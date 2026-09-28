@@ -603,6 +603,9 @@
 
   /* ---------- 演出小件 ---------- */
   const fx = () => $("g-fx");
+  // 大伤害数字（单次伤害 ≥ 目标血量上限 20%）的字号与停留时间（秒）
+  const BIG_POP_SIZE = 64;
+  const BIG_POP_DUR = 2.2;
   const popCount = new Map();
   function centerOf(id) {
     const c = cards.get(id);
@@ -806,7 +809,7 @@
           const total = s ? Math.max(1, sumMax(s)) : 50;
           const big = v >= total * 0.2;
           hit(e.unitId, e.element);
-          popup(e.unitId, big ? v + "!" : String(v), "e-" + e.element + (big ? " big" : ""), { size: big ? 44 : 30, dur: 1.05 });
+          popup(e.unitId, big ? v + "!" : String(v), "e-" + e.element + (big ? " big" : ""), { size: big ? BIG_POP_SIZE : 30, dur: big ? BIG_POP_DUR : 1.05 });
           await wait(chain ? 30 : 45);
           await playBeats(beatsBefore.filter(b => b.kind !== "stun"));
           await wait(chain ? 40 : 55);
@@ -1835,8 +1838,13 @@
     box.querySelector("p").textContent = win
       ? `第 ${state.turnNo} 回合结束。${loot}。${lvline}`
       : `队伍倒地。${loot}。${lvline}`;
-    box.classList.add("show");
-    $("g-reopen").classList.add("show");
+    // 结算面板晚一点弹出，先让最后一击的大伤害数字和击倒演出放完
+    const token = G.endToken = {};
+    realTimeout(() => {
+      if (!G.ended || G.endToken !== token) return;
+      box.classList.add("show");
+      $("g-reopen").classList.add("show");
+    }, G.instant ? 0 : Math.round(BIG_POP_DUR * 1000) + 500);
     return true;
   }
 
@@ -1909,6 +1917,7 @@
       : "外城区巷战";
     if ($("g-enc-name")) $("g-enc-name").textContent = "遭遇 " + encTitle;
     G.ended = false;
+    G.endToken = null;
     G.arm = null;
     G.level = level;
     $("g-result").classList.remove("show");
@@ -2137,8 +2146,11 @@
     }
     const d = el("div", "lg");
     const key = lines.filter(t => /→|失衡|击倒|死亡|濒死|起身|协助|格挡|借机|移动|区 →/.test(t) && !COST_LINE.test(t)).slice(0, 5);
+    // 本行动合计（含感电、高压场地等连带伤害）单独一行，不占上面的名额
+    const sum = lines.find(t => /^本行动合计/.test(t.trim()));
     d.innerHTML = `<div class="t">${meta.actorId ? titleHtml(meta) : "结算"}</div>` +
       key.map(t => `<div class="s${/失衡|击倒|死亡|濒死/.test(t) ? " warn" : ""}">${colorLine(t.trim())}</div>`).join("") +
+      (sum ? `<div class="s sum">${colorLine(sum.trim())}</div>` : "") +
       `<details><summary>完整计算</summary><pre>${lines.map(colorLine).join("\n")}</pre></details>`;
     $("g-logs").appendChild(d);
     $("g-logs").scrollTop = 1e9;

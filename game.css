@@ -488,7 +488,14 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
   animation: popRise var(--dur, .9s) cubic-bezier(.2, .9, .3, 1) forwards;
   white-space: nowrap;
 }
-.pop.big { animation-name: popBig; }
+.pop.big {
+  animation-name: popBig;
+  z-index: 2;
+  text-shadow:
+    3px 0 0 #fff, -3px 0 0 #fff, 0 3px 0 #fff, 0 -3px 0 #fff,
+    2px 2px 0 #fff, -2px -2px 0 #fff, 2px -2px 0 #fff, -2px 2px 0 #fff,
+    0 6px 16px rgba(20, 30, 40, .55);
+}
 .pop.brk { font-family: var(--ui); font-size: 16px; color: #5b4a36; }
 .pop.txt { font-family: var(--ui); font-size: 14px; }
 @keyframes popRise {
@@ -498,11 +505,12 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
   100% { opacity: 0; transform: translate(-50%, -170%) scale(1); }
 }
 @keyframes popBig {
-  0% { opacity: 0; transform: translate(-50%, -50%) scale(2.2); }
-  12% { opacity: 1; transform: translate(-50%, -60%) scale(.9); }
-  24% { transform: translate(-50%, -70%) scale(1.1); }
-  70% { opacity: 1; transform: translate(-50%, -90%) scale(1); }
-  100% { opacity: 0; transform: translate(-50%, -150%) scale(1); }
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(2.4); }
+  7% { opacity: 1; transform: translate(-50%, -60%) scale(.9); }
+  14% { transform: translate(-50%, -70%) scale(1.12); }
+  22% { transform: translate(-50%, -75%) scale(1); }
+  80% { opacity: 1; transform: translate(-50%, -95%) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -140%) scale(1); }
 }
 .e-fire { color: var(--fire); } .e-acid { color: var(--acid); } .e-electric { color: var(--electric); }
 .e-ice { color: var(--icee); } .e-energy { color: var(--energy); } .e-physical { color: var(--physical); }
@@ -739,6 +747,7 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
 .lg .t .who.enemy { color: var(--foe); }
 .lg .s { font-size: 12px; color: var(--muted); margin-top: 2px; line-height: 1.5; }
 .lg .s.warn { color: var(--gold); }
+.lg .s.sum { color: var(--bone); font-weight: 600; border-top: 1px dashed rgba(255,255,255,0.12); padding-top: 3px; margin-top: 4px; }
 .lg details { margin-top: 4px; }
 .lg summary { font-size: 11px; color: var(--faint); cursor: pointer; }
 .lg pre {

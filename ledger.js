@@ -211,7 +211,7 @@ function ledgerApplyToField(notes) {
 function ledgerCapture() {
   partyHeroes().forEach(h => {
     LEDGER.heroes[h.kit] = {
-      layers: (h.layers || []).map(l => Math.max(0, Number(l.current) || 0)),
+      layers: persistentLayers(h).map(l => l.current),
       shp: Math.max(0, Number(h.shp) || 0),
       dying: !!h.dying,
       dead: !!h.dead,

@@ -527,7 +527,7 @@ const RUN = {
     if (!this.active) return;
     (state.units || []).filter(u => u.isPlayer).forEach(u => {
       this.carry[u.kit] = {
-        layers: (u.layers || []).map(l => ({ type: l.type, current: Math.max(0, Number(l.current) || 0) })),
+        layers: persistentLayers(u),
         shp: Math.max(0, Number(u.shp) || 0),
         dead: !!u.dead,
         dying: !!u.dying,

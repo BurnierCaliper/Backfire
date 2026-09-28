@@ -55,6 +55,53 @@ function totalMaxHp(unit) {
   return (unit.layers || []).reduce((s, l) => s + Number(l.max || 0), 0);
 }
 
+/** 不含临时血量（废物利用、拆卸等战斗内获得、战斗结束消失的部分）的血量上限 */
+function baseMaxHp(unit) {
+  return (unit.layers || []).reduce((s, l) => {
+    if (l.temp) return s;
+    return s + Math.max(0, Number(l.max || 0) - Number(l.tempBonus || 0));
+  }, 0);
+}
+
+/** 给单位加一段临时血量层（战斗结束消失）。已有同类型的层就叠上去，并记在 tempBonus 里，
+ *  这样战斗结束只扣掉加上去的那部分，原本的层不受影响。 */
+function addTempLayer(unit, type, amt) {
+  amt = Math.max(0, Number(amt) || 0);
+  if (!unit || !amt) return null;
+  unit.layers = unit.layers || [];
+  let layer = unit.layers.find(l => l.type === type);
+  if (!layer) {
+    layer = { type, current: 0, max: 0, temp: true };
+    unit.layers.unshift(layer);
+  } else if (!layer.temp) {
+    layer.tempBonus = (Number(layer.tempBonus) || 0) + amt;
+  }
+  layer.max = (Number(layer.max) || 0) + amt;
+  layer.current = (Number(layer.current) || 0) + amt;
+  return layer;
+}
+
+/** 不含临时部分的各层当前值（跨战斗存档用：临时层不存，叠加的临时部分截掉） */
+function persistentLayers(unit) {
+  return (unit.layers || []).filter(l => !l.temp).map(l => {
+    const cap = Math.max(0, Number(l.max || 0) - Number(l.tempBonus || 0));
+    return { type: l.type, current: Math.max(0, Math.min(cap, Number(l.current) || 0)) };
+  });
+}
+
+/** 战斗结束：去掉临时层，以及叠在原有层上的临时部分 */
+function stripTempLayers(unit) {
+  if (!unit || !unit.layers) return;
+  unit.layers = unit.layers.filter(l => !l.temp);
+  unit.layers.forEach(l => {
+    const b = Number(l.tempBonus) || 0;
+    if (!b) return;
+    l.max = Math.max(0, (Number(l.max) || 0) - b);
+    l.current = Math.min(Number(l.current) || 0, l.max);
+    l.tempBonus = 0;
+  });
+}
+
 function totalCurHp(unit) {
   return (unit.layers || []).reduce((s, l) => s + Math.max(0, Number(l.current || 0)), 0);
 }
@@ -413,6 +460,7 @@ function resolveAttack(ctx) {
   let knockdownHp = 0;
   let selfBreak = 0;
   let interfDelta = t.interfere || 0;
+  let firstStartType = null;
 
   for (let h = 0; h < hits; h++) {
     const hitLog = [];
@@ -420,6 +468,10 @@ function resolveAttack(ctx) {
 
     if (flags.block === "assistOk") {
       let br = Number(ctx.baseBreak) || 0;
+      if (ctx.breakOnce && h > 0) {
+        perHit.push({ dealt: 0, breakDealt: 0, layers: clone(layersWork) });
+        continue;
+      }
       if (flags.smash) br *= 2;
       if (weather === "glow" && br > 0) br = Math.max(1, br - 1);
       if (weather === "phase" && Number(ctx.phaseStep) === 0) br = Math.max(0, br - 1);
@@ -434,6 +486,7 @@ function resolveAttack(ctx) {
 
     const startIdx = pickStartIndex(layersWork, flags.pierce, flags.focusLayer);
     const startLayer = layersWork[startIdx] || layersWork.find(l => l.current > 0);
+    if (firstStartType == null && startLayer) firstStartType = startLayer.type;
     const onShp = !!(t.upOnShp && t.isPlayer);
     if (!onShp && (!startLayer || totalCurFrom(layersWork) <= 0)) {
       hAdd(t.dying ? "目标已濒死，需先起身。" : "没有可结算的血量层。");
@@ -594,33 +647,38 @@ function resolveAttack(ctx) {
     if (element === "fire" || element === "energy") preventSand = true;
 
     let br = Number(ctx.baseBreak) || 0;
-    if (!onShp && startLayer && startLayer.type === "armor" && element === "physical") {
-      const melted = t.instant && t.instant.melt;
-      if (!melted) { br += 1; hAdd("物理打装甲：击破 +1。"); }
-      else hAdd("熔融装甲：失去物理 +1 击破。");
-    }
-    if (!onShp && t.instant && t.instant.melt && startLayer && startLayer.type === "sand") {
-      br += 1; hAdd("熔融沙尘：击破 +1。");
-    }
-    if (t.instant && t.instant.melt && element === "ice") {
-      br += 1; meltEnded = true;
-    }
-    if (flags.smash) {
-      selfBreak += br;
-      br *= 2;
-      hAdd("猛击：击破 ×2，攻击者承受原击破。");
-    }
-    if (a && a.self === "anchor") { br += 1; hAdd("千钧：本攻击行动击破 +1。"); }
-    if (weather === "glow") {
-      if (br > 0) br = Math.max(1, br - 1);
-      hAdd("微光：击破 −1（不会减到 0）。");
-    }
-    if (weather === "phase" && Number(ctx.phaseStep) === 0) { br = Math.max(0, br - 1); hAdd("相位波谷：击破 −1。"); }
-    if (weather === "phase" && Number(ctx.phaseStep) === 2) { br += 1; hAdd("相位波峰：击破 +1。"); }
-    if (t.instant && t.instant.shift) {
-      const meltArmor = !!(t.instant.melt && startLayer && startLayer.type === "armor" && element === "physical");
-      if (matchupKind(cMod) === "adv" || meltArmor || flags._etchAdv) {
-        br += 1; hAdd(meltArmor ? "错位 + 熔融装甲加伤：击破 +1。" : "错位 + 克制/蚀刻：击破 +1。");
+    // breakOnce：多段攻击的击破整次只结算一回（记在第一击上），卡面写「共 N 击破」的用这个
+    const skipBreak = ctx.breakOnce && h > 0;
+    if (skipBreak) br = 0;
+    if (!skipBreak) {
+      if (!onShp && startLayer && startLayer.type === "armor" && element === "physical") {
+        const melted = t.instant && t.instant.melt;
+        if (!melted) { br += 1; hAdd("物理打装甲：击破 +1。"); }
+        else hAdd("熔融装甲：失去物理 +1 击破。");
+      }
+      if (!onShp && t.instant && t.instant.melt && startLayer && startLayer.type === "sand") {
+        br += 1; hAdd("熔融沙尘：击破 +1。");
+      }
+      if (t.instant && t.instant.melt && element === "ice") {
+        br += 1; meltEnded = true;
+      }
+      if (flags.smash) {
+        selfBreak += br;
+        br *= 2;
+        hAdd("猛击：击破 ×2，攻击者承受原击破。");
+      }
+      if (a && a.self === "anchor") { br += 1; hAdd("千钧：本攻击行动击破 +1。"); }
+      if (weather === "glow") {
+        if (br > 0) br = Math.max(1, br - 1);
+        hAdd("微光：击破 −1（不会减到 0）。");
+      }
+      if (weather === "phase" && Number(ctx.phaseStep) === 0) { br = Math.max(0, br - 1); hAdd("相位波谷：击破 −1。"); }
+      if (weather === "phase" && Number(ctx.phaseStep) === 2) { br += 1; hAdd("相位波峰：击破 +1。"); }
+      if (t.instant && t.instant.shift) {
+        const meltArmor = !!(t.instant.melt && startLayer && startLayer.type === "armor" && element === "physical");
+        if (matchupKind(cMod) === "adv" || meltArmor || flags._etchAdv) {
+          br += 1; hAdd(meltArmor ? "错位 + 熔融装甲加伤：击破 +1。" : "错位 + 克制/蚀刻：击破 +1。");
+        }
       }
     }
     if (fieldT.harmonic) {
@@ -643,7 +701,6 @@ function resolveAttack(ctx) {
       }
     }
 
-    if (flags.block === "assistOk") br = br;
     totalBreak += br;
 
     perHit.push({
@@ -701,7 +758,7 @@ function resolveAttack(ctx) {
     broke,
     iceBreak: !!(ctx.iceBreak || element === "ice") && totalBreak > 0,
     element,
-    startLayerType: (typeof startLayer !== "undefined" && startLayer) ? startLayer.type : null,
+    startLayerType: firstStartType,
     shpDealt: (t.upOnShp && t.isPlayer) ? totalDealt : 0,
     hits,
     preventSand,
@@ -986,17 +1043,70 @@ function scaleByParty(v, party) {
   const m = p === 4 ? 2.5 : p === 3 ? 1.5 : 1;
   return Math.round((Number(v) || 0) * m);
 }
-function scaleHp(v, party) { return scaleByParty(v, party); }
-function scaleDef(v, party, kit) {
-  const base = Number(v) || 0;
+function partyHpMult(party) {
+  const p = partyScaleCount(party);
+  return p === 4 ? 2.5 : p === 3 ? 1.5 : 1;
+}
+// scaleHp 记下这次按几人队缩放，紧接着的 unitOf 把它写到单位上（hpParty），
+// 开战时 rebalanceEnemiesForParty 据此把敌人换算到实际队伍人数。
+let _lastHpParty = null;
+function scaleHp(v, party) {
+  _lastHpParty = partyScaleCount(party);
+  return scaleByParty(v, party);
+}
+function scaleDefAdd(party, kit) {
   const p = partyScaleCount(party);
   let rank = "minion";
   if (typeof enemyRankOf === "function") rank = enemyRankOf({ kit: kit }) || "minion";
   else if (typeof ENEMY_RANK !== "undefined" && kit && ENEMY_RANK[kit]) rank = ENEMY_RANK[kit];
-  if (rank === "minion") return base;
-  if (p === 3) return base + (rank === "boss" ? 3 : 2);
-  if (p >= 4) return base + (rank === "boss" ? 6 : 4);
-  return base;
+  if (rank === "minion") return 0;
+  if (p === 3) return rank === "boss" ? 3 : 2;
+  if (p >= 4) return rank === "boss" ? 6 : 4;
+  return 0;
+}
+function scaleDef(v, party, kit) {
+  return (Number(v) || 0) + scaleDefAdd(party, kit);
+}
+
+/** 把场上敌人的血量与架势换算到 party 人队。
+ *  只动用 scaleHp / scaleDef 缩放过的数值（hpParty / defParty 记录了当时按几人算的），
+ *  临时层不动。满血的层换算后仍是满血，受过伤的按比例换算。返回日志。 */
+function rebalanceEnemiesForParty(party, units) {
+  const n = partyScaleCount(party);
+  const list = units || ((typeof state !== "undefined" && state.units) || []);
+  const changed = [];
+  list.forEach(u => {
+    if (!u || u.isPlayer || u.dead) return;
+    let touched = false;
+    if (u.hpParty != null && u.hpParty !== n) {
+      const f = partyHpMult(n) / partyHpMult(u.hpParty);
+      (u.layers || []).forEach(l => {
+        if (l.temp) return;
+        const oldMax = Number(l.max) || 0;
+        const cur = Number(l.current) || 0;
+        const newMax = Math.max(oldMax > 0 ? 1 : 0, Math.round(oldMax * f));
+        l.current = cur >= oldMax ? newMax : Math.max(0, Math.round(cur * f));
+        l.max = newMax;
+      });
+      u.hpParty = n;
+      touched = true;
+    }
+    if (u.defParty != null && u.defParty !== n && !u.noPosture) {
+      const delta = scaleDefAdd(n, u.kit) - scaleDefAdd(u.defParty, u.kit);
+      if (delta) {
+        u.defMax = Math.max(0, (Number(u.defMax) || 0) + delta);
+        u.def = Math.max(0, Math.min(u.defMax, (Number(u.def) || 0) + delta));
+        touched = true;
+      }
+      u.defParty = n;
+    }
+    if (touched) changed.push(u.name);
+  });
+  // 飞碟触灵本体的血量是各机械足之和
+  if (changed.length && typeof syncUfoBody === "function") {
+    list.filter(u => u && u.kit === "ufo_body").forEach(u => syncUfoBody(u));
+  }
+  return changed.length ? [`人数平衡：按 ${n} 人队重新换算 ${changed.join("、")} 的血量与架势。`] : [];
 }
 
 function ufoLegStats(lv) {
@@ -1227,6 +1337,8 @@ function enemySpawnZone(mode) {
 }
 
 function unitOf(name, level, layers, def, atk, extra = {}) {
+  const hpParty = extra.isPlayer ? null : _lastHpParty;
+  _lastHpParty = null;
   return {
     id: uid(),
     name,
@@ -1280,6 +1392,8 @@ function unitOf(name, level, layers, def, atk, extra = {}) {
     fused: !!extra.fused,
     lootKuizhi: extra.lootKuizhi || 0,
     noPosture: !!extra.noPosture,
-    party: extra.party
+    party: extra.party,
+    hpParty,
+    defParty: extra.isPlayer ? null : partyScaleCount(extra.party)
   };
 }

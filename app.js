@@ -1315,9 +1315,13 @@ function startCombat() {
   if (state.combatStarted) return false;
   state.combatStarted = true;
   state.combatPhase = "player";
+  // 按我方实际上场人数平衡敌人（开战前改过队伍也能跟上）
+  const partyN = typeof syncPartySizeFromField === "function" ? syncPartySizeFromField() : state.partySize;
+  const balanceNotes = typeof rebalanceEnemiesForParty === "function" ? rebalanceEnemiesForParty(partyN) : [];
   beginRound([]);
   startPlayerPhase();
   appendLog("战斗开始。回合开始效果已结算。", "sep");
+  balanceNotes.forEach(t => appendLog(t));
   if (typeof applyTheme === "function") applyTheme();
   if (typeof renderAll === "function") renderAll();
   return true;
@@ -1919,9 +1923,25 @@ function addStatusDmg(key, amount) {
   state.statusDmg[key] = (state.statusDmg[key] || 0) + n;
 }
 
-function beginActionAcc() {
-  state.actionAcc = { dmg: 0, brk: 0, hits: 0, calls: 0, targets: [] };
+function beginActionAcc(actor) {
+  state.actionAcc = {
+    dmg: 0, brk: 0, hits: 0, calls: 0, targets: [],
+    side: 0, sideBy: {},   // 连带伤害：感电、高压场地、灼烧、共振、聚焦抹层等
+    actorIsPlayer: actor ? !!actor.isPlayer : null
+  };
   state.actionWallHit = {};
+}
+
+/** 记一笔本行动引发的连带伤害（不是攻击本身，而是状态、场地、余波等）。
+ *  只算打在对面阵营身上的；不知道出手方时全算。 */
+function noteSideDamage(amount, label, unit) {
+  const acc = state.actionAcc;
+  const n = Math.floor(Number(amount) || 0);
+  if (!acc || n <= 0) return;
+  if (unit && acc.actorIsPlayer != null && !!unit.isPlayer === acc.actorIsPlayer) return;
+  const key = label || "其他";
+  acc.side += n;
+  acc.sideBy[key] = (acc.sideBy[key] || 0) + n;
 }
 
 function ironWallIn(zone) {
@@ -1999,8 +2019,12 @@ function noteActionHit(target, res) {
 function actionAccLine() {
   const acc = state.actionAcc;
   if (!acc) return "";
-  if (acc.calls < 2 && acc.hits < 2 && acc.targets.length < 2) return "";
-  return `本行动合计：伤害 ${acc.dmg}，击破 ${acc.brk}${acc.targets.length ? "（" + acc.targets.join("、") + "）" : ""}`;
+  const side = acc.side || 0;
+  if (!side && acc.calls < 2 && acc.hits < 2 && acc.targets.length < 2) return "";
+  const who = acc.targets.length ? "（" + acc.targets.join("、") + "）" : "";
+  if (!side) return `本行动合计：伤害 ${acc.dmg}，击破 ${acc.brk}${who}`;
+  const parts = Object.keys(acc.sideBy).map(k => `${k} ${acc.sideBy[k]}`).join("、");
+  return `本行动合计：伤害 ${acc.dmg + side}（攻击 ${acc.dmg} ＋ 连带 ${side}：${parts}），击破 ${acc.brk}${who}`;
 }
 
 function pulseHighVoltage(target, amount, hitNo, hitMax) {
@@ -2054,7 +2078,9 @@ function applyTypedDot(unit, amount, element, notes, label) {
   });
   notes.push(...applyCombat(unit, res, null));
   notes.push(label + ` → 实伤 ${Math.floor(res.total || 0)}`);
-  addStatusDmg(inferStatusDmgKey(label, element), res.total || amount);
+  const sdKey = inferStatusDmgKey(label, element);
+  addStatusDmg(sdKey, res.total || amount);
+  noteSideDamage(res.total || 0, STATUS_DMG_NAME[sdKey] || "其他", unit);
   if ((res.intended || res.total || 0) > 0) spawnFloater(unit, res.intended || res.total, element);
   if ((res.extraHarmonic || 0) > 0) spawnFloater(unit, res.extraHarmonic, element);
   checkHighBoom(unit);
@@ -2908,37 +2934,7 @@ function applyCombat(target, result, attacker) {
   if (result.broke && target.resources && target.resources.mecha) {
     notes.push(...exitMecha(target, "被击落，机甲解除"));
   }
-  if (!target.isPlayer && isInnerDepleted(target) && !target._xpGiven) {
-    target.dead = true;
-    target._xpGiven = true;
-    const rank = ENEMY_RANK[target.kit] || "minion";
-    const amt = xpDrop(rank, target.level);
-    grantXpToPlayers(amt, `击杀 ${target.name}`);
-    const loot = typeof rollEnemyLoot === "function" ? rollEnemyLoot(target) : (target.kit === "patrol_car" ? 30 : 0);
-    if (loot > 0 && typeof addKuizhi === "function") addKuizhi(loot, notes, target.name);
-    else if (target.kit === "patrol_car") {
-      state.kuizhi = (Number(state.kuizhi) || 0) + 30;
-      notes.push(`掉落 30 奎支（累计 ${state.kuizhi}）。`);
-    }
-    if (target.kit === "outlaw_king" && target.resources && target.resources.hostage) {
-      const boss = findKit("bandit_boss", state.units);
-      if (boss && boss.resources && boss.resources.mutinied && !boss.dead) {
-        boss.atk = (Number(boss.atk) || 0) * 2;
-        boss.def = (Number(boss.def) || 0) * 2;
-        boss.defMax = (Number(boss.defMax) || boss.def) * 2;
-        boss.resources.promoted = true;
-        boss.name = "亡命之王（" + boss.name + "）";
-        notes.push(`${boss.name} 晋升为新任亡命之王：atk/def 翻倍。`);
-      }
-    }
-    if (target.kit === "bandit_boss" && target.resources && target.resources.mutinied) {
-      const king = findKit("outlaw_king", state.units);
-      if (king && king.resources && king.resources.hostage && !king.dead) {
-        king.resources.hostage = false;
-        notes.push(`挟持者已死，${king.name} 恢复行动。`);
-      }
-    }
-  }
+  if (!target.isPlayer && isInnerDepleted(target) && !target._xpGiven) settleEnemyKill(target, notes);
   if (target.isPlayer && !isWeaponUnit(target) && isInnerDepleted(target) && !target.upOnShp && !target.dead) {
     target.dying = true;
     clearStunOnDown(target);
@@ -3095,6 +3091,40 @@ function removeEnemyFromField(u, notes) {
     state.units = (state.units || []).filter(x => x.id !== id);
     renderAll();
   }, 3000);
+}
+
+/** 敌人内层归零：记死亡、发经验与掉落，以及个别 BOSS 的连带效果。只结算一次。 */
+function settleEnemyKill(target, notes) {
+  if (!target || target.isPlayer || target._xpGiven) return;
+  target.dead = true;
+  target._xpGiven = true;
+  const rank = ENEMY_RANK[target.kit] || "minion";
+  const amt = xpDrop(rank, target.level);
+  grantXpToPlayers(amt, `击杀 ${target.name}`);
+  const loot = typeof rollEnemyLoot === "function" ? rollEnemyLoot(target) : (target.kit === "patrol_car" ? 30 : 0);
+  if (loot > 0 && typeof addKuizhi === "function") addKuizhi(loot, notes, target.name);
+  else if (target.kit === "patrol_car") {
+    state.kuizhi = (Number(state.kuizhi) || 0) + 30;
+    notes.push(`掉落 30 奎支（累计 ${state.kuizhi}）。`);
+  }
+  if (target.kit === "outlaw_king" && target.resources && target.resources.hostage) {
+    const boss = findKit("bandit_boss", state.units);
+    if (boss && boss.resources && boss.resources.mutinied && !boss.dead) {
+      boss.atk = (Number(boss.atk) || 0) * 2;
+      boss.def = (Number(boss.def) || 0) * 2;
+      boss.defMax = (Number(boss.defMax) || boss.def) * 2;
+      boss.resources.promoted = true;
+      boss.name = "亡命之王（" + boss.name + "）";
+      notes.push(`${boss.name} 晋升为新任亡命之王：atk/def 翻倍。`);
+    }
+  }
+  if (target.kit === "bandit_boss" && target.resources && target.resources.mutinied) {
+    const king = findKit("outlaw_king", state.units);
+    if (king && king.resources && king.resources.hostage && !king.dead) {
+      king.resources.hostage = false;
+      notes.push(`挟持者已死，${king.name} 恢复行动。`);
+    }
+  }
 }
 
 function sweepDeadEnemies() {
@@ -3449,26 +3479,31 @@ function stripFocusLayer(target, layerType, lines) {
   const layer = (target.layers || []).find(l => l.type === layerType);
   if (!layer) return;
   const lost = Math.max(0, Number(layer.current) || 0);
+  const wasInner = layer === innermostLayer(target);
   layer.current = 0;
   layer.max = 0;
   layer.sealed = true;
   target.focuses = (target.focuses || []).filter(f => f.layerType !== layerType);
-  target.layers = (target.layers || []).filter(l => l !== layer);
+  // 抹去的是内层：留着这层（0/0）让单位按内层归零死亡，不能让外层顶替成内层
+  if (!wasInner) target.layers = (target.layers || []).filter(l => l !== layer);
   state.lastBrokenLayer = { type: layerType, lost, dmg: lost };
+  noteSideDamage(lost, "聚焦抹层", target);
   const msg = `${target.name} 聚焦完成：${(typeof LAYER !== "undefined" && LAYER[layerType]) || layerType}被抹去（视为 ${lost} 点伤害，该层无法再被治疗）。`;
   if (lines) lines.push(msg);
   else appendLog(msg);
   if (typeof spawnFloater === "function") spawnFloater(target, lost, "harmonic");
   if (typeof spawnPopup === "function") spawnPopup(target, { kind: "status", text: "聚焦抹层", element: "harmonic" });
+  if (wasInner) settleEnemyKill(target, lines || []);
 }
 
+/** 聚焦推进：按序列的下一个属性、对该目标造成伤害的攻击行动推进一步（多段攻击整次算一步），
+ *  不要求打在被聚焦的那一层上。序列走完，被聚焦的层直接抹去。 */
 function advanceFocusOnHit(attacker, target, element, res, extra) {
   if (!target || !target.focuses || !target.focuses.length) return;
   if (!res || !res.ok || (res.total || 0) <= 0) return;
-  const hitType = (res.startLayerType) || ((target.layers || []).find(l => (l.current || 0) > 0) || {}).type;
   target.focuses.slice().forEach(f => {
     const need = f.seq[f.step];
-    if (need && element === need && (!hitType || hitType === f.layerType || f.layerType === hitType)) {
+    if (need && element === need) {
       f.step += 1;
       extra.push(`${target.name} 聚焦推进 ${f.step}/${f.seq.length}（${(typeof ELE !== "undefined" && ELE[element]) || element}）`);
       if (f.step >= f.seq.length) stripFocusLayer(target, f.layerType, extra);
@@ -3482,7 +3517,7 @@ function addRasEnergy(pct, reason) {
   r.resources = r.resources || {};
   r.resources.energyPct = Math.max(0, (Number(r.resources.energyPct) || 0) + pct);
   appendLog(`拉斯缪尔累积能量 ${pct > 0 ? "+" : ""}${pct}%${reason ? "（" + reason + "）" : ""} → ${r.resources.energyPct}%`);
-  if (r.resources.energyPct > 100 && !r.resources.unstable) {
+  if (r.resources.energyPct >= 100 && !r.resources.unstable) {
     r.resources.unstable = true;
     appendLog("拉斯缪尔进入不稳态：受到任何伤害即死，攻击次数翻倍。");
   }
@@ -3497,7 +3532,7 @@ function convertRasLight(pct, bonusRate) {
   const gain = Math.floor(hp * (use / 100) * rate);
   r.resources.energyPct = Math.max(0, (r.resources.energyPct || 0) - use);
   r.resources.light = (Number(r.resources.light) || 0) + gain;
-  if ((r.resources.energyPct || 0) <= 100) r.resources.unstable = false;
+  if ((r.resources.energyPct || 0) < 100) r.resources.unstable = false;
   appendLog(`拉斯缪尔转化光能 +${gain}（${use}% × 血上限 ${hp}）→ 光能 ${r.resources.light}，累积 ${r.resources.energyPct}%`);
   return gain;
 }
@@ -4110,7 +4145,7 @@ function resetBattleFlags(u) {
   if (u.kit === "helu") { r.scanned = false; r.lockLeft = 1; }
   if (u.kit === "torque") r.acidCharge = null;
   u.focuses = [];
-  if (u.layers) u.layers = u.layers.filter(l => !l.temp);
+  stripTempLayers(u);
   (u.layers || []).forEach(l => { l.current = l.max; });
   u.def = u.defMax;
   if (u.kit === "hiaki" && typeof refreshHiakiAtk === "function") refreshHiakiAtk(u);
@@ -4579,7 +4614,7 @@ function dealTo(attacker, target, opt) {
         targetId: target.id,
         onConnect: opt.onConnect || null,
         opt: JSON.parse(JSON.stringify({
-        atk: opt.atk, mult: opt.mult, flat: opt.flat, hits: opt.hits, element: opt.element,
+        atk: opt.atk, mult: opt.mult, flat: opt.flat, hits: opt.hits, breakOnce: opt.breakOnce, element: opt.element,
         baseBreak: opt.baseBreak, diceN: opt.diceN, diceS: opt.diceS, diceB: opt.diceB, diceValue: opt.diceValue,
         usePrep: opt.usePrep, flags: Object.assign({}, opt.flags, { blockResolved: false })
       }))
@@ -4649,9 +4684,11 @@ function dealTo(attacker, target, opt) {
     diceValue = (Number(diceValue) || 0) + prepBonus;
     extraDiceNote = extraDiceNote ? extraDiceNote + " + " + prepNote : prepNote;
   }
-  if (target && target.kit === "kolt" && flags.action) {
-    const cur = (typeof totalHp === "function" ? totalHp(target) : (target.layers || []).reduce((s, l) => s + (Number(l.current) || 0), 0));
-    const mx = (typeof totalMaxHp === "function" ? totalMaxHp(target) : (target.layers || []).reduce((s, l) => s + (Number(l.max) || 0), 0));
+  // 过度自信：现有血量 ≥ 血量上限即减伤。上限不含废物利用等临时血量，
+  // 所以靠临时层把血量堆回（甚至超过）上限时也会触发。
+  if (target && target.kit === "kolt" && flags.action && !target.upOnShp) {
+    const cur = totalCurHp(target);
+    const mx = baseMaxHp(target);
     if (mx > 0 && cur >= mx) flags.prideReduce = true;
   }
   if (attacker && (attacker.kit === "helu" || attacker.kit === "ecmo") && target && target.focuses && target.focuses.length) {
@@ -4670,6 +4707,7 @@ function dealTo(attacker, target, opt) {
     element: opt.element || "physical",
     baseBreak: br,
     hits: opt.hits || 1,
+    breakOnce: !!opt.breakOnce,
     flags,
     weather: currentWeatherFor(target),
     phaseStep: Number(state.phaseStep),
@@ -5823,8 +5861,8 @@ function spawnPopup(unit, spec) {
     const over = Math.max(0, Math.min(th, dmg - th));
     const ratio = th > 0 ? over / th : 0;
     big = dmg >= th;
-    dur = big ? 2.3 + ratio * 1.5 : 2.3;
-    size = big ? 20 + ratio * 14 : 15;
+    dur = big ? 3 + ratio * 1.5 : 2.3;
+    size = big ? 26 + ratio * 18 : 15;
     text = big ? dmg + "!!" : String(dmg);
   } else if (kind === "break") {
     const br = Math.floor(Number(spec.value) || 0);
@@ -6426,7 +6464,7 @@ function runSkill(id, optRun) {
     return;
   }
   snapshot();
-  beginActionAcc();
+  beginActionAcc(a);
   if ((a.kit === "xia" || a.kit === "berniel" || a.weaponOf === "xia") && !/engine$|prep$|summon$|return$|cover$/.test(id)) {
     markXiaAttack(a);
   }
@@ -7114,7 +7152,7 @@ function runSkill(id, optRun) {
       lines.push(`${t.name} 被施加感电。`);
     } else if (id === "mint_banish") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
-      if (!t.kind) hitOne(a, t, { element: "electric", mult: 0.5, hits: 2, baseBreak: 1, atk, onConnect: { dest: otherZone(t.zone), reason: "被驱逐" } });
+      if (!t.kind) hitOne(a, t, { element: "electric", mult: 0.5, hits: 2, baseBreak: 1, breakOnce: true, atk, onConnect: { dest: otherZone(t.zone), reason: "被驱逐" } });
       else displaceTo(t, otherZone(t.zone), lines, "被驱逐");
     } else if (id === "yuito_espresso") {
       const fl = state.skillFlow;
@@ -7473,7 +7511,7 @@ function runSkill(id, optRun) {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       const bit = (findKit("kolt", state.units) || a).resources.bit || "drill";
       if (bit === "acid") hitOne(a, t, { element: "acid", mult: 1, baseBreak: 1, atk, atkRange: "ranged" });
-      else hitOne(a, t, { element: "electric", mult: 0.4, hits: 3, baseBreak: 2, atk, atkRange: "melee" });
+      else hitOne(a, t, { element: "electric", mult: 0.4, hits: 3, baseBreak: 2, breakOnce: true, atk, atkRange: "melee" });
     } else if (id === "kolt_swap" || id === "torque_swap") {
       const next = swapKoltBit(a, lines);
       const tgt = (state.skillFlow && state.skillFlow.picks.target) ? unitById(state.skillFlow.picks.target) : t;
@@ -7506,14 +7544,7 @@ function runSkill(id, optRun) {
           healUnit(a, amt);
           lines.push(`废物利用：恢复 ${amt} 生命（来自${LAYER[rec.type] || rec.type}）。`);
         } else {
-          let layer = (a.layers || []).find(l => l.type === rec.type);
-          if (!layer) {
-            layer = { type: rec.type, current: 0, max: 0 };
-            a.layers.unshift(layer);
-          }
-          layer.max = (layer.max || 0) + amt;
-          layer.current = (layer.current || 0) + amt;
-          layer.temp = true;
+          addTempLayer(a, rec.type, amt);
           lines.push(`废物利用：获得 ${amt} 点${LAYER[rec.type] || rec.type}（战斗结束消失）。`);
         }
       }
@@ -7542,7 +7573,7 @@ function runSkill(id, optRun) {
         const foes = visibleEnemies(dest);
         const tgt = t && Number(t.zone) === dest ? t : foes[0];
         if (!tgt) lines.push("终点没有敌人。");
-        else hitOne(a, tgt, { element: "electric", mult: 0.5, hits: 3, baseBreak: 2, atk });
+        else hitOne(a, tgt, { element: "electric", mult: 0.5, hits: 3, baseBreak: 2, breakOnce: true, atk });
       }
     } else if (id === "torque_strip") {
       const fl = state.skillFlow;
@@ -7558,9 +7589,7 @@ function runSkill(id, optRun) {
       if (outer) {
         const take = Math.min(amount, outer.current);
         outer.current -= take;
-        let layer = (ally.layers || []).find(l => l.type === outer.type);
-        if (!layer) { layer = { type: outer.type, current: 0, max: 0, temp: true }; ally.layers.unshift(layer); }
-        layer.max += take; layer.current += take; layer.temp = true;
+        addTempLayer(ally, outer.type, take);
         lines.push(`拆卸转移 ${take} 点${LAYER[outer.type] || outer.type}给 ${ally.name}。`);
       }
     } else if (id === "torque_return") {
