@@ -1,0 +1,701 @@
+/* 角鳞 · 单局层（run.js）
+ *
+ * 这一层负责「一局之内」的东西，和战斗规则完全分开：
+ *   1. 种子随机数：一个种子完整决定一局，方便复现与批量测试
+ *   2. 遭遇数据：战斗由数据生成，不再写死在 setupBattle 里
+ *   3. 单局状态：战斗之间保留血量、坚毅生命、武器耐久、补给、天数
+ *   4. 休息：按手册的短休 / 长休 / 力竭结算
+ *
+ * 这里不含任何战斗规则。规则仍然全部在 engine/party/enemies/growth/app 里。
+ */
+
+/* ===== 1. 种子随机数 ============================================ */
+
+/** 把任意字符串揉成 32 位整数，用作种子 */
+function hashSeed(str) {
+  let h = 2166136261 >>> 0;
+  const s = String(str == null ? "" : str);
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return h >>> 0;
+}
+
+/** mulberry32：小、快、够用，且同一种子必定同一序列 */
+function makeRng(seed) {
+  let a = (hashSeed(seed) + 0x6D2B79F5) >>> 0;
+  let draws = 0;
+  const next = () => {
+    draws++;
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  next.draws = () => draws;
+  next.setDraws = (n) => {
+    // 从头重放 n 次，用来把随机流恢复到某个位置（读档用）
+    a = (hashSeed(seed) + 0x6D2B79F5) >>> 0;
+    draws = 0;
+    for (let i = 0; i < n; i++) next();
+  };
+  return next;
+}
+
+const RNG = {
+  seed: null,
+  fn: null,
+  realRandom: null,
+  /** 装上种子随机数。规则代码全部走 Math.random，所以在这里接管。 */
+  install(seed) {
+    if (this.realRandom == null) this.realRandom = Math.random;
+    this.seed = String(seed);
+    this.fn = makeRng(this.seed);
+    Math.random = this.fn;
+    return this.seed;
+  },
+  /** 还原成系统随机数 */
+  uninstall() {
+    if (this.realRandom) Math.random = this.realRandom;
+    this.fn = null;
+    this.seed = null;
+  },
+  draws() { return this.fn ? this.fn.draws() : 0; },
+  /** 读档时把随机流拨回原位 */
+  restore(seed, draws) {
+    this.install(seed);
+    this.fn.setDraws(Number(draws) || 0);
+  },
+  /** 生成一个可读的随机种子 */
+  newSeed() {
+    const src = this.realRandom || Math.random;
+    return Math.floor(src() * 0xFFFFFFFF).toString(36).toUpperCase();
+  }
+};
+
+/* ===== 2. 遭遇数据 ============================================== */
+
+/* 一场战斗写成数据，setupBattle 照着摆。
+ *   enemies: [{ preset, level, zone, count? }]
+ *   zoneMode 2 或 3；weather 见 engine；fields 按区写场地
+ *   level 支持相对值："+1" 表示比遭遇基准等级高 1 */
+const ENCOUNTERS = [
+  {
+    id: "outer_thugs",
+    name: "外城区巷战",
+    region: "外城区",
+    tier: "normal",
+    zoneMode: 2,
+    enemies: [
+      { preset: "thug_knife", zone: 2 },
+      { preset: "thug_hammer", zone: 2 },
+      { preset: "bandit_boss", zone: 2 }
+    ]
+  },
+  {
+    id: "outer_patrol",
+    name: "巡逻队拦截",
+    region: "外城区",
+    tier: "normal",
+    zoneMode: 2,
+    enemies: [
+      { preset: "guard_sword", zone: 2 },
+      { preset: "guard_gun", zone: 2 },
+      { preset: "patrol_car", zone: 2 }
+    ]
+  },
+  {
+    id: "outer_sand",
+    name: "沙灵游荡",
+    region: "外城区",
+    tier: "normal",
+    zoneMode: 3,
+    weather: "sand",
+    enemies: [
+      { preset: "sand_beast", zone: 2, count: 2 },
+      { preset: "sand_human", zone: 3 }
+    ]
+  },
+  {
+    id: "outer_drones",
+    name: "废料场无人机",
+    region: "外城区",
+    tier: "normal",
+    zoneMode: 3,
+    fields: { 2: { acid: true } },
+    enemies: [
+      { preset: "dumpdrone", zone: 2 },
+      { preset: "buoy", zone: 3 },
+      { preset: "crow", zone: 2, count: 2 }
+    ]
+  },
+  {
+    id: "elite_captain",
+    name: "警卫队长巡查",
+    region: "外城区",
+    tier: "elite",
+    zoneMode: 3,
+    enemies: [
+      { preset: "captain_wolf", zone: 2 },
+      { preset: "guard_sword", zone: 2, count: 2 }
+    ]
+  },
+  {
+    id: "elite_mecha",
+    name: "机甲触灵",
+    region: "外城区",
+    tier: "elite",
+    zoneMode: 3,
+    enemies: [
+      { preset: "mecha_mg", zone: 2 },
+      { preset: "mecha_gl", zone: 3 }
+    ]
+  },
+  {
+    id: "elite_boat",
+    name: "高压巡逻艇",
+    region: "外城区",
+    tier: "elite",
+    zoneMode: 3,
+    weather: "thunder",
+    enemies: [
+      { preset: "patrolboat", zone: 3 },
+      { preset: "swarm", zone: 2, count: 2 }
+    ]
+  },
+  {
+    id: "boss_king",
+    name: "亡命之王",
+    region: "外城区",
+    tier: "boss",
+    zoneMode: 3,
+    enemies: [
+      { preset: "outlaw_king", zone: 2 },
+      { preset: "thug_knife", zone: 2 },
+      { preset: "thug_hammer", zone: 3 }
+    ]
+  },
+  {
+    id: "boss_aggregate",
+    name: "沙灵聚合体",
+    region: "外城区",
+    tier: "boss",
+    zoneMode: 3,
+    weather: "sand",
+    enemies: [{ preset: "sand_aggregate", zone: 2 }]
+  },
+  {
+    id: "boss_ufo",
+    name: "飞碟触灵",
+    region: "外城区",
+    tier: "boss",
+    zoneMode: 3,
+    enemies: [{ preset: "ufo_boss", zone: 2 }]
+  }
+];
+
+/* ===== 2b. 随机遭遇（代币制） ===================================
+ * 每场战斗有 4 枚代币：杂兵 1 枚，精英 2 枚。
+ * 所以一场可能是 4 杂兵 / 2 精英 / 1 精英 + 2 杂兵。
+ * 空投蜂群三只算一组，整组记 1 枚。
+ *   5% 概率这场变成 5 枚代币。
+ *   5% 概率不受阵营限制，变成混战。
+ * ============================================================== */
+
+const ENCOUNTER_TOKENS = 4;
+const CHANCE_EXTRA_TOKEN = 0.05;   // 变 5 代币
+const CHANCE_MIXED = 0.05;         // 混战：无视阵营
+
+/** 每个敌人的阵营、出没区域、代币、成组数量 */
+const ENEMY_INFO = {
+  // —— 天网安保（机械）——
+  guard_sword: { faction: "安保", regions: ["外城区", "巨人城"], tokens: 1 },
+  guard_gun:   { faction: "安保", regions: ["外城区", "巨人城"], tokens: 1 },
+  patrol_car:  { faction: "安保", regions: ["外城区", "巨人城"], tokens: 1 },
+  boomcar:     { faction: "安保", regions: ["外城区", "巨人城"], tokens: 1 },
+  buoy:        { faction: "安保", regions: ["矿场", "巨人城"], tokens: 1 },
+  dumpdrone:   { faction: "安保", regions: ["矿场", "巨人城"], tokens: 1 },
+  swarm:       { faction: "安保", regions: ["外城区", "巨人城", "矿场"], tokens: 1, group: 3 },
+  patrolboat:  { faction: "安保", regions: ["巨人城", "矿场"], tokens: 2 },
+  spreader:    { faction: "安保", regions: ["矿场"], tokens: 2 },
+  // —— 警卫队（有机体，可与安保混编）——
+  captain_wolf:   { faction: "警卫队", regions: ["巨人城", "外城区"], tokens: 2 },
+  captain_ox:     { faction: "警卫队", regions: ["巨人城", "外城区"], tokens: 2 },
+  captain_lizard: { faction: "警卫队", regions: ["巨人城", "外城区"], tokens: 2 },
+  // —— 盗匪 ——
+  thug_knife:  { faction: "盗匪", regions: ["外城区"], tokens: 1 },
+  thug_hammer: { faction: "盗匪", regions: ["外城区"], tokens: 1 },
+  bandit_boss: { faction: "盗匪", regions: ["外城区"], tokens: 2 },
+  outlaw_king: { faction: "盗匪", regions: ["外城区"], tokens: 4, boss: true },
+  // —— 沙灵 ——
+  sand_beast: { faction: "沙灵", regions: ["沙漠"], tokens: 1 },
+  sand_human: { faction: "沙灵", regions: ["沙漠"], tokens: 1 },
+  bigsand:    { faction: "沙灵", regions: ["沙漠"], tokens: 2 },
+  livesand:   { faction: "沙灵", regions: ["沙漠"], tokens: 2 },
+  dustbody:   { faction: "沙灵", regions: ["沙漠"], tokens: 2 },
+  sand_aggregate: { faction: "沙灵", regions: ["沙漠"], tokens: 4, boss: true },
+  // —— 触灵（天网造物）——
+  mecha_mg: { faction: "触灵", regions: ["天网设施", "巨人城"], tokens: 2 },
+  mecha_gl: { faction: "触灵", regions: ["天网设施", "巨人城"], tokens: 2 },
+  ufo_boss: { faction: "触灵", regions: ["天网设施"], tokens: 4, boss: true },
+  // —— 巨人 ——
+  giant: { faction: "巨人", regions: ["巨人城"], tokens: 2 },
+  // —— 野生动物：只在外城区与沙漠 ——
+  crow: { faction: "野生", regions: ["外城区", "沙漠"], tokens: 1 },
+  // —— 古代造物：沙漠 ——
+  watchcrow: { faction: "古代造物", regions: ["沙漠"], tokens: 2 }
+};
+
+/** 可以同场混编的阵营（安保与警卫队是一套体系的两个分支） */
+const ALLIED_FACTIONS = [["安保", "警卫队"]];
+function alliesOf(faction) {
+  const g = ALLIED_FACTIONS.find(a => a.indexOf(faction) >= 0);
+  return g ? g.slice() : [faction];
+}
+
+function enemyInfo(preset) { return ENEMY_INFO[preset] || null; }
+function enemyTokens(preset) {
+  const i = enemyInfo(preset);
+  return i ? (i.tokens || 1) : 1;
+}
+function regionPool(region, opt) {
+  opt = opt || {};
+  return Object.keys(ENEMY_INFO).filter(k => {
+    const i = ENEMY_INFO[k];
+    if (i.boss && !opt.boss) return false;
+    return !region || i.regions.indexOf(region) >= 0;
+  });
+}
+function regionFactions(region) {
+  const set = [];
+  regionPool(region).forEach(k => {
+    const f = ENEMY_INFO[k].faction;
+    if (set.indexOf(f) < 0) set.push(f);
+  });
+  return set;
+}
+
+const pickOne = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+/** 随机遭遇。opt: { region, tokens, mixed, faction, zoneMode, weather, level } */
+function rollEncounter(opt) {
+  opt = opt || {};
+  const region = opt.region || "外城区";
+
+  // 代币：5% 变 5 枚
+  const extra = opt.tokens == null && Math.random() < CHANCE_EXTRA_TOKEN;
+  let tokens = opt.tokens != null ? Number(opt.tokens) : (ENCOUNTER_TOKENS + (extra ? 1 : 0));
+
+  // 5% 混战：不受阵营限制
+  const mixed = opt.mixed != null ? !!opt.mixed : (Math.random() < CHANCE_MIXED);
+
+  let pool = regionPool(region);
+  let faction = null;
+  if (!mixed) {
+    const fs = opt.faction ? [opt.faction] : regionFactions(region);
+    faction = pickOne(fs);
+    const allow = alliesOf(faction);
+    pool = pool.filter(k => allow.indexOf(ENEMY_INFO[k].faction) >= 0);
+  }
+  if (!pool.length) pool = regionPool(region);
+
+  const enemies = [];
+  let left = tokens;
+  for (let guard = 0; guard < 40 && left > 0; guard++) {
+    const ok = pool.filter(k => enemyTokens(k) <= left);
+    if (!ok.length) break;
+    const k = pickOne(ok);
+    const info = ENEMY_INFO[k];
+    enemies.push({ preset: k, count: info.group || 1 });
+    left -= enemyTokens(k);
+  }
+
+  return finishEncounter({
+    name: mixed ? `${region}·混战` : `${region}·${faction}`,
+    region, faction: mixed ? "混战" : faction,
+    tier: enemies.some(e => enemyTokens(e.preset) >= 2) ? "elite" : "normal",
+    tokens, mixed, extraToken: extra,
+    enemies
+  }, opt);
+}
+
+/** BOSS 遭遇：BOSS 本体不占代币，随从另给。 */
+function rollBossEncounter(bossPreset, opt) {
+  opt = opt || {};
+  const info = enemyInfo(bossPreset);
+  const region = opt.region || (info && info.regions[0]) || "外城区";
+  const tokens = opt.tokens != null ? Number(opt.tokens) : 2;
+  const enemies = [{ preset: bossPreset, zone: 2 }];
+  const allow = info ? alliesOf(info.faction) : null;
+  let pool = regionPool(region).filter(k => !allow || allow.indexOf(ENEMY_INFO[k].faction) >= 0);
+  let left = tokens;
+  for (let guard = 0; guard < 20 && left > 0; guard++) {
+    const ok = pool.filter(k => enemyTokens(k) <= left);
+    if (!ok.length) break;
+    const k = pickOne(ok);
+    enemies.push({ preset: k, count: ENEMY_INFO[k].group || 1 });
+    left -= enemyTokens(k);
+  }
+  return finishEncounter({
+    name: (info && bossPreset) ? `${region}·首领战` : "首领战",
+    region, faction: info ? info.faction : null, tier: "boss",
+    tokens, mixed: false, enemies
+  }, opt);
+}
+
+/** 三区站位：全在 3 区 / 2+3 对半 / 玩家在 2、敌人 1+3 对半。飞碟触灵不改。 */
+function applyEncounterLayout(spec) {
+  if (!spec) return spec;
+  const mode = Number(spec.zoneMode) || 2;
+  if (mode < 3) {
+    spec.playerZone = 1;
+    (spec.enemies || []).forEach(e => {
+      if (e.preset === "ufo_boss") return;
+      if (!e.zone) e.zone = 2;
+    });
+    spec.layout = spec.layout || "front2";
+    return spec;
+  }
+  if (spec.layoutLocked) return spec;
+  const kind = spec.layout && spec.layout !== "front2"
+    ? spec.layout
+    : ["all3", "split23", "pincer"][Math.floor(Math.random() * 3)];
+  spec.layout = kind;
+  spec.playerZone = kind === "pincer" ? 2 : 1;
+  spec.layoutLocked = true;
+  const kept = [];
+  const pool = [];
+  (spec.enemies || []).forEach(e => {
+    if (e.preset === "ufo_boss") { kept.push(e); return; }
+    const n = Math.max(1, Number(e.count) || 1);
+    for (let i = 0; i < n; i++) pool.push({ preset: e.preset, level: e.level, count: 1 });
+  });
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const t = pool[i]; pool[i] = pool[j]; pool[j] = t;
+  }
+  if (kind === "all3") {
+    pool.forEach(e => { e.zone = 3; });
+  } else {
+    const left = kind === "split23" ? 2 : 1;
+    const mid = Math.ceil(pool.length / 2);
+    pool.forEach((e, i) => { e.zone = i < mid ? left : 3; });
+  }
+  spec.enemies = kept.concat(pool);
+  return spec;
+}
+
+function layoutLabel(kind) {
+  return ({
+    all3: "全员 3 区",
+    split23: "2 / 3 区对半",
+    pincer: "夹击（玩家 2 区）",
+    front2: "敌人 2 区"
+  })[kind] || kind;
+}
+
+/** 补上区制、天气和站位 */
+function finishEncounter(spec, opt) {
+  opt = opt || {};
+  const zoneMode = Number(opt.zoneMode) || (Math.random() < 0.5 ? 2 : 3);
+  spec.zoneMode = zoneMode;
+  spec.weather = opt.weather != null ? opt.weather : regionWeather(spec.region);
+  applyEncounterLayout(spec);
+  spec.id = "roll:" + spec.region + ":" + (spec.faction || "") + ":" + spec.enemies.map(e => e.preset).join("+");
+  return spec;
+}
+
+/** 区域默认天气 */
+function regionWeather(region) {
+  if (region === "沙漠") return Math.random() < 0.6 ? "sand" : "none";
+  if (region === "矿场") return Math.random() < 0.4 ? "acid" : "none";
+  if (region === "巨人城") return Math.random() < 0.3 ? "thunder" : "none";
+  return "none";
+}
+
+function encounterById(id) {
+  return ENCOUNTERS.find(e => e.id === id) || null;
+}
+function encountersByTier(tier, region) {
+  return ENCOUNTERS.filter(e => e.tier === tier && (!region || e.region === region));
+}
+
+/** 按数据把敌人摆上场。返回摆好的单位数组。 */
+function buildEncounter(spec, baseLevel, partySize) {
+  if (!spec) return [];
+  const lv = (v) => {
+    if (v == null) return baseLevel;
+    if (typeof v === "string" && /^[+-]/.test(v)) return Math.max(1, baseLevel + Number(v));
+    return Math.max(1, Number(v) || baseLevel);
+  };
+  const presets = enemyPresets();
+  const made = [];
+  state.zoneMode = Number(spec.zoneMode) || 2;
+  state.weather = spec.weather || "none";
+  state.fields = { 1: emptyField(), 2: emptyField(), 3: emptyField() };
+  if (spec.fields) {
+    Object.keys(spec.fields).forEach(z => Object.assign(state.fields[z], spec.fields[z]));
+  }
+  (spec.enemies || []).forEach(row => {
+    const p = presets.find(x => x.id === row.preset);
+    if (!p) return;
+    const n = Math.max(1, Number(row.count) || 1);
+    for (let i = 0; i < n; i++) {
+      // ufo_boss 是一体多部件，由既有的生成器负责
+      if (row.preset === "ufo_boss" && typeof spawnUfoBoss === "function") {
+        const pack = spawnUfoBoss(lv(row.level));
+        (pack || []).forEach(u => {
+          if (u.kit === "ufo_body") u.zone = Number(row.zone) || u.zone || 2;
+          state.units.push(u);
+          made.push(u);
+        });
+        continue;
+      }
+      const u = p.build(lv(row.level), partySize);
+      u.zone = Number(row.zone) || 2;
+      state.units.push(u);
+      made.push(u);
+    }
+  });
+  made.forEach(u => { if (typeof refreshEnemyEconomy === "function") refreshEnemyEconomy(u); });
+  return made;
+}
+
+/* ===== 3. 单局状态 ============================================== */
+
+/* 与「角色档案」（等级、属性、经验，跨局保留）分开：
+ * 这里只存一局之内会变、跑完就清空的东西。 */
+
+const RACE_LONG_REST = {
+  human: { water: 1000, food: 2 },
+  red: { water: 750, food: 2 },
+  canine: { water: 1000, food: 2 },
+  feline: { water: 750, food: 2 },
+  rodent: { water: 500, food: 1 },
+  bovine: { water: 1250, food: 2 },
+  beast: { water: 1250, food: 3 }
+};
+/** 角色卡上没写种族键时，按 note 里的字样猜 */
+function raceOf(u) {
+  if (u && u.race && RACE_LONG_REST[u.race]) return u.race;
+  const n = (u && u.note) || "";
+  if (/鼠类人|兔/.test(n)) return "rodent";
+  if (/猫类人|豹|虎/.test(n)) return "feline";
+  if (/犬类人|狐|犬|狼/.test(n)) return "canine";
+  if (/牛类人|马|羊/.test(n)) return "bovine";
+  if (/兽人/.test(n)) return "beast";
+  if (/红皮人/.test(n)) return "red";
+  return "human";
+}
+function longRestCost(u) {
+  return RACE_LONG_REST[raceOf(u)] || RACE_LONG_REST.human;
+}
+
+const RUN = {
+  active: false,
+  seed: null,
+  day: 1,
+  hours: 0,          // 距上次长休过了多久，用来算力竭
+  supplies: { water: 0, food: 0, kuizhi: 0 },
+  shortRestLeft: {}, // kit → 剩余短休次数
+  carry: {},         // kit → 战斗之间保留的状态
+  log: [],
+
+  start(opt) {
+    opt = opt || {};
+    this.active = true;
+    this.seed = RNG.install(opt.seed || RNG.newSeed());
+    this.day = 1;
+    this.hours = 0;
+    // 默认起始补给：够四人队做一次长休（4000 ml 水 · 8 份食物）还剩一点余量
+    this.supplies = Object.assign({ water: 5000, food: 10, kuizhi: 2000 }, opt.supplies || {});
+    this.shortRestLeft = {};
+    this.carry = {};
+    this.log = [`开局 · 种子 ${this.seed}`];
+    return this.seed;
+  },
+
+  stop() {
+    this.active = false;
+    RNG.uninstall();
+  },
+
+  /** 战斗结束后：把队伍现在的状态记下来 */
+  capture() {
+    if (!this.active) return;
+    (state.units || []).filter(u => u.isPlayer).forEach(u => {
+      this.carry[u.kit] = {
+        layers: (u.layers || []).map(l => ({ type: l.type, current: Math.max(0, Number(l.current) || 0) })),
+        shp: Math.max(0, Number(u.shp) || 0),
+        dead: !!u.dead,
+        dying: !!u.dying,
+        upOnShp: !!u.upOnShp,
+        durability: u.resources ? u.resources.durability : undefined,
+        weaponLevels: u.weaponLevels ? JSON.parse(JSON.stringify(u.weaponLevels)) : undefined,
+        xp: Number(u.xp) || 0,
+        level: Number(u.level) || 1
+      };
+    });
+  },
+
+  /** 新战斗开始后：把保留下来的状态盖回去 */
+  apply() {
+    if (!this.active) return;
+    (state.units || []).filter(u => u.isPlayer).forEach(u => {
+      const c = this.carry[u.kit];
+      if (!c) return;
+      if (c.level) { u.level = c.level; if (typeof applyLevelStats === "function" && !isWeaponUnit(u)) applyLevelStats(u); }
+      u.xp = c.xp || 0;
+      (u.layers || []).forEach((l, i) => {
+        const s = (c.layers || [])[i];
+        if (s && s.type === l.type) l.current = Math.max(0, Math.min(Number(l.max) || 0, s.current));
+      });
+      u.shp = Math.max(0, Math.min(Number(u.shpMax) || 0, c.shp));
+      u.dead = !!c.dead;
+      u.dying = !!c.dying;
+      u.upOnShp = !!c.upOnShp;
+      if (c.durability != null && u.resources) u.resources.durability = c.durability;
+      if (c.weaponLevels) u.weaponLevels = JSON.parse(JSON.stringify(c.weaponLevels));
+    });
+  },
+
+  /** 一场战斗结束：武器耐久 −1，时间推进 */
+  afterBattle(hours) {
+    if (!this.active) return [];
+    const notes = [];
+    (state.units || []).filter(u => u.isPlayer).forEach(u => {
+      if (!u.resources || u.resources.durability == null) return;
+      const before = u.resources.durability;
+      u.resources.durability = Math.max(0, before - 1);
+      if (u.resources.durability !== before) notes.push(`${u.name} 武器耐久 ${before} → ${u.resources.durability}`);
+      if (u.resources.durability === 0) notes.push(`${u.name} 的武器耐久归零，无法使用。`);
+    });
+    this.advance(Number(hours) || 1, notes);
+    this.capture();
+    return notes;
+  },
+
+  /** 推进时间，顺便判力竭 */
+  advance(hours, notes) {
+    notes = notes || [];
+    this.hours += Math.max(0, Number(hours) || 0);
+    const t = this.exhaustTier();
+    if (t) notes.push(`距上次长休 ${this.hours} 小时：${this.exhaustName(t)}`);
+    return notes;
+  },
+  exhaustTier() {
+    if (this.hours >= 80) return 4;
+    if (this.hours >= 60) return 3;
+    if (this.hours >= 40) return 2;
+    if (this.hours >= 20) return 1;
+    return 0;
+  },
+  exhaustName(t) {
+    return ["", "力竭（无法用 shp 起身）", "力竭 2（atk −3，def −1）", "力竭 3（被击倒立刻死亡）", "力竭致死"][t] || "";
+  },
+
+  shortRestCap(u) {
+    // 熊兽人每天只能一次
+    return /熊/.test((u && u.note) || "") ? 1 : 2;
+  },
+
+  /** 短休：恢复 等级×2+体质 点血量，一天两次 */
+  shortRest() {
+    if (!this.active) return ["还没开始一局。"];
+    const notes = [];
+    (state.units || []).filter(u => u.isPlayer && !isWeaponUnit(u) && !u.dead).forEach(u => {
+      const cap = this.shortRestCap(u);
+      const left = this.shortRestLeft[u.kit] == null ? cap : this.shortRestLeft[u.kit];
+      if (left <= 0) { notes.push(`${u.name} 今天的短休次数已用完。`); return; }
+      const con = (u.attrs && Number(u.attrs.con)) || 0;
+      const heal = (Number(u.level) || 1) * 2 + con;
+      if (typeof healUnit === "function") healUnit(u, heal);
+      this.shortRestLeft[u.kit] = left - 1;
+      notes.push(`${u.name} 短休恢复 ${heal} 点（今日剩 ${left - 1} 次）。`);
+    });
+    this.advance(1, notes);
+    this.capture();
+    return notes;
+  },
+
+  /** 长休需要的补给总量 */
+  longRestCost() {
+    let water = 0, food = 0;
+    (state.units || []).filter(u => u.isPlayer && !isWeaponUnit(u) && !u.dead).forEach(u => {
+      const c = longRestCost(u);
+      water += c.water;
+      food += c.food;
+    });
+    return { water, food };
+  },
+
+  /** 长休：全回血、补满短休次数、耐久回满、shp 每小时 +2 */
+  longRest(hours) {
+    if (!this.active) return ["还没开始一局。"];
+    hours = Math.min(12, Math.max(8, Number(hours) || 8));
+    const cost = this.longRestCost();
+    const notes = [];
+    if (this.supplies.water < cost.water || this.supplies.food < cost.food) {
+      notes.push(`补给不足，无法长休（需要 ${cost.water} ml 水 · ${cost.food} 份食物，现有 ${this.supplies.water} ml · ${this.supplies.food} 份）。只能消磨时间。`);
+      this.advance(hours, notes);
+      return notes;
+    }
+    this.supplies.water -= cost.water;
+    this.supplies.food -= cost.food;
+    notes.push(`长休 ${hours} 小时，消耗 ${cost.water} ml 水 · ${cost.food} 份食物。`);
+    (state.units || []).filter(u => u.isPlayer && !u.dead).forEach(u => {
+      (u.layers || []).forEach(l => { l.current = l.max; });
+      u.dying = false;
+      u.upOnShp = false;
+      const shpBefore = Number(u.shp) || 0;
+      u.shp = Math.min(Number(u.shpMax) || 0, shpBefore + hours * 2);
+      if (u.resources && u.resources.durability != null && u.weaponOf) {
+        u.resources.durability = durabilityMaxOf(u);
+      }
+      this.shortRestLeft[u.kit] = this.shortRestCap(u);
+      notes.push(`${u.name} 血量回满，坚毅 ${shpBefore} → ${u.shp}。`);
+    });
+    this.hours = 0;
+    this.day += 1;
+    notes.push(`进入第 ${this.day} 天。`);
+    this.capture();
+    return notes;
+  },
+
+  /** 存档用 */
+  save() {
+    return {
+      seed: this.seed,
+      draws: RNG.draws(),
+      day: this.day,
+      hours: this.hours,
+      supplies: JSON.parse(JSON.stringify(this.supplies)),
+      shortRestLeft: JSON.parse(JSON.stringify(this.shortRestLeft)),
+      carry: JSON.parse(JSON.stringify(this.carry)),
+      log: this.log.slice(-50)
+    };
+  },
+  load(s) {
+    if (!s) return false;
+    this.active = true;
+    RNG.restore(s.seed, s.draws);
+    this.seed = s.seed;
+    this.day = s.day || 1;
+    this.hours = s.hours || 0;
+    this.supplies = Object.assign({ water: 0, food: 0, kuizhi: 0 }, s.supplies || {});
+    this.shortRestLeft = s.shortRestLeft || {};
+    this.carry = s.carry || {};
+    this.log = s.log || [];
+    return true;
+  }
+};
+
+/** 武器人的耐久上限：按等级算，和 growth.js 的成长一致 */
+function durabilityMaxOf(u) {
+  if (!u || !u.weaponOf) return 0;
+  const g = (typeof WEAPON_GROWTH !== "undefined") ? WEAPON_GROWTH[u.kit] : null;
+  const base = g && g.baseDur != null ? g.baseDur : 5;
+  return base + Math.floor((Number(u.level) || 1) / 2);
+}

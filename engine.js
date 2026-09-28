@@ -1,0 +1,1285 @@
+const ELE = {
+  fire: "火", acid: "酸", electric: "电", ice: "冰",
+  energy: "能量", physical: "物理", harmonic: "谐波"
+};
+const LAYER = {
+  flesh: "肉体", armor: "装甲", shield: "护盾", sand: "沙尘", spirit: "星灵"
+};
+const LAYER_COLOR = {
+  flesh: "#ef9a9a", armor: "#90a4ae", shield: "#80deea",
+  sand: "#ffcc80", spirit: "#b39ddb"
+};
+
+const CHART = {
+  fire:      { flesh: 0.50, armor: -0.25, shield: 0,     sand: 0,     spirit: -0.25 },
+  acid:      { flesh: 0,    armor: 0.50,  shield: -0.25, sand: -0.25, spirit: 0 },
+  electric:  { flesh: 0,    armor: -0.25, shield: 0.50,  sand: -0.25, spirit: 0 },
+  ice:       { flesh: 0,    armor: 0,     shield: 0,     sand: 0,     spirit: -0.25 },
+  energy:    { flesh: 0,    armor: -0.25, shield: 0,     sand: 0,     spirit: 0.50 },
+  physical:  { flesh: 0,    armor: -0.25, shield: -0.25, sand: 0,     spirit: 0 },
+  harmonic:  { flesh: -0.25,armor: -0.25, shield: -0.25, sand: 0.50,  spirit: 0 }
+};
+
+function uid() {
+  return "u" + Math.random().toString(36).slice(2, 9);
+}
+
+function clone(o) {
+  return JSON.parse(JSON.stringify(o));
+}
+
+function diceExpect(n, s, b) {
+  if (!n || !s) return b || 0;
+  return n * (s + 1) / 2 + (b || 0);
+}
+
+function rollDice(n, s, b) {
+  if (!n || !s) return { total: b || 0, parts: [], text: String(b || 0) };
+  const parts = [];
+  let total = b || 0;
+  for (let i = 0; i < n; i++) {
+    const v = 1 + Math.floor(Math.random() * s);
+    parts.push(v);
+    total += v;
+  }
+  const label = `${n}d${s}${b ? "+" + b : ""}`;
+  const text = `${label}〔${parts.join("+")}${b ? "+" + b : ""}〕=${total}`;
+  return { total, parts, text };
+}
+
+function takeDice(n, s, b) {
+  return rollDice(n, s, b || 0);
+}
+
+function totalMaxHp(unit) {
+  return (unit.layers || []).reduce((s, l) => s + Number(l.max || 0), 0);
+}
+
+function totalCurHp(unit) {
+  return (unit.layers || []).reduce((s, l) => s + Math.max(0, Number(l.current || 0)), 0);
+}
+
+function livingLayers(unit) {
+  return (unit.layers || []).filter(l => Number(l.current) > 0);
+}
+
+/** 内层血量。标记写在层对象上，所以错位这类交换层顺序的效果不会改变哪一层算内层。
+ *  内层归零 = 这个单位死亡（玩家角色则进入濒死）。 */
+function markInnerLayer(unit) {
+  const ls = (unit && unit.layers) || [];
+  if (!ls.length) return null;
+  let inner = ls.find(l => l && l.inner);
+  if (!inner) {
+    inner = ls[ls.length - 1];
+    inner.inner = true;
+  }
+  ls.forEach(l => { if (l !== inner) delete l.inner; });
+  return inner;
+}
+
+function innermostLayer(unit) {
+  const ls = (unit && unit.layers) || [];
+  if (!ls.length) return null;
+  return ls.find(l => l && l.inner) || markInnerLayer(unit);
+}
+
+function innerHp(unit) {
+  const l = innermostLayer(unit);
+  return l ? Math.max(0, Number(l.current) || 0) : 0;
+}
+
+function isInnerDepleted(unit) {
+  return innerHp(unit) <= 0;
+}
+
+function isUnitDown(unit) {
+  if (!unit) return true;
+  if (unit.dead) return true;
+  if (unit.upOnShp && (Number(unit.shp) || 0) > 0) return false;
+  return isInnerDepleted(unit);
+}
+
+function outerLayer(unit) {
+  return livingLayers(unit)[0] || null;
+}
+
+function secondOuterLayer(unit) {
+  return livingLayers(unit)[1] || livingLayers(unit)[0] || null;
+}
+
+function innermostOrganic(unit) {
+  const pref = ["flesh", "spirit", "sand"];
+  const layers = unit.layers || [];
+  for (let i = layers.length - 1; i >= 0; i--) {
+    if (pref.includes(layers[i].type) && Number(layers[i].current) > 0) return layers[i];
+    if (pref.includes(layers[i].type)) return layers[i];
+  }
+  return layers[layers.length - 1] || null;
+}
+
+function zoneDist(a, b, zoneMode) {
+  if (a == null || b == null) return 0;
+  if (Number(zoneMode) === 2) return a === b ? 0 : 1;
+  return Math.abs(Number(a) - Number(b));
+}
+
+/* 少数技能的真实射程没法从提示文字推出来，在这里写明，优先于文字解析。
+ * 通常是两类：先移动再作用（文字里的「同区」指的是移动之后），
+ * 以及同区和距离 1 都允许（文字只写了其中一个距离）。 */
+const SKILL_RANGE = {
+  tou_start: { min: 0, max: 1 },      // 先移动 ≤1，再对到达后的同区敌人施加错位
+  mochi_pounce: { min: 0, max: 1 },   // 跃向距离 1 的敌人，或带走同区敌人
+  // 针尖把两人连在一起：对刺入目标出手不受「距离1」限制（刺入超过距离 1 会自己断）
+  nora_aa: { min: 0, max: 1 },
+  nora_needle: { min: 0, max: 1 },
+  // 焰袭由夕夏在收回武器后结算，射程按夕夏算，技能内部另有判定。
+  // 写在这里是为了避免提示里的「不同区」被解析成「同区」。
+  berniel_flare: { min: 0, max: 99 },
+  chuan_aa: { min: 0, max: 0 },       // 川川普通攻击是近距离
+  bare_aa: { min: 0, max: 0 },        // 空手攻击一律同区
+  chuan_pulse: { min: 0, max: 1 },
+  chuan_blade: { min: 0, max: 0 },
+  xia_crush: { min: 0, max: 0 },
+  kolt_aa: { min: 0, max: 1 },
+  // 更换刀头的追击射程取决于换上去的新刀头（电钻近距离 / 酸液炮远距离），
+  // 所以外层放到 0–1，具体由技能内部按新刀头判定
+  kolt_swap: { min: 0, max: 1 },
+  kolt_short: { min: 0, max: 1 },
+  kolt_chase: { min: 0, max: 99 },
+  torque_boost: { min: 0, max: 1 },
+  torque_swap: { min: 0, max: 0 },
+  torque_strip: { min: 0, max: 0 },
+  helu_aa: { min: 1, max: 1 },
+  helu_scan: { min: 0, max: 99 },
+  ecmo_bite: { min: 0, max: 0 },
+  ecmo_focus: { min: 0, max: 99 },
+  ecmo_boom: { min: 0, max: 0 },
+  ras_aa: { min: 1, max: 1 },
+  ras_dump: { min: 0, max: 99 },
+  ras_flee: { min: 0, max: 99 },
+  edc_shock: { min: 0, max: 1 },
+  edc_flash: { min: 0, max: 0 }
+};
+
+/* 技能能选哪一边的目标。界面原本是从提示文字里猜的（出现「友方」就只让选友方），
+ * 对「打敌人、顺带治疗友方」这类技能会猜错。这里写明的优先于文字猜测。
+ *   enemy 只能选敌人 / ally 只能选友方 / any 敌我皆可 */
+const SKILL_TARGET_SIDE = {
+  vitas_dance: "enemy",     // 三段冰伤打敌人，温和的治疗只是附带效果
+  yuito_espresso: "enemy",  // 加行动点那一档在分步里选友方，走到这里的是酸液攻击
+  nora_needle: "any",       // 针尖可以扎敌人，也可以扎队友当治疗手段
+  nora_aa: "any"            // 有刺入时打刺入目标，刺入的可能是队友
+};
+
+function parseSkillRange(text) {
+  const s = String(text || "");
+  if (/任意距离/.test(s)) return { min: 0, max: 99 };
+  const scan = (chunk) => {
+    if (!chunk) return null;
+    if (/距离\s*1\s*以?内|1距离以?内/.test(chunk)) return { min: 0, max: 1 };
+    const span = chunk.match(/距离\s*(\d)\s*[-~到至]\s*(\d)/);
+    if (span) return { min: Number(span[1]), max: Number(span[2]) };
+    const one = chunk.match(/距离\s*(\d+)/);
+    if (one) return { min: Number(one[1]), max: Number(one[1]) };
+    if (/近距离|近战/.test(chunk)) return { min: 0, max: 0 };
+    if (/同区域|同区/.test(chunk) && !/同区其他|同区其余|同区域其他/.test(chunk)) return { min: 0, max: 0 };
+    return null;
+  };
+  const parts = s.split(/[·。；]/).map(x => x.trim()).filter(Boolean);
+  for (const part of parts) {
+    const r = scan(part);
+    if (r) return r;
+  }
+  return scan(s);
+}
+
+function inSkillRange(actor, target, text, zoneMode) {
+  const r = parseSkillRange(text);
+  if (!r || !actor || !target) return true;
+  const d = zoneDist(actor.zone, target.zone, zoneMode != null ? zoneMode : (typeof state !== "undefined" ? state.zoneMode : 2));
+  return d >= r.min && d <= r.max;
+}
+
+function chartMod(element, layerType, weather, field, acidRainCancelArmor) {
+  let table = CHART[element];
+  if (!table) return 0;
+  let v = table[layerType] || 0;
+
+  if (weather === "glow" && element !== "energy") {
+    v = -v;
+  }
+  if (field && field.ice) {
+    if (element === "ice") v = 0.25;
+  }
+  if (acidRainCancelArmor && layerType === "armor" && element !== "acid" && element !== "ice") {
+    v += 0.25;
+  }
+  return v;
+}
+
+function matchupKind(mod) {
+  if (mod > 0.001) return "adv";
+  if (mod < -0.001) return "dis";
+  return "neu";
+}
+
+/** 沙暴风向：1 顺风 / -1 逆风 / 0 无风向。
+ *  三区制下中间 2 区不受风向影响；电/酸伤害修正与沙尘回复仍全局生效。
+ */
+function sandWind(zone, zoneMode, sandDir) {
+  const z = Number(zone);
+  const mode = Number(zoneMode) || 2;
+  const dir = sandDir || "12";
+  if (mode === 3 && z === 2) return 0;
+  if (dir === "12") return z === 1 ? 1 : -1;
+  return z === 1 ? -1 : 1;
+}
+
+function sandWindLabel(v) {
+  if (v > 0) return "顺风";
+  if (v < 0) return "逆风";
+  return "无风向";
+}
+
+function weatherDamagePct(weather, element) {
+  switch (weather) {
+    case "heat":
+      if (element === "fire" || element === "acid") return 0.25;
+      if (element === "ice") return -0.25;
+      return 0;
+    case "snow":
+      if (element === "ice" || element === "physical") return 0.25;
+      if (element === "fire" || element === "acid") return -0.25;
+      return 0;
+    case "acid":
+      if (element === "acid" || element === "electric") return 0.25;
+      if (element !== "acid" && element !== "electric" && element !== "energy") return -0.25;
+      return 0;
+    case "thunder":
+      if (element === "electric" || element === "energy") return 0.25;
+      return 0;
+    case "glow":
+      if (element === "energy") return 0.25;
+      return 0;
+    case "sand":
+      if (element === "electric" || element === "acid") return -0.25;
+      return 0;
+    default:
+      return 0;
+  }
+}
+
+function milestone(level, every = 5) {
+  // 达到 5/10/15… 或 2/4/6… 的当级就加，不是下一级才加
+  return Math.floor(Math.max(1, Number(level) || 1) / every);
+}
+function dieStep(level, every = 5) {
+  return milestone(level, every);
+}
+
+const DIE_LADDER = [4, 6, 8, 10, 12, 20];
+function upgradeDieSides(baseSides, steps) {
+  let i = DIE_LADDER.indexOf(Number(baseSides));
+  if (i < 0) i = 0;
+  const s = Math.max(0, Number(steps) || 0);
+  return DIE_LADDER[Math.min(DIE_LADDER.length - 1, i + s)];
+}
+function leveledSides(level, baseSides) {
+  return upgradeDieSides(baseSides || 4, dieStep(level, 5));
+}
+
+function statusDotDice(kind, level, weather, extraArmor = false) {
+  const step = dieStep(level, 5);
+  if (kind === "burn") {
+    const s = upgradeDieSides(4, step);
+    return { n: 1, s, label: `1d${s}×层` };
+  }
+  if (kind === "shock") {
+    const s = upgradeDieSides(4, step);
+    const penalty = weather === "thunder" ? 0 : (1 + step);
+    return { n: 1, s, bonus: -penalty, min: 1, label: `1d${s}${penalty ? "−" + penalty : ""}` };
+  }
+  if (kind === "corr") {
+    let n = 2;
+    if (weather === "heat") n += 1;
+    if (weather === "acid") n += 1;
+    if (weather === "snow") n = Math.max(1, Math.floor(n / 2));
+    const s = upgradeDieSides(4, step + (extraArmor ? 1 : 0));
+    return { n, s, label: `${n}d${s}` };
+  }
+  if (kind === "firefield") {
+    const s = upgradeDieSides(4, step);
+    return { n: 1, s, label: `1d${s}×层` };
+  }
+  if (kind === "acidfield") {
+    let n = 2;
+    if (weather === "acid") n += 1;
+    const s = upgradeDieSides(4, step);
+    return { n, s, label: `${n}d${s}` };
+  }
+  if (kind === "healfield") {
+    return { n: 1 + step, s: 4, label: `${1 + step}d4` };
+  }
+  if (kind === "hvfield") {
+    const s = upgradeDieSides(4, step);
+    return { n: 1, s, label: `1d${s}` };
+  }
+  if (kind === "high") {
+    const s = upgradeDieSides(4, step);
+    return { n: 1, s, bonus: 1, label: `1d${s}+1` };
+  }
+  return { n: 1, s: upgradeDieSides(4, step) };
+}
+
+/**
+ * Core attack resolution.
+ * ctx: {
+ *   attacker, target, atk, mult, flat, diceValue,
+ *   element, baseBreak, hits,
+ *   flags, weather, phaseStep, zoneMode,
+ *   attackerField, targetField, highGround,
+ *   dist
+ * }
+ */
+function resolveAttack(ctx) {
+  const log = [];
+  const add = (s) => log.push(s);
+  const t = ctx.target;
+  const a = ctx.attacker;
+  const flags = ctx.flags || {};
+  const weather = ctx.weather || "none";
+  const fieldT = ctx.targetField || {};
+  const fieldA = ctx.attackerField || {};
+
+  if (!t) return { ok: false, log: ["没有受击者。"] };
+
+  if (flags.immune) {
+    return {
+      ok: true, total: 0, breakDealt: 0, hits: 0, log: ["屹立不倒 / 免疫：伤害与击破均为 0。"],
+      perHit: [], preventSand: false, applied: []
+    };
+  }
+
+  if (flags.assist && flags.block === "assistOk") {
+    add("协助攻击无法被格挡，忽略协助格挡成功。");
+    flags.block = "none";
+  }
+
+  let element = ctx.element;
+  if (t.instant && t.instant.spread && t.statuses) {
+    const latest = t.statuses.latestElement;
+    if (latest) {
+      add(`扩散：本次按受击者最新状态属性结算（${ELE[latest]}）。`);
+      element = latest;
+    }
+  }
+
+  let atk = Number(ctx.atk) || 0;
+  if (a && a.statuses) {
+    if (a.statuses.weak) { atk *= 0.75; add("攻击者虚弱：ATK −25%。"); }
+    if (a.statuses.inspire) { atk *= 1.25; add("攻击者振奋：ATK +25%。"); }
+  }
+
+  let mult = Number(ctx.mult) || 0;
+  if (a && a.self === "anchor") {
+    mult += 0.2;
+    add("千钧：伤害倍率 +0.2。");
+    if (flags.junAdd) { mult += 0.2; add("千钧附赠：伤害倍率再 +0.2。"); }
+  }
+
+  const diceV = Number(ctx.diceValue) || 0;
+  let rawBase = atk * mult + (Number(ctx.flat) || 0) + diceV;
+  add(`基础包 = ATK ${round2(atk)} × 倍率 ${round2(mult)} + 固定 ${ctx.flat || 0} + 骰子 ${round2(diceV)} = ${round2(rawBase)}`);
+
+  let hits = Math.max(1, Number(ctx.hits) || 1);
+  if (a && a.instant && a.instant.overload && hits > 1) {
+    hits += 1;
+    add("攻击者过载：复数次攻击额外再打一次（沿用本段倍率）。");
+  }
+  if (a && a.self === "conductor") {
+    hits += 1;
+    add("攻击者导体：攻击次数 +1。");
+  }
+
+  const layersWork = clone(t.layers || []);
+  const perHit = [];
+  let totalDealt = 0;
+  let totalIntended = 0;
+  let extraHarmonic = 0;
+  let totalBreak = 0;
+  let preventSand = false;
+  let meltEnded = false;
+  let pierColdRetrig = false;
+  let knockdownHp = 0;
+  let selfBreak = 0;
+  let interfDelta = t.interfere || 0;
+
+  for (let h = 0; h < hits; h++) {
+    const hitLog = [];
+    const hAdd = (s) => { hitLog.push(s); add(`#${h + 1} ${s}`); };
+
+    if (flags.block === "assistOk") {
+      let br = Number(ctx.baseBreak) || 0;
+      if (flags.smash) br *= 2;
+      if (weather === "glow" && br > 0) br = Math.max(1, br - 1);
+      if (weather === "phase" && Number(ctx.phaseStep) === 0) br = Math.max(0, br - 1);
+      if (weather === "phase" && Number(ctx.phaseStep) === 2) br += 1;
+      totalBreak += br;
+      hAdd("协助格挡成功：目标免伤，击破 " + br + " 改由格挡者承担。");
+      perHit.push({ dealt: 0, breakDealt: br, layers: clone(layersWork) });
+      continue;
+    }
+
+    let packet = rawBase;
+
+    const startIdx = pickStartIndex(layersWork, flags.pierce, flags.focusLayer);
+    const startLayer = layersWork[startIdx] || layersWork.find(l => l.current > 0);
+    const onShp = !!(t.upOnShp && t.isPlayer);
+    if (!onShp && (!startLayer || totalCurFrom(layersWork) <= 0)) {
+      hAdd(t.dying ? "目标已濒死，需先起身。" : "没有可结算的血量层。");
+      break;
+    }
+
+    let pct = 0;
+    const acidRain = weather === "acid";
+    const layerTypeForChart = onShp ? "shp" : startLayer.type;
+    let cMod = onShp ? 0 : chartMod(element, layerTypeForChart, weather, fieldT, acidRain);
+    if (!onShp && t.instant && t.instant.melt && startLayer && startLayer.type === "armor" && element === "physical") {
+      hAdd(`克制表原值 ${pctTxt(cMod)}，熔融装甲将物理修正强制改为 +50%。`);
+      cMod = 0.50;
+    }
+    pct += cMod;
+    if (onShp) hAdd(`起身状态：克制表无修正（坚毅生命对全属性 0%）`);
+    else hAdd(`克制表 ${ELE[element]} → ${LAYER[startLayer.type]}：${pctTxt(cMod)}（溢出不重算）`);
+
+    const wPct = weatherDamagePct(weather, element);
+    if (wPct) { pct += wPct; hAdd(`天气：${pctTxt(wPct)}`); }
+
+    if (flags.weak) {
+      const kind = matchupKind(cMod);
+      const w = kind === "adv" ? 0.25 : -0.25;
+      pct += w;
+      hAdd(`弱点特效（${kind === "adv" ? "克制" : "非克制"}）：${pctTxt(w)}`);
+    }
+
+    if (ctx.dist === 1 && ctx.atkRange !== "melee") {
+      if (ctx.highA && !ctx.highT) { pct += 0.25; hAdd("高地打低地远程：+25%。"); }
+      if (!ctx.highA && ctx.highT) { pct -= 0.25; hAdd("低地打高地远程：−25%。"); }
+    }
+
+    if (interfDelta) {
+      pct += interfDelta;
+      hAdd(`干涉场叠层带入：${pctTxt(interfDelta)}`);
+    }
+
+    if (t.instant && t.instant.melt && element === "ice") {
+      hAdd("冰打熔融：伤害 ×2，击破 +1，并结束熔融。");
+    }
+
+    if (a && a.self === "burn") {
+      const st = Math.max(1, Number(a.selfBurnStacks) || 1);
+      if (element === "fire") { pct += 0.10 * st; hAdd("自焚×" + st + "：火焰伤害 +" + (10 * st) + "%。"); }
+    }
+    if (t.kit === "outlaw_king" && t.resources && t.resources.hostage) {
+      pct += 0.25; hAdd("亡命之王被挟持：易伤 +25%。");
+    }
+    if (t.self === "burn") {
+      const st = Math.max(1, Number(t.selfBurnStacks) || 1);
+      if (element === "fire" || element === "ice") { pct -= 0.10 * st; hAdd("目标自焚×" + st + "：火/冰受伤 −" + (10 * st) + "%。"); }
+    }
+    if (a && a.self === "frost" && element === "ice") { pct += 0.25; hAdd("霜结：冰伤害 +25%。"); }
+    if (t.self === "frost") {
+      if (["physical", "acid", "energy", "harmonic", "ice"].includes(element)) {
+        pct -= 0.25; hAdd("目标霜结：该类受伤 −25%。");
+      }
+      if (weather === "snow") { pct -= 0.10; hAdd("雪天霜结：全属性再 −10%。"); }
+    }
+    if (t.self === "splash") {
+      if (element === "acid" || element === "fire") { pct -= 0.25; hAdd("目标溅射：酸/火受伤 −25%。"); }
+    }
+    if (a && a.self === "store" && (element === "energy" || element === "harmonic" || element === "electric")) {
+      const maxhp = Math.max(1, totalMaxHp(a));
+      const extra = (Number(a.highEnergy) || 0) / maxhp;
+      pct += extra;
+      hAdd(`蓄能：能量/谐波/电伤害 +${(extra * 100).toFixed(1)}%。`);
+    }
+    if (t.self === "store" && element === "harmonic") {
+      pct += 0.25; hAdd("目标蓄能：谐波受伤 +25%。");
+    }
+    if (a && a.self === "doppler" && element === "harmonic") {
+      if (flags.dopplerCloser) { pct += 0.25; hAdd("多普勒接近：谐波 +25%。"); }
+      if (flags.dopplerFarther) { pct -= 0.25; hAdd("多普勒远离：谐波 −25%。"); }
+    }
+    if (t.self === "doppler") {
+      if (flags.dopplerCloser) { pct += 0.25; hAdd("目标多普勒：来自接近区域伤害 +25%。"); }
+      if (flags.dopplerFarther) { pct -= 0.25; hAdd("目标多普勒：来自远离区域伤害 −25%。"); }
+    }
+
+    if (weather === "phase" && Number(ctx.phaseStep) === 2) {
+      pct += 0.50; hAdd("相位波峰：伤害 +50%。");
+    }
+
+    if (flags.icebreak) {
+      const over = (Number(t.defMax) || 0) > 0 && (Number(t.def) || 0) > (Number(t.defMax) || 0) * 0.5;
+      const frozen = !!(t.instant && t.instant.iceNext);
+      if (over || frozen) {
+        pct += 0.25;
+        hAdd(over ? "破冰：架势超过上限 50%，伤害 +25%。" : "破冰：目标处于冰冻，伤害 +25%。");
+      }
+    }
+    if (flags.etchHit) {
+      pct -= 0.25;
+      hAdd("蚀刻：本次伤害 −25%。");
+    }
+    if (t.etchMarks && t.etchMarks.length) {
+      t.etchMarks.forEach(m => {
+        if (m && m.element === element) {
+          const addp = Number(m.pct) || 0.1;
+          pct += addp;
+          hAdd("蚀刻残留：" + (ELE[element] || element) + " +" + Math.round(addp * 100) + "%，且视为被该属性克制。");
+          flags._etchAdv = true;
+        }
+      });
+    }
+
+    packet *= (1 + pct);
+    hAdd(`加算百分比合计 ${pctTxt(pct)} → ${round2(packet)}`);
+
+    let mul = 1;
+    if (weather === "phase" && Number(ctx.phaseStep) === 0) { mul *= 0.5; hAdd("相位波谷：伤害减半。"); }
+    if (flags.doubleDeal) { mul *= 2; hAdd("造成伤害翻倍。"); }
+    if (flags.doubleTake) { mul *= 2; hAdd("目标受伤翻倍。"); }
+    if (flags.dr50) { mul *= 0.5; hAdd("目标减伤 +50%。"); }
+    if (flags.holyShield) { mul *= 0.5; hAdd("圣盾：本次伤害减半。"); }
+    if (flags.prideReduce) { mul *= 0.75; hAdd("过度自信：满血时受伤 −25%。"); }
+    if (flags.diceMin) { hAdd("决一死战：伤害掷骰已按最低值计算。"); }
+    if (t.flying && flags.action) { mul *= 0.5; hAdd("飞行单位：攻击行动伤害减半。"); }
+    if (t.instant && t.instant.melt && element === "ice") { mul *= 2; }
+    if (flags.block === "bareOk") { mul *= 0.5; hAdd("空手格挡成功：伤害一半。"); }
+    if (h === 0 && t.instant && t.instant.iceNext && flags.action !== false) {
+      mul *= 1.5;
+      hAdd("冰冻（冰属性击破失衡）：本动作第一击伤害 +50%。");
+      t.instant.iceNext = false;
+    }
+    packet *= mul;
+
+    packet = Math.max(0, packet);
+    const floored = Math.floor(packet + 1e-9);
+    if (floored !== packet) hAdd(`最终伤害包 ${round2(packet)} → 向下取整 ${floored}`);
+    else hAdd(`最终伤害包 ${floored}`);
+    packet = floored;
+    totalIntended += packet;
+
+    let hitDealt = packet;
+    if (!onShp) {
+      const distribute = distributePacket({
+        layers: layersWork,
+        startIdx,
+        packet,
+        element,
+        refraction: !!(t.instant && t.instant.refract),
+        sting: !!(t.instant && t.instant.sting),
+        harmonicStun: element === "harmonic" && (typeof isEffectivelyStunned === "function" ? isEffectivelyStunned(t) : !!t.stunned),
+        phaseHarmonic: weather === "phase" && element === "harmonic" && (typeof isEffectivelyStunned === "function" ? isEffectivelyStunned(t) : !!t.stunned),
+        extraShockInner: element === "electric" && t.instant && t.instant.sting
+      });
+      distribute.notes.forEach(hAdd);
+      hitDealt = distribute.dealt;
+      extraHarmonic += Number(distribute.extraHarmonic) || 0;
+    } else {
+      hAdd("起身状态：本段伤害改由坚毅生命承受（不显示剩余值）。");
+    }
+    totalDealt += hitDealt;
+
+    if (element === "fire" || element === "energy") preventSand = true;
+
+    let br = Number(ctx.baseBreak) || 0;
+    if (!onShp && startLayer && startLayer.type === "armor" && element === "physical") {
+      const melted = t.instant && t.instant.melt;
+      if (!melted) { br += 1; hAdd("物理打装甲：击破 +1。"); }
+      else hAdd("熔融装甲：失去物理 +1 击破。");
+    }
+    if (!onShp && t.instant && t.instant.melt && startLayer && startLayer.type === "sand") {
+      br += 1; hAdd("熔融沙尘：击破 +1。");
+    }
+    if (t.instant && t.instant.melt && element === "ice") {
+      br += 1; meltEnded = true;
+    }
+    if (flags.smash) {
+      selfBreak += br;
+      br *= 2;
+      hAdd("猛击：击破 ×2，攻击者承受原击破。");
+    }
+    if (a && a.self === "anchor") { br += 1; hAdd("千钧：本攻击行动击破 +1。"); }
+    if (weather === "glow") {
+      if (br > 0) br = Math.max(1, br - 1);
+      hAdd("微光：击破 −1（不会减到 0）。");
+    }
+    if (weather === "phase" && Number(ctx.phaseStep) === 0) { br = Math.max(0, br - 1); hAdd("相位波谷：击破 −1。"); }
+    if (weather === "phase" && Number(ctx.phaseStep) === 2) { br += 1; hAdd("相位波峰：击破 +1。"); }
+    if (t.instant && t.instant.shift) {
+      const meltArmor = !!(t.instant.melt && startLayer && startLayer.type === "armor" && element === "physical");
+      if (matchupKind(cMod) === "adv" || meltArmor || flags._etchAdv) {
+        br += 1; hAdd(meltArmor ? "错位 + 熔融装甲加伤：击破 +1。" : "错位 + 克制/蚀刻：击破 +1。");
+      }
+    }
+    if (fieldT.harmonic) {
+      if (matchupKind(cMod) === "adv") {
+        interfDelta += 0.25;
+        hAdd("干涉场：本次克制，下次伤害 +25%。");
+      } else if (matchupKind(cMod) === "dis") {
+        interfDelta -= 0.25;
+        hAdd("干涉场：本次劣势，下次伤害 −25%。");
+      } else {
+        /* neutral does not flip */
+      }
+      if (matchupKind(cMod) === "adv" && (t.interfere || 0) < 0) {
+        interfDelta = 0.25;
+        hAdd("干涉场遇到反向：清空后从 +25% 重计。");
+      }
+      if (matchupKind(cMod) === "dis" && (t.interfere || 0) > 0) {
+        interfDelta = -0.25;
+        hAdd("干涉场遇到反向：清空后从 −25% 重计。");
+      }
+    }
+
+    if (flags.block === "assistOk") br = br;
+    totalBreak += br;
+
+    perHit.push({
+      dealt: hitDealt,
+      breakDealt: br,
+      notes: hitLog,
+      shp: onShp
+    });
+  }
+
+  // 高压场地额外电伤改在 dealTo 里自动写入血条，避免这里只记账不结算。
+
+  const defBefore = Number(t.def) || 0;
+  let defAfter = defBefore;
+  let helperBreak = 0;
+  if (flags.block === "assistOk") {
+    defAfter = defBefore;
+    helperBreak = Math.max(0, totalBreak);
+    totalBreak = 0;
+    totalDealt = 0;
+    add(`协助格挡成功：目标免伤且不扣架势。格挡者承担结算后击破 ${helperBreak}（含微光/相位等修正）。`);
+  } else {
+    defAfter = Math.max(0, defBefore - totalBreak);
+  }
+
+  const broke = defBefore > 0 && defAfter <= 0;
+  if (broke) {
+    add("架势归零：目标将晕眩，直到其下一次行动。");
+    if (t.flying) {
+      knockdownHp = Math.floor(totalMaxHp(t) * 0.2);
+      add(`飞行单位被击破：强制击落，并扣除 20% 最大生命 = ${knockdownHp}（真伤，应用时从外层扣）。`);
+    }
+    if (t.instant && t.instant.overload) {
+      add("过载期间被击破：额外承受 等级 × 1d4 电伤。");
+    }
+    if (t.instant && t.instant.sting) pierColdRetrig = true;
+  }
+
+  if (t.self === "cat" && totalBreak > 2) {
+    add("兽人猫·灵巧：一回合失去架势不超过 2。已在应用阶段封顶。");
+  }
+
+  const sandNote = preventSand ? "火/能量命中：本回合可阻止沙尘自动恢复。" : "";
+
+  return {
+    ok: true,
+    blocked: flags.block === "assistOk",   // 主攻击被挡住 → 不产生溅射
+    total: totalDealt,
+    intended: totalIntended,
+    extraHarmonic,
+    breakDealt: totalBreak,
+    helperBreak,
+    defBefore,
+    defAfter,
+    broke,
+    iceBreak: !!(ctx.iceBreak || element === "ice") && totalBreak > 0,
+    element,
+    startLayerType: (typeof startLayer !== "undefined" && startLayer) ? startLayer.type : null,
+    shpDealt: (t.upOnShp && t.isPlayer) ? totalDealt : 0,
+    hits,
+    preventSand,
+    meltEnded,
+    pierColdRetrig,
+    knockdownHp,
+    selfBreak,
+    interfereAfter: interfDelta,
+    layersAfter: layersWork,
+    perHit,
+    log,
+    sandNote,
+    element,
+    rawBase,
+    flags
+  };
+}
+
+function pickStartIndex(layers, pierce, focusType) {
+  const living = [];
+  layers.forEach((l, i) => { if (Number(l.current) > 0) living.push(i); });
+  if (!living.length) return 0;
+  if (focusType) {
+    const hit = living.find(i => layers[i].type === focusType);
+    if (hit != null) return hit;
+  }
+  if (pierce && living.length >= 2) return living[1];
+  return living[0];
+}
+
+function totalCurFrom(layers) {
+  return layers.reduce((s, l) => s + Math.max(0, Number(l.current) || 0), 0);
+}
+
+function distributePacket(opt) {
+  const notes = [];
+  let remaining = opt.packet;
+  let dealt = 0;
+  let extraHarmonic = 0;
+  const layers = opt.layers;
+
+  const applyToIndex = (idx, amount, tag) => {
+    if (amount <= 0) return 0;
+    if (idx < 0 || idx >= layers.length) return 0;
+    const layer = layers[idx];
+    const before = Math.max(0, Number(layer.current) || 0);
+    const take = Math.min(before, amount);
+    layer.current = Math.max(0, Math.floor((before - take) + 1e-9));
+    let leftover = amount - take;
+    dealt += take;
+    notes.push(`${tag}${LAYER[layer.type]} ${before} → ${layer.current}（吸收 ${take}）`);
+    if (leftover > 0 && before > 0 && leftover > 0 && opt.refraction) {
+      leftover = Math.floor(leftover * 1.5 + 1e-9);
+      notes.push(`折射：击穿 ${LAYER[layer.type]}，溢出 ×1.5 后向下取整 = ${leftover}`);
+    }
+    return leftover;
+  };
+
+  if (opt.phaseHarmonic) {
+    notes.push("相位 + 谐波 + 晕眩：每一层血量都吃一次伤害包。");
+    for (let i = 0; i < layers.length; i++) {
+      if (Number(layers[i].current) > 0) {
+        const left = applyToIndex(i, remaining, "相位层：");
+        if (left > 0) {
+          let r = left;
+          for (let j = i + 1; j < layers.length && r > 0; j++) r = applyToIndex(j, r, "相位溢出：");
+        }
+      }
+    }
+    return { dealt, notes, extraHarmonic: remaining };
+  }
+
+  let idx = opt.startIdx;
+  let r = remaining;
+  if (opt.extraShockInner) {
+    const inner = innermostIndex(layers);
+    const split = Math.floor(r * 0.5 + 1e-9);
+    notes.push(`刺骨：电击伤害 50%（${split}）改打最内层肉体/星灵/沙尘。`);
+    let innerLeft = applyToIndex(inner, split, "刺骨内层：");
+    for (let j = inner + 1; j < layers.length && innerLeft > 0; j++) {
+      innerLeft = applyToIndex(j, innerLeft, "内层溢出：");
+    }
+    r = Math.floor(r - split + 1e-9);
+  }
+
+  r = applyToIndex(idx, r, "主目标：");
+  for (let j = idx + 1; j < layers.length && r > 0; j++) {
+    r = applyToIndex(j, r, "溢出：");
+  }
+
+  if (opt.harmonicStun && !opt.phaseHarmonic) {
+    notes.push("谐波打晕眩：次外层再吃一次同等伤害包。");
+    const livingIdx = [];
+    layers.forEach((l, i) => { if (Number(l.current) > 0) livingIdx.push(i); });
+    const second = livingIdx[1] != null ? livingIdx[1] : livingIdx[0];
+    if (second != null) {
+      let extra = opt.packet;
+      extra = applyToIndex(second, extra, "谐波追加：");
+      for (let j = second + 1; j < layers.length && extra > 0; j++) {
+        extra = applyToIndex(j, extra, "谐波追加溢出：");
+      }
+      extraHarmonic += opt.packet;
+    }
+  }
+  return { dealt, notes, extraHarmonic };
+}
+
+/** 濒死且还没选择起身：在玩家自己按下「起身」之前，不受任何伤害，
+ *  也不会因为架势归零而被协助攻击。 */
+function isDownProtected(u) {
+  return !!(u && u.isPlayer && u.dying && !u.upOnShp && !u.dead);
+}
+
+function innermostIndex(layers) {
+  const pref = ["flesh", "spirit", "sand"];
+  for (let i = layers.length - 1; i >= 0; i--) {
+    if (pref.includes(layers[i].type)) return i;
+  }
+  return layers.length - 1;
+}
+
+function round2(n) {
+  return Math.round((Number(n) || 0) * 100) / 100;
+}
+
+function pctTxt(v) {
+  const p = Math.round(v * 1000) / 10;
+  return (p >= 0 ? "+" : "") + p + "%";
+}
+
+function applyTrueDamage(layers, amount) {
+  let r = Math.floor(Math.max(0, Number(amount) || 0) + 1e-9);
+  for (let i = 0; i < layers.length && r > 0; i++) {
+    const cur = Math.max(0, Number(layers[i].current) || 0);
+    const take = Math.min(cur, r);
+    layers[i].current = round2(cur - take);
+    r -= take;
+  }
+  return amount - r;
+}
+
+function isIceBreakResult(result, spent) {
+  if (!result) return false;
+  const br = spent != null ? spent : result.breakDealt;
+  if (!(br > 0)) return false;
+  if (result.iceBreak) return true;
+  return result.element === "ice";
+}
+
+function applyResultToUnit(target, result, attacker) {
+  const notes = [];
+  if (!result.ok) return notes;
+  target.layers = clone(result.layersAfter);
+  if (result.knockdownHp) {
+    const d = applyTrueDamage(target.layers, result.knockdownHp);
+    notes.push(`击落真伤 ${d}`);
+    target.flying = false;
+  }
+  let spent = result.breakDealt;
+  if (target.kit === "xia" && target.upOnShp) {
+    spent = 0;
+    notes.push("背水一战：起身中不失去架势。");
+  }
+  if (target.raceTrait === "catFocus") spent = Math.min(spent, Math.max(0, 2 - (target.lostDefThisTurn || 0)));
+  target.lostDefThisTurn = (target.lostDefThisTurn || 0) + spent;
+  const defBeforeHit = Math.max(0, Number(target.def) || 0);
+  const wasStunned = !!target.stunned;
+  target.def = Math.max(0, (Number(target.def) || 0) - spent);
+  if (spent > 0 && typeof registerZoneBreak === "function" && target.kit !== "ufo_leg" && !target.noPosture) {
+    notes.push(...registerZoneBreak(target.zone, spent));
+  }
+  if (result.shpDealt > 0 && target.upOnShp) {
+    target.shp = Math.max(0, (Number(target.shp) || 0) - result.shpDealt);
+    notes.push("起身状态受伤，伤害已打入坚毅生命。");
+    if (target.shp <= 0) {
+      target.dead = true;
+      target.upOnShp = false;
+      target.dying = false;
+      notes.push(`${target.name} 坚毅生命耗尽，死亡。`);
+    }
+  }
+  if (target.noPosture || target.kit === "ufo_leg" || (target.name && String(target.name).indexOf("机械足") === 0)) {
+    target.noPosture = true;
+    target.stunned = false;
+    target.def = 0;
+    target.defMax = 0;
+  } else if (target.def <= 0) {
+    // 只有这一击把架势打到 0（之前还没失衡）才算「打进失衡」。
+    // 打已经失衡的目标不会再挂一次冰冻加伤。
+    const brokeIntoStun = defBeforeHit > 0 && !wasStunned;
+    target.stunned = true;
+    if (brokeIntoStun && isIceBreakResult(result, spent)) {
+      target.instant = target.instant || {};
+      target.instant.iceNext = true;
+      notes.push(`${target.name} 因冰属性击破失衡：下次受到的攻击动作第一击 +50% 伤害。`);
+    }
+  }
+  if (result.preventSand) target.sandLocked = true;
+  if (result.meltEnded && target.instant) target.instant.melt = false;
+  target.interfere = result.interfereAfter || 0;
+  target.damagedThisTurn = (target.damagedThisTurn || 0) + result.total;
+  if (result.total > 0) target.gotHitThisTurn = true;
+  if (result.selfBreak && attacker) {
+    attacker.def = Math.max(0, (Number(attacker.def) || 0) - result.selfBreak);
+    notes.push(`猛击反震：攻击者架势 −${result.selfBreak}`);
+    if (attacker.def <= 0) attacker.stunned = true;
+  }
+  if (target.self === "burn" && result.element === "fire" && result.total > 0 && attacker === target) {
+    /* self */
+  }
+  if (attacker && attacker.self === "burn" && result.element === "fire") {
+    const st = Math.max(1, Number(attacker.selfBurnStacks) || 1);
+    const heal = (result.total || 0) * 0.2 * st;
+    healUnit(attacker, heal, { selfBurn: true });
+    notes.push(`自焚×${st} 吸血 ${round2(heal)}`);
+  }
+  return notes;
+}
+
+function healUnit(unit, amount, opt) {
+  if (!unit || unit.dead || unit.dying) return 0;
+  const raw = Math.max(0, Number(amount) || 0);
+  if (!raw) return 0;
+  opt = opt || {};
+  if (unit.upOnShp) {
+    const cap = Number(unit.shpMax) || 0;
+    const before = Number(unit.shp) || 0;
+    const give = cap > 0 ? Math.min(raw, Math.max(0, cap - before)) : raw;
+    unit.shp = before + give;
+    if (opt.selfBurn) unit.shpBurnHeal = (Number(unit.shpBurnHeal) || 0) + give;
+    if (give > 0 && typeof pulseResonanceHeal === "function") pulseResonanceHeal(unit, give);
+    return give;
+  }
+  let r = raw;
+  for (let i = (unit.layers || []).length - 1; i >= 0 && r > 0; i--) {
+    const l = unit.layers[i];
+    const room = Math.max(0, Number(l.max) - Number(l.current));
+    const give = Math.min(room, r);
+    l.current = round2(Number(l.current) + give);
+    r -= give;
+  }
+  const given = Math.max(0, raw - r);
+  if (given > 0 && typeof pulseResonanceHeal === "function") pulseResonanceHeal(unit, given);
+  return given;
+}
+
+/* ---------- presets ---------- */
+
+function liveHeroCount() {
+  const n = (typeof state !== "undefined" && state.units || []).filter(u =>
+    u && u.isPlayer && !u.hidden && !u.dead && !u.weaponOf &&
+    !(typeof isWeaponUnit === "function" && isWeaponUnit(u))
+  ).length;
+  if (n > 0) return n;
+  if (typeof GAME !== "undefined" && GAME.partyKits && GAME.partyKits.length) return GAME.partyKits.length;
+  if (typeof state !== "undefined" && Number(state.partySize)) return Number(state.partySize);
+  return 2;
+}
+
+function syncPartySizeFromField() {
+  let n = liveHeroCount();
+  if (n < 2) n = 2;
+  if (n > 4) n = 4;
+  if (typeof state !== "undefined") state.partySize = n;
+  const a = document.getElementById("partySize");
+  if (a) a.value = String(n);
+  const b = document.getElementById("g-cfg-ps");
+  if (b) b.value = String(n);
+  if (typeof GAME !== "undefined") GAME.partySize = n;
+  return n;
+}
+
+function partyScaleCount(party) {
+  let p = party != null ? Number(party) : (typeof liveHeroCount === "function" ? liveHeroCount() : 2);
+  if (!p || p < 2) p = 2;
+  if (p > 4) p = 4;
+  return p;
+}
+
+function scaleByParty(v, party) {
+  const p = partyScaleCount(party);
+  const m = p === 4 ? 2.5 : p === 3 ? 1.5 : 1;
+  return Math.round((Number(v) || 0) * m);
+}
+function scaleHp(v, party) { return scaleByParty(v, party); }
+function scaleDef(v, party, kit) {
+  const base = Number(v) || 0;
+  const p = partyScaleCount(party);
+  let rank = "minion";
+  if (typeof enemyRankOf === "function") rank = enemyRankOf({ kit: kit }) || "minion";
+  else if (typeof ENEMY_RANK !== "undefined" && kit && ENEMY_RANK[kit]) rank = ENEMY_RANK[kit];
+  if (rank === "minion") return base;
+  if (p === 3) return base + (rank === "boss" ? 3 : 2);
+  if (p >= 4) return base + (rank === "boss" ? 6 : 4);
+  return base;
+}
+
+function ufoLegStats(lv) {
+  const extra = Math.max(0, (Number(lv) || 1) - 1);
+  return {
+    spirit: 8 + extra * 2,
+    armor: 6 + extra * 2,
+    shield: 6 + extra * 3,
+    def: 10 + milestone(lv, 2),
+    atk: 9 + extra
+  };
+}
+
+function enemyPresets() {
+  return [
+    { id: "guard_sword", name: "机器人看守（剑）", build(lv, p) {
+      const extra = lv - 1;
+      const armor = 14 + extra * 5;
+      const def = 3 + Math.floor(lv / 5);
+      const atk = 4 + Math.floor(lv / 2);
+      let dice = [1, 4], extraFlat = 0;
+      if (lv >= 4) dice = [1, 6];
+      if (lv >= 8) dice = [1, 8];
+      if (lv >= 12) dice = [1, 10];
+      if (lv >= 16) dice = [1, 12];
+      if (lv >= 20) dice = [1, 20];
+      if (lv >= 25) extraFlat = 10;
+      if (lv >= 30) extraFlat = 20;
+      return unitOf(this.name, lv, [{ type: "armor", hp: scaleHp(armor, p) }], def, atk, { kit: "guard_sword", range: "melee", dice, flat: extraFlat, element: "electric" });
+    }},
+    { id: "guard_gun", name: "机器人看守（枪）", build(lv, p) {
+      const armor = 12 + (lv - 1) * 4;
+      const atk = 5 + (lv - 1);
+      const def = 3 + milestone(lv, 10);
+      return unitOf(this.name, lv, [{ type: "armor", hp: scaleHp(armor, p) }], def, atk, { kit: "guard_gun", range: "ranged", dice: [1, 4], element: "energy" });
+    }},
+    { id: "thug_knife", name: "狂徒（匕首）", build(lv, p) {
+      return unitOf(this.name, lv, [{ type: "flesh", hp: scaleHp(17 + (lv - 1) * 4, p) }], 3 + milestone(lv, 10), 5 + (lv - 1), { kit: "thug_knife", range: "melee", dice: [1, 8], element: "physical" });
+    }},
+    { id: "thug_hammer", name: "狂徒（锤）", build(lv, p) {
+      return unitOf(this.name, lv, [{ type: "flesh", hp: scaleHp(20 + (lv - 1) * 6, p) }], 4 + milestone(lv, 10), 4 + (lv - 1), { kit: "thug_hammer", range: "melee", dice: [1, 6], element: "physical", baseBreak: 2 });
+    }},
+    { id: "boomcar", name: "自爆小车", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(5 + (lv - 1) * 2, p) },
+        { type: "armor", hp: scaleHp(3, p) }
+      ], 2, 7 + (lv - 1) * 2, { kit: "boomcar", range: "melee", dice: [1, 6], element: "energy", baseBreak: 2, resources: { fuse: 1 } });
+    }},
+    { id: "sand_beast", name: "沙灵（四足）", build(lv, p) {
+      const atk = 5 + milestone(lv, 2) + milestone(lv, 5);
+      return unitOf(this.name, lv, [{ type: "sand", hp: scaleHp(18 + (lv - 1) * 4, p) }], 3, atk, { kit: "sand_beast", range: "melee", dice: [1, 4], element: "physical" });
+    }},
+    { id: "sand_human", name: "沙灵（人形）", build(lv, p) {
+      const atk = 6 + (lv - 1) + milestone(lv, 5);
+      return unitOf(this.name, lv, [{ type: "sand", hp: scaleHp(10 + (lv - 1) * 4, p) }], 3, atk, { kit: "sand_human", range: "ranged", dice: [1, 4], element: "physical" });
+    }},
+    { id: "buoy", name: "巡检浮标", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(10 + (lv - 1) * 3, p) },
+        { type: "armor", hp: scaleHp(1, p) }
+      ], 3 + milestone(lv, 2), 4 + (lv - 1) * 2, { kit: "buoy", flying: true, range: "melee", dice: [1, 4], element: "electric" });
+    }},
+    { id: "dumpdrone", name: "投料无人机", build(lv, p) {
+      return unitOf(this.name, lv, [{ type: "armor", hp: scaleHp(8 + (lv - 1) * 3, p) }], 2 + milestone(lv, 2), 5 + (lv - 1) * 2, { kit: "dumpdrone", flying: true, range: "ranged", dice: [1, 4], element: "acid" });
+    }},
+    { id: "swarm", name: "空投蜂群", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(4 + (lv - 1) * 2, p) },
+        { type: "armor", hp: scaleHp(1, p) }
+      ], 1 + milestone(lv, 2), 6 + (lv - 1) * 2, { kit: "swarm", flying: true, range: "melee", dice: [2, 4], element: "physical" });
+    }},
+    { id: "crow", name: "穴鸦", build(lv, p) {
+      return unitOf(this.name, lv, [{ type: "flesh", hp: scaleHp(10 + (lv - 1) * 3, p) }], 2 + milestone(lv, 2), 5 + (lv - 1) * 2, { kit: "crow", flying: true, range: "melee", dice: [1, 4], element: "harmonic" });
+    }},
+    { id: "mecha_mg", name: "机甲触灵（机枪）", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(17 + (lv - 1) * 5, p) },
+        { type: "armor", hp: scaleHp(20 + (lv - 1) * 4, p) },
+        { type: "spirit", hp: scaleHp(5 + (lv - 1) * 2 + milestone(lv, 5) * 2, p) }
+      ], 5 + milestone(lv, 5), 5 + (lv - 1), { kit: "mecha_mg", range: "any", dice: [1, 6], element: "physical", baseBreak: 2 });
+    }},
+    { id: "mecha_gl", name: "机甲触灵（榴弹）", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(10 + (lv - 1) * 4 + milestone(lv, 5) * 2, p) },
+        { type: "armor", hp: scaleHp(15 + (lv - 1) * 4, p) },
+        { type: "spirit", hp: scaleHp(5 + (lv - 1) * 2, p) }
+      ], 5 + milestone(lv, 5), 6 + (lv - 1), { kit: "mecha_gl", range: "ranged", dice: [1, 4], element: "fire", baseBreak: 2 });
+    }},
+    { id: "bandit_boss", name: "强盗头子", build(lv, p) {
+      const armor = milestone(lv, 5) * 20;
+      const layers = [{ type: "flesh", hp: scaleHp(28 + (lv - 1) * 7, p) }];
+      if (armor) layers.unshift({ type: "armor", hp: scaleHp(armor, p) });
+      return unitOf(this.name, lv, layers, 6 + milestone(lv, 5), 6 + (lv - 1) + milestone(lv, 5), { kit: "bandit_boss", range: "any", dice: [1, 8], element: "fire", baseBreak: 2 });
+    }},
+    { id: "captain_wolf", name: "警卫队队长（狼）", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(15 + (lv - 1) * 6, p) },
+        { type: "flesh", hp: scaleHp(20 + (lv - 1) * 5, p) }
+      ], 4 + milestone(lv, 5), 8 + milestone(lv, 2) + milestone(lv, 5) * 2, { kit: "captain_wolf", range: "melee", dice: [1, 4], element: "ice" });
+    }},
+    { id: "captain_ox", name: "警卫队队长（牛）", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(16 + (lv - 1) * 5 + milestone(lv, 5) * 4, p) },
+        { type: "flesh", hp: scaleHp(26 + (lv - 1) * 7, p) }
+      ], 5 + milestone(lv, 5), 6 + milestone(lv, 5) * 2, { kit: "captain_ox", range: "any", dice: [1 + milestone(lv, 5), 4], element: "ice", baseBreak: 2 });
+    }},
+    { id: "captain_lizard", name: "警卫队队长（蜥蜴）", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(12 + (lv - 1) * 5 + milestone(lv, 2) * 5, p) },
+        { type: "flesh", hp: scaleHp(14 + (lv - 1) * 2, p) }
+      ], 4, 7 + milestone(lv, 2) + milestone(lv, 5), { kit: "captain_lizard", range: "ranged", dice: [1, 6], element: "acid", baseBreak: 2 });
+    }},
+    { id: "bigsand", name: "大沙灵", build(lv, p) {
+      return unitOf(this.name, lv, [{ type: "sand", hp: scaleHp(37 + (lv - 1) * 6 + milestone(lv, 2), p) }], 4, 5 + milestone(lv, 2), { kit: "bigsand", range: "melee", dice: [1, 4], element: "physical" });
+    }},
+    { id: "livesand", name: "活沙", build(lv, p) {
+      return unitOf(this.name, lv, [{ type: "sand", hp: scaleHp(20 + (lv - 1), p) }], 4, 7, { kit: "livesand", range: "any", dice: [0, 0], element: "physical" });
+    }},
+    { id: "giant", name: "巨人", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(15 + (lv - 1) * 4, p) },
+        { type: "flesh", hp: scaleHp(35 + (lv - 1) * 5, p) }
+      ], 5 + milestone(lv, 10), 6, { kit: "giant", range: "any", dice: [1 + (lv - 1), 8], element: "physical", baseBreak: 2 });
+    }},
+    { id: "patrolboat", name: "高压巡逻艇", build(lv, p) {
+      const d = Math.max(0, lv - 3);
+      return unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(15 + d * 4, p) },
+        { type: "armor", hp: scaleHp(17 + d * 5, p) }
+      ], 5 + milestone(lv, 2) - milestone(3, 2), 9 + d * 3, { kit: "patrolboat", flying: true, range: "ranged", dice: [1, 6], element: "electric" });
+    }},
+    { id: "spreader", name: "播撒者", build(lv, p) {
+      const d = Math.max(0, lv - 3);
+      return unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(10 + d * 3, p) },
+        { type: "armor", hp: scaleHp(22 + d * 6, p) }
+      ], 4 + milestone(lv, 2) - milestone(3, 2), 7 + d * 2, { kit: "spreader", flying: true, range: "ranged", dice: [1, 6], element: "acid" });
+    }},
+    { id: "watchcrow", name: "观测鸦", build(lv, p) {
+      const d = Math.max(0, lv - 4);
+      return unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(15 + d * 5, p) },
+        { type: "spirit", hp: scaleHp(12 + d * 3, p) }
+      ], 6 + milestone(lv, 2) - milestone(4, 2), 10 + d * 3, { kit: "watchcrow", flying: true, range: "ranged", dice: [1, 8], element: "energy", resources: { reflect: true } });
+    }},
+    { id: "dustbody", name: "扬尘体", build(lv, p) {
+      const d = Math.max(0, lv - 3);
+      return unitOf(this.name, lv, [
+        { type: "armor", hp: scaleHp(15 + d * 3, p) },
+        { type: "sand", hp: scaleHp(20 + d * 4, p) }
+      ], 4 + milestone(lv, 2) - milestone(3, 2), 8 + d * 3, { kit: "dustbody", flying: true, range: "melee", dice: [1, 6], element: "physical" });
+    }},
+    { id: "sand_aggregate", name: "沙灵聚合体", build(lv, p) {
+      const d = Math.max(0, (lv || 1) - 1);
+      const outer = 30 + d * 9;
+      const armor = 40 + d * 8;
+      const inner = 50 + d * 6;
+      const atk = 10 + d;
+      const def = 11 + milestone(lv, 2);
+      return unitOf("沙灵聚合体", lv, [
+        { type: "sand", hp: scaleHp(outer, p) },
+        { type: "armor", hp: scaleHp(armor, p) },
+        { type: "sand", hp: scaleHp(inner, p) }
+      ], def, atk, {
+        kit: "sand_aggregate", range: "any", element: "physical", dice: [1, 8], baseBreak: 3,
+        resources: { phase: 1, debrisCount: 0, forceCharge: false, forceOverheat: false }
+      });
+    }},
+    { id: "outlaw_king", name: "亡命之王", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "armor", hp: scaleHp(35 + (lv - 1) * 7, p) },
+        { type: "flesh", hp: scaleHp(50 + (lv - 1) * 11, p) }
+      ], 7 + milestone(lv, 5), 11 + (lv - 1) + milestone(lv, 5) * 2, { kit: "outlaw_king", range: "any", dice: [1, 4], element: "fire" });
+    }},
+    { id: "chixia", name: "赤牙", build(lv, p) {
+      const table = {
+        5: { flesh: 45, armor: 45, sand: 25, def: 10, atk: 23 },
+        10: { flesh: 70, armor: 70, sand: 50, def: 11, atk: 30 },
+        15: { flesh: 95, armor: 95, sand: 65, def: 12, atk: 37 },
+        20: { flesh: 140, armor: 130, sand: 90, def: 13, atk: 44 },
+        25: { flesh: 160, armor: 160, sand: 120, def: 14, atk: 51 }
+      };
+      const row = table[lv] || table[5];
+      return unitOf(this.name, lv, [
+        { type: "sand", hp: scaleHp(row.sand, p) },
+        { type: "armor", hp: scaleHp(row.armor, p) },
+        { type: "flesh", hp: scaleHp(row.flesh, p) }
+      ], row.def, row.atk, { kit: "chixia", range: "any", dice: [0, 0], element: "fire", resources: { primed: false, cover: false } });
+    }},
+    { id: "ufo_boss", name: "飞碟触灵（Boss 组）", build(lv, p) {
+      const s = ufoLegStats(lv);
+      return unitOf("飞碟触灵·本体", lv, [
+        { type: "shield", hp: scaleHp(s.shield * 5, p) },
+        { type: "armor", hp: scaleHp(s.armor * 5, p) },
+        { type: "spirit", hp: scaleHp(s.spirit * 5, p) }
+      ], s.def, s.atk, { kit: "ufo_body", range: "any", flying: true, element: "energy", dice: [1, 4], baseBreak: 1, resources: { boomReady: false } });
+    }},
+    { id: "ufo_leg", name: "飞碟触灵·机械足", build(lv, p) {
+      const s = ufoLegStats(lv);
+      return unitOf("机械足", lv, [
+        { type: "shield", hp: scaleHp(s.shield, p) },
+        { type: "armor", hp: scaleHp(s.armor, p) },
+        { type: "spirit", hp: scaleHp(s.spirit, p) }
+      ], 0, 0, { kit: "ufo_leg", range: "any", element: "physical" });
+    }},
+    { id: "patrol_car", name: "安保巡逻车", build(lv, p) {
+      const extra = Math.max(0, (lv || 1) - 1);
+      const armor = 16 + extra * 5;
+      const atk = 6 + milestone(lv, 2);
+      const def = 4 + milestone(lv, 10);
+      return unitOf(this.name, lv, [{ type: "armor", hp: scaleHp(armor, p) }], def, atk, {
+        kit: "patrol_car", range: "any", element: "harmonic", dice: [0, 4], baseBreak: 1,
+        resources: { blockUsedThisTurn: false },
+        lootKuizhi: 30
+      });
+    }},
+    { id: "blank_pc", name: "玩家角色（空白）", build(lv) {
+      return unitOf("玩家", lv, [
+        { type: "flesh", hp: 12 }
+      ], 4, 4, { range: "any", isPlayer: true });
+    }}
+  ];
+}
+
+function enemySpawnZone(mode) {
+  const m = mode != null ? mode : (typeof state !== "undefined" ? state.zoneMode : 2);
+  return Number(m) === 3 ? 3 : 2;
+}
+
+function unitOf(name, level, layers, def, atk, extra = {}) {
+  return {
+    id: uid(),
+    name,
+    level: level || 1,
+    zone: extra.zone != null ? extra.zone : (extra.isPlayer ? 1 : enemySpawnZone()),
+    layers: layers.map((l, i) => ({ type: l.type, current: l.hp, max: l.hp, inner: i === layers.length - 1 })),
+    def: extra.isPlayer ? def : scaleDef(def, extra.party, extra.kit),
+    defMax: extra.isPlayer ? def : scaleDef(def, extra.party, extra.kit),
+    atk,
+    flying: !!extra.flying,
+    stunned: false,
+    isPlayer: !!extra.isPlayer,
+    range: extra.range || "melee",
+    suggest: {
+      element: extra.element || "physical",
+      dice: extra.dice || [1, 4],
+      flat: extra.flat || 0,
+      baseBreak: extra.baseBreak || 1
+    },
+    statuses: {
+      burn: 0, shock: false, corr: false, frostbite: false, shockwave: false,
+      high: false, reso: false, unstable: false, weak: false, inspire: false,
+      sturdy: false, hide: false, advantage: false, chase: false, latestElement: null
+    },
+    instant: { melt: false, sting: false, overload: false, shift: false, spread: false, refract: false },
+    self: "none",
+    highEnergy: 0,
+    interfere: 0,
+    sandLocked: false,
+    gotHitThisTurn: false,
+    damagedThisTurn: 0,
+    lostDefThisTurn: 0,
+    ap: extra.ap != null ? extra.ap : (extra.isPlayer ? 1 : 0),
+    apMax: extra.apMax != null ? extra.apMax : (extra.isPlayer ? 1 : 0),
+    bonus: extra.bonus != null ? extra.bonus : (extra.isPlayer ? 1 : 0),
+    bonusMax: extra.bonusMax != null ? extra.bonusMax : (extra.isPlayer ? 1 : 0),
+    loseBonusNext: !!extra.loseBonusNext,
+    shp: extra.shp != null ? extra.shp : 0,
+    shpMax: extra.shpMax != null ? extra.shpMax : (extra.shp || 0),
+    dying: false,
+    upOnShp: false,
+    dead: false,
+    kit: extra.kit || null,
+    role: extra.role || (extra.isPlayer ? "player" : "enemy"),
+    personalAtk: extra.personalAtk != null ? extra.personalAtk : atk,
+    weaponAtk: extra.weaponAtk || 0,
+    weaponHeld: extra.weaponHeld !== false,
+    resources: extra.resources ? Object.assign({}, extra.resources) : {},
+    linked: extra.linked || [],
+    hidden: !!extra.hidden,
+    fused: !!extra.fused,
+    lootKuizhi: extra.lootKuizhi || 0,
+    noPosture: !!extra.noPosture,
+    party: extra.party
+  };
+}

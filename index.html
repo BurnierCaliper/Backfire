@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Anterscale · 伤害与状态计算器</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="app-shell">
+  <header class="app-header">
+    <div class="head-title">
+      <h1>Anterscale</h1>
+      <p>点单位选目标，下方放技能。</p>
+    </div>
+    <div class="toolbar">
+        <label class="field">区制
+          <select id="zoneMode">
+            <option value="2">两区制（默认）</option>
+            <option value="3">三区制</option>
+          </select>
+        </label>
+        <label class="field">队伍人数（敌人血量缩放）
+          <select id="partySize">
+            <option value="2">2 人 ×1</option>
+            <option value="3">3 人 ×1.5</option>
+            <option value="4">4 人 ×2.5</option>
+          </select>
+        </label>
+        <label class="field">天气（全局，同时一种）
+          <select id="weather">
+            <option value="none">常态 / 无</option>
+            <option value="heat">酷暑（火）</option>
+            <option value="snow">雪天（冰）</option>
+            <option value="acid">酸雨（酸）</option>
+            <option value="thunder">雷鸣（电）</option>
+            <option value="glow">微光（能量）</option>
+            <option value="sand">沙暴（物理）</option>
+            <option value="phase">相位（谐波）</option>
+          </select>
+        </label>
+        <label class="field">天气锁定
+          <input id="weatherLock" type="checkbox" />
+        </label>
+        <label class="field">相位阶段
+          <select id="phaseStep">
+            <option value="0">波谷（伤害减半，击破 −1）</option>
+            <option value="1">平衡</option>
+            <option value="2">波峰（伤害 +50%，击破 +1）</option>
+            <option value="3">平衡</option>
+          </select>
+        </label>
+        <label class="field">沙暴风向
+          <select id="sandDir">
+            <option value="12">1 → 外侧（两区吹向 2；三区吹向 3）</option>
+            <option value="21">外侧 → 1（两区 2→1；三区 3→1）</option>
+          </select>
+        </label>
+        <span class="hint" style="align-self:center">风向由场面决定，不默认我方顺风</span>
+        <button class="btn" id="btnAdvancePhase">相位 +1</button>
+        <span id="phaseLabel" class="field" style="align-self:center;font-weight:700;">回合阶段：未开始</span>
+        <button class="btn primary" id="btnStartCombat">开始战斗</button>
+        <button class="btn primary" id="btnTurnEnd">结束玩家回合</button>
+        <button class="btn" id="btnUndo">撤销</button>
+        <button class="btn danger" id="btnClearField">清空战场</button>
+        <button class="btn primary" id="btnOpenPlayer">加入玩家</button>
+        <button class="btn" id="btnLoadLive">载入实况组</button>
+        <button class="btn" id="btnBackstage">后台</button>
+        <button class="btn" id="btnOpenAttack">手动攻击</button>
+        <button class="btn" id="btnOpenEditor">编辑单位</button>
+      </div>
+  </header>
+
+  <main class="stage">
+    <section class="battlefield">
+      <div class="board-tools">
+        <label class="field">敌人
+          <select id="presetSelect"></select>
+        </label>
+        <label class="field">等级
+          <input id="presetLevel" type="number" min="1" max="30" value="1" />
+        </label>
+        <button class="btn small" id="btnAddPreset">加入敌人</button>
+        <label class="field">配置物
+          <select id="propKind">
+            <option value="button">按钮</option>
+            <option value="lever">拉杆</option>
+            <option value="battery">超充能电池</option>
+            <option value="boom">爆炸桶</option>
+            <option value="acid">酸液桶</option>
+            <option value="scrap">碎渣机炮</option>
+            <option value="turret">防卫自律炮台</option>
+          </select>
+        </label>
+        <label class="field">放到
+          <select id="propZone">
+            <option value="1">1 区</option>
+            <option value="2">2 区</option>
+            <option value="3">3 区</option>
+          </select>
+        </label>
+        <label class="field">配置物等级
+          <input id="propLevel" type="number" min="1" value="1" />
+        </label>
+        <label class="field">阵营
+          <select id="propFaction">
+            <option value="player">我方</option>
+            <option value="enemy">敌方</option>
+          </select>
+        </label>
+        <button class="btn small" id="btnAddProp">放置</button>
+      </div>
+      <div id="zones" class="zones z2"></div>
+    </section>
+
+    <section class="dock">
+      <div class="dock-skills">
+        <div class="dock-head">
+          <h2>技能</h2>
+          <span class="hint" id="skillKitHint">先点一名角色当行动者。</span>
+        </div>
+        <div id="skillRes" class="meta"></div>
+        <div id="skillFlowPane" class="skill-flow hidden"></div>
+        <div id="skillBtns" class="row skill-row"></div>
+        <div class="row dock-opts">
+          <label class="field">技能目标
+            <select id="skillTargetSel"></select>
+          </label>
+          <label class="field" id="bladeField">绯秋用刀
+            <select id="bladeSel">
+              <option value="niu">丹生谷（火）</option>
+              <option value="naruto">鳴門（冰）</option>
+            </select>
+          </label>
+        </div>
+      </div>
+      <div class="dock-inspect">
+        <div class="dock-head">
+          <h2>选中</h2>
+          <button class="btn small" id="btnOpenEditor2">详细编辑</button>
+        </div>
+        <div id="inspectPane" class="inspect-pane">点战场上的单位。</div>
+      </div>
+      <div class="dock-log">
+        <div class="dock-head">
+          <h2>日志</h2>
+          <button class="btn small" id="btnLogPrev">上页</button>
+          <span id="logPageLabel" class="hint">第 1 回合</span>
+          <button class="btn small" id="btnLogNext">下页</button>
+          <button class="btn small danger" id="btnLogClear">清除</button>
+        </div>
+        <div id="result" class="result log-view">本回合日志会一直往下记。</div>
+      </div>
+    </section>
+  </main>
+
+  <div id="editorModal" class="modal hidden" aria-hidden="true">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h2>编辑单位</h2>
+        <button class="btn small" id="btnCloseEditor">关闭</button>
+      </div>
+      <div class="panel-body" id="unitEditor">
+        <p class="hint">先在战场里点一个单位。</p>
+      </div>
+    </div>
+  </div>
+
+  <div id="attackModal" class="modal hidden" aria-hidden="true">
+    <div class="modal-card modal-wide">
+      <div class="modal-head">
+        <h2>手动攻击</h2>
+        <button class="btn small" id="btnCloseAttack">关闭</button>
+      </div>
+      <div class="panel-body">
+          <div class="row">
+            <label class="field">攻击者
+              <select id="attackerSel"></select>
+            </label>
+            <label class="field">受击者
+              <select id="targetSel"></select>
+            </label>
+            <label class="field">ATK
+              <input id="atk" type="number" step="0.1" value="10" />
+            </label>
+            <label class="field">伤害倍率
+              <input id="mult" type="number" step="0.1" value="1" />
+            </label>
+            <label class="field">固定加成
+              <input id="flat" type="number" step="0.1" value="0" />
+            </label>
+            <label class="field">骰子数
+              <input id="diceN" type="number" min="0" value="1" />
+            </label>
+            <label class="field">骰面子
+              <input id="diceS" type="number" min="0" value="4" />
+            </label>
+            <label class="field">骰子加值
+              <input id="diceB" type="number" value="0" />
+            </label>
+            <label class="field">骰子用法
+              <select id="diceMode">
+                <option value="roll" selected>现在掷骰</option>
+                <option value="expect">用期望值</option>
+                <option value="manual">手动填结果</option>
+              </select>
+            </label>
+            <label class="field">骰子结果（手动）
+              <input id="diceManual" type="number" value="0" />
+            </label>
+            <label class="field">属性
+              <select id="element">
+                <option value="physical">物理</option>
+                <option value="fire">火</option>
+                <option value="acid">酸</option>
+                <option value="electric">电</option>
+                <option value="ice">冰</option>
+                <option value="energy">能量</option>
+                <option value="harmonic">谐波</option>
+              </select>
+            </label>
+            <label class="field">基础击破
+              <input id="baseBreak" type="number" step="1" value="1" />
+            </label>
+            <label class="field">攻击次数
+              <input id="hits" type="number" min="1" value="1" />
+            </label>
+            <label class="field">攻击距离类型
+              <select id="atkRange">
+                <option value="melee">近距离攻击</option>
+                <option value="ranged">远距离攻击</option>
+                <option value="any">任意距离</option>
+              </select>
+            </label>
+            <label class="field">格挡结果
+              <select id="blockResult">
+                <option value="none">无格挡</option>
+                <option value="assistOk">协助格挡成功（免伤，架势最少留 1）</option>
+                <option value="bareOk">空手格挡成功（一半伤害）</option>
+                <option value="fail">格挡失败</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="section-title">攻击词条 / 情境</div>
+          <div class="chk" id="atkFlags">
+            <label><input type="checkbox" id="fPierce" /> 穿刺（打次外层）</label>
+            <label><input type="checkbox" id="fSmash" /> 猛击（击破×2，自己吃一半击破）</label>
+            <label><input type="checkbox" id="fWeak" /> 弱点特效</label>
+            <label><input type="checkbox" id="fAction" checked /> 攻击行动（飞行单位减半）</label>
+            <label><input type="checkbox" id="fAssist" /> 协助攻击（不可格挡）</label>
+            <label><input type="checkbox" id="fAoe" /> AOE</label>
+            <label><input type="checkbox" id="fDoubleDeal" /> 造成伤害翻倍</label>
+            <label><input type="checkbox" id="fDoubleTake" /> 目标受伤翻倍</label>
+            <label><input type="checkbox" id="fDR50" /> 目标本回合减伤 +50%</label>
+            <label><input type="checkbox" id="fImmune" /> 目标免疫伤害与击破</label>
+            <label><input type="checkbox" id="fJunAdd" /> 千钧：再 +0.2 倍率</label>
+            <label><input type="checkbox" id="fDopplerCloser" /> 多普勒：接近敌人</label>
+            <label><input type="checkbox" id="fDopplerFarther" /> 多普勒：远离敌人</label>
+            <label><input type="checkbox" id="fFx_combust" /> 爆燃</label>
+            <label><input type="checkbox" id="fFx_icebreak" /> 破冰</label>
+            <label><input type="checkbox" id="fFx_bolt" /> 雷击</label>
+            <label><input type="checkbox" id="fFx_etch" /> 蚀刻</label>
+            <label><input type="checkbox" id="fFx_backflow" /> 倒流</label>
+            <label><input type="checkbox" id="fFx_inertia" /> 惯性</label>
+            <label><input type="checkbox" id="fFx_diffract" /> 衍射</label>
+          </div>
+
+          <div class="row" style="margin-top:12px">
+            <button class="btn primary" id="btnCalc">计算这次攻击</button>
+            <button class="btn ok" id="btnApply">把结果应用到受击者</button>
+            <button class="btn" id="btnFillAtk">用攻击者 ATK 填入</button>
+          </div>
+          <p class="hint" id="distHint"></p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="backstageModal" class="modal hidden" aria-hidden="true">
+    <div class="modal-card modal-wide">
+      <div class="modal-head">
+        <h2>后台 · 主持人</h2>
+        <button class="btn small" id="btnCloseBackstage">关闭</button>
+      </div>
+      <div class="panel-body">
+        <p class="hint">改任何单位的血量、架势，或安排一次攻击 / 环境伤害。等级、经验、六维、坚毅生命也在这里。</p>
+        <div id="backstageBody"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="koltSwapModal" class="modal hidden" aria-hidden="true">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h2>更换刀头</h2>
+      </div>
+      <div class="panel-body">
+        <p class="hint" id="koltSwapText">可以选择不切换，或切换后对同区一名敌人造成 0.5atk。</p>
+        <div id="koltSwapBtns" class="row"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="assistModal" class="modal hidden" aria-hidden="true">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h2>协助攻击</h2>
+        <button class="btn small" id="btnAssistSkip">不发动</button>
+      </div>
+      <div class="panel-body">
+        <p class="hint" id="assistModalText">敌人失衡，其他玩家角色可以发动协助攻击。</p>
+        <div id="assistModalBtns" class="row"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="blockModal" class="modal hidden" aria-hidden="true">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h2>协助格挡</h2>
+        <button class="btn small" id="btnBlockSkip">不格挡</button>
+      </div>
+      <div class="panel-body">
+        <p class="hint" id="blockModalText">同区域有人可以消耗附赠行动格挡。</p>
+        <div id="blockModalBtns" class="row"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="playerModal" class="modal hidden" aria-hidden="true">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h2>加入玩家</h2>
+        <button class="btn small" id="btnClosePlayer">关闭</button>
+      </div>
+      <div class="panel-body">
+        <div class="row">
+          <label class="field">名字<input id="pcName" placeholder="例如 夕" /></label>
+          <label class="field">等级<input id="pcLv" type="number" min="1" value="1" /></label>
+          <label class="field">出场区域
+            <select id="pcZone">
+              <option value="1">1 区</option>
+              <option value="2">2 区</option>
+              <option value="3">3 区</option>
+            </select>
+          </label>
+          <label class="field">ATK<input id="pcAtk" type="number" value="5" /></label>
+          <label class="field">架势 DEF<input id="pcDef" type="number" value="4" /></label>
+          <label class="field">攻击距离
+            <select id="pcRange">
+              <option value="any">任意</option>
+              <option value="melee">近距离</option>
+              <option value="ranged">远距离</option>
+            </select>
+          </label>
+          <label class="field">常用属性
+            <select id="pcElem">
+              <option value="physical">物理</option>
+              <option value="fire">火</option>
+              <option value="acid">酸</option>
+              <option value="electric">电</option>
+              <option value="ice">冰</option>
+              <option value="energy">能量</option>
+              <option value="harmonic">谐波</option>
+            </select>
+          </label>
+        </div>
+        <div class="chk" style="margin:8px 0">
+          <label><input id="pcFly" type="checkbox" /> 飞行</label>
+        </div>
+        <div class="section-title">血量层（上 = 最外层）</div>
+        <div id="pcLayers"></div>
+        <div class="row">
+          <button class="btn small" id="pcAddLayer">加一层</button>
+        </div>
+        <div class="hr"></div>
+        <div class="section-title">模板角色</div>
+        <div class="row">
+          <label class="field" style="min-width:240px">选择角色
+            <select id="liveKitSel"></select>
+          </label>
+          <button class="btn primary" id="btnAddLiveKit">从模板加入战场</button>
+        </div>
+        <p class="hint">夕夏 / 川川以及实况组角色都在这里。武器人用技能「唤出」上场。</p>
+        <div class="row" style="margin-top:10px">
+          <button class="btn primary" id="btnAddPlayer">加入战场</button>
+          <button class="btn ok" id="btnSavePlayer">保存到卡组</button>
+          <button class="btn" id="btnSaveSelected">把当前选中存进卡组</button>
+        </div>
+        <div class="hr"></div>
+        <div class="row">
+          <label class="field" style="min-width:220px">已保存卡组
+            <select id="rosterSel"></select>
+          </label>
+          <button class="btn" id="btnLoadRoster">从卡组加入战场</button>
+          <button class="btn" id="btnEditRoster">载入到表单</button>
+          <button class="btn danger" id="btnDelRoster">删除这张卡</button>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button class="btn small" id="btnExportRoster">导出卡组 JSON</button>
+          <button class="btn small" id="btnImportRoster">导入卡组 JSON</button>
+          <input id="rosterFile" type="file" accept="application/json,.json" hidden />
+        </div>
+        <p class="hint" id="rosterHint">卡组保存在本浏览器里；导出 JSON 后换电脑也能用。</p>
+      </div>
+    </div>
+  </div>
+
+  <script src="engine.js"></script>
+  <script src="party.js"></script>
+  <script src="props.js"></script>
+  <script src="enemies.js"></script>
+  <script src="growth.js"></script>
+  <script src="items.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
