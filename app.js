@@ -1,5 +1,22 @@
 const ROSTER_KEY = "anterscale-roster";
 
+/* ---------- 宿主：网页 / 无界面 ----------
+ * 规则只经由这几个函数碰网页。没有网页时（Node 测试、批量模拟）：
+ *   uiEl       返回 null
+ *   hostValue  读 state.inputs[id]，再没有就用默认值
+ *   界面函数（render…、弹窗）开头用 HAS_DOM 直接跳过
+ * 浏览器里行为与原来完全一致。 */
+const HAS_DOM = typeof document !== "undefined";
+function uiEl(id) {
+  return HAS_DOM ? document.getElementById(id) : null;
+}
+function hostValue(id, fallback) {
+  const el = uiEl(id);
+  if (el && el.value !== undefined) return el.value;
+  const inp = (typeof state !== "undefined" && state.inputs) || {};
+  return inp[id] != null ? inp[id] : fallback;
+}
+
 const state = {
   zoneMode: 2,
   partySize: 2,
@@ -81,7 +98,7 @@ function setWeather(kind, opts) {
     return `天气被「${state.weatherLock}」锁定，无法覆盖。`;
   }
   state.weather = kind;
-  const sel = document.getElementById("weather");
+  const sel = uiEl("weather");
   if (sel) sel.value = kind;
   if (opts.lock) state.weatherLock = opts.lock;
   if (opts.unlock) state.weatherLock = null;
@@ -125,7 +142,8 @@ function undo() {
   state.units = prev.units;
   state.fields = prev.fields;
   state.phaseStep = prev.phaseStep;
-  document.getElementById("phaseStep").value = String(state.phaseStep);
+  const ps = uiEl("phaseStep");
+  if (ps) ps.value = String(state.phaseStep);
   renderAll();
 }
 
@@ -134,6 +152,7 @@ function unitById(id) {
 }
 
 function renderAll() {
+  if (!HAS_DOM) return;
   applyTheme();
   renderZones();
   renderEditor();
@@ -157,25 +176,27 @@ function fieldThemeClass(f) {
 }
 
 function applyTheme() {
-  const pl = document.getElementById("phaseLabel");
+  if (!HAS_DOM) return;
+  const pl = uiEl("phaseLabel");
   if (pl) pl.textContent = "回合阶段：" + phaseLabelText();
-  const turnBtn = document.getElementById("btnTurnEnd");
+  const turnBtn = uiEl("btnTurnEnd");
   if (turnBtn) {
     if (!state.combatStarted) turnBtn.textContent = "开始战斗";
     else turnBtn.textContent = state.combatPhase === "enemy" ? "结束敌人回合" : "结束玩家回合";
   }
-  const startBtn = document.getElementById("btnStartCombat");
+  const startBtn = uiEl("btnStartCombat");
   if (startBtn) {
     startBtn.disabled = !!state.combatStarted;
     startBtn.textContent = state.combatStarted ? "战斗进行中" : "开始战斗";
   }
   document.body.setAttribute("data-weather", state.weather || "none");
-  const wl = document.getElementById("weatherLock");
+  const wl = uiEl("weatherLock");
   if (wl) wl.checked = !!state.weatherLock;
 }
 
 function renderInspect() {
-  const box = document.getElementById("inspectPane");
+  if (!HAS_DOM) return;
+  const box = uiEl("inspectPane");
   if (!box) return;
   const u = unitById(state.selectedId) || unitById(state.attackerId);
   if (!u) { box.innerHTML = "点战场上的单位。"; return; }
@@ -188,7 +209,8 @@ function renderInspect() {
 }
 
 function renderZones() {
-  const root = document.getElementById("zones");
+  if (!HAS_DOM) return;
+  const root = uiEl("zones");
   root.className = "zones z" + state.zoneMode;
   const n = Number(state.zoneMode);
   root.innerHTML = "";
@@ -803,9 +825,9 @@ function clearUnitSelection() {
   state.attackerId = null;
   state.targetId = null;
   state.pickActor = false;
-  const st = document.getElementById("skillTargetSel");
-  const as = document.getElementById("attackerSel");
-  const ts = document.getElementById("targetSel");
+  const st = uiEl("skillTargetSel");
+  const as = uiEl("attackerSel");
+  const ts = uiEl("targetSel");
   if (st) st.value = "";
   if (as) as.value = "";
   if (ts) ts.value = "";
@@ -835,9 +857,9 @@ function onUnitClick(id) {
   const actor = unitById(state.attackerId);
   if (actor && actor.suggest) fillFromSuggest(actor);
   renderAll();
-  const st = document.getElementById("skillTargetSel");
-  const as = document.getElementById("attackerSel");
-  const ts = document.getElementById("targetSel");
+  const st = uiEl("skillTargetSel");
+  const as = uiEl("attackerSel");
+  const ts = uiEl("targetSel");
   if (as && state.attackerId) as.value = state.attackerId;
   if (st && state.targetId) st.value = state.targetId;
   if (ts && state.targetId) ts.value = state.targetId;
@@ -860,6 +882,7 @@ function optionExists(el, value) {
 }
 
 function renderSelects() {
+  if (!HAS_DOM) return;
   const validIds = new Set(fieldUnits().map(u => u.id));
   (state.props || []).forEach(p => validIds.add("prop:" + p.id));
   Object.keys(state.gaps || {}).forEach(k => {
@@ -871,7 +894,7 @@ function renderSelects() {
   if (state.selectedId && !validIds.has(state.selectedId)) state.selectedId = null;
 
   const fill = (sel, cur) => {
-    const el = document.getElementById(sel);
+    const el = uiEl(sel);
     if (!el) return;
     const unitOpts = fieldUnits().map(u =>
       `<option value="${u.id}">${escapeHtml(u.name)} @${u.zone}区</option>`).join("");
@@ -886,7 +909,7 @@ function renderSelects() {
   };
   fill("attackerSel", state.attackerId);
   fill("targetSel", state.targetId);
-  const st = document.getElementById("skillTargetSel");
+  const st = uiEl("skillTargetSel");
   if (st) {
     st.innerHTML = `<option value="">（无）</option>` + fieldUnits().map(u =>
       `<option value="${u.id}">${escapeHtml(u.name)} @${u.zone}区</option>`).join("");
@@ -896,9 +919,10 @@ function renderSelects() {
 }
 
 function renderDist() {
+  if (!HAS_DOM) return;
   const a = unitById(state.attackerId);
   const t = unitById(state.targetId);
-  const hint = document.getElementById("distHint");
+  const hint = uiEl("distHint");
   if (!a || !t) { hint.textContent = "请选择攻击者与受击者。"; return; }
   const d = zoneDist(a.zone, t.zone, state.zoneMode);
   const isoA = state.fields[a.zone] && state.fields[a.zone].isolate;
@@ -925,7 +949,8 @@ function sandWindActionText(u) {
 }
 
 function renderEditor() {
-  const box = document.getElementById("unitEditor");
+  if (!HAS_DOM) return;
+  const box = uiEl("unitEditor");
   const u = unitById(state.selectedId);
   if (!u) { box.innerHTML = `<p class="hint">先在战场里点一个单位。</p>`; return; }
   box.innerHTML = `
@@ -1011,8 +1036,8 @@ function renderEditor() {
       <button class="btn ok small" id="saveThisCard">存进卡组</button>
     </div>
   `;
-  document.getElementById("edSelf").value = u.self || "none";
-  const moveBox = document.getElementById("edMoveBtns");
+  uiEl("edSelf").value = u.self || "none";
+  const moveBox = uiEl("edMoveBtns");
   const maxZ = Number(state.zoneMode);
   const z0 = Number(u.zone);
   [-1, 1].forEach(d => {
@@ -1026,15 +1051,15 @@ function renderEditor() {
   });
   drawLayers(u);
   const bind = (id, fn) => {
-    const el = document.getElementById(id);
+    const el = uiEl(id);
     if (!el) return;
     el.addEventListener("input", fn);
     el.addEventListener("change", fn);
   };
-  bind("edName", () => { u.name = document.getElementById("edName").value; renderZones(); renderSelects(); });
-  bind("edLv", () => u.level = Number(document.getElementById("edLv").value) || 1);
+  bind("edName", () => { u.name = uiEl("edName").value; renderZones(); renderSelects(); });
+  bind("edLv", () => u.level = Number(uiEl("edLv").value) || 1);
   bind("edZone", () => {
-    const dest = Number(document.getElementById("edZone").value);
+    const dest = Number(uiEl("edZone").value);
     if (Math.abs(dest - Number(u.zone)) === 1) doMove(u, dest);
     else {
       snapshot();
@@ -1043,28 +1068,28 @@ function renderEditor() {
       renderAll();
     }
   });
-  bind("edAtk", () => u.atk = Number(document.getElementById("edAtk").value) || 0);
-  bind("edDef", () => { u.def = Number(document.getElementById("edDef").value) || 0; renderZones(); });
-  bind("edDefMax", () => u.defMax = Number(document.getElementById("edDefMax").value) || 0);
+  bind("edAtk", () => u.atk = Number(uiEl("edAtk").value) || 0);
+  bind("edDef", () => { u.def = Number(uiEl("edDef").value) || 0; renderZones(); });
+  bind("edDefMax", () => u.defMax = Number(uiEl("edDefMax").value) || 0);
   bind("edHE", () => {
-    u.highEnergy = Number(document.getElementById("edHE").value) || 0;
+    u.highEnergy = Number(uiEl("edHE").value) || 0;
     checkHighBoom(u);
     renderAll();
   });
-  bind("edFly", () => { u.flying = document.getElementById("edFly").checked; renderZones(); });
-  bind("edStun", () => { u.stunned = document.getElementById("edStun").checked; renderZones(); });
-  bind("stBurn", () => u.statuses.burn = Number(document.getElementById("stBurn").value) || 0);
+  bind("edFly", () => { u.flying = uiEl("edFly").checked; renderZones(); });
+  bind("edStun", () => { u.stunned = uiEl("edStun").checked; renderZones(); });
+  bind("stBurn", () => u.statuses.burn = Number(uiEl("stBurn").value) || 0);
   ["Shock","Corr","Frost","Wave","High","Reso","Un","Weak","Insp","Hide","Adv"].forEach(key => {
     const map = {
       Shock: ["shock"], Corr: ["corr"], Frost: ["frostbite"], Wave: ["shockwave"],
       High: ["high"], Reso: ["reso"], Un: ["unstable"], Weak: ["weak"], Insp: ["inspire"],
       Hide: ["hide"], Adv: ["advantage"]
     };
-    bind("st" + key, () => { u.statuses[map[key][0]] = document.getElementById("st" + key).checked; });
+    bind("st" + key, () => { u.statuses[map[key][0]] = uiEl("st" + key).checked; });
   });
   const imap = { inMelt: "melt", inSting: "sting", inOver: "overload", inShift: "shift", inSpread: "spread", inRef: "refract" };
-  Object.keys(imap).forEach(id => bind(id, () => { u.instant[imap[id]] = document.getElementById(id).checked; }));
-  const neu = document.getElementById("btnNeutralize");
+  Object.keys(imap).forEach(id => bind(id, () => { u.instant[imap[id]] = uiEl(id).checked; }));
+  const neu = uiEl("btnNeutralize");
   if (neu) neu.onclick = () => {
     snapshot();
     const notes = applyNeutralize(u);
@@ -1072,16 +1097,16 @@ function renderEditor() {
     renderAll();
   };
   bind("edSelf", () => {
-    u.self = document.getElementById("edSelf").value;
+    u.self = uiEl("edSelf").value;
     if (u.self === "burn") u.selfBurnStacks = Math.max(1, Number(u.selfBurnStacks) || 1);
     else u.selfBurnStacks = 0;
     renderZones();
   });
-  bind("edLatest", () => u.statuses.latestElement = document.getElementById("edLatest").value || null);
+  bind("edLatest", () => u.statuses.latestElement = uiEl("edLatest").value || null);
   ["combust","icebreak","bolt","etch","backflow","inertia","diffract"].forEach(id => {
     bind("fxHang_" + id, () => {
       u.resources = u.resources || {};
-      const on = document.getElementById("fxHang_" + id).checked;
+      const on = uiEl("fxHang_" + id).checked;
       let cur = hungAtkFx(u);
       if (on && cur.indexOf(id) < 0) cur.push(id);
       if (!on) cur = cur.filter(x => x !== id);
@@ -1089,11 +1114,11 @@ function renderEditor() {
       renderZones();
     });
   });
-  document.getElementById("addLayer").onclick = () => {
+  uiEl("addLayer").onclick = () => {
     u.layers.push({ type: "flesh", current: 10, max: 10 });
     drawLayers(u); renderZones();
   };
-  document.getElementById("delUnit").onclick = () => {
+  uiEl("delUnit").onclick = () => {
     snapshot();
     state.units = state.units.filter(x => x.id !== u.id);
     if (state.selectedId === u.id) state.selectedId = null;
@@ -1101,7 +1126,7 @@ function renderEditor() {
     if (state.targetId === u.id) state.targetId = null;
     renderAll();
   };
-  document.getElementById("copyUnit").onclick = () => {
+  uiEl("copyUnit").onclick = () => {
     snapshot();
     const c = clone(u);
     c.id = uid();
@@ -1109,12 +1134,13 @@ function renderEditor() {
     state.units.push(c);
     renderAll();
   };
-  document.getElementById("fullDef").onclick = () => { u.def = u.defMax; renderAll(); };
-  document.getElementById("saveThisCard").onclick = () => saveUnitToRoster(u, true);
+  uiEl("fullDef").onclick = () => { u.def = u.defMax; renderAll(); };
+  uiEl("saveThisCard").onclick = () => saveUnitToRoster(u, true);
 }
 
 function drawLayers(u) {
-  const box = document.getElementById("edLayers");
+  if (!HAS_DOM) return;
+  const box = uiEl("edLayers");
   if (!box) return;
   box.innerHTML = u.layers.map((l, i) => `
     <div class="layer-row">
@@ -1140,45 +1166,45 @@ function drawLayers(u) {
 }
 
 function fillFromSuggest(u) {
-  document.getElementById("atk").value = u.atk;
+  uiEl("atk").value = u.atk;
   if (u.suggest) {
-    document.getElementById("element").value = u.suggest.element;
-    document.getElementById("diceN").value = u.suggest.dice[0];
-    document.getElementById("diceS").value = u.suggest.dice[1];
-    document.getElementById("flat").value = u.suggest.flat || 0;
-    document.getElementById("baseBreak").value = u.suggest.baseBreak || 1;
-    document.getElementById("atkRange").value = u.range || "melee";
+    uiEl("element").value = u.suggest.element;
+    uiEl("diceN").value = u.suggest.dice[0];
+    uiEl("diceS").value = u.suggest.dice[1];
+    uiEl("flat").value = u.suggest.flat || 0;
+    uiEl("baseBreak").value = u.suggest.baseBreak || 1;
+    uiEl("atkRange").value = u.range || "melee";
   }
 }
 
 function collectFlags() {
   return {
-    pierce: document.getElementById("fPierce").checked,
-    smash: document.getElementById("fSmash").checked,
-    weak: document.getElementById("fWeak").checked,
-    action: document.getElementById("fAction").checked,
-    assist: document.getElementById("fAssist").checked,
-    aoe: document.getElementById("fAoe").checked,
-    doubleDeal: document.getElementById("fDoubleDeal").checked,
-    doubleTake: document.getElementById("fDoubleTake").checked,
-    dr50: document.getElementById("fDR50").checked,
-    immune: document.getElementById("fImmune").checked,
-    junAdd: document.getElementById("fJunAdd").checked,
-    dopplerCloser: document.getElementById("fDopplerCloser").checked,
-    dopplerFarther: document.getElementById("fDopplerFarther").checked,
-    block: document.getElementById("blockResult").value
+    pierce: uiEl("fPierce").checked,
+    smash: uiEl("fSmash").checked,
+    weak: uiEl("fWeak").checked,
+    action: uiEl("fAction").checked,
+    assist: uiEl("fAssist").checked,
+    aoe: uiEl("fAoe").checked,
+    doubleDeal: uiEl("fDoubleDeal").checked,
+    doubleTake: uiEl("fDoubleTake").checked,
+    dr50: uiEl("fDR50").checked,
+    immune: uiEl("fImmune").checked,
+    junAdd: uiEl("fJunAdd").checked,
+    dopplerCloser: uiEl("fDopplerCloser").checked,
+    dopplerFarther: uiEl("fDopplerFarther").checked,
+    block: uiEl("blockResult").value
   };
 }
 
 function diceValueNow() {
-  const n = Number(document.getElementById("diceN").value) || 0;
-  const s = Number(document.getElementById("diceS").value) || 0;
-  const b = Number(document.getElementById("diceB").value) || 0;
-  const mode = document.getElementById("diceMode").value;
-  if (mode === "manual") return { value: Number(document.getElementById("diceManual").value) || 0, text: "手动 " + document.getElementById("diceManual").value };
+  const n = Number(uiEl("diceN").value) || 0;
+  const s = Number(uiEl("diceS").value) || 0;
+  const b = Number(uiEl("diceB").value) || 0;
+  const mode = uiEl("diceMode").value;
+  if (mode === "manual") return { value: Number(uiEl("diceManual").value) || 0, text: "手动 " + uiEl("diceManual").value };
   if (mode === "roll") {
     const r = rollDice(n, s, b);
-    document.getElementById("diceManual").value = r.total;
+    uiEl("diceManual").value = r.total;
     return { value: r.total, text: `掷出 ${r.parts.join("+")}${b ? (b >= 0 ? "+" : "") + b : ""} = ${r.total}` };
   }
   const v = diceExpect(n, s, b);
@@ -1194,13 +1220,13 @@ function currentWeatherFor(unit) {
 }
 
 function doCalc() {
-  const attacker = unitById(document.getElementById("attackerSel").value);
-  const targetTok = document.getElementById("targetSel").value;
+  const attacker = unitById(uiEl("attackerSel").value);
+  const targetTok = uiEl("targetSel").value;
   if (targetTok && (String(targetTok).indexOf("gap:") === 0 || String(targetTok).indexOf("prop:") === 0)) {
     hitStructure(attacker, targetTok, {
-      element: document.getElementById("element").value,
-      dmg: Number(document.getElementById("atk").value) * Number(document.getElementById("mult").value) + Number(document.getElementById("flat").value),
-      brk: Number(document.getElementById("baseBreak").value) || 1
+      element: uiEl("element").value,
+      dmg: Number(uiEl("atk").value) * Number(uiEl("mult").value) + Number(uiEl("flat").value),
+      brk: Number(uiEl("baseBreak").value) || 1
     });
     return;
   }
@@ -1210,9 +1236,9 @@ function doCalc() {
   let dice = diceValueNow();
   const flags = collectFlags();
   if (shouldDiceMin(attacker)) {
-    const n = Number(document.getElementById("diceN").value) || 0;
-    const b = Number(document.getElementById("diceB").value) || 0;
-    if (document.getElementById("diceMode").value !== "manual") {
+    const n = Number(uiEl("diceN").value) || 0;
+    const b = Number(uiEl("diceB").value) || 0;
+    if (uiEl("diceMode").value !== "manual") {
       dice = { value: n + b, text: `决一死战取最低 ${n}×1${b ? "+" + b : ""} = ${n + b}` };
     }
     flags.diceMin = true;
@@ -1222,13 +1248,13 @@ function doCalc() {
   const dist = attacker && target ? zoneDist(attacker.zone, target.zone, state.zoneMode) : 0;
   const res = resolveAttack({
     attacker, target,
-    atk: Number(document.getElementById("atk").value),
-    mult: Number(document.getElementById("mult").value),
-    flat: Number(document.getElementById("flat").value),
+    atk: Number(uiEl("atk").value),
+    mult: Number(uiEl("mult").value),
+    flat: Number(uiEl("flat").value),
     diceValue: dice.value,
-    element: document.getElementById("element").value,
-    baseBreak: Number(document.getElementById("baseBreak").value),
-    hits: Number(document.getElementById("hits").value),
+    element: uiEl("element").value,
+    baseBreak: Number(uiEl("baseBreak").value),
+    hits: Number(uiEl("hits").value),
     flags,
     weather: currentWeatherFor(target),
     phaseStep: Number(state.phaseStep),
@@ -1238,7 +1264,7 @@ function doCalc() {
     highA: attacker && state.fields[attacker.zone] && state.fields[attacker.zone].highland,
     highT: target && state.fields[target.zone] && state.fields[target.zone].highland,
     dist,
-    atkRange: document.getElementById("atkRange").value
+    atkRange: uiEl("atkRange").value
   });
   res.diceText = dice.text;
   res.dist = dist;
@@ -1271,8 +1297,8 @@ function paintResult(res, attacker, target) {
 
 function doApply() {
   if (!state.lastResult || !state.lastResult.ok) { doCalc(); }
-  const attacker = unitById(document.getElementById("attackerSel").value);
-  const target = unitById(document.getElementById("targetSel").value);
+  const attacker = unitById(uiEl("attackerSel").value);
+  const target = unitById(uiEl("targetSel").value);
   if (!target || !state.lastResult) return;
   snapshot();
   const extra = applyCombat(target, state.lastResult, attacker);
@@ -1300,7 +1326,7 @@ function advancePhaseWeather() {
   const notes = [];
   if (state.weather !== "phase") return notes;
   state.phaseStep = (Number(state.phaseStep) + 1) % 4;
-  const sel = document.getElementById("phaseStep");
+  const sel = uiEl("phaseStep");
   if (sel) sel.value = String(state.phaseStep);
   notes.push(`相位天气进入下一阶段：${phaseWeatherName(state.phaseStep)}（${state.phaseStep}）。`);
   return notes;
@@ -2108,12 +2134,13 @@ function loadRoster() {
 function persistRoster() {
   try { localStorage.setItem(ROSTER_KEY, JSON.stringify(state.roster)); } catch (e) {}
   renderRosterSel();
-  const hint = document.getElementById("rosterHint");
+  const hint = uiEl("rosterHint");
   if (hint) hint.textContent = `卡组 ${state.roster.length} 张。保存在本浏览器；导出 JSON 可备份。`;
 }
 
 function renderRosterSel() {
-  const sel = document.getElementById("rosterSel");
+  if (!HAS_DOM) return;
+  const sel = uiEl("rosterSel");
   if (!sel) return;
   const keep = sel.value;
   if (!state.roster.length) {
@@ -2127,7 +2154,8 @@ function renderRosterSel() {
 }
 
 function renderPcLayers() {
-  const box = document.getElementById("pcLayers");
+  if (!HAS_DOM) return;
+  const box = uiEl("pcLayers");
   if (!box) return;
   box.innerHTML = state.pcLayers.map((l, i) => `
     <div class="layer-row">
@@ -2154,14 +2182,14 @@ function renderPcLayers() {
 }
 
 function readPlayerForm() {
-  const name = (document.getElementById("pcName").value || "").trim() || "未命名玩家";
-  const level = Number(document.getElementById("pcLv").value) || 1;
-  const zone = Number(document.getElementById("pcZone").value) || 1;
-  const atk = Number(document.getElementById("pcAtk").value) || 0;
-  const def = Number(document.getElementById("pcDef").value) || 0;
-  const range = document.getElementById("pcRange").value || "any";
-  const element = document.getElementById("pcElem").value || "physical";
-  const flying = document.getElementById("pcFly").checked;
+  const name = (uiEl("pcName").value || "").trim() || "未命名玩家";
+  const level = Number(uiEl("pcLv").value) || 1;
+  const zone = Number(uiEl("pcZone").value) || 1;
+  const atk = Number(uiEl("pcAtk").value) || 0;
+  const def = Number(uiEl("pcDef").value) || 0;
+  const range = uiEl("pcRange").value || "any";
+  const element = uiEl("pcElem").value || "physical";
+  const flying = uiEl("pcFly").checked;
   const layers = (state.pcLayers.length ? state.pcLayers : [{ type: "flesh", current: 20, max: 20 }]).map(l => ({
     type: l.type,
     hp: Number(l.max) || Number(l.current) || 1
@@ -2186,14 +2214,14 @@ function unitFromForm() {
 }
 
 function fillFormFromCard(card) {
-  document.getElementById("pcName").value = card.name || "";
-  document.getElementById("pcLv").value = card.level || 1;
-  document.getElementById("pcZone").value = String(card.zone || 1);
-  document.getElementById("pcAtk").value = card.atk || 0;
-  document.getElementById("pcDef").value = card.defMax || card.def || 0;
-  document.getElementById("pcRange").value = card.range || "any";
-  document.getElementById("pcElem").value = (card.suggest && card.suggest.element) || "physical";
-  document.getElementById("pcFly").checked = !!card.flying;
+  uiEl("pcName").value = card.name || "";
+  uiEl("pcLv").value = card.level || 1;
+  uiEl("pcZone").value = String(card.zone || 1);
+  uiEl("pcAtk").value = card.atk || 0;
+  uiEl("pcDef").value = card.defMax || card.def || 0;
+  uiEl("pcRange").value = card.range || "any";
+  uiEl("pcElem").value = (card.suggest && card.suggest.element) || "physical";
+  uiEl("pcFly").checked = !!card.flying;
   state.pcLayers = (card.layers || []).map(l => ({
     type: l.type,
     current: Number(l.max != null ? l.max : l.current) || 0,
@@ -2259,25 +2287,26 @@ function saveFormToRoster() {
 }
 
 function setRosterHint(text) {
-  const hint = document.getElementById("rosterHint");
+  if (!HAS_DOM) return;
+  const hint = uiEl("rosterHint");
   if (hint) hint.textContent = text;
 }
 
 function bindRosterUi() {
   renderPcLayers();
   renderRosterSel();
-  document.getElementById("pcAddLayer").onclick = () => {
+  uiEl("pcAddLayer").onclick = () => {
     state.pcLayers.push({ type: "flesh", current: 10, max: 10 });
     renderPcLayers();
   };
-  const liveSel = document.getElementById("liveKitSel");
+  const liveSel = uiEl("liveKitSel");
   if (liveSel) {
     liveSel.innerHTML = livePartyCards().filter(c => !c.weaponOf).map(c =>
       `<option value="${c.kit}">${escapeHtml(c.name)} · ${escapeHtml(c.note || c.kit)}</option>`).join("");
   }
-  const addKitBtn = document.getElementById("btnAddLiveKit");
+  const addKitBtn = uiEl("btnAddLiveKit");
   if (addKitBtn) addKitBtn.onclick = () => {
-    const kit = document.getElementById("liveKitSel").value;
+    const kit = uiEl("liveKitSel").value;
     const card = livePartyCards().find(c => c.kit === kit);
     if (!card) return;
     if (state.units.some(u => u.kit === kit && !u.hidden)) {
@@ -2285,7 +2314,7 @@ function bindRosterUi() {
       return;
     }
     snapshot();
-    const zone = Number(document.getElementById("pcZone").value) || 1;
+    const zone = Number(uiEl("pcZone").value) || 1;
     const u = spawnLiveCard(card, zone);
     u.weaponHeld = true;
     u.atk = (u.personalAtk || 0) + (u.weaponAtk || 0);
@@ -2294,9 +2323,9 @@ function bindRosterUi() {
     state.attackerId = u.id;
     renderAll();
     setRosterHint(`已加入「${u.name}」到 ${zone} 区。用技能唤出武器人。`);
-    document.getElementById("playerModal").classList.add("hidden");
+    uiEl("playerModal").classList.add("hidden");
   };
-  document.getElementById("btnAddPlayer").onclick = () => {
+  uiEl("btnAddPlayer").onclick = () => {
     snapshot();
     const u = unitFromForm();
     state.units.push(u);
@@ -2304,15 +2333,15 @@ function bindRosterUi() {
     state.attackerId = u.id;
     renderAll();
     setRosterHint(`「${u.name}」已加入 ${u.zone} 区。若要下次直接用，再点「保存到卡组」。`);
-    document.getElementById("playerModal").classList.add("hidden");
+    uiEl("playerModal").classList.add("hidden");
   };
-  document.getElementById("btnSavePlayer").onclick = saveFormToRoster;
-  document.getElementById("btnSaveSelected").onclick = () => {
+  uiEl("btnSavePlayer").onclick = saveFormToRoster;
+  uiEl("btnSaveSelected").onclick = () => {
     const u = unitById(state.selectedId);
     saveUnitToRoster(u, true);
   };
-  document.getElementById("btnLoadRoster").onclick = () => {
-    const id = document.getElementById("rosterSel").value;
+  uiEl("btnLoadRoster").onclick = () => {
+    const id = uiEl("rosterSel").value;
     const card = state.roster.find(c => c.cardId === id);
     if (!card) { setRosterHint("先在卡组里选一张。"); return; }
     snapshot();
@@ -2322,24 +2351,24 @@ function bindRosterUi() {
     state.attackerId = u.id;
     renderAll();
     setRosterHint(`已从卡组加入「${u.name}」。`);
-    document.getElementById("playerModal").classList.add("hidden");
+    uiEl("playerModal").classList.add("hidden");
   };
-  document.getElementById("btnEditRoster").onclick = () => {
-    const id = document.getElementById("rosterSel").value;
+  uiEl("btnEditRoster").onclick = () => {
+    const id = uiEl("rosterSel").value;
     const card = state.roster.find(c => c.cardId === id);
     if (!card) return;
     fillFormFromCard(card);
     setRosterHint(`已把「${card.name}」载入表单，改完后点保存会覆盖同名卡。`);
   };
-  document.getElementById("btnDelRoster").onclick = () => {
-    const id = document.getElementById("rosterSel").value;
+  uiEl("btnDelRoster").onclick = () => {
+    const id = uiEl("rosterSel").value;
     const card = state.roster.find(c => c.cardId === id);
     if (!card) return;
     state.roster = state.roster.filter(c => c.cardId !== id);
     persistRoster();
     setRosterHint(`已删除「${card.name}」。`);
   };
-  document.getElementById("btnExportRoster").onclick = () => {
+  uiEl("btnExportRoster").onclick = () => {
     const blob = new Blob([JSON.stringify(state.roster, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
@@ -2348,8 +2377,8 @@ function bindRosterUi() {
     URL.revokeObjectURL(a.href);
     setRosterHint("已导出 anterscale-players.json。");
   };
-  document.getElementById("btnImportRoster").onclick = () => document.getElementById("rosterFile").click();
-  document.getElementById("rosterFile").onchange = (e) => {
+  uiEl("btnImportRoster").onclick = () => uiEl("rosterFile").click();
+  uiEl("rosterFile").onchange = (e) => {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
     const reader = new FileReader();
@@ -2532,7 +2561,7 @@ function destroyGap(key, g) {
     const fallTo = from === parts[0] ? parts[1] : parts[0];
     g.type = "open";
     g.hp = 0;
-    const lvEl = document.getElementById("propLevel");
+    const lvEl = uiEl("propLevel");
     const lv = Number(lvEl && lvEl.value) || 1;
     const diceN = 1 + dieStep(lv, 5);
     const r = takeDice(diceN, 10, 0);
@@ -3170,7 +3199,7 @@ function visibleEnemies(zone) {
 }
 
 function skillTarget() {
-  const drop = document.getElementById("skillTargetSel");
+  const drop = uiEl("skillTargetSel");
   const id = state.targetId || (drop && drop.value);
   return unitById(id);
 }
@@ -3182,7 +3211,7 @@ function propByRef(id) {
 }
 
 function skillTargetAny() {
-  const drop = document.getElementById("skillTargetSel");
+  const drop = uiEl("skillTargetSel");
   const id = state.targetId || (drop && drop.value);
   return unitById(id) || propByRef(id);
 }
@@ -3220,7 +3249,7 @@ function movablePropsInZone(zone) {
 }
 
 function selectedToken() {
-  const drop = document.getElementById("skillTargetSel");
+  const drop = uiEl("skillTargetSel");
   return state.targetId || (drop && drop.value) || "";
 }
 
@@ -3564,7 +3593,7 @@ function queueKoltSwap(actor) {
 
 function resolveKoltSwap(doSwap, targetId) {
   const job = (state.koltSwapQueue || []).shift();
-  const modal = document.getElementById("koltSwapModal");
+  const modal = uiEl("koltSwapModal");
   if (modal) modal.classList.add("hidden");
   if (!job) return;
   const k = unitById(job.actorId) || findKit("kolt", state.units);
@@ -3592,14 +3621,15 @@ function resolveKoltSwap(doSwap, targetId) {
 }
 
 function presentKoltSwapModal() {
-  const modal = document.getElementById("koltSwapModal");
+  if (!HAS_DOM) return;
+  const modal = uiEl("koltSwapModal");
   if (!modal) return;
   const job = (state.koltSwapQueue || [])[0];
   if (!job) { modal.classList.add("hidden"); return; }
   const k = unitById(job.actorId);
   if (!k) { state.koltSwapQueue.shift(); presentKoltSwapModal(); return; }
-  const box = document.getElementById("koltSwapBtns");
-  const text = document.getElementById("koltSwapText");
+  const box = uiEl("koltSwapBtns");
+  const text = uiEl("koltSwapText");
   const cur = (k.resources && k.resources.bit) === "acid" ? "酸液炮" : "电钻";
   const nxt = cur === "酸液炮" ? "电钻" : "酸液炮";
   if (text) text.textContent = `${k.name} 当前是${cur}。可以换成${nxt}，并对同区一名敌人打 0.5atk（近距离）。`;
@@ -3743,15 +3773,16 @@ function queueAssistAttack(breaker, broken) {
 }
 
 function presentAssistModal() {
+  if (!HAS_DOM) return;
   if (!state.assistQueue) state.assistQueue = [];
   if (!state.assistQueue.length) return;
   const job = state.assistQueue[0];
   const breaker = unitById(job.breakerId);
   const target = unitById(job.targetId);
   const list = eligibleAssisters(breaker, target);
-  const modal = document.getElementById("assistModal");
-  const text = document.getElementById("assistModalText");
-  const box = document.getElementById("assistModalBtns");
+  const modal = uiEl("assistModal");
+  const text = uiEl("assistModalText");
+  const box = uiEl("assistModalBtns");
   if (!modal || !box) return;
   if (job.vsPlayer) {
     text.textContent = `${target ? target.name : "玩家"} 陷入失衡。选择一名敌人发动协助攻击。飞碟触灵可以由自己造成的失衡接协助攻击。${breaker && breaker.kit !== "ufo_body" ? breaker.name + " 作为造成失衡者不能为自己这一击发动。" : ""}`;
@@ -3776,7 +3807,7 @@ function presentAssistModal() {
 
 function finishAssist(helperId, extra) {
   const job = (state.assistQueue || []).shift();
-  const modal = document.getElementById("assistModal");
+  const modal = uiEl("assistModal");
   if (modal) modal.classList.add("hidden");
   extra = extra || {};
   if (!job) return;
@@ -3802,7 +3833,7 @@ function finishAssist(helperId, extra) {
   const prevT = state.targetId;
   state.attackerId = helper.id;
   state.targetId = target.id;
-  const sid = document.getElementById("skillTargetSel");
+  const sid = uiEl("skillTargetSel");
   if (sid) sid.value = target.id;
   const sidSkill = job.vsPlayer
     ? (typeof enemyAssistSkillId === "function" ? enemyAssistSkillId(helper) : "en_aa")
@@ -4028,9 +4059,10 @@ function performAssistBlock(helper, target, attacker, forced) {
 }
 
 function openBlockModal(job) {
-  const modal = document.getElementById("blockModal");
-  const text = document.getElementById("blockModalText");
-  const box = document.getElementById("blockModalBtns");
+  if (!HAS_DOM) return;
+  const modal = uiEl("blockModal");
+  const text = uiEl("blockModalText");
+  const box = uiEl("blockModalBtns");
   const attacker = unitById(job.attackerId);
   const target = unitById(job.targetId);
   const helpers = eligibleBlockers(target);
@@ -4052,7 +4084,8 @@ function openBlockModal(job) {
 }
 
 function closeBlockModal() {
-  const modal = document.getElementById("blockModal");
+  if (!HAS_DOM) return;
+  const modal = uiEl("blockModal");
   if (modal) modal.classList.add("hidden");
 }
 
@@ -4088,6 +4121,7 @@ function finishBlock(helperId, forced) {
 }
 
 function presentBlockModal() {
+  if (!HAS_DOM) return;
   if (!state.blockQueue) state.blockQueue = [];
   if (!state.blockQueue.length) return;
   openBlockModal(state.blockQueue[0]);
@@ -4366,7 +4400,7 @@ function armAtkFx(attacker, flags) {
   const fromHang = hungAtkFx(attacker);
   const fromBox = [];
   ["combust","icebreak","bolt","etch","backflow","inertia","diffract"].forEach(id => {
-    const el = document.getElementById("fFx_" + id);
+    const el = uiEl("fFx_" + id);
     if (el && el.checked) fromBox.push(id);
   });
   const list = [];
@@ -4672,8 +4706,8 @@ function dealTo(attacker, target, opt) {
   let diceValue = opt.diceValue;
   if (diceValue == null) {
     const n = opt.diceN || 0, s = opt.diceS || 0, b = opt.diceB || 0;
-    const mode = document.getElementById("diceMode").value;
-    if (mode === "manual") diceValue = Number(document.getElementById("diceManual").value) || 0;
+    const mode = hostValue("diceMode", "roll");
+    if (mode === "manual") diceValue = Number(hostValue("diceManual", 0)) || 0;
     else if (n && s) {
       const r = takeDice(n, s, b);
       diceValue = r.total;
@@ -4949,7 +4983,8 @@ function heldHiakiBlade(h) {
 }
 
 function syncBladeSel() {
-  const sel = document.getElementById("bladeSel");
+  if (!HAS_DOM) return;
+  const sel = uiEl("bladeSel");
   const h = findKit("hiaki", state.units);
   if (!sel) return;
   const niuOut = !!(h && h.resources && h.resources.niuOut);
@@ -5104,13 +5139,16 @@ function defaultLinkedKits(kit) {
   })[kit] || [];
 }
 
-function loadLiveParty() {
+/** 载入队伍。kits 不给时读游戏的队伍配置（GAME.partyKits），再没有就用默认四人。
+ *  （计算器的按钮会把点击事件传进来，所以只认数组） */
+function loadLiveParty(kits) {
   snapshot();
   const keepEnemies = state.units.filter(u => !u.isPlayer && !u.weaponOf);
   state.units = keepEnemies.slice();
-  const want = (typeof window !== "undefined" && window.GAME && Array.isArray(window.GAME.partyKits) && window.GAME.partyKits.length)
-    ? window.GAME.partyKits
-    : ["ruby", "yuito", "hiaki", "tou"];
+  const want = Array.isArray(kits) && kits.length ? kits
+    : (typeof window !== "undefined" && window.GAME && Array.isArray(window.GAME.partyKits) && window.GAME.partyKits.length)
+      ? window.GAME.partyKits
+      : ["ruby", "yuito", "hiaki", "tou"];
   const players = livePartyCards().filter(c => !c.weaponOf && want.indexOf(c.kit) >= 0);
   players.forEach(c => {
     const u = spawnLiveCard(c, 1);
@@ -5122,7 +5160,7 @@ function loadLiveParty() {
   state.attackerId = ruby ? ruby.id : (state.units[0] && state.units[0].id);
   state.selectedId = state.attackerId;
   state.targetId = null;
-  const st = document.getElementById("skillTargetSel");
+  const st = uiEl("skillTargetSel");
   if (st) st.value = "";
   renderAll();
   paintSkillLog("已载入瑞比 / 结人 / 绯秋 / 灯。武器默认持在手上。用「唤出××」把武器人放到场上。");
@@ -5664,7 +5702,8 @@ function applyFlowPick(value) {
 }
 
 function renderSkillFlow() {
-  const pane = document.getElementById("skillFlowPane");
+  if (!HAS_DOM) return;
+  const pane = uiEl("skillFlowPane");
   if (!pane) return;
   const fl = state.skillFlow;
   if (!fl) { pane.classList.add("hidden"); pane.innerHTML = ""; return; }
@@ -5722,13 +5761,14 @@ function renderSkillFlow() {
 }
 
 function renderSkills() {
-  const box = document.getElementById("skillBtns");
-  const hint = document.getElementById("skillKitHint");
-  const res = document.getElementById("skillRes");
+  if (!HAS_DOM) return;
+  const box = uiEl("skillBtns");
+  const hint = uiEl("skillKitHint");
+  const res = uiEl("skillRes");
   if (!box) return;
   renderSkillFlow();
   syncBladeSel();
-  const bladeField = document.getElementById("bladeField");
+  const bladeField = uiEl("bladeField");
   const a0 = unitById(state.attackerId);
   if (bladeField) bladeField.style.display = a0 && a0.kit === "hiaki" ? "" : "none";
   const a = unitById(state.attackerId);
@@ -5890,7 +5930,7 @@ function spawnPopup(unit, spec) {
   state.floaters = (state.floaters || []).concat(item);
   setTimeout(() => {
     state.floaters = (state.floaters || []).filter(f => f.fid !== item.fid);
-    const el = document.getElementById("floater-" + item.fid);
+    const el = uiEl("floater-" + item.fid);
     if (el) el.remove();
   }, Math.ceil(dur * 1000) + 40);
 }
@@ -6150,6 +6190,7 @@ function popStatus(unit, key) {
 }
 
 function attachFloaters(wrap, unitId) {
+  if (!HAS_DOM) return;
   const now = Date.now();
   const list = (state.floaters || []).filter(f => f.unitId === unitId && now - f.born < f.dur * 1000);
   list.forEach(f => {
@@ -6215,8 +6256,9 @@ function clearLogs() {
 }
 
 function renderLog() {
-  const box = document.getElementById("result");
-  const lab = document.getElementById("logPageLabel");
+  if (!HAS_DOM) return;
+  const box = uiEl("result");
+  const lab = uiEl("logPageLabel");
   if (!box) return;
   const page = currentLogPage();
   if (lab) lab.textContent = `第 ${page.turn} 回合 · ${state.logIndex + 1}/${state.logPages.length}`;
@@ -6456,11 +6498,11 @@ function runSkill(id, optRun) {
     }
   }
   if (token && String(token).indexOf("gap:") === 0) {
-    hitStructure(a, token, { element: document.getElementById("element").value, dmg: effectiveAtk(a, state.units), brk: Number(document.getElementById("baseBreak").value) || 1 });
+    hitStructure(a, token, { element: hostValue("element", "physical"), dmg: effectiveAtk(a, state.units), brk: Number(hostValue("baseBreak", 1)) || 1 });
     return;
   }
   if (token && String(token).indexOf("prop:") === 0 && !isDisplaceSkill(id)) {
-    hitStructure(a, token, { element: document.getElementById("element").value, dmg: effectiveAtk(a, state.units), brk: Number(document.getElementById("baseBreak").value) || 1 });
+    hitStructure(a, token, { element: hostValue("element", "physical"), dmg: effectiveAtk(a, state.units), brk: Number(hostValue("baseBreak", 1)) || 1 });
     return;
   }
   snapshot();
@@ -7307,7 +7349,7 @@ function runSkill(id, optRun) {
       lines.push(...triggerOneStatus(tgt, a, key));
     } else if (id === "role_spread") {
       const src = t;
-      const destId = document.getElementById("skillTargetSel") && state.targetId;
+      const destId = state.targetId;
       const dest = unitById(destId);
       if (!src) { lines.push("先选被复制状态的目标。"); return paintSkillLog(lines.join("\n")); }
       const other = fieldUnits().find(u => u.id !== src.id && u.id === state.targetId) || fieldUnits().filter(u => u.id !== src.id && Number(u.zone) === Number(src.zone))[0];
@@ -7447,7 +7489,7 @@ function runSkill(id, optRun) {
       }
     } else if (id === "role_boost") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
-      const dest = Number(document.getElementById("destZone") && document.getElementById("destZone").value) || otherZone(t.zone);
+      const dest = Number(hostValue("destZone", "")) || otherZone(t.zone);
       displaceTo(t, dest, lines, "被借力移动");
     } else if (id === "role_shake") {
       if (!roleOnce(a, "shake", 1)) lines.push("撼动本场已用完。");
@@ -7780,7 +7822,8 @@ function runSkill(id, optRun) {
       }
       if (a.kit === "niu" && ok) lines.push(...returnWeapon(a));
       if (a.kit === "naruto" && ok) lines.push(...returnWeapon(a));
-      document.getElementById("blockResult").value = ok ? "assistOk" : "fail";
+      const brSel = uiEl("blockResult");
+      if (brSel) brSel.value = ok ? "assistOk" : "fail";
       lines.push("已把下方「格挡结果」设成对应项，可继续用手动攻击结算那一刀。");
     } else if (runEnemyAction(id, a, t, hitOne, lines, needT)) {
       /* handled */
@@ -7805,15 +7848,15 @@ function runSkill(id, optRun) {
 
 function init() {
   const presets = enemyPresets();
-  const sel = document.getElementById("presetSelect");
+  const sel = uiEl("presetSelect");
   sel.innerHTML = presets.map(p => `<option value="${p.id}">${p.name}</option>`).join("");
 
-  document.getElementById("zoneMode").onchange = e => {
+  uiEl("zoneMode").onchange = e => {
     state.zoneMode = Number(e.target.value);
     renderAll();
   };
-  document.getElementById("partySize").onchange = e => { state.partySize = Number(e.target.value); };
-  document.getElementById("weather").onchange = e => {
+  uiEl("partySize").onchange = e => { state.partySize = Number(e.target.value); };
+  uiEl("weather").onchange = e => {
     const err = setWeather(e.target.value);
     if (err) {
       appendLog(err);
@@ -7822,7 +7865,7 @@ function init() {
     }
     renderAll();
   };
-  const wl = document.getElementById("weatherLock");
+  const wl = uiEl("weatherLock");
   if (wl) {
     wl.checked = !!state.weatherLock;
     wl.onchange = () => {
@@ -7830,14 +7873,14 @@ function init() {
       renderAll();
     };
   }
-  document.getElementById("phaseStep").onchange = e => { state.phaseStep = Number(e.target.value); };
-  document.getElementById("sandDir").onchange = e => { state.sandDir = e.target.value; renderAll(); };
-  document.getElementById("btnAdvancePhase").onclick = () => {
+  uiEl("phaseStep").onchange = e => { state.phaseStep = Number(e.target.value); };
+  uiEl("sandDir").onchange = e => { state.sandDir = e.target.value; renderAll(); };
+  uiEl("btnAdvancePhase").onclick = () => {
     state.phaseStep = (Number(state.phaseStep) + 1) % 4;
-    document.getElementById("phaseStep").value = String(state.phaseStep);
+    uiEl("phaseStep").value = String(state.phaseStep);
   };
-  document.getElementById("btnUndo").onclick = undo;
-  document.getElementById("btnClearField").onclick = clearBattlefield;
+  uiEl("btnUndo").onclick = undo;
+  uiEl("btnClearField").onclick = clearBattlefield;
 
 function clearBattlefield() {
   snapshot();
@@ -7854,37 +7897,37 @@ function clearBattlefield() {
   state.lastResult = null;
   state.blockQueue = [];
   state.assistQueue = [];
-  const st = document.getElementById("skillTargetSel");
+  const st = uiEl("skillTargetSel");
   if (st) st.value = "";
   appendLog("已清空战场（单位、配置物、间隔、场地）。天气和区制保留。可点撤销恢复。");
   renderAll();
 }
-  const skip = document.getElementById("btnBlockSkip");
+  const skip = uiEl("btnBlockSkip");
   if (skip) skip.onclick = () => finishBlock(null);
-  const askip = document.getElementById("btnAssistSkip");
+  const askip = uiEl("btnAssistSkip");
   if (askip) askip.onclick = () => finishAssist(null);
-  document.getElementById("skillTargetSel").onchange = e => {
+  uiEl("skillTargetSel").onchange = e => {
     state.targetId = e.target.value || null;
     renderAll();
   };
-  const bs = document.getElementById("btnBackstage");
-  const bsm = document.getElementById("backstageModal");
+  const bs = uiEl("btnBackstage");
+  const bsm = uiEl("backstageModal");
   if (bs && bsm) {
     bs.onclick = () => { renderBackstage(); bsm.classList.remove("hidden"); };
-    document.getElementById("btnCloseBackstage").onclick = () => bsm.classList.add("hidden");
+    uiEl("btnCloseBackstage").onclick = () => bsm.classList.add("hidden");
     bsm.addEventListener("click", e => { if (e.target === bsm) bsm.classList.add("hidden"); });
   }
 
-  document.getElementById("btnLogPrev").onclick = () => {
+  uiEl("btnLogPrev").onclick = () => {
     if (state.logIndex > 0) { state.logIndex -= 1; renderLog(); }
   };
-  document.getElementById("btnLogNext").onclick = () => {
+  uiEl("btnLogNext").onclick = () => {
     if (state.logIndex < state.logPages.length - 1) { state.logIndex += 1; renderLog(); }
   };
-  document.getElementById("btnLogClear").onclick = clearLogs;
-  const btnStart = document.getElementById("btnStartCombat");
+  uiEl("btnLogClear").onclick = clearLogs;
+  const btnStart = uiEl("btnStartCombat");
   if (btnStart) btnStart.onclick = () => startCombat();
-  const btnTurn = document.getElementById("btnTurnEnd");
+  const btnTurn = uiEl("btnTurnEnd");
   if (btnTurn) btnTurn.onclick = () => {
     if (!state.combatStarted) { startCombat(); return; }
     if (state.combatPhase === "enemy") endEnemyTurn();
@@ -7892,7 +7935,7 @@ function clearBattlefield() {
   };
   loadRoster();
   bindRosterUi();
-  const modal = document.getElementById("playerModal");
+  const modal = uiEl("playerModal");
   const openModal = () => {
     modal.classList.remove("hidden");
     modal.setAttribute("aria-hidden", "false");
@@ -7903,37 +7946,37 @@ function clearBattlefield() {
     modal.classList.add("hidden");
     modal.setAttribute("aria-hidden", "true");
   };
-  document.getElementById("btnOpenPlayer").onclick = openModal;
+  uiEl("btnOpenPlayer").onclick = openModal;
   const openHidden = (id) => {
-    const m = document.getElementById(id);
+    const m = uiEl(id);
     if (m) { m.classList.remove("hidden"); m.setAttribute("aria-hidden", "false"); }
   };
   const closeHidden = (id) => {
-    const m = document.getElementById(id);
+    const m = uiEl(id);
     if (m) { m.classList.add("hidden"); m.setAttribute("aria-hidden", "true"); }
   };
-  const oa = document.getElementById("btnOpenAttack");
+  const oa = uiEl("btnOpenAttack");
   if (oa) oa.onclick = () => openHidden("attackModal");
-  const ca = document.getElementById("btnCloseAttack");
+  const ca = uiEl("btnCloseAttack");
   if (ca) ca.onclick = () => closeHidden("attackModal");
-  const oe = document.getElementById("btnOpenEditor");
+  const oe = uiEl("btnOpenEditor");
   if (oe) oe.onclick = () => { renderEditor(); openHidden("editorModal"); };
-  const oe2 = document.getElementById("btnOpenEditor2");
+  const oe2 = uiEl("btnOpenEditor2");
   if (oe2) oe2.onclick = () => { renderEditor(); openHidden("editorModal"); };
-  const ce = document.getElementById("btnCloseEditor");
+  const ce = uiEl("btnCloseEditor");
   if (ce) ce.onclick = () => closeHidden("editorModal");
-  const am = document.getElementById("attackModal");
+  const am = uiEl("attackModal");
   if (am) am.addEventListener("click", e => { if (e.target === am) closeHidden("attackModal"); });
-  const em = document.getElementById("editorModal");
+  const em = uiEl("editorModal");
   if (em) em.addEventListener("click", e => { if (e.target === em) closeHidden("editorModal"); });
-  document.getElementById("btnClosePlayer").onclick = closeModal;
+  uiEl("btnClosePlayer").onclick = closeModal;
   modal.addEventListener("click", (e) => { if (e.target === modal) closeModal(); });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
-  document.getElementById("btnLoadLive").onclick = loadLiveParty;
-  document.getElementById("attackerSel").addEventListener("change", () => renderSkills());
-  document.getElementById("bladeSel").onchange = () => {
+  uiEl("btnLoadLive").onclick = loadLiveParty;
+  uiEl("attackerSel").addEventListener("change", () => renderSkills());
+  uiEl("bladeSel").onchange = () => {
     const h = findKit("hiaki", state.units);
-    const want = document.getElementById("bladeSel").value;
+    const want = uiEl("bladeSel").value;
     if (h && h.resources) {
       if ((want === "niu" && h.resources.niuOut) || (want === "naruto" && h.resources.narutoOut)) {
         appendLog(`${want === "niu" ? "丹生谷" : "鳴門"} 已分出，收回前不能切换到这把刀。`);
@@ -7945,13 +7988,13 @@ function clearBattlefield() {
       renderAll();
     }
   };
-  document.getElementById("btnAddProp").onclick = () => {
+  uiEl("btnAddProp").onclick = () => {
     snapshot();
-    const kind = document.getElementById("propKind").value;
-    const zone = Number(document.getElementById("propZone").value) || 1;
-    const lv = Number(document.getElementById("propLevel").value) || 1;
+    const kind = uiEl("propKind").value;
+    const zone = Number(uiEl("propZone").value) || 1;
+    const lv = Number(uiEl("propLevel").value) || 1;
     const p = makeProp(kind, zone, lv);
-    const fac = document.getElementById("propFaction");
+    const fac = uiEl("propFaction");
     if (fac) p.faction = fac.value || "player";
     state.props.push(p);
     appendLog(`在 ${zone} 区放置 ${p.name}（${p.faction === "enemy" ? "敌方" : "我方"}）。`);
@@ -7961,10 +8004,10 @@ function clearBattlefield() {
     }
     renderAll();
   };
-  document.getElementById("btnAddPreset").onclick = () => {
+  uiEl("btnAddPreset").onclick = () => {
     snapshot();
-    const id = document.getElementById("presetSelect").value;
-    const lv = Number(document.getElementById("presetLevel").value) || 1;
+    const id = uiEl("presetSelect").value;
+    const lv = Number(uiEl("presetLevel").value) || 1;
     if (id === "ufo_boss") {
       if (typeof syncPartySizeFromField === "function") syncPartySizeFromField();
       const pack = spawnUfoBoss(lv);
@@ -7986,14 +8029,14 @@ function clearBattlefield() {
     if (isMechanicalUnit(u)) syncBatteryShields().forEach(s => appendLog(s));
     renderAll();
   };
-  document.getElementById("attackerSel").onchange = e => { state.attackerId = e.target.value || null; renderAll(); };
-  document.getElementById("targetSel").onchange = e => { state.targetId = e.target.value || null; renderAll(); };
-  document.getElementById("btnFillAtk").onclick = () => {
-    const a = unitById(document.getElementById("attackerSel").value);
+  uiEl("attackerSel").onchange = e => { state.attackerId = e.target.value || null; renderAll(); };
+  uiEl("targetSel").onchange = e => { state.targetId = e.target.value || null; renderAll(); };
+  uiEl("btnFillAtk").onclick = () => {
+    const a = unitById(uiEl("attackerSel").value);
     if (a) fillFromSuggest(a);
   };
-  document.getElementById("btnCalc").onclick = doCalc;
-  document.getElementById("btnApply").onclick = doApply;
+  uiEl("btnCalc").onclick = doCalc;
+  uiEl("btnApply").onclick = doApply;
   window.addEventListener("beforeunload", () => {
     try { localStorage.setItem("anterscale-calc", JSON.stringify({
       zoneMode: state.zoneMode, partySize: state.partySize, weather: state.weather,
@@ -8014,10 +8057,10 @@ function clearBattlefield() {
         state.sandDir = s.sandDir || "12";
         state.units = s.units;
         if (s.fields) state.fields = s.fields;
-        document.getElementById("zoneMode").value = String(state.zoneMode);
-        document.getElementById("partySize").value = String(state.partySize);
-        document.getElementById("weather").value = state.weather;
-        document.getElementById("phaseStep").value = String(state.phaseStep);
+        uiEl("zoneMode").value = String(state.zoneMode);
+        uiEl("partySize").value = String(state.partySize);
+        uiEl("weather").value = state.weather;
+        uiEl("phaseStep").value = String(state.phaseStep);
         loaded = true;
       }
     }
@@ -8039,7 +8082,7 @@ function clearBattlefield() {
   renderLog();
 }
 
-init();
+if (HAS_DOM) init();
 
 /* 后台面板。原本写在 init() 里，只有计算器自己能用；
    移到顶层后游戏页面也能复用同一份渲染逻辑。 */
@@ -8145,17 +8188,17 @@ function dmSetHits(pred) {
 }
 
 function dmDealAttack() {
-  const atkId = (document.getElementById("dmAtk") || {}).value;
-  const tgtId = (document.getElementById("dmTgt") || {}).value;
-  const element = (document.getElementById("dmEle") || {}).value || "physical";
-  const mult = Number((document.getElementById("dmMult") || {}).value);
-  const splash = Number((document.getElementById("dmSplash") || {}).value);
-  const flat = Number((document.getElementById("dmFlat") || {}).value) || 0;
-  const br = Number((document.getElementById("dmBrk") || {}).value);
-  const splashBr = Number((document.getElementById("dmSplashBrk") || {}).value);
-  const diceN = Number((document.getElementById("dmDiceN") || {}).value) || 0;
-  const diceS = Number((document.getElementById("dmDiceS") || {}).value) || 0;
-  const skip = !!(document.getElementById("dmSkipBlock") || {}).checked;
+  const atkId = (uiEl("dmAtk") || {}).value;
+  const tgtId = (uiEl("dmTgt") || {}).value;
+  const element = (uiEl("dmEle") || {}).value || "physical";
+  const mult = Number((uiEl("dmMult") || {}).value);
+  const splash = Number((uiEl("dmSplash") || {}).value);
+  const flat = Number((uiEl("dmFlat") || {}).value) || 0;
+  const br = Number((uiEl("dmBrk") || {}).value);
+  const splashBr = Number((uiEl("dmSplashBrk") || {}).value);
+  const diceN = Number((uiEl("dmDiceN") || {}).value) || 0;
+  const diceS = Number((uiEl("dmDiceS") || {}).value) || 0;
+  const skip = !!(uiEl("dmSkipBlock") || {}).checked;
   let targets = dmCheckedUnits("dmHit");
   const main = unitById(tgtId);
   if (main && targets.every(u => u.id !== main.id)) targets.unshift(main);
@@ -8191,11 +8234,11 @@ function dmDealAttack() {
 }
 
 function dmDealEnv() {
-  const scope = (document.getElementById("dmEnvScope") || {}).value || "pick";
-  const zone = Number((document.getElementById("dmEnvZone") || {}).value) || 1;
-  const element = (document.getElementById("dmEnvEle") || {}).value || "physical";
-  const flat = Number((document.getElementById("dmEnvFlat") || {}).value) || 0;
-  const br = Number((document.getElementById("dmEnvBrk") || {}).value) || 0;
+  const scope = (uiEl("dmEnvScope") || {}).value || "pick";
+  const zone = Number((uiEl("dmEnvZone") || {}).value) || 1;
+  const element = (uiEl("dmEnvEle") || {}).value || "physical";
+  const flat = Number((uiEl("dmEnvFlat") || {}).value) || 0;
+  const br = Number((uiEl("dmEnvBrk") || {}).value) || 0;
   const notes = ["主持人安排环境伤害。"];
   let list = [];
   if (scope === "zone") {
@@ -8219,7 +8262,8 @@ function dmDealEnv() {
 }
 
 function renderBackstage() {
-  const box = document.getElementById("backstageBody");
+  if (!HAS_DOM) return;
+  const box = uiEl("backstageBody");
   if (!box) return;
   const pcs = fieldUnits().filter(u => u.isPlayer && !isWeaponUnit(u));
   const all = dmAllUnits();
@@ -8449,9 +8493,9 @@ function renderBackstage() {
       else if (u) appendLog(`${u.name} 经验不足（${u.xp || 0}/${xpToNext(u.level)}）。`);
     };
   });
-  const g = document.getElementById("btnGrantXp");
+  const g = uiEl("btnGrantXp");
   if (g) g.onclick = () => {
-    grantXpToPlayers(Number(document.getElementById("xpGrant").value) || 0, "后台发放");
+    grantXpToPlayers(Number(uiEl("xpGrant").value) || 0, "后台发放");
     renderBackstage();
   };
   const after = () => { renderBackstage(); if (typeof renderAll === "function") renderAll(); };
@@ -8497,11 +8541,11 @@ function renderBackstage() {
     after();
   });
   box.querySelectorAll("[data-revive]").forEach(b => b.onclick = () => { const u = unitById(b.dataset.revive); if (u) { dmRevive(u); appendLog(`${u.name} 后台复活。`); after(); } });
-  const ba = document.getElementById("btnDmAtk");
+  const ba = uiEl("btnDmAtk");
   if (ba) ba.onclick = () => { dmDealAttack(); renderBackstage(); };
-  const be = document.getElementById("btnDmEnv");
+  const be = uiEl("btnDmEnv");
   if (be) be.onclick = () => { dmDealEnv(); renderBackstage(); };
-  const hitBtn = (id, fn) => { const b = document.getElementById(id); if (b) b.onclick = fn; };
+  const hitBtn = (id, fn) => { const b = uiEl(id); if (b) b.onclick = fn; };
   hitBtn("dmHitAll", () => dmSetHits(() => true));
   hitBtn("dmHitNone", () => dmSetHits(() => false));
   hitBtn("dmHitZone1", () => dmSetHits(u => Number(u.zone) === 1));
@@ -8510,12 +8554,12 @@ function renderBackstage() {
   hitBtn("dmHitFoes", () => dmSetHits(u => !u.isPlayer));
   hitBtn("dmHitPlayers", () => dmSetHits(u => !!u.isPlayer));
   hitBtn("dmHitAtkZone", () => {
-    const a = unitById((document.getElementById("dmAtk") || {}).value);
+    const a = unitById((uiEl("dmAtk") || {}).value);
     const z = a ? Number(a.zone) : 0;
     dmSetHits(u => z && Number(u.zone) === z);
   });
   hitBtn("dmHitTgtZone", () => {
-    const t = unitById((document.getElementById("dmTgt") || {}).value);
+    const t = unitById((uiEl("dmTgt") || {}).value);
     const z = t ? Number(t.zone) : 0;
     dmSetHits(u => z && Number(u.zone) === z);
   });

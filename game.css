@@ -38,6 +38,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { margin: 0; height: 100%; }
 body {
   font-family: var(--ui);
@@ -1090,3 +1091,62 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
 .g-top { gap: 8px; overflow-x: auto; scrollbar-width: thin; }
 .g-top .g-btn, .g-top .g-weather, .g-top label { white-space: nowrap; flex-shrink: 0; }
 .g-top .g-btn { padding: 0 10px; }
+
+/* ---------- 标题界面 ---------- */
+.scr-title {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  background:
+    radial-gradient(ellipse at 50% 18%, rgba(242, 179, 61, .10), transparent 60%),
+    linear-gradient(180deg, var(--ground-1), var(--ground-0));
+  color: var(--bone);
+  font-family: var(--ui);
+  overflow-y: auto;
+}
+.t-card { width: min(440px, 100%); display: flex; flex-direction: column; gap: 10px; }
+.t-name {
+  margin: 0;
+  font-size: 64px;
+  font-weight: 900;
+  letter-spacing: .12em;
+  line-height: 1;
+}
+.t-name span {
+  display: inline-block;
+  margin-left: .35em;
+  font-size: .42em;
+  letter-spacing: .3em;
+  color: var(--gold);
+  vertical-align: .55em;
+}
+.t-sub { margin: 0 0 22px; font-size: 12px; letter-spacing: .18em; color: var(--muted); }
+.t-menu { display: flex; flex-direction: column; gap: 10px; }
+.t-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  width: 100%;
+  padding: 12px 16px;
+  background: var(--plate);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line);
+  border-radius: 4px;
+  color: var(--bone);
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+.t-btn b { font-size: 17px; font-weight: 700; }
+.t-btn small { font-size: 12px; color: var(--muted); }
+.t-btn:hover:not(:disabled) { background: var(--plate-hi); border-left-color: var(--bone); }
+.t-btn.primary:not(:disabled) { border-left-color: var(--gold); }
+.t-btn:disabled { opacity: .45; cursor: default; }
+.t-btn:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+@media (max-width: 480px) { .t-name { font-size: 48px; } }

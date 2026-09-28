@@ -3,10 +3,22 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>角鳞 · 战斗原型</title>
+  <title>角鳞：四幕</title>
   <link rel="stylesheet" href="game.css" />
 </head>
 <body>
+<section class="scr-title" id="scr-title" hidden>
+  <div class="t-card">
+    <h1 class="t-name">角鳞<span>四幕</span></h1>
+    <p class="t-sub">ANTLERSCALE · 在巨人的阴影下，活到明天</p>
+    <div class="t-menu">
+      <button class="t-btn primary" id="t-continue"><b>继续</b><small id="t-continue-sub"></small></button>
+      <button class="t-btn" id="t-new"><b>新的一局</b><small id="t-new-sub"></small></button>
+      <button class="t-btn" id="t-sandbox"><b>战斗原型</b><small>自由配队、选遭遇，直接开打</small></button>
+      <a class="t-btn" href="index.html"><b>跑团版 · 规则计算器</b><small>主持人用的分层结算工具</small></a>
+    </div>
+  </div>
+</section>
 <div class="g-app" id="g-app">
   <header class="g-top">
     <span class="g-round" id="g-round">第 1 回合</span>
@@ -29,6 +41,7 @@
       <select id="g-level"><option value="1">Lv1</option><option value="2">Lv2</option><option value="3">Lv3</option></select>
     </label>
     <span class="g-weather" id="g-enc-name">遭遇 外城区巷战</span>
+    <button class="g-btn" id="g-title" title="回到标题界面">标题</button>
     <button class="g-btn" id="g-party-cfg">队伍配置</button>
     <button class="g-btn" id="g-enc-cfg">遭遇</button>
     <button class="g-btn" id="g-field-cfg">战场配置</button>
@@ -683,6 +696,10 @@ window.GAME_MODE = true;
 <script src="items.js"></script>
 <script src="ledger.js"></script>
 <script src="app.js"></script>
+<script src="ai.js"></script>
+<script src="sim.js"></script>
+<script src="save.js"></script>
 <script src="game.js"></script>
+<script src="screens.js"></script>
 </body>
 </html>

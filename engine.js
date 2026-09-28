@@ -1023,10 +1023,12 @@ function syncPartySizeFromField() {
   if (n < 2) n = 2;
   if (n > 4) n = 4;
   if (typeof state !== "undefined") state.partySize = n;
-  const a = document.getElementById("partySize");
-  if (a) a.value = String(n);
-  const b = document.getElementById("g-cfg-ps");
-  if (b) b.value = String(n);
+  if (typeof document !== "undefined") {
+    const a = document.getElementById("partySize");
+    if (a) a.value = String(n);
+    const b = document.getElementById("g-cfg-ps");
+    if (b) b.value = String(n);
+  }
   if (typeof GAME !== "undefined") GAME.partySize = n;
   return n;
 }
