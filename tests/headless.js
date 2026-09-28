@@ -14,7 +14,7 @@ const ROOT = path.resolve(__dirname, "..");
 // 与 game.html 的加载顺序一致（不含 game.js：它是战斗画面）
 const RULE_FILES = [
   "run.js", "engine.js", "party.js", "props.js", "enemies.js",
-  "growth.js", "items.js", "ledger.js", "app.js", "ai.js", "sim.js", "save.js"
+  "growth.js", "items.js", "ledger.js", "app.js", "ai.js", "sim.js", "save.js", "rogue.js"
 ];
 
 const cache = new Map();
@@ -56,12 +56,13 @@ function load(opt) {
   });
   ctx.__errors = logs;
   // 顶层 const / let 不会挂到 window 上，这里取出常用的几个
-  const names = ["state", "RUN", "RNG", "EnemyAI", "BattleSim", "SaveStore", "SKILL_RANGE", "ENEMY_RANK"];
+  const names = ["state", "RUN", "RNG", "EnemyAI", "BattleSim", "SaveStore", "Rogue", "SKILL_RANGE", "ENEMY_RANK"];
   ctx.S = vm.runInContext("({" + names.map(n =>
     `get ${n}() { return typeof ${n} === "undefined" ? undefined : ${n}; }`).join(",") + "})", ctx);
   ctx.BattleSim = ctx.S.BattleSim;
   ctx.EnemyAI = ctx.S.EnemyAI;
   ctx.SaveStore = ctx.S.SaveStore;
+  ctx.Rogue = ctx.S.Rogue;
   return ctx;
 }
 

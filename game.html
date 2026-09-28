@@ -19,6 +19,35 @@
     </div>
   </div>
 </section>
+<section class="scr-party" id="scr-party" hidden>
+  <div class="sp-wrap">
+    <header class="sp-head">
+      <h2>选择队伍</h2>
+      <p>挑 2–4 名角色出发。每人都带着自己的专属武器人；角色永久死亡时，武器人也会一起离开。</p>
+    </header>
+    <div class="party-grid" id="party-grid"></div>
+    <footer class="sp-foot">
+      <span id="party-count"></span>
+      <span class="spacer"></span>
+      <button class="g-btn" id="party-back">返回</button>
+      <button class="g-btn r-main" id="party-go" disabled>出发</button>
+    </footer>
+  </div>
+</section>
+<section class="scr-run" id="scr-run" hidden>
+  <header class="run-top">
+    <b id="run-where"></b>
+    <span id="run-day"></span>
+    <span class="run-supplies" id="run-supplies"></span>
+    <span class="spacer"></span>
+    <button class="g-btn" id="run-title" title="进度已自动保存">存档并回到标题</button>
+  </header>
+  <div class="run-main">
+    <aside class="run-party" id="run-party"></aside>
+    <main class="run-body" id="run-body"></main>
+    <aside class="run-log"><h3>记录</h3><ul id="run-log"></ul></aside>
+  </div>
+</section>
 <div class="g-app" id="g-app">
   <header class="g-top">
     <span class="g-round" id="g-round">第 1 回合</span>
@@ -89,7 +118,7 @@
   </div>
 </div>
 
-<div class="result" id="g-result"><h2></h2><p></p><div class="result-btns"><button class="g-btn" id="g-review">查看日志</button><button class="g-btn" id="g-again">再来一局</button></div></div>
+<div class="result" id="g-result"><h2></h2><p></p><div class="result-btns"><button class="g-btn" id="g-review">查看日志</button><button class="g-btn" id="g-again">再来一局</button><button class="g-btn" id="g-rogue-next">继续</button></div></div>
 <div class="sheet" id="g-bag-sheet">
   <div class="sheet-card wide">
     <div class="sheet-head"><h3>背包</h3><button class="g-btn" id="g-bag-close">关闭</button></div>
@@ -662,7 +691,9 @@
 </div>
 
 <script>
-/* 游戏模式垫片：不让计算器读写它自己的存档，缺失的元素给一个隐藏替身 */
+/* 游戏模式垫片：不让计算器读写它自己的存档，缺失的元素给一个隐藏替身。
+ * 替身只给计算器用：游戏自己的元素（g- 战斗、t- 标题、r- / run- 单局、party- 选队伍、scr- 界面）
+ * 找不到就老实返回 null，否则「这个按钮在不在」的判断会被替身骗过。 */
 window.GAME_MODE = true;
 (function () {
   var add = window.addEventListener.bind(window);
@@ -677,7 +708,7 @@ window.GAME_MODE = true;
   var byId = Document.prototype.getElementById;
   Document.prototype.getElementById = function (id) {
     var e = byId.call(this, id);
-    if (e || String(id).indexOf("g-") === 0) return e;
+    if (e || /^(g|t|r|run|party|scr)-/.test(String(id))) return e;
     var core = byId.call(this, "calc-core");
     if (!core) return e;
     e = document.createElement("div");
@@ -699,7 +730,9 @@ window.GAME_MODE = true;
 <script src="ai.js"></script>
 <script src="sim.js"></script>
 <script src="save.js"></script>
+<script src="rogue.js"></script>
 <script src="game.js"></script>
 <script src="screens.js"></script>
+<script src="rogue-ui.js"></script>
 </body>
 </html>

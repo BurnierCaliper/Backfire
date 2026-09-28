@@ -117,3 +117,14 @@ test("本行动合计包含高压场地等连带伤害", () => {
   const sum = lines().filter(s => /本行动合计/.test(s)).pop();
   assert.match(sum, /连带 \d+：高压场地 \d+/);
 });
+
+test("开战后是第 1 回合，结束一轮后是第 2 回合", () => {
+  const c = H.load();
+  c.BattleSim.setup({ party: ["kolt", "helu"], enemies: [{ id: "thug_knife", lv: 1, zone: 2 }] });
+  c.appendLog("布置阶段的一条记录");
+  c.startCombat();
+  assert.equal(c.S.state.turnNo, 1);
+  c.endPlayerTurn();
+  c.endEnemyTurn();
+  assert.equal(c.S.state.turnNo, 2);
+});

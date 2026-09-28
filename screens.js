@@ -71,7 +71,12 @@ const Screens = (function () {
     });
     $("t-new").onclick = () => RunFlow.start();
     $("t-continue").onclick = () => RunFlow.resume();
-    $("t-sandbox").onclick = () => Screens.show("battle");
+    $("t-sandbox").onclick = () => {
+      // 战斗原型用跑团版的规则：正常经验曲线；如果画面上还留着单局里的战斗，换回原型战斗
+      if (typeof Rogue !== "undefined") Rogue.leaveRunMode();
+      if (window.GAME && GAME.rogue && GAME.setupBattle) GAME.setupBattle(1);
+      Screens.show("battle");
+    };
     $("g-title").onclick = () => { if (!window.GAME || GAME.depth === 0) Screens.show("title"); };
     Screens.show("title");
   }

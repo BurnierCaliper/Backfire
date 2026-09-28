@@ -1344,6 +1344,10 @@ function startCombat() {
   // 按我方实际上场人数平衡敌人（开战前改过队伍也能跟上）
   const partyN = typeof syncPartySizeFromField === "function" ? syncPartySizeFromField() : state.partySize;
   const balanceNotes = typeof rebalanceEnemiesForParty === "function" ? rebalanceEnemiesForParty(partyN) : [];
+  // 开战前的布置记录算「第 0 回合」，开战后的第一回合才是第 1 回合
+  const prePage = state.logPages[state.logPages.length - 1];
+  if (prePage && prePage.lines.length) prePage.turn = 0;
+  state.turnNo = 1;
   beginRound([]);
   startPlayerPhase();
   appendLog("战斗开始。回合开始效果已结算。", "sep");
@@ -6261,7 +6265,7 @@ function renderLog() {
   const lab = uiEl("logPageLabel");
   if (!box) return;
   const page = currentLogPage();
-  if (lab) lab.textContent = `第 ${page.turn} 回合 · ${state.logIndex + 1}/${state.logPages.length}`;
+  if (lab) lab.textContent = `${page.turn ? "第 " + page.turn + " 回合" : "开战前"} · ${state.logIndex + 1}/${state.logPages.length}`;
   if (!page.lines.length) {
     box.innerHTML = `<div class="sub">本回合还没有记录。技能、移动、攻击都会追加在这里。</div>`;
     return;

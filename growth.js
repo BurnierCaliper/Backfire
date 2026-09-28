@@ -43,6 +43,12 @@ function xpDrop(rank, level) {
   return t[lv] || t[t.length - 1];
 }
 
+// 升级所需经验的倍率。跑团版 / 战斗原型为 1；Roguelike 单局里由 rogue.js 设成配置值（目前 1/3）。
+let XP_REQ_SCALE = 1;
+function setXpRequirementScale(s) {
+  XP_REQ_SCALE = Number(s) > 0 ? Number(s) : 1;
+}
+
 function xpToNext(lv) {
   const n = Math.max(1, Number(lv) || 1);
   const need = {
@@ -50,7 +56,7 @@ function xpToNext(lv) {
     10: 17000, 11: 21000, 12: 26000, 13: 30000, 14: 38000, 15: 44000, 16: 52000,
     17: 58000, 18: 67000, 19: 73000
   };
-  return need[n] || 0;
+  return need[n] ? Math.max(1, Math.ceil(need[n] * XP_REQ_SCALE)) : 0;
 }
 
 function ceilDiv2(n) {

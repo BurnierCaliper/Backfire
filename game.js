@@ -1486,6 +1486,7 @@
   }
   function finish(win) {
     G.ended = true;
+    G.lastWin = !!win;
     disarm();
     const box = $("g-result");
     box.querySelector("h2").textContent = win ? "胜利" : "全员倒地";
@@ -1495,9 +1496,12 @@
       const from = u.level;
       if (typeof tryLevelUp === "function" && tryLevelUp(u) && u.level > from) ups.push(`${u.name} ${from}→${u.level}`);
     });
-    const durNotes = typeof ledgerAfterBattle === "function" ? ledgerAfterBattle([]) : [];
-    rememberCampaign();
-    durNotes.forEach(t => addLogPhase(t));
+    // 跑团版的队伍档案只在战斗原型里结算；Roguelike 由单局流程自己记
+    if (!G.rogue) {
+      const durNotes = typeof ledgerAfterBattle === "function" ? ledgerAfterBattle([]) : [];
+      rememberCampaign();
+      durNotes.forEach(t => addLogPhase(t));
+    }
     const loot = `背包现有 ${Number(state.kuizhi) || 0} 奎支`;
     const lvline = ups.length ? "升级：" + ups.join("、") + "。" : "";
     box.querySelector("p").textContent = win
@@ -1567,6 +1571,46 @@
   }
 
   /** 开一场战斗。encounter 可以是遭遇 id、遭遇数据，或省略（用原来的默认阵容）。 */
+  /** 清空战斗画面（两种开战方式共用） */
+  function resetBattleView() {
+    G.ended = false;
+    G.endToken = null;
+    G.arm = null;
+    $("g-result").classList.remove("show");
+    $("g-reopen").classList.remove("show");
+    cards.forEach(c => c.wrap.remove());
+    cards.clear();
+    G.view = new Map();
+    $("g-logs").innerHTML = "";
+  }
+
+  /** Roguelike 单局里的战斗：顶栏只留战斗相关的按钮，结算后把胜负交回单局流程 */
+  function setRogueMode(rogue) {
+    G.rogue = rogue;
+    document.body.classList.toggle("rogue-battle", !!rogue);
+  }
+
+  /**
+   * 开一场 Roguelike 战斗。
+   *   spec   Rogue.battleSpec 的结果：{ title, party, encounter, level, seed, before }
+   *   onEnd  结算面板点「继续」后调用，参数是 win（true / false）
+   * 战场由 BattleSim.setup 布置（与无界面模拟同一套），不读写跑团版的队伍档案。
+   */
+  function startRogueBattle(spec, onEnd) {
+    setRogueMode({ onEnd, spec });
+    resetBattleView();
+    if ($("g-enc-name")) $("g-enc-name").textContent = spec.title || "战斗";
+    BattleSim.setup(spec);
+    if ($("g-weather-sel")) $("g-weather-sel").value = state.weather;
+    syncFieldDom();
+    setView(snapAll(), false);
+    const enc = spec.encounter || {};
+    addLogPhase(`${spec.title || "战斗"} · ${enc.name || ""} · 敌人 Lv${spec.level} · 点「开始战斗」`);
+    autoSelect(true);
+    refreshAll();
+    idleBox();
+  }
+
   function setupBattle(level, encounter) {
     let enc = typeof encounter === "string"
       ? (typeof encounterById === "function" ? encounterById(encounter) : null)
@@ -1581,16 +1625,9 @@
       ? (enc.name + (typeof layoutLabel === "function" && enc.layout ? " · " + layoutLabel(enc.layout) : ""))
       : "外城区巷战";
     if ($("g-enc-name")) $("g-enc-name").textContent = "遭遇 " + encTitle;
-    G.ended = false;
-    G.endToken = null;
-    G.arm = null;
+    setRogueMode(null);
+    resetBattleView();
     G.level = level;
-    $("g-result").classList.remove("show");
-    $("g-reopen").classList.remove("show");
-    cards.forEach(c => c.wrap.remove());
-    cards.clear();
-    G.view = new Map();
-    $("g-logs").innerHTML = "";
 
     state.units = [];
     state.props = [];
@@ -2563,6 +2600,15 @@
     };
     $("g-restart").onclick = () => { if (G.depth === 0) setupBattle(Number($("g-level").value) || 1, G.lastEncounter || null); };
     $("g-again").onclick = () => setupBattle(Number($("g-level").value) || 1, G.lastEncounter || null);
+    $("g-rogue-next").onclick = () => {
+      const r = G.rogue;
+      if (!r || !G.ended) return;
+      const win = G.lastWin;
+      $("g-result").classList.remove("show");
+      $("g-reopen").classList.remove("show");
+      setRogueMode(null);
+      r.onEnd(win);
+    };
     $("g-review").onclick = reviewLog;
     $("g-reopen").onclick = () => $("g-result").classList.add("show");
     window.addEventListener("resize", () => { if (G.depth === 0) setView(snapAll(), false); else fitZones(); });
@@ -2589,6 +2635,7 @@
   G.skillThunk = skillThunk;
   G.snapAll = snapAll;
   G.setupBattle = setupBattle;
+  G.startRogueBattle = startRogueBattle;
   G.armSkill = armSkill;
   G.gameSkills = gameSkills;
   G.blockReason = blockReason;
