@@ -114,6 +114,7 @@ const BattleSim = (function () {
         finishBlock(choice, forced);
         continue;
       }
+      if (state.assistQueue && state.assistQueue.length) pruneAssistQueue();
       if (state.assistQueue && state.assistQueue.length) {
         const job = state.assistQueue[0];
         const target = unitById(job.targetId), breaker = unitById(job.breakerId);

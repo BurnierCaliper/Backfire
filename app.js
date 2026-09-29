@@ -3881,8 +3881,28 @@ function unitCanFight(u) {
   return !!(unitIsCombatReady(u) && !u.stunned);
 }
 
+/** 协助攻击的目标已经不在了：死亡、被移出战场、倒地受保护（濒死没起身），或最内层生命归零。
+ *  失衡往往和致命的那一下同时发生（同一击先算击破再算伤害，或排队期间又被别的伤害打死），
+ *  所以排队时查过一次还不够，真正要发动时再查。 */
+function assistTargetGone(u) {
+  if (!u || u.dead || u._removed) return true;
+  if (typeof isDownProtected === "function" && isDownProtected(u)) return true;
+  if (!u.upOnShp && (u.layers || []).length && isInnerDepleted(u)) return true;
+  return false;
+}
+
+/** 丢掉队首那些目标已经倒下的协助攻击 */
+function pruneAssistQueue() {
+  const q = state.assistQueue || [];
+  while (q.length && assistTargetGone(unitById(q[0].targetId))) {
+    const t = unitById(q[0].targetId);
+    q.shift();
+    appendLog(`${t ? t.name : "目标"} 已经倒下，协助攻击取消。`);
+  }
+}
+
 function eligibleAssisters(breaker, broken) {
-  if (!broken) return [];
+  if (!broken || assistTargetGone(broken)) return [];
   if (broken.isPlayer) {
     return fieldUnits().filter(u =>
       !u.isPlayer &&
@@ -3969,7 +3989,12 @@ function queueAssistAttack(breaker, broken) {
 function presentAssistModal() {
   if (!HAS_DOM) return;
   if (!state.assistQueue) state.assistQueue = [];
-  if (!state.assistQueue.length) return;
+  pruneAssistQueue();
+  if (!state.assistQueue.length) {
+    const modal = uiEl("assistModal");
+    if (modal) modal.classList.add("hidden");
+    return;
+  }
   const job = state.assistQueue[0];
   const breaker = unitById(job.breakerId);
   const target = unitById(job.targetId);
@@ -4006,6 +4031,11 @@ function finishAssist(helperId, extra) {
   extra = extra || {};
   if (!job) return;
   const target = unitById(job.targetId);
+  if (assistTargetGone(target)) {
+    appendLog(`${target ? target.name : "目标"} 已经倒下，协助攻击取消。`);
+    presentAssistModal();
+    return;
+  }
   if (!helperId) {
     appendLog("没有人发动协助攻击。");
     presentAssistModal();

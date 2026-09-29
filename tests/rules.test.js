@@ -245,3 +245,29 @@ test("游戏版（GAME_MODE）不向玩家透露坚毅生命数值；计算器�
     assert.equal(/坚毅 \d/.test(line), !game, line);
   }
 });
+
+test("敌人被致命一击同时打到失衡：不能再发动协助攻击", () => {
+  const c = H.load();
+  c.BattleSim.setup({ party: ["kolt", "helu"], seed: "ASSIST", enemies: [{ id: "thug_knife", lv: 1, zone: 1 }, { id: "thug_hammer", lv: 1, zone: 1 }] });
+  c.startCombat();
+  const st = c.S.state;
+  st.units.forEach(u => { u.zone = 1; });
+  const kolt = c.findKit("kolt", st.units);
+  const [foe, foe2] = st.units.filter(u => !u.isPlayer);
+  // 1) 同一击先失衡、再被打死
+  foe.def = 1; foe.stunned = false;
+  c.dealTo(kolt, foe, { atk: 999, mult: 1, element: "physical", baseBreak: 1, atkRange: "any", flags: { action: true, blockResolved: true, block: "none" } });
+  c.pruneAssistQueue();
+  assert.equal((st.assistQueue || []).filter(j => j.targetId === foe.id).length, 0);
+  assert.equal(c.eligibleAssisters(kolt, foe).length, 0);
+  // 2) 失衡排上队之后，被别的伤害打死：发动时取消
+  foe2.def = 1; foe2.stunned = false;
+  c.dealBreak(foe2, 1, "physical", []);
+  assert.ok((st.assistQueue || []).some(j => j.targetId === foe2.id), "应当先排上协助攻击");
+  foe2.layers.forEach(l => { l.current = 0; });
+  const hp = c.totalHp(foe2);
+  const helu = c.findKit("helu", st.units);
+  c.finishAssist(helu.id);
+  assert.equal(c.totalHp(foe2), hp);
+  assert.equal((st.assistQueue || []).length, 0);
+});
