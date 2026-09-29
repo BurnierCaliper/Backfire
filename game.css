@@ -1315,3 +1315,52 @@ details.smith .sm-prog.ready { color: var(--gold); font-weight: 600; }
 
 .r-hint .bad { color: var(--foe); }
 .r-warn.r-error { font-weight: 600; }
+
+/* ---------- 开战前的大字（game.js · battleIntro） ---------- */
+.battle-intro {
+  position: fixed; inset: 0; z-index: 60;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+  background: radial-gradient(ellipse at center, rgba(0,0,0,.55) 0%, rgba(0,0,0,.25) 55%, rgba(0,0,0,0) 80%);
+  cursor: pointer; animation: biFade .25s ease-out;
+}
+.battle-intro.out { animation: biOut .4s ease-in forwards; }
+.battle-intro .bi-flash {
+  position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(circle at center, var(--c) 0%, rgba(255,255,255,0) 60%);
+  opacity: 0; animation: biFlash .6s ease-out;
+}
+.bi-line {
+  position: relative; isolation: isolate;
+  font-size: 56px; font-weight: 900; letter-spacing: .12em; line-height: 1.15;
+  color: #0a0a0a;
+  opacity: 0; transform: scale(3.2);
+  animation: biPop .5s cubic-bezier(.2,.9,.25,1.25) forwards;
+}
+.bi-line.big { font-size: 92px; letter-spacing: .16em; }
+.bi-line span { position: relative; }
+/* 白色外框（最底）→ 天气颜色内框 → 黑字（最上） */
+.bi-line::before, .bi-line::after {
+  content: attr(data-text); position: absolute; left: 0; top: 0; z-index: -1; white-space: nowrap;
+}
+.bi-line::before { -webkit-text-stroke: 16px #fff; color: #fff; z-index: -2; filter: drop-shadow(0 6px 10px rgba(0,0,0,.55)); }
+.bi-line::after { -webkit-text-stroke: 7px var(--inner); color: var(--inner); }
+.bi-line.big::before { -webkit-text-stroke: 22px #fff; }
+.bi-line.big::after { -webkit-text-stroke: 10px var(--inner); }
+.battle-intro.boss .bi-line.big { animation: biPop .5s cubic-bezier(.2,.9,.25,1.25) forwards, biShake .35s .5s linear 2; }
+@keyframes biPop {
+  0% { opacity: 0; transform: scale(3.2); filter: blur(6px); }
+  55% { opacity: 1; transform: scale(.92); filter: blur(0); }
+  78% { transform: scale(1.06); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes biFlash { 0% { opacity: .55; } 100% { opacity: 0; } }
+@keyframes biFade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes biOut { to { opacity: 0; transform: scale(1.08); } }
+@keyframes biShake {
+  0%, 100% { translate: 0 0; } 25% { translate: -6px 2px; } 50% { translate: 5px -3px; } 75% { translate: -3px 3px; }
+}
+@media (max-width: 700px) {
+  .bi-line { font-size: 34px; } .bi-line.big { font-size: 54px; }
+  .bi-line::before { -webkit-text-stroke: 10px #fff; } .bi-line.big::before { -webkit-text-stroke: 14px #fff; }
+  .bi-line::after { -webkit-text-stroke: 5px var(--inner); } .bi-line.big::after { -webkit-text-stroke: 7px var(--inner); }
+}

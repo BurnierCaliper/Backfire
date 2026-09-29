@@ -67,7 +67,11 @@ const Screens = (function () {
     Screens.register("title", $("scr-title"), { onShow: refreshTitle });
     Screens.register("battle", $("g-app"), {
       // 隐藏时量不到尺寸，显示出来后按实际大小重新排一次战场
-      onShow() { window.dispatchEvent(new Event("resize")); }
+      onShow() {
+        window.dispatchEvent(new Event("resize"));
+        // 开战前的大字：切到战斗画面之后再弹（同一刻新布置的战斗会自己弹，这里只补还没弹过的）
+        setTimeout(() => { if (window.GAME && GAME.showPendingIntro) GAME.showPendingIntro(); }, 0);
+      }
     });
     $("t-new").onclick = () => RunFlow.start();
     $("t-continue").onclick = () => RunFlow.resume();

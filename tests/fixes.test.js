@@ -68,3 +68,23 @@ test("敌人做决定用固定随机数：局势不变时同一回合的决定�
     assert.deepEqual(JSON.parse(JSON.stringify(a.meta)), JSON.parse(JSON.stringify(b.meta)));
   });
 });
+
+test("灯 · 声波切割：同区主目标 1atk + 距离 1 第二目标 0.5atk，消耗 1 圣盾", () => {
+  const c = H.load();
+  c.BattleSim.setup({ party: ["tou", "kolt"], seed: "SONIC", enemies: [{ id: "thug_hammer", lv: 1, zone: 1 }, { id: "thug_knife", lv: 1, zone: 2 }] });
+  c.startCombat();
+  const st = c.S.state;
+  const tou = c.findKit("tou", st.units);
+  tou.level = 2; tou.zone = 1;
+  const [near, far] = st.units.filter(u => !u.isPlayer);
+  near.zone = 1; far.zone = 2;
+  tou.resources.shield = 1;
+  const h1 = c.totalHp(near), h2 = c.totalHp(far);
+  st.attackerId = tou.id; st.targetId = near.id;
+  st.skillFlow = { id: "tou_sonic", actorId: tou.id, picks: { target1: near.id, target2: far.id }, index: 99 };
+  c.runSkill("tou_sonic");
+  st.skillFlow = null;
+  assert.ok(c.totalHp(near) < h1, "同区主目标应当受伤");
+  assert.ok(c.totalHp(far) < h2, "距离 1 的第二目标应当受伤");
+  assert.equal(tou.resources.shield, 0);
+});

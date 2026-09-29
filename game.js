@@ -1327,7 +1327,11 @@
     let all = state.units.filter(u => unitAlive(u) && (u.id !== actor.id || side === "allySelf"));
     if (side === "ally" || side === "allySelf") all = all.filter(u => u.isPlayer);
     else if (side === "enemy") all = all.filter(u => !u.isPlayer);
-    if (typeof inSkillRange === "function") {
+    // 写明了射程（engine.js · SKILL_RANGE）的技能以表为准，不从提示文字里猜
+    const ov = typeof SKILL_RANGE !== "undefined" ? SKILL_RANGE[sk.id] : null;
+    if (ov) {
+      all = all.filter(u => { const d = zoneDist(actor.zone, u.zone, state.zoneMode); return d >= ov.min && d <= ov.max; });
+    } else if (typeof inSkillRange === "function") {
       all = all.filter(u => inSkillRange(actor, u, hint, state.zoneMode));
     }
     if (side !== "ally" && side !== "allySelf") {
@@ -1715,6 +1719,55 @@
     autoSelect(true);
     refreshAll();
     idleBox();
+    battleIntro(spec.kind === "boss" || enc.tier === "boss" ? "boss" : spec.kind === "elite" || enc.tier === "elite" ? "elite" : "normal");
+  }
+
+  /* ---------- 开战前的大字：战斗类型、几区制、天气、场地 ----------
+   * 准备阶段（点「开始战斗」之前）弹出，逐行猛地放大落定。黑字、白色外框，内框颜色跟着天气 / 场地走，
+   * 免得玩家漏看天气这种要紧的信息。点一下或几秒后自动消失。 */
+  const INTRO_WEATHER = {
+    none: ["常态", null], heat: ["酷暑", "#ff5a1f"], snow: ["雪天", "#8fdcff"], acid: ["酸雨", "#7ee04a"],
+    thunder: ["雷鸣", "#ffd23f"], glow: ["微光", "#fff08a"], sand: ["沙暴", "#e2a24f"], phase: ["相位", "#c07bff"]
+  };
+  const INTRO_TIER = { boss: ["首领战斗", "#ff2e3f"], elite: ["精英战斗", "#ff9f1c"], normal: ["普通战斗", "#9aa6b2"] };
+  const INTRO_FIELD = [
+    ["fire", "火场", "#ff6a2b"], ["electric", "高压场地", "#ffd23f"], ["acid", "酸液地面", "#7ee04a"],
+    ["ice", "冻土", "#8fdcff"], ["energy", "能量场", "#fff08a"], ["harmonic", "干涉场地", "#c07bff"],
+    ["heal", "治愈场地", "#6ee7a8"], ["highland", "高地", "#d8c3a5"], ["abyss", "深渊", "#7a6cff"],
+    ["collapseOn", "塌陷区域", "#b08968"], ["isolate", "隔离", "#9aa6b2"]
+  ];
+  function battleIntro(tier) {
+    if (typeof document === "undefined") return;
+    // 战斗画面还没显示（例如打开网页时预先布置的原型战斗）：等切到战斗画面再弹
+    if (typeof Screens !== "undefined" && Screens.is && !Screens.is("battle")) {
+      G.pendingIntro = tier || "normal";
+      return;
+    }
+    G.pendingIntro = null;
+    const old = document.getElementById("g-intro");
+    if (old) old.remove();
+    const lines = [];
+    const t = INTRO_TIER[tier] || INTRO_TIER.normal;
+    lines.push({ text: t[0], color: t[1], big: true });
+    const zm = Number(state.zoneMode) || 2;
+    lines.push({ text: zm === 3 ? "三区制" : "两区制", color: "#6cc4ff" });
+    const w = INTRO_WEATHER[state.weather] || [state.weather, "#ffffff"];
+    if (state.weather && state.weather !== "none") lines.push({ text: "天气 · " + w[0], color: w[1] });
+    for (let z = 1; z <= zm; z++) {
+      const f = (state.fields || {})[z] || {};
+      INTRO_FIELD.forEach(([k, name, color]) => {
+        const on = k === "fire" ? (typeof fieldFireOn === "function" ? fieldFireOn(f) : !!f.fire) : !!f[k];
+        if (on) lines.push({ text: `${z} 区 · ${name}`, color });
+      });
+    }
+    const box = el("div", "battle-intro" + (tier === "boss" ? " boss" : ""));
+    box.id = "g-intro";
+    box.innerHTML = `<div class="bi-flash" style="--c:${lines[0].color}"></div>` + lines.map((l, i) =>
+      `<div class="bi-line${l.big ? " big" : ""}" style="--inner:${l.color};animation-delay:${0.08 + i * 0.28}s" data-text="${esc(l.text)}"><span>${esc(l.text)}</span></div>`).join("");
+    const close = () => { box.classList.add("out"); realTimeout(() => box.remove(), 400); };
+    box.addEventListener("click", close);
+    document.body.appendChild(box);
+    realTimeout(close, 2600 + lines.length * 280);
   }
 
   function setupBattle(level, encounter) {
@@ -1789,6 +1842,7 @@
       autoSelect(true);
       refreshAll();
       idleBox();
+      battleIntro(enc.tier);
       return;
     }
     const presets = enemyPresets();
@@ -1816,6 +1870,7 @@
     autoSelect(true);
     refreshAll();
     idleBox();
+    battleIntro("normal");
   }
 
   /* ================= 11. HUD / 记录 ================= */
@@ -2752,6 +2807,7 @@
   G.snapAll = snapAll;
   G.setupBattle = setupBattle;
   G.startRogueBattle = startRogueBattle;
+  G.showPendingIntro = () => { if (G.pendingIntro && !state.combatStarted) battleIntro(G.pendingIntro); };
   G.armSkill = armSkill;
   G.gameSkills = gameSkills;
   G.blockReason = blockReason;
