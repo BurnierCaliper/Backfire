@@ -1397,13 +1397,14 @@ function beginRound(notes) {
   startLogTurn();
   notes.push(`—— 第 ${state.turnNo} 回合开始 ——`);
   if (typeof mutinyTick === "function") mutinyTick(notes);
+  if (typeof syncBpAll === "function") syncBpAll();
   state.units.forEach(u => {
     if (u.kit === "xia" && isCrushing(u)) {
       const ct = crushingTarget(u);
       u.zone = Number(ct.zone);
       notes.push(...crushOnce(u, ct, true));
     }
-    if (u.kit === "nora") {
+    if (u.kit === "nora" && (typeof passiveOn !== "function" || passiveOn(u))) {
       u.resources = u.resources || {};
       if (u.resources.forceCruelNext) {
         u.resources.forceCruelNext = false;
@@ -1555,7 +1556,7 @@ function beginRound(notes) {
       notes.push(`${u.name} 酸雨溅射回复 ${u.level}`);
     }
     const sand = (u.layers || []).find(l => l.type === "sand");
-    if (u.kit === "tou" && u.resources) {
+    if (u.kit === "tou" && u.resources && (typeof passiveOn !== "function" || passiveOn(u))) {
       u.resources.shield = Math.min(3, (u.resources.shield || 0) + 1);
       notes.push(`${u.name} 圣盾 +1 → ${u.resources.shield}`);
     }
@@ -1614,7 +1615,7 @@ function startPlayerPhase() {
       u.resources.gambitWound = true;
       notes.push(`${u.name} 破釜沉舟生效：本回合攻击双倍，直到下次行动前受伤双倍。`);
     }
-    if (u.kit === "ras" && u.resources && !u.stunned) {
+    if (u.kit === "ras" && u.resources && !u.stunned && (typeof passiveOn !== "function" || passiveOn(u))) {
       addRasEnergy(20, "玩家回合开始");
       notes.push("拉斯缪尔回合开始累积能量 +20%。");
     }
@@ -2684,6 +2685,7 @@ function triggerLeaveOpportunity(mover, fromZone, notes) {
       dealTo(u, mover, { atk: 0, mult: 0, diceN: n, diceS: 6, element: "ice", baseBreak: 1, flags: { action: true, opportunity: true, blockResolved: true } });
       if (window.GAME && window.GAME.tape) window.GAME.tape.push({ type: "opp", attackerId: u.id, targetId: mover.id, name: u.name });
     }
+    if (typeof bpLeaveOpportunity === "function") bpLeaveOpportunity(u, mover, notes);
     if (u.kit === "thug_knife" && mover.isPlayer) {
       notes.push(`${u.name} 对离开区域的 ${mover.name} 发动借机攻击。`);
       dealTo(u, mover, { atk: effectiveAtk(u, state.units), mult: 1, diceN: 1, diceS: 8, element: "physical", baseBreak: 1, flags: { action: true, opportunity: true, blockResolved: true } });
@@ -2781,6 +2783,7 @@ function doMove(unit, dest, moveOpt) {
   unit.zone = dest;
   convertUnstableInHv(unit, notes);
   triggerLeaveOpportunity(unit, from, notes);
+  if (typeof bpAfterEnemyMove === "function") bpAfterEnemyMove(unit, notes);   // 单局图纸：稳妥的距离
   if (toF.ice && !unit.flying) {
     const br = state.weather === "snow" && currentWeatherFor(unit) === "snow" ? 2 : 1;
     const defBeforeIce = Math.max(0, Number(unit.def) || 0);
@@ -3010,7 +3013,7 @@ function applyCombat(target, result, attacker) {
     notes.push(`${target.name} 最内层归零，武器人倒下。`);
   }
   // 双相冲动：诺拉或维塔斯击杀单位后翻一次面
-  if (attacker && (attacker.kit === "nora" || attacker.kit === "vitas") &&
+  if (attacker && (attacker.kit === "nora" || attacker.kit === "vitas") && (typeof passiveOn !== "function" || passiveOn(attacker)) &&
       (target.dead || (target.isPlayer && target.dying)) && !target._noraKillCounted) {
     target._noraKillCounted = true;
     flipMood(noraOf(), notes, "击杀");
@@ -3362,6 +3365,7 @@ function refreshEconomy(u) {
     if (!u.flying && w > 0) bonus += 1;
   }
   if (state.fields[u.zone] && state.fields[u.zone].energy) ap += 1;
+  if (typeof bpEconomy === "function") ({ ap, bonus } = bpEconomy(u, { ap, bonus }));   // 单局图纸
   u.ap = Math.max(0, ap);
   u.apMax = u.ap;
   u.bonus = Math.max(0, bonus);
@@ -3408,14 +3412,14 @@ function highlandBlockMod(helper, attacker) {
   return 0;
 }
 
-function finalBlockChance(helper, attacker) {
+function finalBlockChance(helper, attacker, protectedUnit) {
   let c = blockChance(helper);
   if (c == null) c = 50;
   if (helper.kit === "hiaki" && helper.resources && helper.resources.stance === "iai") c = 100;
   c += highlandBlockMod(helper, attacker);
   if (helper.self === "anchor") c += 10;   // 千钧：格挡成功率 +10%
   if (helper.rallyBlock) c += helper.rallyBlock;
-  if (typeof unitWeaponMod === "function") c += Number(unitWeaponMod(helper).block) || 0;   // 单局图纸
+  if (typeof bpBlockBonus === "function") c += bpBlockBonus(helper, protectedUnit);   // 单局图纸
   return Math.max(5, Math.min(100, c));
 }
 
@@ -3477,7 +3481,7 @@ function standUp(u) {
   } else {
     appendLog(`${u.name} 起身继续战斗。之后受伤改打坚毅生命。`);
   }
-  if (u.kit === "xia") {
+  if (u.kit === "xia" && (typeof passiveOn !== "function" || passiveOn(u))) {
     u.resources = u.resources || {};
     u.resources.engine = true;
     appendLog("背水一战：引擎强制启动，起身期间不失去架势。");
@@ -3929,7 +3933,8 @@ function eligibleAssisters(breaker, broken) {
     (unitCanFight(u) || (u.upOnShp && unitIsCombatReady(u) && !u.stunned) || broken.kit === "ufo_body") &&
     (assistSkillId(u) || broken.kit === "ufo_body") &&
     !(typeof isCrushing === "function" && isCrushing(u)) &&
-    (!breaker || u.id !== breaker.id)
+    (!breaker || u.id !== breaker.id) &&
+    (typeof bpCanAssistAttack !== "function" || bpCanAssistAttack(u))
   );
   if (broken.kit === "ufo_body") {
     if (list.every(u => u.id !== broken.id)) list.push(broken);
@@ -3974,6 +3979,7 @@ function queueAssistAttack(breaker, broken) {
     if (!broken || broken.def > 0) return;
   }
   if (broken._imbalanceLock) return;
+  if (broken.isPlayer && typeof bpFirstBreakGuard === "function" && bpFirstBreakGuard(broken)) return;
   const list = eligibleAssisters(breaker, broken);
   const side = broken.isPlayer ? "敌人" : "玩家角色";
   if (!list.length) {
@@ -4075,7 +4081,8 @@ function finishAssist(helperId, extra) {
   const sidSkill = job.vsPlayer
     ? (typeof enemyAssistSkillId === "function" ? enemyAssistSkillId(helper) : "en_aa")
     : assistSkillId(helper);
-  runSkill(sidSkill);
+  state._assistBy = helper.id;      // 协助攻击期间（图纸「恶眼」的伤害加成看这个）
+  try { runSkill(sidSkill); } finally { state._assistBy = null; }
   state.attackerId = prevAtk;
   state.targetId = prevT;
   renderAll();
@@ -4130,7 +4137,8 @@ function eligibleBlockers(target) {
     u.isPlayer && !u.hidden && u.id !== target.id &&
     Number(u.zone) === Number(target.zone) &&
     !u.stunned && crushOut(u) && ((u.bonus || 0) >= 1 || target.coverBy === u.id) &&
-    blockChance(u) != null
+    blockChance(u) != null &&
+    (typeof bpCanAssistBlock !== "function" || bpCanAssistBlock(u))
   );
 }
 
@@ -4151,7 +4159,7 @@ function performAssistBlock(helper, target, attacker, forced) {
     notes.push(`思念：对 ${target.name} 施加牵挂（同时只能有一名）。`);
   }
   if (isUnarmed(helper)) {
-    const chance = finalBlockChance(helper, attacker);
+    const chance = finalBlockChance(helper, attacker, target);
     const roll = forced.roll != null ? Number(forced.roll) : (1 + Math.floor(Math.random() * 100));
     const ok = forced.ok != null ? !!forced.ok : roll <= chance;
     notes.push(`${helper.name} 空手格挡 ${target.name}：d100=${roll} 成功率 ${chance}% → ${ok ? "成功" : "失败"}`);
@@ -4161,7 +4169,7 @@ function performAssistBlock(helper, target, attacker, forced) {
     } else notes.push("空手格挡失败：目标照常受伤。");
     return { ok, notes, bare: true };
   }
-  const chance = finalBlockChance(helper, attacker);
+  const chance = finalBlockChance(helper, attacker, target);
   // 手册第六章：发动格挡 −1 耐久（空手格挡不扣，已在上面返回）
   if (typeof ledgerOnBlock === "function") ledgerOnBlock(helper, notes);
   const rolls = forced.roll != null ? [Number(forced.roll)] : [1 + Math.floor(Math.random() * 100)];
@@ -4181,6 +4189,7 @@ function performAssistBlock(helper, target, attacker, forced) {
   }
   if (ok) {
     notes.push("成功：目标免伤，击破改由格挡者承担。");
+    if (typeof bpAfterBlock === "function") bpAfterBlock(helper, target, notes);   // 单局图纸
     // 雷鸣：成功的协助格挡可以额外造成 等级 × 1d4 闪电伤害的反伤
     if (attacker && !attacker.dead && currentWeatherFor(helper) === "thunder") {
       const r = takeDice(Math.max(1, Number(helper.level) || 1), 4, 0);
@@ -4313,7 +4322,7 @@ function openBlockModal(job) {
   helpers.forEach(h => {
     const b = document.createElement("button");
     b.className = "btn primary";
-    b.textContent = `${h.name} ${isUnarmed(h) ? "空手格挡" : "格挡"}（${finalBlockChance(h, attacker)}%）`;
+    b.textContent = `${h.name} ${isUnarmed(h) ? "空手格挡" : "格挡"}（${finalBlockChance(h, attacker, target)}%）`;
     b.onclick = () => finishBlock(h.id);
     box.appendChild(b);
   });
@@ -4899,7 +4908,7 @@ function dealTo(attacker, target, opt) {
   if (attacker && !attacker.isPlayer && target && target.isPlayer && opt.flags.action && !opt.flags.assist && !opt.flags.aoe && opt.flags.block !== "assistOk" && !opt.flags.blockResolved) {
     const helpers = eligibleBlockers(target);
     if (helpers.length) {
-      appendLog(`${attacker.name} 攻击 ${target.name}。同区域可格挡：${helpers.map(h => h.name + "（附赠" + h.bonus + "，" + finalBlockChance(h, attacker) + "%）").join("、")}。`);
+      appendLog(`${attacker.name} 攻击 ${target.name}。同区域可格挡：${helpers.map(h => h.name + "（附赠" + h.bonus + "，" + finalBlockChance(h, attacker, target) + "%）").join("、")}。`);
       state.blockQueue = state.blockQueue || [];
       state.blockQueue.push({
         attackerId: attacker.id,
@@ -4977,9 +4986,17 @@ function dealTo(attacker, target, opt) {
     diceValue = (Number(diceValue) || 0) + prepBonus;
     extraDiceNote = extraDiceNote ? extraDiceNote + " + " + prepNote : prepNote;
   }
+  // 单局图纸：打近 / 远距离的额外骰、承受伤害 +1d10 等（mods.js）
+  if (typeof bpDiceAdjust === "function") {
+    const adj = bpDiceAdjust(attacker, target, flags);
+    if (adj.text.length) {
+      diceValue = (Number(diceValue) || 0) + adj.value;
+      extraDiceNote = [extraDiceNote, ...adj.text].filter(Boolean).join(" + ");
+    }
+  }
   // 过度自信：现有血量 ≥ 血量上限即减伤。上限不含废物利用等临时血量，
   // 所以靠临时层把血量堆回（甚至超过）上限时也会触发。
-  if (target && target.kit === "kolt" && flags.action && !target.upOnShp) {
+  if (target && target.kit === "kolt" && flags.action && !target.upOnShp && (typeof passiveOn !== "function" || passiveOn(target))) {
     const cur = totalCurHp(target);
     const mx = baseMaxHp(target);
     if (mx > 0 && cur >= mx) flags.prideReduce = true;
@@ -4994,7 +5011,7 @@ function dealTo(attacker, target, opt) {
   const res = resolveAttack({
     attacker, target,
     atk: opt.atk != null ? opt.atk : effectiveAtk(attacker, state.units),
-    mult: opt.mult != null ? opt.mult : 1,
+    mult: ((flags.assist || (attacker && state._assistBy === attacker.id)) && typeof bpAssistMult === "function") ? bpAssistMult(attacker, opt.mult != null ? opt.mult : 1) : (opt.mult != null ? opt.mult : 1),
     flat: opt.flat || 0,
     diceValue,
     element: opt.element || "physical",
@@ -5035,11 +5052,13 @@ function dealTo(attacker, target, opt) {
     (target.layers || []).forEach(l => { l.current = 0; });
     target.dead = true;
   }
-  if (attacker && (attacker.kit === "kolt" || attacker.kit === "torque") && target && !target.isPlayer && flags.action && !flags.aoe) {
+  if (attacker && (attacker.kit === "kolt" || attacker.kit === "torque") && target && !target.isPlayer && flags.action && !flags.aoe &&
+      (typeof passiveOn !== "function" || passiveOn(attacker))) {
     target.tauntTo = (findKit("kolt", state.units) || attacker).id;
     extra.push(`过度自信：${target.name} 被嘲讽，下次攻击必须打柯尔特。`);
   }
   applyAtkFxAfter(attacker, target, res, flags, extra, opt);
+  if (typeof bpAfterAttack === "function") bpAfterAttack(attacker, target, res, flags, extra);
   if (res && !res.pending) noteActionHit(target, res);
   if (flags.block === "assistOk") {
     extra.push(...applyBlockBreakToHelper(flags.blockHelperId, res.helperBreak));

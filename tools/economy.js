@@ -78,6 +78,17 @@ function playRun(kits, seed) {
     });
   }
   const weaponAvg = () => avg([].concat(...run.party.map(h => Object.values(h.weaponLevels))), x => x);
+  /** 在某位工匠那里：钱够（留够一次长休）就升级等级最低的武器 */
+  function smithing(a, sid) {
+    if (!sid) return;
+    if (R.smithInfo(run, sid).needsIntro) R.introduceSmith(run, sid);
+    for (;;) {
+      const o = R.smithOptions(run, sid).filter(x => !x.max).sort((x, y) => x.level - y.level || x.cost - y.cost)[0];
+      if (!o || money() - o.cost < reserve()) break;
+      R.upgradeWeapon(run, o.kit, sid);
+      a.spendUpgrade += o.cost; a.upgrades++;
+    }
+  }
 
   for (let guard = 0; guard < 900 && run.stage !== "over"; guard++) {
     const a = A();
@@ -85,6 +96,9 @@ function playRun(kits, seed) {
     const pend = R.pendingChoices(run);
     if (pend.length) { const p = pend[0]; R.choose(run, p.kit, p.index, R.choiceOptions(run, p.kit, p.index)[0].value); continue; }
     if (run.stage === "board") {
+      // 任务板上来的工匠：挑最便宜的那位
+      const sids = (run.smiths || []).slice().sort((x, y) => (R.smithQuote(run, x, 2) || {}).cost - (R.smithQuote(run, y, 2) || {}).cost);
+      if (sids.length) { a.smiths++; smithing(a, sids[0]); }
       const side = run.board.findIndex(t => !R.taskBlocked(run, t) && !R.taskWarning(run, t));
       const task = side >= 0 ? run.board[side] : run.main;
       const pay = R.taskPay(run, task);
@@ -120,12 +134,7 @@ function playRun(kits, seed) {
         continue;
       } else if (node.type === "smith") {
         a.smiths++;
-        for (;;) {
-          const o = R.smithOptions(run).filter(x => !x.max).sort((x, y) => x.level - y.level || x.cost - y.cost)[0];
-          if (!o || money() - o.cost < reserve()) break;
-          R.upgradeWeapon(run, o.kit);
-          a.spendUpgrade += o.cost; a.upgrades++;
-        }
+        smithing(a, R.presentSmiths(run)[0]);
         const m1 = money();
         R.leaveNode(run);
         a.reward += money() - m1;

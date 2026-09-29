@@ -152,16 +152,17 @@ test("商店：花奎支买水和食物", () => {
   assert.throws(() => R.buy(run, "food_can", 1), /奎支不够/);
 });
 
-test("工匠：花钱升级武器（不要材料），绯秋两把刀分开升", () => {
+test("工匠：花钱升级武器（材料按物品表折价），绯秋两把刀分开升", () => {
   const { c, run, R } = fresh(["hiaki", "kolt"], "R8");
   R.acceptTask(run, 0);
-  run.task.nodes[run.task.index] = { type: "smith", done: false };
+  run.task.nodes[run.task.index] = { type: "smith", done: false, smith: "zekahr" };
   c.S.state.kuizhi = 100000;
   R.upgradeWeapon(run, "niu");
   assert.equal(run.party.find(h => h.kit === "hiaki").weaponLevels.niu, 2);
   assert.equal(run.party.find(h => h.kit === "hiaki").weaponLevels.naruto, 1);
-  assert.equal(R.smithCost(2), 500);          // 手册 3000 × 1/6
-  assert.equal(R.smithCost(10), 3300);        // 手册 20000 × 1/6，按 100 取整
+  assert.equal(R.smithCost(2), 500);          // 3 金属 = 3000，× 1/6
+  assert.equal(R.smithCost(5), 3300);         // 2 精炼合金 + 2 金属 + 加工费 8000 = 20000，× 1/6，按 100 取整
+  assert.equal(R.smithCost(10), 45000);       // 1 赫心结晶 + 3 稀有晶体 + 加工费 20000 = 270000，× 1/6
   assert.equal(c.S.state.kuizhi, 100000 - 500);
 });
 

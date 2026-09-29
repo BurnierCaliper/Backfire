@@ -107,7 +107,7 @@ const BattleSim = (function () {
         const blocker = unitById(choice);
         let forced = null;
         if (blocker) {
-          const chance = finalBlockChance(blocker, attacker);
+          const chance = finalBlockChance(blocker, attacker, target);
           const iai = blocker.kit === "hiaki" && blocker.resources && blocker.resources.stance === "iai";
           const roll = 1 + Math.floor(Math.random() * 100);
           forced = { roll, ok: iai ? true : roll <= chance, chance, iai };
@@ -197,8 +197,8 @@ const BattleSim = (function () {
       }
       return null;
     },
-    pickBlocker(helpers, attacker) {
-      return helpers.slice().sort((a, b) => finalBlockChance(b, attacker) - finalBlockChance(a, attacker))[0].id;
+    pickBlocker(helpers, attacker, target) {
+      return helpers.slice().sort((a, b) => finalBlockChance(b, attacker, target) - finalBlockChance(a, attacker, target))[0].id;
     },
     pickAssister(list) {
       return list.slice().sort((a, b) => (effectiveAtk(b, state.units) || 0) - (effectiveAtk(a, state.units) || 0))[0].id;

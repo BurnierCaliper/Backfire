@@ -113,11 +113,15 @@ function weaponName(kit) {
 }
 /** 耐久上限：基础耐久 + 武器等级 / 2（与 growth.js 一致） */
 function weaponDurMax(kit) {
+  const base = weaponDurBase(kit);
+  return typeof bpDurMax === "function" ? bpDurMax(base, weaponMod(kit)) : base;
+}
+/** 没装图纸时的耐久上限 */
+function weaponDurBase(kit) {
   const owner = weaponOwner(kit);
   const lv = owner && owner.weaponLevels && owner.weaponLevels[kit] ? Number(owner.weaponLevels[kit]) : 1;
   const g = (typeof WEAPON_GROWTH !== "undefined" && WEAPON_GROWTH[kit]) || {};
-  const mod = weaponMod(kit);
-  return Math.max(1, (g.baseDur || 5) + Math.floor(lv / 2) + (Number(mod.dur) || 0));
+  return (g.baseDur || 5) + Math.floor(lv / 2);
 }
 /** 武器上装的客制化图纸加成（单局在开战前写进 state.weaponMods；战斗原型没有） */
 function weaponMod(kit) {

@@ -242,8 +242,10 @@
     const progress = info.claimed
       ? `已领图纸「${esc(Rogue.blueprintById(info.claimed).name)}」`
       : info.canClaim ? "可以领一张图纸" : `在他这里升级 ${info.uses}/${info.need} 次可领图纸`;
-    const rows = Rogue.smithOptions(run).map(o =>
-      `<div class="shop-row"><span class="s-name">${esc(o.name)}<small>现在 ${o.level} 级</small></span>
+    const rows = info.needsIntro
+      ? `<p class="r-hint">他不帮陌生人强化武器。</p><button class="g-btn" data-intro="${esc(id)}">给他看看你的武器</button>`
+      : Rogue.smithOptions(run, id).map(o =>
+      `<div class="shop-row"><span class="s-name">${esc(o.name)}<small>现在 ${o.level} 级${o.hours ? ` · 要帮忙 ${o.hours} 小时` : ""}</small></span>
         <span class="s-have"></span>
         <span class="s-price">${o.max ? "满级" : o.cost}</span>
         <button class="g-btn" data-upgrade="${esc(o.kit)}" data-smith="${esc(id)}" ${o.max || k < o.cost ? "disabled" : ""}>升到 ${o.level + 1} 级</button></div>`).join("");
@@ -251,7 +253,8 @@
       <div class="r-choices">${info.blueprints.map(b =>
         `<button class="g-btn" data-claim="${esc(b.id)}" data-smith="${esc(id)}">${esc(b.name)}<small>${esc(b.text)}</small></button>`).join("")}</div>` : "";
     return `<details class="smith"${open || info.canClaim ? " open" : ""}>
-      <summary><b>${esc(info.name)}</b><span class="sm-blurb">${esc(info.blurb)}</span><span class="sm-prog${info.canClaim ? " ready" : ""}">${progress}</span></summary>
+      <summary><b>${esc(info.name)}</b><span class="sm-prog${info.canClaim ? " ready" : ""}">${progress}</span></summary>
+      <p class="sm-lore">${esc(info.blurb)}${info.priceNote ? `<br><span class="sm-price">${esc(info.priceNote)}</span>` : ""}</p>
       ${claim}
       <div class="shop">${rows}</div>
     </details>`;
@@ -260,6 +263,7 @@
   function installRows(smithId) {
     const bps = run.blueprints || [];
     if (!bps.length || !smithId) return "";
+    if (!Rogue.smithInfo(run, smithId).canInstall) return `<p class="r-hint">手里有图纸，但 ${esc(Rogue.smithInfo(run, smithId).name)} 装不了，去找别的武器工匠。</p>`;
     const cost = ROGUE_SMITH_RULES.installCost;
     const k = Rogue.supplies().kuizhi;
     const weapons = run.party.flatMap(h => Rogue.heroView(run, h).weapons);
@@ -277,7 +281,7 @@
     return `<h2>工匠</h2>
       <p class="r-hint">这次回城遇到 ${ids.length} 位工匠。手里有 ${Rogue.supplies().kuizhi} 奎支。在同一位工匠那里升级满 ${ROGUE_SMITH_RULES.blueprintAfter} 次，他会给你一张客制化图纸。</p>
       ${ids.map(id => smithCard(id, false)).join("")}
-      ${installRows(ids[0])}`;
+      ${installRows(ids.find(id => Rogue.smithInfo(run, id).canInstall) || ids[0])}`;
   }
 
   /** 维修工具包（手册：修复 10 点耐久），有的话在商店、工匠处、休整时都能用 */
@@ -395,6 +399,7 @@
     });
     body.querySelectorAll("[data-buy]").forEach(b => { b.onclick = () => act(() => Rogue.buy(run, b.dataset.buy, 1)); });
     body.querySelectorAll("[data-upgrade]").forEach(b => { b.onclick = () => act(() => Rogue.upgradeWeapon(run, b.dataset.upgrade, b.dataset.smith)); });
+    body.querySelectorAll("[data-intro]").forEach(b => { b.onclick = () => act(() => Rogue.introduceSmith(run, b.dataset.intro)); });
     body.querySelectorAll("[data-claim]").forEach(b => { b.onclick = () => act(() => Rogue.claimBlueprint(run, b.dataset.smith, b.dataset.claim)); });
     body.querySelectorAll("[data-install]").forEach(b => { b.onclick = () => act(() => Rogue.installBlueprint(run, b.dataset.install, b.dataset.kit, b.dataset.smith)); });
     body.querySelectorAll("[data-repair]").forEach(b => { b.onclick = () => act(() => Rogue.repairWeapon(run, b.dataset.repair)); });

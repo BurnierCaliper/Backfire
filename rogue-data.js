@@ -6,7 +6,8 @@
  *   ROGUE_TASKS       支线任务模板
  *   ROGUE_MAIN_TASK   主线任务模板（每幕开局自动接下）
  *   ROGUE_SHOP        商店卖什么、多少钱
- *   ROGUE_SMITH       工匠升级武器的费用
+ *   ROGUE_MATERIALS   材料价格（物品表）
+ *   ROGUE_SMITH       武器升级表：每级要的材料和加工费
  *   ROGUE_SMITHS      工匠名单与各自的客制化图纸（ROGUE_SMITH_RULES：出现几位、几次解锁图纸、安装价）
  *   ROGUE_CLINIC      诊所治疗与义体改造的价格
  *   ROGUE_LEVEL_REWARDS 升级时要做的选择（手册第三章）
@@ -70,8 +71,10 @@ const ROGUE_CONFIG = {
   perHeadBase: 2,
   // 任务奎支报酬随幕数上涨（已定方向，倍率占位，刻意克制）。额外幕接着往后排
   rewardActScale: [1, 1.2, 1.4, 1.6, 1.8, 2.0],
-  // 工匠费用 = 手册参考费用 × 这个倍率（已定：单局里便宜很多，先试 1/6），按 100 取整
+  // 工匠费用 = (材料按物品表折价 + 加工费) × 这个倍率（已定：单局里便宜很多，先试 1/6），按 100 取整。见 ROGUE_SMITH
   smithPriceScale: 1 / 6,
+  // ARMS 成员身份（特蕾莎 8 折）。单局还没有阵营系统，先关着
+  armsMember: false,
   // 敌人掉落：单局里统一按杂兵 / 精英 / 首领三档（已定）。
   // 已定：任务报酬是收入大头，掉落不超过收入的一半。三档的比例沿用主持人手册敌人表里各档掉落最多的
   // （杂兵 200 空投蜂群 · 精英 1150 巨人期望 · 首领占位 2300），整体乘 0.4，
@@ -153,55 +156,107 @@ const ROGUE_SHOP = [
   { key: "shockbomb",    price: 1200, give: { item: "shockbomb" } }
 ];
 
-/* 工匠：升到某一级的手册参考费用。已定：单局里不要材料，只花钱，实际收 cost × ROGUE_CONFIG.smithPriceScale。
- * 5–10 级照手册「参考费用」；2–4 级手册只写了材料，这里按材料基准价折算（金属 1000、精炼合金 5000），占位。 */
-const ROGUE_SMITH = {
-  maxLevel: 10,
-  cost: { 2: 3000, 3: 6000, 4: 6000, 5: 8000, 6: 10000, 7: 12000, 8: 15000, 9: 17000, 10: 20000 }
+/* 材料（物品表的价格）。单局里升级不收实物材料，按这张表折成奎支。 */
+const ROGUE_MATERIALS = {
+  metal:   { name: "金属",     price: 1000 },
+  alloy:   { name: "精炼合金", price: 5000 },
+  polymer: { name: "聚合材料", price: 10000 },
+  crystal: { name: "稀有晶体", price: 50000 },    // 黑市售价
+  heart:   { name: "赫心结晶", price: 100000 }    // 黑市售价
 };
 
-/* 工匠（名字、介绍、图纸都是占位，之后填内容）。
+/* 武器升级表（照设定：升到某一级要的材料 + 工匠的加工费）。
+ * 4 级以下本来可以自己在工作站升，没有加工费；5 级起只能找武器工匠，加工费是设定里「××奎支上下」的数。
+ * 单局里实际收费 = (材料按物品表折价 + 加工费 × 工匠的加工费倍率) × ROGUE_CONFIG.smithPriceScale，按 100 取整。 */
+const ROGUE_SMITH = {
+  maxLevel: 10,
+  recipe: {
+    2:  { mats: { metal: 3 } },
+    3:  { mats: { metal: 6 } },
+    4:  { mats: { alloy: 1, metal: 1 } },
+    5:  { mats: { alloy: 2, metal: 2 },    labor: 8000 },
+    6:  { mats: { polymer: 1, alloy: 3 },  labor: 10000 },
+    7:  { mats: { polymer: 2, alloy: 3 },  labor: 12000 },
+    8:  { mats: { crystal: 1, polymer: 3 }, labor: 15000 },
+    9:  { mats: { crystal: 2, polymer: 3 }, labor: 17000 },
+    10: { mats: { heart: 1, crystal: 3 },  labor: 20000 }
+  }
+};
+
+/* 武器工匠（设定照作者给的人物表）。
  *   ROGUE_SMITH_RULES.onBoard        每次回到任务板时随机出现几位不同的工匠（已定：3）
- *   ROGUE_SMITH_RULES.blueprintAfter 在同一位工匠那里升级满几次，就能从他的图纸里挑一张（已定：5）
- *   ROGUE_SMITH_RULES.installCost    把图纸装到武器上的价格，在任何工匠处都能装（已定：5000）
- * 图纸效果 mod（拿着这把武器时生效；武器人上场时作用在武器人身上）：
- *   atk    atk 加值          dur   耐久上限加值          block  协助格挡成功率加值（%）
- * 一把武器只能装一张图纸，装新的会替换掉旧的。每位工匠的图纸只能领一次。 */
+ *   ROGUE_SMITH_RULES.blueprintAfter 在同一位工匠那里升级满几次，就能从他的客制化里挑一张图纸（已定：5，代替设定里的任务线）
+ *   ROGUE_SMITH_RULES.installCost    把图纸装到武器上的价格（已定：5000）
+ * 每位工匠：
+ *   home      所在的地方（单局在这个区域时出现的机会翻倍）       weight  出现的权重（默认 1）
+ *   price     收费规则：
+ *     priceMul        总价倍率                 laborMul   加工费倍率
+ *     extraMats       每次升级多消耗几个材料（加最便宜的那种）
+ *     laborHours      不收加工费，改为帮忙干活，花这么多小时（算进「距上次长休」）
+ *     needsIntro      不帮陌生人：要先「给他看看武器」，之后价格正常
+ *     friendAfter / friendDiscount  在他这里升级满几次后关系变好，总价打折
+ *     armsDiscount    ARMS 成员的折扣（单局还没有阵营，ROGUE_CONFIG.armsMember 打开才生效）
+ *   canInstall  能不能帮你装图纸（努尔&哈米德不是武器工匠，装不了）
+ *   blueprints  客制化图纸，mod 字段的含义见 mods.js 开头 */
 const ROGUE_SMITH_RULES = {
   onBoard: 3,
   blueprintAfter: 5,
   installCost: 5000
 };
 const ROGUE_SMITHS = [
-  { id: "he",    name: "老何",   blurb: "外城区的老铁匠，只信结实",
+  { id: "trevor", name: "“独眼”崔佛", home: "外城区",
+    blurb: "戴着夸张高倍观察镜的独眼老人，从地球被抓来的焊接工。孤僻排外，常帮狂徒改武器，风格狂野。",
+    price: { needsIntro: true, friendAfter: 3, friendDiscount: 0.15 },
     blueprints: [
-      { id: "bp_he_forge",  name: "加重锻打", text: "atk +2",          mod: { atk: 2 } },
-      { id: "bp_he_temper", name: "回火淬炼", text: "耐久上限 +4",     mod: { dur: 4 } }
+      { id: "bp_trevor_bigkill", name: "大杀器", text: "耐久减半，减去的数值 +2 加在 atk 上",
+        mod: { bigKill: true } },
+      { id: "bp_trevor_romance", name: "狂徒浪漫", text: "打近距离敌人伤害掷骰 +1d8；承受伤害总是 +1d10；架势 −2，耐久 −3",
+        mod: { meleeDice: [1, 8], takenDice: [1, 10], def: -2, dur: -3 } }
     ] },
-  { id: "suo",   name: "锁匠阿索", blurb: "修过一辈子门锁，懂得怎么卡住东西",
+  { id: "teresa", name: "特蕾莎·特雷丝", home: null,
+    blurb: "ARMS 的武器工匠，靠机械背包上的机械腿走路的小个子鼠类人。对新奇科技着迷，不问阵营。喜欢西瓜。",
+    price: { armsDiscount: 0.2 },
     blueprints: [
-      { id: "bp_suo_guard", name: "护手卡槽", text: "协助格挡成功率 +10%", mod: { block: 10 } },
-      { id: "bp_suo_frame", name: "加固骨架", text: "耐久上限 +2，atk +1",  mod: { dur: 2, atk: 1 } }
+      { id: "bp_teresa_light", name: "轻量化处理", text: "atk −4，架势 −1，耐久 −2；持有者每回合多 1 附赠动作，武器人形态每回合多 1 行动点",
+        mod: { atk: -4, def: -1, dur: -2, bonusPerRound: 1, weaponApPerRound: 1 } },
+      { id: "bp_teresa_exp", name: "实验性选项", text: "行动点 +1！失去附赠动作；atk 减少 1/4，架势 −1，耐久 −2",
+        mod: { apPerRound: 1, noBonus: true, atkPct: -0.25, def: -1, dur: -2 } }
     ] },
-  { id: "mei",   name: "焊工梅",  blurb: "黑市里手最稳的焊枪",
+  { id: "zekahr", name: "“双面”泽卡尔", home: "巨人城",
+    blurb: "满身改装件和霓虹涂鸦的蜥蜴，住在巨人城的废弃下水道里。自诩艺术家，也是情报商。价格合理。",
+    price: {},
     blueprints: [
-      { id: "bp_mei_edge",  name: "高频刃口", text: "atk +3，耐久上限 −1", mod: { atk: 3, dur: -1 } },
-      { id: "bp_mei_seam",  name: "满焊接缝", text: "耐久上限 +3",        mod: { dur: 3 } }
+      { id: "bp_zekahr_evil", name: "恶眼 רַע־עַיִן", text: "无法为其他角色协助格挡；协助攻击伤害 +50%；耐久 −3",
+        mod: { noAssistBlock: true, assistAtkPct: 0.5, dur: -3 } },
+      { id: "bp_zekahr_fool", name: "蠢货 כְּסִיל", text: "协助格挡成功率 +10%，无法协助攻击；架势 +1；敌人更倾向于攻击你；成功格挡后恢复 2d4 生命",
+        mod: { block: 10, noAssistAttack: true, def: 1, aggro: true, healOnBlock: [2, 4] } }
     ] },
-  { id: "twins", name: "拆解双子", blurb: "从回收厂淘零件，价格公道",
+  { id: "tima", name: "“愚人”季玛", home: "沙漠",
+    blurb: "戴着奇怪金属帽的瘦小巨人，唯一不在蜂巢思维里的巨人，被同族通缉，躲在沙漠。不收钱，但要你帮他建庇护所。",
+    price: { laborHours: 4 },
     blueprints: [
-      { id: "bp_tw_scrap",  name: "废料配重", text: "atk +1，协助格挡成功率 +5%", mod: { atk: 1, block: 5 } },
-      { id: "bp_tw_spare",  name: "备用件",   text: "耐久上限 +5，atk −1",       mod: { dur: 5, atk: -1 } }
+      { id: "bp_tima_camo", name: "安全的迷彩", text: "显著降低被敌人当做目标的概率，武器人形态一定不会被攻击；耐久 −2，格挡成功率 −10%",
+        mod: { stealth: true, dur: -2, block: -10 } },
+      { id: "bp_tima_range", name: "稳妥的距离", text: "远距离攻击伤害掷骰 +1d4，近距离攻击伤害 −3；有敌人进入你所在的区时自动移到另一个区；架势 −1",
+        mod: { rangedDice: [1, 4], meleeFlat: -3, autoRetreat: true, def: -1 } }
     ] },
-  { id: "ou",    name: "欧师傅",  blurb: "据说给警卫队修过枪",
+  { id: "morma", name: "摩尔玛", home: "巨人城", weight: 0.3,
+    blurb: "巨腕军火工业军火设计开发部组长，穿着装满水的制式工作服的粉色触灵。严厉权威，嫌弃拼凑的武器，一切按制式标准改。",
+    price: {},
     blueprints: [
-      { id: "bp_ou_bore",   name: "精校膛线", text: "atk +2，耐久上限 +1", mod: { atk: 2, dur: 1 } },
-      { id: "bp_ou_brace",  name: "格挡支架", text: "协助格挡成功率 +15%，atk −1", mod: { block: 15, atk: -1 } }
+      { id: "bp_morma_wam56", name: "WAM-56", text: "放弃角色自身的被动。借机攻击单元：敌人离开你所在区时自动攻击 atk+1d6；近距离压制单元：同区敌人 atk −4",
+        mod: { noPassive: true, oppAttack: true, suppress: 4 } },
+      { id: "bp_morma_mr2165", name: "MR-2165", text: "放弃角色自身的被动。团队协作单元：成功协助格挡时被保护的队友清除负面状态；坚守阵地单元：第一次被击破架势时不触发敌人的协助攻击，并恢复 2 架势",
+        mod: { noPassive: true, blockCleanse: true, firstBreakGuard: true } }
     ] },
-  { id: "lin",   name: "林",      blurb: "不说话的年轻人，活儿却很细",
+  { id: "nurhamid", name: "努尔 & 哈米德", home: null,
+    blurb: "第一采矿场的熊兽人姐弟，替巨人维护大型机械的机械护理师。努尔直爽，哈米德寡言。加工费便宜两成，但多耗两个材料；装不了图纸。",
+    price: { laborMul: 0.8, extraMats: 2 }, canInstall: false,
     blueprints: [
-      { id: "bp_lin_balance", name: "重心调校", text: "协助格挡成功率 +8%，耐久上限 +1", mod: { block: 8, dur: 1 } },
-      { id: "bp_lin_core",    name: "芯材替换", text: "atk +2",                        mod: { atk: 2 } }
+      { id: "bp_nur_safe", name: "愿你无恙（努尔）", text: "被队友协助格挡时成功率 +10%；被属性克制时额外伤害只算 25%；受到和施加的治疗都 +2d4；攻击伤害 −1d6，耐久 −2",
+        mod: { protectedBlock: 10, weaknessCap: 0.25, healBonus: [2, 4], attackDice: [1, 6, -1], dur: -2 } },
+      { id: "bp_hamid_win", name: "愿你常胜（哈米德）", text: "攻击属性效果不好时额外 +1 击破；效果绝佳时 50% 施加对应的状态效果；atk −3，耐久 −2",
+        mod: { resistBreak: 1, greatStatus: 0.5, atk: -3, dur: -2 } }
     ] }
 ];
 

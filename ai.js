@@ -17,7 +17,8 @@ const EnemyAI = (function () {
     return (u.layers || []).reduce((a, l) => a + Math.max(0, Number(l.current) || 0), 0);
   }
   function validPrey() {
-    return players().filter(u => unitAlive(u) && !u.hidden && !(u.dying && !u.upOnShp));
+    return players().filter(u => unitAlive(u) && !u.hidden && !(u.dying && !u.upOnShp) &&
+      !(typeof bpUntargetable === "function" && bpUntargetable(u)));   // 单局图纸：安全的迷彩（武器人形态）
   }
   function canAimSkill(u, sid, t) {
     if (!u || !t || !unitAlive(t) || t.hidden || t.fused) return false;
@@ -130,6 +131,11 @@ const EnemyAI = (function () {
 
   /** 选目标。强制目标（决一死战 / 嘲讽）优先，其次手册写明的追击规则，最后才是同区优先。 */
   function aiTarget(u, spec, prey) {
+    const pick = aiTargetBase(u, spec, prey);
+    // 单局图纸：蠢货让敌人更倾向于打你，安全的迷彩让敌人很少选你
+    return typeof bpRetarget === "function" ? bpRetarget(pick, prey) : pick;
+  }
+  function aiTargetBase(u, spec, prey) {
     const duel = typeof touDuelVictim === "function" ? touDuelVictim(u) : null;
     if (duel && unitAlive(duel) && !(duel.dying && !duel.upOnShp)) return { unit: duel, forced: true };
     if (u.tauntTo) {

@@ -933,7 +933,7 @@
         const blocker = unitById(choice);
         let forced = null;
         if (blocker) {
-          const chance = finalBlockChance(blocker, attacker);
+          const chance = finalBlockChance(blocker, attacker, target);
           const iai = blocker.kit === "hiaki" && blocker.resources && blocker.resources.stance === "iai";
           const roll = 1 + Math.floor(Math.random() * 100);
           const ok = iai ? true : roll <= chance;
@@ -1053,7 +1053,7 @@
       "同区有附赠行动的队友可以协助格挡。成功免伤，但仍扣架势（最少留 1）。闪白部分是不格挡时会受到的伤害。",
       helpers.map(h => ({
         label: `${h.name} ${h.dying && !h.upOnShp ? "起身并格挡" : isUnarmed(h) ? "空手格挡" : "格挡"}`,
-        sub: `成功率 ${finalBlockChance(h, attacker)}% · 消耗附赠行动${h.dying && !h.upOnShp ? " · 会先起身，之后受伤改打坚毅生命" : ""}`,
+        sub: `成功率 ${finalBlockChance(h, attacker, target)}% · 消耗附赠行动${h.dying && !h.upOnShp ? " · 会先起身，之后受伤改打坚毅生命" : ""}`,
         value: h.id,
         onHover: noBlock
       })),

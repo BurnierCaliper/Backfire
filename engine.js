@@ -440,7 +440,7 @@ function resolveAttack(ctx) {
   }
 
   const diceV = Number(ctx.diceValue) || 0;
-  let rawBase = atk * mult + (Number(ctx.flat) || 0) + diceV;
+  let rawBase = Math.max(0, atk * mult + (Number(ctx.flat) || 0) + diceV);
   add(`基础包 = ATK ${round2(atk)} × 倍率 ${round2(mult)} + 固定 ${ctx.flat || 0} + 骰子 ${round2(diceV)} = ${round2(rawBase)}`);
 
   let hits = Math.max(1, Number(ctx.hits) || 1);
@@ -505,6 +505,10 @@ function resolveAttack(ctx) {
     if (!onShp && t.instant && t.instant.melt && startLayer && startLayer.type === "armor" && element === "physical") {
       hAdd(`克制表原值 ${pctTxt(cMod)}，熔融装甲将物理修正强制改为 +50%。`);
       cMod = 0.50;
+    }
+    if (!onShp && typeof bpChartCap === "function") {
+      const capped = bpChartCap(t, cMod);
+      if (capped !== cMod) { hAdd(`愿你无恙：属性克制加成 ${pctTxt(cMod)} → ${pctTxt(capped)}。`); cMod = capped; }
     }
     pct += cMod;
     if (onShp) hAdd(`起身状态：克制表无修正（坚毅生命对全属性 0%）`);
@@ -925,7 +929,7 @@ function applyResultToUnit(target, result, attacker) {
     target.flying = false;
   }
   let spent = result.breakDealt;
-  if (target.kit === "xia" && target.upOnShp) {
+  if (target.kit === "xia" && target.upOnShp && (typeof passiveOn !== "function" || passiveOn(target))) {
     spent = 0;
     notes.push("背水一战：起身中不失去架势。");
   }
@@ -987,8 +991,9 @@ function applyResultToUnit(target, result, attacker) {
 
 function healUnit(unit, amount, opt) {
   if (!unit || unit.dead || unit.dying) return 0;
-  const raw = Math.max(0, Number(amount) || 0);
+  let raw = Math.max(0, Number(amount) || 0);
   if (!raw) return 0;
+  if (typeof bpHealBonus === "function") raw += bpHealBonus(unit);   // 单局图纸：愿你无恙
   opt = opt || {};
   if (unit.upOnShp) {
     const cap = Number(unit.shpMax) || 0;

@@ -305,6 +305,7 @@ const Rogue = (function () {
     state.exhaustTier = Math.min(3, exhaustTierFromHours(hoursAwake()));
     state.lootByRank = C.lootByRank || null;
     state.weaponMods = weaponModsOf(run);
+    if (typeof syncBpAll === "function") syncBpAll();
   }
   function captureHero(u, h) {
     h.level = u.level || 1;
@@ -606,18 +607,40 @@ const Rogue = (function () {
   }
 
   /* ---------- 工匠 ---------- */
-  function smithCost(level) {
-    const base = ROGUE_SMITH.cost[level];
-    if (base == null) return null;
-    return Math.max(100, Math.round(base * (C.smithPriceScale || 1) / 100) * 100);
+  /** 升到某一级的报价（rogue-data.js · ROGUE_SMITH.recipe × 材料价 + 加工费，再按工匠的收费规则）。
+   *  smithId 不给时按标准价算。返回 { cost, hours, mats, labor } 或 null（没有这一级） */
+  function smithQuote(run, smithId, level) {
+    const rc = ROGUE_SMITH.recipe[level];
+    if (!rc) return null;
+    const s = smithId ? smithById(smithId) : null;
+    const pr = (s && s.price) || {};
+    const mats = Object.assign({}, rc.mats);
+    if (pr.extraMats) {
+      const cheap = Object.keys(mats).sort((a, b) => ROGUE_MATERIALS[a].price - ROGUE_MATERIALS[b].price)[0];
+      mats[cheap] += pr.extraMats;
+    }
+    const matCost = Object.keys(mats).reduce((sum, k) => sum + ROGUE_MATERIALS[k].price * mats[k], 0);
+    let labor = (rc.labor || 0) * (pr.laborMul != null ? pr.laborMul : 1);
+    const hours = pr.laborHours && rc.labor ? pr.laborHours : 0;
+    if (pr.laborHours) labor = 0;
+    let mul = pr.priceMul != null ? pr.priceMul : 1;
+    if (run && smithId && pr.friendAfter && ((run.smithUses || {})[smithId] || 0) >= pr.friendAfter) mul *= 1 - (pr.friendDiscount || 0);
+    if (pr.armsDiscount && C.armsMember) mul *= 1 - pr.armsDiscount;
+    const raw = (matCost + labor) * mul * (C.smithPriceScale || 1);
+    return { cost: Math.max(100, Math.round(raw / 100) * 100), hours, mats, labor: Math.round(labor) };
   }
-  function smithOptions(run) {
+  /** 兼容旧接口：标准价 */
+  function smithCost(level) {
+    const q = smithQuote(null, null, level);
+    return q ? q.cost : null;
+  }
+  function smithOptions(run, smithId) {
     const out = [];
     run.party.forEach(h => h.weapons.forEach(k => {
       const lv = (h.weaponLevels || {})[k] || 1;
       const next = lv + 1;
-      const cost = next <= ROGUE_SMITH.maxLevel ? smithCost(next) : null;
-      out.push({ owner: h.kit, kit: k, name: heroName(k), level: lv, cost, max: cost == null });
+      const q = next <= ROGUE_SMITH.maxLevel ? smithQuote(run, smithId, next) : null;
+      out.push({ owner: h.kit, kit: k, name: heroName(k), level: lv, cost: q ? q.cost : null, hours: q ? q.hours : 0, max: !q });
     }));
     return out;
   }
@@ -640,21 +663,28 @@ const Rogue = (function () {
     run.blueprints = run.blueprints || [];
     run.installed = run.installed || {};
   }
-  function rollBoardSmiths(run) {
-    const all = (typeof ROGUE_SMITHS !== "undefined" ? ROGUE_SMITHS : []).map(s => s.id);
+  /** 按权重抽不重复的工匠：设定里的所在地和本幕区域一致时机会翻倍；摩尔玛之类权重低的很少见 */
+  function drawSmiths(run, n) {
+    const pool = (typeof ROGUE_SMITHS !== "undefined" ? ROGUE_SMITHS : []).map(s => ({
+      id: s.id, w: (s.weight != null ? s.weight : 1) * (s.home && s.home === region(run) ? 2 : 1)
+    }));
     const out = [];
-    withRng(`${run.seed}:smiths:${run.act}:${run.boardNo}`, () => {
-      const pool = all.slice();
-      while (out.length < SR().onBoard && pool.length) out.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
-    });
-    run.smiths = out;
+    while (out.length < n && pool.length) {
+      const total = pool.reduce((a, x) => a + x.w, 0);
+      let r = Math.random() * total, i = 0;
+      while (i < pool.length - 1 && r >= pool[i].w) { r -= pool[i].w; i++; }
+      out.push(pool.splice(i, 1)[0].id);
+    }
+    return out;
+  }
+  function rollBoardSmiths(run) {
+    run.smiths = withRng(`${run.seed}:smiths:${run.act}:${run.boardNo}`, () => drawSmiths(run, SR().onBoard));
   }
   /** 任务里的工匠节点是哪位（第一次走到时随机定下） */
   function nodeSmith(run, node) {
     if (!node || node.type !== "smith") return null;
     if (!node.smith) {
-      const all = (typeof ROGUE_SMITHS !== "undefined" ? ROGUE_SMITHS : []).map(s => s.id);
-      node.smith = withRng(`${run.seed}:nodesmith:${run.taskNo}:${run.task ? run.task.index : 0}`, () => all[Math.floor(Math.random() * all.length)]);
+      node.smith = withRng(`${run.seed}:nodesmith:${run.taskNo}:${run.task ? run.task.index : 0}`, () => drawSmiths(run, 1)[0]);
     }
     return node.smith;
   }
@@ -671,10 +701,14 @@ const Rogue = (function () {
     if (!s) return null;
     const uses = run.smithUses[id] || 0;
     const claimed = run.smithClaimed[id] || null;
+    const pr = s.price || {};
     return {
       id, name: s.name, blurb: s.blurb || "", uses, need: SR().blueprintAfter,
       claimed, canClaim: !claimed && uses >= SR().blueprintAfter,
-      blueprints: (s.blueprints || []).map(b => blueprintById(b.id))
+      blueprints: (s.blueprints || []).map(b => blueprintById(b.id)),
+      canInstall: s.canInstall !== false,
+      needsIntro: !!pr.needsIntro && !(run.smithIntro || {})[id],
+      priceNote: smithPriceNote(run, s)
     };
   }
   function requireSmith(run, smithId) {
@@ -683,10 +717,36 @@ const Rogue = (function () {
     if (!id || here.indexOf(id) < 0) throw new Error("这里没有这位工匠");
     return id;
   }
+  /** 工匠的收费说明（界面上显示） */
+  function smithPriceNote(run, s) {
+    const pr = s.price || {};
+    const out = [];
+    if (pr.needsIntro && !(run.smithIntro || {})[s.id]) out.push("不帮陌生人：先给他看看你的武器");
+    if (pr.friendAfter) {
+      const uses = (run.smithUses || {})[s.id] || 0;
+      out.push(uses >= pr.friendAfter ? `关系变好：总价 ${Math.round((1 - pr.friendDiscount) * 10)} 折`
+        : `在他这里升级满 ${pr.friendAfter} 次后关系变好，打 ${Math.round((1 - pr.friendDiscount) * 10)} 折`);
+    }
+    if (pr.armsDiscount) out.push(C.armsMember ? `ARMS 成员 ${Math.round((1 - pr.armsDiscount) * 10)} 折` : "对非成员也一视同仁");
+    if (pr.laborHours) out.push(`不收加工费，5 级起每次要帮他建庇护所 ${pr.laborHours} 小时`);
+    if (pr.laborMul != null && pr.laborMul !== 1) out.push(`加工费 ${Math.round(pr.laborMul * 10)} 折`);
+    if (pr.extraMats) out.push(`每次多耗 ${pr.extraMats} 个材料`);
+    if (s.canInstall === false) out.push("装不了图纸");
+    return out.join("；");
+  }
+  /** 崔佛这类不帮陌生人的工匠：给他看看武器之后才肯接活 */
+  function introduceSmith(run, smithId) {
+    ensureSmithState(run);
+    const sid = requireSmith(run, smithId);
+    run.smithIntro = run.smithIntro || {};
+    run.smithIntro[sid] = true;
+    return logAll(run, [`${smithById(sid).name} 端详了你们的武器好一会儿：「用巨人的东西改成武器……这个点子不坏。」他愿意接活了。`]);
+  }
   function upgradeWeapon(run, kit, smithId) {
     ensureSmithState(run);
     const sid = requireSmith(run, smithId);
-    const opt = smithOptions(run).find(o => o.kit === kit);
+    if (smithInfo(run, sid).needsIntro) throw new Error("他不帮陌生人强化武器，先给他看看你的武器");
+    const opt = smithOptions(run, sid).find(o => o.kit === kit);
     if (!opt || opt.max) throw new Error("已经满级");
     if ((Number(state.kuizhi) || 0) < opt.cost) throw new Error("奎支不够");
     state.kuizhi -= opt.cost;
@@ -695,6 +755,10 @@ const Rogue = (function () {
     run.smithUses[sid] = (run.smithUses[sid] || 0) + 1;
     const s = smithInfo(run, sid);
     const notes = [`${s.name} 把 ${opt.name} 升到 ${opt.level + 1} 级，花掉 ${opt.cost} 奎支。`];
+    if (opt.hours) {
+      notes.push(`帮 ${s.name} 建庇护所，花了 ${opt.hours} 小时。`);
+      passHours(run, opt.hours, notes);
+    }
     if (s.canClaim && s.uses === s.need) notes.push(`${s.name} 愿意把自己的客制化图纸给你一张（在他这里升级满 ${s.need} 次）。`);
     return logAll(run, notes);
   }
@@ -714,6 +778,7 @@ const Rogue = (function () {
   function installBlueprint(run, bpId, kit, smithId) {
     ensureSmithState(run);
     const sid = requireSmith(run, smithId);
+    if (!smithInfo(run, sid).canInstall) throw new Error(`${smithById(sid).name} 装不了图纸，去找别的武器工匠`);
     const i = run.blueprints.indexOf(bpId);
     if (i < 0) throw new Error("手里没有这张图纸");
     const owner = run.party.find(h => (h.weapons || []).indexOf(kit) >= 0);
@@ -852,8 +917,9 @@ const Rogue = (function () {
   // 耐久上限跟武器等级走（growth.js / ledger.js）。战斗外角色不在场上，这里按单局记录的等级算
   function weaponDurMaxFor(h, k, run) {
     const g = WEAPON_GROWTH[k] || {};
+    const base = (g.baseDur || 5) + Math.floor(((h.weaponLevels || {})[k] || 1) / 2);
     const mod = weaponModsOf(run)[k] || {};
-    return Math.max(1, (g.baseDur || 5) + Math.floor(((h.weaponLevels || {})[k] || 1) / 2) + (Number(mod.dur) || 0));
+    return typeof bpDurMax === "function" ? bpDurMax(base, mod) : base;
   }
   function weaponDurFor(h, k, run) {
     const v = LEDGER.dur[k];
@@ -869,6 +935,7 @@ const Rogue = (function () {
     restPlan, canLongRest, restAtNode, leaveNode,
     buy, canShop, shopItemName, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
     presentSmiths, smithInfo, claimBlueprint, installBlueprint, blueprintById, weaponModsOf,
+    smithQuote, introduceSmith,
     canClinic, cyberInfo, cyberPreview, cyberCost, modifyHero, healCost, healHero,
     pendingChoices, choiceOptions, choose,
     camp, nextAct, afterVictory, endRun,

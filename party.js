@@ -867,9 +867,9 @@ function findKit(kit, units) {
 /** 实际 atk = 基础 atk − 力竭惩罚（力竭 2 起 atk −3，只对角色本人） */
 function effectiveAtk(unit, units) {
   if (!unit) return 0;
-  // 单局的客制化图纸：拿着装了图纸的武器时 atk 加减
-  const mod = typeof unitWeaponMod === "function" ? (Number(unitWeaponMod(unit).atk) || 0) : 0;
-  const base = Math.max(0, baseEffectiveAtk(unit, units) + mod);
+  // 单局的客制化图纸（mods.js）：拿着装了图纸的武器时 atk 变化；同区敌人的近距离压制
+  const raw = baseEffectiveAtk(unit, units);
+  const base = typeof bpAtkAdjust === "function" ? bpAtkAdjust(unit, raw) : raw;
   const tier = typeof exhaustTierOf === "function" ? exhaustTierOf(unit) : 0;
   return tier >= 2 ? Math.max(0, base - 3) : base;
 }
