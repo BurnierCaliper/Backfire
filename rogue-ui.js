@@ -15,15 +15,18 @@
 
   let run = null;          // 当前这一局
   let lastNotes = [];      // 上一步发生了什么（显示在记录栏）
+  let lastError = "";      // 上一步为什么没做成（显示在主面板顶上，免得按了像没反应）
 
   const save = () => { if (run && run.stage !== "over") Rogue.save(run); };
 
   function act(fn) {
+    lastError = "";
     try {
       const notes = fn();
       lastNotes = Array.isArray(notes) ? notes : [];
     } catch (e) {
       lastNotes = [e.message];
+      lastError = e.message;
     }
     if (run && run.stage === "over") finishRun();
     else save();
@@ -267,12 +270,13 @@
     const cost = ROGUE_SMITH_RULES.installCost;
     const k = Rogue.supplies().kuizhi;
     const weapons = run.party.flatMap(h => Rogue.heroView(run, h).weapons);
-    return `<p class="r-hint">手里的图纸：装一张 ${cost} 奎支，一把武器只能装一张（装新的会替换旧的）。</p>
+    const short = k < cost ? `<b class="bad">现在手里 ${k}，还差 ${cost - k} 奎支。</b>` : "";
+    return `<p class="r-hint">手里的图纸：装一张 ${cost} 奎支，一把武器只能装一张（装新的会替换旧的）。${short}</p>
       ${bps.map(id => {
         const b = Rogue.blueprintById(id);
         return `<div class="bp-row"><span class="s-name">${esc(b.name)}<small>${esc(b.text)} · 来自 ${esc(b.smithName)}</small></span>
           <div class="r-choices">${weapons.map(w =>
-            `<button class="g-btn" data-install="${esc(id)}" data-kit="${esc(w.kit)}" data-smith="${esc(smithId)}" ${k < cost ? "disabled" : ""}>装到 ${esc(w.name)}${w.blueprint ? `<small>替换「${esc(w.blueprint.name)}」</small>` : ""}</button>`).join("")}</div></div>`;
+            `<button class="g-btn" data-install="${esc(id)}" data-kit="${esc(w.kit)}" data-smith="${esc(smithId)}">装到 ${esc(w.name)}${w.blueprint ? `<small>替换「${esc(w.blueprint.name)}」</small>` : ""}</button>`).join("")}</div></div>`;
       }).join("")}`;
   }
   function renderSmiths() {
@@ -353,7 +357,8 @@
     renderHeader();
     const lv = run.stage === "over" ? "" : renderLevelUps();
     // 有待选的升级时先选完，再继续流程
-    $("run-body").innerHTML = lv || renderStage();
+    const err = lastError ? `<p class="r-warn r-error">没做成：${esc(lastError)}</p>` : "";
+    $("run-body").innerHTML = err + (lv || renderStage());
     const recent = lastNotes.length ? lastNotes : (run.log || []).slice(-6).map(l => l.text);
     $("run-log").innerHTML = recent.map(t => `<li>${esc(t)}</li>`).join("");
     bind();

@@ -784,7 +784,7 @@ const Rogue = (function () {
     const owner = run.party.find(h => (h.weapons || []).indexOf(kit) >= 0);
     if (!owner) throw new Error("队伍里没有这把武器");
     const cost = SR().installCost;
-    if ((Number(state.kuizhi) || 0) < cost) throw new Error("奎支不够");
+    if ((Number(state.kuizhi) || 0) < cost) throw new Error(`奎支不够：装图纸要 ${cost}，手里只有 ${Number(state.kuizhi) || 0}`);
     state.kuizhi -= cost;
     run.blueprints.splice(i, 1);
     const bp = blueprintById(bpId);
