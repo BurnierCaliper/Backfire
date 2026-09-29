@@ -1339,7 +1339,7 @@
     if (side === "ally" || side === "allySelf") all = all.filter(u => u.isPlayer);
     else if (side === "enemy") all = all.filter(u => !u.isPlayer);
     // 写明了射程（engine.js · SKILL_RANGE）的技能以表为准，不从提示文字里猜
-    const ov = typeof SKILL_RANGE !== "undefined" ? SKILL_RANGE[sk.id] : null;
+    const ov = typeof skillRangeFor === "function" ? skillRangeFor(actor, sk.id) : null;
     if (ov) {
       all = all.filter(u => { const d = zoneDist(actor.zone, u.zone, state.zoneMode); return d >= ov.min && d <= ov.max; });
     } else if (typeof inSkillRange === "function") {

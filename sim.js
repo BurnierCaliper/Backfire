@@ -145,8 +145,8 @@ const BattleSim = (function () {
   }
 
   /* ---------- 玩家一方的默认打法 ---------- */
-  function skillRangeOf(id, hint) {
-    return (typeof SKILL_RANGE !== "undefined" && SKILL_RANGE[id]) || parseSkillRange(hint) || { min: 0, max: 1 };
+  function skillRangeOf(id, hint, actor) {
+    return (typeof skillRangeFor === "function" && skillRangeFor(actor, id)) || parseSkillRange(hint) || { min: 0, max: 1 };
   }
   function hpOf(u) {
     return (u.layers || []).reduce((s, l) => s + Math.max(0, Number(l.current) || 0), 0);
@@ -172,7 +172,7 @@ const BattleSim = (function () {
       try { list = skillList(u) || []; } catch (e) { list = []; }
       const aa = list.find(s => s.id === u.kit + "_aa") || list.find(s => /_aa$/.test(s.id || ""));
       if (canUse(u, aa)) {
-        const r = skillRangeOf(aa.id, aa.hint);
+        const r = skillRangeOf(aa.id, aa.hint, u);
         const inRange = foes.filter(f => {
           const d = zoneDist(Number(u.zone), Number(f.zone), Number(state.zoneMode));
           return d >= r.min && d <= r.max;

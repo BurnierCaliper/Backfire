@@ -137,3 +137,25 @@ test("空投蜂群：架势无论几级、几人队都不超过 3", () => {
     assert.ok(u.defMax <= 3 && u.def <= 3, `Lv${lv} ${n} 人队：架势 ${u.def}/${u.defMax}`);
   }
 });
+
+test("绯秋普攻的射程按刀势：拔刀 / 胁构只打同区，居合可以移动 1 距离再打", () => {
+  const c = H.load();
+  c.BattleSim.setup({ party: ["hiaki", "kolt"], seed: "HIAKI", enemies: [{ id: "thug_hammer", lv: 1, zone: 2 }] });
+  c.startCombat();
+  const st = c.S.state;
+  const h = c.findKit("hiaki", st.units);
+  const foe = st.units.find(u => !u.isPlayer);
+  h.zone = 1; foe.zone = 2;
+  const hp0 = c.totalHp(foe);
+  for (const stance of ["draw", "waki"]) {
+    h.resources.stance = stance; h.ap = 1;
+    st.attackerId = h.id; st.targetId = foe.id;
+    c.runSkill("hiaki_aa");
+    assert.equal(c.totalHp(foe), hp0, stance + " 不应当打到距离 1");
+    assert.equal(h.ap, 1, stance + " 打不到时不扣行动点");
+  }
+  h.resources.stance = "iai"; h.ap = 1;
+  c.runSkill("hiaki_aa");
+  assert.ok(c.totalHp(foe) < hp0, "居合移动后打到");
+  assert.equal(Number(h.zone), 2);
+});

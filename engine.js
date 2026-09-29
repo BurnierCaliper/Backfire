@@ -222,6 +222,18 @@ const SKILL_TARGET_SIDE = {
   chuan_over: "allySelf"    // 电站超频：友方，也可以对川川自己用
 };
 
+/** 射程随状态变的技能（例如绯秋的普攻按刀势）。返回 {min,max}，不在表里返回 null */
+const SKILL_RANGE_BY_STATE = {
+  // 拔刀 / 胁构：只打同区；居合：先移动 1 距离再出刀，所以最远打到距离 1
+  hiaki_aa: (a) => ((a && a.resources && a.resources.stance) === "iai" ? { min: 0, max: 1 } : { min: 0, max: 0 })
+};
+/** 技能射程：先看随状态变的表，再看固定表（SKILL_RANGE）。都没写返回 null（由提示文字推断） */
+function skillRangeFor(actor, id) {
+  const fn = SKILL_RANGE_BY_STATE[id];
+  if (fn) return fn(actor);
+  return (typeof SKILL_RANGE !== "undefined" && SKILL_RANGE[id]) || null;
+}
+
 function parseSkillRange(text) {
   const s = String(text || "");
   if (/任意距离/.test(s)) return { min: 0, max: 99 };

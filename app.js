@@ -7036,7 +7036,7 @@ function runSkillInner(id, optRun) {
     }
   }
   if (t && t.id && typeof inSkillRange === "function") {
-    const ov = (typeof SKILL_RANGE !== "undefined") ? SKILL_RANGE[id] : null;
+    const ov = skillRangeFor(a, id);
     let inRange;
     let hint = "";
     if (ov) {
@@ -7230,8 +7230,10 @@ function runSkillInner(id, optRun) {
       const el = blade === "naruto" ? "ice" : "fire";
       const st = a.resources.stance || "draw";
       if (st === "iai") {
-        a.zone = t.zone;
-        lines.push("居合：先移动到目标所在区。");
+        if (Number(a.zone) !== Number(t.zone)) {
+          a.zone = t.zone;
+          lines.push(`居合：先移动 1 距离到 ${t.zone} 区。`);
+        }
         hitOne(a, t, { element: el, mult: 1.5, baseBreak: 0, atk: effectiveAtk(a, state.units) });
       } else if (st === "waki") {
         hitOne(a, t, { element: el, mult: 1, baseBreak: 2, atk: effectiveAtk(a, state.units) });
