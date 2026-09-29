@@ -128,7 +128,7 @@
   }
   function renderBoard() {
     return `<h2>任务板</h2>
-      <p class="r-hint">主线开幕就已接下，要在本幕天数用完之前完成，否则本局结束；完成主线后进入幕末首领战。支线只写了大致目标、时间、报酬和补给，天数够才能接。</p>
+      <p class="r-hint">主线开幕就已接下，要在本幕天数用完之前完成，否则本局结束。本幕的天数用完时迎战首领；主线完成后剩下的日子可以继续做支线。支线只写了大致目标、时间、报酬和补给，天数够才能接。</p>
       <div class="task-list">${run.main && !run.main.done ? taskCard(run.main, "main") : ""}${(run.board || []).map((t, i) => taskCard(t, i)).join("")}</div>`;
   }
 

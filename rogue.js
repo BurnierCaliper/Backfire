@@ -5,7 +5,7 @@
  * 一幕：
  *   开幕自动接下主线（有期限）→ 任务板上挑支线或执行主线 → 任务内节点线性推进
  *   （战斗 / 精英战 / 休息 / 商店 / 工匠）→ 任务完成 → 休整（算一天）→ 回任务板 …
- *   主线完成 → 休整 → 幕末首领 → 赢了进入下一幕。
+ *   本幕天数用完（主线必须已完成）→ 幕末首领 → 赢了进入下一幕。主线完成后剩下的天数可以继续做支线发育。
  *   主线期限内没完成、任何战斗团灭：本局结束。
  *   四幕打完可以选择通关，或者继续挑战额外幕（敌人到 20、25 级）。
  *
@@ -664,14 +664,19 @@ const Rogue = (function () {
       if (run.stage === "over") return logAll(run, notes);
     }
     advanceDays(run, C.restDays);
-    if (run.main.done) {
-      run.stage = "boss";
-      notes.push(`主线完成：前往第 ${run.act} 幕的首领所在。`);
-    } else if (C.mainDeadlineEndsRun && daysLeft(run) < run.main.days) {
+    // 首领在本幕天数用完时才出现（主线完成后可以继续做支线发育）
+    if (!run.main.done && C.mainDeadlineEndsRun && daysLeft(run) < run.main.days) {
       notes.push(`只剩 ${daysLeft(run)} 天，主线（${run.main.days} 天）已经来不及完成。`);
       endRun(run, false, `第 ${run.act} 幕的主线没能在期限内完成。`);
+    } else if (run.main.done && daysLeft(run) <= 0) {
+      run.stage = "boss";
+      notes.push(`第 ${run.act} 幕的日子到头了：前往首领所在。`);
     } else {
       makeBoard(run);
+      if (run.main.done && !run.board.some(t => !taskBlocked(run, t))) {
+        run.stage = "boss";
+        notes.push(`剩下的 ${daysLeft(run)} 天已经接不了任何任务：前往第 ${run.act} 幕的首领所在。`);
+      }
     }
     return logAll(run, notes);
   }

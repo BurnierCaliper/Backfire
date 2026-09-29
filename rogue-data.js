@@ -120,7 +120,7 @@ const ROGUE_TASKS = [
 ];
 
 const ROGUE_MAIN_TASK = {
-  kind: "main", name: "主线", goal: "在期限内完成本幕的关键目标。完成后进入幕末首领战；期限到了还没完成，本局结束。",
+  kind: "main", name: "主线", goal: "在本幕结束前完成关键目标，期限到了还没完成，本局结束。本幕的天数用完时迎战首领。",
   nodes: [4, 5], days: 3, diff: 1, elite: true, key: true,
   mix: { battle: 4, rest: 2, shop: 1, smith: 1, clinic: 1 },
   reward: { kuizhi: 5000, xp: 40 }, supply: { water: 4000, items: { food_liquid: 6 } }

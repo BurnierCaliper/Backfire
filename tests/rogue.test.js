@@ -88,14 +88,24 @@ test("主线期限到了还没完成：本局结束", () => {
   assert.match(run.result.text, /主线/);
 });
 
-test("主线完成 → 休整 → 首领战", () => {
+test("主线提前完成后还能继续做支线；本幕天数用完才打首领", () => {
   const { run, R } = fresh(["kolt", "helu"], "R4");
   R.acceptTask(run, "main");
   run.task.nodes = [{ type: "rest", done: false }];
   R.restAtNode(run, "short");
   assert.equal(run.main.done, true);
   R.camp(run);
+  assert.equal(run.stage, "board", "主线完成但天数没用完：回任务板");
+  // 一直做支线直到天数用完
+  for (let i = 0; i < 10 && run.stage === "board"; i++) {
+    const j = run.board.findIndex(t => !R.taskBlocked(run, t));
+    R.acceptTask(run, j);
+    run.task.nodes = [{ type: "rest", done: false }];
+    R.restAtNode(run, "short");
+    R.camp(run);
+  }
   assert.equal(run.stage, "boss");
+  assert.ok(R.daysLeft(run) < 2, "首领应当在本幕天数用完（或接不了任务）时才出现");
 });
 
 test("任务里每个节点的类型都能看到", () => {
