@@ -201,3 +201,58 @@ test("愿你常胜：属性效果不好时 +1 击破；绝佳时 50% 施加状�
   hit(kolt, foe, { element: "fire" });
   assert.ok(Number(foe.statuses.burn) >= 1);
 });
+
+test("放弃被动：全部角色的两个被动都关掉（没装图纸时照常）", () => {
+  const party = ["xia", "chuan", "nora", "ruby", "yuito", "hiaki", "tou", "kolt", "helu", "ras"];
+  const weapons = ["berniel", "bili", "vitas", "mint", "latte", "niu", "naruto", "mochi", "torque", "ecmo", "edc"];
+  const make = (off) => {
+    const c = H.load();
+    const mods = {};
+    if (off) weapons.forEach(k => { mods[k] = { noPassive: true }; });
+    c.BattleSim.setup({ party, seed: "NP", enemies: [{ id: "thug_hammer", lv: 1, zone: 1 }], before: (st) => { st.weaponMods = mods; } });
+    c.startCombat();
+    c.S.state.units.forEach(u => { u.zone = 1; });
+    return c;
+  };
+  for (const off of [false, true]) {
+    const c = make(off);
+    const st = c.S.state, k = id => c.findKit(id, st.units);
+    const foe = st.units.find(u => !u.isPlayer);
+    const on = !off;
+    // 夕夏 启动引擎
+    c.setEngine(true, "测试");
+    assert.equal(!!k("xia").resources.engine, on, "引擎");
+    // 川川 发电站
+    const ch0 = k("chuan").resources.charge || 0;
+    c.addCharge(1);
+    assert.equal((k("chuan").resources.charge || 0) - ch0, on ? 1 : 0, "电能");
+    // 瑞比 纳米科技 / 银翼
+    const n0 = k("ruby").resources.nano || 0;
+    c.addNano(10);
+    assert.equal((k("ruby").resources.nano || 0) > n0, on, "纳米");
+    // 结人 研磨机 / 思念
+    k("yuito").resources.bean = 1;
+    assert.equal(c.beanToLiquid(), on, "研磨机");
+    c.setBond(k("yuito"), k("kolt"));
+    assert.equal(k("yuito").resources.bondId === k("kolt").id, on, "思念");
+    // 诺拉 冷气注射（刺入）
+    c.setPierce(k("nora"), foe, []);
+    assert.equal(k("nora").resources.piercedId === foe.id, on, "刺入");
+    // 绯秋 剑术
+    c.setHiakiStance(k("hiaki"), "iai");
+    assert.equal(k("hiaki").resources.stance === "iai", on, "剑术");
+    // 灯 决一死战
+    assert.equal(!!c.touDuelVictim(foe), on, "决一死战");
+    // 柯尔特 更换刀头
+    const bit0 = k("kolt").resources.bit;
+    c.swapKoltBit(k("kolt"), []);
+    assert.equal(k("kolt").resources.bit !== bit0, on, "更换刀头");
+    // Helumica 聚焦
+    c.applyFocus(foe, null, []);
+    assert.equal((foe.focuses || []).length > 0, on, "聚焦");
+    // 拉斯缪尔 事故幸存
+    const e0 = k("ras").resources.energyPct || 0;
+    c.addRasEnergy(20, "测试");
+    assert.equal((k("ras").resources.energyPct || 0) > e0, on, "事故幸存");
+  }
+});

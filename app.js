@@ -579,7 +579,7 @@ function explodeHigh(unit) {
   }
   if (unit.highTags && unit.highTags.indexOf("ras") >= 0) {
     const ras = findKit("ras", state.units);
-    if (ras) {
+    if (ras && (typeof passiveOnKit !== "function" || passiveOnKit("ras"))) {   // 放弃被动「能量流向」时不回收
       ras.resources = ras.resources || {};
       ras.resources.light = (Number(ras.resources.light) || 0) + he;
       appendLog(`能量流向：回收光能 +${he} → ${ras.resources.light}`);
@@ -2826,6 +2826,7 @@ function touDuelVictim(u) {
   const tou = findKit("tou", state.units);
   if (!tou || tou.dead || tou.hidden || tou.fused) return null;
   if (tou.dying && !tou.upOnShp) return null;
+  if (typeof passiveOn === "function" && !passiveOn(tou)) return null;   // 放弃被动「决一死战」
   if (Number(u.zone) !== Number(tou.zone)) return null;
   const enemies = (typeof fieldUnits === "function" ? fieldUnits() : state.units).filter(x =>
     x && !x.isPlayer && !x.dead && !x.hidden && !x.fused && Number(x.zone) === Number(tou.zone)
@@ -3691,6 +3692,11 @@ function rollFocusSeq(n) {
 
 function applyFocus(target, layerType, lines) {
   if (!target || target.isPlayer) return;
+  if (!(typeof passiveOnKit !== "function" || passiveOnKit("helu"))) {   // 放弃被动「聚焦」
+    const msg = "Helumica 放弃了被动「聚焦」，无法聚焦。";
+    if (lines) lines.push(msg); else appendLog(msg);
+    return;
+  }
   const type = layerType || ((target.layers || []).find(l => (l.current || 0) > 0) || {}).type;
   if (!type) {
     if (lines) lines.push("没有可聚焦的血量层。");
@@ -3750,6 +3756,7 @@ function advanceFocusOnHit(attacker, target, element, res, extra) {
 function addRasEnergy(pct, reason) {
   const r = findKit("ras", state.units);
   if (!r) return;
+  if (pct > 0 && !(typeof passiveOnKit !== "function" || passiveOnKit("ras"))) return;   // 放弃被动「事故幸存」：不再累积能量
   r.resources = r.resources || {};
   r.resources.energyPct = Math.max(0, (Number(r.resources.energyPct) || 0) + pct);
   appendLog(`拉斯缪尔累积能量 ${pct > 0 ? "+" : ""}${pct}%${reason ? "（" + reason + "）" : ""} → ${r.resources.energyPct}%`);
@@ -3777,6 +3784,10 @@ function swapKoltBit(actor, lines) {
   const k = findKit("kolt", state.units) || (actor && actor.kit === "kolt" ? actor : null);
   if (!k) return "drill";
   k.resources = k.resources || {};
+  if (typeof passiveOn === "function" && !passiveOn(k)) {   // 放弃被动「更换刀头」
+    lines.push(`${k.name} 放弃了被动「更换刀头」，刀头保持不变。`);
+    return k.resources.bit || "drill";
+  }
   k.resources.bit = k.resources.bit === "acid" ? "drill" : "acid";
   const name = k.resources.bit === "acid" ? "酸液炮（远距离）" : "电钻（近距离）";
   lines.push(`${k.name} 更换刀头 → ${name}`);
@@ -3792,6 +3803,7 @@ function koltMeleeSwapTargets(actor) {
 function queueKoltSwap(actor) {
   const k = findKit("kolt", state.units) || (actor && actor.kit === "kolt" ? actor : null);
   if (!k || k.dead || k.hidden) return;
+  if (typeof passiveOn === "function" && !passiveOn(k)) return;   // 放弃被动「更换刀头」
   state.koltSwapQueue = state.koltSwapQueue || [];
   if (state.koltSwapQueue.some(j => j.actorId === k.id)) return;
   state.koltSwapQueue.push({ actorId: k.id });
@@ -4226,7 +4238,7 @@ function performAssistBlock(helper, target, attacker, forced) {
     if (helper.kit === "hiaki") {
       const st = helper.resources.stance || "draw";
       if (st === "iai") {
-        helper.resources.stance = "waki";
+        setHiakiStance(helper, "waki");
         notes.push("进入胁构。");
       } else if (st === "waki") {
         if (attacker) {
@@ -4238,10 +4250,10 @@ function performAssistBlock(helper, target, attacker, forced) {
             queueAssistAttack(helper, attacker);
           }
         }
-        helper.resources.stance = "draw";
+        setHiakiStance(helper, "draw");
         notes.push("进入拔刀。");
       } else {
-        helper.resources.stance = "iai";
+        setHiakiStance(helper, "iai");
         notes.push("进入居合。");
       }
     }
@@ -5006,7 +5018,8 @@ function dealTo(attacker, target, opt) {
   }
   let br = opt.baseBreak != null ? opt.baseBreak : 1;
   if (attacker.rallyBreak) br += attacker.rallyBreak;
-  if (attacker.kit === "hiaki" && attacker.resources && attacker.resources.blade === "naruto") br += 1;
+  if (attacker.kit === "hiaki" && attacker.resources && attacker.resources.blade === "naruto" &&
+      (typeof passiveOn !== "function" || passiveOn(attacker))) br += 1;   // 被动「佩刀」
   const dist = zoneDist(attacker.zone, target.zone, state.zoneMode);
   const res = resolveAttack({
     attacker, target,
@@ -5109,6 +5122,7 @@ function triggerMagnetShield(broken) {
   if (!broken || !(broken.shieldFromChuan || broken.magnetShield)) return notes;
   const c = findKit("chuan", state.units);
   if (!c || Number(c.zone) !== Number(broken.zone)) return notes;
+  if (typeof passiveOn === "function" && !passiveOn(c)) return notes;   // 放弃被动「磁场护盾」
   broken.shieldFromChuan = false;
   broken.magnetShield = false;
   const dest = otherZone(c.zone);
@@ -5129,6 +5143,10 @@ function setEngine(on, reason) {
   const x = findKit("xia", state.units);
   if (!x) return;
   x.resources = x.resources || {};
+  if (on && typeof passiveOn === "function" && !passiveOn(x)) {   // 放弃被动「启动引擎」
+    appendLog("夕夏放弃了被动「启动引擎」，引擎无法启动。");
+    return;
+  }
   x.resources.engine = !!on;
   if (on) x.resources.engineJustOn = true;
   appendLog(`夕夏引擎${on ? "启动" : "关闭"}${reason ? "（" + reason + "）" : ""}`);
@@ -5147,6 +5165,7 @@ function markXiaAttack(attacker) {
 function addCharge(n) {
   const c = findKit("chuan", state.units);
   if (!c) return;
+  if (n > 0 && typeof passiveOn === "function" && !passiveOn(c)) return;   // 放弃被动「发电站」：不再积攒电能
   c.resources = c.resources || {};
   c.resources.charge = Math.max(0, (c.resources.charge || 0) + n);
 }
@@ -5167,6 +5186,7 @@ function addShieldLayer(u, amount) {
 function addNano(n) {
   const ruby = findKit("ruby", state.units);
   if (!ruby) return;
+  if (n > 0 && !(typeof passiveOnKit !== "function" || passiveOnKit("ruby"))) return;   // 放弃被动「纳米科技」
   ruby.resources = ruby.resources || {};
   ruby.resources.nano = Math.max(0, Math.min(100, (ruby.resources.nano || 0) + n));
 }
@@ -5174,14 +5194,24 @@ function addNano(n) {
 function beanToLiquid() {
   const y = findKit("yuito", state.units);
   if (!y || !y.resources) return false;
+  if (typeof passiveOn === "function" && !passiveOn(y)) return false;   // 放弃被动「研磨机」
   if ((y.resources.bean || 0) < 1) return false;
   y.resources.bean -= 1;
   y.resources.liquid = (y.resources.liquid || 0) + 1;
   return true;
 }
 
+/** 绯秋切换刀势。放弃被动「剑术」时一直停在拔刀 */
+function setHiakiStance(u, stance) {
+  if (!u) return;
+  u.resources = u.resources || {};
+  if (stance !== "draw" && typeof passiveOn === "function" && !passiveOn(u)) { u.resources.stance = "draw"; return; }
+  u.resources.stance = stance;
+}
+
 function setBond(yuito, ally) {
   if (!yuito || !ally) return;
+  if (typeof passiveOn === "function" && !passiveOn(yuito)) return;   // 放弃被动「思念」
   yuito.resources = yuito.resources || {};
   yuito.resources.bondId = ally.id;
   yuito.resources.bondName = ally.name;
@@ -5327,6 +5357,7 @@ function enterMecha() {
   const mint = findKit("mint", state.units);
   const notes = [];
   if (!ruby) return ["场上没有瑞比。"];
+  if (!(typeof passiveOnKit !== "function" || passiveOnKit("ruby"))) return ["瑞比放弃了被动「银翼」，无法进入机甲。"];
   if ((ruby.resources.nano || 0) <= 0) return ["纳米能源不足，无法进入机甲。"];
   if (!mint || mint.hidden) {
     const spawned = spawnWeapon(ruby, "mint");
@@ -6358,6 +6389,7 @@ function setPierce(n, t, lines) {
   if (!t) return;
   n = n || noraOf() || vitasOf();
   if (!n) return;
+  if (typeof passiveOn === "function" && !passiveOn(n)) return;   // 放弃被动「冷气注射」：没有刺入
   n.resources = n.resources || {};
   const prev = n.resources.piercedId && unitById(n.resources.piercedId);
   if (prev && prev.id !== t.id) lines.push(`${prev.name} 的刺入解除。`);
@@ -6396,6 +6428,7 @@ function setMood(n, mood, lines, why) {
 }
 function flipMood(n, lines, why) {
   if (!moodHolders().length) return;
+  if (typeof passiveOn === "function" && !passiveOn(moodHolders()[0])) return;   // 放弃被动「双相冲动」
   setMood(n, noraMood() === "cruel" ? "gentle" : "cruel", lines, why);
 }
 /** 冷气注射：施加冻伤，已有冻伤则改为一次冰伤 */
@@ -6403,7 +6436,7 @@ function noraFrost(source, target, lines, atk) {
   if (!target) return;
   const n = noraOf();
   target.statuses = target.statuses || {};
-  if (target.statuses.frostbite && n) {
+  if (target.statuses.frostbite && n && !(typeof passiveOn === "function" && !passiveOn(n))) {
     const r = takeDice(1, 4, n.level || 1);
     lines.push(`冷气注射：${target.name} 已有冻伤，改为 ${r.text} 点冰伤。`);
     dealTo(source, target, {
@@ -6994,7 +7027,7 @@ function runSkill(id, optRun) {
       const sheathed = (state.skillFlow && state.skillFlow.picks.blade) || heldHiakiBlade(a);
       if (!sheathed) { lines.push("两把刀都已分出，无法收刀。"); return paintSkillLog(lines.join("\n")); }
       a.resources.blade = sheathed;
-      a.resources.stance = "iai";
+      setHiakiStance(a, "iai");
       refreshHiakiAtk(a);
       lines.push(`收刀，使用${sheathed === "naruto" ? "鳴門" : "丹生谷"}，进入居合。`);
     } else if (id === "hiaki_allin") {
@@ -7016,7 +7049,7 @@ function runSkill(id, optRun) {
       a.zone = t.zone;
       const el = blade === "naruto" ? "ice" : "fire";
       hitOne(a, t, { element: el, mult: 1.5, baseBreak: 0, atk: effectiveAtk(a, state.units), flags: { action: true, assist: true } });
-      a.resources.stance = "draw";
+      setHiakiStance(a, "draw");
       lines.push("进入拔刀。");
     } else if (id === "hiaki_summon") {
       const usable = summonableBlades(a);
@@ -7102,7 +7135,7 @@ function runSkill(id, optRun) {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       a.zone = t.zone;
       hitOne(a, t, { element: "physical", mult: 1, baseBreak: 0, atk, flags: { action: true, assist: true } });
-      a.resources.shield = Math.min(3, (a.resources.shield || 0) + 1);
+      if (typeof passiveOn !== "function" || passiveOn(a)) a.resources.shield = Math.min(3, (a.resources.shield || 0) + 1);   // 放弃「圣盾荣耀」就没有圣盾点
       lines.push("圣盾 +1 → " + a.resources.shield);
     } else if (id === "tou_summon") {
       const w = spawnWeapon(a, "mochi");
@@ -7569,7 +7602,7 @@ function runSkill(id, optRun) {
           hitOne(a, u, { element: el, mult: 1, baseBreak: 1, atk: effectiveAtk(a, state.units), flags: { action: true, aoe: true } });
         });
         markAoeZone(a.zone);
-        a.resources.stance = "draw";
+        setHiakiStance(a, "draw");
         lines.push("一闪后进入拔刀。");
       }
     } else if (id === "hiaki_pot") {
@@ -8104,7 +8137,7 @@ function runSkill(id, optRun) {
         if (st === "iai") {
           lines.push("居合下协助格挡视为成功。");
           ok = true;
-          a.resources.stance = "waki";
+          setHiakiStance(a, "waki");
           lines.push("进入胁构。");
         } else if (st === "waki" && ok) {
           if (t) {
@@ -8115,10 +8148,10 @@ function runSkill(id, optRun) {
             enemy.def = Math.max(0, enemy.def - 1);
             lines.push(`胁构反伤 1 击破 → ${enemy.name} 架势 ${enemy.def}`);
           }
-          a.resources.stance = "draw";
+          setHiakiStance(a, "draw");
           lines.push("进入拔刀。");
         } else if (ok) {
-          a.resources.stance = "iai";
+          setHiakiStance(a, "iai");
           lines.push("进入居合。");
         }
       }
