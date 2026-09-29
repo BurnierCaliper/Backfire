@@ -554,12 +554,13 @@ function resolveAttack(ctx) {
     if (t.self === "splash") {
       if (element === "acid" || element === "fire") { pct -= 0.25; hAdd("目标溅射：酸/火受伤 −25%。"); }
     }
-    // 蓄能：能量和谐波攻击造成的伤害提高「高能值占血量上限的百分比」（手册不含电）
-    if (a && a.self === "store" && (element === "energy" || element === "harmonic")) {
+    // 蓄能：能量、谐波、电攻击造成的伤害提高「高能值占血量上限的百分比」
+    // （手册正文没写电，作者确认是手册漏写，电也加）
+    if (a && a.self === "store" && (element === "energy" || element === "harmonic" || element === "electric")) {
       const maxhp = Math.max(1, totalMaxHp(a));
       const extra = (Number(a.highEnergy) || 0) / maxhp;
       pct += extra;
-      hAdd(`蓄能：能量/谐波伤害 +${(extra * 100).toFixed(1)}%。`);
+      hAdd(`蓄能：能量/谐波/电伤害 +${(extra * 100).toFixed(1)}%。`);
     }
     if (t.self === "store" && element === "harmonic") {
       pct += 0.25; hAdd("目标蓄能：谐波受伤 +25%。");

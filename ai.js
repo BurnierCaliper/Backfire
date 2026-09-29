@@ -131,6 +131,11 @@ const EnemyAI = (function () {
       const t = unitById(u.tauntTo);
       if (t && unitAlive(t) && !t.dying) return { unit: t, forced: true };
     }
+    // 手册：亡命之王的攻击命令让所有狂徒目标切到此人
+    if (isOutlawThug(u) && typeof kingFocusTarget === "function") {
+      const f = kingFocusTarget();
+      if (f && prey.includes(f)) return { unit: f, forced: true };
+    }
     let aim = spec.aim || "local";
     // 手册：强盗头子在场时，所有狂徒集火血量最低者
     if (/^thug_/.test(u.kit || "") && foes().some(x => x.kit === "bandit_boss")) aim = "lowest";
@@ -148,6 +153,14 @@ const EnemyAI = (function () {
 
   /** 该不该移动。返回要走到的区，null 表示原地行动。 */
   function aiStep(u, target, spec, prey) {
+    // 主持人手册：强盗头子会主动与亡命之王同区（留在王身边，远处的人用远程手段打）
+    if (u.kit === "bandit_boss" && !u.noMove && !(u.resources && u.resources.mutinied)) {
+      const king = findKit("outlaw_king", state.units);
+      if (king && !king.dead) {
+        const kz = Number(king.zone), from = Number(u.zone);
+        return kz === from ? null : (from < kz ? from + 1 : from - 1);
+      }
+    }
     if (spec.dist == null || u.noMove) return null;
     const d = zdist(u.zone, target.zone);
     if (d === spec.dist) return null;
@@ -264,6 +277,7 @@ const EnemyAI = (function () {
 
   /** 手册第十章的行为描述 → 一次行动。 */
   function aiPlan(u) {
+    if (typeof mutinyTick === "function") mutinyTick();
     const prey = validPrey();
     if (!prey.length) return null;
 
@@ -276,6 +290,14 @@ const EnemyAI = (function () {
     if (has("en_thug_mutiny")) {
       const boss = findKit("bandit_boss", state.units);
       if (boss && !boss.dead) {
+        // 反水是近战：不在同区就先走过去
+        if (Number(u.zone) !== Number(boss.zone)) {
+          const dest = Number(u.zone) + (Number(boss.zone) > Number(u.zone) ? 1 : -1);
+          return {
+            thunk: () => { state.attackerId = u.id; doMove(u, dest); },
+            meta: { actorId: u.id, skillName: `移动到 ${dest} 区` }
+          };
+        }
         return {
           thunk: () => { state.attackerId = u.id; state.targetId = boss.id; runSkill("en_thug_mutiny"); },
           meta: { actorId: u.id, targetId: boss.id, skillName: "反水" }

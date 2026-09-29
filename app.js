@@ -1393,6 +1393,7 @@ function beginRound(notes) {
   notes = notes || [];
   startLogTurn();
   notes.push(`—— 第 ${state.turnNo} 回合开始 ——`);
+  if (typeof mutinyTick === "function") mutinyTick(notes);
   state.units.forEach(u => {
     if (u.kit === "xia" && isCrushing(u)) {
       const ct = crushingTarget(u);
@@ -3152,6 +3153,10 @@ function removeEnemyFromField(u, notes) {
 }
 
 /** 敌人内层归零：记死亡、发经验与掉落，以及个别 BOSS 的连带效果。只结算一次。 */
+function isOutlawThugKit(kit) {
+  return /^thug_/.test(kit || "");
+}
+
 function settleEnemyKill(target, notes) {
   if (!target || target.isPlayer || target._xpGiven) return;
   target.dead = true;
@@ -3172,6 +3177,7 @@ function settleEnemyKill(target, notes) {
       boss.def = (Number(boss.def) || 0) * 2;
       boss.defMax = (Number(boss.defMax) || boss.def) * 2;
       boss.resources.promoted = true;
+      target.resources.hostage = false;
       boss.name = "亡命之王（" + boss.name + "）";
       notes.push(`${boss.name} 晋升为新任亡命之王：atk/def 翻倍。`);
     }
@@ -3183,6 +3189,7 @@ function settleEnemyKill(target, notes) {
       notes.push(`挟持者已死，${king.name} 恢复行动。`);
     }
   }
+  if (isOutlawThugKit(target.kit) && typeof mutinyTick === "function") mutinyTick(notes);
 }
 
 function sweepDeadEnemies() {
@@ -4790,6 +4797,14 @@ function dealTo(attacker, target, opt) {
     const msg = `${target.name} 躲藏中，不能被选作攻击目标。`;
     appendLog(msg);
     return { res: { ok: false, total: 0, breakDealt: 0, log: [msg], perHit: [] }, extra: [msg] };
+  }
+  // 亡命之王：对他的攻击总被同区其他狂徒承受（被挟持时失效）
+  if (target && target.kit === "outlaw_king" && !opt.flags.aoe && typeof kingGuardFor === "function") {
+    const guard = kingGuardFor(target);
+    if (guard) {
+      appendLog(`${guard.name} 挡在 ${target.name} 身前，替他承受这次攻击。`);
+      target = guard;
+    }
   }
   // 飞行：近程攻击飞行单位要额外付一个附赠行动；付不起就打不到。
   // 范围攻击、杂兵、以及飞行打飞行不受此限。

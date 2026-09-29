@@ -147,11 +147,13 @@ test("千钧：格挡 +10%；免受位移；无法恢复架势", () => {
   assert.equal(kolt.def, 0);
 });
 
-test("蓄能只加能量和谐波，不加电", () => {
-  const { c, helu, foe } = field();
-  helu.self = "store"; helu.highEnergy = 8;
-  const res = c.dealTo(helu, foe, { atk: 10, mult: 1, element: "electric", baseBreak: 0, flags: { action: true, blockResolved: true, block: "none" } });
-  assert.ok(!(res.res.log || []).some(s => /蓄能/.test(s)));
+test("蓄能对能量、谐波和电都有加成（手册漏写了电）", () => {
+  for (const el of ["energy", "harmonic", "electric"]) {
+    const { c, helu, foe } = field();
+    helu.self = "store"; helu.highEnergy = 8;
+    const res = c.dealTo(helu, foe, { atk: 10, mult: 1, element: el, baseBreak: 0, flags: { action: true, blockResolved: true, block: "none" } });
+    assert.ok((res.res.log || []).some(s => /蓄能/.test(s)), el);
+  }
 });
 
 test("多普勒：自身受到击破时，同区所有单位受同量击破（不分敌我）", () => {

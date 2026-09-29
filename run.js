@@ -173,8 +173,9 @@ const ENCOUNTERS = [
     zoneMode: 3,
     enemies: [
       { preset: "outlaw_king", zone: 2 },
+      { preset: "bandit_boss", zone: 2 },
       { preset: "thug_knife", zone: 2 },
-      { preset: "thug_hammer", zone: 3 }
+      { preset: "thug_hammer", zone: 2 }
     ]
   },
   {
@@ -228,7 +229,9 @@ const ENEMY_INFO = {
   thug_knife:  { faction: "盗匪", regions: ["外城区"], tokens: 1 },
   thug_hammer: { faction: "盗匪", regions: ["外城区"], tokens: 1 },
   bandit_boss: { faction: "盗匪", regions: ["外城区"], tokens: 2 },
-  outlaw_king: { faction: "盗匪", regions: ["外城区"], tokens: 4, boss: true },
+  // 主持人手册：每次出场带强盗头子、匕首狂徒、锤狂徒各一，和他同区（固定随从，不按代币抽）
+  outlaw_king: { faction: "盗匪", regions: ["外城区"], tokens: 4, boss: true,
+                 escorts: ["bandit_boss", "thug_knife", "thug_hammer"] },
   // —— 沙灵 ——
   sand_beast: { faction: "沙灵", regions: ["沙漠"], tokens: 1 },
   sand_human: { faction: "沙灵", regions: ["沙漠"], tokens: 1 },
@@ -321,7 +324,7 @@ function rollEncounter(opt) {
   }, opt);
 }
 
-/** BOSS 遭遇：BOSS 本体不占代币，随从另给。 */
+/** BOSS 遭遇：BOSS 本体不占代币，随从另给。手册写死了随从的 BOSS（ENEMY_INFO.escorts）照写的来，不抽代币。 */
 function rollBossEncounter(bossPreset, opt) {
   opt = opt || {};
   const info = enemyInfo(bossPreset);
@@ -330,7 +333,8 @@ function rollBossEncounter(bossPreset, opt) {
   const enemies = [{ preset: bossPreset, zone: 2 }];
   const allow = info ? alliesOf(info.faction) : null;
   let pool = regionPool(region).filter(k => !allow || allow.indexOf(ENEMY_INFO[k].faction) >= 0);
-  let left = tokens;
+  if (info && info.escorts) info.escorts.forEach(k => enemies.push({ preset: k, zone: 2 }));
+  let left = info && info.escorts ? 0 : tokens;
   for (let guard = 0; guard < 20 && left > 0; guard++) {
     const ok = pool.filter(k => enemyTokens(k) <= left);
     if (!ok.length) break;
@@ -359,7 +363,9 @@ function applyEncounterLayout(spec) {
     return spec;
   }
   if (spec.layoutLocked) return spec;
-  const kind = spec.layout && spec.layout !== "front2"
+  // 带固定随从的 BOSS（亡命之王）：随从与他同区，不拆开
+  const together = (spec.enemies || []).some(e => ENEMY_INFO[e.preset] && ENEMY_INFO[e.preset].escorts);
+  const kind = together ? "all3" : spec.layout && spec.layout !== "front2"
     ? spec.layout
     : ["all3", "split23", "pincer"][Math.floor(Math.random() * 3)];
   spec.layout = kind;

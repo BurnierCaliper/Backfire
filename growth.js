@@ -22,7 +22,9 @@ function enemyRankOf(u) {
 
 function enemyActBudget(u) {
   if (!u || u.isPlayer) return { ap: 1, bonus: 1 };
-  if (u.kit === "chixia" || u.kit === "outlaw_king") return { ap: 3, bonus: 1 };
+  // 手册：没写「一回合几动」的都是 1 行动点。赤牙是指挥官（第九章：每回合 3 行动点 + 1 附赠）；
+  // 亡命之王不是指挥官，一回合一动。
+  if (u.kit === "chixia") return { ap: 3, bonus: 1 };
   // 扬尘体：原本是 2 行动点 0 附赠，靠行动点移动。改成移动只能用附赠之后，
   // 给它 1 附赠保持「移动 + 一次攻击」的原有强度，否则它完全动不了。
   if (u.kit === "dustbody") return { ap: 1, bonus: 1 };

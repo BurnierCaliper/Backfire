@@ -77,6 +77,11 @@ function extraDiceByLevel(lv) {
 function addedDiceByLevel(lv) {
   return 1 + (typeof milestone === "function" ? milestone(lv, 5) : Math.floor(Math.max(1, lv || 1) / 5));
 }
+/** 哗变时狂徒不敢贸然出手：只打 1d6 物理，每十级升一档骰 */
+function mutinyDieSides(lv) {
+  return upgradeDieSides(6, dieStep(lv || 1, 10));
+}
+
 function addedDiceByLevel10(lv) {
   return 1 + (typeof milestone === "function" ? milestone(lv, 10) : Math.floor(Math.max(1, lv || 1) / 10));
 }
@@ -103,8 +108,42 @@ function checkMutiny(state) {
   );
   if (otherThugs.length > 0) return null;
   king.resources.hostage = true;
+  king.resources.focusId = null;
   boss.resources.mutinied = true;
   return `${boss.name} 哗变：抓住 ${king.name}！${king.name} 本回合起无法行动，受到伤害 +25%，直到 ${boss.name} 死亡或 ${king.name} 被击杀。`;
+}
+
+/** 狂徒（匕首 / 锤）与强盗头子 */
+function isOutlawThug(u) {
+  return !!u && !u.isPlayer && !u.dead && !u.hidden && /^(thug_|bandit_boss)/.test(u.kit || "");
+}
+
+/** 主持人手册：对亡命之王的攻击总被同区其他狂徒承受（被挟持时失效）。返回替他挨打的狂徒，没有则 null。
+ *  同区有多个时挑剩余血量最多的那个（手下挡在最前面）。 */
+function kingGuardFor(king) {
+  if (!king || king.kit !== "outlaw_king" || king.dead) return null;
+  if (king.resources && king.resources.hostage) return null;
+  const guards = (state.units || []).filter(u => isOutlawThug(u) && Number(u.zone) === Number(king.zone));
+  if (!guards.length) return null;
+  return guards.sort((a, b) => totalHp(b) - totalHp(a))[0];
+}
+
+/** 攻击命令指定的目标：所有狂徒改打此人（目标倒下或王被挟持 / 死亡后失效） */
+function kingFocusTarget() {
+  const king = findKit("outlaw_king", state.units);
+  if (!king || king.dead || !king.resources || king.resources.hostage || !king.resources.focusId) return null;
+  const t = unitById(king.resources.focusId);
+  if (!t || t.dead || t.dying || (t.hidden)) return null;
+  return t;
+}
+
+/** 哗变的判定时机不止「强盗头子挨打」：同区最后一个狂徒倒下 / 走开也会让条件成立。
+ *  回合开始、每个敌人行动前、敌人阵亡后都查一次。 */
+function mutinyTick(notes) {
+  if (typeof checkMutiny !== "function") return;
+  const note = checkMutiny(state);
+  if (!note) return;
+  if (notes) notes.push(note); else appendLog(note);
 }
 
 function enemySkillList(u) {
@@ -223,9 +262,8 @@ function enemySkillList(u) {
   let list = extra[u.kit] || [];
   if (/^thug_/.test(u.kit || "")) {
     const king = findKit("outlaw_king", state.units);
-    if (king && king.resources && king.resources.hostage) {
-      const dice = "1d6" + (addedDiceByLevel10(u.level || 1) > 1 ? "+" + (addedDiceByLevel10(u.level || 1) - 1) + "d6" : "");
-      return [{ id: "en_thug_mutiny", label: `反水攻击强盗头子（${dice} 物理，强制目标强盗头子）` }];
+    if (king && !king.dead && king.resources && king.resources.hostage) {
+      return [{ id: "en_thug_mutiny", label: `反水攻击强盗头子（只打 1d${mutinyDieSides(u.level)} 物理，强制目标强盗头子）` }];
     }
   }
   if (u.kit === "sand_aggregate") {
@@ -816,13 +854,15 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
   if (id === "en_king_atk") {
     if (!needT()) return true;
     aa(t, { element: "fire", mult: 1, diceN: 1, diceS: 4, baseBreak: 1 });
-    lines.push("所有狂徒目标切换为该单位（请手选他们的技能目标）。");
+    a.resources = a.resources || {};
+    a.resources.focusId = t.id;
+    lines.push(`所有狂徒目标切换为 ${t.name}。`);
     return true;
   }
   if (id === "en_king_kill") {
     if (!needT()) return true;
     aa(t, { element: "acid", mult: 1, diceN: 1, diceS: 6, baseBreak: 1 });
-    const boss = state.units.find(u => u.kit === "bandit_boss" && !u.hidden);
+    const boss = state.units.find(u => u.kit === "bandit_boss" && !u.hidden && !u.dead);
     if (boss && Math.random() < 0.5) {
       t.stunned = true;
       lines.push("强盗头子擒拿成功，目标失去下回合行动。");
@@ -847,10 +887,9 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
   if (id === "en_thug_mutiny") {
     const boss = findKit("bandit_boss", state.units);
     if (!boss || boss.dead) { lines.push("强盗头子已不在场。"); return true; }
-    const sides = 6;
-    const steps = typeof addedDiceByLevel10 === "function" ? addedDiceByLevel10(a.level || 1) : 1;
-    hitOne(a, boss, { element: "physical", mult: 1, diceN: steps, diceS: sides, baseBreak: 1, atk, flags: { action: true } });
-    lines.push(`${a.name} 反水：${steps}d${sides} 物理伤害打在强盗头子身上。`);
+    const sides = mutinyDieSides(a.level);
+    hitOne(a, boss, { element: "physical", mult: 0, diceN: 1, diceS: sides, baseBreak: 1, atk: 0, atkRange: "melee", flags: { action: true } });
+    lines.push(`${a.name} 反水：只敢打 1d${sides} 物理。`);
     return true;
   }
   if (id === "en_chi_knife") {

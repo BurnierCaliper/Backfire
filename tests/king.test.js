@@ -1,0 +1,96 @@
+// 主持人手册第十章 · 亡命之王：一回合一动、固定随从、狂徒替他挨打、攻击命令、哗变与继位
+"use strict";
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const H = require("./headless");
+
+function field() {
+  const c = H.load();
+  c.BattleSim.setup({ party: ["kolt", "helu"], seed: "KING", enemies: [
+    { id: "outlaw_king", lv: 1, zone: 1 }, { id: "bandit_boss", lv: 1, zone: 1 },
+    { id: "thug_knife", lv: 1, zone: 1 }, { id: "thug_hammer", lv: 1, zone: 1 }] });
+  c.startCombat();
+  const st = c.S.state;
+  st.units.forEach(u => { u.zone = 1; });
+  const k = id => c.findKit(id, st.units);
+  const hit = (a, t, extra) => c.dealTo(a, t, Object.assign({ atk: 10, mult: 1, element: "physical", baseBreak: 0, atkRange: "any",
+    flags: { action: true, blockResolved: true, block: "none" } }, extra || {}));
+  const kill = u => { u.layers.forEach(l => { l.current = 0; }); c.settleEnemyKill(u, []); };
+  return { c, st, king: k("outlaw_king"), boss: k("bandit_boss"), knife: k("thug_knife"), hammer: k("thug_hammer"), kolt: k("kolt"), helu: k("helu"), hit, kill };
+}
+
+test("亡命之王一回合一动（不是指挥官）；赤牙是指挥官，3 行动点", () => {
+  const { c, king } = field();
+  assert.equal(c.enemyActBudget(king).ap, 1);
+  assert.equal(c.enemyActBudget({ kit: "chixia" }).ap, 3);
+});
+
+test("首领战固定带强盗头子、匕首狂徒、锤狂徒各一，与王同区", () => {
+  const c = H.load();
+  for (const tokens of [0, 1, 4]) {
+    const enc = c.rollBossEncounter("outlaw_king", { region: "外城区", tokens });
+    const ids = JSON.parse(JSON.stringify(enc.enemies.map(e => e.preset))).sort();
+    assert.deepEqual(ids, ["bandit_boss", "outlaw_king", "thug_hammer", "thug_knife"]);
+    assert.equal(new Set(enc.enemies.map(e => e.zone)).size, 1, "随从与王同区");
+  }
+});
+
+test("对王的单体攻击由同区狂徒承受；同区没有狂徒时才打到王", () => {
+  const { c, king, boss, knife, hammer, kolt, hit } = field();
+  const kHp = c.totalHp(king);
+  const others = c.totalHp(boss) + c.totalHp(knife) + c.totalHp(hammer);
+  hit(kolt, king);
+  assert.equal(c.totalHp(king), kHp);
+  assert.ok(c.totalHp(boss) + c.totalHp(knife) + c.totalHp(hammer) < others);
+  [boss, knife, hammer].forEach(u => { u.zone = 2; });
+  hit(kolt, king);
+  assert.ok(c.totalHp(king) < kHp);
+});
+
+test("攻击命令：所有狂徒目标切到被命令的人", () => {
+  const { c, st, king, knife, helu } = field();
+  st.attackerId = king.id; st.targetId = helu.id;
+  c.runSkill("en_king_atk");
+  assert.equal(c.S.EnemyAI.target(knife, { aim: "local" }, c.S.EnemyAI.players()).unit, helu);
+});
+
+test("哗变：强盗头子 ≤25% 且同区没有其他狂徒 → 挟持王；王不能行动、易伤；狂徒只能反水打 1d6", () => {
+  const { c, st, king, boss, knife, hammer, kolt, hit, kill } = field();
+  boss.layers.forEach(l => { l.current = Math.floor(l.max * 0.2); });
+  c.mutinyTick([]);
+  assert.ok(!king.resources.hostage, "同区还有狂徒，不哗变");
+  kill(knife);
+  hammer.zone = 2;                              // 锤狂徒走开：同区只剩头子和王
+  const notes = [];
+  c.beginRound(notes);
+  assert.equal(king.resources.hostage, true);
+  assert.equal(c.enemySkillList(king).length, 0);
+  // 挟持时失去护卫，王直接挨打且易伤
+  const kHp = c.totalHp(king);
+  const r = hit(kolt, king);
+  assert.ok(c.totalHp(king) < kHp);
+  assert.ok((r.res.log || []).some(s => /挟持/.test(s)));
+  // 狂徒反水：只有 1d6，不加 atk
+  assert.deepEqual(JSON.parse(JSON.stringify(c.enemySkillList(hammer).map(s => s.id))), ["en_thug_mutiny"]);
+  hammer.zone = 1;
+  boss.layers.forEach(l => { l.current = l.type === "flesh" ? l.max : 0; });   // 只留肉体，免得装甲把小伤害减没
+  const bHp = c.totalHp(boss);
+  st.combatPhase = "enemy"; hammer.ap = 1;
+  st.attackerId = hammer.id; st.targetId = boss.id;
+  c.runSkill("en_thug_mutiny");
+  const dealt = bHp - c.totalHp(boss);
+  assert.ok(dealt >= 1 && dealt <= 6, "反水伤害 " + dealt);
+});
+
+test("王在被挟持时被杀：强盗头子继位，atk / def 翻倍，狂徒不再反水", () => {
+  const { c, king, boss, knife, hammer, kill } = field();
+  kill(knife); hammer.zone = 2;
+  boss.layers.forEach(l => { l.current = 1; });
+  c.mutinyTick([]);
+  assert.equal(king.resources.hostage, true);
+  const atk = boss.atk, def = boss.def;
+  kill(king);
+  assert.equal(boss.atk, atk * 2);
+  assert.equal(boss.def, def * 2);
+  assert.ok(!c.enemySkillList(hammer).some(s => s.id === "en_thug_mutiny"));
+});
