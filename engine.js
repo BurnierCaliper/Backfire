@@ -401,9 +401,13 @@ function resolveAttack(ctx) {
   if (!t) return { ok: false, log: ["没有受击者。"] };
 
   if (flags.immune) {
+    // 血量层原样带回：应用结果时要用（原来缺了这一项，屹立不倒一挨打就报错）
+    const defNow = Number(t.def) || 0;
     return {
       ok: true, total: 0, breakDealt: 0, hits: 0, log: ["屹立不倒 / 免疫：伤害与击破均为 0。"],
-      perHit: [], preventSand: false, applied: []
+      perHit: [], preventSand: false, applied: [],
+      layersAfter: clone(t.layers || []), defBefore: defNow, defAfter: defNow, broke: false,
+      element: ctx.element, flags, interfereAfter: t.interfere || 0
     };
   }
 
@@ -550,11 +554,12 @@ function resolveAttack(ctx) {
     if (t.self === "splash") {
       if (element === "acid" || element === "fire") { pct -= 0.25; hAdd("目标溅射：酸/火受伤 −25%。"); }
     }
-    if (a && a.self === "store" && (element === "energy" || element === "harmonic" || element === "electric")) {
+    // 蓄能：能量和谐波攻击造成的伤害提高「高能值占血量上限的百分比」（手册不含电）
+    if (a && a.self === "store" && (element === "energy" || element === "harmonic")) {
       const maxhp = Math.max(1, totalMaxHp(a));
       const extra = (Number(a.highEnergy) || 0) / maxhp;
       pct += extra;
-      hAdd(`蓄能：能量/谐波/电伤害 +${(extra * 100).toFixed(1)}%。`);
+      hAdd(`蓄能：能量/谐波伤害 +${(extra * 100).toFixed(1)}%。`);
     }
     if (t.self === "store" && element === "harmonic") {
       pct += 0.25; hAdd("目标蓄能：谐波受伤 +25%。");

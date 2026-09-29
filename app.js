@@ -1414,6 +1414,10 @@ function beginRound(notes) {
       clearShift(u);
       notes.push(`${u.name} 错位结束，血层顺序恢复。`);
     }
+    if (typeof overloadRoundStart === "function" && overloadRoundStart(u, notes)) u._noShieldRefill = true;
+    if (typeof meltShieldRoundStart === "function" && meltShieldRoundStart(u, notes)) u._noShieldRefill = true;
+    if (u.resources && u.resources.frostShell) { u.resources.frostShell = false; notes.push(`${u.name} 再次霜结的完全免疫结束。`); }
+    if (typeof selfImmunities === "function") selfImmunities(u, notes);
     // 即时效果都是单回合的：没被用掉的也在回合开始时失效
     if (u.instant) {
       const gone = [];
@@ -1559,11 +1563,12 @@ function beginRound(notes) {
       sand.current = Math.min(sand.max, Number(sand.current) + regen);
       notes.push(`${u.name} 沙尘恢复 ${regen}${weather === "sand" ? "（沙暴翻倍，与风向无关）" : ""}`);
     }
-    if (!u.gotHitThisTurn) {
+    if (!u.gotHitThisTurn && !u._noShieldRefill) {
       (u.layers || []).forEach(l => {
         if (l.type === "shield") l.current = l.max;
       });
     }
+    u._noShieldRefill = false;
     u.gotHitThisTurn = false;
     u.damagedThisTurn = 0;
     u.sandLocked = false;
@@ -1678,6 +1683,7 @@ function turnEnd() {
   const notes = ["—— 回合结束 ——"];
   state.units.forEach(u => {
     const weather = currentWeatherFor(u);
+    if (typeof selfImmunities === "function") selfImmunities(u, notes);
     if (Number(u.statuses && u.statuses.burn) > 0) {
       const d = statusDotDice("burn", u.level, weather);
       const stacks = Math.max(1, Math.floor(Number(u.statuses.burn) || 0));
@@ -1718,10 +1724,7 @@ function turnEnd() {
       }
       dealBreak(u, br, "ice", notes, "冻伤");
     }
-    if (u.instant && u.instant.overload) {
-      (u.layers || []).forEach(l => { if (l.type === "shield") l.current = 0; });
-      notes.push(`${u.name} 过载结束：护盾清零（规则为下回合开始清零，这里在回合结束预告处理）`);
-    }
+    // 过载：护盾在下回合开始时清零（effects.js · overloadRoundStart）
     if (u.statuses && u.statuses.inspire && !u.statuses.inspireStay) {
       u.statuses.inspire = false;
       notes.push(`${u.name} 振奋结束`);
@@ -1849,6 +1852,11 @@ function isCombatAttack(attacker, flags) {
 function shockPulse(source) {
   const notes = [];
   if (!source || source._shockBusy) return notes;
+  if (source.self === "conductor") {
+    if (source.statuses) source.statuses.shock = false;
+    notes.push(`${source.name} 导体：免疫感电。`);
+    return notes;
+  }
   source._shockBusy = true;
   const weather = currentWeatherFor(source);
   const d = statusDotDice("shock", source.level || 1, weather);
@@ -2087,7 +2095,8 @@ function convertUnstableInHv(u, notes) {
   }
 }
 
-function applyTypedDot(unit, amount, element, notes, label) {
+function applyTypedDot(unit, amount, element, notes, label, opts) {
+  opts = opts || {};
   if (ignoresAoe(unit)) {
     notes.push(`${unit.name} 是飞碟触灵本体，不受该范围/余波伤害。`);
     return;
@@ -2098,7 +2107,7 @@ function applyTypedDot(unit, amount, element, notes, label) {
     target: fakeTarget,
     atk: 0, mult: 0, flat: amount, diceValue: 0,
     element, baseBreak: 0, hits: 1,
-    flags: { action: false, block: "none" },
+    flags: { action: false, block: "none", focusLayer: opts.focusLayer || null },
     weather: currentWeatherFor(unit),
     phaseStep: state.phaseStep,
     zoneMode: state.zoneMode,
@@ -2107,8 +2116,10 @@ function applyTypedDot(unit, amount, element, notes, label) {
     dist: 0,
     atkRange: "any"
   });
+  const shieldBefore = shieldSum(unit);
   notes.push(...applyCombat(unit, res, null));
   notes.push(label + ` → 实伤 ${Math.floor(res.total || 0)}`);
+  if (typeof afterDamageTaken === "function") afterDamageTaken(unit, element, res.total || 0, Math.max(0, shieldBefore - shieldSum(unit)), notes, {});
   const sdKey = inferStatusDmgKey(label, element);
   addStatusDmg(sdKey, res.total || amount);
   noteSideDamage(res.total || 0, STATUS_DMG_NAME[sdKey] || "其他", unit);
@@ -2119,6 +2130,10 @@ function applyTypedDot(unit, amount, element, notes, label) {
   if (!unit._hvBusy && !/高压场地/.test(String(label || ""))) {
     notes.push(...pulseHighVoltage(unit, res.total || amount));
   }
+}
+
+function shieldSum(u) {
+  return ((u && u.layers) || []).filter(l => l.type === "shield").reduce((a, l) => a + Math.max(0, Number(l.current) || 0), 0);
 }
 
 function escapeHtml(s) {
@@ -2721,6 +2736,8 @@ function doMove(unit, dest, moveOpt) {
     const fromF = state.fields[from] || emptyField();
     if (fromF.acid && !unit.flying) {
       if (!spendAp(unit, 1, "离开酸液地面")) return;
+    } else if (unit.self === "conductor") {
+      // 导体：移动不消耗附赠动作
     } else if (unit.isPlayer) {
       if (!spendBonus(unit, 1, "移动")) return;
     } else if (enemyRankOf(unit) === "minion") {
@@ -2777,6 +2794,7 @@ function doMove(unit, dest, moveOpt) {
     }
   }
   applyAbyssFall(unit, from, notes);
+  if (typeof afterMove === "function") afterMove(unit, notes);
   state.units.forEach(u => {
     if (u.id === unit.id || u.hidden) return;
     if (u.statuses && u.statuses.chase) {
@@ -3237,6 +3255,8 @@ function isDisplaceSkill(id) {
 function canDisplace(obj) {
   if (!obj) return false;
   if (obj.kind) return obj.movable !== false;
+  if (obj.self === "anchor") return false;                          // 千钧：免受其他单位的位移效果
+  if (obj.resources && obj.resources.frostShell) return false;      // 再次霜结：免受位移
   return !obj.noMove;
 }
 
@@ -3287,7 +3307,11 @@ function recoverFromStun(u, notes) {
   u.stunned = false;
   u._imbalanceLock = false;
   if (u.noPosture || u.kit === "ufo_leg") return;
-  const cap = Number(u.defMax) || 0;
+  if (typeof canRestorePosture === "function" && !canRestorePosture(u)) {
+    notes.push(`${u.name} 晕眩结束。千钧：无法恢复架势。`);
+    return;
+  }
+  const cap = typeof postureCap === "function" ? postureCap(u) : (Number(u.defMax) || 0);
   if (cap > 0) {
     u.def = cap;
     notes.push(`${u.name} 晕眩结束，架势回满 ${u.def}/${u.defMax}。`);
@@ -3374,7 +3398,7 @@ function finalBlockChance(helper, attacker) {
   if (c == null) c = 50;
   if (helper.kit === "hiaki" && helper.resources && helper.resources.stance === "iai") c = 100;
   c += highlandBlockMod(helper, attacker);
-  if (helper.self === "heavy") c += 10;
+  if (helper.self === "anchor") c += 10;   // 千钧：格挡成功率 +10%
   if (helper.rallyBlock) c += helper.rallyBlock;
   return Math.max(5, Math.min(100, c));
 }
@@ -3432,7 +3456,7 @@ function standUp(u) {
   u.dead = false;
   if (u.stunned) {
     u.stunned = false;
-    u.def = 1;
+    if (typeof canRestorePosture !== "function" || canRestorePosture(u)) u.def = 1;
     appendLog(`${u.name} 起身：解除晕眩，架势变为 1。之后受伤改打坚毅生命。`);
   } else {
     appendLog(`${u.name} 起身继续战斗。之后受伤改打坚毅生命。`);
@@ -3982,8 +4006,12 @@ function finishAssist(helperId, extra) {
     if (typeof refreshHiakiAtk === "function") refreshHiakiAtk(helper);
     notes.push(`绯秋切换为${extra.blade === "naruto" ? "鳴門" : "丹生谷"}。`);
   }
-  helper.def = helper.defMax;
-  notes.push(`${helper.name} 发动协助攻击，架势回满。`);
+  if (typeof canRestorePosture !== "function" || canRestorePosture(helper)) {
+    helper.def = typeof postureCap === "function" ? postureCap(helper) : helper.defMax;
+    notes.push(`${helper.name} 发动协助攻击，架势回满。`);
+  } else {
+    notes.push(`${helper.name} 发动协助攻击（千钧：架势不恢复）。`);
+  }
   appendLog(notes.join("\n"));
   const prevAtk = state.attackerId;
   const prevT = state.targetId;
@@ -4100,6 +4128,11 @@ function performAssistBlock(helper, target, attacker, forced) {
   }
   if (ok) {
     notes.push("成功：目标免伤，击破改由格挡者承担。");
+    // 雷鸣：成功的协助格挡可以额外造成 等级 × 1d4 闪电伤害的反伤
+    if (attacker && !attacker.dead && currentWeatherFor(helper) === "thunder") {
+      const r = takeDice(Math.max(1, Number(helper.level) || 1), 4, 0);
+      applyTypedDot(attacker, r.total, "electric", notes, `雷鸣：${helper.name} 格挡反伤 ${r.text}`);
+    }
     if (helper.kit === "nora" && attacker) setPierce(helper, attacker, notes);
     if (helper.kit === "vitas") flipMood(noraOf(), notes, "维塔斯格挡成功");
     if (helper.kit === "ruby" || helper.kit === "mint") {
@@ -4733,7 +4766,8 @@ function dealTo(attacker, target, opt) {
   // 它们的触发条件本身已经限定了位置，再判一次距离反而会判错
   // （借机是目标已经离开那一区之后才结算的，此时距离必然是 1）
   const isReaction = !!(opt.flags.assist || opt.flags.opp || opt.flags.opportunity);
-  if (attacker && target && opt.flags.action && !opt.flags.aoe && !isReaction) {
+  // 导体的额外目标是随机击中的，不受射程限制
+  if (attacker && target && opt.flags.action && !opt.flags.aoe && !isReaction && !opt.flags.conductorExtra) {
     const d = zoneDist(Number(attacker.zone), Number(target.zone), Number(state.zoneMode));
     const rg = opt.atkRange || (attacker.isPlayer ? "any" : (attacker.range || "any"));
     const okRange = rg === "melee" ? d === 0 : rg === "ranged" ? d === 1 : d <= 1;
@@ -4743,6 +4777,12 @@ function dealTo(attacker, target, opt) {
       appendLog(msg);
       return { res: { ok: false, total: 0, breakDealt: 0, log: [msg], perHit: [] }, extra: [msg] };
     }
+  }
+  // 躲藏：不会被选做攻击目标（范围攻击、反应不是「选目标」，照常波及）
+  if (target && target.statuses && target.statuses.hide && opt.flags.action && !opt.flags.aoe && !isReaction && !opt.flags.conductorExtra) {
+    const msg = `${target.name} 躲藏中，不能被选作攻击目标。`;
+    appendLog(msg);
+    return { res: { ok: false, total: 0, breakDealt: 0, log: [msg], perHit: [] }, extra: [msg] };
   }
   // 飞行：近程攻击飞行单位要额外付一个附赠行动；付不起就打不到。
   // 范围攻击、杂兵、以及飞行打飞行不受此限。
@@ -4835,6 +4875,7 @@ function dealTo(attacker, target, opt) {
   if (target && target.resources && target.resources.gambitWound) flags.doubleTake = true;
   if (target && target.resources && target.resources.gritTurn) flags.dr50 = true;
   if (target && target.resources && target.resources.standTurn) flags.immune = true;
+  if (target && target.resources && target.resources.frostShell) flags.immune = true;   // 再次霜结：完全免受伤害与击破
   if (target && target.instant && target.instant.doubleBreak) {
     opt.baseBreak = (opt.baseBreak != null ? opt.baseBreak : 1) * 2;
   }
@@ -4910,7 +4951,18 @@ function dealTo(attacker, target, opt) {
     atkRange: opt.atkRange || "any"
   });
   res.flags = flags;
+  const wasStunnedT = !!target.stunned;
+  const shieldBeforeT = shieldSum(target);
   const extra = applyCombat(target, res, attacker);
+  // 手册第四章补全的效果（effects.js）
+  if (typeof afterDamageTaken === "function") {
+    afterDamageTaken(target, opt.element || res.element, res.total || 0, Math.max(0, shieldBeforeT - shieldSum(target)), extra, {
+      attacker, action: !!flags.action, melee: dist === 0, startLayerType: res.startLayerType
+    });
+  }
+  if ((res.breakDealt || 0) > 0 && typeof onBreakTaken === "function") onBreakTaken(target, res.breakDealt, opt.element || res.element, extra);
+  if (!wasStunnedT && target.stunned && typeof onBroken === "function") onBroken(target, extra);
+  if (flags.action && !isReaction && typeof afterAttackDealt === "function") afterAttackDealt(attacker, target, opt.element || res.element, res, opt, extra);
   if ((res.total || 0) > 0) {
     const deadLayer = (target.layers || []).find(l => (Number(l.current) || 0) <= 0 && !l.sealed);
     if (deadLayer) state.lastBrokenLayer = { type: deadLayer.type, lost: deadLayer.max || 0, dmg: res.total || 0 };
@@ -6145,6 +6197,10 @@ function dealBreak(unit, amount, element, notes, reason) {
     notes.push(`${unit.name} ${reason || "击破"} ${amount}（机械足无架势，已记到本体若存在）`);
     return;
   }
+  if (sink.resources && sink.resources.frostShell) {
+    notes.push(`${sink.name} 再次霜结：免受击破。`);
+    return;
+  }
   const before = Number(sink.def) || 0;
   const wasStunnedSink = !!sink.stunned;
   sink.def = Math.max(0, before - amount);
@@ -6165,9 +6221,11 @@ function dealBreak(unit, amount, element, notes, reason) {
     }
     notes.push(imbalanceLine(sink));
     queueAssistAttack(null, sink);
+    if (brokeIntoStun && typeof onBroken === "function") onBroken(sink, notes);
   } else {
     maybeUnstableTrip(sink, notes);
   }
+  if (typeof onBreakTaken === "function") onBreakTaken(sink, amount, element, notes);
 }
 
 function maybeUnstableTrip(u, notes) {
@@ -7143,8 +7201,8 @@ function runSkill(id, optRun) {
       const pin = piercedTarget(a);
       if (!pin) { lines.push("场上没有刺入的目标。"); return paintSkillLog(lines.join("\n")); }
       pin.instant = pin.instant || {};
-      pin.instant.sting = true;
       lines.push(`${pin.name} 获得刺骨。`);
+      applyInstantEffect(pin, "sting", lines);
       noraFrost(a, pin, lines);
     } else if (id === "nora_pressure") {
       a.resources.forceCruelNext = true;
@@ -7289,8 +7347,7 @@ function runSkill(id, optRun) {
       }
     } else if (id === "chuan_over") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
-      t.instant.overload = true;
-      popStatus(t, "overload");
+      applyInstantEffect(t, "overload", lines);
       if ((a.resources.charge || 0) >= 3) {
         const sh = Math.floor(atk / 2);
         addShieldLayer(t, sh);
@@ -7436,7 +7493,7 @@ function runSkill(id, optRun) {
     } else if (id === "hiaki_pot") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       if (a.resources.blade !== "niu") { lines.push("热锅只能用丹生谷发动。"); }
-      else { t.instant.melt = true; popStatus(t, "melt"); lines.push(`${t.name} 被施加熔融。`); }
+      else { applyInstantEffect(t, "melt", lines); lines.push(`${t.name} 被施加熔融。`); }
     } else if (id === "niu_tsubame") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       hitOne(a, t, { element: "fire", mult: 1, baseBreak: 1, atk });

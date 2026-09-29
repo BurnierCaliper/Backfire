@@ -14,7 +14,7 @@ const ROOT = path.resolve(__dirname, "..");
 // 与 game.html 的加载顺序一致（不含 game.js：它是战斗画面）
 const RULE_FILES = [
   "run.js", "engine.js", "party.js", "props.js", "enemies.js",
-  "growth.js", "items.js", "ledger.js", "app.js", "ai.js", "sim.js", "save.js", "rogue-data.js", "rogue.js"
+  "growth.js", "items.js", "ledger.js", "app.js", "effects.js", "ai.js", "sim.js", "save.js", "rogue-data.js", "rogue.js"
 ];
 
 const cache = new Map();
