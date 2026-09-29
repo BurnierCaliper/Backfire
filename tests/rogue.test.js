@@ -221,7 +221,9 @@ test("升级到 4 级、5 级：要选属性点和职责技能；8 级不能加�
   const pend = R.pendingChoices(run).filter(p => p.kit === h.kit);
   const types = pend.map(p => p.choice.type + p.choice.level);
   assert.ok(types.includes("attr4"), types.join(","));
-  assert.ok(types.includes("role5"), types.join(","));
+  // 柯尔特的角色卡是专精坦克：5 级没有选择，直接学会主职责二
+  assert.ok(!types.includes("role5"), types.join(","));
+  assert.deepEqual(plain(h.rolePicks[5]), { role: h.roles ? h.roles.primary : plain(h.rolePicks[5]).role, n: 2 });
   const a4 = pend.find(p => p.choice.level === 4);
   R.choose(run, h.kit, a4.index, "str");
   assert.equal(h.attrs.str, 9);   // 柯尔特力量 8

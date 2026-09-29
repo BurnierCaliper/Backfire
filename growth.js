@@ -329,31 +329,33 @@ function tryLevelUp(u) {
   return changed;
 }
 
-/* ---------- 职责技能（手册第三章「升级时你会得到什么」） ----------
- * lv1 主职责一技能
- * lv5 副职责一技能，或主职责二技能
- * lv10 主职责二技能，或主职责三技能
- * lv15 主职责三技能，或主职责四技能
- * 选过的记在 u.rolePicks[5 / 10 / 15] = { role, n }。没选的里程碑按默认（跑团版原来的做法）。 */
+/* ---------- 职责技能（手册第三章「升级时你会得到什么」、第六步「团队职责」） ----------
+ * 等级表里的「或」不是每次随便挑，而是看是不是专精（主副职责同一项）：
+ *   非专精：lv1 主一 → lv5 副一 → lv10 主二 → lv15 主三
+ *   专精  ：lv1 主一 → lv5 主二 → lv10 主三 → lv15 主四   ← 技能四只有专精能拿到
+ * 单局里把「走不走专精」放到 5 级让玩家选：选副职责一技能＝不走专精；选主职责二技能＝走专精
+ * （放弃副职责）。10、15 级按选定的路线自动给，不再有选择。角色卡本来就是专精的（主副同项）没有选择。
+ * 选过的记在 u.rolePicks[5 / 10 / 15] = { role, n }。 */
 const ROLE_MILESTONES = [5, 10, 15];
 
-/** 某个里程碑可选的职责技能（去掉已经有的） */
+/** 是否走专精路线：角色卡主副同项，或 5 级选了主职责二技能 */
+function rolePathSpec(u) {
+  if (!u || !u.roles) return false;
+  const p = u.roles.primary, sec = u.roles.secondary || p;
+  if (p === sec) return true;
+  const pick5 = (u.rolePicks || {})[5];
+  return !!(pick5 && pick5.role === p && pick5.n === 2);
+}
+
+/** 某个里程碑能拿的职责技能。只有 5 级、而且角色卡不是专精时才有两个选项 */
 function roleChoicesAt(u, milestone) {
   if (!u || !u.roles) return [];
   const p = u.roles.primary, sec = u.roles.secondary || p;
-  const raw = milestone === 5 ? [{ role: sec, n: 1 }, { role: p, n: 2 }]
-    : milestone === 10 ? [{ role: p, n: 2 }, { role: p, n: 3 }]
-    : milestone === 15 ? [{ role: p, n: 3 }, { role: p, n: 4 }] : [];
-  const owned = [{ role: p, n: 1 }];
-  const picks = u.rolePicks || {};
-  ROLE_MILESTONES.filter(m => m < milestone && picks[m]).forEach(m => owned.push(picks[m]));
-  const has = (x) => owned.some(o => o.role === x.role && o.n === x.n);
-  let out = raw.filter(x => !has(x)).filter((x, i, a) => a.findIndex(y => y.role === x.role && y.n === x.n) === i);
-  if (!out.length) {
-    // 两个选项都已经有了：给主职责里下一个还没有的
-    for (let n = 2; n <= 4; n++) if (!has({ role: p, n })) { out = [{ role: p, n }]; break; }
-  }
-  return out;
+  if (milestone === 5) return p === sec ? [{ role: p, n: 2 }] : [{ role: sec, n: 1 }, { role: p, n: 2 }];
+  const spec = rolePathSpec(u);
+  if (milestone === 10) return [{ role: p, n: spec ? 3 : 2 }];
+  if (milestone === 15) return [{ role: p, n: spec ? 4 : 3 }];
+  return [];
 }
 
 function roleSkillsUnlocked(u) {
@@ -364,7 +366,10 @@ function roleSkillsUnlocked(u) {
     out.push({ role: u.roles.primary, n: 1 });
     ROLE_MILESTONES.forEach(m => {
       if (lv < m) return;
-      const pick = u.rolePicks[m] || roleChoicesAt(u, m)[0];
+      // 只认合规的选择（旧存档里可能记着按旧规则选的「主四」之类），否则按路线给
+      const opts = roleChoicesAt(u, m);
+      const saved = u.rolePicks[m];
+      const pick = saved && opts.some(o => o.role === saved.role && o.n === saved.n) ? saved : opts[0];
       if (pick) out.push({ role: pick.role, n: pick.n });
     });
     return out;

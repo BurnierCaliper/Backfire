@@ -331,6 +331,13 @@ const Rogue = (function () {
           h.notes = h.notes || {};
           h.notes[r.key] = (h.notes[r.key] || 0) + 1;
           notes.push(`${heroName(h.kit)} ${L} 级：获得${r.text}（系统尚未实装，先记下）。`);
+        } else if (r.type === "role" && roleOptionsFor(h, L).length <= 1) {
+          // 只有一个合规选项（10、15 级按路线；角色卡本来是专精）：直接给
+          const x = roleOptionsFor(h, L)[0];
+          if (x) {
+            h.rolePicks = Object.assign({}, h.rolePicks || {}, { [L]: x });
+            notes.push(`${heroName(h.kit)} ${L} 级：学会职责技能「${(roleSkillDef(x.role, x.n) || {}).name || x.role + x.n}」（${x.role}${"一二三四"[x.n - 1]}）。`);
+          }
         } else {
           h.pending = h.pending || [];
           h.pending.push({ type: r.type, level: L, noRepeat: !!r.noRepeat });
@@ -361,6 +368,14 @@ const Rogue = (function () {
     return notes;
   }
 
+  /** 单局角色在某个里程碑能拿的职责技能（按手册的专精规则，见 growth.js · roleChoicesAt） */
+  function roleOptionsFor(h, level) {
+    const u = spawnLiveCard(cardOf(h.kit), 1);
+    u.level = level;
+    u.rolePicks = Object.assign({}, h.rolePicks || {});
+    return roleChoicesAt(u, level);
+  }
+
   /** 还没做的升级选择：[{ kit, name, index, choice }] */
   function pendingChoices(run) {
     const out = [];
@@ -382,9 +397,16 @@ const Rogue = (function () {
       const u = spawnLiveCard(cardOf(kit), 1);
       u.level = p.level;
       u.rolePicks = Object.assign({}, h.rolePicks || {});
+      const prim = u.roles && u.roles.primary;
       return roleChoicesAt(u, p.level).map(x => {
         const def = roleSkillDef(x.role, x.n, u) || {};
-        return { value: x, label: `${x.role} ${"一二三四"[x.n - 1]}：${def.name || "?"}`, hint: def.hint || "" };
+        // 5 级这一选决定路线，写清楚之后会拿到什么
+        const path = p.level !== 5 ? ""
+          : x.role === prim && x.n === 2
+            ? `走专精（放弃副职责）：之后 10 级${prim}三、15 级${prim}四（最强的技能四只有专精能拿）`
+            : `不走专精：之后 10 级${prim}二、15 级${prim}三`;
+        return { value: x, label: `${x.role === prim ? "主职责" : "副职责"} ${x.role} ${"一二三四"[x.n - 1]}：${def.name || "?"}`,
+          hint: [path, def.hint].filter(Boolean).join(" · ") };
       });
     }
     return [];
