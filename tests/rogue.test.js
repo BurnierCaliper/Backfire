@@ -115,19 +115,26 @@ test("任务里每个节点的类型都能看到", () => {
   assert.equal(run.task.nodes[run.task.nodes.length - 1].type, "elite");
 });
 
-test("敌人等级：第 1 幕随天数上涨，首领是本幕上限；第 4 幕首领 15 级，额外幕 20、25 级", () => {
+test("敌人等级：第 1 幕随天数上涨；首领 = 本幕上限 + bossLevelOffset（第 4 幕上限 15，额外幕 20、25）", () => {
   const { run, R } = fresh(["kolt", "helu"], "R6");
   const early = R.enemyLevel(run, 0);
   run.actDay = 7;
   assert.ok(R.enemyLevel(run, 0) > early);
   run.stage = "boss";
-  assert.equal(R.battleSpec(run).level, R.CONFIG.actLevels[0][1]);
+  const off = R.CONFIG.bossLevelOffset || 0;
+  assert.equal(R.battleSpec(run).level, R.CONFIG.actLevels[0][1] + off);
   run.act = 4;
-  assert.equal(R.battleSpec(run).level, 15);
+  assert.equal(R.battleSpec(run).level, 15 + off);
   run.extra = true; run.act = 5;
-  assert.equal(R.battleSpec(run).level, 20);
+  assert.equal(R.battleSpec(run).level, 20 + off);
   run.act = 6;
-  assert.equal(R.battleSpec(run).level, 25);
+  assert.equal(R.battleSpec(run).level, 25 + off);
+});
+
+test("首领战随从按 bossEscortTokens", () => {
+  const { run, R } = fresh(["kolt", "helu"], "R6b");
+  run.stage = "boss";
+  assert.equal(R.battleSpec(run).encounter.tokens, R.CONFIG.bossEscortTokens);
 });
 
 test("商店：花奎支买水和食物", () => {

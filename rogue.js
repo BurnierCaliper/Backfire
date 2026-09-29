@@ -411,10 +411,10 @@ const Rogue = (function () {
       const enc = withRng(key, () => {
         const pool = (C.bosses[region(run)] || []).filter(Boolean);
         const all = Object.keys(C.bosses).reduce((a, k) => a.concat(C.bosses[k]), []);
-        return rollBossEncounter(pick(pool.length ? pool : all), { region: region(run) });
+        return rollBossEncounter(pick(pool.length ? pool : all), { region: region(run), tokens: C.bossEscortTokens });
       });
       return { kind: "boss", title: `第 ${run.act} 幕 · 首领战`, party: partyKits, encounter: enc,
-        level: levelRange(run)[1], seed: key, before, retreat: C.bossRetreat };
+        level: Math.max(1, levelRange(run)[1] + (C.bossLevelOffset || 0)), seed: key, before, retreat: C.bossRetreat };
     }
     const node = currentNode(run);
     if (!node || (node.type !== "battle" && node.type !== "elite")) return null;
