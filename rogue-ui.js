@@ -114,6 +114,8 @@
     </section>`;
   }
 
+  const WX_NAME = { none: "常态", heat: "酷暑", snow: "雪天", acid: "酸雨", thunder: "雷鸣", glow: "微光", sand: "沙暴", phase: "相位" };
+
   /* ---------- 任务板 ---------- */
   function taskCard(t, which) {
     const why = Rogue.taskBlocked(run, t);
@@ -124,6 +126,7 @@
       <div class="t-head"><b>${esc(t.name)}</b>${t.key ? '<span class="tag">主线 · 已接下</span>' : ""}<span class="days">${t.days} 天</span></div>
       <p>${esc(t.goal)}</p>
       <div class="t-meta">报酬 ${pay.kuizhi} 奎支 · 每人 ${pay.xp} 经验<br>委托方提供 ${esc(supplyText || "无")}</div>
+      ${t.weather ? `<div class="t-weather">全程天气：${esc(WX_NAME[t.weather] || t.weather)}（任务里每一场战斗都是）</div>` : ""}
       ${warn ? `<div class="t-warn">${esc(warn)}</div>` : ""}
       <button class="g-btn r-go${t.key ? " r-main" : ""}" data-which="${which}" ${why ? "disabled" : ""}>${why ? esc(why) : t.key ? "执行主线" : "接下任务"}</button>
     </div>`;
@@ -320,7 +323,8 @@
     }).join("");
     const panel = node && NODE_PANELS[node.type] ? NODE_PANELS[node.type]() : "";
     const restRow = node && node.type !== "rest" ? restBeforeRow() : "";
-    return `<h2>${esc(t.key ? "主线" : t.name)}<span class="sub">${esc(t.goal)}</span></h2>
+    const wx = t.weather ? `<span class="t-weather inline">全程天气：${esc(WX_NAME[t.weather] || t.weather)}</span>` : "";
+    return `<h2>${esc(t.key ? "主线" : t.name)}<span class="sub">${esc(t.goal)}</span>${wx}</h2>
       <ol class="track">${track}</ol>
       <div class="r-panel">${restRow}${panel}</div>`;
   }

@@ -333,9 +333,11 @@ function tryLevelUp(u) {
  * 等级表里的「或」不是每次随便挑，而是看是不是专精（主副职责同一项）：
  *   非专精：lv1 主一 → lv5 副一 → lv10 主二 → lv15 主三
  *   专精  ：lv1 主一 → lv5 主二 → lv10 主三 → lv15 主四   ← 技能四只有专精能拿到
- * 单局里把「走不走专精」放到 5 级让玩家选：选副职责一技能＝不走专精；选主职责二技能＝走专精
- * （放弃副职责）。10、15 级按选定的路线自动给，不再有选择。角色卡本来就是专精的（主副同项）没有选择。
- * 选过的记在 u.rolePicks[5 / 10 / 15] = { role, n }。 */
+ * 专精与否看角色卡（主副职责同项）。目前没有选择，按角色卡自动给。
+ * （「5 级让玩家选走不走专精」的想法先砍掉了，记在 IDEAS.md，以后可能用上：
+ *   把 ROLE_PATH_CHOICE 打开，5 级就会在副职责一 / 主职责二之间选，10、15 级按路线走。）
+ * 学到的记在 u.rolePicks[5 / 10 / 15] = { role, n }。 */
+const ROLE_PATH_CHOICE = false;
 const ROLE_MILESTONES = [5, 10, 15];
 
 /** 是否走专精路线：角色卡主副同项，或 5 级选了主职责二技能 */
@@ -343,6 +345,7 @@ function rolePathSpec(u) {
   if (!u || !u.roles) return false;
   const p = u.roles.primary, sec = u.roles.secondary || p;
   if (p === sec) return true;
+  if (!ROLE_PATH_CHOICE) return false;
   const pick5 = (u.rolePicks || {})[5];
   return !!(pick5 && pick5.role === p && pick5.n === 2);
 }
@@ -351,7 +354,10 @@ function rolePathSpec(u) {
 function roleChoicesAt(u, milestone) {
   if (!u || !u.roles) return [];
   const p = u.roles.primary, sec = u.roles.secondary || p;
-  if (milestone === 5) return p === sec ? [{ role: p, n: 2 }] : [{ role: sec, n: 1 }, { role: p, n: 2 }];
+  if (milestone === 5) {
+    if (p === sec) return [{ role: p, n: 2 }];
+    return ROLE_PATH_CHOICE ? [{ role: sec, n: 1 }, { role: p, n: 2 }] : [{ role: sec, n: 1 }];
+  }
   const spec = rolePathSpec(u);
   if (milestone === 10) return [{ role: p, n: spec ? 3 : 2 }];
   if (milestone === 15) return [{ role: p, n: spec ? 4 : 3 }];

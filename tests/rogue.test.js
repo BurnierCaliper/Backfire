@@ -483,3 +483,40 @@ test("进下一站前可以先长休一次：消耗补给、回满血、清空�
   R.restBeforeNode(run);
   assert.equal(R.canRestBefore(run).ok, false);
 });
+
+test("战场配置物与地形：越往后越常见；带天气的任务里每一场都是那种天气", () => {
+  const rate = (act) => {
+    let hit = 0, n = 0;
+    for (let s = 0; s < 60; s++) {
+      const { run, R } = fresh(["kolt", "helu"], "BF" + act + "-" + s);
+      run.act = act;
+      R.acceptTask(run, 0);
+      run.task.nodes[run.task.index] = { type: "battle", done: false };
+      const spec = R.battleSpec(run);
+      n++; if ((spec.encounter.features || []).length) hit++;
+    }
+    return hit / n;
+  };
+  const r1 = rate(1), r4 = rate(4);
+  assert.ok(r4 > r1, `第 1 幕 ${r1}，第 4 幕 ${r4}`);
+  // 摆上场
+  const { c, run, R } = fresh(["kolt", "helu"], "BFX");
+  R.acceptTask(run, 0);
+  run.task.nodes[run.task.index] = { type: "battle", done: false };
+  run.task.weather = "thunder";
+  const spec = R.battleSpec(run);
+  spec.encounter.features = [
+    { type: "prop", what: "boom", zone: 2 }, { type: "prop", what: "turret", faction: "enemy", zone: 2 },
+    { type: "field", what: "fire", zone: 1 }, { type: "field", what: "highland", zone: 2 },
+    { type: "gap", what: "bridge", key: "1-2" }
+  ];
+  c.BattleSim.setup(spec);
+  const st = c.S.state;
+  assert.equal(st.weather, "thunder");
+  assert.ok(st.props.some(p => p.kind === "boom"));
+  assert.ok(st.props.some(p => p.kind === "turret" && p.faction === "enemy"));
+  assert.ok(c.fieldFireOn(st.fields[1]));
+  assert.equal(st.fields[2].highland, true);
+  assert.equal(st.gaps["1-2"].type, "bridge");
+  assert.ok(st.gaps["1-2"].hp > 0);
+});

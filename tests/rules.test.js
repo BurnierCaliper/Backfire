@@ -214,7 +214,7 @@ test("撤退：半数倒地 → 断后挨打、丢战斗道具和部分奎支、
   assert.ok(c.totalCurHp(kolt) < hpBefore, "断后的人应该挨了一下");
 });
 
-test("职责技能：5 级在副职责一与主职责二之间选，选了就按选的解锁", () => {
+test.skip("职责技能：5 级在副职责一与主职责二之间选（ROLE_PATH_CHOICE 关着，先不测）", () => {
   const c = H.load();
   c.BattleSim.setup({ party: ["hiaki", "kolt"], enemies: [{ id: "thug_knife", lv: 1, zone: 2 }] });
   const h = c.findKit("hiaki", c.S.state.units);
@@ -272,26 +272,19 @@ test("敌人被致命一击同时打到失衡：不能再发动协助攻击", ()
   assert.equal((st.assistQueue || []).length, 0);
 });
 
-test("职责技能按手册的专精规则：技能四只有专精能拿；5 级选定路线，10、15 级不再有选择", () => {
+test("职责技能按角色卡的专精规则：非专精 5 级副一 → 10 级主二 → 15 级主三，拿不到技能四；专精一路到主四", () => {
   const c = H.load();
   c.BattleSim.setup({ party: ["hiaki", "kolt"], enemies: [{ id: "thug_knife", lv: 1, zone: 2 }] });
   const h = c.findKit("hiaki", c.S.state.units);   // 击破 / 护卫：不是专精
   const k = c.findKit("kolt", c.S.state.units);    // 专精坦克
   const P = h.roles.primary, S = h.roles.secondary;
-  assert.notEqual(P, S);
-  // 5 级两条路
-  assert.deepEqual(plain(c.roleChoicesAt(h, 5)), [{ role: S, n: 1 }, { role: P, n: 2 }]);
-  // 不走专精：10 级主二、15 级主三，拿不到主四
-  h.rolePicks = { 5: { role: S, n: 1 } }; h.level = 15;
-  assert.deepEqual(plain(c.roleChoicesAt(h, 10)), [{ role: P, n: 2 }]);
-  assert.deepEqual(plain(c.roleChoicesAt(h, 15)), [{ role: P, n: 3 }]);
-  assert.ok(!plain(c.roleSkillsUnlocked(h)).some(x => x.n === 4));
-  // 旧存档里按旧规则记了主四：不认
-  h.rolePicks = { 5: { role: S, n: 1 }, 10: { role: P, n: 3 }, 15: { role: P, n: 4 } };
+  assert.deepEqual(plain(c.roleChoicesAt(h, 5)), [{ role: S, n: 1 }], "目前没有选择");
+  h.rolePicks = {}; h.level = 15;
   assert.deepEqual(plain(c.roleSkillsUnlocked(h)), [{ role: P, n: 1 }, { role: S, n: 1 }, { role: P, n: 2 }, { role: P, n: 3 }]);
-  // 走专精：5 级主二 → 10 级主三 → 15 级主四
-  h.rolePicks = { 5: { role: P, n: 2 } };
-  assert.deepEqual(plain(c.roleSkillsUnlocked(h)), [{ role: P, n: 1 }, { role: P, n: 2 }, { role: P, n: 3 }, { role: P, n: 4 }]);
-  // 角色卡本来就是专精：5 级没有选择
-  assert.deepEqual(plain(c.roleChoicesAt(k, 5)), [{ role: k.roles.primary, n: 2 }]);
+  // 旧存档里按旧规则记了主四：不认
+  h.rolePicks = { 5: { role: P, n: 2 }, 10: { role: P, n: 3 }, 15: { role: P, n: 4 } };
+  assert.ok(!plain(c.roleSkillsUnlocked(h)).some(x => x.n === 4));
+  k.rolePicks = {}; k.level = 15;
+  const KP = k.roles.primary;
+  assert.deepEqual(plain(c.roleSkillsUnlocked(k)), [{ role: KP, n: 1 }, { role: KP, n: 2 }, { role: KP, n: 3 }, { role: KP, n: 4 }]);
 });

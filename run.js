@@ -467,7 +467,33 @@ function buildEncounter(spec, baseLevel, partySize) {
     }
   });
   made.forEach(u => { if (typeof refreshEnemyEconomy === "function") refreshEnemyEconomy(u); });
+  applyBattlefieldFeatures(spec.features, baseLevel);
   return made;
+}
+
+/** 摆上遭遇里带的配置物、场地、地形（单局按幕随机生成，见 rogue.js · rollBattlefield）
+ *  features：[{ type: "prop" | "field" | "gap", what, zone, key, faction }] */
+function applyBattlefieldFeatures(features, level) {
+  if (!features || !features.length) return;
+  state.props = state.props || [];
+  state.gaps = state.gaps || { "1-2": emptyGap(), "2-3": emptyGap() };
+  const EFFECT = { fire: "fire", acid: "acid", ice: "ice", electric: "electric", energy: "energy", harmonic: "harmonic", heal: "heal" };
+  features.forEach(f => {
+    if (f.type === "prop" && typeof makeProp === "function") {
+      const p = makeProp(f.what, f.zone, level);
+      if (f.faction) p.faction = f.faction;
+      state.props.push(p);
+    } else if (f.type === "field") {
+      const fl = state.fields[f.zone];
+      if (!fl) return;
+      if (EFFECT[f.what] && typeof setZoneField === "function") setZoneField(f.zone, EFFECT[f.what]);
+      else fl[f.what] = true;
+    } else if (f.type === "gap" && f.key) {
+      const hp = typeof defaultGapHp === "function" ? defaultGapHp(f.what) : 10;
+      state.gaps[f.key] = Object.assign(emptyGap(), { type: f.what, hp, maxHp: hp, open: false });
+    }
+  });
+  if (features.some(f => f.what === "battery") && typeof syncBatteryShields === "function") syncBatteryShields();
 }
 
 /* ===== 3. 单局状态 ============================================== */

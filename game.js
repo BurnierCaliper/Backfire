@@ -1772,6 +1772,16 @@
         if (on) lines.push({ text: `${z} 区 · ${name}`, color });
       });
     }
+    // 配置物与区间地形
+    (state.props || []).filter(p => p.kind !== "ironwall").forEach(p => {
+      const side = p.kind === "battery" || p.kind === "turret" ? (p.faction === "enemy" ? "（敌方）" : "（我方）") : "";
+      lines.push({ text: `${p.zone} 区 · ${p.name}${side}`, color: p.faction === "enemy" && side ? "#ff6b6b" : "#e8c07a" });
+    });
+    Object.keys(state.gaps || {}).forEach(k => {
+      const g = state.gaps[k];
+      if (!g || g.type === "open" || (zm === 2 && k !== "1-2")) return;
+      lines.push({ text: `${k.replace("-", "–")} 区之间 · ${typeof gapLabel === "function" ? gapLabel(g.type) : g.type}`, color: "#b8a88a" });
+    });
     const box = el("div", "battle-intro" + (tier === "boss" ? " boss" : ""));
     box.id = "g-intro";
     box.innerHTML = `<div class="bi-flash" style="--c:${lines[0].color}"></div>` + lines.map((l, i) =>

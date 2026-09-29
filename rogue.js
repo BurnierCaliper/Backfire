@@ -175,7 +175,9 @@ const Rogue = (function () {
         types.push(pickWeighted(tpl.mix || { battle: 1 }, prev && prev !== "battle" ? [prev] : null));
       }
       types.push(tpl.elite ? "elite" : "battle");
+      const weather = rollTaskWeather(run);
       return {
+        weather,
         kind: tpl.kind, name: tpl.name,
         goal: tpl.goal.replace("{region}", region(run)),
         days: tpl.days, diff: tpl.diff || 0, key: !!tpl.key,
@@ -433,6 +435,50 @@ const Rogue = (function () {
     return logAll(run, notes);
   }
 
+  /* ---------- 战场上的配置物与地形（rogue-data.js · ROGUE_BATTLEFIELD） ---------- */
+  function rollBattlefield(run, isBoss, zoneMode) {
+    const B = typeof ROGUE_BATTLEFIELD !== "undefined" ? ROGUE_BATTLEFIELD : null;
+    if (!B) return [];
+    const i = Math.max(0, Math.min((run.act || 1) - 1, B.chanceByAct.length - 1));
+    const chance = isBoss ? (B.bossChance || 0) : B.chanceByAct[i];
+    if (Math.random() >= chance) return [];
+    const [lo, hi] = B.countByAct[Math.min(i, B.countByAct.length - 1)];
+    const want = between(lo, hi);
+    const reg = region(run);
+    let pool = B.pool.filter(x => (!x.regions || x.regions.indexOf(reg) >= 0) && (run.act || 1) >= (x.minAct || 1));
+    const zm = Number(zoneMode) || 2;
+    const gapKeys = zm === 3 ? ["1-2", "2-3"] : ["1-2"];
+    const usedField = new Set(), usedGap = new Set();
+    const out = [];
+    for (let guard = 0; guard < 20 && out.length < want && pool.length; guard++) {
+      const total = pool.reduce((s, x) => s + (x.weight || 1), 0);
+      let r = Math.random() * total, k = 0;
+      while (k < pool.length - 1 && r >= (pool[k].weight || 1)) { r -= pool[k].weight || 1; k++; }
+      const item = pool.splice(k, 1)[0];
+      if (item.type === "gap") {
+        const free = gapKeys.filter(g => !usedGap.has(g));
+        if (!free.length) continue;
+        const key = pick(free); usedGap.add(key);
+        out.push({ type: "gap", what: item.what, key, name: item.name });
+      } else if (item.type === "field") {
+        const free = [1, 2, 3].slice(0, zm).filter(z => !usedField.has(z));
+        if (!free.length) continue;
+        const zone = pick(free); usedField.add(zone);
+        out.push({ type: "field", what: item.what, zone, name: item.name });
+      } else {
+        out.push({ type: "prop", what: item.what, faction: item.faction || null, zone: between(1, zm), name: item.name });
+      }
+    }
+    return out;
+  }
+  /** 任务带的天气（rogue-data.js · ROGUE_TASK_WEATHER）：null 表示不带 */
+  function rollTaskWeather(run) {
+    const W = typeof ROGUE_TASK_WEATHER !== "undefined" ? ROGUE_TASK_WEATHER : null;
+    if (!W || Math.random() >= W.chance) return null;
+    const list = W.byRegion[region(run)] || Object.keys(W.byRegion).reduce((a, k) => a.concat(W.byRegion[k]), []);
+    return list.length ? pick(list) : null;
+  }
+
   /* ---------- 战斗 ---------- */
   /** 当前节点 / 首领的战斗配置（给 BattleSim.setup 或战斗画面用） */
   function battleSpec(run) {
@@ -445,6 +491,7 @@ const Rogue = (function () {
         const all = Object.keys(C.bosses).reduce((a, k) => a.concat(C.bosses[k]), []);
         return rollBossEncounter(pick(pool.length ? pool : all), { region: region(run), tokens: C.bossEscortTokens });
       });
+      enc.features = withRng(key + ":field", () => rollBattlefield(run, true, enc.zoneMode));
       return { kind: "boss", title: `第 ${run.act} 幕 · 首领战`, party: partyKits, encounter: enc,
         level: Math.max(1, levelRange(run)[1] + (C.bossLevelOffset || 0)), seed: key, before, retreat: C.bossRetreat };
     }
@@ -454,8 +501,10 @@ const Rogue = (function () {
     const enc = withRng(key, () => {
       const opt = { region: region(run) };
       if (NODE[node.type].tokens) opt.tokens = NODE[node.type].tokens;
+      if (run.task.weather) opt.weather = run.task.weather;   // 带天气的任务：每一场都是这种天气
       return rollEncounter(opt);
     });
+    enc.features = withRng(key + ":field", () => rollBattlefield(run, false, enc.zoneMode));
     const bonus = run.task.diff + (node.type === "elite" ? C.eliteLevelBonus : 0);
     return {
       kind: node.type,

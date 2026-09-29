@@ -2,6 +2,8 @@
  *
  * rogue.js 只读这些表，不写死数字。调平衡、换设计只改这个文件：
  *   ROGUE_CONFIG      一局的节奏：幕数、天数、敌人等级曲线、区域、BOSS 池、时间消耗
+ *   ROGUE_BATTLEFIELD 战场上的随机配置物与地形（越往后越常见）
+ *   ROGUE_TASK_WEATHER 带天气的任务
  *   ROGUE_NODE_TYPES  任务里会遇到的节点种类（加一种节点：这里加一行 + rogue.js / rogue-ui.js 各加一个处理）
  *   ROGUE_TASKS       支线任务模板
  *   ROGUE_MAIN_TASK   主线任务模板（每幕开局自动接下）
@@ -86,6 +88,53 @@ const ROGUE_CONFIG = {
   // 撤退：规则按手册（app.js · RETREAT_RULES）。撤退后这个战斗节点算跳过（没有奖励），任务继续。
   retreatSkipsNode: true,
   bossRetreat: false              // 首领战不能撤退
+};
+
+/* 战场上的随机配置物与地形（已定方向：越往后越常见；数值占位）。
+ *   chanceByAct  普通 / 精英战斗带这些东西的概率，按幕（额外幕接着往后）
+ *   countByAct   带的话放几样 [最少, 最多]
+ *   bossChance   首领战带的概率
+ * 每一项：
+ *   type    prop 配置物 / field 场地效果（放在某个区）/ gap 区与区之间的地形
+ *   what    配置物种类（props.js · makeProp）/ 场地（app.js · emptyField 的键）/ 间隔种类（bridge 不稳桥梁、wall 危墙）
+ *   faction 配置物属于哪边（电池、炮台）：enemy / player
+ *   weight  抽中的权重；regions 只在这些区域出现（不写＝哪都有）；minAct 从第几幕开始出现 */
+const ROGUE_BATTLEFIELD = {
+  chanceByAct: [0.25, 0.4, 0.55, 0.7, 0.8, 0.9],
+  countByAct: [[1, 1], [1, 2], [1, 2], [2, 3], [2, 3], [2, 3]],
+  bossChance: 0.4,
+  pool: [
+    { type: "prop",  what: "boom",    name: "爆炸桶",           weight: 3 },
+    { type: "prop",  what: "acid",    name: "酸液桶",           weight: 2 },
+    { type: "prop",  what: "battery", name: "超充能电池（敌方）", faction: "enemy",  weight: 1, regions: ["巨人城", "天网设施"] },
+    { type: "prop",  what: "battery", name: "超充能电池（我方）", faction: "player", weight: 1, regions: ["巨人城", "天网设施"] },
+    { type: "prop",  what: "turret",  name: "防卫自律炮台（敌方）", faction: "enemy",  weight: 1, minAct: 2 },
+    { type: "prop",  what: "turret",  name: "防卫自律炮台（我方）", faction: "player", weight: 1, minAct: 2 },
+    { type: "field", what: "fire",     name: "火场",     weight: 2 },
+    { type: "field", what: "acid",     name: "酸液地面", weight: 2 },
+    { type: "field", what: "ice",      name: "冻土",     weight: 1, regions: ["外城区", "巨人城"] },
+    { type: "field", what: "electric", name: "高压场地", weight: 2, regions: ["巨人城", "天网设施", "外城区"] },
+    { type: "field", what: "energy",   name: "能量场",   weight: 1, regions: ["天网设施"] },
+    { type: "field", what: "harmonic", name: "干涉场地", weight: 1, minAct: 2 },
+    { type: "field", what: "heal",     name: "治愈场地", weight: 1 },
+    { type: "field", what: "highland", name: "高地",     weight: 2 },
+    { type: "field", what: "collapseOn", name: "塌陷区域", weight: 2, regions: ["沙漠"] },
+    { type: "gap",   what: "bridge",   name: "不稳桥梁", weight: 2 },
+    { type: "gap",   what: "wall",     name: "危墙",     weight: 2 }
+  ]
+};
+
+/* 带天气的任务（已定：少部分任务标注某种天气，任务里的每一场战斗都是这种天气）。
+ *   chance    一个任务带天气的概率
+ *   byRegion  每个区域可能出现的天气（额外幕沿用第 1–4 幕的区域） */
+const ROGUE_TASK_WEATHER = {
+  chance: 0.25,
+  byRegion: {
+    "外城区": ["heat", "acid", "thunder", "snow"],
+    "沙漠": ["sand", "heat"],
+    "巨人城": ["thunder", "acid", "snow", "glow"],
+    "天网设施": ["glow", "phase", "thunder"]
+  }
 };
 
 /* 节点种类。hours：这个节点本身花的时间（战斗按一场算）。 */
