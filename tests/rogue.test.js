@@ -1,33 +1,42 @@
-// Roguelike 单局流程：任务板、节点、休整、BOSS、幕间、永久死亡、经验与武器成长。
+// Roguelike 单局：主线期限、任务板、节点、休息、商店、工匠、升级选择、撤退、额外幕、存档升级。
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const H = require("./headless");
 const plain = (x) => JSON.parse(JSON.stringify(x));
 
-/** 自动把一局打完（战斗用 BattleSim，玩家一方是朴素打法）。返回走过的每一步。 */
-function autoplay(c, run, maxSteps) {
+/** 自动把一局打完（战斗用 BattleSim 的朴素打法）。opts.goOn：通关后继续额外幕 */
+function autoplay(c, run, opts) {
+  opts = opts || {};
   const { Rogue, BattleSim } = c;
   const steps = [];
-  for (let i = 0; i < (maxSteps || 400) && run.stage !== "over"; i++) {
+  for (let i = 0; i < (opts.maxSteps || 600) && run.stage !== "over"; i++) {
+    // 升级选择：先做完
+    const pend = Rogue.pendingChoices(run);
+    if (pend.length) {
+      const p = pend[0];
+      Rogue.choose(run, p.kit, p.index, Rogue.choiceOptions(run, p.kit, p.index)[0].value);
+      steps.push("pick");
+      continue;
+    }
     if (run.stage === "board") {
-      // 先做支线，天数不够了再做主线
-      const ok = run.board.map((t, j) => [t, j]).filter(([t]) => !Rogue.taskBlocked(run, t));
-      const side = ok.find(([t]) => !t.key && Rogue.daysLeft(run) - t.days >= 3);
-      const [task, j] = side || ok.find(([t]) => t.key) || ok[0];
-      Rogue.acceptTask(run, j);
-      steps.push("task:" + task.kind);
+      const side = run.board.findIndex(t => !Rogue.taskBlocked(run, t) && !Rogue.taskWarning(run, t));
+      Rogue.acceptTask(run, side >= 0 ? side : "main");
+      steps.push(side >= 0 ? "side" : "main");
     } else if (run.stage === "task" || run.stage === "boss") {
       const node = run.stage === "task" ? Rogue.currentNode(run) : { type: "boss" };
       if (node.type === "rest") {
         Rogue.restAtNode(run, Rogue.canLongRest(run) ? "long" : "short");
         steps.push("rest");
+      } else if (node.type === "shop" || node.type === "smith") {
+        steps.push(node.type);
+        Rogue.leaveNode(run);
       } else {
         const spec = Rogue.battleSpec(run);
         BattleSim.setup(spec);
         const r = BattleSim.run({ maxRounds: 40 });
-        Rogue.finishBattle(run, r.winner === "player");
-        steps.push(node.type + ":" + r.winner);
+        Rogue.finishBattle(run, r.winner === "player" ? "win" : "lose");
+        steps.push(`${node.type}:Lv${spec.level}:${r.winner}`);
       }
     } else if (run.stage === "camp") {
       Rogue.camp(run);
@@ -35,110 +44,288 @@ function autoplay(c, run, maxSteps) {
     } else if (run.stage === "interlude") {
       Rogue.nextAct(run);
       steps.push("act" + run.act);
+    } else if (run.stage === "victory") {
+      Rogue.afterVictory(run, !!opts.goOn);
+      steps.push("victory");
     }
   }
   return steps;
 }
 
-test("开局：任务板上有主线，任务板不暴露节点给界面以外的东西也没关系，但节点是线性的", () => {
+/** 新开一局（已进入单局模式） */
+function fresh(party, seed) {
   const c = H.load();
-  const run = c.Rogue.newRun({ party: ["kolt", "helu"], seed: "R1" });
+  const run = c.Rogue.newRun({ party, seed });
+  return { c, run, R: c.Rogue };
+}
+
+test("开幕自动接下主线，任务板上只有支线", () => {
+  const { run, R } = fresh(["kolt", "helu"], "R1");
+  assert.ok(run.main && run.main.key && !run.main.done);
   assert.equal(run.stage, "board");
-  assert.equal(run.board.length, c.Rogue.CONFIG.boardSize);
-  assert.ok(run.board.some(t => t.key));
-  c.Rogue.acceptTask(run, 0);
-  assert.equal(run.stage, "task");
-  assert.equal(run.task.index, 0);
+  assert.equal(run.board.length, R.CONFIG.sideTasksOnBoard);
+  assert.ok(run.board.every(t => !t.key));
+  assert.equal(R.daysLeft(run), 8);
 });
 
-test("同一个种子，任务板和每一场遭遇都一样", () => {
-  const a = H.load(), b = H.load();
-  const ra = a.Rogue.newRun({ party: ["kolt", "helu"], seed: "SAME" });
-  const rb = b.Rogue.newRun({ party: ["kolt", "helu"], seed: "SAME" });
-  assert.deepEqual(plain(ra.board), plain(rb.board));
-  a.Rogue.acceptTask(ra, 1); b.Rogue.acceptTask(rb, 1);
-  const ea = a.Rogue.battleSpec(ra), eb = b.Rogue.battleSpec(rb);
-  if (ea) assert.deepEqual(plain(ea.encounter), plain(eb.encounter));
+test("天数不够的任务不能接；会耽误主线的支线给出警告", () => {
+  const { run, R } = fresh(["kolt", "helu"], "R2");
+  run.actDay = 7;
+  const long = run.board.find(t => t.days > 1);
+  if (long) assert.match(R.taskBlocked(run, long), /天数不够/);
+  run.actDay = 8 - run.main.days - 1;
+  const t = run.board.find(x => !R.taskBlocked(run, x));
+  if (t) assert.match(R.taskWarning(run, t) || "", /来不及/);
 });
 
-test("Roguelike 模式下升级所需经验为原来的 1/3，离开后恢复", () => {
-  const c = H.load();
-  const full = c.xpToNext(1);
-  c.Rogue.enterRunMode();
-  assert.equal(c.xpToNext(1), Math.ceil(full / 3));
-  c.Rogue.leaveRunMode();
-  assert.equal(c.xpToNext(1), full);
+test("主线期限到了还没完成：本局结束", () => {
+  const { run, R } = fresh(["kolt", "helu"], "R3");
+  run.actDay = 8 - run.main.days;   // 再休整一天就来不及
+  run.stage = "camp";
+  R.camp(run);
+  assert.equal(run.stage, "over");
+  assert.equal(run.result.win, false);
+  assert.match(run.result.text, /主线/);
 });
 
-test("每完成配置数量的任务，全队武器 +1 级（绯秋两把刀都升）", () => {
-  const c = H.load();
-  const run = c.Rogue.newRun({ party: ["hiaki", "kolt"], seed: "W" });
-  const every = c.Rogue.CONFIG.weaponLevelEveryTasks;
-  for (let n = 0; n < every; n++) {
-    run.stage = "board";
-    run.board = c.Rogue.makeBoard(run);
-    const j = run.board.findIndex(t => !t.key);
-    c.Rogue.acceptTask(run, j);
-    run.task.nodes = [{ type: "rest", done: false }];   // 直接走完
-    c.Rogue.restAtNode(run, "short");
+test("主线完成 → 休整 → 首领战", () => {
+  const { run, R } = fresh(["kolt", "helu"], "R4");
+  R.acceptTask(run, "main");
+  run.task.nodes = [{ type: "rest", done: false }];
+  R.restAtNode(run, "short");
+  assert.equal(run.main.done, true);
+  R.camp(run);
+  assert.equal(run.stage, "boss");
+});
+
+test("任务里每个节点的类型都能看到", () => {
+  const { run, R } = fresh(["kolt", "helu"], "R5");
+  R.acceptTask(run, "main");
+  assert.ok(run.task.nodes.every(n => ["battle", "elite", "rest", "shop", "smith"].includes(n.type)));
+  assert.equal(run.task.nodes[run.task.nodes.length - 1].type, "elite");
+});
+
+test("敌人等级：第 1 幕随天数上涨，首领是本幕上限；第 4 幕首领 15 级，额外幕 20、25 级", () => {
+  const { run, R } = fresh(["kolt", "helu"], "R6");
+  const early = R.enemyLevel(run, 0);
+  run.actDay = 7;
+  assert.ok(R.enemyLevel(run, 0) > early);
+  run.stage = "boss";
+  assert.equal(R.battleSpec(run).level, R.CONFIG.actLevels[0][1]);
+  run.act = 4;
+  assert.equal(R.battleSpec(run).level, 15);
+  run.extra = true; run.act = 5;
+  assert.equal(R.battleSpec(run).level, 20);
+  run.act = 6;
+  assert.equal(R.battleSpec(run).level, 25);
+});
+
+test("商店：花奎支买水和食物", () => {
+  const { c, run, R } = fresh(["kolt", "helu"], "R7");
+  R.acceptTask(run, 0);
+  run.task.nodes[run.task.index] = { type: "shop", done: false };
+  const before = R.supplies();
+  R.buy(run, "water_1000", 2);
+  R.buy(run, "food_can", 1);
+  const after = R.supplies();
+  assert.equal(after.water, before.water + 2000);
+  assert.equal(after.food.food_can, before.food.food_can + 1);
+  assert.equal(after.kuizhi, before.kuizhi - 2500);
+  c.S.state.kuizhi = 0;
+  assert.throws(() => R.buy(run, "food_can", 1), /奎支不够/);
+});
+
+test("工匠：花钱升级武器（不要材料），绯秋两把刀分开升", () => {
+  const { c, run, R } = fresh(["hiaki", "kolt"], "R8");
+  R.acceptTask(run, 0);
+  run.task.nodes[run.task.index] = { type: "smith", done: false };
+  c.S.state.kuizhi = 100000;
+  R.upgradeWeapon(run, "niu");
+  assert.equal(run.party.find(h => h.kit === "hiaki").weaponLevels.niu, 2);
+  assert.equal(run.party.find(h => h.kit === "hiaki").weaponLevels.naruto, 1);
+  assert.equal(c.S.state.kuizhi, 100000 - c.S.ROGUE_SMITH.cost[2]);
+});
+
+test("完成任务不再自动升级武器", () => {
+  const { run, R } = fresh(["kolt", "helu"], "R9");
+  for (let i = 0; i < 3; i++) {
+    run.stage = "board"; R.makeBoard(run);
+    R.acceptTask(run, 0);
+    run.task.nodes = [{ type: "rest", done: false }];
+    R.restAtNode(run, "short");
   }
-  const lv = Object.fromEntries(run.party.map(h => [h.kit, plain(h.weaponLevels)]));
-  assert.deepEqual(lv.hiaki, { niu: 2, naruto: 2 });
-  assert.deepEqual(lv.kolt, { torque: 2 });
+  assert.equal(run.party.find(h => h.kit === "kolt").weaponLevels.torque, 1);
 });
 
-test("战斗里阵亡的角色连同武器人永久离队", () => {
-  const c = H.load();
-  const run = c.Rogue.newRun({ party: ["kolt", "helu", "ras"], seed: "D" });
-  c.Rogue.acceptTask(run, run.board.findIndex(t => !t.key));
-  const spec = c.Rogue.battleSpec(run);
-  c.BattleSim.setup(spec);
-  c.findKit("kolt", c.S.state.units).dead = true;
-  c.Rogue.finishBattle(run, true);
-  assert.deepEqual(run.party.map(h => h.kit), ["helu", "ras"]);
-  assert.equal(run.fallen[0].kit, "kolt");
+test("升级到 4 级、5 级：要选属性点和职责技能；8 级不能加在同一项上", () => {
+  const { run, R } = fresh(["kolt", "helu"], "R10");
+  const h = run.party[0];
+  h.xp = 5000;                           // 攒够经验
+  R.acceptTask(run, 0);
+  run.task.nodes = [{ type: "rest", done: false }];
+  R.restAtNode(run, "short");            // 完成任务时结算升级
+  const pend = R.pendingChoices(run).filter(p => p.kit === h.kit);
+  const types = pend.map(p => p.choice.type + p.choice.level);
+  assert.ok(types.includes("attr4"), types.join(","));
+  assert.ok(types.includes("role5"), types.join(","));
+  const a4 = pend.find(p => p.choice.level === 4);
+  R.choose(run, h.kit, a4.index, "str");
+  assert.equal(h.attrs.str, 9);   // 柯尔特力量 8
+  const r5 = R.pendingChoices(run).find(p => p.kit === h.kit && p.choice.level === 5);
+  if (r5) {
+    const opt = R.choiceOptions(run, h.kit, r5.index);
+    assert.ok(opt.length >= 1);
+    R.choose(run, h.kit, r5.index, opt[0].value);
+    assert.deepEqual(plain(h.rolePicks[5]), plain(opt[0].value));
+  }
+  const a8 = R.pendingChoices(run).find(p => p.kit === h.kit && p.choice.level === 8);
+  if (a8) assert.ok(!R.choiceOptions(run, h.kit, a8.index).some(o => o.value === "str"));
 });
 
-test("战斗之间血量会保留，不会每场回满", () => {
+test("濒死的角色在战斗结束后恢复到 1 点生命；武器人伤势带到下一场", () => {
+  const { c, run, R } = fresh(["kolt", "helu"], "R11");
+  R.acceptTask(run, "main");
+  while (!R.battleSpec(run)) { run.task.index++; }
+  c.BattleSim.setup(R.battleSpec(run));
+  const st = c.S.state;
+  const kolt = c.findKit("kolt", st.units);
+  kolt.layers[0].current = 0; kolt.dying = true;
+  const torque = c.spawnWeapon(kolt, "torque");
+  torque.layers[0].current = 5;
+  R.finishBattle(run, "win");
+  assert.deepEqual(plain(run.party[0].hp), [{ type: "flesh", current: 1 }]);
+  assert.equal(c.weaponCarryLayers("torque")[0].current, 5);
+});
+
+test("战斗结束武器耐久 −1（手册）", () => {
+  const { c, run, R } = fresh(["kolt", "helu"], "R12");
+  R.acceptTask(run, "main");
+  while (!R.battleSpec(run)) { run.task.index++; }
+  c.BattleSim.setup(R.battleSpec(run));
+  const max = c.weaponDurMax("torque");
+  R.finishBattle(run, "win");
+  assert.equal(c.LEDGER.dur.torque, max - 1);
+});
+
+test("撤退：这一站算跳过，任务继续；首领战不能撤退", () => {
+  const { c, run, R } = fresh(["kolt", "helu"], "R13");
+  R.acceptTask(run, "main");
+  while (!R.battleSpec(run)) { run.task.index++; }
+  const at = run.task.index;
+  c.BattleSim.setup(R.battleSpec(run));
+  c.startCombat();
+  c.performRetreat();
+  R.finishBattle(run, "retreat");
+  assert.ok(run.task ? run.task.index === at + 1 : run.stage === "camp");
+  run.stage = "boss";
+  assert.equal(R.battleSpec(run).retreat, false);
+});
+
+test("力竭：超过 20 小时没长休，开战时带上力竭；满 80 小时本局结束", () => {
+  const { c, run, R } = fresh(["kolt", "helu"], "R14");
+  R.acceptTask(run, "main");
+  while (!R.battleSpec(run)) { run.task.index++; }
+  c.LEDGER.hours = 45;
+  c.BattleSim.setup(R.battleSpec(run));
+  assert.equal(c.S.state.exhaustTier, 2);
+  c.LEDGER.hours = 79;
+  R.finishBattle(run, "win");
+  assert.equal(run.stage, "over");
+  assert.match(run.result.text, /力竭/);
+});
+
+test("离开单局后，战斗原型的队伍档案和经验曲线原样恢复", () => {
   const c = H.load();
-  const run = c.Rogue.newRun({ party: ["kolt", "helu"], seed: "HP" });
-  c.Rogue.acceptTask(run, run.board.findIndex(t => !t.key));
-  c.BattleSim.setup(c.Rogue.battleSpec(run));
-  c.findKit("kolt", c.S.state.units).layers[0].current = 7;
-  c.Rogue.finishBattle(run, true);
-  if (run.stage === "task" && c.Rogue.currentNode(run).type !== "rest") {
-    c.BattleSim.setup(c.Rogue.battleSpec(run));
-    assert.equal(c.findKit("kolt", c.S.state.units).layers[0].current, 7);
+  c.LEDGER.hours = 7;
+  c.S.state.kuizhi = 123;
+  const run = c.Rogue.newRun({ party: ["kolt", "helu"], seed: "R15" });
+  assert.notEqual(c.S.state.kuizhi, 123);
+  assert.equal(c.xpToNext(1), Math.ceil(155 / 3));
+  c.Rogue.leaveRunMode(run);
+  assert.equal(c.S.state.kuizhi, 123);
+  assert.equal(c.LEDGER.hours, 7);
+  assert.equal(c.xpToNext(1), 155);
+  c.Rogue.enterRunMode(run);
+  assert.equal(c.S.state.kuizhi, run.world.kuizhi);
+});
+
+test("第 1 版存档（M1）能升级读取", () => {
+  const c = H.load();
+  const v1 = { seed: "OLD", act: 1, day: 3, actDay: 2, stage: "board", party: [{ kit: "kolt", weapons: ["torque"], level: 2, xp: 10, weaponLevels: { torque: 1 } }, { kit: "helu", weapons: ["ecmo"], level: 1, xp: 0, weaponLevels: { ecmo: 1 } }],
+    supplies: { water: 3000, food: 5, kuizhi: 900 }, board: [], task: null, log: [] };
+  c.localStorage.setItem(c.SaveStore.KEYS.run, JSON.stringify({ kind: "run", version: 1, savedAt: 0, data: v1 }));
+  const run = c.SaveStore.loadRun();
+  assert.equal(run.world.kuizhi, 900);
+  c.Rogue.enterRunMode(run);
+  assert.ok(run.main);
+  assert.equal(c.Rogue.supplies().water, 3000);
+  assert.equal(c.Rogue.supplies().food.food_liquid, 5);
+});
+
+test("存档读回来接着玩，结果和不存档一样", () => {
+  const a = fresh(["chuan", "kolt", "helu", "ras"], "SAVE");
+  const stepsA = autoplay(a.c, a.run, { maxSteps: 12 });
+  a.R.save(a.run);
+  const saved = a.c.localStorage.getItem(a.c.SaveStore.KEYS.run);
+  const b = H.load();
+  b.localStorage.setItem(b.SaveStore.KEYS.run, saved);
+  const runB = b.SaveStore.loadRun();
+  b.Rogue.enterRunMode(runB);
+  const restB = autoplay(b, runB, { maxSteps: 30 });
+  const restA = autoplay(a.c, a.run, { maxSteps: 30 });
+  assert.deepEqual(restB, restA);
+  assert.ok(stepsA.length);
+});
+
+test("自动打完整局：流程走得到底，不报错；同种子过程一致", () => {
+  const once = (seed) => { const f = fresh(["chuan", "kolt", "helu", "ras"], seed); return { f, steps: autoplay(f.c, f.run) }; };
+  const a = once("FULL-1");
+  assert.equal(a.f.run.stage, "over");
+  assert.deepEqual(plain(a.f.c.__errors), []);
+  assert.deepEqual(once("FULL-1").steps, a.steps);
+});
+
+test("多跑几局（朴素打法）都能走到结局，不报错", () => {
+  for (let i = 0; i < 6; i++) {
+    const f = fresh(["ras", "nora", "xia", "chuan"], "ACT" + i);
+    autoplay(f.c, f.run);
+    assert.deepEqual(plain(f.c.__errors), []);
+    assert.equal(f.run.stage, "over");
   }
 });
 
-test("自动打完整局：流程能走到结束，不报错；同种子过程一致", () => {
-  const runOnce = (seed) => {
-    const c = H.load();
-    c.Rogue.enterRunMode();
-    const run = c.Rogue.newRun({ party: ["chuan", "kolt", "helu", "ras"], seed });
-    const steps = autoplay(c, run);
-    return { c, run, steps };
+test("首领战胜利 → 幕间 → 下一幕（新主线、天数重置）；第 4 幕后可通关或继续额外幕", () => {
+  const { c, run, R } = fresh(["kolt", "helu"], "FLOW");
+  const winBoss = () => {
+    run.stage = "boss";
+    c.BattleSim.setup(R.battleSpec(run));
+    R.finishBattle(run, "win");
   };
-  const a = runOnce("FULL-1");
-  assert.equal(a.run.stage, "over");
-  assert.deepEqual(plain(a.c.__errors), []);
-  assert.ok(a.steps.length > 3);
-  const b = runOnce("FULL-1");
-  assert.deepEqual(b.steps, a.steps);
-});
-
-test("能打过 BOSS 进入下一幕（多试几个种子，至少有一局进到第 2 幕）", () => {
-  let best = 1;
-  for (let i = 0; i < 6 && best < 2; i++) {
-    const c = H.load();
-    c.Rogue.enterRunMode();
-    const run = c.Rogue.newRun({ party: ["ras", "nora", "xia", "chuan"], seed: "ACT" + i });
-    autoplay(c, run);
-    best = Math.max(best, run.result ? run.result.act : run.act);
-    assert.deepEqual(plain(c.__errors), []);
-  }
-  assert.ok(best >= 2, "六局都没能进第 2 幕");
+  winBoss();
+  assert.equal(run.stage, "interlude");
+  R.nextAct(run);
+  assert.equal(run.act, 2);
+  assert.equal(run.actDay, 0);
+  assert.equal(run.main.done, false);
+  assert.equal(run.stage, "board");
+  run.act = 4;
+  winBoss();
+  assert.equal(run.stage, "victory");
+  R.afterVictory(run, true);
+  assert.equal(run.act, 5);
+  assert.equal(run.extra, true);
+  run.act = 6;
+  winBoss();
+  assert.equal(run.stage, "over");
+  assert.equal(run.result.win, true);
+  // 不继续：直接通关
+  const g = fresh(["kolt", "helu"], "FLOW2");
+  g.run.act = 4; g.run.stage = "boss";
+  g.c.BattleSim.setup(g.R.battleSpec(g.run));
+  g.R.finishBattle(g.run, "win");
+  g.R.afterVictory(g.run, false);
+  assert.equal(g.run.stage, "over");
+  assert.equal(g.run.result.win, true);
 });
 
 module.exports = { autoplay };

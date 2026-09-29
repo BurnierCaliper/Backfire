@@ -1,66 +1,28 @@
 /* 角鳞：四幕 · 单局流程（规则部分）
  *
- * 不碰网页：界面在 rogue-ui.js，测试可以直接在 Node 里跑整局。
+ * 不碰网页：界面在 rogue-ui.js，测试可以直接在 Node 里跑整局。所有数值在 rogue-data.js。
  *
- *   四幕。每幕：任务板 → 接任务 → 任务内节点线性推进（战斗 / 休息）
- *   → 任务完成 → 休整（算一天）→ 下一个任务 …
- *   天数耗尽或主线任务完成 → 休整 → 幕末 BOSS → 赢了进入下一幕，输了本局结束。
+ * 一幕：
+ *   开幕自动接下主线（有期限）→ 任务板上挑支线或执行主线 → 任务内节点线性推进
+ *   （战斗 / 精英战 / 休息 / 商店 / 工匠）→ 任务完成 → 休整（算一天）→ 回任务板 …
+ *   主线完成 → 休整 → 幕末首领 → 赢了进入下一幕。
+ *   主线期限内没完成、任何战斗团灭：本局结束。
+ *   四幕打完可以选择通关，或者继续挑战额外幕（敌人到 20、25 级）。
  *
- * 所有还没敲定的数值都集中在 ROGUE_CONFIG，改一行就能试另一种方案。
- * 标「占位」的是为了先跑通流程临时定的，等设计确定后替换。
+ * 手册里的资源规则（武器耐久、距上次长休的小时数与力竭、短休次数、长休吃的食物、
+ * 睡袋、维修工具包、水）与战斗原型共用 ledger.js：单局期间把队伍档案换成本局的，
+ * 离开单局时换回来。所以两种模式的这些规则永远一致。
  */
-
-const ROGUE_CONFIG = {
-  acts: 4,
-  daysPerAct: 8,                  // 占位：每幕可用天数
-  restDays: 1,                    // 任务之间的休整算几天
-  boardSize: 3,                   // 任务板同时挂几个任务（其中 1 个主线）
-  xpReqScale: 1 / 3,              // 已定（试行）：升级所需经验为原来的 1/3
-  weaponLevelEveryTasks: 2,       // 已定方向，数值占位：每完成 N 个任务，全队武器 +1 级
-  // 占位：第 1–4 幕所在区域
-  regions: ["外城区", "沙漠", "巨人城", "天网设施"],
-  // 占位：每个区域的轮换 BOSS 池（手册设想每区约 3 个，目前只接入了 3 个 BOSS）
-  bosses: {
-    "外城区": ["outlaw_king"],
-    "沙漠": ["sand_aggregate"],
-    "巨人城": ["ufo_boss"],
-    "天网设施": ["ufo_boss"]
-  },
-  // 占位：敌人等级 = 幕基准 + 任务难度
-  actBaseLevel: [1, 3, 5, 7],
-  startSupplies: { water: 6000, food: 12, kuizhi: 1000 },
-  // 团灭即本局结束（手册只写明了 BOSS 战；普通战斗团灭先按同样处理）
-  wipeEndsRun: true
-};
-
-/* 占位任务：只有结构，文字与数值都是临时的。
- *   nodes   节点数范围；battle 战斗 / elite 精英战 / rest 休息
- *   days    需要几天
- *   reward  完成奖励（奎支、每人经验）
- *   supply  接任务时委托方提供的补给
- *   diff    敌人等级 = 幕基准 + diff */
-const ROGUE_TASKS = [
-  { kind: "clear",  name: "清剿",   goal: "清掉盘踞在{region}的一伙敌人",     nodes: [2, 3], days: 1, diff: 0, rest: 0,
-    reward: { kuizhi: 400, xp: 15 },  supply: { water: 500, food: 1 } },
-  { kind: "escort", name: "护送",   goal: "护送一批货穿过{region}",            nodes: [3, 4], days: 2, diff: 0, rest: 1,
-    reward: { kuizhi: 700, xp: 25 },  supply: { water: 2000, food: 4 } },
-  { kind: "scout",  name: "侦察",   goal: "摸清{region}深处的动静",            nodes: [3, 3], days: 1, diff: 1, rest: 1,
-    reward: { kuizhi: 500, xp: 20 },  supply: { water: 1000, food: 2 } },
-  { kind: "bounty", name: "悬赏",   goal: "在{region}找到并击败悬赏目标",      nodes: [2, 3], days: 1, diff: 1, rest: 0, elite: true,
-    reward: { kuizhi: 900, xp: 30 },  supply: { water: 500, food: 1 } }
-];
-const ROGUE_MAIN_TASK = {
-  kind: "main", name: "主线", goal: "推进本幕的关键目标（完成后直接进入幕末 BOSS）", nodes: [4, 4], days: 3, diff: 1, rest: 1, elite: true,
-  reward: { kuizhi: 1200, xp: 40 }, supply: { water: 3000, food: 6 }, key: true
-};
 
 const Rogue = (function () {
   "use strict";
   const C = ROGUE_CONFIG;
+  const NODE = ROGUE_NODE_TYPES;
+  const clone = (x) => JSON.parse(JSON.stringify(x));
 
   /* ---------- 随机数 ----------
-   * 任务板、节点、遭遇都用「种子 + 位置」派生的独立随机流，
-   * 所以同一局读档后看到的任务板和敌人完全一样，也不会被战斗里的掷骰打乱。 */
+   * 任务板、节点、遭遇都用「种子 + 位置」派生的独立随机流：
+   * 读档后看到的完全一样，也不会被战斗里的掷骰打乱。 */
   function withRng(key, fn) {
     const prev = Math.random;
     Math.random = makeRng(key);
@@ -68,100 +30,199 @@ const Rogue = (function () {
   }
   const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
   const between = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
+  function pickWeighted(weights, exclude) {
+    const keys = Object.keys(weights).filter(k => weights[k] > 0 && NODE[k] && (!exclude || exclude.indexOf(k) < 0));
+    const total = keys.reduce((s, k) => s + weights[k], 0);
+    let r = Math.random() * total;
+    for (const k of keys) { r -= weights[k]; if (r < 0) return k; }
+    return keys[keys.length - 1] || "battle";
+  }
 
   function log(run, text) {
     run.log = run.log || [];
     run.log.push({ act: run.act, day: run.day, text });
-    if (run.log.length > 200) run.log.splice(0, run.log.length - 200);
+    if (run.log.length > 300) run.log.splice(0, run.log.length - 300);
   }
+  function logAll(run, notes) { notes.forEach(t => log(run, t)); return notes; }
 
-  const region = (run) => C.regions[Math.min(C.regions.length, run.act) - 1] || C.regions[0];
+  /* ---------- 幕、区域、天数、敌人等级 ---------- */
+  const totalActs = (run) => C.acts + (run.extra ? C.extraActs : 0);
+  const region = (run) => C.regions[(run.act - 1) % C.regions.length];
   const daysLeft = (run) => Math.max(0, C.daysPerAct - (run.actDay || 0));
+  function levelRange(run) {
+    if (run.act <= C.acts) return C.actLevels[run.act - 1] || C.actLevels[C.actLevels.length - 1];
+    return C.extraActLevels[run.act - C.acts - 1] || C.extraActLevels[C.extraActLevels.length - 1];
+  }
+  /** 本幕此刻的敌人等级：随本幕已用天数从「起」涨到「止」 */
+  function enemyLevel(run, bonus) {
+    const [a, b] = levelRange(run);
+    const t = Math.min(1, (run.actDay || 0) / Math.max(1, C.daysPerAct));
+    return Math.max(a, Math.min(b, Math.round(a + (b - a) * t) + (bonus || 0)));
+  }
 
-  function cardOf(kit) {
-    return livePartyCards().find(c => c.kit === kit) || null;
-  }
-  function heroName(kit) {
-    const c = cardOf(kit);
-    return c ? c.name : kit;
-  }
+  /* ---------- 角色 ---------- */
+  function cardOf(kit) { return livePartyCards().find(c => c.kit === kit) || null; }
+  function heroName(kit) { const c = cardOf(kit); return c ? c.name : kit; }
   /** 可选角色：所有不是武器人的角色卡（Meta 解锁以后在这里过滤） */
-  function heroPool() {
-    return livePartyCards().filter(c => !c.weaponOf);
+  function heroPool() { return livePartyCards().filter(c => !c.weaponOf); }
+
+  /* ---------- 本局的「队伍档案」 ----------
+   * 进入单局：先把战斗原型的档案收起来，换上本局的；离开时换回。 */
+  let stash = null;
+  function stashSandbox() {
+    if (stash) return;
+    stash = { ledger: LEDGER.save(), bag: clone(state.bag || { items: [] }), kuizhi: Number(state.kuizhi) || 0 };
+  }
+  function loadWorld(run) {
+    state.bag = clone(run.world.bag);
+    state.kuizhi = run.world.kuizhi;
+    LEDGER.load(run.world.ledger);
+  }
+  function syncWorld(run) {
+    if (!stash) return;   // 不在单局里：场上的档案不是本局的，不能写回
+    run.world = { ledger: LEDGER.save(), bag: clone(state.bag || { items: [] }), kuizhi: Number(state.kuizhi) || 0 };
+  }
+  function enterRunMode(run) {
+    stashSandbox();
+    setXpRequirementScale(C.xpReqScale);
+    if (run && run.world) {
+      loadWorld(run);
+      // 旧版存档升级上来时还没有主线：按当前幕补上
+      if (!run.main && run.stage !== "over") {
+        run.main = makeTask(run, ROGUE_MAIN_TASK, "main");
+        run.main.done = false;
+      }
+    }
+  }
+  /** 存档：先把场上的物资写回本局 */
+  function save(run) {
+    syncWorld(run);
+    return SaveStore.saveRun(run);
+  }
+  function leaveRunMode(run) {
+    if (run) syncWorld(run);
+    setXpRequirementScale(1);
+    state.exhaustTier = 0;
+    if (stash) {
+      state.bag = stash.bag;
+      state.kuizhi = stash.kuizhi;
+      LEDGER.load(stash.ledger);
+      stash = null;
+    }
+  }
+
+  const water = () => ledgerWater();
+  const hoursAwake = () => Number(LEDGER.hours) || 0;
+  function supplies() {
+    const food = {};
+    FOOD_ORDER.forEach(id => { food[id] = bagCount(id); });
+    return { water: water(), kuizhi: Number(state.kuizhi) || 0, food, foodTotal: FOOD_ORDER.reduce((s, id) => s + food[id], 0) };
   }
 
   /* ---------- 开局 ---------- */
   function newRun(opt) {
     opt = opt || {};
-    const run = SaveStore.newRun({ party: opt.party, seed: opt.seed, supplies: Object.assign({}, C.startSupplies) });
-    run.actDay = 0;          // 本幕已用天数
+    const run = SaveStore.newRun({ party: opt.party, seed: opt.seed });
+    run.actDay = 0;
+    run.taskNo = 0;
+    run.boardNo = 0;
     run.tasksDone = 0;
-    run.taskNo = 0;          // 本局第几个任务（派生随机数用）
-    run.party.forEach(h => { h.weaponLevels = {}; h.weapons.forEach(k => { h.weaponLevels[k] = 1; }); });
+    run.extra = false;
+    run.party.forEach(h => {
+      h.weaponLevels = {};
+      h.weapons.forEach(k => { h.weaponLevels[k] = 1; });
+      h.attrPicks = [];
+      h.rolePicks = {};
+      h.pending = [];
+      h.notes = {};
+    });
+    // 本局的物资：档案从零开始
+    enterRunMode();
+    LEDGER.reset();
+    state.bag = { items: [] };
+    state.kuizhi = C.start.kuizhi;
+    setLedgerWater(C.start.water);
+    Object.keys(C.start.items || {}).forEach(id => bagAdd(id, C.start.items[id]));
+    syncWorld(run);
     log(run, `出发：${run.party.map(h => heroName(h.kit)).join("、")}（种子 ${run.seed}）`);
-    makeBoard(run);
+    startAct(run);
     return run;
   }
 
-  /* ---------- 任务板 ---------- */
+  function startAct(run) {
+    run.actDay = 0;
+    run.main = makeTask(run, ROGUE_MAIN_TASK, "main");
+    run.main.done = false;
+    log(run, `第 ${run.act} 幕 · ${region(run)}：主线「${run.main.goal.split("。")[0]}」，期限 ${C.daysPerAct} 天。`);
+    makeBoard(run);
+  }
+
+  /* ---------- 任务 ---------- */
   function makeTask(run, tpl, slot) {
-    const key = `${run.seed}:board:${run.act}:${run.boardNo}:${slot}`;
-    return withRng(key, () => {
+    return withRng(`${run.seed}:task:${run.act}:${run.boardNo}:${slot}`, () => {
       const n = between(tpl.nodes[0], tpl.nodes[1]);
       const types = [];
-      for (let i = 0; i < n; i++) types.push("battle");
-      // 休息点：不放在第一个和最后一个
-      for (let r = 0; r < (tpl.rest || 0) && n >= 3; r++) types[between(1, n - 2)] = "rest";
-      if (tpl.elite) types[n - 1] = "elite";
+      for (let i = 0; i < n - 1; i++) {
+        // 同一种非战斗节点不连着出
+        const prev = types[i - 1];
+        types.push(pickWeighted(tpl.mix || { battle: 1 }, prev && prev !== "battle" ? [prev] : null));
+      }
+      types.push(tpl.elite ? "elite" : "battle");
       return {
-        kind: tpl.kind,
-        name: tpl.name,
+        kind: tpl.kind, name: tpl.name,
         goal: tpl.goal.replace("{region}", region(run)),
-        days: tpl.days,
-        diff: tpl.diff,
-        key: !!tpl.key,
-        reward: Object.assign({}, tpl.reward),
-        supply: Object.assign({}, tpl.supply),
-        nodeTypes: types     // 任务板上不给玩家看
+        days: tpl.days, diff: tpl.diff || 0, key: !!tpl.key,
+        reward: clone(tpl.reward), supply: clone(tpl.supply || {}),
+        nodeTypes: types     // 任务板上不给玩家看，接下后逐个显示
       };
     });
   }
 
   function makeBoard(run) {
     run.boardNo = (run.boardNo || 0) + 1;
-    const tasks = [];
-    if (!run.mainDone) tasks.push(makeTask(run, ROGUE_MAIN_TASK, 0));
     const pool = ROGUE_TASKS.slice();
-    withRng(`${run.seed}:boardpick:${run.act}:${run.boardNo}`, () => {
-      while (tasks.length < C.boardSize && pool.length) {
-        const i = Math.floor(Math.random() * pool.length);
-        tasks.push(makeTask(run, pool.splice(i, 1)[0], tasks.length));
+    const tasks = [];
+    withRng(`${run.seed}:board:${run.act}:${run.boardNo}`, () => {
+      while (tasks.length < C.sideTasksOnBoard && pool.length) {
+        tasks.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
       }
     });
-    run.board = tasks;
+    run.board = tasks.map((tpl, i) => makeTask(run, tpl, i));
     run.stage = "board";
-    return tasks;
+    return run.board;
   }
 
-  /** 这个任务现在能不能接。返回 null 表示可以，否则是原因 */
+  /** 这个任务现在能不能接。null 表示可以，否则是原因 */
   function taskBlocked(run, task) {
     if (!task) return "没有这个任务";
-    if (!task.key && task.days > daysLeft(run)) return `剩余天数不够（还剩 ${daysLeft(run)} 天）`;
+    if (task.key && run.main && run.main.done) return "主线已完成";
+    if (task.days > daysLeft(run)) return `剩余天数不够（还剩 ${daysLeft(run)} 天）`;
     return null;
   }
+  /** 接下这个支线之后，主线还来不来得及。来不及返回提示 */
+  function taskWarning(run, task) {
+    if (!task || task.key || !run.main || run.main.done) return null;
+    const left = daysLeft(run) - task.days - C.restDays;
+    return left < run.main.days ? `接下后只剩 ${Math.max(0, left)} 天，主线（${run.main.days} 天）将来不及完成` : null;
+  }
 
-  function acceptTask(run, index) {
-    const task = run.board && run.board[index];
+  /** which：支线在任务板上的序号，或 "main" */
+  function acceptTask(run, which) {
+    const task = which === "main" ? run.main : (run.board || [])[which];
     const why = taskBlocked(run, task);
     if (why) throw new Error(why);
     run.taskNo += 1;
-    run.task = Object.assign({}, task, { index: 0, nodes: task.nodeTypes.map(t => ({ type: t, done: false })) });
+    run.task = Object.assign(clone(task), { index: 0, nodes: task.nodeTypes.map(t => ({ type: t, done: false })) });
     run.board = null;
     run.stage = "task";
-    run.supplies.water += task.supply.water || 0;
-    run.supplies.food += task.supply.food || 0;
-    log(run, `接下任务「${task.name}」：${task.goal}。委托方提供 ${task.supply.water || 0} ml 水、${task.supply.food || 0} 份食物。`);
-    return run.task;
+    const notes = [];
+    const s = task.supply || {};
+    if (s.water) setLedgerWater(water() + s.water);
+    Object.keys(s.items || {}).forEach(id => bagAdd(id, s.items[id]));
+    notes.push(`${task.key ? "开始执行主线" : "接下任务「" + task.name + "」"}：${task.goal.split("。")[0]}。` +
+      (s.water || s.items ? `委托方提供 ${s.water || 0} ml 水${Object.keys(s.items || {}).map(id => "、" + ITEM_CATALOG[id].name + "×" + s.items[id]).join("")}。` : ""));
+    arriveAtNode(run, notes);
+    return logAll(run, notes);
   }
 
   function currentNode(run) {
@@ -169,49 +230,30 @@ const Rogue = (function () {
     return run.task.nodes[run.task.index] || null;
   }
 
-  /* ---------- 战斗 ---------- */
-  function enemyLevel(run, extra) {
-    return Math.max(1, (C.actBaseLevel[run.act - 1] || 1) + (extra || 0));
-  }
-
-  /** 当前节点 / BOSS 的战斗配置（给 BattleSim.setup 或战斗画面用） */
-  function battleSpec(run) {
-    const partyKits = run.party.map(h => h.kit);
-    const before = () => applyPartyToField(run);
-    if (run.stage === "boss") {
-      const key = `${run.seed}:boss:${run.act}`;
-      const enc = withRng(key, () => {
-        const pool = (C.bosses[region(run)] || []).filter(Boolean);
-        const all = Object.keys(C.bosses).reduce((a, k) => a.concat(C.bosses[k]), []);
-        const boss = pick(pool.length ? pool : all);
-        return rollBossEncounter(boss, { region: region(run) });
-      });
-      return { kind: "boss", title: `第 ${run.act} 幕 · 首领战`, party: partyKits, encounter: enc,
-        level: enemyLevel(run, 1), seed: key, before };
+  /* ---------- 时间与力竭 ---------- */
+  /** 推进时间（计入距上次长休）。满 80 小时队伍死亡 → 本局结束 */
+  function passHours(run, hours, notes) {
+    if (!hours) return;
+    ledgerAdvance(hours, notes);
+    if (exhaustTierFromHours(hoursAwake()) >= 4) {
+      run.party.slice().forEach(h => killHero(run, h, notes, "力竭致死"));
+      endRun(run, false, "力竭致死：太久没能好好睡一觉。");
     }
+  }
+  function arriveAtNode(run, notes) {
     const node = currentNode(run);
-    if (!node || (node.type !== "battle" && node.type !== "elite")) return null;
-    const key = `${run.seed}:fight:${run.taskNo}:${run.task.index}`;
-    const enc = withRng(key, () => {
-      const opt = { region: region(run) };
-      if (node.type === "elite") opt.tokens = 5;
-      return rollEncounter(opt);
-    });
-    return {
-      kind: node.type,
-      title: `${run.task.name} · 第 ${run.task.index + 1} 站${node.type === "elite" ? "（精英）" : ""}`,
-      party: partyKits, encounter: enc,
-      level: enemyLevel(run, run.task.diff + (node.type === "elite" ? 1 : 0)),
-      seed: key, before
-    };
+    if (!node) return;
+    if (run.task.index > 0) passHours(run, C.hours.travel, notes);
   }
 
-  /** 单局里的角色状态 → 战场上的单位（在 BattleSim.setup 的 before 里调用） */
+  /* ---------- 把队伍摆到场上（战斗，或者战斗外要用到规则的时候） ---------- */
   function applyHero(u, h) {
     u.weaponLevels = Object.assign({}, u.weaponLevels || {}, h.weaponLevels || {});
+    if (h.attrs) u.attrs = Object.assign({}, h.attrs);
+    u.rolePicks = Object.assign({}, h.rolePicks || {});
     u.level = h.level || 1;
     u.xp = h.xp || 0;
-    u.attrPoints = h.attrPoints || 0;
+    u.attrPoints = 0;               // 属性点在单局里走升级选择，不用后台的可分配点
     applyLevelStats(u);
     if (Array.isArray(h.hp)) {
       (u.layers || []).forEach((l, i) => {
@@ -220,249 +262,377 @@ const Rogue = (function () {
       });
     }
     if (h.shp != null) u.shp = Math.max(0, Math.min(Number(u.shpMax) || 0, Number(h.shp) || 0));
-    u.dying = !!h.dying;
-    u.upOnShp = !!h.upOnShp;
+    u.dying = false;
+    u.upOnShp = false;
   }
-  function applyPartyToField(run) {
-    // 战斗里的掉落和道具用本局的钱包和背包，不碰跑团版的队伍档案
-    state.kuizhi = run.supplies.kuizhi;
-    run.bag = run.bag || { items: [] };
-    state.bag = run.bag;
+  function applyPartyToField(run, notes) {
     run.party.forEach(h => {
       const u = findKit(h.kit, state.units);
-      if (u) applyHero(u, h);
+      if (!u) return;
+      applyHero(u, h);
+      // 耐久为 0 的武器拿在手里也用不了（手册第五章）
+      const held = heldWeaponKit(u);
+      if (held && weaponBroken(held)) disarmBrokenWeapon(u, notes);
     });
+    state.exhaustTier = Math.min(3, exhaustTierFromHours(hoursAwake()));
   }
-
   function captureHero(u, h) {
     h.level = u.level || 1;
     h.xp = u.xp || 0;
-    h.attrPoints = u.attrPoints || 0;
     h.hp = persistentLayers(u);
     h.shp = Math.max(0, Number(u.shp) || 0);
-    h.dying = !!u.dying;
-    h.upOnShp = !!u.upOnShp;
+  }
+  /** 战斗外：把队伍摆上场，做完 fn 再把状态收回来 */
+  function withParty(run, fn) {
+    BattleSim.setup({ party: run.party.map(h => h.kit), enemies: [], before: () => applyPartyToField(run) });
+    const out = fn();
+    const notes = [];
+    captureParty(run, notes);
+    return { out, notes };
   }
 
-  /** 离开战斗时的状态（血量、经验、等级）写回单局；阵亡的角色连同武器人永久离队 */
+  /* ---------- 升级（手册第三章） ---------- */
+  function queueLevelRewards(h, from, to, notes) {
+    for (let L = from + 1; L <= to; L++) {
+      (ROGUE_LEVEL_REWARDS[L] || []).forEach(r => {
+        if (r.type === "note") {
+          h.notes = h.notes || {};
+          h.notes[r.key] = (h.notes[r.key] || 0) + 1;
+          notes.push(`${heroName(h.kit)} ${L} 级：获得${r.text}（系统尚未实装，先记下）。`);
+        } else {
+          h.pending = h.pending || [];
+          h.pending.push({ type: r.type, level: L, noRepeat: !!r.noRepeat });
+        }
+      });
+    }
+  }
+  function killHero(run, h, notes, why) {
+    if (run.party.indexOf(h) < 0) return;
+    SaveStore.killHero(run, h.kit);
+    const ws = h.weapons.map(heroName).join("、");
+    notes.push(`${heroName(h.kit)} ${why || "永久死亡"}${ws ? "，" + ws + " 随之离开队伍" : ""}。`);
+  }
+  /** 场上的状态写回单局：升级、升级奖励、血量；死亡的角色连同武器人永久离队 */
   function captureParty(run, notes) {
-    notes = notes || [];
     run.party.slice().forEach(h => {
       const u = findKit(h.kit, state.units);
       if (!u) return;
-      if (typeof tryLevelUp === "function") {
-        const from = u.level;
-        if (tryLevelUp(u) && u.level > from) notes.push(`${u.name} 升到 ${u.level} 级。`);
-      }
-      if (u.dead) {
-        SaveStore.killHero(run, h.kit);
-        const ws = h.weapons.map(heroName).join("、");
-        notes.push(`${u.name} 永久死亡${ws ? "，" + ws + " 随之离开队伍" : ""}。`);
-        return;
+      const from = h.level || 1;
+      tryLevelUp(u);
+      if (u.dead) { killHero(run, h, notes, "永久死亡"); return; }
+      if (u.level > from) {
+        notes.push(`${u.name} 升到 ${u.level} 级。`);
+        queueLevelRewards(h, from, u.level, notes);
       }
       captureHero(u, h);
     });
     return notes;
   }
 
-  /** 战斗结束后调用。win：我方是否胜利。返回要显示的记录。 */
-  function finishBattle(run, win) {
-    const notes = captureParty(run, []);
-    run.supplies.kuizhi = Number(state.kuizhi) || 0;
-    run.bag = JSON.parse(JSON.stringify(state.bag || { items: [] }));
-    const wiped = !win || !run.party.length;
-    if (wiped && C.wipeEndsRun) {
-      endRun(run, false, run.stage === "boss" ? `倒在第 ${run.act} 幕的首领面前。` : "全队倒在了任务途中。");
-      notes.push("团灭。本局结束。");
-      return notes;
+  /** 还没做的升级选择：[{ kit, name, index, choice }] */
+  function pendingChoices(run) {
+    const out = [];
+    run.party.forEach(h => (h.pending || []).forEach((p, i) => out.push({ kit: h.kit, name: heroName(h.kit), index: i, choice: p })));
+    return out;
+  }
+  /** 一个升级选择有哪些选项：[{ value, label, hint }] */
+  function choiceOptions(run, kit, index) {
+    const h = run.party.find(x => x.kit === kit);
+    const p = h && h.pending && h.pending[index];
+    if (!p) return [];
+    if (p.type === "attr") {
+      const attrs = h.attrs || (cardOf(kit) || {}).attrs || {};
+      return Object.keys(ATTR_NAMES)
+        .filter(k => !(p.noRepeat && (h.attrPicks || []).indexOf(k) >= 0))
+        .map(k => ({ value: k, label: `${ATTR_NAMES[k]} +1`, hint: `现在 ${attrs[k] || 0}` }));
     }
-    if (run.stage === "boss") {
-      notes.push(`击败第 ${run.act} 幕首领。`);
-      if (run.act >= C.acts) {
-        endRun(run, true, "四幕全部通过。");
-      } else {
-        run.stage = "interlude";
-      }
-      notes.forEach(t => log(run, t));
-      return notes;
+    if (p.type === "role") {
+      const u = spawnLiveCard(cardOf(kit), 1);
+      u.level = p.level;
+      u.rolePicks = Object.assign({}, h.rolePicks || {});
+      return roleChoicesAt(u, p.level).map(x => {
+        const def = roleSkillDef(x.role, x.n, u) || {};
+        return { value: x, label: `${x.role} ${"一二三四"[x.n - 1]}：${def.name || "?"}`, hint: def.hint || "" };
+      });
     }
-    notes.forEach(t => log(run, t));
-    advanceNode(run, notes);
-    return notes;
+    return [];
+  }
+  function choose(run, kit, index, value) {
+    const h = run.party.find(x => x.kit === kit);
+    const p = h && h.pending && h.pending[index];
+    if (!p) throw new Error("没有这个升级选择");
+    const ok = choiceOptions(run, kit, index).some(o => JSON.stringify(o.value) === JSON.stringify(value));
+    if (!ok) throw new Error("这个选项不可选");
+    const notes = [];
+    if (p.type === "attr") {
+      h.attrs = Object.assign({}, h.attrs || (cardOf(kit) || {}).attrs || {});
+      h.attrs[value] = (Number(h.attrs[value]) || 0) + 1;
+      h.attrPicks = (h.attrPicks || []).concat(value);
+      notes.push(`${heroName(kit)} ${ATTR_NAMES[value]} +1。`);
+    } else if (p.type === "role") {
+      h.rolePicks = Object.assign({}, h.rolePicks || {}, { [p.level]: value });
+      notes.push(`${heroName(kit)} 学会职责技能：${(roleSkillDef(value.role, value.n) || {}).name || value.role + value.n}。`);
+    }
+    h.pending.splice(index, 1);
+    // 属性变了，血量上限等跟着变：摆上场重新算一次
+    if (p.type === "attr") withParty(run, () => null);
+    return logAll(run, notes);
   }
 
-  /* ---------- 任务节点推进 ---------- */
+  /* ---------- 战斗 ---------- */
+  /** 当前节点 / 首领的战斗配置（给 BattleSim.setup 或战斗画面用） */
+  function battleSpec(run) {
+    const partyKits = run.party.map(h => h.kit);
+    const before = () => applyPartyToField(run);
+    if (run.stage === "boss") {
+      const key = `${run.seed}:boss:${run.act}`;
+      const enc = withRng(key, () => {
+        const pool = (C.bosses[region(run)] || []).filter(Boolean);
+        const all = Object.keys(C.bosses).reduce((a, k) => a.concat(C.bosses[k]), []);
+        return rollBossEncounter(pick(pool.length ? pool : all), { region: region(run) });
+      });
+      return { kind: "boss", title: `第 ${run.act} 幕 · 首领战`, party: partyKits, encounter: enc,
+        level: levelRange(run)[1], seed: key, before, retreat: C.bossRetreat };
+    }
+    const node = currentNode(run);
+    if (!node || (node.type !== "battle" && node.type !== "elite")) return null;
+    const key = `${run.seed}:fight:${run.taskNo}:${run.task.index}`;
+    const enc = withRng(key, () => {
+      const opt = { region: region(run) };
+      if (NODE[node.type].tokens) opt.tokens = NODE[node.type].tokens;
+      return rollEncounter(opt);
+    });
+    const bonus = run.task.diff + (node.type === "elite" ? C.eliteLevelBonus : 0);
+    return {
+      kind: node.type,
+      title: `${run.task.name} · 第 ${run.task.index + 1} 站${node.type === "elite" ? "（精英）" : ""}`,
+      party: partyKits, encounter: enc, level: enemyLevel(run, bonus), seed: key, before, retreat: true
+    };
+  }
+
+  /** 战斗结束后调用。outcome：win / lose / retreat */
+  function finishBattle(run, outcome) {
+    const notes = [];
+    const boss = run.stage === "boss";
+    ledgerAfterBattle(notes);                 // 手册：耐久结算、濒死恢复到 1 点生命、记下武器人伤势
+    captureParty(run, notes);
+    const node = currentNode(run);
+    passHours(run, boss ? NODE.elite.hours : NODE[(node && node.type) || "battle"].hours, notes);
+    if (run.stage === "over") return logAll(run, notes);
+    if ((outcome === "lose" || !run.party.length) && C.wipeEndsRun) {
+      notes.push("团灭。本局结束。");
+      endRun(run, false, boss ? `倒在第 ${run.act} 幕的首领面前。` : "全队倒在了任务途中。");
+      return logAll(run, notes);
+    }
+    if (boss) {
+      notes.push(`击败第 ${run.act} 幕首领。`);
+      run.stage = run.act === C.acts && !run.extra ? "victory" : run.act >= totalActs(run) ? "over" : "interlude";
+      if (run.stage === "over") endRun(run, true, `连额外的第 ${run.act} 幕也打穿了。`);
+      return logAll(run, notes);
+    }
+    if (outcome === "retreat") notes.push("撤退：这一站的敌人没有解决，绕开继续前进。");
+    advanceNode(run, notes);
+    return logAll(run, notes);
+  }
+
+  /* ---------- 节点推进 ---------- */
   function advanceNode(run, notes) {
-    notes = notes || [];
     const node = currentNode(run);
     if (node) node.done = true;
     run.task.index += 1;
     if (run.task.index >= run.task.nodes.length) completeTask(run, notes);
+    else arriveAtNode(run, notes);
     return notes;
   }
-
-  /** 任务内休息点：长休（消耗水和食物，回满）或短休（不消耗，回一部分） */
-  function restCost(run) {
-    let water = 0, food = 0;
-    run.party.forEach(h => {
-      const c = longRestCost(cardOf(h.kit) || {});
-      water += c.water; food += c.food;
-    });
-    return { water, food };
-  }
-  function canLongRest(run) {
-    const c = restCost(run);
-    return run.supplies.water >= c.water && run.supplies.food >= c.food;
+  /** 商店、工匠这类节点：逛完了继续走 */
+  function leaveNode(run) {
+    const node = currentNode(run);
+    if (!node || (node.type !== "shop" && node.type !== "smith")) throw new Error("这里没有可以离开的节点");
+    const notes = [];
+    passHours(run, NODE[node.type].hours, notes);
+    if (run.stage !== "over") advanceNode(run, notes);
+    return logAll(run, notes);
   }
 
-  /** 在一个临时单位上操作角色状态（算上限、回血），再写回 */
-  function withHeroUnit(h, fn) {
-    const u = spawnLiveCard(cardOf(h.kit), 1);
-    applyHero(u, h);
-    fn(u);
-    captureHero(u, h);
+  /* ---------- 休息（手册第五章） ---------- */
+  function restPlan(run) {
+    return withParty(run, () => longRestNeeds({})).out;
   }
-
-  /** 界面用：一名角色的当前状态（上限按等级算好） */
-  function heroView(h) {
-    let v = null;
-    withHeroUnit(h, u => {
-      v = {
-        kit: h.kit,
-        name: u.name,
-        level: u.level || 1,
-        hp: totalCurHp(u),
-        hpMax: baseMaxHp(u),
-        shp: Number(u.shp) || 0,
-        shpMax: Number(u.shpMax) || 0,
-        dying: !!u.dying,
-        xp: u.xp || 0,
-        xpNext: xpToNext(u.level),
-        weapons: h.weapons.map(k => ({ kit: k, name: heroName(k), level: (h.weaponLevels || {})[k] || 1 }))
-      };
-    });
-    return v;
+  function canLongRest(run) { return restPlan(run).ok; }
+  function doLongRest(run, notes) {
+    const r = withParty(run, () => ledgerLongRest({ hours: C.hours.longRest }, notes));
+    notes.push(...r.notes);
+    return r.out && r.out.ok;
   }
-
-  function longRest(run, notes, hours) {
-    hours = hours || 8;
-    const c = restCost(run);
-    run.supplies.water -= c.water;
-    run.supplies.food -= c.food;
-    notes.push(`长休：消耗 ${c.water} ml 水、${c.food} 份食物。`);
-    run.party.forEach(h => withHeroUnit(h, u => {
-      (u.layers || []).forEach(l => { l.current = l.max; });
-      u.dying = false;
-      u.upOnShp = false;
-      u.shp = Math.min(Number(u.shpMax) || 0, (Number(u.shp) || 0) + hours * 2);
-      notes.push(`${u.name} 血量回满，坚毅 ${u.shp}/${u.shpMax}。`);
-    }));
-  }
-  function shortRest(run, notes) {
-    run.party.forEach(h => withHeroUnit(h, u => {
-      if (u.dying) { notes.push(`${u.name} 濒死，短休无法恢复。`); return; }
-      const con = (u.attrs && Number(u.attrs.con)) || 0;
-      const heal = (Number(u.level) || 1) * 2 + con;
-      healUnit(u, heal);
-      notes.push(`${u.name} 短休恢复 ${heal}。`);
-    }));
-  }
-
   function restAtNode(run, mode) {
     const node = currentNode(run);
     if (!node || node.type !== "rest") throw new Error("当前节点不是休息点");
     const notes = [];
     if (mode === "long") {
       if (!canLongRest(run)) throw new Error("补给不够长休");
-      longRest(run, notes);
+      doLongRest(run, notes);
     } else {
-      shortRest(run, notes);
+      const r = withParty(run, () => ledgerShortRest(null, notes));
+      notes.push(...r.notes);
     }
-    notes.forEach(t => log(run, t));
     advanceNode(run, notes);
-    return notes;
+    return logAll(run, notes);
   }
 
-  /* ---------- 任务完成、武器成长 ---------- */
+  /* ---------- 商店 ---------- */
+  function shopItemName(row) {
+    return row.name || (ITEM_CATALOG[row.give.item] || {}).name || row.key;
+  }
+  function buy(run, key, qty) {
+    const node = currentNode(run);
+    if (!node || node.type !== "shop") throw new Error("这里没有商店");
+    const row = ROGUE_SHOP.find(r => r.key === key);
+    if (!row) throw new Error("没有这件商品");
+    qty = Math.max(1, Math.floor(Number(qty) || 1));
+    const cost = row.price * qty;
+    if ((Number(state.kuizhi) || 0) < cost) throw new Error("奎支不够");
+    state.kuizhi -= cost;
+    if (row.give.water) setLedgerWater(water() + row.give.water * qty);
+    if (row.give.item) bagAdd(row.give.item, qty);
+    return logAll(run, [`买下 ${shopItemName(row)} ×${qty}，花掉 ${cost} 奎支。`]);
+  }
+
+  /* ---------- 工匠 ---------- */
+  function smithOptions(run) {
+    const out = [];
+    run.party.forEach(h => h.weapons.forEach(k => {
+      const lv = (h.weaponLevels || {})[k] || 1;
+      const next = lv + 1;
+      const cost = next <= ROGUE_SMITH.maxLevel ? ROGUE_SMITH.cost[next] : null;
+      out.push({ owner: h.kit, kit: k, name: heroName(k), level: lv, cost, max: cost == null });
+    }));
+    return out;
+  }
+  function upgradeWeapon(run, kit) {
+    const node = currentNode(run);
+    if (!node || node.type !== "smith") throw new Error("这里没有工匠");
+    const opt = smithOptions(run).find(o => o.kit === kit);
+    if (!opt || opt.max) throw new Error("已经满级");
+    if ((Number(state.kuizhi) || 0) < opt.cost) throw new Error("奎支不够");
+    state.kuizhi -= opt.cost;
+    const h = run.party.find(x => x.kit === opt.owner);
+    h.weaponLevels[kit] = opt.level + 1;
+    return logAll(run, [`工匠把 ${opt.name} 升到 ${opt.level + 1} 级，花掉 ${opt.cost} 奎支。`]);
+  }
+  /** 维修工具包（手册：修复 10 点耐久）。商店、工匠、休整时都能用 */
+  function repairWeapon(run, kit) {
+    const notes = [];
+    withParty(run, () => ledgerRepair(kit, notes));
+    return logAll(run, notes);
+  }
+
+  /* ---------- 任务完成、休整 ---------- */
   function completeTask(run, notes) {
     const t = run.task;
-    run.supplies.kuizhi += t.reward.kuizhi || 0;
-    notes.push(`任务「${t.name}」完成：获得 ${t.reward.kuizhi || 0} 奎支，每人 ${t.reward.xp || 0} 经验。`);
+    state.kuizhi = (Number(state.kuizhi) || 0) + (t.reward.kuizhi || 0);
+    notes.push(`${t.key ? "主线" : "任务「" + t.name + "」"}完成：获得 ${t.reward.kuizhi || 0} 奎支，每人 ${t.reward.xp || 0} 经验。`);
     run.party.forEach(h => { h.xp = (h.xp || 0) + (t.reward.xp || 0); });
-    levelUpOutOfBattle(run, notes);
+    const r = withParty(run, () => null);     // 摆上场按规则结算升级
+    notes.push(...r.notes);
     run.tasksDone += 1;
-    if (C.weaponLevelEveryTasks > 0 && run.tasksDone % C.weaponLevelEveryTasks === 0) {
-      run.party.forEach(h => h.weapons.forEach(k => {
-        h.weaponLevels[k] = (h.weaponLevels[k] || 1) + 1;
-        notes.push(`${heroName(k)} 升到 ${h.weaponLevels[k]} 级。`);
-      }));
-    }
-    run.actDay = (run.actDay || 0) + t.days;
-    run.day += t.days;
-    if (t.key) run.mainDone = true;
+    advanceDays(run, t.days);
+    if (t.key) run.main.done = true;
     run.task = null;
     run.stage = "camp";
-    notes.forEach(s => log(run, s));
     return notes;
   }
-
-  function levelUpOutOfBattle(run, notes) {
-    run.party.forEach(h => withHeroUnit(h, u => {
-      const from = u.level;
-      if (tryLevelUp(u) && u.level > from) notes.push(`${u.name} 升到 ${u.level} 级。`);
-    }));
+  function advanceDays(run, n) {
+    run.actDay = (run.actDay || 0) + n;
+    run.day += n;
+    LEDGER.shortUsed = {};     // 新的一天，短休次数刷新
   }
 
-  /* ---------- 任务之间的休整 ---------- */
-  /** 休整一次：补给够就长休，不够只能硬撑。之后回任务板，或者进入幕末 BOSS。 */
+  /** 休整一次：补给够就长休，不够只能硬撑。之后回任务板、进首领战，或者主线过期 → 结束 */
   function camp(run) {
     if (run.stage !== "camp") throw new Error("现在不是休整的时候");
     const notes = [];
-    if (canLongRest(run)) longRest(run, notes);
-    else notes.push("补给不足，无法长休，只能硬撑着过夜。");
-    run.actDay += C.restDays;
-    run.day += C.restDays;
-    const reason = run.mainDone ? "主线任务完成" : daysLeft(run) <= 0 ? "天数耗尽" : null;
-    if (reason) {
+    if (canLongRest(run)) doLongRest(run, notes);
+    else {
+      notes.push("补给不足，无法长休，只能硬撑着过夜。");
+      passHours(run, C.hours.longRest, notes);
+      if (run.stage === "over") return logAll(run, notes);
+    }
+    advanceDays(run, C.restDays);
+    if (run.main.done) {
       run.stage = "boss";
-      notes.push(`${reason}：前往第 ${run.act} 幕的首领所在。`);
+      notes.push(`主线完成：前往第 ${run.act} 幕的首领所在。`);
+    } else if (C.mainDeadlineEndsRun && daysLeft(run) < run.main.days) {
+      notes.push(`只剩 ${daysLeft(run)} 天，主线（${run.main.days} 天）已经来不及完成。`);
+      endRun(run, false, `第 ${run.act} 幕的主线没能在期限内完成。`);
     } else {
       makeBoard(run);
-      if (!run.board.some(t => !taskBlocked(run, t))) {
-        run.stage = "boss";
-        notes.push("剩下的天数已经接不了任何任务：前往首领所在。");
-      }
     }
-    notes.forEach(t => log(run, t));
-    return notes;
+    return logAll(run, notes);
   }
 
-  /* ---------- 幕间 ---------- */
+  /* ---------- 幕间、额外幕、结局 ---------- */
   function nextAct(run) {
     if (run.stage !== "interlude") throw new Error("现在不是幕间");
     run.act += 1;
-    run.actDay = 0;
-    run.mainDone = false;
     const notes = [`进入第 ${run.act} 幕：${region(run)}。`];
-    makeBoard(run);
-    notes.forEach(t => log(run, t));
-    return notes;
+    startAct(run);
+    return logAll(run, notes);
   }
-
+  /** 四幕打完：通关（结束），或者继续挑战额外幕 */
+  function afterVictory(run, goOn) {
+    if (run.stage !== "victory") throw new Error("现在不是通关的时候");
+    if (!goOn || C.extraActs <= 0) {
+      endRun(run, true, "四幕全部通过。");
+      return logAll(run, ["通关。"]);
+    }
+    run.extra = true;
+    run.stage = "interlude";
+    return nextAct(run);
+  }
   function endRun(run, win, text) {
     run.stage = "over";
-    run.result = { win: !!win, text, act: run.act, day: run.day };
+    run.result = { win: !!win, text, act: run.act, day: run.day, extra: !!run.extra };
     log(run, (win ? "通关：" : "失败：") + text);
   }
 
+  /** 界面用：一名角色的当前状态（上限按等级算好） */
+  function heroView(run, h) {
+    const u = spawnLiveCard(cardOf(h.kit), 1);
+    applyHero(u, h);
+    return {
+      kit: h.kit, name: u.name, level: u.level || 1,
+      hp: totalCurHp(u), hpMax: baseMaxHp(u),
+      shp: Number(u.shp) || 0, shpMax: Number(u.shpMax) || 0,
+      xp: u.xp || 0, xpNext: xpToNext(u.level),
+      pending: (h.pending || []).length,
+      weapons: h.weapons.map(k => {
+        const w = weaponCarryLayers(k);
+        const cur = w ? w.reduce((s, l) => s + (Number(l.current) || 0), 0) : null;
+        return { kit: k, name: heroName(k), level: (h.weaponLevels || {})[k] || 1,
+          dur: weaponDurFor(h, k), durMax: weaponDurMaxFor(h, k), hp: cur };
+      })
+    };
+  }
+  // 耐久上限跟武器等级走（growth.js / ledger.js）。战斗外角色不在场上，这里按单局记录的等级算
+  function weaponDurMaxFor(h, k) {
+    const g = WEAPON_GROWTH[k] || {};
+    return (g.baseDur || 5) + Math.floor(((h.weaponLevels || {})[k] || 1) / 2);
+  }
+  function weaponDurFor(h, k) {
+    const v = LEDGER.dur[k];
+    return v == null ? weaponDurMaxFor(h, k) : Math.max(0, Number(v) || 0);
+  }
+
   return {
-    CONFIG: C, TASKS: ROGUE_TASKS, MAIN_TASK: ROGUE_MAIN_TASK,
-    newRun, heroPool, heroName, cardOf, region, daysLeft, heroView,
-    makeBoard, taskBlocked, acceptTask, currentNode,
+    CONFIG: C,
+    newRun, heroPool, heroName, cardOf, region, daysLeft, enemyLevel, levelRange, totalActs,
+    heroView, supplies, hoursAwake,
+    makeBoard, taskBlocked, taskWarning, acceptTask, currentNode,
     battleSpec, applyPartyToField, finishBattle,
-    restCost, canLongRest, restAtNode,
-    camp, nextAct, endRun,
-    enterRunMode: () => setXpRequirementScale(C.xpReqScale),
-    leaveRunMode: () => setXpRequirementScale(1)
+    restPlan, canLongRest, restAtNode, leaveNode,
+    buy, shopItemName, smithOptions, upgradeWeapon, repairWeapon,
+    pendingChoices, choiceOptions, choose,
+    camp, nextAct, afterVictory, endRun,
+    enterRunMode, leaveRunMode, syncWorld, save
   };
 })();

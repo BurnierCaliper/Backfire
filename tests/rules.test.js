@@ -128,3 +128,105 @@ test("开战后是第 1 回合，结束一轮后是第 2 回合", () => {
   c.endEnemyTurn();
   assert.equal(c.S.state.turnNo, 2);
 });
+
+/* ---------- 手册规则：力竭、濒死恢复、武器人伤势、撤退、职责技能选择 ---------- */
+
+test("力竭 1：不能用坚毅生命起身", () => {
+  const { c, st } = field(["kolt", "helu"], [{ id: "thug_knife", lv: 1, zone: 2 }]);
+  const kolt = c.findKit("kolt", st.units);
+  st.exhaustTier = 1;
+  kolt.layers[0].current = 0; kolt.dying = true;
+  c.standUp(kolt);
+  assert.equal(kolt.upOnShp, false);
+  assert.match(c.standUpBlocked(kolt), /力竭/);
+});
+
+test("力竭 2：atk −3、def −1", () => {
+  const c = H.load();
+  c.BattleSim.setup({ party: ["kolt", "helu"], enemies: [{ id: "thug_knife", lv: 1, zone: 2 }] });
+  const st = c.S.state, kolt = c.findKit("kolt", st.units);
+  const atk = c.effectiveAtk(kolt, st.units), def = kolt.defMax;
+  st.exhaustTier = 2;
+  c.startCombat();
+  assert.equal(c.effectiveAtk(kolt, st.units), atk - 3);
+  assert.equal(kolt.defMax, def - 1);
+});
+
+test("力竭 3：被击倒立刻死亡", () => {
+  const { c, st, foes } = field(["kolt", "helu"], [{ id: "thug_knife", lv: 1, zone: 2 }]);
+  const kolt = c.findKit("kolt", st.units);
+  st.exhaustTier = 3;
+  kolt.layers[0].current = 1;
+  foes[0].zone = kolt.zone;
+  c.dealTo(foes[0], kolt, Object.assign(hit("physical"), { atk: 30 }));
+  assert.equal(kolt.dead, true);
+});
+
+test("战斗结束：濒死的角色恢复到 1 点生命", () => {
+  const { c, st } = field(["kolt", "helu"], [{ id: "thug_knife", lv: 1, zone: 2 }]);
+  const kolt = c.findKit("kolt", st.units);
+  kolt.layers[0].current = 0; kolt.dying = true;
+  c.recoverDownedAfterBattle([]);
+  assert.equal(kolt.dying, false);
+  assert.equal(c.totalCurHp(kolt), 1);
+});
+
+test("武器人伤势跨战斗保留；上一场倒下的武器人长休前唤不出来", () => {
+  const c = H.load();
+  c.BattleSim.setup({ party: ["kolt", "helu"], enemies: [{ id: "thug_knife", lv: 1, zone: 2 }] });
+  let st = c.S.state;
+  const kolt = c.findKit("kolt", st.units);
+  const torque = c.spawnWeapon(kolt, "torque");
+  torque.layers[0].current = 3;
+  c.ledgerCapture();
+  c.BattleSim.setup({ party: ["kolt", "helu"], enemies: [{ id: "thug_knife", lv: 1, zone: 2 }] });
+  st = c.S.state;
+  const t2 = c.spawnWeapon(c.findKit("kolt", st.units), "torque");
+  assert.equal(t2.layers[0].current, 3);
+  t2.layers[0].current = 0; t2.dead = true;
+  c.ledgerCapture();
+  c.BattleSim.setup({ party: ["kolt", "helu"], enemies: [{ id: "thug_knife", lv: 1, zone: 2 }] });
+  assert.equal(c.weaponSummonWhy(c.findKit("kolt", c.S.state.units), "torque").includes("长休"), true);
+});
+
+test("撤退：全员完好 → 每人坚毅 −3 且不致死、耗时 2 小时", () => {
+  const { c, st } = field(["kolt", "helu"], [{ id: "thug_knife", lv: 1, zone: 2 }]);
+  const kolt = c.findKit("kolt", st.units);
+  kolt.shp = 2;
+  const r = c.performRetreat();
+  assert.equal(r.key, "intact");
+  assert.equal(kolt.shp, 1);
+  assert.equal(kolt.dead, false);
+});
+
+test("撤退：半数倒地 → 断后挨打、丢战斗道具和部分奎支、倒地者坚毅 −7", () => {
+  const { c, st } = field(["kolt", "helu"], [{ id: "thug_knife", lv: 1, zone: 2 }]);
+  const kolt = c.findKit("kolt", st.units), helu = c.findKit("helu", st.units);
+  helu.layers[0].current = 0; helu.dying = true; helu.shp = 12;
+  st.kuizhi = 1000;
+  c.ensureBag(); st.bag.items.push({ id: Object.keys(c.ITEM_CATALOG).find(k => c.ITEM_CATALOG[k].combat), qty: 2 });
+  const hpBefore = c.totalCurHp(kolt);
+  const r = c.performRetreat(kolt.id);
+  assert.equal(r.key, "routed");
+  assert.equal(helu.shp, 5);
+  assert.equal(st.kuizhi, 750);
+  assert.ok(st.bag.items.every(x => !c.ITEM_CATALOG[x.id].combat || x.qty === 0));
+  assert.ok(c.totalCurHp(kolt) < hpBefore, "断后的人应该挨了一下");
+});
+
+test("职责技能：5 级在副职责一与主职责二之间选，选了就按选的解锁", () => {
+  const c = H.load();
+  c.BattleSim.setup({ party: ["hiaki", "kolt"], enemies: [{ id: "thug_knife", lv: 1, zone: 2 }] });
+  const h = c.findKit("hiaki", c.S.state.units);
+  h.level = 5;
+  const opts = plain(c.roleChoicesAt(h, 5));
+  assert.equal(opts.length, 2);
+  h.rolePicks = { 5: opts[1] };
+  const got = plain(c.roleSkillsUnlocked(h));
+  assert.deepEqual(got, [{ role: h.roles.primary, n: 1 }, opts[1]]);
+  // 10 级：已经拿了主职责二的话，只剩主职责三
+  h.level = 10;
+  if (opts[1].role === h.roles.primary && opts[1].n === 2) {
+    assert.deepEqual(plain(c.roleChoicesAt(h, 10)), [{ role: h.roles.primary, n: 3 }]);
+  }
+});

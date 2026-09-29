@@ -367,7 +367,7 @@
     if (!state.combatStarted) return "战斗尚未开始";
     if (state.combatPhase !== "player") return "敌人回合";
     if (!u || u.dead) return "已阵亡";
-    if (sk.id === "__stand") return null;
+    if (sk.id === "__stand") return typeof standUpBlocked === "function" ? standUpBlocked(u) : null;
     if (sk.id === "__item" && typeof bagList === "function" && !bagList().some(x => x.combat)) return "没有能在战斗中使用的道具";
     if (u.stunned) return "失衡中，本回合无法行动";
     if ((sk.cost.ap || 0) > (u.ap || 0)) return "行动点不足";
@@ -1419,6 +1419,33 @@
     endTurn();
   }
 
+  /* ---------- 撤退（规则见 app.js · performRetreat，按主持人手册第七章） ---------- */
+  function canRetreat() {
+    if (!state.combatStarted || G.ended || G.depth > 0) return false;
+    if (state.combatPhase !== "player") return false;
+    return !(G.rogue && G.rogue.spec && G.rogue.spec.retreat === false);
+  }
+  async function askRetreat() {
+    if (!canRetreat() || choiceResolve) return;
+    const pv = retreatPreview();
+    const text = pv.lines.join("；") + "。";
+    let guardId = null;
+    if (pv.rule.rearguard) {
+      const guards = retreatRearguards();
+      const pickG = await openChoice("撤退 · 谁来断后", text + " 选一名还站着的角色断后。",
+        guards.map(u => ({ label: u.name, sub: `血量 ${sumHp(u)}`, value: u.id })),
+        { label: "不撤了", value: null });
+      if (!pickG) return;
+      guardId = pickG;
+    } else {
+      const ok = await openChoice("撤退", text, [{ label: "撤退", value: "yes" }], { label: "不撤了", value: null });
+      if (ok !== "yes") return;
+    }
+    await act(() => { performRetreat(guardId); });
+    if (!G.ended) finish(false, "retreat");
+  }
+  const sumHp = (u) => (u.layers || []).reduce((a, l) => a + Math.max(0, Number(l.current) || 0), 0);
+
   /** 开战前的选择。柯尔特可以自行决定初始刀头（不算「更换刀头」，不触发追击伤害）。 */
   async function askOpeningChoices() {
     const k = typeof findKit === "function" ? findKit("kolt", state.units) : null;
@@ -1484,12 +1511,15 @@
     if (!standing.length) return finish(false);
     return false;
   }
-  function finish(win) {
+  /** outcome：win / lose / retreat */
+  function finish(win, outcome) {
     G.ended = true;
-    G.lastWin = !!win;
+    G.lastOutcome = outcome || (win ? "win" : "lose");
     disarm();
+    refreshTop();
     const box = $("g-result");
-    box.querySelector("h2").textContent = win ? "胜利" : "全员倒地";
+    const retreated = G.lastOutcome === "retreat";
+    box.querySelector("h2").textContent = retreated ? "撤退" : win ? "胜利" : "全员倒地";
     box.querySelector("h2").className = win ? "win" : "lose";
     const ups = [];
     state.units.filter(u => u.isPlayer && !isWeaponUnit(u)).forEach(u => {
@@ -1504,9 +1534,11 @@
     }
     const loot = `背包现有 ${Number(state.kuizhi) || 0} 奎支`;
     const lvline = ups.length ? "升级：" + ups.join("、") + "。" : "";
-    box.querySelector("p").textContent = win
-      ? `第 ${state.turnNo} 回合结束。${loot}。${lvline}`
-      : `队伍倒地。${loot}。${lvline}`;
+    box.querySelector("p").textContent = retreated
+      ? `第 ${state.turnNo} 回合撤出战斗。${loot}。${lvline}`
+      : win
+        ? `第 ${state.turnNo} 回合结束。${loot}。${lvline}`
+        : `队伍倒地。${loot}。${lvline}`;
     // 结算面板晚一点弹出，先让最后一击的大伤害数字和击倒演出放完
     const token = G.endToken = {};
     realTimeout(() => {
@@ -1651,6 +1683,8 @@
     state.logIndex = 0;
     state.combatPhase = "player";
     state.combatStarted = false;
+    state.exhaustTier = 0;
+    state.retreated = false;
 
     loadLiveParty();
     if (enc && enc.playerZone) {
@@ -1731,6 +1765,12 @@
     const ph = $("g-phasel");
     ph.textContent = !state.combatStarted ? "等待开始" : (state.combatPhase === "enemy" ? "敌人行动" : "我方行动");
     ph.classList.toggle("enemy", state.combatStarted && state.combatPhase === "enemy");
+    const rt = $("g-retreat");
+    if (rt) {
+      const bossNoRetreat = !!(G.rogue && G.rogue.spec && G.rogue.spec.retreat === false);
+      rt.hidden = bossNoRetreat;
+      rt.disabled = !canRetreat();
+    }
   }
 
   function refreshHud() {
@@ -2600,14 +2640,15 @@
     };
     $("g-restart").onclick = () => { if (G.depth === 0) setupBattle(Number($("g-level").value) || 1, G.lastEncounter || null); };
     $("g-again").onclick = () => setupBattle(Number($("g-level").value) || 1, G.lastEncounter || null);
+    $("g-retreat").onclick = askRetreat;
     $("g-rogue-next").onclick = () => {
       const r = G.rogue;
       if (!r || !G.ended) return;
-      const win = G.lastWin;
+      const outcome = G.lastOutcome;
       $("g-result").classList.remove("show");
       $("g-reopen").classList.remove("show");
       setRogueMode(null);
-      r.onEnd(win);
+      r.onEnd(outcome);
     };
     $("g-review").onclick = reviewLog;
     $("g-reopen").onclick = () => $("g-result").classList.add("show");

@@ -1258,3 +1258,21 @@ body.rogue-battle .g-top label:has(#g-weather-sel) { display: none !important; }
 .run-log h3 { margin: 0 0 8px; font-size: 13px; color: var(--muted); font-weight: 400; letter-spacing: .1em; }
 .run-log ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
 .run-log li { font-size: 12px; line-height: 1.6; padding: 6px 10px; background: var(--plate); border-radius: 4px; }
+
+/* 升级选择、主线警告、商店 / 工匠、力竭提示 */
+.levelup { padding: 14px 16px; border: 1px solid var(--gold); border-radius: 4px; background: var(--plate); }
+.levelup p { margin: 0 0 12px; font-size: 14px; }
+.levelup .sub { margin-left: 10px; font-size: 12px; color: var(--muted); }
+.t-warn { font-size: 12px; color: var(--gold); line-height: 1.5; }
+.rh-top em { color: var(--gold); font-style: normal; }
+.run-supplies .warn, .run-supplies .warn b { color: var(--foe); }
+.shop { display: flex; flex-direction: column; gap: 4px; margin: 0 0 14px; }
+.shop-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) 56px 64px auto; align-items: center; gap: 10px;
+  padding: 6px 10px; background: var(--plate); border: 1px solid var(--line); border-radius: 4px; font-size: 13px;
+}
+.shop-row small { display: block; font-size: 11px; color: var(--muted); }
+.s-have { color: var(--muted); font-size: 12px; text-align: right; }
+.s-price { font-family: var(--num); text-align: right; }
+.shop-row .g-btn { height: 28px; }
+#r-leave { margin-top: 6px; }

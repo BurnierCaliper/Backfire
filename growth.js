@@ -263,9 +263,46 @@ function tryLevelUp(u) {
   return changed;
 }
 
+/* ---------- 职责技能（手册第三章「升级时你会得到什么」） ----------
+ * lv1 主职责一技能
+ * lv5 副职责一技能，或主职责二技能
+ * lv10 主职责二技能，或主职责三技能
+ * lv15 主职责三技能，或主职责四技能
+ * 选过的记在 u.rolePicks[5 / 10 / 15] = { role, n }。没选的里程碑按默认（跑团版原来的做法）。 */
+const ROLE_MILESTONES = [5, 10, 15];
+
+/** 某个里程碑可选的职责技能（去掉已经有的） */
+function roleChoicesAt(u, milestone) {
+  if (!u || !u.roles) return [];
+  const p = u.roles.primary, sec = u.roles.secondary || p;
+  const raw = milestone === 5 ? [{ role: sec, n: 1 }, { role: p, n: 2 }]
+    : milestone === 10 ? [{ role: p, n: 2 }, { role: p, n: 3 }]
+    : milestone === 15 ? [{ role: p, n: 3 }, { role: p, n: 4 }] : [];
+  const owned = [{ role: p, n: 1 }];
+  const picks = u.rolePicks || {};
+  ROLE_MILESTONES.filter(m => m < milestone && picks[m]).forEach(m => owned.push(picks[m]));
+  const has = (x) => owned.some(o => o.role === x.role && o.n === x.n);
+  let out = raw.filter(x => !has(x)).filter((x, i, a) => a.findIndex(y => y.role === x.role && y.n === x.n) === i);
+  if (!out.length) {
+    // 两个选项都已经有了：给主职责里下一个还没有的
+    for (let n = 2; n <= 4; n++) if (!has({ role: p, n })) { out = [{ role: p, n }]; break; }
+  }
+  return out;
+}
+
 function roleSkillsUnlocked(u) {
   const out = [];
   if (!u || !u.roles) return out;
+  if (u.rolePicks) {
+    const lv = u.level || 1;
+    out.push({ role: u.roles.primary, n: 1 });
+    ROLE_MILESTONES.forEach(m => {
+      if (lv < m) return;
+      const pick = u.rolePicks[m] || roleChoicesAt(u, m)[0];
+      if (pick) out.push({ role: pick.role, n: pick.n });
+    });
+    return out;
+  }
   const spec = u.roles.primary && u.roles.primary === u.roles.secondary;
   const lv = u.level || 1;
   const add = (role, n) => out.push({ role, n });

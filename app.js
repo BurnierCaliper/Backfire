@@ -1344,6 +1344,7 @@ function startCombat() {
   // 按我方实际上场人数平衡敌人（开战前改过队伍也能跟上）
   const partyN = typeof syncPartySizeFromField === "function" ? syncPartySizeFromField() : state.partySize;
   const balanceNotes = typeof rebalanceEnemiesForParty === "function" ? rebalanceEnemiesForParty(partyN) : [];
+  applyExhaustionAtStart(balanceNotes);
   // 开战前的布置记录算「第 0 回合」，开战后的第一回合才是第 1 回合
   const prePage = state.logPages[state.logPages.length - 1];
   if (prePage && prePage.lines.length) prePage.turn = 0;
@@ -2969,9 +2970,15 @@ function applyCombat(target, result, attacker) {
   }
   if (!target.isPlayer && isInnerDepleted(target) && !target._xpGiven) settleEnemyKill(target, notes);
   if (target.isPlayer && !isWeaponUnit(target) && isInnerDepleted(target) && !target.upOnShp && !target.dead) {
-    target.dying = true;
-    clearStunOnDown(target);
-    notes.push(`${target.name} 最内层生命归零，陷入濒死。不能靠治疗起身，可消耗起身改用坚毅生命继续战斗。`);
+    if (exhaustTierOf(target) >= 3) {
+      target.dead = true;
+      target.dying = false;
+      notes.push(`${target.name} 力竭 3：被击倒后立刻死亡。`);
+    } else {
+      target.dying = true;
+      clearStunOnDown(target);
+      notes.push(`${target.name} 最内层生命归零，陷入濒死。不能靠治疗起身，可消耗起身改用坚毅生命继续战斗。`);
+    }
   }
   if (target.isPlayer && isWeaponUnit(target) && isInnerDepleted(target)) {
     target.dead = true;
@@ -3372,8 +3379,49 @@ function finalBlockChance(helper, attacker) {
   return Math.max(5, Math.min(100, c));
 }
 
+/* ---------- 力竭（手册第五章） ----------
+ * 距上次长休 20 小时：无法再用坚毅生命起身；40 小时：atk −3，def −1；
+ * 60 小时：被击倒后立刻死亡；80 小时：角色死亡（在推进时间时结算，见 ledger / rogue）。
+ * 战斗里读 state.exhaustTier，由开战的那一方（单局 / 战斗原型）按当时的小时数设置。
+ * 只作用于角色本人，武器人不受影响。 */
+function exhaustTierOf(u) {
+  if (!u || !u.isPlayer || (typeof isWeaponUnit === "function" && isWeaponUnit(u))) return 0;
+  return Math.max(0, Number(typeof state !== "undefined" && state.exhaustTier) || 0);
+}
+function exhaustTierFromHours(h) {
+  h = Number(h) || 0;
+  return h >= 80 ? 4 : h >= 60 ? 3 : h >= 40 ? 2 : h >= 20 ? 1 : 0;
+}
+/** 不能起身的原因；可以起身返回 null */
+function standUpBlocked(u) {
+  if (exhaustTierOf(u) >= 1) return "力竭：无法再用坚毅生命起身";
+  if ((Number(u && u.shp) || 0) <= 0) return "坚毅生命已耗尽";
+  return null;
+}
+/** 开战时的力竭惩罚：力竭 2 起 def −1 */
+function applyExhaustionAtStart(notes) {
+  const tier = Math.max(0, Number(state.exhaustTier) || 0);
+  if (!tier) return;
+  const heroes = state.units.filter(u => u.isPlayer && !isWeaponUnit(u) && !u.dead);
+  if (tier >= 2) {
+    heroes.forEach(u => {
+      if (u._exhaustDef) return;
+      u._exhaustDef = true;
+      u.defMax = Math.max(0, (Number(u.defMax) || 0) - 1);
+      u.def = Math.min(Number(u.def) || 0, u.defMax);
+    });
+  }
+  const text = ["", "力竭：无法用坚毅生命起身", "力竭 2：atk −3，def −1", "力竭 3：被击倒立刻死亡"][Math.min(3, tier)];
+  if (text && notes) notes.push(`队伍${text}。`);
+}
+
 function standUp(u) {
   if (!u || !u.isPlayer || isWeaponUnit(u) || u.dead) return;
+  const blocked = standUpBlocked(u);
+  if (blocked) {
+    appendLog(`${u.name} ${blocked}。`);
+    return;
+  }
   if (!u.dying && totalHp(u) > 0) {
     appendLog(`${u.name} 还没濒死，不用起身。`);
     return;
@@ -3398,6 +3446,110 @@ function standUp(u) {
     appendLog(tickSelfBurn(u, false).join("\n"));
   }
   renderAll();
+}
+
+/* ---------- 战斗结束 ---------- */
+
+/** 手册（本作裁定）：濒死的角色在战斗结束后恢复到 1 点生命。起身靠坚毅生命撑着的也一样。 */
+function recoverDownedAfterBattle(notes) {
+  (state.units || []).filter(u => u.isPlayer && !isWeaponUnit(u) && !u.dead && !u._removed).forEach(u => {
+    if (!u.dying && !u.upOnShp) return;
+    u.dying = false;
+    u.upOnShp = false;
+    const inner = innermostLayer(u);
+    if (inner && (Number(inner.current) || 0) < 1) inner.current = 1;
+    if (notes) notes.push(`${u.name} 从濒死中缓过来，恢复到 1 点生命。`);
+  });
+}
+
+/* ---------- 撤退（主持人手册第七章） ----------
+ *   撤退状态   时间       断后                         资源                    shp
+ *   全员完好   一两小时   无                           无                      每人 3，不致死
+ *   有损伤     一两小时   一人挨一次无法格挡的攻击     一部分奎支或道具        每人 5
+ *   半数倒地   四到五小时 同上                         全部使用道具 + 一部分奎支 每人 5，倒地者 7
+ * 「一部分奎支」手册没给比例，写在 kuizhiLoss 里，随时可调。 */
+const RETREAT_RULES = {
+  intact: { name: "全员完好", hours: 2, rearguard: false, kuizhiLoss: 0,    combatItems: false, shp: 3, shpDown: 3, lethal: false },
+  hurt:   { name: "有损伤",   hours: 2, rearguard: true,  kuizhiLoss: 0.25, combatItems: false, shp: 5, shpDown: 5, lethal: true },
+  routed: { name: "半数倒地", hours: 5, rearguard: true,  kuizhiLoss: 0.25, combatItems: true,  shp: 5, shpDown: 7, lethal: true }
+};
+
+function retreatHeroes() {
+  return (state.units || []).filter(u => u.isPlayer && !isWeaponUnit(u) && !u.dead && !u._removed && !u.hidden);
+}
+/** 现在撤退属于哪一档 */
+function retreatStatus() {
+  const heroes = retreatHeroes();
+  const down = heroes.filter(u => u.dying || u.upOnShp).length;
+  if (heroes.length && down * 2 >= heroes.length) return "routed";
+  const hurt = heroes.some(u => u.dying || u.upOnShp || totalCurHp(u) < baseMaxHp(u));
+  return hurt ? "hurt" : "intact";
+}
+/** 可以断后的人：还站着的角色 */
+function retreatRearguards() {
+  return retreatHeroes().filter(u => !u.dying && !u.upOnShp);
+}
+/** 撤退的代价，给界面预先显示 */
+function retreatPreview() {
+  const key = retreatStatus();
+  const r = RETREAT_RULES[key];
+  const lines = [`${r.name}：耗时 ${r.hours} 小时`];
+  if (r.rearguard) lines.push("一人断后，挨一次无法格挡的攻击");
+  if (r.kuizhiLoss) lines.push(`失去 ${Math.round(r.kuizhiLoss * 100)}% 奎支`);
+  if (r.combatItems) lines.push("失去全部战斗道具");
+  lines.push(`每人坚毅 −${r.shp}${r.shpDown !== r.shp ? `，倒地者 −${r.shpDown}` : ""}${r.lethal ? "" : "（不致死）"}`);
+  return { key, rule: r, lines };
+}
+
+/** 执行撤退。rearguardId：断后的角色（需要时）。返回记录。战斗随之结束。 */
+function performRetreat(rearguardId) {
+  const key = retreatStatus();
+  const r = RETREAT_RULES[key];
+  const notes = [`撤退（${r.name}）。`];
+  if (r.rearguard) {
+    const guards = retreatRearguards();
+    const guard = guards.find(u => u.id === rearguardId) || guards[0];
+    const foes = (state.units || []).filter(u => !u.isPlayer && !u.dead && !u.hidden && !u._removed && u.kit !== "ironwall");
+    const striker = foes.slice().sort((a, b) => effectiveAtk(b, state.units) - effectiveAtk(a, state.units))[0];
+    if (guard && striker) {
+      const sg = striker.suggest || {};
+      const dice = sg.dice || [0, 0];
+      const out = dealTo(striker, guard, {
+        atk: effectiveAtk(striker, state.units), mult: 1, flat: sg.flat || 0,
+        diceN: dice[0], diceS: dice[1], element: sg.element || "physical", baseBreak: sg.baseBreak || 1,
+        flags: { action: true, opp: true, blockResolved: true, block: "none" }
+      });
+      notes.push(`${guard.name} 断后，挨了 ${striker.name} 一击：${Math.floor((out.res && out.res.total) || 0)} 伤害。`);
+    }
+  }
+  if (r.kuizhiLoss > 0) {
+    const before = Number(state.kuizhi) || 0;
+    const lost = Math.floor(before * r.kuizhiLoss);
+    state.kuizhi = before - lost;
+    if (lost) notes.push(`丢下 ${lost} 奎支。`);
+  }
+  if (r.combatItems && state.bag && Array.isArray(state.bag.items)) {
+    const gone = state.bag.items.filter(x => (x.qty || 0) > 0 && ITEM_CATALOG[x.id] && ITEM_CATALOG[x.id].combat);
+    if (gone.length) notes.push(`丢下全部战斗道具：${gone.map(x => ITEM_CATALOG[x.id].name + "×" + x.qty).join("、")}。`);
+    gone.forEach(x => { x.qty = 0; });
+  }
+  retreatHeroes().forEach(u => {
+    const down = u.dying || u.upOnShp;
+    const loss = down ? r.shpDown : r.shp;
+    const before = Number(u.shp) || 0;
+    u.shp = r.lethal ? Math.max(0, before - loss) : Math.max(Math.min(before, 1), before - loss);
+    notes.push(`${u.name} 坚毅 ${before} → ${u.shp}。`);
+    if (u.shp <= 0 && before > 0) {
+      u.dead = true;
+      u.dying = false;
+      u.upOnShp = false;
+      notes.push(`${u.name} 坚毅生命耗尽，永久死亡。`);
+    }
+  });
+  if (typeof ledgerAdvance === "function") ledgerAdvance(r.hours, notes);
+  state.retreated = true;
+  notes.forEach(t => appendLog(t));
+  return { key, notes };
 }
 
 function selfBurnStacksOf(u) {
@@ -4923,6 +5075,15 @@ function spawnWeapon(owner, kit) {
       if (sv && sv.type === l.type) l.current = Math.max(0, Math.min(Number(l.max) || 0, sv.current));
     });
   }
+  // 队伍档案：本场第一次唤出时，带着上一场留下的伤势
+  const carried = !prev && typeof weaponCarryLayers === "function" ? weaponCarryLayers(kit) : null;
+  if (carried) {
+    (u.layers || []).forEach((l, i) => {
+      const sv = carried[i];
+      if (sv && sv.type === l.type) l.current = Math.max(0, Math.min(Number(l.max) || 0, Number(sv.current) || 0));
+    });
+    if (totalCurHp(u) <= 0) return null;   // 上一场倒下、还没长休：唤不出来
+  }
   // 维塔斯：双相与刺入属于武器系统，分出来时从诺拉那边同步过来
   if (kit === "vitas") {
     u.resources = u.resources || {};
@@ -6369,7 +6530,12 @@ function res(u) { return (u && u.resources) || {}; }
 /** 武器人现在能不能唤出：ok / out（已在场）/ dead（本场已倒下，不能再唤出） */
 function weaponSummonState(owner, kit) {
   const list = (state.units || []).filter(x => x.kit === kit && (!x.weaponOf || !owner || x.weaponOf === owner.kit));
-  if (!list.length) return "ok";
+  if (!list.length) {
+    // 本场还没唤出过：看上一场留下的伤势
+    const carried = typeof weaponCarryLayers === "function" ? weaponCarryLayers(kit) : null;
+    if (carried && carried.reduce((sum, l) => sum + Math.max(0, Number(l.current) || 0), 0) <= 0) return "wounded";
+    return "ok";
+  }
   const alive = list.find(x => !x.dead);
   if (!alive) return "dead";
   if (!alive.hidden && !alive.fused) return "out";
@@ -6382,6 +6548,7 @@ function weaponSummonWhy(owner, kit) {
   const nm = typeof weaponCardName === "function" ? weaponCardName(kit) : kit;
   if (st === "out") return `${nm} 已经在场上`;
   if (st === "dead") return `${nm} 本场已倒下，无法再唤出`;
+  if (st === "wounded") return `${nm} 上一场倒下后还没长休，无法唤出`;
   return null;
 }
 /** 绯秋：还能分出哪几把刀 */

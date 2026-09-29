@@ -15,9 +15,35 @@ const SaveStore = (function () {
   "use strict";
 
   const KEYS = { run: "antlerscale-rogue-run", meta: "antlerscale-rogue-meta" };
-  const CURRENT = { run: 1, meta: 1 };
-  // MIGRATE.run[1] = (data) => 第 2 版的 data
-  const MIGRATE = { run: {}, meta: {} };
+  const CURRENT = { run: 2, meta: 1 };
+  // MIGRATE.run[n] = (第 n 版的 data) => 第 n+1 版的 data
+  const MIGRATE = {
+    run: {
+      // 第 1 版（M1）：物资是一组数字 → 第 2 版：物资放进「本局队伍档案」（与战斗原型同一套规则）
+      1: (d) => {
+        const s = d.supplies || {};
+        const items = s.food ? [{ id: "food_liquid", qty: Number(s.food) || 0 }] : [];
+        const out = Object.assign({}, d, {
+          world: {
+            ledger: { day: d.day || 1, hours: 0, dur: {}, heroes: {}, weapons: {}, shortUsed: {}, water: Number(s.water) || 0 },
+            bag: { items, water: Number(s.water) || 0 },
+            kuizhi: Number(s.kuizhi) || 0
+          },
+          main: null,        // 进入单局时按当前幕补上主线
+          extra: false
+        });
+        delete out.supplies;
+        (out.party || []).forEach(h => {
+          h.attrPicks = h.attrPicks || [];
+          h.rolePicks = h.rolePicks || {};
+          h.pending = h.pending || [];
+          h.notes = h.notes || {};
+        });
+        return out;
+      }
+    },
+    meta: {}
+  };
 
   const PARTY_MIN = 2;   // 开局最少 2 人（减员到 1 人不做特殊处理，见 README）
   const PARTY_MAX = 4;
@@ -108,9 +134,10 @@ const SaveStore = (function () {
         weaponState: {}    // 武器人 kit → { hp, durability, level }
       })),
       fallen: [],          // 永久死亡的角色（连同武器人）：{ kit, weapons, act, day }
-      supplies: Object.assign({ water: 5000, food: 10, kuizhi: 2000 }, opt.supplies || {}),
-      board: null,         // 任务板（M1）
-      task: null,          // 进行中的任务与节点进度（M1）
+      world: null,         // 本局的队伍档案：{ ledger（耐久、力竭小时、短休、武器人伤势）, bag（物品、水）, kuizhi }
+      main: null,          // 本幕主线（开幕自动接下）
+      board: null,         // 任务板上的支线
+      task: null,          // 进行中的任务与节点进度
       relations: {},       // 角色 ↔ 武器人关系（M4）
       flags: {},           // 幕间选择、支线推进（M5）
       log: []

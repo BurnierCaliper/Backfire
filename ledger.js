@@ -65,13 +65,14 @@ const LEDGER = {
   hours: 0,            // 距上次长休的小时数
   dur: {},             // 武器 kit → 当前耐久
   heroes: {},          // 角色 kit → { layers:[当前值], shp, dying, dead, upOnShp }
+  weapons: {},         // 武器人 kit → [{ type, current }]：武器人的伤势跨战斗保留，长休回满
   shortUsed: {},       // 角色 kit → 今天已用短休次数
 
   /** 存进队伍档案 */
   save() {
     return JSON.parse(JSON.stringify({
       day: this.day, hours: this.hours, dur: this.dur,
-      heroes: this.heroes, shortUsed: this.shortUsed,
+      heroes: this.heroes, weapons: this.weapons, shortUsed: this.shortUsed,
       water: ledgerWater()
     }));
   },
@@ -81,6 +82,7 @@ const LEDGER = {
     this.hours = Number(s.hours) || 0;
     this.dur = s.dur || {};
     this.heroes = s.heroes || {};
+    this.weapons = s.weapons || {};
     this.shortUsed = s.shortUsed || {};
     if (s.water != null) setLedgerWater(s.water);
   },
@@ -207,8 +209,18 @@ function ledgerApplyToField(notes) {
   });
 }
 
+/** 武器人上次留下的伤势（spawnWeapon 唤出时用）。没有记录返回 null（满血） */
+function weaponCarryLayers(kit) {
+  return (LEDGER.weapons && LEDGER.weapons[kit]) || null;
+}
+
 /** 记下场上角色的状态 */
 function ledgerCapture() {
+  // 武器人：唤出过的（包括收回后隐藏的）记下伤势；这场没唤出过的保留上次的记录
+  (state.units || []).filter(u => u.isPlayer && isWeaponUnit(u) && !u._removed && !u.fused).forEach(u => {
+    LEDGER.weapons = LEDGER.weapons || {};
+    LEDGER.weapons[u.kit] = persistentLayers(u);
+  });
   partyHeroes().forEach(h => {
     LEDGER.heroes[h.kit] = {
       layers: persistentLayers(h).map(l => l.current),
@@ -229,6 +241,7 @@ function ledgerAfterBattle(notes) {
     u._durCounted = true;
     spendDurability(u.kit, 2, "武器人被击败", notes);
   });
+  if (typeof recoverDownedAfterBattle === "function") recoverDownedAfterBattle(notes);
   ledgerCapture();
   return notes;
 }
@@ -344,7 +357,8 @@ function ledgerLongRest(plan, notes) {
       `（${hours} 小时 × ${perHour}${hasBag ? "，含睡袋" : ""}${foodBonus ? `，食物 +${foodBonus}` : ""}）。`);
     (h.linkedKits || []).forEach(k => restoreDurability(k));
   });
-  notes.push("全部武器耐久回满。");
+  LEDGER.weapons = {};
+  notes.push("全部武器耐久回满，武器人伤势痊愈。");
   LEDGER.hours = 0;
   LEDGER.shortUsed = {};
   LEDGER.day += 1;
@@ -363,6 +377,7 @@ function ledgerRestoreAll(notes) {
     h.weaponHeld = true;
     (h.linkedKits || []).forEach(k => restoreDurability(k));
   });
+  LEDGER.weapons = {};
   LEDGER.shortUsed = {};
   notes.push("主持人：全员血量、坚毅、耐久复原。");
   ledgerCapture();
