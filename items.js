@@ -55,6 +55,11 @@ function addKuizhi(n, notes, reason) {
 
 function rollEnemyLoot(u) {
   if (!u || u.isPlayer) return 0;
+  // 单局（Roguelike）统一按杂兵 / 精英 / 首领三档，由开战的一方写进 state.lootByRank
+  if (typeof state !== "undefined" && state.lootByRank) {
+    const rank = typeof enemyRankOf === "function" ? enemyRankOf(u) : "minion";
+    return Number(state.lootByRank[rank]) || 0;
+  }
   if (Number(u.lootKuizhi) > 0) return Number(u.lootKuizhi);
   const kit = u.kit || "";
   const roll = (n, s, b) => (typeof takeDice === "function" ? takeDice(n, s, b).total : n * Math.ceil(s / 2) + (b || 0));

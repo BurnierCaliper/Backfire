@@ -54,6 +54,21 @@ const ROGUE_CONFIG = {
   mainDeadlineEndsRun: true,
   // 团灭：任何战斗团灭都直接结束本局（已定）
   wipeEndsRun: true,
+  /* ---------- 经济（验算工具：node tools/economy.js） ---------- */
+  // 任务之间的休整等于回到城里：可以买补给、用维修工具包（已定）
+  campShop: true,
+  // 任务报酬（奎支）与委托方补给按人数给（已定）。模板里的数字是 perHeadBase 人队的量，
+  // 实际 = 模板 × 队伍人数 / perHeadBase。经验本来就是每人一份，不受影响。
+  perHeadBase: 2,
+  // 任务奎支报酬随幕数上涨（已定方向，倍率占位，刻意克制）。额外幕接着往后排
+  rewardActScale: [1, 1.2, 1.4, 1.6, 1.8, 2.0],
+  // 工匠费用 = 手册参考费用 × 这个倍率（已定：单局里便宜很多，先试 1/6），按 100 取整
+  smithPriceScale: 1 / 6,
+  // 敌人掉落：单局里统一按杂兵 / 精英 / 首领三档（已定）。取主持人手册敌人表里同一档中掉落最多的：
+  //   杂兵 200（空投蜂群）；精英 1150（巨人 3d6×100+100 的期望）；
+  //   首领：手册没写，占位 2300（= 精英 × 首领代币 4 / 精英代币 2，也正好是巨人「破解」6d6×100+200 的期望）
+  lootByRank: { minion: 200, elite: 1150, boss: 2300 },
+
   // 撤退：规则按手册（app.js · RETREAT_RULES）。撤退后这个战斗节点算跳过（没有奖励），任务继续。
   retreatSkipsNode: true,
   bossRetreat: false              // 首领战不能撤退
@@ -68,7 +83,7 @@ const ROGUE_NODE_TYPES = {
   smith:  { label: "工匠",   hours: 1 }
 };
 
-/* 支线任务模板（文字与数值都是占位）
+/* 支线任务模板（文字与数值都是占位）。报酬和补给是 ROGUE_CONFIG.perHeadBase 人队的量
  *   nodes    节点数范围 [最少, 最多]
  *   mix      中间节点的抽取权重（最后一个节点固定是战斗，elite: true 则是精英战）
  *   days     需要几天
@@ -117,7 +132,7 @@ const ROGUE_SHOP = [
   { key: "shockbomb",    price: 1200, give: { item: "shockbomb" } }
 ];
 
-/* 工匠：升到某一级要花多少奎支。已定：单局里不要材料，只花钱。
+/* 工匠：升到某一级的手册参考费用。已定：单局里不要材料，只花钱，实际收 cost × ROGUE_CONFIG.smithPriceScale。
  * 5–10 级照手册「参考费用」；2–4 级手册只写了材料，这里按材料基准价折算（金属 1000、精炼合金 5000），占位。 */
 const ROGUE_SMITH = {
   maxLevel: 10,

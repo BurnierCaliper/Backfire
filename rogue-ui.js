@@ -115,12 +115,12 @@
   function taskCard(t, which) {
     const why = Rogue.taskBlocked(run, t);
     const warn = !why && Rogue.taskWarning(run, t);
-    const s = t.supply || {};
-    const supplyText = [s.water ? `${s.water} ml 水` : "", ...Object.keys(s.items || {}).map(id => `${ITEM_CATALOG[id].name}×${s.items[id]}`)].filter(Boolean).join("、");
+    const pay = Rogue.taskPay(run, t);
+    const supplyText = [pay.water ? `${pay.water} ml 水` : "", ...Object.keys(pay.items).filter(id => pay.items[id]).map(id => `${ITEM_CATALOG[id].name}×${pay.items[id]}`)].filter(Boolean).join("、");
     return `<div class="task${t.key ? " key" : ""}">
       <div class="t-head"><b>${esc(t.name)}</b>${t.key ? '<span class="tag">主线 · 已接下</span>' : ""}<span class="days">${t.days} 天</span></div>
       <p>${esc(t.goal)}</p>
-      <div class="t-meta">报酬 ${t.reward.kuizhi} 奎支 · 每人 ${t.reward.xp} 经验<br>委托方提供 ${esc(supplyText || "无")}</div>
+      <div class="t-meta">报酬 ${pay.kuizhi} 奎支 · 每人 ${pay.xp} 经验<br>委托方提供 ${esc(supplyText || "无")}</div>
       ${warn ? `<div class="t-warn">${esc(warn)}</div>` : ""}
       <button class="g-btn r-go${t.key ? " r-main" : ""}" data-which="${which}" ${why ? "disabled" : ""}>${why ? esc(why) : t.key ? "执行主线" : "接下任务"}</button>
     </div>`;
@@ -147,20 +147,10 @@
           <button class="g-btn" id="r-short">短休 ${C.hours.shortRest} 小时<small>不消耗补给 · 每人回复 等级×2+体质 · 一天两次</small></button>
         </div>`;
     },
-    shop: () => {
-      const s = Rogue.supplies();
-      return `<p>路边有个摊子。手里有 ${s.kuizhi} 奎支。</p>
-        <div class="shop">${ROGUE_SHOP.map(r => {
-          const item = r.give.item && ITEM_CATALOG[r.give.item];
-          const have = r.give.item ? bagCount(r.give.item) : null;
-          return `<div class="shop-row"><span class="s-name">${esc(Rogue.shopItemName(r))}<small>${esc(item ? item.hint || "" : "")}</small></span>
-            <span class="s-have">${have != null ? "有 " + have : ""}</span>
-            <span class="s-price">${r.price}</span>
-            <button class="g-btn" data-buy="${esc(r.key)}" ${s.kuizhi < r.price ? "disabled" : ""}>买</button></div>`;
-        }).join("")}</div>
+    shop: () => `<p>路边有个摊子。手里有 ${Rogue.supplies().kuizhi} 奎支。</p>
+        ${shopList()}
         ${repairRows()}
-        <button class="g-btn r-main" id="r-leave">离开</button>`;
-    },
+        <button class="g-btn r-main" id="r-leave">离开</button>`,
     smith: () => {
       const s = Rogue.supplies();
       return `<p>一位工匠愿意帮你改武器。手里有 ${s.kuizhi} 奎支。</p>
@@ -173,7 +163,19 @@
         <button class="g-btn r-main" id="r-leave">离开</button>`;
     }
   };
-  /** 维修工具包（手册：修复 10 点耐久），有的话在商店、工匠处都能用 */
+  /** 商店货架（商店节点与休整时共用） */
+  function shopList() {
+    const s = Rogue.supplies();
+    return `<div class="shop">${ROGUE_SHOP.map(r => {
+      const item = r.give.item && ITEM_CATALOG[r.give.item];
+      const have = r.give.item ? bagCount(r.give.item) : null;
+      return `<div class="shop-row"><span class="s-name">${esc(Rogue.shopItemName(r))}<small>${esc(item ? item.hint || "" : "")}</small></span>
+        <span class="s-have">${have != null ? "有 " + have : ""}</span>
+        <span class="s-price">${r.price}</span>
+        <button class="g-btn" data-buy="${esc(r.key)}" ${s.kuizhi < r.price ? "disabled" : ""}>买</button></div>`;
+    }).join("")}</div>`;
+  }
+  /** 维修工具包（手册：修复 10 点耐久），有的话在商店、工匠处、休整时都能用 */
   function repairRows() {
     const kits = bagCount("repair_kit");
     if (!kits) return "";
@@ -202,10 +204,12 @@
       case "task": return renderTask();
       case "camp": {
         const plan = Rogue.restPlan(run);
+        const shopping = C.campShop ? `<p class="r-hint">回到城里，出发前可以补货。手里有 ${Rogue.supplies().kuizhi} 奎支。</p>${shopList()}${repairRows()}` : "";
         return `<h2>休整</h2>
           <p class="r-hint">任务之间休整一次，算 ${C.restDays} 天。${plan.ok
             ? `长休需要 ${plan.water} ml 水和食物，血量、武器耐久回满，清空力竭。`
             : "补给不足（" + esc(plan.lack.join("，")) + "），只能硬撑着过夜：不回血，力竭继续累积。"}</p>
+          ${shopping}
           <button class="g-btn r-main" id="r-camp">休整</button>`;
       }
       case "boss":

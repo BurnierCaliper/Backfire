@@ -42,6 +42,8 @@ const BattleSim = (function () {
     state.combatStarted = false;
     state.attackerId = null;
     state.targetId = null;
+    state.lootByRank = null;     // 掉落按手册；单局在 before 里换成三档
+    state.exhaustTier = 0;
   }
 
   /**

@@ -206,6 +206,26 @@ const Rogue = (function () {
     return left < run.main.days ? `接下后只剩 ${Math.max(0, left)} 天，主线（${run.main.days} 天）将来不及完成` : null;
   }
 
+  /* ---------- 报酬与补给（按人数、按幕，见 rogue-data.js · 经济） ---------- */
+  const headScale = (run) => run.party.length / Math.max(1, C.perHeadBase || run.party.length);
+  function actScale(run) {
+    const list = C.rewardActScale || [1];
+    return list[Math.min(list.length, run.act) - 1] || 1;
+  }
+  /** 这个任务现在实际给多少：{ kuizhi, xp, water, items } */
+  function taskPay(run, task) {
+    const h = headScale(run);
+    const s = task.supply || {};
+    const items = {};
+    Object.keys(s.items || {}).forEach(id => { items[id] = Math.max(0, Math.round(s.items[id] * h)); });
+    return {
+      kuizhi: Math.round((task.reward.kuizhi || 0) * h * actScale(run) / 100) * 100,
+      xp: task.reward.xp || 0,
+      water: Math.round((s.water || 0) * h / 100) * 100,
+      items
+    };
+  }
+
   /** which：支线在任务板上的序号，或 "main" */
   function acceptTask(run, which) {
     const task = which === "main" ? run.main : (run.board || [])[which];
@@ -216,11 +236,11 @@ const Rogue = (function () {
     run.board = null;
     run.stage = "task";
     const notes = [];
-    const s = task.supply || {};
-    if (s.water) setLedgerWater(water() + s.water);
-    Object.keys(s.items || {}).forEach(id => bagAdd(id, s.items[id]));
+    const pay = taskPay(run, task);
+    if (pay.water) setLedgerWater(water() + pay.water);
+    Object.keys(pay.items).forEach(id => bagAdd(id, pay.items[id]));
     notes.push(`${task.key ? "开始执行主线" : "接下任务「" + task.name + "」"}：${task.goal.split("。")[0]}。` +
-      (s.water || s.items ? `委托方提供 ${s.water || 0} ml 水${Object.keys(s.items || {}).map(id => "、" + ITEM_CATALOG[id].name + "×" + s.items[id]).join("")}。` : ""));
+      `委托方提供 ${pay.water} ml 水${Object.keys(pay.items).filter(id => pay.items[id]).map(id => "、" + ITEM_CATALOG[id].name + "×" + pay.items[id]).join("")}。`);
     arriveAtNode(run, notes);
     return logAll(run, notes);
   }
@@ -275,6 +295,7 @@ const Rogue = (function () {
       if (held && weaponBroken(held)) disarmBrokenWeapon(u, notes);
     });
     state.exhaustTier = Math.min(3, exhaustTierFromHours(hoursAwake()));
+    state.lootByRank = C.lootByRank || null;
   }
   function captureHero(u, h) {
     h.level = u.level || 1;
@@ -483,9 +504,13 @@ const Rogue = (function () {
   function shopItemName(row) {
     return row.name || (ITEM_CATALOG[row.give.item] || {}).name || row.key;
   }
-  function buy(run, key, qty) {
+  /** 现在能不能买东西：商店节点，或者任务之间的休整（回到城里） */
+  function canShop(run) {
     const node = currentNode(run);
-    if (!node || node.type !== "shop") throw new Error("这里没有商店");
+    return !!(node && node.type === "shop") || (run.stage === "camp" && !!C.campShop);
+  }
+  function buy(run, key, qty) {
+    if (!canShop(run)) throw new Error("这里没有商店");
     const row = ROGUE_SHOP.find(r => r.key === key);
     if (!row) throw new Error("没有这件商品");
     qty = Math.max(1, Math.floor(Number(qty) || 1));
@@ -498,12 +523,17 @@ const Rogue = (function () {
   }
 
   /* ---------- 工匠 ---------- */
+  function smithCost(level) {
+    const base = ROGUE_SMITH.cost[level];
+    if (base == null) return null;
+    return Math.max(100, Math.round(base * (C.smithPriceScale || 1) / 100) * 100);
+  }
   function smithOptions(run) {
     const out = [];
     run.party.forEach(h => h.weapons.forEach(k => {
       const lv = (h.weaponLevels || {})[k] || 1;
       const next = lv + 1;
-      const cost = next <= ROGUE_SMITH.maxLevel ? ROGUE_SMITH.cost[next] : null;
+      const cost = next <= ROGUE_SMITH.maxLevel ? smithCost(next) : null;
       out.push({ owner: h.kit, kit: k, name: heroName(k), level: lv, cost, max: cost == null });
     }));
     return out;
@@ -529,9 +559,10 @@ const Rogue = (function () {
   /* ---------- 任务完成、休整 ---------- */
   function completeTask(run, notes) {
     const t = run.task;
-    state.kuizhi = (Number(state.kuizhi) || 0) + (t.reward.kuizhi || 0);
-    notes.push(`${t.key ? "主线" : "任务「" + t.name + "」"}完成：获得 ${t.reward.kuizhi || 0} 奎支，每人 ${t.reward.xp || 0} 经验。`);
-    run.party.forEach(h => { h.xp = (h.xp || 0) + (t.reward.xp || 0); });
+    const pay = taskPay(run, t);
+    state.kuizhi = (Number(state.kuizhi) || 0) + pay.kuizhi;
+    notes.push(`${t.key ? "主线" : "任务「" + t.name + "」"}完成：获得 ${pay.kuizhi} 奎支，每人 ${pay.xp} 经验。`);
+    run.party.forEach(h => { h.xp = (h.xp || 0) + pay.xp; });
     const r = withParty(run, () => null);     // 摆上场按规则结算升级
     notes.push(...r.notes);
     run.tasksDone += 1;
@@ -630,7 +661,7 @@ const Rogue = (function () {
     makeBoard, taskBlocked, taskWarning, acceptTask, currentNode,
     battleSpec, applyPartyToField, finishBattle,
     restPlan, canLongRest, restAtNode, leaveNode,
-    buy, shopItemName, smithOptions, upgradeWeapon, repairWeapon,
+    buy, canShop, shopItemName, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
     pendingChoices, choiceOptions, choose,
     camp, nextAct, afterVictory, endRun,
     enterRunMode, leaveRunMode, syncWorld, save

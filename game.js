@@ -1685,6 +1685,7 @@
     state.combatStarted = false;
     state.exhaustTier = 0;
     state.retreated = false;
+    state.lootByRank = null;
 
     loadLiveParty();
     if (enc && enc.playerZone) {

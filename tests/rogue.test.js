@@ -143,7 +143,43 @@ test("工匠：花钱升级武器（不要材料），绯秋两把刀分开升",
   R.upgradeWeapon(run, "niu");
   assert.equal(run.party.find(h => h.kit === "hiaki").weaponLevels.niu, 2);
   assert.equal(run.party.find(h => h.kit === "hiaki").weaponLevels.naruto, 1);
-  assert.equal(c.S.state.kuizhi, 100000 - c.S.ROGUE_SMITH.cost[2]);
+  assert.equal(R.smithCost(2), 500);          // 手册 3000 × 1/6
+  assert.equal(R.smithCost(10), 3300);        // 手册 20000 × 1/6，按 100 取整
+  assert.equal(c.S.state.kuizhi, 100000 - 500);
+});
+
+test("任务之间的休整可以买东西；任务里的战斗节点不行", () => {
+  const { run, R } = fresh(["kolt", "helu"], "E1");
+  R.acceptTask(run, "main");
+  while (!R.battleSpec(run)) { run.task.index++; }
+  assert.throws(() => R.buy(run, "food_can", 1), /没有商店/);
+  run.task = null; run.stage = "camp";
+  R.buy(run, "food_can", 1);
+});
+
+test("报酬与委托方补给按人数给；奎支报酬随幕数上涨", () => {
+  const two = fresh(["kolt", "helu"], "E2"), four = fresh(["kolt", "helu", "ras", "chuan"], "E2");
+  const p2 = two.R.taskPay(two.run, two.run.main), p4 = four.R.taskPay(four.run, four.run.main);
+  assert.equal(p4.kuizhi, p2.kuizhi * 2);
+  assert.equal(p4.water, p2.water * 2);
+  assert.equal(p4.xp, p2.xp);
+  const act1 = p2.kuizhi;
+  two.run.act = 4;
+  const scale = two.R.CONFIG.rewardActScale[3];
+  assert.equal(two.R.taskPay(two.run, two.run.main).kuizhi, Math.round(act1 * scale / 100) * 100);
+});
+
+test("单局掉落按杂兵 / 精英 / 首领三档；战斗原型仍按手册", () => {
+  const { c, run, R } = fresh(["kolt", "helu"], "E3");
+  R.acceptTask(run, "main");
+  while (!R.battleSpec(run)) { run.task.index++; }
+  c.BattleSim.setup(R.battleSpec(run));
+  const L = R.CONFIG.lootByRank;
+  assert.equal(c.rollEnemyLoot({ kit: "sand_beast" }), L.minion);
+  assert.equal(c.rollEnemyLoot({ kit: "giant" }), L.elite);
+  assert.equal(c.rollEnemyLoot({ kit: "outlaw_king" }), L.boss);
+  c.BattleSim.setup({ party: ["kolt", "helu"], enemies: [{ id: "thug_knife", lv: 1, zone: 2 }] });
+  assert.equal(c.rollEnemyLoot({ kit: "sand_beast" }), 0);
 });
 
 test("完成任务不再自动升级武器", () => {
