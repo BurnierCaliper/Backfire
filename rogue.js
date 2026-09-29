@@ -157,6 +157,7 @@ const Rogue = (function () {
 
   function startAct(run) {
     run.actDay = 0;
+    run.bossRested = false;
     run.main = makeTask(run, ROGUE_MAIN_TASK, "main");
     run.main.done = false;
     log(run, `第 ${run.act} 幕 · ${region(run)}：主线「${run.main.goal.split("。")[0]}」，期限 ${C.daysPerAct} 天。`);
@@ -495,6 +496,31 @@ const Rogue = (function () {
     notes.push(...r.notes);
     return r.out && r.out.ok;
   }
+  /** 进入下一站之前可以先长休一次（已定：补给多、连战压力大）。每一站 / 首领战前各一次。
+   *  和休息点的长休一样：消耗水和食物，血量、耐久回满，清空力竭；不推进本幕天数。 */
+  function restSpot(run) {
+    if (run.stage === "boss") return run;             // 首领战前：记在 run.bossRested
+    const node = currentNode(run);
+    return node && node.type !== "rest" ? node : null;
+  }
+  function canRestBefore(run) {
+    const spot = restSpot(run);
+    if (!spot) return { ok: false, why: "这里不能长休" };
+    if (run.stage === "boss" ? run.bossRested : spot.restedBefore) return { ok: false, why: "这一站前已经长休过了" };
+    const plan = restPlan(run);
+    if (!plan.ok) return { ok: false, why: "补给不足：" + plan.lack.join("，") };
+    return { ok: true, plan };
+  }
+  function restBeforeNode(run) {
+    const can = canRestBefore(run);
+    if (!can.ok) throw new Error(can.why);
+    const notes = ["出发前先找地方好好睡一觉。"];
+    doLongRest(run, notes);
+    if (run.stage === "boss") run.bossRested = true;
+    else restSpot(run).restedBefore = true;
+    return logAll(run, notes);
+  }
+
   function restAtNode(run, mode) {
     const node = currentNode(run);
     if (!node || node.type !== "rest") throw new Error("当前节点不是休息点");
@@ -932,7 +958,7 @@ const Rogue = (function () {
     heroView, supplies, hoursAwake, brokenWeapons,
     makeBoard, taskBlocked, taskWarning, acceptTask, currentNode,
     battleSpec, applyPartyToField, finishBattle,
-    restPlan, canLongRest, restAtNode, leaveNode,
+    restPlan, canLongRest, restAtNode, leaveNode, canRestBefore, restBeforeNode,
     buy, canShop, shopItemName, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
     presentSmiths, smithInfo, claimBlueprint, installBlueprint, blueprintById, weaponModsOf,
     smithQuote, introduceSmith,

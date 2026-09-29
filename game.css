@@ -1383,3 +1383,8 @@ details.smith .sm-prog.ready { color: var(--gold); font-weight: 600; }
 .lg details.calc pre { white-space: pre-wrap; }
 .lg.note { padding: 4px 0; }
 .lg.note .s { color: var(--faint); }
+
+/* 进下一站前先长休 */
+.rest-before { margin: 0 0 12px; }
+.rest-before .g-btn small { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; }
+.rest-before.done { color: var(--faint); }

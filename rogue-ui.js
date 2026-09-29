@@ -298,6 +298,19 @@
     return rows.length ? `<p class="r-hint">维修工具包 ×${kits}，每个修复 10 点耐久：</p><div class="r-choices">${rows.join("")}</div>` : "";
   }
 
+  /** 进下一站 / 首领战之前可以先长休一次 */
+  function restBeforeRow() {
+    const can = Rogue.canRestBefore(run);
+    const used = !can.ok && /已经长休/.test(can.why || "");
+    if (used) return `<p class="r-hint rest-before done">这一站前已经长休过了。</p>`;
+    const plan = Rogue.restPlan(run);
+    const food = Object.keys(plan.food || {}).map(id => `${ITEM_CATALOG[id].name} ${plan.food[id]} 份`).join("、");
+    return `<div class="rest-before">
+      <button class="g-btn" id="r-rest-before" ${can.ok ? "" : "disabled"}>先长休再前进
+        <small>${can.ok ? `消耗 ${plan.water} ml 水、${esc(food)} · 血量、耐久回满，清空力竭` : esc(can.why || "")}</small></button>
+    </div>`;
+  }
+
   function renderTask() {
     const t = run.task;
     const node = Rogue.currentNode(run);
@@ -306,9 +319,10 @@
       return `<li class="${cls}"><span>${i + 1}</span>${esc(nodeLabel(n))}</li>`;
     }).join("");
     const panel = node && NODE_PANELS[node.type] ? NODE_PANELS[node.type]() : "";
+    const restRow = node && node.type !== "rest" ? restBeforeRow() : "";
     return `<h2>${esc(t.key ? "主线" : t.name)}<span class="sub">${esc(t.goal)}</span></h2>
       <ol class="track">${track}</ol>
-      <div class="r-panel">${panel}</div>`;
+      <div class="r-panel">${restRow}${panel}</div>`;
   }
 
   function renderStage() {
@@ -330,7 +344,7 @@
       case "boss":
         return `<h2>第 ${run.act} 幕 · 首领</h2>
           <p class="r-hint">首领战不能撤退；输了，本局就此结束。</p>
-          ${brokenWarn()}${fightBtn("迎战首领")}`;
+          ${restBeforeRow()}${brokenWarn()}${fightBtn("迎战首领")}`;
       case "interlude":
         return `<h2>第 ${run.act} 幕 · 落幕</h2>
           <p class="r-hint">幕间选择会在之后的版本加入。</p>
@@ -418,6 +432,7 @@
     on("r-fight", fight);
     on("r-long", () => act(() => Rogue.restAtNode(run, "long")));
     on("r-short", () => act(() => Rogue.restAtNode(run, "short")));
+    on("r-rest-before", () => act(() => Rogue.restBeforeNode(run)));
     on("r-leave", () => act(() => Rogue.leaveNode(run)));
     on("r-camp", () => act(() => Rogue.camp(run)));
     on("r-next", () => act(() => Rogue.nextAct(run)));

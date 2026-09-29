@@ -460,3 +460,24 @@ test("诊所只在诊所节点或回城休整时能用", () => {
 });
 
 module.exports = { autoplay };
+
+test("进下一站前可以先长休一次：消耗补给、回满血、清空力竭，每站一次，不推进本幕天数", () => {
+  const { c, run, R } = fresh(["kolt", "helu"], "RB1");
+  R.acceptTask(run, "main");
+  run.task.nodes[run.task.index] = { type: "battle", done: false };
+  const day0 = run.actDay;
+  c.S.LEDGER.hours = 30;
+  const water0 = R.supplies().water;
+  assert.equal(R.canRestBefore(run).ok, true);
+  R.restBeforeNode(run);
+  assert.equal(R.hoursAwake(), 0);
+  assert.ok(R.supplies().water < water0);
+  assert.equal(run.actDay, day0);
+  assert.equal(R.canRestBefore(run).ok, false);
+  assert.throws(() => R.restBeforeNode(run), /已经长休/);
+  // 首领战前也可以
+  run.stage = "boss";
+  assert.equal(R.canRestBefore(run).ok, true);
+  R.restBeforeNode(run);
+  assert.equal(R.canRestBefore(run).ok, false);
+});
