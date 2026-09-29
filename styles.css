@@ -411,7 +411,8 @@ label.field input:focus, label.field select:focus { outline: 1px solid var(--gol
   letter-spacing: .02em;
 }
 .result .sub { color: var(--muted); }
-.log-line { color: #c5d0dc; }
+.log-line { color: #c5d0dc; white-space: pre-wrap; }
+.log-view, .log-line { user-select: text; -webkit-user-select: text; }
 .log-line em { color: var(--gold); font-style: normal; }
 .log-view {
   max-height: 420px;

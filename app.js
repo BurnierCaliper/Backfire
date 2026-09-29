@@ -1397,7 +1397,6 @@ function refreshEnemyEconomy(u) {
 function beginRound(notes) {
   notes = notes || [];
   startLogTurn();
-  notes.push(`—— 第 ${state.turnNo} 回合开始 ——`);
   if (typeof mutinyTick === "function") mutinyTick(notes);
   if (typeof syncBpAll === "function") syncBpAll();
   state.units.forEach(u => {
@@ -1627,7 +1626,6 @@ function startPlayerPhase() {
       u.resources.preparedPending = false;
       notes.push(`${u.name} 「准备」生效：本回合第一次攻击裸伤害 +${n}d6，吃倍率和增伤。`);
     }
-    notes.push(`${u.name} 行动点 ${u.ap}/${u.apMax}，附赠 ${u.bonus}/${u.bonusMax}`);
   });
   appendLog(notes.join("\n"));
   renderAll();
@@ -1660,8 +1658,6 @@ function startEnemyPhase() {
         u.resources.glReady = true;
         notes.push(`${u.name} 榴弹已就绪，可对 ${u.resources.glZone} 区发射。`);
       }
-      const rank = enemyRankOf(u);
-      notes.push(`${u.name}（${rank || "杂兵"}）行动点 ${u.ap}/${u.apMax}，附赠 ${u.bonus}/${u.bonusMax}`);
     }
   });
   appendLog(notes.join("\n"));
@@ -2696,7 +2692,21 @@ function triggerLeaveOpportunity(mover, fromZone, notes) {
   });
 }
 
+/** 移动也整理成一块：「【谁】移动」+ 从哪到哪 + 花费 + 移动引起的事（借机攻击、场地……） */
 function doMove(unit, dest, moveOpt) {
+  if (!unit) return;
+  const prevActor = LOG_ACTOR_ID;
+  LOG_ACTOR_ID = unit.id;
+  let lines;
+  try { lines = withLogSink(() => doMoveInner(unit, dest, moveOpt)); } finally { LOG_ACTOR_ID = prevActor; }
+  // 「X：1 区 → 2 区」挪到最前面，花费跟在后面
+  const i = lines.findIndex(s => /区 → \d+ 区/.test(s));
+  if (i > 0) lines.unshift(lines.splice(i, 1)[0]);
+  const block = tidyActionBlock(`【${unit.name}】移动`, lines.map(s => s.replace(new RegExp("^" + unit.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "：(\\d+ 区 → \\d+ 区)"), "$1")));
+  if (block.length) appendLog(block.join("\n"));
+}
+
+function doMoveInner(unit, dest, moveOpt) {
   dest = Number(dest);
   if (typeof isCrushing === "function" && isCrushing(unit) && !(moveOpt && moveOpt.free)) {
     appendLog(`${unit.name} 正抓在敌人身上，无法主动移动。`);
@@ -3155,7 +3165,7 @@ function removeEnemyFromField(u, notes) {
   u._removed = true;
   u.dead = true;
   u.hidden = false;
-  notes.push(`${u.name} 死亡，3 秒后淡出离场。`);
+  notes.push(`${u.name} 被击杀。`);
   if (state.selectedId === u.id) state.selectedId = null;
   if (state.attackerId === u.id) state.attackerId = null;
   if (state.targetId === u.id) state.targetId = null;
@@ -3387,7 +3397,9 @@ function spendAp(u, n, reason) {
     return false;
   }
   u.ap -= n;
-  appendLog(`${u.name} 消耗 ${n} 行动点 → ${u.ap}/${u.apMax}（${reason || "技能"}）`);
+  appendLog(logSinkActive()
+    ? `  ${u.id === LOG_ACTOR_ID ? "" : u.name + " "}消耗 ${n} 行动点（剩 ${u.ap}/${u.apMax}）`
+    : `${u.name} ${/^[a-z_]+$/.test(reason || "") ? "" : (reason || "") + "："}消耗 ${n} 行动点（剩 ${u.ap}/${u.apMax}）`);
   return true;
 }
 
@@ -3399,7 +3411,9 @@ function spendBonus(u, n, reason) {
     return false;
   }
   u.bonus -= n;
-  appendLog(`${u.name} 消耗 ${n} 附赠行动 → ${u.bonus}/${u.bonusMax}（${reason || "附赠"}）`);
+  appendLog(logSinkActive()
+    ? `  ${u.id === LOG_ACTOR_ID ? "" : u.name + " "}消耗 ${n} 附赠行动（剩 ${u.bonus}/${u.bonusMax}）`
+    : `${u.name} ${/^[a-z_]+$/.test(reason || "") ? "" : (reason || "") + "："}消耗 ${n} 附赠行动（剩 ${u.bonus}/${u.bonusMax}）`);
   return true;
 }
 
@@ -4355,6 +4369,20 @@ function closeBlockModal() {
 }
 
 function finishBlock(helperId, forced) {
+  const job = (state.blockQueue || [])[0];
+  const attacker0 = job ? unitById(job.attackerId) : null;
+  const title = attacker0 ? `【${attacker0.name}】的攻击落下` : "";
+  const prevActor = LOG_ACTOR_ID;
+  LOG_ACTOR_ID = attacker0 ? attacker0.id : null;
+  let lines;
+  try { lines = withLogSink(() => finishBlockInner(helperId, forced)); } finally { LOG_ACTOR_ID = prevActor; }
+  const block = tidyActionBlock(title, lines);
+  if (block.length) appendLog(block.join("\n"));
+  renderAll();
+  presentBlockModal();
+}
+
+function finishBlockInner(helperId, forced) {
   const job = (state.blockQueue || []).shift();
   closeBlockModal();
   if (!job) return;
@@ -4375,14 +4403,10 @@ function finishBlock(helperId, forced) {
     opt.flags.block = "none";
   }
   if (attacker && target) {
-    const out = dealTo(attacker, target, opt);
-    if (out && out.res && !out.pending) {
-      appendLog(`${attacker.name} → ${target.name}：伤害 ${Math.floor(out.res.total || 0)}，击破 ${out.res.breakDealt || 0}${out.res.broke ? "（击破）" : ""}`);
-      (out.extra || []).forEach(s => appendLog("  " + s));
-    }
+    let out;
+    const captured = withLogSink(() => { out = dealTo(attacker, target, opt); });
+    if (out && out.res && !out.pending) formatHitLines(attacker, target, out, captured).forEach(s => appendLog(s));
   }
-  renderAll();
-  presentBlockModal();
 }
 
 function presentBlockModal() {
@@ -4922,7 +4946,7 @@ function dealTo(attacker, target, opt) {
   if (attacker && !attacker.isPlayer && target && target.isPlayer && opt.flags.action && !opt.flags.assist && !opt.flags.aoe && opt.flags.block !== "assistOk" && !opt.flags.blockResolved) {
     const helpers = eligibleBlockers(target);
     if (helpers.length) {
-      appendLog(`${attacker.name} 攻击 ${target.name}。同区域可格挡：${helpers.map(h => h.name + "（附赠" + h.bonus + "，" + finalBlockChance(h, attacker, target) + "%）").join("、")}。`);
+      appendLog(`→ ${target.name}：等待协助格挡（同区可以格挡的：${helpers.map(h => h.name + " " + finalBlockChance(h, attacker, target) + "%").join("、")}）`);
       state.blockQueue = state.blockQueue || [];
       state.blockQueue.push({
         attackerId: attacker.id,
@@ -6320,7 +6344,7 @@ function dealBreak(unit, amount, element, notes, reason) {
   sink.def = Math.max(0, before - amount);
   popBreak(sink, amount, element);
   const tag = sink.id !== unit.id ? `${unit.name}→${sink.name}` : sink.name;
-  notes.push(`${tag} ${reason || "击破"} ${amount}：架势 ${before} → ${sink.def}`);
+  notes.push(`${tag} 受到 ${amount} 击破${reason && reason !== "击破" ? "（" + reason + "）" : ""}：架势 ${before} → ${sink.def}`);
   if (!state.fields[sink.zone] || !state.fields[sink.zone]._collapsing) {
     notes.push(...registerZoneBreak(sink.zone, amount));
   }
@@ -6548,7 +6572,165 @@ function attachFloaters(wrap, unitId) {
   });
 }
 
+/* ===== 战斗日志：一次行动收成一块，再按阅读顺序写出来 =====
+ * runSkill / finishBlock 执行期间，所有 appendLog 先收进「收集桶」；结束后整理成：
+ *   【谁】技能名
+ *     消耗 …
+ *     → 目标：造成多少伤害、多少击破
+ *         掷骰 / 基础伤害 / 属性克制 / 打在哪一层（计算过程，缩进更深）
+ *     后果（死亡、经验、掉落、状态……）
+ * 同一块里重复的行只留一条；「等待协助格挡选择」这类占位行不写。 */
+const LOG_SINKS = [];
+let LOG_ACTOR_ID = null;   // 当前这块日志是谁的行动（花费行里是别人时才写名字）
+function logSinkActive() { return LOG_SINKS.length > 0; }
+function withLogSink(fn) {
+  const sink = [];
+  LOG_SINKS.push(sink);
+  try { fn(sink); } finally {
+    const i = LOG_SINKS.lastIndexOf(sink);
+    if (i >= 0) LOG_SINKS.splice(i, 1);
+  }
+  return sink;
+}
+
+/** 技能在日志里显示的名字（不露内部编号） */
+function skillDisplayName(a, id) {
+  if (!id) return "行动";
+  if (id === "assist_block") return "协助格挡";
+  try {
+    const own = (skillList(a) || []).find(s => s.id === id);
+    if (own && own.name) return own.name;
+  } catch (e) {}
+  try {
+    const en = (enemySkillList(a) || []).find(s => s.id === id);
+    if (en && en.label) return en.label.replace(/[（(].*$/, "");
+  } catch (e) {}
+  if (/assist/.test(id)) return "协助攻击";
+  if (/_opp$/.test(id)) return "借机攻击";
+  if (/_aa$/.test(id)) return "普通攻击";
+  return "技能";
+}
+
+/** 引擎给出的计算过程 → 人话；去掉 +0%、×1、固定 0 这类不起作用的步骤 */
+function tidyCalcLines(log, multi) {
+  const out = [];
+  let hitNo = 0;
+  (log || []).forEach(raw => {
+    let s = String(raw || "").trim();
+    if (!s) return;
+    const m = s.match(/^#(\d+)\s+(.*)$/);
+    if (m) {
+      const k = Number(m[1]);
+      s = m[2];
+      if (multi && k !== hitNo) { hitNo = k; out.push(`第 ${k} 击：`); }
+    }
+    const base = s.match(/^基础包 = ATK ([\d.-]+) × 倍率 ([\d.-]+) \+ 固定 ([\d.-]+) \+ 骰子 ([\d.-]+) = ([\d.-]+)$/);
+    if (base) {
+      const [, atk, mult, flat, dice, total] = base;
+      let t = `基础伤害：ATK ${atk}`;
+      if (Number(mult) !== 1) t += ` × ${mult}`;
+      if (Number(flat)) t += ` ${Number(flat) > 0 ? "+" : "−"} 固定 ${Math.abs(Number(flat))}`;
+      if (Number(dice)) t += ` ${Number(dice) > 0 ? "+" : "−"} 骰子 ${Math.abs(Number(dice))}`;
+      out.push(t === `基础伤害：ATK ${atk}` ? t : `${t} = ${total}`);
+      return;
+    }
+    const chart = s.match(/^克制表 (.+?) → (.+?)：([+-]?[\d.]+%)/);
+    if (chart) {
+      if (/^[+-]?0(\.0)?%$/.test(chart[3])) return;
+      out.push(`${multi ? "  " : ""}属性克制：${chart[1]}打${chart[2]} ${chart[3]}`);
+      return;
+    }
+    const sum = s.match(/^加算百分比合计 ([+-]?[\d.]+%) → (.+)$/);
+    if (sum) {
+      if (/^[+-]?0(\.0)?%$/.test(sum[1])) return;
+      out.push(`${multi ? "  " : ""}增减伤合计 ${sum[1]} → ${sum[2]}`);
+      return;
+    }
+    const fin = s.match(/^最终伤害包 ([\d.]+)(?: → 向下取整 (\d+))?$/);
+    if (fin) { if (fin[2] != null) out.push(`${multi ? "  " : ""}取整为 ${fin[2]}`); return; }
+    const main = s.match(/^主目标：(.+?) ([\d.]+) → ([\d.]+)（吸收 [\d.]+）$/);
+    if (main) { out.push(`${multi ? "  " : ""}${main[1]} ${main[2]} → ${main[3]}`); return; }
+    if (/^协助格挡成功：目标免伤，击破 \d+ 改由格挡者承担。$/.test(s)) return;   // 下一行说得更完整
+    out.push(`${multi ? "  " : ""}${s.replace(/（溢出不重算）/g, "")}`);
+  });
+  return out;
+}
+
+/** 一次命中写成几行：结果 → 掷骰 → 计算 → 后果 */
+function formatHitLines(actor, target, out, captured) {
+  const L = [];
+  const res = (out && out.res) || {};
+  const extra = (out && out.extra) || [];
+  const tName = target ? target.name : "目标";
+  const after = (captured || []).map(s => String(s).trim()).filter(Boolean);
+  if ((out && out.pending) || res.pending) {
+    after.filter(s => !/等待协助格挡选择/.test(s)).forEach(s => L.push("  " + s));
+    if (!L.length) L.push(`  → ${tName}：等待协助格挡的结果`);
+    return L;
+  }
+  if (res.ok === false) {
+    (res.log || []).concat(after).forEach(s => L.push("  ✗ " + String(s).trim()));
+    return L;
+  }
+  const hits = (res.perHit || []).filter(Boolean);
+  const dmg = Math.floor(res.total || 0), br = Number(res.breakDealt) || 0;
+  let head = `  → ${tName}：`;
+  if (res.blocked) head += `被协助格挡挡下${br ? `（格挡者承受 ${br} 击破）` : ""}`;
+  else {
+    head += `${dmg} 伤害`;
+    if (br) head += `、${br} 击破`;
+    if (hits.length > 1) head += `（${hits.length} 击）`;
+    if (res.broke) head += "，打破架势";
+  }
+  L.push(head);
+  const dice = extra.filter(s => /^\s*掷骰/.test(s));
+  const others = extra.filter(s => !/^\s*掷骰/.test(s));
+  dice.forEach(s => {
+    // 「掷骰 1d6〔5〕=5」→「掷骰 1d6 → 5」；多颗骰子写出每颗：「掷骰 2d4（3+1）→ 4」
+    const t = String(s).trim().replace(/^掷骰\s*/, "");
+    const m = t.match(/^(.+?)〔(.+?)〕=(.+)$/);
+    L.push("      掷骰 " + (m ? `${m[1]}${/[+,]/.test(m[2]) ? "（" + m[2] + "）" : ""} → ${m[3]}` : t));
+  });
+  const dead = target && (target.dead || (target.isPlayer && target.dying));
+  tidyCalcLines(res.log, hits.length > 1)
+    .filter(s => !(dead && !target.isPlayer && /架势归零|晕眩/.test(s)))
+    .forEach(s => L.push("      " + s));
+  const seen = new Set();
+  others.concat(after).forEach(s => {
+    const t = String(s).trim();
+    if (!t || seen.has(t)) return;
+    seen.add(t);
+    // 目标已经死了：不再写它失衡 / 晕眩
+    if (dead && !target.isPlayer && /失衡|晕眩|架势归零/.test(t)) return;
+    L.push("  " + t);
+  });
+  return L;
+}
+
+/** 一块行动的收尾整理：加标题、去重、去占位 */
+function tidyActionBlock(title, lines) {
+  const out = [];
+  const seen = new Set();
+  lines.forEach(raw => {
+    const s = String(raw == null ? "" : raw);
+    const key = s.trim();
+    if (!key) return;
+    if (/^等待协助格挡选择$/.test(key)) return;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(/^ /.test(s) || /^——/.test(key) ? s : (title ? "  " + s : s));
+  });
+  if (!out.length) return [];
+  return title ? [title].concat(out) : out;
+}
+
 function appendLog(text, kind) {
+  if (text == null || String(text) === "") return;   // 空字符串不写成空行
+  if (LOG_SINKS.length) {
+    const sink = LOG_SINKS[LOG_SINKS.length - 1];
+    String(text == null ? "" : text).split(/\n/).forEach(l => sink.push(l));
+    return;
+  }
   const page = currentLogPage();
   const raw = String(text == null ? "" : text);
   const parts = raw.split(/\n/);
@@ -6593,6 +6775,31 @@ function clearLogs() {
   state.statusDmg = {};
   renderLog();
   if (typeof renderBackstage === "function") renderBackstage();
+}
+
+/** 日志的纯文本（给跑团复制用）。which：page 当前页 / all 全部 */
+function logPlainText(which) {
+  const pages = which === "all" ? (state.logPages || []) : [currentLogPage()];
+  return pages.map(p => p.lines.map(l => l.kind === "blank" ? "" : l.text).join("\n")).join("\n\n").trim();
+}
+/** 复制到剪贴板（本地打开网页时 navigator.clipboard 可能不可用，退回老办法） */
+function copyText(text, done) {
+  const fallback = () => {
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch (e) {}
+    ta.remove();
+    if (done) done(ok);
+  };
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(() => done && done(true), fallback);
+      return;
+    }
+  } catch (e) {}
+  fallback();
 }
 
 function renderLog() {
@@ -6742,7 +6949,19 @@ function skillRequirementError(actor, id) {
   try { return fn(actor) || null; } catch (e) { return null; }
 }
 
+/** 执行技能，并把这次行动的日志整理成一块（见 withLogSink） */
 function runSkill(id, optRun) {
+  const a0 = unitById(state.attackerId);
+  const title = a0 ? `【${a0.name}】${skillDisplayName(a0, id)}` : "";
+  const prevActor = LOG_ACTOR_ID;
+  LOG_ACTOR_ID = a0 ? a0.id : null;
+  let lines;
+  try { lines = withLogSink(() => runSkillInner(id, optRun)); } finally { LOG_ACTOR_ID = prevActor; }
+  const block = tidyActionBlock(title, lines);
+  if (block.length) appendLog(block.join("\n"));
+}
+
+function runSkillInner(id, optRun) {
   optRun = optRun || {};
   const a = unitById(state.attackerId);
   const token = selectedToken();
@@ -6872,25 +7091,19 @@ function runSkill(id, optRun) {
 
   const overloadSeq = [];
   const hitOne = (actor, target, opt) => {
-    const out = dealTo(actor, target, opt);
+    // 命中过程中立刻写出的日志（击杀、经验、掉落……）先收起来，排在这一击的结果后面
+    let out;
+    const captured = withLogSink(() => { out = dealTo(actor, target, opt); });
     if (actor && actor.instant && actor.instant.overload && target && !target.kind) {
       const n = opt.hits || 1;
       if (n <= 1 && (!opt.flags || opt.flags.action !== false)) {
         overloadSeq.push({ actor, target, opt: Object.assign({}, opt, { usePrep: false, hits: 1 }) });
       }
     }
-    const hits = (out.res.perHit || []).filter(h => h);
-    if (hits.length > 1) {
-      lines.push(`${actor.name} → ${target.name}：共 ${hits.length} 击`);
-      hits.forEach((h, i) => {
-        lines.push(`  第${i + 1}击：${Math.floor(h.dealt || 0)} 伤害，击破 ${h.breakDealt || 0}`);
-      });
-      lines.push(`  合计 ${Math.floor(out.res.total || 0)} 伤害，击破 ${out.res.breakDealt}${out.res.broke ? "（击破）" : ""}`);
-    } else {
-      lines.push(`${actor.name} → ${target.name}：伤害 ${Math.floor(out.res.total || 0)}，击破 ${out.res.breakDealt}${out.res.broke ? "（击破）" : ""}`);
-    }
-    (out.res.log || []).forEach(s => lines.push("  " + s));
-    (out.extra || []).forEach(s => lines.push("  " + s));
+    // 攻击者不是这次行动的发起人（比如召唤物、残骸）时写明是谁打的
+    if (actor && actor.id !== a.id) lines.push(`  ${actor.name} 出手：`);
+    appendLog(lines.splice(0).join("\n"));
+    formatHitLines(actor, target, out, captured).forEach(s => appendLog(s));
     return out;
   };
 
@@ -8274,6 +8487,18 @@ function clearBattlefield() {
     if (state.logIndex < state.logPages.length - 1) { state.logIndex += 1; renderLog(); }
   };
   uiEl("btnLogClear").onclick = clearLogs;
+  // 复制日志（跑团时贴到聊天里）
+  const copyBtn = (id, which) => {
+    const b = uiEl(id);
+    if (!b) return;
+    b.onclick = () => copyText(logPlainText(which), ok => {
+      const old = b.textContent;
+      b.textContent = ok ? "已复制" : "复制失败";
+      setTimeout(() => { b.textContent = old; }, 1200);
+    });
+  };
+  copyBtn("btnLogCopy", "page");
+  copyBtn("btnLogCopyAll", "all");
   const btnStart = uiEl("btnStartCombat");
   if (btnStart) btnStart.onclick = () => startCombat();
   const btnTurn = uiEl("btnTurnEnd");

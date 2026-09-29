@@ -76,7 +76,9 @@
   };
 
   window.appendLog = function (text, kind) {
-    if (G.tape) G.tape.push({ type: "log", text: String(text == null ? "" : text) });
+    // 规则层正在把一次行动收成一块时先不记；整理好的整块写出来时再记一次
+    const collecting = typeof logSinkActive === "function" && logSinkActive();
+    if (G.tape && !collecting) G.tape.push({ type: "log", text: String(text == null ? "" : text) });
     if (G.sim) return;
     return orig.appendLog(text, kind);
   };
@@ -2017,26 +2019,68 @@
     $("g-logs").scrollTop = 1e9;
   }
 
+  /* 右侧战斗记录：规则层已经把每次行动整理成一块（app.js · formatHitLines / tidyActionBlock）：
+   *   【谁】技能名           → 卡片标题
+   *     消耗 / → 目标：结果 / 后果   → 每行都显示
+   *         掷骰、基础伤害、克制……   → 缩进更深的是计算过程，收在「计算过程」里
+   * 全部文字可以选中复制；顶上有「复制本回合」「复制全部」。 */
   function pushLog(meta, tape) {
     const lines = logLines(tape).filter(t => t.trim());
     if (!lines.length) return;
-    if (lines.some(t => /等待协助格挡选择/.test(t)) && !tape.some(e => e.type === "pop")) return;
-    const phaseLine = lines.find(t => /^—— /.test(t));
-    if (phaseLine && !meta.actorId) {
-      const ph = [...new Set(lines.filter(t => /^—— /.test(t)).map(t => t.replace(/——/g, "").trim()))];
-      addLogPhase(ph.join("　"));
-      return;
-    }
-    const d = el("div", "lg");
-    const key = lines.filter(t => /→|失衡|击倒|死亡|濒死|起身|协助|格挡|借机|移动|区 →/.test(t) && !COST_LINE.test(t)).slice(0, 5);
-    // 本行动合计（含感电、高压场地等连带伤害）单独一行，不占上面的名额
-    const sum = lines.find(t => /^本行动合计/.test(t.trim()));
-    d.innerHTML = `<div class="t">${meta.actorId ? titleHtml(meta) : "结算"}</div>` +
-      key.map(t => `<div class="s${/失衡|击倒|死亡|濒死/.test(t) ? " warn" : ""}">${colorLine(t.trim())}</div>`).join("") +
-      (sum ? `<div class="s sum">${colorLine(sum.trim())}</div>` : "") +
-      `<details><summary>完整计算</summary><pre>${lines.map(colorLine).join("\n")}</pre></details>`;
+    // 严格按顺序：回合 / 阶段分隔单独一行；中间的行按「【谁】…」分成一张张卡片
+    let run = [];
+    let phases = [];
+    const flushPhases = () => { if (phases.length) { addLogPhase([...new Set(phases)].join("　")); phases = []; } };
+    const flushRun = () => { if (run.length) { pushLogCard(meta, run); run = []; } };
+    lines.forEach(t => {
+      if (/^——/.test(t.trim())) { flushRun(); phases.push(t.replace(/——/g, "").trim()); return; }
+      flushPhases();
+      run.push(t);
+    });
+    flushRun();
+    flushPhases();
+  }
+  function pushLogCard(meta, rest) {
+    let html = "";
+    let calc = [];
+    const flushCalc = () => {
+      if (!calc.length) return;
+      html += `<details class="calc"><summary>计算过程</summary><pre>${calc.map(colorLine).join("\n")}</pre></details>`;
+      calc = [];
+    };
+    rest.forEach(raw => {
+      const ind = raw.match(/^ */)[0].length;
+      const t = raw.trim();
+      if (/^【/.test(t)) { flushCalc(); html += `<div class="t">${colorLine(t)}</div>`; return; }
+      if (ind >= 6) { calc.push(raw.slice(6)); return; }
+      flushCalc();
+      const cls = /^→/.test(t) ? " hit"
+        : /^本行动合计/.test(t) ? " sum"
+        : /^消耗|消耗 \d+ (行动点|附赠)/.test(t) ? " cost"
+        : /失衡|打破架势|击杀|死亡|濒死|倒下|起身/.test(t) ? " warn" : "";
+      html += `<div class="s${cls}">${colorLine(t)}</div>`;
+    });
+    flushCalc();
+    // 没有「【谁】」标题的零散行（回合结束、回合开始的结算……）不硬套标题
+    const loose = !/^<div class="t">/.test(html);
+    if (loose && meta.actorId) html = `<div class="t">${titleHtml(meta)}</div>` + html;
+    const d = el("div", "lg" + (loose && !meta.actorId ? " note" : ""));
+    d.innerHTML = html;
     $("g-logs").appendChild(d);
     $("g-logs").scrollTop = 1e9;
+  }
+
+  /** 复制记录（跑团时贴到聊天里）：用规则层的纯文本，包含计算过程 */
+  function copyBattleLog(which, btn) {
+    const text = typeof logPlainText === "function" ? logPlainText(which) : $("g-logs").innerText;
+    const done = (ok) => {
+      if (!btn) return;
+      const old = btn.dataset.label || btn.textContent;
+      btn.dataset.label = old;
+      btn.textContent = ok ? "已复制" : "复制失败";
+      realTimeout(() => { btn.textContent = old; }, 1200);
+    };
+    if (typeof copyText === "function") copyText(text, done);
   }
 
 
@@ -2775,6 +2819,8 @@
       renderFieldSheet();
     };
     $("g-fast").onclick = toggleFast;
+    $("g-copy-turn").onclick = (e) => copyBattleLog("page", e.currentTarget);
+    $("g-copy-all").onclick = (e) => copyBattleLog("all", e.currentTarget);
     $("g-weather-sel").onchange = () => {
       if (G.depth > 0) return;
       const was = state.weather;
