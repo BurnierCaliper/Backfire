@@ -116,7 +116,18 @@ function weaponDurMax(kit) {
   const owner = weaponOwner(kit);
   const lv = owner && owner.weaponLevels && owner.weaponLevels[kit] ? Number(owner.weaponLevels[kit]) : 1;
   const g = (typeof WEAPON_GROWTH !== "undefined" && WEAPON_GROWTH[kit]) || {};
-  return (g.baseDur || 5) + Math.floor(lv / 2);
+  const mod = weaponMod(kit);
+  return Math.max(1, (g.baseDur || 5) + Math.floor(lv / 2) + (Number(mod.dur) || 0));
+}
+/** 武器上装的客制化图纸加成（单局在开战前写进 state.weaponMods；战斗原型没有） */
+function weaponMod(kit) {
+  return (kit && state.weaponMods && state.weaponMods[kit]) || {};
+}
+/** 这个单位此刻吃到的图纸加成：角色看手里那把，武器人看自己 */
+function unitWeaponMod(u) {
+  if (!u || !state.weaponMods) return {};
+  if (state.weaponMods[u.kit]) return state.weaponMods[u.kit];
+  return weaponMod(heldWeaponKit(u));
 }
 function weaponDur(kit) {
   if (LEDGER.dur[kit] == null) LEDGER.dur[kit] = weaponDurMax(kit);
@@ -148,8 +159,9 @@ function spendDurability(kit, n, reason, notes) {
   if (unit && unit.resources) unit.resources.durability = after;
   if (notes && after !== before) notes.push(`${weaponName(kit)} 耐久 ${before} → ${after}（${reason}）`);
   if (after <= 0 && before > 0) {
-    if (notes) notes.push(`${weaponName(kit)} 耐久归零，无法使用。`);
+    if (notes) notes.push(`⚠ ${weaponName(kit)} 耐久归零，无法使用（修好之前都只能空手：维修工具包或长休）。`);
     const owner = weaponOwner(kit);
+    if (owner && typeof spawnPopup === "function") spawnPopup(owner, { kind: "status", text: "武器损坏", element: "physical" });
     if (owner && heldWeaponKit(owner) === kit) disarmBrokenWeapon(owner, notes);
   }
 }

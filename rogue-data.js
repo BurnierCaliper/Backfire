@@ -7,6 +7,7 @@
  *   ROGUE_MAIN_TASK   主线任务模板（每幕开局自动接下）
  *   ROGUE_SHOP        商店卖什么、多少钱
  *   ROGUE_SMITH       工匠升级武器的费用
+ *   ROGUE_SMITHS      工匠名单与各自的客制化图纸（ROGUE_SMITH_RULES：出现几位、几次解锁图纸、安装价）
  *   ROGUE_CLINIC      诊所治疗与义体改造的价格
  *   ROGUE_LEVEL_REWARDS 升级时要做的选择（手册第三章）
  *
@@ -158,6 +159,51 @@ const ROGUE_SMITH = {
   maxLevel: 10,
   cost: { 2: 3000, 3: 6000, 4: 6000, 5: 8000, 6: 10000, 7: 12000, 8: 15000, 9: 17000, 10: 20000 }
 };
+
+/* 工匠（名字、介绍、图纸都是占位，之后填内容）。
+ *   ROGUE_SMITH_RULES.onBoard        每次回到任务板时随机出现几位不同的工匠（已定：3）
+ *   ROGUE_SMITH_RULES.blueprintAfter 在同一位工匠那里升级满几次，就能从他的图纸里挑一张（已定：5）
+ *   ROGUE_SMITH_RULES.installCost    把图纸装到武器上的价格，在任何工匠处都能装（已定：5000）
+ * 图纸效果 mod（拿着这把武器时生效；武器人上场时作用在武器人身上）：
+ *   atk    atk 加值          dur   耐久上限加值          block  协助格挡成功率加值（%）
+ * 一把武器只能装一张图纸，装新的会替换掉旧的。每位工匠的图纸只能领一次。 */
+const ROGUE_SMITH_RULES = {
+  onBoard: 3,
+  blueprintAfter: 5,
+  installCost: 5000
+};
+const ROGUE_SMITHS = [
+  { id: "he",    name: "老何",   blurb: "外城区的老铁匠，只信结实",
+    blueprints: [
+      { id: "bp_he_forge",  name: "加重锻打", text: "atk +2",          mod: { atk: 2 } },
+      { id: "bp_he_temper", name: "回火淬炼", text: "耐久上限 +4",     mod: { dur: 4 } }
+    ] },
+  { id: "suo",   name: "锁匠阿索", blurb: "修过一辈子门锁，懂得怎么卡住东西",
+    blueprints: [
+      { id: "bp_suo_guard", name: "护手卡槽", text: "协助格挡成功率 +10%", mod: { block: 10 } },
+      { id: "bp_suo_frame", name: "加固骨架", text: "耐久上限 +2，atk +1",  mod: { dur: 2, atk: 1 } }
+    ] },
+  { id: "mei",   name: "焊工梅",  blurb: "黑市里手最稳的焊枪",
+    blueprints: [
+      { id: "bp_mei_edge",  name: "高频刃口", text: "atk +3，耐久上限 −1", mod: { atk: 3, dur: -1 } },
+      { id: "bp_mei_seam",  name: "满焊接缝", text: "耐久上限 +3",        mod: { dur: 3 } }
+    ] },
+  { id: "twins", name: "拆解双子", blurb: "从回收厂淘零件，价格公道",
+    blueprints: [
+      { id: "bp_tw_scrap",  name: "废料配重", text: "atk +1，协助格挡成功率 +5%", mod: { atk: 1, block: 5 } },
+      { id: "bp_tw_spare",  name: "备用件",   text: "耐久上限 +5，atk −1",       mod: { dur: 5, atk: -1 } }
+    ] },
+  { id: "ou",    name: "欧师傅",  blurb: "据说给警卫队修过枪",
+    blueprints: [
+      { id: "bp_ou_bore",   name: "精校膛线", text: "atk +2，耐久上限 +1", mod: { atk: 2, dur: 1 } },
+      { id: "bp_ou_brace",  name: "格挡支架", text: "协助格挡成功率 +15%，atk −1", mod: { block: 15, atk: -1 } }
+    ] },
+  { id: "lin",   name: "林",      blurb: "不说话的年轻人，活儿却很细",
+    blueprints: [
+      { id: "bp_lin_balance", name: "重心调校", text: "协助格挡成功率 +8%，耐久上限 +1", mod: { block: 8, dur: 1 } },
+      { id: "bp_lin_core",    name: "芯材替换", text: "atk +2",                        mod: { atk: 2 } }
+    ] }
+];
 
 /* 升级时要做的选择（手册第三章「升级时你会得到什么」）。
  * 角色卡上 minLv 的技能（lv2、lv11、lv17 的「一项技能」、效果位技能）到级自动解锁，不在这里。

@@ -723,7 +723,7 @@ function skillList(unit) {
     add({ id: "chuan_aa", name: "普通攻击", hint: "近距离 · 两次 atk/2+1d4 能量 共1击破 · 耗1电能变三次共2击破" });
     add({ id: "chuan_whip", name: "电击鞭", hint: "距离1以内 · atk/2 电击 1击破 · +1电能" });
     add({ id: "chuan_wall", name: "铁壁", hint: "耗1电能 · 同区挡伤盾 atk+1d6 装甲", minLv: 2 });
-    add({ id: "chuan_over", name: "电站超频", hint: "友方过载 · +1电能；已有≥3电能则改为 atk/2 护盾", minLv: 3 });
+    add({ id: "chuan_over", name: "电站超频", hint: "友方（可对自己）过载 · +1电能；已有≥3电能则改为 atk/2 护盾", minLv: 3 });
     add({ id: "chuan_pulse", name: "高能脉冲", hint: "距离1以内 · 对一个敌人施加高能", minLv: 6 });
     add({ id: "chuan_blade", name: "巨刃划空", hint: "同区 · 耗3电能 · 2atk 电击 +2击破 · 对配置物伤害翻倍 · 击穿血量层或摧毁配置物返还1电能", minLv: 11 });
     add({ id: "chuan_summon", name: "唤出哔哩哩", hint: "武器生物化" });
@@ -867,7 +867,9 @@ function findKit(kit, units) {
 /** 实际 atk = 基础 atk − 力竭惩罚（力竭 2 起 atk −3，只对角色本人） */
 function effectiveAtk(unit, units) {
   if (!unit) return 0;
-  const base = baseEffectiveAtk(unit, units);
+  // 单局的客制化图纸：拿着装了图纸的武器时 atk 加减
+  const mod = typeof unitWeaponMod === "function" ? (Number(unitWeaponMod(unit).atk) || 0) : 0;
+  const base = Math.max(0, baseEffectiveAtk(unit, units) + mod);
   const tier = typeof exhaustTierOf === "function" ? exhaustTierOf(unit) : 0;
   return tier >= 2 ? Math.max(0, base - 3) : base;
 }

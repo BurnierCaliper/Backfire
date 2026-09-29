@@ -1249,15 +1249,15 @@
 
   function candidateUnits(actor, sk) {
     const hint = (sk.hint || "") + " " + (sk.name || "");
-    let all = state.units.filter(u => unitAlive(u) && u.id !== actor.id);
     const side = (typeof SKILL_TARGET_SIDE !== "undefined" && SKILL_TARGET_SIDE[sk.id]) ||
       (/任意单位|拉到|磁力/.test(hint) ? "any" : /友方|队友/.test(hint) ? "ally" : "enemy");
-    if (side === "ally") all = all.filter(u => u.isPlayer);
+    let all = state.units.filter(u => unitAlive(u) && (u.id !== actor.id || side === "allySelf"));
+    if (side === "ally" || side === "allySelf") all = all.filter(u => u.isPlayer);
     else if (side === "enemy") all = all.filter(u => !u.isPlayer);
     if (typeof inSkillRange === "function") {
       all = all.filter(u => inSkillRange(actor, u, hint, state.zoneMode));
     }
-    if (side !== "ally") {
+    if (side !== "ally" && side !== "allySelf") {
       (state.props || []).forEach(p => {
         const fake = { id: "prop:" + p.id, name: p.name, zone: p.zone, isPlayer: p.faction !== "enemy" };
         if (!inSkillRange || inSkillRange(actor, fake, hint, state.zoneMode)) all.push(fake);

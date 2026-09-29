@@ -87,7 +87,7 @@
         <div class="rh-row">血 ${bar(v.hp, v.hpMax, "hp")}<span>${v.hp}/${v.hpMax}</span></div>
         ${v.layers.length > 1 ? `<div class="rh-w">${esc(layerText(v.layers))}</div>` : ""}
         <div class="rh-row">经验 ${bar(v.xp, v.xpNext, "xp")}<span>${v.xp}/${v.xpNext || "满"}</span></div>
-        ${v.weapons.map(w => `<div class="rh-w">${esc(w.name)} Lv${w.level} · 耐久 ${w.dur}/${w.durMax}${w.hp != null ? ` · 伤势 ${w.hp <= 0 ? "倒下（需长休）" : "血量 " + w.hp}` : ""}</div>`).join("")}
+        ${v.weapons.map(w => `<div class="rh-w${w.dur <= 0 ? " broken" : ""}">${esc(w.name)} Lv${w.level} · 耐久 ${w.dur}/${w.durMax}${w.dur <= 0 ? "（损坏：进战斗空手）" : ""}${w.blueprint ? ` · 图纸「${esc(w.blueprint.name)}」` : ""}${w.hp != null ? ` · 伤势 ${w.hp <= 0 ? "倒下（需长休）" : "血量 " + w.hp}` : ""}</div>`).join("")}
       </div>`;
     }).join("") + (run.fallen || []).map(f =>
       `<div class="rhero fallen"><div class="rh-top"><b>${esc(Rogue.heroName(f.kit))}</b><span>阵亡</span></div>
@@ -128,15 +128,28 @@
   function renderBoard() {
     return `<h2>任务板</h2>
       <p class="r-hint">主线开幕就已接下，要在本幕天数用完之前完成，否则本局结束。本幕的天数用完时迎战首领；主线完成后剩下的日子可以继续做支线。支线只写了大致目标、时间、报酬和补给，天数够才能接。</p>
-      <div class="task-list">${run.main && !run.main.done ? taskCard(run.main, "main") : ""}${(run.board || []).map((t, i) => taskCard(t, i)).join("")}</div>`;
+      <div class="task-list">${run.main && !run.main.done ? taskCard(run.main, "main") : ""}${(run.board || []).map((t, i) => taskCard(t, i)).join("")}</div>
+      ${renderSmiths()}`;
   }
 
   /* ---------- 任务节点 ---------- */
   const nodeLabel = (n) => (ROGUE_NODE_TYPES[n.type] || {}).label || n.type;
 
+  /** 武器耐久为 0 时的提醒：进战斗会空手。有维修工具包就当场给修理按钮 */
+  function brokenWarn() {
+    const list = Rogue.brokenWeapons(run);
+    if (!list.length) return "";
+    const who = list.map(w => w.owner === w.name ? w.name : `${w.owner} 的 ${w.name}`).join("、");
+    const fix = bagCount("repair_kit") ? "可以先用维修工具包修一下：" : "用维修工具包（商店有卖）或长休才能修好。";
+    return `<p class="r-warn">⚠ ${esc(who)} 耐久为 0，这场战斗只能空手作战。${fix}</p>${repairRows()}`;
+  }
+  const fightBtn = (label) => Rogue.brokenWeapons(run).length
+    ? `<button class="g-btn r-main" id="r-fight">仍然${label}（有人空手）</button>`
+    : `<button class="g-btn r-main" id="r-fight">${label}</button>`;
+
   const NODE_PANELS = {
-    battle: () => `<p>前方有敌人拦路。</p><button class="g-btn r-main" id="r-fight">迎战</button>`,
-    elite: () => `<p>前方有棘手的敌人。</p><button class="g-btn r-main" id="r-fight">迎战</button>`,
+    battle: () => `<p>前方有敌人拦路。</p>${brokenWarn()}${fightBtn("迎战")}`,
+    elite: () => `<p>前方有棘手的敌人。</p>${brokenWarn()}${fightBtn("迎战")}`,
     rest: () => {
       const plan = Rogue.restPlan(run);
       const food = Object.keys(plan.food).map(id => `${ITEM_CATALOG[id].name} ${plan.food[id]} 份`).join("、");
@@ -152,13 +165,10 @@
         ${repairRows()}
         <button class="g-btn r-main" id="r-leave">离开</button>`,
     smith: () => {
-      const s = Rogue.supplies();
-      return `<p>一位工匠愿意帮你改武器。手里有 ${s.kuizhi} 奎支。</p>
-        <div class="shop">${Rogue.smithOptions(run).map(o =>
-          `<div class="shop-row"><span class="s-name">${esc(o.name)}<small>现在 ${o.level} 级</small></span>
-            <span class="s-have"></span>
-            <span class="s-price">${o.max ? "满级" : o.cost}</span>
-            <button class="g-btn" data-upgrade="${esc(o.kit)}" ${o.max || s.kuizhi < o.cost ? "disabled" : ""}>升到 ${o.level + 1} 级</button></div>`).join("")}</div>
+      const id = Rogue.presentSmiths(run)[0];
+      return `<p>一位工匠愿意帮你改武器。手里有 ${Rogue.supplies().kuizhi} 奎支。</p>
+        ${smithCard(id, true)}
+        ${installRows(id)}
         ${repairRows()}
         <button class="g-btn r-main" id="r-leave">离开</button>`;
     },
@@ -224,6 +234,52 @@
         <button class="g-btn" data-buy="${esc(r.key)}" ${s.kuizhi < r.price ? "disabled" : ""}>买</button></div>`;
     }).join("")}</div>`;
   }
+  /* ---------- 工匠：升级、图纸（任务板上随机来几位，任务里也可能遇到一位） ---------- */
+  function smithCard(id, open) {
+    const info = Rogue.smithInfo(run, id);
+    if (!info) return "";
+    const k = Rogue.supplies().kuizhi;
+    const progress = info.claimed
+      ? `已领图纸「${esc(Rogue.blueprintById(info.claimed).name)}」`
+      : info.canClaim ? "可以领一张图纸" : `在他这里升级 ${info.uses}/${info.need} 次可领图纸`;
+    const rows = Rogue.smithOptions(run).map(o =>
+      `<div class="shop-row"><span class="s-name">${esc(o.name)}<small>现在 ${o.level} 级</small></span>
+        <span class="s-have"></span>
+        <span class="s-price">${o.max ? "满级" : o.cost}</span>
+        <button class="g-btn" data-upgrade="${esc(o.kit)}" data-smith="${esc(id)}" ${o.max || k < o.cost ? "disabled" : ""}>升到 ${o.level + 1} 级</button></div>`).join("");
+    const claim = info.canClaim ? `<p class="r-hint">${esc(info.name)} 愿意把自己的客制化图纸给你一张（只能挑一张）：</p>
+      <div class="r-choices">${info.blueprints.map(b =>
+        `<button class="g-btn" data-claim="${esc(b.id)}" data-smith="${esc(id)}">${esc(b.name)}<small>${esc(b.text)}</small></button>`).join("")}</div>` : "";
+    return `<details class="smith"${open || info.canClaim ? " open" : ""}>
+      <summary><b>${esc(info.name)}</b><span class="sm-blurb">${esc(info.blurb)}</span><span class="sm-prog${info.canClaim ? " ready" : ""}">${progress}</span></summary>
+      ${claim}
+      <div class="shop">${rows}</div>
+    </details>`;
+  }
+  /** 手里的图纸装到武器上（任何一位工匠都能装） */
+  function installRows(smithId) {
+    const bps = run.blueprints || [];
+    if (!bps.length || !smithId) return "";
+    const cost = ROGUE_SMITH_RULES.installCost;
+    const k = Rogue.supplies().kuizhi;
+    const weapons = run.party.flatMap(h => Rogue.heroView(run, h).weapons);
+    return `<p class="r-hint">手里的图纸：装一张 ${cost} 奎支，一把武器只能装一张（装新的会替换旧的）。</p>
+      ${bps.map(id => {
+        const b = Rogue.blueprintById(id);
+        return `<div class="bp-row"><span class="s-name">${esc(b.name)}<small>${esc(b.text)} · 来自 ${esc(b.smithName)}</small></span>
+          <div class="r-choices">${weapons.map(w =>
+            `<button class="g-btn" data-install="${esc(id)}" data-kit="${esc(w.kit)}" data-smith="${esc(smithId)}" ${k < cost ? "disabled" : ""}>装到 ${esc(w.name)}${w.blueprint ? `<small>替换「${esc(w.blueprint.name)}」</small>` : ""}</button>`).join("")}</div></div>`;
+      }).join("")}`;
+  }
+  function renderSmiths() {
+    const ids = run.smiths || [];
+    if (!ids.length) return "";
+    return `<h2>工匠</h2>
+      <p class="r-hint">这次回城遇到 ${ids.length} 位工匠。手里有 ${Rogue.supplies().kuizhi} 奎支。在同一位工匠那里升级满 ${ROGUE_SMITH_RULES.blueprintAfter} 次，他会给你一张客制化图纸。</p>
+      ${ids.map(id => smithCard(id, false)).join("")}
+      ${installRows(ids[0])}`;
+  }
+
   /** 维修工具包（手册：修复 10 点耐久），有的话在商店、工匠处、休整时都能用 */
   function repairRows() {
     const kits = bagCount("repair_kit");
@@ -266,7 +322,7 @@
       case "boss":
         return `<h2>第 ${run.act} 幕 · 首领</h2>
           <p class="r-hint">首领战不能撤退；输了，本局就此结束。</p>
-          <button class="g-btn r-main" id="r-fight">迎战首领</button>`;
+          ${brokenWarn()}${fightBtn("迎战首领")}`;
       case "interlude":
         return `<h2>第 ${run.act} 幕 · 落幕</h2>
           <p class="r-hint">幕间选择会在之后的版本加入。</p>
@@ -338,7 +394,9 @@
       };
     });
     body.querySelectorAll("[data-buy]").forEach(b => { b.onclick = () => act(() => Rogue.buy(run, b.dataset.buy, 1)); });
-    body.querySelectorAll("[data-upgrade]").forEach(b => { b.onclick = () => act(() => Rogue.upgradeWeapon(run, b.dataset.upgrade)); });
+    body.querySelectorAll("[data-upgrade]").forEach(b => { b.onclick = () => act(() => Rogue.upgradeWeapon(run, b.dataset.upgrade, b.dataset.smith)); });
+    body.querySelectorAll("[data-claim]").forEach(b => { b.onclick = () => act(() => Rogue.claimBlueprint(run, b.dataset.smith, b.dataset.claim)); });
+    body.querySelectorAll("[data-install]").forEach(b => { b.onclick = () => act(() => Rogue.installBlueprint(run, b.dataset.install, b.dataset.kit, b.dataset.smith)); });
     body.querySelectorAll("[data-repair]").forEach(b => { b.onclick = () => act(() => Rogue.repairWeapon(run, b.dataset.repair)); });
     body.querySelectorAll("[data-heal]").forEach(b => { b.onclick = () => act(() => Rogue.healHero(run, b.dataset.heal)); });
     body.querySelectorAll("[data-cyber]").forEach(b => {

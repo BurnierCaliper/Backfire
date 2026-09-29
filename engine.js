@@ -210,12 +210,13 @@ const SKILL_RANGE = {
 
 /* 技能能选哪一边的目标。界面原本是从提示文字里猜的（出现「友方」就只让选友方），
  * 对「打敌人、顺带治疗友方」这类技能会猜错。这里写明的优先于文字猜测。
- *   enemy 只能选敌人 / ally 只能选友方 / any 敌我皆可 */
+ *   enemy 只能选敌人 / ally 只能选友方（不含自己）/ allySelf 友方含自己 / any 敌我皆可 */
 const SKILL_TARGET_SIDE = {
   vitas_dance: "enemy",     // 三段冰伤打敌人，温和的治疗只是附带效果
   yuito_espresso: "enemy",  // 加行动点那一档在分步里选友方，走到这里的是酸液攻击
   nora_needle: "any",       // 针尖可以扎敌人，也可以扎队友当治疗手段
-  nora_aa: "any"            // 有刺入时打刺入目标，刺入的可能是队友
+  nora_aa: "any",           // 有刺入时打刺入目标，刺入的可能是队友
+  chuan_over: "allySelf"    // 电站超频：友方，也可以对川川自己用
 };
 
 function parseSkillRange(text) {

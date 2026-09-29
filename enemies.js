@@ -524,8 +524,11 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
     return true;
   }
   if (id === "en_boom_fuse") {
-    const dmgOpt = { element: "energy", mult: 1, diceN: 1, diceS: 6, baseBreak: 2 };
-    state.units.filter(u => !u.hidden && Number(u.zone) === Number(a.zone) && u.id !== a.id).forEach(u => aa(u, dmgOpt));
+    // 手册：atk+1d6 范围能量 +2 击破，同区不分敌我。范围攻击不能协助格挡；自爆本身就是它的毁灭，不再触发死亡引爆
+    const dmgOpt = { element: "energy", mult: 1, diceN: 1, diceS: 6, baseBreak: 2, flags: { action: true, aoe: true } };
+    a._exploded = true;
+    state.units.filter(u => !u.hidden && !u.dead && Number(u.zone) === Number(a.zone) && u.id !== a.id).forEach(u => aa(u, dmgOpt));
+    if (typeof markAoeZone === "function") markAoeZone(a.zone);
     a.layers.forEach(l => { l.current = 0; });
     lines.push(`${a.name} 自爆后损毁。`);
     return true;

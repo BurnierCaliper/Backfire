@@ -210,6 +210,29 @@ function selfImmunities(u, notes) {
   }
 }
 /** 自我效果对架势上限的限制（导体 3） */
+/** 震荡（玩家手册第四章「物理 · 震荡」）：架势条上限减少 2。
+ *  直接改 defMax（界面、回满架势、协助攻击回满都跟着变），记下扣了多少，状态消失时还回去。
+ *  上限最少留 1，免得一挨震荡就永远处在失衡里。状态从哪里来都一样：施加时、回合交界时对一遍账。 */
+function syncShockwave(u, notes) {
+  if (!u || !u.statuses) return;
+  const on = !!u.statuses.shockwave;
+  if (on && !u._waveCut) {
+    const cut = Math.min(2, Math.max(0, (Number(u.defMax) || 0) - 1));
+    if (!cut) return;
+    u._waveCut = cut;
+    u.defMax -= cut;
+    if ((Number(u.def) || 0) > u.defMax) u.def = u.defMax;
+    if (notes) notes.push(`${u.name} 震荡：架势上限 −${cut} → ${u.defMax}。`);
+  } else if (!on && u._waveCut) {
+    u.defMax += u._waveCut;
+    if (notes) notes.push(`${u.name} 震荡解除：架势上限恢复到 ${u.defMax}。`);
+    u._waveCut = 0;
+  }
+}
+function syncShockwaveAll(notes) {
+  ((typeof state !== "undefined" && state.units) || []).forEach(u => syncShockwave(u, notes));
+}
+
 function postureCap(u) {
   const cap = Number(u && u.defMax) || 0;
   return u && u.self === "conductor" ? Math.min(3, cap) : cap;

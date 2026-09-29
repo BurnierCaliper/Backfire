@@ -1085,7 +1085,10 @@ function renderEditor() {
       High: ["high"], Reso: ["reso"], Un: ["unstable"], Weak: ["weak"], Insp: ["inspire"],
       Hide: ["hide"], Adv: ["advantage"]
     };
-    bind("st" + key, () => { u.statuses[map[key][0]] = uiEl("st" + key).checked; });
+    bind("st" + key, () => {
+      u.statuses[map[key][0]] = uiEl("st" + key).checked;
+      if (key === "Wave" && typeof syncShockwave === "function") syncShockwave(u, null);
+    });
   });
   const imap = { inMelt: "melt", inSting: "sting", inOver: "overload", inShift: "shift", inSpread: "spread", inRef: "refract" };
   Object.keys(imap).forEach(id => bind(id, () => { u.instant[imap[id]] = uiEl(id).checked; }));
@@ -1419,6 +1422,7 @@ function beginRound(notes) {
     if (typeof meltShieldRoundStart === "function" && meltShieldRoundStart(u, notes)) u._noShieldRefill = true;
     if (u.resources && u.resources.frostShell) { u.resources.frostShell = false; notes.push(`${u.name} 再次霜结的完全免疫结束。`); }
     if (typeof selfImmunities === "function") selfImmunities(u, notes);
+    if (typeof syncShockwave === "function") syncShockwave(u, notes);
     // 即时效果都是单回合的：没被用掉的也在回合开始时失效
     if (u.instant) {
       const gone = [];
@@ -1685,6 +1689,7 @@ function turnEnd() {
   state.units.forEach(u => {
     const weather = currentWeatherFor(u);
     if (typeof selfImmunities === "function") selfImmunities(u, notes);
+    if (typeof syncShockwave === "function") syncShockwave(u, notes);
     if (Number(u.statuses && u.statuses.burn) > 0) {
       const d = statusDotDice("burn", u.level, weather);
       const stacks = Math.max(1, Math.floor(Number(u.statuses.burn) || 0));
@@ -1920,6 +1925,7 @@ function pulseResonanceStatus(source, key) {
     o.statuses = o.statuses || {};
     if (key === "burn") o.statuses.burn = (Number(o.statuses.burn) || 0) + 1;
     else if (source.statuses[key] != null) o.statuses[key] = source.statuses[key];
+    if (key === "shockwave" && typeof syncShockwave === "function") syncShockwave(o, null);
     if (source.instant && source.instant[key] != null) {
       o.instant = o.instant || {};
       o.instant[key] = source.instant[key];
@@ -3098,6 +3104,7 @@ function applyNeutralize(u) {
   if (keys.indexOf("shockwave") >= 0) {
     dealBreak(u, 2, "physical", notes, "中和震荡");
     st.shockwave = false;
+    if (typeof syncShockwave === "function") syncShockwave(u, notes);
   }
   if (u.self && u.self !== "none") {
     notes.push(`${u.name} 自我效果「${selfName(u.self)}」被中和清除（无额外结算）。`);
@@ -3129,10 +3136,11 @@ function explodeBoomcar(target, notes) {
   target._exploded = true;
   const half = Math.floor((target.atk || 0) / 2);
   notes.push(`${target.name} 死亡引爆：同区 ${half} 能量 + 1 击破。`);
-  state.units.filter(u => !u.hidden && u.id !== target.id && Number(u.zone) === Number(target.zone)).forEach(u => {
+  // 同区不分敌我的范围伤害（不能协助格挡）
+  state.units.filter(u => !u.hidden && !u.dead && u.id !== target.id && Number(u.zone) === Number(target.zone)).forEach(u => {
     const fake = unitOf("小车残骸", target.level, [{ type: "armor", hp: 1 }], 0, 0);
     fake.zone = target.zone;
-    dealTo(fake, u, { atk: 0, mult: 0, flat: half, element: "energy", baseBreak: 1, flags: { action: true } });
+    dealTo(fake, u, { atk: 0, mult: 0, flat: half, element: "energy", baseBreak: 1, flags: { action: true, aoe: true } });
   });
 }
 
@@ -3407,6 +3415,7 @@ function finalBlockChance(helper, attacker) {
   c += highlandBlockMod(helper, attacker);
   if (helper.self === "anchor") c += 10;   // 千钧：格挡成功率 +10%
   if (helper.rallyBlock) c += helper.rallyBlock;
+  if (typeof unitWeaponMod === "function") c += Number(unitWeaponMod(helper).block) || 0;   // 单局图纸
   return Math.max(5, Math.min(100, c));
 }
 
@@ -4434,6 +4443,7 @@ function copyStatuses(src, dest) {
   Object.keys(src.statuses || {}).forEach(k => {
     dest.statuses[k] = src.statuses[k];
   });
+  if (typeof syncShockwave === "function") syncShockwave(dest, null);
   dest.instant = dest.instant || {};
   Object.keys(src.instant || {}).forEach(k => {
     if (k === "omenFrom" || k === "omenArmed") return;
@@ -6459,6 +6469,7 @@ function clearShift(u) {
 }
 
 function popStatus(unit, key) {
+  if (key === "shockwave" && typeof syncShockwave === "function") syncShockwave(unit, null);
   const meta = STATUS_POP[key];
   if (meta) spawnPopup(unit, { kind: "status", text: meta.name, element: meta.element });
   if (typeof pulseResonanceStatus === "function") pulseResonanceStatus(unit, key);

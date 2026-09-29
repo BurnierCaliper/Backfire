@@ -103,6 +103,7 @@ const Rogue = (function () {
     if (run) syncWorld(run);
     setXpRequirementScale(1);
     state.exhaustTier = 0;
+    state.weaponMods = null;
     if (stash) {
       state.bag = stash.bag;
       state.kuizhi = stash.kuizhi;
@@ -128,6 +129,10 @@ const Rogue = (function () {
     run.boardNo = 0;
     run.tasksDone = 0;
     run.extra = false;
+    run.smithUses = {};      // 工匠 id → 在他那里升级过几次
+    run.smithClaimed = {};   // 工匠 id → 已经领过的图纸 id
+    run.blueprints = [];     // 领到、还没装上的图纸 id
+    run.installed = {};      // 武器 kit → 装上的图纸 id
     run.party.forEach(h => {
       h.weaponLevels = {};
       h.weapons.forEach(k => { h.weaponLevels[k] = 1; });
@@ -146,6 +151,7 @@ const Rogue = (function () {
     syncWorld(run);
     log(run, `出发：${run.party.map(h => heroName(h.kit)).join("、")}（种子 ${run.seed}）`);
     startAct(run);
+    run.smiths = [];         // 开局第一块任务板还没完成过任务，不来工匠
     return run;
   }
 
@@ -188,6 +194,7 @@ const Rogue = (function () {
       }
     });
     run.board = tasks.map((tpl, i) => makeTask(run, tpl, i));
+    rollBoardSmiths(run);
     run.stage = "board";
     return run.board;
   }
@@ -297,6 +304,7 @@ const Rogue = (function () {
     });
     state.exhaustTier = Math.min(3, exhaustTierFromHours(hoursAwake()));
     state.lootByRank = C.lootByRank || null;
+    state.weaponMods = weaponModsOf(run);
   }
   function captureHero(u, h) {
     h.level = u.level || 1;
@@ -613,16 +621,122 @@ const Rogue = (function () {
     }));
     return out;
   }
-  function upgradeWeapon(run, kit) {
-    const node = currentNode(run);
-    if (!node || node.type !== "smith") throw new Error("这里没有工匠");
+  /* 工匠名单与客制化图纸（rogue-data.js · ROGUE_SMITHS / ROGUE_SMITH_RULES）
+   *   任务板：每次回到任务板随机来 onBoard 位不同的工匠；任务里的工匠节点是随机的一位。
+   *   在同一位工匠那里升级满 blueprintAfter 次，就能从他的图纸里挑一张；
+   *   图纸花 installCost 装到武器上（任何工匠处都能装），拿着这把武器时生效。 */
+  const SR = () => (typeof ROGUE_SMITH_RULES !== "undefined" ? ROGUE_SMITH_RULES : { onBoard: 3, blueprintAfter: 5, installCost: 5000 });
+  const smithById = (id) => (typeof ROGUE_SMITHS !== "undefined" ? ROGUE_SMITHS : []).find(s => s.id === id) || null;
+  function blueprintById(id) {
+    for (const s of (typeof ROGUE_SMITHS !== "undefined" ? ROGUE_SMITHS : [])) {
+      const b = (s.blueprints || []).find(x => x.id === id);
+      if (b) return Object.assign({ smith: s.id, smithName: s.name }, b);
+    }
+    return null;
+  }
+  function ensureSmithState(run) {
+    run.smithUses = run.smithUses || {};
+    run.smithClaimed = run.smithClaimed || {};
+    run.blueprints = run.blueprints || [];
+    run.installed = run.installed || {};
+  }
+  function rollBoardSmiths(run) {
+    const all = (typeof ROGUE_SMITHS !== "undefined" ? ROGUE_SMITHS : []).map(s => s.id);
+    const out = [];
+    withRng(`${run.seed}:smiths:${run.act}:${run.boardNo}`, () => {
+      const pool = all.slice();
+      while (out.length < SR().onBoard && pool.length) out.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
+    });
+    run.smiths = out;
+  }
+  /** 任务里的工匠节点是哪位（第一次走到时随机定下） */
+  function nodeSmith(run, node) {
+    if (!node || node.type !== "smith") return null;
+    if (!node.smith) {
+      const all = (typeof ROGUE_SMITHS !== "undefined" ? ROGUE_SMITHS : []).map(s => s.id);
+      node.smith = withRng(`${run.seed}:nodesmith:${run.taskNo}:${run.task ? run.task.index : 0}`, () => all[Math.floor(Math.random() * all.length)]);
+    }
+    return node.smith;
+  }
+  /** 此刻在场的工匠 id 列表：任务板上的几位，或者当前工匠节点那一位 */
+  function presentSmiths(run) {
+    if (run.stage === "board") return (run.smiths || []).slice();
+    const node = run.stage === "task" ? currentNode(run) : null;
+    const id = nodeSmith(run, node);
+    return id ? [id] : [];
+  }
+  function smithInfo(run, id) {
+    ensureSmithState(run);
+    const s = smithById(id);
+    if (!s) return null;
+    const uses = run.smithUses[id] || 0;
+    const claimed = run.smithClaimed[id] || null;
+    return {
+      id, name: s.name, blurb: s.blurb || "", uses, need: SR().blueprintAfter,
+      claimed, canClaim: !claimed && uses >= SR().blueprintAfter,
+      blueprints: (s.blueprints || []).map(b => blueprintById(b.id))
+    };
+  }
+  function requireSmith(run, smithId) {
+    const here = presentSmiths(run);
+    const id = smithId || here[0];
+    if (!id || here.indexOf(id) < 0) throw new Error("这里没有这位工匠");
+    return id;
+  }
+  function upgradeWeapon(run, kit, smithId) {
+    ensureSmithState(run);
+    const sid = requireSmith(run, smithId);
     const opt = smithOptions(run).find(o => o.kit === kit);
     if (!opt || opt.max) throw new Error("已经满级");
     if ((Number(state.kuizhi) || 0) < opt.cost) throw new Error("奎支不够");
     state.kuizhi -= opt.cost;
     const h = run.party.find(x => x.kit === opt.owner);
     h.weaponLevels[kit] = opt.level + 1;
-    return logAll(run, [`工匠把 ${opt.name} 升到 ${opt.level + 1} 级，花掉 ${opt.cost} 奎支。`]);
+    run.smithUses[sid] = (run.smithUses[sid] || 0) + 1;
+    const s = smithInfo(run, sid);
+    const notes = [`${s.name} 把 ${opt.name} 升到 ${opt.level + 1} 级，花掉 ${opt.cost} 奎支。`];
+    if (s.canClaim && s.uses === s.need) notes.push(`${s.name} 愿意把自己的客制化图纸给你一张（在他这里升级满 ${s.need} 次）。`);
+    return logAll(run, notes);
+  }
+  /** 领图纸：在同一位工匠那里升级满次数后，从他的图纸里挑一张（每位工匠只能领一次） */
+  function claimBlueprint(run, smithId, bpId) {
+    ensureSmithState(run);
+    const sid = requireSmith(run, smithId);
+    const s = smithInfo(run, sid);
+    if (!s.canClaim) throw new Error(s.claimed ? "这位工匠的图纸已经领过了" : `还要在他这里升级 ${s.need - s.uses} 次`);
+    const bp = s.blueprints.find(b => b.id === bpId);
+    if (!bp) throw new Error("没有这张图纸");
+    run.smithClaimed[sid] = bpId;
+    run.blueprints.push(bpId);
+    return logAll(run, [`从 ${s.name} 那里拿到图纸「${bp.name}」（${bp.text}）。装到武器上要 ${SR().installCost} 奎支。`]);
+  }
+  /** 装图纸：任何工匠处都能装，花 installCost。一把武器一张，装新的替换旧的 */
+  function installBlueprint(run, bpId, kit, smithId) {
+    ensureSmithState(run);
+    const sid = requireSmith(run, smithId);
+    const i = run.blueprints.indexOf(bpId);
+    if (i < 0) throw new Error("手里没有这张图纸");
+    const owner = run.party.find(h => (h.weapons || []).indexOf(kit) >= 0);
+    if (!owner) throw new Error("队伍里没有这把武器");
+    const cost = SR().installCost;
+    if ((Number(state.kuizhi) || 0) < cost) throw new Error("奎支不够");
+    state.kuizhi -= cost;
+    run.blueprints.splice(i, 1);
+    const bp = blueprintById(bpId);
+    const old = run.installed[kit] ? blueprintById(run.installed[kit]) : null;
+    run.installed[kit] = bpId;
+    const notes = [`${smithById(sid).name} 把「${bp.name}」装到 ${heroName(kit)} 上（${bp.text}），花掉 ${cost} 奎支。`];
+    if (old) notes.push(`原来的「${old.name}」被拆掉了。`);
+    return logAll(run, notes);
+  }
+  /** 本局各武器的图纸加成：kit → { atk, dur, block } */
+  function weaponModsOf(run) {
+    const out = {};
+    Object.keys((run && run.installed) || {}).forEach(k => {
+      const bp = blueprintById(run.installed[k]);
+      if (bp && bp.mod) out[k] = Object.assign({}, bp.mod);
+    });
+    return out;
   }
   /** 维修工具包（手册：修复 10 点耐久）。商店、工匠、休整时都能用 */
   function repairWeapon(run, kit) {
@@ -722,28 +836,39 @@ const Rogue = (function () {
         const w = weaponCarryLayers(k);
         const cur = w ? w.reduce((s, l) => s + (Number(l.current) || 0), 0) : null;
         return { kit: k, name: heroName(k), level: (h.weaponLevels || {})[k] || 1,
-          dur: weaponDurFor(h, k), durMax: weaponDurMaxFor(h, k), hp: cur };
+          dur: weaponDurFor(h, k, run), durMax: weaponDurMaxFor(h, k, run), hp: cur,
+          blueprint: (run.installed || {})[k] ? blueprintById(run.installed[k]) : null };
       })
     };
   }
-  // 耐久上限跟武器等级走（growth.js / ledger.js）。战斗外角色不在场上，这里按单局记录的等级算
-  function weaponDurMaxFor(h, k) {
-    const g = WEAPON_GROWTH[k] || {};
-    return (g.baseDur || 5) + Math.floor(((h.weaponLevels || {})[k] || 1) / 2);
+  /** 耐久为 0 的武器：带进战斗就只能空手（绯秋另一把刀还能用时会自动换刀） */
+  function brokenWeapons(run) {
+    const out = [];
+    run.party.forEach(h => (h.weapons || []).forEach(k => {
+      if (weaponDurFor(h, k, run) <= 0) out.push({ kit: k, name: heroName(k), owner: heroName(h.kit) });
+    }));
+    return out;
   }
-  function weaponDurFor(h, k) {
+  // 耐久上限跟武器等级走（growth.js / ledger.js）。战斗外角色不在场上，这里按单局记录的等级算
+  function weaponDurMaxFor(h, k, run) {
+    const g = WEAPON_GROWTH[k] || {};
+    const mod = weaponModsOf(run)[k] || {};
+    return Math.max(1, (g.baseDur || 5) + Math.floor(((h.weaponLevels || {})[k] || 1) / 2) + (Number(mod.dur) || 0));
+  }
+  function weaponDurFor(h, k, run) {
     const v = LEDGER.dur[k];
-    return v == null ? weaponDurMaxFor(h, k) : Math.max(0, Number(v) || 0);
+    return v == null ? weaponDurMaxFor(h, k, run) : Math.max(0, Number(v) || 0);
   }
 
   return {
     CONFIG: C,
     newRun, heroPool, heroName, cardOf, region, daysLeft, enemyLevel, levelRange, totalActs,
-    heroView, supplies, hoursAwake,
+    heroView, supplies, hoursAwake, brokenWeapons,
     makeBoard, taskBlocked, taskWarning, acceptTask, currentNode,
     battleSpec, applyPartyToField, finishBattle,
     restPlan, canLongRest, restAtNode, leaveNode,
     buy, canShop, shopItemName, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
+    presentSmiths, smithInfo, claimBlueprint, installBlueprint, blueprintById, weaponModsOf,
     canClinic, cyberInfo, cyberPreview, cyberCost, modifyHero, healCost, healHero,
     pendingChoices, choiceOptions, choose,
     camp, nextAct, afterVictory, endRun,

@@ -1231,6 +1231,8 @@ body.rogue-battle .g-top label:has(#g-weather-sel) { display: none !important; }
 
 .run-body { min-width: 0; }
 .r-hint { margin: 0 0 14px; font-size: 13px; color: var(--muted); line-height: 1.6; }
+.r-warn { margin: 0 0 12px; padding: 8px 10px; font-size: 13px; line-height: 1.6; color: var(--foe); border: 1px solid var(--foe); border-radius: 6px; }
+.rh-w.broken { color: var(--foe); font-weight: 600; }
 .task-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
 .task { display: flex; flex-direction: column; gap: 8px; padding: 14px; background: var(--plate); border: 1px solid var(--line); border-radius: 4px; }
 .task.key { border-color: var(--gold); }
@@ -1296,3 +1298,12 @@ body.rogue-battle .g-top label:has(#g-weather-sel) { display: none !important; }
 .cl-preview { font-size: 12px; color: var(--muted); min-height: 1.5em; }
 .cl-preview b { color: var(--bone); font-family: var(--num); }
 .cl-preview .bad { color: var(--foe); }
+
+/* 工匠（任务板 / 工匠节点） */
+details.smith { margin: 0 0 10px; border: 1px solid var(--line, #3a3a3a); border-radius: 8px; padding: 6px 10px; }
+details.smith > summary { cursor: pointer; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; padding: 4px 0; }
+details.smith .sm-blurb { font-size: 12px; color: var(--muted); }
+details.smith .sm-prog { margin-left: auto; font-size: 12px; color: var(--muted); }
+details.smith .sm-prog.ready { color: var(--gold); font-weight: 600; }
+.bp-row { margin: 0 0 10px; }
+.bp-row .s-name small { display: block; }

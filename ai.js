@@ -25,6 +25,11 @@ const EnemyAI = (function () {
     const d = zdist(u.zone, t.zone);
     const table = (typeof SKILL_RANGE !== "undefined" && SKILL_RANGE[sid]) || null;
     if (table) return d >= (table.min || 0) && d <= (table.max == null ? 99 : table.max);
+    // 敌人技能的射程表（enemies.js · ENEMY_SKILL_RANGE）：近距离只打 0，远距离只打 1。
+    // 之前这里没查它，远距技能被当成 0–1 都能打，于是瞄准同区的人、结果打不到。
+    const erg = typeof ENEMY_SKILL_RANGE !== "undefined" && sid ? ENEMY_SKILL_RANGE[sid] : null;
+    if (erg === "melee") return d === 0;
+    if (erg === "ranged") return d === 1;
     if (sid === "en_aa" || !sid) {
       const rg = u.range || "any";
       if (rg === "melee") return d === 0;
@@ -145,6 +150,11 @@ const EnemyAI = (function () {
       const s = prey.slice().sort((a, b) =>
         (effectiveAtk(b, state.units) || 0) - (effectiveAtk(a, state.units) || 0));
       return { unit: s[0] };
+    }
+    // 远程单位（想保持距离 1）：先挑打得到的，也就是隔一区的人
+    if (spec.dist === 1) {
+      const far = prey.filter(p => zdist(u.zone, p.zone) === 1);
+      if (far.length) return { unit: highest(far) };
     }
     // 手册没写明追谁时，倾向于打血量最高的
     const here = preyInZone(prey, u.zone);          // local：同区有人就打同区
