@@ -128,3 +128,12 @@ test("沙暴风向：每场随机（不再总是同一个方向）；有释放�
   c.setWeather("none"); c.setWeather("sand", { casterZone: 1 });
   assert.equal(c.sandWind(1, c.S.state.zoneMode, c.S.state.sandDir), 1, "释放者所在的 1 区顺风");
 });
+
+test("空投蜂群：架势无论几级、几人队都不超过 3", () => {
+  const c = H.load();
+  const p = c.enemyPresets().find(x => x.id === "swarm");
+  for (const lv of [1, 5, 10, 15, 20, 25]) for (const n of [2, 3, 4]) {
+    const u = p.build(lv, n);
+    assert.ok(u.defMax <= 3 && u.def <= 3, `Lv${lv} ${n} 人队：架势 ${u.def}/${u.defMax}`);
+  }
+});

@@ -1207,10 +1207,14 @@ function enemyPresets() {
       return unitOf(this.name, lv, [{ type: "armor", hp: scaleHp(8 + (lv - 1) * 3, p) }], 2 + milestone(lv, 2), 5 + (lv - 1) * 2, { kit: "dumpdrone", flying: true, range: "ranged", dice: [1, 4], element: "acid" });
     }},
     { id: "swarm", name: "空投蜂群", build(lv, p) {
-      return unitOf(this.name, lv, [
+      const u = unitOf(this.name, lv, [
         { type: "shield", hp: scaleHp(4 + (lv - 1) * 2, p) },
         { type: "armor", hp: scaleHp(1, p) }
       ], 1 + milestone(lv, 2), 6 + (lv - 1) * 2, { kit: "swarm", flying: true, range: "melee", dice: [2, 4], element: "physical" });
+      // 靠数量取胜的小兵：架势无论几级、几人队都不超过 3（作者定）
+      u.defMax = Math.min(3, u.defMax);
+      u.def = Math.min(u.def, u.defMax);
+      return u;
     }},
     { id: "crow", name: "穴鸦", build(lv, p) {
       return unitOf(this.name, lv, [{ type: "flesh", hp: scaleHp(10 + (lv - 1) * 3, p) }], 2 + milestone(lv, 2), 5 + (lv - 1) * 2, { kit: "crow", flying: true, range: "melee", dice: [1, 4], element: "harmonic" });

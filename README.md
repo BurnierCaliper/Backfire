@@ -339,6 +339,8 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **空投蜂群的架势上限 3**：原来每 2 级 +1 架势（15 级时 8 点，再按人数加），对靠数量取胜的小兵太硬。现在无论几级、几人队，架势都不超过 3（`engine.js · swarm`）。
+
 - **战斗日志重写成按顺序、成块的写法**（`app.js · withLogSink / formatHitLines / tidyActionBlock`）。每次行动收成一块再写出：
   ```
   【柯尔特】普通攻击
