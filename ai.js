@@ -382,6 +382,16 @@ const EnemyAI = (function () {
     return attack(use, aiPicks(u, use, target, prey));
   }
 
+  /** 做决定时用「回合 + 单位 + 第几步」派生的固定随机数。
+   *  局势没变时，同一个敌人在同一回合的决定总是一样的——Helumica「环境监测」的预测靠这个才准。
+   *  （执行动作时的掷骰、格挡判定仍然是真随机。） */
+  function planFor(u, step) {
+    if (!u || typeof makeRng !== "function") return aiPlan(u);
+    const prev = Math.random;
+    Math.random = makeRng(`ai:${state.turnNo}:${u.id}:${step || 0}`);
+    try { return aiPlan(u); } finally { Math.random = prev; }
+  }
+
   function aiPickAssister(list) {
     return list.slice().sort((a, b) => (effectiveAtk(b, state.units) || 0) - (effectiveAtk(a, state.units) || 0))[0].id;
   }
@@ -395,6 +405,7 @@ const EnemyAI = (function () {
   return {
     SPEC: AI_SPEC,
     plan: aiPlan,
+    planFor,
     pickAssister: aiPickAssister,
     actingOrder,
     target: aiTarget,

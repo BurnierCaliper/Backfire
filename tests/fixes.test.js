@@ -57,3 +57,14 @@ test("单局：列出耐久为 0 的武器，开战前给提醒", () => {
   assert.equal(b.length, 1);
   assert.equal(b[0].kit, "torque");
 });
+
+test("敌人做决定用固定随机数：局势不变时同一回合的决定总是一样（环境监测的预测靠这个）", () => {
+  const { c, st } = field([{ id: "thug_hammer", lv: 1, zone: 1 }, { id: "thug_knife", lv: 1, zone: 1 }]);
+  st.units.forEach(u => { u.zone = 1; });
+  st.combatPhase = "enemy";
+  st.units.filter(u => !u.isPlayer).forEach(u => {
+    u.ap = 1;
+    const a = c.S.EnemyAI.planFor(u, 0), b = c.S.EnemyAI.planFor(u, 0);
+    assert.deepEqual(JSON.parse(JSON.stringify(a.meta)), JSON.parse(JSON.stringify(b.meta)));
+  });
+});

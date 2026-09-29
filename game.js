@@ -1151,6 +1151,78 @@
       <div class="ln">闪白＝会被打掉的血量与架势；金光＝这一下会造成失衡；蓝光＝冰属性击破造成失衡（冰冻）。</div>`;
   }
 
+  /* ---------- Helumica 被动「环境监测」：预测被聚焦敌人的下一步 ----------
+   * 在沙盒里把这一回合往后演：结束玩家回合 → 排在它前面的敌人先行动 → 记下它这回合的每一步，然后还原。
+   * 敌人做决定用固定随机数（EnemyAI.planFor），局势不变它就真的这么做；你移动、击杀、改变局势后它会重新判断。 */
+  function scannerOn() {
+    const h = findKit("helu", state.units);
+    if (!h || h.dead || h.hidden) return false;
+    return typeof passiveOn !== "function" || passiveOn(h);
+  }
+  function describeIntent(meta) {
+    if (!meta) return "";
+    const name = meta.skillName || "行动";
+    const t = meta.targetId ? unitById(meta.targetId) : null;
+    if (/^移动/.test(name)) return name;
+    return t ? `用「${name}」打 ${t.name}` : `「${name}」`;
+  }
+  function predictTurn(id) {
+    const key = `${G.version}|${state.turnNo}|${id}`;
+    if (G.predict && G.predict.key === key) return G.predict.steps;
+    const saved = saveState();
+    const rnd = Math.random, st = window.setTimeout, outerTape = G.tape;
+    G.sim = true; G.tape = [];
+    state.history = [];
+    window.setTimeout = () => 0;
+    Math.random = makeRng("predict:" + key);
+    const steps = [];
+    try {
+      endPlayerTurn();
+      const drain = () => {
+        for (let g = 0; g < 20 && state.blockQueue && state.blockQueue.length; g++) finishBlock(null);
+        state.assistQueue = []; state.koltSwapQueue = [];
+      };
+      drain();
+      for (const uid of EnemyAI.actingOrder()) {
+        for (let n = 0; n < 5; n++) {
+          const u = unitById(uid);
+          if (!u || !unitAlive(u) || u.stunned || (u.ap || 0) <= 0) {
+            if (uid === id && n === 0) steps.push(u && u.stunned ? "失衡中，这回合动不了" : "这回合不会行动");
+            break;
+          }
+          const plan = EnemyAI.planFor(u, n);
+          if (!plan) { if (uid === id && n === 0) steps.push("这回合不会行动"); break; }
+          if (uid === id) steps.push(describeIntent(plan.meta));
+          const sig = `${u.ap}|${u.bonus}|${u.zone}`;
+          try { plan.thunk(); } catch (e) { break; }
+          drain();
+          const v = unitById(uid);
+          if (!v || `${v.ap}|${v.bonus}|${v.zone}` === sig) break;
+        }
+        if (uid === id) break;
+      }
+    } catch (e) {
+      steps.push("（预测失败）");
+    } finally {
+      Math.random = rnd;
+      window.setTimeout = st;
+      G.sim = false;
+      G.tape = outerTape;
+      restoreState(saved);
+    }
+    G.predict = { key, steps };
+    return steps;
+  }
+  function intentHtml(id) {
+    const u = unitById(id);
+    if (!u || u.isPlayer || !(u.focuses && u.focuses.length)) return "";
+    if (!state.combatStarted || state.combatPhase !== "player" || G.depth > 0 || !scannerOn()) return "";
+    const steps = predictTurn(id);
+    if (!steps.length) return "";
+    return `<div class="ln intent"><b>环境监测 · 预测</b>：${steps.map(esc).join(" → ")}</div>
+      <div class="ln intent-note">局势不变它就会这么做；你移动、击杀或改变局势后它会重新判断。</div>`;
+  }
+
   function unitInfoBox(id) {
     const s = G.view.get(id);
     if (!s) return;
@@ -1160,6 +1232,7 @@
       <div class="ln">架势 ${s.def}/${s.defMax} · ATK ${s.atk} · ${s.zone} 区</div>
       <div class="ln">${esc(s.status || "无状态")}</div>
       ${s.res ? `<div class="ln">${esc(s.res)}</div>` : ""}
+      ${intentHtml(id)}
       <div class="ln">血条最右边是最外层，先被打掉。</div>`;
   }
 
@@ -1391,7 +1464,7 @@
       for (let n = 0; n < 5; n++) {
         const u = unitById(id);
         if (!u || !unitAlive(u) || u.stunned || (u.ap || 0) <= 0) break;
-        const plan = aiPlan(u);
+        const plan = EnemyAI.planFor(u, n);
         if (!plan) break;
         const sig = `${u.ap}|${u.bonus}|${u.zone}`;
         await perform(plan.thunk, plan.meta);
