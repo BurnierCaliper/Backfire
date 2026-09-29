@@ -97,7 +97,9 @@ function setWeather(kind, opts) {
   if (state.weatherLock && !opts.force && kind !== state.weather) {
     return `天气被「${state.weatherLock}」锁定，无法覆盖。`;
   }
+  const was = state.weather;
   state.weather = kind;
+  if (kind === "sand" && (was !== "sand" || opts.casterZone != null)) rollSandDir(opts.casterZone);
   const sel = uiEl("weather");
   if (sel) sel.value = kind;
   if (opts.lock) state.weatherLock = opts.lock;

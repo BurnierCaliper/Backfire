@@ -161,10 +161,13 @@
       try { tags = f ? fieldTags(f) : ""; } catch (e) {}
       let threats = [];
       try { threats = (typeof zoneThreatsIn === "function" ? zoneThreatsIn(z) : []); } catch (e) {}
-      zones[z] = { cls, tags, threats };
+      let wind = "";
+      if (state.weather === "sand") { try { wind = sandWindLabel(sandWind(z, state.zoneMode, state.sandDir)); } catch (e) {} }
+      zones[z] = { cls, tags, threats, wind };
     }
     let weatherText = WEATHER_NAME[state.weather] || state.weather || "常态";
     if (state.weather === "phase") { try { weatherText += "·" + phaseWeatherName(state.phaseStep); } catch (e) {} }
+    if (state.weather === "sand") { try { weatherText += "（风向 " + sandDirText(state.sandDir, state.zoneMode) + "）"; } catch (e) {} }
     if (state.weatherLock) weatherText += "（锁定）";
     return { weather: state.weather || "none", weatherText, zones };
   }
@@ -202,7 +205,13 @@
       FIELD_CLASSES.forEach(c => z.classList.remove(c));
       if (e.cls) z.classList.add(e.cls);
       const lab = z.querySelector(".zlabel");
-      if (lab) lab.textContent = `${z.dataset.num} 区${e.tags ? "　" + e.tags : ""}`;
+      if (lab) {
+        lab.textContent = `${z.dataset.num} 区${e.tags ? "　" + e.tags : ""}`;
+        if (e.wind) {
+          const w = el("span", "zwind " + (e.wind === "顺风" ? "down" : e.wind === "逆风" ? "up" : "calm"), "沙暴 " + e.wind);
+          lab.appendChild(w);
+        }
+      }
       // 区域预警：敌人已经标定、之后回合才落地的范围攻击
       const th = e.threats || [];
       z.classList.toggle("threat", th.length > 0);
@@ -511,17 +520,17 @@
       for (let i = 0; i < Math.max(s.apMax, s.ap); i++) h += `<i class="econ-ap${i < s.ap ? " on" : ""}"></i>`;
       for (let i = 0; i < Math.max(s.bonusMax, s.bonus); i++) h += `<i class="econ-bonus${i < s.bonus ? " on" : ""}"></i>`;
       if (s.flying) h += `<span class="chip">飞</span>`;
-      if (s.highEnergy > 0 || (s.status && /高能/.test(s.status))) {
-        h += `<span class="chip">高能${s.highEnergy > 0 ? s.highEnergy : ""}</span>`;
-      }
       (s.hung || []).forEach(n => { h += `<span class="chip">${esc(n)}</span>`; });
       econ.innerHTML = h;
       econ.title = `行动点 ${s.ap}/${s.apMax} · 附赠 ${s.bonus}/${s.bonusMax}`;
     }
 
-    q(".u-status").innerHTML = s.status
+    // 高能和其他状态放在同一行、同一种样式（之前放在行动点那一行，字体大小不一样）
+    const highChip = (s.highEnergy > 0 || (s.status && /高能/.test(s.status)))
+      ? `<span class="chip">高能${s.highEnergy > 0 ? " " + s.highEnergy : ""}</span>` : "";
+    q(".u-status").innerHTML = highChip + (s.status
       ? s.status.split(" · ").filter(t => t && t !== "无状态" && !/^高能/.test(t)).map(t => `<span class="chip">${esc(t)}</span>`).join("")
-      : "";
+      : "");
     q(".u-res").textContent = s.res || "";
     q(".u-res").style.display = s.res ? "" : "none";
 
@@ -1753,6 +1762,7 @@
     lines.push({ text: zm === 3 ? "三区制" : "两区制", color: "#6cc4ff" });
     const w = INTRO_WEATHER[state.weather] || [state.weather, "#ffffff"];
     if (state.weather && state.weather !== "none") lines.push({ text: "天气 · " + w[0], color: w[1] });
+    if (state.weather === "sand") lines.push({ text: "风向 " + sandDirText(state.sandDir, zm), color: w[1] });
     for (let z = 1; z <= zm; z++) {
       const f = (state.fields || {})[z] || {};
       INTRO_FIELD.forEach(([k, name, color]) => {
@@ -1795,6 +1805,7 @@
     state.zoneMode = Number(G.zoneMode) || 2;
     state.partySize = 2;
     state.weather = G.weather || "none";
+    if (typeof rollSandDir === "function") rollSandDir();
     if ($("g-weather-sel")) $("g-weather-sel").value = state.weather;
     syncFieldDom();
     state.weatherLock = null;
@@ -2723,7 +2734,9 @@
       G.partySize = state.partySize = Number($("g-cfg-ps").value) || 2;
     };
     $("g-cfg-weather").onchange = () => {
+      const was = state.weather;
       G.weather = state.weather = $("g-cfg-weather").value;
+      if (state.weather === "sand" && was !== "sand" && typeof rollSandDir === "function") rollSandDir();
       if ($("g-weather-sel")) $("g-weather-sel").value = state.weather;
       setView(snapAll(), false);
       refreshAll();
@@ -2764,7 +2777,9 @@
     $("g-fast").onclick = toggleFast;
     $("g-weather-sel").onchange = () => {
       if (G.depth > 0) return;
+      const was = state.weather;
       state.weather = $("g-weather-sel").value || "none";
+      if (state.weather === "sand" && was !== "sand" && typeof rollSandDir === "function") rollSandDir();
       applyEnv(snapEnv());
       addLogPhase("天气改为 " + (WEATHER_NAME[state.weather] || state.weather));
     };

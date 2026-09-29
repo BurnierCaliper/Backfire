@@ -440,6 +440,7 @@ function buildEncounter(spec, baseLevel, partySize) {
   const made = [];
   state.zoneMode = Number(spec.zoneMode) || 2;
   state.weather = spec.weather || "none";
+  if (state.weather === "sand" && typeof rollSandDir === "function") rollSandDir();   // 开场沙暴：风向随机
   state.fields = { 1: emptyField(), 2: emptyField(), 3: emptyField() };
   if (spec.fields) {
     Object.keys(spec.fields).forEach(z => Object.assign(state.fields[z], spec.fields[z]));

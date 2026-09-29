@@ -286,6 +286,23 @@ function sandWind(zone, zoneMode, sandDir) {
   return z === 1 ? -1 : 1;
 }
 
+/** 沙暴风向（玩家手册：从 1 区吹向 2 区或相反，总是对释放者所在区域顺风）。
+ *  有释放者时让他所在的区顺风；没有（开场天气、手动切换）就随机。返回 "12" 或 "21"。 */
+function rollSandDir(casterZone) {
+  const z = Number(casterZone);
+  let dir;
+  if (z === 1) dir = "12";
+  else if (z >= 2 && !(Number(state.zoneMode) === 3 && z === 2)) dir = "21";
+  else dir = Math.random() < 0.5 ? "12" : "21";
+  state.sandDir = dir;
+  return dir;
+}
+/** 风向文字：「1 区 → 2 区」（三区制是 1 区 → 3 区） */
+function sandDirText(dir, zoneMode) {
+  const last = Number(zoneMode) === 3 ? 3 : 2;
+  return (dir || "12") === "12" ? `1 区 → ${last} 区` : `${last} 区 → 1 区`;
+}
+
 function sandWindLabel(v) {
   if (v > 0) return "顺风";
   if (v < 0) return "逆风";

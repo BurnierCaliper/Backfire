@@ -1364,3 +1364,10 @@ details.smith .sm-prog.ready { color: var(--gold); font-weight: 600; }
   .bi-line::before { -webkit-text-stroke: 10px #fff; } .bi-line.big::before { -webkit-text-stroke: 14px #fff; }
   .bi-line::after { -webkit-text-stroke: 5px var(--inner); } .bi-line.big::after { -webkit-text-stroke: 7px var(--inner); }
 }
+
+/* 行动点那一行里的小标签（飞行等）和状态标签同样大小 */
+.u-econ .chip { font-size: 11px; line-height: 16px; }
+/* 沙暴：每个区的顺风 / 逆风 */
+.zlabel .zwind { margin-left: 8px; padding: 0 6px; font-size: 11px; border-radius: 3px; background: rgba(226, 162, 79, .25); color: #8a5a1a; }
+.zlabel .zwind.down { background: rgba(226, 162, 79, .85); color: #2a1a05; }
+.zlabel .zwind.up { background: rgba(120, 90, 60, .35); color: #5a3c1c; }

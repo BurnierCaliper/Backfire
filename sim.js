@@ -26,6 +26,7 @@ const BattleSim = (function () {
     state.zoneMode = Number(opt.zoneMode) || 2;
     state.partySize = 2;
     state.weather = opt.weather || "none";
+    if (typeof rollSandDir === "function") rollSandDir();   // 每场重新定风向（不是沙暴时不起作用）
     state.weatherLock = null;
     state.phaseStep = 0;
     state.assistQueue = [];

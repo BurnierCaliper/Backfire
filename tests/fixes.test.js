@@ -112,3 +112,19 @@ test("声波切割：只选同区目标、只选距离 1 的目标都能用", ()
     assert.equal(tou.resources.shield, 0);
   }
 });
+
+test("沙暴风向：每场随机（不再总是同一个方向）；有释放者时对他所在区顺风", () => {
+  const seen = new Set();
+  for (let i = 0; i < 20; i++) {
+    const c = H.load();
+    c.BattleSim.setup({ party: ["kolt", "helu"], seed: "SAND" + i, weather: "sand", enemies: [{ id: "thug_hammer", lv: 1, zone: 2 }] });
+    seen.add(c.S.state.sandDir);
+  }
+  assert.deepEqual([...seen].sort(), ["12", "21"]);
+  const c = H.load();
+  c.BattleSim.setup({ party: ["kolt", "helu"], seed: "SANDC", enemies: [{ id: "thug_hammer", lv: 1, zone: 2 }] });
+  c.setWeather("sand", { casterZone: 2 });
+  assert.equal(c.sandWind(2, c.S.state.zoneMode, c.S.state.sandDir), 1, "释放者所在的 2 区顺风");
+  c.setWeather("none"); c.setWeather("sand", { casterZone: 1 });
+  assert.equal(c.sandWind(1, c.S.state.zoneMode, c.S.state.sandDir), 1, "释放者所在的 1 区顺风");
+});
