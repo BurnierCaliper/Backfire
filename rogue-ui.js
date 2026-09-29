@@ -86,7 +86,6 @@
         <div class="rh-top"><b>${esc(v.name)}</b><span>Lv${v.level}${v.pending ? ' · <em>待选升级</em>' : ""}</span></div>
         <div class="rh-row">血 ${bar(v.hp, v.hpMax, "hp")}<span>${v.hp}/${v.hpMax}</span></div>
         ${v.layers.length > 1 ? `<div class="rh-w">${esc(layerText(v.layers))}</div>` : ""}
-        <div class="rh-row">坚毅 ${bar(v.shp, v.shpMax, "shp")}<span>${v.shp}/${v.shpMax}</span></div>
         <div class="rh-row">经验 ${bar(v.xp, v.xpNext, "xp")}<span>${v.xp}/${v.xpNext || "满"}</span></div>
         ${v.weapons.map(w => `<div class="rh-w">${esc(w.name)} Lv${w.level} · 耐久 ${w.dur}/${w.durMax}${w.hp != null ? ` · 伤势 ${w.hp <= 0 ? "倒下（需长休）" : "血量 " + w.hp}` : ""}</div>`).join("")}
       </div>`;

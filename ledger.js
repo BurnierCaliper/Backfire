@@ -353,8 +353,11 @@ function ledgerLongRest(plan, notes) {
     const gain = hours * perHour + foodBonus;
     const before = Number(h.shp) || 0;
     h.shp = Math.min(Number(h.shpMax) || 0, before + gain);
-    notes.push(`${h.name} 血量回满，坚毅 ${before} → ${h.shp}` +
-      `（${hours} 小时 × ${perHour}${hasBag ? "，含睡袋" : ""}${foodBonus ? `，食物 +${foodBonus}` : ""}）。`);
+    const why = `${hasBag ? "睡袋" : ""}${hasBag && foodBonus ? "、" : ""}${foodBonus ? "好一点的食物" : ""}`;
+    notes.push(typeof shpHidden === "function" && shpHidden()
+      ? `${h.name} 血量回满，坚毅生命慢慢恢复${why ? `（${why}有帮助）` : ""}。`
+      : `${h.name} 血量回满，坚毅 ${before} → ${h.shp}` +
+        `（${hours} 小时 × ${perHour}${hasBag ? "，含睡袋" : ""}${foodBonus ? `，食物 +${foodBonus}` : ""}）。`);
     (h.linkedKits || []).forEach(k => restoreDurability(k));
   });
   LEDGER.weapons = {};

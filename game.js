@@ -2138,7 +2138,7 @@
       }).join(" · ");
       const cost = heroRestCost(h);
       row.appendChild(el("div", "rp-stats",
-        `血量 <b>${totalHpOf(h)}/${totalHpMaxOf(h)}</b> · 坚毅 <b>${h.shp}/${h.shpMax}</b><br>` +
+        `血量 <b>${totalHpOf(h)}/${totalHpMaxOf(h)}</b><br>` +
         `${weapons || "无武器"}<br>长休需 ${cost.water} ml 水 · ${cost.food} 份食物`));
       const act = el("div", "rp-act");
       const fsel = document.createElement("select");

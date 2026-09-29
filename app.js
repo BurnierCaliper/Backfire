@@ -3562,7 +3562,7 @@ function performRetreat(rearguardId) {
     const loss = down ? r.shpDown : r.shp;
     const before = Number(u.shp) || 0;
     u.shp = r.lethal ? Math.max(0, before - loss) : Math.max(Math.min(before, 1), before - loss);
-    notes.push(`${u.name} 坚毅 ${before} → ${u.shp}。`);
+    notes.push(shpHidden() ? `${u.name} 的坚毅生命被消磨了一些。` : `${u.name} 坚毅 ${before} → ${u.shp}。`);
     if (u.shp <= 0 && before > 0) {
       u.dead = true;
       u.dying = false;
@@ -3574,6 +3574,12 @@ function performRetreat(rearguardId) {
   state.retreated = true;
   notes.forEach(t => appendLog(t));
   return { key, notes };
+}
+
+/** 玩家手册第二章：坚毅生命的具体数值对玩家永远不可见。游戏版（game.html 设 GAME_MODE）
+ *  只说「受损 / 恢复了一些」；主持人计算器照常写数字。 */
+function shpHidden() {
+  return typeof GAME_MODE !== "undefined" && !!GAME_MODE;
 }
 
 function selfBurnStacksOf(u) {
@@ -3596,7 +3602,8 @@ function tickSelfBurn(u, growStacks) {
   if (onShp) {
     u.shp = Math.max(1, (Number(u.shp) || 0) - loss);
     spawnFloater(u, loss, "fire");
-    notes.push(`${u.name} 自焚×${stacks} 对 SHP 造成 ${round2(loss)}（上限10%×层，至少留 1）。SHP ${u.shp}/${u.shpMax || "?"}`);
+    notes.push(shpHidden() ? `${u.name} 自焚×${stacks} 灼烧着坚毅生命（至少留 1）。`
+      : `${u.name} 自焚×${stacks} 对 SHP 造成 ${round2(loss)}（上限10%×层，至少留 1）。SHP ${u.shp}/${u.shpMax || "?"}`);
   } else {
     applyTrueDamage(u.layers, loss);
     spawnFloater(u, loss, "fire");

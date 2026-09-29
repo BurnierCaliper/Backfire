@@ -230,3 +230,18 @@ test("职责技能：5 级在副职责一与主职责二之间选，选了就按
     assert.deepEqual(plain(c.roleChoicesAt(h, 10)), [{ role: h.roles.primary, n: 3 }]);
   }
 });
+
+test("游戏版（GAME_MODE）不向玩家透露坚毅生命数值；计算器照常显示", () => {
+  for (const game of [false, true]) {
+    const c = H.load();
+    if (game) c.GAME_MODE = true;
+    c.BattleSim.setup({ party: ["kolt", "helu"], enemies: [{ id: "thug_knife", lv: 1, zone: 2 }] });
+    const kolt = c.findKit("kolt", c.S.state.units);
+    kolt.shp = 3;
+    c.ledgerCapture();
+    const r = c.ledgerLongRest({ force: true }, []);
+    const line = r.notes.find(t => t.startsWith(kolt.name) && t.includes("坚毅"));
+    assert.ok(line, "应当有一句坚毅相关的说明");
+    assert.equal(/坚毅 \d/.test(line), !game, line);
+  }
+});
