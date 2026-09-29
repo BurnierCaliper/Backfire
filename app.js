@@ -5935,22 +5935,22 @@ function skillFlowSteps(id, actor, picks) {
     }];
   }
   if (id === "tou_sonic") {
-    const near = fieldUnits().filter(u => !u.isPlayer && !u.dead && Number(u.zone) === Number(actor.zone));
-    const far = fieldUnits().filter(u => !u.isPlayer && !u.dead && zoneDist(actor.zone, u.zone, state.zoneMode) === 1);
-    const steps = [{
-      key: "target1",
-      type: "unit",
-      optional: false,
-      label: "声波切割 · 同区主目标",
-      units: near
-    }];
-    if (picks.target1 && far.length) {
+    // 同区目标（1atk）和距离 1 的目标（0.5atk）各选一个，都可以不选，但至少要选一个
+    const near = fieldUnits().filter(u => !u.isPlayer && !u.dead && !u.hidden && Number(u.zone) === Number(actor.zone));
+    const far = fieldUnits().filter(u => !u.isPlayer && !u.dead && !u.hidden && zoneDist(actor.zone, u.zone, state.zoneMode) === 1);
+    const steps = [];
+    if (near.length) {
       steps.push({
-        key: "target2",
-        type: "unit",
-        optional: true,
-        label: "距离1的第二目标（可不选）",
-        units: far.filter(u => u.id !== picks.target1)
+        key: "target1", type: "unit", optional: far.length > 0,
+        label: far.length ? "同区目标（1atk 谐波，可不选）" : "同区目标（1atk 谐波）",
+        units: near
+      });
+    }
+    if (far.length && (!near.length || picks.target1 !== undefined)) {
+      steps.push({
+        key: "target2", type: "unit", optional: !!picks.target1,
+        label: picks.target1 ? "距离 1 的目标（0.5atk 谐波，可不选）" : "距离 1 的目标（0.5atk 谐波）",
+        units: far
       });
     }
     return steps;
@@ -7626,14 +7626,18 @@ function runSkill(id, optRun) {
       lines.push("燕飞后请用移动按钮走 1 格。");
     } else if (id === "tou_sonic") {
       const fl = state.skillFlow;
-      const t1 = (fl && fl.picks.target1) ? unitById(fl.picks.target1) : t;
-      const t2 = (fl && fl.picks.target2) ? unitById(fl.picks.target2) : null;
-      if (!t1) { lines.push("先选声波切割的同区主目标。"); return paintSkillLog(lines.join("\n")); }
+      // 分步里选的两个目标；没走分步（计算器直接选目标）时按距离归类
+      let t1 = fl && fl.picks.target1 ? unitById(fl.picks.target1) : null;
+      let t2 = fl && fl.picks.target2 ? unitById(fl.picks.target2) : null;
+      if (!fl && t) {
+        if (zoneDist(a.zone, t.zone, state.zoneMode) === 0) t1 = t; else t2 = t;
+      }
+      if (!t1 && !t2) { lines.push("声波切割至少要选一个目标（同区或距离 1）。"); return paintSkillLog(lines.join("\n")); }
       if ((a.resources.shield || 0) < 1) { lines.push("没有圣盾。"); }
       else {
         a.resources.shield -= 1;
-        hitOne(a, t1, { element: "harmonic", mult: 1, baseBreak: 1, atk });
-        if (t2) hitOne(a, t2, { element: "harmonic", mult: 0.5, baseBreak: 1, atk, usePrep: false });
+        if (t1) hitOne(a, t1, { element: "harmonic", mult: 1, baseBreak: 1, atk, atkRange: "any" });
+        if (t2) hitOne(a, t2, { element: "harmonic", mult: 0.5, baseBreak: 1, atk, atkRange: "any", usePrep: !t1 });
         lines.push("圣盾 −1。");
       }
     } else if (id === "tou_ultra") {

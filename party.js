@@ -692,7 +692,7 @@ function skillList(unit) {
   if (unit.kit === "tou") {
     add({ id: "tou_aa", name: "普通攻击", hint: "同区 · 1atk 物理 +1击破 · 可在技能里耗圣盾打邻区" });
     add({ id: "tou_start", name: "圣战起始", hint: "移动≤1 · 同区施加错位 · 可耗圣盾带一人" });
-    add({ id: "tou_sonic", name: "声波切割", hint: "同区 1atk 谐波 + 距离1 另目标 0.5atk 谐波 · 耗 1 圣盾", minLv: 2 });
+    add({ id: "tou_sonic", name: "声波切割", hint: "同区目标 1atk 谐波、距离1 目标 0.5atk 谐波，可只选其一 · 耗 1 圣盾", minLv: 2 });
     add({ id: "tou_ultra", name: "超音波", hint: "同区施加折射", minLv: 3 });
     add({ id: "tou_summon", name: "唤出年糕", hint: "武器生物化" });
     /* 圣盾延射程已并入普通攻击的分步选择 */

@@ -88,3 +88,27 @@ test("灯 · 声波切割：同区主目标 1atk + 距离 1 第二目标 0.5atk�
   assert.ok(c.totalHp(far) < h2, "距离 1 的第二目标应当受伤");
   assert.equal(tou.resources.shield, 0);
 });
+
+test("声波切割：只选同区目标、只选距离 1 的目标都能用", () => {
+  for (const which of ["near", "far"]) {
+    const c = H.load();
+    c.BattleSim.setup({ party: ["tou", "kolt"], seed: "SONIC2", enemies: [{ id: "thug_hammer", lv: 1, zone: 1 }, { id: "thug_knife", lv: 1, zone: 2 }] });
+    c.startCombat();
+    const st = c.S.state;
+    const tou = c.findKit("tou", st.units);
+    tou.level = 2; tou.zone = 1; tou.resources.shield = 1;
+    const [near, far] = st.units.filter(u => !u.isPlayer);
+    near.zone = 1; far.zone = 2;
+    const tgt = which === "near" ? near : far, other = which === "near" ? far : near;
+    const steps = c.skillFlowSteps("tou_sonic", tou, {});
+    assert.ok(steps.length >= 1 && steps.every(s => s.type === "unit"));
+    const h = c.totalHp(tgt), ho = c.totalHp(other);
+    st.attackerId = tou.id; st.targetId = tgt.id;
+    st.skillFlow = { id: "tou_sonic", actorId: tou.id, picks: which === "near" ? { target1: near.id, target2: null } : { target1: null, target2: far.id }, index: 99 };
+    c.runSkill("tou_sonic");
+    st.skillFlow = null;
+    assert.ok(c.totalHp(tgt) < h, which + " 目标应当受伤");
+    assert.equal(c.totalHp(other), ho);
+    assert.equal(tou.resources.shield, 0);
+  }
+});
