@@ -7,6 +7,7 @@
  *   ROGUE_MAIN_TASK   主线任务模板（每幕开局自动接下）
  *   ROGUE_SHOP        商店卖什么、多少钱
  *   ROGUE_SMITH       工匠升级武器的费用
+ *   ROGUE_CLINIC      诊所治疗与义体改造的价格
  *   ROGUE_LEVEL_REWARDS 升级时要做的选择（手册第三章）
  *
  * 注释里写「手册」的是照手册填的；写「占位」的是为了先跑通流程临时定的。
@@ -64,10 +65,13 @@ const ROGUE_CONFIG = {
   rewardActScale: [1, 1.2, 1.4, 1.6, 1.8, 2.0],
   // 工匠费用 = 手册参考费用 × 这个倍率（已定：单局里便宜很多，先试 1/6），按 100 取整
   smithPriceScale: 1 / 6,
-  // 敌人掉落：单局里统一按杂兵 / 精英 / 首领三档（已定）。取主持人手册敌人表里同一档中掉落最多的：
-  //   杂兵 200（空投蜂群）；精英 1150（巨人 3d6×100+100 的期望）；
-  //   首领：手册没写，占位 2300（= 精英 × 首领代币 4 / 精英代币 2，也正好是巨人「破解」6d6×100+200 的期望）
-  lootByRank: { minion: 200, elite: 1150, boss: 2300 },
+  // 敌人掉落：单局里统一按杂兵 / 精英 / 首领三档（已定）。
+  // 已定：任务报酬是收入大头，掉落不超过收入的一半。三档的比例沿用主持人手册敌人表里各档掉落最多的
+  // （杂兵 200 空投蜂群 · 精英 1150 巨人期望 · 首领占位 2300），整体乘 0.4，
+  // 让最吃亏的 2 人队掉落也只占收入的四成左右（验算见 tools/economy.js 的「掉落占比」）。
+  lootByRank: { minion: 80, elite: 460, boss: 920 },
+  // 诊所：任务之间回到城里时可以去（节点里也可能遇到，见 ROGUE_NODE_TYPES.clinic）
+  campClinic: true,
 
   // 撤退：规则按手册（app.js · RETREAT_RULES）。撤退后这个战斗节点算跳过（没有奖励），任务继续。
   retreatSkipsNode: true,
@@ -80,7 +84,17 @@ const ROGUE_NODE_TYPES = {
   elite:  { label: "精英战", hours: 3, tokens: 5 },   // 5 枚代币的遭遇
   rest:   { label: "休息",   hours: 0 },               // 长休 / 短休的时间单独算
   shop:   { label: "商店",   hours: 1 },
-  smith:  { label: "工匠",   hours: 1 }
+  smith:  { label: "工匠",   hours: 1 },
+  clinic: { label: "诊所",   hours: 2 }
+};
+
+/* 诊所（数值占位，按「一人一次改造平均约 3000 奎支」定）
+ *   healPerHp   治疗：每恢复 1 点生命的价格（手册简易医疗包 600 奎支约治 8.5 点，约 70 / 点）
+ *   cyberPerHp  义体改造：每改动 1 点肉体的价格（加、减都算；换成星灵按被换掉的肉体点数算）
+ * 改造的比例、上限、层数、排列是角色规则，在 growth.js · CYBER_RATIO 等。 */
+const ROGUE_CLINIC = {
+  healPerHp: 60,
+  cyberPerHp: 200
 };
 
 /* 支线任务模板（文字与数值都是占位）。报酬和补给是 ROGUE_CONFIG.perHeadBase 人队的量
@@ -95,7 +109,7 @@ const ROGUE_TASKS = [
     mix: { battle: 5, shop: 1 },
     reward: { kuizhi: 1500, xp: 15 }, supply: { water: 1000, items: { food_liquid: 2 } } },
   { kind: "escort", name: "护送", goal: "护送一批货穿过{region}", nodes: [3, 5], days: 2, diff: 0,
-    mix: { battle: 4, rest: 2, shop: 1, smith: 1 },
+    mix: { battle: 4, rest: 2, shop: 1, smith: 1, clinic: 1 },
     reward: { kuizhi: 3000, xp: 25 }, supply: { water: 3000, items: { food_liquid: 4 } } },
   { kind: "scout",  name: "侦察", goal: "摸清{region}深处的动静", nodes: [3, 4], days: 1, diff: 1,
     mix: { battle: 3, rest: 1, smith: 1 },
@@ -108,7 +122,7 @@ const ROGUE_TASKS = [
 const ROGUE_MAIN_TASK = {
   kind: "main", name: "主线", goal: "在期限内完成本幕的关键目标。完成后进入幕末首领战；期限到了还没完成，本局结束。",
   nodes: [4, 5], days: 3, diff: 1, elite: true, key: true,
-  mix: { battle: 4, rest: 2, shop: 1, smith: 1 },
+  mix: { battle: 4, rest: 2, shop: 1, smith: 1, clinic: 1 },
   reward: { kuizhi: 5000, xp: 40 }, supply: { water: 4000, items: { food_liquid: 6 } }
 };
 

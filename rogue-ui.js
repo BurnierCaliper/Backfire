@@ -85,6 +85,7 @@
       return `<div class="rhero">
         <div class="rh-top"><b>${esc(v.name)}</b><span>Lv${v.level}${v.pending ? ' · <em>待选升级</em>' : ""}</span></div>
         <div class="rh-row">血 ${bar(v.hp, v.hpMax, "hp")}<span>${v.hp}/${v.hpMax}</span></div>
+        ${v.layers.length > 1 ? `<div class="rh-w">${esc(layerText(v.layers))}</div>` : ""}
         <div class="rh-row">坚毅 ${bar(v.shp, v.shpMax, "shp")}<span>${v.shp}/${v.shpMax}</span></div>
         <div class="rh-row">经验 ${bar(v.xp, v.xpNext, "xp")}<span>${v.xp}/${v.xpNext || "满"}</span></div>
         ${v.weapons.map(w => `<div class="rh-w">${esc(w.name)} Lv${w.level} · 耐久 ${w.dur}/${w.durMax}${w.hp != null ? ` · 伤势 ${w.hp <= 0 ? "倒下（需长休）" : "血量 " + w.hp}` : ""}</div>`).join("")}
@@ -161,8 +162,57 @@
             <button class="g-btn" data-upgrade="${esc(o.kit)}" ${o.max || s.kuizhi < o.cost ? "disabled" : ""}>升到 ${o.level + 1} 级</button></div>`).join("")}</div>
         ${repairRows()}
         <button class="g-btn r-main" id="r-leave">离开</button>`;
-    }
+    },
+    clinic: () => `<p>一家小诊所。手里有 ${Rogue.supplies().kuizhi} 奎支。</p>
+        ${clinicPanel()}
+        <button class="g-btn r-main" id="r-leave">离开</button>`
   };
+
+  /* ---------- 诊所：治疗与义体改造（诊所节点与休整时共用） ---------- */
+  const layerText = (ls) => ls.map(l => `${LAYER[l.type] || l.type} ${l.current != null ? l.current + "/" : ""}${l.max}`).join(" · ");
+  function clinicPanel() {
+    return `<div class="clinic">${run.party.map(h => {
+      const v = Rogue.heroView(run, h);
+      const info = Rogue.cyberInfo(run, h.kit);
+      const cur = info.current;
+      const heal = Rogue.healCost(run, h.kit);
+      const input = (t, label) => `<label>${label}<input type="number" min="0" max="${info.limit}" step="1" value="${cur[t]}" data-cy="${esc(h.kit)}" data-t="${t}"></label>`;
+      return `<div class="cl-hero">
+        <div class="cl-head"><b>${esc(v.name)}</b><span>${esc(layerText(v.layers))}</span></div>
+        <button class="g-btn" data-heal="${esc(h.kit)}" ${heal ? "" : "disabled"}>${heal ? `治疗（${heal} 奎支）` : "不需要治疗"}</button>
+        <div class="cl-cyber">
+          <div class="r-hint">义体改造：改造率 ${Math.round(info.rate * 100)}%，最多换掉 ${info.limit} 点肉体（共 ${info.fleshMax}）。
+            换算 肉体 8 : 装甲 7 : 护盾 6 : 沙尘 6；也可以把剩下的肉体按 8 : 7 全部换成星灵。最多 3 种血量。</div>
+          <div class="cl-inputs">${input("armor", "→ 装甲")}${input("shield", "→ 护盾")}${input("sand", "→ 沙尘")}
+            <label class="cl-spirit"><input type="checkbox" data-cy="${esc(h.kit)}" data-t="spirit" ${cur.spirit ? "checked" : ""}> 内层换成星灵</label></div>
+          <div class="cl-preview" id="cy-pv-${esc(h.kit)}"></div>
+          <button class="g-btn" data-cyber="${esc(h.kit)}">改造</button>
+        </div>
+      </div>`;
+    }).join("")}</div>`;
+  }
+  function readPlan(kit) {
+    const plan = {};
+    document.querySelectorAll(`[data-cy="${kit}"]`).forEach(el => {
+      plan[el.dataset.t] = el.type === "checkbox" ? el.checked : Math.max(0, Math.floor(Number(el.value) || 0));
+    });
+    return plan;
+  }
+  function showCyberPreview(kit) {
+    const box = document.getElementById("cy-pv-" + kit);
+    if (!box) return;
+    const pv = Rogue.cyberPreview(run, kit, readPlan(kit));
+    const btn = document.querySelector(`[data-cyber="${kit}"]`);
+    if (pv.error) {
+      box.innerHTML = `<span class="bad">${esc(pv.error)}</span>`;
+      if (btn) btn.disabled = true;
+      return;
+    }
+    const money = Rogue.supplies().kuizhi;
+    box.innerHTML = `改造后（外 → 内）：${esc(layerText(pv.layers))} · 费用 <b>${pv.cost}</b> 奎支` +
+      (pv.cost && money < pv.cost ? ' <span class="bad">奎支不够</span>' : "");
+    if (btn) btn.disabled = !pv.cost || money < pv.cost;
+  }
   /** 商店货架（商店节点与休整时共用） */
   function shopList() {
     const s = Rogue.supplies();
@@ -205,11 +255,13 @@
       case "camp": {
         const plan = Rogue.restPlan(run);
         const shopping = C.campShop ? `<p class="r-hint">回到城里，出发前可以补货。手里有 ${Rogue.supplies().kuizhi} 奎支。</p>${shopList()}${repairRows()}` : "";
+        const clinic = C.campClinic ? `<h3 class="r-sub">诊所</h3>${clinicPanel()}` : "";
         return `<h2>休整</h2>
           <p class="r-hint">任务之间休整一次，算 ${C.restDays} 天。${plan.ok
             ? `长休需要 ${plan.water} ml 水和食物，血量、武器耐久回满，清空力竭。`
             : "补给不足（" + esc(plan.lack.join("，")) + "），只能硬撑着过夜：不回血，力竭继续累积。"}</p>
           ${shopping}
+          ${clinic}
           <button class="g-btn r-main" id="r-camp">休整</button>`;
       }
       case "boss":
@@ -289,6 +341,13 @@
     body.querySelectorAll("[data-buy]").forEach(b => { b.onclick = () => act(() => Rogue.buy(run, b.dataset.buy, 1)); });
     body.querySelectorAll("[data-upgrade]").forEach(b => { b.onclick = () => act(() => Rogue.upgradeWeapon(run, b.dataset.upgrade)); });
     body.querySelectorAll("[data-repair]").forEach(b => { b.onclick = () => act(() => Rogue.repairWeapon(run, b.dataset.repair)); });
+    body.querySelectorAll("[data-heal]").forEach(b => { b.onclick = () => act(() => Rogue.healHero(run, b.dataset.heal)); });
+    body.querySelectorAll("[data-cyber]").forEach(b => {
+      const kit = b.dataset.cyber;
+      b.onclick = () => act(() => Rogue.modifyHero(run, kit, readPlan(kit)));
+      showCyberPreview(kit);
+    });
+    body.querySelectorAll("[data-cy]").forEach(el => { el.oninput = () => showCyberPreview(el.dataset.cy); });
     on("r-fight", fight);
     on("r-long", () => act(() => Rogue.restAtNode(run, "long")));
     on("r-short", () => act(() => Rogue.restAtNode(run, "short")));

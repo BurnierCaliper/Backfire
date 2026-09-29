@@ -274,6 +274,7 @@ const Rogue = (function () {
     u.level = h.level || 1;
     u.xp = h.xp || 0;
     u.attrPoints = 0;               // 属性点在单局里走升级选择，不用后台的可分配点
+    u.cyberPlan = h.cyber ? Object.assign({}, h.cyber) : null;   // 义体改造（growth.js 按方案重建血量层）
     applyLevelStats(u);
     if (Array.isArray(h.hp)) {
       (u.layers || []).forEach((l, i) => {
@@ -468,7 +469,7 @@ const Rogue = (function () {
   /** 商店、工匠这类节点：逛完了继续走 */
   function leaveNode(run) {
     const node = currentNode(run);
-    if (!node || (node.type !== "shop" && node.type !== "smith")) throw new Error("这里没有可以离开的节点");
+    if (!node || ["shop", "smith", "clinic"].indexOf(node.type) < 0) throw new Error("这里没有可以离开的节点");
     const notes = [];
     passHours(run, NODE[node.type].hours, notes);
     if (run.stage !== "over") advanceNode(run, notes);
@@ -498,6 +499,80 @@ const Rogue = (function () {
     }
     advanceNode(run, notes);
     return logAll(run, notes);
+  }
+
+  /* ---------- 诊所：治疗与义体改造 ---------- */
+  /** 现在能不能进诊所：诊所节点，或者任务之间回到城里 */
+  function canClinic(run) {
+    const node = currentNode(run);
+    return !!(node && node.type === "clinic") || (run.stage === "camp" && !!C.campClinic);
+  }
+  /** 没改造时的肉体上限、改造率、可改造上限 */
+  function cyberInfo(run, kit) {
+    const h = run.party.find(x => x.kit === kit);
+    if (!h) throw new Error("队伍里没有这个角色");
+    const u = spawnLiveCard(cardOf(kit), 1);
+    applyHero(u, Object.assign({}, h, { cyber: null, hp: null }));
+    const fleshMax = (u.layers.find(l => l.type === "flesh") || {}).max || 0;
+    const rate = cyberRateOf(u.attrs || h.attrs || (cardOf(kit) || {}).attrs, u.level);
+    return { h, fleshMax, rate, limit: cyberConvertLimit(fleshMax, rate), current: normPlan(h.cyber) };
+  }
+  function normPlan(p) {
+    p = p || {};
+    return { armor: Number(p.armor) || 0, shield: Number(p.shield) || 0, sand: Number(p.sand) || 0, spirit: !!p.spirit };
+  }
+  /** 改造要花多少：动了多少点肉体（加减都算），换成 / 换回星灵按被换的肉体点数算 */
+  function cyberCost(run, kit, plan) {
+    const info = cyberInfo(run, kit);
+    const a = info.current, b = normPlan(plan);
+    let pts = CYBER_OUTER.reduce((s, t) => s + Math.abs(b[t] - a[t]), 0);
+    if (a.spirit !== b.spirit) {
+      const used = CYBER_OUTER.reduce((s, t) => s + b[t], 0);
+      pts += info.fleshMax - used;
+    }
+    return pts * ROGUE_CLINIC.cyberPerHp;
+  }
+  /** 改造预览：{ error, cost, layers（从外到内）, limit, rate } */
+  function cyberPreview(run, kit, plan) {
+    const info = cyberInfo(run, kit);
+    const p = normPlan(plan);
+    const error = cyberPlanError(p, info.fleshMax, info.rate);
+    return {
+      error, cost: error ? 0 : cyberCost(run, kit, p),
+      layers: error ? [] : cyberLayersFor(info.fleshMax, p),
+      limit: info.limit, rate: info.rate, fleshMax: info.fleshMax, current: info.current
+    };
+  }
+  /** 做改造。做完顺便治好（手术后在诊所躺好了才出来） */
+  function modifyHero(run, kit, plan) {
+    if (!canClinic(run)) throw new Error("这里没有诊所");
+    const pv = cyberPreview(run, kit, plan);
+    if (pv.error) throw new Error(pv.error);
+    if (!pv.cost) throw new Error("方案没有变化");
+    if ((Number(state.kuizhi) || 0) < pv.cost) throw new Error("奎支不够");
+    state.kuizhi -= pv.cost;
+    const h = run.party.find(x => x.kit === kit);
+    const p = normPlan(plan);
+    h.cyber = (p.armor || p.shield || p.sand || p.spirit) ? p : null;
+    h.hp = null;
+    const text = pv.layers.map(l => `${LAYER[l.type] || l.type} ${l.max}`).join(" / ");
+    return logAll(run, [`${heroName(kit)} 完成义体改造（${text}），花掉 ${pv.cost} 奎支。`]);
+  }
+  /** 治疗：把血量补满，按缺的点数收钱 */
+  function healCost(run, kit) {
+    const h = run.party.find(x => x.kit === kit);
+    const v = heroView(run, h);
+    return Math.max(0, v.hpMax - v.hp) * ROGUE_CLINIC.healPerHp;
+  }
+  function healHero(run, kit) {
+    if (!canClinic(run)) throw new Error("这里没有诊所");
+    const cost = healCost(run, kit);
+    if (!cost) throw new Error("不需要治疗");
+    if ((Number(state.kuizhi) || 0) < cost) throw new Error("奎支不够");
+    state.kuizhi -= cost;
+    const h = run.party.find(x => x.kit === kit);
+    h.hp = null;
+    return logAll(run, [`${heroName(kit)} 在诊所治好了伤，花掉 ${cost} 奎支。`]);
   }
 
   /* ---------- 商店 ---------- */
@@ -633,6 +708,8 @@ const Rogue = (function () {
     return {
       kit: h.kit, name: u.name, level: u.level || 1,
       hp: totalCurHp(u), hpMax: baseMaxHp(u),
+      layers: (u.layers || []).map(l => ({ type: l.type, current: Number(l.current) || 0, max: Number(l.max) || 0 })),
+      cyber: h.cyber ? normPlan(h.cyber) : null,
       shp: Number(u.shp) || 0, shpMax: Number(u.shpMax) || 0,
       xp: u.xp || 0, xpNext: xpToNext(u.level),
       pending: (h.pending || []).length,
@@ -662,6 +739,7 @@ const Rogue = (function () {
     battleSpec, applyPartyToField, finishBattle,
     restPlan, canLongRest, restAtNode, leaveNode,
     buy, canShop, shopItemName, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
+    canClinic, cyberInfo, cyberPreview, cyberCost, modifyHero, healCost, healHero,
     pendingChoices, choiceOptions, choose,
     camp, nextAct, afterVictory, endRun,
     enterRunMode, leaveRunMode, syncWorld, save

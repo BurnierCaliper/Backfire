@@ -28,7 +28,7 @@ function autoplay(c, run, opts) {
       if (node.type === "rest") {
         Rogue.restAtNode(run, Rogue.canLongRest(run) ? "long" : "short");
         steps.push("rest");
-      } else if (node.type === "shop" || node.type === "smith") {
+      } else if (node.type === "shop" || node.type === "smith" || node.type === "clinic") {
         steps.push(node.type);
         Rogue.leaveNode(run);
       } else {
@@ -101,7 +101,7 @@ test("主线完成 → 休整 → 首领战", () => {
 test("任务里每个节点的类型都能看到", () => {
   const { run, R } = fresh(["kolt", "helu"], "R5");
   R.acceptTask(run, "main");
-  assert.ok(run.task.nodes.every(n => ["battle", "elite", "rest", "shop", "smith"].includes(n.type)));
+  assert.ok(run.task.nodes.every(n => ["battle", "elite", "rest", "shop", "smith", "clinic"].includes(n.type)));
   assert.equal(run.task.nodes[run.task.nodes.length - 1].type, "elite");
 });
 
@@ -362,6 +362,83 @@ test("首领战胜利 → 幕间 → 下一幕（新主线、天数重置）；�
   g.R.afterVictory(g.run, false);
   assert.equal(g.run.stage, "over");
   assert.equal(g.run.result.win, true);
+});
+
+/* ---------- 诊所：义体改造 ---------- */
+
+function atCamp(party, seed) {
+  const f = fresh(party, seed);
+  f.run.stage = "camp";
+  f.c.S.state.kuizhi = 50000;
+  return f;
+}
+
+test("义体改造：换算比例 8:7:6:6，排列 沙尘 → 护盾 → 装甲 → 肉体（外到内）", () => {
+  const { run, R } = atCamp(["kolt", "helu"], "CY1");
+  const info = R.cyberInfo(run, "kolt");       // 柯尔特：肉体 20，智力 7 → 改造率 70% → 最多 14
+  assert.equal(info.fleshMax, 20);
+  assert.equal(info.limit, 14);
+  const pv = R.cyberPreview(run, "kolt", { armor: 8, sand: 4 });
+  assert.equal(pv.error, null);
+  assert.deepEqual(plain(pv.layers), [{ type: "sand", max: 3 }, { type: "armor", max: 7 }, { type: "flesh", max: 8 }]);
+});
+
+test("义体改造的限制：不超过改造率、最多 3 种血量、内层必须是肉体或星灵", () => {
+  const { run, R } = atCamp(["kolt", "helu"], "CY2");
+  assert.match(R.cyberPreview(run, "kolt", { armor: 15 }).error, /最多只能改造 14/);
+  assert.match(R.cyberPreview(run, "kolt", { armor: 2, shield: 2, sand: 2 }).error, /最多 3 种/);
+  assert.equal(R.cyberPreview(run, "kolt", { armor: 2, shield: 2 }).error, null);
+});
+
+test("肉体可以按 8:7 全部换成星灵，不受改造率限制，而且只能二选一当内层", () => {
+  const { run, R } = atCamp(["kolt", "helu"], "CY3");
+  const pv = R.cyberPreview(run, "kolt", { armor: 8, spirit: true });
+  assert.deepEqual(plain(pv.layers), [{ type: "armor", max: 7 }, { type: "spirit", max: 10 }]);   // 剩 12 肉体 → 10 星灵
+  assert.ok(pv.layers.every(l => l.type !== "flesh"));
+});
+
+test("改造花钱：动了多少点肉体收多少；改完血量层跨战斗保留，升级后照方案重算", () => {
+  const { c, run, R } = atCamp(["kolt", "helu"], "CY4");
+  const before = c.S.state.kuizhi;
+  R.modifyHero(run, "kolt", { armor: 8, shield: 4 });
+  const per = c.S.ROGUE_CLINIC.cyberPerHp;
+  assert.equal(before - c.S.state.kuizhi, 12 * per);
+  const v1 = R.heroView(run, run.party[0]);
+  assert.deepEqual(plain(v1.layers.map(l => [l.type, l.max])), [["shield", 3], ["armor", 7], ["flesh", 8]]);
+  // 改回一部分：只收变化的量
+  const b2 = c.S.state.kuizhi;
+  R.modifyHero(run, "kolt", { armor: 8, shield: 0 });
+  assert.equal(b2 - c.S.state.kuizhi, 4 * per);
+  // 进战斗：场上的柯尔特就是改造后的血量层
+  run.stage = "board"; run.board = R.makeBoard(run);
+  R.acceptTask(run, "main");
+  while (!R.battleSpec(run)) { run.task.index++; }
+  c.BattleSim.setup(R.battleSpec(run));
+  const kolt = c.findKit("kolt", c.S.state.units);
+  assert.deepEqual(plain(kolt.layers.map(l => [l.type, l.max])), [["armor", 7], ["flesh", 12]]);
+  assert.equal(c.innermostLayer(kolt).type, "flesh");
+  // 升级：肉体上限按等级涨，改造方案不变
+  run.party[0].level = 3;
+  const v3 = R.heroView(run, run.party[0]);
+  assert.equal(v3.layers.find(l => l.type === "armor").max, 7);
+  assert.ok(v3.layers.find(l => l.type === "flesh").max > 12);
+});
+
+test("诊所治疗：按缺的血量收钱，治完满血", () => {
+  const { c, run, R } = atCamp(["kolt", "helu"], "CY5");
+  run.party[0].hp = [{ type: "flesh", current: 11 }];
+  const cost = R.healCost(run, "kolt");
+  assert.equal(cost, 9 * c.S.ROGUE_CLINIC.healPerHp);
+  R.healHero(run, "kolt");
+  const v = R.heroView(run, run.party[0]);
+  assert.equal(v.hp, v.hpMax);
+});
+
+test("诊所只在诊所节点或回城休整时能用", () => {
+  const { run, R } = fresh(["kolt", "helu"], "CY6");
+  R.acceptTask(run, "main");
+  while (!R.battleSpec(run)) { run.task.index++; }
+  assert.throws(() => R.modifyHero(run, "kolt", { armor: 2 }), /没有诊所/);
 });
 
 module.exports = { autoplay };

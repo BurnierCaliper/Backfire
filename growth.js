@@ -178,17 +178,80 @@ function applyWeaponLevel(u) {
   u.resources.durability = (g.baseDur || 5) + Math.floor(lv / 2);
 }
 
+/* ---------- 义体改造 ----------
+ * 把一部分肉体血量换成别的血量层：
+ *   肉体 8 : 装甲 7 : 护盾 6 : 沙尘 6（例：8 点肉体换 7 点装甲）
+ *   可换的肉体上限 = 义体改造率 × 肉体血量上限
+ *   也可以把（剩下的）肉体按 肉体 8 : 星灵 7 完全换成星灵，不受改造率限制
+ *   一个角色最多 3 种血量；内层必须是肉体或星灵其中一种
+ *   排列：肉体 / 星灵在最内层，外面依次是装甲、护盾、沙尘
+ * 改造方案记在 u.cyberPlan = { armor, shield, sand, spirit }（前三个是用掉的肉体点数），
+ * 每次按等级重算血量时（applyLevelStats）照方案重建血量层，所以升级后改造依然有效。 */
+const CYBER_RATIO = { flesh: 8, armor: 7, shield: 6, sand: 6, spirit: 7 };
+const CYBER_OUTER = ["sand", "shield", "armor"];     // 数组从外到内
+const CYBER_MAX_TYPES = 3;
+
+/** 义体改造率（0–0.99）：50% + (智力 − 5) × 10% */
+function cyberRateOf(attrs, level) {
+  return derivedFromAttrs(attrs || {}, level || 1).cyber / 100;
+}
+function cyberConvertLimit(fleshMax, rate) {
+  return Math.floor((Number(fleshMax) || 0) * (Number(rate) || 0));
+}
+/** 方案不合法返回原因，合法返回 null */
+function cyberPlanError(plan, fleshMax, rate) {
+  plan = plan || {};
+  const amounts = CYBER_OUTER.map(t => Number(plan[t]) || 0);
+  if (amounts.some(n => n < 0 || Math.floor(n) !== n)) return "改造量必须是非负整数";
+  const used = amounts.reduce((s, n) => s + n, 0);
+  const limit = cyberConvertLimit(fleshMax, rate);
+  if (used > limit) return `最多只能改造 ${limit} 点肉体（改造率 ${Math.round(rate * 100)}%）`;
+  if (fleshMax - used < 1) return "内层必须留下肉体或星灵";
+  const types = 1 + amounts.filter(n => n > 0).length;
+  if (types > CYBER_MAX_TYPES) return `一个角色最多 ${CYBER_MAX_TYPES} 种血量`;
+  return null;
+}
+/** 按方案算出的血量层（从外到内），fleshMax 是没改造时的肉体上限 */
+function cyberLayersFor(fleshMax, plan) {
+  plan = plan || {};
+  const out = [];
+  let left = Number(fleshMax) || 0;
+  CYBER_OUTER.forEach(t => {
+    const n = Math.min(left - 1, Math.max(0, Number(plan[t]) || 0));
+    if (n <= 0) return;
+    left -= n;
+    out.push({ type: t, max: Math.max(1, Math.floor(n * CYBER_RATIO[t] / CYBER_RATIO.flesh)) });
+  });
+  out.push(plan.spirit
+    ? { type: "spirit", max: Math.max(1, Math.floor(left * CYBER_RATIO.spirit / CYBER_RATIO.flesh)) }
+    : { type: "flesh", max: left });
+  return out;
+}
+/** 照 u.cyberPlan 重建血量层。同类型的层保留当前值（超过新上限的截掉），新出现的层是满的 */
+function applyCyberLayers(u, fleshMax) {
+  if (!u || !u.cyberPlan) return;
+  const old = u.layers || [];
+  const target = cyberLayersFor(fleshMax, u.cyberPlan);
+  u.layers = target.map((t, i) => {
+    const prev = old.find(l => l.type === t.type);
+    const cur = prev ? Math.max(0, Math.min(Number(prev.current) || 0, t.max)) : t.max;
+    return { type: t.type, current: cur, max: t.max, inner: i === target.length - 1 };
+  });
+}
+
 function applyLevelStats(u) {
   if (!u || !u.isPlayer || isWeaponUnit(u)) return;
   if (u.growth) {
     const up = Math.max(0, (u.level || 1) - 1);
     const hp = (u.baseHp || 14) + (u.growth.hp || 0) * up;
     const flesh = (u.layers || []).find(l => l.type === "flesh");
-    if (flesh) {
+    if (flesh && !u.cyberPlan) {
       const ratio = flesh.max ? flesh.current / flesh.max : 1;
       flesh.max = hp;
       flesh.current = Math.max(0, Math.min(hp, Math.round(hp * ratio)));
     }
+    applyCyberLayers(u, hp);
+    u.cyber = u.attrs ? derivedFromAttrs(u.attrs, u.level).cyber : 50;
     if (u.attrs) {
       u.personalAtk = derivedFromAttrs(u.attrs, u.level).personalAtk;
     } else if (Number(u.growth.atk) > 0) {
@@ -211,11 +274,12 @@ function applyLevelStats(u) {
   if (!u.attrs) return;
   const d = derivedFromAttrs(u.attrs, u.level);
   const flesh = (u.layers || []).find(l => l.type === "flesh");
-  if (flesh) {
+  if (flesh && !u.cyberPlan) {
     const ratio = flesh.max ? flesh.current / flesh.max : 1;
     flesh.max = d.hp;
     flesh.current = Math.max(0, Math.min(d.hp, Math.round(d.hp * ratio)));
   }
+  applyCyberLayers(u, d.hp);
   u.personalAtk = d.personalAtk;
   const primary = (u.linkedKits || [])[0];
   if (primary && typeof computeWeaponAtk === "function") {
