@@ -490,7 +490,7 @@ function applyBattlefieldFeatures(features, level) {
       else fl[f.what] = true;
     } else if (f.type === "gap" && f.key) {
       const hp = typeof defaultGapHp === "function" ? defaultGapHp(f.what) : 10;
-      state.gaps[f.key] = Object.assign(emptyGap(), { type: f.what, hp, maxHp: hp, open: false });
+      state.gaps[f.key] = Object.assign(emptyGap(), { type: f.what, hp, maxHp: hp, open: false, level: Number(level) || 1 });
     }
   });
   if (features.some(f => f.what === "battery") && typeof syncBatteryShields === "function") syncBatteryShields();

@@ -79,7 +79,9 @@
     // 规则层正在把一次行动收成一块时先不记；整理好的整块写出来时再记一次
     const collecting = typeof logSinkActive === "function" && logSinkActive();
     if (G.tape && !collecting) G.tape.push({ type: "log", text: String(text == null ? "" : text) });
-    if (G.sim) return;
+    // 收集中的行要交给规则层的收集器（只是数据，预演里也要），否则预演里整块日志是空的，
+    // 看不到「先选目标」，技能会不等选目标就直接放出去
+    if (G.sim && !collecting) return;
     return orig.appendLog(text, kind);
   };
   window.renderLog = function () { if (!G.sim) return orig.renderLog(); };
@@ -192,8 +194,33 @@
       hidden: false
     };
   }
+  /** 区域之间的危墙 / 不稳桥梁：可以被攻击，快照和配置物一样（画在两区之间的竖条上，不单独出铭牌） */
+  function snapGaps() {
+    const n = Number(state.zoneMode) || 2;
+    const out = [];
+    for (let z = 2; z <= n; z++) {
+      const key = gapKey(z - 1, z);
+      const g = (state.gaps || {})[key];
+      if (!g) continue;
+      const hittable = (g.type === "wall" || g.type === "bridge") && (Number(g.hp) || 0) > 0;
+      const max = Math.max(1, Number(g.maxHp) || Number(g.hp) || 1);
+      out.push({
+        id: "gap:" + key, name: gapLabel(g.type) + "（" + key.replace("-", "–") + " 区之间）", isPlayer: false, isProp: true, isGap: true, gapKey: key,
+        zone: z - 1, level: 1, atk: 0, layers: [{ type: "armor", max, cur: Math.max(0, Number(g.hp) || 0) }],
+        def: 0, defMax: 0, ap: 0, apMax: 0, bonus: 0, bonusMax: 0, status: gapLabel(g.type), res: "",
+        highEnergy: 0, flying: false, stunned: false, dying: false, dead: !hittable, hidden: !hittable, shp: 0
+      });
+    }
+    return out;
+  }
+  function targetName(id) {
+    const s = G.view.get(id);
+    if (s) return s.name;
+    const u = unitById(id);
+    return u ? u.name : "";
+  }
   function snapAll() {
-    const arr = (state.units || []).map(snapUnit).concat((state.props || []).map(snapProp));
+    const arr = (state.units || []).map(snapUnit).concat((state.props || []).map(snapProp)).concat(snapGaps());
     arr.env = snapEnv();
     return arr;
   }
@@ -565,6 +592,7 @@
     const beats = [];
     applyEnv(snaps.env);
     next.forEach((s, id) => {
+      if (s.isGap) return;   // 危墙 / 桥梁画在区域间的竖条上（paintGaps）
       if (s.hidden) {
         const c = cards.get(id);
         if (c) { c.wrap.remove(); cards.delete(id); }
@@ -587,6 +615,7 @@
       if (!next.has(id)) { c.wrap.remove(); cards.delete(id); }
     });
     G.view = next;
+    paintGaps();
     fitZones();
     return beats;
   }
@@ -1247,15 +1276,20 @@
       <div class="ln">血条最右边是最外层，先被打掉。</div>`;
   }
 
+  function gapNodes() {
+    return [...document.querySelectorAll("#g-field .g-gap[data-key]")];
+  }
   function markTargets(ids) {
     cards.forEach((c, id) => {
       const ok = ids.has(id);
       c.wrap.classList.toggle("is-targetable", ok);
       c.wrap.classList.toggle("is-dim", !ok && id !== G.actorId);
     });
+    gapNodes().forEach(n => n.classList.toggle("is-targetable", ids.has("gap:" + n.dataset.key)));
   }
   function unmarkTargets() {
     cards.forEach(c => c.wrap.classList.remove("is-targetable", "is-dim", "is-hover"));
+    gapNodes().forEach(n => n.classList.remove("is-targetable", "is-hover"));
     document.querySelectorAll(".g-zone").forEach(z => z.classList.remove("is-move-target", "is-move-hover"));
   }
 
@@ -1299,7 +1333,8 @@
   }
 
   function onCardHover(id, on) {
-    const c = cards.get(id);
+    const gapNode = String(id).indexOf("gap:") === 0 ? document.querySelector(`#g-field .g-gap[data-key="${String(id).slice(4)}"]`) : null;
+    const c = cards.get(id) || (gapNode ? { wrap: gapNode } : null);
     if (!c) return;
     c.wrap.classList.toggle("is-hover", on && !!(G.arm && G.arm.mode === "unit" && G.arm.map.has(id)));
     if (G.depth > 0 || choiceResolve) return;
@@ -1321,7 +1356,7 @@
       const cand = G.arm.map.get(id);
       if (!cand) return;
       if (cand.preview && !cand.preview.meaningful && cand.invalidOk !== true) {
-        flashHint(`无法对 ${unitById(id).name} 使用：${cand.preview.reason}`);
+        flashHint(`无法对 ${targetName(id)} 使用：${cand.preview.reason}`);
         return;
       }
       G.arm.resolve(id);
@@ -1346,9 +1381,19 @@
       all = all.filter(u => inSkillRange(actor, u, hint, state.zoneMode));
     }
     if (side !== "ally" && side !== "allySelf") {
+      const inRange = (fake) => ov
+        ? (() => { const d = zoneDist(actor.zone, fake.zone, state.zoneMode); return d >= ov.min && d <= ov.max; })()
+        : (typeof inSkillRange !== "function" || inSkillRange(actor, fake, hint, state.zoneMode));
       (state.props || []).forEach(p => {
         const fake = { id: "prop:" + p.id, name: p.name, zone: p.zone, isPlayer: p.faction !== "enemy" };
-        if (!inSkillRange || inSkillRange(actor, fake, hint, state.zoneMode)) all.push(fake);
+        if (inRange(fake)) all.push(fake);
+      });
+      // 危墙 / 不稳桥梁：夹在两区之间，两边任一区在射程里就能打
+      snapGaps().filter(g => !g.hidden).forEach(g => {
+        const hit = g.gapKey.split("-").map(Number)
+          .map(z => ({ id: g.id, name: g.name, zone: z, isPlayer: false }))
+          .find(inRange);
+        if (hit) all.push(hit);
       });
     }
     return all;
@@ -1365,7 +1410,7 @@
     const stale = () => G.arm !== my;
     const cancel = () => { if (!stale()) disarm(); };
     refreshHud();
-    const label = (id) => `${actor.name} · ${sk.name}${id ? " → " + (unitById(id) || {}).name : ""}`;
+    const label = (id) => `${actor.name} · ${sk.name}${id ? " → " + targetName(id) : ""}`;
 
     if (sk.id === "__stand") {
       G.arm = null;
@@ -1385,7 +1430,7 @@
       if (spec && spec.target === "ally") {
         const cands = players().map(u => ({ id: u.id, invalidOk: true }));
         setHint("<b>" + spec.name + "</b>：选择友方。");
-        targetId = await pickUnit(cands, (id) => spec.name + " → " + ((unitById(id) || {}).name || ""));
+        targetId = await pickUnit(cands, (id) => spec.name + " → " + targetName(id));
         if (stale()) return;
         if (!targetId) { cancel(); return; }
       } else if (spec && spec.target === "zone") {
@@ -2429,7 +2474,15 @@
       state.gaps = state.gaps || {};
       if (!state.gaps[key]) state.gaps[key] = emptyGap();
       const g = state.gaps[key];
-      node.className = "g-gap gap-" + (g.type || "open");
+      const keep = ["is-targetable", "is-hover"].filter(c => node.classList.contains(c));
+      node.className = "g-gap gap-" + (g.type || "open") + (keep.length ? " " + keep.join(" ") : "");
+      if (!node._bound) {
+        node._bound = true;
+        const id = "gap:" + key;
+        node.addEventListener("mouseenter", () => onCardHover(id, true));
+        node.addEventListener("mouseleave", () => onCardHover(id, false));
+        node.addEventListener("click", (e) => { e.stopPropagation(); onCardClick(id); });
+      }
       const hp = (g.type === "bridge" || g.type === "wall") ? (" " + (g.hp || 0)) : "";
       const door = g.type === "door" ? (g.open ? " 开" : " 关") : "";
       node.innerHTML = `<span class="gap-lab">${gapLabel(g.type)}${hp}${door}</span>`;

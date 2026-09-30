@@ -2546,6 +2546,26 @@ function fireScrap(p) {
   renderAll();
 }
 
+/** 技能打配置物 / 危墙时的伤害：按技能说明里写的元素、倍率、击破（「1atk 电 1击破」），
+ *  没写就按 1atk 物理 1 击破。爆炸桶怕火、酸液桶怕谐波，所以元素要对。 */
+const STRUCT_ELEMENT_WORDS = [["谐波", "harmonic"], ["火", "fire"], ["电", "electric"], ["能量", "energy"], ["冰", "ice"], ["酸", "acid"], ["物理", "physical"]];
+function structureHitOpt(a, skillId) {
+  let hint = "";
+  try { const sk = (skillList(a) || []).find(x => x.id === skillId); if (sk) hint = String(sk.hint || ""); } catch (e) {}
+  let element = null, at = Infinity;
+  STRUCT_ELEMENT_WORDS.forEach(([w, el]) => { const i = hint.indexOf(w); if (i >= 0 && i < at) { at = i; element = el; } });
+  const m = hint.match(/(\d+(?:\.\d+)?)\s*atk/);
+  const hits = /两次|2\s*次/.test(hint) ? 2 : /三次|3\s*次/.test(hint) ? 3 : 1;   // 「两次 0.5atk」= 合计 1atk
+  const mult = (m ? Number(m[1]) : 1) * hits;
+  const b = hint.match(/(\d+)\s*击破/);
+  const atk = effectiveAtk(a, state.units) || 5;
+  return {
+    element: element || hostValue("element", "physical"),
+    dmg: Math.max(1, Math.floor(atk * (mult > 0 ? mult : 1))),
+    brk: b ? Number(b[1]) : (Number(hostValue("baseBreak", 1)) || 1)
+  };
+}
+
 function hitStructure(attacker, targetToken, opt) {
   snapshot();
   const notes = [];
@@ -2588,7 +2608,7 @@ function destroyGap(key, g) {
     g.type = "open";
     g.hp = 0;
     const lvEl = uiEl("propLevel");
-    const lv = Number(lvEl && lvEl.value) || 1;
+    const lv = Number(g.level) || Number(lvEl && lvEl.value) || 1;
     const diceN = 1 + dieStep(lv, 5);
     const r = takeDice(diceN, 10, 0);
     const dmg = Math.floor(r.total);
@@ -7064,12 +7084,30 @@ function runSkillInner(id, optRun) {
       }
     }
   }
-  if (token && String(token).indexOf("gap:") === 0) {
-    hitStructure(a, token, { element: hostValue("element", "physical"), dmg: effectiveAtk(a, state.units), brk: Number(hostValue("baseBreak", 1)) || 1 });
-    return;
-  }
-  if (token && String(token).indexOf("prop:") === 0 && !isDisplaceSkill(id)) {
-    hitStructure(a, token, { element: hostValue("element", "physical"), dmg: effectiveAtk(a, state.units), brk: Number(hostValue("baseBreak", 1)) || 1 });
+  const isGapTok = token && String(token).indexOf("gap:") === 0;
+  if (isGapTok || (token && String(token).indexOf("prop:") === 0 && !isDisplaceSkill(id))) {
+    // 危墙 / 桥梁夹在两区之间：两边任一区在射程里就能打
+    if (isGapTok) {
+      const zs = String(token).slice(4).split("-").map(Number);
+      const ov = typeof skillRangeFor === "function" ? skillRangeFor(a, id) : null;
+      let hint = "";
+      try { const sk = (skillList(a) || []).find(x => x.id === id); if (sk) hint = (sk.hint || "") + " " + (sk.name || ""); } catch (e) {}
+      const reach = (z) => {
+        if (ov) { const d = zoneDist(a.zone, z, state.zoneMode); return d >= ov.min && d <= ov.max; }
+        return !hint || typeof inSkillRange !== "function" || inSkillRange(a, { id: token, zone: z, isPlayer: false }, hint, state.zoneMode);
+      };
+      const ok = zs.some(reach);
+      if (!ok) { paintSkillLog(`${a.name} 的该技能够不到 ${String(token).slice(4)} 区之间的${gapLabel((state.gaps[String(token).slice(4)] || {}).type)}。`); return; }
+    }
+    // 打配置物 / 危墙也是一次行动，照常消耗行动点 / 附赠行动
+    if (a.isPlayer && id !== "assist_block") {
+      const cost = skillCost(id);
+      if (cost.ap && !spendAp(a, cost.ap, skillNameHint(id))) return;
+      if (cost.bonus && !spendBonus(a, cost.bonus, skillNameHint(id))) return;
+    } else if (!a.isPlayer) {
+      if (!spendAp(a, 1, skillNameHint(id))) return;
+    }
+    hitStructure(a, token, structureHitOpt(a, id));
     return;
   }
   snapshot();
