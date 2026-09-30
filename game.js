@@ -173,7 +173,9 @@
     if (state.weather === "phase") { try { weatherText += "·" + phaseWeatherName(state.phaseStep); } catch (e) {} }
     if (state.weather === "sand") { try { weatherText += "（风向 " + sandDirText(state.sandDir, state.zoneMode) + "）"; } catch (e) {} }
     if (state.weatherLock) weatherText += "（锁定）";
-    return { weather: state.weather || "none", weatherText, zones };
+    // 机关门开关也算画面状态：打按钮 / 拉杆的预演靠它判断「有效果」
+    const doors = Object.keys(state.gaps || {}).map(k => k + ":" + (state.gaps[k].open ? 1 : 0)).join(",");
+    return { weather: state.weather || "none", weatherText, zones, doors };
   }
   function snapProp(p) {
     const max = Math.max(1, Number(p.maxHp) || Number(p.hp) || 1);
@@ -183,6 +185,7 @@
       name: p.name,
       isPlayer: p.faction !== "enemy",
       isProp: true,
+      isDevice: p.kind === "button" || p.kind === "lever",   // 按钮 / 拉杆没有耐久，不显示血条
       zone: Number(p.zone) || 1,
       level: p.level || 1,
       atk: 0,
@@ -458,7 +461,7 @@
   function createCard(s) {
     const wrap = el("div", "unit-wrap");
     wrap.dataset.id = s.id;
-    const unit = el("div", "unit " + (s.isProp ? "prop " : "") + (s.isPlayer ? "player" : "foe"),
+    const unit = el("div", "unit " + (s.isProp ? "prop " : "") + (s.isDevice ? "device " : "") + (s.isPlayer ? "player" : "foe"),
       `<div class="u-head"><span class="u-name"></span><span class="u-lv"></span><span class="u-atk"></span></div>
        <div class="u-hp"></div>
        <div class="u-hpline"><span class="hpn"></span><span class="shpn"></span></div>

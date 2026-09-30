@@ -100,6 +100,8 @@ function useItemOn(actor, itemId, target, zone) {
       Number(u.zone) === z && !u.dead && !u.hidden && !u.fused
     );
     notes.push(`${actor.name} 向 ${z} 区投出${spec.name}。`);
+    // 范围攻击：这个区的按钮 / 拉杆触发一次（区里没人也会炸到）
+    if (typeof markAoeZone === "function") { state.aoePulse = {}; markAoeZone(z); }
     units.forEach(u => {
       if (itemId === "shockbomb") {
         if (typeof dealBreak === "function") dealBreak(u, 2, "physical", notes, spec.name);
@@ -115,6 +117,7 @@ function useItemOn(actor, itemId, target, zone) {
         notes.push(`${u.name} 受到 ${r.text} ${ele}。`);
       }
     });
+    if (typeof flushAoePulse === "function") flushAoePulse();
   }
   return notes;
 }

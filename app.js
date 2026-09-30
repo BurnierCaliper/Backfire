@@ -547,6 +547,7 @@ function highBoomHitsUnit(source, u) {
 
 function highBoomHitsProp(source, p) {
   if (!p) return false;
+  if (p.kind === "button" || p.kind === "lever") return false;   // 由范围波及统一触发一次（markAoeZone）
   if (p.kind !== "battery" && p.kind !== "turret") return true;
   if (!p.faction) return true;
   if (p.faction === "enemy") return !source.isPlayer;
@@ -602,7 +603,7 @@ function explodeHigh(unit) {
       notes.forEach(s => appendLog(s));
     });
   }
-  flushAoePulse();
+  // 波及的按钮 / 拉杆在这次行动结束时统一触发（runSkill），同一区一次行动只触发一次
   unit._highBooming = false;
   if (!unit.isPlayer) sweepDeadEnemies().forEach(s => appendLog(s));
 }
@@ -2666,6 +2667,7 @@ function destroyProp(p, attacker) {
     const r = takeDice(1, 20, lv);
     const dmg = r.total;
     notes.push(`爆炸：同区 ${r.text} 火焰 + 2 击破。`);
+    markAoeZone(p.zone);
     state.units.filter(u => !u.hidden && Number(u.zone) === Number(p.zone)).forEach(u => {
       const fake = unitOf("爆炸桶", lv, [{ type: "armor", hp: 1 }], 0, 0);
       fake.zone = p.zone;
@@ -2681,6 +2683,7 @@ function destroyProp(p, attacker) {
     const r = takeDice(lv, 4, 0);
     const dmg = r.total;
     notes.push(`电池爆炸：同区同阵营 ${r.text} 电击。`);
+    markAoeZone(p.zone);
     state.units.filter(u => !u.hidden && Number(u.zone) === Number(p.zone) && !!u.isPlayer === (p.faction !== "enemy")).forEach(u => {
       const fake = unitOf("电池", lv, [{ type: "armor", hp: 1 }], 0, 0);
       fake.zone = p.zone;
@@ -3172,6 +3175,7 @@ function explodeBoomcar(target, notes) {
   target._exploded = true;
   const half = Math.floor((target.atk || 0) / 2);
   notes.push(`${target.name} 死亡引爆：同区 ${half} 能量 + 1 击破。`);
+  markAoeZone(target.zone);
   // 同区不分敌我的范围伤害（不能协助格挡）
   state.units.filter(u => !u.hidden && !u.dead && u.id !== target.id && Number(u.zone) === Number(target.zone)).forEach(u => {
     const fake = unitOf("小车残骸", target.level, [{ type: "armor", hp: 1 }], 0, 0);
@@ -5135,7 +5139,8 @@ function dealTo(attacker, target, opt) {
     });
   }
   if (flags.smash && attacker.resources) attacker.resources.smashNext = false;
-  if (flags.aoe) markAoeZone(target && target.zone);
+  // 按钮 / 拉杆：被行动的范围攻击波及时触发一次；场地、状态这类环境伤害不算
+  if (flags.aoe && !flags.environment) markAoeZone(target && target.zone);
   if (target && target.resources && target.resources.reflectReady && attacker && !flags.reflect) {
     const bounced = Math.floor(Number(target.resources.reflectReady) || 0);
     target.resources.reflectReady = 0;
@@ -6978,7 +6983,13 @@ function runSkill(id, optRun) {
   const prevActor = LOG_ACTOR_ID;
   LOG_ACTOR_ID = a0 ? a0.id : null;
   let lines;
-  try { lines = withLogSink(() => runSkillInner(id, optRun)); } finally { LOG_ACTOR_ID = prevActor; }
+  try {
+    lines = withLogSink(() => {
+      state.aoePulse = {};            // 只算这一次行动的范围攻击
+      runSkillInner(id, optRun);
+      flushAoePulse();                // 波及到的按钮 / 拉杆各触发一次（提前 return 的分支也算）
+    });
+  } finally { LOG_ACTOR_ID = prevActor; }
   const block = tidyActionBlock(title, lines);
   if (block.length) appendLog(block.join("\n"));
 }
@@ -7906,6 +7917,7 @@ function runSkillInner(id, optRun) {
       const boom = () => {
         visibleEnemies(a.zone).forEach(u => hitOne(a, u, { element: "harmonic", mult: 0.5, baseBreak: 1, atk, flags: { action: true, aoe: true } }));
         markAoeZone(a.zone);
+        flushAoePulse();   // 再耗圣盾炸第二次算另一次范围攻击，按钮再触发一次
       };
       boom();
       lines.push("音爆：同区每个敌人 0.5atk 谐波 +1 击破。");
