@@ -359,8 +359,13 @@ test("音效：七种属性都能合成，有声、不削顶、不出错", async
     const d = await Sfx.render("stagger");
     let peak = 0, lastLoud = 0, zc = 0;
     for (let i = 0; i < d.length; i++) { const a = Math.abs(d[i]); peak = Math.max(peak, a); if (a > 0.01) lastLoud = i; if (i && (d[i - 1] < 0) !== (d[i] < 0)) zc++; }
-    return { peak, ring: lastLoud / 44100, zcr: zc / (d.length / 44100) };
+    // 钟声的尾音应该一路平滑变小；嗡嗡声会忽大忽小。数 0.3–1.5 秒里每 50 毫秒「比上一格响 5% 以上」的次数
+    const w = 2205, rms = [];
+    for (let s = Math.round(0.3 * 44100); s + w < Math.min(d.length, 1.5 * 44100); s += w) { let q = 0; for (let i = s; i < s + w; i++) q += d[i] * d[i]; rms.push(Math.sqrt(q / w)); }
+    let swells = 0; for (let i = 1; i < rms.length; i++) if (rms[i] > rms[i - 1] * 1.05) swells++;
+    return { peak, ring: lastLoud / 44100, zcr: zc / (d.length / 44100), swells };
   });
+  assert.ok(stag.swells <= 1, "失衡声应该像敲钟一样平滑衰减，不该嗡嗡地晃：" + stag.swells);
   assert.ok(stag.peak > 0.05 && stag.peak < 1, "失衡声音量 " + stag.peak);
   assert.ok(stag.ring > parry.ring * 1.8, "失衡声应该比格挡悠长：" + stag.ring + " vs " + parry.ring);
   assert.ok(stag.zcr < parry.zcr / 4, "失衡声应该比格挡低沉：" + stag.zcr + " vs " + parry.zcr);

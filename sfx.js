@@ -215,22 +215,27 @@
   function staggerVoice(t, v) {
     const verb = reverb(3.2);
     const both = (g) => { g.connect(verb); return g; };   // 干声进总线，同时送一份进混响
-    // 冲击：很低的下坠 + 闷响
-    osc("sine", t, 0.55, 120, 34, both(gainEnv(t, 0.004, 0.75 * v, 0.6)));
-    noise(t, 0.12, filter("lowpass", 600, 0.7, both(gainEnv(t, 0.002, 0.7 * v, 0.14))));
-    noise(t, 0.04, filter("bandpass", 2400, 1.5, gainEnv(t, 0.001, 0.25 * v, 0.04)));
-    // 低沉的钟
-    const f0 = 196;
-    [[0.5, 0.34, 3.6], [1, 0.3, 3.0], [1.19, 0.16, 2.2], [1.5, 0.14, 2.0], [2, 0.12, 1.6], [2.66, 0.07, 1.1], [3, 0.06, 0.9]].forEach(([r, a, d]) => {
-      const f = f0 * r;
-      const g = both(gainEnv(t + 0.01, 0.006, a * v, d));
-      osc("sine", t + 0.01, d, f, f * 0.965, g);
-      osc("sine", t + 0.01, d * 0.8, f * 1.004, f * 1.004 * 0.965, both(gainEnv(t + 0.01, 0.006, a * 0.4 * v, d * 0.8)));
+    // 撞木敲上去的一下：硬的撞击声 + 一点短促的低频分量（只给重量，不拖长，免得变成嗡嗡声）
+    noise(t, 0.035, filter("bandpass", 1800, 1.1, both(gainEnv(t, 0.001, 0.55 * v, 0.035))));
+    osc("sine", t, 0.18, 110, 55, gainEnv(t, 0.003, 0.45 * v, 0.18));
+    // 钟：以 392 Hz（G4）为「击音」，泛音照真钟的比例。
+    // 一开头高泛音最亮（「当」），然后高的先消失，只剩低的慢慢收尾（「——」）。
+    // 不加失谐、不滑音、低频 hum 放轻，就不会嗡嗡地晃。
+    const nominal = 392;
+    [
+      [0.25, 0.08, 3.8],   // hum（很轻）
+      [0.5,  0.2,  3.2],   // prime
+      [0.6,  0.2,  2.5],   // tierce（小三度，钟声的「苦味」）
+      [0.75, 0.1,  1.9],   // quint
+      [1,    0.34, 2.8],   // nominal：听到的音高
+      [1.5,  0.14, 1.4],   // superquint
+      [2,    0.12, 1.0],   // octave nominal
+      [2.66, 0.08, 0.6],
+      [3.33, 0.06, 0.42]
+    ].forEach(([r, a, d]) => {
+      const f = nominal * r;
+      osc("sine", t, d, f, f, both(gainEnv(t, 0.002, a * 1.25 * v, d)));
     });
-    // 开头一点金属擦响，和格挡声同一家族，但低一个八度、短
-    const sh = filter("bandpass", 3200, 4, both(gainEnv(t, 0.003, 0.18 * v, 0.35)));
-    sh.frequency.setValueAtTime(3600, t); sh.frequency.exponentialRampToValueAtTime(1800, t + 0.35);
-    noise(t, 0.4, sh);
   }
   VOICES.stagger = staggerVoice;
 
