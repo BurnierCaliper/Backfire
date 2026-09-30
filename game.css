@@ -1488,3 +1488,21 @@ body.trpg .trpg-only { display: flex !important; }
   0%   { filter: drop-shadow(0 0 2px #fff8e0) drop-shadow(0 0 16px rgba(255, 214, 120, .95)) brightness(1.35); }
   100% { filter: drop-shadow(0 2px 3px rgba(20, 30, 40, .28)); }
 }
+/* 被打死的敌人：溢出伤害显示成负血量 */
+.unit-wrap.overkill .hpn b.neg { color: #d8342c; font-size: 1.15em; }
+/* 一记重击打死：先停一会儿，再慢慢淡出 */
+.unit-wrap.dead.dead-slow { transition: opacity 2.4s ease-in 1.4s; }
+/* 高能自爆 */
+.stamp.boom {
+  color: var(--energy, #36c3d6); font-size: 64px;
+  text-shadow: 2px 2px 0 #1b1f24, -2px -2px 0 #1b1f24, 2px -2px 0 #1b1f24, -2px 2px 0 #1b1f24, 0 0 18px rgba(80, 220, 240, .9), 0 0 42px rgba(80, 220, 240, .6);
+  animation-duration: 1.5s;
+}
+.pop.boom { filter: drop-shadow(0 0 10px rgba(80, 220, 240, .85)); }
+.g-app.quake .g-field { animation: quake .55s cubic-bezier(.36, .07, .19, .97); }
+@keyframes quake {
+  10%, 90% { transform: translate(-2px, 1px); }
+  20%, 80% { transform: translate(5px, -3px); }
+  30%, 50%, 70% { transform: translate(-8px, 4px); }
+  40%, 60% { transform: translate(8px, -4px); }
+}

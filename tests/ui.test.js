@@ -251,6 +251,81 @@ test("打出失衡：敌人架势被打空时，响起沉重的失衡声", async
   assert.deepEqual(o.errors, []);
 });
 
+test("打死敌人：血量显示成负数；小刀补死照常消失", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await newTrpg(page);
+  await startBattle(page);
+  await page.evaluate(() => {
+    Math.random = () => 0.999;
+    state.units.filter(u => !u.isPlayer).forEach(u => u.layers.forEach(l => { l.current = 1; }));
+  });
+  await selectHero(page, "ruby");
+  await page.keyboard.press("1");
+  await page.waitForFunction(() => GAME.arm && GAME.arm.mode === "unit");
+  const foe = await page.evaluate(() => [...GAME.arm.map.entries()].find(([id, c]) => !c.invalid && !String(id).includes(":"))[0]);
+  await page.click(`.unit-wrap[data-id="${foe}"]`);
+  await page.waitForSelector(`.unit-wrap[data-id="${foe}"].overkill`, { timeout: 15000 });
+  const hp = await page.textContent(`.unit-wrap[data-id="${foe}"] .hpn`);
+  assert.match(hp, /^−\d+\//, "血量应该是负数：" + hp);
+  assert.ok(!(await page.evaluate(i => document.querySelector(`.unit-wrap[data-id="${i}"]`).classList.contains("dead-slow"), foe)), "小刀补死照常消失");
+  assert.deepEqual(o.errors, []);
+});
+
+test("一记重击打死：铭牌多停一会儿再慢慢消失", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await newTrpg(page);
+  await startBattle(page);
+  await page.evaluate(() => {
+    Math.random = () => 0.999;
+    state.units.filter(u => !u.isPlayer).forEach(u => u.layers.forEach(l => { l.max = 6; l.current = 5; }));
+  });
+  await selectHero(page, "ruby");   // 一击 6 伤害 ≥ 上限 6 的一半
+  await page.keyboard.press("1");
+  await page.waitForFunction(() => GAME.arm && GAME.arm.mode === "unit");
+  const foe = await page.evaluate(() => [...GAME.arm.map.entries()].find(([id, c]) => !c.invalid && !String(id).includes(":"))[0]);
+  await page.click(`.unit-wrap[data-id="${foe}"]`);
+  await page.waitForSelector(`.unit-wrap[data-id="${foe}"].dead-slow`, { timeout: 15000 });
+  // 普通击杀 3 秒后就没了；重击的 3.5 秒时铭牌还在
+  await page.waitForTimeout(3500);
+  assert.ok(await page.isVisible(`.unit-wrap[data-id="${foe}"]`) || await page.$(`.unit-wrap[data-id="${foe}"]`), "重击打死的铭牌应该还在");
+  assert.deepEqual(o.errors, []);
+});
+
+test("高能自爆：震屏、大字、爆炸声、大号数字", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await newTrpg(page);
+  await startBattle(page);
+  await page.evaluate(() => {
+    Math.random = () => 0.999;
+    const f = state.units.find(u => !u.isPlayer);
+    f.highEnergy = 999; f.statuses.high = true;
+    window.__boom = 0;
+    const orig = Sfx.boom;
+    Sfx.boom = () => { window.__boom++; return orig(); };
+    // 记下演出里出现过的大字和数字
+    window.__seen = [];
+    new MutationObserver(ms => ms.forEach(m => m.addedNodes.forEach(n => { if (n.className) window.__seen.push(n.className + "|" + n.textContent); })))
+      .observe(document.body, { childList: true, subtree: true });
+  });
+  await selectHero(page, "ruby");
+  await page.keyboard.press("1");
+  await page.waitForFunction(() => GAME.arm && GAME.arm.mode === "unit");
+  const foe = await page.evaluate(() => state.units.find(u => !u.isPlayer && u.highEnergy >= 999).id);
+  await page.click(`.unit-wrap[data-id="${foe}"]`);
+  await page.waitForFunction(() => window.__boom >= 1, null, { timeout: 15000 });
+  await page.waitForTimeout(200);
+  const seen = await page.evaluate(() => window.__seen);
+  assert.ok(seen.some(x => /stamp boom\|高能自爆/.test(x)), "应该盖「高能自爆」大字");
+  assert.ok(seen.some(x => /pop .*boom\|999!/.test(x)), "应该有大号的自爆数字");
+  // 自爆是重击：铭牌显示负血量，慢慢消失
+  await page.waitForSelector(`.unit-wrap[data-id="${foe}"].dead-slow`, { timeout: 5000 });
+  assert.match(await page.textContent(`.unit-wrap[data-id="${foe}"] .hpn`), /^−\d+\//);
+  assert.deepEqual(o.errors, []);
+});
+
 test("音效：七种属性都能合成，有声、不削顶、不出错", async (t) => {
   const o = await open(t); if (!o) return;
   const r = await o.page.evaluate(async () => {
@@ -289,6 +364,13 @@ test("音效：七种属性都能合成，有声、不削顶、不出错", async
   assert.ok(stag.peak > 0.05 && stag.peak < 1, "失衡声音量 " + stag.peak);
   assert.ok(stag.ring > parry.ring * 1.8, "失衡声应该比格挡悠长：" + stag.ring + " vs " + parry.ring);
   assert.ok(stag.zcr < parry.zcr / 4, "失衡声应该比格挡低沉：" + stag.zcr + " vs " + parry.zcr);
+  const boom = await o.page.evaluate(async () => {
+    const d = await Sfx.render("boom");
+    let peak = 0, bad = false;
+    for (let i = 0; i < d.length; i++) { if (!isFinite(d[i])) bad = true; peak = Math.max(peak, Math.abs(d[i])); }
+    return { peak, bad };
+  });
+  assert.ok(!boom.bad && boom.peak > 0.05 && boom.peak < 1, "爆炸声音量 " + boom.peak);
   // 开关
   await o.page.click("#t-sandbox");
   await o.page.click('[data-new="0"]');

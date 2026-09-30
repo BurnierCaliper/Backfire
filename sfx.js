@@ -233,7 +233,20 @@
     noise(t, 0.4, sh);
   }
   VOICES.stagger = staggerVoice;
-  const RENDER_SECONDS = { parry: 1.4, stagger: 4.2 };
+
+  /* ---------- 高能自爆：能量的爆炸（低频轰鸣 + 扫下来的爆裂噪声 + 能量尖啸） ---------- */
+  function boomVoice(t, v) {
+    const verb = reverb(3.2);
+    const both = (g) => { g.connect(verb); return g; };
+    const lp = filter("lowpass", 3000, 0.8, both(gainEnv(t, 0.003, 0.85 * v, 0.9)));
+    lp.frequency.setValueAtTime(4200, t); lp.frequency.exponentialRampToValueAtTime(160, t + 0.8);
+    noise(t, 0.95, lp);
+    osc("sine", t, 0.7, 95, 28, both(gainEnv(t, 0.004, 0.8 * v, 0.75)));
+    osc("sawtooth", t, 0.35, 1900, 140, filter("lowpass", 2600, 0.7, gainEnv(t, 0.002, 0.2 * v, 0.35)));
+    osc("sine", t + 0.02, 0.4, 2600, 400, both(gainEnv(t + 0.02, 0.003, 0.12 * v, 0.38)));
+  }
+  VOICES.boom = boomVoice;
+  const RENDER_SECONDS = { parry: 1.4, stagger: 4.2, boom: 4.2 };
 
   function play(element, opt) {
     opt = opt || {};
@@ -276,6 +289,8 @@
   function parry() { return play("parry", { throttle: 0.15 }); }
   /** 打出失衡：范围攻击同时打崩好几个人也只响一次 */
   function stagger() { return play("stagger", { throttle: 0.4 }); }
+  /** 高能自爆的爆炸声（连锁自爆时间隔 0.25 秒以上才再响） */
+  function boom() { return play("boom", { throttle: 0.25 }); }
 
-  window.Sfx = { render, parry, stagger, play, enabled, setEnabled, ELEMENTS, NAMES: { physical: "物理", fire: "火", ice: "冰", electric: "电", acid: "酸", energy: "能量", harmonic: "谐波" } };
+  window.Sfx = { render, parry, stagger, boom, play, enabled, setEnabled, ELEMENTS, NAMES: { physical: "物理", fire: "火", ice: "冰", electric: "电", acid: "酸", energy: "能量", harmonic: "谐波" } };
 })();

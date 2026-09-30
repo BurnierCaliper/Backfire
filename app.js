@@ -563,8 +563,11 @@ function explodeHigh(unit) {
   unit._highBooming = true;
   const he = Number(unit.highEnergy) || 0;
   const aoe = Math.floor(he / 2);
-  appendLog(`【高能自爆】${unit.name} 高能值 ${he} ≥ 当前生命 ${currentLifeForHigh(unit)}，立即秒杀。余波只打同阵营与无阵营配置物，${aoe} 能量。`);
-  spawnPopup(unit, { kind: "status", text: "自爆", element: "energy" });
+  const lifeBefore = currentLifeForHigh(unit);
+  appendLog(`【高能自爆】${unit.name} 高能值 ${he} ≥ 当前生命 ${lifeBefore}，立即秒杀。余波只打同阵营与无阵营配置物，${aoe} 能量。`);
+  // 画面：专门的「高能自爆」演出（大字、震屏、爆炸声、大号数字），溢出部分显示成负血量
+  spawnPopup(unit, { kind: "highboom", value: he, text: String(aoe), element: "energy" });
+  if (!unit.isPlayer) { unit.overkill = Math.max(0, he - lifeBefore); unit.killBig = true; }
   (unit.layers || []).forEach(l => { l.current = 0; });
   if (unit.isPlayer && !isWeaponUnit(unit)) {
     unit.dying = true;
@@ -592,16 +595,28 @@ function explodeHigh(unit) {
   if (state.fields[unit.zone]) state.fields[unit.zone].energyVal = 0;
   markAoeZone(unit.zone);
   if (aoe > 0) {
-    highBoomVictims(unit).forEach(u => {
+    const prevTag = state.popTag;
+    state.popTag = "boom";   // 余波的伤害数字在画面上放大、停留更久（连锁自爆时恢复外层的标记）
+    try { highBoomVictims(unit).forEach(u => {
       const notes = [];
+      const lifeB = currentLifeForHigh(u);
+      const maxB = (u.layers || []).reduce((a, l) => a + (Number(l.max) || 0), 0);
+      // 先打标记再结算：演出里铭牌一变灰就走「慢慢消失」
+      if (!u.isPlayer && aoe >= lifeB && aoe >= maxB * 0.5) u.killBig = true;
       applyTypedDot(u, aoe, "energy", notes, `${u.name} 被高能余波击中 ${aoe}`);
+      // 被余波炸死的敌人同样显示负血量，炸掉一半以上血量的慢慢消失
+      if (!u.isPlayer && (u.dead || totalHp(u) <= 0)) {   // dead 要等稍后清场才标，这里看血量
+        u.overkill = (Number(u.overkill) || 0) + Math.max(0, aoe - lifeB);
+        const maxHp = (u.layers || []).reduce((a, l) => a + (Number(l.max) || 0), 0);
+        if (aoe >= maxHp * 0.5) u.killBig = true;
+      }
       notes.forEach(s => appendLog(s));
       checkHighBoom(u);
     });
     (state.props || []).filter(p => Number(p.zone) === Number(unit.zone) && highBoomHitsProp(unit, p)).forEach(p => {
       const notes = damageProp(p, { element: "energy", dmg: aoe }, unit);
       notes.forEach(s => appendLog(s));
-    });
+    }); } finally { state.popTag = prevTag || null; }
   }
   // 波及的按钮 / 拉杆在这次行动结束时统一触发（runSkill），同一区一次行动只触发一次
   unit._highBooming = false;
@@ -3194,10 +3209,12 @@ function removeEnemyFromField(u, notes) {
   if (state.attackerId === u.id) state.attackerId = null;
   if (state.targetId === u.id) state.targetId = null;
   const id = u.id;
-  setTimeout(() => {
+  const drop = () => {
     state.units = (state.units || []).filter(x => x.id !== id);
     renderAll();
-  }, 3000);
+  };
+  // 一记重击打死的，铭牌多停一会儿再淡出（重击的标记可能在这之后才打上，所以到点再看）
+  setTimeout(() => (u.killBig ? setTimeout(drop, 1900) : drop()), 3000);
 }
 
 /** 敌人内层归零：记死亡、发经验与掉落，以及个别 BOSS 的连带效果。只结算一次。 */
@@ -5162,6 +5179,13 @@ function dealTo(attacker, target, opt) {
   }
   if (!res.pending) {
     const ele = opt.element || res.element || "physical";
+    // 画面用：敌人被这一击打死时，记下「溢出」的伤害（血量显示成负数）和是不是一记重击（死后慢慢消失）
+    if (target && !target.isPlayer && (target.dead || totalHp(target) <= 0) && (res.intended || 0) > 0) {
+      const over = Math.max(0, (res.intended || 0) - (res.total || 0));
+      if (over > 0) target.overkill = (Number(target.overkill) || 0) + over;
+      const maxHp = (target.layers || []).reduce((a, l) => a + (Number(l.max) || 0), 0);
+      if ((res.intended || 0) >= maxHp * 0.5) target.killBig = true;
+    }
     if ((res.intended || res.total || 0) > 0) spawnFloater(target, res.intended || res.total, ele);
     if ((res.extraHarmonic || 0) > 0) spawnFloater(target, res.extraHarmonic, ele);
     if ((res.breakDealt || 0) > 0 && flags.block !== "assistOk") popBreak(target, res.breakDealt, ele);
@@ -6289,6 +6313,9 @@ function spawnPopup(unit, spec) {
     dur = big ? 3 + ratio * 1.5 : 2.3;
     size = big ? 26 + ratio * 18 : 15;
     text = big ? dmg + "!!" : String(dmg);
+  } else if (kind === "highboom") {
+    text = "高能自爆";
+    size = 20; dur = 3; big = true;
   } else if (kind === "break") {
     const br = Math.floor(Number(spec.value) || 0);
     if (br <= 0) return;

@@ -113,3 +113,36 @@ test("场地效果、状态伤害不会触发按钮", () => {
   c.runSkill(c.skillList(kolt).find(s => s.name === "普通攻击").id);
   assert.equal(door(), false);
 });
+
+/* ---------- 画面用的击杀数据：溢出伤害、重击 ---------- */
+test("打死敌人时记下溢出的伤害（显示成负血量）；一记打掉一半以上血量算重击", () => {
+  const { c, st, kolt } = field();
+  const foe = st.units.find(u => !u.isPlayer);
+  foe.zone = 1;
+  foe.layers.forEach(l => { l.current = 5; });
+  c.dealTo(kolt, foe, { atk: 0, mult: 0, flat: 50, element: "physical", baseBreak: 0, flags: { action: true, blockResolved: true } });
+  assert.equal(foe.dead, true);
+  assert.equal(foe.overkill, 45);
+  assert.equal(foe.killBig, true);
+  // 小刀补死：有溢出但不算重击
+  const c2 = field();
+  const f2 = c2.st.units.find(u => !u.isPlayer);
+  f2.zone = 1;
+  f2.layers.forEach(l => { l.current = 1; });
+  c2.c.dealTo(c2.kolt, f2, { atk: 0, mult: 0, flat: 3, element: "physical", baseBreak: 0, flags: { action: true, blockResolved: true } });
+  assert.equal(f2.dead, true);
+  assert.equal(f2.overkill, 2);
+  assert.ok(!f2.killBig);
+});
+
+test("高能自爆：溢出 = 高能值 − 剩余生命，算重击", () => {
+  const { c, st, kolt } = field();
+  const foe = st.units.find(u => !u.isPlayer);
+  foe.zone = 1;
+  const life = c.totalHp(foe);
+  foe.highEnergy = life + 30; foe.statuses.high = true;
+  c.dealTo(kolt, foe, { atk: 0, mult: 0, flat: 1, element: "energy", baseBreak: 0, flags: { action: true, blockResolved: true } });
+  assert.equal(foe.dead, true);
+  assert.ok(foe.overkill >= 29, "溢出 " + foe.overkill);
+  assert.equal(foe.killBig, true);
+});

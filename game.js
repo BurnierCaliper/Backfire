@@ -96,6 +96,7 @@
       value: spec.value,
       text: spec.text,
       element: spec.element || "physical",
+      tag: state.popTag || null,   // "boom"：高能自爆的余波，数字放大、停留更久
       snap: G.sim ? null : snapAll()
     });
   };
@@ -151,7 +152,9 @@
       status: status === "无状态" ? "" : status,
       res,
       atk: Math.round(Number(atk) || 0),
-      weapon: !!u.weaponOf
+      weapon: !!u.weaponOf,
+      overkill: !u.isPlayer && (u.dead || u._removed) ? Math.max(0, Math.round(Number(u.overkill) || 0)) : 0,
+      killBig: !u.isPlayer && !!u.killBig
     };
   }
   const WEATHER_NAME = { none: "常态", heat: "酷暑", snow: "雪天", acid: "酸雨", thunder: "雷鸣", glow: "微光", sand: "沙暴", phase: "相位" };
@@ -528,7 +531,9 @@
       c.highBar.style.display = he > 0 ? "" : "none";
       c.highBar.title = he > 0 ? ("高能 " + he) : "";
     }
-    q(".hpn").innerHTML = `<b>${sumCur(s)}</b>/${sumMax(s)}`;
+    // 被打死的敌人：溢出的伤害显示成负血量（纯画面，给一击的分量感）
+    q(".hpn").innerHTML = s.overkill > 0 ? `<b class="neg">−${s.overkill}</b>/${sumMax(s)}` : `<b>${sumCur(s)}</b>/${sumMax(s)}`;
+    c.wrap.classList.toggle("overkill", s.overkill > 0);
     q(".shpn").textContent = s.upOnShp ? "起身" : "";
 
     // 架势
@@ -569,6 +574,7 @@
     c.wrap.classList.toggle("stunned", s.stunned && !s.dead);
     c.wrap.classList.toggle("dying", s.dying && !s.dead);
     c.wrap.classList.toggle("dead", s.dead && !s.isPlayer);
+    c.wrap.classList.toggle("dead-slow", s.dead && !s.isPlayer && s.killBig);   // 一记重击打死：多停一会儿再慢慢消失
     c.wrap.classList.toggle("downed", s.dead && s.isPlayer);
     c.prev = s;
   }
@@ -683,9 +689,10 @@
     const d = el("div", "stamp " + (cls || ""));
     d.textContent = text;
     d.style.left = p.x + "px";
-    d.style.top = (p.r.top + p.r.height / 2) + "px";
+    // 「高能自爆」盖在铭牌上方，不和中间的大号数字叠在一起
+    d.style.top = (cls === "boom" ? p.r.top - 18 : p.r.top + p.r.height / 2) + "px";
     fx().appendChild(d);
-    realTimeout(() => d.remove(), 950);
+    realTimeout(() => d.remove(), cls === "boom" ? 1550 : 950);
   }
   const ELE_VAR = { fire: "--fire", acid: "--acid", electric: "--electric", ice: "--icee", energy: "--energy", physical: "--physical", harmonic: "--harmonic" };
   function hit(id, element, big) {
@@ -866,12 +873,26 @@
           const v = Math.floor(Number(e.value) || 0);
           if (v <= 0) continue;
           const total = s ? Math.max(1, sumMax(s)) : 50;
+          const boom = e.tag === "boom";
           const big = v >= total * 0.2;
           hit(e.unitId, e.element, big);
-          popup(e.unitId, big ? v + "!" : String(v), "e-" + e.element + (big ? " big" : ""), { size: big ? BIG_POP_SIZE : 30, dur: big ? BIG_POP_DUR : 1.05 });
+          popup(e.unitId, big ? v + "!" : String(v), "e-" + e.element + (big ? " big" : "") + (boom ? " boom" : ""),
+            { size: big ? BIG_POP_SIZE : boom ? 46 : 30, dur: boom ? 2.4 : big ? BIG_POP_DUR : 1.05 });
+          if (boom) await wait(160);
           await wait(chain ? 30 : 45);
           deferStun(beatsBefore); await playBeats(beatsBefore.filter(b => b.kind !== "stun"));
           await wait(chain ? 40 : 55);
+        } else if (e.kind === "highboom") {
+          // 高能自爆：震屏 + 大字 + 爆炸声 + 大号数字，停久一点让人看清
+          const app = $("g-app");
+          app.classList.remove("quake"); void app.offsetWidth; app.classList.add("quake");
+          realTimeout(() => app.classList.remove("quake"), 700);
+          if (window.Sfx) Sfx.boom();
+          hit(e.unitId, "energy", true);
+          stamp(e.unitId, "高能自爆", "boom");
+          popup(e.unitId, (Math.floor(Number(e.value) || 0)) + "!", "e-energy big boom", { size: BIG_POP_SIZE + 12, dur: 2.8 });
+          await playBeats(beatsBefore.filter(b => b.kind !== "stun"));
+          await wait(chain ? 380 : 520);
         } else if (e.kind === "break") {
           popup(e.unitId, "击破 " + e.value, "brk", { below: true, dur: 1.05 });
           deferStun(beatsBefore); await playBeats(beatsBefore.filter(b => b.kind !== "stun"));
@@ -2862,7 +2883,7 @@
     const pv = $("g-sfx-preview");
     if (pv && window.Sfx) {
       pv.innerHTML = "试听音效：" + Sfx.ELEMENTS.map(e => `<button class="g-btn small e-${e}" data-sfx="${e}">${Sfx.NAMES[e]}</button>`).join("") +
-        `<button class="g-btn small" data-sfx="parry">格挡成功</button><button class="g-btn small" data-sfx="stagger">打出失衡</button>`;
+        `<button class="g-btn small" data-sfx="parry">格挡成功</button><button class="g-btn small" data-sfx="stagger">打出失衡</button><button class="g-btn small" data-sfx="boom">高能自爆</button>`;
       pv.querySelectorAll("[data-sfx]").forEach(b => { b.onclick = (ev) => Sfx.play(b.dataset.sfx, { big: ev.shiftKey }); });
     }
     $("g-bs-close").onclick = () => { $("g-bs-sheet").classList.remove("show"); G.bsOpen = false; };
