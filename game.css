@@ -1460,3 +1460,6 @@ details.smith .sm-prog.ready { color: var(--gold); font-weight: 600; }
 body.trpg #g-explore-back, body.trpg #g-to-explore { display: inline-block; }
 body.trpg #g-rest { display: none !important; }   /* 跑团模式在探索环节里休息 */
 body.trpg #g-to-explore { border-color: var(--gold); }
+.tr-bs .tr-row label { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
+.tr-bs .tr-row b { min-width: 72px; }
+.tr-bs-foot { position: sticky; bottom: 0; padding: 10px 0; background: var(--ground-1); border-top: 1px solid var(--line); }

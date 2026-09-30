@@ -9007,6 +9007,7 @@ function renderBackstage() {
         <strong style="min-width:110px">${escapeHtml(weaponCardName(kit))}</strong>
         <span class="hint">${escapeHtml(pc.name)}的武器</span>
         <label class="field">等级<input data-owkit="${pc.id}" data-wkit="${kit}" type="number" min="1" value="${lv}"></label>
+        ${typeof weaponDur === "function" ? `<label class="field">耐久<input data-durkit="${kit}" type="number" min="0" value="${weaponDur(kit)}"></label><span class="hint">/ ${weaponDurMax(kit)}</span>` : ""}
         <span class="hint">${existing ? (existing.hidden ? "收在手上" : "在场") : "未唤出"} · 武器ATK ${typeof computeWeaponAtk === "function" ? computeWeaponAtk(kit, pc.attrs, lv) : "?"}${lv >= 5 ? " · 需工匠" : ""}</span>
       </div>`;
     });
@@ -9037,6 +9038,18 @@ function renderBackstage() {
       appendLog(`${owner.name} 的 ${weaponCardName(inp.dataset.wkit)} 设为 ${owner.weaponLevels[inp.dataset.wkit]} 级。`);
       renderBackstage();
       renderAll();
+    };
+  });
+  box.querySelectorAll("[data-durkit]").forEach(inp => {
+    inp.onchange = () => {
+      const kit = inp.dataset.durkit;
+      const before = weaponDur(kit);
+      LEDGER.dur[kit] = Math.max(0, Math.min(weaponDurMax(kit), Math.floor(Number(inp.value) || 0)));
+      const owner = weaponOwner(kit);
+      if (owner && LEDGER.dur[kit] > 0 && owner.weaponHeld === false && !owner.dead) owner.weaponHeld = true;
+      appendLog(`后台：${weaponCardName(kit)} 耐久 ${before} → ${LEDGER.dur[kit]}。`);
+      renderBackstage();
+      if (typeof renderAll === "function") renderAll();
     };
   });
   box.querySelectorAll("[data-attr]").forEach(inp => {

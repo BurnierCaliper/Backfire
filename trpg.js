@@ -163,3 +163,110 @@ function trpgUpgradeWeapon(ownerKit, kit, mode, fee) {
   ledgerCapture();
   return notes;
 }
+
+/* ---------- 后台：主持人按叙事直接改数值（不走规则） ----------
+ * edit = {
+ *   day, hours, kuizhi, water,
+ *   heroes: { kit: { status: "ok"|"up"|"dying"|"dead", layers: [当前值…], shp, level, xp, attrPoints,
+ *                    attrs: { str… }, shortUsed, weapons: { 武器kit: { level, dur, heal } } } }
+ * }
+ * 没写的项不动。返回改了什么（写进探索记录）。 */
+const TRPG_STATUS = { ok: "正常", up: "起身中", dying: "濒死", dead: "死亡" };
+function trpgHeroStatus(u) {
+  return u.dead ? "dead" : u.dying ? "dying" : u.upOnShp ? "up" : "ok";
+}
+function trpgBackstageApply(edit, why) {
+  edit = edit || {};
+  const notes = [];
+  const num = (v, lo, hi) => {
+    let n = Math.floor(Number(v));
+    if (!isFinite(n)) return null;
+    if (lo != null) n = Math.max(lo, n);
+    if (hi != null) n = Math.min(hi, n);
+    return n;
+  };
+  const change = (label, a, b) => { if (a !== b) notes.push(`${label} ${a} → ${b}`); };
+
+  if (edit.day != null) { const v = num(edit.day, 1); if (v != null) { change("天数", LEDGER.day, v); LEDGER.day = v; } }
+  if (edit.hours != null) { const v = num(edit.hours, 0); if (v != null) { change("距上次长休（小时）", LEDGER.hours, v); LEDGER.hours = v; } }
+  if (edit.kuizhi != null) { const v = num(edit.kuizhi, 0); if (v != null) { change("奎支", Number(state.kuizhi) || 0, v); state.kuizhi = v; } }
+  if (edit.water != null) { const v = num(edit.water, 0); if (v != null) { change("水（ml）", ledgerWater(), v); setLedgerWater(v); } }
+
+  Object.keys(edit.heroes || {}).forEach(kit => {
+    const u = trpgHeroes().find(h => h.kit === kit);
+    const e = edit.heroes[kit];
+    if (!u || !e) return;
+    const n = (label, a, b) => change(`${u.name} ${label}`, a, b);
+    // 等级、属性先改：会重算血量与坚毅上限
+    let restat = false;
+    if (e.level != null) { const v = num(e.level, 1, 25); if (v != null && v !== (u.level || 1)) { n("等级", u.level || 1, v); u.level = v; restat = true; } }
+    if (e.attrs) {
+      u.attrs = Object.assign({}, u.attrs || {});
+      Object.keys(e.attrs).forEach(k => {
+        const v = num(e.attrs[k], 1);
+        const was = Number(u.attrs[k]) || 0;
+        if (v != null && v !== was) { n(typeof ATTR_NAMES !== "undefined" ? ATTR_NAMES[k] || k : k, was, v); u.attrs[k] = v; restat = true; }
+      });
+    }
+    if (restat && typeof applyLevelStats === "function") applyLevelStats(u);
+    if (e.xp != null) { const v = num(e.xp, 0); if (v != null) { n("经验", Number(u.xp) || 0, v); u.xp = v; } }
+    if (e.attrPoints != null) { const v = num(e.attrPoints, 0); if (v != null) { n("未分配属性点", Number(u.attrPoints) || 0, v); u.attrPoints = v; } }
+    if (Array.isArray(e.layers)) {
+      (u.layers || []).forEach((l, i) => {
+        if (e.layers[i] == null) return;
+        const v = num(e.layers[i], 0, Number(l.max) || 0);
+        const was = Number(l.current) || 0;
+        if (v != null && v !== was) { n(`${(typeof LAYER !== "undefined" && LAYER[l.type]) || l.type}血量`, was, v); l.current = v; }
+      });
+    }
+    if (e.shp != null) { const v = num(e.shp, 0, Number(u.shpMax) || 0); if (v != null) { n("坚毅", Number(u.shp) || 0, v); u.shp = v; } }
+    if (e.status && TRPG_STATUS[e.status]) {
+      const was = trpgHeroStatus(u);
+      if (was !== e.status) {
+        n("状态", TRPG_STATUS[was], TRPG_STATUS[e.status]);
+        u.dead = e.status === "dead";
+        u.dying = e.status === "dying";
+        u.upOnShp = e.status === "up";
+        if (!u.dead && !u.dying && totalHpOf(u) <= 0) {
+          const l = (u.layers || [])[u.layers.length - 1];
+          if (l) { l.current = 1; notes.push(`${u.name} 血量 0 → 1（活着至少要有 1 点血）`); }
+        }
+      }
+    }
+    if (e.shortUsed != null) {
+      const v = num(e.shortUsed, 0);
+      const was = Number(LEDGER.shortUsed[kit]) || 0;
+      if (v != null && v !== was) { n("今天已短休", was, v); LEDGER.shortUsed[kit] = v; }
+    }
+    Object.keys(e.weapons || {}).forEach(wk => {
+      if ((u.linkedKits || []).indexOf(wk) < 0) return;
+      const w = e.weapons[wk];
+      const wn = typeof weaponName === "function" ? weaponName(wk) : wk;
+      if (w.level != null) {
+        const v = num(w.level, 1, HANDBOOK_WEAPON_UPGRADE.maxLevel);
+        const was = trpgWeaponLevel(u, wk);
+        if (v != null && v !== was) {
+          change(`${wn} 等级`, was, v);
+          if (typeof setOwnedWeaponLevel === "function") setOwnedWeaponLevel(u, wk, v);
+          else { u.weaponLevels = u.weaponLevels || {}; u.weaponLevels[wk] = v; }
+        }
+      }
+      if (w.dur != null) {
+        const v = num(w.dur, 0, weaponDurMax(wk));
+        const was = weaponDur(wk);
+        if (v != null && v !== was) {
+          change(`${wn} 耐久`, was, v);
+          LEDGER.dur[wk] = v;
+          if (v > 0 && u.weaponHeld === false && !u.dead) u.weaponHeld = true;
+        }
+      }
+      if (w.heal && LEDGER.weapons && LEDGER.weapons[wk]) {
+        delete LEDGER.weapons[wk];
+        notes.push(`${wn}（武器人）伤势治好`);
+      }
+    });
+  });
+  if (!notes.length) return ["后台：没有改动。"];
+  ledgerCapture();
+  return [`后台调整${why ? "（" + why + "）" : ""}：`].concat(notes.map(x => "· " + x + "。"));
+}

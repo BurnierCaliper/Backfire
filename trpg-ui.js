@@ -11,7 +11,7 @@
   let log = [];
 
   const TABS = [
-    ["party", "队伍"], ["rest", "时间与休息"], ["shop", "商店"], ["bag", "背包"], ["smith", "武器升级"]
+    ["party", "队伍"], ["rest", "时间与休息"], ["shop", "商店"], ["bag", "背包"], ["smith", "武器升级"], ["backstage", "后台"]
   ];
 
   function heroes() { return trpgHeroes(); }
@@ -184,6 +184,74 @@
     }
   };
 
+  /* 后台：按叙事直接改数值（不走规则），改完点「应用改动」一次写入并记进探索记录 */
+  PANELS.backstage = function () {
+    const numIn = (attrs, v, w) => `<input type="number" ${attrs} value="${v}" style="width:${w || 64}px">`;
+    const heroesHtml = heroes().map(h => {
+      const k = esc(h.kit);
+      const layers = (h.layers || []).map((l, i) =>
+        `<label>${esc((LAYER && LAYER[l.type]) || l.type)} ${numIn(`data-bs-layer="${k}" data-i="${i}" min="0" max="${l.max}"`, Number(l.current) || 0)} / ${l.max}</label>`).join("");
+      const st = trpgHeroStatus(h);
+      const attrs = Object.keys(ATTR_NAMES).map(a =>
+        `<label>${ATTR_NAMES[a]} ${numIn(`data-bs-attr="${k}" data-k="${a}" min="1"`, (h.attrs || {})[a] || 0, 48)}</label>`).join("");
+      const weapons = (h.linkedKits || []).map(w => {
+        const hurt = LEDGER.weapons && LEDGER.weapons[w];
+        const hurtText = hurt ? hurt.map(x => `${(LAYER && LAYER[x.type]) || x.type} ${x.current}`).join(" / ") : "";
+        return `<div class="tr-row"><b>${esc(weaponName(w))}</b>
+          <label>等级 ${numIn(`data-bs-wlv="${k}" data-w="${esc(w)}" min="1" max="${HANDBOOK_WEAPON_UPGRADE.maxLevel}"`, trpgWeaponLevel(h, w), 52)}</label>
+          <label>耐久 ${numIn(`data-bs-dur="${k}" data-w="${esc(w)}" min="0" max="${weaponDurMax(w)}"`, weaponDur(w), 52)} / ${weaponDurMax(w)}</label>
+          ${hurt ? `<label title="武器人上次留下的伤势：${esc(hurtText)}"><input type="checkbox" data-bs-heal="${k}" data-w="${esc(w)}"> 治好武器人伤势（${esc(hurtText)}）</label>` : ""}</div>`;
+      }).join("");
+      return `<div class="tr-up tr-bs">
+        <div class="tr-row"><b>${esc(h.name)}</b>
+          <label>状态 <select data-bs-status="${k}">${Object.keys(TRPG_STATUS).map(x => `<option value="${x}" ${x === st ? "selected" : ""}>${TRPG_STATUS[x]}</option>`).join("")}</select></label>
+          <label>等级 ${numIn(`data-bs-lv="${k}" min="1" max="25"`, h.level || 1, 52)}</label>
+          <label>经验 ${numIn(`data-bs-xp="${k}" min="0"`, Number(h.xp) || 0, 72)}</label>
+          <label>属性点 ${numIn(`data-bs-pts="${k}" min="0"`, Number(h.attrPoints) || 0, 48)}</label>
+          <label>今天已短休 ${numIn(`data-bs-short="${k}" min="0"`, Number(LEDGER.shortUsed[h.kit]) || 0, 48)}</label></div>
+        <div class="tr-row">${layers}<label>坚毅 ${numIn(`data-bs-shp="${k}" min="0" max="${h.shpMax}"`, Number(h.shp) || 0)} / ${h.shpMax}</label></div>
+        <div class="tr-row">${attrs}</div>
+        ${weapons}
+      </div>`;
+    }).join("");
+    return `<p class="r-hint">给叙事用：剧情里受伤、被抢、武器磕坏、昏迷了几天……直接改成想要的数字，不走任何规则。改完点下面的「应用改动」一次写入，每项改动都记进探索记录。
+      改等级或属性会按规则重算血量和坚毅的上限（按原来的比例），想要具体数字就在同一次里一起填。</p>
+      <h3>队伍</h3>
+      <div class="tr-row">
+        <label>第 ${numIn(`id="bs-day" min="1"`, LEDGER.day || 1, 56)} 天</label>
+        <label>距上次长休 ${numIn(`id="bs-hours" min="0"`, LEDGER.hours || 0, 56)} 小时</label>
+        <label>奎支 ${numIn(`id="bs-kz" min="0"`, Number(state.kuizhi) || 0, 100)}</label>
+        <label>水 ${numIn(`id="bs-water" min="0"`, ledgerWater(), 80)} ml</label>
+      </div>
+      <h3>角色</h3>
+      ${heroesHtml || `<p class="r-hint">还没有队员。</p>`}
+      <div class="tr-row tr-bs-foot">
+        <input type="text" id="bs-why" placeholder="原因（写进记录，可不填）" style="width:260px">
+        <button class="g-btn r-main" id="bs-apply">应用改动</button>
+        <button class="g-btn" id="bs-undo">放弃未应用的改动</button>
+      </div>
+      <p class="r-hint">背包里的物品在「背包」页 ±1；战斗中要改数值用战斗顶栏的「后台」（也能改耐久）。</p>`;
+  };
+  function readBackstage() {
+    const P = $("tr-panel");
+    const val = (el) => el.value;
+    const edit = { day: $("bs-day").value, hours: $("bs-hours").value, kuizhi: $("bs-kz").value, water: $("bs-water").value, heroes: {} };
+    const H = (k) => (edit.heroes[k] = edit.heroes[k] || { attrs: {}, layers: [], weapons: {} });
+    const W = (k, w) => (H(k).weapons[w] = H(k).weapons[w] || {});
+    P.querySelectorAll("[data-bs-status]").forEach(el => { H(el.dataset.bsStatus).status = val(el); });
+    P.querySelectorAll("[data-bs-lv]").forEach(el => { H(el.dataset.bsLv).level = val(el); });
+    P.querySelectorAll("[data-bs-xp]").forEach(el => { H(el.dataset.bsXp).xp = val(el); });
+    P.querySelectorAll("[data-bs-pts]").forEach(el => { H(el.dataset.bsPts).attrPoints = val(el); });
+    P.querySelectorAll("[data-bs-short]").forEach(el => { H(el.dataset.bsShort).shortUsed = val(el); });
+    P.querySelectorAll("[data-bs-shp]").forEach(el => { H(el.dataset.bsShp).shp = val(el); });
+    P.querySelectorAll("[data-bs-layer]").forEach(el => { H(el.dataset.bsLayer).layers[Number(el.dataset.i)] = val(el); });
+    P.querySelectorAll("[data-bs-attr]").forEach(el => { H(el.dataset.bsAttr).attrs[el.dataset.k] = val(el); });
+    P.querySelectorAll("[data-bs-wlv]").forEach(el => { W(el.dataset.bsWlv, el.dataset.w).level = val(el); });
+    P.querySelectorAll("[data-bs-dur]").forEach(el => { W(el.dataset.bsDur, el.dataset.w).dur = val(el); });
+    P.querySelectorAll("[data-bs-heal]").forEach(el => { if (el.checked) W(el.dataset.bsHeal, el.dataset.w).heal = true; });
+    return edit;
+  }
+
   function renderTabs() {
     $("tr-tabs").innerHTML = TABS.map(([k, n]) => `<button class="tr-tab${k === tab ? " on" : ""}" data-tab="${k}">${n}</button>`).join("");
   }
@@ -249,6 +317,9 @@
     P.querySelectorAll("[data-heal]").forEach(b => { b.onclick = () => act(() => trpgUseHeal(b.dataset.heal, P.querySelector(`[data-heal-who="${b.dataset.heal}"]`).value)); });
     on("tr-repair", () => act(() => trpgRepair($("tr-repair-who").value)));
     P.querySelectorAll("[data-item]").forEach(b => { b.onclick = () => { const [id, n] = b.dataset.item.split(":"); act(() => trpgAdjustItem(id, Number(n))); }; });
+    // 后台
+    on("bs-apply", () => { const edit = readBackstage(); const why = $("bs-why").value.trim(); act(() => trpgBackstageApply(edit, why)); });
+    on("bs-undo", () => render());
     // 武器升级
     P.querySelectorAll("[data-up]").forEach(b => {
       b.onclick = () => {
@@ -289,6 +360,7 @@
     if (!$("scr-trpg")) return;
     Screens.register("trpg", $("scr-trpg"), { onShow: render });
     $("tr-fight").onclick = toBattle;
+    $("tr-bs").onclick = () => { tab = "backstage"; render(); };
     $("tr-title").onclick = () => { TRPG.active = false; document.body.classList.remove("trpg"); Screens.show("title"); };
     $("tr-copy").onclick = (e) => {
       const text = log.map(x => `【${x.stamp}】\n` + x.lines.map(l => "  " + l).join("\n")).join("\n");

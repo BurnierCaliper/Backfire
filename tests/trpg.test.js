@@ -93,3 +93,35 @@ test("发经验会升级；属性点不能在 8 级加回同一项", () => {
   assert.match(n[0], /同一项/);
   assert.equal(kolt.attrPoints, 1);
 });
+
+test("后台：按叙事直接改血量、坚毅、耐久、状态、时间、奎支，并记下改了什么", () => {
+  const { c, st, kolt } = field();
+  const w = kolt.linkedKits[0];
+  const max = kolt.layers.map(l => l.max);
+  const notes = c.trpgBackstageApply({
+    day: 5, hours: 30, kuizhi: 777, water: 1234,
+    heroes: { kolt: { layers: max.map(() => 3), shp: 1, weapons: { [w]: { dur: 2 } } } }
+  }, "坠落");
+  assert.match(notes[0], /坠落/);
+  assert.equal(c.S.LEDGER.day, 5);
+  assert.equal(c.exhaustTier(), 1);
+  assert.equal(st.kuizhi, 777);
+  assert.equal(c.ledgerWater(), 1234);
+  assert.equal(c.totalHpOf(kolt), 3 * max.length);
+  assert.equal(kolt.shp, 1);
+  assert.equal(c.weaponDur(w), 2);
+  // 超上限会被夹住；存进档案，重新摆队伍后还在
+  c.trpgBackstageApply({ heroes: { kolt: { weapons: { [w]: { dur: 999 } } } } });
+  assert.equal(c.weaponDur(w), c.weaponDurMax(w));
+  c.BattleSim.setup({ party: ["kolt", "helu"], enemies: [{ id: "thug_knife", lv: 1, zone: 2 }] });
+  c.ledgerApplyToField([]);   // 战斗画面开战前做的那一步
+  assert.equal(c.totalHpOf(c.findKit("kolt", c.S.state.units)), 3 * max.length);
+  // 状态：打成死亡再救回来，血量 0 时自动给 1 点
+  const k2 = c.findKit("kolt", c.S.state.units);
+  c.trpgBackstageApply({ heroes: { kolt: { status: "dead", layers: max.map(() => 0) } } });
+  assert.equal(k2.dead, true);
+  c.trpgBackstageApply({ heroes: { kolt: { status: "ok" } } });
+  assert.equal(k2.dead, false);
+  assert.equal(c.totalHpOf(k2), 1);
+  assert.equal(c.trpgBackstageApply({}).join(), "后台：没有改动。");
+});
