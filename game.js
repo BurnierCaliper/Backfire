@@ -2147,6 +2147,7 @@
       ledger: typeof LEDGER !== "undefined" ? LEDGER.save() : null
     };
     try { localStorage.setItem(CAMP_KEY, JSON.stringify(G.campaign)); } catch (e) {}
+    if (typeof G.onCampaignSaved === "function") G.onCampaignSaved(G.campaign);
   }
 
   function loadCampaignMem() {

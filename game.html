@@ -48,12 +48,24 @@
     <aside class="run-log"><h3>记录</h3><ul id="run-log"></ul></aside>
   </div>
 </section>
+<section class="scr-trpg-slots scr-run" id="scr-trpg-slots" hidden>
+  <div class="sp-wrap">
+    <div class="sp-head">
+      <h2>跑团模式 · 选择存档</h2>
+      <p>每个空位放一个团的进度：队伍、等级、物资、时间、探索记录、上次的遭遇。玩的时候每个操作、每场战斗结算都会自动存进当前空位。存档在这台电脑的浏览器里；换电脑或清浏览器数据前，用「存成文件」备份。</p>
+    </div>
+    <div class="tr-slot-list" id="tr-slot-list"></div>
+    <div class="tr-row" style="margin-top:16px"><button class="g-btn" id="tr-slots-title">回到标题</button></div>
+  </div>
+</section>
 <section class="scr-trpg" id="scr-trpg" hidden>
   <header class="tr-top">
     <h2>跑团模式 · 探索环节</h2>
+    <span class="tr-slot-name" id="tr-slot-name"></span>
     <span id="tr-clock"></span>
     <span class="tr-supplies" id="tr-supplies"></span>
     <span class="spacer"></span>
+    <button class="g-btn" id="tr-slots" title="换到别的团的存档（当前进度已自动保存）">换存档</button>
     <button class="g-btn" id="tr-bs" title="按叙事直接改血量、坚毅、耐久、等级、时间、奎支……">后台</button>
     <button class="g-btn r-main" id="tr-fight" title="切到战斗画面，在那里配置遭遇、开打">进入战斗环节</button>
     <button class="g-btn" id="tr-title">回到标题</button>

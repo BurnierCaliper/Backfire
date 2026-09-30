@@ -125,3 +125,25 @@ test("后台：按叙事直接改血量、坚毅、耐久、状态、时间、�
   assert.equal(c.totalHpOf(k2), 1);
   assert.equal(c.trpgBackstageApply({}).join(), "后台：没有改动。");
 });
+
+test("存档：三个空位互不影响；旧版的队伍记忆第一次打开时放进空位 1", () => {
+  const c = H.load();
+  c.localStorage.setItem("anterscale-campaign", JSON.stringify({ party: [{ kit: "kolt", level: 3 }], kuizhi: 50, ledger: { day: 4 } }));
+  let slots = c.trpgReadSlots();
+  assert.equal(slots.length, 3);
+  assert.equal(slots[0].name, "团 1");
+  assert.equal(slots[0].campaign.kuizhi, 50);
+  assert.equal(slots[1], null);
+  c.trpgWriteSlot(2, { name: "沙穹团", campaign: { kuizhi: 9, partyKits: ["helu"], party: [{ kit: "helu", level: 2 }], ledger: { day: 7 } }, log: [] });
+  slots = c.trpgReadSlots();
+  assert.equal(slots[0].campaign.kuizhi, 50);
+  assert.equal(slots[2].name, "沙穹团");
+  const m = c.trpgSlotSummary(slots[2]);
+  assert.equal(m.day, 7);
+  assert.equal(m.party.join(), "Helumica Lv2");
+  c.trpgClearSlot(0);
+  assert.equal(c.trpgReadSlots()[0], null);
+  assert.equal(c.trpgReadSlots()[2].name, "沙穹团");
+  assert.equal(c.trpgValidSlot({ campaign: {}, log: [] }), true);
+  assert.equal(c.trpgValidSlot("x"), false);
+});

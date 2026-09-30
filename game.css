@@ -1463,3 +1463,17 @@ body.trpg #g-to-explore { border-color: var(--gold); }
 .tr-bs .tr-row label { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
 .tr-bs .tr-row b { min-width: 72px; }
 .tr-bs-foot { position: sticky; bottom: 0; padding: 10px 0; background: var(--ground-1); border-top: 1px solid var(--line); }
+/* 跑团模式：存档空位 */
+.tr-slot-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+.tr-slot { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; background: var(--plate); border: 1px solid var(--line); border-radius: 4px; }
+.tr-slot.on { border-color: var(--gold); }
+.tr-slot.empty { opacity: .85; border-style: dashed; }
+.tr-slot .r-hint { margin: 0; }
+.tr-slot .tr-row { margin: 4px 0 0; }
+.tr-slot-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.tr-slot-head b { font-size: 16px; }
+.tr-slot-head span { font-size: 12px; color: var(--muted); font-family: var(--num); }
+.tr-slot-meta { font-size: 13px; color: var(--muted); line-height: 1.5; }
+.tr-slot-name { color: var(--gold); }
+body.trpg #g-save { display: none !important; }   /* 跑团模式用自己的存档空位 */
+.tr-slot .g-btn { height: 30px; font-size: 13px; }

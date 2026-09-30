@@ -6,9 +6,11 @@
   "use strict";
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-  const LOG_KEY = "anterscale-trpg-log";
+  const DEFAULT_PARTY = ["ruby", "yuito", "hiaki", "tou"];
   let tab = "party";
   let log = [];
+  let slot = -1;          // 正在玩的存档空位
+  let slotName = "";
 
   const TABS = [
     ["party", "队伍"], ["rest", "时间与休息"], ["shop", "商店"], ["bag", "背包"], ["smith", "武器升级"], ["backstage", "后台"]
@@ -17,17 +19,17 @@
   function heroes() { return trpgHeroes(); }
   function level() { return Number(($("g-level") || {}).value) || 1; }
 
-  /* ---------- 存 / 读 ---------- */
+  /* ---------- 存 / 读：每个操作、每场战斗结算都自动写回当前存档空位 ---------- */
+  function writeSlotNow() {
+    if (slot < 0 || !TRPG.active || !window.GAME) return;
+    trpgWriteSlot(slot, { name: slotName, campaign: GAME.campaign || null, log: log.slice(-400), level: level(), enc: GAME.lastEncounter || null });
+  }
   function save() {
     if (typeof ledgerCapture === "function") ledgerCapture();
-    if (window.GAME && GAME.rememberCampaign) GAME.rememberCampaign();
+    if (window.GAME && GAME.rememberCampaign) GAME.rememberCampaign();   // 会触发 onCampaignSaved → writeSlotNow
+    else writeSlotNow();
   }
-  function loadLog() {
-    try { log = JSON.parse(localStorage.getItem(LOG_KEY) || "[]"); } catch (e) { log = []; }
-  }
-  function saveLog() {
-    try { localStorage.setItem(LOG_KEY, JSON.stringify(log.slice(-400))); } catch (e) {}
-  }
+  function saveLog() { writeSlotNow(); }
   /** 一次操作：执行、记日志、存档、重画 */
   function act(fn) {
     let notes = [];
@@ -48,6 +50,7 @@
 
   /* ---------- 顶栏 ---------- */
   function renderTop() {
+    $("tr-slot-name").textContent = slot >= 0 ? `存档 ${slot + 1} · ${slotName}` : "";
     const t = exhaustTier();
     $("tr-clock").innerHTML = `第 <b>${LEDGER.day || 1}</b> 天 · 距上次长休 <b>${LEDGER.hours || 0}</b> 小时` +
       (t ? ` · <span class="warn">${esc(exhaustText(t))}</span>` : "");
@@ -98,7 +101,8 @@
         <p class="r-hint">升级照手册第三章：4 级、8 级各 1 点属性点（8 级那点不能加在曾经加过的同一项上）；职责技能按角色卡自动解锁；熟练项、专长由主持人记在角色卡上。</p>
         ${attrs ? `<h3>分配属性点</h3>${attrs}` : ""}
         <h3>重新开团</h3>
-        <button class="g-btn" id="tr-reset">清空队伍记忆（等级、物资、时间全部归零）</button>`;
+        <button class="g-btn" id="tr-reset">清空这个存档的进度（等级、物资、时间全部归零）</button>
+        <p class="r-hint">要同时带别的团，点顶栏「换存档」用另一个空位。</p>`;
     },
     rest() {
       const plan = longRestNeeds({});
@@ -284,11 +288,8 @@
     on("tr-xp-go", () => act(() => trpgGiveXp($("tr-xp-who").value ? [$("tr-xp-who").value] : null, $("tr-xp").value)));
     P.querySelectorAll("[data-attr]").forEach(b => { b.onclick = () => { const [k, a] = b.dataset.attr.split(":"); act(() => trpgSpendAttr(k, a)); }; });
     on("tr-reset", () => {
-      if (!confirm("清空跑团模式的队伍记忆？等级、经验、物资、奎支、时间都会归零。")) return;
-      try { localStorage.removeItem("anterscale-campaign"); } catch (e) {}
-      if (window.GAME) GAME.campaign = null;
-      LEDGER.reset(); state.kuizhi = 0; state.bag = { items: [] };
-      log = []; saveLog();
+      if (!confirm(`清空存档「${slotName}」的进度？等级、经验、物资、奎支、时间、探索记录都会归零（名字保留）。`)) return;
+      freshCampaign();
       rebuild(); save(); render();
     });
     // 时间与休息
@@ -330,16 +331,141 @@
     });
   }
 
+  /* ---------- 存档空位 ---------- */
+  function freshCampaign() {
+    try { localStorage.removeItem("anterscale-campaign"); } catch (e) {}
+    GAME.campaign = null;
+    LEDGER.reset(); state.kuizhi = 0; state.bag = { items: [] };
+    GAME.partyKits = DEFAULT_PARTY.slice();
+    GAME.lastEncounter = null;
+    log = [];
+  }
+  function fmtTime(t) {
+    if (!t) return "";
+    const d = new Date(t), p = n => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+  function renderSlots() {
+    const slots = trpgReadSlots();
+    $("tr-slot-list").innerHTML = slots.map((s, i) => {
+      const m = trpgSlotSummary(s);
+      if (!m) return `<div class="tr-slot empty">
+          <div class="tr-slot-head"><b>存档 ${i + 1}</b><span>空</span></div>
+          <p class="r-hint">还没有团。</p>
+          <div class="tr-row"><button class="g-btn r-main" data-new="${i}">开新团</button><button class="g-btn" data-import="${i}">从文件读入</button></div>
+        </div>`;
+      return `<div class="tr-slot${i === slot ? " on" : ""}">
+          <div class="tr-slot-head"><b>存档 ${i + 1} · ${esc(m.name)}</b><span>${esc(fmtTime(m.at))}</span></div>
+          <div class="tr-slot-meta">第 ${m.day} 天 · 奎支 ${m.kuizhi}</div>
+          <div class="tr-slot-meta">${esc(m.party.join("、") || "（没有队员）")}</div>
+          <div class="tr-row">
+            <button class="g-btn r-main" data-open="${i}">继续这个团</button>
+            <button class="g-btn small" data-rename="${i}">改名</button>
+            <button class="g-btn small" data-export="${i}">存成文件</button>
+            <button class="g-btn small" data-import="${i}">从文件读入</button>
+            <button class="g-btn small" data-clear="${i}">删除</button>
+          </div>
+        </div>`;
+    }).join("");
+    const L = $("tr-slot-list");
+    L.querySelectorAll("[data-open]").forEach(b => { b.onclick = () => enter(Number(b.dataset.open)); });
+    L.querySelectorAll("[data-new]").forEach(b => {
+      b.onclick = () => {
+        const i = Number(b.dataset.new);
+        const name = prompt("给这个团起个名字：", `团 ${i + 1}`);
+        if (name == null) return;
+        trpgWriteSlot(i, { name: name.trim() || `团 ${i + 1}`, campaign: null, log: [], level: 1, enc: null });
+        enter(i);
+      };
+    });
+    L.querySelectorAll("[data-rename]").forEach(b => {
+      b.onclick = () => {
+        const i = Number(b.dataset.rename), s = trpgReadSlots()[i];
+        const name = prompt("新名字：", s.name || "");
+        if (name == null || !name.trim()) return;
+        s.name = name.trim();
+        trpgWriteSlot(i, s);
+        if (i === slot) slotName = s.name;
+        renderSlots();
+      };
+    });
+    L.querySelectorAll("[data-clear]").forEach(b => {
+      b.onclick = () => {
+        const i = Number(b.dataset.clear), s = trpgReadSlots()[i];
+        if (!confirm(`删除存档 ${i + 1}「${s.name}」？删掉就找不回来了（可以先「存成文件」备份）。`)) return;
+        trpgClearSlot(i);
+        if (i === slot) { slot = -1; TRPG.active = false; document.body.classList.remove("trpg"); }
+        renderSlots();
+      };
+    });
+    L.querySelectorAll("[data-export]").forEach(b => {
+      b.onclick = () => {
+        const s = trpgReadSlots()[Number(b.dataset.export)];
+        const blob = new Blob([JSON.stringify({ kind: "anterscale-trpg-slot", version: 1, slot: s }, null, 1)], { type: "application/json" });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        // 文件名只用英文数字：有的浏览器从本地打开时不认中文文件名（团名在文件里面）
+        a.download = `antlerscale-trpg-slot${Number(b.dataset.export) + 1}-${fmtTime(Date.now()).replace(/[- :]/g, "")}.json`;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      };
+    });
+    L.querySelectorAll("[data-import]").forEach(b => {
+      b.onclick = () => {
+        const i = Number(b.dataset.import);
+        const inp = document.createElement("input");
+        inp.type = "file"; inp.accept = ".json,application/json";
+        inp.onchange = () => {
+          const f = inp.files && inp.files[0];
+          if (!f) return;
+          const r = new FileReader();
+          r.onload = () => {
+            let data = null;
+            try { data = JSON.parse(r.result); } catch (e) {}
+            const s = data && data.kind === "anterscale-trpg-slot" ? data.slot : data;
+            if (!trpgValidSlot(s)) { alert("这个文件不是跑团模式的存档。"); return; }
+            if (trpgReadSlots()[i] && !confirm(`用文件里的「${s.name || "未命名"}」覆盖存档 ${i + 1}？`)) return;
+            trpgWriteSlot(i, s);
+            if (i === slot) { slot = -1; TRPG.active = false; document.body.classList.remove("trpg"); }
+            renderSlots();
+          };
+          r.readAsText(f);
+        };
+        inp.click();
+      };
+    });
+  }
+  function openSlots() {
+    if (TRPG.active && slot >= 0) save();
+    Screens.show("trpg-slots");
+  }
+
   /* ---------- 进出 ---------- */
-  function enter() {
+  function enter(i) {
+    const s = trpgReadSlots()[i];
+    if (!s) return;
+    slot = i;
+    slotName = s.name || `团 ${i + 1}`;
     TRPG.active = true;
     document.body.classList.add("trpg");
     if (typeof Rogue !== "undefined") Rogue.leaveRunMode();   // 经验曲线恢复手册的 1 倍
-    const camp = window.GAME && GAME.loadCampaignMem ? GAME.loadCampaignMem() : null;
-    if (camp && camp.partyKits && camp.partyKits.length) GAME.partyKits = camp.partyKits.slice();
-    loadLog();
+    if (s.campaign) {
+      GAME.campaign = JSON.parse(JSON.stringify(s.campaign));
+      LEDGER.load(GAME.campaign.ledger);
+      try { localStorage.setItem("anterscale-campaign", JSON.stringify(GAME.campaign)); } catch (e) {}
+      GAME.partyKits = (GAME.campaign.partyKits && GAME.campaign.partyKits.length) ? GAME.campaign.partyKits.slice()
+        : (GAME.campaign.party || []).map(p => p.kit);
+      if (!GAME.partyKits.length) GAME.partyKits = DEFAULT_PARTY.slice();
+      GAME.lastEncounter = s.enc || null;
+      log = Array.isArray(s.log) ? s.log.slice() : [];
+    } else {
+      freshCampaign();
+    }
+    const lv = $("g-level");
+    if (lv && s.level) lv.value = String(s.level);
     rebuild();
     save();
+    tab = "party";
     Screens.show("trpg");
   }
   function toBattle() {
@@ -353,15 +479,20 @@
     const r = $("g-result"); if (r) r.classList.remove("show");
     const ro = $("g-reopen"); if (ro) ro.classList.remove("show");
     rebuild();
+    save();
     Screens.show("trpg");
   }
 
   function boot() {
     if (!$("scr-trpg")) return;
     Screens.register("trpg", $("scr-trpg"), { onShow: render });
+    Screens.register("trpg-slots", $("scr-trpg-slots"), { onShow: renderSlots });
+    GAME.onCampaignSaved = () => writeSlotNow();
+    $("tr-slots").onclick = openSlots;
+    $("tr-slots-title").onclick = () => { if (TRPG.active && slot >= 0) save(); TRPG.active = false; slot = -1; document.body.classList.remove("trpg"); Screens.show("title"); };
     $("tr-fight").onclick = toBattle;
     $("tr-bs").onclick = () => { tab = "backstage"; render(); };
-    $("tr-title").onclick = () => { TRPG.active = false; document.body.classList.remove("trpg"); Screens.show("title"); };
+    $("tr-title").onclick = () => { save(); TRPG.active = false; slot = -1; document.body.classList.remove("trpg"); Screens.show("title"); };
     $("tr-copy").onclick = (e) => {
       const text = log.map(x => `【${x.stamp}】\n` + x.lines.map(l => "  " + l).join("\n")).join("\n");
       const btn = e.currentTarget;
@@ -371,10 +502,10 @@
     $("g-to-explore").onclick = backFromBattle;
     $("g-explore-back").onclick = backFromBattle;
     const sb = $("t-sandbox");
-    if (sb) sb.onclick = enter;
+    if (sb) sb.onclick = openSlots;
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
   else boot();
 
-  window.TrpgFlow = { enter, toBattle, backFromBattle };
+  window.TrpgFlow = { enter, openSlots, toBattle, backFromBattle };
 })();

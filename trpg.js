@@ -270,3 +270,51 @@ function trpgBackstageApply(edit, why) {
   ledgerCapture();
   return [`后台调整${why ? "（" + why + "）" : ""}：`].concat(notes.map(x => "· " + x + "。"));
 }
+
+/* ---------- 存档：每个团一个空位 ----------
+ * 空位里放：{ name, at, campaign（队伍记忆）, log（探索记录）, level（敌人等级）, enc（上次的遭遇） }
+ * 玩的时候每个操作、每场战斗结算都自动写回当前空位。 */
+const TRPG_SLOT_COUNT = 3;
+const TRPG_SLOTS_KEY = "anterscale-trpg-slots";
+function trpgReadSlots() {
+  let arr = [];
+  try { arr = JSON.parse(localStorage.getItem(TRPG_SLOTS_KEY) || "[]") || []; } catch (e) { arr = []; }
+  if (!Array.isArray(arr)) arr = [];
+  // 旧版只有一份队伍记忆：第一次打开时放进空位 1
+  if (!arr.some(Boolean)) {
+    try {
+      const old = localStorage.getItem("anterscale-campaign");
+      if (old) {
+        let log = [];
+        try { log = JSON.parse(localStorage.getItem("anterscale-trpg-log") || "[]"); } catch (e) {}
+        arr[0] = { name: "团 1", at: Date.now(), campaign: JSON.parse(old), log, level: 1, enc: null };
+        localStorage.setItem(TRPG_SLOTS_KEY, JSON.stringify(arr));
+      }
+    } catch (e) {}
+  }
+  while (arr.length < TRPG_SLOT_COUNT) arr.push(null);
+  return arr.slice(0, TRPG_SLOT_COUNT);
+}
+function trpgWriteSlot(i, data) {
+  const arr = trpgReadSlots();
+  arr[i] = data ? JSON.parse(JSON.stringify(Object.assign({}, data, { at: Date.now() }))) : null;
+  try { localStorage.setItem(TRPG_SLOTS_KEY, JSON.stringify(arr)); return true; } catch (e) { return false; }
+}
+function trpgClearSlot(i) { return trpgWriteSlot(i, null); }
+/** 读进来的存档文件是否像样 */
+function trpgValidSlot(s) {
+  return !!(s && typeof s === "object" && (s.campaign == null || typeof s.campaign === "object") && (s.log == null || Array.isArray(s.log)));
+}
+/** 空位卡片上显示的摘要 */
+function trpgSlotSummary(s) {
+  if (!s) return null;
+  const c = s.campaign || {};
+  const kits = (c.partyKits && c.partyKits.length) ? c.partyKits : (c.party || []).map(p => p.kit);
+  const cards = typeof livePartyCards === "function" ? livePartyCards() : [];
+  const party = kits.map(k => {
+    const p = (c.party || []).find(x => x.kit === k) || {};
+    const card = cards.find(x => x.kit === k);
+    return `${card ? card.name : k} Lv${p.level || 1}`;
+  });
+  return { name: s.name || "未命名", party, day: (c.ledger && c.ledger.day) || 1, kuizhi: Number(c.kuizhi) || 0, at: s.at || 0 };
+}
