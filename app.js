@@ -3616,6 +3616,8 @@ function performRetreat(rearguardId) {
 /** 玩家手册第二章：坚毅生命的具体数值对玩家永远不可见。游戏版（game.html 设 GAME_MODE）
  *  只说「受损 / 恢复了一些」；主持人计算器照常写数字。 */
 function shpHidden() {
+  // 跑团模式由主持人操作：坚毅生命照常显示
+  if (typeof TRPG !== "undefined" && TRPG.active) return false;
   return typeof GAME_MODE !== "undefined" && !!GAME_MODE;
 }
 

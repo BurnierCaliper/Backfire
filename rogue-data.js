@@ -206,30 +206,14 @@ const ROGUE_SHOP = [
 ];
 
 /* 材料（物品表的价格）。单局里升级不收实物材料，按这张表折成奎支。 */
-const ROGUE_MATERIALS = {
-  metal:   { name: "金属",     price: 1000 },
-  alloy:   { name: "精炼合金", price: 5000 },
-  polymer: { name: "聚合材料", price: 10000 },
-  crystal: { name: "稀有晶体", price: 50000 },    // 黑市售价
-  heart:   { name: "赫心结晶", price: 100000 }    // 黑市售价
-};
+const ROGUE_MATERIALS = HANDBOOK_MATERIALS;   // 与跑团模式共用（trpg-data.js）
 
 /* 武器升级表（照设定：升到某一级要的材料 + 工匠的加工费）。
  * 4 级以下本来可以自己在工作站升，没有加工费；5 级起只能找武器工匠，加工费是设定里「××奎支上下」的数。
  * 单局里实际收费 = (材料按物品表折价 + 加工费 × 工匠的加工费倍率) × ROGUE_CONFIG.smithPriceScale，按 100 取整。 */
 const ROGUE_SMITH = {
-  maxLevel: 10,
-  recipe: {
-    2:  { mats: { metal: 3 } },
-    3:  { mats: { metal: 6 } },
-    4:  { mats: { alloy: 1, metal: 1 } },
-    5:  { mats: { alloy: 2, metal: 2 },    labor: 8000 },
-    6:  { mats: { polymer: 1, alloy: 3 },  labor: 10000 },
-    7:  { mats: { polymer: 2, alloy: 3 },  labor: 12000 },
-    8:  { mats: { crystal: 1, polymer: 3 }, labor: 15000 },
-    9:  { mats: { crystal: 2, polymer: 3 }, labor: 17000 },
-    10: { mats: { heart: 1, crystal: 3 },  labor: 20000 }
-  }
+  maxLevel: HANDBOOK_WEAPON_UPGRADE.maxLevel,
+  recipe: HANDBOOK_WEAPON_UPGRADE.recipe       // 与跑团模式共用（trpg-data.js）
 };
 
 /* 武器工匠（设定照作者给的人物表）。

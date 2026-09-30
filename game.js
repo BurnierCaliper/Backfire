@@ -1853,6 +1853,8 @@
       ledgerApplyToField(lnotes);
       lnotes.forEach(t => addLogPhase(t));
     }
+    // 跑团模式按手册：距上次长休的小时数决定力竭（20 / 40 / 60 小时）
+    if (typeof TRPG !== "undefined" && TRPG.active && typeof exhaustTier === "function") state.exhaustTier = Math.min(3, exhaustTier());
     const partyN = typeof syncPartySizeFromField === "function" ? syncPartySizeFromField() : liveHeroCount();
     // 单局状态：把上一场保留下来的血量、坚毅、耐久盖回去
     if (typeof RUN !== "undefined" && RUN.active) RUN.apply();
@@ -2123,14 +2125,23 @@
         if (r.blade) keep.blade = r.blade;
         return keep;
       })(),
-      roles: u.roles || null
+      roles: u.roles || null,
+      // 跑团模式：武器等级、属性点、加过的属性、手册里还没做成系统的奖励（熟练项、专长……）
+      weaponLevels: u.weaponLevels ? JSON.parse(JSON.stringify(u.weaponLevels)) : null,
+      attrPoints: Number(u.attrPoints) || 0,
+      attrPicks: (u.attrPicks || []).slice(),
+      notes: u.levelNotes ? JSON.parse(JSON.stringify(u.levelNotes)) : null
     };
   }
 
   function rememberCampaign() {
     const party = state.units.filter(u => u.isPlayer && !isWeaponUnit(u)).map(packHero);
+    // 换下场的队员也留着记忆（跑团模式换人后再换回来，等级、经验不丢）
+    const prev = (G.campaign && G.campaign.party) || [];
+    prev.forEach(s => { if (!party.some(x => x.kit === s.kit)) party.push(s); });
     G.campaign = {
       party,
+      partyKits: G.partyKits.slice(),
       kuizhi: Number(state.kuizhi) || 0,
       items: JSON.parse(JSON.stringify((ensureBag().items) || [])),
       ledger: typeof LEDGER !== "undefined" ? LEDGER.save() : null
@@ -2161,7 +2172,16 @@
       if (s.attrs) u.attrs = s.attrs;
       if (s.roles) u.roles = s.roles;
       if (s.resources) u.resources = Object.assign(u.resources || {}, s.resources);
+      if (s.attrPoints != null) u.attrPoints = s.attrPoints;
+      if (s.attrPicks) u.attrPicks = s.attrPicks.slice();
+      if (s.notes) u.levelNotes = s.notes;
       if (typeof applyLevelStats === "function") applyLevelStats(u);
+      if (s.weaponLevels && typeof setOwnedWeaponLevel === "function") {
+        Object.keys(s.weaponLevels).forEach(k => {
+          const quiet = window.appendLog; window.appendLog = () => {};   // 恢复存档时不写「须找工匠」提示
+          try { setOwnedWeaponLevel(u, k, s.weaponLevels[k]); } finally { window.appendLog = quiet; }
+        });
+      }
       u.shpMax = s.shpMax || u.shpMax;
       u.shp = u.shpMax;
       if (s.personalAtk != null) u.personalAtk = s.personalAtk;
@@ -2878,6 +2898,8 @@
   G.snapAll = snapAll;
   G.setupBattle = setupBattle;
   G.startRogueBattle = startRogueBattle;
+  G.rememberCampaign = rememberCampaign;
+  G.loadCampaignMem = loadCampaignMem;
   G.showPendingIntro = () => { if (G.pendingIntro && !state.combatStarted) battleIntro(G.pendingIntro); };
   G.armSkill = armSkill;
   G.gameSkills = gameSkills;

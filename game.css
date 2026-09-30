@@ -1394,3 +1394,69 @@ details.smith .sm-prog.ready { color: var(--gold); font-weight: 600; }
 .t-weather.inline { display: inline-block; margin-left: 10px; font-size: 13px; }
 /* 开战大字行数多了：缩小一点 */
 .battle-intro .bi-line:nth-child(n+6) { font-size: 40px; }
+
+/* ---------- 跑团模式：探索环节 ---------- */
+.scr-trpg {
+  position: fixed; inset: 0; z-index: 35;
+  display: flex; flex-direction: column;
+  background: linear-gradient(180deg, var(--ground-1), var(--ground-0));
+  color: var(--bone); font-family: var(--ui);
+}
+.tr-top {
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--ground-0);
+  font-size: 13px; color: var(--muted);
+}
+.tr-top h2 { margin: 0; font-size: 18px; letter-spacing: .08em; color: var(--bone); }
+.tr-top b { color: var(--bone); font-family: var(--num); }
+.tr-top .warn { color: var(--foe); }
+.tr-top .g-btn { height: 34px; font-size: 14px; }
+.tr-supplies { display: flex; gap: 14px; }
+.tr-main {
+  flex: 1; min-height: 0;
+  display: grid; grid-template-columns: 250px minmax(0, 1fr) 300px; gap: 16px;
+  width: 100%; max-width: 1500px; margin: 0 auto; padding: 16px; box-sizing: border-box;
+}
+.tr-party, .tr-body, .tr-log { min-height: 0; overflow-y: auto; }
+.tr-party { display: flex; flex-direction: column; gap: 8px; }
+.tr-party .rh-row { grid-template-columns: 1fr auto; }
+.tr-attn { color: var(--gold); }
+.tr-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 12px; border-bottom: 1px solid var(--line); }
+.tr-tab {
+  padding: 8px 16px; background: none; border: 0; border-bottom: 2px solid transparent;
+  color: var(--muted); font: inherit; font-size: 14px; cursor: pointer;
+}
+.tr-tab:hover { color: var(--bone); }
+.tr-tab.on { color: var(--bone); border-bottom-color: var(--gold); }
+.tr-panel h3 { margin: 16px 0 8px; font-size: 15px; letter-spacing: .06em; }
+.tr-panel h3:first-child { margin-top: 0; }
+.tr-panel input, .tr-panel select {
+  height: 28px; padding: 0 6px; box-sizing: border-box;
+  background: var(--ground-0); color: var(--bone); border: 1px solid var(--line); border-radius: 3px; font: inherit; font-size: 13px;
+}
+.tr-panel .g-btn { height: 30px; }
+.tr-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 0 0 8px; font-size: 13px; }
+.tr-picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 6px; margin-bottom: 10px; }
+.tr-pick {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding: 6px 10px; background: var(--plate); border: 1px solid var(--line); border-radius: 4px; font-size: 13px; cursor: pointer;
+}
+.tr-pick small { flex-basis: 100%; font-size: 11px; color: var(--muted); }
+.tr-up { padding: 10px 12px; margin-bottom: 8px; background: var(--plate); border: 1px solid var(--line); border-radius: 4px; font-size: 13px; }
+.tr-up .r-hint { margin: 4px 0 8px; }
+.tr-up .bad { color: var(--foe); }
+.tr-panel .shop-row { grid-template-columns: minmax(0, 1fr) 70px 64px auto auto auto; }
+.tr-log { display: flex; flex-direction: column; background: var(--ground-0); border: 1px solid var(--line); border-radius: 4px; }
+.tr-log ul { list-style: none; margin: 0; padding: 8px 12px; font-size: 13px; line-height: 1.6; user-select: text; -webkit-user-select: text; }
+.tr-log li { padding: 6px 0; border-bottom: 1px solid rgba(61, 51, 43, .6); }
+.tr-log li small { display: block; color: var(--faint); font-size: 11px; }
+@media (max-width: 1000px) {
+  .scr-trpg { overflow-y: auto; }
+  .tr-main { grid-template-columns: 1fr; flex: none; }
+  .tr-party, .tr-body, .tr-log { overflow: visible; }
+}
+/* 战斗画面里回探索环节的按钮只在跑团模式出现 */
+#g-explore-back, #g-to-explore { display: none; }
+body.trpg #g-explore-back, body.trpg #g-to-explore { display: inline-block; }
+body.trpg #g-rest { display: none !important; }   /* 跑团模式在探索环节里休息 */
+body.trpg #g-to-explore { border-color: var(--gold); }

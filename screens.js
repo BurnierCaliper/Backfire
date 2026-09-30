@@ -1,7 +1,7 @@
 /* 角鳞 · 界面切换
  *
  * 游戏由几块「界面」组成，同一时间只显示一块：
- *   title    标题（新的一局 / 继续 / 战斗原型 / 跑团版计算器）
+ *   title    标题（新的一局 / 继续 / 跑团模式 / 跑团版计算器）
  *   battle   战斗（game.js 那一整块）
  * 之后的任务板、任务节点、休整、幕间选择等，都是在这里 register 一块新界面。
  *
@@ -76,7 +76,7 @@ const Screens = (function () {
     $("t-new").onclick = () => RunFlow.start();
     $("t-continue").onclick = () => RunFlow.resume();
     $("t-sandbox").onclick = () => {
-      // 战斗原型用跑团版的规则：正常经验曲线；如果画面上还留着单局里的战斗，换回原型战斗
+      // 没加载 trpg-ui.js 时的后备：直接进战斗画面（trpg-ui.js 会把这个按钮换成进探索环节）
       if (typeof Rogue !== "undefined") Rogue.leaveRunMode();
       if (window.GAME && GAME.rogue && GAME.setupBattle) GAME.setupBattle(1);
       Screens.show("battle");
