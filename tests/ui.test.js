@@ -326,6 +326,38 @@ test("高能自爆：震屏、大字、爆炸声、大号数字", async (t) => {
   assert.deepEqual(o.errors, []);
 });
 
+test("攻击效果打出大字：属性专属按属性上色，通用的灰色；多段攻击每个字只打一次", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await newTrpg(page);
+  await startBattle(page);
+  const ruby = await selectHero(page, "ruby");
+  await page.evaluate((id) => {
+    Math.random = () => 0.999;
+    const r = state.units.find(u => u.id === id);
+    r.resources.nextAtkFx = ["combust", "bolt"];
+    r.resources.smashNext = true;
+    r.resources.weakNext = true;
+    window.__words = [];
+    new MutationObserver(ms => ms.forEach(m => m.addedNodes.forEach(n => {
+      if (n.classList && n.classList.contains("fxword")) window.__words.push(n.className + "|" + n.textContent + "|" + getComputedStyle(n).color);
+    }))).observe(document.body, { childList: true, subtree: true });
+  }, ruby);
+  await page.keyboard.press("1");   // 瑞比普通攻击：两段
+  await page.waitForFunction(() => GAME.arm && GAME.arm.mode === "unit");
+  const foe = await page.evaluate(() => [...GAME.arm.map.entries()].find(([id, c]) => !c.invalid && !String(id).includes(":"))[0]);
+  await page.click(`.unit-wrap[data-id="${foe}"]`);
+  await page.waitForFunction(() => window.__words.length >= 4, null, { timeout: 15000 });
+  await page.waitForTimeout(1500);
+  const words = await page.evaluate(() => window.__words);
+  const count = (name) => words.filter(w => w.split("|")[1] === name).length;
+  for (const n of ["爆燃", "雷击", "猛击", "弱点特效"]) assert.equal(count(n), 1, n + " 应该正好打一次：" + words.join(" / "));
+  assert.ok(words.some(w => /fx-fire\|爆燃/.test(w)));
+  assert.ok(words.some(w => /fx-electric\|雷击/.test(w)));
+  assert.ok(words.some(w => /fx-generic\|猛击\|rgb\(138, 143, 150\)/.test(w)), "通用效果应该是灰色");
+  assert.deepEqual(o.errors, []);
+});
+
 test("音效：七种属性都能合成，有声、不削顶、不出错", async (t) => {
   const o = await open(t); if (!o) return;
   const r = await o.page.evaluate(async () => {

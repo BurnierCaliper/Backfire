@@ -4717,6 +4717,17 @@ const ATKFX = {
   diffract: { name: "衍射", element: "harmonic" }
 };
 
+/** 一次攻击带着的攻击效果（画面上打字用）：通用的 element 为 "generic" */
+function attackFxWords(flags) {
+  flags = flags || {};
+  const out = [];
+  if (flags.pierce) out.push({ name: "穿刺", element: "generic" });
+  if (flags.smash) out.push({ name: "猛击", element: "generic" });
+  if (flags.weak) out.push({ name: "弱点特效", element: "generic" });
+  (flags.atkFx || []).forEach(id => { if (ATKFX[id]) out.push({ name: ATKFX[id].name, element: ATKFX[id].element }); });
+  return out;
+}
+
 function hungAtkFx(unit) {
   if (!unit || !unit.resources) return [];
   const list = unit.resources.nextAtkFx;
@@ -5021,8 +5032,11 @@ function dealTo(attacker, target, opt) {
     flags.dr50 = true;
     opt.baseBreak = 0;
   }
-  if (opt.smash || (attacker.resources && attacker.resources.smashNext)) flags.smash = true;
-  if (attacker.resources && attacker.resources.pierceNext) {
+  // 挂在「下一击」上的猛击 / 穿刺 / 弱点特效只作用于真正的攻击行动，
+  // 不作用于这一击派生出来的环境伤害（雷击转移、爆燃溢出、反弹……），也不会被它们提前用掉
+  const realAttack = flags.action !== false && !flags.environment;
+  if (opt.smash || (realAttack && attacker.resources && attacker.resources.smashNext)) flags.smash = true;
+  if (realAttack && attacker.resources && attacker.resources.pierceNext) {
     flags.pierce = true;
     attacker.resources.pierceNext = false;
   }
@@ -5034,7 +5048,7 @@ function dealTo(attacker, target, opt) {
   if (target && target.instant && target.instant.doubleBreak) {
     opt.baseBreak = (opt.baseBreak != null ? opt.baseBreak : 1) * 2;
   }
-  if (attacker.resources && attacker.resources.weakNext) {
+  if (realAttack && attacker.resources && attacker.resources.weakNext) {
     flags.weak = true;
     attacker.resources.weakNext = false;
   }
@@ -5188,6 +5202,10 @@ function dealTo(attacker, target, opt) {
     }
     if ((res.intended || res.total || 0) > 0) spawnFloater(target, res.intended || res.total, ele);
     if ((res.extraHarmonic || 0) > 0) spawnFloater(target, res.extraHarmonic, ele);
+    // 画面：这一击带的攻击效果打出大字（属性专属的用属性颜色，穿刺 / 猛击 / 弱点特效用灰色）
+    if (flags.action !== false && !flags.environment && typeof attackConnected === "function" && attackConnected(res, flags)) {
+      attackFxWords(flags).forEach(w => spawnPopup(target, { kind: "fxword", text: w.name, element: w.element }));
+    }
     if ((res.breakDealt || 0) > 0 && flags.block !== "assistOk") popBreak(target, res.breakDealt, ele);
     if (flags.block === "assistOk" && (res.helperBreak || 0) > 0) {
       const helper = unitById(flags.blockHelperId);

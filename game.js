@@ -683,6 +683,26 @@
     fx().appendChild(d);
     realTimeout(() => d.remove(), (opts.dur || 0.9) * 1000 + 60);
   }
+  /** 攻击效果大字：倾斜着从目标身上缓缓飞出、慢慢变大一点、再淡出。n 是这次行动里第几个字，用来错开位置 */
+  function fxWord(id, text, element, n) {
+    const p = centerOf(id);
+    if (!p) return;
+    const d = el("div", "fxword fx-" + (element || "generic"));
+    d.textContent = text;
+    // 在铭牌上沿排成左右两列、一行一行往上叠：不挡铭牌中间的伤害数字，也不压到隔壁的铭牌
+    const side = n % 2 ? -1 : 1;
+    const row = Math.floor((n - 1) / 2);
+    const tilt = side * (6 + Math.random() * 7);                  // 往外侧倾斜 6°–13°
+    d.style.left = (p.x + side * p.r.width * 0.28) + "px";
+    d.style.top = (p.r.top - 8 - row * 52) + "px";
+    d.style.setProperty("--tilt", tilt.toFixed(1) + "deg");
+    d.style.setProperty("--dx", (side * (30 + Math.random() * 16)).toFixed(0) + "px");
+    // 单独一层，压在顶部的技能横幅之上（顶排敌人的字不会被横幅挡住）
+    let layer = $("g-fxw");
+    if (!layer) { layer = el("div", "g-fx g-fxw"); layer.id = "g-fxw"; document.body.appendChild(layer); }
+    layer.appendChild(d);
+    realTimeout(() => d.remove(), 1900);
+  }
   function stamp(id, text, cls) {
     const p = centerOf(id);
     if (!p) return;
@@ -862,6 +882,7 @@
     };
     // 连击中途就打出的失衡先记下，等整串伤害放完再统一盖「失衡」章、响失衡声（以前这种会被漏掉）
     const pendingStun = [];
+    const shownWords = new Set();
     const deferStun = (bs) => bs.forEach(b => { if (b.kind === "stun" && !pendingStun.some(x => x.id === b.id)) pendingStun.push(b); });
     try {
       for (let i = 0; i < pops.length; i++) {
@@ -882,6 +903,14 @@
           await wait(chain ? 30 : 45);
           deferStun(beatsBefore); await playBeats(beatsBefore.filter(b => b.kind !== "stun"));
           await wait(chain ? 40 : 55);
+        } else if (e.kind === "fxword") {
+          // 攻击效果大字：同一次行动里同一个目标的同一个效果只打一次（多段攻击不重复）
+          const key = e.unitId + "|" + e.text;
+          if (!shownWords.has(key)) {
+            shownWords.add(key);
+            fxWord(e.unitId, e.text, e.element, shownWords.size);
+            await wait(110);
+          }
         } else if (e.kind === "highboom") {
           // 高能自爆：震屏 + 大字 + 爆炸声 + 大号数字，停久一点让人看清
           const app = $("g-app");

@@ -1506,3 +1506,29 @@ body.trpg .trpg-only { display: flex !important; }
   30%, 50%, 70% { transform: translate(-8px, 4px); }
   40%, 60% { transform: translate(8px, -4px); }
 }
+/* 攻击效果大字：倾斜、缓缓飞出、慢慢变大一点后淡出；颜色跟属性走，通用效果灰色 */
+.fxword {
+  position: absolute; pointer-events: none; white-space: nowrap;
+  font-size: 30px; font-weight: 900; letter-spacing: .06em;
+  color: var(--fxc, #8a8f96);
+  text-shadow: 2px 2px 0 #1b1f24, -2px -2px 0 #1b1f24, 2px -2px 0 #1b1f24, -2px 2px 0 #1b1f24,
+    0 0 14px color-mix(in srgb, var(--fxc, #8a8f96) 70%, transparent);
+  transform: translate(-50%, -50%) rotate(var(--tilt, -8deg)) scale(.9);
+  animation: fxWordOut 1.8s cubic-bezier(.22, .8, .3, 1) forwards;
+  z-index: 3;
+}
+@keyframes fxWordOut {
+  0%   { opacity: 0; transform: translate(-50%, -50%) rotate(var(--tilt)) scale(.85); }
+  12%  { opacity: 1; transform: translate(calc(-50% + var(--dx) * .15), calc(-50% - 8px)) rotate(var(--tilt)) scale(1); }
+  70%  { opacity: 1; }
+  100% { opacity: 0; transform: translate(calc(-50% + var(--dx)), calc(-50% - 20px)) rotate(var(--tilt)) scale(1.14); }
+}
+.fxword.fx-fire     { --fxc: var(--fire); }
+.fxword.fx-ice      { --fxc: var(--icee); }
+.fxword.fx-electric { --fxc: var(--electric); }
+.fxword.fx-acid     { --fxc: var(--acid); }
+.fxword.fx-energy   { --fxc: var(--energy); }
+.fxword.fx-physical { --fxc: var(--physical); }
+.fxword.fx-harmonic { --fxc: var(--harmonic); }
+.fxword.fx-generic  { --fxc: #8a8f96; }
+.g-fx.g-fxw { z-index: 41; }   /* 攻击效果大字：在技能横幅（40）之上 */

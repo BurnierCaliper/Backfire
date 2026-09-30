@@ -146,3 +146,18 @@ test("高能自爆：溢出 = 高能值 − 剩余生命，算重击", () => {
   assert.ok(foe.overkill >= 29, "溢出 " + foe.overkill);
   assert.equal(foe.killBig, true);
 });
+
+test("挂在下一击的猛击 / 穿刺 / 弱点特效不作用于环境伤害，也不会被它提前用掉", () => {
+  const { c, st, kolt } = field();
+  const foe = st.units.find(u => !u.isPlayer);
+  foe.zone = 1;
+  kolt.resources.smashNext = true; kolt.resources.pierceNext = true; kolt.resources.weakNext = true;
+  const env = c.dealTo(kolt, foe, { atk: 0, mult: 0, flat: 2, element: "electric", baseBreak: 0,
+    flags: { action: false, environment: true, blockResolved: true, atkFx: [] } });
+  assert.ok(!env.res.flags.smash && !env.res.flags.pierce && !env.res.flags.weak, "环境伤害不该带猛击 / 穿刺 / 弱点特效");
+  assert.equal(kolt.resources.pierceNext, true);
+  assert.equal(kolt.resources.weakNext, true);
+  const hit = c.dealTo(kolt, foe, { atk: 0, mult: 0, flat: 2, element: "physical", baseBreak: 1, flags: { action: true, blockResolved: true } });
+  assert.ok(hit.res.flags.smash && hit.res.flags.pierce && hit.res.flags.weak, "真正的攻击才带上");
+  assert.equal(kolt.resources.smashNext, false);
+});
