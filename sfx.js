@@ -164,6 +164,34 @@
     }
   };
 
+  /* ---------- 格挡成功：钢铁相撞（只狼拼刀 / 法环弹反那种「铛——」） ----------
+   * 一下极短的宽频撞击 + 钢条的非谐和泛音长鸣（高的先消失）+ 高频「锵」的金属擦响
+   * + FM 合成的金属尖响 + 一点低频分量让它有重量。 */
+  function parryVoice(t, v) {
+    // 撞击瞬间
+    noise(t, 0.03, filter("highpass", 1800, 0.7, gainEnv(t, 0.001, 0.55 * v, 0.028)));
+    osc("sine", t, 0.05, 220, 90, gainEnv(t, 0.002, 0.35 * v, 0.06));
+    // 钢条的振动模式：1 : 2.76 : 5.40 : 8.93，再各加一条略微失谐的，互相拍出「嗡嗡」的金属光泽
+    const f0 = 1180 + Math.random() * 60;
+    [[1, 0.42, 1.7], [2.76, 0.3, 1.1], [5.40, 0.2, 0.6], [8.93, 0.12, 0.32]].forEach(([r, a, d]) => {
+      osc("sine", t, d, f0 * r, f0 * r, gainEnv(t, 0.001, a * 0.62 * v, d));
+      osc("sine", t, d * 0.9, f0 * r * 1.006, f0 * r * 1.006, gainEnv(t, 0.001, a * 0.34 * v, d * 0.9));
+    });
+    // FM 金属尖响（「锵」）
+    const car = ctx.createOscillator(); car.frequency.value = 2350;
+    const mod = ctx.createOscillator(); mod.frequency.value = 3290;
+    const idx = ctx.createGain();
+    idx.gain.setValueAtTime(2600, t); idx.gain.exponentialRampToValueAtTime(40, t + 0.25);
+    mod.connect(idx); idx.connect(car.frequency);
+    car.connect(gainEnv(t, 0.001, 0.22 * v, 0.3));
+    car.start(t); mod.start(t); car.stop(t + 0.35); mod.stop(t + 0.35);
+    // 刀刃擦过的高频「嘶——」
+    const shing = filter("bandpass", 7000, 3, gainEnv(t + 0.005, 0.004, 0.3 * v, 0.28));
+    shing.frequency.setValueAtTime(8200, t); shing.frequency.exponentialRampToValueAtTime(5200, t + 0.28);
+    noise(t, 0.3, shing);
+  }
+  VOICES.parry = parryVoice;
+
   function play(element, opt) {
     opt = opt || {};
     if (!enabled()) return false;
@@ -172,7 +200,7 @@
     if (c.state === "suspended") c.resume().catch(() => {});
     const el = VOICES[element] ? element : "physical";
     const now = c.currentTime;
-    if (last[el] != null && now - last[el] < 0.06) return false;
+    if (last[el] != null && now - last[el] < (opt.throttle || 0.06)) return false;
     last[el] = now;
     const v = opt.big ? 1.25 : 1;
     try {
@@ -187,7 +215,7 @@
     const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
     if (!OAC) return Promise.resolve(null);
     const saved = [ctx, master, noiseBuf];
-    const off = new OAC(1, Math.round(44100 * 0.8), 44100);
+    const off = new OAC(1, Math.round(44100 * 1.4), 44100);
     try {
       ctx = off;
       master = off.createGain(); master.gain.value = 0.55; master.connect(off.destination);
@@ -201,5 +229,8 @@
     return off.startRendering().then(buf => buf.getChannelData(0));
   }
 
-  window.Sfx = { render, play, enabled, setEnabled, ELEMENTS, NAMES: { physical: "物理", fire: "火", ice: "冰", electric: "电", acid: "酸", energy: "能量", harmonic: "谐波" } };
+  /** 格挡成功的钢铁碰撞声 */
+  function parry() { return play("parry", { throttle: 0.15 }); }
+
+  window.Sfx = { render, parry, play, enabled, setEnabled, ELEMENTS, NAMES: { physical: "物理", fire: "火", ice: "冰", electric: "电", acid: "酸", energy: "能量", harmonic: "谐波" } };
 })();

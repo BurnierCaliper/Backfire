@@ -826,6 +826,14 @@
     if (lungeAtk) motions.push(lunge(meta.actorId, meta.targetId));
     if (meta.blockerId) motions.push(lunge(meta.blockerId, meta.actorId));
     if (motions.length) await Promise.all(motions);
+    // 格挡成功：兵刃相接的一声「铛——」+ 火花（玩家的协助格挡、空手格挡，敌人的格挡都算）
+    const parried = !!meta.blockerId || tape.some(e => e.type === "log" && /格挡[^\n]*→ 成功/.test(e.text));
+    if (parried) {
+      if (window.Sfx) Sfx.parry();
+      const pc = cards.get(meta.blockerId || meta.targetId);
+      if (pc) { pc.wrap.classList.remove("parry"); void pc.wrap.offsetWidth; pc.wrap.classList.add("parry"); }
+      await wait(90);
+    }
     const firstHit = pops.find(e => e.kind === "dmg" && Number(e.value) > 0);
     if (firstHit) hit(firstHit.unitId, firstHit.element);
     else if (meta.forceLunge && meta.targetId && !(meta.blockerId)) {
@@ -2842,7 +2850,8 @@
     paintSfx();
     const pv = $("g-sfx-preview");
     if (pv && window.Sfx) {
-      pv.innerHTML = "试听音效：" + Sfx.ELEMENTS.map(e => `<button class="g-btn small e-${e}" data-sfx="${e}">${Sfx.NAMES[e]}</button>`).join("");
+      pv.innerHTML = "试听音效：" + Sfx.ELEMENTS.map(e => `<button class="g-btn small e-${e}" data-sfx="${e}">${Sfx.NAMES[e]}</button>`).join("") +
+        `<button class="g-btn small" data-sfx="parry">格挡成功</button>`;
       pv.querySelectorAll("[data-sfx]").forEach(b => { b.onclick = (ev) => Sfx.play(b.dataset.sfx, { big: ev.shiftKey }); });
     }
     $("g-bs-close").onclick = () => { $("g-bs-sheet").classList.remove("show"); G.bsOpen = false; };

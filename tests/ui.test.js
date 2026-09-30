@@ -206,6 +206,27 @@ test("单局：选队伍出发，任务板正常显示", async (t) => {
   assert.deepEqual(o.errors, []);
 });
 
+test("格挡成功：敌方队长·牛格挡住攻击时，响起钢铁碰撞声", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await newTrpg(page);
+  await page.evaluate(() => { GAME.enemyPlan = [{ id: "captain_ox", lv: 1, zone: 2 }, { id: "thug_knife", lv: 1, zone: 2 }]; GAME.lastEncounter = null; });
+  await startBattle(page);
+  await page.evaluate(() => {
+    window.__parry = 0;
+    const orig = Sfx.parry;
+    Sfx.parry = () => { window.__parry++; return orig(); };
+    Math.random = () => 0;   // d100 掷出 1：格挡必定成功
+  });
+  await selectHero(page, "ruby");
+  await page.keyboard.press("1");
+  await page.waitForFunction(() => GAME.arm && GAME.arm.mode === "unit");
+  const thug = await page.evaluate(() => state.units.find(u => u.kit === "thug_knife").id);
+  await page.click(`.unit-wrap[data-id="${thug}"]`);
+  await page.waitForFunction(() => window.__parry > 0 && GAME.depth === 0, null, { timeout: 15000 });
+  assert.deepEqual(o.errors, []);
+});
+
 test("音效：七种属性都能合成，有声、不削顶、不出错", async (t) => {
   const o = await open(t); if (!o) return;
   const r = await o.page.evaluate(async () => {
@@ -224,6 +245,16 @@ test("音效：七种属性都能合成，有声、不削顶、不出错", async
     assert.ok(v.peak < 1, e + " 削顶");
   }
   assert.ok(r.ice.zc > r.physical.zc * 5, "冰应该比物理清亮得多");
+  // 格挡成功的钢铁声：明亮、余音长
+  const parry = await o.page.evaluate(async () => {
+    const d = await Sfx.render("parry");
+    let peak = 0, lastLoud = 0, zc = 0;
+    for (let i = 0; i < d.length; i++) { const a = Math.abs(d[i]); peak = Math.max(peak, a); if (a > 0.01) lastLoud = i; if (i && (d[i - 1] < 0) !== (d[i] < 0)) zc++; }
+    return { peak, ring: lastLoud / 44100, zcr: zc / (d.length / 44100) };
+  });
+  assert.ok(parry.peak > 0.05 && parry.peak < 1, "格挡声音量 " + parry.peak);
+  assert.ok(parry.ring > 0.5, "钢铁声应该有余音：" + parry.ring);
+  assert.ok(parry.zcr > 1500, "钢铁声应该明亮：" + parry.zcr);
   // 开关
   await o.page.click("#t-sandbox");
   await o.page.click('[data-new="0"]');

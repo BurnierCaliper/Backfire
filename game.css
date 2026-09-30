@@ -1482,3 +1482,9 @@ body.trpg #g-save { display: none !important; }   /* 跑团模式用自己的存
 .trpg-only { display: none !important; }
 body.trpg .trpg-only { display: flex !important; }
 .sfx-preview { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 12px; font-size: 13px; color: var(--muted); }
+/* 格挡成功：一闪金白色火花（用 filter，不占 ::after——那是选中底板） */
+.unit-wrap.parry { animation: parry-spark .34s ease-out; }
+@keyframes parry-spark {
+  0%   { filter: drop-shadow(0 0 2px #fff8e0) drop-shadow(0 0 16px rgba(255, 214, 120, .95)) brightness(1.35); }
+  100% { filter: drop-shadow(0 2px 3px rgba(20, 30, 40, .28)); }
+}
