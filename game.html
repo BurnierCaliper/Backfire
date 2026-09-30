@@ -103,6 +103,9 @@
     <label style="font-size:13px;color:var(--muted);display:flex;gap:6px;align-items:center">敌人等级
       <select id="g-level"><option value="1">Lv1</option><option value="2">Lv2</option><option value="3">Lv3</option><option value="4">Lv4</option><option value="5">Lv5</option><option value="6">Lv6</option><option value="7">Lv7</option><option value="8">Lv8</option><option value="9">Lv9</option><option value="10">Lv10</option><option value="11">Lv11</option><option value="12">Lv12</option><option value="13">Lv13</option><option value="14">Lv14</option><option value="15">Lv15</option><option value="16">Lv16</option><option value="17">Lv17</option><option value="18">Lv18</option><option value="19">Lv19</option><option value="20">Lv20</option><option value="21">Lv21</option><option value="22">Lv22</option><option value="23">Lv23</option><option value="24">Lv24</option><option value="25">Lv25</option></select>
     </label>
+    <label class="trpg-only" style="font-size:13px;color:var(--muted);gap:6px;align-items:center" title="主持人手册第三章：遭遇战敌人先动，经验双倍；困难遭遇三倍">经验
+      <select id="g-xp-mult"><option value="1">×1</option><option value="2">×2 遭遇战</option><option value="3">×3 困难遭遇</option></select>
+    </label>
     <span class="g-weather" id="g-enc-name">遭遇 外城区巷战</span>
     <button class="g-btn" id="g-title" title="回到标题界面">标题</button>
     <button class="g-btn" id="g-party-cfg">队伍配置</button>
@@ -117,6 +120,7 @@
     <button class="g-btn" id="g-restart">重新开始</button>
     <button class="g-btn" id="g-to-explore" title="跑团模式：回到探索环节">探索环节</button>
     <button class="g-btn" id="g-fast" aria-pressed="false" title="快捷键 F">演出 1×</button>
+    <button class="g-btn" id="g-sfx" aria-pressed="true" title="攻击音效开关（战斗「后台」里可以试听）">音效 开</button>
     <a class="g-btn" href="index.html" style="display:flex;align-items:center;text-decoration:none">打开计算器</a>
   </header>
 
@@ -329,6 +333,7 @@
   <div class="sheet-card">
     <div class="sheet-head"><h3>后台 · 主持人</h3><button class="g-btn" id="g-bs-close">关闭</button></div>
     <p class="sheet-k">改任何单位的血量、架势，安排攻击或环境伤害。等级、经验、武器、坚毅生命也在这里。</p>
+    <div class="sfx-preview" id="g-sfx-preview" title="按住 Shift 点是重击版"></div>
     <div id="g-bs-mount"></div>
   </div>
 </div>
@@ -912,6 +917,7 @@ window.GAME_MODE = true;
 <script src="trpg.js"></script>
 <script src="rogue-data.js"></script>
 <script src="rogue.js"></script>
+<script src="sfx.js"></script>
 <script src="game.js"></script>
 <script src="screens.js"></script>
 <script src="rogue-ui.js"></script>

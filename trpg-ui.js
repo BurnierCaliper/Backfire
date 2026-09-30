@@ -488,6 +488,17 @@
     Screens.register("trpg", $("scr-trpg"), { onShow: render });
     Screens.register("trpg-slots", $("scr-trpg-slots"), { onShow: renderSlots });
     GAME.onCampaignSaved = () => writeSlotNow();
+    // 战斗结算：这场拿到的经验、奎支、升级写进探索记录
+    GAME.onBattleFinished = (r) => {
+      if (!TRPG.active || slot < 0) return;
+      const head = { win: "战斗胜利", lose: "战斗失败（全员倒地）", retreat: "撤出战斗" }[r.outcome] || "战斗结束";
+      const lines = [`${head}（第 ${r.turn} 回合）：每人获得 ${r.xp} 经验${r.xpMult > 1 ? `（经验 ×${r.xpMult}）` : ""}，掉落 ${r.kuizhi} 奎支（现有 ${Number(state.kuizhi) || 0}）。`];
+      if (r.ups && r.ups.length) lines.push("升级：" + r.ups.join("、") + "。");
+      (r.durNotes || []).forEach(t => lines.push(t));
+      log.push({ stamp: `第 ${LEDGER.day || 1} 天 · 距长休 ${LEDGER.hours || 0} 小时`, lines });
+    };
+    const xm = $("g-xp-mult");
+    if (xm) xm.onchange = () => { state.xpMult = Number(xm.value) || 1; };
     $("tr-slots").onclick = openSlots;
     $("tr-slots-title").onclick = () => { if (TRPG.active && slot >= 0) save(); TRPG.active = false; slot = -1; document.body.classList.remove("trpg"); Screens.show("title"); };
     $("tr-fight").onclick = toBattle;

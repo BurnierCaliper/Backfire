@@ -1479,3 +1479,6 @@ body.trpg #g-save { display: none !important; }   /* 跑团模式用自己的存
 .tr-slot .g-btn { height: 30px; font-size: 13px; }
 .g-gap.is-hover { outline: 2px solid #8a6a32; background: #b8a48f; }
 .unit.device .u-hp, .unit.device .u-hpline { display: none !important; }
+.trpg-only { display: none !important; }
+body.trpg .trpg-only { display: flex !important; }
+.sfx-preview { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 12px; font-size: 13px; color: var(--muted); }

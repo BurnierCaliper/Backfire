@@ -308,11 +308,17 @@ function unspentForLevel(lv) {
 function grantXpToPlayers(amount, reason) {
   amount = Math.floor(Number(amount) || 0);
   if (amount <= 0) return;
-  fieldUnits().filter(u => u.isPlayer && !isWeaponUnit(u) && !u.dead).forEach(u => {
-    u.xp = (u.xp || 0) + amount;
+  const heroes = fieldUnits().filter(u => u.isPlayer && !isWeaponUnit(u) && !u.dead);
+  // 跑团模式照手册第三章：战斗经验「全队平分」（Roguelike 单局按自己的调校，每人拿全额）
+  const split = typeof TRPG !== "undefined" && TRPG.active && heroes.length > 1;
+  const each = split ? Math.ceil(amount / heroes.length) : amount;
+  if (split) appendLog(`${amount} 经验${reason ? "（" + reason + "）" : ""}由 ${heroes.length} 人平分，每人 ${each}。`);
+  heroes.forEach(u => {
+    u.xp = (u.xp || 0) + each;
     const need = xpToNext(u.level);
-    appendLog(`${u.name} 获得 ${amount} 经验${reason ? "（" + reason + "）" : ""}。当前 ${u.xp}/${need || "满级"}`);
+    appendLog(`${u.name} 获得 ${each} 经验${reason && !split ? "（" + reason + "）" : ""}。当前 ${u.xp}/${need || "满级"}`);
   });
+  if (state.battleGains) state.battleGains.xp += each;
 }
 
 function tryLevelUp(u) {

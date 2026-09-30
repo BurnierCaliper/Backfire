@@ -3210,9 +3210,12 @@ function settleEnemyKill(target, notes) {
   target.dead = true;
   target._xpGiven = true;
   const rank = ENEMY_RANK[target.kit] || "minion";
-  const amt = xpDrop(rank, target.level);
-  grantXpToPlayers(amt, `击杀 ${target.name}`);
+  // 跑团模式：手册「遭遇战敌人先动，经验双倍；困难遭遇三倍」，由主持人在战斗顶栏选
+  const mult = typeof TRPG !== "undefined" && TRPG.active ? Math.max(1, Number(state.xpMult) || 1) : 1;
+  const amt = xpDrop(rank, target.level) * mult;
+  grantXpToPlayers(amt, `击杀 ${target.name}${mult > 1 ? ` · 经验 ×${mult}` : ""}`);
   const loot = typeof rollEnemyLoot === "function" ? rollEnemyLoot(target) : (target.kit === "patrol_car" ? 30 : 0);
+  if (loot > 0 && state.battleGains) state.battleGains.kuizhi += loot;
   if (loot > 0 && typeof addKuizhi === "function") addKuizhi(loot, notes, target.name);
   else if (target.kit === "patrol_car") {
     state.kuizhi = (Number(state.kuizhi) || 0) + 30;

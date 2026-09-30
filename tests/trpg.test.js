@@ -147,3 +147,30 @@ test("存档：三个空位互不影响；旧版的队伍记忆第一次打开�
   assert.equal(c.trpgValidSlot({ campaign: {}, log: [] }), true);
   assert.equal(c.trpgValidSlot("x"), false);
 });
+
+test("跑团模式：击杀经验全队平分、按手册掉落；可选经验 ×2 / ×3", () => {
+  const c = H.load();
+  c.BattleSim.setup({ party: ["kolt", "helu"], enemies: [{ id: "bandit_boss", lv: 1, zone: 2 }, { id: "captain_wolf", lv: 1, zone: 2 }] });
+  c.S.TRPG.active = true;
+  const st = c.S.state;
+  st.battleGains = { xp: 0, kuizhi: 0 };
+  st.kuizhi = 0;
+  const kolt = c.findKit("kolt", st.units);
+  const foes = st.units.filter(u => !u.isPlayer);
+  c.settleEnemyKill(foes[0], []);
+  assert.equal(kolt.xp, 5);                  // 精英 lv1 10 经验，两人平分
+  assert.ok(st.kuizhi >= 200 && st.kuizhi <= 650, "强盗头子 3d4×50+50：" + st.kuizhi);
+  st.xpMult = 2;
+  const before = st.kuizhi;
+  c.settleEnemyKill(foes[1], []);
+  assert.equal(kolt.xp, 15);                 // 10 × 2 ÷ 2
+  assert.ok(st.kuizhi - before >= 150 && st.kuizhi - before <= 400, "狼队长 1d6×50+100");
+  assert.equal(st.battleGains.xp, 15);
+  // 单局不平分
+  c.S.TRPG.active = false;
+  const k2 = H.load();
+  k2.BattleSim.setup({ party: ["kolt", "helu"], enemies: [{ id: "thug_knife", lv: 1, zone: 2 }] });
+  const kk = k2.findKit("kolt", k2.S.state.units);
+  k2.settleEnemyKill(k2.S.state.units.find(u => !u.isPlayer), []);
+  assert.equal(kk.xp, 5);
+});

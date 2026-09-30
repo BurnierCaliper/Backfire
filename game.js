@@ -688,9 +688,10 @@
     realTimeout(() => d.remove(), 950);
   }
   const ELE_VAR = { fire: "--fire", acid: "--acid", electric: "--electric", ice: "--icee", energy: "--energy", physical: "--physical", harmonic: "--harmonic" };
-  function hit(id, element) {
+  function hit(id, element, big) {
     const c = cards.get(id);
     if (!c) return;
+    if (!G.sim && window.Sfx) Sfx.play(element || "physical", { big: !!big });
     c.flash.style.setProperty("--flash", `var(${ELE_VAR[element] || "--physical"})`);
     c.wrap.classList.remove("hit");
     void c.wrap.offsetWidth;
@@ -851,7 +852,7 @@
           if (v <= 0) continue;
           const total = s ? Math.max(1, sumMax(s)) : 50;
           const big = v >= total * 0.2;
-          hit(e.unitId, e.element);
+          hit(e.unitId, e.element, big);
           popup(e.unitId, big ? v + "!" : String(v), "e-" + e.element + (big ? " big" : ""), { size: big ? BIG_POP_SIZE : 30, dur: big ? BIG_POP_DUR : 1.05 });
           await wait(chain ? 30 : 45);
           await playBeats(beatsBefore.filter(b => b.kind !== "stun"));
@@ -1666,6 +1667,10 @@
     // 跑团版的队伍档案只在战斗原型里结算；Roguelike 由单局流程自己记
     if (!G.rogue) {
       const durNotes = typeof ledgerAfterBattle === "function" ? ledgerAfterBattle([]) : [];
+      if (typeof G.onBattleFinished === "function") {
+        const g = state.battleGains || { xp: 0, kuizhi: 0 };
+        G.onBattleFinished({ outcome: G.lastOutcome, turn: state.turnNo, xp: g.xp, kuizhi: g.kuizhi, xpMult: state.xpMult || 1, ups, durNotes });
+      }
       rememberCampaign();
       durNotes.forEach(t => addLogPhase(t));
     }
@@ -1884,6 +1889,8 @@
     state.exhaustTier = 0;
     state.retreated = false;
     state.lootByRank = null;
+    state.battleGains = { xp: 0, kuizhi: 0 };   // 这场战斗得到的经验（每人）和掉落，跑团模式写进探索记录
+    state.xpMult = Number(($("g-xp-mult") || {}).value) || 1;
 
     loadLiveParty();
     if (enc && enc.playerZone) {
@@ -2828,6 +2835,16 @@
     };
     $("g-party-backstage").onclick = () => openBackstage();
     $("g-bs").onclick = () => openBackstage();
+    // 音效开关 + 后台里的试听
+    const sfxBtn = $("g-sfx");
+    const paintSfx = () => { if (sfxBtn && window.Sfx) { sfxBtn.textContent = Sfx.enabled() ? "音效 开" : "音效 关"; sfxBtn.setAttribute("aria-pressed", String(Sfx.enabled())); } };
+    if (sfxBtn) sfxBtn.onclick = () => { if (!window.Sfx) return; Sfx.setEnabled(!Sfx.enabled()); paintSfx(); if (Sfx.enabled()) Sfx.play("physical"); };
+    paintSfx();
+    const pv = $("g-sfx-preview");
+    if (pv && window.Sfx) {
+      pv.innerHTML = "试听音效：" + Sfx.ELEMENTS.map(e => `<button class="g-btn small e-${e}" data-sfx="${e}">${Sfx.NAMES[e]}</button>`).join("");
+      pv.querySelectorAll("[data-sfx]").forEach(b => { b.onclick = (ev) => Sfx.play(b.dataset.sfx, { big: ev.shiftKey }); });
+    }
     $("g-bs-close").onclick = () => { $("g-bs-sheet").classList.remove("show"); G.bsOpen = false; };
     $("g-field-cfg").onclick = () => { renderFieldSheet(); $("g-field-sheet").classList.add("show"); };
     $("g-enc-cfg").onclick = () => { renderEncSheet(); $("g-enc-sheet").classList.add("show"); };

@@ -65,6 +65,10 @@ function rollEnemyLoot(u) {
   const roll = (n, s, b) => (typeof takeDice === "function" ? takeDice(n, s, b).total : n * Math.ceil(s / 2) + (b || 0));
   if (kit === "thug_knife" || kit === "thug_hammer") return roll(1, 4, 0) * 10;
   if (kit === "bandit_boss") return roll(3, 4, 0) * 50 + 50;
+  // 主持人手册第十章（摧毁植入体的掉落；破解另计，由主持人给）
+  if (kit === "mecha_mg" || kit === "mecha_gl") return roll(2, 6, 0) * 100;
+  if (kit === "captain_wolf" || kit === "captain_ox" || kit === "captain_lizard") return roll(1, 6, 0) * 50 + 100;
+  if (kit === "giant") return roll(3, 6, 0) * 100 + 100;
   if (kit === "outlaw_king") return 0;
   const fixed = {
     guard_sword: 20, guard_gun: 20, patrol_car: 30, buoy: 20, dumpdrone: 35,
