@@ -745,7 +745,11 @@
     const fallen = [];
     beats.forEach(b => {
       const s = G.view.get(b.id);
-      if (b.kind === "stun") { stamp(b.id, "失衡", b.ice ? "ice" : ""); longest = Math.max(longest, hold != null ? hold : 620); }
+      if (b.kind === "stun") {
+        stamp(b.id, "失衡", b.ice ? "ice" : "");
+        if (window.Sfx) Sfx.stagger();   // 打出失衡：沉重、悠长的「咚——嗡——」
+        longest = Math.max(longest, hold != null ? hold : 620);
+      }
       if (b.kind === "kill") {
         stamp(b.id, s && s.isPlayer ? "倒下" : "击倒", "kill");
         longest = Math.max(longest, 520);
@@ -849,6 +853,9 @@
       }
       return false;
     };
+    // 连击中途就打出的失衡先记下，等整串伤害放完再统一盖「失衡」章、响失衡声（以前这种会被漏掉）
+    const pendingStun = [];
+    const deferStun = (bs) => bs.forEach(b => { if (b.kind === "stun" && !pendingStun.some(x => x.id === b.id)) pendingStun.push(b); });
     try {
       for (let i = 0; i < pops.length; i++) {
         const e = pops[i];
@@ -863,19 +870,23 @@
           hit(e.unitId, e.element, big);
           popup(e.unitId, big ? v + "!" : String(v), "e-" + e.element + (big ? " big" : ""), { size: big ? BIG_POP_SIZE : 30, dur: big ? BIG_POP_DUR : 1.05 });
           await wait(chain ? 30 : 45);
-          await playBeats(beatsBefore.filter(b => b.kind !== "stun"));
+          deferStun(beatsBefore); await playBeats(beatsBefore.filter(b => b.kind !== "stun"));
           await wait(chain ? 40 : 55);
         } else if (e.kind === "break") {
           popup(e.unitId, "击破 " + e.value, "brk", { below: true, dur: 1.05 });
-          await playBeats(beatsBefore.filter(b => b.kind !== "stun"));
+          deferStun(beatsBefore); await playBeats(beatsBefore.filter(b => b.kind !== "stun"));
           await wait(chain ? 40 : 55);
         } else {
           if (e.text) popup(e.unitId, e.text, "txt e-" + e.element);
-          await playBeats(beatsBefore.filter(b => b.kind !== "stun"));
+          deferStun(beatsBefore); await playBeats(beatsBefore.filter(b => b.kind !== "stun"));
           await wait(240);
         }
       }
       const beats = setView(after, true);
+      pendingStun.forEach(b => {
+        const now = G.view.get(b.id);
+        if (now && now.stunned && !now.dead && !beats.some(x => x.kind === "stun" && x.id === b.id)) beats.unshift(b);
+      });
       if (stunId) {
         G.slow = 1;
         await playBeats(beats, 150);
@@ -2851,7 +2862,7 @@
     const pv = $("g-sfx-preview");
     if (pv && window.Sfx) {
       pv.innerHTML = "试听音效：" + Sfx.ELEMENTS.map(e => `<button class="g-btn small e-${e}" data-sfx="${e}">${Sfx.NAMES[e]}</button>`).join("") +
-        `<button class="g-btn small" data-sfx="parry">格挡成功</button>`;
+        `<button class="g-btn small" data-sfx="parry">格挡成功</button><button class="g-btn small" data-sfx="stagger">打出失衡</button>`;
       pv.querySelectorAll("[data-sfx]").forEach(b => { b.onclick = (ev) => Sfx.play(b.dataset.sfx, { big: ev.shiftKey }); });
     }
     $("g-bs-close").onclick = () => { $("g-bs-sheet").classList.remove("show"); G.bsOpen = false; };

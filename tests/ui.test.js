@@ -227,6 +227,30 @@ test("格挡成功：敌方队长·牛格挡住攻击时，响起钢铁碰撞声
   assert.deepEqual(o.errors, []);
 });
 
+test("打出失衡：敌人架势被打空时，响起沉重的失衡声", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await newTrpg(page);
+  await startBattle(page);
+  await page.evaluate(() => {
+    Math.random = () => 0.999;   // 不让格挡干扰
+    state.units.filter(u => !u.isPlayer).forEach(u => { u.def = 1; });   // 开战会回满架势，所以开战后再改
+    window.__stagger = 0;
+    const orig = Sfx.stagger;
+    Sfx.stagger = () => { window.__stagger++; return orig(); };
+  });
+  await selectHero(page, "ruby");   // 普通攻击共 1 击破：架势 1 → 0
+  await page.keyboard.press("1");
+  await page.waitForFunction(() => GAME.arm && GAME.arm.mode === "unit");
+  const foe = await page.evaluate(() => [...GAME.arm.map.entries()].find(([id, c]) => !c.invalid && !String(id).includes(":"))[0]);
+  await page.click(`.unit-wrap[data-id="${foe}"]`);
+  // 打出失衡后会弹出「协助攻击」的选择，所以这里不等演出结束，只等失衡声响起
+  await page.waitForFunction(i => state.units.find(u => u.id === i).stunned && window.__stagger >= 1, foe, { timeout: 15000 });
+  await page.waitForTimeout(300);
+  assert.equal(await page.evaluate(() => window.__stagger), 1, "一次失衡只响一声");
+  assert.deepEqual(o.errors, []);
+});
+
 test("音效：七种属性都能合成，有声、不削顶、不出错", async (t) => {
   const o = await open(t); if (!o) return;
   const r = await o.page.evaluate(async () => {
@@ -255,6 +279,16 @@ test("音效：七种属性都能合成，有声、不削顶、不出错", async
   assert.ok(parry.peak > 0.05 && parry.peak < 1, "格挡声音量 " + parry.peak);
   assert.ok(parry.ring > 0.5, "钢铁声应该有余音：" + parry.ring);
   assert.ok(parry.zcr > 1500, "钢铁声应该明亮：" + parry.zcr);
+  // 失衡声：比格挡沉得多、长得多
+  const stag = await o.page.evaluate(async () => {
+    const d = await Sfx.render("stagger");
+    let peak = 0, lastLoud = 0, zc = 0;
+    for (let i = 0; i < d.length; i++) { const a = Math.abs(d[i]); peak = Math.max(peak, a); if (a > 0.01) lastLoud = i; if (i && (d[i - 1] < 0) !== (d[i] < 0)) zc++; }
+    return { peak, ring: lastLoud / 44100, zcr: zc / (d.length / 44100) };
+  });
+  assert.ok(stag.peak > 0.05 && stag.peak < 1, "失衡声音量 " + stag.peak);
+  assert.ok(stag.ring > parry.ring * 1.8, "失衡声应该比格挡悠长：" + stag.ring + " vs " + parry.ring);
+  assert.ok(stag.zcr < parry.zcr / 4, "失衡声应该比格挡低沉：" + stag.zcr + " vs " + parry.zcr);
   // 开关
   await o.page.click("#t-sandbox");
   await o.page.click('[data-new="0"]');

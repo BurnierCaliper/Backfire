@@ -192,6 +192,49 @@
   }
   VOICES.parry = parryVoice;
 
+  /* ---------- 打出失衡：比格挡更沉、更悠长（法环削韧破防 / 只狼架势崩溃那种「咚——嗡——」） ----------
+   * 一记很低很重的冲击 + 一口低沉的钟（泛音按钟的比例：hum 0.5 / 1 / 1.19 / 1.5 / 2 / 2.66 / 3），
+   * 各泛音在几秒里缓缓下滑一点（像时间被拖慢），再送进一段长混响，尾音悠扬。 */
+  let irCache = null;
+  function reverb(seconds) {
+    if (!irCache || irCache.ctx !== ctx) {
+      const len = Math.round(ctx.sampleRate * seconds);
+      const ir = ctx.createBuffer(2, len, ctx.sampleRate);
+      for (let ch = 0; ch < 2; ch++) {
+        const d = ir.getChannelData(ch);
+        for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3.2);
+      }
+      irCache = { ctx, ir };
+    }
+    const conv = ctx.createConvolver();
+    conv.buffer = irCache.ir;
+    const wet = ctx.createGain(); wet.gain.value = 0.55;
+    conv.connect(wet); wet.connect(master);
+    return conv;
+  }
+  function staggerVoice(t, v) {
+    const verb = reverb(3.2);
+    const both = (g) => { g.connect(verb); return g; };   // 干声进总线，同时送一份进混响
+    // 冲击：很低的下坠 + 闷响
+    osc("sine", t, 0.55, 120, 34, both(gainEnv(t, 0.004, 0.75 * v, 0.6)));
+    noise(t, 0.12, filter("lowpass", 600, 0.7, both(gainEnv(t, 0.002, 0.7 * v, 0.14))));
+    noise(t, 0.04, filter("bandpass", 2400, 1.5, gainEnv(t, 0.001, 0.25 * v, 0.04)));
+    // 低沉的钟
+    const f0 = 196;
+    [[0.5, 0.34, 3.6], [1, 0.3, 3.0], [1.19, 0.16, 2.2], [1.5, 0.14, 2.0], [2, 0.12, 1.6], [2.66, 0.07, 1.1], [3, 0.06, 0.9]].forEach(([r, a, d]) => {
+      const f = f0 * r;
+      const g = both(gainEnv(t + 0.01, 0.006, a * v, d));
+      osc("sine", t + 0.01, d, f, f * 0.965, g);
+      osc("sine", t + 0.01, d * 0.8, f * 1.004, f * 1.004 * 0.965, both(gainEnv(t + 0.01, 0.006, a * 0.4 * v, d * 0.8)));
+    });
+    // 开头一点金属擦响，和格挡声同一家族，但低一个八度、短
+    const sh = filter("bandpass", 3200, 4, both(gainEnv(t, 0.003, 0.18 * v, 0.35)));
+    sh.frequency.setValueAtTime(3600, t); sh.frequency.exponentialRampToValueAtTime(1800, t + 0.35);
+    noise(t, 0.4, sh);
+  }
+  VOICES.stagger = staggerVoice;
+  const RENDER_SECONDS = { parry: 1.4, stagger: 4.2 };
+
   function play(element, opt) {
     opt = opt || {};
     if (!enabled()) return false;
@@ -215,7 +258,7 @@
     const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
     if (!OAC) return Promise.resolve(null);
     const saved = [ctx, master, noiseBuf];
-    const off = new OAC(1, Math.round(44100 * 1.4), 44100);
+    const off = new OAC(1, Math.round(44100 * (RENDER_SECONDS[element] || 1.4)), 44100);
     try {
       ctx = off;
       master = off.createGain(); master.gain.value = 0.55; master.connect(off.destination);
@@ -231,6 +274,8 @@
 
   /** 格挡成功的钢铁碰撞声 */
   function parry() { return play("parry", { throttle: 0.15 }); }
+  /** 打出失衡：范围攻击同时打崩好几个人也只响一次 */
+  function stagger() { return play("stagger", { throttle: 0.4 }); }
 
-  window.Sfx = { render, parry, play, enabled, setEnabled, ELEMENTS, NAMES: { physical: "物理", fire: "火", ice: "冰", electric: "电", acid: "酸", energy: "能量", harmonic: "谐波" } };
+  window.Sfx = { render, parry, stagger, play, enabled, setEnabled, ELEMENTS, NAMES: { physical: "物理", fire: "火", ice: "冰", electric: "电", acid: "酸", energy: "能量", harmonic: "谐波" } };
 })();
