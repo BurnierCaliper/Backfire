@@ -29,8 +29,8 @@ function autoplay(c, run, opts) {
         Rogue.restAtNode(run, Rogue.canLongRest(run) ? "long" : "short");
         steps.push("rest");
       } else if (node.type === "check") {
-        const info = Rogue.checkInfo(run);
-        if (Rogue.checkChance(info.diff, 0)) Rogue.attemptCheck(run, run.party[0].kit, 0);
+        const best = run.party.map(h => Rogue.checkOdds(run, h.kit)).sort((a, b) => b.chance - a.chance)[0];
+        if (best && best.chance) Rogue.attemptCheck(run, best.kit);
         else Rogue.skipCheck(run);
         steps.push("check");
       } else if (node.type === "shop" || node.type === "smith" || node.type === "clinic") {
@@ -611,16 +611,17 @@ test("检定成功拿奎支（600–3000），会受伤的检定再 +500；没�
   const D = c.S.ROGUE_CHECKS.diffs;
   assert.equal(D.easy.reward, 600);
   assert.equal(D.extreme.reward, 3000);
-  forceCheck(run, { diff: "normal", injure: false, reward: D.normal.reward });
-  assert.throws(() => R.attemptCheck(run, "kolt", 0), /熟练/);
+  forceCheck(run, { diff: "normal", prof: "历史", injure: false, reward: D.normal.reward });
+  assert.throws(() => R.attemptCheck(run, "kolt"), /熟练/);   // 柯尔特没有历史
+  forceCheck(run, { diff: "normal", prof: "追踪", injure: false, reward: D.normal.reward });
   let kz = c.S.state.kuizhi;
   const idx = run.task.index;
-  R.attemptCheck(run, "kolt", 2);              // 二级熟练：普通默认通过
+  R.attemptCheck(run, "kolt");                 // 追踪二级：普通默认通过
   assert.equal(c.S.state.kuizhi, kz + D.normal.reward);
   assert.equal(run.task.index, idx + 1);
-  forceCheck(run, { diff: "easy", injure: true, reward: D.easy.reward + 500 });
+  forceCheck(run, { diff: "easy", prof: "侦察", injure: true, reward: D.easy.reward + 500 });
   kz = c.S.state.kuizhi;
-  R.attemptCheck(run, "helu", 1);
+  R.attemptCheck(run, "helu");                 // 侦察一级：简单默认通过
   assert.equal(c.S.state.kuizhi, kz + 1100);
 });
 
@@ -637,7 +638,7 @@ test("会受伤的检定失败：随机属性伤害按克制表结算、不致�
       { type: "battle", done: false }];
     h.hp = null; delete h.pendingBreaks;
     c.S.LEDGER.hours = 0;                       // 别把人熬到力竭
-    const notes = R.attemptCheck(run, h.kit, 1).join("\n");
+    const notes = R.attemptCheck(run, h.kit).join("\n");
     if (!/失败/.test(notes)) continue;
     failed += 1;
     const m = notes.match(/受伤：([^\s：]+?)属性 (\d+) 点，实际损失 (\d+) 点生命/);
@@ -665,7 +666,7 @@ test("会受伤的检定失败：随机属性伤害按克制表结算、不致�
   delete h.pendingBreaks;
   let tries = 0;
   while (tries < 30) {
-    const notes = R.attemptCheck(run, h.kit, 1).join("\n");
+    const notes = R.attemptCheck(run, h.kit).join("\n");
     if (/失败/.test(notes)) break;
     tries += 1; run.taskNo += 1; run.task.index = 0;
   }
@@ -708,4 +709,71 @@ test("检定可以不冒险绕过去：没有奖励，前进一站", () => {
   R.skipCheck(run);
   assert.equal(c.S.state.kuizhi, kz);
   assert.equal(run.task.index, idx + 1);
+});
+
+test("角色的出身与熟练项照角色资料；开局带进单局", () => {
+  const { c, run, R } = fresh(["ruby", "yuito"], "PF1");
+  const P = c.S.HERO_PROFILES;
+  // 每个可选角色都有资料，熟练项名字都在手册的表里，等级 1–3
+  R.heroPool().forEach(card => {
+    const p = P[card.kit];
+    assert.ok(p, "缺资料：" + card.kit);
+    Object.keys(p.profs).forEach(k => {
+      assert.ok(c.S.PROF_LIST.includes(k), card.kit + " 的 " + k);
+      assert.ok(p.profs[k] >= 1 && p.profs[k] <= 3);
+    });
+  });
+  assert.deepEqual(plain(run.party[0].profs), { "数据操作": 2, "巧手": 1, "追踪": 1 });
+  assert.equal(P.chuan.profs["求生"], 1, "川川资料里写的「生存」就是求生");
+  assert.equal(P.kolt.profs["追踪"], 2, "士兵本职 + 兽人·狼自带");
+  const v = R.heroView(run, run.party[1]);
+  assert.equal(v.race, "猫类人-猫");
+  assert.equal(v.job, "医生");
+});
+
+test("种族特长：人类失败可重掷，猫的侦察 / 躲藏检定优势", () => {
+  const { run, R } = fresh(["ruby", "yuito"], "PF2");
+  R.acceptTask(run, "main");
+  forceCheck(run, { diff: "easy", prof: "躲藏", injure: false, reward: 600 });
+  const ruby = R.checkOdds(run, "ruby"), yuito = R.checkOdds(run, "yuito");
+  // 两个人都没有躲藏：简单 50%。瑞比重掷 → 75%；结人优势 → 75%
+  assert.equal(ruby.level, 0);
+  assert.equal(ruby.reroll, true);
+  assert.equal(ruby.chance, 0.75);
+  assert.equal(yuito.adv, true);
+  assert.equal(yuito.chance, 0.75);
+  forceCheck(run, { diff: "hard", prof: "数据操作", injure: false, reward: 2000 });
+  assert.equal(R.checkOdds(run, "ruby").chance, 0.75, "二级 50%，重掷后 75%");
+  assert.equal(R.checkOdds(run, "yuito").chance, 0, "结人没有数据操作，困难不能尝试");
+  // 重掷写进记录
+  let saw = false;
+  for (let i = 0; i < 30 && !saw; i++) {
+    run.stage = "task"; run.taskNo = 500 + i; run.task.index = 0;
+    run.task.nodes = [{ type: "check", done: false, check: { diff: "easy", prof: "躲藏", injure: false, reward: 600 } }, { type: "battle", done: false }];
+    saw = /迎难直上重掷/.test(R.attemptCheck(run, "ruby").join("\n"));
+  }
+  assert.ok(saw);
+});
+
+test("升级时的「一个自选熟练项」：新学一项或升一级，最高三级；旧存档的记录补成待选", () => {
+  const { run, R } = fresh(["ruby", "yuito"], "PF3");
+  const h = run.party[0];
+  h.pending = [{ type: "prof", level: 3 }];
+  const opts = R.choiceOptions(run, "ruby", 0);
+  assert.deepEqual(plain(opts.slice(0, 3).map(o => o.value).sort()), ["巧手", "数据操作", "追踪"].sort(), "已有的排前面");
+  assert.ok(opts.some(o => o.value === "历史"));
+  R.choose(run, "ruby", 0, "数据操作");
+  assert.equal(h.profs["数据操作"], 3);
+  h.pending = [{ type: "prof", level: 7 }];
+  assert.ok(!R.choiceOptions(run, "ruby", 0).some(o => o.value === "数据操作"), "三级封顶");
+  R.choose(run, "ruby", 0, "历史");
+  assert.equal(h.profs["历史"], 1);
+  // 旧存档：没有 profs，notes 里记着欠的熟练项
+  const g = run.party[1];
+  delete g.profs;
+  g.pending = [];
+  g.notes = { proficiency: 2 };
+  R.heroProfs(g);
+  assert.equal(g.pending.filter(p => p.type === "prof").length, 2);
+  assert.equal(g.profs["医疗"], 2);
 });

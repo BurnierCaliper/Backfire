@@ -65,6 +65,22 @@ const Rogue = (function () {
   function heroName(kit) { const c = cardOf(kit); return c ? c.name : kit; }
   /** 可选角色：所有不是武器人的角色卡（Meta 解锁以后在这里过滤） */
   function heroPool() { return livePartyCards().filter(c => !c.weaponOf); }
+  /** 本局里这个角色的熟练项 { 名字: 等级 }。开局照角色资料（party.js · HERO_PROFILES），升级时自选的往上加 */
+  function heroProfs(h) {
+    if (!h.profs) {
+      const p = heroProfile(h.kit);
+      h.profs = {};
+      Object.keys((p && p.profs) || {}).forEach(k => { h.profs[profName(k)] = p.profs[k]; });
+      // 旧存档：以前「一个自选熟练项」只是记在 notes 上，现在补成待选
+      const owed = Number((h.notes || {}).proficiency) || 0;
+      if (owed) {
+        h.pending = h.pending || [];
+        for (let i = 0; i < owed; i++) h.pending.push({ type: "prof", level: h.level || 1, noRepeat: false });
+        delete h.notes.proficiency;
+      }
+    }
+    return h.profs;
+  }
 
   /* ---------- 本局的「队伍档案」 ----------
    * 进入单局：先把战斗原型的档案收起来，换上本局的；离开时换回。 */
@@ -140,6 +156,7 @@ const Rogue = (function () {
       h.rolePicks = {};
       h.pending = [];
       h.notes = {};
+      heroProfs(h);
     });
     // 本局的物资：档案从零开始
     enterRunMode();
@@ -411,6 +428,13 @@ const Rogue = (function () {
         .filter(k => !(p.noRepeat && (h.attrPicks || []).indexOf(k) >= 0))
         .map(k => ({ value: k, label: `${ATTR_NAMES[k]} +1`, hint: `现在 ${attrs[k] || 0}` }));
     }
+    if (p.type === "prof") {
+      const have = heroProfs(h);
+      const opts = PROF_LIST.filter(n => (have[n] || 0) < PROF_MAX)
+        .map(n => ({ value: n, label: have[n] ? `${n} ${have[n]} → ${have[n] + 1} 级` : `${n}（新学）`, hint: profCategory(n) }));
+      // 已有的排前面（升级），新学的按手册顺序
+      return opts.filter(o => have[o.value]).concat(opts.filter(o => !have[o.value]));
+    }
     if (p.type === "role") {
       const u = spawnLiveCard(cardOf(kit), 1);
       u.level = p.level;
@@ -441,6 +465,10 @@ const Rogue = (function () {
       h.attrs[value] = (Number(h.attrs[value]) || 0) + 1;
       h.attrPicks = (h.attrPicks || []).concat(value);
       notes.push(`${heroName(kit)} ${ATTR_NAMES[value]} +1。`);
+    } else if (p.type === "prof") {
+      const have = heroProfs(h);
+      have[value] = (have[value] || 0) + 1;
+      notes.push(`${heroName(kit)} 熟练项「${value}」${have[value] > 1 ? "升到 " + have[value] + " 级" : "（新学，一级）"}。`);
     } else if (p.type === "role") {
       h.rolePicks = Object.assign({}, h.rolePicks || {}, { [p.level]: value });
       notes.push(`${heroName(kit)} 学会职责技能：${(roleSkillDef(value.role, value.n) || {}).name || value.role + value.n}。`);
@@ -603,11 +631,28 @@ const Rogue = (function () {
     const row = ROGUE_CHECKS.chance[Math.max(0, Math.min(3, Number(prof) || 0))];
     return row[CHECK_DIFFS.indexOf(diff)] || 0;
   }
+  /** 一名角色做当前检定的情况：熟练等级、优劣势、重掷、最终成功率 */
+  function checkOdds(run, kit) {
+    const info = checkInfo(run);
+    const h = run.party.find(x => x.kit === kit);
+    if (!info || !h) return null;
+    const level = Math.min(PROF_MAX, heroProfs(h)[profName(info.prof)] || 0);
+    const v = heroView(run, h);
+    const perks = checkPerksFor(kit, info.prof, v.hp * 2 < v.hpMax);
+    const base = checkChance(info.diff, level);
+    // 优势：掷两次取好的；劣势：两次都要过；迎难直上：整个检定失败后再来一次
+    let p = perks.adv ? 1 - (1 - base) * (1 - base) : perks.dis ? base * base : base;
+    if (perks.reroll) p = 1 - (1 - p) * (1 - p);
+    return { kit, name: v.name, level, base, chance: base ? p : 0, adv: perks.adv, dis: perks.dis,
+      reroll: perks.reroll, softFail: perks.softFail, perkText: perks.text, hp: v.hp, hpMax: v.hpMax };
+  }
+
   /** 失败受伤：随机属性的伤害按克制表打在检定者的血量层上，最少留 1 点生命；击破留到下一场战斗开场 */
   function injureHero(run, h, info, notes) {
     const K = ROGUE_CHECKS;
-    const amount = between(info.dmg[0], info.dmg[1]);
+    let amount = between(info.dmg[0], info.dmg[1]);
     const element = pick(K.elements);
+    if (info.softFail) amount = Math.max(1, Math.floor(amount / 2));
     const r = withParty(run, () => {
       const u = findKit(h.kit, state.units);
       if (!u) return null;
@@ -630,27 +675,38 @@ const Rogue = (function () {
       `（剩 ${r.out ? r.out.after : "?"}）；下一场战斗开始时受到 ${info.brk} ${ELE[element]}属性击破。`);
     return { amount, element, lost };
   }
-  /** 选一名角色、报上他这项熟练的等级（0–3）进行检定 */
-  function attemptCheck(run, kit, prof) {
+  /** 选一名角色进行检定：熟练等级读角色的熟练项，种族特长自动算 */
+  function attemptCheck(run, kit) {
     const info = checkInfo(run);
     if (!info) throw new Error("当前节点不是检定");
     const h = run.party.find(x => x.kit === kit);
     if (!h) throw new Error("没有这名角色");
-    const p = Math.max(0, Math.min(3, Number(prof) || 0));
-    const chance = checkChance(info.diff, p);
-    if (!chance) throw new Error(`${info.diffName}检定需要「${info.prof}」熟练项才能尝试`);
+    const o = checkOdds(run, kit);
+    if (!o.base) throw new Error(`${info.diffName}检定需要「${info.prof}」熟练项才能尝试`);
     const notes = [];
-    const roll = withRng(`${run.seed}:checkroll:${run.taskNo}:${run.task.index}:${kit}:${p}`, () => Math.random());
-    const ok = chance >= 1 || roll < chance;
-    const profText = p ? `${["", "一", "二", "三"][p]}级熟练` : "无熟练";
-    notes.push(`${heroName(kit)} 进行${info.diffName}「${info.prof}」检定（${profText}，成功率 ${Math.round(chance * 1000) / 10}%）：${ok ? "成功" : "失败"}。`);
+    const profText = o.level ? `「${info.prof}」${["", "一", "二", "三"][o.level]}级熟练` : `没有「${info.prof}」熟练`;
+    const mod = o.adv ? "，优势" : o.dis ? "，劣势" : "";
+    let ok = false, rerolled = false;
+    withRng(`${run.seed}:checkroll:${run.taskNo}:${run.task.index}:${kit}`, () => {
+      const once = () => {
+        if (o.base >= 1) return true;
+        const a = Math.random() < o.base;
+        if (!o.adv && !o.dis) return a;
+        const b = Math.random() < o.base;
+        return o.adv ? a || b : a && b;
+      };
+      ok = once();
+      if (!ok && o.reroll) { rerolled = true; ok = once(); }
+    });
+    notes.push(`${o.name} 进行${info.diffName}「${info.prof}」检定（${profText}${mod}，成功率 ${Math.round(o.chance * 1000) / 10}%）：` +
+      (rerolled ? `失败，迎难直上重掷——${ok ? "成功" : "还是失败"}。` : ok ? "成功。" : "失败。"));
     const node = currentNode(run);
-    node.check.result = { kit, prof: p, ok };
+    node.check.result = { kit, prof: o.level, ok };
     if (ok) {
       state.kuizhi = (Number(state.kuizhi) || 0) + info.reward;
       notes.push(`获得 ${info.reward} 奎支（现有 ${state.kuizhi}）。`);
     } else if (info.injure) {
-      withRng(`${run.seed}:checkhurt:${run.taskNo}:${run.task.index}`, () => injureHero(run, h, info, notes));
+      withRng(`${run.seed}:checkhurt:${run.taskNo}:${run.task.index}`, () => injureHero(run, h, Object.assign({ softFail: o.softFail }, info), notes));
     } else {
       notes.push("没什么损失，继续前进。");
     }
@@ -1133,6 +1189,8 @@ const Rogue = (function () {
       shp: Number(u.shp) || 0, shpMax: Number(u.shpMax) || 0,
       xp: u.xp || 0, xpNext: xpToNext(u.level),
       pending: (h.pending || []).length,
+      race: (heroProfile(h.kit) || {}).race || "", job: (heroProfile(h.kit) || {}).job || "",
+      profs: Object.assign({}, heroProfs(h)),
       pendingBreak: (h.pendingBreaks || []).reduce((a, b) => a + (Number(b.amount) || 0), 0),
       weapons: h.weapons.map(k => {
         const w = weaponCarryLayers(k);
@@ -1169,7 +1227,7 @@ const Rogue = (function () {
     heroView, supplies, hoursAwake, brokenWeapons,
     makeBoard, taskBlocked, taskWarning, acceptTask, currentNode,
     battleSpec, applyPartyToField, finishBattle,
-    checkInfo, checkChance, attemptCheck, skipCheck,
+    checkInfo, checkChance, checkOdds, attemptCheck, skipCheck, heroProfs,
     restPlan, canLongRest, restAtNode, leaveNode, canRestBefore, restBeforeNode, canShortRestBefore, shortRestBeforeNode,
     buy, canShop, shopItemName, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
     presentSmiths, smithInfo, claimBlueprint, installBlueprint, blueprintById, weaponModsOf,

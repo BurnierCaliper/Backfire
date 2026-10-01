@@ -206,38 +206,36 @@ test("单局：选队伍出发，任务板正常显示", async (t) => {
   assert.deepEqual(o.errors, []);
 });
 
-test("单局：熟练项检定节点——选人、选熟练等级、看成功率，检定后前进", async (t) => {
+test("单局：熟练项检定节点——每个人的熟练等级和成功率，点人检定后前进", async (t) => {
   const o = await open(t); if (!o) return;
   const { page } = o;
   await page.click("#t-new");
   await page.waitForSelector("#scr-party:not([hidden])");
-  const picks = page.locator(".hero-pick");
-  await picks.nth(0).click(); await picks.nth(1).click();
+  // 选瑞比和结人
+  await page.click('.hero-pick[data-kit="ruby"]');
+  await page.click('.hero-pick[data-kit="yuito"]');
   await page.click("#party-go");
   await page.waitForSelector("#scr-run:not([hidden])");
+  assert.match(await page.textContent("#run-party"), /人类 · 黑客 · 数据操作2/);
   await page.click('.r-go[data-which="main"]');
-  // 存档里把当前这站换成一个困难、会受伤的检定，再读档
+  // 存档里把当前这站换成一个困难、会受伤的数据操作检定，再读档
   await page.evaluate(() => {
     const r = SaveStore.loadRun();
-    r.task.nodes[r.task.index] = { type: "check", done: false, check: { diff: "hard", prof: "巧手", injure: true, reward: 2500 } };
+    r.task.nodes[r.task.index] = { type: "check", done: false, check: { diff: "hard", prof: "数据操作", injure: true, reward: 2500 } };
     SaveStore.saveRun(r);
     RunFlow.resume();
   });
-  await page.waitForSelector("#r-check-go");
+  await page.waitForSelector('[data-check="ruby"]');
   const body = await page.textContent("#run-body");
   assert.match(body, /困难/);
-  assert.match(body, /巧手/);
   assert.match(body, /2500 奎支/);
   assert.match(body, /有风险/);
-  // 没熟练：困难不能尝试；三级熟练 75%
-  assert.equal(await page.isDisabled("#r-check-go"), true);
-  assert.match(await page.textContent("#r-check-chance"), /没有资格/);
-  await page.selectOption("#r-check-prof", "3");
-  assert.match(await page.textContent("#r-check-chance"), /75%/);
-  assert.equal(await page.isDisabled("#r-check-go"), false);
-  await page.click("#r-check-go");
-  await page.waitForFunction(() => !document.querySelector("#r-check-go"));
-  assert.match(await page.textContent("#run-log"), /困难「巧手」检定/);
+  // 瑞比数据操作二级：困难 50%，人类重掷后 75%；结人没有这项：不能尝试
+  assert.match(await page.textContent('[data-check="ruby"]'), /二级熟练[\s\S]*75%[\s\S]*可重掷/);
+  assert.equal(await page.isDisabled('[data-check="yuito"]'), true);
+  await page.click('[data-check="ruby"]');
+  await page.waitForFunction(() => !document.querySelector("[data-check]"));
+  assert.match(await page.textContent("#run-log"), /困难「数据操作」检定/);
   assert.deepEqual(o.errors, []);
 });
 

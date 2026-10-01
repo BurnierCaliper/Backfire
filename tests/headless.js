@@ -56,7 +56,7 @@ function load(opt) {
   });
   ctx.__errors = logs;
   // 顶层 const / let 不会挂到 window 上，这里取出常用的几个
-  const names = ["state", "RUN", "RNG", "EnemyAI", "BattleSim", "SaveStore", "Rogue", "SKILL_RANGE", "ENEMY_RANK", "ITEM_CATALOG", "LEDGER", "ROGUE_CONFIG", "ROGUE_SHOP", "ROGUE_SMITH", "ROGUE_CLINIC", "ROGUE_SMITHS", "ROGUE_SMITH_RULES", "ROGUE_CHECKS", "ROGUE_NODE_TYPES", "HANDBOOK_SHOP", "HANDBOOK_WEAPON_UPGRADE", "TRPG", "SCORE_GRADES", "SCORE_RULES", "SCORE_SPEED"];
+  const names = ["state", "RUN", "RNG", "EnemyAI", "BattleSim", "SaveStore", "Rogue", "SKILL_RANGE", "ENEMY_RANK", "ITEM_CATALOG", "LEDGER", "ROGUE_CONFIG", "ROGUE_SHOP", "ROGUE_SMITH", "ROGUE_CLINIC", "ROGUE_SMITHS", "ROGUE_SMITH_RULES", "ROGUE_CHECKS", "ROGUE_NODE_TYPES", "HERO_PROFILES", "PROF_LIST", "HANDBOOK_SHOP", "HANDBOOK_WEAPON_UPGRADE", "TRPG", "SCORE_GRADES", "SCORE_RULES", "SCORE_SPEED"];
   ctx.S = vm.runInContext("({" + names.map(n =>
     `get ${n}() { return typeof ${n} === "undefined" ? undefined : ${n}; }`).join(",") + "})", ctx);
   ctx.BattleSim = ctx.S.BattleSim;

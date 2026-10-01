@@ -1595,7 +1595,5 @@ body:not([data-screen="battle"]) .g-rank { display: none !important; }
 #g-skills .sk { position: relative; }
 
 /* 熟练项检定节点 */
-.r-check { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin: 10px 0 12px; }
-.r-check label { display: flex; align-items: center; gap: 6px; }
-.r-check select { max-width: 100%; background: var(--ground-1); color: var(--bone); border: 1px solid var(--line); border-radius: 4px; padding: 5px 8px; font: inherit; }
-.r-check #r-check-chance { color: var(--gold); }
+.r-check-skip { margin-top: 10px; }
+.rh-prof { color: var(--muted); }

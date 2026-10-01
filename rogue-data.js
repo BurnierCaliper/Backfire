@@ -160,7 +160,8 @@ const ROGUE_NODE_TYPES = {
  *   chance        成功率（手册第一章）：行 = 熟练等级 0–3，列 = 简单 / 普通 / 困难 / 极难。0 = 无法尝试
  *   injure        会受伤的检定：出现概率、成功额外奖励、失败时对检定者的伤害（按幕 [最少, 最多]，属性随机、
  *                 走克制表、不致死），以及下一场战斗开始时结算的击破
- *   profs         随机抽一项熟练项挂在事件上（占位：事件内容之后再写） */
+ *   profs         随机抽一项熟练项挂在事件上（占位：事件内容之后再写）
+ * 谁有哪项熟练、几级，种族的优势 / 重掷，见 party.js · HERO_PROFILES / RACE_CHECK_PERKS。 */
 const ROGUE_CHECKS = {
   insertChance: 0.5,
   maxPerTask: 2,
@@ -191,9 +192,7 @@ const ROGUE_CHECKS = {
     brk: 1
   },
   elements: ["fire", "acid", "electric", "ice", "energy", "physical", "harmonic"],
-  profs: ["运动", "攀爬", "躲藏", "盗窃", "巧手", "载具驾驶", "求生", "历史", "科技理论",
-    "机械维修", "电器维修", "数据操作", "植入体研究", "医疗", "侦察", "聆听", "洞悉", "追踪", "评估",
-    "威吓", "说服", "欺瞒", "表演"]
+  profs: PROF_LIST                 // 手册里的全部熟练项（party.js）
 };
 
 /* 诊所（数值占位，按「一人一次改造平均约 3000 奎支」定）
@@ -346,21 +345,22 @@ const ROGUE_SMITHS = [
  * 角色卡上 minLv 的技能（lv2、lv11、lv17 的「一项技能」、效果位技能）到级自动解锁，不在这里。
  *   attr      可分配的六维属性点；noRepeat：不能加在之前加过的同一项上（lv8）
  *   role      职责技能二选一（lv5 副一/主二，lv10 主二/主三，lv15 主三/主四）
+ *   prof      一个自选熟练项：新学一项，或把已有的一项升一级（最高三级）
  *   note      系统还没做的奖励：先记在角色身上，等对应系统做好再兑现 */
 const ROGUE_LEVEL_REWARDS = {
-  3:  [{ type: "note", key: "proficiency", text: "一个自选熟练项" }],
+  3:  [{ type: "prof" }],                      // 一个自选熟练项（已有的再选一次 = 升一级，最高三级）
   4:  [{ type: "attr" }],
   5:  [{ type: "role" }],
-  7:  [{ type: "note", key: "proficiency", text: "一个自选熟练项" }],
+  7:  [{ type: "prof" }],                      // 一个自选熟练项（已有的再选一次 = 升一级，最高三级）
   8:  [{ type: "attr", noRepeat: true }],
   9:  [{ type: "note", key: "feat", text: "一项专长" }],
   10: [{ type: "role" }],
-  12: [{ type: "note", key: "proficiency", text: "一个自选熟练项" }],
+  12: [{ type: "prof" }],                      // 一个自选熟练项（已有的再选一次 = 升一级，最高三级）
   13: [{ type: "note", key: "feat", text: "一项专长" }],
   14: [{ type: "note", key: "lv14", text: "空手格挡成功率提高到 50%；自己回合内可用 1 行动点转化为 1 附赠动作" }],
   15: [{ type: "role" }],
   16: [{ type: "note", key: "feat", text: "一项专长" }],
-  18: [{ type: "note", key: "proficiency", text: "一个自选熟练项" }],
+  18: [{ type: "prof" }],                      // 一个自选熟练项（已有的再选一次 = 升一级，最高三级）
   19: [{ type: "note", key: "feat", text: "一项专长" }],
   20: [{ type: "note", key: "ultimate", text: "强力终极技能" }]
 };

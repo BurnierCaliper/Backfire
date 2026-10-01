@@ -488,6 +488,65 @@ function livePartyCards() {
   ];
 }
 
+/* ---------- 出身与熟练项（手册第一章「检定」、第四步「出身职业」、第五步「熟练项」） ----------
+ * 数据照作者给的角色资料：瑞比 / 结人 / 绯秋 / 灯（实况组测试）、夕夏 / 川川 / 诺拉（武器商），
+ * 柯尔特 / Helumica / 拉斯缪尔（角色卡表格）。熟练项已经算进了本职、种族自带和两项业余。
+ *   柯尔特：表格里追踪只填了 1；士兵本职的追踪 + 兽人·狼自带的追踪叠成 2（同灯的算法）。
+ *   Helumica：表格里只有 4 项（电工本职两项 + 猫自带侦察 + 欺瞒），少一项业余，先空着。 */
+const PROFICIENCIES = {
+  "行动类": ["运动", "攀爬", "躲藏", "盗窃", "巧手", "载具驾驶", "求生"],
+  "知识类": ["历史", "科技理论"],
+  "技术类": ["机械维修", "电器维修", "数据操作", "植入体研究", "医疗"],
+  "调查类": ["侦察", "聆听", "洞悉", "追踪", "评估"],
+  "交涉类": ["威吓", "说服", "欺瞒", "表演"]
+};
+const PROF_LIST = Object.keys(PROFICIENCIES).reduce((a, k) => a.concat(PROFICIENCIES[k]), []);
+const PROF_MAX = 3;
+const PROF_ALIAS = { "生存": "求生", "侦查": "侦察" };
+const profName = (n) => PROF_ALIAS[n] || n;
+function profCategory(name) {
+  name = profName(name);
+  return Object.keys(PROFICIENCIES).find(k => PROFICIENCIES[k].indexOf(name) >= 0) || null;
+}
+
+const HERO_PROFILES = {
+  ruby:  { race: "人类",      job: "黑客",   profs: { "数据操作": 2, "巧手": 1, "追踪": 1 } },
+  yuito: { race: "猫类人-猫", job: "医生",   profs: { "侦察": 1, "医疗": 2, "聆听": 1, "载具驾驶": 1 } },
+  hiaki: { race: "犬类人-狐", job: "流民",   profs: { "躲藏": 1, "求生": 1, "欺瞒": 1, "巧手": 1, "洞悉": 1 } },
+  tou:   { race: "犬类人-犬", job: "士兵",   profs: { "运动": 1, "追踪": 2, "侦察": 1, "说服": 1 } },
+  xia:   { race: "人类",      job: "汽修工", profs: { "机械维修": 1, "巧手": 1, "运动": 1, "侦察": 1 } },
+  chuan: { race: "犬类人-犬", job: "电工",   profs: { "追踪": 1, "电器维修": 1, "评估": 1, "求生": 1, "聆听": 1 } },
+  nora:  { race: "猫类人-猫", job: "档案员", profs: { "历史": 1, "聆听": 1, "医疗": 1, "说服": 1, "侦察": 1 } },
+  kolt:  { race: "兽人-狼",   job: "士兵",   profs: { "运动": 1, "追踪": 2, "机械维修": 1, "电器维修": 1 } },
+  helu:  { race: "猫类人-猫", job: "电工",   profs: { "电器维修": 1, "评估": 1, "侦察": 1, "欺瞒": 1 } },
+  ras:   { race: "人类",      job: "科学家", profs: { "科技理论": 1, "数据操作": 1, "运动": 1, "电器维修": 1 } }
+};
+function heroProfile(kit) { return HERO_PROFILES[kit] || null; }
+
+/* 种族特长里和检定有关的部分（手册第一步「种族」）
+ *   reroll    检定失败后重掷一次（人类 · 迎难直上）
+ *   adv       这些熟练项 / 这一类检定带优势；dis 带劣势
+ *   lowHpDis  血量低于一半时所有检定劣势（牛类人）
+ *   softFail  检定失败往往不会撞上最严重的后果（鼠 · 环境适应）：受伤减半 */
+const RACE_CHECK_PERKS = {
+  "人类":      { reroll: true, text: "迎难直上：失败后重掷一次" },
+  "猫类人-猫": { adv: ["侦察", "躲藏"], text: "夜视：潜行 / 侦察类检定优势" },
+  "鼠类人-鼠": { softFail: true, text: "环境适应：检定失败受伤减半" },
+  "鼠类人-兔": { adv: ["调查类"], text: "听觉敏锐：调查类检定优势" },
+  "牛类人-牛": { lowHpDis: true, text: "血量低于一半时检定劣势" },
+  "牛类人-马": { lowHpDis: true, text: "血量低于一半时检定劣势" },
+  "牛类人-羊": { lowHpDis: true, adv: ["说服"], dis: ["威吓"], text: "温和气场：说服优势、威吓劣势；血量低于一半时检定劣势" }
+};
+/** 这个人做这项检定有没有优势 / 劣势、能不能重掷。hpLow：血量是否低于一半 */
+function checkPerksFor(kit, prof, hpLow) {
+  const p = heroProfile(kit);
+  const r = (p && RACE_CHECK_PERKS[p.race]) || {};
+  const hit = (list) => (list || []).some(x => x === profName(prof) || x === profCategory(prof));
+  let adv = hit(r.adv), dis = hit(r.dis) || (!!r.lowHpDis && !!hpLow);
+  if (adv && dis) { adv = false; dis = false; }   // 优劣相抵
+  return { adv, dis, reroll: !!r.reroll, softFail: !!r.softFail, text: r.text || "" };
+}
+
 function skillCost(id) {
   if (id === "yuito_inspire") {
     const fl = typeof state !== "undefined" ? state.skillFlow : null;
