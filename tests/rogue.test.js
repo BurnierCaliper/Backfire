@@ -520,3 +520,36 @@ test("战场配置物与地形：越往后越常见；带天气的任务里每�
   assert.equal(st.gaps["1-2"].type, "bridge");
   assert.ok(st.gaps["1-2"].hp > 0);
 });
+
+test("休息点可以不休息直接离开：+250 奎支，不花时间，前进到下一站", () => {
+  const { c, run, R } = fresh(["kolt", "helu"], "RS1");
+  R.acceptTask(run, "main");
+  run.task.nodes[run.task.index] = { type: "rest", done: false };
+  const idx = run.task.index;
+  const kz = c.S.state.kuizhi;
+  const hrs = R.hoursAwake();
+  R.restAtNode(run, "leave");
+  assert.equal(c.S.state.kuizhi, kz + 250);
+  assert.equal(run.task.index, idx + 1);
+  assert.ok(R.hoursAwake() >= hrs, "不回到 0（没休息）");
+});
+
+test("进下一站前也能短休：按今天的短休次数（每人 2 次），花 1 小时，回点血", () => {
+  const { c, run, R } = fresh(["kolt", "helu"], "RS2");
+  R.acceptTask(run, "main");
+  run.task.nodes[run.task.index] = { type: "battle", done: false };
+  run.party.forEach(h => { h.hp = [{ type: "flesh", current: 3 }]; });
+  const hpOf = (h) => (h.hp || []).reduce((a, l) => a + (Number(l.current) || 0), 0);
+  const hpBefore = run.party.map(hpOf);
+  const h0 = R.hoursAwake();
+  assert.equal(R.canShortRestBefore(run).ok, true);
+  R.shortRestBeforeNode(run);
+  assert.equal(R.hoursAwake(), h0 + 1);
+  assert.ok(run.party.every((h, i) => hpOf(h) > hpBefore[i]), "应该回血：" + JSON.stringify(run.party.map(h => h.hp)));
+  R.shortRestBeforeNode(run);
+  assert.equal(R.canShortRestBefore(run).ok, false, "两次用完");
+  assert.throws(() => R.shortRestBeforeNode(run), /用完/);
+  // 首领战前也行（次数还是同一天的）
+  run.stage = "boss";
+  assert.equal(R.canShortRestBefore(run).ok, false);
+});

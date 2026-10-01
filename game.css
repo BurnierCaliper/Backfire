@@ -1589,3 +1589,5 @@ body:not([data-screen="battle"]) .g-rank { display: none !important; }
 .stats-grade { margin: 12px 0 0; font-size: 13px; line-height: 1.7; }
 .stats-grade b { font-size: 16px; font-style: italic; margin-right: 6px; color: #9aa6b2; }
 .stats-grade b.g-B { color: #6fb3ff; } .stats-grade b.g-A { color: #ff9f1c; } .stats-grade b.g-S { color: #ff3b5c; }
+.rest-before { display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px; }
+.rest-before .g-btn { height: auto; padding: 8px 12px; text-align: left; }

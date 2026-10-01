@@ -592,6 +592,25 @@ const Rogue = (function () {
     return logAll(run, notes);
   }
 
+  /** 进下一站 / 首领战之前也能短休（手册：1 小时，每人每天 2 次，熊兽人 1 次）。不限这一站几次，只看今天的次数 */
+  function shortRestLeftAll(run) {
+    return withParty(run, () => partyHeroes().filter(h => !h.dead).map(h => ({ kit: h.kit, name: h.name, left: shortRestLeft(h) }))).out;
+  }
+  function canShortRestBefore(run) {
+    if (!restSpot(run)) return { ok: false, why: "这里不能短休" };
+    const who = shortRestLeftAll(run);
+    if (!who.some(x => x.left > 0)) return { ok: false, why: "今天大家的短休次数都用完了", who };
+    return { ok: true, who };
+  }
+  function shortRestBeforeNode(run) {
+    const can = canShortRestBefore(run);
+    if (!can.ok) throw new Error(can.why);
+    const notes = ["原地歇一会儿。"];
+    const r = withParty(run, () => ledgerShortRest(null, notes));
+    notes.push(...r.notes);
+    return logAll(run, notes);
+  }
+
   function restAtNode(run, mode) {
     const node = currentNode(run);
     if (!node || node.type !== "rest") throw new Error("当前节点不是休息点");
@@ -599,6 +618,11 @@ const Rogue = (function () {
     if (mode === "long") {
       if (!canLongRest(run)) throw new Error("补给不够长休");
       doLongRest(run, notes);
+    } else if (mode === "leave") {
+      // 不休息直接走：拿一笔奎支，不花时间
+      const pay = Number(C.restSkipKuizhi) || 0;
+      state.kuizhi = (Number(state.kuizhi) || 0) + pay;
+      notes.push(`没有停下休息，顺手做了点零活：获得 ${pay} 奎支（现有 ${state.kuizhi}）。`);
     } else {
       const r = withParty(run, () => ledgerShortRest(null, notes));
       notes.push(...r.notes);
@@ -1029,7 +1053,7 @@ const Rogue = (function () {
     heroView, supplies, hoursAwake, brokenWeapons,
     makeBoard, taskBlocked, taskWarning, acceptTask, currentNode,
     battleSpec, applyPartyToField, finishBattle,
-    restPlan, canLongRest, restAtNode, leaveNode, canRestBefore, restBeforeNode,
+    restPlan, canLongRest, restAtNode, leaveNode, canRestBefore, restBeforeNode, canShortRestBefore, shortRestBeforeNode,
     buy, canShop, shopItemName, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
     presentSmiths, smithInfo, claimBlueprint, installBlueprint, blueprintById, weaponModsOf,
     smithQuote, introduceSmith,

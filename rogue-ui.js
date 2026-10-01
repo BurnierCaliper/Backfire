@@ -164,6 +164,7 @@
           <button class="g-btn r-main" id="r-long" ${plan.ok ? "" : "disabled"}>长休 ${C.hours.longRest} 小时
             <small>${plan.ok ? `消耗 ${plan.water} ml 水、${esc(food)}` : "补给不足：" + esc(plan.lack.join("，"))} · 血量回满、耐久回满、武器人痊愈、清空力竭</small></button>
           <button class="g-btn" id="r-short">短休 ${C.hours.shortRest} 小时<small>不消耗补给 · 每人回复 等级×2+体质 · 一天两次</small></button>
+          <button class="g-btn" id="r-rest-skip">不休息，直接离开<small>获得 ${C.restSkipKuizhi} 奎支 · 不花时间</small></button>
         </div>`;
     },
     shop: () => `<p>路边有个摊子。手里有 ${Rogue.supplies().kuizhi} 奎支。</p>
@@ -301,17 +302,21 @@
     return rows.length ? `<p class="r-hint">维修工具包 ×${kits}，每个修复 10 点耐久：</p><div class="r-choices">${rows.join("")}</div>` : "";
   }
 
-  /** 进下一站 / 首领战之前可以先长休一次 */
+  /** 进下一站 / 首领战之前：可以先长休一次，也可以短休（按今天的短休次数） */
   function restBeforeRow() {
     const can = Rogue.canRestBefore(run);
     const used = !can.ok && /已经长休/.test(can.why || "");
-    if (used) return `<p class="r-hint rest-before done">这一站前已经长休过了。</p>`;
     const plan = Rogue.restPlan(run);
     const food = Object.keys(plan.food || {}).map(id => `${ITEM_CATALOG[id].name} ${plan.food[id]} 份`).join("、");
-    return `<div class="rest-before">
-      <button class="g-btn" id="r-rest-before" ${can.ok ? "" : "disabled"}>先长休再前进
-        <small>${can.ok ? `消耗 ${plan.water} ml 水、${esc(food)} · 血量、耐久回满，清空力竭` : esc(can.why || "")}</small></button>
-    </div>`;
+    const longBtn = used
+      ? `<span class="r-hint rest-before done">这一站前已经长休过了。</span>`
+      : `<button class="g-btn" id="r-rest-before" ${can.ok ? "" : "disabled"}>先长休再前进
+          <small>${can.ok ? `消耗 ${plan.water} ml 水、${esc(food)} · 血量、耐久回满，清空力竭` : esc(can.why || "")}</small></button>`;
+    const sh = Rogue.canShortRestBefore(run);
+    const left = (sh.who || []).map(x => `${x.name} ${x.left}`).join("、");
+    const shortBtn = `<button class="g-btn" id="r-short-before" ${sh.ok ? "" : "disabled"}>短休 ${C.hours.shortRest} 小时
+        <small>${sh.ok ? `不消耗补给 · 每人回复 等级×2+体质 · 今天还能短休：${esc(left)}` : esc(sh.why || "")}</small></button>`;
+    return `<div class="rest-before">${longBtn}${shortBtn}</div>`;
   }
 
   function renderTask() {
@@ -436,6 +441,8 @@
     on("r-fight", fight);
     on("r-long", () => act(() => Rogue.restAtNode(run, "long")));
     on("r-short", () => act(() => Rogue.restAtNode(run, "short")));
+    on("r-rest-skip", () => act(() => Rogue.restAtNode(run, "leave")));
+    on("r-short-before", () => act(() => Rogue.shortRestBeforeNode(run)));
     on("r-rest-before", () => act(() => Rogue.restBeforeNode(run)));
     on("r-leave", () => act(() => Rogue.leaveNode(run)));
     on("r-camp", () => act(() => Rogue.camp(run)));
