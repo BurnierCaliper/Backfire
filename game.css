@@ -1591,3 +1591,6 @@ body:not([data-screen="battle"]) .g-rank { display: none !important; }
 .stats-grade b.g-B { color: #6fb3ff; } .stats-grade b.g-A { color: #ff9f1c; } .stats-grade b.g-S { color: #ff3b5c; }
 .rest-before { display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px; }
 .rest-before .g-btn { height: auto; padding: 8px 12px; text-align: left; }
+.rk-gain.neg { color: #c0392b; }
+#g-skills .sk { position: relative; }
+#g-skills .sk .fat { margin-left: 5px; font-size: 11px; font-weight: 700; color: #ff8a65; white-space: nowrap; }

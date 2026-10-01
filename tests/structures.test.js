@@ -375,3 +375,38 @@ test("评分：大伤害加成——到门槛（目标等级×2+8）+10%，到�
   assert.equal(r.res.advantage, false);
   assert.equal(st.battleScore.parts.bonus, Math.floor(r.res.total * 0.25 + 1e-6));
 });
+
+test("招式疲劳：同一角色连续几个回合用同一招，这次行动的总得分 −10% / −25% / −40%（封顶）；换招或隔一回合就重置", () => {
+  const { c, st, kolt } = field();
+  c.resetBattleRecords();
+  const streakAt = (turn, id) => { st.turnNo = turn; const s = c.fatigueStreak(kolt, id); c.noteSkillUse(kolt, id, s); return c.fatiguePct(s); };
+  assert.deepEqual([1, 2, 3, 4, 5].map(t => streakAt(t, "A")), [0, 0.10, 0.25, 0.40, 0.40]);
+  assert.equal(streakAt(6, "B"), 0, "换招：重新算");
+  assert.equal(streakAt(7, "A"), 0, "A 隔了一回合：重新算");
+  assert.equal(streakAt(8, "A"), 0.10);
+  // 同一回合里用两次：都按这回合的连续数，不会越用越多
+  st.turnNo = 9;
+  const s1 = c.fatigueStreak(kolt, "A"); c.noteSkillUse(kolt, "A", s1);
+  const s2 = c.fatigueStreak(kolt, "A");
+  assert.equal(s1, s2);
+  assert.equal(c.fatiguePct(s1), 0.25);
+});
+
+test("招式疲劳：真的扣在这次行动的总得分上，单独记成「招式疲劳」", () => {
+  const { c, st, kolt } = field();
+  c.resetBattleRecords();
+  const aa = c.skillList(kolt).find(s => s.name === "普通攻击").id;
+  const foe = st.units.find(u => !u.isPlayer);
+  foe.zone = 1; kolt.zone = 1;
+  const act = (turn) => {
+    st.turnNo = turn; st.combatPhase = "player"; kolt.ap = 1; foe.layers.forEach(l => { l.current = l.max; }); foe.def = foe.defMax; foe.stunned = false;
+    const t0 = st.battleScore.total, f0 = st.battleScore.parts.fatigue || 0;
+    st.attackerId = kolt.id; st.targetId = foe.id;
+    c.runSkill(aa);
+    return { net: st.battleScore.total - t0, cut: (st.battleScore.parts.fatigue || 0) - f0 };
+  };
+  const r1 = act(1), r2 = act(2);
+  assert.equal(r1.cut, 0);
+  assert.ok(r2.cut > 0);
+  assert.equal(r2.cut, Math.floor((r2.net + r2.cut) * 0.10 + 1e-6), "第二回合扣这次行动总分的 10%");
+});

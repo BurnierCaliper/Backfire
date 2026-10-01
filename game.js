@@ -2221,7 +2221,7 @@
     ${(() => {
       if (typeof battleGrade !== "function") return "";
       const gr = battleGrade();
-      const parts = Object.keys(SCORE_PART_NAMES).filter(k => gr.parts[k]).map(k => `${SCORE_PART_NAMES[k]} ${gr.parts[k]}`).join(" · ");
+      const parts = Object.keys(SCORE_PART_NAMES).filter(k => gr.parts[k]).map(k => k === "fatigue" ? `招式疲劳 −${gr.parts[k]}` : `${SCORE_PART_NAMES[k]} ${gr.parts[k]}`).join(" · ");
       return `<p class="stats-grade"><b class="g-${gr.grade}">评价 ${gr.grade}</b> ${gr.score} 分（这场的基准 ${gr.par} 分，${gr.ratio.toFixed(2)} 倍）${gr.next ? `，距 ${gr.next.grade} 还差 ${Math.max(0, gr.next.need - gr.score)} 分` : ""}<br>${parts || "还没有得分"}</p>`;
     })()}
     <p class="stats-turn">${state.combatStarted ? `第 ${state.turnNo || 1} 回合` : "还没开战"} · 评价分段：${SCORE_GRADES.map(([g, k, x]) => g === "C" ? `C（经验 ×${x}）` : `${g} ≥ ${k} 倍基准（经验 ×${x}）`).join("、")}。速杀：${SCORE_SPEED.map(([n, m]) => `${n} 回合内 ×${m}`).join(" / ")}（胜利时整场分数再乘）。得分里的击杀、团队分不一定能归到具体某人，所以个人得分加起来可能比总分少。</p>`;
@@ -2287,7 +2287,13 @@
       if (sk.cost.ap) cost.push(`<span class="ap">行动 ${sk.cost.ap}</span>`);
       if (sk.cost.bonus) cost.push(`<span class="bn">附赠 ${sk.cost.bonus}</span>`);
       if (!cost.length) cost.push("不耗行动");
-      b.innerHTML = `<span class="key">${i < 9 ? i + 1 : ""}</span><span class="nm">${esc(sk.name)}</span><span class="cost">${cost.join(" ")}</span>`;
+      // 招式疲劳：这回合再用这一招会扣多少（连续回合用同一招）
+      let fat = "";
+      if (state.combatStarted && actor && typeof fatigueStreak === "function" && !/^__|^use_device:/.test(sk.id)) {
+        const pct = fatiguePct(fatigueStreak(actor, sk.id));
+        if (pct > 0) fat = `<span class="fat" title="招式疲劳：连续几个回合用同一招，这次行动的总得分打折">疲劳−${Math.round(pct * 100)}%</span>`;
+      }
+      b.innerHTML = `<span class="key">${i < 9 ? i + 1 : ""}</span><span class="nm">${esc(sk.name)}</span><span class="cost">${cost.join(" ")}${fat}</span>`;
       if (why) { b.disabled = true; b.title = why; }
       b.onclick = () => armSkill(sk);
       b.onmouseenter = () => {
@@ -2359,7 +2365,9 @@
     Object.keys(gr.parts).forEach(k => {
       const d = (gr.parts[k] || 0) - (lastParts[k] || 0);
       if (d > 0 && !G.sim) {
-        const line = el("div", "rk-gain", `+${d} ${SCORE_PART_NAMES[k] || k}`);
+        const line = k === "fatigue"
+          ? el("div", "rk-gain neg", `−${d} 招式疲劳`)
+          : el("div", "rk-gain", `+${d} ${SCORE_PART_NAMES[k] || k}`);
         feed.prepend(line);   // column-reverse：最新的一行贴着评价字母，旧的往上推
         realTimeout(() => line.remove(), 2600);
         while (feed.children.length > 5) feed.lastChild.remove();

@@ -2015,6 +2015,9 @@ const SCORE_RULES = {
   ap: 10,          // 我方每用 1 点行动点
   bonusAction: 5   // 我方每用 1 次附赠行动
 };
+// 招式疲劳（像大乱斗的同招衰减）：同一个角色连续几个回合用同一个技能，这次行动的总得分打折。
+// 下标 = 连续第几个回合（1 不扣），超出表的按最后一项封顶
+const SCORE_FATIGUE = [0, 0, 0.10, 0.25, 0.40];
 // 速杀奖励：胜利时整场分数再乘一次。[几回合内（含）, 倍率]
 const SCORE_SPEED = [[1, 2], [2, 1.5], [3, 1.2]];
 // 一击的加分倍率：各项加算（1 + 0.25 + …），乘在这一击产生的所有分数上
@@ -2033,7 +2036,51 @@ function bigHitInfo(level, dmg) {
 }
 // [评价, 至少几倍基准分, 战斗经验倍率]
 const SCORE_GRADES = [["S", 2.6, 2], ["A", 2.15, 1.5], ["B", 1.65, 1.2], ["C", 0, 1]];   // 用无界面对打校准（含行动分、速杀奖励）：只会普攻的自动打法中位数约 1.8 倍（B）
-const SCORE_PART_NAMES = { dmg: "伤害", heal: "治疗 / 护盾", brk: "击破", stagger: "打出失衡", block: "协助格挡成功", overkill: "溢出伤害", kill: "击杀", bonus: "克制 / 大伤害加成", action: "行动", speed: "速杀奖励" };
+const SCORE_PART_NAMES = { dmg: "伤害", heal: "治疗 / 护盾", brk: "击破", stagger: "打出失衡", block: "协助格挡成功", overkill: "溢出伤害", kill: "击杀", bonus: "克制 / 大伤害加成", action: "行动", speed: "速杀奖励", fatigue: "招式疲劳（扣分）" };
+/** 这个角色这回合用这个技能，算连续第几个回合（不改记录）。
+ *  上回合用过 → 上回合的连续数 + 1；这回合已经用过 → 和这回合第一次一样；否则 1 */
+function fatigueStreak(u, skillId) {
+  const rec = (state.skillStreak || {})[u && u.id];
+  const T = Number(state.turnNo) || 1;
+  if (!rec) return 1;
+  if (rec.turn === T) return rec.cur[skillId] || (rec.prev[skillId] || 0) + 1;
+  if (rec.turn === T - 1) return (rec.cur[skillId] || 0) + 1;
+  return 1;
+}
+function fatiguePct(streak) {
+  return SCORE_FATIGUE[Math.min(streak, SCORE_FATIGUE.length - 1)] || 0;
+}
+/** 记下这回合用了这个技能 */
+function noteSkillUse(u, skillId, streak) {
+  state.skillStreak = state.skillStreak || {};
+  const T = Number(state.turnNo) || 1;
+  let rec = state.skillStreak[u.id];
+  if (!rec || rec.turn !== T) rec = state.skillStreak[u.id] = { turn: T, prev: rec && rec.turn === T - 1 ? rec.cur : {}, cur: {} };
+  rec.cur[skillId] = streak;
+}
+/** 反应类（协助攻击、协助格挡）不算主动出的招，不吃疲劳 */
+function isReactionSkill(id) {
+  return id === "assist_block" || /_assist$/.test(String(id || "")) || !!state._assistBy;
+}
+/** 一次行动结束后：按连续回合数，把这次行动的总得分打折（扣掉的记成「招式疲劳」） */
+function applyFatigue(u, skillId, scoreBefore, personalBefore) {
+  if (!u || !u.isPlayer || !state.combatStarted || isReactionSkill(skillId)) return;
+  const sc = state.battleScore || { total: 0, parts: {} };
+  const gained = sc.total - scoreBefore;
+  if (gained <= 0) return;                     // 没真的出手（行动点不足之类）：不算一次使用
+  const streak = fatigueStreak(u, skillId);
+  noteSkillUse(u, skillId, streak);
+  const pct = fatiguePct(streak);
+  if (pct <= 0) return;
+  const cut = Math.floor(gained * pct + 1e-6);
+  if (cut <= 0) return;
+  sc.total -= cut;
+  sc.parts.fatigue = (sc.parts.fatigue || 0) + cut;
+  const st = battleStat(u);
+  if (st) st.score = (st.score || 0) - cut;
+  appendLog(`  招式疲劳：连续第 ${streak} 个回合用「${skillDisplayName(u, skillId)}」，这次行动得分 −${Math.round(pct * 100)}%（−${cut}）`);
+}
+
 /** 我方用掉行动点 / 附赠行动时加分（开战后才算） */
 function scoreSpend(u, ap, bonus) {
   if (!u || !u.isPlayer || !state.combatStarted) return;
@@ -2079,6 +2126,7 @@ function attackScoreBonus(res, target) {
 /** 每场战斗开始时清空：战场数据、评分、这场的经验 / 掉落 */
 function resetBattleRecords() {
   state.battleStats = {};
+  state.skillStreak = {};
   state.battleScore = { total: 0, parts: {} };
   state.scoreSeen = {};
   state.battleGains = { xp: 0, kuizhi: 0 };
@@ -7232,7 +7280,9 @@ function runSkill(id, optRun) {
   try {
     lines = withLogSink(() => {
       state.aoePulse = {};            // 只算这一次行动的范围攻击
+      const scoreBefore = state.battleScore ? state.battleScore.total : 0;
       trackHealBy(a0, () => runSkillInner(id, optRun));
+      applyFatigue(a0, id, scoreBefore);   // 招式疲劳：连续几个回合用同一招，这次行动的总得分打折
       flushAoePulse();                // 波及到的按钮 / 拉杆各触发一次（提前 return 的分支也算）
       state.actionAcc = null;         // 行动结束：之后的持续伤害不再算到这个人头上
     });
