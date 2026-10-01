@@ -11,6 +11,8 @@
   let log = [];
   let slot = -1;          // 正在玩的存档空位
   let slotName = "";
+  let undoStack = [];     // 探索环节的撤销：每个操作之前记一份（最多 20 步）
+  const UNDO_MAX = 20;
 
   const TABS = [
     ["party", "队伍"], ["rest", "时间与休息"], ["shop", "商店"], ["bag", "背包"], ["smith", "武器升级"], ["backstage", "后台"]
@@ -30,8 +32,29 @@
     else writeSlotNow();
   }
   function saveLog() { writeSlotNow(); }
+  /** 记一份撤销点：和存档里写的是同一份东西 */
+  function pushUndo() {
+    if (slot < 0 || !window.GAME) return;
+    if (typeof ledgerCapture === "function") ledgerCapture();
+    if (GAME.rememberCampaign) GAME.rememberCampaign();
+    undoStack.push(JSON.parse(JSON.stringify({
+      campaign: GAME.campaign || null, log, level: level(), enc: GAME.lastEncounter || null,
+      partyKits: (GAME.partyKits || []).slice()
+    })));
+    while (undoStack.length > UNDO_MAX) undoStack.shift();
+  }
+  function undo() {
+    const u = undoStack.pop();
+    if (!u) return;
+    applySlotData(u);
+    if (u.partyKits && u.partyKits.length) GAME.partyKits = u.partyKits.slice();
+    rebuild();
+    save();
+    render();
+  }
   /** 一次操作：执行、记日志、存档、重画 */
   function act(fn) {
+    pushUndo();
     let notes = [];
     try { notes = fn() || []; } catch (e) { notes = ["没做成：" + e.message]; }
     notes = notes.filter(Boolean);
@@ -50,6 +73,8 @@
 
   /* ---------- 顶栏 ---------- */
   function renderTop() {
+    const ub = $("tr-undo");
+    if (ub) { ub.disabled = !undoStack.length; ub.textContent = undoStack.length > 1 ? `撤销（${undoStack.length}）` : "撤销"; }
     $("tr-slot-name").textContent = slot >= 0 ? `存档 ${slot + 1} · ${slotName}` : "";
     const t = exhaustTier();
     $("tr-clock").innerHTML = `第 <b>${LEDGER.day || 1}</b> 天 · 距上次长休 <b>${LEDGER.hours || 0}</b> 小时` +
@@ -282,13 +307,13 @@
     on("tr-apply-party", () => {
       const kits = [...P.querySelectorAll("[data-kit]")].filter(x => x.checked).map(x => x.dataset.kit);
       if (!kits.length) return;
-      GAME.partyKits = kits;
-      act(() => { rebuild(); return [`队伍：${kits.map(k => (livePartyCards().find(c => c.kit === k) || {}).name || k).join("、")}。`]; });
+      act(() => { GAME.partyKits = kits; rebuild(); return [`队伍：${kits.map(k => (livePartyCards().find(c => c.kit === k) || {}).name || k).join("、")}。`]; });
     });
     on("tr-xp-go", () => act(() => trpgGiveXp($("tr-xp-who").value ? [$("tr-xp-who").value] : null, $("tr-xp").value)));
     P.querySelectorAll("[data-attr]").forEach(b => { b.onclick = () => { const [k, a] = b.dataset.attr.split(":"); act(() => trpgSpendAttr(k, a)); }; });
     on("tr-reset", () => {
       if (!confirm(`清空存档「${slotName}」的进度？等级、经验、物资、奎支、时间、探索记录都会归零（名字保留）。`)) return;
+      pushUndo();
       freshCampaign();
       rebuild(); save(); render();
     });
@@ -440,15 +465,8 @@
     Screens.show("trpg-slots");
   }
 
-  /* ---------- 进出 ---------- */
-  function enter(i) {
-    const s = trpgReadSlots()[i];
-    if (!s) return;
-    slot = i;
-    slotName = s.name || `团 ${i + 1}`;
-    TRPG.active = true;
-    document.body.classList.add("trpg");
-    if (typeof Rogue !== "undefined") Rogue.leaveRunMode();   // 经验曲线恢复手册的 1 倍
+  /** 把一份存档内容（空位里的、或撤销点）装进内存：队伍记忆、时间、背包、记录、敌人等级 */
+  function applySlotData(s) {
     if (s.campaign) {
       GAME.campaign = JSON.parse(JSON.stringify(s.campaign));
       LEDGER.load(GAME.campaign.ledger);
@@ -460,9 +478,23 @@
       log = Array.isArray(s.log) ? s.log.slice() : [];
     } else {
       freshCampaign();
+      log = Array.isArray(s.log) ? s.log.slice() : [];
     }
     const lv = $("g-level");
     if (lv && s.level) lv.value = String(s.level);
+  }
+
+  /* ---------- 进出 ---------- */
+  function enter(i) {
+    const s = trpgReadSlots()[i];
+    if (!s) return;
+    slot = i;
+    slotName = s.name || `团 ${i + 1}`;
+    TRPG.active = true;
+    document.body.classList.add("trpg");
+    if (typeof Rogue !== "undefined") Rogue.leaveRunMode();   // 经验曲线恢复手册的 1 倍
+    undoStack = [];
+    applySlotData(s);
     rebuild();
     save();
     tab = "party";
@@ -478,6 +510,7 @@
     if (state.combatStarted && !GAME.ended && !confirm("战斗还没结束。直接回到探索环节会放弃这场战斗（不结算，回到开战前的状态）。确定吗？")) return;
     const r = $("g-result"); if (r) r.classList.remove("show");
     const ro = $("g-reopen"); if (ro) ro.classList.remove("show");
+    undoStack = [];   // 战斗打完回来：之前的撤销点在战斗之前，撤回去会把整场战斗的结果一起抹掉，所以清空
     rebuild();
     save();
     Screens.show("trpg");
@@ -500,6 +533,12 @@
     const xm = $("g-xp-mult");
     if (xm) xm.onchange = () => { state.xpMult = Number(xm.value) || 1; };
     $("tr-slots").onclick = openSlots;
+    $("tr-undo").onclick = undo;
+    document.addEventListener("keydown", (e) => {
+      if (!Screens.is("trpg")) return;
+      if (e.target && /INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) return;
+      if ((e.key === "z" || e.key === "Z") && (e.ctrlKey || e.metaKey)) { e.preventDefault(); undo(); }
+    });
     $("tr-slots-title").onclick = () => { if (TRPG.active && slot >= 0) save(); TRPG.active = false; slot = -1; document.body.classList.remove("trpg"); Screens.show("title"); };
     $("tr-fight").onclick = toBattle;
     $("tr-bs").onclick = () => { tab = "backstage"; render(); };

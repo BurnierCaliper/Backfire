@@ -277,6 +277,43 @@
     s.keys.forEach(k => { state[k] = s.data[k]; });
   }
 
+  /* ---------- 撤销：每次玩家行动、结束回合、开始战斗之前记一份完整快照 ----------
+   * 跑团模式最多撤回 10 步；Roguelike 单局只能撤回 1 步（免得反复重掷）。战斗结算后不能撤销。
+   * 战斗记录不删，只补一行「↶ 撤销」。 */
+  G.undo = [];
+  function undoLimit() { return (typeof TRPG !== "undefined" && TRPG.active) ? 10 : 1; }
+  function pushUndo(label) {
+    if (G.sim) return;
+    G.undo.push({
+      label: label || "行动",
+      st: saveState(),
+      ledger: typeof LEDGER !== "undefined" ? LEDGER.save() : null,
+      actorId: G.actorId,
+      apWarnTurn: G.apWarnTurn
+    });
+    while (G.undo.length > undoLimit()) G.undo.shift();
+  }
+  function canUndo() { return G.undo.length > 0 && G.depth === 0 && !G.ended && !choiceResolve; }
+  function doUndo() {
+    if (!canUndo()) return;
+    disarm();
+    const u = G.undo.pop();
+    restoreState(u.st);
+    if (u.ledger && typeof LEDGER !== "undefined") {
+      const water = ledgerWater();
+      LEDGER.load(u.ledger);
+      setLedgerWater(water);   // 水在背包里，已随快照恢复
+    }
+    G.actorId = u.actorId;
+    G.apWarnTurn = u.apWarnTurn;
+    G.version++;
+    G.predict = null;
+    addLogPhase(`↶ 撤销：${u.label}`);
+    setView(snapAll(), false);
+    refreshAll();
+    flashHint(`已撤销：${u.label}` + (G.undo.length ? `（还能再撤 ${G.undo.length} 步）` : ""));
+  }
+
   function simulate(thunk, diceMode) {
     const saved = saveState();
     const rnd = Math.random;
@@ -971,6 +1008,7 @@
   }
 
   async function act(thunk, meta) {
+    pushUndo((meta && meta.skillName) || "行动");
     G.depth++;
     syncBusy();
     try {
@@ -987,6 +1025,7 @@
 
   function syncBusy() {
     $("g-app").classList.toggle("busy", G.depth > 0);
+    paintUndo();
     refreshHud();
   }
 
@@ -1617,6 +1656,7 @@
     if (G.depth > 0 || G.ended || choiceResolve) return;
     if (!state.combatStarted) {
       await askOpeningChoices();
+      pushUndo("开始战斗");
       startCombat();
       phaseCard("战斗开始", "player");
       autoSelect(true);
@@ -1683,6 +1723,7 @@
       if (ans !== "yes") return;
     }
     disarm();
+    pushUndo(`结束第 ${state.turnNo} 回合`);
     G.depth++;
     syncBusy();
     try {
@@ -1958,7 +1999,8 @@
     state.exhaustTier = 0;
     state.retreated = false;
     state.lootByRank = null;
-    state.battleGains = { xp: 0, kuizhi: 0 };   // 这场战斗得到的经验（每人）和掉落，跑团模式写进探索记录
+    state.battleGains = { xp: 0, kuizhi: 0 };
+    G.undo = [];   // 这场战斗得到的经验（每人）和掉落，跑团模式写进探索记录
     state.xpMult = Number(($("g-xp-mult") || {}).value) || 1;
 
     loadLiveParty();
@@ -2050,6 +2092,14 @@
       rt.hidden = bossNoRetreat;
       rt.disabled = !canRetreat();
     }
+    paintUndo();
+  }
+  function paintUndo() {
+    const b = $("g-undo");
+    if (!b) return;
+    b.disabled = !canUndo();
+    b.textContent = G.undo.length > 1 ? `撤销（${G.undo.length}）` : "撤销";
+    b.title = G.undo.length ? `撤销：${G.undo[G.undo.length - 1].label}（Ctrl+Z）` : "还没有可以撤销的操作（Ctrl+Z）";
   }
 
   function refreshHud() {
@@ -2147,6 +2197,7 @@
   function refreshAll() {
     if (G.depth === 0) setView(snapAll(), true);
     refreshHud();
+    paintUndo();
   }
 
   function addLogPhase(text) {
@@ -2816,6 +2867,7 @@
         e.preventDefault(); $("g-bs-sheet").classList.remove("show"); G.bsOpen = false; return;
       }
       if (e.key === "Escape") { e.preventDefault(); disarm(); return; }
+      if ((e.key === "z" || e.key === "Z") && (e.ctrlKey || e.metaKey)) { e.preventDefault(); doUndo(); return; }
       if (e.key === " ") { e.preventDefault(); clickStartOrEnd(); return; }
       if (e.key === "Tab") {
         e.preventDefault();
@@ -3006,6 +3058,7 @@
     $("g-restart").onclick = () => { if (G.depth === 0) setupBattle(Number($("g-level").value) || 1, G.lastEncounter || null); };
     $("g-again").onclick = () => setupBattle(Number($("g-level").value) || 1, G.lastEncounter || null);
     $("g-retreat").onclick = askRetreat;
+    $("g-undo").onclick = doUndo;
     $("g-rogue-next").onclick = () => {
       const r = G.rogue;
       if (!r || !G.ended) return;
@@ -3043,6 +3096,7 @@
   G.setupBattle = setupBattle;
   G.startRogueBattle = startRogueBattle;
   G.rememberCampaign = rememberCampaign;
+  G.doUndo = doUndo;
   G.loadCampaignMem = loadCampaignMem;
   G.showPendingIntro = () => { if (G.pendingIntro && !state.combatStarted) battleIntro(G.pendingIntro); };
   G.armSkill = armSkill;

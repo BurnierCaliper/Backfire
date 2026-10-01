@@ -3210,7 +3210,8 @@ function removeEnemyFromField(u, notes) {
   if (state.targetId === u.id) state.targetId = null;
   const id = u.id;
   const drop = () => {
-    state.units = (state.units || []).filter(x => x.id !== id);
+    // 只清掉仍处于「已击杀」的那个；中途撤销复活回来的单位不能被这个计时器误删
+    state.units = (state.units || []).filter(x => !(x.id === id && x._removed));
     renderAll();
   };
   // 一记重击打死的，铭牌多停一会儿再淡出（重击的标记可能在这之后才打上，所以到点再看）

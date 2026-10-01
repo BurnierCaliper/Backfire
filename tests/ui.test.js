@@ -358,6 +358,101 @@ test("攻击效果打出大字：属性专属按属性上色，通用的灰色�
   assert.deepEqual(o.errors, []);
 });
 
+/* ---------- 撤销 ---------- */
+const attackFirstFoe = async (page) => {
+  await page.keyboard.press("1");
+  await page.waitForFunction(() => GAME.arm && GAME.arm.mode === "unit");
+  const foe = await page.evaluate(() => [...GAME.arm.map.entries()].find(([id, c]) => !c.invalid && !String(id).includes(":"))[0]);
+  await page.click(`.unit-wrap[data-id="${foe}"]`);
+  await page.waitForFunction(() => GAME.depth === 0 && !document.querySelector(".choice.show, .g-choice.show"));
+  return foe;
+};
+
+test("战斗撤销：撤回上一步，血量、行动点都回来；跑团模式能连撤好几步，连「开始战斗」也能撤", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await newTrpg(page);
+  await startBattle(page);
+  await page.evaluate(() => { Math.random = () => 0.999; });
+  const ruby = await selectHero(page, "ruby");
+  const hpOf = (id) => page.evaluate(i => totalHp(state.units.find(u => u.id === i)), id);
+  const before = { ap: await apOf(page, ruby) };
+  const foe = await attackFirstFoe(page);
+  const hitHp = await hpOf(foe);
+  assert.equal(await apOf(page, ruby), before.ap - 1);
+  await page.click("#g-undo");
+  assert.equal(await apOf(page, ruby), before.ap, "行动点应该回来");
+  assert.ok(await hpOf(foe) > hitHp, "敌人血量应该回来");
+  assert.match(await page.textContent("#g-logs"), /↶ 撤销：普通攻击/);
+  // 再撤一步：回到开战前
+  await page.keyboard.press("Control+z");
+  assert.equal(await page.evaluate(() => state.combatStarted), false);
+  assert.ok(await page.isDisabled("#g-undo"));
+  assert.deepEqual(o.errors, []);
+});
+
+test("战斗撤销：打死敌人后马上撤销，敌人不会被延迟的清场计时器删掉", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await newTrpg(page);
+  await startBattle(page);
+  await page.evaluate(() => { Math.random = () => 0.999; state.units.filter(u => !u.isPlayer).forEach(u => u.layers.forEach(l => { l.current = 1; })); });
+  await selectHero(page, "ruby");
+  const foe = await attackFirstFoe(page);
+  assert.ok(await page.evaluate(i => state.units.find(u => u.id === i).dead, foe));
+  await page.click("#g-undo");
+  await page.waitForTimeout(5200);   // 超过清场计时（3 秒，重击 4.9 秒）
+  const back = await page.evaluate(i => { const u = state.units.find(x => x.id === i); return u ? { dead: !!u.dead, hp: totalHp(u) } : null; }, foe);
+  assert.ok(back && !back.dead && back.hp > 0, "撤销后敌人应该还在：" + JSON.stringify(back));
+  assert.ok(await page.$(`.unit-wrap[data-id="${foe}"]`), "铭牌也应该还在");
+  assert.deepEqual(o.errors, []);
+});
+
+test("战斗撤销：不在跑团模式时只能撤一步", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await newTrpg(page);
+  await startBattle(page);
+  await page.evaluate(() => { Math.random = () => 0.999; TRPG.active = false; });
+  const ruby = await selectHero(page, "ruby");
+  await page.evaluate(i => { state.units.find(u => u.id === i).ap = 2; }, ruby);
+  await attackFirstFoe(page);
+  await attackFirstFoe(page);
+  assert.equal(await apOf(page, ruby), 0);
+  assert.equal(await page.evaluate(() => GAME.undo.length), 1);
+  await page.click("#g-undo");
+  assert.equal(await apOf(page, ruby), 1, "只撤回最后一次攻击");
+  assert.ok(await page.isDisabled("#g-undo"));
+  assert.deepEqual(o.errors, []);
+});
+
+test("探索环节撤销：买错东西可以撤回；打完仗回来不能撤到战斗之前", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await newTrpg(page);
+  await page.click('[data-tab="bag"]');
+  await page.fill("#tr-kz", "5000"); await page.click("#tr-kz-add");
+  await page.click('[data-tab="shop"]');
+  await page.click('[data-buy="medkit"]');
+  await page.click('[data-buy="medkit"]');
+  const s = () => page.evaluate(() => ({ kz: state.kuizhi, med: bagCount("medkit"), log: document.querySelectorAll("#tr-log li").length }));
+  assert.deepEqual(await s(), { kz: 3800, med: 2, log: 3 });
+  await page.click("#tr-undo");
+  assert.deepEqual(await s(), { kz: 4400, med: 1, log: 2 });
+  await page.keyboard.press("Control+z");
+  assert.deepEqual(await s(), { kz: 5000, med: 0, log: 1 });
+  // 刷新后也是撤销后的样子
+  await page.reload(); await page.click("#t-sandbox"); await page.click('[data-open="0"]');
+  assert.deepEqual(await s(), { kz: 5000, med: 0, log: 1 });
+  // 进战斗再回来：撤销清空
+  await page.click('[data-tab="shop"]');
+  await page.click('[data-buy="medkit"]');
+  await page.click("#tr-fight");
+  await page.click("#g-to-explore");
+  assert.ok(await page.isDisabled("#tr-undo"));
+  assert.deepEqual(o.errors, []);
+});
+
 test("音效：七种属性都能合成，有声、不削顶、不出错", async (t) => {
   const o = await open(t); if (!o) return;
   const r = await o.page.evaluate(async () => {
