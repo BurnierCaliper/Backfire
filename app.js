@@ -5007,6 +5007,7 @@ function dealTo(attacker, target, opt) {
       appendLog(`→ ${target.name}：等待协助格挡（同区可以格挡的：${helpers.map(h => h.name + " " + finalBlockChance(h, attacker, target) + "%").join("、")}）`);
       state.blockQueue = state.blockQueue || [];
       state.blockQueue.push({
+        seq: (state.jobSeq = (Number(state.jobSeq) || 0) + 1),   // 这一击的编号：格挡骰和伤害骰按它定种子（Helumica 能预测）
         attackerId: attacker.id,
         targetId: target.id,
         onConnect: opt.onConnect || null,

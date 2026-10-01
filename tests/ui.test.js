@@ -453,6 +453,56 @@ test("探索环节撤销：买错东西可以撤回；打完仗回来不能撤�
   assert.deepEqual(o.errors, []);
 });
 
+test("Helumica 的预测：预测的伤害和格挡骰就是实际掷出来的", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await newTrpg(page);
+  await page.evaluate(() => { GAME.partyKits = ["kolt", "helu"]; GAME.enemyPlan = [{ id: "thug_hammer", lv: 1, zone: 1 }]; GAME.lastEncounter = null; });
+  await page.click("#tr-fight");
+  await page.evaluate(() => { state.units.forEach(u => { u.zone = 1; }); });
+  await page.keyboard.press("Space");
+  for (let i = 0; i < 40; i++) {
+    if (await page.evaluate(() => state.combatStarted && state.combatPhase === "player" && GAME.depth === 0)) break;
+    const opt = page.locator("#g-choice.show .opts button"); if (await opt.count()) await opt.first().click().catch(() => {});
+    await page.waitForTimeout(200);
+  }
+  const foe = await page.evaluate(() => { const f = state.units.find(u => !u.isPlayer); applyFocus(f, null, []); GAME.refresh(); return f.id; });
+  const readPred = async () => { await page.hover(`[data-id="${foe}"]`); await page.waitForTimeout(300); return page.textContent("#g-pvbox"); };
+  const pred = await readPred();
+  const m = pred.match(/([^\s】]+) 预计受到 (\d+) 伤害.*?格挡骰 (\d+)/);
+  assert.ok(m, "预测里应该有伤害和格挡骰：" + pred);
+  const who = m[1].replace(/^.*?(柯尔特|Helumica)$/, "$1"), dmg = Number(m[2]), roll = Number(m[3]);
+  const endTurn = async (choose) => {
+    const hp0 = await page.evaluate(n => totalHp(partyHeroes().find(h => h.name === n)), who);
+    await page.mouse.move(5, 5);
+    await page.keyboard.press("Space");
+    await page.waitForTimeout(300);
+    const yes = page.locator("#g-choice.show button", { hasText: "确定结束" });
+    if (await yes.count()) await yes.click();
+    let shown = null;
+    for (let i = 0; i < 80; i++) {
+      if (await page.evaluate(() => state.turnNo === 2 && state.combatPhase === "player" && GAME.depth === 0)) break;
+      const chk = await page.evaluate(() => { const n = document.getElementById("g-check-num"); return document.querySelector("#g-check.show") && /ok|fail/.test(n.className) ? Number(n.textContent) : null; });
+      if (chk != null) shown = chk;
+      const opts = page.locator("#g-choice.show .opts button");
+      if (await opts.count()) {
+        const btn = choose === "none" ? opts.filter({ hasText: "不格挡" }) : opts.filter({ hasText: "格挡" }).filter({ hasNotText: "不格挡" });
+        await (await btn.count() ? btn.first() : opts.last()).click().catch(() => {});
+      }
+      await page.waitForTimeout(150);
+    }
+    const hp1 = await page.evaluate(n => totalHp(partyHeroes().find(h => h.name === n)), who);
+    return { lost: hp0 - hp1, shown };
+  };
+  const r1 = await endTurn("none");
+  assert.equal(r1.lost, dmg, `预测 ${who} 受到 ${dmg}，实际 ${r1.lost}`);
+  await page.click("#g-undo");
+  assert.equal(await readPred(), pred, "撤销回来，预测不变");
+  const r2 = await endTurn("block");
+  assert.equal(r2.shown, roll, `预测格挡骰 ${roll}，实际 ${r2.shown}`);
+  assert.deepEqual(o.errors, []);
+});
+
 test("音效：七种属性都能合成，有声、不削顶、不出错", async (t) => {
   const o = await open(t); if (!o) return;
   const r = await o.page.evaluate(async () => {

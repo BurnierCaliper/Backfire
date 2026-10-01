@@ -1087,7 +1087,7 @@
         if (blocker) {
           const chance = finalBlockChance(blocker, attacker, target);
           const iai = blocker.kit === "hiaki" && blocker.resources && blocker.resources.stance === "iai";
-          const roll = 1 + Math.floor(Math.random() * 100);
+          const roll = blockRollFor(job);   // 按这一击的编号定种子：和 Helumica 预测的是同一颗骰子
           const ok = iai ? true : roll <= chance;
           forced = { roll, ok, chance, iai };
           await playBlockCheck({
@@ -1098,7 +1098,8 @@
             note: iai ? "居合：必定成功" : ""
           });
         }
-        await perform(() => finishBlock(choice, forced), {
+        const seq = job.seq;
+        await perform(() => withSeed("hit:" + seq, () => finishBlock(choice, forced)), {
           actorId: attacker.id, targetId: target.id, forceLunge: true,
           blockerId: blocker && forced && forced.ok ? blocker.id : null,
           skillName: blocker ? `攻击（${blocker.name} 格挡）` : "攻击"
@@ -1318,6 +1319,21 @@
     if (/^移动/.test(name)) return name;
     return t ? `用「${name}」打 ${t.name}` : `「${name}」`;
   }
+  /* ---------- 敌人回合的骰子都按种子掷：同样的局势掷出同样的结果，所以 Helumica 的预测是准的 ----------
+   *   end:<回合>            玩家回合结束时的结算
+   *   act:<回合>:<敌人>:<第几动>  敌人这一动（不经格挡的伤害骰在这里掷）
+   *   block:<这一击的编号>    协助格挡的 d100
+   *   hit:<这一击的编号>      等格挡的那一击落下时的伤害骰 */
+  function withSeed(key, fn) {
+    if (typeof makeRng !== "function") return fn();
+    const r = Math.random;
+    Math.random = makeRng(key);
+    try { return fn(); } finally { Math.random = r; }
+  }
+  function blockRollFor(job) {
+    if (!job || job.seq == null || typeof makeRng !== "function") return 1 + Math.floor(Math.random() * 100);
+    return 1 + Math.floor(makeRng("block:" + job.seq)() * 100);
+  }
   function predictTurn(id) {
     const key = `${G.version}|${state.turnNo}|${id}`;
     if (G.predict && G.predict.key === key) return G.predict.steps;
@@ -1328,13 +1344,42 @@
     window.setTimeout = () => 0;
     Math.random = makeRng("predict:" + key);
     const steps = [];
+    // 这一段 tape 里打在我方身上的伤害：{ 名字: 伤害 }
+    const dmgOnPlayers = (from) => {
+      const out = new Map();
+      G.tape.slice(from).forEach(e => {
+        if (e.type !== "pop" || e.kind !== "dmg") return;
+        const u = unitById(e.unitId);
+        if (!u || !u.isPlayer) return;
+        out.set(u.name, (out.get(u.name) || 0) + Math.floor(Number(e.value) || 0));
+      });
+      return out;
+    };
     try {
-      endPlayerTurn();
-      const drain = () => {
-        for (let g = 0; g < 20 && state.blockQueue && state.blockQueue.length; g++) finishBlock(null);
+      const endKey = `end:${state.turnNo}`;
+      withSeed(endKey, () => endPlayerTurn());
+      // 落下等格挡的攻击（按「没人格挡」算），focus 时顺便记下格挡骰、谁能挡住、会挨多少
+      const drain = (detail) => {
+        for (let g = 0; g < 20 && state.blockQueue && state.blockQueue.length; g++) {
+          const job = state.blockQueue[0];
+          const attacker = unitById(job.attackerId), target = unitById(job.targetId);
+          let info = null;
+          if (detail && attacker && target && job.attackerId === id) {
+            const roll = blockRollFor(job);
+            const helpers = eligibleBlockers(target).map(h => {
+              const chance = finalBlockChance(h, attacker, target);
+              const iai = h.kit === "hiaki" && h.resources && h.resources.stance === "iai";
+              return `${h.name} ${iai ? "居合必挡" : chance + "%"} ${iai || roll <= chance ? "能挡住" : "挡不住"}`;
+            });
+            info = { target: target.name, roll, helpers };
+          }
+          const from = G.tape.length;
+          withSeed("hit:" + job.seq, () => finishBlock(null));
+          if (info) detail.push(Object.assign(info, { dmg: dmgOnPlayers(from).get(info.target) || 0 }));
+        }
         state.assistQueue = []; state.koltSwapQueue = [];
       };
-      drain();
+      drain(null);
       for (const uid of EnemyAI.actingOrder()) {
         for (let n = 0; n < 5; n++) {
           const u = unitById(uid);
@@ -1344,10 +1389,23 @@
           }
           const plan = EnemyAI.planFor(u, n);
           if (!plan) { if (uid === id && n === 0) steps.push("这回合不会行动"); break; }
-          if (uid === id) steps.push(describeIntent(plan.meta));
           const sig = `${u.ap}|${u.bonus}|${u.zone}`;
-          try { plan.thunk(); } catch (e) { break; }
-          drain();
+          const from = G.tape.length;
+          let failed = false;
+          try { withSeed(`act:${state.turnNo}:${uid}:${n}`, plan.thunk); } catch (e) { failed = true; }
+          const direct = dmgOnPlayers(from);       // 不经格挡、直接落下的伤害（范围攻击等）
+          const blocked = [];
+          drain(uid === id ? blocked : null);
+          if (uid === id) {
+            const parts = [];
+            direct.forEach((v, name) => { if (v > 0) parts.push(`${name} 预计受到 ${v} 伤害（无法格挡）`); });
+            blocked.forEach(b => {
+              parts.push(`${b.target} 预计受到 ${b.dmg} 伤害；格挡骰 ${b.roll}` +
+                (b.helpers.length ? `：${b.helpers.join("、")}` : "（同区没人能替他格挡）"));
+            });
+            steps.push(describeIntent(plan.meta) + (parts.length ? " —— " + parts.join("；") : ""));
+          }
+          if (failed) break;
           const v = unitById(uid);
           if (!v || `${v.ap}|${v.bonus}|${v.zone}` === sig) break;
         }
@@ -1371,8 +1429,13 @@
     if (!state.combatStarted || state.combatPhase !== "player" || G.depth > 0 || !scannerOn()) return "";
     const steps = predictTurn(id);
     if (!steps.length) return "";
-    return `<div class="ln intent"><b>环境监测 · 预测</b>：${steps.map(esc).join(" → ")}</div>
-      <div class="ln intent-note">局势不变它就会这么做；你移动、击杀或改变局势后它会重新判断。</div>`;
+    const stepHtml = (t, i) => {
+      const [what, rest] = String(t).split(" —— ");
+      const subs = rest ? rest.split("；").map(x => `<div class="intent-sub">${esc(x)}</div>`).join("") : "";
+      return `<div class="intent-step">${steps.length > 1 ? (i + 1) + ". " : ""}${esc(what)}${subs}</div>`;
+    };
+    return `<div class="ln intent"><b>环境监测 · 预测</b>${steps.map(stepHtml).join("")}</div>
+      <div class="ln intent-note">局势不变它就会这么做，伤害和格挡骰也会是这个数（伤害按没人格挡算；格挡成功则目标不受伤）。你移动、击杀或改变局势后它会重新判断。</div>`;
   }
 
   function unitInfoBox(id) {
@@ -1639,7 +1702,8 @@
         const plan = EnemyAI.planFor(u, n);
         if (!plan) break;
         const sig = `${u.ap}|${u.bonus}|${u.zone}`;
-        await perform(plan.thunk, plan.meta);
+        const actKey = `act:${state.turnNo}:${id}:${n}`;
+        await perform(() => withSeed(actKey, plan.thunk), plan.meta);
         await resolveQueues();
         if (checkEnd()) return true;
         const v = unitById(id);
@@ -1727,7 +1791,8 @@
     G.depth++;
     syncBusy();
     try {
-      await perform(() => endPlayerTurn(), {});
+      const endKey = `end:${state.turnNo}`;
+      await perform(() => withSeed(endKey, () => endPlayerTurn()), {});
       refreshTop();
       phaseCard("敌人回合", "enemy");
       await wait(750);
