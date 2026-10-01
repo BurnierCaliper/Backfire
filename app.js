@@ -2019,11 +2019,21 @@ const SCORE_RULES = {
 const SCORE_SPEED = [[1, 2], [2, 1.5], [3, 1.2]];
 // 一击的加分倍率：各项加算（1 + 0.25 + …），乘在这一击产生的所有分数上
 const SCORE_BONUS = {
-  advantage: 0.25   // 触发属性克制：这一击的伤害 / 击破 / 溢出 / 由它打出的失衡和击杀分 +25%
+  advantage: 0.25,  // 触发属性克制：这一击的伤害 / 击破 / 溢出 / 由它打出的失衡和击杀分 +25%
+  bigHitMin: 0.10,  // 打出「大伤害」（数字变大、停留更久那种）：刚到门槛 +10%……
+  bigHitMax: 0.25   // ……到门槛两倍及以上 +25%，中间按伤害线性分布
 };
+/** 大伤害的区间（伤害数字变大、停留更久）：门槛 = 目标等级 × 2 + 8，到门槛两倍封顶。
+ *  ratio 0～1 表示在区间里的位置，画面上的字号 / 停留时间和评分加成都按它走 */
+function bigHitInfo(level, dmg) {
+  const th = (Number(level) || 1) * 2 + 8;
+  dmg = Math.floor(Number(dmg) || 0);
+  if (dmg < th) return { big: false, ratio: 0, th };
+  return { big: true, ratio: Math.min(1, (dmg - th) / th), th };
+}
 // [评价, 至少几倍基准分, 战斗经验倍率]
 const SCORE_GRADES = [["S", 2.6, 2], ["A", 2.15, 1.5], ["B", 1.65, 1.2], ["C", 0, 1]];   // 用无界面对打校准（含行动分、速杀奖励）：只会普攻的自动打法中位数约 1.8 倍（B）
-const SCORE_PART_NAMES = { dmg: "伤害", heal: "治疗 / 护盾", brk: "击破", stagger: "打出失衡", block: "协助格挡成功", overkill: "溢出伤害", kill: "击杀", bonus: "克制加成", action: "行动", speed: "速杀奖励" };
+const SCORE_PART_NAMES = { dmg: "伤害", heal: "治疗 / 护盾", brk: "击破", stagger: "打出失衡", block: "协助格挡成功", overkill: "溢出伤害", kill: "击杀", bonus: "克制 / 大伤害加成", action: "行动", speed: "速杀奖励" };
 /** 我方用掉行动点 / 附赠行动时加分（开战后才算） */
 function scoreSpend(u, ap, bonus) {
   if (!u || !u.isPlayer || !state.combatStarted) return;
@@ -2056,10 +2066,14 @@ function addScore(kind, pts, u, bonus) {
   const st = battleStat(u);
   if (st) st.score = (st.score || 0) + pts + extra;
 }
-/** 一击的额外倍率之和 */
-function attackScoreBonus(res) {
+/** 一击的额外倍率之和（各项加算） */
+function attackScoreBonus(res, target) {
   let b = 0;
   if (res && res.advantage) b += SCORE_BONUS.advantage;
+  if (res && target) {
+    const bh = bigHitInfo(target.level, res.intended || res.total);
+    if (bh.big) b += SCORE_BONUS.bigHitMin + (SCORE_BONUS.bigHitMax - SCORE_BONUS.bigHitMin) * bh.ratio;
+  }
   return b;
 }
 /** 每场战斗开始时清空：战场数据、评分、这场的经验 / 掉落 */
@@ -5297,7 +5311,7 @@ function dealTo(attacker, target, opt) {
   const wasStunnedT = !!target.stunned;
   const shieldBeforeT = shieldSum(target);
   // 评分：这一击的加分倍率（克制等）。击杀、失衡在 applyCombat 里发生，先挂在目标身上给它们用
-  const scoreBonus = attacker && attacker.isPlayer && target && !target.isPlayer ? attackScoreBonus(res) : 0;
+  const scoreBonus = attacker && attacker.isPlayer && target && !target.isPlayer ? attackScoreBonus(res, target) : 0;
   const wasStunnedForScore = !!(target && target.stunned);
   if (target && !target.isPlayer) target._killBonus = scoreBonus;
   const extra = applyCombat(target, res, attacker);
@@ -6509,10 +6523,9 @@ function spawnPopup(unit, spec) {
   if (kind === "dmg") {
     const dmg = Math.floor(Number(spec.value) || 0);
     if (dmg <= 0) return;
-    const th = ((unit.level || 1) * 2) + 8;
-    const over = Math.max(0, Math.min(th, dmg - th));
-    const ratio = th > 0 ? over / th : 0;
-    big = dmg >= th;
+    const bh = bigHitInfo(unit.level, dmg);
+    const ratio = bh.ratio;
+    big = bh.big;
     dur = big ? 3 + ratio * 1.5 : 2.3;
     size = big ? 26 + ratio * 18 : 15;
     text = big ? dmg + "!!" : String(dmg);

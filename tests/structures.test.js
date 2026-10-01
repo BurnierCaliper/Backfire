@@ -208,7 +208,9 @@ test("评分：伤害 1 分 / 击破 10 分 / 溢出 1.5 分（向下取整）/ 
   assert.equal(p.brk, r.res.breakDealt * 10);
   assert.equal(p.overkill, Math.floor((r.res.intended - r.res.total) * 1.5));
   assert.equal(p.kill, 20);   // 狂徒是杂兵
-  assert.equal(st.battleScore.total, p.dmg + p.brk + p.overkill + p.kill);
+  // 12 点 ≥ 1 级门槛 10：算大伤害，这一击的分另有加成（单独记在 bonus）
+  assert.ok(p.bonus > 0);
+  assert.equal(st.battleScore.total, p.dmg + p.brk + p.overkill + p.kill + p.bonus);
   assert.equal(st.battleStats[kolt.id].score, st.battleScore.total);
 });
 
@@ -349,4 +351,27 @@ test("评分：速杀奖励——1 / 2 / 3 回合内打完，整场分数 ×2 / 
   assert.deepEqual(run(3), [200, 1200]);
   assert.deepEqual(run(4), [0, 1000]);
   assert.equal(st.battleScore.parts.speed || 0, 0);
+});
+
+test("评分：大伤害加成——到门槛（目标等级×2+8）+10%，到门槛两倍及以上 +25%，中间线性；和克制加算", () => {
+  const { c, st, kolt } = field();
+  const foe = st.units.find(u => !u.isPlayer);
+  foe.zone = 1;
+  const th = foe.level * 2 + 8;
+  assert.deepEqual([c.bigHitInfo(foe.level, th - 1).big, c.bigHitInfo(foe.level, th).ratio, c.bigHitInfo(foe.level, th * 2).ratio, c.bigHitInfo(foe.level, th * 5).ratio], [false, 0, 1, 1]);
+  const bonusOf = (dmg, adv) => c.attackScoreBonus({ intended: dmg, total: dmg, advantage: adv }, foe);
+  assert.equal(bonusOf(th - 1, false), 0);
+  assert.ok(Math.abs(bonusOf(th, false) - 0.10) < 1e-9);
+  assert.ok(Math.abs(bonusOf(Math.round(th * 1.5), false) - (0.10 + 0.15 * (Math.round(th * 1.5) - th) / th)) < 1e-9);
+  assert.ok(Math.abs(bonusOf(th * 2, false) - 0.25) < 1e-9);
+  assert.ok(Math.abs(bonusOf(th * 3, false) - 0.25) < 1e-9, "封顶 25%");
+  assert.ok(Math.abs(bonusOf(th * 2, true) - 0.50) < 1e-9, "和克制加算：25% + 25%");
+  // 实际打一下：一击 2 倍门槛的中性伤害 → 伤害分 +25%
+  foe.layers.forEach(l => { l.max = 999; l.current = 999; });
+  c.resetBattleRecords();
+  const eles = ["fire", "ice", "electric", "acid", "energy", "harmonic", "physical"];
+  const neu = eles.find(e => Math.abs(c.chartMod(e, foe.layers[0].type)) < 0.001);
+  const r = c.dealTo(kolt, foe, { atk: 0, mult: 0, flat: th * 2, element: neu, baseBreak: 0, flags: { action: true, blockResolved: true } });
+  assert.equal(r.res.advantage, false);
+  assert.equal(st.battleScore.parts.bonus, Math.floor(r.res.total * 0.25 + 1e-6));
 });

@@ -932,12 +932,14 @@
         if (e.kind === "dmg") {
           const v = Math.floor(Number(e.value) || 0);
           if (v <= 0) continue;
-          const total = s ? Math.max(1, sumMax(s)) : 50;
           const boom = e.tag === "boom";
-          const big = v >= total * 0.2;
+          // 大伤害：和计算器同一个区间（目标等级 × 2 + 8 起，到两倍封顶），越重字越大、停得越久；评分加成也按它
+          const bh = typeof bigHitInfo === "function" ? bigHitInfo(s ? s.level : 1, v) : { big: false, ratio: 0 };
+          const big = bh.big;
           hit(e.unitId, e.element, big);
           popup(e.unitId, big ? v + "!" : String(v), "e-" + e.element + (big ? " big" : "") + (boom ? " boom" : ""),
-            { size: big ? BIG_POP_SIZE : boom ? 46 : 30, dur: boom ? 2.4 : big ? BIG_POP_DUR : 1.05 });
+            { size: big ? Math.round(BIG_POP_SIZE * (0.8 + 0.35 * bh.ratio)) : boom ? 46 : 30,
+              dur: boom ? 2.4 : big ? BIG_POP_DUR * (0.8 + 0.45 * bh.ratio) : 1.05 });
           if (boom) await wait(160);
           await wait(chain ? 30 : 45);
           deferStun(beatsBefore); await playBeats(beatsBefore.filter(b => b.kind !== "stun"));
