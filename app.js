@@ -1370,6 +1370,10 @@ function startCombat() {
   const partyN = typeof syncPartySizeFromField === "function" ? syncPartySizeFromField() : state.partySize;
   const balanceNotes = typeof rebalanceEnemiesForParty === "function" ? rebalanceEnemiesForParty(partyN) : [];
   applyExhaustionAtStart(balanceNotes);
+  // 开场击破记在开战前（第 0 回合），失衡的人第一回合照常跳过
+  const openNotes = [];
+  applyOpeningBreaks(openNotes);
+  if (openNotes.length) appendLog(openNotes.join("\n"));
   // 开战前的布置记录算「第 0 回合」，开战后的第一回合才是第 1 回合
   const prePage = state.logPages[state.logPages.length - 1];
   if (prePage && prePage.lines.length) prePage.turn = 0;
@@ -3740,6 +3744,17 @@ function applyExhaustionAtStart(notes) {
   }
   const text = ["", "力竭：无法用坚毅生命起身", "力竭 2：atk −3，def −1", "力竭 3：被击倒立刻死亡"][Math.min(3, tier)];
   if (text && notes) notes.push(`队伍${text}。`);
+}
+
+/** 开场击破（单局：熟练项检定失败受的伤留到下一场战斗开始时结算，可能直接开局失衡） */
+function applyOpeningBreaks(notes) {
+  const list = state.openingBreaks || [];
+  state.openingBreaks = null;
+  list.forEach(row => {
+    const u = state.units.find(x => x.kit === row.kit && x.isPlayer && !x.dead && !x.hidden);
+    if (!u) return;
+    (row.breaks || []).forEach(b => dealBreak(u, b.amount, b.element, notes, "检定时受的伤"));
+  });
 }
 
 function standUp(u) {

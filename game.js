@@ -2094,6 +2094,7 @@
     state.combatPhase = "player";
     state.combatStarted = false;
     state.exhaustTier = 0;
+    state.openingBreaks = null;
     state.retreated = false;
     state.lootByRank = null;
     resetBattleRecords();   // 战场数据、评分、这场的经验 / 掉落

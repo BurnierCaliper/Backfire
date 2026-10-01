@@ -206,6 +206,41 @@ test("单局：选队伍出发，任务板正常显示", async (t) => {
   assert.deepEqual(o.errors, []);
 });
 
+test("单局：熟练项检定节点——选人、选熟练等级、看成功率，检定后前进", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await page.click("#t-new");
+  await page.waitForSelector("#scr-party:not([hidden])");
+  const picks = page.locator(".hero-pick");
+  await picks.nth(0).click(); await picks.nth(1).click();
+  await page.click("#party-go");
+  await page.waitForSelector("#scr-run:not([hidden])");
+  await page.click('.r-go[data-which="main"]');
+  // 存档里把当前这站换成一个困难、会受伤的检定，再读档
+  await page.evaluate(() => {
+    const r = SaveStore.loadRun();
+    r.task.nodes[r.task.index] = { type: "check", done: false, check: { diff: "hard", prof: "巧手", injure: true, reward: 2500 } };
+    SaveStore.saveRun(r);
+    RunFlow.resume();
+  });
+  await page.waitForSelector("#r-check-go");
+  const body = await page.textContent("#run-body");
+  assert.match(body, /困难/);
+  assert.match(body, /巧手/);
+  assert.match(body, /2500 奎支/);
+  assert.match(body, /有风险/);
+  // 没熟练：困难不能尝试；三级熟练 75%
+  assert.equal(await page.isDisabled("#r-check-go"), true);
+  assert.match(await page.textContent("#r-check-chance"), /没有资格/);
+  await page.selectOption("#r-check-prof", "3");
+  assert.match(await page.textContent("#r-check-chance"), /75%/);
+  assert.equal(await page.isDisabled("#r-check-go"), false);
+  await page.click("#r-check-go");
+  await page.waitForFunction(() => !document.querySelector("#r-check-go"));
+  assert.match(await page.textContent("#run-log"), /困难「巧手」检定/);
+  assert.deepEqual(o.errors, []);
+});
+
 test("格挡成功：敌方队长·牛格挡住攻击时，响起钢铁碰撞声", async (t) => {
   const o = await open(t); if (!o) return;
   const { page } = o;

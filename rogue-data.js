@@ -5,6 +5,7 @@
  *   ROGUE_BATTLEFIELD 战场上的随机配置物与地形（越往后越常见）
  *   ROGUE_TASK_WEATHER 带天气的任务
  *   ROGUE_NODE_TYPES  任务里会遇到的节点种类（加一种节点：这里加一行 + rogue.js / rogue-ui.js 各加一个处理）
+ *   ROGUE_CHECKS      熟练项检定事件：难度、奖励、受伤
  *   ROGUE_TASKS       支线任务模板
  *   ROGUE_MAIN_TASK   主线任务模板（每幕开局自动接下）
  *   ROGUE_SHOP        商店卖什么、多少钱
@@ -147,7 +148,52 @@ const ROGUE_NODE_TYPES = {
   rest:   { label: "休息",   hours: 0 },               // 长休 / 短休的时间单独算
   shop:   { label: "商店",   hours: 1 },
   smith:  { label: "工匠",   hours: 1 },
-  clinic: { label: "诊所",   hours: 2 }
+  clinic: { label: "诊所",   hours: 2 },
+  check:  { label: "检定",   hours: 1 }                // 熟练项检定事件，见 ROGUE_CHECKS
+};
+
+/* 熟练项检定事件（已定：插在两场战斗之间；事件文字占位）。
+ *   insertChance  任务里每一处「战斗 → 战斗」之间插一个检定的概率；maxPerTask 一个任务最多几个
+ *   diffs         四档难度（手册第一章）：名字、成功奖励（奎支）
+ *   weightsByAct  每幕各难度出现的权重（额外幕接着往后）：第一幕只有简单、普通；第二幕出现困难；
+ *                 第三幕不再有简单、出现极难；第四幕困难、极难略多一点
+ *   chance        成功率（手册第一章）：行 = 熟练等级 0–3，列 = 简单 / 普通 / 困难 / 极难。0 = 无法尝试
+ *   injure        会受伤的检定：出现概率、成功额外奖励、失败时对检定者的伤害（按幕 [最少, 最多]，属性随机、
+ *                 走克制表、不致死），以及下一场战斗开始时结算的击破
+ *   profs         随机抽一项熟练项挂在事件上（占位：事件内容之后再写） */
+const ROGUE_CHECKS = {
+  insertChance: 0.5,
+  maxPerTask: 2,
+  diffs: {
+    easy:    { name: "简单", reward: 600 },
+    normal:  { name: "普通", reward: 1200 },
+    hard:    { name: "困难", reward: 2000 },
+    extreme: { name: "极难", reward: 3000 }
+  },
+  weightsByAct: [
+    { easy: 3, normal: 2 },
+    { easy: 2, normal: 3, hard: 1.5 },
+    { normal: 3, hard: 2, extreme: 1 },
+    { normal: 2.6, hard: 2.4, extreme: 1.3 },
+    { normal: 2.6, hard: 2.4, extreme: 1.3 },
+    { normal: 2.6, hard: 2.4, extreme: 1.3 }
+  ],
+  chance: [
+    [0.5, 0,   0,    0],
+    [1,   0.5, 0.25, 0.125],
+    [1,   1,   0.5,  0.25],
+    [1,   1,   0.75, 0.5]
+  ],
+  injure: {
+    chance: 0.5,
+    bonus: 500,
+    dmgByAct: [[5, 8], [8, 13], [10, 18], [15, 30], [15, 30], [15, 30]],
+    brk: 1
+  },
+  elements: ["fire", "acid", "electric", "ice", "energy", "physical", "harmonic"],
+  profs: ["运动", "攀爬", "躲藏", "盗窃", "巧手", "载具驾驶", "求生", "历史", "科技理论",
+    "机械维修", "电器维修", "数据操作", "植入体研究", "医疗", "侦察", "聆听", "洞悉", "追踪", "评估",
+    "威吓", "说服", "欺瞒", "表演"]
 };
 
 /* 诊所（数值占位，按「一人一次改造平均约 3000 奎支」定）

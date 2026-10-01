@@ -176,6 +176,7 @@ const Rogue = (function () {
       }
       types.push(tpl.elite ? "elite" : "battle");
       const weather = rollTaskWeather(run);
+      insertChecks(types);
       return {
         weather,
         kind: tpl.kind, name: tpl.name,
@@ -185,6 +186,21 @@ const Rogue = (function () {
         nodeTypes: types     // 任务板上不给玩家看，接下后逐个显示
       };
     });
+  }
+
+  /** 熟练项检定插在两场战斗之间（「战斗 / 精英战」紧挨着的地方），每处按概率插一个 */
+  function insertChecks(types) {
+    const K = ROGUE_CHECKS;
+    let added = 0;
+    for (let i = 1; i < types.length && added < K.maxPerTask; i++) {
+      const fight = (t) => t === "battle" || t === "elite";
+      if (fight(types[i - 1]) && fight(types[i]) && Math.random() < K.insertChance) {
+        types.splice(i, 0, "check");
+        added += 1;
+        i += 1;
+      }
+    }
+    return types;
   }
 
   function makeBoard(run) {
@@ -483,7 +499,7 @@ const Rogue = (function () {
   /** 当前节点 / 首领的战斗配置（给 BattleSim.setup 或战斗画面用） */
   function battleSpec(run) {
     const partyKits = run.party.map(h => h.kit);
-    const before = () => applyPartyToField(run);
+    const before = () => { applyPartyToField(run); state.openingBreaks = openingBreaks(run); };
     if (run.stage === "boss") {
       const key = `${run.seed}:boss:${run.act}`;
       const enc = withRng(key, () => {
@@ -519,6 +535,7 @@ const Rogue = (function () {
     const boss = run.stage === "boss";
     ledgerAfterBattle(notes);                 // 手册：耐久结算、濒死恢复到 1 点生命、记下武器人伤势
     captureParty(run, notes);
+    run.party.forEach(h => { delete h.pendingBreaks; });   // 检定受伤的击破已在开场结算
     const node = currentNode(run);
     passHours(run, boss ? NODE.elite.hours : NODE[(node && node.type) || "battle"].hours, notes);
     if (run.stage === "over") return logAll(run, notes);
@@ -555,6 +572,104 @@ const Rogue = (function () {
     passHours(run, NODE[node.type].hours, notes);
     if (run.stage !== "over") advanceNode(run, notes);
     return logAll(run, notes);
+  }
+
+  /* ---------- 熟练项检定（手册第一章；事件内容占位） ---------- */
+  const CHECK_DIFFS = ["easy", "normal", "hard", "extreme"];
+  /** 当前检定节点的内容：难度、熟练项、会不会受伤、奖励。到这一站时按种子定下来，存在节点上 */
+  function checkInfo(run) {
+    const node = currentNode(run);
+    if (!node || node.type !== "check") return null;
+    if (!node.check) {
+      const K = ROGUE_CHECKS;
+      node.check = withRng(`${run.seed}:check:${run.taskNo}:${run.task.index}`, () => {
+        const w = K.weightsByAct[Math.min(K.weightsByAct.length, run.act) - 1];
+        const keys = Object.keys(w).filter(k => w[k] > 0);
+        let r = Math.random() * keys.reduce((a, k) => a + w[k], 0);
+        let diff = keys[keys.length - 1];
+        for (const k of keys) { r -= w[k]; if (r < 0) { diff = k; break; } }
+        const injure = Math.random() < K.injure.chance;
+        const prof = pick(K.profs);
+        return { diff, prof, injure, reward: K.diffs[diff].reward + (injure ? K.injure.bonus : 0) };
+      });
+    }
+    const c = node.check;
+    const dmg = ROGUE_CHECKS.injure.dmgByAct[Math.min(ROGUE_CHECKS.injure.dmgByAct.length, run.act) - 1];
+    return Object.assign({}, c, { diffName: ROGUE_CHECKS.diffs[c.diff].name, dmg: c.injure ? dmg.slice() : null,
+      brk: c.injure ? ROGUE_CHECKS.injure.brk : 0 });
+  }
+  /** 成功率：熟练等级 0–3 × 难度。0 表示没有资格尝试 */
+  function checkChance(diff, prof) {
+    const row = ROGUE_CHECKS.chance[Math.max(0, Math.min(3, Number(prof) || 0))];
+    return row[CHECK_DIFFS.indexOf(diff)] || 0;
+  }
+  /** 失败受伤：随机属性的伤害按克制表打在检定者的血量层上，最少留 1 点生命；击破留到下一场战斗开场 */
+  function injureHero(run, h, info, notes) {
+    const K = ROGUE_CHECKS;
+    const amount = between(info.dmg[0], info.dmg[1]);
+    const element = pick(K.elements);
+    const r = withParty(run, () => {
+      const u = findKit(h.kit, state.units);
+      if (!u) return null;
+      const before = totalHp(u);
+      const inner = [];
+      applyTypedDot(u, amount, element, inner, `检定失败：${ELE[element]}属性伤害 ${amount}`);
+      if (totalHp(u) <= 0) {
+        // 不致死：留 1 点在最里层
+        const last = (u.layers || []).filter(l => l.type !== "shield").slice(-1)[0];
+        if (last) last.current = 1;
+        u.dying = false;
+        u.dead = false;
+      }
+      return { before, after: totalHp(u) };
+    });
+    notes.push(...r.notes);
+    const lost = r.out ? r.out.before - r.out.after : 0;
+    h.pendingBreaks = (h.pendingBreaks || []).concat([{ amount: info.brk, element }]);
+    notes.push(`${heroName(h.kit)} 受伤：${ELE[element]}属性 ${amount} 点，实际损失 ${lost} 点生命` +
+      `（剩 ${r.out ? r.out.after : "?"}）；下一场战斗开始时受到 ${info.brk} ${ELE[element]}属性击破。`);
+    return { amount, element, lost };
+  }
+  /** 选一名角色、报上他这项熟练的等级（0–3）进行检定 */
+  function attemptCheck(run, kit, prof) {
+    const info = checkInfo(run);
+    if (!info) throw new Error("当前节点不是检定");
+    const h = run.party.find(x => x.kit === kit);
+    if (!h) throw new Error("没有这名角色");
+    const p = Math.max(0, Math.min(3, Number(prof) || 0));
+    const chance = checkChance(info.diff, p);
+    if (!chance) throw new Error(`${info.diffName}检定需要「${info.prof}」熟练项才能尝试`);
+    const notes = [];
+    const roll = withRng(`${run.seed}:checkroll:${run.taskNo}:${run.task.index}:${kit}:${p}`, () => Math.random());
+    const ok = chance >= 1 || roll < chance;
+    const profText = p ? `${["", "一", "二", "三"][p]}级熟练` : "无熟练";
+    notes.push(`${heroName(kit)} 进行${info.diffName}「${info.prof}」检定（${profText}，成功率 ${Math.round(chance * 1000) / 10}%）：${ok ? "成功" : "失败"}。`);
+    const node = currentNode(run);
+    node.check.result = { kit, prof: p, ok };
+    if (ok) {
+      state.kuizhi = (Number(state.kuizhi) || 0) + info.reward;
+      notes.push(`获得 ${info.reward} 奎支（现有 ${state.kuizhi}）。`);
+    } else if (info.injure) {
+      withRng(`${run.seed}:checkhurt:${run.taskNo}:${run.task.index}`, () => injureHero(run, h, info, notes));
+    } else {
+      notes.push("没什么损失，继续前进。");
+    }
+    passHours(run, NODE.check.hours, notes);
+    if (run.stage !== "over") advanceNode(run, notes);
+    return logAll(run, notes);
+  }
+  /** 不检定，直接绕过去：没有奖励也不会受伤 */
+  function skipCheck(run) {
+    if (!checkInfo(run)) throw new Error("当前节点不是检定");
+    const notes = ["没有冒险，绕了过去。"];
+    passHours(run, NODE.check.hours, notes);
+    if (run.stage !== "over") advanceNode(run, notes);
+    return logAll(run, notes);
+  }
+  /** 战斗开场要结算的击破（检定受的伤）。battleSpec 的 before 里交给战斗，打完这场清掉 */
+  function openingBreaks(run) {
+    return run.party.filter(h => (h.pendingBreaks || []).length)
+      .map(h => ({ kit: h.kit, breaks: h.pendingBreaks.map(b => Object.assign({}, b)) }));
   }
 
   /* ---------- 休息（手册第五章） ---------- */
@@ -1018,6 +1133,7 @@ const Rogue = (function () {
       shp: Number(u.shp) || 0, shpMax: Number(u.shpMax) || 0,
       xp: u.xp || 0, xpNext: xpToNext(u.level),
       pending: (h.pending || []).length,
+      pendingBreak: (h.pendingBreaks || []).reduce((a, b) => a + (Number(b.amount) || 0), 0),
       weapons: h.weapons.map(k => {
         const w = weaponCarryLayers(k);
         const cur = w ? w.reduce((s, l) => s + (Number(l.current) || 0), 0) : null;
@@ -1053,6 +1169,7 @@ const Rogue = (function () {
     heroView, supplies, hoursAwake, brokenWeapons,
     makeBoard, taskBlocked, taskWarning, acceptTask, currentNode,
     battleSpec, applyPartyToField, finishBattle,
+    checkInfo, checkChance, attemptCheck, skipCheck,
     restPlan, canLongRest, restAtNode, leaveNode, canRestBefore, restBeforeNode, canShortRestBefore, shortRestBeforeNode,
     buy, canShop, shopItemName, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
     presentSmiths, smithInfo, claimBlueprint, installBlueprint, blueprintById, weaponModsOf,

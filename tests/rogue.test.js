@@ -28,6 +28,11 @@ function autoplay(c, run, opts) {
       if (node.type === "rest") {
         Rogue.restAtNode(run, Rogue.canLongRest(run) ? "long" : "short");
         steps.push("rest");
+      } else if (node.type === "check") {
+        const info = Rogue.checkInfo(run);
+        if (Rogue.checkChance(info.diff, 0)) Rogue.attemptCheck(run, run.party[0].kit, 0);
+        else Rogue.skipCheck(run);
+        steps.push("check");
       } else if (node.type === "shop" || node.type === "smith" || node.type === "clinic") {
         steps.push(node.type);
         Rogue.leaveNode(run);
@@ -111,7 +116,7 @@ test("主线提前完成后还能继续做支线；本幕天数用完才打首�
 test("任务里每个节点的类型都能看到", () => {
   const { run, R } = fresh(["kolt", "helu"], "R5");
   R.acceptTask(run, "main");
-  assert.ok(run.task.nodes.every(n => ["battle", "elite", "rest", "shop", "smith", "clinic"].includes(n.type)));
+  assert.ok(run.task.nodes.every(n => ["battle", "elite", "rest", "shop", "smith", "clinic", "check"].includes(n.type)));
   assert.equal(run.task.nodes[run.task.nodes.length - 1].type, "elite");
 });
 
@@ -552,4 +557,155 @@ test("进下一站前也能短休：按今天的短休次数（每人 2 次）�
   // 首领战前也行（次数还是同一天的）
   run.stage = "boss";
   assert.equal(R.canShortRestBefore(run).ok, false);
+});
+
+/* ---------- 熟练项检定 ---------- */
+/** 把当前节点换成一个指定内容的检定 */
+function forceCheck(run, check) {
+  run.task.nodes[run.task.index] = { type: "check", done: false, check: Object.assign({ prof: "运动" }, check) };
+}
+const hpSum = (h) => (h.hp || []).reduce((a, l) => a + (Number(l.current) || 0), 0);
+
+test("检定节点只插在两场战斗之间，一个任务最多 2 个", () => {
+  let seen = 0;
+  for (let i = 0; i < 40; i++) {
+    const { c, run } = fresh(["kolt", "helu"], "CK" + i);
+    for (const t of [run.main].concat(run.board)) {
+      const ty = t.nodeTypes;
+      const n = ty.filter(x => x === "check").length;
+      assert.ok(n <= c.S.ROGUE_CHECKS.maxPerTask, ty.join(","));
+      ty.forEach((x, k) => {
+        if (x !== "check") return;
+        seen += 1;
+        const fight = (y) => y === "battle" || y === "elite";
+        assert.ok(k > 0 && fight(ty[k - 1]) && fight(ty[k + 1]), "检定前后都应是战斗：" + ty.join(","));
+      });
+    }
+  }
+  assert.ok(seen > 10, "应该经常出现，实际 " + seen);
+});
+
+test("检定难度按幕：一幕简单/普通，二幕加困难，三幕没有简单、加极难，四幕困难/极难更多", () => {
+  const { run, R } = fresh(["kolt", "helu"], "CKD");
+  R.acceptTask(run, "main");
+  const tally = (act) => {
+    const n = { easy: 0, normal: 0, hard: 0, extreme: 0 };
+    run.act = act;
+    for (let i = 0; i < 400; i++) {
+      run.taskNo = 1000 + i;
+      run.task.nodes[run.task.index] = { type: "check", done: false };
+      n[R.checkInfo(run).diff] += 1;
+    }
+    return n;
+  };
+  const a1 = tally(1), a2 = tally(2), a3 = tally(3), a4 = tally(4);
+  assert.ok(a1.easy && a1.normal && !a1.hard && !a1.extreme, JSON.stringify(a1));
+  assert.ok(a2.easy && a2.normal && a2.hard && !a2.extreme, JSON.stringify(a2));
+  assert.ok(!a3.easy && a3.normal && a3.hard && a3.extreme, JSON.stringify(a3));
+  assert.ok(!a4.easy && a4.hard + a4.extreme > a3.hard + a3.extreme, JSON.stringify([a3, a4]));
+});
+
+test("检定成功拿奎支（600–3000），会受伤的检定再 +500；没熟练不能尝试普通及以上", () => {
+  const { c, run, R } = fresh(["kolt", "helu"], "CKR");
+  R.acceptTask(run, "main");
+  const D = c.S.ROGUE_CHECKS.diffs;
+  assert.equal(D.easy.reward, 600);
+  assert.equal(D.extreme.reward, 3000);
+  forceCheck(run, { diff: "normal", injure: false, reward: D.normal.reward });
+  assert.throws(() => R.attemptCheck(run, "kolt", 0), /熟练/);
+  let kz = c.S.state.kuizhi;
+  const idx = run.task.index;
+  R.attemptCheck(run, "kolt", 2);              // 二级熟练：普通默认通过
+  assert.equal(c.S.state.kuizhi, kz + D.normal.reward);
+  assert.equal(run.task.index, idx + 1);
+  forceCheck(run, { diff: "easy", injure: true, reward: D.easy.reward + 500 });
+  kz = c.S.state.kuizhi;
+  R.attemptCheck(run, "helu", 1);
+  assert.equal(c.S.state.kuizhi, kz + 1100);
+});
+
+test("会受伤的检定失败：随机属性伤害按克制表结算、不致死，击破在下一场开战时结算", () => {
+  const { c, run, R } = fresh(["kolt", "helu"], "CKH");
+  R.acceptTask(run, "main");
+  const h = run.party[0];
+  let failed = 0, fleshOnly = 0;
+  for (let i = 0; i < 60 && failed < 12; i++) {
+    run.taskNo = 2000 + i;
+    run.stage = "task";
+    run.task.index = 0;
+    run.task.nodes = [{ type: "check", done: false, check: { diff: "extreme", prof: "运动", injure: true, reward: 3500 } },
+      { type: "battle", done: false }];
+    h.hp = null; delete h.pendingBreaks;
+    c.S.LEDGER.hours = 0;                       // 别把人熬到力竭
+    const notes = R.attemptCheck(run, h.kit, 1).join("\n");
+    if (!/失败/.test(notes)) continue;
+    failed += 1;
+    const m = notes.match(/受伤：([^\s：]+?)属性 (\d+) 点，实际损失 (\d+) 点生命/);
+    assert.ok(m, notes);
+    const amount = Number(m[2]), lost = Number(m[3]);
+    assert.ok(amount >= 5 && amount <= 8, "第一幕 5–8：" + amount);
+    // 满血时第一层是肉体（科尔特没有装甲层时）：火 +50%，谐波 −25%
+    if (h.hp.length === 1 && h.hp[0].type === "flesh") {
+      fleshOnly += 1;
+      assert.ok(["火", "酸", "电", "冰", "能量", "物理", "谐波"].includes(m[1]), m[1]);
+      if (m[1] === "火") assert.ok(lost > amount, notes);
+      else if (m[1] === "谐波") assert.ok(lost < amount, notes);
+      else assert.equal(lost, amount, notes);
+    }
+    assert.equal(h.pendingBreaks.length, 1);
+  }
+  assert.ok(failed >= 5, "极难一级熟练只有 12.5%，应该大多失败");
+  assert.ok(fleshOnly >= 5, "科尔特只有肉体层，克制要验到");
+  // 不致死：只剩 1 点也不会被打死
+  run.taskNo = 3000; run.stage = "task"; run.task.index = 0;
+  run.task.nodes = [{ type: "check", done: false, check: { diff: "extreme", prof: "运动", injure: true, reward: 3500 } },
+    { type: "battle", done: false }];
+  run.act = 4;
+  h.hp = c.Rogue.heroView(run, h).layers.map((l, i, a) => ({ type: l.type, current: i === a.length - 1 ? 2 : 0 }));
+  delete h.pendingBreaks;
+  let tries = 0;
+  while (tries < 30) {
+    const notes = R.attemptCheck(run, h.kit, 1).join("\n");
+    if (/失败/.test(notes)) break;
+    tries += 1; run.taskNo += 1; run.task.index = 0;
+  }
+  assert.ok(run.party.includes(h), "不应该死");
+  assert.ok(hpSum(h) >= 1, JSON.stringify(h.hp));
+  // 开场击破：下一场战斗开始时扣架势；扣到 0 直接失衡
+  h.pendingBreaks = [{ amount: 1, element: "physical" }];
+  const spec = R.battleSpec(run);
+  c.BattleSim.setup(spec);
+  const u = c.S.state.units.find(x => x.kit === h.kit);
+  c.startCombat();
+  assert.equal(u.def, u.defMax - 1);
+  R.finishBattle(run, "win");
+  assert.ok(!h.pendingBreaks, "打完这场清掉");
+});
+
+test("开场击破把架势打空：开局失衡", () => {
+  const { c, run, R } = fresh(["kolt", "helu"], "CKS");
+  R.acceptTask(run, "main");
+  run.task.nodes[run.task.index] = { type: "battle", done: false };
+  const h = run.party[1];
+  h.pendingBreaks = [{ amount: 99, element: "ice" }];
+  c.BattleSim.setup(R.battleSpec(run));
+  const u = c.S.state.units.find(x => x.kit === h.kit);
+  c.startCombat();
+  // 失衡：第一回合跳过（没有行动点和附赠动作），敌人拿到一次协助攻击
+  assert.equal(u.ap, 0);
+  assert.equal(u.bonus, 0);
+  const text = c.S.state.logPages.map(p => p.lines.map(l => l.text || l).join("\n")).join("\n");
+  assert.match(text, /检定时受的伤/);
+  assert.match(text, /Helumica 晕眩/);
+  assert.ok((c.S.state.assistQueue || []).some(j => j.targetId === u.id && j.vsPlayer));
+});
+
+test("检定可以不冒险绕过去：没有奖励，前进一站", () => {
+  const { c, run, R } = fresh(["kolt", "helu"], "CKK");
+  R.acceptTask(run, "main");
+  forceCheck(run, { diff: "hard", injure: true, reward: 2500 });
+  const kz = c.S.state.kuizhi, idx = run.task.index;
+  R.skipCheck(run);
+  assert.equal(c.S.state.kuizhi, kz);
+  assert.equal(run.task.index, idx + 1);
 });

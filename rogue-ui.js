@@ -87,6 +87,7 @@
       const v = Rogue.heroView(run, h);
       return `<div class="rhero">
         <div class="rh-top"><b>${esc(v.name)}</b><span>Lv${v.level}${v.pending ? ' · <em>待选升级</em>' : ""}</span></div>
+        ${v.pendingBreak ? `<div class="rh-w broken">检定受伤：下一场开战时受到 ${v.pendingBreak} 击破</div>` : ""}
         <div class="rh-row">血 ${bar(v.hp, v.hpMax, "hp")}<span>${v.hp}/${v.hpMax}</span></div>
         ${v.layers.length > 1 ? `<div class="rh-w">${esc(layerText(v.layers))}</div>` : ""}
         <div class="rh-row">经验 ${bar(v.xp, v.xpNext, "xp")}<span>${v.xp}/${v.xpNext || "满"}</span></div>
@@ -181,8 +182,40 @@
     },
     clinic: () => `<p>一家小诊所。手里有 ${Rogue.supplies().kuizhi} 奎支。</p>
         ${clinicPanel()}
-        <button class="g-btn r-main" id="r-leave">离开</button>`
+        <button class="g-btn r-main" id="r-leave">离开</button>`,
+    check: () => checkPanel()
   };
+
+  /* ---------- 熟练项检定（事件内容占位） ---------- */
+  const PROF_LV = ["无熟练项", "一级熟练", "二级熟练", "三级熟练"];
+  function checkPanel() {
+    const c = Rogue.checkInfo(run);
+    if (!c) return "";
+    const heroes = run.party.map(h => Rogue.heroView(run, h));
+    const hurt = c.injure
+      ? `<p class="r-warn">⚠ 有风险：失败时检定者受到 ${c.dmg[0]}–${c.dmg[1]} 点随机属性伤害（按克制表结算，不致死），下一场战斗开始时再受 ${c.brk} 击破。</p>`
+      : `<p class="r-hint">失败没有损失。</p>`;
+    return `<p>【事件占位】前方需要一次<b>${esc(c.diffName)}</b>的「${esc(c.prof)}」检定。</p>
+      <p class="r-hint">成功奖励 ${c.reward} 奎支${c.injure ? `（含风险加成 ${ROGUE_CHECKS.injure.bonus}）` : ""}。简单检定谁都能试；普通及以上没有这项熟练就不能尝试（手册第一章）。熟练等级按角色卡上记的填。</p>
+      ${hurt}
+      <div class="r-check">
+        <label>检定者 <select id="r-check-who">${heroes.map(v => `<option value="${esc(v.kit)}">${esc(v.name)}（血 ${v.hp}/${v.hpMax}）</option>`).join("")}</select></label>
+        <label>「${esc(c.prof)}」 <select id="r-check-prof">${PROF_LV.map((t, i) => `<option value="${i}">${t}</option>`).join("")}</select></label>
+        <span id="r-check-chance" class="r-hint"></span>
+      </div>
+      <div class="r-choices">
+        <button class="g-btn r-main" id="r-check-go">进行检定</button>
+        <button class="g-btn" id="r-check-skip">不冒险，绕过去<small>没有奖励 · 花 ${ROGUE_NODE_TYPES.check.hours} 小时</small></button>
+      </div>`;
+  }
+  function showCheckChance() {
+    const c = Rogue.checkInfo(run);
+    const sel = $("r-check-prof"), out = $("r-check-chance"), go = $("r-check-go");
+    if (!c || !sel || !out) return;
+    const p = Rogue.checkChance(c.diff, Number(sel.value));
+    out.textContent = p ? `成功率 ${Math.round(p * 1000) / 10}%` : "没有资格尝试";
+    if (go) go.disabled = !p;
+  }
 
   /* ---------- 诊所：治疗与义体改造（诊所节点与休整时共用） ---------- */
   const layerText = (ls) => ls.map(l => `${LAYER[l.type] || l.type} ${l.current != null ? l.current + "/" : ""}${l.max}`).join(" · ");
@@ -445,6 +478,9 @@
     on("r-short-before", () => act(() => Rogue.shortRestBeforeNode(run)));
     on("r-rest-before", () => act(() => Rogue.restBeforeNode(run)));
     on("r-leave", () => act(() => Rogue.leaveNode(run)));
+    on("r-check-go", () => act(() => Rogue.attemptCheck(run, $("r-check-who").value, Number($("r-check-prof").value))));
+    on("r-check-skip", () => act(() => Rogue.skipCheck(run)));
+    if ($("r-check-prof")) { $("r-check-prof").onchange = showCheckChance; showCheckChance(); }
     on("r-camp", () => act(() => Rogue.camp(run)));
     on("r-next", () => act(() => Rogue.nextAct(run)));
     on("r-win", () => act(() => Rogue.afterVictory(run, false)));
