@@ -258,3 +258,33 @@ test("评分：协助格挡成功 +30（记在格挡的人身上）", () => {
   assert.equal(st.battleScore.parts.block, 30);
   assert.equal(st.battleStats[ruby.id].score, 30);
 });
+
+test("评分：触发属性克制的一击，伤害 / 击破 / 溢出 / 击杀分 +25%，单独记成「克制加成」", () => {
+  const { c, st, kolt } = field();
+  const foe = st.units.find(u => !u.isPlayer);   // 狂徒：肉体
+  foe.zone = 1;
+  c.resetBattleRecords();
+  // 先找一个打肉体有克制的属性
+  const eles = ["fire", "ice", "electric", "acid", "energy", "harmonic", "physical"];
+  const adv = eles.find(e => c.chartMod(e, "flesh") > 0.001);
+  const neu = eles.find(e => Math.abs(c.chartMod(e, "flesh")) < 0.001);
+  assert.ok(adv && neu, "要有克制和不克制的属性");
+  const r1 = c.dealTo(kolt, foe, { atk: 0, mult: 0, flat: 3, element: neu, baseBreak: 1, flags: { action: true, blockResolved: true } });
+  assert.equal(r1.res.advantage, false);
+  assert.equal(st.battleScore.parts.bonus || 0, 0);
+  const t0 = st.battleScore.total;
+  const r2 = c.dealTo(kolt, foe, { atk: 0, mult: 0, flat: 3, element: adv, baseBreak: 1, flags: { action: true, blockResolved: true } });
+  assert.equal(r2.res.advantage, true);
+  assert.equal(foe.dead, false);
+  const base = r2.res.total * 1 + r2.res.breakDealt * 10;
+  assert.equal(st.battleScore.total - t0, base + Math.floor(r2.res.total * 0.25) + Math.floor(r2.res.breakDealt * 10 * 0.25));
+  assert.ok(st.battleScore.parts.bonus > 0);
+  // 克制的一击打死：击杀分也 +25%（杂兵 20 → +5）
+  foe.layers.forEach(l => { l.current = 1; });
+  const before = st.battleScore.parts.bonus;
+  const r3 = c.dealTo(kolt, foe, { atk: 0, mult: 0, flat: 3, element: adv, baseBreak: 0, flags: { action: true, blockResolved: true } });
+  assert.equal(foe.dead, true);
+  const over = r3.res.intended - r3.res.total;
+  assert.equal(st.battleScore.parts.bonus - before,
+    Math.floor(r3.res.total * 0.25) + Math.floor(Math.floor(over * 1.5) * 0.25) + Math.floor(20 * 0.25));
+});

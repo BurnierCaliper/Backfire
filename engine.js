@@ -487,6 +487,7 @@ function resolveAttack(ctx) {
 
   const layersWork = clone(t.layers || []);
   const perHit = [];
+  let advHits = 0;   // 触发属性克制的段数（评分用）
   let totalDealt = 0;
   let totalIntended = 0;
   let extraHarmonic = 0;
@@ -543,6 +544,7 @@ function resolveAttack(ctx) {
       if (capped !== cMod) { hAdd(`愿你无恙：属性克制加成 ${pctTxt(cMod)} → ${pctTxt(capped)}。`); cMod = capped; }
     }
     pct += cMod;
+    if (matchupKind(cMod) === "adv") advHits++;
     if (onShp) hAdd(`起身状态：克制表无修正（坚毅生命对全属性 0%）`);
     else hAdd(`克制表 ${ELE[element]} → ${LAYER[startLayer.type]}：${pctTxt(cMod)}（溢出不重算）`);
 
@@ -790,6 +792,7 @@ function resolveAttack(ctx) {
 
   return {
     ok: true,
+    advantage: advHits > 0,                // 这一击触发了属性克制
     blocked: flags.block === "assistOk",   // 主攻击被挡住 → 不产生溅射
     total: totalDealt,
     intended: totalIntended,

@@ -2013,17 +2013,30 @@ const SCORE_RULES = {
   overkill: 1.5,   // 打死敌人时溢出的每点伤害（向下取整）
   kill: { minion: 20, elite: 100, boss: 300 }
 };
+// 一击的加分倍率：各项加算（1 + 0.25 + …），乘在这一击产生的所有分数上
+const SCORE_BONUS = {
+  advantage: 0.25   // 触发属性克制：这一击的伤害 / 击破 / 溢出 / 由它打出的失衡和击杀分 +25%
+};
 // [评价, 至少几倍基准分, 战斗经验倍率]
 const SCORE_GRADES = [["S", 2.0, 2], ["A", 1.6, 1.5], ["B", 1.2, 1.2], ["C", 0, 1]];   // 用无界面对打校准：只会普攻的自动打法中位数约 1.3 倍（B）
-const SCORE_PART_NAMES = { dmg: "伤害", heal: "治疗 / 护盾", brk: "击破", stagger: "打出失衡", block: "协助格挡成功", overkill: "溢出伤害", kill: "击杀" };
-function addScore(kind, pts, u) {
+const SCORE_PART_NAMES = { dmg: "伤害", heal: "治疗 / 护盾", brk: "击破", stagger: "打出失衡", block: "协助格挡成功", overkill: "溢出伤害", kill: "击杀", bonus: "克制加成" };
+/** 加分。bonus：这一击的额外倍率之和（例如克制 0.25），多出来的部分单独记成「克制加成」 */
+function addScore(kind, pts, u, bonus) {
   pts = Math.floor(Number(pts) || 0);
   if (pts <= 0) return;
   state.battleScore = state.battleScore || { total: 0, parts: {} };
-  state.battleScore.total += pts;
+  const extra = Math.floor(pts * (Number(bonus) || 0));
+  state.battleScore.total += pts + extra;
   state.battleScore.parts[kind] = (state.battleScore.parts[kind] || 0) + pts;
+  if (extra > 0) state.battleScore.parts.bonus = (state.battleScore.parts.bonus || 0) + extra;
   const st = battleStat(u);
-  if (st) st.score = (st.score || 0) + pts;
+  if (st) st.score = (st.score || 0) + pts + extra;
+}
+/** 一击的额外倍率之和 */
+function attackScoreBonus(res) {
+  let b = 0;
+  if (res && res.advantage) b += SCORE_BONUS.advantage;
+  return b;
 }
 /** 每场战斗开始时清空：战场数据、评分、这场的经验 / 掉落 */
 function resetBattleRecords() {
@@ -2075,7 +2088,8 @@ function trackHealBy(actor, fn) {
         const gain = hpNow(u) - before.get(u.id);
         if (gain > 0) { st.heal += gain; addScore("heal", gain * SCORE_RULES.heal, actor); }
       }
-      if (calm.has(u.id) && u.stunned && !u.dead) addScore("stagger", SCORE_RULES.stagger, actor);
+      if (calm.has(u.id) && u.stunned && !u.dead) addScore("stagger", SCORE_RULES.stagger, actor, Number(u._staggerBonus) || 0);
+      if (u._staggerBonus) u._staggerBonus = 0;
     });
   }
 }
@@ -3338,7 +3352,7 @@ function settleEnemyKill(target, notes) {
     const st = battleStat(killer);
     if (st) st.kills += 1;
     // 评分：敌人倒下就算（谁打的都算全队的分；能归到人的记在那个人身上）
-    if (target.kit !== "ironwall") addScore("kill", SCORE_RULES.kill[enemyRankOf(target)] || SCORE_RULES.kill.minion, killer);
+    if (target.kit !== "ironwall") addScore("kill", SCORE_RULES.kill[enemyRankOf(target)] || SCORE_RULES.kill.minion, killer, Number(target._killBonus) || 0);
   }
   const rank = ENEMY_RANK[target.kit] || "minion";
   // 跑团模式：手册「遭遇战敌人先动，经验双倍；困难遭遇三倍」，由主持人在战斗顶栏选
@@ -5249,7 +5263,13 @@ function dealTo(attacker, target, opt) {
   res.flags = flags;
   const wasStunnedT = !!target.stunned;
   const shieldBeforeT = shieldSum(target);
+  // 评分：这一击的加分倍率（克制等）。击杀、失衡在 applyCombat 里发生，先挂在目标身上给它们用
+  const scoreBonus = attacker && attacker.isPlayer && target && !target.isPlayer ? attackScoreBonus(res) : 0;
+  const wasStunnedForScore = !!(target && target.stunned);
+  if (target && !target.isPlayer) target._killBonus = scoreBonus;
   const extra = applyCombat(target, res, attacker);
+  if (target && !target.isPlayer && scoreBonus > 0 && !wasStunnedForScore && target.stunned) target._staggerBonus = scoreBonus;
+  if (target && !target.isPlayer) target._killBonus = 0;   // 只给这一击打死的用
   // 手册第四章补全的效果（effects.js）
   if (typeof afterDamageTaken === "function") {
     afterDamageTaken(target, opt.element || res.element, res.total || 0, Math.max(0, shieldBeforeT - shieldSum(target)), extra, {
@@ -5316,8 +5336,8 @@ function dealTo(attacker, target, opt) {
       const st = battleStat(attacker);
       if (st) {
         st.dmg += Math.floor(Number(res.total) || 0); st.brk += Number(res.breakDealt) || 0;
-        addScore("dmg", Math.floor(Number(res.total) || 0) * SCORE_RULES.dmg, attacker);
-        addScore("brk", (Number(res.breakDealt) || 0) * SCORE_RULES.brk, attacker);
+        addScore("dmg", Math.floor(Number(res.total) || 0) * SCORE_RULES.dmg, attacker, scoreBonus);
+        addScore("brk", (Number(res.breakDealt) || 0) * SCORE_RULES.brk, attacker, scoreBonus);
       }
     }
     if (target && target.isPlayer) {
@@ -5328,7 +5348,7 @@ function dealTo(attacker, target, opt) {
     if (target && !target.isPlayer && (target.dead || totalHp(target) <= 0) && (res.intended || 0) > 0) {
       const over = Math.max(0, (res.intended || 0) - (res.total || 0));
       if (over > 0) target.overkill = (Number(target.overkill) || 0) + over;
-      if (over > 0 && attacker && attacker.isPlayer) addScore("overkill", Math.floor(over * SCORE_RULES.overkill), attacker);
+      if (over > 0 && attacker && attacker.isPlayer) addScore("overkill", Math.floor(over * SCORE_RULES.overkill), attacker, scoreBonus);
       const maxHp = (target.layers || []).reduce((a, l) => a + (Number(l.max) || 0), 0);
       if ((res.intended || 0) >= maxHp * 0.5) target.killBig = true;
     }
