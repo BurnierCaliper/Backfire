@@ -2287,13 +2287,7 @@
       if (sk.cost.ap) cost.push(`<span class="ap">行动 ${sk.cost.ap}</span>`);
       if (sk.cost.bonus) cost.push(`<span class="bn">附赠 ${sk.cost.bonus}</span>`);
       if (!cost.length) cost.push("不耗行动");
-      // 招式疲劳：这回合再用这一招会扣多少（连续回合用同一招）
-      let fat = "";
-      if (state.combatStarted && actor && typeof fatigueStreak === "function" && !/^__|^use_device:/.test(sk.id)) {
-        const pct = fatiguePct(fatigueStreak(actor, sk.id));
-        if (pct > 0) fat = `<span class="fat" title="招式疲劳：连续几个回合用同一招，这次行动的总得分打折">疲劳−${Math.round(pct * 100)}%</span>`;
-      }
-      b.innerHTML = `<span class="key">${i < 9 ? i + 1 : ""}</span><span class="nm">${esc(sk.name)}</span><span class="cost">${cost.join(" ")}${fat}</span>`;
+      b.innerHTML = `<span class="key">${i < 9 ? i + 1 : ""}</span><span class="nm">${esc(sk.name)}</span><span class="cost">${cost.join(" ")}</span>`;
       if (why) { b.disabled = true; b.title = why; }
       b.onclick = () => armSkill(sk);
       b.onmouseenter = () => {

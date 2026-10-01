@@ -201,9 +201,12 @@
     if (!irCache || irCache.ctx !== ctx) {
       const len = Math.round(ctx.sampleRate * seconds);
       const ir = ctx.createBuffer(2, len, ctx.sampleRate);
+      // 固定种子的噪声：混响尾巴每次都一样，不会偶尔起伏得像「嗡嗡」
+      let seed = 0x1a2b3c4;
+      const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
       for (let ch = 0; ch < 2; ch++) {
         const d = ir.getChannelData(ch);
-        for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3.2);
+        for (let i = 0; i < len; i++) d[i] = (rnd() * 2 - 1) * Math.pow(1 - i / len, 3.2);
       }
       irCache = { ctx, ir };
     }
