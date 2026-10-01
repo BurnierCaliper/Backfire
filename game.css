@@ -1534,3 +1534,20 @@ body.trpg .trpg-only { display: flex !important; }
 .g-fx.g-fxw { z-index: 41; }   /* 攻击效果大字：在技能横幅（40）之上 */
 #g-pvbox .intent-step { margin: 2px 0 0 0; line-height: 1.5; }
 #g-pvbox .intent-sub { padding-left: 12px; color: var(--bone); font-size: 12px; }
+/* 战场数据 */
+.sheet-card.stats-card { width: min(720px, 94vw); }
+.stats-card .sheet-head { gap: 8px; }
+.stats-card .sheet-head h3 { flex: 1; }
+.stats-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.stats-table th, .stats-table td { padding: 7px 10px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.stats-table th:first-child, .stats-table td:first-child { text-align: left; }
+.stats-table th { font-size: 12px; color: var(--muted); font-weight: 600; }
+.stats-table td { font-family: var(--num); }
+.stats-table td:first-child { font-family: inherit; font-weight: 700; }
+.stats-table td small { margin-left: 6px; font-size: 11px; color: var(--muted); font-weight: 400; }
+.stats-table tr.sub td { font-size: 13px; color: var(--muted); }
+.stats-table tr.sub td:first-child { font-weight: 400; padding-left: 18px; }
+.stats-table tr.dead td:first-child { text-decoration: line-through; opacity: .6; }
+.stats-table td.top { color: var(--gold); font-weight: 700; }
+.stats-table tfoot td { color: var(--muted); border-bottom: 0; font-weight: 700; }
+.stats-note, .stats-turn { margin: 10px 0 0; font-size: 12px; color: var(--muted); line-height: 1.6; }

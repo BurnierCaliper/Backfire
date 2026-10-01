@@ -161,3 +161,36 @@ test("挂在下一击的猛击 / 穿刺 / 弱点特效不作用于环境伤害�
   assert.ok(hit.res.flags.smash && hit.res.flags.pierce && hit.res.flags.weak, "真正的攻击才带上");
   assert.equal(kolt.resources.smashNext, false);
 });
+
+/* ---------- 战场数据 ---------- */
+test("战场数据：造成伤害、击破、承伤、击杀按单位记下", () => {
+  const { c, st, kolt } = field();
+  const foe = st.units.find(u => !u.isPlayer);
+  foe.zone = 1;
+  const hp0 = c.totalHp(foe);
+  const r = c.dealTo(kolt, foe, { atk: 0, mult: 0, flat: 7, element: "physical", baseBreak: 1, flags: { action: true, blockResolved: true } });
+  const s = st.battleStats[kolt.id];
+  assert.equal(s.dmg, hp0 - c.totalHp(foe));
+  assert.equal(s.brk, r.res.breakDealt);
+  // 敌人打柯尔特
+  const k0 = c.totalHp(kolt);
+  c.dealTo(foe, kolt, { atk: 0, mult: 0, flat: 4, element: "physical", baseBreak: 0, flags: { action: true, blockResolved: true } });
+  assert.equal(s.taken, k0 - c.totalHp(kolt));
+  // 补刀：击杀算柯尔特
+  foe.layers.forEach(l => { l.current = 1; });
+  c.dealTo(kolt, foe, { atk: 0, mult: 0, flat: 5, element: "physical", baseBreak: 0, flags: { action: true, blockResolved: true } });
+  assert.equal(foe.dead, true);
+  assert.equal(s.kills, 1);
+  assert.equal(st.battleStats[c.findKit("ruby", st.units).id], undefined, "没出手的人没有记录");
+});
+
+test("战场数据：治疗只算给其他友方加的血量 / 护盾，给自己的不算", () => {
+  const { c, st, kolt } = field();
+  const ruby = c.findKit("ruby", st.units);
+  ruby.layers.forEach(l => { l.current = Math.max(1, l.current - 6); });
+  kolt.layers.forEach(l => { l.current = Math.max(1, l.current - 6); });
+  const r0 = c.totalHp(ruby);
+  c.trackHealBy(kolt, () => { c.healUnit(ruby, 4); c.healUnit(kolt, 4); });
+  assert.equal(st.battleStats[kolt.id].heal, c.totalHp(ruby) - r0);
+  assert.ok(st.battleStats[kolt.id].heal > 0);
+});

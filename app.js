@@ -1984,11 +1984,41 @@ function addStatusDmg(key, amount) {
   state.statusDmg[key] = (state.statusDmg[key] || 0) + n;
 }
 
+/* ===== 战场数据：每个我方单位这场造成的伤害、击破、承受的伤害、击杀、治疗 =====
+ * 记在 state.battleStats[单位 id] 上（随撤销一起回退）。
+ *   伤害 / 击破：打在敌人身上的每一击，加上自己行动里引发的连带伤害（感电、共振、余波……）
+ *   承伤：落在自己身上的所有伤害，含坚毅生命和持续伤害
+ *   击杀：最后一击是谁打的算谁
+ *   治疗：自己的行动让「其他」友方多出来的血量和护盾（新唤出的单位不算） */
+function battleStat(u) {
+  if (!u || !u.isPlayer || !(state.units || []).includes(u)) return null;
+  state.battleStats = state.battleStats || {};
+  const s = state.battleStats[u.id] || (state.battleStats[u.id] = { name: u.name, kit: u.kit || "", weaponOf: u.weaponOf || null, dmg: 0, brk: 0, taken: 0, kills: 0, heal: 0 });
+  s.name = u.name;
+  return s;
+}
+/** 包住一次行动：结束后把其他友方多出来的血量 / 护盾记成 actor 的治疗量 */
+function trackHealBy(actor, fn) {
+  const st = actor && actor.isPlayer ? battleStat(actor) : null;
+  if (!st) return fn();
+  const hpNow = (u) => (u.layers || []).reduce((a, l) => a + Math.max(0, Number(l.current) || 0), 0);
+  const before = new Map();
+  (state.units || []).forEach(u => { if (u.isPlayer && u !== actor && !u.hidden && !u.dead) before.set(u.id, hpNow(u)); });
+  try { return fn(); } finally {
+    (state.units || []).forEach(u => {
+      if (!before.has(u.id) || u === actor) return;
+      const gain = hpNow(u) - before.get(u.id);
+      if (gain > 0) st.heal += gain;
+    });
+  }
+}
+
 function beginActionAcc(actor) {
   state.actionAcc = {
     dmg: 0, brk: 0, hits: 0, calls: 0, targets: [],
     side: 0, sideBy: {},   // 连带伤害：感电、高压场地、灼烧、共振、聚焦抹层等
-    actorIsPlayer: actor ? !!actor.isPlayer : null
+    actorIsPlayer: actor ? !!actor.isPlayer : null,
+    actorId: actor ? actor.id : null
   };
   state.actionWallHit = {};
 }
@@ -2003,6 +2033,11 @@ function noteSideDamage(amount, label, unit) {
   const key = label || "其他";
   acc.side += n;
   acc.sideBy[key] = (acc.sideBy[key] || 0) + n;
+  // 战场数据：我方行动引发、落在敌人身上的连带伤害，算出手的人
+  if (acc.actorIsPlayer && !(unit && unit.isPlayer)) {
+    const st = battleStat(unitById(acc.actorId));
+    if (st) st.dmg += n;
+  }
 }
 
 function ironWallIn(zone) {
@@ -2145,6 +2180,7 @@ function applyTypedDot(unit, amount, element, notes, label, opts) {
   const sdKey = inferStatusDmgKey(label, element);
   addStatusDmg(sdKey, res.total || amount);
   noteSideDamage(res.total || 0, STATUS_DMG_NAME[sdKey] || "其他", unit);
+  if (unit && unit.isPlayer) { const st = battleStat(unit); if (st) st.taken += Math.floor(Number(res.total) || 0) + Math.floor(Number(res.shpDealt) || 0); }
   if ((res.intended || res.total || 0) > 0) spawnFloater(unit, res.intended || res.total, element);
   if ((res.extraHarmonic || 0) > 0) spawnFloater(unit, res.extraHarmonic, element);
   checkHighBoom(unit);
@@ -3227,6 +3263,13 @@ function settleEnemyKill(target, notes) {
   if (!target || target.isPlayer || target._xpGiven) return;
   target.dead = true;
   target._xpGiven = true;
+  // 战场数据：最后一击是谁打的算谁；持续伤害在某人行动中打死的，算那个人
+  {
+    const acc = state.actionAcc;
+    const killer = unitById(target._lastHitBy) || (acc && acc.actorIsPlayer ? unitById(acc.actorId) : null);
+    const st = battleStat(killer);
+    if (st) st.kills += 1;
+  }
   const rank = ENEMY_RANK[target.kit] || "minion";
   // 跑团模式：手册「遭遇战敌人先动，经验双倍；困难遭遇三倍」，由主持人在战斗顶栏选
   const mult = typeof TRPG !== "undefined" && TRPG.active ? Math.max(1, Number(state.xpMult) || 1) : 1;
@@ -4914,6 +4957,8 @@ function applyAtkFxAfter(attacker, target, res, flags, extra, opt) {
 function dealTo(attacker, target, opt) {
   opt = opt || {};
   opt.flags = makeDealFlags(opt.flags);
+  // 战场数据：击杀在伤害结算里就会发生，所以先记下「最后一击是谁」
+  if (attacker && target && attacker.isPlayer && !target.isPlayer && (state.units || []).includes(attacker)) target._lastHitBy = attacker.id;
   if (!opt.flags.atkFx) armAtkFx(attacker, opt.flags);
   if (opt.flags.diffract) {
     opt.flags.blockResolved = true;
@@ -5195,6 +5240,15 @@ function dealTo(attacker, target, opt) {
   }
   if (!res.pending) {
     const ele = opt.element || res.element || "physical";
+    // 战场数据
+    if (attacker && target && attacker.isPlayer && !target.isPlayer) {
+      const st = battleStat(attacker);
+      if (st) { st.dmg += Math.floor(Number(res.total) || 0); st.brk += Number(res.breakDealt) || 0; }
+    }
+    if (target && target.isPlayer) {
+      const st = battleStat(target);
+      if (st) st.taken += Math.floor(Number(res.total) || 0) + Math.floor(Number(res.shpDealt) || 0);
+    }
     // 画面用：敌人被这一击打死时，记下「溢出」的伤害（血量显示成负数）和是不是一记重击（死后慢慢消失）
     if (target && !target.isPlayer && (target.dead || totalHp(target) <= 0) && (res.intended || 0) > 0) {
       const over = Math.max(0, (res.intended || 0) - (res.total || 0));
@@ -7036,8 +7090,9 @@ function runSkill(id, optRun) {
   try {
     lines = withLogSink(() => {
       state.aoePulse = {};            // 只算这一次行动的范围攻击
-      runSkillInner(id, optRun);
+      trackHealBy(a0, () => runSkillInner(id, optRun));
       flushAoePulse();                // 波及到的按钮 / 拉杆各触发一次（提前 return 的分支也算）
+      state.actionAcc = null;         // 行动结束：之后的持续伤害不再算到这个人头上
     });
   } finally { LOG_ACTOR_ID = prevActor; }
   const block = tidyActionBlock(title, lines);

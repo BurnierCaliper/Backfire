@@ -470,7 +470,9 @@
       if (skillId === "__move") { doMove(a, picks.dest); return; }
       if (skillId === "__stand") { standUp(a); return; }
       if (skillId === "__item") {
-        const notes = useItemOn(a, picks.item, unitById(targetId), picks.dest);
+        const notes = typeof trackHealBy === "function"
+          ? trackHealBy(a, () => useItemOn(a, picks.item, unitById(targetId), picks.dest))   // 给队友用医疗包算治疗量
+          : useItemOn(a, picks.item, unitById(targetId), picks.dest);
         (notes || []).forEach(s => appendLog(s));
         if (a && (a.bonus || 0) > 0) a.bonus -= 1;
         return;
@@ -1844,7 +1846,7 @@
       const durNotes = typeof ledgerAfterBattle === "function" ? ledgerAfterBattle([]) : [];
       if (typeof G.onBattleFinished === "function") {
         const g = state.battleGains || { xp: 0, kuizhi: 0 };
-        G.onBattleFinished({ outcome: G.lastOutcome, turn: state.turnNo, xp: g.xp, kuizhi: g.kuizhi, xpMult: state.xpMult || 1, ups, durNotes });
+        G.onBattleFinished({ outcome: G.lastOutcome, turn: state.turnNo, xp: g.xp, kuizhi: g.kuizhi, xpMult: state.xpMult || 1, ups, durNotes, stats: statRows() });
       }
       rememberCampaign();
       durNotes.forEach(t => addLogPhase(t));
@@ -2065,6 +2067,7 @@
     state.retreated = false;
     state.lootByRank = null;
     state.battleGains = { xp: 0, kuizhi: 0 };
+    state.battleStats = {};   // 战场数据（每个我方单位的伤害 / 击破 / 承伤 / 击杀 / 治疗）
     G.undo = [];   // 这场战斗得到的经验（每人）和掉落，跑团模式写进探索记录
     state.xpMult = Number(($("g-xp-mult") || {}).value) || 1;
 
@@ -2159,6 +2162,45 @@
     }
     paintUndo();
   }
+  /* ---------- 战场数据 ---------- */
+  const STAT_COLS = [["dmg", "造成伤害"], ["brk", "击破"], ["taken", "承受伤害"], ["kills", "击杀"], ["heal", "治疗 / 护盾"]];
+  /** 按队伍顺序排好的行：角色在前，武器人跟在主人后面 */
+  function statRows() {
+    const stats = state.battleStats || {};
+    const blank = (u) => ({ name: u.name, kit: u.kit, weaponOf: u.weaponOf || null, dmg: 0, brk: 0, taken: 0, kills: 0, heal: 0 });
+    const units = (state.units || []).filter(u => u.isPlayer && !u._removed);
+    const heroes = units.filter(u => !isWeaponUnit(u));
+    const rows = [];
+    heroes.forEach(h => {
+      rows.push(Object.assign({ id: h.id, sub: false, dead: !!h.dead }, stats[h.id] || blank(h)));
+      units.filter(w => isWeaponUnit(w) && w.weaponOf === h.kit && stats[w.id]).forEach(w =>
+        rows.push(Object.assign({ id: w.id, sub: true, dead: !!w.dead }, stats[w.id])));
+    });
+    return rows;
+  }
+  function openStats() {
+    const rows = statRows();
+    const tot = {}; STAT_COLS.forEach(([k]) => { tot[k] = rows.reduce((a, r) => a + (Number(r[k]) || 0), 0); });
+    const best = {}; STAT_COLS.forEach(([k]) => { best[k] = Math.max(0, ...rows.map(r => Number(r[k]) || 0)); });
+    $("g-stats-body").innerHTML = `<table class="stats-table">
+      <thead><tr><th>角色</th>${STAT_COLS.map(([, n]) => `<th>${n}</th>`).join("")}</tr></thead>
+      <tbody>${rows.map(r => `<tr class="${r.sub ? "sub" : ""}${r.dead ? " dead" : ""}">
+        <td>${r.sub ? "└ " : ""}${esc(r.name)}${r.sub ? "<small>武器人</small>" : ""}</td>
+        ${STAT_COLS.map(([k]) => `<td class="${best[k] > 0 && r[k] === best[k] ? "top" : ""}">${Math.round(Number(r[k]) || 0)}</td>`).join("")}</tr>`).join("")}</tbody>
+      <tfoot><tr><td>合计</td>${STAT_COLS.map(([k]) => `<td>${Math.round(tot[k])}</td>`).join("")}</tr></tfoot>
+    </table>
+    <p class="stats-turn">${state.combatStarted ? `第 ${state.turnNo || 1} 回合` : "还没开战"}</p>`;
+    $("g-stats-sheet").classList.add("show");
+  }
+  function statsText() {
+    const rows = statRows();
+    return [`战场数据（第 ${state.turnNo || 1} 回合）`, "角色\t" + STAT_COLS.map(([, n]) => n).join("\t")]
+      .concat(rows.map(r => (r.sub ? "  " + r.name + "（武器人）" : r.name) + "\t" + STAT_COLS.map(([k]) => Math.round(Number(r[k]) || 0)).join("\t")))
+      .join("\n");
+  }
+  G.statRows = statRows;
+  G.statsText = statsText;
+
   function paintUndo() {
     const b = $("g-undo");
     if (!b) return;
@@ -2263,6 +2305,7 @@
     if (G.depth === 0) setView(snapAll(), true);
     refreshHud();
     paintUndo();
+    if ($("g-stats-sheet") && $("g-stats-sheet").classList.contains("show")) openStats();   // 开着就随时刷新
   }
 
   function addLogPhase(text) {
@@ -3011,6 +3054,13 @@
     };
     $("g-save").onclick = () => { renderSaveSheet(); $("g-save-sheet").classList.add("show"); };
     $("g-save-close").onclick = () => $("g-save-sheet").classList.remove("show");
+    $("g-stats").onclick = openStats;
+    $("g-review-stats").onclick = openStats;
+    $("g-stats-close").onclick = () => $("g-stats-sheet").classList.remove("show");
+    $("g-stats-copy").onclick = (e) => {
+      const btn = e.currentTarget;
+      copyText(statsText(), ok => { const t = btn.textContent; btn.textContent = ok ? "已复制" : "复制失败"; setTimeout(() => { btn.textContent = t; }, 1200); });
+    };
     $("g-party-cfg").onclick = () => { renderPartySheet(); $("g-party-sheet").classList.add("show"); };
     $("g-party-close").onclick = () => $("g-party-sheet").classList.remove("show");
     $("g-party-add").onclick = () => {

@@ -503,6 +503,31 @@ test("Helumica 的预测：预测的伤害和格挡骰就是实际掷出来的",
   assert.deepEqual(o.errors, []);
 });
 
+test("战场数据：攻击后能在面板里看到伤害 / 击破，开着面板会随行动刷新，撤销一起回退", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await newTrpg(page);
+  await startBattle(page);
+  await page.evaluate(() => { Math.random = () => 0.999; });
+  await page.click("#g-stats");
+  assert.match(await page.textContent("#g-stats-body"), /瑞比/);
+  await page.click("#g-stats-close");
+  const ruby = await selectHero(page, "ruby");
+  const foe = await attackFirstFoe(page);
+  const row = await page.evaluate(i => GAME.statRows().find(r => r.id === i), ruby);
+  assert.ok(row.dmg > 0 && row.brk > 0, "瑞比应该有伤害和击破：" + JSON.stringify(row));
+  await page.click("#g-stats");
+  const cells = await page.$$eval(".stats-table tbody tr", trs => trs.map(tr => [...tr.children].map(td => td.textContent.trim())));
+  const rubyCells = cells.find(c => c[0].includes("瑞比"));
+  assert.equal(Number(rubyCells[1]), row.dmg);
+  assert.equal(Number(rubyCells[2]), row.brk);
+  await page.click("#g-stats-close");
+  await page.click("#g-undo");
+  assert.equal((await page.evaluate(i => GAME.statRows().find(r => r.id === i), ruby)).dmg, 0, "撤销后数据回退");
+  assert.ok(foe);
+  assert.deepEqual(o.errors, []);
+});
+
 test("音效：七种属性都能合成，有声、不削顶、不出错", async (t) => {
   const o = await open(t); if (!o) return;
   const r = await o.page.evaluate(async () => {
