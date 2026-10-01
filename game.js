@@ -474,7 +474,7 @@
           ? trackHealBy(a, () => useItemOn(a, picks.item, unitById(targetId), picks.dest))   // 给队友用医疗包算治疗量
           : useItemOn(a, picks.item, unitById(targetId), picks.dest);
         (notes || []).forEach(s => appendLog(s));
-        if (a && (a.bonus || 0) > 0) a.bonus -= 1;
+        if (a && (a.bonus || 0) > 0) { a.bonus -= 1; if (typeof scoreSpend === "function") scoreSpend(a, 0, 1); }
         return;
       }
       if (picks && Object.keys(picks).length) {
@@ -1836,7 +1836,12 @@
     const retreated = G.lastOutcome === "retreat";
     box.querySelector("h2").textContent = retreated ? "撤退" : win ? "胜利" : "全员倒地";
     box.querySelector("h2").className = win ? "win" : "lose";
-    // 战斗评分：胜利时按评价把这场的战斗经验乘上去（S ×2 / A ×1.5 / B ×1.2 / C ×1）
+    // 战斗评分：胜利时先算速杀奖励（1 / 2 / 3 回合内打完，整场分数 ×2 / ×1.5 / ×1.2），再定评价
+    if (G.lastOutcome === "win" && typeof applySpeedBonus === "function") {
+      const sp = applySpeedBonus();
+      if (sp > 0) addLogPhase(`速杀奖励：第 ${state.turnNo} 回合打完，分数 ×${state.battleScore.speedMult}（+${sp}）`);
+    }
+    // 按评价把这场的战斗经验乘上去（S ×2 / A ×1.5 / B ×1.2 / C ×1）
     const gr = typeof battleGrade === "function" ? battleGrade() : null;
     G.lastGrade = gr;
     let gradeLine = "";
@@ -2217,7 +2222,7 @@
       const parts = Object.keys(SCORE_PART_NAMES).filter(k => gr.parts[k]).map(k => `${SCORE_PART_NAMES[k]} ${gr.parts[k]}`).join(" · ");
       return `<p class="stats-grade"><b class="g-${gr.grade}">评价 ${gr.grade}</b> ${gr.score} 分（这场的基准 ${gr.par} 分，${gr.ratio.toFixed(2)} 倍）${gr.next ? `，距 ${gr.next.grade} 还差 ${Math.max(0, gr.next.need - gr.score)} 分` : ""}<br>${parts || "还没有得分"}</p>`;
     })()}
-    <p class="stats-turn">${state.combatStarted ? `第 ${state.turnNo || 1} 回合` : "还没开战"} · 评价分段：S ≥ 2 倍基准（战斗经验 ×2）、A ≥ 1.6 倍（×1.5）、B ≥ 1.2 倍（×1.2）、C（×1）。得分里的击杀、团队分不一定能归到具体某人，所以个人得分加起来可能比总分少。</p>`;
+    <p class="stats-turn">${state.combatStarted ? `第 ${state.turnNo || 1} 回合` : "还没开战"} · 评价分段：${SCORE_GRADES.map(([g, k, x]) => g === "C" ? `C（经验 ×${x}）` : `${g} ≥ ${k} 倍基准（经验 ×${x}）`).join("、")}。速杀：${SCORE_SPEED.map(([n, m]) => `${n} 回合内 ×${m}`).join(" / ")}（胜利时整场分数再乘）。得分里的击杀、团队分不一定能归到具体某人，所以个人得分加起来可能比总分少。</p>`;
     $("g-stats-sheet").classList.add("show");
   }
   function statsText() {

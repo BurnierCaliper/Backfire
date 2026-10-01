@@ -218,10 +218,12 @@ test("评分：评价按得分 ÷ 基准分分段；基准分只算一次出现�
   const g0 = c.battleGrade();
   assert.equal(g0.grade, "C");
   assert.ok(g0.par > 0);
-  st.battleScore.total = Math.ceil(g0.par * 1.2); assert.equal(c.battleGrade().grade, "B");
-  st.battleScore.total = Math.ceil(g0.par * 1.6); assert.equal(c.battleGrade().grade, "A");
-  st.battleScore.total = Math.ceil(g0.par * 2.0); assert.equal(c.battleGrade().grade, "S");
+  const cut = Object.fromEntries(c.S.SCORE_GRADES.map(([g, k]) => [g, k]));
+  st.battleScore.total = Math.ceil(g0.par * cut.B); assert.equal(c.battleGrade().grade, "B");
+  st.battleScore.total = Math.ceil(g0.par * cut.A); assert.equal(c.battleGrade().grade, "A");
+  st.battleScore.total = Math.ceil(g0.par * cut.S); assert.equal(c.battleGrade().grade, "S");
   assert.equal(c.battleGrade().xpMult, 2);
+  st.battleScore.total = Math.ceil(g0.par * cut.B) - 1; assert.equal(c.battleGrade().grade, "C");
   // 敌人死了被移出场，基准分不变
   st.units = st.units.filter(u => u.isPlayer);
   assert.equal(c.battleGrade().par, g0.par);
@@ -256,7 +258,8 @@ test("评分：协助格挡成功 +30（记在格挡的人身上）", () => {
   assert.ok(st.blockQueue.length, "应该在等格挡");
   c.finishBlock(ruby.id, { roll: 1, ok: true, chance: 50 });
   assert.equal(st.battleScore.parts.block, 30);
-  assert.equal(st.battleStats[ruby.id].score, 30);
+  assert.equal(st.battleScore.parts.action, 5, "格挡用掉 1 次附赠行动 +5");
+  assert.equal(st.battleStats[ruby.id].score, 35);
 });
 
 test("评分：触发属性克制的一击，伤害 / 击破 / 溢出 / 击杀分 +25%，单独记成「克制加成」", () => {
@@ -314,4 +317,36 @@ test("危墙倒塌：倒向最后一击来源的另一侧，对那一区造成 1
   assert.ok(lost >= 1 && lost <= 10 * 2, "1d10 物理（按克制可能浮动）：" + lost);
   assert.equal(def0 - foe.def, Math.min(def0, 2));
   assert.ok(c.totalHp(kolt) > 0);
+});
+
+
+test("评分：我方用行动点 +10、用附赠行动 +5（开战后才算，敌人不算）", () => {
+  const { c, st, kolt } = field();
+  c.resetBattleRecords();
+  kolt.ap = 2; kolt.bonus = 1;
+  c.spendAp(kolt, 1, "测试");
+  c.spendBonus(kolt, 1, "测试");
+  assert.equal(st.battleScore.parts.action, 15);
+  const foe = st.units.find(u => !u.isPlayer);
+  foe.ap = 1; c.spendAp(foe, 1, "测试");
+  assert.equal(st.battleScore.parts.action, 15, "敌人用行动点不算");
+  st.combatStarted = false; kolt.ap = 1;
+  c.spendAp(kolt, 1, "测试");
+  assert.equal(st.battleScore.parts.action, 15, "开战前不算");
+});
+
+test("评分：速杀奖励——1 / 2 / 3 回合内打完，整场分数 ×2 / ×1.5 / ×1.2，只算一次", () => {
+  const { c, st } = field();
+  const run = (turn) => {
+    c.resetBattleRecords();
+    st.battleScore.total = 1000; st.turnNo = turn;
+    const extra = c.applySpeedBonus();
+    c.applySpeedBonus();
+    return [extra, st.battleScore.total];
+  };
+  assert.deepEqual(run(1), [1000, 2000]);
+  assert.deepEqual(run(2), [500, 1500]);
+  assert.deepEqual(run(3), [200, 1200]);
+  assert.deepEqual(run(4), [0, 1000]);
+  assert.equal(st.battleScore.parts.speed || 0, 0);
 });
