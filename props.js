@@ -137,8 +137,13 @@ function refillBatteryFactionShields(notes) {
   return notes;
 }
 
+/** 危墙的耐久：手册「有一定耐久值 1～15，DM 自行调整」→ 随机 1–15（战场配置里可以改） */
+const WALL_HP_RANGE = [1, 15];
+function rollWallHp() {
+  return WALL_HP_RANGE[0] + Math.floor(Math.random() * (WALL_HP_RANGE[1] - WALL_HP_RANGE[0] + 1));
+}
 function defaultGapHp(type) {
   if (type === "bridge") return 20;
-  if (type === "wall") return 8;
+  if (type === "wall") return rollWallHp();
   return 0;
 }

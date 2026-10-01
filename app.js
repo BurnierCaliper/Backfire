@@ -357,7 +357,7 @@ function buildGapBox(key) {
 function gapStatusText(g) {
   if (g.type === "open") return "可通过，可影响对面。";
   if (g.type === "bridge") return `通过扣 1d6 耐久。现 ${g.hp}。毁后变空隙。飞行无视。`;
-  if (g.type === "wall") return `挡住对面。现耐久 ${g.hp}。击破也扣耐久。`;
+  if (g.type === "wall") return `挡住对面。现耐久 ${g.hp}（手册 1～15）。只有击破扣耐久，伤害打不动；倒向最后一击的另一侧。`;
   if (g.type === "door") return g.open ? "门开着，可通过。" : "门关着，不能通过也不能打对面。";
   if (g.type === "void") return "地面不能过；飞行可过。强行通过需行动点+运动检定。";
   return "";
@@ -2713,10 +2713,16 @@ function hitStructure(attacker, targetToken, opt) {
       return;
     }
     const dmg = Math.max(1, Math.floor((opt && opt.dmg) || (effectiveAtk(attacker, state.units) || 5)));
-    const br = (opt && opt.brk) || 1;
-    g.lastFrom = attacker ? attacker.zone : 1;
-    g.hp = Math.max(0, g.hp - dmg - br);
-    notes.push(`攻击间隔 ${key}（${gapLabel(g.type)}）：耐久 −${dmg} 伤害 −${br} 击破 → ${g.hp}`);
+    const br = Math.max(0, Math.floor(Number(opt && opt.brk != null ? opt.brk : 1) || 0));
+    g.lastFrom = attacker ? attacker.zone : 1;   // 手册：摧毁方向只看最后一击来源区域
+    if (g.type === "wall") {
+      // 手册：危墙「受到击破时损失等量耐久值」——伤害打不动它，只有击破算
+      g.hp = Math.max(0, g.hp - br);
+      notes.push(`攻击间隔 ${key}（危墙）：击破 ${br} → 耐久 ${g.hp}${br ? "" : "（伤害打不动危墙，要靠击破）"}`);
+    } else {
+      g.hp = Math.max(0, g.hp - dmg - br);
+      notes.push(`攻击间隔 ${key}（${gapLabel(g.type)}）：耐久 −${dmg} 伤害 −${br} 击破 → ${g.hp}`);
+    }
     if (g.hp <= 0) notes.push(...destroyGap(key, g));
   } else if (String(targetToken).indexOf("prop:") === 0) {
     const p = (state.props || []).find(x => x.id === targetToken.slice(5));

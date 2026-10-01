@@ -2977,7 +2977,8 @@
         s.onchange = () => {
           g.type = s.value;
           if (g.type === "bridge" || g.type === "wall") {
-            if (!g.hp) { g.hp = defaultGapHp(g.type); g.maxHp = g.hp; }
+            g.hp = defaultGapHp(g.type); g.maxHp = g.hp;   // 换成危墙时重新掷 1～15
+            g.level = Number(G.level) || 1;                 // 倒塌伤害每五级 +1d10，按这场的敌人等级
           }
           if (g.type === "door") g.open = false;
           if (g.type === "open") { g.hp = 0; g.open = true; }
@@ -2985,6 +2986,20 @@
           renderFieldSheet();
         };
         row.appendChild(s);
+        // 危墙 / 桥梁的耐久：主持人自行调整（危墙按手册 1～15，「随机」重掷一次）
+        if (g.type === "wall" || g.type === "bridge") {
+          const hp = el("input", "");
+          hp.type = "number"; hp.min = "1"; hp.value = String(g.hp || 1); hp.style.width = "64px";
+          hp.title = g.type === "wall" ? "危墙耐久（手册 1～15）" : "桥梁耐久";
+          hp.onchange = () => { g.hp = g.maxHp = Math.max(1, Math.floor(Number(hp.value) || 1)); paintGaps(); renderFieldSheet(); };
+          row.appendChild(hp);
+          if (g.type === "wall") {
+            const rnd = el("button", "g-btn", "随机");
+            rnd.title = "重掷 1～15";
+            rnd.onclick = () => { g.hp = g.maxHp = rollWallHp(); paintGaps(); renderFieldSheet(); };
+            row.appendChild(rnd);
+          }
+        }
         if (g.type === "door") {
           const tog = el("button", "g-btn", g.open ? "关门" : "开门");
           tog.onclick = () => { g.open = !g.open; paintGaps(); renderFieldSheet(); };

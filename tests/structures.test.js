@@ -288,3 +288,30 @@ test("评分：触发属性克制的一击，伤害 / 击破 / 溢出 / 击杀�
   assert.equal(st.battleScore.parts.bonus - before,
     Math.floor(r3.res.total * 0.25) + Math.floor(Math.floor(over * 1.5) * 0.25) + Math.floor(20 * 0.25));
 });
+
+test("危墙：耐久随机 1～15（手册）；只有击破会减耐久，伤害打不动", () => {
+  const { c, st, kolt } = field();
+  const seen = new Set();
+  for (let i = 0; i < 300; i++) seen.add(c.defaultGapHp("wall"));
+  assert.ok([...seen].every(n => n >= 1 && n <= 15), "超出 1～15：" + [...seen]);
+  assert.ok(seen.size >= 12, "应该是随机的：" + [...seen].sort((a, b) => a - b));
+  st.gaps["1-2"] = { type: "wall", hp: 10, maxHp: 10, open: false };
+  c.hitStructure(kolt, "gap:1-2", { dmg: 50, brk: 2, element: "physical" });
+  assert.equal(st.gaps["1-2"].hp, 8, "50 伤害 + 2 击破 → 只掉 2");
+  c.hitStructure(kolt, "gap:1-2", { dmg: 50, brk: 0, element: "physical" });
+  assert.equal(st.gaps["1-2"].hp, 8, "没有击破 → 不掉");
+});
+
+test("危墙倒塌：倒向最后一击来源的另一侧，对那一区造成 1d10（每五级 +1d10）伤害和 2 击破", () => {
+  const { c, st, kolt } = field();
+  const foe = st.units.find(u => !u.isPlayer);
+  kolt.zone = 1; foe.zone = 2;
+  st.gaps["1-2"] = { type: "wall", hp: 1, maxHp: 1, open: false, level: 1 };
+  const hp0 = c.totalHp(foe), def0 = foe.def;
+  c.hitStructure(kolt, "gap:1-2", { dmg: 5, brk: 1, element: "physical" });
+  assert.equal(st.gaps["1-2"].type, "open");
+  const lost = hp0 - c.totalHp(foe);
+  assert.ok(lost >= 1 && lost <= 10 * 2, "1d10 物理（按克制可能浮动）：" + lost);
+  assert.equal(def0 - foe.def, Math.min(def0, 2));
+  assert.ok(c.totalHp(kolt) > 0);
+});
