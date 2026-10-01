@@ -1551,3 +1551,41 @@ body.trpg .trpg-only { display: flex !important; }
 .stats-table td.top { color: var(--gold); font-weight: 700; }
 .stats-table tfoot td { color: var(--muted); border-bottom: 0; font-weight: 700; }
 .stats-note, .stats-turn { margin: 10px 0 0; font-size: 12px; color: var(--muted); line-height: 1.6; }
+/* 战斗评分：战场右上角的评价字母（鬼泣式） */
+.g-rank {
+  position: fixed; bottom: 180px; right: 340px; z-index: 29; pointer-events: auto;
+  display: none; flex-direction: column; align-items: flex-end; gap: 2px; min-width: 150px;
+  font-family: var(--ui); text-align: right;
+}
+.g-rank.on { display: flex; }
+.rk-grade {
+  font-size: 64px; line-height: 1; font-weight: 900; font-style: italic; letter-spacing: -.02em;
+  color: #9aa6b2;
+  text-shadow: 3px 3px 0 #1b1f24, -2px -2px 0 #1b1f24, 2px -2px 0 #1b1f24, -2px 2px 0 #1b1f24, 0 0 18px rgba(0,0,0,.25);
+  transform: skewX(-8deg);
+}
+.g-rank[data-grade="B"] .rk-grade { color: #6fb3ff; }
+.g-rank[data-grade="A"] .rk-grade { color: #ff9f1c; }
+.g-rank[data-grade="S"] .rk-grade { color: #ff3b5c; text-shadow: 3px 3px 0 #1b1f24, -2px -2px 0 #1b1f24, 2px -2px 0 #1b1f24, -2px 2px 0 #1b1f24, 0 0 22px rgba(255, 70, 100, .8); }
+.g-rank.up .rk-grade { animation: rankUp .6s cubic-bezier(.2, 1.6, .4, 1); }
+@keyframes rankUp { 0% { transform: skewX(-8deg) scale(1.9); opacity: .2; } 100% { transform: skewX(-8deg) scale(1); opacity: 1; } }
+.rk-score { font-family: var(--num); font-weight: 800; font-size: 16px; color: #1b1f24; }
+.rk-bar { width: 140px; height: 5px; background: rgba(27, 31, 36, .18); border-radius: 3px; overflow: hidden; }
+.rk-bar i { display: block; height: 100%; width: 0; background: currentColor; color: #9aa6b2; transition: width .4s ease-out; }
+.g-rank[data-grade="B"] .rk-bar i { color: #6fb3ff; }
+.g-rank[data-grade="A"] .rk-bar i { color: #ff9f1c; }
+.g-rank[data-grade="S"] .rk-bar i { color: #ff3b5c; }
+.rk-next { font-size: 11px; color: #5a6370; }
+.rk-feed { position: absolute; bottom: 100%; right: 0; display: flex; flex-direction: column-reverse; align-items: flex-end; gap: 1px; margin-bottom: 4px; }
+.rk-gain { font-size: 13px; font-weight: 800; color: #1b1f24; animation: rkGain 2.6s ease-out forwards; white-space: nowrap; }
+@keyframes rkGain { 0% { opacity: 0; transform: translateX(14px); } 10% { opacity: 1; transform: none; } 75% { opacity: 1; } 100% { opacity: 0; } }
+/* 结算面板上的评价 */
+.grade-badge { display: flex; align-items: baseline; justify-content: center; gap: 10px; margin: 2px 0 6px; }
+.grade-badge b { font-size: 56px; font-weight: 900; font-style: italic; color: #9aa6b2; text-shadow: 2px 2px 0 #1b1f24; }
+.grade-badge span { font-family: var(--num); font-size: 18px; color: var(--muted); }
+.grade-badge.g-B b { color: #6fb3ff; } .grade-badge.g-A b { color: #ff9f1c; } .grade-badge.g-S b { color: #ff3b5c; }
+.grade-badge.dim b { opacity: .45; }
+body:not([data-screen="battle"]) .g-rank { display: none !important; }
+.stats-grade { margin: 12px 0 0; font-size: 13px; line-height: 1.7; }
+.stats-grade b { font-size: 16px; font-style: italic; margin-right: 6px; color: #9aa6b2; }
+.stats-grade b.g-B { color: #6fb3ff; } .stats-grade b.g-A { color: #ff9f1c; } .stats-grade b.g-S { color: #ff3b5c; }

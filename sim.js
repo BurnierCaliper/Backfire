@@ -60,6 +60,7 @@ const BattleSim = (function () {
     opt = opt || {};
     if (opt.seed != null) RNG.install(opt.seed);
     resetField(opt);
+    if (typeof resetBattleRecords === "function") resetBattleRecords();
     loadLiveParty(opt.party);
     if (typeof randomizeNoraMood === "function") randomizeNoraMood();
     state.units.forEach(u => resetBattleFlags(u));

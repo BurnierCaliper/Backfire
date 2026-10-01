@@ -526,6 +526,7 @@
       if (!TRPG.active || slot < 0) return;
       const head = { win: "战斗胜利", lose: "战斗失败（全员倒地）", retreat: "撤出战斗" }[r.outcome] || "战斗结束";
       const lines = [`${head}（第 ${r.turn} 回合）：每人获得 ${r.xp} 经验${r.xpMult > 1 ? `（经验 ×${r.xpMult}）` : ""}，掉落 ${r.kuizhi} 奎支（现有 ${Number(state.kuizhi) || 0}）。`];
+      if (r.grade) lines.push(`评价 ${r.grade.grade}：${r.grade.score} 分（基准 ${r.grade.par}）${r.outcome === "win" && r.grade.xpMult > 1 ? `，战斗经验 ×${r.grade.xpMult}（已含在上面的经验里）` : ""}。`);
       if (r.ups && r.ups.length) lines.push("升级：" + r.ups.join("、") + "。");
       (r.stats || []).filter(x => x.dmg || x.brk || x.taken || x.kills || x.heal).forEach(x => {
         lines.push(`${x.sub ? "　" : ""}${x.name}${x.sub ? "（武器人）" : ""}：伤害 ${Math.round(x.dmg)} · 击破 ${Math.round(x.brk)} · 承伤 ${Math.round(x.taken)} · 击杀 ${x.kills} · 治疗 ${Math.round(x.heal)}`);

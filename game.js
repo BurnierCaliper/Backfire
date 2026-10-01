@@ -1836,6 +1836,23 @@
     const retreated = G.lastOutcome === "retreat";
     box.querySelector("h2").textContent = retreated ? "撤退" : win ? "胜利" : "全员倒地";
     box.querySelector("h2").className = win ? "win" : "lose";
+    // 战斗评分：胜利时按评价把这场的战斗经验乘上去（S ×2 / A ×1.5 / B ×1.2 / C ×1）
+    const gr = typeof battleGrade === "function" ? battleGrade() : null;
+    G.lastGrade = gr;
+    let gradeLine = "";
+    if (gr) {
+      gradeLine = `评价 ${gr.grade}（${gr.score} 分）`;
+      const gained = (state.battleGains && state.battleGains.xp) || 0;
+      if (G.lastOutcome === "win" && gr.xpMult > 1 && gained > 0) {
+        const per = Math.floor(gained * (gr.xpMult - 1));
+        if (per > 0) {
+          state.units.filter(u => u.isPlayer && !isWeaponUnit(u) && !u.dead).forEach(u => { u.xp = (u.xp || 0) + per; });
+          state.battleGains.xp += per;
+          gradeLine += `：战斗经验 ×${gr.xpMult}，每人额外 +${per}`;
+          addLogPhase(`评价 ${gr.grade}：战斗经验 ×${gr.xpMult}，每人额外 +${per} 经验`);
+        }
+      }
+    }
     const ups = [];
     state.units.filter(u => u.isPlayer && !isWeaponUnit(u)).forEach(u => {
       const from = u.level;
@@ -1846,7 +1863,7 @@
       const durNotes = typeof ledgerAfterBattle === "function" ? ledgerAfterBattle([]) : [];
       if (typeof G.onBattleFinished === "function") {
         const g = state.battleGains || { xp: 0, kuizhi: 0 };
-        G.onBattleFinished({ outcome: G.lastOutcome, turn: state.turnNo, xp: g.xp, kuizhi: g.kuizhi, xpMult: state.xpMult || 1, ups, durNotes, stats: statRows() });
+        G.onBattleFinished({ outcome: G.lastOutcome, turn: state.turnNo, xp: g.xp, kuizhi: g.kuizhi, xpMult: state.xpMult || 1, ups, durNotes, stats: statRows(), grade: gr });
       }
       rememberCampaign();
       durNotes.forEach(t => addLogPhase(t));
@@ -1856,8 +1873,13 @@
     box.querySelector("p").textContent = retreated
       ? `第 ${state.turnNo} 回合撤出战斗。${loot}。${lvline}`
       : win
-        ? `第 ${state.turnNo} 回合结束。${loot}。${lvline}`
+        ? `第 ${state.turnNo} 回合结束。${gradeLine ? gradeLine + "。" : ""}${loot}。${lvline}`
         : `队伍倒地。${loot}。${lvline}`;
+    // 结算面板上的大号评价字母
+    let badge = box.querySelector(".grade-badge");
+    if (!badge) { badge = el("div", "grade-badge"); box.insertBefore(badge, box.querySelector("p")); }
+    badge.className = "grade-badge g-" + (gr ? gr.grade : "C") + (win ? "" : " dim");
+    badge.innerHTML = gr ? `<b>${gr.grade}</b><span>${gr.score} 分</span>` : "";
     // 结算面板晚一点弹出，先让最后一击的大伤害数字和击倒演出放完
     const token = G.endToken = {};
     realTimeout(() => {
@@ -1951,7 +1973,8 @@
     setRogueMode({ onEnd, spec });
     resetBattleView();
     if ($("g-enc-name")) $("g-enc-name").textContent = spec.title || "战斗";
-    BattleSim.setup(spec);
+    BattleSim.setup(spec);   // 里面会清空战场数据和评分
+    G.undo = [];
     if ($("g-weather-sel")) $("g-weather-sel").value = state.weather;
     syncFieldDom();
     setView(snapAll(), false);
@@ -2066,8 +2089,7 @@
     state.exhaustTier = 0;
     state.retreated = false;
     state.lootByRank = null;
-    state.battleGains = { xp: 0, kuizhi: 0 };
-    state.battleStats = {};   // 战场数据（每个我方单位的伤害 / 击破 / 承伤 / 击杀 / 治疗）
+    resetBattleRecords();   // 战场数据、评分、这场的经验 / 掉落
     G.undo = [];   // 这场战斗得到的经验（每人）和掉落，跑团模式写进探索记录
     state.xpMult = Number(($("g-xp-mult") || {}).value) || 1;
 
@@ -2163,11 +2185,11 @@
     paintUndo();
   }
   /* ---------- 战场数据 ---------- */
-  const STAT_COLS = [["dmg", "造成伤害"], ["brk", "击破"], ["taken", "承受伤害"], ["kills", "击杀"], ["heal", "治疗 / 护盾"]];
+  const STAT_COLS = [["dmg", "造成伤害"], ["brk", "击破"], ["taken", "承受伤害"], ["kills", "击杀"], ["heal", "治疗 / 护盾"], ["score", "得分"]];
   /** 按队伍顺序排好的行：角色在前，武器人跟在主人后面 */
   function statRows() {
     const stats = state.battleStats || {};
-    const blank = (u) => ({ name: u.name, kit: u.kit, weaponOf: u.weaponOf || null, dmg: 0, brk: 0, taken: 0, kills: 0, heal: 0 });
+    const blank = (u) => ({ name: u.name, kit: u.kit, weaponOf: u.weaponOf || null, dmg: 0, brk: 0, taken: 0, kills: 0, heal: 0, score: 0 });
     const units = (state.units || []).filter(u => u.isPlayer && !u._removed);
     const heroes = units.filter(u => !isWeaponUnit(u));
     const rows = [];
@@ -2189,12 +2211,19 @@
         ${STAT_COLS.map(([k]) => `<td class="${best[k] > 0 && r[k] === best[k] ? "top" : ""}">${Math.round(Number(r[k]) || 0)}</td>`).join("")}</tr>`).join("")}</tbody>
       <tfoot><tr><td>合计</td>${STAT_COLS.map(([k]) => `<td>${Math.round(tot[k])}</td>`).join("")}</tr></tfoot>
     </table>
-    <p class="stats-turn">${state.combatStarted ? `第 ${state.turnNo || 1} 回合` : "还没开战"}</p>`;
+    ${(() => {
+      if (typeof battleGrade !== "function") return "";
+      const gr = battleGrade();
+      const parts = Object.keys(SCORE_PART_NAMES).filter(k => gr.parts[k]).map(k => `${SCORE_PART_NAMES[k]} ${gr.parts[k]}`).join(" · ");
+      return `<p class="stats-grade"><b class="g-${gr.grade}">评价 ${gr.grade}</b> ${gr.score} 分（这场的基准 ${gr.par} 分，${gr.ratio.toFixed(2)} 倍）${gr.next ? `，距 ${gr.next.grade} 还差 ${Math.max(0, gr.next.need - gr.score)} 分` : ""}<br>${parts || "还没有得分"}</p>`;
+    })()}
+    <p class="stats-turn">${state.combatStarted ? `第 ${state.turnNo || 1} 回合` : "还没开战"} · 评价分段：S ≥ 2 倍基准（战斗经验 ×2）、A ≥ 1.6 倍（×1.5）、B ≥ 1.2 倍（×1.2）、C（×1）。得分里的击杀、团队分不一定能归到具体某人，所以个人得分加起来可能比总分少。</p>`;
     $("g-stats-sheet").classList.add("show");
   }
   function statsText() {
     const rows = statRows();
-    return [`战场数据（第 ${state.turnNo || 1} 回合）`, "角色\t" + STAT_COLS.map(([, n]) => n).join("\t")]
+    const gr = typeof battleGrade === "function" ? battleGrade() : null;
+    return [`战场数据（第 ${state.turnNo || 1} 回合）` + (gr ? ` · 评价 ${gr.grade} · ${gr.score} 分` : ""), "角色\t" + STAT_COLS.map(([, n]) => n).join("\t")]
       .concat(rows.map(r => (r.sub ? "  " + r.name + "（武器人）" : r.name) + "\t" + STAT_COLS.map(([k]) => Math.round(Number(r[k]) || 0)).join("\t")))
       .join("\n");
   }
@@ -2301,10 +2330,41 @@
     refreshHud();
   }
 
+  /* ---------- 战斗评分（右上角的评价字母） ---------- */
+  let lastParts = {};
+  function paintRank() {
+    const box = $("g-rank");
+    if (!box || typeof battleGrade !== "function") return;
+    const show = !!state.combatStarted || !!G.ended;
+    box.classList.toggle("on", show);
+    if (!show) { lastParts = {}; return; }
+    const gr = battleGrade();
+    const prevGrade = box.dataset.grade;
+    box.dataset.grade = gr.grade;
+    box.querySelector(".rk-grade").textContent = gr.grade;
+    box.querySelector(".rk-score").textContent = gr.score + " 分";
+    const span = gr.next ? Math.max(1, gr.next.need - gr.floor) : 1;
+    box.querySelector(".rk-bar i").style.width = (gr.next ? Math.min(100, Math.max(0, (gr.score - gr.floor) / span * 100)) : 100) + "%";
+    box.querySelector(".rk-next").textContent = gr.next ? `距 ${gr.next.grade} 还差 ${Math.max(0, gr.next.need - gr.score)} 分` : "最高评价";
+    if (prevGrade && prevGrade !== gr.grade) { box.classList.remove("up"); void box.offsetWidth; box.classList.add("up"); }
+    // 新得的分：一行一行冒出来
+    const feed = box.querySelector(".rk-feed");
+    Object.keys(gr.parts).forEach(k => {
+      const d = (gr.parts[k] || 0) - (lastParts[k] || 0);
+      if (d > 0 && !G.sim) {
+        const line = el("div", "rk-gain", `+${d} ${SCORE_PART_NAMES[k] || k}`);
+        feed.prepend(line);   // column-reverse：最新的一行贴着评价字母，旧的往上推
+        realTimeout(() => line.remove(), 2600);
+        while (feed.children.length > 5) feed.lastChild.remove();
+      }
+    });
+    lastParts = Object.assign({}, gr.parts);
+  }
   function refreshAll() {
     if (G.depth === 0) setView(snapAll(), true);
     refreshHud();
     paintUndo();
+    paintRank();
     if ($("g-stats-sheet") && $("g-stats-sheet").classList.contains("show")) openStats();   // 开着就随时刷新
   }
 

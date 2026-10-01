@@ -194,3 +194,67 @@ test("战场数据：治疗只算给其他友方加的血量 / 护盾，给自�
   assert.equal(st.battleStats[kolt.id].heal, c.totalHp(ruby) - r0);
   assert.ok(st.battleStats[kolt.id].heal > 0);
 });
+
+/* ---------- 战斗评分 ---------- */
+test("评分：伤害 1 分 / 击破 10 分 / 溢出 1.5 分（向下取整）/ 击杀按杂兵精英首领", () => {
+  const { c, st, kolt } = field();
+  const foe = st.units.find(u => !u.isPlayer);
+  foe.zone = 1;
+  c.resetBattleRecords();
+  foe.layers.forEach(l => { l.current = 5; });
+  const r = c.dealTo(kolt, foe, { atk: 0, mult: 0, flat: 12, element: "physical", baseBreak: 1, flags: { action: true, blockResolved: true } });
+  const p = st.battleScore.parts;
+  assert.equal(p.dmg, r.res.total);
+  assert.equal(p.brk, r.res.breakDealt * 10);
+  assert.equal(p.overkill, Math.floor((r.res.intended - r.res.total) * 1.5));
+  assert.equal(p.kill, 20);   // 狂徒是杂兵
+  assert.equal(st.battleScore.total, p.dmg + p.brk + p.overkill + p.kill);
+  assert.equal(st.battleStats[kolt.id].score, st.battleScore.total);
+});
+
+test("评分：评价按得分 ÷ 基准分分段；基准分只算一次出现过的敌人", () => {
+  const { c, st } = field();
+  c.resetBattleRecords();
+  const g0 = c.battleGrade();
+  assert.equal(g0.grade, "C");
+  assert.ok(g0.par > 0);
+  st.battleScore.total = Math.ceil(g0.par * 1.2); assert.equal(c.battleGrade().grade, "B");
+  st.battleScore.total = Math.ceil(g0.par * 1.6); assert.equal(c.battleGrade().grade, "A");
+  st.battleScore.total = Math.ceil(g0.par * 2.0); assert.equal(c.battleGrade().grade, "S");
+  assert.equal(c.battleGrade().xpMult, 2);
+  // 敌人死了被移出场，基准分不变
+  st.units = st.units.filter(u => u.isPlayer);
+  assert.equal(c.battleGrade().par, g0.par);
+});
+
+test("评分：行动打进失衡 +50，协助格挡成功 +30，给其他友方的治疗按点数加分", () => {
+  const { c, st, kolt } = field();
+  c.resetBattleRecords();
+  const foe = st.units.find(u => !u.isPlayer);
+  foe.zone = 1; foe.def = 1;
+  c.trackHealBy(kolt, () => {
+    c.dealTo(kolt, foe, { atk: 0, mult: 0, flat: 1, element: "physical", baseBreak: 1, flags: { action: true, blockResolved: true } });
+  });
+  assert.equal(foe.stunned, true);
+  assert.equal(st.battleScore.parts.stagger, 50);
+  const ruby = c.findKit("ruby", st.units);
+  ruby.layers.forEach(l => { l.current = Math.max(1, l.current - 5); });
+  const r0 = c.totalHp(ruby);
+  c.trackHealBy(kolt, () => c.healUnit(ruby, 3));
+  assert.equal(st.battleScore.parts.heal, c.totalHp(ruby) - r0);
+});
+
+test("评分：协助格挡成功 +30（记在格挡的人身上）", () => {
+  const { c, st, kolt } = field();
+  c.resetBattleRecords();
+  const ruby = c.findKit("ruby", st.units);
+  const foe = st.units.find(u => !u.isPlayer);
+  foe.zone = 1; kolt.zone = 1; ruby.zone = 1;
+  st.combatPhase = "enemy";
+  ruby.bonus = 1;
+  c.dealTo(foe, kolt, { atk: 0, mult: 0, flat: 5, element: "physical", baseBreak: 1, flags: { action: true } });
+  assert.ok(st.blockQueue.length, "应该在等格挡");
+  c.finishBlock(ruby.id, { roll: 1, ok: true, chance: 50 });
+  assert.equal(st.battleScore.parts.block, 30);
+  assert.equal(st.battleStats[ruby.id].score, 30);
+});

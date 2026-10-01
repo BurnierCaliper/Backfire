@@ -567,7 +567,11 @@ function explodeHigh(unit) {
   appendLog(`【高能自爆】${unit.name} 高能值 ${he} ≥ 当前生命 ${lifeBefore}，立即秒杀。余波只打同阵营与无阵营配置物，${aoe} 能量。`);
   // 画面：专门的「高能自爆」演出（大字、震屏、爆炸声、大号数字），溢出部分显示成负血量
   spawnPopup(unit, { kind: "highboom", value: he, text: String(aoe), element: "energy" });
-  if (!unit.isPlayer) { unit.overkill = Math.max(0, he - lifeBefore); unit.killBig = true; }
+  if (!unit.isPlayer) {
+    unit.overkill = Math.max(0, he - lifeBefore); unit.killBig = true;
+    const acc = state.actionAcc;
+    if (acc && acc.actorIsPlayer) addScore("overkill", Math.floor(unit.overkill * SCORE_RULES.overkill), unitById(acc.actorId));
+  }
   (unit.layers || []).forEach(l => { l.current = 0; });
   if (unit.isPlayer && !isWeaponUnit(unit)) {
     unit.dying = true;
@@ -1997,18 +2001,81 @@ function battleStat(u) {
   s.name = u.name;
   return s;
 }
-/** 包住一次行动：结束后把其他友方多出来的血量 / 护盾记成 actor 的治疗量 */
+/* ===== 战斗评分（像鬼泣那样，鼓励打得华丽） =====
+ * 分值都在 SCORE_RULES；评价按「得分 ÷ 这场的基准分」分段（SCORE_GRADES），
+ * 基准分 = 出现过的敌人的总血量 + 击杀它们的奖励分，所以敌人等级、数量不同也能公平比较。 */
+const SCORE_RULES = {
+  dmg: 1,          // 每点伤害（含连带伤害）
+  heal: 1,         // 每点给其他友方的治疗 / 护盾
+  brk: 10,         // 每点击破
+  stagger: 50,     // 打出失衡
+  block: 30,       // 协助格挡成功
+  overkill: 1.5,   // 打死敌人时溢出的每点伤害（向下取整）
+  kill: { minion: 20, elite: 100, boss: 300 }
+};
+// [评价, 至少几倍基准分, 战斗经验倍率]
+const SCORE_GRADES = [["S", 2.0, 2], ["A", 1.6, 1.5], ["B", 1.2, 1.2], ["C", 0, 1]];   // 用无界面对打校准：只会普攻的自动打法中位数约 1.3 倍（B）
+const SCORE_PART_NAMES = { dmg: "伤害", heal: "治疗 / 护盾", brk: "击破", stagger: "打出失衡", block: "协助格挡成功", overkill: "溢出伤害", kill: "击杀" };
+function addScore(kind, pts, u) {
+  pts = Math.floor(Number(pts) || 0);
+  if (pts <= 0) return;
+  state.battleScore = state.battleScore || { total: 0, parts: {} };
+  state.battleScore.total += pts;
+  state.battleScore.parts[kind] = (state.battleScore.parts[kind] || 0) + pts;
+  const st = battleStat(u);
+  if (st) st.score = (st.score || 0) + pts;
+}
+/** 每场战斗开始时清空：战场数据、评分、这场的经验 / 掉落 */
+function resetBattleRecords() {
+  state.battleStats = {};
+  state.battleScore = { total: 0, parts: {} };
+  state.scoreSeen = {};
+  state.battleGains = { xp: 0, kuizhi: 0 };
+}
+/** 这场的基准分：把出现过的每个敌人（含中途召唤的）「打空血、打空一次架势、打进一次失衡、击杀」的分加起来，
+ *  按第一次见到时的数值算。这样架势高的敌人、血厚的敌人都在同一把尺子上。 */
+function scorePar() {
+  state.scoreSeen = state.scoreSeen || {};
+  (state.units || []).forEach(u => {
+    if (u.isPlayer || u.kit === "ironwall" || state.scoreSeen[u.id] != null) return;
+    const hp = (u.layers || []).reduce((a, l) => a + (Number(l.max) || 0), 0);
+    const rank = typeof enemyRankOf === "function" ? enemyRankOf(u) : "minion";
+    const posture = Math.max(0, Number(u.defMax) || 0);
+    state.scoreSeen[u.id] = hp * SCORE_RULES.dmg + posture * SCORE_RULES.brk + (posture > 0 ? SCORE_RULES.stagger : 0) + (SCORE_RULES.kill[rank] || 0);
+  });
+  return Object.values(state.scoreSeen).reduce((a, n) => a + n, 0);
+}
+function battleGrade() {
+  const score = state.battleScore ? state.battleScore.total : 0;
+  const par = Math.max(1, scorePar());
+  const ratio = score / par;
+  const g = SCORE_GRADES.find(x => ratio >= x[1]) || SCORE_GRADES[SCORE_GRADES.length - 1];
+  const i = SCORE_GRADES.indexOf(g);
+  const next = i > 0 ? SCORE_GRADES[i - 1] : null;
+  return { grade: g[0], xpMult: g[2], score, par, ratio, next: next ? { grade: next[0], need: Math.ceil(next[1] * par) } : null,
+    floor: Math.ceil(g[1] * par), parts: Object.assign({}, (state.battleScore || {}).parts) };
+}
+
+/** 包住一次行动：结束后
+ *  · 其他友方多出来的血量 / 护盾记成 actor 的治疗量（并计分）；
+ *  · 这一下新打进失衡的敌人，每个 +50 分 */
 function trackHealBy(actor, fn) {
   const st = actor && actor.isPlayer ? battleStat(actor) : null;
   if (!st) return fn();
   const hpNow = (u) => (u.layers || []).reduce((a, l) => a + Math.max(0, Number(l.current) || 0), 0);
   const before = new Map();
-  (state.units || []).forEach(u => { if (u.isPlayer && u !== actor && !u.hidden && !u.dead) before.set(u.id, hpNow(u)); });
+  const calm = new Set();
+  (state.units || []).forEach(u => {
+    if (u.isPlayer && u !== actor && !u.hidden && !u.dead) before.set(u.id, hpNow(u));
+    if (!u.isPlayer && !u.dead && !u.stunned) calm.add(u.id);
+  });
   try { return fn(); } finally {
     (state.units || []).forEach(u => {
-      if (!before.has(u.id) || u === actor) return;
-      const gain = hpNow(u) - before.get(u.id);
-      if (gain > 0) st.heal += gain;
+      if (before.has(u.id) && u !== actor) {
+        const gain = hpNow(u) - before.get(u.id);
+        if (gain > 0) { st.heal += gain; addScore("heal", gain * SCORE_RULES.heal, actor); }
+      }
+      if (calm.has(u.id) && u.stunned && !u.dead) addScore("stagger", SCORE_RULES.stagger, actor);
     });
   }
 }
@@ -2035,8 +2102,9 @@ function noteSideDamage(amount, label, unit) {
   acc.sideBy[key] = (acc.sideBy[key] || 0) + n;
   // 战场数据：我方行动引发、落在敌人身上的连带伤害，算出手的人
   if (acc.actorIsPlayer && !(unit && unit.isPlayer)) {
-    const st = battleStat(unitById(acc.actorId));
-    if (st) st.dmg += n;
+    const who = unitById(acc.actorId);
+    const st = battleStat(who);
+    if (st) { st.dmg += n; addScore("dmg", n * SCORE_RULES.dmg, who); }
   }
 }
 
@@ -3269,6 +3337,8 @@ function settleEnemyKill(target, notes) {
     const killer = unitById(target._lastHitBy) || (acc && acc.actorIsPlayer ? unitById(acc.actorId) : null);
     const st = battleStat(killer);
     if (st) st.kills += 1;
+    // 评分：敌人倒下就算（谁打的都算全队的分；能归到人的记在那个人身上）
+    if (target.kit !== "ironwall") addScore("kill", SCORE_RULES.kill[enemyRankOf(target)] || SCORE_RULES.kill.minion, killer);
   }
   const rank = ENEMY_RANK[target.kit] || "minion";
   // 跑团模式：手册「遭遇战敌人先动，经验双倍；困难遭遇三倍」，由主持人在战斗顶栏选
@@ -4486,6 +4556,7 @@ function finishBlockInner(helperId, forced) {
     const helper = unitById(helperId);
     const out = performAssistBlock(helper, target, attacker, forced);
     appendLog(out.notes.join("\n"));
+    if (out.ok && helper && helper.isPlayer) addScore("block", SCORE_RULES.block, helper);   // 评分：协助格挡成功
     opt.flags.block = out.ok ? (out.bare ? "bareOk" : "assistOk") : "fail";
     if (out.ok && !out.bare) opt.flags.blockHelperId = helperId;
   } else {
@@ -5243,7 +5314,11 @@ function dealTo(attacker, target, opt) {
     // 战场数据
     if (attacker && target && attacker.isPlayer && !target.isPlayer) {
       const st = battleStat(attacker);
-      if (st) { st.dmg += Math.floor(Number(res.total) || 0); st.brk += Number(res.breakDealt) || 0; }
+      if (st) {
+        st.dmg += Math.floor(Number(res.total) || 0); st.brk += Number(res.breakDealt) || 0;
+        addScore("dmg", Math.floor(Number(res.total) || 0) * SCORE_RULES.dmg, attacker);
+        addScore("brk", (Number(res.breakDealt) || 0) * SCORE_RULES.brk, attacker);
+      }
     }
     if (target && target.isPlayer) {
       const st = battleStat(target);
@@ -5253,6 +5328,7 @@ function dealTo(attacker, target, opt) {
     if (target && !target.isPlayer && (target.dead || totalHp(target) <= 0) && (res.intended || 0) > 0) {
       const over = Math.max(0, (res.intended || 0) - (res.total || 0));
       if (over > 0) target.overkill = (Number(target.overkill) || 0) + over;
+      if (over > 0 && attacker && attacker.isPlayer) addScore("overkill", Math.floor(over * SCORE_RULES.overkill), attacker);
       const maxHp = (target.layers || []).reduce((a, l) => a + (Number(l.max) || 0), 0);
       if ((res.intended || 0) >= maxHp * 0.5) target.killBig = true;
     }

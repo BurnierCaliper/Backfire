@@ -528,6 +528,35 @@ test("战场数据：攻击后能在面板里看到伤害 / 击破，开着面�
   assert.deepEqual(o.errors, []);
 });
 
+test("战斗评分：右上角显示评价并随得分变化；胜利时按评价加战斗经验（S ×2）", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await newTrpg(page);
+  await startBattle(page, () => {
+    Math.random = () => 0.999;
+    const foes = state.units.filter(u => !u.isPlayer);
+    state.units = state.units.filter(u => u.isPlayer || u === foes[0]);
+    foes[0].layers.forEach(l => { l.current = 1; });
+  });
+  assert.ok(await page.isVisible("#g-rank"));
+  assert.equal((await page.textContent("#g-rank .rk-grade")).trim(), "C");
+  await page.evaluate(() => { state.battleScore.total += 100000; });   // 直接给到 S
+  await selectHero(page, "ruby");
+  await attackFirstFoe(page).catch(() => {});
+  await page.waitForFunction(() => GAME.ended, null, { timeout: 15000 });
+  assert.equal((await page.textContent("#g-rank .rk-grade")).trim(), "S");
+  await page.waitForSelector("#g-result.show");
+  assert.match(await page.textContent("#g-result .grade-badge"), /S/);
+  assert.match(await page.textContent("#g-result p"), /战斗经验 ×2，每人额外 \+\d+/);
+  const xp = await page.evaluate(() => partyHeroes().map(h => h.xp));
+  // 狂徒 lv1 = 5 经验，4 人平分每人 2；S 再翻一倍 → 每人 4
+  assert.deepEqual(xp, [4, 4, 4, 4]);
+  await page.click("#g-explore-back");
+  const last = await page.evaluate(() => [...document.querySelectorAll("#tr-log li")].pop().innerText);
+  assert.match(last, /评价 S/);
+  assert.deepEqual(o.errors, []);
+});
+
 test("音效：七种属性都能合成，有声、不削顶、不出错", async (t) => {
   const o = await open(t); if (!o) return;
   const r = await o.page.evaluate(async () => {
