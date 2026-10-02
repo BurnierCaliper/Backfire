@@ -342,6 +342,7 @@ test("评分：速杀奖励——1 / 2 / 3 回合内打完，整场分数 ×2 / 
   const run = (turn) => {
     c.resetBattleRecords();
     st.battleScore.total = 1000; st.turnNo = turn;
+    st.battleScore.hurt = true;   // 只看速杀，不吃无伤奖励
     const extra = c.applySpeedBonus();
     c.applySpeedBonus();
     return [extra, st.battleScore.total];
@@ -351,6 +352,36 @@ test("评分：速杀奖励——1 / 2 / 3 回合内打完，整场分数 ×2 / 
   assert.deepEqual(run(3), [200, 1200]);
   assert.deepEqual(run(4), [0, 1000]);
   assert.equal(st.battleScore.parts.speed || 0, 0);
+});
+
+test("评分：无伤奖励——我方没受伤：+100 再把倍率 +0.5，和速杀加算", () => {
+  const { c, st } = field();
+  const run = (turn, hurt) => {
+    c.resetBattleRecords();
+    st.battleScore.total = 1000; st.turnNo = turn;
+    if (hurt) st.battleScore.hurt = true;
+    const r = c.applyFinishBonus();
+    c.applyFinishBonus();   // 只算一次
+    return [r.mult, st.battleScore.total, st.battleScore.parts.flawless || 0, st.battleScore.parts.speed || 0];
+  };
+  assert.deepEqual(run(1, false), [2.5, 2750, 650, 1100]);    // (1000+100) × (1 + 1 + 0.5)
+  assert.deepEqual(run(2, false), [2, 2200, 650, 550]);       // (1000+100) × (1 + 0.5 + 0.5)
+  assert.deepEqual(run(3, false), [1.7, 1870, 650, 220]);
+  assert.deepEqual(run(5, false), [1.5, 1650, 650, 0]);
+  assert.deepEqual(run(1, true), [2, 2000, 0, 1000]);
+});
+
+test("评分：我方任何单位受到伤害（含护盾）就没有无伤奖励；敌人受伤不算", () => {
+  const { c, st, kolt } = field();
+  c.resetBattleRecords();
+  const foe = st.units.find(u => !u.isPlayer);
+  foe.zone = 1;
+  c.dealTo(kolt, foe, { atk: 3, mult: 1, element: "physical", baseBreak: 0, flags: { action: true } });
+  assert.ok(!st.battleScore.hurt, "打敌人不算我方受伤");
+  const ruby = c.findKit("ruby", st.units);
+  c.applyTypedDot(ruby, 2, "fire", [], "测试");
+  assert.equal(st.battleScore.hurt, true);
+  assert.equal(c.applyFinishBonus().flawless, false);
 });
 
 test("评分：大伤害加成——到门槛（目标等级×2+8）+10%，到门槛两倍及以上 +25%，中间线性；和克制加算", () => {

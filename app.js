@@ -2024,6 +2024,9 @@ const SCORE_RULES = {
 const SCORE_FATIGUE = [0, 0, 0.10, 0.25, 0.40];
 // 速杀奖励：胜利时整场分数再乘一次。[几回合内（含）, 倍率]
 const SCORE_SPEED = [[1, 2], [2, 1.5], [3, 1.2]];
+// 无伤奖励：胜利、且整场我方（角色、武器人）没有受到任何伤害（护盾被打也算受伤）：先 +100 分，
+// 再把整场分数的倍率 +0.5。和速杀的倍率加算：1 回合无伤 = ×(1 + 1 + 0.5) = ×2.5
+const SCORE_FLAWLESS = { points: 100, mult: 0.5 };
 // 一击的加分倍率：各项加算（1 + 0.25 + …），乘在这一击产生的所有分数上
 const SCORE_BONUS = {
   advantage: 0.25,  // 触发属性克制：这一击的伤害 / 击破 / 溢出 / 由它打出的失衡和击杀分 +25%
@@ -2040,7 +2043,7 @@ function bigHitInfo(level, dmg) {
 }
 // [评价, 至少几倍基准分, 战斗经验倍率]
 const SCORE_GRADES = [["S", 2.6, 2], ["A", 2.15, 1.5], ["B", 1.65, 1.2], ["C", 0, 1]];   // 用无界面对打校准（含行动分、速杀奖励）：只会普攻的自动打法中位数约 1.8 倍（B）
-const SCORE_PART_NAMES = { dmg: "伤害", heal: "治疗 / 护盾", brk: "击破", stagger: "打出失衡", block: "协助格挡成功", overkill: "溢出伤害", kill: "击杀", bonus: "克制 / 大伤害加成", action: "行动", speed: "速杀奖励", fatigue: "招式疲劳（扣分）" };
+const SCORE_PART_NAMES = { dmg: "伤害", heal: "治疗 / 护盾", brk: "击破", stagger: "打出失衡", block: "协助格挡成功", overkill: "溢出伤害", kill: "击杀", bonus: "克制 / 大伤害加成", action: "行动", speed: "速杀奖励", flawless: "无伤奖励", fatigue: "招式疲劳（扣分）" };
 /** 这个角色这回合用这个技能，算连续第几个回合（不改记录）。
  *  上回合用过 → 上回合的连续数 + 1；这回合已经用过 → 和这回合第一次一样；否则 1 */
 function fatigueStreak(u, skillId) {
@@ -2091,20 +2094,40 @@ function scoreSpend(u, ap, bonus) {
   addScore("action", (Number(ap) || 0) * SCORE_RULES.ap + (Number(bonus) || 0) * SCORE_RULES.bonusAction, u);
 }
 /** 胜利时的速杀奖励：第 N 回合内打完，整场分数 ×倍率（多出来的记成「速杀奖励」）。只结算一次 */
-function applySpeedBonus() {
+/** 我方有单位受到了伤害（applyCombat 里记，所有伤害都走那里） */
+function markPartyHurt(target, result) {
+  if (!target || !target.isPlayer || !result) return;
+  if ((Number(result.total) || 0) + (Number(result.shpDealt) || 0) <= 0) return;
   state.battleScore = state.battleScore || { total: 0, parts: {} };
-  if (state.battleScore.speedDone) return 0;
-  state.battleScore.speedDone = true;
+  state.battleScore.hurt = true;
+}
+/** 胜利结算：速杀（1 / 2 / 3 回合内）与无伤奖励。无伤先 +100 分；两者的倍率加算后乘在整场分数上。只算一次。
+ *  返回 { extra 总共多出来的分, mult 最终倍率, speedMult, flawless, speed / flawlessPts 各自多出来的分 } */
+function applyFinishBonus() {
+  state.battleScore = state.battleScore || { total: 0, parts: {} };
+  const bs = state.battleScore;
+  const none = { extra: 0, mult: 1, speedMult: 1, flawless: false, speed: 0, flawlessPts: 0 };
+  if (bs.speedDone) return none;
+  bs.speedDone = true;
   const turns = Number(state.turnNo) || 1;
   const hit = SCORE_SPEED.find(([n]) => turns <= n);
-  if (!hit) return 0;
-  const extra = Math.floor(state.battleScore.total * hit[1] + 1e-6) - state.battleScore.total;   // 1e-6：避免 1000×1.2 算成 1199.999…
-  if (extra <= 0) return 0;
-  state.battleScore.total += extra;
-  state.battleScore.parts.speed = (state.battleScore.parts.speed || 0) + extra;
-  state.battleScore.speedMult = hit[1];
-  return extra;
+  const speedMult = hit ? hit[1] : 1;
+  const flawless = !bs.hurt;
+  const base = bs.total + (flawless ? SCORE_FLAWLESS.points : 0);
+  const mult = 1 + (speedMult - 1) + (flawless ? SCORE_FLAWLESS.mult : 0);
+  // 1e-6：避免 1000×1.2 算成 1199.999…
+  const speed = Math.floor(base * (speedMult - 1) + 1e-6);
+  const flawlessPts = flawless ? SCORE_FLAWLESS.points + Math.floor(base * SCORE_FLAWLESS.mult + 1e-6) : 0;
+  if (speed > 0) bs.parts.speed = (bs.parts.speed || 0) + speed;
+  if (flawlessPts > 0) bs.parts.flawless = (bs.parts.flawless || 0) + flawlessPts;
+  bs.total += speed + flawlessPts;
+  bs.speedMult = speedMult;
+  bs.finishMult = mult;
+  bs.flawless = flawless;
+  return { extra: speed + flawlessPts, mult, speedMult, flawless, speed, flawlessPts };
 }
+/** 旧接口：返回多出来的分 */
+function applySpeedBonus() { return applyFinishBonus().extra; }
 /** 加分。bonus：这一击的额外倍率之和（例如克制 0.25），多出来的部分单独记成「克制加成」 */
 function addScore(kind, pts, u, bonus) {
   pts = Math.floor(Number(pts) || 0);
@@ -3151,6 +3174,7 @@ function applyCombat(target, result, attacker) {
     aggArmorBefore = armorL ? Number(armorL.current) || 0 : 0;
   }
   notes.push(...applyResultToUnit(target, result, attacker));
+  markPartyHurt(target, result);
   maybeUnstableTrip(target, notes);
   if (target.kit === "ufo_leg") {
     target.stunned = false;

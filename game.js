@@ -1838,10 +1838,11 @@
     const retreated = G.lastOutcome === "retreat";
     box.querySelector("h2").textContent = retreated ? "撤退" : win ? "胜利" : "全员倒地";
     box.querySelector("h2").className = win ? "win" : "lose";
-    // 战斗评分：胜利时先算速杀奖励（1 / 2 / 3 回合内打完，整场分数 ×2 / ×1.5 / ×1.2），再定评价
-    if (G.lastOutcome === "win" && typeof applySpeedBonus === "function") {
-      const sp = applySpeedBonus();
-      if (sp > 0) addLogPhase(`速杀奖励：第 ${state.turnNo} 回合打完，分数 ×${state.battleScore.speedMult}（+${sp}）`);
+    // 战斗评分：胜利时先算速杀（1 / 2 / 3 回合内 ×2 / ×1.5 / ×1.2）和无伤（+100，倍率 +0.5，与速杀加算），再定评价
+    if (G.lastOutcome === "win" && typeof applyFinishBonus === "function") {
+      const fb = applyFinishBonus();
+      const what = [fb.speedMult > 1 ? `速杀（第 ${state.turnNo} 回合打完）×${fb.speedMult}` : "", fb.flawless ? `无伤 +${SCORE_FLAWLESS.points}、×${1 + SCORE_FLAWLESS.mult}` : ""].filter(Boolean);
+      if (fb.extra > 0) addLogPhase(`${what.join(" + ")}：整场分数 ×${fb.mult}（+${fb.extra}）`);
     }
     // 按评价把这场的战斗经验乘上去（S ×2 / A ×1.5 / B ×1.2 / C ×1）
     const gr = typeof battleGrade === "function" ? battleGrade() : null;
@@ -2225,7 +2226,7 @@
       const parts = Object.keys(SCORE_PART_NAMES).filter(k => gr.parts[k]).map(k => k === "fatigue" ? `招式疲劳 −${gr.parts[k]}` : `${SCORE_PART_NAMES[k]} ${gr.parts[k]}`).join(" · ");
       return `<p class="stats-grade"><b class="g-${gr.grade}">评价 ${gr.grade}</b> ${gr.score} 分（这场的基准 ${gr.par} 分，${gr.ratio.toFixed(2)} 倍）${gr.next ? `，距 ${gr.next.grade} 还差 ${Math.max(0, gr.next.need - gr.score)} 分` : ""}<br>${parts || "还没有得分"}</p>`;
     })()}
-    <p class="stats-turn">${state.combatStarted ? `第 ${state.turnNo || 1} 回合` : "还没开战"} · 评价分段：${SCORE_GRADES.map(([g, k, x]) => g === "C" ? `C（经验 ×${x}）` : `${g} ≥ ${k} 倍基准（经验 ×${x}）`).join("、")}。速杀：${SCORE_SPEED.map(([n, m]) => `${n} 回合内 ×${m}`).join(" / ")}（胜利时整场分数再乘）。得分里的击杀、团队分不一定能归到具体某人，所以个人得分加起来可能比总分少。</p>`;
+    <p class="stats-turn">${state.combatStarted ? `第 ${state.turnNo || 1} 回合` : "还没开战"} · 评价分段：${SCORE_GRADES.map(([g, k, x]) => g === "C" ? `C（经验 ×${x}）` : `${g} ≥ ${k} 倍基准（经验 ×${x}）`).join("、")}。速杀：${SCORE_SPEED.map(([n, m]) => `${n} 回合内 ×${m}`).join(" / ")}；无伤（我方没受任何伤害）：+${SCORE_FLAWLESS.points}、倍率 +${SCORE_FLAWLESS.mult}，和速杀倍率加算（胜利时整场分数再乘）${state.battleScore && state.battleScore.hurt ? "。本场已有人受伤" : ""}。得分里的击杀、团队分不一定能归到具体某人，所以个人得分加起来可能比总分少。</p>`;
     $("g-stats-sheet").classList.add("show");
   }
   function statsText() {
