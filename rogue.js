@@ -358,6 +358,7 @@ const Rogue = (function () {
       const u = findKit(h.kit, state.units);
       if (!u) return;
       applyHero(u, h);
+      u.profs = clone(heroProfs(h));   // 战斗里的检定（改写炮台）按本局的熟练等级
       // 耐久为 0 的武器拿在手里也用不了（手册第五章）
       const held = heldWeaponKit(u);
       if (held && weaponBroken(held)) disarmBrokenWeapon(u, notes);

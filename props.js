@@ -148,8 +148,13 @@ const WALL_HP_RANGE = [1, 15];
 function rollWallHp() {
   return WALL_HP_RANGE[0] + Math.floor(Math.random() * (WALL_HP_RANGE[1] - WALL_HP_RANGE[0] + 1));
 }
+/** 不稳桥梁的耐久：手册「10～30 点，取决于战斗」→ 随机 10–30 */
+const BRIDGE_HP_RANGE = [10, 30];
+function rollBridgeHp() {
+  return BRIDGE_HP_RANGE[0] + Math.floor(Math.random() * (BRIDGE_HP_RANGE[1] - BRIDGE_HP_RANGE[0] + 1));
+}
 function defaultGapHp(type) {
-  if (type === "bridge") return 20;
+  if (type === "bridge") return rollBridgeHp();
   if (type === "wall") return rollWallHp();
   return 0;
 }

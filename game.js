@@ -439,6 +439,15 @@
         cost: { ap: 1 }
       });
     });
+    if (typeof hackableTurrets === "function") hackableTurrets(u).forEach(p => {
+      const odds = turretHackOdds(u);
+      out.push({
+        id: "hack_turret:" + p.id,
+        name: "改写 " + p.name,
+        hint: `同区 · 困难数据操作检定，成功后炮台归我方 · 成功率 ${Math.round(odds.chance * 100)}%`,
+        cost: { ap: 1 }
+      });
+    });
     out.push({ id: "__item", name: "使用道具", hint: "从背包里选一件在战斗中使用。", cost: { bonus: 1 } });
     out.push({ id: "__move", name: "移动", hint: "移动到另一个区域。离开有借机攻击敌人的区域会被追打。", cost: { bonus: 1 } });
     return out;
@@ -455,6 +464,11 @@
     if ((sk.cost.ap || 0) > (u.ap || 0)) return "行动点不足";
     if ((sk.cost.bonus || 0) > (u.bonus || 0)) return "附赠行动不足";
     if (sk.id === "__move" && u.noMove) return "本回合无法移动";
+    if (String(sk.id).indexOf("hack_turret:") === 0 && typeof turretHackError === "function") {
+      const p = (state.props || []).find(x => "hack_turret:" + x.id === sk.id);
+      const why = turretHackError(u, p);
+      if (why) return why;
+    }
     if (typeof skillRequirementError === "function") {
       const why = skillRequirementError(u, sk.id);
       if (why) return why;

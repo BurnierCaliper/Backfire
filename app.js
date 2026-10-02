@@ -356,7 +356,7 @@ function buildGapBox(key) {
 
 function gapStatusText(g) {
   if (g.type === "open") return "可通过，可影响对面。";
-  if (g.type === "bridge") return `通过扣 1d6 耐久。现 ${g.hp}。毁后变空隙。飞行无视。`;
+  if (g.type === "bridge") return `通过扣 1d6 耐久。现 ${g.hp}（手册 10～30）。被攻击时只有击破扣耐久。毁后变空隙。飞行无视。`;
   if (g.type === "wall") return `挡住对面。现耐久 ${g.hp}（手册 1～15）。只有击破扣耐久，伤害打不动；倒向最后一击的另一侧。`;
   if (g.type === "door") return g.open ? "门开着，可通过。" : "门关着，不能通过也不能打对面。";
   if (g.type === "void") return "地面不能过；飞行可过。强行通过需行动点+运动检定。";
@@ -1875,6 +1875,7 @@ function turnEnd() {
   if ((state.props || []).some(p => p.kind === "battery")) {
     notes.push(...refillBatteryFactionShields());
   }
+  releaseButtons(notes);
   notes.push(...advancePhaseWeather());
   settleBossStuns(notes);
   appendLog(notes.join("\n"));
@@ -2797,8 +2798,81 @@ function toggleDevice(p, reason) {
     p.link = key;
   }
   const gap = state.gaps[p.link] || getGap(1, 2);
+  // 按钮：改变状态直到整个回合结束（回合结束时恢复原样），按住期间再按没有效果；拉杆：切换一次
+  if (p.kind === "button") {
+    if (p.held) {
+      appendLog(`${p.name} ${reason || "被操作"}：已经按下了，这一回合结束前保持（间隔 ${p.link} 的门${gap.open ? "打开" : "关闭"}）。`);
+      return;
+    }
+    p.held = true;
+  }
   gap.open = !gap.open;
-  appendLog(`${p.name} ${reason || "被操作"}：间隔 ${p.link} 的门现在${gap.open ? "打开" : "关闭"}。`);
+  appendLog(`${p.name} ${reason || "被操作"}：间隔 ${p.link} 的门现在${gap.open ? "打开" : "关闭"}` +
+    `${p.kind === "button" ? "（到这一回合结束为止）" : ""}。`);
+}
+
+/* ===== 防卫自律炮台：困难数据操作改写阵营 ===== */
+const TURRET_HACK = { prof: "数据操作", diff: 2 };   // diff：ROGUE_CHECKS.chance 的列，2 = 困难
+/** 这个人的某项熟练等级：单局里按本局成长（applyPartyToField 写进 u.profs），否则按角色卡 */
+function unitProfLevel(u, prof) {
+  if (!u) return 0;
+  const own = u.profs || (typeof heroProfile === "function" && heroProfile(u.kit) ? heroProfile(u.kit).profs : null) || {};
+  return Math.max(0, Math.min(typeof PROF_MAX !== "undefined" ? PROF_MAX : 3, Number(own[prof]) || 0));
+}
+/** 改写炮台的成功率：困难检定 + 种族的优势 / 劣势 / 重掷 */
+function turretHackOdds(u) {
+  const level = unitProfLevel(u, TURRET_HACK.prof);
+  const table = typeof ROGUE_CHECKS !== "undefined" ? ROGUE_CHECKS.chance : [[0.5, 0, 0, 0], [1, 0.5, 0.25, 0.125], [1, 1, 0.5, 0.25], [1, 1, 0.75, 0.5]];
+  const base = (table[level] || [])[TURRET_HACK.diff] || 0;
+  const hpLow = totalHp(u) * 2 < totalMaxHp(u);
+  const perks = typeof checkPerksFor === "function" ? checkPerksFor(u.kit, TURRET_HACK.prof, hpLow) : {};
+  let p = perks.adv ? 1 - (1 - base) * (1 - base) : perks.dis ? base * base : base;
+  if (perks.reroll) p = 1 - (1 - p) * (1 - p);
+  return { level, base, chance: base ? p : 0, perks };
+}
+/** 可以改写的炮台：同区、阵营不是自己这边 */
+function hackableTurrets(u) {
+  if (!u || !u.isPlayer) return [];
+  return (state.props || []).filter(p => p.kind === "turret" && p.hp > 0 && p.faction === "enemy" && Number(p.zone) === Number(u.zone));
+}
+function turretHackError(u, p) {
+  if (!p || p.kind !== "turret") return "没有这个炮台。";
+  if (!u) return "先选人。";
+  if (Number(p.zone) !== Number(u.zone)) return "要和炮台同区才能改写。";
+  if (p.faction === (u.isPlayer ? "player" : "enemy")) return "炮台已经是自己这边的了。";
+  if (!turretHackOdds(u).chance) return `${u.name} 没有「${TURRET_HACK.prof}」熟练，做不了困难检定。`;
+  return null;
+}
+/** 掷困难数据操作检定，成功就把炮台改成自己这边 */
+function hackTurret(u, p) {
+  const odds = turretHackOdds(u);
+  const roll = () => Math.random() < odds.base;
+  let ok;
+  if (odds.perks.adv) ok = roll() || roll();
+  else if (odds.perks.dis) ok = roll() && roll();
+  else ok = roll();
+  let rerolled = false;
+  if (!ok && odds.perks.reroll) { rerolled = true; ok = odds.perks.adv ? (roll() || roll()) : odds.perks.dis ? (roll() && roll()) : roll(); }
+  const lines = [`${u.name} 尝试改写 ${p.name}：困难「${TURRET_HACK.prof}」检定（${["没有熟练", "一级熟练", "二级熟练", "三级熟练"][odds.level]}，成功率 ${Math.round(odds.chance * 100)}%）${rerolled ? "，失败后重掷" : ""}。`];
+  if (ok) {
+    p.faction = u.isPlayer ? "player" : "enemy";
+    p.name = propKindName(p.kind);
+    lines.push(`成功：${p.name} 改写为${p.faction === "player" ? "我方" : "敌方"}阵营，回合结束时攻击对面。`);
+  } else {
+    lines.push("失败：炮台的阵营没有变。");
+  }
+  return lines;
+}
+
+/** 回合结束：按下的按钮弹起，门恢复 */
+function releaseButtons(notes) {
+  (state.props || []).filter(p => p.kind === "button" && p.held).forEach(p => {
+    p.held = false;
+    const gap = state.gaps[p.link];
+    if (!gap || gap.type !== "door") return;
+    gap.open = !gap.open;
+    notes.push(`${p.name} 弹起：间隔 ${p.link} 的门恢复${gap.open ? "打开" : "关闭"}。`);
+  });
 }
 
 function gMissingDoor(p) {
@@ -2893,14 +2967,10 @@ function hitStructureCore(attacker, targetToken, opt) {
     const br = Math.max(0, Math.floor(Number(opt.brk != null ? opt.brk : 1) || 0));
     g.lastFrom = attacker ? attacker.zone : 1;   // 手册：摧毁方向只看最后一击来源区域
     const before = Number(g.hp) || 0;
-    if (g.type === "wall") {
-      // 手册：危墙「受到击破时损失等量耐久值」——伤害打不动它，只有击破算
-      g.hp = Math.max(0, g.hp - br);
-      notes.push(`攻击间隔 ${key}（危墙）：击破 ${br} → 耐久 ${g.hp}${br ? "" : "（伤害打不动危墙，要靠击破）"}`);
-    } else {
-      g.hp = Math.max(0, g.hp - dmg - br);
-      notes.push(`攻击间隔 ${key}（${gapLabel(g.type)}）：耐久 −${dmg} 伤害 −${br} 击破 → ${g.hp}`);
-    }
+    // 危墙、不稳桥梁：受到击破时损失等量耐久值——伤害打不动，只有击破算
+    void dmg;
+    g.hp = Math.max(0, g.hp - br);
+    notes.push(`攻击间隔 ${key}（${gapLabel(g.type)}）：击破 ${br} → 耐久 ${g.hp}${br ? "" : `（伤害打不动${gapLabel(g.type)}，要靠击破）`}`);
     popStructure(targetToken, g.level, before - g.hp, opt.element, "打不动");
     if (g.hp <= 0) notes.push(...destroyGap(key, g));
   } else if (String(targetToken).indexOf("prop:") === 0) {
@@ -2982,6 +3052,8 @@ function destroyGap(key, g) {
   return notes;
 }
 
+/** 写了血量类型的配置物：被打时按属性克制表算倍率 */
+const PROP_HP_TYPE = { battery: "armor", turret: "armor" };
 function damageProp(p, opt, attacker) {
   const notes = [];
   const element = opt.element || "physical";
@@ -3004,9 +3076,17 @@ function damageProp(p, opt, attacker) {
     return notes;
   } else {
     lose = Math.max(1, Math.floor(opt.dmg || 5));
+    // 写了血量类型的配置物（电池、炮台是装甲生命值）照属性克制表算倍率
+    const type = PROP_HP_TYPE[p.kind];
+    const m = type && CHART[element] ? 1 + (Number(CHART[element][type]) || 0) : 1;
+    if (m !== 1) {
+      const raw = lose;
+      lose = Math.max(0, Math.floor(raw * m + 1e-6));
+      notes.push(`${p.name}是${LAYER[type] || type}生命：${ELE[element] || element}属性 ×${m}（${raw} → ${lose}）。`);
+    }
   }
   if (lose <= 0) {
-    notes.push(`${p.name} 只怕火焰、能量和雷电：${ELE[element] || element}属性打不动它。`);
+    notes.push(p.kind === "boom" ? `${p.name} 只怕火焰、能量和雷电：${ELE[element] || element}属性打不动它。` : `${p.name} 没有受到伤害。`);
     return notes;
   }
   p.hp = Math.max(0, p.hp - lose);
@@ -7675,6 +7755,16 @@ function runSkillInner(id, optRun) {
       : (state.combatPhase === "enemy" ? "现在是敌人回合，不能操作玩家技能。" : "现在是玩家回合，不能操作敌人技能。"));
     return;
   }
+  if (String(id).indexOf("hack_turret:") === 0) {
+    const pid = id.slice("hack_turret:".length);
+    const p = (state.props || []).find(x => x.id === pid);
+    const why = turretHackError(a, p);
+    if (why) { paintSkillLog(why); return; }
+    if (a.isPlayer && !spendAp(a, 1, "改写炮台")) return;
+    paintSkillLog(hackTurret(a, p).join("\n"));
+    renderAll();
+    return;
+  }
   if (String(id).indexOf("use_device:") === 0) {
     const pid = id.slice("use_device:".length);
     const p = (state.props || []).find(x => x.id === pid);
@@ -8493,7 +8583,11 @@ function runSkillInner(id, optRun) {
     } else if (id === "mint_banish") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       if (!t.kind) hitOne(a, t, { element: "electric", mult: 0.5, hits: 2, baseBreak: 1, breakOnce: true, atk, onConnect: { dest: otherZone(t.zone), reason: "被驱逐" } });
-      else displaceTo(t, otherZone(t.zone), lines, "被驱逐");
+      else {
+        // 配置物和单位一样：先吃这一下（两次 0.5atk 电），没被打坏就推开 1 格
+        if (typeof damageProp === "function") lines.push(...damageProp(t, { element: "electric", dmg: Math.floor(atk), brk: 1 }, a));
+        if ((state.props || []).includes(t)) displaceTo(t, otherZone(t.zone), lines, "被驱逐");
+      }
     } else if (id === "yuito_espresso") {
       const fl = state.skillFlow;
       const mode = fl && fl.picks.mode;
@@ -8807,10 +8901,12 @@ function runSkillInner(id, optRun) {
     } else if (id === "role_rearrange") {
       if (!roleOnce(a, "rearrange", 1)) lines.push("重整本场已用完。");
       else {
-        fieldUnits().filter(u => zoneDist(a.zone, u.zone, state.zoneMode) <= 1 && u.id !== a.id).forEach(u => {
-          const dest = otherZone(u.zone);
-          if (Math.abs(Number(dest) - Number(u.zone)) === 1) displaceTo(u, dest, lines, "被重整");
-        });
+        fieldUnits().filter(u => zoneDist(a.zone, u.zone, state.zoneMode) <= 1 && u.id !== a.id)
+          .concat((state.props || []).filter(p => p.movable && zoneDist(a.zone, p.zone, state.zoneMode) <= 1))   // 可移动的配置物也一样
+          .forEach(u => {
+            const dest = otherZone(u.zone);
+            if (Math.abs(Number(dest) - Number(u.zone)) === 1) displaceTo(u, dest, lines, "被重整");
+          });
         lines.push("重整：距离 1 内其他单位各移动 1 区。飞行切换请在单位面板手动改。");
       }
     } else if (id === "role_sturdy") {

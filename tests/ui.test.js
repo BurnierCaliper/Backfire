@@ -136,6 +136,26 @@ test("战斗：需要目标的技能先等选目标，点敌人才出手并扣�
   assert.deepEqual(o.errors, []);
 });
 
+test("战斗：和敌方炮台同区时有「改写」按钮，点了花 1 行动点做检定", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await newTrpg(page);
+  await startBattle(page, () => {
+    const ruby = state.units.find(u => u.kit === "ruby");
+    const p = makeProp("turret", ruby.zone, 1);
+    p.faction = "enemy";
+    state.props.push(p);
+  });
+  const ruby = await selectHero(page, "ruby");
+  const ap0 = await apOf(page, ruby);
+  const btn = page.locator("#g-skills button.sk", { hasText: "改写" });
+  assert.equal(await btn.count(), 1);
+  await btn.click();
+  await page.waitForFunction(([i, a]) => state.units.find(u => u.id === i).ap < a && GAME.depth === 0, [ruby, ap0]);
+  assert.match(await page.evaluate(() => state.logPages.map(p => p.lines.map(l => l.text || l).join("\n")).join("\n")), /困难「数据操作」检定/);
+  assert.deepEqual(o.errors, []);
+});
+
 test("战斗：危墙可以选为目标，打一下扣行动点、耐久下降", async (t) => {
   const o = await open(t); if (!o) return;
   const { page } = o;

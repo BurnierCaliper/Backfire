@@ -95,10 +95,16 @@ test("范围攻击波及按钮所在区：触发一次（多个目标也只触�
   c.bagAdd("bomb_e", 2);
   c.useItemOn(ruby, "bomb_e", null, 1);
   assert.equal(door(), true);
-  // 没人的区也会炸到按钮
-  st.units.filter(u => !u.isPlayer).forEach(u => { u.zone = 2; });
+  // 按钮按下后保持到回合结束：同一回合再炸一次没有变化
   c.useItemOn(ruby, "bomb_e", null, 1);
+  assert.equal(door(), true);
+  // 回合结束按钮弹起；下一回合没人的区也会炸到按钮
+  c.endPlayerTurn(); c.endEnemyTurn();
   assert.equal(door(), false);
+  st.units.filter(u => !u.isPlayer).forEach(u => { u.zone = 2; });
+  c.bagAdd("bomb_e", 1);
+  c.useItemOn(ruby, "bomb_e", null, 1);
+  assert.equal(door(), true);
 });
 
 test("场地效果、状态伤害不会触发按钮", () => {
@@ -677,4 +683,103 @@ test("观测鸦：def 每五级 +1（lv4 6、lv9 7）；第一次受到的攻击
   const lines = [];
   c.runEnemyAction("en_watch", w, k, (a, t, o) => { const r = c.dealTo(a, t, o); if (r && r.extra) lines.push(...r.extra); }, lines, () => true);
   assert.equal(k.statuses.high, false, lines.join("\n"));
+});
+
+test("按钮：改变状态直到整个回合结束（开的门下一回合自动关上）；拉杆：切换一次，一直保持", () => {
+  const { c, st, btn, door } = deviceField();
+  c.useDevice(btn);
+  assert.equal(door(), true);
+  c.useDevice(btn);
+  assert.equal(door(), true, "按住期间再按没有效果");
+  c.endPlayerTurn(); c.endEnemyTurn();
+  assert.equal(door(), false, "回合结束门自动关上");
+  const lever = c.makeProp("lever", 1, 1); lever.link = "1-2";
+  st.props.push(lever);
+  c.useDevice(lever);
+  assert.equal(door(), true);
+  c.endPlayerTurn(); c.endEnemyTurn();
+  assert.equal(door(), true, "拉杆切换后一直保持");
+  c.useDevice(lever);
+  assert.equal(door(), false);
+});
+
+test("不稳桥梁：耐久随机 10–30；被攻击时和危墙一样只按击破扣耐久", () => {
+  const { c, st, kolt } = field();
+  const seen = new Set();
+  for (let i = 0; i < 300; i++) { const hp = c.defaultGapHp("bridge"); assert.ok(hp >= 10 && hp <= 30); seen.add(hp); }
+  assert.ok(seen.size > 10, "是随机的");
+  st.gaps["1-2"] = { type: "bridge", hp: 12, maxHp: 12, open: true };
+  c.hitStructureCore(kolt, "gap:1-2", { dmg: 50, brk: 2, element: "physical" });
+  assert.equal(st.gaps["1-2"].hp, 10);
+  c.hitStructureCore(kolt, "gap:1-2", { dmg: 50, brk: 10, element: "physical" });
+  assert.equal(st.gaps["1-2"].type, "void");
+});
+
+test("电池、炮台是装甲生命：被打时照属性克制表算倍率（酸 ×1.5，物理 ×0.75）", () => {
+  const { c, st, kolt } = field();
+  const tur = c.makeProp("turret", 1, 1);
+  const bat = c.makeProp("battery", 1, 1);
+  st.props = [tur, bat];
+  const t0 = tur.hp, b0 = bat.hp;
+  c.hitStructureCore(kolt, "prop:" + tur.id, { dmg: 10, brk: 1, element: "acid" });
+  assert.equal(tur.hp, t0 - 15);
+  c.hitStructureCore(kolt, "prop:" + bat.id, { dmg: 10, brk: 1, element: "physical" });
+  assert.equal(bat.hp, b0 - 7);
+});
+
+test("防卫炮台：同区花 1 行动点做困难数据操作检定，成功后归我方", () => {
+  const c = H.load();
+  c.BattleSim.setup({ party: ["ruby", "kolt"], enemies: [{ id: "thug_knife", lv: 1, zone: 2 }] });
+  c.startCombat();
+  const st = c.S.state;
+  const ruby = c.findKit("ruby", st.units), kolt = c.findKit("kolt", st.units);
+  ruby.zone = 1; kolt.zone = 1;
+  const tur = c.makeProp("turret", 1, 1); tur.faction = "enemy";
+  st.props = [tur];
+  // 柯尔特没有数据操作：做不了
+  assert.match(c.turretHackError(kolt, tur), /数据操作/);
+  // 瑞比数据操作二级：困难 50%，人类失败后重掷 → 75%
+  const odds = c.turretHackOdds(ruby);
+  assert.equal(odds.level, 2);
+  assert.ok(Math.abs(odds.chance - 0.75) < 1e-9);
+  assert.ok(c.hackableTurrets(ruby).includes(tur));
+  // 掷到成功为止（每次 1 行动点）
+  let tries = 0;
+  while (tur.faction === "enemy" && tries < 30) {
+    ruby.ap = 1;
+    st.attackerId = ruby.id;
+    c.runSkill("hack_turret:" + tur.id);
+    assert.equal(ruby.ap, 0, "花 1 行动点");
+    tries++;
+  }
+  assert.equal(tur.faction, "player");
+  assert.equal(c.hackableTurrets(ruby).length, 0, "已经是我方的不能再改");
+  // 不同区不能改
+  tur.faction = "enemy"; ruby.zone = 2;
+  assert.match(c.turretHackError(ruby, tur), /同区/);
+});
+
+test("可移动的配置物能被位移技能移动：拉拽、重整", () => {
+  const c = H.load();
+  c.BattleSim.setup({ party: ["kolt"], enemies: [{ id: "thug_knife", lv: 1, zone: 2 }] });
+  c.startCombat();
+  const st = c.S.state;
+  st.zoneMode = 3;
+  const kolt = c.findKit("kolt", st.units);
+  kolt.zone = 1;
+  const boom = c.makeProp("boom", 2, 1);
+  const tur = c.makeProp("turret", 2, 1);
+  st.props = [boom, tur];
+  const lines = [];
+  assert.equal(c.displaceTo(boom, 1, lines, "被拉拽"), true);
+  assert.equal(boom.zone, 1);
+  assert.equal(c.displaceTo(tur, 1, lines, "被拉拽"), false, "炮台不能移动");
+  assert.equal(tur.zone, 2);
+  // 重整：距离 1 内的单位和可移动的配置物各移 1 区
+  kolt.level = 4;
+  kolt.ap = 1;
+  st.attackerId = kolt.id;
+  st.targetId = null;
+  c.runSkill("role_rearrange");
+  assert.notEqual(boom.zone, 1, "重整把同区的爆炸桶也挪了");
 });
