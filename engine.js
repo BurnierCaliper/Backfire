@@ -1103,7 +1103,7 @@ function scaleHp(v, party) {
   _lastHpParty = partyScaleCount(party);
   return scaleByParty(v, party);
 }
-/* 首领、以及 10 级起的精英的架势（已定）：每个等级都是原来的 60%（向下取整），人数加成也一样打六折。
+/* 首领、以及 10 级起的精英的架势（已定）：每个等级都是原来的 60%（四舍五入），人数加成也一样打六折（四舍五入）。
  * 它们另有晕眩标记：失衡照常，但要攒满 2 个才真正跳过回合（app.js · bossShrugStun）。 */
 const BOSS_POSTURE_MULT = 0.6;
 const ELITE_RULE_MIN_LEVEL = 10;   // 精英从这一级起才用首领的架势 / 晕眩规则
@@ -1119,12 +1119,12 @@ function scaleDefAdd(party, kit, level) {
   else if (typeof ENEMY_RANK !== "undefined" && kit && ENEMY_RANK[kit]) rank = ENEMY_RANK[kit];
   if (rank === "minion") return 0;
   const k = isBossKit(kit, level) ? BOSS_POSTURE_MULT : 1;
-  if (p === 3) return Math.floor((rank === "boss" ? 3 : 2) * k);
-  if (p >= 4) return Math.floor((rank === "boss" ? 6 : 4) * k);
+  if (p === 3) return Math.round((rank === "boss" ? 3 : 2) * k);
+  if (p >= 4) return Math.round((rank === "boss" ? 6 : 4) * k);
   return 0;
 }
 function scaleDef(v, party, kit, level) {
-  const base = isBossKit(kit, level) ? Math.floor((Number(v) || 0) * BOSS_POSTURE_MULT) : (Number(v) || 0);
+  const base = isBossKit(kit, level) ? Math.round((Number(v) || 0) * BOSS_POSTURE_MULT) : (Number(v) || 0);
   return base + scaleDefAdd(party, kit, level);
 }
 

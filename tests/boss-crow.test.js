@@ -48,27 +48,27 @@ test("穴鸦击杀奖励 15 奎支：手册和单局都是", () => {
   assert.equal(c.rollEnemyLoot({ kit: "thug_knife" }), 80, "其他杂兵照旧按三档");
 });
 
-test("首领和 10 级起精英的架势是原来的 60%（向下取整），人数加成也打六折；10 级以下精英和杂兵不变", () => {
+test("首领和 10 级起精英的架势是原来的 60%（四舍五入），人数加成也打六折；10 级以下精英和杂兵不变", () => {
   const c = H.load();
   const preset = (id) => c.enemyPresets().find(p => p.id === id);
   // 亡命之王 lv1 原本 7，lv5 原本 8
   assert.equal(preset("outlaw_king").build(1, 2).defMax, 4);
-  assert.equal(preset("outlaw_king").build(5, 2).defMax, 4);
+  assert.equal(preset("outlaw_king").build(5, 2).defMax, 5, "8 × 0.6 = 4.8 → 5（四舍五入）");
   // 人数加成在开战时补上（rebalanceEnemiesForParty）
   const k4 = preset("outlaw_king").build(1, 2); c.rebalanceEnemiesForParty(4, [k4]);
-  assert.equal(k4.defMax, 4 + 3, "4 人队加成 6 → 3");
+  assert.equal(k4.defMax, 4 + 4, "4 人队加成 6 × 0.6 = 3.6 → 4");
   const k3 = preset("outlaw_king").build(1, 2); c.rebalanceEnemiesForParty(3, [k3]);
-  assert.equal(k3.defMax, 4 + 1, "3 人队加成 3 → 1");
+  assert.equal(k3.defMax, 4 + 2, "3 人队加成 3 × 0.6 = 1.8 → 2");
   // 沙灵聚合体 lv1 原本 11
-  assert.equal(preset("sand_aggregate").build(1, 2).defMax, 6);
-  // 精英 10 级起才打六折：强盗头子 lv9 不变（7），lv10 原本 8 → 4；4 人队加成 4 → 2
+  assert.equal(preset("sand_aggregate").build(1, 2).defMax, 7, "11 × 0.6 = 6.6 → 7");
+  // 精英 10 级起才打六折：强盗头子 lv9 不变（7），lv10 原本 8 → 4.8 → 5；4 人队加成 4 → 2.4 → 2
   assert.equal(preset("bandit_boss").build(1, 2).defMax, 6);
   assert.equal(preset("bandit_boss").build(9, 2).defMax, 7);
-  assert.equal(preset("bandit_boss").build(10, 2).defMax, 4);
+  assert.equal(preset("bandit_boss").build(10, 2).defMax, 5);
   const e9 = preset("bandit_boss").build(9, 2); c.rebalanceEnemiesForParty(4, [e9]);
   assert.equal(e9.defMax, 7 + 4, "10 级以下人数加成照旧");
   const e10 = preset("bandit_boss").build(10, 2); c.rebalanceEnemiesForParty(4, [e10]);
-  assert.equal(e10.defMax, 4 + 2);
+  assert.equal(e10.defMax, 5 + 2);
   // 杂兵不变
   assert.equal(preset("thug_knife").build(1, 2).defMax, 3);
 });
