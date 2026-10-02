@@ -383,7 +383,11 @@ if (process.env.ARENA) {
   });
   levelChoices();
   const partyCopy = JSON.parse(JSON.stringify(run.party));   // 每场开打前还原（输了会永久死亡、被移出队伍）
-  const fullHp = () => { run.party = JSON.parse(JSON.stringify(partyCopy)); run.fallen = []; };
+  const fullHp = () => {
+    run.party = JSON.parse(JSON.stringify(partyCopy)); run.fallen = [];
+    // 武器耐久、武器人伤势、力竭也一起复原：每场都是满状态
+    c.S.LEDGER.dur = {}; c.S.LEDGER.weapons = {}; c.S.LEDGER.hours = 0; c.S.LEDGER.heroes = {};
+  };
   const tally = {};
   for (const kind of ["battle", "elite", "boss"]) {
     tally[kind] = { win: 0, lose: 0, retreat: 0, turns: 0 };
