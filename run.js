@@ -246,7 +246,8 @@ const ENEMY_INFO = {
   // —— 巨人 ——
   giant: { faction: "巨人", regions: ["巨人城"], tokens: 2 },
   // —— 野生动物：只在外城区与沙漠 ——
-  crow: { faction: "野生", regions: ["外城区", "沙漠"], tokens: 1 },
+  // 穴鸦成群出现（4–6 只一群），一群占满一场的 4 枚代币；pack：成群的杂兵，不算精英战
+  crow: { faction: "野生", regions: ["外城区", "沙漠"], tokens: 4, group: [4, 6], pack: true },
   // —— 古代造物：沙漠 ——
   watchcrow: { faction: "古代造物", regions: ["沙漠"], tokens: 2 }
 };
@@ -259,6 +260,12 @@ function alliesOf(faction) {
 }
 
 function enemyInfo(preset) { return ENEMY_INFO[preset] || null; }
+/** 一次出几只：group 可以是固定数，也可以是 [最少, 最多] */
+function groupCount(info) {
+  const g = info && info.group;
+  if (Array.isArray(g)) return g[0] + Math.floor(Math.random() * (g[1] - g[0] + 1));
+  return Number(g) || 1;
+}
 function enemyTokens(preset) {
   const i = enemyInfo(preset);
   return i ? (i.tokens || 1) : 1;
@@ -311,14 +318,14 @@ function rollEncounter(opt) {
     if (!ok.length) break;
     const k = pickOne(ok);
     const info = ENEMY_INFO[k];
-    enemies.push({ preset: k, count: info.group || 1 });
+    enemies.push({ preset: k, count: groupCount(info) });
     left -= enemyTokens(k);
   }
 
   return finishEncounter({
     name: mixed ? `${region}·混战` : `${region}·${faction}`,
     region, faction: mixed ? "混战" : faction,
-    tier: enemies.some(e => enemyTokens(e.preset) >= 2) ? "elite" : "normal",
+    tier: enemies.some(e => enemyTokens(e.preset) >= 2 && !(ENEMY_INFO[e.preset] || {}).pack) ? "elite" : "normal",
     tokens, mixed, extraToken: extra,
     enemies
   }, opt);
@@ -339,7 +346,7 @@ function rollBossEncounter(bossPreset, opt) {
     const ok = pool.filter(k => enemyTokens(k) <= left);
     if (!ok.length) break;
     const k = pickOne(ok);
-    enemies.push({ preset: k, count: ENEMY_INFO[k].group || 1 });
+    enemies.push({ preset: k, count: groupCount(ENEMY_INFO[k]) });
     left -= enemyTokens(k);
   }
   return finishEncounter({

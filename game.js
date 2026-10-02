@@ -2130,6 +2130,7 @@
     state.scoreAct = null;
     state.retreated = false;
     state.lootByRank = null;
+    state.lootByKit = null;
     resetBattleRecords();   // 战场数据、评分、这场的经验 / 掉落
     G.undo = [];   // 这场战斗得到的经验（每人）和掉落，跑团模式写进探索记录
     state.xpMult = Number(($("g-xp-mult") || {}).value) || 1;

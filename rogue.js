@@ -363,6 +363,7 @@ const Rogue = (function () {
     });
     state.exhaustTier = Math.min(3, exhaustTierFromHours(hoursAwake()));
     state.lootByRank = C.lootByRank || null;
+    state.lootByKit = C.lootByKit || null;
     state.weaponMods = weaponModsOf(run);
     if (typeof syncBpAll === "function") syncBpAll();
   }

@@ -87,6 +87,8 @@ const ROGUE_CONFIG = {
   // （杂兵 200 空投蜂群 · 精英 1150 巨人期望 · 首领占位 2300），整体乘 0.4，
   // 让最吃亏的 2 人队掉落也只占收入的四成左右（验算见 tools/economy.js 的「掉落占比」）。
   lootByRank: { minion: 80, elite: 460, boss: 920 },
+  // 个别敌人不按三档、用自己的掉落（成群出现的穴鸦按杂兵给太多）
+  lootByKit: { crow: 15 },
   // 诊所：任务之间回到城里时可以去（节点里也可能遇到，见 ROGUE_NODE_TYPES.clinic）
   campClinic: true,
 

@@ -432,6 +432,7 @@ function propCard(p) {
 
 function statusLine(u) {
   const s = [];
+  if (Number(u.stunMarks) > 0) s.push(`晕眩标记 ${u.stunMarks}/${typeof BOSS_STUN_MARKS !== "undefined" ? BOSS_STUN_MARKS : 2}`);
   if (u.statuses) {
     if (u.statuses.burn > 0) s.push("灼烧×" + u.statuses.burn);
     if (u.statuses.shock) s.push("感电");
@@ -1675,6 +1676,7 @@ function startEnemyPhase() {
       });
     }
   });
+  settleBossStuns(notes);
   state.units.forEach(u => {
     if (u.isPlayer || u.hidden || u.dead) return;
     if (u.stunned) {
@@ -1866,6 +1868,7 @@ function turnEnd() {
     notes.push(...refillBatteryFactionShields());
   }
   notes.push(...advancePhaseWeather());
+  settleBossStuns(notes);
   appendLog(notes.join("\n"));
   beginRound([]);
   startPlayerPhase();
@@ -3713,6 +3716,7 @@ function recoverFromStun(u, notes) {
   notes = notes || [];
   u.stunned = false;
   u._imbalanceLock = false;
+  u._bossStunHeld = false;
   if (u.noPosture || u.kit === "ufo_leg") return;
   if (typeof canRestorePosture === "function" && !canRestorePosture(u)) {
     notes.push(`${u.name} 晕眩结束。千钧：无法恢复架势。`);
@@ -4486,6 +4490,8 @@ function clearStunOnDown(u) {
 
 function queueAssistAttack(breaker, broken) {
   if (!broken) return;
+  // 首领只记了晕眩标记、没真的晕：不给协助攻击
+  if (settleBossStun(broken) === "mark" || (isBossUnit(broken) && !broken.stunned)) return;
   if (typeof isDownProtected === "function" && isDownProtected(broken)) return;
   const hpLeft = typeof totalHp === "function" ? totalHp(broken) : 1;
   if (broken.dead || (hpLeft <= 0 && !broken.upOnShp)) return;
@@ -7383,8 +7389,43 @@ function renderLog() {
   box.scrollTop = box.scrollHeight;
 }
 
+/* ---------- 首领的晕眩标记（已定） ----------
+ * 首领受到任何来源的晕眩（架势被打空、不稳、冰冻……）先记 1 个晕眩标记、架势回满，不晕；
+ * 攒满 BOSS_STUN_MARKS 个才真正晕眩（随后照常跳过回合、给对面协助攻击），晕眩后标记清零。
+ * 拦在 imbalanceLine / queueAssistAttack（几乎所有晕眩都会经过），行动结束、敌人回合开始、回合结束再各扫一遍兜底。 */
+const BOSS_STUN_MARKS = 2;
+function isBossUnit(u) {
+  return !!(u && !u.isPlayer && typeof enemyRankOf === "function" && enemyRankOf(u) === "boss");
+}
+/** 刚被打进晕眩的首领：记标记。返回 "mark"（只记了标记，没晕）、"stun"（真的晕了）或 null（不是首领 / 没晕） */
+function settleBossStun(u, notes) {
+  if (!isBossUnit(u)) return null;
+  if (!u.stunned) { u._bossStunHeld = false; return null; }
+  if (u._bossStunHeld) return "stun";
+  u.stunMarks = (Number(u.stunMarks) || 0) + 1;
+  if (u.stunMarks < BOSS_STUN_MARKS) {
+    u.stunned = false;
+    u._imbalanceLock = false;
+    const cap = typeof postureCap === "function" ? postureCap(u) : (Number(u.defMax) || 0);
+    if (cap > 0) u.def = cap;
+    if (notes) notes.push(bossMarkLine(u));
+    return "mark";
+  }
+  u.stunMarks = 0;
+  u._bossStunHeld = true;
+  return "stun";
+}
+function bossMarkLine(u) {
+  return `【晕眩标记】${u.name} 架势归零，但首领要攒满 ${BOSS_STUN_MARKS} 个标记才会晕眩：标记 ${u.stunMarks}/${BOSS_STUN_MARKS}，架势回满 ${u.def}/${u.defMax}。`;
+}
+/** 兜底：场上所有首领过一遍 */
+function settleBossStuns(notes) {
+  (state.units || []).forEach(u => { if (isBossUnit(u) && !u.dead) settleBossStun(u, notes); });
+}
+
 function imbalanceLine(unit) {
-  return `【失衡】${unit.name} 架势归零，进入失衡。直到其下一次行动前跳过回合。`;
+  if (settleBossStun(unit) === "mark") return bossMarkLine(unit);
+  return `【失衡】${unit.name} 架势归零，进入失衡。直到其下一次行动前跳过回合。${isBossUnit(unit) ? `（攒满 ${BOSS_STUN_MARKS} 个晕眩标记）` : ""}`;
 }
 
 /* ===== 技能使用前提 =====================================================
@@ -7571,6 +7612,7 @@ function runSkill(id, optRun) {
       state.aoePulse = {};            // 只算这一次行动的范围攻击
       const scoreBefore = state.battleScore ? state.battleScore.total : 0;
       trackHealBy(a0, () => runSkillInner(id, optRun));
+      const bossNotes = []; settleBossStuns(bossNotes); if (bossNotes.length) appendLog(bossNotes.join("\n"));
       applyFatigue(a0, id, scoreBefore);   // 招式疲劳：连续几个回合用同一招，这次行动的总得分打折
       flushAoePulse();                // 波及到的按钮 / 拉杆各触发一次（提前 return 的分支也算）
       state.actionAcc = null;         // 行动结束：之后的持续伤害不再算到这个人头上

@@ -1103,18 +1103,26 @@ function scaleHp(v, party) {
   _lastHpParty = partyScaleCount(party);
   return scaleByParty(v, party);
 }
+/* 首领的架势（已定）：每个等级都是原来的 60%（向下取整），人数加成也一样打六折。
+ * 首领另有晕眩标记：要攒满 2 个才真正晕眩（app.js · settleBossStun）。 */
+const BOSS_POSTURE_MULT = 0.6;
+function isBossKit(kit) {
+  if (typeof enemyRankOf === "function") return enemyRankOf({ kit: kit }) === "boss";
+  return typeof ENEMY_RANK !== "undefined" && ENEMY_RANK[kit] === "boss";
+}
 function scaleDefAdd(party, kit) {
   const p = partyScaleCount(party);
   let rank = "minion";
   if (typeof enemyRankOf === "function") rank = enemyRankOf({ kit: kit }) || "minion";
   else if (typeof ENEMY_RANK !== "undefined" && kit && ENEMY_RANK[kit]) rank = ENEMY_RANK[kit];
   if (rank === "minion") return 0;
-  if (p === 3) return rank === "boss" ? 3 : 2;
-  if (p >= 4) return rank === "boss" ? 6 : 4;
+  if (p === 3) return rank === "boss" ? Math.floor(3 * BOSS_POSTURE_MULT) : 2;
+  if (p >= 4) return rank === "boss" ? Math.floor(6 * BOSS_POSTURE_MULT) : 4;
   return 0;
 }
 function scaleDef(v, party, kit) {
-  return (Number(v) || 0) + scaleDefAdd(party, kit);
+  const base = isBossKit(kit) ? Math.floor((Number(v) || 0) * BOSS_POSTURE_MULT) : (Number(v) || 0);
+  return base + scaleDefAdd(party, kit);
 }
 
 /** 把场上敌人的血量与架势换算到 party 人队。
@@ -1232,7 +1240,7 @@ function enemyPresets() {
       return u;
     }},
     { id: "crow", name: "穴鸦", build(lv, p) {
-      return unitOf(this.name, lv, [{ type: "flesh", hp: scaleHp(10 + (lv - 1) * 3, p) }], 2 + milestone(lv, 2), 5 + (lv - 1) * 2, { kit: "crow", flying: true, range: "melee", dice: [1, 4], element: "harmonic" });
+      return unitOf(this.name, lv, [{ type: "flesh", hp: scaleHp(10 + (lv - 1) * 3, p) }], 2 + milestone(lv, 5), 5 + (lv - 1) * 2, { kit: "crow", flying: true, range: "melee", dice: [1, 4], element: "harmonic" });
     }},
     { id: "mecha_mg", name: "机甲触灵（机枪）", build(lv, p) {
       return unitOf(this.name, lv, [
