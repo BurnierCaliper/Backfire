@@ -4472,6 +4472,26 @@ function soloSupportInfo() {
   const left = Math.max(0, earned - so.used.length);
   return { score, earned, left, next: (earned + 1) * step, partners: so.partners.filter(k => so.used.indexOf(k) < 0) };
 }
+/** 单人模式：主角倒地不算输。还能用坚毅生命起身就接着打（下个玩家回合点「起身」）；
+ *  起不来（坚毅生命耗尽、力竭）才算真正死亡，这时战斗失败、本局结束。 */
+function soloDownCheck(notes) {
+  if (!state.solo) return notes;
+  (state.units || []).forEach(u => {
+    if (!isSoloHero(u) || !u.dying || u.dead || u.upOnShp) return;
+    const why = standUpBlocked(u);
+    if (!why) return;
+    u.dead = true;
+    u.dying = false;
+    if (notes) notes.push(`${u.name} 倒地后无法再起身（${why}），死亡。`);
+  });
+  return notes;
+}
+/** 这名角色还算「站着」吗：没倒地；或者单人模式的主角倒地了、但还能起身 */
+function heroStillFighting(u) {
+  if (!u || u.dead) return false;
+  if (!u.dying) return true;
+  return isSoloHero(u) && !u.upOnShp && !standUpBlocked(u);
+}
 function soloSupportSkill(unit) {
   if (!isSoloHero(unit)) return null;
   const info = soloSupportInfo();

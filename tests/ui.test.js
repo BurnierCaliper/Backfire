@@ -449,6 +449,45 @@ test("单人模式：选主角、三名伙伴、第二副职责出发；战斗�
   assert.deepEqual(o.errors, []);
 });
 
+test("单人模式：主角倒地不判负，下个玩家回合可以用坚毅生命起身", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await page.click("#t-solo");
+  await page.waitForSelector("#scr-party:not([hidden])");
+  await page.click('.hero-pick[data-kit="ruby"]');
+  for (const k of ["kolt", "yuito", "tou"]) await page.click(`.hero-pick[data-kit="${k}"]`);
+  await page.click('[data-role2="生存"]');
+  await page.click("#party-go");
+  await page.waitForSelector("#scr-run:not([hidden])");
+  await page.click('.r-go[data-which="main"]');
+  await page.evaluate(() => {
+    const r = SaveStore.loadRun();
+    r.task.nodes[r.task.index] = { type: "battle", done: false };
+    SaveStore.saveRun(r);
+    RunFlow.resume();
+  });
+  await page.click("#r-fight");
+  await page.waitForSelector("#g-start");
+  await page.waitForSelector("#g-intro", { state: "detached", timeout: 15000 }).catch(() => {});
+  await page.click("#g-start");
+  await page.waitForFunction(() => state.combatStarted && GAME.depth === 0, null, { timeout: 15000 });
+  const hero = await page.evaluate(() => {
+    const h = state.units.find(u => u.kit === "ruby");
+    h.layers.forEach(l => { l.current = 0; });
+    h.dying = true;
+    return h.id;
+  });
+  await page.click("#g-endturn");
+  await page.waitForFunction(() => state.combatPhase === "player" && state.turnNo >= 2 && GAME.depth === 0 || GAME.ended, null, { timeout: 30000 });
+  assert.equal(await page.evaluate(() => GAME.ended), false, "倒地没有判负");
+  await page.click(`.unit-wrap[data-id="${hero}"]`);
+  const btn = page.locator("#g-skills button.sk", { hasText: "起身" });
+  assert.equal(await btn.count(), 1);
+  await btn.click();
+  await page.waitForFunction(i => state.units.find(u => u.id === i).upOnShp, hero, { timeout: 10000 });
+  assert.deepEqual(o.errors, []);
+});
+
 test("格挡成功：敌方队长·牛格挡住攻击时，响起钢铁碰撞声", async (t) => {
   const o = await open(t); if (!o) return;
   const { page } = o;

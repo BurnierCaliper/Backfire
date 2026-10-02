@@ -87,8 +87,9 @@ const BattleSim = (function () {
 
   /* ---------- 胜负 ---------- */
   function outcome() {
+    if (typeof soloDownCheck === "function") soloDownCheck([]);   // 单人：倒地起不来才算死亡
     const heroes = state.units.filter(u => u.isPlayer && !u.hidden && !u.dead && !isWeapon(u));
-    const standing = heroes.filter(u => !u.dying);
+    const standing = heroes.filter(u => typeof heroStillFighting === "function" ? heroStillFighting(u) : !u.dying);
     if (!EnemyAI.foes().length) return "player";
     if (!standing.length) return "enemy";
     return null;

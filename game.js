@@ -1874,8 +1874,11 @@
   function checkEnd() {
     if (G.ended) return true;
     if (!state.units || !state.units.length) return false;
+    // 单人：主角倒地后还能用坚毅生命起身就不算输；起不来才算真正死亡
+    const downNotes = typeof soloDownCheck === "function" ? soloDownCheck([]) : [];
+    if (downNotes && downNotes.length) addLogPhase(downNotes.join("\n"));
     const heroes = state.units.filter(u => u.isPlayer && !u.hidden && !u.dead && !isWeaponUnit(u));
-    const standing = heroes.filter(u => !u.dying);
+    const standing = heroes.filter(u => typeof heroStillFighting === "function" ? heroStillFighting(u) : !u.dying);
     if (!foes().length) return finish(true);
     if (!standing.length) return finish(false);
     return false;
@@ -1888,7 +1891,7 @@
     refreshTop();
     const box = $("g-result");
     const retreated = G.lastOutcome === "retreat";
-    box.querySelector("h2").textContent = retreated ? "撤退" : win ? "胜利" : "全员倒地";
+    box.querySelector("h2").textContent = retreated ? "撤退" : win ? "胜利" : state.solo ? "阵亡" : "全员倒地";
     box.querySelector("h2").className = win ? "win" : "lose";
     // 战斗评分：胜利时先算速杀（1 / 2 / 3 回合内 ×2 / ×1.5 / ×1.2）和无伤（+100，倍率 +0.5，与速杀加算），再定评价
     if (G.lastOutcome === "win" && typeof applyFinishBonus === "function") {

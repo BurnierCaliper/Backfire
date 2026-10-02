@@ -176,3 +176,58 @@ test("单人模式自动打一段：不报错，支援、成长都能走通", ()
   assert.deepEqual(c.__errors, []);
   assert.ok(run.party.length <= 1);
 });
+
+test("单人：主角倒地不算输，还能用坚毅生命起身就接着打；坚毅耗尽才算真正死亡", () => {
+  const { c, run, st } = soloRun("DOWN1");
+  const { hero } = soloBattle(c, run, [{ id: "thug_knife", lv: 1, zone: 1 }]);
+  const foe = st.units.find(u => !u.isPlayer);
+  hero.zone = 1; foe.zone = 1;
+  assert.ok(hero.shp > 0);
+  // 打到濒死
+  c.dealTo(foe, hero, { atk: 999, mult: 1, element: "physical", baseBreak: 0, flags: { action: true, blockResolved: true } });
+  assert.equal(hero.dying, true);
+  assert.equal(c.BattleSim.outcome(), null, "还能起身：战斗继续");
+  // 起身
+  c.standUp(hero);
+  assert.equal(hero.upOnShp, true);
+  assert.equal(c.BattleSim.outcome(), null);
+  // 坚毅生命打光：真正死亡，战斗失败
+  c.dealTo(foe, hero, { atk: 999, mult: 1, element: "physical", baseBreak: 0, flags: { action: true, blockResolved: true } });
+  assert.equal(hero.dead, true);
+  assert.equal(c.BattleSim.outcome(), "enemy");
+});
+
+test("单人：倒地时已经起不来（坚毅耗尽 / 力竭）就算死亡；多人模式照旧全员倒地即失败", () => {
+  const { c, run, st } = soloRun("DOWN2");
+  const { hero } = soloBattle(c, run, [{ id: "thug_knife", lv: 1, zone: 1 }]);
+  const foe = st.units.find(u => !u.isPlayer);
+  hero.zone = 1; foe.zone = 1;
+  hero.shp = 0;
+  c.dealTo(foe, hero, { atk: 999, mult: 1, element: "physical", baseBreak: 0, flags: { action: true, blockResolved: true } });
+  assert.equal(c.BattleSim.outcome(), "enemy");
+  assert.equal(hero.dead, true);
+  // 结算：主角永久死亡，本局结束
+  c.Rogue.finishBattle(run, "lose");
+  assert.equal(run.stage, "over");
+
+  // 多人：倒地就算失败（不变）
+  const c2 = H.load();
+  c2.BattleSim.setup({ party: ["ruby"], enemies: [{ id: "thug_knife", lv: 1, zone: 1 }] });
+  c2.startCombat();
+  const r = c2.findKit("ruby", c2.S.state.units), f = c2.S.state.units.find(u => !u.isPlayer);
+  r.zone = 1; f.zone = 1;
+  c2.dealTo(f, r, { atk: 999, mult: 1, element: "physical", baseBreak: 0, flags: { action: true, blockResolved: true } });
+  assert.equal(r.dying, true);
+  assert.equal(c2.BattleSim.outcome(), "enemy");
+  assert.equal(r.dead, false, "多人模式倒地不死");
+});
+
+test("单人：自动打的时候倒地会起身继续打（不会直接判负）", () => {
+  const { c, run, st } = soloRun("DOWN3");
+  const { hero } = soloBattle(c, run, [{ id: "thug_knife", lv: 1, zone: 1 }]);
+  hero.zone = 1;
+  c.dealTo(st.units.find(u => !u.isPlayer), hero, { atk: 999, mult: 1, element: "physical", baseBreak: 0, flags: { action: true, blockResolved: true } });
+  assert.equal(hero.dying, true);
+  const r = c.BattleSim.run({ maxRounds: 30 });
+  assert.ok(hero.upOnShp || hero.dead || r.winner === "player", "倒地后起身了：" + JSON.stringify(r.winner));
+});
