@@ -1477,7 +1477,7 @@ function beginRound(notes) {
     }
   });
   state.units.forEach(u => {
-    if (u.kit === "watchcrow") {
+    if (u.kit === "watchcrow" && !u.dead && !u.hidden) {
       u.resources = u.resources || {};
       u.resources.reflect = true;
       notes.push(`${u.name}：本回合第一次受到的攻击伤害将以能量属性反弹（不反弹击破）。`);
@@ -1833,7 +1833,7 @@ function turnEnd() {
   });
   (state.props || []).forEach(p => {
     if (p.kind === "acid" && p.hp < 3) {
-      const pool = state.units.filter(u => !u.hidden && Number(u.zone) === Number(p.zone));
+      const pool = state.units.filter(u => !u.hidden && !u.dead && Number(u.zone) === Number(p.zone));
       if (pool.length) {
         const u = pool[Math.floor(Math.random() * pool.length)];
         const dmg = 4 + (p.level || 1);
@@ -1844,17 +1844,22 @@ function turnEnd() {
       }
     }
     if (p.kind === "turret") {
-      const foes = state.units.filter(u => !u.hidden && !!u.isPlayer === (p.faction === "enemy"));
+      // 自动攻击 atk 最高的敌对单位：活着、看得见、没被危墙 / 关着的门挡住；不限距离，不能协助格挡
+      const foes = state.units.filter(u => !u.hidden && !u.dead && !!u.isPlayer === (p.faction === "enemy") && !lineBlocked(p.zone, u.zone));
       if (foes.length) {
-        foes.sort((a, b) => (b.atk || 0) - (a.atk || 0));
+        const atkOf = (u) => Number(effectiveAtk(u, state.units)) || Number(u.atk) || 0;
+        foes.sort((a, b) => atkOf(b) - atkOf(a));
         const u = foes[0];
-        u.statuses.high = true;
-        u.highApplyTurn = state.turnNo;
         const dmg = p.level || 1;
         const fake = unitOf("防卫炮台", p.level, [{ type: "armor", hp: 1 }], 0, dmg);
         fake.zone = p.zone;
-        dealTo(fake, u, { atk: dmg, mult: 1, hits: 2, element: "energy", baseBreak: 0, flags: { action: true } });
-        notes.push(`防卫炮台锁定 ${u.name}：施加高能，并打出 2 次 ${dmg} 能量。`);
+        const out = dealTo(fake, u, { atk: dmg, mult: 1, hits: 2, element: "energy", baseBreak: 0, flags: { action: true, blockResolved: true, propShot: true } });
+        u.statuses = u.statuses || {};
+        u.statuses.high = true;
+        u.highApplyTurn = state.turnNo;
+        notes.push(`防卫炮台锁定 ${u.name}（atk 最高）：施加高能，并打出 2 次 ${dmg} 能量（实际 ${Math.floor((out && out.res && out.res.total) || 0)}）。`);
+      } else if (state.units.some(u => !u.hidden && !u.dead && !!u.isPlayer === (p.faction === "enemy"))) {
+        notes.push("防卫炮台：敌对单位都在危墙 / 关着的门后面，打不到。");
       }
     }
   });
@@ -2982,8 +2987,10 @@ function damageProp(p, opt, attacker) {
   const element = opt.element || "physical";
   let lose = 1;
   if (p.kind === "boom") {
+    // 手册：火焰 −3，能量 / 雷电 −1；其他属性打不动爆炸桶
     if (element === "fire") lose = 3;
     else if (element === "energy" || element === "electric") lose = 1;
+    else lose = 0;
   } else if (p.kind === "acid") {
     lose = element === "harmonic" ? 3 : 1;
   } else if (p.kind === "scrap") {
@@ -2997,6 +3004,10 @@ function damageProp(p, opt, attacker) {
     return notes;
   } else {
     lose = Math.max(1, Math.floor(opt.dmg || 5));
+  }
+  if (lose <= 0) {
+    notes.push(`${p.name} 只怕火焰、能量和雷电：${ELE[element] || element}属性打不动它。`);
+    return notes;
   }
   p.hp = Math.max(0, p.hp - lose);
   notes.push(`${p.name} 耐久 −${lose} → ${p.hp}`);
@@ -3016,10 +3027,11 @@ function destroyProp(p, attacker) {
     const dmg = r.total;
     notes.push(`爆炸：同区 ${r.text} 火焰 + 2 击破。`);
     markAoeZone(p.zone);
-    state.units.filter(u => !u.hidden && Number(u.zone) === Number(p.zone)).forEach(u => {
+    state.units.filter(u => !u.hidden && !u.dead && Number(u.zone) === Number(p.zone)).forEach(u => {
       const fake = unitOf("爆炸桶", lv, [{ type: "armor", hp: 1 }], 0, 0);
       fake.zone = p.zone;
-      dealTo(fake, u, { atk: 0, mult: 0, flat: dmg, element: "fire", baseBreak: 2, flags: { action: true } });
+      // 爆炸是范围伤害：不能协助格挡
+      dealTo(fake, u, { atk: 0, mult: 0, flat: dmg, element: "fire", baseBreak: 2, flags: { action: true, aoe: true, blockResolved: true } });
     });
   }
   if (p.kind === "acid") {
@@ -3032,10 +3044,10 @@ function destroyProp(p, attacker) {
     const dmg = r.total;
     notes.push(`电池爆炸：同区同阵营 ${r.text} 电击。`);
     markAoeZone(p.zone);
-    state.units.filter(u => !u.hidden && Number(u.zone) === Number(p.zone) && !!u.isPlayer === (p.faction !== "enemy")).forEach(u => {
+    state.units.filter(u => !u.hidden && !u.dead && Number(u.zone) === Number(p.zone) && !!u.isPlayer === (p.faction !== "enemy")).forEach(u => {
       const fake = unitOf("电池", lv, [{ type: "armor", hp: 1 }], 0, 0);
       fake.zone = p.zone;
-      dealTo(fake, u, { atk: 0, mult: 0, flat: dmg, element: "electric", baseBreak: 0, flags: { action: true } });
+      dealTo(fake, u, { atk: 0, mult: 0, flat: dmg, element: "electric", baseBreak: 0, flags: { action: true, aoe: true, blockResolved: true } });
     });
   }
   state.props = state.props.filter(x => x.id !== p.id);
@@ -5151,7 +5163,8 @@ function runOnConnect(attacker, target, spec) {
       if (attacker && attacker.kit === "ruby") tagHighFrom(target, "ruby");
     }
     if (typeof popStatus === "function") popStatus(target, spec.status);
-    notes.push(`${target.name} 被施加${spec.status}。`);
+    const stName = ({ high: "高能", burn: "燃烧", shock: "感电", corr: "腐蚀", frostbite: "冻伤", weak: "虚弱" })[spec.status] || spec.status;
+    notes.push(`${target.name} 被施加${stName}。`);
   }
   if (spec.controlAlly) {
     const allies = (typeof allPlayers === "function" ? allPlayers() : []).filter(p =>
@@ -5391,7 +5404,8 @@ function dealTo(attacker, target, opt) {
   // （借机是目标已经离开那一区之后才结算的，此时距离必然是 1）
   const isReaction = !!(opt.flags.assist || opt.flags.opp || opt.flags.opportunity);
   // 导体的额外目标是随机击中的，不受射程限制
-  if (attacker && target && opt.flags.action && !opt.flags.aoe && !isReaction && !opt.flags.conductorExtra) {
+  // 配置物（防卫炮台）的自动攻击不限距离
+  if (attacker && target && opt.flags.action && !opt.flags.aoe && !isReaction && !opt.flags.conductorExtra && !opt.flags.propShot) {
     const d = zoneDist(Number(attacker.zone), Number(target.zone), Number(state.zoneMode));
     const rg = opt.atkRange || (attacker.isPlayer ? "any" : (attacker.range || "any"));
     const okRange = rg === "melee" ? d === 0 : rg === "ranged" ? d === 1 : d <= 1;

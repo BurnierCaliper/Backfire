@@ -589,3 +589,92 @@ test("敌人 AI：所有目标都隔着危墙时先打墙，墙这边还有目�
   assert.notEqual(r.winner, "timeout", "敌人会把墙打掉、打过来");
   assert.notEqual(c2.S.state.gaps["1-2"].type, "wall");
 });
+
+test("爆炸桶只怕火焰（−3）、能量 / 雷电（−1）；物理等其他属性打不动", () => {
+  const { c, st, kolt } = field();
+  const boom = c.makeProp("boom", 1, 1);
+  st.props.push(boom);
+  c.hitStructureCore(kolt, "prop:" + boom.id, { dmg: 10, brk: 1, element: "physical" });
+  assert.equal(boom.hp, 3);
+  c.hitStructureCore(kolt, "prop:" + boom.id, { dmg: 10, brk: 1, element: "electric" });
+  assert.equal(boom.hp, 2);
+});
+
+test("爆炸桶爆炸是范围伤害：不弹协助格挡，不打已经死掉的单位", () => {
+  const { c, st, kolt } = field();
+  const ruby = c.findKit("ruby", st.units);
+  ruby.zone = 1;
+  const thug = st.units.find(u => !u.isPlayer);
+  thug.zone = 1; thug.dead = true;
+  const boom = c.makeProp("boom", 1, 1);
+  st.props.push(boom);
+  st.blockQueue = [];
+  c.hitStructureCore(kolt, "prop:" + boom.id, { dmg: 10, brk: 1, element: "fire" });
+  assert.ok(!st.props.includes(boom), "爆了");
+  assert.equal((st.blockQueue || []).length, 0, "没有等协助格挡");
+});
+
+test("防卫炮台：只打活着、没被危墙挡住、atk 最高的敌对单位；不限距离", () => {
+  const { c, st, kolt } = field(3);
+  const ruby = c.findKit("ruby", st.units);
+  const thug = st.units.find(u => !u.isPlayer);
+  thug.dead = true;          // 唯一的敌人死了：我方炮台不该去打尸体
+  const tur = c.makeProp("turret", 1, 2);
+  st.props.push(tur);
+  // 敌方炮台在 1 区，ruby 在 3 区（距离 2）、atk 拉到最高
+  const etur = c.makeProp("turret", 1, 2);
+  etur.faction = "enemy";
+  st.props.push(etur);
+  ruby.zone = 3; ruby.atk = 999; kolt.zone = 1;
+  ruby.statuses.high = false; kolt.statuses.high = false;
+  c.endPlayerTurn();
+  c.endEnemyTurn();
+  assert.equal(ruby.statuses.high, true, "距离 2 也打得到");
+  assert.equal(kolt.statuses.high, false);
+  assert.equal(thug.statuses.high, false, "不打死掉的单位");
+});
+
+test("防卫炮台打不到危墙后面的单位", () => {
+  const { c, st, kolt } = field(2);
+  const ruby = c.findKit("ruby", st.units);
+  st.units.filter(u => !u.isPlayer).forEach(u => { u.zone = 2; });
+  kolt.zone = 2; ruby.zone = 2;
+  st.gaps["1-2"] = { type: "wall", hp: 8, maxHp: 8, open: false };
+  const etur = c.makeProp("turret", 1, 2);
+  etur.faction = "enemy";
+  st.props.push(etur);
+  kolt.statuses.high = false; ruby.statuses.high = false;
+  c.endPlayerTurn();
+  c.endEnemyTurn();
+  assert.equal(kolt.statuses.high || ruby.statuses.high, false);
+});
+
+test("观测鸦：def 每五级 +1（lv4 6、lv9 7）；第一次受到的攻击伤害以能量反弹；高能只在打中时施加", () => {
+  const c = H.load();
+  const defAt = (lv) => {
+    c.BattleSim.setup({ party: ["kolt"], enemies: [{ id: "watchcrow", lv, zone: 1 }] });
+    return c.findKit("watchcrow", c.S.state.units).defMax;
+  };
+  assert.equal(defAt(4), 6);
+  assert.equal(defAt(9), 7);
+  c.BattleSim.setup({ party: ["kolt"], enemies: [{ id: "watchcrow", lv: 4, zone: 1 }] });
+  c.startCombat();
+  const st = c.S.state;
+  const k = c.findKit("kolt", st.units), w = c.findKit("watchcrow", st.units);
+  k.zone = 1;
+  const hp = (u) => u.layers.reduce((a, l) => a + l.current, 0);
+  const k0 = hp(k);
+  const out = c.dealTo(k, w, { atk: 20, mult: 1, element: "physical", baseBreak: 1, flags: { action: true, blockResolved: true } });
+  assert.ok(out.res.total > 0);
+  assert.ok(hp(k) < k0, "反弹打到攻击者");
+  const k1 = hp(k);
+  w.resources.reflect = false;
+  c.dealTo(k, w, { atk: 20, mult: 1, element: "physical", baseBreak: 1, flags: { action: true, blockResolved: true, flyPaid: true } });
+  assert.equal(hp(k), k1, "一回合只反弹一次");
+  // 高能：被墙挡住时不上
+  st.zoneMode = 2; w.zone = 2; k.zone = 1; k.statuses.high = false;
+  st.gaps["1-2"] = { type: "wall", hp: 8, maxHp: 8, open: false };
+  const lines = [];
+  c.runEnemyAction("en_watch", w, k, (a, t, o) => { const r = c.dealTo(a, t, o); if (r && r.extra) lines.push(...r.extra); }, lines, () => true);
+  assert.equal(k.statuses.high, false, lines.join("\n"));
+});

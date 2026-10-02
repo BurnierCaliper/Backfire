@@ -1314,7 +1314,7 @@ function enemyPresets() {
       return unitOf(this.name, lv, [
         { type: "shield", hp: scaleHp(15 + d * 5, p) },
         { type: "spirit", hp: scaleHp(12 + d * 3, p) }
-      ], 6 + milestone(lv, 2) - milestone(4, 2), 10 + d * 3, { kit: "watchcrow", flying: true, range: "ranged", dice: [1, 8], element: "energy", resources: { reflect: true } });
+      ], 6 + milestone(lv, 5) - milestone(4, 5), 10 + d * 3, { kit: "watchcrow", flying: true, range: "ranged", dice: [1, 8], element: "energy", resources: { reflect: true } });
     }},
     { id: "dustbody", name: "扬尘体", build(lv, p) {
       const d = Math.max(0, lv - 3);

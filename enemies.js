@@ -836,10 +836,8 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
   }
   if (id === "en_watch") {
     if (!needT()) return true;
-    aa(t, { element: "energy", mult: 1, diceN: 1, diceS: (typeof leveledSides === "function" ? leveledSides(a.level, 8) : 8), baseBreak: 1 });
-    t.statuses.high = true;
-    if (typeof popStatus === "function") popStatus(t, "high");
-    lines.push(`${t.name} 被施加高能。`);
+    // 高能只在打中时施加：被协助格挡住、被墙挡住都不上
+    aa(t, { element: "energy", mult: 1, diceN: 1, diceS: (typeof leveledSides === "function" ? leveledSides(a.level, 8) : 8), baseBreak: 1, onConnect: { status: "high" } });
     return true;
   }
   if (id === "en_dust_grind") {
