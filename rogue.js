@@ -18,6 +18,7 @@ const Rogue = (function () {
   "use strict";
   const C = ROGUE_CONFIG;
   const NODE = ROGUE_NODE_TYPES;
+  const SOLO = ROGUE_SOLO;
   const clone = (x) => JSON.parse(JSON.stringify(x));
 
   /* ---------- 随机数 ----------
@@ -65,6 +66,21 @@ const Rogue = (function () {
   function heroName(kit) { const c = cardOf(kit); return c ? c.name : kit; }
   /** 可选角色：所有不是武器人的角色卡（Meta 解锁以后在这里过滤） */
   function heroPool() { return livePartyCards().filter(c => !c.weaponOf); }
+  /** 单人模式能选哪些第二副职责：角色卡上已有的主 / 副职责之外的 */
+  function role2Options(kit) {
+    const c = cardOf(kit);
+    const have = c && c.roles ? [c.roles.primary, c.roles.secondary] : [];
+    return ROLE_LIST.filter(r => have.indexOf(r) < 0);
+  }
+  function checkSoloSetup(opt) {
+    const kit = (opt.party || [])[0];
+    const pool = heroPool().map(c => c.kit);
+    const ps = opt.partners || [];
+    if (ps.length !== SOLO.partners) throw new Error(`单人模式要选 ${SOLO.partners} 名伙伴。`);
+    if (new Set(ps).size !== ps.length || ps.indexOf(kit) >= 0) throw new Error("伙伴不能重复，也不能是主角自己。");
+    if (ps.some(k => pool.indexOf(k) < 0)) throw new Error("伙伴只能从可选角色里挑。");
+    if (role2Options(kit).indexOf(opt.role2) < 0) throw new Error("第二副职责要选一个角色卡上没有的职责。");
+  }
   /** 本局里这个角色的熟练项 { 名字: 等级 }。开局照角色资料（party.js · HERO_PROFILES），升级时自选的往上加 */
   function heroProfs(h) {
     if (!h.profs) {
@@ -139,7 +155,11 @@ const Rogue = (function () {
   /* ---------- 开局 ---------- */
   function newRun(opt) {
     opt = opt || {};
-    const run = SaveStore.newRun({ party: opt.party, seed: opt.seed });
+    if (opt.solo) checkSoloSetup(opt);
+    const run = SaveStore.newRun({ party: opt.party, seed: opt.seed, solo: !!opt.solo });
+    // 单人模式：一名主角 + 三名伙伴（支援技能）+ 自选的第二副职责
+    run.solo = !!opt.solo;
+    run.partners = run.solo ? opt.partners.slice() : [];
     run.actDay = 0;
     run.taskNo = 0;
     run.boardNo = 0;
@@ -157,6 +177,7 @@ const Rogue = (function () {
       h.pending = [];
       h.notes = {};
       heroProfs(h);
+      if (run.solo) { h.role2 = opt.role2; h.role2Picks = []; }
     });
     // 本局的物资：档案从零开始
     enterRunMode();
@@ -314,6 +335,8 @@ const Rogue = (function () {
     u.weaponLevels = Object.assign({}, u.weaponLevels || {}, h.weaponLevels || {});
     if (h.attrs) u.attrs = Object.assign({}, h.attrs);
     u.rolePicks = Object.assign({}, h.rolePicks || {});
+    u.role2 = h.role2 || null;
+    u.role2Picks = (h.role2Picks || []).slice();
     u.level = h.level || 1;
     u.xp = h.xp || 0;
     u.attrPoints = 0;               // 属性点在单局里走升级选择，不用后台的可分配点
@@ -359,8 +382,14 @@ const Rogue = (function () {
   }
 
   /* ---------- 升级（手册第三章） ---------- */
-  function queueLevelRewards(h, from, to, notes) {
+  function queueLevelRewards(h, from, to, notes, run) {
     for (let L = from + 1; L <= to; L++) {
+      // 单人模式：每 4 级额外一次六维属性，每 5 级从第二副职责里额外学一个技能
+      if (run && run.solo) {
+        h.pending = h.pending || [];
+        if (L % SOLO.attrEvery === 0) h.pending.push({ type: "attr", level: L, noRepeat: false, solo: true });
+        if (h.role2 && L % SOLO.role2Every === 0 && role2Left(h).length) h.pending.push({ type: "role2", level: L });
+      }
       (ROGUE_LEVEL_REWARDS[L] || []).forEach(r => {
         if (r.type === "note") {
           h.notes = h.notes || {};
@@ -396,7 +425,7 @@ const Rogue = (function () {
       if (u.dead) { killHero(run, h, notes, "永久死亡"); return; }
       if (u.level > from) {
         notes.push(`${u.name} 升到 ${u.level} 级。`);
-        queueLevelRewards(h, from, u.level, notes);
+        queueLevelRewards(h, from, u.level, notes, run);
       }
       captureHero(u, h);
     });
@@ -409,6 +438,13 @@ const Rogue = (function () {
     u.level = level;
     u.rolePicks = Object.assign({}, h.rolePicks || {});
     return roleChoicesAt(u, level);
+  }
+
+  /** 第二副职责还没学的技能序号（一到 role2MaxSkill） */
+  function role2Left(h) {
+    const out = [];
+    for (let n = 1; n <= SOLO.role2MaxSkill; n++) if ((h.role2Picks || []).indexOf(n) < 0) out.push(n);
+    return out;
   }
 
   /** 还没做的升级选择：[{ kit, name, index, choice }] */
@@ -427,6 +463,14 @@ const Rogue = (function () {
       return Object.keys(ATTR_NAMES)
         .filter(k => !(p.noRepeat && (h.attrPicks || []).indexOf(k) >= 0))
         .map(k => ({ value: k, label: `${ATTR_NAMES[k]} +1`, hint: `现在 ${attrs[k] || 0}` }));
+    }
+    if (p.type === "role2") {
+      const u = spawnLiveCard(cardOf(kit), 1);
+      u.level = p.level;
+      return role2Left(h).map(n => {
+        const def = roleSkillDef(h.role2, n, u) || {};
+        return { value: n, label: `第二副职责 ${h.role2} ${"一二三四"[n - 1]}：${def.name || "?"}`, hint: def.hint || "" };
+      });
     }
     if (p.type === "prof") {
       const have = heroProfs(h);
@@ -465,6 +509,9 @@ const Rogue = (function () {
       h.attrs[value] = (Number(h.attrs[value]) || 0) + 1;
       h.attrPicks = (h.attrPicks || []).concat(value);
       notes.push(`${heroName(kit)} ${ATTR_NAMES[value]} +1。`);
+    } else if (p.type === "role2") {
+      h.role2Picks = (h.role2Picks || []).concat(Number(value));
+      notes.push(`${heroName(kit)} 学会第二副职责技能：${(roleSkillDef(h.role2, Number(value)) || {}).name || h.role2 + value}。`);
     } else if (p.type === "prof") {
       const have = heroProfs(h);
       have[value] = (have[value] || 0) + 1;
@@ -527,7 +574,7 @@ const Rogue = (function () {
   /** 当前节点 / 首领的战斗配置（给 BattleSim.setup 或战斗画面用） */
   function battleSpec(run) {
     const partyKits = run.party.map(h => h.kit);
-    const before = () => { applyPartyToField(run); state.openingBreaks = openingBreaks(run); };
+    const before = () => { applyPartyToField(run); state.openingBreaks = openingBreaks(run); state.solo = soloBattleInfo(run); };
     if (run.stage === "boss") {
       const key = `${run.seed}:boss:${run.act}`;
       const enc = withRng(key, () => {
@@ -557,11 +604,28 @@ const Rogue = (function () {
     };
   }
 
+  /** 单人模式这场战斗要用到的：主角、伙伴（等级、武器等级都和主角一样）、已经用过的支援 */
+  function soloBattleInfo(run) {
+    if (!run.solo || !run.party[0]) return null;
+    const h = run.party[0];
+    const wl = Math.max(1, ...Object.values(h.weaponLevels || {}).map(Number).filter(x => x > 0), 1);
+    return { heroKit: h.kit, partners: run.partners.slice(), level: h.level || 1, weaponLevel: wl, used: [] };
+  }
+
   /** 战斗结束后调用。outcome：win / lose / retreat */
   function finishBattle(run, outcome) {
     const notes = [];
     const boss = run.stage === "boss";
     ledgerAfterBattle(notes);                 // 手册：耐久结算、濒死恢复到 1 点生命、记下武器人伤势
+    if (run.solo && outcome === "win") {
+      // 单人模式：击杀经验照常，每场胜利再固定 +50
+      run.party.forEach(h => {
+        const u = findKit(h.kit, state.units);
+        if (!u || u.dead) return;
+        u.xp = (u.xp || 0) + SOLO.battleXp;
+        notes.push(`${u.name} 单人模式战斗经验 +${SOLO.battleXp}。`);
+      });
+    }
     captureParty(run, notes);
     run.party.forEach(h => { delete h.pendingBreaks; });   // 检定受伤的击破已在开场结算
     const node = currentNode(run);
@@ -1189,6 +1253,8 @@ const Rogue = (function () {
       shp: Number(u.shp) || 0, shpMax: Number(u.shpMax) || 0,
       xp: u.xp || 0, xpNext: xpToNext(u.level),
       pending: (h.pending || []).length,
+      role2: h.role2 || null,
+      role2Skills: (h.role2Picks || []).map(n => (roleSkillDef(h.role2, n) || {}).name || h.role2 + n),
       race: (heroProfile(h.kit) || {}).race || "", job: (heroProfile(h.kit) || {}).job || "",
       profs: Object.assign({}, heroProfs(h)),
       pendingBreak: (h.pendingBreaks || []).reduce((a, b) => a + (Number(b.amount) || 0), 0),
@@ -1228,6 +1294,7 @@ const Rogue = (function () {
     makeBoard, taskBlocked, taskWarning, acceptTask, currentNode,
     battleSpec, applyPartyToField, finishBattle,
     checkInfo, checkChance, checkOdds, attemptCheck, skipCheck, heroProfs,
+    role2Options, soloBattleInfo,
     restPlan, canLongRest, restAtNode, leaveNode, canRestBefore, restBeforeNode, canShortRestBefore, shortRestBeforeNode,
     buy, canShop, shopItemName, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
     presentSmiths, smithInfo, claimBlueprint, installBlueprint, blueprintById, weaponModsOf,

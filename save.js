@@ -110,7 +110,9 @@ const SaveStore = (function () {
   function newRun(opt) {
     opt = opt || {};
     const kits = (opt.party || []).slice();
-    if (kits.length < PARTY_MIN || kits.length > PARTY_MAX) {
+    if (opt.solo) {
+      if (kits.length !== 1) throw new Error(`单人模式只带 1 名角色，现在是 ${kits.length} 人。`);
+    } else if (kits.length < PARTY_MIN || kits.length > PARTY_MAX) {
       throw new Error(`开局队伍需要 ${PARTY_MIN}–${PARTY_MAX} 人，现在是 ${kits.length} 人。`);
     }
     if (new Set(kits).size !== kits.length) throw new Error("队伍里有重复的角色。");

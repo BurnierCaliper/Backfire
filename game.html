@@ -14,6 +14,7 @@
     <div class="t-menu">
       <button class="t-btn primary" id="t-continue"><b>继续</b><small id="t-continue-sub"></small></button>
       <button class="t-btn" id="t-new"><b>新的一局</b><small id="t-new-sub"></small></button>
+      <button class="t-btn" id="t-solo"><b>单人模式</b><small>一名主角 + 三名伙伴支援：每回合 2 行动点，能给自己协助格挡 / 协助攻击</small></button>
       <button class="t-btn" id="t-sandbox"><b>跑团模式</b><small>主持人用：探索环节买东西、休息、升级；战斗环节自由配遭遇。数值照原手册</small></button>
       <a class="t-btn" href="index.html"><b>跑团版 · 规则计算器</b><small>主持人用的分层结算工具</small></a>
     </div>
@@ -22,10 +23,11 @@
 <section class="scr-party" id="scr-party" hidden>
   <div class="sp-wrap">
     <header class="sp-head">
-      <h2>选择队伍</h2>
-      <p>挑 2–4 名角色出发。每人都带着自己的专属武器人；角色永久死亡时，武器人也会一起离开。</p>
+      <h2 id="party-title">选择队伍</h2>
+      <p id="party-tip">挑 2–4 名角色出发。每人都带着自己的专属武器人；角色永久死亡时，武器人也会一起离开。</p>
     </header>
     <div class="party-grid" id="party-grid"></div>
+    <div class="solo-roles" id="party-solo" hidden></div>
     <footer class="sp-foot">
       <span id="party-count"></span>
       <span class="spacer"></span>
@@ -154,7 +156,7 @@
 </div>
 
 <button class="g-btn reopen" id="g-reopen">返回结算</button>
-<div class="g-rank" id="g-rank" title="战斗评分：伤害、治疗每点 1 分，击破每点 10 分，打出失衡 +50，协助格挡成功 +30，溢出伤害每点 1.5 分，击杀杂兵 / 精英 / 首领 +20 / +100 / +300，用行动点 +10、用附赠行动 +5，触发属性克制的一击 +25%。胜利时 1 / 2 / 3 回合内打完整场分数 ×2 / ×1.5 / ×1.2（速杀）。胜利时 S / A / B 的战斗经验 ×2 / ×1.5 / ×1.2"><div class="rk-grade">C</div><div class="rk-score">0</div><div class="rk-bar"><i></i></div><div class="rk-next"></div><div class="rk-feed"></div></div>
+<div class="g-rank" id="g-rank" title="战斗评分：伤害、治疗每点 1 分，击破每点 10 分，打出失衡 +50，协助格挡成功 +30，溢出伤害每点 1.5 分，击杀杂兵 / 精英 / 首领 +20 / +100 / +300，用行动点 +10、用附赠行动 +5，触发属性克制的一击 +25%。胜利时 1 / 2 / 3 回合内打完整场分数 ×2 / ×1.5 / ×1.2（速杀）。胜利时 S / A / B 的战斗经验 ×2 / ×1.5 / ×1.2"><div class="rk-grade">C</div><div class="rk-score">0</div><div class="rk-bar"><i></i></div><div class="rk-next"></div><div class="rk-support"></div><div class="rk-feed"></div></div>
 <div class="g-fx" id="g-fx"></div>
 <div class="banner" id="g-banner"></div>
 <div class="choice" id="g-choice" role="dialog"><div class="choice-card"><h3></h3><p></p><div class="opts"></div></div></div>

@@ -838,8 +838,13 @@ function skillList(unit) {
   }
   (roleSkillsUnlocked(unit) || []).forEach(rs => {
     const def = roleSkillDef(rs.role, rs.n, unit);
-    if (def) add(def);
+    if (def && !list.some(s => s.id === def.id)) add(def);   // 第二副职责可能和角色自带的技能重复
   });
+  // 单人模式：支援（呼叫伙伴的协助攻击）
+  if (typeof soloSupportSkill === "function") {
+    const sup = soloSupportSkill(unit);
+    if (sup) add(sup);
+  }
   if (isUnarmed(unit)) {
     return list.filter(s => s.id === "bare_aa" || s.bare || (s.id && s.id.indexOf("role_") === 0) || (s.id && s.id.indexOf("fx_") === 0));
   }

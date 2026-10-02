@@ -47,6 +47,7 @@ const BattleSim = (function () {
     state.weaponMods = null;     // 单局图纸加成，在 before 里按本局写进来
     state.exhaustTier = 0;
     state.openingBreaks = null;  // 单局：检定受伤留到开场的击破，在 before 里写进来
+    state.solo = null;           // 单人模式：在 before 里写进来
   }
 
   /**

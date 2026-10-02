@@ -6,6 +6,7 @@
  *   ROGUE_TASK_WEATHER 带天气的任务
  *   ROGUE_NODE_TYPES  任务里会遇到的节点种类（加一种节点：这里加一行 + rogue.js / rogue-ui.js 各加一个处理）
  *   ROGUE_CHECKS      熟练项检定事件：难度、奖励、受伤
+ *   ROGUE_SOLO        单人模式：行动点、支援系统、第二副职责、额外成长
  *   ROGUE_TASKS       支线任务模板
  *   ROGUE_MAIN_TASK   主线任务模板（每幕开局自动接下）
  *   ROGUE_SHOP        商店卖什么、多少钱
@@ -193,6 +194,28 @@ const ROGUE_CHECKS = {
   },
   elements: ["fire", "acid", "electric", "ice", "energy", "physical", "harmonic"],
   profs: PROF_LIST                 // 手册里的全部熟练项（party.js）
+};
+
+/* 单人模式（规则和单局一样，只有下面这些不同；已定）
+ *   apPerRound      主角每回合几个行动点
+ *   partners        开局选几名伙伴（支援技能从他们里面挑）
+ *   supportScore    每得到多少分（本场战斗的评分）多一次支援机会
+ *   supportCost     支援技能花几个行动点
+ *   supportBreak    支援的协助攻击额外造成几点（对应属性的）击破
+ *   battleXp        每场战斗胜利额外给多少经验（击杀经验照常）
+ *   attrEvery       每升几级额外选一次六维属性（和普通的 4 / 8 级属性点叠加）
+ *   role2Every      每升几级从第二副职责里额外学一个技能
+ *   role2MaxSkill   第二副职责能学到技能几（技能四只有专精能拿） */
+const ROGUE_SOLO = {
+  apPerRound: 2,
+  partners: 3,
+  supportScore: 500,
+  supportCost: 1,
+  supportBreak: 3,
+  battleXp: 50,
+  attrEvery: 4,
+  role2Every: 5,
+  role2MaxSkill: 3
 };
 
 /* 诊所（数值占位，按「一人一次改造平均约 3000 奎支」定）

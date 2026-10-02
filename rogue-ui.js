@@ -35,14 +35,25 @@
 
   /* ---------- 选队伍 ---------- */
   const picked = [];
+  // 单人模式：一名主角、三名伙伴、一个第二副职责
+  const solo = { on: false, hero: null, partners: [], role2: null };
+  const PARTY_TIP = "挑 2–4 名角色出发。每人都带着自己的专属武器人；角色永久死亡时，武器人也会一起离开。";
+  const SOLO_TIP = `先点一名角色当主角，再挑 ${ROGUE_SOLO.partners} 名伙伴（战斗里用「支援」叫他们登场打协助攻击），最后选一个第二副职责。` +
+    `单人模式：每回合 ${ROGUE_SOLO.apPerRound} 行动点，能给自己协助格挡、接自己打出的失衡；每场胜利额外 +${ROGUE_SOLO.battleXp} 经验，` +
+    `每 ${ROGUE_SOLO.attrEvery} 级多一次六维属性，每 ${ROGUE_SOLO.role2Every} 级从第二副职责里多学一个技能。`;
   function renderParty() {
+    $("party-title").textContent = solo.on ? "单人模式 · 选择主角与伙伴" : "选择队伍";
+    $("party-tip").textContent = solo.on ? SOLO_TIP : PARTY_TIP;
     const box = $("party-grid");
     box.innerHTML = Rogue.heroPool().map(c => {
-      const on = picked.indexOf(c.kit) >= 0;
+      const isHero = solo.on && solo.hero === c.kit;
+      const isMate = solo.on && solo.partners.indexOf(c.kit) >= 0;
+      const on = solo.on ? (isHero || isMate) : picked.indexOf(c.kit) >= 0;
       const weapons = SaveStore.weaponsOf(c.kit).map(Rogue.heroName).join("、");
       const roles = c.roles ? [c.roles.primary, c.roles.secondary].filter(Boolean).filter((r, i, a) => a.indexOf(r) === i).join(" / ") : "";
-      return `<button class="hero-pick${on ? " on" : ""}" data-kit="${esc(c.kit)}" aria-pressed="${on}">
-        <span class="hp-name">${esc(c.name)}<small>${esc(c.enName || "")}</small></span>
+      const tag = isHero ? '<em class="hp-tag hero">主角</em>' : isMate ? '<em class="hp-tag mate">伙伴</em>' : "";
+      return `<button class="hero-pick${on ? " on" : ""}${isMate ? " mate" : ""}" data-kit="${esc(c.kit)}" aria-pressed="${on}">
+        <span class="hp-name">${esc(c.name)}<small>${esc(c.enName || "")}</small>${tag}</span>
         <span class="hp-note">${esc(c.note || "")}</span>
         <span class="hp-meta">${roles ? esc(roles) + " · " : ""}武器人：${esc(weapons || "无")}</span>
       </button>`;
@@ -50,12 +61,38 @@
     box.querySelectorAll(".hero-pick").forEach(b => {
       b.onclick = () => {
         const k = b.dataset.kit;
-        const i = picked.indexOf(k);
-        if (i >= 0) picked.splice(i, 1);
-        else if (picked.length < SaveStore.PARTY_MAX) picked.push(k);
+        if (solo.on) {
+          if (solo.hero === k) { solo.hero = null; solo.role2 = null; }
+          else if (solo.partners.indexOf(k) >= 0) solo.partners.splice(solo.partners.indexOf(k), 1);
+          else if (!solo.hero) { solo.hero = k; solo.role2 = null; }
+          else if (solo.partners.length < ROGUE_SOLO.partners) solo.partners.push(k);
+        } else {
+          const i = picked.indexOf(k);
+          if (i >= 0) picked.splice(i, 1);
+          else if (picked.length < SaveStore.PARTY_MAX) picked.push(k);
+        }
         renderParty();
       };
     });
+    const roleBox = $("party-solo");
+    roleBox.hidden = !solo.on;
+    if (solo.on) {
+      const opts = solo.hero ? Rogue.role2Options(solo.hero) : [];
+      roleBox.innerHTML = `<h3>第二副职责</h3>` + (solo.hero
+        ? `<div class="r-choices">${opts.map(r => {
+            const defs = [1, 2, 3].map(n => (roleSkillDef(r, n) || {}).name).filter(Boolean).join(" / ");
+            return `<button class="g-btn${solo.role2 === r ? " r-main" : ""}" data-role2="${esc(r)}">${esc(r)}<small>${esc(defs)}</small></button>`;
+          }).join("")}</div>`
+        : `<p class="r-hint">先选主角（只能选角色卡上没有的职责）。</p>`);
+      roleBox.querySelectorAll("[data-role2]").forEach(b => { b.onclick = () => { solo.role2 = b.dataset.role2; renderParty(); }; });
+      const ok = solo.hero && solo.partners.length === ROGUE_SOLO.partners && solo.role2;
+      $("party-go").disabled = !ok;
+      $("party-count").textContent = !solo.hero ? "先选主角"
+        : `主角 ${Rogue.heroName(solo.hero)} · 伙伴 ${solo.partners.length}/${ROGUE_SOLO.partners}` +
+          (solo.partners.length ? "：" + solo.partners.map(Rogue.heroName).join("、") : "") +
+          ` · 第二副职责 ${solo.role2 || "未选"}`;
+      return;
+    }
     const n = picked.length;
     $("party-go").disabled = !(n >= SaveStore.PARTY_MIN && n <= SaveStore.PARTY_MAX);
     $("party-count").textContent = `已选 ${n} 人（${SaveStore.PARTY_MIN}–${SaveStore.PARTY_MAX} 人）` +
@@ -88,13 +125,16 @@
       return `<div class="rhero">
         <div class="rh-top"><b>${esc(v.name)}</b><span>Lv${v.level}${v.pending ? ' · <em>待选升级</em>' : ""}</span></div>
         ${v.race ? `<div class="rh-w rh-prof">${esc(v.race)} · ${esc(v.job)} · ${esc(Object.keys(v.profs).map(k => k + v.profs[k]).join(" "))}</div>` : ""}
+        ${v.role2 ? `<div class="rh-w rh-solo">第二副职责 ${esc(v.role2)}${v.role2Skills.length ? "：" + esc(v.role2Skills.join("、")) : "（还没学技能）"}</div>` : ""}
         ${v.pendingBreak ? `<div class="rh-w broken">检定受伤：下一场开战时受到 ${v.pendingBreak} 击破</div>` : ""}
         <div class="rh-row">血 ${bar(v.hp, v.hpMax, "hp")}<span>${v.hp}/${v.hpMax}</span></div>
         ${v.layers.length > 1 ? `<div class="rh-w">${esc(layerText(v.layers))}</div>` : ""}
         <div class="rh-row">经验 ${bar(v.xp, v.xpNext, "xp")}<span>${v.xp}/${v.xpNext || "满"}</span></div>
         ${v.weapons.map(w => `<div class="rh-w${w.dur <= 0 ? " broken" : ""}">${esc(w.name)} Lv${w.level} · 耐久 ${w.dur}/${w.durMax}${w.dur <= 0 ? "（损坏：进战斗空手）" : ""}${w.blueprint ? ` · 图纸「${esc(w.blueprint.name)}」` : ""}${w.hp != null ? ` · 伤势 ${w.hp <= 0 ? "倒下（需长休）" : "血量 " + w.hp}` : ""}</div>`).join("")}
       </div>`;
-    }).join("") + (run.fallen || []).map(f =>
+    }).join("") + (run.solo ? `<div class="rhero solo-mates"><div class="rh-top"><b>伙伴</b><span>支援</span></div>
+        <div class="rh-w rh-solo">${esc((run.partners || []).map(Rogue.heroName).join("、"))} · 战斗里每 ${ROGUE_SOLO.supportScore} 分一次支援，每人一场一次</div></div>` : "")
+      + (run.fallen || []).map(f =>
       `<div class="rhero fallen"><div class="rh-top"><b>${esc(Rogue.heroName(f.kit))}</b><span>阵亡</span></div>
        <div class="rh-w">第 ${f.act} 幕第 ${f.day} 天 · ${esc(f.weapons.map(Rogue.heroName).join("、"))} 随之离队</div></div>`).join("");
   }
@@ -105,7 +145,9 @@
     if (!pend.length) return "";
     const p = pend[0];
     const title = p.choice.type === "attr"
-      ? `${p.name} ${p.choice.level} 级：分配 1 点六维属性${p.choice.noRepeat ? "（不能加在之前加过的同一项上）" : ""}`
+      ? `${p.name} ${p.choice.level} 级${p.choice.solo ? "（单人模式额外）" : ""}：分配 1 点六维属性${p.choice.noRepeat ? "（不能加在之前加过的同一项上）" : ""}`
+      : p.choice.type === "role2"
+        ? `${p.name} ${p.choice.level} 级（单人模式）：从第二副职责里再学一个技能`
       : p.choice.type === "prof"
         ? `${p.name} ${p.choice.level} 级：一个自选熟练项（新学一项，或把已有的一项升一级，最高三级）`
         : `${p.name} ${p.choice.level} 级：选择一项职责技能`;
@@ -489,8 +531,10 @@
   /* ---------- 入口 ---------- */
   window.RunFlow = {
     ready: true,
-    start() {
+    start(opt) {
       picked.length = 0;
+      solo.on = !!(opt && opt.solo);
+      solo.hero = null; solo.partners = []; solo.role2 = null;
       Screens.show("party");
     },
     resume() {
@@ -510,7 +554,9 @@
     $("party-go").onclick = () => {
       if (SaveStore.loadRun() && !confirm("已有一局在进行中。开新的一局会覆盖它，确定吗？")) return;
       try {
-        run = Rogue.newRun({ party: picked.slice() });
+        run = solo.on
+          ? Rogue.newRun({ party: [solo.hero], partners: solo.partners.slice(), role2: solo.role2, solo: true })
+          : Rogue.newRun({ party: picked.slice() });
       } catch (e) {
         $("party-count").textContent = e.message;
         return;

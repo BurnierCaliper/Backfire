@@ -3723,7 +3723,7 @@ function refreshEconomy(u) {
     u.bonusMax = 0;
     return;
   }
-  let ap = 1, bonus = 1;
+  let ap = isSoloHero(u) ? soloCfg().apPerRound : 1, bonus = 1;   // 单人模式：主角每回合 2 行动点
   if (u.loseBonusNext) {
     bonus = 0;
     u.loseBonusNext = false;
@@ -4316,6 +4316,102 @@ function pruneAssistQueue() {
   }
 }
 
+/* ---------- 单人模式（rogue-data.js · ROGUE_SOLO） ----------
+ * state.solo = { heroKit, partners, level, weaponLevel, used }，由单局的 battleSpec.before 写进来；其他模式为 null。
+ *   · 主角每回合 2 行动点；可以给自己协助格挡、接自己打出的失衡做协助攻击
+ *   · 支援：本场每得到 500 分多一次机会，花 1 行动点叫一名伙伴登场，对一名敌人打一次他的协助攻击，
+ *     再追加 3 点同属性击破，然后退场；每名伙伴一场只能叫一次。伙伴的等级和武器等级跟主角一样。 */
+function soloCfg() {
+  return typeof ROGUE_SOLO !== "undefined" ? ROGUE_SOLO
+    : { apPerRound: 2, partners: 3, supportScore: 500, supportCost: 1, supportBreak: 3 };
+}
+function isSoloHero(u) {
+  return !!(state.solo && u && u.isPlayer && !u.isPartner && u.kit === state.solo.heroKit);
+}
+/** 支援机会：本场分数每满 500 一次，减去已经用掉的 */
+function soloSupportInfo() {
+  const so = state.solo;
+  if (!so) return null;
+  const score = state.battleScore ? Math.max(0, Math.floor(state.battleScore.total || 0)) : 0;
+  const step = soloCfg().supportScore;
+  const earned = Math.floor(score / step);
+  const left = Math.max(0, earned - so.used.length);
+  return { score, earned, left, next: (earned + 1) * step, partners: so.partners.filter(k => so.used.indexOf(k) < 0) };
+}
+function soloSupportSkill(unit) {
+  if (!isSoloHero(unit)) return null;
+  const info = soloSupportInfo();
+  return { id: "solo_support", name: "支援", bare: true,
+    hint: `行动点 · 叫一名伙伴登场，对一名敌人打一次协助攻击 +${soloCfg().supportBreak} 击破 · 剩 ${info.left} 次（每 ${soloCfg().supportScore} 分 +1，下一次 ${info.next} 分）` };
+}
+function soloSupportError(a) {
+  const info = soloSupportInfo();
+  if (!info) return "只有单人模式能用";
+  if (!info.partners.length) return "伙伴都已经出过场了";
+  if (info.left < 1) return `支援机会不足（本场 ${info.score} 分，满 ${info.next} 分多一次）`;
+  if (!fieldUnits().some(u => !u.isPlayer && !u.dead && !u.hidden)) return "没有敌人";
+  return null;
+}
+/** 伙伴登场：照角色卡生成，等级、武器等级和主角一样 */
+function soloSpawnPartner(kit, zone) {
+  const card = livePartyCards().find(c => c.kit === kit);
+  if (!card) return null;
+  const u = spawnLiveCard(card, zone);
+  resetBattleFlags(u);
+  u.isPartner = true;
+  u.weaponHeld = true;
+  u.level = state.solo.level;
+  u.weaponLevels = {};
+  (card.linkedKits || []).forEach(w => { u.weaponLevels[w] = state.solo.weaponLevel; });
+  applyLevelStats(u);
+  (u.layers || []).forEach(l => { l.current = l.max; });
+  u.def = u.defMax;
+  u.ap = 0; u.bonus = 0;
+  return u;
+}
+/** 支援技能的结算（扣行动点之后调用）：伙伴登场 → 协助攻击 → 追加击破 → 退场 */
+function runSoloSupport(a, kit, target, lines) {
+  const so = state.solo;
+  const p = soloSpawnPartner(kit, target.zone);
+  if (!p) { lines.push("没有这名伙伴。"); return; }
+  so.used.push(kit);
+  state.units.push(p);
+  appendLog(lines.splice(0).concat([`${p.name} 登场支援（Lv${p.level}）！`]).join("\n"));
+  // 战斗画面：伙伴先在场上亮相，再冲向目标（见 game.js · playTape 的 partner）
+  if (typeof spawnPopup === "function") {
+    try { spawnPopup(p, { kind: "partner", text: "登场支援！", element: (p.suggest && p.suggest.element) || "physical", targetId: target.id }); } catch (e) {}
+  }
+  const prev = { attacker: state.attackerId, target: state.targetId, flow: state.skillFlow, acc: state.actionAcc };
+  state.attackerId = p.id;
+  state.targetId = target.id;
+  state.skillFlow = null;
+  state.lastHitElement = null;
+  state._assistBy = p.id;
+  try {
+    runSkillInner(assistSkillId(p), { ignorePhase: true });
+  } finally {
+    state._assistBy = null;
+    state.attackerId = prev.attacker;
+    state.targetId = prev.target;
+    state.skillFlow = prev.flow;
+    state.actionAcc = prev.acc;
+  }
+  const el = state.lastHitElement || (p.suggest && p.suggest.element) || "physical";
+  const notes = [];
+  if (!target.dead && !target.hidden && !assistTargetGone(target)) {
+    dealBreak(target, soloCfg().supportBreak, el, notes, "支援追加");
+  }
+  // 退场：连同它这次唤出的武器人一起离开战场
+  state.units = state.units.filter(u => u !== p && u.weaponOf !== p.kit);
+  // 指向伙伴的嘲讽、掩护之类一并失效
+  state.units.forEach(u => {
+    if (u.tauntTo === p.id) u.tauntTo = null;
+    if (u.coverBy === p.id) u.coverBy = null;
+  });
+  notes.push(`${p.name} 完成支援，退场。`);
+  appendLog(notes.join("\n"));
+}
+
 function eligibleAssisters(breaker, broken) {
   if (!broken || assistTargetGone(broken)) return [];
   if (broken.isPlayer) {
@@ -4335,7 +4431,8 @@ function eligibleAssisters(breaker, broken) {
     (unitCanFight(u) || (u.upOnShp && unitIsCombatReady(u) && !u.stunned) || broken.kit === "ufo_body") &&
     (assistSkillId(u) || broken.kit === "ufo_body") &&
     !(typeof isCrushing === "function" && isCrushing(u)) &&
-    (!breaker || u.id !== breaker.id) &&
+    !u.isPartner &&                                          // 支援的伙伴打完就退场，不接协助攻击
+    (!breaker || u.id !== breaker.id || isSoloHero(u)) &&   // 单人模式可以接自己打出的失衡
     (typeof bpCanAssistAttack !== "function" || bpCanAssistAttack(u))
   );
   if (broken.kit === "ufo_body") {
@@ -4536,7 +4633,7 @@ function eligibleBlockers(target) {
   if (!target || !target.isPlayer) return [];
   const crushOut = (u) => !(typeof isCrushing === "function" && isCrushing(u));
   return state.units.filter(u =>
-    u.isPlayer && !u.hidden && u.id !== target.id &&
+    u.isPlayer && !u.hidden && !u.isPartner && (u.id !== target.id || isSoloHero(u)) &&   // 单人模式可以给自己协助格挡
     Number(u.zone) === Number(target.zone) &&
     !u.stunned && crushOut(u) && ((u.bonus || 0) >= 1 || target.coverBy === u.id) &&
     blockChance(u) != null &&
@@ -5535,6 +5632,7 @@ function dealTo(attacker, target, opt) {
   }
   if (!res.pending) {
     const ele = opt.element || res.element || "physical";
+    state.lastHitElement = ele;   // 单人模式的支援：协助攻击之后按这一下的属性追加击破
     // 战场数据
     if (attacker && target && attacker.isPlayer && !target.isPlayer) {
       const st = battleStat(attacker);
@@ -5971,6 +6069,19 @@ function skillFlowSteps(id, actor, picks) {
   picks = picks || {};
   if (!actor) return [];
   const maxZ = Number(state.zoneMode);
+  if (id === "solo_support") {
+    const info = soloSupportInfo();
+    if (!info) return [];
+    return [
+      { key: "partner", type: "choice", optional: false, label: "叫哪名伙伴登场（每人一场一次）",
+        options: info.partners.map(k => {
+          const c = livePartyCards().find(x => x.kit === k) || { name: k };
+          return { value: k, label: `${c.name}${c.note ? " · " + c.note : ""}` };
+        }) },
+      { key: "target", type: "unit", optional: false, label: "对哪名敌人打协助攻击",
+        units: fieldUnits().filter(u => !u.isPlayer && !u.dead && !u.hidden && !u.fused) }
+    ];
+  }
   if (id === "kolt_swap" || id === "torque_swap") {
     const units = fieldUnits().filter(u => !u.isPlayer && !u.dead && !u.hidden && !u.fused && Number(u.zone) === Number(actor.zone));
     return [{ key: "target", type: "unit", optional: true, label: "切刀近距离目标（同区，可不选）", units }];
@@ -7273,6 +7384,7 @@ const SKILL_REQUIREMENT = {
   yuito_espresso: (a) => (res(a).liquid || 0) < 1 ? "没有咖啡液" : null,
   yuito_extract:  (a) => (res(a).liquid || 0) < 1 ? "没有咖啡液" : null,
   tou_taunt:      (a) => (res(a).tauntLeft || 0) <= 0 ? "本场嘲讽次数已用尽" : null,
+  solo_support:   (a) => soloSupportError(a),
   tou_sonic:      (a) => (res(a).shield || 0) < 1 ? "没有圣盾"
     : !skillFlowSteps("tou_sonic", a, {}).length ? "距离 1 以内没有可以打的目标" : null,
   kolt_short:     (a) => ((findKit("kolt", state.units) || a).resources || {}).bit === "acid" ? "直流短接需要电钻模式" : null,
@@ -7403,6 +7515,14 @@ function touSonicPicks(a, t) {
 
 /** 扣行动点之前先查目标：选不到合法目标的技能不白白花掉行动点。返回原因，null 表示可以 */
 function skillTargetError(a, id, t) {
+  if (id === "solo_support") {
+    const fl = state.skillFlow;
+    const kit = fl && fl.picks ? fl.picks.partner : null;
+    const tgt = fl && fl.picks && fl.picks.target ? unitById(fl.picks.target) : t;
+    const info = soloSupportInfo();
+    if (!kit || !info || info.partners.indexOf(kit) < 0) return "先选一名还没出过场的伙伴";
+    if (!tgt || tgt.isPlayer || tgt.dead || tgt.hidden) return "先选一名敌人";
+  }
   if (id === "tou_sonic") {
     if ((res(a).shield || 0) < 1) return "没有圣盾";
     const { t1, t2 } = touSonicPicks(a, t);
@@ -7620,7 +7740,11 @@ function runSkillInner(id, optRun) {
   };
 
   try {
-    if (id === "ruby_aa") {
+    if (id === "solo_support") {
+      const fl = state.skillFlow;
+      const tgt = fl && fl.picks && fl.picks.target ? unitById(fl.picks.target) : t;
+      runSoloSupport(a, fl.picks.partner, tgt, lines);
+    } else if (id === "ruby_aa") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       hitOne(a, t, { element: "energy", mult: 0.5, hits: 1, baseBreak: 1, atk });
       hitOne(a, t, { element: "energy", mult: 0.5, hits: 1, baseBreak: 0, atk, usePrep: false });

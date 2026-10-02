@@ -48,7 +48,7 @@ const Screens = (function () {
       const card = typeof livePartyCards === "function" ? livePartyCards().find(c => c.kit === h.kit) : null;
       return card ? card.name : h.kit;
     });
-    return `第 ${run.act} 幕 · 第 ${run.day} 天 · ${names.join("、")}`;
+    return `${run.solo ? "单人模式 · " : ""}第 ${run.act} 幕 · 第 ${run.day} 天 · ${names.join("、")}`;
   }
 
   function refreshTitle() {
@@ -57,6 +57,7 @@ const Screens = (function () {
     cont.disabled = !run || !RunFlow.ready;
     $("t-continue-sub").textContent = run ? runSummary(run) : "没有进行中的一局";
     $("t-new").disabled = !RunFlow.ready;
+    if ($("t-solo")) $("t-solo").disabled = !RunFlow.ready;
     $("t-new-sub").textContent = RunFlow.ready ? "选择 2–4 名角色出发" : "单局流程在下一步（M1）接入";
   }
 
@@ -74,6 +75,7 @@ const Screens = (function () {
       }
     });
     $("t-new").onclick = () => RunFlow.start();
+    if ($("t-solo")) $("t-solo").onclick = () => RunFlow.start({ solo: true });
     $("t-continue").onclick = () => RunFlow.resume();
     $("t-sandbox").onclick = () => {
       // 没加载 trpg-ui.js 时的后备：直接进战斗画面（trpg-ui.js 会把这个按钮换成进探索环节）

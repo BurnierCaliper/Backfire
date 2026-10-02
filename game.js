@@ -96,6 +96,7 @@
       value: spec.value,
       text: spec.text,
       element: spec.element || "physical",
+      targetId: spec.targetId || null,
       tag: state.popTag || null,   // "boom"：高能自爆的余波，数字放大、停留更久
       snap: G.sim ? null : snapAll()
     });
@@ -910,7 +911,9 @@
       G.slow = prevSlow;
       if (!meta.slow) $("g-app").classList.remove("hitstop");
     }
-    const lungeAtk = !opps.length && (meta.forceLunge || (pops.length && meta.actorId && meta.targetId && meta.actorId !== meta.targetId));
+    // 单人模式的支援：出手的是登场的伙伴，主角不前冲（伙伴的前冲在 partner 里播）
+    const supportTape = pops.some(e => e.kind === "partner");
+    const lungeAtk = !opps.length && !supportTape && (meta.forceLunge || (pops.length && meta.actorId && meta.targetId && meta.actorId !== meta.targetId));
     const motions = [];
     if (lungeAtk) motions.push(lunge(meta.actorId, meta.targetId));
     if (meta.blockerId) motions.push(lunge(meta.blockerId, meta.actorId));
@@ -963,6 +966,14 @@
           await wait(chain ? 30 : 45);
           deferStun(beatsBefore); await playBeats(beatsBefore.filter(b => b.kind !== "stun"));
           await wait(chain ? 40 : 55);
+        } else if (e.kind === "partner") {
+          // 伙伴登场：亮相、停一下，再冲向目标
+          const pc = cards.get(e.unitId);
+          if (pc) { pc.wrap.classList.remove("enter"); void pc.wrap.offsetWidth; pc.wrap.classList.add("enter"); }
+          popup(e.unitId, e.text || "支援！", "txt e-" + e.element, { dur: 1.2 });
+          if (window.Sfx && !G.sim) Sfx.parry();
+          await wait(420);
+          if (e.targetId) await lunge(e.unitId, e.targetId);
         } else if (e.kind === "fxword") {
           // 攻击效果大字：同一次行动里同一个目标的同一个效果只打一次（多段攻击不重复）
           const key = e.unitId + "|" + e.text;
@@ -2115,6 +2126,7 @@
     state.combatStarted = false;
     state.exhaustTier = 0;
     state.openingBreaks = null;
+    state.solo = null;
     state.retreated = false;
     state.lootByRank = null;
     resetBattleRecords();   // 战场数据、评分、这场的经验 / 掉落
@@ -2375,6 +2387,15 @@
     box.querySelector(".rk-bar i").style.width = (gr.next ? Math.min(100, Math.max(0, (gr.score - gr.floor) / span * 100)) : 100) + "%";
     box.querySelector(".rk-next").textContent = gr.next ? `距 ${gr.next.grade} 还差 ${Math.max(0, gr.next.need - gr.score)} 分` : "最高评价";
     if (prevGrade && prevGrade !== gr.grade) { box.classList.remove("up"); void box.offsetWidth; box.classList.add("up"); }
+    // 单人模式：支援机会（每 500 分一次）
+    const sup = typeof soloSupportInfo === "function" ? soloSupportInfo() : null;
+    const supBox = box.querySelector(".rk-support");
+    if (supBox) {
+      supBox.textContent = sup ? `支援 ×${sup.left}${sup.partners.length ? `　下一次 ${sup.next} 分` : "　伙伴都出过场了"}` : "";
+      const prevLeft = Number(supBox.dataset.left || 0);
+      if (sup && sup.left > prevLeft && !G.sim) { supBox.classList.remove("gain"); void supBox.offsetWidth; supBox.classList.add("gain"); }
+      supBox.dataset.left = sup ? sup.left : 0;
+    }
     // 新得的分：一行一行冒出来
     const feed = box.querySelector(".rk-feed");
     Object.keys(gr.parts).forEach(k => {

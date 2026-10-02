@@ -370,7 +370,20 @@ function roleChoicesAt(u, milestone) {
   return [];
 }
 
+/** 全部职责（手册第六步） */
+const ROLE_LIST = ["直伤", "异常", "击破", "坦克", "护卫", "生存", "环境手", "控场", "辅助"];
+
+/** 单人模式的第二副职责：开局自选，升级时额外学到的技能记在 u.role2Picks（技能序号） */
+function role2SkillsOf(u) {
+  if (!u || !u.role2) return [];
+  return (u.role2Picks || []).map(n => ({ role: u.role2, n: Number(n), role2: true }));
+}
+
 function roleSkillsUnlocked(u) {
+  return roleSkillsBase(u).concat(role2SkillsOf(u));
+}
+
+function roleSkillsBase(u) {
   const out = [];
   if (!u || !u.roles) return out;
   if (u.rolePicks) {

@@ -323,6 +323,68 @@ test("单局：熟练项检定节点——每个人的熟练等级和成功率�
   assert.deepEqual(o.errors, []);
 });
 
+test("单人模式：选主角、三名伙伴、第二副职责出发；战斗里 2 行动点，攒够分数后用支援叫伙伴登场", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await page.click("#t-solo");
+  await page.waitForSelector("#scr-party:not([hidden])");
+  assert.match(await page.textContent("#party-title"), /单人模式/);
+  await page.click('.hero-pick[data-kit="ruby"]');
+  assert.equal(await page.isDisabled('[data-role2="直伤"]').catch(() => true), true, "瑞比本来的职责不能选");
+  for (const k of ["kolt", "yuito", "tou"]) await page.click(`.hero-pick[data-kit="${k}"]`);
+  assert.equal(await page.isDisabled("#party-go"), true, "还没选第二副职责");
+  await page.click('[data-role2="生存"]');
+  assert.equal(await page.isDisabled("#party-go"), false);
+  await page.click("#party-go");
+  await page.waitForSelector("#scr-run:not([hidden])");
+  assert.match(await page.textContent("#run-party"), /第二副职责 生存/);
+  assert.match(await page.textContent("#run-party"), /柯尔特、结人、灯/);
+  await page.click('.r-go[data-which="main"]');
+  await page.evaluate(() => {
+    const r = SaveStore.loadRun();
+    r.task.nodes[r.task.index] = { type: "battle", done: false };
+    SaveStore.saveRun(r);
+    RunFlow.resume();
+  });
+  await page.click("#r-fight");
+  await page.waitForSelector("#g-start");
+  await page.waitForSelector("#g-intro", { state: "detached", timeout: 15000 }).catch(() => {});
+  await page.click("#g-start");
+  await page.waitForFunction(() => state.combatStarted && GAME.depth === 0, null, { timeout: 15000 });
+  const hero = await page.evaluate(() => state.units.find(u => u.kit === "ruby").id);
+  assert.equal(await apOf(page, hero), 2);
+  await page.evaluate(() => { state.battleScore.total = 600; });
+  await page.click(`.unit-wrap[data-id="${hero}"]`);
+  await page.waitForFunction(i => GAME.actorId === i, hero);
+  // 记下伙伴的卡片有没有登场
+  await page.evaluate(() => {
+    window.__partner = false;
+    new MutationObserver(() => {
+      if ([...document.querySelectorAll(".unit-wrap")].some(w => /柯尔特/.test(w.textContent))) window.__partner = true;
+    }).observe(document.body, { subtree: true, childList: true });
+  });
+  const idx = await page.evaluate(() => GAME.gameSkills(unitById(GAME.actorId)).findIndex(s => s.id === "solo_support"));
+  assert.ok(idx >= 0, "主角有支援技能");
+  await page.keyboard.press(String(idx + 1));
+  await page.waitForSelector("#g-choice.show");
+  assert.match(await page.textContent("#g-choice"), /柯尔特/);
+  await page.keyboard.press("1");
+  await page.waitForFunction(() => GAME.arm && GAME.arm.mode === "unit");
+  const foe = await page.evaluate(() => state.units.find(u => !u.isPlayer).id);
+  await page.click(`.unit-wrap[data-id="${foe}"]`);
+  for (let i = 0; i < 40; i++) {
+    if (await page.evaluate(() => GAME.depth === 0 && state.solo.used.length === 1)) break;
+    if (await page.evaluate(() => !!document.querySelector("#g-choice.show"))) await page.keyboard.press("Escape");
+    await page.waitForTimeout(300);
+  }
+  assert.deepEqual(await page.evaluate(() => state.solo.used), ["kolt"]);
+  assert.equal(await apOf(page, hero), 1);
+  assert.ok(await page.evaluate(() => window.__partner), "伙伴应该短暂登场");
+  assert.equal(await page.evaluate(() => state.units.some(u => u.isPartner)), false, "打完退场");
+  assert.match(await page.textContent("#g-rank"), /支援 ×0/);
+  assert.deepEqual(o.errors, []);
+});
+
 test("格挡成功：敌方队长·牛格挡住攻击时，响起钢铁碰撞声", async (t) => {
   const o = await open(t); if (!o) return;
   const { page } = o;
