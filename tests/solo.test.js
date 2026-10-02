@@ -67,7 +67,7 @@ test("单人战斗：可以给自己协助格挡、接自己打出的失衡做�
   assert.ok(!c2.eligibleAssisters(b2.hero, b2.st.units.find(u => !u.isPlayer)).some(u => u.id === b2.hero.id));
 });
 
-test("支援：每 500 分一次，花 1 行动点；伙伴登场打一次协助攻击 +3 击破，然后退场，一场只能叫一次", () => {
+test("支援：每 250 分一次，花 1 行动点；伙伴登场打一次协助攻击 +3 击破，然后退场，一场只能叫一次", () => {
   const { c, run } = soloRun();
   const { st, hero } = soloBattle(c, run, [{ id: "thug_hammer", lv: 3, zone: 2 }, { id: "thug_hammer", lv: 3, zone: 2 }]);
   const sk = c.skillList(hero).find(s => s.id === "solo_support");
@@ -79,7 +79,7 @@ test("支援：每 500 分一次，花 1 行动点；伙伴登场打一次协助
     st.skillFlow = { id: "solo_support", actorId: hero.id, picks: { partner: kit, target: t.id }, index: 99 };
     try { c.runSkill("solo_support"); } finally { st.skillFlow = null; }
   };
-  st.battleScore.total = 520;
+  st.battleScore.total = 260;
   assert.equal(c.skillRequirementError(hero, "solo_support"), null);
   const n0 = st.units.length, hp0 = c.totalHp(f1), def0 = f1.def;
   use("tou", f1);
@@ -89,9 +89,10 @@ test("支援：每 500 分一次，花 1 行动点；伙伴登场打一次协助
   assert.equal(st.units.length, n0, "伙伴退场");
   assert.ok(!st.units.some(u => u.isPartner));
   assert.deepEqual(plain(st.solo.used), ["tou"]);
-  // 分数没再满 500：不能再用
+  // 分数没再满 500（第二次）：不能再用
+  st.battleScore.total = 260;
   assert.match(c.skillRequirementError(hero, "solo_support"), /支援机会不足/);
-  st.battleScore.total = 1100;
+  st.battleScore.total = 550;
   // 用过的伙伴不能再叫
   const flowOpts = c.skillFlowSteps("solo_support", hero, {})[0].options.map(o => o.value);
   assert.deepEqual(plain(flowOpts), ["kolt", "yuito"]);

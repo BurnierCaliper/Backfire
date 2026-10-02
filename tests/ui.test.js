@@ -444,7 +444,8 @@ test("单人模式：选主角、三名伙伴、第二副职责出发；战斗�
   assert.equal(await apOf(page, hero), 1);
   assert.ok(await page.evaluate(() => window.__partner), "伙伴应该短暂登场");
   assert.equal(await page.evaluate(() => state.units.some(u => u.isPartner)), false, "打完退场");
-  assert.match(await page.textContent("#g-rank"), /支援 ×0/);
+  const left = await page.evaluate(() => soloSupportInfo().left);
+  assert.match(await page.textContent("#g-rank"), new RegExp(`支援 ×${left}`));
   assert.deepEqual(o.errors, []);
 });
 

@@ -180,3 +180,26 @@ test("夕夏全速撞击：物理伤害 + 震荡 + 每移 1 格 +1 击破，不�
   assert.ok(!(foe.instant && foe.instant.shift), "不应有错位");
   assert.equal(foe.layers[0].type, layer0, "外层没有被互换");
 });
+
+test("沙暴逆风：飞行杂兵 25% 概率不扣行动点；精英、首领照扣", () => {
+  const c = H.load();
+  c.BattleSim.setup({ party: ["kolt"], enemies: [{ id: "crow", lv: 1, zone: 1 }, { id: "watchcrow", lv: 4, zone: 1 }] });
+  const st = c.S.state;
+  st.weather = "sand";
+  const crow = st.units.find(u => u.kit === "crow"), wc = st.units.find(u => u.kit === "watchcrow");
+  // 找一个逆风的区
+  const zone = [1, 2, 3].slice(0, Number(st.zoneMode)).find(z => c.sandWind(z, st.zoneMode, st.sandDir) < 0);
+  if (zone == null) return;
+  crow.zone = zone; wc.zone = zone;
+  let kept = 0, wcKept = 0;
+  const N = 400;
+  for (let i = 0; i < N; i++) {
+    c.refreshEnemyEconomy(crow);
+    if (crow.ap >= 1) kept++;
+    c.refreshEnemyEconomy(wc);
+    const full = c.enemyActBudget(wc).ap;
+    if (wc.ap >= full) wcKept++;
+  }
+  assert.ok(kept > N * 0.15 && kept < N * 0.35, `杂兵保留行动点 ${kept}/${N}`);
+  assert.equal(wcKept, 0, "精英照扣");
+});

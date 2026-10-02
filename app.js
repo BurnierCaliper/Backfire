@@ -968,6 +968,7 @@ function sandWindActionText(u) {
     return "无风向";
   }
   if (w > 0) return u.flying ? "顺风·空中（+1 行动点）" : "顺风·地面（+1 附赠行动）";
+  if (u.flying && !u.isPlayer && typeof enemyRankOf === "function" && enemyRankOf(u) === "minion") return `逆风·空中（−1 行动点，杂兵有 ${Math.round(SAND_HEADWIND_KEEP * 100)}% 顶住）`;
   return u.flying ? "逆风·空中（−1 行动点）" : "逆风·地面（无额外行动变化）";
 }
 
@@ -1397,7 +1398,9 @@ function canControlUnit(u) {
   return !!u.isPlayer;
 }
 
-function refreshEnemyEconomy(u) {
+/** 沙暴逆风：飞行的杂兵有 25% 概率顶住风、不扣行动点（精英、首领照扣） */
+const SAND_HEADWIND_KEEP = 0.25;
+function refreshEnemyEconomy(u, notes) {
   if (!u || u.isPlayer) return;
   if (u.stunned || u.dead) {
     u.ap = 0; u.apMax = 0; u.bonus = 0; u.bonusMax = 0;
@@ -1411,7 +1414,12 @@ function refreshEnemyEconomy(u) {
   if (!iso && state.weather === "sand") {
     const w = sandWind(u.zone, state.zoneMode, state.sandDir);
     if (u.flying && w > 0) ap += 1;
-    if (u.flying && w < 0) ap -= 1;
+    if (u.flying && w < 0) {
+      const minion = (typeof enemyRankOf === "function" ? enemyRankOf(u) : "minion") === "minion";
+      if (minion && Math.random() < SAND_HEADWIND_KEEP) {
+        if (notes) notes.push(`${u.name} 顶住了逆风：这回合不扣行动点。`);
+      } else ap -= 1;
+    }
     if (!u.flying && w > 0) bonus += 1;
   }
   u.ap = Math.max(0, ap);
@@ -1681,13 +1689,13 @@ function startEnemyPhase() {
   state.units.forEach(u => {
     if (u.isPlayer || u.hidden || u.dead) return;
     if (u.stunned && bossShrugStun(u, notes)) {
-      refreshEnemyEconomy(u);
+      refreshEnemyEconomy(u, notes);
     } else if (u.stunned) {
       recoverFromStun(u, notes);
       u.ap = 0; u.apMax = 0; u.bonus = 0; u.bonusMax = 0;
       notes.push(`${u.name} 敌人回合开始时晕眩：解除晕眩并回满架势，本回合不获得行动点。`);
     } else {
-      refreshEnemyEconomy(u);
+      refreshEnemyEconomy(u, notes);
       if (u.kit === "mecha_gl" && u.resources && u.resources.glPending && u.resources.glZone && !u.resources.glReady) {
         u.resources.glReady = true;
         notes.push(`${u.name} 榴弹已就绪，可对 ${u.resources.glZone} 区发射。`);
@@ -4445,11 +4453,11 @@ function pruneAssistQueue() {
 /* ---------- 单人模式（rogue-data.js · ROGUE_SOLO） ----------
  * state.solo = { heroKit, partners, level, weaponLevel, used }，由单局的 battleSpec.before 写进来；其他模式为 null。
  *   · 主角每回合 2 行动点；可以给自己协助格挡、接自己打出的失衡做协助攻击
- *   · 支援：本场每得到 500 分多一次机会，花 1 行动点叫一名伙伴登场，对一名敌人打一次他的协助攻击，
+ *   · 支援：本场每得到 250 分多一次机会，花 1 行动点叫一名伙伴登场，对一名敌人打一次他的协助攻击，
  *     再追加 3 点同属性击破，然后退场；每名伙伴一场只能叫一次。伙伴的等级和武器等级跟主角一样。 */
 function soloCfg() {
   return typeof ROGUE_SOLO !== "undefined" ? ROGUE_SOLO
-    : { apPerRound: 2, partners: 3, supportScore: 500, supportCost: 1, supportBreak: 3 };
+    : { apPerRound: 2, partners: 3, supportScore: 250, supportCost: 1, supportBreak: 3 };
 }
 function isSoloHero(u) {
   return !!(state.solo && u && u.isPlayer && !u.isPartner && u.kit === state.solo.heroKit);

@@ -216,7 +216,7 @@ const ROGUE_CHECKS = {
 const ROGUE_SOLO = {
   apPerRound: 2,
   partners: 3,
-  supportScore: 500,
+  supportScore: 250,
   supportCost: 1,
   supportBreak: 3,
   battleXp: 50,
