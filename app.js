@@ -7389,13 +7389,15 @@ function renderLog() {
   box.scrollTop = box.scrollHeight;
 }
 
-/* ---------- 首领的晕眩标记（已定） ----------
- * 首领的架势被打空时和普通失衡完全一样（协助攻击、打出失衡的分数、冰属性加伤、「打进失衡时」的被动……），
+/* ---------- 精英和首领的晕眩标记（已定） ----------
+ * 精英和首领的架势被打空时和普通失衡完全一样（协助攻击、打出失衡的分数、冰属性加伤、「打进失衡时」的被动……），
  * 只是每次失衡记 1 个晕眩标记：到它自己的回合开始时，标记没满 BOSS_STUN_MARKS 个就恢复架势、照常行动；
  * 满了才真正晕眩（跳过这个回合），之后标记清零。目的是加快首领战的节奏。 */
 const BOSS_STUN_MARKS = 2;
 function isBossUnit(u) {
-  return !!(u && !u.isPlayer && typeof enemyRankOf === "function" && enemyRankOf(u) === "boss");
+  if (!u || u.isPlayer || typeof enemyRankOf !== "function") return false;
+  const r = enemyRankOf(u);
+  return r === "boss" || r === "elite";
 }
 /** 首领这次失衡记一个标记（同一次失衡只记一次）。返回刚记上的标记数，没记返回 0 */
 function noteBossBreak(u) {
@@ -7407,7 +7409,7 @@ function noteBossBreak(u) {
 function bossMarkText(u) {
   return u.stunMarks >= BOSS_STUN_MARKS
     ? `晕眩标记 ${u.stunMarks}/${BOSS_STUN_MARKS}：攒满了，下个回合真正晕眩。`
-    : `晕眩标记 ${u.stunMarks}/${BOSS_STUN_MARKS}：首领要攒满 ${BOSS_STUN_MARKS} 个才会晕眩，下个回合恢复架势照常行动。`;
+    : `晕眩标记 ${u.stunMarks}/${BOSS_STUN_MARKS}：${enemyRankOf(u) === "boss" ? "首领" : "精英"}要攒满 ${BOSS_STUN_MARKS} 个才会晕眩，下个回合恢复架势照常行动。`;
 }
 /** 兜底：没经过 imbalanceLine 的失衡（直接设成晕眩的那些）也记上标记 */
 function settleBossStuns(notes) {

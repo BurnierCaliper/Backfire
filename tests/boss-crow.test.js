@@ -48,7 +48,7 @@ test("穴鸦击杀奖励 15 奎支：手册和单局都是", () => {
   assert.equal(c.rollEnemyLoot({ kit: "thug_knife" }), 80, "其他杂兵照旧按三档");
 });
 
-test("首领架势是原来的 60%（向下取整），人数加成也打六折；非首领不变", () => {
+test("精英和首领的架势是原来的 60%（向下取整），人数加成也打六折；杂兵不变", () => {
   const c = H.load();
   const preset = (id) => c.enemyPresets().find(p => p.id === id);
   // 亡命之王 lv1 原本 7，lv5 原本 8
@@ -59,13 +59,14 @@ test("首领架势是原来的 60%（向下取整），人数加成也打六折�
   assert.equal(k4.defMax, 4 + 3, "4 人队加成 6 → 3");
   const k3 = preset("outlaw_king").build(1, 2); c.rebalanceEnemiesForParty(3, [k3]);
   assert.equal(k3.defMax, 4 + 1, "3 人队加成 3 → 1");
-  const e4 = preset("bandit_boss").build(1, 2); const e4d = e4.defMax; c.rebalanceEnemiesForParty(4, [e4]);
-  assert.equal(e4.defMax, e4d + 4, "精英的人数加成不变");
   // 沙灵聚合体 lv1 原本 11
   assert.equal(preset("sand_aggregate").build(1, 2).defMax, 6);
-  // 精英不受影响（强盗头子 lv1）
-  const boss = preset("bandit_boss").build(1, 2);
-  assert.ok(boss.defMax >= 6);
+  // 精英也一样：强盗头子 lv1 原本 6 → 3；4 人队加成 4 → 2
+  assert.equal(preset("bandit_boss").build(1, 2).defMax, 3);
+  const e4b = preset("bandit_boss").build(1, 2); c.rebalanceEnemiesForParty(4, [e4b]);
+  assert.equal(e4b.defMax, 3 + 2);
+  // 杂兵不变
+  assert.equal(preset("thug_knife").build(1, 2).defMax, 3);
 });
 
 test("首领失衡和普通失衡一样（协助攻击、失衡分），只是记晕眩标记：没攒满 2 个，回合开始恢复架势照常行动；攒满才跳过回合", () => {
@@ -108,4 +109,21 @@ test("首领失衡和普通失衡一样（协助攻击、失衡分），只是�
   f2.c.dealBreak(thug, 99, "physical", [], "测试");
   f2.c.endPlayerTurn();
   assert.equal(thug.ap, 0);
+});
+
+test("精英也攒晕眩标记：第一次失衡照常给协助攻击，回合开始恢复照常行动；第二次才跳过回合", () => {
+  const { c, st } = field(["ruby", "kolt"], [{ id: "captain_wolf", lv: 1, zone: 1 }]);
+  const wolf = st.units.find(u => u.kit === "captain_wolf");
+  st.assistQueue = [];
+  c.dealBreak(wolf, 99, "physical", [], "测试");
+  assert.equal(wolf.stunned, true);
+  assert.equal(wolf.stunMarks, 1);
+  assert.ok(st.assistQueue.some(j => j.targetId === wolf.id));
+  st.assistQueue = [];
+  c.endPlayerTurn();
+  assert.ok(wolf.ap >= 1, "照常行动");
+  c.endEnemyTurn();
+  c.dealBreak(wolf, 99, "physical", [], "测试");
+  c.endPlayerTurn();
+  assert.equal(wolf.ap, 0, "第二次：跳过回合");
 });

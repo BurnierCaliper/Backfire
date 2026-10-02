@@ -1103,12 +1103,13 @@ function scaleHp(v, party) {
   _lastHpParty = partyScaleCount(party);
   return scaleByParty(v, party);
 }
-/* 首领的架势（已定）：每个等级都是原来的 60%（向下取整），人数加成也一样打六折。
- * 首领另有晕眩标记：要攒满 2 个才真正晕眩（app.js · settleBossStun）。 */
+/* 精英和首领的架势（已定）：每个等级都是原来的 60%（向下取整），人数加成也一样打六折。
+ * 它们另有晕眩标记：失衡照常，但要攒满 2 个才真正跳过回合（app.js · bossShrugStun）。 */
 const BOSS_POSTURE_MULT = 0.6;
 function isBossKit(kit) {
-  if (typeof enemyRankOf === "function") return enemyRankOf({ kit: kit }) === "boss";
-  return typeof ENEMY_RANK !== "undefined" && ENEMY_RANK[kit] === "boss";
+  const rank = typeof enemyRankOf === "function" ? enemyRankOf({ kit: kit })
+    : (typeof ENEMY_RANK !== "undefined" ? ENEMY_RANK[kit] : null);
+  return rank === "boss" || rank === "elite";
 }
 function scaleDefAdd(party, kit) {
   const p = partyScaleCount(party);
@@ -1116,8 +1117,8 @@ function scaleDefAdd(party, kit) {
   if (typeof enemyRankOf === "function") rank = enemyRankOf({ kit: kit }) || "minion";
   else if (typeof ENEMY_RANK !== "undefined" && kit && ENEMY_RANK[kit]) rank = ENEMY_RANK[kit];
   if (rank === "minion") return 0;
-  if (p === 3) return rank === "boss" ? Math.floor(3 * BOSS_POSTURE_MULT) : 2;
-  if (p >= 4) return rank === "boss" ? Math.floor(6 * BOSS_POSTURE_MULT) : 4;
+  if (p === 3) return Math.floor((rank === "boss" ? 3 : 2) * BOSS_POSTURE_MULT);
+  if (p >= 4) return Math.floor((rank === "boss" ? 6 : 4) * BOSS_POSTURE_MULT);
   return 0;
 }
 function scaleDef(v, party, kit) {
