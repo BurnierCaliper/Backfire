@@ -203,9 +203,21 @@
     battle: () => `<p>前方有敌人拦路。</p>${brokenWarn()}${fightBtn("迎战")}`,
     elite: () => `<p>前方有棘手的敌人。</p>${brokenWarn()}${fightBtn("迎战")}`,
     rest: () => {
+      if (run.ambush) {
+        return `<p class="r-warn">⚠ 长休时被偷袭了！还没来得及恢复，敌人就摸了上来。</p>
+          <p class="r-hint">遭遇战：敌人 3 枚代币、来自各地；我方跳过第一回合；这场分数 ×2（和速杀、无伤加算）；
+            胜利后每人额外 ${C.ambush.xpPerLevel} × 敌人等级 经验，然后照常长休。撤退则这次不休息、直接离开。</p>
+          ${brokenWarn()}${fightBtn("迎击")}`;
+      }
       const plan = Rogue.restPlan(run);
       const food = Object.keys(plan.food).map(id => `${ITEM_CATALOG[id].name} ${plan.food[id]} 份`).join("、");
+      const chance = Math.round(Rogue.ambushChance(run) * 100);
+      const watchOpts = Rogue.watchOptions(run).map(w =>
+        `<option value="${esc(w.kit)}">${esc(w.weapon ? `${w.name}（${w.owner} 的武器人）` : w.name)}</option>`).join("");
       return `<p>找到一处能歇脚的地方。</p>
+        <p class="r-hint">长休时有 <b id="r-ambush-chance">${chance}%</b> 的概率被偷袭（遭遇战）。没被偷袭，下次 +${Math.round(C.ambush.step * 100)}%；被偷袭后回到 ${Math.round(C.ambush.base * 100)}%。
+          安排一人守夜就一定不会被偷袭，但守夜的人这次长休不恢复，短休次数和「长休一次」的技能也不刷新。</p>
+        <label class="r-watch">守夜：<select id="r-watch"><option value="">不安排守夜</option>${watchOpts}</select></label>
         <div class="r-choices">
           <button class="g-btn r-main" id="r-long" ${plan.ok ? "" : "disabled"}>长休 ${C.hours.longRest} 小时
             <small>${plan.ok ? `消耗 ${plan.water} ml 水、${esc(food)}` : "补给不足：" + esc(plan.lack.join("，"))} · 血量回满、耐久回满、武器人痊愈、清空力竭</small></button>
@@ -376,21 +388,13 @@
     return rows.length ? `<p class="r-hint">维修工具包 ×${kits}，每个修复 10 点耐久：</p><div class="r-choices">${rows.join("")}</div>` : "";
   }
 
-  /** 进下一站 / 首领战之前：可以先长休一次，也可以短休（按今天的短休次数） */
+  /** 进下一站 / 首领战之前：可以短休（按今天的短休次数）。长休只能在任务的休息点 */
   function restBeforeRow() {
-    const can = Rogue.canRestBefore(run);
-    const used = !can.ok && /已经长休/.test(can.why || "");
-    const plan = Rogue.restPlan(run);
-    const food = Object.keys(plan.food || {}).map(id => `${ITEM_CATALOG[id].name} ${plan.food[id]} 份`).join("、");
-    const longBtn = used
-      ? `<span class="r-hint rest-before done">这一站前已经长休过了。</span>`
-      : `<button class="g-btn" id="r-rest-before" ${can.ok ? "" : "disabled"}>先长休再前进
-          <small>${can.ok ? `消耗 ${plan.water} ml 水、${esc(food)} · 血量、耐久回满，清空力竭` : esc(can.why || "")}</small></button>`;
     const sh = Rogue.canShortRestBefore(run);
     const left = (sh.who || []).map(x => `${x.name} ${x.left}`).join("、");
     const shortBtn = `<button class="g-btn" id="r-short-before" ${sh.ok ? "" : "disabled"}>短休 ${C.hours.shortRest} 小时
         <small>${sh.ok ? `不消耗补给 · 每人回复 等级×2+体质 · 今天还能短休：${esc(left)}` : esc(sh.why || "")}</small></button>`;
-    return `<div class="rest-before">${longBtn}${shortBtn}</div>`;
+    return `<div class="rest-before">${shortBtn}</div>`;
   }
 
   function renderTask() {
@@ -513,11 +517,13 @@
     });
     body.querySelectorAll("[data-cy]").forEach(el => { el.oninput = () => showCyberPreview(el.dataset.cy); });
     on("r-fight", fight);
-    on("r-long", () => act(() => Rogue.restAtNode(run, "long")));
+    on("r-long", () => {
+      const w = $("r-watch");
+      act(() => Rogue.restAtNode(run, "long", { watch: (w && w.value) || null }));
+    });
     on("r-short", () => act(() => Rogue.restAtNode(run, "short")));
     on("r-rest-skip", () => act(() => Rogue.restAtNode(run, "leave")));
     on("r-short-before", () => act(() => Rogue.shortRestBeforeNode(run)));
-    on("r-rest-before", () => act(() => Rogue.restBeforeNode(run)));
     on("r-leave", () => act(() => Rogue.leaveNode(run)));
     body.querySelectorAll("[data-check]").forEach(b => { b.onclick = () => act(() => Rogue.attemptCheck(run, b.dataset.check)); });
     on("r-check-skip", () => act(() => Rogue.skipCheck(run)));

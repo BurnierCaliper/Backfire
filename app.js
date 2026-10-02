@@ -1382,6 +1382,7 @@ function startCombat() {
   beginRound([]);
   startPlayerPhase();
   appendLog("战斗开始。回合开始效果已结算。", "sep");
+  if (state.ambush) appendLog("遭遇战：长休时被偷袭，我方来不及反应，跳过第一回合（没有行动点和附赠动作）。");
   balanceNotes.forEach(t => appendLog(t));
   if (typeof applyTheme === "function") applyTheme();
   if (typeof renderAll === "function") renderAll();
@@ -2037,6 +2038,8 @@ const SCORE_SPEED = [[1, 2], [2, 1.5], [3, 1.2]];
 // 无伤奖励：胜利、且整场我方（角色、武器人）没有受到任何伤害（护盾被打也算受伤）：先 +100 分，
 // 再把整场分数的倍率 +0.5。和速杀的倍率加算：1 回合无伤 = ×(1 + 1 + 0.5) = ×2.5
 const SCORE_FLAWLESS = { points: 100, mult: 0.5 };
+// 遭遇战（长休时被偷袭）：分数 ×2，和速杀、无伤的倍率加算
+const SCORE_AMBUSH_MULT = 2;
 // 一击的加分倍率：各项加算（1 + 0.25 + …），乘在这一击产生的所有分数上
 const SCORE_BONUS = {
   advantage: 0.25,  // 触发属性克制：这一击的伤害 / 击破 / 溢出 / 由它打出的失衡和击杀分 +25%
@@ -2055,7 +2058,7 @@ function bigHitInfo(level, dmg) {
 // [评价, 第一幕的分数线, 战斗经验倍率]。C 线以下是 D（经验不加成）。已定：第一幕 C 750 / B 1250 / A 1500 / S 1750
 const SCORE_GRADES = [["S", 1750, 2], ["A", 1500, 1.5], ["B", 1250, 1.2], ["C", 750, 1], ["D", 0, 1]];
 const SCORE_ACT_STEP = 250;   // 之后每一幕，各条分数线（D 除外）+250
-const SCORE_PART_NAMES = { dmg: "伤害", heal: "治疗 / 护盾", brk: "击破", stagger: "打出失衡", block: "协助格挡成功", overkill: "溢出伤害", kill: "击杀", bonus: "克制 / 大伤害加成", action: "行动", speed: "速杀奖励", flawless: "无伤奖励", fatigue: "招式疲劳（扣分）" };
+const SCORE_PART_NAMES = { dmg: "伤害", heal: "治疗 / 护盾", brk: "击破", stagger: "打出失衡", block: "协助格挡成功", overkill: "溢出伤害", kill: "击杀", bonus: "克制 / 大伤害加成", action: "行动", speed: "速杀奖励", flawless: "无伤奖励", ambush: "遭遇战加成", fatigue: "招式疲劳（扣分）" };
 /** 这个角色这回合用这个技能，算连续第几个回合（不改记录）。
  *  上回合用过 → 上回合的连续数 + 1；这回合已经用过 → 和这回合第一次一样；否则 1 */
 function fatigueStreak(u, skillId) {
@@ -2118,7 +2121,7 @@ function markPartyHurt(target, result) {
 function applyFinishBonus() {
   state.battleScore = state.battleScore || { total: 0, parts: {} };
   const bs = state.battleScore;
-  const none = { extra: 0, mult: 1, speedMult: 1, flawless: false, speed: 0, flawlessPts: 0 };
+  const none = { extra: 0, mult: 1, speedMult: 1, flawless: false, speed: 0, flawlessPts: 0, ambush: false, ambushPts: 0 };
   if (bs.speedDone) return none;
   bs.speedDone = true;
   const turns = Number(state.turnNo) || 1;
@@ -2126,17 +2129,21 @@ function applyFinishBonus() {
   const speedMult = hit ? hit[1] : 1;
   const flawless = !bs.hurt;
   const base = bs.total + (flawless ? SCORE_FLAWLESS.points : 0);
-  const mult = 1 + (speedMult - 1) + (flawless ? SCORE_FLAWLESS.mult : 0);
+  const ambush = !!state.ambush;
+  const ambushAdd = ambush ? SCORE_AMBUSH_MULT - 1 : 0;
+  const mult = 1 + (speedMult - 1) + (flawless ? SCORE_FLAWLESS.mult : 0) + ambushAdd;
   // 1e-6：避免 1000×1.2 算成 1199.999…
   const speed = Math.floor(base * (speedMult - 1) + 1e-6);
   const flawlessPts = flawless ? SCORE_FLAWLESS.points + Math.floor(base * SCORE_FLAWLESS.mult + 1e-6) : 0;
+  const ambushPts = ambush ? Math.floor(base * ambushAdd + 1e-6) : 0;
   if (speed > 0) bs.parts.speed = (bs.parts.speed || 0) + speed;
   if (flawlessPts > 0) bs.parts.flawless = (bs.parts.flawless || 0) + flawlessPts;
-  bs.total += speed + flawlessPts;
+  if (ambushPts > 0) bs.parts.ambush = (bs.parts.ambush || 0) + ambushPts;
+  bs.total += speed + flawlessPts + ambushPts;
   bs.speedMult = speedMult;
   bs.finishMult = mult;
   bs.flawless = flawless;
-  return { extra: speed + flawlessPts, mult, speedMult, flawless, speed, flawlessPts };
+  return { extra: speed + flawlessPts + ambushPts, mult, speedMult, flawless, speed, flawlessPts, ambush, ambushPts };
 }
 /** 旧接口：返回多出来的分 */
 function applySpeedBonus() { return applyFinishBonus().extra; }
@@ -3733,13 +3740,17 @@ function recoverFromStun(u, notes) {
   }
 }
 
+/** 遭遇战（长休时被偷袭）：我方跳过第一回合，不拿行动点和附赠动作 */
+function ambushSkipRound() {
+  return !!state.ambush && (Number(state.turnNo) || 1) <= 1;
+}
 function refreshEconomy(u) {
   if (!u || !u.isPlayer) return;
   if (typeof isCrushing === "function" && isCrushing(u)) {
     u.ap = 0; u.apMax = 0; u.bonus = 0; u.bonusMax = 0;
     return;
   }
-  if (u.stunned) {
+  if (u.stunned || ambushSkipRound()) {
     u.ap = 0;
     u.apMax = 0;
     u.bonus = 0;
@@ -4971,6 +4982,10 @@ function resetBattleFlags(u) {
 
 function roleOnce(a, key, limit) {
   if (!a) return false;
+  // 「长休一次」的技能记在队伍档案里，跨战斗保留，长休才刷新（守夜的人不刷新）
+  if (typeof REST_ONCE_KEYS !== "undefined" && REST_ONCE_KEYS.indexOf(key) >= 0 && typeof useRestOnce === "function") {
+    return useRestOnce(a.kit, key, limit);
+  }
   a.resources = a.resources || {};
   a.resources.roleOnce = a.resources.roleOnce || {};
   const n = a.resources.roleOnce[key] || 0;

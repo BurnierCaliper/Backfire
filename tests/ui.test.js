@@ -323,6 +323,49 @@ test("单局：熟练项检定节点——每个人的熟练等级和成功率�
   assert.deepEqual(o.errors, []);
 });
 
+test("单局：休息点可以选守夜；没人守夜被偷袭时进遭遇战，我方跳过第一回合；战斗前只剩短休", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await page.click("#t-new");
+  await page.waitForSelector("#scr-party:not([hidden])");
+  await page.click('.hero-pick[data-kit="ruby"]');
+  await page.click('.hero-pick[data-kit="yuito"]');
+  await page.click("#party-go");
+  await page.waitForSelector("#scr-run:not([hidden])");
+  await page.click('.r-go[data-which="main"]');
+  // 战斗节点前：只有短休，没有「先长休再前进」
+  await page.evaluate(() => {
+    const r = SaveStore.loadRun();
+    r.task.nodes[r.task.index] = { type: "battle", done: false };
+    SaveStore.saveRun(r);
+    RunFlow.resume();
+  });
+  await page.waitForSelector("#r-short-before");
+  assert.equal(await page.locator("#r-rest-before").count(), 0);
+  // 休息点：有守夜选项和偷袭概率；概率设成 100%
+  await page.evaluate(() => {
+    const r = SaveStore.loadRun();
+    r.task.nodes[r.task.index] = { type: "rest", done: false };
+    r.ambushChance = 1;
+    SaveStore.saveRun(r);
+    RunFlow.resume();
+  });
+  await page.waitForSelector("#r-watch");
+  assert.match(await page.textContent("#r-ambush-chance"), /100%/);
+  assert.ok(await page.locator('#r-watch option[value="ruby"]').count() === 1);
+  await page.click("#r-long");
+  await page.waitForSelector("#r-fight");
+  assert.match(await page.textContent("#run-body"), /偷袭/);
+  await page.click("#r-fight");
+  await page.waitForSelector("#g-start");
+  assert.equal(await page.evaluate(() => state.ambush), true);
+  await page.keyboard.press("Space");
+  // 第一回合被跳过：直接进敌人回合，打完回到第 2 回合的玩家回合
+  await page.waitForFunction(() => state.turnNo >= 2 || GAME.ended, null, { timeout: 30000 });
+  assert.match(await page.evaluate(() => state.logPages.map(p => p.lines.map(l => l.text || l).join("\n")).join("\n")), /遭遇战/);
+  assert.deepEqual(o.errors, []);
+});
+
 test("单人模式：选主角、三名伙伴、第二副职责出发；战斗里 2 行动点，攒够分数后用支援叫伙伴登场", async (t) => {
   const o = await open(t); if (!o) return;
   const { page } = o;

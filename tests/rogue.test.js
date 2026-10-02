@@ -25,7 +25,7 @@ function autoplay(c, run, opts) {
       steps.push(side >= 0 ? "side" : "main");
     } else if (run.stage === "task" || run.stage === "boss") {
       const node = run.stage === "task" ? Rogue.currentNode(run) : { type: "boss" };
-      if (node.type === "rest") {
+      if (node.type === "rest" && !run.ambush) {
         Rogue.restAtNode(run, Rogue.canLongRest(run) ? "long" : "short");
         steps.push("rest");
       } else if (node.type === "check") {
@@ -468,25 +468,150 @@ test("诊所只在诊所节点或回城休整时能用", () => {
 
 module.exports = { autoplay };
 
-test("进下一站前可以先长休一次：消耗补给、回满血、清空力竭，每站一次，不推进本幕天数", () => {
-  const { c, run, R } = fresh(["kolt", "helu"], "RB1");
+test("长休只在任务的休息点：每个任务正好一个休息点，不在第一站也不在最后一站；没有战前长休了", () => {
+  const { run, R } = fresh(["kolt", "helu"], "RB1");
+  assert.equal(R.restBeforeNode, undefined);
+  assert.equal(R.canRestBefore, undefined);
+  for (let i = 0; i < 25; i++) {
+    R.makeBoard(run);
+    run.board.forEach(t => {
+      const rests = t.nodeTypes.map((x, j) => x === "rest" ? j : -1).filter(j => j >= 0);
+      assert.equal(rests.length, 1, t.nodeTypes.join(","));
+      assert.ok(rests[0] > 0 && rests[0] < t.nodeTypes.length - 1, t.nodeTypes.join(","));
+    });
+  }
+});
+
+/** 把当前节点换成休息点，并把队伍打残 */
+function atRest(run, R) {
   R.acceptTask(run, "main");
-  run.task.nodes[run.task.index] = { type: "battle", done: false };
-  const day0 = run.actDay;
-  c.S.LEDGER.hours = 30;
-  const water0 = R.supplies().water;
-  assert.equal(R.canRestBefore(run).ok, true);
-  R.restBeforeNode(run);
-  assert.equal(R.hoursAwake(), 0);
-  assert.ok(R.supplies().water < water0);
-  assert.equal(run.actDay, day0);
-  assert.equal(R.canRestBefore(run).ok, false);
-  assert.throws(() => R.restBeforeNode(run), /已经长休/);
-  // 首领战前也可以
-  run.stage = "boss";
-  assert.equal(R.canRestBefore(run).ok, true);
-  R.restBeforeNode(run);
-  assert.equal(R.canRestBefore(run).ok, false);
+  run.task.nodes[run.task.index] = { type: "rest", done: false };
+  run.party.forEach(h => { h.hp = [{ type: "flesh", current: 1 }]; });
+}
+
+test("遭遇战：休息点长休有概率被偷袭，初始 15%，没被偷袭每次 +5%，被偷袭后回到 15%", () => {
+  const { run, R } = fresh(["kolt", "helu"], "AM1");
+  assert.equal(R.ambushChance(run), 0.15);
+  // 找一个不会被偷袭的种子位置：概率设成 0 一定平安
+  atRest(run, R);
+  run.ambushChance = 0;
+  R.restAtNode(run, "long");
+  assert.ok(!run.ambush);
+  assert.ok(Math.abs(R.ambushChance(run) - 0.05) < 1e-9);
+  // 概率 100%：一定被偷袭，恢复之前就开打
+  run.task.nodes[run.task.index] = { type: "rest", done: false };
+  run.party.forEach(h => { h.hp = [{ type: "flesh", current: 1 }]; });
+  run.ambushChance = 1;
+  const idx = run.task.index;
+  R.restAtNode(run, "long");
+  assert.ok(run.ambush);
+  assert.equal(R.ambushChance(run), 0.15);
+  assert.equal(run.task.index, idx, "被偷袭：还停在休息点");
+  assert.ok(run.party.every(h => hpSum(h) === 1), "恢复还没发生");
+  assert.throws(() => R.restAtNode(run, "long"), /遭遇战/);
+});
+
+test("遭遇战：敌人 3 枚代币不分地区；我方跳过第一回合；胜利每人 +50×等级 经验，然后长休", () => {
+  const { c, run, R } = fresh(["kolt", "helu"], "AM2");
+  atRest(run, R);
+  run.ambushChance = 1;
+  R.restAtNode(run, "long");
+  const spec = R.battleSpec(run);
+  assert.equal(spec.kind, "ambush");
+  assert.equal(spec.encounter.tokens, 3);
+  c.BattleSim.setup(spec);
+  assert.equal(c.S.state.ambush, true);
+  c.startCombat();
+  const players = c.S.state.units.filter(u => u.isPlayer && !u.hidden);
+  assert.ok(players.length && players.every(u => (u.ap || 0) === 0 && (u.bonus || 0) === 0), "第一回合没有行动点");
+  const idx = run.task.index;
+  const notes = R.finishBattle(run, "win");
+  const xp = R.CONFIG.ambush.xpPerLevel * spec.level;
+  assert.ok(notes.some(t => t.includes(`遭遇战胜利经验 +${xp}`)), notes.join("\n"));
+  assert.ok(notes.some(t => /长休/.test(t)), "赢了照常长休");
+  assert.equal(R.hoursAwake() <= R.CONFIG.hours.travel, true);
+  assert.ok(!run.ambush);
+  assert.equal(run.task.index, idx + 1);
+});
+
+test("遭遇战撤退：这次不长休，直接离开休息点", () => {
+  const { run, R } = fresh(["kolt", "helu"], "AM3");
+  atRest(run, R);
+  run.ambushChance = 1;
+  R.restAtNode(run, "long");
+  const spec = R.battleSpec(run);
+  const idx = run.task.index;
+  const H0 = R.hoursAwake();
+  R.finishBattle(run, "retreat");
+  assert.ok(!run.ambush);
+  assert.equal(run.task.index, idx + 1);
+  assert.ok(R.hoursAwake() > H0, "没有长休");
+  assert.ok(spec);
+});
+
+test("守夜：有人守夜一定不会被偷袭；守夜的人不恢复，短休次数和「长休一次」的技能也不刷新", () => {
+  const { c, run, R } = fresh(["kolt", "helu"], "AM4");
+  atRest(run, R);
+  run.ambushChance = 1;
+  const S = c.S;
+  S.LEDGER.shortUsed = { kolt: 2, helu: 2 };
+  S.LEDGER.restOnce = { kolt: { rally: 1 }, helu: { rally: 1 } };
+  const opts = R.watchOptions(run);
+  assert.ok(opts.some(w => w.kit === "kolt" && !w.weapon));
+  assert.ok(opts.some(w => w.weapon), "武器人也能守夜");
+  R.restAtNode(run, "long", { watch: "kolt" });
+  assert.ok(!run.ambush, "有人守夜不会被偷袭");
+  assert.ok(Math.abs(R.ambushChance(run) - 1) < 1e-9 || R.ambushChance(run) === 1);
+  const kolt = run.party.find(h => h.kit === "kolt");
+  const helu = run.party.find(h => h.kit === "helu");
+  assert.equal(hpSum(kolt), 1, "守夜的人不恢复");
+  assert.ok(hpSum(helu) > 1, "其他人照常恢复");
+  assert.equal(S.LEDGER.shortUsed.kolt, 2);
+  assert.equal(S.LEDGER.shortUsed.helu, undefined);
+  assert.deepEqual(plain(S.LEDGER.restOnce), { kolt: { rally: 1 } });
+  assert.throws(() => { run.task.nodes[run.task.index] = { type: "rest", done: false }; R.restAtNode(run, "long", { watch: "nobody" }); }, /守夜/);
+});
+
+test("武器人守夜：他的伤势和耐久不恢复，别人的照常", () => {
+  const { c, run, R } = fresh(["kolt", "helu"], "AM5");
+  atRest(run, R);
+  const w = R.watchOptions(run).find(x => x.weapon);
+  const S = c.S;
+  S.LEDGER.weapons = { [w.kit]: [{ type: "flesh", current: 1 }], other: [{ type: "flesh", current: 1 }] };
+  S.LEDGER.dur[w.kit] = 1;
+  R.restAtNode(run, "long", { watch: w.kit });
+  assert.deepEqual(Object.keys(S.LEDGER.weapons), [w.kit]);
+  assert.equal(S.LEDGER.dur[w.kit], 1);
+});
+
+test("遭遇战分数 ×2，和速杀、无伤的倍率加算", () => {
+  const c = H.load();
+  const S = c.S;
+  c.BattleSim.setup({ party: ["kolt"], enemies: [{ id: "crow", lv: 1, zone: 1 }] });
+  S.state.ambush = true;
+  S.state.turnNo = 9;
+  S.state.battleScore = { total: 1000, parts: {}, hurt: true };
+  const fb = c.applyFinishBonus();
+  assert.equal(fb.mult, 2);
+  assert.equal(S.state.battleScore.total, 2000);
+  c.BattleSim.setup({ party: ["kolt"], enemies: [{ id: "crow", lv: 1, zone: 1 }] });
+  S.state.ambush = true;
+  S.state.turnNo = 1;
+  S.state.battleScore = { total: 1000, parts: {}, hurt: false };
+  const fb2 = c.applyFinishBonus();
+  assert.equal(fb2.mult, 1 + 1 + 0.5 + 1);   // 速杀 ×2 + 无伤 0.5 + 遭遇战 1
+});
+
+test("全队集结是「长休一次」：跨战斗不刷新，长休后才能再用", () => {
+  const c = H.load();
+  const S = c.S;
+  S.LEDGER.reset();
+  const a = { kit: "tou", resources: {} };
+  assert.equal(c.roleOnce(a, "rally", 1), true);
+  a.resources = {};   // 新的一场战斗
+  assert.equal(c.roleOnce(a, "rally", 1), false);
+  c.ledgerLongRest({ force: true, hours: 8 }, []);
+  assert.equal(c.roleOnce(a, "rally", 1), true);
 });
 
 test("战场配置物与地形：越往后越常见；带天气的任务里每一场都是那种天气", () => {

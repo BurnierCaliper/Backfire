@@ -195,7 +195,6 @@ const Rogue = (function () {
 
   function startAct(run) {
     run.actDay = 0;
-    run.bossRested = false;
     run.main = makeTask(run, ROGUE_MAIN_TASK, "main");
     run.main.done = false;
     log(run, `第 ${run.act} 幕 · ${region(run)}：主线「${run.main.goal.split("。")[0]}」，期限 ${C.daysPerAct} 天。`);
@@ -213,6 +212,8 @@ const Rogue = (function () {
         types.push(pickWeighted(tpl.mix || { battle: 1 }, prev && prev !== "battle" ? [prev] : null));
       }
       types.push(tpl.elite ? "elite" : "battle");
+      // 每个任务正好一个休息点（能长休的地方）：插在中间，不在第一站、也不在最后一站
+      types.splice(between(1, types.length - 1), 0, "rest");
       const weather = rollTaskWeather(run);
       insertChecks(types);
       return {
@@ -587,6 +588,21 @@ const Rogue = (function () {
       return { kind: "boss", title: `第 ${run.act} 幕 · 首领战`, party: partyKits, encounter: enc,
         level: Math.max(1, levelRange(run)[1] + (C.bossLevelOffset || 0)), seed: key, before, retreat: C.bossRetreat };
     }
+    if (run.ambush && run.stage === "task") {
+      // 遭遇战：3 枚代币，敌人不分地区、不分阵营；天气照这一站
+      const key = `${run.seed}:ambush-fight:${run.taskNo}:${run.task.index}`;
+      const enc = withRng(key, () => {
+        const opt = { region: region(run), anyRegion: true, mixed: true, tokens: AMB.tokens };
+        if (run.task.weather) opt.weather = run.task.weather;
+        return rollEncounter(opt);
+      });
+      enc.features = withRng(key + ":field", () => rollBattlefield(run, false, enc.zoneMode));
+      const ambushBefore = () => { before(); state.ambush = true; };
+      return {
+        kind: "ambush", title: `${run.task.name} · 遭遇战（休息点被偷袭）`,
+        party: partyKits, encounter: enc, level: enemyLevel(run, run.task.diff), seed: key, before: ambushBefore, retreat: true
+      };
+    }
     const node = currentNode(run);
     if (!node || (node.type !== "battle" && node.type !== "elite")) return null;
     const key = `${run.seed}:fight:${run.taskNo}:${run.task.index}`;
@@ -627,8 +643,37 @@ const Rogue = (function () {
         notes.push(`${u.name} 单人模式战斗经验 +${SOLO.battleXp}。`);
       });
     }
+    const ambush = !!run.ambush && !boss;
+    if (ambush && outcome === "win") {
+      // 遭遇战胜利：每人额外 50 × 敌人等级 经验
+      const lv = enemyLevel(run, run.task.diff);
+      const xp = AMB.xpPerLevel * lv;
+      run.party.forEach(h => {
+        const u = findKit(h.kit, state.units);
+        if (!u || u.dead) return;
+        u.xp = (u.xp || 0) + xp;
+        notes.push(`${u.name} 遭遇战胜利经验 +${xp}。`);
+      });
+    }
     captureParty(run, notes);
     run.party.forEach(h => { delete h.pendingBreaks; });   // 检定受伤的击破已在开场结算
+    if (ambush) {
+      run.ambush = null;
+      if ((outcome === "lose" || !run.party.length) && C.wipeEndsRun) {
+        notes.push("团灭。本局结束。");
+        endRun(run, false, "在休息点被偷袭，全队倒下。");
+        return logAll(run, notes);
+      }
+      if (outcome === "win") {
+        notes.push("打退了偷袭的敌人，总算可以睡下了。");
+        doLongRest(run, notes);
+      } else {
+        notes.push("撤退：没能在这里休息，连夜离开。");
+        passHours(run, NODE.battle.hours, notes);
+      }
+      if (run.stage !== "over") advanceNode(run, notes);
+      return logAll(run, notes);
+    }
     const node = currentNode(run);
     passHours(run, boss ? NODE.elite.hours : NODE[(node && node.type) || "battle"].hours, notes);
     if (run.stage === "over") return logAll(run, notes);
@@ -798,34 +843,16 @@ const Rogue = (function () {
     return withParty(run, () => longRestNeeds({})).out;
   }
   function canLongRest(run) { return restPlan(run).ok; }
-  function doLongRest(run, notes) {
-    const r = withParty(run, () => ledgerLongRest({ hours: C.hours.longRest }, notes));
+  function doLongRest(run, notes, watch) {
+    const r = withParty(run, () => ledgerLongRest({ hours: C.hours.longRest, watch: watch || null }, notes));
     notes.push(...r.notes);
     return r.out && r.out.ok;
   }
-  /** 进入下一站之前可以先长休一次（已定：补给多、连战压力大）。每一站 / 首领战前各一次。
-   *  和休息点的长休一样：消耗水和食物，血量、耐久回满，清空力竭；不推进本幕天数。 */
+  /** 进下一站 / 首领战之前能短休的地方（休息点自己有短休按钮） */
   function restSpot(run) {
-    if (run.stage === "boss") return run;             // 首领战前：记在 run.bossRested
+    if (run.stage === "boss") return run;
     const node = currentNode(run);
     return node && node.type !== "rest" ? node : null;
-  }
-  function canRestBefore(run) {
-    const spot = restSpot(run);
-    if (!spot) return { ok: false, why: "这里不能长休" };
-    if (run.stage === "boss" ? run.bossRested : spot.restedBefore) return { ok: false, why: "这一站前已经长休过了" };
-    const plan = restPlan(run);
-    if (!plan.ok) return { ok: false, why: "补给不足：" + plan.lack.join("，") };
-    return { ok: true, plan };
-  }
-  function restBeforeNode(run) {
-    const can = canRestBefore(run);
-    if (!can.ok) throw new Error(can.why);
-    const notes = ["出发前先找地方好好睡一觉。"];
-    doLongRest(run, notes);
-    if (run.stage === "boss") run.bossRested = true;
-    else restSpot(run).restedBefore = true;
-    return logAll(run, notes);
   }
 
   /** 进下一站 / 首领战之前也能短休（手册：1 小时，每人每天 2 次，熊兽人 1 次）。不限这一站几次，只看今天的次数 */
@@ -847,13 +874,47 @@ const Rogue = (function () {
     return logAll(run, notes);
   }
 
-  function restAtNode(run, mode) {
+  /* ---------- 遭遇战：休息点长休时被偷袭 ---------- */
+  const AMB = C.ambush;
+  /** 下一次在休息点长休被偷袭的概率 */
+  function ambushChance(run) {
+    return run.ambushChance == null ? AMB.base : Number(run.ambushChance);
+  }
+  /** 可以守夜的人：还活着的角色，以及他们的武器人 */
+  function watchOptions(run) {
+    return withParty(run, () => {
+      const out = [];
+      partyHeroes().filter(h => !h.dead).forEach(h => {
+        out.push({ kit: h.kit, name: h.name, weapon: false });
+        (h.linkedKits || []).forEach(k => out.push({ kit: k, name: weaponName(k), weapon: true, owner: h.name }));
+      });
+      return out;
+    }).out;
+  }
+
+  /** 休息点。mode：long / short / leave。长休可以带 opt.watch（守夜者 kit） */
+  function restAtNode(run, mode, opt) {
     const node = currentNode(run);
     if (!node || node.type !== "rest") throw new Error("当前节点不是休息点");
+    if (run.ambush) throw new Error("正在遭遇战中");
     const notes = [];
     if (mode === "long") {
       if (!canLongRest(run)) throw new Error("补给不够长休");
-      doLongRest(run, notes);
+      const watch = (opt && opt.watch) || null;
+      if (watch && !watchOptions(run).some(w => w.kit === watch)) throw new Error("守夜的人不在队伍里");
+      const chance = ambushChance(run);
+      const hit = !watch && withRng(`${run.seed}:ambush:${run.taskNo}:${run.task.index}`, () => Math.random() < chance);
+      if (hit) {
+        // 恢复之前就被偷袭：先打，赢了再长休
+        run.ambushChance = AMB.base;
+        run.ambush = { chance };
+        notes.push(`长休时被偷袭！（这次的概率 ${Math.round(chance * 100)}%）还没来得及恢复，敌人就摸了上来。`);
+        return logAll(run, notes);
+      }
+      run.ambushChance = Math.min(1, chance + AMB.step);
+      notes.push(watch ? "有人守夜，这一夜平安无事。" : "这一夜平安无事。");
+      notes.push(`下次长休被偷袭的概率 ${Math.round(run.ambushChance * 100)}%。`);
+      doLongRest(run, notes, watch);
     } else if (mode === "leave") {
       // 不休息直接走：拿一笔奎支，不花时间
       const pay = Number(C.restSkipKuizhi) || 0;
@@ -1296,7 +1357,8 @@ const Rogue = (function () {
     battleSpec, applyPartyToField, finishBattle,
     checkInfo, checkChance, checkOdds, attemptCheck, skipCheck, heroProfs,
     role2Options, soloBattleInfo,
-    restPlan, canLongRest, restAtNode, leaveNode, canRestBefore, restBeforeNode, canShortRestBefore, shortRestBeforeNode,
+    restPlan, canLongRest, restAtNode, leaveNode, canShortRestBefore, shortRestBeforeNode,
+    ambushChance, watchOptions,
     buy, canShop, shopItemName, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
     presentSmiths, smithInfo, claimBlueprint, installBlueprint, blueprintById, weaponModsOf,
     smithQuote, introduceSmith,

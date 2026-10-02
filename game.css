@@ -1630,3 +1630,7 @@ body:not([data-screen="battle"]) .g-rank { display: none !important; }
 /* 评价 D（C 线以下） */
 .g-rank[data-grade="D"] .rk-grade { color: #8a8f96; opacity: .85; }
 .grade-badge.g-D b, .stats-grade b.g-D { color: #8a8f96; }
+
+/* 休息点：守夜人选择 */
+.r-watch { display: flex; align-items: center; gap: 8px; margin: 6px 0 10px; font-size: 13px; }
+.r-watch select { font: inherit; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--line, #444); background: var(--panel, transparent); color: inherit; max-width: 100%; }

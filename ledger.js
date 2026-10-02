@@ -67,13 +67,14 @@ const LEDGER = {
   heroes: {},          // 角色 kit → { layers:[当前值], shp, dying, dead, upOnShp }
   weapons: {},         // 武器人 kit → [{ type, current }]：武器人的伤势跨战斗保留，长休回满
   shortUsed: {},       // 角色 kit → 今天已用短休次数
+  restOnce: {},        // 角色 kit → { 技能 key: 次数 }：「长休一次」的技能，长休才刷新
 
   /** 存进队伍档案 */
   save() {
     return JSON.parse(JSON.stringify({
       day: this.day, hours: this.hours, dur: this.dur,
       heroes: this.heroes, weapons: this.weapons, shortUsed: this.shortUsed,
-      water: ledgerWater()
+      restOnce: this.restOnce, water: ledgerWater()
     }));
   },
   load(s) {
@@ -84,10 +85,23 @@ const LEDGER = {
     this.heroes = s.heroes || {};
     this.weapons = s.weapons || {};
     this.shortUsed = s.shortUsed || {};
+    this.restOnce = s.restOnce || {};
     if (s.water != null) setLedgerWater(s.water);
   },
   reset() { this.load({}); }
 };
+
+/* ===== 「长休一次」的技能 ===== */
+const REST_ONCE_KEYS = ["rally"];
+/** 用一次「长休一次」的技能。用完了返回 false */
+function useRestOnce(kit, key, limit) {
+  LEDGER.restOnce = LEDGER.restOnce || {};
+  const row = LEDGER.restOnce[kit] = LEDGER.restOnce[kit] || {};
+  const n = Number(row[key]) || 0;
+  if (n >= (limit || 1)) return false;
+  row[key] = n + 1;
+  return true;
+}
 
 /* ===== 水 ===== */
 function ledgerWater() {
@@ -337,6 +351,13 @@ function defaultFoodFor() {
   return FOOD_ORDER.find(id => bagCount(id) > 0) || FOOD_ORDER[0];
 }
 
+function unitNameOf(kit) {
+  const h = partyHeroes().find(x => x.kit === kit);
+  if (h) return h.name;
+  return typeof weaponName === "function" ? weaponName(kit) : kit;
+}
+
+/** 长休。plan.watch：守夜者的 kit（角色或武器人），他这次不恢复 */
 function ledgerLongRest(plan, notes) {
   notes = notes || [];
   plan = plan || {};
@@ -355,8 +376,12 @@ function ledgerLongRest(plan, notes) {
   } else {
     notes.push(`长休 ${hours} 小时（主持人强制，不扣补给）。`);
   }
+  // 守夜：选一名角色或武器人整夜放哨。他不吃长休的恢复，也不刷新短休次数和「长休一次」的技能
+  const watch = plan.watch || null;
+  if (watch) notes.push(`${unitNameOf(watch)} 守夜：这次长休不恢复，短休次数和「长休一次」的技能也不刷新。`);
   let bags = bagCount("sleepbag");
   partyHeroes().filter(h => !h.dead).forEach(h => {
+    if (h.kit === watch) { (h.linkedKits || []).forEach(k => { if (k !== watch) restoreDurability(k); }); return; }
     (h.layers || []).forEach(l => { l.current = l.max; });
     h.dying = false;
     h.upOnShp = false;
@@ -374,12 +399,15 @@ function ledgerLongRest(plan, notes) {
       ? `${h.name} 血量回满，坚毅生命慢慢恢复${why ? `（${why}有帮助）` : ""}。`
       : `${h.name} 血量回满，坚毅 ${before} → ${h.shp}` +
         `（${hours} 小时 × ${perHour}${hasBag ? "，含睡袋" : ""}${foodBonus ? `，食物 +${foodBonus}` : ""}）。`);
-    (h.linkedKits || []).forEach(k => restoreDurability(k));
+    (h.linkedKits || []).forEach(k => { if (k !== watch) restoreDurability(k); });
   });
-  LEDGER.weapons = {};
-  notes.push("全部武器耐久回满，武器人伤势痊愈。");
+  const keepW = watch && LEDGER.weapons && LEDGER.weapons[watch];
+  LEDGER.weapons = keepW ? { [watch]: keepW } : {};
+  notes.push(watch ? "除守夜者外，武器耐久回满，武器人伤势痊愈。" : "全部武器耐久回满，武器人伤势痊愈。");
   LEDGER.hours = 0;
-  LEDGER.shortUsed = {};
+  const keep = (tab) => (watch && tab && tab[watch] != null ? { [watch]: tab[watch] } : {});
+  LEDGER.shortUsed = keep(LEDGER.shortUsed);
+  LEDGER.restOnce = keep(LEDGER.restOnce);
   LEDGER.day += 1;
   notes.push(`进入第 ${LEDGER.day} 天。`);
   ledgerCapture();
@@ -398,6 +426,7 @@ function ledgerRestoreAll(notes) {
   });
   LEDGER.weapons = {};
   LEDGER.shortUsed = {};
+  LEDGER.restOnce = {};
   notes.push("主持人：全员血量、坚毅、耐久复原。");
   ledgerCapture();
   return notes;

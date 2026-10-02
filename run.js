@@ -301,7 +301,9 @@ function rollEncounter(opt) {
   // 5% 混战：不受阵营限制
   const mixed = opt.mixed != null ? !!opt.mixed : (Math.random() < CHANCE_MIXED);
 
-  let pool = regionPool(region);
+  // anyRegion：敌人不分地区（遭遇战）；region 仍决定天气
+  const poolRegion = opt.anyRegion ? null : region;
+  let pool = regionPool(poolRegion);
   let faction = null;
   if (!mixed) {
     const fs = opt.faction ? [opt.faction] : regionFactions(region);
@@ -309,7 +311,7 @@ function rollEncounter(opt) {
     const allow = alliesOf(faction);
     pool = pool.filter(k => allow.indexOf(ENEMY_INFO[k].faction) >= 0);
   }
-  if (!pool.length) pool = regionPool(region);
+  if (!pool.length) pool = regionPool(poolRegion);
 
   const enemies = [];
   let left = tokens;
@@ -323,7 +325,7 @@ function rollEncounter(opt) {
   }
 
   return finishEncounter({
-    name: mixed ? `${region}·混战` : `${region}·${faction}`,
+    name: opt.anyRegion ? (mixed ? "遭遇·混战" : `遭遇·${faction}`) : mixed ? `${region}·混战` : `${region}·${faction}`,
     region, faction: mixed ? "混战" : faction,
     tier: enemies.some(e => enemyTokens(e.preset) >= 2 && !(ENEMY_INFO[e.preset] || {}).pack) ? "elite" : "normal",
     tokens, mixed, extraToken: extra,

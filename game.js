@@ -1756,6 +1756,14 @@
       await askOpeningChoices();
       pushUndo("开始战斗");
       startCombat();
+      if (state.ambush) {
+        // 遭遇战：我方第一回合被跳过，直接进敌人回合
+        phaseCard("遭遇战 · 被偷袭", "enemy");
+        refreshAll();
+        await wait(900);
+        endTurn();
+        return;
+      }
       phaseCard("战斗开始", "player");
       autoSelect(true);
       refreshAll();
@@ -1871,7 +1879,7 @@
     // 战斗评分：胜利时先算速杀（1 / 2 / 3 回合内 ×2 / ×1.5 / ×1.2）和无伤（+100，倍率 +0.5，与速杀加算），再定评价
     if (G.lastOutcome === "win" && typeof applyFinishBonus === "function") {
       const fb = applyFinishBonus();
-      const what = [fb.speedMult > 1 ? `速杀（第 ${state.turnNo} 回合打完）×${fb.speedMult}` : "", fb.flawless ? `无伤 +${SCORE_FLAWLESS.points}、×${1 + SCORE_FLAWLESS.mult}` : ""].filter(Boolean);
+      const what = [fb.speedMult > 1 ? `速杀（第 ${state.turnNo} 回合打完）×${fb.speedMult}` : "", fb.flawless ? `无伤 +${SCORE_FLAWLESS.points}、×${1 + SCORE_FLAWLESS.mult}` : "", fb.ambush ? `遭遇战 ×${SCORE_AMBUSH_MULT}` : ""].filter(Boolean);
       if (fb.extra > 0) addLogPhase(`${what.join(" + ")}：整场分数 ×${fb.mult}（+${fb.extra}）`);
     }
     // 按评价把这场的战斗经验乘上去（S ×2 / A ×1.5 / B ×1.2 / C ×1）
@@ -2128,6 +2136,7 @@
     state.openingBreaks = null;
     state.solo = null;
     state.scoreAct = null;
+    state.ambush = false;
     state.retreated = false;
     state.lootByRank = null;
     state.lootByKit = null;

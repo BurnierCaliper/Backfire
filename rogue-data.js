@@ -52,6 +52,11 @@ const ROGUE_CONFIG = {
   // 休息点不休息、直接离开：省下的时间换成一笔奎支（打零工 / 捡到的东西）
   restSkipKuizhi: 250,
 
+  // 遭遇战：在任务的休息点长休时可能被偷袭（城里休整不会）
+  //   初始 15%，每次长休没被偷袭 +5%，被偷袭后回到 15%；有人守夜一定不会被偷袭
+  //   敌人代币 3、不分地区随机；我方跳过第一回合；分数 ×2（和速杀、无伤加算）；胜利每人额外 50 × 敌人等级 经验
+  ambush: { base: 0.15, step: 0.05, tokens: 3, xpPerLevel: 50 },
+
   // 时间（小时）：计入「距上次长休」，用来判力竭（手册：20/40/60/80 小时）
   hours: {
     travel: 3,          // 占位：每走到下一个节点
@@ -232,6 +237,7 @@ const ROGUE_CLINIC = {
 /* 支线任务模板（文字与数值都是占位）。报酬和补给是 ROGUE_CONFIG.perHeadBase 人队的量
  *   nodes    节点数范围 [最少, 最多]
  *   mix      中间节点的抽取权重（最后一个节点固定是战斗，elite: true 则是精英战）
+ *            休息点不在这里抽：每个任务固定额外插一个（不在第一站、也不在最后一站）
  *   days     需要几天
  *   diff     敌人等级额外 +几
  *   reward   完成奖励：奎支、每人经验
@@ -241,10 +247,10 @@ const ROGUE_TASKS = [
     mix: { battle: 5, shop: 1 },
     reward: { kuizhi: 1500, xp: 15 }, supply: { water: 1000, items: { food_liquid: 2 } } },
   { kind: "escort", name: "护送", goal: "护送一批货穿过{region}", nodes: [3, 5], days: 2, diff: 0,
-    mix: { battle: 4, rest: 2, shop: 1, smith: 1, clinic: 1 },
+    mix: { battle: 4, shop: 1, smith: 1, clinic: 1 },
     reward: { kuizhi: 3000, xp: 25 }, supply: { water: 3000, items: { food_liquid: 4 } } },
   { kind: "scout",  name: "侦察", goal: "摸清{region}深处的动静", nodes: [3, 4], days: 1, diff: 1,
-    mix: { battle: 3, rest: 1, smith: 1 },
+    mix: { battle: 3, smith: 1 },
     reward: { kuizhi: 2000, xp: 20 }, supply: { water: 1500, items: { food_can: 2 } } },
   { kind: "bounty", name: "悬赏", goal: "在{region}找到并击败悬赏目标", nodes: [2, 3], days: 1, diff: 1, elite: true,
     mix: { battle: 3, shop: 1 },
@@ -254,7 +260,7 @@ const ROGUE_TASKS = [
 const ROGUE_MAIN_TASK = {
   kind: "main", name: "主线", goal: "在本幕结束前完成关键目标，期限到了还没完成，本局结束。本幕的天数用完时迎战首领。",
   nodes: [4, 5], days: 3, diff: 1, elite: true, key: true,
-  mix: { battle: 4, rest: 2, shop: 1, smith: 1, clinic: 1 },
+  mix: { battle: 4, shop: 1, smith: 1, clinic: 1 },
   reward: { kuizhi: 5000, xp: 40 }, supply: { water: 4000, items: { food_liquid: 6 } }
 };
 

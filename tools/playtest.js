@@ -275,10 +275,8 @@ function boardPick() {
 function prepareFor(boss) {
   levelChoices();
   repairs();
-  // 进战斗前：最低的人 < 55% 或全队 < 70% → 能长休就长休；否则有人 < 80% 就短休
-  if ((minHpRatio() < 0.55 || partyHpRatio() < 0.7 || boss) && R.canRestBefore(run).ok) {
-    if (boss || minHpRatio() < 0.9) { tryDo("战前长休", () => R.restBeforeNode(run)); ev(`${boss ? "首领战" : "战斗"}前长休`); }
-  } else if (minHpRatio() < 0.8 && R.canShortRestBefore(run).ok) {
+  // 进战斗前只能短休（长休只在任务的休息点）：有人 < 80% 就短休
+  if ((minHpRatio() < 0.8 || boss) && R.canShortRestBefore(run).ok) {
     tryDo("战前短休", () => R.shortRestBeforeNode(run));
   }
   levelChoices();
@@ -373,9 +371,17 @@ while (run.stage !== "over" && steps++ < 2000) {
     if (node.type === "battle" || node.type === "elite") {
       prepareFor(false);
       fight(node.type);
+    } else if (node.type === "rest" && run.ambush) {
+      levelChoices();
+      ev("休息点长休时被偷袭：遭遇战");
+      fight("ambush");
     } else if (node.type === "rest") {
       levelChoices();
-      if (partyHpRatio() < 0.85 && R.canLongRest(run)) tryDo("休息点长休", () => R.restAtNode(run, "long"));
+      // 被偷袭的概率高了（≥ 30%）就安排血最多的人守夜
+      const watch = R.ambushChance(run) >= 0.3
+        ? run.party.slice().sort((a, b) => R.heroView(run, b).hp / R.heroView(run, b).hpMax - R.heroView(run, a).hp / R.heroView(run, a).hpMax)[0].kit
+        : null;
+      if (R.canLongRest(run)) tryDo("休息点长休", () => R.restAtNode(run, "long", { watch }));
       else if (partyHpRatio() < 0.85) tryDo("休息点短休", () => R.restAtNode(run, "short"));
       else tryDo("休息点离开", () => R.restAtNode(run, "leave"));
     } else if (node.type === "shop") {
