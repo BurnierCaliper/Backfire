@@ -1300,14 +1300,14 @@ function enemyPresets() {
       return unitOf(this.name, lv, [
         { type: "shield", hp: scaleHp(15 + d * 4, p) },
         { type: "armor", hp: scaleHp(17 + d * 5, p) }
-      ], 5 + milestone(lv, 2) - milestone(3, 2), 9 + d * 3, { kit: "patrolboat", flying: true, range: "ranged", dice: [1, 6], element: "electric" });
+      ], 5 + milestone(lv, 5) - milestone(3, 5), 9 + d * 3, { kit: "patrolboat", flying: true, range: "ranged", dice: [1, 6], element: "electric" });
     }},
     { id: "spreader", name: "播撒者", build(lv, p) {
       const d = Math.max(0, lv - 3);
       return unitOf(this.name, lv, [
         { type: "shield", hp: scaleHp(10 + d * 3, p) },
         { type: "armor", hp: scaleHp(22 + d * 6, p) }
-      ], 4 + milestone(lv, 2) - milestone(3, 2), 7 + d * 2, { kit: "spreader", flying: true, range: "ranged", dice: [1, 6], element: "acid" });
+      ], 4 + milestone(lv, 5) - milestone(3, 5), 7 + d * 2, { kit: "spreader", flying: true, range: "ranged", dice: [1, 6], element: "acid" });
     }},
     { id: "watchcrow", name: "观测鸦", build(lv, p) {
       const d = Math.max(0, lv - 4);
@@ -1321,7 +1321,7 @@ function enemyPresets() {
       return unitOf(this.name, lv, [
         { type: "armor", hp: scaleHp(15 + d * 3, p) },
         { type: "sand", hp: scaleHp(20 + d * 4, p) }
-      ], 4 + milestone(lv, 2) - milestone(3, 2), 8 + d * 3, { kit: "dustbody", flying: true, range: "melee", dice: [1, 6], element: "physical" });
+      ], 4 + milestone(lv, 5) - milestone(3, 5), 8 + d * 3, { kit: "dustbody", flying: true, range: "melee", dice: [1, 6], element: "physical" });
     }},
     { id: "sand_aggregate", name: "沙灵聚合体", build(lv, p) {
       const d = Math.max(0, (lv || 1) - 1);
