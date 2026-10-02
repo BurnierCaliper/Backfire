@@ -3159,9 +3159,18 @@
     };
     $("g-save").onclick = () => { renderSaveSheet(); $("g-save-sheet").classList.add("show"); };
     $("g-save-close").onclick = () => $("g-save-sheet").classList.remove("show");
-    $("g-stats").onclick = openStats;
-    $("g-review-stats").onclick = openStats;
-    $("g-stats-close").onclick = () => $("g-stats-sheet").classList.remove("show");
+    $("g-stats").onclick = () => { G.statsFromResult = false; openStats(); };
+    // 结算面板上的「战场数据」：先收起结算面板，关掉数据表时再回到结算面板
+    $("g-review-stats").onclick = () => {
+      $("g-result").classList.remove("show");
+      G.statsFromResult = true;
+      openStats();
+    };
+    $("g-stats-close").onclick = () => {
+      $("g-stats-sheet").classList.remove("show");
+      if (G.statsFromResult && G.ended) $("g-result").classList.add("show");
+      G.statsFromResult = false;
+    };
     $("g-stats-copy").onclick = (e) => {
       const btn = e.currentTarget;
       copyText(statsText(), ok => { const t = btn.textContent; btn.textContent = ok ? "已复制" : "复制失败"; setTimeout(() => { btn.textContent = t; }, 1200); });

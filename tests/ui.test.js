@@ -179,6 +179,32 @@ test("战斗：灯的普通攻击能选中危墙；打中时危墙抖动闪白�
   assert.deepEqual(o.errors, []);
 });
 
+test("结算面板点「战场数据」：结算面板收起，关掉数据表后回到结算面板", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await newTrpg(page);
+  await startBattle(page, () => {
+    Math.random = () => 0.999;   // 不让格挡、闪避之类的随机判定干扰
+    const foes = state.units.filter(u => !u.isPlayer);
+    state.units = state.units.filter(u => u.isPlayer || u === foes[0]);
+    foes[0].layers.forEach(l => { l.current = 1; });
+  });
+  await selectHero(page, "ruby");
+  await page.keyboard.press("1");
+  await page.waitForFunction(() => GAME.arm && GAME.arm.mode === "unit");
+  const foe = await page.evaluate(() => state.units.find(u => !u.isPlayer).id);
+  await page.click(`.unit-wrap[data-id="${foe}"]`);
+  await page.waitForFunction(() => GAME.ended, null, { timeout: 15000 });
+  await page.waitForSelector("#g-result.show");
+  await page.click("#g-review-stats");
+  assert.equal(await page.evaluate(() => document.getElementById("g-result").classList.contains("show")), false, "结算面板应该收起");
+  assert.ok(await page.isVisible("#g-stats-sheet"), "数据表应该显示");
+  await page.click("#g-stats-close");
+  assert.equal(await page.evaluate(() => document.getElementById("g-result").classList.contains("show")), true, "关掉数据表回到结算面板");
+  assert.equal(await page.isVisible("#g-stats-sheet"), false);
+  assert.deepEqual(o.errors, []);
+});
+
 test("战斗：打配置物时攻击者前冲、配置物受击闪白", async (t) => {
   const o = await open(t); if (!o) return;
   const { page } = o;
