@@ -8241,10 +8241,8 @@ function runSkillInner(id, optRun) {
         if (!tgt) { lines.push("先选到达后攻击的敌人。"); return paintSkillLog(lines.join("\n")); }
         const dist = zoneDist(a.zone, dest, state.zoneMode);
         a.zone = dest;
-        tgt.instant = tgt.instant || {};
-        tgt.instant.shift = true;
+        // 技能描述：atk 物理 + 震荡，每移 1 格 +1 击破（没有错位）
         tgt.statuses.shockwave = true;
-        popStatus(tgt, "shift");
         popStatus(tgt, "shockwave");
         hitOne(a, tgt, { element: "physical", mult: 1, baseBreak: 1 + dist, atk });
         lines.push(`全速撞击移动 ${dist} 区，震荡，击破 ${1 + dist}。`);

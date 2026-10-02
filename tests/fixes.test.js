@@ -159,3 +159,24 @@ test("绯秋普攻的射程按刀势：拔刀 / 胁构只打同区，居合可�
   assert.ok(c.totalHp(foe) < hp0, "居合移动后打到");
   assert.equal(Number(h.zone), 2);
 });
+
+test("夕夏全速撞击：物理伤害 + 震荡 + 每移 1 格 +1 击破，不附带错位", () => {
+  const H = require("./headless");
+  const c = H.load();
+  c.BattleSim.setup({ party: ["xia"], enemies: [{ id: "thug_knife", lv: 3, zone: 2 }] });
+  c.startCombat();
+  const st = c.S.state;
+  const xia = c.findKit("xia", st.units), foe = st.units.find(u => !u.isPlayer);
+  xia.zone = 1; foe.zone = 2;
+  xia.level = 3;
+  xia.resources.engine = true;
+  xia.ap = 1;
+  const layer0 = foe.layers[0].type;
+  st.attackerId = xia.id; st.targetId = foe.id;
+  st.skillFlow = { id: "xia_ram", picks: { dest: 2, target: foe.id } };
+  c.runSkill("xia_ram");
+  assert.equal(xia.zone, 2);
+  assert.equal(foe.statuses.shockwave, true);
+  assert.ok(!(foe.instant && foe.instant.shift), "不应有错位");
+  assert.equal(foe.layers[0].type, layer0, "外层没有被互换");
+});
