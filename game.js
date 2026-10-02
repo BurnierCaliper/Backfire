@@ -1085,12 +1085,14 @@
     try { fn(); } finally { state.combatPhase = prev; }
   }
 
+  /** d100 检定动画（协助格挡、事件里的熟练项检定共用）：数字滚动后停在 spec.roll，按 spec.ok 变色。
+   *  spec：{ who, chance, roll, ok, note, okText, failText } */
   function playBlockCheck(spec) {
     return new Promise(resolve => {
       const box = $("g-check");
       const num = $("g-check-num");
       $("g-check-who").textContent = spec.who || "协助格挡";
-      $("g-check-rate").textContent = "成功率 " + spec.chance + "%" + (spec.note ? " · " + spec.note : "");
+      $("g-check-rate").textContent = (spec.rateText || "成功率 " + spec.chance + "%") + (spec.note ? " · " + spec.note : "");
       $("g-check-hint").textContent = "检定中";
       num.textContent = String(1 + Math.floor(Math.random() * 100));
       num.className = "check-num";
@@ -1109,7 +1111,7 @@
         }
         num.textContent = String(target);
         num.classList.add(spec.ok ? "ok" : "fail");
-        $("g-check-hint").textContent = spec.ok ? "格挡成功" : "格挡失败";
+        $("g-check-hint").textContent = spec.ok ? (spec.okText || "格挡成功") : (spec.failText || "格挡失败");
         realTimeout(() => {
           box.classList.remove("show");
           G.skip = false;
@@ -3373,6 +3375,7 @@
   G.snapAll = snapAll;
   G.setupBattle = setupBattle;
   G.startRogueBattle = startRogueBattle;
+  G.playCheck = playBlockCheck;   // 单局事件的检定也用同一个动画
   G.rememberCampaign = rememberCampaign;
   G.doUndo = doUndo;
   G.loadCampaignMem = loadCampaignMem;

@@ -359,6 +359,8 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **事件检定加上检定动画**（`rogue.js · attemptCheck` 记下每颗 d100，`rogue-ui.js · doCheck`，`game.js · GAME.playCheck`）：单局里的熟练项检定事件，点人检定后先播和协助格挡一样的 d100 检定动画（数字滚动、停在掷出的点数，成功金色 / 失败红色），写明「需要 ≤ 成功线（最终成功率）」，再显示结果。优势 / 劣势各掷两颗、人类「迎难直上」失败后的重掷，都按顺序逐颗播放。成功线 = 基础成功率 × 100（困难二级熟练是 ≤ 50）；概率和以前完全一样。
+
 - **单人模式：支援次数跨战斗继承**（`rogue.js · finishBattle / soloBattleInfo`，`app.js · soloSupportInfo`）：一场战斗结束时（胜利、撤退都算）没用完的支援次数存进本局（`run.supportBank`），下一场开场就能用；本场新挣的（每 250 分一次）照常往上加。没有上限。每名伙伴仍然是一场只能叫一次，下一场又能叫。单局界面的伙伴栏显示「支援存量 N 次」。
 
 - **单人模式：倒地不判负，真正死亡才结束**（`app.js · soloDownCheck / heroStillFighting`，`sim.js · outcome`，`game.js · checkEnd`）

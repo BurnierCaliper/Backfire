@@ -337,6 +337,11 @@ test("单局：熟练项检定节点——每个人的熟练等级和成功率�
   assert.match(await page.textContent('[data-check="ruby"]'), /二级熟练[\s\S]*75%[\s\S]*可重掷/);
   assert.equal(await page.isDisabled('[data-check="yuito"]'), true);
   await page.click('[data-check="ruby"]');
+  // 和协助格挡一样的检定动画：d100 滚动后停在掷出的点数，写明成功线
+  await page.waitForSelector("#g-check.show", { timeout: 5000 });
+  assert.match(await page.textContent("#g-check-who"), /瑞比 · 困难「数据操作」检定/);
+  assert.match(await page.textContent("#g-check-rate"), /需要 ≤ 50/);
+  await page.waitForFunction(() => /检定(成功|失败)/.test(document.querySelector("#g-check-hint").textContent), null, { timeout: 10000 });
   // 下一站也可能刚好是检定（随机生成的主线），所以等日志，不等按钮消失
   await page.waitForFunction(() => /困难「数据操作」检定/.test(document.querySelector("#run-log").textContent));
   assert.equal(await page.evaluate(() => SaveStore.loadRun().task.index), 1, "前进到下一站");

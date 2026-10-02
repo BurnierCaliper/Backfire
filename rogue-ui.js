@@ -476,6 +476,32 @@
     });
   }
 
+  /** 熟练项检定：先结算，再按掷出的 d100 播和协助格挡一样的检定动画，最后刷新界面 */
+  let checking = false;
+  async function doCheck(kit) {
+    if (checking) return;
+    let notes;
+    try { notes = Rogue.attemptCheck(run, kit); } catch (e) { act(() => { throw e; }); return; }
+    const lc = run.lastCheck;
+    run.lastCheck = null;
+    if (lc && window.GAME && typeof GAME.playCheck === "function") {
+      checking = true;
+      try {
+        for (const r of lc.rolls) {
+          if (r.roll == null) continue;   // 必定成功：不用掷
+          const line = Math.round(lc.line * 10) / 10;
+          await GAME.playCheck({
+            who: `${lc.name} · ${lc.diffName}「${lc.prof}」检定${r.label ? " · " + r.label : ""}`,
+            rateText: `需要 ≤ ${line}（最终成功率 ${Math.round(lc.chance * 1000) / 10}%）`,
+            roll: r.roll, ok: r.ok,
+            okText: "检定成功", failText: "检定失败"
+          });
+        }
+      } finally { checking = false; }
+    }
+    act(() => notes);
+  }
+
   function finishRun() {
     if (!run || run._counted) return;
     run._counted = true;
@@ -525,7 +551,7 @@
     on("r-rest-skip", () => act(() => Rogue.restAtNode(run, "leave")));
     on("r-short-before", () => act(() => Rogue.shortRestBeforeNode(run)));
     on("r-leave", () => act(() => Rogue.leaveNode(run)));
-    body.querySelectorAll("[data-check]").forEach(b => { b.onclick = () => act(() => Rogue.attemptCheck(run, b.dataset.check)); });
+    body.querySelectorAll("[data-check]").forEach(b => { b.onclick = () => doCheck(b.dataset.check); });
     on("r-check-skip", () => act(() => Rogue.skipCheck(run)));
     on("r-camp", () => act(() => Rogue.camp(run)));
     on("r-next", () => act(() => Rogue.nextAct(run)));

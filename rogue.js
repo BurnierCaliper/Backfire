@@ -806,17 +806,32 @@ const Rogue = (function () {
     const profText = o.level ? `「${info.prof}」${["", "一", "二", "三"][o.level]}级熟练` : `没有「${info.prof}」熟练`;
     const mod = o.adv ? "，优势" : o.dis ? "，劣势" : "";
     let ok = false, rerolled = false;
+    // 每颗骰子记成 d100：掷出 ≤ 成功线（基础成功率 × 100）就算成功。画面按这些点数播检定动画
+    const line = o.base * 100;
+    const rolls = [];
     withRng(`${run.seed}:checkroll:${run.taskNo}:${run.task.index}:${kit}`, () => {
-      const once = () => {
-        if (o.base >= 1) return true;
-        const a = Math.random() < o.base;
-        if (!o.adv && !o.dis) return a;
-        const b = Math.random() < o.base;
+      const d100 = (label) => {
+        const r = Math.random();
+        const hit = r < o.base;
+        let roll = Math.floor(r * 100) + 1;
+        // 成功线不是整数（12.5）时，边上那一点按实际结果显示，概率不变
+        if (hit && roll > line) roll = Math.max(1, Math.floor(line));
+        if (!hit && roll <= line) roll = Math.floor(line) + 1;
+        rolls.push({ roll, ok: hit, label });
+        return hit;
+      };
+      const once = (tag) => {
+        if (o.base >= 1) { rolls.push({ roll: null, ok: true, label: tag + "必定成功" }); return true; }
+        if (!o.adv && !o.dis) return d100(tag);
+        const a = d100(tag + (o.adv ? "优势 · 第 1 颗" : "劣势 · 第 1 颗"));
+        const b = d100(tag + (o.adv ? "优势 · 第 2 颗" : "劣势 · 第 2 颗"));
         return o.adv ? a || b : a && b;
       };
-      ok = once();
-      if (!ok && o.reroll) { rerolled = true; ok = once(); }
+      ok = once("");
+      if (!ok && o.reroll) { rerolled = true; ok = once("迎难直上重掷 · "); }
     });
+    run.lastCheck = { name: o.name, prof: info.prof, diffName: info.diffName, line, chance: o.chance, rolls, ok,
+      adv: !!o.adv, dis: !!o.dis };
     notes.push(`${o.name} 进行${info.diffName}「${info.prof}」检定（${profText}${mod}，成功率 ${Math.round(o.chance * 1000) / 10}%）：` +
       (rerolled ? `失败，迎难直上重掷——${ok ? "成功" : "还是失败"}。` : ok ? "成功。" : "失败。"));
     const node = currentNode(run);

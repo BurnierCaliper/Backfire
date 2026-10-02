@@ -902,3 +902,22 @@ test("升级时的「一个自选熟练项」：新学一项或升一级，最�
   assert.equal(g.pending.filter(p => p.type === "prof").length, 2);
   assert.equal(g.profs["医疗"], 2);
 });
+
+test("检定记下每颗 d100（供画面播检定动画）：点数 ≤ 成功线才算这颗成功，和结果一致", () => {
+  for (let i = 0; i < 30; i++) {
+    const { run, R } = fresh(["ruby", "yuito"], "CK" + i);
+    R.acceptTask(run, "main");
+    forceCheck(run, { diff: i % 2 ? "hard" : "extreme", prof: "数据操作", injure: false, reward: 100 });
+    R.attemptCheck(run, "ruby");
+    const lc = run.lastCheck;
+    assert.ok(lc && lc.rolls.length >= 1);
+    lc.rolls.forEach(r => {
+      assert.ok(r.roll >= 1 && r.roll <= 100);
+      assert.equal(r.ok, r.roll <= lc.line, JSON.stringify(lc));
+    });
+    // 人类：失败后重掷一次
+    const firstOk = lc.rolls[0].ok;
+    assert.equal(lc.rolls.length, firstOk ? 1 : 2);
+    assert.equal(lc.ok, lc.rolls.some(r => r.ok));
+  }
+});
