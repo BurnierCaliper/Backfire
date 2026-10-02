@@ -231,3 +231,33 @@ test("单人：自动打的时候倒地会起身继续打（不会直接判负�
   const r = c.BattleSim.run({ maxRounds: 30 });
   assert.ok(hero.upOnShp || hero.dead || r.winner === "player", "倒地后起身了：" + JSON.stringify(r.winner));
 });
+
+test("支援次数跨战斗继承：这场没用完的带到下一场", () => {
+  const { c, run, st } = soloRun("BANK1");
+  const R = c.Rogue;
+  let { hero } = soloBattle(c, run, [{ id: "thug_knife", lv: 1, zone: 2 }]);
+  st.battleScore.total = 260 * 3;   // 本场挣到 3 次
+  assert.equal(c.soloSupportInfo().left, 3);
+  R.finishBattle(run, "win");
+  assert.equal(run.supportBank, 3);
+  // 下一场：开场就有 3 次，分数从 0 开始
+  run.task.nodes[run.task.index] = { type: "battle", done: false };
+  const spec = R.battleSpec(run);
+  delete spec.encounter; spec.enemies = [{ id: "thug_knife", lv: 1, zone: 1 }];
+  c.BattleSim.setup(spec); c.startCombat();
+  hero = c.findKit(run.party[0].kit, c.S.state.units);
+  const info = c.soloSupportInfo();
+  assert.equal(info.score, 0);
+  assert.equal(info.left, 3);
+  assert.equal(c.skillRequirementError(hero, "solo_support"), null);
+  // 用掉一次，结算后剩 2
+  const s2 = c.S.state;
+  const foe = s2.units.find(u => !u.isPlayer);
+  s2.attackerId = hero.id; s2.targetId = foe.id;
+  s2.skillFlow = { id: "solo_support", actorId: hero.id, picks: { partner: "kolt", target: foe.id }, index: 99 };
+  try { c.runSkill("solo_support"); } finally { s2.skillFlow = null; }
+  assert.deepEqual(plain(s2.solo.used), ["kolt"]);
+  s2.battleScore.total = 0;
+  R.finishBattle(run, "retreat");
+  assert.equal(run.supportBank, 2, "撤退也照样带走剩下的次数");
+});

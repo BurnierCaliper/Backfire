@@ -4453,7 +4453,7 @@ function pruneAssistQueue() {
 /* ---------- 单人模式（rogue-data.js · ROGUE_SOLO） ----------
  * state.solo = { heroKit, partners, level, weaponLevel, used }，由单局的 battleSpec.before 写进来；其他模式为 null。
  *   · 主角每回合 2 行动点；可以给自己协助格挡、接自己打出的失衡做协助攻击
- *   · 支援：本场每得到 250 分多一次机会，花 1 行动点叫一名伙伴登场，对一名敌人打一次他的协助攻击，
+ *   · 支援：每得到 250 分多一次机会（没用完的次数带到之后的战斗），花 1 行动点叫一名伙伴登场，对一名敌人打一次他的协助攻击，
  *     再追加 3 点同属性击破，然后退场；每名伙伴一场只能叫一次。伙伴的等级和武器等级跟主角一样。 */
 function soloCfg() {
   return typeof ROGUE_SOLO !== "undefined" ? ROGUE_SOLO
@@ -4469,8 +4469,9 @@ function soloSupportInfo() {
   const score = state.battleScore ? Math.max(0, Math.floor(state.battleScore.total || 0)) : 0;
   const step = soloCfg().supportScore;
   const earned = Math.floor(score / step);
-  const left = Math.max(0, earned - so.used.length);
-  return { score, earned, left, next: (earned + 1) * step, partners: so.partners.filter(k => so.used.indexOf(k) < 0) };
+  const bank = Math.max(0, Number(so.bank) || 0);   // 之前战斗没用完、带过来的次数
+  const left = Math.max(0, bank + earned - so.used.length);
+  return { score, earned, bank, left, next: (earned + 1) * step, partners: so.partners.filter(k => so.used.indexOf(k) < 0) };
 }
 /** 单人模式：主角倒地不算输。还能用坚毅生命起身就接着打（下个玩家回合点「起身」）；
  *  起不来（坚毅生命耗尽、力竭）才算真正死亡，这时战斗失败、本局结束。 */

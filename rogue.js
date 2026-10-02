@@ -627,13 +627,21 @@ const Rogue = (function () {
     if (!run.solo || !run.party[0]) return null;
     const h = run.party[0];
     const wl = Math.max(1, ...Object.values(h.weaponLevels || {}).map(Number).filter(x => x > 0), 1);
-    return { heroKit: h.kit, partners: run.partners.slice(), level: h.level || 1, weaponLevel: wl, used: [] };
+    return { heroKit: h.kit, partners: run.partners.slice(), level: h.level || 1, weaponLevel: wl, used: [], bank: Math.max(0, Number(run.supportBank) || 0) };
   }
 
   /** 战斗结束后调用。outcome：win / lose / retreat */
   function finishBattle(run, outcome) {
     const notes = [];
     const boss = run.stage === "boss";
+    // 单人：这场没用完的支援次数带到之后的战斗
+    if (run.solo && state.solo && typeof soloSupportInfo === "function") {
+      const info = soloSupportInfo();
+      if (info) {
+        run.supportBank = info.left;
+        if (info.left) notes.push(`支援次数还剩 ${info.left} 次，带到之后的战斗。`);
+      }
+    }
     ledgerAfterBattle(notes);                 // 手册：耐久结算、濒死恢复到 1 点生命、记下武器人伤势
     if (run.solo && outcome === "win") {
       // 单人模式：击杀经验照常，每场胜利再固定 +50
