@@ -68,35 +68,44 @@ test("首领架势是原来的 60%（向下取整），人数加成也打六折�
   assert.ok(boss.defMax >= 6);
 });
 
-test("首领要攒满 2 个晕眩标记才晕：第一次只记标记、架势回满、不给协助攻击；第二次才晕", () => {
-  const { c, st } = field(["ruby", "kolt"], [{ id: "outlaw_king", lv: 1, zone: 1 }]);
+test("首领失衡和普通失衡一样（协助攻击、失衡分），只是记晕眩标记：没攒满 2 个，回合开始恢复架势照常行动；攒满才跳过回合", () => {
+  const { c, st } = field(["ruby", "kolt"], [{ id: "outlaw_king", lv: 1, zone: 2 }]);
   const king = st.units.find(u => u.kit === "outlaw_king");
   const ruby = c.findKit("ruby", st.units);
+  ruby.zone = 1;
+  // 第一次失衡：用瑞比的普通攻击打空架势
+  king.def = 1;
   st.assistQueue = [];
-  const notes = [];
-  c.dealBreak(king, 99, "physical", notes, "测试");
-  assert.equal(king.stunned, false, "第一次不晕");
+  st.attackerId = ruby.id; st.targetId = king.id;
+  c.runSkill("ruby_aa");
+  assert.equal(king.stunned, true, "照常进入失衡");
   assert.equal(king.stunMarks, 1);
-  assert.equal(king.def, king.defMax, "架势回满");
-  assert.equal(st.assistQueue.length, 0, "不给协助攻击");
-  assert.match(notes.join("\n"), /【晕眩标记】.*标记 1\/2/);
-  c.dealBreak(king, 99, "physical", notes, "测试");
-  assert.equal(king.stunned, true, "第二次晕了");
-  assert.equal(king.stunMarks, 0, "晕了以后标记清零");
-  assert.ok(st.assistQueue.some(j => j.targetId === king.id), "这次给协助攻击");
-  // 晕眩结束后重新攒
-  c.recoverFromStun(king, []);
-  c.dealBreak(king, 99, "physical", [], "测试");
+  assert.ok(st.assistQueue.some(j => j.targetId === king.id), "照常给协助攻击");
+  assert.equal(st.battleScore.parts.stagger, 50, "照常算打出失衡的分");
+  const log = () => st.logPages.map(p => p.lines.map(l => l.text || l).join("\n")).join("\n");
+  assert.match(log(), /晕眩标记 1\/2/);
+  st.assistQueue = [];
+  // 敌人回合开始：标记没攒满，恢复架势、照常行动
+  c.endPlayerTurn();
   assert.equal(king.stunned, false);
-  assert.equal(king.stunMarks, 1);
-  // 其他来源的晕眩（直接被设成晕眩，例如不稳 / 高压场地）也只记标记：行动结束时兜底
-  king.stunned = true;
-  st.attackerId = ruby.id; st.targetId = null;
-  c.runSkill("ruby_prep");
-  assert.equal(king.stunned, true, "第二个标记：晕了");
-  // 普通敌人一次就晕
+  assert.equal(king.def, king.defMax);
+  assert.ok(king.ap >= 1, "这回合照常行动");
+  assert.equal(king.stunMarks, 1, "标记留着");
+  c.endEnemyTurn();
+  // 第二次失衡
+  c.dealBreak(king, 99, "physical", [], "测试");
+  assert.equal(king.stunned, true);
+  assert.equal(king.stunMarks, 2);
+  assert.ok(st.assistQueue.some(j => j.targetId === king.id));
+  st.assistQueue = [];
+  c.endPlayerTurn();
+  assert.equal(king.ap, 0, "攒满了：真正晕眩，跳过这回合");
+  assert.equal(king.stunMarks, 0, "晕过以后标记清零");
+  assert.equal(king.def, king.defMax, "晕眩结束照常回满架势");
+  // 普通敌人照旧：一失衡就跳过下个回合
   const f2 = field(["ruby"], [{ id: "thug_knife", lv: 1, zone: 1 }]);
   const thug = f2.st.units.find(u => !u.isPlayer);
   f2.c.dealBreak(thug, 99, "physical", [], "测试");
-  assert.equal(thug.stunned, true);
+  f2.c.endPlayerTurn();
+  assert.equal(thug.ap, 0);
 });

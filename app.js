@@ -1679,7 +1679,9 @@ function startEnemyPhase() {
   settleBossStuns(notes);
   state.units.forEach(u => {
     if (u.isPlayer || u.hidden || u.dead) return;
-    if (u.stunned) {
+    if (u.stunned && bossShrugStun(u, notes)) {
+      refreshEnemyEconomy(u);
+    } else if (u.stunned) {
       recoverFromStun(u, notes);
       u.ap = 0; u.apMax = 0; u.bonus = 0; u.bonusMax = 0;
       notes.push(`${u.name} 敌人回合开始时晕眩：解除晕眩并回满架势，本回合不获得行动点。`);
@@ -3716,7 +3718,7 @@ function recoverFromStun(u, notes) {
   notes = notes || [];
   u.stunned = false;
   u._imbalanceLock = false;
-  u._bossStunHeld = false;
+  u._bossMarked = false;
   if (u.noPosture || u.kit === "ufo_leg") return;
   if (typeof canRestorePosture === "function" && !canRestorePosture(u)) {
     notes.push(`${u.name} 晕眩结束。千钧：无法恢复架势。`);
@@ -4490,8 +4492,6 @@ function clearStunOnDown(u) {
 
 function queueAssistAttack(breaker, broken) {
   if (!broken) return;
-  // 首领只记了晕眩标记、没真的晕：不给协助攻击
-  if (settleBossStun(broken) === "mark" || (isBossUnit(broken) && !broken.stunned)) return;
   if (typeof isDownProtected === "function" && isDownProtected(broken)) return;
   const hpLeft = typeof totalHp === "function" ? totalHp(broken) : 1;
   if (broken.dead || (hpLeft <= 0 && !broken.upOnShp)) return;
@@ -7390,42 +7390,50 @@ function renderLog() {
 }
 
 /* ---------- 首领的晕眩标记（已定） ----------
- * 首领受到任何来源的晕眩（架势被打空、不稳、冰冻……）先记 1 个晕眩标记、架势回满，不晕；
- * 攒满 BOSS_STUN_MARKS 个才真正晕眩（随后照常跳过回合、给对面协助攻击），晕眩后标记清零。
- * 拦在 imbalanceLine / queueAssistAttack（几乎所有晕眩都会经过），行动结束、敌人回合开始、回合结束再各扫一遍兜底。 */
+ * 首领的架势被打空时和普通失衡完全一样（协助攻击、打出失衡的分数、冰属性加伤、「打进失衡时」的被动……），
+ * 只是每次失衡记 1 个晕眩标记：到它自己的回合开始时，标记没满 BOSS_STUN_MARKS 个就恢复架势、照常行动；
+ * 满了才真正晕眩（跳过这个回合），之后标记清零。目的是加快首领战的节奏。 */
 const BOSS_STUN_MARKS = 2;
 function isBossUnit(u) {
   return !!(u && !u.isPlayer && typeof enemyRankOf === "function" && enemyRankOf(u) === "boss");
 }
-/** 刚被打进晕眩的首领：记标记。返回 "mark"（只记了标记，没晕）、"stun"（真的晕了）或 null（不是首领 / 没晕） */
-function settleBossStun(u, notes) {
-  if (!isBossUnit(u)) return null;
-  if (!u.stunned) { u._bossStunHeld = false; return null; }
-  if (u._bossStunHeld) return "stun";
-  u.stunMarks = (Number(u.stunMarks) || 0) + 1;
-  if (u.stunMarks < BOSS_STUN_MARKS) {
-    u.stunned = false;
-    u._imbalanceLock = false;
-    const cap = typeof postureCap === "function" ? postureCap(u) : (Number(u.defMax) || 0);
-    if (cap > 0) u.def = cap;
-    if (notes) notes.push(bossMarkLine(u));
-    return "mark";
-  }
-  u.stunMarks = 0;
-  u._bossStunHeld = true;
-  return "stun";
+/** 首领这次失衡记一个标记（同一次失衡只记一次）。返回刚记上的标记数，没记返回 0 */
+function noteBossBreak(u) {
+  if (!isBossUnit(u) || !u.stunned || u._bossMarked) return 0;
+  u._bossMarked = true;
+  u.stunMarks = Math.min(BOSS_STUN_MARKS, (Number(u.stunMarks) || 0) + 1);
+  return u.stunMarks;
 }
-function bossMarkLine(u) {
-  return `【晕眩标记】${u.name} 架势归零，但首领要攒满 ${BOSS_STUN_MARKS} 个标记才会晕眩：标记 ${u.stunMarks}/${BOSS_STUN_MARKS}，架势回满 ${u.def}/${u.defMax}。`;
+function bossMarkText(u) {
+  return u.stunMarks >= BOSS_STUN_MARKS
+    ? `晕眩标记 ${u.stunMarks}/${BOSS_STUN_MARKS}：攒满了，下个回合真正晕眩。`
+    : `晕眩标记 ${u.stunMarks}/${BOSS_STUN_MARKS}：首领要攒满 ${BOSS_STUN_MARKS} 个才会晕眩，下个回合恢复架势照常行动。`;
 }
-/** 兜底：场上所有首领过一遍 */
+/** 兜底：没经过 imbalanceLine 的失衡（直接设成晕眩的那些）也记上标记 */
 function settleBossStuns(notes) {
-  (state.units || []).forEach(u => { if (isBossUnit(u) && !u.dead) settleBossStun(u, notes); });
+  (state.units || []).forEach(u => {
+    if (isBossUnit(u) && !u.dead && noteBossBreak(u) && notes) notes.push(`${u.name} ${bossMarkText(u)}`);
+  });
+}
+/** 敌人回合开始时：失衡中的首领，标记没攒满就只恢复架势、照常行动。返回 true 表示这样处理了 */
+function bossShrugStun(u, notes) {
+  if (!isBossUnit(u) || !u.stunned) return false;
+  noteBossBreak(u);
+  if ((Number(u.stunMarks) || 0) >= BOSS_STUN_MARKS) {
+    u.stunMarks = 0;          // 真正晕眩：这回合照常跳过，标记清零
+    return false;
+  }
+  recoverFromStun(u, notes);
+  notes.push(`${u.name} 失衡结束（晕眩标记 ${u.stunMarks}/${BOSS_STUN_MARKS}，没攒满），这回合照常行动。`);
+  return true;
 }
 
 function imbalanceLine(unit) {
-  if (settleBossStun(unit) === "mark") return bossMarkLine(unit);
-  return `【失衡】${unit.name} 架势归零，进入失衡。直到其下一次行动前跳过回合。${isBossUnit(unit) ? `（攒满 ${BOSS_STUN_MARKS} 个晕眩标记）` : ""}`;
+  if (isBossUnit(unit)) {
+    noteBossBreak(unit);
+    return `【失衡】${unit.name} 架势归零，进入失衡。${bossMarkText(unit)}`;
+  }
+  return `【失衡】${unit.name} 架势归零，进入失衡。直到其下一次行动前跳过回合。`;
 }
 
 /* ===== 技能使用前提 =====================================================
