@@ -243,7 +243,7 @@ function enemySkillList(u) {
     outlaw_king: [
       { id: "en_king_atk", label: "攻击命令" },
       { id: "en_king_kill", label: "处死命令" },
-      { id: "en_king_hold", label: "回防命令" }
+      { id: "en_king_hold", label: "回防命令（筑废铁墙）" }
     ],
     ufo_body: [],
     ufo_leg: [],
@@ -873,15 +873,29 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
     return true;
   }
   if (id === "en_king_hold") {
-    const thugs = state.units.filter(u => !u.hidden && (u.kit === "thug_knife" || u.kit === "thug_hammer" || u.kit === "bandit_boss" || u.kit === "outlaw_king"));
-    thugs.forEach(u => { u.zone = a.zone; });
-    const n = thugs.length;
-    const s = typeof leveledSides === "function" ? leveledSides(a.level, 4) : 4;
-    const hp = Math.floor(diceExpect(1, s, 0) * n);
-    state.gaps["1-2"] = state.gaps["1-2"] || emptyGap();
-    state.gaps["1-2"].type = "wall";
-    state.gaps["1-2"].hp = hp;
-    lines.push(`狂徒回防到 ${a.zone} 区，筑起废铁墙（耐久 ${hp}）。`);
+    // 主持人手册：所有人回到他所在区，消耗行动点筑废铁墙（1d4×狂徒人数装甲，每五级升骰）；
+    // 他用电击霰弹对另一区全员 atk+1d8/2 电击。
+    // 废铁墙照川川的铁壁做：放在王所在区，同区敌方单位挨我方攻击行动时只有墙吃这一下，撑到下一个敌人回合开始。
+    const crew = state.units.filter(u => isOutlawThug(u));
+    let spent = 0;
+    crew.forEach(u => {
+      u.zone = a.zone;
+      if ((Number(u.ap) || 0) > 0) { u.ap -= 1; spent += 1; }   // 还没行动的狂徒筑墙花掉 1 行动点
+    });
+    const n = crew.length;
+    if (n) {
+      const s = typeof leveledSides === "function" ? leveledSides(a.level, 4) : 4;
+      const r = takeDice(1, s, 0);
+      const hp = Math.max(1, Math.floor(r.total * n));
+      state.props = (state.props || []).filter(p => !(p.kind === "scrapwall" && Number(p.zone) === Number(a.zone)));
+      const wall = makeProp("scrapwall", a.zone, a.level);
+      wall.hp = wall.maxHp = hp;
+      state.props.push(wall);
+      lines.push(`${n} 名狂徒回防到 ${a.zone} 区${spent ? `（${spent} 名还没行动的各花掉 1 行动点）` : ""}，筑起废铁墙：装甲 ${hp}（${r.text} × ${n}）。` +
+        `同区敌人挨我方攻击行动时只打墙一次，撑到下一个敌人回合开始。`);
+    } else {
+      lines.push("身边已经没有狂徒可以回防，废铁墙没能筑起来。");
+    }
     allPlayers().filter(u => Number(u.zone) !== Number(a.zone)).forEach(u => {
       aa(u, { element: "electric", mult: 0.5, diceN: 1, diceS: 8, baseBreak: 1 });
     });

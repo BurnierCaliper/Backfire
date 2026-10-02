@@ -27,7 +27,8 @@ function propKindName(kind) {
     acid: "酸液桶",
     scrap: "碎渣机炮",
     turret: "防卫自律炮台",
-    ironwall: "铁壁"
+    ironwall: "铁壁",
+    scrapwall: "废铁墙"
   })[kind] || kind;
 }
 
@@ -66,6 +67,11 @@ function makeProp(kind, zone, level) {
     base.hp = base.maxHp = 1;
     base.movable = false;
     base.faction = "player";
+  }
+  if (kind === "scrapwall") {   // 亡命之王「回防命令」：耐久由命令掷骰决定
+    base.hp = base.maxHp = 1;
+    base.movable = false;
+    base.faction = "enemy";
   }
   return base;
 }

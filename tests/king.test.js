@@ -94,3 +94,76 @@ test("王在被挟持时被杀：强盗头子继位，atk / def 翻倍，狂徒�
   assert.equal(boss.def, def * 2);
   assert.ok(!c.enemySkillList(hammer).some(s => s.id === "en_thug_mutiny"));
 });
+
+/* ---------- 回防命令：废铁墙（照川川的铁壁做） ---------- */
+function holdField() {
+  const f = field();
+  const { st, king, knife, hammer, kolt, helu } = f;
+  knife.zone = 2; hammer.zone = 2;          // 狂徒散在外面
+  kolt.zone = 2; helu.zone = 2;             // 我方在另一区
+  king.ap = 1;
+  st.combatPhase = "enemy";
+  st.attackerId = king.id; st.targetId = null;
+  f.c.runSkill("en_king_hold");
+  st.combatPhase = "player";
+  return Object.assign(f, { wall: (st.props || []).find(p => p.kind === "scrapwall") });
+}
+
+test("回防命令：狂徒回到王所在区，在区里筑废铁墙（1d4 × 狂徒人数装甲），不再动区间", () => {
+  const { st, king, boss, knife, hammer, wall } = holdField();
+  assert.ok(wall, "应该有一堵废铁墙");
+  assert.equal(wall.zone, king.zone);
+  assert.equal(wall.faction, "enemy");
+  [boss, knife, hammer].forEach(u => assert.equal(u.zone, king.zone));
+  assert.ok(wall.hp >= 3 && wall.hp <= 12 && wall.hp % 3 === 0, "1d4 × 3 名狂徒：" + wall.hp);
+  assert.ok(!st.gaps["1-2"] || st.gaps["1-2"].type !== "wall", "不再把 1-2 间隔变成危墙");
+});
+
+test("废铁墙：我方一次攻击行动打同区敌人，只有墙吃这一下（装甲克制照算），其余同区伤害被挡住", () => {
+  const { c, st, king, knife, hammer, kolt, wall } = holdField();
+  wall.hp = wall.maxHp = 40;
+  const hpK = c.totalHp(knife), hpH = c.totalHp(hammer);
+  c.beginActionAcc(kolt);
+  const r1 = c.dealTo(kolt, knife, { atk: 10, mult: 1, element: "acid", baseBreak: 1, flags: { action: true, blockResolved: true, block: "none" } });
+  assert.equal(c.totalHp(knife), hpK, "狂徒没挨打");
+  assert.equal(wall.hp, 40 - 15, "酸打装甲 +50%：10 → 15");
+  assert.equal(r1.res.total, 15, "返回的是打在墙上的这一下");
+  // 同一个行动的第二下（AOE 的另一个目标）：被挡住，墙也不再扣
+  c.dealTo(kolt, hammer, { atk: 10, mult: 1, element: "acid", baseBreak: 1, flags: { action: true, blockResolved: true, block: "none" } });
+  assert.equal(c.totalHp(hammer), hpH);
+  assert.equal(wall.hp, 25);
+  // 下一个行动又打一次墙
+  c.beginActionAcc(kolt);
+  c.dealTo(kolt, king, { atk: 10, mult: 1, element: "physical", baseBreak: 1, flags: { action: true, blockResolved: true, block: "none" } });
+  assert.equal(wall.hp, 25 - 7, "物理打装甲 −25%：10 → 7");
+  // 不是攻击行动（状态、场地伤害）不挡
+  c.applyTypedDot(knife, 3, "fire", [], "测试");
+  assert.ok(c.totalHp(knife) < hpK);
+});
+
+test("废铁墙被打塌就移出战场，之后正常挨打；撑过玩家回合的在敌人回合开始时撤掉", () => {
+  const { c, st, knife, kolt, wall } = holdField();
+  wall.hp = wall.maxHp = 3;
+  c.beginActionAcc(kolt);
+  c.dealTo(kolt, knife, { atk: 10, mult: 1, element: "physical", baseBreak: 0, flags: { action: true, blockResolved: true, block: "none" } });
+  assert.ok(!(st.props || []).some(p => p.kind === "scrapwall"), "打塌了");
+  const hp = c.totalHp(knife);
+  c.beginActionAcc(kolt);
+  c.dealTo(kolt, knife, { atk: 10, mult: 1, element: "physical", baseBreak: 0, flags: { action: true, blockResolved: true, block: "none" } });
+  assert.ok(c.totalHp(knife) < hp);
+  // 再筑一堵，敌人回合开始时撤掉
+  const f2 = holdField();
+  assert.ok(f2.wall);
+  f2.c.startEnemyPhase();
+  assert.ok(!(f2.st.props || []).some(p => p.kind === "scrapwall"));
+});
+
+test("废铁墙不挡敌人打我方；铁壁照旧只挡敌人", () => {
+  const { c, st, king, kolt, wall } = holdField();
+  kolt.zone = king.zone;
+  const hp = c.totalHp(kolt);
+  c.beginActionAcc(king);
+  c.dealTo(king, kolt, { atk: 5, mult: 1, element: "physical", baseBreak: 0, flags: { action: true, blockResolved: true, block: "none" } });
+  assert.ok(c.totalHp(kolt) < hp);
+  assert.equal(wall.hp, wall.maxHp);
+});

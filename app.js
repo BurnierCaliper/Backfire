@@ -1658,6 +1658,11 @@ function startPlayerPhase() {
 function startEnemyPhase() {
   const notes = ["—— 敌人回合 ——"];
   state.combatPhase = "enemy";
+  // 废铁墙（回防命令）撑过了一个玩家回合，敌人回合开始时撤掉
+  (state.props || []).filter(p => p.kind === "scrapwall").forEach(p => {
+    notes.push(`${p.zone} 区的废铁墙撑过了玩家回合（剩 ${p.hp}/${p.maxHp}），撤掉了。`);
+  });
+  state.props = (state.props || []).filter(p => p.kind !== "scrapwall");
   state.units.forEach(u => {
     if (u.kit === "torque" && u.resources && u.resources.acidCharge != null && !u.hidden && !u.dead) {
       const z = Number(u.resources.acidCharge);
@@ -2235,36 +2240,38 @@ function noteSideDamage(amount, label, unit) {
   }
 }
 
-function ironWallIn(zone) {
-  return (state.props || []).find(p => p.kind === "ironwall" && Number(p.zone) === Number(zone) && p.hp > 0);
+/* ---------- 屏障：替同区一方挡攻击行动的配置物 ----------
+ *   铁壁（川川，我方）：挡敌方攻击行动，撑到回合结束；被击破时川川受 3 击破
+ *   废铁墙（亡命之王「回防命令」，敌方）：挡我方攻击行动，撑到下一个敌人回合开始
+ * 同区这一方的单位挨一次攻击行动：只有墙吃这一下（按装甲层算克制），这次行动打在同区的其余伤害全被挡住。 */
+const BARRIER_SIDE = { ironwall: "player", scrapwall: "enemy" };
+function barrierIn(zone, side) {
+  return (state.props || []).find(p => BARRIER_SIDE[p.kind] === side && Number(p.zone) === Number(zone) && p.hp > 0);
 }
+function ironWallIn(zone) { return barrierIn(zone, "player"); }
 
 function breakIronWall(p, notes) {
   notes = notes || [];
   if (!p || p._brokeWall) return notes;
   p._brokeWall = true;
   p.hp = 0;
+  state.props = (state.props || []).filter(x => x.id !== p.id);
+  if (p.kind === "scrapwall") {
+    notes.push("废铁墙被打塌，移出战场。");
+    return notes;
+  }
   const c = findKit("chuan", state.units);
   if (c) {
     dealBreak(c, 3, "physical", notes, "铁壁被击破");
   }
-  state.props = (state.props || []).filter(x => x.id !== p.id);
   notes.push("铁壁碎裂并移出战场。");
   return notes;
 }
 
-function absorbIronWall(attacker, zone, opt) {
-  const notes = [];
-  const p = ironWallIn(zone);
-  if (!p) return null;
-  state.actionWallHit = state.actionWallHit || {};
-  if (state.actionWallHit[p.id]) {
-    notes.push("铁壁已拦截本次行动，其余同区伤害被挡住。");
-    return { blocked: true, already: true, notes };
-  }
-  state.actionWallHit[p.id] = true;
-  const dummy = unitOf("铁壁", p.level || 1, [{ type: "armor", hp: p.hp }], 999, 0, { noPosture: true });
-  dummy.zone = zone;
+/** 一下攻击打在墙上：墙是一层装甲，照常算克制 / 天气 / 场地 */
+function hitBarrier(p, attacker, opt) {
+  const dummy = unitOf(p.name, p.level || 1, [{ type: "armor", hp: p.hp }], 999, 0, { noPosture: true });
+  dummy.zone = p.zone;
   dummy.def = 999;
   dummy.defMax = 999;
   dummy.stunned = false;
@@ -2285,15 +2292,28 @@ function absorbIronWall(attacker, zone, opt) {
     phaseStep: Number(state.phaseStep),
     zoneMode: state.zoneMode,
     attackerField: state.fields[attacker && attacker.zone] || {},
-    targetField: state.fields[zone] || {},
+    targetField: state.fields[p.zone] || {},
     dist: 0,
     atkRange: "any"
   });
   const dmg = Math.floor(res.total || 0);
   p.hp = Math.max(0, p.hp - dmg);
-  notes.push(`铁壁替同区承受本次攻击：${dmg} 伤害 → 剩余 ${p.hp}/${p.maxHp}。`);
+  const notes = [`${p.name}替同区承受本次攻击：${dmg} 伤害 → 剩余 ${p.hp}/${p.maxHp}。`];
   if (p.hp <= 0) notes.push(...breakIronWall(p, []));
-  return { blocked: true, already: false, notes, dmg, res };
+  return { dmg, res, notes };
+}
+
+/** side：被保护的一方（player = 铁壁，enemy = 废铁墙） */
+function absorbIronWall(attacker, zone, opt, side) {
+  const p = barrierIn(zone, side || "player");
+  if (!p) return null;
+  state.actionWallHit = state.actionWallHit || {};
+  if (state.actionWallHit[p.id]) {
+    return { blocked: true, already: true, notes: [`${p.name}已拦截本次行动，其余同区伤害被挡住。`] };
+  }
+  state.actionWallHit[p.id] = true;
+  const h = hitBarrier(p, attacker, opt);
+  return { blocked: true, already: false, notes: h.notes, dmg: h.dmg, res: h.res };
 }
 
 function noteActionHit(target, res) {
@@ -2895,6 +2915,9 @@ function damageProp(p, opt, attacker) {
     lose = element === "harmonic" ? 3 : 1;
   } else if (p.kind === "scrap") {
     lose = 1;
+  } else if (p.kind === "scrapwall" || p.kind === "ironwall") {
+    const h = hitBarrier(p, attacker, { atk: 0, mult: 0, flat: Math.max(1, Math.floor(opt.dmg || 5)), element });
+    return notes.concat(h.notes);
   } else if (p.kind === "button" || p.kind === "lever") {
     notes.push(`${p.name} 被攻击，触发装置。`);
     useDevice(p);
@@ -2910,7 +2933,7 @@ function damageProp(p, opt, attacker) {
 
 function destroyProp(p, attacker) {
   const notes = [`${p.name} 被摧毁。`];
-  if (p.kind === "ironwall") {
+  if (p.kind === "ironwall" || p.kind === "scrapwall") {
     notes.push(...breakIronWall(p, []));
     return notes;
   }
@@ -5249,8 +5272,11 @@ function dealTo(attacker, target, opt) {
       opt.flags.blockResolved = true;
     }
   }
-  if (attacker && !attacker.isPlayer && target && (target.isPlayer || target.kit === "ironwall") && opt.flags && opt.flags.action && !opt.flags.diffract) {
-    const wallHit = absorbIronWall(attacker, target.zone, opt);
+  const wallSide = !attacker || !target || !opt.flags || !opt.flags.action || opt.flags.diffract ? null
+    : !attacker.isPlayer && (target.isPlayer || target.kit === "ironwall") ? "player"
+    : attacker.isPlayer && !target.isPlayer ? "enemy" : null;
+  if (wallSide) {
+    const wallHit = absorbIronWall(attacker, target.zone, opt, wallSide);
     if (wallHit) {
       (wallHit.notes || []).forEach(s => appendLog(s));
       return {
