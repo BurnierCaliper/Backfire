@@ -382,7 +382,8 @@ if (process.env.ARENA) {
     Object.keys(h.weaponLevels).forEach(k => { h.weaponLevels[k] = Math.max(1, Math.round(lv * 0.6)); });
   });
   levelChoices();
-  const fullHp = () => run.party.forEach(h => { h.hp = null; h.shp = null; });
+  const partyCopy = JSON.parse(JSON.stringify(run.party));   // 每场开打前还原（输了会永久死亡、被移出队伍）
+  const fullHp = () => { run.party = JSON.parse(JSON.stringify(partyCopy)); run.fallen = []; };
   const tally = {};
   for (const kind of ["battle", "elite", "boss"]) {
     tally[kind] = { win: 0, lose: 0, retreat: 0, turns: 0 };
@@ -398,9 +399,9 @@ if (process.env.ARENA) {
       tally[kind][o] += 1;
       tally[kind].turns += report.battles[report.battles.length - 1].turns;
       if (run.stage === "over") { run.stage = "task"; delete run.result; }
-      if (!run.party.length) break;
     }
   }
+  fullHp();
   const v = R.heroView(run, run.party[0]);
   console.log(`ARENA 第${act}幕 Lv${lv}（${run.party.map(h => R.heroName(h.kit)).join("、")}${run.solo ? "，单人" : ""}，血量上限 ${v.hpMax}）：` +
     Object.keys(tally).map(k => `${k} 胜${tally[k].win}/败${tally[k].lose}/撤${tally[k].retreat}（平均 ${(tally[k].turns / n).toFixed(1)} 回合）`).join("；"));
