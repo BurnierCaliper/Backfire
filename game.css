@@ -543,6 +543,16 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
 }
 .unit-wrap.hit .flash { animation: hitFlash .28s ease-out; }
 @keyframes hitFlash { 0% { opacity: .6; } 100% { opacity: 0; } }
+/* 危墙 / 桥梁被打：竖条抖一下，再闪一下白（叠上属性色） */
+.g-gap { position: relative; }
+.g-gap::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none; opacity: 0;
+  background: #fff; box-shadow: 0 0 14px 4px var(--flash, #fff);
+}
+.g-gap.hit { animation: hitShake .24s linear; }
+.g-gap.hit::after { animation: gapFlash .32s ease-out; }
+@keyframes gapFlash { 0% { opacity: .85; } 100% { opacity: 0; } }
+.g-app.hitstop .g-gap.hit { animation-duration: .48s; }
 .unit-wrap.lunge { transition: transform .14s cubic-bezier(.3, 0, .6, 1); z-index: 4; }
 .unit-wrap.slow-move { filter: saturate(.7) brightness(.9); }
 

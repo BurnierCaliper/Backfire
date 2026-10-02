@@ -150,6 +150,62 @@ test("战斗：危墙可以选为目标，打一下扣行动点、耐久下降",
   assert.deepEqual(o.errors, []);
 });
 
+test("战斗：灯的普通攻击能选中危墙；打中时危墙抖动闪白、弹出数字", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await newTrpg(page);
+  await page.evaluate(() => { GAME.partyKits = ["tou", "ruby"]; GAME.lastEncounter = null; });
+  await startBattle(page, () => {
+    state.gaps["1-2"] = { type: "wall", hp: 30, maxHp: 30, open: false };
+    state.units.filter(u => u.isPlayer).forEach(u => { u.zone = 1; });
+  });
+  // 记下危墙竖条有没有被加上受击 class、有没有弹出数字
+  await page.evaluate(() => {
+    window.__gapHit = false; window.__pop = false;
+    new MutationObserver(() => {
+      if (document.querySelector("#g-field .g-gap.hit")) window.__gapHit = true;
+      if (document.querySelector(".fx .pop, #g-fx .pop, .pop")) window.__pop = true;
+    }).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["class"] });
+  });
+  const tou = await selectHero(page, "tou");
+  await page.evaluate(i => { state.units.find(u => u.id === i).resources.shield = 0; }, tou);   // 不弹「是否耗圣盾」
+  await page.keyboard.press("1");
+  await page.waitForSelector(".g-gap.is-targetable", { timeout: 5000 });
+  await page.click(".g-gap.is-targetable");
+  await page.waitForFunction(i => state.units.find(u => u.id === i).ap === 0 && GAME.depth === 0, tou);
+  assert.equal(await page.evaluate(() => state.gaps["1-2"].hp), 29, "危墙吃 1 击破");
+  assert.ok(await page.evaluate(() => window.__gapHit), "危墙应该播受击");
+  assert.ok(await page.evaluate(() => window.__pop), "应该弹出数字");
+  assert.deepEqual(o.errors, []);
+});
+
+test("战斗：打配置物时攻击者前冲、配置物受击闪白", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await newTrpg(page);
+  await startBattle(page, () => {
+    const b = makeProp("battery", 2, 1); b.faction = "enemy"; state.props = [b];
+  });
+  await page.evaluate(() => {
+    window.__propHit = false; window.__lunge = false;
+    new MutationObserver(() => {
+      if (document.querySelector('.unit-wrap.hit[data-id^="prop:"]')) window.__propHit = true;
+      if (document.querySelector(".unit-wrap.lunge")) window.__lunge = true;
+    }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ["class"] });
+  });
+  const ruby = await selectHero(page, "ruby");
+  await page.keyboard.press("1");
+  await page.waitForFunction(() => GAME.arm && GAME.arm.mode === "unit");
+  const pid = await page.evaluate(() => "prop:" + state.props[0].id);
+  const hp0 = await page.evaluate(() => state.props[0].hp);
+  await page.click(`.unit-wrap[data-id="${pid}"]`);
+  await page.waitForFunction(i => state.units.find(u => u.id === i).ap === 0 && GAME.depth === 0, ruby);
+  assert.ok(await page.evaluate(() => state.props[0].hp) < hp0);
+  assert.ok(await page.evaluate(() => window.__propHit), "配置物应该受击闪白");
+  assert.ok(await page.evaluate(() => window.__lunge), "攻击者应该前冲");
+  assert.deepEqual(o.errors, []);
+});
+
 test("战斗：按钮可以被攻击触发，门打开", async (t) => {
   const o = await open(t); if (!o) return;
   const { page } = o;
@@ -222,6 +278,7 @@ test("单局：熟练项检定节点——每个人的熟练等级和成功率�
   await page.evaluate(() => {
     const r = SaveStore.loadRun();
     r.task.nodes[r.task.index] = { type: "check", done: false, check: { diff: "hard", prof: "数据操作", injure: true, reward: 2500 } };
+    r.task.nodes[r.task.index + 1] = { type: "check", done: false };   // 下一站也是检定：页面上一直有检定按钮
     SaveStore.saveRun(r);
     RunFlow.resume();
   });
@@ -234,8 +291,9 @@ test("单局：熟练项检定节点——每个人的熟练等级和成功率�
   assert.match(await page.textContent('[data-check="ruby"]'), /二级熟练[\s\S]*75%[\s\S]*可重掷/);
   assert.equal(await page.isDisabled('[data-check="yuito"]'), true);
   await page.click('[data-check="ruby"]');
-  await page.waitForFunction(() => !document.querySelector("[data-check]"));
-  assert.match(await page.textContent("#run-log"), /困难「数据操作」检定/);
+  // 下一站也可能刚好是检定（随机生成的主线），所以等日志，不等按钮消失
+  await page.waitForFunction(() => /困难「数据操作」检定/.test(document.querySelector("#run-log").textContent));
+  assert.equal(await page.evaluate(() => SaveStore.loadRun().task.index), 1, "前进到下一站");
   assert.deepEqual(o.errors, []);
 });
 

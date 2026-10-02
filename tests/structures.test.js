@@ -441,3 +441,83 @@ test("招式疲劳：真的扣在这次行动的总得分上，单独记成「�
   assert.ok(r2.cut > 0);
   assert.equal(r2.cut, Math.floor((r2.net + r2.cut) * 0.10 + 1e-6), "第二回合扣这次行动总分的 10%");
 });
+
+/* ---------- 灯：普通攻击、声波切割能打危墙 / 配置物；没合法目标不花行动点 ---------- */
+function touField() {
+  const c = H.load();
+  c.BattleSim.setup({ party: ["tou", "ruby"], enemies: [{ id: "thug_knife", lv: 1, zone: 2 }] });
+  c.startCombat();
+  const st = c.S.state;
+  const tou = c.findKit("tou", st.units);
+  tou.zone = 1;
+  st.gaps["1-2"] = { type: "wall", hp: 8, maxHp: 8, open: false };
+  const use = (id, picks, targetId) => {
+    st.attackerId = tou.id; st.targetId = targetId || null;
+    st.skillFlow = picks ? { id, actorId: tou.id, picks, index: 99 } : null;
+    try { c.runSkill(id); } finally { st.skillFlow = null; }
+  };
+  return { c, st, tou, use };
+}
+
+test("灯的普通攻击：分步选目标里有危墙和同区配置物，打危墙扣 1 耐久（击破）并花 1 行动点", () => {
+  const { c, st, tou, use } = touField();
+  const barrel = c.makeProp("boom", 1, 1);
+  st.props.push(barrel);
+  tou.resources.shield = 0;
+  const steps = c.skillFlowSteps("tou_aa", tou, {});
+  const ids = steps.find(s => s.key === "target").units.map(u => u.id);
+  assert.ok(ids.includes("gap:1-2"), ids.join(","));
+  assert.ok(ids.includes("prop:" + barrel.id));
+  tou.ap = 2;
+  use("tou_aa", { target: "gap:1-2" }, "gap:1-2");
+  assert.equal(st.gaps["1-2"].hp, 7);
+  assert.equal(tou.ap, 1);
+});
+
+test("灯的普通攻击耗圣盾打距离 1 的配置物：扣 1 圣盾；没圣盾时不花行动点", () => {
+  const { c, st, tou, use } = touField();
+  const p = c.makeProp("battery", 2, 1);
+  st.props.push(p);
+  tou.ap = 2; tou.resources.shield = 1;
+  const hp = p.hp;
+  use("tou_aa", { rangeMode: "far", target: "prop:" + p.id }, "prop:" + p.id);
+  assert.ok(p.hp < hp);
+  assert.equal(tou.resources.shield, 0);
+  assert.equal(tou.ap, 1);
+  use("tou_aa", { rangeMode: "far", target: "prop:" + p.id }, "prop:" + p.id);
+  assert.equal(tou.ap, 1, "没圣盾：不花行动点");
+});
+
+test("声波切割：没有圣盾、没有目标、目标距离不对都不花行动点；能同时打危墙和敌人", () => {
+  const { c, st, tou, use } = touField();
+  const foe = st.units.find(u => !u.isPlayer);
+  tou.ap = 2; tou.resources.shield = 0;
+  assert.match(c.skillRequirementError(tou, "tou_sonic"), /圣盾/);
+  use("tou_sonic", { target1: "gap:1-2" }, "gap:1-2");
+  assert.equal(tou.ap, 2);
+  tou.resources.shield = 2;
+  use("tou_sonic", {}, null);
+  assert.equal(tou.ap, 2, "没选目标");
+  use("tou_sonic", { target1: foe.id }, foe.id);   // 敌人在 2 区，不是同区
+  assert.equal(tou.ap, 2, "距离不对");
+  // 危墙算同区（1 区在它旁边），敌人在距离 1
+  const steps = c.skillFlowSteps("tou_sonic", tou, {});
+  assert.ok(steps[0].units.some(u => u.id === "gap:1-2"));
+  // 危墙挡着穿过它的攻击，所以同时打对面敌人用不稳桥梁（不挡攻击）
+  st.gaps["1-2"] = { type: "bridge", hp: 30, maxHp: 30, open: true };
+  const hpFoe = c.totalHp(foe);
+  use("tou_sonic", { target1: "gap:1-2", target2: foe.id }, foe.id);
+  assert.equal(tou.ap, 1);
+  assert.equal(tou.resources.shield, 1);
+  assert.ok(st.gaps["1-2"].hp < 30, "桥梁挨了一下");
+  assert.ok(c.totalHp(foe) < hpFoe);
+  // 只打危墙：吃 1 击破
+  st.gaps["1-2"] = { type: "wall", hp: 8, maxHp: 8, open: false };
+  use("tou_sonic", { target1: "gap:1-2" }, "gap:1-2");
+  assert.equal(st.gaps["1-2"].hp, 7, "危墙吃 1 击破");
+  assert.equal(tou.resources.shield, 0);
+  // 周围什么都没有：按钮直接不可用
+  st.gaps["1-2"] = { type: "open", hp: 0 };
+  foe.zone = 3; st.zoneMode = 3; tou.resources.shield = 1;
+  assert.match(c.skillRequirementError(tou, "tou_sonic") || "", /没有可以打的目标/);
+});

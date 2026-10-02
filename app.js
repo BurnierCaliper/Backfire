@@ -2833,21 +2833,32 @@ function structureHitOpt(a, skillId) {
   };
 }
 
-function hitStructure(attacker, targetToken, opt) {
-  snapshot();
+/** 战斗画面的受击：给配置物 / 危墙也发一个「伤害弹字」，画面据此播前冲、受击变白和数字 */
+function popStructure(token, level, value, element, text) {
+  if (typeof spawnPopup !== "function") return;
+  const fake = { id: token, level: level || 1 };
+  try {
+    if (value > 0) spawnPopup(fake, { kind: "dmg", value, element: element || "physical" });
+    else spawnPopup(fake, { kind: "status", text: text || "无效", element: element || "physical" });
+  } catch (e) {}
+}
+
+/** 打一下配置物 / 危墙 / 桥梁，返回日志行（不存撤销点、不刷新画面；技能里打多个目标时用） */
+function hitStructureCore(attacker, targetToken, opt) {
   const notes = [];
+  opt = opt || {};
   if (String(targetToken).indexOf("gap:") === 0) {
     const key = targetToken.slice(4);
     const g = state.gaps[key];
-    if (!g) return;
+    if (!g) return notes;
     if (g.type !== "wall" && g.type !== "bridge") {
       notes.push("这个间隔没有可打的墙/桥。");
-      appendLog(notes.join("\n"));
-      return;
+      return notes;
     }
-    const dmg = Math.max(1, Math.floor((opt && opt.dmg) || (effectiveAtk(attacker, state.units) || 5)));
-    const br = Math.max(0, Math.floor(Number(opt && opt.brk != null ? opt.brk : 1) || 0));
+    const dmg = Math.max(1, Math.floor(opt.dmg || (effectiveAtk(attacker, state.units) || 5)));
+    const br = Math.max(0, Math.floor(Number(opt.brk != null ? opt.brk : 1) || 0));
     g.lastFrom = attacker ? attacker.zone : 1;   // 手册：摧毁方向只看最后一击来源区域
+    const before = Number(g.hp) || 0;
     if (g.type === "wall") {
       // 手册：危墙「受到击破时损失等量耐久值」——伤害打不动它，只有击破算
       g.hp = Math.max(0, g.hp - br);
@@ -2856,15 +2867,48 @@ function hitStructure(attacker, targetToken, opt) {
       g.hp = Math.max(0, g.hp - dmg - br);
       notes.push(`攻击间隔 ${key}（${gapLabel(g.type)}）：耐久 −${dmg} 伤害 −${br} 击破 → ${g.hp}`);
     }
+    popStructure(targetToken, g.level, before - g.hp, opt.element, "打不动");
     if (g.hp <= 0) notes.push(...destroyGap(key, g));
   } else if (String(targetToken).indexOf("prop:") === 0) {
     const p = (state.props || []).find(x => x.id === targetToken.slice(5));
-    if (!p) return;
-    notes.push(...damageProp(p, opt || {}, attacker));
+    if (!p) return notes;
+    const before = Number(p.hp) || 0;
+    const out = damageProp(p, opt, attacker);
+    const isDevice = p.kind === "button" || p.kind === "lever";
+    popStructure(targetToken, p.level, isDevice ? 0 : before - Math.max(0, Number(p.hp) || 0), opt.element, isDevice ? "触发" : "无效");
+    notes.push(...out);
   }
-  appendLog(notes.join("\n"));
+  return notes;
+}
+
+function hitStructure(attacker, targetToken, opt) {
+  snapshot();
+  const notes = hitStructureCore(attacker, targetToken, opt);
+  if (notes.length) appendLog(notes.join("\n"));
   renderAll();
 }
+
+/** 技能可以打到的配置物与危墙 / 桥梁（距离 minD–maxD）。危墙夹在两区之间：两边任一区在范围里就算 */
+function structureTargets(actor, minD, maxD) {
+  const out = [];
+  const inR = (z) => { const d = zoneDist(actor.zone, z, state.zoneMode); return d >= minD && d <= maxD; };
+  (state.props || []).forEach(p => {
+    if (p.kind === "ironwall") return;
+    if (!(p.hp > 0) && p.kind !== "button" && p.kind !== "lever") return;
+    if (inR(p.zone)) out.push({ id: "prop:" + p.id, name: p.name, zone: p.zone, isPlayer: p.faction !== "enemy" });
+  });
+  const zm = Number(state.zoneMode) || 2;
+  Object.keys(state.gaps || {}).forEach(k => {
+    const g = state.gaps[k];
+    if (!g || (g.type !== "wall" && g.type !== "bridge")) return;
+    if (zm === 2 && k !== "1-2") return;
+    const zs = k.split("-").map(Number);
+    const z = zs.find(inR);
+    if (z != null) out.push({ id: "gap:" + k, name: `${gapLabel(g.type)}（${k} 区之间）`, zone: z, isPlayer: false });
+  });
+  return out;
+}
+const isStructureToken = (id) => /^(gap|prop):/.test(String(id || ""));
 
 function destroyGap(key, g) {
   const notes = [];
@@ -6177,8 +6221,9 @@ function skillFlowSteps(id, actor, picks) {
       type: "unit",
       optional: false,
       label: spend ? "攻击目标（距离 ≤1）" : "攻击目标（同区）",
+      structures: true,
       units: fieldUnits().filter(u => !u.isPlayer && !u.dead && !u.hidden &&
-        zoneDist(actor.zone, u.zone, state.zoneMode) <= maxD)
+        zoneDist(actor.zone, u.zone, state.zoneMode) <= maxD).concat(structureTargets(actor, 0, maxD))
     });
     return steps;
   }
@@ -6346,19 +6391,21 @@ function skillFlowSteps(id, actor, picks) {
   }
   if (id === "tou_sonic") {
     // 同区目标（1atk）和距离 1 的目标（0.5atk）各选一个，都可以不选，但至少要选一个
-    const near = fieldUnits().filter(u => !u.isPlayer && !u.dead && !u.hidden && Number(u.zone) === Number(actor.zone));
-    const far = fieldUnits().filter(u => !u.isPlayer && !u.dead && !u.hidden && zoneDist(actor.zone, u.zone, state.zoneMode) === 1);
+    const near = fieldUnits().filter(u => !u.isPlayer && !u.dead && !u.hidden && Number(u.zone) === Number(actor.zone))
+      .concat(structureTargets(actor, 0, 0));
+    const far = fieldUnits().filter(u => !u.isPlayer && !u.dead && !u.hidden && zoneDist(actor.zone, u.zone, state.zoneMode) === 1)
+      .concat(structureTargets(actor, 1, 1).filter(x => !near.some(n => n.id === x.id)));
     const steps = [];
     if (near.length) {
       steps.push({
-        key: "target1", type: "unit", optional: far.length > 0,
+        key: "target1", type: "unit", optional: far.length > 0, structures: true,
         label: far.length ? "同区目标（1atk 谐波，可不选）" : "同区目标（1atk 谐波）",
         units: near
       });
     }
     if (far.length && (!near.length || picks.target1 !== undefined)) {
       steps.push({
-        key: "target2", type: "unit", optional: !!picks.target1,
+        key: "target2", type: "unit", optional: !!picks.target1, structures: true,
         label: picks.target1 ? "距离 1 的目标（0.5atk 谐波，可不选）" : "距离 1 的目标（0.5atk 谐波）",
         units: far
       });
@@ -7226,6 +7273,8 @@ const SKILL_REQUIREMENT = {
   yuito_espresso: (a) => (res(a).liquid || 0) < 1 ? "没有咖啡液" : null,
   yuito_extract:  (a) => (res(a).liquid || 0) < 1 ? "没有咖啡液" : null,
   tou_taunt:      (a) => (res(a).tauntLeft || 0) <= 0 ? "本场嘲讽次数已用尽" : null,
+  tou_sonic:      (a) => (res(a).shield || 0) < 1 ? "没有圣盾"
+    : !skillFlowSteps("tou_sonic", a, {}).length ? "距离 1 以内没有可以打的目标" : null,
   kolt_short:     (a) => ((findKit("kolt", state.units) || a).resources || {}).bit === "acid" ? "直流短接需要电钻模式" : null,
   torque_strip:   (a) => ((findKit("kolt", state.units) || {}).resources || {}).bit === "acid" ? "拆卸模式需要电钻模式" : null,
   edc_drain:      (a) => {
@@ -7335,6 +7384,44 @@ function skillRequirementError(actor, id) {
   try { return fn(actor) || null; } catch (e) { return null; }
 }
 
+/** 声波切割选中的两个目标：单位对象，或者危墙 / 配置物的 token */
+function touSonicPicks(a, t) {
+  const fl = state.skillFlow;
+  const get = (id) => (!id ? null : isStructureToken(id) ? id : unitById(id));
+  let t1 = fl && fl.picks ? get(fl.picks.target1) : null;
+  let t2 = fl && fl.picks ? get(fl.picks.target2) : null;
+  if (!fl || (!t1 && !t2)) {
+    const tok = state.targetId;
+    const x = isStructureToken(tok) ? tok : t;
+    if (x) {
+      const z = isStructureToken(x) ? (structureTargets(a, 0, 1).find(s => s.id === x) || {}).zone : x.zone;
+      if (z != null && zoneDist(a.zone, z, state.zoneMode) === 0) t1 = x; else t2 = x;
+    }
+  }
+  return { t1, t2 };
+}
+
+/** 扣行动点之前先查目标：选不到合法目标的技能不白白花掉行动点。返回原因，null 表示可以 */
+function skillTargetError(a, id, t) {
+  if (id === "tou_sonic") {
+    if ((res(a).shield || 0) < 1) return "没有圣盾";
+    const { t1, t2 } = touSonicPicks(a, t);
+    if (!t1 && !t2) return "声波切割至少要选一个目标（同区或距离 1）";
+    const zoneOf = (x) => isStructureToken(x) ? (structureTargets(a, 0, 1).find(s => s.id === x) || {}).zone : x.zone;
+    if (t1 && (zoneOf(t1) == null || zoneDist(a.zone, zoneOf(t1), state.zoneMode) !== 0)) return "第一个目标要在同区";
+    if (t2 && (zoneOf(t2) == null || zoneDist(a.zone, zoneOf(t2), state.zoneMode) !== 1)) return "第二个目标要在距离 1";
+  }
+  if (id === "tou_aa" && !isStructureToken(state.targetId)) {
+    const fl = state.skillFlow;
+    const tgt = (fl && fl.picks && fl.picks.target) ? unitById(fl.picks.target) : t;
+    if (!tgt) return null;   // 交给技能里的「先选攻击目标」（画面靠它判断还要选目标）
+    const far = !!(fl && fl.picks && fl.picks.rangeMode === "far");
+    if (far && (res(a).shield || 0) < 1) return "没有圣盾，只能打同区";
+    if (zoneDist(a.zone, tgt.zone, state.zoneMode) > (far ? 1 : 0)) return "目标超出本次射程";
+  }
+  return null;
+}
+
 /** 执行技能，并把这次行动的日志整理成一块（见 withLogSink） */
 function runSkill(id, optRun) {
   const a0 = unitById(state.attackerId);
@@ -7418,6 +7505,8 @@ function runSkillInner(id, optRun) {
   if (a.isPlayer && id !== "assist_block") {
     const why = skillRequirementError(a, id);
     if (why) { paintSkillLog(`${a.name} 现在不能使用该技能：${why}。`); return; }
+    const bad = skillTargetError(a, id, t);
+    if (bad) { paintSkillLog(`${a.name} 现在不能这样用：${bad}。`); return; }
   }
   if (a.isPlayer && id !== "assist_block") {
     const cost = skillCost(id);
@@ -7458,9 +7547,18 @@ function runSkillInner(id, optRun) {
     }
   }
   const isGapTok = token && String(token).indexOf("gap:") === 0;
-  if (isGapTok || (token && String(token).indexOf("prop:") === 0 && !isDisplaceSkill(id))) {
+  if (id !== "tou_sonic" && (isGapTok || (token && String(token).indexOf("prop:") === 0 && !isDisplaceSkill(id)))) {
+    // 灯的普通攻击：耗圣盾时射程变成距离 1
+    const touFar = id === "tou_aa" && state.skillFlow && state.skillFlow.picks && state.skillFlow.picks.rangeMode === "far";
+    const touReach = (z) => zoneDist(a.zone, z, state.zoneMode) <= (touFar ? 1 : 0);
+    const tokZones = isGapTok ? String(token).slice(4).split("-").map(Number)
+      : [Number((propByRef(token) || {}).zone)];
+    if (id === "tou_aa") {
+      if (touFar && (res(a).shield || 0) < 1) { paintSkillLog(`${a.name} 没有圣盾，只能打同区。`); return; }
+      if (!tokZones.some(touReach)) { paintSkillLog(`${a.name} 的普通攻击够不到这个目标。`); return; }
+    }
     // 危墙 / 桥梁夹在两区之间：两边任一区在射程里就能打
-    if (isGapTok) {
+    if (isGapTok && id !== "tou_aa") {
       const zs = String(token).slice(4).split("-").map(Number);
       const ov = typeof skillRangeFor === "function" ? skillRangeFor(a, id) : null;
       let hint = "";
@@ -7480,6 +7578,7 @@ function runSkillInner(id, optRun) {
     } else if (!a.isPlayer) {
       if (!spendAp(a, 1, skillNameHint(id))) return;
     }
+    if (touFar) { a.resources.shield -= 1; appendLog(`消耗 1 圣盾，射程变为距离 1。`); }
     hitStructure(a, token, structureHitOpt(a, id));
     return;
   }
@@ -8257,19 +8356,17 @@ function runSkillInner(id, optRun) {
     } else if (id === "tou_sonic") {
       const fl = state.skillFlow;
       // 分步里选的两个目标；没走分步（计算器直接选目标）时按距离归类
-      let t1 = fl && fl.picks.target1 ? unitById(fl.picks.target1) : null;
-      let t2 = fl && fl.picks.target2 ? unitById(fl.picks.target2) : null;
-      if (!fl && t) {
-        if (zoneDist(a.zone, t.zone, state.zoneMode) === 0) t1 = t; else t2 = t;
-      }
-      if (!t1 && !t2) { lines.push("声波切割至少要选一个目标（同区或距离 1）。"); return paintSkillLog(lines.join("\n")); }
-      if ((a.resources.shield || 0) < 1) { lines.push("没有圣盾。"); }
-      else {
-        a.resources.shield -= 1;
-        if (t1) hitOne(a, t1, { element: "harmonic", mult: 1, baseBreak: 1, atk, atkRange: "any" });
-        if (t2) hitOne(a, t2, { element: "harmonic", mult: 0.5, baseBreak: 1, atk, atkRange: "any", usePrep: !t1 });
-        lines.push("圣盾 −1。");
-      }
+      const { t1, t2 } = touSonicPicks(a, t);
+      a.resources.shield -= 1;   // 有没有圣盾、有没有目标在扣行动点之前就查过了（skillTargetError）
+      const strike = (x, mult, first) => {
+        if (isStructureToken(x)) {
+          appendLog(lines.splice(0).join("\n"));
+          appendLog(hitStructureCore(a, x, { element: "harmonic", dmg: Math.floor(atk * mult), brk: 1 }).join("\n"));
+        } else hitOne(a, x, { element: "harmonic", mult, baseBreak: 1, atk, atkRange: "any", usePrep: first });
+      };
+      if (t1) strike(t1, 1, true);
+      if (t2) strike(t2, 0.5, !t1);
+      lines.push("圣盾 −1。");
     } else if (id === "tou_ultra") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       t.instant.refract = true;

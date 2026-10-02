@@ -695,7 +695,17 @@
   const BIG_POP_SIZE = 64;
   const BIG_POP_DUR = 2.2;
   const popCount = new Map();
+  /** 危墙 / 桥梁画在区与区之间的竖条上，没有卡片 */
+  function gapNode(id) {
+    if (!String(id || "").startsWith("gap:")) return null;
+    return document.querySelector(`#g-field .g-gap[data-key="${String(id).slice(4)}"]`);
+  }
   function centerOf(id) {
+    const gn = gapNode(id);
+    if (gn) {
+      const r = gn.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height * 0.42, r };
+    }
     const c = cards.get(id);
     if (!c || !c.wrap.isConnected) return null;
     const r = c.wrap.getBoundingClientRect();
@@ -755,6 +765,15 @@
   }
   const ELE_VAR = { fire: "--fire", acid: "--acid", electric: "--electric", ice: "--icee", energy: "--energy", physical: "--physical", harmonic: "--harmonic" };
   function hit(id, element, big) {
+    const gn = gapNode(id);
+    if (gn) {
+      if (!G.sim && window.Sfx) Sfx.play(element || "physical", { big: !!big });
+      gn.style.setProperty("--flash", `var(${ELE_VAR[element] || "--physical"})`);
+      gn.classList.remove("hit");
+      void gn.offsetWidth;
+      gn.classList.add("hit");
+      return;
+    }
     const c = cards.get(id);
     if (!c) return;
     if (!G.sim && window.Sfx) Sfx.play(element || "physical", { big: !!big });
@@ -1644,7 +1663,7 @@
       if (step.type === "zone") {
         setHint(`<b>${esc(sk.name)}</b>：${esc(step.label)}`);
         value = await pickZone(step.zones || [], (zone) => previewOf(skillThunk(actor.id, sk.id, lastUnitPick, Object.assign({}, picks, { [step.key]: zone }))));
-      } else if (step.type === "unit" && !step.optional && (step.units || []).every(u => !String(u.id).startsWith("prop:"))) {
+      } else if (step.type === "unit" && !step.optional && (step.structures || (step.units || []).every(u => !String(u.id).startsWith("prop:")))) {
         setHint(`<b>${esc(sk.name)}</b>：${esc(step.label)}`);
         const cands = (step.units || []).map(u => ({
           id: u.id,
@@ -2783,7 +2802,7 @@
       state.gaps = state.gaps || {};
       if (!state.gaps[key]) state.gaps[key] = emptyGap();
       const g = state.gaps[key];
-      const keep = ["is-targetable", "is-hover"].filter(c => node.classList.contains(c));
+      const keep = ["is-targetable", "is-hover", "hit"].filter(c => node.classList.contains(c));
       node.className = "g-gap gap-" + (g.type || "open") + (keep.length ? " " + keep.join(" ") : "");
       if (!node._bound) {
         node._bound = true;
