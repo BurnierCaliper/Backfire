@@ -16,6 +16,9 @@ const H = require("../tests/headless");
 
 const SEED = process.argv[2] || "PLAYTEST";
 const PARTY = (process.argv[3] || "tou,yuito,xia,ruby").split(",");
+// 单人模式：node tools/playtest.js 种子 主角 伙伴1,伙伴2,伙伴3 [第二副职责]
+const SOLO_PARTNERS = process.argv[4] ? process.argv[4].split(",") : null;
+const SOLO_ROLE2 = process.argv[5] || null;
 const c = H.load();
 const st = () => c.S.state;
 const R = c.Rogue;
@@ -124,7 +127,7 @@ function candidates(u) {
   const allies = s.units.filter(x => x.isPlayer && alive(x));
   list.forEach(sk => {
     if (!sk || !sk.id || sk.id === "__item") return;
-    if (/summon/.test(sk.id)) return;   // 不主动唤出武器人：主角之后整场空手，一步预演看不出好坏
+    if (/summon/.test(sk.id) && !process.env.SUMMON) return;   // 不主动唤出武器人：主角之后整场空手，一步预演看不出好坏（SUMMON=1 允许）
     const cost = c.skillCost(sk.id) || {};
     if ((cost.ap || 0) > (u.ap || 0) || (cost.bonus || 0) > (u.bonus || 0)) return;
     if (c.skillRequirementError(u, sk.id)) return;
@@ -329,19 +332,34 @@ function fight(kind) {
   const xpBefore = run.party.map(h => h.level);
   const stats = Object.values(s.battleStats || {}).filter(x => !x.weaponOf).map(x => `${x.name} 伤${x.dmg}/破${x.brk}/承${x.taken}/杀${x.kills}/疗${x.heal}`);
   const turns = s.turnNo, score = s.battleScore.total;   // 结算会重摆战场（升级重算血量），先记下
+  const supports = (text.match(/支援登场|登场支援|支援：/g) || []).length;
+  const selfAssist = (text.match(/协助攻击/g) || []).length, selfBlock = (text.match(/协助格挡成功|格挡成功/g) || []).length;
   let notes = [];
   try { notes = R.finishBattle(run, outcome); } catch (e) { bug("finishBattle 报错", e.stack || e.message); }
   report.battles.push({
     act: run.act, day: run.day, kind, title: spec.title, level: spec.level, foes: foes0, weather: s.weather,
     outcome, turns, score, grade: g.grade, partyBefore,
     partyAfter: run.party.map(h => { const v = R.heroView(run, h); return `${v.name} ${v.hp}/${v.hpMax}`; }),
-    stats, deaths: notes.filter(n => /永久死亡|阵亡/.test(n)), lvUp: run.party.filter((h, i) => h.level > (xpBefore[i] || 0)).map(h => `${R.heroName(h.kit)}→${h.level}`)
+    stats, supports, selfAssist, selfBlock, supportUsed: s.solo ? (s.solo.used || []).slice() : null, deaths: notes.filter(n => /永久死亡|阵亡/.test(n)), lvUp: run.party.filter((h, i) => h.level > (xpBefore[i] || 0)).map(h => `${R.heroName(h.kit)}→${h.level}`)
   });
   return outcome;
 }
 
+/* ---------------- 调试：TOKENS=n 把普通战斗的敌人代币改成 n（精英战、首领不变），用来试平衡 ---------------- */
+if (process.env.TOKENS) {
+  vm.runInContext(`(function () {
+    const orig = rollEncounter;
+    rollEncounter = function (opt) { opt = Object.assign({}, opt || {}); if (opt.tokens == null) opt.tokens = ${Number(process.env.TOKENS)}; return orig(opt); };
+  })();`, c);
+}
+
 /* ---------------- 主循环 ---------------- */
-run = R.newRun({ party: PARTY, seed: SEED });
+if (SOLO_PARTNERS) {
+  const role2 = SOLO_ROLE2 || R.role2Options(PARTY[0])[0];
+  run = R.newRun({ party: [PARTY[0]], seed: SEED, solo: true, partners: SOLO_PARTNERS, role2 });
+} else {
+  run = R.newRun({ party: PARTY, seed: SEED });
+}
 if (process.env.BOSSTEST) {
   // 调试：直接打某一幕的首领。BOSSTEST=幕:角色等级
   const [act, lv] = process.env.BOSSTEST.split(":").map(Number);
@@ -350,6 +368,43 @@ if (process.env.BOSSTEST) {
   const r = fight("boss");
   const b = report.battles[0];
   console.log(JSON.stringify(b, null, 1));
+  process.exit(0);
+}
+if (process.env.ARENA) {
+  // 调试：竞技场。ARENA=幕:等级:场数 —— 把队伍直接拉到这个等级（升级选择照常做完、武器升到 等级×0.6），
+  // 满血连打普通战斗、精英战和首领战各若干场，统计胜率
+  const [act, lv, n] = process.env.ARENA.split(":").map(Number);
+  run.act = act; run.actDay = 4;
+  run.party.forEach(h => {
+    const from = h.level || 1;
+    h.level = lv; h.xp = 0;
+    R.queueLevelRewards(h, from, lv, [], run);
+    Object.keys(h.weaponLevels).forEach(k => { h.weaponLevels[k] = Math.max(1, Math.round(lv * 0.6)); });
+  });
+  levelChoices();
+  const fullHp = () => run.party.forEach(h => { h.hp = null; h.shp = null; });
+  const tally = {};
+  for (const kind of ["battle", "elite", "boss"]) {
+    tally[kind] = { win: 0, lose: 0, retreat: 0, turns: 0 };
+    for (let i = 0; i < n; i++) {
+      fullHp();
+      run.stage = kind === "boss" ? "boss" : "task";
+      run.seed = SEED + ":" + kind + i;
+      run.result = null;
+      if (kind !== "boss") { tryDo("接任务", () => R.acceptTask(run, "main")); run.stage = "task"; run.task.nodes[run.task.index] = { type: kind, done: false }; }
+      run.actDay = 4; run.act = act;
+      run.party.forEach(h => { h.level = lv; });
+      const o = fight(kind);
+      tally[kind][o] += 1;
+      tally[kind].turns += report.battles[report.battles.length - 1].turns;
+      if (run.stage === "over") { run.stage = "task"; delete run.result; }
+      if (!run.party.length) break;
+    }
+  }
+  const v = R.heroView(run, run.party[0]);
+  console.log(`ARENA 第${act}幕 Lv${lv}（${run.party.map(h => R.heroName(h.kit)).join("、")}${run.solo ? "，单人" : ""}，血量上限 ${v.hpMax}）：` +
+    Object.keys(tally).map(k => `${k} 胜${tally[k].win}/败${tally[k].lose}/撤${tally[k].retreat}（平均 ${(tally[k].turns / n).toFixed(1)} 回合）`).join("；"));
+  if (report.bugs.length) console.log("bugs: " + report.bugs.map(b => b.what + "：" + b.detail).join(" | "));
   process.exit(0);
 }
 run.CONFIG_restDays = R.CONFIG.restDays;
@@ -418,7 +473,7 @@ if (steps >= 2000) bug("主循环超过 2000 步", run.stage);
 
 /* ---------------- 汇报 ---------------- */
 const out = [];
-out.push(`# 实战测试：${PARTY.map(R.heroName).join("、")}（种子 ${SEED}）`);
+out.push(`# 实战测试：${run.solo ? `单人模式 ${R.heroName(PARTY[0])}，伙伴 ${run.partners.map(R.heroName).join("、")}，第二副职责 ${run.party[0].role2}` : PARTY.map(R.heroName).join("、")}（种子 ${SEED}）`);
 out.push(`结果：${run.result ? (run.result.win ? "通关" : "失败") + " — " + run.result.text : run.stage}；第 ${run.act} 幕第 ${run.day} 天；用时 ${Math.round((Date.now() - T0) / 1000)} 秒`);
 out.push(`队伍：` + run.party.map(h => { const v = R.heroView(run, h); return `${v.name} Lv${v.level} 血${v.hp}/${v.hpMax} 武器${v.weapons.map(w => w.name + "Lv" + w.level).join("、")}`; }).join("；"));
 if ((run.fallen || []).length) out.push(`阵亡：${run.fallen.map(f => R.heroName(f.kit) + "（第" + f.act + "幕第" + f.day + "天）").join("、")}`);
@@ -427,7 +482,7 @@ out.push("\n## 战斗");
 report.battles.forEach((b, i) => {
   out.push(`${i + 1}. 第${b.act}幕第${b.day}天 ${b.title}（Lv${b.level}${b.weather && b.weather !== "none" ? "，" + b.weather : ""}）：${b.foes.join("、")} → ${b.outcome === "win" ? "胜" : b.outcome === "retreat" ? "撤退/超时" : "败"}，${b.turns} 回合，${b.score} 分 ${b.grade}`);
   out.push(`   战前 ${b.partyBefore.join("，")}　战后 ${b.partyAfter.join("，")}${b.lvUp.length ? "　升级 " + b.lvUp.join("、") : ""}${b.deaths.length ? "　" + b.deaths.join("；") : ""}`);
-  out.push(`   ${b.stats.join("；")}`);
+  out.push(`   ${b.stats.join("；")}${b.supportUsed ? `　支援 ${b.supportUsed.length ? b.supportUsed.map(R.heroName).join("、") : "无"}；协助攻击字样 ${b.selfAssist}、格挡成功字样 ${b.selfBlock}` : ""}`);
 });
 out.push("\n## 过程");
 report.events.forEach(e => out.push("- " + e));

@@ -1364,7 +1364,7 @@ const Rogue = (function () {
     presentSmiths, smithInfo, claimBlueprint, installBlueprint, blueprintById, weaponModsOf,
     smithQuote, introduceSmith,
     canClinic, cyberInfo, cyberPreview, cyberCost, modifyHero, healCost, healHero,
-    pendingChoices, choiceOptions, choose,
+    pendingChoices, choiceOptions, choose, queueLevelRewards,
     camp, nextAct, afterVictory, endRun,
     enterRunMode, leaveRunMode, syncWorld, save
   };
