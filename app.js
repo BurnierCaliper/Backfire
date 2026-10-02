@@ -2011,8 +2011,8 @@ function battleStat(u) {
   return s;
 }
 /* ===== 战斗评分（像鬼泣那样，鼓励打得华丽） =====
- * 分值都在 SCORE_RULES；评价按「得分 ÷ 这场的基准分」分段（SCORE_GRADES），
- * 基准分 = 出现过的敌人的总血量 + 击杀它们的奖励分，所以敌人等级、数量不同也能公平比较。 */
+ * 分值都在 SCORE_RULES；评价按幕的固定分数线分段（SCORE_GRADES：第一幕的线，之后每幕 +SCORE_ACT_STEP）。
+ * 单局用本幕；跑团模式 / 战斗原型按敌人等级对应到幕（ROGUE_CONFIG.actLevels）。 */
 const SCORE_RULES = {
   dmg: 1,          // 每点伤害（含连带伤害）
   heal: 1,         // 每点给其他友方的治疗 / 护盾
@@ -2047,7 +2047,9 @@ function bigHitInfo(level, dmg) {
   return { big: true, ratio: Math.min(1, (dmg - th) / th), th };
 }
 // [评价, 至少几倍基准分, 战斗经验倍率]
-const SCORE_GRADES = [["S", 2.6, 2], ["A", 2.15, 1.5], ["B", 1.65, 1.2], ["C", 0, 1]];   // 用无界面对打校准（含行动分、速杀奖励）：只会普攻的自动打法中位数约 1.8 倍（B）
+// [评价, 第一幕的分数线, 战斗经验倍率]。C 线以下是 D（经验不加成）。已定：第一幕 C 750 / B 1250 / A 1500 / S 1750
+const SCORE_GRADES = [["S", 1750, 2], ["A", 1500, 1.5], ["B", 1250, 1.2], ["C", 750, 1], ["D", 0, 1]];
+const SCORE_ACT_STEP = 250;   // 之后每一幕，各条分数线（D 除外）+250
 const SCORE_PART_NAMES = { dmg: "伤害", heal: "治疗 / 护盾", brk: "击破", stagger: "打出失衡", block: "协助格挡成功", overkill: "溢出伤害", kill: "击杀", bonus: "克制 / 大伤害加成", action: "行动", speed: "速杀奖励", flawless: "无伤奖励", fatigue: "招式疲劳（扣分）" };
 /** 这个角色这回合用这个技能，算连续第几个回合（不改记录）。
  *  上回合用过 → 上回合的连续数 + 1；这回合已经用过 → 和这回合第一次一样；否则 1 */
@@ -2176,15 +2178,30 @@ function scorePar() {
   });
   return Object.values(state.scoreSeen).reduce((a, n) => a + n, 0);
 }
+/** 这场按第几幕的分数线算：单局里由 battleSpec 写进 state.scoreAct；否则按敌人等级对应到幕 */
+function scoreAct() {
+  if (Number(state.scoreAct) > 0) return Number(state.scoreAct);
+  const ranges = (typeof ROGUE_CONFIG !== "undefined" && ROGUE_CONFIG.actLevels) || [[1, 4], [5, 8], [9, 12], [12, 15]];
+  const foes = (state.units || []).filter(u => !u.isPlayer && u.kit !== "ironwall");
+  if (!foes.length) return 1;
+  const lv = Math.max(...foes.map(u => Number(u.level) || 1));
+  for (let i = 0; i < ranges.length; i++) if (lv <= ranges[i][1]) return i + 1;
+  return ranges.length + Math.ceil((lv - ranges[ranges.length - 1][1]) / 5);   // 额外幕：每 5 级一幕
+}
+/** 某一幕的分数线：[[评价, 分数线, 经验倍率], …]，高到低 */
+function gradeLines(act) {
+  const step = SCORE_ACT_STEP * Math.max(0, (Number(act) || 1) - 1);
+  return SCORE_GRADES.map(([g, line, xp]) => [g, line > 0 ? line + step : 0, xp]);
+}
 function battleGrade() {
   const score = state.battleScore ? state.battleScore.total : 0;
-  const par = Math.max(1, scorePar());
-  const ratio = score / par;
-  const g = SCORE_GRADES.find(x => ratio >= x[1]) || SCORE_GRADES[SCORE_GRADES.length - 1];
-  const i = SCORE_GRADES.indexOf(g);
-  const next = i > 0 ? SCORE_GRADES[i - 1] : null;
-  return { grade: g[0], xpMult: g[2], score, par, ratio, next: next ? { grade: next[0], need: Math.ceil(next[1] * par) } : null,
-    floor: Math.ceil(g[1] * par), parts: Object.assign({}, (state.battleScore || {}).parts) };
+  const act = scoreAct();
+  const lines = gradeLines(act);
+  const g = lines.find(x => score >= x[1]) || lines[lines.length - 1];
+  const i = lines.indexOf(g);
+  const next = i > 0 ? lines[i - 1] : null;
+  return { grade: g[0], xpMult: g[2], score, act, lines, next: next ? { grade: next[0], need: next[1] } : null,
+    floor: g[1], parts: Object.assign({}, (state.battleScore || {}).parts) };
 }
 
 /** 包住一次行动：结束后
@@ -7594,7 +7611,10 @@ function runSkillInner(id, optRun) {
       return;
     }
   }
-  const reaction = /_opp$|_block$|assist/.test(id) || id === "ufo_assist" || id === "en_ox_block" || id === "en_wolf_opp" || id === "en_thug_opp";
+  // 反应（协助攻击、格挡、借机攻击）不花行动点。没有专属协助技能的敌人拿普通攻击当协助攻击（enemyAssistSkillId），
+  // 技能名里没有 assist，所以也看「这个单位此刻是不是在打协助攻击」（finishAssist 里设的 state._assistBy）
+  const reaction = /_opp$|_block$|assist/.test(id) || id === "ufo_assist" || id === "en_ox_block" || id === "en_wolf_opp" || id === "en_thug_opp" ||
+    (!!state._assistBy && a && state._assistBy === a.id);
   if (!a.isPlayer && !reaction) {
     if ((a.ap || 0) < 1) {
       paintSkillLog(`${a.name} 行动点不足，无法使用该技能。`);

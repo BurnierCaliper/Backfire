@@ -718,7 +718,7 @@ test("战斗评分：右上角显示评价并随得分变化；胜利时按评�
     foes[0].layers.forEach(l => { l.current = 1; });
   });
   assert.ok(await page.isVisible("#g-rank"));
-  assert.equal((await page.textContent("#g-rank .rk-grade")).trim(), "C");
+  assert.equal((await page.textContent("#g-rank .rk-grade")).trim(), "D", "开战 0 分：C 线以下是 D");
   await page.evaluate(() => { state.battleScore.total += 100000; });   // 直接给到 S
   await selectHero(page, "ruby");
   await attackFirstFoe(page).catch(() => {});

@@ -1627,3 +1627,6 @@ body:not([data-screen="battle"]) .g-rank { display: none !important; }
   60% { opacity: 1; }
   100% { transform: none; opacity: 1; filter: none; }
 }
+/* 评价 D（C 线以下） */
+.g-rank[data-grade="D"] .rk-grade { color: #8a8f96; opacity: .85; }
+.grade-badge.g-D b, .stats-grade b.g-D { color: #8a8f96; }

@@ -214,21 +214,57 @@ test("评分：伤害 1 分 / 击破 10 分 / 溢出 1.5 分（向下取整）/ 
   assert.equal(st.battleStats[kolt.id].score, st.battleScore.total);
 });
 
-test("评分：评价按得分 ÷ 基准分分段；基准分只算一次出现过的敌人", () => {
+test("评分：评价按幕的分数线——第一幕 C 750 / B 1250 / A 1500 / S 1750，之后每幕各 +250，C 线以下是 D", () => {
   const { c, st } = field();
   c.resetBattleRecords();
-  const g0 = c.battleGrade();
-  assert.equal(g0.grade, "C");
-  assert.ok(g0.par > 0);
-  const cut = Object.fromEntries(c.S.SCORE_GRADES.map(([g, k]) => [g, k]));
-  st.battleScore.total = Math.ceil(g0.par * cut.B); assert.equal(c.battleGrade().grade, "B");
-  st.battleScore.total = Math.ceil(g0.par * cut.A); assert.equal(c.battleGrade().grade, "A");
-  st.battleScore.total = Math.ceil(g0.par * cut.S); assert.equal(c.battleGrade().grade, "S");
-  assert.equal(c.battleGrade().xpMult, 2);
-  st.battleScore.total = Math.ceil(g0.par * cut.B) - 1; assert.equal(c.battleGrade().grade, "C");
-  // 敌人死了被移出场，基准分不变
-  st.units = st.units.filter(u => u.isPlayer);
-  assert.equal(c.battleGrade().par, g0.par);
+  const at = (act, score) => { st.scoreAct = act; st.battleScore.total = score; return c.battleGrade(); };
+  assert.equal(at(1, 0).grade, "D");
+  assert.equal(at(1, 749).grade, "D");
+  assert.equal(at(1, 750).grade, "C");
+  assert.equal(at(1, 1250).grade, "B");
+  assert.equal(at(1, 1500).grade, "A");
+  assert.equal(at(1, 1750).grade, "S");
+  assert.equal(at(1, 1750).xpMult, 2);
+  assert.equal(at(1, 1250).xpMult, 1.2);
+  assert.equal(at(1, 800).xpMult, 1);
+  // 第 4 幕：各线 +750
+  assert.equal(at(4, 1499).grade, "D");
+  assert.equal(at(4, 1500).grade, "C");
+  assert.equal(at(4, 2000).grade, "B");
+  assert.equal(at(4, 2250).grade, "A");
+  assert.equal(at(4, 2500).grade, "S");
+  const g = at(2, 1100);
+  assert.equal(g.grade, "C");
+  assert.deepEqual(JSON.parse(JSON.stringify(g.next)), { grade: "B", need: 1500 });
+  // 不在单局里（跑团 / 战斗原型）：按敌人等级对应到幕
+  st.scoreAct = null;
+  st.units.filter(u => !u.isPlayer).forEach(u => { u.level = 10; });
+  assert.equal(c.scoreAct(), 3);
+  st.units.filter(u => !u.isPlayer).forEach(u => { u.level = 2; });
+  assert.equal(c.scoreAct(), 1);
+});
+
+test("敌人的协助攻击不花行动点：行动点用完、拿普通攻击当协助攻击的敌人也能出手", () => {
+  const c = H.load();
+  c.BattleSim.setup({ party: ["ruby"], enemies: [{ id: "crow", lv: 2, zone: 1 }, { id: "crow", lv: 2, zone: 1 }] });
+  c.startCombat();
+  const st = c.S.state;
+  const ruby = c.findKit("ruby", st.units);
+  const foes = st.units.filter(u => !u.isPlayer);
+  assert.equal(c.enemyAssistSkillId(foes[1]), "en_aa", "乌鸦没有专属协助技能");
+  foes.forEach(f => { f.ap = 0; f.zone = 1; });
+  ruby.zone = 1; ruby.def = 0; ruby.stunned = true;
+  st.assistQueue = [{ breakerId: foes[0].id, targetId: ruby.id, vsPlayer: true }];
+  st.combatPhase = "enemy";
+  c.finishAssist(foes[1].id);
+  const log = st.logPages.map(p => p.lines.map(l => l.text || l).join("\n")).join("\n");
+  assert.doesNotMatch(log, /行动点不足/);
+  assert.match(log, /发动协助攻击/);
+  assert.equal(foes[1].ap, 0, "没有扣成负数");
+  // 平时（不是协助攻击）行动点不够还是不能出手
+  st.attackerId = foes[1].id; st.targetId = ruby.id;
+  c.runSkill("en_aa");
+  assert.match(st.logPages.map(p => p.lines.map(l => l.text || l).join("\n")).join("\n"), /行动点不足/);
 });
 
 test("评分：行动打进失衡 +50，协助格挡成功 +30，给其他友方的治疗按点数加分", () => {

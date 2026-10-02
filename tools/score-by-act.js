@@ -2,6 +2,7 @@
 // 用无界面模拟器的朴素打法打完，记下胜利时的最终得分（含速杀 / 无伤奖励）。
 //
 //   node tools/score-by-act.js [每格场数，默认 24]
+// 末尾列出按幕分数线（SCORE_GRADES）得到的评价分布。
 //
 // 假设（都写在这里，验算时可以改）：
 //   · 角色等级 = 这场敌人的等级；武器等级 = round(角色等级 × 0.6)，1–10
@@ -50,7 +51,7 @@ function one(act, kind, size, i) {
   if (win) c.applyFinishBonus();
   const g = c.battleGrade();
   return { act, kind, size, lv, win, score: st.battleScore.total, raw: before, fatigue: st.battleScore.parts.fatigue || 0,
-    turns: st.turnNo, par: g.par, ratio: g.ratio, grade: g.grade, flawless: !!st.battleScore.flawless };
+    turns: st.turnNo, grade: g.grade, flawless: !!st.battleScore.flawless };
 }
 
 const q = (a, p) => { if (!a.length) return "-"; const s = a.slice().sort((x, y) => x - y); return Math.round(s[Math.min(s.length - 1, Math.floor(p * s.length))]); };
@@ -64,14 +65,14 @@ if (errs.length) console.log("出错", errs.length, errs[0].err);
 const ok = rows.filter(r => !r.err);
 const KIND = { battle: "普通", elite: "精英", boss: "首领" };
 console.log(`每格 ${N} 场；分数只看胜利的场次（含速杀 / 无伤奖励）。p25 / 中位 / p75 / p90 是分位数。\n`);
-console.log("幕 类型 人数 | 敌人等级 | 胜率 | 平均 | p25 | 中位 | p75 | p90 | 每人中位 | 回合中位 | 现基准中位 | 现评价分布");
+console.log("幕 类型 人数 | 敌人等级 | 胜率 | 平均 | p25 | 中位 | p75 | p90 | 每人中位 | 回合中位 | 评价分布");
 for (const act of [1, 2, 3, 4]) {
   for (const kind of ["battle", "elite", "boss"]) for (const size of [1, 2, 3, 4]) {
     const g = ok.filter(r => r.act === act && r.kind === kind && r.size === size);
     const w = g.filter(r => r.win);
     const sc = w.map(r => r.score);
-    const grades = ["S", "A", "B", "C"].map(x => x + w.filter(r => r.grade === x).length).join(" ");
-    console.log(`${act} ${KIND[kind]}${BOOST[act + ":" + kind] ? "(+" + BOOST[act + ":" + kind] + "级)" : ""} ${size === 1 ? "单人" : size + "人"} | Lv${q(g.map(r => r.lv), 0)}–${q(g.map(r => r.lv), 0.99)} | ${w.length}/${g.length} | ${mean(sc)} | ${q(sc, .25)} | ${q(sc, .5)} | ${q(sc, .75)} | ${q(sc, .9)} | ${q(w.map(r => r.score / r.size), .5)} | ${q(w.map(r => r.turns), .5)} | ${q(w.map(r => r.par), .5)} | ${grades}`);
+    const grades = ["S", "A", "B", "C", "D"].map(x => x + w.filter(r => r.grade === x).length).join(" ");
+    console.log(`${act} ${KIND[kind]}${BOOST[act + ":" + kind] ? "(+" + BOOST[act + ":" + kind] + "级)" : ""} ${size === 1 ? "单人" : size + "人"} | Lv${q(g.map(r => r.lv), 0)}–${q(g.map(r => r.lv), 0.99)} | ${w.length}/${g.length} | ${mean(sc)} | ${q(sc, .25)} | ${q(sc, .5)} | ${q(sc, .75)} | ${q(sc, .9)} | ${q(w.map(r => r.score / r.size), .5)} | ${q(w.map(r => r.turns), .5)} | ${grades}`);
   }
   const all = ok.filter(r => r.act === act && r.win && r.size > 1);
   console.log(`${act} 全部（不含单人）          | 胜 ${all.length} | 平均 ${mean(all.map(r => r.score))} | 中位 ${q(all.map(r => r.score), .5)} | p75 ${q(all.map(r => r.score), .75)} | p90 ${q(all.map(r => r.score), .9)}\n`);
@@ -93,10 +94,11 @@ for (const act of [1, 2, 3, 4]) {
     return `${KIND[kind]} ${q(ph, .25)} / ${q(ph, .5)} / ${q(ph, .75)} / ${q(ph, .9)}`;
   }).join("　"));
 }
-// 现在的评价为什么不稳：同一幕里「得分 / 基准」的离散程度
-console.log("\n现在的评价（得分 ÷ 敌人基准）在每幕胜利场次里的分布：p10 / 中位 / p90 倍");
+// 按幕分数线（app.js · SCORE_GRADES / SCORE_ACT_STEP）的评价分布
+console.log("\n评价分布（2–4 人，胜利场次）");
 for (const act of [1, 2, 3, 4]) {
   const w = ok.filter(r => r.act === act && r.win && r.size > 1);
-  const rs = w.map(r => r.ratio * 100);
-  console.log(`第 ${act} 幕：${(q(rs, .1) / 100).toFixed(2)} / ${(q(rs, .5) / 100).toFixed(2)} / ${(q(rs, .9) / 100).toFixed(2)}　评价 ` + ["S", "A", "B", "C"].map(x => x + " " + w.filter(r => r.grade === x).length).join("，"));
+  const c = H.load();
+  const lines = c.gradeLines(act).filter(([, k]) => k > 0).map(([g, k]) => `${g}≥${k}`).join(" ");
+  console.log(`第 ${act} 幕（${lines}）：` + ["S", "A", "B", "C", "D"].map(x => `${x} ${w.filter(r => r.grade === x).length}`).join("，"));
 }

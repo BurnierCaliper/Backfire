@@ -574,7 +574,7 @@ const Rogue = (function () {
   /** 当前节点 / 首领的战斗配置（给 BattleSim.setup 或战斗画面用） */
   function battleSpec(run) {
     const partyKits = run.party.map(h => h.kit);
-    const before = () => { applyPartyToField(run); state.openingBreaks = openingBreaks(run); state.solo = soloBattleInfo(run); };
+    const before = () => { applyPartyToField(run); state.openingBreaks = openingBreaks(run); state.solo = soloBattleInfo(run); state.scoreAct = run.act; };
     if (run.stage === "boss") {
       const key = `${run.seed}:boss:${run.act}`;
       const enc = withRng(key, () => {
