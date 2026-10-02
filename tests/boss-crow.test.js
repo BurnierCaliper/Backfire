@@ -48,7 +48,7 @@ test("穴鸦击杀奖励 15 奎支：手册和单局都是", () => {
   assert.equal(c.rollEnemyLoot({ kit: "thug_knife" }), 80, "其他杂兵照旧按三档");
 });
 
-test("精英和首领的架势是原来的 60%（向下取整），人数加成也打六折；杂兵不变", () => {
+test("首领和 10 级起精英的架势是原来的 60%（向下取整），人数加成也打六折；10 级以下精英和杂兵不变", () => {
   const c = H.load();
   const preset = (id) => c.enemyPresets().find(p => p.id === id);
   // 亡命之王 lv1 原本 7，lv5 原本 8
@@ -61,10 +61,14 @@ test("精英和首领的架势是原来的 60%（向下取整），人数加成�
   assert.equal(k3.defMax, 4 + 1, "3 人队加成 3 → 1");
   // 沙灵聚合体 lv1 原本 11
   assert.equal(preset("sand_aggregate").build(1, 2).defMax, 6);
-  // 精英也一样：强盗头子 lv1 原本 6 → 3；4 人队加成 4 → 2
-  assert.equal(preset("bandit_boss").build(1, 2).defMax, 3);
-  const e4b = preset("bandit_boss").build(1, 2); c.rebalanceEnemiesForParty(4, [e4b]);
-  assert.equal(e4b.defMax, 3 + 2);
+  // 精英 10 级起才打六折：强盗头子 lv9 不变（7），lv10 原本 8 → 4；4 人队加成 4 → 2
+  assert.equal(preset("bandit_boss").build(1, 2).defMax, 6);
+  assert.equal(preset("bandit_boss").build(9, 2).defMax, 7);
+  assert.equal(preset("bandit_boss").build(10, 2).defMax, 4);
+  const e9 = preset("bandit_boss").build(9, 2); c.rebalanceEnemiesForParty(4, [e9]);
+  assert.equal(e9.defMax, 7 + 4, "10 级以下人数加成照旧");
+  const e10 = preset("bandit_boss").build(10, 2); c.rebalanceEnemiesForParty(4, [e10]);
+  assert.equal(e10.defMax, 4 + 2);
   // 杂兵不变
   assert.equal(preset("thug_knife").build(1, 2).defMax, 3);
 });
@@ -111,8 +115,8 @@ test("首领失衡和普通失衡一样（协助攻击、失衡分），只是�
   assert.equal(thug.ap, 0);
 });
 
-test("精英也攒晕眩标记：第一次失衡照常给协助攻击，回合开始恢复照常行动；第二次才跳过回合", () => {
-  const { c, st } = field(["ruby", "kolt"], [{ id: "captain_wolf", lv: 1, zone: 1 }]);
+test("10 级起的精英也攒晕眩标记：第一次失衡照常给协助攻击，回合开始恢复照常行动；第二次才跳过回合", () => {
+  const { c, st } = field(["ruby", "kolt"], [{ id: "captain_wolf", lv: 10, zone: 1 }]);
   const wolf = st.units.find(u => u.kit === "captain_wolf");
   st.assistQueue = [];
   c.dealBreak(wolf, 99, "physical", [], "测试");
@@ -126,4 +130,13 @@ test("精英也攒晕眩标记：第一次失衡照常给协助攻击，回合�
   c.dealBreak(wolf, 99, "physical", [], "测试");
   c.endPlayerTurn();
   assert.equal(wolf.ap, 0, "第二次：跳过回合");
+});
+
+test("10 级以下的精英照旧：一失衡就跳过下个回合，不记标记", () => {
+  const { c, st } = field(["ruby", "kolt"], [{ id: "captain_wolf", lv: 9, zone: 1 }]);
+  const wolf = st.units.find(u => u.kit === "captain_wolf");
+  c.dealBreak(wolf, 99, "physical", [], "测试");
+  assert.ok(!wolf.stunMarks);
+  c.endPlayerTurn();
+  assert.equal(wolf.ap, 0);
 });

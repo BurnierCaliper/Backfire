@@ -1103,27 +1103,29 @@ function scaleHp(v, party) {
   _lastHpParty = partyScaleCount(party);
   return scaleByParty(v, party);
 }
-/* 精英和首领的架势（已定）：每个等级都是原来的 60%（向下取整），人数加成也一样打六折。
+/* 首领、以及 10 级起的精英的架势（已定）：每个等级都是原来的 60%（向下取整），人数加成也一样打六折。
  * 它们另有晕眩标记：失衡照常，但要攒满 2 个才真正跳过回合（app.js · bossShrugStun）。 */
 const BOSS_POSTURE_MULT = 0.6;
-function isBossKit(kit) {
+const ELITE_RULE_MIN_LEVEL = 10;   // 精英从这一级起才用首领的架势 / 晕眩规则
+function isBossKit(kit, level) {
   const rank = typeof enemyRankOf === "function" ? enemyRankOf({ kit: kit })
     : (typeof ENEMY_RANK !== "undefined" ? ENEMY_RANK[kit] : null);
-  return rank === "boss" || rank === "elite";
+  return rank === "boss" || (rank === "elite" && (Number(level) || 1) >= ELITE_RULE_MIN_LEVEL);
 }
-function scaleDefAdd(party, kit) {
+function scaleDefAdd(party, kit, level) {
   const p = partyScaleCount(party);
   let rank = "minion";
   if (typeof enemyRankOf === "function") rank = enemyRankOf({ kit: kit }) || "minion";
   else if (typeof ENEMY_RANK !== "undefined" && kit && ENEMY_RANK[kit]) rank = ENEMY_RANK[kit];
   if (rank === "minion") return 0;
-  if (p === 3) return Math.floor((rank === "boss" ? 3 : 2) * BOSS_POSTURE_MULT);
-  if (p >= 4) return Math.floor((rank === "boss" ? 6 : 4) * BOSS_POSTURE_MULT);
+  const k = isBossKit(kit, level) ? BOSS_POSTURE_MULT : 1;
+  if (p === 3) return Math.floor((rank === "boss" ? 3 : 2) * k);
+  if (p >= 4) return Math.floor((rank === "boss" ? 6 : 4) * k);
   return 0;
 }
-function scaleDef(v, party, kit) {
-  const base = isBossKit(kit) ? Math.floor((Number(v) || 0) * BOSS_POSTURE_MULT) : (Number(v) || 0);
-  return base + scaleDefAdd(party, kit);
+function scaleDef(v, party, kit, level) {
+  const base = isBossKit(kit, level) ? Math.floor((Number(v) || 0) * BOSS_POSTURE_MULT) : (Number(v) || 0);
+  return base + scaleDefAdd(party, kit, level);
 }
 
 /** 把场上敌人的血量与架势换算到 party 人队。
@@ -1150,7 +1152,7 @@ function rebalanceEnemiesForParty(party, units) {
       touched = true;
     }
     if (u.defParty != null && u.defParty !== n && !u.noPosture) {
-      const delta = scaleDefAdd(n, u.kit) - scaleDefAdd(u.defParty, u.kit);
+      const delta = scaleDefAdd(n, u.kit, u.level) - scaleDefAdd(u.defParty, u.kit, u.level);
       if (delta) {
         u.defMax = Math.max(0, (Number(u.defMax) || 0) + delta);
         u.def = Math.max(0, Math.min(u.defMax, (Number(u.def) || 0) + delta));
@@ -1407,8 +1409,8 @@ function unitOf(name, level, layers, def, atk, extra = {}) {
     level: level || 1,
     zone: extra.zone != null ? extra.zone : (extra.isPlayer ? 1 : enemySpawnZone()),
     layers: layers.map((l, i) => ({ type: l.type, current: l.hp, max: l.hp, inner: i === layers.length - 1 })),
-    def: extra.isPlayer ? def : scaleDef(def, extra.party, extra.kit),
-    defMax: extra.isPlayer ? def : scaleDef(def, extra.party, extra.kit),
+    def: extra.isPlayer ? def : scaleDef(def, extra.party, extra.kit, level),
+    defMax: extra.isPlayer ? def : scaleDef(def, extra.party, extra.kit, level),
     atk,
     flying: !!extra.flying,
     stunned: false,

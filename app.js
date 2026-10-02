@@ -7389,15 +7389,16 @@ function renderLog() {
   box.scrollTop = box.scrollHeight;
 }
 
-/* ---------- 精英和首领的晕眩标记（已定） ----------
- * 精英和首领的架势被打空时和普通失衡完全一样（协助攻击、打出失衡的分数、冰属性加伤、「打进失衡时」的被动……），
+/* ---------- 首领和 10 级起精英的晕眩标记（已定） ----------
+ * 首领和 10 级起的精英架势被打空时和普通失衡完全一样（协助攻击、打出失衡的分数、冰属性加伤、「打进失衡时」的被动……），
  * 只是每次失衡记 1 个晕眩标记：到它自己的回合开始时，标记没满 BOSS_STUN_MARKS 个就恢复架势、照常行动；
  * 满了才真正晕眩（跳过这个回合），之后标记清零。目的是加快首领战的节奏。 */
 const BOSS_STUN_MARKS = 2;
+/** 用这套规则的：首领，以及 10 级起的精英（ELITE_RULE_MIN_LEVEL） */
 function isBossUnit(u) {
   if (!u || u.isPlayer || typeof enemyRankOf !== "function") return false;
   const r = enemyRankOf(u);
-  return r === "boss" || r === "elite";
+  return r === "boss" || (r === "elite" && (Number(u.level) || 1) >= (typeof ELITE_RULE_MIN_LEVEL !== "undefined" ? ELITE_RULE_MIN_LEVEL : 10));
 }
 /** 首领这次失衡记一个标记（同一次失衡只记一次）。返回刚记上的标记数，没记返回 0 */
 function noteBossBreak(u) {
