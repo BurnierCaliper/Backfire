@@ -291,6 +291,18 @@ const EnemyAI = (function () {
     return null;
   }
 
+  /** 敌人被危墙挡住：没有任何一个目标能不隔着墙打到时，返回挡在它前进方向上的那堵墙（间隔的键，如 "1-2"），否则 null */
+  function wallInTheWay(u, prey, target) {
+    if (typeof lineBlocked !== "function" || typeof getGap !== "function") return null;
+    if (prey.some(p => !lineBlocked(u.zone, p.zone))) return null;      // 还有不隔墙的目标：照常打人
+    const from = Number(u.zone), to = Number(target.zone);
+    if (from === to) return null;
+    const next = from + (to > from ? 1 : -1);
+    const g = getGap(from, next);
+    if (!g || g.type !== "wall") return null;                            // 墙不在眼前：先照常走过去
+    return Math.min(from, next) + "-" + Math.max(from, next);
+  }
+
   /** 手册第十章的行为描述 → 一次行动。 */
   function aiPlan(u) {
     if (typeof mutinyTick === "function") mutinyTick();
@@ -325,6 +337,18 @@ const EnemyAI = (function () {
     const pick = aiTarget(u, spec, prey);
     let target = pick.unit;
     if (!target) return null;
+
+    // 所有目标都隔着危墙（走不过去、也打不过去），而墙就挡在前进方向的下一条间隔上：先打墙
+    const wallKey = wallInTheWay(u, prey, target);
+    if (wallKey) {
+      const sidW = (spec.near && has(spec.near)) ? spec.near : has("en_aa") ? "en_aa" : (list[0] && list[0].id);
+      if (sidW) {
+        return {
+          thunk: () => { state.attackerId = u.id; state.targetId = "gap:" + wallKey; runSkill(sidW); },
+          meta: { actorId: u.id, targetId: "gap:" + wallKey, skillName: `攻击危墙（${wallKey.replace("-", "–")} 区之间）` }
+        };
+      }
+    }
 
     const move = (dest) => ({
       thunk: () => { state.attackerId = u.id; doMove(u, dest); },

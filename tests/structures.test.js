@@ -557,3 +557,35 @@ test("声波切割：没有圣盾、没有目标、目标距离不对都不花�
   foe.zone = 3; st.zoneMode = 3; tou.resources.shield = 1;
   assert.match(c.skillRequirementError(tou, "tou_sonic") || "", /没有可以打的目标/);
 });
+
+test("敌人 AI：所有目标都隔着危墙时先打墙，墙这边还有目标就照常打人；不会再卡成打不完的战斗", () => {
+  const c = H.load();
+  c.BattleSim.setup({ party: ["tou", "xia"], enemies: [{ id: "guard_sword", lv: 3, zone: 2 }, { id: "swarm", lv: 3, zone: 2 }] });
+  c.startCombat();
+  const st = c.S.state;
+  const heroes = st.units.filter(u => u.isPlayer);
+  heroes.forEach(u => { u.zone = 1; });
+  st.gaps["1-2"] = { type: "wall", hp: 3, maxHp: 3, open: false };
+  const guard = st.units.find(u => u.kit === "guard_sword");
+  st.combatPhase = "enemy";
+  guard.ap = 1;
+  const p1 = c.S.EnemyAI.plan(guard);
+  assert.match(p1.meta.skillName, /攻击危墙/);
+  assert.equal(p1.meta.targetId, "gap:1-2");
+  p1.thunk();
+  assert.equal(st.gaps["1-2"].hp, 2, "墙挨了一下");
+  // 我方有人在墙这边：照常打人
+  heroes[0].zone = 2;
+  guard.ap = 1;
+  const p2 = c.S.EnemyAI.plan(guard);
+  assert.doesNotMatch(p2.meta.skillName, /危墙/);
+  // 整场打下来：墙会被打塌，战斗能分出胜负
+  const c2 = H.load();
+  c2.BattleSim.setup({ party: ["tou", "xia"], enemies: [{ id: "guard_sword", lv: 2, zone: 2 }, { id: "guard_sword", lv: 2, zone: 2 }], seed: "WALL" });
+  c2.S.state.zoneMode = 2;
+  c2.S.state.units.filter(u => u.isPlayer).forEach(u => { u.zone = 1; });
+  c2.S.state.gaps["1-2"] = { type: "wall", hp: 6, maxHp: 6, open: false };
+  const r = c2.BattleSim.run({ maxRounds: 30, policy: { act: () => null } });   // 我方原地不动
+  assert.notEqual(r.winner, "timeout", "敌人会把墙打掉、打过来");
+  assert.notEqual(c2.S.state.gaps["1-2"].type, "wall");
+});
