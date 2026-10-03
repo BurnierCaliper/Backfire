@@ -1792,3 +1792,15 @@ body:not([data-screen="battle"]) .g-rank { display: none !important; }
 @media (prefers-reduced-motion: reduce) {
   .rm-edge.next, .rm-node .float, .rm-node .glyph, .rm-node .ping { animation: none; }
 }
+
+/* 属性图标（icons.js）：伤害数字最左边。底层粗描边（--eo），上层属性色 */
+.eicon { width: .95em; height: .95em; margin-right: .1em; vertical-align: -.06em; overflow: visible; flex: none; }
+.eicon .o * { fill: none; stroke: var(--eo, #fff); stroke-width: 11; stroke-linejoin: round; stroke-linecap: round; }
+.eicon .o .thin { stroke-width: 8; }
+.eicon .o .solid { fill: var(--eo, #fff); }
+.eicon .c * { fill: none; stroke: currentColor; stroke-width: 5.2; stroke-linejoin: round; stroke-linecap: round; }
+.eicon .c .thin { stroke-width: 3.2; }
+.eicon .c .solid { fill: currentColor; stroke: none; }
+.pop .eicon { filter: drop-shadow(0 3px 5px rgba(20, 30, 40, .35)); }
+.pvtag .dmg { display: inline-flex; align-items: center; }
+.pvtag .eicon { --eo: #0b0806; }

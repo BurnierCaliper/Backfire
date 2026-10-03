@@ -327,10 +327,8 @@ details.smith .sm-price, details.smith .sm-prog.ready { color: var(--sk-hazard);
 
 /* =====================================================================
  * 战斗界面
- * 战场是一面水泥墙，区域是喷在地上的粉笔框；单位卡是铁皮牌子（左边阵营色条），
- * 顶栏 / 操作栏 / 记录是带噪点的油污铁板，主按钮（开始战斗 / 结束回合）是黄色喷漆。
+ * 战场本身（区域、单位卡）保持原来的浅色，只换外围：顶栏 / 操作栏 / 记录是带噪点的油污铁板，主按钮（开始战斗 / 结束回合）是黄色喷漆。
  * ===================================================================== */
-.g-app { --ally: #4f8fd0; --foe: #d8322a; }
 .g-top {
   background: var(--sk-oil); background-image: var(--sk-noise);
   border-bottom: 4px solid var(--sk-ink);
@@ -347,77 +345,7 @@ details.smith .sm-price, details.smith .sm-prog.ready { color: var(--sk-hazard);
 .g-top .g-btn[aria-pressed="true"] { border-color: var(--sk-hazard); }
 .g-btn.r-main { border-color: var(--sk-hazard) !important; }
 
-/* ---------- 战场 ---------- */
-.g-field {
-  background-color: #35302a;
-  background-image: var(--sk-noise), var(--sk-stains), linear-gradient(180deg, #3d3730, #2a2621);
-}
-.g-zone {
-  background: rgba(0, 0, 0, .2);
-  border: 2px dashed rgba(236, 224, 198, .22);
-}
-.g-zone::before {
-  font-family: var(--sk-stencil); color: rgba(236, 224, 198, .07);
-}
-.g-zone .zlabel { font-family: var(--sk-label); font-size: 14px; color: var(--sk-muted); text-shadow: 1px 1px 0 var(--sk-ink); }
-.g-zone.is-move-target { border: 2px dashed var(--sk-hazard); }
-.g-zone.is-move-hover { box-shadow: inset 0 0 0 999px rgba(242, 194, 48, .08); }
-/* 场地：在水泥地上泼一层属性色 */
-.g-zone.field-fire { background: rgba(255, 91, 46, .14); border-color: rgba(255, 91, 46, .45); }
-.g-zone.field-electric { background: rgba(255, 211, 46, .12); border-color: rgba(255, 211, 46, .45); }
-.g-zone.field-ice { background: rgba(124, 207, 232, .13); border-color: rgba(124, 207, 232, .45); }
-.g-zone.field-acid { background: rgba(155, 224, 58, .12); border-color: rgba(155, 224, 58, .45); }
-.g-zone.field-energy { background: rgba(53, 224, 192, .12); border-color: rgba(53, 224, 192, .45); }
-.g-zone.field-harmonic { background: rgba(192, 124, 240, .13); border-color: rgba(192, 124, 240, .45); }
-.g-zone.field-collapse { background: rgba(201, 154, 70, .2); border-color: rgba(201, 154, 70, .55); }
-.g-zone.field-abyss { background: rgba(0, 0, 0, .7); border-color: #000; }
-.zlabel .zwind { background: rgba(242, 194, 48, .2); color: var(--sk-hazard); }
-.zlabel .zwind.down { background: var(--sk-hazard); color: var(--sk-ink); }
-.zlabel .zwind.up { background: rgba(180, 82, 42, .45); color: var(--sk-canvas); }
-.g-gap, .g-gap.gap-open {
-  background: rgba(0, 0, 0, .3); color: var(--sk-muted);
-  font-family: var(--sk-label); font-size: 13px;
-}
-.g-gap.gap-bridge { background: repeating-linear-gradient(0deg, #6b4a26 0 10px, #4d341b 10px 13px); color: var(--sk-canvas); }
-.g-gap.gap-wall { background: repeating-linear-gradient(0deg, #6c2e16 0 12px, #4a1f0f 12px 15px); color: var(--sk-canvas); }
-.g-gap.gap-door { background: repeating-linear-gradient(-45deg, #3b342c 0 8px, #2a2520 8px 16px); color: var(--sk-hazard); }
-.g-gap.gap-void { background: #050403; color: var(--sk-muted); }
-.g-gap.is-targetable { outline: 2px dashed var(--sk-hazard); }
-.g-gap.is-hover { outline: 2px solid var(--sk-hazard); background: #7a5a2a; }
-
-/* ---------- 单位：铁皮牌子 ---------- */
-.unit {
-  background-color: var(--sk-steel);
-  background-image: var(--sk-noise), linear-gradient(170deg, var(--sk-steel-hi), var(--sk-oil-2) 90%);
-  color: var(--sk-canvas);
-}
-.unit::before { width: 6px; }
-.unit-wrap { filter: drop-shadow(4px 5px 0 rgba(0, 0, 0, .5)); }
-.unit-wrap.is-actor::after { background: var(--sk-mint); }
-.unit-wrap.is-targetable::after { background: rgba(236, 224, 198, .35); }
-.unit-wrap.is-hover::after { background: var(--sk-canvas); }
-.unit-wrap.pv-stun .unit { background-image: linear-gradient(180deg, rgba(242, 179, 61, .3), var(--sk-oil-2) 65%); }
-.unit-wrap.pv-stun.ice .unit { background-image: linear-gradient(180deg, rgba(143, 211, 255, .3), var(--sk-oil-2) 65%); }
-.u-name {
-  font-family: var(--sk-tag); font-weight: 400; font-size: 20px; line-height: 1.05;
-  text-shadow: 2px 2px 0 var(--sk-ink);
-}
-.u-lv { font-family: var(--sk-marker); color: var(--sk-muted); }
-.u-atk { font-family: var(--sk-stencil); font-size: 13px; color: var(--sk-hazard); text-shadow: 1px 1px 0 var(--sk-ink); }
-.seg { background: #3a2c22; box-shadow: inset 0 0 0 1px var(--sk-ink); }
-.u-hpline { font-family: var(--sk-stencil); color: var(--sk-muted); }
-.u-hpline b { color: var(--sk-canvas); font-weight: 400; }
-.pip { background: #3a2c22; border-color: #5a4a3a; }
-.pip.on { background: linear-gradient(180deg, #ffe07a, var(--sk-brass)); border-color: var(--sk-ink); }
-.econ-bonus { border-bottom-color: #5a4a3a; }
-.chip { background: rgba(236, 224, 198, .14); color: var(--sk-canvas); }
-.chip.new { background: rgba(242, 194, 48, .35); }
-.u-res { color: var(--sk-muted); }
-.u-flag { font-family: var(--sk-marker); transform: rotate(6deg); box-shadow: 1px 2px 0 rgba(0, 0, 0, .55); }
-.unit.prop { box-shadow: inset 0 0 0 3px var(--sk-brass); }
-.unit-wrap.downed .unit { background: #24211e; background-image: var(--sk-noise); }
-/* 挤的时候名字换回好认的字体 */
-:is(.g-zone.dense-2, .g-zone.dense-3, .g-field.z3) .u-name { font-family: var(--sk-body); font-weight: 700; text-shadow: none; }
+/* 战场（区域、单位卡、评分条）保持原来的白色配色，看得清楚；这里不动 */
 
 /* 预览牌 / 横幅 / 阶段大字 */
 .pvtag, .banner { background: rgba(11, 8, 6, .94); border: 2px solid var(--sk-ink); box-shadow: 3px 4px 0 rgba(0, 0, 0, .5); }
@@ -537,19 +465,12 @@ details.smith .sm-price, details.smith .sm-prog.ready { color: var(--sk-hazard);
 
 /* ---------- 评分 ---------- */
 .rk-grade { font-family: var(--sk-stencil); font-style: normal; font-weight: 400; }
-.rk-score { font-family: var(--sk-stencil); font-weight: 400; color: var(--sk-canvas); text-shadow: 1px 1px 0 var(--sk-ink); }
-.rk-bar { background: rgba(0, 0, 0, .45); }
-.rk-next { color: var(--sk-muted); }
-.rk-gain { color: var(--sk-canvas); text-shadow: 1px 1px 0 var(--sk-ink); }
-.rk-gain.neg { color: #ff6a55; }
 .grade-badge b { font-family: var(--sk-stencil); font-style: normal; font-weight: 400; }
 
 @media (max-width: 820px) {
   .g-top { background: var(--sk-oil); }
   .g-hud { background: var(--sk-oil); background-image: var(--sk-noise); box-shadow: 0 -6px 18px rgba(0, 0, 0, .45); }
   .g-hud::before { display: none; }
-  .g-rank { background: rgba(11, 8, 6, .9); border: 2px solid var(--sk-ink); }
-  .u-name { font-size: 17px; }
   .sk .nm { font-size: 15px; }
   .pvbox.live { background: rgba(11, 8, 6, .95); border: 2px solid var(--sk-ink); }
   .g-log { background: var(--sk-oil-2); border-top: 4px solid var(--sk-ink); }

@@ -734,7 +734,11 @@
     popCount.set(id, n + 1);
     realTimeout(() => popCount.set(id, Math.max(0, (popCount.get(id) || 1) - 1)), 700);
     const d = el("div", "pop " + (cls || ""));
-    d.textContent = text;
+    const icon = opts.icon && window.Icons ? Icons.element(opts.icon) : "";
+    if (icon) {   // 伤害数字最左边放属性图标
+      d.innerHTML = icon;
+      d.appendChild(document.createTextNode(text));
+    } else d.textContent = text;
     if (opts.below) {
       d.style.left = (p.x + 46) + "px";
       d.style.top = (p.y + 30) + "px";
@@ -974,7 +978,7 @@
           const big = bh.big;
           hit(e.unitId, e.element, big);
           popup(e.unitId, big ? v + "!" : String(v), "e-" + e.element + (big ? " big" : "") + (boom ? " boom" : ""),
-            { size: big ? Math.round(BIG_POP_SIZE * (0.8 + 0.35 * bh.ratio)) : boom ? 46 : 30,
+            { icon: e.element, size: big ? Math.round(BIG_POP_SIZE * (0.8 + 0.35 * bh.ratio)) : boom ? 46 : 30,
               dur: boom ? 2.4 : big ? BIG_POP_DUR * (0.8 + 0.45 * bh.ratio) : 1.05 });
           if (boom) await wait(160);
           await wait(chain ? 30 : 45);
@@ -1004,7 +1008,7 @@
           if (window.Sfx) Sfx.boom();
           hit(e.unitId, "energy", true);
           stamp(e.unitId, "高能自爆", "boom");
-          popup(e.unitId, (Math.floor(Number(e.value) || 0)) + "!", "e-energy big boom", { size: BIG_POP_SIZE + 12, dur: 2.8 });
+          popup(e.unitId, (Math.floor(Number(e.value) || 0)) + "!", "e-energy big boom", { icon: "energy", size: BIG_POP_SIZE + 12, dur: 2.8 });
           await playBeats(beatsBefore.filter(b => b.kind !== "stun"));
           await wait(chain ? 380 : 520);
         } else if (e.kind === "break") {
@@ -1321,7 +1325,7 @@
         if (p.ice) c.wrap.classList.add("ice");
       }
       let h = "";
-      if (p.dmgHi > 0) h += `<span class="dmg e-${p.element}">${p.dmgLo === p.dmgHi ? p.dmgHi : p.dmgLo + "–" + p.dmgHi}</span>`;
+      if (p.dmgHi > 0) h += `<span class="dmg e-${p.element}">${window.Icons ? Icons.element(p.element) : ""}${p.dmgLo === p.dmgHi ? p.dmgHi : p.dmgLo + "–" + p.dmgHi}</span>`;
       if (p.healHi > 0) h += `<span class="heal">+${p.healHi}</span>`;
       if (p.shpLoss > 0) h += `<span class="note">坚毅 −${p.shpLoss}</span>`;
       if (p.brHi > 0) h += `<span class="brk">击破 ${p.brLo === p.brHi ? p.brHi : p.brLo + "–" + p.brHi}</span>`;
