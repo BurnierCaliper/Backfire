@@ -112,6 +112,11 @@ function useItemOn(actor, itemId, target, zone) {
       markAoeZone(z, itemId === "shockbomb" ? null : { element: itemId === "bomb_e" ? "electric" : "acid", dmg: 9, attacker: actor });
     }
     units.forEach(u => {
+      // 被铁壁 / 废铁墙这类屏障保护的单位不受范围攻击（屏障在配置物那一轮挨打）
+      if (itemId === "shockbomb" && typeof aoeShieldFor === "function" && aoeShieldFor(u)) {
+        notes.push(`${u.name} 被${aoeShieldFor(u).name}护住，没受影响。`);
+        return;
+      }
       if (itemId === "shockbomb") {
         if (typeof dealBreak === "function") dealBreak(u, 2, "physical", notes, spec.name);
       } else {

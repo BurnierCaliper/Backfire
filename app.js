@@ -556,7 +556,8 @@ function highBoomHitsProp(source, p) {
 }
 
 function highBoomVictims(source) {
-  return fieldUnits().filter(u => Number(u.zone) === Number(source.zone) && highBoomHitsUnit(source, u));
+  // 余波是范围攻击：被屏障保护的单位不受（屏障在配置物那一轮挨打）
+  return fieldUnits().filter(u => Number(u.zone) === Number(source.zone) && highBoomHitsUnit(source, u) && !aoeShieldFor(u));
 }
 
 function explodeHigh(unit) {
@@ -2293,6 +2294,14 @@ function barrierIn(zone, side) {
   return (state.props || []).find(p => BARRIER_SIDE[p.kind] === side && Number(p.zone) === Number(zone) && p.hp > 0);
 }
 function ironWallIn(zone) { return barrierIn(zone, "player"); }
+/** 单位属于哪一方的屏障保护（我方单位 / 防护罩 → 铁壁；敌方 → 废铁墙） */
+function barrierSideOf(u) { return u && (u.isPlayer || u.kit === "ironwall") ? "player" : "enemy"; }
+/** 范围攻击：被同区屏障保护的单位完全不受范围攻击（伤害、击破都由屏障吃，一次行动只吃一下）。
+ *  返回保护它的屏障；以后新加的盾牌类配置物写进 BARRIER_SIDE 就自动生效 */
+function aoeShieldFor(u) {
+  if (!u || u.kind) return null;
+  return barrierIn(u.zone, barrierSideOf(u)) || null;
+}
 
 function breakIronWall(p, notes) {
   notes = notes || [];
@@ -2912,10 +2921,11 @@ function markAoeZone(zone, hit) {
   else if (hit && hit.element) state.aoePulse[z].hits.push(hit);
 }
 
-/** 范围攻击波及到的配置物：按钮 / 拉杆不在这里（它们按「被操作一次」处理），墙不算区里的东西 */
+/** 范围攻击波及到的配置物：按钮 / 拉杆不在这里（它们按「被操作一次」处理） */
 function aoeHittableProps(zone) {
+  // 铁壁、废铁墙这类屏障也会被范围攻击打到；这次行动已经替人挡过一下的不再挨第二下
   return (state.props || []).filter(p => Number(p.zone) === Number(zone) && p.hp > 0 &&
-    p.kind !== "button" && p.kind !== "lever" && p.kind !== "ironwall" && p.kind !== "scrapwall");
+    p.kind !== "button" && p.kind !== "lever" && !(BARRIER_SIDE[p.kind] && (state.actionWallHit || {})[p.id]));
 }
 
 function flushAoePulse() {
@@ -2934,6 +2944,7 @@ function flushAoePulse() {
       aoeHittableProps(z).forEach(p => {
         if (!(state.props || []).includes(p) || !(p.hp > 0)) return;   // 同一轮里已经被连锁炸掉
         const before = Number(p.hp) || 0;
+        if (BARRIER_SIDE[p.kind]) { state.actionWallHit = state.actionWallHit || {}; state.actionWallHit[p.id] = true; }
         const notes = damageProp(p, { element: hit.element, dmg: Math.max(1, Math.floor(Number(hit.dmg) || 1)) }, hit.attacker);
         if (typeof popStructure === "function") popStructure("prop:" + p.id, p.level, before - Math.max(0, Number(p.hp) || 0), hit.element, "无效");
         if (notes.length) appendLog(`范围攻击波及 ${p.name}：` + notes.join("\n"));
@@ -5605,9 +5616,13 @@ function dealTo(attacker, target, opt) {
       opt.flags.blockResolved = true;
     }
   }
-  const wallSide = !attacker || !target || !opt.flags || !opt.flags.action || opt.flags.diffract ? null
+  let wallSide = !attacker || !target || !opt.flags || !opt.flags.action || opt.flags.diffract ? null
     : !attacker.isPlayer && (target.isPlayer || target.kit === "ironwall") ? "player"
     : attacker.isPlayer && !target.isPlayer ? "enemy" : null;
+  // 范围攻击（不管谁放的、算不算行动）：被屏障保护的单位一律不受，屏障替它吃一下（同一次行动只吃一下）
+  if (!wallSide && target && opt.flags && opt.flags.aoe && !opt.flags.environment && !opt.flags.diffract && aoeShieldFor(target)) {
+    wallSide = barrierSideOf(target);
+  }
   if (wallSide) {
     const wallHit = absorbIronWall(attacker, target.zone, opt, wallSide);
     if (wallHit) {

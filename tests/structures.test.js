@@ -826,3 +826,73 @@ test("范围攻击波及配置物：别的区、按属性打不动的配置物�
   assert.equal(far.hp, 3, "2 区的桶没事");
   assert.equal(big.hp, 7, "同区的桶只挨一下火焰（−3），不按敌人数量重复");
 });
+
+/* ---------- 屏障（铁壁 / 废铁墙）挡范围攻击 ---------- */
+function boomcarField() {
+  const c = H.load();
+  c.BattleSim.setup({ party: ["kolt", "helu"], seed: "WALL", enemies: [{ id: "boomcar", lv: 1, zone: 1 }, { id: "thug_hammer", lv: 1, zone: 2 }] });
+  c.startCombat();
+  const st = c.S.state;
+  st.units.forEach(u => { if (u.isPlayer) u.zone = 1; });
+  return { c, st, k: id => c.findKit(id, st.units) };
+}
+
+test("铁壁保护时，敌人的范围攻击一个玩家都打不到，只对铁壁造成一次伤害", () => {
+  const { c, st, k } = boomcarField();
+  const wall = c.makeProp("ironwall", 1, 1); wall.hp = wall.maxHp = 200;
+  st.props.push(wall);
+  const kolt = k("kolt"), helu = k("helu"), car = k("boomcar");
+  const before = [kolt, helu].map(u => c.totalHp(u));
+  st.combatPhase = "enemy"; car.ap = 1; st.attackerId = car.id; st.targetId = kolt.id;
+  c.runSkill("en_boom_fuse");
+  [kolt, helu].forEach((u, i) => assert.equal(c.totalHp(u), before[i], u.name + " 被铁壁护住"));
+  assert.ok(wall.hp < 200, "铁壁挨了一下");
+  const once = 200 - wall.hp;
+  assert.ok(once > 0 && once < 40, "只挨一次（不是每个玩家各一次）：" + once);
+});
+
+test("废铁墙同样挡我方范围攻击：柏妮尔喷火打不到墙后的敌人，只打墙一次", () => {
+  const { c, st, b } = bernielField(1);
+  const thug = st.units.find(u => !u.isPlayer);
+  const wall = c.makeProp("scrapwall", 1, 1); wall.hp = wall.maxHp = 100;
+  st.props.push(wall);
+  const hp = c.totalHp(thug);
+  c.runSkill("berniel_spit");
+  assert.equal(c.totalHp(thug), hp, "敌人被废铁墙护住");
+  assert.ok(wall.hp < 100, "废铁墙挨了一下");
+  assert.ok(st.props.includes(wall));
+});
+
+test("范围攻击照样打废铁墙：区里没有敌人时墙也会挨打", () => {
+  const { c, st } = bernielField(2);
+  const wall = c.makeProp("scrapwall", 1, 1); wall.hp = wall.maxHp = 100;
+  st.props.push(wall);
+  c.runSkill("berniel_spit");
+  assert.ok(wall.hp < 100);
+});
+
+test("爆炸桶的爆炸（不分敌我的范围伤害）也打不到铁壁后面的玩家", () => {
+  const { c, st, k } = boomcarField();
+  const wall = c.makeProp("ironwall", 1, 1); wall.hp = wall.maxHp = 200;
+  const boom = c.makeProp("boom", 1, 1);
+  st.props.push(wall, boom);
+  const kolt = k("kolt"), helu = k("helu");
+  const before = [kolt, helu].map(u => c.totalHp(u));
+  c.hitStructureCore(kolt, "prop:" + boom.id, { dmg: 10, brk: 1, element: "fire" });
+  assert.ok(!st.props.includes(boom), "桶炸了");
+  [kolt, helu].forEach((u, i) => assert.equal(c.totalHp(u), before[i], u.name + " 被铁壁护住"));
+});
+
+test("爆炸桶的爆炸也打不到废铁墙后面的敌人（以前只挡我方的攻击行动）", () => {
+  const { c, st } = bernielField(1);
+  const thug = st.units.find(u => !u.isPlayer);
+  const kolt = st.units.find(u => u.isPlayer);
+  const wall = c.makeProp("scrapwall", 1, 1); wall.hp = wall.maxHp = 100;
+  const boom = c.makeProp("boom", 1, 1);
+  st.props.push(wall, boom);
+  const hp = c.totalHp(thug);
+  c.hitStructureCore(kolt, "prop:" + boom.id, { dmg: 10, brk: 1, element: "fire" });
+  assert.ok(!st.props.includes(boom));
+  assert.equal(c.totalHp(thug), hp, "敌人被废铁墙护住");
+  assert.ok(wall.hp < 100, "废铁墙替它挨了爆炸");
+});
