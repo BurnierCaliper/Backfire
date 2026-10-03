@@ -1,0 +1,605 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>街头废土风格草稿</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Black+Ops+One&family=Permanent+Marker&family=Zhi+Mang+Xing&family=ZCOOL+QingKe+HuangYou&display=swap" rel="stylesheet">
+<style>
+:root {
+  --oil: #110e0b;
+  --oil-2: #1a1511;
+  --concrete: #2b2723;
+  --concrete-hi: #3a352f;
+  --steel: #2a2520;
+  --steel-hi: #3b342c;
+  --edge: #4d4337;
+  --rust: #b4522a;
+  --rust-dk: #6c2e16;
+  --brass: #c99a46;
+  --hazard: #f2c230;
+  --blood: #d8322a;
+  --pink: #ff4fa3;      /* 喷漆荧光粉 */
+  --mint: #39e6b4;      /* 喷漆荧光绿 */
+  --canvas: #ece0c6;
+  --muted: #a8977b;
+  --ink: #0b0806;
+  --holo: #3fe0ff;      /* 路线图虚线 / 全息 */
+  --gold: #ffc93c;      /* 走过的路线 */
+
+  --fire: #ff5b2e; --acid: #9be03a; --electric: #ffd32e; --ice: #7ccfe8;
+  --energy: #35e0c0; --physical: #ff9a3c; --harmonic: #c07cf0;
+  --n-battle: #ece0c6; --n-elite: #ff7a2e; --n-boss: #ff3b2e; --n-rest: #7ccfe8; --n-shop: #f2c230;
+  --n-smith: #ff9a3c; --n-clinic: #8fe05a; --n-check: #c07cf0; --n-ambush: #ff4f6e; --n-start: #ece0c6;
+
+  --marker: "Permanent Marker", "Comic Sans MS", cursive;
+  --stencil: "Black Ops One", Impact, sans-serif;
+  --tag-cn: "Zhi Mang Xing", "ZCOOL QingKe HuangYou", cursive;
+  --ui-cn: "ZCOOL QingKe HuangYou", "Microsoft YaHei", sans-serif;
+  --noise: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 .6 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  --stains: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='600' height='600'><filter id='b'><feGaussianBlur stdDeviation='30'/></filter><g filter='url(%23b)' fill='%23000' fill-opacity='.35'><ellipse cx='120' cy='90' rx='120' ry='60'/><ellipse cx='480' cy='380' rx='160' ry='90'/><ellipse cx='220' cy='520' rx='100' ry='50'/></g></svg>");
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; color: var(--canvas);
+  font: 14px/1.6 "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background-color: var(--concrete);
+  background-image: var(--noise), var(--stains), linear-gradient(180deg, #34302b, #1d1a17 70%);
+}
+main { position: relative; max-width: 1160px; margin: 0 auto; padding: 20px 16px 64px; overflow: hidden; }
+.wall-tags { position: absolute; inset: 0; pointer-events: none; z-index: 0; }
+main > *:not(.wall-tags) { position: relative; z-index: 1; }
+
+/* ---------- 喷漆大标题 ---------- */
+.hero svg { display: block; width: 100%; max-width: 760px; height: auto; }
+.lead { color: var(--muted); margin: 0 0 18px; max-width: 780px; }
+
+/* 小节标题：马克笔字 + 喷漆底 */
+h2 {
+  position: relative; display: inline-block; margin: 40px 0 16px; padding: 4px 18px 6px 12px;
+  font-family: var(--tag-cn); font-weight: 400; font-size: 34px; line-height: 1.1; color: var(--ink);
+  transform: rotate(-1.5deg);
+}
+h2::before {
+  /* 喷漆刷出来的一块底色，边缘毛糙 */
+  content: ""; position: absolute; inset: -4px -10px -6px -8px; z-index: -1;
+  background: var(--hl, var(--hazard)); filter: url(#spray);
+  clip-path: polygon(1% 12%, 9% 0, 60% 6%, 99% 0, 97% 55%, 100% 92%, 70% 100%, 30% 94%, 2% 100%, 0 50%);
+}
+h2 small { font-family: var(--marker); font-size: 14px; margin-left: 10px; letter-spacing: .05em; }
+h3 { font-family: var(--marker); font-weight: 400; font-size: 16px; margin: 20px 0 10px; color: var(--canvas); letter-spacing: .04em; }
+.note {
+  position: relative; color: var(--ink); font-size: 13px; padding: 12px 16px; margin: 0 0 16px; max-width: 880px;
+  background: #efe3c4; box-shadow: 3px 4px 0 rgba(0,0,0,.45); transform: rotate(.4deg);
+}
+.note::before, .note::after {
+  /* 胶带 */
+  content: ""; position: absolute; top: -9px; width: 70px; height: 20px; background: rgba(214,205,180,.82);
+  box-shadow: 0 1px 2px rgba(0,0,0,.3);
+  clip-path: polygon(3% 10%, 0 0, 100% 0, 97% 30%, 100% 100%, 2% 90%, 0 60%);
+}
+.note::before { left: 16px; transform: rotate(-4deg); }
+.note::after { right: 20px; transform: rotate(5deg); }
+.note b { color: var(--blood); }
+
+/* ---------- 贴纸版图标 ---------- */
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(106px, 1fr)); gap: 18px 12px; }
+.cell { text-align: center; font-size: 12px; color: var(--muted); }
+.cell b { display: block; font-family: var(--tag-cn); font-weight: 400; color: var(--canvas); font-size: 20px; line-height: 1; margin-top: 8px; }
+.sticker {
+  width: 84px; height: 84px; margin: 0 auto; display: grid; place-items: center;
+  background: var(--oil-2); border-radius: 18px;
+  /* 模切贴纸：一圈白边 + 投影，随机歪一点 */
+  box-shadow: 0 0 0 4px var(--canvas), 4px 6px 0 4px rgba(0,0,0,.45);
+  transform: rotate(var(--r, -3deg));
+  background-image: var(--noise);
+}
+.sticker svg { width: 56px; height: 56px; }
+
+svg.ic { overflow: visible; filter: drop-shadow(2px 3px 0 rgba(0,0,0,.65)); }
+svg.ic * { vector-effect: non-scaling-stroke; }
+.ic .ink * { fill: none; stroke: var(--ink); stroke-width: 7; stroke-linejoin: round; stroke-linecap: round; }
+.ic .ink .thin { stroke-width: 4.6; }
+.ic .ink .bold { stroke-width: 9; }
+.ic .ink .solid { fill: var(--ink); stroke-width: 4; }
+.ic .col * { fill: none; stroke: var(--c); stroke-width: 3; stroke-linejoin: round; stroke-linecap: round; }
+.ic .col .thin { stroke-width: 1.7; opacity: .85; }
+.ic .col .bold { stroke-width: 4.6; }
+.ic .col .solid { fill: var(--c); stroke: none; }
+
+/* ---------- 路线图 ---------- */
+.maps { display: grid; gap: 22px; }
+.map { position: relative; border: 3px solid var(--ink); box-shadow: 6px 7px 0 rgba(0,0,0,.5); }
+.map > svg { display: block; width: 100%; height: auto; }
+.map-title {
+  position: absolute; left: 10px; top: 8px; z-index: 2;
+  font-family: var(--tag-cn); font-size: 32px; line-height: 1; color: var(--canvas);
+  text-shadow: 3px 3px 0 var(--ink), -1px -1px 0 var(--ink);
+  transform: rotate(-2deg);
+}
+.map-title small { font-family: var(--marker); font-size: 14px; margin-left: 8px; color: var(--hazard); }
+
+.map .edge-halo { fill: none; stroke: rgba(0,0,0,.14); stroke-width: 5; stroke-linecap: round; }
+.map .edge { fill: none; stroke: var(--holo); stroke-width: 2.6; stroke-dasharray: 9 7; stroke-linecap: round; opacity: .75; }
+.map .edge.done { stroke: var(--gold); stroke-width: 3.2; opacity: 1; }
+.map .edge.next { opacity: 1; stroke-width: 3; animation: flow 1s linear infinite; filter: drop-shadow(0 0 3px var(--holo)); }
+@keyframes flow { to { stroke-dashoffset: -32; } }
+
+/* 全息节点：地上一圈投影光斑、一道光柱，图标半透明、带扫描条纹、轻微漂浮和闪烁 */
+.holo { color: var(--c); }
+.holo .pad { fill: var(--c); opacity: .38; }
+.holo .pad-ring { fill: none; stroke: var(--c); stroke-width: 1.4; opacity: .7; }
+.holo .beam { fill: url(#beam); opacity: .5; }
+.holo .float { animation: bob 3.2s ease-in-out infinite; }
+.holo .glyph { opacity: .92; animation: flicker 4.5s steps(1) infinite; }
+.holo .glyph * { fill: none; stroke: var(--c); stroke-width: 3; stroke-linejoin: round; stroke-linecap: round; }
+.holo .glyph .thin { stroke-width: 1.8; }
+.holo .glyph .bold { stroke-width: 3.6; }
+.holo .glyph .solid { fill: var(--c); stroke: none; }
+.holo .ghost { opacity: .35; }
+.holo .shade * { fill: none; stroke: rgba(0,0,0,.28); stroke-width: 6; stroke-linejoin: round; stroke-linecap: round; }
+.holo .shade .solid { fill: rgba(0,0,0,.28); }
+.holo .ghost * { fill: none; stroke: #ff3b6e; stroke-width: 2; }
+.holo .ghost.b * { stroke: #3fe0ff; }
+@keyframes bob { 50% { transform: translateY(-3px); } }
+@keyframes flicker { 0%, 100% { opacity: .92; } 42% { opacity: .55; } 43% { opacity: .92; } 77% { opacity: .7; } 78% { opacity: .92; } }
+.holo.now .pad { opacity: .6; }
+.holo.now .ping { fill: none; stroke: var(--c); stroke-width: 2; animation: ping 1.6s ease-out infinite; transform-box: fill-box; transform-origin: center; }
+@keyframes ping { from { transform: scale(1); opacity: .9; } to { transform: scale(2.2); opacity: 0; } }
+.holo.done .float { opacity: .38; }
+.holo.done .pad, .holo.done .beam { opacity: .15; }
+.check-mark .stroke { fill: none; stroke: var(--blood); stroke-linecap: round; stroke-linejoin: round; }
+.check-mark .sheen { fill: none; stroke: #ff8a6e; stroke-linecap: round; opacity: .45; }
+
+/* ---------- 界面零件 ---------- */
+.kit { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 26px; align-items: start; }
+.panel {
+  position: relative; padding: 30px 16px 16px;
+  background-color: var(--steel); background-image: var(--noise), linear-gradient(170deg, var(--steel-hi), var(--oil-2) 85%);
+  border: 3px solid var(--ink); box-shadow: 6px 7px 0 rgba(0,0,0,.5);
+}
+.tape {
+  /* 胶带标签：马克笔写的面板名 */
+  position: absolute; left: 14px; top: -14px; padding: 2px 16px 3px;
+  font-family: var(--tag-cn); font-size: 26px; line-height: 1.1; color: var(--ink);
+  background: rgba(220,210,186,.95); transform: rotate(-3deg);
+  clip-path: polygon(2% 8%, 0 0, 100% 4%, 98% 40%, 100% 100%, 3% 94%, 0 55%);
+  box-shadow: 0 2px 3px rgba(0,0,0,.4);
+}
+.splat { position: absolute; pointer-events: none; }
+.btns { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; }
+.btn {
+  position: relative; cursor: pointer; border: 0; padding: 10px 24px 12px; color: var(--ink);
+  font-family: var(--tag-cn); font-size: 28px; line-height: 1; background: transparent; isolation: isolate;
+}
+.btn small { display: block; font: 12px/1 var(--marker); letter-spacing: .08em; margin-top: 4px; }
+.btn::before {
+  content: ""; position: absolute; inset: 0; z-index: -1; background: var(--bg, var(--hazard)); filter: url(#spray);
+  clip-path: polygon(3% 6%, 30% 0, 70% 4%, 97% 0, 100% 40%, 96% 100%, 50% 95%, 4% 100%, 0 60%);
+  box-shadow: 0 0 0 3px var(--ink);
+}
+.btn::after {
+  /* 往下淌的漆 */
+  content: ""; position: absolute; z-index: -1; left: 22%; top: 92%; width: 6px; height: 16px; border-radius: 0 0 4px 4px;
+  background: var(--bg, var(--hazard)); box-shadow: 34px -4px 0 -1px var(--bg, var(--hazard)), 58px 2px 0 0 var(--bg, var(--hazard));
+}
+.btn:active { transform: translate(1px, 2px); }
+.btn.go { transform: rotate(-2deg); }
+.btn.alt { --bg: var(--canvas); transform: rotate(1.5deg); }
+.btn.danger { --bg: var(--blood); color: var(--canvas); transform: rotate(-1deg); }
+
+.unit { position: relative; padding: 10px 12px 12px 16px; margin-bottom: 14px; background: rgba(0,0,0,.28); border-left: 7px solid var(--side, #4f8fd0); }
+.unit.foe { --side: var(--blood); }
+.unit .top { display: flex; align-items: baseline; gap: 10px; }
+.unit .nm { font-family: var(--tag-cn); font-size: 32px; line-height: 1; text-shadow: 3px 3px 0 var(--ink); }
+.unit .lv { font-family: var(--marker); font-size: 13px; color: var(--muted); }
+.unit .atk { margin-left: auto; font-family: var(--stencil); font-size: 18px; color: var(--hazard); text-shadow: 2px 2px 0 var(--ink); }
+.unit .scrawl { position: absolute; right: 10px; top: -12px; font-family: var(--marker); font-size: 13px; color: var(--pink); transform: rotate(6deg); text-shadow: 1px 1px 0 var(--ink); }
+.gauge { display: flex; gap: 3px; margin: 8px 0 4px; height: 14px; }
+.gauge i { flex: 1; background: #3a2c22; border: 1px solid var(--ink); transform: skewX(-18deg); }
+.gauge i.on { background: linear-gradient(180deg, #f2775a, #b6382a); }
+.gauge i.sh { background: linear-gradient(180deg, #a3e3f2, #4c9bb3); }
+.gauge.posture { height: 8px; }
+.gauge.posture i.on { background: linear-gradient(180deg, #ffe07a, var(--brass)); }
+.unit .meta { display: flex; gap: 10px; align-items: center; font-family: var(--marker); font-size: 13px; color: var(--muted); }
+.unit .meta svg { width: 24px; height: 24px; }
+.stk {
+  display: inline-block; font-family: var(--marker); font-size: 12px; padding: 1px 8px; color: var(--ink);
+  background: var(--sbg, var(--mint)); border-radius: 3px; transform: rotate(-3deg); box-shadow: 1px 2px 0 rgba(0,0,0,.5);
+}
+
+.swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 14px; }
+.sw { transform: rotate(var(--r)); }
+.sw div { height: 50px; filter: url(#spray); }
+.sw span { display: block; font-size: 12px; padding: 2px 4px; color: var(--muted); }
+.sw span b { font-family: var(--tag-cn); font-weight: 400; font-size: 20px; color: var(--canvas); margin-right: 6px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .map .edge.next, .holo .float, .holo .glyph, .holo.now .ping { animation: none; }
+}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <filter id="rough" x="-15%" y="-15%" width="130%" height="130%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.05" numOctaves="2" seed="7" result="t"/>
+      <feDisplacementMap in="SourceGraphic" in2="t" scale="2.6" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+    <!-- 喷漆：边缘被噪点打毛、带细小飞溅 -->
+    <filter id="spray" x="-10%" y="-20%" width="120%" height="140%">
+      <feTurbulence type="fractalNoise" baseFrequency=".9" numOctaves="2" seed="4" result="n"/>
+      <feDisplacementMap in="SourceGraphic" in2="n" scale="7" xChannelSelector="R" yChannelSelector="G" result="d"/>
+      <feGaussianBlur in="d" stdDeviation=".6"/>
+    </filter>
+    <!-- 水笔：线条边缘轻微抖动 -->
+    <filter id="marker" x="-20%" y="-20%" width="140%" height="140%">
+      <feTurbulence type="fractalNoise" baseFrequency=".08" numOctaves="2" seed="11" result="t"/>
+      <feDisplacementMap in="SourceGraphic" in2="t" scale="3" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="2.2" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="grain" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="1.1" numOctaves="2" seed="2"/>
+      <feColorMatrix values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 .35 0"/>
+      <feComposite in2="SourceGraphic" operator="in"/>
+    </filter>
+    <filter id="blur3"><feGaussianBlur stdDeviation="3"/></filter>
+    <filter id="blur6"><feGaussianBlur stdDeviation="6"/></filter>
+    <filter id="blur14"><feGaussianBlur stdDeviation="14"/></filter>
+    <!-- 全息图上的横向扫描条纹 -->
+    <pattern id="scan" width="4" height="4" patternUnits="userSpaceOnUse">
+      <rect width="4" height="2.6" fill="#fff"/><rect y="2.6" width="4" height="1.4" fill="#fff" fill-opacity=".35"/>
+    </pattern>
+    <mask id="holo-mask" maskContentUnits="userSpaceOnUse"><rect x="-2000" y="-2000" width="6000" height="6000" fill="url(#scan)"/></mask>
+    <linearGradient id="beam" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="currentColor" stop-opacity=".55"/><stop offset="1" stop-color="currentColor" stop-opacity="0"/>
+    </linearGradient>
+    <pattern id="rain" width="14" height="40" patternUnits="userSpaceOnUse" patternTransform="rotate(14)">
+      <path d="M7 0 V16" stroke="#9fb3d6" stroke-opacity=".18" stroke-width="1"/>
+    </pattern>
+  </defs>
+</svg>
+
+<main>
+  <svg class="wall-tags" id="wall" aria-hidden="true"></svg>
+
+  <div class="hero" id="hero"></div>
+  <p class="lead">这一版往街头走：底色从「机房金属」换成水泥墙和铁皮，标题、按钮用喷漆和马克笔，标签用胶带和贴纸，墙上随手喷了几个涂鸦。路线图按你的要求重做：节点像全息投影立在地图上，路线是青蓝虚线，走过的变金色，走过的节点打红色水笔勾。</p>
+
+  <h2>图标 · 贴纸版<small>STICKERS</small></h2>
+  <p class="note">图标的画法沿用上一版的<b>粗墨线</b>，外框从铆钉铁板换成<b>模切贴纸</b>（白边、随手贴歪），像拍在墙上的街头贴纸，少一点机械感。</p>
+  <h3>Route nodes / 路线节点</h3>
+  <div class="grid" id="nodes"></div>
+  <h3>Elements / 七种属性</h3>
+  <div class="grid" id="elems"></div>
+
+  <h2 style="--hl: var(--holo)">路线图 · 全息投影<small>HOLO MAP</small></h2>
+  <p class="note">节点不加框：地上一块投影光斑、一道光柱，图标半透明悬在上面，带扫描条纹、轻微漂浮和闪烁，边缘有一点红蓝错位。路线全是<b>青蓝虚线</b>，下一步能走的会流动发光；<b>走过的路线是金色</b>；走过的节点变暗，打上<b>红色水笔勾</b>，每个勾的角度、长短都不一样。</p>
+  <div class="maps" id="maps"></div>
+
+  <h2 style="--hl: var(--pink)">界面 · 街头废土<small>STREET KIT</small></h2>
+  <div class="swatches" id="swatches"></div>
+  <h3>Parts / 零件样例</h3>
+  <div class="kit">
+    <div class="panel">
+      <div class="tape">按钮</div>
+      <div class="btns">
+        <button class="btn go">迎战<small>LET'S GO</small></button>
+        <button class="btn alt">长休<small>REST 8H</small></button>
+        <button class="btn danger">撤退<small>RUN!</small></button>
+      </div>
+      <svg class="splat" style="right:-18px; bottom:-20px; width:90px; height:90px" id="splat1"></svg>
+    </div>
+    <div class="panel">
+      <div class="tape">角色卡</div>
+      <div class="unit">
+        <span class="scrawl">engine ON!!</span>
+        <div class="top"><span class="nm">夕夏</span><span class="lv">Lv 7</span><span class="atk">ATK 19</span></div>
+        <div class="gauge" id="g1"></div>
+        <div class="gauge posture" id="p1"></div>
+        <div class="meta" id="m1"></div>
+      </div>
+      <div class="unit foe">
+        <span class="scrawl" style="color:var(--hazard)">BOSS</span>
+        <div class="top"><span class="nm">亡命之王</span><span class="lv">Lv 8</span><span class="atk">ATK 24</span></div>
+        <div class="gauge" id="g2"></div>
+        <div class="gauge posture" id="p2"></div>
+        <div class="meta" id="m2"></div>
+      </div>
+      <svg class="splat" style="left:-24px; top:40%; width:70px; height:70px" id="splat2"></svg>
+    </div>
+  </div>
+</main>
+
+<script>
+/* 简单的种子随机数：每次打开画面一样 */
+let SEED = 7;
+const rnd = () => (SEED = (SEED * 9301 + 49297) % 233280) / 233280;
+const rr = (a, b) => a + rnd() * (b - a);
+
+const G = {
+  battle: `<path d="M11 11 L33 33 M27 37 L37 27 M33 33 L39 39"/><path d="M37 11 L15 33 M11 27 L21 37 M15 33 L9 39"/>`,
+  elite: `<path d="M8 12 L16 21 L24 16 L32 21 L40 12 L37 31 L24 40 L11 31 Z"/><path d="M17 27 L22 28 M31 27 L26 28"/><path class="thin" d="M24 21 L24 33"/>`,
+  boss: `<path d="M24 5 L40.5 14.5 L40.5 33.5 L24 43 L7.5 33.5 L7.5 14.5 Z"/><path d="M13 24 Q24 13 35 24 Q24 35 13 24 Z"/><circle class="solid" cx="24" cy="24" r="3.6"/>`,
+  rest: `<path d="M6 38 L42 38"/><path d="M10 38 L24 15 L38 38"/><path d="M19 38 L24 29 L29 38"/><path class="thin" d="M34 8 A5 5 0 1 0 40 15 A6.5 6.5 0 0 1 34 8 Z"/>`,
+  shop: `<path d="M24 7 L39 15.5 L39 32.5 L24 41 L9 32.5 L9 15.5 Z"/><path d="M9 15.5 L24 24 L39 15.5 M24 24 L24 41"/>`,
+  smith: `<path d="M13 37 L27 23"/><path d="M23 11 L37 25 L41 21 L27 7 Z"/><path class="thin" d="M7 25 L12 25 M11 13 L14.5 16.5 M19 5 L19 10"/><path d="M8 42 L18 42"/>`,
+  clinic: `<path d="M16 6 H32 L42 16 V32 L32 42 H16 L6 32 V16 Z"/><path class="bold" d="M24 14 V34 M14 24 H34"/>`,
+  check: `<path d="M24 5 L40.5 14.5 L40.5 33.5 L24 43 L7.5 33.5 L7.5 14.5 Z"/><path d="M24 13 L34 30 H14 Z"/><path class="thin" d="M24 5 L24 13 M40.5 33.5 L34 30 M7.5 33.5 L14 30"/>`,
+  ambush: `<path d="M24 6 L43 39 H5 Z"/><path class="bold" d="M24 18 V28"/><rect class="solid" x="22" y="31.5" width="4" height="4"/>`,
+  start: `<path d="M12 42 V7"/><path d="M12 9 H36 L30 16 L36 23 H12"/>`,
+  fire: `<path d="M24 5 C31 13 37 18 37 28 A13 13 0 0 1 11 28 C11 21 15 17 18 13 C19 19 22 21 24 21 C22 15 22 10 24 5 Z"/><path class="thin" d="M24 38 A5 5 0 0 1 19 33 C19 30 22 28 24 24 C26 28 29 30 29 33 A5 5 0 0 1 24 38 Z"/>`,
+  acid: `<path d="M24 6 C24 6 11 22 11 30 A13 13 0 0 0 37 30 C37 22 24 6 24 6 Z"/><circle cx="20" cy="31" r="3.2"/><circle class="thin" cx="28.5" cy="35" r="2"/><circle class="thin" cx="39" cy="9" r="2.2"/>`,
+  electric: `<path d="M28 4 L12 27 H23 L19 44 L36 19 H25 Z"/><path class="thin" d="M6 14 L10 14 M38 32 L42 32"/>`,
+  ice: [0, 60, -60].map(a => `<path transform="rotate(${a} 24 24)" d="M24 5 V43 M18.5 10 L24 15 L29.5 10 M18.5 38 L24 33 L29.5 38"/>`).join(""),
+  energy: `<ellipse cx="24" cy="24" rx="19" ry="7.5" transform="rotate(30 24 24)"/><ellipse cx="24" cy="24" rx="19" ry="7.5" transform="rotate(-30 24 24)"/><circle class="solid" cx="24" cy="24" r="4.4"/>`,
+  physical: `<path d="M24 5 L27.1 16.6 L37.4 10.6 L31.4 20.9 L43 24 L31.4 27.1 L37.4 37.4 L27.1 31.4 L24 43 L20.9 31.4 L10.6 37.4 L16.6 27.1 L5 24 L16.6 20.9 L10.6 10.6 L20.9 16.6 Z"/>`,
+  harmonic: `<path d="M5 24 C9 12 13 12 17 24 C21 36 25 36 29 24 C33 12 37 12 41 24 L43 24"/><path class="thin" d="M5 15 C9 9 13 9 17 15 C21 21 25 21 29 15 C33 9 37 9 41 15"/><path class="thin" d="M5 33 C9 27 13 27 17 33 C21 39 25 39 29 33 C33 27 37 27 41 33"/>`
+};
+const icon = (k, color, attrs) =>
+  `<svg class="ic" viewBox="0 0 48 48" ${attrs || ""} style="--c:var(${color})" aria-hidden="true">` +
+  `<g filter="url(#rough)"><g class="ink">${G[k]}</g><g class="col">${G[k]}</g></g></svg>`;
+
+const NODES = [
+  ["battle", "战斗", "--n-battle"], ["elite", "精英战", "--n-elite"], ["boss", "首领", "--n-boss"],
+  ["rest", "休息", "--n-rest"], ["shop", "商店", "--n-shop"], ["smith", "工匠", "--n-smith"],
+  ["clinic", "诊所", "--n-clinic"], ["check", "检定", "--n-check"], ["ambush", "遭遇", "--n-ambush"],
+  ["start", "出发", "--n-start"]
+];
+const ELEMS = [
+  ["fire", "火", "--fire"], ["acid", "酸", "--acid"], ["electric", "电", "--electric"], ["ice", "冰", "--ice"],
+  ["energy", "能量", "--energy"], ["physical", "物理", "--physical"], ["harmonic", "谐波", "--harmonic"]
+];
+const stickers = (list) => list.map(([k, name, c]) =>
+  `<div class="cell"><div class="sticker" style="--r:${rr(-6, 6).toFixed(1)}deg">${icon(k, c)}</div><b>${name}</b>${k}</div>`).join("");
+document.getElementById("nodes").innerHTML = stickers(NODES);
+document.getElementById("elems").innerHTML = stickers(ELEMS);
+
+/* ---------- 喷漆用的小零件 ---------- */
+/** 一滩飞溅：大点 + 一圈小点 */
+function splat(cx, cy, r, color) {
+  let s = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${color}"/>`;
+  for (let i = 0; i < 14; i++) {
+    const a = rnd() * Math.PI * 2, d = r * rr(1.1, 2.2), rad = rr(.8, r * .22);
+    s += `<circle cx="${(cx + Math.cos(a) * d).toFixed(1)}" cy="${(cy + Math.sin(a) * d).toFixed(1)}" r="${rad.toFixed(1)}" fill="${color}"/>`;
+  }
+  for (let i = 0; i < 3; i++) {
+    const x = cx + rr(-r * .6, r * .6), len = rr(r * .6, r * 1.8);
+    s += `<path d="M${x.toFixed(1)} ${cy} V${(cy + r * .6 + len).toFixed(1)}" stroke="${color}" stroke-width="${rr(2, 4).toFixed(1)}" stroke-linecap="round"/>`;
+  }
+  return `<g filter="url(#spray)">${s}</g>`;
+}
+/** 往下淌的漆 */
+function drips(x0, x1, y, color, n) {
+  let s = "";
+  for (let i = 0; i < n; i++) {
+    const x = rr(x0, x1), len = rr(8, 46), w = rr(2.5, 6);
+    s += `<path d="M${x.toFixed(1)} ${y} V${(y + len).toFixed(1)}" stroke="${color}" stroke-width="${w.toFixed(1)}" stroke-linecap="round"/>`;
+    s += `<circle cx="${x.toFixed(1)}" cy="${(y + len + w * .3).toFixed(1)}" r="${(w * .75).toFixed(1)}" fill="${color}"/>`;
+  }
+  return s;
+}
+
+/* 大标题：喷漆字 + 淌漆 + 下划的涂鸦线 */
+document.getElementById("hero").innerHTML = `<svg viewBox="0 0 760 170" role="img" aria-label="角鳞：四幕">
+  <g filter="url(#spray)">
+    <path d="M14 130 C140 112 300 150 470 120 S690 108 740 126" stroke="#d8322a" stroke-width="16" fill="none" stroke-linecap="round"/>
+    ${drips(60, 700, 128, "#d8322a", 7)}
+  </g>
+  <text x="18" y="112" font-family="Zhi Mang Xing, ZCOOL QingKe HuangYou, cursive" font-size="104" fill="#0b0806" transform="translate(5 6)">角鳞：四幕</text>
+  <g filter="url(#spray)"><text x="18" y="112" font-family="Zhi Mang Xing, ZCOOL QingKe HuangYou, cursive" font-size="104" fill="#ece0c6">角鳞：四幕</text></g>
+  <text x="520" y="52" font-family="Permanent Marker, cursive" font-size="26" fill="#ff4fa3" transform="rotate(-8 520 52)">STREET DRAFT v3</text>
+</svg>`;
+
+/* 墙上的随手涂鸦（很淡，只是氛围） */
+document.getElementById("wall").innerHTML = `<g opacity=".16">
+  <text x="78%" y="420" font-family="Permanent Marker" font-size="60" fill="#ff4fa3" transform="rotate(-12 900 420)">WASTED</text>
+  <text x="2%" y="1250" font-family="Permanent Marker" font-size="48" fill="#39e6b4" transform="rotate(8 40 1250)">NO KINGS</text>
+  <text x="70%" y="2300" font-family="Zhi Mang Xing" font-size="90" fill="#f2c230" transform="rotate(-6 800 2300)">活下去</text>
+</g>`;
+
+/* ---------- 路线图：从左到右 ---------- */
+const LAYOUT = [
+  [["start", 150]],
+  [["battle", 70], ["battle", 150], ["check", 230]],
+  [["shop", 60], ["elite", 140], ["battle", 235]],
+  [["rest", 85], ["battle", 165], ["smith", 240]],
+  [["battle", 60], ["ambush", 145], ["clinic", 230]],
+  [["elite", 95], ["rest", 205]],
+  [["boss", 150]]
+];
+const LINKS = [
+  [[0, 0], [1, 0]], [[0, 0], [1, 1]], [[0, 0], [1, 2]],
+  [[1, 0], [2, 0]], [[1, 1], [2, 1]], [[1, 1], [2, 0]], [[1, 2], [2, 2]],
+  [[2, 0], [3, 0]], [[2, 1], [3, 0]], [[2, 1], [3, 1]], [[2, 2], [3, 2]],
+  [[3, 0], [4, 0]], [[3, 0], [4, 1]], [[3, 1], [4, 1]], [[3, 2], [4, 2]],
+  [[4, 0], [5, 0]], [[4, 1], [5, 0]], [[4, 1], [5, 1]], [[4, 2], [5, 1]],
+  [[5, 0], [6, 0]], [[5, 1], [6, 0]]
+];
+const W = 1000, H = 300;
+const colX = (c) => 70 + c * ((W - 140) / (LAYOUT.length - 1));
+
+const BG = {
+  "外城区": {
+    en: "OUTER CITY",
+    draw: () => {
+      let s = `<defs><linearGradient id="oc" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4a3326"/><stop offset=".55" stop-color="#2a1d16"/><stop offset="1" stop-color="#140e0a"/></linearGradient></defs>
+        <rect width="${W}" height="${H}" fill="url(#oc)"/>
+        <g filter="url(#blur14)" opacity=".55">
+          <ellipse cx="180" cy="110" rx="160" ry="40" fill="#6b4a36"/><ellipse cx="620" cy="80" rx="220" ry="46" fill="#5a3e2e"/>
+          <ellipse cx="880" cy="140" rx="140" ry="36" fill="#7a5238"/></g>`;
+      // 棚户塔楼天际线
+      let x = 0, d = `M0 ${H}`;
+      let seed = 3;
+      const rnd = () => (seed = (seed * 9301 + 49297) % 233280) / 233280;
+      while (x < W) {
+        const w = 24 + rnd() * 50, h = 40 + rnd() * 90;
+        d += ` L${x} ${H - h} L${x + w * .3} ${H - h - rnd() * 14} L${x + w} ${H - h}`;
+        x += w;
+      }
+      d += ` L${W} ${H} Z`;
+      s += `<path d="${d}" fill="#0f0a07" opacity=".85"/>`;
+      // 远处的红色警示灯和吊塔
+      s += `<path d="M760 ${H} L770 120 L780 ${H} M770 120 L860 120 M850 120 V150" stroke="#0f0a07" stroke-width="5" fill="none"/>`;
+      [[770, 116], [300, 190], [520, 175]].forEach(([cx, cy]) => { s += `<circle cx="${cx}" cy="${cy}" r="3" fill="#ff4a2e"/><circle cx="${cx}" cy="${cy}" r="10" fill="#ff4a2e" opacity=".25" filter="url(#blur6)"/>`; });
+      return s;
+    }
+  },
+  "沙漠": {
+    en: "THE WASTES",
+    draw: () => `<defs><linearGradient id="ds" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f3cf86"/><stop offset=".45" stop-color="#e0a85a"/><stop offset="1" stop-color="#a8642a"/></linearGradient></defs>
+      <rect width="${W}" height="${H}" fill="url(#ds)"/>
+      <circle cx="820" cy="70" r="46" fill="#fff1c4" opacity=".55"/><circle cx="820" cy="70" r="90" fill="#fff1c4" opacity=".2" filter="url(#blur14)"/>
+      <path d="M0 150 C140 120 260 170 400 140 S680 110 820 150 S960 140 1000 130 V300 H0 Z" fill="#d49646"/>
+      <path d="M0 200 C120 170 300 220 470 185 S760 170 900 205 S980 200 1000 195 V300 H0 Z" fill="#bd7b36"/>
+      <path d="M0 250 C180 225 340 270 520 240 S820 235 1000 255 V300 H0 Z" fill="#9c5d27"/>
+      <path d="M90 300 L110 230 L118 300 M600 300 L612 250 L630 300" stroke="#5b3416" stroke-width="4" fill="none"/>
+      <g opacity=".35" stroke="#fff3d6" stroke-width="1.2" fill="none"><path d="M40 90 Q300 70 520 100"/><path d="M300 60 Q560 40 760 80"/></g>`
+  },
+  "巨人城": {
+    en: "TITAN CITY",
+    draw: () => {
+      let s = `<defs><linearGradient id="gc" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a3f55"/><stop offset=".5" stop-color="#232838"/><stop offset="1" stop-color="#0f121a"/></linearGradient></defs>
+        <rect width="${W}" height="${H}" fill="url(#gc)"/>
+        <g filter="url(#blur14)" opacity=".6"><ellipse cx="300" cy="40" rx="260" ry="40" fill="#555b78"/><ellipse cx="780" cy="30" rx="240" ry="34" fill="#4a5070"/></g>`;
+      // 巨型残骸：断裂的超高楼和一只巨大的机械手骨架
+      const towers = [[40, 70, 200], [150, 60, 150], [430, 90, 230], [560, 55, 170], [700, 80, 250], [880, 70, 190]];
+      towers.forEach(([x, w, h]) => {
+        s += `<path d="M${x} ${H} L${x} ${H - h} L${x + w * .4} ${H - h + 22} L${x + w * .7} ${H - h - 14} L${x + w} ${H - h + 10} L${x + w} ${H} Z" fill="#0b0d13" opacity=".9"/>`;
+        for (let yy = H - h + 30; yy < H - 10; yy += 22) s += `<rect x="${x + 8}" y="${yy}" width="${w - 16}" height="3" fill="#2a3044" opacity=".7"/>`;
+      });
+      s += `<path d="M320 ${H} L345 160 L330 120 L360 90 M345 160 L390 130 L410 95 M345 160 L300 140 L285 105" stroke="#0b0d13" stroke-width="12" fill="none" stroke-linecap="round"/>`;
+      s += `<path d="M640 10 L620 70 L645 72 L610 150" stroke="#cbbcff" stroke-width="2.5" fill="none" opacity=".65"/><path d="M640 10 L620 70 L645 72 L610 150" stroke="#cbbcff" stroke-width="10" fill="none" opacity=".18" filter="url(#blur6)"/>`;
+      s += `<rect width="${W}" height="${H}" fill="url(#rain)"/>`;
+      return s;
+    }
+  },
+  "天网设施": {
+    en: "SKYNET FACILITY",
+    draw: () => {
+      let s = `<defs><linearGradient id="sk" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0f3236"/><stop offset=".6" stop-color="#0a1f22"/><stop offset="1" stop-color="#050d0f"/></linearGradient></defs>
+        <rect width="${W}" height="${H}" fill="url(#sk)"/>`;
+      // 透视网格地面
+      for (let i = 0; i <= 20; i++) s += `<path d="M${500 + (i - 10) * 30} 150 L${500 + (i - 10) * 160} ${H}" stroke="#35e0c0" stroke-opacity=".12" stroke-width="1"/>`;
+      [160, 175, 196, 226, 266].forEach(yy => { s += `<path d="M0 ${yy} H${W}" stroke="#35e0c0" stroke-opacity=".12" stroke-width="1"/>`; });
+      // 管道和机柜
+      s += `<path d="M0 40 H1000 M0 52 H1000" stroke="#16393c" stroke-width="7"/><path d="M0 40 H1000" stroke="#2c6b6e" stroke-width="1" opacity=".6"/>`;
+      [[60, 70], [200, 60], [820, 80], [930, 66]].forEach(([x, h]) => {
+        s += `<rect x="${x}" y="${150 - h}" width="46" height="${h}" fill="#071416" stroke="#1f4c50"/>`;
+        for (let k = 0; k < 4; k++) s += `<rect x="${x + 8}" y="${150 - h + 10 + k * 14}" width="${8 + (k * 7) % 20}" height="3" fill="${k % 3 ? "#35e0c0" : "#ff4a2e"}" opacity=".7"/>`;
+      });
+      s += `<circle cx="500" cy="95" r="34" fill="none" stroke="#ff4a2e" stroke-opacity=".35" stroke-width="2"/><circle cx="500" cy="95" r="6" fill="#ff4a2e" opacity=".8"/><circle cx="500" cy="95" r="22" fill="#ff4a2e" opacity=".2" filter="url(#blur6)"/>`;
+      return s;
+    }
+  }
+};
+
+
+/* 外城区墙上的涂鸦 */
+const TAGS = {
+  "外城区": `<g opacity=".55" filter="url(#spray)">
+    <text x="40" y="262" font-family="Permanent Marker" font-size="28" fill="#ff4fa3" transform="rotate(-6 40 262)">OUTLAWS</text>
+    <text x="560" y="280" font-family="Zhi Mang Xing" font-size="34" fill="#39e6b4" transform="rotate(4 560 280)">别回头</text>
+    <path d="M300 250 l40 -18 l-8 26 l34 -14" stroke="#f2c230" stroke-width="5" fill="none" stroke-linecap="round"/></g>`,
+  "沙漠": `<g opacity=".45" filter="url(#spray)"><text x="80" y="285" font-family="Permanent Marker" font-size="22" fill="#5b2a10" transform="rotate(-4 80 285)">NO WATER &gt;&gt;&gt;</text></g>`,
+  "巨人城": `<g opacity=".4" filter="url(#spray)"><text x="440" y="270" font-family="Permanent Marker" font-size="26" fill="#f2c230" transform="rotate(-8 440 270)">THEY WALK</text></g>`,
+  "天网设施": `<g opacity=".5" filter="url(#spray)"><text x="720" y="272" font-family="Permanent Marker" font-size="24" fill="#ff4fa3" transform="rotate(6 720 272)">UNPLUG IT</text></g>`
+};
+
+/** 红色水笔勾：每个都随手画，角度、长短、收笔都不一样 */
+function checkMark(x, y, big) {
+  const s = big ? 1.4 : 1;
+  const rot = rr(-14, 8), w = rr(5, 7) * (big ? 1.2 : 1);
+  const ax = x - rr(18, 22) * s, ay = y - rr(2, 6) * s;
+  const bx = x - rr(4, 8) * s, by = y + rr(13, 18) * s;
+  const cx = x + rr(22, 30) * s, cy = y - rr(22, 30) * s;
+  const d = `M${ax.toFixed(1)} ${ay.toFixed(1)} Q${(ax + 6 * s).toFixed(1)} ${(ay + rr(6, 12) * s).toFixed(1)} ${bx.toFixed(1)} ${by.toFixed(1)} ` +
+    `Q${(bx + rr(6, 12) * s).toFixed(1)} ${(by - rr(14, 24) * s).toFixed(1)} ${cx.toFixed(1)} ${cy.toFixed(1)} ` +
+    `l${rr(3, 7).toFixed(1)} ${rr(-5, -2).toFixed(1)}`;
+  return `<g class="check-mark" filter="url(#marker)" transform="rotate(${rot.toFixed(1)} ${x} ${y})">
+    <path class="stroke" d="${d}" stroke-width="${w.toFixed(1)}"/>
+    <path class="sheen" d="${d}" stroke-width="${(w * .25).toFixed(1)}" transform="translate(-1 -1)"/></g>`;
+}
+
+function holoNode(k, x, y, state) {
+  const big = k === "boss";
+  const sz = big ? 60 : 42;
+  const top = y - sz * .85;                 // 图标悬浮的位置（比地面高一点）
+  const padRx = big ? 30 : 20, padRy = big ? 8 : 5.5;
+  const glyph = G[k];
+  const bob = rr(0, 3).toFixed(2);
+  return `<g class="holo ${state}" style="--c:var(${nodeColor(k)}); color:var(${nodeColor(k)})">
+    <ellipse class="pad" cx="${x}" cy="${y + 10}" rx="${padRx}" ry="${padRy}" filter="url(#blur3)"/>
+    <ellipse class="pad-ring" cx="${x}" cy="${y + 10}" rx="${padRx}" ry="${padRy}"/>
+    ${state === "now" ? `<ellipse class="ping" cx="${x}" cy="${y + 10}" rx="${padRx}" ry="${padRy}"/>` : ""}
+    <path class="beam" d="M${x - padRx * .9} ${y + 10} L${x - sz * .45} ${top + sz * .3} L${x + sz * .45} ${top + sz * .3} L${x + padRx * .9} ${y + 10} Z"/>
+    <g class="float" style="animation-delay:-${bob}s">
+      <svg x="${x - sz / 2}" y="${top - sz / 2}" width="${sz}" height="${sz}" viewBox="0 0 48 48" overflow="visible"><g class="shade" filter="url(#blur3)">${glyph}</g></svg>
+      <svg x="${x - sz / 2 - 1.5}" y="${top - sz / 2}" width="${sz}" height="${sz}" viewBox="0 0 48 48" overflow="visible"><g class="ghost">${glyph}</g></svg>
+      <svg x="${x - sz / 2 + 1.5}" y="${top - sz / 2}" width="${sz}" height="${sz}" viewBox="0 0 48 48" overflow="visible"><g class="ghost b">${glyph}</g></svg>
+      <svg x="${x - sz / 2}" y="${top - sz / 2}" width="${sz}" height="${sz}" viewBox="0 0 48 48" overflow="visible">
+        <g class="glyph" filter="url(#glow)" mask="url(#holo-mask)">${glyph}</g></svg>
+    </g>
+    ${state === "done" ? checkMark(x, top + 4, big) : ""}
+  </g>`;
+}
+
+const nodeColor = (k) => (NODES.find(n => n[0] === k) || [])[2];
+const same = (a, b) => a[0] === b[0] && a[1] === b[1];
+function drawMap(region, path, now) {
+  const bg = BG[region];
+  const pos = ([c, i]) => [colX(c), LAYOUT[c][i][1] + 14];
+  const onPath = (a) => path.some(p => same(p, a));
+  let s = bg.draw();
+  s += TAGS[region] || "";
+  s += `<rect width="${W}" height="${H}" fill="#000" filter="url(#grain)" opacity=".9"/>`;
+  s += `<radialGradient id="vg-${region}" cx="50%" cy="50%" r="75%"><stop offset=".6" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".55"/></radialGradient><rect width="${W}" height="${H}" fill="url(#vg-${region})"/>`;
+  let halo = "", edges = "";
+  LINKS.forEach(([a, b]) => {
+    const [x1, y1] = pos(a), [x2, y2] = pos(b);
+    const mx = (x1 + x2) / 2;
+    const d = `M${x1} ${y1 + 10} C${mx} ${y1 + 10} ${mx} ${y2 + 10} ${x2} ${y2 + 10}`;
+    const cls = onPath(a) && onPath(b) ? "done" : same(a, now) ? "next" : "";
+    halo += `<path class="edge-halo" d="${d}"/>`;
+    edges += `<path class="edge ${cls}" d="${d}"/>`;
+  });
+  s += halo + edges;
+  LAYOUT.forEach((col, c) => col.forEach(([k], i) => {
+    const [x, y] = pos([c, i]), here = [c, i];
+    const state = same(here, now) ? "now" : onPath(here) ? "done" : "later";
+    s += holoNode(k, x, y, state);
+  }));
+  return `<div class="map"><div class="map-title">${region}<small>${bg.en}</small></div>
+    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${region}路线图示意">${s}</svg></div>`;
+}
+document.getElementById("maps").innerHTML = [
+  drawMap("外城区", [[0, 0], [1, 1], [2, 1]], [2, 1]),
+  drawMap("沙漠", [[0, 0], [1, 0], [2, 0], [3, 0]], [3, 0]),
+  drawMap("巨人城", [[0, 0], [1, 2]], [1, 2]),
+  drawMap("天网设施", [[0, 0], [1, 1], [2, 1], [3, 1], [4, 1], [5, 1]], [5, 1])
+].join("");
+
+/* ---------- 色板：喷漆色块 ---------- */
+document.getElementById("swatches").innerHTML = [
+  ["机油黑", "--oil", "底色"], ["水泥墙", "--concrete-hi", "大背景"], ["铁锈", "--rust", "已走 / 标题"],
+  ["警示黄", "--hazard", "主按钮"], ["血红", "--blood", "敌方 / 红勾"], ["荧光粉", "--pink", "涂鸦点缀"],
+  ["荧光绿", "--mint", "贴纸 / 状态"], ["全息青", "--holo", "路线 / 投影"], ["旧帆布", "--canvas", "正文"]
+].map(([n, v, use]) => `<div class="sw" style="--r:${rr(-3, 3).toFixed(1)}deg"><div style="background:var(${v})"></div><span><b>${n}</b>${use}</span></div>`).join("");
+
+/* ---------- 角色卡样例 ---------- */
+const bar = (id, n, on, cls) => { document.getElementById(id).innerHTML = Array.from({ length: n }, (_, i) => `<i class="${i < on ? cls : ""}"></i>`).join(""); };
+bar("g1", 14, 10, "on"); bar("p1", 6, 4, "on");
+document.getElementById("g2").innerHTML = Array.from({ length: 20 }, (_, i) => `<i class="${i < 6 ? "sh" : i < 17 ? "on" : ""}"></i>`).join("");
+bar("p2", 8, 8, "on");
+document.getElementById("m1").innerHTML = `${icon("fire", "--fire")}${icon("physical", "--physical")}<span class="stk">引擎启动</span><span class="stk" style="--sbg:var(--hazard)">准备</span>`;
+document.getElementById("m2").innerHTML = `${icon("electric", "--electric")}<span class="stk" style="--sbg:var(--pink)">晕眩标记 1/2</span>`;
+document.getElementById("splat1").innerHTML = splat(45, 40, 14, "#ff4fa3");
+document.getElementById("splat2").innerHTML = splat(35, 30, 10, "#39e6b4");
+</script>
+</body>
+</html>
