@@ -5,9 +5,21 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#120f0d" />
   <title>Antlerscale: Backfire</title>
+  <link rel="stylesheet" href="fonts/fonts.css" />
   <link rel="stylesheet" href="game.css" />
+  <link rel="stylesheet" href="skin.css" />
 </head>
 <body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <!-- 喷漆：边缘被噪点打毛（skin.css 里的 filter: url(#sk-spray)） -->
+    <filter id="sk-spray" x="-10%" y="-20%" width="120%" height="140%">
+      <feTurbulence type="fractalNoise" baseFrequency=".9" numOctaves="2" seed="4" result="n"/>
+      <feDisplacementMap in="SourceGraphic" in2="n" scale="6" xChannelSelector="R" yChannelSelector="G" result="d"/>
+      <feGaussianBlur in="d" stdDeviation=".5"/>
+    </filter>
+  </defs>
+</svg>
 <section class="scr-title" id="scr-title" hidden>
   <div class="t-card">
     <h1 class="t-name">Antlerscale<span>Backfire</span></h1>

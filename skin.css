@@ -1,0 +1,558 @@
+/* Antlerscale: Backfire · 街头废土皮肤（定稿见 art/style-guide.html）
+ * 只管样子，不改布局逻辑。第一步：标题、选队伍、单局（任务板 / 节点 / 商店 / 工匠 / 诊所）、跑团存档页。
+ * 喷漆毛边用页面里的 SVG 滤镜 #sk-spray（game.html 顶部）。 */
+
+:root {
+  --sk-oil: #110e0b;
+  --sk-oil-2: #1a1511;
+  --sk-concrete: #2b2723;
+  --sk-steel: #2a2520;
+  --sk-steel-hi: #3b342c;
+  --sk-edge: #4d4337;
+  --sk-rust: #b4522a;
+  --sk-brass: #c99a46;
+  --sk-hazard: #f2c230;
+  --sk-blood: #d8322a;
+  --sk-pink: #ff4fa3;
+  --sk-mint: #39e6b4;
+  --sk-holo: #3fe0ff;
+  --sk-canvas: #ece0c6;
+  --sk-muted: #a8977b;
+  --sk-ink: #0b0806;
+  --sk-tape: rgba(220, 210, 186, .95);
+
+  --sk-marker: "Permanent Marker", "Comic Sans MS", cursive;
+  --sk-stencil: "Black Ops One", Impact, sans-serif;
+  --sk-tag: "Zhi Mang Xing", "ZCOOL QingKe HuangYou", cursive;
+  --sk-label: "ZCOOL QingKe HuangYou", "Noto Sans SC", "Microsoft YaHei", sans-serif;   /* 15px 以上才用，小字它不好认 */
+  --sk-body: "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --sk-noise: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 .6 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  --sk-stains: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='600' height='600'><filter id='b'><feGaussianBlur stdDeviation='30'/></filter><g filter='url(%23b)' fill='%23000' fill-opacity='.35'><ellipse cx='120' cy='90' rx='120' ry='60'/><ellipse cx='480' cy='380' rx='160' ry='90'/><ellipse cx='220' cy='520' rx='100' ry='50'/></g></svg>");
+  /* 墙上随手的涂鸦：大字母、箭头、圈 */
+  --sk-tags: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='900' height='700'><g fill='none' stroke-linecap='round' stroke-linejoin='round'><path d='M60 610 q120 -60 210 -10 t200 -20' stroke='%23ff4fa3' stroke-opacity='.10' stroke-width='14'/><path d='M700 80 l90 40 l-70 50 M790 120 l-150 10' stroke='%23f2c230' stroke-opacity='.10' stroke-width='10'/><circle cx='160' cy='170' r='70' stroke='%2339e6b4' stroke-opacity='.08' stroke-width='9'/><path d='M560 520 l40 -90 l40 90 m-66 -30 h52' stroke='%23ece0c6' stroke-opacity='.07' stroke-width='12'/></g></svg>");
+}
+
+/* ---------- 共用：水泥墙底 ---------- */
+:is(.scr-title, .scr-party, .scr-run, .scr-trpg) {
+  background-color: var(--sk-concrete);
+  background-image: var(--sk-tags), var(--sk-noise), var(--sk-stains), linear-gradient(180deg, #34302b, #1d1a17 70%);
+  background-repeat: no-repeat, repeat, repeat, no-repeat;
+  background-size: 100% 100%, auto, auto, 100% 100%;
+  background-attachment: fixed, scroll, scroll, fixed;
+  color: var(--sk-canvas);
+}
+
+/* 喷漆小节标题：马克笔字压在毛边色块上 */
+:is(.scr-party, .scr-run, .scr-trpg) h2 {
+  position: relative; display: inline-block; isolation: isolate;
+  margin: 4px 0 12px; padding: 4px 18px 6px 12px;
+  font-family: var(--sk-tag); font-weight: 400; font-size: 32px; line-height: 1.1; letter-spacing: .02em;
+  color: var(--sk-ink); transform: rotate(-1.2deg);
+}
+:is(.scr-party, .scr-run, .scr-trpg) h2::before {
+  content: ""; position: absolute; inset: -4px -10px -6px -8px; z-index: -1;
+  background: var(--hl, var(--sk-hazard)); filter: url(#sk-spray);
+  clip-path: polygon(1% 12%, 9% 0, 60% 6%, 99% 0, 97% 55%, 100% 92%, 70% 100%, 30% 94%, 2% 100%, 0 50%);
+}
+.scr-run h2.win { --hl: var(--sk-hazard); color: var(--sk-ink); }
+.scr-run h2.lose { --hl: var(--sk-blood); color: var(--sk-canvas); }
+.scr-run h2 .sub {
+  font-family: var(--sk-body); font-size: 13px; letter-spacing: 0; color: var(--sk-ink); opacity: .85;
+}
+:is(.scr-party, .scr-run, .scr-trpg) :is(.r-sub, .r-panel > h3) {
+  font-family: var(--sk-tag); font-weight: 400; font-size: 24px; letter-spacing: .02em; color: var(--sk-canvas);
+  text-shadow: 2px 2px 0 var(--sk-ink);
+}
+
+/* 铁皮面板：粗墨边 + 硬投影 + 噪点 */
+:is(.scr-party, .scr-run, .scr-trpg) :is(.rhero, .task, .hero-pick, .cl-hero, .levelup, details.smith, .run-log li, .tr-slot, .tr-pick, .tr-up, .tr-log) {
+  background-color: var(--sk-steel);
+  background-image: var(--sk-noise), linear-gradient(170deg, var(--sk-steel-hi), var(--sk-oil-2) 85%);
+  border: 3px solid var(--sk-ink); border-radius: 0;
+  box-shadow: 5px 6px 0 rgba(0, 0, 0, .5);
+  color: var(--sk-canvas);
+}
+:is(.scr-party, .scr-run, .scr-trpg) :is(.r-hint, .t-meta, .hp-note, .hp-meta, .sp-head p, .cl-head span, .rh-w, .rh-row, .s-have, .shop-row small) {
+  color: var(--sk-muted);
+}
+
+/* ---------- 按钮 ---------- */
+:is(.scr-party, .scr-run, .scr-trpg) .g-btn {
+  position: relative; isolation: isolate;
+  height: auto; min-height: 34px; padding: 5px 14px 6px;
+  font-family: var(--sk-label); font-size: 15px; letter-spacing: .04em; color: var(--sk-canvas);
+  background: var(--sk-oil-2); background-image: var(--sk-noise);
+  border: 3px solid var(--sk-ink); border-radius: 0;
+  box-shadow: 3px 4px 0 rgba(0, 0, 0, .55);
+}
+:is(.scr-party, .scr-run, .scr-trpg) .g-btn:hover:not(:disabled) { background-color: var(--sk-steel-hi); }
+:is(.scr-party, .scr-run, .scr-trpg) .g-btn:active:not(:disabled) { transform: translate(1px, 2px); box-shadow: 1px 2px 0 rgba(0, 0, 0, .55); }
+:is(.scr-party, .scr-run, .scr-trpg) .g-btn:disabled { opacity: .4; }
+:is(.scr-party, .scr-run, .scr-trpg) .g-btn small { color: var(--sk-muted); font-family: var(--sk-body); letter-spacing: 0; }
+
+/* 主行动：黄色喷漆块 + 往下淌的漆 */
+:is(.scr-party, .scr-run, .scr-trpg) .g-btn.r-main {
+  --bg: var(--sk-hazard);
+  color: var(--sk-ink); background: transparent; border-color: transparent; box-shadow: none;
+  font-family: var(--sk-tag); font-size: 22px; line-height: 1.05; letter-spacing: .02em;
+  transform: rotate(-1.2deg);
+}
+:is(.scr-party, .scr-run, .scr-trpg) .g-btn.r-main::before {
+  content: ""; position: absolute; inset: -3px; z-index: -1; background: var(--bg); filter: url(#sk-spray);
+  clip-path: polygon(3% 6%, 30% 0, 70% 4%, 97% 0, 100% 40%, 96% 100%, 50% 95%, 4% 100%, 0 60%);
+  box-shadow: 0 0 0 3px var(--sk-ink);
+}
+:is(.scr-party, .scr-run, .scr-trpg) .g-btn.r-main::after {
+  content: ""; position: absolute; z-index: -1; left: 22%; top: 88%; width: 5px; height: 12px; border-radius: 0 0 4px 4px;
+  background: var(--bg); box-shadow: 26px -3px 0 -1px var(--bg), 44px 1px 0 0 var(--bg);
+  pointer-events: none;
+}
+:is(.scr-party, .scr-run, .scr-trpg) .g-btn.r-main small { color: var(--sk-ink); opacity: .8; font-family: var(--sk-body); font-size: 12px; }
+:is(.scr-party, .scr-run, .scr-trpg) .g-btn.r-main:hover:not(:disabled) { background: transparent; filter: brightness(1.08); }
+:is(.scr-party, .scr-run, .scr-trpg) .g-btn.r-main:disabled::after { display: none; }
+/* 撤退 / 放弃之类的危险按钮 */
+:is(.scr-party, .scr-run, .scr-trpg) .g-btn.danger { --bg: var(--sk-blood); }
+
+/* ---------- 标题界面 ---------- */
+.scr-title { font-family: var(--sk-label); }
+.t-card { width: min(520px, 100%); gap: 14px; }
+.t-name {
+  position: relative; margin: 0 0 4px;
+  font-family: var(--sk-stencil); font-weight: 400; font-size: 64px; letter-spacing: .02em; line-height: .95;
+  color: var(--sk-canvas); text-shadow: 4px 5px 0 var(--sk-ink);
+}
+.t-name span {
+  display: block; margin: -4px 0 0 34%;
+  font-family: var(--sk-marker); font-size: .9em; letter-spacing: 0;
+  color: var(--sk-hazard); text-shadow: 4px 4px 0 var(--sk-ink);
+  transform: rotate(-6deg); transform-origin: left center;
+}
+.t-sub {
+  align-self: flex-start; margin: 8px 0 22px; padding: 2px 16px 3px;
+  font-family: var(--sk-tag); font-size: 22px; letter-spacing: .04em; color: var(--sk-ink);
+  background: var(--sk-tape); transform: rotate(-2deg);
+  clip-path: polygon(2% 8%, 0 0, 100% 4%, 98% 40%, 100% 100%, 3% 94%, 0 55%);
+  box-shadow: 0 2px 3px rgba(0, 0, 0, .4);
+}
+.t-menu { gap: 14px; }
+.t-btn {
+  gap: 2px; padding: 10px 16px 11px;
+  background-color: var(--sk-steel);
+  background-image: var(--sk-noise), linear-gradient(170deg, var(--sk-steel-hi), var(--sk-oil-2) 85%);
+  border: 3px solid var(--sk-ink); border-radius: 0;
+  box-shadow: 5px 6px 0 rgba(0, 0, 0, .5);
+  color: var(--sk-canvas);
+}
+.t-btn:nth-child(odd) { transform: rotate(-.6deg); }
+.t-btn:nth-child(even) { transform: rotate(.5deg); }
+.t-btn b { font-family: var(--sk-tag); font-weight: 400; font-size: 26px; line-height: 1.1; text-shadow: 2px 2px 0 var(--sk-ink); }
+.t-btn small { color: var(--sk-muted); font-family: var(--sk-body); font-size: 12.5px; }
+.t-btn:hover:not(:disabled) { background-color: var(--sk-steel-hi); border-left-color: var(--sk-ink); }
+.t-btn:hover:not(:disabled) b { color: var(--sk-hazard); }
+.t-btn:active:not(:disabled) { translate: 1px 2px; box-shadow: 2px 3px 0 rgba(0, 0, 0, .5); }
+.t-btn.primary:not(:disabled) {
+  position: relative; isolation: isolate;
+  background: transparent; border-color: transparent; box-shadow: none; color: var(--sk-ink);
+}
+.t-btn.primary:not(:disabled)::before {
+  content: ""; position: absolute; inset: -2px; z-index: -1; background: var(--sk-hazard); filter: url(#sk-spray);
+  clip-path: polygon(2% 8%, 30% 0, 70% 5%, 98% 0, 100% 45%, 97% 100%, 50% 94%, 3% 100%, 0 60%);
+  box-shadow: 0 0 0 3px var(--sk-ink);
+}
+.t-btn.primary:not(:disabled) b { text-shadow: none; }
+.t-btn.primary:not(:disabled) small { color: var(--sk-ink); opacity: .75; }
+.t-btn.primary:hover:not(:disabled) b { color: var(--sk-ink); }
+.t-btn:disabled { opacity: .35; }
+@media (max-width: 480px) {
+  .t-name { font-size: 44px; }
+  .t-btn b { font-size: 23px; }
+}
+
+/* ---------- 选队伍 ---------- */
+.scr-party .sp-head p { font-size: 14px; }
+.party-grid { gap: 18px 14px; }
+.hero-pick { padding: 12px 14px 14px; transition: transform .12s; }
+.hero-pick:nth-child(3n+1) { transform: rotate(-.5deg); }
+.hero-pick:nth-child(3n+2) { transform: rotate(.4deg); }
+.hero-pick:hover { background-color: var(--sk-steel-hi); }
+.hero-pick.on {
+  border-color: var(--sk-ink); box-shadow: 5px 6px 0 rgba(0, 0, 0, .5), inset 0 0 0 2px var(--sk-mint);
+  position: relative;
+}
+.hero-pick.on::after {
+  content: "IN!"; position: absolute; right: -8px; top: -12px;
+  padding: 0 8px; font-family: var(--sk-marker); font-size: 14px; color: var(--sk-ink);
+  background: var(--sk-mint); border-radius: 3px; transform: rotate(8deg); box-shadow: 1px 2px 0 rgba(0, 0, 0, .55);
+}
+.hp-name { font-family: var(--sk-tag); font-weight: 400; font-size: 28px; line-height: 1; text-shadow: 3px 3px 0 var(--sk-ink); }
+.hp-name small { font-family: var(--sk-marker); font-size: 12px; color: var(--sk-muted); text-shadow: none; }
+.sp-foot {
+  background: var(--sk-oil); background-image: var(--sk-noise);
+  border-top: 4px solid var(--sk-ink);
+  box-shadow: 0 -2px 0 var(--sk-hazard), 0 -8px 18px rgba(0, 0, 0, .5);
+  font-size: 14px; color: var(--sk-muted);
+}
+
+/* ---------- 单局 · 顶栏 ---------- */
+.run-top {
+  position: relative;
+  background: var(--sk-oil); background-image: var(--sk-noise);
+  border-bottom: 4px solid var(--sk-ink);
+  font-size: 13px; color: var(--sk-muted);
+}
+.run-top::after {
+  /* 黄黑警示条 */
+  content: ""; position: absolute; left: 0; right: 0; bottom: -10px; height: 6px; pointer-events: none;
+  background: repeating-linear-gradient(-45deg, var(--sk-hazard) 0 10px, var(--sk-ink) 10px 20px);
+  opacity: .85;
+}
+.run-top > b {
+  font-family: var(--sk-tag); font-weight: 400; font-size: 26px; line-height: 1; color: var(--sk-canvas);
+  text-shadow: 2px 2px 0 var(--sk-ink);
+}
+.run-supplies b, .run-top b:not(:first-child) { font-family: var(--sk-stencil); font-weight: 400; color: var(--sk-hazard); }
+.run-supplies { flex-wrap: wrap; row-gap: 2px; }
+.run-supplies > span { white-space: nowrap; }
+.run-supplies .warn, .run-supplies .warn b { color: #ff6a55; }
+.run-main { padding-top: 24px; gap: 20px; }
+
+/* ---------- 单局 · 队伍栏 ---------- */
+.run-party { gap: 14px; }
+.rhero { padding: 10px 12px 12px 14px; border-left-width: 7px; border-left-color: #4f8fd0; }
+.rhero.dying { border-left-color: var(--sk-blood); }
+.rh-top b { font-family: var(--sk-tag); font-weight: 400; font-size: 24px; line-height: 1; text-shadow: 2px 2px 0 var(--sk-ink); }
+.rh-top span { font-family: var(--sk-marker); color: var(--sk-muted); }
+.rh-top em { color: var(--sk-hazard); }
+.rh-row > span:last-child { font-family: var(--sk-stencil); color: var(--sk-canvas); }
+.rbar { height: 9px; background: #3a2c22; border: 2px solid var(--sk-ink); border-radius: 0; transform: skewX(-18deg); }
+.rbar.hp i { background: linear-gradient(180deg, #f2775a, #b6382a); }
+.rbar.shp i { background: linear-gradient(180deg, #ffe07a, var(--sk-brass)); }
+.rbar.xp i { background: linear-gradient(180deg, #7fd8f2, #3a7fb8); }
+.rh-w em, .rh-w.broken { color: var(--sk-blood); }
+
+/* ---------- 单局 · 记录栏：胶带标题 + 贴在墙上的纸条 ---------- */
+.run-log h3 {
+  display: inline-block; margin: 0 0 12px; padding: 1px 14px 2px;
+  font-family: var(--sk-tag); font-size: 22px; letter-spacing: .04em; color: var(--sk-ink);
+  background: var(--sk-tape); transform: rotate(-3deg);
+  clip-path: polygon(2% 8%, 0 0, 100% 4%, 98% 40%, 100% 100%, 3% 94%, 0 55%);
+}
+.run-log ul { gap: 8px; }
+.run-log li { border-width: 2px; box-shadow: 3px 4px 0 rgba(0, 0, 0, .45); font-size: 12.5px; }
+.run-log li:first-child { background: #efe3c4; background-image: none; color: var(--sk-ink); transform: rotate(.6deg); }
+
+/* ---------- 单局 · 任务板 ---------- */
+.task-list { gap: 20px 16px; }
+.task { position: relative; padding: 14px 14px 16px; }
+.task:nth-child(odd) { transform: rotate(-.4deg); }
+.task:nth-child(even) { transform: rotate(.35deg); }
+.task.key { border-color: var(--sk-ink); box-shadow: 5px 6px 0 rgba(0, 0, 0, .5), inset 0 0 0 2px var(--sk-hazard); }
+.t-head b { font-family: var(--sk-tag); font-weight: 400; font-size: 26px; line-height: 1; text-shadow: 2px 2px 0 var(--sk-ink); }
+.t-head .tag {
+  font-family: var(--sk-marker); font-size: 12px; padding: 1px 8px; color: var(--sk-ink);
+  background: var(--sk-hazard); border-radius: 3px; transform: rotate(-4deg); box-shadow: 1px 2px 0 rgba(0, 0, 0, .55);
+}
+.t-head .days { font-family: var(--sk-stencil); color: var(--sk-hazard); }
+.task .t-weather, .t-weather { color: var(--sk-hazard); }
+.t-warn { color: var(--sk-hazard); }
+
+/* 警告：红色贴纸 */
+.r-warn {
+  border: 3px solid var(--sk-ink); border-radius: 0; color: var(--sk-canvas);
+  background: var(--sk-blood); background-image: var(--sk-noise);
+  box-shadow: 3px 4px 0 rgba(0, 0, 0, .5); transform: rotate(-.4deg);
+}
+.r-hint .bad, .cl-preview .bad, .rest-long .bad { color: #ff6a55; }
+
+/* 旧的文字进度条（没有路线图时） */
+.track li {
+  color: var(--sk-muted);
+  background: var(--sk-oil-2); border: 2px solid var(--sk-ink); border-radius: 0;
+}
+.track li span { font-family: var(--sk-stencil); }
+.track li.now { color: var(--sk-ink); background: var(--sk-hazard); border-color: var(--sk-ink); }
+
+/* 节点面板里的叙述 */
+.r-panel > p { font-size: 15px; }
+.r-choices { gap: 14px; }
+
+/* 升级：黄色描边的铁皮 */
+.levelup { box-shadow: 5px 6px 0 rgba(0, 0, 0, .5), inset 0 0 0 2px var(--sk-hazard); }
+.levelup p { font-size: 15px; }
+
+/* ---------- 商店 / 工匠 / 诊所 ---------- */
+.shop { gap: 6px; }
+.shop-row {
+  background: rgba(0, 0, 0, .28); border: 0; border-left: 5px solid var(--sk-brass); border-radius: 0;
+  font-size: 14px;
+}
+.shop-row:nth-child(even) { background: rgba(0, 0, 0, .18); }
+.s-price { font-family: var(--sk-stencil); color: var(--sk-hazard); }
+.shop-row .g-btn { min-height: 30px; padding: 2px 12px; }
+details.smith { padding: 8px 12px; }
+details.smith > summary { font-size: 14px; }
+details.smith > summary b { font-family: var(--sk-tag); font-weight: 400; font-size: 22px; text-shadow: 2px 2px 0 var(--sk-ink); }
+details.smith .sm-price, details.smith .sm-prog.ready { color: var(--sk-hazard); }
+.cl-head b { font-family: var(--sk-tag); font-weight: 400; font-size: 22px; text-shadow: 2px 2px 0 var(--sk-ink); }
+.cl-inputs input[type="number"], .scr-run select {
+  background: var(--sk-oil); color: var(--sk-canvas); border: 2px solid var(--sk-ink); border-radius: 0;
+  font-family: var(--sk-stencil);
+}
+.cl-preview b { font-family: var(--sk-stencil); color: var(--sk-canvas); }
+
+/* 路线图外框跟其它面板一样粗 */
+.scr-run .route-map { border: 3px solid var(--sk-ink); box-shadow: 6px 7px 0 rgba(0, 0, 0, .5); }
+
+/* ---------- 跑团：存档页 / 探索环节 ---------- */
+.tr-top { background: var(--sk-oil); background-image: var(--sk-noise); border-bottom: 4px solid var(--sk-ink); }
+.tr-top h2 { transform: none; font-size: 24px; }
+.tr-top b { font-family: var(--sk-stencil); font-weight: 400; color: var(--sk-hazard); }
+.tr-tab { font-family: var(--sk-label); font-size: 16px; }
+.tr-tab.on { color: var(--sk-hazard); border-bottom: 4px solid var(--sk-hazard); }
+.tr-panel h3 { font-family: var(--sk-tag); font-weight: 400; font-size: 24px; text-shadow: 2px 2px 0 var(--sk-ink); }
+.tr-slot-head b { font-family: var(--sk-tag); font-weight: 400; font-size: 24px; text-shadow: 2px 2px 0 var(--sk-ink); }
+.tr-slot.on { box-shadow: 5px 6px 0 rgba(0, 0, 0, .5), inset 0 0 0 2px var(--sk-hazard); }
+.tr-panel input, .tr-panel select { background: var(--sk-oil); border: 2px solid var(--sk-ink); border-radius: 0; color: var(--sk-canvas); }
+.scr-trpg-slots .sp-head p { color: var(--sk-muted); }
+
+/* ---------- 手机 ---------- */
+@media (max-width: 820px) {
+  :is(.scr-party, .scr-run, .scr-trpg) h2 { font-size: 26px; }
+  .run-top > b { font-size: 22px; }
+  .task:nth-child(n), .hero-pick:nth-child(n), .t-btn:nth-child(n) { transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-pick { transition: none; }
+}
+
+/* =====================================================================
+ * 战斗界面
+ * 战场是一面水泥墙，区域是喷在地上的粉笔框；单位卡是铁皮牌子（左边阵营色条），
+ * 顶栏 / 操作栏 / 记录是带噪点的油污铁板，主按钮（开始战斗 / 结束回合）是黄色喷漆。
+ * ===================================================================== */
+.g-app { --ally: #4f8fd0; --foe: #d8322a; }
+.g-top {
+  background: var(--sk-oil); background-image: var(--sk-noise);
+  border-bottom: 4px solid var(--sk-ink);
+}
+.g-round { font-family: var(--sk-tag); font-size: 28px; text-shadow: 2px 2px 0 var(--sk-ink); }
+.g-phase { font-family: var(--sk-label); font-size: 15px; }
+.g-phase.enemy { color: #ff6a55; }
+.g-weather { border: 2px solid var(--sk-ink); background: rgba(0, 0, 0, .3); color: var(--sk-hazard); }
+.g-top .g-btn, .g-top select, .g-log .g-btn, .result .g-btn, .sheet .g-btn, .reopen.g-btn {
+  border: 2px solid var(--sk-ink); border-radius: 0; background: var(--sk-steel); background-image: var(--sk-noise);
+  box-shadow: 2px 3px 0 rgba(0, 0, 0, .55); color: var(--sk-canvas);
+}
+.g-top .g-btn:hover, .g-log .g-btn:hover, .result .g-btn:hover, .sheet .g-btn:hover { background-color: var(--sk-steel-hi); }
+.g-top .g-btn[aria-pressed="true"] { border-color: var(--sk-hazard); }
+.g-btn.r-main { border-color: var(--sk-hazard) !important; }
+
+/* ---------- 战场 ---------- */
+.g-field {
+  background-color: #35302a;
+  background-image: var(--sk-noise), var(--sk-stains), linear-gradient(180deg, #3d3730, #2a2621);
+}
+.g-zone {
+  background: rgba(0, 0, 0, .2);
+  border: 2px dashed rgba(236, 224, 198, .22);
+}
+.g-zone::before {
+  font-family: var(--sk-stencil); color: rgba(236, 224, 198, .07);
+}
+.g-zone .zlabel { font-family: var(--sk-label); font-size: 14px; color: var(--sk-muted); text-shadow: 1px 1px 0 var(--sk-ink); }
+.g-zone.is-move-target { border: 2px dashed var(--sk-hazard); }
+.g-zone.is-move-hover { box-shadow: inset 0 0 0 999px rgba(242, 194, 48, .08); }
+/* 场地：在水泥地上泼一层属性色 */
+.g-zone.field-fire { background: rgba(255, 91, 46, .14); border-color: rgba(255, 91, 46, .45); }
+.g-zone.field-electric { background: rgba(255, 211, 46, .12); border-color: rgba(255, 211, 46, .45); }
+.g-zone.field-ice { background: rgba(124, 207, 232, .13); border-color: rgba(124, 207, 232, .45); }
+.g-zone.field-acid { background: rgba(155, 224, 58, .12); border-color: rgba(155, 224, 58, .45); }
+.g-zone.field-energy { background: rgba(53, 224, 192, .12); border-color: rgba(53, 224, 192, .45); }
+.g-zone.field-harmonic { background: rgba(192, 124, 240, .13); border-color: rgba(192, 124, 240, .45); }
+.g-zone.field-collapse { background: rgba(201, 154, 70, .2); border-color: rgba(201, 154, 70, .55); }
+.g-zone.field-abyss { background: rgba(0, 0, 0, .7); border-color: #000; }
+.zlabel .zwind { background: rgba(242, 194, 48, .2); color: var(--sk-hazard); }
+.zlabel .zwind.down { background: var(--sk-hazard); color: var(--sk-ink); }
+.zlabel .zwind.up { background: rgba(180, 82, 42, .45); color: var(--sk-canvas); }
+.g-gap, .g-gap.gap-open {
+  background: rgba(0, 0, 0, .3); color: var(--sk-muted);
+  font-family: var(--sk-label); font-size: 13px;
+}
+.g-gap.gap-bridge { background: repeating-linear-gradient(0deg, #6b4a26 0 10px, #4d341b 10px 13px); color: var(--sk-canvas); }
+.g-gap.gap-wall { background: repeating-linear-gradient(0deg, #6c2e16 0 12px, #4a1f0f 12px 15px); color: var(--sk-canvas); }
+.g-gap.gap-door { background: repeating-linear-gradient(-45deg, #3b342c 0 8px, #2a2520 8px 16px); color: var(--sk-hazard); }
+.g-gap.gap-void { background: #050403; color: var(--sk-muted); }
+.g-gap.is-targetable { outline: 2px dashed var(--sk-hazard); }
+.g-gap.is-hover { outline: 2px solid var(--sk-hazard); background: #7a5a2a; }
+
+/* ---------- 单位：铁皮牌子 ---------- */
+.unit {
+  background-color: var(--sk-steel);
+  background-image: var(--sk-noise), linear-gradient(170deg, var(--sk-steel-hi), var(--sk-oil-2) 90%);
+  color: var(--sk-canvas);
+}
+.unit::before { width: 6px; }
+.unit-wrap { filter: drop-shadow(4px 5px 0 rgba(0, 0, 0, .5)); }
+.unit-wrap.is-actor::after { background: var(--sk-mint); }
+.unit-wrap.is-targetable::after { background: rgba(236, 224, 198, .35); }
+.unit-wrap.is-hover::after { background: var(--sk-canvas); }
+.unit-wrap.pv-stun .unit { background-image: linear-gradient(180deg, rgba(242, 179, 61, .3), var(--sk-oil-2) 65%); }
+.unit-wrap.pv-stun.ice .unit { background-image: linear-gradient(180deg, rgba(143, 211, 255, .3), var(--sk-oil-2) 65%); }
+.u-name {
+  font-family: var(--sk-tag); font-weight: 400; font-size: 20px; line-height: 1.05;
+  text-shadow: 2px 2px 0 var(--sk-ink);
+}
+.u-lv { font-family: var(--sk-marker); color: var(--sk-muted); }
+.u-atk { font-family: var(--sk-stencil); font-size: 13px; color: var(--sk-hazard); text-shadow: 1px 1px 0 var(--sk-ink); }
+.seg { background: #3a2c22; box-shadow: inset 0 0 0 1px var(--sk-ink); }
+.u-hpline { font-family: var(--sk-stencil); color: var(--sk-muted); }
+.u-hpline b { color: var(--sk-canvas); font-weight: 400; }
+.pip { background: #3a2c22; border-color: #5a4a3a; }
+.pip.on { background: linear-gradient(180deg, #ffe07a, var(--sk-brass)); border-color: var(--sk-ink); }
+.econ-bonus { border-bottom-color: #5a4a3a; }
+.chip { background: rgba(236, 224, 198, .14); color: var(--sk-canvas); }
+.chip.new { background: rgba(242, 194, 48, .35); }
+.u-res { color: var(--sk-muted); }
+.u-flag { font-family: var(--sk-marker); transform: rotate(6deg); box-shadow: 1px 2px 0 rgba(0, 0, 0, .55); }
+.unit.prop { box-shadow: inset 0 0 0 3px var(--sk-brass); }
+.unit-wrap.downed .unit { background: #24211e; background-image: var(--sk-noise); }
+/* 挤的时候名字换回好认的字体 */
+:is(.g-zone.dense-2, .g-zone.dense-3, .g-field.z3) .u-name { font-family: var(--sk-body); font-weight: 700; text-shadow: none; }
+
+/* 预览牌 / 横幅 / 阶段大字 */
+.pvtag, .banner { background: rgba(11, 8, 6, .94); border: 2px solid var(--sk-ink); box-shadow: 3px 4px 0 rgba(0, 0, 0, .5); }
+.pvtag .dmg { font-family: var(--sk-stencil); font-weight: 400; }
+.banner { font-family: var(--sk-label); font-size: 17px; }
+.phase-card { font-family: var(--sk-tag); font-weight: 400; font-size: 56px; letter-spacing: .2em; }
+.stamp { font-family: var(--sk-tag); font-weight: 400; }
+.pop { font-family: var(--sk-stencil); font-weight: 400; }
+
+/* ---------- 操作栏 ---------- */
+.g-hud {
+  background: var(--sk-oil); background-image: var(--sk-noise);
+  border-top: 4px solid var(--sk-ink);
+}
+.g-hud::before {
+  content: ""; position: absolute; left: 0; right: 0; top: -10px; height: 6px; pointer-events: none;
+  background: repeating-linear-gradient(-45deg, var(--sk-hazard) 0 10px, var(--sk-ink) 10px 20px); opacity: .85;
+}
+.pc {
+  background: var(--sk-steel); background-image: var(--sk-noise);
+  border: 2px solid var(--sk-ink); border-left: 5px solid var(--ally);
+  box-shadow: 2px 3px 0 rgba(0, 0, 0, .5);
+}
+.pc.on { background-color: var(--sk-steel-hi); border-color: var(--sk-canvas); border-left-color: var(--ally); }
+.pc .n { font-family: var(--sk-label); font-weight: 400; font-size: 15px; }
+.pc .mini { background: #3a2c22; }
+.sk {
+  background: var(--sk-steel); background-image: var(--sk-noise);
+  border: 2px solid var(--sk-ink); box-shadow: 2px 3px 0 rgba(0, 0, 0, .5);
+}
+.sk:hover { background-color: var(--sk-steel-hi); }
+.sk.armed { border-color: var(--sk-hazard); background-color: var(--sk-steel-hi); box-shadow: 2px 3px 0 rgba(0, 0, 0, .5), inset 0 0 0 1px var(--sk-hazard); }
+.sk .nm { font-family: var(--sk-label); font-weight: 400; font-size: 16px; }
+.sk .key { font-family: var(--sk-stencil); }
+.endturn {
+  position: relative; isolation: isolate;
+  background: transparent; border: 0; color: var(--sk-ink);
+  font-family: var(--sk-tag); font-weight: 400; font-size: 24px; line-height: 1.05;
+}
+.endturn::before {
+  content: ""; position: absolute; inset: 0; z-index: -1; background: var(--sk-hazard); filter: url(#sk-spray);
+  clip-path: polygon(3% 6%, 30% 0, 70% 4%, 97% 0, 100% 40%, 96% 100%, 50% 95%, 4% 100%, 0 60%);
+}
+.endturn:hover:not([disabled]) { background: transparent; filter: brightness(1.08); }
+.endturn small { color: var(--sk-ink); opacity: .75; font-family: var(--sk-body); }
+.hint b { color: var(--sk-hazard); }
+
+/* ---------- 预览 / 记录 ---------- */
+.g-log, .pvbox { background: var(--sk-oil-2); background-image: var(--sk-noise); border-left: 4px solid var(--sk-ink); }
+.pvbox h4 { font-family: var(--sk-tag); font-weight: 400; font-size: 22px; text-shadow: 2px 2px 0 var(--sk-ink); }
+.lg { border-bottom-color: rgba(236, 224, 198, .08); }
+.log-tools { border-bottom-color: rgba(236, 224, 198, .1); }
+
+/* 天气：不再把整条界面换色（雪天会整片发白），只在顶栏下沿和记录栏上缘染一道天气色 */
+.g-app[data-weather] :is(.g-top, .g-hud, .g-log) {
+  background-color: var(--sk-oil); color: var(--sk-canvas); border-color: var(--sk-ink);
+}
+.g-app[data-weather] :is(.g-phase, .hint, .pvbox, .pvbox .ln, .lg .s, .lg summary, .lg pre, .g-top label) { color: var(--sk-muted); }
+.g-app[data-weather] :is(.pvbox h4, .lg .t, .g-round) { color: var(--sk-canvas); }
+.g-app[data-weather] .hint b { color: var(--sk-hazard); }
+.g-app[data-weather] .g-weather { color: var(--wx, var(--sk-hazard)); }
+.g-app[data-weather] :is(.pc, .sk, .g-btn, .g-top select) { background-color: var(--sk-steel); border-color: var(--sk-ink); color: var(--sk-canvas); }
+.g-app[data-weather] .pc { border-left-color: var(--ally); }
+.g-app[data-weather] :is(.pc.on, .sk:hover, .g-btn:hover) { background-color: var(--sk-steel-hi); }
+.g-app[data-weather] .pc.on { border-color: var(--sk-canvas); border-left-color: var(--ally); }
+.g-app[data-weather] .sk.armed { border-color: var(--sk-hazard); background-color: var(--sk-steel-hi); }
+.g-app[data-weather] .pc .mini { background: #3a2c22; }
+.g-app[data-weather] .sk .cost { color: var(--sk-muted); }
+.g-app[data-weather] .endturn { background: transparent; border: 0; color: var(--sk-ink); }
+.g-app[data-weather] .endturn small { color: var(--sk-ink); }
+.g-app[data-weather] .g-top a.g-btn { color: var(--sk-canvas); }
+.g-app[data-weather] .pvbox { border-color: var(--sk-ink); }
+.g-app[data-weather] .lg { border-color: rgba(236, 224, 198, .08); }
+.g-app[data-weather] .g-top { box-shadow: 0 3px 0 var(--wx, transparent); }
+.g-app[data-weather="heat"] { --wx: #ff5b2e; }
+.g-app[data-weather="thunder"] { --wx: #c07cf0; }
+.g-app[data-weather="sand"] { --wx: #e2a24f; }
+.g-app[data-weather="acid"] { --wx: #9be03a; }
+.g-app[data-weather="glow"] { --wx: #ff4fa3; }
+.g-app[data-weather="phase"] { --wx: #3fe0ff; }
+.g-app[data-weather="snow"] { --wx: #dfe9f2; }
+
+/* ---------- 弹层：选择 / 检定 / 结算 / 背包 ---------- */
+.choice-card, .check-card, .sheet-card {
+  position: relative;
+  background-color: var(--sk-steel);
+  background-image: var(--sk-noise), linear-gradient(170deg, var(--sk-steel-hi), var(--sk-oil-2) 85%);
+  border: 3px solid var(--sk-ink); box-shadow: 8px 10px 0 rgba(0, 0, 0, .55);
+  color: var(--sk-canvas);
+}
+.choice h3 {
+  display: inline-block; padding: 1px 16px 3px; margin-bottom: 12px;
+  font-family: var(--sk-tag); font-weight: 400; font-size: 30px; color: var(--sk-ink);
+  background: var(--sk-tape); transform: rotate(-2deg);
+  clip-path: polygon(2% 8%, 0 0, 100% 4%, 98% 40%, 100% 100%, 3% 94%, 0 55%);
+}
+.choice .opts button {
+  background: var(--sk-oil-2); background-image: var(--sk-noise);
+  border: 3px solid var(--sk-ink); box-shadow: 3px 4px 0 rgba(0, 0, 0, .55);
+  font-family: var(--sk-label); font-weight: 400; font-size: 21px;
+}
+.choice .opts button:hover { background-color: var(--sk-steel-hi); border-color: var(--sk-hazard); }
+.choice .opts button .key { font-family: var(--sk-stencil); }
+.choice .opts button small { font-family: var(--sk-body); }
+.check-who { font-family: var(--sk-tag); font-size: 24px; color: var(--sk-canvas); text-shadow: 2px 2px 0 var(--sk-ink); }
+.check-num { font-family: var(--sk-stencil); }
+.check-num.ok { color: var(--sk-hazard); }
+.check-num.fail { color: #ff5a48; }
+.sheet-head h3 { font-family: var(--sk-tag); font-weight: 400; font-size: 26px; text-shadow: 2px 2px 0 var(--sk-ink); }
+.sheet-k b, .lm-val { font-family: var(--sk-stencil); color: var(--sk-hazard); }
+.result h2 {
+  font-family: var(--sk-tag); font-weight: 400; font-size: 84px; letter-spacing: .12em;
+  text-shadow: 4px 5px 0 var(--sk-ink);
+}
+.result h2.win { color: var(--sk-hazard); }
+.result h2.lose { color: #ff4a3a; }
+
+/* ---------- 评分 ---------- */
+.rk-grade { font-family: var(--sk-stencil); font-style: normal; font-weight: 400; }
+.rk-score { font-family: var(--sk-stencil); font-weight: 400; color: var(--sk-canvas); text-shadow: 1px 1px 0 var(--sk-ink); }
+.rk-bar { background: rgba(0, 0, 0, .45); }
+.rk-next { color: var(--sk-muted); }
+.rk-gain { color: var(--sk-canvas); text-shadow: 1px 1px 0 var(--sk-ink); }
+.rk-gain.neg { color: #ff6a55; }
+.grade-badge b { font-family: var(--sk-stencil); font-style: normal; font-weight: 400; }
+
+@media (max-width: 820px) {
+  .g-top { background: var(--sk-oil); }
+  .g-hud { background: var(--sk-oil); background-image: var(--sk-noise); box-shadow: 0 -6px 18px rgba(0, 0, 0, .45); }
+  .g-hud::before { display: none; }
+  .g-rank { background: rgba(11, 8, 6, .9); border: 2px solid var(--sk-ink); }
+  .u-name { font-size: 17px; }
+  .sk .nm { font-size: 15px; }
+  .pvbox.live { background: rgba(11, 8, 6, .95); border: 2px solid var(--sk-ink); }
+  .g-log { background: var(--sk-oil-2); border-top: 4px solid var(--sk-ink); }
+  .result h2 { font-size: 52px; }
+  .choice h3 { font-size: 24px; }
+}
