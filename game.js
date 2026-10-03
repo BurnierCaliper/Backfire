@@ -2122,7 +2122,7 @@
       });
     }
     // 配置物与区间地形
-    (state.props || []).filter(p => p.kind !== "ironwall").forEach(p => {
+    (state.props || []).filter(p => p.kind !== "ironwall" && p.kind !== "dome").forEach(p => {
       const side = p.kind === "battery" || p.kind === "turret" ? (p.faction === "enemy" ? "（敌方）" : "（我方）") : "";
       lines.push({ text: `${p.zone} 区 · ${p.name}${side}`, color: p.faction === "enemy" && side ? "#ff6b6b" : "#e8c07a" });
     });

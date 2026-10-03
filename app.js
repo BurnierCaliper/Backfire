@@ -2287,9 +2287,10 @@ function noteSideDamage(amount, label, unit) {
 
 /* ---------- 屏障：替同区一方挡攻击行动的配置物 ----------
  *   铁壁（川川，我方）：挡敌方攻击行动，撑到回合结束；被击破时川川受 3 击破
+ *   防护罩（生存职责，我方）：护盾生命 atk + 10，撑到被打破为止
  *   废铁墙（亡命之王「回防命令」，敌方）：挡我方攻击行动，撑到下一个敌人回合开始
  * 同区这一方的单位挨一次攻击行动：只有墙吃这一下（按装甲层算克制），这次行动打在同区的其余伤害全被挡住。 */
-const BARRIER_SIDE = { ironwall: "player", scrapwall: "enemy" };
+const BARRIER_SIDE = { ironwall: "player", scrapwall: "enemy", dome: "player" };
 function barrierIn(zone, side) {
   return (state.props || []).find(p => BARRIER_SIDE[p.kind] === side && Number(p.zone) === Number(zone) && p.hp > 0);
 }
@@ -2313,6 +2314,10 @@ function breakIronWall(p, notes) {
     notes.push("废铁墙被打塌，移出战场。");
     return notes;
   }
+  if (p.kind !== "ironwall") {
+    notes.push(`${p.name}被打破，移出战场。`);
+    return notes;
+  }
   const c = findKit("chuan", state.units);
   if (c) {
     dealBreak(c, 3, "physical", notes, "铁壁被击破");
@@ -2321,9 +2326,9 @@ function breakIronWall(p, notes) {
   return notes;
 }
 
-/** 一下攻击打在墙上：墙是一层装甲，照常算克制 / 天气 / 场地 */
+/** 一下攻击打在墙上：墙是一层装甲（防护罩是护盾），照常算克制 / 天气 / 场地 */
 function hitBarrier(p, attacker, opt) {
-  const dummy = unitOf(p.name, p.level || 1, [{ type: "armor", hp: p.hp }], 999, 0, { noPosture: true });
+  const dummy = unitOf(p.name, p.level || 1, [{ type: p.layerType || "armor", hp: p.hp }], 999, 0, { noPosture: true });
   dummy.zone = p.zone;
   dummy.def = 999;
   dummy.defMax = 999;
@@ -3047,7 +3052,7 @@ function structureTargets(actor, minD, maxD) {
   const out = [];
   const inR = (z) => { const d = zoneDist(actor.zone, z, state.zoneMode); return d >= minD && d <= maxD; };
   (state.props || []).forEach(p => {
-    if (p.kind === "ironwall") return;
+    if (BARRIER_SIDE[p.kind] === "player") return;   // 自己的铁壁 / 防护罩不当目标
     if (!(p.hp > 0) && p.kind !== "button" && p.kind !== "lever") return;
     if (inR(p.zone)) out.push({ id: "prop:" + p.id, name: p.name, zone: p.zone, isPlayer: p.faction !== "enemy" });
   });
@@ -3117,7 +3122,7 @@ function damageProp(p, opt, attacker) {
     lose = element === "harmonic" ? 3 : 1;
   } else if (p.kind === "scrap") {
     lose = 1;
-  } else if (p.kind === "scrapwall" || p.kind === "ironwall") {
+  } else if (BARRIER_SIDE[p.kind]) {
     const h = hitBarrier(p, attacker, { atk: 0, mult: 0, flat: Math.max(1, Math.floor(opt.dmg || 5)), element });
     return notes.concat(h.notes);
   } else if (p.kind === "button" || p.kind === "lever") {
@@ -3147,7 +3152,7 @@ function damageProp(p, opt, attacker) {
 
 function destroyProp(p, attacker) {
   const notes = [`${p.name} 被摧毁。`];
-  if (p.kind === "ironwall" || p.kind === "scrapwall") {
+  if (BARRIER_SIDE[p.kind]) {
     notes.push(...breakIronWall(p, []));
     return notes;
   }
@@ -8911,11 +8916,12 @@ function runSkillInner(id, optRun) {
       if (!roleOnce(a, "dome", 1)) lines.push("防护罩本场已用完。");
       else {
         const hp = Math.floor(atk + 10);
-        const wall = unitOf("防护罩", a.level, [{ type: "shield", hp }], 0, 0, { kit: "ironwall", isPlayer: true, range: "melee" });
-        wall.zone = a.zone;
-        wall.note = "生存职责防护罩";
-        state.units.push(wall);
-        lines.push(`防护罩展开：护盾 ${hp}。同区友方受击先打罩。`);
+        // 防护罩是盾牌类配置物（和铁壁、废铁墙一样）：替同区我方挡攻击行动，范围攻击完全挡住，只有罩挨一下
+        state.props = (state.props || []).filter(p => !(p.kind === "dome" && Number(p.zone) === Number(a.zone)));
+        const wall = makeProp("dome", a.zone, a.level);
+        wall.hp = wall.maxHp = hp;
+        state.props.push(wall);
+        lines.push(`防护罩展开：护盾 ${hp}。同区我方受到的攻击由罩承受，范围攻击完全挡住。`);
       }
     } else if (id === "role_renew") {
       if (!needT()) return paintSkillLog(lines.join("\n"));

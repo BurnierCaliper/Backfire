@@ -896,3 +896,42 @@ test("爆炸桶的爆炸也打不到废铁墙后面的敌人（以前只挡我�
   assert.equal(c.totalHp(thug), hp, "敌人被废铁墙护住");
   assert.ok(wall.hp < 100, "废铁墙替它挨了爆炸");
 });
+
+/* ---------- 防护罩（生存职责）也是盾牌类配置物 ---------- */
+test("防护罩：技能放出的是屏障配置物（护盾生命 atk + 10），不再是一个单位", () => {
+  const { c, st, k } = boomcarField();
+  const kolt = k("kolt");
+  kolt.ap = 2; st.attackerId = kolt.id; st.targetId = null;
+  c.runSkill("role_dome");
+  const dome = st.props.find(p => p.kind === "dome");
+  assert.ok(dome, "场上有防护罩配置物");
+  assert.equal(dome.zone, kolt.zone);
+  assert.equal(dome.layerType, "shield");
+  assert.ok(dome.hp >= 10);
+  assert.ok(!st.units.some(u => u.name === "防护罩"), "不再生成防护罩单位");
+});
+
+test("防护罩保护时，范围攻击一个玩家都打不到，只对罩造成一次伤害", () => {
+  const { c, st, k } = boomcarField();
+  const dome = c.makeProp("dome", 1, 1); dome.hp = dome.maxHp = 200;
+  st.props.push(dome);
+  const kolt = k("kolt"), helu = k("helu"), car = k("boomcar");
+  const before = [kolt, helu].map(u => c.totalHp(u));
+  st.combatPhase = "enemy"; car.ap = 1; st.attackerId = car.id; st.targetId = kolt.id;
+  c.runSkill("en_boom_fuse");
+  [kolt, helu].forEach((u, i) => assert.equal(c.totalHp(u), before[i], u.name + " 被防护罩护住"));
+  const once = 200 - dome.hp;
+  assert.ok(once > 0 && once < 40, "只挨一次：" + once);
+});
+
+test("防护罩被打破只移出战场，不会让川川受击破；玩家不能把自己的罩当目标", () => {
+  const { c, st, k } = boomcarField();
+  const kolt = k("kolt");
+  const dome = c.makeProp("dome", 1, 1); dome.hp = dome.maxHp = 1;
+  st.props.push(dome);
+  const notes = c.breakIronWall(dome, []);
+  assert.ok(!st.props.includes(dome));
+  assert.ok(!notes.some(s => /川川/.test(s)));
+  st.props.push(c.makeProp("dome", 1, 1));
+  assert.ok(!c.structureTargets(kolt, 0, 1).some(t => /dome|防护罩/.test(t.name)));
+});
