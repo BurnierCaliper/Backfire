@@ -493,6 +493,60 @@ test("单人模式：主角倒地不判负，下个玩家回合可以用坚毅�
   assert.deepEqual(o.errors, []);
 });
 
+test("手机竖屏：战斗不横向溢出；点目标先预览、再点才出手；战斗记录在抽屉里", async (t) => {
+  if (!browser) { t.skip(skipWhy); return; }
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  t.after(() => context.close());
+  const page = await context.newPage();
+  const errors = [];
+  page.on("pageerror", e => errors.push("pageerror: " + e.message));
+  await page.goto(GAME_URL);
+  assert.match(await page.textContent(".t-name"), /Antlerscale\s*Backfire/);
+  await page.click("#t-new");
+  await page.waitForSelector("#scr-party:not([hidden])");
+  for (const k of ["ruby", "yuito"]) await page.click(`.hero-pick[data-kit="${k}"]`);
+  await page.click("#party-go");
+  await page.waitForSelector("#scr-run:not([hidden])");
+  await page.click('.r-go[data-which="main"]');
+  await page.evaluate(() => {
+    const r = SaveStore.loadRun();
+    r.task.nodes[r.task.index] = { type: "battle", done: false };
+    SaveStore.saveRun(r);
+    RunFlow.resume();
+  });
+  await page.click("#r-fight");
+  await page.waitForSelector("#g-start");
+  await page.waitForSelector("#g-intro", { state: "detached", timeout: 15000 }).catch(() => {});
+  await page.click("#g-start");
+  await page.waitForFunction(() => state.combatStarted && GAME.depth === 0, null, { timeout: 15000 });
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  assert.ok(overflow <= 0, "横向溢出 " + overflow);
+  // 瑞比的普通攻击打距离 1：把敌人挪到隔壁区
+  const ruby = await page.evaluate(() => {
+    const h = state.units.find(u => u.kit === "ruby");
+    state.units.filter(u => !u.isPlayer).forEach(u => { u.zone = h.zone > 1 ? h.zone - 1 : 2; });
+    GAME.refresh();
+    return h.id;
+  });
+  await page.locator("#g-party .pc", { hasText: "瑞比" }).first().tap();
+  await page.waitForFunction(i => GAME.actorId === i, ruby);
+  const ap0 = await apOf(page, ruby);
+  await page.tap("#g-skills button.sk:first-child");
+  await page.waitForFunction(() => GAME.arm && GAME.arm.mode === "unit");
+  const foe = await page.evaluate(() => [...GAME.arm.map.entries()].find(([id, c]) => !c.invalid && !String(id).includes(":"))[0]);
+  await page.tap(`.unit-wrap[data-id="${foe}"]`);
+  assert.equal(await apOf(page, ruby), ap0, "第一下只是预览");
+  assert.equal(await page.evaluate(() => document.querySelector("#g-pvbox").classList.contains("live")), true, "预览浮出来");
+  await page.tap(`.unit-wrap[data-id="${foe}"]`);
+  await page.waitForFunction(([i, a]) => state.units.find(u => u.id === i).ap < a && GAME.depth === 0, [ruby, ap0], { timeout: 15000 });
+  // 战斗记录：顶栏按钮打开抽屉，「收起」关上
+  await page.tap("#g-log-open");
+  await page.waitForFunction(() => document.querySelector("#g-app").classList.contains("log-open"));
+  await page.tap("#g-log-close");
+  await page.waitForFunction(() => !document.querySelector("#g-app").classList.contains("log-open"));
+  assert.deepEqual(errors, []);
+});
+
 test("格挡成功：敌方队长·牛格挡住攻击时，响起钢铁碰撞声", async (t) => {
   const o = await open(t); if (!o) return;
   const { page } = o;

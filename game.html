@@ -2,15 +2,16 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>角鳞：四幕</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#120f0d" />
+  <title>Antlerscale: Backfire</title>
   <link rel="stylesheet" href="game.css" />
 </head>
 <body>
 <section class="scr-title" id="scr-title" hidden>
   <div class="t-card">
-    <h1 class="t-name">角鳞<span>四幕</span></h1>
-    <p class="t-sub">ANTLERSCALE · 在巨人的阴影下，活到明天</p>
+    <h1 class="t-name">Antlerscale<span>Backfire</span></h1>
+    <p class="t-sub">角鳞 · 在巨人的阴影下，活到明天</p>
     <div class="t-menu">
       <button class="t-btn primary" id="t-continue"><b>继续</b><small id="t-continue-sub"></small></button>
       <button class="t-btn" id="t-new"><b>新的一局</b><small id="t-new-sub"></small></button>
@@ -89,6 +90,7 @@
   <header class="g-top">
     <span class="g-round" id="g-round">第 1 回合</span>
     <span class="g-phase" id="g-phasel">我方行动</span>
+    <button class="g-btn mobile-only" id="g-log-open" title="战斗记录">记录</button>
     <span class="g-weather" id="g-weather">天气 常态</span>
     <label style="font-size:13px;color:var(--muted);display:flex;gap:6px;align-items:center">天气
       <select id="g-weather-sel">
@@ -144,10 +146,11 @@
     <div class="hint" id="g-hint"></div>
   </footer>
 
-  <aside class="g-log">
-    <div class="pvbox" id="g-pvbox"></div>
+  <div class="pvbox" id="g-pvbox"></div>
+  <aside class="g-log" id="g-log">
     <div class="log-tools">
       <span>战斗记录</span>
+      <button class="g-btn small mobile-only" id="g-log-close" title="收起战斗记录">收起</button>
       <button class="g-btn small" id="g-copy-turn" title="复制这一回合的记录文字（含计算过程）">复制本回合</button>
       <button class="g-btn small" id="g-copy-all" title="复制整场战斗的记录文字（含计算过程）">复制全部</button>
     </div>

@@ -58,13 +58,15 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
 .g-app {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 320px;
-  grid-template-rows: 48px 1fr auto;
+  grid-template-rows: 48px auto 1fr auto;
   grid-template-areas:
     "top top"
+    "field pv"
     "field log"
     "hud log";
   height: 100vh;
 }
+.mobile-only { display: none !important; }
 
 /* ---------- 顶栏 ---------- */
 .g-top {
@@ -742,6 +744,9 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
   min-height: 0;
 }
 .pvbox {
+  grid-area: pv;
+  border-left: 1px solid var(--line);
+  background: rgba(18, 15, 13, .55);
   padding: 12px 14px;
   border-bottom: 1px solid var(--line);
   min-height: 132px;
@@ -1121,18 +1126,17 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
 .t-card { width: min(440px, 100%); display: flex; flex-direction: column; gap: 10px; }
 .t-name {
   margin: 0;
-  font-size: 64px;
+  font-size: 52px;
   font-weight: 900;
-  letter-spacing: .12em;
+  letter-spacing: .03em;
   line-height: 1;
 }
 .t-name span {
-  display: inline-block;
-  margin-left: .35em;
-  font-size: .42em;
-  letter-spacing: .3em;
+  display: block;
+  margin-top: 6px;
+  font-size: .62em;
+  letter-spacing: .32em;
   color: var(--gold);
-  vertical-align: .55em;
 }
 .t-sub { margin: 0 0 22px; font-size: 12px; letter-spacing: .18em; color: var(--muted); }
 .t-menu { display: flex; flex-direction: column; gap: 10px; }
@@ -1159,7 +1163,7 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
 .t-btn.primary:not(:disabled) { border-left-color: var(--gold); }
 .t-btn:disabled { opacity: .45; cursor: default; }
 .t-btn:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
-@media (max-width: 480px) { .t-name { font-size: 48px; } }
+@media (max-width: 480px) { .t-name { font-size: 40px; } }
 
 /* ---------- Roguelike 战斗：只留战斗相关的按钮 ---------- */
 #g-rogue-next { display: none; }
@@ -1634,3 +1638,103 @@ body:not([data-screen="battle"]) .g-rank { display: none !important; }
 /* 休息点：守夜人选择 */
 .r-watch { display: flex; align-items: center; gap: 8px; margin: 6px 0 10px; font-size: 13px; }
 .r-watch select { font: inherit; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--line, #444); background: var(--panel, transparent); color: inherit; max-width: 100%; }
+
+
+/* ================= 手机 / 窄屏（≤ 820px） =================
+ * 战斗：两到三个区改成上下排，操作栏固定在底部，战斗记录收进抽屉（顶栏「记录」打开），
+ * 伤害预览浮在操作栏上面。触屏没有悬停：点目标先预览，再点一下确认（game.js · onCardClick）。 */
+@media (max-width: 820px) {
+  .mobile-only { display: inline-flex !important; align-items: center; }
+  .g-app {
+    display: block; height: 100vh; height: 100dvh; overflow-y: auto; overflow-x: hidden;
+    padding-bottom: calc(var(--hud-h, 220px) + 12px);
+  }
+  .g-top {
+    position: sticky; top: 0; z-index: 20; height: 46px; gap: 8px; padding: 0 10px;
+    overflow-x: auto; flex-wrap: nowrap; background: rgba(18, 15, 13, .96); scrollbar-width: none;
+  }
+  .g-top::-webkit-scrollbar { display: none; }
+  .g-top > * { flex: 0 0 auto; }
+  .g-top .spacer { display: none; }
+  .g-round { font-size: 18px; }
+  .g-phase { font-size: 13px; }
+
+  .g-field, .g-field.z2, .g-field.z3 {
+    grid-template-columns: minmax(0, 1fr); grid-auto-rows: auto; padding: 10px 8px; overflow: visible; min-height: 0;
+  }
+  .g-gap { writing-mode: horizontal-tb; height: 26px; }
+  .g-zone, .g-field.z3 .g-zone { padding: 26px 6px 10px; gap: 10px; min-height: 120px; }
+  .g-zone::before, .g-field.z3 .g-zone::before { font-size: 96px; }
+  .grp, .g-field.z3 .grp { gap: 8px; }
+  .grp > .unit-wrap { width: calc(50% - 4px); max-width: 210px; }
+  .grp > .unit-wrap.prop-wrap, .grp.prop > .unit-wrap { width: auto; }
+  .unit, .g-field.z3 .unit { width: 100%; padding: 6px 7px 5px 11px; }
+  .unit.prop, .g-field.z3 .unit.prop { width: 72px; height: 72px; }
+  .u-name, .g-field.z3 .u-name { font-size: 13px; }
+
+  .g-hud {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+    max-height: 50vh; overflow-y: auto;
+    padding: 8px 10px calc(10px + env(safe-area-inset-bottom, 0px));
+    background: rgba(18, 15, 13, .97); box-shadow: 0 -6px 18px rgba(0, 0, 0, .45);
+  }
+  .party { margin-bottom: 6px; }
+  .pc { width: 96px; }
+  .hud-row { flex-direction: column; gap: 8px; }
+  .skills { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .sk { min-width: 0; padding: 7px 6px 6px 20px; min-height: 44px; }
+  .sk .nm { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sk .key { left: 6px; top: 7px; font-size: 10px; }
+  .hud-side { width: 100%; flex: none; flex-direction: row; min-height: 46px; }
+  .endturn { min-height: 46px; }
+  .hint { font-size: 12px; margin-top: 6px; min-height: 0; }
+
+  .pvbox { display: none; }
+  .pvbox.live {
+    display: block; position: fixed; left: 8px; right: 8px; z-index: 28;
+    bottom: calc(var(--hud-h, 220px) + 8px); max-height: 34vh; overflow-y: auto; min-height: 0;
+    background: rgba(18, 15, 13, .93); border: 1px solid var(--line); box-shadow: 0 8px 22px rgba(0, 0, 0, .55);
+    pointer-events: none;   /* 只是提示：手指点下去穿透到下面的卡片（第二下确认） */
+  }
+  .g-log {
+    position: fixed; left: 0; right: 0; bottom: 0; height: 72vh; height: 72dvh; z-index: 55;
+    transform: translateY(105%); transition: transform .25s ease;
+    background: var(--ground-1); border-left: 0; border-top: 1px solid var(--line);
+    box-shadow: 0 -10px 30px rgba(0, 0, 0, .65);
+  }
+  .g-app.log-open .g-log { transform: none; }
+
+  /* 评分：顶栏下面一条细横栏，不压在敌人卡上 */
+  .g-field, .g-field.z2, .g-field.z3 { padding-top: 44px; }
+  .g-rank {
+    top: 50px; right: 10px; left: 10px; bottom: auto; min-width: 0; z-index: 19;
+    flex-direction: row; align-items: center; justify-content: flex-end; gap: 10px;
+    padding: 2px 10px; background: rgba(230, 233, 236, .92); border: 1px solid #d3dae2;
+    pointer-events: none;
+  }
+  .rk-grade { font-size: 26px; }
+  .rk-score { font-size: 14px; }
+  .rk-bar { width: 70px; }
+  .rk-next { font-size: 10px; margin-right: auto; order: -1; }
+  .rk-support { font-size: 11px; }
+  .rk-feed { bottom: auto; top: 100%; margin: 4px 0 0; flex-direction: column; }
+  .phase-card { right: 0; font-size: 28px; letter-spacing: .2em; }
+  .banner { top: 52px; max-width: 92vw; white-space: normal; text-align: center; font-size: 13px; }
+
+  .choice-card { min-width: 0; width: 94vw; max-height: 86vh; overflow-y: auto; padding: 16px 14px 18px; }
+  .choice h3 { font-size: 20px; }
+  .choice p { font-size: 13px; margin-bottom: 12px; }
+  .choice .opts { gap: 8px; }
+  .choice .opts button { min-width: 0; flex: 1 1 100%; padding: 12px 14px; font-size: 16px; }
+  .result { background: rgba(12, 10, 8, .94); }
+  .result h2 { font-size: 36px; letter-spacing: .2em; }
+  .result p { padding: 0 16px; text-align: center; }
+  .result-btns { flex-wrap: wrap; justify-content: center; padding: 0 12px; }
+
+  /* 单局：主面板放最前面，队伍和记录往后排 */
+  .run-top { flex-wrap: wrap; row-gap: 4px; }
+  .run-main { display: flex; flex-direction: column; }
+  .run-body { order: 1; }
+  .run-party { order: 2; }
+  .run-log { order: 3; }
+}

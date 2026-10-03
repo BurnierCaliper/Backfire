@@ -1,7 +1,7 @@
 {
   "name": "antlerscale",
   "private": true,
-  "description": "角鳞 · 规则计算器 / 战斗原型 / Roguelike",
+  "description": "Antlerscale: Backfire（角鳞）· 规则计算器 / 战斗原型 / Roguelike",
   "scripts": {
     "test": "node --test \"tests/*.test.js\""
   }

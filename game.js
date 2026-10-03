@@ -1339,6 +1339,7 @@
       }
     });
     const box = $("g-pvbox");
+    box.classList.add("live");   // 手机：预览浮在操作栏上面
     const lines = pv.lines.filter(t => !COST_LINE.test(t)).slice(0, 18);
     box.innerHTML = `<h4>${esc(title || "预览")}</h4>` +
       (pv.meaningful ? "" : `<div class="ln key">${esc(pv.reason)}</div>`) +
@@ -1347,10 +1348,11 @@
   }
 
   function idleBox() {
+    $("g-pvbox").classList.remove("live");
     const a = unitById(G.actorId);
     $("g-pvbox").innerHTML = `<h4>${a ? esc(a.name) : "选择角色"}</h4>
       <div class="ln">${a && a.note ? esc(a.note) : ""}</div>
-      <div class="ln">点技能或按数字键，把鼠标移到目标上预览伤害与击破。左键出手，右键或 Esc 取消。</div>
+      <div class="ln">${touchUI() ? "点技能，再点目标预览伤害与击破，再点一下出手；点空白处取消。" : "点技能或按数字键，把鼠标移到目标上预览伤害与击破。左键出手，右键或 Esc 取消。"}</div>
       <div class="ln">闪白＝会被打掉的血量与架势；金光＝这一下会造成失衡；蓝光＝冰属性击破造成失衡（冰冻）。</div>`;
   }
 
@@ -1492,6 +1494,7 @@
     const s = G.view.get(id);
     if (!s) return;
     const layers = s.layers.map(l => `${LAYER[l.type] || l.type} ${l.cur}/${l.max}`).reverse().join("　");
+    $("g-pvbox").classList.add("live");
     $("g-pvbox").innerHTML = `<h4>${esc(s.name)} · Lv${s.level}</h4>
       <div class="ln key">${esc(layers)}</div>
       <div class="ln">架势 ${s.def}/${s.defMax} · ATK ${s.atk} · ${s.zone} 区</div>
@@ -1533,6 +1536,7 @@
       const map = new Map(candidates.map(c => [c.id, c]));
       G.arm = Object.assign(G.arm || {}, {
         mode: "unit",
+        tapId: null,
         map,
         labelFn,
         resolve: (id) => { unmarkTargets(); clearPreview(); G.arm.mode = null; resolve(id); },
@@ -1547,6 +1551,7 @@
     return new Promise(resolve => {
       G.arm = Object.assign(G.arm || {}, {
         mode: "zone",
+        tapZone: null,
         zones: new Set(zones),
         previewFn,
         resolve: (z) => { unmarkTargets(); clearPreview(); G.arm.mode = null; resolve(z); },
@@ -1574,12 +1579,21 @@
     if (!G.arm) { if (on) unitInfoBox(id); else idleBox(); }
   }
 
+  /** 触屏没有悬停：第一下点目标先预览，再点一下才出手 */
+  function touchUI() { return !!(window.matchMedia && window.matchMedia("(hover: none)").matches); }
   function onCardClick(id) {
     if (G.depth > 0) { G.skip = true; return; }
     if (choiceResolve) return;
     if (G.arm && G.arm.mode === "unit") {
       const cand = G.arm.map.get(id);
       if (!cand) return;
+      if (touchUI() && G.arm.tapId !== id && !cand.invalid) {
+        if (G.arm.tapId) onCardHover(G.arm.tapId, false);
+        G.arm.tapId = id;
+        onCardHover(id, true);
+        flashHint(`${targetName(id)}：再点一下确认`);
+        return;
+      }
       if (cand.preview && !cand.preview.meaningful && cand.invalidOk !== true) {
         flashHint(`无法对 ${targetName(id)} 使用：${cand.preview.reason}`);
         return;
@@ -1589,6 +1603,7 @@
     }
     const u = unitById(id);
     if (u && u.isPlayer && !G.arm) selectActor(id);
+    else if (!G.arm && touchUI()) unitInfoBox(id);   // 触屏：点敌人看详情
   }
 
   function candidateUnits(actor, sk) {
@@ -1719,7 +1734,7 @@
       G.arm = null;
       return act(skillThunk(actor.id, sk.id, lastUnitPick, picks), { actorId: actor.id, targetId: lastUnitPick, skillName: sk.name });
     }
-    setHint(`<b>${esc(sk.name)}</b>：${esc(sk.hint || "选择目标")}　<span style="color:var(--faint)">右键取消</span>`);
+    setHint(`<b>${esc(sk.name)}</b>：${esc(sk.hint || "选择目标")}　<span style="color:var(--faint)">${touchUI() ? "点目标预览，再点确认；点空白处取消" : "右键取消"}</span>`);
     const cands = candidateUnits(actor, sk).map(u => {
       const thunk = skillThunk(actor.id, sk.id, u.id, picks);
       const preview = previewOf(thunk);
@@ -3155,8 +3170,21 @@
       if (G.depth > 0) { G.skip = true; return; }
       const zone = e.target.closest(".g-zone");
       if (G.arm && G.arm.mode === "zone" && zone && G.arm.zones.has(Number(zone.dataset.num))) {
-        G.arm.resolve(Number(zone.dataset.num));
+        const zn = Number(zone.dataset.num);
+        if (touchUI() && G.arm.tapZone !== zn) {
+          // 触屏：第一下预览移动的结果，再点一下才移动
+          document.querySelectorAll(".g-zone").forEach(z => z.classList.remove("is-move-hover"));
+          zone.classList.add("is-move-hover");
+          G.arm.tapZone = zn;
+          showPreview(G.arm.previewFn(zn), `移动到 ${zn} 区`);
+          flashHint(`${zn} 区：再点一下确认`);
+          return;
+        }
+        G.arm.resolve(zn);
       }
+      // 触屏：点战场空白处取消正在选的技能
+      if (G.arm && touchUI() && !e.target.closest(".unit-wrap, .g-gap")) { disarm(); return; }
+      if (!G.arm && !e.target.closest(".unit-wrap") && touchUI()) idleBox();
     });
     document.querySelectorAll(".g-zone").forEach(z => {
       z.addEventListener("mouseenter", () => {
@@ -3170,6 +3198,14 @@
         if (G.arm && G.arm.mode === "zone") clearPreview();
       });
     });
+    // 手机：战斗记录收在抽屉里；操作栏的高度写进 --hud-h，战场底部留出这么多空
+    if ($("g-log-open")) $("g-log-open").onclick = () => $("g-app").classList.toggle("log-open");
+    if ($("g-log-close")) $("g-log-close").onclick = () => $("g-app").classList.remove("log-open");
+    if (window.ResizeObserver) {
+      new ResizeObserver(() => {
+        document.documentElement.style.setProperty("--hud-h", $("g-app").querySelector(".g-hud").offsetHeight + "px");
+      }).observe($("g-app").querySelector(".g-hud"));
+    }
     $("g-endturn").onclick = clickStartOrEnd;
     if ($("g-start")) $("g-start").onclick = clickStartOrEnd;
     $("g-bag").onclick = () => { renderBagSheet(); $("g-bag-sheet").classList.add("show"); };
