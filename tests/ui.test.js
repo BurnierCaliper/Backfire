@@ -308,6 +308,44 @@ test("单局：选队伍出发，任务板正常显示", async (t) => {
   assert.deepEqual(o.errors, []);
 });
 
+test("单局：路线图——四个区域各有底图；走到岔路时点地图上发光的节点选下一站；走过的节点打勾", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await page.click("#t-new");
+  await page.waitForSelector("#scr-party:not([hidden])");
+  await page.click('.hero-pick[data-kit="ruby"]');
+  await page.click('.hero-pick[data-kit="yuito"]');
+  await page.click("#party-go");
+  await page.waitForSelector("#scr-run:not([hidden])");
+  await page.click('.r-go[data-which="main"]');
+  await page.waitForSelector(".route-map");
+  // 造一张确定的图，停在第二列的岔路上
+  await page.evaluate(() => {
+    const r = SaveStore.loadRun();
+    r.task.cols = [["battle"], ["shop", "battle", "check"], ["smith", "battle"], ["rest"], ["elite"]];
+    r.task.nodes = [{ type: "battle", done: true }, null, null, { type: "rest", done: false }, { type: "elite", done: false }];
+    r.task.pick = [0, null, null, 0, 0];
+    r.task.index = 1;
+    SaveStore.saveRun(r);
+    RunFlow.resume();
+  });
+  await page.waitForSelector(".rm-node.pickable", { state: "attached" });
+  assert.equal(await page.locator(".rm-node.pickable").count(), 3);
+  assert.equal(await page.locator(".rm-node.done .rm-check").count(), 1, "第一站打了勾");
+  assert.equal(await page.locator(".rm-edge.next").count(), 3, "三条能走的路在流动");
+  assert.equal(await page.evaluate(() => document.querySelector("#rm-defs").namespaceURI), "http://www.w3.org/2000/svg");
+  await page.click('.rm-node.pickable[data-route="2"] .rm-hit');
+  await page.waitForFunction(() => SaveStore.loadRun().task.pick[1] === 2);
+  assert.match(await page.textContent("#run-body"), /检定/);
+  assert.equal(await page.locator(".rm-edge.done").count(), 1, "走过的路线变金色");
+  // 四个区域的底图都画得出来
+  for (const region of ["外城区", "沙漠", "巨人城", "天网设施"]) {
+    const ok = await page.evaluate((rg) => /<svg class="rm-svg"/.test(RouteMap.html({ region: rg, cols: [["battle"], ["rest"]], nodes: [null, null], pick: [], index: 0, choices: [0] })), region);
+    assert.ok(ok, region);
+  }
+  assert.deepEqual(o.errors, []);
+});
+
 test("单局：熟练项检定节点——每个人的熟练等级和成功率，点人检定后前进", async (t) => {
   const o = await open(t); if (!o) return;
   const { page } = o;

@@ -424,7 +424,15 @@ while (run.stage !== "over" && steps++ < 2000) {
     const w = boardPick();
     if (w == null) { bug("任务板上没有能接的任务", JSON.stringify((run.board || []).map(t => t.name))); break; }
     tryDo("接任务", () => R.acceptTask(run, w));
-    ev(`接下${w === "main" ? "主线" : "支线「" + run.task.name + "」"}：${run.task.nodes.map(n => (R.CONFIG && c.S.ROGUE_NODE_TYPES[n.type] || {}).label || n.type).join(" → ")}`);
+    const lab = (t) => (c.S.ROGUE_NODE_TYPES[t] || {}).label || t;
+    ev(`接下${w === "main" ? "主线" : "支线「" + run.task.name + "」"}：${run.task.cols.map(col => col.map(lab).join("/")).join(" → ")}`);
+  } else if (stage === "task" && !R.currentNode(run)) {
+    // 路线图岔路：血少先去诊所 / 商店，有钱找工匠，其余打仗拿经验，检定最后
+    const opts = R.nodeChoices(run);
+    const pref = partyHpRatio() < 0.6 ? ["clinic", "shop", "check", "smith", "battle"]
+      : kz() > 4000 ? ["smith", "battle", "shop", "check", "clinic"] : ["battle", "check", "shop", "smith", "clinic"];
+    const best = opts.slice().sort((a, b) => pref.indexOf(a.type) - pref.indexOf(b.type))[0];
+    tryDo("选路线", () => R.chooseNode(run, best.i));
   } else if (stage === "task") {
     const node = R.currentNode(run);
     if (!node) { bug("任务里没有当前节点", run.task && run.task.index); break; }

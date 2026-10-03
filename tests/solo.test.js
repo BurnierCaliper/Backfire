@@ -164,6 +164,7 @@ test("单人模式自动打一段：不报错，支援、成长都能走通", ()
     if (run.stage === "camp") { R.camp(run); continue; }
     if (run.stage !== "task") break;
     const node = R.currentNode(run);
+    if (!node) { R.chooseNode(run, R.nodeChoices(run)[0].i); continue; }   // 路线图岔路
     if (node.type === "rest") R.restAtNode(run, "short");
     else if (["shop", "smith", "clinic"].includes(node.type)) R.leaveNode(run);
     else if (node.type === "check") R.skipCheck(run);

@@ -216,15 +216,70 @@ const Rogue = (function () {
       types.splice(between(1, types.length - 1), 0, "rest");
       const weather = rollTaskWeather(run);
       insertChecks(types);
+      const cols = buildRoute(types, tpl);   // 放在最后掷：主干、天气和以前完全一样
       return {
         weather,
         kind: tpl.kind, name: tpl.name,
         goal: tpl.goal.replace("{region}", region(run)),
         days: tpl.days, diff: tpl.diff || 0, key: !!tpl.key,
         reward: clone(tpl.reward), supply: clone(tpl.supply || {}),
-        nodeTypes: types     // 任务板上不给玩家看，接下后逐个显示
+        nodeTypes: types,    // 主干：任务板上不给玩家看
+        cols                 // 路线图：每一列可选的节点（接下任务后在地图上一列一列选）
       };
     });
+  }
+
+  /** 路线图（类似《杀戮尖塔》，从左到右）：主干的每一站是一列，中间的列多给 1–2 个可选节点。
+   *  第一列、休息点那一列、最后一列（战斗 / 精英战）都只有一个节点：
+   *  所以不管怎么走都正好经过一次休息点，终点都是任务目标。相邻两列的连线见 routeLinks。 */
+  const ROUTE = { width: [[.25, 1], [.8, 2], [1, 3]], extra: { check: 1 } };
+  function buildRoute(types, tpl) {
+    return types.map((t, c) => {
+      if (c === 0 || t === "rest" || c === types.length - 1) return [t];
+      const r = Math.random();
+      const k = ROUTE.width.find(([p]) => r < p)[1];
+      const opts = [t];
+      const weights = Object.assign({}, tpl.mix || { battle: 1 }, ROUTE.extra);
+      delete weights.rest;
+      for (let guard = 0; opts.length < k && guard < 8; guard++) {
+        const x = pickWeighted(weights, opts);
+        if (opts.indexOf(x) < 0) opts.splice(Math.floor(Math.random() * (opts.length + 1)), 0, x);
+      }
+      return opts;
+    });
+  }
+  /** 第 c 列有 k 个节点、第 c+1 列有 m 个：按上下位置比例连线，互不交叉。返回 [[i, j], …] */
+  function routeLinks(k, m) {
+    const out = [];
+    for (let i = 0; i < k; i++) for (let j = 0; j < m; j++) {
+      const lo = Math.max(i / k, j / m), hi = Math.min((i + 1) / k, (j + 1) / m);
+      if (hi - lo > 1e-9) out.push([i, j]);
+    }
+    return out;
+  }
+  /** 当前这一列可以选哪些节点（由上一列选的那个决定） */
+  function nodeChoices(run) {
+    const t = run && run.task;
+    if (!t || run.stage !== "task" || !t.cols) return [];
+    const c = t.index, col = t.cols[c] || [];
+    if (t.nodes[c]) return [];
+    const prev = c > 0 ? (t.pick || [])[c - 1] : null;
+    const ok = c === 0 || prev == null ? col.map((_, i) => i)
+      : routeLinks(t.cols[c - 1].length, col.length).filter(([i]) => i === prev).map(([, j]) => j);
+    return ok.map(i => ({ i, type: col[i] }));
+  }
+  /** 在路线图上选下一站 */
+  function chooseNode(run, i) {
+    const ok = nodeChoices(run);
+    if (!ok.length) throw new Error("现在不用选路线");
+    const hit = ok.find(o => o.i === Number(i));
+    if (!hit) throw new Error("这一站从上一站走不过去");
+    const t = run.task;
+    t.pick = t.pick || [];
+    t.pick[t.index] = hit.i;
+    t.nodes[t.index] = { type: hit.type, done: false };
+    const notes = [`前往：${NODE[hit.type] ? NODE[hit.type].label : hit.type}。`];
+    return logAll(run, notes);
   }
 
   /** 熟练项检定插在两场战斗之间（「战斗 / 精英战」紧挨着的地方），每处按概率插一个 */
@@ -297,7 +352,13 @@ const Rogue = (function () {
     const why = taskBlocked(run, task);
     if (why) throw new Error(why);
     run.taskNo += 1;
-    run.task = Object.assign(clone(task), { index: 0, nodes: task.nodeTypes.map(t => ({ type: t, done: false })) });
+    // 路线图：只有一个选项的列直接定下，有岔路的列走到那里再选（chooseNode）
+    const cols = task.cols || task.nodeTypes.map(t => [t]);
+    run.task = Object.assign(clone(task), {
+      index: 0, cols: clone(cols),
+      nodes: cols.map(col => col.length === 1 ? { type: col[0], done: false } : null),
+      pick: cols.map(col => col.length === 1 ? 0 : null)
+    });
     run.board = null;
     run.stage = "task";
     const notes = [];
@@ -326,9 +387,9 @@ const Rogue = (function () {
     }
   }
   function arriveAtNode(run, notes) {
-    const node = currentNode(run);
-    if (!node) return;
     if (run.task.index > 0) passHours(run, C.hours.travel, notes);
+    const left = nodeChoices(run);
+    if (left.length === 1) chooseNode(run, left[0].i);   // 只有一条路：直接走
   }
 
   /* ---------- 把队伍摆到场上（战斗，或者战斗外要用到规则的时候） ---------- */
@@ -1377,7 +1438,7 @@ const Rogue = (function () {
     CONFIG: C,
     newRun, heroPool, heroName, cardOf, region, daysLeft, enemyLevel, levelRange, totalActs,
     heroView, supplies, hoursAwake, brokenWeapons,
-    makeBoard, taskBlocked, taskWarning, acceptTask, currentNode,
+    makeBoard, taskBlocked, taskWarning, acceptTask, currentNode, nodeChoices, chooseNode, routeLinks,
     battleSpec, applyPartyToField, finishBattle,
     checkInfo, checkChance, checkOdds, attemptCheck, skipCheck, heroProfs,
     role2Options, soloBattleInfo,

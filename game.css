@@ -1738,3 +1738,57 @@ body:not([data-screen="battle"]) .g-rank { display: none !important; }
   .run-party { order: 2; }
   .run-log { order: 3; }
 }
+
+/* ================= 任务路线图（routemap.js；美术见 art/style-guide.html） ================= */
+.route-map {
+  position: relative; margin: 12px 0 18px; border: 3px solid #0b0806; background: #0b0806;
+  box-shadow: 6px 7px 0 rgba(0, 0, 0, .5);
+}
+.rm-scroll { overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
+.rm-svg { display: block; width: 100%; min-width: 640px; height: auto; }
+.rm-title {
+  position: absolute; left: 10px; top: 6px; z-index: 2; pointer-events: none;
+  font-size: 24px; font-weight: 900; line-height: 1; color: #ece0c6;
+  text-shadow: 3px 3px 0 #0b0806, -1px -1px 0 #0b0806; transform: rotate(-2deg) skewX(-6deg);
+}
+.rm-title small { font-size: 12px; margin-left: 8px; letter-spacing: .15em; color: #f2c230; }
+.rm-edge-halo { fill: none; stroke: rgba(0, 0, 0, .14); stroke-width: 5; stroke-linecap: round; }
+.rm-edge { fill: none; stroke: #3fe0ff; stroke-width: 2.6; stroke-dasharray: 9 7; stroke-linecap: round; opacity: .75; }
+.rm-edge.dead { opacity: .22; }
+.rm-edge.done { stroke: #ffc93c; stroke-width: 3.2; opacity: 1; }
+.rm-edge.next { opacity: 1; stroke-width: 3; animation: rmFlow 1s linear infinite; filter: drop-shadow(0 0 3px #3fe0ff); }
+@keyframes rmFlow { to { stroke-dashoffset: -32; } }
+.rm-node .pad { fill: var(--c); opacity: .38; }
+.rm-node .pad-ring { fill: none; stroke: var(--c); stroke-width: 1.4; opacity: .7; }
+.rm-node .beam { fill: url(#rm-beam); opacity: .45; }
+.rm-node .float { animation: rmBob 3.2s ease-in-out infinite; }
+.rm-node .glyph { opacity: .92; animation: rmFlicker 4.5s steps(1) infinite; }
+.rm-node .glyph * { fill: none; stroke: var(--c); stroke-width: 3; stroke-linejoin: round; stroke-linecap: round; }
+.rm-node .glyph .thin { stroke-width: 1.8; }
+.rm-node .glyph .bold { stroke-width: 4.2; }
+.rm-node .glyph .solid { fill: var(--c); stroke: none; }
+.rm-node .shade * { fill: none; stroke: rgba(0, 0, 0, .28); stroke-width: 6; stroke-linejoin: round; stroke-linecap: round; }
+.rm-node .shade .solid { fill: rgba(0, 0, 0, .28); }
+.rm-node .ghost { opacity: .35; }
+.rm-node .ghost * { fill: none; stroke: #ff3b6e; stroke-width: 2; }
+.rm-node .ghost.b * { stroke: #3fe0ff; }
+.rm-node .ping { fill: none; stroke: var(--c); stroke-width: 2; animation: rmPing 1.6s ease-out infinite; transform-box: fill-box; transform-origin: center; }
+@keyframes rmBob { 50% { transform: translateY(-3px); } }
+@keyframes rmFlicker { 0%, 100% { opacity: .92; } 42% { opacity: .55; } 43% { opacity: .92; } 77% { opacity: .7; } 78% { opacity: .92; } }
+@keyframes rmPing { from { transform: scale(1); opacity: .9; } to { transform: scale(2.2); opacity: 0; } }
+.rm-node.done .float { opacity: .38; }
+.rm-node.done .pad, .rm-node.done .beam { opacity: .15; }
+.rm-node.skip { opacity: .3; }
+.rm-node.skip .float, .rm-node.skip .glyph { animation: none; }
+.rm-node.later { opacity: .85; }
+.rm-node.now .pad { opacity: .6; }
+.rm-node.pickable { cursor: pointer; }
+.rm-node.pickable .pad { opacity: .65; }
+.rm-node.pickable:hover .glyph, .rm-node.pickable:focus-visible .glyph { filter: url(#rm-glow) brightness(1.4); }
+.rm-node.pickable:focus-visible { outline: none; }
+.rm-node .rm-hit { fill: transparent; }
+.rm-choose { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 12px; }
+.rm-choose b { color: var(--bone); margin-right: 4px; }
+@media (prefers-reduced-motion: reduce) {
+  .rm-edge.next, .rm-node .float, .rm-node .glyph, .rm-node .ping { animation: none; }
+}

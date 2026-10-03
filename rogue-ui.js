@@ -397,19 +397,34 @@
     return `<div class="rest-before">${shortBtn}</div>`;
   }
 
+  /** 路线图：旧存档里进行中的任务没有 cols，按单线画 */
+  function routeMapHtml(t) {
+    if (typeof RouteMap === "undefined") return "";
+    const cols = t.cols || t.nodes.map(n => [n ? n.type : "battle"]);
+    const pick = t.pick || cols.map(() => 0);
+    const labels = {};
+    Object.keys(ROGUE_NODE_TYPES).forEach(k => { labels[k] = ROGUE_NODE_TYPES[k].label; });
+    return RouteMap.html({
+      region: Rogue.region(run), title: `${t.key ? "主线" : t.name}路线图`,
+      cols, nodes: t.nodes, pick, index: t.index, labels,
+      choices: Rogue.nodeChoices(run).map(o => o.i), links: Rogue.routeLinks,
+      seed: `${run.seed}:map:${run.taskNo}`
+    });
+  }
   function renderTask() {
     const t = run.task;
     const node = Rogue.currentNode(run);
-    const track = t.nodes.map((n, i) => {
-      const cls = i < t.index ? "done" : i === t.index ? "now" : "later";
-      return `<li class="${cls}"><span>${i + 1}</span>${esc(nodeLabel(n))}</li>`;
-    }).join("");
+    const choices = Rogue.nodeChoices(run);
+    const choose = !node && choices.length
+      ? `<div class="rm-choose"><b>选择下一站：</b>点地图上发光的节点，或者${choices.map(o =>
+          `<button class="g-btn" data-route="${o.i}">${esc(nodeLabel({ type: o.type }))}</button>`).join("")}</div>`
+      : "";
     const panel = node && NODE_PANELS[node.type] ? NODE_PANELS[node.type]() : "";
     const restRow = node && node.type !== "rest" ? restBeforeRow() : "";
     const wx = t.weather ? `<span class="t-weather inline">全程天气：${esc(WX_NAME[t.weather] || t.weather)}</span>` : "";
     return `<h2>${esc(t.key ? "主线" : t.name)}<span class="sub">${esc(t.goal)}</span>${wx}</h2>
-      <ol class="track">${track}</ol>
-      <div class="r-panel">${restRow}${panel}</div>`;
+      ${routeMapHtml(t)}
+      <div class="r-panel">${choose}${restRow}${panel}</div>`;
   }
 
   function renderStage() {
@@ -463,6 +478,13 @@
     const recent = lastNotes.length ? lastNotes : (run.log || []).slice(-6).map(l => l.text);
     $("run-log").innerHTML = recent.map(t => `<li>${esc(t)}</li>`).join("");
     bind();
+    // 路线图比屏幕宽时（手机）：滚到当前这一列
+    const sc = document.querySelector("#run-body .rm-scroll");
+    if (sc && run.task && sc.scrollWidth > sc.clientWidth) {
+      const n = (run.task.cols || run.task.nodes).length;
+      const ratio = n > 1 ? run.task.index / (n - 1) : 0;
+      sc.scrollLeft = Math.max(0, ratio * sc.scrollWidth - sc.clientWidth / 2);
+    }
   }
 
   function fight() {
@@ -542,6 +564,11 @@
       showCyberPreview(kit);
     });
     body.querySelectorAll("[data-cy]").forEach(el => { el.oninput = () => showCyberPreview(el.dataset.cy); });
+    body.querySelectorAll("[data-route]").forEach(b => {
+      const go = () => act(() => Rogue.chooseNode(run, Number(b.dataset.route)));
+      b.addEventListener("click", go);
+      b.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
+    });
     on("r-fight", fight);
     on("r-long", () => {
       const w = $("r-watch");

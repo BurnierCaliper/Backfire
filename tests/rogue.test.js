@@ -23,6 +23,10 @@ function autoplay(c, run, opts) {
       const side = run.board.findIndex(t => !Rogue.taskBlocked(run, t) && !Rogue.taskWarning(run, t));
       Rogue.acceptTask(run, side >= 0 ? side : "main");
       steps.push(side >= 0 ? "side" : "main");
+    } else if (run.stage === "task" && !Rogue.currentNode(run)) {
+      // 路线图上的岔路：选第一个能走的
+      Rogue.chooseNode(run, Rogue.nodeChoices(run)[0].i);
+      steps.push("route");
     } else if (run.stage === "task" || run.stage === "boss") {
       const node = run.stage === "task" ? Rogue.currentNode(run) : { type: "boss" };
       if (node.type === "rest" && !run.ambush) {
@@ -116,7 +120,9 @@ test("主线提前完成后还能继续做支线；本幕天数用完才打首�
 test("任务里每个节点的类型都能看到", () => {
   const { run, R } = fresh(["kolt", "helu"], "R5");
   R.acceptTask(run, "main");
-  assert.ok(run.task.nodes.every(n => ["battle", "elite", "rest", "shop", "smith", "clinic", "check"].includes(n.type)));
+  const TYPES = ["battle", "elite", "rest", "shop", "smith", "clinic", "check"];
+  assert.ok(run.task.cols.every(col => col.length >= 1 && col.every(t => TYPES.includes(t))));
+  assert.ok(run.task.nodes.every(n => n === null || TYPES.includes(n.type)));
   assert.equal(run.task.nodes[run.task.nodes.length - 1].type, "elite");
 });
 
@@ -920,4 +926,62 @@ test("检定记下每颗 d100（供画面播检定动画）：点数 ≤ 成功�
     assert.equal(lc.rolls.length, firstOk ? 1 : 2);
     assert.equal(lc.ok, lc.rolls.some(r => r.ok));
   }
+});
+
+test("路线图：第一列、休息点那列、最后一列只有一个节点；其余列 1–3 个；任何走法都正好经过一次休息点", () => {
+  const { run, R } = fresh(["kolt", "helu"], "MAP1");
+  let branchy = 0;
+  for (let b = 0; b < 30; b++) {
+    R.makeBoard(run);
+    run.board.concat([run.main]).forEach(t => {
+      const cols = t.cols;
+      assert.equal(cols.length, t.nodeTypes.length);
+      assert.equal(cols[0].length, 1);
+      assert.equal(cols[cols.length - 1].length, 1);
+      assert.ok(["battle", "elite"].includes(cols[cols.length - 1][0]));
+      const restCols = cols.map((c, i) => c.includes("rest") ? i : -1).filter(i => i >= 0);
+      assert.equal(restCols.length, 1);
+      assert.equal(cols[restCols[0]].length, 1, "休息点那一列没有岔路");
+      cols.forEach((c, i) => {
+        assert.ok(c.length >= 1 && c.length <= 3);
+        assert.equal(new Set(c).size, c.length, "同一列不重复");
+        assert.ok(c.includes(t.nodeTypes[i]), "主干在里面");
+      });
+      if (cols.some(c => c.length > 1)) branchy++;
+    });
+  }
+  assert.ok(branchy > 20, "大部分任务有岔路");
+});
+
+test("路线连线：互不交叉，每个节点至少连一条", () => {
+  const { R } = fresh(["kolt", "helu"], "MAP2");
+  for (let k = 1; k <= 3; k++) for (let m = 1; m <= 3; m++) {
+    const L = R.routeLinks(k, m);
+    for (let i = 0; i < k; i++) assert.ok(L.some(([a]) => a === i));
+    for (let j = 0; j < m; j++) assert.ok(L.some(([, b]) => b === j));
+    L.forEach(([a, b]) => L.forEach(([c, d]) => assert.ok(!(a < c && b > d), `交叉 ${k}x${m}`)));
+  }
+});
+
+test("走到岔路要先选：只能选上一站连过来的；选了才有当前节点，路线记在 pick 里", () => {
+  const { run, R } = fresh(["kolt", "helu"], "MAP3");
+  R.acceptTask(run, "main");
+  // 造一张确定的图：战斗 → [商店 / 战斗 / 检定] → [工匠 / 战斗] → 休息 → 精英
+  run.task.cols = [["battle"], ["shop", "battle", "check"], ["smith", "battle"], ["rest"], ["elite"]];
+  run.task.nodes = [{ type: "battle", done: false }, null, null, { type: "rest", done: false }, { type: "elite", done: false }];
+  run.task.pick = [0, null, null, 0, 0];
+  run.task.index = 1;
+  assert.equal(R.currentNode(run), null);
+  assert.deepEqual(plain(R.nodeChoices(run).map(o => o.i)), [0, 1, 2], "从唯一的起点能去三个");
+  R.chooseNode(run, 0);   // 商店
+  assert.equal(R.currentNode(run).type, "shop");
+  assert.deepEqual(plain(run.task.pick).slice(0, 2), [0, 0]);
+  R.leaveNode(run);
+  // 3 个 → 2 个：最上面的商店只连得到最上面的工匠，只有一条路就自动走过去
+  assert.equal(R.nodeChoices(run).length, 0);
+  assert.equal(run.task.pick[2], 0);
+  assert.equal(R.currentNode(run) && R.currentNode(run).type, "smith", "只有一条路时自动走过去");
+  R.leaveNode(run);
+  assert.equal(R.currentNode(run).type, "rest");
+  assert.throws(() => R.chooseNode(run, 0), /不用选/);
 });
