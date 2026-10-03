@@ -400,34 +400,11 @@ details.smith .sm-price, details.smith .sm-prog.ready { color: var(--sk-hazard);
 .lg { border-bottom-color: rgba(236, 224, 198, .08); }
 .log-tools { border-bottom-color: rgba(236, 224, 198, .1); }
 
-/* 天气：不再把整条界面换色（雪天会整片发白），只在顶栏下沿和记录栏上缘染一道天气色 */
-.g-app[data-weather] :is(.g-top, .g-hud, .g-log) {
-  background-color: var(--sk-oil); color: var(--sk-canvas); border-color: var(--sk-ink);
-}
-.g-app[data-weather] :is(.g-phase, .hint, .pvbox, .pvbox .ln, .lg .s, .lg summary, .lg pre, .g-top label) { color: var(--sk-muted); }
-.g-app[data-weather] :is(.pvbox h4, .lg .t, .g-round) { color: var(--sk-canvas); }
-.g-app[data-weather] .hint b { color: var(--sk-hazard); }
-.g-app[data-weather] .g-weather { color: var(--wx, var(--sk-hazard)); }
-.g-app[data-weather] :is(.pc, .sk, .g-btn, .g-top select) { background-color: var(--sk-steel); border-color: var(--sk-ink); color: var(--sk-canvas); }
-.g-app[data-weather] .pc { border-left-color: var(--ally); }
-.g-app[data-weather] :is(.pc.on, .sk:hover, .g-btn:hover) { background-color: var(--sk-steel-hi); }
-.g-app[data-weather] .pc.on { border-color: var(--sk-canvas); border-left-color: var(--ally); }
-.g-app[data-weather] .sk.armed { border-color: var(--sk-hazard); background-color: var(--sk-steel-hi); }
-.g-app[data-weather] .pc .mini { background: #3a2c22; }
-.g-app[data-weather] .sk .cost { color: var(--sk-muted); }
+/* 天气：照原来的配色给顶栏 / 操作栏 / 记录栏换底色（game.css），这里只把铁板噪点叠回去、让喷漆按钮不被盖成方块 */
+.g-app[data-weather] :is(.g-top, .g-hud, .g-log) { background-image: var(--sk-noise); }
 .g-app[data-weather] .endturn { background: transparent; border: 0; color: var(--sk-ink); }
 .g-app[data-weather] .endturn small { color: var(--sk-ink); }
-.g-app[data-weather] .g-top a.g-btn { color: var(--sk-canvas); }
-.g-app[data-weather] .pvbox { border-color: var(--sk-ink); }
-.g-app[data-weather] .lg { border-color: rgba(236, 224, 198, .08); }
-.g-app[data-weather] .g-top { box-shadow: 0 3px 0 var(--wx, transparent); }
-.g-app[data-weather="heat"] { --wx: #ff5b2e; }
-.g-app[data-weather="thunder"] { --wx: #c07cf0; }
-.g-app[data-weather="sand"] { --wx: #e2a24f; }
-.g-app[data-weather="acid"] { --wx: #9be03a; }
-.g-app[data-weather="glow"] { --wx: #ff4fa3; }
-.g-app[data-weather="phase"] { --wx: #3fe0ff; }
-.g-app[data-weather="snow"] { --wx: #dfe9f2; }
+.g-app[data-weather] .g-weather { display: inline-flex; align-items: center; gap: 6px; }
 
 /* ---------- 弹层：选择 / 检定 / 结算 / 背包 ---------- */
 .choice-card, .check-card, .sheet-card {
@@ -478,3 +455,16 @@ details.smith .sm-price, details.smith .sm-prog.ready { color: var(--sk-hazard);
   .result h2 { font-size: 52px; }
   .choice h3 { font-size: 24px; }
 }
+/* 雪天的界面是浅色：不叠铁板噪点；预览框、天气牌也换浅底，字才看得清 */
+.g-app[data-weather="snow"] :is(.g-top, .g-hud, .g-log) { background-image: none; }
+.g-app[data-weather="snow"] .pvbox { background: #e3e8ed; background-image: none; border-left-color: #cfd6de; }
+.g-app[data-weather="snow"] .g-weather { background: #dfe4e9; border-color: #c0c8d0; color: #2a3138; }
+.g-app[data-weather="snow"] .g-hud::before { opacity: .6; }
+.g-app[data-weather="snow"] .pvbox h4 { text-shadow: none; color: #1b1f24; }
+/* 伤害预览框跟着记录栏一起换天气底色 */
+.g-app[data-weather="heat"] .pvbox { background-color: #3a2d24; }
+.g-app[data-weather="thunder"] .pvbox { background-color: #2b2734; }
+.g-app[data-weather="sand"] .pvbox { background-color: #3a3528; }
+.g-app[data-weather="acid"] .pvbox { background-color: #2b3228; }
+.g-app[data-weather="glow"] .pvbox { background-color: #352830; }
+.g-app[data-weather="phase"] .pvbox { background-color: #2e3236; }

@@ -234,7 +234,10 @@
   function applyEnv(env) {
     if (!env) return;
     $("g-app").dataset.weather = env.weather;
-    $("g-weather").textContent = "天气 " + env.weatherText;
+    // 有天气时顶栏最前面放天气图标
+    const wi = window.Icons ? Icons.weather(env.weather) : "";
+    $("g-weather").innerHTML = wi + esc("天气 " + env.weatherText);
+    $("g-weather").classList.toggle("has-icon", !!wi);
     if ($("g-weather-sel") && env.weather) $("g-weather-sel").value = env.weather;
     document.querySelectorAll(".g-zone").forEach(z => {
       const e = env.zones[z.dataset.num] || {};

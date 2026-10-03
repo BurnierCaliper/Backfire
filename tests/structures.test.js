@@ -783,3 +783,46 @@ test("可移动的配置物能被位移技能移动：拉拽、重整", () => {
   c.runSkill("role_rearrange");
   assert.notEqual(boom.zone, 1, "重整把同区的爆炸桶也挪了");
 });
+
+function bernielField(foeZone) {
+  const c = H.load();
+  c.BattleSim.setup({ party: ["xia", "ruby"], enemies: [{ id: "thug_knife", lv: 1, zone: foeZone }] });
+  c.startCombat();
+  const st = c.S.state;
+  const xia = c.findKit("xia", st.units);
+  xia.zone = 1; xia.ap = 3; xia.bonus = 3;
+  st.attackerId = xia.id;
+  c.runSkill("xia_summon");
+  const b = st.units.find(u => u.weaponOf === xia.id || u.kit === "berniel");
+  b.zone = 1; b.ap = 3; b.bonus = 3;
+  st.attackerId = b.id;
+  return { c, st, b };
+}
+
+test("范围攻击会波及同区的配置物：柏妮尔喷火能点爆同区的爆炸桶（同区有敌人）", () => {
+  const { c, st, b } = bernielField(1);
+  const boom = c.makeProp("boom", 1, 1);
+  st.props.push(boom);
+  c.runSkill("berniel_spit");
+  assert.ok(!st.props.includes(boom), "爆炸桶被火焰范围攻击打爆");
+});
+
+test("范围攻击波及配置物：同区没有敌人也照样点爆；连锁炸掉同区另一个桶", () => {
+  const { c, st } = bernielField(2);
+  const b1 = c.makeProp("boom", 1, 1), b2 = c.makeProp("boom", 1, 1);
+  b2.hp = 6;   // 一下喷火打不爆，要靠第一个桶的爆炸
+  st.props.push(b1, b2);
+  c.runSkill("berniel_spit");
+  assert.ok(!st.props.includes(b1));
+  assert.ok(!st.props.includes(b2), "第一个桶的爆炸（火焰）连锁炸掉第二个");
+});
+
+test("范围攻击波及配置物：别的区、按属性打不动的配置物不受影响；一次攻击同一个桶只挨一下", () => {
+  const { c, st } = bernielField(1);
+  const far = c.makeProp("boom", 1, 1); far.zone = 2;
+  const big = c.makeProp("boom", 1, 1); big.hp = 10;
+  st.props.push(far, big);
+  c.runSkill("berniel_spit");
+  assert.equal(far.hp, 3, "2 区的桶没事");
+  assert.equal(big.hp, 7, "同区的桶只挨一下火焰（−3），不按敌人数量重复");
+});

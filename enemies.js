@@ -528,7 +528,7 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
     const dmgOpt = { element: "energy", mult: 1, diceN: 1, diceS: 6, baseBreak: 2, flags: { action: true, aoe: true } };
     a._exploded = true;
     state.units.filter(u => !u.hidden && !u.dead && Number(u.zone) === Number(a.zone) && u.id !== a.id).forEach(u => aa(u, dmgOpt));
-    if (typeof markAoeZone === "function") markAoeZone(a.zone);
+    if (typeof markAoeZone === "function") markAoeZone(a.zone, { element: "energy", dmg: (Number(a.atk) || 0) + 3, attacker: a });
     a.layers.forEach(l => { l.current = 0; });
     lines.push(`${a.name} 自爆后损毁。`);
     return true;
@@ -560,7 +560,7 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
     const list = fieldUnits().filter(u => u.id !== a.id && Number(u.zone) === Number(a.zone) && !u.dead && !u.hidden);
     if (!list.length) { lines.push("同区没有其他单位。"); return true; }
     list.forEach(u => aa(u, { element: "harmonic", mult: 1, baseBreak: 0, flags: { action: true, aoe: true } }));
-    if (typeof markAoeZone === "function") markAoeZone(a.zone);
+    if (typeof markAoeZone === "function") markAoeZone(a.zone, { element: "harmonic", dmg: Number(a.atk) || 0, attacker: a });
     lines.push(`安保巡逻车近距扫射 ${a.zone} 区：${list.map(u => u.name).join("、")}`);
     return true;
   }
@@ -999,7 +999,7 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
         (pn || []).forEach(s => lines.push(s));
       }
     });
-    if (typeof markAoeZone === "function") markAoeZone(z);
+    if (typeof markAoeZone === "function") markAoeZone(z, "handled");   // 配置物上面已经打过
     lines.push(`激光扫射 ${z} 区：敌方单位 ${foes.map(u => u.name).join("、") || "无"}，并波及该区配置物。`);
     return true;
   }

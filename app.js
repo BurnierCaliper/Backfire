@@ -621,7 +621,8 @@ function explodeHigh(unit) {
     (state.props || []).filter(p => Number(p.zone) === Number(unit.zone) && highBoomHitsProp(unit, p)).forEach(p => {
       const notes = damageProp(p, { element: "energy", dmg: aoe }, unit);
       notes.forEach(s => appendLog(s));
-    }); } finally { state.popTag = prevTag || null; }
+    });
+    markAoeZone(unit.zone, "handled"); } finally { state.popTag = prevTag || null; }
   }
   // 波及的按钮 / 拉杆在这次行动结束时统一触发（runSkill），同一区一次行动只触发一次
   unit._highBooming = false;
@@ -2900,15 +2901,45 @@ function pulseDevicesInZone(zone, reason) {
   list.forEach(p => toggleDevice(p, reason || "受到范围效果"));
 }
 
-function markAoeZone(zone) {
+/** 记下这次行动的范围攻击波及了哪个区。hit = { element, dmg, attacker }：带伤害的范围攻击，
+ *  结算（flushAoePulse）时同区可以打的配置物（爆炸桶、酸液桶、电池、炮台……）各挨一下 */
+function markAoeZone(zone, hit) {
   if (zone == null) return;
   state.aoePulse = state.aoePulse || {};
-  state.aoePulse[Number(zone)] = true;
+  const z = Number(zone);
+  if (!state.aoePulse[z] || state.aoePulse[z] === true) state.aoePulse[z] = { hits: [] };
+  if (hit === "handled") state.aoePulse[z].propsDone = true;   // 技能自己已经打过区里的配置物，别再打一次
+  else if (hit && hit.element) state.aoePulse[z].hits.push(hit);
+}
+
+/** 范围攻击波及到的配置物：按钮 / 拉杆不在这里（它们按「被操作一次」处理），墙不算区里的东西 */
+function aoeHittableProps(zone) {
+  return (state.props || []).filter(p => Number(p.zone) === Number(zone) && p.hp > 0 &&
+    p.kind !== "button" && p.kind !== "lever" && p.kind !== "ironwall" && p.kind !== "scrapwall");
 }
 
 function flushAoePulse() {
-  const map = state.aoePulse || {};
-  Object.keys(map).forEach(z => pulseDevicesInZone(Number(z), "受到范围伤害，视作被操作一次"));
+  // 配置物被炸毁会引发新的范围伤害（爆炸桶连锁），所以一轮一轮结算到没有新的为止
+  for (let round = 0; round < 20; round++) {
+    const map = state.aoePulse || {};
+    const zones = Object.keys(map);
+    if (!zones.length) break;
+    state.aoePulse = {};
+    zones.forEach(z => {
+      pulseDevicesInZone(Number(z), "受到范围伤害，视作被操作一次");
+      const hits = (map[z] && map[z].hits) || [];
+      if (!hits.length || map[z].propsDone) return;
+      // 一次范围攻击里同区每个配置物只挨一下：取伤害最高的那一段
+      const hit = hits.reduce((a, b) => ((Number(b.dmg) || 0) > (Number(a.dmg) || 0) ? b : a));
+      aoeHittableProps(z).forEach(p => {
+        if (!(state.props || []).includes(p) || !(p.hp > 0)) return;   // 同一轮里已经被连锁炸掉
+        const before = Number(p.hp) || 0;
+        const notes = damageProp(p, { element: hit.element, dmg: Math.max(1, Math.floor(Number(hit.dmg) || 1)) }, hit.attacker);
+        if (typeof popStructure === "function") popStructure("prop:" + p.id, p.level, before - Math.max(0, Number(p.hp) || 0), hit.element, "无效");
+        if (notes.length) appendLog(`范围攻击波及 ${p.name}：` + notes.join("\n"));
+      });
+    });
+  }
   state.aoePulse = {};
 }
 
@@ -3114,7 +3145,7 @@ function destroyProp(p, attacker) {
     const r = takeDice(1, 20, lv);
     const dmg = r.total;
     notes.push(`爆炸：同区 ${r.text} 火焰 + 2 击破。`);
-    markAoeZone(p.zone);
+    markAoeZone(p.zone, { element: "fire", dmg, attacker });
     state.units.filter(u => !u.hidden && !u.dead && Number(u.zone) === Number(p.zone)).forEach(u => {
       const fake = unitOf("爆炸桶", lv, [{ type: "armor", hp: 1 }], 0, 0);
       fake.zone = p.zone;
@@ -3131,7 +3162,7 @@ function destroyProp(p, attacker) {
     const r = takeDice(lv, 4, 0);
     const dmg = r.total;
     notes.push(`电池爆炸：同区同阵营 ${r.text} 电击。`);
-    markAoeZone(p.zone);
+    markAoeZone(p.zone, { element: "electric", dmg, attacker });
     state.units.filter(u => !u.hidden && !u.dead && Number(u.zone) === Number(p.zone) && !!u.isPlayer === (p.faction !== "enemy")).forEach(u => {
       const fake = unitOf("电池", lv, [{ type: "armor", hp: 1 }], 0, 0);
       fake.zone = p.zone;
@@ -3624,7 +3655,7 @@ function explodeBoomcar(target, notes) {
   target._exploded = true;
   const half = Math.floor((target.atk || 0) / 2);
   notes.push(`${target.name} 死亡引爆：同区 ${half} 能量 + 1 击破。`);
-  markAoeZone(target.zone);
+  markAoeZone(target.zone, { element: "energy", dmg: half, attacker: target });
   // 同区不分敌我的范围伤害（不能协助格挡）
   state.units.filter(u => !u.hidden && !u.dead && u.id !== target.id && Number(u.zone) === Number(target.zone)).forEach(u => {
     const fake = unitOf("小车残骸", target.level, [{ type: "armor", hp: 1 }], 0, 0);
@@ -5774,7 +5805,9 @@ function dealTo(attacker, target, opt) {
   }
   if (flags.smash && attacker.resources) attacker.resources.smashNext = false;
   // 按钮 / 拉杆：被行动的范围攻击波及时触发一次；场地、状态这类环境伤害不算
-  if (flags.aoe && !flags.environment) markAoeZone(target && target.zone);
+  if (flags.aoe && !flags.environment) {
+    markAoeZone(target && target.zone, { element: opt.element || res.element || "physical", dmg: Math.max(Number(res.intended) || 0, Number(res.total) || 0), attacker });
+  }
   if (target && target.resources && target.resources.reflectReady && attacker && !flags.reflect) {
     const bounced = Math.floor(Number(target.resources.reflectReady) || 0);
     target.resources.reflectReady = 0;
@@ -8284,7 +8317,7 @@ function runSkillInner(id, optRun) {
       if (!foes.length) lines.push("同区没有敌人。");
       const eng = ownerEngineOn("xia");
       foes.forEach(u => hitOne(a, u, { element: "fire", mult: 0.5, baseBreak: eng ? 1 : 0, atk, flags: { action: true, aoe: true } }));
-      markAoeZone(a.zone);
+      markAoeZone(a.zone, { element: "fire", dmg: Math.floor(atk * 0.5), attacker: a });
     } else if (id === "berniel_ignite") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       const d = zoneDist(a.zone, t.zone, state.zoneMode);
@@ -8677,7 +8710,7 @@ function runSkillInner(id, optRun) {
           const el = a.resources.blade === "naruto" ? "ice" : "fire";
           hitOne(a, u, { element: el, mult: 1, baseBreak: 1, atk: effectiveAtk(a, state.units), flags: { action: true, aoe: true } });
         });
-        markAoeZone(a.zone);
+        markAoeZone(a.zone, { element: a.resources.blade === "naruto" ? "ice" : "fire", dmg: effectiveAtk(a, state.units), attacker: a });
         setHiakiStance(a, "draw");
         lines.push("一闪后进入拔刀。");
       }
@@ -8722,7 +8755,7 @@ function runSkillInner(id, optRun) {
     } else if (id === "mochi_boom") {
       const boom = () => {
         visibleEnemies(a.zone).forEach(u => hitOne(a, u, { element: "harmonic", mult: 0.5, baseBreak: 1, atk, flags: { action: true, aoe: true } }));
-        markAoeZone(a.zone);
+        markAoeZone(a.zone, { element: "harmonic", dmg: Math.floor(atk * 0.5), attacker: a });
         flushAoePulse();   // 再耗圣盾炸第二次算另一次范围攻击，按钮再触发一次
       };
       boom();

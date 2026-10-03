@@ -1815,3 +1815,8 @@ body:not([data-screen="battle"]) .g-rank { display: none !important; }
 .pop .eicon { filter: drop-shadow(0 3px 5px rgba(20, 30, 40, .35)); }
 .pvtag .dmg { display: inline-flex; align-items: center; }
 .pvtag .eicon { --eo: #0b0806; }
+/* 顶栏天气图标（icons.js · Icons.weather） */
+.g-weather.has-icon { display: inline-flex; align-items: center; gap: 6px; }
+.g-weather .wicon { --eo: #0b0806; width: 24px; height: 24px; margin: 0; animation: wxBob 3s ease-in-out infinite; }
+@keyframes wxBob { 50% { transform: translateY(-2px); } }
+@media (prefers-reduced-motion: reduce) { .g-weather .wicon { animation: none; } }
