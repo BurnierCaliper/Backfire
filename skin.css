@@ -25,6 +25,7 @@
   --sk-stencil: "Black Ops One", Impact, sans-serif;
   --sk-tag: "Zhi Mang Xing", "ZCOOL QingKe HuangYou", cursive;
   --sk-label: "ZCOOL QingKe HuangYou", "Noto Sans SC", "Microsoft YaHei", sans-serif;   /* 15px 以上才用，小字它不好认 */
+  --sk-name: var(--sk-body);   /* 单位名字、按钮：统一用好认的黑体加粗 */
   --sk-body: "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   --sk-noise: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 .6 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
   --sk-stains: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='600' height='600'><filter id='b'><feGaussianBlur stdDeviation='30'/></filter><g filter='url(%23b)' fill='%23000' fill-opacity='.35'><ellipse cx='120' cy='90' rx='120' ry='60'/><ellipse cx='480' cy='380' rx='160' ry='90'/><ellipse cx='220' cy='520' rx='100' ry='50'/></g></svg>");
@@ -80,7 +81,7 @@
 :is(.scr-party, .scr-run, .scr-trpg) .g-btn {
   position: relative; isolation: isolate;
   height: auto; min-height: 34px; padding: 5px 14px 6px;
-  font-family: var(--sk-label); font-size: 15px; letter-spacing: .04em; color: var(--sk-canvas);
+  font-family: var(--sk-name); font-weight: 700; font-size: 15px; color: var(--sk-canvas);
   background: var(--sk-oil-2); background-image: var(--sk-noise);
   border: 3px solid var(--sk-ink); border-radius: 0;
   box-shadow: 3px 4px 0 rgba(0, 0, 0, .55);
@@ -94,7 +95,7 @@
 :is(.scr-party, .scr-run, .scr-trpg) .g-btn.r-main {
   --bg: var(--sk-hazard);
   color: var(--sk-ink); background: transparent; border-color: transparent; box-shadow: none;
-  font-family: var(--sk-tag); font-size: 22px; line-height: 1.05; letter-spacing: .02em;
+  font-family: var(--sk-name); font-weight: 700; font-size: 20px; line-height: 1.05; 
   transform: rotate(-1.2deg);
 }
 :is(.scr-party, .scr-run, .scr-trpg) .g-btn.r-main::before {
@@ -145,7 +146,7 @@
 }
 .t-btn:nth-child(odd) { transform: rotate(-.6deg); }
 .t-btn:nth-child(even) { transform: rotate(.5deg); }
-.t-btn b { font-family: var(--sk-tag); font-weight: 400; font-size: 26px; line-height: 1.1; text-shadow: 2px 2px 0 var(--sk-ink); }
+.t-btn b { font-family: var(--sk-name); font-weight: 700; font-size: 21px; line-height: 1.1; text-shadow: 2px 2px 0 var(--sk-ink); }
 .t-btn small { color: var(--sk-muted); font-family: var(--sk-body); font-size: 12.5px; }
 .t-btn:hover:not(:disabled) { background-color: var(--sk-steel-hi); border-left-color: var(--sk-ink); }
 .t-btn:hover:not(:disabled) b { color: var(--sk-hazard); }
@@ -184,7 +185,7 @@
   padding: 0 8px; font-family: var(--sk-marker); font-size: 14px; color: var(--sk-ink);
   background: var(--sk-mint); border-radius: 3px; transform: rotate(8deg); box-shadow: 1px 2px 0 rgba(0, 0, 0, .55);
 }
-.hp-name { font-family: var(--sk-tag); font-weight: 400; font-size: 28px; line-height: 1; text-shadow: 3px 3px 0 var(--sk-ink); }
+.hp-name { font-family: var(--sk-name); font-weight: 700; font-size: 22px; line-height: 1; text-shadow: 3px 3px 0 var(--sk-ink); }
 .hp-name small { font-family: var(--sk-marker); font-size: 12px; color: var(--sk-muted); text-shadow: none; }
 .sp-foot {
   background: var(--sk-oil); background-image: var(--sk-noise);
@@ -207,7 +208,7 @@
   opacity: .85;
 }
 .run-top > b {
-  font-family: var(--sk-tag); font-weight: 400; font-size: 26px; line-height: 1; color: var(--sk-canvas);
+  font-family: var(--sk-name); font-weight: 700; font-size: 21px; line-height: 1; color: var(--sk-canvas);
   text-shadow: 2px 2px 0 var(--sk-ink);
 }
 .run-supplies b, .run-top b:not(:first-child) { font-family: var(--sk-stencil); font-weight: 400; color: var(--sk-hazard); }
@@ -220,7 +221,7 @@
 .run-party { gap: 14px; }
 .rhero { padding: 10px 12px 12px 14px; border-left-width: 7px; border-left-color: #4f8fd0; }
 .rhero.dying { border-left-color: var(--sk-blood); }
-.rh-top b { font-family: var(--sk-tag); font-weight: 400; font-size: 24px; line-height: 1; text-shadow: 2px 2px 0 var(--sk-ink); }
+.rh-top b { font-family: var(--sk-name); font-weight: 700; font-size: 18px; line-height: 1; text-shadow: 2px 2px 0 var(--sk-ink); }
 .rh-top span { font-family: var(--sk-marker); color: var(--sk-muted); }
 .rh-top em { color: var(--sk-hazard); }
 .rh-row > span:last-child { font-family: var(--sk-stencil); color: var(--sk-canvas); }
@@ -247,7 +248,7 @@
 .task:nth-child(odd) { transform: rotate(-.4deg); }
 .task:nth-child(even) { transform: rotate(.35deg); }
 .task.key { border-color: var(--sk-ink); box-shadow: 5px 6px 0 rgba(0, 0, 0, .5), inset 0 0 0 2px var(--sk-hazard); }
-.t-head b { font-family: var(--sk-tag); font-weight: 400; font-size: 26px; line-height: 1; text-shadow: 2px 2px 0 var(--sk-ink); }
+.t-head b { font-family: var(--sk-name); font-weight: 700; font-size: 20px; line-height: 1; text-shadow: 2px 2px 0 var(--sk-ink); }
 .t-head .tag {
   font-family: var(--sk-marker); font-size: 12px; padding: 1px 8px; color: var(--sk-ink);
   background: var(--sk-hazard); border-radius: 3px; transform: rotate(-4deg); box-shadow: 1px 2px 0 rgba(0, 0, 0, .55);
@@ -291,9 +292,9 @@
 .shop-row .g-btn { min-height: 30px; padding: 2px 12px; }
 details.smith { padding: 8px 12px; }
 details.smith > summary { font-size: 14px; }
-details.smith > summary b { font-family: var(--sk-tag); font-weight: 400; font-size: 22px; text-shadow: 2px 2px 0 var(--sk-ink); }
+details.smith > summary b { font-family: var(--sk-name); font-weight: 700; font-size: 18px; text-shadow: 2px 2px 0 var(--sk-ink); }
 details.smith .sm-price, details.smith .sm-prog.ready { color: var(--sk-hazard); }
-.cl-head b { font-family: var(--sk-tag); font-weight: 400; font-size: 22px; text-shadow: 2px 2px 0 var(--sk-ink); }
+.cl-head b { font-family: var(--sk-name); font-weight: 700; font-size: 18px; text-shadow: 2px 2px 0 var(--sk-ink); }
 .cl-inputs input[type="number"], .scr-run select {
   background: var(--sk-oil); color: var(--sk-canvas); border: 2px solid var(--sk-ink); border-radius: 0;
   font-family: var(--sk-stencil);
@@ -307,10 +308,10 @@ details.smith .sm-price, details.smith .sm-prog.ready { color: var(--sk-hazard);
 .tr-top { background: var(--sk-oil); background-image: var(--sk-noise); border-bottom: 4px solid var(--sk-ink); }
 .tr-top h2 { transform: none; font-size: 24px; }
 .tr-top b { font-family: var(--sk-stencil); font-weight: 400; color: var(--sk-hazard); }
-.tr-tab { font-family: var(--sk-label); font-size: 16px; }
+.tr-tab { font-family: var(--sk-name); font-weight: 700; font-size: 16px; }
 .tr-tab.on { color: var(--sk-hazard); border-bottom: 4px solid var(--sk-hazard); }
 .tr-panel h3 { font-family: var(--sk-tag); font-weight: 400; font-size: 24px; text-shadow: 2px 2px 0 var(--sk-ink); }
-.tr-slot-head b { font-family: var(--sk-tag); font-weight: 400; font-size: 24px; text-shadow: 2px 2px 0 var(--sk-ink); }
+.tr-slot-head b { font-family: var(--sk-name); font-weight: 700; font-size: 19px; text-shadow: 2px 2px 0 var(--sk-ink); }
 .tr-slot.on { box-shadow: 5px 6px 0 rgba(0, 0, 0, .5), inset 0 0 0 2px var(--sk-hazard); }
 .tr-panel input, .tr-panel select { background: var(--sk-oil); border: 2px solid var(--sk-ink); border-radius: 0; color: var(--sk-canvas); }
 .scr-trpg-slots .sp-head p { color: var(--sk-muted); }
@@ -350,7 +351,7 @@ details.smith .sm-price, details.smith .sm-prog.ready { color: var(--sk-hazard);
 /* 预览牌 / 横幅 / 阶段大字 */
 .pvtag, .banner { background: rgba(11, 8, 6, .94); border: 2px solid var(--sk-ink); box-shadow: 3px 4px 0 rgba(0, 0, 0, .5); }
 .pvtag .dmg { font-family: var(--sk-stencil); font-weight: 400; }
-.banner { font-family: var(--sk-label); font-size: 17px; }
+.banner { font-family: var(--sk-name); font-weight: 700; font-size: 16px; }
 .phase-card { font-family: var(--sk-tag); font-weight: 400; font-size: 56px; letter-spacing: .2em; }
 .stamp { font-family: var(--sk-tag); font-weight: 400; }
 .pop { font-family: var(--sk-stencil); font-weight: 400; }
@@ -370,7 +371,7 @@ details.smith .sm-price, details.smith .sm-prog.ready { color: var(--sk-hazard);
   box-shadow: 2px 3px 0 rgba(0, 0, 0, .5);
 }
 .pc.on { background-color: var(--sk-steel-hi); border-color: var(--sk-canvas); border-left-color: var(--ally); }
-.pc .n { font-family: var(--sk-label); font-weight: 400; font-size: 15px; }
+.pc .n { font-family: var(--sk-name); font-weight: 700; font-size: 15px; }
 .pc .mini { background: #3a2c22; }
 .sk {
   background: var(--sk-steel); background-image: var(--sk-noise);
@@ -378,12 +379,12 @@ details.smith .sm-price, details.smith .sm-prog.ready { color: var(--sk-hazard);
 }
 .sk:hover { background-color: var(--sk-steel-hi); }
 .sk.armed { border-color: var(--sk-hazard); background-color: var(--sk-steel-hi); box-shadow: 2px 3px 0 rgba(0, 0, 0, .5), inset 0 0 0 1px var(--sk-hazard); }
-.sk .nm { font-family: var(--sk-label); font-weight: 400; font-size: 16px; }
+.sk .nm { font-family: var(--sk-name); font-weight: 700; font-size: 16px; }
 .sk .key { font-family: var(--sk-stencil); }
 .endturn {
   position: relative; isolation: isolate;
   background: transparent; border: 0; color: var(--sk-ink);
-  font-family: var(--sk-tag); font-weight: 400; font-size: 24px; line-height: 1.05;
+  font-family: var(--sk-name); font-weight: 700; font-size: 20px; line-height: 1.05;
 }
 .endturn::before {
   content: ""; position: absolute; inset: 0; z-index: -1; background: var(--sk-hazard); filter: url(#sk-spray);
@@ -395,7 +396,7 @@ details.smith .sm-price, details.smith .sm-prog.ready { color: var(--sk-hazard);
 
 /* ---------- 预览 / 记录 ---------- */
 .g-log, .pvbox { background: var(--sk-oil-2); background-image: var(--sk-noise); border-left: 4px solid var(--sk-ink); }
-.pvbox h4 { font-family: var(--sk-tag); font-weight: 400; font-size: 22px; text-shadow: 2px 2px 0 var(--sk-ink); }
+.pvbox h4 { font-family: var(--sk-name); font-weight: 700; font-size: 17px; text-shadow: 2px 2px 0 var(--sk-ink); }
 .lg { border-bottom-color: rgba(236, 224, 198, .08); }
 .log-tools { border-bottom-color: rgba(236, 224, 198, .1); }
 
@@ -445,12 +446,12 @@ details.smith .sm-price, details.smith .sm-prog.ready { color: var(--sk-hazard);
 .choice .opts button {
   background: var(--sk-oil-2); background-image: var(--sk-noise);
   border: 3px solid var(--sk-ink); box-shadow: 3px 4px 0 rgba(0, 0, 0, .55);
-  font-family: var(--sk-label); font-weight: 400; font-size: 21px;
+  font-family: var(--sk-name); font-weight: 700; font-size: 19px;
 }
 .choice .opts button:hover { background-color: var(--sk-steel-hi); border-color: var(--sk-hazard); }
 .choice .opts button .key { font-family: var(--sk-stencil); }
 .choice .opts button small { font-family: var(--sk-body); }
-.check-who { font-family: var(--sk-tag); font-size: 24px; color: var(--sk-canvas); text-shadow: 2px 2px 0 var(--sk-ink); }
+.check-who { font-family: var(--sk-name); font-weight: 700; font-size: 20px; color: var(--sk-canvas); text-shadow: 2px 2px 0 var(--sk-ink); }
 .check-num { font-family: var(--sk-stencil); }
 .check-num.ok { color: var(--sk-hazard); }
 .check-num.fail { color: #ff5a48; }

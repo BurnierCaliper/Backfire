@@ -1581,8 +1581,19 @@ body.trpg .trpg-only { display: flex !important; }
 .g-rank[data-grade="B"] .rk-grade { color: #6fb3ff; }
 .g-rank[data-grade="A"] .rk-grade { color: #ff9f1c; }
 .g-rank[data-grade="S"] .rk-grade { color: #ff3b5c; text-shadow: 3px 3px 0 #1b1f24, -2px -2px 0 #1b1f24, 2px -2px 0 #1b1f24, -2px 2px 0 #1b1f24, 0 0 22px rgba(255, 70, 100, .8); }
-.g-rank.up .rk-grade { animation: rankUp .6s cubic-bezier(.2, 1.6, .4, 1); }
-@keyframes rankUp { 0% { transform: skewX(-8deg) scale(1.9); opacity: .2; } 100% { transform: skewX(-8deg) scale(1); opacity: 1; } }
+/* 评价升级：新字母放大跳出来，再慢慢缩回原大小 */
+.rk-grade { transform-origin: 70% 60%; }
+.g-rank.up .rk-grade { animation: rankUp 1.3s ease-out; }
+@keyframes rankUp {
+  0% { transform: skewX(-8deg) scale(.6); opacity: 0; }
+  14% { transform: skewX(-8deg) scale(2.2); opacity: 1; }
+  24% { transform: skewX(-8deg) scale(1.9); }
+  100% { transform: skewX(-8deg) scale(1); opacity: 1; }
+}
+/* 加分：数字滚动时放大并抖动，滚完慢慢缩回 */
+.rk-score { transform-origin: right center; transition: scale .8s ease-out; }
+.rk-score.counting { scale: 1.4; transition: scale .12s ease-out; animation: rkShake .12s linear infinite; }
+@keyframes rkShake { 0%, 100% { translate: 0 0; } 25% { translate: -1.5px 1px; } 50% { translate: 1px -1.5px; } 75% { translate: -1px -1px; } }
 .rk-score { font-family: var(--num); font-weight: 800; font-size: 16px; color: #1b1f24; }
 .rk-bar { width: 140px; height: 5px; background: rgba(27, 31, 36, .18); border-radius: 3px; overflow: hidden; }
 .rk-bar i { display: block; height: 100%; width: 0; background: currentColor; color: #9aa6b2; transition: width .4s ease-out; }

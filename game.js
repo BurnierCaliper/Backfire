@@ -1907,6 +1907,7 @@
   /** outcome：win / lose / retreat */
   function finish(win, outcome) {
     G.ended = true;
+    let finishRoll = 0;   // 结束加分动画要多久：结算面板等它播完
     G.lastOutcome = outcome || (win ? "win" : "lose");
     disarm();
     refreshTop();
@@ -1918,7 +1919,13 @@
     if (G.lastOutcome === "win" && typeof applyFinishBonus === "function") {
       const fb = applyFinishBonus();
       const what = [fb.speedMult > 1 ? `速杀（第 ${state.turnNo} 回合打完）×${fb.speedMult}` : "", fb.flawless ? `无伤 +${SCORE_FLAWLESS.points}、×${1 + SCORE_FLAWLESS.mult}` : "", fb.ambush ? `遭遇战 ×${SCORE_AMBUSH_MULT}` : ""].filter(Boolean);
-      if (fb.extra > 0) addLogPhase(`${what.join(" + ")}：整场分数 ×${fb.mult}（+${fb.extra}）`);
+      if (fb.extra > 0) {
+        addLogPhase(`${what.join(" + ")}：整场分数 ×${fb.mult}（+${fb.extra}）`);
+        if (!G.instant && !G.sim) {
+          paintRank();
+          finishRoll = Math.round(Math.min(1600, 350 + fb.extra * 1.2));
+        }
+      }
     }
     // 按评价把这场的战斗经验乘上去（S ×2 / A ×1.5 / B ×1.2 / C ×1）
     const gr = typeof battleGrade === "function" ? battleGrade() : null;
@@ -1966,11 +1973,13 @@
     badge.innerHTML = gr ? `<b>${gr.grade}</b><span>${gr.score} 分</span>` : "";
     // 结算面板晚一点弹出，先让最后一击的大伤害数字和击倒演出放完
     const token = G.endToken = {};
-    realTimeout(() => {
+    const showResult = () => {
       if (!G.ended || G.endToken !== token) return;
+      if (rankRaf) return realTimeout(showResult, 250);   // 分数还在滚：等它滚完
       box.classList.add("show");
       $("g-reopen").classList.add("show");
-    }, G.instant ? 0 : Math.round(BIG_POP_DUR * 1000) + 500);
+    };
+    realTimeout(showResult, G.instant ? 0 : Math.max(Math.round(BIG_POP_DUR * 1000) + 500, finishRoll ? finishRoll + 900 : 0));
     return true;
   }
 
@@ -2421,21 +2430,67 @@
 
   /* ---------- 战斗评分（右上角的评价字母） ---------- */
   let lastParts = {};
+  let rankShown = 0, rankTarget = 0, rankLines = null, rankRaf = 0;
+  /** 按「现在显示的分数」画评价字母、分数、进度条；评价变了就让字母放大跳出来 */
+  function paintRankAt(score) {
+    const box = $("g-rank");
+    if (!box || !rankLines) return;
+    const lines = rankLines;
+    const g = lines.find(x => score >= x[1]) || lines[lines.length - 1];
+    const i = lines.indexOf(g);
+    const next = i > 0 ? lines[i - 1] : null;
+    const prevGrade = box.dataset.grade;
+    box.dataset.grade = g[0];
+    box.querySelector(".rk-grade").textContent = g[0];
+    box.querySelector(".rk-score").textContent = score + " 分";
+    const span = next ? Math.max(1, next[1] - g[1]) : 1;
+    box.querySelector(".rk-bar i").style.width = (next ? Math.min(100, Math.max(0, (score - g[1]) / span * 100)) : 100) + "%";
+    box.querySelector(".rk-next").textContent = next ? `距 ${next[0]} 还差 ${Math.max(0, next[1] - score)} 分` : "最高评价";
+    if (prevGrade && prevGrade !== g[0] && score > 0 && lines.indexOf(lines.find(x => x[0] === prevGrade)) > i) {
+      box.classList.remove("up"); void box.offsetWidth; box.classList.add("up");
+    }
+  }
+  /** 加分动画：数字逐渐变多（先快后慢），滚动时放大、抖动；滚完慢慢缩回原大小。返回大约要多久（毫秒） */
+  function rollScore(target) {
+    rankTarget = target;
+    const box = $("g-rank");
+    const num = box && box.querySelector(".rk-score");
+    if (!num) { rankShown = target; return 0; }
+    num.classList.add("counting");
+    const est = Math.min(1600, 350 + (target - rankShown) * 1.2);
+    if (rankRaf) return est;
+    let last = 0;
+    const step = (t) => {
+      if (t - last >= 40) {   // 约 25 帧 / 秒地跳数字
+        last = t;
+        const gap = rankTarget - rankShown;
+        rankShown = gap <= 0 ? rankTarget : rankShown + Math.max(1, Math.ceil(gap * 0.12));
+        paintRankAt(rankShown);
+      }
+      if (rankShown < rankTarget) rankRaf = requestAnimationFrame(step);
+      else { rankRaf = 0; num.classList.remove("counting"); }
+    };
+    rankRaf = requestAnimationFrame(step);
+    return est;
+  }
   function paintRank() {
     const box = $("g-rank");
     if (!box || typeof battleGrade !== "function") return;
     const show = !!state.combatStarted || !!G.ended;
     box.classList.toggle("on", show);
-    if (!show) { lastParts = {}; return; }
+    if (!show) {
+      lastParts = {}; rankShown = rankTarget = 0;
+      if (rankRaf) { cancelAnimationFrame(rankRaf); rankRaf = 0; }
+      delete box.dataset.grade;
+      return;
+    }
     const gr = battleGrade();
-    const prevGrade = box.dataset.grade;
-    box.dataset.grade = gr.grade;
-    box.querySelector(".rk-grade").textContent = gr.grade;
-    box.querySelector(".rk-score").textContent = gr.score + " 分";
-    const span = gr.next ? Math.max(1, gr.next.need - gr.floor) : 1;
-    box.querySelector(".rk-bar i").style.width = (gr.next ? Math.min(100, Math.max(0, (gr.score - gr.floor) / span * 100)) : 100) + "%";
-    box.querySelector(".rk-next").textContent = gr.next ? `距 ${gr.next.grade} 还差 ${Math.max(0, gr.next.need - gr.score)} 分` : "最高评价";
-    if (prevGrade && prevGrade !== gr.grade) { box.classList.remove("up"); void box.offsetWidth; box.classList.add("up"); }
+    // 分数往上加时数字滚动上去（rollScore），评价字母跟着滚到的分数走；往下掉、模拟、瞬间回放直接跳到位
+    rankLines = gr.lines;
+    if (G.sim || G.instant || gr.score <= rankShown || !box.dataset.grade) {
+      rankShown = gr.score;
+      paintRankAt(rankShown);
+    } else rollScore(gr.score);
     // 单人模式：支援机会（每 ROGUE_SOLO.supportScore 分一次）
     const sup = typeof soloSupportInfo === "function" ? soloSupportInfo() : null;
     const supBox = box.querySelector(".rk-support");
