@@ -1,0 +1,508 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>粗粝风格草稿</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Black+Ops+One&family=ZCOOL+QingKe+HuangYou&display=swap" rel="stylesheet">
+<style>
+:root {
+  /* 柴油朋克底色：机油黑、氧化钢、黄铜、铁锈、警示黄、旧帆布 */
+  --oil: #110e0b;
+  --oil-2: #1a1511;
+  --steel: #2a2520;
+  --steel-hi: #3b342c;
+  --edge: #4d4337;
+  --rust: #b4522a;
+  --rust-dk: #6c2e16;
+  --brass: #c99a46;
+  --hazard: #f2c230;
+  --blood: #c9352b;
+  --olive: #6f7449;
+  --canvas: #e6d8bb;
+  --muted: #a39276;
+  --ink: #0b0806;
+  /* 属性：色相不变，压成「油漆 / 热金属」的饱和色 */
+  --fire: #ff5b2e;
+  --acid: #9be03a;
+  --electric: #ffd32e;
+  --ice: #7ccfe8;
+  --energy: #35e0c0;
+  --physical: #ff9a3c;
+  --harmonic: #c07cf0;
+  /* 节点 */
+  --n-battle: #e6d8bb;
+  --n-elite: #ff7a2e;
+  --n-boss: #ff3b2e;
+  --n-rest: #7ccfe8;
+  --n-shop: #f2c230;
+  --n-smith: #ff9a3c;
+  --n-clinic: #8fe05a;
+  --n-check: #c07cf0;
+  --n-ambush: #ff4f6e;
+  --n-start: #e6d8bb;
+
+  --stencil: "Black Ops One", "Impact", sans-serif;
+  --title-cn: "ZCOOL QingKe HuangYou", "Microsoft YaHei", sans-serif;
+  --noise: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 .55 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  --scratch: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><g stroke='%23ffffff' stroke-opacity='.06' stroke-width='1'><path d='M10 30 L120 22'/><path d='M60 90 L230 70'/><path d='M5 170 L90 190'/><path d='M140 140 L200 230'/><path d='M30 220 L70 120'/></g></svg>");
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; color: var(--canvas);
+  font: 14px/1.6 "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background-color: var(--oil);
+  background-image: var(--noise), var(--scratch), radial-gradient(ellipse at 50% -10%, #2b2018 0%, var(--oil) 60%);
+}
+main { max-width: 1160px; margin: 0 auto; padding: 28px 16px 64px; }
+.hero { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px; margin-bottom: 6px; }
+.hero h1 {
+  margin: 0; font-family: var(--title-cn); font-weight: 400; font-size: 44px; letter-spacing: .06em;
+  color: var(--canvas); text-shadow: 3px 3px 0 var(--rust-dk), 6px 6px 0 rgba(0,0,0,.6);
+  transform: skewX(-6deg);
+}
+.hero .tag {
+  font-family: var(--stencil); font-size: 14px; letter-spacing: .25em; color: var(--ink);
+  background: var(--hazard); padding: 2px 10px; transform: rotate(-2deg);
+}
+.lead { color: var(--muted); margin: 6px 0 22px; max-width: 760px; }
+
+h2 {
+  font-family: var(--stencil); font-weight: 400; font-size: 18px; letter-spacing: .18em;
+  margin: 40px 0 14px; display: flex; align-items: center; gap: 14px; color: var(--canvas);
+}
+h2 .cn { font-family: var(--title-cn); font-size: 22px; letter-spacing: .08em; }
+h2::after {
+  content: ""; flex: 1; height: 10px;
+  background: repeating-linear-gradient(-45deg, var(--hazard) 0 10px, var(--ink) 10px 20px);
+  opacity: .55; clip-path: polygon(0 0, 100% 0, 98% 100%, 0 100%);
+}
+h3 { font-size: 14px; margin: 18px 0 10px; color: var(--muted); font-weight: 600; letter-spacing: .12em; }
+.note {
+  color: var(--canvas); font-size: 13px; padding: 10px 14px; margin: 0 0 14px;
+  background: linear-gradient(90deg, rgba(180,82,42,.18), transparent); border-left: 4px solid var(--rust);
+}
+.note b { color: var(--hazard); font-weight: 600; }
+
+/* ---------- 图标：粗墨线 + 抖动边缘 + 硬阴影 ---------- */
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(108px, 1fr)); gap: 14px; }
+.cell { text-align: center; font-size: 12px; color: var(--muted); }
+.cell b { display: block; color: var(--canvas); font-weight: 600; font-size: 13px; margin-top: 8px; letter-spacing: .08em; }
+.plate {
+  position: relative; width: 88px; height: 88px; margin: 0 auto;
+  display: grid; place-items: center;
+  background-color: var(--steel);
+  background-image: var(--noise), linear-gradient(160deg, var(--steel-hi), var(--oil-2));
+  clip-path: polygon(14px 0, calc(100% - 14px) 0, 100% 14px, 100% calc(100% - 14px), calc(100% - 14px) 100%, 14px 100%, 0 calc(100% - 14px), 0 14px);
+  box-shadow: inset 0 0 0 2px var(--edge), inset 0 0 18px rgba(0,0,0,.7);
+}
+.plate::before {
+  /* 四颗铆钉 */
+  content: ""; position: absolute; inset: 7px;
+  background:
+    radial-gradient(circle, #8b7a62 0 2px, transparent 2.5px) 0 0 / 100% 100% no-repeat,
+    radial-gradient(circle at 0 0, #8b7a62 0 2px, transparent 2.5px),
+    radial-gradient(circle at 100% 0, #8b7a62 0 2px, transparent 2.5px),
+    radial-gradient(circle at 0 100%, #8b7a62 0 2px, transparent 2.5px),
+    radial-gradient(circle at 100% 100%, #8b7a62 0 2px, transparent 2.5px);
+  background-size: auto; opacity: .9; pointer-events: none;
+}
+.plate::after {
+  /* 色条：哪种节点 / 属性一眼看出 */
+  content: ""; position: absolute; left: 14px; right: 14px; bottom: 0; height: 4px; background: var(--c);
+  box-shadow: 0 0 10px var(--c);
+}
+.plate svg { width: 58px; height: 58px; }
+
+svg.ic { overflow: visible; filter: drop-shadow(2px 3px 0 rgba(0,0,0,.65)); }
+svg.ic * { vector-effect: non-scaling-stroke; }
+.ic .ink * { fill: none; stroke: var(--ink); stroke-width: 7; stroke-linejoin: round; stroke-linecap: round; }
+.ic .ink .thin { stroke-width: 4.6; }
+.ic .ink .bold { stroke-width: 9; }
+.ic .ink .solid { fill: var(--ink); stroke-width: 4; }
+.ic .col * { fill: none; stroke: var(--c); stroke-width: 3; stroke-linejoin: round; stroke-linecap: round; }
+.ic .col .thin { stroke-width: 1.7; opacity: .85; }
+.ic .col .bold { stroke-width: 4.6; }
+.ic .col .solid { fill: var(--c); stroke: none; }
+.ic .hi * { fill: none; stroke: rgba(255,255,255,.55); stroke-width: 1; }
+
+/* 小尺寸 */
+.sizes { display: flex; flex-wrap: wrap; gap: 26px; align-items: flex-end; }
+.sizes .row { display: flex; gap: 10px; align-items: center; padding: 8px 10px; background: rgba(0,0,0,.25); }
+.sizes .lab { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+/* ---------- 路线图 ---------- */
+.maps { display: grid; gap: 18px; }
+.map {
+  position: relative; border: 2px solid var(--ink); outline: 1px solid var(--edge); outline-offset: 2px;
+  box-shadow: 6px 6px 0 rgba(0,0,0,.55);
+}
+.map > svg { display: block; width: 100%; height: auto; }
+.map-title {
+  position: absolute; left: -2px; top: -2px; z-index: 2;
+  font-family: var(--title-cn); font-size: 20px; letter-spacing: .08em; color: var(--ink);
+  background: var(--canvas); padding: 2px 16px 2px 12px;
+  clip-path: polygon(0 0, 100% 0, calc(100% - 12px) 100%, 0 100%);
+}
+.map-title small { font-family: var(--stencil); font-size: 12px; letter-spacing: .2em; margin-left: 8px; opacity: .7; }
+.map .edge-ink { fill: none; stroke: rgba(11,8,6,.85); stroke-width: 9; stroke-linecap: round; }
+.map .edge { fill: none; stroke-width: 3.2; stroke-linecap: round; }
+.map .edge.later { stroke: rgba(230,216,187,.55); stroke-dasharray: 3 9; }
+.map .edge.done { stroke: var(--rust); }
+.map .edge.next { stroke: var(--hazard); stroke-dasharray: 10 8; animation: roll 1s linear infinite; }
+@keyframes roll { to { stroke-dashoffset: -36; } }
+.map .node .badge { fill: #1c1713; stroke: var(--ink); stroke-width: 6; }
+.map .node .rim { fill: none; stroke: var(--c); stroke-width: 2.6; }
+.map .node .rivet { fill: #8b7a62; }
+.map .node.done { opacity: .5; }
+.map .node.done .rim { stroke: #6b5d4b; }
+.map .node.now .rim { stroke-width: 3.4; filter: drop-shadow(0 0 6px var(--c)) drop-shadow(0 0 14px var(--c)); }
+.map .node.now .halo { fill: none; stroke: var(--hazard); stroke-width: 3; stroke-dasharray: 8 6; animation: spin 6s linear infinite; transform-box: fill-box; transform-origin: center; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.map .node .stamp { fill: none; stroke: var(--blood); stroke-width: 3; opacity: .9; }
+
+/* ---------- 界面零件 ---------- */
+.kit { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px; align-items: start; }
+.panel {
+  background-color: var(--steel); background-image: var(--noise), linear-gradient(170deg, var(--steel-hi), var(--oil-2) 80%);
+  border: 2px solid var(--ink); box-shadow: inset 0 0 0 1px var(--edge), 5px 5px 0 rgba(0,0,0,.5);
+  padding: 0 0 14px;
+}
+.panel-head {
+  font-family: var(--title-cn); font-size: 20px; letter-spacing: .1em; padding: 6px 14px; margin-bottom: 12px;
+  background: linear-gradient(90deg, var(--rust), var(--rust-dk)); color: var(--canvas);
+  text-shadow: 2px 2px 0 var(--ink); border-bottom: 2px solid var(--ink);
+}
+.panel-body { padding: 0 14px; }
+.btns { display: flex; flex-wrap: wrap; gap: 12px; }
+.btn {
+  font-family: var(--title-cn); font-size: 18px; letter-spacing: .12em; cursor: pointer;
+  padding: 8px 20px; border: 2px solid var(--ink); color: var(--canvas);
+  background: linear-gradient(180deg, var(--steel-hi), var(--steel)); box-shadow: 0 4px 0 var(--ink), inset 0 1px 0 rgba(255,255,255,.12);
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+  transition: transform .08s;
+}
+.btn:active { transform: translateY(3px); box-shadow: 0 1px 0 var(--ink); }
+.btn.go { color: var(--ink); background: var(--hazard); text-shadow: none; position: relative; }
+.btn.go::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .18;
+  background: repeating-linear-gradient(-45deg, var(--ink) 0 6px, transparent 6px 12px);
+}
+.btn.danger { background: linear-gradient(180deg, #d4473a, var(--blood)); }
+.btn small { display: block; font: 11px/1.2 var(--stencil); letter-spacing: .2em; opacity: .7; }
+
+.unit {
+  position: relative; padding: 12px 14px 12px 18px; margin-bottom: 12px;
+  background: linear-gradient(100deg, rgba(0,0,0,.35), transparent); border-left: 6px solid var(--ally, #4f8fd0);
+}
+.unit.foe { --ally: var(--blood); }
+.unit .top { display: flex; align-items: baseline; gap: 10px; }
+.unit .nm { font-family: var(--title-cn); font-size: 22px; letter-spacing: .06em; text-shadow: 2px 2px 0 var(--ink); }
+.unit .lv { font-family: var(--stencil); font-size: 13px; color: var(--muted); }
+.unit .atk { margin-left: auto; font-family: var(--stencil); font-size: 16px; color: var(--hazard); text-shadow: 2px 2px 0 var(--ink); }
+.gauge { display: flex; gap: 3px; margin: 8px 0 4px; height: 14px; }
+.gauge i { flex: 1; background: #3a2c22; border: 1px solid var(--ink); transform: skewX(-18deg); }
+.gauge i.on { background: linear-gradient(180deg, #f2775a, #b6382a); }
+.gauge i.sh { background: linear-gradient(180deg, #a3e3f2, #4c9bb3); }
+.gauge.posture i { height: 8px; }
+.gauge.posture i.on { background: linear-gradient(180deg, #ffe07a, var(--brass)); }
+.unit .meta { display: flex; gap: 10px; align-items: center; font-family: var(--stencil); font-size: 12px; color: var(--muted); }
+.unit .meta svg { width: 22px; height: 22px; }
+
+.swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; }
+.sw { border: 2px solid var(--ink); }
+.sw div { height: 46px; }
+.sw span { display: block; font-size: 12px; padding: 4px 8px; background: var(--oil-2); color: var(--muted); }
+.sw span b { color: var(--canvas); font-weight: 600; margin-right: 6px; }
+
+@media (prefers-reduced-motion: reduce) { .map .edge.next, .map .node.now .halo { animation: none; } }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <!-- 让线条边缘有手绘 / 锈蚀的毛糙抖动 -->
+    <filter id="rough" x="-15%" y="-15%" width="130%" height="130%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.05" numOctaves="2" seed="7" result="t"/>
+      <feDisplacementMap in="SourceGraphic" in2="t" scale="2.6" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+    <filter id="grain" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="1.1" numOctaves="2" seed="2"/>
+      <feColorMatrix values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 .35 0"/>
+      <feComposite in2="SourceGraphic" operator="in"/>
+    </filter>
+    <filter id="blur6"><feGaussianBlur stdDeviation="6"/></filter>
+    <filter id="blur14"><feGaussianBlur stdDeviation="14"/></filter>
+    <pattern id="rain" width="14" height="40" patternUnits="userSpaceOnUse" patternTransform="rotate(14)">
+      <path d="M7 0 V16" stroke="#9fb3d6" stroke-opacity=".18" stroke-width="1"/>
+    </pattern>
+    <pattern id="hazard" width="16" height="16" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <rect width="8" height="16" fill="#f2c230"/><rect x="8" width="8" height="16" fill="#0b0806"/>
+    </pattern>
+  </defs>
+</svg>
+
+<main>
+  <div class="hero">
+    <h1>角鳞：四幕</h1>
+    <span class="tag">STYLE DRAFT v2</span>
+  </div>
+  <p class="lead">方向：选了 A（线框图标），往《无主之地》的粗墨线漫画感、《疯狂的麦克斯》的废土锈铁感推，界面底色改成柴油朋克——机油黑、氧化钢、黄铜、铁锈、警示黄。这一版只是效果图，还没改游戏。</p>
+
+  <h2>01 <span class="cn">图标 · 粗墨线版</span></h2>
+  <p class="note">在 A 的线条外面套一圈<b>黑色粗墨线</b>（无主之地那种描边）、边缘加<b>毛糙抖动</b>、底下压一层<b>硬阴影</b>，霓虹光改成「热金属」的暖光。外框换成带铆钉的切角铁板，底边一道色条区分种类。</p>
+  <h3>路线节点</h3>
+  <div class="grid" id="nodes"></div>
+  <h3>七种属性</h3>
+  <div class="grid" id="elems"></div>
+  <h3>小尺寸</h3>
+  <div class="sizes" id="sizes"></div>
+
+  <h2>02 <span class="cn">路线图 · 从左到右 · 分区域</span></h2>
+  <p class="note">每幕一张底图，色调和地形跟着区域走：<b>外城区</b>锈铁和烟雾，<b>沙漠</b>黄沙和沙丘，<b>巨人城</b>雷雨里的巨型残骸（巨人城常有雷鸣天气），<b>天网设施</b>冷青色的机房网格。节点是铆钉铁牌；走过的路刷成铁锈色、节点盖上红叉；下一步能走的路是滚动的警示黄虚线；当前节点有转动的警戒圈。</p>
+  <div class="maps" id="maps"></div>
+
+  <h2>03 <span class="cn">界面色调 · 柴油朋克</span></h2>
+  <div class="swatches" id="swatches"></div>
+  <h3>零件样例</h3>
+  <div class="kit">
+    <div class="panel">
+      <div class="panel-head">按钮</div>
+      <div class="panel-body">
+        <div class="btns">
+          <button class="btn go">迎战<small>ENGAGE</small></button>
+          <button class="btn">长休<small>REST 8H</small></button>
+          <button class="btn danger">撤退<small>RETREAT</small></button>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">角色卡</div>
+      <div class="panel-body">
+        <div class="unit">
+          <div class="top"><span class="nm">夕夏</span><span class="lv">LV 7</span><span class="atk">ATK 19</span></div>
+          <div class="gauge" id="g1"></div>
+          <div class="gauge posture" id="p1"></div>
+          <div class="meta" id="m1"></div>
+        </div>
+        <div class="unit foe">
+          <div class="top"><span class="nm">亡命之王</span><span class="lv">LV 8 · BOSS</span><span class="atk">ATK 24</span></div>
+          <div class="gauge" id="g2"></div>
+          <div class="gauge posture" id="p2"></div>
+          <div class="meta" id="m2"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+/* 图形：和 v1 同一套，拆成「墨线层 + 颜色层」画两遍 */
+const G = {
+  battle: `<path d="M11 11 L33 33 M27 37 L37 27 M33 33 L39 39"/><path d="M37 11 L15 33 M11 27 L21 37 M15 33 L9 39"/>`,
+  elite: `<path d="M8 12 L16 21 L24 16 L32 21 L40 12 L37 31 L24 40 L11 31 Z"/><path d="M17 27 L22 28 M31 27 L26 28"/><path class="thin" d="M24 21 L24 33"/>`,
+  boss: `<path d="M24 5 L40.5 14.5 L40.5 33.5 L24 43 L7.5 33.5 L7.5 14.5 Z"/><path d="M13 24 Q24 13 35 24 Q24 35 13 24 Z"/><circle class="solid" cx="24" cy="24" r="3.6"/>`,
+  rest: `<path d="M6 38 L42 38"/><path d="M10 38 L24 15 L38 38"/><path d="M19 38 L24 29 L29 38"/><path class="thin" d="M34 8 A5 5 0 1 0 40 15 A6.5 6.5 0 0 1 34 8 Z"/>`,
+  shop: `<path d="M24 7 L39 15.5 L39 32.5 L24 41 L9 32.5 L9 15.5 Z"/><path d="M9 15.5 L24 24 L39 15.5 M24 24 L24 41"/>`,
+  smith: `<path d="M13 37 L27 23"/><path d="M23 11 L37 25 L41 21 L27 7 Z"/><path class="thin" d="M7 25 L12 25 M11 13 L14.5 16.5 M19 5 L19 10"/><path d="M8 42 L18 42"/>`,
+  clinic: `<path d="M16 6 H32 L42 16 V32 L32 42 H16 L6 32 V16 Z"/><path class="bold" d="M24 14 V34 M14 24 H34"/>`,
+  check: `<path d="M24 5 L40.5 14.5 L40.5 33.5 L24 43 L7.5 33.5 L7.5 14.5 Z"/><path d="M24 13 L34 30 H14 Z"/><path class="thin" d="M24 5 L24 13 M40.5 33.5 L34 30 M7.5 33.5 L14 30"/>`,
+  ambush: `<path d="M24 6 L43 39 H5 Z"/><path class="bold" d="M24 18 V28"/><rect class="solid" x="22" y="31.5" width="4" height="4"/>`,
+  start: `<path d="M12 42 V7"/><path d="M12 9 H36 L30 16 L36 23 H12"/>`,
+  fire: `<path d="M24 5 C31 13 37 18 37 28 A13 13 0 0 1 11 28 C11 21 15 17 18 13 C19 19 22 21 24 21 C22 15 22 10 24 5 Z"/><path class="thin" d="M24 38 A5 5 0 0 1 19 33 C19 30 22 28 24 24 C26 28 29 30 29 33 A5 5 0 0 1 24 38 Z"/>`,
+  acid: `<path d="M24 6 C24 6 11 22 11 30 A13 13 0 0 0 37 30 C37 22 24 6 24 6 Z"/><circle cx="20" cy="31" r="3.2"/><circle class="thin" cx="28.5" cy="35" r="2"/><circle class="thin" cx="39" cy="9" r="2.2"/>`,
+  electric: `<path d="M28 4 L12 27 H23 L19 44 L36 19 H25 Z"/><path class="thin" d="M6 14 L10 14 M38 32 L42 32"/>`,
+  ice: [0, 60, -60].map(a => `<path transform="rotate(${a} 24 24)" d="M24 5 V43 M18.5 10 L24 15 L29.5 10 M18.5 38 L24 33 L29.5 38"/>`).join(""),
+  energy: `<ellipse cx="24" cy="24" rx="19" ry="7.5" transform="rotate(30 24 24)"/><ellipse cx="24" cy="24" rx="19" ry="7.5" transform="rotate(-30 24 24)"/><circle class="solid" cx="24" cy="24" r="4.4"/>`,
+  physical: `<path d="M24 5 L27.1 16.6 L37.4 10.6 L31.4 20.9 L43 24 L31.4 27.1 L37.4 37.4 L27.1 31.4 L24 43 L20.9 31.4 L10.6 37.4 L16.6 27.1 L5 24 L16.6 20.9 L10.6 10.6 L20.9 16.6 Z"/>`,
+  harmonic: `<path d="M5 24 C9 12 13 12 17 24 C21 36 25 36 29 24 C33 12 37 12 41 24 L43 24"/><path class="thin" d="M5 15 C9 9 13 9 17 15 C21 21 25 21 29 15 C33 9 37 9 41 15"/><path class="thin" d="M5 33 C9 27 13 27 17 33 C21 39 25 39 29 33 C33 27 37 27 41 33"/>`
+};
+const icon = (k, color, attrs) =>
+  `<svg class="ic" viewBox="0 0 48 48" ${attrs || ""} style="--c:var(${color})" aria-hidden="true">` +
+  `<g filter="url(#rough)"><g class="ink">${G[k]}</g><g class="col">${G[k]}</g></g></svg>`;
+
+const NODES = [
+  ["battle", "战斗", "--n-battle"], ["elite", "精英战", "--n-elite"], ["boss", "首领", "--n-boss"],
+  ["rest", "休息", "--n-rest"], ["shop", "商店", "--n-shop"], ["smith", "工匠", "--n-smith"],
+  ["clinic", "诊所", "--n-clinic"], ["check", "检定事件", "--n-check"], ["ambush", "遭遇 / 未知", "--n-ambush"],
+  ["start", "出发", "--n-start"]
+];
+const ELEMS = [
+  ["fire", "火", "--fire"], ["acid", "酸", "--acid"], ["electric", "电", "--electric"], ["ice", "冰", "--ice"],
+  ["energy", "能量", "--energy"], ["physical", "物理", "--physical"], ["harmonic", "谐波", "--harmonic"]
+];
+const tiles = (list) => list.map(([k, name, c]) =>
+  `<div class="cell"><div class="plate" style="--c:var(${c})">${icon(k, c)}</div><b>${name}</b>${k}</div>`).join("");
+document.getElementById("nodes").innerHTML = tiles(NODES);
+document.getElementById("elems").innerHTML = tiles(ELEMS);
+document.getElementById("sizes").innerHTML = [20, 24, 32].map(px =>
+  `<div><div class="row">${ELEMS.map(([k, , c]) => icon(k, c, `width="${px}" height="${px}"`)).join("")}</div><div class="lab">${px}px</div></div>`).join("");
+
+/* ---------- 路线图：从左到右 ---------- */
+const LAYOUT = [
+  [["start", 150]],
+  [["battle", 70], ["battle", 150], ["check", 230]],
+  [["shop", 60], ["elite", 140], ["battle", 235]],
+  [["rest", 85], ["battle", 165], ["smith", 240]],
+  [["battle", 60], ["ambush", 145], ["clinic", 230]],
+  [["elite", 95], ["rest", 205]],
+  [["boss", 150]]
+];
+const LINKS = [
+  [[0, 0], [1, 0]], [[0, 0], [1, 1]], [[0, 0], [1, 2]],
+  [[1, 0], [2, 0]], [[1, 1], [2, 1]], [[1, 1], [2, 0]], [[1, 2], [2, 2]],
+  [[2, 0], [3, 0]], [[2, 1], [3, 0]], [[2, 1], [3, 1]], [[2, 2], [3, 2]],
+  [[3, 0], [4, 0]], [[3, 0], [4, 1]], [[3, 1], [4, 1]], [[3, 2], [4, 2]],
+  [[4, 0], [5, 0]], [[4, 1], [5, 0]], [[4, 1], [5, 1]], [[4, 2], [5, 1]],
+  [[5, 0], [6, 0]], [[5, 1], [6, 0]]
+];
+const W = 1000, H = 300;
+const colX = (c) => 70 + c * ((W - 140) / (LAYOUT.length - 1));
+
+/* 各区域的底图（全是 SVG 画的地形剪影 + 颗粒） */
+const BG = {
+  "外城区": {
+    en: "OUTER CITY",
+    draw: () => {
+      let s = `<defs><linearGradient id="oc" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4a3326"/><stop offset=".55" stop-color="#2a1d16"/><stop offset="1" stop-color="#140e0a"/></linearGradient></defs>
+        <rect width="${W}" height="${H}" fill="url(#oc)"/>
+        <g filter="url(#blur14)" opacity=".55">
+          <ellipse cx="180" cy="110" rx="160" ry="40" fill="#6b4a36"/><ellipse cx="620" cy="80" rx="220" ry="46" fill="#5a3e2e"/>
+          <ellipse cx="880" cy="140" rx="140" ry="36" fill="#7a5238"/></g>`;
+      // 棚户塔楼天际线
+      let x = 0, d = `M0 ${H}`;
+      let seed = 3;
+      const rnd = () => (seed = (seed * 9301 + 49297) % 233280) / 233280;
+      while (x < W) {
+        const w = 24 + rnd() * 50, h = 40 + rnd() * 90;
+        d += ` L${x} ${H - h} L${x + w * .3} ${H - h - rnd() * 14} L${x + w} ${H - h}`;
+        x += w;
+      }
+      d += ` L${W} ${H} Z`;
+      s += `<path d="${d}" fill="#0f0a07" opacity=".85"/>`;
+      // 远处的红色警示灯和吊塔
+      s += `<path d="M760 ${H} L770 120 L780 ${H} M770 120 L860 120 M850 120 V150" stroke="#0f0a07" stroke-width="5" fill="none"/>`;
+      [[770, 116], [300, 190], [520, 175]].forEach(([cx, cy]) => { s += `<circle cx="${cx}" cy="${cy}" r="3" fill="#ff4a2e"/><circle cx="${cx}" cy="${cy}" r="10" fill="#ff4a2e" opacity=".25" filter="url(#blur6)"/>`; });
+      return s;
+    }
+  },
+  "沙漠": {
+    en: "THE WASTES",
+    draw: () => `<defs><linearGradient id="ds" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f3cf86"/><stop offset=".45" stop-color="#e0a85a"/><stop offset="1" stop-color="#a8642a"/></linearGradient></defs>
+      <rect width="${W}" height="${H}" fill="url(#ds)"/>
+      <circle cx="820" cy="70" r="46" fill="#fff1c4" opacity=".55"/><circle cx="820" cy="70" r="90" fill="#fff1c4" opacity=".2" filter="url(#blur14)"/>
+      <path d="M0 150 C140 120 260 170 400 140 S680 110 820 150 S960 140 1000 130 V300 H0 Z" fill="#d49646"/>
+      <path d="M0 200 C120 170 300 220 470 185 S760 170 900 205 S980 200 1000 195 V300 H0 Z" fill="#bd7b36"/>
+      <path d="M0 250 C180 225 340 270 520 240 S820 235 1000 255 V300 H0 Z" fill="#9c5d27"/>
+      <path d="M90 300 L110 230 L118 300 M600 300 L612 250 L630 300" stroke="#5b3416" stroke-width="4" fill="none"/>
+      <g opacity=".35" stroke="#fff3d6" stroke-width="1.2" fill="none"><path d="M40 90 Q300 70 520 100"/><path d="M300 60 Q560 40 760 80"/></g>`
+  },
+  "巨人城": {
+    en: "TITAN CITY",
+    draw: () => {
+      let s = `<defs><linearGradient id="gc" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a3f55"/><stop offset=".5" stop-color="#232838"/><stop offset="1" stop-color="#0f121a"/></linearGradient></defs>
+        <rect width="${W}" height="${H}" fill="url(#gc)"/>
+        <g filter="url(#blur14)" opacity=".6"><ellipse cx="300" cy="40" rx="260" ry="40" fill="#555b78"/><ellipse cx="780" cy="30" rx="240" ry="34" fill="#4a5070"/></g>`;
+      // 巨型残骸：断裂的超高楼和一只巨大的机械手骨架
+      const towers = [[40, 70, 200], [150, 60, 150], [430, 90, 230], [560, 55, 170], [700, 80, 250], [880, 70, 190]];
+      towers.forEach(([x, w, h]) => {
+        s += `<path d="M${x} ${H} L${x} ${H - h} L${x + w * .4} ${H - h + 22} L${x + w * .7} ${H - h - 14} L${x + w} ${H - h + 10} L${x + w} ${H} Z" fill="#0b0d13" opacity=".9"/>`;
+        for (let yy = H - h + 30; yy < H - 10; yy += 22) s += `<rect x="${x + 8}" y="${yy}" width="${w - 16}" height="3" fill="#2a3044" opacity=".7"/>`;
+      });
+      s += `<path d="M320 ${H} L345 160 L330 120 L360 90 M345 160 L390 130 L410 95 M345 160 L300 140 L285 105" stroke="#0b0d13" stroke-width="12" fill="none" stroke-linecap="round"/>`;
+      s += `<path d="M640 10 L620 70 L645 72 L610 150" stroke="#cbbcff" stroke-width="2.5" fill="none" opacity=".65"/><path d="M640 10 L620 70 L645 72 L610 150" stroke="#cbbcff" stroke-width="10" fill="none" opacity=".18" filter="url(#blur6)"/>`;
+      s += `<rect width="${W}" height="${H}" fill="url(#rain)"/>`;
+      return s;
+    }
+  },
+  "天网设施": {
+    en: "SKYNET FACILITY",
+    draw: () => {
+      let s = `<defs><linearGradient id="sk" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0f3236"/><stop offset=".6" stop-color="#0a1f22"/><stop offset="1" stop-color="#050d0f"/></linearGradient></defs>
+        <rect width="${W}" height="${H}" fill="url(#sk)"/>`;
+      // 透视网格地面
+      for (let i = 0; i <= 20; i++) s += `<path d="M${500 + (i - 10) * 30} 150 L${500 + (i - 10) * 160} ${H}" stroke="#35e0c0" stroke-opacity=".12" stroke-width="1"/>`;
+      [160, 175, 196, 226, 266].forEach(yy => { s += `<path d="M0 ${yy} H${W}" stroke="#35e0c0" stroke-opacity=".12" stroke-width="1"/>`; });
+      // 管道和机柜
+      s += `<path d="M0 40 H1000 M0 52 H1000" stroke="#16393c" stroke-width="7"/><path d="M0 40 H1000" stroke="#2c6b6e" stroke-width="1" opacity=".6"/>`;
+      [[60, 70], [200, 60], [820, 80], [930, 66]].forEach(([x, h]) => {
+        s += `<rect x="${x}" y="${150 - h}" width="46" height="${h}" fill="#071416" stroke="#1f4c50"/>`;
+        for (let k = 0; k < 4; k++) s += `<rect x="${x + 8}" y="${150 - h + 10 + k * 14}" width="${8 + (k * 7) % 20}" height="3" fill="${k % 3 ? "#35e0c0" : "#ff4a2e"}" opacity=".7"/>`;
+      });
+      s += `<circle cx="500" cy="95" r="34" fill="none" stroke="#ff4a2e" stroke-opacity=".35" stroke-width="2"/><circle cx="500" cy="95" r="6" fill="#ff4a2e" opacity=".8"/><circle cx="500" cy="95" r="22" fill="#ff4a2e" opacity=".2" filter="url(#blur6)"/>`;
+      s += `<g opacity=".08">${Array.from({ length: 100 }, (_, i) => `<rect y="${i * 3}" width="${W}" height="1" fill="#ffffff"/>`).join("")}</g>`;
+      return s;
+    }
+  }
+};
+
+const nodeColor = (k) => (NODES.find(n => n[0] === k) || [])[2];
+const same = (a, b) => a[0] === b[0] && a[1] === b[1];
+function drawMap(region, path, now) {
+  const bg = BG[region];
+  const pos = ([c, i]) => [colX(c), LAYOUT[c][i][1]];
+  const onPath = (a) => path.some(p => same(p, a));
+  let s = bg.draw();
+  s += `<rect width="${W}" height="${H}" fill="#000" filter="url(#grain)" opacity=".9"/>`;
+  // 暗角
+  s += `<radialGradient id="vg-${region}" cx="50%" cy="50%" r="75%"><stop offset=".6" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".6"/></radialGradient><rect width="${W}" height="${H}" fill="url(#vg-${region})"/>`;
+  let edges = "";
+  LINKS.forEach(([a, b]) => {
+    const [x1, y1] = pos(a), [x2, y2] = pos(b);
+    const mx = (x1 + x2) / 2;
+    const d = `M${x1} ${y1} C${mx} ${y1} ${mx} ${y2} ${x2} ${y2}`;
+    const cls = onPath(a) && onPath(b) ? "done" : same(a, now) ? "next" : "later";
+    edges += `<path class="edge-ink" d="${d}"/><path class="edge ${cls}" d="${d}"/>`;
+  });
+  s += `<g filter="url(#rough)">${edges}</g>`;
+  LAYOUT.forEach((col, c) => col.forEach(([k, y], i) => {
+    const x = colX(c), here = [c, i];
+    const state = same(here, now) ? "now" : onPath(here) ? "done" : "later";
+    const r = k === "boss" ? 34 : 24;
+    const oct = (rr) => Array.from({ length: 8 }, (_, j) => {
+      const a = Math.PI / 8 + j * Math.PI / 4;
+      return `${(x + rr * Math.cos(a)).toFixed(1)},${(y + rr * Math.sin(a)).toFixed(1)}`;
+    }).join(" ");
+    const halo = state === "now" ? `<circle class="halo" cx="${x}" cy="${y}" r="${r + 9}"/>` : "";
+    const boss = k === "boss" ? `<polygon points="${oct(r + 6)}" fill="url(#hazard)" stroke="#0b0806" stroke-width="3"/>` : "";
+    const rivets = [0, 2, 4, 6].map(j => {
+      const a = Math.PI / 8 + j * Math.PI / 4 + Math.PI / 8;
+      return `<circle class="rivet" cx="${(x + (r - 5) * Math.cos(a)).toFixed(1)}" cy="${(y + (r - 5) * Math.sin(a)).toFixed(1)}" r="1.8"/>`;
+    }).join("");
+    const sz = k === "boss" ? 40 : 30;
+    const stamp = state === "done" ? `<path class="stamp" d="M${x - 14} ${y - 14} L${x + 14} ${y + 14} M${x + 14} ${y - 14} L${x - 14} ${y + 14}"/>` : "";
+    s += `<g class="node ${state}" style="--c:var(${nodeColor(k)})">${halo}${boss}
+      <polygon class="badge" points="${oct(r)}"/><polygon class="rim" points="${oct(r - 3)}"/>${rivets}
+      <svg x="${x - sz / 2}" y="${y - sz / 2}" width="${sz}" height="${sz}" viewBox="0 0 48 48" overflow="visible">${icon(k, nodeColor(k)).replace(/^<svg[^>]*>|<\/svg>$/g, "")}</svg>${stamp}</g>`;
+  }));
+  return `<div class="map"><div class="map-title">${region}<small>${bg.en}</small></div>
+    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${region}路线图示意">${s}</svg></div>`;
+}
+document.getElementById("maps").innerHTML = [
+  drawMap("外城区", [[0, 0], [1, 1], [2, 1]], [2, 1]),
+  drawMap("沙漠", [[0, 0], [1, 0], [2, 0], [3, 0]], [3, 0]),
+  drawMap("巨人城", [[0, 0], [1, 2]], [1, 2]),
+  drawMap("天网设施", [[0, 0], [1, 1], [2, 1], [3, 1], [4, 1], [5, 1]], [5, 1])
+].join("");
+// 节点里的图标要用 .ic 的样式：给内嵌 svg 补上 class 和颜色
+document.querySelectorAll(".map .node > svg").forEach(el => { el.classList.add("ic"); });
+
+/* ---------- 色板 ---------- */
+document.getElementById("swatches").innerHTML = [
+  ["机油黑", "--oil", "底色"], ["氧化钢", "--steel-hi", "面板"], ["黄铜", "--brass", "架势 / 装饰"],
+  ["铁锈", "--rust", "标题条 / 已走路线"], ["警示黄", "--hazard", "主按钮 / 可行动"], ["血红", "--blood", "敌方 / 危险"],
+  ["军绿", "--olive", "次要标记"], ["旧帆布", "--canvas", "正文"]
+].map(([n, v, use]) => `<div class="sw"><div style="background:var(${v})"></div><span><b>${n}</b>${use}</span></div>`).join("");
+
+/* ---------- 角色卡样例 ---------- */
+const bar = (id, n, on, cls) => { document.getElementById(id).innerHTML = Array.from({ length: n }, (_, i) => `<i class="${i < on ? cls : ""}"></i>`).join(""); };
+bar("g1", 14, 10, "on"); bar("p1", 6, 4, "on");
+document.getElementById("g2").innerHTML = Array.from({ length: 20 }, (_, i) => `<i class="${i < 6 ? "sh" : i < 17 ? "on" : ""}"></i>`).join("");
+bar("p2", 8, 8, "on");
+document.getElementById("m1").innerHTML = `${icon("fire", "--fire")}${icon("physical", "--physical")}<span>引擎启动 · 圣盾 0</span>`;
+document.getElementById("m2").innerHTML = `${icon("electric", "--electric")}<span>晕眩标记 1/2</span>`;
+</script>
+</body>
+</html>
