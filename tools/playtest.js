@@ -486,7 +486,7 @@ if (steps >= 2000) bug("主循环超过 2000 步", run.stage);
 
 /* ---------------- 汇报 ---------------- */
 const out = [];
-out.push(`# 实战测试：${run.solo ? `单人模式 ${R.heroName(PARTY[0])}，伙伴 ${run.partners.map(R.heroName).join("、")}，第二副职责 ${run.party[0].role2}` : PARTY.map(R.heroName).join("、")}（种子 ${SEED}）`);
+out.push(`# 实战测试：${run.solo ? `单人模式 ${R.heroName(PARTY[0])}，伙伴 ${run.partners.map(R.heroName).join("、")}，第二副职责 ${(run.party[0] ? run.party[0].role2 : SOLO_ROLE2 || "?")}` : PARTY.map(R.heroName).join("、")}（种子 ${SEED}）`);
 out.push(`结果：${run.result ? (run.result.win ? "通关" : "失败") + " — " + run.result.text : run.stage}；第 ${run.act} 幕第 ${run.day} 天；用时 ${Math.round((Date.now() - T0) / 1000)} 秒`);
 out.push(`队伍：` + run.party.map(h => { const v = R.heroView(run, h); return `${v.name} Lv${v.level} 血${v.hp}/${v.hpMax} 武器${v.weapons.map(w => w.name + "Lv" + w.level).join("、")}`; }).join("；"));
 if ((run.fallen || []).length) out.push(`阵亡：${run.fallen.map(f => R.heroName(f.kit) + "（第" + f.act + "幕第" + f.day + "天）").join("、")}`);

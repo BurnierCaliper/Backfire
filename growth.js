@@ -265,7 +265,7 @@ function applyLevelStats(u) {
     }
     u.atk = (u.personalAtk || 0) + (u.weaponHeld === false ? 0 : (u.weaponAtk || 0));
     if (u.growth.shp) {
-      const shp = (u.baseShp || u.shpMax || 10) + u.growth.shp * up;
+      const shp = (u.baseShp || u.shpMax || 10) + u.growth.shp * up + (Number(u.shpBonus) || 0);
       const shpRatio = u.shpMax ? u.shp / u.shpMax : 1;
       u.shpMax = shp;
       u.shp = Math.max(0, Math.min(shp, Math.round(shp * shpRatio)));
@@ -292,8 +292,9 @@ function applyLevelStats(u) {
   u.defMax = d.def;
   u.def = Math.max(0, Math.min(d.def, Math.round(d.def * defRatio)));
   const shpRatio = u.shpMax ? u.shp / u.shpMax : 1;
-  u.shpMax = d.shp;
-  u.shp = Math.max(0, Math.min(d.shp, Math.round(d.shp * shpRatio)));
+  const shpMax = d.shp + (Number(u.shpBonus) || 0);   // 额外坚毅生命上限（单人模式主角 +15）
+  u.shpMax = shpMax;
+  u.shp = Math.max(0, Math.min(shpMax, Math.round(shpMax * shpRatio)));
   u.cyber = d.cyber;
   if (u.kit === "hiaki" && typeof refreshHiakiAtk === "function") refreshHiakiAtk(u);
 }

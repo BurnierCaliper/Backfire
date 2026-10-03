@@ -237,7 +237,7 @@ test("支援次数跨战斗继承：这场没用完的带到下一场", () => {
   const { c, run, st } = soloRun("BANK1");
   const R = c.Rogue;
   let { hero } = soloBattle(c, run, [{ id: "thug_knife", lv: 1, zone: 2 }]);
-  st.battleScore.total = 260 * 3;   // 本场挣到 3 次
+  st.battleScore.total = 250 + 275 + 300;   // 本场挣到 3 次（门槛 250，手里每有 1 次 +25）
   assert.equal(c.soloSupportInfo().left, 3);
   R.finishBattle(run, "win");
   assert.equal(run.supportBank, 3);
@@ -261,4 +261,64 @@ test("支援次数跨战斗继承：这场没用完的带到下一场", () => {
   s2.battleScore.total = 0;
   R.finishBattle(run, "retreat");
   assert.equal(run.supportBank, 2, "撤退也照样带走剩下的次数");
+});
+
+test("支援门槛：手里每持有 1 次，下一次 +25 分；最多存 6 次，满了不再攒分", () => {
+  const { c, run } = soloRun("CAP1");
+  const { st } = soloBattle(c, run, [{ id: "thug_knife", lv: 1, zone: 2 }]);
+  const at = (score) => { st.battleScore.total = score; return c.soloSupportInfo(); };
+  assert.equal(at(249).left, 0);
+  let i = at(250);
+  assert.equal(i.left, 1);
+  assert.equal(i.next, 250 + 275, "手里有 1 次：下一次要再攒 275");
+  assert.equal(at(524).left, 1);
+  assert.equal(at(525).left, 2);
+  // 250 + 275 + 300 + 325 + 350 + 375 = 1875 → 6 次（上限）
+  i = at(1875);
+  assert.equal(i.left, 6);
+  assert.equal(i.full, true);
+  assert.equal(i.next, null);
+  assert.equal(at(9999).left, 6, "存满后分数再高也不会超过 6");
+});
+
+test("支援门槛按换的那一刻手里有几次算：用掉一次后门槛降回去；存满时多出的分不攒", () => {
+  const { c, run } = soloRun("CAP2");
+  const { st, hero } = soloBattle(c, run, [{ id: "thug_hammer", lv: 3, zone: 2 }]);
+  const foe = st.units.find(u => !u.isPlayer);
+  st.battleScore.total = 250;
+  assert.equal(c.soloSupportInfo().left, 1);
+  hero.ap = 2;
+  st.attackerId = hero.id; st.targetId = foe.id;
+  st.skillFlow = { id: "solo_support", actorId: hero.id, picks: { partner: "kolt", target: foe.id }, index: 99 };
+  try { c.runSkill("solo_support"); } finally { st.skillFlow = null; }
+  assert.equal(c.soloSupportInfo().left, 0);
+  // 手里 0 次：下一次又是 250 分（不是 275）
+  const now = c.soloSupportInfo().score;
+  st.battleScore.total = now + 250;
+  assert.equal(c.soloSupportInfo().left, 1);
+});
+
+test("支援次数跨战斗继承也不超过 6 次", () => {
+  const { c, run } = soloRun("CAP3");
+  run.supportBank = 9;
+  const { st } = soloBattle(c, run, [{ id: "thug_knife", lv: 1, zone: 2 }]);
+  assert.equal(c.soloSupportInfo().left, 6);
+  st.battleScore.total = 5000;
+  assert.equal(c.soloSupportInfo().left, 6);
+});
+
+test("单人模式主角开局坚毅生命上限 +15，第一场满坚毅出发", () => {
+  const { c, run } = soloRun("SHP1");
+  assert.equal(run.party[0].shpBonus, 15);
+  const { hero } = soloBattle(c, run, [{ id: "thug_knife", lv: 1, zone: 2 }]);
+  // 同一个角色在普通单局里的坚毅上限
+  const c2 = H.load();
+  const run2 = c2.Rogue.newRun({ party: ["ruby", "kolt"], seed: "SHP2" });
+  c2.Rogue.acceptTask(run2, "main");
+  run2.task.nodes[run2.task.index] = { type: "battle", done: false };
+  const spec = c2.Rogue.battleSpec(run2); delete spec.encounter; spec.enemies = [{ id: "thug_knife", lv: 1, zone: 2 }];
+  c2.BattleSim.setup(spec); c2.startCombat();
+  const normal = c2.findKit("ruby", c2.S.state.units);
+  assert.equal(hero.shpMax, normal.shpMax + 15);
+  assert.equal(hero.shp, hero.shpMax);
 });

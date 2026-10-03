@@ -4500,25 +4500,56 @@ function pruneAssistQueue() {
 /* ---------- 单人模式（rogue-data.js · ROGUE_SOLO） ----------
  * state.solo = { heroKit, partners, level, weaponLevel, used }，由单局的 battleSpec.before 写进来；其他模式为 null。
  *   · 主角每回合 2 行动点；可以给自己协助格挡、接自己打出的失衡做协助攻击
- *   · 支援：每得到 250 分多一次机会（没用完的次数带到之后的战斗），花 1 行动点叫一名伙伴登场，对一名敌人打一次他的协助攻击，
+ *   · 支援：攒分换机会，门槛 250 分、手里每有 1 次 +25，最多存 6 次（没用完的次数带到之后的战斗），花 1 行动点叫一名伙伴登场，对一名敌人打一次他的协助攻击，
  *     再追加 3 点同属性击破，然后退场；每名伙伴一场只能叫一次。伙伴的等级和武器等级跟主角一样。 */
 function soloCfg() {
   return typeof ROGUE_SOLO !== "undefined" ? ROGUE_SOLO
-    : { apPerRound: 2, partners: 3, supportScore: 250, supportCost: 1, supportBreak: 3 };
+    : { apPerRound: 2, partners: 3, supportScore: 250, supportStep: 25, supportMax: 6, supportCost: 1, supportBreak: 3 };
 }
 function isSoloHero(u) {
   return !!(state.solo && u && u.isPlayer && !u.isPartner && u.kit === state.solo.heroKit);
 }
-/** 支援机会：本场分数每满 500 一次，减去已经用掉的 */
+/** 支援机会：带来的 + 本场攒到的 − 已经用掉的 */
+/** 下一次支援要攒多少分：手里每持有 1 次，门槛 +supportStep */
+function soloSupportCost(held) {
+  const cfg = soloCfg();
+  return (Number(cfg.supportScore) || 250) + (Number(cfg.supportStep) || 0) * Math.max(0, held);
+}
+function soloSupportMax() { return Number(soloCfg().supportMax) || 99; }
+/** 把新得的分攒进支援进度：分数一段一段地换成支援次数（门槛看换的那一刻手里有几次），存满上限就不再攒。
+ *  so.pool 是攒着、还没换成次数的分；so.scoreSeen 是已经算进去的分数 */
+function syncSoloSupport() {
+  const so = state.solo;
+  if (!so) return;
+  const score = state.battleScore ? Math.max(0, Math.floor(state.battleScore.total || 0)) : 0;
+  so.earned = Number(so.earned) || 0;
+  so.pool = Number(so.pool) || 0;
+  so.scoreSeen = Number(so.scoreSeen) || 0;
+  so.pool = Math.max(0, so.pool + (score - so.scoreSeen));   // 招式疲劳扣分也从进度里扣
+  so.scoreSeen = score;
+  const max = soloSupportMax();
+  const bank = Math.min(max, Math.max(0, Number(so.bank) || 0));
+  let held = bank + so.earned - so.used.length;
+  while (held < max && so.pool >= soloSupportCost(held)) {
+    so.pool -= soloSupportCost(held);
+    so.earned += 1;
+    held += 1;
+  }
+  if (held >= max) so.pool = 0;   // 存满了：多出来的分不攒
+}
 function soloSupportInfo() {
   const so = state.solo;
   if (!so) return null;
-  const score = state.battleScore ? Math.max(0, Math.floor(state.battleScore.total || 0)) : 0;
-  const step = soloCfg().supportScore;
-  const earned = Math.floor(score / step);
-  const bank = Math.max(0, Number(so.bank) || 0);   // 之前战斗没用完、带过来的次数
-  const left = Math.max(0, bank + earned - so.used.length);
-  return { score, earned, bank, left, next: (earned + 1) * step, partners: so.partners.filter(k => so.used.indexOf(k) < 0) };
+  syncSoloSupport();
+  const score = so.scoreSeen;
+  const max = soloSupportMax();
+  const bank = Math.min(max, Math.max(0, Number(so.bank) || 0));   // 之前战斗没用完、带过来的次数
+  const left = Math.max(0, bank + so.earned - so.used.length);
+  const full = left >= max;
+  const cost = soloSupportCost(left);
+  return { score, earned: so.earned, bank, left, max, full, cost, progress: so.pool,
+    next: full ? null : score + Math.max(0, cost - so.pool),
+    partners: so.partners.filter(k => so.used.indexOf(k) < 0) };
 }
 /** 单人模式：主角倒地不算输。还能用坚毅生命起身就接着打（下个玩家回合点「起身」）；
  *  起不来（坚毅生命耗尽、力竭）才算真正死亡，这时战斗失败、本局结束。 */
@@ -4544,13 +4575,14 @@ function soloSupportSkill(unit) {
   if (!isSoloHero(unit)) return null;
   const info = soloSupportInfo();
   return { id: "solo_support", name: "支援", bare: true,
-    hint: `行动点 · 叫一名伙伴登场，对一名敌人打一次协助攻击 +${soloCfg().supportBreak} 击破 · 剩 ${info.left} 次（每 ${soloCfg().supportScore} 分 +1，下一次 ${info.next} 分）` };
+    hint: `行动点 · 叫一名伙伴登场，对一名敌人打一次协助攻击 +${soloCfg().supportBreak} 击破 · 剩 ${info.left} 次` +
+      (info.full ? `（已存满 ${info.max} 次）` : `（下一次 ${info.next} 分：门槛 ${soloCfg().supportScore} 分，手里每有 1 次 +${soloCfg().supportStep}，最多存 ${info.max} 次）`) };
 }
 function soloSupportError(a) {
   const info = soloSupportInfo();
   if (!info) return "只有单人模式能用";
   if (!info.partners.length) return "伙伴都已经出过场了";
-  if (info.left < 1) return `支援机会不足（本场 ${info.score} 分，满 ${info.next} 分多一次）`;
+  if (info.left < 1) return `支援机会不足（本场 ${info.score} 分，到 ${info.next} 分多一次）`;
   if (!fieldUnits().some(u => !u.isPlayer && !u.dead && !u.hidden)) return "没有敌人";
   return null;
 }
@@ -4576,6 +4608,7 @@ function runSoloSupport(a, kit, target, lines) {
   const so = state.solo;
   const p = soloSpawnPartner(kit, target.zone);
   if (!p) { lines.push("没有这名伙伴。"); return; }
+  syncSoloSupport();   // 先把用掉之前攒的分按「手里还有这次」的门槛结算掉
   so.used.push(kit);
   state.units.push(p);
   appendLog(lines.splice(0).concat([`${p.name} 登场支援（Lv${p.level}）！`]).join("\n"));

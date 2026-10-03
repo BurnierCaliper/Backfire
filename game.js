@@ -2494,11 +2494,11 @@
       rankShown = gr.score;
       paintRankAt(rankShown);
     } else rollScore(gr.score);
-    // 单人模式：支援机会（每 ROGUE_SOLO.supportScore 分一次）
+    // 单人模式：支援机会（门槛 ROGUE_SOLO.supportScore 分，手里每有 1 次 +supportStep，最多存 supportMax 次）
     const sup = typeof soloSupportInfo === "function" ? soloSupportInfo() : null;
     const supBox = box.querySelector(".rk-support");
     if (supBox) {
-      supBox.textContent = sup ? `支援 ×${sup.left}${sup.partners.length ? `　下一次 ${sup.next} 分` : "　伙伴都出过场了"}` : "";
+      supBox.textContent = sup ? `支援 ×${sup.left}${!sup.partners.length ? "　伙伴都出过场了" : sup.full ? `　已存满 ${sup.max} 次` : `　下一次 ${sup.next} 分`}` : "";
       const prevLeft = Number(supBox.dataset.left || 0);
       if (sup && sup.left > prevLeft && !G.sim) { supBox.classList.remove("gain"); void supBox.offsetWidth; supBox.classList.add("gain"); }
       supBox.dataset.left = sup ? sup.left : 0;

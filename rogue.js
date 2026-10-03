@@ -178,6 +178,8 @@ const Rogue = (function () {
       h.notes = {};
       heroProfs(h);
       if (run.solo) { h.role2 = opt.role2; h.role2Picks = []; }
+      // 单人模式：主角开局坚毅生命上限 +15（前期一个人太容易倒）
+      if (run.solo && h === run.party[0]) h.shpBonus = SOLO.shpBonus || 0;
     });
     // 本局的物资：档案从零开始
     enterRunMode();
@@ -403,6 +405,7 @@ const Rogue = (function () {
     u.xp = h.xp || 0;
     u.attrPoints = 0;               // 属性点在单局里走升级选择，不用后台的可分配点
     u.cyberPlan = h.cyber ? Object.assign({}, h.cyber) : null;   // 义体改造（growth.js 按方案重建血量层）
+    u.shpBonus = Number(h.shpBonus) || 0;   // 单人模式主角：坚毅生命上限 +15
     applyLevelStats(u);
     if (Array.isArray(h.hp)) {
       (u.layers || []).forEach((l, i) => {
@@ -411,10 +414,13 @@ const Rogue = (function () {
       });
     }
     if (h.shp != null) u.shp = Math.max(0, Math.min(Number(u.shpMax) || 0, Number(h.shp) || 0));
+    else if (u.shpBonus) u.shp = Number(u.shpMax) || 0;   // 第一场：带着加成后的满坚毅出发
     u.dying = false;
     u.upOnShp = false;
   }
   function applyPartyToField(run, notes) {
+    // 旧的单人存档也补上主角的坚毅加成
+    if (run.solo && run.party[0] && run.party[0].shpBonus == null) run.party[0].shpBonus = SOLO.shpBonus || 0;
     run.party.forEach(h => {
       const u = findKit(h.kit, state.units);
       if (!u) return;
@@ -688,7 +694,8 @@ const Rogue = (function () {
     if (!run.solo || !run.party[0]) return null;
     const h = run.party[0];
     const wl = Math.max(1, ...Object.values(h.weaponLevels || {}).map(Number).filter(x => x > 0), 1);
-    return { heroKit: h.kit, partners: run.partners.slice(), level: h.level || 1, weaponLevel: wl, used: [], bank: Math.max(0, Number(run.supportBank) || 0) };
+    return { heroKit: h.kit, partners: run.partners.slice(), level: h.level || 1, weaponLevel: wl, used: [],
+      bank: Math.min(SOLO.supportMax || 99, Math.max(0, Number(run.supportBank) || 0)), earned: 0, pool: 0, scoreSeen: 0 };
   }
 
   /** 战斗结束后调用。outcome：win / lose / retreat */

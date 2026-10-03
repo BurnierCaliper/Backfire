@@ -206,7 +206,10 @@ const ROGUE_CHECKS = {
 /* 单人模式（规则和单局一样，只有下面这些不同；已定）
  *   apPerRound      主角每回合几个行动点
  *   partners        开局选几名伙伴（支援技能从他们里面挑）
- *   supportScore    每得到多少分（本场战斗的评分）多一次支援机会
+ *   supportScore    每得到多少分（本场战斗的评分）多一次支援机会（手里没有支援时的门槛）
+ *   supportStep     手里每持有 1 次支援，下一次的门槛 +多少分
+ *   supportMax      支援最多存几次（满了不再攒分）
+ *   shpBonus        主角开局坚毅生命上限 +多少
  *   supportCost     支援技能花几个行动点
  *   supportBreak    支援的协助攻击额外造成几点（对应属性的）击破
  *   battleXp        每场战斗胜利额外给多少经验（击杀经验照常）
@@ -217,6 +220,9 @@ const ROGUE_SOLO = {
   apPerRound: 2,
   partners: 3,
   supportScore: 250,
+  supportStep: 25,
+  supportMax: 6,
+  shpBonus: 15,
   supportCost: 1,
   supportBreak: 3,
   battleXp: 50,
