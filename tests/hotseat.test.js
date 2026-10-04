@@ -1,0 +1,252 @@
+"use strict";
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const { Hotseat, LocalTransport } = require("../hotseat");
+const H = require("./headless");
+const plain = value => JSON.parse(JSON.stringify(value));
+function hero(id, kit) { return { id, kit, name: kit, isPlayer: true, shp: 10, layers: [{ current: 20 }] }; }
+function fixture(options = {}) {
+  let units = options.units || [hero("ruby", "ruby"), hero("hiaki", "hiaki"), hero("xia", "xia")];
+  let time = 1000;
+  const s = Hotseat.create({ operators: [{ id: "gm", name: "主持人" }, { id: "a", name: "甲" }, { id: "b", name: "乙" }], gmId: "gm",
+    assignments: { ruby: "a", hiaki: "b" }, getUnits: () => units, now: () => time, canStand: u => u.shp > 0 && !u.exhausted, ...options });
+  return { s, get units() { return units; }, setUnits(v) { units = v; }, advance(ms) { time += ms; } };
+}
+function force(f) { f.s.beginRound(1); f.s.forceStart("gm"); }
+
+for (const count of [2, 3, 4]) test(`${count} 个操作者完整选序、按单位完成并交给敌方`, () => {
+  const kits = ["ruby", "hiaki", "xia", "kolt"].slice(0, count), units = kits.map((k, i) => hero("h" + i, k));
+  const operators = units.map((u, i) => ({ id: "p" + i, name: "玩家" + i }));
+  const assignments = Object.fromEntries(units.map((u, i) => [u.id, "p" + i]));
+  const s = Hotseat.create({ mode: "coop", operators, gmId: "p0", assignments, getUnits: () => units });
+  s.beginRound(1);
+  for (let i = 0; i < count; i++) { s.pick("p" + i, units[i].id, i); s.confirm("p" + i); }
+  assert.equal(s.snapshot().phase, "acting");
+  for (let i = 0; i < count; i++) {
+    assert.equal(s.snapshot().currentUnitId, units[i].id);
+    assert.equal(s.assertAction("p" + i, units[i].id), true);
+    assert.equal(s.finishUnit("p" + i).roundDone, i === count - 1);
+  }
+  assert.equal(s.snapshot().phase, "enemy");
+  s.beginRound(2); assert.ok(s.snapshot().slots.every(x => x === null));
+});
+
+test("未分配英雄由GM代管，武器按主人一对多；支援伙伴和非角色召唤物不占格", () => {
+  const units = [hero("h", "hiaki"), hero("g", "ruby"),
+    { ...hero("w1", "niu"), weaponOf: "hiaki" }, { ...hero("w2", "naruto"), weaponOf: "h" },
+    { ...hero("held", "mint"), weaponOf: "ruby", hidden: true },
+    { ...hero("partner", "kolt"), isPartner: true }, hero("summon", "unknown_summon"),
+    { ...hero("foe", "ruby"), isPlayer: false }];
+  const { s } = fixture({ units, assignments: { h: "a" } });
+  assert.deepEqual(s.snapshot().roster.map(r => [r.unitId, r.operatorId]), [["h", "a"], ["g", "gm"], ["w1", "a"], ["w2", "a"]]);
+  s.beginRound(1); s.pick("a", "h", 0);
+  assert.throws(() => s.confirm("a"), /全部单位/);
+  s.pick("a", "w1", 2); s.pick("a", "w2", 3); s.confirm("a");
+  assert.equal(s.snapshot().phase, "selecting");
+  s.pick("gm", "g", 1); s.confirm("gm"); assert.equal(s.snapshot().phase, "acting");
+});
+
+test("倒地能起身保留顺位，不可起身、永久死亡、融合或离场单位排除", () => {
+  const units = [
+    { ...hero("rise", "ruby"), dying: true, layers: [{ current: 0 }] },
+    { ...hero("exhaust", "hiaki"), dying: true, exhausted: true, layers: [{ current: 0 }] },
+    { ...hero("grit", "xia"), dying: true, shp: 0, layers: [{ current: 0 }] },
+    { ...hero("dead", "kolt"), dead: true }, { ...hero("fused", "yuito"), fused: true },
+    { ...hero("gone", "chuan"), _removed: true }
+  ];
+  const { s } = fixture({ units, assignments: {} });
+  assert.deepEqual(s.snapshot().roster.map(r => r.unitId), ["rise"]);
+  s.beginRound(1); s.forceStart("gm"); assert.equal(s.assertAction("gm", "rise"), true);
+  units[0].dying = false; units[0].upOnShp = true; s.reconcile();
+  assert.equal(s.snapshot().slots[0].spent, false, "起身的既有规则不扣点，D2不能额外锁点");
+  units[0].dead = true; s.reconcile(); assert.equal(s.snapshot().phase, "enemy");
+});
+
+test("选格先到先得，可以改空格；只有房主可用当前格子开始", () => {
+  const f = fixture(), s = f.s; s.beginRound(1);
+  s.pick("a", "ruby", 1);
+  const before = s.snapshot(); assert.throws(() => s.pick("b", "hiaki", 1), /已被占用/);
+  assert.deepEqual(s.snapshot(), before);
+  s.pick("a", "ruby", 2); assert.equal(s.snapshot().slots[1], null);
+  assert.throws(() => s.forceStart("a"), /房主/);
+  s.forceStart("gm");
+  assert.deepEqual(s.snapshot().slots.map(r => r.unitId), ["hiaki", "xia", "ruby"]);
+});
+
+test("归属和顺位拒绝，主机也不能普通操作别人的角色", () => {
+  const f = fixture(), s = f.s;
+  assert.throws(() => s.assertAction("a", "ruby"), /不能操作/);
+  s.beginRound(1); assert.throws(() => s.assertAction("a", "ruby"), /确定行动顺序/);
+  s.forceStart("gm");
+  assert.throws(() => s.assertAction("b", "ruby"), /不是你的/);
+  assert.throws(() => s.assertAction("gm", "ruby"), /不是你的/);
+  assert.throws(() => s.assertAction("b", "hiaki"), /还没轮到/);
+  assert.throws(() => s.finishUnit("b", "hiaki"), /还没轮到/);
+});
+
+test("开场反应已花点的单位可首次选位，落格后不能通过再次pick绕过锁定", () => {
+  const f = fixture(), s = f.s; s.beginRound(1);
+  s.markSpent([{ unitId: "hiaki", ap: 0, bonus: 1 }]);
+  s.pick("b", "hiaki", 2); s.confirm("b");
+  assert.equal(s.snapshot().slots[2].spent, true);
+  const before = s.snapshot();
+  assert.throws(() => s.pick("b", "hiaki", 1), /固定/);
+  assert.deepEqual(s.snapshot(), before);
+  assert.deepEqual(s.pick("b", "hiaki", 2), before, "同一位置幂等，保留已确认状态");
+  s.pick("a", "ruby", 0);
+  s.forceStart("gm");
+  assert.deepEqual(s.snapshot().slots.map(r => r.unitId), ["ruby", "xia", "hiaki"]);
+  assert.equal(s.snapshot().slots[2].spent, true);
+});
+
+test("未花点当前单位能让位；移到尾部留空，固定格的绝对位置不变", () => {
+  const f = fixture(), s = f.s; force(f);
+  const first = s.move("a", "ruby", 3);
+  assert.equal(first.status, "moved"); assert.equal(s.snapshot().slots[0], null);
+  assert.equal(s.snapshot().currentUnitId, "hiaki");
+  s.markSpent([{ unitId: "hiaki", ap: 0, bonus: 1 }]);
+  assert.throws(() => s.move("b", "hiaki", 4), /固定/);
+  assert.throws(() => s.move("a", "ruby", 0), /固定格子之后/);
+  s.move("a", "ruby", 4);
+  assert.equal(s.snapshot().slots[1].unitId, "hiaki");
+  assert.equal(s.snapshot().slots[3], null);
+});
+
+test("后位反应锁定后，前方未行动者仍可移到尾部空格且不挤动锁格", () => {
+  const f = fixture(), s = f.s; force(f);
+  s.markSpent([{ unitId: "xia", ap: 0, bonus: 1 }]);
+  s.move("a", "ruby", 3);
+  assert.deepEqual(s.snapshot().slots.map(r => r && r.unitId), [null, "hiaki", "xia", "ruby"]);
+  assert.equal(s.snapshot().slots[2].spent, true);
+  assert.throws(() => s.move("b", "hiaki", 3), /互换双方/);
+  assert.equal(s.snapshot().slots[2].unitId, "xia");
+});
+
+test("只认实际正支出；扣后退款不会解锁，完成格固定，新回合才清锁", () => {
+  const f = fixture(), s = f.s; force(f);
+  s.markSpent([{ unitId: "ruby", ap: 0, bonus: 0 }]); assert.equal(s.snapshot().slots[0].spent, false);
+  s.markSpent([{ unitId: "ruby", ap: 1, bonus: 0 }]);
+  s.markSpent([{ unitId: "ruby", ap: -1, bonus: 0 }]); assert.equal(s.snapshot().slots[0].spent, true);
+  s.finishUnit("a"); assert.equal(s.snapshot().slots[0].completed, true);
+  assert.throws(() => s.move("a", "ruby", 3), /固定/);
+  s.finishUnit("b"); s.finishUnit("gm"); s.beginRound(2); s.forceStart("gm");
+  assert.ok(s.snapshot().slots.every(r => !r.spent && !r.completed));
+});
+
+test("跨主人互换需目标主人同意，其他人不能代答或操作请求", () => {
+  const f = fixture(), s = f.s; force(f);
+  const before = s.snapshot().slots;
+  const request = s.move("a", "ruby", 1); assert.equal(request.status, "pending");
+  assert.deepEqual(s.snapshot().slots, before);
+  assert.throws(() => s.acceptSwap("gm", request.requestId, true), /不是发给你/);
+  s.acceptSwap("b", request.requestId, true);
+  assert.deepEqual(s.snapshot().slots.map(r => r.unitId), ["hiaki", "ruby", "xia"]);
+  assert.throws(() => s.acceptSwap("b", request.requestId, true), /失效/);
+  const second = s.move("b", "hiaki", 1); s.acceptSwap("a", second.requestId, false);
+  assert.equal(s.snapshot().slots[0].unitId, "hiaki");
+});
+
+test("同主人直接换，跑团GM可以直接调别人，合作房主没有GM越权", () => {
+  const f = fixture({ assignments: { ruby: "a", hiaki: "a" } }); force(f);
+  assert.equal(f.s.move("a", "ruby", 1).status, "moved");
+  assert.equal(f.s.move("gm", "ruby", 2).status, "moved");
+  const coop = fixture({ mode: "coop" }); force(coop);
+  assert.throws(() => coop.s.move("gm", "ruby", 1), /不是你的/);
+});
+
+test("互换期间花点或离场让请求失效", () => {
+  const f = fixture(), s = f.s; force(f);
+  const first = s.move("a", "ruby", 1);
+  s.markSpent([{ unitId: "hiaki", bonus: 1, ap: 0 }]);
+  assert.throws(() => s.acceptSwap("b", first.requestId, true), /失效/);
+  assert.equal(s.snapshot().pendingSwaps.length, 0);
+});
+
+test("真实绯秋武器新id再唤出继承同回合支出锁，恢复融合单位也保留锁", () => {
+  const c = H.load(); c.BattleSim.setup({ party: ["hiaki", "ruby"], enemies: [{ id: "thug_knife", lv: 1, zone: 2 }], seed: "D2-WEAPON" }); c.startCombat();
+  const st = c.S.state, h = c.findKit("hiaki", st.units), ruby = c.findKit("ruby", st.units);
+  const s = Hotseat.create({ operators: ["a", "b"], gmId: "a", assignments: { [h.id]: "a", [ruby.id]: "b" }, getUnits: () => st.units, canStand: u => !c.standUpBlocked(u) });
+  s.beginRound(1); s.forceStart("a");
+  c.dispatch({ type: "skill", actor: h.id, skill: "hiaki_summon", target: null, picks: { blade: "niu" } });
+  s.reconcile();
+  const firstWeapon = st.units.find(u => u.kit === "niu" && !u.hidden);
+  assert.ok(firstWeapon); assert.equal(s.snapshot().slots.at(-1).unitId, firstWeapon.id); assert.equal(s.ownerOf(firstWeapon.id), "a");
+  s.markSpent([{ unitId: firstWeapon.id, ap: 1, bonus: 0 }]);
+  firstWeapon.hidden = true; s.reconcile(); assert.equal(s.ownerOf(firstWeapon.id), null);
+  const replacement = { ...plain(firstWeapon), id: "new-niu-id", hidden: false };
+  st.units = st.units.filter(u => u.id !== firstWeapon.id).concat(replacement); s.reconcile();
+  assert.equal(s.snapshot().slots.at(-1).unitId, replacement.id); assert.equal(s.snapshot().slots.at(-1).spent, true);
+  assert.throws(() => s.move("a", replacement.id, s.snapshot().slots.length), /固定/);
+  replacement.fused = true; s.reconcile(); replacement.fused = false; s.reconcile();
+  assert.equal(s.snapshot().slots.at(-1).spent, true);
+});
+
+test("协助只给候选操作者选项，同一主人可选自己的多个单位；最先同意者生效", () => {
+  const f = fixture({ units: [hero("ruby", "ruby"), hero("hiaki", "hiaki"), hero("xia", "xia"), { ...hero("niu", "niu"), weaponOf: "hiaki" }] }), s = f.s;
+  force(f);
+  const closed = []; s.onAskClosed(x => closed.push(x));
+  const ask = s.openAsk({ kind: "block", jobId: 5, targetId: "ruby", candidates: ["hiaki", "niu", "xia"] });
+  assert.deepEqual(s.askFor("a").options, []);
+  assert.deepEqual(s.askFor("b").options.map(x => x.unitId), ["hiaki", "niu"]);
+  assert.equal(Object.hasOwn(s.snapshot().ask, "candidates"), false);
+  assert.throws(() => s.answer("a", ask.id, { unitId: "hiaki" }), /没有发给你/);
+  assert.throws(() => s.answer("b", ask.id, { unitId: "xia" }), /其他单位/);
+  const accepted = s.answer("b", ask.id, { unitId: "niu", extra: {} });
+  assert.equal(accepted.accepted, true);
+  const late = s.answer("gm", ask.id, { unitId: "xia" }); assert.equal(late.accepted, false);
+  assert.equal(late.result.unitId, "niu"); assert.equal(closed.length, 1);
+  assert.equal(s.snapshot().ask, null);
+});
+
+test("协助不要求当前顺位，等待中普通行动暂停，全部拒绝或20秒到期不协助", () => {
+  const f = fixture(), s = f.s; force(f);
+  let ask = s.openAsk({ kind: "assist", candidates: ["hiaki", "xia"] });
+  assert.throws(() => s.assertAction("a", "ruby"), /等待协助/);
+  assert.equal(s.answer("b", ask.id, { unitId: null }).status, "waiting");
+  assert.equal(s.askFor("b").declined, true); assert.deepEqual(s.askFor("b").options, []);
+  assert.equal(s.answer("gm", ask.id, { unitId: null }).result.reason, "declined");
+  ask = s.openAsk({ kind: "assist", candidates: ["hiaki"] });
+  assert.equal(s.askFor("b").deadline, 21000);
+  f.advance(19999); s.tick(); assert.ok(s.snapshot().ask);
+  f.advance(1); assert.equal(s.answer("b", ask.id, { unitId: "hiaki" }).result.reason, "timeout");
+  assert.equal(s.snapshot().ask, null); assert.equal(s.assertAction("a", "ruby"), true);
+});
+
+test("候选离场和战斗结束关闭询问，重复回答不重复结算", () => {
+  const f = fixture(), s = f.s; force(f); const events = []; s.onAskClosed(x => events.push(x));
+  const ask = s.openAsk({ kind: "assist", candidates: ["hiaki"] });
+  f.units.find(u => u.id === "hiaki").dead = true; s.reconcile();
+  assert.equal(events[0].reason, "unavailable"); assert.equal(s.answer("b", ask.id, { unitId: "hiaki" }).accepted, false);
+  s.openAsk({ kind: "block", candidates: ["ruby"] }); s.endBattle(); assert.equal(events[1].reason, "ended");
+  assert.equal(s.snapshot().phase, "ended");
+});
+
+test("只有战前/探索可重分配；聊天限大厅与选序；快照不能改权威状态", () => {
+  const f = fixture(), s = f.s;
+  s.setAssignments({ ruby: "b", hiaki: "a" }); assert.equal(s.ownerOf("ruby"), "b");
+  assert.throws(() => s.setAssignments({ ruby: "unknown" }), /操作者/);
+  s.chat("a", "  让我先走  "); assert.equal(s.snapshot().chat[0].text, "让我先走");
+  const view = s.snapshot(); view.roster[0].operatorId = "gm"; view.assignments.ruby = "gm";
+  assert.equal(s.ownerOf("ruby"), "b");
+  s.beginRound(1); s.chat("b", "可以"); s.forceStart("gm");
+  assert.throws(() => s.chat("a", "战斗中"), /只在大厅/);
+  assert.throws(() => s.setAssignments({}), /战斗中/);
+  s.endBattle(); s.setAssignments({}); s.reset(); assert.equal(s.snapshot().phase, "setup");
+});
+
+test("LocalTransport同步先到先得，身份绑定连接，所有收件人获得独立JSON副本", () => {
+  const hub = LocalTransport.createHub({ hostId: "authority" }), a = hub.connect("a"), b = hub.connect("b");
+  const received = [];
+  hub.host.onMessage((message, from) => { received.push({ from, value: message.value }); message.value = 99; });
+  const original = { type: "answer", value: 1, from: "forged" }; a.send(original); b.send({ type: "answer", value: 2 });
+  assert.deepEqual(received, [{ from: "a", value: 1 }, { from: "b", value: 2 }]); assert.equal(original.value, 1);
+  let aView, bView;
+  a.onMessage(m => { aView = m; m.nested.value = 99; }); b.onMessage(m => { bView = m; });
+  hub.host.send({ type: "view", nested: { value: 3 } }); assert.equal(aView.nested.value, 99); assert.equal(bView.nested.value, 3);
+  hub.host.send({ type: "view", nested: { value: 4 } }, "b"); assert.equal(bView.nested.value, 4);
+  assert.throws(() => a.send({ type: "cmd" }, "b"), /only send/);
+  assert.throws(() => hub.connect("authority"), /Duplicate/);
+  assert.throws(() => a.send({ callback() {} }), /JSON/);
+  a.close(); assert.throws(() => a.send({ type: "cmd" }), /closed/);
+  hub.close(); assert.throws(() => b.send({ type: "cmd" }), /closed/);
+});

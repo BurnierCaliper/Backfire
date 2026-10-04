@@ -2,7 +2,11 @@
 "use strict";
 const { spawnSync } = require("node:child_process");
 const path = require("node:path");
-const result = spawnSync(process.execPath, ["--test", "tests/ui.test.js"], {
+const fs = require("node:fs");
+const uiTests = fs.readdirSync(path.resolve(__dirname, "../tests"))
+  .filter(name => name === "ui.test.js" || name.endsWith("-ui.test.js"))
+  .sort().map(name => "tests/" + name);
+const result = spawnSync(process.execPath, ["--test", ...uiTests], {
   cwd: path.resolve(__dirname, ".."),
   env: { ...process.env, REQUIRE_UI: "1" },
   stdio: "inherit"
