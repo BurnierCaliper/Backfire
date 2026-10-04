@@ -366,6 +366,8 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **字体：去掉潦草的毛笔字和手写体**（`skin.css`、`hotseat.css`、`online-gm-ui.css`、`routemap.js`）。标题、标签、「Lv1」这类小字、回合 / 阶段大字、路线图墙上的喷漆字，原来用指芒星（毛笔）和 Permanent Marker（手写），现在统一用黑体加粗。只改显示，规则不变。
+
 - **川川 / 诺拉按新版角色卡微调**（`app.js · runSkillInner / skillFlowSteps / hitBarrier`、`party.js`、`engine.js`、`skill-text.js`、`game.js`）
   - **川川**
     - 效果位：高能 → 蓄能。

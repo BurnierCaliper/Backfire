@@ -21,9 +21,9 @@
   --sk-ink: #0b0806;
   --sk-tape: rgba(220, 210, 186, .95);
 
-  --sk-marker: "Permanent Marker", "Comic Sans MS", cursive;
+  --sk-marker: var(--sk-body);   /* 原来是手写体 Permanent Marker：太潦草，改成黑体 */
   --sk-stencil: "Black Ops One", Impact, sans-serif;
-  --sk-tag: "Zhi Mang Xing", "ZCOOL QingKe HuangYou", cursive;
+  --sk-tag: var(--sk-body);      /* 原来是毛笔字（指芒星）：太潦草，标题也改成黑体加粗 */
   --sk-label: "ZCOOL QingKe HuangYou", "Noto Sans SC", "Microsoft YaHei", sans-serif;   /* 15px 以上才用，小字它不好认 */
   --sk-name: var(--sk-body);   /* 单位名字、按钮：统一用好认的黑体加粗 */
   --sk-body: "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
@@ -47,7 +47,7 @@
 :is(.scr-party, .scr-run, .scr-trpg) h2 {
   position: relative; display: inline-block; isolation: isolate;
   margin: 4px 0 12px; padding: 4px 18px 6px 12px;
-  font-family: var(--sk-tag); font-weight: 400; font-size: 32px; line-height: 1.1; letter-spacing: .02em;
+  font-family: var(--sk-tag); font-weight: 800; font-size: 32px; line-height: 1.1; letter-spacing: .02em;
   color: var(--sk-ink); transform: rotate(-1.2deg);
 }
 :is(.scr-party, .scr-run, .scr-trpg) h2::before {
@@ -61,7 +61,7 @@
   font-family: var(--sk-body); font-size: 13px; letter-spacing: 0; color: var(--sk-ink); opacity: .85;
 }
 :is(.scr-party, .scr-run, .scr-trpg) :is(.r-sub, .r-panel > h3) {
-  font-family: var(--sk-tag); font-weight: 400; font-size: 24px; letter-spacing: .02em; color: var(--sk-canvas);
+  font-family: var(--sk-tag); font-weight: 800; font-size: 24px; letter-spacing: .02em; color: var(--sk-canvas);
   text-shadow: 2px 2px 0 var(--sk-ink);
 }
 
@@ -124,13 +124,13 @@
 }
 .t-name span {
   display: block; margin: -4px 0 0 34%;
-  font-family: var(--sk-marker); font-size: .9em; letter-spacing: 0;
+  font-family: var(--sk-marker); font-weight: 700; font-size: .9em; letter-spacing: 0;
   color: var(--sk-hazard); text-shadow: 4px 4px 0 var(--sk-ink);
   transform: rotate(-6deg); transform-origin: left center;
 }
 .t-sub {
   align-self: flex-start; margin: 8px 0 22px; padding: 2px 16px 3px;
-  font-family: var(--sk-tag); font-size: 22px; letter-spacing: .04em; color: var(--sk-ink);
+  font-family: var(--sk-tag); font-weight: 800; font-size: 22px; letter-spacing: .04em; color: var(--sk-ink);
   background: var(--sk-tape); transform: rotate(-2deg);
   clip-path: polygon(2% 8%, 0 0, 100% 4%, 98% 40%, 100% 100%, 3% 94%, 0 55%);
   box-shadow: 0 2px 3px rgba(0, 0, 0, .4);
@@ -182,11 +182,11 @@
 }
 .hero-pick.on::after {
   content: "IN!"; position: absolute; right: -8px; top: -12px;
-  padding: 0 8px; font-family: var(--sk-marker); font-size: 14px; color: var(--sk-ink);
+  padding: 0 8px; font-family: var(--sk-marker); font-weight: 700; font-size: 14px; color: var(--sk-ink);
   background: var(--sk-mint); border-radius: 3px; transform: rotate(8deg); box-shadow: 1px 2px 0 rgba(0, 0, 0, .55);
 }
 .hp-name { font-family: var(--sk-name); font-weight: 700; font-size: 22px; line-height: 1; text-shadow: 3px 3px 0 var(--sk-ink); }
-.hp-name small { font-family: var(--sk-marker); font-size: 12px; color: var(--sk-muted); text-shadow: none; }
+.hp-name small { font-family: var(--sk-marker); font-weight: 700; font-size: 12px; color: var(--sk-muted); text-shadow: none; }
 .sp-foot {
   background: var(--sk-oil); background-image: var(--sk-noise);
   border-top: 4px solid var(--sk-ink);
@@ -222,7 +222,7 @@
 .rhero { padding: 10px 12px 12px 14px; border-left-width: 7px; border-left-color: #4f8fd0; }
 .rhero.dying { border-left-color: var(--sk-blood); }
 .rh-top b { font-family: var(--sk-name); font-weight: 700; font-size: 18px; line-height: 1; text-shadow: 2px 2px 0 var(--sk-ink); }
-.rh-top span { font-family: var(--sk-marker); color: var(--sk-muted); }
+.rh-top span { font-family: var(--sk-marker); font-weight: 700; color: var(--sk-muted); }
 .rh-top em { color: var(--sk-hazard); }
 .rh-row > span:last-child { font-family: var(--sk-stencil); color: var(--sk-canvas); }
 .rbar { height: 9px; background: #3a2c22; border: 2px solid var(--sk-ink); border-radius: 0; transform: skewX(-18deg); }
@@ -234,7 +234,7 @@
 /* ---------- 单局 · 记录栏：胶带标题 + 贴在墙上的纸条 ---------- */
 .run-log h3 {
   display: inline-block; margin: 0 0 12px; padding: 1px 14px 2px;
-  font-family: var(--sk-tag); font-size: 22px; letter-spacing: .04em; color: var(--sk-ink);
+  font-family: var(--sk-tag); font-weight: 800; font-size: 22px; letter-spacing: .04em; color: var(--sk-ink);
   background: var(--sk-tape); transform: rotate(-3deg);
   clip-path: polygon(2% 8%, 0 0, 100% 4%, 98% 40%, 100% 100%, 3% 94%, 0 55%);
 }
@@ -250,7 +250,7 @@
 .task.key { border-color: var(--sk-ink); box-shadow: 5px 6px 0 rgba(0, 0, 0, .5), inset 0 0 0 2px var(--sk-hazard); }
 .t-head b { font-family: var(--sk-name); font-weight: 700; font-size: 20px; line-height: 1; text-shadow: 2px 2px 0 var(--sk-ink); }
 .t-head .tag {
-  font-family: var(--sk-marker); font-size: 12px; padding: 1px 8px; color: var(--sk-ink);
+  font-family: var(--sk-marker); font-weight: 700; font-size: 12px; padding: 1px 8px; color: var(--sk-ink);
   background: var(--sk-hazard); border-radius: 3px; transform: rotate(-4deg); box-shadow: 1px 2px 0 rgba(0, 0, 0, .55);
 }
 .t-head .days { font-family: var(--sk-stencil); color: var(--sk-hazard); }
@@ -310,7 +310,7 @@ details.smith .sm-price, details.smith .sm-prog.ready { color: var(--sk-hazard);
 .tr-top b { font-family: var(--sk-stencil); font-weight: 400; color: var(--sk-hazard); }
 .tr-tab { font-family: var(--sk-name); font-weight: 700; font-size: 16px; }
 .tr-tab.on { color: var(--sk-hazard); border-bottom: 4px solid var(--sk-hazard); }
-.tr-panel h3 { font-family: var(--sk-tag); font-weight: 400; font-size: 24px; text-shadow: 2px 2px 0 var(--sk-ink); }
+.tr-panel h3 { font-family: var(--sk-tag); font-weight: 800; font-size: 24px; text-shadow: 2px 2px 0 var(--sk-ink); }
 .tr-slot-head b { font-family: var(--sk-name); font-weight: 700; font-size: 19px; text-shadow: 2px 2px 0 var(--sk-ink); }
 .tr-slot.on { box-shadow: 5px 6px 0 rgba(0, 0, 0, .5), inset 0 0 0 2px var(--sk-hazard); }
 .tr-panel input, .tr-panel select { background: var(--sk-oil); border: 2px solid var(--sk-ink); border-radius: 0; color: var(--sk-canvas); }
@@ -334,7 +334,7 @@ details.smith .sm-price, details.smith .sm-prog.ready { color: var(--sk-hazard);
   background: var(--sk-oil); background-image: var(--sk-noise);
   border-bottom: 4px solid var(--sk-ink);
 }
-.g-round { font-family: var(--sk-tag); font-size: 28px; text-shadow: 2px 2px 0 var(--sk-ink); }
+.g-round { font-family: var(--sk-tag); font-weight: 800; font-size: 28px; text-shadow: 2px 2px 0 var(--sk-ink); }
 .g-phase { font-family: var(--sk-label); font-size: 15px; }
 .g-phase.enemy { color: #ff6a55; }
 .g-weather { border: 2px solid var(--sk-ink); background: rgba(0, 0, 0, .3); color: var(--sk-hazard); }
@@ -352,8 +352,8 @@ details.smith .sm-price, details.smith .sm-prog.ready { color: var(--sk-hazard);
 .pvtag, .banner { background: rgba(11, 8, 6, .94); border: 2px solid var(--sk-ink); box-shadow: 3px 4px 0 rgba(0, 0, 0, .5); }
 .pvtag .dmg { font-family: var(--sk-stencil); font-weight: 400; }
 .banner { font-family: var(--sk-name); font-weight: 700; font-size: 16px; }
-.phase-card { font-family: var(--sk-tag); font-weight: 400; font-size: 56px; letter-spacing: .2em; }
-.stamp { font-family: var(--sk-tag); font-weight: 400; }
+.phase-card { font-family: var(--sk-tag); font-weight: 800; font-size: 56px; letter-spacing: .2em; }
+.stamp { font-family: var(--sk-tag); font-weight: 800; }
 .pop { font-family: var(--sk-stencil); font-weight: 400; }
 
 /* ---------- 操作栏 ---------- */
@@ -416,7 +416,7 @@ details.smith .sm-price, details.smith .sm-prog.ready { color: var(--sk-hazard);
 }
 .choice h3 {
   display: inline-block; padding: 1px 16px 3px; margin-bottom: 12px;
-  font-family: var(--sk-tag); font-weight: 400; font-size: 30px; color: var(--sk-ink);
+  font-family: var(--sk-tag); font-weight: 800; font-size: 30px; color: var(--sk-ink);
   background: var(--sk-tape); transform: rotate(-2deg);
   clip-path: polygon(2% 8%, 0 0, 100% 4%, 98% 40%, 100% 100%, 3% 94%, 0 55%);
 }
@@ -432,10 +432,10 @@ details.smith .sm-price, details.smith .sm-prog.ready { color: var(--sk-hazard);
 .check-num { font-family: var(--sk-stencil); }
 .check-num.ok { color: var(--sk-hazard); }
 .check-num.fail { color: #ff5a48; }
-.sheet-head h3 { font-family: var(--sk-tag); font-weight: 400; font-size: 26px; text-shadow: 2px 2px 0 var(--sk-ink); }
+.sheet-head h3 { font-family: var(--sk-tag); font-weight: 800; font-size: 26px; text-shadow: 2px 2px 0 var(--sk-ink); }
 .sheet-k b, .lm-val { font-family: var(--sk-stencil); color: var(--sk-hazard); }
 .result h2 {
-  font-family: var(--sk-tag); font-weight: 400; font-size: 84px; letter-spacing: .12em;
+  font-family: var(--sk-tag); font-weight: 800; font-size: 84px; letter-spacing: .12em;
   text-shadow: 4px 5px 0 var(--sk-ink);
 }
 .result h2.win { color: var(--sk-hazard); }
