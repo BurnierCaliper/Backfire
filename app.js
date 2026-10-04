@@ -9026,9 +9026,10 @@ function runSkillInner(id, optRun) {
       const next = swapKoltBit(a, lines);
       const tgt = (state.skillFlow && state.skillFlow.picks.target) ? unitById(state.skillFlow.picks.target) : t;
       if (tgt) {
-        // 「攻击范围内」按换上去的新刀头算：电钻近距离，酸液炮远距离
+        // 柯尔特被动「更换刀头」：不管换成哪种刀头，都打同区域（近距离）的敌人。
+        // 扭矩的「拆装部件」是自己的技能，仍按新刀头的对应距离打
         const ele = next === "acid" ? "acid" : "electric";
-        const rng = next === "acid" ? "ranged" : "melee";
+        const rng = id === "kolt_swap" ? "melee" : (next === "acid" ? "ranged" : "melee");
         hitOne(a, tgt, { element: ele, mult: 0.5, baseBreak: 0, atk, atkRange: rng });
       }
       if (id === "torque_swap") lines.push(...returnWeapon(a));

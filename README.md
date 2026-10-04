@@ -366,6 +366,10 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **柯尔特被动「更换刀头」：切刀攻击总是打近距离**（`skill-text.js`、`app.js`、`engine.js`）。更换后即刻对一名**同区域内**的敌人造成 0.5×atk 的对应属性伤害，换成酸液炮也一样（以前说明写的是「攻击范围内」，酸液炮按远距离算）。协助攻击和格挡成功后的切刀本来就只打同区，说明和规则现在一致。扭矩的「拆装部件」是它自己的技能，仍按新刀头的对应距离打。测试：`tests/chuan-nora.test.js`。
+
+- **川川改为主属性电、副属性能量**（`party.js` 角色卡）：默认属性（计算器预选、借机攻击单元等读的属性）能量 → 电，角色说明「能量/电」→「电/能量」。技能的属性按新版角色卡不变（普通攻击、协助攻击、巨刃划空是电，电击鞭是能量）。测试：`tests/chuan-nora.test.js`。
+
 - **字体：去掉潦草的毛笔字和手写体**（`skin.css`、`hotseat.css`、`online-gm-ui.css`、`routemap.js`）。标题、标签、「Lv1」这类小字、回合 / 阶段大字、路线图墙上的喷漆字，原来用指芒星（毛笔）和 Permanent Marker（手写），现在统一用黑体加粗。只改显示，规则不变。
 
 - **川川 / 诺拉按新版角色卡微调**（`app.js · runSkillInner / skillFlowSteps / hitBarrier`、`party.js`、`engine.js`、`skill-text.js`、`game.js`）
