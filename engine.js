@@ -196,7 +196,7 @@ const SKILL_RANGE = {
   kolt_short: { min: 0, max: 1 },
   kolt_chase: { min: 0, max: 99 },
   torque_boost: { min: 0, max: 1 },
-  torque_swap: { min: 0, max: 0 },
+  torque_swap: { min: 0, max: 1 },   // 拆装部件：电钻打同区、酸液炮打距离 1（按换上去的刀头）
   torque_strip: { min: 0, max: 0 },
   helu_aa: { min: 1, max: 1 },
   helu_scan: { min: 0, max: 99 },

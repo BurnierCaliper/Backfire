@@ -6252,9 +6252,19 @@ function skillFlowSteps(id, actor, picks) {
         units: fieldUnits().filter(u => !u.isPlayer && !u.dead && !u.hidden && !u.fused) }
     ];
   }
-  if (id === "kolt_swap" || id === "torque_swap") {
+  if (id === "kolt_swap") {
     const units = fieldUnits().filter(u => !u.isPlayer && !u.dead && !u.hidden && !u.fused && Number(u.zone) === Number(actor.zone));
     return [{ key: "target", type: "unit", optional: true, label: "切刀近距离目标（同区，可不选）", units }];
+  }
+  if (id === "torque_swap") {
+    // 拆装部件：先换刀头，再按「换上去的」刀头的距离打——换成电钻打同区，换成酸液炮打距离 1
+    const k = findKit("kolt", state.units);
+    const next = ((k && k.resources && k.resources.bit) || "drill") === "acid" ? "drill" : "acid";
+    const d = next === "acid" ? 1 : 0;
+    const units = fieldUnits().filter(u => !u.isPlayer && !u.dead && !u.hidden && !u.fused &&
+      zoneDist(actor.zone, u.zone, maxZ) === d);
+    return [{ key: "target", type: "unit", optional: true,
+      label: next === "acid" ? "换成酸液炮：打距离 1 的一名敌人（可不选）" : "换成电钻：打同区的一名敌人（可不选）", units }];
   }
   if (id === "kolt_short") {
     const zones = [];
@@ -9026,11 +9036,13 @@ function runSkillInner(id, optRun) {
       const next = swapKoltBit(a, lines);
       const tgt = (state.skillFlow && state.skillFlow.picks.target) ? unitById(state.skillFlow.picks.target) : t;
       if (tgt) {
-        // 柯尔特被动「更换刀头」：不管换成哪种刀头，都打同区域（近距离）的敌人。
-        // 扭矩的「拆装部件」是自己的技能，仍按新刀头的对应距离打
+        // 柯尔特被动「更换刀头」：不管换成哪种刀头，都打同区域（近距离）的敌人，0.5×atk。
+        // 扭矩的「拆装部件」：按换上去的刀头的对应距离打（电钻同区 / 酸液炮距离 1），1×atk + 1 击破
         const ele = next === "acid" ? "acid" : "electric";
-        const rng = id === "kolt_swap" ? "melee" : (next === "acid" ? "ranged" : "melee");
-        hitOne(a, tgt, { element: ele, mult: 0.5, baseBreak: 0, atk, atkRange: rng });
+        if (id === "kolt_swap") hitOne(a, tgt, { element: ele, mult: 0.5, baseBreak: 0, atk, atkRange: "melee" });
+        else hitOne(a, tgt, { element: ele, mult: 1, baseBreak: 1, atk, atkRange: next === "acid" ? "ranged" : "melee" });
+      } else if (id === "torque_swap") {
+        lines.push(next === "acid" ? "距离 1 没有选目标，只更换刀头。" : "同区没有选目标，只更换刀头。");
       }
       if (id === "torque_swap") lines.push(...returnWeapon(a));
     } else if (id === "kolt_short") {
