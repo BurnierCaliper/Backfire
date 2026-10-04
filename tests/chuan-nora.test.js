@@ -164,3 +164,21 @@ test("川川：主属性电、副属性能量（角色卡 note 与默认属性�
   assert.equal(els[0], "electric");
   assert.ok(els.includes("energy"));
 });
+
+test("柯尔特被动「更换刀头」：换成酸液炮也打同区（近距离），远处的敌人打不到", () => {
+  const c = H.load();
+  c.BattleSim.setup({ party: ["kolt"], enemies: [{ id: "thug_hammer", lv: 1, zone: 1 }, { id: "thug_knife", lv: 1, zone: 2 }], seed: "KS" });
+  c.startCombat();
+  const st = c.S.state;
+  const kolt = c.findKit("kolt", st.units);
+  kolt.zone = 1; kolt.resources.bit = "drill";
+  const [near, far] = st.units.filter(u => !u.isPlayer);
+  near.zone = 1; far.zone = 2;
+  assert.equal(c.koltMeleeSwapTargets(kolt).map(u => u.id).join(","), near.id);
+  const h0 = c.totalHp(near);
+  c.queueKoltSwap(kolt);
+  c.resolveKoltSwap(true, near.id);
+  assert.equal(kolt.resources.bit, "acid");
+  assert.ok(c.totalHp(near) < h0, "换成酸液炮后照样打同区敌人");
+  assert.match(c.SkillText.kitInfo("kolt").passives[0].text, /同区域内的敌人/);
+});

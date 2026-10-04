@@ -192,7 +192,7 @@ const SKILL_RANGE = {
   kolt_aa: { min: 0, max: 1 },
   // 更换刀头的追击射程取决于换上去的新刀头（电钻近距离 / 酸液炮远距离），
   // 所以外层放到 0–1，具体由技能内部按新刀头判定
-  kolt_swap: { min: 0, max: 1 },
+  kolt_swap: { min: 0, max: 0 },   // 更换刀头的切刀攻击总是打同区
   kolt_short: { min: 0, max: 1 },
   kolt_chase: { min: 0, max: 99 },
   torque_boost: { min: 0, max: 1 },
