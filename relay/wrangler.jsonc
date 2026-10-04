@@ -14,7 +14,7 @@
     { "tag": "v1", "new_sqlite_classes": ["Room", "Admission"] }
   ],
   "vars": {
-    "ALLOWED_ORIGINS": "http://localhost:8080,http://127.0.0.1:8080",
+    "ALLOWED_ORIGINS": "null,http://localhost:8080,http://127.0.0.1:8080",
     "ROOM_TTL_SECONDS": "86400"
   }
 }

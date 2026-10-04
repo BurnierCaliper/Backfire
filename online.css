@@ -94,7 +94,11 @@
 .ol-exploration-party { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
 .ol-wait { max-width: 600px; margin: 60px auto; }
 .ol-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
-body.online-player > :is([id^="scr-"], .g-app, .banner), body.online-player > .g-modal { display: none !important; }
+/* A remote player uses only these two presentation surfaces. Some retained
+ * calculator dialogs live outside the original screen roots; hiding individual
+ * screen IDs leaves those dialogs in the outer document and its scroll range. */
+body.online-player { overflow: hidden; }
+body.online-player > :not(.ol-ui):not(.hs-ui) { display: none !important; }
 @keyframes ol-impact { 50% { background: #64543c; transform: translateX(2px); } }
 @media (max-width: 650px) {
   .ol-overlay { padding: 10px 8px 24px; }

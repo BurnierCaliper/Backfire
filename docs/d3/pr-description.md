@@ -21,17 +21,20 @@ D3 在 D2 本机权威模型上接入在线跑团：主持人开房、玩家各�
 
 - `npm test`：570 项，569 通过、0 失败、1 项原有 `ROLE_PATH_CHOICE` 跳过。
 - `npm run test:ui`：77/77 通过，零跳过。原有测试断言未改。
-- `npm --prefix relay run check`：Wrangler dry-run 通过，未部署。
+- `npm --prefix relay run check`：Wrangler dry-run 通过，18.67 KiB / gzip 5.63 KiB。
+- 独立公网转发服务已部署：[健康检查](https://backfire-relay.richardguu22.workers.dev/health)。版本 `4d8e54e9-e4b8-427d-aacc-810b417c496b`；既有网站服务、域名、路由、账号权限和套餐未改。
+- 公网专用套件 `node tools/test-online-public.cjs`：4/4 通过，0 跳过，三个同机隔离浏览器直接连接 Cloudflare。实际 30 秒房主断线恢复、协议/构建拒绝、私信帧隔离通过；五次公告全部显示的延迟中位数 67.5 ms、最大 68.8 ms，仅代表本次同机同网络地点采样。
 - 真实 `game.html` + workerd/SQLite + 三个隔离浏览器验证：完整胜利结算与原槽返回探索、AI/手动敌人、本人反应、询问中房主刷新、旧回答拒绝且攻击不重放、私信与回复不进入旁人网络数据。
 - 4v3 双击攻击每名玩家完整动作数据 27,381 B，最大单包 11,299 B；移动合计 24,183 B，最大单包 8,101 B。测量在投影和差异编码后、转发分片前。
 - 新增 120 项测试，其中浏览器 23 项；最大新增文件约 50 KB。依赖、缓存、截图和构建产物不入库。
 
 消息完整保存在主持人设备，实时窗口和历史分页都按收件人过滤。玩家界面显示公开物资、经验、天气风向/相位/锁定及结算。房主处理异常会记录本地详情，并仅向玩家发送固定安全提示。询问恢复保留剩余秒数与已拒绝状态，尚未确认的顺序互换需重新申请。
 
-## 仍待验收（保持草稿）
+## 公网与设备验收（保持草稿）
 
-- [ ] 创建独立 Backfire 公网转发服务并验证部署配置。2026-10-04 只读检查确认现有 Cloudflare Free 账号支持 workers.dev 和 SQLite Durable Objects；未修改已有配置、未部署、未创建授权令牌。
-- [ ] 主持人加两名玩家、其中一台真实手机，通过公网完成遭遇、私信与 30 秒断线恢复；验证正常网络下结果传递少于 1 秒。当前 390px Chromium 与本地网络不能替代公网/Android/iOS 实机证据。
+- [x] 2026-10-04 经作者明确授权，新建独立 Backfire 公网转发服务，仅使用自己的 workers.dev 地址和两个 SQLite Durable Object 绑定；沿用已有凭据，未创建新令牌，也未修改任何既有网站配置。
+- [x] 真实公网三浏览器完成胜利结算、原槽保存及返回探索，并通过断线恢复、隐私和版本检查；修复玩家外层页面残留旧面板的问题，并在 390px 视口复测胜利与探索。
+- [ ] 主持人加两名玩家、其中一台真实手机，各自设备通过公网完成遭遇、私信与 30 秒断线恢复；验证正常网络下结果传递少于 1 秒。当前同机隔离 Chromium、390px 视口和公告延迟样本不能替代跨设备、Android/iOS 实机及移动网络证据。
 - [ ] 作者评审合并本 PR；合并后才开始 D4。
 
 说明与复现：[D3 使用](https://github.com/BurnierCaliper/Backfire/blob/feat/online-d3-trpg/docs/d3/README.md)、[验收记录](https://github.com/BurnierCaliper/Backfire/blob/feat/online-d3-trpg/docs/d3/verification.md)、[部署](https://github.com/BurnierCaliper/Backfire/blob/feat/online-d3-trpg/docs/d3/relay.md)、[隐私](https://github.com/BurnierCaliper/Backfire/blob/feat/online-d3-trpg/docs/d3/privacy.md)、[主持人工具](https://github.com/BurnierCaliper/Backfire/blob/feat/online-d3-trpg/docs/d3/gm.md)。静默勾选在新增主持人工具中，原面板默认显示安全摘要；恢复与全历史依赖主持人的本机存储，保存失败会提示。

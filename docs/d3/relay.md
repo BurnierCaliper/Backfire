@@ -39,6 +39,16 @@ Windows PowerShell 强制浏览器验收可先执行 `$env:REQUIRE_UI='1'`。若
 
 ## 接口与宿主职责
 
+公网复验为显式选择，不在普通 `npm test` 中请求公网：
+
+```powershell
+$env:BACKFIRE_PUBLIC_RELAY='https://backfire-relay.richardguu22.workers.dev'
+$env:BACKFIRE_PUBLIC_TEST_PORT='8080'
+node tools/test-online-public.cjs
+```
+
+需要可用的 Playwright/Chromium（外部安装时设 `NODE_PATH`），本机 8080 端口须空闲。工具强制执行浏览器检查，运行四个测试房间、五个无演出显示延迟样本和一次真实 30 秒断线，不部署、不改 Cloudflare 配置，也不启动本地 workerd。完成后清除这两个环境变量，普通测试回到本地转发。公网结果与限制见 [验收记录](verification.md)。
+
 ```js
 const host = await RelayTransport.createHost({
   url: "https://YOUR-NEW-RELAY.YOUR-SUBDOMAIN.workers.dev",
@@ -58,7 +68,7 @@ const resumedPlayer = await RelayTransport.join({
 | 接口 | 返回与约定 |
 | --- | --- |
 | `endpoint.identity` | 复制后的 `{id, role, name, roomCode}`；主持人 ID 固定为 `host`，玩家 ID 由服务端随机生成 |
-| `credentials()` | `{url, roomCode, role, token, protocol, build}`；交由游戏按存档槽保存，不能广播或加入调试导出 |
+| `credentials()` | `{url, roomCode, role, token, protocol, build}`；游戏在独立的 `backfire-online-v1` 本机恢复数据中保存当前房间及关联跑团槽，不改变原存档格式；不能广播或加入调试导出 |
 | `onMessage((message, from) => {})` | `from` 是转发服务绑定的端点 ID；返回取消订阅函数。权威层必须使用这个参数，不信任 payload 内的 `sender` |
 | `send(message, to?)` | 主持人可发玩家 ID 或 `all`，默认广播；玩家只能发主持人。Promise 表示转发确认，不表示规则接受或落盘 |
 | `onStatus(fn)` / `status()` | 复制后的连接/房主/暂停状态和公开座位表；订阅时立即给最新值 |
@@ -99,14 +109,22 @@ const resumedPlayer = await RelayTransport.join({
 
 转发层只改写可信 `from` 外壳，不读取 payload 的游戏语义，也不做脱敏。主持人必须先按收件人生成 DTO 再定向发送；给 `all` 的内容必须是所有玩家都能看见的公开信息。`ALLOWED_ORIGINS` 限制浏览器来源，但不承担身份认证；非浏览器仍必须通过房间凭证规则。生产连接必须 HTTPS/WSS。
 
-## 独立部署步骤（尚未执行）
+## 已部署的独立测试服务
 
-本次只完成本地运行、浏览器自动测试与 dry-run。现有 Cloudflare 账户中的其他 Worker、域名和配置不属于本服务，不能复用、覆盖或修改。公开服务部署与公网手机验收需要后续单独授权。
+作者在 2026-10-04 明确授权“允许，不要触动到任何已有的网站配置”后，已新建 `backfire-relay`，使用既有 Wrangler 登录凭据部署。部署前确认该名称不存在；没有更新其他 Worker、域名、DNS、路由、套餐或账号权限。
+
+- 游戏中填写的服务地址：`https://backfire-relay.richardguu22.workers.dev`
+- 健康检查：[GET /health](https://backfire-relay.richardguu22.workers.dev/health)
+- 服务版本：`4d8e54e9-e4b8-427d-aacc-810b417c496b`；浏览器构建：`backfire-d3-v1`。
+- 此服务只做转发，没有托管游戏网页或绑定自定义域名。用同一份游戏文件打开 `game.html`，在「联机开房」或「加入房间」里填写服务地址。
+- 本期允许来源为 `null`（本地文件）、`http://localhost:8080` 和 `http://127.0.0.1:8080`。未使用通配来源；房间权限仍由独立端点令牌决定。将来托管游戏网页时，仅给这个新服务增加实际 HTTPS origin。
+
+## 独立部署步骤
 
 1. 在 `relay/wrangler.jsonc` 将 `name` 确认为一个全新的独立名称，例如 `backfire-relay`；若账户已有同名服务，改用未占用的新名称。不要把这里的名字换成其他网站的现有 Worker。
-2. 将 `ALLOWED_ORIGINS` 改成实际游戏站点的完整 HTTPS origin，可用逗号列多个；生产不保留 `null` 或不需要的开发来源。`workers_dev:true` 为新服务生成 workers.dev 地址，不需要改已有站点路由。
+2. 按实际游戏入口设置 `ALLOWED_ORIGINS`，可用逗号列多个。若支持双击本地 `game.html`，保留 `null`；若以后只提供 HTTPS 游戏站点，改成对应完整 origin 并移除不再使用的来源。`workers_dev:true` 只为本服务生成 workers.dev 地址，不需要改已有站点路由。
 3. 保留两个独立 DO 绑定 `ROOMS → Room`、`ADMISSION → Admission`，首次迁移 `v1` 使用 `new_sqlite_classes:["Room","Admission"]`。后续变更追加迁移 tag，不能删改已应用的迁移历史。
-4. 获得部署授权后，在 `relay/` 使用 Wrangler 登录目标账户，核对账户身份、新 Worker 名称与配置，再运行 `npm run check` 和 `npm run deploy`。凭证不写仓库。当前代码未执行登录或 deploy。
+4. 获得部署授权后，在 `relay/` 使用 Wrangler 的既有凭据，核对账户身份、新 Worker 名称与配置，再运行 `npm run check` 和 `npm run deploy`；确实缺登录时再完成对应账号的登录。凭证不写仓库。后续只能更新本服务，不把配置的名字替换为其他网站的 Worker。
 5. 将新服务 HTTPS 地址填入游戏联机设置，在两个独立浏览器和一台真实手机上复测创建、加入、私发、版本错配、30 秒断线与原身份恢复、主机恢复前全房暂停。记录服务 URL、构建标识、设备和结果；这些公网证据不由本地测试代替。
 
 截至 2026-10-04 官方说明，Workers Free 可使用 SQLite Durable Objects；现行免费档列出 100,000 次请求/天、13,000 GB-s/天，SQLite 每天 5,000,000 行读 / 100,000 行写与 5 GB 存储。超过免费额度会导致操作失败，不能视为无限免费托管。[Cloudflare Durable Objects pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/)

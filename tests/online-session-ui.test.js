@@ -4,6 +4,27 @@ const http = require("node:http"), fs = require("node:fs"), path = require("node
 const { execSync } = require("node:child_process");
 const { createLocalRelayServer } = require("../relay/local-server.cjs");
 const ROOT = path.resolve(__dirname, "..");
+const PUBLIC_RELAY = process.env.BACKFIRE_PUBLIC_RELAY || "";
+const PUBLIC_PORT = Number(process.env.BACKFIRE_PUBLIC_TEST_PORT || 8080);
+if (PUBLIC_RELAY) {
+  const url = new URL(PUBLIC_RELAY);
+  if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) throw new Error("BACKFIRE_PUBLIC_RELAY must be an HTTPS relay URL without credentials, query or fragment");
+  if (!Number.isInteger(PUBLIC_PORT) || PUBLIC_PORT < 1 || PUBLIC_PORT > 65535) throw new Error("BACKFIRE_PUBLIC_TEST_PORT must be an available port from 1 to 65535");
+}
+async function publicScreenshot(t, page, name) {
+  if (!PUBLIC_RELAY) return;
+  const directory = fs.mkdtempSync(path.join(require("node:os").tmpdir(), "backfire-public-"));
+  const filename = path.join(directory, name + ".png");
+  await page.screenshot({ path: filename, fullPage: false }); t.diagnostic("PUBLIC VIEWPORT SCREENSHOT: " + filename);
+}
+async function assertPlayerIsolation(page) {
+  const actual = await page.evaluate(() => ({
+    legacy: [...document.body.children].filter(node => !node.matches(".ol-ui, .hs-ui") && getComputedStyle(node).display !== "none").map(node => node.tagName + (node.id ? "#" + node.id : "")),
+    documentHeight: document.documentElement.scrollHeight, bodyHeight: document.body.scrollHeight, viewport: innerHeight
+  }));
+  assert.deepEqual(actual.legacy, [], "a remote player's page must hide every legacy top-level game/GM panel");
+  assert.ok(actual.documentHeight <= actual.viewport + 1 && actual.bodyHeight <= actual.viewport + 1, "only online panels may scroll; the outer page must not expose legacy content: " + JSON.stringify(actual));
+}
 function playwright() {
   try { return require("playwright"); } catch (_) {}
   try { return require(path.join(execSync("npm root -g", { stdio: ["ignore", "pipe", "ignore"] }).toString().trim(), "playwright")); } catch (_) {}
@@ -22,10 +43,12 @@ async function fixture(t) {
       res.end(bytes);
     });
   });
-  await new Promise(resolve => website.listen(0, "127.0.0.1", resolve));
+  await new Promise((resolve, reject) => { website.once("error", reject); website.listen(PUBLIC_RELAY ? PUBLIC_PORT : 0, "127.0.0.1", resolve); });
   t.after(() => new Promise(resolve => website.close(resolve)));
   const origin = "http://127.0.0.1:" + website.address().port;
-  const relay = await createLocalRelayServer({ origins: [origin] }); t.after(() => relay.close());
+  const relay = PUBLIC_RELAY ? { url: PUBLIC_RELAY } : await createLocalRelayServer({ origins: [origin] });
+  if (!PUBLIC_RELAY) t.after(() => relay.close());
+  else t.diagnostic("PUBLIC RELAY: " + PUBLIC_RELAY + "; browser origin " + origin + "; no local workerd started");
   const pages = [], contexts = [], errors = [], wire = [];
   for (const width of [1440, 1280, 390]) {
     const context = await browser.newContext({ viewport: { width, height: 900 } }); contexts.push(context);
@@ -41,9 +64,10 @@ async function fixture(t) {
   for (const [page, name] of [[alice, "Alice"], [bob, "Bob"]]) await page.evaluate(options => OnlineGame.join(options), { url: relay.url, roomCode: created, name });
   await host.waitForFunction(() => OnlineGame.getView().players.length === 3 && !OnlineGame.isPaused());
   for (const page of [alice, bob]) await page.waitForFunction(() => !!OnlineGame.getView().packet?.state);
+  for (const page of [alice, bob]) await assertPlayerIsolation(page);
   const aliceId = await alice.evaluate(() => OnlineGame.getView().identity.id), bobId = await bob.evaluate(() => OnlineGame.getView().identity.id);
   await host.evaluate(({ aliceId, bobId }) => OnlineGame.assign(Object.fromEntries(HotseatGame.getView().heroes.slice(0, 2).map((hero, i) => [hero.id, i === 0 ? aliceId : bobId]))), { aliceId, bobId });
-  return { host, alice, bob, aliceId, bobId, pages, errors, wire };
+  return { host, alice, bob, aliceId, bobId, pages, errors, wire, origin, relayUrl: relay.url };
 }
 const submit = (page, cmd) => page.evaluate(command => OnlineGame.submit(command), cmd);
 function logicalPackets(frames) {
@@ -228,6 +252,7 @@ test("D3 game sessions: remote summon, mixed AI/manual round, reactions, victory
     const result = await page.evaluate(() => OnlineGame.getView().packet.result);
     playerResults.push({ result, visible: await page.locator("#online-stage").innerText() });
   }
+  await assertPlayerIsolation(bob); await publicScreenshot(t, bob, "player-390px-victory");
   const savedAfterWin = await host.evaluate(() => {
     const saved = trpgReadSlots()[0];
     return { name: saved.name, campaign: saved.campaign, log: saved.log, summary: trpgSlotSummary(saved), xp: partyHeroes().map(u => u.xp) };
@@ -239,6 +264,7 @@ test("D3 game sessions: remote summon, mixed AI/manual round, reactions, victory
   await host.click("#g-explore-back");
   await host.waitForSelector("#scr-trpg:not([hidden])");
   for (const page of [host, alice, bob]) await page.waitForFunction(() => OnlineGame.getView().screen === "exploration");
+  await assertPlayerIsolation(bob); await publicScreenshot(t, bob, "player-390px-exploration");
   assert.match(await host.locator("#tr-log").innerText(), /战斗胜利/);
   const savedAfterReturn = await host.evaluate(() => { const slots = trpgReadSlots(); return { summary: trpgSlotSummary(slots[0]), log: slots[0].log, others: slots.slice(1) }; });
   assert.equal(savedAfterReturn.summary.name, savedAfterWin.summary.name);
@@ -308,5 +334,83 @@ test("D3 game sessions: host reload during a reaction preserves remaining time a
   assert.equal(completed.attacks, 0); assert.equal(completed.answers, 1);
   assert.equal(completed.bonus, pending.helpers.find(u => u.id === option.helper).bonus - 1);
   assert.equal(completed.locked, true); assert.equal(completed.phase, "player");
+  assert.deepEqual(f.errors, []);
+});
+
+// Explicit opt-in: this fourth case creates one additional short-lived room on
+// the supplied public service. The ordinary local suite remains three cases.
+if (PUBLIC_RELAY) test("D3 public relay: five display latency samples, version rejection, private messages and 30-second recovery", { timeout: 120000 }, async t => {
+  const f = await fixture(t); if (!f) return;
+  const { host, alice, bob, aliceId, pages } = f;
+  const roomCode = await host.evaluate(() => OnlineGame.getView().roomCode);
+  for (const mismatch of ["protocol", "build"]) {
+    const rejected = await alice.evaluate(async ({ url, roomCode, mismatch }) => {
+      try {
+        const endpoint = await RelayTransport.join({ url, roomCode, name: "Version rejection probe", autoReconnect: false,
+          protocol: OnlineGame.PROTOCOL + (mismatch === "protocol" ? 1 : 0), build: OnlineGame.BUILD + (mismatch === "build" ? "-wrong" : "") });
+        endpoint.close(); return { accepted: true };
+      } catch (error) { return { accepted: false, error: error.message }; }
+    }, { url: f.relayUrl, roomCode, mismatch });
+    assert.equal(rejected.accepted, false, mismatch + " mismatch must be rejected"); assert.match(rejected.error, /版本/);
+  }
+  assert.equal(await host.evaluate(() => OnlineGame.getView().players.length), 3, "rejected versions must not acquire player seats");
+  const privateText = "PUBLIC_PRIVATE_" + Date.now();
+  assert.equal((await submit(host, { type: "gm.msg", to: aliceId, text: privateText })).ok, true);
+  await alice.waitForFunction(text => OnlineGame.getView().messages.some(m => m.text === text), privateText);
+  assert.ok(!(await bob.evaluate(() => JSON.stringify(OnlineGame.getView()))).includes(privateText));
+
+  const samples = [];
+  for (let sample = 1; sample <= 5; sample++) {
+    const text = "PUBLIC_LATENCY_" + sample + "_" + Date.now();
+    await Promise.all(pages.map(page => page.evaluate(text => {
+      window.publicLatency = { text, displayedAt: null };
+      const panel = document.getElementById("online-panel");
+      const observer = new MutationObserver(() => {
+        const paragraph = [...panel.querySelectorAll(".ol-messages li p")].find(p => p.textContent === text);
+        if (paragraph && paragraph.getClientRects().length && !panel.hidden) {
+          publicLatency.displayedAt = performance.timeOrigin + performance.now(); observer.disconnect();
+        }
+      });
+      observer.observe(panel, { childList: true, subtree: true, characterData: true });
+    }, text)));
+    // Measure to the real message DOM update, without combat animation, rather
+    // than relay ACK time or a polling interval. All contexts share this host's
+    // wall clock; this is one network location, not cross-device clock sync.
+    const sent = await host.evaluate(async text => {
+      const startedAt = performance.timeOrigin + performance.now();
+      const ack = await OnlineGame.submit({ type: "gm.msg", to: "all", text }); return { startedAt, ack };
+    }, text);
+    assert.equal(sent.ack.ok, true);
+    await Promise.all(pages.map(page => page.waitForFunction(() => window.publicLatency.displayedAt !== null)));
+    const times = await Promise.all(pages.map(page => page.evaluate(() => publicLatency.displayedAt)));
+    const recipients = times.map((at, index) => ({ recipient: ["host", "Alice", "Bob-390px"][index], milliseconds: Math.round((at - sent.startedAt) * 10) / 10 }));
+    assert.ok(recipients.every(row => row.milliseconds >= 0));
+    samples.push({ sample, recipients, allDisplayedMs: Math.max(...recipients.map(row => row.milliseconds)) });
+  }
+  const sorted = samples.map(row => row.allDisplayedMs).sort((a, b) => a - b);
+  t.diagnostic("PUBLIC NETWORK DISPLAY LATENCY (real message DOM commit; no combat animation; one desktop/network location): " + JSON.stringify({ samples, medianMs: sorted[2], maxMs: sorted[4], over1500ms: sorted.filter(ms => ms > 1500).length }));
+
+  const identities = await Promise.all(pages.map(page => page.evaluate(() => OnlineGame.getView().identity)));
+  const disconnectedAt = Date.now();
+  // Navigation destroys the real host WebSocket and runtime. Only the saved
+  // local room checkpoint and token survive; nothing auto-rejoins for 30 s.
+  await host.goto("about:blank");
+  for (const page of [alice, bob]) await page.waitForFunction(() => OnlineGame.isPaused() && !OnlineGame.getView().status.hostOnline);
+  assert.equal((await submit(alice, { type: "gmReply", text: "must not be sent while paused" })).ok, false);
+  await host.waitForTimeout(Math.max(0, 30000 - (Date.now() - disconnectedAt)));
+  assert.ok(Date.now() - disconnectedAt >= 30000);
+  t.diagnostic("PUBLIC HOST INTERRUPTION: " + (Date.now() - disconnectedAt) + " ms before restoring the saved identity");
+  await host.goto(f.origin + "/game.html"); await host.waitForFunction(() => !!window.OnlineGame);
+  await host.evaluate(() => OnlineGame.resume());
+  for (const page of [host, alice, bob]) await page.waitForFunction(() => !OnlineGame.isPaused());
+  assert.deepEqual(await host.evaluate(() => OnlineGame.getView().identity), identities[0]);
+  const after = "PUBLIC_AFTER_RECOVERY_" + Date.now();
+  assert.equal((await submit(alice, { type: "gmReply", text: after })).ok, true);
+  await host.waitForFunction(text => OnlineGame.getView().messages.some(m => m.text === text), after);
+  await bob.reload(); await bob.waitForFunction(() => !!window.OnlineGame); await bob.evaluate(() => OnlineGame.resume());
+  await bob.waitForFunction(() => !!OnlineGame.getView().packet?.state && !OnlineGame.isPaused());
+  assert.deepEqual(await bob.evaluate(() => OnlineGame.getView().identity), identities[2]);
+  assert.deepEqual(await alice.evaluate(() => OnlineGame.getView().identity), identities[1]);
+  assert.ok(!JSON.stringify(f.wire.filter(row => row.page === 2)).includes(privateText), "private content must stay absent from Bob's public-network frames");
   assert.deepEqual(f.errors, []);
 });
