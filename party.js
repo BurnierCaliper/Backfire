@@ -833,7 +833,7 @@ function skillList(unit) {
   if (unit.kit === "helu") {
     add({ id: "helu_aa", name: "普通攻击", hint: "远距离 · 1atk 谐波 +1击破 · 有聚焦则打聚焦层" });
     add({ id: "helu_wave", name: "驻波", hint: "进入相位；已扫描战场则可推进相位阶段" });
-    add({ id: "helu_scan", name: "环境扫描", hint: "检查一区：可能出现配置物，或远程操作已有配置物", minLv: 2 });
+    add({ id: "helu_scan", name: "环境扫描", hint: "选一区：扫描出配置物，或远程引爆 / 操控配置物、震动危墙桥梁、激发场地", minLv: 2 });
     add({ id: "helu_summon", name: "唤出 Ecmo", hint: "武器生物化" });
   }
   if (unit.kit === "ecmo") {

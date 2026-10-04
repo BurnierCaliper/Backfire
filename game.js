@@ -3058,7 +3058,7 @@
     const kinds = [
       ["", "无"], ["fireOn", "火场"], ["ice", "冻土"], ["acid", "酸液"],
       ["electric", "高压"], ["energy", "能量场"], ["harmonic", "干涉场"],
-      ["heal", "恢复"], ["abyss", "深渊"], ["highland", "高地"], ["collapseOn", "塌陷"]
+      ["heal", "恢复"], ["abyss", "深渊"], ["collapseOn", "塌陷"]
     ];
     for (let z = 1; z <= Number(state.zoneMode); z++) {
       const f = state.fields[z] || emptyField();
@@ -3078,6 +3078,18 @@
         refreshAll();
       };
       row.appendChild(s);
+      // 高地和其他区域效果共存：单独一个勾选框
+      const hl = el("label", "");
+      hl.style.cssText = "display:inline-flex;align-items:center;gap:4px;margin-left:8px;font-size:13px";
+      const hc = document.createElement("input");
+      hc.type = "checkbox"; hc.checked = !!f.highland;
+      hc.onchange = () => {
+        dispatch({ type: "battle.panel", action: "setHighland", zone: z, value: hc.checked });
+        setView(snapAll(), false);
+        refreshAll();
+      };
+      hl.appendChild(hc); hl.appendChild(document.createTextNode("高地"));
+      row.appendChild(hl);
       zbox.appendChild(row);
     }
     const gbox = $("g-gap-list");

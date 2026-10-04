@@ -1410,50 +1410,15 @@ function beginRound(notes) {
       }
     }
   });
-  Object.keys(state.fields || {}).forEach(z => {
-    const f = state.fields[z];
-    if (!fieldFireOn(f)) return;
-    f.fireOn = true;
-    if (!(Number(f.fire) > 0)) f.fire = 1;
-    const stacks = Number(f.fire) || 1;
-    fieldUnits().filter(u => Number(u.zone) === Number(z) && !u.flying && !u.dead).forEach(u => {
-      const weather = currentWeatherFor(u);
-      const d = statusDotDice("firefield", u.level, weather);
-      const parts = [];
-      let dmg = 0;
-      for (let i = 0; i < stacks; i++) {
-        const r = takeDice(d.n, d.s, 0);
-        dmg += r.total;
-        parts.push(r.text);
-      }
-      applyTypedDot(u, dmg, "fire", notes, `${u.name} 火场${stacks}层 ${parts.join(" + ")} = ${dmg}`);
-    });
-    const add = state.weather === "heat" ? 2 : 1;
-    f.fire += add;
-    notes.push(`${z} 区火场先结算伤害，然后层数 +${add} → ${f.fire}${state.weather === "heat" ? "（酷暑）" : ""}`);
-  });
+  Object.keys(state.fields || {}).forEach(z => tickFireField(z, notes));
   tickRuinGround(notes);
   state.units.forEach(u => {
     u.lostDefThisTurn = 0;
     const weather = currentWeatherFor(u);
     const f = state.fields[u.zone] || emptyField();
-    if (f.energy) {
-      const s = leveledSides(u.level || 1, 4);
-      const r = takeDice(1, s, 0);
-      f.energyVal = (f.energyVal || 0) + r.total;
-      notes.push(`${u.name} 所在能量场累积 ${r.text} → 场地高能 ${f.energyVal}`);
-    }
-    if (f.acid && !u.flying) {
-      const d = statusDotDice("acidfield", u.level, weather);
-      const r = takeDice(d.n, d.s, 0);
-      applyTypedDot(u, r.total, "acid", notes, `${u.name} 酸液地面 ${r.text}`);
-    }
-    if (f.heal) {
-      const d = statusDotDice("healfield", u.level, weather);
-      const r = takeDice(d.n, d.s, 0);
-      healUnit(u, r.total);
-      notes.push(`${u.name} 治愈场地 ${r.text} → +${r.total}`);
-    }
+    if (f.energy) tickEnergyFieldFor(u, f, notes);
+    if (f.acid && !u.flying) tickAcidFieldFor(u, weather, notes);
+    if (f.heal) tickHealFieldFor(u, weather, notes);
     if (f.ice && !u.flying) {
       notes.push(`${u.name} 处于冻土：对冰强制 25% 易伤。离开或进入时会自动结算运动检定与冰击破。`);
     }
@@ -1503,23 +1468,65 @@ function beginRound(notes) {
     u.damagedThisTurn = 0;
     u.sandLocked = false;
   });
-  Object.keys(state.fields || {}).forEach(z => {
-    const f = state.fields[z];
-    if (!f || !f.energy || !(f.energyVal > 0)) return;
-    const pool = fieldUnits().filter(u => Number(u.zone) === Number(z) && totalHp(u) > 0);
-    if (!pool.length) return;
-    pool.sort((a, b) => totalHp(a) - totalHp(b));
-    const low = pool[0];
-    const hp = totalHp(low);
-    const combined = (low.highEnergy || 0) + f.energyVal;
-    notes.push(`${z} 区能量场高能 ${f.energyVal}，最低血 ${low.name} ${hp}${low.statuses && low.statuses.high ? "（含自身高能 " + (low.highEnergy || 0) + "）" : ""}。`);
-    if (hp < combined) {
-      notes.push(`${low.name} 生命低于高能阈值，自爆。`);
-      low.highEnergy = combined;
-      explodeHigh(low);
-    }
-  });
+  Object.keys(state.fields || {}).forEach(z => checkEnergyFieldBoom(z, notes));
   appendLog(notes.join("\n"));
+}
+
+/* ---------- 场地的回合开始效果（回合开始和 Helumica「环境扫描」共用） ---------- */
+function tickFireField(z, notes) {
+  const f = state.fields[z];
+  if (!fieldFireOn(f)) return;
+  f.fireOn = true;
+  if (!(Number(f.fire) > 0)) f.fire = 1;
+  const stacks = Number(f.fire) || 1;
+  fieldUnits().filter(u => Number(u.zone) === Number(z) && !u.flying && !u.dead).forEach(u => {
+    const weather = currentWeatherFor(u);
+    const d = statusDotDice("firefield", u.level, weather);
+    const parts = [];
+    let dmg = 0;
+    for (let i = 0; i < stacks; i++) {
+      const r = takeDice(d.n, d.s, 0);
+      dmg += r.total;
+      parts.push(r.text);
+    }
+    applyTypedDot(u, dmg, "fire", notes, `${u.name} 火场${stacks}层 ${parts.join(" + ")} = ${dmg}`);
+  });
+  const add = state.weather === "heat" ? 2 : 1;
+  f.fire += add;
+  notes.push(`${z} 区火场先结算伤害，然后层数 +${add} → ${f.fire}${state.weather === "heat" ? "（酷暑）" : ""}`);
+}
+function tickEnergyFieldFor(u, f, notes) {
+  const s = leveledSides(u.level || 1, 4);
+  const r = takeDice(1, s, 0);
+  f.energyVal = (f.energyVal || 0) + r.total;
+  notes.push(`${u.name} 所在能量场累积 ${r.text} → 场地高能 ${f.energyVal}`);
+}
+function tickAcidFieldFor(u, weather, notes) {
+  const d = statusDotDice("acidfield", u.level, weather);
+  const r = takeDice(d.n, d.s, 0);
+  applyTypedDot(u, r.total, "acid", notes, `${u.name} 酸液地面 ${r.text}`);
+}
+function tickHealFieldFor(u, weather, notes) {
+  const d = statusDotDice("healfield", u.level, weather);
+  const r = takeDice(d.n, d.s, 0);
+  healUnit(u, r.total);
+  notes.push(`${u.name} 治愈场地 ${r.text} → +${r.total}`);
+}
+function checkEnergyFieldBoom(z, notes) {
+  const f = state.fields[z];
+  if (!f || !f.energy || !(f.energyVal > 0)) return;
+  const pool = fieldUnits().filter(u => Number(u.zone) === Number(z) && totalHp(u) > 0);
+  if (!pool.length) return;
+  pool.sort((a, b) => totalHp(a) - totalHp(b));
+  const low = pool[0];
+  const hp = totalHp(low);
+  const combined = (low.highEnergy || 0) + f.energyVal;
+  notes.push(`${z} 区能量场高能 ${f.energyVal}，最低血 ${low.name} ${hp}${low.statuses && low.statuses.high ? "（含自身高能 " + (low.highEnergy || 0) + "）" : ""}。`);
+  if (hp < combined) {
+    notes.push(`${low.name} 生命低于高能阈值，自爆。`);
+    low.highEnergy = combined;
+    explodeHigh(low);
+  }
 }
 
 function startPlayerPhase() {
@@ -1740,25 +1747,7 @@ function turnEnd() {
         notes.push(`酸液桶渗漏：随机打到 ${u.name}，${dmg} 酸伤。`);
       }
     }
-    if (p.kind === "turret") {
-      // 自动攻击 atk 最高的敌对单位：活着、看得见、没被危墙 / 关着的门挡住；不限距离，不能协助格挡
-      const foes = state.units.filter(u => !u.hidden && !u.dead && !!u.isPlayer === (p.faction === "enemy") && !lineBlocked(p.zone, u.zone));
-      if (foes.length) {
-        const atkOf = (u) => Number(effectiveAtk(u, state.units)) || Number(u.atk) || 0;
-        foes.sort((a, b) => atkOf(b) - atkOf(a));
-        const u = foes[0];
-        const dmg = p.level || 1;
-        const fake = unitOf("防卫炮台", p.level, [{ type: "armor", hp: 1 }], 0, dmg);
-        fake.zone = p.zone;
-        const out = dealTo(fake, u, { atk: dmg, mult: 1, hits: 2, element: "energy", baseBreak: 0, flags: { action: true, blockResolved: true, propShot: true } });
-        u.statuses = u.statuses || {};
-        u.statuses.high = true;
-        u.highApplyTurn = state.turnNo;
-        notes.push(`防卫炮台锁定 ${u.name}（atk 最高）：施加高能，并打出 2 次 ${dmg} 能量（实际 ${Math.floor((out && out.res && out.res.total) || 0)}）。`);
-      } else if (state.units.some(u => !u.hidden && !u.dead && !!u.isPlayer === (p.faction === "enemy"))) {
-        notes.push("防卫炮台：敌对单位都在危墙 / 关着的门后面，打不到。");
-      }
-    }
+    if (p.kind === "turret") turretShot(p, p.faction === "enemy", notes);
   });
   state.units.forEach(u => {
     if (u && u._shieldRestoreAtTurnEnd) {
@@ -1780,6 +1769,30 @@ function turnEnd() {
   startPlayerPhase();
   presentAssistModal();
   presentBlockModal();
+}
+
+/** 防卫自律炮台开一炮：自动攻击 atk 最高的目标（hitPlayers：打我方还是打敌方）。
+ *  活着、看得见、没被危墙 / 关着的门挡住；不限距离，不能协助格挡 */
+function turretShot(p, hitPlayers, notes) {
+  const foes = state.units.filter(u => !u.hidden && !u.dead && !!u.isPlayer === !!hitPlayers && !lineBlocked(p.zone, u.zone));
+  if (foes.length) {
+    const atkOf = (u) => Number(effectiveAtk(u, state.units)) || Number(u.atk) || 0;
+    foes.sort((a, b) => atkOf(b) - atkOf(a));
+    const u = foes[0];
+    const dmg = p.level || 1;
+    const fake = unitOf("防卫炮台", p.level, [{ type: "armor", hp: 1 }], 0, dmg);
+    fake.zone = p.zone;
+    const out = dealTo(fake, u, { atk: dmg, mult: 1, hits: 2, element: "energy", baseBreak: 0, flags: { action: true, blockResolved: true, propShot: true } });
+    u.statuses = u.statuses || {};
+    u.statuses.high = true;
+    u.highApplyTurn = state.turnNo;
+    notes.push(`防卫炮台锁定 ${u.name}（atk 最高）：施加高能，并打出 2 次 ${dmg} 能量（实际 ${Math.floor((out && out.res && out.res.total) || 0)}）。`);
+    return true;
+  }
+  if (state.units.some(u => !u.hidden && !u.dead && !!u.isPlayer === !!hitPlayers)) {
+    notes.push("防卫炮台：敌对单位都在危墙 / 关着的门后面，打不到。");
+  }
+  return false;
 }
 
 function ignoresAoe(u) {
@@ -2870,13 +2883,18 @@ function fireScrap(p) {
     return;
   }
   snapshot();
+  appendLog(scrapShot(p, t));
+  renderAll();
+}
+/** 碎渣机炮开火一次：1d4 发，每发 6+等级 物理 +2 击破 */
+function scrapShot(p, t) {
   const n = 1 + Math.floor(Math.random() * 4);
   const flat = 6 + (p.level || 1);
   const fake = unitOf("碎渣机炮", p.level, [{ type: "armor", hp: 1 }], 0, 0);
   fake.zone = p.zone;
-  const out = dealTo(fake, t, { atk: 0, mult: 0, flat, hits: n, element: "physical", baseBreak: 2, flags: { action: true } });
-  appendLog(`碎渣机炮开火 ${n} 次，每次 ${flat} 物理 +2 击破。合计伤害 ${Math.floor(out.res.total || 0)}。`);
-  renderAll();
+  // 射程是「2 距离内」（选目标时已经限定），这里不再按近距离判定
+  const out = dealTo(fake, t, { atk: 0, mult: 0, flat, hits: n, element: "physical", baseBreak: 2, atkRange: "any", flags: { action: true, blockResolved: true } });
+  return `碎渣机炮开火 ${n} 次，每次 ${flat} 物理 +2 击破。合计伤害 ${Math.floor((out && out.res && out.res.total) || 0)}。`;
 }
 
 /** 技能打配置物 / 危墙时的伤害：按技能说明里写的元素、倍率、击破（「1atk 电 1击破」），
@@ -6235,6 +6253,138 @@ function zoneReachable(unit, dest) {
   return null;
 }
 
+/* ---------- Helumica「环境扫描」：扫描出配置物，或者和配置物 / 地形 / 场地互动 ---------- */
+const HELU_SCAN_FIELDS = [
+  ["fire", "火场", "立刻结算一次回合开始效果"],
+  ["acid", "酸液地面", "立刻结算一次回合开始效果"],
+  ["heal", "治愈场地", "立刻结算一次回合开始效果"],
+  ["ice", "冻土", "区里所有地面单位受到 1 点冰属性击破"],
+  ["collapseOn", "塌陷区域", "塌陷计数立刻 +5"],
+  ["energy", "能量场", "立刻累积一次场地高能"],
+  ["harmonic", "干涉场", "区里所有单位的下次伤害 ±25%"],
+  ["ruinOn", "损毁地面", "立刻扣 20 点耐久"]
+];
+const HELU_SCAN_SPAWN = ["boom", "acid", "battery", "scrap"];
+function heluScanFieldOn(f, k) { return k === "fire" ? fieldFireOn(f) : !!(f && f[k]); }
+function heluScanOptions(z) {
+  const opts = [{ value: "spawn", label: "扫描出一个配置物（爆炸桶 / 酸液桶 / 超充能电池 / 碎渣机炮，随机）" }];
+  (state.props || []).filter(p => Number(p.zone) === Number(z) && !BARRIER_SIDE[p.kind]).forEach(p => {
+    const what = p.kind === "boom" || p.kind === "acid" ? "直接引爆"
+      : p.kind === "battery" ? "提取护盾或引爆"
+      : p.kind === "scrap" ? "操控它攻击一名敌人"
+      : p.kind === "turret" ? "立刻向 Helumica 的敌人开一炮"
+      : (p.kind === "button" || p.kind === "lever") ? "远程触发" : "远程操作";
+    opts.push({ value: "prop:" + p.id, label: `${p.name}：${what}` });
+  });
+  [gapKey(z - 1, z), gapKey(z, z + 1)].forEach(key => {
+    const g = (state.gaps || {})[key];
+    if (g && (g.type === "wall" || g.type === "bridge") && (Number(g.hp) || 0) > 0) {
+      opts.push({ value: "gap:" + key, label: `${key} 之间的${gapLabel(g.type)}：耐久 −10（现在 ${g.hp}）` });
+    }
+  });
+  const f = state.fields[z];
+  HELU_SCAN_FIELDS.forEach(([k, name, desc]) => {
+    if (heluScanFieldOn(f, k)) opts.push({ value: "field:" + k, label: `场地 · ${name}：${desc}` });
+  });
+  return opts;
+}
+/** 执行环境扫描的选择。picks：{ dest, act, mode, ally, target, sign } */
+function heluScanAct(a, picks, lines) {
+  const z = picks.dest != null ? Number(picks.dest) : Number(a.zone);
+  const act = String(picks.act || "spawn");
+  const level = a.level || 1;
+  if (act === "spawn") {
+    const kind = HELU_SCAN_SPAWN[Math.floor(Math.random() * HELU_SCAN_SPAWN.length)];
+    const p = makeProp(kind, z, level);
+    p.faction = "player";
+    state.props = state.props || [];
+    state.props.push(p);
+    lines.push(`环境扫描：在 ${z} 区找到可用的${p.name}。`);
+    if (kind === "battery" && typeof syncBatteryShields === "function") lines.push(...syncBatteryShields());
+    return;
+  }
+  if (act.indexOf("prop:") === 0) {
+    const p = (state.props || []).find(x => x.id === act.slice(5));
+    if (!p) { lines.push("那个配置物已经不在了。"); return; }
+    if (p.kind === "boom" || p.kind === "acid") {
+      lines.push(`环境扫描：远程引爆 ${p.name}。`);
+      lines.push(...destroyProp(p, a));
+    } else if (p.kind === "battery") {
+      if (picks.mode === "boom") {
+        lines.push(`环境扫描：远程引爆 ${p.name}。`);
+        lines.push(...destroyProp(p, a));
+      } else {
+        const ally = unitById(picks.ally);
+        if (!ally || !ally.isPlayer) { lines.push("先选一名友方。"); return; }
+        const amt = 5 + 2 * (p.level || 1);
+        const hadFlag = ally.shieldFromChuan;
+        addShieldLayer(ally, amt);
+        ally.shieldFromChuan = hadFlag;   // 不是川川给的护盾，不触发「磁场护盾」
+        lines.push(`环境扫描：从 ${p.name} 提取 ${amt} 点护盾给 ${ally.name}。`);
+      }
+    } else if (p.kind === "scrap") {
+      const t = unitById(picks.target);
+      if (!t || t.isPlayer || t.dead) { lines.push("先选碎渣机炮要打的敌人。"); return; }
+      lines.push(`环境扫描：操控碎渣机炮攻击 ${t.name}。`);
+      lines.push(scrapShot(p, t));
+    } else if (p.kind === "turret") {
+      lines.push(`环境扫描：干扰 ${p.name} 的识别，让它立刻向 Helumica 的敌人开一炮。`);
+      turretShot(p, !a.isPlayer, lines);
+    } else if (p.kind === "button" || p.kind === "lever") {
+      toggleDevice(p, "环境扫描");
+      lines.push(`环境扫描：远程触发 ${p.name}。`);
+    } else {
+      lines.push(`${p.name} 没有可以远程操作的地方。`);
+    }
+    return;
+  }
+  if (act.indexOf("gap:") === 0) {
+    const key = act.slice(4);
+    const g = (state.gaps || {})[key];
+    if (!g || (g.type !== "wall" && g.type !== "bridge") || !((Number(g.hp) || 0) > 0)) { lines.push("那里已经没有危墙 / 桥梁了。"); return; }
+    g.lastFrom = Number(a.zone);
+    g.hp = Math.max(0, (Number(g.hp) || 0) - 10);
+    lines.push(`环境扫描：找到 ${key} 之间${gapLabel(g.type)}的薄弱点，耐久 −10 → ${g.hp}。`);
+    if (g.hp <= 0) lines.push(...destroyGap(key, g));
+    return;
+  }
+  if (act.indexOf("field:") === 0) {
+    const k = act.slice(6);
+    const f = state.fields[z];
+    if (!heluScanFieldOn(f, k)) { lines.push(`${z} 区已经没有这个场地了。`); return; }
+    const here = fieldUnits().filter(u => Number(u.zone) === z && !u.dead);
+    const ground = here.filter(u => !u.flying);
+    lines.push(`环境扫描：激发 ${z} 区的场地。`);
+    if (k === "fire") tickFireField(z, lines);
+    else if (k === "acid") ground.forEach(u => tickAcidFieldFor(u, currentWeatherFor(u), lines));
+    else if (k === "heal") here.forEach(u => tickHealFieldFor(u, currentWeatherFor(u), lines));
+    else if (k === "ice") ground.forEach(u => dealBreak(u, 1, "ice", lines, "冻土（环境扫描）"));
+    else if (k === "collapseOn") lines.push(...registerZoneBreak(z, 5));
+    else if (k === "energy") {
+      if (here.length) here.forEach(u => tickEnergyFieldFor(u, f, lines));
+      else tickEnergyFieldFor({ name: a.name, level: level }, f, lines);
+      checkEnergyFieldBoom(z, lines);
+    } else if (k === "harmonic") {
+      const up = picks.sign !== "-";
+      here.forEach(u => {
+        const cur = Number(u.interfere) || 0;
+        u.interfere = up ? (cur < 0 ? 0.25 : cur + 0.25) : (cur > 0 ? -0.25 : cur - 0.25);
+        lines.push(`${u.name} 干涉 ${up ? "+" : "−"}25% → 下次伤害 ${u.interfere > 0 ? "+" : ""}${Math.round(u.interfere * 100)}%`);
+      });
+      if (!here.length) lines.push("区里没有单位。");
+    } else if (k === "ruinOn") {
+      f.ruinHp = Math.max(0, (Number(f.ruinHp) || 0) - 20);
+      lines.push(`${z} 区损毁地面耐久 −20 → ${f.ruinHp}/${f.ruinMax || 0}`);
+      if (f.ruinHp <= 0) {
+        lines.push(`${z} 区损毁地面耐久归零，变为深渊。`);
+        destroyRuinGround(z, lines);
+      }
+    }
+    return;
+  }
+  lines.push(`${z} 区环境扫描完成。`);
+}
+
 function skillFlowSteps(id, actor, picks) {
   picks = picks || {};
   if (!actor) return [];
@@ -6293,16 +6443,30 @@ function skillFlowSteps(id, actor, picks) {
   if (id === "helu_scan") {
     const zones = [];
     for (let z = 1; z <= maxZ; z++) zones.push(z);
-    const steps = [{ key: "dest", type: "zone", optional: false, label: "检查哪一区", zones }];
+    const steps = [{ key: "dest", type: "zone", optional: false, label: "环境扫描哪一区", zones }];
     const z = picks.dest != null ? Number(picks.dest) : null;
-    if (z != null) {
-      const props = (state.props || []).filter(p => Number(p.zone) === z);
-      if (props.length) {
-        steps.push({
-          key: "prop", type: "choice", optional: true, label: "远程操作已有配置物（可跳过）",
-          options: [{ value: "", label: "不操作" }].concat(props.map(p => ({ value: p.id, label: p.name })))
-        });
+    if (z == null) return steps;
+    steps.push({ key: "act", type: "choice", optional: false, label: `${z} 区：扫描出配置物，或者和已有的配置物 / 地形 / 场地互动`,
+      options: heluScanOptions(z) });
+    const act = String(picks.act || "");
+    if (act.indexOf("prop:") === 0) {
+      const p = (state.props || []).find(x => x.id === act.slice(5));
+      if (p && p.kind === "battery") {
+        steps.push({ key: "mode", type: "choice", optional: false, label: "超充能电池",
+          options: [{ value: "shield", label: `提取 ${5 + 2 * (p.level || 1)} 点护盾给一名友方` }, { value: "boom", label: "直接引爆" }] });
+        if (picks.mode === "shield") {
+          steps.push({ key: "ally", type: "unit", optional: false, label: "护盾给谁（任意友方）",
+            units: fieldUnits().filter(u => u.isPlayer && !u.dead && !u.hidden && !u.fused) });
+        }
       }
+      if (p && p.kind === "scrap") {
+        steps.push({ key: "target", type: "unit", optional: false, label: "碎渣机炮打谁（2 距离内的敌人）",
+          units: fieldUnits().filter(u => !u.isPlayer && !u.dead && !u.hidden && !u.fused && zoneDist(p.zone, u.zone, maxZ) <= 2) });
+      }
+    }
+    if (act === "field:harmonic") {
+      steps.push({ key: "sign", type: "choice", optional: false, label: "干涉场：区里所有单位的下次伤害",
+        options: [{ value: "+", label: "+25%（叠一层正向干涉）" }, { value: "-", label: "−25%（叠一层反向干涉）" }] });
     }
     return steps;
   }
@@ -9133,27 +9297,8 @@ function runSkillInner(id, optRun) {
       } else lines.push("尚未完成回波探测，无法推进相位。");
     } else if (id === "helu_scan") {
       const fl = state.skillFlow;
-      const z = fl && fl.picks.dest != null ? Number(fl.picks.dest) : a.zone;
       a.resources.scanned = true;
-      const pid = fl && fl.picks.prop;
-      if (pid) {
-        const p = (state.props || []).find(x => x.id === pid);
-        if (p) {
-          if (typeof useDevice === "function" && (p.kind === "button" || p.kind === "lever")) useDevice(p);
-          else if (p.kind === "boom" && typeof explodeProp === "function") explodeProp(p);
-          else if (typeof useDevice === "function") useDevice(p);
-          lines.push(`远程操作了 ${p.name}。`);
-        }
-      } else {
-        const exist = (state.props || []).filter(p => Number(p.zone) === z);
-        if (!exist.length && Math.random() < 0.5) {
-          const kind = Math.random() < 0.5 ? "boom" : "button";
-          const p = makeProp(kind, z, a.level || 1);
-          state.props = state.props || [];
-          state.props.push(p);
-          lines.push(`${z} 区扫描出 ${p.name}。`);
-        } else lines.push(`${z} 区环境扫描完成。`);
-      }
+      heluScanAct(a, Object.assign({}, (fl && fl.picks) || {}), lines);
     } else if (id === "helu_summon") {
       const w = spawnWeapon(a, "ecmo");
       lines.push(w ? "Ecmo/7418 已进入战场。" : "Ecmo 已在场。");
