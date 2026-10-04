@@ -42,6 +42,7 @@
   function saveLog() { writeSlotNow(); }
   /** 记一份撤销点：和存档里写的是同一份东西 */
   function pushUndo() {
+    if (window.HotseatGame && HotseatGame.isActive()) return;
     if (slot < 0 || !window.GAME) return;
     if (typeof ledgerCapture === "function") ledgerCapture();
     if (GAME.rememberCampaign) GAME.rememberCampaign();
@@ -52,6 +53,7 @@
     while (undoStack.length > UNDO_MAX) undoStack.shift();
   }
   function undo() {
+    if (window.HotseatGame && HotseatGame.isActive()) return;
     const u = undoStack.pop();
     if (!u) return;
     applySlotData(u);
@@ -571,7 +573,9 @@
     // 战斗结算：这场拿到的经验、奎支、升级写进探索记录
     GAME.onBattleFinished = r => {
       if (!TRPG.active || slot < 0) return;
-      uiCommand("recordBattle", { result: JSON.parse(JSON.stringify(r)) });
+      const data = { result: JSON.parse(JSON.stringify(r)) };
+      if (window.HotseatGame && HotseatGame.isActive()) HotseatGame.system({ type: "trpg.ui", action: "recordBattle", level: Number(($("g-level") || {}).value) || 1, ...data });
+      else uiCommand("recordBattle", data);
     };
     const xm = $("g-xp-mult");
     if (xm) xm.onchange = () => Commands.dispatch(ruleCommand("xpMultiplier", { value: xm.value }));
@@ -580,7 +584,7 @@
     document.addEventListener("keydown", (e) => {
       if (!Screens.is("trpg")) return;
       if (e.target && /INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) return;
-      if ((e.key === "z" || e.key === "Z") && (e.ctrlKey || e.metaKey)) { e.preventDefault(); uiCommand("undo"); }
+      if ((e.key === "z" || e.key === "Z") && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (!(window.HotseatGame && HotseatGame.isActive())) uiCommand("undo"); }
     });
     $("tr-slots-title").onclick = () => uiCommand("title");
     $("tr-fight").onclick = () => uiCommand("toBattle");

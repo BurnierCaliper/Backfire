@@ -198,7 +198,8 @@
       case "assistAnswer": { const helper = unitById(cmd.helper); const prev = state.combatPhase; if (helper) state.combatPhase = helper.isPlayer ? "player" : "enemy"; try { return finishAssist(cmd.helper || null, cmd.extra || {}); } finally { state.combatPhase = prev; } }
       case "koltSwapAnswer": return resolveKoltSwap(!!cmd.swap, cmd.target || null);
       case "retreat": return performRetreat(cmd.rearguard || null);
-      case "endTurn": case "battle.endPlayerTurn": return seeded(cmd.seed, () => endPlayerTurn());
+      case "endTurn": if (env.endUnit) return env.endUnit(cmd);
+      case "battle.endPlayerTurn": return seeded(cmd.seed, () => endPlayerTurn());
       case "battle.endEnemyTurn": return endEnemyTurn();
       case "battle.enemyAction": { const plan = EnemyAI.planFor(actor(cmd.actor), cmd.step); if (!plan) return { executed: false }; seeded(cmd.seed, plan.thunk); return { executed: true, meta: plan.meta }; }
       case "battle.finish": return settleBattleRewards(cmd.outcome);

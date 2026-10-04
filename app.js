@@ -130,6 +130,7 @@ function setZoneField(zone, kind, opts) {
 }
 
 function snapshot() {
+  if (globalThis.HotseatGame?.isActive?.()) return;
   state.history.push(clone({
     units: state.units,
     fields: state.fields,
@@ -2005,9 +2006,28 @@ function applyFatigue(u, skillId, scoreBefore, personalBefore) {
   appendLog(`  招式疲劳：连续第 ${streak} 个回合用「${skillDisplayName(u, skillId)}」，这次行动得分 −${Math.round(pct * 100)}%（−${cut}）`);
 }
 
+// Optional observers receive only spend data, never a reference to a live unit.
+// Rules also run in preview sandboxes; adapters decide which executions are
+// authoritative. This does not persist anything or change an action's cost.
+const ACTION_SPEND_LISTENERS = new Set();
+function onActionSpend(listener) {
+  if (typeof listener !== "function") throw new TypeError("Action spend listener must be a function");
+  ACTION_SPEND_LISTENERS.add(listener);
+  return () => ACTION_SPEND_LISTENERS.delete(listener);
+}
+
 /** 我方用掉行动点 / 附赠行动时加分（开战后才算） */
 function scoreSpend(u, ap, bonus) {
   if (!u || !u.isPlayer || !state.combatStarted) return;
+  const spentAp = Number.isFinite(Number(ap)) && Number(ap) > 0 ? Number(ap) : 0;
+  const spentBonus = Number.isFinite(Number(bonus)) && Number(bonus) > 0 ? Number(bonus) : 0;
+  if (typeof u.id === "string" && (spentAp > 0 || spentBonus > 0)) {
+    // Snapshot the subscriptions, and isolate each listener's data and errors.
+    // An action that refunds its points later still spent them at this point.
+    for (const listener of [...ACTION_SPEND_LISTENERS]) {
+      try { listener({ unitId: u.id, ap: spentAp, bonus: spentBonus }); } catch (_) {}
+    }
+  }
   addScore("action", (Number(ap) || 0) * SCORE_RULES.ap + (Number(bonus) || 0) * SCORE_RULES.bonusAction, u);
 }
 /** 胜利时的速杀奖励：第 N 回合内打完，整场分数 ×倍率（多出来的记成「速杀奖励」）。只结算一次 */

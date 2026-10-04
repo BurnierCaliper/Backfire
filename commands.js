@@ -5,6 +5,7 @@
   "use strict";
   const handlers = new Map(), reserved = new Map(), log = [];
   const displayContexts = new WeakSet();
+  const interceptors = [];
   let sequence = 0;
   const LOG_LIMIT = 1000;
 
@@ -66,6 +67,10 @@
   function dispatch(input, context = {}) {
     const command = prepare(input);
     if (!context || typeof context !== "object" || displayContexts.has(context)) throw new TypeError("A complete authority context is required; display views cannot execute commands");
+    const run = index => index < interceptors.length ? interceptors[index](command, context, () => run(index + 1)) : execute(command, context);
+    return run(0);
+  }
+  function execute(command, context) {
     const handler = handlers.get(command.type);
     if (!handler) throw new Error(reserved.has(command.type) ? command.type + " is reserved for " + reserved.get(command.type).phase : "Unknown command: " + command.type);
     const entry = record(command);
@@ -80,6 +85,16 @@
   function reserve(type, specification) {
     if (handlers.has(type) || reserved.has(type)) throw new Error("Command already registered: " + type);
     jsonValue(specification); reserved.set(type, copy(specification));
+  }
+  function activate(type, phase, executor, options) {
+    if (!reserved.has(type) || reserved.get(type).phase !== phase) throw new Error("Command is not reserved for " + phase + ": " + type);
+    if (typeof executor !== "function") throw new TypeError("Command requires an executor");
+    reserved.delete(type); register(type, executor, options);
+  }
+  function intercept(fn) {
+    if (typeof fn !== "function") throw new TypeError("Interceptor requires a function");
+    interceptors.push(fn);
+    return () => { const i = interceptors.indexOf(fn); if (i >= 0) interceptors.splice(i, 1); };
   }
   function catalog() {
     return [...handlers].map(([type, h]) => ({ type, domain: h.domain, implemented: true }))
@@ -131,7 +146,7 @@
   }
   reserve("orderMove", { phase: "D2", identity: "actor is a unit id; operator may own multiple units" });
   reserve("orderSwapAccept", { phase: "D2", identity: "swap request identifies unit ids, not player seats" });
-  root.Commands = { register, dispatch, reserve, catalog, projectView, unitRoster, exportLog, downloadLog,
+  root.Commands = { register, dispatch, reserve, activate, intercept, catalog, projectView, unitRoster, exportLog, downloadLog,
     history: () => copy(log), clearLog: () => { log.length = 0; }, validate: prepare };
   root.dispatch = dispatch;
 })(globalThis);
