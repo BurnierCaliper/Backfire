@@ -394,7 +394,7 @@ const ROGUE_LEVEL_REWARDS = {
   10: [{ type: "role" }],
   12: [{ type: "prof" }],                      // 一个自选熟练项（已有的再选一次 = 升一级，最高三级）
   13: [{ type: "note", key: "feat", text: "一项专长" }],
-  14: [{ type: "note", key: "lv14", text: "空手格挡成功率提高到 50%；自己回合内可用 1 行动点转化为 1 附赠动作" }],
+  14: [{ type: "note", key: "lv14", text: "自己回合内可用 1 行动点转化为 1 附赠动作" }],
   15: [{ type: "role" }],
   16: [{ type: "note", key: "feat", text: "一项专长" }],
   18: [{ type: "prof" }],                      // 一个自选熟练项（已有的再选一次 = 升一级，最高三级）

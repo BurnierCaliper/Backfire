@@ -105,7 +105,7 @@
         return `<div class="rh-w${d <= 0 ? " broken" : ""}">${esc(weaponName(k))} Lv${lv} · 耐久 ${d}/${m}${d <= 0 ? "（损坏）" : ""}</div>`;
       }).join("");
       return `<div class="rhero${h.dead ? " fallen" : h.dying ? " dying" : ""}">
-        <div class="rh-top"><b>${esc(h.name)}</b><span>Lv${h.level || 1}${tag ? " · " + tag : ""}</span></div>
+        <div class="rh-top"><b>${esc(h.name)}</b><span>Lv${h.level || 1}${tag ? " · " + tag : ""}</span><button class="g-btn small rh-sheet" data-sheet="${esc(h.kit)}" title="数值、被动和技能说明">资料</button></div>
         <div class="rh-row">血量 <span>${totalHpOf(h)}/${totalHpMaxOf(h)}</span></div>
         <div class="rh-row">坚毅 <span>${Number(h.shp) || 0}/${Number(h.shpMax) || 0}</span></div>
         <div class="rh-row">经验 <span>${Number(h.xp) || 0}/${xpNext || "满"}</span></div>
@@ -142,6 +142,7 @@
     },
     rest() {
       const plan = longRestNeeds({});
+      const foodTotal = Object.keys(plan.food).reduce((a, id) => a + (Number(plan.food[id]) || 0), 0);
       const foods = FOOD_ORDER.filter(id => ITEM_CATALOG[id]);
       const rows = heroes().filter(h => !h.dead).map(h => {
         const c = heroRestCost(h);
@@ -161,9 +162,9 @@
         <h3>长休</h3>
         ${rows}
         <div class="tr-row">时长 <select id="tr-long-h">${[8, 9, 10, 11, 12].map(n => `<option value="${n}">${n} 小时</option>`).join("")}</select>
-          <button class="g-btn r-main" id="tr-long">长休</button>
+          <button class="g-btn r-main" id="tr-long">长休（${plan.water} ml 水 · ${foodTotal} 份食物）</button>
           <button class="g-btn" id="tr-long-force" title="不扣水和食物（剧情安排的休息）">长休（不扣补给）</button></div>
-        <p class="r-hint">${plan.ok ? `一共需要 ${plan.water} ml 水。` : "补给不足：" + esc((plan.lack || []).join("，"))}长休：血量、耐久回满，武器人痊愈，坚毅生命按小时慢慢恢复，清空力竭。</p>
+        <p class="r-hint">一共需要 <b>${plan.water}</b> ml 水、<b>${foodTotal}</b> 份食物（${esc(Object.keys(plan.food).map(id => `${(ITEM_CATALOG[id] || {}).name || id} ${plan.food[id]} 份`).join("、"))}）。${plan.ok ? "" : "补给不足：" + esc((plan.lack || []).join("，")) + "。"}长休：血量、耐久回满，武器人痊愈，坚毅生命按小时慢慢恢复，清空力竭。</p>
         <h3>主持人</h3>
         <button class="g-btn" id="tr-restore">全员复原（不扣补给、不推进时间）</button>`;
     },

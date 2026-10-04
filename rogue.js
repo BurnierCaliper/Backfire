@@ -935,6 +935,11 @@ const Rogue = (function () {
     return withParty(run, () => longRestNeeds({})).out;
   }
   function canLongRest(run) { return restPlan(run).ok; }
+  /** 角色资料面板（skill-text.js）：把队伍摆上场算一份，不改动本局 */
+  function sheetData(run) {
+    if (typeof SkillText === "undefined") return [];
+    return withParty(run, () => SkillText.sheetData()).out;
+  }
   function doLongRest(run, notes, watch) {
     const r = withParty(run, () => ledgerLongRest({ hours: C.hours.longRest, watch: watch || null }, notes));
     notes.push(...r.notes);
@@ -1449,7 +1454,7 @@ const Rogue = (function () {
     battleSpec, applyPartyToField, finishBattle,
     checkInfo, checkChance, checkOdds, attemptCheck, skipCheck, heroProfs,
     role2Options, soloBattleInfo,
-    restPlan, canLongRest, restAtNode, leaveNode, canShortRestBefore, shortRestBeforeNode,
+    restPlan, canLongRest, sheetData, restAtNode, leaveNode, canShortRestBefore, shortRestBeforeNode,
     ambushChance, watchOptions,
     buy, canShop, shopItemName, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
     presentSmiths, smithInfo, claimBlueprint, installBlueprint, blueprintById, weaponModsOf,

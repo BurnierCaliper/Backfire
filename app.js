@@ -4757,14 +4757,16 @@ function tryOxAutoBlock(attacker, target) {
   return { ok: false };
 }
 
-function eligibleBlockers(target) {
+/** job：正在等格挡的那一击；已经试过（失败）的人不再列出（连续协助格挡） */
+function eligibleBlockers(target, job) {
   if (!target || !target.isPlayer) return [];
+  const tried = (job && job.tried) || [];
   const crushOut = (u) => !(typeof isCrushing === "function" && isCrushing(u));
   return state.units.filter(u =>
     u.isPlayer && !u.hidden && !u.isPartner && (u.id !== target.id || isSoloHero(u)) &&   // 单人模式可以给自己协助格挡
     Number(u.zone) === Number(target.zone) &&
     !u.stunned && crushOut(u) && ((u.bonus || 0) >= 1 || target.coverBy === u.id) &&
-    blockChance(u) != null &&
+    blockChance(u) != null && tried.indexOf(u.id) < 0 &&
     (typeof bpCanAssistBlock !== "function" || bpCanAssistBlock(u))
   );
 }
@@ -4943,8 +4945,11 @@ function openBlockModal(job) {
   const box = uiEl("blockModalBtns");
   const attacker = unitById(job.attackerId);
   const target = unitById(job.targetId);
-  const helpers = eligibleBlockers(target);
-  text.textContent = `${attacker ? attacker.name : "敌人"} 正在攻击 ${target ? target.name : "玩家"}。同区域有附赠行动的队友可以协助格挡。`;
+  const helpers = eligibleBlockers(target, job);
+  const again = job.tried && job.tried.length;
+  text.textContent = again
+    ? `${attacker ? attacker.name : "敌人"} 的攻击还没落下：前面的协助格挡失败了，其他队友可以继续尝试。`
+    : `${attacker ? attacker.name : "敌人"} 正在攻击 ${target ? target.name : "玩家"}。同区域有附赠行动的队友可以协助格挡。`;
   box.innerHTML = "";
   helpers.forEach(h => {
     const b = document.createElement("button");
@@ -4987,21 +4992,36 @@ function finishBlockInner(helperId, forced) {
   if (!job) return;
   const attacker = unitById(job.attackerId);
   const target = unitById(job.targetId);
-  const opt = job.opt || {};
-  opt.flags = opt.flags || {};
-  opt.flags.blockResolved = true;
-  if (job.onConnect) opt.onConnect = job.onConnect;
+  let block = "none", blockHelperId = null;
   if (helperId) {
     const helper = unitById(helperId);
     const out = performAssistBlock(helper, target, attacker, forced);
     appendLog(out.notes.join("\n"));
     if (out.ok && helper && helper.isPlayer) addScore("block", SCORE_RULES.block, helper);   // 评分：协助格挡成功
-    opt.flags.block = out.ok ? (out.bare ? "bareOk" : "assistOk") : "fail";
-    if (out.ok && !out.bare) opt.flags.blockHelperId = helperId;
+    block = out.ok ? (out.bare ? "bareOk" : "assistOk") : "fail";
+    if (out.ok && !out.bare) blockHelperId = helperId;
+    // 连续协助格挡：这个人没挡住，还有别人能挡 → 这一击先不落下，轮到剩下的人选
+    if (!out.ok && attacker && target && !target.dead) {
+      job.tried = (job.tried || []).concat(helperId);
+      const rest = eligibleBlockers(target, job);
+      if (rest.length) {
+        appendLog(`${helper ? helper.name : ""} 没挡住 → ${rest.map(h => h.name).join("、")} 还可以接着协助格挡。`);
+        state.blockQueue.unshift(job);
+        return;
+      }
+    }
+  } else if (job.tried && job.tried.length) {
+    appendLog(`其他人不再格挡，${target ? target.name : ""} 照常受伤。`);
+    block = "fail";
   } else {
     appendLog(`没有人协助格挡 ${target ? target.name : ""}。`);
-    opt.flags.block = "none";
   }
+  const opt = job.opt || {};
+  opt.flags = opt.flags || {};
+  opt.flags.blockResolved = true;
+  if (job.onConnect) opt.onConnect = job.onConnect;
+  opt.flags.block = block;
+  if (blockHelperId) opt.flags.blockHelperId = blockHelperId;
   if (attacker && target) {
     let out;
     const captured = withLogSink(() => { out = dealTo(attacker, target, opt); });

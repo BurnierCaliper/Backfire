@@ -1151,7 +1151,7 @@
         const job = state.blockQueue[0];
         const attacker = unitById(job.attackerId), target = unitById(job.targetId);
         if (!attacker || !target) { systemCommand({ type: "battle.cleanQueues", queue: "block" }); continue; }
-        const helpers = eligibleBlockers(target);
+        const helpers = eligibleBlockers(target, job);
         let choice = null;
         if (helpers.length) choice = await promptBlock(job, attacker, target, helpers);
         const blocker = unitById(choice);
@@ -1284,11 +1284,13 @@
   function promptBlock(job, attacker, target, helpers) {
     if (hotseat()) return HotseatGame.requestAsk("block", `${attacker.name} 攻击 ${target.name} · 协助格挡`,
       helpers.map(h => ({ helper: h.id, label: h.name, sub: `格挡成功率 ${finalBlockChance(h, attacker, target)}%` })),
-      () => eligibleBlockers(target), job).then(answer => answer.unitId);
+      () => eligibleBlockers(target, job), job).then(answer => answer.unitId);
     const noBlock = () => showPreview(previewOf(() => finishBlock(null)), `${attacker.name} → ${target.name}（不格挡）`);
+    const again = job.tried && job.tried.length;
     return openChoice(
-      `${attacker.name} 攻击 ${target.name}`,
-      "同区有附赠行动的队友可以协助格挡。成功免伤，但仍扣架势（最少留 1）。闪白部分是不格挡时会受到的伤害。",
+      again ? `${attacker.name} 攻击 ${target.name} · 前面的格挡失败了` : `${attacker.name} 攻击 ${target.name}`,
+      again ? "还有队友可以接着协助格挡；都不挡，这一击照常落下。闪白部分是不格挡时会受到的伤害。"
+        : "同区有附赠行动的队友可以协助格挡。成功免伤，但仍扣架势（最少留 1）；失败了其他队友还能接着挡。闪白部分是不格挡时会受到的伤害。",
       helpers.map(h => ({
         label: `${h.name} ${h.dying && !h.upOnShp ? "起身并格挡" : isUnarmed(h) ? "空手格挡" : "格挡"}`,
         sub: `成功率 ${finalBlockChance(h, attacker, target)}% · 消耗附赠行动${h.dying && !h.upOnShp ? " · 会先起身，之后受伤改打坚毅生命" : ""}`,
@@ -1419,7 +1421,8 @@
   }
   function blockRollFor(job) {
     if (!job || job.seq == null || typeof makeRng !== "function") return 1 + Math.floor(Math.random() * 100);
-    return 1 + Math.floor(makeRng("block:" + job.seq)() * 100);
+    const n = (job.tried || []).length;   // 连续格挡：第二个人起换一颗骰子
+    return 1 + Math.floor(makeRng("block:" + job.seq + (n ? ":" + n : ""))() * 100);
   }
   function predictTurn(id) {
     if (window.GMCommands?.isManual(unitById(id))) return ["由主持人操控，无法预测"];
@@ -1454,7 +1457,7 @@
           let info = null;
           if (detail && attacker && target && job.attackerId === id) {
             const roll = blockRollFor(job);
-            const helpers = eligibleBlockers(target).map(h => {
+            const helpers = eligibleBlockers(target, job).map(h => {
               const chance = finalBlockChance(h, attacker, target);
               const iai = h.kit === "hiaki" && h.resources && h.resources.stance === "iai";
               return `${h.name} ${iai ? "居合必挡" : chance + "%"} ${iai || roll <= chance ? "能挡住" : "挡不住"}`;
@@ -2329,6 +2332,13 @@
       b.onclick = () => { if (G.depth === 0 && !choiceResolve && !u.dead) selectActor(u.id); };
       party.appendChild(b);
     });
+    if (heroes.length) {
+      const info = el("button", "pc pc-sheet");
+      info.innerHTML = `<span class="n"><span>角色资料</span></span><div class="u-econ" style="font-size:11px;color:var(--muted)">技能 · 数值</div>`;
+      info.title = "查看每个角色的数值、被动和技能说明";
+      info.dataset.sheet = G.actorId && unitById(G.actorId) ? unitById(G.actorId).kit : heroes[0].kit;
+      party.appendChild(info);
+    }
     cards.forEach((c, id) => c.wrap.classList.toggle("is-actor", id === G.actorId && state.combatPhase === "player"));
 
     // 技能
@@ -2344,13 +2354,15 @@
       if (sk.cost.bonus) cost.push(`<span class="bn">附赠 ${sk.cost.bonus}</span>`);
       if (!cost.length) cost.push("不耗行动");
       b.innerHTML = `<span class="key">${i < 9 ? i + 1 : ""}</span><span class="nm">${esc(sk.name)}</span><span class="cost">${cost.join(" ")}</span>`;
-      if (why) { b.disabled = true; b.title = why; }
-      b.onclick = () => armSkill(sk);
+      if (why) { b.disabled = true; b.setAttribute("aria-label", `${sk.name}：${why}`); }
+      b.onclick = () => { if (window.HeroSheet) HeroSheet.hideTip(); armSkill(sk); };
       b.onmouseenter = () => {
+        // 悬停：浮窗里显示完整技能说明（照角色卡，skill-text.js）
+        if (window.HeroSheet) HeroSheet.tip(b, HeroSheet.skillTipHtml(sk, why));
         if (G.arm || G.depth > 0) return;
         setHint(`<b>${esc(sk.name)}</b>　${esc(sk.hint || "")}${why ? `　<span style="color:var(--foe)">${esc(why)}</span>` : ""}`);
       };
-      b.onmouseleave = () => { if (!G.arm) setHint(""); };
+      b.onmouseleave = () => { if (window.HeroSheet) HeroSheet.hideTip(); if (!G.arm) setHint(""); };
       box.appendChild(b);
     });
     G.skillsShown = list;
@@ -2868,7 +2880,8 @@
       (bags ? ` · 睡袋 ${bags} 个` : "");
     const force = $("g-long-force").checked;
     $("g-long-go").disabled = inFight || (!need.ok && !force);
-    $("g-long-go").textContent = need.ok || force ? "长休" : "补给不足";
+    const foodN = Object.keys(need.food).reduce((a, fid) => a + (Number(need.food[fid]) || 0), 0);
+    $("g-long-go").textContent = need.ok || force ? (force ? "长休（不扣补给）" : `长休（${need.water} ml 水 · ${foodN} 份食物）`) : "补给不足";
   }
   function currentRestPlan() {
     const food = {};

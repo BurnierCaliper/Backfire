@@ -19,6 +19,7 @@
 
   const save = () => { if (run && run.stage !== "over") dispatch({ type: "run.session", action: "save" }, { run }); };
   const query = (action, fields) => dispatch(Object.assign({ type: "run.query", action }, fields || {}), { run });
+  if (window.HeroSheet) HeroSheet.register("run", () => (run ? query("sheetData") : []));
 
   function completeAction(notes, error) {
     lastError = error ? error.message : "";
@@ -117,7 +118,7 @@
     $("run-party").innerHTML = run.party.map(h => {
       const v = query("heroView", { kit: h.kit });
       return `<div class="rhero">
-        <div class="rh-top"><b>${esc(v.name)}</b><span>Lv${v.level}${v.pending ? ' · <em>待选升级</em>' : ""}</span></div>
+        <div class="rh-top"><b>${esc(v.name)}</b><span>Lv${v.level}${v.pending ? ' · <em>待选升级</em>' : ""}</span><button class="g-btn small rh-sheet" data-sheet="${esc(h.kit)}" data-sheet-src="run" title="数值、被动和技能说明">资料</button></div>
         ${v.race ? `<div class="rh-w rh-prof">${esc(v.race)} · ${esc(v.job)} · ${esc(Object.keys(v.profs).map(k => k + v.profs[k]).join(" "))}</div>` : ""}
         ${v.role2 ? `<div class="rh-w rh-solo">第二副职责 ${esc(v.role2)}${v.role2Skills.length ? "：" + esc(v.role2Skills.join("、")) : "（还没学技能）"}</div>` : ""}
         ${v.pendingBreak ? `<div class="rh-w broken">检定受伤：下一场开战时受到 ${v.pendingBreak} 击破</div>` : ""}
@@ -193,6 +194,13 @@
     ? `<button class="g-btn r-main" id="r-fight">仍然${label}（有人空手）</button>`
     : `<button class="g-btn r-main" id="r-fight">${label}</button>`;
 
+  /** 长休要吃的食物：「罐头食品 2 份、流食 1 份（共 3 份食物）」 */
+  function restFoodText(plan) {
+    const ids = Object.keys((plan && plan.food) || {});
+    const total = ids.reduce((a, id) => a + (Number(plan.food[id]) || 0), 0);
+    const parts = ids.map(id => `${(ITEM_CATALOG[id] || {}).name || id} ${plan.food[id]} 份`);
+    return ids.length > 1 ? `${parts.join("、")}（共 ${total} 份食物）` : (parts[0] || "0 份食物");
+  }
   const NODE_PANELS = {
     battle: () => `<p>前方有敌人拦路。</p>${brokenWarn()}${fightBtn("迎战")}`,
     elite: () => `<p>前方有棘手的敌人。</p>${brokenWarn()}${fightBtn("迎战")}`,
@@ -204,7 +212,7 @@
           ${brokenWarn()}${fightBtn("迎击")}`;
       }
       const plan = query("restPlan");
-      const food = Object.keys(plan.food).map(id => `${ITEM_CATALOG[id].name} ${plan.food[id]} 份`).join("、");
+      const food = restFoodText(plan);
       const chance = Math.round(Rogue.ambushChance(run) * 100);
       const watchOpts = query("watchOptions").map(w =>
         `<option value="${esc(w.kit)}">${esc(w.weapon ? `${w.name}（${w.owner} 的武器人）` : w.name)}</option>`).join("");
@@ -429,13 +437,14 @@
         const plan = query("restPlan");
         const shopping = C.campShop ? `<p class="r-hint">回到城里，出发前可以补货。手里有 ${Rogue.supplies().kuizhi} 奎支。</p>${shopList()}${repairRows()}` : "";
         const clinic = C.campClinic ? `<h3 class="r-sub">诊所</h3>${clinicPanel()}` : "";
+        const food = restFoodText(plan);
         return `<h2>休整</h2>
           <p class="r-hint">任务之间休整一次，算 ${C.restDays} 天。${plan.ok
-            ? `长休需要 ${plan.water} ml 水和食物，血量、武器耐久回满，清空力竭。`
-            : "补给不足（" + esc(plan.lack.join("，")) + "），只能硬撑着过夜：不回血，力竭继续累积。"}</p>
+            ? `长休需要 ${plan.water} ml 水、${esc(food)}，血量、武器耐久回满，清空力竭。`
+            : `长休需要 ${plan.water} ml 水、${esc(food)}。补给不足（` + esc(plan.lack.join("，")) + "），只能硬撑着过夜：不回血，力竭继续累积。"}</p>
           ${shopping}
           ${clinic}
-          <button class="g-btn r-main" id="r-camp">休整</button>`;
+          <button class="g-btn r-main" id="r-camp">休整<small>${plan.ok ? `消耗 ${plan.water} ml 水、${esc(food)}` : "补给不足：不回血"}</small></button>`;
       }
       case "boss":
         return `<h2>第 ${run.act} 幕 · 首领</h2>

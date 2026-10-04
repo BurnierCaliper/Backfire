@@ -1820,3 +1820,65 @@ body:not([data-screen="battle"]) .g-rank { display: none !important; }
 .g-weather .wicon { --eo: #0b0806; width: 24px; height: 24px; margin: 0; animation: wxBob 3s ease-in-out infinite; }
 @keyframes wxBob { 50% { transform: translateY(-2px); } }
 @media (prefers-reduced-motion: reduce) { .g-weather .wicon { animation: none; } }
+
+/* ---------- 角色资料面板（sheet-ui.js） ---------- */
+.hs-sheet { z-index: 70; }
+.hs-card { width: min(760px, 96vw); max-height: 88vh; display: flex; flex-direction: column; }
+.hs-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.hs-tabs .g-btn { height: 30px; padding: 0 12px; font-weight: 700; }
+.hs-tabs .g-btn.on { outline: 2px solid var(--gold); }
+.hs-body { overflow: auto; min-height: 0; padding-right: 4px; }
+.hs-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.hs-title b { font-size: 22px; font-weight: 800; }
+.hs-title small { color: var(--muted); }
+.hs-title span { margin-left: auto; color: var(--muted); font-size: 13px; }
+.hs-sub { margin: 4px 0; color: var(--muted); font-size: 13px; }
+.hs-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 6px; margin: 10px 0 6px; }
+.hs-stats > div { background: rgba(0, 0, 0, .25); border: 1px solid var(--line); padding: 5px 8px; display: flex; flex-direction: column; gap: 1px; }
+.hs-stats > div.wide { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.hs-stats span { color: var(--muted); font-size: 12px; }
+.hs-stats b { font-size: 18px; font-weight: 800; color: var(--gold); }
+.hs-stats small { color: var(--muted); font-size: 12px; }
+.hs-layers { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.hs-layer { font-size: 13px; padding: 2px 8px; border-left: 4px solid var(--flesh); background: rgba(0, 0, 0, .25); }
+.hs-layer b { font-weight: 800; }
+.hs-armor { border-left-color: var(--armor); }
+.hs-shield { border-left-color: var(--shield); }
+.hs-sand { border-left-color: var(--sand); }
+.hs-spirit { border-left-color: #b39ddb; }
+.hs-attrs { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; margin: 8px 0; }
+.hs-attr { text-align: center; background: rgba(0, 0, 0, .25); border: 1px solid var(--line); padding: 4px 0; }
+.hs-attr span { display: block; font-size: 12px; color: var(--muted); }
+.hs-attr b { font-size: 18px; font-weight: 800; }
+.hs-body h4 { margin: 0 0 4px; font-size: 18px; font-weight: 800; }
+.hs-body h4 small { color: var(--muted); font-weight: 400; font-size: 13px; }
+.hs-body h5 { margin: 14px 0 6px; font-size: 14px; letter-spacing: .1em; color: var(--gold); border-bottom: 1px solid var(--line); padding-bottom: 3px; }
+.hs-pass, .hs-skill { margin: 6px 0; padding: 6px 10px; background: rgba(0, 0, 0, .2); border-left: 3px solid var(--line); }
+.hs-pass b, .hs-skill b { font-weight: 800; }
+.hs-pass p, .hs-skill p { margin: 3px 0 0; font-size: 13px; line-height: 1.6; }
+.hs-sk-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.hs-cost { font-size: 12px; color: var(--muted); }
+.hs-lv { font-size: 12px; color: var(--gold); margin-left: auto; }
+.hs-skill.locked { opacity: .6; }
+.hs-note { color: var(--muted); font-size: 12px; margin: 4px 0; }
+.hs-weapon { margin-top: 16px; padding: 10px 12px; border: 1px dashed var(--line); }
+.sheet-open { cursor: pointer; }
+@media (max-width: 520px) {
+  .hs-attrs { grid-template-columns: repeat(3, 1fr); }
+  .hs-title span { margin-left: 0; width: 100%; }
+}
+
+/* 战斗里技能按钮的悬停说明 */
+.sk-tip {
+  position: fixed; z-index: 80; display: none; pointer-events: none;
+  background: var(--plate); color: var(--bone); border: 2px solid var(--ink);
+  box-shadow: 4px 5px 0 rgba(0, 0, 0, .5); padding: 8px 12px; font-size: 13px; line-height: 1.6;
+}
+.sk-tip.show { display: block; }
+.sk-tip-top { display: flex; align-items: baseline; gap: 10px; }
+.sk-tip-top b { font-size: 15px; font-weight: 800; }
+.sk-tip-top span { color: var(--muted); font-size: 12px; }
+.sk-tip p { margin: 4px 0 0; }
+.sk-tip-short { color: var(--muted); font-size: 12px; }
+.sk-tip-why { color: #ff7a6a; }
+.rh-top .rh-sheet { margin-left: 8px; height: 22px; padding: 0 8px; font-size: 12px; line-height: 20px; }

@@ -618,55 +618,76 @@ function skillCost(id) {
   return map[id] || { ap: 1 };
 }
 
-/* 空手格挡率（角色自身）。持武器时 = 空手格挡率 + 武器提供的格挡率。 */
-const BARE_BLOCK = { kolt: 20, helu: 25, ras: 20 };
-/* 武器人持在手里时提供给主人的格挡率。
-   它自己作为独立单位在场时的格挡率，写在下面 blockChance 的 map 里。 */
-const WEAPON_PROVIDE_BLOCK = { torque: 35, ecmo: 20, edc: 25 };
+/* 格挡率（玩家手册第二章「空手」「协助格挡」）：
+ *   空手格挡 = 30% +（敏捷 − 5）× 5%，最低 15%，最高 50%；
+ *   协助格挡 = 空手格挡 + 手里武器的格挡加成（5%–45%）。
+ * 角色的敏捷读 attrs.dex（升级加点会改变格挡率）；武器人独立在场时用自己的敏捷 + 自己的格挡加成。 */
+/** 每把武器（武器人）的格挡加成 */
+const WEAPON_BLOCK_BONUS = {
+  mint: 5, latte: 20, niu: 40, naruto: 30, mochi: 45, berniel: 35,
+  bili: 35, vitas: 5, torque: 35, ecmo: 20, edc: 25
+};
+/** 武器人自己的敏捷（独立在场时决定空手那一段） */
+const WEAPON_DEX = {
+  mint: 6, latte: 3, niu: 2, naruto: 2, mochi: 2, berniel: 2,
+  bili: 2, vitas: 8, torque: 4, ecmo: 3, edc: 4
+};
+/** 不是玩家角色、也没有敏捷的友方单位（剧情 NPC）沿用固定格挡率 */
+const FIXED_BLOCK = { captain_ox: 40, patrol_car: 40 };
 
-function bareBlockChance(unit) {
-  if (!unit || !unit.kit) return 30;
-  return BARE_BLOCK[unit.kit] != null ? BARE_BLOCK[unit.kit] : 30;
+function unitDex(unit) {
+  if (!unit) return 5;
+  if (unit.attrs && unit.attrs.dex != null) return Number(unit.attrs.dex) || 0;
+  if (WEAPON_DEX[unit.kit] != null) return WEAPON_DEX[unit.kit];
+  return 5;
 }
-/** 主人手里那把武器提供的格挡率；武器人已分出去就不提供 */
+/** 空手格挡率：只看敏捷 */
+function bareBlockFromDex(dex) {
+  return Math.max(15, Math.min(50, 30 + (Number(dex) - 5) * 5));
+}
+function bareBlockChance(unit) {
+  return bareBlockFromDex(unitDex(unit));
+}
+/** 手里那把武器的格挡加成；空手、武器人已分出去 → 0 */
 function heldWeaponBlockBonus(unit) {
-  if (!unit) return 0;
+  if (!unit || !unit.kit) return 0;
+  if (WEAPON_BLOCK_BONUS[unit.kit] != null && (unit.weaponOf || !unit.attrs)) return WEAPON_BLOCK_BONUS[unit.kit];   // 武器人自己
+  if (isUnarmed(unit)) return 0;
+  const r = unit.resources || {};
+  if (unit.kit === "hiaki") {
+    const blade = r.blade || "niu";
+    if (weaponIsOut(unit)) return 0;
+    return WEAPON_BLOCK_BONUS[blade] || 0;
+  }
+  if (r.mecha) return WEAPON_BLOCK_BONUS[(unit.linkedKits || [])[0]] || 0;
   const kits = unit.linkedKits || [];
   let best = 0;
   kits.forEach(k => {
-    if (WEAPON_PROVIDE_BLOCK[k] == null) return;
-    const out = (state.units || []).some(u => u.kit === k && !u.hidden && !u.fused && !u.dead);
+    if (WEAPON_BLOCK_BONUS[k] == null) return;
+    const units = (typeof state !== "undefined" && state && state.units) || [];
+    const out = units.some(u => u.kit === k && !u.hidden && !u.fused && !u.dead);
     if (out) return;
-    best = Math.max(best, WEAPON_PROVIDE_BLOCK[k]);
+    best = Math.max(best, WEAPON_BLOCK_BONUS[k]);
   });
   return best;
+}
+/** 夕夏引擎（加重）：格挡成功率 +10% */
+function blockStatusBonus(unit) {
+  return unit && unit.kit === "xia" && unit.resources && unit.resources.engine ? 10 : 0;
 }
 
 function blockChance(unit) {
   if (!unit || !unit.kit) return null;
-  if (isUnarmed(unit)) return bareBlockChance(unit);
-  // 新角色按「空手 + 武器提供」算；老角色沿用下面写死的值
-  if (BARE_BLOCK[unit.kit] != null) return bareBlockChance(unit) + heldWeaponBlockBonus(unit);
-  const map = {
-    ruby: 50, mint: 40, yuito: 60, latte: 40,
-    hiaki: unit.resources && unit.resources.blade === "naruto" ? 60 : 70,
-    niu: 50, naruto: 40, tou: 70, mochi: 60,
-    xia: unit.resources && unit.resources.engine ? 70 : 60,
-    berniel: 40,
-    chuan: 80,
-    bili: 50,
-    nora: 50,
-    vitas: 50,
-    kolt: 55,
-    torque: 60,
-    helu: 45,
-    ecmo: 40,
-    ras: 45,
-    edc: 50,
-    captain_ox: 40,
-    patrol_car: 40
-  };
-  return map[unit.kit];
+  if (FIXED_BLOCK[unit.kit] != null) return FIXED_BLOCK[unit.kit];
+  if (!unit.isPlayer && !unit.weaponOf) return null;
+  if (!unit.attrs && WEAPON_BLOCK_BONUS[unit.kit] == null) return null;
+  return bareBlockChance(unit) + heldWeaponBlockBonus(unit) + blockStatusBonus(unit);
+}
+/** 给资料面板用：拆成空手 / 武器 / 其他三段 */
+function blockBreakdown(unit) {
+  const total = blockChance(unit);
+  if (total == null) return null;
+  return { bare: bareBlockChance(unit), weapon: heldWeaponBlockBonus(unit), extra: blockStatusBonus(unit), total, dex: unitDex(unit) };
 }
 
 function skillList(unit) {

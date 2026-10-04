@@ -13,7 +13,7 @@ const vm = require("vm");
 const ROOT = path.resolve(__dirname, "..");
 // 与 game.html 的加载顺序一致（不含 game.js：它是战斗画面）
 const RULE_FILES = [
-  "run.js", "engine.js", "party.js", "props.js", "enemies.js",
+  "run.js", "engine.js", "party.js", "skill-text.js", "props.js", "enemies.js",
   "growth.js", "items.js", "ledger.js", "commands.js", "app.js", "effects.js", "mods.js", "ai.js", "sim.js", "save.js", "trpg-data.js", "trpg.js", "rogue-data.js", "rogue.js",
   "battle-commands.js", "rogue-commands.js", "trpg-commands.js"
 ];
