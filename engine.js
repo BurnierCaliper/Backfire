@@ -187,7 +187,6 @@ const SKILL_RANGE = {
   berniel_flare: { min: 0, max: 99 },
   chuan_aa: { min: 0, max: 0 },       // 川川普通攻击是近距离
   bare_aa: { min: 0, max: 0 },        // 空手攻击一律同区
-  chuan_pulse: { min: 0, max: 1 },
   chuan_blade: { min: 0, max: 0 },
   xia_crush: { min: 0, max: 0 },
   kolt_aa: { min: 0, max: 1 },

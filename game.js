@@ -195,7 +195,9 @@
       zone: Number(p.zone) || 1,
       level: p.level || 1,
       atk: 0,
-      layers: [{ type: "armor", max: max, cur: cur }],
+      // 铁壁的外层护盾（川川多耗电能加的）画在装甲外面
+      layers: (Number(p.shieldMax) > 0 ? [{ type: "shield", max: Number(p.shieldMax), cur: Math.max(0, Number(p.shield) || 0) }] : [])
+        .concat([{ type: "armor", max: max, cur: cur }]),
       def: 0, defMax: 0, ap: 0, apMax: 0, bonus: 0, bonusMax: 0,
       status: (typeof propKindName === "function" ? propKindName(p.kind) : p.kind) + (p.kind === "door" ? "" : ""),
       res: p.kind === "battery" || p.kind === "turret" ? (p.faction === "enemy" ? "敌方" : "我方") : "",
