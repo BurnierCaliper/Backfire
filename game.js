@@ -41,6 +41,8 @@
     ]
   };
   window.GAME = G;
+  const hotseat = () => window.HotseatGame && HotseatGame.isActive();
+  const systemCommand = (cmd, context) => hotseat() ? HotseatGame.system(cmd, context) : dispatch(cmd, context);
 
   function wait(ms) {
     if (G.instant) return Promise.resolve();
@@ -287,6 +289,7 @@
   G.undo = [];
   function undoLimit() { return (typeof TRPG !== "undefined" && TRPG.active) ? 10 : 1; }
   function pushUndo(label) {
+    if (hotseat()) return;
     if (G.sim) return;
     G.undo.push({
       label: label || "行动",
@@ -297,7 +300,7 @@
     });
     while (G.undo.length > undoLimit()) G.undo.shift();
   }
-  function canUndo() { return G.undo.length > 0 && G.depth === 0 && !G.ended && !choiceResolve; }
+  function canUndo() { return !hotseat() && G.undo.length > 0 && G.depth === 0 && !G.ended && !choiceResolve; }
   function doUndo() {
     if (!canUndo()) return;
     disarm();
@@ -464,6 +467,10 @@
   }
 
   function blockReason(u, sk) {
+    const why = hotseat() && !G.sim ? HotseatGame.reason(u) : "";
+    return why || baseBlockReason(u, sk);
+  }
+  function baseBlockReason(u, sk) {
     if (G.ended) return "战斗已结束";
     if (!state.combatStarted) return "战斗尚未开始";
     if (state.combatPhase !== "player") return "敌人回合";
@@ -1041,12 +1048,13 @@
     }
   }
 
-  async function perform(thunk, meta) {
+  async function perform(thunk, meta, system = false) {
     meta = meta || {};
     G.skip = false;
     G.tape = [];
     let result;
-    try { result = typeof thunk === "function" ? thunk() : dispatch(thunk); if (result && result.meta) Object.assign(meta, result.meta); } catch (e) {
+    try { result = typeof thunk === "function" ? thunk() : system ? systemCommand(thunk) : dispatch(thunk); if (result && result.meta) Object.assign(meta, result.meta); } catch (e) {
+      if (hotseat() && !system) { G.tape = null; flashHint(e.message); return null; }
       console.error(e);
       G.tape.push({ type: "log", text: "结算出错：" + e.message });
     }
@@ -1065,14 +1073,18 @@
     G.depth++;
     syncBusy();
     try {
-      await perform(thunk, meta);
+      const tape = await perform(thunk, meta);
+      if (hotseat() && tape === null) return false;
       await resolveQueues();
+      if (hotseat()) return true;
     } finally {
       G.depth--;
       G.version++;
       syncBusy();
+      if (hotseat()) autoSelect(true);
       refreshAll();
       checkEnd();
+      resumeHotseat();
     }
   }
 
@@ -1133,7 +1145,7 @@
       if (state.blockQueue && state.blockQueue.length) {
         const job = state.blockQueue[0];
         const attacker = unitById(job.attackerId), target = unitById(job.targetId);
-        if (!attacker || !target) { dispatch({ type: "battle.cleanQueues", queue: "block" }); continue; }
+        if (!attacker || !target) { systemCommand({ type: "battle.cleanQueues", queue: "block" }); continue; }
         const helpers = eligibleBlockers(target);
         let choice = null;
         if (helpers.length) choice = await promptBlock(job, attacker, target, helpers);
@@ -1158,21 +1170,31 @@
           actorId: attacker.id, targetId: target.id, forceLunge: true,
           blockerId: blocker && forced && forced.ok ? blocker.id : null,
           skillName: blocker ? `攻击（${blocker.name} 格挡）` : "攻击"
-        });
+        }, true);
         continue;
       }
-      if (state.assistQueue && state.assistQueue.length) dispatch({ type: "battle.cleanQueues", queue: "assist" });
+      if (state.assistQueue && state.assistQueue.length) systemCommand({ type: "battle.cleanQueues", queue: "assist" });
       if (state.assistQueue && state.assistQueue.length) {
         const job = state.assistQueue[0];
         const target = unitById(job.targetId), breaker = unitById(job.breakerId);
         const list = target ? eligibleAssisters(breaker, target) : [];
-        let choice = null;
+        let choice = null, hotseatExtra = {};
         if (list.length) {
-          choice = job.vsPlayer ? aiPickAssister(list) : await promptAssist(job, target, list);
+          if (hotseat() && !job.vsPlayer) {
+            const options = list.flatMap(h => {
+              if (h.kit !== "hiaki") return [{ helper: h.id, label: h.name, sub: "协助攻击" }];
+              const r = h.resources || {}, blades = [];
+              if (!r.niuOut) blades.push("niu"); if (!r.narutoOut) blades.push("naruto");
+              if (!blades.length) blades.push("niu", "naruto");
+              return blades.map(blade => ({ helper: h.id, label: h.name + " · " + (blade === "niu" ? "丹生谷" : "鳴門"), sub: "协助攻击", extra: { blade } }));
+            });
+            const answer = await HotseatGame.requestAsk("assist", target.name + " 失衡 · 协助攻击", options, () => eligibleAssisters(breaker, target), job);
+            choice = answer.unitId; hotseatExtra = answer.extra;
+          } else choice = job.vsPlayer ? aiPickAssister(list) : await promptAssist(job, target, list);
         }
         const helper = unitById(choice);
-        let extra = {};
-        if (helper && helper.kit === "hiaki") {
+        let extra = hotseatExtra;
+        if (helper && helper.kit === "hiaki" && !extra.blade) {
           const r = helper.resources || {};
           const blades = [];
           if (!r.niuOut) blades.push({ label: "丹生谷", sub: "火焰 · 1.5 ATK", value: "niu" });
@@ -1188,7 +1210,7 @@
             { label: "取消", value: null }
           );
           if (!pick) {
-            dispatch({ type: "assistAnswer", helper: null, extra: {} });
+            systemCommand({ type: "assistAnswer", helper: null, extra: {} });
             continue;
           }
           extra.blade = pick;
@@ -1197,19 +1219,19 @@
         await perform({ type: "assistAnswer", helper: choice || null, extra }, {
           actorId: choice, targetId: job.targetId, forceLunge: !!helper, slow: !!helper,
           skillName: helper ? ("协助攻击" + (bladeName ? " · " + bladeName : "")) : ""
-        });
+        }, true);
         continue;
       }
       if (state.koltSwapQueue && state.koltSwapQueue.length) {
         const job = state.koltSwapQueue[0];
         const k = unitById(job.actorId);
-        if (!k) { dispatch({ type: "battle.cleanQueues", queue: "kolt" }); continue; }
+        if (!k) { systemCommand({ type: "battle.cleanQueues", queue: "kolt" }); continue; }
         const foes = typeof koltMeleeSwapTargets === "function" ? koltMeleeSwapTargets(k) : [];
         const opts = [{ label: "不切换", value: { swap: false } }];
         if (!foes.length) opts.push({ label: "切换刀头", sub: "同区没有可打的敌人", value: { swap: true, targetId: null } });
         else foes.forEach(u => opts.push({ label: `切换并打 ${u.name}`, sub: "近距离 0.5 ATK", value: { swap: true, targetId: u.id } }));
-        const pick = await openChoice("更换刀头", `${k.name} 可以更换刀头。切刀攻击只能打同区目标。`, opts, { label: "不切换", value: { swap: false } });
-        dispatch({ type: "koltSwapAnswer", swap: !!(pick && pick.swap), target: (pick && pick.targetId) || null });
+        const pick = hotseat() ? await HotseatGame.ownedChoice(k, "更换刀头", opts) : await openChoice("更换刀头", `${k.name} 可以更换刀头。切刀攻击只能打同区目标。`, opts, { label: "不切换", value: { swap: false } });
+        systemCommand({ type: "koltSwapAnswer", swap: !!(pick && pick.swap), target: (pick && pick.targetId) || null });
         continue;
       }
       return;
@@ -1255,6 +1277,9 @@
   }
 
   function promptBlock(job, attacker, target, helpers) {
+    if (hotseat()) return HotseatGame.requestAsk("block", `${attacker.name} 攻击 ${target.name} · 协助格挡`,
+      helpers.map(h => ({ helper: h.id, label: h.name, sub: `格挡成功率 ${finalBlockChance(h, attacker, target)}%` })),
+      () => eligibleBlockers(target), job).then(answer => answer.unitId);
     const noBlock = () => showPreview(previewOf(() => finishBlock(null)), `${attacker.name} → ${target.name}（不格挡）`);
     return openChoice(
       `${attacker.name} 攻击 ${target.name}`,
@@ -1771,7 +1796,7 @@
         if (!u || !unitAlive(u) || u.stunned || (u.ap || 0) <= 0) break;
         const sig = `${u.ap}|${u.bonus}|${u.zone}`;
         const actKey = `act:${state.turnNo}:${id}:${n}`;
-        const tape = await perform({ type: "battle.enemyAction", actor: id, step: n, seed: actKey }, {});
+        const tape = await perform({ type: "battle.enemyAction", actor: id, step: n, seed: actKey }, {}, true);
         if (tape === null) break;
         await resolveQueues();
         if (checkEnd()) return true;
@@ -1788,18 +1813,22 @@
   async function clickStartOrEnd() {
     if (G.depth > 0 || G.ended || choiceResolve) return;
     if (!state.combatStarted) {
+      if (window.HotseatGame && !HotseatGame.canStart()) return;
       await askOpeningChoices();
       pushUndo("开始战斗");
-      dispatch({ type: "startCombat" });
+      if (hotseat()) HotseatGame.startCombat();
+      else dispatch({ type: "startCombat" });
+      if (hotseat()) await resolveQueues();
       if (state.ambush) {
         // 遭遇战：我方第一回合被跳过，直接进敌人回合
         phaseCard("遭遇战 · 被偷袭", "enemy");
         refreshAll();
         await wait(900);
-        endTurn();
+        endTurn(true);
         return;
       }
       phaseCard("战斗开始", "player");
+      if (hotseat()) HotseatGame.beginRound();
       autoSelect(true);
       refreshAll();
       return;
@@ -1809,6 +1838,7 @@
 
   /* ---------- 撤退（规则见 app.js · performRetreat，按主持人手册第七章） ---------- */
   function canRetreat() {
+    if (hotseat() && (!HotseatGame.isHost() || HotseatGame.hasAsk())) return false;
     if (!state.combatStarted || G.ended || G.depth > 0) return false;
     if (state.combatPhase !== "player") return false;
     return !(G.rogue && G.rogue.spec && G.rogue.spec.retreat === false);
@@ -1829,8 +1859,9 @@
       const ok = await openChoice("撤退", text, [{ label: "撤退", value: "yes" }], { label: "不撤了", value: null });
       if (ok !== "yes") return;
     }
-    await act({ type: "retreat", rearguard: guardId });
-    if (!G.ended) finish(false, "retreat");
+    if (hotseat() && !canRetreat()) return;
+    const success = await act({ type: "retreat", rearguard: guardId });
+    if (!G.ended && (!hotseat() || success && state.retreated)) finish(false, "retreat");
   }
   const sumHp = (u) => (u.layers || []).reduce((a, l) => a + Math.max(0, Number(l.current) || 0), 0);
 
@@ -1838,7 +1869,9 @@
   async function askOpeningChoices() {
     const k = typeof findKit === "function" ? findKit("kolt", state.units) : null;
     if (!k || !k.isPlayer) return;
-    const pick = await openChoice(
+    const pick = hotseat() ? await HotseatGame.ownedChoice(k, "柯尔特 · 初始刀头", [
+      { label: "电钻（电 · 近距离）", value: "drill" }, { label: "酸液炮（酸 · 远距离）", value: "acid" }
+    ]) : await openChoice(
       "柯尔特 · 初始刀头",
       "进入战斗时可以自行决定装哪个刀头。这不算「更换刀头」，不会触发追击伤害。",
       [
@@ -1847,13 +1880,18 @@
       ],
       { label: "保持电钻", value: "drill" }
     );
-    dispatch({ type: "openingChoice", actor: k.id, bit: pick === "acid" ? "acid" : "drill" });
+    systemCommand({ type: "openingChoice", actor: k.id, bit: pick === "acid" ? "acid" : "drill" });
     addLogPhase(`柯尔特 初始刀头：${k.resources.bit === "acid" ? "酸液炮（远距离）" : "电钻（近距离）"}`);
   }
 
-  async function endTurn() {
+  async function endTurn(ambush = false) {
     if (G.depth > 0 || G.ended || !state.combatStarted || state.combatPhase !== "player" || choiceResolve) return;
-    const leftover = players().some(u => !u.dying && (u.ap || 0) > 0);
+    if (hotseat() && !ambush) {
+      const ack = HotseatGame.submit({ type: "endTurn" });
+      if (!ack.ok) { flashHint(ack.error); return; }
+      if (!ack.result.roundDone) { autoSelect(true); refreshAll(); return; }
+    }
+    const leftover = !hotseat() && players().some(u => !u.dying && (u.ap || 0) > 0);
     if (leftover && G.apWarnTurn !== state.turnNo) {
       G.apWarnTurn = state.turnNo;
       const ans = await openChoice("结束回合", "你还有没有使用的行动点，确定结束回合吗？", [
@@ -1868,17 +1906,18 @@
     syncBusy();
     try {
       const endKey = `end:${state.turnNo}`;
-      await perform({ type: "endTurn", seed: endKey }, {});
+      await perform({ type: hotseat() ? "battle.endPlayerTurn" : "endTurn", seed: endKey }, {}, hotseat());
       refreshTop();
       phaseCard("敌人回合", "enemy");
       await wait(750);
       const over = await enemyPhase();
       if (!over && !G.ended) {
         await wait(250);
-        await perform({ type: "battle.endEnemyTurn" }, { skillName: "" });
+        await perform({ type: "battle.endEnemyTurn" }, { skillName: "" }, true);
         await resolveQueues();
         if (!checkEnd()) {
           phaseCard(`第 ${state.turnNo} 回合`, "player");
+          if (hotseat()) HotseatGame.beginRound();
           autoSelect(true);
         }
       }
@@ -1891,6 +1930,11 @@
     }
   }
 
+  function resumeHotseat() {
+    if (!hotseat() || G.depth > 0 || G.ended || choiceResolve || HotseatGame.hasAsk()) return;
+    if (state.combatStarted && state.combatPhase === "player" && HotseatGame.needsEnemy() && !checkEnd()) endTurn(true);
+  }
+
   function checkEnd() {
     if (G.ended) return true;
     if (!state.units || !state.units.length) return false;
@@ -1898,7 +1942,7 @@
     const downNotes = dispatch({ type: "battle.checkSolo" });
     if (downNotes && downNotes.length) addLogPhase(downNotes.join("\n"));
     const heroes = state.units.filter(u => u.isPlayer && !u.hidden && !u.dead && !isWeaponUnit(u));
-    const standing = heroes.filter(u => typeof heroStillFighting === "function" ? heroStillFighting(u) : !u.dying);
+    const standing = heroes.filter(u => hotseat() && u.dying ? !standUpBlocked(u) : typeof heroStillFighting === "function" ? heroStillFighting(u) : !u.dying);
     if (!foes().length) return finish(true);
     if (!standing.length) return finish(false);
     return false;
@@ -1915,7 +1959,7 @@
     box.querySelector("h2").textContent = retreated ? "撤退" : win ? "胜利" : state.solo ? "阵亡" : "全员倒地";
     box.querySelector("h2").className = win ? "win" : "lose";
     // 战斗评分：胜利时先算速杀（1 / 2 / 3 回合内 ×2 / ×1.5 / ×1.2）和无伤（+100，倍率 +0.5，与速杀加算），再定评价
-    const rewards = dispatch({ type: "battle.finish", outcome: G.lastOutcome });
+    const rewards = systemCommand({ type: "battle.finish", outcome: G.lastOutcome });
     if (rewards.finishBonus) {
       const fb = rewards.finishBonus;
       const what = [fb.speedMult > 1 ? `速杀（第 ${state.turnNo} 回合打完）×${fb.speedMult}` : "", fb.flawless ? `无伤 +${SCORE_FLAWLESS.points}、×${1 + SCORE_FLAWLESS.mult}` : "", fb.ambush ? `遭遇战 ×${SCORE_AMBUSH_MULT}` : ""].filter(Boolean);
@@ -1941,7 +1985,7 @@
     const ups = rewards.ups;
     // 跑团版的队伍档案只在战斗原型里结算；Roguelike 由单局流程自己记
     if (!G.rogue) {
-      const durNotes = dispatch({ type: "battle.afterBattle" });
+      const durNotes = systemCommand({ type: "battle.afterBattle" });
       if (typeof G.onBattleFinished === "function") {
         const g = state.battleGains || { xp: 0, kuizhi: 0 };
         G.onBattleFinished({ outcome: G.lastOutcome, turn: state.turnNo, xp: g.xp, kuizhi: g.kuizhi, xpMult: state.xpMult || 1, ups, durNotes, stats: statRows(), grade: gr });
@@ -2149,6 +2193,7 @@
 
   /* ================= 11. HUD / 记录 ================= */
   function selectActor(id) {
+    if (hotseat() && HotseatGame.reason(unitById(id))) return;
     if (G.arm) disarm();
     G.actorId = id;
     refreshHud();
@@ -2156,6 +2201,7 @@
   }
 
   function autoSelect(force) {
+    if (hotseat()) { G.actorId = HotseatGame.currentUnit(); return; }
     const cur = unitById(G.actorId);
     const able = (u) => u && u.isPlayer && unitAlive(u) && !u.stunned && ((u.ap || 0) > 0 || (u.bonus || 0) > 0 || u.dying);
     if (!force && able(cur)) return;
@@ -2226,6 +2272,7 @@
   function paintUndo() {
     const b = $("g-undo");
     if (!b) return;
+    b.hidden = !!hotseat();
     b.disabled = !canUndo();
     b.textContent = G.undo.length > 1 ? `撤销（${G.undo.length}）` : "撤销";
     b.title = G.undo.length ? `撤销：${G.undo[G.undo.length - 1].label}（Ctrl+Z）` : "还没有可以撤销的操作（Ctrl+Z）";
@@ -2297,12 +2344,17 @@
       $("g-start").disabled = !!state.combatStarted || G.ended;
       $("g-start").textContent = state.combatStarted ? "战斗中" : "开始战斗";
     }
+    if (window.HotseatGame && HotseatGame.isRequested()) {
+      if (!state.combatStarted) { et.disabled = et.disabled || !HotseatGame.canStart(); $("g-start").disabled = $("g-start").disabled || !HotseatGame.canStart(); }
+      else if (hotseat()) { et.disabled = et.disabled || !!HotseatGame.reason(unitById(HotseatGame.currentUnit())); et.innerHTML = "结束单位行动<small>空格</small>"; }
+    }
     if (!G.arm && G.depth === 0 && !$("g-hint").dataset.flash) setHint(defaultHint());
   }
 
   function defaultHint() {
     const a = unitById(G.actorId);
     if (G.ended) return "";
+    if (hotseat() && state.combatStarted) { const why = HotseatGame.reason(a); if (why) return esc(why); }
     if (!state.combatStarted) return "摆好队伍和敌人后，点「开始战斗」。回合开始效果会在此时结算。";
     if (state.combatPhase !== "player") return "敌人行动中。点击战场可以跳过演出。";
     if (!a) return "选择一名角色。";
@@ -3062,6 +3114,8 @@
       // 只在战斗界面响应（标题、任务板等界面不能误触结束回合）
       if (document.body.dataset.screen && document.body.dataset.screen !== "battle") return;
       if (e.target && /INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) return;
+      if (e.target && e.target.closest(".hs-ui")) return;
+      if (hotseat() && HotseatGame.hasAsk()) return;
       if (choiceResolve) {
         if (e.key === "Escape") { e.preventDefault(); choiceResolve.cancel(); }
         const n = Number(e.key);
@@ -3279,7 +3333,7 @@
       $("g-result").classList.remove("show");
       $("g-reopen").classList.remove("show");
       setRogueMode(null);
-      dispatch({ type: "battle.continue", outcome }, { continueBattle: r.onEnd });
+      systemCommand({ type: "battle.continue", outcome }, { continueBattle: r.onEnd });
     };
     $("g-review").onclick = reviewLog;
     $("g-reopen").onclick = () => $("g-result").classList.add("show");
@@ -3318,6 +3372,11 @@
   G.armSkill = armSkill;
   G.gameSkills = gameSkills;
   G.blockReason = blockReason;
+  G.baseBlockReason = baseBlockReason;
+  G.disarm = disarm;
+  G.selectActor = selectActor;
+  G.startOrEnd = clickStartOrEnd;
+  G.resumeHotseat = resumeHotseat;
   G.aiPlan = aiPlan;
   G.aiStep = EnemyAI.step; G.aiTarget = EnemyAI.target; G.AI_SPEC = EnemyAI.SPEC; G.aiSpecial = EnemyAI.special;
   G.endTurn = endTurn;
