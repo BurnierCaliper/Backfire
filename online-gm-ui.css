@@ -1,0 +1,39 @@
+/* D3 主持人工具：沿用美术定稿的铁皮底色、警示黄与方角控件。 */
+.ogm-ui { color: var(--sk-canvas, #ece0c6); font: 14px/1.55 var(--sk-body, sans-serif); }
+.ogm-ui *, .ogm-ui *::before, .ogm-ui *::after { box-sizing: border-box; }
+.ogm-ui [hidden] { display: none !important; }
+.ogm-ui button, .ogm-ui input, .ogm-ui select { font: inherit; }
+.ogm-ui button { min-height: 42px; padding: 7px 12px; color: var(--sk-canvas, #ece0c6); background: var(--sk-steel-hi, #3b342c); border: 2px solid var(--sk-ink, #0b0806); cursor: pointer; border-radius: 0; }
+.ogm-ui button:hover:not(:disabled), .ogm-ui button[aria-pressed="true"] { background: var(--sk-edge, #4d4337); border-color: var(--sk-hazard, #f2c230); }
+.ogm-ui button:disabled { opacity: .45; cursor: default; }
+.ogm-ui button.ogm-primary, #ogm-toggle { color: var(--sk-ink, #0b0806); background: var(--sk-hazard, #f2c230); font-weight: 700; }
+.ogm-ui button.ogm-danger { color: #ffd0c4; border-color: var(--sk-rust, #b4522a); }
+.ogm-ui :is(input, select, button):focus-visible { outline: 2px solid var(--sk-holo, #3fe0ff); outline-offset: 2px; }
+#ogm-toggle { position: fixed; right: 12px; bottom: max(12px, env(safe-area-inset-bottom)); z-index: 74; box-shadow: 3px 4px 0 #0009; }
+#ogm-panel { position: fixed; right: 12px; bottom: 66px; width: min(610px, calc(100vw - 24px)); max-height: calc(100dvh - 150px); overflow-y: auto; overscroll-behavior: contain; z-index: 74; border: 3px solid var(--sk-ink, #0b0806); box-shadow: 5px 6px 0 #000a; padding: 14px; background: var(--sk-steel, #2a2520); }
+#ogm-panel header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+#ogm-panel h2 { font: 30px/1.2 var(--sk-tag, sans-serif); margin: 0; color: var(--sk-hazard, #f2c230); }
+#ogm-panel h3 { margin: 18px 0 10px; color: var(--sk-brass, #c99a46); font-size: 17px; }
+#ogm-panel nav { display: flex; gap: 5px; flex-wrap: wrap; padding: 10px 0; border-bottom: 1px solid var(--sk-edge, #4d4337); }
+#ogm-panel nav button { flex: 1 0 auto; padding: 6px 10px; }
+.ogm-toolbar, .ogm-actions { display: flex; flex-wrap: wrap; gap: 7px 12px; align-items: center; margin: 10px 0; }
+.ogm-toolbar { justify-content: space-between; }
+.ogm-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 10px 0; }
+.ogm-ui label { display: flex; flex-direction: column; gap: 4px; min-width: 0; color: var(--sk-muted, #a8977b); }
+.ogm-ui input, .ogm-ui select { min-width: 0; width: 100%; min-height: 42px; padding: 7px; border: 1px solid var(--sk-edge, #4d4337); border-radius: 0; background: var(--sk-oil, #110e0b); color: var(--sk-canvas, #ece0c6); }
+.ogm-ui label.ogm-check { flex-direction: row; align-items: center; color: var(--sk-canvas, #ece0c6); }
+.ogm-ui input[type="checkbox"] { width: 20px; height: 20px; min-height: 20px; accent-color: var(--sk-hazard, #f2c230); }
+.ogm-muted, .ogm-enemies small { font-size: 12px; color: var(--sk-muted, #a8977b); }
+.ogm-enemies { list-style: none; padding: 0; margin: 8px 0; }
+.ogm-enemies li { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; border-bottom: 1px solid var(--sk-edge, #4d4337); padding: 8px 0; }
+.ogm-enemies small { display: block; }
+.ogm-enemies .ogm-actions { margin: 0; gap: 5px; }
+.ogm-budget { color: var(--sk-mint, #39e6b4); align-self: end; }
+.ogm-ui fieldset { border: 1px solid var(--sk-edge, #4d4337); margin: 12px 0; padding: 10px; }
+#ogm-notice { padding: 7px 10px; color: var(--sk-hazard, #f2c230); background: #371c13; overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  #ogm-panel { right: 6px; width: calc(100vw - 12px); padding: 11px; max-height: calc(100dvh - 140px); }
+  #ogm-toggle { right: 8px; }
+  .ogm-enemies li > span { flex: 1 1 100%; }
+  .ogm-grid { gap: 9px; }
+}

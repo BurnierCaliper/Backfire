@@ -67,7 +67,10 @@
   function dispatch(input, context = {}) {
     const command = prepare(input);
     if (!context || typeof context !== "object" || displayContexts.has(context)) throw new TypeError("A complete authority context is required; display views cannot execute commands");
-    const run = index => index < interceptors.length ? interceptors[index](command, context, () => run(index + 1)) : execute(command, context);
+    // A deferred interceptor may resume after another module registers/removes a
+    // boundary. Keep this dispatch's continuation on its original ordered chain.
+    const chain = interceptors.slice();
+    const run = index => index < chain.length ? chain[index](command, context, () => run(index + 1)) : execute(command, context);
     return run(0);
   }
   function execute(command, context) {
@@ -91,9 +94,10 @@
     if (typeof executor !== "function") throw new TypeError("Command requires an executor");
     reserved.delete(type); register(type, executor, options);
   }
-  function intercept(fn) {
+  function intercept(fn, options = {}) {
     if (typeof fn !== "function") throw new TypeError("Interceptor requires a function");
-    interceptors.push(fn);
+    if (!options || typeof options !== "object" || (options.first !== undefined && typeof options.first !== "boolean")) throw new TypeError("Interceptor options require a boolean first flag");
+    if (options.first === true) interceptors.unshift(fn); else interceptors.push(fn);
     return () => { const i = interceptors.indexOf(fn); if (i >= 0) interceptors.splice(i, 1); };
   }
   function catalog() {

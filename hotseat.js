@@ -248,7 +248,8 @@
       const candidates = [...new Set(spec.candidates || [])].filter(id => rowFor(id));
       const owners = [...new Set(candidates.map(id => rowFor(id).operatorId))];
       ask = { id: "ask-" + (++sequence), kind: spec.kind, jobId: spec.jobId == null ? null : spec.jobId,
-        targetId: spec.targetId || null, candidates, operators: owners, declined: [], deadline: now() + 20000 };
+        targetId: spec.targetId || null, candidates, operators: owners, declined: [],
+        deadline: now() + (Number.isFinite(spec.remainingMs) ? Math.max(0, Math.min(20000, spec.remainingMs)) : 20000) };
       closedAsk = null; const result = askSummary();
       if (!candidates.length) closeAsk("unavailable", null, {}, null);
       emit("askOpened"); return clone(result);
@@ -295,10 +296,39 @@
       phase = "setup"; turnNo = 0; spent.clear(); completed.clear(); slots = []; swaps = []; confirmed.clear(); stableById.clear();
       roster = rows(); return emit("reset");
     }
+    // This checkpoint belongs to the host's online recovery sidecar, never to a
+    // player packet or the campaign save format. Pending questions are recreated
+    // from the authoritative reaction queues after a host reload.
+    function checkpoint() {
+      return clone({ ...snapshot(), sequence, spent: [...spent], completed: [...completed] });
+    }
+    function restore(value) {
+      const saved = clone(value);
+      if (!saved || !["setup", "selecting", "acting", "enemy", "ended"].includes(saved.phase) ||
+          !Number.isInteger(saved.turnNo) || saved.turnNo < 0 || !Array.isArray(saved.slots)) throw new Error("无效的房主顺序存档");
+      phase = "setup"; setAssignments(saved.assignments);
+      phase = saved.phase; turnNo = saved.turnNo; sequence = Number(saved.sequence) || 0;
+      spent.clear(); completed.clear();
+      for (const key of saved.spent || []) spent.add(key);
+      for (const key of saved.completed || []) completed.add(key);
+      confirmed = new Set((saved.confirmed || []).filter(id => operatorMap.has(id)));
+      roster = rows(); const available = new Map(roster.map(r => [r.unitId, r]));
+      const used = new Set();
+      slots = saved.slots.map(r => {
+        if (!r) return null;
+        if (!available.has(r.unitId) || used.has(r.unitId)) return null;
+        used.add(r.unitId); const row = available.get(r.unitId);
+        return { ...row, spent: spent.has(row.stableKey), completed: completed.has(row.stableKey) };
+      });
+      ask = null; closedAsk = null; swaps = [];
+      chat = (saved.chat || []).filter(r => operatorMap.has(r.operatorId)).slice(-100);
+      reconcile(false); return emit("restored");
+    }
     setAssignments(options.assignments || {});
     return { snapshot, reconcile, setAssignments, beginRound, pick: place, confirm, forceStart, move, acceptSwap,
-      assertAction, finishUnit, markSpent, openAsk, answer, tick, askFor, chat: chatMessage, endBattle, reset,
+      assertAction, finishUnit, markSpent, openAsk, answer, tick, askFor, chat: chatMessage, endBattle, reset, checkpoint, restore,
       ownerOf: unitId => (rowFor(unitId) || {}).operatorId || null,
+      extendAsk(ms) { if (ask && Number.isFinite(ms) && ms > 0) { ask.deadline += ms; emit("askResumed"); } },
       onChange(fn) { changes.add(fn); return () => changes.delete(fn); },
       onAskClosed(fn) { askClosures.add(fn); return () => askClosures.delete(fn); } };
   }
