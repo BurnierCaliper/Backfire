@@ -82,7 +82,11 @@ test("D3 GM UI: props, field, gap and weather submit complete typed forms on mob
   await page.click('[data-action="destroy-prop"]'); assert.equal((await calls(page))[0].mode, "destroy");
   await tab(page, "field"); await page.selectOption("#ogm-gap-kind", "door"); await page.uncheck("#ogm-gap-open"); await page.click('[data-action="edit-gap"]');
   await page.selectOption("#ogm-field-kind", "fireOn"); await page.fill("#ogm-field-fire", "3"); await page.click('[data-action="edit-field"]');
-  await tab(page, "weather"); await page.selectOption("#ogm-weather", "sand"); await page.selectOption("#ogm-sand", "21"); await page.check("#ogm-weather-lock"); await page.click('[data-action="edit-weather"]');
+  await tab(page, "weather");
+  assert.deepEqual(await page.locator("#ogm-weather option").evaluateAll(options => options.map(o => [o.value, o.textContent])), [
+    ["none", "常态"], ["heat", "酷暑"], ["snow", "雪天"], ["acid", "酸雨"], ["thunder", "雷鸣"], ["glow", "微光"], ["sand", "沙暴"], ["phase", "相位"]
+  ]);
+  await page.selectOption("#ogm-weather", "sand"); await page.selectOption("#ogm-sand", "21"); await page.check("#ogm-weather-lock"); await page.click('[data-action="edit-weather"]');
   const sent = await calls(page); assert.equal(sent[1].patch.open, false); assert.equal(sent[2].patch.fire, 3);
   assert.deepEqual(sent[3], { type: "gm.setWeather", weather: "sand", sandDir: "21", phaseStep: 0, lock: true, silent: false });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth && document.querySelector("#ogm-panel").scrollWidth <= document.querySelector("#ogm-panel").clientWidth), true);

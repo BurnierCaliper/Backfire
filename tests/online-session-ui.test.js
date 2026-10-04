@@ -25,6 +25,39 @@ async function assertPlayerIsolation(page) {
   assert.deepEqual(actual.legacy, [], "a remote player's page must hide every legacy top-level game/GM panel");
   assert.ok(actual.documentHeight <= actual.viewport + 1 && actual.bodyHeight <= actual.viewport + 1, "only online panels may scroll; the outer page must not expose legacy content: " + JSON.stringify(actual));
 }
+async function assertHostControlsClickable(page, screen, t, label = screen) {
+  assert.equal(await page.evaluate(() => OnlineGame.getView().screen), screen);
+  const original = page.viewportSize();
+  const sizes = [[1440, 900], [768, 1024], [390, 844], [320, 568], [844, 390], [568, 320]];
+  for (const [width, height] of sizes) {
+    await page.setViewportSize({ width, height });
+    const tools = page.locator("#ogm-toggle"), room = page.locator('#online-dock [data-online="openRoom"]');
+    await tools.waitFor({ state: "visible" }); await room.waitFor({ state: "visible" });
+    const [toolRect, roomRect] = await Promise.all([tools.boundingBox(), room.boundingBox()]);
+    const context = JSON.stringify({ screen, label, width, height, toolRect, roomRect });
+    for (const rect of [toolRect, roomRect]) assert.ok(rect && rect.x >= 0 && rect.y >= 0 && rect.x + rect.width <= width + 1 && rect.y + rect.height <= height + 1, "both host controls must remain inside the viewport: " + context);
+    const overlapping = Math.max(toolRect.x, roomRect.x) < Math.min(toolRect.x + toolRect.width, roomRect.x + roomRect.width) && Math.max(toolRect.y, roomRect.y) < Math.min(toolRect.y + toolRect.height, roomRect.y + roomRect.height);
+    assert.equal(overlapping, false, "host tools and room controls must not overlap: " + context);
+    // Exercise the browser's normal hit testing on the complete game page.
+    // Forced clicks/DOM-dispatched events would hide the original regression.
+    await tools.click({ timeout: 3000 });
+    await page.locator("#ogm-panel").waitFor({ state: "visible" });
+    assert.match(await page.locator("#ogm-panel h2").innerText(), /主持人工具/);
+    await page.locator('#ogm-panel [data-action="close"]').click({ timeout: 3000 });
+    await page.locator("#ogm-panel").waitFor({ state: "hidden" });
+    await room.click({ timeout: 3000 });
+    await page.locator("#online-panel").waitFor({ state: "visible" });
+    assert.match(await page.locator("#online-panel").innerText(), /房间成员/);
+    await page.locator('#online-panel [data-online="close"]').click({ timeout: 3000 });
+    await page.locator("#online-panel").waitFor({ state: "hidden" });
+    if (process.env.BACKFIRE_CAPTURE_CONTROLS === "1" && [1440, 390].includes(width)) {
+      const directory = fs.mkdtempSync(path.join(require("node:os").tmpdir(), "backfire-controls-"));
+      const filename = path.join(directory, label + "-" + width + "px.png");
+      await page.screenshot({ path: filename, fullPage: false }); t.diagnostic("HOST CONTROLS SCREENSHOT: " + filename);
+    }
+  }
+  await page.setViewportSize(original);
+}
 function playwright() {
   try { return require("playwright"); } catch (_) {}
   try { return require(path.join(execSync("npm root -g", { stdio: ["ignore", "pipe", "ignore"] }).toString().trim(), "playwright")); } catch (_) {}
@@ -175,8 +208,11 @@ test("D3 game sessions: remote summon, mixed AI/manual round, reactions, victory
   const { host, alice, bob, aliceId, bobId } = f;
   await host.evaluate(({ aliceId, bobId }) => {
     OnlineGame.assign(Object.fromEntries(partyHeroes().filter(u => ["hiaki", "ruby"].includes(u.kit)).map(u => [u.id, u.kit === "hiaki" ? aliceId : bobId])));
-    OnlineGame.start(); TrpgFlow.toBattle(); GAME.skip = true; GAME.instant = true;
+    OnlineGame.start();
   }, { aliceId, bobId });
+  await host.waitForSelector("#scr-trpg:not([hidden])");
+  await assertHostControlsClickable(host, "exploration", t);
+  await host.evaluate(() => { TrpgFlow.toBattle(); GAME.skip = true; GAME.instant = true; });
   const enemyControl = await host.evaluate(() => { const ai = state.units.find(u => !u.isPlayer && u.kit === "thug_knife"); return { ai: ai.id, manual: state.units.filter(u => !u.isPlayer && u.id !== ai.id).map(u => u.id) }; });
   assert.equal((await submit(host, { type: "gm.setManual", actors: enemyControl.manual, enabled: true })).ok, true);
   await host.evaluate(() => { GAME.startOrEnd(); });
@@ -185,6 +221,7 @@ test("D3 game sessions: remote summon, mixed AI/manual round, reactions, victory
   const pageFor = owner => owner === aliceId ? alice : owner === bobId ? bob : host;
   for (const [index, hero] of heroes.entries()) assert.equal((await submit(pageFor(hero.owner), { type: "orderPick", actor: hero.id, index })).ok, true);
   for (const page of [alice, bob, host]) assert.equal((await submit(page, { type: "orderConfirm" })).ok, true);
+  await assertHostControlsClickable(host, "battle", t);
   const actor = heroes[0].id;
   const first = await alice.evaluate(actor => OnlineGame.actionMenu({ actor, skill: "hiaki_summon" }), actor);
   assert.equal(first.choices.kind, "choice"); assert.equal(first.choices.key, "blade");
@@ -200,6 +237,8 @@ test("D3 game sessions: remote summon, mixed AI/manual round, reactions, victory
   await alice.evaluate(cmd => { window.roundResult = null; OnlineGame.submit(cmd).then(result => { window.roundResult = result; }); }, { type: "endTurn", actor: weapon });
   try { await host.waitForFunction(() => OnlineGame.getView().manualPhase && state.combatPhase === "enemy", null, { timeout: 5000 }); }
   catch (error) { throw new Error(error.message + " " + JSON.stringify(await host.evaluate(() => ({ depth: GAME.depth, phase: HotseatGame.getView().phase, ask: HotseatGame.getView().ask, combatPhase: state.combatPhase, manual: GMCommands.snapshot(), notice: OnlineGame.getView().notice, last: JSON.parse(localStorage.getItem("backfire-online-v1")).requests.slice(-1).map(entry => entry[1].response) }))) + " player=" + JSON.stringify(await alice.evaluate(() => window.roundResult)) + " errors=" + JSON.stringify(f.errors)); }
+  assert.match(await host.locator("#ogm-toggle").innerText(), /敌人待操作/);
+  await assertHostControlsClickable(host, "battle", t, "manual-enemy");
   const aiActions = await host.evaluate(() => Commands.history().filter(row => row.command.type === "battle.enemyAction").map(row => row.command.actor));
   assert.ok(aiActions.includes(enemyControl.ai), "the unmarked enemy acts through the existing AI before the manual phase");
   assert.ok(enemyControl.manual.every(id => !aiActions.includes(id)), "manual enemies cannot also receive an automatic AI turn");

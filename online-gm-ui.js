@@ -7,7 +7,7 @@
   const propNames = { button: "按钮", lever: "拉杆", battery: "超充能电池", boom: "爆炸桶", acid: "酸液桶", scrap: "碎渣机炮", turret: "防卫炮台", ironwall: "铁壁", scrapwall: "废铁墙", dome: "防护罩" };
   const statusNames = { burn: "灼烧层数", shock: "感电", corr: "腐蚀", frostbite: "冻伤", shockwave: "冲击", high: "高能", reso: "共振", unstable: "不稳定", weak: "虚弱", inspire: "振奋", sturdy: "坚固", hide: "隐蔽", advantage: "优势", chase: "追猎" };
   const fieldNames = { "": "无主场地", fireOn: "火场", acid: "酸液", ice: "冰面", electric: "电场", energy: "能量", harmonic: "谐波", heal: "疗愈" };
-  const weatherNames = { none: "无天气", heat: "炎热", snow: "降雪", acid: "酸雨", thunder: "雷暴", glow: "辉光", sand: "沙暴", phase: "相位" };
+  const weatherNames = { none: "常态", heat: "酷暑", snow: "雪天", acid: "酸雨", thunder: "雷鸣", glow: "微光", sand: "沙暴", phase: "相位" };
   const gapNames = { open: "畅通", bridge: "不稳桥梁", wall: "危墙", door: "机关门", void: "空隙" };
   const numericUnit = { hp: "最内层生命", shp: "坚毅生命（仅主持人）", shpMax: "坚毅生命上限", def: "架势", defMax: "架势上限", ap: "行动点", apMax: "行动点上限", bonus: "附赠行动", bonusMax: "附赠行动上限", atk: "个人 ATK", level: "等级", zone: "所在区", highEnergy: "高能层数" };
   const flagUnit = { stunned: "失衡", dying: "濒死", dead: "倒下", flying: "飞行" };

@@ -32,9 +32,10 @@ D3 在 D2 本机权威模型上接入在线跑团：主持人开房、玩家各�
 
 ## 公网与设备验收（保持草稿）
 
+- [x] 作者已确认私信隔离、隐藏信息、生成敌人、修改天气功能正常；按反馈修正主持人工具入口遮挡，并统一全部天气名称。完整联机页面在探索、战斗、手动敌人阶段及六种视口实际点击两个入口，不用强制点击掩盖遮挡。
 - [x] 2026-10-04 经作者明确授权，新建独立 Backfire 公网转发服务，仅使用自己的 workers.dev 地址和两个 SQLite Durable Object 绑定；沿用已有凭据，未创建新令牌，也未修改任何既有网站配置。
 - [x] 真实公网三浏览器完成胜利结算、原槽保存及返回探索，并通过断线恢复、隐私和版本检查；修复玩家外层页面残留旧面板的问题，并在 390px 视口复测胜利与探索。
 - [ ] 主持人加两名玩家、其中一台真实手机，各自设备通过公网完成遭遇、私信与 30 秒断线恢复；验证正常网络下结果传递少于 1 秒。当前同机隔离 Chromium、390px 视口和公告延迟样本不能替代跨设备、Android/iOS 实机及移动网络证据。
-- [ ] 作者评审合并本 PR；合并后才开始 D4。
+- [ ] 真机测试完成后才将本 PR 从草稿改为待合并；作者评审合并后才开始 D4。
 
 说明与复现：[D3 使用](https://github.com/BurnierCaliper/Backfire/blob/feat/online-d3-trpg/docs/d3/README.md)、[验收记录](https://github.com/BurnierCaliper/Backfire/blob/feat/online-d3-trpg/docs/d3/verification.md)、[部署](https://github.com/BurnierCaliper/Backfire/blob/feat/online-d3-trpg/docs/d3/relay.md)、[隐私](https://github.com/BurnierCaliper/Backfire/blob/feat/online-d3-trpg/docs/d3/privacy.md)、[主持人工具](https://github.com/BurnierCaliper/Backfire/blob/feat/online-d3-trpg/docs/d3/gm.md)。静默勾选在新增主持人工具中，原面板默认显示安全摘要；恢复与全历史依赖主持人的本机存储，保存失败会提示。

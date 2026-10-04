@@ -226,6 +226,10 @@ test("D3 display: weather has direction, phase, lock, distinct color and icon; e
   await page.evaluate(() => { fixture.view.state.weather = "phase"; fixture.view.state.phaseStep = 2; fixture.emit(); });
   assert.match(await page.locator(".ol-weather").innerText(), /相位 波峰（2）/);
   assert.notEqual(await page.locator(".ol-weather").evaluate(e => getComputedStyle(e).color), sandColor);
+  for (const [weather, name] of [["none", "常态"], ["heat", "酷暑"], ["snow", "雪天"], ["acid", "酸雨"], ["thunder", "雷鸣"], ["glow", "微光"], ["sand", "沙暴"], ["phase", "相位"]]) {
+    await page.evaluate(weather => { fixture.view.state.weather = weather; fixture.emit(); }, weather);
+    assert.equal(await page.locator(".ol-weather b").innerText(), name);
+  }
   for (const [outcome, label] of [["win", "战斗胜利"], ["lose", "战斗失败"], ["retreat", "队伍撤退"]]) {
     await page.evaluate(outcome => { fixture.view.packet.result = { outcome, grade: { grade: "D", score: 37, xpMult: 0.8 } }; fixture.set({ screen: "ended" }); }, outcome);
     const text = await page.locator(".ol-result").innerText();
