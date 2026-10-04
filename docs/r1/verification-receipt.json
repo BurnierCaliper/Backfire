@@ -1,0 +1,44 @@
+{
+  "status": "PASS",
+  "baseCommit": "10c00638002843f77e68b899cd23d41241c94478",
+  "sourceHash": "87789ca16f86302db1e4ef042daf821cbb05996e8104a04db8a0889f98224247",
+  "configHash": "7d817a30ff56d7a49786956068e0fe00d27f4783ea93828ca6ea2e9435dcefab",
+  "manifestHash": "55dbb5d254b9053aa35fd234ececa96df187417b8d0db38a359d23374da822b2",
+  "additionalSourceHashes": {
+    "game.js": "b2db362636d8f01c10b9302cf8466aa856590df5044c5c3258e9777fac71063e",
+    "tools/economy.js": "411b78242a93ef73123435e7b8604f754bba893c076dbbc12ce518e0bb469b3f",
+    "tools/test-ui.js": "016715bd0edb4e29d448d02bd4102328bb1fc2c7ac824c9ff638473f7ed2786c",
+    "package.json": "40438fa7b093d21edc15c0a6fb2d98ff90534a3403ef148fb489c4fab908f2ac",
+    "tests/ui.test.js": "83aa2b1b8086b50e9825d86e89ee94f48a91ad703dc1d6c7907bdcad851468c3",
+    "tests/balance-tools.test.js": "40d1d464c4ef43171ec71f9f048e96c78d0d6abcfe6a3c2e591c779709f01081",
+    "tests/battle-rewards.test.js": "64f729d3ec48d41f5a5f4e3638223355ff731867d6a9b8da038d896910871f92",
+    "tests/economy-tools.test.js": "927f22350c3faa460002086b3054ed4e2cd83f8153ebc3b09f40a6d747d20ebd"
+  },
+  "counts": [
+    {
+      "suite": "matrix",
+      "requested": 5400,
+      "outcomes": {
+        "win": 3536,
+        "lose": 1815,
+        "timeout": 49
+      }
+    },
+    {
+      "suite": "campaign",
+      "requested": 135,
+      "outcomes": {
+        "lose": 130,
+        "timeout": 5
+      }
+    }
+  ],
+  "checks": [
+    "All fixed samples present exactly once",
+    "No script errors or diagnostic boost",
+    "Every preset hero starts with full HP/layers",
+    "Campaign legal starts, finite raw/final scores and uncompleted timeouts",
+    "Source/config hashes match current code",
+    "All prior rule source unchanged; app.js adds only shared settlement"
+  ]
+}

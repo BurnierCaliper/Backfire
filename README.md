@@ -9,6 +9,9 @@
 | `game.html` | 《Antlerscale: Backfire》Roguelike。标题界面 → 新的一局 / 继续 / 跑团模式 |
 | `index.html` | 跑团版 · 规则计算器（主持人用） |
 | `npm test` | 规则回归测试 + 无界面整场对打（需要 Node 18+，不用装任何依赖）；装了 Playwright 时再加一组真浏览器的画面测试（`tests/ui.test.js`），没装就自动跳过 |
+| `npm run test:ui` | 必须真正运行的浏览器验收；缺少 Playwright 或 Chromium 时直接失败，不以跳过代替通过 |
+
+R1 的范围、固定样本命令及评估证据见 [docs/r1/README.md](docs/r1/README.md)。评分公式、门槛和经验倍率保持原样，留待玩家测试后手动调整；文档与原始手册位于 `docs/`。
 
 ## 代码分层（Roguelike 地基，M0）
 
@@ -360,6 +363,13 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 测试：`tests/effects.test.js` 每条效果一个用例。
 
 ## 规则改动记录
+
+- **R1：统一现有奖励结算，修复评估工具**（`app.js · settleBattleRewards`、`game.js · finish`、`tools/`）
+  - 网页和无界面实战工具共用原有的胜利加分 → 评价额外经验 → 升级顺序，重复结算只发一次；单人/守夜附加经验仍在原单局流程结算。现有评分公式、门槛、按幕增量和奖励倍率没有调整。
+  - `economy.js` 支持分岔、检定、守夜与偷袭，不再把未知节点当战斗；固定声明「战斗强制胜利、评级经验 ×1」，只用于经济验算。
+  - `score-by-act.js` 默认去掉第 4 幕角色额外 +2 级，补齐预设等级的升级选择与满状态；`playtest.js` 保留自然成长，区分真实败局、撤退、回合上限和脚本异常。
+  - `balance-report.js` 保存固定种子/队伍清单、配置和源码哈希、原始 JSON/CSV、分幕胜率/置信区间与得分分布。自动策略结果不代表真人胜率，未到达的幕次显示无样本。
+  - 浏览器验收新增继续存档、网页/无界面奖励一致性与幂等检查；`npm run test:ui` 要求浏览器实际执行。
 
 - **单人模式：主角坚毅 +15；支援改成「越攒越贵、最多 6 次」**（`rogue-data.js · ROGUE_SOLO`，`app.js · syncSoloSupport / soloSupportInfo`）
   - 主角开局坚毅生命上限 +15（`shpBonus`），第一场满坚毅出发；之后升级、长休都按加成后的上限算。旧的单人存档下一场战斗起自动补上。

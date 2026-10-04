@@ -1,0 +1,23 @@
+{
+  "file": "evaluation-evidence.zip",
+  "bytes": 7886671,
+  "sha256": "46a8e1bb7946533747817ce99e85c0a15c70b77ea3258c67bec30a53da3486c2",
+  "verification": "ZIP CRC and every uncompressed file SHA256 verified",
+  "contents": {
+    "manifest.json": "287ac984cac2b9ed33f38b52c2bb2c1521b374691c40398bf76ed2f700edc2cb",
+    "matrix-formal.json": "de2fb246e67bfad4cf7a1bacfc68de870ddceb02db1adea5ef5d1eedee160ea3",
+    "matrix-formal.csv": "80aafd1bbe816c73c73bf2e38ef85a8f9bc818aa200dc4e64de647f493071298",
+    "matrix-formal.battles.csv": "80aafd1bbe816c73c73bf2e38ef85a8f9bc818aa200dc4e64de647f493071298",
+    "campaign-formal.json": "5e1203f537a2ed9b9fde16b46f07611be3a765c540ca00b87f24169114d50d70",
+    "campaign-formal.csv": "66fa31209e2b4d9360c99013a3ce12b240cbc2583d90c84ba2d061c8dfd1044f",
+    "campaign-formal.battles.csv": "8f1efc47fdc41d6410b86f0633ee54757d70799db70ee96573fd98a7d77ee19c",
+    "boss-coverage-diagnostic.json": "d4f9624373d0e2d121177eae3f2af3f4c64ecb5d512bb74b18f4d1e5b52c804b",
+    "boss-coverage-diagnostic.csv": "e4a595b4971856ddb4d1d6e3fe53cfdf03db348a0c896c0b01982d7a4bc2ad74",
+    "matrix-timeout-diagnostics.json": "043ad18392b6d06e503dc71bd23dea6d343816d9c5fedb5f23c3923f346fd872",
+    "campaign-timeout-diagnostics.json": "d81427bfdc8d0d37327e248b48dcd7206c6729aa692ede83af05b35c8cc4a55b",
+    "test-final.log": "963fbd2d258ce1fe69e6f0ba5fda9ab252282a16645f40819f82495f517a58e4",
+    "test-tools-final.log": "1e9914ddc3ce9b2a6c63bf8525f65e3460edf403ce9505519dae606b019b2720",
+    "economy-final.log": "2fb618ae390b090968f31e62a5590a738b850dc84ceb9e63afce31e46acdd06b",
+    "ui-upgrade-final.log": "687619d504fcc6a8de9945654dfda62607348c676547dd61bae75b11e31742d7"
+  }
+}

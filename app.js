@@ -2232,6 +2232,41 @@ function battleGrade() {
     floor: g[1], parts: Object.assign({}, (state.battleScore || {}).parts) };
 }
 
+/** 网页与无界面共用的战斗奖励结算。outcome：win / lose / retreat。
+ *  顺序与原 game.js 一致：胜利加分 → 评价 → 给存活角色补评价经验 → 升级。
+ *  不结算耐久或推进单局；调用方继续原有流程，由单局捕获待选升级。
+ *  xpBonus 是本次实际发放的每人额外经验；totalXpBonus / ups 保留本场摘要供重复展示。
+ *  重复调用不再加分、发经验或升级。
+ *  标记保存在本场 battleScore 内，resetBattleRecords 开新战斗时一起清空。 */
+function settleBattleRewards(outcome) {
+  if (!["win", "lose", "retreat"].includes(outcome)) throw new Error("未知的战斗结局：" + outcome);
+  state.battleScore = state.battleScore || { total: 0, parts: {} };
+  const bs = state.battleScore;
+  if (bs.rewardSettlement) return {
+    outcome: bs.rewardSettlement.outcome, grade: bs.rewardSettlement.grade,
+    finishBonus: null, xpBonus: 0, totalXpBonus: bs.rewardSettlement.xpBonus,
+    ups: bs.rewardSettlement.ups.slice(), alreadySettled: true
+  };
+  const finishBonus = outcome === "win" ? applyFinishBonus() : null;
+  const grade = battleGrade();
+  const gained = (state.battleGains && state.battleGains.xp) || 0;
+  let xpBonus = 0;
+  if (outcome === "win" && grade.xpMult > 1 && gained > 0) {
+    xpBonus = Math.floor(gained * (grade.xpMult - 1));
+    if (xpBonus > 0) {
+      state.units.filter(u => u.isPlayer && !isWeaponUnit(u) && !u.dead).forEach(u => { u.xp = (u.xp || 0) + xpBonus; });
+      state.battleGains.xp += xpBonus;
+    }
+  }
+  const ups = [];
+  bs.rewardSettlement = { outcome, grade, xpBonus, ups };
+  state.units.filter(u => u.isPlayer && !isWeaponUnit(u)).forEach(u => {
+    const from = u.level;
+    if (typeof tryLevelUp === "function" && tryLevelUp(u) && u.level > from) ups.push(`${u.name} ${from}→${u.level}`);
+  });
+  return { outcome, grade, finishBonus, xpBonus, totalXpBonus: xpBonus, ups: ups.slice(), alreadySettled: false };
+}
+
 /** 包住一次行动：结束后
  *  · 其他友方多出来的血量 / 护盾记成 actor 的治疗量（并计分）；
  *  · 这一下新打进失衡的敌人，每个 +50 分 */

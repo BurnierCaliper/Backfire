@@ -14,12 +14,19 @@
 const vm = require("vm");
 const H = require("../tests/headless");
 
-const SEED = process.argv[2] || "PLAYTEST";
-const PARTY = (process.argv[3] || "tou,yuito,xia,ruby").split(",");
+const B = require("./balance-common");
+function runCampaign(options = {}) {
+const SEED = options.seed || "PLAYTEST";
+const env = options.env || {};
+const maxRounds = B.positiveInt(options.maxRounds || 25, "maxRounds");
+const maxSteps = B.positiveInt(options.maxSteps || 2000, "maxSteps");
+const PARTY = options.party || ["tou", "yuito", "xia", "ruby"];
 // 单人模式：node tools/playtest.js 种子 主角 伙伴1,伙伴2,伙伴3 [第二副职责]
-const SOLO_PARTNERS = process.argv[4] ? process.argv[4].split(",") : null;
-const SOLO_ROLE2 = process.argv[5] || null;
+const SOLO_PARTNERS = options.partners || null;
+const SOLO_ROLE2 = options.role2 || null;
+B.validateParty(PARTY, !!SOLO_PARTNERS);
 const c = H.load();
+c.S.RNG.install(SEED + ":campaign");
 const st = () => c.S.state;
 const R = c.Rogue;
 
@@ -51,7 +58,8 @@ vm.runInContext(`
 `, c);
 
 /* ---------------- 记录 ---------------- */
-const report = { battles: [], events: [], bugs: [], levelUps: [] };
+const report = { suite: "campaign", id: options.id || SEED, set: options.set || "adhoc", seed: SEED, party: PARTY.slice(), startingSize: PARTY.length, strategy: B.STRATEGIES.campaign.version, strategyDetails: B.STRATEGIES.campaign.description, diagnostics: { summon: !!env.SUMMON, tokens: env.TOKENS || null, bossTest: env.BOSSTEST || null, arena: env.ARENA || null }, maxRounds, maxSteps, battles: [], events: [], bugs: [], levelUps: [], reachedActs: [1] };
+let terminalOutcome = null;
 const bug = (what, detail) => { report.bugs.push({ what, detail: String(detail || "").slice(0, 300), act: run && run.act, day: run && run.day }); };
 const ev = (t) => report.events.push(`[第${run.act}幕 第${run.day}天] ${t}`);
 
@@ -83,6 +91,10 @@ function tryOnce(thunk, rnd) {
   const ids = new Set(st().units.filter(u => u.isPlayer).map(u => u.id));   // 新唤出的武器人不算「回血」
   const before = snapshotEval(ids);
   let ok = true;
+  // Candidate previews must not append to the real battle log retained by __save.
+  // A fresh temporary page avoids cloning the entire growing log for every action.
+  st().logPages = [{ turn: st().turnNo, lines: [] }];
+  st().logIndex = 0;
   vm.runInContext(`Math.random = () => ${rnd};`, c);
   try { thunk(); } catch (e) { ok = false; }
   const after = snapshotEval(ids);
@@ -127,7 +139,7 @@ function candidates(u) {
   const allies = s.units.filter(x => x.isPlayer && alive(x));
   list.forEach(sk => {
     if (!sk || !sk.id || sk.id === "__item") return;
-    if (/summon/.test(sk.id) && !process.env.SUMMON) return;   // 不主动唤出武器人：主角之后整场空手，一步预演看不出好坏（SUMMON=1 允许）
+    if (/summon/.test(sk.id) && !env.SUMMON) return;   // 不主动唤出武器人：主角之后整场空手，一步预演看不出好坏（SUMMON=1 允许）
     const cost = c.skillCost(sk.id) || {};
     if ((cost.ap || 0) > (u.ap || 0) || (cost.bonus || 0) > (u.bonus || 0)) return;
     if (c.skillRequirementError(u, sk.id)) return;
@@ -170,7 +182,7 @@ const SMART = {
       if (v >= need && v > bestV) { bestV = v; best = cd; }
     });
     u = c.unitById(id);
-    if (process.env.TRACE) console.error(`  T${st().turnNo} ${u.name} ap${u.ap} b${u.bonus} z${u.zone}: ` + (best ? `${best.label} (${Math.round(bestV)})` : "无") + `  [候选 ${cands.length}]`);
+    if (env.TRACE) console.error(`  T${st().turnNo} ${u.name} ap${u.ap} b${u.bonus} z${u.zone}: ` + (best ? `${best.label} (${Math.round(bestV)})` : "无") + `  [候选 ${cands.length}]`);
     if (best) { u._lastPlan = best.label; return best.thunk; }
     // 够不着：朝最近的敌人走一格（用附赠动作）
     if ((u.bonus || 0) > 0 && !u.noMove && (u.ap || 0) > 0) {
@@ -201,7 +213,7 @@ const partyHpRatio = () => {
 const minHpRatio = () => Math.min(...run.party.map(h => { const v = R.heroView(run, h); return v.hp / Math.max(1, v.hpMax); }));
 const kz = () => Number(st().kuizhi) || 0;
 function tryDo(label, fn) {
-  try { return fn(); } catch (e) { if (!/奎支不够|补给不足|不能|没有|已经|不够|用完/.test(e.message)) bug(`${label} 报错`, e.message); return null; }
+  try { return fn(); } catch (e) { bug(`${label} 报错`, e.message); throw e; }
 }
 function shopping() {
   if (!R.canShop(run)) return;
@@ -257,7 +269,7 @@ function levelChoices() {
     if (!pend.length) return;
     const p = pend[0];
     const opts = R.choiceOptions(run, p.kit, p.index);
-    if (!opts.length) { bug("升级选择没有选项", JSON.stringify(p.choice)); return; }
+    if (!opts.length) throw new Error("升级选择没有选项：" + JSON.stringify(p.choice));
     let pick = opts[0];
     if (p.choice.type === "attr") pick = opts.find(o => o.value === MAIN_ATTR[p.kit]) || opts.find(o => o.value === "con") || opts[0];
     tryDo("升级选择", () => R.choose(run, p.kit, p.index, pick.value));
@@ -266,13 +278,19 @@ function levelChoices() {
 }
 function boardPick() {
   const avgLv = run.party.reduce((a, h) => a + (h.level || 1), 0) / Math.max(1, run.party.length);
-  const side = (run.board || []).map((t, i) => ({ t, i }))
+  const legal = (run.board || []).map((t, i) => ({ t, i }))
     .filter(x => !R.taskBlocked(run, x.t) && !R.taskWarning(run, x.t))
+    .sort((a, b) => R.taskPay(run, b.t).kuizhi / b.t.days - R.taskPay(run, a.t).kuizhi / a.t.days);
+  const side = legal
     // 精英支线（悬赏）：等级没高过敌人一截就不接
     .filter(x => !x.t.nodeTypes.includes("elite") || avgLv > R.enemyLevel(run, (x.t.diff || 0) + 1) + 1)
     .sort((a, b) => R.taskPay(run, b.t).kuizhi / b.t.days - R.taskPay(run, a.t).kuizhi / a.t.days);
   if (!run.main.done && R.daysLeft(run) - (side[0] ? side[0].t.days + run.CONFIG_restDays : 0) < run.main.days + 1) return "main";
   if (side.length) return side[0].i;
+  // Once the main task is complete there is no legal "wait for boss" API on
+  // the board. A danger preference must not erase the remaining legal actions.
+  // Accept the best-paying legal side task and let the normal camp/boss flow run.
+  if (run.main.done && legal.length) { ev("常规偏好没有可选任务，按合法任务兜底：" + legal[0].t.name); return legal[0].i; }
   return run.main.done ? null : "main";
 }
 function prepareFor(boss) {
@@ -286,70 +304,43 @@ function prepareFor(boss) {
 }
 function fight(kind) {
   const spec = R.battleSpec(run);
-  if (!spec) { bug("battleSpec 为空", kind); return "lose"; }
+  if (!spec) throw new Error("battleSpec 为空：" + kind);
   c.BattleSim.setup(spec);
-  const s = st();
-  const foes0 = s.units.filter(u => !u.isPlayer).map(u => `${u.name} Lv${u.level}`);
-  const partyBefore = run.party.map(h => { const v = R.heroView(run, h); return `${v.name} ${v.hp}/${v.hpMax}`; });
+  const s = st(), act = run.act, day = run.day;
+  const before = B.fieldSnapshot(c), heroStateBefore = B.heroSnapshot(c, run);
+  const row = { act, day, kind, title: spec.title, level: spec.level, battleSeed: spec.seed, seed: SEED, startingSize: PARTY.length, survivingHeroes: before.filter(u => u.isPlayer && !u.weaponOf && !u.dead).length, party: run.party.map(h => h.kit), strategy: report.strategy, actualUnitsBefore: before, heroStateBefore, foes: before.filter(u => !u.isPlayer).map(u => u.name + " Lv" + u.level), partyBefore: heroStateBefore.map(h => h.kit + " " + h.hp + "/" + h.hpMax), weather: s.weather, terrain: B.clone({ zoneMode: s.zoneMode, gaps: s.gaps, props: s.props, encounter: spec.encounter }), economyBefore: { kuizhi: kz(), supplies: B.clone(R.supplies()) } };
+  report.battles.push(row);
   const errs0 = c.__errors.length;
-  let res, retreated = false;
   const foeHp0 = s.units.filter(u => !u.isPlayer).reduce((a, u) => a + hpOf(u), 0);
+  let res;
   try {
-    // 一回合一回合打：局势崩了（有人倒地 / 血量低于 30%，敌人还剩一半以上的血）就撤退（首领战不能撤）
-    for (let r = 1; r <= 25; r++) {
-      res = c.BattleSim.run({ maxRounds: r, policy: SMART });
+    for (let round = 1; round <= maxRounds; round++) {
+      res = c.BattleSim.run({ maxRounds: round, policy: SMART });
       if (res.winner !== "timeout") break;
       if (spec.retreat === false) continue;
       const heroes = s.units.filter(u => u.isPlayer && !c.isWeaponUnit(u) && alive(u));
-      const bad = heroes.some(u => u.dying || u.upOnShp || hpOf(u) < 0.3 * c.baseMaxHp(u));
+      const bad = heroes.some(u => u.dying || u.upOnShp || hpOf(u) < .3 * c.baseMaxHp(u));
       const foeHp = s.units.filter(u => !u.isPlayer && alive(u)).reduce((a, u) => a + hpOf(u), 0);
-      if (bad && foeHp > foeHp0 * 0.5) {
-        const pv = c.retreatPreview();
-        c.performRetreat();
-        retreated = true;
-        ev(`撤退（${pv.rule.name}）：${spec.title}，第 ${s.turnNo} 回合，敌人还剩 ${Math.round(foeHp / foeHp0 * 100)}% 血`);
-        res = { winner: "retreat" };
-        break;
-      }
+      if (bad && foeHp > foeHp0 * .5) { const pv = c.retreatPreview(); c.performRetreat(); ev("主动撤退（" + pv.rule.name + "）：" + spec.title); res = { winner: "retreat" }; break; }
     }
-  }
-  catch (e) { bug("战斗中报错", e.stack || e.message); res = { winner: "lose" }; }
-  if (c.__errors.length > errs0) bug("战斗中 console.error", c.__errors.slice(errs0).join(" | "));
-  const outcome = res.winner === "player" ? "win" : res.winner === "timeout" || retreated ? "retreat" : "lose";
-  if (res.winner === "timeout") {
-    const dump = { zoneMode: s.zoneMode, gaps: s.gaps, props: (s.props || []).map(p => p.name + "@" + p.zone + " hp" + p.hp),
-      fields: Object.keys(s.fields || {}).map(z => z + ":" + Object.keys(s.fields[z]).filter(k => s.fields[z][k]).join("/")),
-      units: s.units.filter(alive).map(u => `${u.name}${u.isPlayer ? "(我)" : ""} z${u.zone} hp${hpOf(u)} ${u.flying ? "飞" : ""} ap${u.ap} b${u.bonus}${u.stunned ? " 晕" : ""}${u.dying ? " 濒死" : ""}`) };
-    bug("战斗超过 25 回合没打完（按撤退处理）", `${spec.title} ${foes0.join("、")} ` + JSON.stringify(dump));
-    if (process.env.DUMP) require("fs").writeFileSync(process.env.DUMP, JSON.stringify({ spec, log: (s.logPages || []).slice(-3).map(p => p.lines.map(l => l.text || l).join("\n")) }, null, 1));
-  }
-  if (outcome === "win") c.applyFinishBonus();
-  const g = c.battleGrade();
-  // 日志里的可疑字样
-  const text = (s.logPages || []).map(p => (p.lines || []).map(l => l.text || l).join("\n")).join("\n");
-  const sus = text.split("\n").filter(t => /NaN|undefined|\[object Object\]/.test(t));
-  if (sus.length) bug("战斗日志里有 NaN / undefined", sus.slice(0, 3).join(" | "));
-  const xpBefore = run.party.map(h => h.level);
-  const stats = Object.values(s.battleStats || {}).filter(x => !x.weaponOf).map(x => `${x.name} 伤${x.dmg}/破${x.brk}/承${x.taken}/杀${x.kills}/疗${x.heal}`);
-  const turns = s.turnNo, score = s.battleScore.total;   // 结算会重摆战场（升级重算血量），先记下
-  const supports = (text.match(/支援登场|登场支援|支援：/g) || []).length;
-  const selfAssist = (text.match(/协助攻击/g) || []).length, selfBlock = (text.match(/协助格挡成功|格挡成功/g) || []).length;
-  let notes = [];
-  try { notes = R.finishBattle(run, outcome); } catch (e) { bug("finishBattle 报错", e.stack || e.message); }
-  report.battles.push({
-    act: run.act, day: run.day, kind, title: spec.title, level: spec.level, foes: foes0, weather: s.weather,
-    outcome, turns, score, grade: g.grade, partyBefore,
-    partyAfter: run.party.map(h => { const v = R.heroView(run, h); return `${v.name} ${v.hp}/${v.hpMax}`; }),
-    stats, supports, selfAssist, selfBlock, supportUsed: s.solo ? (s.solo.used || []).slice() : null, deaths: notes.filter(n => /永久死亡|阵亡/.test(n)), lvUp: run.party.filter((h, i) => h.level > (xpBefore[i] || 0)).map(h => `${R.heroName(h.kit)}→${h.level}`)
-  });
-  return outcome;
+    if (c.__errors.length > errs0) throw new Error("战斗中 console.error：" + c.__errors.slice(errs0).join(" | "));
+    row.outcome = res.winner === "player" ? "win" : res.winner === "enemy" ? "lose" : res.winner === "retreat" ? "retreat" : "timeout";
+    row.raw = s.battleScore.total;
+    const settled = row.outcome === "timeout" ? { grade: c.battleGrade(), xpBonus: 0 } : c.settleBattleRewards(row.outcome);
+    Object.assign(row, { score: s.battleScore.total, grade: settled.grade.grade, xpBonus: settled.xpBonus, turns: s.turnNo, actualUnitsAfter: B.fieldSnapshot(c), supportUsed: s.solo ? (s.solo.used || []).slice() : null });
+    if (row.outcome === "timeout") { terminalOutcome = "timeout"; row.endReason = "Battle round limit reached; unresolved battle was not settled as retreat or loss"; row.terrainAfter = B.clone({ gaps: s.gaps, props: s.props, fields: s.fields }); row.lastRoundLog = (s.logPages || []).slice(-1).flatMap(p => (p.lines || []).map(l => l.text || String(l))); return row.outcome; }
+    const notes = R.finishBattle(run, row.outcome);
+    Object.assign(row, { heroStateAfter: B.heroSnapshot(c, run), partyAfter: run.party.map(h => h.kit + " Lv" + h.level), deaths: notes.filter(n => /永久死亡|阵亡/.test(n)), economyAfter: { kuizhi: kz(), supplies: B.clone(R.supplies()) } });
+    return row.outcome;
+  } catch (e) { row.outcome = "error"; row.error = e.stack || String(e); terminalOutcome = "error"; throw e; }
 }
 
 /* ---------------- 调试：TOKENS=n 把普通战斗的敌人代币改成 n（精英战、首领不变），用来试平衡 ---------------- */
-if (process.env.TOKENS) {
+if (env.TOKENS) {
+  B.positiveInt(env.TOKENS, "TOKENS");
   vm.runInContext(`(function () {
     const orig = rollEncounter;
-    rollEncounter = function (opt) { opt = Object.assign({}, opt || {}); if (opt.tokens == null) opt.tokens = ${Number(process.env.TOKENS)}; return orig(opt); };
+    rollEncounter = function (opt) { opt = Object.assign({}, opt || {}); if (opt.tokens == null) opt.tokens = ${Number(env.TOKENS)}; return orig(opt); };
   })();`, c);
 }
 
@@ -360,20 +351,24 @@ if (SOLO_PARTNERS) {
 } else {
   run = R.newRun({ party: PARTY, seed: SEED });
 }
-if (process.env.BOSSTEST) {
+if (env.BOSSTEST) {
   // 调试：直接打某一幕的首领。BOSSTEST=幕:角色等级
-  const [act, lv] = process.env.BOSSTEST.split(":").map(Number);
+  const [act, lv] = env.BOSSTEST.split(":").map(Number);
+  if (![1, 2, 3, 4].includes(act)) throw new Error("BOSSTEST act must be 1–4");
+  B.positiveInt(lv, "BOSSTEST level");
   run.act = act; run.actDay = 8; run.stage = "boss";
   run.party.forEach(h => { h.level = lv; Object.keys(h.weaponLevels).forEach(k => { h.weaponLevels[k] = Math.max(1, Math.round(lv * 0.6)); }); });
   const r = fight("boss");
   const b = report.battles[0];
   console.log(JSON.stringify(b, null, 1));
-  process.exit(0);
+  return finishReport();
 }
-if (process.env.ARENA) {
+if (env.ARENA) {
   // 调试：竞技场。ARENA=幕:等级:场数 —— 把队伍直接拉到这个等级（升级选择照常做完、武器升到 等级×0.6），
   // 满血连打普通战斗、精英战和首领战各若干场，统计胜率
-  const [act, lv, n] = process.env.ARENA.split(":").map(Number);
+  const [act, lv, n] = env.ARENA.split(":").map(Number);
+  if (![1, 2, 3, 4].includes(act)) throw new Error("ARENA act must be 1–4");
+  B.positiveInt(lv, "ARENA level"); B.positiveInt(n, "ARENA count");
   run.act = act; run.actDay = 4;
   run.party.forEach(h => {
     const from = h.level || 1;
@@ -390,9 +385,12 @@ if (process.env.ARENA) {
   };
   const tally = {};
   for (const kind of ["battle", "elite", "boss"]) {
-    tally[kind] = { win: 0, lose: 0, retreat: 0, turns: 0 };
+    tally[kind] = { win: 0, lose: 0, retreat: 0, timeout: 0, error: 0, turns: 0 };
     for (let i = 0; i < n; i++) {
       fullHp();
+      terminalOutcome = null;
+      run.main.done = false;
+      run.actDay = 0;
       run.stage = kind === "boss" ? "boss" : "task";
       run.seed = SEED + ":" + kind + i;
       run.result = null;
@@ -408,15 +406,16 @@ if (process.env.ARENA) {
   fullHp();
   const v = R.heroView(run, run.party[0]);
   console.log(`ARENA 第${act}幕 Lv${lv}（${run.party.map(h => R.heroName(h.kit)).join("、")}${run.solo ? "，单人" : ""}，血量上限 ${v.hpMax}）：` +
-    Object.keys(tally).map(k => `${k} 胜${tally[k].win}/败${tally[k].lose}/撤${tally[k].retreat}（平均 ${(tally[k].turns / n).toFixed(1)} 回合）`).join("；"));
+    Object.keys(tally).map(k => `${k} 胜${tally[k].win}/败${tally[k].lose}/撤${tally[k].retreat}/超时${tally[k].timeout}/异常${tally[k].error}（平均 ${(tally[k].turns / n).toFixed(1)} 回合）`).join("；"));
   if (report.bugs.length) console.log("bugs: " + report.bugs.map(b => b.what + "：" + b.detail).join(" | "));
-  process.exit(0);
+  return finishReport();
 }
 run.CONFIG_restDays = R.CONFIG.restDays;
 ev(`出发：${PARTY.map(R.heroName).join("、")}，种子 ${SEED}`);
 let steps = 0;
-const T0 = Date.now();
-while (run.stage !== "over" && steps++ < 2000) {
+try {
+while (run.stage !== "over" && !terminalOutcome && steps++ < maxSteps) {
+  if (!report.reachedActs.includes(run.act)) report.reachedActs.push(run.act);
   levelChoices();
   const stage = run.stage;
   if (stage === "board") {
@@ -431,7 +430,9 @@ while (run.stage !== "over" && steps++ < 2000) {
     const opts = R.nodeChoices(run);
     const pref = partyHpRatio() < 0.6 ? ["clinic", "shop", "check", "smith", "battle"]
       : kz() > 4000 ? ["smith", "battle", "shop", "check", "clinic"] : ["battle", "check", "shop", "smith", "clinic"];
-    const best = opts.slice().sort((a, b) => pref.indexOf(a.type) - pref.indexOf(b.type))[0];
+    const rank = t => pref.includes(t) ? pref.indexOf(t) : pref.length;
+    const best = opts.slice().sort((a, b) => rank(a.type) - rank(b.type))[0];
+    if (!best) throw new Error("路线分岔没有可选节点");
     tryDo("选路线", () => R.chooseNode(run, best.i));
   } else if (stage === "task") {
     const node = R.currentNode(run);
@@ -465,7 +466,7 @@ while (run.stage !== "over" && steps++ < 2000) {
         const notes = tryDo("检定", () => R.attemptCheck(run, best.kit)) || [];
         ev(`${info.diffName}「${info.prof}」检定 → ${best.name}（${Math.round(best.chance * 100)}%）：${/成功/.test(notes[0] || "") && !/失败/.test(notes[0] || "") ? "成功" : "失败"}`);
       } else { tryDo("绕过检定", () => R.skipCheck(run)); ev(`${info.diffName}「${info.prof}」检定：绕过（最好的成功率 ${best ? Math.round(best.chance * 100) : 0}%）`); }
-    } else { bug("没见过的节点", node.type); tryDo("离开", () => R.leaveNode(run)); }
+    } else { throw new Error("没见过的节点：" + node.type); }
   } else if (stage === "camp") {
     shopping(); repairs(); clinic(); smithing(); levelChoices();
     tryDo("休整", () => R.camp(run));
@@ -482,27 +483,37 @@ while (run.stage !== "over" && steps++ < 2000) {
     break;
   } else { bug("没见过的阶段", stage); break; }
 }
-if (steps >= 2000) bug("主循环超过 2000 步", run.stage);
+} catch (e) { bug("流程异常", e.stack || e.message); terminalOutcome = "error"; }
+if (steps >= maxSteps && run.stage !== "over" && !terminalOutcome) { terminalOutcome = "timeout"; report.endReason = "Campaign step limit reached"; }
 
-/* ---------------- 汇报 ---------------- */
-const out = [];
-out.push(`# 实战测试：${run.solo ? `单人模式 ${R.heroName(PARTY[0])}，伙伴 ${run.partners.map(R.heroName).join("、")}，第二副职责 ${(run.party[0] ? run.party[0].role2 : SOLO_ROLE2 || "?")}` : PARTY.map(R.heroName).join("、")}（种子 ${SEED}）`);
-out.push(`结果：${run.result ? (run.result.win ? "通关" : "失败") + " — " + run.result.text : run.stage}；第 ${run.act} 幕第 ${run.day} 天；用时 ${Math.round((Date.now() - T0) / 1000)} 秒`);
-out.push(`队伍：` + run.party.map(h => { const v = R.heroView(run, h); return `${v.name} Lv${v.level} 血${v.hp}/${v.hpMax} 武器${v.weapons.map(w => w.name + "Lv" + w.level).join("、")}`; }).join("；"));
-if ((run.fallen || []).length) out.push(`阵亡：${run.fallen.map(f => R.heroName(f.kit) + "（第" + f.act + "幕第" + f.day + "天）").join("、")}`);
-out.push(`奎支 ${kz()}，水 ${R.supplies().water} ml，食物 ${R.supplies().foodTotal}`);
-out.push("\n## 战斗");
-report.battles.forEach((b, i) => {
-  out.push(`${i + 1}. 第${b.act}幕第${b.day}天 ${b.title}（Lv${b.level}${b.weather && b.weather !== "none" ? "，" + b.weather : ""}）：${b.foes.join("、")} → ${b.outcome === "win" ? "胜" : b.outcome === "retreat" ? "撤退/超时" : "败"}，${b.turns} 回合，${b.score} 分 ${b.grade}`);
-  out.push(`   战前 ${b.partyBefore.join("，")}　战后 ${b.partyAfter.join("，")}${b.lvUp.length ? "　升级 " + b.lvUp.join("、") : ""}${b.deaths.length ? "　" + b.deaths.join("；") : ""}`);
-  out.push(`   ${b.stats.join("；")}${b.supportUsed ? `　支援 ${b.supportUsed.length ? b.supportUsed.map(R.heroName).join("、") : "无"}；协助攻击字样 ${b.selfAssist}、格挡成功字样 ${b.selfBlock}` : ""}`);
-});
-out.push("\n## 过程");
-report.events.forEach(e => out.push("- " + e));
-out.push("\n## 升级选择");
-out.push(report.levelUps.join("；"));
-out.push("\n## 可疑问题 / bug");
-if (!report.bugs.length) out.push("（没有）");
-const seen = new Set();
-report.bugs.forEach(b => { const k = b.what + b.detail; if (seen.has(k)) return; seen.add(k); out.push(`- [第${b.act}幕第${b.day}天] ${b.what}：${b.detail}`); });
-console.log(out.join("\n"));
+return finishReport();
+function finishReport() {
+  if (c.__errors.length) { bug("console.error", c.__errors.join(" | ")); terminalOutcome = "error"; }
+  report.outcome = report.bugs.length ? "error" : terminalOutcome || (run.result ? run.result.win ? "win" : "lose" : "error");
+  const presetDiagnostic = !!(env.BOSSTEST || env.ARENA);
+  if (presetDiagnostic && !report.bugs.length) report.outcome = report.battles.some(b => b.outcome === "timeout") ? "timeout" : report.battles.some(b => b.outcome === "error") ? "error" : report.battles[report.battles.length - 1].outcome;
+  report.legalStart = !presetDiagnostic;
+  report.completed = run.stage === "over" && !!run.result;
+  report.endReason = report.endReason || (report.outcome === "timeout" ? "Battle round limit reached" : run.result && run.result.text) || report.bugs.map(b => b.what + ": " + b.detail).join(" | ") || "Run did not reach a legal ending";
+  if (presetDiagnostic) report.endReason = "Explicit preset-level diagnostic; not a natural-progression campaign";
+  Object.assign(report, { act: run.act, day: run.day, stage: run.stage, result: B.clone(run.result || null), fallen: B.clone(run.fallen || []), finalHeroes: B.heroSnapshot(c, run), economy: { kuizhi: kz(), supplies: B.clone(R.supplies()), bag: B.clone(st().bag || {}) } });
+  return B.clone(report);
+}
+}
+
+function formatCampaign(report) {
+  const lines = ["# 实战测试：" + report.party.join("、") + "（种子 " + report.seed + "）", "结果：" + report.outcome + " — " + report.endReason, "策略：" + report.strategy, report.strategyDetails, "开局人数：" + report.startingSize + "；到达幕：" + report.reachedActs.join("、"), "最终经济：" + JSON.stringify(report.economy), "\n## 战斗"];
+  report.battles.forEach((b, i) => lines.push((i + 1) + ". 第" + b.act + "幕 " + b.title + "：" + b.outcome + "，" + b.turns + " 回合，原始/最终分 " + b.raw + "/" + b.score + "，" + b.grade + "；存活英雄 " + b.survivingHeroes));
+  lines.push("\n## 过程", ...report.events.map(x => "- " + x), "\n## 升级选择", report.levelUps.join("；"), "\n## 异常", report.bugs.length ? JSON.stringify(report.bugs, null, 2) : "无");
+  return lines.join("\n");
+}
+function main(argv = process.argv.slice(2)) {
+  for (const flag of argv.filter(x => x.startsWith("--"))) if (flag !== "--json") throw new Error("Unknown or unimplemented option: " + flag);
+  const args = argv.filter(x => !x.startsWith("--"));
+  if (args.length > 4) throw new Error("Expected seed, party, optional solo partners and optional second role only");
+  const report = runCampaign({ seed: args[0], party: args[1] ? args[1].split(",") : undefined, partners: args[2] ? args[2].split(",") : undefined, role2: args[3], env: process.env });
+  console.log(argv.includes("--json") ? JSON.stringify(report) : formatCampaign(report));
+  return report.outcome === "error" ? 1 : 0;
+}
+if (require.main === module) { try { process.exitCode = main(); } catch (e) { console.error(e.stack || e.message); process.exitCode = 1; } }
+module.exports = { runCampaign, formatCampaign, main };
