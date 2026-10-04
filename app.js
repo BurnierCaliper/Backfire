@@ -5629,7 +5629,7 @@ function dealTo(attacker, target, opt) {
         targetId: target.id,
         onConnect: opt.onConnect || null,
         opt: JSON.parse(JSON.stringify({
-        atk: opt.atk, mult: opt.mult, flat: opt.flat, hits: opt.hits, breakOnce: opt.breakOnce, element: opt.element,
+        atk: opt.atk, mult: opt.mult, flat: opt.flat, hits: opt.hits, baseHits: opt.baseHits, breakOnce: opt.breakOnce, element: opt.element,
         baseBreak: opt.baseBreak, diceN: opt.diceN, diceS: opt.diceS, diceB: opt.diceB, diceValue: opt.diceValue,
         usePrep: opt.usePrep, flags: Object.assign({}, opt.flags, { blockResolved: false })
       }))
@@ -5736,6 +5736,7 @@ function dealTo(attacker, target, opt) {
     baseBreak: br,
     hits: opt.hits || 1,
     breakOnce: !!opt.breakOnce,
+    baseHits: opt.baseHits,
     flags,
     weather: currentWeatherFor(target),
     phaseStep: Number(state.phaseStep),
@@ -6426,11 +6427,17 @@ function skillFlowSteps(id, actor, picks) {
     if (bit === "acid") {
       const zones = [];
       for (let z = 1; z <= maxZ; z++) zones.push(z);
-      return [{ key: "dest", type: "zone", optional: false, label: "酸液炮蓄力落点", zones }];
+      return [{ key: "dest", type: "zone", optional: false, label: "酸液炮蓄力落点（任意区域，不限距离）", zones }];
     }
     const zs = [];
     for (let z = 1; z <= maxZ; z++) if (zoneDist(actor.zone, z, maxZ) === 1) zs.push(z);
-    return [{ key: "dest", type: "zone", optional: false, label: "突进终点（距离 1）", zones: zs }];
+    const steps = [{ key: "dest", type: "zone", optional: false, label: "突进终点（距离 1）", zones: zs }];
+    // 电钻：突进之后自己选打那一区的哪个敌人（以前只会打第一个）
+    if (picks.dest != null) {
+      const foes = visibleEnemies(Number(picks.dest));
+      if (foes.length) steps.push({ key: "target", type: "unit", optional: false, label: "突进后攻击哪个敌人", units: foes });
+    }
+    return steps;
   }
   if (id === "torque_strip") {
     return [
@@ -6491,7 +6498,7 @@ function skillFlowSteps(id, actor, picks) {
     }
     return [
       { key: "dest", type: "zone", optional: false, label: unstable ? "不稳：移动不限" : "逃离终点（1 距离）", zones },
-      { key: "target", type: "unit", optional: false, label: "原区受击敌人",
+      { key: "target", type: "unit", optional: true, label: "原区域受击敌人（可不选）",
         units: fieldUnits().filter(u => !u.isPlayer && !u.dead && Number(u.zone) === Number(actor.zone)) }
     ];
   }
@@ -9258,9 +9265,15 @@ function runSkillInner(id, optRun) {
         if (dest == null) { lines.push("先选突进终点。"); return paintSkillLog(lines.join("\n")); }
         a.zone = dest;
         const foes = visibleEnemies(dest);
-        const tgt = t && Number(t.zone) === dest ? t : foes[0];
+        const picked = fl && fl.picks.target ? unitById(fl.picks.target) : null;
+        const tgt = (picked && foes.includes(picked)) ? picked : (t && Number(t.zone) === dest && foes.includes(t) ? t : foes[0]);
         if (!tgt) lines.push("终点没有敌人。");
-        else hitOne(a, tgt, { element: "electric", mult: 0.5, hits: 3, baseBreak: 2, breakOnce: true, atk });
+        else {
+          // 电钻：1d4+1 次 0.5atk 电击，共 2 击破
+          const r = takeDice(1, 4, 1);
+          lines.push(`电钻突进：攻击 ${r.text} 次。`);
+          hitOne(a, tgt, { element: "electric", mult: 0.5, hits: r.total, baseHits: r.total, baseBreak: 2, breakOnce: true, atk });
+        }
       }
     } else if (id === "torque_strip") {
       const fl = state.skillFlow;
@@ -9333,8 +9346,9 @@ function runSkillInner(id, optRun) {
       lines.push(...returnWeapon(a));
     } else if (id === "ras_aa") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
+      // 两次 0.5atk 能量，共 1 击破；不稳时次数翻倍，额外击破按比例算（共 2）
       const times = (a.resources && a.resources.unstable) ? 4 : 2;
-      hitOne(a, t, { element: "energy", mult: 0.5, hits: times, baseBreak: 1, atk, atkRange: "ranged" });
+      hitOne(a, t, { element: "energy", mult: 0.5, hits: times, baseHits: 2, baseBreak: 1, breakOnce: true, atk, atkRange: "ranged" });
       addRasEnergy(20, "普通攻击");
     } else if (id === "ras_dump") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
@@ -9350,9 +9364,11 @@ function runSkillInner(id, optRun) {
       const tgt = (fl && fl.picks.target) ? unitById(fl.picks.target) : t;
       const from = a.zone;
       if (dest == null) { lines.push("先选逃离终点。"); return paintSkillLog(lines.join("\n")); }
+      // 卡面：对「原区域」的一名敌人造成伤害——先在原地打，再移动
+      if (tgt && Number(tgt.zone) === Number(from)) hitOne(a, tgt, { element: "electric", mult: 1, baseBreak: 0, atk });
+      else if (tgt) lines.push(`${tgt.name} 不在原区域，打不到。`);
       a.zone = dest;
       addRasEnergy(20, "逃离");
-      if (tgt) hitOne(a, tgt, { element: "electric", mult: 1, baseBreak: 0, atk });
       lines.push(`逃离：从 ${from} 区到 ${dest} 区。`);
     } else if (id === "ras_summon") {
       const w = spawnWeapon(a, "edc");
@@ -9361,7 +9377,7 @@ function runSkillInner(id, optRun) {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       const light = (a.resources && a.resources.light) || 0;
       const hits = (a.resources && a.resources.unstable) ? 4 : 2;
-      hitOne(a, t, { element: "energy", mult: 0.5, hits, baseBreak: 0, atk, flags: { action: true, assist: true }, atkRange: "any" });
+      hitOne(a, t, { element: "energy", mult: 0.5, hits, baseHits: 2, baseBreak: 0, atk, flags: { action: true, assist: true }, atkRange: "any" });
       if (light > 0) {
         hitOne(a, t, { element: "energy", mult: 0, flat: light, baseBreak: 0, atk: 0, flags: { action: true, assist: true } });
         a.resources.light = 0;

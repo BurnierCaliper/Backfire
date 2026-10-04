@@ -484,6 +484,16 @@ function resolveAttack(ctx) {
     add("攻击者导体：攻击次数 +1。");
   }
 
+  // 「共 N 击破」的多段攻击（breakOnce）：攻击次数被加多了（过载、导体、不稳翻倍……），
+  // 额外击破 = 多出来的次数 × 原本的 击破 / 次数，向上取整，和原本的击破一起记在第一击上
+  const origHits = Math.max(1, Number(ctx.baseHits) || Number(ctx.hits) || 1);
+  let onceBreak = Number(ctx.baseBreak) || 0;
+  if (ctx.breakOnce && hits > origHits && onceBreak > 0) {
+    const extraBreak = Math.ceil((hits - origHits) * onceBreak / origHits - 1e-9);
+    add(`攻击次数 ${origHits} → ${hits}：按原本 ${onceBreak} 击破 / ${origHits} 次的比例，额外击破 +${extraBreak}（向上取整）。`);
+    onceBreak += extraBreak;
+  }
+
   const layersWork = clone(t.layers || []);
   const perHit = [];
   let advHits = 0;   // 触发属性克制的段数（评分用）
@@ -504,7 +514,7 @@ function resolveAttack(ctx) {
     const hAdd = (s) => { hitLog.push(s); add(`#${h + 1} ${s}`); };
 
     if (flags.block === "assistOk") {
-      let br = Number(ctx.baseBreak) || 0;
+      let br = ctx.breakOnce ? onceBreak : (Number(ctx.baseBreak) || 0);
       if (ctx.breakOnce && h > 0) {
         perHit.push({ dealt: 0, breakDealt: 0, layers: clone(layersWork) });
         continue;
@@ -690,7 +700,7 @@ function resolveAttack(ctx) {
 
     if (element === "fire" || element === "energy") preventSand = true;
 
-    let br = Number(ctx.baseBreak) || 0;
+    let br = ctx.breakOnce ? onceBreak : (Number(ctx.baseBreak) || 0);
     // breakOnce：多段攻击的击破整次只结算一回（记在第一击上），卡面写「共 N 击破」的用这个
     const skipBreak = ctx.breakOnce && h > 0;
     if (skipBreak) br = 0;

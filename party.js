@@ -825,7 +825,7 @@ function skillList(unit) {
   }
   if (unit.kit === "torque") {
     const bit = koltBit();
-    add({ id: "torque_boost", name: "强化输出", hint: bit === "acid" ? "选定区域蓄力，下回合开始对该区酸液AOE" : "移动1后三次 0.5atk 电 · 共2击破" });
+    add({ id: "torque_boost", name: "强化输出", hint: bit === "acid" ? "任意区域蓄力，下回合开始对该区酸液AOE" : "移动1后选一名敌人 · 1d4+1 次 0.5atk 电 · 共2击破" });
     add({ id: "torque_swap", name: "拆装部件", hint: "更换刀头，再打对应距离 1atk +1击破，强制收回" });
     add({ id: "torque_strip", name: "拆卸模式", hint: "需电钻 · 同区 2击破，外层血量转给同区友方", minLv: 2 });
     add({ id: "torque_return", name: "收回为武器", hint: "需与柯尔特同区" });

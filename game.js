@@ -156,9 +156,25 @@
       res,
       atk: Math.round(Number(atk) || 0),
       weapon: !!u.weaponOf,
+      dur: weaponDurSnap(u),
       overkill: !u.isPlayer && (u.dead || u._removed) ? Math.max(0, Math.round(Number(u.overkill) || 0)) : 0,
       killBig: !u.isPlayer && !!u.killBig
     };
+  }
+  /** 武器耐久条：武器人显示自己的耐久；角色显示手里那把武器的耐久（空手不显示） */
+  function weaponDurSnap(u) {
+    try {
+      if (!u || !u.isPlayer) return null;
+      const weapon = typeof isWeaponUnit === "function" ? isWeaponUnit(u) : !!u.weaponOf;
+      const kit = weapon ? u.kit : (typeof heldWeaponKit === "function" ? heldWeaponKit(u) : null);
+      if (!kit || typeof weaponDurMax !== "function") return null;
+      const max = Number(weaponDurMax(kit)) || 0;
+      if (!(max > 0)) return null;
+      const cur = weapon && u.resources && u.resources.durability != null ? Number(u.resources.durability)
+        : (typeof weaponDur === "function" ? Number(weaponDur(kit)) : max);
+      const name = typeof weaponName === "function" ? weaponName(kit) : kit;
+      return { cur: Math.max(0, Math.min(max, cur || 0)), max, name };
+    } catch (e) { return null; }
   }
   const WEATHER_NAME = { none: "常态", heat: "酷暑", snow: "雪天", acid: "酸雨", thunder: "雷鸣", glow: "微光", sand: "沙暴", phase: "相位" };
   const FIELD_CLASSES = ["field-fire", "field-electric", "field-ice", "field-acid", "field-energy", "field-harmonic", "field-collapse", "field-abyss"];
@@ -531,6 +547,7 @@
        <div class="u-hp"></div>
        <div class="u-hpline"><span class="hpn"></span><span class="shpn"></span></div>
        <div class="u-def"></div>
+       <div class="u-dur"><i></i><span></span></div>
        <div class="u-foot"><div class="u-econ"></div><div class="u-status"></div></div>
        <div class="u-res"></div>
        <span class="u-flag stun">失衡</span><span class="u-flag dying">濒死</span><span class="u-flag downed">倒下</span>`);
@@ -612,6 +629,19 @@
       if (i >= s.def && i < prevDef) { p.classList.remove("shatter"); void p.offsetWidth; p.classList.add("shatter"); }
     });
 
+    // 武器耐久（黄色条）
+    const durBox = q(".u-dur");
+    if (durBox) {
+      const d = s.dur;
+      durBox.style.display = d ? "" : "none";
+      if (d) {
+        durBox.querySelector("i").style.width = (d.max ? (d.cur / d.max) * 100 : 0) + "%";
+        durBox.querySelector("span").textContent = `耐久 ${d.cur}/${d.max}`;
+        durBox.title = `${d.name} 耐久 ${d.cur}/${d.max}`;
+        durBox.classList.toggle("broken", d.cur <= 0);
+      }
+    }
+
     // 行动点 / 附赠
     const econ = q(".u-econ");
     {
@@ -630,8 +660,10 @@
     q(".u-status").innerHTML = highChip + (s.status
       ? s.status.split(" · ").filter(t => t && t !== "无状态" && !/^高能/.test(t)).map(t => `<span class="chip">${esc(t)}</span>`).join("")
       : "");
-    q(".u-res").textContent = s.res || "";
-    q(".u-res").style.display = s.res ? "" : "none";
+    // 有耐久条时，资源文字里的「耐久 N」就不重复写了
+    const resText = s.dur ? String(s.res || "").split(" · ").filter(t => !/^耐久 /.test(t)).join(" · ") : (s.res || "");
+    q(".u-res").textContent = resText;
+    q(".u-res").style.display = resText ? "" : "none";
 
     c.wrap.classList.toggle("stunned", s.stunned && !s.dead);
     c.wrap.classList.toggle("dying", s.dying && !s.dead);
@@ -1238,7 +1270,17 @@
         if (!foes.length) opts.push({ label: "切换刀头", sub: "同区没有可打的敌人", value: { swap: true, targetId: null } });
         else foes.forEach(u => opts.push({ label: `切换并打 ${u.name}`, sub: "近距离 0.5 ATK", value: { swap: true, targetId: u.id } }));
         const pick = hotseat() ? await HotseatGame.ownedChoice(k, "更换刀头", opts) : await openChoice("更换刀头", `${k.name} 可以更换刀头。切刀攻击只能打同区目标。`, opts, { label: "不切换", value: { swap: false } });
-        systemCommand({ type: "koltSwapAnswer", swap: !!(pick && pick.swap), target: (pick && pick.targetId) || null });
+        const swapTarget = (pick && pick.swap && pick.targetId) || null;
+        if (pick && pick.swap) {
+          // 换刀头的追击：和协助攻击一样播攻击演出（冲上去打同区那名敌人）
+          const nextBit = (k.resources && k.resources.bit) === "acid" ? "电钻" : "酸液炮";
+          await perform({ type: "koltSwapAnswer", swap: true, target: swapTarget }, {
+            actorId: k.id, targetId: swapTarget, forceLunge: !!swapTarget, slow: true,
+            skillName: `更换刀头 · ${nextBit}`
+          }, true);
+        } else {
+          systemCommand({ type: "koltSwapAnswer", swap: false, target: null });
+        }
         continue;
       }
       return;
