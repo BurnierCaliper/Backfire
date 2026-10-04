@@ -1,5 +1,7 @@
 # Antlerscale: Backfire（角鳞）
 
+> 新加入的合作者先看 [ROADMAP.md](ROADMAP.md)：上手方法、合作约定、已完成的内容和接下来的路线。
+
 同一套规则，三个入口：
 
 | 入口 | 是什么 |
