@@ -19,12 +19,20 @@
   ];
 
   function heroes() { return trpgHeroes(); }
-  function level() { return Number(($("g-level") || {}).value) || 1; }
+  let commandLevel = 1;
+  function level() { return commandLevel; }
+  function uiCommand(action, data) {
+    return Commands.dispatch(Object.assign({ type: "trpg.ui", action, level: Number(($("g-level") || {}).value) || 1 }, data || {}));
+  }
+  function ruleCommand(action, data) { return Object.assign({ type: "trpg", action }, data || {}); }
 
   /* ---------- 存 / 读：每个操作、每场战斗结算都自动写回当前存档空位 ---------- */
   function writeSlotNow() {
     if (slot < 0 || !TRPG.active || !window.GAME) return;
-    trpgWriteSlot(slot, { name: slotName, campaign: GAME.campaign || null, log: log.slice(-400), level: level(), enc: GAME.lastEncounter || null });
+    // The legacy save format already serializes these profiles as JSON. Capture
+    // that exact representation, with no DOM nodes or runtime-only properties.
+    const data = JSON.parse(JSON.stringify({ name: slotName, campaign: GAME.campaign || null, log: log.slice(-400), level: level(), enc: GAME.lastEncounter || null }));
+    Commands.dispatch(ruleCommand("writeSlot", { index: slot, slot: data }));
   }
   function save() {
     if (typeof ledgerCapture === "function") ledgerCapture();
@@ -53,10 +61,11 @@
     render();
   }
   /** 一次操作：执行、记日志、存档、重画 */
-  function act(fn) {
+  function act(command) { return uiCommand("rule", { command }); }
+  function performAct(command) {
     pushUndo();
     let notes = [];
-    try { notes = fn() || []; } catch (e) { notes = ["没做成：" + e.message]; }
+    try { notes = Commands.dispatch(command) || []; } catch (e) { notes = ["没做成：" + e.message]; }
     notes = notes.filter(Boolean);
     if (notes.length) {
       const stamp = `第 ${LEDGER.day || 1} 天 · 距长休 ${LEDGER.hours || 0} 小时`;
@@ -307,51 +316,49 @@
     on("tr-apply-party", () => {
       const kits = [...P.querySelectorAll("[data-kit]")].filter(x => x.checked).map(x => x.dataset.kit);
       if (!kits.length) return;
-      act(() => { GAME.partyKits = kits; rebuild(); return [`队伍：${kits.map(k => (livePartyCards().find(c => c.kit === k) || {}).name || k).join("、")}。`]; });
+      uiCommand("party", { kits });
     });
-    on("tr-xp-go", () => act(() => trpgGiveXp($("tr-xp-who").value ? [$("tr-xp-who").value] : null, $("tr-xp").value)));
-    P.querySelectorAll("[data-attr]").forEach(b => { b.onclick = () => { const [k, a] = b.dataset.attr.split(":"); act(() => trpgSpendAttr(k, a)); }; });
+    on("tr-xp-go", () => act(ruleCommand("giveXp", { kits: $("tr-xp-who").value ? [$("tr-xp-who").value] : null, amount: $("tr-xp").value })));
+    P.querySelectorAll("[data-attr]").forEach(b => { b.onclick = () => { const [k, a] = b.dataset.attr.split(":"); act(ruleCommand("spendAttr", { kit: k, attr: a })); }; });
     on("tr-reset", () => {
       if (!confirm(`清空存档「${slotName}」的进度？等级、经验、物资、奎支、时间、探索记录都会归零（名字保留）。`)) return;
-      pushUndo();
-      freshCampaign();
-      rebuild(); save(); render();
+      uiCommand("reset");
     });
     // 时间与休息
-    P.querySelectorAll("[data-hours]").forEach(b => { b.onclick = () => act(() => trpgPassHours(b.dataset.hours)); });
-    on("tr-hours-go", () => act(() => trpgPassHours($("tr-hours").value)));
-    on("tr-short-all", () => act(() => trpgShortRest(null)));
-    P.querySelectorAll("[data-short]").forEach(b => { b.onclick = () => act(() => trpgShortRest([b.dataset.short])); });
+    P.querySelectorAll("[data-hours]").forEach(b => { b.onclick = () => act(ruleCommand("passHours", { hours: b.dataset.hours })); });
+    on("tr-hours-go", () => act(ruleCommand("passHours", { hours: $("tr-hours").value })));
+    on("tr-short-all", () => act(ruleCommand("shortRest", { kits: null })));
+    P.querySelectorAll("[data-short]").forEach(b => { b.onclick = () => act(ruleCommand("shortRest", { kits: [b.dataset.short] })); });
     const restPlan = (force) => {
       const food = {};
       P.querySelectorAll("[data-food]").forEach(s => { food[s.dataset.food] = s.value; });
       return { hours: Number($("tr-long-h").value) || 8, food, force };
     };
-    on("tr-long", () => act(() => trpgLongRest(restPlan(false))));
-    on("tr-long-force", () => act(() => trpgLongRest(restPlan(true))));
-    on("tr-restore", () => act(() => ledgerRestoreAll([])));
+    on("tr-long", () => act(ruleCommand("longRest", { plan: restPlan(false) })));
+    on("tr-long-force", () => act(ruleCommand("longRest", { plan: restPlan(true) })));
+    on("tr-restore", () => act(ruleCommand("restore")));
     // 商店
     const qty = (key) => (P.querySelector(`[data-qty="${key}"]`) || {}).value || 1;
-    P.querySelectorAll("[data-buy]").forEach(b => { b.onclick = () => act(() => trpgBuy(b.dataset.buy, qty(b.dataset.buy), false)); });
-    P.querySelectorAll("[data-give]").forEach(b => { b.onclick = () => act(() => trpgBuy(b.dataset.give, qty(b.dataset.give), true)); });
+    P.querySelectorAll("[data-buy]").forEach(b => { b.onclick = () => act(ruleCommand("buy", { key: b.dataset.buy, qty: qty(b.dataset.buy), free: false })); });
+    P.querySelectorAll("[data-give]").forEach(b => { b.onclick = () => act(ruleCommand("buy", { key: b.dataset.give, qty: qty(b.dataset.give), free: true })); });
     // 背包
     const why = () => ($("tr-kz-why") || {}).value || "";
-    on("tr-kz-add", () => act(() => trpgAdjustKuizhi(Math.abs(Number($("tr-kz").value) || 0), why())));
-    on("tr-kz-sub", () => act(() => trpgAdjustKuizhi(-Math.abs(Number($("tr-kz").value) || 0), why())));
-    on("tr-water-add", () => act(() => trpgAdjustWater(Math.abs(Number($("tr-water").value) || 0))));
-    on("tr-water-sub", () => act(() => trpgAdjustWater(-Math.abs(Number($("tr-water").value) || 0))));
-    P.querySelectorAll("[data-heal]").forEach(b => { b.onclick = () => act(() => trpgUseHeal(b.dataset.heal, P.querySelector(`[data-heal-who="${b.dataset.heal}"]`).value)); });
-    on("tr-repair", () => act(() => trpgRepair($("tr-repair-who").value)));
-    P.querySelectorAll("[data-item]").forEach(b => { b.onclick = () => { const [id, n] = b.dataset.item.split(":"); act(() => trpgAdjustItem(id, Number(n))); }; });
+    on("tr-kz-add", () => act(ruleCommand("adjustKuizhi", { amount: Math.abs(Number($("tr-kz").value) || 0), why: why() })));
+    on("tr-kz-sub", () => act(ruleCommand("adjustKuizhi", { amount: -Math.abs(Number($("tr-kz").value) || 0), why: why() })));
+    on("tr-water-add", () => act(ruleCommand("adjustWater", { amount: Math.abs(Number($("tr-water").value) || 0) })));
+    on("tr-water-sub", () => act(ruleCommand("adjustWater", { amount: -Math.abs(Number($("tr-water").value) || 0) })));
+    P.querySelectorAll("[data-heal]").forEach(b => { b.onclick = () => act(ruleCommand("heal", { item: b.dataset.heal, kit: P.querySelector(`[data-heal-who="${b.dataset.heal}"]`).value })); });
+    on("tr-repair", () => act(ruleCommand("repair", { kit: $("tr-repair-who").value })));
+    P.querySelectorAll("[data-item]").forEach(b => { b.onclick = () => { const [id, n] = b.dataset.item.split(":"); act(ruleCommand("adjustItem", { item: id, amount: Number(n) })); }; });
     // 后台
-    on("bs-apply", () => { const edit = readBackstage(); const why = $("bs-why").value.trim(); act(() => trpgBackstageApply(edit, why)); });
+    on("bs-apply", () => { const edit = readBackstage(); const why = $("bs-why").value.trim(); act(ruleCommand("backstage", { edit, why })); });
     on("bs-undo", () => render());
     // 武器升级
     P.querySelectorAll("[data-up]").forEach(b => {
       b.onclick = () => {
         const [owner, kit, mode] = b.dataset.up.split(":");
         const fee = (P.querySelector(`[data-fee="${kit}"]`) || {}).value;
-        act(() => trpgUpgradeWeapon(owner, kit, mode, fee));
+        act(ruleCommand("upgradeWeapon", { owner, kit, mode, fee: fee == null ? null : fee }));
       };
     });
   }
@@ -393,14 +400,13 @@
         </div>`;
     }).join("");
     const L = $("tr-slot-list");
-    L.querySelectorAll("[data-open]").forEach(b => { b.onclick = () => enter(Number(b.dataset.open)); });
+    L.querySelectorAll("[data-open]").forEach(b => { b.onclick = () => uiCommand("enter", { index: Number(b.dataset.open) }); });
     L.querySelectorAll("[data-new]").forEach(b => {
       b.onclick = () => {
         const i = Number(b.dataset.new);
         const name = prompt("给这个团起个名字：", `团 ${i + 1}`);
         if (name == null) return;
-        trpgWriteSlot(i, { name: name.trim() || `团 ${i + 1}`, campaign: null, log: [], level: 1, enc: null });
-        enter(i);
+        uiCommand("new", { index: i, name: name.trim() || `团 ${i + 1}` });
       };
     });
     L.querySelectorAll("[data-rename]").forEach(b => {
@@ -408,19 +414,14 @@
         const i = Number(b.dataset.rename), s = trpgReadSlots()[i];
         const name = prompt("新名字：", s.name || "");
         if (name == null || !name.trim()) return;
-        s.name = name.trim();
-        trpgWriteSlot(i, s);
-        if (i === slot) slotName = s.name;
-        renderSlots();
+        uiCommand("rename", { index: i, name: name.trim() });
       };
     });
     L.querySelectorAll("[data-clear]").forEach(b => {
       b.onclick = () => {
         const i = Number(b.dataset.clear), s = trpgReadSlots()[i];
         if (!confirm(`删除存档 ${i + 1}「${s.name}」？删掉就找不回来了（可以先「存成文件」备份）。`)) return;
-        trpgClearSlot(i);
-        if (i === slot) { slot = -1; TRPG.active = false; document.body.classList.remove("trpg"); }
-        renderSlots();
+        uiCommand("delete", { index: i });
       };
     });
     L.querySelectorAll("[data-export]").forEach(b => {
@@ -450,9 +451,7 @@
             const s = data && data.kind === "anterscale-trpg-slot" ? data.slot : data;
             if (!trpgValidSlot(s)) { alert("这个文件不是跑团模式的存档。"); return; }
             if (trpgReadSlots()[i] && !confirm(`用文件里的「${s.name || "未命名"}」覆盖存档 ${i + 1}？`)) return;
-            trpgWriteSlot(i, s);
-            if (i === slot) { slot = -1; TRPG.active = false; document.body.classList.remove("trpg"); }
-            renderSlots();
+            uiCommand("import", { index: i, data: s });
           };
           r.readAsText(f);
         };
@@ -481,6 +480,7 @@
       log = Array.isArray(s.log) ? s.log.slice() : [];
     }
     const lv = $("g-level");
+    if (s.level) commandLevel = Number(s.level);
     if (lv && s.level) lv.value = String(s.level);
   }
 
@@ -506,8 +506,6 @@
     GAME.setupBattle(level(), GAME.lastEncounter || null);
   }
   function backFromBattle() {
-    if (window.GAME && GAME.depth > 0) return;
-    if (state.combatStarted && !GAME.ended && !confirm("战斗还没结束。直接回到探索环节会放弃这场战斗（不结算，回到开战前的状态）。确定吗？")) return;
     const r = $("g-result"); if (r) r.classList.remove("show");
     const ro = $("g-reopen"); if (ro) ro.classList.remove("show");
     undoStack = [];   // 战斗打完回来：之前的撤销点在战斗之前，撤回去会把整场战斗的结果一起抹掉，所以清空
@@ -516,13 +514,41 @@
     Screens.show("trpg");
   }
 
-  function boot() {
-    if (!$("scr-trpg")) return;
-    Screens.register("trpg", $("scr-trpg"), { onShow: render });
-    Screens.register("trpg-slots", $("scr-trpg-slots"), { onShow: renderSlots });
-    GAME.onCampaignSaved = () => writeSlotNow();
-    // 战斗结算：这场拿到的经验、奎支、升级写进探索记录
-    GAME.onBattleFinished = (r) => {
+  function requestBackFromBattle() {
+    if (window.GAME && GAME.depth > 0) return;
+    if (state.combatStarted && !GAME.ended && !confirm("战斗还没结束。直接回到探索环节会放弃这场战斗（不结算，回到开战前的状态）。确定吗？")) return;
+    return uiCommand("backFromBattle");
+  }
+  const uiActions = {
+    rule(c) { if (!c.command || c.command.type !== "trpg") throw new Error("Expected a TRPG rule command"); return performAct(c.command); },
+    saveCaptured: writeSlotNow,
+    recordBattle(c) { recordBattle(c.result); },
+    party(c) {
+      pushUndo(); GAME.partyKits = c.kits.slice(); rebuild();
+      log.push({ stamp: `第 ${LEDGER.day || 1} 天 · 距长休 ${LEDGER.hours || 0} 小时`, lines: [`队伍：${c.kits.map(k => (livePartyCards().find(x => x.kit === k) || {}).name || k).join("、")}。`] });
+      saveLog(); save(); render();
+    },
+    reset() { pushUndo(); freshCampaign(); rebuild(); save(); render(); },
+    undo,
+    enter(c) { enter(c.index); },
+    new(c) { trpgWriteSlot(c.index, { name: c.name, campaign: null, log: [], level: 1, enc: null }); enter(c.index); },
+    rename(c) { const s = trpgReadSlots()[c.index]; if (!s) return; s.name = c.name; trpgWriteSlot(c.index, s); if (c.index === slot) slotName = s.name; renderSlots(); },
+    delete(c) { trpgClearSlot(c.index); if (c.index === slot) { slot = -1; TRPG.active = false; document.body.classList.remove("trpg"); } renderSlots(); },
+    import(c) { if (!trpgValidSlot(c.data)) throw new Error("Invalid TRPG save"); trpgWriteSlot(c.index, c.data); if (c.index === slot) { slot = -1; TRPG.active = false; document.body.classList.remove("trpg"); } renderSlots(); },
+    slots: openSlots,
+    title() { if (TRPG.active && slot >= 0) save(); TRPG.active = false; slot = -1; document.body.classList.remove("trpg"); Screens.show("title"); },
+    toBattle,
+    backFromBattle,
+    clearLog() { log = []; saveLog(); renderLog(); }
+  };
+  Commands.register("trpg.ui", c => {
+    if (!Object.hasOwn(uiActions, c.action)) throw new Error("Unknown TRPG UI action: " + c.action);
+    commandLevel = Number(c.level) || 1;
+    if ($("g-level")) $("g-level").value = String(commandLevel);
+    return uiActions[c.action](c);
+  }, { domain: "trpg-ui" });
+
+  function recordBattle(r) {
       if (!TRPG.active || slot < 0) return;
       const head = { win: "战斗胜利", lose: "战斗失败（全员倒地）", retreat: "撤出战斗" }[r.outcome] || "战斗结束";
       const lines = [`${head}（第 ${r.turn} 回合）：每人获得 ${r.xp} 经验${r.xpMult > 1 ? `（经验 ×${r.xpMult}）` : ""}，掉落 ${r.kuizhi} 奎支（现有 ${Number(state.kuizhi) || 0}）。`];
@@ -533,33 +559,46 @@
       });
       (r.durNotes || []).forEach(t => lines.push(t));
       log.push({ stamp: `第 ${LEDGER.day || 1} 天 · 距长休 ${LEDGER.hours || 0} 小时`, lines });
+  }
+
+  function boot() {
+    if (!$("scr-trpg")) return;
+    Screens.register("trpg", $("scr-trpg"), { onShow: render });
+    Screens.register("trpg-slots", $("scr-trpg-slots"), { onShow: renderSlots });
+    // Capture the current game panel level at the UI callback boundary; it may
+    // have changed through the battle preparation panel since the last TRPG action.
+    GAME.onCampaignSaved = () => uiCommand("saveCaptured");
+    // 战斗结算：这场拿到的经验、奎支、升级写进探索记录
+    GAME.onBattleFinished = r => {
+      if (!TRPG.active || slot < 0) return;
+      uiCommand("recordBattle", { result: JSON.parse(JSON.stringify(r)) });
     };
     const xm = $("g-xp-mult");
-    if (xm) xm.onchange = () => { state.xpMult = Number(xm.value) || 1; };
-    $("tr-slots").onclick = openSlots;
-    $("tr-undo").onclick = undo;
+    if (xm) xm.onchange = () => Commands.dispatch(ruleCommand("xpMultiplier", { value: xm.value }));
+    $("tr-slots").onclick = () => uiCommand("slots");
+    $("tr-undo").onclick = () => uiCommand("undo");
     document.addEventListener("keydown", (e) => {
       if (!Screens.is("trpg")) return;
       if (e.target && /INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) return;
-      if ((e.key === "z" || e.key === "Z") && (e.ctrlKey || e.metaKey)) { e.preventDefault(); undo(); }
+      if ((e.key === "z" || e.key === "Z") && (e.ctrlKey || e.metaKey)) { e.preventDefault(); uiCommand("undo"); }
     });
-    $("tr-slots-title").onclick = () => { if (TRPG.active && slot >= 0) save(); TRPG.active = false; slot = -1; document.body.classList.remove("trpg"); Screens.show("title"); };
-    $("tr-fight").onclick = toBattle;
+    $("tr-slots-title").onclick = () => uiCommand("title");
+    $("tr-fight").onclick = () => uiCommand("toBattle");
     $("tr-bs").onclick = () => { tab = "backstage"; render(); };
-    $("tr-title").onclick = () => { save(); TRPG.active = false; slot = -1; document.body.classList.remove("trpg"); Screens.show("title"); };
+    $("tr-title").onclick = () => uiCommand("title");
     $("tr-copy").onclick = (e) => {
       const text = log.map(x => `【${x.stamp}】\n` + x.lines.map(l => "  " + l).join("\n")).join("\n");
       const btn = e.currentTarget;
       copyText(text, ok => { const o = btn.textContent; btn.textContent = ok ? "已复制" : "复制失败"; setTimeout(() => { btn.textContent = o; }, 1200); });
     };
-    $("tr-clear").onclick = () => { if (confirm("清空探索记录？")) { log = []; saveLog(); renderLog(); } };
-    $("g-to-explore").onclick = backFromBattle;
-    $("g-explore-back").onclick = backFromBattle;
+    $("tr-clear").onclick = () => { if (confirm("清空探索记录？")) uiCommand("clearLog"); };
+    $("g-to-explore").onclick = requestBackFromBattle;
+    $("g-explore-back").onclick = requestBackFromBattle;
     const sb = $("t-sandbox");
-    if (sb) sb.onclick = openSlots;
+    if (sb) sb.onclick = () => uiCommand("slots");
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
   else boot();
 
-  window.TrpgFlow = { enter, openSlots, toBattle, backFromBattle };
+  window.TrpgFlow = { enter: index => uiCommand("enter", { index }), openSlots: () => uiCommand("slots"), toBattle: () => uiCommand("toBattle"), backFromBattle: requestBackFromBattle };
 })();
