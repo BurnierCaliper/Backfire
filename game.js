@@ -2294,11 +2294,14 @@
     paintUndo();
   }
   /* ---------- 战场数据 ---------- */
-  const STAT_COLS = [["dmg", "造成伤害"], ["brk", "击破"], ["taken", "承受伤害"], ["kills", "击杀"], ["heal", "治疗 / 护盾"], ["score", "得分"]];
+  // share：按「造成伤害」算的输出占比；blockText：协助格挡 成功 / 次数
+  const STAT_COLS = [["dmg", "造成伤害"], ["share", "输出占比"], ["brk", "击破"], ["staggers", "打出失衡"], ["kills", "击杀"],
+    ["assists", "协助攻击"], ["blocks", "协助格挡"], ["avoided", "格挡规避伤害"], ["taken", "承受伤害"], ["heal", "治疗 / 护盾"], ["score", "得分"]];
   /** 按队伍顺序排好的行：角色在前，武器人跟在主人后面 */
   function statRows() {
     const stats = state.battleStats || {};
-    const blank = (u) => ({ name: u.name, kit: u.kit, weaponOf: u.weaponOf || null, dmg: 0, brk: 0, taken: 0, kills: 0, heal: 0, score: 0 });
+    const blank = (u) => ({ name: u.name, kit: u.kit, weaponOf: u.weaponOf || null, dmg: 0, brk: 0, taken: 0, kills: 0, heal: 0, score: 0,
+      assists: 0, blocks: 0, blockOk: 0, avoided: 0, staggers: 0 });
     const units = (state.units || []).filter(u => u.isPlayer && !u._removed);
     const heroes = units.filter(u => !isWeaponUnit(u));
     const rows = [];
@@ -2307,19 +2310,29 @@
       units.filter(w => isWeaponUnit(w) && w.weaponOf === h.kit && stats[w.id]).forEach(w =>
         rows.push(Object.assign({ id: w.id, sub: true, dead: !!w.dead }, stats[w.id])));
     });
+    const team = rows.reduce((a, r) => a + (Number(r.dmg) || 0), 0);
+    rows.forEach(r => { r.share = team > 0 ? Math.round((Number(r.dmg) || 0) / team * 1000) / 10 : 0; });
     return rows;
+  }
+  /** 表格单元格：输出占比带 %，协助格挡写「成功/次数」 */
+  function statCell(r, k) {
+    if (k === "share") return (Number(r.share) || 0).toFixed(1) + "%";
+    if (k === "blocks") return `${Math.round(Number(r.blockOk) || 0)}/${Math.round(Number(r.blocks) || 0)}`;
+    return String(Math.round(Number(r[k]) || 0));
   }
   function openStats() {
     const rows = statRows();
     const tot = {}; STAT_COLS.forEach(([k]) => { tot[k] = rows.reduce((a, r) => a + (Number(r[k]) || 0), 0); });
+    tot.blockOk = rows.reduce((a, r) => a + (Number(r.blockOk) || 0), 0);
+    tot.share = rows.length && tot.dmg > 0 ? 100 : 0;
     const best = {}; STAT_COLS.forEach(([k]) => { best[k] = Math.max(0, ...rows.map(r => Number(r[k]) || 0)); });
-    $("g-stats-body").innerHTML = `<table class="stats-table">
+    $("g-stats-body").innerHTML = `<div class="stats-scroll"><table class="stats-table">
       <thead><tr><th>角色</th>${STAT_COLS.map(([, n]) => `<th>${n}</th>`).join("")}</tr></thead>
       <tbody>${rows.map(r => `<tr class="${r.sub ? "sub" : ""}${r.dead ? " dead" : ""}">
         <td>${r.sub ? "└ " : ""}${esc(r.name)}${r.sub ? "<small>武器人</small>" : ""}</td>
-        ${STAT_COLS.map(([k]) => `<td class="${best[k] > 0 && r[k] === best[k] ? "top" : ""}">${Math.round(Number(r[k]) || 0)}</td>`).join("")}</tr>`).join("")}</tbody>
-      <tfoot><tr><td>合计</td>${STAT_COLS.map(([k]) => `<td>${Math.round(tot[k])}</td>`).join("")}</tr></tfoot>
-    </table>
+        ${STAT_COLS.map(([k]) => `<td class="${best[k] > 0 && r[k] === best[k] ? "top" : ""}">${statCell(r, k)}</td>`).join("")}</tr>`).join("")}</tbody>
+      <tfoot><tr><td>合计</td>${STAT_COLS.map(([k]) => `<td>${statCell(tot, k)}</td>`).join("")}</tr></tfoot>
+    </table></div>
     ${(() => {
       if (typeof battleGrade !== "function") return "";
       const gr = battleGrade();
@@ -2333,7 +2346,7 @@
     const rows = statRows();
     const gr = typeof battleGrade === "function" ? battleGrade() : null;
     return [`战场数据（第 ${state.turnNo || 1} 回合）` + (gr ? ` · 评价 ${gr.grade} · ${gr.score} 分` : ""), "角色\t" + STAT_COLS.map(([, n]) => n).join("\t")]
-      .concat(rows.map(r => (r.sub ? "  " + r.name + "（武器人）" : r.name) + "\t" + STAT_COLS.map(([k]) => Math.round(Number(r[k]) || 0)).join("\t")))
+      .concat(rows.map(r => (r.sub ? "  " + r.name + "（武器人）" : r.name) + "\t" + STAT_COLS.map(([k]) => statCell(r, k)).join("\t")))
       .join("\n");
   }
   G.statRows = statRows;

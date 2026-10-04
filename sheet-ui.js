@@ -156,3 +156,96 @@
 
   root.HeroSheet = { open, openFrom, openField: (kit) => openFrom("field", kit), register, close, tip, hideTip, skillTipHtml, heroHtml };
 })(window);
+
+/* ---------- 整局战场记录（LEDGER.career，ledger.js · careerRecordBattle） ----------
+ * 单局：本局所有战斗；跑团：这个存档空位所有战斗。页面上带 data-career 的元素点一下就打开。 */
+(function (root) {
+  "use strict";
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const COLS = [["battles", "出场"], ["dmg", "造成伤害"], ["share", "输出占比"], ["brk", "击破"], ["staggers", "打出失衡"], ["kills", "击杀"],
+    ["assists", "协助攻击"], ["blocks", "协助格挡"], ["avoided", "格挡规避伤害"], ["taken", "承受伤害"], ["takenShare", "承伤占比"], ["heal", "治疗 / 护盾"], ["score", "得分"]];
+  const OUT = { win: "胜利", lose: "战败", retreat: "撤退" };
+  let box = null;
+  const n = (v) => Math.round(Number(v) || 0);
+  function cell(r, k) {
+    if (k === "share" || k === "takenShare") return (Number(r[k]) || 0).toFixed(1) + "%";
+    if (k === "blocks") return `${n(r.blockOk)}/${n(r.blocks)}`;
+    return String(n(r[k]));
+  }
+  function rowsOf(c) {
+    const kits = Object.keys(c.kits || {}).map(k => c.kits[k]);
+    const heroes = kits.filter(r => !r.weaponOf);
+    const out = [];
+    heroes.forEach(h => {
+      out.push(Object.assign({ sub: false }, h));
+      kits.filter(w => w.weaponOf === h.kit).forEach(w => out.push(Object.assign({ sub: true }, w)));
+    });
+    kits.filter(w => w.weaponOf && !heroes.some(h => h.kit === w.weaponOf)).forEach(w => out.push(Object.assign({ sub: true }, w)));
+    const dmg = out.reduce((a, r) => a + n(r.dmg), 0), taken = out.reduce((a, r) => a + n(r.taken), 0);
+    out.forEach(r => {
+      r.share = dmg > 0 ? n(r.dmg) / dmg * 100 : 0;
+      r.takenShare = taken > 0 ? n(r.taken) / taken * 100 : 0;
+    });
+    return out;
+  }
+  function html() {
+    const c = typeof careerData === "function" ? careerData() : { battles: [], kits: {} };
+    const battles = c.battles || [];
+    if (!battles.length) return `<p class="sheet-empty">这一局还没有打过仗。打完一场战斗后，这里会累计每个角色的输出和团队贡献。</p>`;
+    const rows = rowsOf(c);
+    const tot = {};
+    ["dmg", "brk", "staggers", "kills", "assists", "blocks", "blockOk", "avoided", "taken", "heal", "score"].forEach(k => { tot[k] = rows.reduce((a, r) => a + n(r[k]), 0); });
+    const cnt = (o) => battles.filter(b => b.outcome === o).length;
+    const best = {}; COLS.forEach(([k]) => { best[k] = Math.max(0, ...rows.map(r => Number(r[k]) || 0)); });
+    const tiles = [["战斗场数", `${battles.length}`, `胜 ${cnt("win")} · 败 ${cnt("lose")} · 撤 ${cnt("retreat")}`],
+      ["全队造成伤害", tot.dmg, `击杀 ${tot.kills}`], ["全队击破", tot.brk, `打出失衡 ${tot.staggers} 次`],
+      ["协助攻击", tot.assists, ""], ["协助格挡", `${tot.blockOk}/${tot.blocks}`, `规避伤害 ${tot.avoided}`],
+      ["全队承受伤害", tot.taken, `治疗 / 护盾 ${tot.heal}`], ["总得分", tot.score, ""]];
+    const bars = rows.filter(r => !r.sub || n(r.dmg) > 0).map(r =>
+      `<div class="cl-bar"><span class="cl-bar-name">${r.sub ? "└ " : ""}${esc(r.name)}</span><span class="cl-bar-track"><i style="width:${Math.max(0, Math.min(100, r.share)).toFixed(1)}%"></i></span><b>${r.share.toFixed(1)}%</b></div>`).join("");
+    const hist = battles.slice().reverse().map(b => `<tr class="cl-${esc(b.outcome)}"><td>#${b.no}</td><td>${esc(b.when || "")}</td><td>${OUT[b.outcome] || esc(b.outcome)}</td><td>${b.turns} 回合</td>
+      <td>${b.grade ? `${esc(b.grade)} · ${n(b.score)} 分` : "—"}</td><td>${n(b.teamDmg)}</td><td>${b.mvp ? `${esc(b.mvp.name)}（${n(b.mvp.dmg)}）` : "—"}</td></tr>`).join("");
+    return `<div class="cl-tiles">${tiles.map(([k, v, sub]) => `<div><span>${k}</span><b>${esc(v)}</b>${sub ? `<small>${esc(sub)}</small>` : ""}</div>`).join("")}</div>
+      <h5 class="cl-h">输出占比</h5><div class="cl-bars">${bars}</div>
+      <h5 class="cl-h">每个角色</h5>
+      <div class="stats-scroll"><table class="stats-table">
+        <thead><tr><th>角色</th>${COLS.map(([, t]) => `<th>${t}</th>`).join("")}</tr></thead>
+        <tbody>${rows.map(r => `<tr class="${r.sub ? "sub" : ""}"><td>${r.sub ? "└ " : ""}${esc(r.name)}${r.sub ? "<small>武器人</small>" : ""}</td>
+          ${COLS.map(([k]) => `<td class="${!r.sub || k !== "battles" ? (best[k] > 0 && Number(r[k]) === best[k] ? "top" : "") : ""}">${r.sub && k === "battles" ? "—" : cell(r, k)}</td>`).join("")}</tr>`).join("")}</tbody>
+      </table></div>
+      <h5 class="cl-h">每场战斗</h5>
+      <div class="stats-scroll"><table class="stats-table cl-hist"><thead><tr><th>场次</th><th>时间</th><th>结果</th><th>回合</th><th>评价</th><th>全队伤害</th><th>输出最高</th></tr></thead><tbody>${hist}</tbody></table></div>
+      <p class="stats-note">从这一局（跑团：这个存档空位）的第一场战斗开始累计，跟着存档走；新开一局 / 重新开团时清空。输出占比按造成伤害算，承伤占比按承受伤害算。武器人分出去单独打的数据记在武器人那一行。</p>`;
+  }
+  function text() {
+    const c = typeof careerData === "function" ? careerData() : { battles: [], kits: {} };
+    const rows = rowsOf(c);
+    return [`整局数据 · ${(c.battles || []).length} 场战斗`, "角色\t" + COLS.map(([, t]) => t).join("\t")]
+      .concat(rows.map(r => (r.sub ? "  " + r.name + "（武器人）" : r.name) + "\t" + COLS.map(([k]) => (r.sub && k === "battles") ? "—" : cell(r, k)).join("\t"))).join("\n");
+  }
+  function open() {
+    if (!box) {
+      box = document.createElement("div");
+      box.className = "sheet cl-sheet";
+      box.id = "career-sheet";
+      box.innerHTML = `<div class="sheet-card stats-card cl-card"><div class="sheet-head"><h3>整局数据</h3>
+        <button class="g-btn small" id="cl-copy">复制</button><button class="g-btn" id="cl-close">关闭</button></div><div id="cl-body"></div></div>`;
+      document.body.appendChild(box);
+      box.addEventListener("click", (e) => {
+        if (e.target === box || e.target.id === "cl-close") box.classList.remove("show");
+        if (e.target.id === "cl-copy") { try { navigator.clipboard.writeText(text()); e.target.textContent = "已复制"; } catch (err) { /* 浏览器不让复制就算了 */ } }
+      });
+    }
+    box.querySelector("#cl-body").innerHTML = html();
+    box.classList.add("show");
+  }
+  if (typeof document !== "undefined") {
+    document.addEventListener("click", (e) => {
+      const t = e.target.closest && e.target.closest("[data-career]");
+      if (!t) return;
+      e.preventDefault();
+      open();
+    }, true);
+  }
+  root.CareerLog = { open, html, text };
+})(window);

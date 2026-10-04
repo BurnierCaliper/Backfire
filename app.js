@@ -1928,7 +1928,8 @@ function addStatusDmg(key, amount) {
 function battleStat(u) {
   if (!u || !u.isPlayer || !(state.units || []).includes(u)) return null;
   state.battleStats = state.battleStats || {};
-  const s = state.battleStats[u.id] || (state.battleStats[u.id] = { name: u.name, kit: u.kit || "", weaponOf: u.weaponOf || null, dmg: 0, brk: 0, taken: 0, kills: 0, heal: 0 });
+  const s = state.battleStats[u.id] || (state.battleStats[u.id] = { name: u.name, kit: u.kit || "", weaponOf: u.weaponOf || null, dmg: 0, brk: 0, taken: 0, kills: 0, heal: 0,
+    assists: 0, blocks: 0, blockOk: 0, avoided: 0, staggers: 0 });
   s.name = u.name;
   return s;
 }
@@ -2183,6 +2184,8 @@ function settleBattleRewards(outcome) {
     const from = u.level;
     if (typeof tryLevelUp === "function" && tryLevelUp(u) && u.level > from) ups.push(`${u.name} ${from}→${u.level}`);
   });
+  // 整局战场记录：这场的数据并进本局 / 本团的累计（存在队伍档案 LEDGER.career 里，跟着存档走）
+  if (typeof careerRecordBattle === "function") careerRecordBattle(outcome, grade);
   return { outcome, grade, finishBonus, xpBonus, totalXpBonus: xpBonus, ups: ups.slice(), alreadySettled: false };
 }
 
@@ -2205,7 +2208,10 @@ function trackHealBy(actor, fn) {
         const gain = hpNow(u) - before.get(u.id);
         if (gain > 0) { st.heal += gain; addScore("heal", gain * SCORE_RULES.heal, actor); }
       }
-      if (calm.has(u.id) && u.stunned && !u.dead) addScore("stagger", SCORE_RULES.stagger, actor, Number(u._staggerBonus) || 0);
+      if (calm.has(u.id) && u.stunned && !u.dead) {
+        addScore("stagger", SCORE_RULES.stagger, actor, Number(u._staggerBonus) || 0);
+        const ss = battleStat(actor); if (ss) ss.staggers = (ss.staggers || 0) + 1;   // 战场数据：打出失衡
+      }
       if (u._staggerBonus) u._staggerBonus = 0;
     });
   }
@@ -4727,6 +4733,7 @@ function finishAssist(helperId, extra) {
     notes.push(`${helper.name} 发动协助攻击（千钧：架势不恢复）。`);
   }
   appendLog(notes.join("\n"));
+  if (helper.isPlayer) { const ast = battleStat(helper); if (ast) ast.assists = (ast.assists || 0) + 1; }   // 战场数据：协助攻击
   const prevAtk = state.attackerId;
   const prevT = state.targetId;
   state.attackerId = helper.id;
@@ -5026,6 +5033,8 @@ function finishBlockInner(helperId, forced) {
     const out = performAssistBlock(helper, target, attacker, forced);
     appendLog(out.notes.join("\n"));
     if (out.ok && helper && helper.isPlayer) addScore("block", SCORE_RULES.block, helper);   // 评分：协助格挡成功
+    const bst = battleStat(helper);   // 战场数据：发动协助格挡（含失败），成功次数
+    if (bst) { bst.blocks = (bst.blocks || 0) + 1; if (out.ok) bst.blockOk = (bst.blockOk || 0) + 1; }
     block = out.ok ? (out.bare ? "bareOk" : "assistOk") : "fail";
     if (out.ok && !out.bare) blockHelperId = helperId;
     // 连续协助格挡：这个人没挡住，还有别人能挡 → 这一击先不落下，轮到剩下的人选
@@ -5054,6 +5063,12 @@ function finishBlockInner(helperId, forced) {
     let out;
     const captured = withLogSink(() => { out = dealTo(attacker, target, opt); });
     if (out && out.res && !out.pending) formatHitLines(attacker, target, out, captured).forEach(s => appendLog(s));
+    // 战场数据：格挡规避的伤害（协助格挡成功：这一击本来的伤害；空手格挡成功：少挨的那一半）
+    const saver = helperId ? battleStat(unitById(helperId)) : null;
+    if (saver && out && out.res) {
+      const saved = block === "assistOk" ? Number(out.res.blockedRaw) || 0 : block === "bareOk" ? Math.round(Number(out.res.total) || 0) : 0;
+      saver.avoided = (saver.avoided || 0) + Math.max(0, saved);
+    }
   }
 }
 

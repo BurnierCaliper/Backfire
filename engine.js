@@ -803,6 +803,8 @@ function resolveAttack(ctx) {
     ok: true,
     advantage: advHits > 0,                // 这一击触发了属性克制
     blocked: flags.block === "assistOk",   // 主攻击被挡住 → 不产生溅射
+    // 协助格挡成功时这一击本来的伤害（基础包 × 次数，未算抗性），战场数据「格挡规避伤害」用
+    blockedRaw: flags.block === "assistOk" ? Math.round(rawBase * hits) : 0,
     total: totalDealt,
     intended: totalIntended,
     extraHarmonic,

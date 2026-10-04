@@ -926,9 +926,11 @@ test("战场数据：攻击后能在面板里看到伤害 / 击破，开着面�
   assert.ok(row.dmg > 0 && row.brk > 0, "瑞比应该有伤害和击破：" + JSON.stringify(row));
   await page.click("#g-stats");
   const cells = await page.$$eval(".stats-table tbody tr", trs => trs.map(tr => [...tr.children].map(td => td.textContent.trim())));
+  const heads = await page.$$eval(".stats-table thead th", ths => ths.map(th => th.textContent.trim()));
   const rubyCells = cells.find(c => c[0].includes("瑞比"));
-  assert.equal(Number(rubyCells[1]), row.dmg);
-  assert.equal(Number(rubyCells[2]), row.brk);
+  assert.equal(Number(rubyCells[heads.indexOf("造成伤害")]), row.dmg);
+  assert.equal(Number(rubyCells[heads.indexOf("击破")]), row.brk);
+  assert.match(rubyCells[heads.indexOf("输出占比")], /%$/);
   await page.click("#g-stats-close");
   await page.click("#g-undo");
   assert.equal((await page.evaluate(i => GAME.statRows().find(r => r.id === i), ruby)).dmg, 0, "撤销后数据回退");

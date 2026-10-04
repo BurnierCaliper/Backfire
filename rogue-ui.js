@@ -114,7 +114,8 @@
     $("run-supplies").innerHTML =
       `<span>水 <b>${s.water}</b> ml</span><span title="${esc(foodTip)}">食物 <b>${s.foodTotal}</b></span>` +
       `<span>奎支 <b>${s.kuizhi}</b></span>` +
-      `<span class="${tier ? "warn" : ""}">距上次长休 <b>${hrs}</b> 小时${tier ? " · " + EXHAUST[tier] : ""}</span>`;
+      `<span class="${tier ? "warn" : ""}">距上次长休 <b>${hrs}</b> 小时${tier ? " · " + EXHAUST[tier] : ""}</span>` +
+      `<button class="g-btn small" data-career="1" title="本局每个角色的输出占比和团队贡献">整局数据</button>`;
     $("run-party").innerHTML = run.party.map(h => {
       const v = query("heroView", { kit: h.kit });
       return `<div class="rhero">
