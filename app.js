@@ -1469,7 +1469,24 @@ function beginRound(notes) {
     u.sandLocked = false;
   });
   Object.keys(state.fields || {}).forEach(z => checkEnergyFieldBoom(z, notes));
+  // 扭矩酸液炮蓄力：「下回合开始」爆发——和场地效果同一个时间段，在场地效果之后
+  releaseAcidCharges(notes);
   appendLog(notes.join("\n"));
+}
+
+function releaseAcidCharges(notes) {
+  state.units.forEach(u => {
+    if (u.kit === "torque" && u.resources && u.resources.acidCharge != null && !u.hidden && !u.dead) {
+      const z = Number(u.resources.acidCharge);
+      u.resources.acidCharge = null;
+      notes.push(`扭矩酸液炮蓄力在 ${z} 区爆发。`);
+      const atk = effectiveAtk(u, state.units);
+      visibleEnemies(z).forEach(t => {
+        const out = dealTo(u, t, { element: "acid", mult: 1, baseBreak: 1, atk, flags: { action: true, aoe: true } });
+        (out.extra || []).forEach(s => notes.push(s));
+      });
+    }
+  });
 }
 
 /* ---------- 场地的回合开始效果（回合开始和 Helumica「环境扫描」共用） ---------- */
@@ -1569,18 +1586,6 @@ function startEnemyPhase() {
     notes.push(`${p.zone} 区的废铁墙撑过了玩家回合（剩 ${p.hp}/${p.maxHp}），撤掉了。`);
   });
   state.props = (state.props || []).filter(p => p.kind !== "scrapwall");
-  state.units.forEach(u => {
-    if (u.kit === "torque" && u.resources && u.resources.acidCharge != null && !u.hidden && !u.dead) {
-      const z = Number(u.resources.acidCharge);
-      u.resources.acidCharge = null;
-      notes.push(`扭矩酸液炮蓄力在 ${z} 区爆发。`);
-      const atk = effectiveAtk(u, state.units);
-      visibleEnemies(z).forEach(t => {
-        const out = dealTo(u, t, { element: "acid", mult: 1, baseBreak: 1, atk, flags: { action: true, aoe: true } });
-        (out.extra || []).forEach(s => notes.push(s));
-      });
-    }
-  });
   settleBossStuns(notes);
   state.units.forEach(u => {
     if (u.isPlayer || u.hidden || u.dead) return;
@@ -3262,20 +3267,34 @@ function doMoveInner(unit, dest, moveOpt) {
   }
   applyAbyssFall(unit, from, notes);
   if (typeof afterMove === "function") afterMove(unit, notes);
-  state.units.forEach(u => {
-    if (u.id === unit.id || u.hidden) return;
-    if (u.statuses && u.statuses.chase) {
-      if (canCross(u, u.zone, unit.zone, false)) {
-        u.zone = unit.zone;
-        notes.push(`${u.name} 因紧追跟到 ${unit.zone} 区（不耗附赠）。`);
-      } else {
-        notes.push(`${u.name} 紧追但间隔挡住，没跟上。`);
-      }
-    }
-  });
+  chaseFollow(unit, notes);
   notes.unshift(`${unit.name}：${from} 区 → ${unit.zone} 区${moveOpt.free ? "（技能内移动，不耗附赠）" : ""}`);
   paintSkillLog(notes.join("\n"));
   renderAll();
+}
+
+/** 紧追：被紧追的单位移动后，施加紧追的一方自动跟到它所在的区域（不耗行动） */
+function chaseFollow(unit, notes) {
+  if (!unit || !unit.statuses || !unit.statuses.chase || unit.dead) return;
+  let ids = (unit.chasers || []).slice();
+  if (!ids.length) {   // 旧存档没记施加者：默认是柯尔特
+    const k = typeof findKit === "function" ? findKit("kolt", state.units) : null;
+    if (k) ids = [k.id];
+  }
+  ids.forEach(id => {
+    const c = unitById(id);
+    if (!c || c.dead || c.hidden || c.fused || c.id === unit.id) return;
+    if (Number(c.zone) === Number(unit.zone)) return;
+    if (canCross(c, c.zone, unit.zone, false)) {
+      const from = c.zone;
+      c.zone = unit.zone;
+      notes.push(`${c.name} 紧追 ${unit.name}：${from} 区 → ${unit.zone} 区（不耗行动）。`);
+      applyAbyssFall(c, from, notes);
+      if (typeof afterMove === "function") afterMove(c, notes);
+    } else {
+      notes.push(`${c.name} 紧追 ${unit.name}，但间隔挡住，没跟上。`);
+    }
+  });
 }
 
 function touDuelVictim(u) {
@@ -3765,6 +3784,7 @@ function displaceTo(obj, dest, notes, reason) {
   obj.zone = dest;
   notes.push(`${obj.name}${reason ? " " + reason : " 被移动"}：${from} 区 → ${dest} 区。`);
   applyAbyssFall(obj, from, notes);
+  if (!obj.kind) chaseFollow(obj, notes);   // 被推走也算移动：紧追的人跟上
   return true;
 }
 
@@ -5741,6 +5761,7 @@ function dealTo(attacker, target, opt) {
   if (attacker.kit === "hiaki" && attacker.resources && attacker.resources.blade === "naruto" &&
       (typeof passiveOn !== "function" || passiveOn(attacker))) br += 1;   // 被动「佩刀」
   const dist = zoneDist(attacker.zone, target.zone, state.zoneMode);
+  const wasDeadForGhost = !!(target && target.dead);
   const res = resolveAttack({
     attacker, target,
     atk: opt.atk != null ? opt.atk : effectiveAtk(attacker, state.units),
@@ -5752,6 +5773,8 @@ function dealTo(attacker, target, opt) {
     hits: opt.hits || 1,
     breakOnce: !!opt.breakOnce,
     baseHits: opt.baseHits,
+    // 这次攻击动作里刚被打死的敌人：留到动作结束，后面的攻击照常结算、全部算溢出
+    ghostOk: !!(target && !target.isPlayer && target.dead && (state.actionKills || []).includes(target.id)),
     flags,
     weather: currentWeatherFor(target),
     phaseStep: Number(state.phaseStep),
@@ -5771,6 +5794,8 @@ function dealTo(attacker, target, opt) {
   const wasStunnedForScore = !!(target && target.stunned);
   if (target && !target.isPlayer) target._killBonus = scoreBonus;
   const extra = applyCombat(target, res, attacker);
+  // 这一击打死的敌人：本次行动后面的攻击还能打到它（全部算溢出）
+  if (target && !target.isPlayer && target.dead && !wasDeadForGhost && state.actionKills && !state.actionKills.includes(target.id)) state.actionKills.push(target.id);
   if (target && !target.isPlayer && scoreBonus > 0 && !wasStunnedForScore && target.stunned) target._staggerBonus = scoreBonus;
   if (target && !target.isPlayer) target._killBonus = 0;   // 只给这一击打死的用
   // 手册第四章补全的效果（effects.js）
@@ -7973,6 +7998,7 @@ function runSkill(id, optRun) {
   try {
     lines = withLogSink(() => {
       state.aoePulse = {};            // 只算这一次行动的范围攻击
+      state.actionKills = [];         // 这一次行动里打死的敌人（动作结束前还能吃到后面的攻击、算溢出）
       const scoreBefore = state.battleScore ? state.battleScore.total : 0;
       trackHealBy(a0, () => runSkillInner(id, optRun));
       const bossNotes = []; settleBossStuns(bossNotes); if (bossNotes.length) appendLog(bossNotes.join("\n"));
@@ -9242,8 +9268,10 @@ function runSkillInner(id, optRun) {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       t.statuses = t.statuses || {};
       t.statuses.chase = true;
+      // 记下是谁施加的：目标移动时，施加者自动跟到目标所在的区域
+      t.chasers = (t.chasers || []).filter(id => id !== a.id).concat(a.id);
       popStatus(t, "chase");
-      lines.push(`${t.name} 被紧追。`);
+      lines.push(`${t.name} 被 ${a.name} 紧追：它移动时，${a.name} 会自动跟上。`);
     } else if (id === "kolt_scrap") {
       const rec = state.lastBrokenLayer;
       if (!rec) lines.push("本场还没有被摧毁的血量层。");

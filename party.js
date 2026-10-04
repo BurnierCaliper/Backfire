@@ -819,7 +819,7 @@ function skillList(unit) {
     const bit = (unit.resources && unit.resources.bit) || "drill";
     add({ id: "kolt_aa", name: "普通攻击", hint: bit === "acid" ? "距离1 · 1atk 酸 +1击破" : "同区 · 三次 0.4atk 电 · 共2击破" });
     add({ id: "kolt_short", name: "直流短接", hint: "需电钻 · 可先移≤1，再对同区铺高压场地" });
-    add({ id: "kolt_chase", name: "紧追", hint: "附赠 · 对一个敌人施加紧追", bare: true });
+    add({ id: "kolt_chase", name: "紧追", hint: "附赠 · 对一个敌人施加紧追：它移动时柯尔特自动跟上", bare: true });
     add({ id: "kolt_scrap", name: "废物利用", hint: "取上场上一个被摧毁血量层×2 的对应生命", minLv: 2 });
     add({ id: "kolt_summon", name: "唤出扭矩", hint: "武器生物化" });
   }

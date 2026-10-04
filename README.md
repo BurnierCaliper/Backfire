@@ -366,6 +366,16 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **酸液炮蓄力改到下回合开始；紧追方向修正；被打死的敌人留到攻击动作结束**（`app.js · beginRound / releaseAcidCharges / chaseFollow / dealTo`、`engine.js · resolveAttack`）
+  - **扭矩酸液炮蓄力的爆发时机**：以前在敌人回合开始时爆发；现在照技能说明在「下回合开始」爆发，和场地效果同一个时间段，排在场地效果（火场、酸液、治愈、能量场……）之后。
+  - **紧追**：以前是被施加紧追的单位跟着别人跑，反了。现在施加紧追时记下施加者；被紧追的单位每次移动（自己走、被推开都算）后，施加者自动跟到它所在的区域，不耗行动，间隔挡住就跟不上。
+  - **被打死的敌人留到攻击动作结束**：以前多段攻击里，低伤害的一段先打死敌人，后面的段数就打空了（「没有可结算的血量层」），吃不到溢出伤害和加分。现在：
+    - 同一次攻击动作里，敌人被打死后照样吃后面的攻击（同一击的后面几段、同一个技能里分开结算的几击都算）；
+    - 这些伤害全部算溢出：不再扣血、不再击破，但计入溢出伤害和溢出加分，伤害数字照常跳出来；
+    - 击杀只算一次。
+    - 动作开始前就死了的敌人不算，不能拿来刷溢出。
+  - 测试：`tests/timing-chase-overkill.test.js`。
+
 - **战场数据加项目；新增整局战场记录**（`app.js · battleStat / finishAssist / finishBlockInner / trackHealBy / settleBattleRewards`、`engine.js`、`ledger.js · careerRecordBattle`、`game.js`、`sheet-ui.js · CareerLog`）
   - **一场的「战场数据」**新增：
     - 输出占比（占全队造成伤害的 %）；

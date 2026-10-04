@@ -532,12 +532,19 @@ function resolveAttack(ctx) {
     let packet = rawBase;
 
     const startIdx = pickStartIndex(layersWork, flags.pierce, flags.focusLayer);
-    const startLayer = layersWork[startIdx] || layersWork.find(l => l.current > 0);
+    let startLayer = layersWork[startIdx] || layersWork.find(l => l.current > 0);
     if (firstStartType == null && startLayer) firstStartType = startLayer.type;
     const onShp = !!(t.upOnShp && t.isPlayer);
+    // 敌人在这次攻击动作里被打死：它留到动作结束，后面的段数照常结算，伤害全部算溢出（不再扣血、不再击破）
+    let ghost = false;
     if (!onShp && (!startLayer || totalCurFrom(layersWork) <= 0)) {
-      hAdd(t.dying ? "目标已濒死，需先起身。" : "没有可结算的血量层。");
-      break;
+      if (!t.isPlayer && (h > 0 || ctx.ghostOk) && layersWork.length) {
+        ghost = true;
+        startLayer = layersWork[innermostIndex(layersWork)];
+      } else {
+        hAdd(t.dying ? "目标已濒死，需先起身。" : "没有可结算的血量层。");
+        break;
+      }
     }
 
     let pct = 0;
@@ -678,7 +685,10 @@ function resolveAttack(ctx) {
     totalIntended += packet;
 
     let hitDealt = packet;
-    if (!onShp) {
+    if (ghost) {
+      hitDealt = 0;
+      hAdd(`目标已倒下：这一段 ${packet} 全部算作溢出伤害。`);
+    } else if (!onShp) {
       const distribute = distributePacket({
         layers: layersWork,
         startIdx,
@@ -700,9 +710,9 @@ function resolveAttack(ctx) {
 
     if (element === "fire" || element === "energy") preventSand = true;
 
-    let br = ctx.breakOnce ? onceBreak : (Number(ctx.baseBreak) || 0);
+    let br = ghost ? 0 : (ctx.breakOnce ? onceBreak : (Number(ctx.baseBreak) || 0));
     // breakOnce：多段攻击的击破整次只结算一回（记在第一击上），卡面写「共 N 击破」的用这个
-    const skipBreak = ctx.breakOnce && h > 0;
+    const skipBreak = (ctx.breakOnce && h > 0) || ghost;
     if (skipBreak) br = 0;
     if (!skipBreak) {
       if (!onShp && startLayer && startLayer.type === "armor" && element === "physical") {
