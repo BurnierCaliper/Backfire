@@ -2820,7 +2820,7 @@
   G.restFood = G.restFood || {};
   function renderRestSheet() {
     const t = typeof exhaustTier === "function" ? exhaustTier() : 0;
-    $("g-rest-time").innerHTML = `第 <b>${LEDGER.day}</b> 天 · 距上次长休 <b>${LEDGER.hours}</b> 小时 · ` +
+    $("g-rest-time").innerHTML = `第 <b>${LEDGER.day}</b> 天 <b>${clockText(LEDGER.clock == null ? 480 : LEDGER.clock)}</b> · 距上次长休 <b>${durationText(LEDGER.hours || 0)}</b> · ` +
       `<span class="${t ? "bad" : ""}">${exhaustText(t)}</span>`;
     const inFight = state.combatStarted && !G.ended;
     $("g-rest-lock").textContent = inFight ? "战斗进行中，不能休整。背包仍可随时增减。" : "";

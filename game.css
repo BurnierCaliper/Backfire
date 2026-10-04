@@ -1882,3 +1882,16 @@ body:not([data-screen="battle"]) .g-rank { display: none !important; }
 .sk-tip-short { color: var(--muted); font-size: 12px; }
 .sk-tip-why { color: #ff7a6a; }
 .rh-top .rh-sheet { margin-left: 8px; height: 22px; padding: 0 8px; font-size: 12px; line-height: 20px; }
+
+/* 跑团：24 小时时钟、角色页 */
+.tr-time { font-variant-numeric: tabular-nums; letter-spacing: .04em; }
+.tr-clockface { display: flex; align-items: center; gap: 16px; margin: 4px 0 12px; padding: 10px 14px; background: rgba(0, 0, 0, .25); border: 1px solid var(--line); }
+.tr-cf-time { font-size: 44px; font-weight: 800; line-height: 1; color: var(--gold); font-variant-numeric: tabular-nums; letter-spacing: .04em; }
+.tr-cf-side { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
+.tr-cf-side b { font-size: 16px; }
+.tr-cf-side span { color: var(--muted); font-size: 13px; }
+.tr-cf-bar { display: block; height: 6px; background: linear-gradient(90deg, #1d2440 0%, #3a5a8a 25%, #c9a24a 50%, #b46a3a 75%, #1d2440 100%); position: relative; }
+.tr-cf-bar i { position: absolute; top: -3px; bottom: -3px; left: 0; border-right: 3px solid var(--bone); }
+.tr-sheet-tabs { margin-bottom: 8px; }
+.tr-sheet .hs-hero { padding-bottom: 12px; }
+@media (max-width: 520px) { .tr-cf-time { font-size: 34px; } }
