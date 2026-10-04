@@ -1919,8 +1919,9 @@
     box.querySelector("h2").textContent = retreated ? "撤退" : win ? "胜利" : state.solo ? "阵亡" : "全员倒地";
     box.querySelector("h2").className = win ? "win" : "lose";
     // 战斗评分：胜利时先算速杀（1 / 2 / 3 回合内 ×2 / ×1.5 / ×1.2）和无伤（+100，倍率 +0.5，与速杀加算），再定评价
-    if (G.lastOutcome === "win" && typeof applyFinishBonus === "function") {
-      const fb = applyFinishBonus();
+    const rewards = settleBattleRewards(G.lastOutcome);
+    if (rewards.finishBonus) {
+      const fb = rewards.finishBonus;
       const what = [fb.speedMult > 1 ? `速杀（第 ${state.turnNo} 回合打完）×${fb.speedMult}` : "", fb.flawless ? `无伤 +${SCORE_FLAWLESS.points}、×${1 + SCORE_FLAWLESS.mult}` : "", fb.ambush ? `遭遇战 ×${SCORE_AMBUSH_MULT}` : ""].filter(Boolean);
       if (fb.extra > 0) {
         addLogPhase(`${what.join(" + ")}：整场分数 ×${fb.mult}（+${fb.extra}）`);
@@ -1931,27 +1932,17 @@
       }
     }
     // 按评价把这场的战斗经验乘上去（S ×2 / A ×1.5 / B ×1.2 / C ×1）
-    const gr = typeof battleGrade === "function" ? battleGrade() : null;
+    const gr = rewards.grade;
     G.lastGrade = gr;
     let gradeLine = "";
     if (gr) {
       gradeLine = `评价 ${gr.grade}（${gr.score} 分）`;
-      const gained = (state.battleGains && state.battleGains.xp) || 0;
-      if (G.lastOutcome === "win" && gr.xpMult > 1 && gained > 0) {
-        const per = Math.floor(gained * (gr.xpMult - 1));
-        if (per > 0) {
-          state.units.filter(u => u.isPlayer && !isWeaponUnit(u) && !u.dead).forEach(u => { u.xp = (u.xp || 0) + per; });
-          state.battleGains.xp += per;
-          gradeLine += `：战斗经验 ×${gr.xpMult}，每人额外 +${per}`;
-          addLogPhase(`评价 ${gr.grade}：战斗经验 ×${gr.xpMult}，每人额外 +${per} 经验`);
-        }
+      if (rewards.totalXpBonus > 0) gradeLine += `：战斗经验 ×${gr.xpMult}，每人额外 +${rewards.totalXpBonus}`;
+      if (rewards.xpBonus > 0) {
+        addLogPhase(`评价 ${gr.grade}：战斗经验 ×${gr.xpMult}，每人额外 +${rewards.xpBonus} 经验`);
       }
     }
-    const ups = [];
-    state.units.filter(u => u.isPlayer && !isWeaponUnit(u)).forEach(u => {
-      const from = u.level;
-      if (typeof tryLevelUp === "function" && tryLevelUp(u) && u.level > from) ups.push(`${u.name} ${from}→${u.level}`);
-    });
+    const ups = rewards.ups;
     // 跑团版的队伍档案只在战斗原型里结算；Roguelike 由单局流程自己记
     if (!G.rogue) {
       const durNotes = typeof ledgerAfterBattle === "function" ? ledgerAfterBattle([]) : [];

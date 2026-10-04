@@ -1,0 +1,2 @@
+# Keep the frozen generated sample list available without dominating PR review.
+manifest.json linguist-generated=true

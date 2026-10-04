@@ -8,6 +8,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("path");
+const { pathToFileURL } = require("url");
 const { execSync } = require("child_process");
 
 function findPlaywright() {
@@ -19,13 +20,20 @@ function findPlaywright() {
   return null;
 }
 const pw = findPlaywright();
-const GAME_URL = "file://" + path.resolve(__dirname, "..", "game.html");
+const GAME_URL = pathToFileURL(path.resolve(__dirname, "..", "game.html")).href;
+const requireUI = process.env.REQUIRE_UI === "1";
 
 let browser = null;
 let skipWhy = pw ? "" : "没装 Playwright，跳过画面测试";
 test.before(async () => {
-  if (!pw) return;
-  try { browser = await pw.chromium.launch(); } catch (e) { skipWhy = "浏览器启动失败，跳过画面测试：" + e.message.split("\n")[0]; }
+  if (!pw) {
+    if (requireUI) throw new Error("UI 验收需要 Playwright；请安装或通过 NODE_PATH 指定现有安装。");
+    return;
+  }
+  try { browser = await pw.chromium.launch(); } catch (e) {
+    if (requireUI) throw e;
+    skipWhy = "浏览器启动失败，跳过画面测试：" + e.message.split("\n")[0];
+  }
 });
 test.after(async () => { if (browser) await browser.close(); });
 
@@ -305,6 +313,27 @@ test("单局：选队伍出发，任务板正常显示", async (t) => {
   await page.click("#party-go");
   await page.waitForSelector("#scr-run:not([hidden])");
   assert.ok((await page.textContent("#run-body")).length > 0);
+  assert.deepEqual(o.errors, []);
+});
+
+test("单局：刷新后继续保留种子、队伍和任务进度", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await page.click("#t-new");
+  await page.click('.hero-pick[data-kit="ruby"]');
+  await page.click('.hero-pick[data-kit="yuito"]');
+  await page.click("#party-go");
+  await page.waitForSelector("#scr-run:not([hidden])");
+  await page.click('.r-go[data-which="main"]');
+  const progress = () => {
+    const r = SaveStore.loadRun();
+    return { seed: r.seed, party: r.party, stage: r.stage, act: r.act, day: r.day, task: r.task, world: r.world };
+  };
+  const before = await page.evaluate(progress);
+  await page.reload();
+  await page.click("#t-continue");
+  await page.waitForSelector("#scr-run:not([hidden])");
+  assert.deepEqual(await page.evaluate(progress), before);
   assert.deepEqual(o.errors, []);
 });
 
@@ -933,6 +962,79 @@ test("战斗评分：右上角显示评价并随得分变化；胜利时按评�
   await page.click("#g-explore-back");
   const last = await page.evaluate(() => [...document.querySelectorAll("#tr-log li")].pop().innerText);
   assert.match(last, /评价 S/);
+  assert.deepEqual(o.errors, []);
+});
+
+test("奖励结算：真实 UI 评级触发 3→4 级，继续后与无界面的经验和待选升级一致", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  const initial = await page.evaluate(() => {
+    const run = Rogue.newRun({ party: ["ruby", "yuito"], seed: "R1-UI-REWARDS" });
+    run.stage = "boss";
+    run.party.forEach(h => { h.level = 3; h.xp = xpToNext(3) - 1; h.pending = []; });
+    Rogue.save(run);
+    return run;
+  });
+  // 两条路径共用同一份战前档案和最后一击后的状态：基础经验已计入，
+  // 每人离 4 级仍差 1 点；只有 S 评价补发的 11 点经验才能触发升级。
+  const finalBattleState = () => {
+    state.turnNo = 4;
+    state.battleScore.total = 1750;
+    state.battleScore.hurt = true;
+    state.battleGains.xp = 11;
+    state.units.filter(u => !u.isPlayer).forEach(u => { u.dead = true; });
+    return partyHeroes().map(h => ({ level: h.level, xp: h.xp, need: xpToNext(h.level) }));
+  };
+  const result = run => {
+    const first = state.battleScore.rewardSettlement;
+    return JSON.parse(JSON.stringify({
+      grade: first.grade.grade, score: first.grade.score, xpBonus: first.xpBonus,
+      gains: state.battleGains.xp, stage: run.stage,
+      party: run.party.map(h => ({ kit: h.kit, level: h.level, xp: h.xp, hp: h.hp, shp: h.shp, pending: h.pending }))
+    }));
+  };
+  const ctx = require("./headless").load();
+  const expected = require("node:vm").runInContext(`(() => {
+    const run = ${JSON.stringify(initial)};
+    Rogue.enterRunMode(run);
+    BattleSim.setup(Rogue.battleSpec(run));
+    (${finalBattleState.toString()})();
+    settleBattleRewards("win");
+    Rogue.finishBattle(run, "win");
+    return (${result.toString()})(run);
+  })()`, ctx);
+
+  await page.evaluate(() => RunFlow.resume());
+  await page.click("#r-fight"); // RogueUI.fight → GAME.startRogueBattle，绑定真实返回回调。
+  await page.waitForSelector("#g-app:not([hidden])");
+  const before = await page.evaluate(finalBattleState);
+  assert.ok(before.every(h => h.level === 3 && h.xp === h.need - 1));
+  await page.evaluate(() => { GAME.instant = true; GAME.checkEnd(); }); // 实际 game.js::finish。
+  await page.waitForSelector("#g-result.show");
+  assert.match(await page.textContent("#g-result .grade-badge"), /S/);
+  assert.match(await page.textContent("#g-result p"), /每人额外 \+11/);
+  assert.match(await page.textContent("#g-result p"), /3→4/);
+  const settled = await page.evaluate(() => {
+    const snapshot = () => partyHeroes().map(h => ({ level: h.level, xp: h.xp }));
+    const before = snapshot(), duplicate = settleBattleRewards("win"), after = snapshot();
+    return { before, after, xpBonus: duplicate.xpBonus, alreadySettled: duplicate.alreadySettled };
+  });
+  assert.ok(settled.before.every(h => h.level === 4 && h.xp === 10));
+  assert.deepEqual(settled.after, settled.before);
+  assert.equal(settled.xpBonus, 0);
+  assert.equal(settled.alreadySettled, true);
+  await page.click("#g-rogue-next"); // onEnd → Rogue.finishBattle → 保存并显示待选升级。
+  await page.waitForSelector("#scr-run:not([hidden]) .levelup");
+  const saved = await page.evaluate(() => SaveStore.loadRun());
+  const actual = await page.evaluate(result, saved);
+  assert.deepEqual(actual, JSON.parse(JSON.stringify(expected)));
+  assert.equal(actual.grade, "S");
+  assert.equal(actual.xpBonus, 11);
+  assert.equal(actual.gains, 22);
+  assert.equal(actual.stage, "interlude");
+  assert.ok(actual.party.every(h => h.level === 4 && h.xp === 10));
+  assert.ok(actual.party.every(h => h.pending.length === 1 && h.pending[0].type === "attr" && h.pending[0].level === 4));
+  assert.match(await page.textContent("#run-body .levelup"), /4 级/);
   assert.deepEqual(o.errors, []);
 });
 

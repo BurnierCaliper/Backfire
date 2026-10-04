@@ -1,0 +1,11 @@
+# 可由工具或证据压缩包还原；保留本机调试记录，不重复提交大体积中间文件。
+source-extracts/
+*smoke*
+*.log
+*.jsonl
+*-formal.json
+*-formal.csv
+*-formal.battles.csv
+boss-coverage-diagnostic.json
+boss-coverage-diagnostic.csv
+*-timeout-diagnostics.json
