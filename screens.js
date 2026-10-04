@@ -35,7 +35,18 @@ const Screens = (function () {
     if (next.onShow) next.onShow(arg);
   }
 
-  return { register, show, current: () => current, is: (name) => current === name };
+  Commands.register("screen", cmd => show(cmd.name, cmd.arg), {
+    domain: "screens",
+    validate(cmd) {
+      if (cmd.action !== "show" || typeof cmd.name !== "string") throw new Error("未知界面指令");
+    }
+  });
+  function dispatchShow(name, arg) {
+    const command = { type: "screen", action: "show", name };
+    if (arg !== undefined) command.arg = arg;
+    return dispatch(command);
+  }
+  return { register, show: dispatchShow, current: () => current, is: (name) => current === name };
 })();
 
 /* ---------- 标题界面 ---------- */
@@ -52,7 +63,7 @@ const Screens = (function () {
   }
 
   function refreshTitle() {
-    const run = typeof SaveStore !== "undefined" ? SaveStore.loadRun() : null;
+    const run = typeof SaveStore !== "undefined" ? dispatch({ type: "run.session", action: "readSaved" }) : null;
     const cont = $("t-continue");
     cont.disabled = !run || !RunFlow.ready;
     $("t-continue-sub").textContent = run ? runSummary(run) : "没有进行中的一局";
@@ -79,8 +90,9 @@ const Screens = (function () {
     $("t-continue").onclick = () => RunFlow.resume();
     $("t-sandbox").onclick = () => {
       // 没加载 trpg-ui.js 时的后备：直接进战斗画面（trpg-ui.js 会把这个按钮换成进探索环节）
-      if (typeof Rogue !== "undefined") Rogue.leaveRunMode();
-      if (window.GAME && GAME.rogue && GAME.setupBattle) GAME.setupBattle(1);
+      dispatch({ type: "run.session", action: "sandbox" }, { setupBattle() {
+        if (window.GAME && GAME.rogue && GAME.setupBattle) GAME.setupBattle(1);
+      } });
       Screens.show("battle");
     };
     $("g-title").onclick = () => { if (!window.GAME || GAME.depth === 0) Screens.show("title"); };

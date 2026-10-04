@@ -267,33 +267,7 @@ function buildZoneBox(z) {
   here.forEach((u, i) => list.appendChild(unitCard(u, spots[i] || { x: 50, y: 50 })));
   box.querySelectorAll("input").forEach(inp => {
     inp.addEventListener("change", () => {
-      const k = inp.dataset.k;
-      if (k === "fieldLock") {
-        state.fields[z].fieldLock = inp.checked ? (state.fields[z].fieldLock || "手动锁定") : null;
-      } else if (k === "fire") {
-        const n = Math.max(0, Number(inp.value) || 0);
-        if (n > 0) {
-          const err = setZoneField(z, "fire", { stacks: n });
-          if (err) appendLog(err);
-        } else if (!state.fields[z].fieldLock) {
-          state.fields[z].fire = 0;
-          state.fields[z].fireOn = false;
-        }
-      } else if (k === "fireOn" || FIELD_EFFECT_KEYS.indexOf(k) >= 0) {
-        if (inp.checked) {
-          const kind = k === "fireOn" ? "fire" : k;
-          const err = setZoneField(z, kind, k === "fireOn" ? { stacks: state.fields[z].fire || 1 } : {});
-          if (err) appendLog(err);
-        } else if (!state.fields[z].fieldLock) {
-          clearFieldEffects(state.fields[z]);
-        }
-      } else state.fields[z][k] = inp.type === "checkbox" ? inp.checked : inp.value;
-      if (k === "abyss" && inp.checked) {
-        const notes = [];
-        state.units.filter(u => Number(u.zone) === z && !u.hidden && !u.dead).forEach(u => applyAbyssFall(u, otherZone(z), notes));
-        if (notes.length) appendLog(notes.join("\n"));
-      }
-      renderZones();
+      calcCommand("field", { zone: z, key: inp.dataset.k, value: inp.type === "checkbox" ? inp.checked : inp.value });
     });
     if (inp.type === "number") {
       inp.addEventListener("wheel", ev => ev.preventDefault());
@@ -304,7 +278,7 @@ function buildZoneBox(z) {
     const step = flowStep();
     if (state.skillFlow && step && step.type === "zone") {
       const ok = (step.zones || []).some(x => Number(x) === Number(z));
-      if (ok) applyFlowPick(Number(z));
+      if (ok) calcCommand("skillPick", { value: Number(z) });
       else appendLog("当前步骤不能选这个区域。");
     }
   });
@@ -334,23 +308,11 @@ function buildGapBox(key) {
     <button class="btn small" data-ghit="${key}" style="margin-top:6px">作为攻击目标</button>
     <div class="hint">${gapStatusText(g)}</div>`;
   box.querySelector("select").value = g.type;
-  box.querySelector("select").onchange = (e) => {
-    g.type = e.target.value;
-    if (g.type === "bridge" || g.type === "wall") {
-      if (!g.hp) { g.hp = defaultGapHp(g.type); g.maxHp = g.hp; }
-    }
-    if (g.type === "door") g.open = false;
-    if (g.type === "open") { g.hp = 0; g.open = true; }
-    renderAll();
-  };
-  box.querySelector("[data-ghp]").onchange = (e) => { g.hp = Number(e.target.value) || 0; g.maxHp = Math.max(g.maxHp || 0, g.hp); };
-  box.querySelector("[data-gopen]").onchange = (e) => { g.open = e.target.checked; renderAll(); };
-  box.querySelector("[data-gforce]").onchange = (e) => { state.forceVoid[key] = e.target.checked; };
-  box.querySelector("[data-ghit]").onclick = () => {
-    state.targetId = "gap:" + key;
-    renderAll();
-    appendLog(`已把间隔 ${key}（${gapLabel(g.type)}）设为攻击目标。`);
-  };
+  box.querySelector("select").onchange = e => calcCommand("gap", { key, field: "type", value: e.target.value });
+  box.querySelector("[data-ghp]").onchange = e => calcCommand("gap", { key, field: "hp", value: e.target.value });
+  box.querySelector("[data-gopen]").onchange = e => calcCommand("gap", { key, field: "open", value: e.target.checked });
+  box.querySelector("[data-gforce]").onchange = e => calcCommand("gap", { key, field: "force", value: e.target.checked });
+  box.querySelector("[data-ghit]").onclick = () => calcCommand("gap", { key, field: "target" });
   return box;
 }
 
@@ -374,57 +336,33 @@ function propCard(p) {
   const tgt = document.createElement("button");
   tgt.className = "btn small";
   tgt.textContent = "设为目标";
-  tgt.onclick = (e) => {
-    e.stopPropagation();
-    const step = flowStep();
-    if (state.skillFlow && step && step.type === "unit") {
-      const pid = "prop:" + p.id;
-      const ok = (step.units || []).some(u => u.id === pid);
-      if (ok) { applyFlowPick(pid); return; }
-    }
-    state.targetId = "prop:" + p.id;
-    renderAll();
-  };
+  tgt.onclick = e => { e.stopPropagation(); calcCommand("prop", { id: p.id, op: "target" }); };
   row.appendChild(tgt);
   if (p.kind === "button" || p.kind === "lever") {
     const use = document.createElement("button");
     use.className = "btn small";
     use.textContent = p.kind === "lever" ? "扳动" : "按下";
-    use.onclick = (e) => { e.stopPropagation(); useDevice(p); };
+    use.onclick = e => { e.stopPropagation(); calcCommand("prop", { id: p.id, op: "use" }); };
     row.appendChild(use);
   }
   if (p.kind === "scrap") {
     const fire = document.createElement("button");
     fire.className = "btn small";
     fire.textContent = "开火";
-    fire.onclick = (e) => { e.stopPropagation(); fireScrap(p); };
+    fire.onclick = e => { e.stopPropagation(); calcCommand("prop", { id: p.id, op: "fire" }); };
     row.appendChild(fire);
   }
   if (p.movable) {
     const mv = document.createElement("button");
     mv.className = "btn small";
     mv.textContent = "挪到邻区";
-    mv.onclick = (e) => {
-      e.stopPropagation();
-      const dest = Number(p.zone) === 1 ? 2 : Number(p.zone) - 1;
-      if (canCross(null, p.zone, dest, true)) {
-        snapshot();
-        p.zone = dest;
-        appendLog(`${p.name} 移到 ${dest} 区。`);
-        renderAll();
-      }
-    };
+    mv.onclick = e => { e.stopPropagation(); calcCommand("prop", { id: p.id, op: "move", dest: Number(p.zone) === 1 ? 2 : Number(p.zone) - 1 }); };
     row.appendChild(mv);
   }
   const del = document.createElement("button");
   del.className = "btn small danger";
   del.textContent = "移除";
-  del.onclick = (e) => {
-    e.stopPropagation();
-    snapshot();
-    state.props = state.props.filter(x => x.id !== p.id);
-    renderAll();
-  };
+  del.onclick = e => { e.stopPropagation(); calcCommand("prop", { id: p.id, op: "remove" }); };
   row.appendChild(del);
   el.appendChild(row);
   return el;
@@ -801,12 +739,12 @@ function unitCard(u, pos) {
   `;
   el.addEventListener("click", (e) => {
     e.stopPropagation();
-    onUnitClick(u.id);
+    calcCommand("clickUnit", { actor: u.id });
   });
   el.addEventListener("contextmenu", (e) => {
     e.preventDefault();
     e.stopPropagation();
-    clearUnitSelection();
+    calcCommand("clearSelection");
   });
   wrap.appendChild(el);
   attachFloaters(wrap, u.id);
@@ -822,7 +760,7 @@ function unitCard(u, pos) {
       b.textContent = d < 0 ? `← ${dest}` : `${dest} →`;
       b.addEventListener("click", (e) => {
         e.stopPropagation();
-        doMove(u, dest);
+        calcCommand("move", { actor: u.id, dest });
       });
       wrap.appendChild(b);
     });
@@ -1072,7 +1010,7 @@ function renderEditor() {
     const b = document.createElement("button");
     b.className = "btn";
     b.textContent = `移动到 ${dest} 区`;
-    b.onclick = () => doMove(u, dest);
+    b.onclick = () => calcCommand("move", { actor: u.id, dest });
     moveBox.appendChild(b);
   });
   drawLayers(u);
@@ -1082,89 +1020,28 @@ function renderEditor() {
     el.addEventListener("input", fn);
     el.addEventListener("change", fn);
   };
-  bind("edName", () => { u.name = uiEl("edName").value; renderZones(); renderSelects(); });
-  bind("edLv", () => u.level = Number(uiEl("edLv").value) || 1);
-  bind("edZone", () => {
-    const dest = Number(uiEl("edZone").value);
-    if (Math.abs(dest - Number(u.zone)) === 1) doMove(u, dest);
-    else {
-      snapshot();
-      u.zone = dest;
-      paintSkillLog(`${u.name} 被直接放到 ${dest} 区（GM 强制换位，不走移动规则）。`);
-      renderAll();
-    }
-  });
-  bind("edAtk", () => u.atk = Number(uiEl("edAtk").value) || 0);
-  bind("edDef", () => { u.def = Number(uiEl("edDef").value) || 0; renderZones(); });
-  bind("edDefMax", () => u.defMax = Number(uiEl("edDefMax").value) || 0);
-  bind("edHE", () => {
-    u.highEnergy = Number(uiEl("edHE").value) || 0;
-    checkHighBoom(u);
-    renderAll();
-  });
-  bind("edFly", () => { u.flying = uiEl("edFly").checked; renderZones(); });
-  bind("edStun", () => { u.stunned = uiEl("edStun").checked; renderZones(); });
-  bind("stBurn", () => u.statuses.burn = Number(uiEl("stBurn").value) || 0);
-  ["Shock","Corr","Frost","Wave","High","Reso","Un","Weak","Insp","Hide","Adv"].forEach(key => {
-    const map = {
-      Shock: ["shock"], Corr: ["corr"], Frost: ["frostbite"], Wave: ["shockwave"],
-      High: ["high"], Reso: ["reso"], Un: ["unstable"], Weak: ["weak"], Insp: ["inspire"],
-      Hide: ["hide"], Adv: ["advantage"]
-    };
-    bind("st" + key, () => {
-      u.statuses[map[key][0]] = uiEl("st" + key).checked;
-      if (key === "Wave" && typeof syncShockwave === "function") syncShockwave(u, null);
-    });
-  });
+  const editField = (field, value) => calcCommand("unitField", { actor: u.id, field, value });
+  bind("edName", () => editField("name", uiEl("edName").value));
+  bind("edLv", () => editField("level", Number(uiEl("edLv").value) || 1));
+  bind("edZone", () => calcCommand("unitZone", { actor: u.id, dest: Number(uiEl("edZone").value) }));
+  ["edAtk", "edDef", "edDefMax", "edHE"].forEach((id, i) => bind(id, () => editField(["atk", "def", "defMax", "highEnergy"][i], Number(uiEl(id).value) || 0)));
+  bind("edFly", () => editField("flying", uiEl("edFly").checked));
+  bind("edStun", () => editField("stunned", uiEl("edStun").checked));
+  bind("stBurn", () => calcCommand("status", { actor: u.id, key: "burn", value: Number(uiEl("stBurn").value) || 0 }));
+  const statuses = { Shock: "shock", Corr: "corr", Frost: "frostbite", Wave: "shockwave", High: "high", Reso: "reso", Un: "unstable", Weak: "weak", Insp: "inspire", Hide: "hide", Adv: "advantage" };
+  Object.entries(statuses).forEach(([key, status]) => bind("st" + key, () => calcCommand("status", { actor: u.id, key: status, value: uiEl("st" + key).checked })));
   const imap = { inMelt: "melt", inSting: "sting", inOver: "overload", inShift: "shift", inSpread: "spread", inRef: "refract" };
-  Object.keys(imap).forEach(id => bind(id, () => { u.instant[imap[id]] = uiEl(id).checked; }));
+  Object.entries(imap).forEach(([id, key]) => bind(id, () => calcCommand("instant", { actor: u.id, key, value: uiEl(id).checked })));
   const neu = uiEl("btnNeutralize");
-  if (neu) neu.onclick = () => {
-    snapshot();
-    const notes = applyNeutralize(u);
-    appendLog(notes.join("\n") || `${u.name} 身上没有可中和的属性状态。`);
-    renderAll();
-  };
-  bind("edSelf", () => {
-    u.self = uiEl("edSelf").value;
-    if (u.self === "burn") u.selfBurnStacks = Math.max(1, Number(u.selfBurnStacks) || 1);
-    else u.selfBurnStacks = 0;
-    renderZones();
-  });
-  bind("edLatest", () => u.statuses.latestElement = uiEl("edLatest").value || null);
-  ["combust","icebreak","bolt","etch","backflow","inertia","diffract"].forEach(id => {
-    bind("fxHang_" + id, () => {
-      u.resources = u.resources || {};
-      const on = uiEl("fxHang_" + id).checked;
-      let cur = hungAtkFx(u);
-      if (on && cur.indexOf(id) < 0) cur.push(id);
-      if (!on) cur = cur.filter(x => x !== id);
-      u.resources.nextAtkFx = cur;
-      renderZones();
-    });
-  });
-  uiEl("addLayer").onclick = () => {
-    u.layers.push({ type: "flesh", current: 10, max: 10 });
-    drawLayers(u); renderZones();
-  };
-  uiEl("delUnit").onclick = () => {
-    snapshot();
-    state.units = state.units.filter(x => x.id !== u.id);
-    if (state.selectedId === u.id) state.selectedId = null;
-    if (state.attackerId === u.id) state.attackerId = null;
-    if (state.targetId === u.id) state.targetId = null;
-    renderAll();
-  };
-  uiEl("copyUnit").onclick = () => {
-    snapshot();
-    const c = clone(u);
-    c.id = uid();
-    c.name = u.name + " 复制";
-    state.units.push(c);
-    renderAll();
-  };
-  uiEl("fullDef").onclick = () => { u.def = u.defMax; renderAll(); };
-  uiEl("saveThisCard").onclick = () => saveUnitToRoster(u, true);
+  if (neu) neu.onclick = () => calcCommand("neutralize", { actor: u.id });
+  bind("edSelf", () => calcCommand("self", { actor: u.id, value: uiEl("edSelf").value }));
+  bind("edLatest", () => calcCommand("status", { actor: u.id, key: "latestElement", value: uiEl("edLatest").value || null }));
+  ["combust", "icebreak", "bolt", "etch", "backflow", "inertia", "diffract"].forEach(key => bind("fxHang_" + key, () => calcCommand("hang", { actor: u.id, key, value: uiEl("fxHang_" + key).checked })));
+  uiEl("addLayer").onclick = () => calcCommand("unitLayer", { actor: u.id, op: "add" });
+  uiEl("delUnit").onclick = () => calcCommand("removeUnit", { actor: u.id });
+  uiEl("copyUnit").onclick = () => calcCommand("copyUnit", { actor: u.id });
+  uiEl("fullDef").onclick = () => calcCommand("fullDef", { actor: u.id });
+  uiEl("saveThisCard").onclick = () => calcCommand("rosterSaveUnit", { actor: u.id });
 }
 
 function drawLayers(u) {
@@ -1182,19 +1059,18 @@ function drawLayers(u) {
     el.addEventListener("input", () => {
       const i = Number(el.dataset.i);
       const f = el.dataset.f;
-      u.layers[i][f] = f === "type" ? el.value : Number(el.value);
-      renderZones();
+      calcCommand("unitLayer", { actor: u.id, op: "set", index: i, field: f, value: f === "type" ? el.value : Number(el.value) });
     });
   });
   box.querySelectorAll("[data-del]").forEach(btn => {
     btn.addEventListener("click", () => {
-      u.layers.splice(Number(btn.dataset.del), 1);
-      drawLayers(u); renderZones();
+      calcCommand("unitLayer", { actor: u.id, op: "remove", index: Number(btn.dataset.del) });
     });
   });
 }
 
 function fillFromSuggest(u) {
+  if (!HAS_DOM) return;
   uiEl("atk").value = u.atk;
   if (u.suggest) {
     uiEl("element").value = u.suggest.element;
@@ -1225,15 +1101,23 @@ function collectFlags() {
   };
 }
 
-function diceValueNow() {
-  const n = Number(uiEl("diceN").value) || 0;
-  const s = Number(uiEl("diceS").value) || 0;
-  const b = Number(uiEl("diceB").value) || 0;
-  const mode = uiEl("diceMode").value;
-  if (mode === "manual") return { value: Number(uiEl("diceManual").value) || 0, text: "手动 " + uiEl("diceManual").value };
+function readCalcInput() {
+  const input = { flags: collectFlags() };
+  ["attackerSel", "targetSel", "element", "atk", "mult", "flat", "baseBreak", "hits", "atkRange", "diceN", "diceS", "diceB", "diceMode", "diceManual"].forEach(id => { input[id] = uiEl(id).value; });
+  return input;
+}
+function calcCommand(action, data) { return Commands.dispatch(Object.assign({ type: "calc", action }, data || {})); }
+function backstageCommand(action, data) { return Commands.dispatch(Object.assign({ type: "backstage", action }, data || {})); }
+function diceValueNow(input) {
+  input = input || readCalcInput();
+  const n = Number(input.diceN) || 0;
+  const s = Number(input.diceS) || 0;
+  const b = Number(input.diceB) || 0;
+  const mode = input.diceMode;
+  if (mode === "manual") return { value: Number(input.diceManual) || 0, text: "手动 " + input.diceManual };
   if (mode === "roll") {
     const r = rollDice(n, s, b);
-    uiEl("diceManual").value = r.total;
+    if (uiEl("diceManual")) uiEl("diceManual").value = r.total;
     return { value: r.total, text: `掷出 ${r.parts.join("+")}${b ? (b >= 0 ? "+" : "") + b : ""} = ${r.total}` };
   }
   const v = diceExpect(n, s, b);
@@ -1248,26 +1132,27 @@ function currentWeatherFor(unit) {
   return state.weather;
 }
 
-function doCalc() {
-  const attacker = unitById(uiEl("attackerSel").value);
-  const targetTok = uiEl("targetSel").value;
+function doCalc(input) {
+  input = input || readCalcInput();
+  const attacker = unitById(input.attackerSel);
+  const targetTok = input.targetSel;
   if (targetTok && (String(targetTok).indexOf("gap:") === 0 || String(targetTok).indexOf("prop:") === 0)) {
     hitStructure(attacker, targetTok, {
-      element: uiEl("element").value,
-      dmg: Number(uiEl("atk").value) * Number(uiEl("mult").value) + Number(uiEl("flat").value),
-      brk: Number(uiEl("baseBreak").value) || 1
+      element: input.element,
+      dmg: Number(input.atk) * Number(input.mult) + Number(input.flat),
+      brk: Number(input.baseBreak) || 1
     });
     return;
   }
   const target = unitById(targetTok);
   state.attackerId = attacker ? attacker.id : null;
   state.targetId = target ? target.id : null;
-  let dice = diceValueNow();
-  const flags = collectFlags();
+  let dice = diceValueNow(input);
+  const flags = Object.assign({}, input.flags);
   if (shouldDiceMin(attacker)) {
-    const n = Number(uiEl("diceN").value) || 0;
-    const b = Number(uiEl("diceB").value) || 0;
-    if (uiEl("diceMode").value !== "manual") {
+    const n = Number(input.diceN) || 0;
+    const b = Number(input.diceB) || 0;
+    if (input.diceMode !== "manual") {
       dice = { value: n + b, text: `决一死战取最低 ${n}×1${b ? "+" + b : ""} = ${n + b}` };
     }
     flags.diceMin = true;
@@ -1277,13 +1162,13 @@ function doCalc() {
   const dist = attacker && target ? zoneDist(attacker.zone, target.zone, state.zoneMode) : 0;
   const res = resolveAttack({
     attacker, target,
-    atk: Number(uiEl("atk").value),
-    mult: Number(uiEl("mult").value),
-    flat: Number(uiEl("flat").value),
+    atk: Number(input.atk),
+    mult: Number(input.mult),
+    flat: Number(input.flat),
     diceValue: dice.value,
-    element: uiEl("element").value,
-    baseBreak: Number(uiEl("baseBreak").value),
-    hits: Number(uiEl("hits").value),
+    element: input.element,
+    baseBreak: Number(input.baseBreak),
+    hits: Number(input.hits),
     flags,
     weather: currentWeatherFor(target),
     phaseStep: Number(state.phaseStep),
@@ -1293,7 +1178,7 @@ function doCalc() {
     highA: attacker && state.fields[attacker.zone] && state.fields[attacker.zone].highland,
     highT: target && state.fields[target.zone] && state.fields[target.zone].highland,
     dist,
-    atkRange: uiEl("atkRange").value
+    atkRange: input.atkRange
   });
   res.diceText = dice.text;
   res.dist = dist;
@@ -1324,10 +1209,11 @@ function paintResult(res, attacker, target) {
   appendLog(lines.join("\n"));
 }
 
-function doApply() {
-  if (!state.lastResult || !state.lastResult.ok) { doCalc(); }
-  const attacker = unitById(uiEl("attackerSel").value);
-  const target = unitById(uiEl("targetSel").value);
+function doApply(input) {
+  input = input || readCalcInput();
+  if (!state.lastResult || !state.lastResult.ok) { doCalc(input); }
+  const attacker = unitById(input.attackerSel);
+  const target = unitById(input.targetSel);
   if (!target || !state.lastResult) return;
   snapshot();
   const extra = applyCombat(target, state.lastResult, attacker);
@@ -2554,15 +2440,12 @@ function renderPcLayers() {
     el.addEventListener("input", () => {
       const i = Number(el.dataset.i);
       const f = el.dataset.f;
-      state.pcLayers[i][f] = f === "type" ? el.value : Number(el.value);
-      if (f === "max" && !Number(state.pcLayers[i].current)) state.pcLayers[i].current = Number(el.value);
+      calcCommand("pcLayer", { op: "set", index: i, field: f, value: f === "type" ? el.value : Number(el.value) });
     });
   });
   box.querySelectorAll("[data-del]").forEach(btn => {
     btn.addEventListener("click", () => {
-      if (state.pcLayers.length <= 1) return;
-      state.pcLayers.splice(Number(btn.dataset.del), 1);
-      renderPcLayers();
+      calcCommand("pcLayer", { op: "remove", index: Number(btn.dataset.del) });
     });
   });
 }
@@ -2588,8 +2471,8 @@ function readPlayerForm() {
   return { name, level, zone, atk, def, range, element, flying, layers, currentLayers };
 }
 
-function unitFromForm() {
-  const f = readPlayerForm();
+function unitFromForm(form) {
+  const f = form || readPlayerForm();
   const u = unitOf(f.name, f.level, f.layers, f.def, f.atk, {
     isPlayer: true, flying: f.flying, range: f.range, element: f.element
   });
@@ -2600,6 +2483,7 @@ function unitFromForm() {
 }
 
 function fillFormFromCard(card) {
+  if (HAS_DOM) {
   uiEl("pcName").value = card.name || "";
   uiEl("pcLv").value = card.level || 1;
   uiEl("pcZone").value = String(card.zone || 1);
@@ -2608,6 +2492,7 @@ function fillFormFromCard(card) {
   uiEl("pcRange").value = card.range || "any";
   uiEl("pcElem").value = (card.suggest && card.suggest.element) || "physical";
   uiEl("pcFly").checked = !!card.flying;
+  }
   state.pcLayers = (card.layers || []).map(l => ({
     type: l.type,
     current: Number(l.max != null ? l.max : l.current) || 0,
@@ -2681,10 +2566,7 @@ function setRosterHint(text) {
 function bindRosterUi() {
   renderPcLayers();
   renderRosterSel();
-  uiEl("pcAddLayer").onclick = () => {
-    state.pcLayers.push({ type: "flesh", current: 10, max: 10 });
-    renderPcLayers();
-  };
+  uiEl("pcAddLayer").onclick = () => calcCommand("pcLayer", { op: "add" });
   const liveSel = uiEl("liveKitSel");
   if (liveSel) {
     liveSel.innerHTML = livePartyCards().filter(c => !c.weaponOf).map(c =>
@@ -2692,68 +2574,31 @@ function bindRosterUi() {
   }
   const addKitBtn = uiEl("btnAddLiveKit");
   if (addKitBtn) addKitBtn.onclick = () => {
-    const kit = uiEl("liveKitSel").value;
-    const card = livePartyCards().find(c => c.kit === kit);
-    if (!card) return;
-    if (state.units.some(u => u.kit === kit && !u.hidden)) {
-      setRosterHint(`${card.name} 已在场上。`);
-      return;
-    }
-    snapshot();
     const zone = Number(uiEl("pcZone").value) || 1;
-    const u = spawnLiveCard(card, zone);
-    u.weaponHeld = true;
-    u.atk = (u.personalAtk || 0) + (u.weaponAtk || 0);
-    state.units.push(u);
-    state.selectedId = u.id;
-    state.attackerId = u.id;
-    renderAll();
-    setRosterHint(`已加入「${u.name}」到 ${zone} 区。用技能唤出武器人。`);
+    const out = calcCommand("rosterAddKit", { kit: uiEl("liveKitSel").value, zone });
+    if (!out) return;
+    if (out.exists) { setRosterHint(`${out.exists} 已在场上。`); return; }
+    setRosterHint(`已加入「${out.name}」到 ${zone} 区。用技能唤出武器人。`);
     uiEl("playerModal").classList.add("hidden");
   };
   uiEl("btnAddPlayer").onclick = () => {
-    snapshot();
-    const u = unitFromForm();
-    state.units.push(u);
-    state.selectedId = u.id;
-    state.attackerId = u.id;
-    renderAll();
-    setRosterHint(`「${u.name}」已加入 ${u.zone} 区。若要下次直接用，再点「保存到卡组」。`);
+    const form = readPlayerForm(), name = calcCommand("rosterAddForm", { form });
+    setRosterHint(`「${name}」已加入 ${form.zone} 区。若要下次直接用，再点「保存到卡组」。`);
     uiEl("playerModal").classList.add("hidden");
   };
-  uiEl("btnSavePlayer").onclick = saveFormToRoster;
-  uiEl("btnSaveSelected").onclick = () => {
-    const u = unitById(state.selectedId);
-    saveUnitToRoster(u, true);
-  };
+  uiEl("btnSavePlayer").onclick = () => calcCommand("rosterSaveForm", { form: readPlayerForm() });
+  uiEl("btnSaveSelected").onclick = () => calcCommand("rosterSaveUnit", { actor: state.selectedId });
   uiEl("btnLoadRoster").onclick = () => {
-    const id = uiEl("rosterSel").value;
-    const card = state.roster.find(c => c.cardId === id);
-    if (!card) { setRosterHint("先在卡组里选一张。"); return; }
-    snapshot();
-    const u = spawnFromCard(card);
-    state.units.push(u);
-    state.selectedId = u.id;
-    state.attackerId = u.id;
-    renderAll();
-    setRosterHint(`已从卡组加入「${u.name}」。`);
+    const name = calcCommand("rosterLoad", { id: uiEl("rosterSel").value });
+    if (!name) { setRosterHint("先在卡组里选一张。"); return; }
+    setRosterHint(`已从卡组加入「${name}」。`);
     uiEl("playerModal").classList.add("hidden");
   };
   uiEl("btnEditRoster").onclick = () => {
-    const id = uiEl("rosterSel").value;
-    const card = state.roster.find(c => c.cardId === id);
-    if (!card) return;
-    fillFormFromCard(card);
-    setRosterHint(`已把「${card.name}」载入表单，改完后点保存会覆盖同名卡。`);
+    const name = calcCommand("rosterEdit", { id: uiEl("rosterSel").value });
+    if (name) setRosterHint(`已把「${name}」载入表单，改完后点保存会覆盖同名卡。`);
   };
-  uiEl("btnDelRoster").onclick = () => {
-    const id = uiEl("rosterSel").value;
-    const card = state.roster.find(c => c.cardId === id);
-    if (!card) return;
-    state.roster = state.roster.filter(c => c.cardId !== id);
-    persistRoster();
-    setRosterHint(`已删除「${card.name}」。`);
-  };
+  uiEl("btnDelRoster").onclick = () => calcCommand("rosterDelete", { id: uiEl("rosterSel").value });
   uiEl("btnExportRoster").onclick = () => {
     const blob = new Blob([JSON.stringify(state.roster, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
@@ -2772,14 +2617,7 @@ function bindRosterUi() {
       try {
         const list = JSON.parse(reader.result);
         if (!Array.isArray(list)) throw new Error("not array");
-        list.forEach(card => {
-          if (!card.cardId) card.cardId = "c" + Math.random().toString(36).slice(2, 9);
-          const i = state.roster.findIndex(c => c.name === card.name);
-          if (i >= 0) state.roster[i] = Object.assign({}, state.roster[i], card, { cardId: state.roster[i].cardId });
-          else state.roster.push(card);
-        });
-        persistRoster();
-        setRosterHint(`导入完成，卡组现有 ${state.roster.length} 张。`);
+        calcCommand("rosterImport", { cards: list });
       } catch (err) {
         setRosterHint("导入失败：JSON 格式不对。");
       }
@@ -4463,21 +4301,21 @@ function presentKoltSwapModal() {
     const skip = document.createElement("button");
     skip.className = "btn";
     skip.textContent = "不切换";
-    skip.onclick = () => resolveKoltSwap(false, null);
+    skip.onclick = () => calcCommand("koltSwap", { swap: false, target: null });
     box.appendChild(skip);
     const foes = koltMeleeSwapTargets(k);
     if (!foes.length) {
       const only = document.createElement("button");
       only.className = "btn primary";
       only.textContent = "切换（同区无目标）";
-      only.onclick = () => resolveKoltSwap(true, null);
+      only.onclick = () => calcCommand("koltSwap", { swap: true, target: null });
       box.appendChild(only);
     } else {
       foes.forEach(u => {
         const b = document.createElement("button");
         b.className = "btn primary";
         b.textContent = `切换并打 ${u.name}`;
-        b.onclick = () => resolveKoltSwap(true, u.id);
+        b.onclick = () => calcCommand("koltSwap", { swap: true, target: u.id });
         box.appendChild(b);
       });
     }
@@ -4797,13 +4635,13 @@ function presentAssistModal() {
     const b = document.createElement("button");
     b.className = "btn primary";
     b.textContent = `${h.name} 协助攻击`;
-    b.onclick = () => finishAssist(h.id);
+    b.onclick = () => calcCommand("assistAnswer", { helper: h.id });
     box.appendChild(b);
   });
   const no = document.createElement("button");
   no.className = "btn";
   no.textContent = "不发动";
-  no.onclick = () => finishAssist(null);
+  no.onclick = () => calcCommand("assistAnswer", { helper: null });
   box.appendChild(no);
   modal.classList.remove("hidden");
 }
@@ -5092,13 +4930,13 @@ function openBlockModal(job) {
     const b = document.createElement("button");
     b.className = "btn primary";
     b.textContent = `${h.name} ${isUnarmed(h) ? "空手格挡" : "格挡"}（${finalBlockChance(h, attacker, target)}%）`;
-    b.onclick = () => finishBlock(h.id);
+    b.onclick = () => calcCommand("blockAnswer", { helper: h.id });
     box.appendChild(b);
   });
   const no = document.createElement("button");
   no.className = "btn";
   no.textContent = "不格挡";
-  no.onclick = () => finishBlock(null);
+  no.onclick = () => calcCommand("blockAnswer", { helper: null });
   box.appendChild(no);
   modal.classList.remove("hidden");
 }
@@ -6905,7 +6743,7 @@ function renderSkillFlow() {
       const b = document.createElement("button");
       b.className = "btn small";
       b.textContent = `${u.name}（${u.zone}区）`;
-      b.onclick = () => applyFlowPick(u.id);
+      b.onclick = () => calcCommand("skillPick", { value: u.id });
       opts.appendChild(b);
     });
   } else if (step.type === "zone") {
@@ -6913,7 +6751,7 @@ function renderSkillFlow() {
       const b = document.createElement("button");
       b.className = "btn small";
       b.textContent = z + " 区";
-      b.onclick = () => applyFlowPick(Number(z));
+      b.onclick = () => calcCommand("skillPick", { value: Number(z) });
       opts.appendChild(b);
     });
   } else if (step.type === "choice") {
@@ -6921,7 +6759,7 @@ function renderSkillFlow() {
       const b = document.createElement("button");
       b.className = "btn small";
       b.textContent = opt.label;
-      b.onclick = () => applyFlowPick(opt.value);
+      b.onclick = () => calcCommand("skillPick", { value: opt.value == null ? null : opt.value });
       opts.appendChild(b);
     });
   }
@@ -6929,13 +6767,13 @@ function renderSkillFlow() {
     const skip = document.createElement("button");
     skip.className = "btn small";
     skip.textContent = "不选";
-    skip.onclick = () => applyFlowPick(null);
+    skip.onclick = () => calcCommand("skillPick", { value: null });
     opts.appendChild(skip);
   }
   const cancel = document.createElement("button");
   cancel.className = "btn small danger";
   cancel.textContent = "取消技能";
-  cancel.onclick = cancelSkillFlow;
+  cancel.onclick = () => calcCommand("skillCancel");
   opts.appendChild(cancel);
 }
 
@@ -6971,24 +6809,21 @@ function renderSkills() {
     btn.className = "btn";
     btn.textContent = sk.name;
     btn.title = sk.hint || "";
-    btn.onclick = () => {
-      if (skillFlowSteps(sk.id, a, {}).length) beginSkillFlow(sk.id);
-      else runSkill(sk.id);
-    };
+    btn.onclick = () => calcCommand("skill", { actor: a.id, skill: sk.id, target: state.targetId || null });
     box.appendChild(btn);
   });
   (state.props || []).filter(p => Number(p.zone) === Number(a.zone) && (p.kind === "button" || p.kind === "lever")).forEach(p => {
     const btn = document.createElement("button");
     btn.className = "btn";
     btn.textContent = p.kind === "lever" ? `扳动${p.name}` : `按下${p.name}`;
-    btn.onclick = () => runSkill("use_device:" + p.id);
+    btn.onclick = () => calcCommand("skill", { actor: a.id, skill: "use_device:" + p.id, target: state.targetId || null });
     box.appendChild(btn);
   });
   if (a.isPlayer && !isWeaponUnit(a) && a.dying && !a.dead) {
     const up = document.createElement("button");
     up.className = "btn ok";
     up.textContent = "起身";
-    up.onclick = () => standUp(a);
+    up.onclick = () => calcCommand("standUp", { actor: a.id });
     box.appendChild(up);
   }
 }
@@ -9397,65 +9232,21 @@ function init() {
   const sel = uiEl("presetSelect");
   sel.innerHTML = presets.map(p => `<option value="${p.id}">${p.name}</option>`).join("");
 
-  uiEl("zoneMode").onchange = e => {
-    state.zoneMode = Number(e.target.value);
-    renderAll();
-  };
-  uiEl("partySize").onchange = e => { state.partySize = Number(e.target.value); };
-  uiEl("weather").onchange = e => {
-    const err = setWeather(e.target.value);
-    if (err) {
-      appendLog(err);
-      e.target.value = state.weather;
-      return;
-    }
-    renderAll();
-  };
+  uiEl("zoneMode").onchange = e => calcCommand("global", { field: "zoneMode", value: Number(e.target.value) });
+  uiEl("partySize").onchange = e => calcCommand("global", { field: "partySize", value: Number(e.target.value) });
+  uiEl("weather").onchange = e => { const err = calcCommand("global", { field: "weather", value: e.target.value }); if (err) e.target.value = state.weather; };
   const wl = uiEl("weatherLock");
-  if (wl) {
-    wl.checked = !!state.weatherLock;
-    wl.onchange = () => {
-      state.weatherLock = wl.checked ? (state.weatherLock || "手动锁定") : null;
-      renderAll();
-    };
-  }
-  uiEl("phaseStep").onchange = e => { state.phaseStep = Number(e.target.value); };
-  uiEl("sandDir").onchange = e => { state.sandDir = e.target.value; renderAll(); };
-  uiEl("btnAdvancePhase").onclick = () => {
-    state.phaseStep = (Number(state.phaseStep) + 1) % 4;
-    uiEl("phaseStep").value = String(state.phaseStep);
-  };
-  uiEl("btnUndo").onclick = undo;
-  uiEl("btnClearField").onclick = clearBattlefield;
-
-function clearBattlefield() {
-  snapshot();
-  state.units = [];
-  state.props = [];
-  state.gaps = { "1-2": emptyGap(), "2-3": emptyGap() };
-  state.fields = { 1: emptyField(), 2: emptyField(), 3: emptyField() };
-  state.forceVoid = {};
-  state.combatStarted = false;
-  state.combatPhase = "player";
-  state.selectedId = null;
-  state.attackerId = null;
-  state.targetId = null;
-  state.lastResult = null;
-  state.blockQueue = [];
-  state.assistQueue = [];
-  const st = uiEl("skillTargetSel");
-  if (st) st.value = "";
-  appendLog("已清空战场（单位、配置物、间隔、场地）。天气和区制保留。可点撤销恢复。");
-  renderAll();
-}
+  if (wl) { wl.checked = !!state.weatherLock; wl.onchange = () => calcCommand("global", { field: "weatherLock", value: wl.checked }); }
+  uiEl("phaseStep").onchange = e => calcCommand("global", { field: "phaseStep", value: Number(e.target.value) });
+  uiEl("sandDir").onchange = e => calcCommand("global", { field: "sandDir", value: e.target.value });
+  uiEl("btnAdvancePhase").onclick = () => { uiEl("phaseStep").value = String(calcCommand("advancePhase")); };
+  uiEl("btnUndo").onclick = () => calcCommand("undo");
+  uiEl("btnClearField").onclick = () => calcCommand("clearField");
   const skip = uiEl("btnBlockSkip");
-  if (skip) skip.onclick = () => finishBlock(null);
+  if (skip) skip.onclick = () => calcCommand("blockAnswer", { helper: null });
   const askip = uiEl("btnAssistSkip");
-  if (askip) askip.onclick = () => finishAssist(null);
-  uiEl("skillTargetSel").onchange = e => {
-    state.targetId = e.target.value || null;
-    renderAll();
-  };
+  if (askip) askip.onclick = () => calcCommand("assistAnswer", { helper: null });
+  uiEl("skillTargetSel").onchange = e => calcCommand("select", { field: "targetId", value: e.target.value || null });
   const bs = uiEl("btnBackstage");
   const bsm = uiEl("backstageModal");
   if (bs && bsm) {
@@ -9464,13 +9255,9 @@ function clearBattlefield() {
     bsm.addEventListener("click", e => { if (e.target === bsm) bsm.classList.add("hidden"); });
   }
 
-  uiEl("btnLogPrev").onclick = () => {
-    if (state.logIndex > 0) { state.logIndex -= 1; renderLog(); }
-  };
-  uiEl("btnLogNext").onclick = () => {
-    if (state.logIndex < state.logPages.length - 1) { state.logIndex += 1; renderLog(); }
-  };
-  uiEl("btnLogClear").onclick = clearLogs;
+  uiEl("btnLogPrev").onclick = () => calcCommand("logPage", { direction: -1 });
+  uiEl("btnLogNext").onclick = () => calcCommand("logPage", { direction: 1 });
+  uiEl("btnLogClear").onclick = () => calcCommand("clearLog");
   // 复制日志（跑团时贴到聊天里）
   const copyBtn = (id, which) => {
     const b = uiEl(id);
@@ -9484,13 +9271,9 @@ function clearBattlefield() {
   copyBtn("btnLogCopy", "page");
   copyBtn("btnLogCopyAll", "all");
   const btnStart = uiEl("btnStartCombat");
-  if (btnStart) btnStart.onclick = () => startCombat();
+  if (btnStart) btnStart.onclick = () => calcCommand("startCombat");
   const btnTurn = uiEl("btnTurnEnd");
-  if (btnTurn) btnTurn.onclick = () => {
-    if (!state.combatStarted) { startCombat(); return; }
-    if (state.combatPhase === "enemy") endEnemyTurn();
-    else endPlayerTurn();
-  };
+  if (btnTurn) btnTurn.onclick = () => calcCommand("endTurn");
   loadRoster();
   bindRosterUi();
   const modal = uiEl("playerModal");
@@ -9530,78 +9313,23 @@ function clearBattlefield() {
   uiEl("btnClosePlayer").onclick = closeModal;
   modal.addEventListener("click", (e) => { if (e.target === modal) closeModal(); });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
-  uiEl("btnLoadLive").onclick = loadLiveParty;
+  uiEl("btnLoadLive").onclick = () => calcCommand("loadLive");
   uiEl("attackerSel").addEventListener("change", () => renderSkills());
-  uiEl("bladeSel").onchange = () => {
-    const h = findKit("hiaki", state.units);
-    const want = uiEl("bladeSel").value;
-    if (h && h.resources) {
-      if ((want === "niu" && h.resources.niuOut) || (want === "naruto" && h.resources.narutoOut)) {
-        appendLog(`${want === "niu" ? "丹生谷" : "鳴門"} 已分出，收回前不能切换到这把刀。`);
-        syncBladeSel();
-        return;
-      }
-      h.resources.blade = want;
-      refreshHiakiAtk(h);
-      renderAll();
-    }
-  };
-  uiEl("btnAddProp").onclick = () => {
-    snapshot();
-    const kind = uiEl("propKind").value;
-    const zone = Number(uiEl("propZone").value) || 1;
-    const lv = Number(uiEl("propLevel").value) || 1;
-    const p = makeProp(kind, zone, lv);
-    const fac = uiEl("propFaction");
-    if (fac) p.faction = fac.value || "player";
-    state.props.push(p);
-    appendLog(`在 ${zone} 区放置 ${p.name}（${p.faction === "enemy" ? "敌方" : "我方"}）。`);
-    if (kind === "battery") {
-      const extra = syncBatteryShields();
-      extra.forEach(s => appendLog(s));
-    }
-    renderAll();
-  };
-  uiEl("btnAddPreset").onclick = () => {
-    snapshot();
-    const id = uiEl("presetSelect").value;
-    const lv = Number(uiEl("presetLevel").value) || 1;
-    if (id === "ufo_boss") {
-      if (typeof syncPartySizeFromField === "function") syncPartySizeFromField();
-      const pack = spawnUfoBoss(lv);
-      pack.forEach(u => state.units.push(u));
-      const body = pack[0];
-      state.selectedId = body.id;
-      state.attackerId = body.id;
-      appendLog(`飞碟触灵登场（Lv${lv}）：本体在 2 区，机械足甲乙丙在 2 区，丁戊在 1 区。本体不能被通常攻击。`);
-      renderAll();
-      return;
-    }
-    const p = presets.find(x => x.id === id);
-    const partyN = typeof syncPartySizeFromField === "function" ? syncPartySizeFromField() : state.partySize;
-    const u = p.build(lv, partyN);
-    u.zone = enemySpawnZone();
-    state.units.push(u);
-    state.selectedId = u.id;
-    state.targetId = u.id;
-    if (isMechanicalUnit(u)) syncBatteryShields().forEach(s => appendLog(s));
-    renderAll();
-  };
-  uiEl("attackerSel").onchange = e => { state.attackerId = e.target.value || null; renderAll(); };
-  uiEl("targetSel").onchange = e => { state.targetId = e.target.value || null; renderAll(); };
+  uiEl("bladeSel").onchange = () => calcCommand("blade", { value: uiEl("bladeSel").value });
+  uiEl("btnAddProp").onclick = () => calcCommand("addProp", { kind: uiEl("propKind").value, zone: Number(uiEl("propZone").value) || 1, level: Number(uiEl("propLevel").value) || 1, faction: (uiEl("propFaction") || {}).value || "player" });
+  uiEl("btnAddPreset").onclick = () => calcCommand("addPreset", { id: uiEl("presetSelect").value, level: Number(uiEl("presetLevel").value) || 1 });
+  uiEl("attackerSel").onchange = e => calcCommand("select", { field: "attackerId", value: e.target.value || null });
+  uiEl("targetSel").onchange = e => calcCommand("select", { field: "targetId", value: e.target.value || null });
   uiEl("btnFillAtk").onclick = () => {
     const a = unitById(uiEl("attackerSel").value);
     if (a) fillFromSuggest(a);
   };
-  uiEl("btnCalc").onclick = doCalc;
-  uiEl("btnApply").onclick = doApply;
-  window.addEventListener("beforeunload", () => {
-    try { localStorage.setItem("anterscale-calc", JSON.stringify({
-      zoneMode: state.zoneMode, partySize: state.partySize, weather: state.weather,
-      phaseStep: state.phaseStep, sandDir: state.sandDir, units: state.units, fields: state.fields
-    })); } catch (e) {}
-  });
+  uiEl("btnCalc").onclick = () => calcCommand("calculate", { input: readCalcInput() });
+  uiEl("btnApply").onclick = () => calcCommand("applyAttack", { input: readCalcInput() });
+  window.addEventListener("beforeunload", () => calcCommand("persist"));
 
+  // Bootstrap precedes command-module registration; subsequent UI changes and
+  // persistence all use commands. Keep the existing calculator save format.
   let loaded = false;
   try {
     const raw = localStorage.getItem("anterscale-calc");
@@ -9745,19 +9473,26 @@ function dmSetHits(pred) {
   });
 }
 
-function dmDealAttack() {
-  const atkId = (uiEl("dmAtk") || {}).value;
-  const tgtId = (uiEl("dmTgt") || {}).value;
-  const element = (uiEl("dmEle") || {}).value || "physical";
-  const mult = Number((uiEl("dmMult") || {}).value);
-  const splash = Number((uiEl("dmSplash") || {}).value);
-  const flat = Number((uiEl("dmFlat") || {}).value) || 0;
-  const br = Number((uiEl("dmBrk") || {}).value);
-  const splashBr = Number((uiEl("dmSplashBrk") || {}).value);
-  const diceN = Number((uiEl("dmDiceN") || {}).value) || 0;
-  const diceS = Number((uiEl("dmDiceS") || {}).value) || 0;
-  const skip = !!(uiEl("dmSkipBlock") || {}).checked;
-  let targets = dmCheckedUnits("dmHit");
+function readDmAttackInput() {
+  const input = { hits: dmCheckedUnits("dmHit").map(u => u.id) };
+  ["dmAtk", "dmTgt", "dmEle", "dmMult", "dmSplash", "dmFlat", "dmBrk", "dmSplashBrk", "dmDiceN", "dmDiceS"].forEach(id => { input[id] = (uiEl(id) || {}).value || ""; });
+  input.dmSkipBlock = !!(uiEl("dmSkipBlock") || {}).checked;
+  return input;
+}
+function dmDealAttack(input) {
+  input = input || readDmAttackInput();
+  const atkId = input.dmAtk;
+  const tgtId = input.dmTgt;
+  const element = input.dmEle || "physical";
+  const mult = Number(input.dmMult);
+  const splash = Number(input.dmSplash);
+  const flat = Number(input.dmFlat) || 0;
+  const br = Number(input.dmBrk);
+  const splashBr = Number(input.dmSplashBrk);
+  const diceN = Number(input.dmDiceN) || 0;
+  const diceS = Number(input.dmDiceS) || 0;
+  const skip = !!input.dmSkipBlock;
+  let targets = (input.hits || []).map(unitById).filter(u => u && !u.hidden);
   const main = unitById(tgtId);
   if (main && targets.every(u => u.id !== main.id)) targets.unshift(main);
   if (!targets.length) { appendLog("主持人出手：没有勾选波及单位，也没有主目标。"); return; }
@@ -9791,12 +9526,18 @@ function dmDealAttack() {
   renderAll();
 }
 
-function dmDealEnv() {
-  const scope = (uiEl("dmEnvScope") || {}).value || "pick";
-  const zone = Number((uiEl("dmEnvZone") || {}).value) || 1;
-  const element = (uiEl("dmEnvEle") || {}).value || "physical";
-  const flat = Number((uiEl("dmEnvFlat") || {}).value) || 0;
-  const br = Number((uiEl("dmEnvBrk") || {}).value) || 0;
+function readDmEnvInput() {
+  const input = { hits: dmCheckedUnits("dmHit").map(u => u.id) };
+  ["dmEnvScope", "dmEnvZone", "dmEnvEle", "dmEnvFlat", "dmEnvBrk"].forEach(id => { input[id] = (uiEl(id) || {}).value || ""; });
+  return input;
+}
+function dmDealEnv(input) {
+  input = input || readDmEnvInput();
+  const scope = input.dmEnvScope || "pick";
+  const zone = Number(input.dmEnvZone) || 1;
+  const element = input.dmEnvEle || "physical";
+  const flat = Number(input.dmEnvFlat) || 0;
+  const br = Number(input.dmEnvBrk) || 0;
   const notes = ["主持人安排环境伤害。"];
   let list = [];
   if (scope === "zone") {
@@ -9806,7 +9547,7 @@ function dmDealEnv() {
   } else if (scope === "players") {
     list = dmAllUnits().filter(u => !u.hidden && !u.dead && u.isPlayer);
   } else {
-    list = dmCheckedUnits("dmHit");
+    list = (input.hits || []).map(unitById).filter(u => u && !u.hidden);
   }
   if (!list.length) { appendLog("主持人环境伤害：没有目标。勾选波及单位，或改成整个区域。"); return; }
   notes.push("目标：" + list.map(u => u.name).join("、"));
@@ -9998,124 +9739,28 @@ function renderBackstage() {
     <button class="btn" id="btnGrantXp">给所有角色加经验</button>
   </div>`;
   box.innerHTML = html;
-  const bindNum = (sel, fn) => box.querySelectorAll(sel).forEach(inp => { inp.onchange = () => fn(inp); });
-  bindNum("[data-lv]", inp => {
-    const u = unitById(inp.dataset.lv);
-    if (!u) return;
-    u.level = Math.max(1, Number(inp.value) || 1);
-    if (typeof applyLevelStats === "function") applyLevelStats(u);
-    if (u.kit === "hiaki" && typeof refreshHiakiAtk === "function") refreshHiakiAtk(u);
-  });
-  bindNum("[data-xp]", inp => { const u = unitById(inp.dataset.xp); if (u) u.xp = Math.max(0, Number(inp.value) || 0); });
-  bindNum("[data-pts]", inp => { const u = unitById(inp.dataset.pts); if (u) u.attrPoints = Math.max(0, Number(inp.value) || 0); });
-  bindNum("[data-shp]", inp => { const u = unitById(inp.dataset.shp); if (u) u.shp = Math.max(0, Number(inp.value) || 0); });
-  bindNum("[data-shpmax]", inp => { const u = unitById(inp.dataset.shpmax); if (u) u.shpMax = Math.max(0, Number(inp.value) || 0); });
-  box.querySelectorAll("[data-owkit]").forEach(inp => {
-    inp.onchange = () => {
-      const owner = unitById(inp.dataset.owkit);
-      if (!owner) return;
-      setOwnedWeaponLevel(owner, inp.dataset.wkit, inp.value);
-      appendLog(`${owner.name} 的 ${weaponCardName(inp.dataset.wkit)} 设为 ${owner.weaponLevels[inp.dataset.wkit]} 级。`);
-      renderBackstage();
-      renderAll();
-    };
-  });
-  box.querySelectorAll("[data-durkit]").forEach(inp => {
-    inp.onchange = () => {
-      const kit = inp.dataset.durkit;
-      const before = weaponDur(kit);
-      LEDGER.dur[kit] = Math.max(0, Math.min(weaponDurMax(kit), Math.floor(Number(inp.value) || 0)));
-      const owner = weaponOwner(kit);
-      if (owner && LEDGER.dur[kit] > 0 && owner.weaponHeld === false && !owner.dead) owner.weaponHeld = true;
-      appendLog(`后台：${weaponCardName(kit)} 耐久 ${before} → ${LEDGER.dur[kit]}。`);
-      renderBackstage();
-      if (typeof renderAll === "function") renderAll();
-    };
-  });
-  box.querySelectorAll("[data-attr]").forEach(inp => {
-    inp.onchange = () => {
-      const u = unitById(inp.dataset.attr);
-      if (!u) return;
-      u.attrs = u.attrs || { str: 5, con: 5, dex: 5, wil: 5, int: 5, sta: 5 };
-      const next = Math.max(1, Number(inp.value) || 1);
-      const prev = Number(u.attrs[inp.dataset.k]) || 5;
-      if (next > prev && (u.attrPoints || 0) > 0) {
-        u.attrPoints -= 1;
-        u.attrs[inp.dataset.k] = next;
-      } else if (next <= prev) {
-        u.attrs[inp.dataset.k] = next;
-      } else {
-        inp.value = prev;
-        appendLog(`${u.name} 没有可分配属性点。4 级和 8 级各得 1 点。`);
-      }
-      renderBackstage();
-    };
-  });
-  box.querySelectorAll("[data-recalc]").forEach(btn => {
-    btn.onclick = () => {
-      const u = unitById(btn.dataset.recalc);
-      if (u) { applyLevelStats(u); appendLog(`${u.name} 已按规则重算 HP/ATK/DEF/SHP。`); renderBackstage(); renderAll(); }
-    };
-  });
-  box.querySelectorAll("[data-lvup]").forEach(btn => {
-    btn.onclick = () => {
-      const u = unitById(btn.dataset.lvup);
-      if (u && tryLevelUp(u)) { renderBackstage(); renderAll(); }
-      else if (u) appendLog(`${u.name} 经验不足（${u.xp || 0}/${xpToNext(u.level)}）。`);
-    };
-  });
-  const g = uiEl("btnGrantXp");
-  if (g) g.onclick = () => {
-    grantXpToPlayers(Number(uiEl("xpGrant").value) || 0, "后台发放");
-    renderBackstage();
-  };
   const after = () => { renderBackstage(); if (typeof renderAll === "function") renderAll(); };
-  bindNum("[data-lcur]", inp => {
-    const u = unitById(inp.dataset.lcur);
-    dmApplyLayer(u, Number(inp.dataset.i), inp.value, null);
-  });
-  bindNum("[data-lmax]", inp => {
-    const u = unitById(inp.dataset.lmax);
-    dmApplyLayer(u, Number(inp.dataset.i), null, inp.value);
-  });
-  bindNum("[data-def]", inp => { const u = unitById(inp.dataset.def); if (u) u.def = Math.max(0, Number(inp.value) || 0); });
-  bindNum("[data-defmax]", inp => {
-    const u = unitById(inp.dataset.defmax);
-    if (!u) return;
-    u.defMax = Math.max(0, Number(inp.value) || 0);
-    if ((u.def || 0) > u.defMax) u.def = u.defMax;
-  });
-  bindNum("[data-zone]", inp => {
-    const u = unitById(inp.dataset.zone);
-    if (u) u.zone = Math.max(1, Math.min(Number(state.zoneMode) || 3, Number(inp.value) || 1));
-  });
-  bindNum("[data-atk]", inp => { const u = unitById(inp.dataset.atk); if (u) u.atk = Math.max(0, Number(inp.value) || 0); });
-  box.querySelectorAll("[data-fillhp]").forEach(b => b.onclick = () => { const u = unitById(b.dataset.fillhp); if (u) { dmFillHp(u); appendLog(`${u.name} 后台满血。`); after(); } });
-  box.querySelectorAll("[data-filldef]").forEach(b => b.onclick = () => { const u = unitById(b.dataset.filldef); if (u) { dmFillDef(u); appendLog(`${u.name} 后台满架势。`); after(); } });
-  box.querySelectorAll("[data-stun]").forEach(b => b.onclick = () => {
-    const u = unitById(b.dataset.stun);
-    if (!u) return;
-    dmForceStun(u);
-    appendLog(`${u.name} 被后台打入失衡。`);
-    if (typeof queueAssistAttack === "function") queueAssistAttack(null, u);
-    after();
-    if (typeof presentAssistModal === "function") presentAssistModal();
-  });
-  box.querySelectorAll("[data-unstun]").forEach(b => b.onclick = () => { const u = unitById(b.dataset.unstun); if (u) { u.stunned = false; if ((u.def || 0) <= 0) u.def = u.defMax || 1; appendLog(`${u.name} 解除失衡。`); after(); } });
-  box.querySelectorAll("[data-kill]").forEach(b => b.onclick = () => {
-    const u = unitById(b.dataset.kill);
-    if (!u) return;
-    (u.layers || []).forEach(l => { l.current = 0; });
-    u.dead = true;
-    u.dying = !u.isPlayer ? false : true;
-    appendLog(`${u.name} 被后台击倒。`);
-    after();
-  });
-  box.querySelectorAll("[data-revive]").forEach(b => b.onclick = () => { const u = unitById(b.dataset.revive); if (u) { dmRevive(u); appendLog(`${u.name} 后台复活。`); after(); } });
+  const send = (action, data, redraw) => { const result = backstageCommand(action, data); if (redraw) after(); return result; };
+  const bindNum = (sel, fn) => box.querySelectorAll(sel).forEach(inp => { inp.onchange = () => fn(inp); });
+  const fields = { lv: "level", xp: "xp", pts: "attrPoints", shp: "shp", shpmax: "shpMax", def: "def", defmax: "defMax", zone: "zone", atk: "atk" };
+  Object.entries(fields).forEach(([attr, field]) => bindNum(`[data-${attr}]`, inp => send("set", { actor: inp.dataset[attr], field, value: inp.value })));
+  bindNum("[data-owkit]", inp => send("weaponLevel", { actor: inp.dataset.owkit, kit: inp.dataset.wkit, value: inp.value }, true));
+  bindNum("[data-durkit]", inp => send("durability", { kit: inp.dataset.durkit, value: inp.value }, true));
+  bindNum("[data-attr]", inp => { send("attr", { actor: inp.dataset.attr, attr: inp.dataset.k, value: inp.value }); renderBackstage(); });
+  box.querySelectorAll("[data-recalc]").forEach(b => { b.onclick = () => send("recalc", { actor: b.dataset.recalc }, true); });
+  box.querySelectorAll("[data-lvup]").forEach(b => { b.onclick = () => send("levelUp", { actor: b.dataset.lvup }, true); });
+  const g = uiEl("btnGrantXp");
+  if (g) g.onclick = () => { send("grantXp", { amount: Number(uiEl("xpGrant").value) || 0 }); renderBackstage(); };
+  bindNum("[data-lcur]", inp => send("layer", { actor: inp.dataset.lcur, index: Number(inp.dataset.i), current: inp.value, max: null }));
+  bindNum("[data-lmax]", inp => send("layer", { actor: inp.dataset.lmax, index: Number(inp.dataset.i), current: null, max: inp.value }));
+  const buttons = { fillhp: "fillHp", filldef: "fillDef", stun: "stun", unstun: "unstun", kill: "knockOut", revive: "revive" };
+  Object.entries(buttons).forEach(([attr, action]) => box.querySelectorAll(`[data-${attr}]`).forEach(b => {
+    b.onclick = () => { send(action, { actor: b.dataset[attr] }, true); if (action === "stun" && typeof presentAssistModal === "function") presentAssistModal(); };
+  }));
   const ba = uiEl("btnDmAtk");
-  if (ba) ba.onclick = () => { dmDealAttack(); renderBackstage(); };
+  if (ba) ba.onclick = () => { send("attack", { input: readDmAttackInput() }); renderBackstage(); };
   const be = uiEl("btnDmEnv");
-  if (be) be.onclick = () => { dmDealEnv(); renderBackstage(); };
+  if (be) be.onclick = () => { send("environment", { input: readDmEnvInput() }); renderBackstage(); };
   const hitBtn = (id, fn) => { const b = uiEl(id); if (b) b.onclick = fn; };
   hitBtn("dmHitAll", () => dmSetHits(() => true));
   hitBtn("dmHitNone", () => dmSetHits(() => false));

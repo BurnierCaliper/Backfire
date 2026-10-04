@@ -17,26 +17,30 @@
   let lastNotes = [];      // 上一步发生了什么（显示在记录栏）
   let lastError = "";      // 上一步为什么没做成（显示在主面板顶上，免得按了像没反应）
 
-  const save = () => { if (run && run.stage !== "over") Rogue.save(run); };
+  const save = () => { if (run && run.stage !== "over") dispatch({ type: "run.session", action: "save" }, { run }); };
+  const query = (action, fields) => dispatch(Object.assign({ type: "run.query", action }, fields || {}), { run });
 
-  function act(fn) {
-    lastError = "";
-    try {
-      const notes = fn();
-      lastNotes = Array.isArray(notes) ? notes : [];
-    } catch (e) {
-      lastNotes = [e.message];
-      lastError = e.message;
-    }
+  function completeAction(notes, error) {
+    lastError = error ? error.message : "";
+    lastNotes = error ? [error.message] : Array.isArray(notes) ? notes : [];
     if (run && run.stage === "over") finishRun();
     else save();
     render();
+  }
+  function act(command) {
+    let notes, error;
+    lastError = "";
+    try { notes = dispatch(Object.assign({ type: "run" }, command), { run }); }
+    catch (e) { error = e; }
+    completeAction(notes, error);
   }
 
   /* ---------- 选队伍 ---------- */
   const picked = [];
   // 单人模式：一名主角、三名伙伴、一个第二副职责
   const solo = { on: false, hero: null, partners: [], role2: null };
+  const session = { get run() { return run; }, set run(value) { run = value; }, picked, solo };
+  const sessionCommand = (action, fields, context) => dispatch(Object.assign({ type: "run.session", action }, fields || {}), Object.assign({ session }, context || {}));
   const PARTY_TIP = "挑 2–4 名角色出发。每人都带着自己的专属武器人；角色永久死亡时，武器人也会一起离开。";
   const SOLO_TIP = `先点一名角色当主角，再挑 ${ROGUE_SOLO.partners} 名伙伴（战斗里用「支援」叫他们登场打协助攻击），最后选一个第二副职责。` +
     `单人模式：每回合 ${ROGUE_SOLO.apPerRound} 行动点，能给自己协助格挡、接自己打出的失衡；每场胜利额外 +${ROGUE_SOLO.battleXp} 经验，` +
@@ -60,17 +64,7 @@
     }).join("");
     box.querySelectorAll(".hero-pick").forEach(b => {
       b.onclick = () => {
-        const k = b.dataset.kit;
-        if (solo.on) {
-          if (solo.hero === k) { solo.hero = null; solo.role2 = null; }
-          else if (solo.partners.indexOf(k) >= 0) solo.partners.splice(solo.partners.indexOf(k), 1);
-          else if (!solo.hero) { solo.hero = k; solo.role2 = null; }
-          else if (solo.partners.length < ROGUE_SOLO.partners) solo.partners.push(k);
-        } else {
-          const i = picked.indexOf(k);
-          if (i >= 0) picked.splice(i, 1);
-          else if (picked.length < SaveStore.PARTY_MAX) picked.push(k);
-        }
+        sessionCommand("toggleHero", { kit: b.dataset.kit });
         renderParty();
       };
     });
@@ -84,7 +78,7 @@
             return `<button class="g-btn${solo.role2 === r ? " r-main" : ""}" data-role2="${esc(r)}">${esc(r)}<small>${esc(defs)}</small></button>`;
           }).join("")}</div>`
         : `<p class="r-hint">先选主角（只能选角色卡上没有的职责）。</p>`);
-      roleBox.querySelectorAll("[data-role2]").forEach(b => { b.onclick = () => { solo.role2 = b.dataset.role2; renderParty(); }; });
+      roleBox.querySelectorAll("[data-role2]").forEach(b => { b.onclick = () => { sessionCommand("chooseRole2", { role: b.dataset.role2 }); renderParty(); }; });
       const ok = solo.hero && solo.partners.length === ROGUE_SOLO.partners && solo.role2;
       $("party-go").disabled = !ok;
       $("party-count").textContent = !solo.hero ? "先选主角"
@@ -121,7 +115,7 @@
       `<span>奎支 <b>${s.kuizhi}</b></span>` +
       `<span class="${tier ? "warn" : ""}">距上次长休 <b>${hrs}</b> 小时${tier ? " · " + EXHAUST[tier] : ""}</span>`;
     $("run-party").innerHTML = run.party.map(h => {
-      const v = Rogue.heroView(run, h);
+      const v = query("heroView", { kit: h.kit });
       return `<div class="rhero">
         <div class="rh-top"><b>${esc(v.name)}</b><span>Lv${v.level}${v.pending ? ' · <em>待选升级</em>' : ""}</span></div>
         ${v.race ? `<div class="rh-w rh-prof">${esc(v.race)} · ${esc(v.job)} · ${esc(Object.keys(v.profs).map(k => k + v.profs[k]).join(" "))}</div>` : ""}
@@ -151,7 +145,7 @@
       : p.choice.type === "prof"
         ? `${p.name} ${p.choice.level} 级：一个自选熟练项（新学一项，或把已有的一项升一级，最高三级）`
         : `${p.name} ${p.choice.level} 级：选择一项职责技能`;
-    const opts = Rogue.choiceOptions(run, p.kit, p.index);
+    const opts = query("choiceOptions", { kit: p.kit, index: p.index });
     return `<section class="levelup">
       <h2>升级</h2>
       <p>${esc(title)}${pend.length > 1 ? `<span class="sub">还有 ${pend.length - 1} 项待选</span>` : ""}</p>
@@ -209,10 +203,10 @@
             胜利后每人额外 ${C.ambush.xpPerLevel} × 敌人等级 经验，然后照常长休。撤退则这次不休息、直接离开。</p>
           ${brokenWarn()}${fightBtn("迎击")}`;
       }
-      const plan = Rogue.restPlan(run);
+      const plan = query("restPlan");
       const food = Object.keys(plan.food).map(id => `${ITEM_CATALOG[id].name} ${plan.food[id]} 份`).join("、");
       const chance = Math.round(Rogue.ambushChance(run) * 100);
-      const watchOpts = Rogue.watchOptions(run).map(w =>
+      const watchOpts = query("watchOptions").map(w =>
         `<option value="${esc(w.kit)}">${esc(w.weapon ? `${w.name}（${w.owner} 的武器人）` : w.name)}</option>`).join("");
       return `<p>找到一处能歇脚的地方。</p>
         <p class="r-hint">长休时有 <b id="r-ambush-chance">${chance}%</b> 的概率被偷袭（遭遇战）。没被偷袭，下次 +${Math.round(C.ambush.step * 100)}%；被偷袭后回到 ${Math.round(C.ambush.base * 100)}%。
@@ -230,7 +224,7 @@
         ${repairRows()}
         <button class="g-btn r-main" id="r-leave">离开</button>`,
     smith: () => {
-      const id = Rogue.presentSmiths(run)[0];
+      const id = query("presentSmiths")[0];
       return `<p>一位工匠愿意帮你改武器。手里有 ${Rogue.supplies().kuizhi} 奎支。</p>
         ${smithCard(id, true)}
         ${installRows(id)}
@@ -247,9 +241,9 @@
   const LV_TEXT = ["没有熟练", "一级熟练", "二级熟练", "三级熟练"];
   const pctText = (p) => `${Math.round(p * 1000) / 10}%`;
   function checkPanel() {
-    const c = Rogue.checkInfo(run);
+    const c = query("checkInfo");
     if (!c) return "";
-    const odds = run.party.map(h => Rogue.checkOdds(run, h.kit));
+    const odds = run.party.map(h => query("checkOdds", { kit: h.kit }));
     const best = odds.reduce((b, o) => (!b || o.chance > b.chance ? o : b), null);
     const hurt = c.injure
       ? `<p class="r-warn">⚠ 有风险：失败时检定者受到 ${c.dmg[0]}–${c.dmg[1]} 点随机属性伤害（按克制表结算，不致死），下一场战斗开始时再受 ${c.brk} 击破。</p>`
@@ -274,10 +268,10 @@
   const layerText = (ls) => ls.map(l => `${LAYER[l.type] || l.type} ${l.current != null ? l.current + "/" : ""}${l.max}`).join(" · ");
   function clinicPanel() {
     return `<div class="clinic">${run.party.map(h => {
-      const v = Rogue.heroView(run, h);
-      const info = Rogue.cyberInfo(run, h.kit);
+      const v = query("heroView", { kit: h.kit });
+      const info = query("cyberInfo", { kit: h.kit });
       const cur = info.current;
-      const heal = Rogue.healCost(run, h.kit);
+      const heal = query("healCost", { kit: h.kit });
       const input = (t, label) => `<label>${label}<input type="number" min="0" max="${info.limit}" step="1" value="${cur[t]}" data-cy="${esc(h.kit)}" data-t="${t}"></label>`;
       return `<div class="cl-hero">
         <div class="cl-head"><b>${esc(v.name)}</b><span>${esc(layerText(v.layers))}</span></div>
@@ -303,7 +297,7 @@
   function showCyberPreview(kit) {
     const box = document.getElementById("cy-pv-" + kit);
     if (!box) return;
-    const pv = Rogue.cyberPreview(run, kit, readPlan(kit));
+    const pv = query("cyberPreview", { kit, plan: readPlan(kit) });
     const btn = document.querySelector(`[data-cyber="${kit}"]`);
     if (pv.error) {
       box.innerHTML = `<span class="bad">${esc(pv.error)}</span>`;
@@ -329,7 +323,7 @@
   }
   /* ---------- 工匠：升级、图纸（任务板上随机来几位，任务里也可能遇到一位） ---------- */
   function smithCard(id, open) {
-    const info = Rogue.smithInfo(run, id);
+    const info = query("smithInfo", { smith: id });
     if (!info) return "";
     const k = Rogue.supplies().kuizhi;
     const progress = info.claimed
@@ -356,10 +350,10 @@
   function installRows(smithId) {
     const bps = run.blueprints || [];
     if (!bps.length || !smithId) return "";
-    if (!Rogue.smithInfo(run, smithId).canInstall) return `<p class="r-hint">手里有图纸，但 ${esc(Rogue.smithInfo(run, smithId).name)} 装不了，去找别的武器工匠。</p>`;
+    if (!query("smithInfo", { smith: smithId }).canInstall) return `<p class="r-hint">手里有图纸，但 ${esc(query("smithInfo", { smith: smithId }).name)} 装不了，去找别的武器工匠。</p>`;
     const cost = ROGUE_SMITH_RULES.installCost;
     const k = Rogue.supplies().kuizhi;
-    const weapons = run.party.flatMap(h => Rogue.heroView(run, h).weapons);
+    const weapons = run.party.flatMap(h => query("heroView", { kit: h.kit }).weapons);
     const short = k < cost ? `<b class="bad">现在手里 ${k}，还差 ${cost - k} 奎支。</b>` : "";
     return `<p class="r-hint">手里的图纸：装一张 ${cost} 奎支，一把武器只能装一张（装新的会替换旧的）。${short}</p>
       ${bps.map(id => {
@@ -375,14 +369,14 @@
     return `<h2>工匠</h2>
       <p class="r-hint">这次回城遇到 ${ids.length} 位工匠。手里有 ${Rogue.supplies().kuizhi} 奎支。在同一位工匠那里升级满 ${ROGUE_SMITH_RULES.blueprintAfter} 次，他会给你一张客制化图纸。</p>
       ${ids.map(id => smithCard(id, false)).join("")}
-      ${installRows(ids.find(id => Rogue.smithInfo(run, id).canInstall) || ids[0])}`;
+      ${installRows(ids.find(id => query("smithInfo", { smith: id }).canInstall) || ids[0])}`;
   }
 
   /** 维修工具包（手册：修复 10 点耐久），有的话在商店、工匠处、休整时都能用 */
   function repairRows() {
     const kits = bagCount("repair_kit");
     if (!kits) return "";
-    const rows = run.party.map(h => Rogue.heroView(run, h)).flatMap(v => v.weapons)
+    const rows = run.party.map(h => query("heroView", { kit: h.kit })).flatMap(v => v.weapons)
       .filter(w => w.dur < w.durMax)
       .map(w => `<button class="g-btn" data-repair="${esc(w.kit)}">修 ${esc(w.name)}（${w.dur}/${w.durMax}）</button>`);
     return rows.length ? `<p class="r-hint">维修工具包 ×${kits}，每个修复 10 点耐久：</p><div class="r-choices">${rows.join("")}</div>` : "";
@@ -390,7 +384,7 @@
 
   /** 进下一站 / 首领战之前：可以短休（按今天的短休次数）。长休只能在任务的休息点 */
   function restBeforeRow() {
-    const sh = Rogue.canShortRestBefore(run);
+    const sh = query("canShortRestBefore");
     const left = (sh.who || []).map(x => `${x.name} ${x.left}`).join("、");
     const shortBtn = `<button class="g-btn" id="r-short-before" ${sh.ok ? "" : "disabled"}>短休 ${C.hours.shortRest} 小时
         <small>${sh.ok ? `不消耗补给 · 每人回复 等级×2+体质 · 今天还能短休：${esc(left)}` : esc(sh.why || "")}</small></button>`;
@@ -432,7 +426,7 @@
       case "board": return renderBoard();
       case "task": return renderTask();
       case "camp": {
-        const plan = Rogue.restPlan(run);
+        const plan = query("restPlan");
         const shopping = C.campShop ? `<p class="r-hint">回到城里，出发前可以补货。手里有 ${Rogue.supplies().kuizhi} 奎支。</p>${shopList()}${repairRows()}` : "";
         const clinic = C.campClinic ? `<h3 class="r-sub">诊所</h3>${clinicPanel()}` : "";
         return `<h2>休整</h2>
@@ -488,24 +482,22 @@
   }
 
   function fight() {
-    const spec = Rogue.battleSpec(run);
-    if (!spec) return;
-    save();   // 战斗打到一半退出，下次从这场战斗开头重来
-    Screens.show("battle");
-    GAME.startRogueBattle(spec, (outcome) => {
-      act(() => Rogue.finishBattle(run, outcome));
-      Screens.show("run");
-    });
+    sessionCommand("startBattle", null, { startBattle(spec) {
+      Screens.show("battle");
+      GAME.startRogueBattle(spec, (outcome) => {
+        act({ action: "finishBattle", outcome });
+        Screens.show("run");
+      });
+    } });
   }
 
   /** 熟练项检定：先结算，再按掷出的 d100 播和协助格挡一样的检定动画，最后刷新界面 */
   let checking = false;
   async function doCheck(kit) {
     if (checking) return;
-    let notes;
-    try { notes = Rogue.attemptCheck(run, kit); } catch (e) { act(() => { throw e; }); return; }
-    const lc = run.lastCheck;
-    run.lastCheck = null;
+    let result;
+    try { result = dispatch({ type: "run", action: "attemptCheck", kit }, { run }); } catch (e) { completeAction(null, e); return; }
+    const notes = result.notes, lc = result.check;
     if (lc && window.GAME && typeof GAME.playCheck === "function") {
       checking = true;
       try {
@@ -521,18 +513,11 @@
         }
       } finally { checking = false; }
     }
-    act(() => notes);
+    completeAction(notes);
   }
 
   function finishRun() {
-    if (!run || run._counted) return;
-    run._counted = true;
-    const meta = SaveStore.loadMeta();
-    meta.stats.runs += 1;
-    if (run.result && run.result.win) meta.stats.wins += 1;
-    meta.stats.deaths += (run.fallen || []).length;
-    SaveStore.saveMeta(meta);
-    SaveStore.clearRun();
+    if (run && !run._counted) sessionCommand("finishRun");
   }
 
   function bind() {
@@ -541,67 +526,63 @@
     body.querySelectorAll("[data-pick]").forEach(b => {
       b.onclick = () => {
         const p = Rogue.pendingChoices(run)[0];
-        const o = Rogue.choiceOptions(run, p.kit, p.index)[Number(b.dataset.pick)];
-        act(() => Rogue.choose(run, p.kit, p.index, o.value));
+        const o = query("choiceOptions", { kit: p.kit, index: p.index })[Number(b.dataset.pick)];
+        act({ action: "choose", kit: p.kit, index: p.index, value: o.value });
       };
     });
     body.querySelectorAll(".r-go").forEach(b => {
       b.onclick = () => {
         const w = b.dataset.which === "main" ? "main" : Number(b.dataset.which);
-        act(() => Rogue.acceptTask(run, w));
+        act({ action: "acceptTask", which: w });
       };
     });
-    body.querySelectorAll("[data-buy]").forEach(b => { b.onclick = () => act(() => Rogue.buy(run, b.dataset.buy, 1)); });
-    body.querySelectorAll("[data-upgrade]").forEach(b => { b.onclick = () => act(() => Rogue.upgradeWeapon(run, b.dataset.upgrade, b.dataset.smith)); });
-    body.querySelectorAll("[data-intro]").forEach(b => { b.onclick = () => act(() => Rogue.introduceSmith(run, b.dataset.intro)); });
-    body.querySelectorAll("[data-claim]").forEach(b => { b.onclick = () => act(() => Rogue.claimBlueprint(run, b.dataset.smith, b.dataset.claim)); });
-    body.querySelectorAll("[data-install]").forEach(b => { b.onclick = () => act(() => Rogue.installBlueprint(run, b.dataset.install, b.dataset.kit, b.dataset.smith)); });
-    body.querySelectorAll("[data-repair]").forEach(b => { b.onclick = () => act(() => Rogue.repairWeapon(run, b.dataset.repair)); });
-    body.querySelectorAll("[data-heal]").forEach(b => { b.onclick = () => act(() => Rogue.healHero(run, b.dataset.heal)); });
+    body.querySelectorAll("[data-buy]").forEach(b => { b.onclick = () => act({ action: "buy", key: b.dataset.buy, qty: 1 }); });
+    body.querySelectorAll("[data-upgrade]").forEach(b => { b.onclick = () => act({ action: "upgradeWeapon", kit: b.dataset.upgrade, smith: b.dataset.smith }); });
+    body.querySelectorAll("[data-intro]").forEach(b => { b.onclick = () => act({ action: "introduceSmith", smith: b.dataset.intro }); });
+    body.querySelectorAll("[data-claim]").forEach(b => { b.onclick = () => act({ action: "claimBlueprint", smith: b.dataset.smith, blueprint: b.dataset.claim }); });
+    body.querySelectorAll("[data-install]").forEach(b => { b.onclick = () => act({ action: "installBlueprint", blueprint: b.dataset.install, kit: b.dataset.kit, smith: b.dataset.smith }); });
+    body.querySelectorAll("[data-repair]").forEach(b => { b.onclick = () => act({ action: "repairWeapon", kit: b.dataset.repair }); });
+    body.querySelectorAll("[data-heal]").forEach(b => { b.onclick = () => act({ action: "healHero", kit: b.dataset.heal }); });
     body.querySelectorAll("[data-cyber]").forEach(b => {
       const kit = b.dataset.cyber;
-      b.onclick = () => act(() => Rogue.modifyHero(run, kit, readPlan(kit)));
+      b.onclick = () => act({ action: "modifyHero", kit, plan: readPlan(kit) });
       showCyberPreview(kit);
     });
     body.querySelectorAll("[data-cy]").forEach(el => { el.oninput = () => showCyberPreview(el.dataset.cy); });
     body.querySelectorAll("[data-route]").forEach(b => {
-      const go = () => act(() => Rogue.chooseNode(run, Number(b.dataset.route)));
+      const go = () => act({ action: "chooseNode", index: Number(b.dataset.route) });
       b.addEventListener("click", go);
       b.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
     });
     on("r-fight", fight);
     on("r-long", () => {
       const w = $("r-watch");
-      act(() => Rogue.restAtNode(run, "long", { watch: (w && w.value) || null }));
+      act({ action: "restAtNode", mode: "long", watch: (w && w.value) || null });
     });
-    on("r-short", () => act(() => Rogue.restAtNode(run, "short")));
-    on("r-rest-skip", () => act(() => Rogue.restAtNode(run, "leave")));
-    on("r-short-before", () => act(() => Rogue.shortRestBeforeNode(run)));
-    on("r-leave", () => act(() => Rogue.leaveNode(run)));
+    on("r-short", () => act({ action: "restAtNode", mode: "short" }));
+    on("r-rest-skip", () => act({ action: "restAtNode", mode: "leave" }));
+    on("r-short-before", () => act({ action: "shortRestBeforeNode" }));
+    on("r-leave", () => act({ action: "leaveNode" }));
     body.querySelectorAll("[data-check]").forEach(b => { b.onclick = () => doCheck(b.dataset.check); });
-    on("r-check-skip", () => act(() => Rogue.skipCheck(run)));
-    on("r-camp", () => act(() => Rogue.camp(run)));
-    on("r-next", () => act(() => Rogue.nextAct(run)));
-    on("r-win", () => act(() => Rogue.afterVictory(run, false)));
-    on("r-more", () => act(() => Rogue.afterVictory(run, true)));
-    on("r-home", () => { Rogue.leaveRunMode(null); run = null; Screens.show("title"); });
+    on("r-check-skip", () => act({ action: "skipCheck" }));
+    on("r-camp", () => act({ action: "camp" }));
+    on("r-next", () => act({ action: "nextAct" }));
+    on("r-win", () => act({ action: "afterVictory", goOn: false }));
+    on("r-more", () => act({ action: "afterVictory", goOn: true }));
+    on("r-home", () => { sessionCommand("leave", { save: false }); Screens.show("title"); });
   }
 
   /* ---------- 入口 ---------- */
   window.RunFlow = {
     ready: true,
     start(opt) {
-      picked.length = 0;
-      solo.on = !!(opt && opt.solo);
-      solo.hero = null; solo.partners = []; solo.role2 = null;
+      sessionCommand("prepareParty", { solo: !!(opt && opt.solo) });
       Screens.show("party");
     },
     resume() {
-      const saved = SaveStore.loadRun();
-      if (!saved) return;
-      run = saved;
+      const result = sessionCommand("resume");
+      if (!result.resumed) return;
       lastNotes = ["继续上次的进度。"];
-      Rogue.enterRunMode(run);
       Screens.show("run");
     }
   };
@@ -611,11 +592,12 @@
     Screens.register("run", $("scr-run"), { onShow: render });
     $("party-back").onclick = () => Screens.show("title");
     $("party-go").onclick = () => {
-      if (SaveStore.loadRun() && !confirm("已有一局在进行中。开新的一局会覆盖它，确定吗？")) return;
+      if (sessionCommand("readSaved") && !confirm("已有一局在进行中。开新的一局会覆盖它，确定吗？")) return;
       try {
-        run = solo.on
-          ? Rogue.newRun({ party: [solo.hero], partners: solo.partners.slice(), role2: solo.role2, solo: true })
-          : Rogue.newRun({ party: picked.slice() });
+        const seed = RNG.newSeed();
+        sessionCommand("newRun", solo.on
+          ? { party: [solo.hero], partners: solo.partners.slice(), role2: solo.role2, solo: true, seed }
+          : { party: picked.slice(), seed });
       } catch (e) {
         $("party-count").textContent = e.message;
         return;
@@ -625,8 +607,7 @@
       Screens.show("run");
     };
     $("run-title").onclick = () => {
-      if (run) { save(); Rogue.leaveRunMode(run); }
-      run = null;
+      sessionCommand("leave", { save: true });
       Screens.show("title");
     };
   }

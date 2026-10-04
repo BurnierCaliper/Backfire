@@ -1,0 +1,225 @@
+/* Local battle commands. Data crosses this boundary; presentation stays in game.js. */
+(function (root) {
+  "use strict";
+  let local = {};
+  const types = ["skill", "move", "standUp", "useItem", "startCombat", "endTurn", "openingChoice", "blockAnswer", "assistAnswer", "koltSwapAnswer", "retreat", "battle.endPlayerTurn", "battle.endEnemyTurn", "battle.enemyAction", "battle.finish", "battle.afterBattle", "battle.checkSolo", "battle.supportInfo", "battle.rememberCampaign", "battle.loadCampaign", "battle.cleanQueues", "battle.setup", "battle.setupRogue", "battle.panel", "battle.undo", "battle.continue"];
+  const panelActions = ["bagAdd", "currency", "water", "healItem", "repair", "advance", "shortRest", "longRest", "restore", "cheat", "saveSlot", "loadSlot", "clearSlot", "addParty", "removeParty", "addEnemy", "removeEnemy", "setField", "setGap", "gapHp", "rollWall", "toggleDoor", "addProp", "removeProp", "setZones", "setPartySize", "setWeather", "rollEncounter", "rollBossEncounter", "selectEncounter", "normalizeBag", "normalizeGaps", "normalizeField"];
+  function configure(adapter) { local = Object.assign({}, local, adapter || {}); }
+  function environment(context) { return Object.assign({}, local, context || {}); }
+  // Rogue's legacy encounter rows explicitly contain level: undefined when they
+  // inherit the encounter level. Omit only that documented optional field.
+  // Preserve descriptors/prototypes so the strict boundary still rejects other
+  // functions, accessors and non-data objects instead of silently cleaning them.
+  function battleSpecData(spec) {
+    const copy = value => Object.create(Object.getPrototypeOf(value), Object.getOwnPropertyDescriptors(value));
+    const data = copy(spec);
+    delete data.before;
+    const enc = data.encounter;
+    if (enc && typeof enc === "object" && Array.isArray(enc.enemies)) {
+      data.encounter = copy(enc);
+      data.encounter.enemies = enc.enemies.map(row => {
+        if (!row || typeof row !== "object") return row;
+        const level = Object.getOwnPropertyDescriptor(row, "level");
+        if (!level || level.get || level.set || level.value !== undefined) return row;
+        const next = copy(row);
+        delete next.level;
+        return next;
+      });
+    }
+    return data;
+  }
+  function seeded(key, fn) {
+    if (key == null || typeof makeRng !== "function") return fn();
+    const random = Math.random;
+    Math.random = makeRng(key);
+    try { return fn(); } finally { Math.random = random; }
+  }
+  function actor(id) {
+    const u = unitById(id);
+    if (!u) throw new Error("Unknown battle actor: " + id);
+    return u;
+  }
+  function validate(cmd) {
+    if (types.indexOf(cmd.type) < 0) throw new Error("Unknown battle command: " + cmd.type);
+    if (["skill", "move", "standUp", "useItem", "openingChoice", "battle.enemyAction"].includes(cmd.type)) actor(cmd.actor);
+    if (cmd.type === "skill" && typeof cmd.skill !== "string") throw new Error("skill must be a string");
+    if (cmd.type === "move" && !Number.isFinite(cmd.dest)) throw new Error("dest must be a number");
+    if (cmd.type === "battle.panel" && panelActions.indexOf(cmd.action) < 0) throw new Error("Unknown battle panel action: " + cmd.action);
+    const oneOf = (value, values, field) => { if (!values.includes(value)) throw new Error("Unknown " + field + ": " + value); };
+    if (cmd.type === "openingChoice") oneOf(cmd.bit, ["acid", "drill"], "opening bit");
+    if (cmd.type === "battle.cleanQueues") oneOf(cmd.queue, ["block", "assist", "kolt"], "reaction queue");
+    if (cmd.type === "battle.panel") {
+      if (cmd.action === "setField") oneOf(cmd.kind, ["", "fireOn", "ice", "acid", "electric", "energy", "harmonic", "heal", "abyss", "highland", "collapseOn"], "field kind");
+      if (cmd.action === "setGap") oneOf(cmd.kind, ["open", "bridge", "wall", "door", "void"], "gap kind");
+      if (["setGap", "gapHp", "rollWall", "toggleDoor"].includes(cmd.action)) oneOf(cmd.key, ["1-2", "2-3"], "gap key");
+      if (cmd.action === "setWeather") oneOf(cmd.value, ["none", "heat", "snow", "acid", "thunder", "glow", "sand", "phase"], "weather");
+      if (cmd.action === "setZones") oneOf(cmd.value, [2, 3], "zone count");
+      if (cmd.action === "setPartySize") oneOf(cmd.value, [2, 3, 4], "party size");
+      if (["setField", "addProp", "addParty", "addEnemy"].includes(cmd.action)) oneOf(cmd.zone, [1, 2, 3], "zone");
+      if (cmd.action === "addProp") {
+        oneOf(cmd.kind, ["button", "lever", "battery", "boom", "acid", "scrap", "turret"], "prop kind");
+        oneOf(cmd.faction, ["player", "enemy"], "prop faction");
+      }
+      if (["bagAdd", "healItem"].includes(cmd.action) && !Object.prototype.hasOwnProperty.call(ITEM_CATALOG, cmd.item)) throw new Error("Unknown item: " + cmd.item);
+    }
+  }
+  function skill(cmd) {
+    const a = actor(cmd.actor);
+    state.attackerId = cmd.actor;
+    state.selectedId = cmd.actor;
+    state.targetId = cmd.target || null;
+    if (cmd.type === "move") return doMove(a, cmd.dest);
+    if (cmd.type === "standUp") return standUp(a);
+    if (cmd.type === "useItem") {
+      const notes = typeof trackHealBy === "function"
+        ? trackHealBy(a, () => useItemOn(a, cmd.item, unitById(cmd.target), cmd.dest))
+        : useItemOn(a, cmd.item, unitById(cmd.target), cmd.dest);
+      (notes || []).forEach(s => appendLog(s));
+      if ((a.bonus || 0) > 0) { a.bonus -= 1; if (typeof scoreSpend === "function") scoreSpend(a, 0, 1); }
+      return;
+    }
+    if (cmd.picks && Object.keys(cmd.picks).length) state.skillFlow = { id: cmd.skill, actorId: cmd.actor, picks: Object.assign({}, cmd.picks), index: 99 };
+    try { return runSkill(cmd.skill); } finally { state.skillFlow = null; }
+  }
+  function setup(cmd, env) {
+    const g = env.game || root.GAME || {};
+    let enc = typeof cmd.encounter === "string" ? (typeof encounterById === "function" ? encounterById(cmd.encounter) : null) : cmd.encounter || null;
+    if (enc) { enc = JSON.parse(JSON.stringify(enc)); if (typeof applyEncounterLayout === "function") applyEncounterLayout(enc); }
+    g.encounter = enc;
+    if (enc) g.lastEncounter = enc;
+    g.level = cmd.level;
+    state.units = []; state.props = [];
+    state.fields = { 1: emptyField(), 2: emptyField(), 3: emptyField() };
+    state.gaps = { "1-2": emptyGap(), "2-3": emptyGap() };
+    state.zoneMode = Number(g.zoneMode) || 2;
+    state.partySize = 2;
+    state.weather = g.weather || "none";
+    if (typeof rollSandDir === "function") rollSandDir();
+    state.weatherLock = null; state.phaseStep = 0; state.assistQueue = []; state.blockQueue = [];
+    state.skillFlow = null; state.history = []; state.actionAcc = null; state.statusDmg = {};
+    state.turnNo = 1; state.logPages = [{ turn: 1, lines: [] }]; state.logIndex = 0;
+    state.combatPhase = "player"; state.combatStarted = false; state.exhaustTier = 0;
+    state.openingBreaks = null; state.solo = null; state.scoreAct = null; state.ambush = false;
+    state.retreated = false; state.lootByRank = null; state.lootByKit = null;
+    resetBattleRecords();
+    g.undo = [];
+    state.xpMult = Number(cmd.xpMult) || 1;
+    loadLiveParty(g.partyKits);
+    if (enc && enc.playerZone) state.units.forEach(u => { if (u.isPlayer && !u.hidden) u.zone = Number(enc.playerZone); });
+    if (typeof randomizeNoraMood === "function") randomizeNoraMood();
+    if (env.applyCampaignToField) env.applyCampaignToField();
+    state.units.forEach(u => { if (typeof resetBattleFlags === "function") resetBattleFlags(u); });
+    const notes = [];
+    if (typeof ledgerApplyToField === "function") ledgerApplyToField(notes);
+    if (typeof TRPG !== "undefined" && TRPG.active && typeof exhaustTier === "function") state.exhaustTier = Math.min(3, exhaustTier());
+    const partyN = typeof syncPartySizeFromField === "function" ? syncPartySizeFromField() : liveHeroCount();
+    if (typeof RUN !== "undefined" && RUN.active) RUN.apply();
+    if (enc && typeof buildEncounter === "function") buildEncounter(enc, cmd.level, partyN);
+    else {
+      const presets = enemyPresets();
+      const plan = g.enemyPlan && g.enemyPlan.length ? g.enemyPlan : [{ id: "thug_knife", lv: cmd.level, zone: 2 }, { id: "thug_hammer", lv: cmd.level, zone: 2 }, { id: "bandit_boss", lv: cmd.level, zone: 2 }];
+      plan.forEach(row => {
+        const pack = typeof spawnEnemyGroup === "function" ? spawnEnemyGroup(row.id, Number(row.lv) || cmd.level, partyN, row.zone) : null;
+        if (pack && pack.length) { pack.forEach(u => state.units.push(u)); return; }
+        const p = presets.find(x => x.id === row.id);
+        if (!p || !p.build) return;
+        const u = p.build(Number(row.lv) || cmd.level, partyN);
+        u.zone = Math.min(Number(state.zoneMode), Number(row.zone) || Number(state.zoneMode)); state.units.push(u);
+      });
+    }
+    return { encounter: enc, partySize: partyN, notes };
+  }
+  function panel(cmd, env) {
+    const g = env.game || root.GAME || {};
+    const notes = [];
+    let value;
+    switch (cmd.action) {
+      case "normalizeBag": ensureBag(); break;
+      case "normalizeGaps": state.gaps = state.gaps || {}; (Number(state.zoneMode) >= 3 ? ["1-2", "2-3"] : ["1-2"]).forEach(k => { if (!state.gaps[k]) state.gaps[k] = emptyGap(); }); break;
+      case "normalizeField": panel({ action: "normalizeGaps" }, env); (state.units || []).forEach(u => { if (Number(u.zone) > Number(state.zoneMode)) u.zone = Number(state.zoneMode); }); break;
+      case "bagAdd": bagAdd(cmd.item, cmd.amount); notes.push(`背包：${ITEM_CATALOG[cmd.item].name} ${cmd.amount < 0 ? "−" : "+"}${Math.abs(cmd.amount)}`); break;
+      case "currency": state.kuizhi = Math.max(0, (Number(state.kuizhi) || 0) + cmd.amount); notes.push(`背包：奎支 ${cmd.amount < 0 ? "−" : "+"}${Math.abs(cmd.amount)} → ${state.kuizhi}`); break;
+      case "water": setLedgerWater(ledgerWater() + cmd.amount); notes.push(`背包：水 ${cmd.amount < 0 ? "−" : "+"}${Math.abs(cmd.amount)} ml → ${ledgerWater()} ml`); break;
+      case "healItem": return { notes: ledgerHealItem(cmd.item, cmd.kit, []) };
+      case "repair": return { notes: ledgerRepair(cmd.kit, []) };
+      case "advance": ledgerAdvance(cmd.hours, notes); notes.unshift(`时间推进 ${cmd.hours} 小时。`); break;
+      case "shortRest": return { notes: ledgerShortRest(cmd.kits || null, []) };
+      case "longRest": return ledgerLongRest(cmd.plan, []);
+      case "restore": return { notes: ledgerRestoreAll([]) };
+      case "cheat": return { notes: cheatFillBag() };
+      case "saveSlot": return env.writeSlot(cmd.index);
+      case "loadSlot": return env.loadSlot(cmd.index, cmd.level);
+      case "clearSlot": return env.clearSlot(cmd.index);
+      case "addParty": {
+        const card = livePartyCards().find(c => c.kit === cmd.kit); if (!card) break;
+        const u = spawnLiveCard(card, Number(cmd.zone) || 1);
+        u.weaponHeld = true; u.atk = (u.personalAtk || 0) + (u.weaponAtk || 0);
+        if (typeof resetBattleFlags === "function") resetBattleFlags(u);
+        if (typeof applyLevelStats === "function") applyLevelStats(u);
+        state.units.push(u);
+        g.partyKits = g.partyKits || []; if (g.partyKits.indexOf(cmd.kit) < 0) g.partyKits.push(cmd.kit);
+        if (state.combatStarted && state.combatPhase === "player") { u.ap = u.apMax || 1; u.bonus = u.bonusMax || 1; }
+        value = u.id; break;
+      }
+      case "removeParty": { const u = actor(cmd.actor); state.units = state.units.filter(x => x.id !== u.id && x.weaponOf !== u.kit); g.partyKits = (g.partyKits || []).filter(k => k !== u.kit); break; }
+      case "removeEnemy": { const u = actor(cmd.actor); state.units = state.units.filter(x => x.id !== u.id && x.ufoParent !== u.id); g.enemyPlan = (g.enemyPlan || []).filter(p => !(p.id === u.kit && Number(p.zone) === Number(u.zone))); break; }
+      case "addEnemy": {
+        const p = enemyPresets().find(x => x.id === cmd.preset); if (!p) break;
+        const partyN = typeof syncPartySizeFromField === "function" ? syncPartySizeFromField() : liveHeroCount();
+        const pack = typeof spawnEnemyGroup === "function" ? spawnEnemyGroup(cmd.preset, cmd.level, partyN, cmd.zone) : null;
+        if (pack && pack.length) pack.forEach(u => state.units.push(u));
+        else { const u = p.build(cmd.level, partyN); u.zone = Math.min(cmd.zone, Number(state.zoneMode)); state.units.push(u); if (typeof refreshEnemyEconomy === "function") refreshEnemyEconomy(u); }
+        g.enemyPlan = (g.enemyPlan || []).concat([{ id: cmd.preset, lv: cmd.level, zone: cmd.zone }]); break;
+      }
+      case "setField": { const f = emptyField(); if (cmd.kind) f[cmd.kind] = true; if (cmd.kind === "fireOn") f.fire = 1; state.fields[cmd.zone] = f; break; }
+      case "setGap": { const gap = state.gaps[cmd.key]; gap.type = cmd.kind; if (["bridge", "wall"].includes(gap.type)) { gap.hp = defaultGapHp(gap.type); gap.maxHp = gap.hp; gap.level = Number(g.level) || 1; } if (gap.type === "door") gap.open = false; if (gap.type === "open") { gap.hp = 0; gap.open = true; } break; }
+      case "gapHp": state.gaps[cmd.key].hp = state.gaps[cmd.key].maxHp = Math.max(1, Math.floor(Number(cmd.hp) || 1)); break;
+      case "rollWall": state.gaps[cmd.key].hp = state.gaps[cmd.key].maxHp = rollWallHp(); break;
+      case "toggleDoor": state.gaps[cmd.key].open = !state.gaps[cmd.key].open; break;
+      case "addProp": { const p = makeProp(cmd.kind, cmd.zone, cmd.level); p.faction = cmd.faction || "player"; state.props = state.props || []; state.props.push(p); if (cmd.kind === "battery" && typeof syncBatteryShields === "function") syncBatteryShields(); value = p.id; break; }
+      case "removeProp": state.props = state.props.filter(x => x.id !== cmd.id); break;
+      case "setZones": g.zoneMode = state.zoneMode = Number(cmd.value) || 2; panel({ action: "normalizeField" }, env); break;
+      case "setPartySize": g.partySize = state.partySize = Number(cmd.value) || 2; break;
+      case "setWeather": { const was = state.weather; state.weather = cmd.value || "none"; if (cmd.persist) g.weather = state.weather; if (state.weather === "sand" && was !== "sand" && typeof rollSandDir === "function") rollSandDir(); break; }
+      case "rollEncounter": value = rollEncounter({ region: cmd.region, ...(cmd.faction ? { faction: cmd.faction } : {}) }); break;
+      case "rollBossEncounter": { const bosses = Object.keys(ENEMY_INFO || {}).filter(k => ENEMY_INFO[k].boss && ENEMY_INFO[k].regions.indexOf(cmd.region) >= 0); if (bosses.length) value = rollBossEncounter(bosses[Math.floor(Math.random() * bosses.length)], { region: cmd.region }); break; }
+      case "selectEncounter": g.lastEncounter = cmd.encounter; value = cmd.encounter; break;
+    }
+    return value === undefined ? { notes } : { notes, value };
+  }
+  function execute(cmd, context) {
+    validate(cmd);
+    const env = environment(context);
+    switch (cmd.type) {
+      case "skill": case "move": case "standUp": case "useItem": return skill(cmd);
+      case "startCombat": return startCombat();
+      case "openingChoice": { const u = actor(cmd.actor); u.resources = u.resources || {}; u.resources.bit = cmd.bit === "acid" ? "acid" : "drill"; return u.resources.bit; }
+      case "blockAnswer": return seeded(cmd.seed, () => finishBlock(cmd.helper || null, cmd.forced || null));
+      case "assistAnswer": { const helper = unitById(cmd.helper); const prev = state.combatPhase; if (helper) state.combatPhase = helper.isPlayer ? "player" : "enemy"; try { return finishAssist(cmd.helper || null, cmd.extra || {}); } finally { state.combatPhase = prev; } }
+      case "koltSwapAnswer": return resolveKoltSwap(!!cmd.swap, cmd.target || null);
+      case "retreat": return performRetreat(cmd.rearguard || null);
+      case "endTurn": case "battle.endPlayerTurn": return seeded(cmd.seed, () => endPlayerTurn());
+      case "battle.endEnemyTurn": return endEnemyTurn();
+      case "battle.enemyAction": { const plan = EnemyAI.planFor(actor(cmd.actor), cmd.step); if (!plan) return { executed: false }; seeded(cmd.seed, plan.thunk); return { executed: true, meta: plan.meta }; }
+      case "battle.finish": return settleBattleRewards(cmd.outcome);
+      case "battle.afterBattle": return typeof ledgerAfterBattle === "function" ? ledgerAfterBattle([]) : [];
+      case "battle.checkSolo": return typeof soloDownCheck === "function" ? soloDownCheck([]) : [];
+      case "battle.supportInfo": return typeof soloSupportInfo === "function" ? soloSupportInfo() : null;
+      case "battle.rememberCampaign": return env.rememberCampaign ? env.rememberCampaign() : null;
+      case "battle.loadCampaign": return env.loadCampaignMem ? env.loadCampaignMem() : null;
+      case "battle.cleanQueues": {
+        if (cmd.queue === "assist") return pruneAssistQueue();
+        const queue = cmd.queue === "block" ? state.blockQueue : state.koltSwapQueue;
+        if (queue && queue.length) queue.shift();
+        return;
+      }
+      case "battle.setup": return setup(cmd, env);
+      case "battle.setupRogue": { const spec = Object.assign({}, cmd.spec); if (env.before) spec.before = env.before; BattleSim.setup(spec); return; }
+      case "battle.panel": return panel(cmd, env);
+      case "battle.undo": return env.undo ? env.undo() : false;
+      case "battle.continue": return env.continueBattle ? env.continueBattle(cmd.outcome) : false;
+    }
+  }
+  root.BattleCommands = { execute, configure, battleSpecData, types: types.slice(), panelActions: panelActions.slice() };
+  if (root.Commands) types.forEach(type => root.Commands.register(type, execute, { domain: "battle", validate }));
+})(typeof window !== "undefined" ? window : globalThis);
