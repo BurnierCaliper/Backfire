@@ -59,10 +59,14 @@ const SHORT_REST_BONUS = { chuan: 0.25 };
 /** 每天可短休次数：熊兽人 1 次，其余 2 次 */
 function shortRestCap(u) { return /熊/.test(String((u && u.note) || "")) ? 1 : 2; }
 
+/** 新档的起始时刻：早上 8 点 */
+const CLOCK_START = 8 * 60;
+
 /* ===== 档案本体 ===== */
 const LEDGER = {
   day: 1,
-  hours: 0,            // 距上次长休的小时数
+  hours: 0,            // 距上次长休的小时数（可以带零头：按分钟推进时间）
+  clock: 480,          // 当天时刻：从 0 点起的分钟数（0–1439），新档从早上 8 点开始
   dur: {},             // 武器 kit → 当前耐久
   heroes: {},          // 角色 kit → { layers:[当前值], shp, dying, dead, upOnShp }
   weapons: {},         // 武器人 kit → [{ type, current }]：武器人的伤势跨战斗保留，长休回满
@@ -72,7 +76,7 @@ const LEDGER = {
   /** 存进队伍档案 */
   save() {
     return JSON.parse(JSON.stringify({
-      day: this.day, hours: this.hours, dur: this.dur,
+      day: this.day, hours: this.hours, clock: this.clock, dur: this.dur,
       heroes: this.heroes, weapons: this.weapons, shortUsed: this.shortUsed,
       restOnce: this.restOnce, water: ledgerWater()
     }));
@@ -81,6 +85,7 @@ const LEDGER = {
     s = s || {};
     this.day = Number(s.day) || 1;
     this.hours = Number(s.hours) || 0;
+    this.clock = s.clock != null && isFinite(Number(s.clock)) ? ((Math.floor(Number(s.clock)) % 1440) + 1440) % 1440 : CLOCK_START;
     this.dur = s.dur || {};
     this.heroes = s.heroes || {};
     this.weapons = s.weapons || {};
@@ -276,21 +281,58 @@ function ledgerAfterBattle(notes) {
   return notes;
 }
 
-/* ===== 时间 ===== */
+/* ===== 时间 =====
+ * 24 小时时钟：LEDGER.clock 是当天从 0 点起的分钟数。推进时间时时钟跟着走，过了 0 点就进入下一天（短休次数刷新）。
+ * LEDGER.hours 是距上次长休的小时数（力竭按它算），按分钟推进时可以带零头。 */
+/** 分钟数 → "08:05" */
+function clockText(min) {
+  min = ((Math.floor(Number(min) || 0) % 1440) + 1440) % 1440;
+  return String(Math.floor(min / 60)).padStart(2, "0") + ":" + String(min % 60).padStart(2, "0");
+}
+/** "8:05" / "08:05" → 分钟数；看不懂返回 null */
+function parseClock(text) {
+  const m = /^\s*(\d{1,2})\s*[:：]\s*(\d{1,2})\s*$/.exec(String(text == null ? "" : text));
+  if (!m) return null;
+  const h = Number(m[1]), mi = Number(m[2]);
+  if (h > 23 || mi > 59) return null;
+  return h * 60 + mi;
+}
+/** 时段：深夜 / 清晨 / 上午 / 中午 / 下午 / 傍晚 / 夜晚 */
+function dayPeriod(min) {
+  const h = Math.floor((((Number(min) || 0) % 1440) + 1440) % 1440 / 60);
+  return h < 5 ? "深夜" : h < 8 ? "清晨" : h < 12 ? "上午" : h < 14 ? "中午" : h < 18 ? "下午" : h < 20 ? "傍晚" : "夜晚";
+}
+/** 「3 小时 20 分」 */
+function durationText(hours) {
+  const total = Math.round((Number(hours) || 0) * 60);
+  const h = Math.floor(total / 60), m = total % 60;
+  return m ? (h ? `${h} 小时 ${m} 分` : `${m} 分钟`) : `${h} 小时`;
+}
+/** 「第 2 天 14:30（下午）」 */
+function ledgerTimeText() {
+  const c = LEDGER.clock == null ? CLOCK_START : LEDGER.clock;
+  return `第 ${LEDGER.day || 1} 天 ${clockText(c)}（${dayPeriod(c)}）`;
+}
+/** 时钟往前走 minutes 分钟；返回跨过了几个 0 点 */
+function advanceClock(minutes) {
+  const c = (LEDGER.clock == null ? CLOCK_START : LEDGER.clock) + Math.max(0, Math.round(Number(minutes) || 0));
+  LEDGER.clock = c % 1440;
+  return Math.floor(c / 1440);
+}
 function ledgerAdvance(hours, notes) {
   hours = Math.max(0, Number(hours) || 0);
-  if (!hours) return;
-  const before = LEDGER.hours;
-  LEDGER.hours += hours;
-  // 每满 24 小时算过了一天，短休次数刷新
-  const days = Math.floor((before % 24 + hours) / 24);
+  const minutes = Math.round(hours * 60);
+  if (!minutes) return;
+  LEDGER.hours = Math.round(((Number(LEDGER.hours) || 0) + minutes / 60) * 600) / 600;
+  // 过了 0 点算新的一天，短休次数刷新
+  const days = advanceClock(minutes);
   if (days > 0) {
     LEDGER.day += days;
     LEDGER.shortUsed = {};
     if (notes) notes.push(`进入第 ${LEDGER.day} 天，短休次数刷新。`);
   }
   const t = exhaustTier();
-  if (t && notes) notes.push(`距上次长休 ${LEDGER.hours} 小时：${exhaustText(t)}`);
+  if (t && notes) notes.push(`距上次长休 ${durationText(LEDGER.hours)}：${exhaustText(t)}`);
 }
 function exhaustTier() {
   const h = LEDGER.hours;
@@ -408,8 +450,10 @@ function ledgerLongRest(plan, notes) {
   const keep = (tab) => (watch && tab && tab[watch] != null ? { [watch]: tab[watch] } : {});
   LEDGER.shortUsed = keep(LEDGER.shortUsed);
   LEDGER.restOnce = keep(LEDGER.restOnce);
-  LEDGER.day += 1;
-  notes.push(`进入第 ${LEDGER.day} 天。`);
+  // 时钟照常往前走；过了 0 点才换天（长休本身已经刷新了短休次数）
+  const days = advanceClock(hours * 60);
+  LEDGER.day += days;
+  notes.push(days ? `醒来：进入第 ${LEDGER.day} 天，${clockText(LEDGER.clock)}。` : `醒来：${clockText(LEDGER.clock)}。`);
   ledgerCapture();
   return { ok: true, notes };
 }

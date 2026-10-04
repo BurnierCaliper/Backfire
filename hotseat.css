@@ -13,7 +13,7 @@
 #hs-bar { display: flex; align-items: center; gap: 10px; padding: 6px 14px; min-height: 56px; }
 #hs-bar label { color: var(--sk-muted, #a8977b); white-space: nowrap; }
 #hs-player { width: min(210px, 30vw); }
-.hs-tag { background: var(--sk-hazard, #f2c230); color: var(--sk-ink, #0b0806); padding: 1px 10px; font: 26px/1.2 var(--sk-tag, sans-serif); transform: rotate(-2deg); white-space: nowrap; }
+.hs-tag { background: var(--sk-hazard, #f2c230); color: var(--sk-ink, #0b0806); padding: 1px 10px; font: 800 26px/1.2 var(--sk-tag, sans-serif); transform: rotate(-2deg); white-space: nowrap; }
 .hs-phase { margin-right: auto; color: var(--sk-muted, #a8977b); }
 .hs-button { cursor: pointer; min-height: 40px; padding: 6px 12px; border: 2px solid var(--sk-ink, #0b0806); border-radius: 0; color: var(--sk-canvas, #ece0c6); background: var(--sk-steel-hi, #3b342c); box-shadow: 2px 3px 0 #0008; font-weight: 700 !important; }
 .hs-button:hover:not(:disabled) { background: var(--sk-edge, #4d4337); }
@@ -38,7 +38,7 @@
 #hs-reaction { z-index: 71; }
 .hs-card { width: min(720px, 100%); min-width: 0; margin: auto 0; padding: 22px; background-color: var(--sk-steel, #2a2520); background-image: var(--sk-noise, none), linear-gradient(170deg, var(--sk-steel-hi, #3b342c), var(--sk-oil-2, #1a1511)); border: 3px solid var(--sk-ink, #0b0806); box-shadow: 6px 7px 0 #0008; }
 .hs-heading { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
-.hs-heading h2 { padding: 3px 14px; font: 30px/1.2 var(--sk-tag, sans-serif); color: var(--sk-ink, #0b0806); background: var(--sk-hazard, #f2c230); transform: rotate(-1.3deg); clip-path: polygon(1% 12%, 9% 0, 60% 6%, 99% 0, 97% 55%, 100% 92%, 70% 100%, 30% 94%, 2% 100%, 0 50%); }
+.hs-heading h2 { padding: 3px 14px; font: 800 30px/1.2 var(--sk-tag, sans-serif); color: var(--sk-ink, #0b0806); background: var(--sk-hazard, #f2c230); transform: rotate(-1.3deg); clip-path: polygon(1% 12%, 9% 0, 60% 6%, 99% 0, 97% 55%, 100% 92%, 70% 100%, 30% 94%, 2% 100%, 0 50%); }
 .hs-muted { color: var(--sk-muted, #a8977b); }
 .hs-config-row, .hs-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 .hs-config-row > label { flex: 1 1 190px; }

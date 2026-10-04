@@ -195,7 +195,9 @@
       zone: Number(p.zone) || 1,
       level: p.level || 1,
       atk: 0,
-      layers: [{ type: "armor", max: max, cur: cur }],
+      // 铁壁的外层护盾（川川多耗电能加的）画在装甲外面
+      layers: (Number(p.shieldMax) > 0 ? [{ type: "shield", max: Number(p.shieldMax), cur: Math.max(0, Number(p.shield) || 0) }] : [])
+        .concat([{ type: "armor", max: max, cur: cur }]),
       def: 0, defMax: 0, ap: 0, apMax: 0, bonus: 0, bonusMax: 0,
       status: (typeof propKindName === "function" ? propKindName(p.kind) : p.kind) + (p.kind === "door" ? "" : ""),
       res: p.kind === "battery" || p.kind === "turret" ? (p.faction === "enemy" ? "敌方" : "我方") : "",
@@ -2820,7 +2822,7 @@
   G.restFood = G.restFood || {};
   function renderRestSheet() {
     const t = typeof exhaustTier === "function" ? exhaustTier() : 0;
-    $("g-rest-time").innerHTML = `第 <b>${LEDGER.day}</b> 天 · 距上次长休 <b>${LEDGER.hours}</b> 小时 · ` +
+    $("g-rest-time").innerHTML = `第 <b>${LEDGER.day}</b> 天 <b>${clockText(LEDGER.clock == null ? 480 : LEDGER.clock)}</b> · 距上次长休 <b>${durationText(LEDGER.hours || 0)}</b> · ` +
       `<span class="${t ? "bad" : ""}">${exhaustText(t)}</span>`;
     const inFight = state.combatStarted && !G.ended;
     $("g-rest-lock").textContent = inFight ? "战斗进行中，不能休整。背包仍可随时增减。" : "";

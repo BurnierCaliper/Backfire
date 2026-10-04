@@ -132,9 +132,9 @@ const RouteMap = (() => {
   };
   /** 墙上的喷漆字 */
   function tag(x, y, text, color, rot, size, cn) {
-    // 字体还没打包进游戏：先用系统粗体 + 斜体顶上（装了 Permanent Marker / 指芒星 会自动用上）
-    const font = cn ? `"Zhi Mang Xing", "ZCOOL QingKe HuangYou", "PingFang SC", "Microsoft YaHei", sans-serif`
-      : `"Permanent Marker", Impact, "Arial Black", sans-serif`;
+    // 好认的黑体加粗（以前用毛笔字 / 手写体，太潦草）
+    const font = cn ? `"Noto Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif`
+      : `"Noto Sans SC", "Arial Black", "Helvetica Neue", Arial, sans-serif`;
     return `<g opacity=".5" filter="url(#rm-spray)"><text x="${x.toFixed(0)}" y="${y}" font-family='${font}' font-weight="900" font-style="italic" font-size="${size}" fill="${color}" transform="rotate(${rot} ${x.toFixed(0)} ${y})">${text}</text></g>`;
   }
 

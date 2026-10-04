@@ -8,6 +8,8 @@
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const DEFAULT_PARTY = ["ruby", "yuito", "hiaki", "tou"];
   let tab = "party";
+  let sheetKit = null;    // 「角色」页正在看谁
+  const stampNow = () => `${typeof ledgerTimeText === "function" ? ledgerTimeText() : `第 ${LEDGER.day || 1} 天`} · 距长休 ${typeof durationText === "function" ? durationText(LEDGER.hours || 0) : (LEDGER.hours || 0) + " 小时"}`;
   let log = [];
   let slot = -1;          // 正在玩的存档空位
   let slotName = "";
@@ -15,7 +17,7 @@
   const UNDO_MAX = 20;
 
   const TABS = [
-    ["party", "队伍"], ["rest", "时间与休息"], ["shop", "商店"], ["bag", "背包"], ["smith", "武器升级"], ["backstage", "后台"]
+    ["party", "队伍"], ["sheet", "角色"], ["rest", "时间与休息"], ["shop", "商店"], ["bag", "背包"], ["smith", "武器升级"], ["backstage", "后台"]
   ];
 
   function heroes() { return trpgHeroes(); }
@@ -70,7 +72,7 @@
     try { notes = Commands.dispatch(command) || []; } catch (e) { notes = ["没做成：" + e.message]; }
     notes = notes.filter(Boolean);
     if (notes.length) {
-      const stamp = `第 ${LEDGER.day || 1} 天 · 距长休 ${LEDGER.hours || 0} 小时`;
+      const stamp = stampNow();
       log.push({ stamp, lines: notes });
       saveLog();
     }
@@ -88,12 +90,17 @@
     if (ub) { ub.disabled = !undoStack.length; ub.textContent = undoStack.length > 1 ? `撤销（${undoStack.length}）` : "撤销"; }
     $("tr-slot-name").textContent = slot >= 0 ? `存档 ${slot + 1} · ${slotName}` : "";
     const t = exhaustTier();
-    $("tr-clock").innerHTML = `第 <b>${LEDGER.day || 1}</b> 天 · 距上次长休 <b>${LEDGER.hours || 0}</b> 小时` +
+    const ck = LEDGER.clock == null ? 480 : LEDGER.clock;
+    $("tr-clock").innerHTML = `第 <b>${LEDGER.day || 1}</b> 天 <b class="tr-time">${clockText(ck)}</b> ${dayPeriod(ck)} · 距上次长休 <b>${durationText(LEDGER.hours || 0)}</b>` +
       (t ? ` · <span class="warn">${esc(exhaustText(t))}</span>` : "");
     const food = FOOD_ORDER.reduce((s, id) => s + bagCount(id), 0);
     $("tr-supplies").innerHTML = `<span>奎支 <b>${Number(state.kuizhi) || 0}</b></span><span>水 <b>${ledgerWater()}</b> ml</span><span>食物 <b>${food}</b> 份</span>`;
   }
 
+  /** 面板上的攻击力：角色 + 手里的武器（和战斗里一样算） */
+  function heroAtk(h) {
+    try { return typeof effectiveAtk === "function" ? effectiveAtk(h, state.units) : (Number(h.atk) || 0); } catch (e) { return Number(h.atk) || 0; }
+  }
   /* ---------- 左栏：队伍状态（主持人视角，坚毅生命照常显示） ---------- */
   function renderParty() {
     $("tr-party").innerHTML = heroes().map(h => {
@@ -107,6 +114,9 @@
       return `<div class="rhero${h.dead ? " fallen" : h.dying ? " dying" : ""}">
         <div class="rh-top"><b>${esc(h.name)}</b><span>Lv${h.level || 1}${tag ? " · " + tag : ""}</span><button class="g-btn small rh-sheet" data-sheet="${esc(h.kit)}" title="数值、被动和技能说明">资料</button></div>
         <div class="rh-row">血量 <span>${totalHpOf(h)}/${totalHpMaxOf(h)}</span></div>
+        <div class="rh-row">攻击力 <span>${heroAtk(h)}</span></div>
+        <div class="rh-row">架势 <span>${Number(h.def) || 0}/${Number(h.defMax != null ? h.defMax : h.def) || 0}</span></div>
+        <div class="rh-row">协助格挡 <span>${typeof blockChance === "function" && blockChance(h) != null ? blockChance(h) + "%" : "—"}</span></div>
         <div class="rh-row">坚毅 <span>${Number(h.shp) || 0}/${Number(h.shpMax) || 0}</span></div>
         <div class="rh-row">经验 <span>${Number(h.xp) || 0}/${xpNext || "满"}</span></div>
         ${Number(h.attrPoints) > 0 ? `<div class="rh-w tr-attn">有 ${h.attrPoints} 点属性点可分配（队伍页）</div>` : ""}
@@ -117,6 +127,14 @@
 
   /* ---------- 各页 ---------- */
   const PANELS = {
+    sheet() {
+      const data = window.SkillText ? SkillText.sheetData() : [];
+      if (!data.length) return `<p class="r-hint">还没有队员。到「队伍」页选人。</p>`;
+      if (!data.some(h => h.kit === sheetKit)) sheetKit = data[0].kit;
+      const h = data.find(x => x.kit === sheetKit);
+      return `<div class="hs-tabs tr-sheet-tabs">${data.map(x => `<button class="g-btn${x.kit === sheetKit ? " on" : ""}" data-hs-kit="${esc(x.kit)}">${esc(x.name)}</button>`).join("")}</div>
+        <div class="tr-sheet">${window.HeroSheet ? HeroSheet.heroHtml(h) : ""}</div>`;
+    },
     party() {
       const pool = livePartyCards().filter(c => !c.weaponOf);
       const on = new Set((window.GAME && GAME.partyKits) || []);
@@ -150,12 +168,27 @@
           <select data-food="${esc(h.kit)}">${foods.map(id => `<option value="${id}">${esc(ITEM_CATALOG[id].name)}（有 ${bagCount(id)}）</option>`).join("")}</select>
           · 今天还能短休 ${shortRestLeft(h)} 次</div>`;
       }).join("");
-      return `<h3>推进时间</h3>
-        <div class="tr-row">
-          ${[1, 2, 4, 8].map(n => `<button class="g-btn" data-hours="${n}">+${n} 小时</button>`).join("")}
-          <input type="number" id="tr-hours" value="3" min="1" style="width:70px"><button class="g-btn" id="tr-hours-go">经过</button>
+      const ck = LEDGER.clock == null ? 480 : LEDGER.clock;
+      const nextTier = [20, 40, 60, 80].find(x => x > (Number(LEDGER.hours) || 0));
+      return `<div class="tr-clockface">
+          <div class="tr-cf-time">${clockText(ck)}</div>
+          <div class="tr-cf-side"><b>第 ${LEDGER.day || 1} 天 · ${dayPeriod(ck)}</b>
+            <span>距上次长休 ${durationText(LEDGER.hours || 0)}${nextTier ? ` · 再过 ${durationText(nextTier - (Number(LEDGER.hours) || 0))} 进入${nextTier >= 80 ? "力竭致死" : "力竭 " + (nextTier / 20)}` : ""}</span>
+            <span class="tr-cf-bar"><i style="width:${(ck / 1440 * 100).toFixed(1)}%"></i></span></div>
         </div>
-        <p class="r-hint">距上次长休 20 / 40 / 60 小时分别进入力竭 1 / 2 / 3，80 小时力竭致死（手册第五章）。每满 24 小时算过了一天，短休次数刷新。</p>
+        <h3>推进时间</h3>
+        <div class="tr-row">
+          ${[10, 30].map(n => `<button class="g-btn" data-minutes="${n}">+${n} 分钟</button>`).join("")}
+          ${[1, 2, 4, 8].map(n => `<button class="g-btn" data-hours="${n}">+${n} 小时</button>`).join("")}
+        </div>
+        <div class="tr-row">
+          <input type="number" id="tr-hours" value="1" min="0" style="width:60px"> 小时
+          <input type="number" id="tr-mins" value="0" min="0" max="59" style="width:60px"> 分钟
+          <button class="g-btn" id="tr-hours-go">经过</button>
+          <span style="margin-left:12px">一直等到</span> <input type="text" id="tr-until" value="${clockText((ck + 60) % 1440)}" maxlength="5" placeholder="21:00" style="width:64px">
+          <button class="g-btn" id="tr-until-go">等待</button>
+        </div>
+        <p class="r-hint">24 小时制：时钟过了 0 点就进入下一天，短休次数刷新。「一直等到」的时刻如果今天已经过了，就等到明天的这个时刻。距上次长休 20 / 40 / 60 小时分别进入力竭 1 / 2 / 3，80 小时力竭致死（手册第五章）。</p>
         <h3>短休（1 小时）</h3>
         <div class="tr-row"><button class="g-btn" id="tr-short-all">全员短休</button>
           ${heroes().filter(h => !h.dead).map(h => `<button class="g-btn small" data-short="${esc(h.kit)}">${esc(h.name)}</button>`).join("")}</div>
@@ -260,7 +293,8 @@
       <h3>队伍</h3>
       <div class="tr-row">
         <label>第 ${numIn(`id="bs-day" min="1"`, LEDGER.day || 1, 56)} 天</label>
-        <label>距上次长休 ${numIn(`id="bs-hours" min="0"`, LEDGER.hours || 0, 56)} 小时</label>
+        <label>时刻 <input type="text" id="bs-clock" value="${clockText(LEDGER.clock == null ? 480 : LEDGER.clock)}" maxlength="5" placeholder="08:00" style="width:64px"></label>
+        <label>距上次长休 ${numIn(`id="bs-hours" min="0" step="any"`, Math.round((LEDGER.hours || 0) * 100) / 100, 64)} 小时</label>
         <label>奎支 ${numIn(`id="bs-kz" min="0"`, Number(state.kuizhi) || 0, 100)}</label>
         <label>水 ${numIn(`id="bs-water" min="0"`, ledgerWater(), 80)} ml</label>
       </div>
@@ -276,7 +310,7 @@
   function readBackstage() {
     const P = $("tr-panel");
     const val = (el) => el.value;
-    const edit = { day: $("bs-day").value, hours: $("bs-hours").value, kuizhi: $("bs-kz").value, water: $("bs-water").value, heroes: {} };
+    const edit = { day: $("bs-day").value, clock: $("bs-clock").value, hours: $("bs-hours").value, kuizhi: $("bs-kz").value, water: $("bs-water").value, heroes: {} };
     const H = (k) => (edit.heroes[k] = edit.heroes[k] || { attrs: {}, layers: [], weapons: {} });
     const W = (k, w) => (H(k).weapons[w] = H(k).weapons[w] || {});
     P.querySelectorAll("[data-bs-status]").forEach(el => { H(el.dataset.bsStatus).status = val(el); });
@@ -329,7 +363,11 @@
     });
     // 时间与休息
     P.querySelectorAll("[data-hours]").forEach(b => { b.onclick = () => act(ruleCommand("passHours", { hours: b.dataset.hours })); });
-    on("tr-hours-go", () => act(ruleCommand("passHours", { hours: $("tr-hours").value })));
+    P.querySelectorAll("[data-minutes]").forEach(b => { b.onclick = () => act(ruleCommand("passMinutes", { minutes: b.dataset.minutes })); });
+    on("tr-hours-go", () => act(ruleCommand("passMinutes", { minutes: (Math.max(0, Math.floor(Number($("tr-hours").value) || 0)) * 60) + Math.max(0, Math.floor(Number($("tr-mins").value) || 0)) })));
+    on("tr-until-go", () => act(ruleCommand("passUntil", { time: $("tr-until").value })));
+    // 角色页：换人
+    P.querySelectorAll("[data-hs-kit]").forEach(b => { b.onclick = () => { sheetKit = b.dataset.hsKit; render(); }; });
     on("tr-short-all", () => act(ruleCommand("shortRest", { kits: null })));
     P.querySelectorAll("[data-short]").forEach(b => { b.onclick = () => act(ruleCommand("shortRest", { kits: [b.dataset.short] })); });
     const restPlan = (force) => {
@@ -528,7 +566,7 @@
     recordBattle(c) { recordBattle(c.result); },
     party(c) {
       pushUndo(); GAME.partyKits = c.kits.slice(); rebuild();
-      log.push({ stamp: `第 ${LEDGER.day || 1} 天 · 距长休 ${LEDGER.hours || 0} 小时`, lines: [`队伍：${c.kits.map(k => (livePartyCards().find(x => x.kit === k) || {}).name || k).join("、")}。`] });
+      log.push({ stamp: stampNow(), lines: [`队伍：${c.kits.map(k => (livePartyCards().find(x => x.kit === k) || {}).name || k).join("、")}。`] });
       saveLog(); save(); render();
     },
     reset() { pushUndo(); freshCampaign(); rebuild(); save(); render(); },
@@ -561,7 +599,7 @@
         lines.push(`${x.sub ? "　" : ""}${x.name}${x.sub ? "（武器人）" : ""}：伤害 ${Math.round(x.dmg)} · 击破 ${Math.round(x.brk)} · 承伤 ${Math.round(x.taken)} · 击杀 ${x.kills} · 治疗 ${Math.round(x.heal)}`);
       });
       (r.durNotes || []).forEach(t => lines.push(t));
-      log.push({ stamp: `第 ${LEDGER.day || 1} 天 · 距长休 ${LEDGER.hours || 0} 小时`, lines });
+      log.push({ stamp: stampNow(), lines });
   }
 
   function boot() {

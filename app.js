@@ -2269,7 +2269,10 @@ function breakIronWall(p, notes) {
 
 /** 一下攻击打在墙上：墙是一层装甲（防护罩是护盾），照常算克制 / 天气 / 场地 */
 function hitBarrier(p, attacker, opt) {
-  const dummy = unitOf(p.name, p.level || 1, [{ type: p.layerType || "armor", hp: p.hp }], 999, 0, { noPosture: true });
+  // 铁壁可以带一层外层护盾（川川电能 ≥ 3 时额外加的）：先打护盾，再打本体
+  const shieldNow = Math.max(0, Number(p.shield) || 0);
+  const dummy = unitOf(p.name, p.level || 1,
+    (shieldNow > 0 ? [{ type: "shield", hp: shieldNow }] : []).concat([{ type: p.layerType || "armor", hp: p.hp }]), 999, 0, { noPosture: true });
   dummy.zone = p.zone;
   dummy.def = 999;
   dummy.defMax = 999;
@@ -2296,8 +2299,15 @@ function hitBarrier(p, attacker, opt) {
     atkRange: "any"
   });
   const dmg = Math.floor(res.total || 0);
-  p.hp = Math.max(0, p.hp - dmg);
-  const notes = [`${p.name}替同区承受本次攻击：${dmg} 伤害 → 剩余 ${p.hp}/${p.maxHp}。`];
+  let notes;
+  if (shieldNow > 0 && res.layersAfter && res.layersAfter.length === 2) {
+    p.shield = Math.max(0, Math.floor(Number(res.layersAfter[0].current) || 0));
+    p.hp = Math.max(0, Math.floor(Number(res.layersAfter[1].current) || 0));
+    notes = [`${p.name}替同区承受本次攻击：${dmg} 伤害 → 护盾 ${p.shield}，装甲 ${p.hp}/${p.maxHp}。`];
+  } else {
+    p.hp = Math.max(0, p.hp - dmg);
+    notes = [`${p.name}替同区承受本次攻击：${dmg} 伤害 → 剩余 ${p.hp}/${p.maxHp}。`];
+  }
   if (p.hp <= 0) notes.push(...breakIronWall(p, []));
   return { dmg, res, notes };
 }
@@ -6318,6 +6328,21 @@ function skillFlowSteps(id, actor, picks) {
     return [{ key: "dest", type: "choice", optional: true, label: "是否顺势移动 1 距离",
               options: [{ value: 0, label: "留在原地" }].concat(zones.map(z => ({ value: z, label: `移动到 ${z} 区` }))) }];
   }
+  if (id === "chuan_whip" && (Number(actor.resources && actor.resources.charge) || 0) >= 1) {
+    return [{ key: "pull", type: "choice", optional: true, label: "命中后要不要消耗 1 电能，把自己拉到敌人那一区？",
+              options: [{ value: "", label: "不拉" }, { value: "pull", label: "命中后拉过去（−1 电能）" }] }];
+  }
+  if (id === "chuan_wall" && (Number(actor.resources && actor.resources.charge) || 0) >= 3) {
+    return [{ key: "shield", type: "choice", optional: true, label: "电能 ≥ 3：要不要额外消耗 1 电能，给铁壁加 atk 点外层护盾？",
+              options: [{ value: "", label: "不加（−1 电能）" }, { value: "shield", label: "加护盾（共 −2 电能）" }] }];
+  }
+  if (id === "bili_field") {
+    const c = findKit("chuan", state.units);
+    if (c && (Number(c.resources && c.resources.charge) || 0) >= 2) {
+      return [{ key: "boost", type: "choice", optional: true, label: `要不要额外消耗 1 电能，护盾再加 ${Number(c.level) || 1} 点（川川等级）？`,
+                options: [{ value: "", label: "不加（−1 电能）" }, { value: "boost", label: "加（共 −2 电能）" }] }];
+    }
+  }
   if (id === "chuan_blade") {
     const units = fieldUnits().filter(u => !u.isPlayer && !u.dead && !u.hidden &&
       Number(u.zone) === Number(actor.zone));
@@ -7619,10 +7644,7 @@ const SKILL_REQUIREMENT = {
   nora_summon:    (a) => weaponSummonWhy(a, "vitas"),
   nora_indwell:   (a) => piercedTarget(a) ? null : "场上没有刺入的目标",
   vitas_infuse:   () => piercedTarget(noraOf()) ? null : "场上没有刺入的目标",
-  vitas_rip:      () => {
-    if (noraMood(noraOf()) !== "cruel") return "只能在残忍状态下使用";
-    return piercedTarget(noraOf()) ? null : "场上没有刺入的目标";
-  },
+  vitas_rip:      () => piercedTarget(noraOf()) ? null : "场上没有刺入的目标",
   vitas_dance:    () => piercedTarget(noraOf()) ? "场上有刺入单位时无法使用" : null,
   nora_soothe:    (a) => noraMood(a) === "gentle" ? "维塔斯已处于温和" : null,
   hiaki_allin:    (a) => (Number(a.resources && a.resources.smashUsed) || 0) >= allinMaxUses(a)
@@ -8336,11 +8358,23 @@ function runSkillInner(id, optRun) {
       if (charged) { a.resources.charge -= 1; lines.push("消耗 1 电能，攻击变为三次、共 2 击破。"); }
       const hits = charged ? 3 : 2;
       const br = charged ? 2 : 1;
-      hitOne(a, t, { element: "energy", mult: 0.5, hits: 1, diceN: 1, diceS: 4, baseBreak: br, atk });
-      for (let i = 1; i < hits; i++) hitOne(a, t, { element: "energy", mult: 0.5, hits: 1, diceN: 1, diceS: 4, baseBreak: 0, atk, usePrep: false });
+      hitOne(a, t, { element: "electric", mult: 0.5, hits: 1, diceN: 1, diceS: 4, baseBreak: br, atk });
+      for (let i = 1; i < hits; i++) hitOne(a, t, { element: "electric", mult: 0.5, hits: 1, diceN: 1, diceS: 4, baseBreak: 0, atk, usePrep: false });
     } else if (id === "chuan_whip") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
-      hitOne(a, t, { element: "electric", mult: 0.5, baseBreak: 1, atk });
+      const hadCharge = (a.resources.charge || 0) >= 1;
+      const whipFl = state.skillFlow;
+      const wantPull = !!(whipFl && whipFl.picks && whipFl.picks.pull);
+      const wr = hitOne(a, t, { element: "energy", mult: 0.5, baseBreak: 1, atk });
+      const landed = !(wr && wr.res && wr.res.ok === false) && !t.dead;
+      // 有电能时：命中后可以消耗 1 电能，把自己拉到敌人那一区
+      if (wantPull && hadCharge && Number(t.zone) !== Number(a.zone) && (landed || t.dead)) {
+        a.resources.charge -= 1;
+        const from = a.zone;
+        a.zone = Number(t.zone);
+        lines.push(`电击鞭缠住 ${t.name}：消耗 1 电能，川川从 ${from} 区拉到 ${a.zone} 区。`);
+        if (typeof afterMove === "function") afterMove(a, lines);
+      }
       addCharge(1);
       lines.push("电能 +1 → " + (findKit("chuan", state.units).resources.charge));
     } else if (id === "chuan_cover") {
@@ -8359,7 +8393,7 @@ function runSkillInner(id, optRun) {
           noraFrost(a, tgt, lines);
         } else {
           // 温和对刺入目标改为治疗，不造成伤害（所以刺入队友可以拿来奶）
-          const r = takeDice(1, 4, a.level || 1);
+          const r = takeDice(1, 6, a.level || 1);
           healUnit(tgt, r.total);
           lines.push(`温和：${tgt.name} 恢复 ${r.text} 点生命。`);
         }
@@ -8421,14 +8455,13 @@ function runSkillInner(id, optRun) {
       } else {
         // 每五级多一个 d4
         const nd = 2 + dieStep(a.level || 1, 5);
-        const r = takeDice(nd, 4, 0);
+        const r = takeDice(nd, 4, 2);
         healUnit(pin, r.total);
         pin.def = Math.min(pin.defMax, (pin.def || 0) + 1);
         lines.push(`温和：加压灌输 ${r.text}，${pin.name} 恢复生命并 +1 架势。`);
       }
     } else if (id === "vitas_rip") {
       const n = noraOf();
-      if (noraMood(n) !== "cruel") { lines.push("扯下只能在残忍状态下使用。"); return paintSkillLog(lines.join("\n")); }
       const pin = piercedTarget(n);
       if (!pin) { lines.push("场上没有刺入的目标。"); return paintSkillLog(lines.join("\n")); }
       hitOne(a, pin, { element: "harmonic", mult: 1.5, baseBreak: 2, atk });
@@ -8475,9 +8508,9 @@ function runSkillInner(id, optRun) {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       lines.push(...crushOnce(a, t));
     } else if (id === "chuan_pulse") {
-      if (!needT()) return paintSkillLog(lines.join("\n"));
-      addHighEnergy(t, "高能脉冲");
-      lines.push(`${t.name} 被施加高能。`);
+      // 高能脉冲：对自身施加蓄能（自我效果，同时只能有一种）
+      castSelfEffect(a, "store", lines);
+      lines.push(`${a.name} 进入蓄能：每回合开始高能 +等级，能量 / 谐波 / 电伤害按高能值提高。`);
     } else if (id === "chuan_blade") {
       if ((a.resources.charge || 0) < 3) { lines.push("巨刃划空需要 3 电能。"); return paintSkillLog(lines.join("\n")); }
       const fl2 = state.skillFlow;
@@ -8512,10 +8545,19 @@ function runSkillInner(id, optRun) {
       hitOne(a, t, { element: "electric", mult: 0.5, diceN: 1, diceS: 4, baseBreak: 0, atk, flags: { action: true, assist: true }, usePrep: false });
       addCharge(2);
       lines.push("电能 +2。");
+      // 有至少 3 电能：最后补一击重斩（1×atk+1d10 电击），消耗 2 电能
+      if ((a.resources.charge || 0) >= 3 && !t.dead) {
+        a.resources.charge -= 2;
+        hitOne(a, t, { element: "electric", mult: 1, diceN: 1, diceS: 10, baseBreak: 0, atk, flags: { action: true, assist: true }, usePrep: false });
+        lines.push(`重斩：1×atk+1d10 电击，电能 −2 → ${a.resources.charge}。`);
+      }
     } else if (id === "chuan_wall") {
       if ((a.resources.charge || 0) < 1) lines.push("没有电能。");
       else {
-        a.resources.charge -= 1;
+        // 至少 3 电能时，可以额外消耗 1 电能给铁壁加一层 atk 点的外层护盾
+        const wallFl = state.skillFlow;
+        const extraShield = !!(wallFl && wallFl.picks && wallFl.picks.shield) && (a.resources.charge || 0) >= 3;
+        a.resources.charge -= extraShield ? 2 : 1;
         const r = takeDice(1, 6, 0);
         const hp = Math.floor(atk + r.total);
         state.props = (state.props || []).filter(p => !(p.kind === "ironwall" && Number(p.zone) === Number(a.zone)));
@@ -8525,8 +8567,9 @@ function runSkillInner(id, optRun) {
         wall.name = "铁壁";
         wall.movable = false;
         wall.faction = "player";
+        if (extraShield) { wall.shield = wall.shieldMax = Math.floor(atk); }
         state.props.push(wall);
-        lines.push(`铁壁展开：配置物装甲 ${hp}（${r.text}），不可移动。同区敌方攻击行动只打铁壁一次。`);
+        lines.push(`铁壁展开：配置物装甲 ${hp}（${r.text}）${extraShield ? `，外层护盾 ${wall.shield}（多耗 1 电能）` : ""}，不可移动。同区敌方攻击行动只打铁壁一次。`);
       }
     } else if (id === "chuan_over") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
@@ -8564,10 +8607,14 @@ function runSkillInner(id, optRun) {
       const c = findKit("chuan", state.units);
       if (!c || (c.resources.charge || 0) < 1) lines.push("川川电能不足。");
       else {
-        c.resources.charge -= 1;
-        const sh = effectiveAtk(a, state.units);
+        // atk+1d4 护盾；额外消耗 1 电能再加「角色等级」点
+        const fieldFl = state.skillFlow;
+        const boost = !!(fieldFl && fieldFl.picks && fieldFl.picks.boost) && (c.resources.charge || 0) >= 2;
+        c.resources.charge -= boost ? 2 : 1;
+        const r = takeDice(1, 4, 0);
+        const sh = effectiveAtk(a, state.units) + r.total + (boost ? (Number(c.level) || 1) : 0);
         fieldUnits().filter(u => u.isPlayer && Number(u.zone) === Number(a.zone)).forEach(u => addShieldLayer(u, sh));
-        lines.push(`磁场盾：同区友方各获得 ${sh} 护盾，电能 −1。`);
+        lines.push(`磁场盾：同区友方各获得 ${sh} 护盾（atk+${r.text}${boost ? ` + 等级 ${Number(c.level) || 1}` : ""}），电能 −${boost ? 2 : 1}。`);
       }
     } else if (id === "bili_storm") {
       if (!needT()) return paintSkillLog(lines.join("\n"));

@@ -13,7 +13,7 @@
 #ogm-toggle { position: fixed; right: 14px; bottom: calc(74px + env(safe-area-inset-bottom)); max-width: calc(100vw - 28px); z-index: 74; box-shadow: 3px 4px 0 #0009; }
 #ogm-panel { position: fixed; right: 12px; bottom: calc(128px + env(safe-area-inset-bottom)); width: min(610px, calc(100vw - 24px)); max-height: calc(100dvh - 214px - env(safe-area-inset-bottom)); overflow-y: auto; overscroll-behavior: contain; z-index: 74; border: 3px solid var(--sk-ink, #0b0806); box-shadow: 5px 6px 0 #000a; padding: 14px; background: var(--sk-steel, #2a2520); }
 #ogm-panel header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-#ogm-panel h2 { font: 30px/1.2 var(--sk-tag, sans-serif); margin: 0; color: var(--sk-hazard, #f2c230); }
+#ogm-panel h2 { font: 800 30px/1.2 var(--sk-tag, sans-serif); margin: 0; color: var(--sk-hazard, #f2c230); }
 #ogm-panel h3 { margin: 18px 0 10px; color: var(--sk-brass, #c99a46); font-size: 17px; }
 #ogm-panel nav { display: flex; gap: 5px; flex-wrap: wrap; padding: 10px 0; border-bottom: 1px solid var(--sk-edge, #4d4337); }
 #ogm-panel nav button { flex: 1 0 auto; padding: 6px 10px; }

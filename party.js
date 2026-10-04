@@ -732,7 +732,7 @@ function skillList(unit) {
   if (unit.kit === "nora") {
     const lv = unit.level || 1;
     add({ id: "nora_aa", name: "普通攻击", hint: "距离1 · 1atk 冰 +1击破 · 有刺入则只能打刺入目标（温和治疗／残忍加伤）" });
-    add({ id: "nora_needle", name: "发射针尖", hint: "距离1 · 施加刺入 · 温和则自己移到目标区／残忍则附加冻伤" });
+    add({ id: "nora_needle", name: "发射针尖", hint: "距离1以内 · 施加刺入 · 温和则自己移到目标区／残忍则附加冻伤" });
     add({ id: "nora_summon", name: "唤出维塔斯", hint: "武器生物化" });
     add({ id: "nora_soothe", name: "安抚", hint: "附赠 · 安抚维塔斯，切换为温和", minLv: 2, bare: true });
     add({ id: "nora_indwell", name: "留置针", hint: "对刺入目标施加刺骨与 1 冻伤", minLv: 3 });
@@ -740,8 +740,8 @@ function skillList(unit) {
     add({ id: "nora_sonic", name: "声波震击", hint: "同区全体 0.5atk 谐波 +1击破 · 刺入目标额外再吃一次", minLv: 11 });
   }
   if (unit.kit === "vitas") {
-    add({ id: "vitas_infuse", name: "加压灌输", hint: "对刺入目标 · 温和 2d4 治疗并 +1 架势／残忍 1atk 冰 +1击破与两次冻伤" });
-    add({ id: "vitas_rip", name: "扯下", hint: "仅残忍 · 对刺入目标 1.5atk 谐波 +2击破 · 结束刺入" });
+    add({ id: "vitas_infuse", name: "加压灌输", hint: "对刺入目标 · 温和 2d4+2 治疗并 +1 架势／残忍 1atk 冰 +1击破与两次冻伤" });
+    add({ id: "vitas_rip", name: "扯下", hint: "对刺入目标 1.5atk 谐波 +2击破 · 结束刺入" });
     add({ id: "vitas_slash", name: "针尖剑斩", hint: "同区 1atk 谐波 +1击破 · 有刺入则只能打刺入目标并先移动过去", minLv: 2 });
     add({ id: "vitas_dance", name: "寒气剑舞", hint: "场上无刺入才能用 · 三次 0.2atk 冰 共1击破 · 温和治疗同区友方／残忍每击冻伤", minLv: 4 });
     add({ id: "vitas_return", name: "收回为武器", hint: "需与诺拉同区" });
@@ -800,18 +800,18 @@ function skillList(unit) {
     add({ id: "berniel_return", name: "收回为武器", hint: "需与夕夏同区" });
   }
   if (unit.kit === "chuan") {
-    add({ id: "chuan_aa", name: "普通攻击", hint: "近距离 · 两次 atk/2+1d4 能量 共1击破 · 耗1电能变三次共2击破" });
-    add({ id: "chuan_whip", name: "电击鞭", hint: "距离1以内 · atk/2 电击 1击破 · +1电能" });
-    add({ id: "chuan_wall", name: "铁壁", hint: "耗1电能 · 同区挡伤盾 atk+1d6 装甲", minLv: 2 });
+    add({ id: "chuan_aa", name: "普通攻击", hint: "近距离 · 两次 atk/2+1d4 电击 共1击破 · 耗1电能变三次共2击破" });
+    add({ id: "chuan_whip", name: "电击鞭", hint: "距离1以内 · atk/2 能量 1击破 · +1电能 · 可耗1电能把自己拉到敌人区" });
+    add({ id: "chuan_wall", name: "铁壁", hint: "耗1电能 · 同区挡伤盾 atk+1d6 装甲 · 电能≥3可多耗1加 atk 护盾", minLv: 2 });
     add({ id: "chuan_over", name: "电站超频", hint: "友方（可对自己）过载 · +1电能；已有≥3电能则改为 atk/2 护盾", minLv: 3 });
-    add({ id: "chuan_pulse", name: "高能脉冲", hint: "距离1以内 · 对一个敌人施加高能", minLv: 6 });
+    add({ id: "chuan_pulse", name: "高能脉冲", hint: "对自身施加蓄能", minLv: 6 });
     add({ id: "chuan_blade", name: "巨刃划空", hint: "同区 · 耗3电能 · 2atk 电击 +2击破 · 对配置物伤害翻倍 · 击穿血量层或摧毁配置物返还1电能", minLv: 11 });
     add({ id: "chuan_summon", name: "唤出哔哩哩", hint: "武器生物化" });
   }
   if (unit.kit === "bili") {
     add({ id: "bili_beam", name: "电光束", hint: "任意距离 · 1atk 电击 · 感电" });
     add({ id: "bili_magnet", name: "磁力移动", hint: "任意距离 · 同区推远或他区拉到身边 · 1击破" });
-    add({ id: "bili_field", name: "磁场盾", hint: "耗川川1电能 · 同区友方 +atk 护盾", minLv: 2 });
+    add({ id: "bili_field", name: "磁场盾", hint: "耗川川1电能 · 同区友方 +atk+1d4 护盾 · 可多耗1再加等级", minLv: 2 });
     add({ id: "bili_storm", name: "雷电风暴", hint: "耗全部电能 · 电能×2 次 0.4atk 电击 · 每2电能1击破 · 目标感电则+2电能", minLv: 4 });
     add({ id: "bili_return", name: "收回为武器", hint: "需与川川同区" });
   }

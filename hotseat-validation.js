@@ -12,7 +12,7 @@
   // This only says whether a primary target is mandatory; the existing flow and
   // range helpers remain authoritative for the options and their legal ranges.
   const needsTarget = new Set(("ruby_aa ruby_trigger wing_aa mint_steal yuito_aa latte_puff hiaki_aa niu_slash naruto_wind mochi_roar " +
-    "xia_aa xia_execute berniel_ignite berniel_flare chuan_aa chuan_whip chuan_cover nora_needle vitas_dance xia_crush chuan_pulse " +
+    "xia_aa xia_execute berniel_ignite berniel_flare chuan_aa chuan_whip chuan_cover nora_needle vitas_dance xia_crush " +
     "chuan_over bili_beam bili_storm ruby_surge wing_surge ruby_short mint_banish latte_love hiaki_pot niu_tsubame naruto_fly tou_ultra " +
     "role_double_dot role_halve role_omen role_buffer role_renew role_shelter role_harsh role_boost role_sturdy role_gold role_firstaid " +
     "role_cover role_pull kolt_aa kolt_chase helu_aa ecmo_bite ras_aa ras_dump edc_shock bare_aa yuito_inspire chuan_blade role_spread").split(" "));

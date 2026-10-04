@@ -74,6 +74,29 @@ function trpgPassHours(h) {
   ledgerCapture();
   return notes;
 }
+/** 按分钟推进（24 小时时钟） */
+function trpgPassMinutes(m) {
+  const notes = [];
+  m = Math.max(0, Math.floor(Number(m) || 0));
+  if (!m) return notes;
+  notes.push(`经过 ${durationText(m / 60)}。`);
+  ledgerAdvance(m / 60, notes);
+  if (exhaustTier() >= 4) {
+    trpgHeroes().filter(u => !u.dead).forEach(u => { u.dead = true; notes.push(`${u.name} 力竭致死。`); });
+  }
+  ledgerCapture();
+  return notes;
+}
+/** 一直等到某个时刻（"21:00"）：已经过了就等到明天的这个时刻 */
+function trpgPassUntil(text) {
+  const target = parseClock(text);
+  if (target == null) return [`看不懂时刻「${text}」，请写成 21:00 这样。`];
+  let m = target - (LEDGER.clock == null ? CLOCK_START : LEDGER.clock);
+  if (m <= 0) m += 1440;
+  const notes = trpgPassMinutes(m);
+  if (notes.length) notes[0] = `等到 ${clockText(target)}（经过 ${durationText(m / 60)}）。`;
+  return notes;
+}
 function trpgShortRest(kits) {
   return ledgerShortRest(kits && kits.length ? kits : null, []);
 }
@@ -188,7 +211,12 @@ function trpgBackstageApply(edit, why) {
   const change = (label, a, b) => { if (a !== b) notes.push(`${label} ${a} → ${b}`); };
 
   if (edit.day != null) { const v = num(edit.day, 1); if (v != null) { change("天数", LEDGER.day, v); LEDGER.day = v; } }
-  if (edit.hours != null) { const v = num(edit.hours, 0); if (v != null) { change("距上次长休（小时）", LEDGER.hours, v); LEDGER.hours = v; } }
+  if (edit.clock != null && String(edit.clock).trim() !== "") {
+    const v = parseClock(edit.clock);
+    if (v == null) notes.push(`时刻「${edit.clock}」看不懂，没有改（写成 21:00 这样）。`);
+    else { change("时刻", clockText(LEDGER.clock), clockText(v)); LEDGER.clock = v; }
+  }
+  if (edit.hours != null && Math.abs(Number(edit.hours) - (Number(LEDGER.hours) || 0)) >= 0.01) { const v = num(edit.hours, 0); if (v != null) { change("距上次长休（小时）", LEDGER.hours, v); LEDGER.hours = v; } }
   if (edit.kuizhi != null) { const v = num(edit.kuizhi, 0); if (v != null) { change("奎支", Number(state.kuizhi) || 0, v); state.kuizhi = v; } }
   if (edit.water != null) { const v = num(edit.water, 0); if (v != null) { change("水（ml）", ledgerWater(), v); setLedgerWater(v); } }
 

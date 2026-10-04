@@ -154,5 +154,5 @@
     }, true);
   }
 
-  root.HeroSheet = { open, openFrom, openField: (kit) => openFrom("field", kit), register, close, tip, hideTip, skillTipHtml };
+  root.HeroSheet = { open, openFrom, openField: (kit) => openFrom("field", kit), register, close, tip, hideTip, skillTipHtml, heroHtml };
 })(window);

@@ -7,6 +7,8 @@ const TrpgCommands = (() => {
     giveXp: c => trpgGiveXp(c.kits, c.amount),
     spendAttr: c => trpgSpendAttr(c.kit, c.attr),
     passHours: c => trpgPassHours(c.hours),
+    passMinutes: c => trpgPassMinutes(c.minutes),
+    passUntil: c => trpgPassUntil(c.time),
     shortRest: c => trpgShortRest(c.kits),
     longRest: c => trpgLongRest(c.plan),
     restore: () => ledgerRestoreAll([]),
