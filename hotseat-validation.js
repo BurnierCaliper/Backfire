@@ -27,13 +27,17 @@
   }
   function readOnly(fn) {
     const descriptors = Object.getOwnPropertyDescriptors(state), draft = duplicate(state);
+    const ledger = typeof LEDGER === "undefined" ? null : LEDGER;
+    const ledgerDescriptors = ledger && Object.getOwnPropertyDescriptors(ledger), ledgerDraft = ledger && duplicate(ledger);
     try {
       for (const key of Object.keys(state)) delete state[key];
       Object.assign(state, draft);
+      if (ledger) { for (const key of Object.keys(ledger)) delete ledger[key]; Object.assign(ledger, ledgerDraft); }
       return fn();
     } finally {
       for (const key of Object.keys(state)) delete state[key];
       Object.defineProperties(state, descriptors);
+      if (ledger) { for (const key of Object.keys(ledger)) delete ledger[key]; Object.defineProperties(ledger, ledgerDescriptors); }
     }
   }
   const present = u => !!u && !u.dead && !u.hidden && !u.fused && !u._removed;
@@ -207,6 +211,6 @@
       return true;
     });
   }
-  root.HotseatValidation = { validateBattle, reason };
+  root.HotseatValidation = { validateBattle, reason, inspect: readOnly };
   if (typeof module !== "undefined" && module.exports) module.exports = root.HotseatValidation;
 })(typeof globalThis !== "undefined" ? globalThis : window);

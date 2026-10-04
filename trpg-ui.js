@@ -604,5 +604,9 @@
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
   else boot();
 
-  window.TrpgFlow = { enter: index => uiCommand("enter", { index }), openSlots: () => uiCommand("slots"), toBattle: () => uiCommand("toBattle"), backFromBattle: requestBackFromBattle };
+  window.TrpgFlow = { enter: index => uiCommand("enter", { index }), openSlots: () => uiCommand("slots"), toBattle: () => uiCommand("toBattle"), backFromBattle: requestBackFromBattle,
+    refresh: render,
+    onlineCheckpoint: () => JSON.parse(JSON.stringify({ slot, slotName, log, tab, commandLevel })),
+    restoreOnline(saved) { slot = saved.slot; slotName = saved.slotName; log = saved.log || []; tab = saved.tab || "party"; commandLevel = saved.commandLevel || 1; TRPG.active = true; document.body.classList.add("trpg"); }
+  };
 })();

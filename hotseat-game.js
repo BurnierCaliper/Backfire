@@ -7,7 +7,9 @@
   let enabled = requested, configured = false, session = null, authority = null;
   let clients = new Map(), playerId = "p1", config = { mode: "trpg", players: [{ id: "p1", name: "主持人", gm: true }, { id: "p2", name: "玩家 2" }] };
   let ownerByKit = {}, executing = 0, pendingContext = null, sender = null, askDetails = null, choice = null;
-  let newRoundSpends = null, notice = "";
+  let newRoundSpends = null, notice = "", restoredAsk = null;
+  let network = false, commandOperator = null;
+  const packetListeners = new Set();
   const listeners = new Set(), authorityContext = {}, actionTypes = new Set(["skill", "move", "standUp", "useItem"]);
   const automatic = new Set(["battle.supportInfo", "battle.checkSolo", "battle.rememberCampaign", "battle.loadCampaign"]);
   const orderTypes = new Set(["orderPick", "orderConfirm", "orderStart", "orderMove", "orderSwapAccept", "answer", "chat"]);
@@ -32,7 +34,7 @@
     session.onChange(() => { if (!executing) authority.broadcast(); });
     for (const p of config.players) {
       const client = authority.connect(p.id); clients.set(p.id, client);
-      client.onMessage(message => { if (message.type === "result" && p.id === playerId) notify(); });
+      client.onMessage(message => { if (message.type === "result" && p.id === playerId) { notify(); for (const fn of packetListeners) fn(message); } });
     }
   }
   function configure(value) {
@@ -40,11 +42,12 @@
       if (!enabled || !canConfigure()) fail("战斗中不能重新分配角色");
       if (configured) hostOnly(playerId);
       Commands.validate({ type: "hotseat.configure", value });
-      if (!["trpg", "coop"].includes(value.mode) || !Array.isArray(value.players) || value.players.length < 2 || value.players.length > 4) fail("热座需要 2–4 名操作者");
+      if (!["trpg", "coop"].includes(value.mode) || !Array.isArray(value.players) || value.players.length < (network ? 1 : 2) || value.players.length > (network ? 5 : 4)) fail(network ? "在线跑团最多 1 名主持人与 4 名玩家" : "热座需要 2–4 名操作者");
       const ids = value.players.map(p => p.id);
       if (new Set(ids).size !== ids.length || ids.some(id => typeof id !== "string" || !id)) fail("操作者编号必须唯一");
       const assignments = value.assignments || {}, list = heroes();
       if (Object.keys(assignments).some(id => !list.some(u => u.id === id) || !ids.includes(assignments[id]))) fail("角色分配无效");
+      if (network && (value.mode !== "trpg" || value.players.filter(p => p.gm).length !== 1 || value.players.some(p => !p.gm && list.filter(u => assignments[u.id] === p.id).length > 1))) fail("每名在线玩家最多操控一名角色，未分配角色由主持人操作");
       if (value.mode === "coop" && (list.length !== ids.length || ids.some(id => list.filter(u => assignments[u.id] === id).length !== 1))) fail("合作模式需要每名操作者恰好一名角色，请先调整队伍");
       config = copy(value); ownerByKit = {}; for (const u of list) ownerByKit[u.kit] = assignments[u.id] || gm();
       if (!ids.includes(playerId)) playerId = gm();
@@ -66,20 +69,21 @@
       options: id === choice.owner ? choice.options : [] };
     return base;
   }
-  function getView() {
-    const packet = clients.get(playerId)?.snapshot();
-    const s = packet?.view || session?.snapshot();
-    return { enabled: enabled && !state.solo, configured, notice, mode: config.mode, playerId, hostId: gm(), players: copy(config.players),
+  function getViewFor(id) {
+    const s = session ? (config.players.some(p => p.id === id) ? project(id, session.snapshot()) : { ...session.snapshot(), ask: null }) : null;
+    return { enabled: enabled && !state.solo, network, configured, notice, mode: config.mode, playerId: id, hostId: gm(), players: copy(config.players),
       heroes: heroes().map(u => ({ id: u.id, name: u.name, owner: ownerByKit[u.kit] || gm() })),
       units: (s?.roster || []).map(r => ({ id: r.unitId, name: r.unitName, owner: r.operatorId })),
       phase: s?.phase === "selecting" ? "picking" : s?.phase || "setup", currentUnitId: s?.currentUnitId || null,
       order: (s?.slots || []).map(r => r && ({ actor: r.unitId, name: r.unitName, owner: r.operatorId, locked: r.spent, done: r.completed, current: r.unitId === s.currentUnitId })),
       confirmed: s?.confirmed || [], swap: s?.pendingSwaps?.length ? { requestId: s.pendingSwaps[0].id, from: s.pendingSwaps[0].actor, to: s.pendingSwaps[0].target, recipient: s.pendingSwaps[0].responder } : null,
       ask: s?.ask || null, chat: (s?.chat || []).map(r => ({ name: r.operatorName, text: r.text })),
-      canConfigure: canConfigure() && (!configured || playerId === gm()), canDisable: canConfigure() && (!configured || playerId === gm()) };
+      canConfigure: !network && canConfigure() && (!configured || id === gm()), canDisable: !network && canConfigure() && (!configured || id === gm()) };
   }
+  const getView = () => getViewFor(playerId);
   function validate(cmd, id) {
     if (!active()) fail("热座尚未配置或当前为单人模式");
+    if (network && root.OnlineGame?.isPaused()) fail("房主连接中断，等待恢复");
     if (cmd.type === "answer") {
       if (choice) {
         if (cmd.askId !== choice.id || id !== choice.owner) fail("不能代替其他操作者回答");
@@ -135,7 +139,7 @@
   function submit(cmd) {
     try {
       if (!active()) fail("请先应用角色分配");
-      const ack = clients.get(playerId).send(cmd);
+      const ack = clients.get(commandOperator || playerId).send(cmd);
       notice = ack.ok ? "" : ack.error; notify();
       if (ack.ok && orderTypes.has(cmd.type)) { GAME.disarm(); const current = session.snapshot().currentUnitId; if (current) GAME.actorId = current; refresh(); }
       return ack;
@@ -149,14 +153,23 @@
   function reason(unit) {
     if (!active()) return "";
     if (choice) return "正在等待其他操作者选择";
-    try { session.assertAction(playerId, unit?.id); return ""; } catch (e) { return e.message; }
+    if (network && root.OnlineGame?.isPaused()) return "房主连接中断，等待恢复";
+    try { session.assertAction(commandOperator || playerId, unit?.id); return ""; } catch (e) { return e.message; }
   }
   function beginRound() { if (!active()) return; session.beginRound(state.turnNo); if (newRoundSpends?.length) session.markSpent(newRoundSpends); newRoundSpends = null; GAME.disarm(); refresh(); }
   function requestAsk(kind, title, options, eligible, job) {
     return new Promise(resolve => {
       askDetails = { title, options: copy(options), eligible };
       const off = session.onAskClosed(result => { off(); askDetails = null; resolve(result); });
-      session.openAsk({ kind, jobId: job.seq || null, targetId: job.targetId || null, candidates: eligible().map(u => u.id) });
+      const previous = restoredAsk; restoredAsk = null;
+      const sameAsk = previous && previous.kind === kind && previous.jobId === (job.seq || null) && previous.targetId === (job.targetId || null);
+      const reopened = session.openAsk({ kind, jobId: job.seq || null, targetId: job.targetId || null, candidates: eligible().map(u => u.id),
+        ...(sameAsk ? { remainingMs: previous.remainingMs } : {}) });
+      if (sameAsk) {
+        const waiting = new Set(previous.waiting.map(p => p.operatorId));
+        for (const p of reopened.waiting) if (!waiting.has(p.operatorId) && session.snapshot().ask) session.answer(p.operatorId, reopened.id, { unitId: null });
+        session.tick();
+      }
       refresh();
     });
   }
@@ -191,14 +204,27 @@
     finally { pendingContext = prev; }
   });
   onActionSpend(event => { if (active() && executing && !GAME.sim) { if (newRoundSpends) newRoundSpends.push(event); else session.markSpent([event]); } });
-  setInterval(() => { if (active()) session.tick(); }, 250);
+  setInterval(() => { if (active() && !(network && root.OnlineGame?.isPaused())) session.tick(); }, 250);
   // Legacy panel handlers were written before the command boundary. Surface an
   // expected authorization rejection in the hotseat bar; unrelated errors keep
   // their normal browser diagnostics and remain visible to UI regression tests.
   if (root.addEventListener) root.addEventListener("error", event => {
     if (active() && event.error?.code === "HOTSEAT_REJECT") { notice = event.error.message; notify(); event.preventDefault(); }
   });
-  root.HotseatGame = { getView, configure, submit, isActive: active, isRequested: () => enabled && !state.solo,
+  root.HotseatGame = { getView, getViewFor, configure, submit, isActive: active, isRequested: () => enabled && !state.solo,
+    enableOnline(value) { network = true; enabled = true; if (!configured) playerId = value.players.find(p => p.gm).id; return configure(value); },
+    isNetwork: () => network,
+    receiveFrom(id, cmd) { return this.withOperator(id, () => submit(cmd)); },
+    withOperator(id, fn) { if (!clients.has(id)) fail("没有这个操作者"); const prev = commandOperator; commandOperator = id; try { return fn(); } finally { commandOperator = prev; } },
+    assertActionFrom(id, actor) { return session.assertAction(id, actor); },
+    extendAsk(ms) { session?.extendAsk(ms); },
+    validateFrom(id, cmd) { return validate(cmd, id); },
+    checkpoint(now = Date.now()) { if (!active()) return null; const snapshot = session.checkpoint(); return copy({ config, ownerByKit, playerId, session: snapshot,
+      askRemainingMs: snapshot.ask ? Math.max(0, snapshot.ask.deadline - now) : null, newRoundSpends, choiceNo, openingChoice: !!choice && !state.combatStarted }); },
+    restoreOnline(saved) { network = enabled = true; configured = false; config = copy(saved.config); ownerByKit = copy(saved.ownerByKit); playerId = saved.playerId; newRoundSpends = saved.newRoundSpends || null; choiceNo = saved.choiceNo || 0;
+      restoredAsk = saved.session?.ask ? { ...copy(saved.session.ask), remainingMs: saved.askRemainingMs ?? 20000 } : null;
+      setupSession(); configured = true; executing++; try { session.restore(saved.session); } finally { executing--; } authority.broadcast(); refresh(); },
+    onPacket(fn) { packetListeners.add(fn); return () => packetListeners.delete(fn); },
     reason, beginRound, system, requestAsk, ownedChoice,
     isHost: () => !active() || playerId === gm(), hasAsk: () => !!choice || !!session?.snapshot().ask,
     currentUnit: () => active() ? session.snapshot().currentUnitId : null,

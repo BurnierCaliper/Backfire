@@ -1048,18 +1048,22 @@
     }
   }
 
-  async function perform(thunk, meta, system = false) {
+  async function perform(thunk, meta, system = false, context) {
+    if (system && window.OnlineGame?.isHost()) await OnlineGame.waitUntilReady();
     meta = meta || {};
     G.skip = false;
     G.tape = [];
     let result;
-    try { result = typeof thunk === "function" ? thunk() : system ? systemCommand(thunk) : dispatch(thunk); if (result && result.meta) Object.assign(meta, result.meta); } catch (e) {
+    try { result = typeof thunk === "function" ? thunk() : system ? systemCommand(thunk, context) : dispatch(thunk); if (result && result.meta) Object.assign(meta, result.meta); } catch (e) {
+      if (window.OnlineGame?.isHost() && (system || e.code !== "HOTSEAT_REJECT")) { meta.onlineError = true; OnlineGame.reportError(e); }
+      if (context && window.OnlineGame?.isHost()) { G.tape = null; OnlineGame.onActionSettled(thunk, { executed: false }, [], meta); throw e; }
       if (hotseat() && !system) { G.tape = null; flashHint(e.message); return null; }
       console.error(e);
       G.tape.push({ type: "log", text: "结算出错：" + e.message });
     }
     const tape = G.tape;
     G.tape = null;
+    if (window.OnlineGame?.isHost()) OnlineGame.onActionSettled(meta.onlineLegacy ? { type: "gm.legacy" } : thunk, result, tape, meta);
     if (result && result.executed === false) return null;
     const after = snapAll();
     await playTape(tape, after, meta);
@@ -1068,12 +1072,12 @@
     return tape;
   }
 
-  async function act(thunk, meta) {
+  async function act(thunk, meta, context) {
     pushUndo((meta && meta.skillName) || "行动");
     G.depth++;
     syncBusy();
     try {
-      const tape = await perform(thunk, meta);
+      const tape = await perform(thunk, meta, !!context, context);
       if (hotseat() && tape === null) return false;
       await resolveQueues();
       if (hotseat()) return true;
@@ -1141,6 +1145,7 @@
 
   async function resolveQueues() {
     for (let guard = 0; guard < 40; guard++) {
+      if (window.OnlineGame?.isHost()) await OnlineGame.waitUntilReady();
       if (G.ended) return;
       if (state.blockQueue && state.blockQueue.length) {
         const job = state.blockQueue[0];
@@ -1417,6 +1422,7 @@
     return 1 + Math.floor(makeRng("block:" + job.seq)() * 100);
   }
   function predictTurn(id) {
+    if (window.GMCommands?.isManual(unitById(id))) return ["由主持人操控，无法预测"];
     const key = `${G.version}|${state.turnNo}|${id}`;
     if (G.predict && G.predict.key === key) return G.predict.steps;
     const saved = saveState();
@@ -1463,6 +1469,7 @@
       };
       drain(null);
       for (const uid of EnemyAI.actingOrder()) {
+        if (window.OnlineGame?.isHost() && GMCommands.isManual(unitById(uid))) continue;
         for (let n = 0; n < 5; n++) {
           const u = unitById(uid);
           if (!u || !unitAlive(u) || u.stunned || (u.ap || 0) <= 0) {
@@ -1789,9 +1796,15 @@
   const aiPickAssister = EnemyAI.pickAssister;
 
   async function enemyPhase() {
+    if (window.OnlineGame?.isHost()) GMCommands.beginEnemyRound(state.turnNo);
     const order = EnemyAI.actingOrder();
     for (const id of order) {
+      if (window.OnlineGame?.isHost()) await OnlineGame.flushGM();
+      if (window.OnlineGame?.isHost() && (!GMCommands.enemyMayAct(unitById(id)) || GMCommands.isManual(unitById(id)))) continue;
       for (let n = 0; n < 5; n++) {
+        if (window.OnlineGame?.isHost() && n < (G.onlineEnemyCursor?.[id] || 0)) continue;
+        if (window.OnlineGame?.isHost() && (GMCommands.isManual(unitById(id)) || !GMCommands.enemyMayAct(unitById(id)))) break;
+        if (window.OnlineGame?.isHost()) await OnlineGame.waitUntilReady();
         const u = unitById(id);
         if (!u || !unitAlive(u) || u.stunned || (u.ap || 0) <= 0) break;
         const sig = `${u.ap}|${u.bonus}|${u.zone}`;
@@ -1799,6 +1812,7 @@
         const tape = await perform({ type: "battle.enemyAction", actor: id, step: n, seed: actKey }, {}, true);
         if (tape === null) break;
         await resolveQueues();
+        if (window.OnlineGame?.isHost()) await OnlineGame.flushGM();
         if (checkEnd()) return true;
         const v = unitById(id);
         if (!v || `${v.ap}|${v.bonus}|${v.zone}` === sig) break;
@@ -1806,6 +1820,7 @@
       }
       await wait(450);
     }
+    if (window.OnlineGame?.isHost() && !G.ended) { await OnlineGame.manualEnemyPhase(); if (checkEnd()) return true; if (OnlineGame.takeAIResume()) return enemyPhase(); }
     return false;
   }
 
@@ -2174,9 +2189,17 @@
   }
 
   function setupBattle(level, encounter) {
+    if (window.OnlineGame?.isHost() && state.combatStarted && !G.ended) {
+      const error = new Error("战斗中不能重新布置遭遇，请先结束当前战斗"); error.code = "HOTSEAT_REJECT"; throw error;
+    }
     setRogueMode(null);
+    const online = window.OnlineGame?.isHost();
+    const setupCommand = { type: "battle.setup", level, encounter: encounter || null, xpMult: Number(($("g-xp-mult") || {}).value) || 1 };
+    // Keep the previous ended flag available to the online authority guard.
+    // Ordinary single-player retains its original view/rule ordering.
+    let result = online ? dispatch(setupCommand) : null;
     resetBattleView();
-    const result = dispatch({ type: "battle.setup", level, encounter: encounter || null, xpMult: Number(($("g-xp-mult") || {}).value) || 1 });
+    if (!online) result = dispatch(setupCommand);
     const enc = result.encounter;
     const encTitle = enc && enc.name ? (enc.name + (typeof layoutLabel === "function" && enc.layout ? " · " + layoutLabel(enc.layout) : "")) : "外城区巷战";
     if ($("g-enc-name")) $("g-enc-name").textContent = "遭遇 " + encTitle;
@@ -3360,6 +3383,7 @@
 
   // 调试用
   G.previewOf = previewOf;
+  G.candidateUnits = candidateUnits;
   G.skillThunk = skillThunk;
   G.snapAll = snapAll;
   G.setupBattle = setupBattle;
@@ -3384,4 +3408,34 @@
   G.refresh = refreshAll;
   G.fitZones = fitZones;
   G.act = act;
+  G.actSystem = (cmd, meta, context) => act(cmd, meta, context);
+  G.actLegacy = fn => act(fn, { skillName: "主持人操作", onlineLegacy: true });
+  G.resolveOnlineEdits = async () => {
+    if (!window.OnlineGame?.isHost() || G.depth || G.ended) return;
+    G.depth++; syncBusy();
+    try { await resolveQueues(); }
+    finally { G.depth--; G.version++; syncBusy(); autoSelect(true); refreshAll(); if (state.combatStarted) checkEnd(); resumeHotseat(); }
+  };
+  G.onlineCheckpoint = () => JSON.parse(JSON.stringify({ state, campaign: G.campaign, partyKits: G.partyKits, enemyPlan: G.enemyPlan,
+    lastEncounter: G.lastEncounter, level: G.level, ended: G.ended, lastOutcome: G.lastOutcome, actorId: G.actorId,
+    enemyCursor: G.onlineEnemyCursor || {}, ledger: typeof LEDGER === "undefined" ? null : LEDGER.save() }));
+  G.restoreOnline = saved => {
+    for (const key of Object.keys(state)) delete state[key]; Object.assign(state, deepClone(saved.state));
+    Object.assign(G, { campaign: saved.campaign, partyKits: saved.partyKits, enemyPlan: saved.enemyPlan, lastEncounter: saved.lastEncounter,
+      level: saved.level, ended: saved.ended, lastOutcome: saved.lastOutcome, actorId: saved.actorId, onlineEnemyCursor: saved.enemyCursor || {}, depth: 0, tape: null, arm: null, undo: [] });
+    if (saved.ledger) LEDGER.load(saved.ledger);
+    G.version++; setView(snapAll(), false); refreshAll();
+  };
+  G.resumeOnline = async () => {
+    if (!state.combatStarted || G.ended || G.depth) return;
+    G.depth++; syncBusy();
+    try {
+      await resolveQueues();
+      if (state.combatPhase === "enemy") {
+        const over = await enemyPhase();
+        if (!over) { await perform({ type: "battle.endEnemyTurn" }, {}, true); await resolveQueues(); }
+      }
+      if (!G.ended && ["setup", "enemy"].includes(HotseatGame.getView().phase)) HotseatGame.beginRound();
+    } finally { G.depth--; syncBusy(); autoSelect(true); refreshAll(); checkEnd(); resumeHotseat(); }
+  };
 })();

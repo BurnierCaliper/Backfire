@@ -1,0 +1,16 @@
+{
+  "name": "backfire-relay",
+  "private": true,
+  "type": "module",
+  "description": "Optional D3 Cloudflare relay and isolated local development tools",
+  "scripts": {
+    "dev": "wrangler dev --ip 127.0.0.1 --port 8787",
+    "local": "node local-server.cjs",
+    "check": "wrangler deploy --dry-run --outdir .dry-run",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "4.147.0",
+    "miniflare": "5.20261001.0-alpha"
+  }
+}

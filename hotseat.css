@@ -7,6 +7,7 @@
 .hs-ui input:focus, .hs-ui select:focus, .hs-ui button:focus-visible { outline: 2px solid var(--sk-holo, #3fe0ff); outline-offset: 2px; }
 .hs-ui label { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .hs-ui p { margin: 10px 0; }
+.hs-strip .hs-vacated { opacity: .45; border-style: dashed; }
 .hs-ui h2, .hs-ui h3 { margin: 0; }
 #hotseat-root { position: fixed; z-index: 72; top: 0; left: 0; right: 0; background: var(--sk-oil-2, #1a1511); border-bottom: 2px solid var(--sk-edge, #4d4337); box-shadow: 0 4px 14px #0007; }
 #hs-bar { display: flex; align-items: center; gap: 10px; padding: 6px 14px; min-height: 56px; }
