@@ -153,3 +153,14 @@ test("技能说明同步新版角色卡", () => {
   assert.match(T.skillText("vitas_infuse"), /2d4\+2/);
   assert.doesNotMatch(T.skillText("vitas_rip"), /残忍/);
 });
+
+test("川川：主属性电、副属性能量（角色卡 note 与默认属性）", () => {
+  const c = H.load();
+  const card = c.livePartyCards().find(x => x.kit === "chuan");
+  assert.equal(card.suggest.element, "electric");
+  assert.match(card.note, /电\/能量/);
+  c.BattleSim.setup({ party: ["chuan"], enemies: [] });
+  const els = c.partyElements();
+  assert.equal(els[0], "electric");
+  assert.ok(els.includes("energy"));
+});
