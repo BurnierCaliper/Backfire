@@ -58,6 +58,7 @@ const RogueCommands = (function () {
     presentSmiths: (_c, run) => Rogue.presentSmiths(run),
     smithInfo: (c, run) => Rogue.smithInfo(run, c.smith),
     restPlan: (_c, run) => Rogue.restPlan(run),
+    sheetData: (_c, run) => Rogue.sheetData(run),
     canShortRestBefore: (_c, run) => Rogue.canShortRestBefore(run),
     watchOptions: (_c, run) => Rogue.watchOptions(run)
   };

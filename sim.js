@@ -110,7 +110,7 @@ const BattleSim = (function () {
         const job = state.blockQueue[0];
         const attacker = unitById(job.attackerId), target = unitById(job.targetId);
         if (!attacker || !target) { state.blockQueue.shift(); continue; }
-        const helpers = eligibleBlockers(target);
+        const helpers = eligibleBlockers(target, job);
         const choice = helpers.length ? policy.pickBlocker(helpers, attacker, target) : null;
         const blocker = unitById(choice);
         let forced = null;
