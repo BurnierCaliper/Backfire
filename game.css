@@ -1897,15 +1897,22 @@ body:not([data-screen="battle"]) .g-rank { display: none !important; }
 .tr-sheet .hs-hero { padding-bottom: 12px; }
 @media (max-width: 520px) { .tr-cf-time { font-size: 34px; } }
 
-/* 武器耐久条：黄色，和血条一样的条 */
-.u-dur { position: relative; height: 12px; margin-top: 4px; background: rgba(0, 0, 0, .18); border: 1px solid rgba(0, 0, 0, .35); overflow: hidden; }
-.u-dur i { position: absolute; left: 0; top: 0; bottom: 0; background: #f2c230; transition: width .3s; }
-.u-dur span { position: relative; display: block; font-size: 10px; line-height: 10px; padding-left: 4px; font-weight: 700; color: #1b1f24; }
-.u-dur.broken { border-color: #c44a44; }
-.u-dur.broken span { color: #c44a44; }
+/* 武器耐久条：和血条同一套样式（格子 + 下面一行数字），颜色是黄色，每点耐久一格 */
+.u-dur { margin-top: 5px; --dc: #e8b425; }
+.u-durbar { display: flex; gap: 2px; height: 7px; }
+.dseg { position: relative; flex: 1; height: 100%; background: #e6eaee; overflow: hidden; }
+.dseg .fill { position: absolute; top: 0; bottom: 0; left: 0; width: 0; background: var(--dc); transition: width .16s ease-out; }
+.dseg.on .fill { width: 100%; }
+.u-durline { display: flex; justify-content: space-between; margin-top: 2px; font-family: var(--num); font-size: 11px; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.u-durline b { color: var(--ink); font-weight: 600; }
+.u-dur.broken .u-durline, .u-dur.broken .u-durline b { color: var(--foe); }
 .unit.prop .u-dur, .unit.foe .u-dur { display: none !important; }
-.g-zone.dense-3 .u-dur { height: 9px; margin-top: 2px; }
-.g-zone.dense-3 .u-dur span { font-size: 8px; line-height: 8px; }
+.unit-wrap.downed .dseg { background: #302d2a; }
+.unit-wrap.downed .dseg .fill { background: #6e6862; }
+.unit-wrap.downed .u-durline, .unit-wrap.downed .u-durline b { color: #a8a29b; }
+.g-zone.dense-2 .u-durbar { height: 6px; }
+.g-zone.dense-3 .u-durbar { height: 5px; }
+.g-zone.dense-3 .u-durline { font-size: 10px; margin-top: 1px; }
 
 /* 整局数据（sheet-ui.js · CareerLog） */
 .cl-sheet { z-index: 72; }

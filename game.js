@@ -547,7 +547,7 @@
        <div class="u-hp"></div>
        <div class="u-hpline"><span class="hpn"></span><span class="shpn"></span></div>
        <div class="u-def"></div>
-       <div class="u-dur"><i></i><span></span></div>
+       <div class="u-dur"><div class="u-durbar"></div><div class="u-durline"><span class="durn"></span><span class="durlbl"></span></div></div>
        <div class="u-foot"><div class="u-econ"></div><div class="u-status"></div></div>
        <div class="u-res"></div>
        <span class="u-flag stun">失衡</span><span class="u-flag dying">濒死</span><span class="u-flag downed">倒下</span>`);
@@ -635,8 +635,15 @@
       const d = s.dur;
       durBox.style.display = d ? "" : "none";
       if (d) {
-        durBox.querySelector("i").style.width = (d.max ? (d.cur / d.max) * 100 : 0) + "%";
-        durBox.querySelector("span").textContent = `耐久 ${d.cur}/${d.max}`;
+        // 和血条一样：每点耐久一格，掉了的格子变空；下面一行写数字
+        const bar = durBox.querySelector(".u-durbar");
+        if (bar.children.length !== d.max) {
+          bar.innerHTML = "";
+          for (let i = 0; i < d.max; i++) { const g = el("div", "dseg"); g.appendChild(el("div", "fill")); bar.appendChild(g); }
+        }
+        [...bar.children].forEach((g, i) => g.classList.toggle("on", i < d.cur));
+        durBox.querySelector(".durn").innerHTML = `<b>${d.cur}</b>/${d.max}`;
+        durBox.querySelector(".durlbl").textContent = "耐久";
         durBox.title = `${d.name} 耐久 ${d.cur}/${d.max}`;
         durBox.classList.toggle("broken", d.cur <= 0);
       }
