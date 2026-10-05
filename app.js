@@ -9345,6 +9345,7 @@ function runSkillInner(id, optRun) {
       if (!rec) lines.push("本场还没有被摧毁的血量层。");
       else {
         const amt = Math.floor((rec.dmg || rec.lost || 0) * 2);
+        const hp0 = totalHp(a);
         if (rec.type === "flesh" || rec.type === "spirit") {
           healUnit(a, amt);
           lines.push(`废物利用：恢复 ${amt} 生命（来自${LAYER[rec.type] || rec.type}）。`);
@@ -9352,6 +9353,10 @@ function runSkillInner(id, optRun) {
           addTempLayer(a, rec.type, amt);
           lines.push(`废物利用：获得 ${amt} 点${LAYER[rec.type] || rec.type}（战斗结束消失）。`);
         }
+        // 废物利用给自己回的血 / 加的层也算治疗（一般的治疗只统计给其他友方的）
+        const gain = totalHp(a) - hp0;
+        const st = gain > 0 ? battleStat(a) : null;
+        if (st) { st.heal += gain; addScore("heal", gain * SCORE_RULES.heal, a); }
       }
     } else if (id === "kolt_summon") {
       const w = spawnWeapon(a, "torque");
