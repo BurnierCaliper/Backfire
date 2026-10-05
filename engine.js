@@ -196,7 +196,7 @@ const SKILL_RANGE = {
   kolt_short: { min: 0, max: 1 },
   kolt_chase: { min: 0, max: 99 },
   torque_boost: { min: 0, max: 1 },
-  torque_swap: { min: 0, max: 0 },
+  torque_swap: { min: 0, max: 1 },   // 拆装部件：电钻打同区、酸液炮打距离 1（按换上去的刀头）
   torque_strip: { min: 0, max: 0 },
   helu_aa: { min: 1, max: 1 },
   helu_scan: { min: 0, max: 99 },
@@ -484,6 +484,16 @@ function resolveAttack(ctx) {
     add("攻击者导体：攻击次数 +1。");
   }
 
+  // 「共 N 击破」的多段攻击（breakOnce）：攻击次数被加多了（过载、导体、不稳翻倍……），
+  // 额外击破 = 多出来的次数 × 原本的 击破 / 次数，向上取整，和原本的击破一起记在第一击上
+  const origHits = Math.max(1, Number(ctx.baseHits) || Number(ctx.hits) || 1);
+  let onceBreak = Number(ctx.baseBreak) || 0;
+  if (ctx.breakOnce && hits > origHits && onceBreak > 0) {
+    const extraBreak = Math.ceil((hits - origHits) * onceBreak / origHits - 1e-9);
+    add(`攻击次数 ${origHits} → ${hits}：按原本 ${onceBreak} 击破 / ${origHits} 次的比例，额外击破 +${extraBreak}（向上取整）。`);
+    onceBreak += extraBreak;
+  }
+
   const layersWork = clone(t.layers || []);
   const perHit = [];
   let advHits = 0;   // 触发属性克制的段数（评分用）
@@ -504,7 +514,7 @@ function resolveAttack(ctx) {
     const hAdd = (s) => { hitLog.push(s); add(`#${h + 1} ${s}`); };
 
     if (flags.block === "assistOk") {
-      let br = Number(ctx.baseBreak) || 0;
+      let br = ctx.breakOnce ? onceBreak : (Number(ctx.baseBreak) || 0);
       if (ctx.breakOnce && h > 0) {
         perHit.push({ dealt: 0, breakDealt: 0, layers: clone(layersWork) });
         continue;
@@ -522,12 +532,19 @@ function resolveAttack(ctx) {
     let packet = rawBase;
 
     const startIdx = pickStartIndex(layersWork, flags.pierce, flags.focusLayer);
-    const startLayer = layersWork[startIdx] || layersWork.find(l => l.current > 0);
+    let startLayer = layersWork[startIdx] || layersWork.find(l => l.current > 0);
     if (firstStartType == null && startLayer) firstStartType = startLayer.type;
     const onShp = !!(t.upOnShp && t.isPlayer);
+    // 敌人在这次攻击动作里被打死：它留到动作结束，后面的段数照常结算，伤害全部算溢出（不再扣血、不再击破）
+    let ghost = false;
     if (!onShp && (!startLayer || totalCurFrom(layersWork) <= 0)) {
-      hAdd(t.dying ? "目标已濒死，需先起身。" : "没有可结算的血量层。");
-      break;
+      if (!t.isPlayer && (h > 0 || ctx.ghostOk) && layersWork.length) {
+        ghost = true;
+        startLayer = layersWork[innermostIndex(layersWork)];
+      } else {
+        hAdd(t.dying ? "目标已濒死，需先起身。" : "没有可结算的血量层。");
+        break;
+      }
     }
 
     let pct = 0;
@@ -668,7 +685,10 @@ function resolveAttack(ctx) {
     totalIntended += packet;
 
     let hitDealt = packet;
-    if (!onShp) {
+    if (ghost) {
+      hitDealt = 0;
+      hAdd(`目标已倒下：这一段 ${packet} 全部算作溢出伤害。`);
+    } else if (!onShp) {
       const distribute = distributePacket({
         layers: layersWork,
         startIdx,
@@ -690,9 +710,9 @@ function resolveAttack(ctx) {
 
     if (element === "fire" || element === "energy") preventSand = true;
 
-    let br = Number(ctx.baseBreak) || 0;
+    let br = ghost ? 0 : (ctx.breakOnce ? onceBreak : (Number(ctx.baseBreak) || 0));
     // breakOnce：多段攻击的击破整次只结算一回（记在第一击上），卡面写「共 N 击破」的用这个
-    const skipBreak = ctx.breakOnce && h > 0;
+    const skipBreak = (ctx.breakOnce && h > 0) || ghost;
     if (skipBreak) br = 0;
     if (!skipBreak) {
       if (!onShp && startLayer && startLayer.type === "armor" && element === "physical") {
@@ -793,6 +813,8 @@ function resolveAttack(ctx) {
     ok: true,
     advantage: advHits > 0,                // 这一击触发了属性克制
     blocked: flags.block === "assistOk",   // 主攻击被挡住 → 不产生溅射
+    // 协助格挡成功时这一击本来的伤害（基础包 × 次数，未算抗性），战场数据「格挡规避伤害」用
+    blockedRaw: flags.block === "assistOk" ? Math.round(rawBase * hits) : 0,
     total: totalDealt,
     intended: totalIntended,
     extraHarmonic,

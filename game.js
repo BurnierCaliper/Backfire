@@ -156,9 +156,25 @@
       res,
       atk: Math.round(Number(atk) || 0),
       weapon: !!u.weaponOf,
+      dur: weaponDurSnap(u),
       overkill: !u.isPlayer && (u.dead || u._removed) ? Math.max(0, Math.round(Number(u.overkill) || 0)) : 0,
       killBig: !u.isPlayer && !!u.killBig
     };
+  }
+  /** 武器耐久条：武器人显示自己的耐久；角色显示手里那把武器的耐久（空手不显示） */
+  function weaponDurSnap(u) {
+    try {
+      if (!u || !u.isPlayer) return null;
+      const weapon = typeof isWeaponUnit === "function" ? isWeaponUnit(u) : !!u.weaponOf;
+      const kit = weapon ? u.kit : (typeof heldWeaponKit === "function" ? heldWeaponKit(u) : null);
+      if (!kit || typeof weaponDurMax !== "function") return null;
+      const max = Number(weaponDurMax(kit)) || 0;
+      if (!(max > 0)) return null;
+      const cur = weapon && u.resources && u.resources.durability != null ? Number(u.resources.durability)
+        : (typeof weaponDur === "function" ? Number(weaponDur(kit)) : max);
+      const name = typeof weaponName === "function" ? weaponName(kit) : kit;
+      return { cur: Math.max(0, Math.min(max, cur || 0)), max, name };
+    } catch (e) { return null; }
   }
   const WEATHER_NAME = { none: "常态", heat: "酷暑", snow: "雪天", acid: "酸雨", thunder: "雷鸣", glow: "微光", sand: "沙暴", phase: "相位" };
   const FIELD_CLASSES = ["field-fire", "field-electric", "field-ice", "field-acid", "field-energy", "field-harmonic", "field-collapse", "field-abyss"];
@@ -531,6 +547,7 @@
        <div class="u-hp"></div>
        <div class="u-hpline"><span class="hpn"></span><span class="shpn"></span></div>
        <div class="u-def"></div>
+       <div class="u-dur"><i></i><span></span></div>
        <div class="u-foot"><div class="u-econ"></div><div class="u-status"></div></div>
        <div class="u-res"></div>
        <span class="u-flag stun">失衡</span><span class="u-flag dying">濒死</span><span class="u-flag downed">倒下</span>`);
@@ -612,6 +629,19 @@
       if (i >= s.def && i < prevDef) { p.classList.remove("shatter"); void p.offsetWidth; p.classList.add("shatter"); }
     });
 
+    // 武器耐久（黄色条）
+    const durBox = q(".u-dur");
+    if (durBox) {
+      const d = s.dur;
+      durBox.style.display = d ? "" : "none";
+      if (d) {
+        durBox.querySelector("i").style.width = (d.max ? (d.cur / d.max) * 100 : 0) + "%";
+        durBox.querySelector("span").textContent = `耐久 ${d.cur}/${d.max}`;
+        durBox.title = `${d.name} 耐久 ${d.cur}/${d.max}`;
+        durBox.classList.toggle("broken", d.cur <= 0);
+      }
+    }
+
     // 行动点 / 附赠
     const econ = q(".u-econ");
     {
@@ -630,8 +660,10 @@
     q(".u-status").innerHTML = highChip + (s.status
       ? s.status.split(" · ").filter(t => t && t !== "无状态" && !/^高能/.test(t)).map(t => `<span class="chip">${esc(t)}</span>`).join("")
       : "");
-    q(".u-res").textContent = s.res || "";
-    q(".u-res").style.display = s.res ? "" : "none";
+    // 有耐久条时，资源文字里的「耐久 N」就不重复写了
+    const resText = s.dur ? String(s.res || "").split(" · ").filter(t => !/^耐久 /.test(t)).join(" · ") : (s.res || "");
+    q(".u-res").textContent = resText;
+    q(".u-res").style.display = resText ? "" : "none";
 
     c.wrap.classList.toggle("stunned", s.stunned && !s.dead);
     c.wrap.classList.toggle("dying", s.dying && !s.dead);
@@ -1065,6 +1097,9 @@
     }
     const tape = G.tape;
     G.tape = null;
+    // 有些演出要看结算之后的局面才知道（例：连续协助格挡时这一击有没有落下）
+    if (typeof meta.forceLunge === "function") meta.forceLunge = !!meta.forceLunge();
+    if (typeof meta.blockerId === "function") meta.blockerId = meta.blockerId() || null;
     if (window.OnlineGame?.isHost()) OnlineGame.onActionSettled(meta.onlineLegacy ? { type: "gm.legacy" } : thunk, result, tape, meta);
     if (result && result.executed === false) return null;
     const after = snapAll();
@@ -1173,9 +1208,13 @@
           });
         }
         const seq = job.seq;
+        // 连续协助格挡：这个人没挡住、还有别人能挡时，这一击还没落下（同一击仍在队首）——
+        // 不播敌人的攻击动画，直接回到循环弹出下一个人的格挡确认
+        const stillWaiting = () => !!(state.blockQueue && state.blockQueue[0] && state.blockQueue[0].seq === seq);
         await perform({ type: "blockAnswer", helper: choice || null, forced, seed: "hit:" + seq }, {
-          actorId: attacker.id, targetId: target.id, forceLunge: true,
-          blockerId: blocker && forced && forced.ok ? blocker.id : null,
+          actorId: attacker.id, targetId: target.id,
+          forceLunge: () => !stillWaiting(),
+          blockerId: () => (blocker && forced && forced.ok && !stillWaiting() ? blocker.id : null),
           skillName: blocker ? `攻击（${blocker.name} 格挡）` : "攻击"
         }, true);
         continue;
@@ -1238,7 +1277,17 @@
         if (!foes.length) opts.push({ label: "切换刀头", sub: "同区没有可打的敌人", value: { swap: true, targetId: null } });
         else foes.forEach(u => opts.push({ label: `切换并打 ${u.name}`, sub: "近距离 0.5 ATK", value: { swap: true, targetId: u.id } }));
         const pick = hotseat() ? await HotseatGame.ownedChoice(k, "更换刀头", opts) : await openChoice("更换刀头", `${k.name} 可以更换刀头。切刀攻击只能打同区目标。`, opts, { label: "不切换", value: { swap: false } });
-        systemCommand({ type: "koltSwapAnswer", swap: !!(pick && pick.swap), target: (pick && pick.targetId) || null });
+        const swapTarget = (pick && pick.swap && pick.targetId) || null;
+        if (pick && pick.swap) {
+          // 换刀头的追击：和协助攻击一样播攻击演出（冲上去打同区那名敌人）
+          const nextBit = (k.resources && k.resources.bit) === "acid" ? "电钻" : "酸液炮";
+          await perform({ type: "koltSwapAnswer", swap: true, target: swapTarget }, {
+            actorId: k.id, targetId: swapTarget, forceLunge: !!swapTarget, slow: true,
+            skillName: `更换刀头 · ${nextBit}`
+          }, true);
+        } else {
+          systemCommand({ type: "koltSwapAnswer", swap: false, target: null });
+        }
         continue;
       }
       return;
@@ -2252,11 +2301,14 @@
     paintUndo();
   }
   /* ---------- 战场数据 ---------- */
-  const STAT_COLS = [["dmg", "造成伤害"], ["brk", "击破"], ["taken", "承受伤害"], ["kills", "击杀"], ["heal", "治疗 / 护盾"], ["score", "得分"]];
+  // share：按「造成伤害」算的输出占比；blockText：协助格挡 成功 / 次数
+  const STAT_COLS = [["dmg", "造成伤害"], ["share", "输出占比"], ["brk", "击破"], ["staggers", "打出失衡"], ["kills", "击杀"],
+    ["assists", "协助攻击"], ["blocks", "协助格挡"], ["avoided", "格挡规避伤害"], ["taken", "承受伤害"], ["heal", "治疗 / 护盾"], ["score", "得分"]];
   /** 按队伍顺序排好的行：角色在前，武器人跟在主人后面 */
   function statRows() {
     const stats = state.battleStats || {};
-    const blank = (u) => ({ name: u.name, kit: u.kit, weaponOf: u.weaponOf || null, dmg: 0, brk: 0, taken: 0, kills: 0, heal: 0, score: 0 });
+    const blank = (u) => ({ name: u.name, kit: u.kit, weaponOf: u.weaponOf || null, dmg: 0, brk: 0, taken: 0, kills: 0, heal: 0, score: 0,
+      assists: 0, blocks: 0, blockOk: 0, avoided: 0, staggers: 0 });
     const units = (state.units || []).filter(u => u.isPlayer && !u._removed);
     const heroes = units.filter(u => !isWeaponUnit(u));
     const rows = [];
@@ -2265,19 +2317,29 @@
       units.filter(w => isWeaponUnit(w) && w.weaponOf === h.kit && stats[w.id]).forEach(w =>
         rows.push(Object.assign({ id: w.id, sub: true, dead: !!w.dead }, stats[w.id])));
     });
+    const team = rows.reduce((a, r) => a + (Number(r.dmg) || 0), 0);
+    rows.forEach(r => { r.share = team > 0 ? Math.round((Number(r.dmg) || 0) / team * 1000) / 10 : 0; });
     return rows;
+  }
+  /** 表格单元格：输出占比带 %，协助格挡写「成功/次数」 */
+  function statCell(r, k) {
+    if (k === "share") return (Number(r.share) || 0).toFixed(1) + "%";
+    if (k === "blocks") return `${Math.round(Number(r.blockOk) || 0)}/${Math.round(Number(r.blocks) || 0)}`;
+    return String(Math.round(Number(r[k]) || 0));
   }
   function openStats() {
     const rows = statRows();
     const tot = {}; STAT_COLS.forEach(([k]) => { tot[k] = rows.reduce((a, r) => a + (Number(r[k]) || 0), 0); });
+    tot.blockOk = rows.reduce((a, r) => a + (Number(r.blockOk) || 0), 0);
+    tot.share = rows.length && tot.dmg > 0 ? 100 : 0;
     const best = {}; STAT_COLS.forEach(([k]) => { best[k] = Math.max(0, ...rows.map(r => Number(r[k]) || 0)); });
-    $("g-stats-body").innerHTML = `<table class="stats-table">
+    $("g-stats-body").innerHTML = `<div class="stats-scroll"><table class="stats-table">
       <thead><tr><th>角色</th>${STAT_COLS.map(([, n]) => `<th>${n}</th>`).join("")}</tr></thead>
       <tbody>${rows.map(r => `<tr class="${r.sub ? "sub" : ""}${r.dead ? " dead" : ""}">
         <td>${r.sub ? "└ " : ""}${esc(r.name)}${r.sub ? "<small>武器人</small>" : ""}</td>
-        ${STAT_COLS.map(([k]) => `<td class="${best[k] > 0 && r[k] === best[k] ? "top" : ""}">${Math.round(Number(r[k]) || 0)}</td>`).join("")}</tr>`).join("")}</tbody>
-      <tfoot><tr><td>合计</td>${STAT_COLS.map(([k]) => `<td>${Math.round(tot[k])}</td>`).join("")}</tr></tfoot>
-    </table>
+        ${STAT_COLS.map(([k]) => `<td class="${best[k] > 0 && r[k] === best[k] ? "top" : ""}">${statCell(r, k)}</td>`).join("")}</tr>`).join("")}</tbody>
+      <tfoot><tr><td>合计</td>${STAT_COLS.map(([k]) => `<td>${statCell(tot, k)}</td>`).join("")}</tr></tfoot>
+    </table></div>
     ${(() => {
       if (typeof battleGrade !== "function") return "";
       const gr = battleGrade();
@@ -2291,7 +2353,7 @@
     const rows = statRows();
     const gr = typeof battleGrade === "function" ? battleGrade() : null;
     return [`战场数据（第 ${state.turnNo || 1} 回合）` + (gr ? ` · 评价 ${gr.grade} · ${gr.score} 分` : ""), "角色\t" + STAT_COLS.map(([, n]) => n).join("\t")]
-      .concat(rows.map(r => (r.sub ? "  " + r.name + "（武器人）" : r.name) + "\t" + STAT_COLS.map(([k]) => Math.round(Number(r[k]) || 0)).join("\t")))
+      .concat(rows.map(r => (r.sub ? "  " + r.name + "（武器人）" : r.name) + "\t" + STAT_COLS.map(([k]) => statCell(r, k)).join("\t")))
       .join("\n");
   }
   G.statRows = statRows;
@@ -3058,7 +3120,7 @@
     const kinds = [
       ["", "无"], ["fireOn", "火场"], ["ice", "冻土"], ["acid", "酸液"],
       ["electric", "高压"], ["energy", "能量场"], ["harmonic", "干涉场"],
-      ["heal", "恢复"], ["abyss", "深渊"], ["highland", "高地"], ["collapseOn", "塌陷"]
+      ["heal", "恢复"], ["abyss", "深渊"], ["collapseOn", "塌陷"]
     ];
     for (let z = 1; z <= Number(state.zoneMode); z++) {
       const f = state.fields[z] || emptyField();
@@ -3078,6 +3140,18 @@
         refreshAll();
       };
       row.appendChild(s);
+      // 高地和其他区域效果共存：单独一个勾选框
+      const hl = el("label", "");
+      hl.style.cssText = "display:inline-flex;align-items:center;gap:4px;margin-left:8px;font-size:13px";
+      const hc = document.createElement("input");
+      hc.type = "checkbox"; hc.checked = !!f.highland;
+      hc.onchange = () => {
+        dispatch({ type: "battle.panel", action: "setHighland", zone: z, value: hc.checked });
+        setView(snapAll(), false);
+        refreshAll();
+      };
+      hl.appendChild(hc); hl.appendChild(document.createTextNode("高地"));
+      row.appendChild(hl);
       zbox.appendChild(row);
     }
     const gbox = $("g-gap-list");

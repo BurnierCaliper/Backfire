@@ -609,7 +609,7 @@ const Rogue = (function () {
     let pool = B.pool.filter(x => (!x.regions || x.regions.indexOf(reg) >= 0) && (run.act || 1) >= (x.minAct || 1));
     const zm = Number(zoneMode) || 2;
     const gapKeys = zm === 3 ? ["1-2", "2-3"] : ["1-2"];
-    const usedField = new Set(), usedGap = new Set();
+    const usedField = new Set(), usedGap = new Set(), usedHigh = new Set();
     const out = [];
     for (let guard = 0; guard < 20 && out.length < want && pool.length; guard++) {
       const total = pool.reduce((s, x) => s + (x.weight || 1), 0);
@@ -621,6 +621,12 @@ const Rogue = (function () {
         if (!free.length) continue;
         const key = pick(free); usedGap.add(key);
         out.push({ type: "gap", what: item.what, key, name: item.name });
+      } else if (item.type === "field" && item.what === "highland") {
+        // 高地和其他区域效果共存：不占这一区的场地，也不会被别的场地挤掉
+        const free = [1, 2, 3].slice(0, zm).filter(z => !usedHigh.has(z));
+        if (!free.length) continue;
+        const zone = pick(free); usedHigh.add(zone);
+        out.push({ type: "field", what: item.what, zone, name: item.name });
       } else if (item.type === "field") {
         const free = [1, 2, 3].slice(0, zm).filter(z => !usedField.has(z));
         if (!free.length) continue;

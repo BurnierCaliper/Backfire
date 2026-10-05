@@ -94,7 +94,8 @@
     $("tr-clock").innerHTML = `第 <b>${LEDGER.day || 1}</b> 天 <b class="tr-time">${clockText(ck)}</b> ${dayPeriod(ck)} · 距上次长休 <b>${durationText(LEDGER.hours || 0)}</b>` +
       (t ? ` · <span class="warn">${esc(exhaustText(t))}</span>` : "");
     const food = FOOD_ORDER.reduce((s, id) => s + bagCount(id), 0);
-    $("tr-supplies").innerHTML = `<span>奎支 <b>${Number(state.kuizhi) || 0}</b></span><span>水 <b>${ledgerWater()}</b> ml</span><span>食物 <b>${food}</b> 份</span>`;
+    $("tr-supplies").innerHTML = `<span>奎支 <b>${Number(state.kuizhi) || 0}</b></span><span>水 <b>${ledgerWater()}</b> ml</span><span>食物 <b>${food}</b> 份</span>` +
+      `<button class="g-btn small" data-career="1" title="这个存档所有战斗里每个角色的输出占比和团队贡献">整局数据</button>`;
   }
 
   /** 面板上的攻击力：角色 + 手里的武器（和战斗里一样算） */

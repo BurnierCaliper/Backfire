@@ -1549,7 +1549,8 @@ body.trpg .trpg-only { display: flex !important; }
 #g-pvbox .intent-step { margin: 2px 0 0 0; line-height: 1.5; }
 #g-pvbox .intent-sub { padding-left: 12px; color: var(--bone); font-size: 12px; }
 /* 战场数据 */
-.sheet-card.stats-card { width: min(720px, 94vw); }
+.sheet-card.stats-card { width: min(1100px, 96vw); }
+.stats-scroll { overflow-x: auto; }
 .stats-card .sheet-head { gap: 8px; }
 .stats-card .sheet-head h3 { flex: 1; }
 .stats-table { width: 100%; border-collapse: collapse; font-size: 14px; }
@@ -1895,3 +1896,31 @@ body:not([data-screen="battle"]) .g-rank { display: none !important; }
 .tr-sheet-tabs { margin-bottom: 8px; }
 .tr-sheet .hs-hero { padding-bottom: 12px; }
 @media (max-width: 520px) { .tr-cf-time { font-size: 34px; } }
+
+/* 武器耐久条：黄色，和血条一样的条 */
+.u-dur { position: relative; height: 12px; margin-top: 4px; background: rgba(0, 0, 0, .18); border: 1px solid rgba(0, 0, 0, .35); overflow: hidden; }
+.u-dur i { position: absolute; left: 0; top: 0; bottom: 0; background: #f2c230; transition: width .3s; }
+.u-dur span { position: relative; display: block; font-size: 10px; line-height: 10px; padding-left: 4px; font-weight: 700; color: #1b1f24; }
+.u-dur.broken { border-color: #c44a44; }
+.u-dur.broken span { color: #c44a44; }
+.unit.prop .u-dur, .unit.foe .u-dur { display: none !important; }
+.g-zone.dense-3 .u-dur { height: 9px; margin-top: 2px; }
+.g-zone.dense-3 .u-dur span { font-size: 8px; line-height: 8px; }
+
+/* 整局数据（sheet-ui.js · CareerLog） */
+.cl-sheet { z-index: 72; }
+.cl-card { max-height: 88vh; }
+.cl-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px; margin-bottom: 10px; }
+.cl-tiles > div { background: rgba(0, 0, 0, .25); border: 1px solid var(--line); padding: 6px 10px; display: flex; flex-direction: column; }
+.cl-tiles span { font-size: 12px; color: var(--muted); }
+.cl-tiles b { font-size: 20px; font-weight: 800; color: var(--gold); }
+.cl-tiles small { font-size: 12px; color: var(--muted); }
+.cl-h { margin: 12px 0 6px; font-size: 14px; letter-spacing: .1em; color: var(--gold); border-bottom: 1px solid var(--line); padding-bottom: 3px; }
+.cl-bars { display: grid; gap: 4px; }
+.cl-bar { display: grid; grid-template-columns: 120px 1fr 56px; align-items: center; gap: 8px; font-size: 13px; }
+.cl-bar-track { height: 10px; background: rgba(0, 0, 0, .3); border: 1px solid var(--line); position: relative; }
+.cl-bar-track i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--gold); }
+.cl-bar b { text-align: right; font-weight: 800; }
+.cl-hist td { font-family: inherit; }
+.cl-hist tr.cl-lose td { color: #ff8a7a; }
+.cl-hist tr.cl-retreat td { color: var(--muted); }

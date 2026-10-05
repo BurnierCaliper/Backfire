@@ -3,7 +3,7 @@
   "use strict";
   let local = {};
   const types = ["skill", "move", "standUp", "useItem", "startCombat", "endTurn", "openingChoice", "blockAnswer", "assistAnswer", "koltSwapAnswer", "retreat", "battle.endPlayerTurn", "battle.endEnemyTurn", "battle.enemyAction", "battle.finish", "battle.afterBattle", "battle.checkSolo", "battle.supportInfo", "battle.rememberCampaign", "battle.loadCampaign", "battle.cleanQueues", "battle.setup", "battle.setupRogue", "battle.panel", "battle.undo", "battle.continue"];
-  const panelActions = ["bagAdd", "currency", "water", "healItem", "repair", "advance", "shortRest", "longRest", "restore", "cheat", "saveSlot", "loadSlot", "clearSlot", "addParty", "removeParty", "addEnemy", "removeEnemy", "setField", "setGap", "gapHp", "rollWall", "toggleDoor", "addProp", "removeProp", "setZones", "setPartySize", "setWeather", "rollEncounter", "rollBossEncounter", "selectEncounter", "normalizeBag", "normalizeGaps", "normalizeField"];
+  const panelActions = ["bagAdd", "currency", "water", "healItem", "repair", "advance", "shortRest", "longRest", "restore", "cheat", "saveSlot", "loadSlot", "clearSlot", "addParty", "removeParty", "addEnemy", "removeEnemy", "setField", "setGap", "gapHp", "rollWall", "toggleDoor", "addProp", "removeProp", "setZones", "setPartySize", "setWeather", "rollEncounter", "rollBossEncounter", "selectEncounter", "normalizeBag", "normalizeGaps", "normalizeField", "setHighland"];
   function configure(adapter) { local = Object.assign({}, local, adapter || {}); }
   function environment(context) { return Object.assign({}, local, context || {}); }
   // Rogue's legacy encounter rows explicitly contain level: undefined when they
@@ -55,7 +55,7 @@
       if (cmd.action === "setWeather") oneOf(cmd.value, ["none", "heat", "snow", "acid", "thunder", "glow", "sand", "phase"], "weather");
       if (cmd.action === "setZones") oneOf(cmd.value, [2, 3], "zone count");
       if (cmd.action === "setPartySize") oneOf(cmd.value, [2, 3, 4], "party size");
-      if (["setField", "addProp", "addParty", "addEnemy"].includes(cmd.action)) oneOf(cmd.zone, [1, 2, 3], "zone");
+      if (["setField", "setHighland", "addProp", "addParty", "addEnemy"].includes(cmd.action)) oneOf(cmd.zone, [1, 2, 3], "zone");
       if (cmd.action === "addProp") {
         oneOf(cmd.kind, ["button", "lever", "battery", "boom", "acid", "scrap", "turret"], "prop kind");
         oneOf(cmd.faction, ["player", "enemy"], "prop faction");
@@ -171,7 +171,14 @@
         else { const u = p.build(cmd.level, partyN); u.zone = Math.min(cmd.zone, Number(state.zoneMode)); state.units.push(u); if (typeof refreshEnemyEconomy === "function") refreshEnemyEconomy(u); }
         g.enemyPlan = (g.enemyPlan || []).concat([{ id: cmd.preset, lv: cmd.level, zone: cmd.zone }]); break;
       }
-      case "setField": { const f = emptyField(); if (cmd.kind) f[cmd.kind] = true; if (cmd.kind === "fireOn") f.fire = 1; state.fields[cmd.zone] = f; break; }
+      case "setField": {
+        // 高地和其他区域效果共存：换场地时保留高地；选「高地」只是加上高地
+        const old = state.fields[cmd.zone] || emptyField();
+        if (cmd.kind === "highland") { old.highland = true; state.fields[cmd.zone] = old; break; }
+        const f = emptyField(); if (cmd.kind) f[cmd.kind] = true; if (cmd.kind === "fireOn") f.fire = 1;
+        f.highland = !!old.highland; state.fields[cmd.zone] = f; break;
+      }
+      case "setHighland": { const f = state.fields[cmd.zone] || emptyField(); f.highland = !!cmd.value; state.fields[cmd.zone] = f; break; }
       case "setGap": { const gap = state.gaps[cmd.key]; gap.type = cmd.kind; if (["bridge", "wall"].includes(gap.type)) { gap.hp = defaultGapHp(gap.type); gap.maxHp = gap.hp; gap.level = Number(g.level) || 1; } if (gap.type === "door") gap.open = false; if (gap.type === "open") { gap.hp = 0; gap.open = true; } break; }
       case "gapHp": state.gaps[cmd.key].hp = state.gaps[cmd.key].maxHp = Math.max(1, Math.floor(Number(cmd.hp) || 1)); break;
       case "rollWall": state.gaps[cmd.key].hp = state.gaps[cmd.key].maxHp = rollWallHp(); break;

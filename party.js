@@ -819,13 +819,13 @@ function skillList(unit) {
     const bit = (unit.resources && unit.resources.bit) || "drill";
     add({ id: "kolt_aa", name: "普通攻击", hint: bit === "acid" ? "距离1 · 1atk 酸 +1击破" : "同区 · 三次 0.4atk 电 · 共2击破" });
     add({ id: "kolt_short", name: "直流短接", hint: "需电钻 · 可先移≤1，再对同区铺高压场地" });
-    add({ id: "kolt_chase", name: "紧追", hint: "附赠 · 对一个敌人施加紧追", bare: true });
+    add({ id: "kolt_chase", name: "紧追", hint: "附赠 · 对一个敌人施加紧追：它移动时柯尔特自动跟上", bare: true });
     add({ id: "kolt_scrap", name: "废物利用", hint: "取上场上一个被摧毁血量层×2 的对应生命", minLv: 2 });
     add({ id: "kolt_summon", name: "唤出扭矩", hint: "武器生物化" });
   }
   if (unit.kit === "torque") {
     const bit = koltBit();
-    add({ id: "torque_boost", name: "强化输出", hint: bit === "acid" ? "选定区域蓄力，下回合开始对该区酸液AOE" : "移动1后三次 0.5atk 电 · 共2击破" });
+    add({ id: "torque_boost", name: "强化输出", hint: bit === "acid" ? "任意区域蓄力，下回合开始对该区酸液AOE" : "移动1后选一名敌人 · 1d4+1 次 0.5atk 电 · 共2击破" });
     add({ id: "torque_swap", name: "拆装部件", hint: "更换刀头，再打对应距离 1atk +1击破，强制收回" });
     add({ id: "torque_strip", name: "拆卸模式", hint: "需电钻 · 同区 2击破，外层血量转给同区友方", minLv: 2 });
     add({ id: "torque_return", name: "收回为武器", hint: "需与柯尔特同区" });
@@ -833,7 +833,7 @@ function skillList(unit) {
   if (unit.kit === "helu") {
     add({ id: "helu_aa", name: "普通攻击", hint: "远距离 · 1atk 谐波 +1击破 · 有聚焦则打聚焦层" });
     add({ id: "helu_wave", name: "驻波", hint: "进入相位；已扫描战场则可推进相位阶段" });
-    add({ id: "helu_scan", name: "环境扫描", hint: "检查一区：可能出现配置物，或远程操作已有配置物", minLv: 2 });
+    add({ id: "helu_scan", name: "环境扫描", hint: "选一区：扫描出配置物，或远程引爆 / 操控配置物、震动危墙桥梁、激发场地", minLv: 2 });
     add({ id: "helu_summon", name: "唤出 Ecmo", hint: "武器生物化" });
   }
   if (unit.kit === "ecmo") {

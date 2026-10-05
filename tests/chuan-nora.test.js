@@ -182,3 +182,42 @@ test("柯尔特被动「更换刀头」：换成酸液炮也打同区（近距�
   assert.ok(c.totalHp(near) < h0, "换成酸液炮后照样打同区敌人");
   assert.match(c.SkillText.kitInfo("kolt").passives[0].text, /同区域内的敌人/);
 });
+
+function torqueField(bit) {
+  const c = H.load();
+  c.BattleSim.setup({ party: ["kolt"], enemies: [{ id: "thug_hammer", lv: 1, zone: 1 }, { id: "thug_knife", lv: 1, zone: 2 }], seed: "TQ" });
+  c.startCombat();
+  const st = c.S.state;
+  const kolt = c.findKit("kolt", st.units);
+  kolt.zone = 1; kolt.resources.bit = bit;
+  const torque = c.spawnWeapon(kolt, "torque");
+  torque.zone = 1; torque.ap = 2;
+  const [near, far] = st.units.filter(u => !u.isPlayer && !u.hidden);
+  near.zone = 1; far.zone = 2;
+  [near, far].forEach(u => u.layers.forEach(l => { l.current = l.max = 500; }));
+  return { c, st, kolt, torque, near, far };
+}
+
+test("扭矩「拆装部件」：换成酸液炮就打距离 1 的敌人，1×atk 酸 + 1 击破，然后收回", () => {
+  const { c, st, kolt, torque, near, far } = torqueField("drill");
+  const steps = c.skillFlowSteps("torque_swap", torque, {});
+  assert.equal(steps[0].units.map(u => u.id).join(","), far.id, "只列出距离 1 的敌人");
+  const h0 = c.totalHp(far), d0 = far.def;
+  c.dispatch({ type: "skill", actor: torque.id, skill: "torque_swap", target: far.id, picks: { target: far.id } });
+  assert.equal(kolt.resources.bit, "acid");
+  assert.ok(c.totalHp(far) < h0, "打到了");
+  assert.ok(far.def < d0 || far.stunned, "有击破");
+  assert.equal(torque.hidden, true, "收回为武器");
+  void st; void near;
+});
+
+test("扭矩「拆装部件」：换成电钻就打同区的敌人", () => {
+  const { c, kolt, torque, near, far } = torqueField("acid");
+  const steps = c.skillFlowSteps("torque_swap", torque, {});
+  assert.equal(steps[0].units.map(u => u.id).join(","), near.id);
+  const h0 = c.totalHp(near);
+  c.dispatch({ type: "skill", actor: torque.id, skill: "torque_swap", target: near.id, picks: { target: near.id } });
+  assert.equal(kolt.resources.bit, "drill");
+  assert.ok(c.totalHp(near) < h0);
+  void far;
+});

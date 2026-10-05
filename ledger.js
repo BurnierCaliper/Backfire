@@ -72,13 +72,14 @@ const LEDGER = {
   weapons: {},         // 武器人 kit → [{ type, current }]：武器人的伤势跨战斗保留，长休回满
   shortUsed: {},       // 角色 kit → 今天已用短休次数
   restOnce: {},        // 角色 kit → { 技能 key: 次数 }：「长休一次」的技能，长休才刷新
+  career: null,        // 整局战场记录：{ battles: [每场摘要], kits: { kit: 累计数据 } }（careerRecordBattle）
 
   /** 存进队伍档案 */
   save() {
     return JSON.parse(JSON.stringify({
       day: this.day, hours: this.hours, clock: this.clock, dur: this.dur,
       heroes: this.heroes, weapons: this.weapons, shortUsed: this.shortUsed,
-      restOnce: this.restOnce, water: ledgerWater()
+      restOnce: this.restOnce, career: this.career, water: ledgerWater()
     }));
   },
   load(s) {
@@ -91,10 +92,54 @@ const LEDGER = {
     this.weapons = s.weapons || {};
     this.shortUsed = s.shortUsed || {};
     this.restOnce = s.restOnce || {};
+    this.career = s.career || null;
     if (s.water != null) setLedgerWater(s.water);
   },
   reset() { this.load({}); }
 };
+
+/* ===== 整局战场记录 =====
+ * 每场战斗结算（settleBattleRewards）时，把这场的战场数据（state.battleStats）按角色 / 武器人的 kit 并进来。
+ * 存在 LEDGER 里：单局跟着本局走（新开一局清空），跑团跟着存档空位走（重新开团清空）。 */
+const CAREER_KEYS = ["dmg", "brk", "taken", "kills", "heal", "score", "assists", "blocks", "blockOk", "avoided", "staggers"];
+const CAREER_MAX_BATTLES = 200;
+function careerData() {
+  if (!LEDGER.career) LEDGER.career = { battles: [], kits: {} };
+  LEDGER.career.battles = LEDGER.career.battles || [];
+  LEDGER.career.kits = LEDGER.career.kits || {};
+  return LEDGER.career;
+}
+function careerRecordBattle(outcome, grade) {
+  const stats = (typeof state !== "undefined" && state.battleStats) || {};
+  const ids = Object.keys(stats);
+  const units = (typeof state !== "undefined" && state.units) || [];
+  const c = careerData();
+  const no = (c.battles.length ? c.battles[c.battles.length - 1].no : 0) + 1;
+  let teamDmg = 0, mvp = null;
+  ids.forEach(id => {
+    const s = stats[id];
+    if (!s || !s.kit) return;
+    const row = c.kits[s.kit] || (c.kits[s.kit] = { name: s.name, kit: s.kit, weaponOf: s.weaponOf || null, battles: 0 });
+    row.name = s.name;
+    row.weaponOf = s.weaponOf || row.weaponOf || null;
+    CAREER_KEYS.forEach(k => { row[k] = (Number(row[k]) || 0) + Math.round(Number(s[k]) || 0); });
+    teamDmg += Math.round(Number(s.dmg) || 0);
+    if (!mvp || (Number(s.dmg) || 0) > mvp.dmg) mvp = { name: s.name, dmg: Math.round(Number(s.dmg) || 0) };
+  });
+  // 出场的角色（不管有没有数据）都算打过这一场
+  units.filter(u => u.isPlayer && !u._removed && !(typeof isWeaponUnit === "function" && isWeaponUnit(u)) && u.kit).forEach(u => {
+    const row = c.kits[u.kit] || (c.kits[u.kit] = { name: u.name, kit: u.kit, weaponOf: null, battles: 0 });
+    row.battles = (Number(row.battles) || 0) + 1;
+  });
+  c.battles.push({
+    no, outcome, turns: Number(state.turnNo) || 1,
+    grade: grade ? grade.grade : "", score: grade ? grade.score : 0,
+    when: typeof ledgerTimeText === "function" ? ledgerTimeText() : "", teamDmg,
+    mvp: mvp && mvp.dmg > 0 ? mvp : null
+  });
+  while (c.battles.length > CAREER_MAX_BATTLES) c.battles.shift();
+  return c;
+}
 
 /* ===== 「长休一次」的技能 ===== */
 const REST_ONCE_KEYS = ["rally"];
