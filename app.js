@@ -4169,9 +4169,9 @@ const FOCUS_ELEMS = ["fire", "acid", "electric", "ice", "energy", "physical", "h
 
 function focusSeqLen(target) {
   const r = typeof enemyRankOf === "function" ? enemyRankOf(target) : "minion";
-  if (r === "boss") return 4;
-  if (r === "elite") return 3;
-  return 2;
+  if (r === "boss") return 3;
+  if (r === "elite") return 2;
+  return 1;
 }
 
 const ELE_BY_CN = {
@@ -4256,18 +4256,31 @@ function stripFocusLayer(target, layerType, lines) {
   if (typeof spawnFloater === "function") spawnFloater(target, lost, "harmonic");
   if (typeof spawnPopup === "function") spawnPopup(target, { kind: "status", text: "聚焦抹层", element: "harmonic" });
   if (wasInner) settleEnemyKill(target, lines || []);
+  // 抹层同时露出结构弱点：2 击破（内层被抹、敌人已倒下就不用了）
+  else if (!target.dead) {
+    const notes = [];
+    dealBreak(target, 2, "harmonic", notes, "聚焦抹层");
+    notes.forEach(n => { if (lines) lines.push(n); else appendLog(n); });
+  }
 }
 
 /** 聚焦推进：按序列的下一个属性、对该目标造成伤害的攻击行动推进一步（多段攻击整次算一步），
- *  不要求打在被聚焦的那一层上。序列走完，被聚焦的层直接抹去。 */
+ *  不要求打在被聚焦的那一层上。用符合天气（这天气下有增伤）的属性攻击时，不管序列要什么都推进一步。
+ *  序列走完，被聚焦的层直接抹去（并造成 2 击破）。 */
+function weatherFavorsElement(target, element) {
+  const w = currentWeatherFor(target);
+  return !!(w && w !== "none" && element && weatherDamagePct(w, element) > 0);
+}
 function advanceFocusOnHit(attacker, target, element, res, extra) {
   if (!target || !target.focuses || !target.focuses.length) return;
   if (!res || !res.ok || (res.total || 0) <= 0) return;
+  const byWeather = weatherFavorsElement(target, element);
   target.focuses.slice().forEach(f => {
     const need = f.seq[f.step];
-    if (need && element === need) {
+    if (need && (element === need || byWeather)) {
       f.step += 1;
-      extra.push(`${target.name} 聚焦推进 ${f.step}/${f.seq.length}（${(typeof ELE !== "undefined" && ELE[element]) || element}）`);
+      const why = element === need ? "" : "，顺应天气";
+      extra.push(`${target.name} 聚焦推进 ${f.step}/${f.seq.length}（${(typeof ELE !== "undefined" && ELE[element]) || element}${why}）`);
       if (f.step >= f.seq.length) stripFocusLayer(target, f.layerType, extra);
     }
   });
