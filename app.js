@@ -4348,7 +4348,7 @@ function resolveKoltSwap(doSwap, targetId) {
   if (tgt && Number(tgt.zone) === Number(k.zone) && !tgt.dead) {
     const ele = next === "acid" ? "acid" : "electric";
     const atk = effectiveAtk(k, state.units);
-    const out = dealTo(k, tgt, { element: ele, mult: 0.5, baseBreak: 0, atk, atkRange: "melee", flags: { action: true, blockResolved: true } });
+    const out = dealTo(k, tgt, { element: ele, mult: 0.5, baseBreak: 0, atk, atkRange: "melee", flags: { action: true, blockResolved: true, flyFree: true } });
     (out.extra || []).forEach(s => lines.push(s));
     lines.push(`切刀近距离打击 ${tgt.name}：0.5atk ${ele === "acid" ? "酸" : "电"}。`);
   } else {
@@ -5599,8 +5599,8 @@ function dealTo(attacker, target, opt) {
     }
   }
   // 飞行：近程攻击飞行单位要额外付一个附赠行动；付不起就打不到。
-  // 范围攻击、杂兵、以及飞行打飞行不受此限。
-  if (attacker && target && target.flying && opt.flags.action && !opt.flags.aoe && !isReaction) {
+  // 范围攻击、杂兵、飞行打飞行、柯尔特切刀附带的那一击（flyFree）不受此限。
+  if (attacker && target && target.flying && opt.flags.action && !opt.flags.aoe && !opt.flags.flyFree && !isReaction) {
     const d = zoneDist(Number(attacker.zone), Number(target.zone), Number(state.zoneMode));
     const minion = !attacker.isPlayer && (typeof enemyRankOf === "function") && enemyRankOf(attacker) === "minion";
     if (d === 0 && !attacker.flying && !minion) {

@@ -1795,7 +1795,9 @@
     let lastUnitPick = null;
     for (let guard = 0; guard < 8; guard++) {
       let steps = [];
-      try { steps = skillFlowSteps(sk.id, actor, picks) || []; } catch (e) { steps = []; }
+      // 预览会在沙盒里跑一遍技能再还原局面，手里的旧单位对象可能已被改过（例：逃离预览把人挪走了），每步都重新取
+      const live = unitById(actor.id) || actor;
+      try { steps = skillFlowSteps(sk.id, live, picks) || []; } catch (e) { steps = []; }
       const step = steps.find(s => picks[s.key] === undefined);
       if (!step) break;
       const isLast = steps.every(s => s.key === step.key || picks[s.key] !== undefined);
@@ -1833,7 +1835,7 @@
       return act(skillCommand(actor.id, sk.id, lastUnitPick, picks), { actorId: actor.id, targetId: lastUnitPick, skillName: sk.name });
     }
     setHint(`<b>${esc(sk.name)}</b>：${esc(sk.hint || "选择目标")}　<span style="color:var(--faint)">${touchUI() ? "点目标预览，再点确认；点空白处取消" : "右键取消"}</span>`);
-    const cands = candidateUnits(actor, sk).map(u => {
+    const cands = candidateUnits(unitById(actor.id) || actor, sk).map(u => {
       const thunk = skillThunk(actor.id, sk.id, u.id, picks);
       const preview = previewOf(thunk);
       return { id: u.id, thunk, preview, invalid: !preview.meaningful };
