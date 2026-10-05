@@ -2310,12 +2310,12 @@
   /* ---------- 战场数据 ---------- */
   // share：按「造成伤害」算的输出占比；blockText：协助格挡 成功 / 次数
   const STAT_COLS = [["dmg", "造成伤害"], ["share", "输出占比"], ["brk", "击破"], ["staggers", "打出失衡"], ["kills", "击杀"],
-    ["assists", "协助攻击"], ["blocks", "协助格挡"], ["avoided", "格挡规避伤害"], ["taken", "承受伤害"], ["heal", "治疗 / 护盾"], ["score", "得分"]];
+    ["assists", "协助攻击"], ["blocks", "协助格挡"], ["avoided", "格挡规避伤害"], ["reduced", "减伤减免"], ["taken", "承受伤害"], ["heal", "治疗 / 护盾"], ["score", "得分"]];
   /** 按队伍顺序排好的行：角色在前，武器人跟在主人后面 */
   function statRows() {
     const stats = state.battleStats || {};
     const blank = (u) => ({ name: u.name, kit: u.kit, weaponOf: u.weaponOf || null, dmg: 0, brk: 0, taken: 0, kills: 0, heal: 0, score: 0,
-      assists: 0, blocks: 0, blockOk: 0, avoided: 0, staggers: 0 });
+      assists: 0, blocks: 0, blockOk: 0, avoided: 0, staggers: 0, reduced: 0 });
     const units = (state.units || []).filter(u => u.isPlayer && !u._removed);
     const heroes = units.filter(u => !isWeaponUnit(u));
     const rows = [];

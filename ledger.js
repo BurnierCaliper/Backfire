@@ -101,7 +101,7 @@ const LEDGER = {
 /* ===== 整局战场记录 =====
  * 每场战斗结算（settleBattleRewards）时，把这场的战场数据（state.battleStats）按角色 / 武器人的 kit 并进来。
  * 存在 LEDGER 里：单局跟着本局走（新开一局清空），跑团跟着存档空位走（重新开团清空）。 */
-const CAREER_KEYS = ["dmg", "brk", "taken", "kills", "heal", "score", "assists", "blocks", "blockOk", "avoided", "staggers"];
+const CAREER_KEYS = ["dmg", "brk", "taken", "kills", "heal", "score", "assists", "blocks", "blockOk", "avoided", "staggers", "reduced"];
 const CAREER_MAX_BATTLES = 200;
 function careerData() {
   if (!LEDGER.career) LEDGER.career = { battles: [], kits: {} };

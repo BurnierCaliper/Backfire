@@ -1934,7 +1934,7 @@ function battleStat(u) {
   if (!u || !u.isPlayer || !(state.units || []).includes(u)) return null;
   state.battleStats = state.battleStats || {};
   const s = state.battleStats[u.id] || (state.battleStats[u.id] = { name: u.name, kit: u.kit || "", weaponOf: u.weaponOf || null, dmg: 0, brk: 0, taken: 0, kills: 0, heal: 0,
-    assists: 0, blocks: 0, blockOk: 0, avoided: 0, staggers: 0 });
+    assists: 0, blocks: 0, blockOk: 0, avoided: 0, staggers: 0, reduced: 0 });
   s.name = u.name;
   return s;
 }
@@ -1949,6 +1949,8 @@ const SCORE_RULES = {
   block: 30,       // 协助格挡成功
   overkill: 1.5,   // 打死敌人时溢出的每点伤害（向下取整）
   kill: { minion: 20, elite: 100, boss: 300 },
+  reduce: 1.5,     // 我方受击时，减伤减免掉的每点伤害（天气、血量改造、角色能力……完全免伤也算）
+  blockSave: 1,    // 协助格挡成功减免掉的每点伤害（空手格挡成功：少挨的那一半）
   ap: 10,          // 我方每用 1 点行动点
   bonusAction: 5   // 我方每用 1 次附赠行动
 };
@@ -1980,7 +1982,7 @@ function bigHitInfo(level, dmg) {
 // [评价, 第一幕的分数线, 战斗经验倍率]。C 线以下是 D（经验不加成）。已定：第一幕 C 750 / B 1250 / A 1500 / S 1750
 const SCORE_GRADES = [["S", 1750, 2], ["A", 1500, 1.5], ["B", 1250, 1.2], ["C", 750, 1], ["D", 0, 1]];
 const SCORE_ACT_STEP = 250;   // 之后每一幕，各条分数线（D 除外）+250
-const SCORE_PART_NAMES = { dmg: "伤害", heal: "治疗 / 护盾", brk: "击破", stagger: "打出失衡", block: "协助格挡成功", overkill: "溢出伤害", kill: "击杀", bonus: "克制 / 大伤害加成", action: "行动", speed: "速杀奖励", flawless: "无伤奖励", ambush: "遭遇战加成", fatigue: "招式疲劳（扣分）" };
+const SCORE_PART_NAMES = { dmg: "伤害", heal: "治疗 / 护盾", brk: "击破", stagger: "打出失衡", block: "协助格挡成功", reduce: "减伤", blockSave: "格挡减免", overkill: "溢出伤害", kill: "击杀", bonus: "克制 / 大伤害加成", action: "行动", speed: "速杀奖励", flawless: "无伤奖励", ambush: "遭遇战加成", fatigue: "招式疲劳（扣分）" };
 /** 这个角色这回合用这个技能，算连续第几个回合（不改记录）。
  *  上回合用过 → 上回合的连续数 + 1；这回合已经用过 → 和这回合第一次一样；否则 1 */
 function fatigueStreak(u, skillId) {
@@ -5088,6 +5090,7 @@ function finishBlockInner(helperId, forced) {
     if (saver && out && out.res) {
       const saved = block === "assistOk" ? Number(out.res.blockedRaw) || 0 : block === "bareOk" ? Math.round(Number(out.res.total) || 0) : 0;
       saver.avoided = (saver.avoided || 0) + Math.max(0, saved);
+      if (saved > 0) addScore("blockSave", Math.floor(saved * SCORE_RULES.blockSave), unitById(helperId));   // 评分：格挡减免的伤害
     }
   }
 }
@@ -5874,6 +5877,12 @@ function dealTo(attacker, target, opt) {
     if (target && target.isPlayer) {
       const st = battleStat(target);
       if (st) st.taken += Math.floor(Number(res.total) || 0) + Math.floor(Number(res.shpDealt) || 0);
+      // 减伤得分：敌方（含配置物、环境）的攻击打在我方身上，被减伤减免掉的伤害 ×1.5
+      const red = Math.floor(Number(res.reduced) || 0);
+      if (st && red > 0 && !(attacker && attacker.isPlayer)) {
+        st.reduced = (st.reduced || 0) + red;
+        addScore("reduce", Math.floor(red * SCORE_RULES.reduce), target);
+      }
     }
     // 画面用：敌人被这一击打死时，记下「溢出」的伤害（血量显示成负数）和是不是一记重击（死后慢慢消失）
     if (target && !target.isPlayer && (target.dead || totalHp(target) <= 0) && (res.intended || 0) > 0) {
