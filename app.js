@@ -1931,6 +1931,7 @@ function addStatusDmg(key, amount) {
  *   击杀：最后一击是谁打的算谁
  *   治疗：自己的行动让「其他」友方多出来的血量和护盾（新唤出的单位不算） */
 function battleStat(u) {
+  if (u && u.creditTo) u = unitById(u.creditTo);   // 碎渣机炮这类代打：记在操控的人身上
   if (!u || !u.isPlayer || !(state.units || []).includes(u)) return null;
   state.battleStats = state.battleStats || {};
   const s = state.battleStats[u.id] || (state.battleStats[u.id] = { name: u.name, kit: u.kit || "", weaponOf: u.weaponOf || null, dmg: 0, brk: 0, taken: 0, kills: 0, heal: 0,
@@ -2899,14 +2900,43 @@ function fireScrap(p) {
   appendLog(scrapShot(p, t));
   renderAll();
 }
+/** 碎渣机炮可以被谁操控：玩家单位，或狂徒 */
+function canControlScrap(u) {
+  return !!u && !u.dead && !u.hidden && !u.fused && (u.isPlayer || /^thug_/.test(u.kit || ""));
+}
+/** u 所在区里能操控的碎渣机炮 */
+function scrapsFor(u) {
+  if (!canControlScrap(u)) return [];
+  return (state.props || []).filter(p => p.kind === "scrap" && (Number(p.hp) || 0) > 0 && Number(p.zone) === Number(u.zone));
+}
+/** 操控者的敌人里，在机炮 2 距离内的 */
+function scrapTargets(p, u) {
+  if (!p || !u) return [];
+  return (state.units || []).filter(t => t && !t.dead && !t.hidden && !t.fused && !t._removed &&
+    !!t.isPlayer !== !!u.isPlayer && t.kit !== "ironwall" &&
+    zoneDist(Number(p.zone), Number(t.zone), state.zoneMode) <= 2);
+}
+/** 操控碎渣机炮（消耗 1 行动点）：玩家和狂徒都能用 */
+function controlScrap(a, p, t) {
+  if (!p || p.kind !== "scrap" || !((Number(p.hp) || 0) > 0)) return "碎渣机炮已经不在了。";
+  if (!canControlScrap(a)) return `${a ? a.name : "该单位"} 不能操控碎渣机炮。`;
+  if (Number(p.zone) !== Number(a.zone)) return "必须和碎渣机炮在同一区才能操控。";
+  if (!t || t.isProp || !(state.units || []).includes(t)) return "先选碎渣机炮要打的敌人。";
+  if (!scrapTargets(p, a).includes(t)) return `${t.name} 不在碎渣机炮 2 距离内，或不是敌人。`;
+  if (!spendAp(a, 1, "操控碎渣机炮")) return `${a.name} 行动点不足，无法操控碎渣机炮。`;
+  return `${a.name} 操控碎渣机炮攻击 ${t.name}。\n` + scrapShot(p, t, a);
+}
 /** 碎渣机炮开火一次：1d4 发，每发 6+等级 物理 +2 击破 */
-function scrapShot(p, t) {
+function scrapShot(p, t, controller) {
   const n = 1 + Math.floor(Math.random() * 4);
   const flat = 6 + (p.level || 1);
   const fake = unitOf("碎渣机炮", p.level, [{ type: "armor", hp: 1 }], 0, 0);
   fake.zone = p.zone;
+  // 狂徒操控时站在敌人那边（打玩家），玩家操控时站在玩家那边
+  if (controller) fake.isPlayer = !!controller.isPlayer;
+  if (controller && controller.isPlayer) fake.creditTo = controller.id;
   // 射程是「2 距离内」（选目标时已经限定），这里不再按近距离判定
-  const out = dealTo(fake, t, { atk: 0, mult: 0, flat, hits: n, element: "physical", baseBreak: 2, atkRange: "any", flags: { action: true, blockResolved: true } });
+  const out = dealTo(fake, t, { atk: 0, mult: 0, flat, hits: n, element: "physical", baseBreak: 2, atkRange: "any", flags: { action: true, blockResolved: true, propShot: true, flyFree: true } });
   return `碎渣机炮开火 ${n} 次，每次 ${flat} 物理 +2 击破。合计伤害 ${Math.floor((out && out.res && out.res.total) || 0)}。`;
 }
 
@@ -4169,9 +4199,9 @@ const FOCUS_ELEMS = ["fire", "acid", "electric", "ice", "energy", "physical", "h
 
 function focusSeqLen(target) {
   const r = typeof enemyRankOf === "function" ? enemyRankOf(target) : "minion";
-  if (r === "boss") return 4;
-  if (r === "elite") return 3;
-  return 2;
+  if (r === "boss") return 3;
+  if (r === "elite") return 2;
+  return 1;
 }
 
 const ELE_BY_CN = {
@@ -4256,18 +4286,31 @@ function stripFocusLayer(target, layerType, lines) {
   if (typeof spawnFloater === "function") spawnFloater(target, lost, "harmonic");
   if (typeof spawnPopup === "function") spawnPopup(target, { kind: "status", text: "聚焦抹层", element: "harmonic" });
   if (wasInner) settleEnemyKill(target, lines || []);
+  // 抹层同时露出结构弱点：2 击破（内层被抹、敌人已倒下就不用了）
+  else if (!target.dead) {
+    const notes = [];
+    dealBreak(target, 2, "harmonic", notes, "聚焦抹层");
+    notes.forEach(n => { if (lines) lines.push(n); else appendLog(n); });
+  }
 }
 
 /** 聚焦推进：按序列的下一个属性、对该目标造成伤害的攻击行动推进一步（多段攻击整次算一步），
- *  不要求打在被聚焦的那一层上。序列走完，被聚焦的层直接抹去。 */
+ *  不要求打在被聚焦的那一层上。用符合天气（这天气下有增伤）的属性攻击时，不管序列要什么都推进一步。
+ *  序列走完，被聚焦的层直接抹去（并造成 2 击破）。 */
+function weatherFavorsElement(target, element) {
+  const w = currentWeatherFor(target);
+  return !!(w && w !== "none" && element && weatherDamagePct(w, element) > 0);
+}
 function advanceFocusOnHit(attacker, target, element, res, extra) {
   if (!target || !target.focuses || !target.focuses.length) return;
   if (!res || !res.ok || (res.total || 0) <= 0) return;
+  const byWeather = weatherFavorsElement(target, element);
   target.focuses.slice().forEach(f => {
     const need = f.seq[f.step];
-    if (need && element === need) {
+    if (need && (element === need || byWeather)) {
       f.step += 1;
-      extra.push(`${target.name} 聚焦推进 ${f.step}/${f.seq.length}（${(typeof ELE !== "undefined" && ELE[element]) || element}）`);
+      const why = element === need ? "" : "，顺应天气";
+      extra.push(`${target.name} 聚焦推进 ${f.step}/${f.seq.length}（${(typeof ELE !== "undefined" && ELE[element]) || element}${why}）`);
       if (f.step >= f.seq.length) stripFocusLayer(target, f.layerType, extra);
     }
   });
@@ -6376,7 +6419,7 @@ function heluScanAct(a, picks, lines) {
       const t = unitById(picks.target);
       if (!t || t.isPlayer || t.dead) { lines.push("先选碎渣机炮要打的敌人。"); return; }
       lines.push(`环境扫描：操控碎渣机炮攻击 ${t.name}。`);
-      lines.push(scrapShot(p, t));
+      lines.push(scrapShot(p, t, a));
     } else if (p.kind === "turret") {
       lines.push(`环境扫描：干扰 ${p.name} 的识别，让它立刻向 Helumica 的敌人开一炮。`);
       turretShot(p, !a.isPlayer, lines);
@@ -7112,6 +7155,14 @@ function renderSkills() {
     btn.className = "btn";
     btn.textContent = p.kind === "lever" ? `扳动${p.name}` : `按下${p.name}`;
     btn.onclick = () => calcCommand("skill", { actor: a.id, skill: "use_device:" + p.id, target: state.targetId || null });
+    box.appendChild(btn);
+  });
+  scrapsFor(a).forEach(p => {
+    const btn = document.createElement("button");
+    btn.className = "btn";
+    btn.textContent = `操控${p.name}`;
+    btn.title = "消耗 1 行动点：对机炮 2 距离内的一名敌人（先选为目标）打 1d4 次 6+等级 物理，2 击破";
+    btn.onclick = () => calcCommand("skill", { actor: a.id, skill: "use_scrap:" + p.id, target: state.targetId || null });
     box.appendChild(btn);
   });
   if (a.isPlayer && !isWeaponUnit(a) && a.dying && !a.dead) {
@@ -8040,6 +8091,14 @@ function runSkillInner(id, optRun) {
     if (why) { paintSkillLog(why); return; }
     if (a.isPlayer && !spendAp(a, 1, "改写炮台")) return;
     paintSkillLog(hackTurret(a, p).join("\n"));
+    renderAll();
+    return;
+  }
+  if (String(id).indexOf("use_scrap:") === 0) {
+    const pid = id.slice("use_scrap:".length);
+    const p = (state.props || []).find(x => x.id === pid);
+    const tu = unitById(state.targetId);
+    paintSkillLog(controlScrap(a, p, tu));
     renderAll();
     return;
   }
@@ -9286,6 +9345,7 @@ function runSkillInner(id, optRun) {
       if (!rec) lines.push("本场还没有被摧毁的血量层。");
       else {
         const amt = Math.floor((rec.dmg || rec.lost || 0) * 2);
+        const hp0 = totalHp(a);
         if (rec.type === "flesh" || rec.type === "spirit") {
           healUnit(a, amt);
           lines.push(`废物利用：恢复 ${amt} 生命（来自${LAYER[rec.type] || rec.type}）。`);
@@ -9293,6 +9353,10 @@ function runSkillInner(id, optRun) {
           addTempLayer(a, rec.type, amt);
           lines.push(`废物利用：获得 ${amt} 点${LAYER[rec.type] || rec.type}（战斗结束消失）。`);
         }
+        // 废物利用给自己回的血 / 加的层也算治疗（一般的治疗只统计给其他友方的）
+        const gain = totalHp(a) - hp0;
+        const st = gain > 0 ? battleStat(a) : null;
+        if (st) { st.heal += gain; addScore("heal", gain * SCORE_RULES.heal, a); }
       }
     } else if (id === "kolt_summon") {
       const w = spawnWeapon(a, "torque");
@@ -9873,6 +9937,79 @@ function dmDealEnv(input) {
   renderAll();
 }
 
+/* ===== 主持人后台：角色被动 / 资源的数值（给叙事用，直接改，不走规则） =====
+ * 只开放这张表里列出的键，值按类型收紧（数字取整夹在范围里、选项只认表里的值）。 */
+const PASSIVE_EDIT = {
+  ruby:  [{ key: "nano", label: "纳米 %", type: "num", min: 0, max: 100 }],
+  yuito: [{ key: "bean", label: "咖啡豆", type: "num", min: 0 }, { key: "liquid", label: "咖啡液", type: "num", min: 0 },
+          { key: "bondId", label: "思念对象", type: "ally" }],
+  hiaki: [{ key: "stance", label: "刀势", type: "select", options: [["draw", "拔刀"], ["iai", "居合"]] },
+          { key: "blade", label: "手中的刀", type: "select", options: [["niu", "丹生谷"], ["naruto", "鳴門"]] }],
+  tou:   [{ key: "shield", label: "圣盾", type: "num", min: 0, max: 3 }, { key: "tauntLeft", label: "嘲讽剩余次数", type: "num", min: 0 }],
+  xia:   [{ key: "engine", label: "引擎已拉响", type: "bool" }],
+  chuan: [{ key: "charge", label: "电能", type: "num", min: 0 }],
+  nora:  [{ key: "mood", label: "维塔斯情绪", type: "select", options: [["gentle", "温和"], ["cruel", "残忍"]] }],
+  kolt:  [{ key: "bit", label: "刀头", type: "select", options: [["drill", "电钻"], ["acid", "酸液炮"]] },
+          { key: "tauntLeft", label: "嘲讽剩余次数", type: "num", min: 0 }],
+  helu:  [{ key: "scanned", label: "本场已用过环境扫描", type: "bool" }],
+  ras:   [{ key: "energyPct", label: "累积能量 %", type: "num", min: 0 }, { key: "light", label: "光能", type: "num", min: 0 },
+          { key: "unstable", label: "不稳态", type: "bool" }]
+};
+function passiveEditSpec(u) { return (u && PASSIVE_EDIT[u.kit]) || []; }
+/** 后台改一项被动数值，返回写进记录的一行 */
+function dmSetPassive(u, key, value) {
+  const spec = passiveEditSpec(u).find(x => x.key === key);
+  if (!spec) throw new Error("Unknown passive field: " + key);
+  u.resources = u.resources || {};
+  const before = u.resources[key];
+  let v;
+  if (spec.type === "num") {
+    v = Math.floor(Number(value) || 0);
+    if (spec.min != null) v = Math.max(spec.min, v);
+    if (spec.max != null) v = Math.min(spec.max, v);
+  } else if (spec.type === "bool") v = value === true || value === "true" || value === 1 || value === "1";
+  else if (spec.type === "select") {
+    if (!spec.options.some(o => o[0] === value)) throw new Error("Unknown value for " + key + ": " + value);
+    v = value;
+  } else if (spec.type === "ally") {
+    const ally = value ? unitById(value) : null;
+    if (value && !(ally && ally.isPlayer)) throw new Error("Unknown ally: " + value);
+    v = ally ? ally.id : null;
+    u.resources.bondName = ally ? ally.name : null;
+  }
+  if (key === "mood" && typeof setMood === "function") setMood(u, v, null);   // 诺拉和维塔斯一起变
+  else u.resources[key] = v;
+  const show = (x) => spec.type === "bool" ? (x ? "是" : "否")
+    : spec.type === "select" ? ((spec.options.find(o => o[0] === x) || [x, x])[1])
+    : spec.type === "ally" ? ((unitById(x) || {}).name || "无") : String(x == null ? 0 : x);
+  return `后台：${u.name} ${spec.label} ${show(before)} → ${show(v)}。`;
+}
+/** 后台改聚焦：op "set" 写入一层的聚焦（序列 + 已推进步数），op "clear" 清掉一层（不给 layerType 就全清） */
+function dmSetFocus(u, op, layerType, seq, step) {
+  if (!u || u.isPlayer) throw new Error("Focus only applies to enemies");
+  const layerName = (t) => (LAYER[t] || t);
+  if (op === "clear") {
+    const had = (u.focuses || []).length;
+    u.focuses = layerType ? (u.focuses || []).filter(f => f.layerType !== layerType) : [];
+    return had ? `后台：清除 ${u.name} 的${layerType ? layerName(layerType) : "全部"}聚焦。` : `${u.name} 没有聚焦。`;
+  }
+  if (op !== "set") throw new Error("Unknown focus op: " + op);
+  if (!(u.layers || []).some(l => l.type === layerType)) throw new Error("No such layer: " + layerType);
+  let list = Array.isArray(seq) ? seq.filter(e => FOCUS_ELEMS.includes(e)) : [];
+  if (!list.length) list = rollFocusSeq(focusSeqLen(u));
+  const n = Math.max(0, Math.min(list.length - 1, Math.floor(Number(step) || 0)));
+  u.focuses = (u.focuses || []).filter(f => f.layerType !== layerType);
+  u.focuses.push({ layerType, seq: list, step: n });
+  return `后台：${u.name} 的${layerName(layerType)}被聚焦：${list.map(e => ELE[e] || e).join(" → ")}（已推进 ${n}/${list.length}）。`;
+}
+/** 「火 电 冰」/「fire,electric」→ 属性 id 列表 */
+function parseFocusSeqText(text) {
+  const byName = {};
+  FOCUS_ELEMS.forEach(e => { byName[e] = e; if (ELE[e]) byName[ELE[e]] = e; });
+  Object.keys(ELE_BY_CN).forEach(cn => { byName[cn] = ELE_BY_CN[cn]; });
+  return String(text || "").split(/[\s,，、→>\/]+/).map(x => byName[x.trim()]).filter(Boolean);
+}
+
 function renderBackstage() {
   if (!HAS_DOM) return;
   const box = uiEl("backstageBody");
@@ -9985,6 +10122,42 @@ function renderBackstage() {
       </div>
     </div>`;
   });
+  // 角色被动 / 资源：光能、能量 %、电能、刀头、是否扫描过……给叙事用
+  const passiveUnits = all.filter(u => u.isPlayer && passiveEditSpec(u).length);
+  html += `<div class="section-title">角色被动 / 资源</div>
+    <p class="hint">按叙事需要直接改，改完立刻生效并写进战斗记录，不走任何规则（例：改到 100% 能量不会自动进入不稳态，要的话一起勾上）。</p>`;
+  if (!passiveUnits.length) html += `<p class="hint">场上没有带可调被动的角色。</p>`;
+  passiveUnits.forEach(u => {
+    const r = u.resources || {};
+    const ctl = passiveEditSpec(u).map(sp => {
+      const attrs = `data-passive="${u.id}" data-key="${sp.key}"`;
+      if (sp.type === "num") return `<label class="field">${sp.label}<input ${attrs} type="number" ${sp.min != null ? `min="${sp.min}"` : ""} ${sp.max != null ? `max="${sp.max}"` : ""} value="${Math.floor(Number(r[sp.key]) || 0)}" style="width:72px"></label>`;
+      if (sp.type === "bool") return `<label class="field" style="flex-direction:row;align-items:center;gap:6px"><input ${attrs} type="checkbox" ${r[sp.key] ? "checked" : ""}> ${sp.label}</label>`;
+      if (sp.type === "select") return `<label class="field">${sp.label}<select ${attrs}>${sp.options.map(o => `<option value="${o[0]}" ${r[sp.key] === o[0] ? "selected" : ""}>${o[1]}</option>`).join("")}</select></label>`;
+      const allies = all.filter(x => x.isPlayer && x.id !== u.id && !x.hidden && !x.dead);
+      return `<label class="field">${sp.label}<select ${attrs}><option value="">（无）</option>${allies.map(x => `<option value="${x.id}" ${r[sp.key] === x.id ? "selected" : ""}>${escapeHtml(x.name)}</option>`).join("")}</select></label>`;
+    }).join("");
+    html += `<div class="prop-card" style="margin-bottom:8px"><div><b>${escapeHtml(u.name)}</b></div><div class="row">${ctl}</div></div>`;
+  });
+  // 聚焦：给哪个敌人的哪一层加 / 改 / 清聚焦
+  const focusFoes = all.filter(u => !u.isPlayer && !u.dead && !u.hidden && (u.layers || []).length);
+  html += `<div class="section-title">聚焦</div>
+    <p class="hint">序列用属性名写，空格隔开（例：火 电 冰）；留空就按规则随机生成（长度按敌人级别）。已推进 = 已经完成的步数。</p>`;
+  if (!focusFoes.length) html += `<p class="hint">场上没有敌人。</p>`;
+  focusFoes.forEach(u => {
+    const cur = (u.focuses || []).map(f => `${LAYER[f.layerType] || f.layerType}：${f.seq.map(e => ELE[e] || e).join(" → ")}（${f.step}/${f.seq.length}）
+        <button class="btn small" data-focusclear="${u.id}" data-layer="${f.layerType}">清除</button>`).join("<br>");
+    const f0 = (u.focuses || [])[0];
+    html += `<div class="prop-card" style="margin-bottom:8px">
+      <div><b>${escapeHtml(u.name)}</b> · ${cur || '<span class="hint">没有聚焦</span>'}</div>
+      <div class="row">
+        <label class="field">血量层<select data-focuslayer="${u.id}">${(u.layers || []).map(l => `<option value="${l.type}" ${f0 && f0.layerType === l.type ? "selected" : ""}>${LAYER[l.type] || l.type}</option>`).join("")}</select></label>
+        <label class="field">序列<input data-focusseq="${u.id}" type="text" placeholder="留空随机" value="${f0 ? f0.seq.map(e => ELE[e] || e).join(" ") : ""}" style="width:150px"></label>
+        <label class="field">已推进<input data-focusstep="${u.id}" type="number" min="0" value="${f0 ? f0.step : 0}" style="width:56px"></label>
+        <button class="btn small primary" data-focusset="${u.id}">设置聚焦</button>
+      </div>
+    </div>`;
+  });
   html += `<div class="section-title">状态 / 场地累计伤害</div>`;
   html += `<p class="hint">从开战或上次清除日志起累计。清除日志会同时清零。</p>`;
   if (!sdKeys.length) html += `<p class="hint">还没有状态或场地伤害。</p>`;
@@ -10066,6 +10239,17 @@ function renderBackstage() {
   if (g) g.onclick = () => { send("grantXp", { amount: Number(uiEl("xpGrant").value) || 0 }); renderBackstage(); };
   bindNum("[data-lcur]", inp => send("layer", { actor: inp.dataset.lcur, index: Number(inp.dataset.i), current: inp.value, max: null }));
   bindNum("[data-lmax]", inp => send("layer", { actor: inp.dataset.lmax, index: Number(inp.dataset.i), current: null, max: inp.value }));
+  box.querySelectorAll("[data-passive]").forEach(inp => {
+    inp.onchange = () => send("passive", { actor: inp.dataset.passive, key: inp.dataset.key, value: inp.type === "checkbox" ? inp.checked : inp.value }, true);
+  });
+  box.querySelectorAll("[data-focusset]").forEach(b => {
+    b.onclick = () => {
+      const id = b.dataset.focusset;
+      const q = (k) => box.querySelector(`[data-${k}="${id}"]`);
+      send("focus", { actor: id, op: "set", layerType: q("focuslayer").value, seq: parseFocusSeqText(q("focusseq").value), step: q("focusstep").value }, true);
+    };
+  });
+  box.querySelectorAll("[data-focusclear]").forEach(b => { b.onclick = () => send("focus", { actor: b.dataset.focusclear, op: "clear", layerType: b.dataset.layer }, true); });
   const buttons = { fillhp: "fillHp", filldef: "fillDef", stun: "stun", unstun: "unstun", kill: "knockOut", revive: "revive" };
   Object.entries(buttons).forEach(([attr, action]) => box.querySelectorAll(`[data-${attr}]`).forEach(b => {
     b.onclick = () => { send(action, { actor: b.dataset[attr] }, true); if (action === "stun" && typeof presentAssistModal === "function") presentAssistModal(); };

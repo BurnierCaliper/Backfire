@@ -470,6 +470,14 @@
         cost: { ap: 1 }
       });
     });
+    if (typeof scrapsFor === "function") scrapsFor(u).forEach(p => {
+      out.push({
+        id: "use_scrap:" + p.id,
+        name: "操控 " + p.name,
+        hint: `和机炮站在一起时操控 · 向机炮 2 距离以内的一名敌人发射碎渣：1d4 次 ${6 + (Number(p.level) || 1)} 点物理，2 击破 · 耐久 ${p.hp}/${p.maxHp || 5}`,
+        cost: { ap: 1 }
+      });
+    });
     if (typeof hackableTurrets === "function") hackableTurrets(u).forEach(p => {
       const odds = turretHackOdds(u);
       out.push({
@@ -499,6 +507,10 @@
     if ((sk.cost.ap || 0) > (u.ap || 0)) return "行动点不足";
     if ((sk.cost.bonus || 0) > (u.bonus || 0)) return "附赠行动不足";
     if (sk.id === "__move" && u.noMove) return "本回合无法移动";
+    if (String(sk.id).indexOf("use_scrap:") === 0 && typeof scrapTargets === "function") {
+      const p = (state.props || []).find(x => "use_scrap:" + x.id === sk.id);
+      if (!p || !scrapTargets(p, u).length) return "碎渣机炮 2 距离内没有敌人";
+    }
     if (String(sk.id).indexOf("hack_turret:") === 0 && typeof turretHackError === "function") {
       const p = (state.props || []).find(x => "hack_turret:" + x.id === sk.id);
       const why = turretHackError(u, p);

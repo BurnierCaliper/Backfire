@@ -62,3 +62,18 @@ test("空手格挡成功：少挨的那一半算格挡减免，不重复算成�
   assert.equal(st.battleScore.parts.blockSave, 5);
   assert.equal(st.battleScore.parts.reduce || 0, 0);
 });
+
+test("柯尔特废物利用：给自己回的血 / 加的层也算治疗，计分", () => {
+  const { c, st, kolt } = field();
+  kolt.level = 3; kolt.ap = 3;
+  st.combatPhase = "player";
+  kolt.layers = [{ type: "flesh", current: 100, max: 300 }];
+  st.lastBrokenLayer = { type: "flesh", lost: 5, dmg: 5 };
+  c.dispatch({ type: "skill", actor: kolt.id, skill: "kolt_scrap", target: null, picks: {} });
+  assert.equal(st.battleStats[kolt.id].heal, 10);
+  assert.equal(st.battleScore.parts.heal, 10);
+  st.lastBrokenLayer = { type: "armor", lost: 4, dmg: 4 };
+  kolt.ap = 3;
+  c.dispatch({ type: "skill", actor: kolt.id, skill: "kolt_scrap", target: null, picks: {} });
+  assert.equal(st.battleStats[kolt.id].heal, 18);
+});

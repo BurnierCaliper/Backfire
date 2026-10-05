@@ -338,6 +338,19 @@ const EnemyAI = (function () {
     let target = pick.unit;
     if (!target) return null;
 
+    // 狂徒：同区有碎渣机炮、机炮 2 距离内有玩家时，花 1 行动点操控它开火（嘲讽 / 决一死战时只打强制目标）
+    if (typeof scrapsFor === "function" && (u.ap || 0) >= 1) {
+      const sp = scrapsFor(u)[0];
+      const inR = sp ? scrapTargets(sp, u) : [];
+      const tgt = inR.includes(target) ? target : (pick.forced ? null : (inR.length ? lowest(inR) : null));
+      if (sp && tgt) {
+        return {
+          thunk: () => { state.attackerId = u.id; state.targetId = tgt.id; runSkill("use_scrap:" + sp.id); },
+          meta: { actorId: u.id, targetId: tgt.id, skillName: "操控碎渣机炮" }
+        };
+      }
+    }
+
     // 所有目标都隔着危墙（走不过去、也打不过去），而墙就挡在前进方向的下一条间隔上：先打墙
     const wallKey = wallInTheWay(u, prey, target);
     if (wallKey) {
