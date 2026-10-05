@@ -221,3 +221,24 @@ test("扭矩「拆装部件」：换成电钻就打同区的敌人", () => {
   assert.ok(c.totalHp(near) < h0);
   void far;
 });
+
+test("柯尔特切刀附带的那一击打飞行敌人，不额外消耗附赠行动", () => {
+  const c = H.load();
+  c.BattleSim.setup({ party: ["kolt"], enemies: [{ id: "thug_hammer", lv: 1, zone: 1 }], seed: "KF" });
+  c.startCombat();
+  const st = c.S.state;
+  const kolt = c.findKit("kolt", st.units);
+  const foe = st.units.find(u => !u.isPlayer);
+  kolt.zone = 1; foe.zone = 1; foe.flying = true;
+  kolt.bonus = 0;
+  const h0 = c.totalHp(foe);
+  c.queueKoltSwap(kolt);
+  c.resolveKoltSwap(true, foe.id);
+  assert.ok(c.totalHp(foe) < h0, "附赠行动为 0 也打到了飞行敌人");
+  assert.equal(kolt.bonus, 0);
+});
+
+test("战斗画面分步选择每一步都重新取单位（预览会替换单位对象，逃离的目标要按移动前的区域列）", () => {
+  const src = require("fs").readFileSync(require("path").join(H.ROOT, "game.js"), "utf8");
+  assert.match(src, /const live = unitById\(actor\.id\) \|\| actor;\s*try \{ steps = skillFlowSteps\(sk\.id, live, picks\)/);
+});

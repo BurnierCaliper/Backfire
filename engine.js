@@ -435,8 +435,10 @@ function resolveAttack(ctx) {
   if (flags.immune) {
     // 血量层原样带回：应用结果时要用（原来缺了这一项，屹立不倒一挨打就报错）
     const defNow = Number(t.def) || 0;
+    // 完全免伤也算减伤：这一击本来的伤害全部算「减免」
+    const immuneRaw = Math.max(0, (Number(ctx.atk) || 0) * (Number(ctx.mult) || 0) + (Number(ctx.flat) || 0) + (Number(ctx.diceValue) || 0)) * Math.max(1, Number(ctx.hits) || 1);
     return {
-      ok: true, total: 0, breakDealt: 0, hits: 0, log: ["屹立不倒 / 免疫：伤害与击破均为 0。"],
+      ok: true, total: 0, breakDealt: 0, hits: 0, log: ["屹立不倒 / 免疫：伤害与击破均为 0。"], reduced: Math.round(immuneRaw),
       perHit: [], preventSand: false, applied: [],
       layersAfter: clone(t.layers || []), defBefore: defNow, defAfter: defNow, broke: false,
       element: ctx.element, flags, interfereAfter: t.interfere || 0
@@ -472,6 +474,10 @@ function resolveAttack(ctx) {
 
   const diceV = Number(ctx.diceValue) || 0;
   let rawBase = Math.max(0, atk * mult + (Number(ctx.flat) || 0) + diceV);
+  // 减伤的参照：攻击者本来的伤害（算振奋，不算玩家给它上的虚弱——那也是减伤的一部分）
+  const refAtk = (Number(ctx.atk) || 0) * (a && a.statuses && a.statuses.inspire ? 1.25 : 1);
+  const refBase = Math.max(0, refAtk * mult + (Number(ctx.flat) || 0) + diceV);
+  let totalReduced = 0;
   add(`基础包 = ATK ${round2(atk)} × 倍率 ${round2(mult)} + 固定 ${ctx.flat || 0} + 骰子 ${round2(diceV)} = ${round2(rawBase)}`);
 
   let hits = Math.max(1, Number(ctx.hits) || 1);
@@ -683,6 +689,8 @@ function resolveAttack(ctx) {
     else hAdd(`最终伤害包 ${floored}`);
     packet = floored;
     totalIntended += packet;
+    // 减伤：这一段比参照少了多少（空手格挡减半那部分不算，归格挡）
+    if (!ghost) totalReduced += Math.max(0, refBase * (flags.block === "bareOk" ? 0.5 : 1) - packet);
 
     let hitDealt = packet;
     if (ghost) {
@@ -815,6 +823,8 @@ function resolveAttack(ctx) {
     blocked: flags.block === "assistOk",   // 主攻击被挡住 → 不产生溅射
     // 协助格挡成功时这一击本来的伤害（基础包 × 次数，未算抗性），战场数据「格挡规避伤害」用
     blockedRaw: flags.block === "assistOk" ? Math.round(rawBase * hits) : 0,
+    // 受击方的减伤减免掉的伤害（天气、血量层抗性、角色能力、减半……；协助格挡成功的不算）
+    reduced: flags.block === "assistOk" ? 0 : Math.round(totalReduced),
     total: totalDealt,
     intended: totalIntended,
     extraHarmonic,

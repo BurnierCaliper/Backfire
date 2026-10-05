@@ -547,7 +547,7 @@
        <div class="u-hp"></div>
        <div class="u-hpline"><span class="hpn"></span><span class="shpn"></span></div>
        <div class="u-def"></div>
-       <div class="u-dur"><i></i><span></span></div>
+       <div class="u-dur"><div class="u-durbar"></div><div class="u-durline"><span class="durn"></span><span class="durlbl"></span></div></div>
        <div class="u-foot"><div class="u-econ"></div><div class="u-status"></div></div>
        <div class="u-res"></div>
        <span class="u-flag stun">失衡</span><span class="u-flag dying">濒死</span><span class="u-flag downed">倒下</span>`);
@@ -635,8 +635,15 @@
       const d = s.dur;
       durBox.style.display = d ? "" : "none";
       if (d) {
-        durBox.querySelector("i").style.width = (d.max ? (d.cur / d.max) * 100 : 0) + "%";
-        durBox.querySelector("span").textContent = `耐久 ${d.cur}/${d.max}`;
+        // 和血条一样：每点耐久一格，掉了的格子变空；下面一行写数字
+        const bar = durBox.querySelector(".u-durbar");
+        if (bar.children.length !== d.max) {
+          bar.innerHTML = "";
+          for (let i = 0; i < d.max; i++) { const g = el("div", "dseg"); g.appendChild(el("div", "fill")); bar.appendChild(g); }
+        }
+        [...bar.children].forEach((g, i) => g.classList.toggle("on", i < d.cur));
+        durBox.querySelector(".durn").innerHTML = `<b>${d.cur}</b>/${d.max}`;
+        durBox.querySelector(".durlbl").textContent = "耐久";
         durBox.title = `${d.name} 耐久 ${d.cur}/${d.max}`;
         durBox.classList.toggle("broken", d.cur <= 0);
       }
@@ -1788,7 +1795,9 @@
     let lastUnitPick = null;
     for (let guard = 0; guard < 8; guard++) {
       let steps = [];
-      try { steps = skillFlowSteps(sk.id, actor, picks) || []; } catch (e) { steps = []; }
+      // 预览会在沙盒里跑一遍技能再还原局面，手里的旧单位对象可能已被改过（例：逃离预览把人挪走了），每步都重新取
+      const live = unitById(actor.id) || actor;
+      try { steps = skillFlowSteps(sk.id, live, picks) || []; } catch (e) { steps = []; }
       const step = steps.find(s => picks[s.key] === undefined);
       if (!step) break;
       const isLast = steps.every(s => s.key === step.key || picks[s.key] !== undefined);
@@ -1826,7 +1835,7 @@
       return act(skillCommand(actor.id, sk.id, lastUnitPick, picks), { actorId: actor.id, targetId: lastUnitPick, skillName: sk.name });
     }
     setHint(`<b>${esc(sk.name)}</b>：${esc(sk.hint || "选择目标")}　<span style="color:var(--faint)">${touchUI() ? "点目标预览，再点确认；点空白处取消" : "右键取消"}</span>`);
-    const cands = candidateUnits(actor, sk).map(u => {
+    const cands = candidateUnits(unitById(actor.id) || actor, sk).map(u => {
       const thunk = skillThunk(actor.id, sk.id, u.id, picks);
       const preview = previewOf(thunk);
       return { id: u.id, thunk, preview, invalid: !preview.meaningful };
@@ -2303,12 +2312,12 @@
   /* ---------- 战场数据 ---------- */
   // share：按「造成伤害」算的输出占比；blockText：协助格挡 成功 / 次数
   const STAT_COLS = [["dmg", "造成伤害"], ["share", "输出占比"], ["brk", "击破"], ["staggers", "打出失衡"], ["kills", "击杀"],
-    ["assists", "协助攻击"], ["blocks", "协助格挡"], ["avoided", "格挡规避伤害"], ["taken", "承受伤害"], ["heal", "治疗 / 护盾"], ["score", "得分"]];
+    ["assists", "协助攻击"], ["blocks", "协助格挡"], ["avoided", "格挡规避伤害"], ["reduced", "减伤减免"], ["taken", "承受伤害"], ["heal", "治疗 / 护盾"], ["score", "得分"]];
   /** 按队伍顺序排好的行：角色在前，武器人跟在主人后面 */
   function statRows() {
     const stats = state.battleStats || {};
     const blank = (u) => ({ name: u.name, kit: u.kit, weaponOf: u.weaponOf || null, dmg: 0, brk: 0, taken: 0, kills: 0, heal: 0, score: 0,
-      assists: 0, blocks: 0, blockOk: 0, avoided: 0, staggers: 0 });
+      assists: 0, blocks: 0, blockOk: 0, avoided: 0, staggers: 0, reduced: 0 });
     const units = (state.units || []).filter(u => u.isPlayer && !u._removed);
     const heroes = units.filter(u => !isWeaponUnit(u));
     const rows = [];

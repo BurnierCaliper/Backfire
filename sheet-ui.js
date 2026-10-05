@@ -163,7 +163,7 @@
   "use strict";
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const COLS = [["battles", "出场"], ["dmg", "造成伤害"], ["share", "输出占比"], ["brk", "击破"], ["staggers", "打出失衡"], ["kills", "击杀"],
-    ["assists", "协助攻击"], ["blocks", "协助格挡"], ["avoided", "格挡规避伤害"], ["taken", "承受伤害"], ["takenShare", "承伤占比"], ["heal", "治疗 / 护盾"], ["score", "得分"]];
+    ["assists", "协助攻击"], ["blocks", "协助格挡"], ["avoided", "格挡规避伤害"], ["reduced", "减伤减免"], ["taken", "承受伤害"], ["takenShare", "承伤占比"], ["heal", "治疗 / 护盾"], ["score", "得分"]];
   const OUT = { win: "胜利", lose: "战败", retreat: "撤退" };
   let box = null;
   const n = (v) => Math.round(Number(v) || 0);
@@ -194,13 +194,13 @@
     if (!battles.length) return `<p class="sheet-empty">这一局还没有打过仗。打完一场战斗后，这里会累计每个角色的输出和团队贡献。</p>`;
     const rows = rowsOf(c);
     const tot = {};
-    ["dmg", "brk", "staggers", "kills", "assists", "blocks", "blockOk", "avoided", "taken", "heal", "score"].forEach(k => { tot[k] = rows.reduce((a, r) => a + n(r[k]), 0); });
+    ["dmg", "brk", "staggers", "kills", "assists", "blocks", "blockOk", "avoided", "reduced", "taken", "heal", "score"].forEach(k => { tot[k] = rows.reduce((a, r) => a + n(r[k]), 0); });
     const cnt = (o) => battles.filter(b => b.outcome === o).length;
     const best = {}; COLS.forEach(([k]) => { best[k] = Math.max(0, ...rows.map(r => Number(r[k]) || 0)); });
     const tiles = [["战斗场数", `${battles.length}`, `胜 ${cnt("win")} · 败 ${cnt("lose")} · 撤 ${cnt("retreat")}`],
       ["全队造成伤害", tot.dmg, `击杀 ${tot.kills}`], ["全队击破", tot.brk, `打出失衡 ${tot.staggers} 次`],
       ["协助攻击", tot.assists, ""], ["协助格挡", `${tot.blockOk}/${tot.blocks}`, `规避伤害 ${tot.avoided}`],
-      ["全队承受伤害", tot.taken, `治疗 / 护盾 ${tot.heal}`], ["总得分", tot.score, ""]];
+      ["全队承受伤害", tot.taken, `减伤减免 ${tot.reduced} · 治疗 / 护盾 ${tot.heal}`], ["总得分", tot.score, ""]];
     const bars = rows.filter(r => !r.sub || n(r.dmg) > 0).map(r =>
       `<div class="cl-bar"><span class="cl-bar-name">${r.sub ? "└ " : ""}${esc(r.name)}</span><span class="cl-bar-track"><i style="width:${Math.max(0, Math.min(100, r.share)).toFixed(1)}%"></i></span><b>${r.share.toFixed(1)}%</b></div>`).join("");
     const hist = battles.slice().reverse().map(b => `<tr class="cl-${esc(b.outcome)}"><td>#${b.no}</td><td>${esc(b.when || "")}</td><td>${OUT[b.outcome] || esc(b.outcome)}</td><td>${b.turns} 回合</td>
