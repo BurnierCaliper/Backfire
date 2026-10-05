@@ -1931,6 +1931,7 @@ function addStatusDmg(key, amount) {
  *   击杀：最后一击是谁打的算谁
  *   治疗：自己的行动让「其他」友方多出来的血量和护盾（新唤出的单位不算） */
 function battleStat(u) {
+  if (u && u.creditTo) u = unitById(u.creditTo);   // 碎渣机炮这类代打：记在操控的人身上
   if (!u || !u.isPlayer || !(state.units || []).includes(u)) return null;
   state.battleStats = state.battleStats || {};
   const s = state.battleStats[u.id] || (state.battleStats[u.id] = { name: u.name, kit: u.kit || "", weaponOf: u.weaponOf || null, dmg: 0, brk: 0, taken: 0, kills: 0, heal: 0,
@@ -2899,14 +2900,43 @@ function fireScrap(p) {
   appendLog(scrapShot(p, t));
   renderAll();
 }
+/** 碎渣机炮可以被谁操控：玩家单位，或狂徒 */
+function canControlScrap(u) {
+  return !!u && !u.dead && !u.hidden && !u.fused && (u.isPlayer || /^thug_/.test(u.kit || ""));
+}
+/** u 所在区里能操控的碎渣机炮 */
+function scrapsFor(u) {
+  if (!canControlScrap(u)) return [];
+  return (state.props || []).filter(p => p.kind === "scrap" && (Number(p.hp) || 0) > 0 && Number(p.zone) === Number(u.zone));
+}
+/** 操控者的敌人里，在机炮 2 距离内的 */
+function scrapTargets(p, u) {
+  if (!p || !u) return [];
+  return (state.units || []).filter(t => t && !t.dead && !t.hidden && !t.fused && !t._removed &&
+    !!t.isPlayer !== !!u.isPlayer && t.kit !== "ironwall" &&
+    zoneDist(Number(p.zone), Number(t.zone), state.zoneMode) <= 2);
+}
+/** 操控碎渣机炮（消耗 1 行动点）：玩家和狂徒都能用 */
+function controlScrap(a, p, t) {
+  if (!p || p.kind !== "scrap" || !((Number(p.hp) || 0) > 0)) return "碎渣机炮已经不在了。";
+  if (!canControlScrap(a)) return `${a ? a.name : "该单位"} 不能操控碎渣机炮。`;
+  if (Number(p.zone) !== Number(a.zone)) return "必须和碎渣机炮在同一区才能操控。";
+  if (!t || t.isProp || !(state.units || []).includes(t)) return "先选碎渣机炮要打的敌人。";
+  if (!scrapTargets(p, a).includes(t)) return `${t.name} 不在碎渣机炮 2 距离内，或不是敌人。`;
+  if (!spendAp(a, 1, "操控碎渣机炮")) return `${a.name} 行动点不足，无法操控碎渣机炮。`;
+  return `${a.name} 操控碎渣机炮攻击 ${t.name}。\n` + scrapShot(p, t, a);
+}
 /** 碎渣机炮开火一次：1d4 发，每发 6+等级 物理 +2 击破 */
-function scrapShot(p, t) {
+function scrapShot(p, t, controller) {
   const n = 1 + Math.floor(Math.random() * 4);
   const flat = 6 + (p.level || 1);
   const fake = unitOf("碎渣机炮", p.level, [{ type: "armor", hp: 1 }], 0, 0);
   fake.zone = p.zone;
+  // 狂徒操控时站在敌人那边（打玩家），玩家操控时站在玩家那边
+  if (controller) fake.isPlayer = !!controller.isPlayer;
+  if (controller && controller.isPlayer) fake.creditTo = controller.id;
   // 射程是「2 距离内」（选目标时已经限定），这里不再按近距离判定
-  const out = dealTo(fake, t, { atk: 0, mult: 0, flat, hits: n, element: "physical", baseBreak: 2, atkRange: "any", flags: { action: true, blockResolved: true } });
+  const out = dealTo(fake, t, { atk: 0, mult: 0, flat, hits: n, element: "physical", baseBreak: 2, atkRange: "any", flags: { action: true, blockResolved: true, propShot: true, flyFree: true } });
   return `碎渣机炮开火 ${n} 次，每次 ${flat} 物理 +2 击破。合计伤害 ${Math.floor((out && out.res && out.res.total) || 0)}。`;
 }
 
@@ -6389,7 +6419,7 @@ function heluScanAct(a, picks, lines) {
       const t = unitById(picks.target);
       if (!t || t.isPlayer || t.dead) { lines.push("先选碎渣机炮要打的敌人。"); return; }
       lines.push(`环境扫描：操控碎渣机炮攻击 ${t.name}。`);
-      lines.push(scrapShot(p, t));
+      lines.push(scrapShot(p, t, a));
     } else if (p.kind === "turret") {
       lines.push(`环境扫描：干扰 ${p.name} 的识别，让它立刻向 Helumica 的敌人开一炮。`);
       turretShot(p, !a.isPlayer, lines);
@@ -7125,6 +7155,14 @@ function renderSkills() {
     btn.className = "btn";
     btn.textContent = p.kind === "lever" ? `扳动${p.name}` : `按下${p.name}`;
     btn.onclick = () => calcCommand("skill", { actor: a.id, skill: "use_device:" + p.id, target: state.targetId || null });
+    box.appendChild(btn);
+  });
+  scrapsFor(a).forEach(p => {
+    const btn = document.createElement("button");
+    btn.className = "btn";
+    btn.textContent = `操控${p.name}`;
+    btn.title = "消耗 1 行动点：对机炮 2 距离内的一名敌人（先选为目标）打 1d4 次 6+等级 物理，2 击破";
+    btn.onclick = () => calcCommand("skill", { actor: a.id, skill: "use_scrap:" + p.id, target: state.targetId || null });
     box.appendChild(btn);
   });
   if (a.isPlayer && !isWeaponUnit(a) && a.dying && !a.dead) {
@@ -8053,6 +8091,14 @@ function runSkillInner(id, optRun) {
     if (why) { paintSkillLog(why); return; }
     if (a.isPlayer && !spendAp(a, 1, "改写炮台")) return;
     paintSkillLog(hackTurret(a, p).join("\n"));
+    renderAll();
+    return;
+  }
+  if (String(id).indexOf("use_scrap:") === 0) {
+    const pid = id.slice("use_scrap:".length);
+    const p = (state.props || []).find(x => x.id === pid);
+    const tu = unitById(state.targetId);
+    paintSkillLog(controlScrap(a, p, tu));
     renderAll();
     return;
   }
