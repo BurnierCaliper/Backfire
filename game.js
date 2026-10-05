@@ -1097,6 +1097,9 @@
     }
     const tape = G.tape;
     G.tape = null;
+    // 有些演出要看结算之后的局面才知道（例：连续协助格挡时这一击有没有落下）
+    if (typeof meta.forceLunge === "function") meta.forceLunge = !!meta.forceLunge();
+    if (typeof meta.blockerId === "function") meta.blockerId = meta.blockerId() || null;
     if (window.OnlineGame?.isHost()) OnlineGame.onActionSettled(meta.onlineLegacy ? { type: "gm.legacy" } : thunk, result, tape, meta);
     if (result && result.executed === false) return null;
     const after = snapAll();
@@ -1205,9 +1208,13 @@
           });
         }
         const seq = job.seq;
+        // 连续协助格挡：这个人没挡住、还有别人能挡时，这一击还没落下（同一击仍在队首）——
+        // 不播敌人的攻击动画，直接回到循环弹出下一个人的格挡确认
+        const stillWaiting = () => !!(state.blockQueue && state.blockQueue[0] && state.blockQueue[0].seq === seq);
         await perform({ type: "blockAnswer", helper: choice || null, forced, seed: "hit:" + seq }, {
-          actorId: attacker.id, targetId: target.id, forceLunge: true,
-          blockerId: blocker && forced && forced.ok ? blocker.id : null,
+          actorId: attacker.id, targetId: target.id,
+          forceLunge: () => !stillWaiting(),
+          blockerId: () => (blocker && forced && forced.ok && !stillWaiting() ? blocker.id : null),
           skillName: blocker ? `攻击（${blocker.name} 格挡）` : "攻击"
         }, true);
         continue;
