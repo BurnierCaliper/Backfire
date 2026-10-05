@@ -48,6 +48,14 @@ const BackstageCommands = (() => {
       appendLog(`后台：${weaponCardName(c.kit)} 耐久 ${before} → ${LEDGER.dur[c.kit]}。`);
       return;
     }
+    if (c.action === "passive" || c.action === "focus") {
+      const u = unitById(c.actor);
+      if (!u) throw new Error("Unknown unit: " + c.actor);
+      appendLog(c.action === "passive"
+        ? dmSetPassive(u, c.key, c.value)
+        : dmSetFocus(u, c.op, c.layerType || null, Array.isArray(c.seq) ? c.seq.slice() : parseFocusSeqText(c.seq), c.step));
+      return;
+    }
     const actions = ["set", "weaponLevel", "attr", "recalc", "levelUp", "layer", "fillHp", "fillDef", "stun", "unstun", "knockOut", "revive"];
     if (!actions.includes(c.action)) throw new Error("Unknown backstage action: " + c.action);
     if (c.action === "set" && !fields.includes(c.field)) throw new Error("Unknown backstage field: " + c.field);

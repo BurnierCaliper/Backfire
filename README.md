@@ -366,6 +366,10 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **主持人后台可以直接改角色被动数值和聚焦**（`app.js · PASSIVE_EDIT / dmSetPassive / dmSetFocus / renderBackstage`、`trpg-commands.js · BackstageCommands`）：战斗顶栏「后台」新增两节，给叙事用，改完立刻生效并写进战斗记录，不走任何规则。
+  - **角色被动 / 资源**：鲁比纳米 %；结衣咖啡豆、咖啡液、思念对象；绯秋刀势、手中的刀；托乌圣盾、嘲讽剩余次数；夏引擎；川川电能；诺拉 / 维塔斯情绪（两人一起变）；柯尔特刀头、嘲讽剩余次数；Helumica 本场是否用过环境扫描；拉斯缪尔累积能量 %、光能、不稳态。数字夹在合理范围里，只开放表里列出的项。
+  - **聚焦**：给任意敌人的任意血量层设聚焦，序列用属性名写（例：火 电 冰），可以指定已推进的步数；序列留空就按规则随机生成；也可以清除。
+
 - **柯尔特「废物利用」计入治疗**（`app.js · runSkill kolt_scrap`）：废物利用给自己回的生命、加的临时血量层，现在记进柯尔特的治疗量，并按治疗计分（1 点 = 1 分）。以前治疗只统计给其他友方的部分，废物利用不算。
 
 - **碎渣机炮可以操控了**（`app.js · controlScrap / scrapsFor / scrapTargets / scrapShot`、`game.js · gameSkills`、`ai.js · aiPlan`）
