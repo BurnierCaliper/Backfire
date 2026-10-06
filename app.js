@@ -5935,10 +5935,22 @@ function dealTo(attacker, target, opt) {
     if (deadLayer) state.lastBrokenLayer = { type: deadLayer.type, lost: deadLayer.max || 0, dmg: res.total || 0 };
   }
   if (flags.action) advanceFocusOnHit(attacker, target, opt.element || res.element, res, extra);
-  if (target && target.kit === "ras" && target.resources && target.resources.unstable && (res.total || 0) > 0 && flags.action) {
-    extra.push("不稳态：拉斯缪尔受到伤害，立即死亡。");
+  // 不稳态：受到伤害就倒地（濒死）；已经起身（用坚毅生命继续战斗）时再受到伤害才直接死亡
+  if (target && target.kit === "ras" && target.resources && target.resources.unstable && !target.dead &&
+      ((res.total || 0) + (res.shpDealt || 0)) > 0 && flags.action) {
     (target.layers || []).forEach(l => { l.current = 0; });
-    target.dead = true;
+    const wasUp = !!target.upOnShp;
+    if (wasUp || (typeof exhaustTierOf === "function" && exhaustTierOf(target) >= 3)) {
+      target.shp = 0;
+      target.upOnShp = false;
+      target.dying = false;
+      target.dead = true;
+      extra.push(wasUp ? "不稳态：拉斯缪尔起身后再次受到伤害，立即死亡。" : "不稳态：拉斯缪尔受到伤害，力竭 3 下直接死亡。");
+    } else if (!target.dying) {
+      target.dying = true;
+      if (typeof clearStunOnDown === "function") clearStunOnDown(target);
+      extra.push("不稳态：拉斯缪尔受到伤害，倒地陷入濒死。");
+    }
   }
   if (attacker && (attacker.kit === "kolt" || attacker.kit === "torque") && target && !target.isPlayer && flags.action && !flags.aoe &&
       (typeof passiveOn !== "function" || passiveOn(attacker))) {
