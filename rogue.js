@@ -136,6 +136,7 @@ const Rogue = (function () {
     setXpRequirementScale(1);
     state.exhaustTier = 0;
     state.weaponMods = null;
+    state.weaponBlueprints = null;
     if (stash) {
       state.bag = stash.bag;
       state.kuizhi = stash.kuizhi;
@@ -435,6 +436,7 @@ const Rogue = (function () {
     state.lootByRank = C.lootByRank || null;
     state.lootByKit = C.lootByKit || null;
     state.weaponMods = weaponModsOf(run);
+    state.weaponBlueprints = Object.assign({}, run.installed || {});
     if (typeof syncBpAll === "function") syncBpAll();
   }
   function captureHero(u, h) {
@@ -946,6 +948,11 @@ const Rogue = (function () {
   function sheetData(run) {
     if (typeof SkillText === "undefined") return [];
     return withParty(run, () => SkillText.sheetData()).out;
+  }
+  /** 武器工坊（armory-ui.js）：同样摆上场算一份，不改动本局 */
+  function armoryData(run) {
+    if (typeof SkillText === "undefined" || !SkillText.armoryData) return [];
+    return withParty(run, () => SkillText.armoryData()).out;
   }
   function doLongRest(run, notes, watch) {
     const r = withParty(run, () => ledgerLongRest({ hours: C.hours.longRest, watch: watch || null }, notes));
@@ -1461,7 +1468,7 @@ const Rogue = (function () {
     battleSpec, applyPartyToField, finishBattle,
     checkInfo, checkChance, checkOdds, attemptCheck, skipCheck, heroProfs,
     role2Options, soloBattleInfo,
-    restPlan, canLongRest, sheetData, restAtNode, leaveNode, canShortRestBefore, shortRestBeforeNode,
+    restPlan, canLongRest, sheetData, armoryData, restAtNode, leaveNode, canShortRestBefore, shortRestBeforeNode,
     ambushChance, watchOptions,
     buy, canShop, shopItemName, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
     presentSmiths, smithInfo, claimBlueprint, installBlueprint, blueprintById, weaponModsOf,

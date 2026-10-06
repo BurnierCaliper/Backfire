@@ -2493,6 +2493,11 @@
       info.title = "查看每个角色的数值、被动和技能说明";
       info.dataset.sheet = G.actorId && unitById(G.actorId) ? unitById(G.actorId).kit : heroes[0].kit;
       party.appendChild(info);
+      const arm = el("button", "pc pc-sheet pc-armory");
+      arm.innerHTML = `<span class="n"><span>武器工坊</span></span><div class="u-econ" style="font-size:11px;color:var(--muted)">补正 · 改装</div>`;
+      arm.title = "查看武器补正、atk 明细、改装件和客制化";
+      arm.dataset.armory = info.dataset.sheet;
+      party.appendChild(arm);
     }
     cards.forEach((c, id) => c.wrap.classList.toggle("is-actor", id === G.actorId && state.combatPhase === "player"));
 

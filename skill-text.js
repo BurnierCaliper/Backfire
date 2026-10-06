@@ -471,6 +471,60 @@
       weapons: (u.linkedKits || []).map(k => weaponSheet(u, k, units)).filter(Boolean)
     };
   }
+  /* ---------- 武器工坊（armory-ui.js）：每把武器的补正、atk 明细、改装件、客制化 ---------- */
+  function blueprintInfo(id) {
+    if (!id || typeof ROGUE_SMITHS === "undefined") return null;
+    for (const s of ROGUE_SMITHS) {
+      const b = (s.blueprints || []).find(x => x.id === id);
+      if (b) return { id: b.id, name: b.name, text: b.text, smith: s.name };
+    }
+    return null;
+  }
+  function armoryWeapon(owner, kit, units) {
+    const ws = weaponSheet(owner, kit, units);
+    if (!ws) return null;
+    const lv = Number((owner.weaponLevels || {})[kit]) || 1;
+    const parts = typeof weaponPartsOf === "function" ? weaponPartsOf(owner, kit) : [];
+    const bd = typeof weaponAtkBreakdown === "function" ? weaponAtkBreakdown(kit, owner.attrs, lv, parts) : null;
+    const st = typeof state !== "undefined" ? state : {};
+    const mod = (st.weaponMods && st.weaponMods[kit]) || null;
+    const bpId = st.weaponBlueprints && st.weaponBlueprints[kit];
+    let durBase = null, durMax = null, dur = null;
+    try { durBase = weaponDurBase(kit); durMax = weaponDurMax(kit); dur = weaponDur(kit); } catch (e) { /* 没有账本 */ }
+    const held = typeof heldWeaponKit === "function" ? heldWeaponKit(owner) === kit : false;
+    const atk = bd ? bd.atk : ws.atk;
+    const ctx = { atkWeapon: atk, atkHeld: (Number(owner.personalAtk) || 0) + atk, durBase, durMax, blockBase: ws.blockBonus,
+      bigKill: mod && mod.bigKill && typeof bigKillAtk === "function" ? bigKillAtk(kit) : 0 };
+    const info = kitInfo(owner.kit) || {};
+    const pas = info.passives || [];
+    const slotLv = typeof WEAPON_PART_SLOT_LEVELS !== "undefined" ? WEAPON_PART_SLOT_LEVELS : [];
+    const plusLv = typeof PASSIVE_PLUS_LEVEL !== "undefined" ? PASSIVE_PLUS_LEVEL : {};
+    const track = slotLv.map((L, i) => ({ lv: L, text: `改装槽 ${i + 1}` }))
+      .concat(Object.keys(plusLv).filter(n => pas[n - 1]).map(n => ({ lv: plusLv[n], text: `被动「${pas[n - 1].name}+」` })))
+      .sort((a, b) => a.lv - b.lv).map(x => Object.assign(x, { done: lv >= x.lv }));
+    const row = typeof weaponPartRow === "function" ? weaponPartRow(owner, kit) : [];
+    return {
+      kit, name: ws.name, owner: owner.kit, ownerName: owner.name, level: lv, maxLevel: 10,
+      held, out: ws.out, broken: dur != null && dur <= 0,
+      atk, breakdown: bd, def: ws.def, layers: ws.layers,
+      durability: dur, durMax, durBase,
+      blockBonus: ws.blockBonus, blockAlone: ws.blockAlone,
+      personalAtk: Number(owner.personalAtk) || 0,
+      slots: row.map(id => id ? { id, name: WEAPON_PARTS[id].name, grade: WEAPON_PARTS[id].grade || "",
+        text: weaponPartCoefText(WEAPON_PARTS[id].coef), coef: Object.assign({}, WEAPON_PARTS[id].coef) } : null),
+      lockedSlots: slotLv.filter(L => L > lv),
+      blueprint: mod ? Object.assign({ name: "客制化", text: "", smith: "" }, blueprintInfo(bpId) || {},
+        { effects: typeof bpEffectRows === "function" ? bpEffectRows(mod, ctx) : [] }) : null,
+      track
+    };
+  }
+  /** 武器工坊数据：[{ kit, name, weapons: [armoryWeapon…] }] */
+  function armoryData() {
+    const units = (typeof state !== "undefined" && state.units) || [];
+    const heroes = typeof partyHeroes === "function" ? partyHeroes() : units.filter(u => u.isPlayer && u.attrs);
+    return heroes.filter(u => u.attrs).map(u => ({ kit: u.kit, name: u.name,
+      weapons: (u.linkedKits || []).map(k => armoryWeapon(u, k, units)).filter(Boolean) }));
+  }
   /** 当前队伍所有角色的资料 */
   function sheetData() {
     const units = (typeof state !== "undefined" && state.units) || [];
@@ -478,5 +532,5 @@
     return heroes.filter(u => u.attrs).map(u => heroSheet(u, units));
   }
 
-  root.SkillText = { KIT, SKILL, PLUS, kitInfo, passivesOf, skillText, skillCostText, heroSheet, sheetData };
+  root.SkillText = { KIT, SKILL, PLUS, kitInfo, passivesOf, skillText, skillCostText, heroSheet, sheetData, armoryData };
 })(typeof window !== "undefined" ? window : globalThis);

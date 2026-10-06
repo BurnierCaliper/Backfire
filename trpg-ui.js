@@ -113,7 +113,7 @@
         return `<div class="rh-w${d <= 0 ? " broken" : ""}">${esc(weaponName(k))} Lv${lv} · 耐久 ${d}/${m}${d <= 0 ? "（损坏）" : ""}</div>`;
       }).join("");
       return `<div class="rhero${h.dead ? " fallen" : h.dying ? " dying" : ""}">
-        <div class="rh-top"><b>${esc(h.name)}</b><span>Lv${h.level || 1}${tag ? " · " + tag : ""}</span><button class="g-btn small rh-sheet" data-sheet="${esc(h.kit)}" title="数值、被动和技能说明">资料</button></div>
+        <div class="rh-top"><b>${esc(h.name)}</b><span>Lv${h.level || 1}${tag ? " · " + tag : ""}</span><button class="g-btn small rh-sheet" data-sheet="${esc(h.kit)}" title="数值、被动和技能说明">资料</button><button class="g-btn small rh-sheet" data-armory="${esc(h.kit)}" title="武器补正、atk 明细、改装件和客制化">武器</button></div>
         <div class="rh-row">血量 <span>${totalHpOf(h)}/${totalHpMaxOf(h)}</span></div>
         <div class="rh-row">攻击力 <span>${heroAtk(h)}</span></div>
         <div class="rh-row">架势 <span>${Number(h.def) || 0}/${Number(h.defMax != null ? h.defMax : h.def) || 0}</span></div>
@@ -272,7 +272,7 @@
       const give = `<div class="tr-row">给予改装件 <select id="tr-part-give">${parts.map(p => `<option value="${esc(weaponPartItemId(p))}">${esc(weaponPartLabel(p))} · ${esc(weaponPartCoefText(WEAPON_PARTS[p].coef))}</option>`).join("")}</select>
           <button class="g-btn small" id="tr-part-give-btn">放进背包 +1</button></div>`;
       return `<p class="r-hint">手册：升级武器需要找到工作站；${U.selfMaxLevel} 级以上无法靠自己升级，要找专门的武器工匠（材料 + 加工费，不同工匠的费用要求不一样，按剧情改费用）。材料在商店「材料」里买，或在背包里给予。</p>${rows}
-        <h3>改装槽</h3>
+        <h3>改装槽 <button class="g-btn small" data-armory="${esc((heroes()[0] || {}).kit || "")}">打开武器工坊</button></h3>
         <p class="r-hint">武器 ${WEAPON_PART_SLOT_LEVELS.join(" 级、")} 级各开放 1 个改装槽。改装件修改武器的属性补正系数；装上从背包拿走，拆下放回背包。</p>
         ${give}${slotRows}`;
     }

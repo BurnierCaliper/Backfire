@@ -188,6 +188,32 @@ function computeWeaponAtk(kit, attrs, lv, parts) {
   return 0;
 }
 
+/** 武器 atk 的明细（武器页用）：和 computeWeaponAtk 同一个算法，逐项列出来
+ *  { formula, base, lvBase, tier, rows: [{ attr, name, value, coef, baseCoef, partCoef, part }], sum, raw, atk } */
+function weaponAtkBreakdown(kit, attrs, lv, parts) {
+  const f = WEAPON_FORMULA[kit];
+  lv = Math.max(1, Number(lv) || 1);
+  attrs = attrs || {};
+  if (!f) {
+    const atk = computeWeaponAtk(kit, attrs, lv, parts);
+    return { formula: false, base: atk, lvBase: 0, tier: weaponTier(lv), rows: [], sum: 0, raw: atk, atk };
+  }
+  const own = weaponCoefs(kit, []), all = weaponCoefs(kit, parts);
+  const order = ["str", "con", "dex", "wil", "int", "sta"].filter(a => a in all);
+  const tier = weaponTier(lv);
+  const rows = order.map(a => {
+    const coef = all[a], baseCoef = own[a] || 0;
+    const value = Number(attrs[a]) || 0;
+    return { attr: a, name: WEAPON_PART_ATTR_CN[a] || a, value, coef, baseCoef,
+      partCoef: Math.round((coef - baseCoef) * 1000) / 1000, part: Math.round(value * coef * tier * 100) / 100 };
+  });
+  const sum = rows.reduce((s, r) => s + r.value * r.coef, 0);
+  const base = Number(f.base) || 3, lvBase = lv - 1;
+  const raw = base + lvBase + sum * tier;
+  return { formula: true, base, lvBase, tier, rows, sum: Math.round(sum * 1000) / 1000, raw: Math.round(raw * 100) / 100,
+    atk: Math.max(0, Math.round(raw)) };
+}
+
 /** 改装件变了 / 等级变了：重算这把武器给角色和武器人带来的攻击力 */
 function refreshOwnerWeaponAtk(owner, kit) {
   if (!owner) return;
