@@ -1970,3 +1970,10 @@ body:not([data-screen="battle"]) .g-rank { display: none !important; }
 .tk-foes { margin-left: 12px; }
 .tk-chip { display: inline-flex; align-items: center; gap: 4px; margin: 2px 4px 2px 0; padding: 0 0 0 8px; font-size: 12px; border: 1px solid var(--line); }
 .tk-edit textarea { background: rgba(0, 0, 0, .3); color: inherit; border: 1px solid var(--line); }
+
+/* ---------- 在战场上选目标时的额外按钮（game.js · showPickBar）：「不选」「不切换」「放弃扫描」 ---------- */
+.g-pick-bar { display: none; flex-wrap: wrap; gap: 8px; align-items: center; margin: 4px 0 6px; }
+.g-pick-bar.show { display: flex; }
+.g-pick-bar::before { content: "或者："; color: var(--muted); font-size: 13px; }
+.g-pick-bar .g-btn { height: 32px; padding: 0 14px; font-weight: 700; border-color: var(--gold); }
+.g-pick-bar .g-btn small { margin-left: 6px; color: var(--muted); font-weight: 400; }

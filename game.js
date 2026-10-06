@@ -1247,7 +1247,14 @@
         const opts = [{ label: "不切换", value: { swap: false } }];
         if (!foes.length) opts.push({ label: "切换刀头", sub: "同区没有可打的敌人", value: { swap: true, targetId: null } });
         else foes.forEach(u => opts.push({ label: `切换并打 ${u.name}`, sub: "近距离 0.5 ATK", value: { swap: true, targetId: u.id } }));
-        const pick = hotseat() ? await HotseatGame.ownedChoice(k, "更换刀头", opts) : await openChoice("更换刀头", `${k.name} 可以更换刀头。切刀攻击只能打同区目标。`, opts, { label: "不切换", value: { swap: false } });
+        let pick;
+        if (hotseat()) pick = await HotseatGame.ownedChoice(k, "更换刀头", opts);
+        else if (foes.length && allOnField(foes.map(u => u.id))) {
+          // 在战场上点要追击的敌人；按钮：只换刀不打 / 不切换
+          const got = await queueFieldPick(`<b>${esc(k.name)} 更换刀头</b>：点同区一名敌人切刀追击（近距离 0.5 ATK），或者不切换`,
+            foes.map(u => ({ id: u.id })), (id) => `${k.name} 切刀 → ${targetName(id)}`, [{ label: "不切换", value: "no" }]);
+          pick = got && typeof got === "object" ? { swap: false } : got ? { swap: true, targetId: got } : { swap: false };
+        } else pick = await openChoice("更换刀头", `${k.name} 可以更换刀头。切刀攻击只能打同区目标。`, opts, { label: "不切换", value: { swap: false } });
         const swapTarget = (pick && pick.swap && pick.targetId) || null;
         if (pick && pick.swap) {
           // 换刀头的追击：和协助攻击一样播攻击演出（冲上去打同区那名敌人）
@@ -1280,7 +1287,12 @@
           const opts = step.type === "unit"
             ? (step.units || []).map(u => ({ label: u.name, sub: u.zone ? `${u.zone} 区` : "", value: u.id }))
             : (step.options || []).map(o => ({ label: o.label, value: o.value }));
-          const v = await ask(`环境扫描 · ${job.zone} 区`, `协助攻击附带的环境扫描。${step.label}`, opts);
+          let v;
+          if (!hotseat() && step.type === "unit" && allOnField((step.units || []).map(u => u.id))) {
+            const got = await queueFieldPick(`<b>环境扫描 · ${job.zone} 区</b>：${esc(step.label)}`,
+              (step.units || []).map(u => ({ id: u.id })), (id) => `环境扫描 → ${targetName(id)}`, [{ label: "放弃扫描", value: SKIP }]);
+            v = got && typeof got === "object" ? SKIP : got;
+          } else v = await ask(`环境扫描 · ${job.zone} 区`, `协助攻击附带的环境扫描。${step.label}`, opts);
           if (v == null || v === SKIP) { skipped = true; break; }
           picks[step.key] = v;
         }
@@ -1668,7 +1680,11 @@
   }
 
   /** 进入目标选择。candidates: [{id, preview}]；返回被点中的 id，取消返回 null */
-  function pickUnit(candidates, labelFn) {
+  /**
+   * 在战场上点选一个目标。buttons：额外的按钮（例：「不选」「不切换」「放弃扫描」），
+   * 显示在提示栏旁边，点了返回 { button: value }；点目标返回目标 id；右键 / Esc 取消返回 null。
+   */
+  function pickUnit(candidates, labelFn, buttons) {
     return new Promise(resolve => {
       const map = new Map(candidates.map(c => [c.id, c]));
       G.arm = Object.assign(G.arm || {}, {
@@ -1676,12 +1692,43 @@
         tapId: null,
         map,
         labelFn,
-        resolve: (id) => { unmarkTargets(); clearPreview(); G.arm.mode = null; resolve(id); },
-        reject: () => { unmarkTargets(); resolve(null); }
+        resolve: (id) => { unmarkTargets(); clearPreview(); showPickBar(null); G.arm.mode = null; resolve(id); },
+        reject: () => { unmarkTargets(); showPickBar(null); resolve(null); }
       });
       markTargets(new Set([...map.keys()].filter(id => !map.get(id).invalid)));
+      showPickBar(buttons);
       refreshHud();
     });
+  }
+  /** 结算队列里（换刀头、协助攻击附带的扫描）在战场上点选：选完之前别的操作都锁住，和弹窗一样 */
+  async function queueFieldPick(hint, cands, labelFn, buttons) {
+    setHint(hint);
+    choiceResolve = { field: true, cancel: () => disarm() };
+    try { return await pickUnit(cands, labelFn, buttons); }
+    finally { choiceResolve = null; G.arm = null; unmarkTargets(); clearPreview(); setHint(defaultHint()); refreshHud(); }
+  }
+  /** 选目标时的额外按钮条（在提示栏下面） */
+  function showPickBar(buttons) {
+    let bar = $("g-pick-bar");
+    if (!buttons || !buttons.length) { if (bar) { bar.classList.remove("show"); bar.innerHTML = ""; } return; }
+    if (!bar) {
+      bar = el("div", "g-pick-bar");
+      bar.id = "g-pick-bar";
+      const row = document.querySelector(".g-hud .hud-row");   // 放在技能栏上面，显眼
+      if (row && row.parentNode) row.parentNode.insertBefore(bar, row); else document.body.appendChild(bar);
+    }
+    bar.innerHTML = "";
+    buttons.forEach(b => {
+      const x = el("button", "g-btn", `${esc(b.label)}${b.sub ? `<small>${esc(b.sub)}</small>` : ""}`);
+      x.onclick = (e) => { e.stopPropagation(); if (G.arm && G.arm.mode === "unit") G.arm.resolve({ button: b.value }); };
+      bar.appendChild(x);
+    });
+    bar.classList.add("show");
+  }
+  /** 这些 id 是不是都在战场上有卡片（单位、配置物、危墙 / 桥梁），能直接点 */
+  function allOnField(ids) {
+    return ids.length > 0 && ids.every(id => cards.has(id) ||
+      (String(id).indexOf("gap:") === 0 && !!document.querySelector(`#g-field .g-gap[data-key="${String(id).slice(4)}"]`)));
   }
 
   function pickZone(zones, previewFn) {
@@ -1704,7 +1751,8 @@
     const c = cards.get(id) || (gapNode ? { wrap: gapNode } : null);
     if (!c) return;
     c.wrap.classList.toggle("is-hover", on && !!(G.arm && G.arm.mode === "unit" && G.arm.map.has(id)));
-    if (G.depth > 0 || choiceResolve) return;
+    const fieldPick = !!(choiceResolve && choiceResolve.field);   // 结算队列里在战场上点选（那时动作还没结束，G.depth > 0）
+    if ((G.depth > 0 && !fieldPick) || (choiceResolve && !fieldPick)) return;
     if (G.arm && G.arm.mode === "unit") {
       if (!on) { clearPreview(); return; }
       const cand = G.arm.map.get(id);
@@ -1735,8 +1783,9 @@
     return true;
   }
   function onCardClick(id) {
-    if (G.depth > 0) { G.skip = true; return; }
-    if (choiceResolve) return;
+    const fieldPick = !!(choiceResolve && choiceResolve.field);
+    if (G.depth > 0 && !fieldPick) { G.skip = true; return; }
+    if (choiceResolve && !fieldPick) return;
     // 选区域时点到了区里的单位 / 配置物：当成点这个区（区里站满人时也能选）
     if (G.arm && G.arm.mode === "zone") {
       const c = cards.get(id);
@@ -1878,14 +1927,18 @@
       if (step.type === "zone") {
         setHint(`<b>${esc(sk.name)}</b>：${esc(step.label)}`);
         value = await pickZone(step.zones || [], (zone) => previewOf(skillThunk(actor.id, sk.id, lastUnitPick, Object.assign({}, picks, { [step.key]: zone }))));
-      } else if (step.type === "unit" && !step.optional && (step.structures || (step.units || []).every(u => !String(u.id).startsWith("prop:")))) {
-        setHint(`<b>${esc(sk.name)}</b>：${esc(step.label)}`);
+      } else if (step.type === "unit" && allOnField((step.units || []).map(u => u.id))) {
+        // 选单位一律在战场上点（同名敌人也分得清）；可不选的步骤多一个「不选」按钮
+        setHint(`<b>${esc(sk.name)}</b>：${esc(step.label)}　<span style="color:var(--faint)">${touchUI() ? "点空白处取消" : "右键取消"}</span>`);
         const cands = (step.units || []).map(u => ({
           id: u.id,
           thunk: isLast ? skillThunk(actor.id, sk.id, u.id, Object.assign({}, picks, { [step.key]: u.id })) : null
         }));
-        value = await pickUnit(cands, label);
-        lastUnitPick = value;
+        const got = await pickUnit(cands, label, step.optional ? [{ label: "不选，继续", value: "skip" }] : null);
+        if (stale()) return;
+        if (got && typeof got === "object") value = "";   // 点了「不选」
+        else { value = got; if (value == null) { cancel(); return; } lastUnitPick = value; }
+        if (value === "") value = null;
       } else {
         const options = step.type === "unit"
           ? (step.units || []).map(u => ({ label: u.name, sub: u.zone ? `${u.zone} 区` : "", value: u.id }))
