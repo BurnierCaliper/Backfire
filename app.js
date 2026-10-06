@@ -117,8 +117,8 @@ function setZoneField(zone, kind, opts) {
   if (!f) return "没有这个区域。";
   if (state.combatStarted && !opts.force && !opts.innateOk) {   // innateOk：主持人的计算器面板（仍然尊重手动锁定）
     const same = (kind === "fire" && fieldFireOn(f)) || (kind && kind !== "fire" && f[kind]);
-    // 深渊、塌陷区域不能被改变；战斗开始时就存在的场地是固有场地，也不能被改变（重复施加同一种照常）
-    if (!same && (f.abyss || f.collapseOn)) return `${zone} 区是${f.abyss ? "深渊" : "塌陷区域"}，场地无法被改变。`;
+    // 深渊、损毁地面不能被改变；战斗开始时就存在的场地是固有场地，也不能被改变（重复施加同一种照常）
+    if (!same && (f.abyss || f.ruinOn)) return `${zone} 区是${f.abyss ? "深渊" : "损毁地面"}，场地无法被改变。`;
     if (!same && f.innate) return `${zone} 区是固有场地（战斗开始时就存在），无法被改变。`;
   }
   if (f.fieldLock && !opts.force) {
@@ -485,7 +485,7 @@ function checkHighBoom(unit) {
   const f = (state.fields && state.fields[unit.zone]) || emptyField();
   const fieldHE = unit.statuses && unit.statuses.high ? (Number(f.energyVal) || 0) : 0;
   const val = (Number(unit.highEnergy) || 0) + fieldHE;
-  if (val > 0 && val >= hp) explodeHigh(unit);
+  if (val > 0 && val >= hp) explodeHigh(unit, val);   // 这次爆炸的高能值含能量场叠上来的部分
 }
 
 function highBoomHitsUnit(source, u) {
@@ -508,10 +508,11 @@ function highBoomVictims(source) {
   return fieldUnits().filter(u => Number(u.zone) === Number(source.zone) && highBoomHitsUnit(source, u) && !aoeShieldFor(u));
 }
 
-function explodeHigh(unit) {
+/** 高能自爆。total：触发这次爆炸的高能值（含能量场叠加的部分）；不给就用单位自己的高能值 */
+function explodeHigh(unit, total) {
   if (!unit || unit._highBooming) return;
   unit._highBooming = true;
-  const he = Number(unit.highEnergy) || 0;
+  const he = Math.max(Number(total) || 0, Number(unit.highEnergy) || 0);
   const aoe = Math.floor(he / 2);
   const lifeBefore = currentLifeForHigh(unit);
   appendLog(`【高能自爆】${unit.name} 高能值 ${he} ≥ 当前生命 ${lifeBefore}，立即秒杀。余波只打同阵营与无阵营配置物，${aoe} 能量。`);
@@ -1276,7 +1277,7 @@ function markInnateEnvironment() {
     if (!f) return;
     f.innate = fieldFireOn(f) || FIELD_EFFECT_KEYS.some(k => k !== "highland" && f[k]);
     if (f.innate) notes.push(`${z} 区固有场地：${fieldTags(f) || "场地"}（无法被改变）`);
-    else if (f.abyss || f.collapseOn) notes.push(`${z} 区${f.abyss ? "深渊" : "塌陷区域"}（无法被改变）`);
+    else if (f.abyss || f.ruinOn) notes.push(`${z} 区${f.abyss ? "深渊" : "损毁地面"}（无法被改变）`);
   });
   if (notes.length) appendLog(notes.join("\n"));
 }

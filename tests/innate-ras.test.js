@@ -41,13 +41,15 @@ test("固有场地：开战时就有的场地无法被改变；开战后新铺�
   assert.equal(st.fields[2].fireOn, true);
 });
 
-test("深渊、塌陷区域：场地无法被改变", () => {
-  const { c, st } = field();
+test("深渊、损毁地面：场地无法被改变；塌陷区域不受此限", () => {
+  const { c, st } = field({ zoneMode: 3 });
   st.fields[1].abyss = true;
-  st.fields[2].collapseOn = true;
+  st.fields[2].ruinOn = true; st.fields[2].ruinHp = st.fields[2].ruinMax = 30;
+  st.fields[3].collapseOn = true;
   c.startCombat();
   assert.match(c.setZoneField(1, "energy") || "", /深渊/);
-  assert.match(c.setZoneField(2, "energy") || "", /塌陷/);
+  assert.match(c.setZoneField(2, "energy") || "", /损毁地面/);
+  assert.equal(c.setZoneField(3, "energy"), null);
 });
 
 test("只有高地的区不算固有场地", () => {
@@ -87,4 +89,31 @@ test("失控暴走：+40% 能量；因此进入不稳态 → 同区变能量场�
   go();
   assert.ok([1, 2, 3].every(z => st.fields[z].energy), "已在不稳态：全场能量场");
   assert.ok(c.skillList(ras).some(s => s.id === "ras_rampage"));
+});
+
+test("能量流向：能量场叠加导致的自爆、蓄能导致的自爆都按这次爆炸的高能值回收光能", () => {
+  const { c, st } = field();
+  c.startCombat();
+  const ras = c.findKit("ras", st.units);
+  const foe = st.units.find(u => !u.isPlayer);
+  // 能量场叠加：自身高能 4 + 场地 30 ≥ 生命
+  ras.resources.light = 0;
+  foe.layers.forEach(l => { l.current = 5; });
+  c.setZoneField(foe.zone, "energy");
+  st.fields[foe.zone].energyVal = 30;
+  foe.statuses.high = true; foe.highEnergy = 4;
+  c.checkHighBoom(foe);
+  assert.equal(foe.dead, true);
+  assert.equal(ras.resources.light, 34, "含能量场叠加的部分");
+  // 蓄能：回合开始累积高能直到自爆
+  const { c: c2, st: st2 } = field({ seed: "IR2" });
+  c2.startCombat();
+  const ras2 = c2.findKit("ras", st2.units);
+  const foe2 = st2.units.find(u => !u.isPlayer);
+  ras2.resources.light = 0;
+  foe2.layers.forEach(l => { l.current = 2; });
+  foe2.self = "store"; foe2.level = 3; foe2.highEnergy = 0;
+  c2.beginRound([]);
+  assert.equal(foe2.dead, true, "蓄能自爆");
+  assert.equal(ras2.resources.light, 3);
 });
