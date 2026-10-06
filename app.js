@@ -1481,9 +1481,12 @@ function releaseAcidCharges(notes) {
       u.resources.acidCharge = null;
       notes.push(`扭矩酸液炮蓄力在 ${z} 区爆发。`);
       const atk = effectiveAtk(u, state.units);
+      const kolt = findKit("kolt", state.units);
       visibleEnemies(z).forEach(t => {
         const out = dealTo(u, t, { element: "acid", mult: 1, baseBreak: 1, atk, flags: { action: true, aoe: true } });
         (out.extra || []).forEach(s => notes.push(s));
+        // 卡面：被打到的敌人下一击必须攻击柯尔特
+        if (kolt && !kolt.dead && !t.dead) { t.tauntTo = kolt.id; notes.push(`${t.name} 被嘲讽：下一击必须攻击柯尔特。`); }
       });
     }
   });
@@ -2425,7 +2428,20 @@ function applyTypedDot(unit, amount, element, notes, label, opts) {
     atkRange: "any"
   });
   const shieldBefore = shieldSum(unit);
+  // 腐坏抛射施加的腐蚀：记下这次对每种血量层造成的伤害，下一次废物利用时给柯尔特
+  const rotOwner = element === "acid" && unit.rotBy && unit.statuses && unit.statuses.corr && /腐蚀/.test(String(label || "")) ? unitById(unit.rotBy) : null;
+  const byType = () => (unit.layers || []).reduce((m, l) => { m[l.type] = (m[l.type] || 0) + Math.max(0, Number(l.current) || 0); return m; }, {});
+  const rotBefore = rotOwner ? byType() : null;
   notes.push(...applyCombat(unit, res, null));
+  if (rotOwner) {
+    const after = byType();
+    rotOwner.resources = rotOwner.resources || {};
+    const store = rotOwner.resources.rotStore = rotOwner.resources.rotStore || {};
+    Object.keys(rotBefore).forEach(type => {
+      const lost = rotBefore[type] - (after[type] || 0);
+      if (lost > 0) { store[type] = (store[type] || 0) + lost; notes.push(`腐坏抛射记录：${LAYER[type] || type} ${lost}（下一次废物利用领取）。`); }
+    });
+  }
   notes.push(label + ` → 实伤 ${Math.floor(res.total || 0)}`);
   if (typeof afterDamageTaken === "function") afterDamageTaken(unit, element, res.total || 0, Math.max(0, shieldBefore - shieldSum(unit)), notes, {});
   const sdKey = inferStatusDmgKey(label, element);
@@ -4963,10 +4979,7 @@ function performAssistBlock(helper, target, attacker, forced) {
       const layer = ((attacker.layers || []).find(l => (l.current || 0) > 0) || {}).type;
       applyFocus(attacker, layer, notes);
     }
-    if (helper.kit === "ras") {
-      convertRasLight(helper.resources && helper.resources.energyPct);
-      notes.push("格挡成功：累积能量全部转为光能。");
-    }
+    if (helper.kit === "ras") addRasEnergy(20, "协助格挡");   // 无论成功与否都累积 20% 能量
     if (helper.kit === "ecmo") {
       notes.push("音波偏转：自身不扣除架势。");
     }
@@ -7940,6 +7953,8 @@ const SKILL_REQUIREMENT = {
     : !skillFlowSteps("tou_sonic", a, {}).length ? "距离 1 以内没有可以打的目标" : null,
   kolt_short:     (a) => ((findKit("kolt", state.units) || a).resources || {}).bit === "acid" ? "直流短接需要电钻模式" : null,
   torque_strip:   (a) => ((findKit("kolt", state.units) || {}).resources || {}).bit === "acid" ? "拆卸模式需要电钻模式" : null,
+  kolt_rot:       (a) => ((findKit("kolt", state.units) || a).resources || {}).bit !== "acid" ? "腐坏抛射需要酸液炮模式" : null,
+  kolt_mod:       (a) => ((findKit("kolt", state.units) || a).resources || {}).bit === "acid" ? "「非法」改装需要电钻模式" : null,
   edc_drain:      (a) => {
     const ras = findKit("ras", state.units);
     if (!ras) return "拉斯缪尔不在场";
@@ -9385,22 +9400,43 @@ function runSkillInner(id, optRun) {
       lines.push(`${t.name} 被 ${a.name} 紧追：它移动时，${a.name} 会自动跟上。`);
     } else if (id === "kolt_scrap") {
       const rec = state.lastBrokenLayer;
-      if (!rec) lines.push("本场还没有被摧毁的血量层。");
-      else {
-        const amt = Math.floor((rec.dmg || rec.lost || 0) * 2);
-        const hp0 = totalHp(a);
-        if (rec.type === "flesh" || rec.type === "spirit") {
+      const hp0 = totalHp(a);
+      const grant = (type, amt, from) => {
+        if (amt <= 0) return;
+        if (type === "flesh" || type === "spirit") {
           healUnit(a, amt);
-          lines.push(`废物利用：恢复 ${amt} 生命（来自${LAYER[rec.type] || rec.type}）。`);
+          lines.push(`${from}：恢复 ${amt} 生命（来自${LAYER[type] || type}）。`);
         } else {
-          addTempLayer(a, rec.type, amt);
-          lines.push(`废物利用：获得 ${amt} 点${LAYER[rec.type] || rec.type}（战斗结束消失）。`);
+          addTempLayer(a, type, amt);
+          lines.push(`${from}：获得 ${amt} 点${LAYER[type] || type}（战斗结束消失）。`);
         }
-        // 废物利用给自己回的血 / 加的层也算治疗（一般的治疗只统计给其他友方的）
-        const gain = totalHp(a) - hp0;
-        const st = gain > 0 ? battleStat(a) : null;
-        if (st) { st.heal += gain; addScore("heal", gain * SCORE_RULES.heal, a); }
+      };
+      if (!rec) lines.push("本场还没有被摧毁的血量层。");
+      else grant(rec.type, Math.floor((rec.dmg || rec.lost || 0) * 2), "废物利用");
+      // 腐坏抛射留下的腐蚀记录：这一次废物利用一起领取，然后清空
+      const rot = (a.resources && a.resources.rotStore) || {};
+      Object.keys(rot).forEach(type => grant(type, Math.floor(Number(rot[type]) || 0), "腐坏回收"));
+      if (a.resources) a.resources.rotStore = {};
+      // 废物利用给自己回的血 / 加的层也算治疗（一般的治疗只统计给其他友方的）
+      const gain = totalHp(a) - hp0;
+      const st = gain > 0 ? battleStat(a) : null;
+      if (st) { st.heal += gain; addScore("heal", gain * SCORE_RULES.heal, a); }
+    } else if (id === "kolt_rot") {
+      // 腐坏抛射：酸液炮模式，对 1 距离的敌人 1×atk 酸 + 腐蚀；这份腐蚀造成的伤害记给下一次废物利用
+      if (!needT()) return paintSkillLog(lines.join("\n"));
+      hitOne(a, t, { element: "acid", mult: 1, baseBreak: 0, atk, atkRange: "ranged" });
+      if (!t.dead && Number(t.zone) !== Number(a.zone)) {
+        t.statuses = t.statuses || {};
+        t.statuses.corr = true;
+        t.rotBy = a.id;
+        if (typeof popStatus === "function") popStatus(t, "corr");
+        lines.push(`腐坏抛射：${t.name} 被腐蚀。这份腐蚀造成的伤害会记下来，下一次废物利用时转为柯尔特的对应生命。`);
       }
+    } else if (id === "kolt_mod") {
+      // 「非法」改装：电钻模式，对 1 距离内任意单位施加过载
+      if (!needT()) return paintSkillLog(lines.join("\n"));
+      applyInstantEffect(t, "overload", lines);
+      lines.push(`「非法」改装：${t.name} 过载。`);
     } else if (id === "kolt_summon") {
       const w = spawnWeapon(a, "torque");
       lines.push(w ? "扭矩已进入战场。" : "扭矩已在场。");
@@ -9467,6 +9503,18 @@ function runSkillInner(id, optRun) {
       } else if (a.resources && a.resources.scanned) {
         lines.push(...advancePhaseWeather());
       } else lines.push("尚未完成回波探测，无法推进相位。");
+    } else if (id === "helu_storm") {
+      // 大气干扰：进入沙暴；已经分析过战场（用过环境扫描）时，沙暴中再用可以调转风向
+      if (state.weather !== "sand") {
+        const err = setWeather("sand", { casterZone: a.zone });
+        lines.push(err || `大气干扰：战场进入沙暴，风向 ${sandDirText(state.sandDir, state.zoneMode)}。`);
+      } else if (a.resources && a.resources.scanned) {
+        if (state.weatherLock) lines.push(`天气被「${state.weatherLock}」锁定，无法调转风向。`);
+        else {
+          state.sandDir = state.sandDir === "21" ? "12" : "21";
+          lines.push(`大气干扰：沙暴调转风向 → ${sandDirText(state.sandDir, state.zoneMode)}。`);
+        }
+      } else lines.push("尚未分析当前战场（环境扫描），无法调转风向。");
     } else if (id === "helu_scan") {
       const fl = state.skillFlow;
       a.resources.scanned = true;
@@ -9536,6 +9584,12 @@ function runSkillInner(id, optRun) {
       a.zone = dest;
       addRasEnergy(20, "逃离");
       lines.push(`逃离：从 ${from} 区到 ${dest} 区。`);
+    } else if (id === "ras_super") {
+      // 不稳超导：转换 20% 累积能量为光能，给自己施加导体；不稳态下免费（skillCost）
+      convertRasLight(20);
+      a.self = "conductor";
+      if (typeof spawnPopup === "function") spawnPopup(a, { kind: "status", text: "导体", element: "electric" });
+      lines.push("不稳超导：转换 20% 累积能量为光能，自身获得导体效果。");
     } else if (id === "ras_summon") {
       const w = spawnWeapon(a, "edc");
       lines.push(w ? "EDC30k 已进入战场。" : "EDC30k 已在场。");

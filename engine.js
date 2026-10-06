@@ -188,6 +188,8 @@ const SKILL_RANGE = {
   chuan_aa: { min: 0, max: 0 },       // 川川普通攻击是近距离
   bare_aa: { min: 0, max: 0 },        // 空手攻击一律同区
   chuan_blade: { min: 0, max: 1 },   // 巨刃划空：1 距离以内
+  kolt_rot: { min: 1, max: 1 },      // 腐坏抛射：1 距离的敌人
+  kolt_mod: { min: 0, max: 1 },      // 「非法」改装：1 距离以内任意单位
   xia_crush: { min: 0, max: 0 },
   kolt_aa: { min: 0, max: 1 },
   // 更换刀头的追击射程取决于换上去的新刀头（电钻近距离 / 酸液炮远距离），
@@ -218,6 +220,7 @@ const SKILL_TARGET_SIDE = {
   yuito_espresso: "enemy",  // 加行动点那一档在分步里选友方，走到这里的是酸液攻击
   nora_needle: "any",       // 针尖可以扎敌人，也可以扎队友当治疗手段
   nora_aa: "any",           // 有刺入时打刺入目标，刺入的可能是队友
+  kolt_mod: "anySelf",      // 「非法」改装：任意单位（含自己）施加过载
   chuan_over: "anySelf"     // 电站超频：任意单位（敌人也行：主动让敌人过载），也可以对川川自己用
 };
 
