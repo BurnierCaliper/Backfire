@@ -124,6 +124,19 @@ const BattleSim = (function () {
         finishBlock(choice, forced);
         continue;
       }
+      if (state.koltSwapQueue && state.koltSwapQueue.length) {
+        const job = state.koltSwapQueue[0];
+        const k = unitById(job.actorId);
+        if (!k) { state.koltSwapQueue.shift(); continue; }
+        const pick = policy.koltSwap ? policy.koltSwap(k) : { swap: false };
+        resolveKoltSwap(!!(pick && pick.swap), pick && pick.targetId);
+        continue;
+      }
+      if (state.heluScanQueue && state.heluScanQueue.length) {
+        const job = state.heluScanQueue[0];
+        resolveHeluScan(policy.heluScan ? policy.heluScan(job) : { act: "spawn" });
+        continue;
+      }
       if (state.assistQueue && state.assistQueue.length) pruneAssistQueue();
       if (state.assistQueue && state.assistQueue.length) {
         const job = state.assistQueue[0];
@@ -138,19 +151,6 @@ const BattleSim = (function () {
           extra.blade = !r.niuOut ? "niu" : !r.narutoOut ? "naruto" : "niu";
         }
         withPhaseOf(helper, () => finishAssist(choice, extra));
-        continue;
-      }
-      if (state.koltSwapQueue && state.koltSwapQueue.length) {
-        const job = state.koltSwapQueue[0];
-        const k = unitById(job.actorId);
-        if (!k) { state.koltSwapQueue.shift(); continue; }
-        const pick = policy.koltSwap ? policy.koltSwap(k) : { swap: false };
-        resolveKoltSwap(!!(pick && pick.swap), pick && pick.targetId);
-        continue;
-      }
-      if (state.heluScanQueue && state.heluScanQueue.length) {
-        const job = state.heluScanQueue[0];
-        resolveHeluScan(policy.heluScan ? policy.heluScan(job) : { act: "spawn" });
         continue;
       }
       return;

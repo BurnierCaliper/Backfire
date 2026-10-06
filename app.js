@@ -4432,7 +4432,8 @@ function queueKoltSwap(actor) {
   if (!k || k.dead || k.hidden) return;
   if (typeof passiveOn === "function" && !passiveOn(k)) return;   // 放弃被动「更换刀头」
   state.koltSwapQueue = state.koltSwapQueue || [];
-  if (state.koltSwapQueue.some(j => j.actorId === k.id)) return;
+  // 每次触发（协助攻击、协助格挡……）各给一次更换刀头的机会：不按柯尔特去重，
+  // 画面 / 模拟器会在处理下一个协助攻击之前先问完这一次
   state.koltSwapQueue.push({ actorId: k.id });
   if (typeof presentKoltSwapModal === "function") presentKoltSwapModal();
 }

@@ -1239,6 +1239,54 @@
         }, true);
         continue;
       }
+      if (state.koltSwapQueue && state.koltSwapQueue.length) {
+        const job = state.koltSwapQueue[0];
+        const k = unitById(job.actorId);
+        if (!k) { systemCommand({ type: "battle.cleanQueues", queue: "kolt" }); continue; }
+        const foes = typeof koltMeleeSwapTargets === "function" ? koltMeleeSwapTargets(k) : [];
+        const opts = [{ label: "不切换", value: { swap: false } }];
+        if (!foes.length) opts.push({ label: "切换刀头", sub: "同区没有可打的敌人", value: { swap: true, targetId: null } });
+        else foes.forEach(u => opts.push({ label: `切换并打 ${u.name}`, sub: "近距离 0.5 ATK", value: { swap: true, targetId: u.id } }));
+        const pick = hotseat() ? await HotseatGame.ownedChoice(k, "更换刀头", opts) : await openChoice("更换刀头", `${k.name} 可以更换刀头。切刀攻击只能打同区目标。`, opts, { label: "不切换", value: { swap: false } });
+        const swapTarget = (pick && pick.swap && pick.targetId) || null;
+        if (pick && pick.swap) {
+          // 换刀头的追击：和协助攻击一样播攻击演出（冲上去打同区那名敌人）
+          const nextBit = (k.resources && k.resources.bit) === "acid" ? "电钻" : "酸液炮";
+          await perform({ type: "koltSwapAnswer", swap: true, target: swapTarget }, {
+            actorId: k.id, targetId: swapTarget, forceLunge: !!swapTarget, slow: true,
+            skillName: `更换刀头 · ${nextBit}`
+          }, true);
+        } else {
+          systemCommand({ type: "koltSwapAnswer", swap: false, target: null });
+        }
+        continue;
+      }
+      // Helumica 协助攻击附带的环境扫描：区域已定（被打的敌人所在的区），按环境扫描的选项一步步问
+      if (state.heluScanQueue && state.heluScanQueue.length) {
+        const job = state.heluScanQueue[0];
+        const h = unitById(job.actorId);
+        if (!h) { systemCommand({ type: "battle.cleanQueues", queue: "helu" }); continue; }
+        const SKIP = "__skip";
+        const ask = (title, text, opts) => hotseat()
+          ? HotseatGame.ownedChoice(h, title, opts.concat([{ label: "放弃扫描", value: SKIP }]))
+          : openChoice(title, text, opts, { label: "放弃扫描", value: SKIP });
+        const picks = { dest: job.zone };
+        let skipped = false;
+        for (let g = 0; g < 8; g++) {
+          let steps = [];
+          try { steps = skillFlowSteps("helu_scan", h, picks) || []; } catch (e) { steps = []; }
+          const step = steps.find(st => picks[st.key] === undefined);
+          if (!step) break;
+          const opts = step.type === "unit"
+            ? (step.units || []).map(u => ({ label: u.name, sub: u.zone ? `${u.zone} 区` : "", value: u.id }))
+            : (step.options || []).map(o => ({ label: o.label, value: o.value }));
+          const v = await ask(`环境扫描 · ${job.zone} 区`, `协助攻击附带的环境扫描。${step.label}`, opts);
+          if (v == null || v === SKIP) { skipped = true; break; }
+          picks[step.key] = v;
+        }
+        await perform({ type: "heluScanAnswer", picks: skipped ? null : picks }, { actorId: animActor(h.id, "helu_scan", picks), targetId: (!skipped && picks.target) || null, skillName: "环境扫描" }, true);
+        continue;
+      }
       if (state.assistQueue && state.assistQueue.length) systemCommand({ type: "battle.cleanQueues", queue: "assist" });
       if (state.assistQueue && state.assistQueue.length) {
         const job = state.assistQueue[0];
@@ -1286,54 +1334,6 @@
           actorId: choice, targetId: job.targetId, forceLunge: !!helper, slow: !!helper,
           skillName: helper ? ("协助攻击" + (bladeName ? " · " + bladeName : "")) : ""
         }, true);
-        continue;
-      }
-      if (state.koltSwapQueue && state.koltSwapQueue.length) {
-        const job = state.koltSwapQueue[0];
-        const k = unitById(job.actorId);
-        if (!k) { systemCommand({ type: "battle.cleanQueues", queue: "kolt" }); continue; }
-        const foes = typeof koltMeleeSwapTargets === "function" ? koltMeleeSwapTargets(k) : [];
-        const opts = [{ label: "不切换", value: { swap: false } }];
-        if (!foes.length) opts.push({ label: "切换刀头", sub: "同区没有可打的敌人", value: { swap: true, targetId: null } });
-        else foes.forEach(u => opts.push({ label: `切换并打 ${u.name}`, sub: "近距离 0.5 ATK", value: { swap: true, targetId: u.id } }));
-        const pick = hotseat() ? await HotseatGame.ownedChoice(k, "更换刀头", opts) : await openChoice("更换刀头", `${k.name} 可以更换刀头。切刀攻击只能打同区目标。`, opts, { label: "不切换", value: { swap: false } });
-        const swapTarget = (pick && pick.swap && pick.targetId) || null;
-        if (pick && pick.swap) {
-          // 换刀头的追击：和协助攻击一样播攻击演出（冲上去打同区那名敌人）
-          const nextBit = (k.resources && k.resources.bit) === "acid" ? "电钻" : "酸液炮";
-          await perform({ type: "koltSwapAnswer", swap: true, target: swapTarget }, {
-            actorId: k.id, targetId: swapTarget, forceLunge: !!swapTarget, slow: true,
-            skillName: `更换刀头 · ${nextBit}`
-          }, true);
-        } else {
-          systemCommand({ type: "koltSwapAnswer", swap: false, target: null });
-        }
-        continue;
-      }
-      // Helumica 协助攻击附带的环境扫描：区域已定（被打的敌人所在的区），按环境扫描的选项一步步问
-      if (state.heluScanQueue && state.heluScanQueue.length) {
-        const job = state.heluScanQueue[0];
-        const h = unitById(job.actorId);
-        if (!h) { systemCommand({ type: "battle.cleanQueues", queue: "helu" }); continue; }
-        const SKIP = "__skip";
-        const ask = (title, text, opts) => hotseat()
-          ? HotseatGame.ownedChoice(h, title, opts.concat([{ label: "放弃扫描", value: SKIP }]))
-          : openChoice(title, text, opts, { label: "放弃扫描", value: SKIP });
-        const picks = { dest: job.zone };
-        let skipped = false;
-        for (let g = 0; g < 8; g++) {
-          let steps = [];
-          try { steps = skillFlowSteps("helu_scan", h, picks) || []; } catch (e) { steps = []; }
-          const step = steps.find(st => picks[st.key] === undefined);
-          if (!step) break;
-          const opts = step.type === "unit"
-            ? (step.units || []).map(u => ({ label: u.name, sub: u.zone ? `${u.zone} 区` : "", value: u.id }))
-            : (step.options || []).map(o => ({ label: o.label, value: o.value }));
-          const v = await ask(`环境扫描 · ${job.zone} 区`, `协助攻击附带的环境扫描。${step.label}`, opts);
-          if (v == null || v === SKIP) { skipped = true; break; }
-          picks[step.key] = v;
-        }
-        await perform({ type: "heluScanAnswer", picks: skipped ? null : picks }, { actorId: animActor(h.id, "helu_scan", picks), targetId: (!skipped && picks.target) || null, skillName: "环境扫描" }, true);
         continue;
       }
       return;
