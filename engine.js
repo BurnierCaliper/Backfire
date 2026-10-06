@@ -220,7 +220,8 @@ const SKILL_TARGET_SIDE = {
   yuito_espresso: "enemy",  // 加行动点那一档在分步里选友方，走到这里的是酸液攻击
   nora_needle: "any",       // 针尖可以扎敌人，也可以扎队友当治疗手段
   nora_aa: "any",           // 有刺入时打刺入目标，刺入的可能是队友
-  kolt_mod: "anySelf",      // 「非法」改装：任意单位（含自己）施加过载
+  kolt_mod: "anySelf",
+  chuan_reclaim: "allySelf", // 回收护盾：任意一名友方（含自己）      // 「非法」改装：任意单位（含自己）施加过载
   chuan_over: "anySelf"     // 电站超频：任意单位（敌人也行：主动让敌人过载），也可以对川川自己用
 };
 
@@ -600,6 +601,7 @@ function resolveAttack(ctx) {
       hAdd("冰打熔融：伤害 ×2，击破 +1，并结束熔融。");
     }
 
+    if (flags.fuelPct) { pct += flags.fuelPct; hAdd(`燃油：伤害 +${Math.round(flags.fuelPct * 100)}%。`); }
     if (a && a.self === "burn") {
       const st = Math.max(1, Number(a.selfBurnStacks) || 1);
       if (element === "fire") { pct += 0.10 * st; hAdd("自焚×" + st + "：火焰伤害 +" + (10 * st) + "%。"); }
@@ -677,7 +679,14 @@ function resolveAttack(ctx) {
     if (flags.doubleTake) { mul *= 2; hAdd("目标受伤翻倍。"); }
     if (flags.dr50) { mul *= 0.5; hAdd("目标减伤 +50%。"); }
     if (flags.holyShield) { mul *= 0.5; hAdd("圣盾：本次伤害减半。"); }
-    if (flags.prideReduce) { mul *= 0.75; hAdd("过度自信：满血时受伤 −25%。"); }
+    if (flags.prideReduce) {
+      const pr = typeof flags.prideReduce === "number" ? flags.prideReduce : 0.25;
+      mul *= 1 - pr; hAdd(`过度自信：满血时受伤 −${Math.round(pr * 100)}%。`);
+    }
+    // 事故幸存+：拉斯缪尔不稳态下受到的伤害 ×3（不再倒地 / 死亡）
+    if (t.kit === "ras" && t.resources && t.resources.unstable && typeof passivePlus === "function" && passivePlus(t, 2)) {
+      mul *= 3; hAdd("事故幸存+：不稳态受伤 ×3。");
+    }
     if (flags.diceMin) { hAdd("决一死战：伤害掷骰已按最低值计算。"); }
     if (t.flying && flags.action) { mul *= 0.5; hAdd("飞行单位：攻击行动伤害减半。"); }
     if (t.instant && t.instant.melt && element === "ice") { mul *= 2; }
@@ -1066,6 +1075,8 @@ function healUnit(unit, amount, opt) {
   let raw = Math.max(0, Number(amount) || 0);
   if (!raw) return 0;
   if (typeof bpHealBonus === "function") raw += bpHealBonus(unit);   // 单局图纸：愿你无恙
+  // 事故幸存+：拉斯缪尔不稳态下受到的治疗 ×3
+  if (unit.kit === "ras" && unit.resources && unit.resources.unstable && typeof passivePlus === "function" && passivePlus(unit, 2)) raw *= 3;
   opt = opt || {};
   if (unit.upOnShp) {
     const cap = Number(unit.shpMax) || 0;

@@ -46,7 +46,8 @@
     if (cmd.type === "move" && !Number.isFinite(cmd.dest)) throw new Error("dest must be a number");
     if (cmd.type === "battle.panel" && panelActions.indexOf(cmd.action) < 0) throw new Error("Unknown battle panel action: " + cmd.action);
     const oneOf = (value, values, field) => { if (!values.includes(value)) throw new Error("Unknown " + field + ": " + value); };
-    if (cmd.type === "openingChoice") oneOf(cmd.bit, ["acid", "drill"], "opening bit");
+    if (cmd.type === "openingChoice" && cmd.mood == null) oneOf(cmd.bit, ["acid", "drill"], "opening bit");
+    if (cmd.type === "openingChoice" && cmd.mood != null) oneOf(cmd.mood, ["gentle", "cruel"], "opening mood");
     if (cmd.type === "battle.cleanQueues") oneOf(cmd.queue, ["block", "assist", "kolt", "helu"], "reaction queue");
     if (cmd.type === "heluScanAnswer" && cmd.picks != null && (typeof cmd.picks !== "object" || Array.isArray(cmd.picks))) throw new Error("picks must be an object");
     if (cmd.type === "battle.panel") {
@@ -201,7 +202,11 @@
     switch (cmd.type) {
       case "skill": case "move": case "standUp": case "useItem": return skill(cmd);
       case "startCombat": return startCombat();
-      case "openingChoice": { const u = actor(cmd.actor); u.resources = u.resources || {}; u.resources.bit = cmd.bit === "acid" ? "acid" : "drill"; return u.resources.bit; }
+      case "openingChoice": {
+        const u = actor(cmd.actor); u.resources = u.resources || {};
+        if (cmd.mood) { if (typeof setMood === "function") setMood(u, cmd.mood, null); else u.resources.mood = cmd.mood; return u.resources.mood; }   // 双相冲动+：自选初始状态
+        u.resources.bit = cmd.bit === "acid" ? "acid" : "drill"; return u.resources.bit;
+      }
       case "blockAnswer": return seeded(cmd.seed, () => finishBlock(cmd.helper || null, cmd.forced || null));
       case "assistAnswer": { const helper = unitById(cmd.helper); const prev = state.combatPhase; if (helper) state.combatPhase = helper.isPlayer ? "player" : "enemy"; try { return finishAssist(cmd.helper || null, cmd.extra || {}); } finally { state.combatPhase = prev; } }
       case "koltSwapAnswer": return resolveKoltSwap(!!cmd.swap, cmd.target || null);

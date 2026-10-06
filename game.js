@@ -2018,6 +2018,15 @@
 
   /** 开战前的选择。柯尔特可以自行决定初始刀头（不算「更换刀头」，不触发追击伤害）。 */
   async function askOpeningChoices() {
+    // 双相冲动+：诺拉自选初始状态
+    const nora = typeof findKit === "function" ? findKit("nora", state.units) : null;
+    if (nora && nora.isPlayer && typeof passivePlus === "function" && passivePlus(nora, 2)) {
+      const opts = [{ label: "温和", value: "gentle" }, { label: "残忍", value: "cruel" }];
+      const pick = hotseat() ? await HotseatGame.ownedChoice(nora, "诺拉 · 初始状态", opts)
+        : await openChoice("诺拉 · 初始状态", "双相冲动+：开局时可以自行选择初始状态，回合开始时不会再随机改变。", opts, { label: "保持当前", value: (nora.resources || {}).mood || "gentle" });
+      systemCommand({ type: "openingChoice", actor: nora.id, mood: pick === "cruel" ? "cruel" : "gentle" });
+      addLogPhase(`诺拉 初始状态：${pick === "cruel" ? "残忍" : "温和"}`);
+    }
     const k = typeof findKit === "function" ? findKit("kolt", state.units) : null;
     if (!k || !k.isPlayer) return;
     const pick = hotseat() ? await HotseatGame.ownedChoice(k, "柯尔特 · 初始刀头", [

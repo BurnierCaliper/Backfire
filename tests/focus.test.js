@@ -55,7 +55,7 @@ test("符合天气的属性：不管序列要什么都推进一步", () => {
 
 test("技能说明写明新规则", () => {
   const c = H.load();
-  const p = c.SkillText.kitInfo("helu").passives.find(x => x.name === "聚焦");
+  const p = c.SkillText.kitInfo("helu").passives.find(x => x.name === "频谱分析");
   assert.match(p.text, /2 击破/);
   assert.match(p.text, /符合天气/);
 });

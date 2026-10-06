@@ -49,6 +49,11 @@
       const p = (state.props || []).find(x => "use_device:" + x.id === id && Number(x.zone) === Number(actor.zone) && ["button", "lever"].includes(x.kind));
       return p ? { id, name: p.name, cost: { ap: 1 } } : null;
     }
+    if (id.startsWith("use_scrap:")) {
+      const p = (state.props || []).find(x => "use_scrap:" + x.id === id);
+      if (!p || typeof scrapsFor !== "function" || !scrapsFor(actor).includes(p)) return null;
+      return { id, name: "操控 " + p.name, cost: { ap: 1 } };
+    }
     if (id.startsWith("hack_turret:")) {
       const p = (state.props || []).find(x => "hack_turret:" + x.id === id);
       if (!p || typeof turretHackError !== "function" || turretHackError(actor, p)) return null;
