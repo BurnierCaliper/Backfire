@@ -551,9 +551,12 @@
     const r = $("g-result"); if (r) r.classList.remove("show");
     const ro = $("g-reopen"); if (ro) ro.classList.remove("show");
     undoStack = [];   // 战斗打完回来：之前的撤销点在战斗之前，撤回去会把整场战斗的结果一起抹掉，所以清空
+    // 先切回探索画面再布置下一场：否则布置时战斗画面还在，开战前的大字会弹出来盖在探索画面上
+    Screens.show("trpg");
+    const intro = document.getElementById("g-intro"); if (intro) intro.remove();
     rebuild();
     save();
-    Screens.show("trpg");
+    render();
   }
 
   function requestBackFromBattle() {

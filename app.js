@@ -1481,9 +1481,12 @@ function releaseAcidCharges(notes) {
       u.resources.acidCharge = null;
       notes.push(`扭矩酸液炮蓄力在 ${z} 区爆发。`);
       const atk = effectiveAtk(u, state.units);
+      const kolt = findKit("kolt", state.units);
       visibleEnemies(z).forEach(t => {
         const out = dealTo(u, t, { element: "acid", mult: 1, baseBreak: 1, atk, flags: { action: true, aoe: true } });
         (out.extra || []).forEach(s => notes.push(s));
+        // 卡面：被打到的敌人下一击必须攻击柯尔特
+        if (kolt && !kolt.dead && !t.dead) { t.tauntTo = kolt.id; notes.push(`${t.name} 被嘲讽：下一击必须攻击柯尔特。`); }
       });
     }
   });
@@ -1568,10 +1571,9 @@ function startPlayerPhase() {
       notes.push("拉斯缪尔回合开始累积能量 +20%。");
     }
     if (u.resources && u.resources.preparedPending) {
-      const n = 1 + milestone(u.level || 1, 5);
       u.resources.preparedActive = true;
       u.resources.preparedPending = false;
-      notes.push(`${u.name} 「准备」生效：本回合第一次攻击裸伤害 +${n}d6，吃倍率和增伤。`);
+      notes.push(`${u.name} 「准备」生效：本回合第一次攻击的第一击基础包 +1d${prepDieSides(u)}，吃倍率和克制。`);
     }
   });
   appendLog(notes.join("\n"));
@@ -1980,9 +1982,10 @@ function bigHitInfo(level, dmg) {
   return { big: true, ratio: Math.min(1, (dmg - th) / th), th };
 }
 // [评价, 至少几倍基准分, 战斗经验倍率]
-// [评价, 第一幕的分数线, 战斗经验倍率]。C 线以下是 D（经验不加成）。已定：第一幕 C 750 / B 1250 / A 1500 / S 1750
-const SCORE_GRADES = [["S", 1750, 2], ["A", 1500, 1.5], ["B", 1250, 1.2], ["C", 750, 1], ["D", 0, 1]];
-const SCORE_ACT_STEP = 250;   // 之后每一幕，各条分数线（D 除外）+250
+// [评价, 第一幕的分数线, 战斗经验倍率]。C 线以下是 D（经验不加成）。
+// 第一幕 C 500 / B 1000 / A 1250 / S 1500 / SS 1750 / SSS 2000。SS、SSS 只是更高的评价，经验倍率和 S 一样
+const SCORE_GRADES = [["SSS", 2000, 2], ["SS", 1750, 2], ["S", 1500, 2], ["A", 1250, 1.5], ["B", 1000, 1.2], ["C", 500, 1], ["D", 0, 1]];
+const SCORE_ACT_STEP = 150;   // 之后每一幕，各条分数线（D 除外）+150
 const SCORE_PART_NAMES = { dmg: "伤害", heal: "治疗 / 护盾", brk: "击破", stagger: "打出失衡", block: "协助格挡成功", reduce: "减伤", blockSave: "格挡减免", overkill: "溢出伤害", kill: "击杀", bonus: "克制 / 大伤害加成", action: "行动", speed: "速杀奖励", flawless: "无伤奖励", ambush: "遭遇战加成", fatigue: "招式疲劳（扣分）" };
 /** 这个角色这回合用这个技能，算连续第几个回合（不改记录）。
  *  上回合用过 → 上回合的连续数 + 1；这回合已经用过 → 和这回合第一次一样；否则 1 */
@@ -2425,7 +2428,20 @@ function applyTypedDot(unit, amount, element, notes, label, opts) {
     atkRange: "any"
   });
   const shieldBefore = shieldSum(unit);
+  // 腐坏抛射施加的腐蚀：记下这次对每种血量层造成的伤害，下一次废物利用时给柯尔特
+  const rotOwner = element === "acid" && unit.rotBy && unit.statuses && unit.statuses.corr && /腐蚀/.test(String(label || "")) ? unitById(unit.rotBy) : null;
+  const byType = () => (unit.layers || []).reduce((m, l) => { m[l.type] = (m[l.type] || 0) + Math.max(0, Number(l.current) || 0); return m; }, {});
+  const rotBefore = rotOwner ? byType() : null;
   notes.push(...applyCombat(unit, res, null));
+  if (rotOwner) {
+    const after = byType();
+    rotOwner.resources = rotOwner.resources || {};
+    const store = rotOwner.resources.rotStore = rotOwner.resources.rotStore || {};
+    Object.keys(rotBefore).forEach(type => {
+      const lost = rotBefore[type] - (after[type] || 0);
+      if (lost > 0) { store[type] = (store[type] || 0) + lost; notes.push(`腐坏抛射记录：${LAYER[type] || type} ${lost}（下一次废物利用领取）。`); }
+    });
+  }
   notes.push(label + ` → 实伤 ${Math.floor(res.total || 0)}`);
   if (typeof afterDamageTaken === "function") afterDamageTaken(unit, element, res.total || 0, Math.max(0, shieldBefore - shieldSum(unit)), notes, {});
   const sdKey = inferStatusDmgKey(label, element);
@@ -2923,11 +2939,18 @@ function controlScrap(a, p, t) {
   if (Number(p.zone) !== Number(a.zone)) return "必须和碎渣机炮在同一区才能操控。";
   if (!t || t.isProp || !(state.units || []).includes(t)) return "先选碎渣机炮要打的敌人。";
   if (!scrapTargets(p, a).includes(t)) return `${t.name} 不在碎渣机炮 2 距离内，或不是敌人。`;
+  if (!scrapReady(p)) return "碎渣机炮这一回合已经发射过了。";
   if (!spendAp(a, 1, "操控碎渣机炮")) return `${a.name} 行动点不足，无法操控碎渣机炮。`;
   return `${a.name} 操控碎渣机炮攻击 ${t.name}。\n` + scrapShot(p, t, a);
 }
-/** 碎渣机炮开火一次：1d4 发，每发 6+等级 物理 +2 击破 */
+/** 碎渣机炮每回合只能发射一次（不管被谁、用什么方式触发） */
+function scrapReady(p) {
+  return !!p && p.firedRound !== Number(state.turnNo || 0);
+}
+/** 碎渣机炮开火一次：1d4 发，每发 6+等级 物理 +2 击破。打玩家时可以被协助格挡 */
 function scrapShot(p, t, controller) {
+  if (!scrapReady(p)) return "碎渣机炮这一回合已经发射过了。";
+  p.firedRound = Number(state.turnNo || 0);
   const n = 1 + Math.floor(Math.random() * 4);
   const flat = 6 + (p.level || 1);
   const fake = unitOf("碎渣机炮", p.level, [{ type: "armor", hp: 1 }], 0, 0);
@@ -2936,7 +2959,9 @@ function scrapShot(p, t, controller) {
   if (controller) fake.isPlayer = !!controller.isPlayer;
   if (controller && controller.isPlayer) fake.creditTo = controller.id;
   // 射程是「2 距离内」（选目标时已经限定），这里不再按近距离判定
-  const out = dealTo(fake, t, { atk: 0, mult: 0, flat, hits: n, element: "physical", baseBreak: 2, atkRange: "any", flags: { action: true, blockResolved: true, propShot: true, flyFree: true } });
+  fake.propId = p.id;
+  const out = dealTo(fake, t, { atk: 0, mult: 0, flat, hits: n, element: "physical", baseBreak: 2, atkRange: "any", flags: { action: true, propShot: true, flyFree: true } });
+  if (out && out.pending) return `碎渣机炮开火 ${n} 次，每次 ${flat} 物理 +2 击破，${t.name} 的队友可以协助格挡。`;
   return `碎渣机炮开火 ${n} 次，每次 ${flat} 物理 +2 击破。合计伤害 ${Math.floor((out && out.res && out.res.total) || 0)}。`;
 }
 
@@ -3141,9 +3166,9 @@ function destroyProp(p, attacker) {
   if (p.kind === "battery") {
     const r = takeDice(lv, 4, 0);
     const dmg = r.total;
-    notes.push(`电池爆炸：同区同阵营 ${r.text} 电击。`);
+    notes.push(`电池爆炸：同区所有单位（不分敌我）${r.text} 电击。`);
     markAoeZone(p.zone, { element: "electric", dmg, attacker });
-    state.units.filter(u => !u.hidden && !u.dead && Number(u.zone) === Number(p.zone) && !!u.isPlayer === (p.faction !== "enemy")).forEach(u => {
+    state.units.filter(u => !u.hidden && !u.dead && Number(u.zone) === Number(p.zone)).forEach(u => {
       const fake = unitOf("电池", lv, [{ type: "armor", hp: 1 }], 0, 0);
       fake.zone = p.zone;
       dealTo(fake, u, { atk: 0, mult: 0, flat: dmg, element: "electric", baseBreak: 0, flags: { action: true, aoe: true, blockResolved: true } });
@@ -3908,6 +3933,10 @@ function skillNameHint(id) {
   return id || "技能";
 }
 
+/** 「准备」的骰子：1 级 1d6，5 级 1d8，10 级 1d10，15 级 1d12 */
+function prepDieSides(u) {
+  return upgradeDieSides(6, milestone((u && u.level) || 1, 5));
+}
 function spendAp(u, n, reason) {
   n = n || 1;
   if (!u) return true;
@@ -4271,6 +4300,7 @@ function stripFocusLayer(target, layerType, lines) {
   const layer = (target.layers || []).find(l => l.type === layerType);
   if (!layer) return;
   const lost = Math.max(0, Number(layer.current) || 0);
+  const layerMax = Math.max(0, Number(layer.max) || 0);
   const wasInner = layer === innermostLayer(target);
   layer.current = 0;
   layer.max = 0;
@@ -4278,7 +4308,7 @@ function stripFocusLayer(target, layerType, lines) {
   target.focuses = (target.focuses || []).filter(f => f.layerType !== layerType);
   // 抹去的是内层：留着这层（0/0）让单位按内层归零死亡，不能让外层顶替成内层
   if (!wasInner) target.layers = (target.layers || []).filter(l => l !== layer);
-  state.lastBrokenLayer = { type: layerType, lost, dmg: lost };
+  state.lastBrokenLayer = { type: layerType, lost: layerMax, dmg: lost };
   noteSideDamage(lost, "聚焦抹层", target);
   const msg = `${target.name} 聚焦完成：${(typeof LAYER !== "undefined" && LAYER[layerType]) || layerType}被抹去（视为 ${lost} 点伤害，该层无法再被治疗）。`;
   if (lines) lines.push(msg);
@@ -4308,12 +4338,17 @@ function advanceFocusOnHit(attacker, target, element, res, extra) {
   target.focuses.slice().forEach(f => {
     const need = f.seq[f.step];
     if (need && (element === need || byWeather)) {
-      f.step += 1;
-      const why = element === need ? "" : "，顺应天气";
-      extra.push(`${target.name} 聚焦推进 ${f.step}/${f.seq.length}（${(typeof ELE !== "undefined" && ELE[element]) || element}${why}）`);
-      if (f.step >= f.seq.length) stripFocusLayer(target, f.layerType, extra);
+      const eleName = (typeof ELE !== "undefined" && ELE[element]) || element;
+      stepFocus(target, f, extra, element === need ? eleName : eleName + "，顺应天气");
     }
   });
+}
+/** 聚焦序列推进一步；走完就抹层 */
+function stepFocus(target, f, out, why) {
+  if (!f || !(target.focuses || []).includes(f) || f.step >= f.seq.length) return;
+  f.step += 1;
+  out.push(`${target.name} 聚焦推进 ${f.step}/${f.seq.length}（${why}）`);
+  if (f.step >= f.seq.length) stripFocusLayer(target, f.layerType, out);
 }
 
 function addRasEnergy(pct, reason) {
@@ -4945,10 +4980,7 @@ function performAssistBlock(helper, target, attacker, forced) {
       const layer = ((attacker.layers || []).find(l => (l.current || 0) > 0) || {}).type;
       applyFocus(attacker, layer, notes);
     }
-    if (helper.kit === "ras") {
-      convertRasLight(helper.resources && helper.resources.energyPct);
-      notes.push("格挡成功：累积能量全部转为光能。");
-    }
+    if (helper.kit === "ras") addRasEnergy(20, "协助格挡");   // 无论成功与否都累积 20% 能量
     if (helper.kit === "ecmo") {
       notes.push("音波偏转：自身不扣除架势。");
     }
@@ -5043,7 +5075,7 @@ function openBlockModal(job) {
   const modal = uiEl("blockModal");
   const text = uiEl("blockModalText");
   const box = uiEl("blockModalBtns");
-  const attacker = unitById(job.attackerId);
+  const attacker = blockJobAttacker(job);
   const target = unitById(job.targetId);
   const helpers = eligibleBlockers(target, job);
   const again = job.tried && job.tried.length;
@@ -5072,9 +5104,14 @@ function closeBlockModal() {
   if (modal) modal.classList.add("hidden");
 }
 
+/** 格挡队列里这一击的攻击者（场上单位，或者记下来的配置物） */
+function blockJobAttacker(job) {
+  if (!job) return null;
+  return unitById(job.attackerId) || job.fakeAttacker || null;
+}
 function finishBlock(helperId, forced) {
   const job = (state.blockQueue || [])[0];
-  const attacker0 = job ? unitById(job.attackerId) : null;
+  const attacker0 = job ? blockJobAttacker(job) : null;
   const title = attacker0 ? `【${attacker0.name}】的攻击落下` : "";
   const prevActor = LOG_ACTOR_ID;
   LOG_ACTOR_ID = attacker0 ? attacker0.id : null;
@@ -5090,7 +5127,7 @@ function finishBlockInner(helperId, forced) {
   const job = (state.blockQueue || []).shift();
   closeBlockModal();
   if (!job) return;
-  const attacker = unitById(job.attackerId);
+  const attacker = blockJobAttacker(job);
   const target = unitById(job.targetId);
   let block = "none", blockHelperId = null;
   if (helperId) {
@@ -5707,6 +5744,8 @@ function dealTo(attacker, target, opt) {
       state.blockQueue.push({
         seq: (state.jobSeq = (Number(state.jobSeq) || 0) + 1),   // 这一击的编号：格挡骰和伤害骰按它定种子（Helumica 能预测）
         attackerId: attacker.id,
+        // 配置物（碎渣机炮）这类不在场上的攻击者：把它本身记下来，格挡结算时照样能找到
+        fakeAttacker: (state.units || []).includes(attacker) ? null : JSON.parse(JSON.stringify(attacker)),
         targetId: target.id,
         onConnect: opt.onConnect || null,
         opt: JSON.parse(JSON.stringify({
@@ -5755,8 +5794,7 @@ function dealTo(attacker, target, opt) {
   let prepBonus = 0;
   let prepNote = "";
   if (attacker.resources && attacker.resources.preparedActive && opt.usePrep !== false) {
-    const s = upgradeDieSides(6, milestone(attacker.level || 1, 5));
-    const r = takeDice(1, s, 0);
+    const r = takeDice(1, prepDieSides(attacker), 0);
     prepBonus = r.total;
     prepNote = "准备" + r.text;
     attacker.resources.preparedActive = false;
@@ -5780,10 +5818,8 @@ function dealTo(attacker, target, opt) {
       extraDiceNote = r.text;
     } else diceValue = 0;
   }
-  if (prepBonus) {
-    diceValue = (Number(diceValue) || 0) + prepBonus;
-    extraDiceNote = extraDiceNote ? extraDiceNote + " + " + prepNote : prepNote;
-  }
+  // 准备：只加在这次攻击第一击的基础包上（复数攻击只生效一次），不并进每一段都吃的骰子
+  if (prepBonus) extraDiceNote = extraDiceNote ? extraDiceNote + " + " + prepNote + "（第一击）" : prepNote + "（第一击）";
   // 单局图纸：打近 / 远距离的额外骰、承受伤害 +1d10 等（mods.js）
   if (typeof bpDiceAdjust === "function") {
     const adj = bpDiceAdjust(attacker, target, flags);
@@ -5814,6 +5850,8 @@ function dealTo(attacker, target, opt) {
     mult: ((flags.assist || (attacker && state._assistBy === attacker.id)) && typeof bpAssistMult === "function") ? bpAssistMult(attacker, opt.mult != null ? opt.mult : 1) : (opt.mult != null ? opt.mult : 1),
     flat: opt.flat || 0,
     diceValue,
+    firstHitBonus: prepBonus,
+    firstHitNote: prepNote,
     element: opt.element || "physical",
     baseBreak: br,
     hits: opt.hits || 1,
@@ -5839,6 +5877,8 @@ function dealTo(attacker, target, opt) {
   const scoreBonus = attacker && attacker.isPlayer && target && !target.isPlayer ? attackScoreBonus(res, target) : 0;
   const wasStunnedForScore = !!(target && target.stunned);
   if (target && !target.isPlayer) target._killBonus = scoreBonus;
+  // 废物利用的来源：记下这一击之前敌人每层的血量，之后只认这一击真正打碎的层
+  const layersBeforeHit = target && !target.isPlayer ? (target.layers || []).map(l => ({ type: l.type, cur: Number(l.current) || 0, max: Number(l.max) || 0, sealed: !!l.sealed })) : null;
   const extra = applyCombat(target, res, attacker);
   // 这一击打死的敌人：本次行动后面的攻击还能打到它（全部算溢出）
   if (target && !target.isPlayer && target.dead && !wasDeadForGhost && state.actionKills && !state.actionKills.includes(target.id)) state.actionKills.push(target.id);
@@ -5853,8 +5893,15 @@ function dealTo(attacker, target, opt) {
   if ((res.breakDealt || 0) > 0 && typeof onBreakTaken === "function") onBreakTaken(target, res.breakDealt, opt.element || res.element, extra);
   if (!wasStunnedT && target.stunned && typeof onBroken === "function") onBroken(target, extra);
   if (flags.action && !isReaction && typeof afterAttackDealt === "function") afterAttackDealt(attacker, target, opt.element || res.element, res, opt, extra);
-  if ((res.total || 0) > 0) {
-    const deadLayer = (target.layers || []).find(l => (Number(l.current) || 0) <= 0 && !l.sealed);
+  if ((res.total || 0) > 0 && layersBeforeHit) {
+    // 只认敌人、只认这一击之前还有血、这一击之后归零（或被移除）的那一层；已经碎掉的层不会被后来的攻击反复记录
+    const now = target.layers || [];
+    const broken = layersBeforeHit.filter((p0, i) => {
+      if (p0.cur <= 0 || p0.sealed) return false;
+      const l = now.find((x, j) => x.type === p0.type && j >= i - 1 && j <= i);   // 外层被移除时会往前挪一位
+      return !l || (Number(l.current) || 0) <= 0;
+    });
+    const deadLayer = broken[broken.length - 1];   // 一击打穿多层时取最里面那层
     if (deadLayer) state.lastBrokenLayer = { type: deadLayer.type, lost: deadLayer.max || 0, dmg: res.total || 0 };
   }
   if (flags.action) advanceFocusOnHit(attacker, target, opt.element || res.element, res, extra);
@@ -6361,7 +6408,7 @@ const HELU_SCAN_SPAWN = ["boom", "acid", "battery", "scrap"];
 function heluScanFieldOn(f, k) { return k === "fire" ? fieldFireOn(f) : !!(f && f[k]); }
 function heluScanOptions(z) {
   const opts = [{ value: "spawn", label: "扫描出一个配置物（爆炸桶 / 酸液桶 / 超充能电池 / 碎渣机炮，随机）" }];
-  (state.props || []).filter(p => Number(p.zone) === Number(z) && !BARRIER_SIDE[p.kind]).forEach(p => {
+  (state.props || []).filter(p => Number(p.zone) === Number(z) && !BARRIER_SIDE[p.kind] && !(p.kind === "scrap" && !scrapReady(p))).forEach(p => {
     const what = p.kind === "boom" || p.kind === "acid" ? "直接引爆"
       : p.kind === "battery" ? "提取护盾或引爆"
       : p.kind === "scrap" ? "操控它攻击一名敌人"
@@ -6380,6 +6427,24 @@ function heluScanOptions(z) {
     if (heluScanFieldOn(f, k)) opts.push({ value: "field:" + k, label: `场地 · ${name}：${desc}` });
   });
   return opts;
+}
+/** Helumica 协助攻击附带的环境扫描：排进队列，由画面（或模拟器）问完选项再结算 */
+function queueHeluScan(a, zone, lines) {
+  if (!a || zone == null) return;
+  state.heluScanQueue = state.heluScanQueue || [];
+  state.heluScanQueue.push({ actorId: a.id, zone: Number(zone) });
+  if (lines) lines.push(`接着对 ${zone} 区进行环境扫描。`);
+}
+/** 结算队首的协助扫描。picks 为 null 表示放弃；区域固定为排队时的那一区 */
+function resolveHeluScan(picks) {
+  const job = (state.heluScanQueue || []).shift();
+  if (!job) return;
+  const a = unitById(job.actorId);
+  if (!a || !picks) { if (a) appendLog(`${a.name} 放弃了这次环境扫描。`); return; }
+  const lines = [];
+  heluScanAct(a, Object.assign({}, picks, { dest: job.zone }), lines);
+  appendLog(lines.join("\n"));
+  if (typeof renderAll === "function") renderAll();
 }
 /** 执行环境扫描的选择。picks：{ dest, act, mode, ally, target, sign } */
 function heluScanAct(a, picks, lines) {
@@ -6617,12 +6682,12 @@ function skillFlowSteps(id, actor, picks) {
     }
   }
   if (id === "chuan_blade") {
-    const units = fieldUnits().filter(u => !u.isPlayer && !u.dead && !u.hidden &&
-      Number(u.zone) === Number(actor.zone));
-    const props = (state.props || []).filter(p => Number(p.zone) === Number(actor.zone) && (Number(p.hp) || 0) > 0)
+    const near = (z) => zoneDist(Number(actor.zone), Number(z), maxZ) <= 1;   // 1 距离以内
+    const units = fieldUnits().filter(u => !u.isPlayer && !u.dead && !u.hidden && near(u.zone));
+    const props = (state.props || []).filter(p => near(p.zone) && (Number(p.hp) || 0) > 0)
       .map(p => ({ id: "prop:" + p.id, name: p.name, zone: p.zone }));
     if (!props.length) return [];
-    return [{ key: "target", type: "unit", optional: false, label: "巨刃划空目标（同区敌人或配置物）",
+    return [{ key: "target", type: "unit", optional: false, label: "巨刃划空目标（1 距离以内的敌人或配置物）",
               units: units.concat(props) }];
   }
   if (id === "role_activate") {
@@ -7898,6 +7963,8 @@ const SKILL_REQUIREMENT = {
     : !skillFlowSteps("tou_sonic", a, {}).length ? "距离 1 以内没有可以打的目标" : null,
   kolt_short:     (a) => ((findKit("kolt", state.units) || a).resources || {}).bit === "acid" ? "直流短接需要电钻模式" : null,
   torque_strip:   (a) => ((findKit("kolt", state.units) || {}).resources || {}).bit === "acid" ? "拆卸模式需要电钻模式" : null,
+  kolt_rot:       (a) => ((findKit("kolt", state.units) || a).resources || {}).bit !== "acid" ? "腐坏抛射需要酸液炮模式" : null,
+  kolt_mod:       (a) => ((findKit("kolt", state.units) || a).resources || {}).bit === "acid" ? "「非法」改装需要电钻模式" : null,
   edc_drain:      (a) => {
     const ras = findKit("ras", state.units);
     if (!ras) return "拉斯缪尔不在场";
@@ -8556,8 +8623,7 @@ function runSkillInner(id, optRun) {
       a.resources.preparedPending = true;
       a.resources.preparedActive = false;
       a.resources.prepared = true;
-      const n = 1 + milestone(a.level || 1, 5);
-      lines.push(`准备：下个玩家回合第一次攻击裸伤害 +${n}d6（吃倍率与增伤，含协助攻击）。`);
+      lines.push(`准备：下个玩家回合第一次攻击的第一击基础包 +1d${prepDieSides(a)}（吃倍率与克制，含协助攻击；复数攻击只生效一次）。`);
     } else if (id === "xia_assist") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       setEngine(true, "协助攻击");
@@ -8831,12 +8897,14 @@ function runSkillInner(id, optRun) {
     } else if (id === "chuan_assist") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       a.zone = t.zone;
+      // 「若有至少 3 电能」看的是发动协助攻击时手上的电能（这次积攒的 2 电能之前）
+      const heavyReady = (a.resources.charge || 0) >= 3;
       hitOne(a, t, { element: "electric", mult: 0.5, diceN: 1, diceS: 4, baseBreak: 0, atk, flags: { action: true, assist: true } });
       hitOne(a, t, { element: "electric", mult: 0.5, diceN: 1, diceS: 4, baseBreak: 0, atk, flags: { action: true, assist: true }, usePrep: false });
       addCharge(2);
       lines.push("电能 +2。");
       // 有至少 3 电能：最后补一击重斩（1×atk+1d10 电击），消耗 2 电能
-      if ((a.resources.charge || 0) >= 3 && !t.dead) {
+      if (heavyReady && !t.dead) {
         a.resources.charge -= 2;
         hitOne(a, t, { element: "electric", mult: 1, diceN: 1, diceS: 10, baseBreak: 0, atk, flags: { action: true, assist: true }, usePrep: false });
         lines.push(`重斩：1×atk+1d10 电击，电能 −2 → ${a.resources.charge}。`);
@@ -9342,22 +9410,55 @@ function runSkillInner(id, optRun) {
       lines.push(`${t.name} 被 ${a.name} 紧追：它移动时，${a.name} 会自动跟上。`);
     } else if (id === "kolt_scrap") {
       const rec = state.lastBrokenLayer;
-      if (!rec) lines.push("本场还没有被摧毁的血量层。");
-      else {
-        const amt = Math.floor((rec.dmg || rec.lost || 0) * 2);
-        const hp0 = totalHp(a);
-        if (rec.type === "flesh" || rec.type === "spirit") {
+      const hp0 = totalHp(a);
+      const grant = (type, amt, from) => {
+        if (amt <= 0) return;
+        if (type === "flesh" || type === "spirit") {
           healUnit(a, amt);
-          lines.push(`废物利用：恢复 ${amt} 生命（来自${LAYER[rec.type] || rec.type}）。`);
+          lines.push(`${from}：恢复 ${amt} 生命（来自${LAYER[type] || type}）。`);
         } else {
-          addTempLayer(a, rec.type, amt);
-          lines.push(`废物利用：获得 ${amt} 点${LAYER[rec.type] || rec.type}（战斗结束消失）。`);
+          addTempLayer(a, type, amt);
+          lines.push(`${from}：获得 ${amt} 点${LAYER[type] || type}（战斗结束消失）。`);
         }
-        // 废物利用给自己回的血 / 加的层也算治疗（一般的治疗只统计给其他友方的）
-        const gain = totalHp(a) - hp0;
-        const st = gain > 0 ? battleStat(a) : null;
-        if (st) { st.heal += gain; addScore("heal", gain * SCORE_RULES.heal, a); }
+      };
+      // 获得上一个被摧毁的敌人血量层等量的对应血量，最多为柯尔特生命上限的 50%（腐坏抛射的记录不算在内）
+      if (!rec) lines.push("本场还没有被摧毁的敌人血量层。");
+      else {
+        const cap = Math.floor(baseMaxHp(a) * 0.5);
+        const amt = Math.min(Math.floor(Number(rec.lost) || 0), cap);
+        grant(rec.type, amt, "废物利用");
+        if ((Number(rec.lost) || 0) > cap) lines.push(`（那一层有 ${Math.floor(rec.lost)}，按生命上限一半封顶为 ${cap}）`);
       }
+      // 腐坏抛射留下的腐蚀记录：这一次废物利用一起领取，然后清空
+      const rot = (a.resources && a.resources.rotStore) || {};
+      Object.keys(rot).forEach(type => grant(type, Math.floor(Number(rot[type]) || 0), "腐坏回收"));
+      if (a.resources) a.resources.rotStore = {};
+      // 废物利用给自己回的血 / 加的层也算治疗（一般的治疗只统计给其他友方的）
+      const gain = totalHp(a) - hp0;
+      const st = gain > 0 ? battleStat(a) : null;
+      if (st) { st.heal += gain; addScore("heal", gain * SCORE_RULES.heal, a); }
+    } else if (id === "kolt_rot") {
+      // 腐坏抛射：酸液炮模式，对 1 距离的敌人施加腐蚀（不造成伤害）；这份腐蚀造成的伤害记给下一次废物利用
+      if (!needT()) return paintSkillLog(lines.join("\n"));
+      if (t.isPlayer || zoneDist(Number(a.zone), Number(t.zone), state.zoneMode) !== 1) {
+        lines.push("腐坏抛射只能打距离 1 的敌人。");
+        return paintSkillLog(lines.join("\n"));
+      }
+      t.statuses = t.statuses || {};
+      t.statuses.corr = true;
+      t.rotBy = a.id;
+      if (typeof popStatus === "function") popStatus(t, "corr");
+      lines.push(`腐坏抛射：${t.name} 被腐蚀。这份腐蚀造成的伤害会记下来，下一次废物利用时转为柯尔特的对应生命。`);
+      // 不造成伤害，但仍是指向敌人的单体攻击：照样触发「过度自信」的嘲讽
+      if (typeof passiveOn !== "function" || passiveOn(a)) {
+        t.tauntTo = a.id;
+        lines.push(`过度自信：${t.name} 被嘲讽，下次攻击必须打柯尔特。`);
+      }
+    } else if (id === "kolt_mod") {
+      // 「非法」改装：电钻模式，对 1 距离内任意单位施加过载
+      if (!needT()) return paintSkillLog(lines.join("\n"));
+      applyInstantEffect(t, "overload", lines);
+      lines.push(`「非法」改装：${t.name} 过载。`);
     } else if (id === "kolt_summon") {
       const w = spawnWeapon(a, "torque");
       lines.push(w ? "扭矩已进入战场。" : "扭矩已在场。");
@@ -9424,6 +9525,18 @@ function runSkillInner(id, optRun) {
       } else if (a.resources && a.resources.scanned) {
         lines.push(...advancePhaseWeather());
       } else lines.push("尚未完成回波探测，无法推进相位。");
+    } else if (id === "helu_storm") {
+      // 大气干扰：进入沙暴；已经分析过战场（用过环境扫描）时，沙暴中再用可以调转风向
+      if (state.weather !== "sand") {
+        const err = setWeather("sand", { casterZone: a.zone });
+        lines.push(err || `大气干扰：战场进入沙暴，风向 ${sandDirText(state.sandDir, state.zoneMode)}。`);
+      } else if (a.resources && a.resources.scanned) {
+        if (state.weatherLock) lines.push(`天气被「${state.weatherLock}」锁定，无法调转风向。`);
+        else {
+          state.sandDir = state.sandDir === "21" ? "12" : "21";
+          lines.push(`大气干扰：沙暴调转风向 → ${sandDirText(state.sandDir, state.zoneMode)}。`);
+        }
+      } else lines.push("尚未分析当前战场（环境扫描），无法调转风向。");
     } else if (id === "helu_scan") {
       const fl = state.skillFlow;
       a.resources.scanned = true;
@@ -9434,8 +9547,15 @@ function runSkillInner(id, optRun) {
     } else if (id === "helu_assist") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       hitOne(a, t, { element: "harmonic", mult: 1, baseBreak: 0, atk, flags: { action: true, assist: true }, atkRange: "any" });
-      const layer = ((t.layers || []).find(l => (l.current || 0) > 0) || {}).type;
-      applyFocus(t, layer, lines);
+      // 已有聚焦：直接推进序列一次；没有就对一种血量层造成聚焦
+      if (!t.dead && (t.focuses || []).length) {
+        t.focuses.slice().forEach(f => stepFocus(t, f, lines, "协助攻击"));
+      } else if (!t.dead) {
+        const layer = ((t.layers || []).find(l => (l.current || 0) > 0) || {}).type;
+        applyFocus(t, layer, lines);
+      }
+      // 再对这个敌人所在的区做一次环境扫描（不耗行动，也不算本场那次主动扫描）
+      queueHeluScan(a, t.zone, lines);
     } else if (id === "ecmo_bite") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       const beforeStun = !!t.stunned;
@@ -9486,6 +9606,12 @@ function runSkillInner(id, optRun) {
       a.zone = dest;
       addRasEnergy(20, "逃离");
       lines.push(`逃离：从 ${from} 区到 ${dest} 区。`);
+    } else if (id === "ras_super") {
+      // 不稳超导：转换 20% 累积能量为光能，给自己施加导体；不稳态下免费（skillCost）
+      convertRasLight(20);
+      a.self = "conductor";
+      if (typeof spawnPopup === "function") spawnPopup(a, { kind: "status", text: "导体", element: "electric" });
+      lines.push("不稳超导：转换 20% 累积能量为光能，自身获得导体效果。");
     } else if (id === "ras_summon") {
       const w = spawnWeapon(a, "edc");
       lines.push(w ? "EDC30k 已进入战场。" : "EDC30k 已在场。");

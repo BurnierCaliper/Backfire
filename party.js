@@ -548,6 +548,11 @@ function checkPerksFor(kit, prof, hpLow) {
 }
 
 function skillCost(id) {
+  // 不稳超导：拉斯缪尔已经处于不稳态时免费释放
+  if (id === "ras_super") {
+    const r = typeof state !== "undefined" && typeof findKit === "function" ? findKit("ras", state.units) : null;
+    if (r && r.resources && r.resources.unstable) return {};
+  }
   if (id === "yuito_inspire") {
     const fl = typeof state !== "undefined" ? state.skillFlow : null;
     if (fl && fl.picks && fl.picks.mode === "stay") return { ap: 1 };
@@ -606,12 +611,12 @@ function skillCost(id) {
     vitas_infuse: { ap: 1 }, vitas_rip: { ap: 1 }, vitas_slash: { ap: 1 }, vitas_dance: { ap: 1 },
     vitas_return: { ap: 1 },
     kolt_aa: { ap: 1 }, kolt_short: { ap: 1 }, kolt_chase: { bonus: 1 },
-    kolt_assist: {}, kolt_summon: { ap: 1, bonus: 1 }, kolt_scrap: { ap: 1 },
+    kolt_assist: {}, kolt_summon: { ap: 1, bonus: 1 }, kolt_scrap: { ap: 1 }, kolt_rot: { ap: 1 }, kolt_mod: { ap: 1 },
     torque_boost: { ap: 1 }, torque_swap: { ap: 1 }, torque_strip: { ap: 1 }, torque_return: { ap: 1 },
-    helu_aa: { ap: 1 }, helu_wave: { ap: 1 }, helu_scan: { ap: 1 }, helu_assist: {},
+    helu_aa: { ap: 1 }, helu_wave: { ap: 1 }, helu_storm: { ap: 1 }, helu_scan: { ap: 1 }, helu_assist: {},
     helu_summon: { ap: 1, bonus: 1 },
     ecmo_bite: { ap: 1 }, ecmo_focus: { ap: 1 }, ecmo_boom: { ap: 1 }, ecmo_return: { ap: 1 },
-    ras_aa: { ap: 1 }, ras_dump: { ap: 1 }, ras_flee: { ap: 1 }, ras_assist: {},
+    ras_aa: { ap: 1 }, ras_dump: { ap: 1 }, ras_flee: { ap: 1 }, ras_super: { ap: 1 }, ras_assist: {},
     ras_summon: { ap: 1, bonus: 1 },
     edc_drain: { ap: 1 }, edc_shock: { ap: 1 }, edc_flash: { ap: 1 }, edc_return: { ap: 1 }
   };
@@ -803,9 +808,9 @@ function skillList(unit) {
     add({ id: "chuan_aa", name: "普通攻击", hint: "近距离 · 两次 atk/2+1d4 电击 共1击破 · 耗1电能变三次共2击破" });
     add({ id: "chuan_whip", name: "电击鞭", hint: "距离1以内 · atk/2 能量 1击破 · +1电能 · 可耗1电能把自己拉到敌人区" });
     add({ id: "chuan_wall", name: "铁壁", hint: "耗1电能 · 同区挡伤盾 atk+1d6 装甲 · 电能≥3可多耗1加 atk 护盾", minLv: 2 });
-    add({ id: "chuan_over", name: "电站超频", hint: "友方（可对自己）过载 · +1电能；已有≥3电能则改为 atk/2 护盾", minLv: 3 });
+    add({ id: "chuan_over", name: "电站超频", hint: "任意单位（可对自己）过载 · +1电能；已有≥3电能则改为 atk/2 护盾", minLv: 3 });
     add({ id: "chuan_pulse", name: "高能脉冲", hint: "对自身施加蓄能", minLv: 6 });
-    add({ id: "chuan_blade", name: "巨刃划空", hint: "同区 · 耗3电能 · 2atk 电击 +2击破 · 对配置物伤害翻倍 · 击穿血量层或摧毁配置物返还1电能", minLv: 11 });
+    add({ id: "chuan_blade", name: "巨刃划空", hint: "1距离以内 · 耗3电能 · 2atk 电击 +2击破 · 对配置物伤害翻倍 · 击穿血量层或摧毁配置物返还1电能", minLv: 11 });
     add({ id: "chuan_summon", name: "唤出哔哩哩", hint: "武器生物化" });
   }
   if (unit.kit === "bili") {
@@ -820,7 +825,9 @@ function skillList(unit) {
     add({ id: "kolt_aa", name: "普通攻击", hint: bit === "acid" ? "距离1 · 1atk 酸 +1击破" : "同区 · 三次 0.4atk 电 · 共2击破" });
     add({ id: "kolt_short", name: "直流短接", hint: "需电钻 · 可先移≤1，再对同区铺高压场地" });
     add({ id: "kolt_chase", name: "紧追", hint: "附赠 · 对一个敌人施加紧追：它移动时柯尔特自动跟上", bare: true });
-    add({ id: "kolt_scrap", name: "废物利用", hint: "取上场上一个被摧毁血量层×2 的对应生命", minLv: 2 });
+    add({ id: "kolt_scrap", name: "废物利用", hint: "获得上一个被摧毁的敌人血量层等量的对应血量（最多生命上限50%）· 另领腐坏抛射的记录", minLv: 2 });
+    add({ id: "kolt_rot", name: "腐坏抛射", hint: "需酸液炮 · 距离1 · 施加腐蚀（不造成伤害，仍会嘲讽）· 腐蚀伤害记给下一次废物利用", minLv: 3 });
+    add({ id: "kolt_mod", name: "「非法」改装", hint: "需电钻 · 1距离以内任意单位施加过载", minLv: 6 });
     add({ id: "kolt_summon", name: "唤出扭矩", hint: "武器生物化" });
   }
   if (unit.kit === "torque") {
@@ -833,6 +840,7 @@ function skillList(unit) {
   if (unit.kit === "helu") {
     add({ id: "helu_aa", name: "普通攻击", hint: "远距离 · 1atk 谐波 +1击破 · 有聚焦则打聚焦层" });
     add({ id: "helu_wave", name: "驻波", hint: "进入相位；已扫描战场则可推进相位阶段" });
+    add({ id: "helu_storm", name: "大气干扰", hint: "进入沙暴；已环境扫描过则可在沙暴中调转风向", minLv: 3 });
     add({ id: "helu_scan", name: "环境扫描", hint: "选一区：扫描出配置物，或远程引爆 / 操控配置物、震动危墙桥梁、激发场地", minLv: 2 });
     add({ id: "helu_summon", name: "唤出 Ecmo", hint: "武器生物化" });
   }
@@ -845,7 +853,8 @@ function skillList(unit) {
   if (unit.kit === "ras") {
     add({ id: "ras_aa", name: "普通攻击", hint: "远距离 · 两次 0.5atk 能量 共1击破 · 累积20%能量" });
     add({ id: "ras_dump", name: "泄能", hint: "任意距离 · 施加高能 · 转化20%能量为光能" });
-    add({ id: "ras_flee", name: "逃离", hint: "移动1 · +20%能量 · 原区一名敌人 1atk 电。不稳则移动不限", minLv: 2 });
+    add({ id: "ras_flee", name: "逃离", hint: "移动1 · +20%能量 · 原区一名敌人 1atk 电 · 不触发借机攻击。不稳则移动不限", minLv: 2 });
+    add({ id: "ras_super", name: "不稳超导", hint: "20%能量转光能 · 自身导体 · 不稳态下免费", minLv: 3 });
     add({ id: "ras_summon", name: "唤出 EDC30k", hint: "武器生物化" });
   }
   if (unit.kit === "edc") {

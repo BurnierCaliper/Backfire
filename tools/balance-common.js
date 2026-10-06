@@ -39,7 +39,7 @@ function quantile(values, p) { if (!values.length) return null; const a = values
 function summarize(rows, requested = rows.length) {
   const outcomes = Object.fromEntries(["win", "lose", "retreat", "timeout", "error"].map(k => [k, rows.filter(r => r.outcome === k).length]));
   const executed = rows.length - outcomes.error, wins = rows.filter(r => r.outcome === "win"), scores = wins.map(r => r.score).filter(Number.isFinite);
-  return { requested, completed: rows.length, executed, missing: requested - rows.length, outcomes, winRate: executed ? outcomes.win / executed : null, winRate95: wilson(outcomes.win, executed), scoreSampleSize: scores.length, scores: Object.fromEntries([.25, .5, .75, .9].map(p => [`p${p * 100}`, quantile(scores, p)])), grades: Object.fromEntries(["S", "A", "B", "C", "D"].map(g => [g, wins.filter(r => r.grade === g).length])) };
+  return { requested, completed: rows.length, executed, missing: requested - rows.length, outcomes, winRate: executed ? outcomes.win / executed : null, winRate95: wilson(outcomes.win, executed), scoreSampleSize: scores.length, scores: Object.fromEntries([.25, .5, .75, .9].map(p => [`p${p * 100}`, quantile(scores, p)])), grades: Object.fromEntries(["SSS", "SS", "S", "A", "B", "C", "D"].map(g => [g, wins.filter(r => r.grade === g).length])) };
 }
 function provenance(command = process.argv.join(" ")) {
   const files = [...H.RULE_FILES, "tests/headless.js", "tools/balance-common.js", "tools/score-by-act.js", "tools/playtest.js", "tools/balance-report.js"];

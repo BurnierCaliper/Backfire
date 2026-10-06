@@ -950,11 +950,11 @@ test("战斗评分：右上角显示评价并随得分变化；胜利时按评�
   });
   assert.ok(await page.isVisible("#g-rank"));
   assert.equal((await page.textContent("#g-rank .rk-grade")).trim(), "D", "开战 0 分：C 线以下是 D");
-  await page.evaluate(() => { state.battleScore.total += 100000; });   // 直接给到 S
+  await page.evaluate(() => { state.battleScore.total += 100000; });   // 直接给到最高评价 SSS（经验倍率和 S 一样 ×2）
   await selectHero(page, "ruby");
   await attackFirstFoe(page).catch(() => {});
   await page.waitForFunction(() => GAME.ended, null, { timeout: 15000 });
-  assert.equal((await page.textContent("#g-rank .rk-grade")).trim(), "S");
+  assert.equal((await page.textContent("#g-rank .rk-grade")).trim(), "SSS");
   await page.waitForSelector("#g-result.show");
   assert.match(await page.textContent("#g-result .grade-badge"), /S/);
   assert.match(await page.textContent("#g-result p"), /战斗经验 ×2，每人额外 \+\d+/);
@@ -981,7 +981,7 @@ test("奖励结算：真实 UI 评级触发 3→4 级，继续后与无界面的
   // 每人离 4 级仍差 1 点；只有 S 评价补发的 11 点经验才能触发升级。
   const finalBattleState = () => {
     state.turnNo = 4;
-    state.battleScore.total = 1750;
+    state.battleScore.total = 1500;
     state.battleScore.hurt = true;
     state.battleGains.xp = 11;
     state.units.filter(u => !u.isPlayer).forEach(u => { u.dead = true; });

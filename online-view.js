@@ -179,7 +179,7 @@
     const out = copyFields(result, {}, [], [], ["accepted", "executed", "roundDone", "alreadySettled"]);
     enumField(result, out, "outcome", ["win", "lose", "retreat"]);
     const grade = get(result, "grade");
-    if (obj(grade)) { out.grade = copyFields(grade, {}, [], ["score", "par", "xpMult"], []); enumField(grade, out.grade, "grade", ["D", "C", "B", "A", "S"]); }
+    if (obj(grade)) { out.grade = copyFields(grade, {}, [], ["score", "par", "xpMult"], []); enumField(grade, out.grade, "grade", ["D", "C", "B", "A", "S", "SS", "SSS"]); }
     return out;
   }
   const pickKeys = new Set(["partner", "target", "target1", "target2", "ally", "dest", "prop", "layer", "status", "mode", "carry", "burn", "rangeMode", "carryMode", "blade", "again", "item", "index"]);

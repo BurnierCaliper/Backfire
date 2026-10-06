@@ -509,6 +509,7 @@
     if (sk.id === "__move" && u.noMove) return "本回合无法移动";
     if (String(sk.id).indexOf("use_scrap:") === 0 && typeof scrapTargets === "function") {
       const p = (state.props || []).find(x => "use_scrap:" + x.id === sk.id);
+      if (p && typeof scrapReady === "function" && !scrapReady(p)) return "碎渣机炮这一回合已经发射过了";
       if (!p || !scrapTargets(p, u).length) return "碎渣机炮 2 距离内没有敌人";
     }
     if (String(sk.id).indexOf("hack_turret:") === 0 && typeof turretHackError === "function") {
@@ -1205,7 +1206,7 @@
       if (G.ended) return;
       if (state.blockQueue && state.blockQueue.length) {
         const job = state.blockQueue[0];
-        const attacker = unitById(job.attackerId), target = unitById(job.targetId);
+        const attacker = blockJobAttacker(job), target = unitById(job.targetId);
         if (!attacker || !target) { systemCommand({ type: "battle.cleanQueues", queue: "block" }); continue; }
         const helpers = eligibleBlockers(target, job);
         let choice = null;
@@ -1231,7 +1232,7 @@
         // 不播敌人的攻击动画，直接回到循环弹出下一个人的格挡确认
         const stillWaiting = () => !!(state.blockQueue && state.blockQueue[0] && state.blockQueue[0].seq === seq);
         await perform({ type: "blockAnswer", helper: choice || null, forced, seed: "hit:" + seq }, {
-          actorId: attacker.id, targetId: target.id,
+          actorId: attacker.propId ? "prop:" + attacker.propId : attacker.id, targetId: target.id,
           forceLunge: () => !stillWaiting(),
           blockerId: () => (blocker && forced && forced.ok && !stillWaiting() ? blocker.id : null),
           skillName: blocker ? `攻击（${blocker.name} 格挡）` : "攻击"
@@ -1307,6 +1308,32 @@
         } else {
           systemCommand({ type: "koltSwapAnswer", swap: false, target: null });
         }
+        continue;
+      }
+      // Helumica 协助攻击附带的环境扫描：区域已定（被打的敌人所在的区），按环境扫描的选项一步步问
+      if (state.heluScanQueue && state.heluScanQueue.length) {
+        const job = state.heluScanQueue[0];
+        const h = unitById(job.actorId);
+        if (!h) { systemCommand({ type: "battle.cleanQueues", queue: "helu" }); continue; }
+        const SKIP = "__skip";
+        const ask = (title, text, opts) => hotseat()
+          ? HotseatGame.ownedChoice(h, title, opts.concat([{ label: "放弃扫描", value: SKIP }]))
+          : openChoice(title, text, opts, { label: "放弃扫描", value: SKIP });
+        const picks = { dest: job.zone };
+        let skipped = false;
+        for (let g = 0; g < 8; g++) {
+          let steps = [];
+          try { steps = skillFlowSteps("helu_scan", h, picks) || []; } catch (e) { steps = []; }
+          const step = steps.find(st => picks[st.key] === undefined);
+          if (!step) break;
+          const opts = step.type === "unit"
+            ? (step.units || []).map(u => ({ label: u.name, sub: u.zone ? `${u.zone} 区` : "", value: u.id }))
+            : (step.options || []).map(o => ({ label: o.label, value: o.value }));
+          const v = await ask(`环境扫描 · ${job.zone} 区`, `协助攻击附带的环境扫描。${step.label}`, opts);
+          if (v == null || v === SKIP) { skipped = true; break; }
+          picks[step.key] = v;
+        }
+        await perform({ type: "heluScanAnswer", picks: skipped ? null : picks }, { actorId: animActor(h.id, "helu_scan", picks), targetId: (!skipped && picks.target) || null, skillName: "环境扫描" }, true);
         continue;
       }
       return;
@@ -1523,7 +1550,7 @@
       const drain = (detail) => {
         for (let g = 0; g < 20 && state.blockQueue && state.blockQueue.length; g++) {
           const job = state.blockQueue[0];
-          const attacker = unitById(job.attackerId), target = unitById(job.targetId);
+          const attacker = blockJobAttacker(job), target = unitById(job.targetId);
           let info = null;
           if (detail && attacker && target && job.attackerId === id) {
             const roll = blockRollFor(job);
@@ -1538,7 +1565,7 @@
           withSeed("hit:" + job.seq, () => finishBlock(null));
           if (info) detail.push(Object.assign(info, { dmg: dmgOnPlayers(from).get(info.target) || 0 }));
         }
-        state.assistQueue = []; state.koltSwapQueue = [];
+        state.assistQueue = []; state.koltSwapQueue = []; state.heluScanQueue = [];
       };
       drain(null);
       for (const uid of EnemyAI.actingOrder()) {
@@ -1720,7 +1747,7 @@
     const hint = (sk.hint || "") + " " + (sk.name || "");
     const side = (typeof SKILL_TARGET_SIDE !== "undefined" && SKILL_TARGET_SIDE[sk.id]) ||
       (/任意单位|拉到|磁力/.test(hint) ? "any" : /友方|队友/.test(hint) ? "ally" : "enemy");
-    let all = state.units.filter(u => unitAlive(u) && (u.id !== actor.id || side === "allySelf"));
+    let all = state.units.filter(u => unitAlive(u) && (u.id !== actor.id || side === "allySelf" || side === "anySelf"));
     if (side === "ally" || side === "allySelf") all = all.filter(u => u.isPlayer);
     else if (side === "enemy") all = all.filter(u => !u.isPlayer);
     // 写明了射程（engine.js · SKILL_RANGE）的技能以表为准，不从提示文字里猜
@@ -1730,7 +1757,7 @@
     } else if (typeof inSkillRange === "function") {
       all = all.filter(u => inSkillRange(actor, u, hint, state.zoneMode));
     }
-    if (side !== "ally" && side !== "allySelf") {
+    if (side !== "ally" && side !== "allySelf" && side !== "anySelf") {
       const inRange = (fake) => ov
         ? (() => { const d = zoneDist(actor.zone, fake.zone, state.zoneMode); return d >= ov.min && d <= ov.max; })()
         : (typeof inSkillRange !== "function" || inSkillRange(actor, fake, hint, state.zoneMode));
@@ -1749,6 +1776,17 @@
     return all;
   }
 
+  /** 攻击演出由谁前冲：操控碎渣机炮（直接操控、环境扫描操控）时是机炮自己 */
+  function animActor(actorId, skillId, picks) {
+    const sid = String(skillId || "");
+    if (sid.indexOf("use_scrap:") === 0) return "prop:" + sid.slice("use_scrap:".length);
+    const act = String((picks && picks.act) || "");
+    if (act.indexOf("prop:") === 0) {
+      const p = (state.props || []).find(x => x.id === act.slice(5));
+      if (p && p.kind === "scrap") return "prop:" + p.id;
+    }
+    return actorId;
+  }
   async function armSkill(sk) {
     if (G.depth > 0 || G.ended || choiceResolve) return;
     const actor = unitById(G.actorId);
@@ -1844,7 +1882,7 @@
     const probe = previewOf(skillThunk(actor.id, sk.id, lastUnitPick, picks));
     if (!probe.needsTarget) {
       G.arm = null;
-      return act(skillCommand(actor.id, sk.id, lastUnitPick, picks), { actorId: actor.id, targetId: lastUnitPick, skillName: sk.name });
+      return act(skillCommand(actor.id, sk.id, lastUnitPick, picks), { actorId: animActor(actor.id, sk.id, picks), targetId: lastUnitPick, skillName: sk.name });
     }
     setHint(`<b>${esc(sk.name)}</b>：${esc(sk.hint || "选择目标")}　<span style="color:var(--faint)">${touchUI() ? "点目标预览，再点确认；点空白处取消" : "右键取消"}</span>`);
     const cands = candidateUnits(unitById(actor.id) || actor, sk).map(u => {
@@ -1862,7 +1900,7 @@
     if (stale()) return;
     if (!target) { cancel(); return; }
     G.arm = null;
-    return act(skillCommand(actor.id, sk.id, target, picks), { actorId: actor.id, targetId: target, skillName: sk.name });
+    return act(skillCommand(actor.id, sk.id, target, picks), { actorId: animActor(actor.id, sk.id, picks), targetId: target, skillName: sk.name });
   }
 
   /* ================= 9. 敌人 AI ================= */

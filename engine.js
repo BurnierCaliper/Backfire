@@ -187,7 +187,9 @@ const SKILL_RANGE = {
   berniel_flare: { min: 0, max: 99 },
   chuan_aa: { min: 0, max: 0 },       // 川川普通攻击是近距离
   bare_aa: { min: 0, max: 0 },        // 空手攻击一律同区
-  chuan_blade: { min: 0, max: 0 },
+  chuan_blade: { min: 0, max: 1 },   // 巨刃划空：1 距离以内
+  kolt_rot: { min: 1, max: 1 },      // 腐坏抛射：1 距离的敌人
+  kolt_mod: { min: 0, max: 1 },      // 「非法」改装：1 距离以内任意单位
   xia_crush: { min: 0, max: 0 },
   kolt_aa: { min: 0, max: 1 },
   // 更换刀头的追击射程取决于换上去的新刀头（电钻近距离 / 酸液炮远距离），
@@ -218,7 +220,8 @@ const SKILL_TARGET_SIDE = {
   yuito_espresso: "enemy",  // 加行动点那一档在分步里选友方，走到这里的是酸液攻击
   nora_needle: "any",       // 针尖可以扎敌人，也可以扎队友当治疗手段
   nora_aa: "any",           // 有刺入时打刺入目标，刺入的可能是队友
-  chuan_over: "allySelf"    // 电站超频：友方，也可以对川川自己用
+  kolt_mod: "anySelf",      // 「非法」改装：任意单位（含自己）施加过载
+  chuan_over: "anySelf"     // 电站超频：任意单位（敌人也行：主动让敌人过载），也可以对川川自己用
 };
 
 /** 射程随状态变的技能（例如绯秋的普攻按刀势）。返回 {min,max}，不在表里返回 null */
@@ -479,6 +482,9 @@ function resolveAttack(ctx) {
   const refBase = Math.max(0, refAtk * mult + (Number(ctx.flat) || 0) + diceV);
   let totalReduced = 0;
   add(`基础包 = ATK ${round2(atk)} × 倍率 ${round2(mult)} + 固定 ${ctx.flat || 0} + 骰子 ${round2(diceV)} = ${round2(rawBase)}`);
+  // 只加在第一击基础包上的骰（「准备」：复数攻击只生效一次），之后照样吃倍率和克制
+  const firstBonus = Math.max(0, Number(ctx.firstHitBonus) || 0);
+  if (firstBonus) add(`第一击基础包 +${round2(firstBonus)}（${ctx.firstHitNote || "额外骰"}）`);
 
   let hits = Math.max(1, Number(ctx.hits) || 1);
   if (a && a.instant && a.instant.overload && hits > 1) {
@@ -535,7 +541,7 @@ function resolveAttack(ctx) {
       continue;
     }
 
-    let packet = rawBase;
+    let packet = rawBase + (h === 0 ? firstBonus : 0);
 
     const startIdx = pickStartIndex(layersWork, flags.pierce, flags.focusLayer);
     let startLayer = layersWork[startIdx] || layersWork.find(l => l.current > 0);
@@ -690,7 +696,7 @@ function resolveAttack(ctx) {
     packet = floored;
     totalIntended += packet;
     // 减伤：这一段比参照少了多少（空手格挡减半那部分不算，归格挡）
-    if (!ghost) totalReduced += Math.max(0, refBase * (flags.block === "bareOk" ? 0.5 : 1) - packet);
+    if (!ghost) totalReduced += Math.max(0, (refBase + (h === 0 ? firstBonus : 0)) * (flags.block === "bareOk" ? 0.5 : 1) - packet);
 
     let hitDealt = packet;
     if (ghost) {
@@ -822,7 +828,7 @@ function resolveAttack(ctx) {
     advantage: advHits > 0,                // 这一击触发了属性克制
     blocked: flags.block === "assistOk",   // 主攻击被挡住 → 不产生溅射
     // 协助格挡成功时这一击本来的伤害（基础包 × 次数，未算抗性），战场数据「格挡规避伤害」用
-    blockedRaw: flags.block === "assistOk" ? Math.round(rawBase * hits) : 0,
+    blockedRaw: flags.block === "assistOk" ? Math.round(rawBase * hits + firstBonus) : 0,
     // 受击方的减伤减免掉的伤害（天气、血量层抗性、角色能力、减半……；协助格挡成功的不算）
     reduced: flags.block === "assistOk" ? 0 : Math.round(totalReduced),
     total: totalDealt,
