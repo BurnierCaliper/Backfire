@@ -172,3 +172,11 @@ test("单局随机地形：高地不占这一区的场地名额", () => {
   assert.match(src, /usedHigh/);
   void c;
 });
+
+test("战斗画面：选区域时点到区里的单位 / 配置物卡片也算点了这个区（区里站满人时也能选）", () => {
+  const src = require("fs").readFileSync(require("path").join(H.ROOT, "game.js"), "utf8");
+  const i = src.indexOf("function onCardClick");
+  const body = src.slice(i, i + 900);
+  assert.match(body, /G\.arm\.mode === "zone"/);
+  assert.match(body, /pickZoneByClick\(zoneEl\)/);
+});

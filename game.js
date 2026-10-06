@@ -1718,9 +1718,32 @@
 
   /** 触屏没有悬停：第一下点目标先预览，再点一下才出手 */
   function touchUI() { return !!(window.matchMedia && window.matchMedia("(hover: none)").matches); }
+  /** 选区域时点中某个区（点区里的空白，或者点区里的单位 / 配置物卡片都算）。处理了返回 true */
+  function pickZoneByClick(zone) {
+    if (!(G.arm && G.arm.mode === "zone" && zone && G.arm.zones.has(Number(zone.dataset.num)))) return false;
+    const zn = Number(zone.dataset.num);
+    if (touchUI() && G.arm.tapZone !== zn) {
+      // 触屏：第一下预览移动的结果，再点一下才确认
+      document.querySelectorAll(".g-zone").forEach(z => z.classList.remove("is-move-hover"));
+      zone.classList.add("is-move-hover");
+      G.arm.tapZone = zn;
+      showPreview(G.arm.previewFn(zn), `移动到 ${zn} 区`);
+      flashHint(`${zn} 区：再点一下确认`);
+      return true;
+    }
+    G.arm.resolve(zn);
+    return true;
+  }
   function onCardClick(id) {
     if (G.depth > 0) { G.skip = true; return; }
     if (choiceResolve) return;
+    // 选区域时点到了区里的单位 / 配置物：当成点这个区（区里站满人时也能选）
+    if (G.arm && G.arm.mode === "zone") {
+      const c = cards.get(id);
+      const zoneEl = c && c.wrap ? c.wrap.closest(".g-zone") : null;
+      if (zoneEl) pickZoneByClick(zoneEl);
+      return;
+    }
     if (G.arm && G.arm.mode === "unit") {
       const cand = G.arm.map.get(id);
       if (!cand) return;
@@ -3324,19 +3347,7 @@
     $("g-field").addEventListener("click", (e) => {
       if (G.depth > 0) { G.skip = true; return; }
       const zone = e.target.closest(".g-zone");
-      if (G.arm && G.arm.mode === "zone" && zone && G.arm.zones.has(Number(zone.dataset.num))) {
-        const zn = Number(zone.dataset.num);
-        if (touchUI() && G.arm.tapZone !== zn) {
-          // 触屏：第一下预览移动的结果，再点一下才移动
-          document.querySelectorAll(".g-zone").forEach(z => z.classList.remove("is-move-hover"));
-          zone.classList.add("is-move-hover");
-          G.arm.tapZone = zn;
-          showPreview(G.arm.previewFn(zn), `移动到 ${zn} 区`);
-          flashHint(`${zn} 区：再点一下确认`);
-          return;
-        }
-        G.arm.resolve(zn);
-      }
+      if (pickZoneByClick(zone)) return;
       // 触屏：点战场空白处取消正在选的技能
       if (G.arm && touchUI() && !e.target.closest(".unit-wrap, .g-gap")) { disarm(); return; }
       if (!G.arm && !e.target.closest(".unit-wrap") && touchUI()) idleBox();
