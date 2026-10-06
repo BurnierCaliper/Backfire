@@ -220,7 +220,7 @@ test("评分：伤害 1 分 / 击破 10 分 / 溢出 1.5 分（向下取整）/ 
   assert.equal(st.battleStats[kolt.id].score, st.battleScore.total);
 });
 
-test("评分：评价按幕的分数线——第一幕 C 500 / B 1000 / A 1250 / S 1500 / SS 1750 / SSS 2000，之后每幕各 +250，C 线以下是 D", () => {
+test("评分：评价按幕的分数线——第一幕 C 500 / B 1000 / A 1250 / S 1500 / SS 1750 / SSS 2000，之后每幕各 +150，C 线以下是 D", () => {
   const { c, st } = field();
   c.resetBattleRecords();
   const at = (act, score) => { st.scoreAct = act; st.battleScore.total = score; return c.battleGrade(); };
@@ -236,16 +236,16 @@ test("评分：评价按幕的分数线——第一幕 C 500 / B 1000 / A 1250 /
   assert.equal(at(1, 2000).xpMult, 2, "SSS 不提高经验倍率");
   assert.equal(at(1, 1000).xpMult, 1.2);
   assert.equal(at(1, 600).xpMult, 1);
-  // 第 4 幕：各线 +750
-  assert.equal(at(4, 1249).grade, "D");
-  assert.equal(at(4, 1250).grade, "C");
-  assert.equal(at(4, 1750).grade, "B");
-  assert.equal(at(4, 2000).grade, "A");
-  assert.equal(at(4, 2250).grade, "S");
-  assert.equal(at(4, 2750).grade, "SSS");
-  const g = at(2, 850);
+  // 第 4 幕：各线 +450（每幕 +150）
+  assert.equal(at(4, 949).grade, "D");
+  assert.equal(at(4, 950).grade, "C");
+  assert.equal(at(4, 1450).grade, "B");
+  assert.equal(at(4, 1700).grade, "A");
+  assert.equal(at(4, 1950).grade, "S");
+  assert.equal(at(4, 2450).grade, "SSS");
+  const g = at(2, 700);
   assert.equal(g.grade, "C");
-  assert.deepEqual(JSON.parse(JSON.stringify(g.next)), { grade: "B", need: 1250 });
+  assert.deepEqual(JSON.parse(JSON.stringify(g.next)), { grade: "B", need: 1150 });
   // 不在单局里（跑团 / 战斗原型）：按敌人等级对应到幕
   st.scoreAct = null;
   st.units.filter(u => !u.isPlayer).forEach(u => { u.level = 10; });

@@ -1985,7 +1985,7 @@ function bigHitInfo(level, dmg) {
 // [评价, 第一幕的分数线, 战斗经验倍率]。C 线以下是 D（经验不加成）。
 // 第一幕 C 500 / B 1000 / A 1250 / S 1500 / SS 1750 / SSS 2000。SS、SSS 只是更高的评价，经验倍率和 S 一样
 const SCORE_GRADES = [["SSS", 2000, 2], ["SS", 1750, 2], ["S", 1500, 2], ["A", 1250, 1.5], ["B", 1000, 1.2], ["C", 500, 1], ["D", 0, 1]];
-const SCORE_ACT_STEP = 250;   // 之后每一幕，各条分数线（D 除外）+250
+const SCORE_ACT_STEP = 150;   // 之后每一幕，各条分数线（D 除外）+150
 const SCORE_PART_NAMES = { dmg: "伤害", heal: "治疗 / 护盾", brk: "击破", stagger: "打出失衡", block: "协助格挡成功", reduce: "减伤", blockSave: "格挡减免", overkill: "溢出伤害", kill: "击杀", bonus: "克制 / 大伤害加成", action: "行动", speed: "速杀奖励", flawless: "无伤奖励", ambush: "遭遇战加成", fatigue: "招式疲劳（扣分）" };
 /** 这个角色这回合用这个技能，算连续第几个回合（不改记录）。
  *  上回合用过 → 上回合的连续数 + 1；这回合已经用过 → 和这回合第一次一样；否则 1 */
@@ -9422,15 +9422,21 @@ function runSkillInner(id, optRun) {
       const st = gain > 0 ? battleStat(a) : null;
       if (st) { st.heal += gain; addScore("heal", gain * SCORE_RULES.heal, a); }
     } else if (id === "kolt_rot") {
-      // 腐坏抛射：酸液炮模式，对 1 距离的敌人 1×atk 酸 + 腐蚀；这份腐蚀造成的伤害记给下一次废物利用
+      // 腐坏抛射：酸液炮模式，对 1 距离的敌人施加腐蚀（不造成伤害）；这份腐蚀造成的伤害记给下一次废物利用
       if (!needT()) return paintSkillLog(lines.join("\n"));
-      hitOne(a, t, { element: "acid", mult: 1, baseBreak: 0, atk, atkRange: "ranged" });
-      if (!t.dead && Number(t.zone) !== Number(a.zone)) {
-        t.statuses = t.statuses || {};
-        t.statuses.corr = true;
-        t.rotBy = a.id;
-        if (typeof popStatus === "function") popStatus(t, "corr");
-        lines.push(`腐坏抛射：${t.name} 被腐蚀。这份腐蚀造成的伤害会记下来，下一次废物利用时转为柯尔特的对应生命。`);
+      if (t.isPlayer || zoneDist(Number(a.zone), Number(t.zone), state.zoneMode) !== 1) {
+        lines.push("腐坏抛射只能打距离 1 的敌人。");
+        return paintSkillLog(lines.join("\n"));
+      }
+      t.statuses = t.statuses || {};
+      t.statuses.corr = true;
+      t.rotBy = a.id;
+      if (typeof popStatus === "function") popStatus(t, "corr");
+      lines.push(`腐坏抛射：${t.name} 被腐蚀。这份腐蚀造成的伤害会记下来，下一次废物利用时转为柯尔特的对应生命。`);
+      // 不造成伤害，但仍是指向敌人的单体攻击：照样触发「过度自信」的嘲讽
+      if (typeof passiveOn !== "function" || passiveOn(a)) {
+        t.tauntTo = a.id;
+        lines.push(`过度自信：${t.name} 被嘲讽，下次攻击必须打柯尔特。`);
       }
     } else if (id === "kolt_mod") {
       // 「非法」改装：电钻模式，对 1 距离内任意单位施加过载

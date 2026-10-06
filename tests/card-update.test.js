@@ -33,9 +33,11 @@ test("腐坏抛射：酸液炮打距离 1 的敌人并腐蚀；腐蚀伤害记�
   kolt.resources.bit = "acid";
   kolt.layers = [{ type: "flesh", current: 5, max: 20 }];
   const h0 = c.totalHp(foe);
+  foe.tauntTo = null;
   skill(c, kolt, "kolt_rot", foe);
-  assert.ok(c.totalHp(foe) < h0);
+  assert.equal(c.totalHp(foe), h0, "不造成伤害");
   assert.equal(foe.statuses.corr, true);
+  assert.equal(foe.tauntTo, kolt.id, "仍触发过度自信的嘲讽");
   // 回合结束的腐蚀结算
   const notes = [];
   c.applyTypedDot(foe, 6, "acid", notes, `${foe.name} 腐蚀 1d6`);
