@@ -545,6 +545,9 @@
   }
 
   function fight() {
+    // 有队员血量低于 20% 而且还能短休：先提醒一下
+    const low = query("lowHpWarning");
+    if (low && low.length && !confirm(lowHpWarningText(low))) return;
     sessionCommand("startBattle", null, { startBattle(spec) {
       Screens.show("battle");
       GAME.startRogueBattle(spec, (outcome) => {

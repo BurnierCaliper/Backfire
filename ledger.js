@@ -553,6 +553,18 @@ function ledgerHealItem(itemId, kit, notes) {
 }
 
 /* ===== 小工具 ===== */
+/** 进下一场战斗前的提醒：血量低于 20% 而且今天还能短休的队员（濒死 / 死亡的不算）。
+ *  返回 [{ kit, name, hp, max, pct, left }]，空数组 = 不用提醒 */
+const LOW_HP_WARN_RATIO = 0.2;
+function lowHpRestWarning() {
+  return partyHeroes().filter(h => !h.dead && !h.dying && !h.hidden).map(h => {
+    const hp = totalHpOf(h), max = totalHpMaxOf(h);
+    return { kit: h.kit, name: h.name, hp, max, pct: max > 0 ? Math.round(hp / max * 100) : 100, left: shortRestLeft(h) };
+  }).filter(x => x.max > 0 && x.hp / x.max < LOW_HP_WARN_RATIO && x.left > 0);
+}
+function lowHpWarningText(list) {
+  return `队伍状态不佳：${list.map(x => `${x.name} 血量 ${x.hp}/${x.max}（${x.pct}%，今天还能短休 ${x.left} 次）`).join("；")}。\n\n确定直接进入下一场战斗吗？（取消的话可以先短休）`;
+}
 function totalHpOf(u) { return (u.layers || []).reduce((s, l) => s + (Number(l.current) || 0), 0); }
 function totalHpMaxOf(u) { return (u.layers || []).reduce((s, l) => s + (Number(l.max) || 0), 0); }
 /** 休整时的治疗：从内到外补，死亡角色不能被治疗 */

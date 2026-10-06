@@ -91,15 +91,22 @@ function clearFieldEffects(f) {
   f.heal = false;
 }
 
+/** 天气现在能不能改成 kind：能返回 null，不能返回原因（固有天气、被锁定） */
+function weatherChangeWhy(kind, opts) {
+  opts = opts || {};
+  kind = kind || "none";
+  if (opts.force || kind === state.weather) return null;
+  if (state.combatStarted && state.weatherInnate && !opts.innateOk) {
+    return `固有天气「${weatherName(state.weatherInnate)}」：战斗开始时就存在的天气无法被改变。`;
+  }
+  if (state.weatherLock) return `天气被「${state.weatherLock}」锁定，无法覆盖。`;
+  return null;
+}
 function setWeather(kind, opts) {
   opts = opts || {};
   kind = kind || "none";
-  if (state.combatStarted && state.weatherInnate && !opts.force && !opts.innateOk && kind !== state.weather) {
-    return `固有天气「${weatherName(state.weatherInnate)}」：战斗开始时就存在的天气无法被改变。`;
-  }
-  if (state.weatherLock && !opts.force && kind !== state.weather) {
-    return `天气被「${state.weatherLock}」锁定，无法覆盖。`;
-  }
+  const why = weatherChangeWhy(kind, opts);
+  if (why) return why;
   const was = state.weather;
   state.weather = kind;
   if (kind === "sand" && (was !== "sand" || opts.casterZone != null)) rollSandDir(opts.casterZone);
@@ -111,21 +118,29 @@ function setWeather(kind, opts) {
   return null;
 }
 
-function setZoneField(zone, kind, opts) {
+/** 这一区的场地现在能不能改成 kind（空 = 清除）：能返回 null，不能返回原因（深渊、损毁地面、固有场地、被锁定） */
+function fieldChangeWhy(zone, kind, opts) {
   opts = opts || {};
   const f = state.fields[zone];
   if (!f) return "没有这个区域。";
-  if (state.combatStarted && !opts.force && !opts.innateOk) {   // innateOk：主持人的计算器面板（仍然尊重手动锁定）
-    const same = (kind === "fire" && fieldFireOn(f)) || (kind && kind !== "fire" && f[kind]);
-    // 深渊、损毁地面不能被改变；战斗开始时就存在的场地是固有场地，也不能被改变（重复施加同一种照常）
-    if (!same && (f.abyss || f.ruinOn)) return `${zone} 区是${f.abyss ? "深渊" : "损毁地面"}，场地无法被改变。`;
-    if (!same && f.innate) return `${zone} 区是固有场地（战斗开始时就存在），无法被改变。`;
+  const same = (kind === "fire" && fieldFireOn(f)) || (kind && kind !== "fire" && f[kind]);
+  if (state.combatStarted && !opts.force && !opts.innateOk && !same) {
+    if (f.abyss || f.ruinOn) return `${zone} 区是${f.abyss ? "深渊" : "损毁地面"}，场地无法被改变。`;
+    if (f.innate) return `${zone} 区是固有场地（战斗开始时就存在），无法被改变。`;
   }
   if (f.fieldLock && !opts.force) {
-    const same = (kind === "fire" && fieldFireOn(f)) || (kind && kind !== "fire" && f[kind]);
     if (!same && kind) return `${zone} 区场地被「${f.fieldLock}」锁定，无法覆盖。`;
     if (!kind) return `${zone} 区场地被「${f.fieldLock}」锁定，无法清除。`;
   }
+  return null;
+}
+function setZoneField(zone, kind, opts) {
+  opts = opts || {};
+  const f = state.fields[zone];
+  // 深渊、损毁地面不能被改变；战斗开始时就存在的场地是固有场地，也不能被改变（重复施加同一种照常）；
+  // innateOk：主持人的计算器面板（仍然尊重手动锁定）
+  const why = fieldChangeWhy(zone, kind, opts);
+  if (why) return why;
   clearFieldEffects(f);
   if (kind === "fire") {
     f.fireOn = true;
@@ -6589,7 +6604,8 @@ const HELU_SCAN_FIELDS = [
   ["collapseOn", "塌陷区域", "塌陷计数立刻 +5"],
   ["energy", "能量场", "立刻累积一次场地高能"],
   ["harmonic", "干涉场", "区里所有单位的下次伤害 ±25%"],
-  ["ruinOn", "损毁地面", "立刻扣 20 点耐久"]
+  ["ruinOn", "损毁地面", "立刻扣 20 点耐久"],
+  ["electric", "高压场地", "区里所有单位立刻受到一次高压电击"]
 ];
 const HELU_SCAN_SPAWN = ["boom", "acid", "battery", "scrap"];
 function heluScanFieldOn(f, k) { return k === "fire" ? fieldFireOn(f) : !!(f && f[k]); }
@@ -6717,6 +6733,9 @@ function heluScanAct(a, picks, lines) {
         lines.push(`${u.name} 干涉 ${up ? "+" : "−"}25% → 下次伤害 ${u.interfere > 0 ? "+" : ""}${Math.round(u.interfere * 100)}%`);
       });
       if (!here.length) lines.push("区里没有单位。");
+    } else if (k === "electric") {
+      if (!here.length) lines.push("区里没有单位。");
+      here.forEach(u => lines.push(...pulseHighVoltage(u, 1)));
     } else if (k === "ruinOn") {
       f.ruinHp = Math.max(0, (Number(f.ruinHp) || 0) - 20);
       lines.push(`${z} 区损毁地面耐久 −20 → ${f.ruinHp}/${f.ruinMax || 0}`);
@@ -6762,9 +6781,9 @@ function skillFlowSteps(id, actor, picks) {
       label: next === "acid" ? "换成酸液炮：打距离 1 的一名敌人（可不选）" : "换成电钻：打同区的一名敌人（可不选）", units }];
   }
   if (id === "kolt_short") {
-    const zones = [];
-    for (let z = 1; z <= maxZ; z++) if (zoneDist(actor.zone, z, maxZ) <= 1) zones.push(z);
-    return [{ key: "dest", type: "zone", optional: true, label: "可先移动至多 1 区", zones }];
+    // 只给场地能变成高压的区域（固有场地 / 深渊 / 损毁地面 / 被锁定的区不能选）
+    const zones = envZones(actor, "electric", 1);
+    return [{ key: "dest", type: "zone", optional: zones.includes(Number(actor.zone)), label: "可先移动至多 1 区（只列出能铺高压场地的区）", zones }];
   }
   if (id === "torque_boost") {
     const bit = ((findKit("kolt", state.units) || {}).resources || {}).bit || "drill";
@@ -7181,8 +7200,8 @@ function skillFlowSteps(id, actor, picks) {
       key: "dest",
       type: "zone",
       optional: false,
-      label: "哪一区变成酸液地面（距离 ≤1）",
-      zones: zones.filter(z => zoneDist(actor.zone, z, state.zoneMode) <= 1)
+      label: "哪一区变成酸液地面（距离 ≤1，只列出场地能改变的区）",
+      zones: zones.filter(z => zoneDist(actor.zone, z, state.zoneMode) <= 1 && !fieldChangeWhy(z, "acid"))
     }];
   }
   if (id === "hiaki_summon") {
@@ -8192,12 +8211,21 @@ const SKILL_REQUIREMENT = {
   hiaki_pot:      (a) => res(a).blade !== "niu" ? "热锅只能用丹生谷发动" : null,
   yuito_amer:     (a) => (res(a).liquid || 0) < 1 ? "没有咖啡液" : null,
   yuito_espresso: (a) => (res(a).liquid || 0) < 1 ? "没有咖啡液" : null,
-  yuito_extract:  (a) => (res(a).liquid || 0) < 1 ? "没有咖啡液" : null,
+  yuito_extract:  (a) => (res(a).liquid || 0) < 1 ? "没有咖啡液"
+    : !envZones(a, "acid", 1).length ? "距离 1 以内没有能变成酸液地面的区域（固有场地 / 深渊 / 损毁地面 / 被锁定）" : null,
   tou_taunt:      (a) => (res(a).tauntLeft || 0) <= 0 ? "本场嘲讽次数已用尽" : null,
   solo_support:   (a) => soloSupportError(a),
   tou_sonic:      (a) => (res(a).shield || 0) < 1 ? "没有圣盾"
     : !skillFlowSteps("tou_sonic", a, {}).length ? "距离 1 以内没有可以打的目标" : null,
-  kolt_short:     (a) => ((findKit("kolt", state.units) || a).resources || {}).bit === "acid" ? "直流短接需要电钻模式" : null,
+  kolt_short:     (a) => ((findKit("kolt", state.units) || a).resources || {}).bit === "acid" ? "直流短接需要电钻模式"
+    : !envZones(a, "electric", 1).length ? "附近没有能变成高压场地的区域（固有场地 / 深渊 / 损毁地面 / 被锁定）" : null,
+  // 只改变天气 / 场地的技能：改不了就不能用（免得白白花掉行动点）
+  latte_ice:      () => state.weather === "snow" ? "已经是雪天" : weatherChangeWhy("snow"),
+  helu_wave:      (a) => state.weather !== "phase" ? weatherChangeWhy("phase")
+    : !res(a).scanned ? "相位中再用要先做一次环境扫描（回波探测）" : null,
+  helu_storm:     (a) => state.weather !== "sand" ? weatherChangeWhy("sand")
+    : !res(a).scanned ? "沙暴中再用要先做一次环境扫描才能调转风向"
+    : state.weatherLock ? `天气被「${state.weatherLock}」锁定，无法调转风向` : null,
   torque_strip:   (a) => ((findKit("kolt", state.units) || {}).resources || {}).bit === "acid" ? "拆卸模式需要电钻模式" : null,
   kolt_rot:       (a) => ((findKit("kolt", state.units) || a).resources || {}).bit !== "acid" ? "腐坏抛射需要酸液炮模式" : null,
   kolt_mod:       (a) => ((findKit("kolt", state.units) || a).resources || {}).bit === "acid" ? "「非法」改装需要电钻模式" : null,
@@ -8264,6 +8292,16 @@ const SKILL_REQUIREMENT = {
   }
 };
 function res(u) { return (u && u.resources) || {}; }
+/** actor 距离 range 以内、场地能改成 kind 的区域 */
+function envZones(actor, kind, range) {
+  const out = [];
+  const maxZ = Number(state.zoneMode) || 2;
+  for (let z = 1; z <= maxZ; z++) {
+    if (actor && zoneDist(actor.zone, z, maxZ) > range) continue;
+    if (!fieldChangeWhy(z, kind)) out.push(z);
+  }
+  return out;
+}
 
 /** 武器人现在能不能唤出：ok / out（已在场）/ dead（本场已倒下，不能再唤出） */
 function weaponSummonState(owner, kit) {

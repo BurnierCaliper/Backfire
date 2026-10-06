@@ -559,6 +559,7 @@
         if (cmd === "fight") {
           let cfg;
           try { cfg = trpgTaskPrepareBattle(id); } catch (e) { alert(e.message); return; }
+          if (!lowHpOk()) { TRPG.taskBattle = null; return; }
           GAME.lastEncounter = null;
           GAME.enemyPlan = cfg.enemies;
           GAME.weather = cfg.weather;
@@ -573,6 +574,12 @@
       el[ev] = () => { teSet(el.dataset.te, el.value); if (el.dataset.teRerender) render(); };
     });
     P.querySelectorAll("[data-te-act]").forEach(b => { b.onclick = () => teAct(b.dataset.teAct, P); });
+  }
+
+  /** 进战斗前：有队员血量低于 20% 而且还能短休，先提醒（返回 false = 不进） */
+  function lowHpOk() {
+    const low = typeof lowHpRestWarning === "function" ? lowHpRestWarning() : [];
+    return !low.length || confirm(lowHpWarningText(low));
   }
 
   /* ---------- 绑定 ---------- */
@@ -887,7 +894,7 @@
       if ((e.key === "z" || e.key === "Z") && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (!(window.HotseatGame && HotseatGame.isActive())) uiCommand("undo"); }
     });
     $("tr-slots-title").onclick = () => uiCommand("title");
-    $("tr-fight").onclick = () => uiCommand("toBattle");
+    $("tr-fight").onclick = () => { if (lowHpOk()) uiCommand("toBattle"); };
     $("tr-bs").onclick = () => { tab = "backstage"; render(); };
     $("tr-title").onclick = () => uiCommand("title");
     $("tr-copy").onclick = (e) => {

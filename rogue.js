@@ -1022,6 +1022,11 @@ const Rogue = (function () {
     if (!who.some(x => x.left > 0)) return { ok: false, why: "今天大家的短休次数都用完了", who };
     return { ok: true, who };
   }
+  /** 进战斗前的低血量提醒：只在这里能短休时提醒 */
+  function lowHpWarning(run) {
+    if (!canShortRestBefore(run).ok || typeof lowHpRestWarning !== "function") return [];
+    return withParty(run, () => lowHpRestWarning()).out;
+  }
   function shortRestBeforeNode(run) {
     const can = canShortRestBefore(run);
     if (!can.ok) throw new Error(can.why);
@@ -1633,7 +1638,7 @@ const Rogue = (function () {
     battleSpec, applyPartyToField, finishBattle,
     checkInfo, checkChance, checkOdds, attemptCheck, skipCheck, heroProfs,
     role2Options, soloBattleInfo,
-    restPlan, canLongRest, sheetData, armoryData, escortInfo, partOffers, buyPart, sellPart, canSellParts, partStock, partSellPrice, partInstallCost, installPart, removePart, restAtNode, leaveNode, canShortRestBefore, shortRestBeforeNode,
+    restPlan, canLongRest, sheetData, armoryData, lowHpWarning, escortInfo, partOffers, buyPart, sellPart, canSellParts, partStock, partSellPrice, partInstallCost, installPart, removePart, restAtNode, leaveNode, canShortRestBefore, shortRestBeforeNode,
     ambushChance, watchOptions,
     buy, canShop, shopItemName, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
     presentSmiths, smithInfo, claimBlueprint, installBlueprint, blueprintById, weaponModsOf,

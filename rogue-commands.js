@@ -64,6 +64,7 @@ const RogueCommands = (function () {
     restPlan: (_c, run) => Rogue.restPlan(run),
     sheetData: (_c, run) => Rogue.sheetData(run),
     armoryData: (_c, run) => Rogue.armoryData(run),
+    lowHpWarning: (_c, run) => Rogue.lowHpWarning(run),
     escortInfo: (_c, run) => Rogue.escortInfo(run, run.task),
     partOffers: (c, run) => Rogue.partOffers(run, c.smith),
     partStock: () => Rogue.partStock(),
