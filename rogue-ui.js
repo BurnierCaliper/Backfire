@@ -170,6 +170,7 @@
       <p>${esc(t.goal)}</p>
       <div class="t-meta">报酬 ${pay.kuizhi} 奎支 · 每人 ${pay.xp} 经验${t.part && WEAPON_PARTS[t.part] ? `<br>额外奖励：改装件 ${esc(weaponPartLabel(t.part))}（${esc(weaponPartCoefText(WEAPON_PARTS[t.part].coef))}）` : ""}<br>委托方提供 ${esc(supplyText || "无")}</div>
       ${t.weather ? `<div class="t-weather">全程天气：${esc(WX_NAME[t.weather] || t.weather)}（任务里每一场战斗都是）</div>` : ""}
+      ${escortLine(Rogue.escortInfo(run, t), false)}
       ${warn ? `<div class="t-warn">${esc(warn)}</div>` : ""}
       <button class="g-btn r-go${t.key ? " r-main" : ""}" data-which="${which}" ${why ? "disabled" : ""}>${why ? esc(why) : t.key ? "执行主线" : "接下任务"}</button>
     </div>`;
@@ -457,6 +458,14 @@
       seed: `${run.seed}:map:${run.taskNo}`
     });
   }
+  /** 护送对象：任务板上说明是什么；任务里显示剩多少血 */
+  function escortLine(e, live) {
+    if (!e) return "";
+    const pct = Math.round(e.hp / Math.max(1, e.max) * 100);
+    const rules = `被摧毁任务失败；剩余 ≥ ${Math.round(ESCORT_RULES.intactRatio * 100)}% 完好送达，额外报酬 +${Math.round(ESCORT_RULES.intactBonus * 100)}%`;
+    return `<div class="t-escort${live && !e.intact ? " warn" : ""}">护送：<b>${esc(e.name)}</b>（${e.kind === "cart" ? "货车" : "人物"} · ${esc(e.note)}）
+      · ${live ? `血量 <b>${e.hp}/${e.max}</b>（${pct}%）${e.intact ? " · 完好" : " · 已不算完好"}` : `血量 ${e.max}${e.atk ? ` · atk ${e.atk}` : ""}`}<br><small>${esc(rules)}</small></div>`;
+  }
   function renderTask() {
     const t = run.task;
     const node = Rogue.currentNode(run);
@@ -469,6 +478,7 @@
     const restRow = node && node.type !== "rest" ? restBeforeRow() : "";
     const wx = t.weather ? `<span class="t-weather inline">全程天气：${esc(WX_NAME[t.weather] || t.weather)}</span>` : "";
     return `<h2>${esc(t.key ? "主线" : t.name)}<span class="sub">${esc(t.goal)}</span>${wx}</h2>
+      ${escortLine(query("escortInfo"), true)}
       ${routeMapHtml(t)}
       <div class="r-panel">${choose}${restRow}${panel}</div>`;
   }

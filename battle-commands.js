@@ -113,6 +113,8 @@
     // 客制化图纸：跑团按队伍里装的图纸重算；其他模式（战斗原型）没有图纸
     if (typeof TRPG !== "undefined" && TRPG.active && typeof trpgSyncWeaponMods === "function") trpgSyncWeaponMods();
     else { state.weaponMods = null; state.weaponBlueprints = null; }
+    // 跑团任务战斗：护送对象跟着上场（trpg-tasks.js）
+    if (typeof TRPG !== "undefined" && TRPG.active && typeof trpgSpawnTaskEscort === "function") trpgSpawnTaskEscort();
     state.units.forEach(u => { if (typeof resetBattleFlags === "function") resetBattleFlags(u); });
     const notes = [];
     if (typeof ledgerApplyToField === "function") ledgerApplyToField(notes);

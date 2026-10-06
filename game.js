@@ -164,7 +164,7 @@
   /** 武器耐久条：武器人显示自己的耐久；角色显示手里那把武器的耐久（空手不显示） */
   function weaponDurSnap(u) {
     try {
-      if (!u || !u.isPlayer) return null;
+      if (!u || !u.isPlayer || u.escort) return null;   // 护送对象没有耐久
       const weapon = typeof isWeaponUnit === "function" ? isWeaponUnit(u) : !!u.weaponOf;
       const kit = weapon ? u.kit : (typeof heldWeaponKit === "function" ? heldWeaponKit(u) : null);
       if (!kit || typeof weaponDurMax !== "function") return null;
@@ -2362,6 +2362,7 @@
   /* ================= 11. HUD / 记录 ================= */
   function selectActor(id) {
     if (hotseat() && HotseatGame.reason(unitById(id))) return;
+    if (unitById(id) && unitById(id).escort) return;   // 护送对象玩家不能操作
     if (G.arm) disarm();
     G.actorId = id;
     refreshHud();
@@ -2464,7 +2465,7 @@
     // 队伍
     const party = $("g-party");
     party.innerHTML = "";
-    const all = state.units.filter(u => u.isPlayer && !u.hidden && !u.fused && !u._removed);
+    const all = state.units.filter(u => u.isPlayer && !u.hidden && !u.fused && !u._removed && !u.escort);   // 护送对象玩家不能操作，不进队伍栏
     const heroes = all.filter(u => !isWeaponUnit(u));
     const ordered = [];
     heroes.forEach(h => {

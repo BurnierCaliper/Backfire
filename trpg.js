@@ -9,7 +9,8 @@
  * 每个函数返回写给日志的几行文字。 */
 
 const TRPG = {
-  active: false
+  active: false,
+  taskBattle: null   // 正在打的任务战斗 { id, index }（trpg-tasks.js）
 };
 
 function trpgHeroes() {
@@ -103,6 +104,7 @@ function trpgShortRest(kits) {
 /** plan：{ hours, food: { kit: foodId }, force } */
 function trpgLongRest(plan) {
   const r = ledgerLongRest(plan || {}, []);
+  if (typeof trpgTaskRestEscort === "function") trpgTaskRestEscort(r.notes);
   return r.notes;
 }
 

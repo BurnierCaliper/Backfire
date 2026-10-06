@@ -399,6 +399,13 @@ const ROGUE_PARTS = {
   }
 };
 
+/* 护送任务（escort.js）：护送对象一半是货车、一半是人物；人物名字从这里抽 */
+const ROGUE_ESCORT = {
+  kinds: { cart: 1, vip: 1 },
+  cartNames: ["货车", "补给车", "运水车"],
+  vipNames: ["委托人", "商队老板", "技术员", "线人"]
+};
+
 /** 按 id 找客制化图纸（跑团模式也用）：{ id, name, text, mod, smith, smithName } */
 function blueprintSpec(id) {
   for (const s of ROGUE_SMITHS) {

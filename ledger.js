@@ -73,13 +73,14 @@ const LEDGER = {
   shortUsed: {},       // 角色 kit → 今天已用短休次数
   restOnce: {},        // 角色 kit → { 技能 key: 次数 }：「长休一次」的技能，长休才刷新
   career: null,        // 整局战场记录：{ battles: [每场摘要], kits: { kit: 累计数据 } }（careerRecordBattle）
+  tasks: [],           // 跑团：主持人发布的任务（trpg-tasks.js）
 
   /** 存进队伍档案 */
   save() {
     return JSON.parse(JSON.stringify({
       day: this.day, hours: this.hours, clock: this.clock, dur: this.dur,
       heroes: this.heroes, weapons: this.weapons, shortUsed: this.shortUsed,
-      restOnce: this.restOnce, career: this.career, water: ledgerWater()
+      restOnce: this.restOnce, career: this.career, tasks: this.tasks || [], water: ledgerWater()
     }));
   },
   load(s) {
@@ -93,6 +94,7 @@ const LEDGER = {
     this.shortUsed = s.shortUsed || {};
     this.restOnce = s.restOnce || {};
     this.career = s.career || null;
+    this.tasks = Array.isArray(s.tasks) ? s.tasks : [];
     if (s.water != null) setLedgerWater(s.water);
   },
   reset() { this.load({}); }
@@ -297,7 +299,7 @@ function weaponCarryLayers(kit) {
 /** 记下场上角色的状态 */
 function ledgerCapture() {
   // 武器人：唤出过的（包括收回后隐藏的）记下伤势；这场没唤出过的保留上次的记录
-  (state.units || []).filter(u => u.isPlayer && isWeaponUnit(u) && !u._removed && !u.fused).forEach(u => {
+  (state.units || []).filter(u => u.isPlayer && isWeaponUnit(u) && !u.escort && !u._removed && !u.fused).forEach(u => {
     LEDGER.weapons = LEDGER.weapons || {};
     LEDGER.weapons[u.kit] = persistentLayers(u);
   });
@@ -317,7 +319,7 @@ function ledgerAfterBattle(notes) {
   notes = notes || [];
   const heroes = partyHeroes();
   heroes.forEach(h => (h.linkedKits || []).forEach(k => spendDurability(k, 1, "战斗结束", notes)));
-  (state.units || []).filter(u => u.isPlayer && isWeaponUnit(u) && u.dead && !u._durCounted).forEach(u => {
+  (state.units || []).filter(u => u.isPlayer && isWeaponUnit(u) && !u.escort && u.dead && !u._durCounted).forEach(u => {
     u._durCounted = true;
     spendDurability(u.kit, 2, "武器人被击败", notes);
   });

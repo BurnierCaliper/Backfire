@@ -231,7 +231,25 @@ const Rogue = (function () {
       };
     });
     task.part = rollTaskPart(run, tpl, slot);   // 完成时额外给的改装件（部分任务有）
+    if (tpl.kind === "escort") task.escort = rollEscort(run, slot);
     return task;
+  }
+  /** 护送任务的护送对象：货车或人物（单独一条随机流） */
+  function rollEscort(run, slot) {
+    if (typeof ROGUE_ESCORT === "undefined") return null;
+    return withRng(`${run.seed}:escort:${run.act}:${run.boardNo}:${slot}`, () => {
+      const kind = Math.random() * (ROGUE_ESCORT.kinds.cart + ROGUE_ESCORT.kinds.vip) < ROGUE_ESCORT.kinds.cart ? "cart" : "vip";
+      return { kind, name: pick(kind === "cart" ? ROGUE_ESCORT.cartNames : ROGUE_ESCORT.vipNames) };
+    });
+  }
+  /** 护送对象此刻的情况：{ name, kind, hp, max, lost, intact } */
+  function escortInfo(run, task) {
+    const e = task && task.escort;
+    if (!e || typeof escortSpec !== "function") return null;
+    const sp = escortSpec(e, e.level || enemyLevel(run, 0));
+    const hp = e.lost ? 0 : e.cur != null ? e.cur : sp.hpMax;
+    return { name: sp.name, kind: sp.kind, hp, max: sp.hpMax, def: sp.def, atk: sp.atk, lost: !!e.lost,
+      intact: !e.lost && escortIntact(hp, sp.hpMax), note: ESCORT_KINDS[sp.kind].note };
   }
   /** 任务奖励的改装件：单独一条随机流，不影响任务的路线和天气 */
   function rollTaskPart(run, tpl, slot) {
@@ -372,6 +390,7 @@ const Rogue = (function () {
     });
     run.board = null;
     run.stage = "task";
+    if (run.task.escort) run.task.escort = Object.assign({}, run.task.escort, { level: enemyLevel(run, 0), cur: null, lost: false });
     const notes = [];
     const pay = taskPay(run, task);
     if (pay.water) setLedgerWater(water() + pay.water);
@@ -661,7 +680,12 @@ const Rogue = (function () {
   /** 当前节点 / 首领的战斗配置（给 BattleSim.setup 或战斗画面用） */
   function battleSpec(run) {
     const partyKits = run.party.map(h => h.kit);
-    const before = () => { applyPartyToField(run); state.openingBreaks = openingBreaks(run); state.solo = soloBattleInfo(run); state.scoreAct = run.act; };
+    const before = () => {
+      applyPartyToField(run); state.openingBreaks = openingBreaks(run); state.solo = soloBattleInfo(run); state.scoreAct = run.act;
+      // 护送任务：护送对象跟着上场，血量接着上一场
+      const e = run.stage === "task" && run.task && run.task.escort;
+      if (e && !e.lost && typeof spawnEscort === "function") spawnEscort(e, e.level || enemyLevel(run, 0), e.cur);
+    };
     if (run.stage === "boss") {
       const key = `${run.seed}:boss:${run.act}`;
       const enc = withRng(key, () => {
@@ -751,6 +775,18 @@ const Rogue = (function () {
     }
     captureParty(run, notes);
     run.party.forEach(h => { delete h.pendingBreaks; });   // 检定受伤的击破已在开场结算
+    // 护送：记下护送对象剩下的血量；被摧毁 = 任务失败
+    const esc = !boss && run.task && run.task.escort;
+    if (esc && !esc.lost && typeof escortStatus === "function") {
+      const st = escortStatus();
+      if (st) { esc.cur = st.hp; esc.lost = st.destroyed; }
+      if (esc.lost && !(outcome === "lose" && C.wipeEndsRun)) {
+        run.ambush = null;
+        passHours(run, NODE.battle.hours, notes);
+        if (run.stage !== "over") failTask(run, notes, `${esc.name || "护送对象"}被摧毁`);
+        return logAll(run, notes);
+      }
+    }
     if (ambush) {
       run.ambush = null;
       if ((outcome === "lose" || !run.party.length) && C.wipeEndsRun) {
@@ -964,6 +1000,8 @@ const Rogue = (function () {
   }
   function doLongRest(run, notes, watch) {
     const r = withParty(run, () => ledgerLongRest({ hours: C.hours.longRest, watch: watch || null }, notes));
+    const e = run.task && run.task.escort;
+    if (e && !e.lost && e.kind === "vip" && e.cur != null) { e.cur = null; notes.push(`${e.name || "委托人"}也休息好了，血量回满。`); }
     notes.push(...r.notes);
     return r.out && r.out.ok;
   }
@@ -1455,11 +1493,28 @@ const Rogue = (function () {
       notes.push(`委托方额外给了一个改装件：${weaponPartLabel(t.part)}（${weaponPartCoefText(WEAPON_PARTS[t.part].coef)}）。`);
     }
     run.party.forEach(h => { h.xp = (h.xp || 0) + pay.xp; });
+    const ei = escortInfo(run, t);
+    if (ei && ei.intact) {
+      const bonus = Math.round(pay.kuizhi * ESCORT_RULES.intactBonus / 100) * 100;
+      state.kuizhi += bonus;
+      notes.push(`${ei.name}完好送达（剩 ${ei.hp}/${ei.max}）：额外报酬 ${bonus} 奎支。`);
+    } else if (ei) {
+      notes.push(`${ei.name}送到了，但受损严重（剩 ${ei.hp}/${ei.max}），没有额外报酬。`);
+    }
     const r = withParty(run, () => null);     // 摆上场按规则结算升级
     notes.push(...r.notes);
     run.tasksDone += 1;
     advanceDays(run, t.days);
     if (t.key) run.main.done = true;
+    run.task = null;
+    run.stage = "camp";
+    return notes;
+  }
+  /** 任务失败（护送对象被摧毁）：没有报酬，照样花掉任务天数，回城休整 */
+  function failTask(run, notes, why) {
+    const t = run.task;
+    notes.push(`护送失败：${why}，任务「${t.name}」失败，没有报酬。`);
+    advanceDays(run, t.days);
     run.task = null;
     run.stage = "camp";
     return notes;
@@ -1578,7 +1633,7 @@ const Rogue = (function () {
     battleSpec, applyPartyToField, finishBattle,
     checkInfo, checkChance, checkOdds, attemptCheck, skipCheck, heroProfs,
     role2Options, soloBattleInfo,
-    restPlan, canLongRest, sheetData, armoryData, partOffers, buyPart, sellPart, canSellParts, partStock, partSellPrice, partInstallCost, installPart, removePart, restAtNode, leaveNode, canShortRestBefore, shortRestBeforeNode,
+    restPlan, canLongRest, sheetData, armoryData, escortInfo, partOffers, buyPart, sellPart, canSellParts, partStock, partSellPrice, partInstallCost, installPart, removePart, restAtNode, leaveNode, canShortRestBefore, shortRestBeforeNode,
     ambushChance, watchOptions,
     buy, canShop, shopItemName, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
     presentSmiths, smithInfo, claimBlueprint, installBlueprint, blueprintById, weaponModsOf,

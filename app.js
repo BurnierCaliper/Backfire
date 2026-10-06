@@ -1667,6 +1667,7 @@ function startPlayerPhase() {
 
 function startEnemyPhase() {
   const notes = ["—— 敌人回合 ——"];
+  if (typeof escortAct === "function") escortAct(notes);   // 护送的人物先躲 / 还击
   state.combatPhase = "enemy";
   // 废铁墙（回防命令）撑过了一个玩家回合，敌人回合开始时撤掉
   (state.props || []).filter(p => p.kind === "scrapwall").forEach(p => {
@@ -4020,6 +4021,7 @@ function ambushSkipRound() {
 }
 function refreshEconomy(u) {
   if (!u || !u.isPlayer) return;
+  if (u.escort) { u.ap = 0; u.apMax = 0; u.bonus = 0; u.bonusMax = 0; return; }   // 护送对象玩家不能操作
   if (typeof isCrushing === "function" && isCrushing(u)) {
     u.ap = 0; u.apMax = 0; u.bonus = 0; u.bonusMax = 0;
     return;
@@ -4362,6 +4364,7 @@ function tickSelfBurn(u, growStacks) {
 function isWeaponUnit(u) {
   if (!u) return false;
   if (u.weaponOf) return true;
+  if (u.escort) return true;   // 护送对象（escort.js）：和武器人一样血量归零直接倒下、不算进全员倒地
   return ["mint", "latte", "niu", "naruto", "mochi", "berniel", "bili", "ironwall", "torque", "ecmo", "edc"].indexOf(u.kit) >= 0;
 }
 

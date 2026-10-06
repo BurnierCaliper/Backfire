@@ -1947,3 +1947,26 @@ body:not([data-screen="battle"]) .g-rank { display: none !important; }
   -webkit-background-clip: text; background-clip: text; color: transparent; text-shadow: none;
   filter: drop-shadow(2px 2px 0 #1b1f24);
 }
+
+/* ---------- 跑团：任务（trpg-ui.js · PANELS.tasks） ---------- */
+.tk-card.on { border-color: var(--gold); }
+.tk-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; }
+.tk-head b { font-size: 17px; }
+.tk-kind { font-size: 12px; color: var(--muted); }
+.tk-days { margin-left: auto; color: var(--muted); font-size: 12px; }
+.tk-st { font-size: 12px; padding: 0 8px; border: 1px solid var(--line); }
+.tk-st.tk-posted { border-color: var(--ally); color: #8cc0f0; }
+.tk-st.tk-active { border-color: var(--gold); color: var(--gold); }
+.tk-st.tk-done { border-color: var(--heal); color: var(--heal); }
+.tk-st.tk-failed { border-color: var(--foe); color: var(--foe); }
+.tk-goal { margin: 4px 0; font-size: 13px; }
+.tk-route { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
+.tk-node { font-size: 12px; padding: 2px 8px; background: rgba(0, 0, 0, .3); border: 1px solid var(--line); }
+.tk-node.done { opacity: .55; text-decoration: line-through; }
+.tk-node.cur { border-color: var(--gold); color: var(--gold); }
+.tk-go { outline: 2px solid var(--gold); }
+.tk-edit h4 { margin: 10px 0 4px; font-size: 14px; color: var(--gold); }
+.tk-enode { margin: 6px 0; padding: 6px 8px; border-left: 3px solid var(--line); background: rgba(0, 0, 0, .2); }
+.tk-foes { margin-left: 12px; }
+.tk-chip { display: inline-flex; align-items: center; gap: 4px; margin: 2px 4px 2px 0; padding: 0 0 0 8px; font-size: 12px; border: 1px solid var(--line); }
+.tk-edit textarea { background: rgba(0, 0, 0, .3); color: inherit; border: 1px solid var(--line); }

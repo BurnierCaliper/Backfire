@@ -206,3 +206,8 @@
   .shop-row.pt-row { grid-template-columns: auto auto auto; }
   .shop-row.pt-row select { grid-column: 1 / 3; }
 }
+
+/* 单局：护送对象（rogue-ui.js · escortLine） */
+.t-escort { margin: 6px 0; padding: 5px 10px; font-size: 13px; border-left: 4px solid var(--sk-mint, #39e6b4); background: rgba(0, 0, 0, .25); }
+.t-escort.warn { border-left-color: var(--sk-blood, #d8322a); }
+.t-escort small { color: var(--sk-muted, #a8977b); }
