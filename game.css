@@ -1931,3 +1931,19 @@ body:not([data-screen="battle"]) .g-rank { display: none !important; }
 .cl-hist td { font-family: inherit; }
 .cl-hist tr.cl-lose td { color: #ff8a7a; }
 .cl-hist tr.cl-retreat td { color: var(--muted); }
+/* 评价 SS / SSS：只是更高的评价（经验倍率和 S 一样） */
+.g-rank[data-grade="SS"] .rk-grade { color: #ffcc33; text-shadow: 3px 3px 0 #1b1f24, -2px -2px 0 #1b1f24, 2px -2px 0 #1b1f24, -2px 2px 0 #1b1f24, 0 0 24px rgba(255, 200, 40, .85); }
+.g-rank[data-grade="SSS"] .rk-grade {
+  font-size: 54px;
+  background: linear-gradient(100deg, #ffe066 0%, #ff8a3d 35%, #ff3b8d 65%, #b86bff 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  text-shadow: none; filter: drop-shadow(3px 3px 0 #1b1f24) drop-shadow(0 0 14px rgba(255, 120, 180, .7));
+}
+.g-rank[data-grade="SS"] .rk-bar i { color: #ffcc33; }
+.g-rank[data-grade="SSS"] .rk-bar i { color: #ff3b8d; }
+.grade-badge.g-SS b, .stats-grade b.g-SS { color: #ffcc33; }
+.grade-badge.g-SSS b, .stats-grade b.g-SSS {
+  background: linear-gradient(100deg, #ffe066 0%, #ff8a3d 35%, #ff3b8d 65%, #b86bff 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent; text-shadow: none;
+  filter: drop-shadow(2px 2px 0 #1b1f24);
+}

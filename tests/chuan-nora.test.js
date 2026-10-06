@@ -62,20 +62,21 @@ test("高能脉冲：对自身施加蓄能，不用选目标", () => {
   assert.equal(chuan.ap, 2);
 });
 
-test("协助攻击：积攒后电能 ≥ 3 时补一记重斩，消耗 2 电能", () => {
+test("协助攻击：发动时电能 ≥ 3 才补一记重斩（看积攒之前），消耗 2 电能", () => {
   const { c, st, foe } = field();
   const chuan = c.findKit("chuan", st.units);
   foe.layers.forEach(l => { l.current = l.max = 999; });
-  chuan.resources.charge = 1;
+  chuan.resources.charge = 3;
   st.attackerId = chuan.id; st.targetId = foe.id;
   const sp = spy(c);
   c.runSkill("chuan_assist", { ignorePhase: true, free: true });
-  assert.equal(chuan.resources.charge, 1);    // 1 + 2 = 3 → 重斩 −2
+  assert.equal(chuan.resources.charge, 3);    // 3 → +2 → 重斩 −2
   assert.match(sp.text(), /重斩/);
   assert.equal(sp.els.length, 3);
-  chuan.resources.charge = 0;
+  chuan.resources.charge = 1;
   c.runSkill("chuan_assist", { ignorePhase: true, free: true });
-  assert.equal(chuan.resources.charge, 2);    // 不到 3，不重斩
+  assert.equal(chuan.resources.charge, 3);    // 发动时只有 1，积攒到 3 也不重斩
+  assert.equal(sp.els.length, 5);
 });
 
 test("铁壁：电能 ≥ 3 时可以多耗 1 电能加 atk 点外层护盾，护盾先挨打", () => {

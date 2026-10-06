@@ -340,13 +340,13 @@ const EnemyAI = (function () {
 
     // 狂徒：同区有碎渣机炮、机炮 2 距离内有玩家时，花 1 行动点操控它开火（嘲讽 / 决一死战时只打强制目标）
     if (typeof scrapsFor === "function" && (u.ap || 0) >= 1) {
-      const sp = scrapsFor(u)[0];
+      const sp = scrapsFor(u).filter(scrapReady)[0];   // 这回合发射过的不再去操控
       const inR = sp ? scrapTargets(sp, u) : [];
       const tgt = inR.includes(target) ? target : (pick.forced ? null : (inR.length ? lowest(inR) : null));
       if (sp && tgt) {
         return {
           thunk: () => { state.attackerId = u.id; state.targetId = tgt.id; runSkill("use_scrap:" + sp.id); },
-          meta: { actorId: u.id, targetId: tgt.id, skillName: "操控碎渣机炮" }
+          meta: { actorId: "prop:" + sp.id, targetId: tgt.id, skillName: `${u.name} 操控碎渣机炮` }
         };
       }
     }

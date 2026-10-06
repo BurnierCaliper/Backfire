@@ -15,7 +15,7 @@ function field() {
   return { c, st, heroes };
 }
 
-for (const [score, grade, bonus] of [[749, "D", 0], [750, "C", 0], [1250, "B", 20], [1500, "A", 50], [1750, "S", 101]]) {
+for (const [score, grade, bonus] of [[499, "D", 0], [500, "C", 0], [1000, "B", 20], [1250, "A", 50], [1500, "S", 101], [1750, "SS", 101], [2000, "SSS", 101]]) {
   test(`共享奖励：现有 ${grade} 评价与 101 点战斗经验的倍率、向下取整保持不变`, () => {
     const { c, st, heroes } = field();
     c.grantXpToPlayers(101);
@@ -40,7 +40,7 @@ test("共享奖励：先叠加速杀、无伤、遭遇战分数，再评级发�
   // (1000 + 100) × (1 + 速杀1 + 无伤0.5 + 遭遇1) = 3850。
   assert.equal(first.grade.score, 3850);
   assert.equal(first.finishBonus.mult, 3.5);
-  assert.equal(first.grade.grade, "S");
+  assert.equal(first.grade.grade, "SSS");
   assert.equal(first.xpBonus, 101);
   const second = c.settleBattleRewards("win");
   assert.equal(second.alreadySettled, true);
@@ -75,7 +75,7 @@ for (const outcome of ["lose", "retreat"]) {
     st.battleScore.hurt = false;
     st.turnNo = 1;
     const reward = c.settleBattleRewards(outcome);
-    assert.equal(reward.grade.grade, "S");
+    assert.equal(reward.grade.grade, "SS");
     assert.equal(reward.finishBonus, null);
     assert.equal(reward.xpBonus, 0);
     assert.equal(c.settleBattleRewards("win").outcome, outcome);

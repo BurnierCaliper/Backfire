@@ -53,9 +53,11 @@ test("狂徒也能操控，打玩家；AI 站在机炮旁边时会用", () => {
   thug.zone = 1; thug.ap = 1;
   st.combatPhase = "enemy";
   const plan = c.EnemyAI.plan(thug);
-  assert.equal(plan.meta.skillName, "操控碎渣机炮");
+  assert.match(plan.meta.skillName, /操控碎渣机炮/);
+  assert.equal(plan.meta.actorId, "prop:" + p.id, "攻击演出由机炮前冲");
   const h0 = c.totalHp(kolt);
   plan.thunk();
+  if (st.blockQueue && st.blockQueue.length) c.finishBlock(null);   // 有人能格挡时先放弃格挡
   assert.ok(c.totalHp(kolt) < h0);
   assert.equal(thug.ap, 0);
   void p;
@@ -74,4 +76,48 @@ test("耐久 5，每次受到攻击 −1，归零被摧毁", () => {
   assert.equal(p.hp, 1);
   c.damageProp(p, { element: "physical", dmg: 1 }, kolt);
   assert.ok(!st.props.includes(p));
+});
+
+test("每回合只能发射一次，不管被谁、用什么方式触发；下一回合恢复", () => {
+  const { c, st, kolt, helu, thug, p } = field();
+  kolt.ap = 3;
+  use(c, st, kolt, p, thug);
+  const h1 = c.totalHp(thug);
+  kolt.ap = 3;
+  use(c, st, kolt, p, thug);
+  assert.equal(c.totalHp(thug), h1, "同一回合第二次不发射");
+  assert.equal(kolt.ap, 3, "没发射就不扣行动点");
+  // 环境扫描操控也算这一次
+  helu.level = 3; helu.ap = 3;
+  assert.ok(!c.heluScanOptions(1).some(o => o.value === "prop:" + p.id), "发射过的机炮不出现在扫描选项里");
+  st.turnNo += 1;
+  use(c, st, kolt, p, thug);
+  assert.ok(c.totalHp(thug) < h1, "下一回合可以再发射");
+});
+
+test("狂徒操控的碎渣可以被协助格挡；格挡成功少挨伤害", () => {
+  const { c, st, kolt, thug, p } = field();
+  const ruby = { id: "x" }; void ruby;
+  thug.zone = 1; thug.ap = 1;
+  st.combatPhase = "enemy";
+  // 让柯尔特有一个同区、有附赠行动的队友
+  const helu = c.findKit("helu", st.units);
+  helu.zone = 1; helu.bonus = 1;
+  st.attackerId = thug.id; st.targetId = kolt.id;
+  c.runSkill("use_scrap:" + p.id);
+  assert.equal(st.blockQueue.length, 1, "等协助格挡");
+  assert.equal(c.blockJobAttacker(st.blockQueue[0]).name, "碎渣机炮");
+  const h0 = c.totalHp(kolt);
+  c.finishBlock(helu.id, { roll: 1, ok: true, chance: 99 });
+  assert.equal(st.blockQueue.length, 0);
+  assert.ok(h0 - c.totalHp(kolt) < 7 * 4, "格挡后伤害减少");
+});
+
+test("机炮这回合发射过了，狂徒不会再去操控它", () => {
+  const { c, st, thug, p } = field();
+  thug.zone = 1; thug.ap = 1;
+  st.combatPhase = "enemy";
+  p.firedRound = st.turnNo;
+  const plan = c.EnemyAI.plan(thug);
+  assert.ok(!plan || !/碎渣机炮/.test(plan.meta.skillName || ""));
 });

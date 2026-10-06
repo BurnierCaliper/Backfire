@@ -1568,10 +1568,9 @@ function startPlayerPhase() {
       notes.push("拉斯缪尔回合开始累积能量 +20%。");
     }
     if (u.resources && u.resources.preparedPending) {
-      const n = 1 + milestone(u.level || 1, 5);
       u.resources.preparedActive = true;
       u.resources.preparedPending = false;
-      notes.push(`${u.name} 「准备」生效：本回合第一次攻击裸伤害 +${n}d6，吃倍率和增伤。`);
+      notes.push(`${u.name} 「准备」生效：本回合第一次攻击的第一击基础包 +1d${prepDieSides(u)}，吃倍率和克制。`);
     }
   });
   appendLog(notes.join("\n"));
@@ -1980,8 +1979,9 @@ function bigHitInfo(level, dmg) {
   return { big: true, ratio: Math.min(1, (dmg - th) / th), th };
 }
 // [评价, 至少几倍基准分, 战斗经验倍率]
-// [评价, 第一幕的分数线, 战斗经验倍率]。C 线以下是 D（经验不加成）。已定：第一幕 C 750 / B 1250 / A 1500 / S 1750
-const SCORE_GRADES = [["S", 1750, 2], ["A", 1500, 1.5], ["B", 1250, 1.2], ["C", 750, 1], ["D", 0, 1]];
+// [评价, 第一幕的分数线, 战斗经验倍率]。C 线以下是 D（经验不加成）。
+// 第一幕 C 500 / B 1000 / A 1250 / S 1500 / SS 1750 / SSS 2000。SS、SSS 只是更高的评价，经验倍率和 S 一样
+const SCORE_GRADES = [["SSS", 2000, 2], ["SS", 1750, 2], ["S", 1500, 2], ["A", 1250, 1.5], ["B", 1000, 1.2], ["C", 500, 1], ["D", 0, 1]];
 const SCORE_ACT_STEP = 250;   // 之后每一幕，各条分数线（D 除外）+250
 const SCORE_PART_NAMES = { dmg: "伤害", heal: "治疗 / 护盾", brk: "击破", stagger: "打出失衡", block: "协助格挡成功", reduce: "减伤", blockSave: "格挡减免", overkill: "溢出伤害", kill: "击杀", bonus: "克制 / 大伤害加成", action: "行动", speed: "速杀奖励", flawless: "无伤奖励", ambush: "遭遇战加成", fatigue: "招式疲劳（扣分）" };
 /** 这个角色这回合用这个技能，算连续第几个回合（不改记录）。
@@ -2923,11 +2923,18 @@ function controlScrap(a, p, t) {
   if (Number(p.zone) !== Number(a.zone)) return "必须和碎渣机炮在同一区才能操控。";
   if (!t || t.isProp || !(state.units || []).includes(t)) return "先选碎渣机炮要打的敌人。";
   if (!scrapTargets(p, a).includes(t)) return `${t.name} 不在碎渣机炮 2 距离内，或不是敌人。`;
+  if (!scrapReady(p)) return "碎渣机炮这一回合已经发射过了。";
   if (!spendAp(a, 1, "操控碎渣机炮")) return `${a.name} 行动点不足，无法操控碎渣机炮。`;
   return `${a.name} 操控碎渣机炮攻击 ${t.name}。\n` + scrapShot(p, t, a);
 }
-/** 碎渣机炮开火一次：1d4 发，每发 6+等级 物理 +2 击破 */
+/** 碎渣机炮每回合只能发射一次（不管被谁、用什么方式触发） */
+function scrapReady(p) {
+  return !!p && p.firedRound !== Number(state.turnNo || 0);
+}
+/** 碎渣机炮开火一次：1d4 发，每发 6+等级 物理 +2 击破。打玩家时可以被协助格挡 */
 function scrapShot(p, t, controller) {
+  if (!scrapReady(p)) return "碎渣机炮这一回合已经发射过了。";
+  p.firedRound = Number(state.turnNo || 0);
   const n = 1 + Math.floor(Math.random() * 4);
   const flat = 6 + (p.level || 1);
   const fake = unitOf("碎渣机炮", p.level, [{ type: "armor", hp: 1 }], 0, 0);
@@ -2936,7 +2943,9 @@ function scrapShot(p, t, controller) {
   if (controller) fake.isPlayer = !!controller.isPlayer;
   if (controller && controller.isPlayer) fake.creditTo = controller.id;
   // 射程是「2 距离内」（选目标时已经限定），这里不再按近距离判定
-  const out = dealTo(fake, t, { atk: 0, mult: 0, flat, hits: n, element: "physical", baseBreak: 2, atkRange: "any", flags: { action: true, blockResolved: true, propShot: true, flyFree: true } });
+  fake.propId = p.id;
+  const out = dealTo(fake, t, { atk: 0, mult: 0, flat, hits: n, element: "physical", baseBreak: 2, atkRange: "any", flags: { action: true, propShot: true, flyFree: true } });
+  if (out && out.pending) return `碎渣机炮开火 ${n} 次，每次 ${flat} 物理 +2 击破，${t.name} 的队友可以协助格挡。`;
   return `碎渣机炮开火 ${n} 次，每次 ${flat} 物理 +2 击破。合计伤害 ${Math.floor((out && out.res && out.res.total) || 0)}。`;
 }
 
@@ -3908,6 +3917,10 @@ function skillNameHint(id) {
   return id || "技能";
 }
 
+/** 「准备」的骰子：1 级 1d6，5 级 1d8，10 级 1d10，15 级 1d12 */
+function prepDieSides(u) {
+  return upgradeDieSides(6, milestone((u && u.level) || 1, 5));
+}
 function spendAp(u, n, reason) {
   n = n || 1;
   if (!u) return true;
@@ -5048,7 +5061,7 @@ function openBlockModal(job) {
   const modal = uiEl("blockModal");
   const text = uiEl("blockModalText");
   const box = uiEl("blockModalBtns");
-  const attacker = unitById(job.attackerId);
+  const attacker = blockJobAttacker(job);
   const target = unitById(job.targetId);
   const helpers = eligibleBlockers(target, job);
   const again = job.tried && job.tried.length;
@@ -5077,9 +5090,14 @@ function closeBlockModal() {
   if (modal) modal.classList.add("hidden");
 }
 
+/** 格挡队列里这一击的攻击者（场上单位，或者记下来的配置物） */
+function blockJobAttacker(job) {
+  if (!job) return null;
+  return unitById(job.attackerId) || job.fakeAttacker || null;
+}
 function finishBlock(helperId, forced) {
   const job = (state.blockQueue || [])[0];
-  const attacker0 = job ? unitById(job.attackerId) : null;
+  const attacker0 = job ? blockJobAttacker(job) : null;
   const title = attacker0 ? `【${attacker0.name}】的攻击落下` : "";
   const prevActor = LOG_ACTOR_ID;
   LOG_ACTOR_ID = attacker0 ? attacker0.id : null;
@@ -5095,7 +5113,7 @@ function finishBlockInner(helperId, forced) {
   const job = (state.blockQueue || []).shift();
   closeBlockModal();
   if (!job) return;
-  const attacker = unitById(job.attackerId);
+  const attacker = blockJobAttacker(job);
   const target = unitById(job.targetId);
   let block = "none", blockHelperId = null;
   if (helperId) {
@@ -5712,6 +5730,8 @@ function dealTo(attacker, target, opt) {
       state.blockQueue.push({
         seq: (state.jobSeq = (Number(state.jobSeq) || 0) + 1),   // 这一击的编号：格挡骰和伤害骰按它定种子（Helumica 能预测）
         attackerId: attacker.id,
+        // 配置物（碎渣机炮）这类不在场上的攻击者：把它本身记下来，格挡结算时照样能找到
+        fakeAttacker: (state.units || []).includes(attacker) ? null : JSON.parse(JSON.stringify(attacker)),
         targetId: target.id,
         onConnect: opt.onConnect || null,
         opt: JSON.parse(JSON.stringify({
@@ -5760,8 +5780,7 @@ function dealTo(attacker, target, opt) {
   let prepBonus = 0;
   let prepNote = "";
   if (attacker.resources && attacker.resources.preparedActive && opt.usePrep !== false) {
-    const s = upgradeDieSides(6, milestone(attacker.level || 1, 5));
-    const r = takeDice(1, s, 0);
+    const r = takeDice(1, prepDieSides(attacker), 0);
     prepBonus = r.total;
     prepNote = "准备" + r.text;
     attacker.resources.preparedActive = false;
@@ -5785,10 +5804,8 @@ function dealTo(attacker, target, opt) {
       extraDiceNote = r.text;
     } else diceValue = 0;
   }
-  if (prepBonus) {
-    diceValue = (Number(diceValue) || 0) + prepBonus;
-    extraDiceNote = extraDiceNote ? extraDiceNote + " + " + prepNote : prepNote;
-  }
+  // 准备：只加在这次攻击第一击的基础包上（复数攻击只生效一次），不并进每一段都吃的骰子
+  if (prepBonus) extraDiceNote = extraDiceNote ? extraDiceNote + " + " + prepNote + "（第一击）" : prepNote + "（第一击）";
   // 单局图纸：打近 / 远距离的额外骰、承受伤害 +1d10 等（mods.js）
   if (typeof bpDiceAdjust === "function") {
     const adj = bpDiceAdjust(attacker, target, flags);
@@ -5819,6 +5836,8 @@ function dealTo(attacker, target, opt) {
     mult: ((flags.assist || (attacker && state._assistBy === attacker.id)) && typeof bpAssistMult === "function") ? bpAssistMult(attacker, opt.mult != null ? opt.mult : 1) : (opt.mult != null ? opt.mult : 1),
     flat: opt.flat || 0,
     diceValue,
+    firstHitBonus: prepBonus,
+    firstHitNote: prepNote,
     element: opt.element || "physical",
     baseBreak: br,
     hits: opt.hits || 1,
@@ -6366,7 +6385,7 @@ const HELU_SCAN_SPAWN = ["boom", "acid", "battery", "scrap"];
 function heluScanFieldOn(f, k) { return k === "fire" ? fieldFireOn(f) : !!(f && f[k]); }
 function heluScanOptions(z) {
   const opts = [{ value: "spawn", label: "扫描出一个配置物（爆炸桶 / 酸液桶 / 超充能电池 / 碎渣机炮，随机）" }];
-  (state.props || []).filter(p => Number(p.zone) === Number(z) && !BARRIER_SIDE[p.kind]).forEach(p => {
+  (state.props || []).filter(p => Number(p.zone) === Number(z) && !BARRIER_SIDE[p.kind] && !(p.kind === "scrap" && !scrapReady(p))).forEach(p => {
     const what = p.kind === "boom" || p.kind === "acid" ? "直接引爆"
       : p.kind === "battery" ? "提取护盾或引爆"
       : p.kind === "scrap" ? "操控它攻击一名敌人"
@@ -6640,12 +6659,12 @@ function skillFlowSteps(id, actor, picks) {
     }
   }
   if (id === "chuan_blade") {
-    const units = fieldUnits().filter(u => !u.isPlayer && !u.dead && !u.hidden &&
-      Number(u.zone) === Number(actor.zone));
-    const props = (state.props || []).filter(p => Number(p.zone) === Number(actor.zone) && (Number(p.hp) || 0) > 0)
+    const near = (z) => zoneDist(Number(actor.zone), Number(z), maxZ) <= 1;   // 1 距离以内
+    const units = fieldUnits().filter(u => !u.isPlayer && !u.dead && !u.hidden && near(u.zone));
+    const props = (state.props || []).filter(p => near(p.zone) && (Number(p.hp) || 0) > 0)
       .map(p => ({ id: "prop:" + p.id, name: p.name, zone: p.zone }));
     if (!props.length) return [];
-    return [{ key: "target", type: "unit", optional: false, label: "巨刃划空目标（同区敌人或配置物）",
+    return [{ key: "target", type: "unit", optional: false, label: "巨刃划空目标（1 距离以内的敌人或配置物）",
               units: units.concat(props) }];
   }
   if (id === "role_activate") {
@@ -8579,8 +8598,7 @@ function runSkillInner(id, optRun) {
       a.resources.preparedPending = true;
       a.resources.preparedActive = false;
       a.resources.prepared = true;
-      const n = 1 + milestone(a.level || 1, 5);
-      lines.push(`准备：下个玩家回合第一次攻击裸伤害 +${n}d6（吃倍率与增伤，含协助攻击）。`);
+      lines.push(`准备：下个玩家回合第一次攻击的第一击基础包 +1d${prepDieSides(a)}（吃倍率与克制，含协助攻击；复数攻击只生效一次）。`);
     } else if (id === "xia_assist") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       setEngine(true, "协助攻击");
@@ -8854,12 +8872,14 @@ function runSkillInner(id, optRun) {
     } else if (id === "chuan_assist") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       a.zone = t.zone;
+      // 「若有至少 3 电能」看的是发动协助攻击时手上的电能（这次积攒的 2 电能之前）
+      const heavyReady = (a.resources.charge || 0) >= 3;
       hitOne(a, t, { element: "electric", mult: 0.5, diceN: 1, diceS: 4, baseBreak: 0, atk, flags: { action: true, assist: true } });
       hitOne(a, t, { element: "electric", mult: 0.5, diceN: 1, diceS: 4, baseBreak: 0, atk, flags: { action: true, assist: true }, usePrep: false });
       addCharge(2);
       lines.push("电能 +2。");
       // 有至少 3 电能：最后补一击重斩（1×atk+1d10 电击），消耗 2 电能
-      if ((a.resources.charge || 0) >= 3 && !t.dead) {
+      if (heavyReady && !t.dead) {
         a.resources.charge -= 2;
         hitOne(a, t, { element: "electric", mult: 1, diceN: 1, diceS: 10, baseBreak: 0, atk, flags: { action: true, assist: true }, usePrep: false });
         lines.push(`重斩：1×atk+1d10 电击，电能 −2 → ${a.resources.charge}。`);
