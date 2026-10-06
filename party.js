@@ -616,7 +616,7 @@ function skillCost(id) {
     helu_aa: { ap: 1 }, helu_wave: { ap: 1 }, helu_storm: { ap: 1 }, helu_scan: { ap: 1 }, helu_assist: {},
     helu_summon: { ap: 1, bonus: 1 },
     ecmo_bite: { ap: 1 }, ecmo_focus: { ap: 1 }, ecmo_boom: { ap: 1 }, ecmo_return: { ap: 1 },
-    ras_aa: { ap: 1 }, ras_dump: { ap: 1 }, ras_flee: { ap: 1 }, ras_super: { ap: 1 }, ras_assist: {},
+    ras_aa: { ap: 1 }, ras_dump: { ap: 1 }, ras_flee: { ap: 1 }, ras_super: { ap: 1 }, ras_rampage: { ap: 1 }, ras_assist: {},
     ras_summon: { ap: 1, bonus: 1 },
     edc_drain: { ap: 1 }, edc_shock: { ap: 1 }, edc_flash: { ap: 1 }, edc_return: { ap: 1 }
   };
@@ -855,6 +855,7 @@ function skillList(unit) {
     add({ id: "ras_dump", name: "泄能", hint: "任意距离 · 施加高能 · 转化20%能量为光能" });
     add({ id: "ras_flee", name: "逃离", hint: "移动1 · +20%能量 · 原区一名敌人 1atk 电 · 不触发借机攻击。不稳则移动不限", minLv: 2 });
     add({ id: "ras_super", name: "不稳超导", hint: "20%能量转光能 · 自身导体 · 不稳态下免费", minLv: 3 });
+    add({ id: "ras_rampage", name: "失控暴走", hint: "+40%能量 · 因此进入不稳态则同区变能量场；已在不稳态则全场变能量场", minLv: 6 });
     add({ id: "ras_summon", name: "唤出 EDC30k", hint: "武器生物化" });
   }
   if (unit.kit === "edc") {
