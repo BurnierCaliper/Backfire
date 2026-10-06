@@ -602,7 +602,7 @@ function skillCost(id) {
     xia_summon: { ap: 1, bonus: 1 }, xia_execute: { ap: 1 }, xia_ram: { ap: 1 },
     berniel_spit: { ap: 1 }, berniel_ignite: { ap: 1 }, berniel_dash: { ap: 1 }, berniel_flare: { ap: 1 }, berniel_return: { ap: 1 },
     chuan_aa: { ap: 1 }, chuan_whip: { ap: 1 }, chuan_cover: { bonus: 1 }, chuan_assist: {},
-    chuan_summon: { ap: 1, bonus: 1 }, chuan_wall: { ap: 1 }, chuan_over: { ap: 1 },
+    chuan_summon: { ap: 1, bonus: 1 }, chuan_wall: { ap: 1 }, chuan_over: { ap: 1 }, chuan_reclaim: { bonus: 1 }, ruby_refuel: { bonus: 1 },
     bili_beam: { ap: 1 }, bili_magnet: { ap: 1 }, bili_field: { ap: 1 }, bili_storm: { ap: 1 }, bili_return: { ap: 1 },
     nora_aa: { ap: 1 }, nora_needle: { ap: 1 }, nora_assist: {},
     nora_summon: { ap: 1, bonus: 1 },
@@ -790,7 +790,8 @@ function skillList(unit) {
   }
   if (unit.kit === "xia") {
     add({ id: "xia_aa", name: "普通攻击", hint: "近战 1d4+atk 物理 2击破 · 引擎时火焰 3击破" });
-    add({ id: "xia_engine", name: "拉响引擎", hint: "发动引擎" });
+    if ((unit.resources || {}).engine && typeof passivePlus === "function" && passivePlus(unit, 1)) add({ id: "xia_engine", name: "加油", hint: "获得 2 燃油 · 不会导致引擎熄火" });
+    else add({ id: "xia_engine", name: "拉响引擎", hint: "发动引擎" });
     add({ id: "xia_execute", name: "处决", hint: "引擎+目标晕眩 · 1d8+1.5atk 火焰 · 穿刺", minLv: 2 });
     add({ id: "xia_ram", name: "全速撞击", hint: "引擎 · 移动≤2 · atk物理+震荡 · 每移1格+1击破", minLv: 3 });
     add({ id: "xia_selfburn", name: "引火烧身", hint: "需引擎 · 进入自焚，可选立刻移动 1 距离", minLv: 6, bare: true });
@@ -812,6 +813,13 @@ function skillList(unit) {
     add({ id: "chuan_pulse", name: "高能脉冲", hint: "对自身施加蓄能", minLv: 6 });
     add({ id: "chuan_blade", name: "巨刃划空", hint: "1距离以内 · 耗3电能 · 2atk 电击 +2击破 · 对配置物伤害翻倍 · 击穿血量层或摧毁配置物返还1电能", minLv: 11 });
     add({ id: "chuan_summon", name: "唤出哔哩哩", hint: "武器生物化" });
+  }
+  // 被动升级后才有的技能
+  if (unit.kit === "chuan" && typeof passivePlus === "function" && passivePlus(unit, 2)) {
+    add({ id: "chuan_reclaim", name: "回收护盾", hint: "附赠 · 清除一名友方的护盾，得到 2 电能，并触发磁场护盾" });
+  }
+  if (unit.kit === "ruby" && !(unit.resources && unit.resources.mecha) && typeof passivePlus === "function" && passivePlus(unit, 1)) {
+    add({ id: "ruby_refuel", name: "补充能源", hint: "附赠 · 获得 10 点纳米能源", bare: true });
   }
   if (unit.kit === "bili") {
     add({ id: "bili_beam", name: "电光束", hint: "任意距离 · 1atk 电击 · 感电" });
@@ -846,7 +854,7 @@ function skillList(unit) {
   }
   if (unit.kit === "ecmo") {
     add({ id: "ecmo_bite", name: "叮咬", hint: "同区 · 1atk 物理 +1击破 · 造成失衡返还行动点" });
-    add({ id: "ecmo_focus", name: "频谱分析", hint: "任意敌人的任意血量层施加聚焦" });
+    add({ id: "ecmo_focus", name: "相控阵探头", hint: "任意敌人的任意血量层施加聚焦" });
     add({ id: "ecmo_boom", name: "音爆", hint: "同区全体 0.5atk 谐波 · 触发配置物 · 聚焦层打两次", minLv: 2 });
     add({ id: "ecmo_return", name: "收回为武器", hint: "需与 Helumica 同区" });
   }
@@ -964,7 +972,10 @@ function effectiveAtk(unit, units) {
   if (!unit) return 0;
   // 单局的客制化图纸（mods.js）：拿着装了图纸的武器时 atk 变化；同区敌人的近距离压制
   const raw = baseEffectiveAtk(unit, units);
-  const base = typeof bpAtkAdjust === "function" ? bpAtkAdjust(unit, raw) : raw;
+  let base = typeof bpAtkAdjust === "function" ? bpAtkAdjust(unit, raw) : raw;
+  // 更换刀头+：酸液炮模式下柯尔特 atk +5；思念+：被牵挂且回合内未受伤累积的 atk 加成
+  if (unit.kit === "kolt" && (unit.resources || {}).bit === "acid" && typeof passivePlus === "function" && passivePlus(unit, 1)) base += 5;
+  if (unit.bondAtk) base += Number(unit.bondAtk) || 0;
   const tier = typeof exhaustTierOf === "function" ? exhaustTierOf(unit) : 0;
   return tier >= 2 ? Math.max(0, base - 3) : base;
 }
@@ -1005,7 +1016,7 @@ function resourceText(unit) {
     return `${blade} · ${st} · 全力 ${mx - us}/${mx}`;
   }
   if (unit.kit === "tou") return `圣盾 ${r.shield || 0}/3 · 嘲讽剩余 ${r.tauntLeft == null ? 2 : r.tauntLeft}`;
-  if (unit.kit === "xia") return `${r.engine ? "引擎启动" : "引擎关闭"}${r.preparedActive ? " · 准备生效" : r.preparedPending || r.prepared ? " · 已准备" : ""}`;
+  if (unit.kit === "xia") return `${r.engine ? "引擎启动" : "引擎关闭"}${typeof passivePlus === "function" && passivePlus(unit, 1) ? " · 燃油 " + (Number(r.fuel) || 0) + "/5" : ""}${r.preparedActive ? " · 准备生效" : r.preparedPending || r.prepared ? " · 已准备" : ""}`;
   if (unit.kit === "chuan") return `电能 ${r.charge || 0}`;
   if (unit.kit === "nora") {
     const pin = typeof piercedTarget === "function" ? piercedTarget(unit) : null;

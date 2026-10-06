@@ -416,3 +416,29 @@ function roleSkillsBase(u) {
   }
   return out;
 }
+
+
+/* ===== 被动升级（被动名后面带 +）=====
+ * 角色武器升到 5 级：被动 1 升级；升到 10 级：被动 2 升级。绯秋有两把刀，按等级较高的那把算。
+ * 放弃被动（单局图纸）时不算升级。 */
+const PASSIVE_PLUS_LEVEL = { 1: 5, 2: 10 };
+function heroOfUnit(u) {
+  if (!u) return null;
+  if (u.weaponOf && typeof findKit === "function" && typeof state !== "undefined") return findKit(u.weaponOf, state.units) || null;
+  return u;
+}
+function heroWeaponLevel(hero) {
+  if (!hero) return 0;
+  const kits = (hero.linkedKits && hero.linkedKits.length) ? hero.linkedKits : (typeof defaultLinkedKits === "function" ? defaultLinkedKits(hero.kit) : []);
+  return kits.reduce((m, k) => Math.max(m, Number((hero.weaponLevels || {})[k]) || 1), 0);
+}
+/** 这个角色（或它的武器人）的第 n 个被动是否已经升级 */
+function passivePlus(u, n) {
+  const hero = heroOfUnit(u);
+  if (!hero || !hero.isPlayer) return false;
+  if (typeof passiveOn === "function" && !passiveOn(hero)) return false;
+  return heroWeaponLevel(hero) >= (PASSIVE_PLUS_LEVEL[n] || 99);
+}
+function passivePlusKit(kit, n) {
+  return typeof findKit === "function" && typeof state !== "undefined" ? passivePlus(findKit(kit, state.units), n) : false;
+}

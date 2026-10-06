@@ -51,7 +51,7 @@
   function heroHtml(h) {
     const roles = h.roles.map(r => `${r.label} ${esc(r.role)}`).join(" · ");
     const attrs = ATTR.map(([k, n]) => `<div class="hs-attr"><span>${n}</span><b>${h.attrs[k] != null ? h.attrs[k] : "—"}</b></div>`).join("");
-    const passives = h.passives.map(p => `<div class="hs-pass"><b>${esc(p.name)}</b><p>${esc(p.text)}</p></div>`).join("");
+    const passives = h.passives.map((p, i) => `<div class="hs-pass${p.plus ? " plus" : ""}"><b>${esc(p.name)}</b><p>${esc(p.text)}</p>${!p.plus && p.next ? `<p class="hs-note">武器 ${i === 0 ? 5 : 10} 级时升级为「${esc(p.name)}+」：${esc(p.next)}</p>` : ""}</div>`).join("");
     const weapons = h.weapons.map(w => `<section class="hs-weapon">
         <h4>${esc(w.name)} <small>Lv${w.level} · 武器人${w.out ? " · 在场" : ""}</small></h4>
         <div class="hs-stats">
