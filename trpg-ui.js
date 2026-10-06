@@ -255,7 +255,26 @@
             <button class="g-btn small" data-up="${esc(h.kit)}:${esc(k)}:gm">主持人直接升（不耗）</button>
           </div></div>`;
       })).join("");
-      return `<p class="r-hint">手册：升级武器需要找到工作站；${U.selfMaxLevel} 级以上无法靠自己升级，要找专门的武器工匠（材料 + 加工费，不同工匠的费用要求不一样，按剧情改费用）。材料在商店「材料」里买，或在背包里给予。</p>${rows}`;
+      const parts = Object.keys(WEAPON_PARTS);
+      const slotRows = heroes().flatMap(h => (h.linkedKits || []).map(k => {
+        const row = weaponPartRow(h, k);
+        const name = weaponName(k);
+        const coefs = weaponCoefs(k, weaponPartsOf(h, k));
+        const coefTxt = Object.keys(coefs).map(a => `${WEAPON_PART_ATTR_CN[a] || a} ${coefs[a]}`).join(" · ");
+        if (!row.length) return `<div class="tr-up"><b>${esc(name)}</b>（${esc(h.name)}）没有改装槽（${WEAPON_PART_SLOT_LEVELS[0]} 级开放） · 补正 ${esc(coefTxt)}</div>`;
+        const slots = row.map((id, i) => `<div class="tr-row">槽 ${i + 1}：${id ? `<b>${esc(weaponPartLabel(id))}</b> <small>${esc(weaponPartCoefText(WEAPON_PARTS[id].coef))}</small>
+            <button class="g-btn small" data-part-rm="${esc(h.kit)}:${esc(k)}:${i}">拆下</button>` : `<span class="r-hint">空</span>`}
+            <select data-part-pick="${esc(h.kit)}:${esc(k)}:${i}">${parts.map(p => `<option value="${esc(p)}">${esc(weaponPartLabel(p))}（背包 ${bagCount(weaponPartItemId(p))}）</option>`).join("")}</select>
+            <button class="g-btn small" data-part-in="${esc(h.kit)}:${esc(k)}:${i}:0">装上（从背包）</button>
+            <button class="g-btn small" data-part-in="${esc(h.kit)}:${esc(k)}:${i}:1">主持人直接装</button></div>`).join("");
+        return `<div class="tr-up"><b>${esc(name)}</b>（${esc(h.name)}）${row.length} 个改装槽 · 补正 ${esc(coefTxt)}${slots}</div>`;
+      })).join("");
+      const give = `<div class="tr-row">给予改装件 <select id="tr-part-give">${parts.map(p => `<option value="${esc(weaponPartItemId(p))}">${esc(weaponPartLabel(p))} · ${esc(weaponPartCoefText(WEAPON_PARTS[p].coef))}</option>`).join("")}</select>
+          <button class="g-btn small" id="tr-part-give-btn">放进背包 +1</button></div>`;
+      return `<p class="r-hint">手册：升级武器需要找到工作站；${U.selfMaxLevel} 级以上无法靠自己升级，要找专门的武器工匠（材料 + 加工费，不同工匠的费用要求不一样，按剧情改费用）。材料在商店「材料」里买，或在背包里给予。</p>${rows}
+        <h3>改装槽</h3>
+        <p class="r-hint">武器 ${WEAPON_PART_SLOT_LEVELS.join(" 级、")} 级各开放 1 个改装槽。改装件修改武器的属性补正系数；装上从背包拿走，拆下放回背包。</p>
+        ${give}${slotRows}`;
     }
   };
 
@@ -396,6 +415,18 @@
     on("bs-apply", () => { const edit = readBackstage(); const why = $("bs-why").value.trim(); act(ruleCommand("backstage", { edit, why })); });
     on("bs-undo", () => render());
     // 武器升级
+    // 改装槽
+    P.querySelectorAll("[data-part-in]").forEach(b => {
+      b.onclick = () => {
+        const [owner, kit, slot, free] = b.dataset.partIn.split(":");
+        const pick = P.querySelector(`[data-part-pick="${owner}:${kit}:${slot}"]`);
+        act(ruleCommand("installPart", { owner, kit, slot: Number(slot), part: pick ? pick.value : null, free: free === "1" }));
+      };
+    });
+    P.querySelectorAll("[data-part-rm]").forEach(b => {
+      b.onclick = () => { const [owner, kit, slot] = b.dataset.partRm.split(":"); act(ruleCommand("removePart", { owner, kit, slot: Number(slot) })); };
+    });
+    on("tr-part-give-btn", () => act(ruleCommand("adjustItem", { item: $("tr-part-give").value, amount: 1 })));
     P.querySelectorAll("[data-up]").forEach(b => {
       b.onclick = () => {
         const [owner, kit, mode] = b.dataset.up.split(":");

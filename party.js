@@ -991,7 +991,7 @@ function baseEffectiveAtk(unit, units) {
     const out = blade === "niu" ? unit.resources.niuOut : unit.resources.narutoOut;
     const lv = (unit.weaponLevels && unit.weaponLevels[blade]) || 1;
     const wAtk = typeof computeWeaponAtk === "function"
-      ? computeWeaponAtk(blade, unit.attrs, lv)
+      ? computeWeaponAtk(blade, unit.attrs, lv, weaponPartsOf(unit, blade))
       : (blade === "niu" ? 7 : 6);
     return (unit.personalAtk || 0) + (out ? 0 : wAtk);
   }

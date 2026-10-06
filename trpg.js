@@ -187,6 +187,21 @@ function trpgUpgradeWeapon(ownerKit, kit, mode, fee) {
   return notes;
 }
 
+/* ---------- 武器改装槽（growth.js：3 级 +1 槽，7 级 +1 槽） ----------
+ * free：主持人直接装，不从背包拿 */
+function trpgInstallPart(ownerKit, kit, slot, part, free) {
+  const owner = trpgHeroes().find(h => h.kit === ownerKit);
+  const notes = installWeaponPart(owner, kit, slot, part, free);
+  ledgerCapture();
+  return notes;
+}
+function trpgRemovePart(ownerKit, kit, slot) {
+  const owner = trpgHeroes().find(h => h.kit === ownerKit);
+  const notes = removeWeaponPart(owner, kit, slot);
+  ledgerCapture();
+  return notes;
+}
+
 /* ---------- 后台：主持人按叙事直接改数值（不走规则） ----------
  * edit = {
  *   day, hours, kuizhi, water,

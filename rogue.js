@@ -397,6 +397,7 @@ const Rogue = (function () {
   /* ---------- 把队伍摆到场上（战斗，或者战斗外要用到规则的时候） ---------- */
   function applyHero(u, h) {
     u.weaponLevels = Object.assign({}, u.weaponLevels || {}, h.weaponLevels || {});
+    if (h.weaponParts) u.weaponParts = JSON.parse(JSON.stringify(h.weaponParts));
     if (h.attrs) u.attrs = Object.assign({}, h.attrs);
     u.rolePicks = Object.assign({}, h.rolePicks || {});
     u.role2 = h.role2 || null;

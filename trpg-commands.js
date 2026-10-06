@@ -19,6 +19,8 @@ const TrpgCommands = (() => {
     heal: c => trpgUseHeal(c.item, c.kit),
     repair: c => trpgRepair(c.kit),
     upgradeWeapon: c => trpgUpgradeWeapon(c.owner, c.kit, c.mode, c.fee),
+    installPart: c => trpgInstallPart(c.owner, c.kit, c.slot, c.part, !!c.free),
+    removePart: c => trpgRemovePart(c.owner, c.kit, c.slot),
     backstage: c => trpgBackstageApply(c.edit, c.why),
     xpMultiplier: c => { state.xpMult = Number(c.value) || 1; },
     writeSlot: c => trpgWriteSlot(c.index, c.slot),

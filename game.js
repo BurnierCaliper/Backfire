@@ -2763,6 +2763,7 @@
       roles: u.roles || null,
       // 跑团模式：武器等级、属性点、加过的属性、手册里还没做成系统的奖励（熟练项、专长……）
       weaponLevels: u.weaponLevels ? JSON.parse(JSON.stringify(u.weaponLevels)) : null,
+      weaponParts: u.weaponParts ? JSON.parse(JSON.stringify(u.weaponParts)) : null,   // 武器改装槽
       attrPoints: Number(u.attrPoints) || 0,
       attrPicks: (u.attrPicks || []).slice(),
       notes: u.levelNotes ? JSON.parse(JSON.stringify(u.levelNotes)) : null
@@ -2814,6 +2815,7 @@
       if (s.attrPicks) u.attrPicks = s.attrPicks.slice();
       if (s.notes) u.levelNotes = s.notes;
       if (typeof applyLevelStats === "function") applyLevelStats(u);
+      if (s.weaponParts) u.weaponParts = JSON.parse(JSON.stringify(s.weaponParts));
       if (s.weaponLevels && typeof setOwnedWeaponLevel === "function") {
         Object.keys(s.weaponLevels).forEach(k => {
           const quiet = window.appendLog; window.appendLog = () => {};   // 恢复存档时不写「须找工匠」提示

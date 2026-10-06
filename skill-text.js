@@ -396,6 +396,17 @@
     later.sort((a, b) => a.minLv - b.minLv);
     return { now: rows, later };
   }
+  /** 武器补正系数和改装槽：{ coefs: [{ attr, name, coef }], slots: [{ id, name, text }|null] } */
+  function weaponModRows(owner, kit) {
+    if (typeof weaponCoefs !== "function") return null;
+    const parts = weaponPartsOf(owner, kit);
+    const c = weaponCoefs(kit, parts);
+    return {
+      coefs: Object.keys(c).map(a => ({ attr: a, name: WEAPON_PART_ATTR_CN[a] || a, coef: c[a] })),
+      slots: weaponPartRow(owner, kit).map(id => id ? { id, name: weaponPartLabel(id), text: weaponPartCoefText(WEAPON_PARTS[id].coef) } : null),
+      nextSlotLv: WEAPON_PART_SLOT_LEVELS.find(x => x > (Number((owner.weaponLevels || {})[kit]) || 1)) || null
+    };
+  }
   /** 武器人（不管在不在场）的资料 */
   function weaponSheet(owner, kit, units) {
     let w = units.find(x => x.kit === kit && !x.fused && !x._removed);
@@ -416,7 +427,7 @@
         return { type: l.type, current: hp, max: hp };
       });
       if (g) { w.defMax = w.def = g.baseDef + Math.floor(lv / 5); }
-      try { if (typeof computeWeaponAtk === "function") w.atk = computeWeaponAtk(kit, owner.attrs, lv); } catch (e) { /* 用卡片值 */ }
+      try { if (typeof computeWeaponAtk === "function") w.atk = computeWeaponAtk(kit, owner.attrs, lv, weaponPartsOf(owner, kit)); } catch (e) { /* 用卡片值 */ }
       w.weaponOf = w.weaponOf || owner.kit;
       w.hidden = false;
     }
@@ -430,6 +441,7 @@
       blockBonus: (typeof WEAPON_BLOCK_BONUS !== "undefined" && WEAPON_BLOCK_BONUS[kit]) || 0,
       blockAlone: typeof blockChance === "function" ? blockChance(w) : null,
       passives: info.passives || [], assistBlock: info.assistBlock || "", growth: info.growth || "",
+      mods: weaponModRows(owner, kit),
       skills: skillRows(w)
     };
   }
