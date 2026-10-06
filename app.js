@@ -94,6 +94,9 @@ function clearFieldEffects(f) {
 function setWeather(kind, opts) {
   opts = opts || {};
   kind = kind || "none";
+  if (state.combatStarted && state.weatherInnate && !opts.force && !opts.innateOk && kind !== state.weather) {
+    return `固有天气「${weatherName(state.weatherInnate)}」：战斗开始时就存在的天气无法被改变。`;
+  }
   if (state.weatherLock && !opts.force && kind !== state.weather) {
     return `天气被「${state.weatherLock}」锁定，无法覆盖。`;
   }
@@ -112,6 +115,12 @@ function setZoneField(zone, kind, opts) {
   opts = opts || {};
   const f = state.fields[zone];
   if (!f) return "没有这个区域。";
+  if (state.combatStarted && !opts.force && !opts.innateOk) {   // innateOk：主持人的计算器面板（仍然尊重手动锁定）
+    const same = (kind === "fire" && fieldFireOn(f)) || (kind && kind !== "fire" && f[kind]);
+    // 深渊、损毁地面不能被改变；战斗开始时就存在的场地是固有场地，也不能被改变（重复施加同一种照常）
+    if (!same && (f.abyss || f.ruinOn)) return `${zone} 区是${f.abyss ? "深渊" : "损毁地面"}，场地无法被改变。`;
+    if (!same && f.innate) return `${zone} 区是固有场地（战斗开始时就存在），无法被改变。`;
+  }
   if (f.fieldLock && !opts.force) {
     const same = (kind === "fire" && fieldFireOn(f)) || (kind && kind !== "fire" && f[kind]);
     if (!same && kind) return `${zone} 区场地被「${f.fieldLock}」锁定，无法覆盖。`;
@@ -476,7 +485,7 @@ function checkHighBoom(unit) {
   const f = (state.fields && state.fields[unit.zone]) || emptyField();
   const fieldHE = unit.statuses && unit.statuses.high ? (Number(f.energyVal) || 0) : 0;
   const val = (Number(unit.highEnergy) || 0) + fieldHE;
-  if (val > 0 && val >= hp) explodeHigh(unit);
+  if (val > 0 && val >= hp) explodeHigh(unit, val);   // 这次爆炸的高能值含能量场叠上来的部分
 }
 
 function highBoomHitsUnit(source, u) {
@@ -499,10 +508,11 @@ function highBoomVictims(source) {
   return fieldUnits().filter(u => Number(u.zone) === Number(source.zone) && highBoomHitsUnit(source, u) && !aoeShieldFor(u));
 }
 
-function explodeHigh(unit) {
+/** 高能自爆。total：触发这次爆炸的高能值（含能量场叠加的部分）；不给就用单位自己的高能值 */
+function explodeHigh(unit, total) {
   if (!unit || unit._highBooming) return;
   unit._highBooming = true;
-  const he = Number(unit.highEnergy) || 0;
+  const he = Math.max(Number(total) || 0, Number(unit.highEnergy) || 0);
   const aoe = Math.floor(he / 2);
   const lifeBefore = currentLifeForHigh(unit);
   appendLog(`【高能自爆】${unit.name} 高能值 ${he} ≥ 当前生命 ${lifeBefore}，立即秒杀。余波只打同阵营与无阵营配置物，${aoe} 能量。`);
@@ -528,9 +538,10 @@ function explodeHigh(unit) {
     const ruby = findKit("ruby", state.units);
     appendLog(`瑞比标签高能自爆：纳米 +40 → ${ruby && ruby.resources ? ruby.resources.nano : "?"}`);
   }
-  if (unit.highTags && unit.highTags.indexOf("ras") >= 0) {
+  // 能量流向：场上发生任何高能值导致的爆炸，拉斯缪尔都回收等量光能（不再要求是自己施加的高能）
+  {
     const ras = findKit("ras", state.units);
-    if (ras && (typeof passiveOnKit !== "function" || passiveOnKit("ras"))) {   // 放弃被动「能量流向」时不回收
+    if (ras && !ras.dead && he > 0 && (typeof passiveOnKit !== "function" || passiveOnKit("ras"))) {   // 放弃被动「能量流向」时不回收
       ras.resources = ras.resources || {};
       ras.resources.light = (Number(ras.resources.light) || 0) + he;
       appendLog(`能量流向：回收光能 +${he} → ${ras.resources.light}`);
@@ -686,6 +697,7 @@ function fieldTags(f) {
   if (f.abyss) a.push("深渊");
   if (f.isolate) a.push("隔离");
   if (f.fieldLock) a.push("锁定:" + f.fieldLock);
+  if (f.innate && state.combatStarted) a.push("固有");
   return a.join(" · ");
 }
 
@@ -1253,6 +1265,22 @@ function phaseLabelText() {
   return state.combatPhase === "enemy" ? "敌人回合" : "玩家回合";
 }
 
+const WEATHER_CN = { none: "常态", heat: "酷暑", snow: "雪天", acid: "酸雨", thunder: "雷鸣", glow: "微光", sand: "沙暴", phase: "相位" };
+function weatherName(w) { return WEATHER_CN[w] || w; }
+/** 战斗开始时就存在的天气 / 场地是「固有」的：整场战斗都无法被改变（主持人后台除外）。高地不算场地名额，不影响。 */
+function markInnateEnvironment() {
+  state.weatherInnate = state.weather && state.weather !== "none" ? state.weather : null;
+  const notes = [];
+  if (state.weatherInnate) notes.push(`固有天气：${weatherName(state.weatherInnate)}（无法被改变）`);
+  Object.keys(state.fields || {}).forEach(z => {
+    const f = state.fields[z];
+    if (!f) return;
+    f.innate = fieldFireOn(f) || FIELD_EFFECT_KEYS.some(k => k !== "highland" && f[k]);
+    if (f.innate) notes.push(`${z} 区固有场地：${fieldTags(f) || "场地"}（无法被改变）`);
+    else if (f.abyss || f.ruinOn) notes.push(`${z} 区${f.abyss ? "深渊" : "损毁地面"}（无法被改变）`);
+  });
+  if (notes.length) appendLog(notes.join("\n"));
+}
 function startCombat() {
   if (state.combatStarted) return false;
   state.combatStarted = true;
@@ -1269,6 +1297,7 @@ function startCombat() {
   const prePage = state.logPages[state.logPages.length - 1];
   if (prePage && prePage.lines.length) prePage.turn = 0;
   state.turnNo = 1;
+  markInnateEnvironment();
   beginRound([]);
   startPlayerPhase();
   appendLog("战斗开始。回合开始效果已结算。", "sep");
@@ -9606,6 +9635,18 @@ function runSkillInner(id, optRun) {
       a.zone = dest;
       addRasEnergy(20, "逃离");
       lines.push(`逃离：从 ${from} 区到 ${dest} 区。`);
+    } else if (id === "ras_rampage") {
+      // 失控暴走：累积 40% 能量；因此进入不稳态 → 同区变能量场；本来就在不稳态 → 全场所有区域变能量场
+      const wasUnstable = !!(a.resources && a.resources.unstable);
+      addRasEnergy(40, "失控暴走");
+      const zones = [];
+      if (wasUnstable) for (let z = 1; z <= Number(state.zoneMode || 2); z++) zones.push(z);
+      else if (a.resources && a.resources.unstable) zones.push(Number(a.zone));
+      if (!zones.length) lines.push("失控暴走：累积 40% 能量（未进入不稳态）。");
+      else {
+        lines.push(wasUnstable ? "失控暴走：已在不稳态，全场所有区域变为能量场！" : `失控暴走：进入不稳态，${a.zone} 区变为能量场。`);
+        zones.forEach(z => { const err = setZoneField(z, "energy"); if (err) lines.push(err); });
+      }
     } else if (id === "ras_super") {
       // 不稳超导：转换 20% 累积能量为光能，给自己施加导体；不稳态下免费（skillCost）
       convertRasLight(20);

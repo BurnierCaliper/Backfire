@@ -130,10 +130,10 @@ const CalcCommands = (() => {
         if (k === "fieldLock") state.fields[z].fieldLock = value ? (state.fields[z].fieldLock || "手动锁定") : null;
         else if (k === "fire") {
           const n = Math.max(0, Number(value) || 0);
-          if (n > 0) { const err = setZoneField(z, "fire", { stacks: n }); if (err) appendLog(err); }
+          if (n > 0) { const err = setZoneField(z, "fire", { stacks: n, innateOk: true }); if (err) appendLog(err); }
           else if (!state.fields[z].fieldLock) { state.fields[z].fire = 0; state.fields[z].fireOn = false; }
         } else if (k === "fireOn" || FIELD_EFFECT_KEYS.includes(k)) {
-          if (value) { const err = setZoneField(z, k === "fireOn" ? "fire" : k, k === "fireOn" ? { stacks: state.fields[z].fire || 1 } : {}); if (err) appendLog(err); }
+          if (value) { const err = setZoneField(z, k === "fireOn" ? "fire" : k, k === "fireOn" ? { stacks: state.fields[z].fire || 1, innateOk: true } : { innateOk: true }); if (err) appendLog(err); }
           else if (!state.fields[z].fieldLock) clearFieldEffects(state.fields[z]);
         } else state.fields[z][k] = value;
         if (k === "abyss" && value) { const notes = []; state.units.filter(v => Number(v.zone) === z && !v.hidden && !v.dead).forEach(v => applyAbyssFall(v, otherZone(z), notes)); if (notes.length) appendLog(notes.join("\n")); }
@@ -191,7 +191,7 @@ const CalcCommands = (() => {
       case "rosterImport": if (!Array.isArray(c.cards)) throw new Error("Invalid roster"); c.cards.forEach(original => { const card = cloneData(original); if (!card.cardId) card.cardId = "c" + Math.random().toString(36).slice(2, 9); const i = state.roster.findIndex(v => v.name === card.name); if (i >= 0) state.roster[i] = Object.assign({}, state.roster[i], card, { cardId: state.roster[i].cardId }); else state.roster.push(card); }); persistRoster(); setRosterHint(`导入完成，卡组现有 ${state.roster.length} 张。`); return;
       case "global": {
         if (!["zoneMode", "partySize", "weather", "weatherLock", "phaseStep", "sandDir"].includes(c.field)) throw new Error("Unknown calculator setting");
-        if (c.field === "weather") { const err = setWeather(c.value); if (err) { appendLog(err); return err; } }
+        if (c.field === "weather") { const err = setWeather(c.value, { innateOk: true }); if (err) { appendLog(err); return err; } }
         else if (c.field === "weatherLock") state.weatherLock = c.value ? (state.weatherLock || "手动锁定") : null;
         else state[c.field] = c.value;
         if (!["partySize", "phaseStep"].includes(c.field)) render(); return;
