@@ -281,3 +281,61 @@ function bpLeaveOpportunity(u, mover, notes) {
   dealTo(u, mover, { atk: effectiveAtk(u, state.units), mult: 1, diceN: 1, diceS: 6, element, baseBreak: 1,
     flags: { action: true, opportunity: true, blockResolved: true } });
 }
+
+/* ---------- 武器页（armory-ui.js）用：把图纸的 mod 换成「实际效果」一行行 ----------
+ * ctx：{ atkWeapon 武器 atk, atkHeld 拿着时角色 atk（套图纸前）, durBase/durMax, defBase, blockBase, bigKill 大杀器加的 atk }
+ * 每行 { k 名目, v 实际数值, tone: "up" | "down" | "" } */
+function bpEffectRows(mod, ctx) {
+  mod = mod || {}; ctx = ctx || {};
+  const rows = [];
+  const sgn = (n) => (n > 0 ? "+" : "−") + Math.abs(n);
+  const dice = (d) => `${d[0]}d${d[1]}`;
+  const atkAfter = (b) => {
+    let a = Number(b) || 0;
+    if (mod.atkPct) a = Math.floor(a * (1 + Number(mod.atkPct)));
+    a += Number(mod.atk) || 0;
+    if (mod.bigKill) a += Number(ctx.bigKill) || 0;
+    return Math.max(0, a);
+  };
+  if (mod.atk || mod.atkPct || mod.bigKill) {
+    const parts = [];
+    if (mod.atkPct) parts.push(`×${Math.round((1 + Number(mod.atkPct)) * 100)}%`);
+    if (mod.atk) parts.push(sgn(Number(mod.atk)));
+    if (mod.bigKill) parts.push(`大杀器 +${Number(ctx.bigKill) || 0}`);
+    const up = atkAfter(100) >= 100;
+    if (ctx.atkHeld != null) rows.push({ k: "拿着时角色 atk", v: `${ctx.atkHeld} → ${atkAfter(ctx.atkHeld)}（${parts.join("，")}）`, tone: up ? "up" : "down" });
+    if (ctx.atkWeapon != null) rows.push({ k: "武器人形态 atk", v: `${ctx.atkWeapon} → ${atkAfter(ctx.atkWeapon)}`, tone: up ? "up" : "down" });
+  }
+  if (mod.bigKill || mod.dur) {
+    rows.push({ k: "耐久上限", v: `${ctx.durBase} → ${ctx.durMax}${mod.bigKill ? "（大杀器：耐久减半）" : ""}`, tone: ctx.durMax >= ctx.durBase ? "up" : "down" });
+  }
+  if (mod.def) rows.push({ k: "架势上限", v: `${sgn(Number(mod.def))}${ctx.defBase != null ? `（${ctx.defBase} → ${Math.max(1, ctx.defBase + Number(mod.def))}）` : ""}`, tone: mod.def > 0 ? "up" : "down" });
+  if (mod.block) rows.push({ k: "协助格挡", v: `${sgn(Number(mod.block))}%${ctx.blockBase != null ? `（武器格挡加成 ${ctx.blockBase}% → ${ctx.blockBase + Number(mod.block)}%）` : ""}`, tone: mod.block > 0 ? "up" : "down" });
+  if (mod.protectedBlock) rows.push({ k: "被队友格挡", v: `成功率 ${sgn(Number(mod.protectedBlock))}%`, tone: "up" });
+  if (mod.bonusPerRound) rows.push({ k: "附赠动作", v: `每回合 +${mod.bonusPerRound}（角色拿着时）`, tone: "up" });
+  if (mod.weaponApPerRound) rows.push({ k: "行动点", v: `每回合 +${mod.weaponApPerRound}（武器人形态）`, tone: "up" });
+  if (mod.apPerRound) rows.push({ k: "行动点", v: `每回合 +${mod.apPerRound}`, tone: "up" });
+  if (mod.noBonus) rows.push({ k: "附赠动作", v: "失去全部附赠动作", tone: "down" });
+  if (mod.meleeDice) rows.push({ k: "近距离伤害", v: `+${dice(mod.meleeDice)}`, tone: "up" });
+  if (mod.rangedDice) rows.push({ k: "远距离伤害", v: `+${dice(mod.rangedDice)}`, tone: "up" });
+  if (mod.meleeFlat) rows.push({ k: "近距离伤害", v: sgn(Number(mod.meleeFlat)), tone: mod.meleeFlat > 0 ? "up" : "down" });
+  if (mod.attackDice) { const neg = Number(mod.attackDice[2] || -1) < 0; rows.push({ k: "攻击伤害", v: `${neg ? "−" : "+"}${dice(mod.attackDice)}`, tone: neg ? "down" : "up" }); }
+  if (mod.takenDice) rows.push({ k: "承受伤害", v: `总是 +${dice(mod.takenDice)}`, tone: "down" });
+  if (mod.noAssistBlock) rows.push({ k: "协助格挡", v: "不能为别人协助格挡", tone: "down" });
+  if (mod.noAssistAttack) rows.push({ k: "协助攻击", v: "不能发动协助攻击", tone: "down" });
+  if (mod.assistAtkPct) rows.push({ k: "协助攻击", v: `伤害 +${Math.round(mod.assistAtkPct * 100)}%`, tone: "up" });
+  if (mod.aggro) rows.push({ k: "仇恨", v: "敌人更倾向于攻击你", tone: "" });
+  if (mod.stealth) rows.push({ k: "潜行", v: "敌人显著不倾向于攻击你（武器人形态不会被选中）", tone: "up" });
+  if (mod.healOnBlock) rows.push({ k: "格挡回血", v: `成功协助格挡后恢复 ${dice(mod.healOnBlock)}`, tone: "up" });
+  if (mod.autoRetreat) rows.push({ k: "自动撤离", v: "有敌人走进你所在区时自动移到另一个区", tone: "" });
+  if (mod.noPassive) rows.push({ k: "被动", v: "放弃角色自身的被动效果", tone: "down" });
+  if (mod.oppAttack) rows.push({ k: "借机攻击", v: "敌人离开你所在区时自动攻击 atk+1d6", tone: "up" });
+  if (mod.suppress) rows.push({ k: "近距离压制", v: `同区敌人 atk −${mod.suppress}`, tone: "up" });
+  if (mod.blockCleanse) rows.push({ k: "团队协作", v: "成功协助格挡时清除被保护者的负面状态", tone: "up" });
+  if (mod.firstBreakGuard) rows.push({ k: "坚守阵地", v: "第一次被击破架势时不触发协助攻击，并恢复 2 架势", tone: "up" });
+  if (mod.weaknessCap != null) rows.push({ k: "属性克制", v: `克制加成最多 ${Math.round(mod.weaknessCap * 100)}%`, tone: "up" });
+  if (mod.healBonus) rows.push({ k: "治疗", v: `受到和施加的治疗 +${dice(mod.healBonus)}`, tone: "up" });
+  if (mod.resistBreak) rows.push({ k: "效果不好时", v: `额外 +${mod.resistBreak} 击破`, tone: "up" });
+  if (mod.greatStatus) rows.push({ k: "效果绝佳时", v: `${Math.round(mod.greatStatus * 100)}% 施加该属性状态`, tone: "up" });
+  return rows;
+}

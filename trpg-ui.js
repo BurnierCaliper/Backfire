@@ -17,7 +17,7 @@
   const UNDO_MAX = 20;
 
   const TABS = [
-    ["party", "队伍"], ["sheet", "角色"], ["rest", "时间与休息"], ["shop", "商店"], ["bag", "背包"], ["smith", "武器升级"], ["backstage", "后台"]
+    ["party", "队伍"], ["sheet", "角色"], ["rest", "时间与休息"], ["shop", "商店"], ["bag", "背包"], ["smith", "武器升级"], ["tasks", "任务"], ["backstage", "后台"]
   ];
 
   function heroes() { return trpgHeroes(); }
@@ -113,7 +113,7 @@
         return `<div class="rh-w${d <= 0 ? " broken" : ""}">${esc(weaponName(k))} Lv${lv} · 耐久 ${d}/${m}${d <= 0 ? "（损坏）" : ""}</div>`;
       }).join("");
       return `<div class="rhero${h.dead ? " fallen" : h.dying ? " dying" : ""}">
-        <div class="rh-top"><b>${esc(h.name)}</b><span>Lv${h.level || 1}${tag ? " · " + tag : ""}</span><button class="g-btn small rh-sheet" data-sheet="${esc(h.kit)}" title="数值、被动和技能说明">资料</button></div>
+        <div class="rh-top"><b>${esc(h.name)}</b><span>Lv${h.level || 1}${tag ? " · " + tag : ""}</span><button class="g-btn small rh-sheet" data-sheet="${esc(h.kit)}" title="数值、被动和技能说明">资料</button><button class="g-btn small rh-sheet" data-armory="${esc(h.kit)}" title="武器补正、atk 明细、改装件和客制化">武器</button></div>
         <div class="rh-row">血量 <span>${totalHpOf(h)}/${totalHpMaxOf(h)}</span></div>
         <div class="rh-row">攻击力 <span>${heroAtk(h)}</span></div>
         <div class="rh-row">架势 <span>${Number(h.def) || 0}/${Number(h.defMax != null ? h.defMax : h.def) || 0}</span></div>
@@ -255,9 +255,57 @@
             <button class="g-btn small" data-up="${esc(h.kit)}:${esc(k)}:gm">主持人直接升（不耗）</button>
           </div></div>`;
       })).join("");
-      return `<p class="r-hint">手册：升级武器需要找到工作站；${U.selfMaxLevel} 级以上无法靠自己升级，要找专门的武器工匠（材料 + 加工费，不同工匠的费用要求不一样，按剧情改费用）。材料在商店「材料」里买，或在背包里给予。</p>${rows}`;
+      const parts = Object.keys(WEAPON_PARTS);
+      // 按等级分组：<optgroup label="C 级">…；opt(p) 生成一项
+      const partOpts = (opt) => ["C", "B", "A", "S"].map(g => {
+        const ps = parts.filter(p => WEAPON_PARTS[p].grade === g);
+        return ps.length ? `<optgroup label="${g} 级">${ps.map(opt).join("")}</optgroup>` : "";
+      }).join("");
+      const slotRows = heroes().flatMap(h => (h.linkedKits || []).map(k => {
+        const row = weaponPartRow(h, k);
+        const name = weaponName(k);
+        const coefs = weaponCoefs(k, weaponPartsOf(h, k));
+        const coefTxt = Object.keys(coefs).map(a => `${WEAPON_PART_ATTR_CN[a] || a} ${coefs[a]}`).join(" · ");
+        if (!row.length) return `<div class="tr-up"><b>${esc(name)}</b>（${esc(h.name)}）没有改装槽（${WEAPON_PART_SLOT_LEVELS[0]} 级开放） · 补正 ${esc(coefTxt)}</div>`;
+        const slots = row.map((id, i) => `<div class="tr-row">槽 ${i + 1}：${id ? `<b>${esc(weaponPartLabel(id))}</b> <small>${esc(weaponPartCoefText(WEAPON_PARTS[id].coef))}</small>
+            <button class="g-btn small" data-part-rm="${esc(h.kit)}:${esc(k)}:${i}">拆下</button>` : `<span class="r-hint">空</span>`}
+            <select data-part-pick="${esc(h.kit)}:${esc(k)}:${i}">${partOpts(p => `<option value="${esc(p)}">${esc(weaponPartLabel(p))} ${esc(weaponPartCoefText(WEAPON_PARTS[p].coef))}（背包 ${bagCount(weaponPartItemId(p))}）</option>`)}</select>
+            <button class="g-btn small" data-part-in="${esc(h.kit)}:${esc(k)}:${i}:0">装上（从背包）</button>
+            <button class="g-btn small" data-part-in="${esc(h.kit)}:${esc(k)}:${i}:1">主持人直接装</button></div>`).join("");
+        return `<div class="tr-up"><b>${esc(name)}</b>（${esc(h.name)}）${row.length} 个改装槽 · 补正 ${esc(coefTxt)}${slots}</div>`;
+      })).join("");
+      const give = `<div class="tr-row">随机生成 <button class="g-btn small" data-part-rand="C">C 级 +1</button><button class="g-btn small" data-part-rand="B">B 级 +1</button></div>
+        <div class="tr-row">给予改装件 <select id="tr-part-give">${partOpts(p => `<option value="${esc(weaponPartItemId(p))}">${esc(weaponPartLabel(p))} · ${esc(weaponPartCoefText(WEAPON_PARTS[p].coef))}</option>`)}</select>
+          <button class="g-btn small" id="tr-part-give-btn">放进背包 +1</button></div>`;
+      return `<p class="r-hint">手册：升级武器需要找到工作站；${U.selfMaxLevel} 级以上无法靠自己升级，要找专门的武器工匠（材料 + 加工费，不同工匠的费用要求不一样，按剧情改费用）。材料在商店「材料」里买，或在背包里给予。</p>${rows}
+        <h3>改装槽 <button class="g-btn small" data-armory="${esc((heroes()[0] || {}).kit || "")}">打开武器工坊</button></h3>
+        <p class="r-hint">武器 ${WEAPON_PART_SLOT_LEVELS.join(" 级、")} 级各开放 1 个改装槽。改装件修改武器的属性补正系数；装上从背包拿走，拆下放回背包。</p>
+        ${give}${slotRows}
+        ${blueprintPanel()}`;
     }
   };
+
+  /* 客制化图纸：主持人放进背包，再装到武器上（一把武器一张，装新的把旧的放回背包） */
+  function blueprintPanel() {
+    if (typeof ROGUE_SMITHS === "undefined") return "";
+    const all = ROGUE_SMITHS.flatMap(s => (s.blueprints || []).map(b => Object.assign({ smithName: s.name }, b)));
+    const opt = (b) => `<option value="${esc(b.id)}">${esc(b.name)}（背包 ${bagCount(b.id)}）· ${esc(b.text)}</option>`;
+    const groups = ROGUE_SMITHS.map(s => `<optgroup label="${esc(s.name)}">${(s.blueprints || []).map(b => opt(b)).join("")}</optgroup>`).join("");
+    const rows = heroes().flatMap(h => (h.linkedKits || []).map(k => {
+      const cur = (h.weaponBlueprints || {})[k];
+      const b = cur ? all.find(x => x.id === cur) : null;
+      return `<div class="tr-up"><b>${esc(weaponName(k))}</b>（${esc(h.name)}）${b ? `装着「<b>${esc(b.name)}</b>」<small> ${esc(b.text)}</small>
+          <button class="g-btn small" data-bp-rm="${esc(h.kit)}:${esc(k)}">拆下（放回背包）</button>` : `<span class="r-hint">没有装图纸</span>`}
+        <div class="tr-row"><select data-bp-pick="${esc(h.kit)}:${esc(k)}">${groups}</select>
+          <span>工钱 <input type="number" min="0" value="0" data-bp-fee="${esc(h.kit)}:${esc(k)}" style="width:90px"></span>
+          <button class="g-btn small" data-bp-in="${esc(h.kit)}:${esc(k)}:0">装上（从背包）</button>
+          <button class="g-btn small" data-bp-in="${esc(h.kit)}:${esc(k)}:1">主持人直接装（不耗）</button></div></div>`;
+    })).join("");
+    return `<h3>客制化图纸 <button class="g-btn small" data-armory="${esc((heroes()[0] || {}).kit || "")}">在武器工坊里看实际效果</button></h3>
+      <p class="r-hint">一把武器只能装一张，装新的会把旧的放回背包；拆下也放回背包。工钱按剧情填（不同工匠收费不一样），主持人直接装不耗图纸也不收钱。</p>
+      <div class="tr-row">给予图纸 <select id="tr-bp-give">${groups}</select><button class="g-btn small" id="tr-bp-give-btn">放进背包 +1</button></div>
+      ${rows}`;
+  }
 
   /* 后台：按叙事直接改数值（不走规则），改完点「应用改动」一次写入并记进探索记录 */
   PANELS.backstage = function () {
@@ -345,9 +393,192 @@
     bind();
   }
 
+  /* ---------- 任务（trpg-tasks.js）：主持人发布、编辑任务，预先配置路线、每站敌人、奖励 ---------- */
+  let taskEdit = null;   // 正在编辑的任务（一份拷贝，点「保存」才写回）
+  const NODE_T = () => TRPG_NODE_TYPES;
+  const WX = { none: "常态", heat: "酷暑", snow: "雪天", acid: "酸雨", thunder: "雷鸣", glow: "微光", sand: "沙暴", phase: "相位" };
+  const presetName = (id) => ((typeof enemyPresets === "function" ? enemyPresets() : []).find(p => p.id === id) || {}).name || id;
+  const options = (pairs, cur) => pairs.map(([v, t]) => `<option value="${esc(v)}"${String(v) === String(cur) ? " selected" : ""}>${esc(t)}</option>`).join("");
+  function taskRewardText(t) {
+    const r = t.reward, out = [];
+    if (r.kuizhi) out.push(`${r.kuizhi} 奎支`);
+    if (r.xp) out.push(`每人 ${r.xp} 经验`);
+    r.items.forEach(x => out.push(`${(ITEM_CATALOG[x.id] || {}).name || x.id}×${x.qty}`));
+    r.parts.forEach(id => out.push(weaponPartLabel(id)));
+    r.blueprints.forEach(id => out.push(`图纸「${(blueprintSpec(id) || {}).name || id}」`));
+    if (t.escort && r.intactKuizhi) out.push(`完好额外 ${r.intactKuizhi} 奎支`);
+    return out.join("、") || "无";
+  }
+  function taskEscortText(t) {
+    if (!t.escort) return "";
+    const sp = escortSpec(t.escort, t.escort.level);
+    const cur = t.escort.lost ? 0 : t.escort.cur != null ? t.escort.cur : sp.hpMax;
+    return `护送 <b>${esc(sp.name)}</b>（${sp.kind === "cart" ? "货车" : "人物"} · 血量 ${t.status === "active" ? `${cur}/${sp.hpMax}` : sp.hpMax} · 架势 ${sp.def} · atk ${sp.atk}）${t.escort.lost ? ' <span class="bad">已被摧毁</span>' : ""}`;
+  }
+  function taskRoute(t) {
+    return `<div class="tk-route">${t.nodes.map((n, i) => {
+      const cls = t.status === "active" ? (i < t.index ? " done" : i === t.index ? " cur" : "") : "";
+      const foes = n.enemies.length ? `：${n.enemies.map(e => `${presetName(e.id)} Lv${e.lv}`).join("、")}${n.weather !== "none" ? ` · ${WX[n.weather]}` : ""}` : "";
+      return `<span class="tk-node${cls}" title="${esc(n.note || "")}">${i + 1}. ${esc(NODE_T()[n.type])}${esc(foes)}${n.note ? ` · ${esc(n.note)}` : ""}</span>`;
+    }).join("")}</div>`;
+  }
+  function taskCardHtml(t) {
+    const st = `<span class="tk-st tk-${t.status}">${TRPG_TASK_STATUS[t.status]}</span>`;
+    const id = esc(t.id);
+    const node = t.status === "active" ? t.nodes[t.index] : null;
+    const fight = node && (node.type === "battle" || node.type === "elite");
+    const btns = [];
+    if (t.status === "draft") btns.push(`<button class="g-btn small" data-tk="post:${id}">发布</button>`);
+    if (t.status === "posted") btns.push(`<button class="g-btn small" data-tk="accept:${id}">队伍接下任务</button>`, `<button class="g-btn small" data-tk="unpost:${id}">撤回为草稿</button>`);
+    if (t.status === "active") {
+      if (fight) btns.push(`<button class="g-btn small tk-go" data-tk="fight:${id}">打这一站（${esc(NODE_T()[node.type])}）</button>`);
+      if (node) btns.push(`<button class="g-btn small" data-tk="node:${id}">这一站完成</button>`);
+      btns.push(`<button class="g-btn small" data-tk="complete:${id}">结算任务（发奖励）</button>`, `<button class="g-btn small" data-tk="fail:${id}">判定失败</button>`);
+    }
+    btns.push(`<button class="g-btn small" data-tk="edit:${id}">编辑</button>`);
+    if (t.status !== "active") btns.push(`<button class="g-btn small" data-tk="del:${id}">删除</button>`);
+    return `<div class="tr-up tk-card${t.status === "active" ? " on" : ""}">
+      <div class="tk-head"><b>${esc(t.name)}</b><span class="tk-kind">${esc(TRPG_TASK_KINDS[t.kind])}</span>${st}<span class="tk-days">${t.days} 天</span></div>
+      ${t.goal ? `<p class="tk-goal">${esc(t.goal)}</p>` : ""}
+      <div class="r-hint">报酬：${esc(taskRewardText(t))}</div>
+      ${t.escort ? `<div class="r-hint">${taskEscortText(t)}</div>` : ""}
+      ${taskRoute(t)}
+      ${node ? `<div class="r-hint">当前：第 ${t.index + 1} 站 ${esc(NODE_T()[node.type])}${node.note ? " · " + esc(node.note) : ""}</div>` : t.status === "active" ? `<div class="r-hint">路线走完了，可以结算。</div>` : ""}
+      <div class="tr-row">${btns.join("")}</div></div>`;
+  }
+  /** 编辑表单：data-te="路径" 的输入直接改 taskEdit；data-te-act 增删行 */
+  function taskEditorHtml(t) {
+    const inp = (path, v, w, type) => `<input type="${type || "text"}" data-te="${path}" value="${esc(v == null ? "" : v)}" style="width:${w || 120}px">`;
+    const presets = (typeof enemyPresets === "function" ? enemyPresets() : []).map(p => [p.id, p.name]);
+    const nodes = t.nodes.map((n, i) => {
+      const fight = n.type === "battle" || n.type === "elite";
+      const foes = fight ? `<div class="tk-foes">${n.enemies.map((e, j) => `<div class="tr-row">
+            <select data-te="nodes.${i}.enemies.${j}.id">${options(presets, e.id)}</select>
+            等级 ${inp(`nodes.${i}.enemies.${j}.lv`, e.lv, 52, "number")} 区域 <select data-te="nodes.${i}.enemies.${j}.zone">${options([[1, "1 区"], [2, "2 区"], [3, "3 区"]], e.zone)}</select>
+            <button class="g-btn small" data-te-act="delEnemy:${i}:${j}">删</button></div>`).join("")}
+          <div class="tr-row"><button class="g-btn small" data-te-act="addEnemy:${i}">＋ 敌人</button>
+            天气 <select data-te="nodes.${i}.weather">${options(Object.keys(WX).map(k => [k, WX[k]]), n.weather)}</select>
+            战场 <select data-te="nodes.${i}.zoneMode">${options([[2, "两区"], [3, "三区"]], n.zoneMode)}</select></div></div>` : "";
+      return `<div class="tk-enode"><div class="tr-row"><b>第 ${i + 1} 站</b>
+          <select data-te="nodes.${i}.type" data-te-rerender="1">${options(Object.keys(NODE_T()).map(k => [k, NODE_T()[k]]), n.type)}</select>
+          说明 ${inp(`nodes.${i}.note`, n.note, 260)}
+          <button class="g-btn small" data-te-act="up:${i}">↑</button><button class="g-btn small" data-te-act="down:${i}">↓</button>
+          <button class="g-btn small" data-te-act="delNode:${i}">删这一站</button></div>${foes}</div>`;
+    }).join("");
+    const r = t.reward;
+    const itemOpts = Object.keys(ITEM_CATALOG).filter(id => !ITEM_CATALOG[id].part && !ITEM_CATALOG[id].blueprint).map(id => [id, ITEM_CATALOG[id].name]);
+    const partOpts = Object.keys(WEAPON_PARTS).map(id => [id, `${weaponPartLabel(id)} ${weaponPartCoefText(WEAPON_PARTS[id].coef)}`]);
+    const bpOpts = (typeof ROGUE_SMITHS !== "undefined" ? ROGUE_SMITHS : []).flatMap(s => s.blueprints.map(b => [b.id, `${b.name}（${s.name}）`]));
+    const list = (arr, kind, label) => arr.map((x, k) => `<span class="tk-chip">${esc(label(x))}<button class="g-btn small" data-te-act="del${kind}:${k}">×</button></span>`).join("");
+    const e = t.escort;
+    const escort = e ? `<h4>护送对象</h4><div class="tr-row">
+        <select data-te="escort.kind" data-te-rerender="1">${options([["cart", "货车（不行动，不会失衡）"], ["vip", "人物（会躲开敌人、能还击）"]], e.kind)}</select>
+        名字 ${inp("escort.name", e.name, 100)} 等级 ${inp("escort.level", e.level, 52, "number")}
+        血量 ${inp("escort.hp", e.hp, 60, "number")} 架势 ${inp("escort.def", e.def, 52, "number")} atk ${inp("escort.atk", e.atk, 52, "number")}</div>
+        <p class="r-hint">空着的按等级自动算（现在：${(() => { const sp = escortSpec(e, e.level); return `血量 ${sp.hpMax}、架势 ${sp.def}、atk ${sp.atk}`; })()}）。被摧毁任务失败；剩余 ≥ ${Math.round(ESCORT_RULES.intactRatio * 100)}% 算完好，发「完好额外奖励」。</p>` : "";
+    return `<div class="tr-up tk-edit">
+      <h4>编辑任务</h4>
+      <div class="tr-row">名称 ${inp("name", t.name, 160)} 类型 <select data-te="kind" data-te-rerender="1">${options(Object.keys(TRPG_TASK_KINDS).map(k => [k, TRPG_TASK_KINDS[k]]), t.kind)}</select>
+        天数 ${inp("days", t.days, 52, "number")}</div>
+      <div class="tr-row">目标 <textarea data-te="goal" rows="2" style="width:100%">${esc(t.goal)}</textarea></div>
+      <h4>奖励</h4>
+      <div class="tr-row">奎支 ${inp("reward.kuizhi", r.kuizhi, 90, "number")} 每人经验 ${inp("reward.xp", r.xp, 70, "number")}
+        ${e ? `完好额外奎支 ${inp("reward.intactKuizhi", r.intactKuizhi, 90, "number")}` : ""}</div>
+      <div class="tr-row">物品 <select id="te-item">${options(itemOpts)}</select> ×${inp("_qty", 1, 52, "number").replace('data-te="_qty"', 'id="te-qty"')}
+        <button class="g-btn small" data-te-act="addItem">＋</button> ${list(r.items, "Item", x => `${(ITEM_CATALOG[x.id] || {}).name}×${x.qty}`)}</div>
+      <div class="tr-row">改装件 <select id="te-part">${options(partOpts)}</select><button class="g-btn small" data-te-act="addPart">＋</button>
+        <button class="g-btn small" data-te-act="randPart:C">随机 C</button><button class="g-btn small" data-te-act="randPart:B">随机 B</button> ${list(r.parts, "Part", id => weaponPartLabel(id))}</div>
+      <div class="tr-row">图纸 <select id="te-bp">${options(bpOpts)}</select><button class="g-btn small" data-te-act="addBp">＋</button> ${list(r.blueprints, "Bp", id => (blueprintSpec(id) || {}).name || id)}</div>
+      ${escort}
+      <h4>路线（按顺序走；战斗站预先配置敌人、天气、战场）</h4>
+      ${nodes}
+      <div class="tr-row"><button class="g-btn small" data-te-act="addNode:battle">＋ 战斗站</button><button class="g-btn small" data-te-act="addNode:rest">＋ 休息点</button><button class="g-btn small" data-te-act="addNode:event">＋ 事件</button></div>
+      <div class="tr-row"><button class="g-btn" data-te-act="save">保存</button><button class="g-btn" data-te-act="cancel">取消</button></div>
+    </div>`;
+  }
+  PANELS.tasks = function () {
+    const list = trpgTasks();
+    const order = { active: 0, posted: 1, draft: 2, done: 3, failed: 4 };
+    const cards = list.slice().sort((a, b) => order[a.status] - order[b.status]).map(t => taskEdit && taskEdit.id === t.id ? taskEditorHtml(taskEdit) : taskCardHtml(t)).join("");
+    return `<p class="r-hint">主持人在这里发布任务：先建草稿、配置路线（每一站是什么，战斗站的敌人、天气、战场）和奖励，再「发布」给队伍看，队伍「接下」后按站推进。
+        战斗站点「打这一站」会按配置摆好敌人进入战斗，打赢自动走到下一站；护送任务的护送对象会跟着上场，血量跨战斗保留。走完路线后「结算任务」发奖励。</p>
+      <div class="tr-row">新建任务：${Object.keys(TRPG_TASK_KINDS).map(k => `<button class="g-btn small" data-tk="new:${k}">${esc(TRPG_TASK_KINDS[k])}</button>`).join("")}</div>
+      ${cards || '<p class="r-hint">还没有任务。</p>'}`;
+  };
+  function teSet(path, v) {
+    const keys = path.split(".");
+    let o = taskEdit;
+    for (let i = 0; i < keys.length - 1; i++) o = o[keys[i]];
+    const k = keys[keys.length - 1];
+    o[k] = typeof o[k] === "number" ? (v === "" ? 0 : Number(v)) : v;
+    if (path === "kind") {
+      if (v === "escort" && !taskEdit.escort) taskEdit.escort = { kind: "cart", name: "", level: trpgPartyLevel(), hp: null, def: null, atk: null };
+      if (v !== "escort") taskEdit.escort = null;
+    }
+    if (/^nodes\.\d+\.type$/.test(path)) {
+      const n = taskEdit.nodes[Number(keys[1])];
+      if ((v === "battle" || v === "elite") && !n.enemies.length) n.enemies = [{ id: "thug_knife", lv: trpgPartyLevel(), zone: 2 }];
+    }
+  }
+  function teAct(a, P) {
+    const [cmd, x, y] = a.split(":");
+    const t = taskEdit, i = Number(x), j = Number(y);
+    const lv = trpgPartyLevel();
+    switch (cmd) {
+      case "save": taskEdit = null; act(ruleCommand("taskSave", { task: JSON.parse(JSON.stringify(t)) })); return;
+      case "cancel": taskEdit = null; break;
+      case "addNode": t.nodes.push(x === "battle" ? { type: "battle", note: "", enemies: [{ id: "thug_knife", lv, zone: 2 }], weather: "none", zoneMode: 2 } : { type: x, note: "", enemies: [], weather: "none", zoneMode: 2 }); break;
+      case "delNode": t.nodes.splice(i, 1); break;
+      case "up": if (i > 0) t.nodes.splice(i - 1, 0, t.nodes.splice(i, 1)[0]); break;
+      case "down": if (i < t.nodes.length - 1) t.nodes.splice(i + 1, 0, t.nodes.splice(i, 1)[0]); break;
+      case "addEnemy": t.nodes[i].enemies.push({ id: "thug_knife", lv, zone: 2 }); break;
+      case "delEnemy": t.nodes[i].enemies.splice(j, 1); break;
+      case "addItem": t.reward.items.push({ id: $("te-item").value, qty: Math.max(1, Number($("te-qty").value) || 1) }); break;
+      case "delItem": t.reward.items.splice(i, 1); break;
+      case "addPart": t.reward.parts.push($("te-part").value); break;
+      case "randPart": t.reward.parts.push(rollWeaponPart({ [x]: 1 })); break;
+      case "delPart": t.reward.parts.splice(i, 1); break;
+      case "addBp": t.reward.blueprints.push($("te-bp").value); break;
+      case "delBp": t.reward.blueprints.splice(i, 1); break;
+    }
+    render();
+  }
+  function bindTasks(P) {
+    P.querySelectorAll("[data-tk]").forEach(b => {
+      b.onclick = () => {
+        const [cmd, id] = b.dataset.tk.split(":");
+        if (cmd === "new") return act(ruleCommand("taskCreate", { kind: id }));
+        if (cmd === "edit") { taskEdit = JSON.parse(JSON.stringify(trpgTaskById(id))); return render(); }
+        if (cmd === "del") { if (confirm("删除这个任务？")) act(ruleCommand("taskDelete", { id })); return; }
+        if (cmd === "post") return act(ruleCommand("taskStatus", { id, status: "posted" }));
+        if (cmd === "unpost") return act(ruleCommand("taskStatus", { id, status: "draft" }));
+        if (cmd === "accept") return act(ruleCommand("taskAccept", { id }));
+        if (cmd === "node") return act(ruleCommand("taskNodeDone", { id }));
+        if (cmd === "complete") return act(ruleCommand("taskComplete", { id }));
+        if (cmd === "fail") { const why = prompt("失败原因（可不填）", "") ; if (why !== null) act(ruleCommand("taskFail", { id, why })); return; }
+        if (cmd === "fight") {
+          let cfg;
+          try { cfg = trpgTaskPrepareBattle(id); } catch (e) { alert(e.message); return; }
+          GAME.lastEncounter = null;
+          GAME.enemyPlan = cfg.enemies;
+          GAME.weather = cfg.weather;
+          GAME.zoneMode = cfg.zoneMode;
+          return uiCommand("toBattle");
+        }
+      };
+    });
+    if (!taskEdit) return;
+    P.querySelectorAll("[data-te]").forEach(el => {
+      const ev = el.tagName === "SELECT" ? "onchange" : "oninput";
+      el[ev] = () => { teSet(el.dataset.te, el.value); if (el.dataset.teRerender) render(); };
+    });
+    P.querySelectorAll("[data-te-act]").forEach(b => { b.onclick = () => teAct(b.dataset.teAct, P); });
+  }
+
   /* ---------- 绑定 ---------- */
   function bind() {
     const P = $("tr-panel");
+    bindTasks(P);
     const on = (id, fn) => { const b = $(id); if (b) b.onclick = fn; };
     $("tr-tabs").querySelectorAll("[data-tab]").forEach(b => { b.onclick = () => { tab = b.dataset.tab; render(); }; });
     // 队伍
@@ -396,6 +627,30 @@
     on("bs-apply", () => { const edit = readBackstage(); const why = $("bs-why").value.trim(); act(ruleCommand("backstage", { edit, why })); });
     on("bs-undo", () => render());
     // 武器升级
+    // 改装槽
+    P.querySelectorAll("[data-part-in]").forEach(b => {
+      b.onclick = () => {
+        const [owner, kit, slot, free] = b.dataset.partIn.split(":");
+        const pick = P.querySelector(`[data-part-pick="${owner}:${kit}:${slot}"]`);
+        act(ruleCommand("installPart", { owner, kit, slot: Number(slot), part: pick ? pick.value : null, free: free === "1" }));
+      };
+    });
+    P.querySelectorAll("[data-part-rm]").forEach(b => {
+      b.onclick = () => { const [owner, kit, slot] = b.dataset.partRm.split(":"); act(ruleCommand("removePart", { owner, kit, slot: Number(slot) })); };
+    });
+    on("tr-part-give-btn", () => act(ruleCommand("adjustItem", { item: $("tr-part-give").value, amount: 1 })));
+    P.querySelectorAll("[data-part-rand]").forEach(b => { b.onclick = () => act(ruleCommand("randomPart", { grade: b.dataset.partRand })); });
+    // 客制化图纸
+    on("tr-bp-give-btn", () => act(ruleCommand("adjustItem", { item: $("tr-bp-give").value, amount: 1 })));
+    P.querySelectorAll("[data-bp-in]").forEach(b => {
+      b.onclick = () => {
+        const [owner, kit, free] = b.dataset.bpIn.split(":");
+        const pick = P.querySelector(`[data-bp-pick="${owner}:${kit}"]`);
+        const fee = P.querySelector(`[data-bp-fee="${owner}:${kit}"]`);
+        act(ruleCommand("installBlueprint", { owner, kit, blueprint: pick ? pick.value : null, fee: fee ? Number(fee.value) || 0 : 0, free: free === "1" }));
+      };
+    });
+    P.querySelectorAll("[data-bp-rm]").forEach(b => { b.onclick = () => { const [owner, kit] = b.dataset.bpRm.split(":"); act(ruleCommand("removeBlueprint", { owner, kit })); }; });
     P.querySelectorAll("[data-up]").forEach(b => {
       b.onclick = () => {
         const [owner, kit, mode] = b.dataset.up.split(":");
@@ -550,6 +805,7 @@
   function backFromBattle() {
     const r = $("g-result"); if (r) r.classList.remove("show");
     const ro = $("g-reopen"); if (ro) ro.classList.remove("show");
+    TRPG.taskBattle = null;   // 没结算就回来：这场不算任务战斗
     undoStack = [];   // 战斗打完回来：之前的撤销点在战斗之前，撤回去会把整场战斗的结果一起抹掉，所以清空
     // 先切回探索画面再布置下一场：否则布置时战斗画面还在，开战前的大字会弹出来盖在探索画面上
     Screens.show("trpg");
@@ -603,6 +859,7 @@
         lines.push(`${x.sub ? "　" : ""}${x.name}${x.sub ? "（武器人）" : ""}：伤害 ${Math.round(x.dmg)} · 击破 ${Math.round(x.brk)} · 承伤 ${Math.round(x.taken)} · 击杀 ${x.kills} · 治疗 ${Math.round(x.heal)}`);
       });
       (r.durNotes || []).forEach(t => lines.push(t));
+      if (typeof trpgTaskAfterBattle === "function") lines.push(...trpgTaskAfterBattle(r.outcome));   // 任务战斗：护送对象血量、推进路线
       log.push({ stamp: stampNow(), lines });
   }
 

@@ -119,20 +119,196 @@ function weaponTier(lv) {
   return 0.5 * Math.max(1, Number(lv) || 1);
 }
 
-function computeWeaponAtk(kit, attrs, lv) {
+/* ===== 武器改装槽 =====
+ * 武器 3 级多 1 个改装槽，7 级再多 1 个。改装件修改武器的补正系数：
+ *   coef = { 属性: 增减量 }，正数加正补正，负数是负补正（例：配重块-beta 力量 +0.1、敏捷 −0.1）。
+ * 装了什么记在角色身上：hero.weaponParts[武器kit] = [改装件 id 或 null, …]（按槽位）。
+ * 改装件平时放在背包里（物品 id = "part_" + 改装件 id），装上从背包拿走，拆下放回背包。
+ * C / B 级是程序生成的「凑数件」：主补正（力量 / 敏捷 / 智力）+ 一个不同属性的负补正（六维任意一个）。
+ *   C 级：主补正 +0.1，负补正 −0.1，名字后缀 beta；B 级：±0.15，后缀 alpha。
+ *   id = 等级_主属性_负属性（例：c_str_dex = 配重块-beta，力量 +0.1、敏捷 −0.1）。
+ * A / S 级之后再设计（往 WEAPON_PARTS 里加就行）。 */
+const WEAPON_PART_SLOT_LEVELS = [3, 7];
+const WEAPON_PART_ATTRS = ["str", "con", "dex", "wil", "int", "sta"];
+const WEAPON_PART_GEN = {
+  mains: { str: "配重块", dex: "轻量骨架", int: "调谐芯片" },
+  grades: { C: { step: 0.1, suffix: "beta" }, B: { step: 0.15, suffix: "alpha" } }
+};
+const WEAPON_PARTS = {};
+Object.keys(WEAPON_PART_GEN.grades).forEach(g => {
+  const G = WEAPON_PART_GEN.grades[g];
+  Object.keys(WEAPON_PART_GEN.mains).forEach(main => {
+    WEAPON_PART_ATTRS.filter(a => a !== main).forEach(neg => {
+      WEAPON_PARTS[`${g.toLowerCase()}_${main}_${neg}`] = {
+        name: `${WEAPON_PART_GEN.mains[main]}-${G.suffix}`, grade: g, main, neg,
+        coef: { [main]: G.step, [neg]: -G.step }, gen: true
+      };
+    });
+  });
+});
+/** 随机生成一个改装件 id。grades：可选的等级和权重，例 { C: 3, B: 1 }（默认各一半） */
+function rollWeaponPart(grades, rnd) {
+  rnd = rnd || Math.random;
+  grades = grades || { C: 1, B: 1 };
+  const keys = Object.keys(grades).filter(k => grades[k] > 0 && WEAPON_PART_GEN.grades[k]);
+  const total = keys.reduce((s, k) => s + grades[k], 0);
+  let r = rnd() * total, g = keys[keys.length - 1];
+  for (const k of keys) { r -= grades[k]; if (r < 0) { g = k; break; } }
+  const mains = Object.keys(WEAPON_PART_GEN.mains);
+  const main = mains[Math.floor(rnd() * mains.length)];
+  const negs = WEAPON_PART_ATTRS.filter(a => a !== main);
+  const neg = negs[Math.floor(rnd() * negs.length)];
+  return `${g.toLowerCase()}_${main}_${neg}`;
+}
+const WEAPON_PART_ATTR_CN = { str: "力量", con: "体质", dex: "敏捷", wil: "意志", int: "智力", sta: "耐力" };
+function weaponPartSpec(id) { return WEAPON_PARTS[id] || null; }
+function weaponPartIds() { return Object.keys(WEAPON_PARTS); }
+function weaponPartSlots(lv) {
+  lv = Math.max(1, Number(lv) || 1);
+  return WEAPON_PART_SLOT_LEVELS.filter(x => lv >= x).length;
+}
+function weaponPartItemId(id) { return "part_" + id; }
+function weaponPartCoefText(coef) {
+  return Object.keys(coef || {}).filter(a => Number(coef[a])).map(a => {
+    const v = Math.round(Number(coef[a]) * 100) / 100;
+    return `${WEAPON_PART_ATTR_CN[a] || a}补正 ${v > 0 ? "+" : "−"}${Math.abs(v)}`;
+  }).join("，");
+}
+function weaponPartLabel(id) {
+  const p = WEAPON_PARTS[id];
+  return p ? `【${p.name}】${p.grade ? p.grade + "级" : ""}` : id;
+}
+/** 武器槽位原样（含空槽），长度补齐到当前等级的槽数 */
+function weaponPartRow(owner, kit) {
+  const lv = Number(((owner && owner.weaponLevels) || {})[kit]) || 1;
+  const n = weaponPartSlots(lv);
+  const raw = ((owner && owner.weaponParts) || {})[kit] || [];
+  const row = [];
+  for (let i = 0; i < n; i++) row.push(raw[i] && WEAPON_PARTS[raw[i]] ? raw[i] : null);
+  return row;
+}
+/** 实际生效的改装件 id 列表（只算当前等级开放的槽） */
+function weaponPartsOf(owner, kit) {
+  return weaponPartRow(owner, kit).filter(Boolean);
+}
+/** 武器的补正系数表 { 属性: 系数 }：武器本身的主 / 副 / 负补正 + 改装件 */
+function weaponCoefs(kit, parts) {
+  const f = WEAPON_FORMULA[kit];
+  const c = {};
+  const add = (a, v) => { if (a) c[a] = Math.round(((c[a] || 0) + (Number(v) || 0)) * 1000) / 1000; };
+  if (f) { add(f.mainAttr, f.mainCoef); add(f.subAttr, f.subCoef); add(f.negAttr, f.negCoef); }
+  (parts || []).forEach(id => {
+    const p = WEAPON_PARTS[id];
+    if (p) Object.keys(p.coef || {}).forEach(a => add(a, p.coef[a]));
+  });
+  return c;
+}
+
+function computeWeaponAtk(kit, attrs, lv, parts) {
   const f = WEAPON_FORMULA[kit];
   const g = WEAPON_GROWTH[kit];
   lv = Math.max(1, Number(lv) || 1);
   if (f) {
     attrs = attrs || {};
-    const main = (Number(attrs[f.mainAttr]) || 0) * (Number(f.mainCoef) || 0);
-    const sub = f.subAttr ? (Number(attrs[f.subAttr]) || 0) * (Number(f.subCoef) || 0) : 0;
-    const neg = f.negAttr ? (Number(attrs[f.negAttr]) || 0) * (Number(f.negCoef) || 0) : 0;
+    const coefs = weaponCoefs(kit, parts);
+    const sum = Object.keys(coefs).reduce((s, a) => s + (Number(attrs[a]) || 0) * coefs[a], 0);
     const base = (Number(f.base) || 3) + (lv - 1) * 1;
-    return Math.max(0, Math.round(base + (main + sub + neg) * weaponTier(lv)));
+    return Math.max(0, Math.round(base + sum * weaponTier(lv)));
   }
   if (g) return (g.baseAtk || 0) + (g.atk || 0) * (lv - 1);
   return 0;
+}
+
+/** 武器 atk 的明细（武器页用）：和 computeWeaponAtk 同一个算法，逐项列出来
+ *  { formula, base, lvBase, tier, rows: [{ attr, name, value, coef, baseCoef, partCoef, part }], sum, raw, atk } */
+function weaponAtkBreakdown(kit, attrs, lv, parts) {
+  const f = WEAPON_FORMULA[kit];
+  lv = Math.max(1, Number(lv) || 1);
+  attrs = attrs || {};
+  if (!f) {
+    const atk = computeWeaponAtk(kit, attrs, lv, parts);
+    return { formula: false, base: atk, lvBase: 0, tier: weaponTier(lv), rows: [], sum: 0, raw: atk, atk };
+  }
+  const own = weaponCoefs(kit, []), all = weaponCoefs(kit, parts);
+  const order = ["str", "con", "dex", "wil", "int", "sta"].filter(a => a in all);
+  const tier = weaponTier(lv);
+  const rows = order.map(a => {
+    const coef = all[a], baseCoef = own[a] || 0;
+    const value = Number(attrs[a]) || 0;
+    return { attr: a, name: WEAPON_PART_ATTR_CN[a] || a, value, coef, baseCoef,
+      partCoef: Math.round((coef - baseCoef) * 1000) / 1000, part: Math.round(value * coef * tier * 100) / 100 };
+  });
+  const sum = rows.reduce((s, r) => s + r.value * r.coef, 0);
+  const base = Number(f.base) || 3, lvBase = lv - 1;
+  const raw = base + lvBase + sum * tier;
+  return { formula: true, base, lvBase, tier, rows, sum: Math.round(sum * 1000) / 1000, raw: Math.round(raw * 100) / 100,
+    atk: Math.max(0, Math.round(raw)) };
+}
+
+/** 改装件变了 / 等级变了：重算这把武器给角色和武器人带来的攻击力 */
+function refreshOwnerWeaponAtk(owner, kit) {
+  if (!owner) return;
+  const lv = Number((owner.weaponLevels || {})[kit]) || 1;
+  const atk = computeWeaponAtk(kit, owner.attrs, lv, weaponPartsOf(owner, kit));
+  const units = (typeof state !== "undefined" && state.units) || [];
+  const wu = units.find(u => u.kit === kit && u.weaponOf === owner.kit);
+  if (wu) { wu.personalAtk = atk; wu.atk = atk; }
+  if (owner.kit === "hiaki") { if (typeof refreshHiakiAtk === "function") refreshHiakiAtk(owner); return; }
+  if ((owner.linkedKits || [])[0] !== kit) return;
+  owner.weaponAtk = atk;
+  if (owner.weaponHeld !== false && (typeof weaponIsOut !== "function" || !weaponIsOut(owner))) {
+    owner.atk = (owner.personalAtk || 0) + atk;
+  }
+}
+/** 等级降了槽位变少：多出来的改装件退回背包 */
+function ejectExtraWeaponParts(owner, kit, notes) {
+  const raw = ((owner && owner.weaponParts) || {})[kit];
+  if (!raw) return;
+  const n = weaponPartSlots(Number((owner.weaponLevels || {})[kit]) || 1);
+  raw.slice(n).forEach(id => {
+    if (id && WEAPON_PARTS[id] && typeof bagAdd === "function") {
+      bagAdd(weaponPartItemId(id), 1);
+      if (notes) notes.push(`${weaponPartLabel(id)} 槽位不够，退回背包。`);
+    }
+  });
+  owner.weaponParts[kit] = raw.slice(0, n);
+}
+/** 装上改装件（从背包拿）。slot 不填就找第一个空槽；槽里原有的件退回背包。返回说明文字数组 */
+function installWeaponPart(owner, kit, slot, partId, free) {
+  if (!owner) return ["没有这个角色。"];
+  const p = WEAPON_PARTS[partId];
+  if (!p) return ["没有这种改装件。"];
+  if (!(owner.linkedKits || []).includes(kit)) return ["这把武器不属于这个角色。"];
+  const row = weaponPartRow(owner, kit);
+  if (!row.length) return [`武器要到 ${WEAPON_PART_SLOT_LEVELS[0]} 级才有改装槽。`];
+  let i = slot == null || slot === "" ? row.indexOf(null) : Math.floor(Number(slot));
+  if (i < 0) i = 0;
+  if (!(i < row.length)) return [`这把武器只有 ${row.length} 个改装槽。`];
+  const item = weaponPartItemId(partId);
+  if (!free && typeof bagCount === "function" && bagCount(item) < 1) return [`背包里没有${weaponPartLabel(partId)}。`];
+  const notes = [];
+  if (!free && typeof bagAdd === "function") bagAdd(item, -1);
+  if (row[i] && typeof bagAdd === "function") { bagAdd(weaponPartItemId(row[i]), 1); notes.push(`拆下 ${weaponPartLabel(row[i])} 放回背包。`); }
+  row[i] = partId;
+  owner.weaponParts = owner.weaponParts || {};
+  owner.weaponParts[kit] = row;
+  refreshOwnerWeaponAtk(owner, kit);
+  notes.push(`${owner.name || owner.kit} 的武器第 ${i + 1} 槽装上 ${weaponPartLabel(partId)}（${weaponPartCoefText(p.coef)}）。`);
+  return notes;
+}
+/** 拆下改装件（放回背包） */
+function removeWeaponPart(owner, kit, slot) {
+  if (!owner) return ["没有这个角色。"];
+  const row = weaponPartRow(owner, kit);
+  const i = Math.floor(Number(slot));
+  if (!(i >= 0 && i < row.length) || !row[i]) return ["这个槽是空的。"];
+  const id = row[i];
+  if (typeof bagAdd === "function") bagAdd(weaponPartItemId(id), 1);
+  row[i] = null;
+  owner.weaponParts = owner.weaponParts || {};
+  owner.weaponParts[kit] = row;
+  refreshOwnerWeaponAtk(owner, kit);
+  return [`${owner.name || owner.kit} 的武器第 ${i + 1} 槽拆下 ${weaponPartLabel(id)}，放回背包。`];
 }
 
 function applyWeaponLevel(u) {
@@ -160,7 +336,7 @@ function applyWeaponLevel(u) {
   if (typeof state !== "undefined" && u.weaponOf) {
     owner = (typeof findKit === "function") ? findKit(u.weaponOf, state.units) : null;
   }
-  const watk = computeWeaponAtk(u.kit, owner && owner.attrs, lv);
+  const watk = computeWeaponAtk(u.kit, owner && owner.attrs, lv, owner ? weaponPartsOf(owner, u.kit) : []);
   u.personalAtk = watk;
   u.atk = watk;
   if (owner && owner.kit === "hiaki" && typeof refreshHiakiAtk === "function") {
@@ -261,7 +437,7 @@ function applyLevelStats(u) {
     }
     const primary = (u.linkedKits || [])[0];
     if (primary && typeof computeWeaponAtk === "function") {
-      u.weaponAtk = computeWeaponAtk(primary, u.attrs, (u.weaponLevels && u.weaponLevels[primary]) || 1);
+      u.weaponAtk = computeWeaponAtk(primary, u.attrs, (u.weaponLevels && u.weaponLevels[primary]) || 1, weaponPartsOf(u, primary));
     }
     u.atk = (u.personalAtk || 0) + (u.weaponHeld === false ? 0 : (u.weaponAtk || 0));
     if (u.growth.shp) {
@@ -285,7 +461,7 @@ function applyLevelStats(u) {
   u.personalAtk = d.personalAtk;
   const primary = (u.linkedKits || [])[0];
   if (primary && typeof computeWeaponAtk === "function") {
-    u.weaponAtk = computeWeaponAtk(primary, u.attrs, (u.weaponLevels && u.weaponLevels[primary]) || 1);
+    u.weaponAtk = computeWeaponAtk(primary, u.attrs, (u.weaponLevels && u.weaponLevels[primary]) || 1, weaponPartsOf(u, primary));
   }
   u.atk = (u.personalAtk || 0) + (u.weaponHeld === false ? 0 : (u.weaponAtk || 0));
   const defRatio = u.defMax ? u.def / u.defMax : 1;

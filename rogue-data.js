@@ -378,6 +378,50 @@ const ROGUE_SMITHS = [
     ] }
 ];
 
+/* 武器改装件（C / B 级，程序生成，见 growth.js · WEAPON_PARTS / rollWeaponPart）
+ *   price          买入价；工匠处每次随机摆 smithOffer 件，discountChance 的概率打 discount 折
+ *   sellRate       在商店或工匠处卖出：原价 × sellRate（打折买来的也按原价算）
+ *   install        在工匠处装上的工钱（拆下不要钱）
+ *   smithGrades    工匠摆出来的等级权重
+ *   taskReward     哪些任务完成时给一件：chance 概率，grades 等级权重（按任务 kind） */
+const ROGUE_PARTS = {
+  price: { C: 400, B: 650 },
+  discountChance: 0.25, discount: 0.8,
+  sellRate: 0.4,
+  install: { C: 300, B: 500 },
+  smithOffer: 3,
+  smithGrades: { C: 2, B: 1 },
+  taskReward: {
+    escort: { chance: 0.5, grades: { C: 3, B: 1 } },
+    scout:  { chance: 0.6, grades: { C: 2, B: 1 } },
+    bounty: { chance: 0.75, grades: { C: 1, B: 1 } },
+    main:   { chance: 1, grades: { C: 1, B: 2 } }
+  }
+};
+
+/* 护送任务（escort.js）：护送对象一半是货车、一半是人物；人物名字从这里抽 */
+const ROGUE_ESCORT = {
+  kinds: { cart: 1, vip: 1 },
+  cartNames: ["货车", "补给车", "运水车"],
+  vipNames: ["委托人", "商队老板", "技术员", "线人"]
+};
+
+/** 按 id 找客制化图纸（跑团模式也用）：{ id, name, text, mod, smith, smithName } */
+function blueprintSpec(id) {
+  for (const s of ROGUE_SMITHS) {
+    const b = (s.blueprints || []).find(x => x.id === id);
+    if (b) return Object.assign({ smith: s.id, smithName: s.name }, b);
+  }
+  return null;
+}
+/* 图纸也登记进背包物品表（跑团模式：主持人放进背包，再装到武器上） */
+(function registerBlueprintItems() {
+  if (typeof ITEM_CATALOG === "undefined") return;
+  ROGUE_SMITHS.forEach(s => (s.blueprints || []).forEach(b => {
+    if (!ITEM_CATALOG[b.id]) ITEM_CATALOG[b.id] = { name: `客制化图纸·${b.name}`, hint: b.text, combat: false, blueprint: b.id };
+  }));
+})();
+
 /* 升级时要做的选择（手册第三章「升级时你会得到什么」）。
  * 角色卡上 minLv 的技能（lv2、lv11、lv17 的「一项技能」、效果位技能）到级自动解锁，不在这里。
  *   attr      可分配的六维属性点；noRepeat：不能加在之前加过的同一项上（lv8）

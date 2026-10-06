@@ -47,6 +47,7 @@ const BattleSim = (function () {
     state.lootByRank = null;     // 掉落按手册；单局在 before 里换成三档
     state.lootByKit = null;
     state.weaponMods = null;     // 单局图纸加成，在 before 里按本局写进来
+    state.weaponBlueprints = null;   // 武器 kit → 装着的图纸 id（武器页显示名字用）
     state.exhaustTier = 0;
     state.openingBreaks = null;  // 单局：检定受伤留到开场的击破，在 before 里写进来
     state.solo = null;           // 单人模式：在 before 里写进来

@@ -164,7 +164,7 @@
   /** 武器耐久条：武器人显示自己的耐久；角色显示手里那把武器的耐久（空手不显示） */
   function weaponDurSnap(u) {
     try {
-      if (!u || !u.isPlayer) return null;
+      if (!u || !u.isPlayer || u.escort) return null;   // 护送对象没有耐久
       const weapon = typeof isWeaponUnit === "function" ? isWeaponUnit(u) : !!u.weaponOf;
       const kit = weapon ? u.kit : (typeof heldWeaponKit === "function" ? heldWeaponKit(u) : null);
       if (!kit || typeof weaponDurMax !== "function") return null;
@@ -2362,6 +2362,7 @@
   /* ================= 11. HUD / 记录 ================= */
   function selectActor(id) {
     if (hotseat() && HotseatGame.reason(unitById(id))) return;
+    if (unitById(id) && unitById(id).escort) return;   // 护送对象玩家不能操作
     if (G.arm) disarm();
     G.actorId = id;
     refreshHud();
@@ -2464,7 +2465,7 @@
     // 队伍
     const party = $("g-party");
     party.innerHTML = "";
-    const all = state.units.filter(u => u.isPlayer && !u.hidden && !u.fused && !u._removed);
+    const all = state.units.filter(u => u.isPlayer && !u.hidden && !u.fused && !u._removed && !u.escort);   // 护送对象玩家不能操作，不进队伍栏
     const heroes = all.filter(u => !isWeaponUnit(u));
     const ordered = [];
     heroes.forEach(h => {
@@ -2493,6 +2494,11 @@
       info.title = "查看每个角色的数值、被动和技能说明";
       info.dataset.sheet = G.actorId && unitById(G.actorId) ? unitById(G.actorId).kit : heroes[0].kit;
       party.appendChild(info);
+      const arm = el("button", "pc pc-sheet pc-armory");
+      arm.innerHTML = `<span class="n"><span>武器工坊</span></span><div class="u-econ" style="font-size:11px;color:var(--muted)">补正 · 改装</div>`;
+      arm.title = "查看武器补正、atk 明细、改装件和客制化";
+      arm.dataset.armory = info.dataset.sheet;
+      party.appendChild(arm);
     }
     cards.forEach((c, id) => c.wrap.classList.toggle("is-actor", id === G.actorId && state.combatPhase === "player"));
 
@@ -2763,6 +2769,8 @@
       roles: u.roles || null,
       // 跑团模式：武器等级、属性点、加过的属性、手册里还没做成系统的奖励（熟练项、专长……）
       weaponLevels: u.weaponLevels ? JSON.parse(JSON.stringify(u.weaponLevels)) : null,
+      weaponParts: u.weaponParts ? JSON.parse(JSON.stringify(u.weaponParts)) : null,   // 武器改装槽
+      weaponBlueprints: u.weaponBlueprints ? JSON.parse(JSON.stringify(u.weaponBlueprints)) : null,   // 客制化图纸
       attrPoints: Number(u.attrPoints) || 0,
       attrPicks: (u.attrPicks || []).slice(),
       notes: u.levelNotes ? JSON.parse(JSON.stringify(u.levelNotes)) : null
@@ -2814,6 +2822,8 @@
       if (s.attrPicks) u.attrPicks = s.attrPicks.slice();
       if (s.notes) u.levelNotes = s.notes;
       if (typeof applyLevelStats === "function") applyLevelStats(u);
+      if (s.weaponParts) u.weaponParts = JSON.parse(JSON.stringify(s.weaponParts));
+      if (s.weaponBlueprints) u.weaponBlueprints = JSON.parse(JSON.stringify(s.weaponBlueprints));
       if (s.weaponLevels && typeof setOwnedWeaponLevel === "function") {
         Object.keys(s.weaponLevels).forEach(k => {
           const quiet = window.appendLog; window.appendLog = () => {};   // 恢复存档时不写「须找工匠」提示

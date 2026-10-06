@@ -20,6 +20,7 @@
   const save = () => { if (run && run.stage !== "over") dispatch({ type: "run.session", action: "save" }, { run }); };
   const query = (action, fields) => dispatch(Object.assign({ type: "run.query", action }, fields || {}), { run });
   if (window.HeroSheet) HeroSheet.register("run", () => (run ? query("sheetData") : []));
+  if (window.Armory) Armory.register("run", () => (run ? query("armoryData") : []));
 
   function completeAction(notes, error) {
     lastError = error ? error.message : "";
@@ -119,14 +120,14 @@
     $("run-party").innerHTML = run.party.map(h => {
       const v = query("heroView", { kit: h.kit });
       return `<div class="rhero">
-        <div class="rh-top"><b>${esc(v.name)}</b><span>Lv${v.level}${v.pending ? ' · <em>待选升级</em>' : ""}</span><button class="g-btn small rh-sheet" data-sheet="${esc(h.kit)}" data-sheet-src="run" title="数值、被动和技能说明">资料</button></div>
+        <div class="rh-top"><b>${esc(v.name)}</b><span>Lv${v.level}${v.pending ? ' · <em>待选升级</em>' : ""}</span><button class="g-btn small rh-sheet" data-sheet="${esc(h.kit)}" data-sheet-src="run" title="数值、被动和技能说明">资料</button><button class="g-btn small rh-sheet" data-armory="${esc(h.kit)}" data-armory-src="run" title="武器补正、atk 明细、改装件和客制化">武器</button></div>
         ${v.race ? `<div class="rh-w rh-prof">${esc(v.race)} · ${esc(v.job)} · ${esc(Object.keys(v.profs).map(k => k + v.profs[k]).join(" "))}</div>` : ""}
         ${v.role2 ? `<div class="rh-w rh-solo">第二副职责 ${esc(v.role2)}${v.role2Skills.length ? "：" + esc(v.role2Skills.join("、")) : "（还没学技能）"}</div>` : ""}
         ${v.pendingBreak ? `<div class="rh-w broken">检定受伤：下一场开战时受到 ${v.pendingBreak} 击破</div>` : ""}
         <div class="rh-row">血 ${bar(v.hp, v.hpMax, "hp")}<span>${v.hp}/${v.hpMax}</span></div>
         ${v.layers.length > 1 ? `<div class="rh-w">${esc(layerText(v.layers))}</div>` : ""}
         <div class="rh-row">经验 ${bar(v.xp, v.xpNext, "xp")}<span>${v.xp}/${v.xpNext || "满"}</span></div>
-        ${v.weapons.map(w => `<div class="rh-w${w.dur <= 0 ? " broken" : ""}">${esc(w.name)} Lv${w.level} · 耐久 ${w.dur}/${w.durMax}${w.dur <= 0 ? "（损坏：进战斗空手）" : ""}${w.blueprint ? ` · 图纸「${esc(w.blueprint.name)}」` : ""}${w.hp != null ? ` · 伤势 ${w.hp <= 0 ? "倒下（需长休）" : "血量 " + w.hp}` : ""}</div>`).join("")}
+        ${v.weapons.map(w => `<div class="rh-w${w.dur <= 0 ? " broken" : ""}">${esc(w.name)} Lv${w.level} · 耐久 ${w.dur}/${w.durMax}${w.dur <= 0 ? "（损坏：进战斗空手）" : ""}${w.blueprint ? ` · 图纸「${esc(w.blueprint.name)}」` : ""}${(w.parts || []).some(Boolean) ? ` · 改装 ${esc(w.parts.filter(Boolean).map(p => p.name).join("、"))}` : ""}${w.hp != null ? ` · 伤势 ${w.hp <= 0 ? "倒下（需长休）" : "血量 " + w.hp}` : ""}</div>`).join("")}
       </div>`;
     }).join("") + (run.solo ? `<div class="rhero solo-mates"><div class="rh-top"><b>伙伴</b><span>支援存量 ${Number(run.supportBank) || 0} 次</span></div>
         <div class="rh-w rh-solo">${esc((run.partners || []).map(Rogue.heroName).join("、"))} · 战斗里攒分换支援：门槛 ${ROGUE_SOLO.supportScore} 分，手里每有 1 次 +${ROGUE_SOLO.supportStep}，最多存 ${ROGUE_SOLO.supportMax} 次；每人一场一次</div></div>` : "")
@@ -167,8 +168,9 @@
     return `<div class="task${t.key ? " key" : ""}">
       <div class="t-head"><b>${esc(t.name)}</b>${t.key ? '<span class="tag">主线 · 已接下</span>' : ""}<span class="days">${t.days} 天</span></div>
       <p>${esc(t.goal)}</p>
-      <div class="t-meta">报酬 ${pay.kuizhi} 奎支 · 每人 ${pay.xp} 经验<br>委托方提供 ${esc(supplyText || "无")}</div>
+      <div class="t-meta">报酬 ${pay.kuizhi} 奎支 · 每人 ${pay.xp} 经验${t.part && WEAPON_PARTS[t.part] ? `<br>额外奖励：改装件 ${esc(weaponPartLabel(t.part))}（${esc(weaponPartCoefText(WEAPON_PARTS[t.part].coef))}）` : ""}<br>委托方提供 ${esc(supplyText || "无")}</div>
       ${t.weather ? `<div class="t-weather">全程天气：${esc(WX_NAME[t.weather] || t.weather)}（任务里每一场战斗都是）</div>` : ""}
+      ${escortLine(Rogue.escortInfo(run, t), false)}
       ${warn ? `<div class="t-warn">${esc(warn)}</div>` : ""}
       <button class="g-btn r-go${t.key ? " r-main" : ""}" data-which="${which}" ${why ? "disabled" : ""}>${why ? esc(why) : t.key ? "执行主线" : "接下任务"}</button>
     </div>`;
@@ -230,6 +232,7 @@
     },
     shop: () => `<p>路边有个摊子。手里有 ${Rogue.supplies().kuizhi} 奎支。</p>
         ${shopList()}
+        ${partRows(null)}
         ${repairRows()}
         <button class="g-btn r-main" id="r-leave">离开</button>`,
     smith: () => {
@@ -237,6 +240,7 @@
       return `<p>一位工匠愿意帮你改武器。手里有 ${Rogue.supplies().kuizhi} 奎支。</p>
         ${smithCard(id, true)}
         ${installRows(id)}
+        ${partRows(id)}
         ${repairRows()}
         <button class="g-btn r-main" id="r-leave">离开</button>`;
     },
@@ -353,6 +357,7 @@
       <p class="sm-lore">${esc(info.blurb)}${info.priceNote ? `<br><span class="sm-price">${esc(info.priceNote)}</span>` : ""}</p>
       ${claim}
       <div class="shop">${rows}</div>
+      ${partShelf(id)}
     </details>`;
   }
   /** 手里的图纸装到武器上（任何一位工匠都能装） */
@@ -378,7 +383,46 @@
     return `<h2>工匠</h2>
       <p class="r-hint">这次回城遇到 ${ids.length} 位工匠。手里有 ${Rogue.supplies().kuizhi} 奎支。在同一位工匠那里升级满 ${ROGUE_SMITH_RULES.blueprintAfter} 次，他会给你一张客制化图纸。</p>
       ${ids.map(id => smithCard(id, false)).join("")}
-      ${installRows(ids.find(id => query("smithInfo", { smith: id }).canInstall) || ids[0])}`;
+      ${installRows(ids.find(id => query("smithInfo", { smith: id }).canInstall) || ids[0])}
+      ${partRows(ids[0])}`;
+  }
+
+  /* ---------- 改装件（C / B 级）：工匠货架、背包里的件（卖 / 装）、武器上的件（拆） ----------
+   * smithId 为空：只是商店，只能卖 */
+  /** 一位工匠摆出来卖的 3 件改装件（放在他的卡片里） */
+  function partShelf(smithId) {
+    if (typeof ROGUE_PARTS === "undefined") return "";
+    const k = Rogue.supplies().kuizhi;
+    const rows = query("partOffers", { smith: smithId }).map((o, i) => `<div class="shop-row${o.sold ? " sold" : ""}">
+        <span class="s-name">${esc(weaponPartLabel(o.id))}<small>${esc(weaponPartCoefText(WEAPON_PARTS[o.id].coef))}${o.discount ? ` · <b class="pt-sale">八折</b>（原价 ${o.base}）` : ""}</small></span>
+        <span class="s-have"></span><span class="s-price">${o.sold ? "—" : o.price}</span>
+        <button class="g-btn" data-part-buy="${i}" data-smith="${esc(smithId)}" ${o.sold || k < o.price ? "disabled" : ""}>${o.sold ? "已买" : "买"}</button></div>`).join("");
+    return rows ? `<p class="r-hint">改装件（随机进货，C 级 / B 级）：</p><div class="shop">${rows}</div>` : "";
+  }
+  function partRows(smithId) {
+    if (typeof ROGUE_PARTS === "undefined") return "";
+    const k = Rogue.supplies().kuizhi;
+    const P = ROGUE_PARTS;
+    const stock = query("partStock");
+    const weapons = run.party.flatMap(h => query("heroView", { kit: h.kit }).weapons);
+    const targets = weapons.flatMap(w => (w.parts || []).map((p, i) => ({ v: `${w.kit}:${i}`, t: `${w.name} 槽${i + 1}${p ? `（换下 ${p.name}）` : "（空）"}` })));
+    const opts = targets.map(x => `<option value="${esc(x.v)}">${esc(x.t)}</option>`).join("");
+    const bag = stock.map(x => `<div class="shop-row${smithId && targets.length ? " pt-row" : ""}">
+        <span class="s-name">${esc(x.name)}<small>${esc(x.text)}</small></span>
+        <span class="s-have">有 ${x.qty}</span><span class="s-price">卖 ${x.sell}</span>
+        <button class="g-btn" data-part-sell="${esc(x.id)}">卖掉</button>
+        ${smithId && targets.length ? `<select data-part-to="${esc(x.id)}">${opts}</select>
+          <button class="g-btn" data-part-install="${esc(x.id)}" data-smith="${esc(smithId)}" ${k < x.install ? "disabled" : ""}>装上（${x.install}）</button>` : ""}</div>`).join("");
+    const fitted = smithId ? weapons.flatMap(w => (w.parts || []).map((p, i) => p ? `<div class="shop-row">
+        <span class="s-name">${esc(w.name)} 槽${i + 1}：${esc(p.name)}<small>${esc(p.text)}</small></span>
+        <span class="s-have"></span><span class="s-price">免费</span>
+        <button class="g-btn" data-part-remove="${esc(w.kit)}:${i}" data-smith="${esc(smithId)}">拆下</button></div>` : "")).join("") : "";
+    if (!bag && !fitted) return "";
+    const slotsHint = targets.length ? "" : `武器升到 ${WEAPON_PART_SLOT_LEVELS[0]} 级才有改装槽（${WEAPON_PART_SLOT_LEVELS.join(" / ")} 级各开 1 个）。`;
+    return `<h3 class="r-sub">改装件</h3>
+      <p class="r-hint">C 级主补正 +0.1 / 负补正 −0.1，B 级 ±0.15。${smithId ? `工匠装上：C ${P.install.C}、B ${P.install.B} 奎支，拆下不要钱。` : ""}卖出按原价 ${Math.round(P.sellRate * 100)}%。${slotsHint}</p>
+      ${bag ? `<p class="r-hint">背包里的改装件：</p><div class="shop">${bag}</div>` : ""}
+      ${fitted ? `<p class="r-hint">武器上的改装件：</p><div class="shop">${fitted}</div>` : ""}`;
   }
 
   /** 维修工具包（手册：修复 10 点耐久），有的话在商店、工匠处、休整时都能用 */
@@ -414,6 +458,14 @@
       seed: `${run.seed}:map:${run.taskNo}`
     });
   }
+  /** 护送对象：任务板上说明是什么；任务里显示剩多少血 */
+  function escortLine(e, live) {
+    if (!e) return "";
+    const pct = Math.round(e.hp / Math.max(1, e.max) * 100);
+    const rules = `被摧毁任务失败；剩余 ≥ ${Math.round(ESCORT_RULES.intactRatio * 100)}% 完好送达，额外报酬 +${Math.round(ESCORT_RULES.intactBonus * 100)}%`;
+    return `<div class="t-escort${live && !e.intact ? " warn" : ""}">护送：<b>${esc(e.name)}</b>（${e.kind === "cart" ? "货车" : "人物"} · ${esc(e.note)}）
+      · ${live ? `血量 <b>${e.hp}/${e.max}</b>（${pct}%）${e.intact ? " · 完好" : " · 已不算完好"}` : `血量 ${e.max}${e.atk ? ` · atk ${e.atk}` : ""}`}<br><small>${esc(rules)}</small></div>`;
+  }
   function renderTask() {
     const t = run.task;
     const node = Rogue.currentNode(run);
@@ -426,6 +478,7 @@
     const restRow = node && node.type !== "rest" ? restBeforeRow() : "";
     const wx = t.weather ? `<span class="t-weather inline">全程天气：${esc(WX_NAME[t.weather] || t.weather)}</span>` : "";
     return `<h2>${esc(t.key ? "主线" : t.name)}<span class="sub">${esc(t.goal)}</span>${wx}</h2>
+      ${escortLine(query("escortInfo"), true)}
       ${routeMapHtml(t)}
       <div class="r-panel">${choose}${restRow}${panel}</div>`;
   }
@@ -436,7 +489,7 @@
       case "task": return renderTask();
       case "camp": {
         const plan = query("restPlan");
-        const shopping = C.campShop ? `<p class="r-hint">回到城里，出发前可以补货。手里有 ${Rogue.supplies().kuizhi} 奎支。</p>${shopList()}${repairRows()}` : "";
+        const shopping = C.campShop ? `<p class="r-hint">回到城里，出发前可以补货。手里有 ${Rogue.supplies().kuizhi} 奎支。</p>${shopList()}${partRows(null)}${repairRows()}` : "";
         const clinic = C.campClinic ? `<h3 class="r-sub">诊所</h3>${clinicPanel()}` : "";
         const food = restFoodText(plan);
         return `<h2>休整</h2>
@@ -551,6 +604,18 @@
     body.querySelectorAll("[data-intro]").forEach(b => { b.onclick = () => act({ action: "introduceSmith", smith: b.dataset.intro }); });
     body.querySelectorAll("[data-claim]").forEach(b => { b.onclick = () => act({ action: "claimBlueprint", smith: b.dataset.smith, blueprint: b.dataset.claim }); });
     body.querySelectorAll("[data-install]").forEach(b => { b.onclick = () => act({ action: "installBlueprint", blueprint: b.dataset.install, kit: b.dataset.kit, smith: b.dataset.smith }); });
+    body.querySelectorAll("[data-part-buy]").forEach(b => { b.onclick = () => act({ action: "buyPart", smith: b.dataset.smith, index: Number(b.dataset.partBuy) }); });
+    body.querySelectorAll("[data-part-sell]").forEach(b => { b.onclick = () => act({ action: "sellPart", part: b.dataset.partSell }); });
+    body.querySelectorAll("[data-part-install]").forEach(b => {
+      b.onclick = () => {
+        const sel = body.querySelector(`[data-part-to="${b.dataset.partInstall}"]`);
+        const [kit, slot] = (sel ? sel.value : ":").split(":");
+        act({ action: "installPart", part: b.dataset.partInstall, kit, slot: Number(slot), smith: b.dataset.smith });
+      };
+    });
+    body.querySelectorAll("[data-part-remove]").forEach(b => {
+      b.onclick = () => { const [kit, slot] = b.dataset.partRemove.split(":"); act({ action: "removePart", kit, slot: Number(slot), smith: b.dataset.smith }); };
+    });
     body.querySelectorAll("[data-repair]").forEach(b => { b.onclick = () => act({ action: "repairWeapon", kit: b.dataset.repair }); });
     body.querySelectorAll("[data-heal]").forEach(b => { b.onclick = () => act({ action: "healHero", kit: b.dataset.heal }); });
     body.querySelectorAll("[data-cyber]").forEach(b => {

@@ -1667,6 +1667,7 @@ function startPlayerPhase() {
 
 function startEnemyPhase() {
   const notes = ["—— 敌人回合 ——"];
+  if (typeof escortAct === "function") escortAct(notes);   // 护送的人物先躲 / 还击
   state.combatPhase = "enemy";
   // 废铁墙（回防命令）撑过了一个玩家回合，敌人回合开始时撤掉
   (state.props || []).filter(p => p.kind === "scrapwall").forEach(p => {
@@ -4020,6 +4021,7 @@ function ambushSkipRound() {
 }
 function refreshEconomy(u) {
   if (!u || !u.isPlayer) return;
+  if (u.escort) { u.ap = 0; u.apMax = 0; u.bonus = 0; u.bonusMax = 0; return; }   // 护送对象玩家不能操作
   if (typeof isCrushing === "function" && isCrushing(u)) {
     u.ap = 0; u.apMax = 0; u.bonus = 0; u.bonusMax = 0;
     return;
@@ -4362,6 +4364,7 @@ function tickSelfBurn(u, growStacks) {
 function isWeaponUnit(u) {
   if (!u) return false;
   if (u.weaponOf) return true;
+  if (u.escort) return true;   // 护送对象（escort.js）：和武器人一样血量归零直接倒下、不算进全员倒地
   return ["mint", "latte", "niu", "naruto", "mochi", "berniel", "bili", "ironwall", "torque", "ecmo", "edc"].indexOf(u.kit) >= 0;
 }
 
@@ -6404,7 +6407,7 @@ function refreshHiakiAtk(h) {
   const out = blade === "niu" ? h.resources.niuOut : h.resources.narutoOut;
   const lv = (h.weaponLevels && h.weaponLevels[blade]) || 1;
   const wAtk = typeof computeWeaponAtk === "function"
-    ? computeWeaponAtk(blade, h.attrs, lv)
+    ? computeWeaponAtk(blade, h.attrs, lv, weaponPartsOf(h, blade))
     : (blade === "niu" ? 7 : 6);
   h.weaponAtk = out || !held ? 0 : wAtk;
   h.atk = (h.personalAtk || 0) + h.weaponAtk;
@@ -6515,6 +6518,7 @@ function spawnLiveCard(card, zone) {
   (u.linkedKits || []).forEach(k => {
     if (u.weaponLevels[k] == null) u.weaponLevels[k] = 1;
   });
+  u.weaponParts = card.weaponParts ? JSON.parse(JSON.stringify(card.weaponParts)) : (u.weaponParts || {});
   if (u.kit === "hiaki" && typeof refreshHiakiAtk === "function") refreshHiakiAtk(u);
   if (typeof applyLevelStats === "function") applyLevelStats(u);
   return u;
@@ -10183,6 +10187,7 @@ function setOwnedWeaponLevel(owner, kit, lv) {
   lv = Math.max(1, Number(lv) || 1);
   owner.weaponLevels = owner.weaponLevels || {};
   owner.weaponLevels[kit] = lv;
+  if (typeof ejectExtraWeaponParts === "function") ejectExtraWeaponParts(owner, kit);   // 等级降了，多出来的改装件退回背包
   const existing = (state.units || []).find(u => u.kit === kit && u.weaponOf === owner.kit);
   if (existing) {
     existing.level = lv;
@@ -10192,7 +10197,7 @@ function setOwnedWeaponLevel(owner, kit, lv) {
   if (typeof computeWeaponAtk === "function" && owner.kit !== "hiaki") {
     const primary = (owner.linkedKits || [])[0];
     if (kit === primary) {
-      owner.weaponAtk = computeWeaponAtk(kit, owner.attrs, lv);
+      owner.weaponAtk = computeWeaponAtk(kit, owner.attrs, lv, weaponPartsOf(owner, kit));
       if (owner.weaponHeld !== false && typeof weaponIsOut === "function" && !weaponIsOut(owner)) {
         owner.atk = (owner.personalAtk || 0) + owner.weaponAtk;
       }
@@ -10624,7 +10629,7 @@ function renderBackstage() {
         <span class="hint">${escapeHtml(pc.name)}的武器</span>
         <label class="field">等级<input data-owkit="${pc.id}" data-wkit="${kit}" type="number" min="1" value="${lv}"></label>
         ${typeof weaponDur === "function" ? `<label class="field">耐久<input data-durkit="${kit}" type="number" min="0" value="${weaponDur(kit)}"></label><span class="hint">/ ${weaponDurMax(kit)}</span>` : ""}
-        <span class="hint">${existing ? (existing.hidden ? "收在手上" : "在场") : "未唤出"} · 武器ATK ${typeof computeWeaponAtk === "function" ? computeWeaponAtk(kit, pc.attrs, lv) : "?"}${lv >= 5 ? " · 需工匠" : ""}</span>
+        <span class="hint">${existing ? (existing.hidden ? "收在手上" : "在场") : "未唤出"} · 武器ATK ${typeof computeWeaponAtk === "function" ? computeWeaponAtk(kit, pc.attrs, lv, weaponPartsOf(pc, kit)) : "?"}${lv >= 5 ? " · 需工匠" : ""}</span>
       </div>`;
     });
   });

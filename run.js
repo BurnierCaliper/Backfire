@@ -576,6 +576,7 @@ const RUN = {
         upOnShp: !!u.upOnShp,
         durability: u.resources ? u.resources.durability : undefined,
         weaponLevels: u.weaponLevels ? JSON.parse(JSON.stringify(u.weaponLevels)) : undefined,
+        weaponParts: u.weaponParts ? JSON.parse(JSON.stringify(u.weaponParts)) : undefined,
         xp: Number(u.xp) || 0,
         level: Number(u.level) || 1
       };
@@ -600,6 +601,10 @@ const RUN = {
       u.upOnShp = !!c.upOnShp;
       if (c.durability != null && u.resources) u.resources.durability = c.durability;
       if (c.weaponLevels) u.weaponLevels = JSON.parse(JSON.stringify(c.weaponLevels));
+      if (c.weaponParts) {
+        u.weaponParts = JSON.parse(JSON.stringify(c.weaponParts));
+        if (typeof refreshOwnerWeaponAtk === "function") Object.keys(u.weaponParts).forEach(k => refreshOwnerWeaponAtk(u, k));
+      }
     });
   },
 

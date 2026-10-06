@@ -9,7 +9,8 @@
  * 每个函数返回写给日志的几行文字。 */
 
 const TRPG = {
-  active: false
+  active: false,
+  taskBattle: null   // 正在打的任务战斗 { id, index }（trpg-tasks.js）
 };
 
 function trpgHeroes() {
@@ -103,6 +104,7 @@ function trpgShortRest(kits) {
 /** plan：{ hours, food: { kit: foodId }, force } */
 function trpgLongRest(plan) {
   const r = ledgerLongRest(plan || {}, []);
+  if (typeof trpgTaskRestEscort === "function") trpgTaskRestEscort(r.notes);
   return r.notes;
 }
 
@@ -185,6 +187,79 @@ function trpgUpgradeWeapon(ownerKit, kit, mode, fee) {
   else { owner.weaponLevels = owner.weaponLevels || {}; owner.weaponLevels[kit] = info.next; }
   ledgerCapture();
   return notes;
+}
+
+/* ---------- 武器改装槽（growth.js：3 级 +1 槽，7 级 +1 槽） ----------
+ * free：主持人直接装，不从背包拿 */
+function trpgInstallPart(ownerKit, kit, slot, part, free) {
+  const owner = trpgHeroes().find(h => h.kit === ownerKit);
+  const notes = installWeaponPart(owner, kit, slot, part, free);
+  ledgerCapture();
+  return notes;
+}
+/** 主持人随机生成一个改装件放进背包（grade：C / B） */
+function trpgRandomPart(grade) {
+  const id = rollWeaponPart({ [grade === "B" ? "B" : "C"]: 1 });
+  bagAdd(weaponPartItemId(id), 1);
+  ledgerCapture();
+  return [`背包里多了一个改装件：${weaponPartLabel(id)}（${weaponPartCoefText(WEAPON_PARTS[id].coef)}）。`];
+}
+function trpgRemovePart(ownerKit, kit, slot) {
+  const owner = trpgHeroes().find(h => h.kit === ownerKit);
+  const notes = removeWeaponPart(owner, kit, slot);
+  ledgerCapture();
+  return notes;
+}
+
+/* ---------- 客制化图纸（rogue-data.js · ROGUE_SMITHS 的图纸，背包物品 id 就是图纸 id） ----------
+ * 装在哪把武器上记在角色身上：hero.weaponBlueprints[武器kit] = 图纸 id，一把武器一张。
+ * 战斗规则读 state.weaponMods（mods.js）：每次摆队伍、装 / 拆之后按队伍重算一遍。 */
+function trpgSyncWeaponMods() {
+  const mods = {}, ids = {};
+  trpgHeroes().forEach(h => Object.keys(h.weaponBlueprints || {}).forEach(k => {
+    const b = typeof blueprintSpec === "function" ? blueprintSpec(h.weaponBlueprints[k]) : null;
+    if (b && b.mod) { mods[k] = JSON.parse(JSON.stringify(b.mod)); ids[k] = b.id; }
+  }));
+  state.weaponMods = Object.keys(mods).length ? mods : null;
+  state.weaponBlueprints = Object.keys(ids).length ? ids : null;
+  if (typeof syncBpAll === "function") syncBpAll();
+  // 耐久上限变小（大杀器、耐久 −N）：当前耐久跟着压下来
+  if (typeof LEDGER !== "undefined" && LEDGER.dur && typeof weaponDurMax === "function") {
+    Object.keys(LEDGER.dur).forEach(k => { const m = weaponDurMax(k); if (Number(LEDGER.dur[k]) > m) LEDGER.dur[k] = m; });
+  }
+}
+/** 装图纸。fee：付给工匠的奎支（主持人按剧情定）；free：主持人直接装（不从背包拿，不收钱） */
+function trpgInstallBlueprint(ownerKit, kit, bpId, fee, free) {
+  const owner = trpgHeroes().find(h => h.kit === ownerKit);
+  if (!owner) return ["没有这个角色。"];
+  if (!(owner.linkedKits || []).includes(kit)) return ["这把武器不属于这个角色。"];
+  const b = typeof blueprintSpec === "function" ? blueprintSpec(bpId) : null;
+  if (!b) return ["没有这张图纸。"];
+  const wname = typeof weaponName === "function" ? weaponName(kit) : kit;
+  const pay = free ? 0 : Math.max(0, Math.floor(Number(fee) || 0));
+  if (!free && bagCount(bpId) < 1) return [`背包里没有图纸「${b.name}」。`];
+  if (pay > (Number(state.kuizhi) || 0)) return [`奎支不够付工钱：要 ${pay}，手里只有 ${Number(state.kuizhi) || 0}。`];
+  const notes = [];
+  if (!free) { bagAdd(bpId, -1); if (pay) state.kuizhi -= pay; }
+  owner.weaponBlueprints = owner.weaponBlueprints || {};
+  const old = owner.weaponBlueprints[kit];
+  if (old) { bagAdd(old, 1); notes.push(`拆下原来的图纸「${(blueprintSpec(old) || {}).name || old}」放回背包。`); }
+  owner.weaponBlueprints[kit] = bpId;
+  trpgSyncWeaponMods();
+  notes.push(`${free ? "主持人" : "工匠"}把客制化图纸「${b.name}」装到 ${wname} 上（${b.text}）${pay ? `，工钱 ${pay} 奎支` : ""}。`);
+  ledgerCapture();
+  return notes;
+}
+function trpgRemoveBlueprint(ownerKit, kit) {
+  const owner = trpgHeroes().find(h => h.kit === ownerKit);
+  if (!owner) return ["没有这个角色。"];
+  const id = (owner.weaponBlueprints || {})[kit];
+  if (!id) return ["这把武器没有装图纸。"];
+  delete owner.weaponBlueprints[kit];
+  bagAdd(id, 1);
+  trpgSyncWeaponMods();
+  ledgerCapture();
+  return [`拆下 ${typeof weaponName === "function" ? weaponName(kit) : kit} 上的图纸「${(blueprintSpec(id) || {}).name || id}」，放回背包。`];
 }
 
 /* ---------- 后台：主持人按叙事直接改数值（不走规则） ----------

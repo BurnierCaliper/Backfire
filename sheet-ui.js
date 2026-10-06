@@ -48,6 +48,15 @@
     const extra = b.extra ? ` + 引擎 ${b.extra}%` : "";
     return `<b>${b.total}%</b> <small>= 空手 ${b.bare}%（敏捷 ${b.dex}）${unarmed ? "，空手中" : ` + 武器 ${b.weapon}%`}${extra}</small>`;
   }
+  /** 补正系数 + 改装槽 */
+  function modsHtml(m) {
+    if (!m) return "";
+    const coefs = m.coefs.map(c => `${esc(c.name)} ${c.coef > 0 ? "" : "−"}${Math.abs(c.coef)}`).join(" · ") || "—";
+    const slots = m.slots.length
+      ? m.slots.map((s, i) => `槽${i + 1}：${s ? `${esc(s.name)}（${esc(s.text)}）` : "空"}`).join(" · ")
+      : "没有";
+    return `<p class="hs-note">补正系数：${coefs}<br>改装槽：${slots}${m.nextSlotLv ? `（${m.nextSlotLv} 级再开 1 个）` : ""}</p>`;
+  }
   function heroHtml(h) {
     const roles = h.roles.map(r => `${r.label} ${esc(r.role)}`).join(" · ");
     const attrs = ATTR.map(([k, n]) => `<div class="hs-attr"><span>${n}</span><b>${h.attrs[k] != null ? h.attrs[k] : "—"}</b></div>`).join("");
@@ -62,6 +71,7 @@
           <div><span>独立协助格挡</span><b>${w.blockAlone != null ? w.blockAlone + "%" : "—"}</b></div>
         </div>
         <div class="hs-layers">${layersText(w.layers)}</div>
+        ${modsHtml(w.mods)}
         ${w.growth ? `<p class="hs-note">${esc(w.growth)}</p>` : ""}
         ${w.passives.map(p => `<div class="hs-pass"><b>${esc(p.name)}</b><p>${esc(p.text)}</p></div>`).join("")}
         ${w.assistBlock ? `<div class="hs-pass"><b>协助格挡 · ${w.blockAlone != null ? w.blockAlone + "%" : ""}</b><p>${esc(w.assistBlock)}</p></div>` : ""}

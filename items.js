@@ -10,6 +10,19 @@ const ITEM_CATALOG = {
   shockbomb:  { name: "冲击炸弹", hint: "对一个区域全部单位造成 2 击破", target: "zone", combat: true }
 };
 
+/* 武器改装件也放在背包里（growth.js 的 WEAPON_PARTS，物品 id = part_改装件id） */
+function registerWeaponPartItems() {
+  if (typeof WEAPON_PARTS === "undefined") return;
+  Object.keys(WEAPON_PARTS).forEach(id => {
+    const p = WEAPON_PARTS[id];
+    const key = typeof weaponPartItemId === "function" ? weaponPartItemId(id) : "part_" + id;
+    const neg = p.neg && typeof WEAPON_PART_ATTR_CN !== "undefined" ? ` · ${WEAPON_PART_ATTR_CN[p.neg]}−` : "";
+    if (!ITEM_CATALOG[key]) ITEM_CATALOG[key] = { name: `改装件·${p.name}${p.grade ? `（${p.grade}级${neg}）` : ""}`,
+      hint: typeof weaponPartCoefText === "function" ? weaponPartCoefText(p.coef) : "", combat: false, part: id };
+  });
+}
+registerWeaponPartItems();
+
 function ensureBag() {
   if (!state.bag || typeof state.bag !== "object") state.bag = { items: [] };
   if (!Array.isArray(state.bag.items)) state.bag.items = [];
