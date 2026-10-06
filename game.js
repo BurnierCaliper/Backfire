@@ -1309,6 +1309,32 @@
         }
         continue;
       }
+      // Helumica 协助攻击附带的环境扫描：区域已定（被打的敌人所在的区），按环境扫描的选项一步步问
+      if (state.heluScanQueue && state.heluScanQueue.length) {
+        const job = state.heluScanQueue[0];
+        const h = unitById(job.actorId);
+        if (!h) { systemCommand({ type: "battle.cleanQueues", queue: "helu" }); continue; }
+        const SKIP = "__skip";
+        const ask = (title, text, opts) => hotseat()
+          ? HotseatGame.ownedChoice(h, title, opts.concat([{ label: "放弃扫描", value: SKIP }]))
+          : openChoice(title, text, opts, { label: "放弃扫描", value: SKIP });
+        const picks = { dest: job.zone };
+        let skipped = false;
+        for (let g = 0; g < 8; g++) {
+          let steps = [];
+          try { steps = skillFlowSteps("helu_scan", h, picks) || []; } catch (e) { steps = []; }
+          const step = steps.find(st => picks[st.key] === undefined);
+          if (!step) break;
+          const opts = step.type === "unit"
+            ? (step.units || []).map(u => ({ label: u.name, sub: u.zone ? `${u.zone} 区` : "", value: u.id }))
+            : (step.options || []).map(o => ({ label: o.label, value: o.value }));
+          const v = await ask(`环境扫描 · ${job.zone} 区`, `协助攻击附带的环境扫描。${step.label}`, opts);
+          if (v == null || v === SKIP) { skipped = true; break; }
+          picks[step.key] = v;
+        }
+        await perform({ type: "heluScanAnswer", picks: skipped ? null : picks }, { actorId: h.id, skillName: "环境扫描" }, true);
+        continue;
+      }
       return;
     }
   }
@@ -1538,7 +1564,7 @@
           withSeed("hit:" + job.seq, () => finishBlock(null));
           if (info) detail.push(Object.assign(info, { dmg: dmgOnPlayers(from).get(info.target) || 0 }));
         }
-        state.assistQueue = []; state.koltSwapQueue = [];
+        state.assistQueue = []; state.koltSwapQueue = []; state.heluScanQueue = [];
       };
       drain(null);
       for (const uid of EnemyAI.actingOrder()) {

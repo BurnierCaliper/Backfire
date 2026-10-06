@@ -366,6 +366,10 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **超充能电池爆炸不分敌我；Helumica 协助攻击改版**（`app.js · destroyProp / runSkill helu_assist / stepFocus / queueHeluScan / resolveHeluScan`、`game.js · resolveQueues`、`battle-commands.js · heluScanAnswer`、`sim.js`）
+  - **超充能电池**：被摧毁 / 引爆时，同区所有单位（敌我都算）受到 等级d4 电击。以前只打和电池同阵营的单位。
+  - **Helumica 协助攻击**：任意距离，对敌人造成 1×atk 谐波伤害。敌人没有聚焦时，对其中一种血量层造成聚焦；已有聚焦时，直接推进序列一次（不管序列要什么属性，走完就抹层）。然后对该敌人所在的区域进行一次环境扫描：区域固定，照环境扫描的选项选（扫描出配置物、引爆 / 操控配置物、震动危墙桥梁、激发场地），也可以放弃。这次扫描不耗行动点，也不占用本场主动「环境扫描」的次数。
+
 - **主持人后台可以直接改角色被动数值和聚焦**（`app.js · PASSIVE_EDIT / dmSetPassive / dmSetFocus / renderBackstage`、`trpg-commands.js · BackstageCommands`）：战斗顶栏「后台」新增两节，给叙事用，改完立刻生效并写进战斗记录，不走任何规则。
   - **角色被动 / 资源**：鲁比纳米 %；结衣咖啡豆、咖啡液、思念对象；绯秋刀势、手中的刀；托乌圣盾、嘲讽剩余次数；夏引擎；川川电能；诺拉 / 维塔斯情绪（两人一起变）；柯尔特刀头、嘲讽剩余次数；Helumica 本场是否用过环境扫描；拉斯缪尔累积能量 %、光能、不稳态。数字夹在合理范围里，只开放表里列出的项。
   - **聚焦**：给任意敌人的任意血量层设聚焦，序列用属性名写（例：火 电 冰），可以指定已推进的步数；序列留空就按规则随机生成；也可以清除。

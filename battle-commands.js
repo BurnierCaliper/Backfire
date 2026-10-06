@@ -2,7 +2,7 @@
 (function (root) {
   "use strict";
   let local = {};
-  const types = ["skill", "move", "standUp", "useItem", "startCombat", "endTurn", "openingChoice", "blockAnswer", "assistAnswer", "koltSwapAnswer", "retreat", "battle.endPlayerTurn", "battle.endEnemyTurn", "battle.enemyAction", "battle.finish", "battle.afterBattle", "battle.checkSolo", "battle.supportInfo", "battle.rememberCampaign", "battle.loadCampaign", "battle.cleanQueues", "battle.setup", "battle.setupRogue", "battle.panel", "battle.undo", "battle.continue"];
+  const types = ["skill", "move", "standUp", "useItem", "startCombat", "endTurn", "openingChoice", "blockAnswer", "assistAnswer", "koltSwapAnswer", "heluScanAnswer", "retreat", "battle.endPlayerTurn", "battle.endEnemyTurn", "battle.enemyAction", "battle.finish", "battle.afterBattle", "battle.checkSolo", "battle.supportInfo", "battle.rememberCampaign", "battle.loadCampaign", "battle.cleanQueues", "battle.setup", "battle.setupRogue", "battle.panel", "battle.undo", "battle.continue"];
   const panelActions = ["bagAdd", "currency", "water", "healItem", "repair", "advance", "shortRest", "longRest", "restore", "cheat", "saveSlot", "loadSlot", "clearSlot", "addParty", "removeParty", "addEnemy", "removeEnemy", "setField", "setGap", "gapHp", "rollWall", "toggleDoor", "addProp", "removeProp", "setZones", "setPartySize", "setWeather", "rollEncounter", "rollBossEncounter", "selectEncounter", "normalizeBag", "normalizeGaps", "normalizeField", "setHighland"];
   function configure(adapter) { local = Object.assign({}, local, adapter || {}); }
   function environment(context) { return Object.assign({}, local, context || {}); }
@@ -47,7 +47,8 @@
     if (cmd.type === "battle.panel" && panelActions.indexOf(cmd.action) < 0) throw new Error("Unknown battle panel action: " + cmd.action);
     const oneOf = (value, values, field) => { if (!values.includes(value)) throw new Error("Unknown " + field + ": " + value); };
     if (cmd.type === "openingChoice") oneOf(cmd.bit, ["acid", "drill"], "opening bit");
-    if (cmd.type === "battle.cleanQueues") oneOf(cmd.queue, ["block", "assist", "kolt"], "reaction queue");
+    if (cmd.type === "battle.cleanQueues") oneOf(cmd.queue, ["block", "assist", "kolt", "helu"], "reaction queue");
+    if (cmd.type === "heluScanAnswer" && cmd.picks != null && (typeof cmd.picks !== "object" || Array.isArray(cmd.picks))) throw new Error("picks must be an object");
     if (cmd.type === "battle.panel") {
       if (cmd.action === "setField") oneOf(cmd.kind, ["", "fireOn", "ice", "acid", "electric", "energy", "harmonic", "heal", "abyss", "highland", "collapseOn"], "field kind");
       if (cmd.action === "setGap") oneOf(cmd.kind, ["open", "bridge", "wall", "door", "void"], "gap kind");
@@ -204,6 +205,7 @@
       case "blockAnswer": return seeded(cmd.seed, () => finishBlock(cmd.helper || null, cmd.forced || null));
       case "assistAnswer": { const helper = unitById(cmd.helper); const prev = state.combatPhase; if (helper) state.combatPhase = helper.isPlayer ? "player" : "enemy"; try { return finishAssist(cmd.helper || null, cmd.extra || {}); } finally { state.combatPhase = prev; } }
       case "koltSwapAnswer": return resolveKoltSwap(!!cmd.swap, cmd.target || null);
+      case "heluScanAnswer": return resolveHeluScan(cmd.picks || null);
       case "retreat": return performRetreat(cmd.rearguard || null);
       case "endTurn": if (env.endUnit) return env.endUnit(cmd);
       case "battle.endPlayerTurn": return seeded(cmd.seed, () => endPlayerTurn());
@@ -217,7 +219,7 @@
       case "battle.loadCampaign": return env.loadCampaignMem ? env.loadCampaignMem() : null;
       case "battle.cleanQueues": {
         if (cmd.queue === "assist") return pruneAssistQueue();
-        const queue = cmd.queue === "block" ? state.blockQueue : state.koltSwapQueue;
+        const queue = cmd.queue === "block" ? state.blockQueue : cmd.queue === "helu" ? state.heluScanQueue : state.koltSwapQueue;
         if (queue && queue.length) queue.shift();
         return;
       }

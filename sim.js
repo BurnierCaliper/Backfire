@@ -32,6 +32,7 @@ const BattleSim = (function () {
     state.assistQueue = [];
     state.blockQueue = [];
     state.koltSwapQueue = [];
+    state.heluScanQueue = [];
     state.skillFlow = null;
     state.history = [];
     state.actionAcc = null;
@@ -145,6 +146,11 @@ const BattleSim = (function () {
         if (!k) { state.koltSwapQueue.shift(); continue; }
         const pick = policy.koltSwap ? policy.koltSwap(k) : { swap: false };
         resolveKoltSwap(!!(pick && pick.swap), pick && pick.targetId);
+        continue;
+      }
+      if (state.heluScanQueue && state.heluScanQueue.length) {
+        const job = state.heluScanQueue[0];
+        resolveHeluScan(policy.heluScan ? policy.heluScan(job) : { act: "spawn" });
         continue;
       }
       return;

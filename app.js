@@ -3141,9 +3141,9 @@ function destroyProp(p, attacker) {
   if (p.kind === "battery") {
     const r = takeDice(lv, 4, 0);
     const dmg = r.total;
-    notes.push(`电池爆炸：同区同阵营 ${r.text} 电击。`);
+    notes.push(`电池爆炸：同区所有单位（不分敌我）${r.text} 电击。`);
     markAoeZone(p.zone, { element: "electric", dmg, attacker });
-    state.units.filter(u => !u.hidden && !u.dead && Number(u.zone) === Number(p.zone) && !!u.isPlayer === (p.faction !== "enemy")).forEach(u => {
+    state.units.filter(u => !u.hidden && !u.dead && Number(u.zone) === Number(p.zone)).forEach(u => {
       const fake = unitOf("电池", lv, [{ type: "armor", hp: 1 }], 0, 0);
       fake.zone = p.zone;
       dealTo(fake, u, { atk: 0, mult: 0, flat: dmg, element: "electric", baseBreak: 0, flags: { action: true, aoe: true, blockResolved: true } });
@@ -4308,12 +4308,17 @@ function advanceFocusOnHit(attacker, target, element, res, extra) {
   target.focuses.slice().forEach(f => {
     const need = f.seq[f.step];
     if (need && (element === need || byWeather)) {
-      f.step += 1;
-      const why = element === need ? "" : "，顺应天气";
-      extra.push(`${target.name} 聚焦推进 ${f.step}/${f.seq.length}（${(typeof ELE !== "undefined" && ELE[element]) || element}${why}）`);
-      if (f.step >= f.seq.length) stripFocusLayer(target, f.layerType, extra);
+      const eleName = (typeof ELE !== "undefined" && ELE[element]) || element;
+      stepFocus(target, f, extra, element === need ? eleName : eleName + "，顺应天气");
     }
   });
+}
+/** 聚焦序列推进一步；走完就抹层 */
+function stepFocus(target, f, out, why) {
+  if (!f || !(target.focuses || []).includes(f) || f.step >= f.seq.length) return;
+  f.step += 1;
+  out.push(`${target.name} 聚焦推进 ${f.step}/${f.seq.length}（${why}）`);
+  if (f.step >= f.seq.length) stripFocusLayer(target, f.layerType, out);
 }
 
 function addRasEnergy(pct, reason) {
@@ -6380,6 +6385,24 @@ function heluScanOptions(z) {
     if (heluScanFieldOn(f, k)) opts.push({ value: "field:" + k, label: `场地 · ${name}：${desc}` });
   });
   return opts;
+}
+/** Helumica 协助攻击附带的环境扫描：排进队列，由画面（或模拟器）问完选项再结算 */
+function queueHeluScan(a, zone, lines) {
+  if (!a || zone == null) return;
+  state.heluScanQueue = state.heluScanQueue || [];
+  state.heluScanQueue.push({ actorId: a.id, zone: Number(zone) });
+  if (lines) lines.push(`接着对 ${zone} 区进行环境扫描。`);
+}
+/** 结算队首的协助扫描。picks 为 null 表示放弃；区域固定为排队时的那一区 */
+function resolveHeluScan(picks) {
+  const job = (state.heluScanQueue || []).shift();
+  if (!job) return;
+  const a = unitById(job.actorId);
+  if (!a || !picks) { if (a) appendLog(`${a.name} 放弃了这次环境扫描。`); return; }
+  const lines = [];
+  heluScanAct(a, Object.assign({}, picks, { dest: job.zone }), lines);
+  appendLog(lines.join("\n"));
+  if (typeof renderAll === "function") renderAll();
 }
 /** 执行环境扫描的选择。picks：{ dest, act, mode, ally, target, sign } */
 function heluScanAct(a, picks, lines) {
@@ -9434,8 +9457,15 @@ function runSkillInner(id, optRun) {
     } else if (id === "helu_assist") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       hitOne(a, t, { element: "harmonic", mult: 1, baseBreak: 0, atk, flags: { action: true, assist: true }, atkRange: "any" });
-      const layer = ((t.layers || []).find(l => (l.current || 0) > 0) || {}).type;
-      applyFocus(t, layer, lines);
+      // 已有聚焦：直接推进序列一次；没有就对一种血量层造成聚焦
+      if (!t.dead && (t.focuses || []).length) {
+        t.focuses.slice().forEach(f => stepFocus(t, f, lines, "协助攻击"));
+      } else if (!t.dead) {
+        const layer = ((t.layers || []).find(l => (l.current || 0) > 0) || {}).type;
+        applyFocus(t, layer, lines);
+      }
+      // 再对这个敌人所在的区做一次环境扫描（不耗行动，也不算本场那次主动扫描）
+      queueHeluScan(a, t.zone, lines);
     } else if (id === "ecmo_bite") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       const beforeStun = !!t.stunned;
