@@ -206,7 +206,7 @@ const Rogue = (function () {
 
   /* ---------- 任务 ---------- */
   function makeTask(run, tpl, slot) {
-    return withRng(`${run.seed}:task:${run.act}:${run.boardNo}:${slot}`, () => {
+    const task = withRng(`${run.seed}:task:${run.act}:${run.boardNo}:${slot}`, () => {
       const n = between(tpl.nodes[0], tpl.nodes[1]);
       const types = [];
       for (let i = 0; i < n - 1; i++) {
@@ -230,6 +230,14 @@ const Rogue = (function () {
         cols                 // 路线图：每一列可选的节点（接下任务后在地图上一列一列选）
       };
     });
+    task.part = rollTaskPart(run, tpl, slot);   // 完成时额外给的改装件（部分任务有）
+    return task;
+  }
+  /** 任务奖励的改装件：单独一条随机流，不影响任务的路线和天气 */
+  function rollTaskPart(run, tpl, slot) {
+    const cfg = typeof ROGUE_PARTS !== "undefined" && ROGUE_PARTS.taskReward[tpl.kind];
+    if (!cfg || typeof rollWeaponPart !== "function") return null;
+    return withRng(`${run.seed}:taskpart:${run.act}:${run.boardNo}:${slot}`, () => (Math.random() < cfg.chance ? rollWeaponPart(cfg.grades) : null));
   }
 
   /** 路线图（类似《杀戮尖塔》，从左到右）：主干的每一站是一列，中间的列多给 1–2 个可选节点。
@@ -1323,6 +1331,103 @@ const Rogue = (function () {
     if (old) notes.push(`原来的「${old.name}」被拆掉了。`);
     return logAll(run, notes);
   }
+  /* ---------- 改装件（C / B 级，rogue-data.js · ROGUE_PARTS） ----------
+   * 改装件放在本局背包里。工匠处每次随机摆 3 件卖；商店和工匠处都能按原价 40% 卖掉；
+   * 在工匠处花工钱装上（C 300 / B 500），拆下不要钱，拆下的放回背包。 */
+  const PR = () => ROGUE_PARTS;
+  const partBase = (id) => (WEAPON_PARTS[id] ? PR().price[WEAPON_PARTS[id].grade] || 0 : 0);
+  function partSellPrice(id) { return Math.round(partBase(id) * PR().sellRate); }
+  function partInstallCost(id) { return WEAPON_PARTS[id] ? PR().install[WEAPON_PARTS[id].grade] || 0 : 0; }
+  /** 此刻在哪里（任务板 / 第几个任务的第几站）：工匠的货架按这个刷新 */
+  const partPlace = (run) => (run.stage === "board" ? `b${run.act}.${run.boardNo}` : `t${run.taskNo}.${run.task ? run.task.index : 0}`);
+  /** 工匠摆出来卖的改装件：[{ id, base, price, discount, sold }]。第一次看时随机定下 */
+  function partOffers(run, smithId) {
+    const sid = requireSmith(run, smithId);
+    const place = partPlace(run);
+    run.partOffers = run.partOffers || {};
+    Object.keys(run.partOffers).forEach(k => { if (k.split(":")[0] !== place) delete run.partOffers[k]; });   // 离开了就不留
+    const key = `${place}:${sid}`;
+    if (!run.partOffers[key]) {
+      run.partOffers[key] = withRng(`${run.seed}:partoffer:${key}`, () => {
+        const out = [];
+        for (let i = 0; i < PR().smithOffer; i++) {
+          const id = rollWeaponPart(PR().smithGrades);
+          const base = partBase(id);
+          const discount = Math.random() < PR().discountChance;
+          out.push({ id, base, price: discount ? Math.round(base * PR().discount) : base, discount, sold: false });
+        }
+        return out;
+      });
+    }
+    return run.partOffers[key];
+  }
+  function buyPart(run, smithId, index) {
+    const offer = partOffers(run, smithId)[Number(index)];
+    if (!offer) throw new Error("没有这件改装件");
+    if (offer.sold) throw new Error("这件已经卖掉了");
+    if ((Number(state.kuizhi) || 0) < offer.price) throw new Error(`奎支不够：要 ${offer.price}`);
+    state.kuizhi -= offer.price;
+    offer.sold = true;
+    bagAdd(weaponPartItemId(offer.id), 1);
+    return logAll(run, [`买下改装件 ${weaponPartLabel(offer.id)}（${weaponPartCoefText(WEAPON_PARTS[offer.id].coef)}），花掉 ${offer.price} 奎支${offer.discount ? "（打折）" : ""}。`]);
+  }
+  /** 能不能卖改装件：商店节点、休整时的商店，或者有工匠在场 */
+  function canSellParts(run) { return canShop(run) || presentSmiths(run).length > 0; }
+  /** 背包里的改装件：[{ id, name, grade, text, qty, sell, install }] */
+  function partStock() {
+    return Object.keys(WEAPON_PARTS).map(id => ({ id, qty: bagCount(weaponPartItemId(id)) })).filter(x => x.qty > 0)
+      .map(x => Object.assign(x, { name: weaponPartLabel(x.id), grade: WEAPON_PARTS[x.id].grade, text: weaponPartCoefText(WEAPON_PARTS[x.id].coef),
+        sell: partSellPrice(x.id), install: partInstallCost(x.id) }));
+  }
+  function sellPart(run, partId) {
+    if (!canSellParts(run)) throw new Error("这里没人收改装件（去商店或者工匠那里卖）");
+    if (!WEAPON_PARTS[partId] || bagCount(weaponPartItemId(partId)) < 1) throw new Error("背包里没有这件改装件");
+    const price = partSellPrice(partId);
+    bagAdd(weaponPartItemId(partId), -1);
+    state.kuizhi = (Number(state.kuizhi) || 0) + price;
+    return logAll(run, [`卖掉改装件 ${weaponPartLabel(partId)}，得到 ${price} 奎支。`]);
+  }
+  function partOwner(run, kit) {
+    const h = run.party.find(x => (x.weapons || []).indexOf(kit) >= 0);
+    if (!h) throw new Error("队伍里没有这把武器");
+    return h;
+  }
+  /** 在工匠处装上改装件：slot 槽位（从 0 数）；槽里原来的件放回背包 */
+  function installPart(run, kit, slot, partId, smithId) {
+    requireSmith(run, smithId);
+    const h = partOwner(run, kit);
+    if (!WEAPON_PARTS[partId] || bagCount(weaponPartItemId(partId)) < 1) throw new Error("背包里没有这件改装件");
+    const row = weaponPartRow(h, kit);
+    if (!row.length) throw new Error(`${heroName(kit)} 要升到 ${WEAPON_PART_SLOT_LEVELS[0]} 级才有改装槽`);
+    const i = Math.floor(Number(slot) || 0);
+    if (i < 0 || i >= row.length) throw new Error(`${heroName(kit)} 只有 ${row.length} 个改装槽`);
+    const cost = partInstallCost(partId);
+    if ((Number(state.kuizhi) || 0) < cost) throw new Error(`奎支不够：装上要 ${cost}`);
+    state.kuizhi -= cost;
+    bagAdd(weaponPartItemId(partId), -1);
+    const notes = [];
+    if (row[i]) { bagAdd(weaponPartItemId(row[i]), 1); notes.push(`拆下 ${weaponPartLabel(row[i])} 放回背包。`); }
+    row[i] = partId;
+    h.weaponParts = h.weaponParts || {};
+    h.weaponParts[kit] = row;
+    notes.push(`工匠把 ${weaponPartLabel(partId)}（${weaponPartCoefText(WEAPON_PARTS[partId].coef)}）装到 ${heroName(kit)} 的第 ${i + 1} 个改装槽，工钱 ${cost} 奎支。`);
+    return logAll(run, notes);
+  }
+  /** 拆下改装件：不要钱，放回背包（要有工匠在场） */
+  function removePart(run, kit, slot, smithId) {
+    requireSmith(run, smithId);
+    const h = partOwner(run, kit);
+    const row = weaponPartRow(h, kit);
+    const i = Math.floor(Number(slot) || 0);
+    if (!row[i]) throw new Error("这个槽是空的");
+    const id = row[i];
+    row[i] = null;
+    h.weaponParts = h.weaponParts || {};
+    h.weaponParts[kit] = row;
+    bagAdd(weaponPartItemId(id), 1);
+    return logAll(run, [`拆下 ${heroName(kit)} 第 ${i + 1} 槽的 ${weaponPartLabel(id)}，放回背包（不要钱）。`]);
+  }
+
   /** 本局各武器的图纸加成：kit → { atk, dur, block } */
   function weaponModsOf(run) {
     const out = {};
@@ -1345,6 +1450,10 @@ const Rogue = (function () {
     const pay = taskPay(run, t);
     state.kuizhi = (Number(state.kuizhi) || 0) + pay.kuizhi;
     notes.push(`${t.key ? "主线" : "任务「" + t.name + "」"}完成：获得 ${pay.kuizhi} 奎支，每人 ${pay.xp} 经验。`);
+    if (t.part && WEAPON_PARTS[t.part]) {
+      bagAdd(weaponPartItemId(t.part), 1);
+      notes.push(`委托方额外给了一个改装件：${weaponPartLabel(t.part)}（${weaponPartCoefText(WEAPON_PARTS[t.part].coef)}）。`);
+    }
     run.party.forEach(h => { h.xp = (h.xp || 0) + pay.xp; });
     const r = withParty(run, () => null);     // 摆上场按规则结算升级
     notes.push(...r.notes);
@@ -1436,7 +1545,8 @@ const Rogue = (function () {
         const cur = w ? w.reduce((s, l) => s + (Number(l.current) || 0), 0) : null;
         return { kit: k, name: heroName(k), level: (h.weaponLevels || {})[k] || 1,
           dur: weaponDurFor(h, k, run), durMax: weaponDurMaxFor(h, k, run), hp: cur,
-          blueprint: (run.installed || {})[k] ? blueprintById(run.installed[k]) : null };
+          blueprint: (run.installed || {})[k] ? blueprintById(run.installed[k]) : null,
+          parts: weaponPartRow(h, k).map(id => id ? { id, name: weaponPartLabel(id), text: weaponPartCoefText(WEAPON_PARTS[id].coef) } : null) };
       })
     };
   }
@@ -1468,7 +1578,7 @@ const Rogue = (function () {
     battleSpec, applyPartyToField, finishBattle,
     checkInfo, checkChance, checkOdds, attemptCheck, skipCheck, heroProfs,
     role2Options, soloBattleInfo,
-    restPlan, canLongRest, sheetData, armoryData, restAtNode, leaveNode, canShortRestBefore, shortRestBeforeNode,
+    restPlan, canLongRest, sheetData, armoryData, partOffers, buyPart, sellPart, canSellParts, partStock, partSellPrice, partInstallCost, installPart, removePart, restAtNode, leaveNode, canShortRestBefore, shortRestBeforeNode,
     ambushChance, watchOptions,
     buy, canShop, shopItemName, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
     presentSmiths, smithInfo, claimBlueprint, installBlueprint, blueprintById, weaponModsOf,

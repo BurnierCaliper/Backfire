@@ -121,14 +121,45 @@ function weaponTier(lv) {
 
 /* ===== 武器改装槽 =====
  * 武器 3 级多 1 个改装槽，7 级再多 1 个。改装件修改武器的补正系数：
- *   coef = { 属性: 增减量 }，正数加正补正，负数是负补正（例：配重块 力量 +0.1、敏捷 −0.1）。
+ *   coef = { 属性: 增减量 }，正数加正补正，负数是负补正（例：配重块-beta 力量 +0.1、敏捷 −0.1）。
  * 装了什么记在角色身上：hero.weaponParts[武器kit] = [改装件 id 或 null, …]（按槽位）。
  * 改装件平时放在背包里（物品 id = "part_" + 改装件 id），装上从背包拿走，拆下放回背包。
- * 具体改装件之后再设计，现在只有一个示例【配重块】。 */
+ * C / B 级是程序生成的「凑数件」：主补正（力量 / 敏捷 / 智力）+ 一个不同属性的负补正（六维任意一个）。
+ *   C 级：主补正 +0.1，负补正 −0.1，名字后缀 beta；B 级：±0.15，后缀 alpha。
+ *   id = 等级_主属性_负属性（例：c_str_dex = 配重块-beta，力量 +0.1、敏捷 −0.1）。
+ * A / S 级之后再设计（往 WEAPON_PARTS 里加就行）。 */
 const WEAPON_PART_SLOT_LEVELS = [3, 7];
-const WEAPON_PARTS = {
-  counterweight: { name: "配重块", grade: "C", coef: { str: 0.1, dex: -0.1 }, hint: "示例改装件" }
+const WEAPON_PART_ATTRS = ["str", "con", "dex", "wil", "int", "sta"];
+const WEAPON_PART_GEN = {
+  mains: { str: "配重块", dex: "轻量骨架", int: "调谐芯片" },
+  grades: { C: { step: 0.1, suffix: "beta" }, B: { step: 0.15, suffix: "alpha" } }
 };
+const WEAPON_PARTS = {};
+Object.keys(WEAPON_PART_GEN.grades).forEach(g => {
+  const G = WEAPON_PART_GEN.grades[g];
+  Object.keys(WEAPON_PART_GEN.mains).forEach(main => {
+    WEAPON_PART_ATTRS.filter(a => a !== main).forEach(neg => {
+      WEAPON_PARTS[`${g.toLowerCase()}_${main}_${neg}`] = {
+        name: `${WEAPON_PART_GEN.mains[main]}-${G.suffix}`, grade: g, main, neg,
+        coef: { [main]: G.step, [neg]: -G.step }, gen: true
+      };
+    });
+  });
+});
+/** 随机生成一个改装件 id。grades：可选的等级和权重，例 { C: 3, B: 1 }（默认各一半） */
+function rollWeaponPart(grades, rnd) {
+  rnd = rnd || Math.random;
+  grades = grades || { C: 1, B: 1 };
+  const keys = Object.keys(grades).filter(k => grades[k] > 0 && WEAPON_PART_GEN.grades[k]);
+  const total = keys.reduce((s, k) => s + grades[k], 0);
+  let r = rnd() * total, g = keys[keys.length - 1];
+  for (const k of keys) { r -= grades[k]; if (r < 0) { g = k; break; } }
+  const mains = Object.keys(WEAPON_PART_GEN.mains);
+  const main = mains[Math.floor(rnd() * mains.length)];
+  const negs = WEAPON_PART_ATTRS.filter(a => a !== main);
+  const neg = negs[Math.floor(rnd() * negs.length)];
+  return `${g.toLowerCase()}_${main}_${neg}`;
+}
 const WEAPON_PART_ATTR_CN = { str: "力量", con: "体质", dex: "敏捷", wil: "意志", int: "智力", sta: "耐力" };
 function weaponPartSpec(id) { return WEAPON_PARTS[id] || null; }
 function weaponPartIds() { return Object.keys(WEAPON_PARTS); }

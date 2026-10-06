@@ -16,7 +16,8 @@ function registerWeaponPartItems() {
   Object.keys(WEAPON_PARTS).forEach(id => {
     const p = WEAPON_PARTS[id];
     const key = typeof weaponPartItemId === "function" ? weaponPartItemId(id) : "part_" + id;
-    if (!ITEM_CATALOG[key]) ITEM_CATALOG[key] = { name: `改装件·${p.name}${p.grade ? `（${p.grade}级）` : ""}`,
+    const neg = p.neg && typeof WEAPON_PART_ATTR_CN !== "undefined" ? ` · ${WEAPON_PART_ATTR_CN[p.neg]}−` : "";
+    if (!ITEM_CATALOG[key]) ITEM_CATALOG[key] = { name: `改装件·${p.name}${p.grade ? `（${p.grade}级${neg}）` : ""}`,
       hint: typeof weaponPartCoefText === "function" ? weaponPartCoefText(p.coef) : "", combat: false, part: id };
   });
 }

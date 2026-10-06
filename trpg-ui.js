@@ -256,6 +256,11 @@
           </div></div>`;
       })).join("");
       const parts = Object.keys(WEAPON_PARTS);
+      // 按等级分组：<optgroup label="C 级">…；opt(p) 生成一项
+      const partOpts = (opt) => ["C", "B", "A", "S"].map(g => {
+        const ps = parts.filter(p => WEAPON_PARTS[p].grade === g);
+        return ps.length ? `<optgroup label="${g} 级">${ps.map(opt).join("")}</optgroup>` : "";
+      }).join("");
       const slotRows = heroes().flatMap(h => (h.linkedKits || []).map(k => {
         const row = weaponPartRow(h, k);
         const name = weaponName(k);
@@ -264,19 +269,43 @@
         if (!row.length) return `<div class="tr-up"><b>${esc(name)}</b>（${esc(h.name)}）没有改装槽（${WEAPON_PART_SLOT_LEVELS[0]} 级开放） · 补正 ${esc(coefTxt)}</div>`;
         const slots = row.map((id, i) => `<div class="tr-row">槽 ${i + 1}：${id ? `<b>${esc(weaponPartLabel(id))}</b> <small>${esc(weaponPartCoefText(WEAPON_PARTS[id].coef))}</small>
             <button class="g-btn small" data-part-rm="${esc(h.kit)}:${esc(k)}:${i}">拆下</button>` : `<span class="r-hint">空</span>`}
-            <select data-part-pick="${esc(h.kit)}:${esc(k)}:${i}">${parts.map(p => `<option value="${esc(p)}">${esc(weaponPartLabel(p))}（背包 ${bagCount(weaponPartItemId(p))}）</option>`).join("")}</select>
+            <select data-part-pick="${esc(h.kit)}:${esc(k)}:${i}">${partOpts(p => `<option value="${esc(p)}">${esc(weaponPartLabel(p))} ${esc(weaponPartCoefText(WEAPON_PARTS[p].coef))}（背包 ${bagCount(weaponPartItemId(p))}）</option>`)}</select>
             <button class="g-btn small" data-part-in="${esc(h.kit)}:${esc(k)}:${i}:0">装上（从背包）</button>
             <button class="g-btn small" data-part-in="${esc(h.kit)}:${esc(k)}:${i}:1">主持人直接装</button></div>`).join("");
         return `<div class="tr-up"><b>${esc(name)}</b>（${esc(h.name)}）${row.length} 个改装槽 · 补正 ${esc(coefTxt)}${slots}</div>`;
       })).join("");
-      const give = `<div class="tr-row">给予改装件 <select id="tr-part-give">${parts.map(p => `<option value="${esc(weaponPartItemId(p))}">${esc(weaponPartLabel(p))} · ${esc(weaponPartCoefText(WEAPON_PARTS[p].coef))}</option>`).join("")}</select>
+      const give = `<div class="tr-row">随机生成 <button class="g-btn small" data-part-rand="C">C 级 +1</button><button class="g-btn small" data-part-rand="B">B 级 +1</button></div>
+        <div class="tr-row">给予改装件 <select id="tr-part-give">${partOpts(p => `<option value="${esc(weaponPartItemId(p))}">${esc(weaponPartLabel(p))} · ${esc(weaponPartCoefText(WEAPON_PARTS[p].coef))}</option>`)}</select>
           <button class="g-btn small" id="tr-part-give-btn">放进背包 +1</button></div>`;
       return `<p class="r-hint">手册：升级武器需要找到工作站；${U.selfMaxLevel} 级以上无法靠自己升级，要找专门的武器工匠（材料 + 加工费，不同工匠的费用要求不一样，按剧情改费用）。材料在商店「材料」里买，或在背包里给予。</p>${rows}
         <h3>改装槽 <button class="g-btn small" data-armory="${esc((heroes()[0] || {}).kit || "")}">打开武器工坊</button></h3>
         <p class="r-hint">武器 ${WEAPON_PART_SLOT_LEVELS.join(" 级、")} 级各开放 1 个改装槽。改装件修改武器的属性补正系数；装上从背包拿走，拆下放回背包。</p>
-        ${give}${slotRows}`;
+        ${give}${slotRows}
+        ${blueprintPanel()}`;
     }
   };
+
+  /* 客制化图纸：主持人放进背包，再装到武器上（一把武器一张，装新的把旧的放回背包） */
+  function blueprintPanel() {
+    if (typeof ROGUE_SMITHS === "undefined") return "";
+    const all = ROGUE_SMITHS.flatMap(s => (s.blueprints || []).map(b => Object.assign({ smithName: s.name }, b)));
+    const opt = (b) => `<option value="${esc(b.id)}">${esc(b.name)}（背包 ${bagCount(b.id)}）· ${esc(b.text)}</option>`;
+    const groups = ROGUE_SMITHS.map(s => `<optgroup label="${esc(s.name)}">${(s.blueprints || []).map(b => opt(b)).join("")}</optgroup>`).join("");
+    const rows = heroes().flatMap(h => (h.linkedKits || []).map(k => {
+      const cur = (h.weaponBlueprints || {})[k];
+      const b = cur ? all.find(x => x.id === cur) : null;
+      return `<div class="tr-up"><b>${esc(weaponName(k))}</b>（${esc(h.name)}）${b ? `装着「<b>${esc(b.name)}</b>」<small> ${esc(b.text)}</small>
+          <button class="g-btn small" data-bp-rm="${esc(h.kit)}:${esc(k)}">拆下（放回背包）</button>` : `<span class="r-hint">没有装图纸</span>`}
+        <div class="tr-row"><select data-bp-pick="${esc(h.kit)}:${esc(k)}">${groups}</select>
+          <span>工钱 <input type="number" min="0" value="0" data-bp-fee="${esc(h.kit)}:${esc(k)}" style="width:90px"></span>
+          <button class="g-btn small" data-bp-in="${esc(h.kit)}:${esc(k)}:0">装上（从背包）</button>
+          <button class="g-btn small" data-bp-in="${esc(h.kit)}:${esc(k)}:1">主持人直接装（不耗）</button></div></div>`;
+    })).join("");
+    return `<h3>客制化图纸 <button class="g-btn small" data-armory="${esc((heroes()[0] || {}).kit || "")}">在武器工坊里看实际效果</button></h3>
+      <p class="r-hint">一把武器只能装一张，装新的会把旧的放回背包；拆下也放回背包。工钱按剧情填（不同工匠收费不一样），主持人直接装不耗图纸也不收钱。</p>
+      <div class="tr-row">给予图纸 <select id="tr-bp-give">${groups}</select><button class="g-btn small" id="tr-bp-give-btn">放进背包 +1</button></div>
+      ${rows}`;
+  }
 
   /* 后台：按叙事直接改数值（不走规则），改完点「应用改动」一次写入并记进探索记录 */
   PANELS.backstage = function () {
@@ -427,6 +456,18 @@
       b.onclick = () => { const [owner, kit, slot] = b.dataset.partRm.split(":"); act(ruleCommand("removePart", { owner, kit, slot: Number(slot) })); };
     });
     on("tr-part-give-btn", () => act(ruleCommand("adjustItem", { item: $("tr-part-give").value, amount: 1 })));
+    P.querySelectorAll("[data-part-rand]").forEach(b => { b.onclick = () => act(ruleCommand("randomPart", { grade: b.dataset.partRand })); });
+    // 客制化图纸
+    on("tr-bp-give-btn", () => act(ruleCommand("adjustItem", { item: $("tr-bp-give").value, amount: 1 })));
+    P.querySelectorAll("[data-bp-in]").forEach(b => {
+      b.onclick = () => {
+        const [owner, kit, free] = b.dataset.bpIn.split(":");
+        const pick = P.querySelector(`[data-bp-pick="${owner}:${kit}"]`);
+        const fee = P.querySelector(`[data-bp-fee="${owner}:${kit}"]`);
+        act(ruleCommand("installBlueprint", { owner, kit, blueprint: pick ? pick.value : null, fee: fee ? Number(fee.value) || 0 : 0, free: free === "1" }));
+      };
+    });
+    P.querySelectorAll("[data-bp-rm]").forEach(b => { b.onclick = () => { const [owner, kit] = b.dataset.bpRm.split(":"); act(ruleCommand("removeBlueprint", { owner, kit })); }; });
     P.querySelectorAll("[data-up]").forEach(b => {
       b.onclick = () => {
         const [owner, kit, mode] = b.dataset.up.split(":");

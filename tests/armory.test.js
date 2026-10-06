@@ -19,9 +19,9 @@ test("atk 明细和 computeWeaponAtk 算出来的一样，改装件的补正单�
   const kolt = c.findKit("kolt", c.S.state.units);
   kolt.attrs.str = 20;
   c.setOwnedWeaponLevel(kolt, "torque", 7);
-  c.installWeaponPart(kolt, "torque", 1, "counterweight", true);
+  c.installWeaponPart(kolt, "torque", 1, "c_str_dex", true);
   const w = weaponOf(c, "torque");
-  assert.equal(w.atk, c.computeWeaponAtk("torque", kolt.attrs, 7, ["counterweight"]));
+  assert.equal(w.atk, c.computeWeaponAtk("torque", kolt.attrs, 7, ["c_str_dex"]));
   assert.equal(w.atk, kolt.weaponAtk);
   const b = w.breakdown;
   assert.equal(b.base + b.lvBase, 2 + 6);
@@ -30,7 +30,7 @@ test("atk 明细和 computeWeaponAtk 算出来的一样，改装件的补正单�
   assert.deepEqual([str.baseCoef, str.partCoef, str.coef], [0.3, 0.1, 0.4]);
   assert.deepEqual([dex.baseCoef, dex.partCoef, dex.coef], [0, -0.1, -0.1]);
   assert.equal(Math.round(b.raw), w.atk);
-  assert.deepEqual(plain(w.slots.map(s => s && s.id)), [null, "counterweight"]);
+  assert.deepEqual(plain(w.slots.map(s => s && s.id)), [null, "c_str_dex"]);
   assert.deepEqual(plain(w.lockedSlots), []);
   assert.deepEqual(plain(w.track.map(t => [t.lv, t.done])), [[3, true], [5, true], [7, true], [10, false]]);
 });

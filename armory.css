@@ -195,3 +195,14 @@
   .ar-gauge { grid-template-columns: 40px 1fr 70px; }
 }
 #ar-close { white-space: nowrap; flex: none; }
+
+/* ---------- 单局：改装件货架 / 背包（rogue-ui.js · partRows） ---------- */
+.shop-row.pt-row { grid-template-columns: 48px 64px auto minmax(0, 1fr) auto; }
+.shop-row.pt-row .s-name { grid-column: 1 / -1; }
+.shop-row.pt-row select { min-width: 0; height: 28px; }
+.shop-row.sold { opacity: .5; }
+.pt-sale { color: var(--sk-hazard, #f2c230); }
+@media (max-width: 680px) {
+  .shop-row.pt-row { grid-template-columns: auto auto auto; }
+  .shop-row.pt-row select { grid-column: 1 / 3; }
+}
