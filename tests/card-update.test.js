@@ -109,3 +109,35 @@ test("拉斯缪尔协助格挡：成功也只是累积 20% 能量（不再把能
   const c = H.load();
   assert.match(c.SkillText.kitInfo("ras").assistBlock, /无论成功与否都累积 20% 能量/);
 });
+
+test("废物利用：获得上一个被摧毁的敌人血量层等量的血量，最多柯尔特生命上限的 50%", () => {
+  const { c, st } = field(["kolt", "helu"]);
+  const kolt = c.findKit("kolt", st.units);
+  kolt.layers = [{ type: "flesh", current: 10, max: 100 }];
+  st.lastBrokenLayer = { type: "flesh", lost: 30, dmg: 7 };
+  skill(c, kolt, "kolt_scrap", null);
+  assert.equal(c.totalHp(kolt), 40, "按那一层的上限 30，不看那一击的伤害");
+  st.lastBrokenLayer = { type: "armor", lost: 200, dmg: 7 };
+  skill(c, kolt, "kolt_scrap", null);
+  const armor = kolt.layers.filter(l => l.type === "armor").reduce((s, l) => s + l.current, 0);
+  assert.equal(armor, 50, "封顶为生命上限 100 的一半");
+});
+
+test("被摧毁的血量层只认敌人的、只认真正把它打碎的那一击", () => {
+  const { c, st, foe } = field(["kolt", "helu"], 1);
+  const kolt = c.findKit("kolt", st.units), helu = c.findKit("helu", st.units);
+  foe.layers = [{ type: "shield", current: 10, max: 25 }, { type: "flesh", current: 500, max: 500, inner: true }];
+  const hit = (a, t, n) => c.dealTo(a, t, { atk: 0, mult: 0, flat: n, element: "physical", baseBreak: 0, atkRange: "any", flags: { action: true, blockResolved: true } });
+  st.lastBrokenLayer = null;
+  hit(helu, foe, 30);   // 打碎护盾
+  assert.equal(st.lastBrokenLayer.type, "shield");
+  assert.equal(st.lastBrokenLayer.lost, 25, "记的是这一层的上限");
+  st.lastBrokenLayer.mark = 1;
+  hit(helu, foe, 3);    // 之后再打：护盾早就碎了，不再覆盖记录
+  assert.equal(st.lastBrokenLayer.mark, 1);
+  // 敌人打碎玩家的层不算
+  helu.layers = [{ type: "shield", current: 2, max: 9 }, { type: "flesh", current: 50, max: 50, inner: true }];
+  hit(foe, helu, 20);
+  assert.equal(st.lastBrokenLayer.mark, 1, "玩家的层被打碎不会成为来源");
+  void kolt;
+});

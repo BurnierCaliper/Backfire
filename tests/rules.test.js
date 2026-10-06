@@ -32,7 +32,7 @@ test("过度自信：靠废物利用的临时层把血量堆回上限也触发�
   const { c, st, act, foes } = field(["kolt", "helu"], [{ id: "thug_hammer", lv: 1, zone: 2 }]);
   const kolt = c.findKit("kolt", st.units), foe = foes[0];
   kolt.layers[0].current = 15;
-  st.lastBrokenLayer = { type: "armor", lost: 5, dmg: 5 };
+  st.lastBrokenLayer = { type: "armor", lost: 10, dmg: 5 };   // 那一层上限 10（= 生命上限 20 的一半，正好不被封顶）
   act(kolt, null, "kolt_scrap");
   assert.equal(c.totalCurHp(kolt), 25);
   assert.equal(c.baseMaxHp(kolt), 20);

@@ -4300,6 +4300,7 @@ function stripFocusLayer(target, layerType, lines) {
   const layer = (target.layers || []).find(l => l.type === layerType);
   if (!layer) return;
   const lost = Math.max(0, Number(layer.current) || 0);
+  const layerMax = Math.max(0, Number(layer.max) || 0);
   const wasInner = layer === innermostLayer(target);
   layer.current = 0;
   layer.max = 0;
@@ -4307,7 +4308,7 @@ function stripFocusLayer(target, layerType, lines) {
   target.focuses = (target.focuses || []).filter(f => f.layerType !== layerType);
   // 抹去的是内层：留着这层（0/0）让单位按内层归零死亡，不能让外层顶替成内层
   if (!wasInner) target.layers = (target.layers || []).filter(l => l !== layer);
-  state.lastBrokenLayer = { type: layerType, lost, dmg: lost };
+  state.lastBrokenLayer = { type: layerType, lost: layerMax, dmg: lost };
   noteSideDamage(lost, "聚焦抹层", target);
   const msg = `${target.name} 聚焦完成：${(typeof LAYER !== "undefined" && LAYER[layerType]) || layerType}被抹去（视为 ${lost} 点伤害，该层无法再被治疗）。`;
   if (lines) lines.push(msg);
@@ -5876,6 +5877,8 @@ function dealTo(attacker, target, opt) {
   const scoreBonus = attacker && attacker.isPlayer && target && !target.isPlayer ? attackScoreBonus(res, target) : 0;
   const wasStunnedForScore = !!(target && target.stunned);
   if (target && !target.isPlayer) target._killBonus = scoreBonus;
+  // 废物利用的来源：记下这一击之前敌人每层的血量，之后只认这一击真正打碎的层
+  const layersBeforeHit = target && !target.isPlayer ? (target.layers || []).map(l => ({ type: l.type, cur: Number(l.current) || 0, max: Number(l.max) || 0, sealed: !!l.sealed })) : null;
   const extra = applyCombat(target, res, attacker);
   // 这一击打死的敌人：本次行动后面的攻击还能打到它（全部算溢出）
   if (target && !target.isPlayer && target.dead && !wasDeadForGhost && state.actionKills && !state.actionKills.includes(target.id)) state.actionKills.push(target.id);
@@ -5890,8 +5893,15 @@ function dealTo(attacker, target, opt) {
   if ((res.breakDealt || 0) > 0 && typeof onBreakTaken === "function") onBreakTaken(target, res.breakDealt, opt.element || res.element, extra);
   if (!wasStunnedT && target.stunned && typeof onBroken === "function") onBroken(target, extra);
   if (flags.action && !isReaction && typeof afterAttackDealt === "function") afterAttackDealt(attacker, target, opt.element || res.element, res, opt, extra);
-  if ((res.total || 0) > 0) {
-    const deadLayer = (target.layers || []).find(l => (Number(l.current) || 0) <= 0 && !l.sealed);
+  if ((res.total || 0) > 0 && layersBeforeHit) {
+    // 只认敌人、只认这一击之前还有血、这一击之后归零（或被移除）的那一层；已经碎掉的层不会被后来的攻击反复记录
+    const now = target.layers || [];
+    const broken = layersBeforeHit.filter((p0, i) => {
+      if (p0.cur <= 0 || p0.sealed) return false;
+      const l = now.find((x, j) => x.type === p0.type && j >= i - 1 && j <= i);   // 外层被移除时会往前挪一位
+      return !l || (Number(l.current) || 0) <= 0;
+    });
+    const deadLayer = broken[broken.length - 1];   // 一击打穿多层时取最里面那层
     if (deadLayer) state.lastBrokenLayer = { type: deadLayer.type, lost: deadLayer.max || 0, dmg: res.total || 0 };
   }
   if (flags.action) advanceFocusOnHit(attacker, target, opt.element || res.element, res, extra);
@@ -9411,8 +9421,14 @@ function runSkillInner(id, optRun) {
           lines.push(`${from}：获得 ${amt} 点${LAYER[type] || type}（战斗结束消失）。`);
         }
       };
-      if (!rec) lines.push("本场还没有被摧毁的血量层。");
-      else grant(rec.type, Math.floor((rec.dmg || rec.lost || 0) * 2), "废物利用");
+      // 获得上一个被摧毁的敌人血量层等量的对应血量，最多为柯尔特生命上限的 50%（腐坏抛射的记录不算在内）
+      if (!rec) lines.push("本场还没有被摧毁的敌人血量层。");
+      else {
+        const cap = Math.floor(baseMaxHp(a) * 0.5);
+        const amt = Math.min(Math.floor(Number(rec.lost) || 0), cap);
+        grant(rec.type, amt, "废物利用");
+        if ((Number(rec.lost) || 0) > cap) lines.push(`（那一层有 ${Math.floor(rec.lost)}，按生命上限一半封顶为 ${cap}）`);
+      }
       // 腐坏抛射留下的腐蚀记录：这一次废物利用一起领取，然后清空
       const rot = (a.resources && a.resources.rotStore) || {};
       Object.keys(rot).forEach(type => grant(type, Math.floor(Number(rot[type]) || 0), "腐坏回收"));
