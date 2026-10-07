@@ -902,6 +902,7 @@
     $("tr-slots-title").onclick = () => uiCommand("title");
     $("tr-fight").onclick = () => { if (lowHpOk()) uiCommand("toBattle"); };
     $("tr-bs").onclick = () => { tab = "backstage"; render(); };
+    $("tr-map").onclick = () => { if (window.WorldMap) WorldMap.open(mapOptions()); };
     $("tr-title").onclick = () => uiCommand("title");
     $("tr-copy").onclick = (e) => {
       const text = log.map(x => `【${x.stamp}】\n` + x.lines.map(l => "  " + l).join("\n")).join("\n");
@@ -917,7 +918,17 @@
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
   else boot();
 
-  window.TrpgFlow = { enter: index => uiCommand("enter", { index }), openSlots: () => uiCommand("slots"), toBattle: () => uiCommand("toBattle"), backFromBattle: requestBackFromBattle,
+  /** 角鳞星地图：队伍的位置由主持人在地图上设（跟着存档走） */
+  function mapOptions() {
+    return {
+      here: LEDGER.place || null, canMove: true,
+      sub: `跑团${slotName ? " · " + slotName : ""}${LEDGER.place ? "" : " · 还没设定队伍的位置（点地点 → 把队伍移到这里）"}`,
+      party: heroes().filter(h => !h.dead).map(h => h.name),
+      onMove: (id) => { act(ruleCommand("setPlace", { place: id || null })); },
+      refresh: () => mapOptions()
+    };
+  }
+  window.TrpgFlow = { mapOptions, enter: index => uiCommand("enter", { index }), openSlots: () => uiCommand("slots"), toBattle: () => uiCommand("toBattle"), backFromBattle: requestBackFromBattle,
     refresh: render,
     onlineCheckpoint: () => JSON.parse(JSON.stringify({ slot, slotName, log, tab, commandLevel })),
     restoreOnline(saved) { slot = saved.slot; slotName = saved.slotName; log = saved.log || []; tab = saved.tab || "party"; commandLevel = saved.commandLevel || 1; TRPG.active = true; document.body.classList.add("trpg"); }

@@ -3907,6 +3907,18 @@
       applyEnv(snapEnv());
       addLogPhase("天气改为 " + (WEATHER_NAME[state.weather] || state.weather));
     };
+    // 角鳞星地图：跑团看队伍的位置，单局看这一幕的区域，战斗原型看这场遭遇的区域
+    $("g-map").onclick = () => {
+      if (!window.WorldMap) return;
+      let o = null;
+      if (typeof TRPG !== "undefined" && TRPG.active && window.TrpgFlow && TrpgFlow.mapOptions) o = TrpgFlow.mapOptions();
+      else if (typeof Rogue !== "undefined" && Rogue.inRunMode && Rogue.inRunMode() && window.RunFlow && RunFlow.mapOptions) o = RunFlow.mapOptions();
+      if (!o) {
+        const reg = G.lastEncounter && G.lastEncounter.region;
+        o = { here: reg || null, sub: reg ? `战斗原型 · 这场遭遇在${reg}` : "战斗原型" };
+      }
+      WorldMap.open(o);
+    };
     $("g-restart").onclick = () => { if (G.depth === 0) setupBattle(Number($("g-level").value) || 1, G.lastEncounter || null); };
     $("g-again").onclick = () => setupBattle(Number($("g-level").value) || 1, G.lastEncounter || null);
     $("g-retreat").onclick = askRetreat;

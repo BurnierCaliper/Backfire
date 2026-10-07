@@ -701,6 +701,16 @@
       sessionCommand("prepareParty", { solo: !!(opt && opt.solo) });
       Screens.show("party");
     },
+    /** 角鳞星地图（world-map.js）：这一幕的区域是当前位置，各幕按顺序连成路线 */
+    mapOptions() {
+      if (!run) return null;
+      const C = ROGUE_CONFIG, total = Rogue.totalActs(run);
+      const route = [];
+      for (let a = 1; a <= total; a++) {
+        route.push({ place: C.regions[(a - 1) % C.regions.length], label: `第 ${a} 幕`, state: a < run.act ? "done" : a === run.act ? "now" : "next" });
+      }
+      return { here: Rogue.region(run), sub: `${run.solo ? "单人模式" : "单局"} · 第 ${run.act} 幕 · ${Rogue.region(run)}`, party: run.party.map(h => Rogue.heroName(h.kit)), route };
+    },
     resume() {
       const result = sessionCommand("resume");
       if (!result.resumed) return;
@@ -728,6 +738,7 @@
       save();
       Screens.show("run");
     };
+    $("run-map").onclick = () => { const o = window.RunFlow.mapOptions(); if (o && window.WorldMap) WorldMap.open(o); };
     $("run-title").onclick = () => {
       sessionCommand("leave", { save: true });
       Screens.show("title");

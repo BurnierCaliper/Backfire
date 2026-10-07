@@ -34,6 +34,7 @@ const TrpgCommands = (() => {
     removeBlueprint: c => trpgRemoveBlueprint(c.owner, c.kit),
     backstage: c => trpgBackstageApply(c.edit, c.why),
     xpMultiplier: c => { state.xpMult = Number(c.value) || 1; },
+    setPlace: c => trpgSetPlace(c.place || null),
     writeSlot: c => trpgWriteSlot(c.index, c.slot),
     clearSlot: c => trpgClearSlot(c.index)
   };

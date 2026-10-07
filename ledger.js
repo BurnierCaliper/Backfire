@@ -77,13 +77,14 @@ const LEDGER = {
   restOnce: {},        // 角色 kit → { 技能 key: 次数 }：「长休一次」的技能，长休才刷新
   career: null,        // 整局战场记录：{ battles: [每场摘要], kits: { kit: 累计数据 } }（careerRecordBattle）
   tasks: [],           // 跑团：主持人发布的任务（trpg-tasks.js）
+  place: null,         // 跑团：队伍在角鳞星地图上的位置（world-data.js · WORLD_PLACES 的 id）
 
   /** 存进队伍档案 */
   save() {
     return JSON.parse(JSON.stringify({
       day: this.day, hours: this.hours, clock: this.clock, dur: this.dur,
       heroes: this.heroes, weapons: this.weapons, shortUsed: this.shortUsed,
-      restOnce: this.restOnce, career: this.career, tasks: this.tasks || [], water: ledgerWater()
+      restOnce: this.restOnce, career: this.career, tasks: this.tasks || [], place: this.place || null, water: ledgerWater()
     }));
   },
   load(s) {
@@ -98,6 +99,7 @@ const LEDGER = {
     this.restOnce = s.restOnce || {};
     this.career = s.career || null;
     this.tasks = Array.isArray(s.tasks) ? s.tasks : [];
+    this.place = typeof s.place === "string" ? s.place : null;
     if (s.water != null) setLedgerWater(s.water);
   },
   reset() { this.load({}); }

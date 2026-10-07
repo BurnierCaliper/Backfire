@@ -1739,6 +1739,6 @@ const Rogue = (function () {
     canClinic, cyberInfo, cyberPreview, cyberCost, modifyHero, healCost, healHero,
     pendingChoices, choiceOptions, choose, queueLevelRewards,
     camp, nextAct, afterVictory, endRun,
-    enterRunMode, leaveRunMode, syncWorld, save
+    enterRunMode, leaveRunMode, syncWorld, save, inRunMode: () => !!stash
   };
 })();
