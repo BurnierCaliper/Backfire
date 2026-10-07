@@ -24,6 +24,7 @@ const BattleSim = (function () {
     state.fields = { 1: emptyField(), 2: emptyField(), 3: emptyField() };
     state.gaps = { "1-2": emptyGap(), "2-3": emptyGap() };
     state.zoneMode = Number(opt.zoneMode) || 2;
+    state.board = null;          // 特殊棋盘：setup 里按 opt.board 换上（普通战斗两区 / 三区直排）
     state.partySize = 2;
     state.weather = opt.weather || "none";
     if (typeof rollSandDir === "function") rollSandDir();   // 每场重新定风向（不是沙暴时不起作用）
@@ -67,8 +68,10 @@ const BattleSim = (function () {
     opt = opt || {};
     if (opt.seed != null) RNG.install(opt.seed);
     resetField(opt);
+    if (opt.board) applyBoard(opt.board);
     if (typeof resetBattleRecords === "function") resetBattleRecords();
     loadLiveParty(opt.party);
+    placePartyOnBoard();
     if (typeof randomizeNoraMood === "function") randomizeNoraMood();
     state.units.forEach(u => resetBattleFlags(u));
     if (typeof opt.before === "function") opt.before(state);

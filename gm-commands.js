@@ -29,7 +29,7 @@
   function unit(id) { if (typeof id !== "string") fail("单位编号必须是字符串"); const u = unitById(id); if (!u) fail("没有这个单位"); return u; }
   function enemy(id, live = true) { const u = unit(id); if (u.isPlayer || (live && !present(u))) fail("没有这个可用敌人"); return u; }
   function prop(id) { const p = (state.props || []).find(p => p.id === id); if (!p) fail("没有这个配置物"); return p; }
-  function gapKeyCheck(k, count = Number(state.zoneMode)) { one(k, count === 3 ? ["1-2", "2-3"] : ["1-2"], "间隔"); }
+  function gapKeyCheck(k) { one(k, boardGapKeys(), "间隔"); }
   function requireHost(context) { if (typeof adapter.requireHost !== "function" || adapter.requireHost(context) !== true) fail("只有房间主持人可以操作", "gm_forbidden"); }
   function configure(next) { adapter = Object.assign({}, adapter, next || {}); }
   function reset() { metadata.clear(); manualAll = false; round = 0; }
@@ -121,7 +121,7 @@
   }
   function checkMove(a, dest, extraAp = 0) {
     zone(dest);
-    if (Math.abs(dest - Number(a.zone)) !== 1) fail("一次只能移动一格");
+    if (!zonesAdjacent(dest, a.zone)) fail("一次只能移动一格（只能走到相连的区）");
     if (a.noMove || a.self === "frost" || (typeof isCrushing === "function" && isCrushing(a)) || (typeof touDuelVictim === "function" && touDuelVictim(a))) fail("这个单位现在不能移动");
     const f = (state.fields || {})[a.zone] || {};
     if (f.abyss && !a.flying) fail("地面单位不能从深渊移动");
@@ -178,7 +178,8 @@
     if (flowTarget) return;
     if (cmd.skill === "en_approach" || cmd.skill === "en_flee") {
       if ((cmd.skill === "en_flee") !== (Number(a.zone) === Number(t.zone))) fail("当前距离不允许这个移动技能");
-      const dest = cmd.skill === "en_flee" ? otherZone(a.zone) : Number(a.zone) + Math.sign(Number(t.zone) - Number(a.zone));
+      const path = zonePath(a.zone, t.zone);
+      const dest = cmd.skill === "en_flee" ? otherZone(a.zone, t.zone) : (path && path.length > 1 ? path[1] : Number(a.zone) + Math.sign(Number(t.zone) - Number(a.zone)));
       checkMove(a, dest, 1); return;
     }
     if (NO_TARGET.has(cmd.skill)) fail("这个技能不接受主目标");
@@ -233,7 +234,7 @@
       case "setField": zone(cmd.zone); patchField(cmd.patch); break;
       case "setWeather":
         if (!["weather", "sandDir", "phaseStep", "lock"].some(k => own(cmd, k))) fail("天气补丁为空");
-        if (own(cmd, "weather")) one(cmd.weather, WEATHERS, "天气"); if (own(cmd, "sandDir")) one(cmd.sandDir, ["12", "21"], "沙暴风向");
+        if (own(cmd, "weather")) one(cmd.weather, WEATHERS, "天气"); if (own(cmd, "sandDir")) one(cmd.sandDir, ["12", "21", "E", "W", "S", "N"], "沙暴风向");
         if (own(cmd, "phaseStep")) number(cmd.phaseStep, "相位阶段", 0, 3, true); if (own(cmd, "lock")) bool(cmd.lock, "天气锁定"); break;
       case "setEncounter":
         if (state.combatStarted) fail("遭遇和区数只能在开战前修改");
@@ -327,7 +328,7 @@
           publicSummary = "主持人：调整了天气。"; break;
         case "setEncounter":
           if (own(cmd, "encounter")) adapter.setEncounter(cmd, context);
-          if (own(cmd, "zoneMode")) { state.zoneMode = cmd.zoneMode; state.units.forEach(u => { u.zone = Math.min(Number(u.zone), cmd.zoneMode); }); state.props.forEach(p => { p.zone = Math.min(Number(p.zone), cmd.zoneMode); }); }
+          if (own(cmd, "zoneMode")) { state.zoneMode = cmd.zoneMode; state.board = null; state.units.forEach(u => { u.zone = Math.min(Number(u.zone), cmd.zoneMode); }); state.props.forEach(p => { p.zone = Math.min(Number(p.zone), cmd.zoneMode); }); }
           publicSummary = "主持人：配置了战前遭遇。"; break;
         case "forceAttack": dmDealAttack(cmd.input); notes.push(...sweepDeadEnemies()); publicSummary = "主持人：安排了一次攻击。"; break;
         case "setManual":

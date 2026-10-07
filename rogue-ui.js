@@ -15,7 +15,8 @@
 
   let run = null;          // 当前这一局
   let lastNotes = [];      // 上一步发生了什么（显示在记录栏）
-  let lastError = "";      // 上一步为什么没做成（显示在主面板顶上，免得按了像没反应）
+  let lastError = "";
+  let restSel = { food: {}, sleep: {} };   // 长休界面：每个角色选的食物 / 睡眠道具（没选的按默认）      // 上一步为什么没做成（显示在主面板顶上，免得按了像没反应）
 
   const save = () => { if (run && run.stage !== "over") dispatch({ type: "run.session", action: "save" }, { run }); };
   const query = (action, fields) => dispatch(Object.assign({ type: "run.query", action }, fields || {}), { run });
@@ -171,6 +172,7 @@
       <div class="t-meta">报酬 ${pay.kuizhi} 奎支 · 每人 ${pay.xp} 经验${t.part && WEAPON_PARTS[t.part] ? `<br>额外奖励：改装件 ${esc(weaponPartLabel(t.part))}（${esc(weaponPartCoefText(WEAPON_PARTS[t.part].coef))}）` : ""}<br>委托方提供 ${esc(supplyText || "无")}</div>
       ${t.weather ? `<div class="t-weather">全程天气：${esc(WX_NAME[t.weather] || t.weather)}（任务里每一场战斗都是）</div>` : ""}
       ${escortLine(Rogue.escortInfo(run, t), false)}
+      ${t.hunt ? `<div class="t-hunt">路线未知：一站一站往前走。通过 ${t.hunt.need} 次线索检定找到悬赏目标（失败 ${t.hunt.failMax} 次目标也会自己找上门），最后一站是和目标的精英战。</div>` : ""}
       ${warn ? `<div class="t-warn">${esc(warn)}</div>` : ""}
       <button class="g-btn r-go${t.key ? " r-main" : ""}" data-which="${which}" ${why ? "disabled" : ""}>${why ? esc(why) : t.key ? "执行主线" : "接下任务"}</button>
     </div>`;
@@ -190,7 +192,7 @@
     const list = Rogue.brokenWeapons(run);
     if (!list.length) return "";
     const who = list.map(w => w.owner === w.name ? w.name : `${w.owner} 的 ${w.name}`).join("、");
-    const fix = bagCount("repair_kit") ? "可以先用维修工具包修一下：" : "用维修工具包（商店有卖）或长休才能修好。";
+    const fix = repairPoints() ? "可以先用维修工具包修一下：" : "用维修工具包（商店有卖）或长休才能修好。";
     return `<p class="r-warn">⚠ ${esc(who)} 耐久为 0，这场战斗只能空手作战。${fix}</p>${repairRows()}`;
   }
   const fightBtn = (label) => Rogue.brokenWeapons(run).length
@@ -204,6 +206,32 @@
     const parts = ids.map(id => `${(ITEM_CATALOG[id] || {}).name || id} ${plan.food[id]} 份`);
     return ids.length > 1 ? `${parts.join("、")}（共 ${total} 份食物）` : (parts[0] || "0 份食物");
   }
+  /** 长休界面：每个角色单独选吃哪种食物、用哪个睡眠道具（例如睡袋），下面汇总消耗和缺口 */
+  function restPlanner() {
+    const o = query("restOptions", restSel);
+    if (!o.heroes.length) return "";
+    const need = o.need;
+    const rows = o.heroes.map(h => {
+      const foods = o.foods.map(f => `<option value="${esc(f.id)}" ${f.id === h.foodId ? "selected" : ""}>${esc(f.name)}${f.shp ? `（坚毅 +${f.shp}/份）` : ""} · 有 ${f.have}</option>`).join("");
+      const sleeps = `<option value="">不用</option>` + o.sleeps.map(x => `<option value="${esc(x.id)}" ${x.id === h.sleepId ? "selected" : ""}>${esc(x.name)}（每小时坚毅 +${x.bonus}） · 有 ${x.have}</option>`).join("");
+      return `<tr><td><b>${esc(h.name)}</b></td><td>${h.water} ml · ${h.food} 份</td>
+        <td><select data-rest-food="${esc(h.kit)}">${foods}</select></td>
+        <td><select data-rest-sleep="${esc(h.kit)}">${sleeps}</select></td></tr>`;
+    }).join("");
+    const bad = (a, b) => (a > b ? "r-bad" : "");
+    const foodSum = Object.keys(need.food).map(id => {
+      const f = o.foods.find(x => x.id === id) || { name: id, have: 0 };
+      return `${esc(f.name)} <b class="${bad(need.food[id], f.have)}">${need.food[id]}</b>/${f.have}`;
+    }).join(" · ");
+    const sleepSum = Object.keys(need.sleep).map(id => {
+      const x = o.sleeps.find(y => y.id === id) || { name: id, have: 0 };
+      return `${esc(x.name)} <b class="${bad(need.sleep[id], x.have)}">${need.sleep[id]}</b>/${x.have}`;
+    }).join(" · ");
+    return `<div class="r-restplan"><h3 class="r-sub">长休安排</h3>
+      <table><tr><th>角色</th><th>需要</th><th>吃</th><th>睡眠道具</th></tr>${rows}</table>
+      <p class="r-hint">消耗：水 <b class="${bad(need.water, o.water)}">${need.water}</b>/${o.water} ml · ${foodSum}${sleepSum ? ` · ${sleepSum}（不消耗）` : ""}
+        ${need.ok ? "" : `<br><span class="r-bad">不够：${esc(need.lack.join("，"))}</span>`}</p></div>`;
+  }
   const NODE_PANELS = {
     battle: () => `<p>前方有敌人拦路。</p>${brokenWarn()}${fightBtn("迎战")}`,
     elite: () => `<p>前方有棘手的敌人。</p>${brokenWarn()}${fightBtn("迎战")}`,
@@ -214,7 +242,7 @@
             胜利后每人额外 ${C.ambush.xpPerLevel} × 敌人等级 经验，然后照常长休。撤退则这次不休息、直接离开。</p>
           ${brokenWarn()}${fightBtn("迎击")}`;
       }
-      const plan = query("restPlan");
+      const plan = query("restPlan", restSel);
       const food = restFoodText(plan);
       const chance = Math.round(Rogue.ambushChance(run) * 100);
       const watchOpts = query("watchOptions").map(w =>
@@ -222,6 +250,7 @@
       return `<p>找到一处能歇脚的地方。</p>
         <p class="r-hint">长休时有 <b id="r-ambush-chance">${chance}%</b> 的概率被偷袭（遭遇战）。没被偷袭，下次 +${Math.round(C.ambush.step * 100)}%；被偷袭后回到 ${Math.round(C.ambush.base * 100)}%。
           安排一人守夜就一定不会被偷袭，但守夜的人这次长休不恢复，短休次数和「长休一次」的技能也不刷新。</p>
+        ${restPlanner()}
         <label class="r-watch">守夜：<select id="r-watch"><option value="">不安排守夜</option>${watchOpts}</select></label>
         <div class="r-choices">
           <button class="g-btn r-main" id="r-long" ${plan.ok ? "" : "disabled"}>长休 ${C.hours.longRest} 小时
@@ -268,7 +297,8 @@
         ${esc(o.name)} · ${LV_TEXT[o.level]}
         <small>${can ? `成功率 ${pctText(o.chance)}` : "没有资格尝试"}${tags ? " · " + esc(tags) : ""} · 血 ${o.hp}/${o.hpMax}</small></button>`;
     }).join("");
-    return `<p>【事件占位】前方需要一次<b>${esc(c.diffName)}</b>的「${esc(c.prof)}」检定。</p>
+    const huntNote = run.task && run.task.hunt ? `<p class="r-hint">悬赏线索检定：成功 = 找到一条线索；失败或绕过去都算没找到，下一次换一个熟练项。</p>` : "";
+    return `<p>【事件占位】前方需要一次<b>${esc(c.diffName)}</b>的「${esc(c.prof)}」检定。</p>${huntNote}
       <p class="r-hint">成功奖励 ${c.reward} 奎支${c.injure ? `（含风险加成 ${ROGUE_CHECKS.injure.bonus}）` : ""}。简单检定谁都能试；普通及以上没有这项熟练就不能尝试（手册第一章）。选一个人去做：</p>
       ${hurt}
       <div class="r-choices">${rows}</div>
@@ -325,7 +355,7 @@
   /** 商店货架（商店节点与休整时共用） */
   function shopList() {
     const s = Rogue.supplies();
-    return `<div class="shop">${ROGUE_SHOP.map(r => {
+    return `<p class="r-hint">水和食物每家都有，其余商品每家店随机进 ${ROGUE_SHOP_RULES.randomCount} 种。</p><div class="shop">${query("shopStock").map(r => {
       const item = r.give.item && ITEM_CATALOG[r.give.item];
       const have = r.give.item ? bagCount(r.give.item) : null;
       return `<div class="shop-row"><span class="s-name">${esc(Rogue.shopItemName(r))}<small>${esc(item ? item.hint || "" : "")}</small></span>
@@ -425,14 +455,14 @@
       ${fitted ? `<p class="r-hint">武器上的改装件：</p><div class="shop">${fitted}</div>` : ""}`;
   }
 
-  /** 维修工具包（手册：修复 10 点耐久），有的话在商店、工匠处、休整时都能用 */
+  /** 维修工具包（一包 10 点维修量，修几点用几点），有的话在商店、工匠处、休整时都能用 */
   function repairRows() {
-    const kits = bagCount("repair_kit");
-    if (!kits) return "";
+    const pts = repairPoints();
+    if (!pts) return "";
     const rows = run.party.map(h => query("heroView", { kit: h.kit })).flatMap(v => v.weapons)
       .filter(w => w.dur < w.durMax)
-      .map(w => `<button class="g-btn" data-repair="${esc(w.kit)}">修 ${esc(w.name)}（${w.dur}/${w.durMax}）</button>`);
-    return rows.length ? `<p class="r-hint">维修工具包 ×${kits}，每个修复 10 点耐久：</p><div class="r-choices">${rows.join("")}</div>` : "";
+      .map(w => `<button class="g-btn" data-repair="${esc(w.kit)}">修 ${esc(w.name)}（${w.dur}/${w.durMax}）<small>用 ${Math.min(pts, w.durMax - w.dur)} 点</small></button>`);
+    return rows.length ? `<p class="r-hint">${esc(repairPointsText())}：修几点耐久用几点，用不完的留着下次用。</p><div class="r-choices">${rows.join("")}</div>` : "";
   }
 
   /** 进下一站 / 首领战之前：可以短休（按今天的短休次数）。长休只能在任务的休息点 */
@@ -466,6 +496,16 @@
     return `<div class="t-escort${live && !e.intact ? " warn" : ""}">护送：<b>${esc(e.name)}</b>（${e.kind === "cart" ? "货车" : "人物"} · ${esc(e.note)}）
       · ${live ? `血量 <b>${e.hp}/${e.max}</b>（${pct}%）${e.intact ? " · 完好" : " · 已不算完好"}` : `血量 ${e.max}${e.atk ? ` · atk ${e.atk}` : ""}`}<br><small>${esc(rules)}</small></div>`;
   }
+  /** 悬赏：线索进度 / 已经找到的目标 */
+  function huntLine(t) {
+    const h = t && t.hunt;
+    if (!h || h.found == null) return "";
+    if (h.located && h.target) return `<div class="t-hunt found">已找到悬赏目标：<b>${esc(h.target.name)}</b>（血量、atk ×1.5，多占 1 枚代币）。击败它完成任务；从这一战撤退目标会逃走，任务失败。</div>`;
+    const pips = (n, max, cls) => Array.from({ length: max }, (_, i) => `<i class="${i < n ? cls : ""}"></i>`).join("");
+    return `<div class="t-hunt">线索 <span class="hunt-pips">${pips(h.found, h.need, "ok")}</span> ${h.found}/${h.need}
+      · 失败 <span class="hunt-pips">${pips(h.fails, h.failMax, "bad")}</span> ${h.fails}/${h.failMax}
+      <small>路线一站一站显示：线索检定之间夹着一站别的。失败 ${h.failMax} 次目标也会自己找上门。</small></div>`;
+  }
   function renderTask() {
     const t = run.task;
     const node = Rogue.currentNode(run);
@@ -479,6 +519,7 @@
     const wx = t.weather ? `<span class="t-weather inline">全程天气：${esc(WX_NAME[t.weather] || t.weather)}</span>` : "";
     return `<h2>${esc(t.key ? "主线" : t.name)}<span class="sub">${esc(t.goal)}</span>${wx}</h2>
       ${escortLine(query("escortInfo"), true)}
+      ${huntLine(t)}
       ${routeMapHtml(t)}
       <div class="r-panel">${choose}${restRow}${panel}</div>`;
   }
@@ -488,7 +529,7 @@
       case "board": return renderBoard();
       case "task": return renderTask();
       case "camp": {
-        const plan = query("restPlan");
+        const plan = query("restPlan", restSel);
         const shopping = C.campShop ? `<p class="r-hint">回到城里，出发前可以补货。手里有 ${Rogue.supplies().kuizhi} 奎支。</p>${shopList()}${partRows(null)}${repairRows()}` : "";
         const clinic = C.campClinic ? `<h3 class="r-sub">诊所</h3>${clinicPanel()}` : "";
         const food = restFoodText(plan);
@@ -498,6 +539,7 @@
             : `长休需要 ${plan.water} ml 水、${esc(food)}。补给不足（` + esc(plan.lack.join("，")) + "），只能硬撑着过夜：不回血，力竭继续累积。"}</p>
           ${shopping}
           ${clinic}
+          ${restPlanner()}
           <button class="g-btn r-main" id="r-camp">休整<small>${plan.ok ? `消耗 ${plan.water} ml 水、${esc(food)}` : "补给不足：不回血"}</small></button>`;
       }
       case "boss":
@@ -545,6 +587,9 @@
   }
 
   function fight() {
+    // 有队员血量低于 20% 而且还能短休：先提醒一下
+    const low = query("lowHpWarning");
+    if (low && low.length && !confirm(lowHpWarningText(low))) return;
     sessionCommand("startBattle", null, { startBattle(spec) {
       Screens.show("battle");
       GAME.startRogueBattle(spec, (outcome) => {
@@ -632,7 +677,7 @@
     on("r-fight", fight);
     on("r-long", () => {
       const w = $("r-watch");
-      act({ action: "restAtNode", mode: "long", watch: (w && w.value) || null });
+      act(Object.assign({ action: "restAtNode", mode: "long", watch: (w && w.value) || null }, restSel));
     });
     on("r-short", () => act({ action: "restAtNode", mode: "short" }));
     on("r-rest-skip", () => act({ action: "restAtNode", mode: "leave" }));
@@ -640,7 +685,9 @@
     on("r-leave", () => act({ action: "leaveNode" }));
     body.querySelectorAll("[data-check]").forEach(b => { b.onclick = () => doCheck(b.dataset.check); });
     on("r-check-skip", () => act({ action: "skipCheck" }));
-    on("r-camp", () => act({ action: "camp" }));
+    on("r-camp", () => act(Object.assign({ action: "camp" }, restSel)));
+    body.querySelectorAll("[data-rest-food]").forEach(el => { el.onchange = () => { restSel.food[el.dataset.restFood] = el.value; render(); }; });
+    body.querySelectorAll("[data-rest-sleep]").forEach(el => { el.onchange = () => { restSel.sleep[el.dataset.restSleep] = el.value; render(); }; });
     on("r-next", () => act({ action: "nextAct" }));
     on("r-win", () => act({ action: "afterVictory", goOn: false }));
     on("r-more", () => act({ action: "afterVictory", goOn: true }));

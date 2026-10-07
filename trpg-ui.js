@@ -163,10 +163,13 @@
       const plan = longRestNeeds({});
       const foodTotal = Object.keys(plan.food).reduce((a, id) => a + (Number(plan.food[id]) || 0), 0);
       const foods = FOOD_ORDER.filter(id => ITEM_CATALOG[id]);
+      const opt = longRestOptions({});
       const rows = heroes().filter(h => !h.dead).map(h => {
         const c = heroRestCost(h);
+        const o = opt.heroes.find(x => x.kit === h.kit) || {};
         return `<div class="tr-row"><b>${esc(h.name)}</b> 长休需 ${c.water} ml 水 · ${c.food} 份食物 · 吃
-          <select data-food="${esc(h.kit)}">${foods.map(id => `<option value="${id}">${esc(ITEM_CATALOG[id].name)}（有 ${bagCount(id)}）</option>`).join("")}</select>
+          <select data-food="${esc(h.kit)}">${foods.map(id => `<option value="${id}" ${id === o.foodId ? "selected" : ""}>${esc(ITEM_CATALOG[id].name)}（有 ${bagCount(id)}）</option>`).join("")}</select>
+          · 睡 <select data-sleep="${esc(h.kit)}"><option value="">不用睡眠道具</option>${opt.sleeps.map(x => `<option value="${esc(x.id)}" ${x.id === o.sleepId ? "selected" : ""}>${esc(x.name)}（每小时坚毅 +${x.bonus} · 有 ${x.have}）</option>`).join("")}</select>
           · 今天还能短休 ${shortRestLeft(h)} 次</div>`;
       }).join("");
       const ck = LEDGER.clock == null ? 480 : LEDGER.clock;
@@ -220,7 +223,7 @@
     bag() {
       const items = bagList();
       const heal = items.filter(x => x.id === "medkit" || x.id === "clinic");
-      const kits = bagCount("repair_kit");
+      const kits = repairPoints();
       const weapons = heroes().flatMap(h => (h.linkedKits || []).map(k => ({ k, name: weaponName(k), d: weaponDur(k), m: weaponDurMax(k) })));
       return `<h3>奎支与水</h3>
         <div class="tr-row">奎支 <input type="number" id="tr-kz" value="100" style="width:100px">
@@ -232,8 +235,8 @@
         ${heal.length ? heal.map(x => `<div class="tr-row">${esc(x.name)} ×${x.qty} → 给
             <select data-heal-who="${x.id}">${heroes().filter(h => !h.dead).map(h => `<option value="${esc(h.kit)}">${esc(h.name)}（${totalHpOf(h)}/${totalHpMaxOf(h)}）</option>`).join("")}</select>
             <button class="g-btn small" data-heal="${x.id}">使用</button></div>`).join("") : `<p class="r-hint">背包里没有医疗包。</p>`}
-        ${kits ? `<div class="tr-row">维修工具包 ×${kits} → 修 <select id="tr-repair-who">${weapons.map(w => `<option value="${esc(w.k)}">${esc(w.name)}（${w.d}/${w.m}）</option>`).join("")}</select>
-            <button class="g-btn small" id="tr-repair">修理 10 点</button></div>` : ""}
+        ${kits ? `<div class="tr-row">${esc(repairPointsText())} → 修 <select id="tr-repair-who">${weapons.map(w => `<option value="${esc(w.k)}">${esc(w.name)}（${w.d}/${w.m}）</option>`).join("")}</select>
+            <button class="g-btn small" id="tr-repair">修到满（修几点用几点）</button></div>` : ""}
         <h3>背包</h3>
         <div class="shop">${items.map(x => `<div class="shop-row"><span class="s-name">${esc(x.name)}${x.hint ? `<small>${esc(x.hint)}</small>` : ""}</span>
           <span class="s-have">×${x.qty}</span><span class="s-price"></span>
@@ -454,11 +457,11 @@
       const fight = n.type === "battle" || n.type === "elite";
       const foes = fight ? `<div class="tk-foes">${n.enemies.map((e, j) => `<div class="tr-row">
             <select data-te="nodes.${i}.enemies.${j}.id">${options(presets, e.id)}</select>
-            等级 ${inp(`nodes.${i}.enemies.${j}.lv`, e.lv, 52, "number")} 区域 <select data-te="nodes.${i}.enemies.${j}.zone">${options([[1, "1 区"], [2, "2 区"], [3, "3 区"]], e.zone)}</select>
+            等级 ${inp(`nodes.${i}.enemies.${j}.lv`, e.lv, 52, "number")} 区域 <select data-te="nodes.${i}.enemies.${j}.zone">${options([1, 2, 3, 4, 5].map(z => [z, z + " 区"]), e.zone)}</select>
             <button class="g-btn small" data-te-act="delEnemy:${i}:${j}">删</button></div>`).join("")}
           <div class="tr-row"><button class="g-btn small" data-te-act="addEnemy:${i}">＋ 敌人</button>
             天气 <select data-te="nodes.${i}.weather">${options(Object.keys(WX).map(k => [k, WX[k]]), n.weather)}</select>
-            战场 <select data-te="nodes.${i}.zoneMode">${options([[2, "两区"], [3, "三区"]], n.zoneMode)}</select></div></div>` : "";
+            战场 <select data-te="nodes.${i}.zoneMode">${options([[2, "两区"], [3, "三区"], ["line4", "四区直排"], ["square4", "四区方形 2×2"], ["cross5", "五区十字"]], n.zoneMode)}</select></div></div>` : "";
       return `<div class="tk-enode"><div class="tr-row"><b>第 ${i + 1} 站</b>
           <select data-te="nodes.${i}.type" data-te-rerender="1">${options(Object.keys(NODE_T()).map(k => [k, NODE_T()[k]]), n.type)}</select>
           说明 ${inp(`nodes.${i}.note`, n.note, 260)}
@@ -510,7 +513,7 @@
     let o = taskEdit;
     for (let i = 0; i < keys.length - 1; i++) o = o[keys[i]];
     const k = keys[keys.length - 1];
-    o[k] = typeof o[k] === "number" ? (v === "" ? 0 : Number(v)) : v;
+    o[k] = typeof o[k] === "number" && /^-?\d*\.?\d*$/.test(v) ? (v === "" ? 0 : Number(v)) : v;   // 布局名（square4 …）保持字符串
     if (path === "kind") {
       if (v === "escort" && !taskEdit.escort) taskEdit.escort = { kind: "cart", name: "", level: trpgPartyLevel(), hp: null, def: null, atk: null };
       if (v !== "escort") taskEdit.escort = null;
@@ -559,10 +562,12 @@
         if (cmd === "fight") {
           let cfg;
           try { cfg = trpgTaskPrepareBattle(id); } catch (e) { alert(e.message); return; }
+          if (!lowHpOk()) { TRPG.taskBattle = null; return; }
           GAME.lastEncounter = null;
           GAME.enemyPlan = cfg.enemies;
           GAME.weather = cfg.weather;
-          GAME.zoneMode = cfg.zoneMode;
+          if (typeof cfg.zoneMode === "string") { GAME.board = cfg.zoneMode; GAME.zoneMode = BOARD_LAYOUTS[cfg.zoneMode].zones.length; }
+          else { GAME.board = null; GAME.zoneMode = cfg.zoneMode; }
           return uiCommand("toBattle");
         }
       };
@@ -573,6 +578,12 @@
       el[ev] = () => { teSet(el.dataset.te, el.value); if (el.dataset.teRerender) render(); };
     });
     P.querySelectorAll("[data-te-act]").forEach(b => { b.onclick = () => teAct(b.dataset.teAct, P); });
+  }
+
+  /** 进战斗前：有队员血量低于 20% 而且还能短休，先提醒（返回 false = 不进） */
+  function lowHpOk() {
+    const low = typeof lowHpRestWarning === "function" ? lowHpRestWarning() : [];
+    return !low.length || confirm(lowHpWarningText(low));
   }
 
   /* ---------- 绑定 ---------- */
@@ -604,8 +615,10 @@
     P.querySelectorAll("[data-short]").forEach(b => { b.onclick = () => act(ruleCommand("shortRest", { kits: [b.dataset.short] })); });
     const restPlan = (force) => {
       const food = {};
+      const sleep = {};
       P.querySelectorAll("[data-food]").forEach(s => { food[s.dataset.food] = s.value; });
-      return { hours: Number($("tr-long-h").value) || 8, food, force };
+      P.querySelectorAll("[data-sleep]").forEach(s => { sleep[s.dataset.sleep] = s.value; });
+      return { hours: Number($("tr-long-h").value) || 8, food, sleep, force };
     };
     on("tr-long", () => act(ruleCommand("longRest", { plan: restPlan(false) })));
     on("tr-long-force", () => act(ruleCommand("longRest", { plan: restPlan(true) })));
@@ -887,7 +900,7 @@
       if ((e.key === "z" || e.key === "Z") && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (!(window.HotseatGame && HotseatGame.isActive())) uiCommand("undo"); }
     });
     $("tr-slots-title").onclick = () => uiCommand("title");
-    $("tr-fight").onclick = () => uiCommand("toBattle");
+    $("tr-fight").onclick = () => { if (lowHpOk()) uiCommand("toBattle"); };
     $("tr-bs").onclick = () => { tab = "backstage"; render(); };
     $("tr-title").onclick = () => uiCommand("title");
     $("tr-copy").onclick = (e) => {

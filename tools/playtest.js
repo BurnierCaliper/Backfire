@@ -222,17 +222,19 @@ function shopping() {
   // 两次长休的水和食物
   const waterNeed = (need.water || 3000) * 2;
   let guard = 0;
-  while (R.supplies().water < waterNeed && kz() > 4000 + 1000 && guard++ < 10) tryDo("买水", () => R.buy(run, "water_5000", 1));
+  while (R.supplies().water < waterNeed && kz() > 4000 + 1000 && guard++ < 10) tryDo("买水", () => R.buy(run, ["water_5000", "water_1000"].find(k => R.shopStock(run).some(r => r.key === k)) || "water_500", 1));
   const foodNeed = Object.values(need.food || {}).reduce((a, b) => a + b, 0) * 2 || 8;
   guard = 0;
   while (R.supplies().foodTotal < foodNeed && kz() > 300 + 1000 && guard++ < 20) tryDo("买食物", () => R.buy(run, "food_liquid", 1));
-  if (c.bagCount("repair_kit") < 1 && kz() > 2500) tryDo("买维修包", () => R.buy(run, "repair_kit", 1));
-  if (c.bagCount("medkit") < 2 && kz() > 2500) tryDo("买医疗包", () => R.buy(run, "medkit", 1));
+  // 商店每家随机进货：没有的就不买
+  const inStock = (key) => R.shopStock(run).some(r => r.key === key);
+  if (c.repairPoints() < 10 && kz() > 2500 && inStock("repair_kit")) tryDo("买维修包", () => R.buy(run, "repair_kit", 1));
+  if (c.bagCount("medkit") < 2 && kz() > 2500 && inStock("medkit")) tryDo("买医疗包", () => R.buy(run, "medkit", 1));
   void sup;
 }
 function repairs() {
   R.brokenWeapons(run).forEach(w => {
-    if (c.bagCount("repair_kit") < 1 && R.canShop(run) && kz() > 1000) tryDo("买维修包", () => R.buy(run, "repair_kit", 1));
+    if (c.repairPoints() < 10 && R.canShop(run) && kz() > 1000 && R.shopStock(run).some(r => r.key === "repair_kit")) tryDo("买维修包", () => R.buy(run, "repair_kit", 1));
     if (c.bagCount("repair_kit") > 0) tryDo("修武器", () => R.repairWeapon(run, w.kit));
   });
 }
@@ -283,7 +285,7 @@ function boardPick() {
     .sort((a, b) => R.taskPay(run, b.t).kuizhi / b.t.days - R.taskPay(run, a.t).kuizhi / a.t.days);
   const side = legal
     // 精英支线（悬赏）：等级没高过敌人一截就不接
-    .filter(x => !x.t.nodeTypes.includes("elite") || avgLv > R.enemyLevel(run, (x.t.diff || 0) + 1) + 1)
+    .filter(x => !(x.t.nodeTypes.includes("elite") || x.t.hunt) || avgLv > R.enemyLevel(run, (x.t.diff || 0) + 1) + 1)   // 悬赏路线不预先给出，最后照样是精英战
     .sort((a, b) => R.taskPay(run, b.t).kuizhi / b.t.days - R.taskPay(run, a.t).kuizhi / a.t.days);
   if (!run.main.done && R.daysLeft(run) - (side[0] ? side[0].t.days + run.CONFIG_restDays : 0) < run.main.days + 1) return "main";
   if (side.length) return side[0].i;

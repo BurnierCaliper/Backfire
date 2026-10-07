@@ -20,7 +20,10 @@ const SUPPLY_ITEMS = {
   food_can:     { name: "罐头食品", hint: "长休算 1 份食物 · 额外恢复 1 坚毅", food: true, shp: 1 },
   food_organic: { name: "有机食品", hint: "长休算 1 份食物 · 额外恢复 2 坚毅", food: true, shp: 2 },
   food_gourmet: { name: "美食",     hint: "长休算 1 份食物 · 额外恢复 5 坚毅", food: true, shp: 5 },
-  repair_kit:   { name: "维修工具包", hint: "修复 10 点武器耐久", repair: 10 },
+  // 维修工具包：一包 10 点维修量，修几点耐久就用掉几点，用不完的留在「开封的维修工具包」里（数量 = 剩下的点数）。
+  // 战斗中也能用（使用道具）：修手里或场上武器的耐久；对倒地的武器人用会把它修好重新站起来
+  repair_kit:   { name: "维修工具包", hint: "共 10 点维修量：修几点耐久用几点，可以分几次用完 · 战斗中也能用，能修好倒地的武器人", repair: 10, combat: true, target: "weapon" },
+  repair_kit_open: { name: "开封的维修工具包", hint: "数量 = 还剩几点维修量（先用这个，用完再开新的一包）", repairPts: true, combat: true, target: "weapon" },
   sleepbag:     { name: "睡袋",     hint: "长休时每小时坚毅恢复 +1（不消耗，一人一个）", sleep: 1 }
 };
 const FOOD_ORDER = ["food_liquid", "food_can", "food_organic", "food_gourmet"];
@@ -415,17 +418,40 @@ function ledgerShortRest(kits, notes) {
 
 /* ===== 长休 ===== */
 
-/** 长休计划：plan = { hours, food: { kit: foodId }, force } */
+/** 睡眠道具（物品表里带 sleep 的，例如睡袋）：不消耗，一人一个，长休每小时坚毅恢复 +sleep */
+function sleepItemIds() { return Object.keys(ITEM_CATALOG).filter(id => Number(ITEM_CATALOG[id].sleep) > 0); }
+/** 没有指定时的睡眠道具分配：按队伍顺序，有几个睡袋给前几个人 */
+function defaultSleepPlan() {
+  const out = {};
+  const left = {};
+  sleepItemIds().forEach(id => { left[id] = bagCount(id); });
+  partyHeroes().filter(h => !h.dead).forEach(h => {
+    const id = sleepItemIds().find(x => left[x] > 0);
+    out[h.kit] = id || "";
+    if (id) left[id] -= 1;
+  });
+  return out;
+}
+/** 这个角色这次长休用哪个睡眠道具（"" = 不用） */
+function sleepFor(plan, kit) {
+  const s = plan && plan.sleep && Object.prototype.hasOwnProperty.call(plan.sleep, kit) ? plan.sleep[kit] : defaultSleepPlan()[kit];
+  return s && ITEM_CATALOG[s] && Number(ITEM_CATALOG[s].sleep) > 0 ? s : "";
+}
+
+/** 长休计划：plan = { hours, food: { kit: foodId }, sleep: { kit: 睡眠道具 id 或 "" }, force }
+ *  每个角色单独选吃哪种食物（这个角色要吃的几份都吃这一种）和用哪个睡眠道具（不写就按默认分配） */
 function longRestNeeds(plan) {
   plan = plan || {};
   const heroes = partyHeroes().filter(h => !h.dead);
   let water = 0;
-  const food = {};
+  const food = {}, sleep = {};
   heroes.forEach(h => {
     const c = heroRestCost(h);
     water += c.water;
     const fid = (plan.food && plan.food[h.kit]) || defaultFoodFor();
     food[fid] = (food[fid] || 0) + c.food;
+    const sid = sleepFor(plan, h.kit);
+    if (sid) sleep[sid] = (sleep[sid] || 0) + 1;
   });
   const lack = [];
   if (ledgerWater() < water) lack.push(`水差 ${water - ledgerWater()} ml`);
@@ -433,7 +459,25 @@ function longRestNeeds(plan) {
     const have = bagCount(fid);
     if (have < food[fid]) lack.push(`${(ITEM_CATALOG[fid] || {}).name || fid} 差 ${food[fid] - have} 份`);
   });
-  return { water, food, lack, ok: lack.length === 0 };
+  Object.keys(sleep).forEach(sid => {
+    const have = bagCount(sid);
+    if (have < sleep[sid]) lack.push(`${(ITEM_CATALOG[sid] || {}).name || sid} 只有 ${have} 个，分给了 ${sleep[sid]} 个人`);
+  });
+  return { water, food, sleep, lack, ok: lack.length === 0 };
+}
+/** 长休界面用：每个角色要多少、现在选了什么，以及能选的食物 / 睡眠道具（带库存）。plan 同 longRestNeeds */
+function longRestOptions(plan) {
+  plan = plan || {};
+  const heroes = partyHeroes().filter(h => !h.dead).map(h => {
+    const c = heroRestCost(h);
+    const fid = (plan.food && plan.food[h.kit]) || defaultFoodFor();
+    return { kit: h.kit, name: h.name, water: c.water, food: c.food, foodId: fid, sleepId: sleepFor(plan, h.kit) };
+  });
+  const foods = FOOD_ORDER.filter(id => ITEM_CATALOG[id]).map(id => ({ id, name: ITEM_CATALOG[id].name, have: bagCount(id), shp: Number(ITEM_CATALOG[id].shp) || 0 }));
+  const sleeps = sleepItemIds().map(id => ({ id, name: ITEM_CATALOG[id].name, have: bagCount(id), bonus: Number(ITEM_CATALOG[id].sleep) || 0 }));
+  const food = {}, sleep = {};
+  heroes.forEach(h => { food[h.kit] = h.foodId; sleep[h.kit] = h.sleepId; });
+  return { heroes, foods, sleeps, water: ledgerWater(), plan: { food, sleep }, need: longRestNeeds(Object.assign({}, plan, { food, sleep })) };
 }
 /** 默认吃最便宜的、背包里有的食物 */
 function defaultFoodFor() {
@@ -468,7 +512,6 @@ function ledgerLongRest(plan, notes) {
   // 守夜：选一名角色或武器人整夜放哨。他不吃长休的恢复，也不刷新短休次数和「长休一次」的技能
   const watch = plan.watch || null;
   if (watch) notes.push(`${unitNameOf(watch)} 守夜：这次长休不恢复，短休次数和「长休一次」的技能也不刷新。`);
-  let bags = bagCount("sleepbag");
   partyHeroes().filter(h => !h.dead).forEach(h => {
     if (h.kit === watch) { (h.linkedKits || []).forEach(k => { if (k !== watch) restoreDurability(k); }); return; }
     (h.layers || []).forEach(l => { l.current = l.max; });
@@ -477,17 +520,18 @@ function ledgerLongRest(plan, notes) {
     h.stunned = false;
     const fid = (plan.food && plan.food[h.kit]) || defaultFoodFor();
     const foodBonus = ((ITEM_CATALOG[fid] || {}).shp || 0) * heroRestCost(h).food;
-    const hasBag = bags > 0;
-    if (hasBag) bags--;
-    const perHour = 2 + (hasBag ? 1 : 0);
+    const sid = sleepFor(plan, h.kit);
+    const hasBag = !!sid;
+    const perHour = 2 + (hasBag ? Number(ITEM_CATALOG[sid].sleep) || 0 : 0);
     const gain = hours * perHour + foodBonus;
     const before = Number(h.shp) || 0;
     h.shp = Math.min(Number(h.shpMax) || 0, before + gain);
-    const why = `${hasBag ? "睡袋" : ""}${hasBag && foodBonus ? "、" : ""}${foodBonus ? "好一点的食物" : ""}`;
+    const bagName = hasBag ? ITEM_CATALOG[sid].name : "";
+    const why = `${bagName}${hasBag && foodBonus ? "、" : ""}${foodBonus ? "好一点的食物" : ""}`;
     notes.push(typeof shpHidden === "function" && shpHidden()
       ? `${h.name} 血量回满，坚毅生命慢慢恢复${why ? `（${why}有帮助）` : ""}。`
       : `${h.name} 血量回满，坚毅 ${before} → ${h.shp}` +
-        `（${hours} 小时 × ${perHour}${hasBag ? "，含睡袋" : ""}${foodBonus ? `，食物 +${foodBonus}` : ""}）。`);
+        `（${hours} 小时 × ${perHour}${hasBag ? `，含${bagName}` : ""}${foodBonus ? `，食物 +${foodBonus}` : ""}）。`);
     (h.linkedKits || []).forEach(k => { if (k !== watch) restoreDurability(k); });
   });
   const keepW = watch && LEDGER.weapons && LEDGER.weapons[watch];
@@ -524,15 +568,38 @@ function ledgerRestoreAll(notes) {
 }
 
 /* ===== 维修与休整时用药 ===== */
+/* ===== 维修点数：维修工具包按点数用 ===== */
+const REPAIR_KIT_POINTS = 10;
+/** 背包里一共还有几点维修量（没开封的每包 10 点 + 开封那包剩下的） */
+function repairPoints() { return bagCount("repair_kit") * REPAIR_KIT_POINTS + bagCount("repair_kit_open"); }
+/** 用掉 n 点维修量：先用开封的，不够再开新的一包，剩下的留在开封那包里。返回实际用掉几点 */
+function spendRepairPoints(n) {
+  let left = Math.max(0, Math.min(Math.floor(Number(n) || 0), repairPoints()));
+  const used = left;
+  const open = Math.min(bagCount("repair_kit_open"), left);
+  if (open) { bagAdd("repair_kit_open", -open); left -= open; }
+  while (left > 0 && bagCount("repair_kit") > 0) {
+    bagAdd("repair_kit", -1);
+    const take = Math.min(REPAIR_KIT_POINTS, left);
+    left -= take;
+    if (REPAIR_KIT_POINTS - take > 0) bagAdd("repair_kit_open", REPAIR_KIT_POINTS - take);
+  }
+  return used;
+}
+function repairPointsText() {
+  const kits = bagCount("repair_kit"), open = bagCount("repair_kit_open");
+  return `维修量 ${repairPoints()} 点（${kits} 包没开封${open ? `，开封的还剩 ${open} 点` : ""}）`;
+}
+/** 修一把武器的耐久：缺几点修几点（维修量不够就修到用完为止） */
 function ledgerRepair(kit, notes) {
   notes = notes || [];
-  if (bagCount("repair_kit") < 1) { notes.push("没有维修工具包。"); return notes; }
+  if (repairPoints() < 1) { notes.push("没有维修工具包。"); return notes; }
   const before = weaponDur(kit);
   const max = weaponDurMax(kit);
   if (before >= max) { notes.push(`${weaponName(kit)} 耐久已满。`); return notes; }
-  bagAdd("repair_kit", -1);
-  restoreDurability(kit, 10);
-  notes.push(`用维修工具包修复 ${weaponName(kit)}：耐久 ${before} → ${weaponDur(kit)}。`);
+  const used = spendRepairPoints(max - before);
+  restoreDurability(kit, used);
+  notes.push(`用维修工具包修复 ${weaponName(kit)}：耐久 ${before} → ${weaponDur(kit)}，用掉 ${used} 点维修量（还剩 ${repairPoints()} 点）。`);
   const owner = weaponOwner(kit);
   if (owner && owner.weaponHeld === false && !owner.dead) owner.weaponHeld = true;
   return notes;
@@ -553,6 +620,18 @@ function ledgerHealItem(itemId, kit, notes) {
 }
 
 /* ===== 小工具 ===== */
+/** 进下一场战斗前的提醒：血量低于 20% 而且今天还能短休的队员（濒死 / 死亡的不算）。
+ *  返回 [{ kit, name, hp, max, pct, left }]，空数组 = 不用提醒 */
+const LOW_HP_WARN_RATIO = 0.2;
+function lowHpRestWarning() {
+  return partyHeroes().filter(h => !h.dead && !h.dying && !h.hidden).map(h => {
+    const hp = totalHpOf(h), max = totalHpMaxOf(h);
+    return { kit: h.kit, name: h.name, hp, max, pct: max > 0 ? Math.round(hp / max * 100) : 100, left: shortRestLeft(h) };
+  }).filter(x => x.max > 0 && x.hp / x.max < LOW_HP_WARN_RATIO && x.left > 0);
+}
+function lowHpWarningText(list) {
+  return `队伍状态不佳：${list.map(x => `${x.name} 血量 ${x.hp}/${x.max}（${x.pct}%，今天还能短休 ${x.left} 次）`).join("；")}。\n\n确定直接进入下一场战斗吗？（取消的话可以先短休）`;
+}
 function totalHpOf(u) { return (u.layers || []).reduce((s, l) => s + (Number(l.current) || 0), 0); }
 function totalHpMaxOf(u) { return (u.layers || []).reduce((s, l) => s + (Number(l.max) || 0), 0); }
 /** 休整时的治疗：从内到外补，死亡角色不能被治疗 */

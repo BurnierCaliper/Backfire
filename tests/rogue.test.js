@@ -110,6 +110,7 @@ test("主线提前完成后还能继续做支线；本幕天数用完才打首�
     const j = run.board.findIndex(t => !R.taskBlocked(run, t));
     R.acceptTask(run, j);
     run.task.nodes = [{ type: "rest", done: false }];
+    delete run.task.hunt;   // 测试捷径：把任务缩成一个休息点（悬赏也一样直接走完）
     R.restAtNode(run, "short");
     R.camp(run);
   }
@@ -153,14 +154,15 @@ test("商店：花奎支买水和食物", () => {
   R.acceptTask(run, 0);
   run.task.nodes[run.task.index] = { type: "shop", done: false };
   const before = R.supplies();
-  R.buy(run, "water_1000", 2);
-  R.buy(run, "food_can", 1);
+  // 每家都有的只有最便宜的水和食物（其余的随机进货）
+  R.buy(run, "water_500", 2);
+  R.buy(run, "food_liquid", 1);
   const after = R.supplies();
-  assert.equal(after.water, before.water + 2000);
-  assert.equal(after.food.food_can, before.food.food_can + 1);
-  assert.equal(after.kuizhi, before.kuizhi - 2500);
+  assert.equal(after.water, before.water + 1000);
+  assert.equal(after.food.food_liquid, before.food.food_liquid + 1);
+  assert.equal(after.kuizhi, before.kuizhi - 1500);
   c.S.state.kuizhi = 0;
-  assert.throws(() => R.buy(run, "food_can", 1), /奎支不够/);
+  assert.throws(() => R.buy(run, "food_liquid", 1), /奎支不够/);
 });
 
 test("工匠：花钱升级武器（材料按物品表折价），绯秋两把刀分开升", () => {
@@ -181,9 +183,9 @@ test("任务之间的休整可以买东西；任务里的战斗节点不行", ()
   const { run, R } = fresh(["kolt", "helu"], "E1");
   R.acceptTask(run, "main");
   while (!R.battleSpec(run)) { run.task.index++; }
-  assert.throws(() => R.buy(run, "food_can", 1), /没有商店/);
+  assert.throws(() => R.buy(run, "food_liquid", 1), /没有商店/);
   run.task = null; run.stage = "camp";
-  R.buy(run, "food_can", 1);
+  R.buy(run, "food_liquid", 1);
 });
 
 test("报酬与委托方补给按人数给；奎支报酬随幕数上涨", () => {
@@ -481,6 +483,7 @@ test("长休只在任务的休息点：每个任务正好一个休息点，不�
   for (let i = 0; i < 25; i++) {
     R.makeBoard(run);
     run.board.forEach(t => {
+      if (t.hunt) return;   // 悬赏：路线不预先给出，一站一站往前走（tests/bounty.test.js）
       const rests = t.nodeTypes.map((x, j) => x === "rest" ? j : -1).filter(j => j >= 0);
       assert.equal(rests.length, 1, t.nodeTypes.join(","));
       assert.ok(rests[0] > 0 && rests[0] < t.nodeTypes.length - 1, t.nodeTypes.join(","));
@@ -702,6 +705,7 @@ test("检定节点只插在两场战斗之间，一个任务最多 2 个", () =>
   for (let i = 0; i < 40; i++) {
     const { c, run } = fresh(["kolt", "helu"], "CK" + i);
     for (const t of [run.main].concat(run.board)) {
+      if (t.hunt) continue;   // 悬赏的线索检定另有规则（tests/bounty.test.js）
       const ty = t.nodeTypes;
       const n = ty.filter(x => x === "check").length;
       assert.ok(n <= c.S.ROGUE_CHECKS.maxPerTask, ty.join(","));
@@ -934,6 +938,7 @@ test("路线图：第一列、休息点那列、最后一列只有一个节点�
   for (let b = 0; b < 30; b++) {
     R.makeBoard(run);
     run.board.concat([run.main]).forEach(t => {
+      if (t.hunt) return;   // 悬赏：路线一站一站显示（tests/bounty.test.js）
       const cols = t.cols;
       assert.equal(cols.length, t.nodeTypes.length);
       assert.equal(cols[0].length, 1);

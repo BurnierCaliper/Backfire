@@ -55,7 +55,7 @@
       if (cmd.action === "setGap") oneOf(cmd.kind, ["open", "bridge", "wall", "door", "void"], "gap kind");
       if (["setGap", "gapHp", "rollWall", "toggleDoor"].includes(cmd.action)) oneOf(cmd.key, ["1-2", "2-3"], "gap key");
       if (cmd.action === "setWeather") oneOf(cmd.value, ["none", "heat", "snow", "acid", "thunder", "glow", "sand", "phase"], "weather");
-      if (cmd.action === "setZones") oneOf(cmd.value, [2, 3], "zone count");
+      if (cmd.action === "setZones") oneOf(cmd.value, [2, 3].concat(typeof BOARD_LAYOUTS !== "undefined" ? Object.keys(BOARD_LAYOUTS) : []), "zone count");
       if (cmd.action === "setPartySize") oneOf(cmd.value, [2, 3, 4], "party size");
       if (["setField", "setHighland", "addProp", "addParty", "addEnemy"].includes(cmd.action)) oneOf(cmd.zone, [1, 2, 3], "zone");
       if (cmd.action === "addProp") {
@@ -94,6 +94,7 @@
     state.fields = { 1: emptyField(), 2: emptyField(), 3: emptyField() };
     state.gaps = { "1-2": emptyGap(), "2-3": emptyGap() };
     state.zoneMode = Number(g.zoneMode) || 2;
+    state.board = null;
     state.partySize = 2;
     state.weather = g.weather || "none";
     if (typeof rollSandDir === "function") rollSandDir();
@@ -106,7 +107,9 @@
     resetBattleRecords();
     g.undo = [];
     state.xpMult = Number(cmd.xpMult) || 1;
+    if (g.board) applyBoard(g.board);   // 特殊棋盘（战场配置里选的布局）
     loadLiveParty(g.partyKits);
+    placePartyOnBoard();
     if (enc && enc.playerZone) state.units.forEach(u => { if (u.isPlayer && !u.hidden) u.zone = Number(enc.playerZone); });
     if (typeof randomizeNoraMood === "function") randomizeNoraMood();
     if (env.applyCampaignToField) env.applyCampaignToField();
@@ -142,7 +145,7 @@
     let value;
     switch (cmd.action) {
       case "normalizeBag": ensureBag(); break;
-      case "normalizeGaps": state.gaps = state.gaps || {}; (Number(state.zoneMode) >= 3 ? ["1-2", "2-3"] : ["1-2"]).forEach(k => { if (!state.gaps[k]) state.gaps[k] = emptyGap(); }); break;
+      case "normalizeGaps": state.gaps = state.gaps || {}; boardLinks().map(([a, b]) => gapKey(a, b)).forEach(k => { if (!state.gaps[k]) state.gaps[k] = emptyGap(); }); break;
       case "normalizeField": panel({ action: "normalizeGaps" }, env); (state.units || []).forEach(u => { if (Number(u.zone) > Number(state.zoneMode)) u.zone = Number(state.zoneMode); }); break;
       case "bagAdd": bagAdd(cmd.item, cmd.amount); notes.push(`背包：${ITEM_CATALOG[cmd.item].name} ${cmd.amount < 0 ? "−" : "+"}${Math.abs(cmd.amount)}`); break;
       case "currency": state.kuizhi = Math.max(0, (Number(state.kuizhi) || 0) + cmd.amount); notes.push(`背包：奎支 ${cmd.amount < 0 ? "−" : "+"}${Math.abs(cmd.amount)} → ${state.kuizhi}`); break;
@@ -192,7 +195,13 @@
       case "toggleDoor": state.gaps[cmd.key].open = !state.gaps[cmd.key].open; break;
       case "addProp": { const p = makeProp(cmd.kind, cmd.zone, cmd.level); p.faction = cmd.faction || "player"; state.props = state.props || []; state.props.push(p); if (cmd.kind === "battery" && typeof syncBatteryShields === "function") syncBatteryShields(); value = p.id; break; }
       case "removeProp": state.props = state.props.filter(x => x.id !== cmd.id); break;
-      case "setZones": g.zoneMode = state.zoneMode = Number(cmd.value) || 2; panel({ action: "normalizeField" }, env); break;
+      case "setZones": {
+        // 数字 = 普通两区 / 三区直排；布局名（line4 / square4 / cross5 …）= 特殊棋盘
+        if (typeof cmd.value === "string" && typeof BOARD_LAYOUTS !== "undefined" && BOARD_LAYOUTS[cmd.value] && !/^line[23]$/.test(cmd.value)) {
+          g.board = cmd.value; applyBoard(cmd.value); g.zoneMode = state.zoneMode;
+        } else { g.board = null; state.board = null; g.zoneMode = state.zoneMode = Number(cmd.value) || (cmd.value === "line3" ? 3 : 2); }
+        panel({ action: "normalizeField" }, env); break;
+      }
       case "setPartySize": g.partySize = state.partySize = Number(cmd.value) || 2; break;
       case "setWeather": { const was = state.weather; state.weather = cmd.value || "none"; if (cmd.persist) g.weather = state.weather; if (state.weather === "sand" && was !== "sand" && typeof rollSandDir === "function") rollSandDir(); break; }
       case "rollEncounter": value = rollEncounter({ region: cmd.region, ...(cmd.faction ? { faction: cmd.faction } : {}) }); break;

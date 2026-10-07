@@ -23,9 +23,9 @@ const RogueCommands = (function () {
   const actions = {
     acceptTask: (c, run) => Rogue.acceptTask(run, c.which),
     chooseNode: (c, run) => Rogue.chooseNode(run, c.index),
-    restAtNode: (c, run) => c.mode === "long" ? Rogue.restAtNode(run, c.mode, { watch: c.watch || null }) : Rogue.restAtNode(run, c.mode),
+    restAtNode: (c, run) => c.mode === "long" ? Rogue.restAtNode(run, c.mode, { watch: c.watch || null, food: c.food, sleep: c.sleep }) : Rogue.restAtNode(run, c.mode),
     shortRestBeforeNode: (_c, run) => Rogue.shortRestBeforeNode(run),
-    camp: (_c, run) => Rogue.camp(run),
+    camp: (c, run) => Rogue.camp(run, { food: c.food, sleep: c.sleep }),
     buy: (c, run) => Rogue.buy(run, c.key, c.qty),
     introduceSmith: (c, run) => Rogue.introduceSmith(run, c.smith),
     upgradeWeapon: (c, run) => Rogue.upgradeWeapon(run, c.kit, c.smith),
@@ -61,9 +61,12 @@ const RogueCommands = (function () {
     healCost: (c, run) => Rogue.healCost(run, c.kit),
     presentSmiths: (_c, run) => Rogue.presentSmiths(run),
     smithInfo: (c, run) => Rogue.smithInfo(run, c.smith),
-    restPlan: (_c, run) => Rogue.restPlan(run),
+    restPlan: (c, run) => Rogue.restPlan(run, { food: c.food, sleep: c.sleep }),
+    restOptions: (c, run) => Rogue.restOptions(run, { food: c.food, sleep: c.sleep }),
     sheetData: (_c, run) => Rogue.sheetData(run),
     armoryData: (_c, run) => Rogue.armoryData(run),
+    shopStock: (_c, run) => Rogue.shopStock(run),
+    lowHpWarning: (_c, run) => Rogue.lowHpWarning(run),
     escortInfo: (_c, run) => Rogue.escortInfo(run, run.task),
     partOffers: (c, run) => Rogue.partOffers(run, c.smith),
     partStock: () => Rogue.partStock(),
@@ -156,6 +159,8 @@ const RogueCommands = (function () {
     if (typeof c.action !== "string" || !own(table, c.action)) throw new Error("未知单局指令：" + c.action);
     if (c.index != null && (!Number.isInteger(c.index) || c.index < 0)) throw new Error("单局索引必须是非负整数");
     if (c.action === "restAtNode" && !["long", "short", "leave"].includes(c.mode)) throw new Error("未知休息方式");
+    const restMap = (m) => m == null || (typeof m === "object" && !Array.isArray(m) && Object.keys(m).every(k => typeof m[k] === "string"));
+    if (!restMap(c.food) || !restMap(c.sleep)) throw new Error("长休的食物 / 睡眠道具选择格式不对");
     if (c.action === "finishBattle" && !["win", "lose", "retreat"].includes(c.outcome)) throw new Error("未知战斗结局");
     if (c.action === "afterVictory" && typeof c.goOn !== "boolean") throw new Error("必须明确是否继续额外幕");
     if (c.action === "newRun" && (!Array.isArray(c.party) || !c.party.every(k => typeof k === "string") || typeof c.seed !== "string" || !c.seed || (c.solo && !Array.isArray(c.partners)))) throw new Error("新局必须包含队伍和明确种子");

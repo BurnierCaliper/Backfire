@@ -98,6 +98,7 @@
       value: spec.value,
       text: spec.text,
       element: spec.element || "physical",
+      main: !!spec.main,           // 攻击动作本身的那一下（不是高压场地等连带伤害）
       targetId: spec.targetId || null,
       tag: state.popTag || null,   // "boom"：高能自爆的余波，数字放大、停留更久
       snap: G.sim ? null : snapAll()
@@ -223,17 +224,17 @@
   }
   /** 区域之间的危墙 / 不稳桥梁：可以被攻击，快照和配置物一样（画在两区之间的竖条上，不单独出铭牌） */
   function snapGaps() {
-    const n = Number(state.zoneMode) || 2;
     const out = [];
-    for (let z = 2; z <= n; z++) {
-      const key = gapKey(z - 1, z);
+    for (const [za, zb] of boardLinks()) {
+      const key = gapKey(za, zb);
+      const z = Math.max(za, zb);
       const g = (state.gaps || {})[key];
       if (!g) continue;
       const hittable = (g.type === "wall" || g.type === "bridge") && (Number(g.hp) || 0) > 0;
       const max = Math.max(1, Number(g.maxHp) || Number(g.hp) || 1);
       out.push({
         id: "gap:" + key, name: gapLabel(g.type) + "（" + key.replace("-", "–") + " 区之间）", isPlayer: false, isProp: true, isGap: true, gapKey: key,
-        zone: z - 1, level: 1, atk: 0, layers: [{ type: "armor", max, cur: Math.max(0, Number(g.hp) || 0) }],
+        zone: Math.min(za, zb), level: 1, atk: 0, layers: [{ type: "armor", max, cur: Math.max(0, Number(g.hp) || 0) }],
         def: 0, defMax: 0, ap: 0, apMax: 0, bonus: 0, bonusMax: 0, status: gapLabel(g.type), res: "",
         highEnergy: 0, flying: false, stunned: false, dying: false, dead: !hittable, hidden: !hittable, shp: 0
       });
@@ -422,7 +423,9 @@
         return true;
       });
       p.resChanged = bs.res !== s2.res;
-      const pop = hi.tape.find(e => e.type === "pop" && e.unitId === id && e.kind === "dmg");
+      // 属性颜色按攻击动作本身那一下：高压场地这类连带伤害会先弹出来，不能拿第一个
+      const dmgPops = hi.tape.filter(e => e.type === "pop" && e.unitId === id && e.kind === "dmg" && Number(e.value) > 0);
+      const pop = dmgPops.find(e => e.main) || dmgPops[0];
       p.element = pop ? pop.element : "physical";
       p.changed = p.dmgHi > 0 || p.healHi > 0 || p.brHi > 0 || p.stunSure || p.stunMaybe || p.killSure || p.killMaybe ||
         p.zoneTo != null || p.newStatus.length > 0 || p.shpLoss > 0 || p.resChanged;
@@ -502,7 +505,7 @@
     if (state.combatPhase !== "player") return "敌人回合";
     if (!u || u.dead) return "已阵亡";
     if (sk.id === "__stand") return typeof standUpBlocked === "function" ? standUpBlocked(u) : null;
-    if (sk.id === "__item" && typeof bagList === "function" && !bagList().some(x => x.combat)) return "没有能在战斗中使用的道具";
+    if (sk.id === "__item" && typeof bagList === "function" && !bagList().some(x => x.combat)) return "没有能在战斗中使用的道具";   // 维修工具包也算（战斗中能用）
     if (u.stunned) return "失衡中，本回合无法行动";
     if ((sk.cost.ap || 0) > (u.ap || 0)) return "行动点不足";
     if ((sk.cost.bonus || 0) > (u.bonus || 0)) return "附赠行动不足";
@@ -536,11 +539,7 @@
     return { type: "skill", actor: actorId, skill: skillId, target: targetId || null, picks };
   }
 
-  function otherZones(z) {
-    const out = [];
-    for (let i = 1; i <= Number(state.zoneMode); i++) if (Math.abs(i - z) === 1) out.push(i);
-    return out;
-  }
+  function otherZones(z) { return zoneNeighbors(z); }   // 能走一步过去的区（棋盘上相连的）
 
   /* ================= 5. 画面 ================= */
   const cards = new Map();
@@ -966,6 +965,7 @@
 
   async function playTape(tape, after, meta) {
     const pops = tape.filter(e => e.type === "pop");
+    comboPrime(pops);
     const stunId = newStunId(after, pops);
     if (meta.slow) {
       G.slow = 1.4;
@@ -1037,6 +1037,7 @@
           const bh = typeof bigHitInfo === "function" ? bigHitInfo(s ? s.level : 1, v) : { big: false, ratio: 0 };
           const big = bh.big;
           hit(e.unitId, e.element, big);
+          comboHit(e, v);
           popup(e.unitId, big ? v + "!" : String(v), "e-" + e.element + (big ? " big" : "") + (boom ? " boom" : ""),
             { icon: e.element, size: big ? Math.round(BIG_POP_SIZE * (0.8 + 0.35 * bh.ratio)) : boom ? 46 : 30,
               dur: boom ? 2.4 : big ? BIG_POP_DUR * (0.8 + 0.45 * bh.ratio) : 1.05 });
@@ -1067,6 +1068,7 @@
           realTimeout(() => app.classList.remove("quake"), 700);
           if (window.Sfx) Sfx.boom();
           hit(e.unitId, "energy", true);
+          comboHit(e, Math.floor(Number(e.value) || 0));
           stamp(e.unitId, "高能自爆", "boom");
           popup(e.unitId, (Math.floor(Number(e.value) || 0)) + "!", "e-energy big boom", { icon: "energy", size: BIG_POP_SIZE + 12, dur: 2.8 });
           await playBeats(beatsBefore.filter(b => b.kind !== "stun"));
@@ -1133,12 +1135,14 @@
     pushUndo((meta && meta.skillName) || "行动");
     G.depth++;
     syncBusy();
+    comboStart();
     try {
       const tape = await perform(thunk, meta, !!context, context);
       if (hotseat() && tape === null) return false;
       await resolveQueues();
       if (hotseat()) return true;
     } finally {
+      comboEnd();
       G.depth--;
       G.version++;
       syncBusy();
@@ -1247,7 +1251,14 @@
         const opts = [{ label: "不切换", value: { swap: false } }];
         if (!foes.length) opts.push({ label: "切换刀头", sub: "同区没有可打的敌人", value: { swap: true, targetId: null } });
         else foes.forEach(u => opts.push({ label: `切换并打 ${u.name}`, sub: "近距离 0.5 ATK", value: { swap: true, targetId: u.id } }));
-        const pick = hotseat() ? await HotseatGame.ownedChoice(k, "更换刀头", opts) : await openChoice("更换刀头", `${k.name} 可以更换刀头。切刀攻击只能打同区目标。`, opts, { label: "不切换", value: { swap: false } });
+        let pick;
+        if (hotseat()) pick = await HotseatGame.ownedChoice(k, "更换刀头", opts);
+        else if (foes.length && allOnField(foes.map(u => u.id))) {
+          // 在战场上点要追击的敌人；按钮：只换刀不打 / 不切换
+          const got = await queueFieldPick(`<b>${esc(k.name)} 更换刀头</b>：点同区一名敌人切刀追击（近距离 0.5 ATK），或者不切换`,
+            foes.map(u => ({ id: u.id })), (id) => `${k.name} 切刀 → ${targetName(id)}`, [{ label: "不切换", value: "no" }]);
+          pick = got && typeof got === "object" ? { swap: false } : got ? { swap: true, targetId: got } : { swap: false };
+        } else pick = await openChoice("更换刀头", `${k.name} 可以更换刀头。切刀攻击只能打同区目标。`, opts, { label: "不切换", value: { swap: false } });
         const swapTarget = (pick && pick.swap && pick.targetId) || null;
         if (pick && pick.swap) {
           // 换刀头的追击：和协助攻击一样播攻击演出（冲上去打同区那名敌人）
@@ -1280,7 +1291,12 @@
           const opts = step.type === "unit"
             ? (step.units || []).map(u => ({ label: u.name, sub: u.zone ? `${u.zone} 区` : "", value: u.id }))
             : (step.options || []).map(o => ({ label: o.label, value: o.value }));
-          const v = await ask(`环境扫描 · ${job.zone} 区`, `协助攻击附带的环境扫描。${step.label}`, opts);
+          let v;
+          if (!hotseat() && step.type === "unit" && allOnField((step.units || []).map(u => u.id))) {
+            const got = await queueFieldPick(`<b>环境扫描 · ${job.zone} 区</b>：${esc(step.label)}`,
+              (step.units || []).map(u => ({ id: u.id })), (id) => `环境扫描 → ${targetName(id)}`, [{ label: "放弃扫描", value: SKIP }]);
+            v = got && typeof got === "object" ? SKIP : got;
+          } else v = await ask(`环境扫描 · ${job.zone} 区`, `协助攻击附带的环境扫描。${step.label}`, opts);
           if (v == null || v === SKIP) { skipped = true; break; }
           picks[step.key] = v;
         }
@@ -1668,7 +1684,11 @@
   }
 
   /** 进入目标选择。candidates: [{id, preview}]；返回被点中的 id，取消返回 null */
-  function pickUnit(candidates, labelFn) {
+  /**
+   * 在战场上点选一个目标。buttons：额外的按钮（例：「不选」「不切换」「放弃扫描」），
+   * 显示在提示栏旁边，点了返回 { button: value }；点目标返回目标 id；右键 / Esc 取消返回 null。
+   */
+  function pickUnit(candidates, labelFn, buttons) {
     return new Promise(resolve => {
       const map = new Map(candidates.map(c => [c.id, c]));
       G.arm = Object.assign(G.arm || {}, {
@@ -1676,12 +1696,43 @@
         tapId: null,
         map,
         labelFn,
-        resolve: (id) => { unmarkTargets(); clearPreview(); G.arm.mode = null; resolve(id); },
-        reject: () => { unmarkTargets(); resolve(null); }
+        resolve: (id) => { unmarkTargets(); clearPreview(); showPickBar(null); G.arm.mode = null; resolve(id); },
+        reject: () => { unmarkTargets(); showPickBar(null); resolve(null); }
       });
       markTargets(new Set([...map.keys()].filter(id => !map.get(id).invalid)));
+      showPickBar(buttons);
       refreshHud();
     });
+  }
+  /** 结算队列里（换刀头、协助攻击附带的扫描）在战场上点选：选完之前别的操作都锁住，和弹窗一样 */
+  async function queueFieldPick(hint, cands, labelFn, buttons) {
+    setHint(hint);
+    choiceResolve = { field: true, cancel: () => disarm() };
+    try { return await pickUnit(cands, labelFn, buttons); }
+    finally { choiceResolve = null; G.arm = null; unmarkTargets(); clearPreview(); setHint(defaultHint()); refreshHud(); }
+  }
+  /** 选目标时的额外按钮条（在提示栏下面） */
+  function showPickBar(buttons) {
+    let bar = $("g-pick-bar");
+    if (!buttons || !buttons.length) { if (bar) { bar.classList.remove("show"); bar.innerHTML = ""; } return; }
+    if (!bar) {
+      bar = el("div", "g-pick-bar");
+      bar.id = "g-pick-bar";
+      const row = document.querySelector(".g-hud .hud-row");   // 放在技能栏上面，显眼
+      if (row && row.parentNode) row.parentNode.insertBefore(bar, row); else document.body.appendChild(bar);
+    }
+    bar.innerHTML = "";
+    buttons.forEach(b => {
+      const x = el("button", "g-btn", `${esc(b.label)}${b.sub ? `<small>${esc(b.sub)}</small>` : ""}`);
+      x.onclick = (e) => { e.stopPropagation(); if (G.arm && G.arm.mode === "unit") G.arm.resolve({ button: b.value }); };
+      bar.appendChild(x);
+    });
+    bar.classList.add("show");
+  }
+  /** 这些 id 是不是都在战场上有卡片（单位、配置物、危墙 / 桥梁），能直接点 */
+  function allOnField(ids) {
+    return ids.length > 0 && ids.every(id => cards.has(id) ||
+      (String(id).indexOf("gap:") === 0 && !!document.querySelector(`#g-field .g-gap[data-key="${String(id).slice(4)}"]`)));
   }
 
   function pickZone(zones, previewFn) {
@@ -1704,7 +1755,8 @@
     const c = cards.get(id) || (gapNode ? { wrap: gapNode } : null);
     if (!c) return;
     c.wrap.classList.toggle("is-hover", on && !!(G.arm && G.arm.mode === "unit" && G.arm.map.has(id)));
-    if (G.depth > 0 || choiceResolve) return;
+    const fieldPick = !!(choiceResolve && choiceResolve.field);   // 结算队列里在战场上点选（那时动作还没结束，G.depth > 0）
+    if ((G.depth > 0 && !fieldPick) || (choiceResolve && !fieldPick)) return;
     if (G.arm && G.arm.mode === "unit") {
       if (!on) { clearPreview(); return; }
       const cand = G.arm.map.get(id);
@@ -1735,8 +1787,9 @@
     return true;
   }
   function onCardClick(id) {
-    if (G.depth > 0) { G.skip = true; return; }
-    if (choiceResolve) return;
+    const fieldPick = !!(choiceResolve && choiceResolve.field);
+    if (G.depth > 0 && !fieldPick) { G.skip = true; return; }
+    if (choiceResolve && !fieldPick) return;
     // 选区域时点到了区里的单位 / 配置物：当成点这个区（区里站满人时也能选）
     if (G.arm && G.arm.mode === "zone") {
       const c = cards.get(id);
@@ -1828,11 +1881,13 @@
       return act(skillCommand(actor.id, "__stand"), { actorId: actor.id, skillName: "起身" });
     }
     if (sk.id === "__item") {
-      const items = (typeof bagList === "function" ? bagList() : []).filter(x => x.combat);
+      // 维修工具包（没开封的 + 开封的）合成一项，按维修点数显示
+      const items = (typeof bagList === "function" ? bagList() : []).filter(x => x.combat && x.id !== "repair_kit_open");
+      if (typeof repairPoints === "function" && repairPoints() > 0 && !items.some(x => x.id === "repair_kit")) items.push(Object.assign({ qty: 0 }, ITEM_CATALOG.repair_kit, { id: "repair_kit" }));
       if (!items.length) { cancel(); flashHint("背包里没有能在战斗中使用的道具。"); return; }
       setHint("<b>使用道具</b>：选择一件。");
       const itemId = await openChoice("使用道具", "背包", items.map(x => ({
-        label: x.name + " ×" + x.qty, sub: x.hint, value: x.id
+        label: x.id === "repair_kit" ? `维修工具包 · ${repairPoints()} 点维修量` : x.name + " ×" + x.qty, sub: x.hint, value: x.id
       })), { label: "取消", value: null });
       if (stale()) return;
       if (!itemId) { cancel(); return; }
@@ -1845,9 +1900,21 @@
         if (stale()) return;
         if (!targetId) { cancel(); return; }
       } else if (spec && spec.target === "zone") {
-        dest = await pickZone([1, 2, 3].filter(z => z <= Number(state.zoneMode)), () => null);
+        dest = await pickZone(boardZoneIds(), () => null);
         if (stale()) return;
         if (dest == null) { cancel(); return; }
+      } else if (spec && spec.target === "weapon") {
+        // 维修工具包：选一把武器（武器名不会重名，用列表选）；倒地的武器人会被修好站起来
+        const rows = repairTargets().filter(r => r.need > 0);
+        if (!rows.length) { cancel(); flashHint("没有需要修的武器（耐久都是满的，也没有倒地的武器人）。"); return; }
+        const pts = repairPoints();
+        dest = await openChoice("维修工具包", `还有 ${pts} 点维修量：修几点耐久用几点；倒地的武器人修好后重新站起来（恢复最大生命的 25%）。`, rows.map(r => ({
+          label: r.down ? `${r.name}（${r.owner.name}）· 倒地` : `${r.name}（${r.owner.name}）· 耐久 ${r.dur}/${r.max}`,
+          sub: r.down ? `修好站起来：恢复 ${Math.min(r.need, pts)} 点生命，用 ${Math.min(r.need, pts)} 点` : `修到 ${Math.min(r.max, r.dur + pts)}，用 ${Math.min(r.need, pts)} 点`,
+          value: r.kit
+        })), { label: "取消", value: null });
+        if (stale()) return;
+        if (!dest) { cancel(); return; }
       }
       G.arm = null;
       return act(skillCommand(actor.id, "__item", targetId, { item: itemId, dest }), { actorId: actor.id, targetId, skillName: spec ? spec.name : "使用道具" });
@@ -1878,14 +1945,18 @@
       if (step.type === "zone") {
         setHint(`<b>${esc(sk.name)}</b>：${esc(step.label)}`);
         value = await pickZone(step.zones || [], (zone) => previewOf(skillThunk(actor.id, sk.id, lastUnitPick, Object.assign({}, picks, { [step.key]: zone }))));
-      } else if (step.type === "unit" && !step.optional && (step.structures || (step.units || []).every(u => !String(u.id).startsWith("prop:")))) {
-        setHint(`<b>${esc(sk.name)}</b>：${esc(step.label)}`);
+      } else if (step.type === "unit" && allOnField((step.units || []).map(u => u.id))) {
+        // 选单位一律在战场上点（同名敌人也分得清）；可不选的步骤多一个「不选」按钮
+        setHint(`<b>${esc(sk.name)}</b>：${esc(step.label)}　<span style="color:var(--faint)">${touchUI() ? "点空白处取消" : "右键取消"}</span>`);
         const cands = (step.units || []).map(u => ({
           id: u.id,
           thunk: isLast ? skillThunk(actor.id, sk.id, u.id, Object.assign({}, picks, { [step.key]: u.id })) : null
         }));
-        value = await pickUnit(cands, label);
-        lastUnitPick = value;
+        const got = await pickUnit(cands, label, step.optional ? [{ label: "不选，继续", value: "skip" }] : null);
+        if (stale()) return;
+        if (got && typeof got === "object") value = "";   // 点了「不选」
+        else { value = got; if (value == null) { cancel(); return; } lastUnitPick = value; }
+        if (value === "") value = null;
       } else {
         const options = step.type === "unit"
           ? (step.units || []).map(u => ({ label: u.name, sub: u.zone ? `${u.zone} 区` : "", value: u.id }))
@@ -2302,7 +2373,7 @@
     const t = INTRO_TIER[tier] || INTRO_TIER.normal;
     lines.push({ text: t[0], color: t[1], big: true });
     const zm = Number(state.zoneMode) || 2;
-    lines.push({ text: zm === 3 ? "三区制" : "两区制", color: "#6cc4ff" });
+    lines.push({ text: state.board ? (state.board.name || `${zm} 区棋盘`) : zm === 3 ? "三区制" : "两区制", color: "#6cc4ff" });
     const w = INTRO_WEATHER[state.weather] || [state.weather, "#ffffff"];
     if (state.weather && state.weather !== "none") lines.push({ text: "天气 · " + w[0], color: w[1] });
     if (state.weather === "sand") lines.push({ text: "风向 " + sandDirText(state.sandDir, zm), color: w[1] });
@@ -2658,6 +2729,90 @@
     });
     lastParts = Object.assign({}, gr.parts);
   }
+  /* ---------- 单次行动的总伤害（评分旁边） ----------
+   * 一次行动（含它引出的协助攻击等后续）里打在敌人身上的所有伤害都加进来：多段攻击、高压场地 / 感电 / 共振这类附带伤害都算。
+   * 字号按总数涨，门槛和伤害数字的「大伤害」一致（bigHitInfo：目标等级 × 2 + 8 起，到两倍封顶）。
+   * 一下就打出大伤害：大数字直接砸出来；多段：每段都弹一下、数字滚上去、越来越大，跨过门槛时再砸一次。
+   * 颜色 = 这次攻击动作本身那一下的属性（不是附带伤害的属性）。 */
+  const combo = { on: false, total: 0, shown: 0, hits: 0, level: 1, element: null, mainSet: false, big: false, token: 0, raf: 0 };
+  function comboBox() {
+    let b = $("g-combo");
+    if (!b) {
+      const rank = $("g-rank");
+      if (!rank) return null;
+      b = el("div", "g-combo", `<div class="cb-num"></div><div class="cb-sub"></div>`);
+      b.id = "g-combo";
+      rank.appendChild(b);
+    }
+    return b;
+  }
+  function comboStart() {
+    if (G.sim) return;
+    Object.assign(combo, { on: true, total: 0, hits: 0, level: 1, element: null, mainSet: false, big: false });
+  }
+  /** 放这段演出之前先看一眼：攻击动作本身那一下的属性，免得连带伤害先弹出来时颜色先变成它的 */
+  function comboPrime(pops) {
+    if (!combo.on || combo.mainSet) return;
+    const m = pops.find(e => e.kind === "dmg" && e.main && Number(e.value) > 0 && unitById(e.unitId) && !unitById(e.unitId).isPlayer);
+    if (m) { combo.element = m.element; combo.mainSet = true; }
+  }
+  function comboHit(e, v) {
+    if (!combo.on || G.sim || !(v > 0)) return;
+    const u = unitById(e.unitId);
+    if (!u || u.isPlayer) return;   // 只算打在敌人身上的
+    if (!combo.hits) { combo.level = Number(u.level) || 1; combo.shown = 0; }
+    if (e.main && !combo.mainSet) { combo.element = e.element; combo.mainSet = true; }
+    else if (!combo.element) combo.element = e.element;
+    combo.total += v;
+    combo.hits += 1;
+    combo.token += 1;
+    paintCombo();
+  }
+  function comboSize(total) {
+    const bh = bigHitInfo(combo.level, total);
+    return { bh, size: bh.big ? Math.round(58 + 34 * bh.ratio) : Math.round(24 + 22 * Math.min(1, total / bh.th)) };
+  }
+  function paintCombo() {
+    const b = comboBox();
+    if (!b) return;
+    const num = b.querySelector(".cb-num"), sub = b.querySelector(".cb-sub");
+    const { bh } = comboSize(combo.total);
+    const wasBig = combo.big;
+    combo.big = bh.big;
+    b.className = "g-combo show e-" + (combo.element || "physical") + (bh.big ? " big" : "");
+    sub.textContent = combo.hits > 1 ? `${combo.hits} 段 · 总伤害` : "伤害";
+    // 动画：一下就是大伤害 / 多段跨过门槛 → 砸出来；其余每段弹一下
+    const anim = bh.big && (combo.hits === 1 || !wasBig) ? "slam" : combo.hits === 1 ? "enter" : "bump";
+    num.classList.remove("slam", "enter", "bump");
+    void num.offsetWidth;
+    num.classList.add(anim);
+    if (anim === "slam") { b.classList.remove("quake"); void b.offsetWidth; b.classList.add("quake"); }
+    // 数字滚上去（一下打出来的直接显示）
+    const from = combo.hits === 1 ? combo.total : combo.shown;
+    const to = combo.total, t0 = performance.now(), span = 160;
+    if (combo.raf) cancelAnimationFrame(combo.raf);
+    const step = (t) => {
+      const k = Math.min(1, (t - t0) / span);
+      combo.shown = Math.round(from + (to - from) * k);
+      num.textContent = combo.shown;
+      num.style.fontSize = comboSize(combo.shown).size + "px";
+      if (k < 1) combo.raf = requestAnimationFrame(step); else combo.raf = 0;
+    };
+    step(t0);
+    if (from !== to) combo.raf = requestAnimationFrame(step);
+  }
+  function comboEnd() {
+    if (!combo.on) return;
+    combo.on = false;
+    if (!combo.hits) return;
+    const token = combo.token;
+    realTimeout(() => {
+      if (token !== combo.token || combo.on && combo.hits) return;   // 下一次行动已经开始打了
+      const b = $("g-combo");
+      if (b) b.classList.remove("show");
+    }, combo.big ? 2400 : 1600);
+  }
+
   function refreshAll() {
     if (G.depth === 0) setView(snapAll(), true);
     refreshHud();
@@ -2965,7 +3120,8 @@
       box.append(sel, go);
       return box;
     }
-    if (id === "repair_kit") {
+    if (id === "repair_kit" || id === "repair_kit_open") {
+      if (inFight) return null;     // 战斗里走「使用道具」
       const box = el("div", "ledger-use");
       const sel = document.createElement("select");
       heroesForUse().forEach(h => (h.linkedKits || []).forEach(k => {
@@ -2973,7 +3129,7 @@
         o.value = k; o.textContent = `${weaponName(k)}（耐久 ${weaponDur(k)}/${weaponDurMax(k)}）`;
         sel.appendChild(o);
       }));
-      const go = el("button", "g-btn", "修复");
+      const go = el("button", "g-btn", "修复（修几点用几点）");
       go.onclick = () => { panelCommit({ action: "repair", kit: sel.value }); renderBagSheet(); };
       box.append(sel, go);
       return box;
@@ -2983,6 +3139,7 @@
 
   /* ---------- 休整 ---------- */
   G.restFood = G.restFood || {};
+  G.restSleep = G.restSleep || {};
   function renderRestSheet() {
     const t = typeof exhaustTier === "function" ? exhaustTier() : 0;
     $("g-rest-time").innerHTML = `第 <b>${LEDGER.day}</b> 天 <b>${clockText(LEDGER.clock == null ? 480 : LEDGER.clock)}</b> · 距上次长休 <b>${durationText(LEDGER.hours || 0)}</b> · ` +
@@ -3016,10 +3173,17 @@
       fsel.value = G.restFood[h.kit] || (typeof defaultFoodFor === "function" ? defaultFoodFor() : foods[0]);
       fsel.onchange = () => { G.restFood[h.kit] = fsel.value; renderRestSheet(); };
       fsel.disabled = h.dead;
+      const ssel = document.createElement("select");
+      const sleepOpt = (v, t) => { const o = document.createElement("option"); o.value = v; o.textContent = t; ssel.appendChild(o); };
+      sleepOpt("", "不用睡眠道具");
+      sleepItemIds().forEach(id => sleepOpt(id, `睡 ${ITEM_CATALOG[id].name}（每小时坚毅 +${ITEM_CATALOG[id].sleep} · 有 ${bagCount(id)}）`));
+      ssel.value = h.dead ? "" : sleepFor(currentRestPlan(), h.kit);
+      ssel.onchange = () => { G.restSleep[h.kit] = ssel.value; renderRestSheet(); };
+      ssel.disabled = h.dead;
       const sr = el("button", "g-btn", `短休（剩 ${shortRestLeft(h)}）`);
       sr.disabled = inFight || h.dead || shortRestLeft(h) <= 0;
       sr.onclick = () => { panelCommit({ action: "shortRest", kits: [h.kit] }); renderRestSheet(); };
-      act.append(fsel, sr);
+      act.append(fsel, ssel, sr);
       row.appendChild(act);
       box.appendChild(row);
     });
@@ -3036,13 +3200,14 @@
     }
     const plan = currentRestPlan();
     const need = longRestNeeds(plan);
-    const bags = Math.min(bagCount("sleepbag"), partyHeroes().filter(h => !h.dead).length);
     const foodTxt = Object.keys(need.food).map(fid =>
       `${ITEM_CATALOG[fid].name} <b class="${bagCount(fid) < need.food[fid] ? "bad" : ""}">${need.food[fid]}</b>/${bagCount(fid)}`
     ).join(" · ");
     $("g-long-need").innerHTML =
       `水 <b class="${ledgerWater() < need.water ? "bad" : ""}">${need.water}</b>/${ledgerWater()} ml · ${foodTxt}` +
-      (bags ? ` · 睡袋 ${bags} 个` : "");
+      Object.keys(need.sleep).map(sid =>
+        ` · ${ITEM_CATALOG[sid].name} <b class="${bagCount(sid) < need.sleep[sid] ? "bad" : ""}">${need.sleep[sid]}</b>/${bagCount(sid)}`).join("") +
+      (need.ok ? "" : `<br><span class="bad">不够：${esc(need.lack.join("，"))}</span>`);
     const force = $("g-long-force").checked;
     $("g-long-go").disabled = inFight || (!need.ok && !force);
     const foodN = Object.keys(need.food).reduce((a, fid) => a + (Number(need.food[fid]) || 0), 0);
@@ -3051,7 +3216,8 @@
   function currentRestPlan() {
     const food = {};
     partyHeroes().forEach(h => { food[h.kit] = G.restFood[h.kit] || defaultFoodFor(); });
-    return { hours: Number($("g-long-hours").value) || 8, food, force: $("g-long-force").checked };
+    const hsel = $("g-long-hours");
+    return { hours: Number(hsel && hsel.value) || 8, food, sleep: Object.assign({}, G.restSleep), force: !!($("g-long-force") && $("g-long-force").checked) };
   }
 
   function renderSaveSheet() {
@@ -3095,24 +3261,65 @@
     });
   }
 
+  /** 一个区的格子（单位、配置物都摆在里面） */
+  function makeZoneSection(z) {
+    const sec = el("section", "g-zone");
+    sec.dataset.num = String(z);
+    sec.innerHTML = `<span class="zlabel">${z} 区</span><div class="grp enemy"></div><div class="grp prop"></div><div class="grp player"></div>`;
+    return sec;
+  }
+  /**
+   * 战场棋盘：普通的两区 / 三区直排照旧（一排：区 | 间隔 | 区 …）；
+   * 特殊棋盘（state.board）按每个区的格子坐标摆进网格：区占奇数行列，相连两区之间的那一格放间隔条
+   * （左右相连是竖条，上下相连是横条）。没有区的格子空着。
+   */
   function syncFieldDom() {
     const field = $("g-field");
     if (!field) return;
     const n = Number(state.zoneMode) || 2;
-    field.className = "g-field z" + n;
     field.innerHTML = "";
+    field.removeAttribute("style");
     dispatch({ type: "battle.panel", action: "normalizeField" });
-    for (let z = 1; z <= n; z++) {
-      if (z > 1) {
-        const key = gapKey(z - 1, z);
-        const gap = el("div", "g-gap");
-        gap.dataset.key = key;
+    const sections = [];
+    if (state.board) {
+      const b = state.board;
+      const W = Math.max(...b.zones.map(q => Number(q.x))) + 1, Hh = Math.max(...b.zones.map(q => Number(q.y))) + 1;
+      field.className = "g-field board-grid " + (W >= 3 ? "z3" : "z2") + (Hh >= 2 ? " rows" + Hh : "");
+      const track = (k, zone, gap) => Array.from({ length: 2 * k - 1 }, (_, i) => (i % 2 ? gap : zone)).join(" ");
+      field.style.gridTemplateColumns = track(W, "minmax(0, 1fr)", W >= 3 ? "32px" : "28px");
+      field.style.gridTemplateRows = track(Hh, "minmax(0, 1fr)", "24px");
+      b.zones.forEach(q => {
+        const sec = makeZoneSection(Number(q.id));
+        sec.style.gridColumn = String(2 * Number(q.x) + 1);
+        sec.style.gridRow = String(2 * Number(q.y) + 1);
+        field.appendChild(sec);
+        sections.push(sec);
+      });
+      boardLinks(b).forEach(([za, zb]) => {
+        const qa = boardZone(za, b), qb = boardZone(zb, b);
+        const dx = Math.abs(qa.x - qb.x), dy = Math.abs(qa.y - qb.y);
+        if (dx + dy !== 1) return;   // 只画上下左右挨着的连接（不挨着的连接规则上照样算，画面上不画条）
+        const gap = el("div", "g-gap" + (dy ? " horiz" : ""));
+        gap.dataset.key = gapKey(za, zb);
+        gap.style.gridColumn = String(dx ? 2 * Math.min(qa.x, qb.x) + 2 : 2 * qa.x + 1);
+        gap.style.gridRow = String(dy ? 2 * Math.min(qa.y, qb.y) + 2 : 2 * qa.y + 1);
         field.appendChild(gap);
+      });
+    } else {
+      field.className = "g-field z" + n;
+      for (let z = 1; z <= n; z++) {
+        if (z > 1) {
+          const key = gapKey(z - 1, z);
+          const gap = el("div", "g-gap");
+          gap.dataset.key = key;
+          field.appendChild(gap);
+        }
+        const sec = makeZoneSection(z);
+        field.appendChild(sec);
+        sections.push(sec);
       }
-      const sec = el("section", "g-zone");
-      sec.dataset.num = String(z);
-      sec.innerHTML = `<span class="zlabel">${z} 区</span><div class="grp enemy"></div><div class="grp prop"></div><div class="grp player"></div>`;
-      field.appendChild(sec);
+    }
+    sections.forEach(sec => {
       sec.addEventListener("mouseenter", () => {
         if (!(G.arm && G.arm.mode === "zone" && G.arm.zones.has(Number(sec.dataset.num)))) return;
         sec.classList.add("is-move-hover");
@@ -3123,7 +3330,7 @@
         sec.classList.remove("is-move-hover");
         if (G.arm && G.arm.mode === "zone") clearPreview();
       });
-    }
+    });
     paintGaps();
     requestAnimationFrame(() => { try { fitZones(); } catch (e) {} });
   }
@@ -3190,7 +3397,7 @@
   }
 
   function renderFieldSheet() {
-    $("g-cfg-zones").value = String(state.zoneMode || 2);
+    $("g-cfg-zones").value = state.board ? String(state.board.id) : String(state.zoneMode || 2);
     $("g-cfg-ps").value = String(state.partySize || 4);
     $("g-cfg-weather").value = state.weather || "none";
     const elist = $("g-enemy-list");
@@ -3258,7 +3465,7 @@
     const gbox = $("g-gap-list");
     if (gbox) {
       gbox.innerHTML = "";
-      const keys = Number(state.zoneMode) >= 3 ? ["1-2", "2-3"] : ["1-2"];
+      const keys = boardGapKeys();
       dispatch({ type: "battle.panel", action: "normalizeGaps" });
       keys.forEach(key => {
         const g = state.gaps[key];
@@ -3478,7 +3685,8 @@
     };
     $("g-field-close").onclick = () => $("g-field-sheet").classList.remove("show");
     $("g-cfg-zones").onchange = () => {
-      dispatch({ type: "battle.panel", action: "setZones", value: Number($("g-cfg-zones").value) || 2 });
+      const v = $("g-cfg-zones").value;
+      dispatch({ type: "battle.panel", action: "setZones", value: /^\d+$/.test(v) ? Number(v) : v });
       const zm = document.getElementById("zoneMode");
       if (zm) zm.value = String(state.zoneMode);
       syncFieldDom();

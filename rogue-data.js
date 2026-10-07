@@ -258,7 +258,7 @@ const ROGUE_TASKS = [
   { kind: "scout",  name: "侦察", goal: "摸清{region}深处的动静", nodes: [3, 4], days: 1, diff: 1,
     mix: { battle: 3, smith: 1 },
     reward: { kuizhi: 2000, xp: 20 }, supply: { water: 1500, items: { food_can: 2 } } },
-  { kind: "bounty", name: "悬赏", goal: "在{region}找到并击败悬赏目标", nodes: [2, 3], days: 1, diff: 1, elite: true,
+  { kind: "bounty", name: "悬赏", goal: "在{region}找到并击败悬赏目标", nodes: [2, 3], days: 1, diff: 1, elite: true, hunt: true,
     mix: { battle: 3, shop: 1 },
     reward: { kuizhi: 3500, xp: 30 }, supply: { water: 1000, items: { food_liquid: 2 } } }
 ];
@@ -271,11 +271,13 @@ const ROGUE_MAIN_TASK = {
 };
 
 /* 商店。价格照手册「常见物价」。give：water 是毫升；item 是背包物品 id（ITEM_CATALOG / 补给物品）。 */
+/* 商店：always 的（最便宜的水和食物）每家都有；其余商品每家随机进货 ROGUE_SHOP_RULES.randomCount 种 */
+const ROGUE_SHOP_RULES = { randomCount: 8 };
 const ROGUE_SHOP = [
-  { key: "water_500",  name: "瓶装水 500 ml",  price: 600,  give: { water: 500 } },
+  { key: "water_500",  name: "瓶装水 500 ml",  price: 600,  give: { water: 500 }, always: true },
   { key: "water_1000", name: "罐装水 1000 ml", price: 1000, give: { water: 1000 } },
   { key: "water_5000", name: "桶装水 5000 ml", price: 4000, give: { water: 5000 } },
-  { key: "food_liquid",  price: 300,  give: { item: "food_liquid" } },
+  { key: "food_liquid",  price: 300,  give: { item: "food_liquid" }, always: true },
   { key: "food_can",     price: 500,  give: { item: "food_can" } },
   { key: "food_organic", price: 1000, give: { item: "food_organic" } },
   { key: "food_gourmet", price: 2000, give: { item: "food_gourmet" } },
@@ -397,6 +399,18 @@ const ROGUE_PARTS = {
     bounty: { chance: 0.75, grades: { C: 1, B: 1 } },
     main:   { chance: 1, grades: { C: 1, B: 2 } }
   }
+};
+
+/* 悬赏任务（rogue.js · huntNext）：路线不预先给出，一站一站往前走。
+ *   线索检定 → 其他任意节点 → 线索检定 → …；检定成功 need 次就找到目标；失败 failMax 次也会直接找到目标。
+ *   检定失败（或绕过去）之后，下一个线索检定换一个不同的熟练项。
+ *   找到后下一站是精英战：目标是本区域随机一个精英单位，血量和 atk ×hpMul / atkMul，名字前加【目标】，多占 extraTokens 枚代币。
+ *   打赢目标完成任务；从目标那一战撤退 = 目标逃走，任务失败。
+ *   other：检定之间那一站的抽取权重（休息点整个任务最多一次） */
+const ROGUE_BOUNTY = {
+  need: 3, failMax: 5,
+  hpMul: 1.5, atkMul: 1.5, extraTokens: 1,
+  other: { battle: 3, shop: 1, smith: 1, clinic: 1, rest: 1 }
 };
 
 /* 护送任务（escort.js）：护送对象一半是货车、一半是人物；人物名字从这里抽 */

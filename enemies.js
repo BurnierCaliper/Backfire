@@ -373,18 +373,26 @@ function stepTowardZone(unit, destZone, opt) {
   destZone = Number(destZone);
   const from = Number(unit.zone);
   if (from === destZone) return false;
-  const dest = from < destZone ? from + 1 : from - 1;
+  // 沿连接走最短路线的下一格（直排就是往那边挪一格）
+  const path = typeof zonePath === "function" ? zonePath(from, destZone) : null;
+  const dest = path && path.length > 1 ? path[1] : (from < destZone ? from + 1 : from - 1);
   doMove(unit, dest, opt || {});
   return true;
 }
 
-function otherZone(zone) {
-  const n = Number(state.zoneMode);
+/** 相邻的另一个区。awayFrom 给了就挑离那个区最远的相邻区（一样远取编号小的）；
+ *  不给就取编号最小的相邻区（直排：两区互换；三区 1、3 → 2，2 → 1，和以前一样） */
+function otherZone(zone, awayFrom) {
   const z = Number(zone);
-  if (n === 2) return z === 1 ? 2 : 1;
-  if (z === 1) return 2;
-  if (z === 3) return 2;
-  return 1;
+  const ns = typeof zoneNeighbors === "function" ? zoneNeighbors(z) : [];
+  if (!ns.length) {
+    const n = Number(state.zoneMode);
+    if (n === 2) return z === 1 ? 2 : 1;
+    return z === 2 ? 1 : 2;
+  }
+  if (awayFrom == null) return ns[0];
+  const far = Math.max(...ns.map(x => zoneDist(x, awayFrom)));
+  return ns.find(x => zoneDist(x, awayFrom) === far);
 }
 
 function playersInZone(z) {
@@ -459,7 +467,7 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
   if (id === "en_flee") {
     if (!needT()) return true;
     if (Number(a.zone) !== Number(t.zone)) lines.push("已经不在同一区。");
-    else stepTowardZone(a, otherZone(a.zone));
+    else stepTowardZone(a, otherZone(a.zone, t.zone));   // 往离目标最远的相邻区躲
     return true;
   }
   if (id === "en_aa") {
@@ -849,7 +857,7 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
   if (id === "en_dust_lift") {
     if (!needT()) return true;
     const canPush = Number(t.zone) === Number(a.zone) || zoneDist(a.zone, t.zone, state.zoneMode) === 1;
-    if (!t.kind) aa(t, { element: "harmonic", mult: 1, diceN: 1, diceS: (typeof leveledSides === "function" ? leveledSides(a.level, 6) : 6), baseBreak: 1, onConnect: canPush ? { dest: otherZone(t.zone), reason: "被卷走" } : null });
+    if (!t.kind) aa(t, { element: "harmonic", mult: 1, diceN: 1, diceS: (typeof leveledSides === "function" ? leveledSides(a.level, 6) : 6), baseBreak: 1, onConnect: canPush ? { dest: otherZone(t.zone, a.zone), reason: "被卷走" } : null });   // 推到离自己最远的相邻区
     return true;
   }
   if (id === "en_king_atk") {
@@ -1077,7 +1085,7 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
   }
   if (id === "en_agg3_push") {
     if (!needT()) return true;
-    aa(t, { element: "physical", mult: 1, baseBreak: 0, onConnect: { dest: otherZone(t.zone), reason: "被推击击退" } });
+    aa(t, { element: "physical", mult: 1, baseBreak: 0, onConnect: { dest: otherZone(t.zone, a.zone), reason: "被推击击退" } });   // 推到离自己最远的相邻区
     return true;
   }
   if (id === "en_agg3_control") {

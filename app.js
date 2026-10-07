@@ -91,15 +91,22 @@ function clearFieldEffects(f) {
   f.heal = false;
 }
 
+/** 天气现在能不能改成 kind：能返回 null，不能返回原因（固有天气、被锁定） */
+function weatherChangeWhy(kind, opts) {
+  opts = opts || {};
+  kind = kind || "none";
+  if (opts.force || kind === state.weather) return null;
+  if (state.combatStarted && state.weatherInnate && !opts.innateOk) {
+    return `固有天气「${weatherName(state.weatherInnate)}」：战斗开始时就存在的天气无法被改变。`;
+  }
+  if (state.weatherLock) return `天气被「${state.weatherLock}」锁定，无法覆盖。`;
+  return null;
+}
 function setWeather(kind, opts) {
   opts = opts || {};
   kind = kind || "none";
-  if (state.combatStarted && state.weatherInnate && !opts.force && !opts.innateOk && kind !== state.weather) {
-    return `固有天气「${weatherName(state.weatherInnate)}」：战斗开始时就存在的天气无法被改变。`;
-  }
-  if (state.weatherLock && !opts.force && kind !== state.weather) {
-    return `天气被「${state.weatherLock}」锁定，无法覆盖。`;
-  }
+  const why = weatherChangeWhy(kind, opts);
+  if (why) return why;
   const was = state.weather;
   state.weather = kind;
   if (kind === "sand" && (was !== "sand" || opts.casterZone != null)) rollSandDir(opts.casterZone);
@@ -111,21 +118,29 @@ function setWeather(kind, opts) {
   return null;
 }
 
-function setZoneField(zone, kind, opts) {
+/** 这一区的场地现在能不能改成 kind（空 = 清除）：能返回 null，不能返回原因（深渊、损毁地面、固有场地、被锁定） */
+function fieldChangeWhy(zone, kind, opts) {
   opts = opts || {};
   const f = state.fields[zone];
   if (!f) return "没有这个区域。";
-  if (state.combatStarted && !opts.force && !opts.innateOk) {   // innateOk：主持人的计算器面板（仍然尊重手动锁定）
-    const same = (kind === "fire" && fieldFireOn(f)) || (kind && kind !== "fire" && f[kind]);
-    // 深渊、损毁地面不能被改变；战斗开始时就存在的场地是固有场地，也不能被改变（重复施加同一种照常）
-    if (!same && (f.abyss || f.ruinOn)) return `${zone} 区是${f.abyss ? "深渊" : "损毁地面"}，场地无法被改变。`;
-    if (!same && f.innate) return `${zone} 区是固有场地（战斗开始时就存在），无法被改变。`;
+  const same = (kind === "fire" && fieldFireOn(f)) || (kind && kind !== "fire" && f[kind]);
+  if (state.combatStarted && !opts.force && !opts.innateOk && !same) {
+    if (f.abyss || f.ruinOn) return `${zone} 区是${f.abyss ? "深渊" : "损毁地面"}，场地无法被改变。`;
+    if (f.innate) return `${zone} 区是固有场地（战斗开始时就存在），无法被改变。`;
   }
   if (f.fieldLock && !opts.force) {
-    const same = (kind === "fire" && fieldFireOn(f)) || (kind && kind !== "fire" && f[kind]);
     if (!same && kind) return `${zone} 区场地被「${f.fieldLock}」锁定，无法覆盖。`;
     if (!kind) return `${zone} 区场地被「${f.fieldLock}」锁定，无法清除。`;
   }
+  return null;
+}
+function setZoneField(zone, kind, opts) {
+  opts = opts || {};
+  const f = state.fields[zone];
+  // 深渊、损毁地面不能被改变；战斗开始时就存在的场地是固有场地，也不能被改变（重复施加同一种照常）；
+  // innateOk：主持人的计算器面板（仍然尊重手动锁定）
+  const why = fieldChangeWhy(zone, kind, opts);
+  if (why) return why;
   clearFieldEffects(f);
   if (kind === "fire") {
     f.fireOn = true;
@@ -918,7 +933,7 @@ function sandWindActionText(u) {
   if (state.fields[u.zone] && state.fields[u.zone].isolate) return "隔离区（无视天气风向）";
   const w = sandWind(u.zone, state.zoneMode, state.sandDir);
   if (w === 0) {
-    if (Number(state.zoneMode) === 3 && Number(u.zone) === 2) return "2区无风向（沙尘回复仍翻倍）";
+    if (Number(state.zoneMode) >= 3) return `${u.zone}区在风向中线上，无风向（沙尘回复仍翻倍）`;
     return "无风向";
   }
   if (w > 0) return u.flying ? "顺风·空中（+1 行动点）" : "顺风·地面（+1 附赠行动）";
@@ -3156,7 +3171,7 @@ function structureTargets(actor, minD, maxD) {
   Object.keys(state.gaps || {}).forEach(k => {
     const g = state.gaps[k];
     if (!g || (g.type !== "wall" && g.type !== "bridge")) return;
-    if (zm === 2 && k !== "1-2") return;
+    if (!boardGapKeys().includes(k)) return;   // 只看这块棋盘上真的有的连接
     const zs = k.split("-").map(Number);
     const z = zs.find(inR);
     if (z != null) out.push({ id: "gap:" + k, name: `${gapLabel(g.type)}（${k} 区之间）`, zone: z, isPlayer: false });
@@ -3335,8 +3350,8 @@ function doMoveInner(unit, dest, moveOpt) {
     paintSkillLog("没有那个区域。");
     return;
   }
-  if (Math.abs(dest - from) !== 1) {
-    paintSkillLog("一次只能移动 1 格。1 区到 3 区要走两次。");
+  if (!zonesAdjacent(from, dest)) {
+    paintSkillLog("一次只能移动 1 格（只能走到相连的区）。远的区要走几次。");
     return;
   }
   if (!moveOpt.free && !canControlUnit(unit)) {
@@ -3981,12 +3996,18 @@ function selectedToken() {
 function lineBlocked(aZone, bZone) {
   aZone = Number(aZone); bZone = Number(bZone);
   if (aZone === bZone) return false;
-  const step = aZone < bZone ? 1 : -1;
-  for (let z = aZone; z !== bZone; z += step) {
-    const g = getGap(z, z + step);
+  // 有一条同样短、中间没有危墙 / 关着的机关门的路线就不算挡住（直排只有一条路线，和以前一样）
+  const why = (a, b) => {
+    const g = getGap(a, b);
     if (g.type === "wall") return "危墙挡住，无法影响对面。";
     if (g.type === "door" && !g.open) return "关闭的机关门挡住，无法影响对面。";
-  }
+    return null;
+  };
+  const free = zonePath(aZone, bZone, (a, b) => !why(a, b));
+  const any = zonePath(aZone, bZone);
+  if (free && any && free.length <= any.length) return false;
+  if (!any) return false;
+  for (let i = 0; i < any.length - 1; i++) { const w = why(any[i], any[i + 1]); if (w) return w; }
   return false;
 }
 
@@ -4294,7 +4315,8 @@ function performRetreat(rearguardId) {
     if (lost) notes.push(`丢下 ${lost} 奎支。`);
   }
   if (r.combatItems && state.bag && Array.isArray(state.bag.items)) {
-    const gone = state.bag.items.filter(x => (x.qty || 0) > 0 && ITEM_CATALOG[x.id] && ITEM_CATALOG[x.id].combat);
+    // 维修工具包战斗中也能用，但不算「战斗道具」（以前也不丢）
+    const gone = state.bag.items.filter(x => (x.qty || 0) > 0 && ITEM_CATALOG[x.id] && ITEM_CATALOG[x.id].combat && ITEM_CATALOG[x.id].target !== "weapon");
     if (gone.length) notes.push(`丢下全部战斗道具：${gone.map(x => ITEM_CATALOG[x.id].name + "×" + x.qty).join("、")}。`);
     gone.forEach(x => { x.qty = 0; });
   }
@@ -6154,7 +6176,9 @@ function dealTo(attacker, target, opt) {
       const maxHp = (target.layers || []).reduce((a, l) => a + (Number(l.max) || 0), 0);
       if ((res.intended || 0) >= maxHp * 0.5) target.killBig = true;
     }
-    if ((res.intended || res.total || 0) > 0) spawnFloater(target, res.intended || res.total, ele);
+    // main：这一下是攻击动作本身的伤害（不是高压场地、感电这类连带伤害）。预览和总伤害计数按它定属性颜色
+    const mainHit = flags.action !== false && !flags.environment;
+    if ((res.intended || res.total || 0) > 0) spawnPopup(target, { kind: "dmg", value: res.intended || res.total, element: ele, main: mainHit });
     if ((res.extraHarmonic || 0) > 0) spawnFloater(target, res.extraHarmonic, ele);
     // 画面：这一击带的攻击效果打出大字（属性专属的用属性颜色，穿刺 / 猛击 / 弱点特效用灰色）
     if (flags.action !== false && !flags.environment && typeof attackConnected === "function" && attackConnected(res, flags)) {
@@ -6568,15 +6592,18 @@ function zoneReachable(unit, dest) {
   const from = Number(unit.zone);
   if (dest === from) return "必须换到另一个区域。";
   if (dest < 1 || dest > Number(state.zoneMode)) return "没有这个区域。";
-  const step = dest > from ? 1 : -1;
-  for (let z = from; z !== dest; z += step) {
-    const g = getGap(z, z + step);
+  // 沿连接找一条走得通的路线（直排就是一格一格往那边走）；走不通时说出最近一条路上挡着的是什么
+  const why = (a, b) => {
+    const g = getGap(a, b);
     if (g.type === "wall") return "危墙挡住去路。";
     if (g.type === "door" && !g.open) return "机关门关着。";
-    if (g.type === "void" && !(unit.flying || (state.forceVoid && state.forceVoid[gapKey(z, z + step)]))) {
-      return "空隙挡住地面单位。";
-    }
-  }
+    if (g.type === "void" && !(unit.flying || (state.forceVoid && state.forceVoid[gapKey(a, b)]))) return "空隙挡住地面单位。";
+    return null;
+  };
+  if (zonePath(from, dest, (a, b) => !why(a, b))) return null;
+  const any = zonePath(from, dest);
+  if (!any) return "到不了那个区域。";
+  for (let i = 0; i < any.length - 1; i++) { const w = why(any[i], any[i + 1]); if (w) return w; }
   return null;
 }
 
@@ -6589,7 +6616,8 @@ const HELU_SCAN_FIELDS = [
   ["collapseOn", "塌陷区域", "塌陷计数立刻 +5"],
   ["energy", "能量场", "立刻累积一次场地高能"],
   ["harmonic", "干涉场", "区里所有单位的下次伤害 ±25%"],
-  ["ruinOn", "损毁地面", "立刻扣 20 点耐久"]
+  ["ruinOn", "损毁地面", "立刻扣 20 点耐久"],
+  ["electric", "高压场地", "区里所有单位立刻受到一次高压电击"]
 ];
 const HELU_SCAN_SPAWN = ["boom", "acid", "battery", "scrap"];
 function heluScanFieldOn(f, k) { return k === "fire" ? fieldFireOn(f) : !!(f && f[k]); }
@@ -6603,7 +6631,7 @@ function heluScanOptions(z) {
       : (p.kind === "button" || p.kind === "lever") ? "远程触发" : "远程操作";
     opts.push({ value: "prop:" + p.id, label: `${p.name}：${what}` });
   });
-  [gapKey(z - 1, z), gapKey(z, z + 1)].forEach(key => {
+  zoneNeighbors(z).map(n => gapKey(z, n)).forEach(key => {
     const g = (state.gaps || {})[key];
     if (g && (g.type === "wall" || g.type === "bridge") && (Number(g.hp) || 0) > 0) {
       opts.push({ value: "gap:" + key, label: `${key} 之间的${gapLabel(g.type)}：耐久 −10（现在 ${g.hp}）` });
@@ -6717,6 +6745,9 @@ function heluScanAct(a, picks, lines) {
         lines.push(`${u.name} 干涉 ${up ? "+" : "−"}25% → 下次伤害 ${u.interfere > 0 ? "+" : ""}${Math.round(u.interfere * 100)}%`);
       });
       if (!here.length) lines.push("区里没有单位。");
+    } else if (k === "electric") {
+      if (!here.length) lines.push("区里没有单位。");
+      here.forEach(u => lines.push(...pulseHighVoltage(u, 1)));
     } else if (k === "ruinOn") {
       f.ruinHp = Math.max(0, (Number(f.ruinHp) || 0) - 20);
       lines.push(`${z} 区损毁地面耐久 −20 → ${f.ruinHp}/${f.ruinMax || 0}`);
@@ -6730,9 +6761,24 @@ function heluScanAct(a, picks, lines) {
   lines.push(`${z} 区环境扫描完成。`);
 }
 
+/* ---------- 击退 / 推开：推到哪一区由攻击方选 ----------
+ * 玩家技能（吼叫、驱逐）：目标旁边相连的区不止一个时，多一步「推到哪一区」（skillFlowSteps 的 push）；
+ * 只有一个可去的区就直接推过去。没选（旧存档 / 模拟器）按离攻击者最远的那一区。 */
+const PUSH_SKILLS = ["mochi_roar", "mint_banish"];
+function pushDest(a, t) {
+  const fl = state.skillFlow;
+  const want = fl && fl.picks && fl.picks.push != null ? Number(fl.picks.push) : null;
+  if (want != null && zonesAdjacent(want, t.zone)) return want;
+  return otherZone(t.zone, a && a.zone);
+}
 function skillFlowSteps(id, actor, picks) {
   picks = picks || {};
   if (!actor) return [];
+  if (PUSH_SKILLS.includes(id)) {
+    // 这两个技能只打同区：目标就在自己这一区，推去的区 = 这一区相连的区
+    const zones = zoneNeighbors(actor.zone);
+    return zones.length > 1 ? [{ key: "push", type: "zone", optional: false, label: "把目标推到哪一区（相连的区）", zones }] : [];
+  }
   const maxZ = Number(state.zoneMode);
   if (id === "solo_support") {
     const info = soloSupportInfo();
@@ -6762,9 +6808,9 @@ function skillFlowSteps(id, actor, picks) {
       label: next === "acid" ? "换成酸液炮：打距离 1 的一名敌人（可不选）" : "换成电钻：打同区的一名敌人（可不选）", units }];
   }
   if (id === "kolt_short") {
-    const zones = [];
-    for (let z = 1; z <= maxZ; z++) if (zoneDist(actor.zone, z, maxZ) <= 1) zones.push(z);
-    return [{ key: "dest", type: "zone", optional: true, label: "可先移动至多 1 区", zones }];
+    // 只给场地能变成高压的区域（固有场地 / 深渊 / 损毁地面 / 被锁定的区不能选）
+    const zones = envZones(actor, "electric", 1);
+    return [{ key: "dest", type: "zone", optional: zones.includes(Number(actor.zone)), label: "可先移动至多 1 区（只列出能铺高压场地的区）", zones }];
   }
   if (id === "torque_boost") {
     const bit = ((findKit("kolt", state.units) || {}).resources || {}).bit || "drill";
@@ -6848,7 +6894,7 @@ function skillFlowSteps(id, actor, picks) {
   }
   if (id === "xia_selfburn") {
     const zones = [];
-    for (let z = 1; z <= maxZ; z++) if (Math.abs(z - Number(actor.zone)) === 1) zones.push(z);
+    zoneNeighbors(actor.zone).forEach(z => zones.push(z));
     const steps = [];
     if (xiaFuelOn() && xiaFuel() > 0) steps.push({ key: "mode", type: "choice", optional: true, label: `引火烧身 / 引火自焚（燃油 ${xiaFuel()}）`,
       options: [{ value: "", label: "引火烧身" }, { value: "full", label: `引火自焚：消耗 ${xiaFuel()} 燃油，自焚 +${xiaFuel()} 层` }] });
@@ -7181,8 +7227,8 @@ function skillFlowSteps(id, actor, picks) {
       key: "dest",
       type: "zone",
       optional: false,
-      label: "哪一区变成酸液地面（距离 ≤1）",
-      zones: zones.filter(z => zoneDist(actor.zone, z, state.zoneMode) <= 1)
+      label: "哪一区变成酸液地面（距离 ≤1，只列出场地能改变的区）",
+      zones: zones.filter(z => zoneDist(actor.zone, z, state.zoneMode) <= 1 && !fieldChangeWhy(z, "acid"))
     }];
   }
   if (id === "hiaki_summon") {
@@ -8192,12 +8238,21 @@ const SKILL_REQUIREMENT = {
   hiaki_pot:      (a) => res(a).blade !== "niu" ? "热锅只能用丹生谷发动" : null,
   yuito_amer:     (a) => (res(a).liquid || 0) < 1 ? "没有咖啡液" : null,
   yuito_espresso: (a) => (res(a).liquid || 0) < 1 ? "没有咖啡液" : null,
-  yuito_extract:  (a) => (res(a).liquid || 0) < 1 ? "没有咖啡液" : null,
+  yuito_extract:  (a) => (res(a).liquid || 0) < 1 ? "没有咖啡液"
+    : !envZones(a, "acid", 1).length ? "距离 1 以内没有能变成酸液地面的区域（固有场地 / 深渊 / 损毁地面 / 被锁定）" : null,
   tou_taunt:      (a) => (res(a).tauntLeft || 0) <= 0 ? "本场嘲讽次数已用尽" : null,
   solo_support:   (a) => soloSupportError(a),
   tou_sonic:      (a) => (res(a).shield || 0) < 1 ? "没有圣盾"
     : !skillFlowSteps("tou_sonic", a, {}).length ? "距离 1 以内没有可以打的目标" : null,
-  kolt_short:     (a) => ((findKit("kolt", state.units) || a).resources || {}).bit === "acid" ? "直流短接需要电钻模式" : null,
+  kolt_short:     (a) => ((findKit("kolt", state.units) || a).resources || {}).bit === "acid" ? "直流短接需要电钻模式"
+    : !envZones(a, "electric", 1).length ? "附近没有能变成高压场地的区域（固有场地 / 深渊 / 损毁地面 / 被锁定）" : null,
+  // 只改变天气 / 场地的技能：改不了就不能用（免得白白花掉行动点）
+  latte_ice:      () => state.weather === "snow" ? "已经是雪天" : weatherChangeWhy("snow"),
+  helu_wave:      (a) => state.weather !== "phase" ? weatherChangeWhy("phase")
+    : !res(a).scanned ? "相位中再用要先做一次环境扫描（回波探测）" : null,
+  helu_storm:     (a) => state.weather !== "sand" ? weatherChangeWhy("sand")
+    : !res(a).scanned ? "沙暴中再用要先做一次环境扫描才能调转风向"
+    : state.weatherLock ? `天气被「${state.weatherLock}」锁定，无法调转风向` : null,
   torque_strip:   (a) => ((findKit("kolt", state.units) || {}).resources || {}).bit === "acid" ? "拆卸模式需要电钻模式" : null,
   kolt_rot:       (a) => ((findKit("kolt", state.units) || a).resources || {}).bit !== "acid" ? "腐坏抛射需要酸液炮模式" : null,
   kolt_mod:       (a) => ((findKit("kolt", state.units) || a).resources || {}).bit === "acid" ? "「非法」改装需要电钻模式" : null,
@@ -8264,6 +8319,16 @@ const SKILL_REQUIREMENT = {
   }
 };
 function res(u) { return (u && u.resources) || {}; }
+/** actor 距离 range 以内、场地能改成 kind 的区域 */
+function envZones(actor, kind, range) {
+  const out = [];
+  const maxZ = Number(state.zoneMode) || 2;
+  for (let z = 1; z <= maxZ; z++) {
+    if (actor && zoneDist(actor.zone, z, maxZ) > range) continue;
+    if (!fieldChangeWhy(z, kind)) out.push(z);
+  }
+  return out;
+}
 
 /** 武器人现在能不能唤出：ok / out（已在场）/ dead（本场已倒下，不能再唤出） */
 function weaponSummonState(owner, kit) {
@@ -8846,10 +8911,11 @@ function runSkillInner(id, optRun) {
       else if (typeof damageProp === "function") damageProp(tgt, { element: "physical", dmg: Math.floor(atk), brk: 1 }, a);
     } else if (id === "mochi_roar") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
-      if (!t.kind) hitOne(a, t, { element: "harmonic", mult: 1, diceN: 1, diceS: 4, baseBreak: 1, atk, onConnect: { dest: otherZone(t.zone), reason: "被吼走" } });
+      const dest = pushDest(a, t);
+      if (!t.kind) hitOne(a, t, { element: "harmonic", mult: 1, diceN: 1, diceS: 4, baseBreak: 1, atk, onConnect: { dest, reason: "被吼走" } });
       else {
         if (typeof damageProp === "function") damageProp(t, { element: "harmonic", dmg: Math.floor(atk), brk: 1 }, a);
-        displaceTo(t, otherZone(t.zone), lines, "被吼走");
+        displaceTo(t, dest, lines, "被吼走");
       }
     } else if (id === "mochi_return") {
       lines.push(...returnWeapon(a));
@@ -9047,8 +9113,7 @@ function runSkillInner(id, optRun) {
     } else if (id === "nora_assist") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       if (Number(a.zone) === Number(t.zone)) {
-        const zn = Number(state.zoneMode);
-        const dest = [Number(a.zone) - 1, Number(a.zone) + 1].find(z => z >= 1 && z <= zn);
+        const dest = zoneNeighbors(a.zone)[0];
         if (dest) { a.zone = dest; lines.push(`协助攻击：先退到 ${dest} 区再发射针尖。`); }
       }
       hitOne(a, t, { element: "ice", mult: 1, baseBreak: 0, atk, flags: { action: true, assist: true } });
@@ -9284,11 +9349,12 @@ function runSkillInner(id, optRun) {
       lines.push(`${t.name} 被施加感电。`);
     } else if (id === "mint_banish") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
-      if (!t.kind) hitOne(a, t, { element: "electric", mult: 0.5, hits: 2, baseBreak: 1, breakOnce: true, atk, onConnect: { dest: otherZone(t.zone), reason: "被驱逐" } });
+      const dest = pushDest(a, t);
+      if (!t.kind) hitOne(a, t, { element: "electric", mult: 0.5, hits: 2, baseBreak: 1, breakOnce: true, atk, onConnect: { dest, reason: "被驱逐" } });
       else {
         // 配置物和单位一样：先吃这一下（两次 0.5atk 电），没被打坏就推开 1 格
         if (typeof damageProp === "function") lines.push(...damageProp(t, { element: "electric", dmg: Math.floor(atk), brk: 1 }, a));
-        if ((state.props || []).includes(t)) displaceTo(t, otherZone(t.zone), lines, "被驱逐");
+        if ((state.props || []).includes(t)) displaceTo(t, dest, lines, "被驱逐");
       }
     } else if (id === "yuito_espresso") {
       const fl = state.skillFlow;
@@ -9608,7 +9674,7 @@ function runSkillInner(id, optRun) {
           .concat((state.props || []).filter(p => p.movable && zoneDist(a.zone, p.zone, state.zoneMode) <= 1))   // 可移动的配置物也一样
           .forEach(u => {
             const dest = otherZone(u.zone);
-            if (Math.abs(Number(dest) - Number(u.zone)) === 1) displaceTo(u, dest, lines, "被重整");
+            if (zonesAdjacent(dest, u.zone)) displaceTo(u, dest, lines, "被重整");
           });
         lines.push("重整：距离 1 内其他单位各移动 1 区。飞行切换请在单位面板手动改。");
       }
@@ -9807,7 +9873,7 @@ function runSkillInner(id, optRun) {
       } else if (a.resources && a.resources.scanned) {
         if (state.weatherLock) lines.push(`天气被「${state.weatherLock}」锁定，无法调转风向。`);
         else {
-          state.sandDir = state.sandDir === "21" ? "12" : "21";
+          state.sandDir = reverseSandDir(state.sandDir);
           lines.push(`大气干扰：沙暴调转风向 → ${sandDirText(state.sandDir, state.zoneMode)}。`);
         }
       } else lines.push("尚未分析当前战场（环境扫描），无法调转风向。");
@@ -10126,6 +10192,7 @@ function init() {
       const s = JSON.parse(raw);
       if (s && Array.isArray(s.units) && s.units.length) {
         state.zoneMode = s.zoneMode || 2;
+        state.board = null;
         state.partySize = s.partySize || 2;
         state.weather = s.weather || "none";
         state.phaseStep = s.phaseStep || 0;

@@ -231,6 +231,12 @@ const Rogue = (function () {
       };
     });
     task.part = rollTaskPart(run, tpl, slot);   // 完成时额外给的改装件（部分任务有）
+    if (tpl.hunt) {
+      // 悬赏：路线不预先给出，从第一个线索检定开始一站一站往前走（huntNext）
+      task.nodeTypes = ["check"];
+      task.cols = [["check"]];
+      task.hunt = { need: BOUNTY().need, failMax: BOUNTY().failMax };
+    }
     if (tpl.kind === "escort") task.escort = rollEscort(run, slot);
     return task;
   }
@@ -391,6 +397,7 @@ const Rogue = (function () {
     run.board = null;
     run.stage = "task";
     if (run.task.escort) run.task.escort = Object.assign({}, run.task.escort, { level: enemyLevel(run, 0), cur: null, lost: false });
+    if (run.task.hunt) run.task.hunt = Object.assign({ found: 0, fails: 0, located: false, lastFailProf: null, restUsed: false, target: null }, run.task.hunt);
     const notes = [];
     const pay = taskPay(run, task);
     if (pay.water) setLedgerWater(water() + pay.water);
@@ -715,6 +722,17 @@ const Rogue = (function () {
     const node = currentNode(run);
     if (!node || (node.type !== "battle" && node.type !== "elite")) return null;
     const key = `${run.seed}:fight:${run.taskNo}:${run.task.index}`;
+    if (node.target && run.task.hunt && run.task.hunt.target) {
+      // 悬赏目标那一战
+      const B = BOUNTY(), tg = run.task.hunt.target;
+      const enc = withRng(key, () => rollBountyEncounter(tg.preset, { region: region(run), tokens: NODE.elite.tokens, extraTokens: B.extraTokens,
+        hpMul: B.hpMul, atkMul: B.atkMul, weather: run.task.weather || undefined, targetName: tg.name }));
+      enc.features = withRng(key + ":field", () => rollBattlefield(run, false, enc.zoneMode));
+      return {
+        kind: "elite", title: `${run.task.name} · ${tg.name}`,
+        party: partyKits, encounter: enc, level: enemyLevel(run, run.task.diff + C.eliteLevelBonus), seed: key, before, retreat: true
+      };
+    }
     const enc = withRng(key, () => {
       const opt = { region: region(run) };
       if (NODE[node.type].tokens) opt.tokens = NODE[node.type].tokens;
@@ -762,6 +780,7 @@ const Rogue = (function () {
       });
     }
     const ambush = !!run.ambush && !boss;
+    const ambushPlan = ambush ? run.ambush.plan || null : null;
     if (ambush && outcome === "win") {
       // 遭遇战胜利：每人额外 50 × 敌人等级 经验
       const lv = enemyLevel(run, run.task.diff);
@@ -796,7 +815,9 @@ const Rogue = (function () {
       }
       if (outcome === "win") {
         notes.push("打退了偷袭的敌人，总算可以睡下了。");
-        doLongRest(run, notes);
+        // 偷袭前选好的吃什么、睡什么；打完补给变了不够就按默认再分一次
+        const plan = ambushPlan;
+        doLongRest(run, notes, null, plan && canLongRest(run, plan) ? plan : null);
       } else {
         notes.push("撤退：没能在这里休息，连夜离开。");
         passHours(run, NODE.battle.hours, notes);
@@ -818,6 +839,10 @@ const Rogue = (function () {
       if (run.stage === "over") endRun(run, true, `连额外的第 ${run.act} 幕也打穿了。`);
       return logAll(run, notes);
     }
+    if (outcome === "retreat" && node && node.target) {
+      failTask(run, notes, "悬赏目标逃走了", "悬赏失败");
+      return logAll(run, notes);
+    }
     if (outcome === "retreat") notes.push("撤退：这一站的敌人没有解决，绕开继续前进。");
     advanceNode(run, notes);
     return logAll(run, notes);
@@ -827,11 +852,50 @@ const Rogue = (function () {
   function advanceNode(run, notes) {
     const node = currentNode(run);
     if (node) node.done = true;
+    if (run.task.hunt && run.task.index >= run.task.nodes.length - 1) huntNext(run, node, notes);
     run.task.index += 1;
     if (run.task.index >= run.task.nodes.length) completeTask(run, notes);
     else arriveAtNode(run, notes);
     return notes;
   }
+  /* ---------- 悬赏：一站一站往前走 ---------- */
+  const BOUNTY = () => (typeof ROGUE_BOUNTY !== "undefined" ? ROGUE_BOUNTY : { need: 3, failMax: 5, hpMul: 1.5, atkMul: 1.5, extraTokens: 1, other: { battle: 1 } });
+  function pushHuntNode(t, node) {
+    t.cols.push([node.type]);
+    t.nodes.push(Object.assign({ done: false }, node));
+    t.pick = t.pick || [];
+    t.pick.push(0);
+  }
+  /** 刚走完路线上的最后一站：决定下一站是什么（目标那一战之后就没有了 → 任务完成） */
+  function huntNext(run, node, notes) {
+    const t = run.task, h = t.hunt;
+    if (!node || node.target) return;
+    if (node.type === "check") {
+      const ok = !!(node.check && node.check.result && node.check.result.ok);
+      if (ok) { h.found += 1; h.lastFailProf = null; }
+      else { h.fails += 1; h.lastFailProf = node.check ? node.check.prof : null; }
+      notes.push(ok ? `找到一条线索（${h.found}/${h.need}）。` : `没有找到线索（失败 ${h.fails}/${h.failMax}）${h.lastFailProf ? `，下一次换个方向打听（不再是「${h.lastFailProf}」）` : ""}。`);
+      if (h.found >= h.need || h.fails >= h.failMax) {
+        h.located = true;
+        h.target = withRng(`${run.seed}:bounty:${run.taskNo}`, () => {
+          const preset = pick(bountyCandidates(region(run)));
+          const p = enemyPresets().find(x => x.id === preset);
+          return { preset, name: "【目标】" + ((p && p.name) || preset) };
+        });
+        notes.push(h.found >= h.need ? `线索凑齐了：找到了悬赏目标 ${h.target.name}！` : `虽然没问出什么，${h.target.name} 却自己找上门来了！`);
+        pushHuntNode(t, { type: "elite", target: true });
+        return;
+      }
+      const w = Object.assign({}, BOUNTY().other);
+      if (h.restUsed) delete w.rest;
+      const type = withRng(`${run.seed}:hunt:${run.taskNo}:${t.nodes.length}`, () => pickWeighted(w));
+      if (type === "rest") h.restUsed = true;
+      pushHuntNode(t, { type });
+      return;
+    }
+    pushHuntNode(t, h.lastFailProf ? { type: "check", excludeProf: h.lastFailProf } : { type: "check" });
+  }
+
   /** 商店、工匠这类节点：逛完了继续走 */
   function leaveNode(run) {
     const node = currentNode(run);
@@ -857,7 +921,8 @@ const Rogue = (function () {
         let diff = keys[keys.length - 1];
         for (const k of keys) { r -= w[k]; if (r < 0) { diff = k; break; } }
         const injure = Math.random() < K.injure.chance;
-        const prof = pick(K.profs);
+        const profs = node.excludeProf ? K.profs.filter(p => p !== node.excludeProf) : K.profs;   // 悬赏：上次没成功就换一个熟练项
+        const prof = pick(profs.length ? profs : K.profs);
         return { diff, prof, injure, reward: K.diffs[diff].reward + (injure ? K.injure.bonus : 0) };
       });
     }
@@ -984,10 +1049,19 @@ const Rogue = (function () {
   }
 
   /* ---------- 休息（手册第五章） ---------- */
-  function restPlan(run) {
-    return withParty(run, () => longRestNeeds({})).out;
+  /** 长休计划只留 food / sleep 两张表（每个角色吃什么、用什么睡眠道具），不写就按默认 */
+  function restChoice(plan) {
+    const pick = (o) => (o && typeof o === "object" ? Object.assign({}, o) : undefined);
+    return { food: pick(plan && plan.food), sleep: pick(plan && plan.sleep) };
   }
-  function canLongRest(run) { return restPlan(run).ok; }
+  function restPlan(run, plan) {
+    return withParty(run, () => longRestNeeds(restChoice(plan))).out;
+  }
+  /** 长休界面：每个角色的需求、选择和可选的食物 / 睡眠道具 */
+  function restOptions(run, plan) {
+    return withParty(run, () => longRestOptions(restChoice(plan))).out;
+  }
+  function canLongRest(run, plan) { return restPlan(run, plan).ok; }
   /** 角色资料面板（skill-text.js）：把队伍摆上场算一份，不改动本局 */
   function sheetData(run) {
     if (typeof SkillText === "undefined") return [];
@@ -998,8 +1072,8 @@ const Rogue = (function () {
     if (typeof SkillText === "undefined" || !SkillText.armoryData) return [];
     return withParty(run, () => SkillText.armoryData()).out;
   }
-  function doLongRest(run, notes, watch) {
-    const r = withParty(run, () => ledgerLongRest({ hours: C.hours.longRest, watch: watch || null }, notes));
+  function doLongRest(run, notes, watch, plan) {
+    const r = withParty(run, () => ledgerLongRest(Object.assign(restChoice(plan), { hours: C.hours.longRest, watch: watch || null }), notes));
     const e = run.task && run.task.escort;
     if (e && !e.lost && e.kind === "vip" && e.cur != null) { e.cur = null; notes.push(`${e.name || "委托人"}也休息好了，血量回满。`); }
     notes.push(...r.notes);
@@ -1021,6 +1095,11 @@ const Rogue = (function () {
     const who = shortRestLeftAll(run);
     if (!who.some(x => x.left > 0)) return { ok: false, why: "今天大家的短休次数都用完了", who };
     return { ok: true, who };
+  }
+  /** 进战斗前的低血量提醒：只在这里能短休时提醒 */
+  function lowHpWarning(run) {
+    if (!canShortRestBefore(run).ok || typeof lowHpRestWarning !== "function") return [];
+    return withParty(run, () => lowHpRestWarning()).out;
   }
   function shortRestBeforeNode(run) {
     const can = canShortRestBefore(run);
@@ -1056,7 +1135,9 @@ const Rogue = (function () {
     if (run.ambush) throw new Error("正在遭遇战中");
     const notes = [];
     if (mode === "long") {
-      if (!canLongRest(run)) throw new Error("补给不够长休");
+      const plan = restChoice(opt);
+      const need = restPlan(run, plan);
+      if (!need.ok) throw new Error("补给不够长休：" + need.lack.join("，"));
       const watch = (opt && opt.watch) || null;
       if (watch && !watchOptions(run).some(w => w.kit === watch)) throw new Error("守夜的人不在队伍里");
       const chance = ambushChance(run);
@@ -1064,14 +1145,14 @@ const Rogue = (function () {
       if (hit) {
         // 恢复之前就被偷袭：先打，赢了再长休
         run.ambushChance = AMB.base;
-        run.ambush = { chance };
+        run.ambush = { chance, plan };
         notes.push(`长休时被偷袭！（这次的概率 ${Math.round(chance * 100)}%）还没来得及恢复，敌人就摸了上来。`);
         return logAll(run, notes);
       }
       run.ambushChance = Math.min(1, chance + AMB.step);
       notes.push(watch ? "有人守夜，这一夜平安无事。" : "这一夜平安无事。");
       notes.push(`下次长休被偷袭的概率 ${Math.round(run.ambushChance * 100)}%。`);
-      doLongRest(run, notes, watch);
+      doLongRest(run, notes, watch, plan);
     } else if (mode === "leave") {
       // 不休息直接走：拿一笔奎支，不花时间
       const pay = Number(C.restSkipKuizhi) || 0;
@@ -1168,10 +1249,26 @@ const Rogue = (function () {
     const node = currentNode(run);
     return !!(node && node.type === "shop") || (run.stage === "camp" && !!C.campShop);
   }
+  /** 这家商店的货架：水和食物一定有，其余商品随机 randomCount 种（同一家店看几次都一样，换一家重新进货） */
+  function shopPlace(run) { return run.stage === "camp" ? `c${run.act}.${run.taskNo}` : partPlace(run); }
+  function shopStock(run) {
+    const place = shopPlace(run);
+    if (!run.shopStock || run.shopStock.place !== place) {
+      const n = (typeof ROGUE_SHOP_RULES !== "undefined" && ROGUE_SHOP_RULES.randomCount) || 8;
+      const pool = ROGUE_SHOP.filter(r => !r.always).map(r => r.key);
+      const picked = withRng(`${run.seed}:shop:${place}`, () => {
+        const left = pool.slice(), out = [];
+        while (out.length < n && left.length) out.push(left.splice(Math.floor(Math.random() * left.length), 1)[0]);
+        return out;
+      });
+      run.shopStock = { place, keys: ROGUE_SHOP.filter(r => r.always).map(r => r.key).concat(pool.filter(k => picked.includes(k))) };
+    }
+    return ROGUE_SHOP.filter(r => run.shopStock.keys.includes(r.key));
+  }
   function buy(run, key, qty) {
     if (!canShop(run)) throw new Error("这里没有商店");
-    const row = ROGUE_SHOP.find(r => r.key === key);
-    if (!row) throw new Error("没有这件商品");
+    const row = shopStock(run).find(r => r.key === key);
+    if (!row) throw new Error(ROGUE_SHOP.some(r => r.key === key) ? "这家店没有这件商品" : "没有这件商品");
     qty = Math.max(1, Math.floor(Number(qty) || 1));
     const cost = row.price * qty;
     if ((Number(state.kuizhi) || 0) < cost) throw new Error("奎支不够");
@@ -1511,9 +1608,9 @@ const Rogue = (function () {
     return notes;
   }
   /** 任务失败（护送对象被摧毁）：没有报酬，照样花掉任务天数，回城休整 */
-  function failTask(run, notes, why) {
+  function failTask(run, notes, why, label) {
     const t = run.task;
-    notes.push(`护送失败：${why}，任务「${t.name}」失败，没有报酬。`);
+    notes.push(`${label || "护送失败"}：${why}，任务「${t.name}」失败，没有报酬。`);
     advanceDays(run, t.days);
     run.task = null;
     run.stage = "camp";
@@ -1526,10 +1623,11 @@ const Rogue = (function () {
   }
 
   /** 休整一次：补给够就长休，不够只能硬撑。之后回任务板、进首领战，或者主线过期 → 结束 */
-  function camp(run) {
+  function camp(run, plan) {
     if (run.stage !== "camp") throw new Error("现在不是休整的时候");
     const notes = [];
-    if (canLongRest(run)) doLongRest(run, notes);
+    plan = restChoice(plan);
+    if (canLongRest(run, plan)) doLongRest(run, notes, null, plan);
     else {
       notes.push("补给不足，无法长休，只能硬撑着过夜。");
       passHours(run, C.hours.longRest, notes);
@@ -1633,9 +1731,9 @@ const Rogue = (function () {
     battleSpec, applyPartyToField, finishBattle,
     checkInfo, checkChance, checkOdds, attemptCheck, skipCheck, heroProfs,
     role2Options, soloBattleInfo,
-    restPlan, canLongRest, sheetData, armoryData, escortInfo, partOffers, buyPart, sellPart, canSellParts, partStock, partSellPrice, partInstallCost, installPart, removePart, restAtNode, leaveNode, canShortRestBefore, shortRestBeforeNode,
+    restPlan, restOptions, canLongRest, sheetData, armoryData, lowHpWarning, escortInfo, partOffers, buyPart, sellPart, canSellParts, partStock, partSellPrice, partInstallCost, installPart, removePart, restAtNode, leaveNode, canShortRestBefore, shortRestBeforeNode,
     ambushChance, watchOptions,
-    buy, canShop, shopItemName, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
+    buy, canShop, shopItemName, shopStock, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
     presentSmiths, smithInfo, claimBlueprint, installBlueprint, blueprintById, weaponModsOf,
     smithQuote, introduceSmith,
     canClinic, cyberInfo, cyberPreview, cyberCost, modifyHero, healCost, healHero,
