@@ -43,9 +43,11 @@ function trpgTaskNormalizeNode(n) {
   return {
     type, note: tStr(n.note, 300), done: !!n.done,
     enemies: fight ? (Array.isArray(n.enemies) ? n.enemies : []).filter(e => e && (!presets.length || presets.includes(e.id)))
-      .slice(0, 12).map(e => ({ id: e.id, lv: tNum(e.lv, 1, 1, 30), zone: tNum(e.zone, 2, 1, 3) })) : [],
+      .slice(0, 12).map(e => ({ id: e.id, lv: tNum(e.lv, 1, 1, 30), zone: tNum(e.zone, 2, 1, 9) })) : [],
     weather: fight && TRPG_WEATHERS.includes(n.weather) ? n.weather : "none",
-    zoneMode: fight && Number(n.zoneMode) === 3 ? 3 : 2
+    // 两区 / 三区，或者特殊棋盘的布局名（line4 / square4 / cross5，engine.js · BOARD_LAYOUTS）
+    zoneMode: !fight ? 2 : (typeof BOARD_LAYOUTS !== "undefined" && typeof n.zoneMode === "string" && BOARD_LAYOUTS[n.zoneMode] && !/^line[23]$/.test(n.zoneMode))
+      ? n.zoneMode : Number(n.zoneMode) === 3 || n.zoneMode === "line3" ? 3 : 2
   };
 }
 function trpgTaskNormalize(t, old) {

@@ -1977,3 +1977,10 @@ body:not([data-screen="battle"]) .g-rank { display: none !important; }
 .g-pick-bar::before { content: "或者："; color: var(--muted); font-size: 13px; }
 .g-pick-bar .g-btn { height: 32px; padding: 0 14px; font-weight: 700; border-color: var(--gold); }
 .g-pick-bar .g-btn small { margin-left: 6px; color: var(--muted); font-weight: 400; }
+
+/* ---------- 特殊棋盘（大型 boss 用：四区直排、2×2 方形、十字形……；game.js · syncFieldDom） ---------- */
+.g-field.board-grid { padding: 12px 10px 8px; }
+.g-field.board-grid .g-zone { padding: 22px 8px 8px; gap: 6px; }
+.g-field.board-grid.rows2 .g-zone::before, .g-field.board-grid.rows3 .g-zone::before { font-size: 72px; }
+.g-field.board-grid.rows3 .g-zone { padding: 20px 6px 6px; }
+.g-gap.horiz { writing-mode: horizontal-tb; letter-spacing: .3em; }

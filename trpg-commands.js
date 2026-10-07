@@ -207,10 +207,11 @@ const CalcCommands = (() => {
         if (c.field === "weather") { const err = setWeather(c.value, { innateOk: true }); if (err) { appendLog(err); return err; } }
         else if (c.field === "weatherLock") state.weatherLock = c.value ? (state.weatherLock || "手动锁定") : null;
         else state[c.field] = c.value;
+        if (c.field === "zoneMode") state.board = null;   // 计算器只有两区 / 三区直排
         if (!["partySize", "phaseStep"].includes(c.field)) render(); return;
       }
       case "advancePhase": state.phaseStep = (Number(state.phaseStep) + 1) % 4; return state.phaseStep;
-      case "clearField": snapshot(); state.units = []; state.props = []; state.gaps = { "1-2": emptyGap(), "2-3": emptyGap() }; state.fields = { 1: emptyField(), 2: emptyField(), 3: emptyField() }; state.forceVoid = {}; state.combatStarted = false; state.combatPhase = "player"; state.selectedId = state.attackerId = state.targetId = state.lastResult = null; state.blockQueue = []; state.assistQueue = []; appendLog("已清空战场（单位、配置物、间隔、场地）。天气和区制保留。可点撤销恢复。"); render(); return;
+      case "clearField": snapshot(); state.units = []; state.props = []; state.gaps = { "1-2": emptyGap(), "2-3": emptyGap() }; state.fields = { 1: emptyField(), 2: emptyField(), 3: emptyField() }; if (state.board) applyBoard(state.board); state.forceVoid = {}; state.combatStarted = false; state.combatPhase = "player"; state.selectedId = state.attackerId = state.targetId = state.lastResult = null; state.blockQueue = []; state.assistQueue = []; appendLog("已清空战场（单位、配置物、间隔、场地）。天气和区制保留。可点撤销恢复。"); render(); return;
       case "undo": return undo();
       case "persist":
         try { localStorage.setItem("anterscale-calc", JSON.stringify({ zoneMode: state.zoneMode, partySize: state.partySize, weather: state.weather, phaseStep: state.phaseStep, sandDir: state.sandDir, units: state.units, fields: state.fields })); } catch (_) {}

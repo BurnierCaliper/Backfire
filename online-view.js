@@ -80,7 +80,7 @@
     if (!obj(state)) return null;
     const out = { displayOnly: true, schema: SCHEMA };
     copyFields(state, out, [], ["turnNo", "zoneMode", "phaseStep", "partySize", "kuizhi"], ["combatStarted", "retreated", "ambush"]);
-    enumField(state, out, "sandDir", ["12", "21", "23", "32", "13", "31"]);
+    enumField(state, out, "sandDir", ["12", "21", "23", "32", "13", "31", "E", "W", "S", "N"]);
     out.weatherLocked = !!get(state, "weatherLock");
     enumField(state, out, "combatPhase", ["player", "enemy"]);
     enumField(state, out, "weather", ["none", "heat", "snow", "acid", "thunder", "glow", "sand", "phase"]);

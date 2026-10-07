@@ -82,7 +82,7 @@ function escortAct(notes) {
     const maxZ = Number(state.zoneMode) || 2;
     const from = Number(u.zone);
     if (count(from) > 0) {
-      const opts = [from - 1, from + 1].filter(z => z >= 1 && z <= maxZ)
+      const opts = (typeof zoneNeighbors === "function" ? zoneNeighbors(from) : [from - 1, from + 1].filter(z => z >= 1 && z <= maxZ))
         .filter(z => !(state.fields[z] && state.fields[z].abyss) && !(state.fields[from] && state.fields[from].abyss))
         .filter(z => { const g = typeof getGap === "function" ? getGap(from, z) : { type: "none" }; return g.type !== "wall" && !(g.type === "door" && !g.open) && !(g.type === "void" && !u.flying); })
         .sort((a, b) => count(a) - count(b));

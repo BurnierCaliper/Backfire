@@ -115,12 +115,7 @@ const EnemyAI = (function () {
   };
 
   const zdist = (a, b) => zoneDist(Number(a), Number(b), Number(state.zoneMode));
-  function adjacentZones(z) {
-    const n = Number(state.zoneMode);
-    const out = [];
-    for (let i = 1; i <= n; i++) if (Math.abs(i - Number(z)) === 1) out.push(i);
-    return out;
-  }
+  function adjacentZones(z) { return zoneNeighbors(z); }
   function preyInZone(list, z) {
     return list.filter(p => Number(p.zone) === Number(z));
   }
@@ -297,7 +292,8 @@ const EnemyAI = (function () {
     if (prey.some(p => !lineBlocked(u.zone, p.zone))) return null;      // 还有不隔墙的目标：照常打人
     const from = Number(u.zone), to = Number(target.zone);
     if (from === to) return null;
-    const next = from + (to > from ? 1 : -1);
+    const path = zonePath(from, to);
+    const next = path && path.length > 1 ? path[1] : from + (to > from ? 1 : -1);
     const g = getGap(from, next);
     if (!g || g.type !== "wall") return null;                            // 墙不在眼前：先照常走过去
     return Math.min(from, next) + "-" + Math.max(from, next);

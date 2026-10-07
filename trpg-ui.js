@@ -454,11 +454,11 @@
       const fight = n.type === "battle" || n.type === "elite";
       const foes = fight ? `<div class="tk-foes">${n.enemies.map((e, j) => `<div class="tr-row">
             <select data-te="nodes.${i}.enemies.${j}.id">${options(presets, e.id)}</select>
-            等级 ${inp(`nodes.${i}.enemies.${j}.lv`, e.lv, 52, "number")} 区域 <select data-te="nodes.${i}.enemies.${j}.zone">${options([[1, "1 区"], [2, "2 区"], [3, "3 区"]], e.zone)}</select>
+            等级 ${inp(`nodes.${i}.enemies.${j}.lv`, e.lv, 52, "number")} 区域 <select data-te="nodes.${i}.enemies.${j}.zone">${options([1, 2, 3, 4, 5].map(z => [z, z + " 区"]), e.zone)}</select>
             <button class="g-btn small" data-te-act="delEnemy:${i}:${j}">删</button></div>`).join("")}
           <div class="tr-row"><button class="g-btn small" data-te-act="addEnemy:${i}">＋ 敌人</button>
             天气 <select data-te="nodes.${i}.weather">${options(Object.keys(WX).map(k => [k, WX[k]]), n.weather)}</select>
-            战场 <select data-te="nodes.${i}.zoneMode">${options([[2, "两区"], [3, "三区"]], n.zoneMode)}</select></div></div>` : "";
+            战场 <select data-te="nodes.${i}.zoneMode">${options([[2, "两区"], [3, "三区"], ["line4", "四区直排"], ["square4", "四区方形 2×2"], ["cross5", "五区十字"]], n.zoneMode)}</select></div></div>` : "";
       return `<div class="tk-enode"><div class="tr-row"><b>第 ${i + 1} 站</b>
           <select data-te="nodes.${i}.type" data-te-rerender="1">${options(Object.keys(NODE_T()).map(k => [k, NODE_T()[k]]), n.type)}</select>
           说明 ${inp(`nodes.${i}.note`, n.note, 260)}
@@ -510,7 +510,7 @@
     let o = taskEdit;
     for (let i = 0; i < keys.length - 1; i++) o = o[keys[i]];
     const k = keys[keys.length - 1];
-    o[k] = typeof o[k] === "number" ? (v === "" ? 0 : Number(v)) : v;
+    o[k] = typeof o[k] === "number" && /^-?\d*\.?\d*$/.test(v) ? (v === "" ? 0 : Number(v)) : v;   // 布局名（square4 …）保持字符串
     if (path === "kind") {
       if (v === "escort" && !taskEdit.escort) taskEdit.escort = { kind: "cart", name: "", level: trpgPartyLevel(), hp: null, def: null, atk: null };
       if (v !== "escort") taskEdit.escort = null;
@@ -563,7 +563,8 @@
           GAME.lastEncounter = null;
           GAME.enemyPlan = cfg.enemies;
           GAME.weather = cfg.weather;
-          GAME.zoneMode = cfg.zoneMode;
+          if (typeof cfg.zoneMode === "string") { GAME.board = cfg.zoneMode; GAME.zoneMode = BOARD_LAYOUTS[cfg.zoneMode].zones.length; }
+          else { GAME.board = null; GAME.zoneMode = cfg.zoneMode; }
           return uiCommand("toBattle");
         }
       };

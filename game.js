@@ -223,17 +223,17 @@
   }
   /** 区域之间的危墙 / 不稳桥梁：可以被攻击，快照和配置物一样（画在两区之间的竖条上，不单独出铭牌） */
   function snapGaps() {
-    const n = Number(state.zoneMode) || 2;
     const out = [];
-    for (let z = 2; z <= n; z++) {
-      const key = gapKey(z - 1, z);
+    for (const [za, zb] of boardLinks()) {
+      const key = gapKey(za, zb);
+      const z = Math.max(za, zb);
       const g = (state.gaps || {})[key];
       if (!g) continue;
       const hittable = (g.type === "wall" || g.type === "bridge") && (Number(g.hp) || 0) > 0;
       const max = Math.max(1, Number(g.maxHp) || Number(g.hp) || 1);
       out.push({
         id: "gap:" + key, name: gapLabel(g.type) + "（" + key.replace("-", "–") + " 区之间）", isPlayer: false, isProp: true, isGap: true, gapKey: key,
-        zone: z - 1, level: 1, atk: 0, layers: [{ type: "armor", max, cur: Math.max(0, Number(g.hp) || 0) }],
+        zone: Math.min(za, zb), level: 1, atk: 0, layers: [{ type: "armor", max, cur: Math.max(0, Number(g.hp) || 0) }],
         def: 0, defMax: 0, ap: 0, apMax: 0, bonus: 0, bonusMax: 0, status: gapLabel(g.type), res: "",
         highEnergy: 0, flying: false, stunned: false, dying: false, dead: !hittable, hidden: !hittable, shp: 0
       });
@@ -536,11 +536,7 @@
     return { type: "skill", actor: actorId, skill: skillId, target: targetId || null, picks };
   }
 
-  function otherZones(z) {
-    const out = [];
-    for (let i = 1; i <= Number(state.zoneMode); i++) if (Math.abs(i - z) === 1) out.push(i);
-    return out;
-  }
+  function otherZones(z) { return zoneNeighbors(z); }   // 能走一步过去的区（棋盘上相连的）
 
   /* ================= 5. 画面 ================= */
   const cards = new Map();
@@ -1894,7 +1890,7 @@
         if (stale()) return;
         if (!targetId) { cancel(); return; }
       } else if (spec && spec.target === "zone") {
-        dest = await pickZone([1, 2, 3].filter(z => z <= Number(state.zoneMode)), () => null);
+        dest = await pickZone(boardZoneIds(), () => null);
         if (stale()) return;
         if (dest == null) { cancel(); return; }
       }
@@ -2355,7 +2351,7 @@
     const t = INTRO_TIER[tier] || INTRO_TIER.normal;
     lines.push({ text: t[0], color: t[1], big: true });
     const zm = Number(state.zoneMode) || 2;
-    lines.push({ text: zm === 3 ? "三区制" : "两区制", color: "#6cc4ff" });
+    lines.push({ text: state.board ? (state.board.name || `${zm} 区棋盘`) : zm === 3 ? "三区制" : "两区制", color: "#6cc4ff" });
     const w = INTRO_WEATHER[state.weather] || [state.weather, "#ffffff"];
     if (state.weather && state.weather !== "none") lines.push({ text: "天气 · " + w[0], color: w[1] });
     if (state.weather === "sand") lines.push({ text: "风向 " + sandDirText(state.sandDir, zm), color: w[1] });
@@ -3148,24 +3144,65 @@
     });
   }
 
+  /** 一个区的格子（单位、配置物都摆在里面） */
+  function makeZoneSection(z) {
+    const sec = el("section", "g-zone");
+    sec.dataset.num = String(z);
+    sec.innerHTML = `<span class="zlabel">${z} 区</span><div class="grp enemy"></div><div class="grp prop"></div><div class="grp player"></div>`;
+    return sec;
+  }
+  /**
+   * 战场棋盘：普通的两区 / 三区直排照旧（一排：区 | 间隔 | 区 …）；
+   * 特殊棋盘（state.board）按每个区的格子坐标摆进网格：区占奇数行列，相连两区之间的那一格放间隔条
+   * （左右相连是竖条，上下相连是横条）。没有区的格子空着。
+   */
   function syncFieldDom() {
     const field = $("g-field");
     if (!field) return;
     const n = Number(state.zoneMode) || 2;
-    field.className = "g-field z" + n;
     field.innerHTML = "";
+    field.removeAttribute("style");
     dispatch({ type: "battle.panel", action: "normalizeField" });
-    for (let z = 1; z <= n; z++) {
-      if (z > 1) {
-        const key = gapKey(z - 1, z);
-        const gap = el("div", "g-gap");
-        gap.dataset.key = key;
+    const sections = [];
+    if (state.board) {
+      const b = state.board;
+      const W = Math.max(...b.zones.map(q => Number(q.x))) + 1, Hh = Math.max(...b.zones.map(q => Number(q.y))) + 1;
+      field.className = "g-field board-grid " + (W >= 3 ? "z3" : "z2") + (Hh >= 2 ? " rows" + Hh : "");
+      const track = (k, zone, gap) => Array.from({ length: 2 * k - 1 }, (_, i) => (i % 2 ? gap : zone)).join(" ");
+      field.style.gridTemplateColumns = track(W, "minmax(0, 1fr)", W >= 3 ? "32px" : "28px");
+      field.style.gridTemplateRows = track(Hh, "minmax(0, 1fr)", "24px");
+      b.zones.forEach(q => {
+        const sec = makeZoneSection(Number(q.id));
+        sec.style.gridColumn = String(2 * Number(q.x) + 1);
+        sec.style.gridRow = String(2 * Number(q.y) + 1);
+        field.appendChild(sec);
+        sections.push(sec);
+      });
+      boardLinks(b).forEach(([za, zb]) => {
+        const qa = boardZone(za, b), qb = boardZone(zb, b);
+        const dx = Math.abs(qa.x - qb.x), dy = Math.abs(qa.y - qb.y);
+        if (dx + dy !== 1) return;   // 只画上下左右挨着的连接（不挨着的连接规则上照样算，画面上不画条）
+        const gap = el("div", "g-gap" + (dy ? " horiz" : ""));
+        gap.dataset.key = gapKey(za, zb);
+        gap.style.gridColumn = String(dx ? 2 * Math.min(qa.x, qb.x) + 2 : 2 * qa.x + 1);
+        gap.style.gridRow = String(dy ? 2 * Math.min(qa.y, qb.y) + 2 : 2 * qa.y + 1);
         field.appendChild(gap);
+      });
+    } else {
+      field.className = "g-field z" + n;
+      for (let z = 1; z <= n; z++) {
+        if (z > 1) {
+          const key = gapKey(z - 1, z);
+          const gap = el("div", "g-gap");
+          gap.dataset.key = key;
+          field.appendChild(gap);
+        }
+        const sec = makeZoneSection(z);
+        field.appendChild(sec);
+        sections.push(sec);
       }
-      const sec = el("section", "g-zone");
-      sec.dataset.num = String(z);
-      sec.innerHTML = `<span class="zlabel">${z} 区</span><div class="grp enemy"></div><div class="grp prop"></div><div class="grp player"></div>`;
-      field.appendChild(sec);
+    }
+    sections.forEach(sec => {
       sec.addEventListener("mouseenter", () => {
         if (!(G.arm && G.arm.mode === "zone" && G.arm.zones.has(Number(sec.dataset.num)))) return;
         sec.classList.add("is-move-hover");
@@ -3176,7 +3213,7 @@
         sec.classList.remove("is-move-hover");
         if (G.arm && G.arm.mode === "zone") clearPreview();
       });
-    }
+    });
     paintGaps();
     requestAnimationFrame(() => { try { fitZones(); } catch (e) {} });
   }
@@ -3243,7 +3280,7 @@
   }
 
   function renderFieldSheet() {
-    $("g-cfg-zones").value = String(state.zoneMode || 2);
+    $("g-cfg-zones").value = state.board ? String(state.board.id) : String(state.zoneMode || 2);
     $("g-cfg-ps").value = String(state.partySize || 4);
     $("g-cfg-weather").value = state.weather || "none";
     const elist = $("g-enemy-list");
@@ -3311,7 +3348,7 @@
     const gbox = $("g-gap-list");
     if (gbox) {
       gbox.innerHTML = "";
-      const keys = Number(state.zoneMode) >= 3 ? ["1-2", "2-3"] : ["1-2"];
+      const keys = boardGapKeys();
       dispatch({ type: "battle.panel", action: "normalizeGaps" });
       keys.forEach(key => {
         const g = state.gaps[key];
@@ -3531,7 +3568,8 @@
     };
     $("g-field-close").onclick = () => $("g-field-sheet").classList.remove("show");
     $("g-cfg-zones").onchange = () => {
-      dispatch({ type: "battle.panel", action: "setZones", value: Number($("g-cfg-zones").value) || 2 });
+      const v = $("g-cfg-zones").value;
+      dispatch({ type: "battle.panel", action: "setZones", value: /^\d+$/.test(v) ? Number(v) : v });
       const zm = document.getElementById("zoneMode");
       if (zm) zm.value = String(state.zoneMode);
       syncFieldDom();

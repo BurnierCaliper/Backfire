@@ -480,9 +480,11 @@ function buildEncounter(spec, baseLevel, partySize) {
   const presets = enemyPresets();
   const made = [];
   state.zoneMode = Number(spec.zoneMode) || 2;
+  state.board = null;
   state.weather = spec.weather || "none";
   if (state.weather === "sand" && typeof rollSandDir === "function") rollSandDir();   // 开场沙暴：风向随机
   state.fields = { 1: emptyField(), 2: emptyField(), 3: emptyField() };
+  if (spec.board) applyBoard(spec.board);   // 特殊棋盘的遭遇（大型 boss）
   if (spec.fields) {
     Object.keys(spec.fields).forEach(z => Object.assign(state.fields[z], spec.fields[z]));
   }

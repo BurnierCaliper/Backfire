@@ -164,10 +164,126 @@ function innermostOrganic(unit) {
   return layers[layers.length - 1] || null;
 }
 
+/* ===== 区制棋盘（拓扑）=====
+ * 战场由若干「区」拼成：每个区有编号（1…N，连续）和在棋盘上的格子坐标 x / y（画面按坐标摆），
+ * 区和区之间的「连接」决定相邻关系；距离 = 沿连接走几步（2×2 方形对角是距离 2，十字形两臂之间是 2）。
+ * 每条连接上可以有间隔（危墙、桥梁、空隙、机关门），键是 gapKey(a, b) = "小-大"。
+ * 普通战斗还是两区 / 三区直排（state.board 为空时按 state.zoneMode 当直排处理，行为和以前完全一样）；
+ * 特殊棋盘（大型 boss 用）通过 applyBoard(布局名或布局对象) 换上，state.zoneMode = 区数。
+ *   布局对象：{ id, name, zones: [{ id, x, y }], links: [[a, b], …], playerZone, enemyZone } */
+const BOARD_LAYOUTS = {
+  line2:   { name: "两区直排", zones: [{ id: 1, x: 0, y: 0 }, { id: 2, x: 1, y: 0 }], links: [[1, 2]], playerZone: 1, enemyZone: 2 },
+  line3:   { name: "三区直排", zones: [{ id: 1, x: 0, y: 0 }, { id: 2, x: 1, y: 0 }, { id: 3, x: 2, y: 0 }], links: [[1, 2], [2, 3]], playerZone: 1, enemyZone: 3 },
+  line4:   { name: "四区直排", zones: [1, 2, 3, 4].map((id, i) => ({ id, x: i, y: 0 })), links: [[1, 2], [2, 3], [3, 4]], playerZone: 1, enemyZone: 4 },
+  square4: { name: "四区方形（2×2）", zones: [{ id: 1, x: 0, y: 0 }, { id: 2, x: 1, y: 0 }, { id: 3, x: 0, y: 1 }, { id: 4, x: 1, y: 1 }],
+             links: [[1, 2], [1, 3], [2, 4], [3, 4]], playerZone: 3, enemyZone: 2 },
+  cross5:  { name: "五区十字", zones: [{ id: 1, x: 1, y: 0 }, { id: 2, x: 0, y: 1 }, { id: 3, x: 1, y: 1 }, { id: 4, x: 2, y: 1 }, { id: 5, x: 1, y: 2 }],
+             links: [[1, 3], [2, 3], [3, 4], [3, 5]], playerZone: 5, enemyZone: 3 }
+};
+Object.keys(BOARD_LAYOUTS).forEach(k => { BOARD_LAYOUTS[k].id = k; });
+/** 现在用的棋盘。没有特殊棋盘时按区制当直排 */
+function currentBoard(zoneMode) {
+  const b = typeof state !== "undefined" ? state.board : null;
+  if (b && Array.isArray(b.zones) && b.zones.length) return b;
+  const m = Number(zoneMode != null ? zoneMode : (typeof state !== "undefined" ? state.zoneMode : 2));
+  return m === 3 ? BOARD_LAYOUTS.line3 : BOARD_LAYOUTS.line2;
+}
+function isLineBoard(b) { b = b || currentBoard(); return /^line/.test(b.id || "") || (b.zones || []).every(z => Number(z.y) === 0); }
+/** 所有区编号（从小到大） */
+function boardZoneIds(b) { return (b || currentBoard()).zones.map(z => Number(z.id)).sort((x, y) => x - y); }
+function boardZone(id, b) { return (b || currentBoard()).zones.find(z => Number(z.id) === Number(id)) || null; }
+function boardLinks(b) { return ((b || currentBoard()).links || []).map(([x, y]) => [Number(x), Number(y)]); }
+/** 和 z 相邻的区（有连接） */
+function zoneNeighbors(z, b) {
+  z = Number(z);
+  return boardLinks(b).filter(l => l[0] === z || l[1] === z).map(l => (l[0] === z ? l[1] : l[0])).sort((x, y) => x - y);
+}
+function zonesAdjacent(a, b, board) { return zoneNeighbors(a, board).includes(Number(b)); }
+const _boardDistCache = new Map();
+function boardDistTable(b) {
+  b = b || currentBoard();
+  const key = b.key || (b.key = (b.id || "custom") + ":" + JSON.stringify(b.links));
+  if (_boardDistCache.has(key)) return _boardDistCache.get(key);
+  const ids = boardZoneIds(b), table = {};
+  ids.forEach(src => {
+    const d = { [src]: 0 }, q = [src];
+    while (q.length) { const z = q.shift(); zoneNeighbors(z, b).forEach(n => { if (d[n] == null) { d[n] = d[z] + 1; q.push(n); } }); }
+    table[src] = d;
+  });
+  _boardDistCache.set(key, table);
+  return table;
+}
+/** 两区之间的距离：沿连接走几步（直排就是编号差）。zoneMode 参数保留给旧调用（没有特殊棋盘时决定两区 / 三区） */
 function zoneDist(a, b, zoneMode) {
   if (a == null || b == null) return 0;
-  if (Number(zoneMode) === 2) return a === b ? 0 : 1;
-  return Math.abs(Number(a) - Number(b));
+  const board = currentBoard(zoneMode);
+  const row = boardDistTable(board)[Number(a)];
+  const d = row ? row[Number(b)] : null;
+  if (d != null) return d;
+  // 不在棋盘上的区号（旧档 / 计算器里两区制留着的 3 区）：按以前的直排算法
+  if (!(typeof state !== "undefined" && state.board)) return Number(zoneMode != null ? zoneMode : state.zoneMode) === 2 ? (Number(a) === Number(b) ? 0 : 1) : Math.abs(Number(a) - Number(b));
+  return 99;
+}
+/** 换上一个棋盘（布局名或布局对象；null = 回到普通的两区 / 三区直排）。补齐每个区的场地、每条连接的间隔 */
+function applyBoard(spec) {
+  if (typeof state === "undefined") return null;
+  if (!spec) { state.board = null; return null; }
+  const src = typeof spec === "string" ? BOARD_LAYOUTS[spec] : spec;
+  if (!src || !Array.isArray(src.zones) || !src.zones.length) throw new Error("没有这种棋盘：" + spec);
+  const b = JSON.parse(JSON.stringify(src));
+  b.id = b.id || "custom";
+  delete b.key;
+  const ids = boardZoneIds(b);
+  ids.forEach((id, i) => { if (id !== i + 1) throw new Error("棋盘的区编号要从 1 开始连续"); });
+  // 直排两区 / 三区就是普通区制，不另外存棋盘
+  if (b.id === "line2" || b.id === "line3") { state.board = null; state.zoneMode = ids.length; }
+  else { state.board = b; state.zoneMode = ids.length; }
+  state.fields = state.fields || {};
+  ids.forEach(id => { if (!state.fields[id] && typeof emptyField === "function") state.fields[id] = emptyField(); });
+  state.gaps = state.gaps || {};
+  const keys = boardGapKeys(b);
+  if (state.board) Object.keys(state.gaps).forEach(k => { if (!keys.includes(k)) delete state.gaps[k]; });   // 直排留下的、这块棋盘上没有的连接
+  keys.forEach(k => { if (!state.gaps[k] && typeof emptyGap === "function") state.gaps[k] = emptyGap(); });
+  // 换了棋盘：风向换成这块棋盘能用的方向（直排的 "12" / "21" → 往右 / 往左；没有左右就往下 / 往上）
+  if (typeof sandDirOptions === "function") {
+    const opts = sandDirOptions();
+    if (!opts.includes(state.sandDir)) {
+      const map = state.sandDir === "21" ? ["W", "N", "21"] : ["E", "S", "12"];
+      state.sandDir = map.find(d => opts.includes(d)) || opts[0];
+    }
+  }
+  return b;
+}
+/** 每条连接的间隔键（"1-2" …） */
+function boardGapKeys(b) { return boardLinks(b).map(([x, y]) => (typeof gapKey === "function" ? gapKey(x, y) : Math.min(x, y) + "-" + Math.max(x, y))); }
+/** from 到 dest 的一条最短路线（含两端），走不到返回 null。passable(a, b) 可以排除某些连接 */
+function zonePath(from, dest, passable, b) {
+  from = Number(from); dest = Number(dest);
+  if (from === dest) return [from];
+  const prev = { [from]: null }, q = [from];
+  while (q.length) {
+    const z = q.shift();
+    for (const n of zoneNeighbors(z, b)) {
+      if (prev[n] !== undefined || (passable && !passable(z, n))) continue;
+      prev[n] = z;
+      if (n === dest) { const path = [n]; let c = z; while (c != null) { path.unshift(c); c = prev[c]; } return path; }
+      q.push(n);
+    }
+  }
+  return null;
+}
+/** 特殊棋盘：队员默认站在布局写的我方区（普通直排不动，还是 1 区） */
+function placePartyOnBoard() {
+  const b = typeof state !== "undefined" ? state.board : null;
+  if (!b || !b.playerZone) return;
+  (state.units || []).forEach(u => { if (u.isPlayer && Number(u.zone) === 1) u.zone = Number(b.playerZone); });
+}
+/** 普通区制下的一份干净场地 / 间隔（新建战场用） */
+function freshBoardState(zoneMode) {
+  state.board = null;
+  state.zoneMode = Number(zoneMode) === 3 ? 3 : 2;
+  state.fields = { 1: emptyField(), 2: emptyField(), 3: emptyField() };
+  state.gaps = { "1-2": emptyGap(), "2-3": emptyGap() };
 }
 
 /* 少数技能的真实射程没法从提示文字推出来，在这里写明，优先于文字解析。
@@ -292,29 +408,66 @@ function matchupKind(mod) {
 /** 沙暴风向：1 顺风 / -1 逆风 / 0 无风向。
  *  三区制下中间 2 区不受风向影响；电/酸伤害修正与沙尘回复仍全局生效。
  */
+/* 沙暴风向：直排棋盘用 "12"（从 1 区吹向另一头）/ "21"；其他棋盘用 E / W / S / N（往右 / 往左 / 往下 / 往上吹）。
+ * 顺风 = 上风那半边，逆风 = 下风那半边，正好在中线上的区无风向（直排三区的 2 区）。 */
+const SAND_WIND_VEC = { "12": [1, 0], E: [1, 0], "21": [-1, 0], W: [-1, 0], S: [0, 1], N: [0, -1] };
 function sandWind(zone, zoneMode, sandDir) {
   const z = Number(zone);
-  const mode = Number(zoneMode) || 2;
   const dir = sandDir || "12";
-  if (mode === 3 && z === 2) return 0;
-  if (dir === "12") return z === 1 ? 1 : -1;
-  return z === 1 ? -1 : 1;
+  const b = typeof currentBoard === "function" ? currentBoard(zoneMode) : null;
+  const zz = b ? boardZone(z, b) : null;
+  if (!zz) {
+    const mode = Number(zoneMode) || 2;
+    if (mode === 3 && z === 2) return 0;
+    if (dir === "12") return z === 1 ? 1 : -1;
+    return z === 1 ? -1 : 1;
+  }
+  const [dx, dy] = SAND_WIND_VEC[dir] || SAND_WIND_VEC["12"];
+  const along = (q) => Number(q.x) * dx + Number(q.y) * dy;
+  const vals = b.zones.map(along);
+  const mid = (Math.min(...vals) + Math.max(...vals)) / 2;
+  const v = along(zz);
+  if (Math.abs(v - mid) < 1e-9) return 0;
+  return v < mid ? 1 : -1;
 }
+/** 这块棋盘能用的风向（直排只有两个方向；方形 / 十字四个方向都有） */
+function sandDirOptions() {
+  const b = typeof currentBoard === "function" ? currentBoard() : null;
+  if (!b || isLineBoard(b)) return ["12", "21"];
+  const xs = b.zones.map(q => q.x), ys = b.zones.map(q => q.y);
+  const out = [];
+  if (Math.max(...xs) > Math.min(...xs)) out.push("E", "W");
+  if (Math.max(...ys) > Math.min(...ys)) out.push("S", "N");
+  return out.length ? out : ["12", "21"];
+}
+/** 反过来吹 */
+function reverseSandDir(dir) { return ({ "12": "21", "21": "12", E: "W", W: "E", S: "N", N: "S" })[dir || "12"] || "21"; }
 
 /** 沙暴风向（玩家手册：从 1 区吹向 2 区或相反，总是对释放者所在区域顺风）。
  *  有释放者时让他所在的区顺风；没有（开场天气、手动切换）就随机。返回 "12" 或 "21"。 */
 function rollSandDir(casterZone) {
-  const z = Number(casterZone);
+  const opts = sandDirOptions();
   let dir;
-  if (z === 1) dir = "12";
-  else if (z >= 2 && !(Number(state.zoneMode) === 3 && z === 2)) dir = "21";
-  else dir = Math.random() < 0.5 ? "12" : "21";
+  if (opts[0] === "12") {
+    // 直排：和以前一样（1 区吹向另一头 / 反过来），释放者那一区总是顺风
+    const z = Number(casterZone);
+    if (z === 1) dir = "12";
+    else if (z >= 2 && !(Number(state.zoneMode) === 3 && z === 2)) dir = "21";
+    else dir = Math.random() < 0.5 ? "12" : "21";
+  } else {
+    const good = casterZone != null ? opts.filter(d => sandWind(casterZone, state.zoneMode, d) > 0) : [];
+    const pool = good.length ? good : opts;
+    dir = pool[Math.floor(Math.random() * pool.length)];
+  }
   state.sandDir = dir;
   return dir;
 }
 /** 风向文字：「1 区 → 2 区」（三区制是 1 区 → 3 区） */
 function sandDirText(dir, zoneMode) {
-  const last = Number(zoneMode) === 3 ? 3 : 2;
+  const named = { E: "从左往右吹 →", W: "从右往左吹 ←", S: "从上往下吹 ↓", N: "从下往上吹 ↑" };
+  if (named[dir]) return named[dir];
+  const b = typeof currentBoard === "function" ? currentBoard(zoneMode) : null;
+  const last = b ? Math.max(...boardZoneIds(b)) : (Number(zoneMode) === 3 ? 3 : 2);
   return (dir || "12") === "12" ? `1 区 → ${last} 区` : `${last} 区 → 1 区`;
 }
 
@@ -1444,6 +1597,8 @@ function enemyPresets() {
 }
 
 function enemySpawnZone(mode) {
+  const b = typeof state !== "undefined" ? state.board : null;
+  if (b && b.zones && b.enemyZone) return Number(b.enemyZone);
   const m = mode != null ? mode : (typeof state !== "undefined" ? state.zoneMode : 2);
   return Number(m) === 3 ? 3 : 2;
 }
