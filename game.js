@@ -98,6 +98,7 @@
       value: spec.value,
       text: spec.text,
       element: spec.element || "physical",
+      main: !!spec.main,           // 攻击动作本身的那一下（不是高压场地等连带伤害）
       targetId: spec.targetId || null,
       tag: state.popTag || null,   // "boom"：高能自爆的余波，数字放大、停留更久
       snap: G.sim ? null : snapAll()
@@ -422,7 +423,9 @@
         return true;
       });
       p.resChanged = bs.res !== s2.res;
-      const pop = hi.tape.find(e => e.type === "pop" && e.unitId === id && e.kind === "dmg");
+      // 属性颜色按攻击动作本身那一下：高压场地这类连带伤害会先弹出来，不能拿第一个
+      const dmgPops = hi.tape.filter(e => e.type === "pop" && e.unitId === id && e.kind === "dmg" && Number(e.value) > 0);
+      const pop = dmgPops.find(e => e.main) || dmgPops[0];
       p.element = pop ? pop.element : "physical";
       p.changed = p.dmgHi > 0 || p.healHi > 0 || p.brHi > 0 || p.stunSure || p.stunMaybe || p.killSure || p.killMaybe ||
         p.zoneTo != null || p.newStatus.length > 0 || p.shpLoss > 0 || p.resChanged;
@@ -962,6 +965,7 @@
 
   async function playTape(tape, after, meta) {
     const pops = tape.filter(e => e.type === "pop");
+    comboPrime(pops);
     const stunId = newStunId(after, pops);
     if (meta.slow) {
       G.slow = 1.4;
@@ -1033,6 +1037,7 @@
           const bh = typeof bigHitInfo === "function" ? bigHitInfo(s ? s.level : 1, v) : { big: false, ratio: 0 };
           const big = bh.big;
           hit(e.unitId, e.element, big);
+          comboHit(e, v);
           popup(e.unitId, big ? v + "!" : String(v), "e-" + e.element + (big ? " big" : "") + (boom ? " boom" : ""),
             { icon: e.element, size: big ? Math.round(BIG_POP_SIZE * (0.8 + 0.35 * bh.ratio)) : boom ? 46 : 30,
               dur: boom ? 2.4 : big ? BIG_POP_DUR * (0.8 + 0.45 * bh.ratio) : 1.05 });
@@ -1063,6 +1068,7 @@
           realTimeout(() => app.classList.remove("quake"), 700);
           if (window.Sfx) Sfx.boom();
           hit(e.unitId, "energy", true);
+          comboHit(e, Math.floor(Number(e.value) || 0));
           stamp(e.unitId, "高能自爆", "boom");
           popup(e.unitId, (Math.floor(Number(e.value) || 0)) + "!", "e-energy big boom", { icon: "energy", size: BIG_POP_SIZE + 12, dur: 2.8 });
           await playBeats(beatsBefore.filter(b => b.kind !== "stun"));
@@ -1129,12 +1135,14 @@
     pushUndo((meta && meta.skillName) || "行动");
     G.depth++;
     syncBusy();
+    comboStart();
     try {
       const tape = await perform(thunk, meta, !!context, context);
       if (hotseat() && tape === null) return false;
       await resolveQueues();
       if (hotseat()) return true;
     } finally {
+      comboEnd();
       G.depth--;
       G.version++;
       syncBusy();
@@ -2721,6 +2729,90 @@
     });
     lastParts = Object.assign({}, gr.parts);
   }
+  /* ---------- 单次行动的总伤害（评分旁边） ----------
+   * 一次行动（含它引出的协助攻击等后续）里打在敌人身上的所有伤害都加进来：多段攻击、高压场地 / 感电 / 共振这类附带伤害都算。
+   * 字号按总数涨，门槛和伤害数字的「大伤害」一致（bigHitInfo：目标等级 × 2 + 8 起，到两倍封顶）。
+   * 一下就打出大伤害：大数字直接砸出来；多段：每段都弹一下、数字滚上去、越来越大，跨过门槛时再砸一次。
+   * 颜色 = 这次攻击动作本身那一下的属性（不是附带伤害的属性）。 */
+  const combo = { on: false, total: 0, shown: 0, hits: 0, level: 1, element: null, mainSet: false, big: false, token: 0, raf: 0 };
+  function comboBox() {
+    let b = $("g-combo");
+    if (!b) {
+      const rank = $("g-rank");
+      if (!rank) return null;
+      b = el("div", "g-combo", `<div class="cb-num"></div><div class="cb-sub"></div>`);
+      b.id = "g-combo";
+      rank.appendChild(b);
+    }
+    return b;
+  }
+  function comboStart() {
+    if (G.sim) return;
+    Object.assign(combo, { on: true, total: 0, hits: 0, level: 1, element: null, mainSet: false, big: false });
+  }
+  /** 放这段演出之前先看一眼：攻击动作本身那一下的属性，免得连带伤害先弹出来时颜色先变成它的 */
+  function comboPrime(pops) {
+    if (!combo.on || combo.mainSet) return;
+    const m = pops.find(e => e.kind === "dmg" && e.main && Number(e.value) > 0 && unitById(e.unitId) && !unitById(e.unitId).isPlayer);
+    if (m) { combo.element = m.element; combo.mainSet = true; }
+  }
+  function comboHit(e, v) {
+    if (!combo.on || G.sim || !(v > 0)) return;
+    const u = unitById(e.unitId);
+    if (!u || u.isPlayer) return;   // 只算打在敌人身上的
+    if (!combo.hits) { combo.level = Number(u.level) || 1; combo.shown = 0; }
+    if (e.main && !combo.mainSet) { combo.element = e.element; combo.mainSet = true; }
+    else if (!combo.element) combo.element = e.element;
+    combo.total += v;
+    combo.hits += 1;
+    combo.token += 1;
+    paintCombo();
+  }
+  function comboSize(total) {
+    const bh = bigHitInfo(combo.level, total);
+    return { bh, size: bh.big ? Math.round(58 + 34 * bh.ratio) : Math.round(24 + 22 * Math.min(1, total / bh.th)) };
+  }
+  function paintCombo() {
+    const b = comboBox();
+    if (!b) return;
+    const num = b.querySelector(".cb-num"), sub = b.querySelector(".cb-sub");
+    const { bh } = comboSize(combo.total);
+    const wasBig = combo.big;
+    combo.big = bh.big;
+    b.className = "g-combo show e-" + (combo.element || "physical") + (bh.big ? " big" : "");
+    sub.textContent = combo.hits > 1 ? `${combo.hits} 段 · 总伤害` : "伤害";
+    // 动画：一下就是大伤害 / 多段跨过门槛 → 砸出来；其余每段弹一下
+    const anim = bh.big && (combo.hits === 1 || !wasBig) ? "slam" : combo.hits === 1 ? "enter" : "bump";
+    num.classList.remove("slam", "enter", "bump");
+    void num.offsetWidth;
+    num.classList.add(anim);
+    if (anim === "slam") { b.classList.remove("quake"); void b.offsetWidth; b.classList.add("quake"); }
+    // 数字滚上去（一下打出来的直接显示）
+    const from = combo.hits === 1 ? combo.total : combo.shown;
+    const to = combo.total, t0 = performance.now(), span = 160;
+    if (combo.raf) cancelAnimationFrame(combo.raf);
+    const step = (t) => {
+      const k = Math.min(1, (t - t0) / span);
+      combo.shown = Math.round(from + (to - from) * k);
+      num.textContent = combo.shown;
+      num.style.fontSize = comboSize(combo.shown).size + "px";
+      if (k < 1) combo.raf = requestAnimationFrame(step); else combo.raf = 0;
+    };
+    step(t0);
+    if (from !== to) combo.raf = requestAnimationFrame(step);
+  }
+  function comboEnd() {
+    if (!combo.on) return;
+    combo.on = false;
+    if (!combo.hits) return;
+    const token = combo.token;
+    realTimeout(() => {
+      if (token !== combo.token || combo.on && combo.hits) return;   // 下一次行动已经开始打了
+      const b = $("g-combo");
+      if (b) b.classList.remove("show");
+    }, combo.big ? 2400 : 1600);
+  }
+
   function refreshAll() {
     if (G.depth === 0) setView(snapAll(), true);
     refreshHud();

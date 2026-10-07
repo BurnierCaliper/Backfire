@@ -1997,3 +1997,48 @@ body:not([data-screen="battle"]) .g-rank { display: none !important; }
   .r-restplan tr { padding: 6px 0; border-bottom: 1px solid var(--line, #444); }
   .r-restplan td { border: 0; padding: 2px 0; }
 }
+
+/* ---------- 单次行动的总伤害（评分左边）：game.js · comboHit / paintCombo ---------- */
+.g-combo {
+  --cb: var(--physical);
+  position: absolute; right: calc(100% + 18px); bottom: 6px;
+  display: flex; flex-direction: column; align-items: flex-end;
+  pointer-events: none; white-space: nowrap;
+  opacity: 0; transform: translateX(16px); transition: opacity .35s ease-in, transform .35s ease-in;
+}
+.g-combo.show { opacity: 1; transform: none; transition: opacity .08s ease-out, transform .12s ease-out; }
+.g-combo.e-fire { --cb: var(--fire); } .g-combo.e-acid { --cb: var(--acid); } .g-combo.e-electric { --cb: var(--electric); }
+.g-combo.e-ice { --cb: var(--icee); } .g-combo.e-energy { --cb: var(--energy); } .g-combo.e-harmonic { --cb: var(--harmonic); }
+.cb-num {
+  font-family: "Black Ops One", var(--num); font-size: 28px; line-height: .9; letter-spacing: .01em;
+  color: var(--cb); filter: saturate(1.6) brightness(1.15);
+  transform: skewX(-10deg); transform-origin: 85% 70%;
+  text-shadow: 3px 3px 0 #1b1f24, -2px -2px 0 #1b1f24, 2px -2px 0 #1b1f24, -2px 2px 0 #1b1f24, 0 3px 0 #1b1f24;
+  transition: font-size .12s ease-out;
+}
+.g-combo.big .cb-num {
+  text-shadow: 4px 4px 0 #1b1f24, -3px -3px 0 #1b1f24, 3px -3px 0 #1b1f24, -3px 3px 0 #1b1f24, 0 4px 0 #1b1f24,
+    0 0 18px var(--cb), 0 0 36px var(--cb);
+}
+.cb-sub {
+  margin-top: 4px; padding: 1px 8px; font-size: 11px; font-weight: 800; letter-spacing: .12em;
+  color: #fff; background: #1b1f24; transform: skewX(-10deg);
+  border-left: 4px solid var(--cb);
+}
+/* 第一下（不大）：从右边冲进来 */
+.cb-num.enter { animation: cbEnter .28s cubic-bezier(.2, 1.4, .4, 1); }
+@keyframes cbEnter { 0% { transform: skewX(-10deg) translateX(30px) scale(.5); opacity: 0; } 100% { transform: skewX(-10deg); opacity: 1; } }
+/* 之后每一段：弹一下 */
+.cb-num.bump { animation: cbBump .22s ease-out; }
+@keyframes cbBump { 0% { transform: skewX(-10deg) scale(1); } 35% { transform: skewX(-10deg) scale(1.28) rotate(-2deg); } 100% { transform: skewX(-10deg) scale(1); } }
+/* 一下就打出大伤害 / 多段跨过门槛：大数字砸下来 */
+.cb-num.slam { animation: cbSlam .55s cubic-bezier(.15, 1.3, .35, 1); }
+@keyframes cbSlam {
+  0% { transform: skewX(-10deg) scale(3.2); opacity: 0; filter: saturate(1.6) brightness(2.4); }
+  22% { transform: skewX(-10deg) scale(.86); opacity: 1; }
+  40% { transform: skewX(-10deg) scale(1.12); }
+  100% { transform: skewX(-10deg) scale(1); filter: saturate(1.6) brightness(1.15); }
+}
+.g-combo.quake { animation: cbQuake .32s linear; }
+@keyframes cbQuake { 0%, 100% { translate: 0 0; } 20% { translate: -5px 3px; } 40% { translate: 4px -4px; } 60% { translate: -3px -2px; } 80% { translate: 2px 3px; } }
+@media (prefers-reduced-motion: reduce) { .cb-num.enter, .cb-num.bump, .cb-num.slam, .g-combo.quake { animation: none; } }
