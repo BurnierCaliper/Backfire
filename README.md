@@ -366,6 +366,14 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **首领机制模块：分担**（`boss-mechanics.js · castShare`，标记 / 计时流程和死刑共用；`app.js · dealTo`、`battle-commands.js · setShare`、`game.js`、`online-view.js`）
+  - 敌人挂 `mechanics: [{ type: "share", ... }]` 生效（默认值 `BOSS_MECH_DEFAULTS.share`）。
+  - **标记**：随机一名我方单位（`pick: "random"`），铭牌内圈一道**黄框**，状态栏「分担 N · 3人」（N = 还剩几回合，后面是现在和他同区的人数，悬停能看到伤害池和每人大约挨多少）；首领身上「分担→谁 N」。
+  - **落下**：以目标**当时所在的区**为准，伤害池 `pool`（`{ mult × 首领 atk, flat }`）由这个区里所有还站着的友方单位（角色、武器人、护送对象）**平均分担**（每人向上取整），**不能格挡**；之后照常吃各自的减伤。人越多每人挨得越少，所以要聚到被标记的人身边一起扛。`baseBreak` 可以给每人加击破（默认 0），`element` 不写就用首领的属性。
+  - 和死刑一样：落下时机 `phase` 两种都有、目标倒地立刻转标（随机挑另一个人）、首领失衡推迟一回合、`then` / `interval` / `times` / `hook` 决定落下之后怎样、无视射程 / 阻隔 / 屏障 / 躲藏。
+  - **重构**：死刑和分担共用一套「标记 → 倒计时 → 落下」流程，新的标记类机制只要在 `BOSS_MECH_TYPES` 里登记选法和落下时做什么。绕过射程等限制的伤害统一用 `flags.locked`。
+  - **试用**：战场配置的敌人列表里每个敌人多了「分担…」，可以设落下时机、几回合、伤害池倍率、落下后重新标记还是只放一次。死刑和分担可以同时挂在一个敌人身上。
+  - 联机：标记目标、落下回合和时机同步给玩家，伤害池数值不同步（玩家看到的提示里不写数字）。
 - **首领机制模块：死刑**（新文件 `boss-mechanics.js`；`app.js · startEnemyPhase / startPlayerPhase / applyCombat / dealTo / finishBlock`、`battle-commands.js · setExecution`、`game.js`、`online-view.js`）
   - 给以后的大型首领准备的可复用机制。敌人身上挂 `mechanics: [{ type: "execution", ... }]` 就生效，每个首领自己定数字和行为（不写的取 `BOSS_MECH_DEFAULTS.execution`）。
   - **标记**：从第 `firstTurn` 回合起，标记我方**血量上限最高**的单位（护送对象、单人模式的伙伴不算）。被标记的单位铭牌内圈一道红框、状态栏一个「死刑 N」（N = 还剩几回合，「!」= 这回合落下，到时候红框闪）；首领身上显示「死刑→谁 N」。

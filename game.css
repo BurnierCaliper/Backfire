@@ -2051,9 +2051,18 @@ body:not([data-screen="battle"]) .g-rank { display: none !important; }
   0%, 100% { box-shadow: inset 0 0 0 3px #d62f2f, inset 0 0 10px rgba(214, 47, 47, .3); }
   50% { box-shadow: inset 0 0 0 4px #ff3b3b, inset 0 0 22px rgba(255, 59, 59, .6); }
 }
-.chip.exec { background: #d62f2f; color: #fff; font-weight: 800; }
-.chip.exec-by { background: #1b1f24; color: #ff6b6b; font-weight: 800; }
-@media (prefers-reduced-motion: reduce) { .unit-wrap.doom-now .unit { animation: none; } }
+.chip.mark-execution { background: #d62f2f; color: #fff; font-weight: 800; }
+.chip.cast-execution { background: #1b1f24; color: #ff6b6b; font-weight: 800; }
+/* 分担：黄框（和死刑的红框区分），聚过来一起扛 */
+.unit-wrap.shared .unit { box-shadow: inset 0 0 0 4px #e3a51b, inset 0 0 16px rgba(227, 165, 27, .4); }
+.unit-wrap.shared.doom-now .unit { animation: sharePulse .9s ease-in-out infinite; }
+@keyframes sharePulse {
+  0%, 100% { box-shadow: inset 0 0 0 4px #e3a51b, inset 0 0 10px rgba(227, 165, 27, .3); }
+  50% { box-shadow: inset 0 0 0 5px #ffc233, inset 0 0 22px rgba(255, 194, 51, .65); }
+}
+.chip.mark-share { background: #e3a51b; color: #1b1f24; font-weight: 800; }
+.chip.cast-share { background: #1b1f24; color: #ffc233; font-weight: 800; }
+@media (prefers-reduced-motion: reduce) { .unit-wrap.doom-now .unit, .unit-wrap.shared.doom-now .unit { animation: none; } }
 .exec-edit { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; padding: 6px 8px 10px; font-size: 12px; border-bottom: 1px solid rgba(255,255,255,.08); }
 .exec-edit[hidden] { display: none; }
 .exec-edit label { display: inline-flex; align-items: center; gap: 4px; }

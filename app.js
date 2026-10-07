@@ -5830,7 +5830,7 @@ function dealTo(attacker, target, opt) {
   const isReaction = !!(opt.flags.assist || opt.flags.opp || opt.flags.opportunity);
   // 导体的额外目标是随机击中的，不受射程限制
   // 配置物（防卫炮台）的自动攻击不限距离
-  if (attacker && target && opt.flags.action && !opt.flags.aoe && !isReaction && !opt.flags.conductorExtra && !opt.flags.propShot && !opt.flags.execution) {
+  if (attacker && target && opt.flags.action && !opt.flags.aoe && !isReaction && !opt.flags.conductorExtra && !opt.flags.propShot && !opt.flags.locked) {
     const d = zoneDist(Number(attacker.zone), Number(target.zone), Number(state.zoneMode));
     const rg = opt.atkRange || (attacker.isPlayer ? "any" : (attacker.range || "any"));
     const okRange = rg === "melee" ? d === 0 : rg === "ranged" ? d === 1 : d <= 1;
@@ -5842,7 +5842,7 @@ function dealTo(attacker, target, opt) {
     }
   }
   // 躲藏：不会被选做攻击目标（范围攻击、反应不是「选目标」，照常波及）
-  if (target && target.statuses && target.statuses.hide && opt.flags.action && !opt.flags.aoe && !isReaction && !opt.flags.conductorExtra && !opt.flags.execution) {
+  if (target && target.statuses && target.statuses.hide && opt.flags.action && !opt.flags.aoe && !isReaction && !opt.flags.conductorExtra && !opt.flags.locked) {
     const msg = `${target.name} 躲藏中，不能被选作攻击目标。`;
     appendLog(msg);
     return { res: { ok: false, total: 0, breakDealt: 0, log: [msg], perHit: [] }, extra: [msg] };
@@ -5890,7 +5890,7 @@ function dealTo(attacker, target, opt) {
       opt.flags.blockResolved = true;
     }
   }
-  let wallSide = !attacker || !target || !opt.flags || !opt.flags.action || opt.flags.diffract || opt.flags.execution ? null
+  let wallSide = !attacker || !target || !opt.flags || !opt.flags.action || opt.flags.diffract || opt.flags.locked ? null
     : !attacker.isPlayer && (target.isPlayer || target.kit === "ironwall") ? "player"
     : attacker.isPlayer && !target.isPlayer ? "enemy" : null;
   // 范围攻击（不管谁放的、算不算行动）：被屏障保护的单位一律不受，屏障替它吃一下（同一次行动只吃一下）
@@ -5936,7 +5936,7 @@ function dealTo(attacker, target, opt) {
     }
   }
   markXiaAttack(attacker);
-  if (attacker && target && target.zone != null && attacker.zone != null && !opt.flags.diffract && !opt.flags.execution) {
+  if (attacker && target && target.zone != null && attacker.zone != null && !opt.flags.diffract && !opt.flags.locked) {
     const block = lineBlocked(attacker.zone, target.zone);
     if (block) {
       appendLog(block);

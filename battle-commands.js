@@ -3,7 +3,7 @@
   "use strict";
   let local = {};
   const types = ["skill", "move", "standUp", "useItem", "startCombat", "endTurn", "openingChoice", "blockAnswer", "assistAnswer", "koltSwapAnswer", "heluScanAnswer", "retreat", "battle.endPlayerTurn", "battle.endEnemyTurn", "battle.enemyAction", "battle.finish", "battle.afterBattle", "battle.checkSolo", "battle.supportInfo", "battle.rememberCampaign", "battle.loadCampaign", "battle.cleanQueues", "battle.setup", "battle.setupRogue", "battle.panel", "battle.undo", "battle.continue"];
-  const panelActions = ["bagAdd", "currency", "water", "healItem", "repair", "advance", "shortRest", "longRest", "restore", "cheat", "saveSlot", "loadSlot", "clearSlot", "addParty", "removeParty", "addEnemy", "removeEnemy", "setField", "setGap", "gapHp", "rollWall", "toggleDoor", "addProp", "removeProp", "setZones", "setPartySize", "setWeather", "rollEncounter", "rollBossEncounter", "selectEncounter", "normalizeBag", "normalizeGaps", "normalizeField", "setHighland", "setExecution"];
+  const panelActions = ["bagAdd", "currency", "water", "healItem", "repair", "advance", "shortRest", "longRest", "restore", "cheat", "saveSlot", "loadSlot", "clearSlot", "addParty", "removeParty", "addEnemy", "removeEnemy", "setField", "setGap", "gapHp", "rollWall", "toggleDoor", "addProp", "removeProp", "setZones", "setPartySize", "setWeather", "rollEncounter", "rollBossEncounter", "selectEncounter", "normalizeBag", "normalizeGaps", "normalizeField", "setHighland", "setExecution", "setShare"];
   function configure(adapter) { local = Object.assign({}, local, adapter || {}); }
   function environment(context) { return Object.assign({}, local, context || {}); }
   // Rogue's legacy encounter rows explicitly contain level: undefined when they
@@ -69,6 +69,15 @@
         oneOf(c.then, ["repeat", "once"], "execution then");
         if (!Number.isInteger(c.turns) || c.turns < 1 || c.turns > 20) throw new Error("execution turns must be 1-20");
         if (!Array.isArray(c.hits) || !c.hits.length || c.hits.length > 10 || !c.hits.every(h => h && isFinite(Number(h.mult)) && Number(h.mult) > 0 && Number(h.mult) <= 20)) throw new Error("execution hits must be 1-10 multipliers");
+      }
+      if (cmd.action === "setShare" && cmd.cfg != null) {
+        const c = cmd.cfg;
+        if (typeof c !== "object" || Array.isArray(c)) throw new Error("share cfg must be an object");
+        oneOf(c.phase, ["enemy", "player"], "share phase");
+        oneOf(c.then, ["repeat", "once"], "share then");
+        if (!Number.isInteger(c.turns) || c.turns < 1 || c.turns > 20) throw new Error("share turns must be 1-20");
+        if (!isFinite(Number(c.mult)) || Number(c.mult) <= 0 || Number(c.mult) > 50) throw new Error("share pool multiplier must be 0-50");
+        if (c.element != null) oneOf(c.element, ["physical", "fire", "ice", "electric", "acid", "energy", "harmonic"], "share element");
       }
       if (["bagAdd", "healItem"].includes(cmd.action) && !Object.prototype.hasOwnProperty.call(ITEM_CATALOG, cmd.item)) throw new Error("Unknown item: " + cmd.item);
     }
@@ -212,6 +221,18 @@
           bossMechSync(notes);
           notes.unshift(`${u.name} 加上「死刑」：标记后 ${c.turns} 回合、${c.phase === "player" ? "我方" : "敌人"}回合开始时落下，${c.hits.length} 段（× ${c.hits.map(h => h.mult).join(" / ")} atk），${c.then === "repeat" ? "落下后重新标记" : "只放一次"}。`);
         } else notes.push(`${u.name} 去掉了「死刑」。`);
+        break;
+      }
+      case "setShare": {
+        // 首领机制·分担（boss-mechanics.js）：给敌人挂上 / 去掉。cfg = null 去掉
+        const u = actor(cmd.actor);
+        removeBossMechanics(u, "share");
+        if (cmd.cfg) {
+          const c = cmd.cfg;
+          addBossMechanic(u, { type: "share", phase: c.phase, turns: c.turns, then: c.then, pool: { mult: Number(c.mult) }, element: c.element || null });
+          bossMechSync(notes);
+          notes.unshift(`${u.name} 加上「分担」：随机标记一人，${c.turns} 回合后${c.phase === "player" ? "我方" : "敌人"}回合开始时落下，伤害池 ${c.mult} × atk 由他所在区的友方平均分担，${c.then === "repeat" ? "落下后重新标记" : "只放一次"}。`);
+        } else notes.push(`${u.name} 去掉了「分担」。`);
         break;
       }
       case "removeProp": state.props = state.props.filter(x => x.id !== cmd.id); break;

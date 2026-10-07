@@ -159,8 +159,8 @@
       weapon: !!u.weaponOf,
       dur: weaponDurSnap(u),
       // 首领机制（boss-mechanics.js）：身上的死刑标记 / 首领正在倒数的死刑
-      exec: typeof executionMarksOn === "function" ? executionMarksOn(u) : [],
-      execBy: typeof executionCastsBy === "function" ? executionCastsBy(u) : [],
+      marks: typeof bossMarksOn === "function" ? bossMarksOn(u) : [],
+      casts: typeof bossCastsBy === "function" ? bossCastsBy(u) : [],
       overkill: !u.isPlayer && (u.dead || u._removed) ? Math.max(0, Math.round(Number(u.overkill) || 0)) : 0,
       killBig: !u.isPlayer && !!u.killBig
     };
@@ -679,9 +679,13 @@
     // 高能和其他状态放在同一行、同一种样式（之前放在行动点那一行，字体大小不一样）
     const highChip = (s.highEnergy > 0 || (s.status && /高能/.test(s.status)))
       ? `<span class="chip">高能${s.highEnergy > 0 ? " " + s.highEnergy : ""}</span>` : "";
-    const when = (x) => x.left > 0 ? `${x.left} 回合` : `${x.phase === "player" ? "我方" : "敌人"}回合开始`;
-    const execChip = (s.exec || []).map(x => `<span class="chip exec" title="${esc(`${x.by} 的${x.name}：${when(x)}落下${x.delayed ? "（首领失衡，会推迟一回合）" : ""}。每一段都可以协助格挡。`)}">${esc(x.name)} ${x.left > 0 ? x.left : "!"}</span>`).join("") +
-      (s.execBy || []).map(x => `<span class="chip exec-by" title="${esc(`${x.name} → ${x.target || "（无目标）"}：${when(x)}落下`)}">${esc(x.name)}→${esc(x.target || "?")} ${x.left > 0 ? x.left : "!"}</span>`).join("");
+    // 首领机制（死刑 / 分担）的标记：被标记的人身上一个倒计时，首领身上写着标了谁
+    const when = (x) => x.left > 0 ? `${x.left} 回合后` : `这回合${x.phase === "player" ? "我方" : "敌人"}回合开始时`;
+    const markTip = (x) => x.type === "share"
+      ? `${x.by} 的${x.name}：${when(x)}落下${x.delayed ? "（首领失衡，会推迟一回合）" : ""}。${x.pool > 0 ? `伤害池 ${x.pool}，` : ""}由这个人所在区的所有友方平均分担，不能格挡——大家聚过来一起扛（现在同区 ${x.group} 人${x.pool > 0 ? `，每人约 ${Math.ceil(x.pool / Math.max(1, x.group))}` : ""}）。`
+      : `${x.by} 的${x.name}：${when(x)}落下${x.delayed ? "（首领失衡，会推迟一回合）" : ""}。每一段都可以协助格挡。`;
+    const execChip = (s.marks || []).map(x => `<span class="chip mark-${x.type}" title="${esc(markTip(x))}">${esc(x.name)} ${x.left > 0 ? x.left : "!"}${x.type === "share" ? ` · ${x.group}人` : ""}</span>`).join("") +
+      (s.casts || []).map(x => `<span class="chip cast-${x.type}" title="${esc(`${x.name} → ${x.target || "（无目标）"}：${when(x)}落下`)}">${esc(x.name)}→${esc(x.target || "?")} ${x.left > 0 ? x.left : "!"}</span>`).join("");
     q(".u-status").innerHTML = execChip + highChip + (s.status
       ? s.status.split(" · ").filter(t => t && t !== "无状态" && !/^高能/.test(t)).map(t => `<span class="chip">${esc(t)}</span>`).join("")
       : "");
@@ -691,8 +695,10 @@
     q(".u-res").style.display = resText ? "" : "none";
 
     c.wrap.classList.toggle("stunned", s.stunned && !s.dead);
-    c.wrap.classList.toggle("doomed", (s.exec || []).length > 0 && !s.dead);
-    c.wrap.classList.toggle("doom-now", (s.exec || []).some(x => x.left <= 0) && !s.dead);
+    const ex = (s.marks || []).filter(x => x.type === "execution"), sh = (s.marks || []).filter(x => x.type === "share");
+    c.wrap.classList.toggle("doomed", ex.length > 0 && !s.dead);
+    c.wrap.classList.toggle("shared", sh.length > 0 && !ex.length && !s.dead);
+    c.wrap.classList.toggle("doom-now", (s.marks || []).some(x => x.left <= 0) && !s.dead);
     c.wrap.classList.toggle("dying", s.dying && !s.dead);
     c.wrap.classList.toggle("dead", s.dead && !s.isPlayer);
     c.wrap.classList.toggle("dead-slow", s.dead && !s.isPlayer && s.killBig);   // 一记重击打死：多停一会儿再慢慢消失
@@ -3462,6 +3468,39 @@
         hits: String(f("hits").value).split(/[,，\s]+/).filter(Boolean).map(x => ({ mult: Number(x) }))
       });
       if (f("off")) f("off").onclick = () => apply(null);
+      // 首领机制·分担
+      const curS = (u.mechanics || []).find(m => m.type === "share");
+      const sb = el("button", "g-btn" + (curS ? " on" : ""), curS ? "分担 ✓" : "分担…");
+      sb.title = "给这个敌人加上「分担」机制：随机标记一名我方单位，倒计时到了对他所在区造成一次伤害，由同区的友方平均分担，不能格挡";
+      row.insertBefore(sb, rm);
+      const se = el("div", "exec-edit");
+      se.hidden = true;
+      se.innerHTML = `<label>落下<select data-x="phase"><option value="enemy">敌人回合开始</option><option value="player">我方回合开始</option></select></label>
+        <label>标记后<input data-x="turns" type="number" min="1" max="20" value="3"> 回合</label>
+        <label title="伤害池 = 这个倍率 × 这个敌人的 atk，同区的友方平均分担">伤害池<input data-x="mult" type="number" min="0.5" max="50" step="0.5" value="4"> × atk</label>
+        <label>落下后<select data-x="then"><option value="repeat">重新标记</option><option value="once">只放一次</option></select></label>
+        <button class="g-btn" data-x="go">${curS ? "改" : "加上"}</button>${curS ? '<button class="g-btn" data-x="off">去掉</button>' : ""}`;
+      elist.appendChild(se);
+      const g = (k) => se.querySelector(`[data-x="${k}"]`);
+      if (curS) {
+        g("phase").value = curS.phase || "enemy"; g("turns").value = curS.turns || 3;
+        g("mult").value = (curS.pool && curS.pool.mult) || 4; g("then").value = curS.then || "repeat";
+      }
+      sb.onclick = () => { se.hidden = !se.hidden; };
+      const applyS = (cfg) => {
+        let r;
+        try { r = dispatch({ type: "battle.panel", action: "setShare", actor: u.id, cfg }); } catch (e) { flashHint(e.message); return; }
+        ((r && r.notes) || []).forEach(t => appendLog(t));
+        setView(snapAll(), false);
+        refreshAll();
+        renderFieldSheet();
+      };
+      g("go").onclick = () => applyS({
+        phase: g("phase").value, then: g("then").value,
+        turns: Math.max(1, Math.min(20, Math.floor(Number(g("turns").value) || 3))),
+        mult: Math.max(0.5, Math.min(50, Number(g("mult").value) || 4))
+      });
+      if (g("off")) g("off").onclick = () => applyS(null);
     });
     const sel = $("g-enemy-sel");
     if (!sel.options.length) {
