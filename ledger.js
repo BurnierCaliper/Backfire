@@ -78,13 +78,14 @@ const LEDGER = {
   career: null,        // 整局战场记录：{ battles: [每场摘要], kits: { kit: 累计数据 } }（careerRecordBattle）
   tasks: [],           // 跑团：主持人发布的任务（trpg-tasks.js）
   place: null,         // 跑团：队伍在角鳞星地图上的位置（world-data.js · WORLD_PLACES 的 id）
+  placePos: null,      // 跑团：标记拖到了地图上任意位置时的坐标 { x, y }（百分比）；place 记最近的地点
 
   /** 存进队伍档案 */
   save() {
     return JSON.parse(JSON.stringify({
       day: this.day, hours: this.hours, clock: this.clock, dur: this.dur,
       heroes: this.heroes, weapons: this.weapons, shortUsed: this.shortUsed,
-      restOnce: this.restOnce, career: this.career, tasks: this.tasks || [], place: this.place || null, water: ledgerWater()
+      restOnce: this.restOnce, career: this.career, tasks: this.tasks || [], place: this.place || null, placePos: this.placePos || null, water: ledgerWater()
     }));
   },
   load(s) {
@@ -100,6 +101,7 @@ const LEDGER = {
     this.career = s.career || null;
     this.tasks = Array.isArray(s.tasks) ? s.tasks : [];
     this.place = typeof s.place === "string" ? s.place : null;
+    this.placePos = s.placePos && isFinite(Number(s.placePos.x)) && isFinite(Number(s.placePos.y)) ? { x: Number(s.placePos.x), y: Number(s.placePos.y) } : null;
     if (s.water != null) setLedgerWater(s.water);
   },
   reset() { this.load({}); }

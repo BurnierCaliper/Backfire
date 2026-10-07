@@ -46,3 +46,23 @@ test("跑团：主持人设定队伍位置（经过指令层），写进记录�
   c.Commands.dispatch({ type: "trpg", action: "setPlace", place: null });
   assert.equal(c.LEDGER.place, null);
 });
+
+test("跑团：标记可以拖到地图上任意位置（记最近的地点、显示「附近」）；坐标越界被拦下", () => {
+  const c = H.load();
+  const near = c.worldNearestPlace(66, 81);
+  assert.equal(near.place.id, "mine_1");
+  const notes = c.Commands.dispatch({ type: "trpg", action: "setPlace", place: "mine_1", x: 70.04, y: 85 });
+  assert.equal(c.LEDGER.place, "mine_1");
+  assert.equal(c.LEDGER.placePos.x, 70);
+  assert.equal(c.LEDGER.placePos.y, 85);
+  assert.match(notes.join(), /第一采矿场 附近/);
+  const saved = c.LEDGER.save();
+  c.LEDGER.reset();
+  assert.equal(c.LEDGER.placePos, null);
+  c.LEDGER.load(saved);
+  assert.equal(c.LEDGER.placePos.x, 70);
+  // 吸到地点上：不带坐标
+  c.Commands.dispatch({ type: "trpg", action: "setPlace", place: "casino" });
+  assert.equal(c.LEDGER.placePos, null);
+  assert.throws(() => c.Commands.dispatch({ type: "trpg", action: "setPlace", place: "casino", x: 120, y: 5 }), /0–100/);
+});

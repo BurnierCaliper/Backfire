@@ -3,7 +3,8 @@
  * WORLD_PLACES：地图上的地点。x / y 是在地图图片（art/world-map.webp）上的位置，按百分比（0–100）。
  *   desc 是一句话简介（先按地图画面写的占位，设定定了再改）。
  * WORLD_REGION_PLACE：游戏里用的区域名（单局各幕的区域、遭遇的区域）→ 地图上的地点。
- * 当前位置：单局 = 这一幕的区域；跑团 = 主持人在地图上设的（LEDGER.place，跟着存档走）。 */
+ * 当前位置：单局 = 这一幕的区域；跑团 = 主持人在地图上设的（LEDGER.place，跟着存档走）。
+ *   跑团的标记可以拖到地图上任何位置：LEDGER.placePos = { x, y }（百分比），LEDGER.place 记最近的地点（「××附近」）。 */
 "use strict";
 
 const WORLD_MAP_IMAGE = "art/world-map.webp";
@@ -40,13 +41,26 @@ function worldPlaceOf(regionOrId) {
     WORLD_PLACES.find(p => p.name === regionOrId) || null;
 }
 
-/** 跑团：主持人把队伍移到某个地点（id 为空 = 不显示位置） */
-function trpgSetPlace(id) {
+/** 离 (x, y) 最近的地点（按地图图片上的实际距离算） */
+function worldNearestPlace(x, y) {
+  let best = null, bd = Infinity;
+  WORLD_PLACES.forEach(p => {
+    const d = Math.hypot((p.x - x) * 1672 / 100, (p.y - y) * 941 / 100);
+    if (d < bd) { bd = d; best = p; }
+  });
+  return best ? { place: best, dist: bd } : null;
+}
+/** 跑团：主持人把队伍移到某个地点（id 为空 = 不显示位置）。
+ *  带 x / y（0–100）= 标记拖到了地图上任意位置，id 是最近的地点，显示成「××附近」 */
+function trpgSetPlace(id, x, y) {
   if (id && !worldPlace(id)) throw new Error("地图上没有这个地点：" + id);
+  const free = id && x != null && y != null;
+  if (free && !([x, y].every(v => isFinite(Number(v)) && Number(v) >= 0 && Number(v) <= 100))) throw new Error("地图坐标要在 0–100 之间");
   const before = worldPlace(LEDGER.place);
   LEDGER.place = id || null;
+  LEDGER.placePos = free ? { x: Math.round(Number(x) * 10) / 10, y: Math.round(Number(y) * 10) / 10 } : null;
   const now = worldPlace(LEDGER.place);
-  const note = now ? `队伍移动到 ${now.name}${before && before.id !== now.id ? `（之前在 ${before.name}）` : ""}。` : "地图上不再标出队伍的位置。";
+  const note = now ? `队伍移动到 ${now.name}${free ? " 附近" : ""}${before && before.id !== now.id ? `（之前在 ${before.name}）` : ""}。` : "地图上不再标出队伍的位置。";
   if (typeof appendLog === "function") appendLog(note);
   return [note];
 }

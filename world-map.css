@@ -188,3 +188,18 @@ body.wm-open { overflow: hidden; }
 .wm-index li:hover, .wm-index li.sel { background: rgba(63, 224, 255, .18); }
 .wm-index li.here { background: var(--wm-hazard); color: var(--wm-ink); box-shadow: none; font-weight: 800; }
 @media (max-width: 760px) { .wm-sec { margin-top: 12px; padding-top: 10px; } }
+
+/* 跑团主持人：可以拖动的「你在这里」标记 */
+.wm-drop { display: none; }
+.wm.can-move.no-here .wm-drop { display: inline-flex; }
+.wm-mark { z-index: 4; }
+.wm-mark.movable { cursor: grab; }
+.wm-mark.movable .wm-dot { outline: 2px dashed rgba(242, 194, 48, .8); outline-offset: 6px; }
+.wm-mark.dragging { cursor: grabbing; }
+.wm-mark.dragging .wm-here { animation: none; transform: translateX(-50%) rotate(0) scale(1.06); }
+.wm-mark.dragging::before, .wm-mark.dragging::after { animation: none; opacity: 0; }
+.wm-here small.where:empty { display: none; }
+.wm-here small.where { color: #5a3d00; }
+.wm-pin.near-here .wm-dot { border-color: var(--wm-hazard); box-shadow: 0 0 8px var(--wm-hazard), 0 0 0 2px rgba(11, 8, 6, .6); }
+.wm-gm-tip { font-size: 12px !important; color: var(--wm-muted) !important; margin-top: 10px !important; }
+.wm-pin.near-here .wm-badges { top: auto; bottom: -10px; transform: translate(-50%, 100%); }
