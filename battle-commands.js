@@ -3,7 +3,7 @@
   "use strict";
   let local = {};
   const types = ["skill", "move", "standUp", "useItem", "startCombat", "endTurn", "openingChoice", "blockAnswer", "assistAnswer", "koltSwapAnswer", "heluScanAnswer", "retreat", "battle.endPlayerTurn", "battle.endEnemyTurn", "battle.enemyAction", "battle.finish", "battle.afterBattle", "battle.checkSolo", "battle.supportInfo", "battle.rememberCampaign", "battle.loadCampaign", "battle.cleanQueues", "battle.setup", "battle.setupRogue", "battle.panel", "battle.undo", "battle.continue"];
-  const panelActions = ["bagAdd", "currency", "water", "healItem", "repair", "advance", "shortRest", "longRest", "restore", "cheat", "saveSlot", "loadSlot", "clearSlot", "addParty", "removeParty", "addEnemy", "removeEnemy", "setField", "setGap", "gapHp", "rollWall", "toggleDoor", "addProp", "removeProp", "setZones", "setPartySize", "setWeather", "rollEncounter", "rollBossEncounter", "selectEncounter", "normalizeBag", "normalizeGaps", "normalizeField", "setHighland"];
+  const panelActions = ["bagAdd", "currency", "water", "healItem", "repair", "advance", "shortRest", "longRest", "restore", "cheat", "saveSlot", "loadSlot", "clearSlot", "addParty", "removeParty", "addEnemy", "removeEnemy", "setField", "setGap", "gapHp", "rollWall", "toggleDoor", "addProp", "removeProp", "setZones", "setPartySize", "setWeather", "rollEncounter", "rollBossEncounter", "selectEncounter", "normalizeBag", "normalizeGaps", "normalizeField", "setHighland", "setExecution"];
   function configure(adapter) { local = Object.assign({}, local, adapter || {}); }
   function environment(context) { return Object.assign({}, local, context || {}); }
   // Rogue's legacy encounter rows explicitly contain level: undefined when they
@@ -61,6 +61,14 @@
       if (cmd.action === "addProp") {
         oneOf(cmd.kind, ["button", "lever", "battery", "boom", "acid", "scrap", "turret"], "prop kind");
         oneOf(cmd.faction, ["player", "enemy"], "prop faction");
+      }
+      if (cmd.action === "setExecution" && cmd.cfg != null) {
+        const c = cmd.cfg;
+        if (typeof c !== "object" || Array.isArray(c)) throw new Error("execution cfg must be an object");
+        oneOf(c.phase, ["enemy", "player"], "execution phase");
+        oneOf(c.then, ["repeat", "once"], "execution then");
+        if (!Number.isInteger(c.turns) || c.turns < 1 || c.turns > 20) throw new Error("execution turns must be 1-20");
+        if (!Array.isArray(c.hits) || !c.hits.length || c.hits.length > 10 || !c.hits.every(h => h && isFinite(Number(h.mult)) && Number(h.mult) > 0 && Number(h.mult) <= 20)) throw new Error("execution hits must be 1-10 multipliers");
       }
       if (["bagAdd", "healItem"].includes(cmd.action) && !Object.prototype.hasOwnProperty.call(ITEM_CATALOG, cmd.item)) throw new Error("Unknown item: " + cmd.item);
     }
@@ -194,6 +202,18 @@
       case "rollWall": state.gaps[cmd.key].hp = state.gaps[cmd.key].maxHp = rollWallHp(); break;
       case "toggleDoor": state.gaps[cmd.key].open = !state.gaps[cmd.key].open; break;
       case "addProp": { const p = makeProp(cmd.kind, cmd.zone, cmd.level); p.faction = cmd.faction || "player"; state.props = state.props || []; state.props.push(p); if (cmd.kind === "battery" && typeof syncBatteryShields === "function") syncBatteryShields(); value = p.id; break; }
+      case "setExecution": {
+        // 首领机制·死刑（boss-mechanics.js）：给敌人挂上 / 去掉。cfg = null 去掉
+        const u = actor(cmd.actor);
+        removeBossMechanics(u, "execution");
+        if (cmd.cfg) {
+          const c = cmd.cfg;
+          addBossMechanic(u, { type: "execution", phase: c.phase, turns: c.turns, then: c.then, hits: c.hits.map(h => ({ mult: Number(h.mult), element: h.element || undefined })) });
+          bossMechSync(notes);
+          notes.unshift(`${u.name} 加上「死刑」：标记后 ${c.turns} 回合、${c.phase === "player" ? "我方" : "敌人"}回合开始时落下，${c.hits.length} 段（× ${c.hits.map(h => h.mult).join(" / ")} atk），${c.then === "repeat" ? "落下后重新标记" : "只放一次"}。`);
+        } else notes.push(`${u.name} 去掉了「死刑」。`);
+        break;
+      }
       case "removeProp": state.props = state.props.filter(x => x.id !== cmd.id); break;
       case "setZones": {
         // 数字 = 普通两区 / 三区直排；布局名（line4 / square4 / cross5 …）= 特殊棋盘

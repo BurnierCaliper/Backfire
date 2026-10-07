@@ -65,6 +65,13 @@
     enumField(r, out.resources, "mood", ["gentle", "cruel"]);
     enumField(r, out.resources, "bit", ["acid", "drill"]);
     identifiers(r, out.resources, ["bondId", "piercedId"]);
+    // 首领机制（死刑）是公开的预告：只给标记目标、落下回合和时机，不给伤害数值
+    const mech = arr(get(unit, "mechanics")).slice(0, 8).filter(m => obj(m) && get(m, "type") === "execution").map(m => {
+      const dto = { type: "execution" }; copyFields(m, dto, ["name"], [], []); enumField(m, dto, "phase", ["enemy", "player"]);
+      const st = get(m, "st"); dto.st = copyFields(st, {}, [], ["due"], ["done"]); identifiers(st, dto.st, ["targetId"]);
+      return dto;
+    });
+    if (mech.length) out.mechanics = mech;
     // status/res are legacy free-form strings and must not bypass these DTOs.
     return out;
   }

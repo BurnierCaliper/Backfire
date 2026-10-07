@@ -158,6 +158,9 @@
       atk: Math.round(Number(atk) || 0),
       weapon: !!u.weaponOf,
       dur: weaponDurSnap(u),
+      // 首领机制（boss-mechanics.js）：身上的死刑标记 / 首领正在倒数的死刑
+      exec: typeof executionMarksOn === "function" ? executionMarksOn(u) : [],
+      execBy: typeof executionCastsBy === "function" ? executionCastsBy(u) : [],
       overkill: !u.isPlayer && (u.dead || u._removed) ? Math.max(0, Math.round(Number(u.overkill) || 0)) : 0,
       killBig: !u.isPlayer && !!u.killBig
     };
@@ -676,7 +679,10 @@
     // 高能和其他状态放在同一行、同一种样式（之前放在行动点那一行，字体大小不一样）
     const highChip = (s.highEnergy > 0 || (s.status && /高能/.test(s.status)))
       ? `<span class="chip">高能${s.highEnergy > 0 ? " " + s.highEnergy : ""}</span>` : "";
-    q(".u-status").innerHTML = highChip + (s.status
+    const when = (x) => x.left > 0 ? `${x.left} 回合` : `${x.phase === "player" ? "我方" : "敌人"}回合开始`;
+    const execChip = (s.exec || []).map(x => `<span class="chip exec" title="${esc(`${x.by} 的${x.name}：${when(x)}落下${x.delayed ? "（首领失衡，会推迟一回合）" : ""}。每一段都可以协助格挡。`)}">${esc(x.name)} ${x.left > 0 ? x.left : "!"}</span>`).join("") +
+      (s.execBy || []).map(x => `<span class="chip exec-by" title="${esc(`${x.name} → ${x.target || "（无目标）"}：${when(x)}落下`)}">${esc(x.name)}→${esc(x.target || "?")} ${x.left > 0 ? x.left : "!"}</span>`).join("");
+    q(".u-status").innerHTML = execChip + highChip + (s.status
       ? s.status.split(" · ").filter(t => t && t !== "无状态" && !/^高能/.test(t)).map(t => `<span class="chip">${esc(t)}</span>`).join("")
       : "");
     // 有耐久条时，资源文字里的「耐久 N」就不重复写了
@@ -685,6 +691,8 @@
     q(".u-res").style.display = resText ? "" : "none";
 
     c.wrap.classList.toggle("stunned", s.stunned && !s.dead);
+    c.wrap.classList.toggle("doomed", (s.exec || []).length > 0 && !s.dead);
+    c.wrap.classList.toggle("doom-now", (s.exec || []).some(x => x.left <= 0) && !s.dead);
     c.wrap.classList.toggle("dying", s.dying && !s.dead);
     c.wrap.classList.toggle("dead", s.dead && !s.isPlayer);
     c.wrap.classList.toggle("dead-slow", s.dead && !s.isPlayer && s.killBig);   // 一记重击打死：多停一会儿再慢慢消失
@@ -1395,13 +1403,16 @@
   }
 
   function promptBlock(job, attacker, target, helpers) {
-    if (hotseat()) return HotseatGame.requestAsk("block", `${attacker.name} 攻击 ${target.name} · 协助格挡`,
+    if (hotseat()) return HotseatGame.requestAsk("block", `${job.opt && job.opt.flags && job.opt.flags.execution ? `【死刑 ${job.opt.flags.execHit}/${job.opt.flags.execHits}】` : ""}${attacker.name} 攻击 ${target.name} · 协助格挡`,
       helpers.map(h => ({ helper: h.id, label: h.name, sub: `格挡成功率 ${finalBlockChance(h, attacker, target)}%` })),
       () => eligibleBlockers(target, job), job).then(answer => answer.unitId);
     const noBlock = () => showPreview(previewOf(() => finishBlock(null)), `${attacker.name} → ${target.name}（不格挡）`);
     const again = job.tried && job.tried.length;
+    // 首领机制·死刑：标题写明是死刑的第几段（每一段都要单独挡）
+    const fl = (job.opt && job.opt.flags) || {};
+    const what = fl.execution ? `【死刑 ${fl.execHit}/${fl.execHits}】${attacker.name} 处刑 ${target.name}` : `${attacker.name} 攻击 ${target.name}`;
     return openChoice(
-      again ? `${attacker.name} 攻击 ${target.name} · 前面的格挡失败了` : `${attacker.name} 攻击 ${target.name}`,
+      again ? `${what} · 前面的格挡失败了` : what,
       again ? "还有队友可以接着协助格挡；都不挡，这一击照常落下。闪白部分是不格挡时会受到的伤害。"
         : "同区有附赠行动的队友可以协助格挡。成功免伤，但仍扣架势（最少留 1）；失败了其他队友还能接着挡。闪白部分是不格挡时会受到的伤害。",
       helpers.map(h => ({
@@ -2138,6 +2149,8 @@
     try {
       const endKey = `end:${state.turnNo}`;
       await perform({ type: hotseat() ? "battle.endPlayerTurn" : "endTurn", seed: endKey }, {}, hotseat());
+      await resolveQueues();   // 敌人回合开始时落下的死刑：每一段先问协助格挡
+      if (checkEnd()) return;
       refreshTop();
       phaseCard("敌人回合", "enemy");
       await wait(750);
@@ -3414,8 +3427,41 @@
         refreshAll();
         renderFieldSheet();
       };
+      // 首领机制·死刑（boss-mechanics.js）：在这里给任意敌人挂上试用
+      const cur = (u.mechanics || []).find(m => m.type === "execution");
+      const ex = el("button", "g-btn" + (cur ? " on" : ""), cur ? "死刑 ✓" : "死刑…");
+      ex.title = "给这个敌人加上「死刑」机制：标记我方血量上限最高的单位，倒计时到了在回合开始时打一次（可以分几段，每段都能协助格挡）";
+      row.appendChild(ex);
       row.appendChild(rm);
       elist.appendChild(row);
+      const ed = el("div", "exec-edit");
+      ed.hidden = true;
+      ed.innerHTML = `<label>落下<select data-x="phase"><option value="enemy">敌人回合开始</option><option value="player">我方回合开始</option></select></label>
+        <label>标记后<input data-x="turns" type="number" min="1" max="20" value="3"> 回合</label>
+        <label title="每一段的倍率（× 这个敌人的 atk），用逗号隔开：3 = 一段 3 倍；2,1,1 = 三段">每段倍率<input data-x="hits" type="text" value="3"></label>
+        <label>落下后<select data-x="then"><option value="repeat">重新标记</option><option value="once">只放一次</option></select></label>
+        <button class="g-btn" data-x="go">${cur ? "改" : "加上"}</button>${cur ? '<button class="g-btn" data-x="off">去掉</button>' : ""}`;
+      elist.appendChild(ed);
+      const f = (k) => ed.querySelector(`[data-x="${k}"]`);
+      if (cur) {
+        f("phase").value = cur.phase || "enemy"; f("turns").value = cur.turns || 3;
+        f("hits").value = (cur.hits || []).map(h => h.mult).join(","); f("then").value = cur.then || "repeat";
+      }
+      ex.onclick = () => { ed.hidden = !ed.hidden; };
+      const apply = (cfg) => {
+        let r;
+        try { r = dispatch({ type: "battle.panel", action: "setExecution", actor: u.id, cfg }); } catch (e) { flashHint(e.message); return; }
+        ((r && r.notes) || []).forEach(t => appendLog(t));
+        setView(snapAll(), false);
+        refreshAll();
+        renderFieldSheet();
+      };
+      f("go").onclick = () => apply({
+        phase: f("phase").value, then: f("then").value,
+        turns: Math.max(1, Math.min(20, Math.floor(Number(f("turns").value) || 3))),
+        hits: String(f("hits").value).split(/[,，\s]+/).filter(Boolean).map(x => ({ mult: Number(x) }))
+      });
+      if (f("off")) f("off").onclick = () => apply(null);
     });
     const sel = $("g-enemy-sel");
     if (!sel.options.length) {

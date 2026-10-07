@@ -1676,6 +1676,8 @@ function startPlayerPhase() {
       notes.push(`${u.name} 「准备」生效：本回合第一次攻击的第一击基础包 +1d${prepDieSides(u)}，吃倍率和克制。`);
     }
   });
+  // 首领机制：落在我方回合开始的死刑等（我方已经回满行动点 / 附赠，可以用来协助格挡）
+  if (typeof bossMechPhaseStart === "function") bossMechPhaseStart("player", notes);
   appendLog(notes.join("\n"));
   renderAll();
 }
@@ -1684,6 +1686,8 @@ function startEnemyPhase() {
   const notes = ["—— 敌人回合 ——"];
   if (typeof escortAct === "function") escortAct(notes);   // 护送的人物先躲 / 还击
   state.combatPhase = "enemy";
+  // 首领机制（boss-mechanics.js）：落在敌人回合开始的死刑等。要在失衡恢复之前判（首领失衡 → 推迟一回合）
+  if (typeof bossMechPhaseStart === "function") bossMechPhaseStart("enemy", notes);
   // 废铁墙（回防命令）撑过了一个玩家回合，敌人回合开始时撤掉
   (state.props || []).filter(p => p.kind === "scrapwall").forEach(p => {
     notes.push(`${p.zone} 区的废铁墙撑过了玩家回合（剩 ${p.hp}/${p.maxHp}），撤掉了。`);
@@ -3713,6 +3717,8 @@ function applyCombat(target, result, attacker) {
     target.selfBurnStacks = 0;
     notes.push(`${target.name} 晕眩，自焚结束。`);
   }
+  // 死刑：被标记的人倒下了 → 立刻转标
+  if (typeof bossMechSync === "function") bossMechSync(notes);
   return notes;
 }
 
@@ -5280,7 +5286,8 @@ function blockJobAttacker(job) {
 function finishBlock(helperId, forced) {
   const job = (state.blockQueue || [])[0];
   const attacker0 = job ? blockJobAttacker(job) : null;
-  const title = attacker0 ? `【${attacker0.name}】的攻击落下` : "";
+  const xf = job && job.opt && job.opt.flags;
+  const title = !attacker0 ? "" : xf && xf.execution ? `【${attacker0.name}】死刑 第 ${xf.execHit}/${xf.execHits} 段落下` : `【${attacker0.name}】的攻击落下`;
   const prevActor = LOG_ACTOR_ID;
   LOG_ACTOR_ID = attacker0 ? attacker0.id : null;
   let lines;
@@ -5823,7 +5830,7 @@ function dealTo(attacker, target, opt) {
   const isReaction = !!(opt.flags.assist || opt.flags.opp || opt.flags.opportunity);
   // 导体的额外目标是随机击中的，不受射程限制
   // 配置物（防卫炮台）的自动攻击不限距离
-  if (attacker && target && opt.flags.action && !opt.flags.aoe && !isReaction && !opt.flags.conductorExtra && !opt.flags.propShot) {
+  if (attacker && target && opt.flags.action && !opt.flags.aoe && !isReaction && !opt.flags.conductorExtra && !opt.flags.propShot && !opt.flags.execution) {
     const d = zoneDist(Number(attacker.zone), Number(target.zone), Number(state.zoneMode));
     const rg = opt.atkRange || (attacker.isPlayer ? "any" : (attacker.range || "any"));
     const okRange = rg === "melee" ? d === 0 : rg === "ranged" ? d === 1 : d <= 1;
@@ -5835,7 +5842,7 @@ function dealTo(attacker, target, opt) {
     }
   }
   // 躲藏：不会被选做攻击目标（范围攻击、反应不是「选目标」，照常波及）
-  if (target && target.statuses && target.statuses.hide && opt.flags.action && !opt.flags.aoe && !isReaction && !opt.flags.conductorExtra) {
+  if (target && target.statuses && target.statuses.hide && opt.flags.action && !opt.flags.aoe && !isReaction && !opt.flags.conductorExtra && !opt.flags.execution) {
     const msg = `${target.name} 躲藏中，不能被选作攻击目标。`;
     appendLog(msg);
     return { res: { ok: false, total: 0, breakDealt: 0, log: [msg], perHit: [] }, extra: [msg] };
@@ -5883,7 +5890,7 @@ function dealTo(attacker, target, opt) {
       opt.flags.blockResolved = true;
     }
   }
-  let wallSide = !attacker || !target || !opt.flags || !opt.flags.action || opt.flags.diffract ? null
+  let wallSide = !attacker || !target || !opt.flags || !opt.flags.action || opt.flags.diffract || opt.flags.execution ? null
     : !attacker.isPlayer && (target.isPlayer || target.kit === "ironwall") ? "player"
     : attacker.isPlayer && !target.isPlayer ? "enemy" : null;
   // 范围攻击（不管谁放的、算不算行动）：被屏障保护的单位一律不受，屏障替它吃一下（同一次行动只吃一下）
@@ -5929,7 +5936,7 @@ function dealTo(attacker, target, opt) {
     }
   }
   markXiaAttack(attacker);
-  if (attacker && target && target.zone != null && attacker.zone != null && !opt.flags.diffract) {
+  if (attacker && target && target.zone != null && attacker.zone != null && !opt.flags.diffract && !opt.flags.execution) {
     const block = lineBlocked(attacker.zone, target.zone);
     if (block) {
       appendLog(block);
