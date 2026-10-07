@@ -333,6 +333,38 @@ function rollEncounter(opt) {
   }, opt);
 }
 
+/** 悬赏目标（rogue.js 悬赏任务）：血量、atk 乘倍率，名字前加【目标】 */
+function makeBountyTarget(u, cfg) {
+  cfg = typeof cfg === "object" ? cfg : {};
+  const hm = Number(cfg.hpMul) || 1.5, am = Number(cfg.atkMul) || 1.5;
+  (u.layers || []).forEach(l => { l.max = Math.round((Number(l.max) || 0) * hm); l.current = Math.round((Number(l.current) || 0) * hm); });
+  // 敌人出手用的是 personalAtk（+ weaponAtk），面板显示 atk：都乘上
+  ["atk", "personalAtk", "weaponAtk", "baseAtk"].forEach(k => { if (u[k] != null) u[k] = Math.round((Number(u[k]) || 0) * am); });
+  u.name = "【目标】" + u.name;
+  u.bountyTarget = true;
+  return u;
+}
+/** 悬赏目标那一战：目标 + 同阵营的其他敌人，目标多占 extraTokens 枚代币 */
+function rollBountyEncounter(preset, opt) {
+  opt = opt || {};
+  const info = enemyInfo(preset) || {};
+  const cost = enemyTokens(preset) + (Number(opt.extraTokens) || 0);
+  const left = Math.max(0, (Number(opt.tokens) || 5) - cost);
+  const enc = rollEncounter({ region: opt.region, tokens: left, faction: info.faction, mixed: false, weather: opt.weather, zoneMode: opt.zoneMode });
+  enc.enemies.unshift({ preset, zone: 2, bounty: { hpMul: opt.hpMul, atkMul: opt.atkMul } });
+  enc.tier = "elite";
+  enc.tokens = Number(opt.tokens) || 5;
+  enc.name = `悬赏 · ${opt.targetName || preset}`;
+  enc.id = "bounty:" + enc.id;
+  return enc;
+}
+/** 本区域可以当悬赏目标的精英（2 代币及以上、不是首领、不是成群的） */
+function bountyCandidates(region) {
+  const ok = (k) => { const i = ENEMY_INFO[k]; return i && !i.boss && !i.pack && (i.tokens || 1) >= 2; };
+  const here = regionPool(region).filter(ok);
+  return here.length ? here : Object.keys(ENEMY_INFO).filter(ok);
+}
+
 /** BOSS 遭遇：BOSS 本体不占代币，随从另给。手册写死了随从的 BOSS（ENEMY_INFO.escorts）照写的来，不抽代币。 */
 function rollBossEncounter(bossPreset, opt) {
   opt = opt || {};
@@ -471,6 +503,7 @@ function buildEncounter(spec, baseLevel, partySize) {
       }
       const u = p.build(lv(row.level), partySize);
       u.zone = Number(row.zone) || 2;
+      if (row.bounty) makeBountyTarget(u, row.bounty);
       state.units.push(u);
       made.push(u);
     }

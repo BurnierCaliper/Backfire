@@ -231,6 +231,12 @@ const Rogue = (function () {
       };
     });
     task.part = rollTaskPart(run, tpl, slot);   // 完成时额外给的改装件（部分任务有）
+    if (tpl.hunt) {
+      // 悬赏：路线不预先给出，从第一个线索检定开始一站一站往前走（huntNext）
+      task.nodeTypes = ["check"];
+      task.cols = [["check"]];
+      task.hunt = { need: BOUNTY().need, failMax: BOUNTY().failMax };
+    }
     if (tpl.kind === "escort") task.escort = rollEscort(run, slot);
     return task;
   }
@@ -391,6 +397,7 @@ const Rogue = (function () {
     run.board = null;
     run.stage = "task";
     if (run.task.escort) run.task.escort = Object.assign({}, run.task.escort, { level: enemyLevel(run, 0), cur: null, lost: false });
+    if (run.task.hunt) run.task.hunt = Object.assign({ found: 0, fails: 0, located: false, lastFailProf: null, restUsed: false, target: null }, run.task.hunt);
     const notes = [];
     const pay = taskPay(run, task);
     if (pay.water) setLedgerWater(water() + pay.water);
@@ -715,6 +722,17 @@ const Rogue = (function () {
     const node = currentNode(run);
     if (!node || (node.type !== "battle" && node.type !== "elite")) return null;
     const key = `${run.seed}:fight:${run.taskNo}:${run.task.index}`;
+    if (node.target && run.task.hunt && run.task.hunt.target) {
+      // 悬赏目标那一战
+      const B = BOUNTY(), tg = run.task.hunt.target;
+      const enc = withRng(key, () => rollBountyEncounter(tg.preset, { region: region(run), tokens: NODE.elite.tokens, extraTokens: B.extraTokens,
+        hpMul: B.hpMul, atkMul: B.atkMul, weather: run.task.weather || undefined, targetName: tg.name }));
+      enc.features = withRng(key + ":field", () => rollBattlefield(run, false, enc.zoneMode));
+      return {
+        kind: "elite", title: `${run.task.name} · ${tg.name}`,
+        party: partyKits, encounter: enc, level: enemyLevel(run, run.task.diff + C.eliteLevelBonus), seed: key, before, retreat: true
+      };
+    }
     const enc = withRng(key, () => {
       const opt = { region: region(run) };
       if (NODE[node.type].tokens) opt.tokens = NODE[node.type].tokens;
@@ -818,6 +836,10 @@ const Rogue = (function () {
       if (run.stage === "over") endRun(run, true, `连额外的第 ${run.act} 幕也打穿了。`);
       return logAll(run, notes);
     }
+    if (outcome === "retreat" && node && node.target) {
+      failTask(run, notes, "悬赏目标逃走了", "悬赏失败");
+      return logAll(run, notes);
+    }
     if (outcome === "retreat") notes.push("撤退：这一站的敌人没有解决，绕开继续前进。");
     advanceNode(run, notes);
     return logAll(run, notes);
@@ -827,11 +849,50 @@ const Rogue = (function () {
   function advanceNode(run, notes) {
     const node = currentNode(run);
     if (node) node.done = true;
+    if (run.task.hunt && run.task.index >= run.task.nodes.length - 1) huntNext(run, node, notes);
     run.task.index += 1;
     if (run.task.index >= run.task.nodes.length) completeTask(run, notes);
     else arriveAtNode(run, notes);
     return notes;
   }
+  /* ---------- 悬赏：一站一站往前走 ---------- */
+  const BOUNTY = () => (typeof ROGUE_BOUNTY !== "undefined" ? ROGUE_BOUNTY : { need: 3, failMax: 5, hpMul: 1.5, atkMul: 1.5, extraTokens: 1, other: { battle: 1 } });
+  function pushHuntNode(t, node) {
+    t.cols.push([node.type]);
+    t.nodes.push(Object.assign({ done: false }, node));
+    t.pick = t.pick || [];
+    t.pick.push(0);
+  }
+  /** 刚走完路线上的最后一站：决定下一站是什么（目标那一战之后就没有了 → 任务完成） */
+  function huntNext(run, node, notes) {
+    const t = run.task, h = t.hunt;
+    if (!node || node.target) return;
+    if (node.type === "check") {
+      const ok = !!(node.check && node.check.result && node.check.result.ok);
+      if (ok) { h.found += 1; h.lastFailProf = null; }
+      else { h.fails += 1; h.lastFailProf = node.check ? node.check.prof : null; }
+      notes.push(ok ? `找到一条线索（${h.found}/${h.need}）。` : `没有找到线索（失败 ${h.fails}/${h.failMax}）${h.lastFailProf ? `，下一次换个方向打听（不再是「${h.lastFailProf}」）` : ""}。`);
+      if (h.found >= h.need || h.fails >= h.failMax) {
+        h.located = true;
+        h.target = withRng(`${run.seed}:bounty:${run.taskNo}`, () => {
+          const preset = pick(bountyCandidates(region(run)));
+          const p = enemyPresets().find(x => x.id === preset);
+          return { preset, name: "【目标】" + ((p && p.name) || preset) };
+        });
+        notes.push(h.found >= h.need ? `线索凑齐了：找到了悬赏目标 ${h.target.name}！` : `虽然没问出什么，${h.target.name} 却自己找上门来了！`);
+        pushHuntNode(t, { type: "elite", target: true });
+        return;
+      }
+      const w = Object.assign({}, BOUNTY().other);
+      if (h.restUsed) delete w.rest;
+      const type = withRng(`${run.seed}:hunt:${run.taskNo}:${t.nodes.length}`, () => pickWeighted(w));
+      if (type === "rest") h.restUsed = true;
+      pushHuntNode(t, { type });
+      return;
+    }
+    pushHuntNode(t, h.lastFailProf ? { type: "check", excludeProf: h.lastFailProf } : { type: "check" });
+  }
+
   /** 商店、工匠这类节点：逛完了继续走 */
   function leaveNode(run) {
     const node = currentNode(run);
@@ -857,7 +918,8 @@ const Rogue = (function () {
         let diff = keys[keys.length - 1];
         for (const k of keys) { r -= w[k]; if (r < 0) { diff = k; break; } }
         const injure = Math.random() < K.injure.chance;
-        const prof = pick(K.profs);
+        const profs = node.excludeProf ? K.profs.filter(p => p !== node.excludeProf) : K.profs;   // 悬赏：上次没成功就换一个熟练项
+        const prof = pick(profs.length ? profs : K.profs);
         return { diff, prof, injure, reward: K.diffs[diff].reward + (injure ? K.injure.bonus : 0) };
       });
     }
@@ -1516,9 +1578,9 @@ const Rogue = (function () {
     return notes;
   }
   /** 任务失败（护送对象被摧毁）：没有报酬，照样花掉任务天数，回城休整 */
-  function failTask(run, notes, why) {
+  function failTask(run, notes, why, label) {
     const t = run.task;
-    notes.push(`护送失败：${why}，任务「${t.name}」失败，没有报酬。`);
+    notes.push(`${label || "护送失败"}：${why}，任务「${t.name}」失败，没有报酬。`);
     advanceDays(run, t.days);
     run.task = null;
     run.stage = "camp";

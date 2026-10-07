@@ -283,7 +283,7 @@ function boardPick() {
     .sort((a, b) => R.taskPay(run, b.t).kuizhi / b.t.days - R.taskPay(run, a.t).kuizhi / a.t.days);
   const side = legal
     // 精英支线（悬赏）：等级没高过敌人一截就不接
-    .filter(x => !x.t.nodeTypes.includes("elite") || avgLv > R.enemyLevel(run, (x.t.diff || 0) + 1) + 1)
+    .filter(x => !(x.t.nodeTypes.includes("elite") || x.t.hunt) || avgLv > R.enemyLevel(run, (x.t.diff || 0) + 1) + 1)   // 悬赏路线不预先给出，最后照样是精英战
     .sort((a, b) => R.taskPay(run, b.t).kuizhi / b.t.days - R.taskPay(run, a.t).kuizhi / a.t.days);
   if (!run.main.done && R.daysLeft(run) - (side[0] ? side[0].t.days + run.CONFIG_restDays : 0) < run.main.days + 1) return "main";
   if (side.length) return side[0].i;

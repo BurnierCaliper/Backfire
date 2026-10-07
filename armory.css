@@ -211,3 +211,12 @@
 .t-escort { margin: 6px 0; padding: 5px 10px; font-size: 13px; border-left: 4px solid var(--sk-mint, #39e6b4); background: rgba(0, 0, 0, .25); }
 .t-escort.warn { border-left-color: var(--sk-blood, #d8322a); }
 .t-escort small { color: var(--sk-muted, #a8977b); }
+
+/* 单局：悬赏任务进度（rogue-ui.js · huntLine） */
+.t-hunt { margin: 6px 0; padding: 5px 10px; font-size: 13px; border-left: 4px solid var(--sk-hazard, #f2c230); background: rgba(0, 0, 0, .25); }
+.t-hunt.found { border-left-color: var(--sk-blood, #d8322a); }
+.t-hunt small { display: block; color: var(--sk-muted, #a8977b); }
+.hunt-pips { display: inline-flex; gap: 3px; vertical-align: middle; }
+.hunt-pips i { width: 10px; height: 10px; border: 1px solid var(--sk-edge, #4d4337); background: rgba(0, 0, 0, .4); transform: rotate(45deg); }
+.hunt-pips i.ok { background: var(--sk-mint, #39e6b4); }
+.hunt-pips i.bad { background: var(--sk-blood, #d8322a); }

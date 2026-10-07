@@ -171,6 +171,7 @@
       <div class="t-meta">报酬 ${pay.kuizhi} 奎支 · 每人 ${pay.xp} 经验${t.part && WEAPON_PARTS[t.part] ? `<br>额外奖励：改装件 ${esc(weaponPartLabel(t.part))}（${esc(weaponPartCoefText(WEAPON_PARTS[t.part].coef))}）` : ""}<br>委托方提供 ${esc(supplyText || "无")}</div>
       ${t.weather ? `<div class="t-weather">全程天气：${esc(WX_NAME[t.weather] || t.weather)}（任务里每一场战斗都是）</div>` : ""}
       ${escortLine(Rogue.escortInfo(run, t), false)}
+      ${t.hunt ? `<div class="t-hunt">路线未知：一站一站往前走。通过 ${t.hunt.need} 次线索检定找到悬赏目标（失败 ${t.hunt.failMax} 次目标也会自己找上门），最后一站是和目标的精英战。</div>` : ""}
       ${warn ? `<div class="t-warn">${esc(warn)}</div>` : ""}
       <button class="g-btn r-go${t.key ? " r-main" : ""}" data-which="${which}" ${why ? "disabled" : ""}>${why ? esc(why) : t.key ? "执行主线" : "接下任务"}</button>
     </div>`;
@@ -268,7 +269,8 @@
         ${esc(o.name)} · ${LV_TEXT[o.level]}
         <small>${can ? `成功率 ${pctText(o.chance)}` : "没有资格尝试"}${tags ? " · " + esc(tags) : ""} · 血 ${o.hp}/${o.hpMax}</small></button>`;
     }).join("");
-    return `<p>【事件占位】前方需要一次<b>${esc(c.diffName)}</b>的「${esc(c.prof)}」检定。</p>
+    const huntNote = run.task && run.task.hunt ? `<p class="r-hint">悬赏线索检定：成功 = 找到一条线索；失败或绕过去都算没找到，下一次换一个熟练项。</p>` : "";
+    return `<p>【事件占位】前方需要一次<b>${esc(c.diffName)}</b>的「${esc(c.prof)}」检定。</p>${huntNote}
       <p class="r-hint">成功奖励 ${c.reward} 奎支${c.injure ? `（含风险加成 ${ROGUE_CHECKS.injure.bonus}）` : ""}。简单检定谁都能试；普通及以上没有这项熟练就不能尝试（手册第一章）。选一个人去做：</p>
       ${hurt}
       <div class="r-choices">${rows}</div>
@@ -466,6 +468,16 @@
     return `<div class="t-escort${live && !e.intact ? " warn" : ""}">护送：<b>${esc(e.name)}</b>（${e.kind === "cart" ? "货车" : "人物"} · ${esc(e.note)}）
       · ${live ? `血量 <b>${e.hp}/${e.max}</b>（${pct}%）${e.intact ? " · 完好" : " · 已不算完好"}` : `血量 ${e.max}${e.atk ? ` · atk ${e.atk}` : ""}`}<br><small>${esc(rules)}</small></div>`;
   }
+  /** 悬赏：线索进度 / 已经找到的目标 */
+  function huntLine(t) {
+    const h = t && t.hunt;
+    if (!h || h.found == null) return "";
+    if (h.located && h.target) return `<div class="t-hunt found">已找到悬赏目标：<b>${esc(h.target.name)}</b>（血量、atk ×1.5，多占 1 枚代币）。击败它完成任务；从这一战撤退目标会逃走，任务失败。</div>`;
+    const pips = (n, max, cls) => Array.from({ length: max }, (_, i) => `<i class="${i < n ? cls : ""}"></i>`).join("");
+    return `<div class="t-hunt">线索 <span class="hunt-pips">${pips(h.found, h.need, "ok")}</span> ${h.found}/${h.need}
+      · 失败 <span class="hunt-pips">${pips(h.fails, h.failMax, "bad")}</span> ${h.fails}/${h.failMax}
+      <small>路线一站一站显示：线索检定之间夹着一站别的。失败 ${h.failMax} 次目标也会自己找上门。</small></div>`;
+  }
   function renderTask() {
     const t = run.task;
     const node = Rogue.currentNode(run);
@@ -479,6 +491,7 @@
     const wx = t.weather ? `<span class="t-weather inline">全程天气：${esc(WX_NAME[t.weather] || t.weather)}</span>` : "";
     return `<h2>${esc(t.key ? "主线" : t.name)}<span class="sub">${esc(t.goal)}</span>${wx}</h2>
       ${escortLine(query("escortInfo"), true)}
+      ${huntLine(t)}
       ${routeMapHtml(t)}
       <div class="r-panel">${choose}${restRow}${panel}</div>`;
   }

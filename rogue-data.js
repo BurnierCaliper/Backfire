@@ -258,7 +258,7 @@ const ROGUE_TASKS = [
   { kind: "scout",  name: "侦察", goal: "摸清{region}深处的动静", nodes: [3, 4], days: 1, diff: 1,
     mix: { battle: 3, smith: 1 },
     reward: { kuizhi: 2000, xp: 20 }, supply: { water: 1500, items: { food_can: 2 } } },
-  { kind: "bounty", name: "悬赏", goal: "在{region}找到并击败悬赏目标", nodes: [2, 3], days: 1, diff: 1, elite: true,
+  { kind: "bounty", name: "悬赏", goal: "在{region}找到并击败悬赏目标", nodes: [2, 3], days: 1, diff: 1, elite: true, hunt: true,
     mix: { battle: 3, shop: 1 },
     reward: { kuizhi: 3500, xp: 30 }, supply: { water: 1000, items: { food_liquid: 2 } } }
 ];
@@ -397,6 +397,18 @@ const ROGUE_PARTS = {
     bounty: { chance: 0.75, grades: { C: 1, B: 1 } },
     main:   { chance: 1, grades: { C: 1, B: 2 } }
   }
+};
+
+/* 悬赏任务（rogue.js · huntNext）：路线不预先给出，一站一站往前走。
+ *   线索检定 → 其他任意节点 → 线索检定 → …；检定成功 need 次就找到目标；失败 failMax 次也会直接找到目标。
+ *   检定失败（或绕过去）之后，下一个线索检定换一个不同的熟练项。
+ *   找到后下一站是精英战：目标是本区域随机一个精英单位，血量和 atk ×hpMul / atkMul，名字前加【目标】，多占 extraTokens 枚代币。
+ *   打赢目标完成任务；从目标那一战撤退 = 目标逃走，任务失败。
+ *   other：检定之间那一站的抽取权重（休息点整个任务最多一次） */
+const ROGUE_BOUNTY = {
+  need: 3, failMax: 5,
+  hpMul: 1.5, atkMul: 1.5, extraTokens: 1,
+  other: { battle: 3, shop: 1, smith: 1, clinic: 1, rest: 1 }
 };
 
 /* 护送任务（escort.js）：护送对象一半是货车、一半是人物；人物名字从这里抽 */
