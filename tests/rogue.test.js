@@ -154,14 +154,15 @@ test("商店：花奎支买水和食物", () => {
   R.acceptTask(run, 0);
   run.task.nodes[run.task.index] = { type: "shop", done: false };
   const before = R.supplies();
-  R.buy(run, "water_1000", 2);
-  R.buy(run, "food_can", 1);
+  // 每家都有的只有最便宜的水和食物（其余的随机进货）
+  R.buy(run, "water_500", 2);
+  R.buy(run, "food_liquid", 1);
   const after = R.supplies();
-  assert.equal(after.water, before.water + 2000);
-  assert.equal(after.food.food_can, before.food.food_can + 1);
-  assert.equal(after.kuizhi, before.kuizhi - 2500);
+  assert.equal(after.water, before.water + 1000);
+  assert.equal(after.food.food_liquid, before.food.food_liquid + 1);
+  assert.equal(after.kuizhi, before.kuizhi - 1500);
   c.S.state.kuizhi = 0;
-  assert.throws(() => R.buy(run, "food_can", 1), /奎支不够/);
+  assert.throws(() => R.buy(run, "food_liquid", 1), /奎支不够/);
 });
 
 test("工匠：花钱升级武器（材料按物品表折价），绯秋两把刀分开升", () => {
@@ -182,9 +183,9 @@ test("任务之间的休整可以买东西；任务里的战斗节点不行", ()
   const { run, R } = fresh(["kolt", "helu"], "E1");
   R.acceptTask(run, "main");
   while (!R.battleSpec(run)) { run.task.index++; }
-  assert.throws(() => R.buy(run, "food_can", 1), /没有商店/);
+  assert.throws(() => R.buy(run, "food_liquid", 1), /没有商店/);
   run.task = null; run.stage = "camp";
-  R.buy(run, "food_can", 1);
+  R.buy(run, "food_liquid", 1);
 });
 
 test("报酬与委托方补给按人数给；奎支报酬随幕数上涨", () => {

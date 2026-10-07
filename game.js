@@ -3047,6 +3047,7 @@
 
   /* ---------- 休整 ---------- */
   G.restFood = G.restFood || {};
+  G.restSleep = G.restSleep || {};
   function renderRestSheet() {
     const t = typeof exhaustTier === "function" ? exhaustTier() : 0;
     $("g-rest-time").innerHTML = `第 <b>${LEDGER.day}</b> 天 <b>${clockText(LEDGER.clock == null ? 480 : LEDGER.clock)}</b> · 距上次长休 <b>${durationText(LEDGER.hours || 0)}</b> · ` +
@@ -3080,10 +3081,17 @@
       fsel.value = G.restFood[h.kit] || (typeof defaultFoodFor === "function" ? defaultFoodFor() : foods[0]);
       fsel.onchange = () => { G.restFood[h.kit] = fsel.value; renderRestSheet(); };
       fsel.disabled = h.dead;
+      const ssel = document.createElement("select");
+      const sleepOpt = (v, t) => { const o = document.createElement("option"); o.value = v; o.textContent = t; ssel.appendChild(o); };
+      sleepOpt("", "不用睡眠道具");
+      sleepItemIds().forEach(id => sleepOpt(id, `睡 ${ITEM_CATALOG[id].name}（每小时坚毅 +${ITEM_CATALOG[id].sleep} · 有 ${bagCount(id)}）`));
+      ssel.value = h.dead ? "" : sleepFor(currentRestPlan(), h.kit);
+      ssel.onchange = () => { G.restSleep[h.kit] = ssel.value; renderRestSheet(); };
+      ssel.disabled = h.dead;
       const sr = el("button", "g-btn", `短休（剩 ${shortRestLeft(h)}）`);
       sr.disabled = inFight || h.dead || shortRestLeft(h) <= 0;
       sr.onclick = () => { panelCommit({ action: "shortRest", kits: [h.kit] }); renderRestSheet(); };
-      act.append(fsel, sr);
+      act.append(fsel, ssel, sr);
       row.appendChild(act);
       box.appendChild(row);
     });
@@ -3100,13 +3108,14 @@
     }
     const plan = currentRestPlan();
     const need = longRestNeeds(plan);
-    const bags = Math.min(bagCount("sleepbag"), partyHeroes().filter(h => !h.dead).length);
     const foodTxt = Object.keys(need.food).map(fid =>
       `${ITEM_CATALOG[fid].name} <b class="${bagCount(fid) < need.food[fid] ? "bad" : ""}">${need.food[fid]}</b>/${bagCount(fid)}`
     ).join(" · ");
     $("g-long-need").innerHTML =
       `水 <b class="${ledgerWater() < need.water ? "bad" : ""}">${need.water}</b>/${ledgerWater()} ml · ${foodTxt}` +
-      (bags ? ` · 睡袋 ${bags} 个` : "");
+      Object.keys(need.sleep).map(sid =>
+        ` · ${ITEM_CATALOG[sid].name} <b class="${bagCount(sid) < need.sleep[sid] ? "bad" : ""}">${need.sleep[sid]}</b>/${bagCount(sid)}`).join("") +
+      (need.ok ? "" : `<br><span class="bad">不够：${esc(need.lack.join("，"))}</span>`);
     const force = $("g-long-force").checked;
     $("g-long-go").disabled = inFight || (!need.ok && !force);
     const foodN = Object.keys(need.food).reduce((a, fid) => a + (Number(need.food[fid]) || 0), 0);
@@ -3115,7 +3124,8 @@
   function currentRestPlan() {
     const food = {};
     partyHeroes().forEach(h => { food[h.kit] = G.restFood[h.kit] || defaultFoodFor(); });
-    return { hours: Number($("g-long-hours").value) || 8, food, force: $("g-long-force").checked };
+    const hsel = $("g-long-hours");
+    return { hours: Number(hsel && hsel.value) || 8, food, sleep: Object.assign({}, G.restSleep), force: !!($("g-long-force") && $("g-long-force").checked) };
   }
 
   function renderSaveSheet() {

@@ -780,6 +780,7 @@ const Rogue = (function () {
       });
     }
     const ambush = !!run.ambush && !boss;
+    const ambushPlan = ambush ? run.ambush.plan || null : null;
     if (ambush && outcome === "win") {
       // 遭遇战胜利：每人额外 50 × 敌人等级 经验
       const lv = enemyLevel(run, run.task.diff);
@@ -814,7 +815,9 @@ const Rogue = (function () {
       }
       if (outcome === "win") {
         notes.push("打退了偷袭的敌人，总算可以睡下了。");
-        doLongRest(run, notes);
+        // 偷袭前选好的吃什么、睡什么；打完补给变了不够就按默认再分一次
+        const plan = ambushPlan;
+        doLongRest(run, notes, null, plan && canLongRest(run, plan) ? plan : null);
       } else {
         notes.push("撤退：没能在这里休息，连夜离开。");
         passHours(run, NODE.battle.hours, notes);
@@ -1046,10 +1049,19 @@ const Rogue = (function () {
   }
 
   /* ---------- 休息（手册第五章） ---------- */
-  function restPlan(run) {
-    return withParty(run, () => longRestNeeds({})).out;
+  /** 长休计划只留 food / sleep 两张表（每个角色吃什么、用什么睡眠道具），不写就按默认 */
+  function restChoice(plan) {
+    const pick = (o) => (o && typeof o === "object" ? Object.assign({}, o) : undefined);
+    return { food: pick(plan && plan.food), sleep: pick(plan && plan.sleep) };
   }
-  function canLongRest(run) { return restPlan(run).ok; }
+  function restPlan(run, plan) {
+    return withParty(run, () => longRestNeeds(restChoice(plan))).out;
+  }
+  /** 长休界面：每个角色的需求、选择和可选的食物 / 睡眠道具 */
+  function restOptions(run, plan) {
+    return withParty(run, () => longRestOptions(restChoice(plan))).out;
+  }
+  function canLongRest(run, plan) { return restPlan(run, plan).ok; }
   /** 角色资料面板（skill-text.js）：把队伍摆上场算一份，不改动本局 */
   function sheetData(run) {
     if (typeof SkillText === "undefined") return [];
@@ -1060,8 +1072,8 @@ const Rogue = (function () {
     if (typeof SkillText === "undefined" || !SkillText.armoryData) return [];
     return withParty(run, () => SkillText.armoryData()).out;
   }
-  function doLongRest(run, notes, watch) {
-    const r = withParty(run, () => ledgerLongRest({ hours: C.hours.longRest, watch: watch || null }, notes));
+  function doLongRest(run, notes, watch, plan) {
+    const r = withParty(run, () => ledgerLongRest(Object.assign(restChoice(plan), { hours: C.hours.longRest, watch: watch || null }), notes));
     const e = run.task && run.task.escort;
     if (e && !e.lost && e.kind === "vip" && e.cur != null) { e.cur = null; notes.push(`${e.name || "委托人"}也休息好了，血量回满。`); }
     notes.push(...r.notes);
@@ -1123,7 +1135,9 @@ const Rogue = (function () {
     if (run.ambush) throw new Error("正在遭遇战中");
     const notes = [];
     if (mode === "long") {
-      if (!canLongRest(run)) throw new Error("补给不够长休");
+      const plan = restChoice(opt);
+      const need = restPlan(run, plan);
+      if (!need.ok) throw new Error("补给不够长休：" + need.lack.join("，"));
       const watch = (opt && opt.watch) || null;
       if (watch && !watchOptions(run).some(w => w.kit === watch)) throw new Error("守夜的人不在队伍里");
       const chance = ambushChance(run);
@@ -1131,14 +1145,14 @@ const Rogue = (function () {
       if (hit) {
         // 恢复之前就被偷袭：先打，赢了再长休
         run.ambushChance = AMB.base;
-        run.ambush = { chance };
+        run.ambush = { chance, plan };
         notes.push(`长休时被偷袭！（这次的概率 ${Math.round(chance * 100)}%）还没来得及恢复，敌人就摸了上来。`);
         return logAll(run, notes);
       }
       run.ambushChance = Math.min(1, chance + AMB.step);
       notes.push(watch ? "有人守夜，这一夜平安无事。" : "这一夜平安无事。");
       notes.push(`下次长休被偷袭的概率 ${Math.round(run.ambushChance * 100)}%。`);
-      doLongRest(run, notes, watch);
+      doLongRest(run, notes, watch, plan);
     } else if (mode === "leave") {
       // 不休息直接走：拿一笔奎支，不花时间
       const pay = Number(C.restSkipKuizhi) || 0;
@@ -1609,10 +1623,11 @@ const Rogue = (function () {
   }
 
   /** 休整一次：补给够就长休，不够只能硬撑。之后回任务板、进首领战，或者主线过期 → 结束 */
-  function camp(run) {
+  function camp(run, plan) {
     if (run.stage !== "camp") throw new Error("现在不是休整的时候");
     const notes = [];
-    if (canLongRest(run)) doLongRest(run, notes);
+    plan = restChoice(plan);
+    if (canLongRest(run, plan)) doLongRest(run, notes, null, plan);
     else {
       notes.push("补给不足，无法长休，只能硬撑着过夜。");
       passHours(run, C.hours.longRest, notes);
@@ -1716,7 +1731,7 @@ const Rogue = (function () {
     battleSpec, applyPartyToField, finishBattle,
     checkInfo, checkChance, checkOdds, attemptCheck, skipCheck, heroProfs,
     role2Options, soloBattleInfo,
-    restPlan, canLongRest, sheetData, armoryData, lowHpWarning, escortInfo, partOffers, buyPart, sellPart, canSellParts, partStock, partSellPrice, partInstallCost, installPart, removePart, restAtNode, leaveNode, canShortRestBefore, shortRestBeforeNode,
+    restPlan, restOptions, canLongRest, sheetData, armoryData, lowHpWarning, escortInfo, partOffers, buyPart, sellPart, canSellParts, partStock, partSellPrice, partInstallCost, installPart, removePart, restAtNode, leaveNode, canShortRestBefore, shortRestBeforeNode,
     ambushChance, watchOptions,
     buy, canShop, shopItemName, shopStock, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
     presentSmiths, smithInfo, claimBlueprint, installBlueprint, blueprintById, weaponModsOf,

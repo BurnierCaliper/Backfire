@@ -4,13 +4,13 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const H = require("./headless");
 
-test("商店：水和食物一定有，其余商品每家随机 8 种；同一家看几次都一样；没进货的买不到", () => {
+test("商店：最便宜的水和食物一定有，其余商品每家随机 8 种；同一家看几次都一样；没进货的买不到", () => {
   const c = H.load(); const R = c.Rogue;
   const run = R.newRun({ party: ["kolt", "helu"], seed: "SHOP" });
   run.stage = "camp";
   const a = R.shopStock(run).map(r => r.key);
   const always = c.S.ROGUE_SHOP.filter(r => r.always).map(r => r.key);
-  assert.equal(always.slice().sort().join(), ["food_can", "food_gourmet", "food_liquid", "food_organic", "water_1000", "water_500", "water_5000"].join());
+  assert.equal(always.slice().sort().join(), ["food_liquid", "water_500"].join());
   always.forEach(k => assert.ok(a.includes(k), k));
   assert.equal(a.length, always.length + 8);
   assert.equal(R.shopStock(run).map(r => r.key).join(), a.join(), "同一家店看几次都一样");
@@ -20,6 +20,10 @@ test("商店：水和食物一定有，其余商品每家随机 8 种；同一�
   const seen = new Set([a.join()]);
   for (let i = 0; i < 6; i++) { run.taskNo += 1; seen.add(R.shopStock(run).map(r => r.key).join()); }
   assert.ok(seen.size > 1, "换一家店进货会变");
+  // 高级的水和食物进了随机清单：有的店有、有的店没有
+  const has = { food_gourmet: 0, water_5000: 0 };
+  for (let i = 0; i < 30; i++) { run.taskNo += 1; const keys = R.shopStock(run).map(r => r.key); Object.keys(has).forEach(k => { if (keys.includes(k)) has[k] += 1; }); }
+  Object.keys(has).forEach(k => assert.ok(has[k] > 0 && has[k] < 30, `${k}：${has[k]}/30`));
 });
 
 function field() {

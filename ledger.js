@@ -418,17 +418,40 @@ function ledgerShortRest(kits, notes) {
 
 /* ===== 长休 ===== */
 
-/** 长休计划：plan = { hours, food: { kit: foodId }, force } */
+/** 睡眠道具（物品表里带 sleep 的，例如睡袋）：不消耗，一人一个，长休每小时坚毅恢复 +sleep */
+function sleepItemIds() { return Object.keys(ITEM_CATALOG).filter(id => Number(ITEM_CATALOG[id].sleep) > 0); }
+/** 没有指定时的睡眠道具分配：按队伍顺序，有几个睡袋给前几个人 */
+function defaultSleepPlan() {
+  const out = {};
+  const left = {};
+  sleepItemIds().forEach(id => { left[id] = bagCount(id); });
+  partyHeroes().filter(h => !h.dead).forEach(h => {
+    const id = sleepItemIds().find(x => left[x] > 0);
+    out[h.kit] = id || "";
+    if (id) left[id] -= 1;
+  });
+  return out;
+}
+/** 这个角色这次长休用哪个睡眠道具（"" = 不用） */
+function sleepFor(plan, kit) {
+  const s = plan && plan.sleep && Object.prototype.hasOwnProperty.call(plan.sleep, kit) ? plan.sleep[kit] : defaultSleepPlan()[kit];
+  return s && ITEM_CATALOG[s] && Number(ITEM_CATALOG[s].sleep) > 0 ? s : "";
+}
+
+/** 长休计划：plan = { hours, food: { kit: foodId }, sleep: { kit: 睡眠道具 id 或 "" }, force }
+ *  每个角色单独选吃哪种食物（这个角色要吃的几份都吃这一种）和用哪个睡眠道具（不写就按默认分配） */
 function longRestNeeds(plan) {
   plan = plan || {};
   const heroes = partyHeroes().filter(h => !h.dead);
   let water = 0;
-  const food = {};
+  const food = {}, sleep = {};
   heroes.forEach(h => {
     const c = heroRestCost(h);
     water += c.water;
     const fid = (plan.food && plan.food[h.kit]) || defaultFoodFor();
     food[fid] = (food[fid] || 0) + c.food;
+    const sid = sleepFor(plan, h.kit);
+    if (sid) sleep[sid] = (sleep[sid] || 0) + 1;
   });
   const lack = [];
   if (ledgerWater() < water) lack.push(`水差 ${water - ledgerWater()} ml`);
@@ -436,7 +459,25 @@ function longRestNeeds(plan) {
     const have = bagCount(fid);
     if (have < food[fid]) lack.push(`${(ITEM_CATALOG[fid] || {}).name || fid} 差 ${food[fid] - have} 份`);
   });
-  return { water, food, lack, ok: lack.length === 0 };
+  Object.keys(sleep).forEach(sid => {
+    const have = bagCount(sid);
+    if (have < sleep[sid]) lack.push(`${(ITEM_CATALOG[sid] || {}).name || sid} 只有 ${have} 个，分给了 ${sleep[sid]} 个人`);
+  });
+  return { water, food, sleep, lack, ok: lack.length === 0 };
+}
+/** 长休界面用：每个角色要多少、现在选了什么，以及能选的食物 / 睡眠道具（带库存）。plan 同 longRestNeeds */
+function longRestOptions(plan) {
+  plan = plan || {};
+  const heroes = partyHeroes().filter(h => !h.dead).map(h => {
+    const c = heroRestCost(h);
+    const fid = (plan.food && plan.food[h.kit]) || defaultFoodFor();
+    return { kit: h.kit, name: h.name, water: c.water, food: c.food, foodId: fid, sleepId: sleepFor(plan, h.kit) };
+  });
+  const foods = FOOD_ORDER.filter(id => ITEM_CATALOG[id]).map(id => ({ id, name: ITEM_CATALOG[id].name, have: bagCount(id), shp: Number(ITEM_CATALOG[id].shp) || 0 }));
+  const sleeps = sleepItemIds().map(id => ({ id, name: ITEM_CATALOG[id].name, have: bagCount(id), bonus: Number(ITEM_CATALOG[id].sleep) || 0 }));
+  const food = {}, sleep = {};
+  heroes.forEach(h => { food[h.kit] = h.foodId; sleep[h.kit] = h.sleepId; });
+  return { heroes, foods, sleeps, water: ledgerWater(), plan: { food, sleep }, need: longRestNeeds(Object.assign({}, plan, { food, sleep })) };
 }
 /** 默认吃最便宜的、背包里有的食物 */
 function defaultFoodFor() {
@@ -471,7 +512,6 @@ function ledgerLongRest(plan, notes) {
   // 守夜：选一名角色或武器人整夜放哨。他不吃长休的恢复，也不刷新短休次数和「长休一次」的技能
   const watch = plan.watch || null;
   if (watch) notes.push(`${unitNameOf(watch)} 守夜：这次长休不恢复，短休次数和「长休一次」的技能也不刷新。`);
-  let bags = bagCount("sleepbag");
   partyHeroes().filter(h => !h.dead).forEach(h => {
     if (h.kit === watch) { (h.linkedKits || []).forEach(k => { if (k !== watch) restoreDurability(k); }); return; }
     (h.layers || []).forEach(l => { l.current = l.max; });
@@ -480,17 +520,18 @@ function ledgerLongRest(plan, notes) {
     h.stunned = false;
     const fid = (plan.food && plan.food[h.kit]) || defaultFoodFor();
     const foodBonus = ((ITEM_CATALOG[fid] || {}).shp || 0) * heroRestCost(h).food;
-    const hasBag = bags > 0;
-    if (hasBag) bags--;
-    const perHour = 2 + (hasBag ? 1 : 0);
+    const sid = sleepFor(plan, h.kit);
+    const hasBag = !!sid;
+    const perHour = 2 + (hasBag ? Number(ITEM_CATALOG[sid].sleep) || 0 : 0);
     const gain = hours * perHour + foodBonus;
     const before = Number(h.shp) || 0;
     h.shp = Math.min(Number(h.shpMax) || 0, before + gain);
-    const why = `${hasBag ? "睡袋" : ""}${hasBag && foodBonus ? "、" : ""}${foodBonus ? "好一点的食物" : ""}`;
+    const bagName = hasBag ? ITEM_CATALOG[sid].name : "";
+    const why = `${bagName}${hasBag && foodBonus ? "、" : ""}${foodBonus ? "好一点的食物" : ""}`;
     notes.push(typeof shpHidden === "function" && shpHidden()
       ? `${h.name} 血量回满，坚毅生命慢慢恢复${why ? `（${why}有帮助）` : ""}。`
       : `${h.name} 血量回满，坚毅 ${before} → ${h.shp}` +
-        `（${hours} 小时 × ${perHour}${hasBag ? "，含睡袋" : ""}${foodBonus ? `，食物 +${foodBonus}` : ""}）。`);
+        `（${hours} 小时 × ${perHour}${hasBag ? `，含${bagName}` : ""}${foodBonus ? `，食物 +${foodBonus}` : ""}）。`);
     (h.linkedKits || []).forEach(k => { if (k !== watch) restoreDurability(k); });
   });
   const keepW = watch && LEDGER.weapons && LEDGER.weapons[watch];

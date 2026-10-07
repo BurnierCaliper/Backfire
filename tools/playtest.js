@@ -222,7 +222,7 @@ function shopping() {
   // 两次长休的水和食物
   const waterNeed = (need.water || 3000) * 2;
   let guard = 0;
-  while (R.supplies().water < waterNeed && kz() > 4000 + 1000 && guard++ < 10) tryDo("买水", () => R.buy(run, "water_5000", 1));
+  while (R.supplies().water < waterNeed && kz() > 4000 + 1000 && guard++ < 10) tryDo("买水", () => R.buy(run, ["water_5000", "water_1000"].find(k => R.shopStock(run).some(r => r.key === k)) || "water_500", 1));
   const foodNeed = Object.values(need.food || {}).reduce((a, b) => a + b, 0) * 2 || 8;
   guard = 0;
   while (R.supplies().foodTotal < foodNeed && kz() > 300 + 1000 && guard++ < 20) tryDo("买食物", () => R.buy(run, "food_liquid", 1));

@@ -1984,3 +1984,16 @@ body:not([data-screen="battle"]) .g-rank { display: none !important; }
 .g-field.board-grid.rows2 .g-zone::before, .g-field.board-grid.rows3 .g-zone::before { font-size: 72px; }
 .g-field.board-grid.rows3 .g-zone { padding: 20px 6px 6px; }
 .g-gap.horiz { writing-mode: horizontal-tb; letter-spacing: .3em; }
+/* 单局长休安排：每个角色选食物和睡眠道具 */
+.r-restplan { margin: 8px 0 10px; }
+.r-restplan table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.r-restplan th, .r-restplan td { padding: 4px 6px; text-align: left; border-bottom: 1px solid var(--line, #444); vertical-align: middle; }
+.r-restplan th { font-weight: 600; opacity: .75; }
+.r-restplan select { font: inherit; padding: 3px 6px; border-radius: 6px; border: 1px solid var(--line, #444); background: var(--panel, transparent); color: inherit; max-width: 100%; }
+.r-bad { color: var(--foe); }
+@media (max-width: 560px) {
+  .r-restplan table, .r-restplan tbody, .r-restplan tr, .r-restplan td { display: block; width: 100%; }
+  .r-restplan tr:first-child { display: none; }
+  .r-restplan tr { padding: 6px 0; border-bottom: 1px solid var(--line, #444); }
+  .r-restplan td { border: 0; padding: 2px 0; }
+}

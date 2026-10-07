@@ -15,7 +15,8 @@
 
   let run = null;          // 当前这一局
   let lastNotes = [];      // 上一步发生了什么（显示在记录栏）
-  let lastError = "";      // 上一步为什么没做成（显示在主面板顶上，免得按了像没反应）
+  let lastError = "";
+  let restSel = { food: {}, sleep: {} };   // 长休界面：每个角色选的食物 / 睡眠道具（没选的按默认）      // 上一步为什么没做成（显示在主面板顶上，免得按了像没反应）
 
   const save = () => { if (run && run.stage !== "over") dispatch({ type: "run.session", action: "save" }, { run }); };
   const query = (action, fields) => dispatch(Object.assign({ type: "run.query", action }, fields || {}), { run });
@@ -205,6 +206,32 @@
     const parts = ids.map(id => `${(ITEM_CATALOG[id] || {}).name || id} ${plan.food[id]} 份`);
     return ids.length > 1 ? `${parts.join("、")}（共 ${total} 份食物）` : (parts[0] || "0 份食物");
   }
+  /** 长休界面：每个角色单独选吃哪种食物、用哪个睡眠道具（例如睡袋），下面汇总消耗和缺口 */
+  function restPlanner() {
+    const o = query("restOptions", restSel);
+    if (!o.heroes.length) return "";
+    const need = o.need;
+    const rows = o.heroes.map(h => {
+      const foods = o.foods.map(f => `<option value="${esc(f.id)}" ${f.id === h.foodId ? "selected" : ""}>${esc(f.name)}${f.shp ? `（坚毅 +${f.shp}/份）` : ""} · 有 ${f.have}</option>`).join("");
+      const sleeps = `<option value="">不用</option>` + o.sleeps.map(x => `<option value="${esc(x.id)}" ${x.id === h.sleepId ? "selected" : ""}>${esc(x.name)}（每小时坚毅 +${x.bonus}） · 有 ${x.have}</option>`).join("");
+      return `<tr><td><b>${esc(h.name)}</b></td><td>${h.water} ml · ${h.food} 份</td>
+        <td><select data-rest-food="${esc(h.kit)}">${foods}</select></td>
+        <td><select data-rest-sleep="${esc(h.kit)}">${sleeps}</select></td></tr>`;
+    }).join("");
+    const bad = (a, b) => (a > b ? "r-bad" : "");
+    const foodSum = Object.keys(need.food).map(id => {
+      const f = o.foods.find(x => x.id === id) || { name: id, have: 0 };
+      return `${esc(f.name)} <b class="${bad(need.food[id], f.have)}">${need.food[id]}</b>/${f.have}`;
+    }).join(" · ");
+    const sleepSum = Object.keys(need.sleep).map(id => {
+      const x = o.sleeps.find(y => y.id === id) || { name: id, have: 0 };
+      return `${esc(x.name)} <b class="${bad(need.sleep[id], x.have)}">${need.sleep[id]}</b>/${x.have}`;
+    }).join(" · ");
+    return `<div class="r-restplan"><h3 class="r-sub">长休安排</h3>
+      <table><tr><th>角色</th><th>需要</th><th>吃</th><th>睡眠道具</th></tr>${rows}</table>
+      <p class="r-hint">消耗：水 <b class="${bad(need.water, o.water)}">${need.water}</b>/${o.water} ml · ${foodSum}${sleepSum ? ` · ${sleepSum}（不消耗）` : ""}
+        ${need.ok ? "" : `<br><span class="r-bad">不够：${esc(need.lack.join("，"))}</span>`}</p></div>`;
+  }
   const NODE_PANELS = {
     battle: () => `<p>前方有敌人拦路。</p>${brokenWarn()}${fightBtn("迎战")}`,
     elite: () => `<p>前方有棘手的敌人。</p>${brokenWarn()}${fightBtn("迎战")}`,
@@ -215,7 +242,7 @@
             胜利后每人额外 ${C.ambush.xpPerLevel} × 敌人等级 经验，然后照常长休。撤退则这次不休息、直接离开。</p>
           ${brokenWarn()}${fightBtn("迎击")}`;
       }
-      const plan = query("restPlan");
+      const plan = query("restPlan", restSel);
       const food = restFoodText(plan);
       const chance = Math.round(Rogue.ambushChance(run) * 100);
       const watchOpts = query("watchOptions").map(w =>
@@ -223,6 +250,7 @@
       return `<p>找到一处能歇脚的地方。</p>
         <p class="r-hint">长休时有 <b id="r-ambush-chance">${chance}%</b> 的概率被偷袭（遭遇战）。没被偷袭，下次 +${Math.round(C.ambush.step * 100)}%；被偷袭后回到 ${Math.round(C.ambush.base * 100)}%。
           安排一人守夜就一定不会被偷袭，但守夜的人这次长休不恢复，短休次数和「长休一次」的技能也不刷新。</p>
+        ${restPlanner()}
         <label class="r-watch">守夜：<select id="r-watch"><option value="">不安排守夜</option>${watchOpts}</select></label>
         <div class="r-choices">
           <button class="g-btn r-main" id="r-long" ${plan.ok ? "" : "disabled"}>长休 ${C.hours.longRest} 小时
@@ -501,7 +529,7 @@
       case "board": return renderBoard();
       case "task": return renderTask();
       case "camp": {
-        const plan = query("restPlan");
+        const plan = query("restPlan", restSel);
         const shopping = C.campShop ? `<p class="r-hint">回到城里，出发前可以补货。手里有 ${Rogue.supplies().kuizhi} 奎支。</p>${shopList()}${partRows(null)}${repairRows()}` : "";
         const clinic = C.campClinic ? `<h3 class="r-sub">诊所</h3>${clinicPanel()}` : "";
         const food = restFoodText(plan);
@@ -511,6 +539,7 @@
             : `长休需要 ${plan.water} ml 水、${esc(food)}。补给不足（` + esc(plan.lack.join("，")) + "），只能硬撑着过夜：不回血，力竭继续累积。"}</p>
           ${shopping}
           ${clinic}
+          ${restPlanner()}
           <button class="g-btn r-main" id="r-camp">休整<small>${plan.ok ? `消耗 ${plan.water} ml 水、${esc(food)}` : "补给不足：不回血"}</small></button>`;
       }
       case "boss":
@@ -648,7 +677,7 @@
     on("r-fight", fight);
     on("r-long", () => {
       const w = $("r-watch");
-      act({ action: "restAtNode", mode: "long", watch: (w && w.value) || null });
+      act(Object.assign({ action: "restAtNode", mode: "long", watch: (w && w.value) || null }, restSel));
     });
     on("r-short", () => act({ action: "restAtNode", mode: "short" }));
     on("r-rest-skip", () => act({ action: "restAtNode", mode: "leave" }));
@@ -656,7 +685,9 @@
     on("r-leave", () => act({ action: "leaveNode" }));
     body.querySelectorAll("[data-check]").forEach(b => { b.onclick = () => doCheck(b.dataset.check); });
     on("r-check-skip", () => act({ action: "skipCheck" }));
-    on("r-camp", () => act({ action: "camp" }));
+    on("r-camp", () => act(Object.assign({ action: "camp" }, restSel)));
+    body.querySelectorAll("[data-rest-food]").forEach(el => { el.onchange = () => { restSel.food[el.dataset.restFood] = el.value; render(); }; });
+    body.querySelectorAll("[data-rest-sleep]").forEach(el => { el.onchange = () => { restSel.sleep[el.dataset.restSleep] = el.value; render(); }; });
     on("r-next", () => act({ action: "nextAct" }));
     on("r-win", () => act({ action: "afterVictory", goOn: false }));
     on("r-more", () => act({ action: "afterVictory", goOn: true }));
