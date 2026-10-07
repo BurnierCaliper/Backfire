@@ -65,10 +65,11 @@
     enumField(r, out.resources, "mood", ["gentle", "cruel"]);
     enumField(r, out.resources, "bit", ["acid", "drill"]);
     identifiers(r, out.resources, ["bondId", "piercedId"]);
-    // 首领机制（死刑 / 分担）是公开的预告：只给标记目标、落下回合和时机，不给伤害数值
-    const mech = arr(get(unit, "mechanics")).slice(0, 8).filter(m => obj(m) && ["execution", "share"].includes(get(m, "type"))).map(m => {
+    // 首领机制（死刑 / 分担 / 远离）是公开的预告：只给标记目标、落下回合和时机，不给伤害数值
+    const mech = arr(get(unit, "mechanics")).slice(0, 8).filter(m => obj(m) && ["execution", "share", "spread"].includes(get(m, "type"))).map(m => {
       const dto = { type: get(m, "type") }; copyFields(m, dto, ["name"], [], []); enumField(m, dto, "phase", ["enemy", "player"]);
       const st = get(m, "st"); dto.st = copyFields(st, {}, [], ["due"], ["done"]); identifiers(st, dto.st, ["targetId"]);
+      const ids = arr(get(st, "targetIds")).slice(0, 20).map(id).filter(Boolean); if (ids.length) dto.st.targetIds = ids;
       return dto;
     });
     if (mech.length) out.mechanics = mech;

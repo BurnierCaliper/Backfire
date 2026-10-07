@@ -681,10 +681,12 @@
       ? `<span class="chip">高能${s.highEnergy > 0 ? " " + s.highEnergy : ""}</span>` : "";
     // 首领机制（死刑 / 分担）的标记：被标记的人身上一个倒计时，首领身上写着标了谁
     const when = (x) => x.left > 0 ? `${x.left} 回合后` : `这回合${x.phase === "player" ? "我方" : "敌人"}回合开始时`;
-    const markTip = (x) => x.type === "share"
+    const markTip = (x) => x.type === "spread"
+      ? `${x.by} 的${x.name}：${when(x)}在这个人所在的区爆炸，${x.blast > 0 ? `每次对同区每个友方 ${x.blast}` : "每次波及同区每个友方"}，不能格挡。同一个区有几个标记就炸几次——现在这里有 ${x.stack} 个标记${x.stack > 1 ? `，每人会挨 ${x.stack} 次，快分开站` : "，没有和别人重叠"}。${x.delayed ? "（首领失衡，会推迟一回合）" : ""}`
+      : x.type === "share"
       ? `${x.by} 的${x.name}：${when(x)}落下${x.delayed ? "（首领失衡，会推迟一回合）" : ""}。${x.pool > 0 ? `伤害池 ${x.pool}，` : ""}由这个人所在区的所有友方平均分担，不能格挡——大家聚过来一起扛（现在同区 ${x.group} 人${x.pool > 0 ? `，每人约 ${Math.ceil(x.pool / Math.max(1, x.group))}` : ""}）。`
       : `${x.by} 的${x.name}：${when(x)}落下${x.delayed ? "（首领失衡，会推迟一回合）" : ""}。每一段都可以协助格挡。`;
-    const execChip = (s.marks || []).map(x => `<span class="chip mark-${x.type}" title="${esc(markTip(x))}">${esc(x.name)} ${x.left > 0 ? x.left : "!"}${x.type === "share" ? ` · ${x.group}人` : ""}</span>`).join("") +
+    const execChip = (s.marks || []).map(x => `<span class="chip mark-${x.type}" title="${esc(markTip(x))}">${esc(x.name)} ${x.left > 0 ? x.left : "!"}${x.type === "share" ? ` · ${x.group}人` : x.type === "spread" ? ` · ×${x.stack}` : ""}</span>`).join("") +
       (s.casts || []).map(x => `<span class="chip cast-${x.type}" title="${esc(`${x.name} → ${x.target || "（无目标）"}：${when(x)}落下`)}">${esc(x.name)}→${esc(x.target || "?")} ${x.left > 0 ? x.left : "!"}</span>`).join("");
     q(".u-status").innerHTML = execChip + highChip + (s.status
       ? s.status.split(" · ").filter(t => t && t !== "无状态" && !/^高能/.test(t)).map(t => `<span class="chip">${esc(t)}</span>`).join("")
@@ -697,7 +699,10 @@
     c.wrap.classList.toggle("stunned", s.stunned && !s.dead);
     const ex = (s.marks || []).filter(x => x.type === "execution"), sh = (s.marks || []).filter(x => x.type === "share");
     c.wrap.classList.toggle("doomed", ex.length > 0 && !s.dead);
+    const sp = (s.marks || []).filter(x => x.type === "spread");
     c.wrap.classList.toggle("shared", sh.length > 0 && !ex.length && !s.dead);
+    c.wrap.classList.toggle("spread", sp.length > 0 && !ex.length && !sh.length && !s.dead);
+    c.wrap.classList.toggle("spread-clash", sp.some(x => x.stack > 1) && !s.dead);
     c.wrap.classList.toggle("doom-now", (s.marks || []).some(x => x.left <= 0) && !s.dead);
     c.wrap.classList.toggle("dying", s.dying && !s.dead);
     c.wrap.classList.toggle("dead", s.dead && !s.isPlayer);
@@ -3501,6 +3506,39 @@
         mult: Math.max(0.5, Math.min(50, Number(g("mult").value) || 4))
       });
       if (g("off")) g("off").onclick = () => applyS(null);
+      // 首领机制·远离
+      const curP = (u.mechanics || []).find(m => m.type === "spread");
+      const pb = el("button", "g-btn" + (curP ? " on" : ""), curP ? "远离 ✓" : "远离…");
+      pb.title = "给这个敌人加上「远离」机制：标记我方全员，倒计时到了每人在自己的区爆炸一次，同区有几个标记就炸几次，每次每个人都挨";
+      row.insertBefore(pb, rm);
+      const pe = el("div", "exec-edit");
+      pe.hidden = true;
+      pe.innerHTML = `<label>落下<select data-x="phase"><option value="enemy">敌人回合开始</option><option value="player">我方回合开始</option></select></label>
+        <label>标记后<input data-x="turns" type="number" min="1" max="20" value="3"> 回合</label>
+        <label title="每一次爆炸对同区每个友方的伤害 = 这个倍率 × 这个敌人的 atk">每次爆炸<input data-x="mult" type="number" min="0.5" max="20" step="0.5" value="1"> × atk</label>
+        <label>落下后<select data-x="then"><option value="repeat">重新标记</option><option value="once">只放一次</option></select></label>
+        <button class="g-btn" data-x="go">${curP ? "改" : "加上"}</button>${curP ? '<button class="g-btn" data-x="off">去掉</button>' : ""}`;
+      elist.appendChild(pe);
+      const q2 = (k) => pe.querySelector(`[data-x="${k}"]`);
+      if (curP) {
+        q2("phase").value = curP.phase || "enemy"; q2("turns").value = curP.turns || 3;
+        q2("mult").value = (curP.blast && curP.blast.mult) || 1; q2("then").value = curP.then || "repeat";
+      }
+      pb.onclick = () => { pe.hidden = !pe.hidden; };
+      const applyP = (cfg) => {
+        let r;
+        try { r = dispatch({ type: "battle.panel", action: "setSpread", actor: u.id, cfg }); } catch (e) { flashHint(e.message); return; }
+        ((r && r.notes) || []).forEach(t => appendLog(t));
+        setView(snapAll(), false);
+        refreshAll();
+        renderFieldSheet();
+      };
+      q2("go").onclick = () => applyP({
+        phase: q2("phase").value, then: q2("then").value,
+        turns: Math.max(1, Math.min(20, Math.floor(Number(q2("turns").value) || 3))),
+        mult: Math.max(0.5, Math.min(20, Number(q2("mult").value) || 1))
+      });
+      if (q2("off")) q2("off").onclick = () => applyP(null);
     });
     const sel = $("g-enemy-sel");
     if (!sel.options.length) {

@@ -17,7 +17,12 @@
  *
  * ── 分担 share ──
  *   随机标记一名我方单位（黄框）；落下时以「他当时所在的区」为准，伤害池 pool 由这个区里所有还站着的友方单位
- *   平均分担（人越多每人挨得越少）；不能格挡。 */
+ *   平均分担（人越多每人挨得越少）；不能格挡。
+ *
+ * ── 远离 spread ──
+ *   标记我方全员（紫框）；落下时每个还站着的被标记者在自己当时所在的区爆炸一次，对这个区里所有还站着的友方单位
+ *   各造成 blast 伤害、不能格挡。同一个区有几个标记就炸几次，每个人每次都挨——要分开站。
+ *   被标记的人倒下了，他的标记就没了（不转给别人）。 */
 "use strict";
 
 const BOSS_MECH_DEFAULTS = {
@@ -46,13 +51,28 @@ const BOSS_MECH_DEFAULTS = {
     interval: null,
     times: 0,
     hook: null
+  },
+  spread: {
+    name: "远离",
+    phase: "enemy",
+    turns: 3,
+    firstTurn: 1,
+    pick: "all",           // 全员
+    blast: { mult: 1 },    // 每一次爆炸对同区每个友方的伤害：{ mult（× 首领 atk）, flat, atk }
+    element: null,         // 不写 = 首领的属性
+    baseBreak: 0,          // 每次爆炸每人另外挨几点击破
+    then: "repeat",
+    interval: null,
+    times: 0,
+    hook: null
   }
 };
 
 /** 选标记目标的规则（以后的首领可以加别的选法） */
 const BOSS_MECH_PICKS = {
   maxHp: (list) => list.slice().sort((a, b) => unitMaxHp(b) - unitMaxHp(a))[0] || null,
-  random: (list) => list.length ? list[Math.floor(Math.random() * list.length)] : null
+  random: (list) => list.length ? list[Math.floor(Math.random() * list.length)] : null,
+  all: (list) => list.slice()   // 多目标机制用：全员
 };
 /** 首领专属的后续（落下之后调用），按名字注册 */
 const BOSS_MECH_HOOKS = {};
@@ -97,8 +117,15 @@ function mechMark(boss, m, notes, why) {
   const c = mechConfig(m);
   const T = BOSS_MECH_TYPES[m.type];
   const pick = BOSS_MECH_PICKS[c.pick] || BOSS_MECH_PICKS[T.pick];
-  const t = pick(executionCandidates(), boss, m);
   m.st = m.st || {};
+  if (T.multi) {
+    const list = [].concat(pick(executionCandidates(), boss, m) || []);
+    m.st.targetIds = list.map(u => u.id);
+    m.st.targetId = null;
+    if (list.length && notes) notes.push(`${boss.name}「${c.name}」${why || "标记"}了 ${list.map(u => u.name).join("、")}${T.markNote ? T.markNote(list, boss, m) : ""}：${mechWhen(c, m.st.due)}。`);
+    return list[0] || null;
+  }
+  const t = pick(executionCandidates(), boss, m);
   m.st.targetId = t ? t.id : null;
   if (t && notes) notes.push(`${boss.name}「${c.name}」${why || "锁定"}了 ${t.name}${T.markNote ? T.markNote(t, boss, m) : ""}：${mechWhen(c, m.st.due)}。`);
   return t;
@@ -106,6 +133,12 @@ function mechMark(boss, m, notes, why) {
 function mechTarget(m) {
   const id = m && m.st && m.st.targetId;
   return id ? (state.units || []).find(u => u.id === id) || null : null;
+}
+function mechStanding(u) { return !!u && !u.dead && !u.dying && !u.hidden && !u._removed && !u.fused; }
+/** 多目标机制：还站着的被标记者 */
+function mechTargets(m) {
+  const ids = (m && m.st && m.st.targetIds) || [];
+  return ids.map(id => (state.units || []).find(u => u.id === id)).filter(mechStanding);
 }
 function markedMechs(boss) { return bossMechList(boss).filter(m => BOSS_MECH_TYPES[m.type]); }
 
@@ -128,6 +161,7 @@ function bossMechSync(notes) {
         mechMark(boss, m, notes);
         return;
       }
+      if (BOSS_MECH_TYPES[m.type].multi) return;   // 多目标：倒下的人标记就没了，不转给别人
       const t = mechTarget(m);
       if (!t || t.dead || t.dying || t.hidden || t._removed) {
         const old = t ? t.name : null;
@@ -171,18 +205,21 @@ function castBossMech(boss, m, notes) {
   bossMechSync(notes);
   m.st.casts = (Number(m.st.casts) || 0) + 1;
   m.st.uid = `${boss.id}:${m.type}:${m.st.casts}`;   // 这一次落下的编号（格挡队列里认它）
-  const t = mechTarget(m);
-  if (!t) notes.push(`${boss.name}「${c.name}」落空：没有能打的目标。`);
-  else BOSS_MECH_TYPES[m.type].cast(boss, m, c, t, notes);
+  const T = BOSS_MECH_TYPES[m.type];
+  const t = T.multi ? mechTargets(m) : mechTarget(m);
+  if (!t || (T.multi && !t.length)) notes.push(`${boss.name}「${c.name}」落空：没有能打的目标。`);
+  else T.cast(boss, m, c, t, notes);
   // 落下之后
   const limit = Number(c.times) || 0;
   if (c.then === "repeat" && (!limit || m.st.casts < limit)) {
     m.st.due = (Number(state.turnNo) || 1) + Math.max(1, Number(c.interval != null ? c.interval : c.turns) || 1);
     m.st.targetId = null;
-    mechMark(boss, m, notes, "重新锁定");
+    m.st.targetIds = null;
+    mechMark(boss, m, notes, T.multi ? "重新标记" : "重新锁定");
   } else {
     m.st.done = true;
     m.st.targetId = null;
+    m.st.targetIds = null;
   }
   if (c.hook && BOSS_MECH_HOOKS[c.hook]) BOSS_MECH_HOOKS[c.hook](boss, m, notes);
   return notes;
@@ -236,10 +273,40 @@ function castShare(boss, m, c, t, notes) {
   });
 }
 
-/** 标记类机制登记表：pick 默认选法、cast 落下时做什么、markNote 标记时补一句 */
+/* ---------- 远离 ---------- */
+/** 每一次爆炸对同区每个友方的伤害（× 首领现在的 atk） */
+function spreadBlast(boss, c) {
+  const b = c.blast || {};
+  return Math.max(0, Math.round((Number(b.mult) || 0) * mechAtk(boss, b) + (Number(b.flat) || 0)));
+}
+function castSpread(boss, m, c, marked, notes) {
+  const dmg = spreadBlast(boss, c);
+  const element = c.element || boss.element || "physical";
+  // 先按落下这一刻每个被标记者站的区定好爆炸点，再一个一个炸
+  const blasts = marked.map(u => ({ by: u, zone: Number(u.zone) }));
+  const perZone = {};
+  blasts.forEach(b => { perZone[b.zone] = (perZone[b.zone] || 0) + 1; });
+  notes.push(`【${c.name}】${boss.name} 引爆了 ${blasts.length} 个标记：` +
+    Object.keys(perZone).map(z => `${z} 区 ${perZone[z]} 次`).join("、") + `，每次对同区每个友方 ${dmg}（不能格挡）。`);
+  flushMechNotes(notes);
+  blasts.forEach((b, i) => {
+    if (typeof spawnPopup === "function") spawnPopup(b.by, { kind: "status", text: "爆炸！", element });
+    const group = (state.units || []).filter(u => u.isPlayer && mechStanding(u) && Number(u.zone) === b.zone);
+    group.forEach(u => {
+      const out = dealTo(boss, u, {
+        atk: 0, mult: 0, flat: dmg, hits: 1, element, baseBreak: Number(c.baseBreak) || 0,
+        flags: { action: true, locked: true, spread: true, mechId: m.st.uid, blockResolved: true, block: "none" }
+      });
+      if (out && out.res) appendLog(`${c.name} 第 ${i + 1}/${blasts.length} 次爆炸（${b.by.name}，${b.zone} 区）→ ${u.name}：${Math.floor(Number(out.res.total) || 0)} 伤害。`);
+    });
+  });
+}
+
+/** 标记类机制登记表：pick 默认选法、cast 落下时做什么、markNote 标记时补一句、multi 一次标记多人 */
 const BOSS_MECH_TYPES = {
   execution: { pick: "maxHp", cast: castExecution, markNote: (t) => `（血量上限 ${unitMaxHp(t)}）` },
-  share: { pick: "random", cast: castShare, markNote: (t, boss, m) => `（伤害池 ${sharePool(boss, mechConfig(m))}，到时同区的友方平均分担）` }
+  share: { pick: "random", cast: castShare, markNote: (t, boss, m) => `（伤害池 ${sharePool(boss, mechConfig(m))}，到时同区的友方平均分担）` },
+  spread: { pick: "all", multi: true, cast: castSpread, markNote: (list, boss, m) => `（到时每人在自己的区爆炸一次，每次对同区每个友方 ${spreadBlast(boss, mechConfig(m))}，要分开站）` }
 };
 
 /* ---------- 画面用 ---------- */
@@ -251,10 +318,14 @@ function bossMarksOn(u) {
   (state.units || []).forEach(boss => {
     if (boss.isPlayer || !mechBossAlive(boss)) return;
     markedMechs(boss).forEach(m => {
-      if (!m.st || m.st.done || m.st.targetId !== u.id) return;
+      if (!m.st || m.st.done) return;
+      const multi = BOSS_MECH_TYPES[m.type].multi;
+      if (multi ? !(m.st.targetIds || []).includes(u.id) || !mechStanding(u) : m.st.targetId !== u.id) return;
       const c = mechConfig(m);
       const mark = { type: m.type, name: c.name, left: Math.max(0, m.st.due - turn), phase: c.phase, by: boss.name, delayed: !!boss.stunned };
       if (m.type === "share") { mark.pool = sharePool(boss, c); mark.group = shareGroup(u).length; }
+      // 远离：这个人现在所在的区里有几个标记（= 到时这里炸几次，每次每人都挨）
+      if (multi) { mark.blast = spreadBlast(boss, c); mark.stack = mechTargets(m).filter(x => Number(x.zone) === Number(u.zone)).length; }
       out.push(mark);
     });
   });
@@ -262,14 +333,16 @@ function bossMarksOn(u) {
 }
 function executionMarksOn(u) { return bossMarksOn(u).filter(x => x.type === "execution"); }
 function shareMarksOn(u) { return bossMarksOn(u).filter(x => x.type === "share"); }
+function spreadMarksOn(u) { return bossMarksOn(u).filter(x => x.type === "spread"); }
 /** 首领身上：「死刑 → 某某 · 2 回合」「分担 → 某某 · 1 回合」 */
 function bossCastsBy(boss) {
   if (!boss || boss.isPlayer || !state.combatStarted) return [];
   const turn = Number(state.turnNo) || 1;
   return markedMechs(boss).filter(m => m.st && !m.st.done && m.st.due != null).map(m => {
     const c = mechConfig(m);
-    const t = mechTarget(m);
-    return { type: m.type, name: c.name, left: Math.max(0, m.st.due - turn), target: t ? t.name : "", phase: c.phase };
+    const multi = BOSS_MECH_TYPES[m.type].multi;
+    const t = multi ? null : mechTarget(m);
+    return { type: m.type, name: c.name, left: Math.max(0, m.st.due - turn), target: multi ? `全员（${mechTargets(m).length}）` : t ? t.name : "", phase: c.phase };
   });
 }
 function executionCastsBy(boss) { return bossCastsBy(boss); }
