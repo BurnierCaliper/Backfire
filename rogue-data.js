@@ -271,14 +271,16 @@ const ROGUE_MAIN_TASK = {
 };
 
 /* 商店。价格照手册「常见物价」。give：water 是毫升；item 是背包物品 id（ITEM_CATALOG / 补给物品）。 */
+/* 商店：always 的（水、食物）每家都有；其余商品每家随机进货 ROGUE_SHOP_RULES.randomCount 种 */
+const ROGUE_SHOP_RULES = { randomCount: 8 };
 const ROGUE_SHOP = [
-  { key: "water_500",  name: "瓶装水 500 ml",  price: 600,  give: { water: 500 } },
-  { key: "water_1000", name: "罐装水 1000 ml", price: 1000, give: { water: 1000 } },
-  { key: "water_5000", name: "桶装水 5000 ml", price: 4000, give: { water: 5000 } },
-  { key: "food_liquid",  price: 300,  give: { item: "food_liquid" } },
-  { key: "food_can",     price: 500,  give: { item: "food_can" } },
-  { key: "food_organic", price: 1000, give: { item: "food_organic" } },
-  { key: "food_gourmet", price: 2000, give: { item: "food_gourmet" } },
+  { key: "water_500",  name: "瓶装水 500 ml",  price: 600,  give: { water: 500 }, always: true },
+  { key: "water_1000", name: "罐装水 1000 ml", price: 1000, give: { water: 1000 }, always: true },
+  { key: "water_5000", name: "桶装水 5000 ml", price: 4000, give: { water: 5000 }, always: true },
+  { key: "food_liquid",  price: 300,  give: { item: "food_liquid" }, always: true },
+  { key: "food_can",     price: 500,  give: { item: "food_can" }, always: true },
+  { key: "food_organic", price: 1000, give: { item: "food_organic" }, always: true },
+  { key: "food_gourmet", price: 2000, give: { item: "food_gourmet" }, always: true },
   { key: "repair_kit",   price: 1000, give: { item: "repair_kit" } },
   { key: "sleepbag",     price: 800,  give: { item: "sleepbag" } },
   { key: "medkit",       price: 600,  give: { item: "medkit" } },

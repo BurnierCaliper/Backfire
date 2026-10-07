@@ -20,7 +20,10 @@ const SUPPLY_ITEMS = {
   food_can:     { name: "罐头食品", hint: "长休算 1 份食物 · 额外恢复 1 坚毅", food: true, shp: 1 },
   food_organic: { name: "有机食品", hint: "长休算 1 份食物 · 额外恢复 2 坚毅", food: true, shp: 2 },
   food_gourmet: { name: "美食",     hint: "长休算 1 份食物 · 额外恢复 5 坚毅", food: true, shp: 5 },
-  repair_kit:   { name: "维修工具包", hint: "修复 10 点武器耐久", repair: 10 },
+  // 维修工具包：一包 10 点维修量，修几点耐久就用掉几点，用不完的留在「开封的维修工具包」里（数量 = 剩下的点数）。
+  // 战斗中也能用（使用道具）：修手里或场上武器的耐久；对倒地的武器人用会把它修好重新站起来
+  repair_kit:   { name: "维修工具包", hint: "共 10 点维修量：修几点耐久用几点，可以分几次用完 · 战斗中也能用，能修好倒地的武器人", repair: 10, combat: true, target: "weapon" },
+  repair_kit_open: { name: "开封的维修工具包", hint: "数量 = 还剩几点维修量（先用这个，用完再开新的一包）", repairPts: true, combat: true, target: "weapon" },
   sleepbag:     { name: "睡袋",     hint: "长休时每小时坚毅恢复 +1（不消耗，一人一个）", sleep: 1 }
 };
 const FOOD_ORDER = ["food_liquid", "food_can", "food_organic", "food_gourmet"];
@@ -524,15 +527,38 @@ function ledgerRestoreAll(notes) {
 }
 
 /* ===== 维修与休整时用药 ===== */
+/* ===== 维修点数：维修工具包按点数用 ===== */
+const REPAIR_KIT_POINTS = 10;
+/** 背包里一共还有几点维修量（没开封的每包 10 点 + 开封那包剩下的） */
+function repairPoints() { return bagCount("repair_kit") * REPAIR_KIT_POINTS + bagCount("repair_kit_open"); }
+/** 用掉 n 点维修量：先用开封的，不够再开新的一包，剩下的留在开封那包里。返回实际用掉几点 */
+function spendRepairPoints(n) {
+  let left = Math.max(0, Math.min(Math.floor(Number(n) || 0), repairPoints()));
+  const used = left;
+  const open = Math.min(bagCount("repair_kit_open"), left);
+  if (open) { bagAdd("repair_kit_open", -open); left -= open; }
+  while (left > 0 && bagCount("repair_kit") > 0) {
+    bagAdd("repair_kit", -1);
+    const take = Math.min(REPAIR_KIT_POINTS, left);
+    left -= take;
+    if (REPAIR_KIT_POINTS - take > 0) bagAdd("repair_kit_open", REPAIR_KIT_POINTS - take);
+  }
+  return used;
+}
+function repairPointsText() {
+  const kits = bagCount("repair_kit"), open = bagCount("repair_kit_open");
+  return `维修量 ${repairPoints()} 点（${kits} 包没开封${open ? `，开封的还剩 ${open} 点` : ""}）`;
+}
+/** 修一把武器的耐久：缺几点修几点（维修量不够就修到用完为止） */
 function ledgerRepair(kit, notes) {
   notes = notes || [];
-  if (bagCount("repair_kit") < 1) { notes.push("没有维修工具包。"); return notes; }
+  if (repairPoints() < 1) { notes.push("没有维修工具包。"); return notes; }
   const before = weaponDur(kit);
   const max = weaponDurMax(kit);
   if (before >= max) { notes.push(`${weaponName(kit)} 耐久已满。`); return notes; }
-  bagAdd("repair_kit", -1);
-  restoreDurability(kit, 10);
-  notes.push(`用维修工具包修复 ${weaponName(kit)}：耐久 ${before} → ${weaponDur(kit)}。`);
+  const used = spendRepairPoints(max - before);
+  restoreDurability(kit, used);
+  notes.push(`用维修工具包修复 ${weaponName(kit)}：耐久 ${before} → ${weaponDur(kit)}，用掉 ${used} 点维修量（还剩 ${repairPoints()} 点）。`);
   const owner = weaponOwner(kit);
   if (owner && owner.weaponHeld === false && !owner.dead) owner.weaponHeld = true;
   return notes;

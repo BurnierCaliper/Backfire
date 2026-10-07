@@ -4315,7 +4315,8 @@ function performRetreat(rearguardId) {
     if (lost) notes.push(`丢下 ${lost} 奎支。`);
   }
   if (r.combatItems && state.bag && Array.isArray(state.bag.items)) {
-    const gone = state.bag.items.filter(x => (x.qty || 0) > 0 && ITEM_CATALOG[x.id] && ITEM_CATALOG[x.id].combat);
+    // 维修工具包战斗中也能用，但不算「战斗道具」（以前也不丢）
+    const gone = state.bag.items.filter(x => (x.qty || 0) > 0 && ITEM_CATALOG[x.id] && ITEM_CATALOG[x.id].combat && ITEM_CATALOG[x.id].target !== "weapon");
     if (gone.length) notes.push(`丢下全部战斗道具：${gone.map(x => ITEM_CATALOG[x.id].name + "×" + x.qty).join("、")}。`);
     gone.forEach(x => { x.qty = 0; });
   }

@@ -1235,10 +1235,26 @@ const Rogue = (function () {
     const node = currentNode(run);
     return !!(node && node.type === "shop") || (run.stage === "camp" && !!C.campShop);
   }
+  /** 这家商店的货架：水和食物一定有，其余商品随机 randomCount 种（同一家店看几次都一样，换一家重新进货） */
+  function shopPlace(run) { return run.stage === "camp" ? `c${run.act}.${run.taskNo}` : partPlace(run); }
+  function shopStock(run) {
+    const place = shopPlace(run);
+    if (!run.shopStock || run.shopStock.place !== place) {
+      const n = (typeof ROGUE_SHOP_RULES !== "undefined" && ROGUE_SHOP_RULES.randomCount) || 8;
+      const pool = ROGUE_SHOP.filter(r => !r.always).map(r => r.key);
+      const picked = withRng(`${run.seed}:shop:${place}`, () => {
+        const left = pool.slice(), out = [];
+        while (out.length < n && left.length) out.push(left.splice(Math.floor(Math.random() * left.length), 1)[0]);
+        return out;
+      });
+      run.shopStock = { place, keys: ROGUE_SHOP.filter(r => r.always).map(r => r.key).concat(pool.filter(k => picked.includes(k))) };
+    }
+    return ROGUE_SHOP.filter(r => run.shopStock.keys.includes(r.key));
+  }
   function buy(run, key, qty) {
     if (!canShop(run)) throw new Error("这里没有商店");
-    const row = ROGUE_SHOP.find(r => r.key === key);
-    if (!row) throw new Error("没有这件商品");
+    const row = shopStock(run).find(r => r.key === key);
+    if (!row) throw new Error(ROGUE_SHOP.some(r => r.key === key) ? "这家店没有这件商品" : "没有这件商品");
     qty = Math.max(1, Math.floor(Number(qty) || 1));
     const cost = row.price * qty;
     if ((Number(state.kuizhi) || 0) < cost) throw new Error("奎支不够");
@@ -1702,7 +1718,7 @@ const Rogue = (function () {
     role2Options, soloBattleInfo,
     restPlan, canLongRest, sheetData, armoryData, lowHpWarning, escortInfo, partOffers, buyPart, sellPart, canSellParts, partStock, partSellPrice, partInstallCost, installPart, removePart, restAtNode, leaveNode, canShortRestBefore, shortRestBeforeNode,
     ambushChance, watchOptions,
-    buy, canShop, shopItemName, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
+    buy, canShop, shopItemName, shopStock, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
     presentSmiths, smithInfo, claimBlueprint, installBlueprint, blueprintById, weaponModsOf,
     smithQuote, introduceSmith,
     canClinic, cyberInfo, cyberPreview, cyberCost, modifyHero, healCost, healHero,

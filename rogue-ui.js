@@ -191,7 +191,7 @@
     const list = Rogue.brokenWeapons(run);
     if (!list.length) return "";
     const who = list.map(w => w.owner === w.name ? w.name : `${w.owner} 的 ${w.name}`).join("、");
-    const fix = bagCount("repair_kit") ? "可以先用维修工具包修一下：" : "用维修工具包（商店有卖）或长休才能修好。";
+    const fix = repairPoints() ? "可以先用维修工具包修一下：" : "用维修工具包（商店有卖）或长休才能修好。";
     return `<p class="r-warn">⚠ ${esc(who)} 耐久为 0，这场战斗只能空手作战。${fix}</p>${repairRows()}`;
   }
   const fightBtn = (label) => Rogue.brokenWeapons(run).length
@@ -327,7 +327,7 @@
   /** 商店货架（商店节点与休整时共用） */
   function shopList() {
     const s = Rogue.supplies();
-    return `<div class="shop">${ROGUE_SHOP.map(r => {
+    return `<p class="r-hint">水和食物每家都有，其余商品每家店随机进 ${ROGUE_SHOP_RULES.randomCount} 种。</p><div class="shop">${query("shopStock").map(r => {
       const item = r.give.item && ITEM_CATALOG[r.give.item];
       const have = r.give.item ? bagCount(r.give.item) : null;
       return `<div class="shop-row"><span class="s-name">${esc(Rogue.shopItemName(r))}<small>${esc(item ? item.hint || "" : "")}</small></span>
@@ -427,14 +427,14 @@
       ${fitted ? `<p class="r-hint">武器上的改装件：</p><div class="shop">${fitted}</div>` : ""}`;
   }
 
-  /** 维修工具包（手册：修复 10 点耐久），有的话在商店、工匠处、休整时都能用 */
+  /** 维修工具包（一包 10 点维修量，修几点用几点），有的话在商店、工匠处、休整时都能用 */
   function repairRows() {
-    const kits = bagCount("repair_kit");
-    if (!kits) return "";
+    const pts = repairPoints();
+    if (!pts) return "";
     const rows = run.party.map(h => query("heroView", { kit: h.kit })).flatMap(v => v.weapons)
       .filter(w => w.dur < w.durMax)
-      .map(w => `<button class="g-btn" data-repair="${esc(w.kit)}">修 ${esc(w.name)}（${w.dur}/${w.durMax}）</button>`);
-    return rows.length ? `<p class="r-hint">维修工具包 ×${kits}，每个修复 10 点耐久：</p><div class="r-choices">${rows.join("")}</div>` : "";
+      .map(w => `<button class="g-btn" data-repair="${esc(w.kit)}">修 ${esc(w.name)}（${w.dur}/${w.durMax}）<small>用 ${Math.min(pts, w.durMax - w.dur)} 点</small></button>`);
+    return rows.length ? `<p class="r-hint">${esc(repairPointsText())}：修几点耐久用几点，用不完的留着下次用。</p><div class="r-choices">${rows.join("")}</div>` : "";
   }
 
   /** 进下一站 / 首领战之前：可以短休（按今天的短休次数）。长休只能在任务的休息点 */

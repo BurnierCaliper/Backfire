@@ -366,6 +366,12 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **单局商店随机进货；维修工具包按点数用、战斗中能用、能修好倒地的武器人**（`rogue.js · shopStock`、`rogue-data.js · ROGUE_SHOP_RULES`、`ledger.js · repairPoints / spendRepairPoints / ledgerRepair`、`items.js · repairTargets / useRepairKit`、`game.js`、`rogue-ui.js`、`trpg-ui.js`、`hotseat-validation.js`、`online-actions.js`）
+  - 单局 / 单人商店：**水和食物每家都有**，其余商品每家店随机进 **8 种**（同一家看几次都一样，换一家店 / 下一次回城重新进货）。没进货的买不到。
+  - 维修工具包：一包 **10 点维修量**，**修几点耐久用几点**，用不完的留在「开封的维修工具包」里（数量 = 剩几点），下次先用开封的，不够再开新的一包。商店、工匠处、休整时的「修 ××」按钮修到满（点数不够就修到用完为止）。
+  - **战斗中也能用**：「使用道具」→ 维修工具包 → 选一把要修的武器（附赠行动 1）。对**倒地的武器人**用会把它修好重新站起来，恢复最大生命的 **25%**（至少 1 点），1 点生命用 1 点维修量；这回合它没有行动。
+  - 撤退「丢下全部战斗道具」时维修工具包不丢（和以前一样）。试玩机器人只买商店里有的东西。
+
 - **区制棋盘改成可以像模块一样拼接**（`engine.js · BOARD_LAYOUTS / applyBoard / zoneDist / zoneNeighbors / zonePath / sandWind`、`app.js`、`enemies.js`、`ai.js`、`game.js · syncFieldDom`、`battle-commands.js`、`sim.js`、`run.js`、`gm-commands.js`、`trpg-tasks.js`）
   - 底层从「1–2–3 一条直线」改成「区 + 连接」：每个区有编号（1…N）和棋盘格子坐标，连接决定谁和谁相邻。**距离 = 沿连接走几步**（2×2 方形对角是距离 2，十字形两臂之间是 2）。间隔（危墙、桥梁、空隙、机关门）放在每条连接上。
   - 内置布局：两区直排、三区直排（普通战斗，行为和以前完全一样）、**四区直排**、**四区方形 2×2**、**五区十字**。新布局往 `BOARD_LAYOUTS` 加一项（区的坐标 + 连接 + 我方 / 敌方默认区）即可；遭遇写 `board: "布局名"`、模拟器 `BattleSim.setup({ board })`、战场配置面板「区制」、跑团任务战斗站的「战场」都能选。

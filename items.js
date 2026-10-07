@@ -91,10 +91,61 @@ function rollEnemyLoot(u) {
   return fixed[kit] || 0;
 }
 
+/** 维修工具包能修的武器：[{ kit, name, unit, owner, down, dur, max, need }]（need = 这次能用掉几点） */
+function repairTargets() {
+  const out = [];
+  const units = state.units || [];
+  partyHeroes().filter(h => !h.dead).forEach(h => (h.linkedKits || []).forEach(k => {
+    const unit = units.find(u => u.kit === k && !u._removed && !u.fused && (!u.weaponOf || u.weaponOf === h.kit)) || null;
+    const down = !!(unit && unit.dead);
+    const dur = weaponDur(k), max = weaponDurMax(k);
+    out.push({ kit: k, name: weaponName(k), unit, owner: h, down, dur, max, need: down ? reviveCost(unit) : Math.max(0, max - dur) });
+  }));
+  return out;
+}
+/** 修好倒地的武器人要用几点：恢复最大生命的 25%（至少 1 点），1 点维修量 = 1 点生命 */
+const REPAIR_REVIVE_RATIO = 0.25;
+function reviveCost(unit) {
+  const max = (unit.layers || []).reduce((s, l) => s + (Number(l.max) || 0), 0);
+  return Math.max(1, Math.ceil(max * REPAIR_REVIVE_RATIO));
+}
+/** 战斗中用维修工具包：kit 指定哪把武器（不给就按目标单位：武器人自己，角色手里那把） */
+function useRepairKit(actor, target, kit, notes) {
+  if (repairPoints() < 1) { notes.push("没有维修工具包。"); return notes; }
+  const list = repairTargets();
+  let row = typeof kit === "string" ? list.find(r => r.kit === kit) : null;
+  if (!row && target) row = list.find(r => r.unit === target) || list.find(r => r.owner === target && typeof heldWeaponKit === "function" && r.kit === heldWeaponKit(target));
+  if (!row) { notes.push("选一把要修的武器。"); return notes; }
+  if (row.down) {
+    // 倒地的武器人：修好重新站起来（从最内层开始补血），这回合没有行动
+    const u = row.unit;
+    const used = spendRepairPoints(row.need);
+    u.dead = false; u.dying = false; u.stunned = false;
+    u.ap = 0; u.bonus = 0;
+    let left = used;
+    for (let i = u.layers.length - 1; i >= 0 && left > 0; i--) {
+      const l = u.layers[i];
+      const add = Math.min(left, (Number(l.max) || 0) - (Number(l.current) || 0));
+      l.current = (Number(l.current) || 0) + add;
+      left -= add;
+    }
+    u.def = u.defMax != null ? u.defMax : u.def;
+    notes.push(`${actor.name} 用维修工具包修好倒地的 ${row.name}：恢复 ${used} 点生命重新站起来，用掉 ${used} 点维修量（还剩 ${repairPoints()} 点）。`);
+    return notes;
+  }
+  if (row.need <= 0) { notes.push(`${row.name} 耐久已满。`); return notes; }
+  const before = row.dur;
+  const used = spendRepairPoints(row.need);
+  restoreDurability(row.kit, used);
+  if (row.owner && row.owner.weaponHeld === false && !row.owner.dead && before <= 0 && typeof heldWeaponKit === "function") row.owner.weaponHeld = true;
+  notes.push(`${actor.name} 用维修工具包修 ${row.name}：耐久 ${before} → ${weaponDur(row.kit)}，用掉 ${used} 点维修量（还剩 ${repairPoints()} 点）。`);
+  return notes;
+}
 function useItemOn(actor, itemId, target, zone) {
   const notes = [];
   const spec = ITEM_CATALOG[itemId];
   if (!spec) { notes.push("没有这种道具。"); return notes; }
+  if (spec.target === "weapon") return useRepairKit(actor, target, zone, notes);   // 维修工具包按点数用，不是一次一个
   if (bagCount(itemId) < 1) { notes.push(`没有${spec.name}。`); return notes; }
   bagAdd(itemId, -1, notes);
   if (itemId === "medkit" || itemId === "clinic") {

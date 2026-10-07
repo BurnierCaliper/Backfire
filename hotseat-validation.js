@@ -176,7 +176,13 @@
   }
   function checkItem(actor, cmd) {
     const spec = typeof cmd.item === "string" && Object.hasOwn(ITEM_CATALOG, cmd.item) && ITEM_CATALOG[cmd.item];
-    if (!spec || !spec.combat || bagCount(cmd.item) < 1) fail("背包里没有这件可用战斗道具", "invalid_item");
+    const have = spec && spec.target === "weapon" && typeof repairPoints === "function" ? repairPoints() : bagCount(cmd.item);
+    if (!spec || !spec.combat || have < 1) fail("背包里没有这件可用战斗道具", "invalid_item");
+    if (spec.target === "weapon") {
+      // 维修工具包：dest 是要修的武器 kit
+      if (typeof cmd.dest !== "string" || !repairTargets().some(r => r.kit === cmd.dest && r.need > 0)) fail("维修工具包需要选一把要修的武器", "invalid_item");
+      return;
+    }
     if (spec.target === "ally") {
       const target = unitById(cmd.target);
       if (!present(target) || !target.isPlayer) fail("道具需要选择在场友方", "invalid_item");

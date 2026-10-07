@@ -226,13 +226,15 @@ function shopping() {
   const foodNeed = Object.values(need.food || {}).reduce((a, b) => a + b, 0) * 2 || 8;
   guard = 0;
   while (R.supplies().foodTotal < foodNeed && kz() > 300 + 1000 && guard++ < 20) tryDo("买食物", () => R.buy(run, "food_liquid", 1));
-  if (c.bagCount("repair_kit") < 1 && kz() > 2500) tryDo("买维修包", () => R.buy(run, "repair_kit", 1));
-  if (c.bagCount("medkit") < 2 && kz() > 2500) tryDo("买医疗包", () => R.buy(run, "medkit", 1));
+  // 商店每家随机进货：没有的就不买
+  const inStock = (key) => R.shopStock(run).some(r => r.key === key);
+  if (c.repairPoints() < 10 && kz() > 2500 && inStock("repair_kit")) tryDo("买维修包", () => R.buy(run, "repair_kit", 1));
+  if (c.bagCount("medkit") < 2 && kz() > 2500 && inStock("medkit")) tryDo("买医疗包", () => R.buy(run, "medkit", 1));
   void sup;
 }
 function repairs() {
   R.brokenWeapons(run).forEach(w => {
-    if (c.bagCount("repair_kit") < 1 && R.canShop(run) && kz() > 1000) tryDo("买维修包", () => R.buy(run, "repair_kit", 1));
+    if (c.repairPoints() < 10 && R.canShop(run) && kz() > 1000 && R.shopStock(run).some(r => r.key === "repair_kit")) tryDo("买维修包", () => R.buy(run, "repair_kit", 1));
     if (c.bagCount("repair_kit") > 0) tryDo("修武器", () => R.repairWeapon(run, w.kit));
   });
 }

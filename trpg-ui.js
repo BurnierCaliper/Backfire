@@ -220,7 +220,7 @@
     bag() {
       const items = bagList();
       const heal = items.filter(x => x.id === "medkit" || x.id === "clinic");
-      const kits = bagCount("repair_kit");
+      const kits = repairPoints();
       const weapons = heroes().flatMap(h => (h.linkedKits || []).map(k => ({ k, name: weaponName(k), d: weaponDur(k), m: weaponDurMax(k) })));
       return `<h3>奎支与水</h3>
         <div class="tr-row">奎支 <input type="number" id="tr-kz" value="100" style="width:100px">
@@ -232,8 +232,8 @@
         ${heal.length ? heal.map(x => `<div class="tr-row">${esc(x.name)} ×${x.qty} → 给
             <select data-heal-who="${x.id}">${heroes().filter(h => !h.dead).map(h => `<option value="${esc(h.kit)}">${esc(h.name)}（${totalHpOf(h)}/${totalHpMaxOf(h)}）</option>`).join("")}</select>
             <button class="g-btn small" data-heal="${x.id}">使用</button></div>`).join("") : `<p class="r-hint">背包里没有医疗包。</p>`}
-        ${kits ? `<div class="tr-row">维修工具包 ×${kits} → 修 <select id="tr-repair-who">${weapons.map(w => `<option value="${esc(w.k)}">${esc(w.name)}（${w.d}/${w.m}）</option>`).join("")}</select>
-            <button class="g-btn small" id="tr-repair">修理 10 点</button></div>` : ""}
+        ${kits ? `<div class="tr-row">${esc(repairPointsText())} → 修 <select id="tr-repair-who">${weapons.map(w => `<option value="${esc(w.k)}">${esc(w.name)}（${w.d}/${w.m}）</option>`).join("")}</select>
+            <button class="g-btn small" id="tr-repair">修到满（修几点用几点）</button></div>` : ""}
         <h3>背包</h3>
         <div class="shop">${items.map(x => `<div class="shop-row"><span class="s-name">${esc(x.name)}${x.hint ? `<small>${esc(x.hint)}</small>` : ""}</span>
           <span class="s-have">×${x.qty}</span><span class="s-price"></span>

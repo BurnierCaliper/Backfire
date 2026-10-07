@@ -502,7 +502,7 @@
     if (state.combatPhase !== "player") return "敌人回合";
     if (!u || u.dead) return "已阵亡";
     if (sk.id === "__stand") return typeof standUpBlocked === "function" ? standUpBlocked(u) : null;
-    if (sk.id === "__item" && typeof bagList === "function" && !bagList().some(x => x.combat)) return "没有能在战斗中使用的道具";
+    if (sk.id === "__item" && typeof bagList === "function" && !bagList().some(x => x.combat)) return "没有能在战斗中使用的道具";   // 维修工具包也算（战斗中能用）
     if (u.stunned) return "失衡中，本回合无法行动";
     if ((sk.cost.ap || 0) > (u.ap || 0)) return "行动点不足";
     if ((sk.cost.bonus || 0) > (u.bonus || 0)) return "附赠行动不足";
@@ -1873,11 +1873,13 @@
       return act(skillCommand(actor.id, "__stand"), { actorId: actor.id, skillName: "起身" });
     }
     if (sk.id === "__item") {
-      const items = (typeof bagList === "function" ? bagList() : []).filter(x => x.combat);
+      // 维修工具包（没开封的 + 开封的）合成一项，按维修点数显示
+      const items = (typeof bagList === "function" ? bagList() : []).filter(x => x.combat && x.id !== "repair_kit_open");
+      if (typeof repairPoints === "function" && repairPoints() > 0 && !items.some(x => x.id === "repair_kit")) items.push(Object.assign({ qty: 0 }, ITEM_CATALOG.repair_kit, { id: "repair_kit" }));
       if (!items.length) { cancel(); flashHint("背包里没有能在战斗中使用的道具。"); return; }
       setHint("<b>使用道具</b>：选择一件。");
       const itemId = await openChoice("使用道具", "背包", items.map(x => ({
-        label: x.name + " ×" + x.qty, sub: x.hint, value: x.id
+        label: x.id === "repair_kit" ? `维修工具包 · ${repairPoints()} 点维修量` : x.name + " ×" + x.qty, sub: x.hint, value: x.id
       })), { label: "取消", value: null });
       if (stale()) return;
       if (!itemId) { cancel(); return; }
@@ -1893,6 +1895,18 @@
         dest = await pickZone(boardZoneIds(), () => null);
         if (stale()) return;
         if (dest == null) { cancel(); return; }
+      } else if (spec && spec.target === "weapon") {
+        // 维修工具包：选一把武器（武器名不会重名，用列表选）；倒地的武器人会被修好站起来
+        const rows = repairTargets().filter(r => r.need > 0);
+        if (!rows.length) { cancel(); flashHint("没有需要修的武器（耐久都是满的，也没有倒地的武器人）。"); return; }
+        const pts = repairPoints();
+        dest = await openChoice("维修工具包", `还有 ${pts} 点维修量：修几点耐久用几点；倒地的武器人修好后重新站起来（恢复最大生命的 25%）。`, rows.map(r => ({
+          label: r.down ? `${r.name}（${r.owner.name}）· 倒地` : `${r.name}（${r.owner.name}）· 耐久 ${r.dur}/${r.max}`,
+          sub: r.down ? `修好站起来：恢复 ${Math.min(r.need, pts)} 点生命，用 ${Math.min(r.need, pts)} 点` : `修到 ${Math.min(r.max, r.dur + pts)}，用 ${Math.min(r.need, pts)} 点`,
+          value: r.kit
+        })), { label: "取消", value: null });
+        if (stale()) return;
+        if (!dest) { cancel(); return; }
       }
       G.arm = null;
       return act(skillCommand(actor.id, "__item", targetId, { item: itemId, dest }), { actorId: actor.id, targetId, skillName: spec ? spec.name : "使用道具" });
@@ -3014,7 +3028,8 @@
       box.append(sel, go);
       return box;
     }
-    if (id === "repair_kit") {
+    if (id === "repair_kit" || id === "repair_kit_open") {
+      if (inFight) return null;     // 战斗里走「使用道具」
       const box = el("div", "ledger-use");
       const sel = document.createElement("select");
       heroesForUse().forEach(h => (h.linkedKits || []).forEach(k => {
@@ -3022,7 +3037,7 @@
         o.value = k; o.textContent = `${weaponName(k)}（耐久 ${weaponDur(k)}/${weaponDurMax(k)}）`;
         sel.appendChild(o);
       }));
-      const go = el("button", "g-btn", "修复");
+      const go = el("button", "g-btn", "修复（修几点用几点）");
       go.onclick = () => { panelCommit({ action: "repair", kit: sel.value }); renderBagSheet(); };
       box.append(sel, go);
       return box;

@@ -104,7 +104,7 @@ function simulateRun(c, run, opt = {}) {
     const plan = R.restPlan(run);
     const needWater = Math.max(0, plan.water * STOCK_RESTS - c.ledgerWater());
     const needFood = Math.max(0, Object.values(plan.food).reduce((s, n) => s + n, 0) * STOCK_RESTS - R.supplies().foodTotal);
-    const buy = (key) => { if (money() < priceOf(key)) return false; R.buy(run, key, 1); return true; };
+    const buy = (key) => { if (money() < priceOf(key) || !R.shopStock(run).some(r => r.key === key)) return false; R.buy(run, key, 1); return true; };   // 商店随机进货：没有就不买
     let w = needWater;
     while (w > 0) {
       const key = w >= 5000 ? "water_5000" : w > 500 ? "water_1000" : "water_500";

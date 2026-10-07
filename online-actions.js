@@ -73,7 +73,7 @@
             if (request.target != null) fail("移动不接受单位目标");
             const command = dest => ({ type: "move", actor: request.actor, dest });
             if (request.dest != null) return ready(command(request.dest));
-            const zones = [1, 2, 3].filter(z => z <= Number(state.zoneMode) && Math.abs(z - Number(actor().zone)) === 1 && legal(command(z)));
+            const zones = zoneNeighbors(actor().zone).filter(z => legal(command(z)));
             return emit({ kind: "zone", key: "dest", title: "选择移动区域", options: zones.map(z => ({ value: z, label: `${z} 区` })) });
           }
           if (sk.id === "__item") {
@@ -91,7 +91,12 @@
             }
             if (item.target === "zone" && request.dest == null) {
               if (request.target != null) fail("区域道具不接受单位目标");
-              return emit({ kind: "zone", key: "dest", title: "选择道具区域", options: [1, 2, 3].filter(z => z <= Number(state.zoneMode) && legal(command(null, z))).map(z => ({ value: z, label: `${z} 区` })) });
+              return emit({ kind: "zone", key: "dest", title: "选择道具区域", options: boardZoneIds().filter(z => legal(command(null, z))).map(z => ({ value: z, label: `${z} 区` })) });
+            }
+            if (item.target === "weapon" && request.dest == null) {
+              // 维修工具包：选要修的武器（倒地的武器人修好站起来）
+              return emit({ kind: "choice", key: "dest", title: `维修工具包（${repairPoints()} 点）`, options: repairTargets().filter(r => r.need > 0)
+                .map(r => ({ value: r.kit, label: r.down ? `${r.name} · 倒地` : `${r.name} · 耐久 ${r.dur}/${r.max}` })) });
             }
             return ready(command(request.target || null, request.dest == null ? null : request.dest));
           }
