@@ -193,7 +193,10 @@
       try { threats = (typeof zoneThreatsIn === "function" ? zoneThreatsIn(z) : []); } catch (e) {}
       let wind = "";
       if (state.weather === "sand") { try { wind = sandWindLabel(sandWind(z, state.zoneMode, state.sandDir)); } catch (e) {} }
-      zones[z] = { cls, tags, threats, wind };
+      // 首领机制·踩塔：标在这个区上的塔
+      let towers = [];
+      try { towers = typeof bossZoneMarks === "function" ? bossZoneMarks(z) : []; } catch (e) {}
+      zones[z] = { cls, tags, threats, wind, towers };
     }
     let weatherText = WEATHER_NAME[state.weather] || state.weather || "常态";
     if (state.weather === "phase") { try { weatherText += "·" + phaseWeatherName(state.phaseStep); } catch (e) {} }
@@ -287,6 +290,18 @@
           `<span class="${t.ready ? "rd" : ""}">${esc(t.label)}${t.from ? `<i>${esc(t.from)}</i>` : ""}</span>`
         ).join("");
       }
+    });
+    // 踩塔：区域边框 + 角上一块牌子「踩塔 N · 1/1 人」（人数不够时变红）
+    document.querySelectorAll(".g-zone").forEach(z => {
+      const tw = (env.zones[z.dataset.num] || {}).towers || [];
+      z.classList.toggle("tower", tw.length > 0);
+      z.classList.toggle("tower-ready", tw.some(t => t.left <= 0));
+      z.classList.toggle("tower-short", tw.some(t => t.have < t.need));
+      let tb = z.querySelector(".ztower");
+      if (!tw.length) { if (tb) tb.remove(); return; }
+      if (!tb) { tb = el("div", "ztower"); z.appendChild(tb); }
+      const when = (t) => t.left > 0 ? `${t.left} 回合后` : `这回合${t.phase === "player" ? "我方" : "敌人"}回合开始时`;
+      tb.innerHTML = tw.map(t => `<span class="${t.have < t.need ? "short" : "ok"}" title="${esc(`${t.by} 的${t.name}：${when(t)}落下${t.delayed ? "（首领失衡，会推迟一回合）" : ""}。至少 ${t.need} 人站在这个区里踩住${t.soak > 0 ? `，每人挨 ${t.soak}` : ""}；没人踩住${t.fail != null ? (t.fail > 0 ? `，我方全员各挨 ${t.fail}` : "，我方全员挨巨额伤害") : "，会触发严重惩罚"}。不能格挡。`)}">${esc(t.name)} ${t.left > 0 ? t.left : "!"} · ${t.have}/${t.need} 人</span>`).join("");
     });
     paintGaps();
   }
@@ -3539,6 +3554,44 @@
         mult: Math.max(0.5, Math.min(20, Number(q2("mult").value) || 1))
       });
       if (q2("off")) q2("off").onclick = () => applyP(null);
+      // 首领机制·踩塔
+      const curT = (u.mechanics || []).find(m => m.type === "tower");
+      const tbn = el("button", "g-btn" + (curT ? " on" : ""), curT ? "踩塔 ✓" : "踩塔…");
+      tbn.title = "给这个敌人加上「踩塔」机制：随机标记区域，倒计时到了需要有人站在里面踩住（挨一点伤害），没人踩则全员挨巨额伤害";
+      row.insertBefore(tbn, rm);
+      const te = el("div", "exec-edit");
+      te.hidden = true;
+      te.innerHTML = `<label>落下<select data-x="phase"><option value="enemy">敌人回合开始</option><option value="player">我方回合开始</option></select></label>
+        <label>标记后<input data-x="turns" type="number" min="1" max="20" value="3"> 回合</label>
+        <label>塔数<input data-x="count" type="number" min="1" max="5" value="1"></label>
+        <label>每座至少<input data-x="need" type="number" min="1" max="4" value="1"> 人</label>
+        <label title="踩塔的人每人挨的伤害 = 这个倍率 × 这个敌人的 atk">踩塔伤害<input data-x="soak" type="number" min="0" max="20" step="0.5" value="0.5"> × atk</label>
+        <label title="没人踩住时我方全员每人挨的伤害 = 这个倍率 × 这个敌人的 atk">没人踩<input data-x="fail" type="number" min="0.5" max="50" step="0.5" value="4"> × atk</label>
+        <label>落下后<select data-x="then"><option value="repeat">重新标记</option><option value="once">只放一次</option></select></label>
+        <button class="g-btn" data-x="go">${curT ? "改" : "加上"}</button>${curT ? '<button class="g-btn" data-x="off">去掉</button>' : ""}`;
+      elist.appendChild(te);
+      const q3 = (k) => te.querySelector(`[data-x="${k}"]`);
+      if (curT) {
+        q3("phase").value = curT.phase || "enemy"; q3("turns").value = curT.turns || 3; q3("count").value = curT.count || 1; q3("need").value = curT.need || 1;
+        q3("soak").value = (curT.soak && curT.soak.mult) != null ? curT.soak.mult : 0.5; q3("fail").value = (curT.fail && curT.fail.mult) || 4; q3("then").value = curT.then || "repeat";
+      }
+      tbn.onclick = () => { te.hidden = !te.hidden; };
+      const applyT = (cfg) => {
+        let r;
+        try { r = dispatch({ type: "battle.panel", action: "setTower", actor: u.id, cfg }); } catch (e) { flashHint(e.message); return; }
+        ((r && r.notes) || []).forEach(t => appendLog(t));
+        setView(snapAll(), false);
+        refreshAll();
+        renderFieldSheet();
+      };
+      const int = (k, lo, hi, d) => Math.max(lo, Math.min(hi, Math.floor(Number(q3(k).value) || d)));
+      q3("go").onclick = () => applyT({
+        phase: q3("phase").value, then: q3("then").value,
+        turns: int("turns", 1, 20, 3), count: int("count", 1, 5, 1), need: int("need", 1, 4, 1),
+        soak: Math.max(0, Math.min(20, Number(q3("soak").value) || 0)),
+        fail: Math.max(0.5, Math.min(50, Number(q3("fail").value) || 4))
+      });
+      if (q3("off")) q3("off").onclick = () => applyT(null);
     });
     const sel = $("g-enemy-sel");
     if (!sel.options.length) {

@@ -2071,6 +2071,16 @@ body:not([data-screen="battle"]) .g-rank { display: none !important; }
 .chip.mark-spread { background: #8a5cf6; color: #fff; font-weight: 800; }
 .unit-wrap.spread-clash .chip.mark-spread { background: #d62f2f; }
 .chip.cast-spread { background: #1b1f24; color: #b99bff; font-weight: 800; }
+.chip.cast-tower { background: #1b1f24; color: #4fd1c5; font-weight: 800; }
+/* 踩塔：区域内圈青色粗框 + 右上角的牌子；人数不够时牌子变红，落下那一刻边框闪 */
+.g-zone.tower { box-shadow: inset 0 0 0 5px #1fa89a, inset 0 0 40px rgba(31, 168, 154, .18); }
+.g-zone.tower.tower-short { box-shadow: inset 0 0 0 5px #d62f2f, inset 0 0 40px rgba(214, 47, 47, .15); }
+.g-zone.tower.tower-ready { animation: towerPulse .9s ease-in-out infinite alternate; }
+@keyframes towerPulse { from { filter: none; } to { filter: drop-shadow(0 0 10px rgba(31, 168, 154, .8)); } }
+.ztower { position: absolute; top: 8px; right: 10px; z-index: 3; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; pointer-events: auto; }
+.ztower span { padding: 2px 8px; font-size: 12px; font-weight: 800; color: #fff; background: #1fa89a; white-space: nowrap; }
+.ztower span.short { background: #d62f2f; }
+@media (prefers-reduced-motion: reduce) { .g-zone.tower.tower-ready { animation: none; } }
 .chip.cast-share { background: #1b1f24; color: #ffc233; font-weight: 800; }
 @media (prefers-reduced-motion: reduce) { .unit-wrap.doom-now .unit, .unit-wrap.shared.doom-now .unit, .unit-wrap.spread.doom-now .unit { animation: none; } }
 .exec-edit { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; padding: 6px 8px 10px; font-size: 12px; border-bottom: 1px solid rgba(255,255,255,.08); }

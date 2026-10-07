@@ -3,7 +3,7 @@
   "use strict";
   let local = {};
   const types = ["skill", "move", "standUp", "useItem", "startCombat", "endTurn", "openingChoice", "blockAnswer", "assistAnswer", "koltSwapAnswer", "heluScanAnswer", "retreat", "battle.endPlayerTurn", "battle.endEnemyTurn", "battle.enemyAction", "battle.finish", "battle.afterBattle", "battle.checkSolo", "battle.supportInfo", "battle.rememberCampaign", "battle.loadCampaign", "battle.cleanQueues", "battle.setup", "battle.setupRogue", "battle.panel", "battle.undo", "battle.continue"];
-  const panelActions = ["bagAdd", "currency", "water", "healItem", "repair", "advance", "shortRest", "longRest", "restore", "cheat", "saveSlot", "loadSlot", "clearSlot", "addParty", "removeParty", "addEnemy", "removeEnemy", "setField", "setGap", "gapHp", "rollWall", "toggleDoor", "addProp", "removeProp", "setZones", "setPartySize", "setWeather", "rollEncounter", "rollBossEncounter", "selectEncounter", "normalizeBag", "normalizeGaps", "normalizeField", "setHighland", "setExecution", "setShare", "setSpread"];
+  const panelActions = ["bagAdd", "currency", "water", "healItem", "repair", "advance", "shortRest", "longRest", "restore", "cheat", "saveSlot", "loadSlot", "clearSlot", "addParty", "removeParty", "addEnemy", "removeEnemy", "setField", "setGap", "gapHp", "rollWall", "toggleDoor", "addProp", "removeProp", "setZones", "setPartySize", "setWeather", "rollEncounter", "rollBossEncounter", "selectEncounter", "normalizeBag", "normalizeGaps", "normalizeField", "setHighland", "setExecution", "setShare", "setSpread", "setTower"];
   function configure(adapter) { local = Object.assign({}, local, adapter || {}); }
   function environment(context) { return Object.assign({}, local, context || {}); }
   // Rogue's legacy encounter rows explicitly contain level: undefined when they
@@ -86,6 +86,17 @@
         oneOf(c.then, ["repeat", "once"], "spread then");
         if (!Number.isInteger(c.turns) || c.turns < 1 || c.turns > 20) throw new Error("spread turns must be 1-20");
         if (!isFinite(Number(c.mult)) || Number(c.mult) <= 0 || Number(c.mult) > 20) throw new Error("spread blast multiplier must be 0-20");
+      }
+      if (cmd.action === "setTower" && cmd.cfg != null) {
+        const c = cmd.cfg;
+        if (typeof c !== "object" || Array.isArray(c)) throw new Error("tower cfg must be an object");
+        oneOf(c.phase, ["enemy", "player"], "tower phase");
+        oneOf(c.then, ["repeat", "once"], "tower then");
+        if (!Number.isInteger(c.turns) || c.turns < 1 || c.turns > 20) throw new Error("tower turns must be 1-20");
+        if (!Number.isInteger(c.count) || c.count < 1 || c.count > 5) throw new Error("tower count must be 1-5");
+        if (!Number.isInteger(c.need) || c.need < 1 || c.need > 4) throw new Error("tower need must be 1-4");
+        if (!isFinite(Number(c.soak)) || Number(c.soak) < 0 || Number(c.soak) > 20) throw new Error("tower soak multiplier must be 0-20");
+        if (!isFinite(Number(c.fail)) || Number(c.fail) <= 0 || Number(c.fail) > 50) throw new Error("tower fail multiplier must be 0-50");
       }
       if (["bagAdd", "healItem"].includes(cmd.action) && !Object.prototype.hasOwnProperty.call(ITEM_CATALOG, cmd.item)) throw new Error("Unknown item: " + cmd.item);
     }
@@ -253,6 +264,18 @@
           bossMechSync(notes);
           notes.unshift(`${u.name} 加上「远离」：标记我方全员，${c.turns} 回合后${c.phase === "player" ? "我方" : "敌人"}回合开始时每人在自己的区爆炸一次（每次对同区每个友方 ${c.mult} × atk），${c.then === "repeat" ? "落下后重新标记" : "只放一次"}。`);
         } else notes.push(`${u.name} 去掉了「远离」。`);
+        break;
+      }
+      case "setTower": {
+        // 首领机制·踩塔（boss-mechanics.js）：给敌人挂上 / 去掉。cfg = null 去掉
+        const u = actor(cmd.actor);
+        removeBossMechanics(u, "tower");
+        if (cmd.cfg) {
+          const c = cmd.cfg;
+          addBossMechanic(u, { type: "tower", phase: c.phase, turns: c.turns, then: c.then, count: c.count, need: c.need, soak: { mult: Number(c.soak) }, fail: { kind: "raid", mult: Number(c.fail) } });
+          bossMechSync(notes);
+          notes.unshift(`${u.name} 加上「踩塔」：随机标记 ${c.count} 个区，${c.turns} 回合后${c.phase === "player" ? "我方" : "敌人"}回合开始时落下，每座塔至少 ${c.need} 人踩住（每人挨 ${c.soak} × atk），没人踩则全员各挨 ${c.fail} × atk，${c.then === "repeat" ? "落下后重新标记" : "只放一次"}。`);
+        } else notes.push(`${u.name} 去掉了「踩塔」。`);
         break;
       }
       case "removeProp": state.props = state.props.filter(x => x.id !== cmd.id); break;

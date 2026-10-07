@@ -366,6 +366,14 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **首领机制模块：踩塔**（`boss-mechanics.js · castTower / bossZoneMarks`，标记框架扩展成可以标记区域；`battle-commands.js · setTower`、`game.js`、`game.css`、`online-view.js`）
+  - 敌人挂 `mechanics: [{ type: "tower", ... }]` 生效（默认值 `BOSS_MECH_DEFAULTS.tower`）。
+  - **标记**：随机标记 `count` 个不同的区（`pick: "randomZone"`，深渊不选）。被标记的区内圈一道**青色粗框**，右上角一块牌子「踩塔 N · 3/1 人」（N = 还剩几回合，后面是现在区里站着几个人 / 至少要几个人）；人数不够时框和牌子变红，落下那一刻边框闪。悬停能看到踩塔伤害和失败惩罚。首领身上「踩塔→1区 N」。
+  - **落下**：每座塔分别结算——区里还站着的友方 ≥ `need`：这些人每人挨一下不高的 `soak` 伤害（`{ mult × 首领 atk, flat }`）；人数不够（没人踩）：失败惩罚 `fail`。都不能格挡。
+  - **失败惩罚**（模块化）：`fail.kind = "raid"`（默认）我方全员各挨 `fail` 的伤害（`{ mult × atk, flat }`，默认 4 × atk）；`fail.kind = "hook"` 调首领专属的惩罚 `BOSS_MECH_HOOKS[fail.hook](boss, mech, zone, notes)`（例如首领狂暴、召唤小怪……）。
+  - 和其他标记类机制一样：落下时机 `phase` 两种都有、首领失衡推迟一回合、`then` / `interval` / `times` / `hook`。落下后重新标记时重新随机选区。
+  - **试用**：战场配置的敌人列表里每个敌人多了「踩塔…」（落下时机、几回合、塔数、每座至少几人、踩塔伤害倍率、没人踩时的伤害倍率、落下后重新标记还是只放一次）。
+  - 联机：标了哪些区、每座要几个人、落下回合和时机同步给玩家，伤害数值不同步。
 - **首领机制模块：远离**（`boss-mechanics.js · castSpread`，标记框架扩展成可以一次标记多人；`battle-commands.js · setSpread`、`game.js`、`online-view.js`）
   - 敌人挂 `mechanics: [{ type: "spread", ... }]` 生效（默认值 `BOSS_MECH_DEFAULTS.spread`）。
   - **标记**：我方全员（`pick: "all"`，还站着的角色和武器人）。每个人铭牌内圈一道**紫框**，状态栏「远离 N · ×k」：N = 还剩几回合，k = 现在这个人所在的区里有几个标记（= 到时这里炸几次）；k > 1 时标签变红提醒分开站。悬停能看到每次爆炸的伤害。首领身上「远离→全员（3）N」。

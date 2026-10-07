@@ -22,7 +22,12 @@
  * ── 远离 spread ──
  *   标记我方全员（紫框）；落下时每个还站着的被标记者在自己当时所在的区爆炸一次，对这个区里所有还站着的友方单位
  *   各造成 blast 伤害、不能格挡。同一个区有几个标记就炸几次，每个人每次都挨——要分开站。
- *   被标记的人倒下了，他的标记就没了（不转给别人）。 */
+ *   被标记的人倒下了，他的标记就没了（不转给别人）。
+ *
+ * ── 踩塔 tower ──
+ *   标记 count 个区域（区域边框 + 倒计时）；落下时每座塔：区里还站着的友方 ≥ need → 这些人各挨一下不高的 soak 伤害；
+ *   人数不够（没人踩塔）→ 失败惩罚 fail：默认对我方全员造成巨额伤害（kind "raid"），也可以接首领专属的惩罚（kind "hook"）。
+ *   都不能格挡。 */
 "use strict";
 
 const BOSS_MECH_DEFAULTS = {
@@ -52,6 +57,23 @@ const BOSS_MECH_DEFAULTS = {
     times: 0,
     hook: null
   },
+  tower: {
+    name: "踩塔",
+    phase: "enemy",
+    turns: 3,
+    firstTurn: 1,
+    pick: "randomZone",    // 随机区域（不选深渊）
+    count: 1,              // 一次标几座塔（几个不同的区）
+    need: 1,               // 每座塔至少要几个人踩
+    soak: { mult: 0.5 },   // 踩塔的人每人挨的伤害：{ mult（× 首领 atk）, flat, atk }
+    fail: { kind: "raid", mult: 4 },   // 没人踩（人数不够）：raid = 我方全员各挨 mult × atk + flat；hook = 调 BOSS_MECH_HOOKS[fail.hook](boss, mech, zone, notes)
+    element: null,
+    baseBreak: 0,
+    then: "repeat",
+    interval: null,
+    times: 0,
+    hook: null
+  },
   spread: {
     name: "远离",
     phase: "enemy",
@@ -72,8 +94,19 @@ const BOSS_MECH_DEFAULTS = {
 const BOSS_MECH_PICKS = {
   maxHp: (list) => list.slice().sort((a, b) => unitMaxHp(b) - unitMaxHp(a))[0] || null,
   random: (list) => list.length ? list[Math.floor(Math.random() * list.length)] : null,
-  all: (list) => list.slice()   // 多目标机制用：全员
+  all: (list) => list.slice(),   // 多目标机制用：全员
+  // 区域机制用：从能选的区里随机挑 n 个不同的区
+  randomZone: (zones, boss, m, n) => {
+    const left = zones.slice(), out = [];
+    while (left.length && out.length < (n || 1)) out.push(left.splice(Math.floor(Math.random() * left.length), 1)[0]);
+    return out;
+  }
 };
+/** 能放区域机制的区：棋盘上的区，深渊不算 */
+function mechZoneOptions() {
+  const ids = typeof boardZoneIds === "function" ? boardZoneIds() : Array.from({ length: Number(state.zoneMode) || 2 }, (_, i) => i + 1);
+  return ids.map(Number).filter(z => !((state.fields || {})[z] && state.fields[z].abyss));
+}
 /** 首领专属的后续（落下之后调用），按名字注册 */
 const BOSS_MECH_HOOKS = {};
 
@@ -118,6 +151,13 @@ function mechMark(boss, m, notes, why) {
   const T = BOSS_MECH_TYPES[m.type];
   const pick = BOSS_MECH_PICKS[c.pick] || BOSS_MECH_PICKS[T.pick];
   m.st = m.st || {};
+  if (T.zone) {
+    const zones = [].concat(pick(mechZoneOptions(), boss, m, Math.max(1, Number(c.count) || 1)) || []);
+    m.st.zones = zones;
+    m.st.targetId = null;
+    if (zones.length && notes) notes.push(`${boss.name}「${c.name}」${why || "标记"}了 ${zones.map(z => z + " 区").join("、")}${T.markNote ? T.markNote(zones, boss, m) : ""}：${mechWhen(c, m.st.due)}。`);
+    return zones[0] || null;
+  }
   if (T.multi) {
     const list = [].concat(pick(executionCandidates(), boss, m) || []);
     m.st.targetIds = list.map(u => u.id);
@@ -161,7 +201,7 @@ function bossMechSync(notes) {
         mechMark(boss, m, notes);
         return;
       }
-      if (BOSS_MECH_TYPES[m.type].multi) return;   // 多目标：倒下的人标记就没了，不转给别人
+      if (BOSS_MECH_TYPES[m.type].multi || BOSS_MECH_TYPES[m.type].zone) return;   // 多目标：倒下的人标记就没了，不转给别人；区域标记不用转
       const t = mechTarget(m);
       if (!t || t.dead || t.dying || t.hidden || t._removed) {
         const old = t ? t.name : null;
@@ -206,8 +246,8 @@ function castBossMech(boss, m, notes) {
   m.st.casts = (Number(m.st.casts) || 0) + 1;
   m.st.uid = `${boss.id}:${m.type}:${m.st.casts}`;   // 这一次落下的编号（格挡队列里认它）
   const T = BOSS_MECH_TYPES[m.type];
-  const t = T.multi ? mechTargets(m) : mechTarget(m);
-  if (!t || (T.multi && !t.length)) notes.push(`${boss.name}「${c.name}」落空：没有能打的目标。`);
+  const t = T.zone ? (m.st.zones || []) : T.multi ? mechTargets(m) : mechTarget(m);
+  if (!t || ((T.multi || T.zone) && !t.length)) notes.push(`${boss.name}「${c.name}」落空：没有能打的目标。`);
   else T.cast(boss, m, c, t, notes);
   // 落下之后
   const limit = Number(c.times) || 0;
@@ -215,11 +255,13 @@ function castBossMech(boss, m, notes) {
     m.st.due = (Number(state.turnNo) || 1) + Math.max(1, Number(c.interval != null ? c.interval : c.turns) || 1);
     m.st.targetId = null;
     m.st.targetIds = null;
-    mechMark(boss, m, notes, T.multi ? "重新标记" : "重新锁定");
+    m.st.zones = null;
+    mechMark(boss, m, notes, T.multi || T.zone ? "重新标记" : "重新锁定");
   } else {
     m.st.done = true;
     m.st.targetId = null;
     m.st.targetIds = null;
+    m.st.zones = null;
   }
   if (c.hook && BOSS_MECH_HOOKS[c.hook]) BOSS_MECH_HOOKS[c.hook](boss, m, notes);
   return notes;
@@ -302,10 +344,60 @@ function castSpread(boss, m, c, marked, notes) {
   });
 }
 
+/* ---------- 踩塔 ---------- */
+function mechDamage(boss, spec) {
+  spec = spec || {};
+  return Math.max(0, Math.round((Number(spec.mult) || 0) * mechAtk(boss, spec) + (Number(spec.flat) || 0)));
+}
+function towerSoakers(z) {
+  return (state.units || []).filter(u => u.isPlayer && mechStanding(u) && Number(u.zone) === Number(z));
+}
+function mechHit(boss, u, dmg, element, baseBreak, m, extra) {
+  return dealTo(boss, u, {
+    atk: 0, mult: 0, flat: dmg, hits: 1, element, baseBreak: Number(baseBreak) || 0,
+    flags: Object.assign({ action: true, locked: true, mechId: m.st.uid, blockResolved: true, block: "none" }, extra || {})
+  });
+}
+function castTower(boss, m, c, zones, notes) {
+  const element = c.element || boss.element || "physical";
+  const need = Math.max(1, Number(c.need) || 1);
+  const soak = mechDamage(boss, c.soak);
+  const fail = c.fail || {};
+  notes.push(`【${c.name}】${boss.name} 的塔落下：${zones.map(z => `${z} 区（${towerSoakers(z).length}/${need} 人）`).join("、")}。`);
+  flushMechNotes(notes);
+  zones.forEach(z => {
+    const soakers = towerSoakers(z);
+    if (soakers.length >= need) {
+      appendLog(`${z} 区的塔有 ${soakers.length} 人踩住：每人挨 ${soak}（不能格挡）。`);
+      soakers.forEach(u => {
+        if (typeof spawnPopup === "function") spawnPopup(u, { kind: "status", text: "踩塔", element });
+        const out = mechHit(boss, u, soak, element, c.baseBreak, m, { tower: true });
+        if (out && out.res) appendLog(`${c.name}（${z} 区）→ ${u.name}：${Math.floor(Number(out.res.total) || 0)} 伤害。`);
+      });
+      return;
+    }
+    // 没人踩（人数不够）：失败惩罚
+    appendLog(`${z} 区的塔没人踩住（${soakers.length}/${need} 人）！${c.name}失败。`);
+    if (fail.kind === "hook") {
+      if (fail.hook && BOSS_MECH_HOOKS[fail.hook]) { const n2 = []; BOSS_MECH_HOOKS[fail.hook](boss, m, z, n2); n2.forEach(t => appendLog(t)); }
+      return;
+    }
+    const big = mechDamage(boss, fail);
+    const all = (state.units || []).filter(u => u.isPlayer && mechStanding(u));
+    appendLog(`塔爆发：我方全员各挨 ${big}（不能格挡）。`);
+    all.forEach(u => {
+      if (typeof spawnPopup === "function") spawnPopup(u, { kind: "status", text: "塔爆发！", element });
+      const out = mechHit(boss, u, big, element, fail.baseBreak, m, { towerFail: true });
+      if (out && out.res) appendLog(`${c.name}失败 → ${u.name}：${Math.floor(Number(out.res.total) || 0)} 伤害。`);
+    });
+  });
+}
+
 /** 标记类机制登记表：pick 默认选法、cast 落下时做什么、markNote 标记时补一句、multi 一次标记多人 */
 const BOSS_MECH_TYPES = {
   execution: { pick: "maxHp", cast: castExecution, markNote: (t) => `（血量上限 ${unitMaxHp(t)}）` },
   share: { pick: "random", cast: castShare, markNote: (t, boss, m) => `（伤害池 ${sharePool(boss, mechConfig(m))}，到时同区的友方平均分担）` },
+  tower: { pick: "randomZone", zone: true, cast: castTower, markNote: (zones, boss, m) => { const c = mechConfig(m); return `（每座塔至少 ${Math.max(1, Number(c.need) || 1)} 人踩住，每人挨 ${mechDamage(boss, c.soak)}；没人踩则${(c.fail || {}).kind === "hook" ? "触发严重惩罚" : `全员各挨 ${mechDamage(boss, c.fail)}`}）`; } },
   spread: { pick: "all", multi: true, cast: castSpread, markNote: (list, boss, m) => `（到时每人在自己的区爆炸一次，每次对同区每个友方 ${spreadBlast(boss, mechConfig(m))}，要分开站）` }
 };
 
@@ -340,9 +432,27 @@ function bossCastsBy(boss) {
   const turn = Number(state.turnNo) || 1;
   return markedMechs(boss).filter(m => m.st && !m.st.done && m.st.due != null).map(m => {
     const c = mechConfig(m);
-    const multi = BOSS_MECH_TYPES[m.type].multi;
-    const t = multi ? null : mechTarget(m);
-    return { type: m.type, name: c.name, left: Math.max(0, m.st.due - turn), target: multi ? `全员（${mechTargets(m).length}）` : t ? t.name : "", phase: c.phase };
+    const T = BOSS_MECH_TYPES[m.type];
+    const t = T.multi || T.zone ? null : mechTarget(m);
+    const target = T.zone ? (m.st.zones || []).map(z => z + "区").join("、") : T.multi ? `全员（${mechTargets(m).length}）` : t ? t.name : "";
+    return { type: m.type, name: c.name, left: Math.max(0, m.st.due - turn), target, phase: c.phase };
   });
 }
 function executionCastsBy(boss) { return bossCastsBy(boss); }
+/** 区域上的标记（踩塔）：[{ type, name, left, phase, by, need, have, soak, fail, delayed }] */
+function bossZoneMarks(z) {
+  if (!state.combatStarted) return [];
+  const turn = Number(state.turnNo) || 1;
+  const out = [];
+  (state.units || []).forEach(boss => {
+    if (boss.isPlayer || !mechBossAlive(boss)) return;
+    markedMechs(boss).forEach(m => {
+      if (!BOSS_MECH_TYPES[m.type].zone || !m.st || m.st.done || !(m.st.zones || []).map(Number).includes(Number(z))) return;
+      const c = mechConfig(m);
+      out.push({ type: m.type, name: c.name, left: Math.max(0, m.st.due - turn), phase: c.phase, by: boss.name, delayed: !!boss.stunned,
+        need: Math.max(1, Number(c.need) || 1), have: towerSoakers(z).length, soak: mechDamage(boss, c.soak),
+        fail: (c.fail || {}).kind === "hook" ? null : mechDamage(boss, c.fail) });
+    });
+  });
+  return out;
+}
