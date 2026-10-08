@@ -1052,7 +1052,7 @@ const Rogue = (function () {
   /** 长休计划只留 food / sleep 两张表（每个角色吃什么、用什么睡眠道具），不写就按默认 */
   function restChoice(plan) {
     const pick = (o) => (o && typeof o === "object" ? Object.assign({}, o) : undefined);
-    return { food: pick(plan && plan.food), sleep: pick(plan && plan.sleep) };
+    return { food: pick(plan && plan.food), sleep: pick(plan && plan.sleep), spit: pick(plan && plan.spit) };
   }
   function restPlan(run, plan) {
     return withParty(run, () => longRestNeeds(restChoice(plan))).out;

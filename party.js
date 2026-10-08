@@ -504,7 +504,7 @@ function livePartyCards() {
       shp: 11,
       shpMax: 11,
       // trigger：扳机解锁（霰弹枪模式）；ammo：剩下的胶囊弹药（按顺序，"red" 火 / "blue" 冰）；known：从队首数已经窥探到的枚数
-      resources: { trigger: false, ammo: [], known: 0, spitUsed: false },
+      resources: { trigger: false, ammo: [], seen: [], known: 0, spitUsed: false },
       linkedKits: ["xiaoxiao"],
       note: "兽人-蜥蜴典当行 · 冰/火 · 生存专精",
       attrs: { str: 5, con: 7, dex: 6, wil: 6, int: 8, sta: 7 },
@@ -668,9 +668,9 @@ function skillCost(id) {
     ras_aa: { ap: 1 }, ras_dump: { ap: 1 }, ras_flee: { ap: 1 }, ras_super: { ap: 1 }, ras_rampage: { ap: 1 }, ras_assist: {},
     ras_summon: { ap: 1, bonus: 1 },
     edc_drain: { ap: 1 }, edc_shock: { ap: 1 }, edc_flash: { ap: 1 }, edc_return: { ap: 1 },
-    longge_aa: { ap: 1 }, longge_chill: { ap: 1 }, longge_spit: { bonus: 1 }, longge_assist: {},
+    longge_aa: { ap: 1 }, longge_chill: { ap: 1 }, longge_spit: { bonus: 1 }, longge_assist: {}, longge_safety: { bonus: 1 },
     longge_summon: { ap: 1, bonus: 1 },
-    xiaoxiao_punch: { ap: 1 }, xiaoxiao_heal: { ap: 1 }, xiaoxiao_return: { ap: 1 }
+    xiaoxiao_punch: { ap: 1 }, xiaoxiao_heal: { ap: 1 }, xiaoxiao_combo: { ap: 1 }, xiaoxiao_return: { ap: 1 }
   };
   return map[id] || { ap: 1 };
 }
@@ -943,11 +943,13 @@ function skillList(unit) {
     add({ id: "longge_aa", name: "普通攻击", hint: gun ? "手杖：近距离 1atk 冰 +1击破 · 窥探1 / 霰弹枪：远距离 1.5atk 子弹属性 +1击破（耗 1 弹）" : "手杖 · 近距离 · 1atk 冰 +1击破 · 窥探1（扳机解锁后可用霰弹枪）" });
     add({ id: "longge_chill", name: "冷气穿刺", hint: gun ? "手杖：近距离施加刺骨 / 霰弹枪：远距离特殊射击（蓝弹刺骨并治疗该区友方，红弹 0.5atk 火）" : "手杖 · 近距离 · 施加刺骨" });
     add({ id: "longge_spit", name: "吐酸", hint: "附赠 · 近距离 · 角色本身 atk 的酸液伤害 · 每场一次（兽人-蜥蜴种族特长）", bare: true });
+    add({ id: "longge_safety", name: "解开保险", hint: "附赠 · 解锁扳机 · 查看最后一发子弹，可以把它移到最前面", minLv: 2 });
     add({ id: "longge_summon", name: "唤出小朋友", hint: "武器生物化" });
   }
   if (unit.kit === "xiaoxiao") {
     add({ id: "xiaoxiao_punch", name: "直冲拳", hint: "耗 1 弹 · 近距离 · 1atk 子弹属性 +2击破" });
     add({ id: "xiaoxiao_heal", name: "治疗支援", hint: "耗 1 弹 · 同区友方按子弹颜色治疗 · 然后收回武器" });
+    add({ id: "xiaoxiao_combo", name: "连续拳", hint: "耗 3 弹 · 近距离 · 全红升龙拳 3atk 火 +3击破 / 全蓝撼地拳 2atk 冰 +5击破 / 混合每发红 0.75atk 火、蓝 0.5atk 冰 +1击破", minLv: 2 });
     add({ id: "xiaoxiao_return", name: "收回为武器", hint: "需与龙哥同区" });
   }
   if (isUnarmed(unit)) {
@@ -991,7 +993,7 @@ function roleSkillDef(role, n, unit) {
   if (role === "护卫" && n === 2) return { id: "role_fear", name: "恐惧怒吼", hint: "行动点 · 距离1内敌人本回合虚弱 · 每场两次" };
   if (role === "护卫" && n === 3) return { id: "role_guard_strike", name: "防守反击", hint: "行动点 · 本回合首次成功格挡追加一次协助攻击" };
   if (role === "护卫" && n === 4) return { id: "role_all_reflect", name: "全反击", hint: "行动点 · 本回合全队成功格挡反伤伤害与击破 · 每场一次" };
-  if (role === "生存" && n === 1) return { id: "role_firstaid", name: "应急处理", hint: unit.kit === "longge" ? "行动点 · 距离1以内友方 2d4+3（半血取最大）" : "行动点 · 距离1以内友方 1d4+2（半血取最大）" };
+  if (role === "生存" && n === 1) return { id: "role_firstaid", name: "应急处理", hint: "行动点 · 距离1以内友方 1d4+2（半血取最大）" };
   if (role === "生存" && n === 2) return { id: "role_buffer", name: "缓冲", hint: "附赠 · 距离1以内友方 2d4+4 护盾 · 每场一次" };
   if (role === "生存" && n === 3) return { id: "role_dome", name: "防护罩", hint: "行动点 · 同区 atk+10 护盾罩 · 每场一次" };
   if (role === "生存" && n === 4) return { id: "role_renew", name: "续命", hint: "行动点 · 恢复最大生命 50%，濒死则起身并恢复 25% · 每场一次" };

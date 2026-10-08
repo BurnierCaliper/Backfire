@@ -170,6 +170,7 @@
         return `<div class="tr-row"><b>${esc(h.name)}</b> 长休需 ${c.water} ml 水 · ${c.food} 份食物 · 吃
           <select data-food="${esc(h.kit)}">${foods.map(id => `<option value="${id}" ${id === o.foodId ? "selected" : ""}>${esc(ITEM_CATALOG[id].name)}（有 ${bagCount(id)}）</option>`).join("")}</select>
           · 睡 <select data-sleep="${esc(h.kit)}"><option value="">不用睡眠道具</option>${opt.sleeps.map(x => `<option value="${esc(x.id)}" ${x.id === o.sleepId ? "selected" : ""}>${esc(x.name)}（每小时坚毅 +${x.bonus} · 有 ${x.have}）</option>`).join("")}</select>
+          ${o.spit ? `· 吐酸改成 <select data-spit="${esc(h.kit)}">${(opt.spitElements || []).map(e => `<option value="${esc(e.id)}" ${e.id === o.spit ? "selected" : ""}>${esc(e.name)}</option>`).join("")}</select>` : ""}
           · 今天还能短休 ${shortRestLeft(h)} 次</div>`;
       }).join("");
       const ck = LEDGER.clock == null ? 480 : LEDGER.clock;
@@ -618,7 +619,9 @@
       const sleep = {};
       P.querySelectorAll("[data-food]").forEach(s => { food[s.dataset.food] = s.value; });
       P.querySelectorAll("[data-sleep]").forEach(s => { sleep[s.dataset.sleep] = s.value; });
-      return { hours: Number($("tr-long-h").value) || 8, food, sleep, force };
+      const spit = {};
+      P.querySelectorAll("[data-spit]").forEach(s => { spit[s.dataset.spit] = s.value; });
+      return { hours: Number($("tr-long-h").value) || 8, food, sleep, spit, force };
     };
     on("tr-long", () => act(ruleCommand("longRest", { plan: restPlan(false) })));
     on("tr-long-force", () => act(ruleCommand("longRest", { plan: restPlan(true) })));

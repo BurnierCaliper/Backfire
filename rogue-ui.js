@@ -16,7 +16,7 @@
   let run = null;          // 当前这一局
   let lastNotes = [];      // 上一步发生了什么（显示在记录栏）
   let lastError = "";
-  let restSel = { food: {}, sleep: {} };   // 长休界面：每个角色选的食物 / 睡眠道具（没选的按默认）      // 上一步为什么没做成（显示在主面板顶上，免得按了像没反应）
+  let restSel = { food: {}, sleep: {}, spit: {} };   // 长休界面：每个角色选的食物 / 睡眠道具（没选的按默认）      // 上一步为什么没做成（显示在主面板顶上，免得按了像没反应）
 
   const save = () => { if (run && run.stage !== "over") dispatch({ type: "run.session", action: "save" }, { run }); };
   const query = (action, fields) => dispatch(Object.assign({ type: "run.query", action }, fields || {}), { run });
@@ -214,9 +214,11 @@
     const rows = o.heroes.map(h => {
       const foods = o.foods.map(f => `<option value="${esc(f.id)}" ${f.id === h.foodId ? "selected" : ""}>${esc(f.name)}${f.shp ? `（坚毅 +${f.shp}/份）` : ""} · 有 ${f.have}</option>`).join("");
       const sleeps = `<option value="">不用</option>` + o.sleeps.map(x => `<option value="${esc(x.id)}" ${x.id === h.sleepId ? "selected" : ""}>${esc(x.name)}（每小时坚毅 +${x.bonus}） · 有 ${x.have}</option>`).join("");
+      // 兽人-蜥蜴：长休时可以换吐酸攻击的属性
+      const spit = h.spit ? `<br><small>吐酸</small> <select data-rest-spit="${esc(h.kit)}">${(o.spitElements || []).map(e => `<option value="${esc(e.id)}" ${e.id === h.spit ? "selected" : ""}>${esc(e.name)}</option>`).join("")}</select>` : "";
       return `<tr><td><b>${esc(h.name)}</b></td><td>${h.water} ml · ${h.food} 份</td>
         <td><select data-rest-food="${esc(h.kit)}">${foods}</select></td>
-        <td><select data-rest-sleep="${esc(h.kit)}">${sleeps}</select></td></tr>`;
+        <td><select data-rest-sleep="${esc(h.kit)}">${sleeps}</select>${spit}</td></tr>`;
     }).join("");
     const bad = (a, b) => (a > b ? "r-bad" : "");
     const foodSum = Object.keys(need.food).map(id => {
@@ -688,6 +690,7 @@
     on("r-camp", () => act(Object.assign({ action: "camp" }, restSel)));
     body.querySelectorAll("[data-rest-food]").forEach(el => { el.onchange = () => { restSel.food[el.dataset.restFood] = el.value; render(); }; });
     body.querySelectorAll("[data-rest-sleep]").forEach(el => { el.onchange = () => { restSel.sleep[el.dataset.restSleep] = el.value; render(); }; });
+    body.querySelectorAll("[data-rest-spit]").forEach(el => { el.onchange = () => { restSel.spit = restSel.spit || {}; restSel.spit[el.dataset.restSpit] = el.value; render(); }; });
     on("r-next", () => act({ action: "nextAct" }));
     on("r-win", () => act({ action: "afterVictory", goOn: false }));
     on("r-more", () => act({ action: "afterVictory", goOn: true }));

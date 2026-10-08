@@ -1362,8 +1362,10 @@
             const options = list.flatMap(h => {
               if (h.kit === "longge") {
                 const ammo = ((h.resources || {}).ammo || []).length;
-                return [{ helper: h.id, label: h.name + " · 手杖", sub: "协助攻击 · 0.5 ATK 冰", extra: { mode: "cane" } }]
-                  .concat(ammo ? [{ helper: h.id, label: h.name + " · 霰弹枪", sub: "协助攻击 · 1.5 ATK", extra: { mode: "gun" } }] : []);
+                // 手杖有子弹时顺带治疗：每个能治疗的同区友方（含自己）各一个选项
+                const cane = ammo ? longgeHealOptions(h, target).map(u => ({ helper: h.id, label: `${h.name} · 手杖（治疗 ${u.name}）`, sub: "协助攻击 · 0.5 ATK 冰 · 耗 1 发治疗", extra: { mode: "cane", heal: u.id } }))
+                  : [{ helper: h.id, label: h.name + " · 手杖", sub: "协助攻击 · 0.5 ATK 冰", extra: { mode: "cane" } }];
+                return cane.concat(ammo ? [{ helper: h.id, label: h.name + " · 霰弹枪", sub: "协助攻击 · 1.5 ATK", extra: { mode: "gun" } }] : []);
               }
               if (h.kit !== "hiaki") return [{ helper: h.id, label: h.name, sub: "协助攻击" }];
               const r = h.resources || {}, blades = [];
@@ -1409,6 +1411,12 @@
             continue;
           }
           extra.mode = pick;
+          // 手杖有子弹：自己选治疗同区的哪一名友方（含自己；龙哥会移动到敌人那一区）
+          if (pick === "cane" && ammo) {
+            const opts = longgeHealOptions(helper, target).map(u => ({ label: u.name, sub: u.id === helper.id ? "自己" : `${u.zone} 区`, value: u.id }));
+            const heal = opts.length === 1 ? opts[0].value : await openChoice("龙哥 · 手杖治疗", `戳刺后会耗 1 发子弹治疗：选一名 ${target.zone} 区的友方（含自己）。蓝弹固定治疗等级 + 5，红弹治疗已损失血量的 40%。`, opts, { label: "让程序选（血量比例最低）", value: null });
+            if (heal) extra.heal = heal;
+          }
         }
         const bladeName = extra.blade === "naruto" ? "鳴門" : extra.blade === "niu" ? "丹生谷" : extra.mode === "gun" ? "霰弹枪" : extra.mode === "cane" ? "手杖" : "";
         await perform({ type: "assistAnswer", helper: choice || null, extra }, {
@@ -1421,6 +1429,12 @@
     }
   }
 
+  /** 龙哥手杖协助攻击能治疗的人：敌人所在区的友方，加上龙哥自己（他会移动过去） */
+  function longgeHealOptions(lg, target) {
+    const z = Number(target.zone);
+    const list = state.units.filter(u => u.isPlayer && unitAlive(u) && u.id !== lg.id && Number(u.zone) === z);
+    return [lg].concat(list);
+  }
   let choiceResolve = null;
   let choiceKeys = [];
   function openChoice(title, text, options, cancel) {
@@ -3214,6 +3228,7 @@
   /* ---------- 休整 ---------- */
   G.restFood = G.restFood || {};
   G.restSleep = G.restSleep || {};
+  G.restSpit = G.restSpit || {};
   function renderRestSheet() {
     const t = typeof exhaustTier === "function" ? exhaustTier() : 0;
     $("g-rest-time").innerHTML = `第 <b>${LEDGER.day}</b> 天 <b>${clockText(LEDGER.clock == null ? 480 : LEDGER.clock)}</b> · 距上次长休 <b>${durationText(LEDGER.hours || 0)}</b> · ` +
@@ -3254,10 +3269,21 @@
       ssel.value = h.dead ? "" : sleepFor(currentRestPlan(), h.kit);
       ssel.onchange = () => { G.restSleep[h.kit] = ssel.value; renderRestSheet(); };
       ssel.disabled = h.dead;
+      // 兽人-蜥蜴：长休时可以换吐酸攻击的属性
+      let psel = null;
+      if (typeof canSpit === "function" && canSpit(h.kit)) {
+        psel = document.createElement("select");
+        SPIT_ELEMENTS.forEach(e => { const o = document.createElement("option"); o.value = e; o.textContent = `长休后吐酸：${ELE[e] || e}`; psel.appendChild(o); });
+        psel.value = G.restSpit[h.kit] || spitElementOf(h.kit);
+        psel.onchange = () => { G.restSpit[h.kit] = psel.value; };
+        psel.disabled = h.dead;
+      }
       const sr = el("button", "g-btn", `短休（剩 ${shortRestLeft(h)}）`);
       sr.disabled = inFight || h.dead || shortRestLeft(h) <= 0;
       sr.onclick = () => { panelCommit({ action: "shortRest", kits: [h.kit] }); renderRestSheet(); };
-      act.append(fsel, ssel, sr);
+      act.append(fsel, ssel);
+      if (psel) act.append(psel);
+      act.append(sr);
       row.appendChild(act);
       box.appendChild(row);
     });
@@ -3291,7 +3317,7 @@
     const food = {};
     partyHeroes().forEach(h => { food[h.kit] = G.restFood[h.kit] || defaultFoodFor(); });
     const hsel = $("g-long-hours");
-    return { hours: Number(hsel && hsel.value) || 8, food, sleep: Object.assign({}, G.restSleep), force: !!($("g-long-force") && $("g-long-force").checked) };
+    return { hours: Number(hsel && hsel.value) || 8, food, sleep: Object.assign({}, G.restSleep), spit: Object.assign({}, G.restSpit), force: !!($("g-long-force") && $("g-long-force").checked) };
   }
 
   function renderSaveSheet() {

@@ -4677,7 +4677,8 @@ function assistSkillId(helper) {
  *   小朋友变回武器时解锁扳机；弹药打光后不能再解锁。
  * 被动「胶囊弹药」：6 发，红（火）蓝（冰）各 3 发，开战时顺序随机，按顺序消耗。窥探 N：从还没看过的那一发起，
  *   按顺序再知道 N 发的颜色。蓝弹用于治疗：固定（龙哥等级 + 5）；红弹用于治疗：该单位已损失血量的 40%。
- * 弹药记在龙哥身上（小朋友的直冲拳、治疗支援、反击也从这里扣）。
+ * 弹药记在龙哥身上（小朋友的直冲拳、治疗支援、反击也从这里扣）。子弹打光时扳机锁上。
+ * 每一发看没看过记在 seen（和 ammo 一一对应）；known = 从队首数连续看过的枚数（旧存档 / 后台用）。
  * 预演（伤害预览）里下一发还没窥探到时，按最小 / 最大两次分别当蓝弹 / 红弹算，不提前泄露颜色。 */
 const LONGGE_AMMO = { red: { name: "红弹", short: "红", element: "fire" }, blue: { name: "蓝弹", short: "蓝", element: "ice" } };
 function longgeOf() { return (state.units || []).find(u => u.kit === "longge" && !u.weaponOf) || null; }
@@ -4692,13 +4693,22 @@ function longgeRes(u) {
   if (!lg) return null;
   const r = lg.resources = lg.resources || {};
   if (!Array.isArray(r.ammo)) r.ammo = [];
-  r.known = Math.max(0, Math.min(r.ammo.length, Number(r.known) || 0));
+  if (!Array.isArray(r.seen) || r.seen.length !== r.ammo.length) {
+    const k = Math.max(0, Math.min(r.ammo.length, Number(r.known) || 0));
+    r.seen = r.ammo.map((c, i) => i < k);
+  }
+  longgeSyncKnown(r);
   return r;
+}
+function longgeSyncKnown(r) {
+  let k = 0;
+  while (k < r.seen.length && r.seen[k]) k++;
+  r.known = k;
 }
 function longgeAmmoText(u) {
   const r = longgeRes(u);
   if (!r) return "";
-  const seq = r.ammo.map((c, i) => i < r.known ? (LONGGE_AMMO[c] || {}).short || "?" : "?").join("");
+  const seq = r.ammo.map((c, i) => r.seen[i] ? (LONGGE_AMMO[c] || {}).short || "?" : "?").join("");
   return `弹药 ${r.ammo.length}/6${r.ammo.length ? "（" + seq + "）" : ""}`;
 }
 function longgeGunReady(u) {
@@ -4719,16 +4729,19 @@ function longgeUnlock(u, lines, why) {
   r.trigger = true;
   lines.push(`${why ? why + "：" : ""}解锁扳机，可以使用霰弹枪模式。`);
 }
-/** 窥探 n：按顺序多知道 n 发子弹的颜色 */
+/** 窥探 n：按顺序（从队首起还没看过的）多知道 n 发子弹的颜色 */
 function longgePeek(u, n, lines) {
   const r = longgeRes(u);
   if (!r) return;
   if (!r.ammo.length) { lines.push("窥探：已经没有子弹了。"); return; }
-  const from = r.known;
-  r.known = Math.min(r.ammo.length, r.known + n);
-  if (r.known === from) { lines.push("窥探：剩下的子弹都已经看过了。"); return; }
-  const seen = r.ammo.slice(from, r.known).map(c => LONGGE_AMMO[c].name).join("、");
-  lines.push(`窥探 ${n}：第 ${from + 1}${r.known - from > 1 ? "–" + r.known : ""} 发是${seen}。`);
+  const got = [];
+  for (let i = 0; i < r.ammo.length && got.length < n; i++) {
+    if (r.seen[i]) continue;
+    r.seen[i] = true;
+    got.push(`第 ${i + 1} 发是${LONGGE_AMMO[r.ammo[i]].name}`);
+  }
+  longgeSyncKnown(r);
+  lines.push(got.length ? `窥探 ${n}：${got.join("，")}。` : "窥探：剩下的子弹都已经看过了。");
 }
 /** 按顺序取一发子弹；没有返回 null */
 function longgeTakeBullet(u, lines) {
@@ -4736,10 +4749,12 @@ function longgeTakeBullet(u, lines) {
   if (!r || !r.ammo.length) return null;
   let c = r.ammo[0];
   // 伤害预览：没窥探到的那一发，最小 / 最大两次预演分别当蓝 / 红，不提前透露真正的颜色
-  if (r.known < 1 && typeof window !== "undefined" && window.GAME && window.GAME.sim) c = takeDice(1, 2, 0).total <= 1 ? "blue" : "red";
+  if (!r.seen[0] && typeof window !== "undefined" && window.GAME && window.GAME.sim) c = takeDice(1, 2, 0).total <= 1 ? "blue" : "red";
   r.ammo.shift();
-  r.known = Math.max(0, r.known - 1);
+  r.seen.shift();
+  longgeSyncKnown(r);
   lines.push(`消耗 1 发${LONGGE_AMMO[c].name}（剩 ${r.ammo.length} 发）。`);
+  if (!r.ammo.length && r.trigger) { r.trigger = false; lines.push("子弹打光了，扳机锁上。"); }
   return c;
 }
 /** 用一发子弹治疗：蓝弹（龙哥等级 + 5），红弹（已损失血量的 40%） */
@@ -5088,6 +5103,7 @@ function finishAssist(helperId, extra) {
   if (helper.kit === "longge" && extra.mode) {
     helper.resources = helper.resources || {};
     helper.resources.assistMode = extra.mode === "gun" ? "gun" : "cane";
+    helper.resources.assistHeal = typeof extra.heal === "string" ? extra.heal : null;
   }
   if (helper.kit === "hiaki" && extra.blade) {
     helper.resources = helper.resources || {};
@@ -5517,6 +5533,7 @@ function resetBattleFlags(u) {
   if (u.kit === "helu") { r.scanned = false; r.lockLeft = 1; }
   if (u.kit === "torque") r.acidCharge = null;
   if (u.kit === "longge") { r.trigger = false; r.ammo = longgeAmmoFresh(); r.known = 0; r.spitUsed = false; r.assistMode = null; }
+  if (typeof canSpit === "function" && canSpit(u.kit)) r.spitElement = spitElementOf(u.kit);   // 吐酸的属性（长休时改，记在队伍档案）
   u.focuses = [];
   u.bondAtk = 0;
   u._hurtRound = null;
@@ -7192,6 +7209,14 @@ function skillFlowSteps(id, actor, picks) {
         zoneDist(actor.zone, u.zone, state.zoneMode) <= 1)
     }];
   }
+  if (id === "longge_safety") {
+    // 解开保险：看最后一发（选的时候就看到了），再决定要不要把它挪到最前面
+    const r = longgeRes(actor);
+    if (!r || r.ammo.length < 2) return [];
+    const last = LONGGE_AMMO[r.ammo[r.ammo.length - 1]].name;
+    return [{ key: "move", type: "choice", optional: false, label: `最后一发是${last}。要把它移到最前面吗？`,
+      options: [{ value: "front", label: `移到最前（下一发就是${last}）` }, { value: "stay", label: "留在最后" }] }];
+  }
   if (id === "longge_aa" || id === "longge_chill") {
     // 枪管手杖：扳机解锁、有子弹时先选手杖（近距离）还是霰弹枪（远距离 = 距离 1）
     const steps = [];
@@ -8414,6 +8439,8 @@ const SKILL_REQUIREMENT = {
   ruby_summon:    (a) => weaponSummonWhy(a, "mint"),
   longge_summon:  (a) => weaponSummonWhy(a, "xiaoxiao"),
   longge_spit:    (a) => res(a).spitUsed ? "本场已经吐过酸了（一局战斗仅限一次）" : null,
+  longge_safety:  (a) => (longgeRes(a) || { ammo: [] }).ammo.length ? null : "没有子弹，扳机解不开",
+  xiaoxiao_combo: (a) => (longgeRes(a) || { ammo: [] }).ammo.length >= 3 ? null : "连续拳要 3 发子弹",
   xiaoxiao_punch: (a) => (longgeRes(a) || { ammo: [] }).ammo.length ? null : "没有子弹了",
   xiaoxiao_heal:  (a) => (longgeRes(a) || { ammo: [] }).ammo.length ? null : "没有子弹了",
   yuito_summon:   (a) => weaponSummonWhy(a, "latte"),
@@ -9847,9 +9874,7 @@ function runSkillInner(id, optRun) {
       }
     } else if (id === "role_firstaid") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
-      // 龙哥（角色卡）：应急处理是 2d4+3（比手册多 1d4+1），每 5 级照样 +1d4+1
-      const lgBonus = a.kit === "longge" ? 1 : 0;
-      const n = addedDiceByLevel(a.level) + lgBonus;
+      const n = addedDiceByLevel(a.level);
       const bonus = 1 + n;
       const healR = takeDice(n, 4, bonus);
       let heal = healR.total;
@@ -10185,6 +10210,23 @@ function runSkillInner(id, optRun) {
       const ele = a.resources.spitElement || "acid";
       hitOne(a, t, { element: ele, mult: 1, baseBreak: 0, atk: Math.max(0, (a.personalAtk || 0) - ((typeof exhaustTierOf === "function" && exhaustTierOf(a) >= 2) ? 3 : 0)), atkRange: "melee" });
       lines.push("吐酸：本场战斗已用。");
+    } else if (id === "longge_safety") {
+      // 解开保险：解锁扳机；立刻查看最后一发子弹的颜色，可以选择把它移到队列最前方
+      const r = longgeRes(a);
+      longgeUnlock(a, lines, "解开保险");
+      const n = r.ammo.length;
+      if (n) {
+        r.seen[n - 1] = true;
+        const c = r.ammo[n - 1];
+        lines.push(`查看最后一发：${LONGGE_AMMO[c].name}。`);
+        const fl = state.skillFlow;
+        if (n > 1 && fl && fl.picks && fl.picks.move === "front") {
+          r.ammo.unshift(r.ammo.pop());
+          r.seen.unshift(r.seen.pop());
+          lines.push(`把这发${LONGGE_AMMO[c].name}移到最前面：下一发就是它。`);
+        }
+        longgeSyncKnown(r);
+      }
     } else if (id === "longge_summon") {
       const w = spawnWeapon(a, "xiaoxiao");
       lines.push(w ? "小朋友已进入战场。" : "小朋友已在场。");
@@ -10192,7 +10234,8 @@ function runSkillInner(id, optRun) {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       const r = longgeRes(a);
       let mode = r.assistMode === "gun" ? "gun" : "cane";
-      r.assistMode = null;
+      const healId = r.assistHeal || null;
+      r.assistMode = null; r.assistHeal = null;
       longgeUnlock(a, lines, "协助攻击");
       if (mode === "gun" && !r.ammo.length) { lines.push("没有子弹，改用手杖。"); mode = "cane"; }
       if (mode === "cane") {
@@ -10200,8 +10243,11 @@ function runSkillInner(id, optRun) {
         a.zone = t.zone;
         hitOne(a, t, { element: "ice", mult: 0.5, baseBreak: 0, atk, flags: { action: true, assist: true } });
         if (r.ammo.length) {
+          // 治疗对象：自己选的同区友方（含自己）；没选或已经不在同区就给血量比例最低的
+          const picked = healId ? unitById(healId) : null;
+          const ok = picked && picked.isPlayer && !picked.dead && !picked.hidden && Number(picked.zone) === Number(a.zone);
           const c = longgeTakeBullet(a, lines);
-          longgeBulletHeal(c, longgeHealPick(a), lines);
+          longgeBulletHeal(c, ok ? picked : longgeHealPick(a), lines);
         }
       } else {
         const c = longgeTakeBullet(a, lines);
@@ -10213,6 +10259,27 @@ function runSkillInner(id, optRun) {
       const c = longgeTakeBullet(a, lines);
       if (!c) lines.push("没有子弹了。");
       else hitOne(a, t, { element: LONGGE_AMMO[c].element, mult: 1, baseBreak: 2, atk, atkRange: "melee" });
+    } else if (id === "xiaoxiao_combo") {
+      // 连续拳：消耗 3 发。全红 → 升龙拳 3atk 火 +3 击破；全蓝 → 撼地拳 2atk 冰 +5 击破；
+      // 其余：每发红弹 0.75atk 火，每发蓝弹 0.5atk 冰 +1 击破
+      if (!needT()) return paintSkillLog(lines.join("\n"));
+      const shots = [longgeTakeBullet(a, lines), longgeTakeBullet(a, lines), longgeTakeBullet(a, lines)].filter(Boolean);
+      if (shots.length < 3) lines.push("子弹不够 3 发。");
+      else if (shots.every(c => c === "red")) {
+        lines.push("全是红弹：升龙拳！");
+        hitOne(a, t, { element: "fire", mult: 3, baseBreak: 3, atk, atkRange: "melee" });
+      } else if (shots.every(c => c === "blue")) {
+        lines.push("全是蓝弹：撼地拳！");
+        hitOne(a, t, { element: "ice", mult: 2, baseBreak: 5, atk, atkRange: "melee" });
+      } else {
+        lines.push(`连续拳：${shots.map(c => LONGGE_AMMO[c].short).join("")}。`);
+        shots.forEach((c, i) => {
+          if (t.dead) return;
+          hitOne(a, t, c === "red"
+            ? { element: "fire", mult: 0.75, baseBreak: 0, atk, atkRange: "melee", usePrep: i === 0 }
+            : { element: "ice", mult: 0.5, baseBreak: 1, atk, atkRange: "melee", usePrep: i === 0 });
+        });
+      }
     } else if (id === "xiaoxiao_heal") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       if (!t.isPlayer || Number(t.zone) !== Number(a.zone)) { lines.push("治疗支援只能给同区的友方。"); return paintSkillLog(lines.join("\n")); }
@@ -10686,7 +10753,12 @@ function dmSetPassive(u, key, value) {
   }
   if (key === "mood" && typeof setMood === "function") setMood(u, v, null);   // 诺拉和维塔斯一起变
   else u.resources[key] = v;
-  if (u.kit === "longge") u.resources.known = Math.min((u.resources.ammo || []).length, Number(u.resources.known) || 0);
+  if (u.kit === "longge") {
+    // 改了子弹或已窥探枚数：从队首起前 known 发算看过
+    const k = Math.min((u.resources.ammo || []).length, Number(u.resources.known) || 0);
+    u.resources.seen = (u.resources.ammo || []).map((c, i) => i < k);
+    longgeRes(u);
+  }
   const show = (x) => spec.type === "bool" ? (x ? "是" : "否")
     : spec.type === "select" ? ((spec.options.find(o => o[0] === x) || [x, x])[1])
     : spec.type === "ally" ? ((unitById(x) || {}).name || "无")

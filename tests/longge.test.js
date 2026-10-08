@@ -174,17 +174,17 @@ test("鳞片：敌人的能量攻击打龙哥 +25%", () => {
   assert.ok(S);
 });
 
-test("应急处理（龙哥）：2d4+3，半血以下取最大 11", () => {
+test("应急处理（龙哥）：照手册 1d4+2，半血以下取最大 6", () => {
   const { c, S, lg } = setup();
   const kolt = c.findKit("kolt", S.units);
   kolt.zone = lg.zone;
   kolt.layers.forEach(l => { l.current = 1; });
   const hp0 = c.totalHp(kolt);
   cmd(c, { actor: lg.id, skill: "role_firstaid", target: kolt.id });
-  assert.equal(c.totalHp(kolt) - hp0, 11);
+  assert.equal(c.totalHp(kolt) - hp0, 6);
 });
 
-test("小朋友：装甲 12、架势 4、耐久 5（每五级 +1）、atk 5；格挡 60%，守护龙哥 75%", () => {
+test("小朋友：装甲 12、架势 4、耐久 5（每两级 +1）、atk 5；格挡 60%，守护龙哥 75%", () => {
   const { c, S, lg } = setup();
   cmd(c, { actor: lg.id, skill: "longge_summon" });
   const w = c.findKit("xiaoxiao", S.units);
@@ -194,15 +194,14 @@ test("小朋友：装甲 12、架势 4、耐久 5（每五级 +1）、atk 5；�
   assert.equal(w.defMax, 4);
   assert.equal(w.atk, 5);
   assert.equal(c.weaponBaseDur("xiaoxiao", 1), 5);
-  assert.equal(c.weaponBaseDur("xiaoxiao", 4), 5);
-  assert.equal(c.weaponBaseDur("xiaoxiao", 5), 6);
-  assert.equal(c.weaponBaseDur("edc", 2), 6, "其他武器照旧每两级 +1");
+  assert.equal(c.weaponBaseDur("xiaoxiao", 2), 6, "和其他武器一样每两级 +1");
+  assert.equal(c.weaponBaseDur("xiaoxiao", 5), 7);
   const kolt = c.findKit("kolt", S.units);
   const foe = S.units.find(u => !u.isPlayer);
   assert.equal(c.finalBlockChance(w, foe, kolt), 60);
   assert.equal(c.finalBlockChance(w, foe, lg), 75);
   assert.ok(c.isUnarmed(lg), "唤出后龙哥空手");
-  assert.deepEqual(plain(c.skillList(w).map(s => s.id)), ["xiaoxiao_punch", "xiaoxiao_heal", "xiaoxiao_return"]);
+  assert.deepEqual(plain(c.skillList(w).map(s => s.id)), ["xiaoxiao_punch", "xiaoxiao_heal", "xiaoxiao_return"], "连续拳要武器 2 级");
 });
 
 test("小朋友：直冲拳耗 1 发 1atk 子弹属性 +2 击破；格挡成功反击；治疗支援后收回并解锁扳机", () => {
@@ -252,4 +251,98 @@ test("主持人后台：可以改剩余子弹（红 / 蓝顺序）、已窥探�
   c.dmSetPassive(lg, "trigger", true);
   assert.equal(lg.resources.trigger, true);
   assert.match(c.resourceText(lg), /扳机解锁 · 弹药 3\/6（红蓝红）/);
+});
+
+test("子弹打光扳机锁上；手杖协助攻击可以自己选治疗同区的谁（含自己）", () => {
+  const { c, S, lg, foes } = setup();
+  lg.resources.trigger = true;
+  lg.resources.ammo = ["red"];
+  lg.resources.seen = [true];
+  cmd(c, { actor: lg.id, skill: "longge_aa", target: foes[1].id, picks: { mode: "gun", target: foes[1].id } });
+  assert.equal(lg.resources.ammo.length, 0);
+  assert.equal(lg.resources.trigger, false, "打光就锁上");
+  // 手杖协助：选治疗自己
+  const s2 = setup("LG-HEAL");
+  const kolt = s2.c.findKit("kolt", s2.S.units);
+  kolt.zone = 2; kolt.layers.forEach(l => { l.current = 1; });
+  s2.lg.layers.forEach(l => { l.current = 6; });
+  s2.lg.resources.ammo = ["blue", "red"]; s2.lg.resources.seen = [false, false];
+  s2.c.Commands.dispatch(plain({ type: "assistAnswer", helper: null, extra: {} }));   // 空队列：什么都不做
+  s2.S.assistQueue = [{ targetId: s2.foes[1].id, breakerId: kolt.id }];
+  s2.c.finishAssist(s2.lg.id, { mode: "cane", heal: s2.lg.id });
+  assert.equal(s2.lg.zone, 2);
+  assert.equal(s2.c.totalHp(s2.lg), 12, "蓝弹治疗自己 +6（虽然柯尔特血更少）");
+  assert.equal(s2.c.totalHp(kolt), 1);
+  assert.ok(S);
+});
+
+test("解开保险（2 级，附赠）：解锁扳机，查看最后一发，可以移到最前", () => {
+  const { c, lg } = setup();
+  assert.ok(!c.skillList(lg).some(s => s.id === "longge_safety"), "1 级还没有");
+  lg.level = 2;
+  assert.ok(c.skillList(lg).some(s => s.id === "longge_safety"));
+  lg.resources.ammo = ["blue", "blue", "red"]; lg.resources.seen = [false, false, false];
+  const steps = c.skillFlowSteps("longge_safety", lg, {});
+  assert.match(steps[0].label, /最后一发是红弹/);
+  cmd(c, { actor: lg.id, skill: "longge_safety", picks: { move: "front" } });
+  assert.equal(lg.resources.trigger, true);
+  assert.deepEqual(plain(lg.resources.ammo), ["red", "blue", "blue"]);
+  assert.deepEqual(plain(lg.resources.seen), [true, false, false]);
+  assert.equal(lg.bonus, 1, "附赠动作");
+  assert.match(c.resourceText(lg), /弹药 3\/6（红\?\?）/);
+  // 不移动：最后一发记成看过
+  lg.bonus = 1;
+  cmd(c, { actor: lg.id, skill: "longge_safety", picks: { move: "stay" } });
+  assert.deepEqual(plain(lg.resources.seen), [true, false, true]);
+  assert.match(c.resourceText(lg), /（红\?蓝）/);
+});
+
+test("连续拳（武器 2 级）：全红升龙拳 3atk 火 +3，全蓝撼地拳 2atk 冰 +5，混合逐发结算", () => {
+  const run = (ammo) => {
+    const { c, S, lg, foes } = setup("LG-COMBO");
+    lg.weaponLevels = Object.assign({}, lg.weaponLevels, { xiaoxiao: 2 });
+    cmd(c, { actor: lg.id, skill: "longge_summon" });
+    const w = c.findKit("xiaoxiao", S.units);
+    w.zone = 1; w.ap = 3;
+    lg.resources.ammo = ammo.slice(); lg.resources.seen = ammo.map(() => true);
+    const pops = capturePops(c);
+    const def0 = foes[0].def;
+    cmd(c, { actor: w.id, skill: "xiaoxiao_combo", target: foes[0].id });
+    return { pops, brk: def0 - foes[0].def, w, lg, c };
+  };
+  const red = run(["red", "red", "red"]);
+  assert.ok(red.c.skillList(red.w).some(s => s.id === "xiaoxiao_combo"));
+  assert.equal(red.pops.length, 1);
+  assert.equal(red.pops[0].element, "fire");
+  assert.equal(red.pops[0].value, Math.floor(red.w.atk * 3 * 1.5), "火打血肉 +50%");
+  assert.equal(red.brk, 3);
+  const blue = run(["blue", "blue", "blue", "red"]);
+  assert.equal(blue.pops[0].element, "ice");
+  assert.equal(blue.pops[0].value, blue.w.atk * 2);
+  assert.equal(blue.brk, 5);
+  assert.equal(blue.lg.resources.ammo.length, 1);
+  const mix = run(["red", "blue", "blue"]);
+  assert.deepEqual(plain(mix.pops.map(p => p.element)), ["fire", "ice", "ice"]);
+  assert.equal(mix.brk, 2);
+  const few = run(["red", "blue"]);
+  assert.ok(few.c.skillRequirementError(few.w, "xiaoxiao_combo"), "不到 3 发不能用");
+});
+
+test("吐酸属性：长休时换（记在队伍档案），下一场开战按新属性", () => {
+  const { c, lg, foes } = setup();
+  const opt = c.longRestOptions({});
+  const row = opt.heroes.find(h => h.kit === "longge");
+  assert.equal(row.spit, "acid");
+  assert.ok(opt.heroes.find(h => h.kit === "kolt").spit === null, "不是蜥蜴没有吐酸");
+  c.S.state.kuizhi = 0;
+  const r = c.ledgerLongRest({ force: true, spit: { longge: "fire", kolt: "ice" } }, []);
+  assert.match(r.notes.join("\n"), /吐酸攻击属性：酸 → 火/);
+  assert.equal(c.spitElementOf("longge"), "fire");
+  assert.equal(c.LEDGER.save().spit.longge, "fire", "存档带上");
+  c.resetBattleFlags(lg);
+  assert.equal(lg.resources.spitElement, "fire");
+  lg.zone = foes[0].zone; lg.bonus = 1;
+  const pops = capturePops(c);
+  cmd(c, { actor: lg.id, skill: "longge_spit", target: foes[0].id });
+  assert.equal(pops[0].element, "fire");
 });

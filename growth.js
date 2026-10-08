@@ -99,8 +99,8 @@ const WEAPON_GROWTH = {
   torque:   { layer: "armor",  baseHp: 14, hp: 6, baseDef: 4, baseDur: 6 },
   ecmo:     { layer: "armor",  baseHp: 8,  hp: 4, baseDef: 3, baseDur: 4 },
   edc:      { layer: "armor",  baseHp: 10, hp: 4, baseDef: 4, baseDur: 5 },
-  // 小朋友（龙哥的武器）：装甲 12、每级 +5；耐久 5、每五级 +1（durEvery）；架势 4
-  xiaoxiao: { layer: "armor",  baseHp: 12, hp: 5, baseDef: 4, baseDur: 5, durEvery: 5 }
+  // 小朋友（龙哥的武器）：装甲 12、每级 +5；耐久 5、和其他武器一样每两级 +1；架势 4
+  xiaoxiao: { layer: "armor",  baseHp: 12, hp: 5, baseDef: 4, baseDur: 5 }
 };
 /** 武器的耐久上限（没装图纸时）：基础耐久 + 每 durEvery 级 +1（没写就是每两级） */
 function weaponBaseDur(kit, lv) {
