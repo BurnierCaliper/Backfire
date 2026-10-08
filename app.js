@@ -6963,8 +6963,17 @@ function skillFlowSteps(id, actor, picks) {
     const d = next === "acid" ? 1 : 0;
     const units = fieldUnits().filter(u => !u.isPlayer && !u.dead && !u.hidden && !u.fused &&
       zoneDist(actor.zone, u.zone, maxZ) === d);
-    return [{ key: "target", type: "unit", optional: true,
-      label: next === "acid" ? "换成酸液炮：打距离 1 的一名敌人（可不选）" : "换成电钻：打同区的一名敌人（可不选）", units }];
+    const steps = [];
+    // 换刀头本身触发柯尔特的被动「更换刀头」：先选柯尔特同区一名敌人切刀追击（0.5×atk，可不选）
+    const passiveOk = k && !k.dead && !k.hidden && (typeof passiveOn !== "function" || passiveOn(k));
+    if (passiveOk) {
+      const foes = koltMeleeSwapTargets(k);
+      if (foes.length) steps.push({ key: "swapTarget", type: "unit", optional: true,
+        label: `更换刀头追击：柯尔特同区一名敌人 ${typeof passivePlus === "function" && passivePlus(k, 1) ? "0.75" : "0.5"}×atk（可不选）`, units: foes });
+    }
+    steps.push({ key: "target", type: "unit", optional: true,
+      label: next === "acid" ? "换成酸液炮，打距离 1 的一名敌人 1×atk +1 击破（可不选）" : "换成电钻，打同区的一名敌人 1×atk +1 击破（可不选）", units });
+    return steps;
   }
   if (id === "kolt_short") {
     // 只给场地能变成高压的区域（固有场地 / 深渊 / 损毁地面 / 被锁定的区不能选）
@@ -9919,7 +9928,19 @@ function runSkillInner(id, optRun) {
       else hitOne(a, t, { element: "electric", mult: 0.4, hits: 3, baseBreak: 2, breakOnce: true, atk, atkRange: "melee" });
     } else if (id === "kolt_swap" || id === "torque_swap") {
       const next = swapKoltBit(a, lines);
-      const tgt = (state.skillFlow && state.skillFlow.picks.target) ? unitById(state.skillFlow.picks.target) : t;
+      // 拆装部件换了刀头 → 柯尔特的被动「更换刀头」照样触发一次切刀追击（同区一名敌人，0.5×atk / 被动+ 0.75×atk）
+      if (id === "torque_swap") {
+        const k = findKit("kolt", state.units);
+        const st = state.skillFlow && state.skillFlow.picks && state.skillFlow.picks.swapTarget ? unitById(state.skillFlow.picks.swapTarget) : null;
+        if (k && st && !st.dead && Number(st.zone) === Number(k.zone) && (typeof passiveOn !== "function" || passiveOn(k))) {
+          const mult = typeof passivePlus === "function" && passivePlus(k, 1) ? 0.75 : 0.5;
+          lines.push(`更换刀头：${k.name} 切刀追击 ${st.name}。`);
+          hitOne(k, st, { element: next === "acid" ? "acid" : "electric", mult, baseBreak: 0, atk: effectiveAtk(k, state.units), atkRange: "melee", flags: { action: true, blockResolved: true, flyFree: true } });
+        }
+      }
+      // 走了分步就只认分步里选的目标（拆装部件第二步可以不选；不能把第一步追击选的敌人当成它的目标）
+      const fl = state.skillFlow;
+      const tgt = fl && fl.picks ? (fl.picks.target ? unitById(fl.picks.target) : null) : t;
       if (tgt) {
         // 柯尔特被动「更换刀头」：不管换成哪种刀头，都打同区域（近距离）的敌人，0.5×atk。
         // 扭矩的「拆装部件」：按换上去的刀头的对应距离打（电钻同区 / 酸液炮距离 1），1×atk + 1 击破
@@ -10036,6 +10057,12 @@ function runSkillInner(id, optRun) {
       if (!tgt || !ally) { lines.push("先选拆卸目标和接收友方。"); return paintSkillLog(lines.join("\n")); }
       const stunnedBefore = !!tgt.stunned;
       dealBreak(tgt, 2, "electric", lines, "拆卸");
+      // 拆卸是对一个敌人的单体攻击：照样触发柯尔特「过度自信」的嘲讽（击破不走 dealTo，要单独加）
+      const koltT = findKit("kolt", state.units);
+      if (!tgt.isPlayer && !tgt.dead && (typeof passiveOn !== "function" || passiveOn(koltT || a))) {
+        tgt.tauntTo = (koltT || a).id;
+        lines.push(`过度自信：${tgt.name} 被嘲讽，下次攻击必须打柯尔特。`);
+      }
       // 卡面：这次攻击行动造成失衡才提升到 1.5×；本来就失衡的不算
       const brokeNow = !stunnedBefore && !!tgt.stunned;
       const amount = Math.floor(atk * (brokeNow ? 1.5 : 1));
