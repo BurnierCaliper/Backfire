@@ -2251,6 +2251,7 @@ function resetBattleRecords() {
   state.battleScore = { total: 0, parts: {} };
   state.scoreSeen = {};
   state.battleGains = { xp: 0, kuizhi: 0 };
+  state.lastBrokenLayer = null;   // 废物利用：每场重新记（上一场打碎的层不能拿来用）
 }
 /** 这场的基准分：把出现过的每个敌人（含中途召唤的）「打空血、打空一次架势、打进一次失衡、击杀」的分加起来，
  *  按第一次见到时的数值算。这样架势高的敌人、血厚的敌人都在同一把尺子上。 */
@@ -5532,7 +5533,7 @@ function resetBattleFlags(u) {
   if (u.kit === "xia") { r.engine = false; r.fuel = 0; }
   if (u.kit === "yuito") r.bean = Math.max(1, Number(r.bean) || 0);
   if (u.kit === "ruby" && r.nano == null) r.nano = 40;
-  if (u.kit === "kolt") r.bit = r.bit || "drill";
+  if (u.kit === "kolt") { r.bit = r.bit || "drill"; r.rotStore = {}; }
   if (u.kit === "ras") { r.energyPct = 0; r.light = 0; r.unstable = false; }
   if (u.kit === "helu") { r.scanned = false; r.lockLeft = 1; }
   if (u.kit === "torque") r.acidCharge = null;
@@ -8442,6 +8443,9 @@ const SKILL_REQUIREMENT = {
     : !res(a).scanned ? "沙暴中再用要先做一次环境扫描才能调转风向"
     : state.weatherLock ? `天气被「${state.weatherLock}」锁定，无法调转风向` : null,
   torque_strip:   (a) => ((findKit("kolt", state.units) || {}).resources || {}).bit === "acid" ? "拆卸模式需要电钻模式" : null,
+  // 废物利用：要有「还没利用过的被摧毁的敌人血量层」或腐坏抛射攒下的记录才能用（同一层不能反复利用）
+  kolt_scrap:     (a) => state.lastBrokenLayer || Object.keys(res(a).rotStore || {}).some(k => (Number(res(a).rotStore[k]) || 0) > 0)
+    ? null : "还没有可以利用的残骸（被摧毁的敌人血量层，或腐坏抛射留下的记录）",
   kolt_rot:       (a) => ((findKit("kolt", state.units) || a).resources || {}).bit !== "acid" ? "腐坏抛射需要酸液炮模式" : null,
   kolt_mod:       (a) => ((findKit("kolt", state.units) || a).resources || {}).bit === "acid" ? "「非法」改装需要电钻模式" : null,
   edc_drain:      (a) => {
@@ -9995,6 +9999,7 @@ function runSkillInner(id, optRun) {
         const amt = Math.min(Math.floor(Number(rec.lost) || 0), cap);
         grant(rec.type, amt, "废物利用");
         if ((Number(rec.lost) || 0) > cap) lines.push(`（那一层有 ${Math.floor(rec.lost)}，按生命上限一半封顶为 ${cap}）`);
+        state.lastBrokenLayer = null;   // 这一层已经利用过了：要等下一个被摧毁的层
       }
       // 腐坏抛射留下的腐蚀记录：这一次废物利用一起领取，然后清空
       const rot = (a.resources && a.resources.rotStore) || {};

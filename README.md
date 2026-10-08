@@ -366,6 +366,7 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **废物利用不能反复利用同一层**（`app.js · SKILL_REQUIREMENT.kolt_scrap / runSkill kolt_scrap / resetBattleRecords`、`skill-text.js`）：以前「上一个被摧毁的敌人血量层」用过之后还留着，可以一直用同一层回血；而且这个记录跨战斗保留，开局就能用。现在用过一次就清掉，要等新的敌人血量层被摧毁或腐坏抛射攒下新的记录才能再用；每场开战时清空（腐坏抛射的记录也清空），开局没有可用的残骸时不能用。
 - **生存职责：缓冲不再给磁场护盾，续命直接救回濒死前的状态**（`app.js · addShieldLayer / runSkill role_buffer · role_renew`、`skill-text.js`、`party.js`）
   - 加护盾的公用函数以前不管是谁给的都标成「川川给的」，所以缓冲（以及 Helumica 环境扫描提取）给的护盾状态条上会写「磁场护盾」，被打破时还会触发川川的磁场护盾。现在只有川川 / 哔哩哩给的护盾带磁场护盾。
   - 防护罩本来就是和铁壁一样的盾牌类配置物（我方、护盾生命，替同区我方挡攻击、范围攻击完全挡住），核对过没有问题。
