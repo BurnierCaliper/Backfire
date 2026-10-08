@@ -2089,3 +2089,22 @@ body:not([data-screen="battle"]) .g-rank { display: none !important; }
 .exec-edit input[type=number] { width: 48px; }
 .exec-edit input[type=text] { width: 72px; }
 .exec-edit input, .exec-edit select { font: inherit; padding: 2px 4px; }
+
+/* 属性克制：预览里要打掉的血条变浅金、写「克制」；命中时整个战场震一下 */
+.unit-wrap.pv-adv .seg .pv.sure { background: #ffe39a; box-shadow: 0 0 6px rgba(255, 214, 110, .8); }
+.unit-wrap.pv-adv .seg .pv.maybe { background: rgba(255, 227, 154, .6); }
+.pvtag .adv {
+  align-self: center; padding: 1px 6px 0; font-size: 13px; font-weight: 900; letter-spacing: .12em;
+  color: #2a1a00; background: linear-gradient(180deg, #fff1b8, #f2c94c); box-shadow: 0 0 8px rgba(242, 201, 76, .7);
+}
+.g-field.adv-shake { animation: advShake .38s cubic-bezier(.36, .07, .19, .97); }
+@keyframes advShake {
+  0%, 100% { translate: 0 0; }
+  12% { translate: -7px 3px; }
+  25% { translate: 6px -4px; }
+  38% { translate: -5px -2px; }
+  52% { translate: 4px 3px; }
+  66% { translate: -3px 1px; }
+  80% { translate: 2px -1px; }
+}
+@media (prefers-reduced-motion: reduce) { .g-field.adv-shake { animation: none; } }

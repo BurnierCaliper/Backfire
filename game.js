@@ -99,6 +99,7 @@
       text: spec.text,
       element: spec.element || "physical",
       main: !!spec.main,           // 攻击动作本身的那一下（不是高压场地等连带伤害）
+      adv: !!spec.adv,             // 玩家这一下触发了属性克制
       targetId: spec.targetId || null,
       tag: state.popTag || null,   // "boom"：高能自爆的余波，数字放大、停留更久
       snap: G.sim ? null : snapAll()
@@ -445,6 +446,7 @@
       const dmgPops = hi.tape.filter(e => e.type === "pop" && e.unitId === id && e.kind === "dmg" && Number(e.value) > 0);
       const pop = dmgPops.find(e => e.main) || dmgPops[0];
       p.element = pop ? pop.element : "physical";
+      p.adv = dmgPops.some(e => e.adv);   // 克制：预览写「克制」，要打掉的血条变浅金
       p.changed = p.dmgHi > 0 || p.healHi > 0 || p.brHi > 0 || p.stunSure || p.stunMaybe || p.killSure || p.killMaybe ||
         p.zoneTo != null || p.newStatus.length > 0 || p.shpLoss > 0 || p.resChanged;
       if (p.changed || p.resChanged) meaningful = true;
@@ -997,6 +999,14 @@
     return seen.size ? [...seen][0] : null;
   }
 
+  /** 克制命中：整个战场震一下（正反馈） */
+  function advShake() {
+    const f = $("g-field");
+    if (!f) return;
+    f.classList.remove("adv-shake"); void f.offsetWidth; f.classList.add("adv-shake");
+    clearTimeout(advShake.t);
+    advShake.t = setTimeout(() => f.classList.remove("adv-shake"), 420);
+  }
   async function playTape(tape, after, meta) {
     const pops = tape.filter(e => e.type === "pop");
     comboPrime(pops);
@@ -1056,6 +1066,7 @@
     // 连击中途就打出的失衡先记下，等整串伤害放完再统一盖「失衡」章、响失衡声（以前这种会被漏掉）
     const pendingStun = [];
     const shownWords = new Set();
+    let advShook = false;   // 克制：一段演出只震一次
     const deferStun = (bs) => bs.forEach(b => { if (b.kind === "stun" && !pendingStun.some(x => x.id === b.id)) pendingStun.push(b); });
     try {
       for (let i = 0; i < pops.length; i++) {
@@ -1071,6 +1082,7 @@
           const bh = typeof bigHitInfo === "function" ? bigHitInfo(s ? s.level : 1, v) : { big: false, ratio: 0 };
           const big = bh.big;
           hit(e.unitId, e.element, big);
+          if (e.adv && !advShook) { advShook = true; advShake(); }
           comboHit(e, v);
           popup(e.unitId, big ? v + "!" : String(v), "e-" + e.element + (big ? " big" : "") + (boom ? " boom" : ""),
             { icon: e.element, size: big ? Math.round(BIG_POP_SIZE * (0.8 + 0.35 * bh.ratio)) : boom ? 46 : 30,
@@ -1470,7 +1482,7 @@
     cards.forEach(c => {
       c.segs.forEach(sg => { if (!sg) return; sg.sure.style.width = sg.maybe.style.width = sg.heal.style.width = "0"; });
       c.pips.forEach(p => p.classList.remove("pv", "maybe"));
-      c.wrap.classList.remove("pv-stun", "maybe", "ice");
+      c.wrap.classList.remove("pv-stun", "maybe", "ice", "pv-adv");
       c.tag.classList.remove("show");
     });
     if (!G.arm) idleBox();
@@ -1502,12 +1514,14 @@
         if (i >= p.defAfterHi && i < (p.defAfterHi + p.brLo)) pip.classList.add("pv");
         else if (i >= p.defAfterLo && i < p.defAfterHi) pip.classList.add("pv", "maybe");
       });
+      if (p.adv && p.dmgHi > 0) c.wrap.classList.add("pv-adv");
       if (p.stunSure || p.stunMaybe) {
         c.wrap.classList.add("pv-stun");
         if (p.stunMaybe) c.wrap.classList.add("maybe");
         if (p.ice) c.wrap.classList.add("ice");
       }
       let h = "";
+      if (p.dmgHi > 0 && p.adv) h += `<span class="adv">克制</span>`;
       if (p.dmgHi > 0) h += `<span class="dmg e-${p.element}">${window.Icons ? Icons.element(p.element) : ""}${p.dmgLo === p.dmgHi ? p.dmgHi : p.dmgLo + "–" + p.dmgHi}</span>`;
       if (p.healHi > 0) h += `<span class="heal">+${p.healHi}</span>`;
       if (p.shpLoss > 0) h += `<span class="note">坚毅 −${p.shpLoss}</span>`;

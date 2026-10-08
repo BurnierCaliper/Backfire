@@ -6186,7 +6186,9 @@ function dealTo(attacker, target, opt) {
     }
     // main：这一下是攻击动作本身的伤害（不是高压场地、感电这类连带伤害）。预览和总伤害计数按它定属性颜色
     const mainHit = flags.action !== false && !flags.environment;
-    if ((res.intended || res.total || 0) > 0) spawnPopup(target, { kind: "dmg", value: res.intended || res.total, element: ele, main: mainHit });
+    // adv：玩家这一击触发了属性克制（预览写「克制」、血条变浅金；演出时画面震一下）
+    const advHit = !!(res.advantage && attacker && attacker.isPlayer && mainHit);
+    if ((res.intended || res.total || 0) > 0) spawnPopup(target, { kind: "dmg", value: res.intended || res.total, element: ele, main: mainHit, adv: advHit });
     if ((res.extraHarmonic || 0) > 0) spawnFloater(target, res.extraHarmonic, ele);
     // 画面：这一击带的攻击效果打出大字（属性专属的用属性颜色，穿刺 / 猛击 / 弱点特效用灰色）
     if (flags.action !== false && !flags.environment && typeof attackConnected === "function" && attackConnected(res, flags)) {
