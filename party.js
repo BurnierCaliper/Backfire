@@ -996,7 +996,7 @@ function roleSkillDef(role, n, unit) {
   if (role === "生存" && n === 1) return { id: "role_firstaid", name: "应急处理", hint: "行动点 · 距离1以内友方 1d4+2（半血取最大）" };
   if (role === "生存" && n === 2) return { id: "role_buffer", name: "缓冲", hint: "附赠 · 距离1以内友方 2d4+4 护盾 · 每场一次" };
   if (role === "生存" && n === 3) return { id: "role_dome", name: "防护罩", hint: "行动点 · 同区 atk+10 护盾罩 · 每场一次" };
-  if (role === "生存" && n === 4) return { id: "role_renew", name: "续命", hint: "行动点 · 恢复最大生命 50%，濒死则起身并恢复 25% · 每场一次" };
+  if (role === "生存" && n === 4) return { id: "role_renew", name: "续命", hint: "行动点 · 恢复最大生命 50%，濒死则救回濒死前的状态并恢复 25% · 每场一次" };
   if (role === "环境手" && n === 1) return { id: "role_lock", name: "锁定", hint: "附赠 · 锁定一种天气或场地本回合不被修改" };
   if (role === "环境手" && n === 2) return { id: "role_shelter", name: "保释", hint: "附赠 · 一名友方本回合豁免天气场地" };
   if (role === "环境手" && n === 3) return { id: "role_harsh", name: "恶劣环境", hint: "附赠 · 一名单位本回合场地天气双倍 · 每场一次" };

@@ -6393,7 +6393,8 @@ function addCharge(n) {
   c.resources.charge = Math.max(0, (c.resources.charge || 0) + n);
 }
 
-function addShieldLayer(u, amount) {
+/** 加护盾。fromChuan：是不是川川 / 哔哩哩给的（只有他们给的护盾带「磁场护盾」）；默认是，其他来源要传 false */
+function addShieldLayer(u, amount, fromChuan) {
   if (!u || amount <= 0) return;
   amount = Math.floor(amount);
   let sh = (u.layers || []).find(l => l.type === "shield");
@@ -6403,7 +6404,7 @@ function addShieldLayer(u, amount) {
     sh.current = Number(sh.current) + amount;
     sh.max = Number(sh.max) + amount;
   }
-  u.shieldFromChuan = true;
+  if (fromChuan !== false) u.shieldFromChuan = true;
 }
 
 function addNano(n) {
@@ -6854,9 +6855,7 @@ function heluScanAct(a, picks, lines) {
         const ally = unitById(picks.ally);
         if (!ally || !ally.isPlayer) { lines.push("先选一名友方。"); return; }
         const amt = 5 + 2 * (p.level || 1);
-        const hadFlag = ally.shieldFromChuan;
-        addShieldLayer(ally, amt);
-        ally.shieldFromChuan = hadFlag;   // 不是川川给的护盾，不触发「磁场护盾」
+        addShieldLayer(ally, amt, false);   // 不是川川给的护盾，不触发「磁场护盾」
         lines.push(`环境扫描：从 ${p.name} 提取 ${amt} 点护盾给 ${ally.name}。`);
       }
     } else if (p.kind === "scrap") {
@@ -9809,7 +9808,7 @@ function runSkillInner(id, optRun) {
       if (!roleOnce(a, "buffer", (a.level || 1) >= 15 ? 2 : 1)) lines.push("缓冲次数用尽。");
       else {
         const r = takeDice(2, 4, 4);
-        addShieldLayer(t, r.total);
+        addShieldLayer(t, r.total, false);   // 生存职责给的护盾，不是川川的磁场护盾
         lines.push(`缓冲：${t.name} 获得 ${r.total} 护盾（${r.text}）。`);
       }
     } else if (id === "role_dome") {
@@ -9826,11 +9825,15 @@ function runSkillInner(id, optRun) {
     } else if (id === "role_renew") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       if (!roleOnce(a, "renew", 1)) lines.push("续命本场已用完。");
-      else if (t.dying || totalHp(t) <= 0) {
-        standUp(t);
-        const heal = Math.floor(totalMaxHp(t) * 0.25);
-        healUnit(t, heal);
-        lines.push(`续命：${t.name} 起身并恢复 ${heal}。`);
+      else if (t.dying || t.upOnShp || totalHp(t) <= 0) {
+        // 濒死（或已经靠坚毅生命起身）：直接救回濒死前的状态——不走坚毅生命那一套，不受力竭「不能起身」限制，
+        // 之后受伤照常打血量层；恢复最大生命的 25%
+        t.dying = false;
+        t.upOnShp = false;
+        t.dead = false;
+        const heal = Math.floor(baseMaxHp(t) * 0.25);
+        const got = healUnit(t, heal);
+        lines.push(`续命：${t.name} 从濒死中救回（不消耗坚毅生命），恢复 ${got}（最大生命 25%）。`);
       } else {
         const heal = Math.floor(totalMaxHp(t) * 0.5);
         healUnit(t, heal);
