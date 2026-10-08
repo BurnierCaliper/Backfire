@@ -902,6 +902,10 @@
     $("tr-slots-title").onclick = () => uiCommand("title");
     $("tr-fight").onclick = () => { if (lowHpOk()) uiCommand("toBattle"); };
     $("tr-bs").onclick = () => { tab = "backstage"; render(); };
+    $("tr-bestiary").onclick = () => {
+      if (!window.Bestiary) return;
+      Bestiary.open({ partySize: Math.max(2, Math.min(4, heroes().filter(h => !h.dead).length)), sub: "跑团" });
+    };
     $("tr-map").onclick = () => { if (window.WorldMap) WorldMap.open(mapOptions()); };
     $("tr-title").onclick = () => uiCommand("title");
     $("tr-copy").onclick = (e) => {

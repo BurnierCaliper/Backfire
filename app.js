@@ -2322,6 +2322,7 @@ function settleBattleRewards(outcome) {
   });
   // 整局战场记录：这场的数据并进本局 / 本团的累计（存在队伍档案 LEDGER.career 里，跟着存档走）
   if (typeof careerRecordBattle === "function") careerRecordBattle(outcome, grade);
+  if (typeof bestiaryRecordBattle === "function") bestiaryRecordBattle(outcome);   // 敌人图鉴：这场出现过的敌人记为遭遇过
   return { outcome, grade, finishBonus, xpBonus, totalXpBonus: xpBonus, ups: ups.slice(), alreadySettled: false };
 }
 

@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="skin.css" />
   <link rel="stylesheet" href="armory.css" />
   <link rel="stylesheet" href="world-map.css" />
+  <link rel="stylesheet" href="bestiary.css" />
   <link rel="stylesheet" href="hotseat.css" />
   <link rel="stylesheet" href="online.css" />
   <link rel="stylesheet" href="online-gm-ui.css" />
@@ -61,6 +62,7 @@
     <span class="run-supplies" id="run-supplies"></span>
     <span class="spacer"></span>
     <button class="g-btn" id="run-map" title="角鳞星地图：看看现在在哪、各幕要去哪">地图</button>
+    <button class="g-btn" id="run-bestiary" title="敌人图鉴：遭遇过的敌人的能力和数值">图鉴</button>
     <button class="g-btn" id="run-title" title="进度已自动保存">存档并回到标题</button>
   </header>
   <div class="run-main">
@@ -89,6 +91,7 @@
     <button class="g-btn" id="tr-undo" disabled title="撤销上一个操作（Ctrl+Z）">撤销</button>
     <button class="g-btn" id="tr-slots" title="换到别的团的存档（当前进度已自动保存）">换存档</button>
     <button class="g-btn" id="tr-map" title="角鳞星地图：看队伍在哪，主持人可以在地图上移动队伍">地图</button>
+    <button class="g-btn" id="tr-bestiary" title="敌人图鉴：遭遇过的敌人的能力和数值">图鉴</button>
     <button class="g-btn" id="tr-bs" title="按叙事直接改血量、坚毅、耐久、等级、时间、奎支……">后台</button>
     <button class="g-btn r-main" id="tr-fight" title="切到战斗画面，在那里配置遭遇、开打">进入战斗环节</button>
     <button class="g-btn" id="tr-title">回到标题</button>
@@ -949,6 +952,7 @@ window.GAME_MODE = true;
 <script src="escort.js"></script>
 <script src="boss-mechanics.js"></script>
 <script src="world-data.js"></script>
+<script src="bestiary.js"></script>
 <script src="effects.js"></script>
 <script src="mods.js"></script>
 <script src="ai.js"></script>
@@ -971,6 +975,7 @@ window.GAME_MODE = true;
 <script src="sheet-ui.js"></script>
 <script src="armory-ui.js"></script>
 <script src="world-map.js"></script>
+<script src="bestiary-ui.js"></script>
 <script src="game.js"></script>
 <script src="screens.js"></script>
 <script src="routemap.js"></script>
