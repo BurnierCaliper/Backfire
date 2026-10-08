@@ -16,7 +16,7 @@
   let run = null;          // 当前这一局
   let lastNotes = [];      // 上一步发生了什么（显示在记录栏）
   let lastError = "";
-  let restSel = { food: {}, sleep: {} };   // 长休界面：每个角色选的食物 / 睡眠道具（没选的按默认）      // 上一步为什么没做成（显示在主面板顶上，免得按了像没反应）
+  let restSel = { food: {}, sleep: {}, spit: {} };   // 长休界面：每个角色选的食物 / 睡眠道具（没选的按默认）      // 上一步为什么没做成（显示在主面板顶上，免得按了像没反应）
 
   const save = () => { if (run && run.stage !== "over") dispatch({ type: "run.session", action: "save" }, { run }); };
   const query = (action, fields) => dispatch(Object.assign({ type: "run.query", action }, fields || {}), { run });
@@ -169,7 +169,7 @@
     return `<div class="task${t.key ? " key" : ""}">
       <div class="t-head"><b>${esc(t.name)}</b>${t.key ? '<span class="tag">主线 · 已接下</span>' : ""}<span class="days">${t.days} 天</span></div>
       <p>${esc(t.goal)}</p>
-      <div class="t-meta">报酬 ${pay.kuizhi} 奎支 · 每人 ${pay.xp} 经验${t.part && WEAPON_PARTS[t.part] ? `<br>额外奖励：改装件 ${esc(weaponPartLabel(t.part))}（${esc(weaponPartCoefText(WEAPON_PARTS[t.part].coef))}）` : ""}<br>委托方提供 ${esc(supplyText || "无")}</div>
+      <div class="t-meta">报酬 ${pay.kuizhi} 奎支 · 每人 ${pay.xp} 经验${t.part && WEAPON_PARTS[t.part] ? `<br>额外奖励：改装件 ${esc(weaponPartLabel(t.part))}（${esc(weaponPartText(t.part))}）` : ""}<br>委托方提供 ${esc(supplyText || "无")}</div>
       ${t.weather ? `<div class="t-weather">全程天气：${esc(WX_NAME[t.weather] || t.weather)}（任务里每一场战斗都是）</div>` : ""}
       ${escortLine(Rogue.escortInfo(run, t), false)}
       ${t.hunt ? `<div class="t-hunt">路线未知：一站一站往前走。通过 ${t.hunt.need} 次线索检定找到悬赏目标（失败 ${t.hunt.failMax} 次目标也会自己找上门），最后一站是和目标的精英战。</div>` : ""}
@@ -214,9 +214,11 @@
     const rows = o.heroes.map(h => {
       const foods = o.foods.map(f => `<option value="${esc(f.id)}" ${f.id === h.foodId ? "selected" : ""}>${esc(f.name)}${f.shp ? `（坚毅 +${f.shp}/份）` : ""} · 有 ${f.have}</option>`).join("");
       const sleeps = `<option value="">不用</option>` + o.sleeps.map(x => `<option value="${esc(x.id)}" ${x.id === h.sleepId ? "selected" : ""}>${esc(x.name)}（每小时坚毅 +${x.bonus}） · 有 ${x.have}</option>`).join("");
+      // 兽人-蜥蜴：长休时可以换吐酸攻击的属性
+      const spit = h.spit ? `<br><small>吐酸</small> <select data-rest-spit="${esc(h.kit)}">${(o.spitElements || []).map(e => `<option value="${esc(e.id)}" ${e.id === h.spit ? "selected" : ""}>${esc(e.name)}</option>`).join("")}</select>` : "";
       return `<tr><td><b>${esc(h.name)}</b></td><td>${h.water} ml · ${h.food} 份</td>
         <td><select data-rest-food="${esc(h.kit)}">${foods}</select></td>
-        <td><select data-rest-sleep="${esc(h.kit)}">${sleeps}</select></td></tr>`;
+        <td><select data-rest-sleep="${esc(h.kit)}">${sleeps}</select>${spit}</td></tr>`;
     }).join("");
     const bad = (a, b) => (a > b ? "r-bad" : "");
     const foodSum = Object.keys(need.food).map(id => {
@@ -424,7 +426,7 @@
     if (typeof ROGUE_PARTS === "undefined") return "";
     const k = Rogue.supplies().kuizhi;
     const rows = query("partOffers", { smith: smithId }).map((o, i) => `<div class="shop-row${o.sold ? " sold" : ""}">
-        <span class="s-name">${esc(weaponPartLabel(o.id))}<small>${esc(weaponPartCoefText(WEAPON_PARTS[o.id].coef))}${o.discount ? ` · <b class="pt-sale">八折</b>（原价 ${o.base}）` : ""}</small></span>
+        <span class="s-name">${esc(weaponPartLabel(o.id))}<small>${esc(weaponPartText(o.id))}${o.discount ? ` · <b class="pt-sale">八折</b>（原价 ${o.base}）` : ""}</small></span>
         <span class="s-have"></span><span class="s-price">${o.sold ? "—" : o.price}</span>
         <button class="g-btn" data-part-buy="${i}" data-smith="${esc(smithId)}" ${o.sold || k < o.price ? "disabled" : ""}>${o.sold ? "已买" : "买"}</button></div>`).join("");
     return rows ? `<p class="r-hint">改装件（随机进货，C 级 / B 级）：</p><div class="shop">${rows}</div>` : "";
@@ -688,6 +690,7 @@
     on("r-camp", () => act(Object.assign({ action: "camp" }, restSel)));
     body.querySelectorAll("[data-rest-food]").forEach(el => { el.onchange = () => { restSel.food[el.dataset.restFood] = el.value; render(); }; });
     body.querySelectorAll("[data-rest-sleep]").forEach(el => { el.onchange = () => { restSel.sleep[el.dataset.restSleep] = el.value; render(); }; });
+    body.querySelectorAll("[data-rest-spit]").forEach(el => { el.onchange = () => { restSel.spit = restSel.spit || {}; restSel.spit[el.dataset.restSpit] = el.value; render(); }; });
     on("r-next", () => act({ action: "nextAct" }));
     on("r-win", () => act({ action: "afterVictory", goOn: false }));
     on("r-more", () => act({ action: "afterVictory", goOn: true }));
@@ -737,6 +740,10 @@
       lastNotes = [`出发。种子 ${run.seed}。`];
       save();
       Screens.show("run");
+    };
+    $("run-bestiary").onclick = () => {
+      if (!window.Bestiary || !run) return;
+      Bestiary.open({ partySize: Math.max(2, Math.min(4, run.party.length + (run.solo ? 1 : 0))), sub: run.solo ? "单人模式" : "单局" });
     };
     $("run-map").onclick = () => { const o = window.RunFlow.mapOptions(); if (o && window.WorldMap) WorldMap.open(o); };
     $("run-title").onclick = () => {

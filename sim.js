@@ -34,6 +34,7 @@ const BattleSim = (function () {
     state.blockQueue = [];
     state.koltSwapQueue = [];
     state.heluScanQueue = [];
+    state.longgeSafetyQueue = [];
     state.skillFlow = null;
     state.history = [];
     state.actionAcc = null;
@@ -136,6 +137,11 @@ const BattleSim = (function () {
         resolveKoltSwap(!!(pick && pick.swap), pick && pick.targetId);
         continue;
       }
+      if (state.longgeSafetyQueue && state.longgeSafetyQueue.length) {
+        const job = state.longgeSafetyQueue[0];
+        resolveLonggeSafety(policy.longgeSafety ? !!policy.longgeSafety(job) : false);
+        continue;
+      }
       if (state.heluScanQueue && state.heluScanQueue.length) {
         const job = state.heluScanQueue[0];
         resolveHeluScan(policy.heluScan ? policy.heluScan(job) : { act: "spawn" });
@@ -154,6 +160,7 @@ const BattleSim = (function () {
           const r = helper.resources || {};
           extra.blade = !r.niuOut ? "niu" : !r.narutoOut ? "naruto" : "niu";
         }
+        if (helper && helper.kit === "longge") extra.mode = ((helper.resources || {}).ammo || []).length ? "gun" : "cane";
         withPhaseOf(helper, () => finishAssist(choice, extra));
         continue;
       }

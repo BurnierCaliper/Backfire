@@ -9,12 +9,14 @@
  *   opt.canMove   能不能在地图上改位置（跑团主持人）：可以直接拖动「你在这里」的标记，或在地点卡上点「把队伍移到这里」
  *                 opt.onMove(loc) 改位置时调用：loc = { place } / { place, x, y }（任意位置，place 是最近的地点）/ null（不再标出）
  *                 opt.refresh() 改完以后重新取一份 opt
- * 地图可以拖动、滚轮 / 双指缩放；点地点看简介。数据在 world-data.js。 */
+ * 地图可以拖动、滚轮 / 双指缩放；点地点看简介。数据在 world-data.js。
+ * 「测距」：选起点、终点，看路程（km）和徒步 / 各种车要多久。距离按 world-travel.js 的设定表算，不量图（地图有透视）。 */
 "use strict";
 const WorldMap = (() => {
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c]));
   const IMG_W = 1672, IMG_H = 941;
   let root = null, opt = {}, sel = null;
+  let measure = null;   // 测距：{ from, to, pick, terrain }；null = 没在测距
   const view = { s: 1, tx: 0, ty: 0 };
   const MIN_S = 1, MAX_S = 5;
 
@@ -36,6 +38,7 @@ const WorldMap = (() => {
             <button class="g-btn small" data-wm="home" title="回到当前位置">定位</button>
             <button class="g-btn small wm-drop" data-wm="drop" title="在地图中间放下队伍标记，之后可以拖到任何地方">放标记</button>
             <button class="g-btn small" data-wm="fit" title="看整张地图">全图</button>
+            <button class="g-btn small wm-measure-btn" data-wm="measure" title="算两地之间的路程和用时">测距</button>
           </div>
           <button class="g-btn" data-wm="close">关闭</button>
         </header>
@@ -44,7 +47,9 @@ const WorldMap = (() => {
             <div class="wm-stage">
               <img class="wm-img" alt="角鳞星地图" draggable="false">
               <svg class="wm-route" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"></svg>
+              <svg class="wm-trip" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"></svg>
               <div class="wm-pins"></div>
+              <div class="wm-tripmarks"></div>
             </div>
             <div class="wm-vignette"></div>
             <div class="wm-hint">拖动查看 · 滚轮 / 双指缩放 · 点地点看简介</div>
@@ -63,6 +68,15 @@ const WorldMap = (() => {
         else if (a === "out") zoomAt(view.s / 1.5);
         else if (a === "fit") { view.s = 1; view.tx = 0; view.ty = 0; apply(true); }
         else if (a === "home") focusHere(2.2);
+        else if (a === "measure") toggleMeasure();
+        else if (a === "swap" && measure) { Object.assign(measure, { from: measure.to, to: measure.from }); renderMeasure(); }
+        else if (a === "trip-go" && measure && opt.canMove && measure.to) {
+          const to = measure.to;
+          if (typeof to === "string") doMove({ place: to }); else dropMark(to.x, to.y);
+          Object.assign(measure, { from: hereEnd(), to: null, pick: "to" });
+          renderMeasure();
+          focusHere(Math.max(view.s, 1.6));
+        }
         else if (a === "drop" && opt.canMove) {
           // 放在现在看到的地图正中间
           const b = baseSize();
@@ -74,15 +88,34 @@ const WorldMap = (() => {
       }
       const go = e.target.closest("[data-goto]");
       if (go) { focus(go.dataset.goto, Math.max(view.s, 1.8)); select(go.dataset.goto); return; }
-      if (e.target.closest("[data-mark]") && !dragMoved) { select(hereId()); return; }
+      if (e.target.closest("[data-mark]") && !dragMoved) { if (measure) pickMeasure(hereEnd()); else select(hereId()); return; }
       const pin = e.target.closest("[data-place]");
-      if (pin && !dragMoved) { select(pin.dataset.place); return; }
+      if (pin && !dragMoved) {
+        if (measure) pickMeasure(pin.dataset.place); else select(pin.dataset.place);
+        return;
+      }
+      if (measure) {
+        const pk = e.target.closest("[data-pick]");
+        if (pk) { measure.pick = pk.dataset.pick; renderMeasure(); return; }
+        const tr = e.target.closest("[data-terrain]");
+        if (tr) { measure.terrain = tr.dataset.terrain; renderMeasure(); return; }
+        // 测距时点地图上任意一点（不是拖动）
+        if (e.target.closest(".wm-view") && !dragMoved) { pickMeasure(e.target.closest("[data-mark]") ? hereEnd() : stagePct(e)); return; }
+      }
       const mv = e.target.closest("[data-move]");
       if (mv && opt.canMove) {
         doMove(mv.dataset.move ? { place: mv.dataset.move } : null);
         if (hereId()) focusHere(Math.max(view.s, 1.6));
       }
       if (e.target === root) close();
+    });
+    root.addEventListener("change", (e) => {
+      const s = e.target.closest("[data-trip]");
+      if (!s || !measure) return;
+      const v = s.value;
+      if (v === "@") return;
+      measure[s.dataset.trip] = v === "@here" ? hereEnd() : (v || null);
+      renderMeasure();
     });
     document.addEventListener("keydown", (e) => { if (root && root.classList.contains("show") && e.key === "Escape") { e.stopPropagation(); close(); } }, true);
     bindPanZoom();
@@ -268,6 +301,7 @@ const WorldMap = (() => {
   }
   function select(id) {
     sel = id;
+    if (measure) { renderMeasure(); return; }
     root.querySelectorAll(".wm-pin").forEach(b => b.classList.toggle("sel", b.dataset.place === id));
     const card = root.querySelector(".wm-card");
     const p = worldPlace(id) || worldPlaceOf(opt.here);
@@ -307,14 +341,158 @@ const WorldMap = (() => {
       `<div class="wm-sec"><div class="wm-card-kicker">地点一览</div><ul class="wm-index">${places}</ul></div>`;
   }
 
+  /* ---------- 测距 ---------- */
+  // 端点：地点 id，或地图上任意一点 { x, y }（%）。两头都是有设定距离的地点 → 按设定表；否则按地图推算（world-travel.js · worldEstimate）
+  const canTravel = () => typeof worldTravelPlan === "function";
+  const isPt = (e) => !!e && typeof e === "object";
+  function travelIds() { return canTravel() ? travelPlaceIds() : []; }
+  const TERRAIN = [["sand", "沙地"], ["dirt", "土路 / 便道"], ["paved", "铺装公路"]];
+  /** 队伍现在的位置当端点 */
+  function hereEnd() {
+    const h = hereXY();
+    if (!h) return null;
+    return h.free ? { x: h.x, y: h.y } : hereId();
+  }
+  function endName(e) {
+    if (!e) return "";
+    if (isPt(e)) {
+      const n = worldNearestPlace(e.x, e.y);
+      return n ? `${n.place.name}附近的点` : "地图上的点";
+    }
+    return travelNodeName(e);
+  }
+  const sameEnd = (a, b) => !!a && !!b && (isPt(a) ? isPt(b) && a.x === b.x && a.y === b.y : a === b);
+  function toggleMeasure() {
+    if (measure) { measure = null; root.classList.remove("measuring"); renderTrip(); select(sel); return; }
+    measure = { from: hereEnd(), to: null, terrain: "sand" };
+    measure.pick = measure.from ? "to" : "from";
+    root.classList.add("measuring");
+    renderMeasure();
+  }
+  /** 点了地点 / 地图上一点：按「点地图设定」放到起点或终点 */
+  function pickMeasure(e) {
+    if (typeof e === "string" && !travelIds().includes(e) && worldPlace(e)) {
+      // 「沙漠」这种泛指的地点：按它在图上的位置当任意一点
+      const p = worldPlace(e); e = { x: p.x, y: p.y };
+    }
+    if (isPt(e) && worldTerrainAt(e.x, e.y) === "space") { renderMeasure("那里是太空，选星球表面上的点。"); return; }
+    measure[measure.pick] = e;
+    if (measure.pick === "from" && !measure.to) measure.pick = "to";
+    renderMeasure();
+  }
+  function stagePct(ev) {
+    const r = stage().getBoundingClientRect();
+    return { x: Math.round((ev.clientX - r.left) / r.width * 1000) / 10, y: Math.round((ev.clientY - r.top) / r.height * 1000) / 10 };
+  }
+  /** 路线上每个点画在地图哪里：聚落边缘画在外城区那里；任意一点就是它自己 */
+  function nodeXY(e) {
+    if (isPt(e)) return { x: e.x, y: e.y };
+    const p = worldPlace(e === "rim" ? "outer_city" : e);
+    return p ? { x: p.x, y: p.y } : null;
+  }
+  function renderTrip(plan) {
+    const svg = root.querySelector(".wm-trip");
+    const marks = root.querySelector(".wm-tripmarks");
+    root.querySelectorAll(".wm-pin").forEach(b => b.classList.remove("trip-a", "trip-b"));
+    if (!measure) { svg.innerHTML = ""; marks.innerHTML = ""; return; }
+    const mark = (e, cls) => { if (typeof e === "string") { const b = root.querySelector(`.wm-pin[data-place="${e}"]`); if (b) b.classList.add(cls); } };
+    mark(measure.from, "trip-a"); mark(measure.to, "trip-b");
+    marks.innerHTML = [["from", "a", "起"], ["to", "b", "终"]].filter(([k]) => isPt(measure[k]))
+      .map(([k, c, t]) => `<span class="wm-tripmark ${c}" style="left:${measure[k].x}%;top:${measure[k].y}%"><i>${t}</i></span>`).join("");
+    let pts = [];
+    if (plan && plan.route && plan.route.ok && plan.route.legs.length) {
+      pts = plan.route.estimate ? [nodeXY(measure.from), nodeXY(measure.to)]
+        : [plan.route.from].concat(plan.route.legs.map(l => l.b)).map(nodeXY);
+    }
+    pts = pts.filter(Boolean).filter((p, i, a) => !i || p.x !== a[i - 1].x || p.y !== a[i - 1].y);
+    svg.innerHTML = pts.length > 1
+      ? `<polyline class="${plan.route.estimate ? "est" : ""}" points="${pts.map(p => `${p.x},${p.y}`).join(" ")}" vector-effect="non-scaling-stroke"/>` : "";
+  }
+  function kmText(km) {
+    const f = (v) => km[1] >= 20 ? Math.round(v) : v;   // 远路取整（700–900.6 → 700–901）
+    return f(km[0]) === f(km[1]) ? `${f(km[0])} km` : `${f(km[0])}–${f(km[1])} km`;
+  }
+  function modesHtml(modes) {
+    return `<ul class="wm-trip-modes">${modes.map(m => `<li class="wm-mode-${esc(m.mode)}${m.tbd ? " tbd" : ""}"><span>${esc(m.name)}</span><b>${esc(m.text)}</b>
+      ${m.warn.length ? `<small>⚠ ${esc(m.warn.join("；"))}</small>` : ""}${m.tbd ? `<small><em>速度暂定</em></small>` : ""}</li>`).join("")}</ul>`;
+  }
+  function renderMeasure(msg) {
+    if (!measure) return;
+    const card = root.querySelector(".wm-card");
+    const ids = travelIds();
+    const options = (cur) => (isPt(cur) ? `<option value="@" selected>${esc(endName(cur))}</option>` : `<option value="">— 点地图或选地点 —</option>`) +
+      (hereEnd() ? `<option value="@here">队伍所在位置</option>` : "") +
+      ids.map(id => {
+        const p = worldPlace(id);
+        return `<option value="${esc(id)}"${id === cur ? " selected" : ""}>${esc(travelNodeName(id))}${p && WORLD_PLACES.filter(q => q.name === p.name).length > 1 ? `（${esc(id === "solar_w" ? "西" : id === "solar_c" ? "南" : id === "solar_e" ? "东" : id)}）` : ""}</option>`;
+      }).join("");
+    const { from, to } = measure;
+    const both = from && to && !sameEnd(from, to);
+    const table = both && typeof from === "string" && typeof to === "string" ? worldTravelPlan(from, to) : null;
+    const useTable = table && table.route.ok;
+    const est = both ? worldEstimate(from, to, measure.terrain) : null;
+    renderTrip(useTable ? table : est);
+    let body = "";
+    if (msg) body += `<p class="wm-trip-msg">${esc(msg)}</p>`;
+    if (!from || !to) body += `<p class="wm-trip-msg">${!from ? "先定起点" : "再定终点"}：点地图上的地点，或地图上任意一点（荒漠里也行），也可以在上面选。</p>`;
+    else if (sameEnd(from, to)) body += `<p class="wm-trip-msg">起点和终点是同一个地方。</p>`;
+    else if (useTable) {
+      const r = table.route;
+      const legs = r.legs.map(l => {
+        const roads = Object.keys(l.road || {}).map(k => `${WORLD_ROAD_NAME[k] || k}${l.road[k] < 1 ? ` ${Math.round(l.road[k] * 100)}%` : ""}`).join(" + ");
+        return `<li${l.tbd || l.tbdRoad ? ' class="tbd"' : ""}><div><b>${esc(travelNodeName(l.a))} → ${esc(travelNodeName(l.b))}</b><span>${esc(kmText(l.km))}</span></div>
+          <small>${esc(roads)}${l.note ? " · " + esc(l.note) : ""}${l.tbd ? " · <em>距离暂定</em>" : l.tbdRoad ? " · <em>路况暂定</em>" : ""}</small></li>`;
+      }).join("");
+      body += `<div class="wm-trip-total"><span>路程（按设定）</span><b>${esc(kmText(r.km))}</b>${r.tbd ? `<em>含暂定数据</em>` : ""}</div>
+        <ol class="wm-trip-legs">${legs}</ol>
+        <div class="wm-card-kicker">用时</div>${modesHtml(table.modes)}`;
+      // 沿路走（经由聚落边缘）比直线越野远得多时，附上越野的估算
+      if (est && est.ok && est.km[1] < r.km[0] * 0.8) {
+        const w = est.modes[0];
+        body += `<div class="wm-trip-alt"><b>直线越野（地图估算）</b> 约 ${esc(kmText(est.km))}，徒步${esc(w.text)}。不走公路、穿过荒漠时参考。</div>`;
+      }
+      body += `<p class="wm-trip-note">城外距离从聚落边缘（外城区外圈）量起，按设定表算，不量图。</p>`;
+    } else if (!est || !est.ok) body += `<p class="wm-trip-msg">${esc((est && est.why) || (table && table.route.why) || "算不出来")}</p>`;
+    else {
+      const parts = [];
+      if (est.cityKm > 0.05) parts.push(`城里 ${kmText([est.cityKm, est.cityKm])}`);
+      if (est.snowShare > 0.01) parts.push(`雪原约 ${Math.round(est.snowShare * 100)}%`);
+      body += `<div class="wm-trip-total est"><span>路程（地图估算）</span><b>${esc(kmText(est.km))}</b><em>粗估</em></div>
+        <p class="wm-trip-sub">直线约 ${esc(kmText([est.straightKm, est.straightKm]))}${parts.length ? "，其中" + esc(parts.join("、")) : ""}；实际要走的路按直线 ±12% 算。</p>
+        <div class="wm-trip-terrain"><span>城外路况</span>${TERRAIN.map(([k, t]) => `<button class="${measure.terrain === k ? "on" : ""}" data-terrain="${k}">${t}</button>`).join("")}</div>
+        <div class="wm-card-kicker">用时</div>${modesHtml(est.modes)}
+        <p class="wm-trip-note">地图有透视、也不按比例画，这里按设定表里的距离把地图「拉直」后估算（地点附近准，离地点越远误差越大，可能差两三成）。雪原段车辆用不上。</p>`;
+    }
+    const atHere = sameEnd(from, hereEnd());
+    if (both && opt.canMove && atHere && (useTable || (est && est.ok))) {
+      body += `<button class="g-btn r-main" data-wm="trip-go">队伍到达${esc(endName(to))}</button>
+        <p class="wm-gm-tip">主持人：只移动队伍标记；路上花的时间请在「推进时间」里按上面的用时推进。</p>`;
+    }
+    card.innerHTML = `<div class="wm-card-in wm-trip-card">
+        <div class="wm-card-kicker">测距</div>
+        <h4>路程与用时</h4>
+        <div class="wm-trip-pick">
+          <label class="${measure.pick === "from" ? "picking" : ""}"><i class="a" data-pick="from" title="之后点地图设定起点">起</i><select data-trip="from">${options(from)}</select></label>
+          <button class="g-btn small" data-wm="swap" title="起点终点对调">⇅</button>
+          <label class="${measure.pick === "to" ? "picking" : ""}"><i class="b" data-pick="to" title="之后点地图设定终点">终</i><select data-trip="to">${options(to)}</select></label>
+        </div>
+        <p class="wm-trip-hint">点地图设定：<button class="${measure.pick === "from" ? "on" : ""}" data-pick="from">起点</button><button class="${measure.pick === "to" ? "on" : ""}" data-pick="to">终点</button></p>
+        ${body}
+      </div>`;
+  }
+
   function open(o) {
     opt = o || {};
+    measure = null;
     if (!root) build();
     root.querySelector(".wm-sub").textContent = opt.sub || "";
     root.classList.toggle("can-move", !!opt.canMove);
     root.classList.toggle("no-here", !hereXY());
+    root.classList.remove("measuring");
+    root.classList.toggle("can-measure", canTravel());
     root.querySelector(".wm-hint").textContent = opt.canMove ? "拖动黄色标记移动队伍 · 拖动空白处查看地图 · 滚轮 / 双指缩放" : "拖动查看 · 滚轮 / 双指缩放 · 点地点看简介";
     renderPins();
+    renderTrip();
     root.classList.add("show");
     document.body.classList.add("wm-open");
     const img = root.querySelector(".wm-img");
@@ -323,7 +501,8 @@ const WorldMap = (() => {
       view.s = 1; view.tx = 0; view.ty = 0; apply(false);
       const b = baseSize(), cover = Math.max(b.vw / b.w, b.vh / b.h);
       if (hereXY()) focusHere(Math.max(1.6, cover)); else if (cover > 1.05) zoomAt(cover);
-      select(hereId());
+      if (opt.measure && canTravel()) { toggleMeasure(); if (opt.measure.to) pickMeasure(opt.measure.to); }
+      else select(hereId());
     };
     if (img.complete) requestAnimationFrame(start); else img.onload = start;
     root.querySelector('[data-wm="close"]').focus({ preventScroll: true });

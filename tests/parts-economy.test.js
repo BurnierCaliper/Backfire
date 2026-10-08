@@ -7,7 +7,7 @@ const plain = x => JSON.parse(JSON.stringify(x));
 
 test("C / B 级改装件：三种主补正 × 五种负补正，C ±0.1 后缀 beta，B ±0.15 后缀 alpha", () => {
   const c = H.load();
-  const ids = c.weaponPartIds();
+  const ids = c.weaponPartIds().filter(id => c.weaponPartSpec(id).kind === "coef");   // 补正件（功能件见 weapon-parts.test.js）
   assert.equal(ids.length, 30);
   ids.forEach(id => {
     const p = c.weaponPartSpec(id);

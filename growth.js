@@ -98,8 +98,15 @@ const WEAPON_GROWTH = {
               extra: [{ layer: "shield", baseHp: 6, hp: 4 }] },
   torque:   { layer: "armor",  baseHp: 14, hp: 6, baseDef: 4, baseDur: 6 },
   ecmo:     { layer: "armor",  baseHp: 8,  hp: 4, baseDef: 3, baseDur: 4 },
-  edc:      { layer: "armor",  baseHp: 10, hp: 4, baseDef: 4, baseDur: 5 }
+  edc:      { layer: "armor",  baseHp: 10, hp: 4, baseDef: 4, baseDur: 5 },
+  // 小朋友（龙哥的武器）：装甲 12、每级 +5；耐久 5、和其他武器一样每两级 +1；架势 4
+  xiaoxiao: { layer: "armor",  baseHp: 12, hp: 5, baseDef: 4, baseDur: 5 }
 };
+/** 武器的耐久上限（没装图纸时）：基础耐久 + 每 durEvery 级 +1（没写就是每两级） */
+function weaponBaseDur(kit, lv) {
+  const g = WEAPON_GROWTH[kit] || {};
+  return (g.baseDur || 5) + Math.floor((Math.max(1, Number(lv) || 1)) / (g.durEvery || 2));
+}
 
 const WEAPON_FORMULA = {
   mint: { base: 4, mainAttr: "int", mainCoef: 0.5, subAttr: "dex", subCoef: 0.3 },
@@ -112,7 +119,8 @@ const WEAPON_FORMULA = {
   vitas: { base: 4, mainAttr: "int", mainCoef: 0.4, subAttr: "dex", subCoef: 0.2 },
   torque: { base: 2, mainAttr: "str", mainCoef: 0.3, subAttr: "int", subCoef: 0.2 },
   ecmo: { base: 2, mainAttr: "int", mainCoef: 0.8 },
-  edc: { base: 3, mainAttr: "int", mainCoef: 0.6, subAttr: "con", subCoef: 0.2 }
+  edc: { base: 3, mainAttr: "int", mainCoef: 0.6, subAttr: "con", subCoef: 0.2 },
+  xiaoxiao: { base: 3, mainAttr: "int", mainCoef: 0.4, subAttr: "dex", subCoef: 0.2 }
 };
 
 function weaponTier(lv) {
@@ -127,21 +135,53 @@ function weaponTier(lv) {
  * C / B 级是程序生成的「凑数件」：主补正（力量 / 敏捷 / 智力）+ 一个不同属性的负补正（六维任意一个）。
  *   C 级：主补正 +0.1，负补正 −0.1，名字后缀 beta；B 级：±0.15，后缀 alpha。
  *   id = 等级_主属性_负属性（例：c_str_dex = 配重块-beta，力量 +0.1、敏捷 −0.1）。
- * A / S 级之后再设计（往 WEAPON_PARTS 里加就行）。 */
+ * 每个改装件另外固定加武器 atk（WEAPON_PART_FLAT_ATK：C / B 级 +1，A / S 级 +2），不随等级、属性变动——
+ *   装上立刻就有感觉，不用等升很多级补正才显出来。
+ * 另有两种「功能件」，不加正补正，同样带一个随机属性的负补正（C −0.1 / B −0.15 / A −0.2 / S −0.25）和固定 atk：
+ *   格挡件（缓冲护板）：武器的格挡加成 +5% / +8% / +10% / +12%（C / B / A / S）——拿在手里时加到角色的协助格挡，
+ *     武器人独立在场时加到它自己的格挡率；
+ *   生命件（加固框架）：武器人每级装甲 +3 / +6 / +8 / +11（按武器等级算，装甲层；必哩没有装甲就加在护盾上）。
+ *   id = 等级_block_负属性 / 等级_hp_负属性（例：c_block_dex = 缓冲护板-beta）。
+ * 补正件的 A / S 级之后再设计；功能件的 A / S 级已经有数据（跑团主持人可以直接给），单局商店 / 工匠 / 奖励暂时只出 C / B。 */
 const WEAPON_PART_SLOT_LEVELS = [3, 7];
 const WEAPON_PART_ATTRS = ["str", "con", "dex", "wil", "int", "sta"];
 const WEAPON_PART_GEN = {
   mains: { str: "配重块", dex: "轻量骨架", int: "调谐芯片" },
-  grades: { C: { step: 0.1, suffix: "beta" }, B: { step: 0.15, suffix: "alpha" } }
+  grades: { C: { step: 0.1, suffix: "beta" }, B: { step: 0.15, suffix: "alpha" }, A: { step: 0.2, suffix: "gamma" }, S: { step: 0.25, suffix: "omega" } },
+  coefGrades: ["C", "B"],   // 补正件目前只有 C / B 级
+  // 功能件：每个等级的效果数值
+  kinds: {
+    block: { name: "缓冲护板", field: "block", grades: { C: 5, B: 8, A: 10, S: 12 } },
+    hp: { name: "加固框架", field: "hpPerLv", grades: { C: 3, B: 6, A: 8, S: 11 } }
+  }
 };
+const WEAPON_PART_FLAT_ATK = { C: 1, B: 1, A: 2, S: 2 };
+/** 改装件固定加的 atk（写了 spec.atk 就用它，否则按等级） */
+function weaponPartFlatAtk(id) {
+  const p = WEAPON_PARTS[id];
+  if (!p) return 0;
+  return p.atk != null ? Number(p.atk) || 0 : (WEAPON_PART_FLAT_ATK[p.grade] || 0);
+}
 const WEAPON_PARTS = {};
-Object.keys(WEAPON_PART_GEN.grades).forEach(g => {
+WEAPON_PART_GEN.coefGrades.forEach(g => {
   const G = WEAPON_PART_GEN.grades[g];
   Object.keys(WEAPON_PART_GEN.mains).forEach(main => {
     WEAPON_PART_ATTRS.filter(a => a !== main).forEach(neg => {
       WEAPON_PARTS[`${g.toLowerCase()}_${main}_${neg}`] = {
         name: `${WEAPON_PART_GEN.mains[main]}-${G.suffix}`, grade: g, main, neg,
-        coef: { [main]: G.step, [neg]: -G.step }, gen: true
+        coef: { [main]: G.step, [neg]: -G.step }, gen: true, kind: "coef"
+      };
+    });
+  });
+});
+Object.keys(WEAPON_PART_GEN.kinds).forEach(kind => {
+  const K = WEAPON_PART_GEN.kinds[kind];
+  Object.keys(K.grades).forEach(g => {
+    const G = WEAPON_PART_GEN.grades[g];
+    WEAPON_PART_ATTRS.forEach(neg => {
+      WEAPON_PARTS[`${g.toLowerCase()}_${kind}_${neg}`] = {
+        name: `${K.name}-${G.suffix}`, grade: g, main: kind, neg, kind,
+        coef: { [neg]: -G.step }, [K.field]: K.grades[g], gen: true
       };
     });
   });
@@ -154,7 +194,9 @@ function rollWeaponPart(grades, rnd) {
   const total = keys.reduce((s, k) => s + grades[k], 0);
   let r = rnd() * total, g = keys[keys.length - 1];
   for (const k of keys) { r -= grades[k]; if (r < 0) { g = k; break; } }
-  const mains = Object.keys(WEAPON_PART_GEN.mains);
+  // 这个等级有的种类：补正件（力量 / 敏捷 / 智力）+ 功能件（格挡 / 生命）
+  const mains = (WEAPON_PART_GEN.coefGrades.includes(g) ? Object.keys(WEAPON_PART_GEN.mains) : [])
+    .concat(Object.keys(WEAPON_PART_GEN.kinds).filter(k => WEAPON_PART_GEN.kinds[k].grades[g] != null));
   const main = mains[Math.floor(rnd() * mains.length)];
   const negs = WEAPON_PART_ATTRS.filter(a => a !== main);
   const neg = negs[Math.floor(rnd() * negs.length)];
@@ -173,6 +215,40 @@ function weaponPartCoefText(coef) {
     const v = Math.round(Number(coef[a]) * 100) / 100;
     return `${WEAPON_PART_ATTR_CN[a] || a}补正 ${v > 0 ? "+" : "−"}${Math.abs(v)}`;
   }).join("，");
+}
+/** 改装件效果的一行字：「atk +1，力量补正 +0.1，敏捷补正 −0.1」 */
+function weaponPartText(id) {
+  const p = WEAPON_PARTS[id];
+  if (!p) return "";
+  const flat = weaponPartFlatAtk(id);
+  return [flat ? `atk +${flat}` : "", p.block ? `格挡率 +${p.block}%` : "", p.hpPerLv ? `武器人每级装甲 +${p.hpPerLv}` : "",
+    weaponPartCoefText(p.coef)].filter(Boolean).join("，");
+}
+/** 装着的格挡件一共加多少格挡率（%） */
+function partsBlock(parts) { return (parts || []).reduce((s, id) => s + (Number((WEAPON_PARTS[id] || {}).block) || 0), 0); }
+/** 装着的生命件一共让武器人每级多多少装甲 */
+function partsHpPerLv(parts) { return (parts || []).reduce((s, id) => s + (Number((WEAPON_PARTS[id] || {}).hpPerLv) || 0), 0); }
+/** 武器人的血量层（按武器等级 + 生命件）：{ 层类型: 上限 } */
+function weaponUnitHp(kit, lv, parts) {
+  const g = WEAPON_GROWTH[kit];
+  if (!g) return null;
+  lv = Math.max(1, Number(lv) || 1);
+  const out = { [g.layer]: g.baseHp + g.hp * (lv - 1) };
+  (g.extra || []).forEach(ex => { out[ex.layer] = ex.baseHp + ex.hp * (lv - 1); });
+  const add = partsHpPerLv(parts) * lv;
+  if (add) { const t = out.armor != null ? "armor" : g.layer; out[t] = (out[t] || 0) + add; }
+  return out;
+}
+/** 把武器人场上的血量层上限调到「等级 + 生命件」该有的值（按比例保留当前血量） */
+function refreshWeaponUnitHp(u, owner) {
+  if (!u || !WEAPON_GROWTH[u.kit]) return;
+  const hp = weaponUnitHp(u.kit, u.level, owner ? weaponPartsOf(owner, u.kit) : []);
+  (u.layers || []).forEach(l => {
+    if (hp[l.type] == null) return;
+    const ratio = l.max ? l.current / l.max : 1;
+    l.max = hp[l.type];
+    l.current = Math.max(0, Math.min(l.max, Math.round(l.max * ratio)));
+  });
 }
 function weaponPartLabel(id) {
   const p = WEAPON_PARTS[id];
@@ -213,21 +289,24 @@ function computeWeaponAtk(kit, attrs, lv, parts) {
     const coefs = weaponCoefs(kit, parts);
     const sum = Object.keys(coefs).reduce((s, a) => s + (Number(attrs[a]) || 0) * coefs[a], 0);
     const base = (Number(f.base) || 3) + (lv - 1) * 1;
-    return Math.max(0, Math.round(base + sum * weaponTier(lv)));
+    return Math.max(0, Math.round(base + sum * weaponTier(lv)) + partsFlatAtk(parts));
   }
-  if (g) return (g.baseAtk || 0) + (g.atk || 0) * (lv - 1);
+  if (g) return (g.baseAtk || 0) + (g.atk || 0) * (lv - 1) + partsFlatAtk(parts);
   return 0;
 }
+/** 装着的改装件一共固定加多少 atk */
+function partsFlatAtk(parts) { return (parts || []).reduce((s, id) => s + weaponPartFlatAtk(id), 0); }
 
 /** 武器 atk 的明细（武器页用）：和 computeWeaponAtk 同一个算法，逐项列出来
- *  { formula, base, lvBase, tier, rows: [{ attr, name, value, coef, baseCoef, partCoef, part }], sum, raw, atk } */
+ *  { formula, base, lvBase, tier, rows: [{ attr, name, value, coef, baseCoef, partCoef, part }], sum, raw, flat（改装件固定 atk）, atk } */
 function weaponAtkBreakdown(kit, attrs, lv, parts) {
   const f = WEAPON_FORMULA[kit];
   lv = Math.max(1, Number(lv) || 1);
   attrs = attrs || {};
   if (!f) {
     const atk = computeWeaponAtk(kit, attrs, lv, parts);
-    return { formula: false, base: atk, lvBase: 0, tier: weaponTier(lv), rows: [], sum: 0, raw: atk, atk };
+    const flat = partsFlatAtk(parts);
+    return { formula: false, base: atk - flat, lvBase: 0, tier: weaponTier(lv), rows: [], sum: 0, flat, raw: atk, atk };
   }
   const own = weaponCoefs(kit, []), all = weaponCoefs(kit, parts);
   const order = ["str", "con", "dex", "wil", "int", "sta"].filter(a => a in all);
@@ -241,8 +320,9 @@ function weaponAtkBreakdown(kit, attrs, lv, parts) {
   const sum = rows.reduce((s, r) => s + r.value * r.coef, 0);
   const base = Number(f.base) || 3, lvBase = lv - 1;
   const raw = base + lvBase + sum * tier;
+  const flat = partsFlatAtk(parts);   // 改装件的固定 atk：取整之后再加，和 computeWeaponAtk 一样
   return { formula: true, base, lvBase, tier, rows, sum: Math.round(sum * 1000) / 1000, raw: Math.round(raw * 100) / 100,
-    atk: Math.max(0, Math.round(raw)) };
+    flat, atk: Math.max(0, Math.round(raw)) + flat };
 }
 
 /** 改装件变了 / 等级变了：重算这把武器给角色和武器人带来的攻击力 */
@@ -252,7 +332,7 @@ function refreshOwnerWeaponAtk(owner, kit) {
   const atk = computeWeaponAtk(kit, owner.attrs, lv, weaponPartsOf(owner, kit));
   const units = (typeof state !== "undefined" && state.units) || [];
   const wu = units.find(u => u.kit === kit && u.weaponOf === owner.kit);
-  if (wu) { wu.personalAtk = atk; wu.atk = atk; }
+  if (wu) { wu.personalAtk = atk; wu.atk = atk; refreshWeaponUnitHp(wu, owner); }   // 生命件：武器人的装甲跟着变
   if (owner.kit === "hiaki") { if (typeof refreshHiakiAtk === "function") refreshHiakiAtk(owner); return; }
   if ((owner.linkedKits || [])[0] !== kit) return;
   owner.weaponAtk = atk;
@@ -293,7 +373,7 @@ function installWeaponPart(owner, kit, slot, partId, free) {
   owner.weaponParts = owner.weaponParts || {};
   owner.weaponParts[kit] = row;
   refreshOwnerWeaponAtk(owner, kit);
-  notes.push(`${owner.name || owner.kit} 的武器第 ${i + 1} 槽装上 ${weaponPartLabel(partId)}（${weaponPartCoefText(p.coef)}）。`);
+  notes.push(`${owner.name || owner.kit} 的武器第 ${i + 1} 槽装上 ${weaponPartLabel(partId)}（${weaponPartText(partId)}）。`);
   return notes;
 }
 /** 拆下改装件（放回背包） */
@@ -316,26 +396,19 @@ function applyWeaponLevel(u) {
   const g = WEAPON_GROWTH[u.kit];
   if (!g) return;
   const lv = Math.max(1, Number(u.level) || 1);
-  const up = lv - 1;
-  const hp = g.baseHp + g.hp * up;
-  const layer = (u.layers || []).find(l => l.type === g.layer) || (u.layers || [])[0];
-  if (layer) {
-    const ratio = layer.max ? layer.current / layer.max : 1;
-    layer.max = hp;
-    layer.current = Math.max(0, Math.min(hp, Math.round(hp * ratio)));
-  }
-  (g.extra || []).forEach(ex => {
-    const l2 = (u.layers || []).find(l => l.type === ex.layer);
-    if (!l2) return;
-    const hp2 = ex.baseHp + ex.hp * up;
-    const r2 = l2.max ? l2.current / l2.max : 1;
-    l2.max = hp2;
-    l2.current = Math.max(0, Math.min(hp2, Math.round(hp2 * r2)));
-  });
   let owner = null;
   if (typeof state !== "undefined" && u.weaponOf) {
     owner = (typeof findKit === "function") ? findKit(u.weaponOf, state.units) : null;
   }
+  // 血量层：等级 + 生命件（找不到某层就改第一层，和以前一样）
+  const hp = weaponUnitHp(u.kit, lv, owner ? weaponPartsOf(owner, u.kit) : []);
+  (u.layers || []).forEach((l, i) => {
+    const want = hp[l.type] != null ? hp[l.type] : (i === 0 && !(u.layers || []).some(x => x.type === g.layer) ? hp[g.layer] : null);
+    if (want == null) return;
+    const ratio = l.max ? l.current / l.max : 1;
+    l.max = want;
+    l.current = Math.max(0, Math.min(want, Math.round(want * ratio)));
+  });
   const watk = computeWeaponAtk(u.kit, owner && owner.attrs, lv, owner ? weaponPartsOf(owner, u.kit) : []);
   u.personalAtk = watk;
   u.atk = watk;
@@ -353,7 +426,7 @@ function applyWeaponLevel(u) {
   u.defMax = def;
   u.def = Math.max(0, Math.min(def, Math.round(def * defRatio)));
   u.resources = u.resources || {};
-  u.resources.durability = (g.baseDur || 5) + Math.floor(lv / 2);
+  u.resources.durability = weaponBaseDur(u.kit, lv);
 }
 
 /* ---------- 义体改造 ----------

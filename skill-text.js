@@ -152,8 +152,24 @@
     edc: {
       weapon: true,
       passives: [],
-      growth: "每级提升 4 装甲；每五级提升 1 耐久。",
+      growth: "每级提升 4 装甲；每两级提升 1 耐久。",
       assistBlock: "用强光干扰敌人的攻击。"
+    },
+    longge: {
+      passives: [
+        { name: "枪管手杖", text: "武器可以作为手杖或是霰弹枪来使用。在扳机未解锁的状态下无法访问霰弹枪模式。扳机解锁后部分技能行为会发生改变。弹药打光后扳机锁上，并且无法再解锁。武器人变回武器的时候自动解锁扳机。" },
+        { name: "胶囊弹药", text: "手杖枪使用特制的胶囊子弹作为弹药，共 6 发：红色火弹、蓝色冰弹各 3 发。战斗开始时弹药的顺序是随机的，使用弹药时按照顺序消耗，用完后无法使用。通过窥探可以得到子弹的颜色信息，窥探后面的次数代表会按照顺序得到几枚子弹的信息。蓝色弹药用于治疗时，治疗固定的（角色等级 + 5）点生命值；红色弹药用于治疗时，治疗 40% 该单位已损失血量的生命值。" },
+        { name: "吐酸（兽人-蜥蜴）", text: "种族特长：可以使用附赠动作对一个近距离敌人发动吐酸攻击，造成 1×角色本身 atk 的酸液伤害。一局战斗仅限一次。可以在长休时改变吐酸攻击的属性（长休安排里选）。" },
+        { name: "鳞片（兽人-蜥蜴）", text: "种族缺陷：能量属性对你造成 25% 额外伤害。" }
+      ],
+      assistAttack: "可选手杖或霰弹枪模式来执行，立刻解锁扳机。手杖模式下移动至敌人的位置，对其发动戳刺，造成 0.5×atk 的冰属性伤害；如果有子弹，消耗一枚并且对一名同区域友方（可以是自己）执行对应的治疗。霰弹枪模式下举枪射击，消耗一枚弹药，造成 1.5×atk 的对应属性伤害。无论哪种模式，都会进行窥探 2。",
+      assistBlock: "成功时窥探 1，并且解锁扳机。"
+    },
+    xiaoxiao: {
+      weapon: true,
+      passives: [{ name: "小小", text: "龙哥的武器生物化为西装短发的人形保镖。和龙哥共用胶囊弹药；变回武器时解锁龙哥的扳机。" }],
+      growth: "每级提升 5 装甲；每两级提升 1 耐久。架势值 4。",
+      assistBlock: "成功率 60%，守护龙哥的时候成功率为 75%。成功时立刻进行一次反击：消耗 1 发子弹，打出一拳，对敌人造成 1×atk 的对应属性伤害和 2 击破（没有子弹则不反击）。"
     }
   };
 
@@ -278,6 +294,16 @@
     edc_shock: "电流冲击：对一个距离 1 的敌人造成 1×atk 的电击伤害以及 1 击破。如果有光能，则额外造成等同于光能数值的一次电击伤害和 1 击破。",
     edc_flash: "爆闪：释放所有光能，对同区域的每个敌人造成「光能/2」的能量伤害和 1 击破。",
     edc_return: "变回武器回到拉斯缪尔手里。需要和拉斯缪尔同区域。",
+    /* 龙哥 / 小朋友 */
+    longge_aa: "普通攻击：手杖模式对近距离的敌人挥打，造成 1×atk 的冰属性伤害以及 1 击破，窥探 1。霰弹枪模式（扳机解锁后）对远距离的敌人开枪，消耗 1 发子弹，造成 1.5×atk 的子弹对应属性伤害以及 1 击破。",
+    longge_chill: "冷气穿刺：手杖模式下对一个近距离的敌人进行戳刺，造成刺骨。扳机解锁时可以以霰弹枪模式释放：通过特殊射击对远距离的敌人发射一枚子弹，如果是蓝色子弹，造成刺骨且立刻对该敌人所在区域的所有友方单位治疗（蓝弹治疗：角色等级 + 5）；如果是红色子弹，子弹会在中途爆开，造成 0.5×atk 的火属性伤害。",
+    longge_spit: "吐酸（兽人-蜥蜴种族特长）：附赠动作，对一个近距离敌人造成 1×角色本身 atk（不算武器）的酸液伤害。一局战斗仅限一次。",
+    longge_safety: "解开保险（2 级）：行动点。解锁扳机。立刻查看最后一发子弹的颜色，并且可以选择将其移动至队列的最前方。",
+    longge_summon: "武器生物化：唤出小朋友（小小）作为独立单位。龙哥会变成空手。",
+    xiaoxiao_punch: "直冲拳：消耗 1 发子弹。对近距离的敌人直接打出一拳，造成 1×atk 的子弹对应属性伤害和 2 击破。",
+    xiaoxiao_heal: "治疗支援：消耗 1 发子弹。为同区域的一名友方单位执行治疗（蓝弹：龙哥等级 + 5；红弹：已损失血量的 40%），然后收回武器（会解锁龙哥的扳机）。",
+    xiaoxiao_combo: "连续拳（2 级）：消耗 3 发子弹，对近距离的敌人进行攻击，消耗的子弹不同效果不同。全红：打出升龙拳，造成 3×atk 的火焰伤害和 3 击破。全蓝：打出撼地拳，造成 2×atk 的冰冻伤害和 5 击破。其余情况：每发红弹打出 0.75×atk 的火焰伤害，每发蓝弹打出 0.5×atk 的冰冻伤害和 1 击破。",
+    xiaoxiao_return: "变回武器回到龙哥手里，并解锁扳机。需要和龙哥同区域。",
     /* 通用 */
     bare_aa: "空手攻击：对同区域一个敌人造成 1×atk 的物理伤害。没有武器在手时只能发动空手攻击和空手格挡。",
     assist_block: "消耗附赠动作，为同区域被攻击的队友尝试格挡。",
@@ -403,7 +429,7 @@
     const c = weaponCoefs(kit, parts);
     return {
       coefs: Object.keys(c).map(a => ({ attr: a, name: WEAPON_PART_ATTR_CN[a] || a, coef: c[a] })),
-      slots: weaponPartRow(owner, kit).map(id => id ? { id, name: weaponPartLabel(id), text: weaponPartCoefText(WEAPON_PARTS[id].coef) } : null),
+      slots: weaponPartRow(owner, kit).map(id => id ? { id, name: weaponPartLabel(id), text: weaponPartText(id) } : null),
       nextSlotLv: WEAPON_PART_SLOT_LEVELS.find(x => x > (Number((owner.weaponLevels || {})[kit]) || 1)) || null
     };
   }
@@ -419,11 +445,11 @@
       const g = (typeof WEAPON_GROWTH !== "undefined" && WEAPON_GROWTH[kit]) || null;
       w = JSON.parse(JSON.stringify(card));
       w.level = lv;
+      // 等级 + 生命件（growth.js · weaponUnitHp）
+      const want = typeof weaponUnitHp === "function" ? weaponUnitHp(kit, lv, typeof weaponPartsOf === "function" ? weaponPartsOf(owner, kit) : []) : null;
       w.layers = (card.layers || []).map(l => {
         let hp = Number(l.hp) || 0;
-        if (g && l.type === g.layer) hp = g.baseHp + g.hp * (lv - 1);
-        const ex = g && (g.extra || []).find(e => e.layer === l.type);
-        if (ex) hp = ex.baseHp + ex.hp * (lv - 1);
+        if (want && want[l.type] != null) hp = want[l.type];
         return { type: l.type, current: hp, max: hp };
       });
       if (g) { w.defMax = w.def = g.baseDef + Math.floor(lv / 5); }
@@ -438,7 +464,7 @@
       kit, name: w.name, level: w.level || 1, out,
       atk: Number(w.atk) || 0, def: w.defMax != null ? w.defMax : w.def,
       layers: layersOf(w), durability: dur,
-      blockBonus: (typeof WEAPON_BLOCK_BONUS !== "undefined" && WEAPON_BLOCK_BONUS[kit]) || 0,
+      blockBonus: (typeof weaponBlockBonusOf === "function" ? weaponBlockBonusOf(kit, owner) : (typeof WEAPON_BLOCK_BONUS !== "undefined" && WEAPON_BLOCK_BONUS[kit])) || 0,
       blockAlone: typeof blockChance === "function" ? blockChance(w) : null,
       passives: info.passives || [], assistBlock: info.assistBlock || "", growth: info.growth || "",
       mods: weaponModRows(owner, kit),
@@ -511,7 +537,7 @@
       blockBonus: ws.blockBonus, blockAlone: ws.blockAlone,
       personalAtk: Number(owner.personalAtk) || 0,
       slots: row.map(id => id ? { id, name: WEAPON_PARTS[id].name, grade: WEAPON_PARTS[id].grade || "",
-        text: weaponPartCoefText(WEAPON_PARTS[id].coef), coef: Object.assign({}, WEAPON_PARTS[id].coef) } : null),
+        text: weaponPartText(id), coef: Object.assign({}, WEAPON_PARTS[id].coef) } : null),
       lockedSlots: slotLv.filter(L => L > lv),
       blueprint: mod ? Object.assign({ name: "客制化", text: "", smith: "" }, blueprintInfo(bpId) || {},
         { effects: typeof bpEffectRows === "function" ? bpEffectRows(mod, ctx) : [] }) : null,

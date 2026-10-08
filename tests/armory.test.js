@@ -29,7 +29,8 @@ test("atk 明细和 computeWeaponAtk 算出来的一样，改装件的补正单�
   const str = b.rows.find(r => r.attr === "str"), dex = b.rows.find(r => r.attr === "dex");
   assert.deepEqual([str.baseCoef, str.partCoef, str.coef], [0.3, 0.1, 0.4]);
   assert.deepEqual([dex.baseCoef, dex.partCoef, dex.coef], [0, -0.1, -0.1]);
-  assert.equal(Math.round(b.raw), w.atk);
+  assert.equal(b.flat, 1, "C 级改装件固定 +1 atk");
+  assert.equal(Math.round(b.raw) + b.flat, w.atk);
   assert.deepEqual(plain(w.slots.map(s => s && s.id)), [null, "c_str_dex"]);
   assert.deepEqual(plain(w.lockedSlots), []);
   assert.deepEqual(plain(w.track.map(t => [t.lv, t.done])), [[3, true], [5, true], [7, true], [10, false]]);

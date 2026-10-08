@@ -18,7 +18,7 @@ function registerWeaponPartItems() {
     const key = typeof weaponPartItemId === "function" ? weaponPartItemId(id) : "part_" + id;
     const neg = p.neg && typeof WEAPON_PART_ATTR_CN !== "undefined" ? ` · ${WEAPON_PART_ATTR_CN[p.neg]}−` : "";
     if (!ITEM_CATALOG[key]) ITEM_CATALOG[key] = { name: `改装件·${p.name}${p.grade ? `（${p.grade}级${neg}）` : ""}`,
-      hint: typeof weaponPartCoefText === "function" ? weaponPartCoefText(p.coef) : "", combat: false, part: id };
+      hint: typeof weaponPartText === "function" ? weaponPartText(id) : "", combat: false, part: id };
   });
 }
 registerWeaponPartItems();

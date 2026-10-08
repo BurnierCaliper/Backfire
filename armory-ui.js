@@ -70,17 +70,19 @@
   function ticket(w) {
     const b = w.breakdown;
     if (!b) return "";
-    if (!b.formula) return `<div class="ar-ticket"><div class="ar-line"><span>这把武器按成长表算</span><b>${b.atk}</b></div></div>`;
+    const flatLine = b.flat ? `<div class="ar-line"><span>改装件固定加成</span><b>+${b.flat}</b></div>` : "";
+    if (!b.formula) return `<div class="ar-ticket"><div class="ar-line"><span>这把武器按成长表算</span><b>${b.base}</b></div>${flatLine}${b.flat ? `<div class="ar-line sum"><span>合计</span><b>${b.atk}</b></div>` : ""}</div>`;
     const rows = b.rows.map(r => {
       const src = r.partCoef ? `<small>（本体 ${num(r.baseCoef)} ${signed(r.partCoef)} 改装）</small>` : "";
       return `<div class="ar-line${r.coef < 0 ? " neg" : ""}"><span>${esc(r.name)} ${r.value} × 补正 ${num(r.coef)}${src} × 等级系数 ${num(b.tier)}</span><b>${signed(r.part)}</b></div>`;
     }).join("");
     return `<div class="ar-ticket">
-      <div class="ar-ticket-h">ATK 工单 <small>基础 + 等级 + Σ(属性 × 补正) × 等级系数（0.5 × 等级）</small></div>
+      <div class="ar-ticket-h">ATK 工单 <small>基础 + 等级 + Σ(属性 × 补正) × 等级系数（0.5 × 等级）+ 改装件固定加成</small></div>
       <div class="ar-line"><span>基础</span><b>${b.base}</b></div>
       <div class="ar-line"><span>等级加成（Lv${w.level} − 1）</span><b>+${b.lvBase}</b></div>
       ${rows}
-      <div class="ar-line sum"><span>合计 ${num(b.raw)} → 四舍五入</span><b>${b.atk}</b></div>
+      ${b.flat ? `<div class="ar-line"><span>小计 ${num(b.raw)} → 四舍五入</span><b>${b.atk - b.flat}</b></div>${flatLine}` : ""}
+      <div class="ar-line sum"><span>${b.flat ? "合计" : `合计 ${num(b.raw)} → 四舍五入`}</span><b>${b.atk}</b></div>
     </div>`;
   }
   /** 补正系数刻度：本体一段、改装件一段 */

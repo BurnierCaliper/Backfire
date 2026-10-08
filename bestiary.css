@@ -1,0 +1,133 @@
+/* Antlerscale: Backfire · 敌人图鉴（bestiary-ui.js）
+ * 和角鳞星地图同一套：铁皮框 + 黄黑警示条标题栏。左边卡片墙，右边详情。
+ * 遭遇过的卡片按等级上色（杂兵铁灰 / 精英橙 / 首领红），没遭遇过的是暗色问号卡。 */
+.bx {
+  --bx-ink: #0b0806;
+  --bx-steel: #1a1511;
+  --bx-edge: #4d4337;
+  --bx-hazard: #f2c230;
+  --bx-paper: #ece0c6;
+  --bx-muted: #a8977b;
+  --bx-holo: #3fe0ff;
+  --bx-minion: #8a9aa8;
+  --bx-elite: #ff9f1c;
+  --bx-boss: #ff3b5c;
+  position: fixed; inset: 0; z-index: 200;
+  display: none; align-items: center; justify-content: center; padding: 18px;
+  background: radial-gradient(ellipse at 50% 30%, rgba(60, 30, 20, .55), rgba(5, 4, 3, .93) 70%);
+  backdrop-filter: blur(3px);
+}
+.bx.show { display: flex; animation: bxIn .25s ease-out; }
+@keyframes bxIn { from { opacity: 0; } to { opacity: 1; } }
+body.bx-open { overflow: hidden; }
+.bx-frame {
+  width: min(1320px, 100%); height: min(880px, 100%);
+  display: flex; flex-direction: column;
+  background: var(--bx-steel); color: var(--bx-paper);
+  border: 2px solid var(--bx-edge);
+  box-shadow: 0 0 0 4px var(--bx-ink), 0 30px 80px rgba(0, 0, 0, .7);
+  clip-path: polygon(0 0, calc(100% - 22px) 0, 100% 22px, 100% 100%, 22px 100%, 0 calc(100% - 22px));
+}
+.bx-head { position: relative; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 12px 18px 16px; background: linear-gradient(#231c16, #1a1511); }
+.bx-head::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 6px; background: repeating-linear-gradient(-45deg, var(--bx-hazard) 0 12px, var(--bx-ink) 12px 24px); }
+.bx-tag { font-family: "Black Ops One", Impact, sans-serif; font-size: 13px; letter-spacing: .14em; padding: 3px 10px 2px; color: var(--bx-ink); background: var(--bx-hazard); transform: rotate(-2deg); box-shadow: 2px 2px 0 var(--bx-ink); }
+.bx-head h3 { margin: 0; font-size: 22px; font-weight: 900; letter-spacing: .06em; }
+.bx-progress { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--bx-muted); }
+.bx-progress b { color: var(--bx-hazard); font-size: 15px; }
+.bx-bar { width: 140px; height: 6px; background: rgba(236, 224, 198, .12); overflow: hidden; }
+.bx-bar i { display: block; height: 100%; background: var(--bx-hazard); transition: width .4s; }
+.bx-spacer { flex: 1; }
+
+.bx-body { flex: 1; min-height: 0; display: flex; }
+.bx-list { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; padding: 14px 16px 16px; }
+.bx-tabs { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+.bx-tab { display: inline-flex; align-items: baseline; gap: 6px; padding: 5px 14px; font: inherit; font-size: 14px; font-weight: 800; color: var(--bx-paper); background: rgba(236, 224, 198, .06); border: 0; box-shadow: inset 0 0 0 1px rgba(236, 224, 198, .2); cursor: pointer; }
+.bx-tab small { font-size: 11px; font-weight: 700; color: var(--bx-muted); }
+.bx-tab.on { color: var(--bx-ink); background: var(--bx-hazard); box-shadow: none; }
+.bx-tab.on small { color: rgba(11, 8, 6, .7); }
+.bx-grid { flex: 1; overflow: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; align-content: start; padding: 2px 4px 2px 2px; }
+
+/* 卡片 */
+.bx-card {
+  --c: var(--bx-minion);
+  position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+  min-height: 112px; padding: 10px 12px 10px 14px; text-align: left; cursor: pointer;
+  font: inherit; color: var(--bx-paper);
+  background: linear-gradient(160deg, #2a221b, #18130f);
+  border: 0; box-shadow: inset 0 0 0 1px rgba(236, 224, 198, .14);
+  clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
+  transition: transform .12s, box-shadow .12s;
+}
+.bx-card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--c); }
+.bx-card.elite { --c: var(--bx-elite); }
+.bx-card.boss { --c: var(--bx-boss); }
+.bx-card:hover { transform: translateY(-2px); box-shadow: inset 0 0 0 1px var(--c); }
+.bx-card.sel { box-shadow: inset 0 0 0 2px var(--bx-hazard); background: linear-gradient(160deg, #3a2f22, #1c1611); }
+.bx-rank { font-size: 10px; font-weight: 900; letter-spacing: .2em; color: var(--c); }
+.bx-name { font-size: 15px; font-weight: 900; line-height: 1.25; }
+.bx-card small { font-size: 11px; color: var(--bx-muted); }
+.bx-sigil { position: absolute; right: 10px; top: 10px; font-size: 22px; }
+.bx-sigil.unknown { font-family: "Black Ops One", Impact, sans-serif; font-size: 34px; line-height: 1; color: rgba(236, 224, 198, .14); }
+.bx-card.locked { background: repeating-linear-gradient(-45deg, #15110d 0 8px, #191410 8px 16px); }
+.bx-card.locked .bx-name { color: rgba(236, 224, 198, .45); letter-spacing: .2em; }
+.bx-card.locked::before { background: rgba(236, 224, 198, .18); }
+.bx-empty { color: var(--bx-muted); }
+
+/* 详情 */
+.bx-detail { width: 400px; flex: none; overflow: auto; padding: 20px 20px 24px; background: linear-gradient(180deg, #221b15, #15110d); border-left: 2px solid var(--bx-edge); }
+.bx-kicker { font-family: "Black Ops One", Impact, sans-serif; font-size: 11px; letter-spacing: .25em; color: var(--bx-holo); }
+.bx-detail h4 { margin: 4px 0 10px; font-size: 28px; font-weight: 900; letter-spacing: .03em; }
+.bx-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.bx-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 9px; font-size: 12px; font-weight: 800; color: var(--bx-ink); background: var(--bx-paper); }
+.bx-chip .eicon { --eo: #ece0c6; }
+.bx-chip.dim { color: var(--bx-paper); background: transparent; box-shadow: inset 0 0 0 1px rgba(236, 224, 198, .35); }
+.bx-sec { margin-top: 18px; padding-top: 12px; border-top: 1px dashed rgba(236, 224, 198, .18); }
+.bx-sec-h { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+.bx-sec-h > span:first-child { font-size: 13px; font-weight: 900; letter-spacing: .15em; color: var(--bx-hazard); }
+.bx-lv { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; font-size: 12px; color: var(--bx-muted); }
+.bx-lv input { width: 110px; accent-color: var(--bx-hazard); }
+.bx-lv b { min-width: 22px; color: var(--bx-paper); }
+.bx-party { display: inline-flex; }
+.bx-party button { font: inherit; font-size: 11px; font-weight: 800; padding: 2px 7px; color: var(--bx-paper); background: transparent; border: 1px solid rgba(236, 224, 198, .3); cursor: pointer; }
+.bx-party button + button { border-left: 0; }
+.bx-party button.on { color: var(--bx-ink); background: var(--bx-paper); }
+.bx-layers { display: flex; gap: 2px; height: 30px; }
+.bx-layer { min-width: 54px; display: flex; align-items: center; justify-content: space-between; gap: 4px; padding: 0 8px; font-size: 11px; color: #fff; background: #8c6d4a; }
+.bx-layer b { font-size: 13px; }
+.bx-layer.flesh { background: #b0504a; }
+.bx-layer.armor { background: #6f7c88; }
+.bx-layer.shield { background: #3c86b8; }
+.bx-layer.sand { background: #b68a3f; }
+.bx-layer.spirit { background: #8a5cc0; }
+.bx-nums { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 10px; }
+.bx-nums div { padding: 6px 8px; background: rgba(236, 224, 198, .06); }
+.bx-nums small { display: block; font-size: 11px; color: var(--bx-muted); }
+.bx-nums b { font-family: "Black Ops One", Impact, sans-serif; font-size: 20px; color: var(--bx-paper); }
+.bx-note { margin: 8px 0 0; font-size: 11px; line-height: 1.6; color: var(--bx-muted); }
+.bx-move { margin: 0; font-size: 14px; line-height: 1.6; }
+.bx-abil { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 7px; }
+.bx-abil li { position: relative; padding: 7px 10px 7px 14px; font-size: 13px; line-height: 1.65; color: #d8ccb2; background: rgba(236, 224, 198, .05); }
+.bx-abil li::before { content: ""; position: absolute; left: 0; top: 9px; bottom: 9px; width: 3px; background: var(--bx-holo); }
+.bx-abil li b { color: var(--bx-paper); }
+.bx-facts { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 0; font-size: 13px; }
+.bx-facts dt { color: var(--bx-muted); }
+.bx-facts dd { margin: 0; font-weight: 700; }
+.bx-d-locked h4 { color: rgba(236, 224, 198, .45); letter-spacing: .3em; }
+.bx-silhouette { margin: 14px 0 18px; height: 150px; display: flex; align-items: center; justify-content: center; font-family: "Black Ops One", Impact, sans-serif; font-size: 110px; color: rgba(236, 224, 198, .08); background: repeating-linear-gradient(-45deg, #15110d 0 10px, #1a1511 10px 20px); box-shadow: inset 0 0 0 1px rgba(236, 224, 198, .1); }
+.bx-hint { margin: 16px 0 0; font-size: 13px; line-height: 1.75; color: var(--bx-muted); }
+
+@media (max-width: 820px) {
+  .bx { padding: 0; }
+  .bx-frame { width: 100%; height: 100%; clip-path: none; border: 0; }
+  .bx-head { padding: 10px 12px 14px; gap: 8px; }
+  .bx-head h3 { display: none; }
+  .bx-bar { width: 80px; }
+  .bx-body { flex-direction: column; }
+  .bx-list { flex: 0 0 42%; min-height: 0; padding: 10px 12px; }
+  .bx-grid { grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px; }
+  .bx-card { min-height: 92px; }
+  .bx-detail { width: auto; flex: 1 1 0; min-height: 0; border-left: 0; border-top: 2px solid var(--bx-edge); padding: 14px 16px 20px; }
+  .bx-detail h4 { font-size: 22px; }
+  .bx-nums { grid-template-columns: repeat(2, 1fr); }
+}
+@media (prefers-reduced-motion: reduce) { .bx.show { animation: none; } .bx-card { transition: none; } }

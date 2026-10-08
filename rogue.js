@@ -1052,7 +1052,7 @@ const Rogue = (function () {
   /** 长休计划只留 food / sleep 两张表（每个角色吃什么、用什么睡眠道具），不写就按默认 */
   function restChoice(plan) {
     const pick = (o) => (o && typeof o === "object" ? Object.assign({}, o) : undefined);
-    return { food: pick(plan && plan.food), sleep: pick(plan && plan.sleep) };
+    return { food: pick(plan && plan.food), sleep: pick(plan && plan.sleep), spit: pick(plan && plan.spit) };
   }
   function restPlan(run, plan) {
     return withParty(run, () => longRestNeeds(restChoice(plan))).out;
@@ -1504,14 +1504,14 @@ const Rogue = (function () {
     state.kuizhi -= offer.price;
     offer.sold = true;
     bagAdd(weaponPartItemId(offer.id), 1);
-    return logAll(run, [`买下改装件 ${weaponPartLabel(offer.id)}（${weaponPartCoefText(WEAPON_PARTS[offer.id].coef)}），花掉 ${offer.price} 奎支${offer.discount ? "（打折）" : ""}。`]);
+    return logAll(run, [`买下改装件 ${weaponPartLabel(offer.id)}（${weaponPartText(offer.id)}），花掉 ${offer.price} 奎支${offer.discount ? "（打折）" : ""}。`]);
   }
   /** 能不能卖改装件：商店节点、休整时的商店，或者有工匠在场 */
   function canSellParts(run) { return canShop(run) || presentSmiths(run).length > 0; }
   /** 背包里的改装件：[{ id, name, grade, text, qty, sell, install }] */
   function partStock() {
     return Object.keys(WEAPON_PARTS).map(id => ({ id, qty: bagCount(weaponPartItemId(id)) })).filter(x => x.qty > 0)
-      .map(x => Object.assign(x, { name: weaponPartLabel(x.id), grade: WEAPON_PARTS[x.id].grade, text: weaponPartCoefText(WEAPON_PARTS[x.id].coef),
+      .map(x => Object.assign(x, { name: weaponPartLabel(x.id), grade: WEAPON_PARTS[x.id].grade, text: weaponPartText(x.id),
         sell: partSellPrice(x.id), install: partInstallCost(x.id) }));
   }
   function sellPart(run, partId) {
@@ -1545,7 +1545,7 @@ const Rogue = (function () {
     row[i] = partId;
     h.weaponParts = h.weaponParts || {};
     h.weaponParts[kit] = row;
-    notes.push(`工匠把 ${weaponPartLabel(partId)}（${weaponPartCoefText(WEAPON_PARTS[partId].coef)}）装到 ${heroName(kit)} 的第 ${i + 1} 个改装槽，工钱 ${cost} 奎支。`);
+    notes.push(`工匠把 ${weaponPartLabel(partId)}（${weaponPartText(partId)}）装到 ${heroName(kit)} 的第 ${i + 1} 个改装槽，工钱 ${cost} 奎支。`);
     return logAll(run, notes);
   }
   /** 拆下改装件：不要钱，放回背包（要有工匠在场） */
@@ -1587,7 +1587,7 @@ const Rogue = (function () {
     notes.push(`${t.key ? "主线" : "任务「" + t.name + "」"}完成：获得 ${pay.kuizhi} 奎支，每人 ${pay.xp} 经验。`);
     if (t.part && WEAPON_PARTS[t.part]) {
       bagAdd(weaponPartItemId(t.part), 1);
-      notes.push(`委托方额外给了一个改装件：${weaponPartLabel(t.part)}（${weaponPartCoefText(WEAPON_PARTS[t.part].coef)}）。`);
+      notes.push(`委托方额外给了一个改装件：${weaponPartLabel(t.part)}（${weaponPartText(t.part)}）。`);
     }
     run.party.forEach(h => { h.xp = (h.xp || 0) + pay.xp; });
     const ei = escortInfo(run, t);
@@ -1699,7 +1699,7 @@ const Rogue = (function () {
         return { kit: k, name: heroName(k), level: (h.weaponLevels || {})[k] || 1,
           dur: weaponDurFor(h, k, run), durMax: weaponDurMaxFor(h, k, run), hp: cur,
           blueprint: (run.installed || {})[k] ? blueprintById(run.installed[k]) : null,
-          parts: weaponPartRow(h, k).map(id => id ? { id, name: weaponPartLabel(id), text: weaponPartCoefText(WEAPON_PARTS[id].coef) } : null) };
+          parts: weaponPartRow(h, k).map(id => id ? { id, name: weaponPartLabel(id), text: weaponPartText(id) } : null) };
       })
     };
   }
@@ -1713,8 +1713,7 @@ const Rogue = (function () {
   }
   // 耐久上限跟武器等级走（growth.js / ledger.js）。战斗外角色不在场上，这里按单局记录的等级算
   function weaponDurMaxFor(h, k, run) {
-    const g = WEAPON_GROWTH[k] || {};
-    const base = (g.baseDur || 5) + Math.floor(((h.weaponLevels || {})[k] || 1) / 2);
+    const base = weaponBaseDur(k, (h.weaponLevels || {})[k] || 1);
     const mod = weaponModsOf(run)[k] || {};
     return typeof bpDurMax === "function" ? bpDurMax(base, mod) : base;
   }

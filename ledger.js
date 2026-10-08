@@ -79,13 +79,14 @@ const LEDGER = {
   tasks: [],           // 跑团：主持人发布的任务（trpg-tasks.js）
   place: null,         // 跑团：队伍在角鳞星地图上的位置（world-data.js · WORLD_PLACES 的 id）
   placePos: null,      // 跑团：标记拖到了地图上任意位置时的坐标 { x, y }（百分比）；place 记最近的地点
+  spit: {},            // 角色 kit → 吐酸攻击的属性（兽人-蜥蜴种族特长，长休时可以换；没写是酸）
 
   /** 存进队伍档案 */
   save() {
     return JSON.parse(JSON.stringify({
       day: this.day, hours: this.hours, clock: this.clock, dur: this.dur,
       heroes: this.heroes, weapons: this.weapons, shortUsed: this.shortUsed,
-      restOnce: this.restOnce, career: this.career, tasks: this.tasks || [], place: this.place || null, placePos: this.placePos || null, water: ledgerWater()
+      restOnce: this.restOnce, career: this.career, tasks: this.tasks || [], place: this.place || null, placePos: this.placePos || null, spit: this.spit || {}, water: ledgerWater()
     }));
   },
   load(s) {
@@ -102,6 +103,7 @@ const LEDGER = {
     this.tasks = Array.isArray(s.tasks) ? s.tasks : [];
     this.place = typeof s.place === "string" ? s.place : null;
     this.placePos = s.placePos && isFinite(Number(s.placePos.x)) && isFinite(Number(s.placePos.y)) ? { x: Number(s.placePos.x), y: Number(s.placePos.y) } : null;
+    this.spit = s.spit && typeof s.spit === "object" ? Object.assign({}, s.spit) : {};
     if (s.water != null) setLedgerWater(s.water);
   },
   reset() { this.load({}); }
@@ -193,6 +195,7 @@ function weaponDurMax(kit) {
 function weaponDurBase(kit) {
   const owner = weaponOwner(kit);
   const lv = owner && owner.weaponLevels && owner.weaponLevels[kit] ? Number(owner.weaponLevels[kit]) : 1;
+  if (typeof weaponBaseDur === "function") return weaponBaseDur(kit, lv);
   const g = (typeof WEAPON_GROWTH !== "undefined" && WEAPON_GROWTH[kit]) || {};
   return (g.baseDur || 5) + Math.floor(lv / 2);
 }
@@ -469,19 +472,32 @@ function longRestNeeds(plan) {
   });
   return { water, food, sleep, lack, ok: lack.length === 0 };
 }
+/* ===== 吐酸（兽人-蜥蜴种族特长）的属性：长休时可以改 ===== */
+const SPIT_ELEMENTS = ["acid", "fire", "ice", "electric", "energy", "physical", "harmonic"];
+/** 这个角色有没有吐酸（看种族） */
+function canSpit(kit) { return typeof heroProfile === "function" && (heroProfile(kit) || {}).race === "兽人-蜥蜴"; }
+/** 这个角色现在吐酸是什么属性 */
+function spitElementOf(kit) {
+  const e = LEDGER.spit && LEDGER.spit[kit];
+  return SPIT_ELEMENTS.indexOf(e) >= 0 ? e : "acid";
+}
 /** 长休界面用：每个角色要多少、现在选了什么，以及能选的食物 / 睡眠道具（带库存）。plan 同 longRestNeeds */
 function longRestOptions(plan) {
   plan = plan || {};
   const heroes = partyHeroes().filter(h => !h.dead).map(h => {
     const c = heroRestCost(h);
     const fid = (plan.food && plan.food[h.kit]) || defaultFoodFor();
-    return { kit: h.kit, name: h.name, water: c.water, food: c.food, foodId: fid, sleepId: sleepFor(plan, h.kit) };
+    const spit = canSpit(h.kit) ? ((plan.spit && SPIT_ELEMENTS.indexOf(plan.spit[h.kit]) >= 0) ? plan.spit[h.kit] : spitElementOf(h.kit)) : null;
+    return { kit: h.kit, name: h.name, water: c.water, food: c.food, foodId: fid, sleepId: sleepFor(plan, h.kit), spit };
   });
   const foods = FOOD_ORDER.filter(id => ITEM_CATALOG[id]).map(id => ({ id, name: ITEM_CATALOG[id].name, have: bagCount(id), shp: Number(ITEM_CATALOG[id].shp) || 0 }));
   const sleeps = sleepItemIds().map(id => ({ id, name: ITEM_CATALOG[id].name, have: bagCount(id), bonus: Number(ITEM_CATALOG[id].sleep) || 0 }));
   const food = {}, sleep = {};
   heroes.forEach(h => { food[h.kit] = h.foodId; sleep[h.kit] = h.sleepId; });
-  return { heroes, foods, sleeps, water: ledgerWater(), plan: { food, sleep }, need: longRestNeeds(Object.assign({}, plan, { food, sleep })) };
+  const spit = {};
+  heroes.forEach(h => { if (h.spit) spit[h.kit] = h.spit; });
+  const spitElements = SPIT_ELEMENTS.map(id => ({ id, name: (typeof ELE !== "undefined" && ELE[id]) || id }));
+  return { heroes, foods, sleeps, spitElements, water: ledgerWater(), plan: { food, sleep, spit }, need: longRestNeeds(Object.assign({}, plan, { food, sleep })) };
 }
 /** 默认吃最便宜的、背包里有的食物 */
 function defaultFoodFor() {
@@ -516,6 +532,16 @@ function ledgerLongRest(plan, notes) {
   // 守夜：选一名角色或武器人整夜放哨。他不吃长休的恢复，也不刷新短休次数和「长休一次」的技能
   const watch = plan.watch || null;
   if (watch) notes.push(`${unitNameOf(watch)} 守夜：这次长休不恢复，短休次数和「长休一次」的技能也不刷新。`);
+  // 吐酸：长休时可以改变吐酸攻击的属性（守夜的人也能改，这不算恢复）
+  Object.keys(plan.spit || {}).forEach(kit => {
+    const e = plan.spit[kit];
+    if (!canSpit(kit) || SPIT_ELEMENTS.indexOf(e) < 0 || e === spitElementOf(kit)) return;
+    LEDGER.spit = LEDGER.spit || {};
+    const before = spitElementOf(kit);
+    LEDGER.spit[kit] = e;
+    const nm = (k) => (typeof ELE !== "undefined" && ELE[k]) || k;
+    notes.push(`${unitNameOf(kit)} 的吐酸攻击属性：${nm(before)} → ${nm(e)}。`);
+  });
   partyHeroes().filter(h => !h.dead).forEach(h => {
     if (h.kit === watch) { (h.linkedKits || []).forEach(k => { if (k !== watch) restoreDurability(k); }); return; }
     (h.layers || []).forEach(l => { l.current = l.max; });
