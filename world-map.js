@@ -9,12 +9,14 @@
  *   opt.canMove   能不能在地图上改位置（跑团主持人）：可以直接拖动「你在这里」的标记，或在地点卡上点「把队伍移到这里」
  *                 opt.onMove(loc) 改位置时调用：loc = { place } / { place, x, y }（任意位置，place 是最近的地点）/ null（不再标出）
  *                 opt.refresh() 改完以后重新取一份 opt
- * 地图可以拖动、滚轮 / 双指缩放；点地点看简介。数据在 world-data.js。 */
+ * 地图可以拖动、滚轮 / 双指缩放；点地点看简介。数据在 world-data.js。
+ * 「测距」：选起点、终点，看路程（km）和徒步 / 各种车要多久。距离按 world-travel.js 的设定表算，不量图（地图有透视）。 */
 "use strict";
 const WorldMap = (() => {
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c]));
   const IMG_W = 1672, IMG_H = 941;
   let root = null, opt = {}, sel = null;
+  let measure = null;   // 测距：{ from, to }；null = 没在测距
   const view = { s: 1, tx: 0, ty: 0 };
   const MIN_S = 1, MAX_S = 5;
 
@@ -36,6 +38,7 @@ const WorldMap = (() => {
             <button class="g-btn small" data-wm="home" title="回到当前位置">定位</button>
             <button class="g-btn small wm-drop" data-wm="drop" title="在地图中间放下队伍标记，之后可以拖到任何地方">放标记</button>
             <button class="g-btn small" data-wm="fit" title="看整张地图">全图</button>
+            <button class="g-btn small wm-measure-btn" data-wm="measure" title="算两地之间的路程和用时">测距</button>
           </div>
           <button class="g-btn" data-wm="close">关闭</button>
         </header>
@@ -44,6 +47,7 @@ const WorldMap = (() => {
             <div class="wm-stage">
               <img class="wm-img" alt="角鳞星地图" draggable="false">
               <svg class="wm-route" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"></svg>
+              <svg class="wm-trip" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"></svg>
               <div class="wm-pins"></div>
             </div>
             <div class="wm-vignette"></div>
@@ -63,6 +67,14 @@ const WorldMap = (() => {
         else if (a === "out") zoomAt(view.s / 1.5);
         else if (a === "fit") { view.s = 1; view.tx = 0; view.ty = 0; apply(true); }
         else if (a === "home") focusHere(2.2);
+        else if (a === "measure") toggleMeasure();
+        else if (a === "swap" && measure) { measure = { from: measure.to, to: measure.from }; renderMeasure(); }
+        else if (a === "trip-go" && measure && opt.canMove && measure.to) {
+          doMove({ place: measure.to });
+          measure = { from: measure.to, to: null };
+          renderMeasure();
+          focusHere(Math.max(view.s, 1.6));
+        }
         else if (a === "drop" && opt.canMove) {
           // 放在现在看到的地图正中间
           const b = baseSize();
@@ -76,13 +88,22 @@ const WorldMap = (() => {
       if (go) { focus(go.dataset.goto, Math.max(view.s, 1.8)); select(go.dataset.goto); return; }
       if (e.target.closest("[data-mark]") && !dragMoved) { select(hereId()); return; }
       const pin = e.target.closest("[data-place]");
-      if (pin && !dragMoved) { select(pin.dataset.place); return; }
+      if (pin && !dragMoved) {
+        if (measure) pickMeasure(pin.dataset.place); else select(pin.dataset.place);
+        return;
+      }
       const mv = e.target.closest("[data-move]");
       if (mv && opt.canMove) {
         doMove(mv.dataset.move ? { place: mv.dataset.move } : null);
         if (hereId()) focusHere(Math.max(view.s, 1.6));
       }
       if (e.target === root) close();
+    });
+    root.addEventListener("change", (e) => {
+      const s = e.target.closest("[data-trip]");
+      if (!s || !measure) return;
+      measure[s.dataset.trip] = s.value || null;
+      renderMeasure();
     });
     document.addEventListener("keydown", (e) => { if (root && root.classList.contains("show") && e.key === "Escape") { e.stopPropagation(); close(); } }, true);
     bindPanZoom();
@@ -268,6 +289,7 @@ const WorldMap = (() => {
   }
   function select(id) {
     sel = id;
+    if (measure) { renderMeasure(); return; }
     root.querySelectorAll(".wm-pin").forEach(b => b.classList.toggle("sel", b.dataset.place === id));
     const card = root.querySelector(".wm-card");
     const p = worldPlace(id) || worldPlaceOf(opt.here);
@@ -307,14 +329,102 @@ const WorldMap = (() => {
       `<div class="wm-sec"><div class="wm-card-kicker">地点一览</div><ul class="wm-index">${places}</ul></div>`;
   }
 
+  /* ---------- 测距 ---------- */
+  const canTravel = () => typeof worldTravelPlan === "function";
+  /** 测距能用的地点 id（去掉泛指的「沙漠」）；当前位置不在表里时起点空着 */
+  function travelIds() { return canTravel() ? travelPlaceIds() : []; }
+  function toggleMeasure() {
+    if (measure) { measure = null; root.classList.remove("measuring"); renderTrip(); select(sel); return; }
+    const h = hereId();
+    measure = { from: travelIds().includes(h) ? h : null, to: null };
+    root.classList.add("measuring");
+    renderMeasure();
+  }
+  /** 点地点：没有起点就当起点，否则当终点 */
+  function pickMeasure(id) {
+    if (!travelIds().includes(id)) { renderMeasure(`${worldPlace(id) ? worldPlace(id).name : id}没有固定的距离（「沙漠」是泛指），选别的地点。`); return; }
+    if (!measure.from) measure.from = id;
+    else if (measure.from !== id) measure.to = id;
+    renderMeasure();
+  }
+  /** 路线上每个点画在地图哪里：聚落边缘画在外城区那里 */
+  function nodeXY(id) {
+    const p = worldPlace(id === "rim" ? "outer_city" : id);
+    return p ? { x: p.x, y: p.y } : null;
+  }
+  function renderTrip(plan) {
+    const svg = root.querySelector(".wm-trip");
+    root.querySelectorAll(".wm-pin").forEach(b => b.classList.remove("trip-a", "trip-b"));
+    if (!measure) { svg.innerHTML = ""; return; }
+    const mark = (id, cls) => { const b = root.querySelector(`.wm-pin[data-place="${id}"]`); if (b) b.classList.add(cls); };
+    if (measure.from) mark(measure.from, "trip-a");
+    if (measure.to) mark(measure.to, "trip-b");
+    if (!plan || !plan.route.ok || !plan.route.legs.length) { svg.innerHTML = ""; return; }
+    const ids = [plan.route.from].concat(plan.route.legs.map(l => l.b));
+    const pts = ids.map(nodeXY).filter(Boolean)
+      .filter((p, i, a) => !i || p.x !== a[i - 1].x || p.y !== a[i - 1].y);
+    svg.innerHTML = pts.length > 1
+      ? `<polyline points="${pts.map(p => `${p.x},${p.y}`).join(" ")}" vector-effect="non-scaling-stroke"/>` : "";
+  }
+  function kmText(km) {
+    const f = (v) => km[1] >= 20 ? Math.round(v) : v;   // 远路取整（700–900.6 → 700–901）
+    return f(km[0]) === f(km[1]) ? `${f(km[0])} km` : `${f(km[0])}–${f(km[1])} km`;
+  }
+  function renderMeasure(msg) {
+    if (!measure) return;
+    const card = root.querySelector(".wm-card");
+    const ids = travelIds();
+    const options = (cur) => `<option value="">— 选地点 —</option>` + ids.map(id => {
+      const p = worldPlace(id);
+      return `<option value="${esc(id)}"${id === cur ? " selected" : ""}>${esc(travelNodeName(id))}${p && WORLD_PLACES.filter(q => q.name === p.name).length > 1 ? `（${esc(id === "solar_w" ? "西" : id === "solar_c" ? "南" : id === "solar_e" ? "东" : id)}）` : ""}</option>`;
+    }).join("");
+    const plan = measure.from && measure.to ? worldTravelPlan(measure.from, measure.to) : null;
+    renderTrip(plan);
+    let body = "";
+    if (msg) body += `<p class="wm-trip-msg">${esc(msg)}</p>`;
+    if (!plan) body += `<p class="wm-trip-msg">${measure.from ? "点地图上的地点（或在上面选）当终点。" : "先选起点：点地图上的地点，或在上面选。"}</p>`;
+    else if (!plan.route.ok) body += `<p class="wm-trip-msg">${esc(plan.route.why)}</p>`;
+    else if (!plan.route.legs.length) body += `<p class="wm-trip-msg">起点和终点是同一个地方。</p>`;
+    else {
+      const r = plan.route;
+      const legs = r.legs.map(l => {
+        const roads = Object.keys(l.road || {}).map(k => `${WORLD_ROAD_NAME[k] || k}${l.road[k] < 1 ? ` ${Math.round(l.road[k] * 100)}%` : ""}`).join(" + ");
+        return `<li${l.tbd || l.tbdRoad ? ' class="tbd"' : ""}><div><b>${esc(travelNodeName(l.a))} → ${esc(travelNodeName(l.b))}</b><span>${esc(kmText(l.km))}</span></div>
+          <small>${esc(roads)}${l.note ? " · " + esc(l.note) : ""}${l.tbd ? " · <em>距离暂定</em>" : l.tbdRoad ? " · <em>路况暂定</em>" : ""}</small></li>`;
+      }).join("");
+      const modes = plan.modes.map(m => `<li class="wm-mode-${esc(m.mode)}${m.tbd ? " tbd" : ""}"><span>${esc(m.name)}</span><b>${esc(m.text)}</b>
+          ${m.warn.length ? `<small>⚠ ${esc(m.warn.join("；"))}</small>` : ""}${m.tbd ? `<small><em>速度暂定</em></small>` : ""}</li>`).join("");
+      body += `<div class="wm-trip-total"><span>路程</span><b>${esc(kmText(r.km))}</b>${r.tbd ? `<em>含暂定数据</em>` : ""}</div>
+        <ol class="wm-trip-legs">${legs}</ol>
+        <div class="wm-card-kicker">用时</div>
+        <ul class="wm-trip-modes">${modes}</ul>
+        <p class="wm-trip-note">城外距离从聚落边缘（外城区外圈）量起。地图有透视，图上的远近不等于实际距离，以这里的数字为准。</p>
+        ${opt.canMove && measure.from === hereId() && !(hereXY() && hereXY().free) ? `<button class="g-btn r-main" data-wm="trip-go">队伍到达${esc(travelNodeName(measure.to))}</button><p class="wm-gm-tip">主持人：只移动队伍标记；路上花的时间请在「推进时间」里按上面的用时推进。</p>` : ""}`;
+    }
+    card.innerHTML = `<div class="wm-card-in wm-trip-card">
+        <div class="wm-card-kicker">测距</div>
+        <h4>路程与用时</h4>
+        <div class="wm-trip-pick">
+          <label><i class="a">起</i><select data-trip="from">${options(measure.from)}</select></label>
+          <button class="g-btn small" data-wm="swap" title="起点终点对调">⇅</button>
+          <label><i class="b">终</i><select data-trip="to">${options(measure.to)}</select></label>
+        </div>
+        ${body}
+      </div>`;
+  }
+
   function open(o) {
     opt = o || {};
+    measure = null;
     if (!root) build();
     root.querySelector(".wm-sub").textContent = opt.sub || "";
     root.classList.toggle("can-move", !!opt.canMove);
     root.classList.toggle("no-here", !hereXY());
+    root.classList.remove("measuring");
+    root.classList.toggle("can-measure", canTravel());
     root.querySelector(".wm-hint").textContent = opt.canMove ? "拖动黄色标记移动队伍 · 拖动空白处查看地图 · 滚轮 / 双指缩放" : "拖动查看 · 滚轮 / 双指缩放 · 点地点看简介";
     renderPins();
+    renderTrip();
     root.classList.add("show");
     document.body.classList.add("wm-open");
     const img = root.querySelector(".wm-img");
@@ -323,7 +433,8 @@ const WorldMap = (() => {
       view.s = 1; view.tx = 0; view.ty = 0; apply(false);
       const b = baseSize(), cover = Math.max(b.vw / b.w, b.vh / b.h);
       if (hereXY()) focusHere(Math.max(1.6, cover)); else if (cover > 1.05) zoomAt(cover);
-      select(hereId());
+      if (opt.measure && canTravel()) { toggleMeasure(); if (opt.measure.to) pickMeasure(opt.measure.to); }
+      else select(hereId());
     };
     if (img.complete) requestAnimationFrame(start); else img.onload = start;
     root.querySelector('[data-wm="close"]').focus({ preventScroll: true });
