@@ -403,7 +403,7 @@
     const c = weaponCoefs(kit, parts);
     return {
       coefs: Object.keys(c).map(a => ({ attr: a, name: WEAPON_PART_ATTR_CN[a] || a, coef: c[a] })),
-      slots: weaponPartRow(owner, kit).map(id => id ? { id, name: weaponPartLabel(id), text: weaponPartCoefText(WEAPON_PARTS[id].coef) } : null),
+      slots: weaponPartRow(owner, kit).map(id => id ? { id, name: weaponPartLabel(id), text: weaponPartText(id) } : null),
       nextSlotLv: WEAPON_PART_SLOT_LEVELS.find(x => x > (Number((owner.weaponLevels || {})[kit]) || 1)) || null
     };
   }
@@ -511,7 +511,7 @@
       blockBonus: ws.blockBonus, blockAlone: ws.blockAlone,
       personalAtk: Number(owner.personalAtk) || 0,
       slots: row.map(id => id ? { id, name: WEAPON_PARTS[id].name, grade: WEAPON_PARTS[id].grade || "",
-        text: weaponPartCoefText(WEAPON_PARTS[id].coef), coef: Object.assign({}, WEAPON_PARTS[id].coef) } : null),
+        text: weaponPartText(id), coef: Object.assign({}, WEAPON_PARTS[id].coef) } : null),
       lockedSlots: slotLv.filter(L => L > lv),
       blueprint: mod ? Object.assign({ name: "客制化", text: "", smith: "" }, blueprintInfo(bpId) || {},
         { effects: typeof bpEffectRows === "function" ? bpEffectRows(mod, ctx) : [] }) : null,

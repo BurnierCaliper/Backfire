@@ -202,7 +202,7 @@ function trpgRandomPart(grade) {
   const id = rollWeaponPart({ [grade === "B" ? "B" : "C"]: 1 });
   bagAdd(weaponPartItemId(id), 1);
   ledgerCapture();
-  return [`背包里多了一个改装件：${weaponPartLabel(id)}（${weaponPartCoefText(WEAPON_PARTS[id].coef)}）。`];
+  return [`背包里多了一个改装件：${weaponPartLabel(id)}（${weaponPartText(id)}）。`];
 }
 function trpgRemovePart(ownerKit, kit, slot) {
   const owner = trpgHeroes().find(h => h.kit === ownerKit);

@@ -127,13 +127,22 @@ function weaponTier(lv) {
  * C / B 级是程序生成的「凑数件」：主补正（力量 / 敏捷 / 智力）+ 一个不同属性的负补正（六维任意一个）。
  *   C 级：主补正 +0.1，负补正 −0.1，名字后缀 beta；B 级：±0.15，后缀 alpha。
  *   id = 等级_主属性_负属性（例：c_str_dex = 配重块-beta，力量 +0.1、敏捷 −0.1）。
- * A / S 级之后再设计（往 WEAPON_PARTS 里加就行）。 */
+ * 每个改装件另外固定加武器 atk（WEAPON_PART_FLAT_ATK：C / B 级 +1，A / S 级 +2），不随等级、属性变动——
+ *   装上立刻就有感觉，不用等升很多级补正才显出来。
+ * A / S 级之后再设计（往 WEAPON_PARTS 里加就行，grade 写 "A" / "S" 自动拿 +2）。 */
 const WEAPON_PART_SLOT_LEVELS = [3, 7];
 const WEAPON_PART_ATTRS = ["str", "con", "dex", "wil", "int", "sta"];
 const WEAPON_PART_GEN = {
   mains: { str: "配重块", dex: "轻量骨架", int: "调谐芯片" },
   grades: { C: { step: 0.1, suffix: "beta" }, B: { step: 0.15, suffix: "alpha" } }
 };
+const WEAPON_PART_FLAT_ATK = { C: 1, B: 1, A: 2, S: 2 };
+/** 改装件固定加的 atk（写了 spec.atk 就用它，否则按等级） */
+function weaponPartFlatAtk(id) {
+  const p = WEAPON_PARTS[id];
+  if (!p) return 0;
+  return p.atk != null ? Number(p.atk) || 0 : (WEAPON_PART_FLAT_ATK[p.grade] || 0);
+}
 const WEAPON_PARTS = {};
 Object.keys(WEAPON_PART_GEN.grades).forEach(g => {
   const G = WEAPON_PART_GEN.grades[g];
@@ -174,6 +183,13 @@ function weaponPartCoefText(coef) {
     return `${WEAPON_PART_ATTR_CN[a] || a}补正 ${v > 0 ? "+" : "−"}${Math.abs(v)}`;
   }).join("，");
 }
+/** 改装件效果的一行字：「atk +1，力量补正 +0.1，敏捷补正 −0.1」 */
+function weaponPartText(id) {
+  const p = WEAPON_PARTS[id];
+  if (!p) return "";
+  const flat = weaponPartFlatAtk(id);
+  return [flat ? `atk +${flat}` : "", weaponPartCoefText(p.coef)].filter(Boolean).join("，");
+}
 function weaponPartLabel(id) {
   const p = WEAPON_PARTS[id];
   return p ? `【${p.name}】${p.grade ? p.grade + "级" : ""}` : id;
@@ -213,21 +229,24 @@ function computeWeaponAtk(kit, attrs, lv, parts) {
     const coefs = weaponCoefs(kit, parts);
     const sum = Object.keys(coefs).reduce((s, a) => s + (Number(attrs[a]) || 0) * coefs[a], 0);
     const base = (Number(f.base) || 3) + (lv - 1) * 1;
-    return Math.max(0, Math.round(base + sum * weaponTier(lv)));
+    return Math.max(0, Math.round(base + sum * weaponTier(lv)) + partsFlatAtk(parts));
   }
-  if (g) return (g.baseAtk || 0) + (g.atk || 0) * (lv - 1);
+  if (g) return (g.baseAtk || 0) + (g.atk || 0) * (lv - 1) + partsFlatAtk(parts);
   return 0;
 }
+/** 装着的改装件一共固定加多少 atk */
+function partsFlatAtk(parts) { return (parts || []).reduce((s, id) => s + weaponPartFlatAtk(id), 0); }
 
 /** 武器 atk 的明细（武器页用）：和 computeWeaponAtk 同一个算法，逐项列出来
- *  { formula, base, lvBase, tier, rows: [{ attr, name, value, coef, baseCoef, partCoef, part }], sum, raw, atk } */
+ *  { formula, base, lvBase, tier, rows: [{ attr, name, value, coef, baseCoef, partCoef, part }], sum, raw, flat（改装件固定 atk）, atk } */
 function weaponAtkBreakdown(kit, attrs, lv, parts) {
   const f = WEAPON_FORMULA[kit];
   lv = Math.max(1, Number(lv) || 1);
   attrs = attrs || {};
   if (!f) {
     const atk = computeWeaponAtk(kit, attrs, lv, parts);
-    return { formula: false, base: atk, lvBase: 0, tier: weaponTier(lv), rows: [], sum: 0, raw: atk, atk };
+    const flat = partsFlatAtk(parts);
+    return { formula: false, base: atk - flat, lvBase: 0, tier: weaponTier(lv), rows: [], sum: 0, flat, raw: atk, atk };
   }
   const own = weaponCoefs(kit, []), all = weaponCoefs(kit, parts);
   const order = ["str", "con", "dex", "wil", "int", "sta"].filter(a => a in all);
@@ -241,8 +260,9 @@ function weaponAtkBreakdown(kit, attrs, lv, parts) {
   const sum = rows.reduce((s, r) => s + r.value * r.coef, 0);
   const base = Number(f.base) || 3, lvBase = lv - 1;
   const raw = base + lvBase + sum * tier;
+  const flat = partsFlatAtk(parts);   // 改装件的固定 atk：取整之后再加，和 computeWeaponAtk 一样
   return { formula: true, base, lvBase, tier, rows, sum: Math.round(sum * 1000) / 1000, raw: Math.round(raw * 100) / 100,
-    atk: Math.max(0, Math.round(raw)) };
+    flat, atk: Math.max(0, Math.round(raw)) + flat };
 }
 
 /** 改装件变了 / 等级变了：重算这把武器给角色和武器人带来的攻击力 */
@@ -293,7 +313,7 @@ function installWeaponPart(owner, kit, slot, partId, free) {
   owner.weaponParts = owner.weaponParts || {};
   owner.weaponParts[kit] = row;
   refreshOwnerWeaponAtk(owner, kit);
-  notes.push(`${owner.name || owner.kit} 的武器第 ${i + 1} 槽装上 ${weaponPartLabel(partId)}（${weaponPartCoefText(p.coef)}）。`);
+  notes.push(`${owner.name || owner.kit} 的武器第 ${i + 1} 槽装上 ${weaponPartLabel(partId)}（${weaponPartText(partId)}）。`);
   return notes;
 }
 /** 拆下改装件（放回背包） */

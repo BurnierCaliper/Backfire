@@ -270,15 +270,15 @@
         const coefs = weaponCoefs(k, weaponPartsOf(h, k));
         const coefTxt = Object.keys(coefs).map(a => `${WEAPON_PART_ATTR_CN[a] || a} ${coefs[a]}`).join(" · ");
         if (!row.length) return `<div class="tr-up"><b>${esc(name)}</b>（${esc(h.name)}）没有改装槽（${WEAPON_PART_SLOT_LEVELS[0]} 级开放） · 补正 ${esc(coefTxt)}</div>`;
-        const slots = row.map((id, i) => `<div class="tr-row">槽 ${i + 1}：${id ? `<b>${esc(weaponPartLabel(id))}</b> <small>${esc(weaponPartCoefText(WEAPON_PARTS[id].coef))}</small>
+        const slots = row.map((id, i) => `<div class="tr-row">槽 ${i + 1}：${id ? `<b>${esc(weaponPartLabel(id))}</b> <small>${esc(weaponPartText(id))}</small>
             <button class="g-btn small" data-part-rm="${esc(h.kit)}:${esc(k)}:${i}">拆下</button>` : `<span class="r-hint">空</span>`}
-            <select data-part-pick="${esc(h.kit)}:${esc(k)}:${i}">${partOpts(p => `<option value="${esc(p)}">${esc(weaponPartLabel(p))} ${esc(weaponPartCoefText(WEAPON_PARTS[p].coef))}（背包 ${bagCount(weaponPartItemId(p))}）</option>`)}</select>
+            <select data-part-pick="${esc(h.kit)}:${esc(k)}:${i}">${partOpts(p => `<option value="${esc(p)}">${esc(weaponPartLabel(p))} ${esc(weaponPartText(p))}（背包 ${bagCount(weaponPartItemId(p))}）</option>`)}</select>
             <button class="g-btn small" data-part-in="${esc(h.kit)}:${esc(k)}:${i}:0">装上（从背包）</button>
             <button class="g-btn small" data-part-in="${esc(h.kit)}:${esc(k)}:${i}:1">主持人直接装</button></div>`).join("");
         return `<div class="tr-up"><b>${esc(name)}</b>（${esc(h.name)}）${row.length} 个改装槽 · 补正 ${esc(coefTxt)}${slots}</div>`;
       })).join("");
       const give = `<div class="tr-row">随机生成 <button class="g-btn small" data-part-rand="C">C 级 +1</button><button class="g-btn small" data-part-rand="B">B 级 +1</button></div>
-        <div class="tr-row">给予改装件 <select id="tr-part-give">${partOpts(p => `<option value="${esc(weaponPartItemId(p))}">${esc(weaponPartLabel(p))} · ${esc(weaponPartCoefText(WEAPON_PARTS[p].coef))}</option>`)}</select>
+        <div class="tr-row">给予改装件 <select id="tr-part-give">${partOpts(p => `<option value="${esc(weaponPartItemId(p))}">${esc(weaponPartLabel(p))} · ${esc(weaponPartText(p))}</option>`)}</select>
           <button class="g-btn small" id="tr-part-give-btn">放进背包 +1</button></div>`;
       return `<p class="r-hint">手册：升级武器需要找到工作站；${U.selfMaxLevel} 级以上无法靠自己升级，要找专门的武器工匠（材料 + 加工费，不同工匠的费用要求不一样，按剧情改费用）。材料在商店「材料」里买，或在背包里给予。</p>${rows}
         <h3>改装槽 <button class="g-btn small" data-armory="${esc((heroes()[0] || {}).kit || "")}">打开武器工坊</button></h3>
@@ -470,7 +470,7 @@
     }).join("");
     const r = t.reward;
     const itemOpts = Object.keys(ITEM_CATALOG).filter(id => !ITEM_CATALOG[id].part && !ITEM_CATALOG[id].blueprint).map(id => [id, ITEM_CATALOG[id].name]);
-    const partOpts = Object.keys(WEAPON_PARTS).map(id => [id, `${weaponPartLabel(id)} ${weaponPartCoefText(WEAPON_PARTS[id].coef)}`]);
+    const partOpts = Object.keys(WEAPON_PARTS).map(id => [id, `${weaponPartLabel(id)} ${weaponPartText(id)}`]);
     const bpOpts = (typeof ROGUE_SMITHS !== "undefined" ? ROGUE_SMITHS : []).flatMap(s => s.blueprints.map(b => [b.id, `${b.name}（${s.name}）`]));
     const list = (arr, kind, label) => arr.map((x, k) => `<span class="tk-chip">${esc(label(x))}<button class="g-btn small" data-te-act="del${kind}:${k}">×</button></span>`).join("");
     const e = t.escort;
