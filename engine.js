@@ -651,9 +651,10 @@ function resolveAttack(ctx) {
     hits += 1;
     add("攻击者过载：复数次攻击额外再打一次（沿用本段倍率）。");
   }
-  if (a && a.self === "conductor") {
+  // 导体：和过载一样，只对本来就是复数次的攻击起效，多打一次（重复最后一段）
+  if (a && a.self === "conductor" && hits > 1) {
     hits += 1;
-    add("攻击者导体：攻击次数 +1。");
+    add("攻击者导体：复数次攻击额外再打一次（重复最后一段）。");
   }
 
   // 「共 N 击破」的多段攻击（breakOnce）：攻击次数被加多了（过载、导体、不稳翻倍……），
@@ -957,6 +958,7 @@ function resolveAttack(ctx) {
 
     perHit.push({
       dealt: hitDealt,
+      intended: packet,   // 这一段打出去的伤害（不按剩余血量封顶），画面按段弹字用
       breakDealt: br,
       notes: hitLog,
       shp: onShp

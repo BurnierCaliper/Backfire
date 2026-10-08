@@ -450,6 +450,8 @@ function statusLine(u) {
   }
   if (u.kit === "helu" && u.resources && u.resources.scanned) s.push("已探测");
   if (u.kit === "longge" && u.resources && u.resources.trigger) s.push("扳机解锁");
+  // 自我效果（导体、霜结、自焚、溅射、千钧、蓄能、多普勒）：战斗画面的状态条读这里，以前漏了
+  if (u.self && u.self !== "none") s.push(selfName(u.self) + (u.self === "burn" && u.selfBurnStacks ? "×" + u.selfBurnStacks : ""));
   return s.length ? s.join(" · ") : "无状态";
 }
 
@@ -6320,7 +6322,10 @@ function dealTo(attacker, target, opt) {
     // adv：玩家这一击触发了属性克制（预览写「克制」、血条变浅金；演出时画面震一下）
     const advHit = !!(res.advantage && attacker && attacker.isPlayer && mainHit);
     const disHit = !!(res.disadvantage && attacker && attacker.isPlayer && mainHit);   // 劣势：预览写「劣势」、伤害变灰
-    if ((res.intended || res.total || 0) > 0) spawnPopup(target, { kind: "dmg", value: res.intended || res.total, element: ele, main: mainHit, adv: advHit, dis: disHit });
+    // 多段攻击（例：拉斯缪尔两次 0.5atk、不稳态四次）：每一段各跳一个数字，看得出判定了几次
+    const segs = (res.perHit || []).filter(h => (Number(h.intended) || 0) > 0);
+    if (segs.length > 1) segs.forEach(h => spawnPopup(target, { kind: "dmg", value: h.intended, element: ele, main: mainHit, adv: advHit, dis: disHit }));
+    else if ((res.intended || res.total || 0) > 0) spawnPopup(target, { kind: "dmg", value: res.intended || res.total, element: ele, main: mainHit, adv: advHit, dis: disHit });
     if ((res.extraHarmonic || 0) > 0) spawnFloater(target, res.extraHarmonic, ele);
     // 画面：这一击带的攻击效果打出大字（属性专属的用属性颜色，穿刺 / 猛击 / 弱点特效用灰色）
     if (flags.action !== false && !flags.environment && typeof attackConnected === "function" && attackConnected(res, flags)) {
@@ -8833,7 +8838,8 @@ function runSkillInner(id, optRun) {
     // 命中过程中立刻写出的日志（击杀、经验、掉落……）先收起来，排在这一击的结果后面
     let out;
     const captured = withLogSink(() => { out = dealTo(actor, target, opt); });
-    if (actor && actor.instant && actor.instant.overload && target && !target.kind) {
+    // 过载 / 导体：一个技能里分几下（各 1 次）打同一个目标，也算复数次攻击 → 结尾重复最后一段
+    if (actor && ((actor.instant && actor.instant.overload) || actor.self === "conductor") && target && !target.kind) {
       const n = opt.hits || 1;
       if (n <= 1 && (!opt.flags || opt.flags.action !== false)) {
         overloadSeq.push({ actor, target, opt: Object.assign({}, opt, { usePrep: false, hits: 1 }) });
@@ -10405,12 +10411,17 @@ function runSkillInner(id, optRun) {
   } catch (err) {
     lines.push("结算出错：" + err.message);
   }
-  if (a && a.instant && a.instant.overload && overloadSeq.length >= 2) {
+  const extraBy = a ? [a.instant && a.instant.overload ? "过载" : null, a.self === "conductor" ? "导体" : null].filter(Boolean) : [];
+  if (extraBy.length && overloadSeq.length >= 2) {
     const last = overloadSeq[overloadSeq.length - 1];
     const same = overloadSeq.filter(x => x.target && last.target && x.target.id === last.target.id);
-    if (same.length >= 2 && last.target && totalHp(last.target) > 0) {
-      lines.push(`${a.name} 过载：复数次攻击额外再打一次，沿用最后一段倍率。`);
-      hitOne(last.actor, last.target, last.opt);
+    if (same.length >= 2 && last.target) {
+      // 过载、导体各多打一次，都重复最后一段
+      extraBy.forEach(by => {
+        if (totalHp(last.target) <= 0) return;
+        lines.push(`${a.name} ${by}：复数次攻击额外再打一次，重复最后一段。`);
+        hitOne(last.actor, last.target, last.opt);
+      });
     }
   }
   flushAoePulse();

@@ -1024,6 +1024,32 @@
       $("g-app").classList.add("hitstop");
     }
     if (meta.skillName || meta.actorId) banner(titleHtml(meta));
+    // 回合结算（回合开始的区域 / 场地效果、回合结束的持续伤害……）：左上角写出现在结算的是什么
+    const popCaption = new Map();
+    if (meta.phase) {
+      // 每个弹字配一句「为什么」：这段结算的记录（常常整块写在弹字后面）里提到这个单位、带伤害 / 治疗 / 击破的行，
+      // 同一个单位按顺序一行配一个弹字（例：「灼烧：狂徒 受到 4 火焰」）
+      const lines = [];
+      tape.forEach(e => {
+        if (e.type !== "log") return;
+        String(e.text || "").split("\n").map(t => t.trim())
+          .filter(t => t && !/^——|^【|回合(结束|开始)。?$/.test(t)).forEach(t => lines.push(t));
+      });
+      const used = new Set();
+      tape.forEach(e => {
+        if (e.type !== "pop") return;
+        const u = unitById(e.unitId);
+        const nm = u && u.name;
+        let k = -1;
+        if (nm) {
+          k = lines.findIndex((t, n) => !used.has(n) && t.indexOf(nm) >= 0 && /\d/.test(t));
+          if (k < 0) k = lines.findIndex(t => t.indexOf(nm) >= 0);
+        }
+        if (k >= 0) used.add(k);
+        popCaption.set(e, k >= 0 ? lines[k] : "");
+      });
+      if (pops.length) banner(`<b>${esc(meta.phase)}</b>`);
+    }
     const opps = tape.filter(e => e.type === "opp");
     if (opps.length) {
       $("g-app").classList.add("hitstop");
@@ -1081,6 +1107,10 @@
         const e = pops[i];
         const beatsBefore = e.snap ? setView(e.snap, true) : [];
         const s = G.view.get(e.unitId);
+        if (meta.phase) {
+          const why = popCaption.get(e) || "";
+          banner(`<b>${esc(meta.phase)}</b> · ${whoHtml(unitById(e.unitId))}${why ? ` <span class="bn-why">${esc(why.length > 46 ? why.slice(0, 45) + "…" : why)}</span>` : ""}`);
+        }
         const chain = chainAfter(i);
         if (e.kind === "dmg") {
           const v = Math.floor(Number(e.value) || 0);
@@ -2246,7 +2276,7 @@
     syncBusy();
     try {
       const endKey = `end:${state.turnNo}`;
-      await perform({ type: hotseat() ? "battle.endPlayerTurn" : "endTurn", seed: endKey }, {}, hotseat());
+      await perform({ type: hotseat() ? "battle.endPlayerTurn" : "endTurn", seed: endKey }, { phase: "玩家回合结束 · 敌人回合开始" }, hotseat());
       await resolveQueues();   // 敌人回合开始时落下的死刑：每一段先问协助格挡
       if (checkEnd()) return;
       refreshTop();
@@ -2255,7 +2285,7 @@
       const over = await enemyPhase();
       if (!over && !G.ended) {
         await wait(250);
-        await perform({ type: "battle.endEnemyTurn" }, { skillName: "" }, true);
+        await perform({ type: "battle.endEnemyTurn" }, { skillName: "", phase: "敌人回合结束 · 玩家回合开始" }, true);
         await resolveQueues();
         if (!checkEnd()) {
           phaseCard(`第 ${state.turnNo} 回合`, "player");
@@ -4091,7 +4121,7 @@
       await resolveQueues();
       if (state.combatPhase === "enemy") {
         const over = await enemyPhase();
-        if (!over) { await perform({ type: "battle.endEnemyTurn" }, {}, true); await resolveQueues(); }
+        if (!over) { await perform({ type: "battle.endEnemyTurn" }, { phase: "敌人回合结束 · 玩家回合开始" }, true); await resolveQueues(); }
       }
       if (!G.ended && ["setup", "enemy"].includes(HotseatGame.getView().phase)) HotseatGame.beginRound();
     } finally { G.depth--; syncBusy(); autoSelect(true); refreshAll(); checkEnd(); resumeHotseat(); }

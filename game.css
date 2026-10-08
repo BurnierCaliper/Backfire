@@ -579,10 +579,10 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
 }
 
 .banner {
+  /* 左上角：场上现在发生什么（谁在用什么技能、哪个敌人在行动、回合开始 / 结束结算的是什么） */
   position: fixed;
-  left: 50%;
+  left: 16px;
   top: 70px;
-  transform: translateX(-50%);
   padding: 6px 18px;
   background: rgba(18, 15, 13, .92);
   border: 1px solid var(--line);
@@ -1731,7 +1731,7 @@ body:not([data-screen="battle"]) .g-rank { display: none !important; }
   .rk-support { font-size: 11px; }
   .rk-feed { bottom: auto; top: 100%; margin: 4px 0 0; flex-direction: column; }
   .phase-card { right: 0; font-size: 28px; letter-spacing: .2em; }
-  .banner { top: 52px; max-width: 92vw; white-space: normal; text-align: center; font-size: 13px; }
+  .banner { top: 52px; left: 8px; max-width: calc(100vw - 16px); white-space: normal; text-align: left; font-size: 13px; }
 
   .choice-card { min-width: 0; width: 94vw; max-height: 86vh; overflow-y: auto; padding: 16px 14px 18px; }
   .choice h3 { font-size: 20px; }
@@ -2127,3 +2127,8 @@ body:not([data-screen="battle"]) .g-rank { display: none !important; }
 }
 .pop.bullet.b-red { background: #e5302a; }
 .pop.bullet.b-blue { background: #2f8be6; }
+
+.r-sub-check { margin: 14px 0 6px; font-size: 14px; }
+
+.banner { border-left: 3px solid var(--gold, #f2c230); max-width: min(560px, 60vw); white-space: normal; }
+.banner .bn-why { color: var(--muted, #b9ad98); font-size: 13px; }
