@@ -98,8 +98,15 @@ const WEAPON_GROWTH = {
               extra: [{ layer: "shield", baseHp: 6, hp: 4 }] },
   torque:   { layer: "armor",  baseHp: 14, hp: 6, baseDef: 4, baseDur: 6 },
   ecmo:     { layer: "armor",  baseHp: 8,  hp: 4, baseDef: 3, baseDur: 4 },
-  edc:      { layer: "armor",  baseHp: 10, hp: 4, baseDef: 4, baseDur: 5 }
+  edc:      { layer: "armor",  baseHp: 10, hp: 4, baseDef: 4, baseDur: 5 },
+  // 小朋友（龙哥的武器）：装甲 12、每级 +5；耐久 5、每五级 +1（durEvery）；架势 4
+  xiaoxiao: { layer: "armor",  baseHp: 12, hp: 5, baseDef: 4, baseDur: 5, durEvery: 5 }
 };
+/** 武器的耐久上限（没装图纸时）：基础耐久 + 每 durEvery 级 +1（没写就是每两级） */
+function weaponBaseDur(kit, lv) {
+  const g = WEAPON_GROWTH[kit] || {};
+  return (g.baseDur || 5) + Math.floor((Math.max(1, Number(lv) || 1)) / (g.durEvery || 2));
+}
 
 const WEAPON_FORMULA = {
   mint: { base: 4, mainAttr: "int", mainCoef: 0.5, subAttr: "dex", subCoef: 0.3 },
@@ -112,7 +119,8 @@ const WEAPON_FORMULA = {
   vitas: { base: 4, mainAttr: "int", mainCoef: 0.4, subAttr: "dex", subCoef: 0.2 },
   torque: { base: 2, mainAttr: "str", mainCoef: 0.3, subAttr: "int", subCoef: 0.2 },
   ecmo: { base: 2, mainAttr: "int", mainCoef: 0.8 },
-  edc: { base: 3, mainAttr: "int", mainCoef: 0.6, subAttr: "con", subCoef: 0.2 }
+  edc: { base: 3, mainAttr: "int", mainCoef: 0.6, subAttr: "con", subCoef: 0.2 },
+  xiaoxiao: { base: 3, mainAttr: "int", mainCoef: 0.4, subAttr: "dex", subCoef: 0.2 }
 };
 
 function weaponTier(lv) {
@@ -418,7 +426,7 @@ function applyWeaponLevel(u) {
   u.defMax = def;
   u.def = Math.max(0, Math.min(def, Math.round(def * defRatio)));
   u.resources = u.resources || {};
-  u.resources.durability = (g.baseDur || 5) + Math.floor(lv / 2);
+  u.resources.durability = weaponBaseDur(u.kit, lv);
 }
 
 /* ---------- 义体改造 ----------

@@ -777,6 +777,7 @@ const RUN = {
 /** 武器人的耐久上限：按等级算，和 growth.js 的成长一致 */
 function durabilityMaxOf(u) {
   if (!u || !u.weaponOf) return 0;
+  if (typeof weaponBaseDur === "function") return weaponBaseDur(u.kit, u.level);
   const g = (typeof WEAPON_GROWTH !== "undefined") ? WEAPON_GROWTH[u.kit] : null;
   const base = g && g.baseDur != null ? g.baseDur : 5;
   return base + Math.floor((Number(u.level) || 1) / 2);

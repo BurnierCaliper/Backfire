@@ -15,7 +15,8 @@
     "xia_aa xia_execute berniel_ignite berniel_flare chuan_aa chuan_whip chuan_cover nora_needle vitas_dance xia_crush " +
     "chuan_over bili_beam bili_storm ruby_surge wing_surge ruby_short mint_banish latte_love hiaki_pot niu_tsubame naruto_fly tou_ultra " +
     "role_double_dot role_halve role_omen role_buffer role_renew role_shelter role_harsh role_boost role_sturdy role_gold role_firstaid " +
-    "role_cover role_pull kolt_aa kolt_chase helu_aa ecmo_bite ras_aa ras_dump edc_shock bare_aa yuito_inspire chuan_blade role_spread").split(" "));
+    "role_cover role_pull kolt_aa kolt_chase helu_aa ecmo_bite ras_aa ras_dump edc_shock bare_aa yuito_inspire chuan_blade role_spread " +
+    "longge_aa longge_chill longge_spit xiaoxiao_punch xiaoxiao_heal").split(" "));
   function fail(message, code) { const e = new Error(message); e.code = code || "invalid_battle_action"; throw e; }
   function duplicate(value, seen = new Map()) {
     if (!value || typeof value !== "object") return value;

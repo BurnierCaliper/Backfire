@@ -193,6 +193,7 @@ function weaponDurMax(kit) {
 function weaponDurBase(kit) {
   const owner = weaponOwner(kit);
   const lv = owner && owner.weaponLevels && owner.weaponLevels[kit] ? Number(owner.weaponLevels[kit]) : 1;
+  if (typeof weaponBaseDur === "function") return weaponBaseDur(kit, lv);
   const g = (typeof WEAPON_GROWTH !== "undefined" && WEAPON_GROWTH[kit]) || {};
   return (g.baseDur || 5) + Math.floor(lv / 2);
 }

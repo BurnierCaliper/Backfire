@@ -484,6 +484,53 @@ function livePartyCards() {
       resources: { durability: 5 },
       weaponOf: "ras",
       note: "拉斯缪尔的武器"
+    },
+    {
+      kit: "longge",
+      enName: "Longfei",
+      name: "龙哥",
+      level: 1,
+      zone: 1,
+      personalAtk: 4,
+      weaponAtk: 5,
+      atk: 9,
+      def: 5,
+      defMax: 5,
+      flying: false,
+      isPlayer: true,
+      range: "any",
+      suggest: { element: "ice", dice: [0, 4], flat: 0, baseBreak: 1 },
+      layers: [{ type: "flesh", hp: 16 }],
+      shp: 11,
+      shpMax: 11,
+      // trigger：扳机解锁（霰弹枪模式）；ammo：剩下的胶囊弹药（按顺序，"red" 火 / "blue" 冰）；known：从队首数已经窥探到的枚数
+      resources: { trigger: false, ammo: [], known: 0, spitUsed: false },
+      linkedKits: ["xiaoxiao"],
+      note: "兽人-蜥蜴典当行 · 冰/火 · 生存专精",
+      attrs: { str: 5, con: 7, dex: 6, wil: 6, int: 8, sta: 7 },
+      roles: { primary: "生存", secondary: "生存" },
+      xp: 0,
+      attrPoints: 0
+    },
+    {
+      kit: "xiaoxiao",
+      enName: "Xiaoxiao",
+      name: "小朋友",
+      level: 1,
+      zone: 1,
+      personalAtk: 5,
+      weaponAtk: 0,
+      atk: 5,
+      def: 4,
+      defMax: 4,
+      flying: false,
+      isPlayer: true,
+      range: "melee",
+      suggest: { element: "physical", dice: [0, 4], flat: 0, baseBreak: 2 },
+      layers: [{ type: "armor", hp: 12 }],
+      resources: { durability: 5 },
+      weaponOf: "longge",
+      note: "龙哥的武器（小小）"
     }
   ];
 }
@@ -519,7 +566,9 @@ const HERO_PROFILES = {
   nora:  { race: "猫类人-猫", job: "档案员", profs: { "历史": 1, "聆听": 1, "医疗": 1, "说服": 1, "侦察": 1 } },
   kolt:  { race: "兽人-狼",   job: "士兵",   profs: { "运动": 1, "追踪": 2, "机械维修": 1, "电器维修": 1 } },
   helu:  { race: "猫类人-猫", job: "电工",   profs: { "电器维修": 1, "评估": 1, "侦察": 1, "欺瞒": 1 } },
-  ras:   { race: "人类",      job: "科学家", profs: { "科技理论": 1, "数据操作": 1, "运动": 1, "电器维修": 1 } }
+  ras:   { race: "人类",      job: "科学家", profs: { "科技理论": 1, "数据操作": 1, "运动": 1, "电器维修": 1 } },
+  // 龙哥：角色卡表格（典当行本职评估 / 盗窃，业余医疗 + 评估再一次 → 评估 2）
+  longge: { race: "兽人-蜥蜴", job: "典当行", profs: { "评估": 2, "盗窃": 1, "医疗": 1 } }
 };
 function heroProfile(kit) { return HERO_PROFILES[kit] || null; }
 
@@ -618,7 +667,10 @@ function skillCost(id) {
     ecmo_bite: { ap: 1 }, ecmo_focus: { ap: 1 }, ecmo_boom: { ap: 1 }, ecmo_return: { ap: 1 },
     ras_aa: { ap: 1 }, ras_dump: { ap: 1 }, ras_flee: { ap: 1 }, ras_super: { ap: 1 }, ras_rampage: { ap: 1 }, ras_assist: {},
     ras_summon: { ap: 1, bonus: 1 },
-    edc_drain: { ap: 1 }, edc_shock: { ap: 1 }, edc_flash: { ap: 1 }, edc_return: { ap: 1 }
+    edc_drain: { ap: 1 }, edc_shock: { ap: 1 }, edc_flash: { ap: 1 }, edc_return: { ap: 1 },
+    longge_aa: { ap: 1 }, longge_chill: { ap: 1 }, longge_spit: { bonus: 1 }, longge_assist: {},
+    longge_summon: { ap: 1, bonus: 1 },
+    xiaoxiao_punch: { ap: 1 }, xiaoxiao_heal: { ap: 1 }, xiaoxiao_return: { ap: 1 }
   };
   return map[id] || { ap: 1 };
 }
@@ -630,12 +682,12 @@ function skillCost(id) {
 /** 每把武器（武器人）的格挡加成 */
 const WEAPON_BLOCK_BONUS = {
   mint: 5, latte: 20, niu: 40, naruto: 30, mochi: 45, berniel: 35,
-  bili: 35, vitas: 5, torque: 35, ecmo: 20, edc: 25
+  bili: 35, vitas: 5, torque: 35, ecmo: 20, edc: 25, xiaoxiao: 30
 };
 /** 武器人自己的敏捷（独立在场时决定空手那一段） */
 const WEAPON_DEX = {
   mint: 6, latte: 3, niu: 2, naruto: 2, mochi: 2, berniel: 2,
-  bili: 2, vitas: 8, torque: 4, ecmo: 3, edc: 4
+  bili: 2, vitas: 8, torque: 4, ecmo: 3, edc: 4, xiaoxiao: 5   // 小朋友：空手 30% + 武器 30% = 角色卡的 60%
 };
 /** 不是玩家角色、也没有敏捷的友方单位（剧情 NPC）沿用固定格挡率 */
 const FIXED_BLOCK = { captain_ox: 40, patrol_car: 40 };
@@ -885,6 +937,19 @@ function skillList(unit) {
     add({ id: "edc_flash", name: "爆闪", hint: "释放全部光能 · 同区每名敌人 光能/2 能量 +1击破", minLv: 2 });
     add({ id: "edc_return", name: "收回为武器", hint: "需与拉斯缪尔同区" });
   }
+  if (unit.kit === "longge") {
+    const r = unit.resources || {};
+    const gun = !!r.trigger && (r.ammo || []).length > 0;
+    add({ id: "longge_aa", name: "普通攻击", hint: gun ? "手杖：近距离 1atk 冰 +1击破 · 窥探1 / 霰弹枪：远距离 1.5atk 子弹属性 +1击破（耗 1 弹）" : "手杖 · 近距离 · 1atk 冰 +1击破 · 窥探1（扳机解锁后可用霰弹枪）" });
+    add({ id: "longge_chill", name: "冷气穿刺", hint: gun ? "手杖：近距离施加刺骨 / 霰弹枪：远距离特殊射击（蓝弹刺骨并治疗该区友方，红弹 0.5atk 火）" : "手杖 · 近距离 · 施加刺骨" });
+    add({ id: "longge_spit", name: "吐酸", hint: "附赠 · 近距离 · 角色本身 atk 的酸液伤害 · 每场一次（兽人-蜥蜴种族特长）", bare: true });
+    add({ id: "longge_summon", name: "唤出小朋友", hint: "武器生物化" });
+  }
+  if (unit.kit === "xiaoxiao") {
+    add({ id: "xiaoxiao_punch", name: "直冲拳", hint: "耗 1 弹 · 近距离 · 1atk 子弹属性 +2击破" });
+    add({ id: "xiaoxiao_heal", name: "治疗支援", hint: "耗 1 弹 · 同区友方按子弹颜色治疗 · 然后收回武器" });
+    add({ id: "xiaoxiao_return", name: "收回为武器", hint: "需与龙哥同区" });
+  }
   if (isUnarmed(unit)) {
     add({ id: "bare_aa", name: "空手攻击", hint: "同区 · 1×atk 物理。未持武器时的基本攻击。" });
   }
@@ -926,7 +991,7 @@ function roleSkillDef(role, n, unit) {
   if (role === "护卫" && n === 2) return { id: "role_fear", name: "恐惧怒吼", hint: "行动点 · 距离1内敌人本回合虚弱 · 每场两次" };
   if (role === "护卫" && n === 3) return { id: "role_guard_strike", name: "防守反击", hint: "行动点 · 本回合首次成功格挡追加一次协助攻击" };
   if (role === "护卫" && n === 4) return { id: "role_all_reflect", name: "全反击", hint: "行动点 · 本回合全队成功格挡反伤伤害与击破 · 每场一次" };
-  if (role === "生存" && n === 1) return { id: "role_firstaid", name: "应急处理", hint: "行动点 · 距离1以内友方 1d4+2（半血取最大）" };
+  if (role === "生存" && n === 1) return { id: "role_firstaid", name: "应急处理", hint: unit.kit === "longge" ? "行动点 · 距离1以内友方 2d4+3（半血取最大）" : "行动点 · 距离1以内友方 1d4+2（半血取最大）" };
   if (role === "生存" && n === 2) return { id: "role_buffer", name: "缓冲", hint: "附赠 · 距离1以内友方 2d4+4 护盾 · 每场一次" };
   if (role === "生存" && n === 3) return { id: "role_dome", name: "防护罩", hint: "行动点 · 同区 atk+10 护盾罩 · 每场一次" };
   if (role === "生存" && n === 4) return { id: "role_renew", name: "续命", hint: "行动点 · 恢复最大生命 50%，濒死则起身并恢复 25% · 每场一次" };
@@ -1041,6 +1106,11 @@ function resourceText(unit) {
     const mood = typeof noraMood === "function" ? (noraMood(n) === "cruel" ? "残忍" : "温和") : "";
     const pin = typeof piercedTarget === "function" ? piercedTarget(n) : null;
     return `${mood} · ${pin ? "刺入 " + pin.name : "无刺入"} · 耐久 ${r.durability != null ? r.durability : "—"}`;
+  }
+  if (unit.kit === "longge") return `扳机${r.trigger ? "解锁" : "锁定"} · ${typeof longgeAmmoText === "function" ? longgeAmmoText(unit) : ""}${r.spitUsed ? " · 已吐酸" : ""}`;
+  if (unit.kit === "xiaoxiao") {
+    const lg = typeof longgeOf === "function" ? longgeOf() : null;
+    return `${lg && typeof longgeAmmoText === "function" ? longgeAmmoText(lg) + " · " : ""}耐久 ${r.durability != null ? r.durability : "—"}`;
   }
   if (r.durability != null) return `耐久 ${r.durability}`;
   return "";

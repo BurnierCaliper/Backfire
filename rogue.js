@@ -1713,8 +1713,7 @@ const Rogue = (function () {
   }
   // 耐久上限跟武器等级走（growth.js / ledger.js）。战斗外角色不在场上，这里按单局记录的等级算
   function weaponDurMaxFor(h, k, run) {
-    const g = WEAPON_GROWTH[k] || {};
-    const base = (g.baseDur || 5) + Math.floor(((h.weaponLevels || {})[k] || 1) / 2);
+    const base = weaponBaseDur(k, (h.weaponLevels || {})[k] || 1);
     const mod = weaponModsOf(run)[k] || {};
     return typeof bpDurMax === "function" ? bpDurMax(base, mod) : base;
   }

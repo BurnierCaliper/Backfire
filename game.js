@@ -1360,6 +1360,11 @@
         if (list.length) {
           if (hotseat() && !job.vsPlayer) {
             const options = list.flatMap(h => {
+              if (h.kit === "longge") {
+                const ammo = ((h.resources || {}).ammo || []).length;
+                return [{ helper: h.id, label: h.name + " · 手杖", sub: "协助攻击 · 0.5 ATK 冰", extra: { mode: "cane" } }]
+                  .concat(ammo ? [{ helper: h.id, label: h.name + " · 霰弹枪", sub: "协助攻击 · 1.5 ATK", extra: { mode: "gun" } }] : []);
+              }
               if (h.kit !== "hiaki") return [{ helper: h.id, label: h.name, sub: "协助攻击" }];
               const r = h.resources || {}, blades = [];
               if (!r.niuOut) blades.push("niu"); if (!r.narutoOut) blades.push("naruto");
@@ -1393,7 +1398,19 @@
           }
           extra.blade = pick;
         }
-        const bladeName = extra.blade === "naruto" ? "鳴門" : extra.blade === "niu" ? "丹生谷" : "";
+        if (helper && helper.kit === "longge" && !extra.mode) {
+          // 枪管手杖：协助攻击可选手杖或霰弹枪（立刻解锁扳机；霰弹枪要有子弹）
+          const ammo = ((helper.resources || {}).ammo || []).length;
+          const modes = [{ label: "手杖", sub: "移动到敌人那一区戳刺 0.5 ATK 冰；有子弹则耗 1 发给同区友方治疗", value: "cane" }];
+          if (ammo) modes.push({ label: "霰弹枪", sub: `耗 1 发子弹 · 1.5 ATK 子弹属性（${typeof longgeAmmoText === "function" ? longgeAmmoText(helper) : ""}）`, value: "gun" });
+          const pick = modes.length === 1 ? "cane" : await openChoice("龙哥协助攻击", "选择手杖还是霰弹枪。无论哪种都会立刻解锁扳机，并窥探 2。", modes, { label: "取消", value: null });
+          if (!pick) {
+            systemCommand({ type: "assistAnswer", helper: null, extra: {} });
+            continue;
+          }
+          extra.mode = pick;
+        }
+        const bladeName = extra.blade === "naruto" ? "鳴門" : extra.blade === "niu" ? "丹生谷" : extra.mode === "gun" ? "霰弹枪" : extra.mode === "cane" ? "手杖" : "";
         await perform({ type: "assistAnswer", helper: choice || null, extra }, {
           actorId: choice, targetId: job.targetId, forceLunge: !!helper, slow: !!helper,
           skillName: helper ? ("协助攻击" + (bladeName ? " · " + bladeName : "")) : ""

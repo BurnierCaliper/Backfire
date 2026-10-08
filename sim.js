@@ -154,6 +154,7 @@ const BattleSim = (function () {
           const r = helper.resources || {};
           extra.blade = !r.niuOut ? "niu" : !r.narutoOut ? "naruto" : "niu";
         }
+        if (helper && helper.kit === "longge") extra.mode = ((helper.resources || {}).ammo || []).length ? "gun" : "cane";
         withPhaseOf(helper, () => finishAssist(choice, extra));
         continue;
       }

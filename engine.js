@@ -325,7 +325,12 @@ const SKILL_RANGE = {
   ras_dump: { min: 0, max: 99 },
   ras_flee: { min: 0, max: 99 },
   edc_shock: { min: 0, max: 1 },
-  edc_flash: { min: 0, max: 0 }
+  edc_flash: { min: 0, max: 0 },
+  // 龙哥：手杖近距离、霰弹枪远距离（距离 1），按分步里选的模式在技能内部再判定
+  longge_aa: { min: 0, max: 1 },
+  longge_chill: { min: 0, max: 1 },
+  longge_spit: { min: 0, max: 0 },     // 吐酸：近距离
+  xiaoxiao_punch: { min: 0, max: 0 }   // 直冲拳：近距离
 };
 
 /* 技能能选哪一边的目标。界面原本是从提示文字里猜的（出现「友方」就只让选友方），
@@ -777,6 +782,10 @@ function resolveAttack(ctx) {
     }
     if (t.self === "splash") {
       if (element === "acid" || element === "fire") { pct -= 0.25; hAdd("目标溅射：酸/火受伤 −25%。"); }
+    }
+    // 种族缺陷「鳞片」（兽人-蜥蜴）：能量属性对你造成 25% 额外伤害
+    if (element === "energy" && t.kit && typeof heroProfile === "function" && (heroProfile(t.kit) || {}).race === "兽人-蜥蜴" && t.isPlayer && !t.weaponOf) {
+      pct += 0.25; hAdd("鳞片（兽人-蜥蜴）：能量受伤 +25%。");
     }
     // 蓄能：能量、谐波、电攻击造成的伤害提高「高能值占血量上限的百分比」
     // （手册正文没写电，作者确认是手册漏写，电也加）
