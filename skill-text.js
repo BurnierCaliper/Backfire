@@ -419,11 +419,11 @@
       const g = (typeof WEAPON_GROWTH !== "undefined" && WEAPON_GROWTH[kit]) || null;
       w = JSON.parse(JSON.stringify(card));
       w.level = lv;
+      // 等级 + 生命件（growth.js · weaponUnitHp）
+      const want = typeof weaponUnitHp === "function" ? weaponUnitHp(kit, lv, typeof weaponPartsOf === "function" ? weaponPartsOf(owner, kit) : []) : null;
       w.layers = (card.layers || []).map(l => {
         let hp = Number(l.hp) || 0;
-        if (g && l.type === g.layer) hp = g.baseHp + g.hp * (lv - 1);
-        const ex = g && (g.extra || []).find(e => e.layer === l.type);
-        if (ex) hp = ex.baseHp + ex.hp * (lv - 1);
+        if (want && want[l.type] != null) hp = want[l.type];
         return { type: l.type, current: hp, max: hp };
       });
       if (g) { w.defMax = w.def = g.baseDef + Math.floor(lv / 5); }
@@ -438,7 +438,7 @@
       kit, name: w.name, level: w.level || 1, out,
       atk: Number(w.atk) || 0, def: w.defMax != null ? w.defMax : w.def,
       layers: layersOf(w), durability: dur,
-      blockBonus: (typeof WEAPON_BLOCK_BONUS !== "undefined" && WEAPON_BLOCK_BONUS[kit]) || 0,
+      blockBonus: (typeof weaponBlockBonusOf === "function" ? weaponBlockBonusOf(kit, owner) : (typeof WEAPON_BLOCK_BONUS !== "undefined" && WEAPON_BLOCK_BONUS[kit])) || 0,
       blockAlone: typeof blockChance === "function" ? blockChance(w) : null,
       passives: info.passives || [], assistBlock: info.assistBlock || "", growth: info.growth || "",
       mods: weaponModRows(owner, kit),

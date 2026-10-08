@@ -653,18 +653,31 @@ function bareBlockFromDex(dex) {
 function bareBlockChance(unit) {
   return bareBlockFromDex(unitDex(unit));
 }
+/** 一把武器的格挡加成：武器本身 + 装在上面的格挡件（growth.js · partsBlock）。owner：持有者（角色单位） */
+function weaponBlockBonusOf(kit, owner) {
+  const base = WEAPON_BLOCK_BONUS[kit];
+  if (base == null) return null;
+  const parts = owner && typeof weaponPartsOf === "function" ? weaponPartsOf(owner, kit) : [];
+  return base + (typeof partsBlock === "function" ? partsBlock(parts) : 0);
+}
+/** 武器人的持有者（角色单位） */
+function weaponOwnerUnit(u) {
+  if (!u || !u.weaponOf) return null;
+  const units = (typeof state !== "undefined" && state && state.units) || [];
+  return units.find(x => x.kit === u.weaponOf && !x.weaponOf) || null;
+}
 /** 手里那把武器的格挡加成；空手、武器人已分出去 → 0 */
 function heldWeaponBlockBonus(unit) {
   if (!unit || !unit.kit) return 0;
-  if (WEAPON_BLOCK_BONUS[unit.kit] != null && (unit.weaponOf || !unit.attrs)) return WEAPON_BLOCK_BONUS[unit.kit];   // 武器人自己
+  if (WEAPON_BLOCK_BONUS[unit.kit] != null && (unit.weaponOf || !unit.attrs)) return weaponBlockBonusOf(unit.kit, weaponOwnerUnit(unit));   // 武器人自己
   if (isUnarmed(unit)) return 0;
   const r = unit.resources || {};
   if (unit.kit === "hiaki") {
     const blade = r.blade || "niu";
     if (weaponIsOut(unit)) return 0;
-    return WEAPON_BLOCK_BONUS[blade] || 0;
+    return weaponBlockBonusOf(blade, unit) || 0;
   }
-  if (r.mecha) return WEAPON_BLOCK_BONUS[(unit.linkedKits || [])[0]] || 0;
+  if (r.mecha) return weaponBlockBonusOf((unit.linkedKits || [])[0], unit) || 0;
   const kits = unit.linkedKits || [];
   let best = 0;
   kits.forEach(k => {
@@ -672,7 +685,7 @@ function heldWeaponBlockBonus(unit) {
     const units = (typeof state !== "undefined" && state && state.units) || [];
     const out = units.some(u => u.kit === k && !u.hidden && !u.fused && !u.dead);
     if (out) return;
-    best = Math.max(best, WEAPON_BLOCK_BONUS[k]);
+    best = Math.max(best, weaponBlockBonusOf(k, unit));
   });
   return best;
 }

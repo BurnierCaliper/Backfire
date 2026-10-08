@@ -366,6 +366,13 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **新改装件：格挡件（缓冲护板）、生命件（加固框架）**（`growth.js · WEAPON_PART_GEN.kinds / partsBlock / partsHpPerLv / weaponUnitHp / refreshWeaponUnitHp`、`party.js · weaponBlockBonusOf`、`skill-text.js`）
+  - 两种「功能件」不加正补正，换成别的效果；和补正件一样带一个随机属性的负补正（C −0.1 / B −0.15 / A −0.2 / S −0.25）和固定 atk（C / B +1，A / S +2）。
+  - **格挡件（缓冲护板）**：武器的格挡加成 C +5% / B +8% / A +10% / S +12%。拿在手里时加到角色的协助格挡，武器人独立在场时加到它自己的格挡率；两个槽叠加。
+  - **生命件（加固框架）**：武器人每级装甲 C +3 / B +6 / A +8 / S +11（× 武器等级；必哩没有装甲层，加在护盾上）。装上 / 拆下时场上的武器人马上改血量上限（按比例保留当前血量）。
+  - 名字后缀：C beta、B alpha、A gamma、S omega。id 例：`c_block_dex`（缓冲护板-beta，敏捷 −0.1）、`s_hp_con`（加固框架-omega）。
+  - 单局的任务奖励、工匠货架照旧只出 C / B 级，抽到的种类从 3 种补正件扩大到 5 种（含格挡 / 生命件）。A / S 级目前只有功能件、先只做数据：跑团主持人可以在「给予改装件」里直接给。
+  - 武器工坊、角色资料的持握格挡 / 独立格挡 / 血量层都算进改装件。
 - **改装件固定加 atk**（`growth.js · WEAPON_PART_FLAT_ATK / weaponPartFlatAtk / computeWeaponAtk / weaponAtkBreakdown / weaponPartText`、`armory-ui.js`）
   - 每个改装件除了改补正系数，还**固定加武器 atk**：C / B 级 **+1**，A / S 级 **+2**（A / S 级之后加进来时按等级自动拿 +2；某个件单独写了 `atk` 就用它）。这个数不随武器等级、属性变动——装上立刻就有提升，不用等升很多级补正才显出来。两个槽的固定加成叠加。
   - 算法：基础 + 等级 + Σ(属性 × 补正) × 等级系数，四舍五入之后再加改装件的固定 atk。按成长表算的武器（没有补正公式）也加。
