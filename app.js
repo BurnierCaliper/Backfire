@@ -3078,7 +3078,7 @@ function controlScrap(a, p, t) {
 function scrapReady(p) {
   return !!p && p.firedRound !== Number(state.turnNo || 0);
 }
-/** 碎渣机炮开火一次：1d4 发，每发 6+等级 物理 +2 击破。打玩家时可以被协助格挡 */
+/** 碎渣机炮开火一次：1d4 发，每发 6+等级 物理 +2 击破，开完耐久 −1。打玩家时可以被协助格挡 */
 function scrapShot(p, t, controller) {
   if (!scrapReady(p)) return "碎渣机炮这一回合已经发射过了。";
   p.firedRound = Number(state.turnNo || 0);
@@ -3092,8 +3092,16 @@ function scrapShot(p, t, controller) {
   // 射程是「2 距离内」（选目标时已经限定），这里不再按近距离判定
   fake.propId = p.id;
   const out = dealTo(fake, t, { atk: 0, mult: 0, flat, hits: n, element: "physical", baseBreak: 2, atkRange: "any", flags: { action: true, propShot: true, flyFree: true } });
-  if (out && out.pending) return `碎渣机炮开火 ${n} 次，每次 ${flat} 物理 +2 击破，${t.name} 的队友可以协助格挡。`;
-  return `碎渣机炮开火 ${n} 次，每次 ${flat} 物理 +2 击破。合计伤害 ${Math.floor((out && out.res && out.res.total) || 0)}。`;
+  const wear = scrapWear(p, controller);
+  if (out && out.pending) return `碎渣机炮开火 ${n} 次，每次 ${flat} 物理 +2 击破，${t.name} 的队友可以协助格挡。\n${wear}`;
+  return `碎渣机炮开火 ${n} 次，每次 ${flat} 物理 +2 击破。合计伤害 ${Math.floor((out && out.res && out.res.total) || 0)}。\n${wear}`;
+}
+/** 碎渣机炮每用一次耐久 −1（和被攻击一样），耐久归零就报废 */
+function scrapWear(p, controller) {
+  p.hp = Math.max(0, (Number(p.hp) || 0) - 1);
+  const notes = [`碎渣机炮使用磨损：耐久 −1 → ${p.hp}`];
+  if (p.hp <= 0) notes.push(...destroyProp(p, controller));
+  return notes.join("\n");
 }
 
 /** 技能打配置物 / 危墙时的伤害：按技能说明里写的元素、倍率、击破（「1atk 电 1击破」），
@@ -7655,7 +7663,7 @@ function renderSkills() {
     const btn = document.createElement("button");
     btn.className = "btn";
     btn.textContent = `操控${p.name}`;
-    btn.title = "消耗 1 行动点：对机炮 2 距离内的一名敌人（先选为目标）打 1d4 次 6+等级 物理，2 击破";
+    btn.title = "消耗 1 行动点：对机炮 2 距离内的一名敌人（先选为目标）打 1d4 次 6+等级 物理，2 击破；每用一次耐久 −1";
     btn.onclick = () => calcCommand("skill", { actor: a.id, skill: "use_scrap:" + p.id, target: state.targetId || null });
     box.appendChild(btn);
   });

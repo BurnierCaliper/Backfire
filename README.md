@@ -366,6 +366,7 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **碎渣机炮每用一次耐久 −1**（`app.js · scrapShot / scrapWear`）：不管是玩家操控、狂徒操控还是环境扫描操控，开火后耐久都 −1（和受到攻击一样），耐久归零就报废。技能栏和配置物说明里写上了「每用一次耐久 −1」。
 - **龙哥普通攻击可以打危墙 / 桥梁 / 配置物**：之前普攻的目标列表只有敌人。现在手杖能打同区边上的危墙（1atk 冰、1 击破，照常窥探 1），霰弹枪能打距离 1 的（耗 1 发，1.5atk 子弹属性、1 击破）。冷气穿刺只施加刺骨，所以仍然只能选敌人。
 - **废物利用不能反复利用同一层**（`app.js · SKILL_REQUIREMENT.kolt_scrap / runSkill kolt_scrap / resetBattleRecords`、`skill-text.js`）：以前「上一个被摧毁的敌人血量层」用过之后还留着，可以一直用同一层回血；而且这个记录跨战斗保留，开局就能用。现在用过一次就清掉，要等新的敌人血量层被摧毁或腐坏抛射攒下新的记录才能再用；每场开战时清空（腐坏抛射的记录也清空），开局没有可用的残骸时不能用。
 - **生存职责：缓冲不再给磁场护盾，续命直接救回濒死前的状态**（`app.js · addShieldLayer / runSkill role_buffer · role_renew`、`skill-text.js`、`party.js`）
