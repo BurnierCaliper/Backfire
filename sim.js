@@ -34,6 +34,7 @@ const BattleSim = (function () {
     state.blockQueue = [];
     state.koltSwapQueue = [];
     state.heluScanQueue = [];
+    state.longgeSafetyQueue = [];
     state.skillFlow = null;
     state.history = [];
     state.actionAcc = null;
@@ -134,6 +135,11 @@ const BattleSim = (function () {
         if (!k) { state.koltSwapQueue.shift(); continue; }
         const pick = policy.koltSwap ? policy.koltSwap(k) : { swap: false };
         resolveKoltSwap(!!(pick && pick.swap), pick && pick.targetId);
+        continue;
+      }
+      if (state.longgeSafetyQueue && state.longgeSafetyQueue.length) {
+        const job = state.longgeSafetyQueue[0];
+        resolveLonggeSafety(policy.longgeSafety ? !!policy.longgeSafety(job) : false);
         continue;
       }
       if (state.heluScanQueue && state.heluScanQueue.length) {

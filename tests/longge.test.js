@@ -276,25 +276,34 @@ test("子弹打光扳机锁上；手杖协助攻击可以自己选治疗同区�
   assert.ok(S);
 });
 
-test("解开保险（2 级，附赠）：解锁扳机，查看最后一发，可以移到最前", () => {
-  const { c, lg } = setup();
+test("解开保险（2 级，行动点）：解锁扳机，查看最后一发；结算完才问要不要移到最前", () => {
+  const { c, S, lg } = setup();
   assert.ok(!c.skillList(lg).some(s => s.id === "longge_safety"), "1 级还没有");
   lg.level = 2;
   assert.ok(c.skillList(lg).some(s => s.id === "longge_safety"));
   lg.resources.ammo = ["blue", "blue", "red"]; lg.resources.seen = [false, false, false];
-  const steps = c.skillFlowSteps("longge_safety", lg, {});
-  assert.match(steps[0].label, /最后一发是红弹/);
-  cmd(c, { actor: lg.id, skill: "longge_safety", picks: { move: "front" } });
+  assert.deepEqual(plain(c.skillFlowSteps("longge_safety", lg, {})), [], "选技能时不给任何提示，取消就看不到颜色");
+  cmd(c, { actor: lg.id, skill: "longge_safety" });
+  assert.equal(lg.ap, 2, "行动点");
+  assert.equal(lg.bonus, 2);
   assert.equal(lg.resources.trigger, true);
+  assert.deepEqual(plain(lg.resources.seen), [false, false, true], "最后一发看过了");
+  assert.equal(S.longgeSafetyQueue.length, 1, "等着选");
+  c.Commands.dispatch({ type: "longgeSafetyAnswer", front: true });
   assert.deepEqual(plain(lg.resources.ammo), ["red", "blue", "blue"]);
   assert.deepEqual(plain(lg.resources.seen), [true, false, false]);
-  assert.equal(lg.bonus, 1, "附赠动作");
   assert.match(c.resourceText(lg), /弹药 3\/6（红\?\?）/);
-  // 不移动：最后一发记成看过
-  lg.bonus = 1;
-  cmd(c, { actor: lg.id, skill: "longge_safety", picks: { move: "stay" } });
+  // 留在最后
+  cmd(c, { actor: lg.id, skill: "longge_safety" });
+  c.Commands.dispatch({ type: "longgeSafetyAnswer", front: false });
   assert.deepEqual(plain(lg.resources.seen), [true, false, true]);
   assert.match(c.resourceText(lg), /（红\?蓝）/);
+  assert.equal(S.longgeSafetyQueue.length, 0);
+  // 只剩 1 发：不用问
+  lg.resources.ammo = ["red"]; lg.resources.seen = [false];
+  cmd(c, { actor: lg.id, skill: "longge_safety" });
+  assert.equal(S.longgeSafetyQueue.length, 0);
+  assert.deepEqual(plain(lg.resources.seen), [true]);
 });
 
 test("连续拳（武器 2 级）：全红升龙拳 3atk 火 +3，全蓝撼地拳 2atk 冰 +5，混合逐发结算", () => {

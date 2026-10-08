@@ -366,6 +366,9 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **解开保险改成行动点，修掉「选技能时偷看颜色」**（`app.js · resolveLonggeSafety / state.longgeSafetyQueue`、`battle-commands.js · longgeSafetyAnswer`、`game.js`、`sim.js`、`online-game.js`）
+  - 解开保险的消耗从附赠动作改成行动点。
+  - 以前「要不要把最后一发移到最前」是选技能时的分步，问题里就写着颜色，玩家看到后取消技能就等于白看。现在选技能时不问任何东西；技能结算完（行动点已花掉、扳机已解锁、最后一发已记成看过）才弹出选择，和柯尔特更换刀头、Helumica 协助扫描同一套队列。只剩 1 发时不用问。按 Esc 等于留在最后。
 - **龙哥 / 小朋友：按作者确认调整，新增解开保险、连续拳**（`app.js · longgeRes / longgePeek / longgeTakeBullet`、`ledger.js · SPIT_ELEMENTS / spitElementOf`、`game.js`、`rogue-ui.js`、`trpg-ui.js`、`party.js`、`growth.js`、`skill-text.js`）
   - 应急处理改回手册的 1d4+2（每 5 级 +1d4+1，半血以下取最大），不再给龙哥单独加。
   - 子弹打光时扳机锁上（之后也不能再解锁）；其余时候解锁后一直保持。

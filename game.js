@@ -1320,6 +1320,19 @@
         }
         continue;
       }
+      // 龙哥解开保险：技能结算完才问要不要把最后一发移到最前（取消技能看不到颜色）
+      if (state.longgeSafetyQueue && state.longgeSafetyQueue.length) {
+        const job = state.longgeSafetyQueue[0];
+        const lg = unitById(job.actorId);
+        const r = lg && typeof longgeRes === "function" ? longgeRes(lg) : null;
+        if (!r || r.ammo.length < 2) { systemCommand({ type: "battle.cleanQueues", queue: "longge" }); continue; }
+        const last = LONGGE_AMMO[r.ammo[r.ammo.length - 1]].name;
+        const opts = [{ label: "移到最前", sub: `下一发就是${last}`, value: "front" }, { label: "留在最后", value: "stay" }];
+        const pick = hotseat() ? await HotseatGame.ownedChoice(lg, "解开保险", opts)
+          : await openChoice("解开保险", `最后一发是${last}。要把它移到队列最前面吗？`, opts, { label: "留在最后", value: "stay" });
+        systemCommand({ type: "longgeSafetyAnswer", front: pick === "front" });
+        continue;
+      }
       // Helumica 协助攻击附带的环境扫描：区域已定（被打的敌人所在的区），按环境扫描的选项一步步问
       if (state.heluScanQueue && state.heluScanQueue.length) {
         const job = state.heluScanQueue[0];
@@ -1667,7 +1680,7 @@
           withSeed("hit:" + job.seq, () => finishBlock(null));
           if (info) detail.push(Object.assign(info, { dmg: dmgOnPlayers(from).get(info.target) || 0 }));
         }
-        state.assistQueue = []; state.koltSwapQueue = []; state.heluScanQueue = [];
+        state.assistQueue = []; state.koltSwapQueue = []; state.heluScanQueue = []; state.longgeSafetyQueue = [];
       };
       drain(null);
       for (const uid of EnemyAI.actingOrder()) {

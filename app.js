@@ -6787,6 +6787,22 @@ function queueHeluScan(a, zone, lines) {
   state.heluScanQueue.push({ actorId: a.id, zone: Number(zone) });
   if (lines) lines.push(`接着对 ${zone} 区进行环境扫描。`);
 }
+/** 解开保险之后的选择：把最后一发移到队列最前面（front = true）还是留在最后 */
+function resolveLonggeSafety(front) {
+  const job = (state.longgeSafetyQueue || []).shift();
+  if (!job) return;
+  const a = unitById(job.actorId);
+  const r = a ? longgeRes(a) : null;
+  if (!r || r.ammo.length < 2) return;
+  const c = r.ammo[r.ammo.length - 1];
+  if (front) {
+    r.ammo.unshift(r.ammo.pop());
+    r.seen.unshift(r.seen.pop());
+    longgeSyncKnown(r);
+    appendLog(`${a.name} 把最后一发${LONGGE_AMMO[c].name}移到最前面：下一发就是它。`);
+  } else appendLog(`${a.name} 让${LONGGE_AMMO[c].name}留在最后。`);
+  if (typeof renderAll === "function") renderAll();
+}
 /** 结算队首的协助扫描。picks 为 null 表示放弃；区域固定为排队时的那一区 */
 function resolveHeluScan(picks) {
   const job = (state.heluScanQueue || []).shift();
@@ -7208,14 +7224,6 @@ function skillFlowSteps(id, actor, picks) {
       units: fieldUnits().filter(u => !u.isPlayer && !u.dead && !u.hidden &&
         zoneDist(actor.zone, u.zone, state.zoneMode) <= 1)
     }];
-  }
-  if (id === "longge_safety") {
-    // 解开保险：看最后一发（选的时候就看到了），再决定要不要把它挪到最前面
-    const r = longgeRes(actor);
-    if (!r || r.ammo.length < 2) return [];
-    const last = LONGGE_AMMO[r.ammo[r.ammo.length - 1]].name;
-    return [{ key: "move", type: "choice", optional: false, label: `最后一发是${last}。要把它移到最前面吗？`,
-      options: [{ value: "front", label: `移到最前（下一发就是${last}）` }, { value: "stay", label: "留在最后" }] }];
   }
   if (id === "longge_aa" || id === "longge_chill") {
     // 枪管手杖：扳机解锁、有子弹时先选手杖（近距离）还是霰弹枪（远距离 = 距离 1）
@@ -10217,15 +10225,14 @@ function runSkillInner(id, optRun) {
       const n = r.ammo.length;
       if (n) {
         r.seen[n - 1] = true;
-        const c = r.ammo[n - 1];
-        lines.push(`查看最后一发：${LONGGE_AMMO[c].name}。`);
-        const fl = state.skillFlow;
-        if (n > 1 && fl && fl.picks && fl.picks.move === "front") {
-          r.ammo.unshift(r.ammo.pop());
-          r.seen.unshift(r.seen.pop());
-          lines.push(`把这发${LONGGE_AMMO[c].name}移到最前面：下一发就是它。`);
-        }
         longgeSyncKnown(r);
+        lines.push(`查看最后一发：${LONGGE_AMMO[r.ammo[n - 1]].name}。`);
+        // 技能结算完（行动点已花掉）才问要不要移到最前：取消技能就看不到颜色
+        if (n > 1) {
+          state.longgeSafetyQueue = state.longgeSafetyQueue || [];
+          state.longgeSafetyQueue.push({ actorId: a.id });
+          lines.push("可以选择把它移到最前面。");
+        }
       }
     } else if (id === "longge_summon") {
       const w = spawnWeapon(a, "xiaoxiao");

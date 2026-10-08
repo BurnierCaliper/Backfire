@@ -314,7 +314,7 @@
       for (const u of added) if (!existing.has(u.id)) saved.units.push({ id: u.id, eligibleEnemyRound: state.combatStarted ? Number(state.turnNo) + (state.combatPhase === "enemy" ? 1 : 0) : 0 });
       GMCommands.restore(saved, gmContext);
     }
-    if (!GAME.depth && !GAME.tape && [state.blockQueue, state.assistQueue, state.koltSwapQueue, state.heluScanQueue].some(q => q?.length)) {
+    if (!GAME.depth && !GAME.tape && [state.blockQueue, state.assistQueue, state.koltSwapQueue, state.heluScanQueue, state.longgeSafetyQueue].some(q => q?.length)) {
       queueMicrotask(() => { GAME.resolveOnlineEdits().then(() => publish()).catch(reportError); });
     }
   }

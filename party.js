@@ -668,7 +668,7 @@ function skillCost(id) {
     ras_aa: { ap: 1 }, ras_dump: { ap: 1 }, ras_flee: { ap: 1 }, ras_super: { ap: 1 }, ras_rampage: { ap: 1 }, ras_assist: {},
     ras_summon: { ap: 1, bonus: 1 },
     edc_drain: { ap: 1 }, edc_shock: { ap: 1 }, edc_flash: { ap: 1 }, edc_return: { ap: 1 },
-    longge_aa: { ap: 1 }, longge_chill: { ap: 1 }, longge_spit: { bonus: 1 }, longge_assist: {}, longge_safety: { bonus: 1 },
+    longge_aa: { ap: 1 }, longge_chill: { ap: 1 }, longge_spit: { bonus: 1 }, longge_assist: {}, longge_safety: { ap: 1 },
     longge_summon: { ap: 1, bonus: 1 },
     xiaoxiao_punch: { ap: 1 }, xiaoxiao_heal: { ap: 1 }, xiaoxiao_combo: { ap: 1 }, xiaoxiao_return: { ap: 1 }
   };
@@ -943,7 +943,7 @@ function skillList(unit) {
     add({ id: "longge_aa", name: "普通攻击", hint: gun ? "手杖：近距离 1atk 冰 +1击破 · 窥探1 / 霰弹枪：远距离 1.5atk 子弹属性 +1击破（耗 1 弹）" : "手杖 · 近距离 · 1atk 冰 +1击破 · 窥探1（扳机解锁后可用霰弹枪）" });
     add({ id: "longge_chill", name: "冷气穿刺", hint: gun ? "手杖：近距离施加刺骨 / 霰弹枪：远距离特殊射击（蓝弹刺骨并治疗该区友方，红弹 0.5atk 火）" : "手杖 · 近距离 · 施加刺骨" });
     add({ id: "longge_spit", name: "吐酸", hint: "附赠 · 近距离 · 角色本身 atk 的酸液伤害 · 每场一次（兽人-蜥蜴种族特长）", bare: true });
-    add({ id: "longge_safety", name: "解开保险", hint: "附赠 · 解锁扳机 · 查看最后一发子弹，可以把它移到最前面", minLv: 2 });
+    add({ id: "longge_safety", name: "解开保险", hint: "解锁扳机 · 查看最后一发子弹，可以把它移到最前面", minLv: 2 });
     add({ id: "longge_summon", name: "唤出小朋友", hint: "武器生物化" });
   }
   if (unit.kit === "xiaoxiao") {
