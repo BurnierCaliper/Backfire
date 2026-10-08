@@ -287,23 +287,31 @@
   function checkPanel() {
     const c = query("checkInfo");
     if (!c) return "";
-    const odds = run.party.map(h => query("checkOdds", { kit: h.kit }));
-    const best = odds.reduce((b, o) => (!b || o.chance > b.chance ? o : b), null);
+    const opts = c.options && c.options.length ? c.options : [{ diff: c.diff, prof: c.prof, reward: c.reward, diffName: c.diffName }];
+    // 每一种熟练项 × 每个人的成功率；最高的那个按钮高亮
+    const table = opts.map((x, i) => ({ x, i, odds: run.party.map(h => query("checkOdds", { kit: h.kit, opt: i })) }));
+    let best = null;
+    table.forEach(t => t.odds.forEach(o => { if (o.chance > 0 && (!best || o.chance > best.chance)) best = o; }));
     const hurt = c.injure
       ? `<p class="r-warn">⚠ 有风险：失败时检定者受到 ${c.dmg[0]}–${c.dmg[1]} 点随机属性伤害（按克制表结算，不致死），下一场战斗开始时再受 ${c.brk} 击破。</p>`
       : `<p class="r-hint">失败没有损失。</p>`;
-    const rows = odds.map(o => {
+    const button = (o) => {
       const tags = [o.adv ? "优势" : "", o.dis ? "劣势" : "", o.reroll ? "可重掷" : ""].filter(Boolean).join(" · ");
       const can = o.chance > 0;
-      return `<button class="g-btn${best && o.kit === best.kit && can ? " r-main" : ""}" data-check="${esc(o.kit)}" ${can ? "" : "disabled"}>
+      return `<button class="g-btn${best && o.kit === best.kit && o.opt === best.opt && can ? " r-main" : ""}" data-check="${esc(o.kit)}" data-opt="${o.opt}" ${can ? "" : "disabled"}>
         ${esc(o.name)} · ${LV_TEXT[o.level]}
         <small>${can ? `成功率 ${pctText(o.chance)}` : "没有资格尝试"}${tags ? " · " + esc(tags) : ""} · 血 ${o.hp}/${o.hpMax}</small></button>`;
-    }).join("");
-    const huntNote = run.task && run.task.hunt ? `<p class="r-hint">悬赏线索检定：成功 = 找到一条线索；失败或绕过去都算没找到，下一次换一个熟练项。</p>` : "";
-    return `<p>【事件占位】前方需要一次<b>${esc(c.diffName)}</b>的「${esc(c.prof)}」检定。</p>${huntNote}
-      <p class="r-hint">成功奖励 ${c.reward} 奎支${c.injure ? `（含风险加成 ${ROGUE_CHECKS.injure.bonus}）` : ""}。简单检定谁都能试；普通及以上没有这项熟练就不能尝试（手册第一章）。选一个人去做：</p>
+    };
+    const multi = opts.length > 1;
+    const groups = table.map(t => `${multi ? `<p class="r-sub-check"><b>${esc(t.x.diffName)}</b>「${esc(t.x.prof)}」检定 · 成功奖励 ${t.x.reward} 奎支</p>` : ""}
+      <div class="r-choices">${t.odds.map(button).join("")}</div>`).join("");
+    const huntNote = run.task && run.task.hunt ? `<p class="r-hint">悬赏线索检定：下面三种熟练项任选一种，用哪种成功都算找到一条线索（难度和奖励各不相同）；失败或绕过去都算没找到，下一次换别的熟练项。</p>` : "";
+    const head = multi ? `<p>【事件占位】前方需要一次检定，可以从三种方式里选一种。</p>`
+      : `<p>【事件占位】前方需要一次<b>${esc(c.diffName)}</b>的「${esc(c.prof)}」检定。</p>`;
+    return `${head}${huntNote}
+      <p class="r-hint">${multi ? "" : `成功奖励 ${c.reward} 奎支${c.injure ? `（含风险加成 ${ROGUE_CHECKS.injure.bonus}）` : ""}。`}简单检定谁都能试；普通及以上没有这项熟练就不能尝试（手册第一章）。选一个人去做：</p>
       ${hurt}
-      <div class="r-choices">${rows}</div>
+      ${groups}
       <div class="r-choices r-check-skip">
         <button class="g-btn" id="r-check-skip">不冒险，绕过去<small>没有奖励 · 花 ${ROGUE_NODE_TYPES.check.hours} 小时</small></button>
       </div>`;
@@ -438,7 +446,10 @@
     const stock = query("partStock");
     const weapons = run.party.flatMap(h => query("heroView", { kit: h.kit }).weapons);
     const targets = weapons.flatMap(w => (w.parts || []).map((p, i) => ({ v: `${w.kit}:${i}`, t: `${w.name} 槽${i + 1}${p ? `（换下 ${p.name}）` : "（空）"}` })));
-    const opts = targets.map(x => `<option value="${esc(x.v)}">${esc(x.t)}</option>`).join("");
+    // 还没有改装槽的武器也列出来（灰掉，写明几级开放），免得只看到一个选项不知道其他武器去哪了
+    const locked = weapons.filter(w => !(w.parts || []).length)
+      .map(w => `<option disabled>${esc(w.name)} · Lv${w.level || 1}（${WEAPON_PART_SLOT_LEVELS[0]} 级开放改装槽）</option>`).join("");
+    const opts = targets.map(x => `<option value="${esc(x.v)}">${esc(x.t)}</option>`).join("") + locked;
     const bag = stock.map(x => `<div class="shop-row${smithId && targets.length ? " pt-row" : ""}">
         <span class="s-name">${esc(x.name)}<small>${esc(x.text)}</small></span>
         <span class="s-have">有 ${x.qty}</span><span class="s-price">卖 ${x.sell}</span>
@@ -603,10 +614,10 @@
 
   /** 熟练项检定：先结算，再按掷出的 d100 播和协助格挡一样的检定动画，最后刷新界面 */
   let checking = false;
-  async function doCheck(kit) {
+  async function doCheck(kit, opt) {
     if (checking) return;
     let result;
-    try { result = dispatch({ type: "run", action: "attemptCheck", kit }, { run }); } catch (e) { completeAction(null, e); return; }
+    try { result = dispatch({ type: "run", action: "attemptCheck", kit, opt: opt || 0 }, { run }); } catch (e) { completeAction(null, e); return; }
     const notes = result.notes, lc = result.check;
     if (lc && window.GAME && typeof GAME.playCheck === "function") {
       checking = true;
@@ -685,7 +696,7 @@
     on("r-rest-skip", () => act({ action: "restAtNode", mode: "leave" }));
     on("r-short-before", () => act({ action: "shortRestBeforeNode" }));
     on("r-leave", () => act({ action: "leaveNode" }));
-    body.querySelectorAll("[data-check]").forEach(b => { b.onclick = () => doCheck(b.dataset.check); });
+    body.querySelectorAll("[data-check]").forEach(b => { b.onclick = () => doCheck(b.dataset.check, Number(b.dataset.opt) || 0); });
     on("r-check-skip", () => act({ action: "skipCheck" }));
     on("r-camp", () => act(Object.assign({ action: "camp" }, restSel)));
     body.querySelectorAll("[data-rest-food]").forEach(el => { el.onchange = () => { restSel.food[el.dataset.restFood] = el.value; render(); }; });

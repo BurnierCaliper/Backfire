@@ -19,6 +19,7 @@ function passCheck(R, run) {
   const info = R.checkInfo(run);
   const node = R.currentNode(run);
   node.check.diff = "easy";
+  (node.check.options || []).forEach(o => { o.diff = "easy"; });
   run.party.forEach(h => { h.profs[info.prof] = 3; });
   return R.attemptCheck(run, run.party[0].kit);
 }
@@ -105,4 +106,54 @@ test("同一个种子路线和目标都一样（读档不变）", () => {
   [a, b].forEach(({ R, run, k }) => { R.acceptTask(run, k); for (let i = 0; i < 3; i++) { R.skipCheck(run); if (i < 2) passOther(null, R, run); } });
   assert.deepEqual(plain(a.run.task.nodes.map(n => n.type)), plain(b.run.task.nodes.map(n => n.type)));
   assert.deepEqual(plain(a.run.task.nodes.filter(n => n.check).map(n => n.check.prof)), plain(b.run.task.nodes.filter(n => n.check).map(n => n.check.prof)));
+});
+
+test("悬赏线索检定：一次给三种不同的熟练项，难度各自掷；普通检定仍然只有一种", () => {
+  const { R, run, k } = bountyRun("BTY-OPT");
+  R.acceptTask(run, k);
+  const info = R.checkInfo(run);
+  assert.equal(info.options.length, 3);
+  assert.equal(new Set(info.options.map(o => o.prof)).size, 3, "三种不同的熟练项");
+  info.options.forEach((o, i) => {
+    assert.ok(o.diffName && o.reward > 0);
+    assert.equal(R.checkInfo(run, i).prof, o.prof);
+    assert.equal(R.checkOdds(run, run.party[0].kit, i).prof, o.prof);
+  });
+  // 多抽几局：三种选项的难度不总是一样
+  let differ = false;
+  for (let s = 0; s < 30 && !differ; s++) {
+    const b = bountyRun("BTY-DIFF" + s);
+    b.R.acceptTask(b.run, b.k);
+    differ = new Set(b.R.checkInfo(b.run).options.map(o => o.diff)).size > 1;
+  }
+  assert.ok(differ, "难度不一定一样");
+});
+
+test("悬赏线索检定：用第三种熟练项成功也算找到线索；失败后下一次不再出那一种；绕过去这次三种都不再出", () => {
+  const { R, run, k } = bountyRun("BTY-OPT2");
+  R.acceptTask(run, k);
+  const node = R.currentNode(run);
+  const third = R.checkInfo(run).options[2];
+  node.check.options[2].diff = "easy";
+  run.party.forEach(h => { h.profs[third.prof] = 3; });
+  R.attemptCheck(run, run.party[0].kit, 2);
+  assert.equal(run.task.hunt.found, 1, "第三种成功也算");
+  passOther(null, R, run);
+  // 这次失败：记成用第二种熟练项试过、失败了，再走过去 → 下一次不再出这一种（其他两种还可能出）
+  const info2 = R.checkInfo(run);
+  const failed = info2.options[1].prof;
+  R.currentNode(run).check.result = { kit: run.party[0].kit, prof: 0, ok: false, opt: 1, profName: failed };
+  R.skipCheck(run);
+  assert.equal(run.task.hunt.fails, 1);
+  assert.deepEqual(plain(run.task.hunt.lastFailProfs), [failed]);
+  passOther(null, R, run);
+  assert.ok(!R.checkInfo(run).options.map(o => o.prof).includes(failed), "失败的那种不再出");
+  // 用公开接口：绕过去
+  const s3 = bountyRun("BTY-OPT3");
+  s3.R.acceptTask(s3.run, s3.k);
+  const skipped = s3.R.checkInfo(s3.run).options.map(o => o.prof);
+  s3.R.skipCheck(s3.run);
+  passOther(null, s3.R, s3.run);
+  const next = s3.R.checkInfo(s3.run).options.map(o => o.prof);
+  skipped.forEach(p => assert.ok(!next.includes(p), "绕过去的三种都不再出：" + p));
 });

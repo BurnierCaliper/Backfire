@@ -235,6 +235,7 @@ const Rogue = (function () {
       // 悬赏：路线不预先给出，从第一个线索检定开始一站一站往前走（huntNext）
       task.nodeTypes = ["check"];
       task.cols = [["check"]];
+      task.huntMulti = true;   // 悬赏的线索检定：一次给三种熟练项任选（checkInfo）
       task.hunt = { need: BOUNTY().need, failMax: BOUNTY().failMax };
     }
     if (tpl.kind === "escort") task.escort = rollEscort(run, slot);
@@ -872,9 +873,12 @@ const Rogue = (function () {
     if (!node || node.target) return;
     if (node.type === "check") {
       const ok = !!(node.check && node.check.result && node.check.result.ok);
-      if (ok) { h.found += 1; h.lastFailProf = null; }
-      else { h.fails += 1; h.lastFailProf = node.check ? node.check.prof : null; }
-      notes.push(ok ? `找到一条线索（${h.found}/${h.need}）。` : `没有找到线索（失败 ${h.fails}/${h.failMax}）${h.lastFailProf ? `，下一次换个方向打听（不再是「${h.lastFailProf}」）` : ""}。`);
+      // 失败：下一次不再出这次试的熟练项；绕过去：这次给的几种都不再出
+      const tried = !node.check ? [] : node.check.result ? [node.check.result.profName || node.check.prof]
+        : (node.check.options || [{ prof: node.check.prof }]).map(o => o.prof);
+      if (ok) { h.found += 1; h.lastFailProf = null; h.lastFailProfs = null; }
+      else { h.fails += 1; h.lastFailProfs = tried.filter(Boolean); h.lastFailProf = h.lastFailProfs[0] || null; }
+      notes.push(ok ? `找到一条线索（${h.found}/${h.need}）。` : `没有找到线索（失败 ${h.fails}/${h.failMax}）${h.lastFailProfs && h.lastFailProfs.length ? `，下一次换个方向打听（不再是「${h.lastFailProfs.join("」「")}」）` : ""}。`);
       if (h.found >= h.need || h.fails >= h.failMax) {
         h.located = true;
         h.target = withRng(`${run.seed}:bounty:${run.taskNo}`, () => {
@@ -893,7 +897,8 @@ const Rogue = (function () {
       pushHuntNode(t, { type });
       return;
     }
-    pushHuntNode(t, h.lastFailProf ? { type: "check", excludeProf: h.lastFailProf } : { type: "check" });
+    const ex = h.lastFailProfs || (h.lastFailProf ? [h.lastFailProf] : []);
+    pushHuntNode(t, ex.length ? { type: "check", excludeProfs: ex } : { type: "check" });
   }
 
   /** 商店、工匠这类节点：逛完了继续走 */
@@ -908,27 +913,52 @@ const Rogue = (function () {
 
   /* ---------- 熟练项检定（手册第一章；事件内容占位） ---------- */
   const CHECK_DIFFS = ["easy", "normal", "hard", "extreme"];
-  /** 当前检定节点的内容：难度、熟练项、会不会受伤、奖励。到这一站时按种子定下来，存在节点上 */
-  function checkInfo(run) {
+  /** 当前检定节点的内容：难度、熟练项、会不会受伤、奖励。到这一站时按种子定下来，存在节点上。
+   *  悬赏的线索检定一次给三种不同的熟练项（options），各自的难度、奖励分开掷，用哪一种成功都算过；
+   *  其余检定只有一种。opt：看第几种（默认第一种）；返回值顶层的 diff / prof / reward 是这一种的 */
+  function checkInfo(run, opt) {
     const node = currentNode(run);
     if (!node || node.type !== "check") return null;
     if (!node.check) {
       const K = ROGUE_CHECKS;
+      const multi = !!(run.task && run.task.huntMulti);
       node.check = withRng(`${run.seed}:check:${run.taskNo}:${run.task.index}`, () => {
         const w = K.weightsByAct[Math.min(K.weightsByAct.length, run.act) - 1];
         const keys = Object.keys(w).filter(k => w[k] > 0);
-        let r = Math.random() * keys.reduce((a, k) => a + w[k], 0);
-        let diff = keys[keys.length - 1];
-        for (const k of keys) { r -= w[k]; if (r < 0) { diff = k; break; } }
+        const rollDiff = () => {
+          let r = Math.random() * keys.reduce((a, k) => a + w[k], 0);
+          let diff = keys[keys.length - 1];
+          for (const k of keys) { r -= w[k]; if (r < 0) { diff = k; break; } }
+          return diff;
+        };
+        const diff = rollDiff();
         const injure = Math.random() < K.injure.chance;
-        const profs = node.excludeProf ? K.profs.filter(p => p !== node.excludeProf) : K.profs;   // 悬赏：上次没成功就换一个熟练项
-        const prof = pick(profs.length ? profs : K.profs);
-        return { diff, prof, injure, reward: K.diffs[diff].reward + (injure ? K.injure.bonus : 0) };
+        // 悬赏：上次没成功的熟练项不再出
+        const ex = node.excludeProfs || (node.excludeProf ? [node.excludeProf] : []);
+        let pool = K.profs.filter(p => ex.indexOf(p) < 0);
+        if (!pool.length) pool = K.profs.slice();
+        const reward = (d) => K.diffs[d].reward + (injure ? K.injure.bonus : 0);
+        const prof = pick(pool);
+        const options = [{ diff, prof, reward: reward(diff) }];
+        if (multi) {
+          while (options.length < 3) {
+            const left = pool.filter(p => !options.some(o => o.prof === p));
+            if (!left.length) break;
+            const d = rollDiff();
+            options.push({ diff: d, prof: pick(left), reward: reward(d) });
+          }
+        }
+        return { diff, prof, injure, reward: reward(diff), options };
       });
     }
     const c = node.check;
+    const opts = c.options || [{ diff: c.diff, prof: c.prof, reward: c.reward }];
+    const i = Math.max(0, Math.min(opts.length - 1, Number(opt) || 0));
+    const o = opts[i];
     const dmg = ROGUE_CHECKS.injure.dmgByAct[Math.min(ROGUE_CHECKS.injure.dmgByAct.length, run.act) - 1];
-    return Object.assign({}, c, { diffName: ROGUE_CHECKS.diffs[c.diff].name, dmg: c.injure ? dmg.slice() : null,
+    return Object.assign({}, c, { diff: o.diff, prof: o.prof, reward: o.reward, opt: i,
+      options: opts.map(x => Object.assign({}, x, { diffName: ROGUE_CHECKS.diffs[x.diff].name })),
+      diffName: ROGUE_CHECKS.diffs[o.diff].name, dmg: c.injure ? dmg.slice() : null,
       brk: c.injure ? ROGUE_CHECKS.injure.brk : 0 });
   }
   /** 成功率：熟练等级 0–3 × 难度。0 表示没有资格尝试 */
@@ -937,8 +967,8 @@ const Rogue = (function () {
     return row[CHECK_DIFFS.indexOf(diff)] || 0;
   }
   /** 一名角色做当前检定的情况：熟练等级、优劣势、重掷、最终成功率 */
-  function checkOdds(run, kit) {
-    const info = checkInfo(run);
+  function checkOdds(run, kit, opt) {
+    const info = checkInfo(run, opt);
     const h = run.party.find(x => x.kit === kit);
     if (!info || !h) return null;
     const level = Math.min(PROF_MAX, heroProfs(h)[profName(info.prof)] || 0);
@@ -948,7 +978,7 @@ const Rogue = (function () {
     // 优势：掷两次取好的；劣势：两次都要过；迎难直上：整个检定失败后再来一次
     let p = perks.adv ? 1 - (1 - base) * (1 - base) : perks.dis ? base * base : base;
     if (perks.reroll) p = 1 - (1 - p) * (1 - p);
-    return { kit, name: v.name, level, base, chance: base ? p : 0, adv: perks.adv, dis: perks.dis,
+    return { kit, opt: info.opt, prof: info.prof, diff: info.diff, diffName: info.diffName, name: v.name, level, base, chance: base ? p : 0, adv: perks.adv, dis: perks.dis,
       reroll: perks.reroll, softFail: perks.softFail, perkText: perks.text, hp: v.hp, hpMax: v.hpMax };
   }
 
@@ -981,12 +1011,12 @@ const Rogue = (function () {
     return { amount, element, lost };
   }
   /** 选一名角色进行检定：熟练等级读角色的熟练项，种族特长自动算 */
-  function attemptCheck(run, kit) {
-    const info = checkInfo(run);
+  function attemptCheck(run, kit, opt) {
+    const info = checkInfo(run, opt);
     if (!info) throw new Error("当前节点不是检定");
     const h = run.party.find(x => x.kit === kit);
     if (!h) throw new Error("没有这名角色");
-    const o = checkOdds(run, kit);
+    const o = checkOdds(run, kit, info.opt);
     if (!o.base) throw new Error(`${info.diffName}检定需要「${info.prof}」熟练项才能尝试`);
     const notes = [];
     const profText = o.level ? `「${info.prof}」${["", "一", "二", "三"][o.level]}级熟练` : `没有「${info.prof}」熟练`;
@@ -1021,7 +1051,7 @@ const Rogue = (function () {
     notes.push(`${o.name} 进行${info.diffName}「${info.prof}」检定（${profText}${mod}，成功率 ${Math.round(o.chance * 1000) / 10}%）：` +
       (rerolled ? `失败，迎难直上重掷——${ok ? "成功" : "还是失败"}。` : ok ? "成功。" : "失败。"));
     const node = currentNode(run);
-    node.check.result = { kit, prof: o.level, ok };
+    node.check.result = { kit, prof: o.level, ok, opt: info.opt, profName: info.prof };
     if (ok) {
       state.kuizhi = (Number(state.kuizhi) || 0) + info.reward;
       notes.push(`获得 ${info.reward} 奎支（现有 ${state.kuizhi}）。`);
