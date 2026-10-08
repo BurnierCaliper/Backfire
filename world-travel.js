@@ -1,10 +1,10 @@
 /* Antlerscale: Backfire · 角鳞星的路程与用时（跑团测距用；地图界面在 world-map.js）
  *
  * 地图是带透视的鸟瞰图，画面上的远近不等于真实距离，所以这里不量图，距离全部按设定写在表里：
- *   WORLD_TRAVEL_EDGES：路段。每段 { a, b, km: [最少, 最多], road: { 路况: 占比 }, walkDays?, walkKmh?, note?, tbd? }
+ *   WORLD_TRAVEL_EDGES：路段。每段 { a, b, km: [最少, 最多], road: { 路况: 占比 }, walkKmh?, note?, tbd? }
  *     - 「rim」是聚落边缘（外城区外圈，出去就是沙漠）：城外地点的距离都从这里量（设定：起点按聚落边缘算）。
  *     - road 的路况：paved 铺装公路 / dirt 压实土路、矿区便道 / sand 松软沙地 / snow 雪山 / city 城内街道。
- *     - walkDays：设定里确认过的徒步天数（有就直接用，不按步速算）；walkKmh：城内步行（4–5 km/h，绕路系数 1.4）。
+ *     - 徒步天数一律按路况的日行距离（WORLD_TRAVEL.walkPace）算，不另写；walkKmh：城内步行（4–5 km/h，绕路系数 1.4）。
  *     - tbd: true = 暂定，还要和作者商讨（界面上会写「暂定」）。
  *   两地之间按路段连起来找最短路（Dijkstra，按距离中值），没有直达的就经由聚落边缘。
  *   WORLD_TRAVEL_MODES：交通方式和各路况的速度（km/h，[最慢, 最快]）。
@@ -16,7 +16,9 @@
 "use strict";
 
 const WORLD_TRAVEL = {
-  walkKmPerDay: [25, 35],     // 城外徒步：每天走多远（含休息、找路）
+  // 城外徒步每天走多远（km/天）：按现实的负重长途行军，每天走约 8 小时、含休息和找路。
+  // 公路 / 压实土路 4–5 km/h；松软沙地吃力（设定：沙漠 25–35 km/天）；雪山爬坡、积雪，一天走不了多远。
+  walkPace: { paved: [30, 40], dirt: [30, 40], sand: [25, 35], snow: [12, 20] },
   cityWalkKmh: [4, 5],        // 城内步行
   cityDetour: 1.4,            // 城内绕路系数
   rimName: "聚落边缘"
@@ -27,7 +29,7 @@ const WORLD_ROAD_NAME = { paved: "铺装公路", dirt: "压实土路 / 矿区便
 
 /** 交通方式。speed：各路况的速度 km/h [最慢, 最快]；不写的路况 = 走不了（要弃车步行那一段） */
 const WORLD_TRAVEL_MODES = {
-  walk: { name: "徒步", note: "城外按每天 25–35 km 算（设定里确认过天数的地点直接用设定的天数）" },
+  walk: { name: "徒步", note: "公路 / 土路每天 30–40 km、沙地 25–35 km、雪山 12–20 km；城里 4–5 km/h" },
   car: { name: "巨人油车", note: "普通车，松软沙地上随时可能陷车",
     speed: { paved: [60, 70], city: [30, 40], dirt: [30, 40], sand: [10, 20] }, warn: { sand: "沙地上随时可能陷车" } },
   atv: { name: "全地形巡逻车", note: "铺装公路按普通车算（设定没写，暂定）",
@@ -43,16 +45,16 @@ const WORLD_TRAVEL_EDGES = [
   { a: "giant_city", b: "outer_city", km: [9.0, 9.0], road: { city: 1 }, walkKmh: true,
     note: "核心区中心到外城区：半径约 9 km，按城内街道绕路系数 1.4 步行；磁悬浮只在核心区、人类和类人不能坐" },
   // —— 城外（从聚落边缘量）——
-  { a: "rim", b: "starport", km: [15, 25], road: { paved: 1 }, walkDays: [0.5, 1], note: "有铺装路" },
-  { a: "rim", b: "solar_w", km: [30, 50], road: { sand: 1 }, walkDays: [1, 2], note: "西侧太阳能板群，可当日往返", tbdRoad: true },
-  { a: "rim", b: "mine_1", km: [40, 60], road: { paved: 1 }, walkDays: [1, 2], note: "有铺装路" },
-  { a: "rim", b: "power_plant", km: [40, 60], road: { dirt: 1 }, walkDays: [1, 2], note: "能走到，但进不去", tbdRoad: true },
-  { a: "rim", b: "casino", km: [50, 70], road: { paved: 1 }, walkDays: [1, 2], note: "有铺装路" },
-  { a: "rim", b: "mine_2", km: [180, 220], road: { paved: 0.6, dirt: 0.4 }, walkDays: [3, 5], note: "公路加矿区便道，地形破碎", tbdRoad: true },
-  { a: "rim", b: "mine_3", km: [180, 220], road: { paved: 0.6, dirt: 0.4 }, walkDays: [3, 5], note: "和第二采矿场同一片区域", tbdRoad: true },
-  { a: "rim", b: "ruins", km: [250, 300], road: { sand: 1 }, walkDays: [6, 10], note: "无路" },
-  { a: "rim", b: "skynet", km: [280, 320], road: { sand: 1 }, walkDays: [6, 10], note: "无路（沙漠塔）" },
-  { a: "rim", b: "north_zone", km: [700, 900], road: { sand: 0.7, snow: 0.3 }, walkDays: [15, 20], note: "无路，沙漠转雪山；雪山段要弃车徒步", tbdRoad: true },
+  { a: "rim", b: "starport", km: [15, 25], road: { paved: 1 }, note: "有铺装路" },
+  { a: "rim", b: "solar_w", km: [30, 50], road: { sand: 1 }, note: "西侧太阳能板群，可当日往返", tbdRoad: true },
+  { a: "rim", b: "mine_1", km: [40, 60], road: { paved: 1 }, note: "有铺装路" },
+  { a: "rim", b: "power_plant", km: [40, 60], road: { dirt: 1 }, note: "能走到，但进不去", tbdRoad: true },
+  { a: "rim", b: "casino", km: [50, 70], road: { paved: 1 }, note: "有铺装路" },
+  { a: "rim", b: "mine_2", km: [180, 220], road: { paved: 0.6, dirt: 0.4 }, note: "公路加矿区便道，地形破碎", tbdRoad: true },
+  { a: "rim", b: "mine_3", km: [180, 220], road: { paved: 0.6, dirt: 0.4 }, note: "和第二采矿场同一片区域", tbdRoad: true },
+  { a: "rim", b: "ruins", km: [250, 300], road: { sand: 1 }, note: "无路" },
+  { a: "rim", b: "skynet", km: [280, 320], road: { sand: 1 }, note: "无路（沙漠塔）" },
+  { a: "rim", b: "north_zone", km: [700, 900], road: { sand: 0.7, snow: 0.3 }, note: "无路，沙漠转雪山；雪山段要弃车徒步", tbdRoad: true },
   // —— 设定表里没有：按地图推算（下面的 worldEstimate），暂定，待商讨 ——
   { a: "rim", b: "solar_c", km: [25, 40], road: { sand: 1 }, note: "南边的太阳能板群（按地图推算，暂定）", tbd: true },
   { a: "rim", b: "solar_e", km: [85, 110], road: { sand: 1 }, note: "东边的太阳能板群（按地图推算，暂定）", tbd: true },
@@ -73,7 +75,7 @@ function travelPlaceIds() {
   ids.delete("rim");
   return [...ids];
 }
-/** 从 from 到 to 的路线：{ ok, from, to, legs: [{ a, b, km, road, walkDays, walkKmh, note, tbd }], km: [lo, hi], tbd } */
+/** 从 from 到 to 的路线：{ ok, from, to, legs: [{ a, b, km, road, walkKmh, note, tbd }], km: [lo, hi], tbd } */
 function worldRoute(from, to) {
   if (!from || !to) return { ok: false, why: "要选起点和终点" };
   if (from === to) return { ok: true, from, to, legs: [], km: [0, 0], tbd: false };
@@ -107,6 +109,8 @@ function worldRoute(from, to) {
 }
 
 /* ---------- 用时 ---------- */
+/** 某种路况徒步每天走多远（没写的按沙地） */
+function walkPaceOf(road) { return WORLD_TRAVEL.walkPace[road] || WORLD_TRAVEL.walkPace.sand; }
 /** 一段路按某种交通方式要多久：{ hours: [lo, hi], days: [lo, hi], walkKm: [lo, hi], warn: [] } */
 function legTravel(leg, modeId) {
   const out = { hours: [0, 0], days: [0, 0], warn: [], walkedKm: [0, 0] };
@@ -116,11 +120,12 @@ function legTravel(leg, modeId) {
     if (leg.walkKmh || road.city) {
       const k = WORLD_TRAVEL.cityDetour, v = WORLD_TRAVEL.cityWalkKmh;
       out.hours = [kmLo * k / v[1], kmHi * k / v[0]];
-    } else if (leg.walkDays) {
-      out.days = leg.walkDays.slice();
     } else {
-      const v = WORLD_TRAVEL.walkKmPerDay;
-      out.days = [kmLo / v[1], kmHi / v[0]];
+      Object.keys(road).forEach(r => {
+        const share = Number(road[r]) || 0, v = walkPaceOf(r);
+        out.days[0] += kmLo * share / v[1];
+        out.days[1] += kmHi * share / v[0];
+      });
     }
     return out;
   }
@@ -131,7 +136,7 @@ function legTravel(leg, modeId) {
     const sp = M.speed[r];
     if (!sp) {
       // 车开不了这段（雪山）：弃车徒步
-      const v = WORLD_TRAVEL.walkKmPerDay;
+      const v = walkPaceOf(r);
       out.days[0] += kmLo * share / v[1];
       out.days[1] += kmHi * share / v[0];
       out.walkedKm[0] += kmLo * share; out.walkedKm[1] += kmHi * share;

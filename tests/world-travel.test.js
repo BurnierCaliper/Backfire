@@ -19,15 +19,15 @@ test("路段表：两端都是地图上的地点（或聚落边缘），km 是 [
   assert.ok(!c.travelPlaceIds().includes("rim"));
 });
 
-test("城外两地经由聚落边缘：第一采矿场 → 沙穹赌场 = 90–130 km，徒步 2–4 天", () => {
+test("城外两地经由聚落边缘：第一采矿场 → 沙穹赌场 = 90–130 km，公路徒步每天 30–40 km", () => {
   const c = H.load();
   const r = c.worldRoute("mine_1", "casino");
   assert.ok(r.ok);
   assert.deepEqual(plain(r.legs.map(l => [l.a, l.b])), [["mine_1", "rim"], ["rim", "casino"]]);
   assert.deepEqual(plain(r.km), [90, 130]);
   const walk = c.worldTravel(r, "walk");
-  assert.deepEqual(plain(walk.days), [2, 4]);
-  assert.equal(walk.text, "约 2–4 天");
+  near(walk.days[0], 90 / 40, "快"); near(walk.days[1], 130 / 30, "慢");
+  assert.equal(walk.text, "约 2.5–4.5 天");
   const car = c.worldTravel(r, "car");
   near(car.hours[0], 90 / 70, "全程铺装 最快"); near(car.hours[1], 130 / 60, "最慢");
   assert.equal(car.warn.length, 0);
@@ -42,7 +42,7 @@ test("巨人城核心区到外城区：9 km × 绕路 1.4，步行 4–5 km/h �
   assert.equal(w.text, "约 2.5–3 小时");
   // 城里出发去星际港口：城内几小时 + 城外半天到一天
   const s = c.worldTravel(c.worldRoute("giant_city", "starport"), "walk");
-  assert.deepEqual(plain(s.days), [0.5, 1]);
+  near(s.days[0], 15 / 40, "港口 快"); near(s.days[1], 25 / 30, "港口 慢");
   assert.ok(s.hours[0] > 2 && s.text.includes("天 +"), s.text);
 });
 
@@ -50,7 +50,7 @@ test("普通车在沙地上会陷车；全地形车沙地 40–55 km/h；悬浮�
   const c = H.load();
   const r = c.worldRoute("outer_city", "ruins");
   const [walk, car, atv, hover] = c.worldTravelPlan("outer_city", "ruins").modes;
-  assert.equal(walk.mode, "walk"); assert.deepEqual(plain(walk.days), [6, 10]);
+  assert.equal(walk.mode, "walk"); near(walk.days[0], 250 / 35, "沙地 快"); near(walk.days[1], 300 / 25, "沙地 慢");
   assert.ok(car.warn.some(w => w.includes("陷车")));
   near(atv.hours[0], 250 / 55 + 0 / 40, "全地形车 快");   // 外城区到边缘 0 km 起
   near(atv.hours[1], 300 / 40 + 0.6 / 30, "全地形车 慢");
@@ -64,11 +64,12 @@ test("极北禁区：雪山段车辆用不上，要弃车徒步（天数 + 小�
   const r = c.worldRoute("outer_city", "north_zone");
   assert.ok(r.tbd);
   const hover = c.worldTravel(r, "hover");
-  near(hover.days[0], 700 * 0.3 / 35, "雪山 快"); near(hover.days[1], 900 * 0.3 / 25, "雪山 慢");
+  near(hover.days[0], 700 * 0.3 / 20, "雪山 快"); near(hover.days[1], 900 * 0.3 / 12, "雪山 慢");
   assert.ok(hover.hours[0] > 0, "沙漠那段开车");
   assert.ok(hover.warn.some(w => w.includes("弃车徒步")));
   assert.match(hover.text, /开车 .*小时 \+ 弃车徒步 .*天/);
-  assert.deepEqual(plain(c.worldTravel(r, "walk").days), [15, 20], "徒步直接用设定的天数");
+  const w = c.worldTravel(r, "walk").days;
+  near(w[0], 700 * 0.7 / 35 + 700 * 0.3 / 20, "徒步 快：沙地 + 雪山"); near(w[1], 900 * 0.7 / 25 + 900 * 0.3 / 12, "徒步 慢");
 });
 
 test("暂定数据：太阳能板群（南 / 东）、第二↔第三采矿场；全地形车铺装路速度暂定", () => {
@@ -78,7 +79,7 @@ test("暂定数据：太阳能板群（南 / 东）、第二↔第三采矿场�
   assert.equal(m.legs.length, 1, "两座矿场之间直接走，不绕回聚落边缘");
   assert.ok(m.tbd);
   const walk = c.worldTravel(m, "walk");
-  near(walk.days[0], 160 / 35, "没有设定天数：按每天 25–35 km 算");
+  near(walk.days[0], 160 / 40, "便道徒步每天 30–40 km");
   assert.equal(c.worldTravel(c.worldRoute("outer_city", "starport"), "atv").tbd, true);
   assert.equal(c.worldTravel(c.worldRoute("outer_city", "ruins"), "atv").tbd, false);
 });
@@ -105,7 +106,7 @@ test("用时文字：开车开到一半要弃车，分开写；走好几天的�
   const c = H.load();
   const r = c.worldRoute("outer_city", "north_zone");
   assert.match(c.worldTravel(r, "hover").text, /^约 开车 .+小时 \+ 弃车徒步 .+天$/);
-  assert.equal(c.worldTravel(r, "walk").text, "约 15–20 天");
+  assert.match(c.worldTravel(r, "walk").text, /^约 [\d.]+–[\d.]+ 天$/);
 });
 
 /* ---------- 地图上任意两点：按透视倒推的估算 ---------- */
@@ -143,7 +144,7 @@ test("地图估算：任意一点到任意一点给出路程范围和四种交�
   const paved = c.worldEstimate("mine_1", { x: 78, y: 70 }, "paved");
   assert.equal(paved.modes.find(m => m.mode === "car").warn.length, 0);
   assert.ok(paved.modes[1].hours[1] < e.modes[1].hours[1], "铺装公路开车更快");
-  assert.deepEqual(plain(paved.modes[0].days), plain(e.modes[0].days), "徒步不管路况");
+  assert.ok(paved.modes[0].days[1] < e.modes[0].days[1], "公路上徒步也比沙地快");
 });
 
 test("地图估算：离城越远（同一个方向）越远；穿过城里那段按城内街道", () => {
