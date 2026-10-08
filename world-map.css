@@ -241,3 +241,31 @@ body.wm-open { overflow: hidden; }
 .wm-trip-note { font-size: 11px !important; color: var(--wm-muted) !important; line-height: 1.6 !important; }
 @media (max-width: 760px) { .wm.measuring .wm-card { width: auto; max-height: 46%; } }
 @media (prefers-reduced-motion: reduce) { .wm-trip polyline { animation: none; } }
+/* 测距：地图上任意一点的起 / 终标记、地图估算 */
+.wm-tripmarks { position: absolute; inset: 0; pointer-events: none; }
+.wm-tripmark { position: absolute; transform: translate(-50%, -100%) scale(var(--inv, 1)); transform-origin: 50% 100%; }
+.wm-tripmark i {
+  display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; margin-bottom: 6px;
+  font-style: normal; font-size: 12px; font-weight: 900; color: var(--wm-ink); background: var(--wm-holo);
+  box-shadow: 2px 2px 0 var(--wm-ink); position: relative;
+}
+.wm-tripmark i::after { content: ""; position: absolute; left: 50%; top: 100%; transform: translateX(-50%); border: 6px solid transparent; border-top-color: var(--wm-holo); }
+.wm-tripmark.b i { background: var(--wm-hazard); }
+.wm-tripmark.b i::after { border-top-color: var(--wm-hazard); }
+.wm.measuring .wm-view { cursor: crosshair; }
+.wm.measuring .wm-view.dragging { cursor: grabbing; }
+.wm-trip polyline.est { stroke: var(--wm-hazard); filter: drop-shadow(0 0 4px rgba(242, 194, 48, .9)); }
+.wm-trip-pick label.picking i { outline: 2px solid var(--wm-paper); outline-offset: 2px; }
+.wm-trip-pick i { cursor: pointer; }
+.wm-trip-hint { display: flex; align-items: center; gap: 6px; margin: -4px 0 12px !important; font-size: 12px !important; color: var(--wm-muted) !important; }
+.wm-trip-hint button, .wm-trip-terrain button {
+  font: inherit; font-size: 12px; font-weight: 800; padding: 2px 9px; cursor: pointer;
+  color: var(--wm-paper); background: transparent; border: 1px solid rgba(236, 224, 198, .3);
+}
+.wm-trip-hint button.on, .wm-trip-terrain button.on { color: var(--wm-ink); background: var(--wm-paper); }
+.wm-trip-total.est { background: rgba(242, 194, 48, .08); border-left-color: var(--wm-hazard); }
+.wm-trip-sub { margin: 0 0 10px !important; font-size: 12px !important; color: var(--wm-muted) !important; line-height: 1.6 !important; }
+.wm-trip-terrain { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-bottom: 14px; font-size: 12px; color: var(--wm-muted); }
+.wm-trip-terrain span { margin-right: 4px; }
+.wm-trip-alt { margin-top: 12px; padding: 8px 10px; font-size: 12px; line-height: 1.6; color: #d8ccb2; background: rgba(242, 194, 48, .08); border-left: 3px solid var(--wm-hazard); }
+.wm-trip-alt b { color: var(--wm-hazard); }

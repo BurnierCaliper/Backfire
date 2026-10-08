@@ -75,10 +75,10 @@ test("暂定数据：太阳能板群（南 / 东）、第二↔第三采矿场�
   const c = H.load();
   assert.ok(c.worldRoute("outer_city", "solar_c").tbd);
   const m = c.worldRoute("mine_2", "mine_3");
-  assert.equal(m.legs.length, 1, "同一片矿区直接走便道，不绕回聚落边缘");
+  assert.equal(m.legs.length, 1, "两座矿场之间直接走，不绕回聚落边缘");
   assert.ok(m.tbd);
   const walk = c.worldTravel(m, "walk");
-  near(walk.days[0], 20 / 35, "没有设定天数：按每天 25–35 km 算");
+  near(walk.days[0], 160 / 35, "没有设定天数：按每天 25–35 km 算");
   assert.equal(c.worldTravel(c.worldRoute("outer_city", "starport"), "atv").tbd, true);
   assert.equal(c.worldTravel(c.worldRoute("outer_city", "ruins"), "atv").tbd, false);
 });
@@ -106,4 +106,71 @@ test("用时文字：开车开到一半要弃车，分开写；走好几天的�
   const r = c.worldRoute("outer_city", "north_zone");
   assert.match(c.worldTravel(r, "hover").text, /^约 开车 .+小时 \+ 弃车徒步 .+天$/);
   assert.equal(c.worldTravel(r, "walk").text, "约 15–20 天");
+});
+
+/* ---------- 地图上任意两点：按透视倒推的估算 ---------- */
+test("地图估算：设定表里确认过的地点，从城中心量过去正好是 9.6 km + 表里距离的中值", () => {
+  const c = H.load();
+  c.S.WORLD_TRAVEL_EDGES.filter(e => e.a === "rim" && !e.tbd).forEach(e => {
+    const p = c.worldPlaceAnchor(e.b);
+    const g = c.worldGround(p.x, p.y);
+    near(Math.round((Math.hypot(g[0], g[1]) - 9.6) * 100) / 100, (e.km[0] + e.km[1]) / 2, e.b);
+  });
+  const g0 = c.worldGround(c.S.WORLD_GEO.center.x, c.S.WORLD_GEO.center.y);
+  assert.ok(Math.hypot(g0[0], g0[1]) < 1e-6, "城中心是原点");
+});
+
+test("地图估算：太空里的点不算；城里、雪原、沙漠认得出来", () => {
+  const c = H.load();
+  assert.equal(c.worldTerrainAt(20, 8), "space");
+  assert.equal(c.worldGround(20, 8), null);
+  assert.equal(c.worldTerrainAt(60, 42), "city");
+  assert.equal(c.worldTerrainAt(92, 10), "snow");
+  assert.equal(c.worldTerrainAt(78, 70), "desert");
+  const bad = c.worldEstimate({ x: 20, y: 8 }, "casino");
+  assert.equal(bad.ok, false);
+  assert.match(bad.why, /太空/);
+});
+
+test("地图估算：任意一点到任意一点给出路程范围和四种交通方式的用时；路况可选", () => {
+  const c = H.load();
+  const e = c.worldEstimate("mine_1", { x: 78, y: 70 });
+  assert.ok(e.ok);
+  assert.ok(e.straightKm > 5 && e.straightKm < 150, String(e.straightKm));
+  assert.ok(e.km[0] < e.straightKm && e.km[1] > e.straightKm, "直线 ±12%");
+  assert.equal(e.modes.length, 4);
+  assert.ok(e.modes.find(m => m.mode === "car").warn.some(w => w.includes("陷车")), "默认沙地");
+  const paved = c.worldEstimate("mine_1", { x: 78, y: 70 }, "paved");
+  assert.equal(paved.modes.find(m => m.mode === "car").warn.length, 0);
+  assert.ok(paved.modes[1].hours[1] < e.modes[1].hours[1], "铺装公路开车更快");
+  assert.deepEqual(plain(paved.modes[0].days), plain(e.modes[0].days), "徒步不管路况");
+});
+
+test("地图估算：离城越远（同一个方向）越远；穿过城里那段按城内街道", () => {
+  const c = H.load();
+  const C = c.S.WORLD_GEO.center;
+  [[1, 0], [-1, 0], [0, 1], [0.6, 0.8], [-0.6, 0.8]].forEach(([dx, dy]) => {
+    let last = 0;
+    for (let s = 1.1; s < 3; s += 0.2) {
+      const x = C.x + dx * 17.5 * s, y = C.y + dy * 9.5 * s;
+      if (x < 0 || x > 100 || y > 95) break;
+      const g = c.worldGround(x, y);
+      const r = Math.hypot(g[0], g[1]);
+      assert.ok(r >= last - 2, `方向 ${dx},${dy} 在 ${s.toFixed(1)}：${r} < ${last}`);
+      last = r;
+    }
+  });
+  const gc = c.worldEstimate("giant_city", "outer_city");
+  assert.ok(gc.straightKm > 7 && gc.straightKm < 10.5, "核心到外城区 ≈ 9 km：" + gc.straightKm);
+  assert.equal(gc.route.legs.length, 1);
+  assert.ok(gc.route.legs[0].road.city === 1);
+  const cross = c.worldEstimate("power_plant", "mine_3");
+  assert.ok(cross.cityKm > 3 && cross.cityKm <= 19.2, "从东穿城到西：" + cross.cityKm);
+});
+
+test("地图估算：极北禁区方向有一段雪原，车辆用不上", () => {
+  const c = H.load();
+  const e = c.worldEstimate("starport", "north_zone");
+  assert.ok(e.snowShare > 0.1 && e.snowShare < 0.9, String(e.snowShare));
+  assert.ok(e.modes.find(m => m.mode === "hover").warn.some(w => w.includes("弃车徒步")));
 });
