@@ -39,7 +39,7 @@ const RogueCommands = (function () {
     healHero: (c, run) => Rogue.healHero(run, c.kit),
     modifyHero: (c, run) => Rogue.modifyHero(run, c.kit, c.plan),
     attemptCheck: (c, run) => {
-      const notes = Rogue.attemptCheck(run, c.kit);
+      const notes = Rogue.attemptCheck(run, c.kit, c.opt);
       const check = run.lastCheck;
       run.lastCheck = null;  // Same consumption as the old UI, before the animation.
       return { notes, check: check || null };
@@ -54,8 +54,8 @@ const RogueCommands = (function () {
   const queries = {
     heroView: (c, run) => Rogue.heroView(run, hero(run, c.kit)),
     choiceOptions: (c, run) => Rogue.choiceOptions(run, c.kit, c.index),
-    checkInfo: (_c, run) => Rogue.checkInfo(run),
-    checkOdds: (c, run) => Rogue.checkOdds(run, c.kit),
+    checkInfo: (c, run) => Rogue.checkInfo(run, c.opt),
+    checkOdds: (c, run) => Rogue.checkOdds(run, c.kit, c.opt),
     cyberInfo: (c, run) => Rogue.cyberInfo(run, c.kit),
     cyberPreview: (c, run) => Rogue.cyberPreview(run, c.kit, c.plan),
     healCost: (c, run) => Rogue.healCost(run, c.kit),
@@ -158,6 +158,7 @@ const RogueCommands = (function () {
   function validate(table, c) {
     if (typeof c.action !== "string" || !own(table, c.action)) throw new Error("未知单局指令：" + c.action);
     if (c.index != null && (!Number.isInteger(c.index) || c.index < 0)) throw new Error("单局索引必须是非负整数");
+    if (c.opt != null && (!Number.isInteger(c.opt) || c.opt < 0 || c.opt > 2)) throw new Error("检定选项必须是 0–2");
     if (c.action === "restAtNode" && !["long", "short", "leave"].includes(c.mode)) throw new Error("未知休息方式");
     const restMap = (m) => m == null || (typeof m === "object" && !Array.isArray(m) && Object.keys(m).every(k => typeof m[k] === "string"));
     if (!restMap(c.food) || !restMap(c.sleep) || !restMap(c.spit)) throw new Error("长休的食物 / 睡眠道具 / 吐酸属性选择格式不对");

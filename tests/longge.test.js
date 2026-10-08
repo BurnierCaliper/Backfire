@@ -355,3 +355,48 @@ test("吐酸属性：长休时换（记在队伍档案），下一场开战按�
   cmd(c, { actor: lg.id, skill: "longge_spit", target: foes[0].id });
   assert.equal(pops[0].element, "fire");
 });
+
+test("消耗子弹时开枪 / 出拳的人头顶跳出红弹 / 蓝弹（画面用 bullet 弹字）", () => {
+  const { c, S, lg, foes } = setup();
+  lg.resources.trigger = true;
+  lg.resources.ammo = ["blue", "red", "red", "blue"]; lg.resources.seen = [false, false, false, false];
+  const pops = [];
+  c.spawnPopup = (u, spec) => { if (spec.kind === "bullet") pops.push({ id: u.id, text: spec.text, element: spec.element }); };
+  cmd(c, { actor: lg.id, skill: "longge_aa", target: foes[1].id, picks: { mode: "gun", target: foes[1].id } });
+  assert.deepEqual(plain(pops), [{ id: lg.id, text: "蓝弹", element: "ice" }]);
+  cmd(c, { actor: lg.id, skill: "longge_summon" });
+  const w = c.findKit("xiaoxiao", S.units);
+  w.zone = foes[0].zone; w.ap = 3;
+  cmd(c, { actor: w.id, skill: "xiaoxiao_punch", target: foes[0].id });
+  assert.deepEqual(plain(pops[1]), { id: w.id, text: "红弹", element: "fire" }, "小朋友出拳：小朋友头顶");
+  const src = require("node:fs").readFileSync(require("node:path").join(H.ROOT, "online-view.js"), "utf8");
+  assert.match(src, /"partner", "bullet"\]/, "联机投影也放行");
+});
+
+test("连续拳打飞行目标：三拳都打出去，近程打飞行的附赠行动整次只付一次；付不起就不出手、不耗子弹", () => {
+  const go = (bonus) => {
+    const c = H.load();
+    c.BattleSim.setup({ party: ["longge", "kolt"], enemies: [{ id: "crow", lv: 1, zone: 1 }], seed: "LG-CROW" });
+    c.startCombat();
+    const S = c.S.state;
+    const lg = c.findKit("longge", S.units);
+    lg.zone = 1; lg.ap = 3; lg.bonus = 2; lg.weaponLevels = { xiaoxiao: 2 };
+    cmd(c, { actor: lg.id, skill: "longge_summon" });
+    const w = c.findKit("xiaoxiao", S.units);
+    const f = S.units.find(u => !u.isPlayer);
+    w.zone = 1; f.zone = 1; w.ap = 3; w.bonus = bonus;
+    f.layers.forEach(l => { l.current = l.max = 300; });
+    assert.ok(f.flying);
+    lg.resources.ammo = ["blue", "blue", "red"]; lg.resources.seen = [false, false, false];
+    const pops = capturePops(c);
+    cmd(c, { actor: w.id, skill: "xiaoxiao_combo", target: f.id });
+    return { pops, w, lg };
+  };
+  const ok = go(1);
+  assert.deepEqual(plain(ok.pops.map(p => p.element)), ["ice", "ice", "fire"], "三拳都打出去");
+  assert.equal(ok.w.bonus, 0, "附赠行动只扣一次");
+  const no = go(0);
+  assert.equal(no.pops.length, 0);
+  assert.equal(no.lg.resources.ammo.length, 3, "不出手也不耗子弹");
+  assert.equal(no.w.ap, 3, "行动点也不扣");
+});

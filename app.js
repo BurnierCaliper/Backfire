@@ -450,6 +450,8 @@ function statusLine(u) {
   }
   if (u.kit === "helu" && u.resources && u.resources.scanned) s.push("已探测");
   if (u.kit === "longge" && u.resources && u.resources.trigger) s.push("扳机解锁");
+  // 自我效果（导体、霜结、自焚、溅射、千钧、蓄能、多普勒）：战斗画面的状态条读这里，以前漏了
+  if (u.self && u.self !== "none") s.push(selfName(u.self) + (u.self === "burn" && u.selfBurnStacks ? "×" + u.selfBurnStacks : ""));
   return s.length ? s.join(" · ") : "无状态";
 }
 
@@ -2249,6 +2251,7 @@ function resetBattleRecords() {
   state.battleScore = { total: 0, parts: {} };
   state.scoreSeen = {};
   state.battleGains = { xp: 0, kuizhi: 0 };
+  state.lastBrokenLayer = null;   // 废物利用：每场重新记（上一场打碎的层不能拿来用）
 }
 /** 这场的基准分：把出现过的每个敌人（含中途召唤的）「打空血、打空一次架势、打进一次失衡、击杀」的分加起来，
  *  按第一次见到时的数值算。这样架势高的敌人、血厚的敌人都在同一把尺子上。 */
@@ -4754,6 +4757,8 @@ function longgeTakeBullet(u, lines) {
   r.seen.shift();
   longgeSyncKnown(r);
   lines.push(`消耗 1 发${LONGGE_AMMO[c].name}（剩 ${r.ammo.length} 发）。`);
+  // 画面：开枪 / 出拳的人（龙哥或小朋友）头顶跳出红 / 蓝字，告诉玩家这一发是什么颜色
+  if (typeof spawnPopup === "function" && u) spawnPopup(u, { kind: "bullet", text: LONGGE_AMMO[c].name, element: LONGGE_AMMO[c].element });
   if (!r.ammo.length && r.trigger) { r.trigger = false; lines.push("子弹打光了，扳机锁上。"); }
   return c;
 }
@@ -5528,7 +5533,7 @@ function resetBattleFlags(u) {
   if (u.kit === "xia") { r.engine = false; r.fuel = 0; }
   if (u.kit === "yuito") r.bean = Math.max(1, Number(r.bean) || 0);
   if (u.kit === "ruby" && r.nano == null) r.nano = 40;
-  if (u.kit === "kolt") r.bit = r.bit || "drill";
+  if (u.kit === "kolt") { r.bit = r.bit || "drill"; r.rotStore = {}; }
   if (u.kit === "ras") { r.energyPct = 0; r.light = 0; r.unstable = false; }
   if (u.kit === "helu") { r.scanned = false; r.lockLeft = 1; }
   if (u.kit === "torque") r.acidCharge = null;
@@ -5986,13 +5991,17 @@ function dealTo(attacker, target, opt) {
   if (attacker && target && target.flying && opt.flags.action && !opt.flags.aoe && !opt.flags.flyFree && !isReaction) {
     const d = zoneDist(Number(attacker.zone), Number(target.zone), Number(state.zoneMode));
     const minion = !attacker.isPlayer && (typeof enemyRankOf === "function") && enemyRankOf(attacker) === "minion";
-    if (d === 0 && !attacker.flying && !minion) {
+    // 一次攻击行动只付一次：同一个技能里分几下打同一个飞行目标（连续拳、多段普攻）不重复收
+    const flyKey = attacker.id + ">" + target.id;
+    const paid = !!(state.flyPaid && state.flyPaid[flyKey]);
+    if (d === 0 && !attacker.flying && !minion && !paid) {
       if ((Number(attacker.bonus) || 0) < 1) {
         const msg = `${target.name} 在飞行，近程攻击需要额外 1 附赠行动，${attacker.name} 附赠行动不足。`;
         appendLog(msg);
         return { res: { ok: false, total: 0, breakDealt: 0, log: [msg], perHit: [] }, extra: [msg] };
       }
       attacker.bonus = (Number(attacker.bonus) || 0) - 1;
+      if (state.flyPaid) state.flyPaid[flyKey] = true;
       scoreSpend(attacker, 0, 1);
       appendLog(`${attacker.name} 额外消耗 1 附赠行动以近程攻击飞行中的 ${target.name}。`);
     }
@@ -6314,7 +6323,10 @@ function dealTo(attacker, target, opt) {
     // adv：玩家这一击触发了属性克制（预览写「克制」、血条变浅金；演出时画面震一下）
     const advHit = !!(res.advantage && attacker && attacker.isPlayer && mainHit);
     const disHit = !!(res.disadvantage && attacker && attacker.isPlayer && mainHit);   // 劣势：预览写「劣势」、伤害变灰
-    if ((res.intended || res.total || 0) > 0) spawnPopup(target, { kind: "dmg", value: res.intended || res.total, element: ele, main: mainHit, adv: advHit, dis: disHit });
+    // 多段攻击（例：拉斯缪尔两次 0.5atk、不稳态四次）：每一段各跳一个数字，看得出判定了几次
+    const segs = (res.perHit || []).filter(h => (Number(h.intended) || 0) > 0);
+    if (segs.length > 1) segs.forEach(h => spawnPopup(target, { kind: "dmg", value: h.intended, element: ele, main: mainHit, adv: advHit, dis: disHit }));
+    else if ((res.intended || res.total || 0) > 0) spawnPopup(target, { kind: "dmg", value: res.intended || res.total, element: ele, main: mainHit, adv: advHit, dis: disHit });
     if ((res.extraHarmonic || 0) > 0) spawnFloater(target, res.extraHarmonic, ele);
     // 画面：这一击带的攻击效果打出大字（属性专属的用属性颜色，穿刺 / 猛击 / 弱点特效用灰色）
     if (flags.action !== false && !flags.environment && typeof attackConnected === "function" && attackConnected(res, flags)) {
@@ -6382,7 +6394,8 @@ function addCharge(n) {
   c.resources.charge = Math.max(0, (c.resources.charge || 0) + n);
 }
 
-function addShieldLayer(u, amount) {
+/** 加护盾。fromChuan：是不是川川 / 哔哩哩给的（只有他们给的护盾带「磁场护盾」）；默认是，其他来源要传 false */
+function addShieldLayer(u, amount, fromChuan) {
   if (!u || amount <= 0) return;
   amount = Math.floor(amount);
   let sh = (u.layers || []).find(l => l.type === "shield");
@@ -6392,7 +6405,7 @@ function addShieldLayer(u, amount) {
     sh.current = Number(sh.current) + amount;
     sh.max = Number(sh.max) + amount;
   }
-  u.shieldFromChuan = true;
+  if (fromChuan !== false) u.shieldFromChuan = true;
 }
 
 function addNano(n) {
@@ -6843,9 +6856,7 @@ function heluScanAct(a, picks, lines) {
         const ally = unitById(picks.ally);
         if (!ally || !ally.isPlayer) { lines.push("先选一名友方。"); return; }
         const amt = 5 + 2 * (p.level || 1);
-        const hadFlag = ally.shieldFromChuan;
-        addShieldLayer(ally, amt);
-        ally.shieldFromChuan = hadFlag;   // 不是川川给的护盾，不触发「磁场护盾」
+        addShieldLayer(ally, amt, false);   // 不是川川给的护盾，不触发「磁场护盾」
         lines.push(`环境扫描：从 ${p.name} 提取 ${amt} 点护盾给 ${ally.name}。`);
       }
     } else if (p.kind === "scrap") {
@@ -6957,8 +6968,17 @@ function skillFlowSteps(id, actor, picks) {
     const d = next === "acid" ? 1 : 0;
     const units = fieldUnits().filter(u => !u.isPlayer && !u.dead && !u.hidden && !u.fused &&
       zoneDist(actor.zone, u.zone, maxZ) === d);
-    return [{ key: "target", type: "unit", optional: true,
-      label: next === "acid" ? "换成酸液炮：打距离 1 的一名敌人（可不选）" : "换成电钻：打同区的一名敌人（可不选）", units }];
+    const steps = [];
+    // 换刀头本身触发柯尔特的被动「更换刀头」：先选柯尔特同区一名敌人切刀追击（0.5×atk，可不选）
+    const passiveOk = k && !k.dead && !k.hidden && (typeof passiveOn !== "function" || passiveOn(k));
+    if (passiveOk) {
+      const foes = koltMeleeSwapTargets(k);
+      if (foes.length) steps.push({ key: "swapTarget", type: "unit", optional: true,
+        label: `更换刀头追击：柯尔特同区一名敌人 ${typeof passivePlus === "function" && passivePlus(k, 1) ? "0.75" : "0.5"}×atk（可不选）`, units: foes });
+    }
+    steps.push({ key: "target", type: "unit", optional: true,
+      label: next === "acid" ? "换成酸液炮，打距离 1 的一名敌人 1×atk +1 击破（可不选）" : "换成电钻，打同区的一名敌人 1×atk +1 击破（可不选）", units });
+    return steps;
   }
   if (id === "kolt_short") {
     // 只给场地能变成高压的区域（固有场地 / 深渊 / 损毁地面 / 被锁定的区不能选）
@@ -8423,6 +8443,9 @@ const SKILL_REQUIREMENT = {
     : !res(a).scanned ? "沙暴中再用要先做一次环境扫描才能调转风向"
     : state.weatherLock ? `天气被「${state.weatherLock}」锁定，无法调转风向` : null,
   torque_strip:   (a) => ((findKit("kolt", state.units) || {}).resources || {}).bit === "acid" ? "拆卸模式需要电钻模式" : null,
+  // 废物利用：要有「还没利用过的被摧毁的敌人血量层」或腐坏抛射攒下的记录才能用（同一层不能反复利用）
+  kolt_scrap:     (a) => state.lastBrokenLayer || Object.keys(res(a).rotStore || {}).some(k => (Number(res(a).rotStore[k]) || 0) > 0)
+    ? null : "还没有可以利用的残骸（被摧毁的敌人血量层，或腐坏抛射留下的记录）",
   kolt_rot:       (a) => ((findKit("kolt", state.units) || a).resources || {}).bit !== "acid" ? "腐坏抛射需要酸液炮模式" : null,
   kolt_mod:       (a) => ((findKit("kolt", state.units) || a).resources || {}).bit === "acid" ? "「非法」改装需要电钻模式" : null,
   edc_drain:      (a) => {
@@ -8580,6 +8603,14 @@ function skillTargetError(a, id, t) {
     if (t1 && (zoneOf(t1) == null || zoneDist(a.zone, zoneOf(t1), state.zoneMode) !== 0)) return "第一个目标要在同区";
     if (t2 && (zoneOf(t2) == null || zoneDist(a.zone, zoneOf(t2), state.zoneMode) !== 1)) return "第二个目标要在距离 1";
   }
+  // 龙哥 / 小朋友的近程技能打飞行目标：要多付 1 附赠行动，付不起就先拦下（免得子弹白白消耗）
+  if (["longge_aa", "longge_chill", "longge_spit", "xiaoxiao_punch", "xiaoxiao_combo"].includes(id) && !isStructureToken(state.targetId)) {
+    const fl = state.skillFlow;
+    const tgt = (fl && fl.picks && fl.picks.target) ? unitById(fl.picks.target) : t;
+    const gun = (id === "longge_aa" || id === "longge_chill") && longgeMode(a) === "gun";
+    const needBonus = (skillCost(id).bonus || 0) + 1;
+    if (tgt && tgt.flying && !a.flying && !gun && Number(tgt.zone) === Number(a.zone) && (Number(a.bonus) || 0) < needBonus) return `${tgt.name} 在飞行，近程攻击需要额外 1 附赠行动`;
+  }
   if ((id === "longge_aa" || id === "longge_chill") && !isStructureToken(state.targetId)) {
     const fl = state.skillFlow;
     const tgt = (fl && fl.picks && fl.picks.target) ? unitById(fl.picks.target) : t;
@@ -8609,6 +8640,7 @@ function runSkill(id, optRun) {
     lines = withLogSink(() => {
       state.aoePulse = {};            // 只算这一次行动的范围攻击
       state.actionKills = [];         // 这一次行动里打死的敌人（动作结束前还能吃到后面的攻击、算溢出）
+      state.flyPaid = {};             // 这一次行动里已经为「近程打飞行」付过附赠行动的（攻击者 > 目标）
       const scoreBefore = state.battleScore ? state.battleScore.total : 0;
       // 启动引擎+：引擎已启动时使用带有启动引擎效果的技能，结算后获得 1 燃油
       const fuelGain = FUEL_SKILLS.includes(id) && xiaFuelOn() && ((findKit("xia", state.units) || {}).resources || {}).engine;
@@ -8809,7 +8841,8 @@ function runSkillInner(id, optRun) {
     // 命中过程中立刻写出的日志（击杀、经验、掉落……）先收起来，排在这一击的结果后面
     let out;
     const captured = withLogSink(() => { out = dealTo(actor, target, opt); });
-    if (actor && actor.instant && actor.instant.overload && target && !target.kind) {
+    // 过载 / 导体：一个技能里分几下（各 1 次）打同一个目标，也算复数次攻击 → 结尾重复最后一段
+    if (actor && ((actor.instant && actor.instant.overload) || actor.self === "conductor") && target && !target.kind) {
       const n = opt.hits || 1;
       if (n <= 1 && (!opt.flags || opt.flags.action !== false)) {
         overloadSeq.push({ actor, target, opt: Object.assign({}, opt, { usePrep: false, hits: 1 }) });
@@ -9779,7 +9812,7 @@ function runSkillInner(id, optRun) {
       if (!roleOnce(a, "buffer", (a.level || 1) >= 15 ? 2 : 1)) lines.push("缓冲次数用尽。");
       else {
         const r = takeDice(2, 4, 4);
-        addShieldLayer(t, r.total);
+        addShieldLayer(t, r.total, false);   // 生存职责给的护盾，不是川川的磁场护盾
         lines.push(`缓冲：${t.name} 获得 ${r.total} 护盾（${r.text}）。`);
       }
     } else if (id === "role_dome") {
@@ -9796,11 +9829,15 @@ function runSkillInner(id, optRun) {
     } else if (id === "role_renew") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       if (!roleOnce(a, "renew", 1)) lines.push("续命本场已用完。");
-      else if (t.dying || totalHp(t) <= 0) {
-        standUp(t);
-        const heal = Math.floor(totalMaxHp(t) * 0.25);
-        healUnit(t, heal);
-        lines.push(`续命：${t.name} 起身并恢复 ${heal}。`);
+      else if (t.dying || t.upOnShp || totalHp(t) <= 0) {
+        // 濒死（或已经靠坚毅生命起身）：直接救回濒死前的状态——不走坚毅生命那一套，不受力竭「不能起身」限制，
+        // 之后受伤照常打血量层；恢复最大生命的 25%
+        t.dying = false;
+        t.upOnShp = false;
+        t.dead = false;
+        const heal = Math.floor(baseMaxHp(t) * 0.25);
+        const got = healUnit(t, heal);
+        lines.push(`续命：${t.name} 从濒死中救回（不消耗坚毅生命），恢复 ${got}（最大生命 25%）。`);
       } else {
         const heal = Math.floor(totalMaxHp(t) * 0.5);
         healUnit(t, heal);
@@ -9904,7 +9941,19 @@ function runSkillInner(id, optRun) {
       else hitOne(a, t, { element: "electric", mult: 0.4, hits: 3, baseBreak: 2, breakOnce: true, atk, atkRange: "melee" });
     } else if (id === "kolt_swap" || id === "torque_swap") {
       const next = swapKoltBit(a, lines);
-      const tgt = (state.skillFlow && state.skillFlow.picks.target) ? unitById(state.skillFlow.picks.target) : t;
+      // 拆装部件换了刀头 → 柯尔特的被动「更换刀头」照样触发一次切刀追击（同区一名敌人，0.5×atk / 被动+ 0.75×atk）
+      if (id === "torque_swap") {
+        const k = findKit("kolt", state.units);
+        const st = state.skillFlow && state.skillFlow.picks && state.skillFlow.picks.swapTarget ? unitById(state.skillFlow.picks.swapTarget) : null;
+        if (k && st && !st.dead && Number(st.zone) === Number(k.zone) && (typeof passiveOn !== "function" || passiveOn(k))) {
+          const mult = typeof passivePlus === "function" && passivePlus(k, 1) ? 0.75 : 0.5;
+          lines.push(`更换刀头：${k.name} 切刀追击 ${st.name}。`);
+          hitOne(k, st, { element: next === "acid" ? "acid" : "electric", mult, baseBreak: 0, atk: effectiveAtk(k, state.units), atkRange: "melee", flags: { action: true, blockResolved: true, flyFree: true } });
+        }
+      }
+      // 走了分步就只认分步里选的目标（拆装部件第二步可以不选；不能把第一步追击选的敌人当成它的目标）
+      const fl = state.skillFlow;
+      const tgt = fl && fl.picks ? (fl.picks.target ? unitById(fl.picks.target) : null) : t;
       if (tgt) {
         // 柯尔特被动「更换刀头」：不管换成哪种刀头，都打同区域（近距离）的敌人，0.5×atk。
         // 扭矩的「拆装部件」：按换上去的刀头的对应距离打（电钻同区 / 酸液炮距离 1），1×atk + 1 击破
@@ -9950,6 +9999,7 @@ function runSkillInner(id, optRun) {
         const amt = Math.min(Math.floor(Number(rec.lost) || 0), cap);
         grant(rec.type, amt, "废物利用");
         if ((Number(rec.lost) || 0) > cap) lines.push(`（那一层有 ${Math.floor(rec.lost)}，按生命上限一半封顶为 ${cap}）`);
+        state.lastBrokenLayer = null;   // 这一层已经利用过了：要等下一个被摧毁的层
       }
       // 腐坏抛射留下的腐蚀记录：这一次废物利用一起领取，然后清空
       const rot = (a.resources && a.resources.rotStore) || {};
@@ -10021,6 +10071,12 @@ function runSkillInner(id, optRun) {
       if (!tgt || !ally) { lines.push("先选拆卸目标和接收友方。"); return paintSkillLog(lines.join("\n")); }
       const stunnedBefore = !!tgt.stunned;
       dealBreak(tgt, 2, "electric", lines, "拆卸");
+      // 拆卸是对一个敌人的单体攻击：照样触发柯尔特「过度自信」的嘲讽（击破不走 dealTo，要单独加）
+      const koltT = findKit("kolt", state.units);
+      if (!tgt.isPlayer && !tgt.dead && (typeof passiveOn !== "function" || passiveOn(koltT || a))) {
+        tgt.tauntTo = (koltT || a).id;
+        lines.push(`过度自信：${tgt.name} 被嘲讽，下次攻击必须打柯尔特。`);
+      }
       // 卡面：这次攻击行动造成失衡才提升到 1.5×；本来就失衡的不算
       const brokeNow = !stunnedBefore && !!tgt.stunned;
       const amount = Math.floor(atk * (brokeNow ? 1.5 : 1));
@@ -10363,12 +10419,17 @@ function runSkillInner(id, optRun) {
   } catch (err) {
     lines.push("结算出错：" + err.message);
   }
-  if (a && a.instant && a.instant.overload && overloadSeq.length >= 2) {
+  const extraBy = a ? [a.instant && a.instant.overload ? "过载" : null, a.self === "conductor" ? "导体" : null].filter(Boolean) : [];
+  if (extraBy.length && overloadSeq.length >= 2) {
     const last = overloadSeq[overloadSeq.length - 1];
     const same = overloadSeq.filter(x => x.target && last.target && x.target.id === last.target.id);
-    if (same.length >= 2 && last.target && totalHp(last.target) > 0) {
-      lines.push(`${a.name} 过载：复数次攻击额外再打一次，沿用最后一段倍率。`);
-      hitOne(last.actor, last.target, last.opt);
+    if (same.length >= 2 && last.target) {
+      // 过载、导体各多打一次，都重复最后一段
+      extraBy.forEach(by => {
+        if (totalHp(last.target) <= 0) return;
+        lines.push(`${a.name} ${by}：复数次攻击额外再打一次，重复最后一段。`);
+        hitOne(last.actor, last.target, last.opt);
+      });
     }
   }
   flushAoePulse();

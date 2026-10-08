@@ -189,10 +189,13 @@ function simulateRun(c, run, opt = {}) {
         }
         else R.restAtNode(run, "short");
       } else if (node.type === "check") {
-        const best = run.party.map(h => R.checkOdds(run, h.kit)).filter(Boolean).sort((x, y) => y.chance - x.chance)[0];
+        // 悬赏的线索检定有三种熟练项可选：所有人 × 所有选项里挑成功率最高的（同成功率按奖励高的）
+        const nOpt = ((R.checkInfo(run) || {}).options || [0]).length;
+        const best = run.party.flatMap(h => Array.from({ length: nOpt }, (_, i) => R.checkOdds(run, h.kit, i))).filter(Boolean)
+          .sort((x, y) => y.chance - x.chance || (R.checkInfo(run, y.opt).reward - R.checkInfo(run, x.opt).reward))[0];
         const completedBefore = run.tasksDone || 0;
         const pay = R.taskPay(run, run.task).kuizhi;
-        if (best && best.chance > 0) { R.attemptCheck(run, best.kit); a.checks++; }
+        if (best && best.chance > 0) { R.attemptCheck(run, best.kit, best.opt); a.checks++; }
         else { R.skipCheck(run); a.checkSkips++; }
         // 检定可成为已有存档/定向场景的任务末站；任务报酬和检定收入分开。
         const reward = (run.tasksDone || 0) > completedBefore ? pay : 0;

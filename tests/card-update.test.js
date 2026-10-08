@@ -141,3 +141,22 @@ test("被摧毁的血量层只认敌人的、只认真正把它打碎的那一�
   assert.equal(st.lastBrokenLayer.mark, 1, "玩家的层被打碎不会成为来源");
   void kolt;
 });
+
+test("废物利用：开局没有残骸不能用；用过的那一层不能再利用，要等新的被摧毁的层或腐坏抛射的记录", () => {
+  const { c, st } = field(["kolt", "helu"]);
+  const kolt = c.findKit("kolt", st.units);
+  kolt.level = 3;
+  kolt.layers = [{ type: "flesh", current: 10, max: 100 }];
+  assert.equal(st.lastBrokenLayer, null, "开局没有记录");
+  assert.ok(c.skillRequirementError(kolt, "kolt_scrap"), "开局不能用");
+  st.lastBrokenLayer = { type: "flesh", lost: 20, dmg: 5 };
+  assert.equal(c.skillRequirementError(kolt, "kolt_scrap"), null);
+  skill(c, kolt, "kolt_scrap", null);
+  assert.equal(c.totalHp(kolt), 30);
+  assert.ok(c.skillRequirementError(kolt, "kolt_scrap"), "同一层不能再利用");
+  kolt.resources.rotStore = { flesh: 4 };
+  assert.equal(c.skillRequirementError(kolt, "kolt_scrap"), null, "腐坏抛射攒下的记录可以用");
+  skill(c, kolt, "kolt_scrap", null);
+  assert.equal(c.totalHp(kolt), 34);
+  assert.ok(c.skillRequirementError(kolt, "kolt_scrap"));
+});

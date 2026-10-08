@@ -463,10 +463,11 @@ while (run.stage !== "over" && !terminalOutcome && steps++ < maxSteps) {
       clinic(); tryDo("离开诊所", () => R.leaveNode(run));
     } else if (node.type === "check") {
       const info = R.checkInfo(run);
-      const best = run.party.map(h => R.checkOdds(run, h.kit)).sort((a, b) => b.chance - a.chance)[0];
+      const nOpt = (info.options || [0]).length;
+      const best = run.party.flatMap(h => Array.from({ length: nOpt }, (_, i) => R.checkOdds(run, h.kit, i))).sort((a, b) => b.chance - a.chance)[0];
       if (best && best.chance && (!info.injure || best.chance >= 0.5)) {
-        const notes = tryDo("检定", () => R.attemptCheck(run, best.kit)) || [];
-        ev(`${info.diffName}「${info.prof}」检定 → ${best.name}（${Math.round(best.chance * 100)}%）：${/成功/.test(notes[0] || "") && !/失败/.test(notes[0] || "") ? "成功" : "失败"}`);
+        const notes = tryDo("检定", () => R.attemptCheck(run, best.kit, best.opt)) || [];
+        ev(`${best.diffName}「${best.prof}」检定 → ${best.name}（${Math.round(best.chance * 100)}%）：${/成功/.test(notes[0] || "") && !/失败/.test(notes[0] || "") ? "成功" : "失败"}`);
       } else { tryDo("绕过检定", () => R.skipCheck(run)); ev(`${info.diffName}「${info.prof}」检定：绕过（最好的成功率 ${best ? Math.round(best.chance * 100) : 0}%）`); }
     } else { throw new Error("没见过的节点：" + node.type); }
   } else if (stage === "camp") {

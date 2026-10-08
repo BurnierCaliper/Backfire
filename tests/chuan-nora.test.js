@@ -202,7 +202,7 @@ function torqueField(bit) {
 test("扭矩「拆装部件」：换成酸液炮就打距离 1 的敌人，1×atk 酸 + 1 击破，然后收回", () => {
   const { c, st, kolt, torque, near, far } = torqueField("drill");
   const steps = c.skillFlowSteps("torque_swap", torque, {});
-  assert.equal(steps[0].units.map(u => u.id).join(","), far.id, "只列出距离 1 的敌人");
+  assert.equal(steps.find(x => x.key === "target").units.map(u => u.id).join(","), far.id, "只列出距离 1 的敌人");
   const h0 = c.totalHp(far), d0 = far.def;
   c.dispatch({ type: "skill", actor: torque.id, skill: "torque_swap", target: far.id, picks: { target: far.id } });
   assert.equal(kolt.resources.bit, "acid");
@@ -215,12 +215,26 @@ test("扭矩「拆装部件」：换成酸液炮就打距离 1 的敌人，1×at
 test("扭矩「拆装部件」：换成电钻就打同区的敌人", () => {
   const { c, kolt, torque, near, far } = torqueField("acid");
   const steps = c.skillFlowSteps("torque_swap", torque, {});
-  assert.equal(steps[0].units.map(u => u.id).join(","), near.id);
+  assert.equal(steps.find(x => x.key === "target").units.map(u => u.id).join(","), near.id);
   const h0 = c.totalHp(near);
   c.dispatch({ type: "skill", actor: torque.id, skill: "torque_swap", target: near.id, picks: { target: near.id } });
   assert.equal(kolt.resources.bit, "drill");
   assert.ok(c.totalHp(near) < h0);
   void far;
+});
+
+test("扭矩「拆装部件」：先问更换刀头的切刀追击（柯尔特同区 0.5atk），再问拆装部件的目标——一共两次攻击", () => {
+  const { c, kolt, torque, near, far } = torqueField("drill");
+  const steps = c.skillFlowSteps("torque_swap", torque, {});
+  assert.deepEqual(JSON.parse(JSON.stringify(steps.map(x => x.key))), ["swapTarget", "target"]);
+  assert.equal(steps[0].units.map(u => u.id).join(","), near.id, "切刀追击打柯尔特同区");
+  const pops = [];
+  c.spawnPopup = (u, spec) => { if (spec.kind === "dmg") pops.push({ id: u.id, element: spec.element }); };
+  c.dispatch({ type: "skill", actor: torque.id, skill: "torque_swap", target: far.id, picks: { swapTarget: near.id, target: far.id } });
+  assert.deepEqual(pops.map(p => p.id), [near.id, far.id], "两次攻击");
+  assert.deepEqual(pops.map(p => p.element), ["acid", "acid"]);
+  assert.equal(kolt.resources.bit, "acid");
+  assert.equal(torque.hidden, true);
 });
 
 test("柯尔特切刀附带的那一击打飞行敌人，不额外消耗附赠行动", () => {
@@ -242,4 +256,21 @@ test("柯尔特切刀附带的那一击打飞行敌人，不额外消耗附赠�
 test("战斗画面分步选择每一步都重新取单位（预览会替换单位对象，逃离的目标要按移动前的区域列）", () => {
   const src = require("fs").readFileSync(require("path").join(H.ROOT, "game.js"), "utf8");
   assert.match(src, /const live = unitById\(actor\.id\) \|\| actor;\s*try \{ steps = skillFlowSteps\(sk\.id, live, picks\)/);
+});
+
+test("扭矩「拆装部件」：第二步不选目标，就不会把第一步追击的敌人当成拆装部件的目标", () => {
+  const { c, torque, near, far } = torqueField("drill");
+  const pops = [];
+  c.spawnPopup = (u, spec) => { if (spec.kind === "dmg") pops.push(u.id); };
+  c.dispatch({ type: "skill", actor: torque.id, skill: "torque_swap", target: near.id, picks: { swapTarget: near.id, target: null } });
+  assert.deepEqual(JSON.parse(JSON.stringify(pops)), [near.id], "只有切刀追击那一下");
+  void far;
+});
+
+test("扭矩「拆卸模式」：对敌人的单体攻击，照样被嘲讽（过度自信）", () => {
+  const { c, st, kolt, torque, near } = torqueField("drill");
+  const ally = kolt;
+  c.dispatch({ type: "skill", actor: torque.id, skill: "torque_strip", target: near.id, picks: { target: near.id, ally: ally.id } });
+  assert.equal(near.tauntTo, kolt.id);
+  void st;
 });
