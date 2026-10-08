@@ -1,0 +1,205 @@
+/* Antlerscale: Backfire · 角鳞星地图（world-map.js）
+ * 铁皮框 + 黄黑警示条的标题栏，星空底；地点是全息小菱形，当前位置是黄色雷达脉冲的大针 + 「你在这里」胶带牌。 */
+.wm {
+  --wm-ink: #0b0806;
+  --wm-steel: #1a1511;
+  --wm-edge: #4d4337;
+  --wm-hazard: #f2c230;
+  --wm-holo: #3fe0ff;
+  --wm-mint: #39e6b4;
+  --wm-paper: #ece0c6;
+  --wm-muted: #a8977b;
+  position: fixed; inset: 0; z-index: 200;
+  display: none; align-items: center; justify-content: center;
+  padding: 18px;
+  background: radial-gradient(ellipse at 50% 30%, rgba(30, 40, 60, .55), rgba(5, 4, 3, .92) 70%);
+  backdrop-filter: blur(3px);
+}
+.wm.show { display: flex; animation: wmIn .28s ease-out; }
+@keyframes wmIn { from { opacity: 0; } to { opacity: 1; } }
+body.wm-open { overflow: hidden; }
+
+.wm-frame {
+  position: relative;
+  width: min(1500px, 100%); height: min(920px, 100%);
+  display: flex; flex-direction: column;
+  background: var(--wm-steel);
+  border: 2px solid var(--wm-edge);
+  box-shadow: 0 0 0 4px var(--wm-ink), 0 30px 80px rgba(0, 0, 0, .7);
+  clip-path: polygon(0 0, calc(100% - 22px) 0, 100% 22px, 100% 100%, 22px 100%, 0 calc(100% - 22px));
+  animation: wmFrame .32s cubic-bezier(.2, 1.2, .4, 1);
+}
+@keyframes wmFrame { from { transform: scale(.96) translateY(10px); } to { transform: none; } }
+
+/* 标题栏：黄黑警示条压底 */
+.wm-head {
+  position: relative;
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 12px 18px 16px;
+  background: linear-gradient(#231c16, #1a1511);
+  color: var(--wm-paper);
+}
+.wm-head::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 6px;
+  background: repeating-linear-gradient(-45deg, var(--wm-hazard) 0 12px, var(--wm-ink) 12px 24px);
+}
+.wm-tag {
+  font-family: "Black Ops One", Impact, sans-serif; font-size: 13px; letter-spacing: .14em;
+  padding: 3px 10px 2px; color: var(--wm-ink); background: var(--wm-hazard);
+  transform: rotate(-2deg); box-shadow: 2px 2px 0 var(--wm-ink);
+}
+.wm-head h3 { margin: 0; font-size: 22px; font-weight: 900; letter-spacing: .06em; }
+.wm-sub { font-size: 13px; color: var(--wm-muted); }
+.wm-spacer { flex: 1; }
+.wm-tools { display: flex; gap: 6px; }
+.wm-tools .g-btn { min-width: 38px; }
+
+.wm-body { position: relative; flex: 1; min-height: 0; display: flex; }
+.wm-view {
+  position: relative; flex: 1; min-width: 0; overflow: hidden;
+  background-color: #04060c; cursor: grab; touch-action: none;
+  background-image: radial-gradient(1px 1px at 20% 30%, rgba(255,255,255,.6), transparent),
+    radial-gradient(1px 1px at 70% 80%, rgba(255,255,255,.4), transparent),
+    radial-gradient(1px 1px at 40% 60%, rgba(255,255,255,.35), transparent);
+  background-size: 140px 140px, 90px 90px, 60px 60px;
+}
+.wm-view.dragging { cursor: grabbing; }
+.wm-stage { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
+.wm-stage.anim { transition: transform .38s cubic-bezier(.2, .9, .3, 1); }
+.wm-img { display: block; width: 100%; height: 100%; user-select: none; -webkit-user-drag: none; pointer-events: none; }
+.wm-vignette { position: absolute; inset: 0; pointer-events: none; box-shadow: inset 0 0 90px rgba(0, 0, 0, .65); }
+.wm-hint {
+  position: absolute; left: 14px; bottom: 12px; pointer-events: none;
+  padding: 4px 10px; font-size: 12px; color: var(--wm-paper);
+  background: rgba(11, 8, 6, .72); border-left: 3px solid var(--wm-holo);
+}
+
+/* 路线（单局的各幕） */
+.wm-route { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+.wm-route line { stroke-width: 3; stroke-linecap: round; filter: drop-shadow(0 0 3px rgba(0, 0, 0, .9)); }
+.wm-route line.done { stroke: var(--wm-hazard); }
+.wm-route line.next { stroke: rgba(236, 224, 198, .85); stroke-dasharray: 7 7; animation: wmDash 1.2s linear infinite; }
+@keyframes wmDash { to { stroke-dashoffset: -28; } }
+
+/* 地点：全息小菱形，悬停 / 选中时亮起 */
+.wm-pins { position: absolute; inset: 0; }
+.wm-pin {
+  position: absolute; width: 34px; height: 34px; padding: 0; border: 0; background: none; cursor: pointer;
+  transform: translate(-50%, -50%) scale(var(--inv, 1)); transform-origin: 50% 50%;
+}
+.wm-dot {
+  position: absolute; left: 50%; top: 50%; width: 12px; height: 12px;
+  transform: translate(-50%, -50%) rotate(45deg);
+  background: rgba(63, 224, 255, .25); border: 2px solid var(--wm-holo);
+  box-shadow: 0 0 8px var(--wm-holo), 0 0 0 2px rgba(11, 8, 6, .6);
+  transition: transform .15s, background .15s;
+}
+.wm-pin:hover .wm-dot, .wm-pin:focus-visible .wm-dot, .wm-pin.sel .wm-dot { transform: translate(-50%, -50%) rotate(45deg) scale(1.5); background: var(--wm-holo); }
+.wm-pin:focus-visible { outline: none; }
+.wm-pin.on-route .wm-dot { border-color: var(--wm-paper); box-shadow: 0 0 8px rgba(236, 224, 198, .8), 0 0 0 2px rgba(11, 8, 6, .6); }
+.wm-badges { position: absolute; left: 50%; top: -6px; transform: translate(-50%, -100%); display: flex; gap: 3px; pointer-events: none; }
+.wm-badge {
+  font-style: normal; font-size: 11px; font-weight: 900; white-space: nowrap;
+  padding: 1px 6px; color: var(--wm-ink); background: var(--wm-paper); box-shadow: 1px 1px 0 var(--wm-ink);
+}
+.wm-badge.done { background: var(--wm-muted); }
+.wm-badge.now { background: var(--wm-hazard); }
+
+/* 当前位置：黄色大针 + 雷达脉冲 + 「你在这里」胶带牌 */
+.wm-pin.here { z-index: 3; }
+.wm-pin.here .wm-dot {
+  width: 18px; height: 18px; background: var(--wm-hazard); border-color: var(--wm-ink);
+  box-shadow: 0 0 0 3px var(--wm-hazard), 0 0 18px var(--wm-hazard);
+}
+.wm-pin.here::before, .wm-pin.here::after {
+  content: ""; position: absolute; left: 50%; top: 50%; width: 18px; height: 18px; border-radius: 50%;
+  border: 2px solid var(--wm-hazard); transform: translate(-50%, -50%); pointer-events: none;
+  animation: wmRadar 2s ease-out infinite;
+}
+.wm-pin.here::after { animation-delay: 1s; }
+@keyframes wmRadar { from { width: 18px; height: 18px; opacity: 1; } to { width: 90px; height: 90px; opacity: 0; } }
+.wm-here {
+  position: absolute; left: 50%; bottom: calc(100% + 16px); transform: translateX(-50%) rotate(-2deg);
+  display: flex; flex-direction: column; align-items: center; pointer-events: none;
+  padding: 4px 12px 3px; white-space: nowrap;
+  background: var(--wm-hazard); color: var(--wm-ink); box-shadow: 3px 3px 0 var(--wm-ink);
+  animation: wmBob 2.4s ease-in-out infinite;
+}
+.wm-here::after {
+  content: ""; position: absolute; left: 50%; top: 100%; transform: translateX(-50%);
+  border: 8px solid transparent; border-top-color: var(--wm-hazard);
+}
+.wm-here b { font-size: 14px; font-weight: 900; letter-spacing: .08em; }
+.wm-here small { font-size: 11px; font-weight: 700; opacity: .8; }
+.wm-pin.here .wm-badges { top: auto; bottom: -10px; transform: translate(-50%, 100%); }
+@keyframes wmBob { 50% { transform: translateX(-50%) rotate(-2deg) translateY(-4px); } }
+
+/* 右侧地点卡 */
+.wm-card {
+  width: 280px; flex: none; padding: 20px 18px;
+  background: linear-gradient(180deg, #221b15, #15110d);
+  border-left: 2px solid var(--wm-edge); color: var(--wm-paper);
+  overflow: auto;
+}
+.wm-card-kicker { font-family: "Black Ops One", Impact, sans-serif; font-size: 11px; letter-spacing: .3em; color: var(--wm-holo); }
+.wm-card h4 { margin: 4px 0 10px; font-size: 26px; font-weight: 900; letter-spacing: .04em; }
+.wm-card p { margin: 10px 0 16px; font-size: 14px; line-height: 1.7; color: #d8ccb2; }
+.wm-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.wm-chip { padding: 2px 8px; font-size: 12px; font-weight: 800; color: var(--wm-ink); background: var(--wm-paper); }
+.wm-chip.here, .wm-chip.now { background: var(--wm-hazard); }
+.wm-chip.done { background: var(--wm-muted); }
+.wm-chip.next { background: transparent; color: var(--wm-paper); box-shadow: inset 0 0 0 1px var(--wm-paper); }
+.wm-card-empty b { font-size: 22px; }
+.wm-card-empty p { color: var(--wm-muted); }
+
+/* 手机：地点卡挪到下面 */
+@media (max-width: 760px) {
+  .wm { padding: 0; }
+  .wm-frame { width: 100%; height: 100%; clip-path: none; border: 0; }
+  .wm-head { padding: 10px 10px 14px; gap: 6px; }
+  .wm-head h3 { display: none; }
+  .wm-spacer { display: none; }
+  .wm-tools { gap: 4px; margin-left: auto; }
+  .wm-tools .g-btn { min-width: 32px; padding-left: 6px; padding-right: 6px; }
+  .wm-sub { order: 5; width: 100%; }
+  .wm-body { flex-direction: column; }
+  .wm-card { width: auto; max-height: 34%; border-left: 0; border-top: 2px solid var(--wm-edge); padding: 12px 16px; }
+  .wm-card h4 { font-size: 20px; margin-bottom: 6px; }
+  .wm-hint { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wm.show, .wm-frame, .wm-here, .wm-route line.next, .wm-pin.here::before, .wm-pin.here::after { animation: none; }
+  .wm-stage.anim { transition: none; }
+}
+
+/* 地点卡下面：路线和地点一览 */
+.wm-sec { margin-top: 22px; padding-top: 14px; border-top: 1px dashed rgba(236, 224, 198, .18); }
+.wm-route-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.wm-route-list li { display: flex; align-items: center; gap: 10px; padding: 5px 8px; font-size: 13px; cursor: pointer; background: rgba(236, 224, 198, .05); border-left: 3px solid rgba(236, 224, 198, .35); }
+.wm-route-list li:hover { background: rgba(63, 224, 255, .12); }
+.wm-route-list li b { font-size: 12px; min-width: 44px; color: var(--wm-muted); }
+.wm-route-list li span { flex: 1; font-weight: 700; }
+.wm-route-list li i { font-style: normal; font-size: 11px; color: var(--wm-muted); }
+.wm-route-list li.now { border-left-color: var(--wm-hazard); background: rgba(242, 194, 48, .12); }
+.wm-route-list li.now b, .wm-route-list li.now i { color: var(--wm-hazard); }
+.wm-route-list li.done { opacity: .6; }
+.wm-index { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 5px; }
+.wm-index li { padding: 3px 9px; font-size: 12px; cursor: pointer; color: var(--wm-paper); box-shadow: inset 0 0 0 1px rgba(63, 224, 255, .45); }
+.wm-index li:hover, .wm-index li.sel { background: rgba(63, 224, 255, .18); }
+.wm-index li.here { background: var(--wm-hazard); color: var(--wm-ink); box-shadow: none; font-weight: 800; }
+@media (max-width: 760px) { .wm-sec { margin-top: 12px; padding-top: 10px; } }
+
+/* 跑团主持人：可以拖动的「你在这里」标记 */
+.wm-drop { display: none; }
+.wm.can-move.no-here .wm-drop { display: inline-flex; }
+.wm-mark { z-index: 4; }
+.wm-mark.movable { cursor: grab; }
+.wm-mark.movable .wm-dot { outline: 2px dashed rgba(242, 194, 48, .8); outline-offset: 6px; }
+.wm-mark.dragging { cursor: grabbing; }
+.wm-mark.dragging .wm-here { animation: none; transform: translateX(-50%) rotate(0) scale(1.06); }
+.wm-mark.dragging::before, .wm-mark.dragging::after { animation: none; opacity: 0; }
+.wm-here small.where:empty { display: none; }
+.wm-here small.where { color: #5a3d00; }
+.wm-pin.near-here .wm-dot { border-color: var(--wm-hazard); box-shadow: 0 0 8px var(--wm-hazard), 0 0 0 2px rgba(11, 8, 6, .6); }
+.wm-gm-tip { font-size: 12px !important; color: var(--wm-muted) !important; margin-top: 10px !important; }
+.wm-pin.near-here .wm-badges { top: auto; bottom: -10px; transform: translate(-50%, 100%); }

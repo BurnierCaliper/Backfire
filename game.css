@@ -2042,3 +2042,50 @@ body:not([data-screen="battle"]) .g-rank { display: none !important; }
 .g-combo.quake { animation: cbQuake .32s linear; }
 @keyframes cbQuake { 0%, 100% { translate: 0 0; } 20% { translate: -5px 3px; } 40% { translate: 4px -4px; } 60% { translate: -3px -2px; } 80% { translate: 2px 3px; } }
 @media (prefers-reduced-motion: reduce) { .cb-num.enter, .cb-num.bump, .cb-num.slam, .g-combo.quake { animation: none; } }
+
+/* ---------- 首领机制：死刑标记（boss-mechanics.js）---------- */
+/* 被标记的单位：铭牌内圈一道红框；该落下的那一刻红框闪 */
+.unit-wrap.doomed .unit { box-shadow: inset 0 0 0 4px #d62f2f, inset 0 0 16px rgba(214, 47, 47, .4); }
+.unit-wrap.doom-now .unit { animation: doomPulse .9s ease-in-out infinite; }
+@keyframes doomPulse {
+  0%, 100% { box-shadow: inset 0 0 0 3px #d62f2f, inset 0 0 10px rgba(214, 47, 47, .3); }
+  50% { box-shadow: inset 0 0 0 4px #ff3b3b, inset 0 0 22px rgba(255, 59, 59, .6); }
+}
+.chip.mark-execution { background: #d62f2f; color: #fff; font-weight: 800; }
+.chip.cast-execution { background: #1b1f24; color: #ff6b6b; font-weight: 800; }
+/* 分担：黄框（和死刑的红框区分），聚过来一起扛 */
+.unit-wrap.shared .unit { box-shadow: inset 0 0 0 4px #e3a51b, inset 0 0 16px rgba(227, 165, 27, .4); }
+.unit-wrap.shared.doom-now .unit { animation: sharePulse .9s ease-in-out infinite; }
+@keyframes sharePulse {
+  0%, 100% { box-shadow: inset 0 0 0 4px #e3a51b, inset 0 0 10px rgba(227, 165, 27, .3); }
+  50% { box-shadow: inset 0 0 0 5px #ffc233, inset 0 0 22px rgba(255, 194, 51, .65); }
+}
+.chip.mark-share { background: #e3a51b; color: #1b1f24; font-weight: 800; }
+/* 远离：紫框；和别人的标记挤在同一个区（会被炸好几次）时框和标签变成警告的样子 */
+.unit-wrap.spread .unit { box-shadow: inset 0 0 0 4px #8a5cf6, inset 0 0 16px rgba(138, 92, 246, .4); }
+.unit-wrap.spread.doom-now .unit { animation: spreadPulse .9s ease-in-out infinite; }
+@keyframes spreadPulse {
+  0%, 100% { box-shadow: inset 0 0 0 4px #8a5cf6, inset 0 0 10px rgba(138, 92, 246, .3); }
+  50% { box-shadow: inset 0 0 0 5px #a985ff, inset 0 0 22px rgba(169, 133, 255, .65); }
+}
+.chip.mark-spread { background: #8a5cf6; color: #fff; font-weight: 800; }
+.unit-wrap.spread-clash .chip.mark-spread { background: #d62f2f; }
+.chip.cast-spread { background: #1b1f24; color: #b99bff; font-weight: 800; }
+.chip.cast-tower { background: #1b1f24; color: #4fd1c5; font-weight: 800; }
+/* 踩塔：区域内圈青色粗框 + 右上角的牌子；人数不够时牌子变红，落下那一刻边框闪 */
+.g-zone.tower { box-shadow: inset 0 0 0 5px #1fa89a, inset 0 0 40px rgba(31, 168, 154, .18); }
+.g-zone.tower.tower-short { box-shadow: inset 0 0 0 5px #d62f2f, inset 0 0 40px rgba(214, 47, 47, .15); }
+.g-zone.tower.tower-ready { animation: towerPulse .9s ease-in-out infinite alternate; }
+@keyframes towerPulse { from { filter: none; } to { filter: drop-shadow(0 0 10px rgba(31, 168, 154, .8)); } }
+.ztower { position: absolute; top: 8px; right: 10px; z-index: 3; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; pointer-events: auto; }
+.ztower span { padding: 2px 8px; font-size: 12px; font-weight: 800; color: #fff; background: #1fa89a; white-space: nowrap; }
+.ztower span.short { background: #d62f2f; }
+@media (prefers-reduced-motion: reduce) { .g-zone.tower.tower-ready { animation: none; } }
+.chip.cast-share { background: #1b1f24; color: #ffc233; font-weight: 800; }
+@media (prefers-reduced-motion: reduce) { .unit-wrap.doom-now .unit, .unit-wrap.shared.doom-now .unit, .unit-wrap.spread.doom-now .unit { animation: none; } }
+.exec-edit { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; padding: 6px 8px 10px; font-size: 12px; border-bottom: 1px solid rgba(255,255,255,.08); }
+.exec-edit[hidden] { display: none; }
+.exec-edit label { display: inline-flex; align-items: center; gap: 4px; }
+.exec-edit input[type=number] { width: 48px; }
+.exec-edit input[type=text] { width: 72px; }
+.exec-edit input, .exec-edit select { font: inherit; padding: 2px 4px; }

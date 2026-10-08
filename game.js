@@ -158,6 +158,9 @@
       atk: Math.round(Number(atk) || 0),
       weapon: !!u.weaponOf,
       dur: weaponDurSnap(u),
+      // 首领机制（boss-mechanics.js）：身上的死刑标记 / 首领正在倒数的死刑
+      marks: typeof bossMarksOn === "function" ? bossMarksOn(u) : [],
+      casts: typeof bossCastsBy === "function" ? bossCastsBy(u) : [],
       overkill: !u.isPlayer && (u.dead || u._removed) ? Math.max(0, Math.round(Number(u.overkill) || 0)) : 0,
       killBig: !u.isPlayer && !!u.killBig
     };
@@ -190,7 +193,10 @@
       try { threats = (typeof zoneThreatsIn === "function" ? zoneThreatsIn(z) : []); } catch (e) {}
       let wind = "";
       if (state.weather === "sand") { try { wind = sandWindLabel(sandWind(z, state.zoneMode, state.sandDir)); } catch (e) {} }
-      zones[z] = { cls, tags, threats, wind };
+      // 首领机制·踩塔：标在这个区上的塔
+      let towers = [];
+      try { towers = typeof bossZoneMarks === "function" ? bossZoneMarks(z) : []; } catch (e) {}
+      zones[z] = { cls, tags, threats, wind, towers };
     }
     let weatherText = WEATHER_NAME[state.weather] || state.weather || "常态";
     if (state.weather === "phase") { try { weatherText += "·" + phaseWeatherName(state.phaseStep); } catch (e) {} }
@@ -284,6 +290,18 @@
           `<span class="${t.ready ? "rd" : ""}">${esc(t.label)}${t.from ? `<i>${esc(t.from)}</i>` : ""}</span>`
         ).join("");
       }
+    });
+    // 踩塔：区域边框 + 角上一块牌子「踩塔 N · 1/1 人」（人数不够时变红）
+    document.querySelectorAll(".g-zone").forEach(z => {
+      const tw = (env.zones[z.dataset.num] || {}).towers || [];
+      z.classList.toggle("tower", tw.length > 0);
+      z.classList.toggle("tower-ready", tw.some(t => t.left <= 0));
+      z.classList.toggle("tower-short", tw.some(t => t.have < t.need));
+      let tb = z.querySelector(".ztower");
+      if (!tw.length) { if (tb) tb.remove(); return; }
+      if (!tb) { tb = el("div", "ztower"); z.appendChild(tb); }
+      const when = (t) => t.left > 0 ? `${t.left} 回合后` : `这回合${t.phase === "player" ? "我方" : "敌人"}回合开始时`;
+      tb.innerHTML = tw.map(t => `<span class="${t.have < t.need ? "short" : "ok"}" title="${esc(`${t.by} 的${t.name}：${when(t)}落下${t.delayed ? "（首领失衡，会推迟一回合）" : ""}。至少 ${t.need} 人站在这个区里踩住${t.soak > 0 ? `，每人挨 ${t.soak}` : ""}；没人踩住${t.fail != null ? (t.fail > 0 ? `，我方全员各挨 ${t.fail}` : "，我方全员挨巨额伤害") : "，会触发严重惩罚"}。不能格挡。`)}">${esc(t.name)} ${t.left > 0 ? t.left : "!"} · ${t.have}/${t.need} 人</span>`).join("");
     });
     paintGaps();
   }
@@ -676,7 +694,16 @@
     // 高能和其他状态放在同一行、同一种样式（之前放在行动点那一行，字体大小不一样）
     const highChip = (s.highEnergy > 0 || (s.status && /高能/.test(s.status)))
       ? `<span class="chip">高能${s.highEnergy > 0 ? " " + s.highEnergy : ""}</span>` : "";
-    q(".u-status").innerHTML = highChip + (s.status
+    // 首领机制（死刑 / 分担）的标记：被标记的人身上一个倒计时，首领身上写着标了谁
+    const when = (x) => x.left > 0 ? `${x.left} 回合后` : `这回合${x.phase === "player" ? "我方" : "敌人"}回合开始时`;
+    const markTip = (x) => x.type === "spread"
+      ? `${x.by} 的${x.name}：${when(x)}在这个人所在的区爆炸，${x.blast > 0 ? `每次对同区每个友方 ${x.blast}` : "每次波及同区每个友方"}，不能格挡。同一个区有几个标记就炸几次——现在这里有 ${x.stack} 个标记${x.stack > 1 ? `，每人会挨 ${x.stack} 次，快分开站` : "，没有和别人重叠"}。${x.delayed ? "（首领失衡，会推迟一回合）" : ""}`
+      : x.type === "share"
+      ? `${x.by} 的${x.name}：${when(x)}落下${x.delayed ? "（首领失衡，会推迟一回合）" : ""}。${x.pool > 0 ? `伤害池 ${x.pool}，` : ""}由这个人所在区的所有友方平均分担，不能格挡——大家聚过来一起扛（现在同区 ${x.group} 人${x.pool > 0 ? `，每人约 ${Math.ceil(x.pool / Math.max(1, x.group))}` : ""}）。`
+      : `${x.by} 的${x.name}：${when(x)}落下${x.delayed ? "（首领失衡，会推迟一回合）" : ""}。每一段都可以协助格挡。`;
+    const execChip = (s.marks || []).map(x => `<span class="chip mark-${x.type}" title="${esc(markTip(x))}">${esc(x.name)} ${x.left > 0 ? x.left : "!"}${x.type === "share" ? ` · ${x.group}人` : x.type === "spread" ? ` · ×${x.stack}` : ""}</span>`).join("") +
+      (s.casts || []).map(x => `<span class="chip cast-${x.type}" title="${esc(`${x.name} → ${x.target || "（无目标）"}：${when(x)}落下`)}">${esc(x.name)}→${esc(x.target || "?")} ${x.left > 0 ? x.left : "!"}</span>`).join("");
+    q(".u-status").innerHTML = execChip + highChip + (s.status
       ? s.status.split(" · ").filter(t => t && t !== "无状态" && !/^高能/.test(t)).map(t => `<span class="chip">${esc(t)}</span>`).join("")
       : "");
     // 有耐久条时，资源文字里的「耐久 N」就不重复写了
@@ -685,6 +712,13 @@
     q(".u-res").style.display = resText ? "" : "none";
 
     c.wrap.classList.toggle("stunned", s.stunned && !s.dead);
+    const ex = (s.marks || []).filter(x => x.type === "execution"), sh = (s.marks || []).filter(x => x.type === "share");
+    c.wrap.classList.toggle("doomed", ex.length > 0 && !s.dead);
+    const sp = (s.marks || []).filter(x => x.type === "spread");
+    c.wrap.classList.toggle("shared", sh.length > 0 && !ex.length && !s.dead);
+    c.wrap.classList.toggle("spread", sp.length > 0 && !ex.length && !sh.length && !s.dead);
+    c.wrap.classList.toggle("spread-clash", sp.some(x => x.stack > 1) && !s.dead);
+    c.wrap.classList.toggle("doom-now", (s.marks || []).some(x => x.left <= 0) && !s.dead);
     c.wrap.classList.toggle("dying", s.dying && !s.dead);
     c.wrap.classList.toggle("dead", s.dead && !s.isPlayer);
     c.wrap.classList.toggle("dead-slow", s.dead && !s.isPlayer && s.killBig);   // 一记重击打死：多停一会儿再慢慢消失
@@ -1395,13 +1429,16 @@
   }
 
   function promptBlock(job, attacker, target, helpers) {
-    if (hotseat()) return HotseatGame.requestAsk("block", `${attacker.name} 攻击 ${target.name} · 协助格挡`,
+    if (hotseat()) return HotseatGame.requestAsk("block", `${job.opt && job.opt.flags && job.opt.flags.execution ? `【死刑 ${job.opt.flags.execHit}/${job.opt.flags.execHits}】` : ""}${attacker.name} 攻击 ${target.name} · 协助格挡`,
       helpers.map(h => ({ helper: h.id, label: h.name, sub: `格挡成功率 ${finalBlockChance(h, attacker, target)}%` })),
       () => eligibleBlockers(target, job), job).then(answer => answer.unitId);
     const noBlock = () => showPreview(previewOf(() => finishBlock(null)), `${attacker.name} → ${target.name}（不格挡）`);
     const again = job.tried && job.tried.length;
+    // 首领机制·死刑：标题写明是死刑的第几段（每一段都要单独挡）
+    const fl = (job.opt && job.opt.flags) || {};
+    const what = fl.execution ? `【死刑 ${fl.execHit}/${fl.execHits}】${attacker.name} 处刑 ${target.name}` : `${attacker.name} 攻击 ${target.name}`;
     return openChoice(
-      again ? `${attacker.name} 攻击 ${target.name} · 前面的格挡失败了` : `${attacker.name} 攻击 ${target.name}`,
+      again ? `${what} · 前面的格挡失败了` : what,
       again ? "还有队友可以接着协助格挡；都不挡，这一击照常落下。闪白部分是不格挡时会受到的伤害。"
         : "同区有附赠行动的队友可以协助格挡。成功免伤，但仍扣架势（最少留 1）；失败了其他队友还能接着挡。闪白部分是不格挡时会受到的伤害。",
       helpers.map(h => ({
@@ -2138,6 +2175,8 @@
     try {
       const endKey = `end:${state.turnNo}`;
       await perform({ type: hotseat() ? "battle.endPlayerTurn" : "endTurn", seed: endKey }, {}, hotseat());
+      await resolveQueues();   // 敌人回合开始时落下的死刑：每一段先问协助格挡
+      if (checkEnd()) return;
       refreshTop();
       phaseCard("敌人回合", "enemy");
       await wait(750);
@@ -3414,8 +3453,145 @@
         refreshAll();
         renderFieldSheet();
       };
+      // 首领机制·死刑（boss-mechanics.js）：在这里给任意敌人挂上试用
+      const cur = (u.mechanics || []).find(m => m.type === "execution");
+      const ex = el("button", "g-btn" + (cur ? " on" : ""), cur ? "死刑 ✓" : "死刑…");
+      ex.title = "给这个敌人加上「死刑」机制：标记我方血量上限最高的单位，倒计时到了在回合开始时打一次（可以分几段，每段都能协助格挡）";
+      row.appendChild(ex);
       row.appendChild(rm);
       elist.appendChild(row);
+      const ed = el("div", "exec-edit");
+      ed.hidden = true;
+      ed.innerHTML = `<label>落下<select data-x="phase"><option value="enemy">敌人回合开始</option><option value="player">我方回合开始</option></select></label>
+        <label>标记后<input data-x="turns" type="number" min="1" max="20" value="3"> 回合</label>
+        <label title="每一段的倍率（× 这个敌人的 atk），用逗号隔开：3 = 一段 3 倍；2,1,1 = 三段">每段倍率<input data-x="hits" type="text" value="3"></label>
+        <label>落下后<select data-x="then"><option value="repeat">重新标记</option><option value="once">只放一次</option></select></label>
+        <button class="g-btn" data-x="go">${cur ? "改" : "加上"}</button>${cur ? '<button class="g-btn" data-x="off">去掉</button>' : ""}`;
+      elist.appendChild(ed);
+      const f = (k) => ed.querySelector(`[data-x="${k}"]`);
+      if (cur) {
+        f("phase").value = cur.phase || "enemy"; f("turns").value = cur.turns || 3;
+        f("hits").value = (cur.hits || []).map(h => h.mult).join(","); f("then").value = cur.then || "repeat";
+      }
+      ex.onclick = () => { ed.hidden = !ed.hidden; };
+      const apply = (cfg) => {
+        let r;
+        try { r = dispatch({ type: "battle.panel", action: "setExecution", actor: u.id, cfg }); } catch (e) { flashHint(e.message); return; }
+        ((r && r.notes) || []).forEach(t => appendLog(t));
+        setView(snapAll(), false);
+        refreshAll();
+        renderFieldSheet();
+      };
+      f("go").onclick = () => apply({
+        phase: f("phase").value, then: f("then").value,
+        turns: Math.max(1, Math.min(20, Math.floor(Number(f("turns").value) || 3))),
+        hits: String(f("hits").value).split(/[,，\s]+/).filter(Boolean).map(x => ({ mult: Number(x) }))
+      });
+      if (f("off")) f("off").onclick = () => apply(null);
+      // 首领机制·分担
+      const curS = (u.mechanics || []).find(m => m.type === "share");
+      const sb = el("button", "g-btn" + (curS ? " on" : ""), curS ? "分担 ✓" : "分担…");
+      sb.title = "给这个敌人加上「分担」机制：随机标记一名我方单位，倒计时到了对他所在区造成一次伤害，由同区的友方平均分担，不能格挡";
+      row.insertBefore(sb, rm);
+      const se = el("div", "exec-edit");
+      se.hidden = true;
+      se.innerHTML = `<label>落下<select data-x="phase"><option value="enemy">敌人回合开始</option><option value="player">我方回合开始</option></select></label>
+        <label>标记后<input data-x="turns" type="number" min="1" max="20" value="3"> 回合</label>
+        <label title="伤害池 = 这个倍率 × 这个敌人的 atk，同区的友方平均分担">伤害池<input data-x="mult" type="number" min="0.5" max="50" step="0.5" value="4"> × atk</label>
+        <label>落下后<select data-x="then"><option value="repeat">重新标记</option><option value="once">只放一次</option></select></label>
+        <button class="g-btn" data-x="go">${curS ? "改" : "加上"}</button>${curS ? '<button class="g-btn" data-x="off">去掉</button>' : ""}`;
+      elist.appendChild(se);
+      const g = (k) => se.querySelector(`[data-x="${k}"]`);
+      if (curS) {
+        g("phase").value = curS.phase || "enemy"; g("turns").value = curS.turns || 3;
+        g("mult").value = (curS.pool && curS.pool.mult) || 4; g("then").value = curS.then || "repeat";
+      }
+      sb.onclick = () => { se.hidden = !se.hidden; };
+      const applyS = (cfg) => {
+        let r;
+        try { r = dispatch({ type: "battle.panel", action: "setShare", actor: u.id, cfg }); } catch (e) { flashHint(e.message); return; }
+        ((r && r.notes) || []).forEach(t => appendLog(t));
+        setView(snapAll(), false);
+        refreshAll();
+        renderFieldSheet();
+      };
+      g("go").onclick = () => applyS({
+        phase: g("phase").value, then: g("then").value,
+        turns: Math.max(1, Math.min(20, Math.floor(Number(g("turns").value) || 3))),
+        mult: Math.max(0.5, Math.min(50, Number(g("mult").value) || 4))
+      });
+      if (g("off")) g("off").onclick = () => applyS(null);
+      // 首领机制·远离
+      const curP = (u.mechanics || []).find(m => m.type === "spread");
+      const pb = el("button", "g-btn" + (curP ? " on" : ""), curP ? "远离 ✓" : "远离…");
+      pb.title = "给这个敌人加上「远离」机制：标记我方全员，倒计时到了每人在自己的区爆炸一次，同区有几个标记就炸几次，每次每个人都挨";
+      row.insertBefore(pb, rm);
+      const pe = el("div", "exec-edit");
+      pe.hidden = true;
+      pe.innerHTML = `<label>落下<select data-x="phase"><option value="enemy">敌人回合开始</option><option value="player">我方回合开始</option></select></label>
+        <label>标记后<input data-x="turns" type="number" min="1" max="20" value="3"> 回合</label>
+        <label title="每一次爆炸对同区每个友方的伤害 = 这个倍率 × 这个敌人的 atk">每次爆炸<input data-x="mult" type="number" min="0.5" max="20" step="0.5" value="1"> × atk</label>
+        <label>落下后<select data-x="then"><option value="repeat">重新标记</option><option value="once">只放一次</option></select></label>
+        <button class="g-btn" data-x="go">${curP ? "改" : "加上"}</button>${curP ? '<button class="g-btn" data-x="off">去掉</button>' : ""}`;
+      elist.appendChild(pe);
+      const q2 = (k) => pe.querySelector(`[data-x="${k}"]`);
+      if (curP) {
+        q2("phase").value = curP.phase || "enemy"; q2("turns").value = curP.turns || 3;
+        q2("mult").value = (curP.blast && curP.blast.mult) || 1; q2("then").value = curP.then || "repeat";
+      }
+      pb.onclick = () => { pe.hidden = !pe.hidden; };
+      const applyP = (cfg) => {
+        let r;
+        try { r = dispatch({ type: "battle.panel", action: "setSpread", actor: u.id, cfg }); } catch (e) { flashHint(e.message); return; }
+        ((r && r.notes) || []).forEach(t => appendLog(t));
+        setView(snapAll(), false);
+        refreshAll();
+        renderFieldSheet();
+      };
+      q2("go").onclick = () => applyP({
+        phase: q2("phase").value, then: q2("then").value,
+        turns: Math.max(1, Math.min(20, Math.floor(Number(q2("turns").value) || 3))),
+        mult: Math.max(0.5, Math.min(20, Number(q2("mult").value) || 1))
+      });
+      if (q2("off")) q2("off").onclick = () => applyP(null);
+      // 首领机制·踩塔
+      const curT = (u.mechanics || []).find(m => m.type === "tower");
+      const tbn = el("button", "g-btn" + (curT ? " on" : ""), curT ? "踩塔 ✓" : "踩塔…");
+      tbn.title = "给这个敌人加上「踩塔」机制：随机标记区域，倒计时到了需要有人站在里面踩住（挨一点伤害），没人踩则全员挨巨额伤害";
+      row.insertBefore(tbn, rm);
+      const te = el("div", "exec-edit");
+      te.hidden = true;
+      te.innerHTML = `<label>落下<select data-x="phase"><option value="enemy">敌人回合开始</option><option value="player">我方回合开始</option></select></label>
+        <label>标记后<input data-x="turns" type="number" min="1" max="20" value="3"> 回合</label>
+        <label>塔数<input data-x="count" type="number" min="1" max="5" value="1"></label>
+        <label>每座至少<input data-x="need" type="number" min="1" max="4" value="1"> 人</label>
+        <label title="踩塔的人每人挨的伤害 = 这个倍率 × 这个敌人的 atk">踩塔伤害<input data-x="soak" type="number" min="0" max="20" step="0.5" value="0.5"> × atk</label>
+        <label title="没人踩住时我方全员每人挨的伤害 = 这个倍率 × 这个敌人的 atk">没人踩<input data-x="fail" type="number" min="0.5" max="50" step="0.5" value="4"> × atk</label>
+        <label>落下后<select data-x="then"><option value="repeat">重新标记</option><option value="once">只放一次</option></select></label>
+        <button class="g-btn" data-x="go">${curT ? "改" : "加上"}</button>${curT ? '<button class="g-btn" data-x="off">去掉</button>' : ""}`;
+      elist.appendChild(te);
+      const q3 = (k) => te.querySelector(`[data-x="${k}"]`);
+      if (curT) {
+        q3("phase").value = curT.phase || "enemy"; q3("turns").value = curT.turns || 3; q3("count").value = curT.count || 1; q3("need").value = curT.need || 1;
+        q3("soak").value = (curT.soak && curT.soak.mult) != null ? curT.soak.mult : 0.5; q3("fail").value = (curT.fail && curT.fail.mult) || 4; q3("then").value = curT.then || "repeat";
+      }
+      tbn.onclick = () => { te.hidden = !te.hidden; };
+      const applyT = (cfg) => {
+        let r;
+        try { r = dispatch({ type: "battle.panel", action: "setTower", actor: u.id, cfg }); } catch (e) { flashHint(e.message); return; }
+        ((r && r.notes) || []).forEach(t => appendLog(t));
+        setView(snapAll(), false);
+        refreshAll();
+        renderFieldSheet();
+      };
+      const int = (k, lo, hi, d) => Math.max(lo, Math.min(hi, Math.floor(Number(q3(k).value) || d)));
+      q3("go").onclick = () => applyT({
+        phase: q3("phase").value, then: q3("then").value,
+        turns: int("turns", 1, 20, 3), count: int("count", 1, 5, 1), need: int("need", 1, 4, 1),
+        soak: Math.max(0, Math.min(20, Number(q3("soak").value) || 0)),
+        fail: Math.max(0.5, Math.min(50, Number(q3("fail").value) || 4))
+      });
+      if (q3("off")) q3("off").onclick = () => applyT(null);
     });
     const sel = $("g-enemy-sel");
     if (!sel.options.length) {
@@ -3730,6 +3906,18 @@
       dispatch({ type: "battle.panel", action: "setWeather", value: $("g-weather-sel").value || "none", persist: false });
       applyEnv(snapEnv());
       addLogPhase("天气改为 " + (WEATHER_NAME[state.weather] || state.weather));
+    };
+    // 角鳞星地图：跑团看队伍的位置，单局看这一幕的区域，战斗原型看这场遭遇的区域
+    $("g-map").onclick = () => {
+      if (!window.WorldMap) return;
+      let o = null;
+      if (typeof TRPG !== "undefined" && TRPG.active && window.TrpgFlow && TrpgFlow.mapOptions) o = TrpgFlow.mapOptions();
+      else if (typeof Rogue !== "undefined" && Rogue.inRunMode && Rogue.inRunMode() && window.RunFlow && RunFlow.mapOptions) o = RunFlow.mapOptions();
+      if (!o) {
+        const reg = G.lastEncounter && G.lastEncounter.region;
+        o = { here: reg || null, sub: reg ? `战斗原型 · 这场遭遇在${reg}` : "战斗原型" };
+      }
+      WorldMap.open(o);
     };
     $("g-restart").onclick = () => { if (G.depth === 0) setupBattle(Number($("g-level").value) || 1, G.lastEncounter || null); };
     $("g-again").onclick = () => setupBattle(Number($("g-level").value) || 1, G.lastEncounter || null);
