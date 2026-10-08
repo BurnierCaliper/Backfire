@@ -100,6 +100,7 @@
       element: spec.element || "physical",
       main: !!spec.main,           // 攻击动作本身的那一下（不是高压场地等连带伤害）
       adv: !!spec.adv,             // 玩家这一下触发了属性克制
+      dis: !!spec.dis,             // 玩家这一下被克制表减伤（劣势）
       targetId: spec.targetId || null,
       tag: state.popTag || null,   // "boom"：高能自爆的余波，数字放大、停留更久
       snap: G.sim ? null : snapAll()
@@ -447,6 +448,7 @@
       const pop = dmgPops.find(e => e.main) || dmgPops[0];
       p.element = pop ? pop.element : "physical";
       p.adv = dmgPops.some(e => e.adv);   // 克制：预览写「克制」，要打掉的血条变浅金
+      p.dis = !p.adv && dmgPops.some(e => e.dis);   // 劣势：预览写「劣势」，伤害数字和要打掉的血条变灰
       p.changed = p.dmgHi > 0 || p.healHi > 0 || p.brHi > 0 || p.stunSure || p.stunMaybe || p.killSure || p.killMaybe ||
         p.zoneTo != null || p.newStatus.length > 0 || p.shpLoss > 0 || p.resChanged;
       if (p.changed || p.resChanged) meaningful = true;
@@ -1482,7 +1484,7 @@
     cards.forEach(c => {
       c.segs.forEach(sg => { if (!sg) return; sg.sure.style.width = sg.maybe.style.width = sg.heal.style.width = "0"; });
       c.pips.forEach(p => p.classList.remove("pv", "maybe"));
-      c.wrap.classList.remove("pv-stun", "maybe", "ice", "pv-adv");
+      c.wrap.classList.remove("pv-stun", "maybe", "ice", "pv-adv", "pv-dis");
       c.tag.classList.remove("show");
     });
     if (!G.arm) idleBox();
@@ -1515,6 +1517,7 @@
         else if (i >= p.defAfterLo && i < p.defAfterHi) pip.classList.add("pv", "maybe");
       });
       if (p.adv && p.dmgHi > 0) c.wrap.classList.add("pv-adv");
+      if (p.dis && p.dmgHi > 0) c.wrap.classList.add("pv-dis");
       if (p.stunSure || p.stunMaybe) {
         c.wrap.classList.add("pv-stun");
         if (p.stunMaybe) c.wrap.classList.add("maybe");
@@ -1522,7 +1525,8 @@
       }
       let h = "";
       if (p.dmgHi > 0 && p.adv) h += `<span class="adv">克制</span>`;
-      if (p.dmgHi > 0) h += `<span class="dmg e-${p.element}">${window.Icons ? Icons.element(p.element) : ""}${p.dmgLo === p.dmgHi ? p.dmgHi : p.dmgLo + "–" + p.dmgHi}</span>`;
+      if (p.dmgHi > 0 && p.dis) h += `<span class="disadv">劣势</span>`;
+      if (p.dmgHi > 0) h += `<span class="dmg e-${p.element}${p.dis ? " dis" : ""}">${window.Icons ? Icons.element(p.element) : ""}${p.dmgLo === p.dmgHi ? p.dmgHi : p.dmgLo + "–" + p.dmgHi}</span>`;
       if (p.healHi > 0) h += `<span class="heal">+${p.healHi}</span>`;
       if (p.shpLoss > 0) h += `<span class="note">坚毅 −${p.shpLoss}</span>`;
       if (p.brHi > 0) h += `<span class="brk">击破 ${p.brLo === p.brHi ? p.brHi : p.brLo + "–" + p.brHi}</span>`;

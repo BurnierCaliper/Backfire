@@ -2108,3 +2108,13 @@ body:not([data-screen="battle"]) .g-rank { display: none !important; }
   80% { translate: 2px -1px; }
 }
 @media (prefers-reduced-motion: reduce) { .g-field.adv-shake { animation: none; } }
+
+/* 劣势（被克制表减伤）：预览写「劣势」，伤害数字和要打掉的血条变灰 */
+.pvtag .disadv {
+  align-self: center; padding: 1px 6px 0; font-size: 13px; font-weight: 900; letter-spacing: .12em;
+  color: #d6d0c8; background: #4a4642; box-shadow: inset 0 0 0 1px #6d6862;
+}
+.pvtag .dmg.dis { color: #9a948c !important; }
+.pvtag .dmg.dis svg, .pvtag .dmg.dis .eicon { filter: grayscale(1); opacity: .75; }
+.unit-wrap.pv-dis .seg .pv.sure { background: #a8a39c; }
+.unit-wrap.pv-dis .seg .pv.maybe { background: rgba(168, 163, 156, .55); }

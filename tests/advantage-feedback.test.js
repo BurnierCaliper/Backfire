@@ -47,3 +47,15 @@ test("画面：预览读 adv 写「克制」、加 pv-adv（浅金血条）；�
   assert.match(css, /\.unit-wrap\.pv-adv \.seg \.pv\.sure \{ background: #ffe39a/);
   assert.match(css, /\.g-field\.adv-shake \{ animation: advShake/);
 });
+
+test("劣势：火打装甲层（−25%）弹字标 dis；克制、0% 都不标", () => {
+  assert.equal(hiakiHits("armor")[0].dis, true);
+  assert.equal(hiakiHits("flesh")[0].dis, false);
+  assert.equal(hiakiHits("shield")[0].dis, false);
+  const g = fs.readFileSync(path.join(H.ROOT, "game.js"), "utf8");
+  const css = fs.readFileSync(path.join(H.ROOT, "game.css"), "utf8");
+  assert.match(g, /<span class="disadv">劣势<\/span>/);
+  assert.match(g, /p\.dis = !p\.adv && dmgPops\.some\(e => e\.dis\)/);
+  assert.match(css, /\.pvtag \.dmg\.dis \{ color: #9a948c/);
+  assert.match(css, /\.unit-wrap\.pv-dis \.seg \.pv\.sure \{ background: #a8a39c/);
+});
