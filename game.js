@@ -423,6 +423,12 @@
       const d1 = hb - h1, d2 = hb - h2;
       p.dmgLo = Math.max(0, Math.min(d1, d2));
       p.dmgHi = Math.max(0, Math.max(d1, d2));
+      // 预览数字写「这一下打出去的伤害」，不按目标剩下的血量封顶（剩 8 血吃 15 伤害就写 15）：
+      // 用伤害弹字的数值（规则层的 intended，含溢出）加起来；血条上闪的那段仍然是实际会掉的血
+      const popDmg = (tape) => (tape || []).filter(e => e.type === "pop" && e.unitId === id && e.kind === "dmg")
+        .reduce((sum, e) => sum + Math.max(0, Number(e.value) || 0), 0);
+      const q1 = popDmg(lo.tape), q2 = popDmg(hi.tape);
+      if (q1 > 0 || q2 > 0) { p.dmgLo = Math.min(q1, q2); p.dmgHi = Math.max(q1, q2); }
       p.healHi = Math.max(0, -Math.min(d1, d2));
       const shpLoss = Math.max(bs.shp - s1.shp, bs.shp - s2.shp, 0);
       p.shpLoss = bs.upOnShp || bs.dying ? shpLoss : 0;
@@ -841,7 +847,7 @@
       d.style.top = (p.y + 30) + "px";
     } else {
       d.style.left = (p.x + (n % 2 ? 22 : -22) * Math.min(n, 3) / 1.5) + "px";
-      d.style.top = (p.y - n * 16) + "px";
+      d.style.top = (p.y - n * 16 - (opts.lift || 0)) + "px";   // lift：往上抬（头顶的字）
     }
     if (opts.size) d.style.fontSize = opts.size + "px";
     d.style.setProperty("--dur", (opts.dur || 0.9) + "s");
@@ -1101,6 +1107,10 @@
           if (window.Sfx && !G.sim) Sfx.parry();
           await wait(420);
           if (e.targetId) await lunge(e.unitId, e.targetId);
+        } else if (e.kind === "bullet") {
+          // 龙哥 / 小朋友消耗子弹：头顶跳出红弹 / 蓝弹
+          popup(e.unitId, e.text || (e.element === "fire" ? "红弹" : "蓝弹"), "bullet " + (e.element === "fire" ? "b-red" : "b-blue"), { lift: 64, dur: 1.5 });
+          await wait(160);
         } else if (e.kind === "fxword") {
           // 攻击效果大字：同一次行动里同一个目标的同一个效果只打一次（多段攻击不重复）
           const key = e.unitId + "|" + e.text;

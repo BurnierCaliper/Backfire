@@ -4754,6 +4754,8 @@ function longgeTakeBullet(u, lines) {
   r.seen.shift();
   longgeSyncKnown(r);
   lines.push(`消耗 1 发${LONGGE_AMMO[c].name}（剩 ${r.ammo.length} 发）。`);
+  // 画面：开枪 / 出拳的人（龙哥或小朋友）头顶跳出红 / 蓝字，告诉玩家这一发是什么颜色
+  if (typeof spawnPopup === "function" && u) spawnPopup(u, { kind: "bullet", text: LONGGE_AMMO[c].name, element: LONGGE_AMMO[c].element });
   if (!r.ammo.length && r.trigger) { r.trigger = false; lines.push("子弹打光了，扳机锁上。"); }
   return c;
 }
@@ -5986,13 +5988,17 @@ function dealTo(attacker, target, opt) {
   if (attacker && target && target.flying && opt.flags.action && !opt.flags.aoe && !opt.flags.flyFree && !isReaction) {
     const d = zoneDist(Number(attacker.zone), Number(target.zone), Number(state.zoneMode));
     const minion = !attacker.isPlayer && (typeof enemyRankOf === "function") && enemyRankOf(attacker) === "minion";
-    if (d === 0 && !attacker.flying && !minion) {
+    // 一次攻击行动只付一次：同一个技能里分几下打同一个飞行目标（连续拳、多段普攻）不重复收
+    const flyKey = attacker.id + ">" + target.id;
+    const paid = !!(state.flyPaid && state.flyPaid[flyKey]);
+    if (d === 0 && !attacker.flying && !minion && !paid) {
       if ((Number(attacker.bonus) || 0) < 1) {
         const msg = `${target.name} 在飞行，近程攻击需要额外 1 附赠行动，${attacker.name} 附赠行动不足。`;
         appendLog(msg);
         return { res: { ok: false, total: 0, breakDealt: 0, log: [msg], perHit: [] }, extra: [msg] };
       }
       attacker.bonus = (Number(attacker.bonus) || 0) - 1;
+      if (state.flyPaid) state.flyPaid[flyKey] = true;
       scoreSpend(attacker, 0, 1);
       appendLog(`${attacker.name} 额外消耗 1 附赠行动以近程攻击飞行中的 ${target.name}。`);
     }
@@ -8580,6 +8586,14 @@ function skillTargetError(a, id, t) {
     if (t1 && (zoneOf(t1) == null || zoneDist(a.zone, zoneOf(t1), state.zoneMode) !== 0)) return "第一个目标要在同区";
     if (t2 && (zoneOf(t2) == null || zoneDist(a.zone, zoneOf(t2), state.zoneMode) !== 1)) return "第二个目标要在距离 1";
   }
+  // 龙哥 / 小朋友的近程技能打飞行目标：要多付 1 附赠行动，付不起就先拦下（免得子弹白白消耗）
+  if (["longge_aa", "longge_chill", "longge_spit", "xiaoxiao_punch", "xiaoxiao_combo"].includes(id) && !isStructureToken(state.targetId)) {
+    const fl = state.skillFlow;
+    const tgt = (fl && fl.picks && fl.picks.target) ? unitById(fl.picks.target) : t;
+    const gun = (id === "longge_aa" || id === "longge_chill") && longgeMode(a) === "gun";
+    const needBonus = (skillCost(id).bonus || 0) + 1;
+    if (tgt && tgt.flying && !a.flying && !gun && Number(tgt.zone) === Number(a.zone) && (Number(a.bonus) || 0) < needBonus) return `${tgt.name} 在飞行，近程攻击需要额外 1 附赠行动`;
+  }
   if ((id === "longge_aa" || id === "longge_chill") && !isStructureToken(state.targetId)) {
     const fl = state.skillFlow;
     const tgt = (fl && fl.picks && fl.picks.target) ? unitById(fl.picks.target) : t;
@@ -8609,6 +8623,7 @@ function runSkill(id, optRun) {
     lines = withLogSink(() => {
       state.aoePulse = {};            // 只算这一次行动的范围攻击
       state.actionKills = [];         // 这一次行动里打死的敌人（动作结束前还能吃到后面的攻击、算溢出）
+      state.flyPaid = {};             // 这一次行动里已经为「近程打飞行」付过附赠行动的（攻击者 > 目标）
       const scoreBefore = state.battleScore ? state.battleScore.total : 0;
       // 启动引擎+：引擎已启动时使用带有启动引擎效果的技能，结算后获得 1 燃油
       const fuelGain = FUEL_SKILLS.includes(id) && xiaFuelOn() && ((findKit("xia", state.units) || {}).resources || {}).engine;

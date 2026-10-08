@@ -2118,3 +2118,12 @@ body:not([data-screen="battle"]) .g-rank { display: none !important; }
 .pvtag .dmg.dis svg, .pvtag .dmg.dis .eicon { filter: grayscale(1); opacity: .75; }
 .unit-wrap.pv-dis .seg .pv.sure { background: #a8a39c; }
 .unit-wrap.pv-dis .seg .pv.maybe { background: rgba(168, 163, 156, .55); }
+
+/* 龙哥 / 小朋友消耗子弹：头顶跳出的红弹 / 蓝弹 */
+.pop.bullet {
+  font-family: var(--ui); font-size: 22px; font-weight: 900; letter-spacing: .08em;
+  padding: 1px 10px 0; color: #fff; text-shadow: 0 1px 0 rgba(0, 0, 0, .45);
+  border: 2px solid #fff; border-radius: 999px; box-shadow: 0 3px 10px rgba(20, 30, 40, .45);
+}
+.pop.bullet.b-red { background: #e5302a; }
+.pop.bullet.b-blue { background: #2f8be6; }
