@@ -377,7 +377,7 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
     - 濒死、倒下、击倒有倒地声；
     - 开战和每个我方回合开始有提示音，检定掷骰有摇骰声，单局里出现升级选择有升级音。
   - 战斗胜利、战斗失败、确认三类作者没选，不出声。
-  - **调音**：每个录音的音量、音高 / 速度、截取起止、淡出、延迟、随机音高都在 `sfx.js` 的 `SFX_TUNE` 里。`sfx-tuner.html` 可以拖推子试听，调好后复制参数。
+  - **调音**：每个录音的音量、音高 / 速度、截取起止、淡出、延迟、随机音高都在 `sfx.js` 的 `SFX_TUNE` 里。`sfx-tuner.html` 可以拖推子试听，调好后复制参数。作者已经按自己的调音结果改过一轮，当前参数就是作者调好的。
   - **素材来源**（全部 CC0，不用署名）：
     - [Kenney](https://kenney.nl/assets)：Impact、Interface、UI、Sci-Fi、Digital、RPG、Casino、Music Jingles；
     - OpenGameArt：[37 Hits/Punches](https://opengameart.org/content/37-hitspunches)、[RPG Sound Pack](https://opengameart.org/content/rpg-sound-pack)、[Level up/Power up](https://opengameart.org/content/level-up-power-up-coin-get-13-sounds)、[Battle SFX](https://opengameart.org/content/battle-sound-effects)、[512 Retro SFX](https://opengameart.org/content/512-sound-effects-8-bit-style)。
