@@ -1,4 +1,4 @@
-// 碎渣机炮：玩家或狂徒同区操控（1 行动点），打机炮 2 距离内的敌人 1d4 次 6+等级 物理、2 击破；耐久 5，每次受到攻击 −1
+// 碎渣机炮：玩家或狂徒同区操控（1 行动点），打机炮 2 距离内的敌人 1d4 次 6+等级 物理、2 击破；耐久 5，每次受到攻击或使用 −1
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -120,4 +120,17 @@ test("机炮这回合发射过了，狂徒不会再去操控它", () => {
   p.firedRound = st.turnNo;
   const plan = c.EnemyAI.plan(thug);
   assert.ok(!plan || !/碎渣机炮/.test(plan.meta.skillName || ""));
+});
+
+test("每用一次耐久 −1：操控、狂徒操控都算；耐久归零就报废", () => {
+  const { c, st, kolt, thug, p } = field();
+  kolt.ap = 3;
+  use(c, st, kolt, p, thug);
+  assert.equal(p.hp, 4, "开火后耐久 −1");
+  // 用到只剩 1 耐久，再开一次就报废
+  p.hp = 1;
+  st.turnNo = (Number(st.turnNo) || 0) + 1;
+  use(c, st, kolt, p, thug);
+  assert.equal(st.props.includes(p), false, "耐久归零被摧毁");
+  assert.equal(c.scrapsFor(kolt).length, 0);
 });

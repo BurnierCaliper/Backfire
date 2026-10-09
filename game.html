@@ -35,6 +35,7 @@
       <button class="t-btn" id="t-new"><b>新的一局</b><small id="t-new-sub"></small></button>
       <button class="t-btn" id="t-solo"><b>单人模式</b><small>一名主角 + 三名伙伴支援：每回合 2 行动点，能给自己协助格挡 / 协助攻击</small></button>
       <button class="t-btn" id="t-sandbox"><b>跑团模式</b><small>主持人用：探索环节买东西、休息、升级；战斗环节自由配遭遇。数值照原手册</small></button>
+      <button class="t-btn" id="t-codex"><b>图鉴</b><small>角色的技能、被动和升级效果，敌人、配置物和所有效果</small></button>
       <a class="t-btn" href="index.html"><b>跑团版 · 规则计算器</b><small>主持人用的分层结算工具</small></a>
     </div>
   </div>
@@ -62,7 +63,7 @@
     <span class="run-supplies" id="run-supplies"></span>
     <span class="spacer"></span>
     <button class="g-btn" id="run-map" title="角鳞星地图：看看现在在哪、各幕要去哪">地图</button>
-    <button class="g-btn" id="run-bestiary" title="敌人图鉴：遭遇过的敌人的能力和数值">图鉴</button>
+    <button class="g-btn" id="run-bestiary" title="图鉴：敌人、配置物和所有效果">图鉴</button>
     <button class="g-btn" id="run-title" title="进度已自动保存">存档并回到标题</button>
   </header>
   <div class="run-main">
@@ -91,7 +92,7 @@
     <button class="g-btn" id="tr-undo" disabled title="撤销上一个操作（Ctrl+Z）">撤销</button>
     <button class="g-btn" id="tr-slots" title="换到别的团的存档（当前进度已自动保存）">换存档</button>
     <button class="g-btn" id="tr-map" title="角鳞星地图：看队伍在哪，主持人可以在地图上移动队伍">地图</button>
-    <button class="g-btn" id="tr-bestiary" title="敌人图鉴：遭遇过的敌人的能力和数值">图鉴</button>
+    <button class="g-btn" id="tr-bestiary" title="图鉴：敌人、配置物和所有效果">图鉴</button>
     <button class="g-btn" id="tr-bs" title="按叙事直接改血量、坚毅、耐久、等级、时间、奎支……">后台</button>
     <button class="g-btn r-main" id="tr-fight" title="切到战斗画面，在那里配置遭遇、开打">进入战斗环节</button>
     <button class="g-btn" id="tr-title">回到标题</button>
@@ -954,6 +955,7 @@ window.GAME_MODE = true;
 <script src="world-data.js"></script>
 <script src="world-travel.js"></script>
 <script src="bestiary.js"></script>
+<script src="codex.js"></script>
 <script src="effects.js"></script>
 <script src="mods.js"></script>
 <script src="ai.js"></script>

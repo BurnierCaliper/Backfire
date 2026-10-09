@@ -400,3 +400,22 @@ test("连续拳打飞行目标：三拳都打出去，近程打飞行的附赠�
   assert.equal(no.lg.resources.ammo.length, 3, "不出手也不耗子弹");
   assert.equal(no.w.ap, 3, "行动点也不扣");
 });
+
+test("普通攻击能打危墙：手杖打同区边上的墙（冰 1 击破，窥探 1），霰弹枪打距离 1 的墙（耗 1 发）", () => {
+  const { c, S, lg } = setup("LG-WALL");
+  S.gaps["1-2"] = Object.assign(c.emptyGap(), { type: "wall", hp: 10, maxHp: 10, level: 1 });
+  const ids = (p) => c.skillFlowSteps("longge_aa", lg, p).find(s => s.key === "target").units.map(u => u.id);
+  assert.ok(ids({}).includes("gap:1-2"), "手杖目标里有 1–2 之间的危墙");
+  assert.ok(!c.skillFlowSteps("longge_chill", lg, {}).find(s => s.key === "target").units.some(u => /^gap:/.test(u.id)), "冷气穿刺不打墙");
+  cmd(c, { actor: lg.id, skill: "longge_aa", target: "gap:1-2", picks: { target: "gap:1-2" } });
+  assert.equal(S.gaps["1-2"].hp, 9);
+  assert.equal(lg.ap, 2);
+  assert.equal(lg.resources.known, 1, "手杖窥探 1");
+  assert.equal(lg.resources.ammo.length, 6);
+  // 霰弹枪：墙另一边的 2 区在距离 1，也能打
+  lg.resources.trigger = true;
+  assert.ok(ids({ mode: "gun" }).includes("gap:1-2"));
+  cmd(c, { actor: lg.id, skill: "longge_aa", target: "gap:1-2", picks: { mode: "gun", target: "gap:1-2" } });
+  assert.equal(S.gaps["1-2"].hp, 8);
+  assert.equal(lg.resources.ammo.length, 5, "霰弹枪耗 1 发");
+});

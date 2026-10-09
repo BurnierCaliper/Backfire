@@ -505,7 +505,7 @@
       out.push({
         id: "use_scrap:" + p.id,
         name: "操控 " + p.name,
-        hint: `和机炮站在一起时操控 · 向机炮 2 距离以内的一名敌人发射碎渣：1d4 次 ${6 + (Number(p.level) || 1)} 点物理，2 击破 · 耐久 ${p.hp}/${p.maxHp || 5}`,
+        hint: `和机炮站在一起时操控 · 向机炮 2 距离以内的一名敌人发射碎渣：1d4 次 ${6 + (Number(p.level) || 1)} 点物理，2 击破 · 每用一次耐久 −1 · 耐久 ${p.hp}/${p.maxHp || 5}`,
         cost: { ap: 1 }
       });
     });

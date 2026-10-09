@@ -3078,7 +3078,7 @@ function controlScrap(a, p, t) {
 function scrapReady(p) {
   return !!p && p.firedRound !== Number(state.turnNo || 0);
 }
-/** 碎渣机炮开火一次：1d4 发，每发 6+等级 物理 +2 击破。打玩家时可以被协助格挡 */
+/** 碎渣机炮开火一次：1d4 发，每发 6+等级 物理 +2 击破，开完耐久 −1。打玩家时可以被协助格挡 */
 function scrapShot(p, t, controller) {
   if (!scrapReady(p)) return "碎渣机炮这一回合已经发射过了。";
   p.firedRound = Number(state.turnNo || 0);
@@ -3092,8 +3092,16 @@ function scrapShot(p, t, controller) {
   // 射程是「2 距离内」（选目标时已经限定），这里不再按近距离判定
   fake.propId = p.id;
   const out = dealTo(fake, t, { atk: 0, mult: 0, flat, hits: n, element: "physical", baseBreak: 2, atkRange: "any", flags: { action: true, propShot: true, flyFree: true } });
-  if (out && out.pending) return `碎渣机炮开火 ${n} 次，每次 ${flat} 物理 +2 击破，${t.name} 的队友可以协助格挡。`;
-  return `碎渣机炮开火 ${n} 次，每次 ${flat} 物理 +2 击破。合计伤害 ${Math.floor((out && out.res && out.res.total) || 0)}。`;
+  const wear = scrapWear(p, controller);
+  if (out && out.pending) return `碎渣机炮开火 ${n} 次，每次 ${flat} 物理 +2 击破，${t.name} 的队友可以协助格挡。\n${wear}`;
+  return `碎渣机炮开火 ${n} 次，每次 ${flat} 物理 +2 击破。合计伤害 ${Math.floor((out && out.res && out.res.total) || 0)}。\n${wear}`;
+}
+/** 碎渣机炮每用一次耐久 −1（和被攻击一样），耐久归零就报废 */
+function scrapWear(p, controller) {
+  p.hp = Math.max(0, (Number(p.hp) || 0) - 1);
+  const notes = [`碎渣机炮使用磨损：耐久 −1 → ${p.hp}`];
+  if (p.hp <= 0) notes.push(...destroyProp(p, controller));
+  return notes.join("\n");
 }
 
 /** 技能打配置物 / 危墙时的伤害：按技能说明里写的元素、倍率、击破（「1atk 电 1击破」），
@@ -7256,9 +7264,11 @@ function skillFlowSteps(id, actor, picks) {
           : [{ value: "cane", label: "手杖：近距离施加刺骨" }, { value: "gun", label: "霰弹枪：远距离特殊射击（耗 1 弹）" }] });
     }
     const d = gun && picks.mode === "gun" ? 1 : 0;
-    steps.push({ key: "target", type: "unit", optional: false,
+    // 普通攻击也能打配置物 / 危墙 / 桥梁（冷气穿刺只是上刺骨，不打物件）
+    const structs = id === "longge_aa" ? structureTargets(actor, d, d) : [];
+    steps.push({ key: "target", type: "unit", optional: false, structures: structs.length > 0,
       label: d ? "射击目标（距离 1）" : "目标（同区）",
-      units: fieldUnits().filter(u => !u.isPlayer && !u.dead && !u.hidden && !u.fused && zoneDist(actor.zone, u.zone, state.zoneMode) === d) });
+      units: fieldUnits().filter(u => !u.isPlayer && !u.dead && !u.hidden && !u.fused && zoneDist(actor.zone, u.zone, state.zoneMode) === d).concat(structs) });
     return steps;
   }
   if (id === "tou_aa") {
@@ -7653,7 +7663,7 @@ function renderSkills() {
     const btn = document.createElement("button");
     btn.className = "btn";
     btn.textContent = `操控${p.name}`;
-    btn.title = "消耗 1 行动点：对机炮 2 距离内的一名敌人（先选为目标）打 1d4 次 6+等级 物理，2 击破";
+    btn.title = "消耗 1 行动点：对机炮 2 距离内的一名敌人（先选为目标）打 1d4 次 6+等级 物理，2 击破；每用一次耐久 −1";
     btn.onclick = () => calcCommand("skill", { actor: a.id, skill: "use_scrap:" + p.id, target: state.targetId || null });
     box.appendChild(btn);
   });
@@ -8792,8 +8802,14 @@ function runSkillInner(id, optRun) {
       if (touFar && (res(a).shield || 0) < 1) { paintSkillLog(`${a.name} 没有圣盾，只能打同区。`); return; }
       if (!tokZones.some(touReach)) { paintSkillLog(`${a.name} 的普通攻击够不到这个目标。`); return; }
     }
+    // 龙哥普攻：手杖只打同区，霰弹枪只打距离 1
+    const lgGun = id === "longge_aa" && longgeMode(a) === "gun";
+    if (id === "longge_aa" && !tokZones.some(z => zoneDist(a.zone, z, state.zoneMode) === (lgGun ? 1 : 0))) {
+      paintSkillLog(lgGun ? "霰弹枪只能打距离 1 的目标。" : "手杖只能打同区的目标。");
+      return;
+    }
     // 危墙 / 桥梁夹在两区之间：两边任一区在射程里就能打
-    if (isGapTok && id !== "tou_aa") {
+    if (isGapTok && id !== "tou_aa" && id !== "longge_aa") {
       const zs = String(token).slice(4).split("-").map(Number);
       const ov = typeof skillRangeFor === "function" ? skillRangeFor(a, id) : null;
       let hint = "";
@@ -8814,6 +8830,24 @@ function runSkillInner(id, optRun) {
       if (!spendAp(a, 1, skillNameHint(id))) return;
     }
     if (touFar) { a.resources.shield -= 1; touShieldHeal(a); appendLog(`消耗 1 圣盾，射程变为距离 1。`); }
+    if (id === "longge_aa") {
+      // 手杖：1atk 冰 +1 击破，窥探 1；霰弹枪：耗 1 发，1.5atk 子弹属性 +1 击破
+      snapshot();
+      const lines = [];
+      const atkV = effectiveAtk(a, state.units) || 5;
+      let opt;
+      if (lgGun) {
+        const c = longgeTakeBullet(a, lines);
+        opt = { element: LONGGE_AMMO[c].element, dmg: Math.max(1, Math.floor(atkV * 1.5)), brk: 1 };
+      } else {
+        opt = { element: "ice", dmg: Math.max(1, Math.floor(atkV)), brk: 1 };
+        longgePeek(a, 1, lines);
+      }
+      lines.push(...hitStructureCore(a, token, opt));
+      appendLog(lines.join("\n"));
+      renderAll();
+      return;
+    }
     hitStructure(a, token, structureHitOpt(a, id));
     return;
   }
