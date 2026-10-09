@@ -205,6 +205,23 @@
   // Keep the complete room history on the host. Ordinary display packets carry
   // only a recent window; older pages are filtered BEFORE choosing the cursor,
   // so neither a page nor its metadata reveals other players' private traffic.
+  /** 角色资料、武器页、背包明细（玩家点「角色资料 / 武器 / 背包」时向房主要；发送前经过 OnlineView 去掉隐藏数值） */
+  function bagDetail() {
+    const bag = state.bag && typeof state.bag === "object" ? state.bag : { items: [] };
+    const items = (Array.isArray(bag.items) ? bag.items : []).filter(x => x && (Number(x.qty) || 0) > 0).map(x => {
+      const cat = typeof ITEM_CATALOG !== "undefined" ? ITEM_CATALOG[x.id] : null;
+      const bp = !cat && typeof blueprintSpec === "function" ? blueprintSpec(x.id) : null;
+      return { id: x.id, qty: Number(x.qty) || 0, name: (cat && cat.name) || (bp && "图纸·" + bp.name) || x.id, hint: (cat && cat.hint) || (bp && bp.text) || "" };
+    });
+    return { water: Number(bag.water) || 0, kuizhi: Number(state.kuizhi) || 0, items };
+  }
+  function sheetPacket() {
+    const ST = root.SkillText;
+    let sheets = [], armory = [];
+    try { sheets = ST ? ST.sheetData() : []; } catch (e) { sheets = []; }
+    try { armory = ST && ST.armoryData ? ST.armoryData() : []; } catch (e) { armory = []; }
+    return { type: "sheetData", protocol: PROTOCOL, build: BUILD, sheets, armory, bag: bagDetail() };
+  }
   function messagePage(sender, request = {}) {
     const visible = sender === identity.id ? messages : messages.flatMap(m => OnlineView.projectMessages([m], { recipientId: sender, gmId: identity.id }));
     let end = visible.length;
@@ -226,6 +243,7 @@
       if (packet.type === "resync") return resync(sender);
       if (!Number.isSafeInteger(packet.requestId) || packet.requestId < 1) error("无效指令编号");
       if (packet.type === "messageHistory") return sendProjected(sender, { ...messagePage(sender, packet), requestId: packet.requestId });
+      if (packet.type === "sheetData") return sendProjected(sender, { ...sheetPacket(), requestId: packet.requestId });
       if (packet.type === "actionOptions") {
         if (isPaused()) error("房间暂停");
         const menu = actionMenu.menu(packet.request, sender);
@@ -254,7 +272,7 @@
   }
   function receiveDisplay(packet) {
     if (!active || packet.protocol !== PROTOCOL || packet.build !== BUILD || packet.displayOnly !== true) return;
-    if (packet.type === "ack" || packet.type === "actionOptions" || packet.type === "messageHistory") {
+    if (packet.type === "ack" || packet.type === "actionOptions" || packet.type === "messageHistory" || packet.type === "sheetData") {
       const item = pending.get(packet.requestId); if (!item) return;
       clearTimeout(item.timer); pending.delete(packet.requestId); item.resolve(packet); return;
     }
@@ -390,6 +408,7 @@
     assign(assignments) { if (!isHost()) error("只有主持人可以分配角色"); setupOperators(assignments); publish(); return { ok: true }; },
     start() { if (!isHost()) error("只有主持人可以开始"); if (!status.roster.some(p => p.role === "player" && p.online)) error("请等待至少一名玩家加入"); started = true; publish(); return { ok: true }; },
     actionMenu: request => rpc("actionOptions", { request }),
+    sheetData: () => isHost() ? Promise.resolve(OnlineView.projectPacket(sheetPacket(), { recipientId: identity.id, gmId: identity.id })) : rpc("sheetData", {}),
     messageHistory: (request = {}) => isHost() ? Promise.resolve(messagePage(identity.id, request)) : rpc("messageHistory", { beforeId: request.beforeId || null }),
     subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     onPacket(fn) { packetListeners.add(fn); return () => packetListeners.delete(fn); },

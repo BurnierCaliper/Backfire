@@ -27,7 +27,8 @@
     clients = new Map();
     const assignments = {};
     for (const u of heroes()) if (ownerByKit[u.kit] && config.players.some(p => p.id === ownerByKit[u.kit])) assignments[u.id] = ownerByKit[u.kit];
-    session = Hotseat.create({ operators: config.players, gmId: gm(), mode: config.mode, assignments,
+    const keepChat = session ? session.snapshot().chat || [] : [];   // 重建会话时带上小队聊天记录
+    session = Hotseat.create({ operators: config.players, gmId: gm(), mode: config.mode, assignments, chat: keepChat,
       getUnits: () => state.units, canStand: u => !standUpBlocked(u) });
     authority = HotseatAuthority.create({ session, validate, execute, afterCommand,
       getState: () => state, getTape: () => GAME.tape || [], viewFor: project });
@@ -77,7 +78,7 @@
       phase: s?.phase === "selecting" ? "picking" : s?.phase || "setup", currentUnitId: s?.currentUnitId || null,
       order: (s?.slots || []).map(r => r && ({ actor: r.unitId, name: r.unitName, owner: r.operatorId, locked: r.spent, done: r.completed, current: r.unitId === s.currentUnitId })),
       confirmed: s?.confirmed || [], swap: s?.pendingSwaps?.length ? { requestId: s.pendingSwaps[0].id, from: s.pendingSwaps[0].actor, to: s.pendingSwaps[0].target, recipient: s.pendingSwaps[0].responder } : null,
-      ask: s?.ask || null, chat: (s?.chat || []).map(r => ({ name: r.operatorName, text: r.text })),
+      ask: s?.ask || null, chat: (s?.chat || []).map(r => ({ id: r.id, operatorId: r.operatorId, name: r.operatorName, text: r.text, at: r.at })),
       canConfigure: !network && canConfigure() && (!configured || id === gm()), canDisable: !network && canConfigure() && (!configured || id === gm()) };
   }
   const getView = () => getViewFor(playerId);
@@ -94,6 +95,7 @@
       }
       return;
     }
+    if (cmd.type === "chat") return;   // 小队聊天不受询问、战斗阶段影响
     if (choice || session.snapshot().ask) fail("正在等待其他操作者回应");
     if (orderTypes.has(cmd.type)) { if (cmd.type === "orderSwapAccept" && typeof cmd.accept !== "boolean") fail("互换回答必须为同意或拒绝"); return; }
     if (actionTypes.has(cmd.type)) {

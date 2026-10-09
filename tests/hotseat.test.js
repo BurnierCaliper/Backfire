@@ -221,7 +221,7 @@ test("候选离场和战斗结束关闭询问，重复回答不重复结算", ()
   assert.equal(s.snapshot().phase, "ended");
 });
 
-test("只有战前/探索可重分配；聊天限大厅与选序；快照不能改权威状态", () => {
+test("只有战前/探索可重分配；小队聊天全程开放；快照不能改权威状态", () => {
   const f = fixture(), s = f.s;
   s.setAssignments({ ruby: "b", hiaki: "a" }); assert.equal(s.ownerOf("ruby"), "b");
   assert.throws(() => s.setAssignments({ ruby: "unknown" }), /操作者/);
@@ -229,7 +229,7 @@ test("只有战前/探索可重分配；聊天限大厅与选序；快照不能�
   const view = s.snapshot(); view.roster[0].operatorId = "gm"; view.assignments.ruby = "gm";
   assert.equal(s.ownerOf("ruby"), "b");
   s.beginRound(1); s.chat("b", "可以"); s.forceStart("gm");
-  assert.throws(() => s.chat("a", "战斗中"), /只在大厅/);
+  s.chat("a", "战斗中"); assert.equal(s.snapshot().chat.at(-1).text, "战斗中", "作者要求：战斗中也能小队聊天");
   assert.throws(() => s.setAssignments({}), /战斗中/);
   s.endBattle(); s.setAssignments({}); s.reset(); assert.equal(s.snapshot().phase, "setup");
 });
@@ -249,4 +249,50 @@ test("LocalTransport同步先到先得，身份绑定连接，所有收件人获
   assert.throws(() => a.send({ callback() {} }), /JSON/);
   a.close(); assert.throws(() => a.send({ type: "cmd" }), /closed/);
   hub.close(); assert.throws(() => b.send({ type: "cmd" }), /closed/);
+});
+
+test("战斗中召唤武器人：紧挨着本人，并且立刻轮到武器人；武器人结束后回到还有行动的本人", () => {
+  const f = fixture({ units: [hero("ruby", "ruby"), hero("hiaki", "hiaki"), hero("xia", "xia")] }), s = f.s;
+  force(f);
+  const order = () => s.snapshot().slots.map(r => r && r.unitId);
+  const first = order();
+  // 轮到绯秋时让他先花点（锁定格子）
+  while (s.snapshot().currentUnitId !== "hiaki") s.finishUnit(s.snapshot().slots.find(r => r && !r.completed).operatorId);
+  s.markSpent([{ unitId: "hiaki", ap: 1 }]);
+  f.setUnits([...f.units, { ...hero("niu", "niu"), weaponOf: "hiaki" }]);
+  s.reconcile();
+  const after = order();
+  const i = after.indexOf("niu"), h = after.indexOf("hiaki");
+  assert.equal(i, h - 1, "武器人紧挨着本人（在本人前面一格，立刻行动）：" + after.join(","));
+  assert.equal(s.snapshot().currentUnitId, "niu", "立刻轮到武器人");
+  assert.equal(after.length, first.length + 1);
+  s.finishUnit("b", "niu");
+  assert.equal(s.snapshot().currentUnitId, "hiaki", "武器人结束后回到本人");
+});
+
+test("不是本人的回合时出现的武器人：排在本人后面一格", () => {
+  const f = fixture({ units: [hero("ruby", "ruby"), hero("hiaki", "hiaki"), hero("xia", "xia")] }), s = f.s;
+  force(f);
+  const before = s.snapshot().slots.map(r => r && r.unitId);
+  f.setUnits([...f.units, { ...hero("niu", "niu"), weaponOf: "hiaki" }]);
+  s.reconcile();
+  const after = s.snapshot().slots.map(r => r && r.unitId);
+  if (s.snapshot().currentUnitId !== "hiaki") assert.equal(after.indexOf("niu"), after.indexOf("hiaki") + 1, after.join(","));
+  assert.equal(after.length, before.length + 1);
+});
+
+test("小队聊天：战斗中也能发，最多保留 300 条，重建会话时带上旧记录", () => {
+  const f = fixture(), s = f.s;
+  force(f);
+  assert.equal(s.snapshot().phase, "acting");
+  s.chat("a", "先打左边那个");
+  assert.equal(s.snapshot().chat.at(-1).text, "先打左边那个");
+  for (let i = 0; i < 320; i++) s.chat("b", "刷屏" + i);
+  assert.equal(s.snapshot().chat.length, 300);
+  const kept = s.snapshot().chat;
+  const s2 = Hotseat.create({ operators: [{ id: "gm", name: "主持人" }, { id: "a", name: "甲" }], gmId: "gm", getUnits: () => f.units, chat: kept });
+  assert.equal(s2.snapshot().chat.length, 300);
+  s2.chat("a", "新的一条");
+  const ids = s2.snapshot().chat.map(r => r.id);
+  assert.equal(new Set(ids).size, ids.length, "新消息编号不和旧的重复");
 });

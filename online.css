@@ -100,7 +100,51 @@
  * calculator dialogs live outside the original screen roots; hiding individual
  * screen IDs leaves those dialogs in the outer document and its scroll range. */
 body.online-player { overflow: hidden; }
-body.online-player > :not(.ol-ui):not(.hs-ui) { display: none !important; }
+body.online-player > :not(.ol-ui):not(.hs-ui):not(.hs-sheet):not(.ar-sheet):not(#sk-tip):not(.sk-tip) { display: none !important; }
+/* 玩家看自己的角色资料 / 武器页：压在联机舞台上面 */
+body.online-player .hs-sheet, body.online-player .ar-sheet { z-index: 95; }
+/* 玩家右侧栏：战斗（记录）/ 小队 两个频道 */
+.ol-side { position: fixed; z-index: 45; top: var(--hs-top-height, 0px); right: 0; bottom: 0; width: 330px; display: flex; flex-direction: column; background: #16120e; border-left: 2px solid #4d4337; }
+body.ol-has-side .ol-stage { right: 330px; }
+body.ol-has-side .ol-dock { right: 344px; }
+/* 主持人：战斗中选顺序的面板也不盖住右边的战斗记录 / 小队栏（窄屏时记录栏本来就是抽屉，不处理） */
+@media (min-width: 821px) { body.ol-host-online.ol-in-battle .hs-overlay { right: 320px; } }
+/* 选行动顺序的面板不盖住右侧栏：选顺序时也能看记录、在小队里商量 */
+body.ol-has-side .hs-overlay { right: 330px; }
+.ol-side-tabs, .ol-host-tabs { display: flex; gap: 0; flex: none; border-bottom: 2px solid #4d4337; }
+.ol-tab { flex: 1; position: relative; min-height: 40px; font: inherit; font-weight: 800; font-size: 15px; color: #cbb99a; background: transparent; border: 0; cursor: pointer; }
+.ol-tab.on { color: #0b0806; background: var(--sk-hazard, #f2c230); }
+.ol-tab:focus-visible { outline: 2px solid var(--sk-mint, #39e6b4); outline-offset: -2px; }
+.ol-badge { display: inline-block; min-width: 18px; margin-left: 6px; padding: 0 5px; font-size: 11px; line-height: 18px; border-radius: 9px; color: #fff; background: #d8413a; }
+.ol-side-log, .ol-side-chat { flex: 1; min-height: 0; margin: 0; padding: 10px 14px 10px 30px; overflow-y: auto; color: #e9dcc0; font-size: 14px; line-height: 1.55; }
+.ol-side-chat { list-style: none; padding-left: 14px; }
+.ol-side[data-tab="log"] .ol-side-chat, .ol-side[data-tab="log"] .ol-side-form { display: none; }
+.ol-side[data-tab="chat"] .ol-side-log { display: none; }
+.ol-side-chat li { margin-bottom: 9px; padding: 6px 9px; background: #231c16; border-left: 3px solid #6b5d4b; }
+.ol-side-chat li.ol-mine { border-left-color: var(--sk-hazard, #f2c230); }
+.ol-side-chat li > div { display: flex; gap: 8px; align-items: baseline; }
+.ol-side-chat li b { color: var(--sk-hazard, #f2c230); }
+.ol-side-chat li small { color: #8f8068; font-size: 11px; }
+.ol-side-chat li p { margin: 2px 0 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.ol-side-form { display: flex; gap: 6px; flex: none; padding: 10px; border-top: 1px solid #4d4337; }
+.ol-side-form input, .ol-side-form label { flex: 1; min-width: 0; }
+.ol-side-form input { width: 100%; box-sizing: border-box; min-height: 38px; padding: 6px 9px; font: inherit; color: #f3e7cf; background: #0f0c09; border: 1px solid #6b5d4b; }
+/* 主持人：战斗记录 / 探索记录加「小队」频道 */
+.ol-host-chat { display: none; }
+.ol-chat-mode > :not(.ol-host-tabs):not(.ol-host-chat) { display: none !important; }
+.ol-chat-mode > .ol-host-chat { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.ol-chat-mode { display: flex; flex-direction: column; }
+/* 主持人右下角固定着「主持人工具」和「消息与成员」两个按钮：发送框放在频道顶部，不被挡住 */
+.ol-host-chat .ol-side-form { order: -1; border-top: 0; border-bottom: 1px solid #4d4337; }
+.ol-host-chat .ol-side-chat { padding-bottom: 110px; }
+body.ol-has-side .ol-toast { right: 344px; }
+/* 角色资料 / 武器 / 背包 按钮与背包 */
+.ol-info-tools { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.ol-bag { z-index: 95; }
+.ol-bag-list { list-style: none; margin: 10px 0; padding: 0; display: grid; gap: 8px; }
+.ol-bag-list li { padding: 8px 10px; background: #231c16; border: 1px solid #4d4337; }
+.ol-bag-list li > div { display: flex; justify-content: space-between; gap: 10px; }
+.ol-bag-list li p { margin: 4px 0 0; color: #cbb99a; font-size: 13px; }
 @keyframes ol-impact { 50% { background: #64543c; transform: translateX(2px); } }
 @media (max-width: 650px) {
   .ol-overlay { padding: 10px 8px 24px; }
@@ -115,5 +159,11 @@ body.online-player > :not(.ol-ui):not(.hs-ui) { display: none !important; }
   .ol-actions { padding: 12px; }
   .ol-dock { right: 8px; bottom: calc(8px + env(safe-area-inset-bottom)); }
   .ol-exploration-party { grid-template-columns: 1fr; }
+  /* 手机：右侧栏改成贴在底部的一条，高度 38% */
+  .ol-side { top: auto; left: 0; width: auto; height: 38vh; border-left: 0; border-top: 2px solid #4d4337; }
+  body.ol-has-side .ol-stage { right: 0; bottom: 38vh; }
+  body.ol-has-side .ol-dock { right: 8px; bottom: calc(38vh + 8px); }
+  body.ol-has-side .ol-toast { right: 8px; }
+  body.ol-has-side .hs-overlay { right: 0; bottom: 38vh; }
 }
 @media (prefers-reduced-motion: reduce) { .ol-unit.ol-impact { animation: none; } .ol-popup.ol-visible { transition: none; } }

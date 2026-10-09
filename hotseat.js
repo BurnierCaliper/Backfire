@@ -30,6 +30,7 @@
   function fail(code, message) { const e = new Error(message); e.code = code; throw e; }
   const DEFAULT_HEROES = ["ruby", "yuito", "hiaki", "tou", "xia", "chuan", "nora", "kolt", "helu", "ras"];
 
+  const CHAT_KEEP = 300;   // 小队聊天保留的条数
   function create(options) {
     options = options || {};
     if (typeof options.getUnits !== "function") throw new TypeError("Hotseat requires getUnits");
@@ -45,7 +46,10 @@
     const isHero = options.isHero || (u => !!u.isPlayer && !u.weaponOf && !u.isPartner && heroKits.has(u.kit));
     const canStand = options.canStand || (u => typeof root.standUpBlocked === "function" ? !root.standUpBlocked(u) : Number(u.shp) > 0);
     let assignments = {}, phase = "setup", turnNo = 0, roster = [], slots = [], confirmed = new Set();
-    let swaps = [], ask = null, closedAsk = null, sequence = 0, chat = [];
+    let swaps = [], ask = null, closedAsk = null, sequence = 0;
+    // 小队聊天：重新分配角色 / 有人进出房间会重建会话，聊天记录从上一个会话带过来
+    let chat = (Array.isArray(options.chat) ? options.chat : []).filter(r => r && typeof r.text === "string").slice(-CHAT_KEEP);
+    sequence = chat.reduce((m, r) => Math.max(m, Number(String(r.id || "").replace(/^chat-/, "")) || 0), 0);
     const spent = new Set(), completed = new Set(), stableById = new Map();
     const changes = new Set(), askClosures = new Set();
 
@@ -110,7 +114,14 @@
         while (slots.length < roster.length) slots.push(null);
         if (changed) confirmed.clear();
       } else if (phase === "acting" || phase === "enemy") {
-        for (const r of roster) if (!previousIds.has(r.unitId) && slotFor(r.unitId) < 0) slots.push(slotRow(r));
+        for (const r of roster) if (!previousIds.has(r.unitId) && slotFor(r.unitId) < 0) {
+          // 战斗中召唤出的武器人：紧挨着本人，并且立刻轮到它行动（本人还有行动的话，武器人结束后再回到本人）
+          const ownerKey = r.weaponOf ? String(r.stableKey).split(":weapon:")[0] : null;
+          const at = ownerKey ? slots.findIndex(s => s && s.stableKey === ownerKey) : -1;
+          if (at >= 0 && phase === "acting" && !slots[at].completed && current() === slots[at].unitId) slots.splice(at, 0, slotRow(r));
+          else if (at >= 0) slots.splice(at + 1, 0, slotRow(r));
+          else slots.push(slotRow(r));
+        }
         if (phase === "acting" && !current()) phase = "enemy";
       }
       swaps = swaps.filter(s => {
@@ -284,10 +295,10 @@
     }
     function chatMessage(id, text) {
       const op = operator(id);
-      if (!["setup", "selecting"].includes(phase)) fail("chat_phase", "聊天只在大厅和选择顺序时开放");
+      // 小队聊天在大厅、探索和战斗中都开放
       if (typeof text !== "string" || !text.trim()) fail("chat_empty", "消息不能为空");
       chat.push({ id: "chat-" + (++sequence), operatorId: id, operatorName: op.name, text: text.trim().slice(0, 500), at: now() });
-      if (chat.length > 100) chat.splice(0, chat.length - 100);
+      if (chat.length > CHAT_KEEP) chat.splice(0, chat.length - CHAT_KEEP);
       return emit("chat");
     }
     function endBattle() { phase = "ended"; swaps = []; if (ask) closeAsk("ended", null, {}, null); return emit("ended"); }
@@ -321,7 +332,8 @@
         return { ...row, spent: spent.has(row.stableKey), completed: completed.has(row.stableKey) };
       });
       ask = null; closedAsk = null; swaps = [];
-      chat = (saved.chat || []).filter(r => operatorMap.has(r.operatorId)).slice(-100);
+      // 已经离开房间的人说过的话也保留（名字存在记录里）
+      chat = (saved.chat || []).filter(r => r && typeof r.text === "string").slice(-CHAT_KEEP);
       reconcile(false); return emit("restored");
     }
     setAssignments(options.assignments || {});

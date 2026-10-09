@@ -243,3 +243,19 @@ test("battle results include the actual D grade and drop private settlement note
   const out = V.projectPacket({ type: "result", result: { outcome: "win", grade: { grade: "D", score: 0, xpMult: 0.8, notes: "SECRET-GRADE" }, notes: "SECRET-SETTLEMENT" } }, player);
   noSecrets(out); assert.deepEqual(out.result, { outcome: "win", grade: { score: 0, xpMult: 0.8, grade: "D" } });
 });
+
+test("角色资料 / 武器 / 背包请求：递归去掉坚毅生命字段，背包说明里有坚毅的整条不发", () => {
+  const V = require("../online-view");
+  const packet = { type: "sheetData", requestId: 9, protocol: 1, build: "b",
+    sheets: [{ kit: "ruby", name: "瑞比", shp: 11, shpMax: 11, layers: [{ type: "flesh", cur: 12, max: 12 }], weapons: [{ kit: "mint", shp: 3, atk: 7 }], passives: [{ name: "纳米科技", text: "规则说明" }] }],
+    armory: [{ kit: "ruby", weapons: [{ kit: "mint", atk: 7, upOnShp: true }] }],
+    bag: { water: 500, kuizhi: 3, items: [{ id: "medkit", name: "简易医疗包", qty: 2, hint: "治疗一名友方 1d4+6 内层生命" }, { id: "stim", name: "强心注射剂", qty: 1, hint: "自身恢复 16 生命，失去 6 坚毅生命" }, { id: "x", name: "空", qty: 0 }] } };
+  const out = V.projectPacket(packet, { recipientId: "p1", gmId: "host" });
+  const json = JSON.stringify(out);
+  assert.ok(!/shp/i.test(json), json);
+  assert.equal(out.sheets[0].name, "瑞比");
+  assert.equal(out.sheets[0].weapons[0].atk, 7);
+  assert.equal(out.sheets[0].passives[0].text, "规则说明");
+  assert.equal(out.requestId, 9);
+  assert.deepEqual(JSON.parse(JSON.stringify(out.bag)), { water: 500, kuizhi: 3, items: [{ id: "medkit", name: "简易医疗包", qty: 2, hint: "治疗一名友方 1d4+6 内层生命" }, { id: "stim", name: "强心注射剂", qty: 1 }] });
+});

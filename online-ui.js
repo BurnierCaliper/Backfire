@@ -35,14 +35,37 @@
     const panel = make("section", "online-panel", "ol-overlay", { role: "dialog", "aria-label": "联机房间" });
     const toast = make("aside", "online-toast", "ol-toast", { role: "status", "aria-live": "polite" });
     toast.hidden = true;
+    // 玩家右侧栏：「战斗 / 记录」和「小队」两个频道。输入框只建一次，收到新消息只更新列表，不会打断输入
+    const side = make("aside", "online-side", "ol-side", { "aria-label": "战斗记录与小队聊天" });
+    side.innerHTML = `<nav class="ol-side-tabs" role="tablist"><button type="button" role="tab" data-side="log" class="ol-tab"></button><button type="button" role="tab" data-side="chat" class="ol-tab">小队<span class="ol-badge" hidden></span></button></nav><ol class="ol-side-log" aria-live="polite"></ol><ol class="ol-side-chat" aria-live="polite"></ol><form class="ol-side-form" id="ol-side-form"><label class="ol-sr-only" for="ol-side-text">小队消息</label><input id="ol-side-text" maxlength="500" autocomplete="off" placeholder="和队友说点什么…（所有人可见）"><button type="submit" class="ol-button ol-primary">发送</button></form>`;
+    side.hidden = true;
+    const bagBox = make("section", "online-bag", "ol-overlay ol-bag", { role: "dialog", "aria-label": "背包" });
+    bagBox.hidden = true;
+    let sideTab = { battle: "log", other: "chat" }, sideKeys = { log: "", chat: "" }, seenChat = new Set(), chatPrimed = false, unread = 0, chatSending = false;
+    side.addEventListener("click", event => {
+      const tab = event.target.closest("[data-side]"); if (!tab) return;
+      sideTab[view.screen === "battle" ? "battle" : "other"] = tab.dataset.side; renderSide(true);
+      if (tab.dataset.side === "chat") side.querySelector("#ol-side-text")?.focus({ preventScroll: true });
+    });
+    side.addEventListener("keydown", event => event.stopPropagation());
+    side.addEventListener("submit", event => { event.preventDefault(); sendSideChat(); });
+    bagBox.addEventListener("click", event => { if (event.target === bagBox || event.target.closest('[data-bag="close"]')) bagBox.hidden = true; });
+    bagBox.addEventListener("keydown", event => { event.stopPropagation(); if (event.key === "Escape") bagBox.hidden = true; });
     for (const node of [dock, stage, panel]) {
       node.addEventListener("click", click);
       node.addEventListener("keydown", event => { event.stopPropagation(); if (event.key === "Escape" && panelOpen && view.screen !== "lobby") { panelOpen = false; render(); } });
       node.addEventListener("input", input); node.addEventListener("change", change);
       node.addEventListener("submit", event => { event.preventDefault(); if (event.target.id === "ol-message-form") sendMessage(); if (event.target.id === "ol-lobby-chat") sendLobbyChat(); });
     }
+    // 中文输入法正在拼字时，不重画含有正在输入的输入框的区域（重画会把拼到一半的字打断），拼完再补画
+    let composing = false, deferred = false;
+    const onCompStart = () => { composing = true; };
+    const onCompEnd = () => { composing = false; if (deferred) { deferred = false; setTimeout(() => { if (!destroyed) render(); }, 0); } };
+    document.addEventListener("compositionstart", onCompStart, true);
+    document.addEventListener("compositionend", onCompEnd, true);
     function html(node, markup, key) {
       if (lastMarkup[key] === markup) return;
+      if (composing && node.contains(document.activeElement)) { deferred = true; return; }
       const focused = document.activeElement, id = focused && node.contains(focused) ? focused.id : "";
       const start = focused && typeof focused.selectionStart === "number" ? focused.selectionStart : null;
       lastMarkup[key] = markup; node.innerHTML = markup;
@@ -138,7 +161,7 @@
       const data = displayState || view.state, screen = view.screen;
       if (screen === "lobby" || !data) return '<div class="ol-wait"><h2>等待房间同步</h2><p>房主准备好后会更新这里。</p></div>';
       const units = (data.units || []).filter(u => !u.hidden), logs = view.packet?.publicLogs || [];
-      return `<header class="ol-stage-heading"><div><span class="ol-muted">${esc(view.roomCode)} · ${screen === "battle" ? `第 ${data.turnNo || 1} 回合` : screen === "ended" ? "遭遇结束" : "探索环节"}</span><h1>${screen === "battle" ? "战场" : screen === "ended" ? "战斗结算" : "与队伍同行"}</h1></div>${weatherMarkup(data)}</header>${screen === "ended" ? resultMarkup() : ""}${suppliesMarkup(data)}${paused() ? '<p class="ol-pause" role="status">房间暂停，正在等待连接恢复。</p>' : ""}${view.offlineWait ? `<p class="ol-pause">${esc(view.offlineWait.name)} 离线，等待其返回。</p>` : ""}${screen === "battle" || screen === "ended" ? `<div class="ol-zones">${Array.from({ length: Math.min(3, Math.max(2, Number(data.zoneMode) || 3)) }, (_, i) => `<section class="ol-zone"><h2>${i + 1} 区</h2>${fieldsMarkup(data, i + 1)}${units.filter(u => Number(u.zone) === i + 1).map(card).join("") || '<p class="ol-muted">空区域</p>'}${(data.props || []).filter(p => Number(p.zone) === i + 1 && !p.destroyed).map(p => `<article class="ol-prop"><b>${esc(p.name || p.kind || "配置物")}</b>${p.hp != null ? `<span>耐久 ${esc(p.hp)}${p.maxHp == null ? "" : " / " + esc(p.maxHp)}</span>` : ""}</article>`).join("")}</section>`).join("")}</div>${gapsMarkup(data)}${screen === "ended" ? "" : actionsMarkup()}` : `<p class="ol-muted">主持人正在管理探索与遭遇。你可以在房间消息里回复主持人。</p><div class="ol-exploration-party">${units.filter(u => u.isPlayer && !u.weaponOf).map(card).join("")}</div>`}<details class="ol-logs"><summary>公开记录</summary><ol>${logs.map(l => `<li>${esc(l.text || "")}</li>`).join("") || '<li class="ol-muted">还没有公开记录。</li>'}</ol></details>`;
+      return `<header class="ol-stage-heading"><div><span class="ol-muted">${esc(view.roomCode)} · ${screen === "battle" ? `第 ${data.turnNo || 1} 回合` : screen === "ended" ? "遭遇结束" : "探索环节"}</span><h1>${screen === "battle" ? "战场" : screen === "ended" ? "战斗结算" : "与队伍同行"}</h1><div class="ol-info-tools">${button("角色资料", "info", 'data-info="sheet"', pending)}${button("武器", "info", 'data-info="armory"', pending)}${button("背包", "info", 'data-info="bag"', pending)}</div></div>${weatherMarkup(data)}</header>${screen === "ended" ? resultMarkup() : ""}${suppliesMarkup(data)}${paused() ? '<p class="ol-pause" role="status">房间暂停，正在等待连接恢复。</p>' : ""}${view.offlineWait ? `<p class="ol-pause">${esc(view.offlineWait.name)} 离线，等待其返回。</p>` : ""}${screen === "battle" || screen === "ended" ? `<div class="ol-zones">${Array.from({ length: Math.min(3, Math.max(2, Number(data.zoneMode) || 3)) }, (_, i) => `<section class="ol-zone"><h2>${i + 1} 区</h2>${fieldsMarkup(data, i + 1)}${units.filter(u => Number(u.zone) === i + 1).map(card).join("") || '<p class="ol-muted">空区域</p>'}${(data.props || []).filter(p => Number(p.zone) === i + 1 && !p.destroyed).map(p => `<article class="ol-prop"><b>${esc(p.name || p.kind || "配置物")}</b>${p.hp != null ? `<span>耐久 ${esc(p.hp)}${p.maxHp == null ? "" : " / " + esc(p.maxHp)}</span>` : ""}</article>`).join("")}</section>`).join("")}</div>${gapsMarkup(data)}${screen === "ended" ? "" : actionsMarkup()}` : `<p class="ol-muted">主持人正在管理探索与遭遇。右侧「小队」频道可以和大家聊天，「消息与成员」里可以私下回复主持人。</p><div class="ol-exploration-party">${units.filter(u => u.isPlayer && !u.weaponOf).map(card).join("")}</div>`}`;
     }
     function observeMessages() {
       const rows = view.messages || [], incoming = rows.filter(m => !seenMessages.has(m.id) && m.from !== own());
@@ -150,6 +173,114 @@
       }
       messagesInitialized = true;
     }
+    /* ---------- 小队聊天 ---------- */
+    const chatRows = () => (hs().chat || []).filter(m => m && typeof m.text === "string");
+    const clock = at => { if (!at) return ""; const d = new Date(at); return isNaN(d) ? "" : `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
+    function chatListMarkup(rows) {
+      return rows.map(m => `<li class="${m.operatorId && m.operatorId === own() ? "ol-mine" : ""}"><div><b>${esc(m.name || m.operatorName || playerName(m.operatorId))}</b><small>${esc(clock(m.at))}</small></div><p>${esc(m.text)}</p></li>`).join("") || '<li class="ol-muted">还没有人说话。消息所有人都能看到，并一直保留在记录里。</li>';
+    }
+    /** 更新列表（只换列表内容，不碰输入框）；原来在底部就继续贴底 */
+    function fillList(list, markup) {
+      const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
+      list.innerHTML = markup;
+      if (atBottom) list.scrollTop = list.scrollHeight;
+    }
+    /** 新消息：不在小队频道时累计未读数 */
+    function trackUnread(onChat) {
+      const rows = chatRows();
+      if (!chatPrimed) { rows.forEach(m => seenChat.add(m.id)); chatPrimed = true; return 0; }
+      const fresh = rows.filter(m => m.id && !seenChat.has(m.id));
+      fresh.forEach(m => seenChat.add(m.id));
+      if (onChat) unread = 0; else unread += fresh.filter(m => m.operatorId !== own()).length;
+      return fresh.length;
+    }
+    function renderSide(force) {
+      if (side.hidden) return;
+      const battle = view.screen === "battle" || view.screen === "ended";
+      const tab = sideTab[battle ? "battle" : "other"];
+      side.dataset.tab = tab;
+      const logTab = side.querySelector('[data-side="log"]'), chatTab = side.querySelector('[data-side="chat"]');
+      logTab.textContent = battle ? "战斗" : "记录";
+      logTab.classList.toggle("on", tab === "log"); chatTab.classList.toggle("on", tab === "chat");
+      logTab.setAttribute("aria-selected", String(tab === "log")); chatTab.setAttribute("aria-selected", String(tab === "chat"));
+      trackUnread(tab === "chat");
+      const badge = chatTab.querySelector(".ol-badge"); badge.hidden = !unread; badge.textContent = unread > 99 ? "99+" : String(unread);
+      const logs = view.packet?.publicLogs || [];
+      const logMarkup = logs.map(l => `<li>${esc(l.text || "")}</li>`).join("") || '<li class="ol-muted">还没有公开记录。</li>';
+      if (force || sideKeys.log !== logMarkup) { sideKeys.log = logMarkup; fillList(side.querySelector(".ol-side-log"), logMarkup); }
+      const chatMarkup = chatListMarkup(chatRows());
+      if (force || sideKeys.chat !== chatMarkup) { sideKeys.chat = chatMarkup; fillList(side.querySelector(".ol-side-chat"), chatMarkup); }
+      side.querySelector(".ol-side-form button").disabled = chatSending || paused();
+    }
+    async function sendChatText(input, button) {
+      const text = input.value.trim();
+      if (!text || chatSending || paused()) return;
+      chatSending = true; if (button) button.disabled = true;
+      try {
+        const result = await api.submit({ type: "chat", text });
+        if (result?.ok === false) { notice = result.error || "消息没有发出去"; render(); }
+        else input.value = "";
+      } catch (error) { notice = error.message || "消息没有发出去"; render(); }
+      finally { chatSending = false; if (button) button.disabled = paused(); }
+    }
+    function sendSideChat() { sendChatText(side.querySelector("#ol-side-text"), side.querySelector(".ol-side-form button")); }
+
+    /* 主持人这边：战斗记录栏加「战斗 / 小队」，探索记录栏加「探索 / 小队」 */
+    const hostMounts = [];
+    function mountHostChat() {
+      const want = !!(view.active && view.isHost);
+      if (!want) { while (hostMounts.length) hostMounts.pop().remove(); return; }
+      if (!hostMounts.length) {
+        for (const [root, label, def] of [[document.getElementById("g-log"), "战斗", "log"], [document.querySelector("#scr-trpg .tr-log"), "探索", "chat"]]) {
+          if (!root) continue;
+          const nav = document.createElement("nav"); nav.className = "ol-host-tabs"; nav.setAttribute("role", "tablist");
+          nav.innerHTML = `<button type="button" role="tab" data-host-tab="log" class="ol-tab">${label}</button><button type="button" role="tab" data-host-tab="chat" class="ol-tab">小队<span class="ol-badge" hidden></span></button>`;
+          const box = document.createElement("div"); box.className = "ol-host-chat";
+          box.innerHTML = `<ol class="ol-side-chat" aria-live="polite"></ol><form class="ol-side-form"><input maxlength="500" autocomplete="off" aria-label="小队消息" placeholder="和玩家们说点什么…（所有人可见）"><button type="submit" class="ol-button ol-primary">发送</button></form>`;
+          root.prepend(nav); root.appendChild(box);
+          const m = { root, nav, box, tab: def, key: "", seen: null, unread: 0, remove() { nav.remove(); box.remove(); root.classList.remove("ol-chat-mode"); } };
+          nav.addEventListener("click", e => { const b = e.target.closest("[data-host-tab]"); if (!b) return; m.tab = b.dataset.hostTab; paintHost(m, true); if (m.tab === "chat") box.querySelector("input").focus({ preventScroll: true }); });
+          box.addEventListener("keydown", e => e.stopPropagation());
+          box.addEventListener("submit", e => { e.preventDefault(); sendChatText(box.querySelector("input"), box.querySelector("button")); });
+          hostMounts.push(m);
+        }
+      }
+      for (const m of hostMounts) paintHost(m);
+    }
+    function paintHost(m, force) {
+      m.root.classList.toggle("ol-chat-mode", m.tab === "chat");
+      m.nav.querySelectorAll("[data-host-tab]").forEach(b => { const on = b.dataset.hostTab === m.tab; b.classList.toggle("on", on); b.setAttribute("aria-selected", String(on)); });
+      const rows = chatRows();
+      if (!m.seen) m.seen = new Set(rows.map(r => r.id));
+      const fresh = rows.filter(r => r.id && !m.seen.has(r.id)); fresh.forEach(r => m.seen.add(r.id));
+      if (m.tab === "chat") m.unread = 0; else m.unread += fresh.filter(r => r.operatorId !== own()).length;
+      const badge = m.nav.querySelector(".ol-badge"); badge.hidden = !m.unread; badge.textContent = String(m.unread);
+      const markup = chatListMarkup(rows);
+      if (force || m.key !== markup) { m.key = markup; fillList(m.box.querySelector(".ol-side-chat"), markup); }
+    }
+
+    /* ---------- 角色资料 / 武器 / 背包（向房主要数据，只读显示） ---------- */
+    function myKit() {
+      const units = (displayState || view.state || {}).units || [];
+      const mine = (hs().units || []).filter(u => u.owner === own()).map(u => units.find(x => x.id === u.id)).filter(Boolean);
+      const hero = mine.find(u => !u.weaponOf) || mine[0];
+      return hero ? hero.kit : null;
+    }
+    function bagMarkup(bag) {
+      const items = (bag && bag.items) || [];
+      return `<div class="ol-card"><header><h2>背包</h2><button type="button" class="ol-button" data-bag="close">关闭</button></header><div class="ol-points"><span>奎支 ${esc(bag?.kuizhi ?? 0)}</span><span>水 ${esc(bag?.water ?? 0)} ml</span></div><ul class="ol-bag-list">${items.map(it => `<li><div><b>${esc(it.name)}</b><span>× ${esc(it.qty)}</span></div>${it.hint ? `<p>${esc(it.hint)}</p>` : ""}</li>`).join("") || '<li class="ol-muted">背包是空的。</li>'}</ul><p class="ol-muted">队伍共用的背包。使用道具请在自己的行动里选「使用道具」。</p></div>`;
+    }
+    async function openInfo(kind) {
+      if (pending || typeof api.sheetData !== "function") return;
+      let data = null;
+      const ok = await call(async () => { data = await api.sheetData(); if (data?.ok === false) return data; });
+      if (!ok || !data || destroyed) return;
+      const kit = myKit();
+      if (kind === "sheet" && global.HeroSheet) global.HeroSheet.open(data.sheets || [], kit);
+      else if (kind === "armory" && global.Armory) global.Armory.open(data.armory || [], kit);
+      else if (kind === "bag") { bagBox.innerHTML = bagMarkup(data.bag); bagBox.hidden = false; bagBox.querySelector('[data-bag="close"]')?.focus({ preventScroll: true }); }
+    }
+
     function render() {
       if (destroyed) return;
       view = api.getView() || {};
@@ -160,6 +291,10 @@
       }
       if (view.active) historyRows = mergeMessages([...historyRows, ...(view.messages || [])]);
       stage.hidden = !view.active || view.isHost;
+      side.hidden = !view.active || view.isHost || view.screen === "lobby";
+      document.body.classList.toggle("ol-has-side", !side.hidden);
+      document.body.classList.toggle("ol-host-online", !!(view.active && view.isHost));
+      document.body.classList.toggle("ol-in-battle", view.screen === "battle" || view.screen === "ended");
       dock.hidden = !view.active;
       document.body.classList.toggle("online-player", !!view.active && !view.isHost);
       if (view.active) {
@@ -170,6 +305,8 @@
       }
       panel.hidden = !(panelOpen || view.active && view.screen === "lobby");
       if (!panel.hidden) html(panel, view.active ? roomMarkup() : entryMarkup(), "panel");
+      renderSide();
+      mountHostChat();
       if (!stage.hidden) html(stage, `${notice || view.notice || view.packet?.systemNotice ? `<p class="ol-notice" role="status">${esc(notice || view.notice || view.packet?.systemNotice)}</p>` : ""}${stageMarkup()}`, "stage");
     }
     async function call(fn) {
@@ -256,6 +393,7 @@
         case "option": await choose(Number(b.dataset.option)); break;
         case "execute": if (currentMenu?.choices?.command && !disabled()) { const command = copy(currentMenu.choices.command); if (await call(() => api.submit(command))) { currentMenu = request = null; render(); } } break;
         case "endTurn": if (!disabled()) await call(() => api.submit({ type: "endTurn", actor: b.dataset.actor })); break;
+        case "info": await openInfo(b.dataset.info); break;
       }
     }
     async function playPacket(packet) {
@@ -302,6 +440,8 @@
     render();
     const instance = { render, open(which = "join") { entry = which; panelOpen = true; render(); }, destroy() {
       destroyed = true; playbackGeneration++; actionGeneration++; historyGeneration++; clearTimeout(toastTimer);
+      document.removeEventListener("compositionstart", onCompStart, true); document.removeEventListener("compositionend", onCompEnd, true);
+      while (hostMounts.length) hostMounts.pop().remove(); document.body.classList.remove("ol-has-side", "ol-host-online", "ol-in-battle");
       for (const off of unsubs) if (typeof off === "function") off();
       for (const node of [...nodes, ...titleButtons]) node.remove();
       document.body.classList.remove("online-player"); if (mounted === instance) mounted = null;

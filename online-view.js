@@ -268,7 +268,7 @@
     const row = item => !obj(item) ? null : identifiers(item, copyFields(item, {}, ["unitName", "operatorName", "name"], [], ["spent", "completed", "locked", "done", "current"]), ["id", "unitId", "actor", "operatorId", "owner", "weaponOf"]);
     for (const key of ["roster", "slots", "order", "units", "heroes"]) if (Array.isArray(get(view, key))) out[key] = get(view, key).slice(0, 200).map(row);
     out.confirmed = arr(get(view, "confirmed")).map(id).filter(Boolean);
-    out.chat = arr(get(view, "chat")).slice(-100).flatMap(m => {
+    out.chat = arr(get(view, "chat")).slice(-300).flatMap(m => {
       const t = text(get(m, "text"), 500); return t === null ? [] : [identifiers(m, copyFields(m, { text: t }, ["operatorName", "name"], ["at"], []), ["id", "operatorId"])];
     });
     out.messages = projectMessages(get(view, "messages"), context);
@@ -301,6 +301,11 @@
     copyFields(packet, out, ["type", "build", "roomCode", "hostName"], ["protocol", "seq", "requestId"], ["ok", "paused", "manualPhase"]);
     if (get(packet, "systemNotice") === "房主遇到处理错误，请等待主持人确认后继续") out.systemNotice = get(packet, "systemNotice");
     if (get(packet, "type") === "messageHistory") copyFields(packet, out, [], [], ["hasMore"]);
+    if (get(packet, "type") === "sheetData") {
+      out.sheets = projectSheets(get(packet, "sheets"));
+      out.armory = projectSheets(get(packet, "armory"));
+      out.bag = projectBagDetail(get(packet, "bag"));
+    }
     if (own(packet, "offlineWait")) {
       const wait = get(packet, "offlineWait");
       out.offlineWait = obj(wait) ? identifiers(wait, copyFields(wait, {}, ["name"], ["deadline"], []), ["actor", "owner"]) : null;
@@ -318,7 +323,30 @@
     // path for forwarding an opaque nested packet or raw save snapshot.
     return out;
   }
-  const api = { SCHEMA, projectPacket, projectUnit, projectState, projectTape, projectMessages, projectLogs, projectView, projectActionMenu, safeText: text, safeError };
+  /* 玩家请求的角色资料、武器页和背包明细：都是规则说明和公开数值，只去掉坚毅生命这类隐藏数值 */
+  const hiddenSheetKey = /^(shp|shpMax|shpBase|shpBonus|upOnShp)$/i;
+  function scrubHidden(value) {
+    if (Array.isArray(value)) return value.map(scrubHidden);
+    if (!obj(value)) return value;
+    const out = {};
+    for (const key of Object.keys(value)) if (!hiddenSheetKey.test(key)) out[key] = scrubHidden(value[key]);
+    return out;
+  }
+  function projectSheets(list) { return arr(list).slice(0, 16).map(row => scrubHidden(clone(row))).filter(obj); }
+  function projectBagDetail(bag) {
+    if (!obj(bag)) return null;
+    const out = copyFields(bag, {}, [], ["water", "kuizhi"], []);
+    out.items = arr(get(bag, "items")).slice(0, 200).flatMap(item => {
+      const itemId = id(get(item, "id")), qty = number(get(item, "qty"));
+      if (!itemId || qty === undefined || qty <= 0) return [];
+      const row = { id: itemId, name: text(get(item, "name"), 80) || itemId, qty };
+      const hint = text(get(item, "hint"), 300);   // 说明里提到坚毅生命的不发（隐藏数值）
+      if (hint) row.hint = hint;
+      return [row];
+    });
+    return out;
+  }
+  const api = { SCHEMA, projectPacket, projectSheets, projectBagDetail, projectUnit, projectState, projectTape, projectMessages, projectLogs, projectView, projectActionMenu, safeText: text, safeError };
   root.OnlineView = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof globalThis !== "undefined" ? globalThis : window);
