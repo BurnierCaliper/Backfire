@@ -31,32 +31,22 @@
   const DEFAULT_HEROES = ["ruby", "yuito", "hiaki", "tou", "xia", "chuan", "nora", "kolt", "helu", "ras"];
 
   const CHAT_KEEP = 300;   // 小队聊天保留的条数
-  /* 掷骰：「/r 1d20+3」「/r 2d6+1d4-1」「/r d100」。最多 50 颗骰子、每颗最多 1000 面。
-   * 由房主掷（结果写进小队记录），玩家改不了数字。 */
-  function rollDice(expr, random) {
-    const src = String(expr || "").replace(/\s+/g, "").toLowerCase() || "1d20";
-    if (!/^[+-]?(\d*d\d+|\d+)([+-](\d*d\d+|\d+))*$/.test(src) || src.length > 60) return null;
+  /* 掷骰（按钮式，d100）：选角色和熟练项，掷一颗 d100（种族优势掷两颗取低，劣势取高）。
+   * 点数越低越好：≤5 大成功；之后按这名角色这项熟练的成功线（手册的成功率表 × 100）
+   * 看过得了哪一档——极难 / 困难 / 普通 / 简单；都过不了就是失败。
+   * lines：{ extreme, hard, normal, easy }（百分比）。一级熟练是 12.5 / 25 / 50 / 100。 */
+  const ROLL_TIERS = [["extreme", "极难成功"], ["hard", "困难成功"], ["normal", "普通成功"], ["easy", "简单成功"]];
+  function rollTier(roll, lines) {
+    if (roll <= 5) return { key: "crit", name: "大成功" };
+    for (const [key, name] of ROLL_TIERS) if (roll <= (Number((lines || {})[key]) || 0)) return { key, name };
+    return { key: "fail", name: "失败" };
+  }
+  function rollD100(spec, random) {
     const rnd = typeof random === "function" ? random : Math.random;
-    const terms = src.match(/[+-]?(\d*d\d+|\d+)/g);
-    let total = 0, dice = 0;
-    const parts = [];
-    for (const t of terms) {
-      const sign = t[0] === "-" ? -1 : 1, body = t.replace(/^[+-]/, "");
-      if (body.includes("d")) {
-        const [a, b] = body.split("d"), n = a === "" ? 1 : Number(a), sides = Number(b);
-        if (!(n >= 1) || !(sides >= 2) || sides > 1000) return null;
-        dice += n; if (dice > 50) return null;
-        const rolls = Array.from({ length: n }, () => 1 + Math.floor(rnd() * sides));
-        total += sign * rolls.reduce((x, y) => x + y, 0);
-        parts.push({ sign, text: `${n}d${sides}[${rolls.join(",")}]`, rolls, sides });
-      } else {
-        const v = Number(body); if (v > 9999) return null;
-        total += sign * v; parts.push({ sign, text: String(v) });
-      }
-    }
-    const expr2 = terms.map((t, i) => i === 0 ? t.replace(/^\+/, "") : (t[0] === "-" || t[0] === "+" ? t : "+" + t)).join("");
-    const shown = parts.map((p, i) => (i === 0 ? (p.sign < 0 ? "-" : "") : p.sign < 0 ? " - " : " + ") + p.text).join("");
-    return { expr: expr2, total, parts, text: `${expr2}：${shown} = ${total}` };
+    const one = () => 1 + Math.floor(rnd() * 100);
+    const dice = spec.adv || spec.dis ? [one(), one()] : [one()];
+    const roll = spec.adv ? Math.min(...dice) : spec.dis ? Math.max(...dice) : dice[0];
+    return { dice, roll, tier: rollTier(roll, spec.lines) };
   }
   /* 检定（手册第一章）：每颗骰子 d100，掷出 ≤ 成功线（基础成功率 × 100）算成功。
    * 优势掷两颗取好的，劣势两颗都要过；人类「迎难直上」整个检定失败后再来一次。
@@ -157,6 +147,24 @@
       chat.push({ id: "chat-" + (++sequence), operatorId: id, operatorName: op.name, text: text.slice(0, 500), at: now(), roll: true });
       if (chat.length > CHAT_KEEP) chat.splice(0, chat.length - CHAT_KEEP);
     }
+    /** 按钮掷骰：spec 由房主按角色卡算好 { unitId, name, prof, level, adv, dis, lines, note }；secret 只有主持人能用（暗骰） */
+    function skillRoll(id, spec, secret) {
+      const op = operator(id);
+      if (!spec || typeof spec.prof !== "string" || !spec.unitId) fail("roll_bad", "先选角色和熟练项");
+      const owner = (rowFor(spec.unitId) || {}).operatorId || gmId;
+      if (id !== gmId && id !== owner) fail("table_owner", "只能替自己的角色掷骰");
+      if (secret && id !== gmId) fail("chat_secret", "只有主持人能暗骰");
+      const r = rollD100(spec, options.random);
+      const lv = ["没有熟练", "一级熟练", "二级熟练", "三级熟练"][Number(spec.level) || 0] || "";
+      const dice = r.dice.length > 1 ? `${r.dice.join("、")}（${spec.adv ? "优势取低" : "劣势取高"}）→ ${r.roll}` : String(r.roll);
+      const text = `${secret ? "暗骰" : "掷骰"} · ${spec.name}「${spec.prof}」${lv}：d100 ${dice} → ${r.tier.name}${spec.note ? "（" + String(spec.note).slice(0, 80) + "）" : ""}`;
+      const row = { id: "chat-" + (++sequence), operatorId: id, operatorName: op.name, text: text.slice(0, 500), at: now(),
+        roll: { total: r.roll, tier: r.tier.key } };
+      if (secret) row.secret = true;
+      chat.push(row);
+      if (chat.length > CHAT_KEEP) chat.splice(0, chat.length - CHAT_KEEP);
+      return emit("chat");
+    }
     /** 主持人发起检定。spec：{ prof, diff, diffName, note, targets: [{ unitId, name, base, adv, dis, reroll, level, perkText }] } */
     function openCheck(id, spec) {
       operator(id);
@@ -183,7 +191,7 @@
       t.result = rollCheck(t, options.random);
       t.result.by = id;
       const shown = t.result.rolls.map(r => r.roll == null ? r.label : `${r.label ? r.label + " " : ""}${r.roll}`).join("，");
-      tableNote(id, `检定 · ${t.name}「${check.prof}」${check.diffName}（成功率 ${Math.round(t.base * 1000) / 10}%）：d100 ${shown} → ${t.result.ok ? "成功" : "失败"}`);
+      tableNote(id, `检定 · ${t.name}「${check.prof}」${check.diffName}（成功率 ${Math.round(t.base * 1000) / 10}%）：d100 ${shown} → ${t.result.ok ? (t.result.rolls.some(r => r.ok && r.roll != null && r.roll <= 5) ? "大成功" : "成功") : "失败"}`);
       if (check.targets.every(x => x.result)) check.status = "done";
       return emit("table");
     }
@@ -420,17 +428,6 @@
       // 小队聊天在大厅、探索和战斗中都开放
       if (typeof text !== "string" || !text.trim()) fail("chat_empty", "消息不能为空");
       const row = { id: "chat-" + (++sequence), operatorId: id, operatorName: op.name, text: text.trim().slice(0, 500), at: now() };
-      // 「/r 表达式 [说明]」公开掷骰；「/gr …」主持人暗骰，只有主持人看得到
-      const cmd = row.text.match(/^\/(r|roll|gr)(?:\s+([0-9dD+\-\s]*[0-9dD]))?(?:\s+(.*))?$/i);
-      if (cmd) {
-        const secret = cmd[1].toLowerCase() === "gr";
-        if (secret && id !== gmId) { sequence--; fail("chat_secret", "只有主持人能暗骰"); }
-        const r = rollDice(cmd[2] || "1d20", options.random);
-        if (!r) { sequence--; fail("chat_dice", "骰子写法不对，例：/r 1d20+3、/r 2d6"); }
-        row.text = `${secret ? "暗骰" : "掷骰"} ${r.text}${cmd[3] ? "（" + cmd[3].trim().slice(0, 80) + "）" : ""}`;
-        row.roll = { total: r.total, expr: r.expr };
-        if (secret) row.secret = true;
-      }
       chat.push(row);
       if (chat.length > CHAT_KEEP) chat.splice(0, chat.length - CHAT_KEEP);
       return emit("chat");
@@ -474,7 +471,7 @@
     setAssignments(options.assignments || {});
     return { snapshot, reconcile, setAssignments, beginRound, pick: place, confirm, forceStart, move, acceptSwap,
       assertAction, finishUnit, markSpent, openAsk, answer, tick, askFor, chat: chatMessage, endBattle, reset, checkpoint, restore,
-      openCheck, rollCheck: rollCheckFor, closeCheck, requestAttr, decideAttr,
+      openCheck, rollCheck: rollCheckFor, closeCheck, requestAttr, decideAttr, skillRoll,
       ownerOf: unitId => (rowFor(unitId) || {}).operatorId || null,
       extendAsk(ms) { if (ask && Number.isFinite(ms) && ms > 0) { ask.deadline += ms; emit("askResumed"); } },
       onChange(fn) { changes.add(fn); return () => changes.delete(fn); },
@@ -509,7 +506,7 @@
     const host = endpoint(hostId, true);
     return { host, connect: id => endpoint(id, false), close() { for (const entry of [...endpoints.values()]) entry.close(); closed = true; } };
   }
-  const Hotseat = { create, rollDice, rollCheck }, LocalTransport = { createHub };
+  const Hotseat = { create, rollCheck, rollTier, rollD100 }, LocalTransport = { createHub };
   root.Hotseat = Hotseat; root.LocalTransport = LocalTransport;
   if (typeof module !== "undefined" && module.exports) module.exports = { Hotseat, LocalTransport };
 })(typeof globalThis !== "undefined" ? globalThis : window);

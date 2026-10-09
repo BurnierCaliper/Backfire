@@ -317,7 +317,8 @@
       if (get(m, "secret")) return [];   // 主持人暗骰：只在房主本机
       const t = text(get(m, "text"), 500); if (t === null) return [];
       const dto = identifiers(m, copyFields(m, { text: t }, ["operatorName", "name"], ["at"], []), ["id", "operatorId"]);
-      if (get(m, "roll")) dto.roll = true;
+      const roll = get(m, "roll");
+      if (roll) { dto.roll = true; const tier = obj(roll) ? get(roll, "tier") : null; if (["crit", "extreme", "hard", "normal", "easy", "fail"].includes(tier)) dto.tier = tier; }
       return [dto];
     });
     // 主持人发起的检定：熟练项、难度、每个人的成功率和掷出的点数（都是公开的）

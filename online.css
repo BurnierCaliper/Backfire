@@ -198,3 +198,12 @@ body.ol-has-side .ol-toast { right: 344px; }
 .ol-record table { border-collapse: collapse; width: 100%; font-size: 13px; font-variant-numeric: tabular-nums; }
 .ol-record th, .ol-record td { padding: 4px 6px; border-bottom: 1px solid #3a3229; text-align: right; white-space: nowrap; }
 .ol-record th:first-child, .ol-record td:first-child { text-align: left; }
+
+/* 掷骰按钮与对话框（d100） */
+.ol-side-form .ol-dice { flex: 0 0 auto; padding-inline: 10px; }
+.ol-roll .ol-card { max-width: 460px; display: grid; gap: 10px; }
+.ol-roll label { display: grid; gap: 4px; }
+.ol-roll .ol-check-line { display: flex; gap: 8px; align-items: center; }
+.ol-roll-lines { margin: 0; font-size: 13px; color: #cdbfa5; }
+.ol-side-chat li.ol-tier-crit p { color: #ffd84a; text-shadow: 0 0 6px #ffb20066; }
+.ol-side-chat li.ol-tier-fail p { color: #e06a4f; }

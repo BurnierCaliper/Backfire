@@ -594,22 +594,32 @@ test("联机：四区方形棋盘，玩家画面摆成 2×2，4 区和所有间�
   assert.deepEqual(f.errors, []);
 });
 
-test("联机：小队频道掷骰 / 主持人暗骰；主持人发起检定、玩家自己掷；玩家申请属性点、主持人同意后才加上", { timeout: 120000 }, async t => {
+test("联机：按钮掷 d100 / 主持人暗骰；主持人发起检定、玩家自己掷；玩家申请属性点、主持人同意后才加上", { timeout: 120000 }, async t => {
   const f = await fixture(t); if (!f) return;
   const { host, alice, bob } = f;
   const shot = async (page, name) => { if (process.env.BACKFIRE_SHOTS) await page.screenshot({ path: path.join(process.env.BACKFIRE_SHOTS, name + ".png") }); };
   await host.evaluate(() => { OnlineGame.start(); });
   for (const page of [alice, bob]) await page.waitForFunction(() => OnlineGame.getView().screen === "exploration" && !document.getElementById("online-side").hidden);
-  // 掷骰
-  await alice.fill("#ol-side-text", "/r 1d20+3 撬锁");
-  await alice.click("#ol-side-form button");
-  try { await bob.waitForFunction(() => /掷骰 1d20\+3[:：]1d20\[\d+\] \+ 3 = \d+[(（]撬锁[)）]/.test(document.querySelector("#online-side .ol-side-chat").textContent), null, { timeout: 5000 }); }
-  catch (e) { throw new Error(JSON.stringify(await host.evaluate(() => HotseatGame.getView().chat)) + " | " + await bob.evaluate(() => document.querySelector("#online-side .ol-side-chat").textContent) + " | " + await alice.evaluate(() => OnlineGame.getView().notice)); }
-  assert.equal(await bob.locator("#online-side .ol-side-chat li.ol-roll").count(), 1);
-  assert.equal((await host.evaluate(() => OnlineGame.submit({ type: "chat", text: "/gr 1d100 伏兵" }))).ok, true);
-  await host.waitForFunction(() => HotseatGame.getView().chat.some(m => m.secret));
+  // 掷骰：按钮 → 选熟练项 → 掷 d100
+  await alice.click('#online-side [data-roll-open]');
+  await alice.waitForSelector("#online-roll:not([hidden]) #ol-roll-prof");
+  await alice.selectOption("#ol-roll-prof", "数据操作");
+  assert.match(await alice.locator("#online-roll").innerText(), /二级熟练[\s\S]*大成功 ≤5 · 极难 ≤25 · 困难 ≤50 · 普通 \/ 简单 ≤100/, "瑞比数据操作二级");
+  await alice.fill("#ol-roll-note", "黑进门禁");
+  await shot(alice, "roll-dialog");
+  await alice.click('#online-roll [data-roll="go"]');
+  await bob.waitForFunction(() => /掷骰 · 瑞比「数据操作」二级熟练[:：]d100 \d+ → (大成功|极难成功|困难成功|普通成功|简单成功|失败)[(（]黑进门禁[)）]/.test(document.querySelector("#online-side .ol-side-chat").textContent));
+  await alice.waitForSelector("#online-roll", { state: "hidden" });
+  assert.equal(await alice.locator("#ol-roll-secret").count(), 0, "玩家没有暗骰选项");
+  // 主持人暗骰
+  await host.click('#tr-tabs [data-tab="party"]');
+  await host.locator('.tr-log [data-host-tab="chat"]').click();
+  await host.click('.tr-log [data-roll-open]');
+  await host.check("#ol-roll-secret");
+  await host.click('#online-roll [data-roll="go"]');
+  await host.waitForFunction(() => HotseatGame.getView().chat.some(m => m.secret && /^暗骰 · /.test(m.text)));
   await alice.waitForTimeout(300);
-  assert.ok(!/暗骰|伏兵/.test(await alice.evaluate(() => JSON.stringify(OnlineGame.getView()))), "玩家收不到暗骰");
+  assert.ok(!/暗骰/.test(await alice.evaluate(() => JSON.stringify(OnlineGame.getView()))), "玩家收不到暗骰");
   // 检定：主持人在「检定」页发起
   await host.click('#tr-tabs [data-tab="checks"]');
   await host.selectOption("#ck-prof", "侦察");

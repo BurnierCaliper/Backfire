@@ -37,10 +37,14 @@
     toast.hidden = true;
     // 玩家右侧栏：「战斗 / 记录」和「小队」两个频道。输入框只建一次，收到新消息只更新列表，不会打断输入
     const side = make("aside", "online-side", "ol-side", { "aria-label": "战斗记录与小队聊天" });
-    side.innerHTML = `<nav class="ol-side-tabs" role="tablist"><button type="button" role="tab" data-side="log" class="ol-tab"></button><button type="button" role="tab" data-side="chat" class="ol-tab">小队<span class="ol-badge" hidden></span></button></nav><ol class="ol-side-log" aria-live="polite"></ol><ol class="ol-side-chat" aria-live="polite"></ol><form class="ol-side-form" id="ol-side-form"><label class="ol-sr-only" for="ol-side-text">小队消息</label><input id="ol-side-text" maxlength="500" autocomplete="off" placeholder="和队友说点什么…（掷骰：/r 1d20+3）"><button type="submit" class="ol-button ol-primary">发送</button></form>`;
+    side.innerHTML = `<nav class="ol-side-tabs" role="tablist"><button type="button" role="tab" data-side="log" class="ol-tab"></button><button type="button" role="tab" data-side="chat" class="ol-tab">小队<span class="ol-badge" hidden></span></button></nav><ol class="ol-side-log" aria-live="polite"></ol><ol class="ol-side-chat" aria-live="polite"></ol><form class="ol-side-form" id="ol-side-form"><label class="ol-sr-only" for="ol-side-text">小队消息</label><button type="button" class="ol-button ol-dice" data-roll-open="1" title="选一个熟练项掷 d100">🎲 掷骰</button><input id="ol-side-text" maxlength="500" autocomplete="off" placeholder="和队友说点什么…"><button type="submit" class="ol-button ol-primary">发送</button></form>`;
     side.hidden = true;
     const bagBox = make("section", "online-bag", "ol-overlay ol-bag", { role: "dialog", "aria-label": "背包" });
     bagBox.hidden = true;
+    // 掷骰：选角色、选熟练项，掷一颗 d100（点数越低越好）
+    const rollBox = make("section", "online-roll", "ol-overlay ol-bag ol-roll", { role: "dialog", "aria-label": "掷骰" });
+    rollBox.hidden = true;
+    const rollForm = { unit: "", prof: "", note: "", secret: false };
     let sideTab = { battle: "log", other: "chat" }, sideKeys = { log: "", chat: "" }, seenChat = new Set(), chatPrimed = false, unread = 0, chatSending = false;
     side.addEventListener("click", event => {
       const tab = event.target.closest("[data-side]"); if (!tab) return;
@@ -50,6 +54,20 @@
     side.addEventListener("keydown", event => event.stopPropagation());
     side.addEventListener("submit", event => { event.preventDefault(); sendSideChat(); });
     bagBox.addEventListener("click", event => { if (event.target === bagBox || event.target.closest('[data-bag="close"]')) bagBox.hidden = true; });
+    const onRollOpen = event => { if (event.target.closest && event.target.closest("[data-roll-open]")) openRoll(); };
+    document.addEventListener("click", onRollOpen);
+    rollBox.addEventListener("click", event => {
+      if (event.target === rollBox || event.target.closest('[data-roll="close"]')) { rollBox.hidden = true; return; }
+      if (event.target.closest('[data-roll="go"]')) doRoll();
+    });
+    rollBox.addEventListener("change", event => {
+      const t = event.target;
+      if (t.id === "ol-roll-unit") { rollForm.unit = t.value; paintRoll(); }
+      else if (t.id === "ol-roll-prof") { rollForm.prof = t.value; paintRoll(); }
+      else if (t.id === "ol-roll-secret") rollForm.secret = t.checked;
+    });
+    rollBox.addEventListener("input", event => { if (event.target.id === "ol-roll-note") rollForm.note = event.target.value; });
+    rollBox.addEventListener("keydown", event => { event.stopPropagation(); if (event.key === "Escape") rollBox.hidden = true; if (event.key === "Enter" && event.target.id === "ol-roll-note") doRoll(); });
     bagBox.addEventListener("keydown", event => { event.stopPropagation(); if (event.key === "Escape") bagBox.hidden = true; });
     for (const node of [dock, stage, panel]) {
       node.addEventListener("click", click);
@@ -213,7 +231,7 @@
     const chatRows = () => (hs().chat || []).filter(m => m && typeof m.text === "string");
     const clock = at => { if (!at) return ""; const d = new Date(at); return isNaN(d) ? "" : `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
     function chatListMarkup(rows) {
-      return rows.map(m => `<li class="${m.operatorId && m.operatorId === own() ? "ol-mine" : ""}${m.roll ? " ol-roll" : ""}${m.secret ? " ol-secret" : ""}"><div><b>${esc(m.name || m.operatorName || playerName(m.operatorId))}</b><small>${esc(clock(m.at))}</small></div><p>${esc(m.text)}</p></li>`).join("") || '<li class="ol-muted">还没有人说话。消息所有人都能看到，并一直保留在记录里。</li>';
+      return rows.map(m => `<li class="${m.operatorId && m.operatorId === own() ? "ol-mine" : ""}${m.roll ? " ol-roll" : ""}${m.tier ? " ol-tier-" + m.tier : ""}${m.secret ? " ol-secret" : ""}"><div><b>${esc(m.name || m.operatorName || playerName(m.operatorId))}</b><small>${esc(clock(m.at))}</small></div><p>${esc(m.text)}</p></li>`).join("") || '<li class="ol-muted">还没有人说话。消息所有人都能看到，并一直保留在记录里。</li>';
     }
     /** 更新列表（只换列表内容，不碰输入框）；原来在底部就继续贴底 */
     function fillList(list, markup) {
@@ -272,7 +290,7 @@
           const nav = document.createElement("nav"); nav.className = "ol-host-tabs"; nav.setAttribute("role", "tablist");
           nav.innerHTML = `<button type="button" role="tab" data-host-tab="log" class="ol-tab">${label}</button><button type="button" role="tab" data-host-tab="chat" class="ol-tab">小队<span class="ol-badge" hidden></span></button>`;
           const box = document.createElement("div"); box.className = "ol-host-chat";
-          box.innerHTML = `<ol class="ol-side-chat" aria-live="polite"></ol><form class="ol-side-form"><input maxlength="500" autocomplete="off" aria-label="小队消息" placeholder="说点什么…（/r 1d20 公开掷骰，/gr 1d20 暗骰）"><button type="submit" class="ol-button ol-primary">发送</button></form>`;
+          box.innerHTML = `<ol class="ol-side-chat" aria-live="polite"></ol><form class="ol-side-form"><button type="button" class="ol-button ol-dice" data-roll-open="1" title="选角色和熟练项掷 d100（可以暗骰）">🎲</button><input maxlength="500" autocomplete="off" aria-label="小队消息" placeholder="说点什么…"><button type="submit" class="ol-button ol-primary">发送</button></form>`;
           root.prepend(nav); root.appendChild(box);
           const m = { root, nav, box, tab: def, key: "", seen: null, unread: 0, remove() { nav.remove(); box.remove(); root.classList.remove("ol-chat-mode"); } };
           nav.addEventListener("click", e => { const b = e.target.closest("[data-host-tab]"); if (!b) return; m.tab = b.dataset.hostTab; paintHost(m, true); if (m.tab === "chat") box.querySelector("input").focus({ preventScroll: true }); });
@@ -305,6 +323,48 @@
     function bagMarkup(bag) {
       const items = (bag && bag.items) || [];
       return `<div class="ol-card"><header><h2>背包</h2><button type="button" class="ol-button" data-bag="close">关闭</button></header><div class="ol-points"><span>奎支 ${esc(bag?.kuizhi ?? 0)}</span><span>水 ${esc(bag?.water ?? 0)} ml</span></div><ul class="ol-bag-list">${items.map(it => `<li><div><b>${esc(it.name)}</b><span>× ${esc(it.qty)}</span></div>${it.hint ? `<p>${esc(it.hint)}</p>` : ""}</li>`).join("") || '<li class="ol-muted">背包是空的。</li>'}</ul><p class="ol-muted">队伍共用的背包。使用道具请在自己的行动里选「使用道具」。</p></div>`;
+    }
+    /* ---------- 掷骰（按钮式 d100） ---------- */
+    const LV = ["没有熟练", "一级熟练", "二级熟练", "三级熟练"];
+    /** 能替谁掷：玩家是自己的角色，主持人是全队 */
+    function rollUnits() {
+      const units = ((displayState || view.state || {}).units || []).filter(u => u.isPlayer && !u.weaponOf && !u.hidden && u.kit);
+      if (view.isHost) return units;
+      const mine = new Set((hs().units || []).filter(u => u.owner === own()).map(u => u.id));
+      return units.filter(u => mine.has(u.id));
+    }
+    function profLevel(kit, prof) {
+      const p = typeof heroProfile === "function" ? heroProfile(kit) : null;
+      return Math.min(3, Number(((p && p.profs) || {})[prof]) || 0);
+    }
+    function rollLines(level) {
+      const row = (typeof ROGUE_CHECKS !== "undefined" && ROGUE_CHECKS.chance[level]) || [0, 0, 0, 0];
+      const pct = x => Math.floor(x * 100 + 1e-9);   // 点数是整数：12.5 就是 ≤12
+      const out = [];
+      [["大成功", 5], ["极难", pct(row[3])], ["困难", pct(row[2])], ["普通", pct(row[1])], ["简单", pct(row[0])]].filter(([, v]) => v > 5).forEach(([n, v]) => {
+        const last = out[out.length - 1];
+        if (last && last.v === v) last.n += " / " + n; else out.push({ n, v });
+      });
+      return ["大成功 ≤5"].concat(out.map(x => `${x.n} ≤${x.v}`)).join(" · ") + (out.length && out[out.length - 1].v < 100 ? ` · 更高是失败` : "");
+    }
+    function paintRoll() {
+      const units = rollUnits();
+      if (!units.some(u => u.id === rollForm.unit)) rollForm.unit = units[0]?.id || "";
+      const u = units.find(x => x.id === rollForm.unit);
+      const groups = typeof PROFICIENCIES !== "undefined" ? PROFICIENCIES : {};
+      const all = Object.values(groups).flat();
+      if (!all.includes(rollForm.prof)) rollForm.prof = all[0] || "";
+      const profOpts = Object.keys(groups).map(g => `<optgroup label="${esc(g)}">${groups[g].map(p => { const lv = u ? profLevel(u.kit, p) : 0; return option(p, `${p}${lv ? "（" + LV[lv] + "）" : ""}`, p === rollForm.prof); }).join("")}</optgroup>`).join("");
+      const level = u ? profLevel(u.kit, rollForm.prof) : 0;
+      const perks = u && typeof checkPerksFor === "function" ? checkPerksFor(u.kit, rollForm.prof, false) : {};
+      rollBox.innerHTML = `<div class="ol-card"><header><h2>掷骰 · d100</h2><button type="button" class="ol-button" data-roll="close">关闭</button></header>${units.length ? `<label>角色<select id="ol-roll-unit">${units.map(x => option(x.id, x.name, x.id === rollForm.unit)).join("")}</select></label><label>熟练项<select id="ol-roll-prof">${profOpts}</select></label><p class="ol-roll-lines"><b>${esc(LV[level])}</b>　点数越低越好：${esc(rollLines(level))}${perks.adv ? "（种族优势：掷两颗取低）" : perks.dis ? "（种族劣势：掷两颗取高）" : ""}</p><label>说明（可不填）<input id="ol-roll-note" maxlength="80" value="${esc(rollForm.note)}" placeholder="比如：撬开仓库的锁"></label>${view.isHost ? `<label class="ol-check-line"><input type="checkbox" id="ol-roll-secret"${rollForm.secret ? " checked" : ""}> 暗骰（结果只有主持人看得到）</label>` : ""}<footer><button type="button" class="ol-button ol-primary" data-roll="go"${disabled() ? " disabled" : ""}>掷 d100</button></footer>` : '<p class="ol-muted">还没有分配到你的角色。</p>'}</div>`;
+    }
+    function openRoll() { if (!view.active) return; paintRoll(); rollBox.hidden = false; rollBox.querySelector("#ol-roll-prof, [data-roll=close]")?.focus({ preventScroll: true }); }
+    async function doRoll() {
+      if (!rollForm.unit || !rollForm.prof || disabled()) return;
+      const cmd = { type: "skillRoll", unitId: rollForm.unit, prof: rollForm.prof, note: rollForm.note.trim() };
+      if (view.isHost && rollForm.secret) cmd.secret = true;
+      if (await call(() => api.submit(cmd))) { rollForm.note = ""; rollBox.hidden = true; }
     }
     /** 最近 10 场战绩：每场的结果、评价、掉落，和每个人的数据 */
     function recordMarkup(list) {
@@ -492,6 +552,7 @@
     const instance = { render, open(which = "join") { entry = which; panelOpen = true; render(); }, destroy() {
       destroyed = true; playbackGeneration++; actionGeneration++; historyGeneration++; clearTimeout(toastTimer);
       document.removeEventListener("compositionstart", onCompStart, true); document.removeEventListener("compositionend", onCompEnd, true);
+      document.removeEventListener("click", onRollOpen);
       while (hostMounts.length) hostMounts.pop().remove(); document.body.classList.remove("ol-has-side", "ol-host-online", "ol-in-battle");
       for (const off of unsubs) if (typeof off === "function") off();
       for (const node of [...nodes, ...titleButtons]) node.remove();

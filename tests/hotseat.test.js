@@ -297,30 +297,31 @@ test("小队聊天：战斗中也能发，最多保留 300 条，重建会话时
   assert.equal(new Set(ids).size, ids.length, "新消息编号不和旧的重复");
 });
 
-test("掷骰：/r 由房主掷、结果写进小队记录；/gr 只有主持人能用，玩家投影里看不到", () => {
-  const f = fixture(), s = f.s;
-  const r = Hotseat.rollDice("2d6+1d4-1", (() => { const seq = [0, 0.5, 0.99]; let i = 0; return () => seq[i++]; })());
-  assert.deepEqual([r.total, r.expr, r.text], [1 + 4 + 4 - 1, "2d6+1d4-1", "2d6+1d4-1：2d6[1,4] + 1d4[4] - 1 = 8"]);
-  assert.equal(Hotseat.rollDice("d20+x"), null);
-  assert.equal(Hotseat.rollDice("99d6"), null, "最多 50 颗");
-  s.chat("a", "/r 1d20+3 撬锁");
+test("掷骰（d100）：≤5 大成功，再按熟练的成功线分极难 / 困难 / 普通 / 简单，都不过是失败；暗骰只有主持人能用、玩家看不到", () => {
+  const L1 = { extreme: 12.5, hard: 25, normal: 50, easy: 100 }, L0 = { extreme: 0, hard: 0, normal: 0, easy: 50 };
+  const tier = (roll, lines) => Hotseat.rollTier(roll, lines).name;
+  assert.deepEqual([1, 5, 6, 12, 13, 25, 26, 50, 51, 100].map(r => tier(r, L1)),
+    ["大成功", "大成功", "极难成功", "极难成功", "困难成功", "困难成功", "普通成功", "普通成功", "简单成功", "简单成功"]);
+  assert.deepEqual([5, 30, 50, 51].map(r => tier(r, L0)), ["大成功", "简单成功", "简单成功", "失败"], "没有熟练只能过简单");
+  const adv = Hotseat.rollD100({ adv: true, lines: L1 }, (() => { const q = [0.7, 0.2]; let k = 0; return () => q[k++]; })());
+  assert.deepEqual([adv.dice, adv.roll, adv.tier.name], [[71, 21], 21, "困难成功"], "优势取低");
+  const dis = Hotseat.rollD100({ dis: true, lines: L1 }, (() => { const q = [0.7, 0.2]; let k = 0; return () => q[k++]; })());
+  assert.equal(dis.roll, 71, "劣势取高");
+  const f = fixture({ random: () => 0.03 }), s = f.s;
+  s.skillRoll("a", { unitId: "ruby", name: "瑞比", prof: "侦察", level: 1, lines: L1, note: "看门后" });
   const row = s.snapshot().chat.at(-1);
-  assert.match(row.text, /^掷骰 1d20\+3：1d20\[\d+\] \+ 3 = \d+（撬锁）$/);
-  assert.ok(row.roll.total >= 4 && row.roll.total <= 23);
-  s.chat("b", "/r");
-  assert.match(s.snapshot().chat.at(-1).text, /^掷骰 1d20：/, "不写就是 1d20");
-  assert.throws(() => s.chat("a", "/gr 1d20"), /只有主持人/);
-  assert.throws(() => s.chat("a", "/r 1d"), /骰子写法/);
-  s.chat("gm", "/gr 1d100 伏兵");
-  const secret = s.snapshot().chat.at(-1);
-  assert.equal(secret.secret, true);
-  assert.match(secret.text, /^暗骰 1d100：/);
+  assert.equal(row.text, "掷骰 · 瑞比「侦察」一级熟练：d100 4 → 大成功（看门后）");
+  assert.deepEqual(row.roll, { total: 4, tier: "crit" });
+  assert.throws(() => s.skillRoll("b", { unitId: "ruby", name: "瑞比", prof: "侦察", lines: L1 }), /只能替自己的角色/);
+  assert.throws(() => s.skillRoll("a", { unitId: "ruby", name: "瑞比", prof: "侦察", lines: L1 }, true), /只有主持人能暗骰/);
+  s.skillRoll("gm", { unitId: "hiaki", name: "绯秋", prof: "欺瞒", level: 1, lines: L1 }, true);
+  assert.equal(s.snapshot().chat.at(-1).secret, true);
   const V = require("../online-view");
   const view = V.projectView({ chat: s.snapshot().chat }, { recipientId: "a" });
   assert.ok(!view.chat.some(m => /暗骰/.test(m.text)), "玩家看不到暗骰");
-  assert.equal(view.chat.find(m => /撬锁/.test(m.text)).roll, true);
-  const ids = s.snapshot().chat.map(m => m.id);
-  assert.equal(new Set(ids).size, ids.length, "失败的掷骰不占编号");
+  assert.deepEqual([view.chat.at(-1).roll, view.chat.at(-1).tier], [true, "crit"]);
+  s.chat("a", "/r 1d20");
+  assert.equal(s.snapshot().chat.at(-1).text, "/r 1d20", "文字指令不再掷骰，原样当聊天");
 });
 
 test("检定：主持人发起，玩家只能替自己的角色掷，结果写进小队频道；跨重建保留", () => {

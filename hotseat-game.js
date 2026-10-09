@@ -12,7 +12,7 @@
   const packetListeners = new Set();
   const listeners = new Set(), authorityContext = {}, actionTypes = new Set(["skill", "move", "standUp", "useItem"]);
   const automatic = new Set(["battle.supportInfo", "battle.checkSolo", "battle.rememberCampaign", "battle.loadCampaign"]);
-  const tableTypes = new Set(["checkOpen", "checkRoll", "checkClose", "attrRequest", "attrDecide"]);
+  const tableTypes = new Set(["checkOpen", "checkRoll", "checkClose", "attrRequest", "attrDecide", "skillRoll"]);
   const orderTypes = new Set(["orderPick", "orderConfirm", "orderStart", "orderMove", "orderSwapAccept", "answer", "chat", ...tableTypes]);
   const copy = value => JSON.parse(JSON.stringify(value));
   const active = () => !!(enabled && configured && session && authority && !state.solo);
@@ -80,7 +80,7 @@
       phase: s?.phase === "selecting" ? "picking" : s?.phase || "setup", currentUnitId: s?.currentUnitId || null,
       order: (s?.slots || []).map(r => r && ({ actor: r.unitId, name: r.unitName, owner: r.operatorId, locked: r.spent, done: r.completed, current: r.unitId === s.currentUnitId })),
       confirmed: s?.confirmed || [], swap: s?.pendingSwaps?.length ? { requestId: s.pendingSwaps[0].id, from: s.pendingSwaps[0].actor, to: s.pendingSwaps[0].target, recipient: s.pendingSwaps[0].responder } : null,
-      ask: s?.ask || null, chat: (s?.chat || []).map(r => ({ id: r.id, operatorId: r.operatorId, name: r.operatorName, text: r.text, at: r.at, roll: !!r.roll, secret: !!r.secret })),
+      ask: s?.ask || null, chat: (s?.chat || []).map(r => ({ id: r.id, operatorId: r.operatorId, name: r.operatorName, text: r.text, at: r.at, roll: r.roll ? (typeof r.roll === "object" ? { tier: r.roll.tier || null } : true) : false, tier: r.roll && r.roll.tier || null, secret: !!r.secret })),
       checks: copy(s?.table?.checks || []), attrRequests: copy(s?.table?.attrs || []),
       canConfigure: !network && canConfigure() && (!configured || id === gm()), canDisable: !network && canConfigure() && (!configured || id === gm()) };
   }
@@ -204,6 +204,20 @@
     });
     return { prof, diff: c.diff, diffName: K.diffs[c.diff].name, note: typeof c.note === "string" ? c.note : "", targets };
   }
+  /** 按钮掷骰：这名角色这项熟练的等级、种族优劣势、各档成功线（手册成功率表 × 100） */
+  function rollSpec(c) {
+    const K = root.ROGUE_CHECKS || (typeof ROGUE_CHECKS !== "undefined" ? ROGUE_CHECKS : null);
+    const u = heroes().find(h => h.id === c.unitId); if (!u) fail("没有这名角色");
+    const prof = profName(String(c.prof || ""));
+    if (!PROF_LIST.includes(prof)) fail("没有这个熟练项");
+    const p = heroProfile(u.kit), profs = (p && p.profs) || {};
+    const level = Math.min(PROF_MAX, Number(profs[prof] || profs[c.prof]) || 0);
+    const hp = (u.layers || []).reduce((a, l) => a + (Number(l.current) || 0), 0), max = (u.layers || []).reduce((a, l) => a + (Number(l.max) || 0), 0);
+    const perks = checkPerksFor(u.kit, prof, hp * 2 < max);
+    const row = K ? K.chance[level] : [0, 0, 0, 0];
+    return { unitId: u.id, name: u.name, prof, level, adv: perks.adv, dis: perks.dis, note: typeof c.note === "string" ? c.note : "",
+      lines: { easy: row[0] * 100, normal: row[1] * 100, hard: row[2] * 100, extreme: row[3] * 100 } };
+  }
   /** 属性点申请：自己的角色、还有点数、这一项能加（8 级那点不能和以前加过的同一项） */
   function attrUnit(c) {
     const u = heroes().find(h => h.id === c.unitId); if (!u) fail("没有这名角色");
@@ -221,6 +235,7 @@
     checkClose: c => session.closeCheck(sender, c.checkId),
     attrRequest: c => { const u = attrUnit(c); return session.requestAttr(sender, u.id, c.attr, u.name); },
     attrDecide: c => session.decideAttr(sender, c.requestId, c.decision),
+    skillRoll: c => session.skillRoll(sender, rollSpec(c), !!c.secret),
     answer: c => { if (choice) { const old = choice; choice = null; old.finish(c.extra.index); return { accepted: true }; } return session.answer(sender, c.askId, { unitId: c.helper || null, extra: c.extra || {} }); }
   };
   for (const [type, fn] of Object.entries(orderHandlers)) {
@@ -246,7 +261,7 @@
   if (root.addEventListener) root.addEventListener("error", event => {
     if (active() && event.error?.code === "HOTSEAT_REJECT") { notice = event.error.message; notify(); event.preventDefault(); }
   });
-  root.HotseatGame = { getView, getViewFor, configure, submit, isActive: active, isRequested: () => enabled && !state.solo, checkSpec,
+  root.HotseatGame = { getView, getViewFor, configure, submit, isActive: active, isRequested: () => enabled && !state.solo, checkSpec, rollSpec,
     enableOnline(value) { network = true; enabled = true; if (!configured) playerId = value.players.find(p => p.gm).id; return configure(value); },
     isNetwork: () => network,
     receiveFrom(id, cmd) { return this.withOperator(id, () => submit(cmd)); },
