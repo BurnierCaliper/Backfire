@@ -167,3 +167,24 @@ body.ol-has-side .ol-toast { right: 344px; }
   body.ol-has-side .hs-overlay { right: 0; bottom: 38vh; }
 }
 @media (prefers-reduced-motion: reduce) { .ol-unit.ol-impact { animation: none; } .ol-popup.ol-visible { transition: none; } }
+
+/* 小队频道里的掷骰：醒目一点；主持人暗骰只在主持人本机，用虚线框标出来 */
+.ol-side-chat li.ol-roll p { color: var(--sk-mint, #39e6b4); font-weight: 700; font-variant-numeric: tabular-nums; }
+.ol-side-chat li.ol-secret { outline: 1px dashed #c99a46; outline-offset: -2px; }
+.ol-side-chat li.ol-secret p { color: #c99a46; }
+
+/* 检定、属性点申请 */
+.ol-checks { display: grid; gap: 12px; margin: 0 0 16px; }
+.ol-check { padding: 12px 14px; background: #1f1a14; border: 1px solid #4d4337; }
+.ol-check.ol-open { border-color: var(--sk-brass, #c99a46); box-shadow: 3px 3px #0006; }
+.ol-check header { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.ol-check h3 { margin: 0; color: var(--sk-brass, #c99a46); }
+.ol-check ul { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 8px; }
+.ol-check li { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ol-check li > span { display: grid; }
+.ol-check .ol-ok { color: var(--sk-mint, #39e6b4); }
+.ol-check .ol-bad { color: #e06a4f; }
+.ol-attr { margin: 8px 0; padding: 8px; border: 1px dashed var(--sk-brass, #c99a46); }
+.ol-attr p { margin: 0 0 6px; }
+.ol-attr-btns { display: flex; flex-wrap: wrap; gap: 6px; }
+.ol-attr-btns .ol-button { padding: 4px 8px; font-size: 13px; }

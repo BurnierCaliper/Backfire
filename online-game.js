@@ -5,7 +5,7 @@
   const PROTOCOL = 1, BUILD = "backfire-d3-v1", KEY = "backfire-online-v1";
   const copy = v => JSON.parse(JSON.stringify(v));
   const listeners = new Set(), packetListeners = new Set(), pending = new Map(), requests = new Map(), requestHighWater = new Map();
-  const gmContext = Object.freeze({}), controls = new Set(["orderPick", "orderConfirm", "orderMove", "orderSwapAccept", "answer", "chat"]);
+  const gmContext = Object.freeze({}), controls = new Set(["orderPick", "orderConfirm", "orderMove", "orderSwapAccept", "answer", "chat", "checkOpen", "checkRoll", "checkClose", "attrRequest", "attrDecide"]);
   const messageContexts = new WeakMap();
   const recipientWires = new Map(), displayWire = OnlineWire.create();
   let endpoint = null, identity = null, status = { connected: false, paused: true, roster: [] }, active = false;

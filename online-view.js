@@ -48,8 +48,13 @@
   function projectUnit(unit) {
     if (!obj(unit) || !id(get(unit, "id"))) return null;
     const out = identifiers(unit, {}, ["id", "kit", "weaponOf", "owner", "operatorId"]);
-    copyFields(unit, out, ["name"], ["level", "xp", "zone", "atk", "def", "defMax", "ap", "apMax", "bonus", "bonusMax", "highEnergy", "stunMarks"], ["isPlayer", "weaponUnit", "isProp", "isGap", "isDevice", "dying", "stunned", "flying", "dead", "hidden", "noMove"]);
+    copyFields(unit, out, ["name"], ["level", "xp", "attrPoints", "zone", "atk", "def", "defMax", "ap", "apMax", "bonus", "bonusMax", "highEnergy", "stunMarks"], ["isPlayer", "weaponUnit", "isProp", "isGap", "isDevice", "dying", "stunned", "flying", "dead", "hidden", "noMove"]);
     if (get(unit, "fused") || get(unit, "_removed")) out.hidden = true;
+    // 属性（升级加点要看）：六项数值和曾经加过的项
+    const attrs = get(unit, "attrs");
+    if (obj(attrs)) { out.attrs = {}; for (const k of ["str", "con", "dex", "wil", "int", "sta"]) { const v = number(get(attrs, k)); if (v !== undefined) out.attrs[k] = v; } }
+    const picks = arr(get(unit, "attrPicks")).filter(a => ["str", "con", "dex", "wil", "int", "sta"].includes(a));
+    if (picks.length) out.attrPicks = picks.slice(0, 10);
     out.layers = arr(get(unit, "layers")).slice(0, 20).filter(obj).map(layer => {
       const result = {}; enumField(layer, result, "type", layerTypes);
       const current = number(get(layer, "current")) ?? number(get(layer, "cur"));
@@ -285,7 +290,32 @@
     for (const key of ["roster", "slots", "order", "units", "heroes"]) if (Array.isArray(get(view, key))) out[key] = get(view, key).slice(0, 200).map(row);
     out.confirmed = arr(get(view, "confirmed")).map(id).filter(Boolean);
     out.chat = arr(get(view, "chat")).slice(-300).flatMap(m => {
-      const t = text(get(m, "text"), 500); return t === null ? [] : [identifiers(m, copyFields(m, { text: t }, ["operatorName", "name"], ["at"], []), ["id", "operatorId"])];
+      if (get(m, "secret")) return [];   // 主持人暗骰：只在房主本机
+      const t = text(get(m, "text"), 500); if (t === null) return [];
+      const dto = identifiers(m, copyFields(m, { text: t }, ["operatorName", "name"], ["at"], []), ["id", "operatorId"]);
+      if (get(m, "roll")) dto.roll = true;
+      return [dto];
+    });
+    // 主持人发起的检定：熟练项、难度、每个人的成功率和掷出的点数（都是公开的）
+    out.checks = arr(get(view, "checks")).slice(-20).flatMap(c => {
+      if (!obj(c) || !id(get(c, "id"))) return [];
+      const dto = identifiers(c, copyFields(c, {}, ["prof", "diffName", "note"], ["at"], []), ["id"]);
+      enumField(c, dto, "status", ["open", "done", "closed"]);
+      dto.targets = arr(get(c, "targets")).slice(0, 12).flatMap(t => {
+        if (!obj(t) || !id(get(t, "unitId"))) return [];
+        const row = identifiers(t, copyFields(t, {}, ["name", "perkText"], ["base", "level"], ["adv", "dis", "reroll"]), ["unitId"]);
+        const r = get(t, "result");
+        if (obj(r)) row.result = { ok: !!get(r, "ok"), rerolled: !!get(r, "rerolled"), rolls: arr(get(r, "rolls")).slice(0, 4).map(x => ({ roll: number(get(x, "roll")) ?? null, ok: !!get(x, "ok"), label: text(get(x, "label"), 40) || "" })) };
+        return [row];
+      });
+      return [dto];
+    });
+    out.attrRequests = arr(get(view, "attrRequests")).slice(-20).flatMap(r => {
+      if (!obj(r) || !id(get(r, "id"))) return [];
+      const dto = identifiers(r, copyFields(r, {}, ["unitName"], ["at"], []), ["id", "unitId", "operatorId"]);
+      enumField(r, dto, "status", ["pending", "approved", "rejected", "cancelled"]);
+      dto.attrs = arr(get(r, "attrs")).filter(a => ["str", "con", "dex", "wil", "int", "sta"].includes(a)).slice(0, 4);
+      return [dto];
     });
     out.messages = projectMessages(get(view, "messages"), context);
     const swap = get(view, "swap"); out.swap = obj(swap) ? identifiers(swap, {}, ["requestId", "from", "to", "recipient"]) : null;

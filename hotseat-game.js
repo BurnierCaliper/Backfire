@@ -12,7 +12,8 @@
   const packetListeners = new Set();
   const listeners = new Set(), authorityContext = {}, actionTypes = new Set(["skill", "move", "standUp", "useItem"]);
   const automatic = new Set(["battle.supportInfo", "battle.checkSolo", "battle.rememberCampaign", "battle.loadCampaign"]);
-  const orderTypes = new Set(["orderPick", "orderConfirm", "orderStart", "orderMove", "orderSwapAccept", "answer", "chat"]);
+  const tableTypes = new Set(["checkOpen", "checkRoll", "checkClose", "attrRequest", "attrDecide"]);
+  const orderTypes = new Set(["orderPick", "orderConfirm", "orderStart", "orderMove", "orderSwapAccept", "answer", "chat", ...tableTypes]);
   const copy = value => JSON.parse(JSON.stringify(value));
   const active = () => !!(enabled && configured && session && authority && !state.solo);
   const heroes = () => (state.units || []).filter(u => u.isPlayer && !u.weaponOf && !u.isPartner && livePartyCards().some(c => c.kit === u.kit && !c.weaponOf));
@@ -28,7 +29,8 @@
     const assignments = {};
     for (const u of heroes()) if (ownerByKit[u.kit] && config.players.some(p => p.id === ownerByKit[u.kit])) assignments[u.id] = ownerByKit[u.kit];
     const keepChat = session ? session.snapshot().chat || [] : [];   // 重建会话时带上小队聊天记录
-    session = Hotseat.create({ operators: config.players, gmId: gm(), mode: config.mode, assignments, chat: keepChat,
+    const keepTable = session ? session.snapshot().table || null : null;   // 检定、属性点申请也带上
+    session = Hotseat.create({ operators: config.players, gmId: gm(), mode: config.mode, assignments, chat: keepChat, table: keepTable,
       getUnits: () => state.units, canStand: u => !standUpBlocked(u) });
     authority = HotseatAuthority.create({ session, validate, execute, afterCommand,
       getState: () => state, getTape: () => GAME.tape || [], viewFor: project });
@@ -78,7 +80,8 @@
       phase: s?.phase === "selecting" ? "picking" : s?.phase || "setup", currentUnitId: s?.currentUnitId || null,
       order: (s?.slots || []).map(r => r && ({ actor: r.unitId, name: r.unitName, owner: r.operatorId, locked: r.spent, done: r.completed, current: r.unitId === s.currentUnitId })),
       confirmed: s?.confirmed || [], swap: s?.pendingSwaps?.length ? { requestId: s.pendingSwaps[0].id, from: s.pendingSwaps[0].actor, to: s.pendingSwaps[0].target, recipient: s.pendingSwaps[0].responder } : null,
-      ask: s?.ask || null, chat: (s?.chat || []).map(r => ({ id: r.id, operatorId: r.operatorId, name: r.operatorName, text: r.text, at: r.at })),
+      ask: s?.ask || null, chat: (s?.chat || []).map(r => ({ id: r.id, operatorId: r.operatorId, name: r.operatorName, text: r.text, at: r.at, roll: !!r.roll, secret: !!r.secret })),
+      checks: copy(s?.table?.checks || []), attrRequests: copy(s?.table?.attrs || []),
       canConfigure: !network && canConfigure() && (!configured || id === gm()), canDisable: !network && canConfigure() && (!configured || id === gm()) };
   }
   const getView = () => getViewFor(playerId);
@@ -95,7 +98,7 @@
       }
       return;
     }
-    if (cmd.type === "chat") return;   // 小队聊天不受询问、战斗阶段影响
+    if (cmd.type === "chat" || tableTypes.has(cmd.type)) return;   // 小队聊天、检定、属性点申请不受询问、战斗阶段影响
     if (choice || session.snapshot().ask) fail("正在等待其他操作者回应");
     if (orderTypes.has(cmd.type)) { if (cmd.type === "orderSwapAccept" && typeof cmd.accept !== "boolean") fail("互换回答必须为同意或拒绝"); return; }
     if (actionTypes.has(cmd.type)) {
@@ -184,10 +187,40 @@
       authority.broadcast(); refresh();
     });
   }
+  /** 检定：按角色卡的熟练项、种族特长（party.js）和手册的成功率表（ROGUE_CHECKS）算出每个人的成功率 */
+  function checkSpec(c) {
+    const K = root.ROGUE_CHECKS || (typeof ROGUE_CHECKS !== "undefined" ? ROGUE_CHECKS : null);
+    const diffs = ["easy", "normal", "hard", "extreme"];
+    if (!K || typeof c.prof !== "string" || !diffs.includes(c.diff) || !Array.isArray(c.unitIds) || !c.unitIds.length) fail("检定需要熟练项、难度和至少一名角色");
+    const prof = profName(c.prof);
+    if (!PROF_LIST.includes(prof)) fail("没有这个熟练项");
+    const targets = c.unitIds.map(id => {
+      const u = heroes().find(h => h.id === id); if (!u) fail("没有这名角色");
+      const p = heroProfile(u.kit), level = Math.min(PROF_MAX, Number(((p && p.profs) || {})[prof] || ((p && p.profs) || {})[c.prof]) || 0);
+      const hp = (u.layers || []).reduce((a, l) => a + (Number(l.current) || 0), 0), max = (u.layers || []).reduce((a, l) => a + (Number(l.max) || 0), 0);
+      const perks = checkPerksFor(u.kit, prof, hp * 2 < max);
+      const base = K.chance[level][diffs.indexOf(c.diff)] || 0;
+      return { unitId: u.id, name: u.name, base, adv: perks.adv, dis: perks.dis, reroll: perks.reroll, level, perkText: perks.text };
+    });
+    return { prof, diff: c.diff, diffName: K.diffs[c.diff].name, note: typeof c.note === "string" ? c.note : "", targets };
+  }
+  /** 属性点申请：自己的角色、还有点数、这一项能加（8 级那点不能和以前加过的同一项） */
+  function attrUnit(c) {
+    const u = heroes().find(h => h.id === c.unitId); if (!u) fail("没有这名角色");
+    if (!root.ATTR_NAMES?.[c.attr] && !(typeof ATTR_NAMES !== "undefined" && ATTR_NAMES[c.attr])) fail("没有这项属性");
+    if (!(Number(u.attrPoints) > 0)) fail(u.name + " 没有可分配的属性点");
+    if ((u.attrPicks || []).length >= 1 && (u.attrPicks || []).includes(c.attr)) fail("8 级的属性点不能加在曾经加过的同一项上");
+    return u;
+  }
   const orderHandlers = {
     orderPick: c => session.pick(sender, c.actor, c.index), orderConfirm: () => session.confirm(sender),
     orderStart: () => session.forceStart(sender), orderMove: c => session.move(sender, c.actor, c.index),
     orderSwapAccept: c => session.acceptSwap(sender, c.requestId, c.accept), chat: c => session.chat(sender, c.text),
+    checkOpen: c => session.openCheck(sender, checkSpec(c)),
+    checkRoll: c => session.rollCheck(sender, c.checkId, c.unitId),
+    checkClose: c => session.closeCheck(sender, c.checkId),
+    attrRequest: c => { const u = attrUnit(c); return session.requestAttr(sender, u.id, c.attr, u.name); },
+    attrDecide: c => session.decideAttr(sender, c.requestId, c.decision),
     answer: c => { if (choice) { const old = choice; choice = null; old.finish(c.extra.index); return { accepted: true }; } return session.answer(sender, c.askId, { unitId: c.helper || null, extra: c.extra || {} }); }
   };
   for (const [type, fn] of Object.entries(orderHandlers)) {
@@ -213,7 +246,7 @@
   if (root.addEventListener) root.addEventListener("error", event => {
     if (active() && event.error?.code === "HOTSEAT_REJECT") { notice = event.error.message; notify(); event.preventDefault(); }
   });
-  root.HotseatGame = { getView, getViewFor, configure, submit, isActive: active, isRequested: () => enabled && !state.solo,
+  root.HotseatGame = { getView, getViewFor, configure, submit, isActive: active, isRequested: () => enabled && !state.solo, checkSpec,
     enableOnline(value) { network = true; enabled = true; if (!configured) playerId = value.players.find(p => p.gm).id; return configure(value); },
     isNetwork: () => network,
     receiveFrom(id, cmd) { return this.withOperator(id, () => submit(cmd)); },

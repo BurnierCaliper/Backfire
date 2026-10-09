@@ -17,7 +17,7 @@
   const UNDO_MAX = 20;
 
   const TABS = [
-    ["party", "队伍"], ["sheet", "角色"], ["rest", "时间与休息"], ["shop", "商店"], ["bag", "背包"], ["smith", "武器升级"], ["tasks", "任务"], ["battles", "战斗模板"], ["backstage", "后台"]
+    ["party", "队伍"], ["sheet", "角色"], ["rest", "时间与休息"], ["shop", "商店"], ["bag", "背包"], ["smith", "武器升级"], ["tasks", "任务"], ["checks", "检定"], ["battles", "战斗模板"], ["backstage", "后台"]
   ];
 
   function heroes() { return trpgHeroes(); }
@@ -154,6 +154,7 @@
           <button class="g-btn" id="tr-xp-go">发放</button>
         </div>
         <p class="r-hint">升级照手册第三章：4 级、8 级各 1 点属性点（8 级那点不能加在曾经加过的同一项上）；职责技能按角色卡自动解锁；熟练项、专长由主持人记在角色卡上。</p>
+        ${attrRequestsHtml()}
         ${attrs ? `<h3>分配属性点</h3>${attrs}` : ""}
         <h3>重新开团</h3>
         <button class="g-btn" id="tr-reset">清空这个存档的进度（等级、物资、时间全部归零）</button>
@@ -595,6 +596,107 @@
     });
   }
 
+  /* ---------- 检定（手册第一章）：主持人发起，联机时玩家自己掷，单机时主持人代掷 ---------- */
+  let localChecks = [];   // 不联机时的检定记录（只在这次打开的页面里）
+  const checkForm = { prof: "侦察", diff: "normal", note: "", units: null };
+  const online = () => !!(window.HotseatGame && HotseatGame.isActive());
+  const checkList = () => online() ? (HotseatGame.getView().checks || []) : localChecks;
+  function checkPreview(unitIds) {
+    try { return HotseatGame.checkSpec({ prof: checkForm.prof, diff: checkForm.diff, unitIds, note: checkForm.note }); } catch (e) { return null; }
+  }
+  const pct = x => Math.round((Number(x) || 0) * 1000) / 10 + "%";
+  const rollText = r => r.rolls.map(x => x.roll == null ? x.label : (x.label ? x.label + " " : "") + x.roll).join("，");
+  PANELS.checks = function () {
+    const hs = heroes();
+    if (!checkForm.units) checkForm.units = hs.map(h => h.id);
+    const spec = checkPreview(hs.map(h => h.id));
+    const profOpts = Object.keys(PROFICIENCIES).map(g => `<optgroup label="${esc(g)}">${PROFICIENCIES[g].map(p => `<option${p === checkForm.prof ? " selected" : ""}>${esc(p)}</option>`).join("")}</optgroup>`).join("");
+    const diffOpts = Object.keys(ROGUE_CHECKS.diffs).map(k => `<option value="${k}"${k === checkForm.diff ? " selected" : ""}>${esc(ROGUE_CHECKS.diffs[k].name)}</option>`).join("");
+    const who = hs.map(h => {
+      const t = spec && spec.targets.find(x => x.unitId === h.id);
+      const odds = t ? `${["没有熟练", "一级熟练", "二级熟练", "三级熟练"][t.level] || ""} · 成功率 ${pct(t.base)}${t.adv ? " · 优势" : t.dis ? " · 劣势" : ""}${t.reroll ? " · 失败可重掷" : ""}` : "";
+      return `<label class="tr-pick"><input type="checkbox" data-ck-unit="${esc(h.id)}"${checkForm.units.includes(h.id) ? " checked" : ""}>${esc(h.name)}<small>${esc(odds)}</small></label>`;
+    }).join("");
+    const cards = checkList().slice().reverse().map(c => `<div class="tr-up tk-card${c.status === "open" ? " on" : ""}">
+        <div class="tk-head"><b>${esc(c.diffName)}「${esc(c.prof)}」检定</b><span class="tk-st">${c.status === "open" ? "进行中" : "已结束"}</span></div>
+        ${c.note ? `<p class="tk-goal">${esc(c.note)}</p>` : ""}
+        ${c.targets.map(t => `<div class="tr-row"><b>${esc(t.name)}</b> <span class="r-hint">成功率 ${pct(t.base)}${t.adv ? " · 优势" : t.dis ? " · 劣势" : ""}</span>
+          ${t.result ? `<b class="${t.result.ok ? "good" : "bad"}">${t.result.ok ? "成功" : "失败"}</b> <span class="r-hint">d100 ${esc(rollText(t.result))}</span>`
+            : c.status === "open" ? `<span class="r-hint">${online() ? "等玩家掷骰" : ""}</span><button class="g-btn small" data-ck="roll:${esc(c.id)}:${esc(t.unitId)}">${online() ? "代掷" : "掷骰"}</button>` : '<span class="r-hint">没有掷</span>'}</div>`).join("")}
+        ${c.status === "open" ? `<div class="tr-row"><button class="g-btn small" data-ck="close:${esc(c.id)}">结束这个检定</button></div>` : ""}</div>`).join("");
+    return `<p class="r-hint">按手册第一章：成功率看熟练等级和难度（没有熟练只能做简单检定），种族特长自动算优势 / 劣势 / 重掷。
+        ${online() ? "联机时发起后，玩家在自己画面上点「掷骰」，结果写进小队频道；主持人也可以代掷。" : "现在没有联机，检定由主持人在这里掷。"}</p>
+      <div class="tr-up">
+        <div class="tr-row">熟练项 <select id="ck-prof">${profOpts}</select> 难度 <select id="ck-diff">${diffOpts}</select>
+          说明 <input id="ck-note" value="${esc(checkForm.note)}" placeholder="比如：撬开仓库的锁" style="width:240px"></div>
+        <div class="tr-picks">${who}</div>
+        <div class="tr-row"><button class="g-btn" id="ck-open">发起检定</button></div>
+      </div>
+      ${cards || '<p class="r-hint">还没有检定。</p>'}`;
+  };
+  /** 联机时走房间（玩家马上看到）；本机热座直接交给热座会话 */
+  async function checkSubmit(cmd) {
+    const net = window.OnlineGame && OnlineGame.isHost && OnlineGame.isHost();
+    const ack = net ? await OnlineGame.submit(cmd) : HotseatGame.submit(cmd);
+    if (ack && ack.ok === false) alert(ack.error);
+    render();
+  }
+  function bindChecks(P) {
+    const prof = $("ck-prof"); if (!prof) return;
+    prof.onchange = () => { checkForm.prof = prof.value; render(); };
+    $("ck-diff").onchange = () => { checkForm.diff = $("ck-diff").value; render(); };
+    $("ck-note").oninput = () => { checkForm.note = $("ck-note").value; };
+    P.querySelectorAll("[data-ck-unit]").forEach(el => { el.onchange = () => {
+      const id = el.dataset.ckUnit; checkForm.units = checkForm.units.filter(x => x !== id); if (el.checked) checkForm.units.push(id);
+    }; });
+    $("ck-open").onclick = () => {
+      const ids = heroes().map(h => h.id).filter(id => checkForm.units.includes(id));
+      if (!ids.length) { alert("至少选一名角色"); return; }
+      if (online()) { checkForm.note = ""; return checkSubmit({ type: "checkOpen", prof: checkForm.prof, diff: checkForm.diff, unitIds: ids, note: $("ck-note").value }); }
+      const spec = checkPreview(ids); if (!spec) return;
+      spec.note = $("ck-note").value; checkForm.note = "";
+      localChecks.push(Object.assign(spec, { id: "check-" + Date.now(), status: "open", at: Date.now(), targets: spec.targets.map(t => Object.assign(t, { result: null })) }));
+      log.push({ stamp: stampNow(), lines: [`主持人发起${spec.diffName}「${spec.prof}」检定：${spec.targets.map(t => t.name).join("、")}${spec.note ? "（" + spec.note + "）" : ""}`] });
+      saveLog(); render();
+    };
+    P.querySelectorAll("[data-ck]").forEach(b => { b.onclick = () => {
+      const [cmd, checkId, unitId] = b.dataset.ck.split(":");
+      if (online()) return checkSubmit(cmd === "roll" ? { type: "checkRoll", checkId, unitId } : { type: "checkClose", checkId });
+      const c = localChecks.find(x => x.id === checkId); if (!c) return;
+      if (cmd === "close") c.status = "closed";
+      else {
+        const t = c.targets.find(x => x.unitId === unitId); if (!t || t.result) return;
+        t.result = Hotseat.rollCheck(t);
+        log.push({ stamp: stampNow(), lines: [`检定 · ${t.name}「${c.prof}」${c.diffName}（成功率 ${pct(t.base)}）：d100 ${rollText(t.result)} → ${t.result.ok ? "成功" : "失败"}`] });
+        saveLog();
+        if (c.targets.every(x => x.result)) c.status = "done";
+      }
+      render();
+    }; });
+  }
+  /** 联机时玩家申请的属性点：主持人同意才真正加上 */
+  function attrRequestsHtml() {
+    if (!online()) return "";
+    const list = (HotseatGame.getView().attrRequests || []).filter(r => r.status === "pending");
+    if (!list.length) return "";
+    return `<h3>玩家申请的属性点</h3>${list.map(r => `<div class="tr-row"><b>${esc(r.unitName)}</b> 想加 ${esc(r.attrs.map(a => ATTR_NAMES[a]).join("、"))} +1
+        <button class="g-btn small" data-attr-req="approve:${esc(r.id)}">同意</button><button class="g-btn small" data-attr-req="reject:${esc(r.id)}">不同意</button></div>`).join("")}`;
+  }
+  function bindAttrRequests(P) {
+    P.querySelectorAll("[data-attr-req]").forEach(b => { b.onclick = () => {
+      const [decision, requestId] = b.dataset.attrReq.split(":");
+      const r = (HotseatGame.getView().attrRequests || []).find(x => x.id === requestId); if (!r) return;
+      if (decision === "approve") {
+        const h = heroes().find(x => x.id === r.unitId);
+        const before = h ? Number(h.attrPoints) || 0 : 0;
+        if (h) act(ruleCommand("spendAttr", { kit: h.kit, attr: r.attrs[0] }));
+        const after = h ? Number((heroes().find(x => x.id === r.unitId) || {}).attrPoints) || 0 : before;
+        if (!h || after >= before) { alert("没加上（点数不够或这一项不能再加），这条申请按不同意处理"); return checkSubmit({ type: "attrDecide", requestId, decision: "reject" }); }
+      }
+      checkSubmit({ type: "attrDecide", requestId, decision });
+    }; });
+  }
+
   /* ---------- 战斗模板（battle-templates.js）：主持人提前布置好战场，开战时直接摆好 ---------- */
   let btEdit = null;   // 正在编辑的模板（一份拷贝，点「保存」才写回）
   let btIo = "";       // 导入 / 导出框里的文字
@@ -758,10 +860,28 @@
   }
 
   /* ---------- 绑定 ---------- */
+  // 玩家掷了检定、申请了属性点：主持人这边的「检定」「队伍」页跟着刷新（正在输入时不打断）
+  let tableKey = "", tableSub = false;
+  function watchTable() {
+    if (tableSub || !window.HotseatGame) return;
+    tableSub = true;
+    HotseatGame.subscribe(() => {
+      if (!HotseatGame.isActive() || !Screens.is("trpg") || !["checks", "party"].includes(tab)) return;
+      const v = HotseatGame.getView(), key = JSON.stringify([v.checks, v.attrRequests]);
+      if (key === tableKey) return;
+      tableKey = key;
+      const a = document.activeElement;
+      if (a && $("tr-panel").contains(a) && /^(INPUT|TEXTAREA)$/.test(a.tagName)) return;
+      render();
+    });
+  }
   function bind() {
+    watchTable();
     const P = $("tr-panel");
     bindTasks(P);
     bindTemplates(P);
+    bindChecks(P);
+    bindAttrRequests(P);
     const on = (id, fn) => { const b = $(id); if (b) b.onclick = fn; };
     $("tr-tabs").querySelectorAll("[data-tab]").forEach(b => { b.onclick = () => { tab = b.dataset.tab; render(); }; });
     // 队伍

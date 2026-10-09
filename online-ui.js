@@ -37,7 +37,7 @@
     toast.hidden = true;
     // 玩家右侧栏：「战斗 / 记录」和「小队」两个频道。输入框只建一次，收到新消息只更新列表，不会打断输入
     const side = make("aside", "online-side", "ol-side", { "aria-label": "战斗记录与小队聊天" });
-    side.innerHTML = `<nav class="ol-side-tabs" role="tablist"><button type="button" role="tab" data-side="log" class="ol-tab"></button><button type="button" role="tab" data-side="chat" class="ol-tab">小队<span class="ol-badge" hidden></span></button></nav><ol class="ol-side-log" aria-live="polite"></ol><ol class="ol-side-chat" aria-live="polite"></ol><form class="ol-side-form" id="ol-side-form"><label class="ol-sr-only" for="ol-side-text">小队消息</label><input id="ol-side-text" maxlength="500" autocomplete="off" placeholder="和队友说点什么…（所有人可见）"><button type="submit" class="ol-button ol-primary">发送</button></form>`;
+    side.innerHTML = `<nav class="ol-side-tabs" role="tablist"><button type="button" role="tab" data-side="log" class="ol-tab"></button><button type="button" role="tab" data-side="chat" class="ol-tab">小队<span class="ol-badge" hidden></span></button></nav><ol class="ol-side-log" aria-live="polite"></ol><ol class="ol-side-chat" aria-live="polite"></ol><form class="ol-side-form" id="ol-side-form"><label class="ol-sr-only" for="ol-side-text">小队消息</label><input id="ol-side-text" maxlength="500" autocomplete="off" placeholder="和队友说点什么…（掷骰：/r 1d20+3）"><button type="submit" class="ol-button ol-primary">发送</button></form>`;
     side.hidden = true;
     const bagBox = make("section", "online-bag", "ol-overlay ol-bag", { role: "dialog", "aria-label": "背包" });
     bagBox.hidden = true;
@@ -153,13 +153,38 @@
       const heading = { win: "战斗胜利", lose: "战斗失败", retreat: "队伍撤退" }[result.outcome] || "遭遇结束";
       return `<section class="ol-result" aria-label="战斗结算"><h2>${heading}</h2>${["D", "C", "B", "A", "S", "SS", "SSS"].includes(grade.grade) ? `<p class="ol-result-grade">评价 ${esc(grade.grade)}${grade.score == null ? "" : ` · ${esc(grade.score)} 分`}</p>` : ""}${grade.xpMult == null ? "" : `<p>战斗经验倍率 ×${esc(grade.xpMult)}</p>`}<p class="ol-muted">等待主持人返回探索。</p></section>`;
     }
+    const ATTRS = { str: "力量", con: "体质", dex: "敏捷", wil: "意志", int: "智力", sta: "耐力" };
+    /** 升级的属性点：玩家自己选，主持人确认后才加上 */
+    function attrMarkup(u) {
+      const pend = (hs().attrRequests || []).find(r => r.unitId === u.id && r.status === "pending");
+      const last = (hs().attrRequests || []).filter(r => r.unitId === u.id && r.status !== "pending").slice(-1)[0];
+      const lastText = last && Date.now() - (last.at || 0) < 10 * 60 * 1000 ? `<p class="ol-muted">上次申请 ${esc((last.attrs || []).map(a => ATTRS[a]).join("、"))} +1：${({ approved: "主持人已同意", rejected: "主持人没有同意", cancelled: "已撤回" })[last.status] || ""}</p>` : "";
+      if (pend) return `<div class="ol-attr"><p>等主持人确认：${esc(pend.attrs.map(a => ATTRS[a]).join("、"))} +1</p>${button("撤回", "attrCancel", `data-request="${esc(pend.id)}"`, disabled())}</div>${lastText}`;
+      if (!(Number(u.attrPoints) > 0)) return lastText;
+      const picked = u.attrPicks || [];
+      return `<div class="ol-attr"><p>有 ${esc(u.attrPoints)} 点属性点可以分配（选好后由主持人确认）</p><div class="ol-attr-btns">${Object.keys(ATTRS).map(k => button(`${ATTRS[k]} ${(u.attrs || {})[k] ?? ""} +1`, "attrRequest", `data-unit="${esc(u.id)}" data-attr="${k}"`, disabled() || (picked.length >= 1 && picked.includes(k)))).join("")}</div>${picked.length ? '<p class="ol-muted">8 级那一点不能加在曾经加过的同一项上。</p>' : ""}</div>${lastText}`;
+    }
+    /** 主持人发起的检定：自己的角色点「掷骰」；结果所有人都看得到 */
+    function checksMarkup() {
+      const list = hs().checks || [];
+      const open = list.filter(c => c.status === "open");
+      const recent = list.filter(c => c.status !== "open" && Date.now() - (c.at || 0) < 15 * 60 * 1000).slice(-1);
+      const mineIds = new Set((hs().units || []).filter(u => u.owner === own()).map(u => u.id));
+      const rows = open.concat(recent);
+      if (!rows.length) return "";
+      return `<section class="ol-checks" aria-label="检定">${rows.map(c => `<article class="ol-check${c.status === "open" ? " ol-open" : ""}"><header><h3>${esc(c.diffName)}「${esc(c.prof)}」检定</h3><small>${c.status === "open" ? "进行中" : "已结束"}</small></header>${c.note ? `<p>${esc(c.note)}</p>` : ""}<ul>${(c.targets || []).map(t => {
+        const odds = `成功率 ${Math.round((t.base || 0) * 1000) / 10}%${t.adv ? " · 优势" : t.dis ? " · 劣势" : ""}${t.reroll ? " · 失败可重掷" : ""}`;
+        const res = t.result ? `<b class="${t.result.ok ? "ol-ok" : "ol-bad"}">${t.result.ok ? "成功" : "失败"}</b> <small>${esc(t.result.rolls.map(r => r.roll == null ? r.label : (r.label ? r.label + " " : "") + r.roll).join("，"))}</small>` : c.status === "open" && mineIds.has(t.unitId) ? button("掷骰", "checkRoll", `data-check="${esc(c.id)}" data-unit="${esc(t.unitId)}"`, disabled() || !(t.base > 0), true) : '<small class="ol-muted">等待掷骰</small>';
+        return `<li><span><b>${esc(t.name)}</b><small>${esc(odds)}</small></span>${res}</li>`;
+      }).join("")}</ul></article>`).join("")}</section>`;
+    }
     function card(u) {
       const owner = (hs().units || []).find(x => x.id === u.id)?.owner;
       const resources = Object.entries(u.resources || {}).filter(([k, v]) => names[k] && (typeof v === "number" || v === true)).map(([k, v]) => `${names[k]} ${v === true ? "" : v}`);
       const conditions = Object.entries(u.statuses || {}).filter(([k, v]) => names[k] && v).map(([k, v]) => `${names[k]}${typeof v === "number" && v !== 1 ? " " + v : ""}`);
       if (u.dying) conditions.unshift("倒地"); if (u.dead) conditions.unshift("阵亡"); if (u.stunned) conditions.unshift("失衡"); if (u.flying) conditions.push("飞行");
       const available = view.screen === "battle" && u.isPlayer && owner === own() && hs().currentUnitId === u.id && hs().phase === "acting";
-      return `<article class="ol-unit${u.isPlayer ? " ol-ally" : " ol-enemy"}${selectedActor === u.id ? " ol-selected" : ""}" data-unit-id="${esc(u.id)}"><header><h3>${esc(u.name || u.id)}</h3><small>Lv${esc(u.level || 1)}</small></header>${owner ? `<small>${esc(playerName(owner))}${u.weaponOf ? " · 武器人" : ""}</small>` : ""}${u.isPlayer && !u.weaponOf ? `<p class="ol-xp">经验 ${esc(u.xp ?? 0)}</p>` : ""}<div class="ol-layers">${(u.layers || []).map(l => `<div class="ol-layer"><span>${esc(labels[l.type] || "生命")}</span><meter min="0" max="${esc(Math.max(1, Number(l.max) || 1))}" value="${esc(Math.max(0, Number(l.current) || 0))}" aria-label="${esc(labels[l.type] || "生命")}"></meter><b>${esc(l.current ?? 0)} / ${esc(l.max ?? 0)}</b></div>`).join("")}</div><div class="ol-points"><span>行动 ${esc(u.ap ?? 0)} / ${esc(u.apMax ?? 0)}</span><span>附赠 ${esc(u.bonus ?? 0)} / ${esc(u.bonusMax ?? 0)}</span>${u.def != null ? `<span>架势 ${esc(u.def)} / ${esc(u.defMax ?? u.def)}</span>` : ""}</div>${resources.length ? `<p class="ol-muted">${esc(resources.join(" · "))}</p>` : ""}${conditions.length ? `<p class="ol-conditions">${esc(conditions.join(" · "))}</p>` : ""}${available ? button("选择行动", "actor", `data-actor="${esc(u.id)}"`, disabled(), true) : ""}<span class="ol-popup" aria-live="polite"></span></article>`;
+      return `<article class="ol-unit${u.isPlayer ? " ol-ally" : " ol-enemy"}${selectedActor === u.id ? " ol-selected" : ""}" data-unit-id="${esc(u.id)}"><header><h3>${esc(u.name || u.id)}</h3><small>Lv${esc(u.level || 1)}</small></header>${owner ? `<small>${esc(playerName(owner))}${u.weaponOf ? " · 武器人" : ""}</small>` : ""}${u.isPlayer && !u.weaponOf ? `<p class="ol-xp">经验 ${esc(u.xp ?? 0)}${typeof xpToNext === "function" && xpToNext(u.level || 1) ? ` / ${esc(xpToNext(u.level || 1))}` : ""}</p>` : ""}${view.screen === "exploration" && u.isPlayer && !u.weaponOf && owner === own() ? attrMarkup(u) : ""}<div class="ol-layers">${(u.layers || []).map(l => `<div class="ol-layer"><span>${esc(labels[l.type] || "生命")}</span><meter min="0" max="${esc(Math.max(1, Number(l.max) || 1))}" value="${esc(Math.max(0, Number(l.current) || 0))}" aria-label="${esc(labels[l.type] || "生命")}"></meter><b>${esc(l.current ?? 0)} / ${esc(l.max ?? 0)}</b></div>`).join("")}</div><div class="ol-points"><span>行动 ${esc(u.ap ?? 0)} / ${esc(u.apMax ?? 0)}</span><span>附赠 ${esc(u.bonus ?? 0)} / ${esc(u.bonusMax ?? 0)}</span>${u.def != null ? `<span>架势 ${esc(u.def)} / ${esc(u.defMax ?? u.def)}</span>` : ""}</div>${resources.length ? `<p class="ol-muted">${esc(resources.join(" · "))}</p>` : ""}${conditions.length ? `<p class="ol-conditions">${esc(conditions.join(" · "))}</p>` : ""}${available ? button("选择行动", "actor", `data-actor="${esc(u.id)}"`, disabled(), true) : ""}<span class="ol-popup" aria-live="polite"></span></article>`;
     }
     function actionsMarkup() {
       const current = hs().currentUnitId, mine = (hs().units || []).some(u => u.id === current && u.owner === own());
@@ -171,7 +196,7 @@
       const data = displayState || view.state, screen = view.screen;
       if (screen === "lobby" || !data) return '<div class="ol-wait"><h2>等待房间同步</h2><p>房主准备好后会更新这里。</p></div>';
       const units = (data.units || []).filter(u => !u.hidden), logs = view.packet?.publicLogs || [];
-      return `<header class="ol-stage-heading"><div><span class="ol-muted">${esc(view.roomCode)} · ${screen === "battle" ? `第 ${data.turnNo || 1} 回合` : screen === "ended" ? "遭遇结束" : "探索环节"}</span><h1>${screen === "battle" ? "战场" : screen === "ended" ? "战斗结算" : "与队伍同行"}</h1><div class="ol-info-tools">${button("角色资料", "info", 'data-info="sheet"', pending)}${button("武器", "info", 'data-info="armory"', pending)}${button("背包", "info", 'data-info="bag"', pending)}</div></div>${weatherMarkup(data)}</header>${screen === "ended" ? resultMarkup() : ""}${suppliesMarkup(data)}${paused() ? '<p class="ol-pause" role="status">房间暂停，正在等待连接恢复。</p>' : ""}${view.offlineWait ? `<p class="ol-pause">${esc(view.offlineWait.name)} 离线，等待其返回。</p>` : ""}${screen === "battle" || screen === "ended" ? `<div class="ol-zones"${zoneGrid(data).style}>${zoneGrid(data).zones.map(z => `<section class="ol-zone"${z.style}><h2>${z.id} 区</h2>${fieldsMarkup(data, z.id)}${units.filter(u => Number(u.zone) === z.id).map(card).join("") || '<p class="ol-muted">空区域</p>'}${(data.props || []).filter(p => Number(p.zone) === z.id && !p.destroyed).map(p => `<article class="ol-prop"><b>${esc(p.name || p.kind || "配置物")}</b>${p.hp != null ? `<span>耐久 ${esc(p.hp)}${p.maxHp == null ? "" : " / " + esc(p.maxHp)}</span>` : ""}</article>`).join("")}</section>`).join("")}</div>${gapsMarkup(data)}${screen === "ended" ? "" : actionsMarkup()}` : `<p class="ol-muted">主持人正在管理探索与遭遇。右侧「小队」频道可以和大家聊天，「消息与成员」里可以私下回复主持人。</p><div class="ol-exploration-party">${units.filter(u => u.isPlayer && !u.weaponOf).map(card).join("")}</div>`}`;
+      return `<header class="ol-stage-heading"><div><span class="ol-muted">${esc(view.roomCode)} · ${screen === "battle" ? `第 ${data.turnNo || 1} 回合` : screen === "ended" ? "遭遇结束" : "探索环节"}</span><h1>${screen === "battle" ? "战场" : screen === "ended" ? "战斗结算" : "与队伍同行"}</h1><div class="ol-info-tools">${button("角色资料", "info", 'data-info="sheet"', pending)}${button("武器", "info", 'data-info="armory"', pending)}${button("背包", "info", 'data-info="bag"', pending)}</div></div>${weatherMarkup(data)}</header>${screen === "ended" ? resultMarkup() : ""}${suppliesMarkup(data)}${paused() ? '<p class="ol-pause" role="status">房间暂停，正在等待连接恢复。</p>' : ""}${view.offlineWait ? `<p class="ol-pause">${esc(view.offlineWait.name)} 离线，等待其返回。</p>` : ""}${checksMarkup()}${screen === "battle" || screen === "ended" ? `<div class="ol-zones"${zoneGrid(data).style}>${zoneGrid(data).zones.map(z => `<section class="ol-zone"${z.style}><h2>${z.id} 区</h2>${fieldsMarkup(data, z.id)}${units.filter(u => Number(u.zone) === z.id).map(card).join("") || '<p class="ol-muted">空区域</p>'}${(data.props || []).filter(p => Number(p.zone) === z.id && !p.destroyed).map(p => `<article class="ol-prop"><b>${esc(p.name || p.kind || "配置物")}</b>${p.hp != null ? `<span>耐久 ${esc(p.hp)}${p.maxHp == null ? "" : " / " + esc(p.maxHp)}</span>` : ""}</article>`).join("")}</section>`).join("")}</div>${gapsMarkup(data)}${screen === "ended" ? "" : actionsMarkup()}` : `<p class="ol-muted">主持人正在管理探索与遭遇。右侧「小队」频道可以和大家聊天，「消息与成员」里可以私下回复主持人。</p><div class="ol-exploration-party">${units.filter(u => u.isPlayer && !u.weaponOf).map(card).join("")}</div>`}`;
     }
     function observeMessages() {
       const rows = view.messages || [], incoming = rows.filter(m => !seenMessages.has(m.id) && m.from !== own());
@@ -187,7 +212,7 @@
     const chatRows = () => (hs().chat || []).filter(m => m && typeof m.text === "string");
     const clock = at => { if (!at) return ""; const d = new Date(at); return isNaN(d) ? "" : `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
     function chatListMarkup(rows) {
-      return rows.map(m => `<li class="${m.operatorId && m.operatorId === own() ? "ol-mine" : ""}"><div><b>${esc(m.name || m.operatorName || playerName(m.operatorId))}</b><small>${esc(clock(m.at))}</small></div><p>${esc(m.text)}</p></li>`).join("") || '<li class="ol-muted">还没有人说话。消息所有人都能看到，并一直保留在记录里。</li>';
+      return rows.map(m => `<li class="${m.operatorId && m.operatorId === own() ? "ol-mine" : ""}${m.roll ? " ol-roll" : ""}${m.secret ? " ol-secret" : ""}"><div><b>${esc(m.name || m.operatorName || playerName(m.operatorId))}</b><small>${esc(clock(m.at))}</small></div><p>${esc(m.text)}</p></li>`).join("") || '<li class="ol-muted">还没有人说话。消息所有人都能看到，并一直保留在记录里。</li>';
     }
     /** 更新列表（只换列表内容，不碰输入框）；原来在底部就继续贴底 */
     function fillList(list, markup) {
@@ -246,7 +271,7 @@
           const nav = document.createElement("nav"); nav.className = "ol-host-tabs"; nav.setAttribute("role", "tablist");
           nav.innerHTML = `<button type="button" role="tab" data-host-tab="log" class="ol-tab">${label}</button><button type="button" role="tab" data-host-tab="chat" class="ol-tab">小队<span class="ol-badge" hidden></span></button>`;
           const box = document.createElement("div"); box.className = "ol-host-chat";
-          box.innerHTML = `<ol class="ol-side-chat" aria-live="polite"></ol><form class="ol-side-form"><input maxlength="500" autocomplete="off" aria-label="小队消息" placeholder="和玩家们说点什么…（所有人可见）"><button type="submit" class="ol-button ol-primary">发送</button></form>`;
+          box.innerHTML = `<ol class="ol-side-chat" aria-live="polite"></ol><form class="ol-side-form"><input maxlength="500" autocomplete="off" aria-label="小队消息" placeholder="说点什么…（/r 1d20 公开掷骰，/gr 1d20 暗骰）"><button type="submit" class="ol-button ol-primary">发送</button></form>`;
           root.prepend(nav); root.appendChild(box);
           const m = { root, nav, box, tab: def, key: "", seen: null, unread: 0, remove() { nav.remove(); box.remove(); root.classList.remove("ol-chat-mode"); } };
           nav.addEventListener("click", e => { const b = e.target.closest("[data-host-tab]"); if (!b) return; m.tab = b.dataset.hostTab; paintHost(m, true); if (m.tab === "chat") box.querySelector("input").focus({ preventScroll: true }); });
@@ -404,6 +429,9 @@
         case "execute": if (currentMenu?.choices?.command && !disabled()) { const command = copy(currentMenu.choices.command); if (await call(() => api.submit(command))) { currentMenu = request = null; render(); } } break;
         case "endTurn": if (!disabled()) await call(() => api.submit({ type: "endTurn", actor: b.dataset.actor })); break;
         case "info": await openInfo(b.dataset.info); break;
+        case "checkRoll": if (!disabled()) await call(() => api.submit({ type: "checkRoll", checkId: b.dataset.check, unitId: b.dataset.unit })); break;
+        case "attrRequest": if (!disabled()) await call(() => api.submit({ type: "attrRequest", unitId: b.dataset.unit, attr: b.dataset.attr })); break;
+        case "attrCancel": if (!disabled()) await call(() => api.submit({ type: "attrDecide", requestId: b.dataset.request, decision: "cancel" })); break;
       }
     }
     async function playPacket(packet) {

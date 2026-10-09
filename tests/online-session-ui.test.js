@@ -593,3 +593,50 @@ test("联机：四区方形棋盘，玩家画面摆成 2×2，4 区和所有间�
   if (process.env.BACKFIRE_SHOTS) await alice.screenshot({ path: path.join(process.env.BACKFIRE_SHOTS, "board-square4.png") });
   assert.deepEqual(f.errors, []);
 });
+
+test("联机：小队频道掷骰 / 主持人暗骰；主持人发起检定、玩家自己掷；玩家申请属性点、主持人同意后才加上", { timeout: 120000 }, async t => {
+  const f = await fixture(t); if (!f) return;
+  const { host, alice, bob } = f;
+  const shot = async (page, name) => { if (process.env.BACKFIRE_SHOTS) await page.screenshot({ path: path.join(process.env.BACKFIRE_SHOTS, name + ".png") }); };
+  await host.evaluate(() => { OnlineGame.start(); });
+  for (const page of [alice, bob]) await page.waitForFunction(() => OnlineGame.getView().screen === "exploration" && !document.getElementById("online-side").hidden);
+  // 掷骰
+  await alice.fill("#ol-side-text", "/r 1d20+3 撬锁");
+  await alice.click("#ol-side-form button");
+  try { await bob.waitForFunction(() => /掷骰 1d20\+3[:：]1d20\[\d+\] \+ 3 = \d+[(（]撬锁[)）]/.test(document.querySelector("#online-side .ol-side-chat").textContent), null, { timeout: 5000 }); }
+  catch (e) { throw new Error(JSON.stringify(await host.evaluate(() => HotseatGame.getView().chat)) + " | " + await bob.evaluate(() => document.querySelector("#online-side .ol-side-chat").textContent) + " | " + await alice.evaluate(() => OnlineGame.getView().notice)); }
+  assert.equal(await bob.locator("#online-side .ol-side-chat li.ol-roll").count(), 1);
+  assert.equal((await host.evaluate(() => OnlineGame.submit({ type: "chat", text: "/gr 1d100 伏兵" }))).ok, true);
+  await host.waitForFunction(() => HotseatGame.getView().chat.some(m => m.secret));
+  await alice.waitForTimeout(300);
+  assert.ok(!/暗骰|伏兵/.test(await alice.evaluate(() => JSON.stringify(OnlineGame.getView()))), "玩家收不到暗骰");
+  // 检定：主持人在「检定」页发起
+  await host.click('#tr-tabs [data-tab="checks"]');
+  await host.selectOption("#ck-prof", "侦察");
+  await host.selectOption("#ck-diff", "easy");
+  await host.fill("#ck-note", "看看门后有什么");
+  await host.click("#ck-open");
+  await alice.waitForSelector('#online-stage [data-online="checkRoll"]');
+  await shot(alice, "check-1-player");
+  assert.equal(await alice.locator('#online-stage [data-online="checkRoll"]').count(), 1, "只能掷自己的角色");
+  await alice.click('#online-stage [data-online="checkRoll"]');
+  await bob.waitForFunction(() => /检定 · .+「侦察」简单/.test(document.querySelector("#online-side .ol-side-chat").textContent));
+  await host.waitForFunction(() => /成功|失败/.test(document.getElementById("tr-panel").textContent) && /代掷/.test(document.getElementById("tr-panel").textContent));
+  await shot(host, "check-2-host");
+  // 属性点：Alice 的角色有 1 点
+  const mine = await alice.evaluate(() => { const v = OnlineGame.getView(); return v.packet.view.units.find(u => u.owner === v.identity.id).id; });
+  await host.evaluate(id => OnlineGame.queueHostEdit(() => { state.units.find(u => u.id === id).attrPoints = 1; }), mine);
+  await alice.waitForSelector('#online-stage [data-online="attrRequest"][data-attr="dex"]');
+  await alice.click('#online-stage [data-online="attrRequest"][data-attr="dex"]');
+  await alice.waitForFunction(() => /等主持人确认：敏捷 \+1/.test(document.getElementById("online-stage").textContent));
+  await shot(alice, "attr-1-player");
+  await host.click('#tr-tabs [data-tab="party"]');
+  await host.waitForSelector('[data-attr-req^="approve:"]');
+  const dexBefore = await host.evaluate(id => state.units.find(u => u.id === id).attrs.dex, mine);
+  await host.click('[data-attr-req^="approve:"]');
+  await host.waitForFunction(id => state.units.find(u => u.id === id).attrPoints === 0, mine);
+  assert.equal(await host.evaluate(id => state.units.find(u => u.id === id).attrs.dex, mine), dexBefore + 1);
+  await alice.waitForFunction(() => /主持人已同意/.test(document.getElementById("online-stage").textContent));
+  assert.equal(await alice.locator('#online-stage [data-online="attrRequest"]').count(), 0);
+  assert.deepEqual(f.errors, []);
+});

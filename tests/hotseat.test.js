@@ -296,3 +296,74 @@ test("小队聊天：战斗中也能发，最多保留 300 条，重建会话时
   const ids = s2.snapshot().chat.map(r => r.id);
   assert.equal(new Set(ids).size, ids.length, "新消息编号不和旧的重复");
 });
+
+test("掷骰：/r 由房主掷、结果写进小队记录；/gr 只有主持人能用，玩家投影里看不到", () => {
+  const f = fixture(), s = f.s;
+  const r = Hotseat.rollDice("2d6+1d4-1", (() => { const seq = [0, 0.5, 0.99]; let i = 0; return () => seq[i++]; })());
+  assert.deepEqual([r.total, r.expr, r.text], [1 + 4 + 4 - 1, "2d6+1d4-1", "2d6+1d4-1：2d6[1,4] + 1d4[4] - 1 = 8"]);
+  assert.equal(Hotseat.rollDice("d20+x"), null);
+  assert.equal(Hotseat.rollDice("99d6"), null, "最多 50 颗");
+  s.chat("a", "/r 1d20+3 撬锁");
+  const row = s.snapshot().chat.at(-1);
+  assert.match(row.text, /^掷骰 1d20\+3：1d20\[\d+\] \+ 3 = \d+（撬锁）$/);
+  assert.ok(row.roll.total >= 4 && row.roll.total <= 23);
+  s.chat("b", "/r");
+  assert.match(s.snapshot().chat.at(-1).text, /^掷骰 1d20：/, "不写就是 1d20");
+  assert.throws(() => s.chat("a", "/gr 1d20"), /只有主持人/);
+  assert.throws(() => s.chat("a", "/r 1d"), /骰子写法/);
+  s.chat("gm", "/gr 1d100 伏兵");
+  const secret = s.snapshot().chat.at(-1);
+  assert.equal(secret.secret, true);
+  assert.match(secret.text, /^暗骰 1d100：/);
+  const V = require("../online-view");
+  const view = V.projectView({ chat: s.snapshot().chat }, { recipientId: "a" });
+  assert.ok(!view.chat.some(m => /暗骰/.test(m.text)), "玩家看不到暗骰");
+  assert.equal(view.chat.find(m => /撬锁/.test(m.text)).roll, true);
+  const ids = s.snapshot().chat.map(m => m.id);
+  assert.equal(new Set(ids).size, ids.length, "失败的掷骰不占编号");
+});
+
+test("检定：主持人发起，玩家只能替自己的角色掷，结果写进小队频道；跨重建保留", () => {
+  const seq = [0.3, 0.9, 0.1]; let i = 0;
+  const f = fixture({ random: () => seq[i++ % seq.length] }), s = f.s;
+  assert.throws(() => s.openCheck("a", { prof: "侦察", targets: [{ unitId: "ruby" }] }), /只有主持人/);
+  s.openCheck("gm", { prof: "侦察", diff: "normal", diffName: "普通", note: "看看门后", targets: [
+    { unitId: "ruby", name: "瑞比", base: 0.5 }, { unitId: "hiaki", name: "绯秋", base: 0.5, adv: true }] });
+  const c = s.snapshot().table.checks[0];
+  assert.equal(c.status, "open");
+  assert.match(s.snapshot().chat.at(-1).text, /主持人发起普通「侦察」检定：瑞比、绯秋（看看门后）/);
+  assert.throws(() => s.rollCheck("a", c.id, "hiaki"), /只能替自己的角色/);
+  s.rollCheck("a", c.id, "ruby");
+  assert.equal(s.snapshot().table.checks[0].targets[0].result.ok, true, "0.3 < 0.5 成功");
+  assert.match(s.snapshot().chat.at(-1).text, /检定 · 瑞比「侦察」普通（成功率 50%）：d100 31 → 成功/);
+  assert.throws(() => s.rollCheck("a", c.id, "ruby"), /已经掷过/);
+  s.rollCheck("gm", c.id, "hiaki");   // 主持人代掷；优势两颗 0.9、0.1 → 第二颗成功
+  const t = s.snapshot().table.checks[0].targets[1];
+  assert.equal(t.result.ok, true);
+  assert.equal(t.result.rolls.length, 2);
+  assert.equal(s.snapshot().table.checks[0].status, "done");
+  const g = fixture({ table: s.snapshot().table });
+  assert.equal(g.s.snapshot().table.checks[0].targets[1].result.ok, true, "重建会话带上检定");
+  // 劣势、迎难直上、没资格
+  assert.equal(Hotseat.rollCheck({ base: 0.5, dis: true }, () => 0.3).ok, true);
+  assert.equal(Hotseat.rollCheck({ base: 0.5, dis: true }, (() => { const q = [0.3, 0.7]; let k = 0; return () => q[k++]; })()).ok, false);
+  const re = Hotseat.rollCheck({ base: 0.5, reroll: true }, (() => { const q = [0.9, 0.2]; let k = 0; return () => q[k++]; })());
+  assert.deepEqual([re.ok, re.rerolled], [true, true]);
+  assert.equal(Hotseat.rollCheck({ base: 0 }).ok, false);
+});
+
+test("属性点申请：只能给自己的角色、一次一条；主持人同意 / 不同意，玩家可以撤回", () => {
+  const f = fixture(), s = f.s;
+  assert.throws(() => s.requestAttr("b", "ruby", "str"), /只能给自己的角色/);
+  s.requestAttr("a", "ruby", "str", "瑞比");
+  assert.throws(() => s.requestAttr("a", "ruby", "dex"), /还在等主持人确认/);
+  const r = s.snapshot().table.attrs[0];
+  assert.deepEqual([r.unitName, r.attrs[0], r.status], ["瑞比", "str", "pending"]);
+  assert.throws(() => s.decideAttr("a", r.id, "approve"), /只有主持人/);
+  s.decideAttr("gm", r.id, "approve");
+  assert.equal(s.snapshot().table.attrs[0].status, "approved");
+  assert.throws(() => s.decideAttr("gm", r.id, "reject"), /已经处理过/);
+  s.requestAttr("a", "ruby", "dex", "瑞比");
+  s.decideAttr("a", s.snapshot().table.attrs[1].id, "cancel");
+  assert.equal(s.snapshot().table.attrs[1].status, "cancelled");
+});
