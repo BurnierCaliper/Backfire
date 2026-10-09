@@ -900,6 +900,7 @@
       gn.classList.remove("hit");
       void gn.offsetWidth;
       gn.classList.add("hit");
+      if (!G.sim && !G.skip && window.HitFx) HitFx.burst(element || "physical", gn.getBoundingClientRect(), { big: !!big });
       return;
     }
     const c = cards.get(id);
@@ -909,6 +910,8 @@
     c.wrap.classList.remove("hit");
     void c.wrap.offsetWidth;
     c.wrap.classList.add("hit");
+    // 属性受击特效（hit-fx.js）：火焰窜起、电弧、冰晶、酸液……
+    if (!G.sim && !G.skip && window.HitFx) HitFx.burst(element || "physical", c.wrap.getBoundingClientRect(), { big: !!big });
   }
   async function lunge(actorId, targetId) {
     const a = centerOf(actorId), t = centerOf(targetId), c = cards.get(actorId);
