@@ -325,6 +325,12 @@
       </label>
       <button class="g-btn" id="g-prop-add">放置</button>
     </div>
+    <p class="sheet-k">战斗模板（存在这台电脑上；跑团「战斗模板」页可以直接用它开战，进战斗时战场已经摆好）</p>
+    <div class="sheet-foot row">
+      <label>名称 <input id="g-tpl-name" type="text" maxlength="40" placeholder="比如：桥头伏击" style="width:160px" /></label>
+      <button class="g-btn" id="g-tpl-save" title="把现在摆好的区制、天气、我方站位、敌人（含首领机制）、场地、间隙、配置物记成一个模板">把当前战场存为模板</button>
+    </div>
+    <div id="g-tpl-list" class="sheet-list"></div>
   </div>
 </div>
 <div class="sheet" id="g-enc-sheet">
@@ -964,6 +970,7 @@ window.GAME_MODE = true;
 <script src="trpg-data.js"></script>
 <script src="trpg.js"></script>
 <script src="rogue-data.js"></script>
+<script src="battle-templates.js"></script>
 <script src="trpg-tasks.js"></script>
 <script src="rogue.js"></script>
 <script src="battle-commands.js"></script>

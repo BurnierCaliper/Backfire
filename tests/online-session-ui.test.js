@@ -546,3 +546,23 @@ test("联机：玩家能看角色资料 / 武器 / 背包；小队聊天全程�
   for (const page of [alice, bob]) await assertPlayerIsolation(page);
   assert.deepEqual(f.errors, []);
 });
+
+test("联机：主持人用战斗模板开战，玩家一进战斗就看到摆好的战场", { timeout: 120000 }, async t => {
+  const f = await fixture(t); if (!f) return;
+  const { host, alice } = f;
+  const shot = async (page, name) => { if (process.env.BACKFIRE_SHOTS) await page.screenshot({ path: path.join(process.env.BACKFIRE_SHOTS, name + ".png") }); };
+  await host.evaluate(() => { OnlineGame.start(); });
+  await alice.waitForFunction(() => OnlineGame.getView().screen === "exploration");
+  await host.evaluate(() => battleTemplateSave({ name: "桥头伏击", board: 3, weather: "snow", playerZone: 1,
+    enemies: [{ preset: "thug_knife", level: 2, zone: 3 }, { preset: "thug_hammer", level: 2, zone: 2 }],
+    fields: { 2: { acid: true } }, gaps: { "2-3": { type: "wall", hp: 30 } }, props: [{ kind: "boom", zone: 2, faction: "enemy" }] }));
+  await host.click('#tr-tabs [data-tab="battles"]');
+  await shot(host, "tpl-1-host-templates");
+  await host.click('[data-bt^="fight:"]');
+  await alice.waitForFunction(() => OnlineGame.getView().screen === "battle");
+  await alice.waitForFunction(() => (OnlineGame.getView().packet?.state?.units || []).filter(u => !u.isPlayer).length === 2);
+  const seen = await alice.evaluate(() => { const s = OnlineGame.getView().packet.state; return { zoneMode: s.zoneMode, weather: s.weather, foes: s.units.filter(u => !u.isPlayer).map(u => u.zone).sort(), props: (s.props || []).length, wall: (s.gaps || {})["2-3"]?.type, started: !!s.combatStarted }; });
+  assert.deepEqual(seen, { zoneMode: 3, weather: "snow", foes: [2, 3], props: 1, wall: "wall", started: false });
+  await shot(alice, "tpl-2-player-battle"); await shot(host, "tpl-3-host-battle");
+  assert.deepEqual(f.errors, []);
+});

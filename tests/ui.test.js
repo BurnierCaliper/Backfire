@@ -1139,3 +1139,51 @@ test("录音音效：每个录音都能解码、有声、有调音参数；没�
   assert.equal(r.uiNone, false, "没选录音的类别（战斗胜利）不出声");
   assert.deepEqual(o.errors, []);
 });
+
+test("战斗模板：探索环节新建模板 → 用它开战，进战斗时战场已经摆好；战斗画面也能把当前战场存成模板", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await newTrpg(page);
+  await page.click('[data-tab="battles"]');
+  await page.click('[data-bt="new:"]');
+  await page.selectOption('[data-bte="board"]', "3");
+  await page.fill('[data-bte="name"]', "桥头伏击");
+  await page.selectOption('[data-bte="weather"]', "snow");
+  await page.selectOption('[data-bte="enemies.0.zone"]', "3");
+  await page.fill('[data-bte="enemies.0.level"]', "3");
+  await page.click('[data-bt-act="addEnemy"]');
+  await page.selectOption('[data-bte="enemies.1.preset"]', "thug_hammer");
+  await page.selectOption('[data-bt-field="2"]', "acid");
+  await page.selectOption('[data-bt-gap="2-3"]', "wall");
+  await page.fill('[data-bt-gaphp="2-3"]', "30");
+  await page.click('[data-bt-act="addProp"]');
+  await page.click('[data-bt-act="save"]');
+  const card = await page.textContent("#tr-panel");
+  assert.match(card, /桥头伏击/);
+  assert.match(card, /三区 · 雪天 · 狂徒（匕首） Lv3（3 区）、狂徒（锤） Lv随队（3 区）/);
+  await page.click('[data-bt^="fight:"]');
+  await page.waitForSelector("#g-start");
+  const r = await page.evaluate(() => ({
+    started: state.combatStarted, zoneMode: state.zoneMode, weather: state.weather,
+    foes: state.units.filter(u => !u.isPlayer).map(u => [u.kit, u.level, u.zone]),
+    acid: state.fields[2].acid, wall: [state.gaps["2-3"].type, state.gaps["2-3"].hp],
+    props: state.props.map(p => [p.kind, p.zone]), title: document.getElementById("g-enc-name").textContent
+  }));
+  assert.equal(r.started, false);
+  assert.equal(r.zoneMode, 3);
+  assert.equal(r.weather, "snow");
+  assert.deepEqual(r.foes, [["thug_knife", 3, 3], ["thug_hammer", 1, 3]]);
+  assert.equal(r.acid, true);
+  assert.deepEqual(r.wall, ["wall", 30]);
+  assert.deepEqual(r.props, [["boom", 2]]);
+  assert.match(r.title, /桥头伏击 · 主持人预设/);
+  // 战斗画面：把当前战场存为模板，再套用
+  await page.evaluate(() => { document.getElementById("g-intro")?.remove(); });
+  await page.click("#g-field-cfg");
+  await page.fill("#g-tpl-name", "桥头伏击 2");
+  await page.click("#g-tpl-save");
+  const names = await page.$$eval("#g-tpl-list .sheet-slot b", els => els.map(e => e.textContent));
+  assert.deepEqual(names, ["桥头伏击", "桥头伏击 2"]);
+  assert.equal(await page.evaluate(() => battleTemplateList()[1].enemies.length), 2);
+  assert.deepEqual(o.errors, []);
+});

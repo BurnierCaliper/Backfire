@@ -3842,6 +3842,41 @@
         pbox.appendChild(row);
       });
     }
+    renderTemplateList();
+  }
+  /* ---------- 战斗模板（battle-templates.js）：存当前战场 / 套用 ---------- */
+  function renderTemplateList() {
+    const box = $("g-tpl-list");
+    if (!box || typeof battleTemplateList !== "function") return;
+    box.innerHTML = "";
+    const list = battleTemplateList();
+    if (!list.length) box.innerHTML = '<p class="sheet-empty">还没有模板。摆好战场后在上面起个名字存下来。</p>';
+    list.forEach(t => {
+      const row = el("div", "sheet-slot");
+      row.innerHTML = `<div><b>${esc(t.name)}</b><div class="sub">${esc(battleTemplateSummary(t))}</div></div>`;
+      const use = el("button", "g-btn", "套用");
+      use.title = "按这个模板重新摆战场（战斗开始前才能换）";
+      use.onclick = () => applyTemplate(t);
+      const over = el("button", "g-btn", "覆盖");
+      over.title = "用现在的战场覆盖这个模板";
+      over.onclick = () => {
+        if (!confirm(`用现在的战场覆盖模板「${t.name}」？`)) return;
+        try { battleTemplateSave(Object.assign(battleTemplateCapture(t.name), { id: t.id, note: t.note })); flashHint("已覆盖模板「" + t.name + "」"); }
+        catch (e) { flashHint(e.message); }
+        renderTemplateList();
+      };
+      const del = el("button", "g-btn", "删除");
+      del.onclick = () => { if (confirm(`删除模板「${t.name}」？`)) { battleTemplateDelete(t.id); renderTemplateList(); } };
+      row.appendChild(use); row.appendChild(over); row.appendChild(del);
+      box.appendChild(row);
+    });
+  }
+  function applyTemplate(t) {
+    if (state.combatStarted && !G.ended) { flashHint("战斗已经开始，不能换战场"); return; }
+    try { setupBattle(Number($("g-level").value) || 1, battleTemplateToEncounter(t)); }
+    catch (e) { flashHint(e.message); return; }
+    $("g-field-sheet").classList.remove("show");
+    flashHint("已按模板「" + t.name + "」摆好战场");
   }
 
   /* ================= 12. 输入 ================= */
@@ -4001,6 +4036,15 @@
       startEncounter(spec);
     };
     $("g-field-close").onclick = () => $("g-field-sheet").classList.remove("show");
+    if ($("g-tpl-save")) $("g-tpl-save").onclick = () => {
+      if (typeof battleTemplateCapture !== "function") return;
+      const name = ($("g-tpl-name").value || "").trim();
+      if (!name) { flashHint("先给模板起个名字"); $("g-tpl-name").focus(); return; }
+      try { battleTemplateSave(battleTemplateCapture(name)); } catch (e) { flashHint(e.message); return; }
+      $("g-tpl-name").value = "";
+      renderTemplateList();
+      flashHint("已存为模板「" + name + "」");
+    };
     $("g-cfg-zones").onchange = () => {
       const v = $("g-cfg-zones").value;
       dispatch({ type: "battle.panel", action: "setZones", value: /^\d+$/.test(v) ? Number(v) : v });

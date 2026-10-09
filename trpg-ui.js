@@ -17,7 +17,7 @@
   const UNDO_MAX = 20;
 
   const TABS = [
-    ["party", "队伍"], ["sheet", "角色"], ["rest", "时间与休息"], ["shop", "商店"], ["bag", "背包"], ["smith", "武器升级"], ["tasks", "任务"], ["backstage", "后台"]
+    ["party", "队伍"], ["sheet", "角色"], ["rest", "时间与休息"], ["shop", "商店"], ["bag", "背包"], ["smith", "武器升级"], ["tasks", "任务"], ["battles", "战斗模板"], ["backstage", "后台"]
   ];
 
   function heroes() { return trpgHeroes(); }
@@ -422,7 +422,7 @@
   function taskRoute(t) {
     return `<div class="tk-route">${t.nodes.map((n, i) => {
       const cls = t.status === "active" ? (i < t.index ? " done" : i === t.index ? " cur" : "") : "";
-      const foes = n.enemies.length ? `：${n.enemies.map(e => `${presetName(e.id)} Lv${e.lv}`).join("、")}${n.weather !== "none" ? ` · ${WX[n.weather]}` : ""}` : "";
+      const foes = n.template ? `：模板「${n.template.name}」` : n.enemies.length ? `：${n.enemies.map(e => `${presetName(e.id)} Lv${e.lv}`).join("、")}${n.weather !== "none" ? ` · ${WX[n.weather]}` : ""}` : "";
       return `<span class="tk-node${cls}" title="${esc(n.note || "")}">${i + 1}. ${esc(NODE_T()[n.type])}${esc(foes)}${n.note ? ` · ${esc(n.note)}` : ""}</span>`;
     }).join("")}</div>`;
   }
@@ -456,13 +456,18 @@
     const presets = (typeof enemyPresets === "function" ? enemyPresets() : []).map(p => [p.id, p.name]);
     const nodes = t.nodes.map((n, i) => {
       const fight = n.type === "battle" || n.type === "elite";
-      const foes = fight ? `<div class="tk-foes">${n.enemies.map((e, j) => `<div class="tr-row">
+      const tpls = typeof battleTemplateList === "function" ? battleTemplateList() : [];
+      const tplOpts = [["", "不用模板（按下面配置）"]].concat(tpls.map(x => [x.id, x.name]));
+      if (n.template && !tpls.some(x => x.id === n.template.id)) tplOpts.push([n.template.id, n.template.name + "（已存进任务）"]);
+      const tplRow = fight ? `<div class="tr-row">战斗模板 <select data-te-tpl="${i}">${options(tplOpts, n.template ? n.template.id : "")}</select>
+          ${n.template ? `<span class="r-hint">${esc(battleTemplateSummary(n.template))}</span>` : ""}</div>` : "";
+      const foes = !fight ? "" : n.template ? tplRow : tplRow + `<div class="tk-foes">${n.enemies.map((e, j) => `<div class="tr-row">
             <select data-te="nodes.${i}.enemies.${j}.id">${options(presets, e.id)}</select>
             等级 ${inp(`nodes.${i}.enemies.${j}.lv`, e.lv, 52, "number")} 区域 <select data-te="nodes.${i}.enemies.${j}.zone">${options([1, 2, 3, 4, 5].map(z => [z, z + " 区"]), e.zone)}</select>
             <button class="g-btn small" data-te-act="delEnemy:${i}:${j}">删</button></div>`).join("")}
           <div class="tr-row"><button class="g-btn small" data-te-act="addEnemy:${i}">＋ 敌人</button>
             天气 <select data-te="nodes.${i}.weather">${options(Object.keys(WX).map(k => [k, WX[k]]), n.weather)}</select>
-            战场 <select data-te="nodes.${i}.zoneMode">${options([[2, "两区"], [3, "三区"], ["line4", "四区直排"], ["square4", "四区方形 2×2"], ["cross5", "五区十字"]], n.zoneMode)}</select></div></div>` : "";
+            战场 <select data-te="nodes.${i}.zoneMode">${options([[2, "两区"], [3, "三区"], ["line4", "四区直排"], ["square4", "四区方形 2×2"], ["cross5", "五区十字"]], n.zoneMode)}</select></div></div>`;
       return `<div class="tk-enode"><div class="tr-row"><b>第 ${i + 1} 站</b>
           <select data-te="nodes.${i}.type" data-te-rerender="1">${options(Object.keys(NODE_T()).map(k => [k, NODE_T()[k]]), n.type)}</select>
           说明 ${inp(`nodes.${i}.note`, n.note, 260)}
@@ -564,6 +569,7 @@
           let cfg;
           try { cfg = trpgTaskPrepareBattle(id); } catch (e) { alert(e.message); return; }
           if (!lowHpOk()) { TRPG.taskBattle = null; return; }
+          if (cfg.template) { GAME.lastEncounter = battleTemplateToEncounter(cfg.template); return uiCommand("toBattle"); }
           GAME.lastEncounter = null;
           GAME.enemyPlan = cfg.enemies;
           GAME.weather = cfg.weather;
@@ -579,6 +585,170 @@
       el[ev] = () => { teSet(el.dataset.te, el.value); if (el.dataset.teRerender) render(); };
     });
     P.querySelectorAll("[data-te-act]").forEach(b => { b.onclick = () => teAct(b.dataset.teAct, P); });
+    P.querySelectorAll("[data-te-tpl]").forEach(el => {
+      el.onchange = () => {
+        const n = taskEdit.nodes[Number(el.dataset.teTpl)];
+        if (!el.value) n.template = null;
+        else if (!n.template || n.template.id !== el.value) n.template = battleTemplateById(el.value);
+        render();
+      };
+    });
+  }
+
+  /* ---------- 战斗模板（battle-templates.js）：主持人提前布置好战场，开战时直接摆好 ---------- */
+  let btEdit = null;   // 正在编辑的模板（一份拷贝，点「保存」才写回）
+  let btIo = "";       // 导入 / 导出框里的文字
+  const BT_PROPS = { button: "按钮", lever: "拉杆", battery: "超充能电池", boom: "爆炸桶", acid: "酸液桶", scrap: "碎渣机炮", turret: "防卫自律炮台" };
+  const BT_GAPS = { open: "畅通", bridge: "不稳桥梁", wall: "危墙", door: "机关门", void: "空隙" };
+  const BT_BOARDS = [[2, "两区"], [3, "三区"], ["line4", "四区直排"], ["square4", "四区方形 2×2"], ["cross5", "五区十字"]];
+  const btMechName = m => ({ execution: "死刑", share: "分担", spread: "远离", tower: "踩塔" })[m.type] || m.type;
+  /** 用模板开战：进战斗画面时敌人、场地、配置物都已经摆好 */
+  function fightTemplate(t) {
+    if (!t) return;
+    if (!lowHpOk()) return;
+    TRPG.taskBattle = null;
+    GAME.lastEncounter = battleTemplateToEncounter(t);
+    return uiCommand("toBattle");
+  }
+  function btCardHtml(t) {
+    const id = esc(t.id);
+    return `<div class="tr-up tk-card">
+      <div class="tk-head"><b>${esc(t.name)}</b><span class="tk-kind">${esc(BATTLE_TEMPLATE_TIERS[t.tier])}</span></div>
+      ${t.note ? `<p class="tk-goal">${esc(t.note)}</p>` : ""}
+      <div class="r-hint">${esc(battleTemplateSummary(t))}</div>
+      <div class="tr-row"><button class="g-btn small tk-go" data-bt="fight:${id}">用它开战</button>
+        <button class="g-btn small" data-bt="edit:${id}">编辑</button><button class="g-btn small" data-bt="dup:${id}">复制</button>
+        <button class="g-btn small" data-bt="export:${id}">导出</button><button class="g-btn small" data-bt="del:${id}">删除</button></div></div>`;
+  }
+  function btEditorHtml(t) {
+    const inp = (path, v, w, type, extra) => `<input type="${type || "text"}" data-bte="${path}" value="${esc(v == null ? "" : v)}" style="width:${w || 120}px"${extra || ""}>`;
+    const presets = (typeof enemyPresets === "function" ? enemyPresets() : []).filter(p => p.id !== "blank_pc").map(p => [p.id, p.name]);
+    const zones = battleTemplateZones(t.board);
+    const zoneSel = (path, cur) => `<select data-bte="${path}">${options(zones.map(z => [z, z + " 区"]), cur)}</select>`;
+    const lvTip = ' placeholder="随队" title="空着 = 跟着开战时的等级"';
+    const foes = t.enemies.map((e, j) => `<div class="tr-row">
+        <select data-bte="enemies.${j}.preset">${options(presets, e.preset)}</select>
+        等级 ${inp(`enemies.${j}.level`, e.level, 60, "number", lvTip)} 区域 ${zoneSel(`enemies.${j}.zone`, e.zone)}
+        ${e.mechanics ? `<span class="tk-chip">机制：${esc(e.mechanics.map(btMechName).join("、"))}<button class="g-btn small" data-bt-act="clearMech:${j}" title="去掉这个敌人身上的首领机制">×</button></span>` : ""}
+        <button class="g-btn small" data-bt-act="delEnemy:${j}">删</button></div>`).join("");
+    const fields = zones.map(z => {
+      const f = t.fields[z] || {};
+      return `<div class="tr-row">${z} 区 <select data-bt-field="${z}">${options(Object.keys(BATTLE_TEMPLATE_FIELD_KINDS).map(k => [k, BATTLE_TEMPLATE_FIELD_KINDS[k]]), battleTemplateFieldKind(f))}</select>
+        <label><input type="checkbox" data-bt-high="${z}"${f.highland ? " checked" : ""}> 高地</label></div>`;
+    }).join("");
+    const gaps = battleTemplateGapKeys(t.board).map(k => {
+      const g = t.gaps[k] || { type: "open", hp: null, open: false };
+      const hp = g.type === "bridge" || g.type === "wall" ? ` 耐久 <input type="number" data-bt-gaphp="${k}" value="${g.hp == null ? "" : g.hp}" placeholder="按规则掷" style="width:80px">` : "";
+      const door = g.type === "door" ? ` <label><input type="checkbox" data-bt-door="${k}"${g.open ? " checked" : ""}> 开着</label>` : "";
+      return `<div class="tr-row">${k.replace("-", "–")} 区之间 <select data-bt-gap="${k}">${options(Object.keys(BT_GAPS).map(x => [x, BT_GAPS[x]]), g.type)}</select>${hp}${door}</div>`;
+    }).join("");
+    const props = t.props.map((p, j) => `<div class="tr-row">
+        <select data-bte="props.${j}.kind">${options(Object.keys(BT_PROPS).map(k => [k, BT_PROPS[k]]), p.kind)}</select>
+        区域 ${zoneSel(`props.${j}.zone`, p.zone)} 等级 ${inp(`props.${j}.level`, p.level, 60, "number", lvTip)}
+        阵营 <select data-bte="props.${j}.faction">${options([["player", "我方"], ["enemy", "敌方"]], p.faction)}</select>
+        <button class="g-btn small" data-bt-act="delProp:${j}">删</button></div>`).join("");
+    return `<div class="tr-up tk-edit">
+      <h4>编辑战斗模板</h4>
+      <div class="tr-row">名称 ${inp("name", t.name, 180)} 类型 <select data-bte="tier">${options(Object.keys(BATTLE_TEMPLATE_TIERS).map(k => [k, BATTLE_TEMPLATE_TIERS[k]]), t.tier)}</select></div>
+      <div class="tr-row">备注 ${inp("note", t.note, 360)}</div>
+      <div class="tr-row">战场 <select data-bte="board" data-bte-rerender="1">${options(BT_BOARDS, t.board)}</select>
+        天气 <select data-bte="weather">${options(Object.keys(WX).map(k => [k, WX[k]]), t.weather)}</select>
+        我方站在 ${zoneSel("playerZone", t.playerZone)}</div>
+      <h4>敌人</h4>${foes || '<p class="r-hint">还没有敌人。</p>'}
+      <div class="tr-row"><button class="g-btn small" data-bt-act="addEnemy">＋ 敌人</button></div>
+      <h4>场地</h4>${fields}
+      <h4>间隙</h4>${gaps}
+      <h4>配置物</h4>${props || '<p class="r-hint">没有配置物。</p>'}
+      <div class="tr-row"><button class="g-btn small" data-bt-act="addProp">＋ 配置物</button></div>
+      <p class="r-hint">首领机制（死刑 / 分担 / 远离 / 踩塔）要在战斗画面「战场配置」里给敌人挂上，再「把当前战场存为模板」。</p>
+      <div class="tr-row"><button class="g-btn" data-bt-act="save">保存</button><button class="g-btn" data-bt-act="cancel">取消</button></div>
+    </div>`;
+  }
+  PANELS.battles = function () {
+    const list = typeof battleTemplateList === "function" ? battleTemplateList() : [];
+    const editing = btEdit && !list.some(t => t.id === btEdit.id) ? btEditorHtml(btEdit) : "";
+    const cards = list.map(t => btEdit && btEdit.id === t.id ? btEditorHtml(btEdit) : btCardHtml(t)).join("");
+    return `<p class="r-hint">提前把战场布置好存成模板：区制 / 棋盘、天气、我方站位、敌人（等级、区域）、场地、间隙、配置物。
+        点「用它开战」进战斗画面时一切都已经摆好，玩家看到的就是布置完的战场，主持人只要点「开始战斗」。
+        也可以在战斗画面的「战场配置」里摆好之后「把当前战场存为模板」（这样还能带上首领机制）。
+        模板存在这台电脑上，所有团、联机房间共用；任务的战斗站也能直接选模板。</p>
+      <div class="tr-row"><button class="g-btn small" data-bt="new:">新建模板</button>
+        <button class="g-btn small" data-bt="exportAll:">导出全部</button><button class="g-btn small" data-bt="import:">导入</button></div>
+      <div class="tr-row"><textarea id="bt-io" rows="3" style="width:100%" placeholder="导出的模板文字会出现在这里；要导入就把文字贴进来再点「导入」">${esc(btIo)}</textarea></div>
+      ${editing}
+      ${cards || (editing ? "" : '<p class="r-hint">还没有模板。</p>')}`;
+  };
+  function btSet(path, v) {
+    const keys = path.split(".");
+    let o = btEdit;
+    for (let i = 0; i < keys.length - 1; i++) o = o[keys[i]];
+    const k = keys[keys.length - 1];
+    if (k === "level") o[k] = v === "" ? null : Number(v);
+    else if (k === "zone" || k === "playerZone") o[k] = Number(v);
+    else if (k === "board") o[k] = /^\d+$/.test(v) ? Number(v) : v;
+    else o[k] = v;
+    if (k === "board") { btEdit.playerZone = null; btEdit = battleTemplateNormalize(btEdit); }   // 换了棋盘：我方回到棋盘默认的区，区号、间隙夹回新棋盘
+  }
+  function btAct(a) {
+    const [cmd, x] = a.split(":");
+    const t = btEdit, j = Number(x);
+    const zones = t ? battleTemplateZones(t.board) : [1, 2];
+    switch (cmd) {
+      case "save":
+        try { battleTemplateSave(t); } catch (e) { alert(e.message); return; }
+        btEdit = null; break;
+      case "cancel": btEdit = null; break;
+      case "addEnemy": t.enemies.push({ preset: "thug_knife", level: null, zone: zones[zones.length - 1] }); break;
+      case "delEnemy": t.enemies.splice(j, 1); break;
+      case "clearMech": delete t.enemies[j].mechanics; break;
+      case "addProp": t.props.push({ kind: "boom", zone: zones[Math.min(1, zones.length - 1)], level: null, faction: "player" }); break;
+      case "delProp": t.props.splice(j, 1); break;
+    }
+    render();
+  }
+  function bindTemplates(P) {
+    const io = () => { const box = $("bt-io"); return box ? box.value : ""; };
+    P.querySelectorAll("[data-bt]").forEach(b => {
+      b.onclick = () => {
+        const i = b.dataset.bt.indexOf(":");
+        const cmd = b.dataset.bt.slice(0, i), id = b.dataset.bt.slice(i + 1);
+        btIo = io();
+        if (cmd === "new") { btEdit = battleTemplateNormalize({ name: "新战场", board: 2, enemies: [{ preset: "thug_knife", level: null, zone: 2 }] }); return render(); }
+        if (cmd === "edit") { btEdit = battleTemplateById(id); return render(); }
+        if (cmd === "dup") { battleTemplateDuplicate(id); return render(); }
+        if (cmd === "del") { const t = battleTemplateById(id); if (t && confirm(`删除模板「${t.name}」？`)) battleTemplateDelete(id); if (btEdit && btEdit.id === id) btEdit = null; return render(); }
+        if (cmd === "export") { btIo = battleTemplateExport([id]); return render(); }
+        if (cmd === "exportAll") { btIo = battleTemplateExport(); return render(); }
+        if (cmd === "import") {
+          if (!btIo.trim()) { alert("先把模板文字贴到框里"); return; }
+          try { const n = battleTemplateImport(btIo); btIo = ""; alert(`导入了 ${n} 个模板`); } catch (e) { alert(e.message); return; }
+          return render();
+        }
+        if (cmd === "fight") return fightTemplate(battleTemplateById(id));
+      };
+    });
+    if (!btEdit) return;
+    P.querySelectorAll("[data-bte]").forEach(el => {
+      const ev = el.tagName === "SELECT" ? "onchange" : "oninput";
+      el[ev] = () => { btSet(el.dataset.bte, el.value); if (el.dataset.bteRerender) render(); };
+    });
+    P.querySelectorAll("[data-bt-field]").forEach(el => {
+      el.onchange = () => { const z = el.dataset.btField; battleTemplateSetField(btEdit, z, el.value, !!(btEdit.fields[z] || {}).highland); };
+    });
+    P.querySelectorAll("[data-bt-high]").forEach(el => {
+      el.onchange = () => { const z = el.dataset.btHigh; battleTemplateSetField(btEdit, z, battleTemplateFieldKind(btEdit.fields[z]), el.checked); };
+    });
+    P.querySelectorAll("[data-bt-gap]").forEach(el => {
+      el.onchange = () => {
+        const k = el.dataset.btGap;
+        if (el.value === "open") delete btEdit.gaps[k];
+        else btEdit.gaps[k] = { type: el.value, hp: null, open: false };
+        render();
+      };
+    });
+    P.querySelectorAll("[data-bt-gaphp]").forEach(el => { el.oninput = () => { const g = btEdit.gaps[el.dataset.btGaphp]; if (g) g.hp = el.value === "" ? null : Number(el.value); }; });
+    P.querySelectorAll("[data-bt-door]").forEach(el => { el.onchange = () => { const g = btEdit.gaps[el.dataset.btDoor]; if (g) g.open = el.checked; }; });
+    P.querySelectorAll("[data-bt-act]").forEach(b => { b.onclick = () => btAct(b.dataset.btAct); });
   }
 
   /** 进战斗前：有队员血量低于 20% 而且还能短休，先提醒（返回 false = 不进） */
@@ -591,6 +761,7 @@
   function bind() {
     const P = $("tr-panel");
     bindTasks(P);
+    bindTemplates(P);
     const on = (id, fn) => { const b = $(id); if (b) b.onclick = fn; };
     $("tr-tabs").querySelectorAll("[data-tab]").forEach(b => { b.onclick = () => { tab = b.dataset.tab; render(); }; });
     // 队伍
