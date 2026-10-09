@@ -320,6 +320,7 @@ const Bestiary = (() => {
 
   function open(opt) {
     opt = opt || {};
+    if (window.Sfx) Sfx.ui("open");
     if (!root) build();
     party = [2, 3, 4].includes(Number(opt.partySize)) ? Number(opt.partySize) : 4;
     sub = opt.sub || "";

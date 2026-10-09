@@ -138,10 +138,15 @@
   }
 
   /* ---------- 升级选择（手册第三章） ---------- */
+  let lastLevelKey = "";
   function renderLevelUps() {
     const pend = Rogue.pendingChoices(run);
-    if (!pend.length) return "";
+    if (!pend.length) { lastLevelKey = ""; return ""; }
     const p = pend[0];
+    // 新出现的升级：响一声升级音效（同一项重画界面不重复响）
+    const lvKey = p.kit + ":" + p.choice.level;
+    if (lvKey !== lastLevelKey && window.Sfx) setTimeout(() => Sfx.ui("levelup"), 0);
+    lastLevelKey = lvKey;
     const title = p.choice.type === "attr"
       ? `${p.name} ${p.choice.level} 级${p.choice.solo ? "（单人模式额外）" : ""}：分配 1 点六维属性${p.choice.noRepeat ? "（不能加在之前加过的同一项上）" : ""}`
       : p.choice.type === "role2"
@@ -657,12 +662,12 @@
         act({ action: "acceptTask", which: w });
       };
     });
-    body.querySelectorAll("[data-buy]").forEach(b => { b.onclick = () => act({ action: "buy", key: b.dataset.buy, qty: 1 }); });
+    body.querySelectorAll("[data-buy]").forEach(b => { b.onclick = () => { if (window.Sfx) Sfx.ui("coin"); act({ action: "buy", key: b.dataset.buy, qty: 1 }); }; });
     body.querySelectorAll("[data-upgrade]").forEach(b => { b.onclick = () => act({ action: "upgradeWeapon", kit: b.dataset.upgrade, smith: b.dataset.smith }); });
     body.querySelectorAll("[data-intro]").forEach(b => { b.onclick = () => act({ action: "introduceSmith", smith: b.dataset.intro }); });
     body.querySelectorAll("[data-claim]").forEach(b => { b.onclick = () => act({ action: "claimBlueprint", smith: b.dataset.smith, blueprint: b.dataset.claim }); });
     body.querySelectorAll("[data-install]").forEach(b => { b.onclick = () => act({ action: "installBlueprint", blueprint: b.dataset.install, kit: b.dataset.kit, smith: b.dataset.smith }); });
-    body.querySelectorAll("[data-part-buy]").forEach(b => { b.onclick = () => act({ action: "buyPart", smith: b.dataset.smith, index: Number(b.dataset.partBuy) }); });
+    body.querySelectorAll("[data-part-buy]").forEach(b => { b.onclick = () => { if (window.Sfx) Sfx.ui("coin"); act({ action: "buyPart", smith: b.dataset.smith, index: Number(b.dataset.partBuy) }); }; });
     body.querySelectorAll("[data-part-sell]").forEach(b => { b.onclick = () => act({ action: "sellPart", part: b.dataset.partSell }); });
     body.querySelectorAll("[data-part-install]").forEach(b => {
       b.onclick = () => {
