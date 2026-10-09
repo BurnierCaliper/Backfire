@@ -152,3 +152,32 @@ test("跑团任务：战斗站选了模板，打这一站按模板摆（存的�
   assert.equal(enc.layoutLocked, true);
   assert.equal(c.layoutLabel(enc.layout), "主持人预设");
 });
+
+test("战斗掉落：模板带上、打赢才进背包（只给一次）；输了不给；战绩记下最近 10 场的明细", () => {
+  const c = field();
+  const t = c.battleTemplateNormalize({ name: "仓库", enemies: [{ preset: "thug_knife", zone: 2 }], drops: { kuizhi: 250, items: [{ id: "medkit", qty: 2 }, { id: "nope", qty: 1 }] } });
+  assert.deepEqual(plain(t.drops), { kuizhi: 250, items: [{ id: "medkit", qty: 2 }] });
+  c.dispatch({ type: "battle.setup", level: 1, encounter: c.battleTemplateToEncounter(t) });
+  assert.deepEqual(plain(c.S.state.battleDrops), { kuizhi: 250, items: [{ id: "medkit", qty: 2 }] });
+  const kz = Number(c.S.state.kuizhi) || 0;
+  const r = c.dispatch({ type: "battle.finish", outcome: "win" });
+  assert.deepEqual(plain(r.drops), { kuizhi: 250, items: [{ id: "medkit", name: "简易医疗包", qty: 2 }] });
+  assert.equal(c.S.state.kuizhi, kz + 250);
+  assert.equal(c.bagCount("medkit"), 2);
+  assert.deepEqual(plain(c.dispatch({ type: "battle.finish", outcome: "win" }).drops), plain(r.drops), "重复结算不再给");
+  assert.equal(c.bagCount("medkit"), 2);
+  const b = c.S.LEDGER.career.battles.at(-1);
+  assert.equal(b.name, "仓库");
+  assert.deepEqual(plain(b.drops), plain(r.drops));
+  assert.ok(b.rows.length >= 2 && b.rows.every(x => typeof x.dmg === "number"), "每个上场的人都有一行");
+  // 主持人在战场配置里改掉落；输了不给
+  c.dispatch({ type: "battle.setup", level: 1, encounter: null });
+  assert.equal(c.S.state.battleDrops, null);
+  c.dispatch({ type: "battle.panel", action: "setDrops", drops: { kuizhi: 99, items: [] } });
+  assert.equal(c.S.state.battleDrops.kuizhi, 99);
+  assert.equal(c.dispatch({ type: "battle.finish", outcome: "lose" }).drops, null);
+  // 只留最近 10 场的明细
+  for (let i = 0; i < 12; i++) { c.dispatch({ type: "battle.setup", level: 1, encounter: null }); c.dispatch({ type: "battle.finish", outcome: "win" }); }
+  const all = c.S.LEDGER.career.battles;
+  assert.equal(all.filter(x => x.rows).length, 10);
+});

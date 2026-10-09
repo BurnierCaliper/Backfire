@@ -640,3 +640,36 @@ test("联机：小队频道掷骰 / 主持人暗骰；主持人发起检定、�
   assert.equal(await alice.locator('#online-stage [data-online="attrRequest"]').count(), 0);
   assert.deepEqual(f.errors, []);
 });
+
+test("联机：模板带的战斗掉落打赢后进背包，玩家结算里看得到；能看这场的战斗记录和最近 10 场战绩", { timeout: 120000 }, async t => {
+  const f = await fixture(t); if (!f) return;
+  const { host, alice } = f;
+  const shot = async (page, name) => { if (process.env.BACKFIRE_SHOTS) await page.screenshot({ path: path.join(process.env.BACKFIRE_SHOTS, name + ".png") }); };
+  await host.evaluate(() => { OnlineGame.start(); });
+  await alice.waitForFunction(() => OnlineGame.getView().screen === "exploration");
+  await host.evaluate(() => battleTemplateSave({ name: "仓库守卫", board: 2, enemies: [{ preset: "thug_knife", level: 1, zone: 2 }], drops: { kuizhi: 300, items: [{ id: "medkit", qty: 2 }] } }));
+  await host.click('#tr-tabs [data-tab="battles"]');
+  await host.click('[data-bt^="fight:"]');
+  await host.evaluate(() => { GAME.skip = true; GAME.instant = true; });
+  await host.evaluate(() => { GAME.startOrEnd(); });
+  await host.waitForFunction(() => state.combatStarted && GAME.depth === 0);
+  const before = await host.evaluate(() => ({ kz: Number(state.kuizhi) || 0, med: bagCount("medkit") }));
+  for (const id of await host.evaluate(() => state.units.filter(u => !u.isPlayer && !u.dead && !u.hidden).map(u => u.id))) assert.equal((await submit(host, { type: "gm.removeUnit", actor: id, mode: "kill" })).ok, true);
+  await host.waitForFunction(() => GAME.ended && GAME.lastOutcome === "win");
+  const after = await host.evaluate(() => ({ kz: Number(state.kuizhi) || 0, med: bagCount("medkit") }));
+  assert.ok(after.kz >= before.kz + 300, "掉落的奎支加在敌人自己掉的之外");
+  assert.equal(after.med, before.med + 2);
+  assert.match(await host.locator("#g-result").innerText(), /战斗掉落：300 奎支、简易医疗包×2/);
+  await alice.waitForFunction(() => OnlineGame.getView().screen === "ended" && /战斗掉落/.test(document.getElementById("online-stage").textContent));
+  assert.match(await alice.locator(".ol-result").innerText(), /300 奎支、简易医疗包 ×2/);
+  await alice.click('#online-stage [data-online="showLog"]');
+  assert.equal(await alice.evaluate(() => document.getElementById("online-side").dataset.tab), "log");
+  await alice.click('.ol-result [data-online="info"][data-info="record"]');
+  await alice.waitForSelector("#online-bag:not([hidden]) .ol-record");
+  const rec = await alice.locator("#online-bag").innerText();
+  assert.match(rec, /仓库守卫/);
+  assert.match(rec, /胜利/);
+  assert.match(rec, /掉落：300 奎支、简易医疗包×2/);
+  await shot(alice, "record-player");
+  assert.deepEqual(f.errors, []);
+});

@@ -2386,13 +2386,13 @@
       const durNotes = systemCommand({ type: "battle.afterBattle" });
       if (typeof G.onBattleFinished === "function") {
         const g = state.battleGains || { xp: 0, kuizhi: 0 };
-        G.onBattleFinished({ outcome: G.lastOutcome, turn: state.turnNo, xp: g.xp, kuizhi: g.kuizhi, xpMult: state.xpMult || 1, ups, durNotes, stats: statRows(), grade: gr });
+        G.onBattleFinished({ outcome: G.lastOutcome, turn: state.turnNo, xp: g.xp, kuizhi: g.kuizhi, xpMult: state.xpMult || 1, ups, durNotes, stats: statRows(), grade: gr, drops: rewards.drops || null });
       }
       rememberCampaign();
       durNotes.forEach(t => addLogPhase(t));
     }
     const loot = `背包现有 ${Number(state.kuizhi) || 0} 奎支`;
-    const lvline = ups.length ? "升级：" + ups.join("、") + "。" : "";
+    const lvline = (ups.length ? "升级：" + ups.join("、") + "。" : "") + (rewards.drops ? "战斗掉落：" + battleDropsText(rewards.drops) + "。" : "");
     box.querySelector("p").textContent = retreated
       ? `第 ${state.turnNo} 回合撤出战斗。${loot}。${lvline}`
       : win
@@ -3843,7 +3843,27 @@
       });
     }
     renderTemplateList();
+    renderDrops();
   }
+  /* ---------- 战斗掉落：主持人设好，打赢才进背包 ---------- */
+  function renderDrops() {
+    const box = $("g-drop-list"); if (!box) return;
+    const d = state.battleDrops || { kuizhi: 0, items: [] };
+    $("g-drop-kz").value = String(d.kuizhi || 0);
+    box.innerHTML = (d.items || []).length ? "" : '<p class="sheet-empty">没有设物品掉落。</p>';
+    (d.items || []).forEach((x, i) => {
+      const row = el("div", "sheet-slot");
+      row.innerHTML = `<div><b>${esc((ITEM_CATALOG[x.id] || {}).name || x.id)}</b><div class="sub">× ${x.qty}</div></div>`;
+      const rm = el("button", "g-btn", "去掉");
+      rm.onclick = () => setDrops({ kuizhi: d.kuizhi, items: d.items.filter((_, j) => j !== i) });
+      row.appendChild(rm); box.appendChild(row);
+    });
+  }
+  function setDrops(drops) {
+    try { dispatch({ type: "battle.panel", action: "setDrops", drops }); } catch (e) { flashHint(e.message); }
+    renderDrops();
+  }
+
   /* ---------- 战斗模板（battle-templates.js）：存当前战场 / 套用 ---------- */
   function renderTemplateList() {
     const box = $("g-tpl-list");
@@ -4036,6 +4056,16 @@
       startEncounter(spec);
     };
     $("g-field-close").onclick = () => $("g-field-sheet").classList.remove("show");
+    if ($("g-drop-sel")) {
+      $("g-drop-sel").innerHTML = Object.keys(ITEM_CATALOG).map(id => `<option value="${esc(id)}">${esc(ITEM_CATALOG[id].name || id)}</option>`).join("");
+      const cur = () => state.battleDrops || { kuizhi: 0, items: [] };
+      $("g-drop-kz").onchange = () => setDrops({ kuizhi: Number($("g-drop-kz").value) || 0, items: cur().items || [] });
+      $("g-drop-add").onclick = () => {
+        const id = $("g-drop-sel").value, qty = Math.max(1, Number($("g-drop-qty").value) || 1), items = (cur().items || []).slice();
+        const same = items.find(x => x.id === id); if (same) same.qty += qty; else items.push({ id, qty });
+        setDrops({ kuizhi: Number($("g-drop-kz").value) || 0, items });
+      };
+    }
     if ($("g-tpl-save")) $("g-tpl-save").onclick = () => {
       if (typeof battleTemplateCapture !== "function") return;
       const name = ($("g-tpl-name").value || "").trim();

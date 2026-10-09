@@ -220,7 +220,8 @@
     let sheets = [], armory = [];
     try { sheets = ST ? ST.sheetData() : []; } catch (e) { sheets = []; }
     try { armory = ST && ST.armoryData ? ST.armoryData() : []; } catch (e) { armory = []; }
-    return { type: "sheetData", protocol: PROTOCOL, build: BUILD, sheets, armory, bag: bagDetail() };
+    const battles = typeof LEDGER !== "undefined" && LEDGER.career && Array.isArray(LEDGER.career.battles) ? LEDGER.career.battles.slice(-10) : [];
+    return { type: "sheetData", protocol: PROTOCOL, build: BUILD, sheets, armory, bag: bagDetail(), battles };
   }
   function messagePage(sender, request = {}) {
     const visible = sender === identity.id ? messages : messages.flatMap(m => OnlineView.projectMessages([m], { recipientId: sender, gmId: identity.id }));

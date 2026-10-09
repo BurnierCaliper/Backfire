@@ -210,7 +210,31 @@
     enumField(result, out, "outcome", ["win", "lose", "retreat"]);
     const grade = get(result, "grade");
     if (obj(grade)) { out.grade = copyFields(grade, {}, [], ["score", "par", "xpMult"], []); enumField(grade, out.grade, "grade", ["D", "C", "B", "A", "S", "SS", "SSS"]); }
+    const drops = projectDrops(get(result, "drops")); if (drops) out.drops = drops;
     return out;
+  }
+  /** 战斗掉落：奎支和物品名、数量 */
+  function projectDrops(d) {
+    if (!obj(d)) return null;
+    const out = copyFields(d, {}, [], ["kuizhi"], []);
+    out.items = arr(get(d, "items")).slice(0, 30).flatMap(x => {
+      const itemId = id(get(x, "id")), qty = number(get(x, "qty"));
+      return itemId && qty > 0 ? [{ id: itemId, name: text(get(x, "name"), 60) || itemId, qty }] : [];
+    });
+    return out;
+  }
+  /** 最近 10 场战绩：概要 + 每个人的数据（伤害、击破、承伤……都是公开的战场数据） */
+  function projectBattles(list) {
+    const keys = ["dmg", "brk", "taken", "kills", "heal", "score", "assists", "blocks", "blockOk", "avoided", "staggers", "reduced", "share"];
+    return arr(list).slice(-10).flatMap(b => {
+      if (!obj(b)) return [];
+      const out = copyFields(b, {}, ["name", "when", "grade"], ["no", "turns", "score", "teamDmg"], []);
+      enumField(b, out, "outcome", ["win", "lose", "retreat"]);
+      const mvp = get(b, "mvp"); if (obj(mvp)) out.mvp = copyFields(mvp, {}, ["name"], ["dmg"], []);
+      const drops = projectDrops(get(b, "drops")); if (drops) out.drops = drops;
+      out.rows = arr(get(b, "rows")).slice(0, 20).flatMap(r => obj(r) ? [identifiers(r, copyFields(r, {}, ["name"], keys, []), ["kit", "weaponOf"])] : []);
+      return [out];
+    });
   }
   const pickKeys = new Set(["partner", "target", "target1", "target2", "ally", "dest", "prop", "layer", "status", "mode", "carry", "burn", "rangeMode", "carryMode", "blade", "again", "item", "index"]);
   function choiceValue(value) {
@@ -351,6 +375,7 @@
       out.sheets = projectSheets(get(packet, "sheets"));
       out.armory = projectSheets(get(packet, "armory"));
       out.bag = projectBagDetail(get(packet, "bag"));
+      out.battles = projectBattles(get(packet, "battles"));
     }
     if (own(packet, "offlineWait")) {
       const wait = get(packet, "offlineWait");

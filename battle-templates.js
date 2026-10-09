@@ -85,6 +85,14 @@ function btMechanics(list) {
   return out.length ? out : undefined;
 }
 
+/** 打赢之后的掉落：{ kuizhi, items: [{ id, qty }] }，没有就是 null */
+function btDrops(d) {
+  if (!d || typeof d !== "object") return null;
+  const known = id => typeof ITEM_CATALOG === "undefined" || Object.prototype.hasOwnProperty.call(ITEM_CATALOG, id);
+  const kuizhi = btInt(d.kuizhi, 0, 0, 999999);
+  const items = (Array.isArray(d.items) ? d.items : []).filter(x => x && typeof x.id === "string" && known(x.id)).slice(0, 30).map(x => ({ id: x.id, qty: btInt(x.qty, 1, 1, 999) }));
+  return kuizhi || items.length ? { kuizhi, items } : null;
+}
 function battleTemplateNormalize(t) {
   t = t && typeof t === "object" ? t : {};
   const board = btBoard(t.board);
@@ -124,6 +132,7 @@ function battleTemplateNormalize(t) {
     weather: BATTLE_TEMPLATE_WEATHERS.includes(t.weather) ? t.weather : "none",
     playerZone: zoneOk(t.playerZone, defaultPlayer),
     enemies, fields, gaps, props,
+    drops: btDrops(t.drops),
     updatedAt: Number(t.updatedAt) || Date.now()
   };
 }
@@ -235,7 +244,7 @@ function battleTemplateCapture(name) {
     .map(p => ({ kind: p.kind, zone: Number(p.zone) || 1, level: Number(p.level) || null, faction: p.faction || "player" }));
   const enc = typeof GAME !== "undefined" && GAME && GAME.encounter;
   return battleTemplateNormalize({
-    name, board, weather: state.weather || "none",
+    name, board, weather: state.weather || "none", drops: state.battleDrops || null,
     tier: enc && BATTLE_TEMPLATE_TIERS[enc.tier] ? enc.tier : "normal",
     playerZone: btMostCommon(heroes.map(u => Number(u.zone) || 1), (btLayout(board) || {}).playerZone || 1),
     enemies, fields, gaps, props
@@ -260,6 +269,7 @@ function battleTemplateToEncounter(t) {
     fields: btClone(t.fields),
     features: []
   };
+  if (t.drops) enc.drops = btClone(t.drops);
   if (typeof t.board === "string") enc.board = t.board;
   Object.keys(t.gaps).forEach(k => {
     const g = t.gaps[k];
@@ -294,6 +304,7 @@ function battleTemplateSummary(t) {
   if (nf) extra.push(`${nf} 个区有场地`);
   if (ng) extra.push(`${ng} 处间隙`);
   if (t.props.length) extra.push(`${t.props.length} 个配置物`);
+  if (t.drops) extra.push("有掉落");
   return bits.join(" · ") + (extra.length ? `（${extra.join("、")}）` : "");
 }
 /** 一区的主场地（编辑表单用） */

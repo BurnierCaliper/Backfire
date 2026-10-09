@@ -762,6 +762,11 @@
       <h4>间隙</h4>${gaps}
       <h4>配置物</h4>${props || '<p class="r-hint">没有配置物。</p>'}
       <div class="tr-row"><button class="g-btn small" data-bt-act="addProp">＋ 配置物</button></div>
+      <h4>战斗掉落（打赢才给，直接进背包）</h4>
+      <div class="tr-row">奎支 <input type="number" min="0" data-bt-dropkz="1" value="${(t.drops && t.drops.kuizhi) || 0}" style="width:90px">
+        物品 <select id="bt-drop-item">${options(Object.keys(ITEM_CATALOG).map(id => [id, ITEM_CATALOG[id].name || id]))}</select>
+        × <input type="number" min="1" id="bt-drop-qty" value="1" style="width:56px"> <button class="g-btn small" data-bt-act="addDrop">＋</button>
+        ${((t.drops && t.drops.items) || []).map((x, k) => `<span class="tk-chip">${esc((ITEM_CATALOG[x.id] || {}).name || x.id)}×${x.qty}<button class="g-btn small" data-bt-act="delDrop:${k}">×</button></span>`).join("")}</div>
       <p class="r-hint">首领机制（死刑 / 分担 / 远离 / 踩塔）要在战斗画面「战场配置」里给敌人挂上，再「把当前战场存为模板」。</p>
       <div class="tr-row"><button class="g-btn" data-bt-act="save">保存</button><button class="g-btn" data-bt-act="cancel">取消</button></div>
     </div>`;
@@ -805,6 +810,13 @@
       case "clearMech": delete t.enemies[j].mechanics; break;
       case "addProp": t.props.push({ kind: "boom", zone: zones[Math.min(1, zones.length - 1)], level: null, faction: "player" }); break;
       case "delProp": t.props.splice(j, 1); break;
+      case "addDrop": {
+        t.drops = t.drops || { kuizhi: 0, items: [] };
+        const id = $("bt-drop-item").value, qty = Math.max(1, Number($("bt-drop-qty").value) || 1);
+        const same = t.drops.items.find(x => x.id === id); if (same) same.qty += qty; else t.drops.items.push({ id, qty });
+        break;
+      }
+      case "delDrop": if (t.drops) { t.drops.items.splice(j, 1); if (!t.drops.items.length && !t.drops.kuizhi) t.drops = null; } break;
     }
     render();
   }
@@ -851,6 +863,11 @@
     P.querySelectorAll("[data-bt-gaphp]").forEach(el => { el.oninput = () => { const g = btEdit.gaps[el.dataset.btGaphp]; if (g) g.hp = el.value === "" ? null : Number(el.value); }; });
     P.querySelectorAll("[data-bt-door]").forEach(el => { el.onchange = () => { const g = btEdit.gaps[el.dataset.btDoor]; if (g) g.open = el.checked; }; });
     P.querySelectorAll("[data-bt-act]").forEach(b => { b.onclick = () => btAct(b.dataset.btAct); });
+    P.querySelectorAll("[data-bt-dropkz]").forEach(el => { el.oninput = () => {
+      const kz = Math.max(0, Number(el.value) || 0);
+      btEdit.drops = btEdit.drops || { kuizhi: 0, items: [] }; btEdit.drops.kuizhi = kz;
+      if (!kz && !btEdit.drops.items.length) btEdit.drops = null;
+    }; });
   }
 
   /** 进战斗前：有队员血量低于 20% 而且还能短休，先提醒（返回 false = 不进） */
@@ -1162,6 +1179,7 @@
       const lines = [`${head}（第 ${r.turn} 回合）：每人获得 ${r.xp} 经验${r.xpMult > 1 ? `（经验 ×${r.xpMult}）` : ""}，掉落 ${r.kuizhi} 奎支（现有 ${Number(state.kuizhi) || 0}）。`];
       if (r.grade) lines.push(`评价 ${r.grade.grade}：${r.grade.score} 分（基准 ${r.grade.par}）${r.outcome === "win" && r.grade.xpMult > 1 ? `，战斗经验 ×${r.grade.xpMult}（已含在上面的经验里）` : ""}。`);
       if (r.ups && r.ups.length) lines.push("升级：" + r.ups.join("、") + "。");
+      if (r.drops && typeof battleDropsText === "function") lines.push("战斗掉落：" + battleDropsText(r.drops) + "（已放进背包）。");
       (r.stats || []).filter(x => x.dmg || x.brk || x.taken || x.kills || x.heal).forEach(x => {
         lines.push(`${x.sub ? "　" : ""}${x.name}${x.sub ? "（武器人）" : ""}：伤害 ${Math.round(x.dmg)} · 击破 ${Math.round(x.brk)} · 承伤 ${Math.round(x.taken)} · 击杀 ${x.kills} · 治疗 ${Math.round(x.heal)}`);
       });

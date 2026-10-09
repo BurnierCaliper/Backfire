@@ -188,3 +188,13 @@ body.ol-has-side .ol-toast { right: 344px; }
 .ol-attr p { margin: 0 0 6px; }
 .ol-attr-btns { display: flex; flex-wrap: wrap; gap: 6px; }
 .ol-attr-btns .ol-button { padding: 4px 8px; font-size: 13px; }
+
+/* 战斗结算的掉落、最近 10 场战绩 */
+.ol-drops b { color: var(--sk-mint, #39e6b4); }
+.ol-record-card { max-width: 980px; }
+.ol-record { margin: 12px 0; padding: 10px 12px; background: #1f1a14; border: 1px solid #4d4337; }
+.ol-record header { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.ol-record-table { overflow-x: auto; margin-top: 8px; }
+.ol-record table { border-collapse: collapse; width: 100%; font-size: 13px; font-variant-numeric: tabular-nums; }
+.ol-record th, .ol-record td { padding: 4px 6px; border-bottom: 1px solid #3a3229; text-align: right; white-space: nowrap; }
+.ol-record th:first-child, .ol-record td:first-child { text-align: left; }
