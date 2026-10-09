@@ -340,8 +340,12 @@
       const itemId = id(get(item, "id")), qty = number(get(item, "qty"));
       if (!itemId || qty === undefined || qty <= 0) return [];
       const row = { id: itemId, name: text(get(item, "name"), 80) || itemId, qty };
-      const hint = text(get(item, "hint"), 300);   // 说明里提到坚毅生命的不发（隐藏数值）
-      if (hint) row.hint = hint;
+      // 道具说明是固定的目录文字，可以提到坚毅生命；要藏的只是玩家自己的坚毅生命数值（scrubHidden 管）
+      const rawHint = get(item, "hint");
+      if (typeof rawHint === "string") {
+        const hint = rawHint.replace(/[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2060-\u206f]/g, "").slice(0, 300);
+        if (hint) row.hint = hint;
+      }
       return [row];
     });
     return out;
