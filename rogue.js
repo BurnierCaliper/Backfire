@@ -844,6 +844,11 @@ const Rogue = (function () {
       failTask(run, notes, "悬赏目标逃走了", "悬赏失败");
       return logAll(run, notes);
     }
+    // 任务最后一站（目标战）撤退：任务目标没完成 → 任务失败（以前照样算完成、拿全额报酬）
+    if (outcome === "retreat" && run.task && !run.task.hunt && run.task.index >= run.task.nodes.length - 1) {
+      failTask(run, notes, "在最后一战撤退，任务目标没有完成", "任务失败");
+      return logAll(run, notes);
+    }
     if (outcome === "retreat") notes.push("撤退：这一站的敌人没有解决，绕开继续前进。");
     advanceNode(run, notes);
     return logAll(run, notes);
@@ -1238,7 +1243,8 @@ const Rogue = (function () {
       limit: info.limit, rate: info.rate, fleshMax: info.fleshMax, current: info.current
     };
   }
-  /** 做改造。做完顺便治好（手术后在诊所躺好了才出来） */
+  /** 做改造。伤势照旧带着（以前做完直接回满：改一点装甲比治疗便宜得多，被拿来免费回血）——
+   *  缺的血量先从外层扣，最内层至少留 1 */
   function modifyHero(run, kit, plan) {
     if (!canClinic(run)) throw new Error("这里没有诊所");
     const pv = cyberPreview(run, kit, plan);
@@ -1247,9 +1253,20 @@ const Rogue = (function () {
     if ((Number(state.kuizhi) || 0) < pv.cost) throw new Error("奎支不够");
     state.kuizhi -= pv.cost;
     const h = run.party.find(x => x.kit === kit);
+    const before = heroView(run, h);
+    let missing = Math.max(0, (Number(before.hpMax) || 0) - (Number(before.hp) || 0));
     const p = normPlan(plan);
     h.cyber = (p.armor || p.shield || p.sand || p.spirit) ? p : null;
-    h.hp = null;
+    if (!missing) h.hp = null;
+    else {
+      const layers = pv.layers.map(l => ({ type: l.type, current: l.max }));
+      layers.forEach((l, i) => {
+        const keep = i === layers.length - 1 ? 1 : 0;
+        const take = Math.min(missing, Math.max(0, l.current - keep));
+        l.current -= take; missing -= take;
+      });
+      h.hp = layers;
+    }
     const text = pv.layers.map(l => `${LAYER[l.type] || l.type} ${l.max}`).join(" / ");
     return logAll(run, [`${heroName(kit)} 完成义体改造（${text}），花掉 ${pv.cost} 奎支。`]);
   }

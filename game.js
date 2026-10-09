@@ -2389,7 +2389,8 @@
     const downNotes = dispatch({ type: "battle.checkSolo" });
     if (downNotes && downNotes.length) addLogPhase(downNotes.join("\n"));
     const heroes = state.units.filter(u => u.isPlayer && !u.hidden && !u.dead && !isWeaponUnit(u));
-    const standing = heroes.filter(u => hotseat() && u.dying ? !standUpBlocked(u) : typeof heroStillFighting === "function" ? heroStillFighting(u) : !u.dying);
+    // 多人模式（含热座 / 联机）：全员倒地即失败，和 README 一致；只有单人主角能靠起身撑着不算输
+    const standing = heroes.filter(u => typeof heroStillFighting === "function" ? heroStillFighting(u) : !u.dying);
     if (!foes().length) return finish(true);
     if (!standing.length) return finish(false);
     return false;

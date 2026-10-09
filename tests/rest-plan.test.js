@@ -1,3 +1,4 @@
+// 柯尔特是兽人（长休吃 3 份），Helumica 是猫类人（2 份）
 // 长休界面：每个角色单独选吃哪种食物、用哪个睡眠道具；单局的休息点 / 遭遇战 / 休整都按这份安排
 "use strict";
 const test = require("node:test");
@@ -15,7 +16,7 @@ const hero = (c, kit) => c.partyHeroes().find(h => h.kit === kit);
 
 test("长休选项：列出每个角色的需求、能选的食物和睡眠道具；默认按队伍顺序分睡袋", () => {
   const c = field();
-  c.bagAdd("food_liquid", 4); c.bagAdd("food_gourmet", 2); c.bagAdd("sleepbag", 1);
+  c.bagAdd("food_liquid", 5); c.bagAdd("food_gourmet", 2); c.bagAdd("sleepbag", 1);
   const o = c.longRestOptions({});
   assert.equal(o.heroes.map(h => h.kit).join(), "kolt,helu");
   assert.equal(o.heroes.map(h => h.foodId).join(), "food_liquid,food_liquid");
@@ -27,7 +28,7 @@ test("长休选项：列出每个角色的需求、能选的食物和睡眠道�
 
 test("睡袋分给谁由玩家选；分出去的比背包里的多就不够长休", () => {
   const c = field();
-  c.bagAdd("food_liquid", 4); c.bagAdd("sleepbag", 1);
+  c.bagAdd("food_liquid", 5); c.bagAdd("sleepbag", 1);
   const two = c.longRestNeeds({ sleep: { kolt: "sleepbag", helu: "sleepbag" } });
   assert.equal(two.ok, false);
   assert.match(two.lack.join(), /睡袋 只有 1 个，分给了 2 个人/);
@@ -43,13 +44,13 @@ test("睡袋分给谁由玩家选；分出去的比背包里的多就不够长�
 
 test("每人各吃各的：好食物额外恢复坚毅，按各自的份数扣", () => {
   const c = field();
-  c.bagAdd("food_liquid", 2); c.bagAdd("food_gourmet", 2);
+  c.bagAdd("food_liquid", 2); c.bagAdd("food_gourmet", 3);
   hero(c, "kolt").shp = 0; hero(c, "helu").shp = 0;
   const r = c.ledgerLongRest({ hours: 8, food: { kolt: "food_gourmet", helu: "food_liquid" }, sleep: { kolt: "", helu: "" } }, []);
   assert.equal(r.ok, true);
   assert.equal(c.bagCount("food_gourmet"), 0);
   assert.equal(c.bagCount("food_liquid"), 0);
-  assert.equal(hero(c, "kolt").shp, Math.min(hero(c, "kolt").shpMax, 16 + 5 * 2));
+  assert.equal(hero(c, "kolt").shp, Math.min(hero(c, "kolt").shpMax, 16 + 5 * 3));
   assert.equal(hero(c, "helu").shp, Math.min(hero(c, "helu").shpMax, 16));
 });
 
@@ -60,7 +61,7 @@ function rogue(seed) {
   delete run.task.hunt;
   run.task.nodes[run.task.index] = { type: "rest", done: false };
   c.S.state.bag = { items: [] };
-  c.bagAdd("food_liquid", 2); c.bagAdd("food_gourmet", 2); c.bagAdd("sleepbag", 1);
+  c.bagAdd("food_liquid", 2); c.bagAdd("food_gourmet", 3); c.bagAdd("sleepbag", 1);
   c.setLedgerWater(10000);
   return { c, R, run };
 }
