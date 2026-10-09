@@ -368,3 +368,22 @@ test("属性点申请：只能给自己的角色、一次一条；主持人同�
   s.decideAttr("a", s.snapshot().table.attrs[1].id, "cancel");
   assert.equal(s.snapshot().table.attrs[1].status, "cancelled");
 });
+
+test("大字：只有主持人能发，最长 40 字、停留 2–15 秒；小队频道留一条记录；跨重建保留最近一条", () => {
+  const f = fixture(), s = f.s;
+  assert.throws(() => s.showTitle("a", { text: "我来了" }), /只有主持人/);
+  assert.throws(() => s.showTitle("gm", { text: "  " }), /不能为空/);
+  s.showTitle("gm", { text: "援军来了", sub: "北边山坡亮起了火把", tone: "hope", seconds: 99 });
+  const t = s.snapshot().table.title;
+  assert.deepEqual([t.text, t.sub, t.tone, t.seconds], ["援军来了", "北边山坡亮起了火把", "hope", 15]);
+  assert.equal(s.snapshot().chat.at(-1).text, "【援军来了】 北边山坡亮起了火把");
+  s.showTitle("gm", { text: "他们来了", tone: "weird" });
+  const t2 = s.snapshot().table.title;
+  assert.notEqual(t2.id, t.id);
+  assert.deepEqual([t2.tone, t2.seconds], ["plain", 4]);
+  assert.equal(fixture({ table: s.snapshot().table }).s.snapshot().table.title.text, "他们来了");
+  const V = require("../online-view");
+  const view = V.projectView({ title: t2, chat: s.snapshot().chat }, { recipientId: "a" });
+  assert.deepEqual(JSON.parse(JSON.stringify(view.title)), { text: "他们来了", sub: "", seconds: 4, at: t2.at, id: t2.id, tone: "plain" });
+  assert.equal(view.chat.at(-1).title, true);
+});

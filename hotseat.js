@@ -139,13 +139,28 @@
     }
     function cleanTable(t) {
       t = t && typeof t === "object" ? t : {};
-      return { seq: Number(t.seq) || 0, checks: (Array.isArray(t.checks) ? t.checks : []).filter(c => c && Array.isArray(c.targets)).slice(-TABLE_KEEP),
+      return { seq: Number(t.seq) || 0, title: t.title && typeof t.title.text === "string" ? t.title : null, checks: (Array.isArray(t.checks) ? t.checks : []).filter(c => c && Array.isArray(c.targets)).slice(-TABLE_KEEP),
         attrs: (Array.isArray(t.attrs) ? t.attrs : []).filter(r => r && Array.isArray(r.attrs)).slice(-TABLE_KEEP) };
     }
     function tableNote(id, text) {
       const op = operator(id);
       chat.push({ id: "chat-" + (++sequence), operatorId: id, operatorName: op.name, text: text.slice(0, 500), at: now(), roll: true });
       if (chat.length > CHAT_KEEP) chat.splice(0, chat.length - CHAT_KEEP);
+    }
+    /** 大字（像 Minecraft 的 /title）：主持人在所有人画面中间打出一行大字，可带一行小字。
+     * opt：{ text, sub, tone: "plain" | "danger" | "hope", seconds } */
+    function showTitle(id, opt) {
+      const op = operator(id);
+      if (id !== gmId) fail("table_gm", "只有主持人能发大字");
+      const text = String((opt && opt.text) || "").trim().slice(0, 40);
+      if (!text) fail("title_empty", "大字不能为空");
+      const sub = String((opt && opt.sub) || "").trim().slice(0, 80);
+      const tone = ["plain", "danger", "hope"].includes(opt && opt.tone) ? opt.tone : "plain";
+      const seconds = Math.max(2, Math.min(15, Math.round(Number(opt && opt.seconds) || 4)));
+      table.title = { id: "title-" + (++table.seq), text, sub, tone, seconds, at: now() };
+      chat.push({ id: "chat-" + (++sequence), operatorId: id, operatorName: op.name, text: `【${text}】${sub ? " " + sub : ""}`, at: now(), title: true });
+      if (chat.length > CHAT_KEEP) chat.splice(0, chat.length - CHAT_KEEP);
+      return emit("title");
     }
     /** 按钮掷骰：spec 由房主按角色卡算好 { unitId, name, prof, level, adv, dis, lines, note }；secret 只有主持人能用（暗骰） */
     function skillRoll(id, spec, secret) {
@@ -471,7 +486,7 @@
     setAssignments(options.assignments || {});
     return { snapshot, reconcile, setAssignments, beginRound, pick: place, confirm, forceStart, move, acceptSwap,
       assertAction, finishUnit, markSpent, openAsk, answer, tick, askFor, chat: chatMessage, endBattle, reset, checkpoint, restore,
-      openCheck, rollCheck: rollCheckFor, closeCheck, requestAttr, decideAttr, skillRoll,
+      openCheck, rollCheck: rollCheckFor, closeCheck, requestAttr, decideAttr, skillRoll, showTitle,
       ownerOf: unitId => (rowFor(unitId) || {}).operatorId || null,
       extendAsk(ms) { if (ask && Number.isFinite(ms) && ms > 0) { ask.deadline += ms; emit("askResumed"); } },
       onChange(fn) { changes.add(fn); return () => changes.delete(fn); },

@@ -45,6 +45,13 @@
     const rollBox = make("section", "online-roll", "ol-overlay ol-bag ol-roll", { role: "dialog", "aria-label": "掷骰" });
     rollBox.hidden = true;
     const rollForm = { unit: "", prof: "", note: "", secret: false };
+    // 大字：主持人发，所有人画面中间出现（像 Minecraft 的 /title）
+    const titleShow = make("div", "online-title", "ol-title-show", { "aria-live": "assertive" });
+    titleShow.hidden = true;
+    const titleBox = make("section", "online-title-form", "ol-overlay ol-bag ol-roll", { role: "dialog", "aria-label": "发大字" });
+    titleBox.hidden = true;
+    const titleForm = { text: "", sub: "", tone: "plain", seconds: 4 };
+    let lastTitle = null, titlePrimed = false, titleTimer = null;
     let sideTab = { battle: "log", other: "chat" }, sideKeys = { log: "", chat: "" }, seenChat = new Set(), chatPrimed = false, unread = 0, chatSending = false;
     side.addEventListener("click", event => {
       const tab = event.target.closest("[data-side]"); if (!tab) return;
@@ -54,7 +61,20 @@
     side.addEventListener("keydown", event => event.stopPropagation());
     side.addEventListener("submit", event => { event.preventDefault(); sendSideChat(); });
     bagBox.addEventListener("click", event => { if (event.target === bagBox || event.target.closest('[data-bag="close"]')) bagBox.hidden = true; });
-    const onRollOpen = event => { if (event.target.closest && event.target.closest("[data-roll-open]")) openRoll(); };
+    const onRollOpen = event => {
+      if (!event.target.closest) return;
+      if (event.target.closest("[data-roll-open]")) openRoll();
+      if (event.target.closest("[data-title-open]")) openTitleForm();
+    };
+    titleBox.addEventListener("click", event => {
+      if (event.target === titleBox || event.target.closest('[data-title="close"]')) { titleBox.hidden = true; return; }
+      const preset = event.target.closest("[data-title-preset]");
+      if (preset) { const [t, tone] = preset.dataset.titlePreset.split("|"); titleForm.text = t; titleForm.tone = tone; paintTitleForm(); return; }
+      if (event.target.closest('[data-title="go"]')) sendTitle();
+    });
+    titleBox.addEventListener("input", event => { const k = event.target.dataset.tf; if (k) titleForm[k] = event.target.value; });
+    titleBox.addEventListener("change", event => { const k = event.target.dataset.tf; if (k) titleForm[k] = event.target.value; });
+    titleBox.addEventListener("keydown", event => { event.stopPropagation(); if (event.key === "Escape") titleBox.hidden = true; if (event.key === "Enter" && event.target.tagName === "INPUT") sendTitle(); });
     document.addEventListener("click", onRollOpen);
     rollBox.addEventListener("click", event => {
       if (event.target === rollBox || event.target.closest('[data-roll="close"]')) { rollBox.hidden = true; return; }
@@ -231,7 +251,7 @@
     const chatRows = () => (hs().chat || []).filter(m => m && typeof m.text === "string");
     const clock = at => { if (!at) return ""; const d = new Date(at); return isNaN(d) ? "" : `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
     function chatListMarkup(rows) {
-      return rows.map(m => `<li class="${m.operatorId && m.operatorId === own() ? "ol-mine" : ""}${m.roll ? " ol-roll" : ""}${m.tier ? " ol-tier-" + m.tier : ""}${m.secret ? " ol-secret" : ""}"><div><b>${esc(m.name || m.operatorName || playerName(m.operatorId))}</b><small>${esc(clock(m.at))}</small></div><p>${esc(m.text)}</p></li>`).join("") || '<li class="ol-muted">还没有人说话。消息所有人都能看到，并一直保留在记录里。</li>';
+      return rows.map(m => `<li class="${m.operatorId && m.operatorId === own() ? "ol-mine" : ""}${m.roll ? " ol-roll" : ""}${m.tier ? " ol-tier-" + m.tier : ""}${m.secret ? " ol-secret" : ""}${m.title ? " ol-title-row" : ""}"><div><b>${esc(m.name || m.operatorName || playerName(m.operatorId))}</b><small>${esc(clock(m.at))}</small></div><p>${esc(m.text)}</p></li>`).join("") || '<li class="ol-muted">还没有人说话。消息所有人都能看到，并一直保留在记录里。</li>';
     }
     /** 更新列表（只换列表内容，不碰输入框）；原来在底部就继续贴底 */
     function fillList(list, markup) {
@@ -290,7 +310,7 @@
           const nav = document.createElement("nav"); nav.className = "ol-host-tabs"; nav.setAttribute("role", "tablist");
           nav.innerHTML = `<button type="button" role="tab" data-host-tab="log" class="ol-tab">${label}</button><button type="button" role="tab" data-host-tab="chat" class="ol-tab">小队<span class="ol-badge" hidden></span></button>`;
           const box = document.createElement("div"); box.className = "ol-host-chat";
-          box.innerHTML = `<ol class="ol-side-chat" aria-live="polite"></ol><form class="ol-side-form"><button type="button" class="ol-button ol-dice" data-roll-open="1" title="选角色和熟练项掷 d100（可以暗骰）">🎲</button><input maxlength="500" autocomplete="off" aria-label="小队消息" placeholder="说点什么…"><button type="submit" class="ol-button ol-primary">发送</button></form>`;
+          box.innerHTML = `<ol class="ol-side-chat" aria-live="polite"></ol><form class="ol-side-form"><button type="button" class="ol-button ol-dice" data-roll-open="1" title="选角色和熟练项掷 d100（可以暗骰）">🎲</button><button type="button" class="ol-button ol-dice" data-title-open="1" title="在所有玩家画面中间打出大字（比如「援军来了」）">📢</button><input maxlength="500" autocomplete="off" aria-label="小队消息" placeholder="说点什么…"><button type="submit" class="ol-button ol-primary">发送</button></form>`;
           root.prepend(nav); root.appendChild(box);
           const m = { root, nav, box, tab: def, key: "", seen: null, unread: 0, remove() { nav.remove(); box.remove(); root.classList.remove("ol-chat-mode"); } };
           nav.addEventListener("click", e => { const b = e.target.closest("[data-host-tab]"); if (!b) return; m.tab = b.dataset.hostTab; paintHost(m, true); if (m.tab === "chat") box.querySelector("input").focus({ preventScroll: true }); });
@@ -323,6 +343,34 @@
     function bagMarkup(bag) {
       const items = (bag && bag.items) || [];
       return `<div class="ol-card"><header><h2>背包</h2><button type="button" class="ol-button" data-bag="close">关闭</button></header><div class="ol-points"><span>奎支 ${esc(bag?.kuizhi ?? 0)}</span><span>水 ${esc(bag?.water ?? 0)} ml</span></div><ul class="ol-bag-list">${items.map(it => `<li><div><b>${esc(it.name)}</b><span>× ${esc(it.qty)}</span></div>${it.hint ? `<p>${esc(it.hint)}</p>` : ""}</li>`).join("") || '<li class="ol-muted">背包是空的。</li>'}</ul><p class="ol-muted">队伍共用的背包。使用道具请在自己的行动里选「使用道具」。</p></div>`;
+    }
+    /* ---------- 大字 ---------- */
+    const TITLE_PRESETS = [["援军来了", "hope"], ["他们来了", "danger"], ["小心！", "danger"], ["天亮了", "hope"]];
+    function paintTitleForm() {
+      const tones = { plain: "普通（金色）", danger: "危险（红色）", hope: "希望（青色）" };
+      titleBox.innerHTML = `<div class="ol-card"><header><h2>发大字</h2><button type="button" class="ol-button" data-title="close">关闭</button></header><p class="ol-muted">所有玩家画面中间会突然出现这行大字，几秒后淡出；小队频道里也会留一条记录。</p><div class="ol-attr-btns">${TITLE_PRESETS.map(([t, tone]) => `<button type="button" class="ol-button" data-title-preset="${esc(t)}|${tone}">${esc(t)}</button>`).join("")}</div><label>大字<input id="ol-title-text" data-tf="text" maxlength="40" value="${esc(titleForm.text)}" placeholder="比如：援军来了"></label><label>小字（可不填）<input data-tf="sub" maxlength="80" value="${esc(titleForm.sub)}" placeholder="比如：北边的山坡上亮起了火把"></label><label>风格<select data-tf="tone">${Object.keys(tones).map(k => option(k, tones[k], k === titleForm.tone)).join("")}</select></label><label>停留秒数<input data-tf="seconds" type="number" min="2" max="15" value="${esc(titleForm.seconds)}"></label><footer><button type="button" class="ol-button ol-primary" data-title="go"${disabled() ? " disabled" : ""}>发出去</button></footer></div>`;
+    }
+    function openTitleForm() { if (!view.active || !view.isHost) return; paintTitleForm(); titleBox.hidden = false; titleBox.querySelector("#ol-title-text")?.focus({ preventScroll: true }); }
+    async function sendTitle() {
+      if (!titleForm.text.trim() || disabled()) return;
+      const cmd = { type: "showTitle", text: titleForm.text.trim(), sub: titleForm.sub.trim(), tone: titleForm.tone, seconds: Number(titleForm.seconds) || 4 };
+      if (await call(() => api.submit(cmd))) { titleForm.text = ""; titleForm.sub = ""; titleBox.hidden = true; }
+    }
+    /** 收到新的大字就播一次（刚进房间时已经有的那条不重播） */
+    function playTitle() {
+      const t = hs().title;
+      if (!view.active || !view.packet) return;
+      if (!titlePrimed) { titlePrimed = true; lastTitle = t ? t.id : null; return; }
+      if (!t || t.id === lastTitle) return;
+      lastTitle = t.id;
+      clearTimeout(titleTimer);
+      titleShow.className = "ol-ui ol-title-show ol-tone-" + (t.tone || "plain");
+      titleShow.innerHTML = `<div class="ol-title-main">${esc(t.text)}</div>${t.sub ? `<div class="ol-title-sub">${esc(t.sub)}</div>` : ""}`;
+      titleShow.hidden = false;
+      void titleShow.offsetWidth; titleShow.classList.add("on");
+      const ms = Math.max(2, Math.min(15, Number(t.seconds) || 4)) * 1000;
+      titleTimer = setTimeout(() => { titleShow.classList.remove("on"); titleShow.classList.add("out"); titleTimer = setTimeout(() => { titleShow.hidden = true; }, 700); }, ms);
+      if (global.Sfx && Sfx.enabled && Sfx.enabled() && Sfx.ui) { try { Sfx.ui("turn"); } catch (_) {} }
     }
     /* ---------- 掷骰（按钮式 d100） ---------- */
     const LV = ["没有熟练", "一级熟练", "二级熟练", "三级熟练"];
@@ -397,6 +445,7 @@
         seenMessages = new Set(); messagesInitialized = false; clearTimeout(toastTimer); toast.hidden = true;
       }
       if (view.active) historyRows = mergeMessages([...historyRows, ...(view.messages || [])]);
+      playTitle();
       stage.hidden = !view.active || view.isHost;
       side.hidden = !view.active || view.isHost || view.screen === "lobby";
       document.body.classList.toggle("ol-has-side", !side.hidden);
@@ -552,7 +601,7 @@
     const instance = { render, open(which = "join") { entry = which; panelOpen = true; render(); }, destroy() {
       destroyed = true; playbackGeneration++; actionGeneration++; historyGeneration++; clearTimeout(toastTimer);
       document.removeEventListener("compositionstart", onCompStart, true); document.removeEventListener("compositionend", onCompEnd, true);
-      document.removeEventListener("click", onRollOpen);
+      document.removeEventListener("click", onRollOpen); clearTimeout(titleTimer);
       while (hostMounts.length) hostMounts.pop().remove(); document.body.classList.remove("ol-has-side", "ol-host-online", "ol-in-battle");
       for (const off of unsubs) if (typeof off === "function") off();
       for (const node of [...nodes, ...titleButtons]) node.remove();

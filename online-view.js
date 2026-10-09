@@ -315,12 +315,23 @@
     out.confirmed = arr(get(view, "confirmed")).map(id).filter(Boolean);
     out.chat = arr(get(view, "chat")).slice(-300).flatMap(m => {
       if (get(m, "secret")) return [];   // 主持人暗骰：只在房主本机
+      const isTitle = !!get(m, "title");
       const t = text(get(m, "text"), 500); if (t === null) return [];
       const dto = identifiers(m, copyFields(m, { text: t }, ["operatorName", "name"], ["at"], []), ["id", "operatorId"]);
       const roll = get(m, "roll");
       if (roll) { dto.roll = true; const tier = obj(roll) ? get(roll, "tier") : null; if (["crit", "extreme", "hard", "normal", "easy", "fail"].includes(tier)) dto.tier = tier; }
+      if (isTitle) dto.title = true;
       return [dto];
     });
+    // 主持人的大字（像 /title）：主标题、小字、风格、停留秒数
+    const title = get(view, "title");
+    if (obj(title) && id(get(title, "id"))) {
+      const tt = text(get(title, "text"), 40);
+      if (tt) {
+        out.title = identifiers(title, copyFields(title, { text: tt }, ["sub"], ["seconds", "at"], []), ["id"]);
+        enumField(title, out.title, "tone", ["plain", "danger", "hope"]);
+      }
+    }
     // 主持人发起的检定：熟练项、难度、每个人的成功率和掷出的点数（都是公开的）
     out.checks = arr(get(view, "checks")).slice(-20).flatMap(c => {
       if (!obj(c) || !id(get(c, "id"))) return [];

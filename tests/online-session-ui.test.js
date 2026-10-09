@@ -683,3 +683,32 @@ test("联机：模板带的战斗掉落打赢后进背包，玩家结算里看�
   await shot(alice, "record-player");
   assert.deepEqual(f.errors, []);
 });
+
+test("联机：主持人发大字，所有玩家画面中间弹出，几秒后淡出；小队频道留记录；刚进房间不重播旧的", { timeout: 120000 }, async t => {
+  const f = await fixture(t); if (!f) return;
+  const { host, alice, bob } = f;
+  const shot = async (page, name) => { if (process.env.BACKFIRE_SHOTS) await page.screenshot({ path: path.join(process.env.BACKFIRE_SHOTS, name + ".png") }); };
+  await host.evaluate(() => { OnlineGame.start(); });
+  for (const page of [alice, bob]) await page.waitForFunction(() => OnlineGame.getView().screen === "exploration" && !document.getElementById("online-side").hidden);
+  await host.locator('.tr-log [data-host-tab="chat"]').click();
+  await host.click('.tr-log [data-title-open]');
+  await host.click('#online-title-form [data-title-preset^="援军来了"]');
+  await host.fill('#online-title-form [data-tf="sub"]', "北边山坡亮起了火把");
+  await host.fill('#online-title-form [data-tf="seconds"]', "3");
+  await host.click('#online-title-form [data-title="go"]');
+  for (const page of [alice, bob]) await page.waitForSelector("#online-title.on:not([hidden])");
+  assert.match(await alice.locator("#online-title").innerText(), /援军来了[\s\S]*北边山坡亮起了火把/);
+  assert.ok(await alice.evaluate(() => document.getElementById("online-title").classList.contains("ol-tone-hope")));
+  await alice.waitForTimeout(700);
+  await shot(alice, "title-player"); await shot(bob, "title-player-mobile");
+  assert.match(await bob.locator("#online-side .ol-side-chat").innerText(), /【援军来了】/);
+  await alice.waitForSelector("#online-title", { state: "hidden", timeout: 6000 });
+  // 玩家刷新重连：旧的大字不重播
+  await bob.reload(); await bob.waitForFunction(() => !!window.OnlineGame); await bob.evaluate(() => OnlineGame.resume());
+  await bob.waitForFunction(() => !!OnlineGame.getView().packet?.view?.title);
+  await bob.waitForTimeout(500);
+  assert.equal(await bob.locator("#online-title").isHidden(), true);
+  // 玩家发不了
+  assert.equal((await submit(alice, { type: "showTitle", text: "我是主持人" })).ok, false);
+  assert.deepEqual(f.errors, []);
+});

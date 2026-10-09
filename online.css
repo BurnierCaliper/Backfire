@@ -207,3 +207,19 @@ body.ol-has-side .ol-toast { right: 344px; }
 .ol-roll-lines { margin: 0; font-size: 13px; color: #cdbfa5; }
 .ol-side-chat li.ol-tier-crit p { color: #ffd84a; text-shadow: 0 0 6px #ffb20066; }
 .ol-side-chat li.ol-tier-fail p { color: #e06a4f; }
+
+/* 主持人的大字（像 Minecraft 的 /title）：画面正中，放大淡入，停几秒后淡出 */
+.ol-title-show { position: fixed; inset: 0; z-index: 120; display: grid; place-content: center; justify-items: center; gap: 12px; pointer-events: none; text-align: center; padding: 0 16px;
+  background: radial-gradient(ellipse at center, #0009 0%, #0005 45%, transparent 75%); opacity: 0; }
+.ol-title-show[hidden] { display: none; }
+.ol-title-show.on { animation: ol-title-in .55s cubic-bezier(.2, .9, .3, 1.2) forwards; }
+.ol-title-show.out { animation: ol-title-out .7s ease forwards; }
+.ol-title-main { font-size: clamp(40px, 9vw, 112px); font-weight: 900; letter-spacing: .08em; line-height: 1.1; color: #ffe08a;
+  text-shadow: 0 0 2px #000, 4px 4px 0 #000, 0 0 28px #ffb20088; }
+.ol-title-sub { font-size: clamp(16px, 2.6vw, 28px); font-weight: 700; color: #f1e6cf; text-shadow: 2px 2px 0 #000, 0 0 12px #000; }
+.ol-tone-danger .ol-title-main { color: #ff6a4d; text-shadow: 0 0 2px #000, 4px 4px 0 #000, 0 0 32px #ff2a0099; }
+.ol-tone-hope .ol-title-main { color: #7ff5d2; text-shadow: 0 0 2px #000, 4px 4px 0 #000, 0 0 32px #39e6b499; }
+@keyframes ol-title-in { from { opacity: 0; transform: scale(1.35); filter: blur(6px); } to { opacity: 1; transform: scale(1); filter: none; } }
+@keyframes ol-title-out { from { opacity: 1; } to { opacity: 0; transform: scale(.96); } }
+@media (prefers-reduced-motion: reduce) { .ol-title-show.on { animation: none; opacity: 1; } .ol-title-show.out { animation: none; opacity: 0; } }
+.ol-side-chat li.ol-title-row p { color: #ffe08a; font-weight: 800; letter-spacing: .04em; }
