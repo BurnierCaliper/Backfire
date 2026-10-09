@@ -271,3 +271,23 @@ test("特殊棋盘：玩家拿到区号、坐标、连接，所有区的场地�
   assert.equal(out.gaps["2-4"].open, true);
   assert.equal(V.projectState({ zoneMode: 3, units: [] }).board, undefined);
 });
+
+test("状态图标：自我效果、挂着的攻击效果、角色仪表数据只发白名单字段；生效事件只带图标名", () => {
+  require("../hud-icons.js");
+  const u = unit();
+  u.self = "conductor"; u.selfBurnStacks = 2;
+  u.resources.nextAtkFx = ["bolt", "SECRET-FX", "backflow"];
+  const out = V.projectUnit(u);
+  assert.equal(out.self, "conductor");
+  assert.deepEqual(out.resources.nextAtkFx, ["bolt", "backflow"]);
+  assert.equal(out.hud.kit, "ruby");
+  assert.equal(out.hud.nano, 50);
+  assert.doesNotMatch(JSON.stringify(out), /SECRET|732911/);
+  assert.equal(V.projectUnit({ ...unit(), self: "SECRET-SELF" }).self, undefined);
+  const tape = V.projectTape([
+    { type: "pop", unitId: "u1", kind: "proc", fx: "burn" },
+    { type: "pop", unitId: "u1", kind: "proc", fx: "<script>" },
+    { type: "pop", unitId: "u1", kind: "fxword", text: "猛击" }
+  ]);
+  assert.deepEqual(tape.map(e => e.kind + ":" + (e.fx || e.text || "")), ["proc:burn", "fxword:猛击"]);
+});

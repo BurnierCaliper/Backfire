@@ -79,8 +79,36 @@
       return dto;
     });
     if (mech.length) out.mechanics = mech;
+    // 状态图标（hud-icons.js）：自我效果、挂着的攻击效果、刺入 / 牵挂标记、角色仪表的数据
+    enumField(unit, out, "self", ["burn", "frost", "splash", "conductor", "anchor", "store", "doppler"]);
+    const sbs = number(get(unit, "selfBurnStacks")); if (sbs !== undefined) out.selfBurnStacks = sbs;
+    const hung = arr(get(r, "nextAtkFx")).filter(x => ["combust", "icebreak", "bolt", "etch", "backflow", "inertia", "diffract"].includes(x)).slice(0, 7);
+    if (hung.length && out.resources) out.resources.nextAtkFx = hung;
+    const marks = [];
+    try { if (typeof root.isPierced === "function" && root.isPierced(unit)) marks.push("needle"); } catch (e) {}
+    try { if (arr(root.state && root.state.units).some(x => x && x.kit === "yuito" && x.resources && x.resources.bondId === get(unit, "id"))) marks.push("bond"); } catch (e) {}
+    if (marks.length) out.marks = marks;
+    if (obj(r) && get(unit, "isPlayer") && root.HudIcons) { let hud = null; try { hud = root.HudIcons.gaugeState(unit); } catch (e) {} const dto = projectHud(hud); if (dto) out.hud = dto; }
     // status/res are legacy free-form strings and must not bypass these DTOs.
     return out;
+  }
+  /** 角色仪表的数据：只放数字、开关和几个固定取值的字段（gaugeState 的输出） */
+  const hudEnums = { mood: ["gentle", "cruel"], blade: ["niu", "naruto"], out: ["none", "niu", "naruto"], stance: ["draw", "iai", "guard"], bit: ["drill", "acid"] };
+  function projectHud(hud) {
+    if (!obj(hud)) return null;
+    const kits = ["xia", "chuan", "nora", "ruby", "yuito", "hiaki", "tou", "kolt", "helu", "ras", "longge"];
+    if (!kits.includes(get(hud, "kit"))) return null;
+    const dto = { kit: get(hud, "kit") };
+    for (const key of Object.keys(hud)) {
+      if (["__proto__", "constructor", "prototype", "kit"].includes(key) || !/^[a-zA-Z]{1,16}$/.test(key)) continue;
+      const v = get(hud, key);
+      if (typeof v === "boolean") dto[key] = v;
+      else if (number(v) !== undefined) dto[key] = Math.max(-999, Math.min(999, v));
+      else if (hudEnums[key] && hudEnums[key].includes(v)) dto[key] = v;
+      else if (key === "bondName") { const t = text(v, 40); if (t !== null) dto[key] = t; }
+      else if (key === "ammo") dto.ammo = arr(v).slice(0, 6).filter(obj).map(a => ({ c: get(a, "c") === "blue" ? "blue" : "red", seen: get(a, "seen") === true }));
+    }
+    return dto;
   }
   function projectProp(prop) {
     if (!obj(prop) || !id(get(prop, "id"))) return null;
@@ -139,13 +167,14 @@
     }
     return out;
   }
-  const popupWords = new Set(["无效", "失衡", "起身", "倒下", "刺入", "温和", "残忍", "登场支援！", "聚焦抹层", "灼烧", "感电", "腐蚀", "冻伤", "震荡", "共振", "高能", "虚弱", "振奋", "躲藏", "优势", "紧追", "熔融", "刺骨", "过载", "错位", "扩散", "折射", "红弹", "蓝弹"]);
+  const popupWords = new Set(["无效", "失衡", "起身", "倒下", "刺入", "温和", "残忍", "登场支援！", "聚焦抹层", "灼烧", "感电", "腐蚀", "冻伤", "震荡", "共振", "高能", "虚弱", "振奋", "躲藏", "优势", "紧追", "熔融", "刺骨", "过载", "错位", "扩散", "折射", "红弹", "蓝弹", "导体", "霜结", "自焚", "溅射", "千钧", "蓄能", "多普勒", "爆燃", "破冰", "雷击", "蚀刻", "倒流", "惯性", "衍射", "穿刺", "猛击", "弱点特效", "超载", "中和"]);
   function projectTape(tape, context = {}) {
     const units = arr(get(context.state, "units"));
     return arr(tape).slice(0, 256).flatMap(event => {
       if (!obj(event) || get(event, "type") !== "pop" || !id(get(event, "unitId"))) return [];
-      const kind = get(event, "kind"); if (!["dmg", "heal", "break", "status", "fxword", "highboom", "partner", "bullet"].includes(kind)) return [];
+      const kind = get(event, "kind"); if (!["dmg", "heal", "break", "status", "fxword", "highboom", "partner", "bullet", "proc"].includes(kind)) return [];
       const out = identifiers(event, { type: "pop", kind }, ["unitId", "targetId"]);
+      if (kind === "proc") { const fx = get(event, "fx"); if (typeof fx !== "string" || !/^[a-zA-Z]{2,16}$/.test(fx)) return []; out.fx = fx; }
       enumField(event, out, "element", ["physical", "fire", "ice", "electric", "acid", "energy", "harmonic"]);
       const snap = arr(get(event, "snap")), subject = snap.find(u => get(u, "id") === out.unitId) || units.find(u => get(u, "id") === out.unitId);
       // Legacy damage/healing numbers can include the hidden life pool. Without

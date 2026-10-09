@@ -2606,6 +2606,7 @@ function applyTypedDot(unit, amount, element, notes, label, opts) {
   notes.push(label + ` → 实伤 ${Math.floor(res.total || 0)}`);
   if (typeof afterDamageTaken === "function") afterDamageTaken(unit, element, res.total || 0, Math.max(0, shieldBefore - shieldSum(unit)), notes, {});
   const sdKey = inferStatusDmgKey(label, element);
+  if (PROC_DOT_FX[sdKey]) procFx(unit, PROC_DOT_FX[sdKey]);
   addStatusDmg(sdKey, res.total || amount);
   noteSideDamage(res.total || 0, STATUS_DMG_NAME[sdKey] || "其他", unit);
   if (unit && unit.isPlayer) { const st = battleStat(unit); if (st) st.taken += Math.floor(Number(res.total) || 0) + Math.floor(Number(res.shpDealt) || 0); }
@@ -7857,9 +7858,16 @@ function clearUfoLegStun(u) {
   u._imbalanceLock = false;
 }
 
+/** 某个状态 / 效果在这个单位身上生效了：画面上对应的图标放大一下并发光（hud-icons.js 的 key） */
+function procFx(unit, fx) {
+  if (unit && fx && typeof spawnPopup === "function") spawnPopup(unit, { kind: "proc", fx });
+}
+const PROC_DOT_FX = { burn: "burn", selfburn: "selfBurn", shock: "shock", corr: "corr", reso: "reso", high: "high" };
+
 function dealBreak(unit, amount, element, notes, reason) {
   amount = Math.max(0, Math.floor(Number(amount) || 0));
   if (!unit || !amount) return;
+  if (/冻伤/.test(reason || "")) procFx(unit, "frost");
   notes = notes || [];
   let sink = unit;
   if (isUfoLeg(unit)) {

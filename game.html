@@ -14,6 +14,7 @@
   <link rel="stylesheet" href="hotseat.css" />
   <link rel="stylesheet" href="online.css" />
   <link rel="stylesheet" href="online-gm-ui.css" />
+  <link rel="stylesheet" href="hud-icons.css" />
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -164,6 +165,7 @@
   <footer class="g-hud">
     <div class="party" id="g-party"></div>
     <div class="hud-row">
+      <div class="hi-gauge" id="g-gauge" aria-label="角色仪表"></div>
       <div class="skills" id="g-skills"></div>
       <div class="hud-side"><button class="endturn" id="g-endturn">结束回合<small>空格</small></button></div>
     </div>
@@ -992,6 +994,7 @@ window.GAME_MODE = true;
 <script src="sfx.js"></script>
 <script src="hit-fx.js"></script>
 <script src="icons.js"></script>
+<script src="hud-icons.js"></script>
 <script src="sheet-ui.js"></script>
 <script src="armory-ui.js"></script>
 <script src="world-map.js"></script>

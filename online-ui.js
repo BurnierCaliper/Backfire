@@ -227,9 +227,13 @@
       const owner = (hs().units || []).find(x => x.id === u.id)?.owner;
       const resources = Object.entries(u.resources || {}).filter(([k, v]) => names[k] && (typeof v === "number" || v === true)).map(([k, v]) => `${names[k]} ${v === true ? "" : v}`);
       const conditions = Object.entries(u.statuses || {}).filter(([k, v]) => names[k] && v).map(([k, v]) => `${names[k]}${typeof v === "number" && v !== 1 ? " " + v : ""}`);
+      // 状态 / 效果画成图标（hud-icons.js）；没有图标模块时还是写字
+      const HI = global.HudIcons, badges = HI ? HI.unitBadges(u, u.marks) : [];
+      if (HI) conditions.length = 0;
       if (u.dying) conditions.unshift("倒地"); if (u.dead) conditions.unshift("阵亡"); if (u.stunned) conditions.unshift("失衡"); if (u.flying) conditions.push("飞行");
+      const gauge = HI && u.hud && view.screen !== "exploration" ? HI.gauge(u.hud) : "";
       const available = view.screen === "battle" && u.isPlayer && owner === own() && hs().currentUnitId === u.id && hs().phase === "acting";
-      return `<article class="ol-unit${u.isPlayer ? " ol-ally" : " ol-enemy"}${selectedActor === u.id ? " ol-selected" : ""}" data-unit-id="${esc(u.id)}"><header><h3>${esc(u.name || u.id)}</h3><small>Lv${esc(u.level || 1)}</small></header>${owner ? `<small>${esc(playerName(owner))}${u.weaponOf ? " · 武器人" : ""}</small>` : ""}${u.isPlayer && !u.weaponOf ? `<p class="ol-xp">经验 ${esc(u.xp ?? 0)}${typeof xpToNext === "function" && xpToNext(u.level || 1) ? ` / ${esc(xpToNext(u.level || 1))}` : ""}</p>` : ""}${view.screen === "exploration" && u.isPlayer && !u.weaponOf && owner === own() ? attrMarkup(u) : ""}<div class="ol-layers">${(u.layers || []).map(l => `<div class="ol-layer"><span>${esc(labels[l.type] || "生命")}</span><meter min="0" max="${esc(Math.max(1, Number(l.max) || 1))}" value="${esc(Math.max(0, Number(l.current) || 0))}" aria-label="${esc(labels[l.type] || "生命")}"></meter><b>${esc(l.current ?? 0)} / ${esc(l.max ?? 0)}</b></div>`).join("")}${highBar(u)}</div><div class="ol-points"><span>行动 ${esc(u.ap ?? 0)} / ${esc(u.apMax ?? 0)}</span><span>附赠 ${esc(u.bonus ?? 0)} / ${esc(u.bonusMax ?? 0)}</span>${u.def != null ? `<span>架势 ${esc(u.def)} / ${esc(u.defMax ?? u.def)}</span>` : ""}</div>${resources.length ? `<p class="ol-muted">${esc(resources.join(" · "))}</p>` : ""}${conditions.length ? `<p class="ol-conditions">${esc(conditions.join(" · "))}</p>` : ""}${available ? button("选择行动", "actor", `data-actor="${esc(u.id)}"`, disabled(), true) : ""}<span class="ol-popup" aria-live="polite"></span></article>`;
+      return `<article class="ol-unit${u.isPlayer ? " ol-ally" : " ol-enemy"}${selectedActor === u.id ? " ol-selected" : ""}" data-unit-id="${esc(u.id)}"><header><h3>${esc(u.name || u.id)}</h3><small>Lv${esc(u.level || 1)}</small></header>${owner ? `<small>${esc(playerName(owner))}${u.weaponOf ? " · 武器人" : ""}</small>` : ""}${u.isPlayer && !u.weaponOf ? `<p class="ol-xp">经验 ${esc(u.xp ?? 0)}${typeof xpToNext === "function" && xpToNext(u.level || 1) ? ` / ${esc(xpToNext(u.level || 1))}` : ""}</p>` : ""}${view.screen === "exploration" && u.isPlayer && !u.weaponOf && owner === own() ? attrMarkup(u) : ""}<div class="ol-layers">${(u.layers || []).map(l => `<div class="ol-layer"><span>${esc(labels[l.type] || "生命")}</span><meter min="0" max="${esc(Math.max(1, Number(l.max) || 1))}" value="${esc(Math.max(0, Number(l.current) || 0))}" aria-label="${esc(labels[l.type] || "生命")}"></meter><b>${esc(l.current ?? 0)} / ${esc(l.max ?? 0)}</b></div>`).join("")}${highBar(u)}</div><div class="ol-points"><span>行动 ${esc(u.ap ?? 0)} / ${esc(u.apMax ?? 0)}</span><span>附赠 ${esc(u.bonus ?? 0)} / ${esc(u.bonusMax ?? 0)}</span>${u.def != null ? `<span>架势 ${esc(u.def)} / ${esc(u.defMax ?? u.def)}</span>` : ""}</div>${gauge ? `<div class="hi-gauge ol-gauge" aria-label="${esc(u.name || "")}的角色仪表">${gauge}</div>` : resources.length ? `<p class="ol-muted">${esc(resources.join(" · "))}</p>` : ""}${badges.length ? `<div class="hi-badges ol-badges">${badges.map(b => HI.badge(b.key, b.stack)).join("")}</div>` : ""}${conditions.length ? `<p class="ol-conditions">${esc(conditions.join(" · "))}</p>` : ""}${available ? button("选择行动", "actor", `data-actor="${esc(u.id)}"`, disabled(), true) : ""}<span class="ol-popup" aria-live="polite"></span></article>`;
     }
     function actionsMarkup() {
       const current = hs().currentUnitId, mine = (hs().units || []).some(u => u.id === current && u.owner === own());
@@ -583,9 +587,18 @@
           if (Array.isArray(event.snap)) displayState = { ...(displayState || packet.state || {}), units: copy(event.snap) };
           html(stage, stageMarkup(), "stage");
           const card = [...stage.querySelectorAll("[data-unit-id]")].find(node => node.dataset.unitId === event.unitId);
+          if (event.kind === "proc") {
+            // 效果生效：卡上对应的图标放大一下并发光，不弹字
+            if (card) global.HudIcons?.procIn(card, event.fx);
+            await new Promise(resolve => setTimeout(resolve, 60));
+            continue;
+          }
           if (card) {
             const bubble = card.querySelector(".ol-popup");
             bubble.textContent = event.text || (event.value == null ? ({ dmg: "受击", heal: "恢复", break: "击破", status: "状态变化" }[event.kind] || "行动") : `${event.kind === "heal" ? "+" : event.kind === "dmg" ? "−" : ""}${event.value}`);
+            const fk = (event.kind === "fxword" || event.kind === "status") && event.text && global.HudIcons?.keyOf(event.text);
+            if (fk && event.kind === "fxword") { bubble.insertAdjacentHTML("afterbegin", global.HudIcons.badge(fk)); global.HudIcons.proc(bubble.firstElementChild); }
+            if (fk) global.HudIcons.procIn(card, fk);
             card.classList.add("ol-impact"); bubble.classList.add("ol-visible");
             if (global.HitFx && (event.kind === "dmg" || event.kind === "highboom")) global.HitFx.burst(event.element || "physical", card.getBoundingClientRect(), { big: event.kind === "highboom" });
           }

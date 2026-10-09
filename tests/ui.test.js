@@ -1187,3 +1187,44 @@ test("战斗模板：探索环节新建模板 → 用它开战，进战斗时战
   assert.equal(await page.evaluate(() => battleTemplateList()[1].enemies.length), 2);
   assert.deepEqual(o.errors, []);
 });
+
+test("战斗画面：状态画成图标，技能栏左边有角色仪表，状态生效时图标放大发光", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page, errors } = o;
+  await newTrpg(page);
+  await startBattle(page);
+  const foe = await page.evaluate(() => {
+    const f = state.units.find(u => !u.isPlayer && !u.dead);
+    f.statuses.burn = 2; f.statuses.weak = true;
+    GAME.refresh();
+    return f.id;
+  });
+  await page.waitForSelector(`.unit-wrap[data-id="${foe}"] .hi-badge[data-fx="burn"]`);
+  assert.equal(await page.textContent(`.unit-wrap[data-id="${foe}"] .hi-badge[data-fx="burn"] .hi-stack`), "2");
+  // 有图标的状态不再重复写字
+  assert.equal(await page.evaluate(i => [...document.querySelectorAll(`.unit-wrap[data-id="${i}"] .u-status .chip`)].filter(c => /灼烧|虚弱/.test(c.textContent)).length, foe), 0);
+  // 层数变了：图标生效一下
+  await page.evaluate(i => { state.units.find(u => u.id === i).statuses.burn = 3; GAME.refresh(); }, foe);
+  await page.waitForSelector(`.unit-wrap[data-id="${foe}"] .hi-badge.hi-proc[data-fx="burn"]`);
+  // 角色仪表跟着当前角色
+  await selectHero(page, "tou");
+  assert.match(await page.textContent("#g-gauge"), /圣盾/);
+  await selectHero(page, "ruby");
+  assert.match(await page.textContent("#g-gauge"), /纳米/);
+  // 回合结束灼烧结算：单位卡上的灼烧图标生效
+  await page.evaluate(() => { window.__procSeen = []; const o = HudIcons.procIn; HudIcons.procIn = (box, k) => { window.__procSeen.push(k); return o(box, k); }; });
+  await page.mouse.move(5, 5);
+  await page.keyboard.press("Space");
+  await page.waitForTimeout(300);
+  const yes = page.locator("#g-choice.show button", { hasText: "确定结束" });
+  if (await yes.count()) await yes.click();
+  // 敌人回合里可能要选格挡：一律选第一个选项，直到看到灼烧图标生效
+  for (let i = 0; i < 120; i++) {
+    if (await page.evaluate(() => window.__procSeen.includes("burn"))) break;
+    const opts = page.locator("#g-choice.show .opts button");
+    if (await opts.count()) await opts.first().click().catch(() => {});
+    await page.waitForTimeout(250);
+  }
+  assert.ok(await page.evaluate(() => window.__procSeen.includes("burn")), "灼烧结算时图标没有生效");
+  assert.deepEqual(errors, []);
+});

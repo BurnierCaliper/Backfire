@@ -97,6 +97,7 @@
       kind: spec.kind || "dmg",
       value: spec.value,
       text: spec.text,
+      fx: spec.fx || null,         // kind "proc"：哪个图标生效了（hud-icons.js 的 key）
       element: spec.element || "physical",
       main: !!spec.main,           // 攻击动作本身的那一下（不是高压场地等连带伤害）
       adv: !!spec.adv,             // 玩家这一下触发了属性克制
@@ -156,6 +157,7 @@
       bonus: Number(u.bonus) || 0,
       bonusMax: Number(u.bonusMax) || 0,
       status: status === "无状态" ? "" : status,
+      badges: unitBadgesOf(u),
       res,
       atk: Math.round(Number(atk) || 0),
       weapon: !!u.weaponOf,
@@ -166,6 +168,14 @@
       overkill: !u.isPlayer && (u.dead || u._removed) ? Math.max(0, Math.round(Number(u.overkill) || 0)) : 0,
       killBig: !u.isPlayer && !!u.killBig
     };
+  }
+  /** 单位卡上的状态 / 效果徽章（hud-icons.js）：属性状态、通用状态、即时 / 自我效果、挂着的攻击效果，加上刺入、牵挂这两个别人挂上的标记 */
+  function unitBadgesOf(u) {
+    if (!window.HudIcons) return [];
+    const extra = [];
+    try { if (typeof isPierced === "function" && isPierced(u)) extra.push("needle"); } catch (e) {}
+    if ((state.units || []).some(x => x.kit === "yuito" && x.resources && x.resources.bondId === u.id)) extra.push("bond");
+    try { return HudIcons.unitBadges(u, extra); } catch (e) { return []; }
   }
   /** 武器耐久条：武器人显示自己的耐久；角色显示手里那把武器的耐久（空手不显示） */
   function weaponDurSnap(u) {
@@ -697,13 +707,14 @@
       for (let i = 0; i < Math.max(s.apMax, s.ap); i++) h += `<i class="econ-ap${i < s.ap ? " on" : ""}"></i>`;
       for (let i = 0; i < Math.max(s.bonusMax, s.bonus); i++) h += `<i class="econ-bonus${i < s.bonus ? " on" : ""}"></i>`;
       if (s.flying) h += `<span class="chip">飞</span>`;
-      (s.hung || []).forEach(n => { h += `<span class="chip">${esc(n)}</span>`; });
+      if (!window.HudIcons) (s.hung || []).forEach(n => { h += `<span class="chip">${esc(n)}</span>`; });
       econ.innerHTML = h;
       econ.title = `行动点 ${s.ap}/${s.apMax} · 附赠 ${s.bonus}/${s.bonusMax}`;
     }
 
     // 高能和其他状态放在同一行、同一种样式（之前放在行动点那一行，字体大小不一样）
-    const highChip = (s.highEnergy > 0 || (s.status && /高能/.test(s.status)))
+    const icons = !!window.HudIcons;
+    const highChip = !icons && (s.highEnergy > 0 || (s.status && /高能/.test(s.status)))
       ? `<span class="chip">高能${s.highEnergy > 0 ? " " + s.highEnergy : ""}</span>` : "";
     // 首领机制（死刑 / 分担）的标记：被标记的人身上一个倒计时，首领身上写着标了谁
     const when = (x) => x.left > 0 ? `${x.left} 回合后` : `这回合${x.phase === "player" ? "我方" : "敌人"}回合开始时`;
@@ -714,9 +725,19 @@
       : `${x.by} 的${x.name}：${when(x)}落下${x.delayed ? "（首领失衡，会推迟一回合）" : ""}。每一段都可以协助格挡。`;
     const execChip = (s.marks || []).map(x => `<span class="chip mark-${x.type}" title="${esc(markTip(x))}">${esc(x.name)} ${x.left > 0 ? x.left : "!"}${x.type === "share" ? ` · ${x.group}人` : x.type === "spread" ? ` · ×${x.stack}` : ""}</span>`).join("") +
       (s.casts || []).map(x => `<span class="chip cast-${x.type}" title="${esc(`${x.name} → ${x.target || "（无目标）"}：${when(x)}落下`)}">${esc(x.name)}→${esc(x.target || "?")} ${x.left > 0 ? x.left : "!"}</span>`).join("");
-    q(".u-status").innerHTML = execChip + highChip + (s.status
-      ? s.status.split(" · ").filter(t => t && t !== "无状态" && !/^高能/.test(t)).map(t => `<span class="chip">${esc(t)}</span>`).join("")
+    // 有图标的状态画成徽章（hud-icons.js），没有图标的（聚焦、掩护、首领阶段……）还是写字
+    const badges = icons ? (s.badges || []) : [];
+    const badgeKey = badges.map(b => b.key + ":" + b.stack).join("|");
+    q(".u-status").innerHTML = execChip + highChip + (badges.length ? `<span class="hi-badges">${badges.map(b => HudIcons.badge(b.key, b.stack)).join("")}</span>` : "") + (s.status
+      ? s.status.split(" · ").filter(t => t && t !== "无状态" && !/^高能/.test(t) && !(icons && HudIcons.covered(t))).map(t => `<span class="chip">${esc(t)}</span>`).join("")
       : "");
+    // 新挂上的、层数变了的徽章：生效一下（放大 + 发光）
+    if (icons && c.prev && c.prevBadges !== badgeKey && !G.sim) {
+      const before = {};
+      (c.prev.badges || []).forEach(b => { before[b.key] = String(b.stack); });
+      badges.forEach(b => { if (before[b.key] !== String(b.stack)) HudIcons.procIn(q(".u-status"), b.key); });
+    }
+    c.prevBadges = badgeKey;
     // 有耐久条时，资源文字里的「耐久 N」就不重复写了
     const resText = s.dur ? String(s.res || "").split(" · ").filter(t => !/^耐久 /.test(t)).join(" · ") : (s.res || "");
     q(".u-res").textContent = resText;
@@ -858,12 +879,21 @@
     fx().appendChild(d);
     realTimeout(() => d.remove(), (opts.dur || 0.9) * 1000 + 60);
   }
+  /** 单位卡上某个状态 / 效果图标生效：放大一下 + 发光（hud-icons.js） */
+  function procBadge(id, key) {
+    if (!key || !window.HudIcons || G.sim || G.skip) return;
+    const c = cards.get(id);
+    if (c) HudIcons.procIn(c.unit, key);
+  }
   /** 攻击效果大字：倾斜着从目标身上缓缓飞出、慢慢变大一点、再淡出。n 是这次行动里第几个字，用来错开位置 */
   function fxWord(id, text, element, n) {
     const p = centerOf(id);
     if (!p) return;
     const d = el("div", "fxword fx-" + (element || "generic"));
     d.textContent = text;
+    // 攻击效果的图标跟着大字一起出来，生效时放大发光
+    const fk = window.HudIcons && HudIcons.keyOf(text);
+    if (fk) { d.insertAdjacentHTML("afterbegin", HudIcons.badge(fk)); HudIcons.proc(d.firstElementChild); }
     // 在铭牌上沿排成左右两列、一行一行往上叠：不挡铭牌中间的伤害数字，也不压到隔壁的铭牌
     const side = n % 2 ? -1 : 1;
     const row = Math.floor((n - 1) / 2);
@@ -1167,6 +1197,9 @@
           // 龙哥 / 小朋友消耗子弹：头顶跳出红弹 / 蓝弹
           popup(e.unitId, e.text || (e.element === "fire" ? "红弹" : "蓝弹"), "bullet " + (e.element === "fire" ? "b-red" : "b-blue"), { lift: 64, dur: 1.5 });
           await wait(160);
+        } else if (e.kind === "proc") {
+          // 效果生效（灼烧结算、自焚掉血、高能自爆……）：单位卡上对应的图标放大一下并发光，不占演出时间
+          procBadge(e.unitId, e.fx);
         } else if (e.kind === "fxword") {
           // 攻击效果大字：同一次行动里同一个目标的同一个效果只打一次（多段攻击不重复）
           const key = e.unitId + "|" + e.text;
@@ -1186,6 +1219,7 @@
             await wait(chain ? 300 : 360);
             bc.wrap.classList.remove("high-warn");
           }
+          procBadge(e.unitId, "high");
           // 高能自爆：震屏 + 大字 + 爆炸声 + 大号数字，停久一点让人看清
           const app = $("g-app");
           app.classList.remove("quake"); void app.offsetWidth; app.classList.add("quake");
@@ -1204,6 +1238,7 @@
         } else {
           if (e.kind === "status" && e.text && window.Sfx && !G.sim) Sfx.ui(/振奋|坚固|坚挺|优势|躲藏|护盾|铁壁|免疫/.test(e.text) ? "shield" : /无效|打不动|触发/.test(e.text) ? "" : "debuff");
           if (e.text) popup(e.unitId, e.text, "txt e-" + e.element);
+          if (e.kind === "status" && e.text && window.HudIcons) procBadge(e.unitId, HudIcons.keyOf(e.text));
           deferStun(beatsBefore); await playBeats(beatsBefore.filter(b => b.kind !== "stun"));
           await wait(240);
         }
@@ -2779,6 +2814,14 @@
       box.appendChild(b);
     });
     G.skillsShown = list;
+    // 角色仪表：当前角色独有的资源和状态，画成图标（hud-icons.js），放在技能栏左边
+    const gauge = $("g-gauge");
+    if (gauge) {
+      let gh = "";
+      try { if (window.HudIcons && actor && actor.isPlayer && !isWeaponUnit(actor)) gh = HudIcons.gauge(HudIcons.gaugeState(actor, state.units)); } catch (e) { gh = ""; }
+      if (gauge.dataset.html !== gh) { gauge.innerHTML = gh; gauge.dataset.html = gh; }
+      gauge.setAttribute("aria-label", actor ? actor.name + "的角色仪表" : "角色仪表");
+    }
 
     const et = $("g-endturn");
     if (!state.combatStarted) {
