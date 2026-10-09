@@ -223,3 +223,10 @@ body.ol-has-side .ol-toast { right: 344px; }
 @keyframes ol-title-out { from { opacity: 1; } to { opacity: 0; transform: scale(.96); } }
 @media (prefers-reduced-motion: reduce) { .ol-title-show.on { animation: none; opacity: 1; } .ol-title-show.out { animation: none; opacity: 0; } }
 .ol-side-chat li.ol-title-row p { color: #ffe08a; font-weight: 800; letter-spacing: .04em; }
+
+/* 高能值液体条（样式和战斗画面的 .u-high 共用） */
+.ol-high { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; font-size: 12px; }
+.ol-high span { color: #7fe8cf; }
+.ol-high-track { position: relative; height: 10px; background: #2c261f; }
+.ol-high-hp { position: absolute; left: 0; top: 0; bottom: 0; background: #d9644f; }
+.ol-high b { font-variant-numeric: tabular-nums; }

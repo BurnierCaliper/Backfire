@@ -648,7 +648,8 @@
       const he = Math.max(0, Number(s.highEnergy) || 0);
       c.highBar.style.width = (he > 0 ? Math.min(100, (he / tot) * 100) : 0) + "%";
       c.highBar.style.display = he > 0 ? "" : "none";
-      c.highBar.title = he > 0 ? ("高能 " + he) : "";
+      c.highBar.title = he > 0 ? ("高能 " + he + "（血量低于高能值时自爆）") : "";
+      c.highBar.classList.toggle("danger", he > 0 && he >= sumCur(s) * 0.75);
     }
     // 被打死的敌人：溢出的伤害显示成负血量（纯画面，给一击的分量感）
     q(".hpn").innerHTML = s.overkill > 0 ? `<b class="neg">−${s.overkill}</b>/${sumMax(s)}` : `<b>${sumCur(s)}</b>/${sumMax(s)}`;
