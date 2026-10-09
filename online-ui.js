@@ -50,7 +50,7 @@
     }
     function entryMarkup() {
       const slots = typeof api.slots === "function" ? api.slots() : [];
-      return `<div class="ol-card"><header><h2>${entry === "create" ? "联机开房" : "加入房间"}</h2>${button("关闭", "close")}</header><div class="ol-entry-tabs">${button("我来主持", "createTab", "", pending, entry === "create")}${button("加入朋友", "joinTab", "", pending, entry === "join")}</div><label>转发服务地址<input id="ol-url" data-field="url" type="url" placeholder="https://你的转发服务" value="${esc(form.url)}" autocomplete="url"></label><label>昵称<input id="ol-name" data-field="name" maxlength="24" value="${esc(form.name)}" autocomplete="nickname"></label>${entry === "create" ? `<label>跑团存档<select id="ol-slot" data-field="slot">${slots.map(s => option(s.index, `${s.index + 1} · ${s.name}`, String(s.index) === form.slot)).join("")}</select></label><label>新团名称<input id="ol-campaign" data-field="campaignName" maxlength="40" placeholder="空白存档使用此名称" value="${esc(form.campaignName)}"></label>` : `<label>房间码<input id="ol-code" data-field="roomCode" maxlength="6" autocapitalize="characters" spellcheck="false" placeholder="六位房间码" value="${esc(form.roomCode)}"></label>`}<p class="ol-muted">使用与朋友相同的转发服务地址。进入房间后，断线会自动尝试重连。</p><footer>${button(pending ? "连接中…" : entry === "create" ? "创建房间" : "加入", "connect", "", pending, true)}${api.hasSaved?.() ? button("恢复上次房间", "resume", "", pending) : ""}</footer><p class="ol-notice" role="status">${esc(notice)}</p></div>`;
+      return `<div class="ol-card"><header><h2>${entry === "create" ? "联机开房" : "加入房间"}</h2>${button("关闭", "close")}</header><div class="ol-entry-tabs">${button("我来主持", "createTab", "", pending, entry === "create")}${button("加入朋友", "joinTab", "", pending, entry === "join")}</div><label>转发服务地址<input id="ol-url" data-field="url" type="url" placeholder="https://你的转发服务" value="${esc(form.url)}" autocomplete="url"></label><label>昵称<input id="ol-name" data-field="name" maxlength="24" value="${esc(form.name)}" autocomplete="nickname"></label>${entry === "create" ? `<label>跑团存档<select id="ol-slot" data-field="slot">${slots.map(s => option(s.index, `${s.index + 1} · ${s.name}`, String(s.index) === form.slot)).join("")}</select></label><label>新团名称<input id="ol-campaign" data-field="campaignName" maxlength="40" placeholder="空白存档使用此名称" value="${esc(form.campaignName)}"></label>` : `<label>房间码<input id="ol-code" data-field="roomCode" maxlength="16" autocapitalize="characters" spellcheck="false" placeholder="六位房间码" value="${esc(form.roomCode)}"></label>`}<p class="ol-muted">使用与朋友相同的转发服务地址。进入房间后，断线会自动尝试重连。</p><footer>${button(pending ? "连接中…" : entry === "create" ? "创建房间" : "加入", "connect", "", pending, true)}${api.hasSaved?.() ? button("恢复上次房间", "resume", "", pending) : ""}</footer><p class="ol-notice" role="status">${esc(notice)}</p></div>`;
     }
     function rosterMarkup() {
       const heroes = view.heroes || [], mayAssign = view.isHost && ["lobby", "exploration", "ended"].includes(view.screen);
@@ -83,7 +83,7 @@
     }
     function roomMarkup() {
       const starting = view.screen === "lobby", canClose = !starting;
-      return `<div class="ol-card"><header><div><span class="ol-muted">${starting ? "大厅" : "联机房间"}</span><h2 class="ol-code">${esc(view.roomCode)}</h2></div>${canClose ? button("收起", "close") : ""}</header><p class="ol-connection" role="status">${esc(paused() ? view.status?.connected ? "房主离线，等待恢复" : "连接中断，正在重连" : "已连接")}</p>${rosterMarkup()}${starting ? `<footer>${view.isHost ? button("开始跑团", "start", "", disabled() || !players().some(p => !p.gm && p.online), true) : '<p class="ol-muted">等待主持人分配角色并开始。</p>'}</footer>` : ""}${starting ? lobbyChatMarkup() : ""}${messagesMarkup()}<footer>${button("重新连接", "reconnect", "", pending)}${button(view.isHost ? "离开并保存" : "离开房间", "leave", "", pending)}</footer><p class="ol-notice" role="status">${esc(notice || view.notice || view.packet?.systemNotice || (view.storageError ? "本机保存失败，请保持页面打开并检查存储空间。" : ""))}</p></div>`;
+      return `<div class="ol-card"><header><div><span class="ol-muted">${starting ? "大厅" : "联机房间"}</span><div class="ol-code-row"><h2 class="ol-code">${esc(view.roomCode)}</h2>${view.roomCode ? button("复制房间码", "copyCode") : ""}</div></div>${canClose ? button("收起", "close") : ""}</header><p class="ol-connection" role="status">${esc(paused() ? view.status?.connected ? "房主离线，等待恢复" : "连接中断，正在重连" : "已连接")}</p>${rosterMarkup()}${starting ? `<footer>${view.isHost ? button("开始跑团", "start", "", disabled() || !players().some(p => !p.gm && p.online), true) : '<p class="ol-muted">等待主持人分配角色并开始。</p>'}</footer>` : ""}${starting ? lobbyChatMarkup() : ""}${messagesMarkup()}<footer>${button("重新连接", "reconnect", "", pending)}${button(view.isHost ? "离开并保存" : "离开房间", "leave", "", pending)}</footer><p class="ol-notice" role="status">${esc(notice || view.notice || view.packet?.systemNotice || (view.storageError ? "本机保存失败，请保持页面打开并检查存储空间。" : ""))}</p></div>`;
     }
     function lobbyChatMarkup() {
       return `<section class="ol-messages"><h3>大厅交流</h3><ol aria-live="polite">${(hs().chat || []).map(m => `<li><b>${esc(m.name || m.operatorName || "玩家")}</b><p>${esc(m.text)}</p></li>`).join("") || '<li class="ol-muted">在这里与所有人商量准备事项。</li>'}</ol><form id="ol-lobby-chat"><label class="ol-sr-only" for="ol-lobby-text">大厅聊天</label><input id="ol-lobby-text" data-field="chatText" maxlength="500" value="${esc(form.chatText)}" placeholder="所有人都能看到…"><button class="ol-button" type="submit"${disabled() ? " disabled" : ""}>发送到大厅</button></form></section>`;
@@ -204,6 +204,22 @@
       } else { next.picks ||= {}; next.picks[choices.key] = value; }
       await menu(next);
     }
+    /** 复制房间码：优先用剪贴板接口，不行（file:// 等不安全来源）就退回选中文字再复制 */
+    async function copyRoomCode() {
+      const code = String(view.roomCode || "");
+      if (!code) return;
+      let ok = false;
+      try { if (navigator.clipboard && window.isSecureContext !== false) { await navigator.clipboard.writeText(code); ok = true; } } catch (e) { ok = false; }
+      if (!ok) {
+        const ta = document.createElement("textarea");
+        ta.value = code; ta.setAttribute("readonly", ""); ta.style.position = "fixed"; ta.style.opacity = "0";
+        document.body.appendChild(ta); ta.select();
+        try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+        ta.remove();
+      }
+      notice = ok ? `已复制房间码 ${code}` : "无法自动复制，请长按或拖选房间码手动复制。";
+      render();
+    }
     async function sendMessage() {
       const text = form.text.trim(); if (!text || disabled()) return;
       if (await call(() => api.submit(view.isHost ? { type: "gm.msg", to: form.to, text } : { type: "gmReply", text }))) { form.text = ""; render(); }
@@ -225,12 +241,13 @@
         case "connect": {
           const opts = { url: form.url.trim(), name: form.name.trim() || (entry === "create" ? "主持人" : "玩家") };
           if (entry === "create") Object.assign(opts, { slot: Number(form.slot), campaignName: form.campaignName.trim() || "联机跑团" });
-          else opts.roomCode = form.roomCode.trim().toUpperCase();
+          else opts.roomCode = form.roomCode.replace(/[^0-9a-z]/gi, "").toUpperCase();   // 粘贴时带的空格、标点去掉
           if (await call(() => api[entry === "create" ? "create" : "join"](opts))) { panelOpen = false; assignments = {}; render(); }
           break;
         }
         case "resume": if (await call(() => api.resume())) { panelOpen = false; render(); } break;
         case "reconnect": await call(() => api.reconnect()); break;
+        case "copyCode": await copyRoomCode(); break;
         case "leave": await call(() => api.leave()); break;
         case "assign": await call(() => api.assign(Object.fromEntries((view.heroes || []).map(h => [h.id, assignments[h.id] || h.owner || own()])))); assignments = {}; break;
         case "start": if (await call(() => api.start())) { panelOpen = false; render(); } break;

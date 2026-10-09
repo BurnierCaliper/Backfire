@@ -26,7 +26,9 @@
 .ol-overlay { position: fixed; z-index: 90; inset: 0; background: #0b0806e8; padding: 24px 16px; display: flex; align-items: flex-start; justify-content: center; overflow-y: auto; overscroll-behavior: contain; }
 .ol-card { width: min(650px, 100%); margin: auto 0; padding: 24px; background: var(--sk-steel, #2a2520); border: 3px solid #0b0806; box-shadow: 6px 7px #0008; }
 .ol-card > section { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--sk-edge, #4d4337); }
-.ol-code { letter-spacing: .14em; color: var(--sk-hazard, #f2c230); font-variant-numeric: tabular-nums; }
+.ol-code-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ol-code-row .ol-code { margin: 0; }
+.ol-code { user-select: all; -webkit-user-select: all; cursor: text; letter-spacing: .14em; color: var(--sk-hazard, #f2c230); font-variant-numeric: tabular-nums; }
 .ol-entry-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 20px; }
 .ol-connection { color: var(--sk-mint, #39e6b4); }
 .ol-roster { padding: 0; list-style: none; }

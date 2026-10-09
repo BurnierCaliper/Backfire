@@ -297,3 +297,35 @@ test("D3 display: resync restarts pagination at the new window after a long disc
   assert.deepEqual(await page.locator("[data-message-id]").evaluateAll(rows => rows.map(r => r.dataset.messageId)), ["msg-399", "msg-400"]);
   assert.deepEqual(o.errors, []);
 });
+
+test("D3 display: 房间码可以一键复制；粘贴带空格 / 小写的房间码也能加入", async t => {
+  const o = await open(t); if (!o) return; const { page } = o;
+  await page.getByRole("button", { name: /联机开房/ }).click();
+  await page.fill("#ol-url", "http://localhost:8799"); await page.fill("#ol-name", "测试主持");
+  await page.click('[data-online="connect"]');
+  await page.getByRole("button", { name: /消息与成员/ }).click().catch(() => {});
+  // 记下被复制的文字：有剪贴板接口时截住 writeText，没有时（本地文件 / 非安全来源）走选中文字 + copy 事件
+  await page.evaluate(() => {
+    window.__copied = null;
+    if (navigator.clipboard) navigator.clipboard.writeText = async (t) => { window.__copied = t; };
+    document.addEventListener("copy", () => { const a = document.activeElement; window.__copied = a && "value" in a ? a.value : String(getSelection()); });
+  });
+  const copy = page.locator('[data-online="copyCode"]');
+  assert.equal(await copy.count(), 1, "房间面板上有复制按钮");
+  await copy.click();
+  await page.waitForFunction(() => /已复制房间码 ABCD23|无法自动复制/.test(document.body.textContent));
+  assert.match(await page.textContent("body"), /已复制房间码 ABCD23/);
+  assert.equal(await page.evaluate(() => window.__copied), "ABCD23");
+  // 房间码文字本身可以整段选中
+  assert.equal(await page.locator(".ol-code").first().evaluate(e => getComputedStyle(e).userSelect), "all");
+  assert.deepEqual(o.errors, []);
+});
+
+test("D3 display: 加入时去掉粘贴进来的空格和标点", async t => {
+  const o = await open(t); if (!o) return; const { page } = o;
+  await page.getByRole("button", { name: /加入房间/ }).click();
+  await page.fill("#ol-url", "http://localhost:8799"); await page.fill("#ol-name", "路人乙"); await page.fill("#ol-code", " abcd-23 ");
+  await page.click('[data-online="connect"]');
+  assert.equal((await calls(page)).find(c => c.kind === "join").args.roomCode, "ABCD23");
+  assert.deepEqual(o.errors, []);
+});
