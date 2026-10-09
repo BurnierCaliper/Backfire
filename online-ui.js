@@ -95,6 +95,47 @@
       node.addEventListener("input", input); node.addEventListener("change", change);
       node.addEventListener("submit", event => { event.preventDefault(); if (event.target.id === "ol-message-form") sendMessage(); if (event.target.id === "ol-lobby-chat") sendLobbyChat(); });
     }
+    // 悬停在单位 / 配置物上：图鉴描述 + 身上效果的文字说明（unit-tip.js）
+    const TIP_STATUS = { burn: "灼烧", shock: "感电", corr: "腐蚀", frostbite: "冻伤", shockwave: "震荡", reso: "共振", unstable: "不稳", weak: "虚弱", inspire: "振奋", sturdy: "坚挺", hide: "躲藏", advantage: "优势", chase: "紧追" };
+    const TIP_INSTANT = { melt: "熔融", sting: "刺骨", overload: "过载", shift: "错位", spread: "扩散", refract: "折射", iceNext: "冰冻+50%" };
+    const TIP_SELF = { burn: "自焚", frost: "霜结", splash: "溅射", conductor: "导体", anchor: "千钧", store: "蓄能", doppler: "多普勒" };
+    const TIP_ATK = { combust: "爆燃", icebreak: "破冰", bolt: "雷击", etch: "蚀刻", backflow: "倒流", inertia: "惯性", diffract: "衍射" };
+    function unitTip(node) {
+      const T = global.UnitTip, data = displayState || view.state || {};
+      if (!T) return "";
+      if (node.dataset.propId) {
+        const p = (data.props || []).find(x => String(x.id) === node.dataset.propId);
+        if (!p) return "";
+        return T.html({ kind: "prop", propKind: p.kind }, [], { name: p.name || p.kind, sub: [p.hp != null ? `耐久 ${p.hp}${p.maxHp == null ? "" : "/" + p.maxHp}` : "", p.zone + " 区"].filter(Boolean).join(" · ") });
+      }
+      const u = (data.units || []).find(x => x.id === node.dataset.unitId);
+      if (!u) return "";
+      const st = u.statuses || {}, tokens = [];
+      if (u.dead) tokens.push(u.isPlayer ? "倒下" : "");
+      if (u.dying && !u.dead) tokens.push("濒死");
+      if (u.stunned && !u.dead) tokens.push("失衡");
+      if (u.flying) tokens.push("飞行");
+      Object.keys(TIP_STATUS).forEach(k => { if (st[k]) tokens.push(k === "burn" && Number(st.burn) > 0 ? "灼烧×" + st.burn : TIP_STATUS[k]); });
+      if (st.high || Number(u.highEnergy) > 0) tokens.push("高能 " + (Number(u.highEnergy) || 0));
+      Object.keys(TIP_INSTANT).forEach(k => { if ((u.instant || {})[k]) tokens.push(TIP_INSTANT[k]); });
+      if (TIP_SELF[u.self]) tokens.push(TIP_SELF[u.self] + (u.self === "burn" && Number(u.selfBurnStacks) > 1 ? "×" + u.selfBurnStacks : ""));
+      ((u.resources || {}).nextAtkFx || []).forEach(k => { if (TIP_ATK[k]) tokens.push(TIP_ATK[k]); });
+      (u.marks || []).forEach(m => tokens.push(m === "needle" ? "刺入" : m === "bond" ? "牵挂" : ""));
+      const owner = u.weaponOf ? (data.units || []).find(x => x.kit === u.weaponOf && !x.weaponOf) : null;
+      const kind = u.isPlayer ? (u.weaponOf || u.weaponUnit ? "weapon" : "hero") : "enemy";
+      return T.html({ kind, kit: u.kit, ownerName: owner && owner.name }, tokens.filter(Boolean), { name: u.name || u.id, sub: `Lv${u.level || 1} · ${u.zone} 区` });
+    }
+    const hoverable = (t) => t && t.closest && t.closest("[data-unit-id], [data-prop-id]");
+    stage.addEventListener("mouseover", event => {
+      const node = hoverable(event.target);
+      if (!node || !global.UnitTip || (global.matchMedia && global.matchMedia("(hover: none)").matches)) return;
+      const h = unitTip(node);
+      if (h) global.UnitTip.show(node, h);
+    });
+    stage.addEventListener("mouseout", event => {
+      const node = hoverable(event.target);
+      if (node && !node.contains(event.relatedTarget)) global.UnitTip?.hide();
+    });
     // 中文输入法正在拼字时，不重画含有正在输入的输入框的区域（重画会把拼到一半的字打断），拼完再补画
     let composing = false, deferred = false;
     const onCompStart = () => { composing = true; };
@@ -245,7 +286,7 @@
       const data = displayState || view.state, screen = view.screen;
       if (screen === "lobby" || !data) return '<div class="ol-wait"><h2>等待房间同步</h2><p>房主准备好后会更新这里。</p></div>';
       const units = (data.units || []).filter(u => !u.hidden), logs = view.packet?.publicLogs || [];
-      return `<header class="ol-stage-heading"><div><span class="ol-muted">${esc(view.roomCode)} · ${screen === "battle" ? `第 ${data.turnNo || 1} 回合` : screen === "ended" ? "遭遇结束" : "探索环节"}</span><h1>${screen === "battle" ? "战场" : screen === "ended" ? "战斗结算" : "与队伍同行"}</h1><div class="ol-info-tools">${button("角色资料", "info", 'data-info="sheet"', pending)}${button("武器", "info", 'data-info="armory"', pending)}${button("背包", "info", 'data-info="bag"', pending)}${button("战绩", "info", 'data-info="record"', pending)}</div></div>${weatherMarkup(data)}</header>${screen === "ended" ? resultMarkup() : ""}${suppliesMarkup(data)}${paused() ? '<p class="ol-pause" role="status">房间暂停，正在等待连接恢复。</p>' : ""}${view.offlineWait ? `<p class="ol-pause">${esc(view.offlineWait.name)} 离线，等待其返回。</p>` : ""}${checksMarkup()}${screen === "battle" || screen === "ended" ? `<div class="ol-zones"${zoneGrid(data).style}>${zoneGrid(data).zones.map(z => `<section class="ol-zone"${z.style}><h2>${z.id} 区</h2>${fieldsMarkup(data, z.id)}${units.filter(u => Number(u.zone) === z.id).map(card).join("") || '<p class="ol-muted">空区域</p>'}${(data.props || []).filter(p => Number(p.zone) === z.id && !p.destroyed).map(p => `<article class="ol-prop"><b>${esc(p.name || p.kind || "配置物")}</b>${p.hp != null ? `<span>耐久 ${esc(p.hp)}${p.maxHp == null ? "" : " / " + esc(p.maxHp)}</span>` : ""}</article>`).join("")}</section>`).join("")}</div>${gapsMarkup(data)}${screen === "ended" ? "" : actionsMarkup()}` : `<p class="ol-muted">主持人正在管理探索与遭遇。右侧「小队」频道可以和大家聊天，「消息与成员」里可以私下回复主持人。</p><div class="ol-exploration-party">${units.filter(u => u.isPlayer && !u.weaponOf).map(card).join("")}</div>`}`;
+      return `<header class="ol-stage-heading"><div><span class="ol-muted">${esc(view.roomCode)} · ${screen === "battle" ? `第 ${data.turnNo || 1} 回合` : screen === "ended" ? "遭遇结束" : "探索环节"}</span><h1>${screen === "battle" ? "战场" : screen === "ended" ? "战斗结算" : "与队伍同行"}</h1><div class="ol-info-tools">${button("角色资料", "info", 'data-info="sheet"', pending)}${button("武器", "info", 'data-info="armory"', pending)}${button("背包", "info", 'data-info="bag"', pending)}${button("战绩", "info", 'data-info="record"', pending)}</div></div>${weatherMarkup(data)}</header>${screen === "ended" ? resultMarkup() : ""}${suppliesMarkup(data)}${paused() ? '<p class="ol-pause" role="status">房间暂停，正在等待连接恢复。</p>' : ""}${view.offlineWait ? `<p class="ol-pause">${esc(view.offlineWait.name)} 离线，等待其返回。</p>` : ""}${checksMarkup()}${screen === "battle" || screen === "ended" ? `<div class="ol-zones"${zoneGrid(data).style}>${zoneGrid(data).zones.map(z => `<section class="ol-zone"${z.style}><h2>${z.id} 区</h2>${fieldsMarkup(data, z.id)}${units.filter(u => Number(u.zone) === z.id).map(card).join("") || '<p class="ol-muted">空区域</p>'}${(data.props || []).filter(p => Number(p.zone) === z.id && !p.destroyed).map(p => `<article class="ol-prop" data-prop-id="${esc(p.id)}"><b>${esc(p.name || p.kind || "配置物")}</b>${p.hp != null ? `<span>耐久 ${esc(p.hp)}${p.maxHp == null ? "" : " / " + esc(p.maxHp)}</span>` : ""}</article>`).join("")}</section>`).join("")}</div>${gapsMarkup(data)}${screen === "ended" ? "" : actionsMarkup()}` : `<p class="ol-muted">主持人正在管理探索与遭遇。右侧「小队」频道可以和大家聊天，「消息与成员」里可以私下回复主持人。</p><div class="ol-exploration-party">${units.filter(u => u.isPlayer && !u.weaponOf).map(card).join("")}</div>`}`;
     }
     function observeMessages() {
       const rows = view.messages || [], incoming = rows.filter(m => !seenMessages.has(m.id) && m.from !== own());

@@ -1228,3 +1228,30 @@ test("战斗画面：状态画成图标，技能栏左边有角色仪表，状�
   assert.ok(await page.evaluate(() => window.__procSeen.includes("burn")), "灼烧结算时图标没有生效");
   assert.deepEqual(errors, []);
 });
+
+test("悬停单位：浮窗里有图鉴描述和身上效果的文字", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page, errors } = o;
+  await newTrpg(page);
+  await startBattle(page);
+  const ids = await page.evaluate(() => {
+    const f = state.units.find(u => !u.isPlayer && !u.dead);
+    f.statuses.burn = 2; f.statuses.weak = true;
+    const p = makeProp("boom", f.zone, 1); state.props.push(p);
+    GAME.refresh();
+    return { foe: f.id, prop: "prop:" + p.id };
+  });
+  await page.hover(`.unit-wrap[data-id="${ids.foe}"]`);
+  await page.waitForSelector(".unit-tip.show");
+  const txt = await page.textContent(".unit-tip");
+  assert.match(txt, /行动方式/);
+  assert.match(txt, /灼烧×2/);
+  assert.match(txt, /每回合结束时/);
+  assert.match(txt, /虚弱.*atk −25%/);
+  await page.mouse.move(5, 5);
+  await page.waitForSelector(".unit-tip:not(.show)", { state: "attached" });
+  await page.hover(`.unit-wrap[data-id="${ids.prop}"]`);
+  await page.waitForSelector(".unit-tip.show");
+  assert.match(await page.textContent(".unit-tip"), /爆炸桶[\s\S]*耐久/);
+  assert.deepEqual(errors, []);
+});

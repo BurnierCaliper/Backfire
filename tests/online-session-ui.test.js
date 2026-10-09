@@ -712,3 +712,22 @@ test("联机：主持人发大字，所有玩家画面中间弹出，几秒后�
   assert.equal((await submit(alice, { type: "showTitle", text: "我是主持人" })).ok, false);
   assert.deepEqual(f.errors, []);
 });
+
+test("联机：玩家悬停单位 / 配置物，看到图鉴描述和身上效果的文字", { timeout: 120000 }, async t => {
+  const f = await fixture(t); if (!f) return;
+  const { host, alice } = f;
+  await host.evaluate(() => { OnlineGame.start(); });
+  await alice.waitForFunction(() => OnlineGame.getView().screen === "exploration");
+  await host.evaluate(() => battleTemplateSave({ name: "悬停", board: 2, enemies: [{ preset: "thug_knife", level: 1, zone: 2 }], props: [{ kind: "boom", zone: 2, faction: "enemy" }] }));
+  await host.click('#tr-tabs [data-tab="battles"]');
+  await host.click('[data-bt^="fight:"]');
+  await alice.waitForFunction(() => document.querySelectorAll("#online-stage .ol-enemy").length === 1);
+  await alice.hover("#online-stage .ol-enemy");
+  await alice.waitForSelector(".unit-tip.show");
+  const txt = await alice.textContent(".unit-tip");
+  assert.match(txt, /行动方式/);
+  await alice.mouse.move(2, 2);
+  await alice.hover("#online-stage .ol-prop");
+  await alice.waitForFunction(() => /爆炸桶[\s\S]*耐久/.test(document.querySelector(".unit-tip.show")?.textContent || ""));
+  assert.deepEqual(f.errors, []);
+});

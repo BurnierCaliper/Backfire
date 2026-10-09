@@ -61,3 +61,23 @@
 .ol-unit .ol-badges { margin: 4px 0 2px; }
 .ol-unit .ol-gauge { margin: 6px 0 2px; min-height: 0; padding: 5px 8px; gap: 8px; }
 .ol-popup .hi-badge { margin-right: 3px; }
+/* 单位悬停说明（unit-tip.js）：图鉴描述 + 身上效果的文字 */
+.unit-tip { position: fixed; z-index: 85; display: none; pointer-events: none; max-height: calc(100vh - 16px); overflow: hidden;
+  background: #2a231c; color: #f1e6cf; border: 2px solid #0d0b09; box-shadow: 4px 5px 0 rgba(0, 0, 0, .5);
+  padding: 8px 12px 10px; font-size: 12.5px; line-height: 1.55; }
+.unit-tip.show { display: block; }
+.unit-tip .ut-top { display: flex; align-items: baseline; gap: 10px; }
+.unit-tip .ut-top b { font-size: 15px; font-weight: 800; }
+.unit-tip .ut-top span, .unit-tip .ut-kicker { color: #b3a487; font-size: 12px; }
+.unit-tip .ut-kicker { letter-spacing: .06em; }
+.unit-tip .ut-desc { margin: 4px 0 0; }
+.unit-tip ul { margin: 4px 0 0; padding-left: 16px; }
+.unit-tip .ut-list li { color: #d8ccb4; }
+.unit-tip .ut-h { margin-top: 8px; padding-top: 6px; border-top: 1px solid #4d4337; color: #c99a46; font-size: 12px; font-weight: 700; letter-spacing: .1em; }
+.unit-tip .ut-effects { list-style: none; padding: 0; display: grid; gap: 4px; }
+.unit-tip .ut-effects li { display: grid; grid-template-columns: auto 1fr; column-gap: 6px; align-items: start; }
+.unit-tip .ut-effects li > svg { width: 18px; height: 18px; grid-row: span 2; margin-top: 1px; }
+.unit-tip .ut-effects li > b { font-weight: 700; }
+.unit-tip .ut-effects li > span { grid-column: 2; color: #d8ccb4; }
+.unit-tip .ut-effects li:not(:has(> svg)) > span { grid-column: 1 / -1; }
+.unit-tip .ut-none { margin: 4px 0 0; color: #9a8c74; }

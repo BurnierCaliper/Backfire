@@ -1,0 +1,121 @@
+/* Antlerscale: Backfire · 单位悬停说明（战斗画面和联机玩家画面共用）
+ * 鼠标停在单位 / 配置物上：一段简单描述（从图鉴摘：角色介绍、敌人的行动方式和能力、配置物说明），
+ * 再把身上的效果一条条用文字写出来（名字 + 图鉴里的说明），玩家不认识图标也看得懂。
+ *   UnitTip.describe(info)  → { kicker, text, list }   info: { kind: "hero" | "weapon" | "enemy" | "prop" | "gap", kit, propKind, gapType, ownerName }
+ *   UnitTip.effect(token)   → { name, text }           token：状态文字里的一个词（「灼烧×3」「高能 5」「导体」「失衡」…）
+ *   UnitTip.html(info, tokens, head) → 浮窗内容 */
+(function (root) {
+  "use strict";
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  const g = (name) => { try { return root[name] !== undefined ? root[name] : eval(name); } catch (e) { return undefined; } };
+
+  // 图鉴里没有单独条目的几种状态（文字取自规则和角色被动）
+  const EXTRA = {
+    "失衡": "架势归零，进入失衡：直到它的下一次行动前跳过回合，其他角色可以对它发动协助攻击。",
+    "濒死": "最内层生命归零，倒地。不能靠治疗起身，可以消耗起身改用坚毅生命继续战斗。",
+    "倒下": "已经倒下，退出战斗。",
+    "起身": "靠坚毅生命继续战斗：之后受到的伤害打进坚毅生命，坚毅耗尽就会死亡。",
+    "刺入": "诺拉的针尖留在它身上：对诺拉的部分技能有影响；和诺拉的距离超过 1 时自动结束。",
+    "牵挂": "结人牵挂着它：结人对它的治疗骰取最高值；它即将被击破架势时，由结人代为承担这次击破。",
+    "磁场护盾": "川川施加的护盾：被打破时，把同区域所有敌人推到另一个区域，并造成 1 击破。",
+    "嘲讽": "被嘲讽：下一次攻击必须打嘲讽它的人。",
+    "掩护": "有队友在掩护它：这一回合会免费为它协助格挡。",
+    "决一死战": "灯的决一死战：只能攻击灯，伤害骰取最低。",
+    "无法移动": "这一回合不能移动。",
+    "冰冻+50%": "因冰属性击破失衡：下一次受到的攻击动作第一击伤害 +50%。",
+    "晕眩标记": "首领的晕眩标记：集满就会失衡。"
+  };
+  function codexEffects() { return g("CODEX_EFFECTS") || []; }
+  function lineOf(e) { return e ? (e.lines || []).join(" ").replace(/\s+/g, " ").trim() : ""; }
+
+  /** 状态文字里的一个词 → 名字 + 说明。认不出来的只写名字 */
+  function effect(token) {
+    const raw = String(token || "").trim();
+    if (!raw) return null;
+    // 「灼烧×3」「高能 5」「自焚×2」「晕眩标记 1/2」「掩护（灯）」「聚焦护甲 火→[冰]」
+    let base = raw.replace(/[（(].*$/, "").replace(/\s*[×x]\s*\d+$/, "").replace(/\s+\d+(\/\d+)?$/, "").trim();
+    if (/^聚焦/.test(base)) base = "聚焦";
+    const e = codexEffects().find(x => x.name === base);
+    if (e) return { name: raw, text: lineOf(e) };
+    if (EXTRA[base]) return { name: raw, text: EXTRA[base] };
+    if (base === "聚焦") return { name: raw, text: "Helumica 的聚焦：按方括号里那一步的属性攻击这一层，走完整个序列就抹掉整层血量并附加 2 击破。" };
+    return { name: raw, text: "" };
+  }
+
+  const KIND_NAME = { hero: "角色", weapon: "武器人", enemy: "敌人", prop: "配置物", gap: "间隔" };
+  /** 简单描述：角色看图鉴介绍，武器人看被动，敌人看行动方式和能力，配置物 / 间隔看配置物图鉴 */
+  function describe(info) {
+    info = info || {};
+    const out = { kicker: KIND_NAME[info.kind] || "", text: "", list: [] };
+    if (info.kind === "hero") {
+      const h = (g("HERO_CODEX") || {})[info.kit];
+      if (h) out.text = h.intro;
+    } else if (info.kind === "weapon") {
+      const st = root.SkillText && SkillText.kitInfo ? SkillText.kitInfo(info.kit) : null;
+      out.kicker = info.ownerName ? info.ownerName + "的武器人" : "武器人";
+      if (st && (st.passives || []).length) out.list = st.passives.map(p => p.name + "：" + p.text);
+      else if (st && st.assistBlock) out.text = "协助格挡：" + st.assistBlock;
+    } else if (info.kind === "enemy") {
+      const kit = info.kit === "ufo_leg" || info.kit === "ufo_body" ? "ufo_boss" : info.kit;
+      const t = (g("BESTIARY_TEXT") || {})[kit] || {};
+      const rank = (g("BESTIARY_RANK_NAME") || {})[(g("ENEMY_RANK") || {})[info.kit]] || "";
+      out.kicker = [rank, t.faction].filter(Boolean).join(" · ") || "敌人";
+      if (t.move) out.text = "行动方式：" + t.move;
+      // 能力只摘名字和一句话，太长的截短（完整的去图鉴看）
+      out.list = (t.abilities || []).map(a => a.length > 60 ? a.slice(0, 58) + "…" : a);
+    } else if (info.kind === "prop" || info.kind === "gap") {
+      const id = info.kind === "gap" ? info.gapType : info.propKind;
+      const p = (g("CODEX_PROPS") || []).find(x => x.id === id);
+      if (info.kind === "gap" && id === "void") { const e = codexEffects().find(x => x.name === "空隙（间隔）"); if (e) out.text = lineOf(e); }
+      if (p) { out.kicker = [KIND_NAME[info.kind], p.place, p.source].filter(Boolean).join(" · "); out.list = p.lines.slice(); }
+    }
+    return out;
+  }
+
+  /** 浮窗内容。head：{ name, sub }（等级、区、阵营之类）；tokens：身上的效果词 */
+  function html(info, tokens, head) {
+    const d = describe(info);
+    const effs = (tokens || []).map(effect).filter(Boolean);
+    const seen = new Set();
+    const rows = effs.filter(e => { if (seen.has(e.name)) return false; seen.add(e.name); return true; });
+    return `<div class="ut-top"><b>${esc(head && head.name || "")}</b>${head && head.sub ? `<span>${esc(head.sub)}</span>` : ""}</div>` +
+      (d.kicker ? `<div class="ut-kicker">${esc(d.kicker)}</div>` : "") +
+      (d.text ? `<p class="ut-desc">${esc(d.text)}</p>` : "") +
+      (d.list.length ? `<ul class="ut-list">${d.list.map(x => { const i = x.indexOf("："); return `<li>${i > 0 && i < 18 ? `<b>${esc(x.slice(0, i))}</b>${esc(x.slice(i))}` : esc(x)}</li>`; }).join("")}</ul>` : "") +
+      `<div class="ut-h">身上的效果</div>` +
+      (rows.length ? `<ul class="ut-effects">${rows.map(e => {
+        const k = root.HudIcons ? HudIcons.keyOf(e.name.replace(/[（(].*$/, "").replace(/\s*[×x]\s*\d+$/, "").replace(/\s+\d+(\/\d+)?$/, "").trim()) : null;
+        return `<li>${k ? HudIcons.icon(k) : ""}<b>${esc(e.name)}</b>${e.text ? `<span>${esc(e.text)}</span>` : ""}</li>`;
+      }).join("")}</ul>` : `<p class="ut-none">没有效果</p>`);
+  }
+
+  // 浮窗本体（跟着单位卡出现，不挡鼠标）
+  let tipEl = null;
+  function show(anchor, content) {
+    if (typeof document === "undefined" || !anchor) return;
+    if (!tipEl) {
+      tipEl = document.createElement("div");
+      tipEl.className = "unit-tip";
+      tipEl.setAttribute("role", "tooltip");
+      document.body.appendChild(tipEl);
+    }
+    tipEl.innerHTML = content;
+    tipEl.classList.add("show");
+    const r = anchor.getBoundingClientRect();
+    const w = Math.min(340, window.innerWidth - 16);
+    tipEl.style.width = w + "px";
+    // 先放在卡片右边，放不下放左边，再不行放上面
+    let left = r.right + 10, top = r.top;
+    if (left + w > window.innerWidth - 8) left = r.left - w - 10;
+    const h = tipEl.offsetHeight;
+    if (left < 8) { left = Math.max(8, Math.min(window.innerWidth - w - 8, r.left + r.width / 2 - w / 2)); top = r.top - h - 8 >= 8 ? r.top - h - 8 : r.bottom + 8; }
+    top = Math.max(8, Math.min(window.innerHeight - h - 8, top));
+    tipEl.style.left = left + "px";
+    tipEl.style.top = top + "px";
+  }
+  function hide() { if (tipEl) tipEl.classList.remove("show"); }
+
+  const api = { describe, effect, html, show, hide, EXTRA };
+  root.UnitTip = api;
+  if (typeof module !== "undefined" && module.exports) module.exports = api;
+})(typeof window !== "undefined" ? window : globalThis);
