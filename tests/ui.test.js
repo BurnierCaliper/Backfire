@@ -1116,9 +1116,16 @@ test("录音音效：每个录音都能解码、有声、有调音参数；没�
         out[k] = { peak, dur: buf.duration, tune: !!Sfx.TUNE[k], label: !!Sfx.UI_LABEL[k] };
       } catch (e) { out[k] = { error: String(e) }; }
     }
+    // 克制 / 劣势：录音和合成音效都能走效果链（混响 / 低通）而不出错
+    const tones = [["ice", { adv: true }], ["fire", { dis: true }], ["electric", { adv: true }], ["stagger", { dis: true }]].map(([e, o]) => Sfx.play(e, o));
+    out.__tone = { tones, adv: Sfx.TONE.adv, dis: Sfx.TONE.dis };
     return { out, has: ["physical", "fire", "ice", "acid", "energy", "harmonic", "electric", "parry", "stagger", "boom"].map(k => Sfx.hasSample(k)),
       uiCoin: Sfx.ui("coin"), uiNone: Sfx.ui("victory") };
   });
+  const tone = r.out.__tone; delete r.out.__tone;
+  assert.deepEqual(tone.tones, [true, true, true, true], "克制 / 劣势音效都能播");
+  assert.ok(tone.adv.vol > 1 && tone.adv.rate > 1 && tone.adv.wet > 0, "克制：更响、更高、有混响");
+  assert.ok(tone.dis.vol < 1 && tone.dis.rate < 1 && tone.dis.lowpass > 0, "劣势：更轻、更低、发闷");
   const keys = Object.keys(r.out);
   assert.equal(keys.length, 25);
   for (const k of keys) {

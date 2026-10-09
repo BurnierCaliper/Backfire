@@ -120,7 +120,7 @@
       const s = c.createBufferSource();
       s.buffer = buf;
       const jitter = t.vary ? 1 + (Math.random() * 2 - 1) * t.vary : 1;
-      s.playbackRate.value = Math.max(0.25, Math.min(4, (Number(t.rate) || 1) * jitter));
+      s.playbackRate.value = Math.max(0.25, Math.min(4, (Number(t.rate) || 1) * jitter * (opt.rateMul || 1)));
       const g = c.createGain();
       const vol = Math.max(0, Number(t.gain) || 0) * (opt.vol || 1);
       const start = Math.max(0, Math.min(buf.duration - 0.01, Number(t.start) || 0));
@@ -137,6 +137,45 @@
     });
     return true;
   }
+  /* ---------- 克制 / 劣势 ---------- */
+  /** 克制：音量、音高提高一点，再加一层混响；劣势反过来：音量、音高降低，声音发闷（低通，没有混响） */
+  const TONE = {
+    adv: { vol: 1.3, rate: 1.12, wet: 0.5 },
+    dis: { vol: 0.7, rate: 0.88, lowpass: 1100 }
+  };
+  let reverbIr = null;
+  /** 程序生成的房间混响脉冲：1.8 秒衰减的立体声噪声 */
+  function reverbBuffer(c) {
+    if (reverbIr && reverbIr.sampleRate === c.sampleRate) return reverbIr;
+    const len = Math.round(c.sampleRate * 1.8);
+    const ir = c.createBuffer(2, len, c.sampleRate);
+    for (let ch = 0; ch < 2; ch++) {
+      const d = ir.getChannelData(ch);
+      for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3);
+    }
+    reverbIr = ir;
+    return ir;
+  }
+  /** 给一次命中搭一条临时的效果链，返回声音该接进去的节点（null = 直接进 master） */
+  function toneBus(tone) {
+    const cfg = TONE[tone];
+    if (!cfg || !ctx) return null;
+    const input = ctx.createGain();
+    if (cfg.wet) {
+      input.connect(master);
+      const conv = ctx.createConvolver();
+      conv.buffer = reverbBuffer(ctx);
+      const wet = ctx.createGain();
+      wet.gain.value = cfg.wet;
+      input.connect(conv); conv.connect(wet); wet.connect(master);
+    } else if (cfg.lowpass) {
+      const lp = ctx.createBiquadFilter();
+      lp.type = "lowpass"; lp.frequency.value = cfg.lowpass; lp.Q.value = 0.7;
+      input.connect(lp); lp.connect(master);
+    } else input.connect(master);
+    return input;
+  }
+
   const uiLast = {};
   let explicitAt = 0;
   /** 界面 / 演出音效：没有录音的类别不出声 */
@@ -410,17 +449,23 @@
     const now = c.currentTime;
     if (last[el] != null && now - last[el] < (opt.throttle || 0.06)) return false;
     last[el] = now;
-    const v = opt.big ? 1.25 : 1;
+    const tone = opt.adv ? "adv" : opt.dis ? "dis" : "";
+    const cfg = TONE[tone] || { vol: 1, rate: 1 };
+    const v = (opt.big ? 1.25 : 1) * cfg.vol;
+    const bus = toneBus(tone);
     // 有录音的属性放录音；重击照旧叠一层低频
     if (hasSample(el)) {
-      playSample(el, { vol: v });
-      if (opt.big) { try { osc("sine", now + 0.005, 0.3, 75, 38, gainEnv(now + 0.005, 0.005, 0.5, 0.3)); } catch (e) {} }
+      playSample(el, { vol: v, rateMul: cfg.rate, dest: bus || undefined });
+      if (opt.big) { try { osc("sine", now + 0.005, 0.3, 75, 38, gainEnv(now + 0.005, 0.005, 0.5, 0.3, bus || master)); } catch (e) {} }
       return true;
     }
+    // 合成音效：所有声部默认接 master，临时把 master 换成效果链（音高不变，音量和混响 / 发闷照样起作用）
+    const realMaster = master;
     try {
+      if (bus) master = bus;
       VOICES[el](now + 0.005, v);
       if (opt.big) osc("sine", now + 0.005, 0.3, 75, 38, gainEnv(now + 0.005, 0.005, 0.5, 0.3));
-    } catch (e) { return false; }
+    } catch (e) { return false; } finally { master = realMaster; }
     return true;
   }
 
@@ -450,5 +495,5 @@
   /** 高能自爆的爆炸声（连锁自爆时间隔 0.25 秒以上才再响） */
   function boom() { return play("boom", { throttle: 0.25 }); }
 
-  window.Sfx = { render, parry, stagger, boom, play, ui, playSample, hasSample, TUNE: SFX_TUNE, UI_LABEL, enabled, setEnabled, ELEMENTS, NAMES: { physical: "物理", fire: "火", ice: "冰", electric: "电", acid: "酸", energy: "能量", harmonic: "谐波" } };
+  window.Sfx = { render, parry, stagger, boom, play, ui, playSample, hasSample, TUNE: SFX_TUNE, TONE, UI_LABEL, enabled, setEnabled, ELEMENTS, NAMES: { physical: "物理", fire: "火", ice: "冰", electric: "电", acid: "酸", energy: "能量", harmonic: "谐波" } };
 })();

@@ -889,10 +889,12 @@
     realTimeout(() => d.remove(), cls === "boom" ? 1550 : 950);
   }
   const ELE_VAR = { fire: "--fire", acid: "--acid", electric: "--electric", ice: "--icee", energy: "--energy", physical: "--physical", harmonic: "--harmonic" };
-  function hit(id, element, big) {
+  /** pop：这一击的伤害弹字（带 adv 克制 / dis 劣势），克制时音效更响更高并带混响，劣势更闷更低 */
+  function hit(id, element, big, pop) {
+    const tone = pop ? { adv: !!pop.adv, dis: !pop.adv && !!pop.dis } : {};
     const gn = gapNode(id);
     if (gn) {
-      if (!G.sim && window.Sfx) Sfx.play(element || "physical", { big: !!big });
+      if (!G.sim && window.Sfx) Sfx.play(element || "physical", Object.assign({ big: !!big }, tone));
       gn.style.setProperty("--flash", `var(${ELE_VAR[element] || "--physical"})`);
       gn.classList.remove("hit");
       void gn.offsetWidth;
@@ -901,7 +903,7 @@
     }
     const c = cards.get(id);
     if (!c) return;
-    if (!G.sim && window.Sfx) Sfx.play(element || "physical", { big: !!big });
+    if (!G.sim && window.Sfx) Sfx.play(element || "physical", Object.assign({ big: !!big }, tone));
     c.flash.style.setProperty("--flash", `var(${ELE_VAR[element] || "--physical"})`);
     c.wrap.classList.remove("hit");
     void c.wrap.offsetWidth;
@@ -1103,7 +1105,7 @@
       await wait(90);
     }
     const firstHit = pops.find(e => e.kind === "dmg" && Number(e.value) > 0);
-    if (firstHit) hit(firstHit.unitId, firstHit.element);
+    if (firstHit) hit(firstHit.unitId, firstHit.element, false, firstHit);
     else if (meta.forceLunge && meta.targetId && !(meta.blockerId)) {
       /* 格挡失败仍应有受击；若伤害弹字迟到，先播受击 */
       const anyDmg = pops.some(e => e.kind === "dmg");
@@ -1139,7 +1141,7 @@
           // 大伤害：和计算器同一个区间（目标等级 × 2 + 8 起，到两倍封顶），越重字越大、停得越久；评分加成也按它
           const bh = typeof bigHitInfo === "function" ? bigHitInfo(s ? s.level : 1, v) : { big: false, ratio: 0 };
           const big = bh.big;
-          hit(e.unitId, e.element, big);
+          hit(e.unitId, e.element, big, e);
           if (e.adv && !advShook) { advShook = true; advShake(); }
           comboHit(e, v);
           popup(e.unitId, big ? v + "!" : String(v), "e-" + e.element + (big ? " big" : "") + (boom ? " boom" : ""),

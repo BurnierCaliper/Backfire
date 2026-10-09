@@ -23,7 +23,10 @@ h1 { margin: 10px 0 6px; font-size: clamp(22px, 4vw, 32px); font-weight: 900; le
 .lede { margin: 0; max-width: 70ch; color: #d8ccb2; }
 .legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 10px 0 0; padding: 0; list-style: none; font-size: 12px; color: var(--muted); }
 .legend b { color: var(--paper); }
-.groups { display: grid; gap: 12px; margin-top: 20px; }
+.groups { display: grid; gap: 12px; margin-top: 12px; }
+section.tone { margin-top: 20px; border-color: var(--hazard); }
+.tone-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.tone-row select { font: inherit; font-size: 13px; color: var(--paper); background: var(--plate); border: 1px solid var(--edge); padding: 4px 6px; }
 section.k { background: var(--steel); border: 1px solid var(--edge); padding: 12px 14px; }
 section.k.changed { border-color: var(--changed); }
 .k-h { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
@@ -67,6 +70,7 @@ textarea#out { display: block; width: 100%; max-width: 1040px; margin: 8px auto 
       <li><b>随机音高</b> 每次随机变一点，连续命中不单调</li>
     </ul>
   </header>
+  <section class="k tone" id="tone"></section>
   <div class="groups" id="groups"></div>
 </div>
 <div class="tray" data-sfx-none>
@@ -99,7 +103,25 @@ const fmt = (v) => (Math.round(v * 100) / 100).toString();
 const same = (a, b) => Math.abs(Number(a) - Number(b)) < 1e-6;
 function changed(k) { return FIELDS.some(([f]) => !same(tune[k][f], DEF[k][f])) || tune[k].on !== DEF[k].on; }
 
+const TKEY = "backfire-sfx-tone";
+const TDEF = JSON.parse(JSON.stringify(Sfx.TONE));
+try { const sv = JSON.parse(localStorage.getItem(TKEY) || "{}") || {}; ["adv", "dis"].forEach(m => Object.assign(Sfx.TONE[m], sv[m] || {})); } catch (e) {}
+const TFIELDS = { adv: [["vol", "音量倍数", 1, 2, 0.01], ["rate", "音高倍数", 1, 1.5, 0.01], ["wet", "混响量", 0, 1.5, 0.01]],
+  dis: [["vol", "音量倍数", 0.2, 1, 0.01], ["rate", "音高倍数", 0.5, 1, 0.01], ["lowpass", "发闷程度（低通 Hz，越小越闷）", 300, 5000, 50]] };
+const toneChanged = () => ["adv", "dis"].some(m => TFIELDS[m].some(([f]) => !same(Sfx.TONE[m][f], TDEF[m][f])));
+function renderTone() {
+  const el = document.getElementById("tone");
+  el.classList.toggle("changed", toneChanged());
+  el.innerHTML = `<div class="k-h"><h2>克制 / 劣势</h2><span class="src">攻击打出克制时：更响、更高，加混响；劣势时：更轻、更低、发闷。对所有攻击属性的命中音效生效（电属性是合成音效，只改音量和混响 / 发闷，音高不变）。</span></div>
+    ${["adv", "dis"].map(m => `<div class="faders">${TFIELDS[m].map(([f, name, min, max, step]) => `<div class="f${same(Sfx.TONE[m][f], TDEF[m][f]) ? "" : " mod"}">
+      <label for="tone-${m}-${f}">${m === "adv" ? "克制" : "劣势"} · ${name}<output>${fmt(Sfx.TONE[m][f])}</output></label>
+      <input id="tone-${m}-${f}" type="range" min="${min}" max="${max}" step="${step}" value="${Sfx.TONE[m][f]}" data-tone="${m}" data-tf="${f}"></div>`).join("")}</div>`).join("")}
+    <div class="tone-row"><select id="tone-el" aria-label="试听的属性">${["physical", "fire", "ice", "acid", "energy", "harmonic", "electric"].map(e => `<option value="${e}">${Sfx.NAMES[e]}</option>`).join("")}</select>
+      <button class="play" data-tplay="">▶ 普通</button><button class="play" data-tplay="adv">▶ 克制</button><button class="play" data-tplay="dis">▶ 劣势</button>
+      <button class="reset" id="tone-reset">恢复默认</button></div>`;
+}
 function render() {
+  renderTone();
   document.getElementById("groups").innerHTML = KEYS.map(k => {
     const t = tune[k];
     return `<section class="k${changed(k) ? " changed" : ""}" data-k="${k}">
@@ -116,12 +138,20 @@ function render() {
   paintSum();
 }
 function paintSum() {
-  const n = KEYS.filter(changed).length;
-  document.getElementById("sum").innerHTML = n ? `改动了 <b>${n}</b> 个音效` : "还没有改动。";
+  const n = KEYS.filter(changed).length + (toneChanged() ? 1 : 0);
+  document.getElementById("sum").innerHTML = n ? `改动了 <b>${n}</b> 项` : "还没有改动。";
 }
 function play(k) { Sfx.playSample(k, { tune: tune[k] }); }
 document.addEventListener("input", e => {
-  const sec = e.target.closest("section.k"); if (!sec) return;
+  if (e.target.dataset.tone) {
+    const m = e.target.dataset.tone, f = e.target.dataset.tf;
+    Sfx.TONE[m][f] = Number(e.target.value);
+    const box = e.target.closest(".f"); box.querySelector("output").textContent = fmt(Sfx.TONE[m][f]); box.classList.toggle("mod", !same(Sfx.TONE[m][f], TDEF[m][f]));
+    document.getElementById("tone").classList.toggle("changed", toneChanged());
+    try { localStorage.setItem(TKEY, JSON.stringify(Sfx.TONE)); } catch (er) {}
+    paintSum(); return;
+  }
+  const sec = e.target.closest("section.k"); if (!sec || sec.id === "tone") return;
   const k = sec.dataset.k, f = e.target.dataset.f;
   if (f === "on") tune[k].on = e.target.checked;
   else {
@@ -134,23 +164,28 @@ document.addEventListener("input", e => {
 });
 document.addEventListener("change", e => {
   // 松开推子自动试听一次
+  if (e.target.dataset.tone) { const el = document.getElementById("tone-el").value; Sfx.play(el, { [e.target.dataset.tone]: true, throttle: 0.001 }); return; }
   const sec = e.target.closest("section.k");
-  if (sec && e.target.type === "range") play(sec.dataset.k);
+  if (sec && sec.dataset.k && e.target.type === "range") play(sec.dataset.k);
 });
 document.addEventListener("click", e => {
   const p = e.target.closest("[data-play]"); if (p) { play(p.dataset.play); return; }
+  const tp = e.target.closest("[data-tplay]");
+  if (tp) { const el = document.getElementById("tone-el").value; Sfx.play(el, tp.dataset.tplay ? { [tp.dataset.tplay]: true, throttle: 0.001 } : { throttle: 0.001 }); return; }
+  if (e.target.id === "tone-reset") { ["adv", "dis"].forEach(m => Object.assign(Sfx.TONE[m], TDEF[m])); try { localStorage.removeItem(TKEY); } catch (er) {} renderTone(); paintSum(); return; }
   const r = e.target.closest("[data-reset]");
   if (r) { tune[r.dataset.reset] = Object.assign({}, DEF[r.dataset.reset]); save(); render(); }
 });
-document.getElementById("reset-all").addEventListener("click", () => { KEYS.forEach(k => { tune[k] = Object.assign({}, DEF[k]); }); save(); render(); document.getElementById("out").hidden = true; });
+document.getElementById("reset-all").addEventListener("click", () => { KEYS.forEach(k => { tune[k] = Object.assign({}, DEF[k]); }); ["adv", "dis"].forEach(m => Object.assign(Sfx.TONE[m], TDEF[m])); try { localStorage.removeItem(TKEY); } catch (er) {} save(); render(); document.getElementById("out").hidden = true; });
 function resultText() {
   const ks = KEYS.filter(changed);
-  if (!ks.length) return "没有改动。";
+  if (!ks.length && !toneChanged()) return "没有改动。";
+  const toneText = toneChanged() ? "\n克制 / 劣势（TONE）：\n" + ["adv", "dis"].map(m => `${m}（${m === "adv" ? "克制" : "劣势"}）: { ${TFIELDS[m].map(([f]) => `${f}: ${fmt(Sfx.TONE[m][f])}`).join(", ")} }`).join("\n") : "";
   return "音效调音参数（SFX_TUNE）：\n" + ks.map(k => {
     const t = tune[k];
     const parts = FIELDS.map(([f]) => `${f}: ${fmt(t[f])}`).concat([`on: ${t.on !== false}`]);
     return `${k}（${Sfx.UI_LABEL[k] || k}）: { ${parts.join(", ")} }`;
-  }).join("\n");
+  }).join("\n") + toneText;
 }
 document.getElementById("copy").addEventListener("click", () => {
   const out = document.getElementById("out"); const text = resultText();
