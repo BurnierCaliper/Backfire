@@ -11,8 +11,8 @@ const Bestiary = (() => {
   const RANGE = { melee: "近距离", ranged: "远距离", any: "远近皆可" };
   let root = null, filter = "all", sel = null, lv = null, party = 4, sub = "";
   let mode = "enemy", query = "";
-  const MODES = [["enemy", "敌人"], ["prop", "配置物"], ["effect", "效果"]];
-  const codexSel = { prop: null, effect: null }, codexFilter = { prop: "all", effect: "all" };
+  const MODES = [["hero", "角色"], ["enemy", "敌人"], ["prop", "配置物"], ["effect", "效果"]];
+  const codexSel = { hero: null, prop: null, effect: null }, codexFilter = { hero: "all", prop: "all", effect: "all" };
 
   function build() {
     root = document.createElement("div");
@@ -179,10 +179,12 @@ const Bestiary = (() => {
   const PROP_TABS = [["all", "全部"], ["zone", "区域"], ["gap", "间隔"], ["skill", "技能产物"]];
   const eleIcon = (el) => (el && window.Icons ? Icons.element(el) : "");
   function codexList() {
+    if (mode === "hero") return typeof codexHeroEntries === "function" ? codexHeroEntries() : [];
     if (mode === "prop") return typeof codexPropEntries === "function" ? codexPropEntries() : [];
     return typeof codexEffectEntries === "function" ? codexEffectEntries() : [];
   }
   function codexTabs() {
+    if (mode === "hero") return [["all", "全部"], ["easy", "入门 ★1–2"], ["mid", "进阶 ★3"], ["hard", "高手 ★4–5"]];
     if (mode === "prop") return PROP_TABS;
     return [["all", "全部"]].concat((typeof CODEX_EFFECT_GROUPS !== "undefined" ? CODEX_EFFECT_GROUPS : []).map(g => [g.id, g.name]));
   }
@@ -192,7 +194,7 @@ const Bestiary = (() => {
     const matched = all.filter(e => typeof codexMatch !== "function" || codexMatch(e, query));
     root.querySelector(".bx-prog-text").innerHTML = query.trim()
       ? `搜到 <b>${matched.length}</b> 条`
-      : `共 <b>${all.length}</b> 条${mode === "prop" ? "配置物" : "效果"}`;
+      : `共 <b>${all.length}</b> ${mode === "hero" ? "名角色" : mode === "prop" ? "种配置物" : "条效果"}`;
     root.querySelector(".bx-tabs").innerHTML = codexTabs().map(([k, n]) => {
       const c = k === "all" ? matched.length : matched.filter(e => e.group === k).length;
       return `<button class="bx-tab${f === k ? " on" : ""}" data-filter="${k}">${esc(n)}<small>${c}</small></button>`;
@@ -200,6 +202,15 @@ const Bestiary = (() => {
     const shown = f === "all" ? matched : matched.filter(e => e.group === f);
     const key = (e) => e.id;
     if (!codexSel[mode] || !shown.some(e => key(e) === codexSel[mode])) codexSel[mode] = shown[0] ? key(shown[0]) : null;
+    if (mode === "hero") {
+      root.querySelector(".bx-grid").innerHTML = shown.map(e => `<button class="bx-card cx hero${e.id === codexSel.hero ? " sel" : ""}" data-cx="${esc(e.id)}">
+          <span class="bx-rank hx-stars" aria-label="难度 ${e.stars} 星">${starText(e.stars)}</span>
+          <b class="bx-name">${esc(e.name)}</b>
+          <small>${esc([e.race, e.job].filter(Boolean).join(" · "))}</small>
+        </button>`).join("") || `<p class="bx-empty">没有符合搜索的角色。</p>`;
+      renderHeroDetail(shown.find(e => e.id === codexSel.hero) || null);
+      return;
+    }
     root.querySelector(".bx-grid").innerHTML = shown.map(e => {
       const kicker = mode === "prop" ? (e.source ? "技能产物" : e.place) : e.groupName;
       const el = e.element || null;
@@ -211,6 +222,65 @@ const Bestiary = (() => {
       </button>`;
     }).join("") || `<p class="bx-empty">${query.trim() ? "没有符合搜索的条目。" : "这一类还没有条目。"}</p>`;
     renderCodexDetail(shown.find(e => key(e) === codexSel[mode]) || null);
+  }
+  const starText = (n) => "★".repeat(n) + "☆".repeat(Math.max(0, 5 - n));
+  const ATTR_CN = [["str", "力量"], ["con", "体质"], ["dex", "敏捷"], ["wil", "意志"], ["int", "智力"], ["sta", "耐力"]];
+  function textItem(name, text, extra) {
+    return `<li><b>${esc(name)}</b>${extra ? ` <span class="hx-tag">${esc(extra)}</span>` : ""}<br>${esc(text)}</li>`;
+  }
+  function layerBar(layers) {
+    return `<div class="bx-layers">${(layers || []).map(l => `<div class="bx-layer ${esc(l.type)}" style="flex:${Math.max(1, l.max)}"><span>${esc(l.name)}</span><b>${l.max}</b></div>`).join("")}</div>`;
+  }
+  function renderHeroDetail(e) {
+    const box = root.querySelector(".bx-detail");
+    if (!e) { box.innerHTML = ""; return; }
+    const s = e.sheet;
+    const sec = (title, body) => body ? `<section class="bx-sec"><div class="bx-sec-h"><span>${title}</span></div>${body}</section>` : "";
+    const profs = Object.keys(e.profs || {}).map(k => `${k}${e.profs[k] > 1 ? " ×" + e.profs[k] : ""}`).join("、");
+    let body = "";
+    if (s) {
+      const blk = s.block && s.block.total != null ? s.block.total + "%" : "—";
+      body += sec("基础数值（Lv1）", `${layerBar(s.layers)}
+        <div class="bx-nums">
+          <div><small>atk</small><b>${s.atk}</b></div>
+          <div><small>坚毅生命</small><b>${s.shpMax != null ? s.shpMax : "—"}</b></div>
+          <div><small>架势</small><b>${s.defMax}</b></div>
+          <div><small>协助格挡</small><b>${blk}</b></div>
+        </div>
+        <dl class="bx-facts hx-attrs">${ATTR_CN.map(([k, n]) => `<dt>${n}</dt><dd>${s.attrs[k] != null ? s.attrs[k] : "—"}</dd>`).join("")}</dl>
+        <p class="bx-note">atk = 角色 ${s.personalAtk} + 武器 ${s.weaponAtk}。${s.roles.length ? "职责：" + s.roles.map(r => r.label + " " + r.role).join("、") + "。" : ""}</p>`);
+      const plusLv = (n) => typeof codexPlusLevel === "function" && codexPlusLevel(n) ? `武器 Lv${codexPlusLevel(n)}` : "";
+      body += sec("被动", `<ul class="bx-abil">${s.passives.map((p, i) => `<li><b>${esc(p.name)}</b><br>${esc(p.text)}
+          ${p.next ? `<div class="hx-plus"><b>${esc(p.name)}+</b><span class="hx-tag">${esc(plusLv(i + 1))} 升级</span><br>${esc(p.next)}</div>`
+            : i < 2 && !p.plus ? `<div class="hx-plus dim">被动升级：待定</div>` : ""}</li>`).join("")}</ul>`);
+      const skillLi = (k, lock) => textItem(k.name, k.text, [k.cost, lock ? `Lv${k.minLv} 解锁` : ""].filter(Boolean).join(" · "));
+      const roleIds = new Set((e.roleSkills || []).map(k => k.id));   // 职责技能单独列一节
+      body += sec("技能", `<ul class="bx-abil">${s.skills.now.filter(k => !roleIds.has(k.id)).map(k => skillLi(k)).join("")}${s.skills.later.filter(k => !roleIds.has(k.id)).map(k => skillLi(k, true)).join("")}</ul>`);
+      const ms = typeof ROLE_MILESTONES !== "undefined" ? ROLE_MILESTONES.join(" / ") : "5 / 10 / 15";
+      if ((e.roleSkills || []).length) body += sec("职责技能", `<ul class="bx-abil">${e.roleSkills.map(k => textItem(k.name, k.text,
+          [`${k.label}「${k.role}」${k.n}`, k.cost].filter(Boolean).join(" · "))).join("")}</ul>
+        <p class="bx-note">开局拥有主职责的 1 号技能；之后在 ${ms} 级按职责路线选择解锁更多职责技能。</p>`);
+      body += sec("协助", `<ul class="bx-abil">${s.assistAttack ? textItem("协助攻击", s.assistAttack) : ""}${s.assistBlock ? textItem("协助格挡", s.assistBlock) : ""}</ul>`);
+      body += s.weapons.map(w => sec(`武器人 · ${esc(w.name)}`, `${layerBar(w.layers)}
+        <div class="bx-nums">
+          <div><small>atk</small><b>${w.atk}</b></div>
+          <div><small>架势</small><b>${w.def}</b></div>
+          <div><small>耐久</small><b>${w.durability != null ? w.durability : "—"}</b></div>
+          <div><small>格挡加成</small><b>${w.blockBonus != null ? "+" + w.blockBonus + "%" : "—"}</b></div>
+        </div>
+        <ul class="bx-abil">${(w.passives || []).map(p => textItem(p.name, p.text)).join("")}
+          ${((w.skills && w.skills.now) || []).concat((w.skills && w.skills.later) || []).map(k => skillLi(k, !!k.minLv)).join("")}
+          ${w.assistBlock ? textItem("协助格挡", w.assistBlock) : ""}
+          ${w.growth ? textItem("成长", w.growth) : ""}</ul>`)).join("");
+    }
+    box.innerHTML = `<div class="bx-d">
+        <div class="bx-kicker">角色 · ${esc([e.race, e.job].filter(Boolean).join(" · "))}</div>
+        <h4>${esc(e.name)}${e.enName ? ` <small class="hx-en">${esc(e.enName)}</small>` : ""}</h4>
+        <div class="hx-diff"><span>游玩难度</span><b class="hx-stars" aria-label="${e.stars} 星（满分 5 星）">${starText(e.stars)}</b></div>
+        <p class="hx-intro">${esc(e.intro)}</p>
+        <div class="bx-chips">${profs ? `<span class="bx-chip dim">熟练：${esc(profs)}</span>` : ""}${e.note ? `<span class="bx-chip dim">${esc(e.note)}</span>` : ""}</div>
+        ${body}
+      </div>`;
   }
   /** 卡片上的一行摘要：说明第一句截短 */
   function codexBlurb(e) {

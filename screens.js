@@ -88,6 +88,7 @@ const Screens = (function () {
     $("t-new").onclick = () => RunFlow.start();
     if ($("t-solo")) $("t-solo").onclick = () => RunFlow.start({ solo: true });
     $("t-continue").onclick = () => RunFlow.resume();
+    if ($("t-codex")) $("t-codex").onclick = () => { if (window.Bestiary) Bestiary.open({ mode: "hero", sub: "主菜单" }); };
     $("t-sandbox").onclick = () => {
       // 没加载 trpg-ui.js 时的后备：直接进战斗画面（trpg-ui.js 会把这个按钮换成进探索环节）
       dispatch({ type: "run.session", action: "sandbox" }, { setupBattle() {

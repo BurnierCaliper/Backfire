@@ -58,3 +58,29 @@ test("搜索：名字、说明文字、属性名都能搜，多个关键词要�
   assert.equal(hits("").length, c.codexEffectEntries().length);
   assert.ok(c.codexPropEntries().filter(p => c.codexMatch(p, "爆炸")).some(p => p.id === "boom"));
 });
+
+test("角色图鉴：11 名角色都有介绍和 1–5 星难度，带完整的被动（含升级）、技能、职责技能和武器人", () => {
+  const c = H.load();
+  const heroes = c.codexHeroEntries();
+  assert.deepEqual(JSON.parse(JSON.stringify(heroes.map(h => h.kit))), ["ruby", "yuito", "hiaki", "tou", "xia", "chuan", "nora", "kolt", "helu", "ras", "longge"]);
+  heroes.forEach(h => {
+    assert.ok(h.intro.length > 40, h.kit + " 介绍");
+    assert.ok(h.stars >= 1 && h.stars <= 5, h.kit + " 星级");
+    assert.ok(h.sheet, h.kit + " 资料");
+    assert.ok(h.sheet.passives.length >= 2, h.kit + " 被动");
+    assert.ok(h.sheet.skills.now.length + h.sheet.skills.later.length >= 3, h.kit + " 技能");
+    assert.ok(h.sheet.weapons.length >= 1, h.kit + " 武器人");
+    assert.ok(h.roleSkills.length >= 4, h.kit + " 职责技能");
+    assert.ok(h.race && h.job, h.kit + " 种族职业");
+  });
+  const hiaki = heroes.find(h => h.kit === "hiaki");
+  assert.match(hiaki.sheet.passives[0].next, /丹生谷提供的以及武器人的协助格挡率/, "被动升级文字");
+  assert.equal(hiaki.sheet.weapons.length, 2);
+  assert.ok(hiaki.sheet.skills.later.some(k => k.name === "一闪" && k.minLv === 2), "等级解锁的技能");
+  assert.equal(c.codexPlusLevel(1), 5);
+  assert.equal(c.codexPlusLevel(2), 10);
+  assert.equal(heroes.find(h => h.kit === "tou").stars, 2);
+  assert.equal(heroes.find(h => h.kit === "ras").stars, 5);
+  // 搜索也能搜到角色（技能名、介绍）
+  assert.deepEqual(JSON.parse(JSON.stringify(heroes.filter(h => c.codexMatch(h, "咖啡")).map(h => h.kit))), ["yuito"]);
+});

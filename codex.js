@@ -155,3 +155,59 @@ function codexMatch(e, q) {
   const hay = [e.name, e.groupName, e.source, (e.lines || []).join(" ")].concat(e.element && typeof ELE !== "undefined" ? [ELE[e.element]] : []).join(" ");
   return q.split(/\s+/).every(w => hay.indexOf(w) >= 0);
 }
+
+/* ---------- 角色图鉴 ---------- */
+/** 每名角色的介绍和游玩难度（1–5 星）。技能 / 被动 / 被动升级的文字都来自 skill-text.js，和战斗里显示的一致 */
+const HERO_CODEX = {
+  ruby: { stars: 4, intro: "骇入战场的机甲驾驶员。平时用电流和短路骚扰敌人，同区有明特时可以合体成飞行机甲，换用火力强大的银翼系列技能。机甲每回合都要烧纳米能源，而能源主要靠场上的高能自爆补充，所以什么时候合体、能撑几回合，需要提前算好。" },
+  yuito: { stars: 3, intro: "用咖啡战斗的医生。把咖啡豆磨成咖啡液，就能泡出冰美式、意式浓缩、酸萃这些攻击或辅助用的咖啡。可以「牵挂」一名队友：替他扛下将要打破架势的击破，治疗骰也取最高值。适合想当后援、照顾前排的玩家。" },
+  hiaki: { stars: 4, intro: "双刀剑客，火属性大太刀【丹生谷】和冰属性打刀【鳴門】可以随时切换，也能把其中一把分出去变成武器人并肩作战。技能会随拔刀、居合、胁构三种刀势派生出不同效果。顺好刀势的节奏后，输出和格挡都很强。" },
+  tou: { stars: 2, intro: "站在最前面的盾。「决一死战」逼同区唯一的敌人只能打他，而且伤害骰取最低；圣盾点每回合自动回复，挨打时消耗一点就能把伤害减半。规则直白，站好位置就能发挥作用，最适合新手。" },
+  xia: { stars: 3, intro: "开着引擎往前冲的近战。拉响引擎后多数技能都会变强，但一回合不攻击引擎就会熄火，所以要一直保持进攻。濒死起身后引擎总是开着，越到绝境越凶。被动升级后加入燃油槽，火属性伤害的爆发会更高，玩法也稍微复杂一些。" },
+  chuan: { stars: 3, intro: "攻守兼备的电工。用技能积攒电能，再换成铁壁、电站超频这类强力技能。他施加的护盾被打破时，会把同区敌人全部推到另一区并造成击破，可以用来解围或者控场。需要规划电能怎么花、护盾放在哪里。" },
+  nora: { stars: 4, intro: "拿着注射器的远程冰属性辅助。武器系统在温和和残忍两种状态之间随机切换，同一个技能在两种状态下效果不同。针尖留在敌人身上会形成「刺入」，配合冷气注射打出额外的冰伤。状态不由自己决定，要临场应变。" },
+  kolt: { stars: 2, intro: "爱出风头的改装狂。电钻（电）和酸液炮（酸）两种刀头可以随时更换，换刀头时顺手打一下同区敌人。他打过的敌人都会被嘲讽来打他，满血时受到的伤害降低。思路简单：抢仇恨、换刀头打克制。" },
+  helu: { stars: 5, intro: "战场分析师。用聚焦锁定敌人的血量层，按照正确的步骤攻击就能直接抹掉整层血量，再附加 2 击破。精英和首领需要走更多步，用符合当前天气的属性攻击可以推进步数。还能扫描环境、预测敌人的下一步行动。需要整队配合她的节奏，上限极高。" },
+  ras: { stars: 5, intro: "一颗行走的炸弹。体内能量每回合都在累积，必须用技能把它引流成光能，否则超过 100% 就会进入不稳态：所有攻击的攻击次数翻倍，但再受伤就会倒地甚至死亡。场上的高能爆炸能帮他回收光能。他是在悬崖边跳舞的高风险输出。" },
+  longge: { stars: 4, intro: "拄着枪管手杖的典当行老板。手杖近战，解开保险后可以改用霰弹枪远程射击。6 发红蓝胶囊弹顺序随机：红弹火攻，蓝弹冰攻，也都能拿来治疗。靠「窥探」提前看到后面子弹的颜色，再决定这一发用来打人还是救人。另外他会吐酸，但怕能量属性。" }
+};
+
+/** 角色图鉴条目：按角色卡（Lv1）生成完整资料（SkillText.heroSheet），加上介绍和难度 */
+function codexHeroEntries() {
+  if (typeof livePartyCards !== "function") return [];
+  const ST = (typeof window !== "undefined" && window.SkillText) || (typeof SkillText !== "undefined" ? SkillText : null);
+  const cards = livePartyCards();
+  return cards.filter(c => c.attrs && HERO_CODEX[c.kit]).map(card => {
+    const u = JSON.parse(JSON.stringify(card));
+    let sheet = null;
+    try { sheet = ST ? ST.heroSheet(u, []) : null; } catch (e) { sheet = null; }
+    const prof = typeof heroProfile === "function" ? heroProfile(card.kit) : null;
+    // 职责技能：主 / 副职责各自的 1–4 号技能（开局有主职责 1 号，之后 5 / 10 / 15 级按路线选）
+    const roleSkills = [];
+    const roles = card.roles || {};
+    [["主职责", roles.primary], ["副职责", roles.secondary]].forEach(([label, role], i) => {
+      if (!role || (i === 1 && role === roles.primary)) return;
+      for (let n = 1; n <= 4; n++) {
+        const def = typeof roleSkillDef === "function" ? roleSkillDef(role, n, u) : null;
+        if (!def) continue;
+        const text = (ST && ST.skillText(def.id)) || def.hint || "";
+        roleSkills.push({ id: def.id, name: def.name, role, label, n, cost: ST ? ST.skillCostText(def.id) : "", text });
+      }
+    });
+    return Object.assign({ roleSkills, id: card.kit, kit: card.kit, name: card.name, enName: card.enName || "",
+      race: prof ? prof.race : "", job: prof ? prof.job : "", profs: prof ? Object.assign({}, prof.profs) : {},
+      note: card.note || "", sheet }, HERO_CODEX[card.kit], {
+      group: HERO_CODEX[card.kit].stars <= 2 ? "easy" : HERO_CODEX[card.kit].stars === 3 ? "mid" : "hard",
+      groupName: "难度 " + HERO_CODEX[card.kit].stars + " 星",
+      // 搜索用：介绍、种族职业、被动和技能的名字与说明
+      lines: [HERO_CODEX[card.kit].intro, prof ? prof.race + " " + prof.job : ""].concat(sheet ? [].concat(
+        sheet.passives.map(x => x.name + " " + x.text + " " + (x.next || "")),
+        sheet.skills.now.concat(sheet.skills.later).map(x => x.name + " " + x.text),
+        sheet.weapons.map(w => w.name), roleSkills.map(x => x.name + " " + x.text)) : [])
+    });
+  });
+}
+/** 被动升级的解锁条件：武器等级（growth.js · PASSIVE_PLUS_LEVEL） */
+function codexPlusLevel(n) {
+  return typeof PASSIVE_PLUS_LEVEL !== "undefined" ? PASSIVE_PLUS_LEVEL[n] || null : null;
+}
