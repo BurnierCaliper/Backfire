@@ -141,6 +141,13 @@ function useRepairKit(actor, target, kit, notes) {
   notes.push(`${actor.name} 用维修工具包修 ${row.name}：耐久 ${before} → ${weaponDur(row.kit)}，用掉 ${used} 点维修量（还剩 ${repairPoints()} 点）。`);
   return notes;
 }
+/** 道具自己扣坚毅生命（强心 / 强化注射剂）：不会致死，坚毅最少留 1。返回实际扣掉的量 */
+function selfShpCost(u, n) {
+  const cur = Math.max(0, Number(u.shp) || 0);
+  const next = Math.max(Math.min(1, cur), cur - n);
+  u.shp = next;
+  return cur - next;
+}
 function useItemOn(actor, itemId, target, zone) {
   const notes = [];
   const spec = ITEM_CATALOG[itemId];
@@ -152,17 +159,18 @@ function useItemOn(actor, itemId, target, zone) {
     const t = target || actor;
     const n = itemId === "clinic" ? 2 : 1;
     const r = takeDice(n, 4, 6);
-    if (typeof healUnit === "function") healUnit(t, r.total);
-    notes.push(`${actor.name} 对 ${t.name} 使用${spec.name}，恢复 ${r.text}。`);
+    const got = typeof healUnit === "function" ? healUnit(t, r.total) : r.total;
+    notes.push(`${actor.name} 对 ${t.name} 使用${spec.name}，掷出 ${r.text}，实际恢复 ${Math.floor(got || 0)}` +
+      (t.dying ? "（濒死不能靠治疗恢复）" : t.upOnShp ? "（起身中，治疗不回坚毅生命）" : "") + "。");
   } else if (itemId === "stim") {
-    if (typeof healUnit === "function") healUnit(actor, 16);
-    actor.shp = Math.max(0, (Number(actor.shp) || 0) - 6);
-    notes.push(`${actor.name} 使用强心注射剂：+16 生命，坚毅 −6。`);
+    const got = typeof healUnit === "function" ? healUnit(actor, 16) : 16;
+    const lost = selfShpCost(actor, 6);
+    notes.push(`${actor.name} 使用强心注射剂：恢复 ${Math.floor(got || 0)} 生命，坚毅 −${lost}${lost < 6 ? "（自己扣坚毅的道具不会致死，至少留 1）" : ""}。`);
   } else if (itemId === "steroid") {
     actor.atk = (Number(actor.atk) || 0) + 3;
     actor.itemAtkBonus = (Number(actor.itemAtkBonus) || 0) + 3;
-    actor.shp = Math.max(0, (Number(actor.shp) || 0) - 6);
-    notes.push(`${actor.name} 使用强化注射剂：ATK +3 至战斗结束，坚毅 −6。`);
+    const lost = selfShpCost(actor, 6);
+    notes.push(`${actor.name} 使用强化注射剂：ATK +3 至战斗结束，坚毅 −${lost}${lost < 6 ? "（自己扣坚毅的道具不会致死，至少留 1）" : ""}。`);
   } else if (itemId === "bomb_e" || itemId === "bomb_a" || itemId === "shockbomb") {
     const z = zone != null ? Number(zone) : Number((target && target.zone) || actor.zone);
     const units = (typeof fieldUnits === "function" ? fieldUnits() : state.units).filter(u =>

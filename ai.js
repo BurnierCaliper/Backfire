@@ -116,6 +116,16 @@ const EnemyAI = (function () {
 
   const zdist = (a, b) => zoneDist(Number(a), Number(b), Number(state.zoneMode));
   function adjacentZones(z) { return zoneNeighbors(z); }
+  /** 朝目标区走一步：从相连的区里挑离目标最近的（方形 / 十字棋盘区号不一定挨着，以前写死 ±1 会走不动）。
+   *  不会自己走进深渊（飞行单位除外）；没有更近的区返回 null */
+  function stepToward(u, to) {
+    const from = Number(u.zone), goal = Number(to);
+    const here = zdist(from, goal);
+    const abyss = (z) => !u.flying && state.fields && state.fields[z] && state.fields[z].abyss;
+    const opts = adjacentZones(from).map(Number).filter(z => !abyss(z) && zdist(z, goal) < here);
+    if (!opts.length) return null;
+    return opts.sort((a, b) => zdist(a, goal) - zdist(b, goal) || a - b)[0];
+  }
   function preyInZone(list, z) {
     return list.filter(p => Number(p.zone) === Number(z));
   }
@@ -169,18 +179,17 @@ const EnemyAI = (function () {
       const king = findKit("outlaw_king", state.units);
       if (king && !king.dead) {
         const kz = Number(king.zone), from = Number(u.zone);
-        return kz === from ? null : (from < kz ? from + 1 : from - 1);
+        return kz === from ? null : stepToward(u, kz);
       }
     }
     if (spec.dist == null || u.noMove) return null;
     const d = zdist(u.zone, target.zone);
     if (d === spec.dist) return null;
     if (d > spec.dist) {                            // 太远 → 接近一格
-      const from = Number(u.zone), to = Number(target.zone);
-      return from < to ? from + 1 : from - 1;
+      return stepToward(u, target.zone);
     }
     // 太近 → 后撤。手册规定优先退到没有敌人的区，退不掉才留下打。
-    const open = adjacentZones(u.zone).filter(z => !preyInZone(prey, z).length);
+    const open = adjacentZones(u.zone).filter(z => !preyInZone(prey, z).length && (u.flying || !(state.fields && state.fields[z] && state.fields[z].abyss)));
     if (!open.length) return null;
     return open.sort((a, b) => zdist(b, target.zone) - zdist(a, target.zone))[0];
   }
@@ -316,8 +325,8 @@ const EnemyAI = (function () {
       if (boss && !boss.dead) {
         // 反水是近战：不在同区就先走过去
         if (Number(u.zone) !== Number(boss.zone)) {
-          const dest = Number(u.zone) + (Number(boss.zone) > Number(u.zone) ? 1 : -1);
-          return {
+          const dest = stepToward(u, boss.zone);
+          if (dest != null) return {
             thunk: () => { state.attackerId = u.id; doMove(u, dest); },
             meta: { actorId: u.id, skillName: `移动到 ${dest} 区` }
           };

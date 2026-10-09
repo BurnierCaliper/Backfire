@@ -227,7 +227,6 @@ function livePartyCards() {
       note: "人类汽修工 · 火/物理 · 直伤击破",
       attrs: { str: 7, con: 6, dex: 4, wil: 9, int: 5, sta: 7 },
       roles: { primary: "直伤", secondary: "击破" },
-      growth: { hp: 6, shp: 5 },
       xp: 0,
       attrPoints: 0
     },
@@ -274,7 +273,6 @@ function livePartyCards() {
       note: "犬类人电工 · 电/能量 · 护卫控场",
       attrs: { str: 3, con: 7, dex: 8, wil: 5, int: 7, sta: 8 },
       roles: { primary: "护卫", secondary: "控场" },
-      growth: { hp: 7, shp: 5 },
       xp: 0,
       attrPoints: 0
     },
@@ -322,7 +320,6 @@ function livePartyCards() {
       note: "猫类人档案员 · 冰/谐波 · 异常生存",
       attrs: { str: 3, con: 4, dex: 8, wil: 7, int: 9, sta: 6 },
       roles: { primary: "异常", secondary: "生存" },
-      growth: { hp: 5, shp: 6 },
       xp: 0,
       attrPoints: 0
     },
@@ -996,7 +993,7 @@ function roleSkillDef(role, n, unit) {
   if (role === "生存" && n === 1) return { id: "role_firstaid", name: "应急处理", hint: "行动点 · 距离1以内友方 1d4+2（半血取最大）" };
   if (role === "生存" && n === 2) return { id: "role_buffer", name: "缓冲", hint: "附赠 · 距离1以内友方 2d4+4 护盾 · 每场一次" };
   if (role === "生存" && n === 3) return { id: "role_dome", name: "防护罩", hint: "行动点 · 同区 atk+10 护盾罩 · 每场一次" };
-  if (role === "生存" && n === 4) return { id: "role_renew", name: "续命", hint: "行动点 · 恢复最大生命 50%，濒死则救回濒死前的状态并恢复 25% · 每场一次" };
+  if (role === "生存" && n === 4) return { id: "role_renew", name: "续命", hint: "行动点 · 任意距离一名友方恢复最大生命 50%，濒死则救回濒死前的状态并恢复 25% · 每场一次" };
   if (role === "环境手" && n === 1) return { id: "role_lock", name: "锁定", hint: "附赠 · 锁定一种天气或场地本回合不被修改" };
   if (role === "环境手" && n === 2) return { id: "role_shelter", name: "保释", hint: "附赠 · 一名友方本回合豁免天气场地" };
   if (role === "环境手" && n === 3) return { id: "role_harsh", name: "恶劣环境", hint: "附赠 · 一名单位本回合场地天气双倍 · 每场一次" };

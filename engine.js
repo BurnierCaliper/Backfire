@@ -83,7 +83,13 @@ function addTempLayer(unit, type, amt) {
 
 /** 不含临时部分的各层当前值（跨战斗存档用：临时层不存，叠加的临时部分截掉） */
 function persistentLayers(unit) {
-  return (unit.layers || []).filter(l => !l.temp).map(l => {
+  // 机甲模式：瑞比身上标了 mecha 的外层是明特的，记到明特名下；明特（合体中）读瑞比身上的那几层
+  let src = (unit.layers || []).filter(l => !l.mecha);
+  if (unit.kit === "mint" && unit.fused && typeof state !== "undefined") {
+    const ruby = (state.units || []).find(x => x.kit === "ruby" && x.resources && x.resources.mecha);
+    if (ruby) src = (ruby.layers || []).filter(l => l.mecha);
+  }
+  return src.filter(l => !l.temp).map(l => {
     const cap = Math.max(0, Number(l.max || 0) - Number(l.tempBonus || 0));
     return { type: l.type, current: Math.max(0, Math.min(cap, Number(l.current) || 0)) };
   });
@@ -344,6 +350,7 @@ const SKILL_TARGET_SIDE = {
   nora_aa: "any",           // 有刺入时打刺入目标，刺入的可能是队友
   kolt_mod: "anySelf",
   chuan_reclaim: "allySelf", // 回收护盾：任意一名友方（含自己）      // 「非法」改装：任意单位（含自己）施加过载
+  role_renew: "ally",       // 续命：任意距离一名友方（以前没登记，被推断成敌方）
   chuan_over: "anySelf"     // 电站超频：任意单位（敌人也行：主动让敌人过载），也可以对川川自己用
 };
 
@@ -1183,6 +1190,11 @@ function applyResultToUnit(target, result, attacker) {
     notes.push("背水一战：起身中不失去架势。");
   }
   if (target.raceTrait === "catFocus") spent = Math.min(spent, Math.max(0, 2 - (target.lostDefThisTurn || 0)));
+  // 坚挺：架势不会被打到 1 以下（不倒战意给的，本回合有效）
+  if (target.statuses && target.statuses.sturdy && (Number(target.def) || 0) >= 1 && spent > (Number(target.def) || 0) - 1) {
+    spent = Math.max(0, (Number(target.def) || 0) - 1);
+    notes.push(`${target.name} 坚挺：架势保留 1。`);
+  }
   target.lostDefThisTurn = (target.lostDefThisTurn || 0) + spent;
   const defBeforeHit = Math.max(0, Number(target.def) || 0);
   const wasStunned = !!target.stunned;
@@ -1226,15 +1238,7 @@ function applyResultToUnit(target, result, attacker) {
     notes.push(`猛击反震：攻击者架势 −${result.selfBreak}`);
     if (attacker.def <= 0) attacker.stunned = true;
   }
-  if (target.self === "burn" && result.element === "fire" && result.total > 0 && attacker === target) {
-    /* self */
-  }
-  if (attacker && attacker.self === "burn" && result.element === "fire") {
-    const st = Math.max(1, Number(attacker.selfBurnStacks) || 1);
-    const heal = (result.total || 0) * 0.2 * st;
-    healUnit(attacker, heal, { selfBurn: true });
-    notes.push(`自焚×${st} 吸血 ${round2(heal)}`);
-  }
+  // 自焚吸血只在 app.js · applyCombat 里结算一次（以前这里也治一次，吸血翻倍）
   return notes;
 }
 
@@ -1246,12 +1250,15 @@ function healUnit(unit, amount, opt) {
   // 事故幸存+：拉斯缪尔不稳态下受到的治疗 ×3
   if (unit.kit === "ras" && unit.resources && unit.resources.unstable && typeof passivePlus === "function" && passivePlus(unit, 2)) raw *= 3;
   opt = opt || {};
+  // 起身中（靠坚毅生命战斗）：普通治疗不回坚毅生命，只有自焚吸血回（这场战斗里临时有效，见 ledgerCapture）
+  if (unit.upOnShp && !opt.selfBurn) return 0;
   if (unit.upOnShp) {
     const cap = Number(unit.shpMax) || 0;
     const before = Number(unit.shp) || 0;
     const give = cap > 0 ? Math.min(raw, Math.max(0, cap - before)) : raw;
     unit.shp = before + give;
-    if (opt.selfBurn) unit.shpBurnHeal = (Number(unit.shpBurnHeal) || 0) + give;
+    // 自焚吸来的坚毅生命只在这场战斗里有用：记下吸血前真正的坚毅，战后存档时不超过它
+    if (opt.selfBurn && give > 0 && unit.shpBurnBase == null) unit.shpBurnBase = before;
     if (give > 0 && typeof pulseResonanceHeal === "function") pulseResonanceHeal(unit, give);
     return give;
   }

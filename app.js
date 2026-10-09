@@ -658,6 +658,12 @@ function applyAbyssFall(unit, prevZone, notes) {
   if (!unit || unit.flying || unit.dead || unit.hidden) return false;
   const f = state.fields[unit.zone] || {};
   if (!f.abyss) return false;
+  // 配置物（爆炸桶、电池……）没有血量层：掉进深渊直接消失，不引爆（以前读不存在的血量层抛异常，结算中断）
+  if (!Array.isArray(unit.layers) || (state.props || []).includes(unit)) {
+    state.props = (state.props || []).filter(x => x !== unit);
+    if (notes) notes.push(`${unit.name || "配置物"} 掉进深渊，消失了。`);
+    return true;
+  }
   const loss = Math.floor(totalMaxHp(unit) * 0.1);
   applyTrueDamage(unit.layers, loss);
   if ((loss || 0) > 0) spawnFloater(unit, loss, "physical");
@@ -1340,6 +1346,24 @@ function applyPassivePlusAtStart() {
   }
   if (notes.length) appendLog(notes.join("\n"));
 }
+/** 开战时站在深渊里的地面单位（主持人把整区设成深渊、布阵落在里面）挪到最近的非深渊区，不算坠落。
+ *  以前留在深渊里：玩家走不出去，敌人每回合走进去再摔回来，打到超时 */
+function liftOutOfAbyss() {
+  const abyss = (z) => !!(state.fields[z] && state.fields[z].abyss);
+  // 棋盘上真有的区（字段表里可能多出没用到的 3 区）
+  const zones = [...new Set((typeof boardLinks === "function" ? boardLinks() : []).flat().map(Number))];
+  const safe = zones.filter(z => !abyss(z));
+  if (!safe.length) return;
+  const moved = [];
+  (state.units || []).concat(state.props || []).forEach(u => {
+    if (!u || u.flying || u.hidden || u.dead || !abyss(Number(u.zone))) return;
+    const z = safe.slice().sort((a, b) => zoneDist(Number(u.zone), a, state.zoneMode) - zoneDist(Number(u.zone), b, state.zoneMode) || a - b)[0];
+    u.zone = z;
+    moved.push(`${u.name} → ${z} 区`);
+  });
+  if (moved.length) appendLog(`深渊里站不了人，开战时挪到旁边：${moved.join("，")}。`);
+}
+
 function startCombat() {
   if (state.combatStarted) return false;
   state.combatStarted = true;
@@ -1357,6 +1381,7 @@ function startCombat() {
   if (prePage && prePage.lines.length) prePage.turn = 0;
   state.turnNo = 1;
   markInnateEnvironment();
+  liftOutOfAbyss();
   applyPassivePlusAtStart();
   beginRound([]);
   startPlayerPhase();
@@ -1399,6 +1424,12 @@ function refreshEnemyEconomy(u, notes) {
       } else ap -= 1;
     }
     if (!u.flying && w > 0) bonus += 1;
+  }
+  // 不稳：敌人一样失去附赠动作，触发一次后消失
+  if (u.statuses && u.statuses.unstable) {
+    bonus = 0;
+    u.statuses.unstable = false;
+    if (notes) notes.push(`${u.name} 不稳：这回合失去附赠动作。`);
   }
   u.ap = Math.max(0, ap);
   u.apMax = u.ap;
@@ -1517,6 +1548,8 @@ function beginRound(notes) {
   tickRuinGround(notes);
   state.units.forEach(u => {
     u.lostDefThisTurn = 0;
+    // 收回的武器人（hidden）、合体中的、已经死掉的不在场上：不吃场地、自我效果、沙尘回复，也不算进能量场
+    if (offField(u)) return;
     const weather = currentWeatherFor(u);
     const f = state.fields[u.zone] || emptyField();
     if (f.energy) tickEnergyFieldFor(u, f, notes);
@@ -1575,6 +1608,11 @@ function beginRound(notes) {
   // 扭矩酸液炮蓄力：「下回合开始」爆发——和场地效果同一个时间段，在场地效果之后
   releaseAcidCharges(notes);
   appendLog(notes.join("\n"));
+}
+
+/** 不在场上的单位：收回的武器人、合体中的、已经死掉 / 移除的。回合开始 / 结束的结算都跳过它们 */
+function offField(u) {
+  return !u || !!(u.hidden || u.fused || u.dead || u._removed);
 }
 
 function releaseAcidCharges(notes) {
@@ -1666,8 +1704,8 @@ function startPlayerPhase() {
     if (u.resources && u.resources.gambitArmed) {
       u.resources.gambitArmed = false;
       u.resources.gambitStrike = true;
-      u.resources.gambitWound = true;
-      notes.push(`${u.name} 破釜沉舟生效：本回合攻击双倍，直到下次行动前受伤双倍。`);
+      u.resources.gambitWound = false;   // 受伤翻倍到这里（自己下一次行动前）为止
+      notes.push(`${u.name} 破釜沉舟：本回合攻击双倍；受伤翻倍结束。`);
     }
     if (u.kit === "ras" && u.resources && !u.stunned && (typeof passiveOn !== "function" || passiveOn(u))) {
       addRasEnergy(20, "玩家回合开始");
@@ -1738,6 +1776,7 @@ function endEnemyTurn() {
 function turnEnd() {
   snapshot();
   const notes = ["—— 回合结束 ——"];
+  releaseTurnLocks(notes);
   // 剑术+：这一回合切换刀势得到的附赠动作没用掉的，留到下回合（再下回合就过期）
   state.units.forEach(u => {
     const g = u.kit === "hiaki" && u.resources && u.resources.stanceGrant;
@@ -1757,6 +1796,7 @@ function turnEnd() {
     }
   }
   state.units.forEach(u => {
+    if (offField(u)) return;   // 收回的武器人 / 死掉的单位：灼烧不叠层、不掉血
     const weather = currentWeatherFor(u);
     if (typeof selfImmunities === "function") selfImmunities(u, notes);
     if (typeof syncShockwave === "function") syncShockwave(u, notes);
@@ -1801,6 +1841,14 @@ function turnEnd() {
       dealBreak(u, br, "ice", notes, "冻伤");
     }
     // 过载：护盾在下回合开始时清零（effects.js · overloadRoundStart）
+    if (u.statuses && u.statuses.sturdy) {
+      u.statuses.sturdy = false;
+      notes.push(`${u.name} 坚挺结束`);
+    }
+    if (u.statuses && u.statuses.weakFear) {
+      u.statuses.weakFear = false;
+      if (u.statuses.weak) { u.statuses.weak = false; notes.push(`${u.name} 恐惧怒吼的虚弱结束`); }
+    }
     if (u.statuses && u.statuses.inspire && !u.statuses.inspireStay) {
       u.statuses.inspire = false;
       notes.push(`${u.name} 振奋结束`);
@@ -2008,6 +2056,7 @@ function pulseResonanceStatus(source, key) {
     o._resoBusy = true;
     o.statuses = o.statuses || {};
     if (key === "burn") o.statuses.burn = (Number(o.statuses.burn) || 0) + 1;
+    else if (key === "unstable" && source.statuses.unstable) { const n = []; applyUnstable(o, n); n.forEach(t => appendLog(t)); }
     else if (source.statuses[key] != null) o.statuses[key] = source.statuses[key];
     if (key === "shockwave" && typeof syncShockwave === "function") syncShockwave(o, null);
     if (source.instant && source.instant[key] != null) {
@@ -3424,7 +3473,8 @@ function doMoveInner(unit, dest, moveOpt) {
   }
   const fromF = state.fields[from] || emptyField();
   const toF = state.fields[dest] || emptyField();
-  if (fromF.abyss && !unit.flying) {
+  // 深渊：地面单位不能主动走进去（被推进去才会坠落）；万一站在里面，可以走出来
+  if (toF.abyss && !unit.flying && !moveOpt.forced) {
     paintSkillLog("深渊不能站人。飞行单位才能过。");
     return;
   }
@@ -3579,7 +3629,9 @@ function applyCombat(target, result, attacker) {
     target.resources.reflectReady = result.total;
     target.resources.reflect = false;
   }
-  const yuito = state.units.find(u => u.kit === "yuito" && u.resources && u.resources.bondId === target.id);
+  // 牵挂：结人还能战斗时才代扛（死了 / 倒地没起身 / 不在场的不扛，以前照扛，被牵挂的人永远不失衡）
+  const yuito = state.units.find(u => u.kit === "yuito" && u.resources && u.resources.bondId === target.id &&
+    !u.dead && !u.hidden && !u.fused && !(u.dying && !u.upOnShp));
   if (yuito && result.broke && result.breakDealt > 0) {
     const taken = result.breakDealt;
     result = clone(result);
@@ -4109,7 +4161,11 @@ function refreshEconomy(u) {
     bonus = 0;
     u.loseBonusNext = false;
   }
-  if (u.self === "unstable") bonus = 0;
+  // 不稳：失去这回合的附赠动作，触发一次后消失（以前误写成 u.self === "unstable"，从来没生效）
+  if (u.statuses && u.statuses.unstable) {
+    bonus = 0;
+    u.statuses.unstable = false;
+  }
   const iso = state.fields[u.zone] && state.fields[u.zone].isolate;
   if (!iso && state.weather === "sand") {
     const w = sandWind(u.zone, state.zoneMode, state.sandDir);
@@ -4267,9 +4323,10 @@ function standUp(u) {
   u.dying = false;
   u.upOnShp = true;
   u.dead = false;
-  if (u.stunned) {
+  // 倒地时晕眩已经被清掉（clearStunOnDown），所以也要看架势是不是 0：倒地前失衡的人起身也有 1 架势
+  if (u.stunned || (Number(u.def) || 0) <= 0) {
     u.stunned = false;
-    if (typeof canRestorePosture !== "function" || canRestorePosture(u)) u.def = 1;
+    if (typeof canRestorePosture !== "function" || canRestorePosture(u)) u.def = Math.max(1, Number(u.def) || 0);
     appendLog(`${u.name} 起身：解除晕眩，架势变为 1。之后受伤改打坚毅生命。`);
   } else {
     appendLog(`${u.name} 起身继续战斗。之后受伤改打坚毅生命。`);
@@ -5542,6 +5599,7 @@ function resetBattleFlags(u) {
   u.highApplyTurn = null;
   u.highFrom = null;
   u._imbalanceLock = false;
+  u.shpBurnBase = null;
   u.statuses = {
     burn: 0, shock: false, corr: false, frostbite: false, shockwave: false,
     high: false, reso: false, unstable: false, weak: false, inspire: false,
@@ -5574,7 +5632,7 @@ function resetBattleFlags(u) {
   if (u.kit === "ruby" && r.nano == null) r.nano = 40;
   if (u.kit === "kolt") { r.bit = r.bit || "drill"; r.rotStore = {}; }
   if (u.kit === "ras") { r.energyPct = 0; r.light = 0; r.unstable = false; }
-  if (u.kit === "helu") { r.scanned = false; r.lockLeft = 1; }
+  if (u.kit === "helu") { r.scanned = false; r.lockLeft = roleLockCap(u); }
   if (u.kit === "torque") r.acidCharge = null;
   if (u.kit === "longge") { r.trigger = false; r.ammo = longgeAmmoFresh(); r.known = 0; r.spitUsed = false; r.assistMode = null; }
   if (typeof canSpit === "function" && canSpit(u.kit)) r.spitElement = spitElementOf(u.kit);   // 吐酸的属性（长休时改，记在队伍档案）
@@ -5585,6 +5643,26 @@ function resetBattleFlags(u) {
   (u.layers || []).forEach(l => { l.current = l.max; });
   u.def = u.defMax;
   if (u.kit === "hiaki" && typeof refreshHiakiAtk === "function") refreshHiakiAtk(u);
+}
+
+/** 锁定每场能用几次：1 次，5 级 2 次，10 级 3 次 */
+function roleLockCap(a) {
+  const lv = Number(a && a.level) || 1;
+  return lv >= 10 ? 3 : lv >= 5 ? 2 : 1;
+}
+/** 回合结束：职责「锁定」只锁这一回合，到点解开（主持人 / 全队集结的锁不动） */
+function releaseTurnLocks(notes) {
+  if (state.weatherLockTurn) {
+    state.weatherLockTurn = false;
+    if (state.weatherLock) { state.weatherLock = null; if (notes) notes.push("天气锁定结束。"); }
+  }
+  Object.keys(state.fields || {}).forEach(z => {
+    const f = state.fields[z];
+    if (f && f.fieldLockTurn) {
+      f.fieldLockTurn = false;
+      if (f.fieldLock) { f.fieldLock = null; if (notes) notes.push(`${z} 区场地锁定结束。`); }
+    }
+  });
 }
 
 function roleOnce(a, key, limit) {
@@ -6054,7 +6132,10 @@ function dealTo(attacker, target, opt) {
     appendLog(msg);
     return { res: { ok: false, total: 0, breakDealt: 0, log: [msg], perHit: [] }, extra: [msg] };
   }
-  if (attacker && attacker.isPlayer && target && !target.isPlayer && opt.flags.action && !opt.flags.assist && !opt.flags.aoe && opt.flags.block !== "assistOk" && !opt.flags.blockResolved) {
+  // 协助攻击无法被格挡：技能本身带 assist 标记的，以及「正在打协助攻击的人」打出的每一下（finishAssist 设的 state._assistBy；
+  // 敌人大多拿普通攻击当协助，以前没有标记，会进我方协助格挡队列）
+  const assisting = !!opt.flags.assist || !!(attacker && state._assistBy && state._assistBy === attacker.id);
+  if (attacker && attacker.isPlayer && target && !target.isPlayer && opt.flags.action && !assisting && !opt.flags.aoe && opt.flags.block !== "assistOk" && !opt.flags.blockResolved) {
     const auto = tryOxAutoBlock(attacker, target);
     if (auto && auto.ok) {
       opt.flags.block = "assistOk";
@@ -6087,7 +6168,7 @@ function dealTo(attacker, target, opt) {
     appendLog(msg);
     return { res: { ok: false, total: 0, breakDealt: 0, log: [msg], perHit: [] }, extra: [msg] };
   }
-  if (attacker && !attacker.isPlayer && target && target.isPlayer && opt.flags.action && !opt.flags.assist && !opt.flags.aoe && opt.flags.block !== "assistOk" && !opt.flags.blockResolved) {
+  if (attacker && !attacker.isPlayer && target && target.isPlayer && opt.flags.action && !assisting && !opt.flags.aoe && opt.flags.block !== "assistOk" && !opt.flags.blockResolved) {
     const helpers = eligibleBlockers(target);
     if (helpers.length) {
       appendLog(`→ ${target.name}：等待协助格挡（同区可以格挡的：${helpers.map(h => h.name + " " + finalBlockChance(h, attacker, target) + "%").join("、")}）`);
@@ -6491,6 +6572,17 @@ function setBond(yuito, ally) {
   yuito.resources.bondName = ally.name;
 }
 
+/** 武器人沿用之前的血量：按「同类型的第几层」对应，跳过临时层。
+ *  以前按下标对应，前面插过护盾层（电站超频 / 缓冲）或护盾层被回收删掉后就对错层，收回再唤出装甲直接回满 */
+function inheritLayers(u, src) {
+  const pool = {};
+  (src || []).filter(l => l && !l.temp).forEach(l => { (pool[l.type] = pool[l.type] || []).push(l); });
+  (u.layers || []).forEach(l => {
+    const sv = (pool[l.type] || []).shift();
+    if (sv) l.current = Math.max(0, Math.min(Number(l.max) || 0, Number(sv.current) || 0));
+  });
+}
+
 function spawnWeapon(owner, kit) {
   const card = livePartyCards().find(c => c.kit === kit);
   if (!card) return null;
@@ -6507,18 +6599,12 @@ function spawnWeapon(owner, kit) {
   if (typeof RUN !== "undefined" && RUN.active && RUN.carry && RUN.carry[kit]) {
     const c = RUN.carry[kit];
     if (c.durability != null && u.resources) u.resources.durability = c.durability;
-    (u.layers || []).forEach((l, i) => {
-      const sv = (c.layers || [])[i];
-      if (sv && sv.type === l.type) l.current = Math.max(0, Math.min(Number(l.max) || 0, sv.current));
-    });
+    inheritLayers(u, c.layers);
   }
   // 队伍档案：本场第一次唤出时，带着上一场留下的伤势
   const carried = !prev && typeof weaponCarryLayers === "function" ? weaponCarryLayers(kit) : null;
   if (carried) {
-    (u.layers || []).forEach((l, i) => {
-      const sv = carried[i];
-      if (sv && sv.type === l.type) l.current = Math.max(0, Math.min(Number(l.max) || 0, Number(sv.current) || 0));
-    });
+    inheritLayers(u, carried);
     if (totalCurHp(u) <= 0) return null;   // 上一场倒下、还没长休：唤不出来
   }
   // 维塔斯：双相与刺入属于武器系统，分出来时从诺拉那边同步过来
@@ -6529,10 +6615,7 @@ function spawnWeapon(owner, kit) {
     u.resources.piercedIds = pierceIdsOf(owner);
   }
   if (prev) {
-    (u.layers || []).forEach((l, i) => {
-      const old = (prev.layers || [])[i];
-      if (old && old.type === l.type) l.current = Math.max(0, Math.min(Number(l.max) || 0, Number(old.current) || 0));
-    });
+    inheritLayers(u, prev.layers);
     state.units = state.units.filter(x => x !== prev);
   }
   u.weaponHeld = false;
@@ -6648,7 +6731,10 @@ function enterMecha() {
     defMax: ruby.defMax,
     flying: ruby.flying
   };
-  ruby.layers = clone(m.layers).concat(clone(ruby.layers));
+  // 明特的装甲拼在外层：去掉它自己的「内层」标记、标成 mecha（以前带着 inner 标记，装甲打空就把瑞比判成濒死）
+  const outer = clone(m.layers).map(l => { delete l.inner; l.mecha = true; return l; });
+  ruby.layers = outer.concat(clone(ruby.layers));
+  if (typeof markInnerLayer === "function") { ruby.layers.forEach(l => { if (l.mecha) delete l.inner; }); if (!ruby.layers.some(l => l.inner && !l.mecha)) { const own = ruby.layers.filter(l => !l.mecha); if (own.length) own[own.length - 1].inner = true; } }
   ruby.def = m.def;
   ruby.defMax = m.defMax;
   ruby.flying = true;
@@ -6669,8 +6755,10 @@ function exitMecha(ruby, reason) {
   const mint = state.units.find(u => u.kit === "mint");
   const pre = ruby.resources.preMecha;
   const layersNow = clone(ruby.layers);
-  const armor = layersNow.filter(l => l.type === "armor");
-  const rest = layersNow.filter(l => l.type !== "armor");
+  // 按来源分回去：标了 mecha 的是明特的（老存档没有标记的按装甲算）
+  const tagged = layersNow.some(l => l.mecha);
+  const armor = layersNow.filter(l => tagged ? l.mecha : l.type === "armor").map(l => { delete l.mecha; return l; });
+  const rest = layersNow.filter(l => tagged ? !l.mecha : l.type !== "armor");
   if (pre) {
     ruby.layers = rest.length ? rest : pre.layers;
     ruby.flying = false;
@@ -6685,7 +6773,7 @@ function exitMecha(ruby, reason) {
     mint.bonus = ruby.bonus || 0;
     mint.bonusMax = ruby.bonusMax || mint.bonusMax;
     notes.push(`机甲解除后行动资源同步：瑞比/明特 行动点 ${mint.ap}，附赠 ${mint.bonus}`);
-    if (armor.length) mint.layers = armor;
+    if (armor.length) { mint.layers = armor; armor.forEach(l => delete l.inner); armor[armor.length - 1].inner = true; }
     // 银翼+：被击落时瑞比不受坠落伤害、也不失衡，只是退出机甲模式
     const safe = /击落/.test(String(reason || "")) && typeof passivePlus === "function" && passivePlus(ruby, 2);
     const fall = safe ? 0 : Math.floor(totalMaxHp(ruby) * 0.2);
@@ -7888,6 +7976,12 @@ function dealBreak(unit, amount, element, notes, reason) {
   }
   const before = Number(sink.def) || 0;
   const wasStunnedSink = !!sink.stunned;
+  // 坚挺：任何来源的击破都不会把架势打到 1 以下
+  if (sink.statuses && sink.statuses.sturdy && before >= 1 && amount > before - 1) {
+    amount = before - 1;
+    notes.push(`${sink.name} 坚挺：架势保留 1。`);
+    if (amount <= 0) return;
+  }
   sink.def = Math.max(0, before - amount);
   popBreak(sink, amount, element);
   const tag = sink.id !== unit.id ? `${unit.name}→${sink.name}` : sink.name;
@@ -7913,8 +8007,26 @@ function dealBreak(unit, amount, element, notes, reason) {
   if (typeof onBreakTaken === "function") onBreakTaken(sink, amount, element, notes);
 }
 
+/** 挂上不稳：已经不稳的再挂一个 → 两个不稳转成晕眩（失衡）。返回 true = 现在是不稳状态 */
+function applyUnstable(u, notes) {
+  if (!u) return false;
+  u.statuses = u.statuses || {};
+  if (u.statuses.unstable) {
+    u.statuses.unstable = false;
+    if (!u.stunned && !u.noPosture) {
+      u.stunned = true;
+      if (notes) { notes.push(`${u.name} 叠加两个不稳：转为晕眩。`); notes.push(imbalanceLine(u)); }
+      queueAssistAttack(null, u);
+    }
+    return false;
+  }
+  u.statuses.unstable = true;
+  return true;
+}
+
 function maybeUnstableTrip(u, notes) {
   if (!u || u.stunned || u.dead || u.noPosture) return;
+  if (u.statuses && u.statuses.sturdy) return;   // 坚挺：剩 1 架势也站得住
   if (!u.statuses || !u.statuses.unstable) return;
   if ((Number(u.def) || 0) > 1) return;
   u.stunned = true;
@@ -8635,6 +8747,7 @@ function touSonicPicks(a, t) {
 
 /** 扣行动点之前先查目标：选不到合法目标的技能不白白花掉行动点。返回原因，null 表示可以 */
 function skillTargetError(a, id, t) {
+  if (id === "role_renew" && t && !t.isPlayer) return "续命只能对友方使用";
   if (id === "solo_support") {
     const fl = state.skillFlow;
     const kit = fl && fl.picks ? fl.picks.partner : null;
@@ -9789,7 +9902,9 @@ function runSkillInner(id, optRun) {
       if (!roleOnce(a, "gambit", 1)) lines.push("破釜沉舟本场已用完。");
       else {
         a.resources.gambitArmed = true;
-        lines.push("破釜沉舟：下个自己的回合攻击双倍，直到自己下次行动前受伤也双倍。");
+        // 受伤翻倍从现在开始，到自己下一个回合开始（下一次行动前）结束；以前是下回合起整场翻倍
+        a.resources.gambitWound = true;
+        lines.push("破釜沉舟：下个自己的回合攻击双倍；从现在到自己下次行动前，受到的伤害翻倍。");
       }
     } else if (id === "role_activate") {
       const fl = state.skillFlow;
@@ -9866,6 +9981,8 @@ function runSkillInner(id, optRun) {
       else {
         fieldUnits().filter(u => !u.isPlayer && zoneDist(a.zone, u.zone, state.zoneMode) <= 1).forEach(u => {
           u.statuses = u.statuses || {};
+          // 只到这一回合结束（敌人回合打完的 turnEnd 里清掉），不是整场
+          if (!u.statuses.weak) u.statuses.weakFear = true;
           u.statuses.weak = true;
         });
         lines.push("恐惧怒吼：距离 1 内敌人本回合虚弱。");
@@ -9916,14 +10033,18 @@ function runSkillInner(id, optRun) {
         lines.push(`续命：${t.name} 恢复 ${heal}（最大生命 50%）。`);
       }
     } else if (id === "role_lock") {
-      if (state.weather && state.weather !== "none") {
-        state.weatherLock = a.name + "锁定";
-        lines.push(`锁定天气：${state.weather} 本回合不会被修改。`);
+      // 每场一次（5 级两次，10 级三次）；只锁到这一回合结束（turnEnd 里解开）
+      const cap = roleLockCap(a);
+      if (!roleOnce(a, "lock", cap)) lines.push(`锁定本场已用完（每场 ${cap} 次）。`);
+      else if (state.weather && state.weather !== "none") {
+        if (!state.weatherLock) { state.weatherLock = a.name + "锁定"; state.weatherLockTurn = true; }
+        lines.push(`锁定天气：${weatherName(state.weather)} 本回合不会被修改。`);
       } else {
         const f = state.fields[a.zone];
-        if (f) f.fieldLock = a.name + "锁定";
+        if (f && !f.fieldLock) { f.fieldLock = a.name + "锁定"; f.fieldLockTurn = true; }
         lines.push(`锁定 ${a.zone} 区场地本回合不会被修改。`);
       }
+      if (a.kit === "helu") a.resources.lockLeft = Math.max(0, cap - ((a.resources.roleOnce || {}).lock || 0));
     } else if (id === "role_shelter") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       t.isolate = true;
@@ -9951,8 +10072,7 @@ function runSkillInner(id, optRun) {
       else {
         visibleEnemies(a.zone).forEach(u => {
           u.noMove = true;
-          u.statuses = u.statuses || {};
-          u.statuses.unstable = true;
+          if (!applyUnstable(u, lines)) return;
           convertUnstableInHv(u, lines);
           maybeUnstableTrip(u, lines);
         });
@@ -10158,6 +10278,12 @@ function runSkillInner(id, optRun) {
         outer.current -= take;
         addTempLayer(ally, outer.type, take);
         lines.push(`拆卸转移 ${take} 点${LAYER[outer.type] || outer.type}给 ${ally.name}。`);
+        // 抽空了最内层：敌人照常被击杀（以前直接改血量不走击杀结算，0 血还能继续行动）
+        if (!tgt.isPlayer && !tgt.dead && isInnerDepleted(tgt)) {
+          tgt._lastHitBy = a.id;
+          settleEnemyKill(tgt, lines);
+          lines.push(`${tgt.name} 被拆卸抽空，倒下。`);
+        }
       }
     } else if (id === "torque_return") {
       lines.push(...returnWeapon(a));

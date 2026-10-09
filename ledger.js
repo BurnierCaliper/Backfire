@@ -45,20 +45,26 @@ const LONG_REST_COST = {
   bovine: { water: 1250, food: 2 },
   beast:  { water: 1250, food: 3 }
 };
+/** 种族文字：先看角色资料（party.js · HERO_PROFILES 的「犬类人-犬」「兽人-狼」），没有再看卡片说明 */
+function heroRaceText(u) {
+  const p = u && typeof heroProfile === "function" ? heroProfile(u.kit) : null;
+  return String((p && p.race) || (u && u.note) || "");
+}
 function heroRace(u) {
-  const n = String((u && u.note) || "");
+  const n = heroRaceText(u);
+  // 兽人要先判：「兽人-狼」里的「狼」不能被当成犬类人
+  if (/兽人/.test(n)) return "beast";
   if (/鼠类人|兔/.test(n)) return "rodent";
   if (/猫类人|豹|虎/.test(n)) return "feline";
   if (/犬类人|狐|狼/.test(n)) return "canine";
   if (/牛类人|马|羊/.test(n)) return "bovine";
-  if (/兽人/.test(n)) return "beast";
   if (/红皮人/.test(n)) return "red";
   return "human";
 }
 function heroRestCost(u) { return LONG_REST_COST[heroRace(u)] || LONG_REST_COST.human; }
 
-/** 短休治疗加成（角色特长）：川川「活力源泉」+25% */
-const SHORT_REST_BONUS = { chuan: 0.25 };
+/** 短休治疗加成：犬类人-犬的种族特长「活力源泉」+25%（川川、灯）。以前按角色写死，只有川川有 */
+function shortRestBonus(u) { return /犬类人-犬/.test(heroRaceText(u)) ? 0.25 : 0; }
 /** 每天可短休次数：熊兽人 1 次，其余 2 次 */
 function shortRestCap(u) { return /熊/.test(String((u && u.note) || "")) ? 1 : 2; }
 
@@ -323,14 +329,16 @@ function weaponCarryLayers(kit) {
 /** 记下场上角色的状态 */
 function ledgerCapture() {
   // 武器人：唤出过的（包括收回后隐藏的）记下伤势；这场没唤出过的保留上次的记录
-  (state.units || []).filter(u => u.isPlayer && isWeaponUnit(u) && !u.escort && !u._removed && !u.fused).forEach(u => {
+  // 明特在机甲里（fused）也要记：它的伤势在瑞比身上标了 mecha 的那几层（engine.js · persistentLayers）
+  (state.units || []).filter(u => u.isPlayer && isWeaponUnit(u) && !u.escort && !u._removed && (!u.fused || u.kit === "mint")).forEach(u => {
     LEDGER.weapons = LEDGER.weapons || {};
     LEDGER.weapons[u.kit] = persistentLayers(u);
   });
   partyHeroes().forEach(h => {
     LEDGER.heroes[h.kit] = {
       layers: persistentLayers(h).map(l => l.current),
-      shp: Math.max(0, Number(h.shp) || 0),
+      // 自焚吸血回的坚毅是临时的：战后不超过吸血前的坚毅（先扣掉的那部分算在临时的里）
+      shp: Math.max(0, h.shpBurnBase != null ? Math.min(Number(h.shp) || 0, Number(h.shpBurnBase) || 0) : Number(h.shp) || 0),
       dying: !!h.dying,
       dead: !!h.dead,
       upOnShp: !!h.upOnShp
@@ -425,7 +433,7 @@ function ledgerShortRest(kits, notes) {
     if (shortRestLeft(h) <= 0) { notes.push(`${h.name} 今天的短休次数已用完。`); return; }
     const con = Number(h.attrs && h.attrs.con) || 0;
     let heal = (Number(h.level) || 1) * 2 + con;
-    if (SHORT_REST_BONUS[h.kit]) heal = Math.floor(heal * (1 + SHORT_REST_BONUS[h.kit]));
+    if (shortRestBonus(h)) heal = Math.floor(heal * (1 + shortRestBonus(h)));
     const before = totalHpOf(h);
     healHeroFlesh(h, heal);
     LEDGER.shortUsed[h.kit] = (Number(LEDGER.shortUsed[h.kit]) || 0) + 1;
