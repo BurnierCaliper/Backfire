@@ -264,7 +264,7 @@
       if (force || sideKeys.log !== logMarkup) { sideKeys.log = logMarkup; fillList(side.querySelector(".ol-side-log"), logMarkup); }
       const chatMarkup = chatListMarkup(chatRows());
       if (force || sideKeys.chat !== chatMarkup) { sideKeys.chat = chatMarkup; fillList(side.querySelector(".ol-side-chat"), chatMarkup); }
-      side.querySelector(".ol-side-form button").disabled = chatSending || paused();
+      side.querySelector(".ol-side-form button[type=submit]").disabled = chatSending || paused();
     }
     async function sendChatText(input, button) {
       const text = input.value.trim();
@@ -277,7 +277,7 @@
       } catch (error) { notice = error.message || "消息没有发出去"; render(); }
       finally { chatSending = false; if (button) button.disabled = paused(); }
     }
-    function sendSideChat() { sendChatText(side.querySelector("#ol-side-text"), side.querySelector(".ol-side-form button")); }
+    function sendSideChat() { sendChatText(side.querySelector("#ol-side-text"), side.querySelector(".ol-side-form button[type=submit]")); }
 
     /* 主持人这边：战斗记录栏加「战斗 / 小队」，探索记录栏加「探索 / 小队」 */
     const hostMounts = [];
@@ -295,7 +295,7 @@
           const m = { root, nav, box, tab: def, key: "", seen: null, unread: 0, remove() { nav.remove(); box.remove(); root.classList.remove("ol-chat-mode"); } };
           nav.addEventListener("click", e => { const b = e.target.closest("[data-host-tab]"); if (!b) return; m.tab = b.dataset.hostTab; paintHost(m, true); if (m.tab === "chat") box.querySelector("input").focus({ preventScroll: true }); });
           box.addEventListener("keydown", e => e.stopPropagation());
-          box.addEventListener("submit", e => { e.preventDefault(); sendChatText(box.querySelector("input"), box.querySelector("button")); });
+          box.addEventListener("submit", e => { e.preventDefault(); sendChatText(box.querySelector("input"), box.querySelector("button[type=submit]")); });
           hostMounts.push(m);
         }
       }

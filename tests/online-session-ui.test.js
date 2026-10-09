@@ -469,7 +469,7 @@ test("联机：玩家能看角色资料 / 武器 / 背包；小队聊天全程�
   assert.equal(await alice.evaluate(() => document.getElementById("online-side").dataset.tab), "chat");
   // 小队聊天：玩家发、所有人都看得到
   await alice.fill("#ol-side-text", "我们先去黑市");
-  await alice.click("#ol-side-form button");
+  await alice.click("#ol-side-form button[type=submit]");
   await host.waitForFunction(() => HotseatGame.getView().chat.some(m => m.text === "我们先去黑市"));
   await bob.waitForFunction(() => /我们先去黑市/.test(document.querySelector("#online-side .ol-side-chat").textContent));
   assert.equal(await alice.inputValue("#ol-side-text"), "", "发出去后清空输入框");
@@ -477,7 +477,7 @@ test("联机：玩家能看角色资料 / 武器 / 背包；小队聊天全程�
   await host.locator('.tr-log [data-host-tab="chat"]').click();
   assert.match(await host.locator(".tr-log .ol-host-chat").innerText(), /我们先去黑市/);
   await host.fill(".tr-log .ol-host-chat input", "好的路上小心");
-  await host.click(".tr-log .ol-host-chat button");
+  await host.click(".tr-log .ol-host-chat button[type=submit]");
   try { await host.waitForFunction(() => HotseatGame.getView().chat.some(m => m.text === "好的路上小心"), null, { timeout: 5000 }); }
   catch (e) { throw new Error("主持人消息没发出去：" + JSON.stringify(await host.evaluate(() => ({ notice: OnlineGame.getView().notice, input: document.querySelector(".tr-log .ol-host-chat input").value, chat: HotseatGame.getView().chat })))); }
   await alice.waitForFunction(() => /好的路上小心/.test(document.querySelector("#online-side .ol-side-chat").textContent));
@@ -485,7 +485,7 @@ test("联机：玩家能看角色资料 / 武器 / 背包；小队聊天全程�
   await bob.click("#ol-side-text");
   await bob.evaluate(() => { window.__inp = document.getElementById("ol-side-text"); window.__inp.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true })); window.__inp.value = "wo m"; });
   await alice.fill("#ol-side-text", "Bob 你看看背包");
-  await alice.click("#ol-side-form button");
+  await alice.click("#ol-side-form button[type=submit]");
   await bob.waitForFunction(() => /Bob 你看看背包/.test(document.querySelector("#online-side .ol-side-chat").textContent));
   assert.deepEqual(await bob.evaluate(() => ({ same: document.getElementById("ol-side-text") === window.__inp, value: window.__inp.value, focused: document.activeElement === window.__inp })), { same: true, value: "wo m", focused: true });
   // 房间面板里的私信框：拼字时整个面板不重画
@@ -535,7 +535,7 @@ test("联机：玩家能看角色资料 / 武器 / 背包；小队聊天全程�
   assert.match(await alice.locator("#online-side .ol-side-chat").innerText(), /战斗中也能说话/);
   await shot(alice, "6-player-battle-chat");
   await alice.fill("#ol-side-text", "收到");
-  await alice.click("#ol-side-form button");
+  await alice.click("#ol-side-form button[type=submit]");
   await host.waitForFunction(() => HotseatGame.getView().chat.some(m => m.text === "收到"));
   // 主持人战斗记录栏也有「战斗 / 小队」
   await host.locator('#g-log [data-host-tab="chat"]').click();
