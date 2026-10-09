@@ -221,7 +221,7 @@ test("候选离场和战斗结束关闭询问，重复回答不重复结算", ()
   assert.equal(s.snapshot().phase, "ended");
 });
 
-test("只有战前/探索可重分配；聊天限大厅与选序；快照不能改权威状态", () => {
+test("只有战前/探索可重分配；小队聊天全程开放；快照不能改权威状态", () => {
   const f = fixture(), s = f.s;
   s.setAssignments({ ruby: "b", hiaki: "a" }); assert.equal(s.ownerOf("ruby"), "b");
   assert.throws(() => s.setAssignments({ ruby: "unknown" }), /操作者/);
@@ -229,7 +229,7 @@ test("只有战前/探索可重分配；聊天限大厅与选序；快照不能�
   const view = s.snapshot(); view.roster[0].operatorId = "gm"; view.assignments.ruby = "gm";
   assert.equal(s.ownerOf("ruby"), "b");
   s.beginRound(1); s.chat("b", "可以"); s.forceStart("gm");
-  assert.throws(() => s.chat("a", "战斗中"), /只在大厅/);
+  s.chat("a", "战斗中"); assert.equal(s.snapshot().chat.at(-1).text, "战斗中", "作者要求：战斗中也能小队聊天");
   assert.throws(() => s.setAssignments({}), /战斗中/);
   s.endBattle(); s.setAssignments({}); s.reset(); assert.equal(s.snapshot().phase, "setup");
 });
@@ -249,4 +249,141 @@ test("LocalTransport同步先到先得，身份绑定连接，所有收件人获
   assert.throws(() => a.send({ callback() {} }), /JSON/);
   a.close(); assert.throws(() => a.send({ type: "cmd" }), /closed/);
   hub.close(); assert.throws(() => b.send({ type: "cmd" }), /closed/);
+});
+
+test("战斗中召唤武器人：紧挨着本人，并且立刻轮到武器人；武器人结束后回到还有行动的本人", () => {
+  const f = fixture({ units: [hero("ruby", "ruby"), hero("hiaki", "hiaki"), hero("xia", "xia")] }), s = f.s;
+  force(f);
+  const order = () => s.snapshot().slots.map(r => r && r.unitId);
+  const first = order();
+  // 轮到绯秋时让他先花点（锁定格子）
+  while (s.snapshot().currentUnitId !== "hiaki") s.finishUnit(s.snapshot().slots.find(r => r && !r.completed).operatorId);
+  s.markSpent([{ unitId: "hiaki", ap: 1 }]);
+  f.setUnits([...f.units, { ...hero("niu", "niu"), weaponOf: "hiaki" }]);
+  s.reconcile();
+  const after = order();
+  const i = after.indexOf("niu"), h = after.indexOf("hiaki");
+  assert.equal(i, h - 1, "武器人紧挨着本人（在本人前面一格，立刻行动）：" + after.join(","));
+  assert.equal(s.snapshot().currentUnitId, "niu", "立刻轮到武器人");
+  assert.equal(after.length, first.length + 1);
+  s.finishUnit("b", "niu");
+  assert.equal(s.snapshot().currentUnitId, "hiaki", "武器人结束后回到本人");
+});
+
+test("不是本人的回合时出现的武器人：排在本人后面一格", () => {
+  const f = fixture({ units: [hero("ruby", "ruby"), hero("hiaki", "hiaki"), hero("xia", "xia")] }), s = f.s;
+  force(f);
+  const before = s.snapshot().slots.map(r => r && r.unitId);
+  f.setUnits([...f.units, { ...hero("niu", "niu"), weaponOf: "hiaki" }]);
+  s.reconcile();
+  const after = s.snapshot().slots.map(r => r && r.unitId);
+  if (s.snapshot().currentUnitId !== "hiaki") assert.equal(after.indexOf("niu"), after.indexOf("hiaki") + 1, after.join(","));
+  assert.equal(after.length, before.length + 1);
+});
+
+test("小队聊天：战斗中也能发，最多保留 300 条，重建会话时带上旧记录", () => {
+  const f = fixture(), s = f.s;
+  force(f);
+  assert.equal(s.snapshot().phase, "acting");
+  s.chat("a", "先打左边那个");
+  assert.equal(s.snapshot().chat.at(-1).text, "先打左边那个");
+  for (let i = 0; i < 320; i++) s.chat("b", "刷屏" + i);
+  assert.equal(s.snapshot().chat.length, 300);
+  const kept = s.snapshot().chat;
+  const s2 = Hotseat.create({ operators: [{ id: "gm", name: "主持人" }, { id: "a", name: "甲" }], gmId: "gm", getUnits: () => f.units, chat: kept });
+  assert.equal(s2.snapshot().chat.length, 300);
+  s2.chat("a", "新的一条");
+  const ids = s2.snapshot().chat.map(r => r.id);
+  assert.equal(new Set(ids).size, ids.length, "新消息编号不和旧的重复");
+});
+
+test("掷骰（d100）：≤5 大成功，再按熟练的成功线分极难 / 困难 / 普通 / 简单，都不过是失败；暗骰只有主持人能用、玩家看不到", () => {
+  const L1 = { extreme: 12.5, hard: 25, normal: 50, easy: 100 }, L0 = { extreme: 0, hard: 0, normal: 0, easy: 50 };
+  const tier = (roll, lines) => Hotseat.rollTier(roll, lines).name;
+  assert.deepEqual([1, 5, 6, 12, 13, 25, 26, 50, 51, 100].map(r => tier(r, L1)),
+    ["大成功", "大成功", "极难成功", "极难成功", "困难成功", "困难成功", "普通成功", "普通成功", "简单成功", "简单成功"]);
+  assert.deepEqual([5, 30, 50, 51].map(r => tier(r, L0)), ["大成功", "简单成功", "简单成功", "失败"], "没有熟练只能过简单");
+  const adv = Hotseat.rollD100({ adv: true, lines: L1 }, (() => { const q = [0.7, 0.2]; let k = 0; return () => q[k++]; })());
+  assert.deepEqual([adv.dice, adv.roll, adv.tier.name], [[71, 21], 21, "困难成功"], "优势取低");
+  const dis = Hotseat.rollD100({ dis: true, lines: L1 }, (() => { const q = [0.7, 0.2]; let k = 0; return () => q[k++]; })());
+  assert.equal(dis.roll, 71, "劣势取高");
+  const f = fixture({ random: () => 0.03 }), s = f.s;
+  s.skillRoll("a", { unitId: "ruby", name: "瑞比", prof: "侦察", level: 1, lines: L1, note: "看门后" });
+  const row = s.snapshot().chat.at(-1);
+  assert.equal(row.text, "掷骰 · 瑞比「侦察」一级熟练：d100 4 → 大成功（看门后）");
+  assert.deepEqual(row.roll, { total: 4, tier: "crit" });
+  assert.throws(() => s.skillRoll("b", { unitId: "ruby", name: "瑞比", prof: "侦察", lines: L1 }), /只能替自己的角色/);
+  assert.throws(() => s.skillRoll("a", { unitId: "ruby", name: "瑞比", prof: "侦察", lines: L1 }, true), /只有主持人能暗骰/);
+  s.skillRoll("gm", { unitId: "hiaki", name: "绯秋", prof: "欺瞒", level: 1, lines: L1 }, true);
+  assert.equal(s.snapshot().chat.at(-1).secret, true);
+  const V = require("../online-view");
+  const view = V.projectView({ chat: s.snapshot().chat }, { recipientId: "a" });
+  assert.ok(!view.chat.some(m => /暗骰/.test(m.text)), "玩家看不到暗骰");
+  assert.deepEqual([view.chat.at(-1).roll, view.chat.at(-1).tier], [true, "crit"]);
+  s.chat("a", "/r 1d20");
+  assert.equal(s.snapshot().chat.at(-1).text, "/r 1d20", "文字指令不再掷骰，原样当聊天");
+});
+
+test("检定：主持人发起，玩家只能替自己的角色掷，结果写进小队频道；跨重建保留", () => {
+  const seq = [0.3, 0.9, 0.1]; let i = 0;
+  const f = fixture({ random: () => seq[i++ % seq.length] }), s = f.s;
+  assert.throws(() => s.openCheck("a", { prof: "侦察", targets: [{ unitId: "ruby" }] }), /只有主持人/);
+  s.openCheck("gm", { prof: "侦察", diff: "normal", diffName: "普通", note: "看看门后", targets: [
+    { unitId: "ruby", name: "瑞比", base: 0.5 }, { unitId: "hiaki", name: "绯秋", base: 0.5, adv: true }] });
+  const c = s.snapshot().table.checks[0];
+  assert.equal(c.status, "open");
+  assert.match(s.snapshot().chat.at(-1).text, /主持人发起普通「侦察」检定：瑞比、绯秋（看看门后）/);
+  assert.throws(() => s.rollCheck("a", c.id, "hiaki"), /只能替自己的角色/);
+  s.rollCheck("a", c.id, "ruby");
+  assert.equal(s.snapshot().table.checks[0].targets[0].result.ok, true, "0.3 < 0.5 成功");
+  assert.match(s.snapshot().chat.at(-1).text, /检定 · 瑞比「侦察」普通（成功率 50%）：d100 31 → 成功/);
+  assert.throws(() => s.rollCheck("a", c.id, "ruby"), /已经掷过/);
+  s.rollCheck("gm", c.id, "hiaki");   // 主持人代掷；优势两颗 0.9、0.1 → 第二颗成功
+  const t = s.snapshot().table.checks[0].targets[1];
+  assert.equal(t.result.ok, true);
+  assert.equal(t.result.rolls.length, 2);
+  assert.equal(s.snapshot().table.checks[0].status, "done");
+  const g = fixture({ table: s.snapshot().table });
+  assert.equal(g.s.snapshot().table.checks[0].targets[1].result.ok, true, "重建会话带上检定");
+  // 劣势、迎难直上、没资格
+  assert.equal(Hotseat.rollCheck({ base: 0.5, dis: true }, () => 0.3).ok, true);
+  assert.equal(Hotseat.rollCheck({ base: 0.5, dis: true }, (() => { const q = [0.3, 0.7]; let k = 0; return () => q[k++]; })()).ok, false);
+  const re = Hotseat.rollCheck({ base: 0.5, reroll: true }, (() => { const q = [0.9, 0.2]; let k = 0; return () => q[k++]; })());
+  assert.deepEqual([re.ok, re.rerolled], [true, true]);
+  assert.equal(Hotseat.rollCheck({ base: 0 }).ok, false);
+});
+
+test("属性点申请：只能给自己的角色、一次一条；主持人同意 / 不同意，玩家可以撤回", () => {
+  const f = fixture(), s = f.s;
+  assert.throws(() => s.requestAttr("b", "ruby", "str"), /只能给自己的角色/);
+  s.requestAttr("a", "ruby", "str", "瑞比");
+  assert.throws(() => s.requestAttr("a", "ruby", "dex"), /还在等主持人确认/);
+  const r = s.snapshot().table.attrs[0];
+  assert.deepEqual([r.unitName, r.attrs[0], r.status], ["瑞比", "str", "pending"]);
+  assert.throws(() => s.decideAttr("a", r.id, "approve"), /只有主持人/);
+  s.decideAttr("gm", r.id, "approve");
+  assert.equal(s.snapshot().table.attrs[0].status, "approved");
+  assert.throws(() => s.decideAttr("gm", r.id, "reject"), /已经处理过/);
+  s.requestAttr("a", "ruby", "dex", "瑞比");
+  s.decideAttr("a", s.snapshot().table.attrs[1].id, "cancel");
+  assert.equal(s.snapshot().table.attrs[1].status, "cancelled");
+});
+
+test("大字：只有主持人能发，最长 40 字、停留 2–15 秒；小队频道留一条记录；跨重建保留最近一条", () => {
+  const f = fixture(), s = f.s;
+  assert.throws(() => s.showTitle("a", { text: "我来了" }), /只有主持人/);
+  assert.throws(() => s.showTitle("gm", { text: "  " }), /不能为空/);
+  s.showTitle("gm", { text: "援军来了", sub: "北边山坡亮起了火把", tone: "hope", seconds: 99 });
+  const t = s.snapshot().table.title;
+  assert.deepEqual([t.text, t.sub, t.tone, t.seconds], ["援军来了", "北边山坡亮起了火把", "hope", 15]);
+  assert.equal(s.snapshot().chat.at(-1).text, "【援军来了】 北边山坡亮起了火把");
+  s.showTitle("gm", { text: "他们来了", tone: "weird" });
+  const t2 = s.snapshot().table.title;
+  assert.notEqual(t2.id, t.id);
+  assert.deepEqual([t2.tone, t2.seconds], ["plain", 4]);
+  assert.equal(fixture({ table: s.snapshot().table }).s.snapshot().table.title.text, "他们来了");
+  const V = require("../online-view");
+  const view = V.projectView({ title: t2, chat: s.snapshot().chat }, { recipientId: "a" });
+  assert.deepEqual(JSON.parse(JSON.stringify(view.title)), { text: "他们来了", sub: "", seconds: 4, at: t2.at, id: t2.id, tone: "plain" });
+  assert.equal(view.chat.at(-1).title, true);
 });

@@ -439,7 +439,8 @@ function layoutLabel(kind) {
     all3: "全员 3 区",
     split23: "2 / 3 区对半",
     pincer: "夹击（玩家 2 区）",
-    front2: "敌人 2 区"
+    front2: "敌人 2 区",
+    custom: "主持人预设"
   })[kind] || kind;
 }
 
@@ -485,6 +486,11 @@ function buildEncounter(spec, baseLevel, partySize) {
   if (state.weather === "sand" && typeof rollSandDir === "function") rollSandDir();   // 开场沙暴：风向随机
   state.fields = { 1: emptyField(), 2: emptyField(), 3: emptyField() };
   if (spec.board) applyBoard(spec.board);   // 特殊棋盘的遭遇（大型 boss）
+  else if (state.gaps) {
+    // 普通直排：上一场特殊棋盘留下的连接（1-3、2-4 …）不要带过来
+    Object.keys(state.gaps).forEach(k => { if (k !== "1-2" && k !== "2-3") delete state.gaps[k]; });
+    ["1-2", "2-3"].forEach(k => { if (!state.gaps[k]) state.gaps[k] = emptyGap(); });
+  }
   if (spec.fields) {
     Object.keys(spec.fields).forEach(z => Object.assign(state.fields[z], spec.fields[z]));
   }
@@ -506,6 +512,8 @@ function buildEncounter(spec, baseLevel, partySize) {
       const u = p.build(lv(row.level), partySize);
       u.zone = Number(row.zone) || 2;
       if (row.bounty) makeBountyTarget(u, row.bounty);
+      // 战斗模板（battle-templates.js）里预先挂好的首领机制
+      if (Array.isArray(row.mechanics) && typeof addBossMechanic === "function") row.mechanics.forEach(m => addBossMechanic(u, JSON.parse(JSON.stringify(m))));
       state.units.push(u);
       made.push(u);
     }
@@ -524,7 +532,7 @@ function applyBattlefieldFeatures(features, level) {
   const EFFECT = { fire: "fire", acid: "acid", ice: "ice", electric: "electric", energy: "energy", harmonic: "harmonic", heal: "heal" };
   features.forEach(f => {
     if (f.type === "prop" && typeof makeProp === "function") {
-      const p = makeProp(f.what, f.zone, level);
+      const p = makeProp(f.what, f.zone, f.level != null ? f.level : level);
       if (f.faction) p.faction = f.faction;
       state.props.push(p);
     } else if (f.type === "field") {
@@ -533,8 +541,9 @@ function applyBattlefieldFeatures(features, level) {
       if (EFFECT[f.what] && typeof setZoneField === "function") setZoneField(f.zone, EFFECT[f.what]);
       else fl[f.what] = true;
     } else if (f.type === "gap" && f.key) {
-      const hp = typeof defaultGapHp === "function" ? defaultGapHp(f.what) : 10;
-      state.gaps[f.key] = Object.assign(emptyGap(), { type: f.what, hp, maxHp: hp, open: false, level: Number(level) || 1 });
+      // 战斗模板可以写死耐久、机关门开着
+      const hp = f.hp != null ? Number(f.hp) : typeof defaultGapHp === "function" ? defaultGapHp(f.what) : 10;
+      state.gaps[f.key] = Object.assign(emptyGap(), { type: f.what, hp, maxHp: hp, open: f.what === "door" ? !!f.open : false, level: Number(level) || 1 });
     }
   });
   if (features.some(f => f.what === "battery") && typeof syncBatteryShields === "function") syncBatteryShields();

@@ -45,6 +45,8 @@ function trpgTaskNormalizeNode(n) {
     enemies: fight ? (Array.isArray(n.enemies) ? n.enemies : []).filter(e => e && (!presets.length || presets.includes(e.id)))
       .slice(0, 12).map(e => ({ id: e.id, lv: tNum(e.lv, 1, 1, 30), zone: tNum(e.zone, 2, 1, 9) })) : [],
     weather: fight && TRPG_WEATHERS.includes(n.weather) ? n.weather : "none",
+    // 选了战斗模板（battle-templates.js）就按模板摆战场；存的是一份拷贝，模板以后改了、删了都不影响这个任务
+    template: fight && n.template && typeof n.template === "object" && typeof battleTemplateNormalize === "function" ? battleTemplateNormalize(n.template) : null,
     // 两区 / 三区，或者特殊棋盘的布局名（line4 / square4 / cross5，engine.js · BOARD_LAYOUTS）
     zoneMode: !fight ? 2 : (typeof BOARD_LAYOUTS !== "undefined" && typeof n.zoneMode === "string" && BOARD_LAYOUTS[n.zoneMode] && !/^line[23]$/.test(n.zoneMode))
       ? n.zoneMode : Number(n.zoneMode) === 3 || n.zoneMode === "line3" ? 3 : 2
@@ -159,14 +161,15 @@ function trpgTaskNodeDone(id) {
   const next = t.nodes[t.index];
   return [`任务「${t.name}」第 ${t.index} 站（${TRPG_NODE_TYPES[n.type]}）完成。${next ? `下一站：${TRPG_NODE_TYPES[next.type]}${next.note ? "（" + next.note + "）" : ""}。` : "路线走完了，可以结算任务。"}`];
 }
-/** 打当前这一站：返回 { enemies, weather, zoneMode }，并记下这场是任务战斗 */
+/** 打当前这一站：返回 { enemies, weather, zoneMode }（选了模板就是 { template }），并记下这场是任务战斗 */
 function trpgTaskPrepareBattle(id) {
   const t = trpgTaskById(id);
   if (!t || t.status !== "active") throw new Error("没有进行中的这个任务");
   const n = t.nodes[t.index];
   if (!n || (n.type !== "battle" && n.type !== "elite")) throw new Error("当前这一站不是战斗");
-  if (!n.enemies.length) throw new Error("这一站还没配置敌人");
+  if (!n.template && !n.enemies.length) throw new Error("这一站还没配置敌人");
   TRPG.taskBattle = { id: t.id, index: t.index };
+  if (n.template) return { template: JSON.parse(JSON.stringify(n.template)) };
   return { enemies: JSON.parse(JSON.stringify(n.enemies)), weather: n.weather, zoneMode: n.zoneMode };
 }
 /** 摆战场时（battle-commands.js）：任务战斗就把护送对象放上场 */

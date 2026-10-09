@@ -62,8 +62,13 @@
       if (typeof ResizeObserver !== "undefined") { observer = new ResizeObserver(reserveSpace); observer.observe(root); }
     }
     function reserveSpace() { if (root && !root.hidden) document.body.style.setProperty("--hs-top-height", `${Math.ceil(root.getBoundingClientRect().height)}px`); }
+    // 中文输入法正在拼字时不重画含输入框的区域（重画会打断拼字），拼完再补画
+    let composing = false, deferred = false;
+    document.addEventListener("compositionstart", () => { composing = true; }, true);
+    document.addEventListener("compositionend", () => { composing = false; if (deferred) { deferred = false; setTimeout(() => { try { render(); } catch (_) {} }, 0); } }, true);
     function html(node, value, key) {
       if (lastMarkup[key] === value) return;
+      if (composing && node.contains(document.activeElement)) { deferred = true; return; }
       const focused = document.activeElement, focusId = focused && node.contains(focused) ? focused.id : "";
       const start = focused && typeof focused.selectionStart === "number" ? focused.selectionStart : null;
       lastMarkup[key] = value; node.innerHTML = value;

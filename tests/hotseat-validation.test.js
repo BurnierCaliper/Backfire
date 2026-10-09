@@ -97,7 +97,8 @@ test("灯普通攻击按流程圣盾扩射程，零盾不能伪造 far", () => {
 test("多单位流程允许最终选项为友方，不能误套普通攻击敌我判断", () => {
   const f = fixture("kolt");
   const w = f.c.spawnWeapon(f.a, "torque"); w.level = 2; w.ap = 2; w.bonus = 2; f.enemy.zone = 1;
-  f.session.reconcile(); f.session.finishUnit("a"); f.session.finishUnit("b");
+  f.session.reconcile();   // 召唤出的武器人插在本人前面，立刻轮到它
+  assert.equal(f.session.snapshot().currentUnitId, w.id);
   const command = { type: "skill", actor: w.id, skill: "torque_strip", target: f.b.id, picks: { target: f.enemy.id, ally: f.b.id } };
   assert.equal(f.validate(command), true);
 });
@@ -134,7 +135,8 @@ test("可起身者保留零费用起身，不接受站立者", () => {
 
 test("武器不能起身，坚毅耗尽或力竭的倒地英雄不能行动", () => {
   const f = fixture(); const w = f.c.spawnWeapon(f.a, "mint"); w.shp = 10;
-  f.session.reconcile(); f.session.finishUnit("a"); f.session.finishUnit("b");
+  f.session.reconcile();   // 召唤出的武器人立刻轮到它
+  assert.equal(f.session.snapshot().currentUnitId, w.id);
   untouched(f, { type: "standUp", actor: w.id }, /起身/);
   for (const exhausted of [false, true]) {
     const d = fixture(); d.a.dying = true; d.a.layers.forEach(l => l.current = 0);

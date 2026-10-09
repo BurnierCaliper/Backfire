@@ -120,7 +120,8 @@ function careerData() {
   LEDGER.career.kits = LEDGER.career.kits || {};
   return LEDGER.career;
 }
-function careerRecordBattle(outcome, grade) {
+const CAREER_DETAIL_BATTLES = 10;   // 最近几场留下每个人的明细（战绩页「最近 10 场」）
+function careerRecordBattle(outcome, grade, extra) {
   const stats = (typeof state !== "undefined" && state.battleStats) || {};
   const ids = Object.keys(stats);
   const units = (typeof state !== "undefined" && state.units) || [];
@@ -142,13 +143,26 @@ function careerRecordBattle(outcome, grade) {
     const row = c.kits[u.kit] || (c.kits[u.kit] = { name: u.name, kit: u.kit, weaponOf: null, battles: 0 });
     row.battles = (Number(row.battles) || 0) + 1;
   });
+  // 明细：有数据的都算上，没出手的上场角色也列出来（全是 0）
+  const seen = new Set(ids.map(id => stats[id] && stats[id].kit).filter(Boolean));
+  const idle = units.filter(u => u.isPlayer && !u._removed && !u.hidden && u.kit && !u.escort && !seen.has(u.kit))
+    .map(u => ({ name: u.name, kit: u.kit, weaponOf: u.weaponOf || null }));
+  const rows = ids.map(id => stats[id]).filter(x => x && x.kit).concat(idle).map(x => {
+    const r = { name: x.name, kit: x.kit, weaponOf: x.weaponOf || null };
+    CAREER_KEYS.forEach(k => { r[k] = Math.round(Number(x[k]) || 0); });
+    r.share = teamDmg > 0 ? Math.round(r.dmg / teamDmg * 1000) / 10 : 0;
+    return r;
+  });
+  extra = extra || {};
   c.battles.push({
     no, outcome, turns: Number(state.turnNo) || 1,
     grade: grade ? grade.grade : "", score: grade ? grade.score : 0,
     when: typeof ledgerTimeText === "function" ? ledgerTimeText() : "", teamDmg,
-    mvp: mvp && mvp.dmg > 0 ? mvp : null
+    mvp: mvp && mvp.dmg > 0 ? mvp : null,
+    name: extra.name || "", drops: extra.drops || null, rows
   });
   while (c.battles.length > CAREER_MAX_BATTLES) c.battles.shift();
+  c.battles.slice(0, -CAREER_DETAIL_BATTLES).forEach(b => { delete b.rows; });   // 更早的只留概要
   return c;
 }
 

@@ -293,14 +293,34 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
   gap: 2px;
   background: transparent;
 }
+/* 高能值：亮青色的液体从左往右灌进血条，右边是在晃的波浪液面（纯色，不加阴影）。
+ * 宽度 = 高能值 / 血量上限。液面越过血量（血条里还亮着的部分）就会自爆，快到时（高能 ≥ 血量 75%）液体闪动 */
 .u-high {
   position: absolute;
   left: 0; top: 0; bottom: 0;
-  background: rgba(64, 196, 204, .48);
-  box-shadow: inset 0 0 0 1px rgba(40, 160, 170, .35);
+  background: #84f3d2;
   pointer-events: none;
   z-index: 5;
+  transition: width .45s cubic-bezier(.3, .8, .3, 1);
 }
+.u-high::after {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0; right: -5px;
+  width: 5px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='5' height='8'%3E%3Cpath d='M0 0H2Q5 2 2 4Q-1 6 2 8H0Z' fill='%2384f3d2'/%3E%3C/svg%3E") repeat-y;
+  background-size: 5px 8px;
+  animation: u-high-wave .8s linear infinite;
+}
+.u-high.danger { animation: u-high-pulse .9s ease-in-out infinite; }
+/* 自爆前的预警：整张卡闪两下 */
+.unit-wrap.high-warn .unit { animation: high-warn .3s ease-in-out 2; }
+.unit-wrap.high-warn .u-high, .unit-wrap.high-warn .u-high::after { animation: high-warn-fill .3s ease-in-out 2; }
+@keyframes high-warn { 50% { outline: 3px solid #84f3d2; outline-offset: 1px; filter: brightness(1.2); } }
+@keyframes high-warn-fill { 50% { background-color: #ffffff; opacity: 1; } }
+@keyframes u-high-wave { from { background-position: 0 0; } to { background-position: 0 8px; } }
+@keyframes u-high-pulse { 50% { opacity: .55; } }
+@media (prefers-reduced-motion: reduce) { .u-high, .u-high::after, .u-high.danger { animation: none; transition: none; } }
 .seg {
   position: relative;
   height: 100%;

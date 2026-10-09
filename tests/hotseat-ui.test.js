@@ -272,13 +272,17 @@ for (const count of [2, 3, 4]) test(`D2 integration: ${count} operators finish a
   }, first);
   assert.equal(preview.after, preview.before, "previewing a summon does not lock a slot or add an actual weapon");
   await page.evaluate(async actor => { await GAME.act({ type: "skill", actor, skill: "helu_summon", target: null, picks: {} }, { actorId: actor, skillName: "唤出 Ecmo" }); }, first);
-  const weapon = await page.evaluate(() => HotseatGame.getView().order.at(-1));
+  // 召唤出的武器人紧挨着本人（在本人前一格），并且立刻轮到它
+  const weapon = await page.evaluate(() => { const v = HotseatGame.getView(); return v.order.find(r => r && r.actor === v.currentUnitId); });
+  assert.notEqual(weapon.actor, first, "召唤后当前行动单位是武器人");
+  assert.equal(await page.evaluate(([w, h]) => { const o = HotseatGame.getView().order; return o.findIndex(r => r && r.actor === h) - o.findIndex(r => r && r.actor === w); }, [weapon.actor, first]), 1);
   assert.equal(weapon.owner, "p1");
   assert.equal(await page.evaluate(() => HotseatGame.getView().order.length), count + 1);
   assert.equal(await page.evaluate(first => HotseatGame.getView().order.find(row => row?.actor === first).locked, first), true);
+  const oldIndex = await page.evaluate(w => HotseatGame.getView().order.findIndex(r => r && r.actor === w), weapon.actor);
   await page.locator(`[data-hs="move"][data-actor="${weapon.actor}"][aria-label$="移至末尾"]`).click();
   assert.equal(await page.evaluate(() => HotseatGame.getView().order.at(-1).actor), weapon.actor);
-  assert.equal(await page.evaluate(() => HotseatGame.getView().order.at(-2)), null, "moving to the empty tail leaves old slot fixed in place");
+  assert.equal(await page.evaluate(i => HotseatGame.getView().order[i], oldIndex), null, "moving to the empty tail leaves old slot fixed in place");
   await page.evaluate(() => {
     window.autoReplies = []; window.autoReplyErrors = [];
     window.autoReplyTimer = setInterval(() => {

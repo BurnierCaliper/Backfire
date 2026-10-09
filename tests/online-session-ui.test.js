@@ -231,12 +231,16 @@ test("D3 game sessions: remote summon, mixed AI/manual round, reactions, victory
   await alice.waitForFunction(() => OnlineGame.getView().packet.view.order.length === 5);
   const weapon = await host.evaluate(() => state.units.find(u => u.kit === "niu" && !u.hidden).id);
   const order = await host.evaluate(() => HotseatGame.getView().order);
-  assert.equal(order.at(-1).actor, weapon); assert.equal(order.at(-1).owner, aliceId);
+  // 召唤出的武器人紧挨着本人（在本人前一格），并且立刻轮到它
+  const wi = order.findIndex(row => row && row.actor === weapon), hi = order.findIndex(row => row && row.actor === actor);
+  assert.equal(wi, hi - 1); assert.equal(order[wi].owner, aliceId);
+  assert.equal(await host.evaluate(() => HotseatGame.getView().currentUnitId), weapon);
   assert.equal((await submit(bob, { type: "move", actor: weapon, dest: 2 })).ok, false);
-  for (const row of order.slice(0, -1)) assert.equal((await submit(pageFor(row.owner), { type: "endTurn", actor: row.actor })).ok, true);
-  await alice.evaluate(cmd => { window.roundResult = null; OnlineGame.submit(cmd).then(result => { window.roundResult = result; }); }, { type: "endTurn", actor: weapon });
+  const rows = order.filter(row => row && !row.done), last = rows.at(-1);
+  for (const row of rows.slice(0, -1)) assert.equal((await submit(pageFor(row.owner), { type: "endTurn", actor: row.actor })).ok, true);
+  await pageFor(last.owner).evaluate(cmd => { window.roundResult = null; OnlineGame.submit(cmd).then(result => { window.roundResult = result; }); }, { type: "endTurn", actor: last.actor });
   try { await host.waitForFunction(() => OnlineGame.getView().manualPhase && state.combatPhase === "enemy", null, { timeout: 5000 }); }
-  catch (error) { throw new Error(error.message + " " + JSON.stringify(await host.evaluate(() => ({ depth: GAME.depth, phase: HotseatGame.getView().phase, ask: HotseatGame.getView().ask, combatPhase: state.combatPhase, manual: GMCommands.snapshot(), notice: OnlineGame.getView().notice, last: JSON.parse(localStorage.getItem("backfire-online-v1")).requests.slice(-1).map(entry => entry[1].response) }))) + " player=" + JSON.stringify(await alice.evaluate(() => window.roundResult)) + " errors=" + JSON.stringify(f.errors)); }
+  catch (error) { throw new Error(error.message + " " + JSON.stringify(await host.evaluate(() => ({ depth: GAME.depth, phase: HotseatGame.getView().phase, ask: HotseatGame.getView().ask, combatPhase: state.combatPhase, manual: GMCommands.snapshot(), notice: OnlineGame.getView().notice, last: JSON.parse(localStorage.getItem("backfire-online-v1")).requests.slice(-1).map(entry => entry[1].response) }))) + " player=" + JSON.stringify(await pageFor(last.owner).evaluate(() => window.roundResult)) + " errors=" + JSON.stringify(f.errors)); }
   assert.match(await host.locator("#ogm-toggle").innerText(), /敌人待操作/);
   await assertHostControlsClickable(host, "battle", t, "manual-enemy");
   const aiActions = await host.evaluate(() => Commands.history().filter(row => row.command.type === "battle.enemyAction").map(row => row.command.actor));
@@ -274,8 +278,8 @@ test("D3 game sessions: remote summon, mixed AI/manual round, reactions, victory
   } finally { clearTimeout(rejectionTimer); }
   assert.equal((await submit(host, { type: "gm.enemyEndTurn" })).ok, true);
   await host.waitForFunction(() => state.turnNo === 2 && HotseatGame.getView().phase === "picking" && GAME.depth === 0);
-  await alice.waitForFunction(() => !!window.roundResult);
-  const roundResult = await alice.evaluate(() => window.roundResult); assert.equal(roundResult.ok, true, JSON.stringify(roundResult));
+  await pageFor(last.owner).waitForFunction(() => !!window.roundResult);
+  const roundResult = await pageFor(last.owner).evaluate(() => window.roundResult); assert.equal(roundResult.ok, true, JSON.stringify(roundResult));
   const livingEnemies = await host.evaluate(() => state.units.filter(u => !u.isPlayer && !u.dead && !u.hidden && !u._removed).map(u => u.id));
   assert.equal(livingEnemies.length, 3);
   for (const id of livingEnemies) {
@@ -451,5 +455,260 @@ if (PUBLIC_RELAY) test("D3 public relay: five display latency samples, version r
   assert.deepEqual(await bob.evaluate(() => OnlineGame.getView().identity), identities[2]);
   assert.deepEqual(await alice.evaluate(() => OnlineGame.getView().identity), identities[1]);
   assert.ok(!JSON.stringify(f.wire.filter(row => row.page === 2)).includes(privateText), "private content must stay absent from Bob's public-network frames");
+  assert.deepEqual(f.errors, []);
+});
+
+test("联机：玩家能看角色资料 / 武器 / 背包；小队聊天全程可用；输入法拼字不被打断", { timeout: 120000 }, async t => {
+  const f = await fixture(t); if (!f) return;
+  const { host, alice, bob } = f;
+  const shot = async (page, name) => { if (process.env.BACKFIRE_SHOTS) await page.screenshot({ path: path.join(process.env.BACKFIRE_SHOTS, name + ".png") }); };
+  await host.evaluate(() => { OnlineGame.start(); bagAdd("medkit", 2); });
+  await host.evaluate(() => OnlineGame.queueHostEdit(() => {}));
+  for (const page of [alice, bob]) await page.waitForFunction(() => OnlineGame.getView().screen === "exploration" && !document.getElementById("online-side").hidden);
+  // 探索时右侧栏默认就是小队频道
+  assert.equal(await alice.evaluate(() => document.getElementById("online-side").dataset.tab), "chat");
+  // 小队聊天：玩家发、所有人都看得到
+  await alice.fill("#ol-side-text", "我们先去黑市");
+  await alice.click("#ol-side-form button[type=submit]");
+  await host.waitForFunction(() => HotseatGame.getView().chat.some(m => m.text === "我们先去黑市"));
+  await bob.waitForFunction(() => /我们先去黑市/.test(document.querySelector("#online-side .ol-side-chat").textContent));
+  assert.equal(await alice.inputValue("#ol-side-text"), "", "发出去后清空输入框");
+  // 主持人：探索记录栏有「探索 / 小队」频道，也能直接回
+  await host.locator('.tr-log [data-host-tab="chat"]').click();
+  assert.match(await host.locator(".tr-log .ol-host-chat").innerText(), /我们先去黑市/);
+  await host.fill(".tr-log .ol-host-chat input", "好的路上小心");
+  await host.click(".tr-log .ol-host-chat button[type=submit]");
+  try { await host.waitForFunction(() => HotseatGame.getView().chat.some(m => m.text === "好的路上小心"), null, { timeout: 5000 }); }
+  catch (e) { throw new Error("主持人消息没发出去：" + JSON.stringify(await host.evaluate(() => ({ notice: OnlineGame.getView().notice, input: document.querySelector(".tr-log .ol-host-chat input").value, chat: HotseatGame.getView().chat })))); }
+  await alice.waitForFunction(() => /好的路上小心/.test(document.querySelector("#online-side .ol-side-chat").textContent));
+  // 输入法拼字中：别人发消息时，输入框不被换掉，拼到一半的内容还在
+  await bob.click("#ol-side-text");
+  await bob.evaluate(() => { window.__inp = document.getElementById("ol-side-text"); window.__inp.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true })); window.__inp.value = "wo m"; });
+  await alice.fill("#ol-side-text", "Bob 你看看背包");
+  await alice.click("#ol-side-form button[type=submit]");
+  await bob.waitForFunction(() => /Bob 你看看背包/.test(document.querySelector("#online-side .ol-side-chat").textContent));
+  assert.deepEqual(await bob.evaluate(() => ({ same: document.getElementById("ol-side-text") === window.__inp, value: window.__inp.value, focused: document.activeElement === window.__inp })), { same: true, value: "wo m", focused: true });
+  // 房间面板里的私信框：拼字时整个面板不重画
+  await bob.evaluate(() => { window.__inp.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true })); window.__inp.value = ""; });
+  await bob.click('#online-dock [data-online="openRoom"]');
+  await bob.click("#ol-message");
+  await bob.evaluate(() => { window.__ta = document.getElementById("ol-message"); window.__ta.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true })); window.__ta.value = "zhu chi"; });
+  await host.evaluate(() => OnlineGame.submit({ type: "gm.msg", to: "all", text: "全体注意天快黑了" }));
+  await bob.waitForFunction(() => OnlineGame.getView().messages.some(m => m.text === "全体注意天快黑了"));
+  await bob.waitForTimeout(200);
+  assert.deepEqual(await bob.evaluate(() => ({ same: document.getElementById("ol-message") === window.__ta, value: window.__ta.value })), { same: true, value: "zhu chi" });
+  await bob.evaluate(() => window.__ta.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true })));
+  await bob.waitForFunction(() => /全体注意天快黑了/.test(document.getElementById("online-panel").textContent), null, { timeout: 5000 });
+  await bob.click('#online-panel [data-online="close"]');
+  // 角色资料：玩家自己的英雄，完整技能和被动，但没有坚毅生命数值
+  const data = await alice.evaluate(() => OnlineGame.sheetData());
+  assert.ok(data.sheets.length >= 2, "队伍里的英雄资料都在");
+  assert.ok(!/"shp/.test(JSON.stringify(data)), "坚毅生命数值不发给玩家");
+  assert.ok(data.sheets.every(s => s.passives.length && (s.skills.now.length + s.skills.later.length)), "被动和技能都在");
+  await shot(alice, "1-player-exploration"); await shot(host, "2-host-exploration"); await shot(bob, "3-player-mobile");
+  await alice.click('[data-online="info"][data-info="sheet"]');
+  await alice.waitForSelector("#hero-sheet.show");
+  await shot(alice, "4-player-sheet");
+  const myName = await alice.evaluate(() => { const v = OnlineGame.getView(); const mine = v.packet.view.units.find(u => u.owner === v.identity.id); return mine.name; });
+  assert.match(await alice.locator("#hero-sheet").innerText(), new RegExp(myName));
+  await alice.click("#hs-close");
+  await alice.click('[data-online="info"][data-info="armory"]');
+  await alice.waitForSelector("#armory-sheet.show");
+  await alice.keyboard.press("Escape").catch(() => {});
+  await alice.evaluate(() => document.getElementById("armory-sheet").classList.remove("show"));
+  // 背包：名字、数量、说明
+  await alice.click('[data-online="info"][data-info="bag"]');
+  await alice.waitForSelector("#online-bag:not([hidden])");
+  await shot(alice, "5-player-bag");
+  const bagText = await alice.locator("#online-bag").innerText();
+  assert.match(bagText, /简易医疗包/); assert.match(bagText, /× 2/); assert.match(bagText, /1d4\+6/);
+  await alice.click('#online-bag [data-bag="close"]');
+  // 战斗中：右侧栏变成「战斗 / 小队」，默认战斗频道，也能切到小队聊天
+  await host.evaluate(() => { TrpgFlow.toBattle(); GAME.skip = true; GAME.instant = true; GAME.startOrEnd(); });
+  await alice.waitForFunction(() => OnlineGame.getView().screen === "battle");
+  assert.equal(await alice.locator('#online-side [data-side="log"]').innerText(), "战斗");
+  assert.equal(await alice.evaluate(() => document.getElementById("online-side").dataset.tab), "log");
+  await host.evaluate(() => OnlineGame.submit({ type: "chat", text: "战斗中也能说话" }));
+  await alice.waitForFunction(() => !document.querySelector('#online-side [data-side="chat"] .ol-badge').hidden, null, { timeout: 5000 });
+  try { await alice.click('#online-side [data-side="chat"]', { timeout: 4000 }); }
+  catch (e) { throw new Error("点不到小队频道：" + JSON.stringify(await alice.evaluate(() => { const p = document.getElementById("hs-panel"), r = p.getBoundingClientRect(), cs = getComputedStyle(p); return { body: document.body.className, right: cs.right, rect: [r.x, r.y, r.width, r.height], side: document.getElementById("online-side").getBoundingClientRect().x, w: innerWidth }; }))); }
+  assert.match(await alice.locator("#online-side .ol-side-chat").innerText(), /战斗中也能说话/);
+  await shot(alice, "6-player-battle-chat");
+  await alice.fill("#ol-side-text", "收到");
+  await alice.click("#ol-side-form button[type=submit]");
+  await host.waitForFunction(() => HotseatGame.getView().chat.some(m => m.text === "收到"));
+  // 主持人战斗记录栏也有「战斗 / 小队」
+  await host.locator('#g-log [data-host-tab="chat"]').click();
+  assert.match(await host.locator("#g-log .ol-host-chat").innerText(), /收到/);
+  await shot(host, "7-host-battle-chat");
+  await host.locator('#g-log [data-host-tab="log"]').click();
+  assert.equal(await host.locator("#g-logs").isVisible(), true);
+  for (const page of [alice, bob]) await assertPlayerIsolation(page);
+  assert.deepEqual(f.errors, []);
+});
+
+test("联机：主持人用战斗模板开战，玩家一进战斗就看到摆好的战场", { timeout: 120000 }, async t => {
+  const f = await fixture(t); if (!f) return;
+  const { host, alice } = f;
+  const shot = async (page, name) => { if (process.env.BACKFIRE_SHOTS) await page.screenshot({ path: path.join(process.env.BACKFIRE_SHOTS, name + ".png") }); };
+  await host.evaluate(() => { OnlineGame.start(); });
+  await alice.waitForFunction(() => OnlineGame.getView().screen === "exploration");
+  await host.evaluate(() => battleTemplateSave({ name: "桥头伏击", board: 3, weather: "snow", playerZone: 1,
+    enemies: [{ preset: "thug_knife", level: 2, zone: 3 }, { preset: "thug_hammer", level: 2, zone: 2 }],
+    fields: { 2: { acid: true } }, gaps: { "2-3": { type: "wall", hp: 30 } }, props: [{ kind: "boom", zone: 2, faction: "enemy" }] }));
+  await host.click('#tr-tabs [data-tab="battles"]');
+  await shot(host, "tpl-1-host-templates");
+  await host.click('[data-bt^="fight:"]');
+  await alice.waitForFunction(() => OnlineGame.getView().screen === "battle");
+  await alice.waitForFunction(() => (OnlineGame.getView().packet?.state?.units || []).filter(u => !u.isPlayer).length === 2);
+  const seen = await alice.evaluate(() => { const s = OnlineGame.getView().packet.state; return { zoneMode: s.zoneMode, weather: s.weather, foes: s.units.filter(u => !u.isPlayer).map(u => u.zone).sort(), props: (s.props || []).length, wall: (s.gaps || {})["2-3"]?.type, started: !!s.combatStarted }; });
+  assert.deepEqual(seen, { zoneMode: 3, weather: "snow", foes: [2, 3], props: 1, wall: "wall", started: false });
+  await shot(alice, "tpl-2-player-battle"); await shot(host, "tpl-3-host-battle");
+  assert.deepEqual(f.errors, []);
+});
+
+test("联机：四区方形棋盘，玩家画面摆成 2×2，4 区和所有间隙都看得到", { timeout: 120000 }, async t => {
+  const f = await fixture(t); if (!f) return;
+  const { host, alice } = f;
+  await host.evaluate(() => { OnlineGame.start(); });
+  await alice.waitForFunction(() => OnlineGame.getView().screen === "exploration");
+  await host.evaluate(() => battleTemplateSave({ name: "仓库", board: "square4", enemies: [{ preset: "thug_knife", level: 1, zone: 4 }], fields: { 4: { ice: true } }, gaps: { "2-4": { type: "wall", hp: 20 } } }));
+  await host.click('#tr-tabs [data-tab="battles"]');
+  await host.click('[data-bt^="fight:"]');
+  await alice.waitForFunction(() => document.querySelectorAll("#online-stage .ol-zone").length === 4);
+  const r = await alice.evaluate(() => {
+    const zones = [...document.querySelectorAll("#online-stage .ol-zone")];
+    const box = id => zones.find(z => z.querySelector("h2").textContent === id + " 区").getBoundingClientRect();
+    const [b1, b2, b3, b4] = [1, 2, 3, 4].map(box);
+    return { grid: Math.abs(b1.top - b2.top) < 2 && Math.abs(b3.top - b4.top) < 2 && b3.top > b1.bottom - 1 && Math.abs(b1.left - b3.left) < 2,
+      foeIn4: /狂徒/.test(zones.find(z => z.querySelector("h2").textContent === "4 区").textContent),
+      ice4: /冰面/.test(zones.find(z => z.querySelector("h2").textContent === "4 区").textContent),
+      gaps: document.querySelector("#online-stage .ol-gaps").textContent };
+  });
+  assert.equal(r.grid, true, "2×2 排版");
+  assert.equal(r.foeIn4, true);
+  assert.equal(r.ice4, true);
+  assert.match(r.gaps, /2 ↔ 4：危墙 · 耐久 20/);
+  assert.match(r.gaps, /1 ↔ 3/);
+  if (process.env.BACKFIRE_SHOTS) await alice.screenshot({ path: path.join(process.env.BACKFIRE_SHOTS, "board-square4.png") });
+  assert.deepEqual(f.errors, []);
+});
+
+test("联机：按钮掷 d100 / 主持人暗骰；主持人发起检定、玩家自己掷；玩家申请属性点、主持人同意后才加上", { timeout: 120000 }, async t => {
+  const f = await fixture(t); if (!f) return;
+  const { host, alice, bob } = f;
+  const shot = async (page, name) => { if (process.env.BACKFIRE_SHOTS) await page.screenshot({ path: path.join(process.env.BACKFIRE_SHOTS, name + ".png") }); };
+  await host.evaluate(() => { OnlineGame.start(); });
+  for (const page of [alice, bob]) await page.waitForFunction(() => OnlineGame.getView().screen === "exploration" && !document.getElementById("online-side").hidden);
+  // 掷骰：按钮 → 选熟练项 → 掷 d100
+  await alice.click('#online-side [data-roll-open]');
+  await alice.waitForSelector("#online-roll:not([hidden]) #ol-roll-prof");
+  await alice.selectOption("#ol-roll-prof", "数据操作");
+  assert.match(await alice.locator("#online-roll").innerText(), /二级熟练[\s\S]*大成功 ≤5 · 极难 ≤25 · 困难 ≤50 · 普通 \/ 简单 ≤100/, "瑞比数据操作二级");
+  await alice.fill("#ol-roll-note", "黑进门禁");
+  await shot(alice, "roll-dialog");
+  await alice.click('#online-roll [data-roll="go"]');
+  await bob.waitForFunction(() => /掷骰 · 瑞比「数据操作」二级熟练[:：]d100 \d+ → (大成功|极难成功|困难成功|普通成功|简单成功|失败)[(（]黑进门禁[)）]/.test(document.querySelector("#online-side .ol-side-chat").textContent));
+  await alice.waitForSelector("#online-roll", { state: "hidden" });
+  assert.equal(await alice.locator("#ol-roll-secret").count(), 0, "玩家没有暗骰选项");
+  // 主持人暗骰
+  await host.click('#tr-tabs [data-tab="party"]');
+  await host.locator('.tr-log [data-host-tab="chat"]').click();
+  await host.click('.tr-log [data-roll-open]');
+  await host.check("#ol-roll-secret");
+  await host.click('#online-roll [data-roll="go"]');
+  await host.waitForFunction(() => HotseatGame.getView().chat.some(m => m.secret && /^暗骰 · /.test(m.text)));
+  await alice.waitForTimeout(300);
+  assert.ok(!/暗骰/.test(await alice.evaluate(() => JSON.stringify(OnlineGame.getView()))), "玩家收不到暗骰");
+  // 检定：主持人在「检定」页发起
+  await host.click('#tr-tabs [data-tab="checks"]');
+  await host.selectOption("#ck-prof", "侦察");
+  await host.selectOption("#ck-diff", "easy");
+  await host.fill("#ck-note", "看看门后有什么");
+  await host.click("#ck-open");
+  await alice.waitForSelector('#online-stage [data-online="checkRoll"]');
+  await shot(alice, "check-1-player");
+  assert.equal(await alice.locator('#online-stage [data-online="checkRoll"]').count(), 1, "只能掷自己的角色");
+  await alice.click('#online-stage [data-online="checkRoll"]');
+  await bob.waitForFunction(() => /检定 · .+「侦察」简单/.test(document.querySelector("#online-side .ol-side-chat").textContent));
+  await host.waitForFunction(() => /成功|失败/.test(document.getElementById("tr-panel").textContent) && /代掷/.test(document.getElementById("tr-panel").textContent));
+  await shot(host, "check-2-host");
+  // 属性点：Alice 的角色有 1 点
+  const mine = await alice.evaluate(() => { const v = OnlineGame.getView(); return v.packet.view.units.find(u => u.owner === v.identity.id).id; });
+  await host.evaluate(id => OnlineGame.queueHostEdit(() => { state.units.find(u => u.id === id).attrPoints = 1; }), mine);
+  await alice.waitForSelector('#online-stage [data-online="attrRequest"][data-attr="dex"]');
+  await alice.click('#online-stage [data-online="attrRequest"][data-attr="dex"]');
+  await alice.waitForFunction(() => /等主持人确认：敏捷 \+1/.test(document.getElementById("online-stage").textContent));
+  await shot(alice, "attr-1-player");
+  await host.click('#tr-tabs [data-tab="party"]');
+  await host.waitForSelector('[data-attr-req^="approve:"]');
+  const dexBefore = await host.evaluate(id => state.units.find(u => u.id === id).attrs.dex, mine);
+  await host.click('[data-attr-req^="approve:"]');
+  await host.waitForFunction(id => state.units.find(u => u.id === id).attrPoints === 0, mine);
+  assert.equal(await host.evaluate(id => state.units.find(u => u.id === id).attrs.dex, mine), dexBefore + 1);
+  await alice.waitForFunction(() => /主持人已同意/.test(document.getElementById("online-stage").textContent));
+  assert.equal(await alice.locator('#online-stage [data-online="attrRequest"]').count(), 0);
+  assert.deepEqual(f.errors, []);
+});
+
+test("联机：模板带的战斗掉落打赢后进背包，玩家结算里看得到；能看这场的战斗记录和最近 10 场战绩", { timeout: 120000 }, async t => {
+  const f = await fixture(t); if (!f) return;
+  const { host, alice } = f;
+  const shot = async (page, name) => { if (process.env.BACKFIRE_SHOTS) await page.screenshot({ path: path.join(process.env.BACKFIRE_SHOTS, name + ".png") }); };
+  await host.evaluate(() => { OnlineGame.start(); });
+  await alice.waitForFunction(() => OnlineGame.getView().screen === "exploration");
+  await host.evaluate(() => battleTemplateSave({ name: "仓库守卫", board: 2, enemies: [{ preset: "thug_knife", level: 1, zone: 2 }], drops: { kuizhi: 300, items: [{ id: "medkit", qty: 2 }] } }));
+  await host.click('#tr-tabs [data-tab="battles"]');
+  await host.click('[data-bt^="fight:"]');
+  await host.evaluate(() => { GAME.skip = true; GAME.instant = true; });
+  await host.evaluate(() => { GAME.startOrEnd(); });
+  await host.waitForFunction(() => state.combatStarted && GAME.depth === 0);
+  const before = await host.evaluate(() => ({ kz: Number(state.kuizhi) || 0, med: bagCount("medkit") }));
+  for (const id of await host.evaluate(() => state.units.filter(u => !u.isPlayer && !u.dead && !u.hidden).map(u => u.id))) assert.equal((await submit(host, { type: "gm.removeUnit", actor: id, mode: "kill" })).ok, true);
+  await host.waitForFunction(() => GAME.ended && GAME.lastOutcome === "win");
+  const after = await host.evaluate(() => ({ kz: Number(state.kuizhi) || 0, med: bagCount("medkit") }));
+  assert.ok(after.kz >= before.kz + 300, "掉落的奎支加在敌人自己掉的之外");
+  assert.equal(after.med, before.med + 2);
+  assert.match(await host.locator("#g-result").innerText(), /战斗掉落：300 奎支、简易医疗包×2/);
+  await alice.waitForFunction(() => OnlineGame.getView().screen === "ended" && /战斗掉落/.test(document.getElementById("online-stage").textContent));
+  assert.match(await alice.locator(".ol-result").innerText(), /300 奎支、简易医疗包 ×2/);
+  await alice.click('#online-stage [data-online="showLog"]');
+  assert.equal(await alice.evaluate(() => document.getElementById("online-side").dataset.tab), "log");
+  await alice.click('.ol-result [data-online="info"][data-info="record"]');
+  await alice.waitForSelector("#online-bag:not([hidden]) .ol-record");
+  const rec = await alice.locator("#online-bag").innerText();
+  assert.match(rec, /仓库守卫/);
+  assert.match(rec, /胜利/);
+  assert.match(rec, /掉落：300 奎支、简易医疗包×2/);
+  await shot(alice, "record-player");
+  assert.deepEqual(f.errors, []);
+});
+
+test("联机：主持人发大字，所有玩家画面中间弹出，几秒后淡出；小队频道留记录；刚进房间不重播旧的", { timeout: 120000 }, async t => {
+  const f = await fixture(t); if (!f) return;
+  const { host, alice, bob } = f;
+  const shot = async (page, name) => { if (process.env.BACKFIRE_SHOTS) await page.screenshot({ path: path.join(process.env.BACKFIRE_SHOTS, name + ".png") }); };
+  await host.evaluate(() => { OnlineGame.start(); });
+  for (const page of [alice, bob]) await page.waitForFunction(() => OnlineGame.getView().screen === "exploration" && !document.getElementById("online-side").hidden);
+  await host.locator('.tr-log [data-host-tab="chat"]').click();
+  await host.click('.tr-log [data-title-open]');
+  await host.click('#online-title-form [data-title-preset^="援军来了"]');
+  await host.fill('#online-title-form [data-tf="sub"]', "北边山坡亮起了火把");
+  await host.fill('#online-title-form [data-tf="seconds"]', "3");
+  await host.click('#online-title-form [data-title="go"]');
+  for (const page of [alice, bob]) await page.waitForSelector("#online-title.on:not([hidden])");
+  assert.match(await alice.locator("#online-title").innerText(), /援军来了[\s\S]*北边山坡亮起了火把/);
+  assert.ok(await alice.evaluate(() => document.getElementById("online-title").classList.contains("ol-tone-hope")));
+  await alice.waitForTimeout(700);
+  await shot(alice, "title-player"); await shot(bob, "title-player-mobile");
+  assert.match(await bob.locator("#online-side .ol-side-chat").innerText(), /【援军来了】/);
+  await alice.waitForSelector("#online-title", { state: "hidden", timeout: 6000 });
+  // 玩家刷新重连：旧的大字不重播
+  await bob.reload(); await bob.waitForFunction(() => !!window.OnlineGame); await bob.evaluate(() => OnlineGame.resume());
+  await bob.waitForFunction(() => !!OnlineGame.getView().packet?.view?.title);
+  await bob.waitForTimeout(500);
+  assert.equal(await bob.locator("#online-title").isHidden(), true);
+  // 玩家发不了
+  assert.equal((await submit(alice, { type: "showTitle", text: "我是主持人" })).ok, false);
   assert.deepEqual(f.errors, []);
 });

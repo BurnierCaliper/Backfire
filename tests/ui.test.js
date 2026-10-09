@@ -1139,3 +1139,92 @@ test("录音音效：每个录音都能解码、有声、有调音参数；没�
   assert.equal(r.uiNone, false, "没选录音的类别（战斗胜利）不出声");
   assert.deepEqual(o.errors, []);
 });
+
+test("战斗模板：探索环节新建模板 → 用它开战，进战斗时战场已经摆好；战斗画面也能把当前战场存成模板", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await newTrpg(page);
+  await page.click('[data-tab="battles"]');
+  await page.click('[data-bt="new:"]');
+  await page.selectOption('[data-bte="board"]', "3");
+  await page.fill('[data-bte="name"]', "桥头伏击");
+  await page.selectOption('[data-bte="weather"]', "snow");
+  await page.selectOption('[data-bte="enemies.0.zone"]', "3");
+  await page.fill('[data-bte="enemies.0.level"]', "3");
+  await page.click('[data-bt-act="addEnemy"]');
+  await page.selectOption('[data-bte="enemies.1.preset"]', "thug_hammer");
+  await page.selectOption('[data-bt-field="2"]', "acid");
+  await page.selectOption('[data-bt-gap="2-3"]', "wall");
+  await page.fill('[data-bt-gaphp="2-3"]', "30");
+  await page.click('[data-bt-act="addProp"]');
+  await page.click('[data-bt-act="save"]');
+  const card = await page.textContent("#tr-panel");
+  assert.match(card, /桥头伏击/);
+  assert.match(card, /三区 · 雪天 · 狂徒（匕首） Lv3（3 区）、狂徒（锤） Lv随队（3 区）/);
+  await page.click('[data-bt^="fight:"]');
+  await page.waitForSelector("#g-start");
+  const r = await page.evaluate(() => ({
+    started: state.combatStarted, zoneMode: state.zoneMode, weather: state.weather,
+    foes: state.units.filter(u => !u.isPlayer).map(u => [u.kit, u.level, u.zone]),
+    acid: state.fields[2].acid, wall: [state.gaps["2-3"].type, state.gaps["2-3"].hp],
+    props: state.props.map(p => [p.kind, p.zone]), title: document.getElementById("g-enc-name").textContent
+  }));
+  assert.equal(r.started, false);
+  assert.equal(r.zoneMode, 3);
+  assert.equal(r.weather, "snow");
+  assert.deepEqual(r.foes, [["thug_knife", 3, 3], ["thug_hammer", 1, 3]]);
+  assert.equal(r.acid, true);
+  assert.deepEqual(r.wall, ["wall", 30]);
+  assert.deepEqual(r.props, [["boom", 2]]);
+  assert.match(r.title, /桥头伏击 · 主持人预设/);
+  // 战斗画面：把当前战场存为模板，再套用
+  await page.evaluate(() => { document.getElementById("g-intro")?.remove(); });
+  await page.click("#g-field-cfg");
+  await page.fill("#g-tpl-name", "桥头伏击 2");
+  await page.click("#g-tpl-save");
+  const names = await page.$$eval("#g-tpl-list .sheet-slot b", els => els.map(e => e.textContent));
+  assert.deepEqual(names, ["桥头伏击", "桥头伏击 2"]);
+  assert.equal(await page.evaluate(() => battleTemplateList()[1].enemies.length), 2);
+  assert.deepEqual(o.errors, []);
+});
+
+test("战斗画面：状态画成图标，技能栏左边有角色仪表，状态生效时图标放大发光", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page, errors } = o;
+  await newTrpg(page);
+  await startBattle(page);
+  const foe = await page.evaluate(() => {
+    const f = state.units.find(u => !u.isPlayer && !u.dead);
+    f.statuses.burn = 2; f.statuses.weak = true;
+    GAME.refresh();
+    return f.id;
+  });
+  await page.waitForSelector(`.unit-wrap[data-id="${foe}"] .hi-badge[data-fx="burn"]`);
+  assert.equal(await page.textContent(`.unit-wrap[data-id="${foe}"] .hi-badge[data-fx="burn"] .hi-stack`), "2");
+  // 有图标的状态不再重复写字
+  assert.equal(await page.evaluate(i => [...document.querySelectorAll(`.unit-wrap[data-id="${i}"] .u-status .chip`)].filter(c => /灼烧|虚弱/.test(c.textContent)).length, foe), 0);
+  // 层数变了：图标生效一下
+  await page.evaluate(i => { state.units.find(u => u.id === i).statuses.burn = 3; GAME.refresh(); }, foe);
+  await page.waitForSelector(`.unit-wrap[data-id="${foe}"] .hi-badge.hi-proc[data-fx="burn"]`);
+  // 角色仪表跟着当前角色
+  await selectHero(page, "tou");
+  assert.match(await page.textContent("#g-gauge"), /圣盾/);
+  await selectHero(page, "ruby");
+  assert.match(await page.textContent("#g-gauge"), /纳米/);
+  // 回合结束灼烧结算：单位卡上的灼烧图标生效
+  await page.evaluate(() => { window.__procSeen = []; const o = HudIcons.procIn; HudIcons.procIn = (box, k) => { window.__procSeen.push(k); return o(box, k); }; });
+  await page.mouse.move(5, 5);
+  await page.keyboard.press("Space");
+  await page.waitForTimeout(300);
+  const yes = page.locator("#g-choice.show button", { hasText: "确定结束" });
+  if (await yes.count()) await yes.click();
+  // 敌人回合里可能要选格挡：一律选第一个选项，直到看到灼烧图标生效
+  for (let i = 0; i < 120; i++) {
+    if (await page.evaluate(() => window.__procSeen.includes("burn"))) break;
+    const opts = page.locator("#g-choice.show .opts button");
+    if (await opts.count()) await opts.first().click().catch(() => {});
+    await page.waitForTimeout(250);
+  }
+  assert.ok(await page.evaluate(() => window.__procSeen.includes("burn")), "灼烧结算时图标没有生效");
+  assert.deepEqual(errors, []);
+});

@@ -243,3 +243,51 @@ test("battle results include the actual D grade and drop private settlement note
   const out = V.projectPacket({ type: "result", result: { outcome: "win", grade: { grade: "D", score: 0, xpMult: 0.8, notes: "SECRET-GRADE" }, notes: "SECRET-SETTLEMENT" } }, player);
   noSecrets(out); assert.deepEqual(out.result, { outcome: "win", grade: { score: 0, xpMult: 0.8, grade: "D" } });
 });
+
+test("角色资料 / 武器 / 背包请求：递归去掉坚毅生命字段，道具说明照常发（可以提到坚毅生命）", () => {
+  const V = require("../online-view");
+  const packet = { type: "sheetData", requestId: 9, protocol: 1, build: "b",
+    sheets: [{ kit: "ruby", name: "瑞比", shp: 11, shpMax: 11, layers: [{ type: "flesh", cur: 12, max: 12 }], weapons: [{ kit: "mint", shp: 3, atk: 7 }], passives: [{ name: "纳米科技", text: "规则说明" }] }],
+    armory: [{ kit: "ruby", weapons: [{ kit: "mint", atk: 7, upOnShp: true }] }],
+    bag: { water: 500, kuizhi: 3, items: [{ id: "medkit", name: "简易医疗包", qty: 2, hint: "治疗一名友方 1d4+6 内层生命" }, { id: "stim", name: "强心注射剂", qty: 1, hint: "自身恢复 16 生命，失去 6 坚毅生命" }, { id: "x", name: "空", qty: 0 }] } };
+  const out = V.projectPacket(packet, { recipientId: "p1", gmId: "host" });
+  const json = JSON.stringify(out);
+  assert.ok(!/shp/i.test(json), json);
+  assert.equal(out.sheets[0].name, "瑞比");
+  assert.equal(out.sheets[0].weapons[0].atk, 7);
+  assert.equal(out.sheets[0].passives[0].text, "规则说明");
+  assert.equal(out.requestId, 9);
+  assert.deepEqual(JSON.parse(JSON.stringify(out.bag)), { water: 500, kuizhi: 3, items: [{ id: "medkit", name: "简易医疗包", qty: 2, hint: "治疗一名友方 1d4+6 内层生命" }, { id: "stim", name: "强心注射剂", qty: 1, hint: "自身恢复 16 生命，失去 6 坚毅生命" }] });
+});
+
+test("特殊棋盘：玩家拿到区号、坐标、连接，所有区的场地和所有连接的间隙", () => {
+  const V = require("../online-view");
+  const state = { zoneMode: 4, board: { id: "square4", name: "x", zones: [{ id: 1, x: 0, y: 0 }, { id: 2, x: 1, y: 0 }, { id: 3, x: 0, y: 1 }, { id: 4, x: 1, y: 1, secret: 1 }], links: [[1, 2], [1, 3], [2, 4], [3, 4]], playerZone: 3 },
+    fields: { 4: { ice: true, fieldLock: "x" } }, gaps: { "1-3": { type: "wall", hp: 9, maxHp: 12 }, "2-4": { type: "door", open: true } }, units: [] };
+  const out = V.projectState(state);
+  assert.deepEqual(JSON.parse(JSON.stringify(out.board)), { zones: [{ id: 1, x: 0, y: 0 }, { id: 2, x: 1, y: 0 }, { id: 3, x: 0, y: 1 }, { id: 4, x: 1, y: 1 }], links: [[1, 2], [1, 3], [2, 4], [3, 4]], id: "square4" });
+  assert.equal(out.fields[4].ice, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(out.gaps["1-3"])), { hp: 9, maxHp: 12, type: "wall" });
+  assert.equal(out.gaps["2-4"].open, true);
+  assert.equal(V.projectState({ zoneMode: 3, units: [] }).board, undefined);
+});
+
+test("状态图标：自我效果、挂着的攻击效果、角色仪表数据只发白名单字段；生效事件只带图标名", () => {
+  require("../hud-icons.js");
+  const u = unit();
+  u.self = "conductor"; u.selfBurnStacks = 2;
+  u.resources.nextAtkFx = ["bolt", "SECRET-FX", "backflow"];
+  const out = V.projectUnit(u);
+  assert.equal(out.self, "conductor");
+  assert.deepEqual(out.resources.nextAtkFx, ["bolt", "backflow"]);
+  assert.equal(out.hud.kit, "ruby");
+  assert.equal(out.hud.nano, 50);
+  assert.doesNotMatch(JSON.stringify(out), /SECRET|732911/);
+  assert.equal(V.projectUnit({ ...unit(), self: "SECRET-SELF" }).self, undefined);
+  const tape = V.projectTape([
+    { type: "pop", unitId: "u1", kind: "proc", fx: "burn" },
+    { type: "pop", unitId: "u1", kind: "proc", fx: "<script>" },
+    { type: "pop", unitId: "u1", kind: "fxword", text: "猛击" }
+  ]);
+  assert.deepEqual(tape.map(e => e.kind + ":" + (e.fx || e.text || "")), ["proc:burn", "fxword:猛击"]);
+});

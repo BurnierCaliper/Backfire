@@ -91,17 +91,17 @@ test("sandbox previews spend temporary points without locking or broadcasting an
   assert.equal(f.send("p1", { type: "orderMove", actor: first.id, index: 2 }).ok, true, "preview did not lock the real order model");
 });
 
-test("bridge appends summoned weapons and preserves a real refunded AP spend as a lock", () => {
+test("bridge places a summoned weapon next to its hero, acts at once, and preserves a real refunded AP spend as a lock", () => {
   const f = bridge(["helu", "kolt"]), [owner] = f.units, { c } = f;
   f.begin();
   assert.equal(f.send("p1", { type: "skill", actor: owner.id, skill: "helu_summon", target: null, picks: {} }).ok, true);
   const weapon = c.findKit("ecmo", c.S.state.units);
-  assert.ok(weapon); assert.equal(f.view().order.at(-1).actor, weapon.id);
-  assert.equal(f.view().order.at(-1).owner, "p1");
-  assert.equal(f.view().order.at(-1).locked, false);
-  assert.equal(f.send("p1", { type: "endTurn" }).ok, true);
-  assert.equal(f.send("p2", { type: "endTurn" }).ok, true);
-  assert.equal(f.view().currentUnitId, weapon.id);
+  assert.ok(weapon);
+  const order = f.view().order, wi = order.findIndex(r => r?.actor === weapon.id), oi = order.findIndex(r => r?.actor === owner.id);
+  assert.equal(wi, oi - 1, "武器人紧挨着本人");
+  assert.equal(order[wi].owner, "p1");
+  assert.equal(order[wi].locked, false);
+  assert.equal(f.view().currentUnitId, weapon.id, "召唤后立刻轮到武器人");
   const target = c.EnemyAI.foes()[0];
   weapon.zone = target.zone; weapon.ap = weapon.apMax = 1; target.def = 1; target.defMax = 5;
   target.layers.forEach(layer => { layer.current = layer.max = 1000; });
@@ -218,6 +218,9 @@ test("the last weapon's recall, including a queued system reaction, readies the 
     f.begin();
     assert.equal(f.send("p1", { type: "skill", actor: owner.id, skill: "helu_summon", target: null, picks: {} }).ok, true);
     const weapon = c.findKit("ecmo", c.S.state.units);
+    assert.equal(f.view().currentUnitId, weapon.id, "召唤后立刻轮到武器人");
+    // 把武器人挪到最后一格，再让本人和队友先结束，就是「最后一个行动的是武器人」的情形
+    assert.equal(f.send("p1", { type: "orderMove", actor: weapon.id, index: f.view().order.length }).ok, true);
     assert.equal(f.send("p1", { type: "endTurn" }).ok, true);
     assert.equal(f.send("p2", { type: "endTurn" }).ok, true);
     assert.equal(f.view().currentUnitId, weapon.id);
@@ -227,8 +230,9 @@ test("the last weapon's recall, including a queued system reaction, readies the 
     assert.equal(weapon.hidden, true);
     assert.equal(c.HotseatGame.needsEnemy(), true, queuedReaction ? "act's final coordinator can observe a reaction removal" : "a normal action can finish the active roster");
     assert.equal(f.view().currentUnitId, null);
-    assert.equal(f.view().order.length, 2);
-    assert.ok(f.view().order.every(row => row.done));
+    // 挪动武器人时原位置留下一个空格（设计如此：空格不会让固定格子移位）
+    assert.equal(f.view().order.filter(Boolean).length, 2);
+    assert.ok(f.view().order.filter(Boolean).every(row => row.done));
   }
 });
 

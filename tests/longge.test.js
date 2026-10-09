@@ -370,7 +370,7 @@ test("消耗子弹时开枪 / 出拳的人头顶跳出红弹 / 蓝弹（画面�
   cmd(c, { actor: w.id, skill: "xiaoxiao_punch", target: foes[0].id });
   assert.deepEqual(plain(pops[1]), { id: w.id, text: "红弹", element: "fire" }, "小朋友出拳：小朋友头顶");
   const src = require("node:fs").readFileSync(require("node:path").join(H.ROOT, "online-view.js"), "utf8");
-  assert.match(src, /"partner", "bullet"\]/, "联机投影也放行");
+  assert.match(src, /"partner", "bullet"[,\]]/, "联机投影也放行");
 });
 
 test("连续拳打飞行目标：三拳都打出去，近程打飞行的附赠行动整次只付一次；付不起就不出手、不耗子弹", () => {

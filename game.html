@@ -14,6 +14,7 @@
   <link rel="stylesheet" href="hotseat.css" />
   <link rel="stylesheet" href="online.css" />
   <link rel="stylesheet" href="online-gm-ui.css" />
+  <link rel="stylesheet" href="hud-icons.css" />
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -164,6 +165,7 @@
   <footer class="g-hud">
     <div class="party" id="g-party"></div>
     <div class="hud-row">
+      <div class="hi-gauge" id="g-gauge" aria-label="角色仪表"></div>
       <div class="skills" id="g-skills"></div>
       <div class="hud-side"><button class="endturn" id="g-endturn">结束回合<small>空格</small></button></div>
     </div>
@@ -325,6 +327,20 @@
       </label>
       <button class="g-btn" id="g-prop-add">放置</button>
     </div>
+    <p class="sheet-k">战斗掉落（打赢才给，直接进背包；战斗模板也会带上）</p>
+    <div class="sheet-foot row">
+      <label>奎支 <input id="g-drop-kz" type="number" min="0" value="0" style="width:90px" /></label>
+      <label>物品 <select id="g-drop-sel"></select></label>
+      <label>数量 <input id="g-drop-qty" type="number" min="1" value="1" style="width:56px" /></label>
+      <button class="g-btn" id="g-drop-add">加入掉落</button>
+    </div>
+    <div id="g-drop-list" class="sheet-list"></div>
+    <p class="sheet-k">战斗模板（存在这台电脑上；跑团「战斗模板」页可以直接用它开战，进战斗时战场已经摆好）</p>
+    <div class="sheet-foot row">
+      <label>名称 <input id="g-tpl-name" type="text" maxlength="40" placeholder="比如：桥头伏击" style="width:160px" /></label>
+      <button class="g-btn" id="g-tpl-save" title="把现在摆好的区制、天气、我方站位、敌人（含首领机制）、场地、间隙、配置物记成一个模板">把当前战场存为模板</button>
+    </div>
+    <div id="g-tpl-list" class="sheet-list"></div>
   </div>
 </div>
 <div class="sheet" id="g-enc-sheet">
@@ -964,6 +980,7 @@ window.GAME_MODE = true;
 <script src="trpg-data.js"></script>
 <script src="trpg.js"></script>
 <script src="rogue-data.js"></script>
+<script src="battle-templates.js"></script>
 <script src="trpg-tasks.js"></script>
 <script src="rogue.js"></script>
 <script src="battle-commands.js"></script>
@@ -975,7 +992,9 @@ window.GAME_MODE = true;
 <script src="gm-commands.js"></script>
 <script src="sfx-samples.js"></script>
 <script src="sfx.js"></script>
+<script src="hit-fx.js"></script>
 <script src="icons.js"></script>
+<script src="hud-icons.js"></script>
 <script src="sheet-ui.js"></script>
 <script src="armory-ui.js"></script>
 <script src="world-map.js"></script>

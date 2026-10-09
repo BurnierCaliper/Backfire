@@ -17,7 +17,7 @@
   const UNDO_MAX = 20;
 
   const TABS = [
-    ["party", "队伍"], ["sheet", "角色"], ["rest", "时间与休息"], ["shop", "商店"], ["bag", "背包"], ["smith", "武器升级"], ["tasks", "任务"], ["backstage", "后台"]
+    ["party", "队伍"], ["sheet", "角色"], ["rest", "时间与休息"], ["shop", "商店"], ["bag", "背包"], ["smith", "武器升级"], ["tasks", "任务"], ["checks", "检定"], ["battles", "战斗模板"], ["backstage", "后台"]
   ];
 
   function heroes() { return trpgHeroes(); }
@@ -154,6 +154,7 @@
           <button class="g-btn" id="tr-xp-go">发放</button>
         </div>
         <p class="r-hint">升级照手册第三章：4 级、8 级各 1 点属性点（8 级那点不能加在曾经加过的同一项上）；职责技能按角色卡自动解锁；熟练项、专长由主持人记在角色卡上。</p>
+        ${attrRequestsHtml()}
         ${attrs ? `<h3>分配属性点</h3>${attrs}` : ""}
         <h3>重新开团</h3>
         <button class="g-btn" id="tr-reset">清空这个存档的进度（等级、物资、时间全部归零）</button>
@@ -422,7 +423,7 @@
   function taskRoute(t) {
     return `<div class="tk-route">${t.nodes.map((n, i) => {
       const cls = t.status === "active" ? (i < t.index ? " done" : i === t.index ? " cur" : "") : "";
-      const foes = n.enemies.length ? `：${n.enemies.map(e => `${presetName(e.id)} Lv${e.lv}`).join("、")}${n.weather !== "none" ? ` · ${WX[n.weather]}` : ""}` : "";
+      const foes = n.template ? `：模板「${n.template.name}」` : n.enemies.length ? `：${n.enemies.map(e => `${presetName(e.id)} Lv${e.lv}`).join("、")}${n.weather !== "none" ? ` · ${WX[n.weather]}` : ""}` : "";
       return `<span class="tk-node${cls}" title="${esc(n.note || "")}">${i + 1}. ${esc(NODE_T()[n.type])}${esc(foes)}${n.note ? ` · ${esc(n.note)}` : ""}</span>`;
     }).join("")}</div>`;
   }
@@ -456,13 +457,18 @@
     const presets = (typeof enemyPresets === "function" ? enemyPresets() : []).map(p => [p.id, p.name]);
     const nodes = t.nodes.map((n, i) => {
       const fight = n.type === "battle" || n.type === "elite";
-      const foes = fight ? `<div class="tk-foes">${n.enemies.map((e, j) => `<div class="tr-row">
+      const tpls = typeof battleTemplateList === "function" ? battleTemplateList() : [];
+      const tplOpts = [["", "不用模板（按下面配置）"]].concat(tpls.map(x => [x.id, x.name]));
+      if (n.template && !tpls.some(x => x.id === n.template.id)) tplOpts.push([n.template.id, n.template.name + "（已存进任务）"]);
+      const tplRow = fight ? `<div class="tr-row">战斗模板 <select data-te-tpl="${i}">${options(tplOpts, n.template ? n.template.id : "")}</select>
+          ${n.template ? `<span class="r-hint">${esc(battleTemplateSummary(n.template))}</span>` : ""}</div>` : "";
+      const foes = !fight ? "" : n.template ? tplRow : tplRow + `<div class="tk-foes">${n.enemies.map((e, j) => `<div class="tr-row">
             <select data-te="nodes.${i}.enemies.${j}.id">${options(presets, e.id)}</select>
             等级 ${inp(`nodes.${i}.enemies.${j}.lv`, e.lv, 52, "number")} 区域 <select data-te="nodes.${i}.enemies.${j}.zone">${options([1, 2, 3, 4, 5].map(z => [z, z + " 区"]), e.zone)}</select>
             <button class="g-btn small" data-te-act="delEnemy:${i}:${j}">删</button></div>`).join("")}
           <div class="tr-row"><button class="g-btn small" data-te-act="addEnemy:${i}">＋ 敌人</button>
             天气 <select data-te="nodes.${i}.weather">${options(Object.keys(WX).map(k => [k, WX[k]]), n.weather)}</select>
-            战场 <select data-te="nodes.${i}.zoneMode">${options([[2, "两区"], [3, "三区"], ["line4", "四区直排"], ["square4", "四区方形 2×2"], ["cross5", "五区十字"]], n.zoneMode)}</select></div></div>` : "";
+            战场 <select data-te="nodes.${i}.zoneMode">${options([[2, "两区"], [3, "三区"], ["line4", "四区直排"], ["square4", "四区方形 2×2"], ["cross5", "五区十字"]], n.zoneMode)}</select></div></div>`;
       return `<div class="tk-enode"><div class="tr-row"><b>第 ${i + 1} 站</b>
           <select data-te="nodes.${i}.type" data-te-rerender="1">${options(Object.keys(NODE_T()).map(k => [k, NODE_T()[k]]), n.type)}</select>
           说明 ${inp(`nodes.${i}.note`, n.note, 260)}
@@ -564,6 +570,7 @@
           let cfg;
           try { cfg = trpgTaskPrepareBattle(id); } catch (e) { alert(e.message); return; }
           if (!lowHpOk()) { TRPG.taskBattle = null; return; }
+          if (cfg.template) { GAME.lastEncounter = battleTemplateToEncounter(cfg.template); return uiCommand("toBattle"); }
           GAME.lastEncounter = null;
           GAME.enemyPlan = cfg.enemies;
           GAME.weather = cfg.weather;
@@ -579,6 +586,288 @@
       el[ev] = () => { teSet(el.dataset.te, el.value); if (el.dataset.teRerender) render(); };
     });
     P.querySelectorAll("[data-te-act]").forEach(b => { b.onclick = () => teAct(b.dataset.teAct, P); });
+    P.querySelectorAll("[data-te-tpl]").forEach(el => {
+      el.onchange = () => {
+        const n = taskEdit.nodes[Number(el.dataset.teTpl)];
+        if (!el.value) n.template = null;
+        else if (!n.template || n.template.id !== el.value) n.template = battleTemplateById(el.value);
+        render();
+      };
+    });
+  }
+
+  /* ---------- 检定（手册第一章）：主持人发起，联机时玩家自己掷，单机时主持人代掷 ---------- */
+  let localChecks = [];   // 不联机时的检定记录（只在这次打开的页面里）
+  const checkForm = { prof: "侦察", diff: "normal", note: "", units: null };
+  const online = () => !!(window.HotseatGame && HotseatGame.isActive());
+  const checkList = () => online() ? (HotseatGame.getView().checks || []) : localChecks;
+  function checkPreview(unitIds) {
+    try { return HotseatGame.checkSpec({ prof: checkForm.prof, diff: checkForm.diff, unitIds, note: checkForm.note }); } catch (e) { return null; }
+  }
+  const pct = x => Math.round((Number(x) || 0) * 1000) / 10 + "%";
+  const rollText = r => r.rolls.map(x => x.roll == null ? x.label : (x.label ? x.label + " " : "") + x.roll).join("，");
+  PANELS.checks = function () {
+    const hs = heroes();
+    if (!checkForm.units) checkForm.units = hs.map(h => h.id);
+    const spec = checkPreview(hs.map(h => h.id));
+    const profOpts = Object.keys(PROFICIENCIES).map(g => `<optgroup label="${esc(g)}">${PROFICIENCIES[g].map(p => `<option${p === checkForm.prof ? " selected" : ""}>${esc(p)}</option>`).join("")}</optgroup>`).join("");
+    const diffOpts = Object.keys(ROGUE_CHECKS.diffs).map(k => `<option value="${k}"${k === checkForm.diff ? " selected" : ""}>${esc(ROGUE_CHECKS.diffs[k].name)}</option>`).join("");
+    const who = hs.map(h => {
+      const t = spec && spec.targets.find(x => x.unitId === h.id);
+      const odds = t ? `${["没有熟练", "一级熟练", "二级熟练", "三级熟练"][t.level] || ""} · 成功率 ${pct(t.base)}${t.adv ? " · 优势" : t.dis ? " · 劣势" : ""}${t.reroll ? " · 失败可重掷" : ""}` : "";
+      return `<label class="tr-pick"><input type="checkbox" data-ck-unit="${esc(h.id)}"${checkForm.units.includes(h.id) ? " checked" : ""}>${esc(h.name)}<small>${esc(odds)}</small></label>`;
+    }).join("");
+    const cards = checkList().slice().reverse().map(c => `<div class="tr-up tk-card${c.status === "open" ? " on" : ""}">
+        <div class="tk-head"><b>${esc(c.diffName)}「${esc(c.prof)}」检定</b><span class="tk-st">${c.status === "open" ? "进行中" : "已结束"}</span></div>
+        ${c.note ? `<p class="tk-goal">${esc(c.note)}</p>` : ""}
+        ${c.targets.map(t => `<div class="tr-row"><b>${esc(t.name)}</b> <span class="r-hint">成功率 ${pct(t.base)}${t.adv ? " · 优势" : t.dis ? " · 劣势" : ""}</span>
+          ${t.result ? `<b class="${t.result.ok ? "good" : "bad"}">${t.result.ok ? "成功" : "失败"}</b> <span class="r-hint">d100 ${esc(rollText(t.result))}</span>`
+            : c.status === "open" ? `<span class="r-hint">${online() ? "等玩家掷骰" : ""}</span><button class="g-btn small" data-ck="roll:${esc(c.id)}:${esc(t.unitId)}">${online() ? "代掷" : "掷骰"}</button>` : '<span class="r-hint">没有掷</span>'}</div>`).join("")}
+        ${c.status === "open" ? `<div class="tr-row"><button class="g-btn small" data-ck="close:${esc(c.id)}">结束这个检定</button></div>` : ""}</div>`).join("");
+    return `<p class="r-hint">按手册第一章：成功率看熟练等级和难度（没有熟练只能做简单检定），种族特长自动算优势 / 劣势 / 重掷。
+        ${online() ? "联机时发起后，玩家在自己画面上点「掷骰」，结果写进小队频道；主持人也可以代掷。" : "现在没有联机，检定由主持人在这里掷。"}</p>
+      <div class="tr-up">
+        <div class="tr-row">熟练项 <select id="ck-prof">${profOpts}</select> 难度 <select id="ck-diff">${diffOpts}</select>
+          说明 <input id="ck-note" value="${esc(checkForm.note)}" placeholder="比如：撬开仓库的锁" style="width:240px"></div>
+        <div class="tr-picks">${who}</div>
+        <div class="tr-row"><button class="g-btn" id="ck-open">发起检定</button></div>
+      </div>
+      ${cards || '<p class="r-hint">还没有检定。</p>'}`;
+  };
+  /** 联机时走房间（玩家马上看到）；本机热座直接交给热座会话 */
+  async function checkSubmit(cmd) {
+    const net = window.OnlineGame && OnlineGame.isHost && OnlineGame.isHost();
+    const ack = net ? await OnlineGame.submit(cmd) : HotseatGame.submit(cmd);
+    if (ack && ack.ok === false) alert(ack.error);
+    render();
+  }
+  function bindChecks(P) {
+    const prof = $("ck-prof"); if (!prof) return;
+    prof.onchange = () => { checkForm.prof = prof.value; render(); };
+    $("ck-diff").onchange = () => { checkForm.diff = $("ck-diff").value; render(); };
+    $("ck-note").oninput = () => { checkForm.note = $("ck-note").value; };
+    P.querySelectorAll("[data-ck-unit]").forEach(el => { el.onchange = () => {
+      const id = el.dataset.ckUnit; checkForm.units = checkForm.units.filter(x => x !== id); if (el.checked) checkForm.units.push(id);
+    }; });
+    $("ck-open").onclick = () => {
+      const ids = heroes().map(h => h.id).filter(id => checkForm.units.includes(id));
+      if (!ids.length) { alert("至少选一名角色"); return; }
+      if (online()) { checkForm.note = ""; return checkSubmit({ type: "checkOpen", prof: checkForm.prof, diff: checkForm.diff, unitIds: ids, note: $("ck-note").value }); }
+      const spec = checkPreview(ids); if (!spec) return;
+      spec.note = $("ck-note").value; checkForm.note = "";
+      localChecks.push(Object.assign(spec, { id: "check-" + Date.now(), status: "open", at: Date.now(), targets: spec.targets.map(t => Object.assign(t, { result: null })) }));
+      log.push({ stamp: stampNow(), lines: [`主持人发起${spec.diffName}「${spec.prof}」检定：${spec.targets.map(t => t.name).join("、")}${spec.note ? "（" + spec.note + "）" : ""}`] });
+      saveLog(); render();
+    };
+    P.querySelectorAll("[data-ck]").forEach(b => { b.onclick = () => {
+      const [cmd, checkId, unitId] = b.dataset.ck.split(":");
+      if (online()) return checkSubmit(cmd === "roll" ? { type: "checkRoll", checkId, unitId } : { type: "checkClose", checkId });
+      const c = localChecks.find(x => x.id === checkId); if (!c) return;
+      if (cmd === "close") c.status = "closed";
+      else {
+        const t = c.targets.find(x => x.unitId === unitId); if (!t || t.result) return;
+        t.result = Hotseat.rollCheck(t);
+        log.push({ stamp: stampNow(), lines: [`检定 · ${t.name}「${c.prof}」${c.diffName}（成功率 ${pct(t.base)}）：d100 ${rollText(t.result)} → ${t.result.ok ? "成功" : "失败"}`] });
+        saveLog();
+        if (c.targets.every(x => x.result)) c.status = "done";
+      }
+      render();
+    }; });
+  }
+  /** 联机时玩家申请的属性点：主持人同意才真正加上 */
+  function attrRequestsHtml() {
+    if (!online()) return "";
+    const list = (HotseatGame.getView().attrRequests || []).filter(r => r.status === "pending");
+    if (!list.length) return "";
+    return `<h3>玩家申请的属性点</h3>${list.map(r => `<div class="tr-row"><b>${esc(r.unitName)}</b> 想加 ${esc(r.attrs.map(a => ATTR_NAMES[a]).join("、"))} +1
+        <button class="g-btn small" data-attr-req="approve:${esc(r.id)}">同意</button><button class="g-btn small" data-attr-req="reject:${esc(r.id)}">不同意</button></div>`).join("")}`;
+  }
+  function bindAttrRequests(P) {
+    P.querySelectorAll("[data-attr-req]").forEach(b => { b.onclick = () => {
+      const [decision, requestId] = b.dataset.attrReq.split(":");
+      const r = (HotseatGame.getView().attrRequests || []).find(x => x.id === requestId); if (!r) return;
+      if (decision === "approve") {
+        const h = heroes().find(x => x.id === r.unitId);
+        const before = h ? Number(h.attrPoints) || 0 : 0;
+        if (h) act(ruleCommand("spendAttr", { kit: h.kit, attr: r.attrs[0] }));
+        const after = h ? Number((heroes().find(x => x.id === r.unitId) || {}).attrPoints) || 0 : before;
+        if (!h || after >= before) { alert("没加上（点数不够或这一项不能再加），这条申请按不同意处理"); return checkSubmit({ type: "attrDecide", requestId, decision: "reject" }); }
+      }
+      checkSubmit({ type: "attrDecide", requestId, decision });
+    }; });
+  }
+
+  /* ---------- 战斗模板（battle-templates.js）：主持人提前布置好战场，开战时直接摆好 ---------- */
+  let btEdit = null;   // 正在编辑的模板（一份拷贝，点「保存」才写回）
+  let btIo = "";       // 导入 / 导出框里的文字
+  const BT_PROPS = { button: "按钮", lever: "拉杆", battery: "超充能电池", boom: "爆炸桶", acid: "酸液桶", scrap: "碎渣机炮", turret: "防卫自律炮台" };
+  const BT_GAPS = { open: "畅通", bridge: "不稳桥梁", wall: "危墙", door: "机关门", void: "空隙" };
+  const BT_BOARDS = [[2, "两区"], [3, "三区"], ["line4", "四区直排"], ["square4", "四区方形 2×2"], ["cross5", "五区十字"]];
+  const btMechName = m => ({ execution: "死刑", share: "分担", spread: "远离", tower: "踩塔" })[m.type] || m.type;
+  /** 用模板开战：进战斗画面时敌人、场地、配置物都已经摆好 */
+  function fightTemplate(t) {
+    if (!t) return;
+    if (!lowHpOk()) return;
+    TRPG.taskBattle = null;
+    GAME.lastEncounter = battleTemplateToEncounter(t);
+    return uiCommand("toBattle");
+  }
+  function btCardHtml(t) {
+    const id = esc(t.id);
+    return `<div class="tr-up tk-card">
+      <div class="tk-head"><b>${esc(t.name)}</b><span class="tk-kind">${esc(BATTLE_TEMPLATE_TIERS[t.tier])}</span></div>
+      ${t.note ? `<p class="tk-goal">${esc(t.note)}</p>` : ""}
+      <div class="r-hint">${esc(battleTemplateSummary(t))}</div>
+      <div class="tr-row"><button class="g-btn small tk-go" data-bt="fight:${id}">用它开战</button>
+        <button class="g-btn small" data-bt="edit:${id}">编辑</button><button class="g-btn small" data-bt="dup:${id}">复制</button>
+        <button class="g-btn small" data-bt="export:${id}">导出</button><button class="g-btn small" data-bt="del:${id}">删除</button></div></div>`;
+  }
+  function btEditorHtml(t) {
+    const inp = (path, v, w, type, extra) => `<input type="${type || "text"}" data-bte="${path}" value="${esc(v == null ? "" : v)}" style="width:${w || 120}px"${extra || ""}>`;
+    const presets = (typeof enemyPresets === "function" ? enemyPresets() : []).filter(p => p.id !== "blank_pc").map(p => [p.id, p.name]);
+    const zones = battleTemplateZones(t.board);
+    const zoneSel = (path, cur) => `<select data-bte="${path}">${options(zones.map(z => [z, z + " 区"]), cur)}</select>`;
+    const lvTip = ' placeholder="随队" title="空着 = 跟着开战时的等级"';
+    const foes = t.enemies.map((e, j) => `<div class="tr-row">
+        <select data-bte="enemies.${j}.preset">${options(presets, e.preset)}</select>
+        等级 ${inp(`enemies.${j}.level`, e.level, 60, "number", lvTip)} 区域 ${zoneSel(`enemies.${j}.zone`, e.zone)}
+        ${e.mechanics ? `<span class="tk-chip">机制：${esc(e.mechanics.map(btMechName).join("、"))}<button class="g-btn small" data-bt-act="clearMech:${j}" title="去掉这个敌人身上的首领机制">×</button></span>` : ""}
+        <button class="g-btn small" data-bt-act="delEnemy:${j}">删</button></div>`).join("");
+    const fields = zones.map(z => {
+      const f = t.fields[z] || {};
+      return `<div class="tr-row">${z} 区 <select data-bt-field="${z}">${options(Object.keys(BATTLE_TEMPLATE_FIELD_KINDS).map(k => [k, BATTLE_TEMPLATE_FIELD_KINDS[k]]), battleTemplateFieldKind(f))}</select>
+        <label><input type="checkbox" data-bt-high="${z}"${f.highland ? " checked" : ""}> 高地</label></div>`;
+    }).join("");
+    const gaps = battleTemplateGapKeys(t.board).map(k => {
+      const g = t.gaps[k] || { type: "open", hp: null, open: false };
+      const hp = g.type === "bridge" || g.type === "wall" ? ` 耐久 <input type="number" data-bt-gaphp="${k}" value="${g.hp == null ? "" : g.hp}" placeholder="按规则掷" style="width:80px">` : "";
+      const door = g.type === "door" ? ` <label><input type="checkbox" data-bt-door="${k}"${g.open ? " checked" : ""}> 开着</label>` : "";
+      return `<div class="tr-row">${k.replace("-", "–")} 区之间 <select data-bt-gap="${k}">${options(Object.keys(BT_GAPS).map(x => [x, BT_GAPS[x]]), g.type)}</select>${hp}${door}</div>`;
+    }).join("");
+    const props = t.props.map((p, j) => `<div class="tr-row">
+        <select data-bte="props.${j}.kind">${options(Object.keys(BT_PROPS).map(k => [k, BT_PROPS[k]]), p.kind)}</select>
+        区域 ${zoneSel(`props.${j}.zone`, p.zone)} 等级 ${inp(`props.${j}.level`, p.level, 60, "number", lvTip)}
+        阵营 <select data-bte="props.${j}.faction">${options([["player", "我方"], ["enemy", "敌方"]], p.faction)}</select>
+        <button class="g-btn small" data-bt-act="delProp:${j}">删</button></div>`).join("");
+    return `<div class="tr-up tk-edit">
+      <h4>编辑战斗模板</h4>
+      <div class="tr-row">名称 ${inp("name", t.name, 180)} 类型 <select data-bte="tier">${options(Object.keys(BATTLE_TEMPLATE_TIERS).map(k => [k, BATTLE_TEMPLATE_TIERS[k]]), t.tier)}</select></div>
+      <div class="tr-row">备注 ${inp("note", t.note, 360)}</div>
+      <div class="tr-row">战场 <select data-bte="board" data-bte-rerender="1">${options(BT_BOARDS, t.board)}</select>
+        天气 <select data-bte="weather">${options(Object.keys(WX).map(k => [k, WX[k]]), t.weather)}</select>
+        我方站在 ${zoneSel("playerZone", t.playerZone)}</div>
+      <h4>敌人</h4>${foes || '<p class="r-hint">还没有敌人。</p>'}
+      <div class="tr-row"><button class="g-btn small" data-bt-act="addEnemy">＋ 敌人</button></div>
+      <h4>场地</h4>${fields}
+      <h4>间隙</h4>${gaps}
+      <h4>配置物</h4>${props || '<p class="r-hint">没有配置物。</p>'}
+      <div class="tr-row"><button class="g-btn small" data-bt-act="addProp">＋ 配置物</button></div>
+      <h4>战斗掉落（打赢才给，直接进背包）</h4>
+      <div class="tr-row">奎支 <input type="number" min="0" data-bt-dropkz="1" value="${(t.drops && t.drops.kuizhi) || 0}" style="width:90px">
+        物品 <select id="bt-drop-item">${options(Object.keys(ITEM_CATALOG).map(id => [id, ITEM_CATALOG[id].name || id]))}</select>
+        × <input type="number" min="1" id="bt-drop-qty" value="1" style="width:56px"> <button class="g-btn small" data-bt-act="addDrop">＋</button>
+        ${((t.drops && t.drops.items) || []).map((x, k) => `<span class="tk-chip">${esc((ITEM_CATALOG[x.id] || {}).name || x.id)}×${x.qty}<button class="g-btn small" data-bt-act="delDrop:${k}">×</button></span>`).join("")}</div>
+      <p class="r-hint">首领机制（死刑 / 分担 / 远离 / 踩塔）要在战斗画面「战场配置」里给敌人挂上，再「把当前战场存为模板」。</p>
+      <div class="tr-row"><button class="g-btn" data-bt-act="save">保存</button><button class="g-btn" data-bt-act="cancel">取消</button></div>
+    </div>`;
+  }
+  PANELS.battles = function () {
+    const list = typeof battleTemplateList === "function" ? battleTemplateList() : [];
+    const editing = btEdit && !list.some(t => t.id === btEdit.id) ? btEditorHtml(btEdit) : "";
+    const cards = list.map(t => btEdit && btEdit.id === t.id ? btEditorHtml(btEdit) : btCardHtml(t)).join("");
+    return `<p class="r-hint">提前把战场布置好存成模板：区制 / 棋盘、天气、我方站位、敌人（等级、区域）、场地、间隙、配置物。
+        点「用它开战」进战斗画面时一切都已经摆好，玩家看到的就是布置完的战场，主持人只要点「开始战斗」。
+        也可以在战斗画面的「战场配置」里摆好之后「把当前战场存为模板」（这样还能带上首领机制）。
+        模板存在这台电脑上，所有团、联机房间共用；任务的战斗站也能直接选模板。</p>
+      <div class="tr-row"><button class="g-btn small" data-bt="new:">新建模板</button>
+        <button class="g-btn small" data-bt="exportAll:">导出全部</button><button class="g-btn small" data-bt="import:">导入</button></div>
+      <div class="tr-row"><textarea id="bt-io" rows="3" style="width:100%" placeholder="导出的模板文字会出现在这里；要导入就把文字贴进来再点「导入」">${esc(btIo)}</textarea></div>
+      ${editing}
+      ${cards || (editing ? "" : '<p class="r-hint">还没有模板。</p>')}`;
+  };
+  function btSet(path, v) {
+    const keys = path.split(".");
+    let o = btEdit;
+    for (let i = 0; i < keys.length - 1; i++) o = o[keys[i]];
+    const k = keys[keys.length - 1];
+    if (k === "level") o[k] = v === "" ? null : Number(v);
+    else if (k === "zone" || k === "playerZone") o[k] = Number(v);
+    else if (k === "board") o[k] = /^\d+$/.test(v) ? Number(v) : v;
+    else o[k] = v;
+    if (k === "board") { btEdit.playerZone = null; btEdit = battleTemplateNormalize(btEdit); }   // 换了棋盘：我方回到棋盘默认的区，区号、间隙夹回新棋盘
+  }
+  function btAct(a) {
+    const [cmd, x] = a.split(":");
+    const t = btEdit, j = Number(x);
+    const zones = t ? battleTemplateZones(t.board) : [1, 2];
+    switch (cmd) {
+      case "save":
+        try { battleTemplateSave(t); } catch (e) { alert(e.message); return; }
+        btEdit = null; break;
+      case "cancel": btEdit = null; break;
+      case "addEnemy": t.enemies.push({ preset: "thug_knife", level: null, zone: zones[zones.length - 1] }); break;
+      case "delEnemy": t.enemies.splice(j, 1); break;
+      case "clearMech": delete t.enemies[j].mechanics; break;
+      case "addProp": t.props.push({ kind: "boom", zone: zones[Math.min(1, zones.length - 1)], level: null, faction: "player" }); break;
+      case "delProp": t.props.splice(j, 1); break;
+      case "addDrop": {
+        t.drops = t.drops || { kuizhi: 0, items: [] };
+        const id = $("bt-drop-item").value, qty = Math.max(1, Number($("bt-drop-qty").value) || 1);
+        const same = t.drops.items.find(x => x.id === id); if (same) same.qty += qty; else t.drops.items.push({ id, qty });
+        break;
+      }
+      case "delDrop": if (t.drops) { t.drops.items.splice(j, 1); if (!t.drops.items.length && !t.drops.kuizhi) t.drops = null; } break;
+    }
+    render();
+  }
+  function bindTemplates(P) {
+    const io = () => { const box = $("bt-io"); return box ? box.value : ""; };
+    P.querySelectorAll("[data-bt]").forEach(b => {
+      b.onclick = () => {
+        const i = b.dataset.bt.indexOf(":");
+        const cmd = b.dataset.bt.slice(0, i), id = b.dataset.bt.slice(i + 1);
+        btIo = io();
+        if (cmd === "new") { btEdit = battleTemplateNormalize({ name: "新战场", board: 2, enemies: [{ preset: "thug_knife", level: null, zone: 2 }] }); return render(); }
+        if (cmd === "edit") { btEdit = battleTemplateById(id); return render(); }
+        if (cmd === "dup") { battleTemplateDuplicate(id); return render(); }
+        if (cmd === "del") { const t = battleTemplateById(id); if (t && confirm(`删除模板「${t.name}」？`)) battleTemplateDelete(id); if (btEdit && btEdit.id === id) btEdit = null; return render(); }
+        if (cmd === "export") { btIo = battleTemplateExport([id]); return render(); }
+        if (cmd === "exportAll") { btIo = battleTemplateExport(); return render(); }
+        if (cmd === "import") {
+          if (!btIo.trim()) { alert("先把模板文字贴到框里"); return; }
+          try { const n = battleTemplateImport(btIo); btIo = ""; alert(`导入了 ${n} 个模板`); } catch (e) { alert(e.message); return; }
+          return render();
+        }
+        if (cmd === "fight") return fightTemplate(battleTemplateById(id));
+      };
+    });
+    if (!btEdit) return;
+    P.querySelectorAll("[data-bte]").forEach(el => {
+      const ev = el.tagName === "SELECT" ? "onchange" : "oninput";
+      el[ev] = () => { btSet(el.dataset.bte, el.value); if (el.dataset.bteRerender) render(); };
+    });
+    P.querySelectorAll("[data-bt-field]").forEach(el => {
+      el.onchange = () => { const z = el.dataset.btField; battleTemplateSetField(btEdit, z, el.value, !!(btEdit.fields[z] || {}).highland); };
+    });
+    P.querySelectorAll("[data-bt-high]").forEach(el => {
+      el.onchange = () => { const z = el.dataset.btHigh; battleTemplateSetField(btEdit, z, battleTemplateFieldKind(btEdit.fields[z]), el.checked); };
+    });
+    P.querySelectorAll("[data-bt-gap]").forEach(el => {
+      el.onchange = () => {
+        const k = el.dataset.btGap;
+        if (el.value === "open") delete btEdit.gaps[k];
+        else btEdit.gaps[k] = { type: el.value, hp: null, open: false };
+        render();
+      };
+    });
+    P.querySelectorAll("[data-bt-gaphp]").forEach(el => { el.oninput = () => { const g = btEdit.gaps[el.dataset.btGaphp]; if (g) g.hp = el.value === "" ? null : Number(el.value); }; });
+    P.querySelectorAll("[data-bt-door]").forEach(el => { el.onchange = () => { const g = btEdit.gaps[el.dataset.btDoor]; if (g) g.open = el.checked; }; });
+    P.querySelectorAll("[data-bt-act]").forEach(b => { b.onclick = () => btAct(b.dataset.btAct); });
+    P.querySelectorAll("[data-bt-dropkz]").forEach(el => { el.oninput = () => {
+      const kz = Math.max(0, Number(el.value) || 0);
+      btEdit.drops = btEdit.drops || { kuizhi: 0, items: [] }; btEdit.drops.kuizhi = kz;
+      if (!kz && !btEdit.drops.items.length) btEdit.drops = null;
+    }; });
   }
 
   /** 进战斗前：有队员血量低于 20% 而且还能短休，先提醒（返回 false = 不进） */
@@ -588,9 +877,28 @@
   }
 
   /* ---------- 绑定 ---------- */
+  // 玩家掷了检定、申请了属性点：主持人这边的「检定」「队伍」页跟着刷新（正在输入时不打断）
+  let tableKey = "", tableSub = false;
+  function watchTable() {
+    if (tableSub || !window.HotseatGame) return;
+    tableSub = true;
+    HotseatGame.subscribe(() => {
+      if (!HotseatGame.isActive() || !Screens.is("trpg") || !["checks", "party"].includes(tab)) return;
+      const v = HotseatGame.getView(), key = JSON.stringify([v.checks, v.attrRequests]);
+      if (key === tableKey) return;
+      tableKey = key;
+      const a = document.activeElement;
+      if (a && $("tr-panel").contains(a) && /^(INPUT|TEXTAREA)$/.test(a.tagName)) return;
+      render();
+    });
+  }
   function bind() {
+    watchTable();
     const P = $("tr-panel");
     bindTasks(P);
+    bindTemplates(P);
+    bindChecks(P);
+    bindAttrRequests(P);
     const on = (id, fn) => { const b = $(id); if (b) b.onclick = fn; };
     $("tr-tabs").querySelectorAll("[data-tab]").forEach(b => { b.onclick = () => { tab = b.dataset.tab; render(); }; });
     // 队伍
@@ -871,6 +1179,7 @@
       const lines = [`${head}（第 ${r.turn} 回合）：每人获得 ${r.xp} 经验${r.xpMult > 1 ? `（经验 ×${r.xpMult}）` : ""}，掉落 ${r.kuizhi} 奎支（现有 ${Number(state.kuizhi) || 0}）。`];
       if (r.grade) lines.push(`评价 ${r.grade.grade}：${r.grade.score} 分（基准 ${r.grade.par}）${r.outcome === "win" && r.grade.xpMult > 1 ? `，战斗经验 ×${r.grade.xpMult}（已含在上面的经验里）` : ""}。`);
       if (r.ups && r.ups.length) lines.push("升级：" + r.ups.join("、") + "。");
+      if (r.drops && typeof battleDropsText === "function") lines.push("战斗掉落：" + battleDropsText(r.drops) + "（已放进背包）。");
       (r.stats || []).filter(x => x.dmg || x.brk || x.taken || x.kills || x.heal).forEach(x => {
         lines.push(`${x.sub ? "　" : ""}${x.name}${x.sub ? "（武器人）" : ""}：伤害 ${Math.round(x.dmg)} · 击破 ${Math.round(x.brk)} · 承伤 ${Math.round(x.taken)} · 击杀 ${x.kills} · 治疗 ${Math.round(x.heal)}`);
       });

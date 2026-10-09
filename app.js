@@ -2305,7 +2305,7 @@ function settleBattleRewards(outcome) {
   if (bs.rewardSettlement) return {
     outcome: bs.rewardSettlement.outcome, grade: bs.rewardSettlement.grade,
     finishBonus: null, xpBonus: 0, totalXpBonus: bs.rewardSettlement.xpBonus,
-    ups: bs.rewardSettlement.ups.slice(), alreadySettled: true
+    ups: bs.rewardSettlement.ups.slice(), drops: bs.rewardSettlement.drops || null, alreadySettled: true
   };
   const finishBonus = outcome === "win" ? applyFinishBonus() : null;
   const grade = battleGrade();
@@ -2319,15 +2319,45 @@ function settleBattleRewards(outcome) {
     }
   }
   const ups = [];
-  bs.rewardSettlement = { outcome, grade, xpBonus, ups };
+  const drops = outcome === "win" ? giveBattleDrops() : null;
+  bs.rewardSettlement = { outcome, grade, xpBonus, ups, drops };
   state.units.filter(u => u.isPlayer && !isWeaponUnit(u)).forEach(u => {
     const from = u.level;
     if (typeof tryLevelUp === "function" && tryLevelUp(u) && u.level > from) ups.push(`${u.name} ${from}→${u.level}`);
   });
   // 整局战场记录：这场的数据并进本局 / 本团的累计（存在队伍档案 LEDGER.career 里，跟着存档走）
-  if (typeof careerRecordBattle === "function") careerRecordBattle(outcome, grade);
+  const encName = typeof GAME !== "undefined" && GAME && GAME.encounter && GAME.encounter.name || "";
+  if (typeof careerRecordBattle === "function") careerRecordBattle(outcome, grade, { name: encName, drops });
   if (typeof bestiaryRecordBattle === "function") bestiaryRecordBattle(outcome);   // 敌人图鉴：这场出现过的敌人记为遭遇过
-  return { outcome, grade, finishBonus, xpBonus, totalXpBonus: xpBonus, ups: ups.slice(), alreadySettled: false };
+  return { outcome, grade, finishBonus, xpBonus, totalXpBonus: xpBonus, ups: ups.slice(), drops, alreadySettled: false };
+}
+
+/* 战斗掉落：主持人在「战场配置」或战斗模板里设好（奎支 + 物品），打赢才给，进背包。
+ * state.battleDrops = { kuizhi, items: [{ id, qty }] }。返回 { kuizhi, items: [{ id, name, qty }] } 或 null */
+function normalizeBattleDrops(d) {
+  if (!d || typeof d !== "object") return null;
+  const kuizhi = Math.max(0, Math.min(999999, Math.floor(Number(d.kuizhi) || 0)));
+  const items = (Array.isArray(d.items) ? d.items : []).filter(x => x && typeof ITEM_CATALOG !== "undefined" && Object.prototype.hasOwnProperty.call(ITEM_CATALOG, x.id))
+    .slice(0, 30).map(x => ({ id: x.id, qty: Math.max(1, Math.min(999, Math.floor(Number(x.qty) || 1))) }));
+  return kuizhi || items.length ? { kuizhi, items } : null;
+}
+function giveBattleDrops() {
+  const d = normalizeBattleDrops(state.battleDrops);
+  if (!d) return null;
+  const notes = [];
+  if (d.kuizhi) state.kuizhi = (Number(state.kuizhi) || 0) + d.kuizhi;
+  d.items.forEach(x => bagAdd(x.id, x.qty, notes));
+  state.battleDrops = null;   // 只给一次
+  const out = { kuizhi: d.kuizhi, items: d.items.map(x => ({ id: x.id, name: (ITEM_CATALOG[x.id] || {}).name || x.id, qty: x.qty })) };
+  appendLog("战斗掉落：" + battleDropsText(out) + "，已放进背包。");
+  return out;
+}
+function battleDropsText(d) {
+  if (!d) return "无";
+  const parts = [];
+  if (d.kuizhi) parts.push(d.kuizhi + " 奎支");
+  (d.items || []).forEach(x => parts.push((x.name || (ITEM_CATALOG[x.id] || {}).name || x.id) + "×" + x.qty));
+  return parts.join("、") || "无";
 }
 
 /** 包住一次行动：结束后
@@ -2576,6 +2606,7 @@ function applyTypedDot(unit, amount, element, notes, label, opts) {
   notes.push(label + ` → 实伤 ${Math.floor(res.total || 0)}`);
   if (typeof afterDamageTaken === "function") afterDamageTaken(unit, element, res.total || 0, Math.max(0, shieldBefore - shieldSum(unit)), notes, {});
   const sdKey = inferStatusDmgKey(label, element);
+  if (PROC_DOT_FX[sdKey]) procFx(unit, PROC_DOT_FX[sdKey]);
   addStatusDmg(sdKey, res.total || amount);
   noteSideDamage(res.total || 0, STATUS_DMG_NAME[sdKey] || "其他", unit);
   if (unit && unit.isPlayer) { const st = battleStat(unit); if (st) st.taken += Math.floor(Number(res.total) || 0) + Math.floor(Number(res.shpDealt) || 0); }
@@ -7827,9 +7858,16 @@ function clearUfoLegStun(u) {
   u._imbalanceLock = false;
 }
 
+/** 某个状态 / 效果在这个单位身上生效了：画面上对应的图标放大一下并发光（hud-icons.js 的 key） */
+function procFx(unit, fx) {
+  if (unit && fx && typeof spawnPopup === "function") spawnPopup(unit, { kind: "proc", fx });
+}
+const PROC_DOT_FX = { burn: "burn", selfburn: "selfBurn", shock: "shock", corr: "corr", reso: "reso", high: "high" };
+
 function dealBreak(unit, amount, element, notes, reason) {
   amount = Math.max(0, Math.floor(Number(amount) || 0));
   if (!unit || !amount) return;
+  if (/冻伤/.test(reason || "")) procFx(unit, "frost");
   notes = notes || [];
   let sink = unit;
   if (isUfoLeg(unit)) {
