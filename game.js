@@ -1173,6 +1173,16 @@
             await wait(110);
           }
         } else if (e.kind === "highboom") {
+          // 自爆前先预警：单位卡闪两下（薄荷色描边 + 高能液体发白），再炸
+          const bc = cards.get(e.unitId);
+          if (bc && !G.skip) {
+            bc.wrap.classList.remove("high-warn"); void bc.wrap.offsetWidth; bc.wrap.classList.add("high-warn");
+            if (window.Sfx && !G.sim) Sfx.ui("toggle");
+            await wait(300);
+            if (window.Sfx && !G.sim) Sfx.ui("toggle");
+            await wait(chain ? 300 : 360);
+            bc.wrap.classList.remove("high-warn");
+          }
           // 高能自爆：震屏 + 大字 + 爆炸声 + 大号数字，停久一点让人看清
           const app = $("g-app");
           app.classList.remove("quake"); void app.offsetWidth; app.classList.add("quake");
