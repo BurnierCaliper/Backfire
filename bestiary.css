@@ -131,3 +131,26 @@ body.bx-open { overflow: hidden; }
   .bx-nums { grid-template-columns: repeat(2, 1fr); }
 }
 @media (prefers-reduced-motion: reduce) { .bx.show { animation: none; } .bx-card { transition: none; } }
+
+/* 图鉴切换：敌人 / 配置物 / 效果（codex.js） */
+.bx-modes { display: inline-flex; box-shadow: inset 0 0 0 1px rgba(236, 224, 198, .3); }
+.bx-modes button { font: inherit; font-size: 13px; font-weight: 900; letter-spacing: .08em; padding: 4px 14px; color: var(--bx-paper); background: transparent; border: 0; cursor: pointer; }
+.bx-modes button.on { color: var(--bx-ink); background: var(--bx-paper); }
+.bx-modes button:focus-visible, .bx-search:focus-visible { outline: 2px solid var(--bx-holo); outline-offset: 1px; }
+.bx-search { margin: 0 0 12px; padding: 7px 10px; font: inherit; font-size: 14px; color: var(--bx-paper); background: rgba(236, 224, 198, .06); border: 0; box-shadow: inset 0 0 0 1px rgba(236, 224, 198, .2); }
+.bx-search::placeholder { color: var(--bx-muted); }
+.bx-search[hidden] { display: none; }
+.bx-bar[hidden] { display: none; }
+.bx-card.cx { --c: var(--bx-holo); min-height: 96px; }
+.bx-card.cx.e-fire { --c: var(--fire, #ff6a3d); } .bx-card.cx.e-acid { --c: var(--acid, #9be15d); } .bx-card.cx.e-electric { --c: var(--electric, #ffe14d); }
+.bx-card.cx.e-ice { --c: var(--ice, #7fd8ff); } .bx-card.cx.e-energy { --c: var(--energy, #ff5fd2); } .bx-card.cx.e-physical { --c: var(--physical, #c9b79a); } .bx-card.cx.e-harmonic { --c: var(--harmonic, #9d7bff); }
+.bx-card.cx { color: var(--bx-paper); }
+.bx-card.cx small { line-height: 1.45; }
+.cx-chart { display: grid; grid-template-columns: repeat(auto-fill, minmax(70px, 1fr)); gap: 4px; }
+.cx-cell { padding: 6px 8px; background: rgba(236, 224, 198, .06); }
+.cx-cell small { display: flex; align-items: center; gap: 3px; font-size: 11px; color: var(--bx-muted); }
+.cx-cell small .eicon { width: 14px; height: 14px; }
+.cx-cell b { font-family: "Black Ops One", Impact, sans-serif; font-size: 17px; color: var(--bx-muted); }
+.cx-cell.up b { color: #f2c230; }
+.cx-cell.down b { color: #8d8274; }
+.cx-groupnote { margin-top: 18px; }

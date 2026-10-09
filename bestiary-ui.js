@@ -1,5 +1,7 @@
-/* Antlerscale: Backfire · 敌人图鉴（界面）
- * Bestiary.open(opt) 打开全屏图鉴。opt.partySize：按几人队算血量（默认 4，界面上可以切）。
+/* Antlerscale: Backfire · 图鉴（界面）：敌人 / 配置物 / 效果
+ * Bestiary.open(opt) 打开全屏图鉴。opt.partySize：按几人队算血量（默认 4，界面上可以切）；
+ * opt.mode：先打开哪一本（"enemy" 默认 / "prop" / "effect"）。
+ * 配置物、效果图鉴是规则说明（数据在 codex.js），一直都能查，可以按分类筛、按关键词搜。
  * 左边是卡片墙（按 杂兵 / 精英 / 首领 筛），右边是选中敌人的详情：
  *   遭遇过 → 行动方式、能力、按等级和人数现算的血量 / 架势 / atk、遭遇记录；
  *   没遭遇过 → 「？？？」，只看得到阵营和出没区域。数据在 bestiary.js。 */
@@ -8,17 +10,21 @@ const Bestiary = (() => {
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c]));
   const RANGE = { melee: "近距离", ranged: "远距离", any: "远近皆可" };
   let root = null, filter = "all", sel = null, lv = null, party = 4, sub = "";
+  let mode = "enemy", query = "";
+  const MODES = [["enemy", "敌人"], ["prop", "配置物"], ["effect", "效果"]];
+  const codexSel = { prop: null, effect: null }, codexFilter = { prop: "all", effect: "all" };
 
   function build() {
     root = document.createElement("div");
     root.className = "bx";
     root.setAttribute("role", "dialog");
-    root.setAttribute("aria-label", "敌人图鉴");
+    root.setAttribute("aria-label", "图鉴");
     root.innerHTML = `
       <div class="bx-frame">
         <header class="bx-head">
           <span class="bx-tag">图鉴</span>
           <h3>敌人图鉴</h3>
+          <nav class="bx-modes" role="tablist">${MODES.map(([k, n]) => `<button role="tab" data-mode="${k}">${n}</button>`).join("")}</nav>
           <div class="bx-progress"><span class="bx-prog-text"></span><span class="bx-bar"><i></i></span></div>
           <span class="bx-spacer"></span>
           <button class="g-btn" data-bx="close">关闭</button>
@@ -26,6 +32,7 @@ const Bestiary = (() => {
         <div class="bx-body">
           <section class="bx-list">
             <nav class="bx-tabs"></nav>
+            <input class="bx-search" type="search" placeholder="搜索名字或效果文字（例：灼烧、击破、飞行）" aria-label="搜索">
             <div class="bx-grid"></div>
           </section>
           <aside class="bx-detail" aria-live="polite"></aside>
@@ -34,14 +41,19 @@ const Bestiary = (() => {
     document.body.appendChild(root);
     root.addEventListener("click", (e) => {
       if (e.target.closest('[data-bx="close"]') || e.target === root) { close(); return; }
+      const md = e.target.closest("[data-mode]");
+      if (md) { setMode(md.dataset.mode); return; }
       const tab = e.target.closest("[data-filter]");
-      if (tab) { filter = tab.dataset.filter; render(); return; }
+      if (tab) { if (mode === "enemy") filter = tab.dataset.filter; else codexFilter[mode] = tab.dataset.filter; render(); return; }
+      const cx = e.target.closest("[data-cx]");
+      if (cx) { codexSel[mode] = cx.dataset.cx; render(); root.querySelector(".bx-detail").scrollTop = 0; return; }
       const card = e.target.closest("[data-kit]");
       if (card) { sel = card.dataset.kit; lv = null; render(); root.querySelector(".bx-detail").scrollTop = 0; return; }
       const ps = e.target.closest("[data-party]");
       if (ps) { party = Number(ps.dataset.party) || 4; root.querySelectorAll("[data-party]").forEach(b => b.classList.toggle("on", Number(b.dataset.party) === party)); renderStats(); }
     });
     root.addEventListener("input", (e) => {
+      if (e.target.matches(".bx-search")) { query = e.target.value; render(); return; }
       if (e.target.matches("[data-lv]")) { lv = Number(e.target.value) || 1; e.target.nextElementSibling.textContent = lv; renderStats(); }
     });
     document.addEventListener("keydown", (e) => { if (root && root.classList.contains("show") && e.key === "Escape") { e.stopPropagation(); close(); } }, true);
@@ -49,7 +61,22 @@ const Bestiary = (() => {
 
   function entries() { return typeof bestiaryEntries === "function" ? bestiaryEntries() : []; }
 
+  function setMode(m) {
+    if (!MODES.some(([k]) => k === m)) m = "enemy";
+    mode = m;
+    query = "";
+    const box = root.querySelector(".bx-search");
+    if (box) box.value = "";
+    render();
+    root.querySelector(".bx-detail").scrollTop = 0;
+  }
+
   function render() {
+    root.querySelectorAll("[data-mode]").forEach(b => { const on = b.dataset.mode === mode; b.classList.toggle("on", on); b.setAttribute("aria-selected", on ? "true" : "false"); });
+    root.querySelector(".bx-head h3").textContent = (MODES.find(([k]) => k === mode) || [, "敌人"])[1] + "图鉴";
+    root.querySelector(".bx-search").hidden = mode === "enemy";
+    root.querySelector(".bx-bar").hidden = mode !== "enemy";
+    if (mode !== "enemy") { renderCodex(); return; }
     const all = entries();
     const seen = all.filter(e => e.seen).length;
     root.querySelector(".bx-prog-text").innerHTML = `已收录 <b>${seen}</b> / ${all.length}${sub ? ` · ${esc(sub)}` : ""}`;
@@ -148,12 +175,88 @@ const Bestiary = (() => {
       </div>` : `<p class="bx-note">这个敌人的数值没法单独计算。</p>`;
   }
 
+  /* ---------- 配置物 / 效果图鉴 ---------- */
+  const PROP_TABS = [["all", "全部"], ["zone", "区域"], ["gap", "间隔"], ["skill", "技能产物"]];
+  const eleIcon = (el) => (el && window.Icons ? Icons.element(el) : "");
+  function codexList() {
+    if (mode === "prop") return typeof codexPropEntries === "function" ? codexPropEntries() : [];
+    return typeof codexEffectEntries === "function" ? codexEffectEntries() : [];
+  }
+  function codexTabs() {
+    if (mode === "prop") return PROP_TABS;
+    return [["all", "全部"]].concat((typeof CODEX_EFFECT_GROUPS !== "undefined" ? CODEX_EFFECT_GROUPS : []).map(g => [g.id, g.name]));
+  }
+  function renderCodex() {
+    const all = codexList();
+    const f = codexFilter[mode];
+    const matched = all.filter(e => typeof codexMatch !== "function" || codexMatch(e, query));
+    root.querySelector(".bx-prog-text").innerHTML = query.trim()
+      ? `搜到 <b>${matched.length}</b> 条`
+      : `共 <b>${all.length}</b> 条${mode === "prop" ? "配置物" : "效果"}`;
+    root.querySelector(".bx-tabs").innerHTML = codexTabs().map(([k, n]) => {
+      const c = k === "all" ? matched.length : matched.filter(e => e.group === k).length;
+      return `<button class="bx-tab${f === k ? " on" : ""}" data-filter="${k}">${esc(n)}<small>${c}</small></button>`;
+    }).join("");
+    const shown = f === "all" ? matched : matched.filter(e => e.group === f);
+    const key = (e) => e.id;
+    if (!codexSel[mode] || !shown.some(e => key(e) === codexSel[mode])) codexSel[mode] = shown[0] ? key(shown[0]) : null;
+    root.querySelector(".bx-grid").innerHTML = shown.map(e => {
+      const kicker = mode === "prop" ? (e.source ? "技能产物" : e.place) : e.groupName;
+      const el = e.element || null;
+      return `<button class="bx-card cx seen${el ? " e-" + esc(el) : ""}${key(e) === codexSel[mode] ? " sel" : ""}" data-cx="${esc(key(e))}">
+        <span class="bx-rank">${esc(kicker)}</span>
+        ${el ? `<span class="bx-sigil e-${esc(el)}">${eleIcon(el)}</span>` : ""}
+        <b class="bx-name">${esc(e.name)}</b>
+        <small>${esc(codexBlurb(e))}</small>
+      </button>`;
+    }).join("") || `<p class="bx-empty">${query.trim() ? "没有符合搜索的条目。" : "这一类还没有条目。"}</p>`;
+    renderCodexDetail(shown.find(e => key(e) === codexSel[mode]) || null);
+  }
+  /** 卡片上的一行摘要：说明第一句截短 */
+  function codexBlurb(e) {
+    const t = String((e.lines || [])[0] || "");
+    return t.length > 26 ? t.slice(0, 25) + "…" : t;
+  }
+  function renderCodexDetail(e) {
+    const box = root.querySelector(".bx-detail");
+    if (!e) { box.innerHTML = ""; return; }
+    const chips = [];
+    if (e.element) chips.push(`<span class="bx-chip e-${esc(e.element)}">${eleIcon(e.element)}${esc(typeof ELE !== "undefined" ? ELE[e.element] : e.element)}属性</span>`);
+    if (mode === "prop") {
+      chips.push(`<span class="bx-chip">放置在${esc(e.place)}</span>`);
+      if (e.movable) chips.push(`<span class="bx-chip">可以被移动</span>`);
+      if (e.source) chips.push(`<span class="bx-chip dim">来源：${esc(e.source)}</span>`);
+    } else {
+      chips.push(`<span class="bx-chip dim">${esc(e.groupName)}</span>`);
+    }
+    const group = mode === "effect" && typeof CODEX_EFFECT_GROUPS !== "undefined" ? CODEX_EFFECT_GROUPS.find(g => g.id === e.group) : null;
+    const lines = (e.lines || []).map(a => {
+      const i = a.indexOf("：");
+      return `<li>${i > 0 && i < 10 ? `<b>${esc(a.slice(0, i))}</b>${esc(a.slice(i))}` : esc(a)}</li>`;
+    }).join("");
+    const chart = e.chart ? `<section class="bx-sec"><div class="bx-sec-h"><span>${e.group === "element" ? "对各血量层" : "受各属性伤害"}</span></div>
+        <div class="cx-chart">${e.chart.map(c => `<div class="cx-cell ${c.value > 0 ? "up" : c.value < 0 ? "down" : ""}">
+          <small>${c.element ? `<span class="e-${esc(c.element)}">${eleIcon(c.element)}</span>` : ""}${esc(c.name)}</small><b>${typeof codexPct === "function" ? codexPct(c.value) : c.value}</b></div>`).join("")}</div>
+        <p class="bx-note">正数是克制（伤害提高），负数是劣势（伤害降低）；和战斗里的克制表一致。</p></section>` : "";
+    box.innerHTML = `<div class="bx-d">
+        <div class="bx-kicker">${esc(mode === "prop" ? "配置物" : "效果")} · ${esc(mode === "prop" ? (e.source ? "技能产物" : e.place) : e.groupName)}</div>
+        <h4>${esc(e.name)}</h4>
+        <div class="bx-chips">${chips.join("")}</div>
+        ${lines ? `<section class="bx-sec"><div class="bx-sec-h"><span>${mode === "prop" ? "说明" : "效果"}</span></div><ul class="bx-abil">${lines}</ul></section>` : ""}
+        ${chart}
+        ${group && group.note ? `<p class="bx-note cx-groupnote">${esc(group.name)}：${esc(group.note)}</p>` : ""}
+      </div>`;
+  }
+
   function open(opt) {
     opt = opt || {};
     if (!root) build();
     party = [2, 3, 4].includes(Number(opt.partySize)) ? Number(opt.partySize) : 4;
     sub = opt.sub || "";
     lv = null;
+    mode = MODES.some(([k]) => k === opt.mode) ? opt.mode : "enemy";
+    query = "";
+    root.querySelector(".bx-search").value = "";
     render();
     root.classList.add("show");
     document.body.classList.add("bx-open");
