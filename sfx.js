@@ -1,5 +1,12 @@
-/* 角鳞 · 攻击音效（WebAudio 现场合成，不用音频文件）
+/* 角鳞 · 音效：录音音效（sfx-samples.js，CC0）+ WebAudio 现场合成
  *
+ * 录音音效：有录音的类别放录音（SFX_SAMPLES），没有的照旧用下面的合成音效。
+ *   电属性、格挡、失衡、爆炸按作者的选择保留合成音效。
+ *   Sfx.ui(key)：界面 / 演出音效（click hover back error open toggle dice coin turn heal shield debuff
+ *   swing draw mech gun move ko levelup）。按钮点击、悬停、返回、切换由这里统一挂在页面上，不用每个按钮自己写。
+ *   每个录音的音量、音高、截取起止、淡出、随机音高都在 SFX_TUNE 里调（sfx-tuner.html 可以拖滑块试听再复制参数）。
+ *
+ * 合成音效：
  * 每种属性一个音效，按属性给人的印象来做：
  *   physical 物理  沉闷的重击：低频下坠的「咚」+ 一点撞击噪声
  *   fire     火    呼的一下燃起：扫频的风声 + 噼啪的火星
@@ -44,6 +51,142 @@
     } catch (e) { ctx = null; }
     return ctx;
   }
+  /* ---------- 录音音效 ---------- */
+  /** 每个录音的微调：gain 音量倍数、rate 播放速度（同时改音高，1 = 原样）、start / end 截取起止秒（end 0 = 到结尾）、
+   *  fade 结尾淡出秒数、delay 延迟秒数、vary 每次随机音高幅度（0.04 = ±4%，连续命中不那么单调）、on 是否启用 */
+  const SFX_TUNE = {
+    physical: { gain: 1, rate: 1, start: 0, end: 0, fade: 0, delay: 0, vary: 0.05, on: true },
+    fire:     { gain: 1, rate: 1, start: 0, end: 0, fade: 0, delay: 0, vary: 0.04, on: true },
+    ice:      { gain: 1, rate: 1, start: 0, end: 0, fade: 0, delay: 0, vary: 0.04, on: true },
+    acid:     { gain: 1, rate: 1, start: 0, end: 0, fade: 0, delay: 0, vary: 0.05, on: true },
+    energy:   { gain: 0.9, rate: 1, start: 0, end: 0, fade: 0.1, delay: 0, vary: 0.03, on: true },
+    harmonic: { gain: 1, rate: 1, start: 0, end: 0, fade: 0.1, delay: 0, vary: 0.03, on: true },
+    click:    { gain: 0.6, rate: 1, start: 0, end: 0, fade: 0, delay: 0, vary: 0, on: true },
+    hover:    { gain: 0.3, rate: 1, start: 0, end: 0, fade: 0, delay: 0, vary: 0, on: true },
+    back:     { gain: 0.6, rate: 1, start: 0, end: 0, fade: 0, delay: 0, vary: 0, on: true },
+    error:    { gain: 0.7, rate: 1, start: 0, end: 0, fade: 0, delay: 0, vary: 0, on: true },
+    open:     { gain: 0.7, rate: 1, start: 0, end: 0, fade: 0, delay: 0, vary: 0, on: true },
+    toggle:   { gain: 0.6, rate: 1, start: 0, end: 0, fade: 0, delay: 0, vary: 0, on: true },
+    dice:     { gain: 0.8, rate: 1, start: 0, end: 0, fade: 0.15, delay: 0, vary: 0, on: true },
+    coin:     { gain: 0.8, rate: 1, start: 0, end: 0, fade: 0, delay: 0, vary: 0.03, on: true },
+    turn:     { gain: 0.8, rate: 1, start: 0, end: 0, fade: 0, delay: 0, vary: 0, on: true },
+    heal:     { gain: 0.8, rate: 1, start: 0, end: 0, fade: 0, delay: 0, vary: 0, on: true },
+    shield:   { gain: 0.7, rate: 1, start: 0, end: 0, fade: 0.15, delay: 0, vary: 0, on: true },
+    debuff:   { gain: 0.7, rate: 1, start: 0, end: 0, fade: 0, delay: 0, vary: 0, on: true },
+    swing:    { gain: 0.7, rate: 1, start: 0, end: 0, fade: 0, delay: 0, vary: 0.06, on: true },
+    draw:     { gain: 0.8, rate: 1, start: 0, end: 0, fade: 0, delay: 0, vary: 0, on: true },
+    mech:     { gain: 0.8, rate: 1, start: 0, end: 0, fade: 0, delay: 0, vary: 0, on: true },
+    gun:      { gain: 1, rate: 1, start: 0, end: 0, fade: 0, delay: 0, vary: 0.04, on: true },
+    move:     { gain: 0.6, rate: 1, start: 0, end: 0, fade: 0, delay: 0, vary: 0.06, on: true },
+    ko:       { gain: 0.9, rate: 1, start: 0, end: 0, fade: 0, delay: 0, vary: 0, on: true },
+    levelup:  { gain: 0.8, rate: 1, start: 0, end: 1.8, fade: 0.3, delay: 0, vary: 0, on: true }
+  };
+  const UI_LABEL = { physical: "物理命中", fire: "火属性", ice: "冰属性", acid: "酸属性", energy: "能量属性", harmonic: "谐波属性",
+    click: "按钮点击", hover: "鼠标悬停", back: "返回 / 取消", error: "不能这样做", open: "打开面板", toggle: "切换开关", dice: "掷骰",
+    coin: "钱币 / 购买", turn: "回合开始", heal: "治疗", shield: "护盾 / 增益", debuff: "减益 / 状态", swing: "挥砍 / 出手",
+    draw: "拔刀 / 收刀", mech: "机械 / 上膛", gun: "枪声", move: "移动", ko: "倒地 / 击倒", levelup: "升级" };
+  const buffers = {}, decoding = {};
+  function samples() { return (typeof window !== "undefined" && window.SFX_SAMPLES) || {}; }
+  function hasSample(key) {
+    const t = SFX_TUNE[key];
+    return !!(samples()[key] && (!t || t.on !== false));
+  }
+  function b64ToBuf(uri) {
+    const b64 = String(uri).slice(String(uri).indexOf(",") + 1);
+    const bin = atob(b64), u = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+    return u.buffer;
+  }
+  /** 第一次用到时才解码（每个录音只解一次） */
+  function bufferOf(key) {
+    if (buffers[key]) return Promise.resolve(buffers[key]);
+    if (decoding[key]) return decoding[key];
+    const c = ensure();
+    if (!c || !samples()[key]) return Promise.resolve(null);
+    decoding[key] = new Promise(res => {
+      try { c.decodeAudioData(b64ToBuf(samples()[key]), b => { buffers[key] = b; res(b); }, () => res(null)); } catch (e) { res(null); }
+    });
+    return decoding[key];
+  }
+  /** 播一个录音。tune 可以临时覆盖 SFX_TUNE（调音页用），vol 是额外的音量倍数（重击更响） */
+  function playSample(key, opt) {
+    opt = opt || {};
+    const c = ensure();
+    if (!c || !samples()[key]) return false;
+    if (c.state === "suspended") c.resume().catch(() => {});
+    const t = Object.assign({ gain: 1, rate: 1, start: 0, end: 0, fade: 0, delay: 0, vary: 0 }, SFX_TUNE[key] || {}, opt.tune || {});
+    bufferOf(key).then(buf => {
+      if (!buf) return;
+      const s = c.createBufferSource();
+      s.buffer = buf;
+      const jitter = t.vary ? 1 + (Math.random() * 2 - 1) * t.vary : 1;
+      s.playbackRate.value = Math.max(0.25, Math.min(4, (Number(t.rate) || 1) * jitter));
+      const g = c.createGain();
+      const vol = Math.max(0, Number(t.gain) || 0) * (opt.vol || 1);
+      const start = Math.max(0, Math.min(buf.duration - 0.01, Number(t.start) || 0));
+      const end = Number(t.end) > start ? Math.min(buf.duration, Number(t.end)) : buf.duration;
+      const len = Math.max(0.01, end - start);
+      const real = len / s.playbackRate.value;            // 实际播放时长（变速后）
+      const at = c.currentTime + Math.max(0, Number(t.delay) || 0) + 0.005;
+      g.gain.setValueAtTime(vol, at);
+      const fade = Math.min(real, Math.max(0, Number(t.fade) || 0));
+      if (fade > 0) { g.gain.setValueAtTime(vol, at + real - fade); g.gain.linearRampToValueAtTime(0.0001, at + real); }
+      s.connect(g); g.connect(opt.dest || master);
+      s.start(at, start, len);
+      if (opt.onEnd) s.onended = opt.onEnd;
+    });
+    return true;
+  }
+  const uiLast = {};
+  let explicitAt = 0;
+  /** 界面 / 演出音效：没有录音的类别不出声 */
+  function ui(key, opt) {
+    opt = opt || {};
+    if (!enabled() || !hasSample(key)) return false;
+    const c = ensure();
+    if (!c) return false;
+    const now = c.currentTime;
+    const gap = opt.throttle != null ? opt.throttle : key === "hover" ? 0.04 : key === "move" ? 0.12 : 0.05;
+    if (uiLast[key] != null && now - uiLast[key] < gap) return false;
+    uiLast[key] = now;
+    if (!opt.auto) explicitAt = performance.now();
+    return playSample(key, opt);
+  }
+
+  /* ---------- 页面上统一挂按钮音效 ---------- */
+  const CLICKABLE = "button, [role=button], [role=tab], a.t-btn, .g-btn, .t-btn, summary, select, input[type=checkbox], input[type=radio]";
+  const BACK_WORDS = /^(关闭|取消|返回|算了|放弃|不用了|×|✕)/;
+  function clickKind(el) {
+    if (el.closest("[data-sfx-none]") || el.matches("[disabled], [aria-disabled=true]")) return null;
+    if (el.dataset && el.dataset.sfxUi) return el.dataset.sfxUi;
+    const id = (el.id || "") + " " + (el.className && el.className.baseVal == null ? el.className : "");
+    const text = (el.textContent || "").trim();
+    if (/close|cancel|(^|[-_ ])back([-_ ]|$)/i.test(id) || BACK_WORDS.test(text) || el.matches('[data-bx="close"]')) return "back";
+    if (el.matches("[aria-pressed], [role=tab], [role=switch], input[type=checkbox], input[type=radio], select, [data-mode], [data-filter], [data-party]")) return "toggle";
+    return "click";
+  }
+  function onUiClick(e) {
+    const el = e.target && e.target.closest ? e.target.closest(CLICKABLE) : null;
+    if (!el) return;
+    const kind = clickKind(el);
+    if (!kind) return;
+    const at = performance.now();
+    // 点下去之后才知道这次点击有没有自己的音效（买东西是钱币声、不能这样做是错误声……），有的话就不再响点击声
+    setTimeout(() => { if (explicitAt < at) ui(kind, { auto: true }); }, 0);
+  }
+  let hoverEl = null;
+  function onUiHover(e) {
+    if (e.pointerType && e.pointerType !== "mouse") return;
+    const el = e.target && e.target.closest ? e.target.closest(CLICKABLE) : null;
+    if (el === hoverEl) return;
+    hoverEl = el;
+    if (el && !el.matches("[disabled]") && !el.closest("[data-sfx-none]")) ui("hover", { auto: true });
+  }
+  if (typeof document !== "undefined") {
+    document.addEventListener("click", onUiClick, true);
+    document.addEventListener("pointerover", onUiHover, true);
+  }
+
   function unlock() {
     const c = ensure();
     if (c && c.state === "suspended") c.resume().catch(() => {});
@@ -268,6 +411,12 @@
     if (last[el] != null && now - last[el] < (opt.throttle || 0.06)) return false;
     last[el] = now;
     const v = opt.big ? 1.25 : 1;
+    // 有录音的属性放录音；重击照旧叠一层低频
+    if (hasSample(el)) {
+      playSample(el, { vol: v });
+      if (opt.big) { try { osc("sine", now + 0.005, 0.3, 75, 38, gainEnv(now + 0.005, 0.005, 0.5, 0.3)); } catch (e) {} }
+      return true;
+    }
     try {
       VOICES[el](now + 0.005, v);
       if (opt.big) osc("sine", now + 0.005, 0.3, 75, 38, gainEnv(now + 0.005, 0.005, 0.5, 0.3));
@@ -301,5 +450,5 @@
   /** 高能自爆的爆炸声（连锁自爆时间隔 0.25 秒以上才再响） */
   function boom() { return play("boom", { throttle: 0.25 }); }
 
-  window.Sfx = { render, parry, stagger, boom, play, enabled, setEnabled, ELEMENTS, NAMES: { physical: "物理", fire: "火", ice: "冰", electric: "电", acid: "酸", energy: "能量", harmonic: "谐波" } };
+  window.Sfx = { render, parry, stagger, boom, play, ui, playSample, hasSample, TUNE: SFX_TUNE, UI_LABEL, enabled, setEnabled, ELEMENTS, NAMES: { physical: "物理", fire: "火", ice: "冰", electric: "电", acid: "酸", energy: "能量", harmonic: "谐波" } };
 })();

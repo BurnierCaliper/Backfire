@@ -628,7 +628,7 @@
     on("tr-restore", () => act(ruleCommand("restore")));
     // 商店
     const qty = (key) => (P.querySelector(`[data-qty="${key}"]`) || {}).value || 1;
-    P.querySelectorAll("[data-buy]").forEach(b => { b.onclick = () => act(ruleCommand("buy", { key: b.dataset.buy, qty: qty(b.dataset.buy), free: false })); });
+    P.querySelectorAll("[data-buy]").forEach(b => { b.onclick = () => { if (window.Sfx) Sfx.ui("coin"); act(ruleCommand("buy", { key: b.dataset.buy, qty: qty(b.dataset.buy), free: false })); }; });
     P.querySelectorAll("[data-give]").forEach(b => { b.onclick = () => act(ruleCommand("buy", { key: b.dataset.give, qty: qty(b.dataset.give), free: true })); });
     // 背包
     const why = () => ($("tr-kz-why") || {}).value || "";

@@ -1100,3 +1100,35 @@ test("音效：七种属性都能合成，有声、不削顶、不出错", async
   assert.equal(await o.page.evaluate(() => Sfx.enabled()), true);
   assert.deepEqual(o.errors, []);
 });
+
+test("录音音效：每个录音都能解码、有声、有调音参数；没选录音的类别不出声，电 / 格挡 / 失衡 / 爆炸保留合成音效", async (t) => {
+  const o = await open(t); if (!o) return;
+  const r = await o.page.evaluate(async () => {
+    const ctx = new OfflineAudioContext(1, 1, 22050);
+    const out = {};
+    for (const k of Object.keys(SFX_SAMPLES)) {
+      const b64 = SFX_SAMPLES[k].split(",")[1];
+      const u = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+      try {
+        const buf = await ctx.decodeAudioData(u.buffer);
+        const d = buf.getChannelData(0); let peak = 0;
+        for (let i = 0; i < d.length; i++) peak = Math.max(peak, Math.abs(d[i]));
+        out[k] = { peak, dur: buf.duration, tune: !!Sfx.TUNE[k], label: !!Sfx.UI_LABEL[k] };
+      } catch (e) { out[k] = { error: String(e) }; }
+    }
+    return { out, has: ["physical", "fire", "ice", "acid", "energy", "harmonic", "electric", "parry", "stagger", "boom"].map(k => Sfx.hasSample(k)),
+      uiCoin: Sfx.ui("coin"), uiNone: Sfx.ui("victory") };
+  });
+  const keys = Object.keys(r.out);
+  assert.equal(keys.length, 25);
+  for (const k of keys) {
+    assert.ok(!r.out[k].error, k + " 解码失败：" + r.out[k].error);
+    assert.ok(r.out[k].peak > 0.02, k + " 几乎没声音");
+    assert.ok(r.out[k].dur > 0.03 && r.out[k].dur < 3, k + " 时长 " + r.out[k].dur);
+    assert.ok(r.out[k].tune && r.out[k].label, k + " 缺调音参数或名字");
+  }
+  assert.deepEqual(r.has, [true, true, true, true, true, true, false, false, false, false]);
+  assert.equal(r.uiCoin, true);
+  assert.equal(r.uiNone, false, "没选录音的类别（战斗胜利）不出声");
+  assert.deepEqual(o.errors, []);
+});

@@ -366,6 +366,22 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **录音音效**（`sfx-samples.js`、`sfx.js · SFX_TUNE / Sfx.ui`、`sfx-tuner.html`）：作者从 CC0 素材里试听选出了 25 个录音，接进游戏。
+  - **攻击属性**：物理、火、冰、酸、能量、谐波改用录音。电属性、格挡、失衡、爆炸按作者的选择保留原来的合成音效；重击照旧多叠一层低频。
+  - **界面**：所有按钮自动有点击声，鼠标悬停有很轻的声音；关闭 / 取消 / 返回类按钮用返回声，切换类按钮（标签、开关、模式）用切换声。不能执行的操作有错误提示音。打开资料、武器、图鉴、生涯面板有翻页声。买东西是钱币声，并且不再叠点击声。
+  - **战斗演出**：
+    - 近战出手有破风声，龙哥霰弹枪开火有枪声；
+    - 绯秋收刀、分刀、刀变回武器有拔刀声，龙哥解开保险、柯尔特换刀头有机械声；
+    - 换区移动有脚步声；
+    - 治疗有治疗声，获得护盾或振奋这类增益有护盾声，被施加负面状态有减益声；
+    - 濒死、倒下、击倒有倒地声；
+    - 开战和每个我方回合开始有提示音，检定掷骰有摇骰声，单局里出现升级选择有升级音。
+  - 战斗胜利、战斗失败、确认三类作者没选，不出声。
+  - **调音**：每个录音的音量、音高 / 速度、截取起止、淡出、延迟、随机音高都在 `sfx.js` 的 `SFX_TUNE` 里。`sfx-tuner.html` 可以拖推子试听，调好后复制参数。
+  - **素材来源**（全部 CC0，不用署名）：
+    - [Kenney](https://kenney.nl/assets)：Impact、Interface、UI、Sci-Fi、Digital、RPG、Casino、Music Jingles；
+    - OpenGameArt：[37 Hits/Punches](https://opengameart.org/content/37-hitspunches)、[RPG Sound Pack](https://opengameart.org/content/rpg-sound-pack)、[Level up/Power up](https://opengameart.org/content/level-up-power-up-coin-get-13-sounds)、[Battle SFX](https://opengameart.org/content/battle-sound-effects)、[512 Retro SFX](https://opengameart.org/content/512-sound-effects-8-bit-style)。
+    - 每条录音的原始文件名和来源页写在 `sfx-samples.js` 的注释里。
 - **角色图鉴，可以从主菜单打开**（`codex.js · HERO_CODEX / codexHeroEntries`、`bestiary-ui.js`、`screens.js`）：主菜单新增「图鉴」按钮，打开后默认是角色图鉴，顶上可以切换 角色 / 敌人 / 配置物 / 效果。单局和跑团里原来的图鉴按钮也能看到角色这一栏。
   - **每名角色**都有一段介绍和游玩难度（五星制），可以按难度筛选（入门 ★1–2 / 进阶 ★3 / 高手 ★4–5），也能搜索介绍、技能名和说明文字。
   - **详情内容**：

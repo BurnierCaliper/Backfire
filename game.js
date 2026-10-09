@@ -557,7 +557,7 @@
 
   function skillThunk(actorId, skillId, targetId, picks) {
     const cmd = skillCommand(actorId, skillId, targetId, picks);
-    return () => BattleCommands.execute(cmd); // Sandbox previews never enter the command log.
+    return () => { G.lastCmd = cmd; return BattleCommands.execute(cmd); }; // Sandbox previews never enter the command log.
   }
   function skillCommand(actorId, skillId, targetId, picks) {
     picks = picks || {};
@@ -740,6 +740,7 @@
     const grp = zoneGroup(s.zone, s.isPlayer, s.isProp);
     if (c.wrap.parentElement === grp) return;
     const first = c.wrap.isConnected ? c.wrap.getBoundingClientRect() : null;
+    if (first && animate && !s.isProp && window.Sfx && !G.sim) Sfx.ui("move");   // 换区移动：脚步声
     grp.appendChild(c.wrap);
     if (first && animate) {
       const last = c.wrap.getBoundingClientRect();
@@ -772,7 +773,9 @@
         if (!p.dead && s.dead) beats.push({ kind: "kill", id });
         if (!p.dying && s.dying && !s.dead) beats.push({ kind: "down", id });
         const healed = sumCur(s) - sumCur(p);
-        if (healed > 0) beats.push({ kind: "heal", id, value: healed });
+        const shieldOf = (x) => (x.layers || []).filter(l => l.type === "shield").reduce((a, l) => a + l.cur, 0);
+        const shieldUp = shieldOf(s) - shieldOf(p);
+        if (healed > 0) beats.push({ kind: "heal", id, value: healed, shield: shieldUp > 0, life: healed - Math.max(0, shieldUp) > 0 });
       }
       updateCard(c, s);
       placeCard(c, s, animate);
@@ -958,12 +961,17 @@
         longest = Math.max(longest, hold != null ? hold : 620);
       }
       if (b.kind === "kill") {
+        if (window.Sfx && !G.sim) Sfx.ui("ko");
         stamp(b.id, s && s.isPlayer ? "倒下" : "击倒", "kill");
         longest = Math.max(longest, 520);
         if (s && s.isPlayer) fallen.push(s);
       }
-      if (b.kind === "down") { stamp(b.id, "濒死", "kill"); longest = Math.max(longest, 520); }
-      if (b.kind === "heal") { popup(b.id, "+" + b.value, "e-heal", { size: 22 }); longest = Math.max(longest, 300); }
+      if (b.kind === "down") { if (window.Sfx && !G.sim) Sfx.ui("ko"); stamp(b.id, "濒死", "kill"); longest = Math.max(longest, 520); }
+      if (b.kind === "heal") {
+        // 加的是护盾就响护盾声，恢复生命就响治疗声
+        if (window.Sfx && !G.sim) { if (b.life !== false) Sfx.ui("heal"); if (b.shield) Sfx.ui("shield"); }
+        popup(b.id, "+" + b.value, "e-heal", { size: 22 }); longest = Math.max(longest, 300);
+      }
     });
     if (longest) await wait(longest);
     for (const s of fallen) await announceDeath(s);
@@ -1070,6 +1078,18 @@
     // 单人模式的支援：出手的是登场的伙伴，主角不前冲（伙伴的前冲在 partner 里播）
     const supportTape = pops.some(e => e.kind === "partner");
     const lungeAtk = !opps.length && !supportTape && (meta.forceLunge || (pops.length && meta.actorId && meta.targetId && meta.actorId !== meta.targetId));
+    const cmd = G.lastCmd; G.lastCmd = null;
+    if (window.Sfx && !G.sim) {
+      const sk = cmd && cmd.type === "skill" ? cmd.skill : "";
+      const gun = /^longge_(aa|chill)$/.test(sk) && cmd.picks && cmd.picks.mode === "gun";
+      if (/^hiaki_(sheath|summon)$|^(niu|naruto)_return$/.test(sk)) Sfx.ui("draw");           // 绯秋拔刀 / 收刀 / 分刀
+      else if (/^(longge_safety|torque_swap)$/.test(sk)) Sfx.ui("mech");                    // 解开保险、换刀头
+      if (gun) Sfx.ui("gun");
+      else if (lungeAtk) {
+        const a = unitById(meta.actorId), t = unitById(meta.targetId);
+        if (a && t && Number(a.zone) === Number(t.zone)) Sfx.ui("swing");                     // 近战出手的破风声
+      }
+    }
     const motions = [];
     if (lungeAtk) motions.push(lunge(meta.actorId, meta.targetId));
     if (meta.blockerId) motions.push(lunge(meta.blockerId, meta.actorId));
@@ -1166,6 +1186,7 @@
           deferStun(beatsBefore); await playBeats(beatsBefore.filter(b => b.kind !== "stun"));
           await wait(chain ? 40 : 55);
         } else {
+          if (e.kind === "status" && e.text && window.Sfx && !G.sim) Sfx.ui(/振奋|坚固|坚挺|优势|躲藏|护盾|铁壁|免疫/.test(e.text) ? "shield" : /无效|打不动|触发/.test(e.text) ? "" : "debuff");
           if (e.text) popup(e.unitId, e.text, "txt e-" + e.element);
           deferStun(beatsBefore); await playBeats(beatsBefore.filter(b => b.kind !== "stun"));
           await wait(240);
@@ -1264,6 +1285,7 @@
       $("g-check-who").textContent = spec.who || "协助格挡";
       $("g-check-rate").textContent = (spec.rateText || "成功率 " + spec.chance + "%") + (spec.note ? " · " + spec.note : "");
       $("g-check-hint").textContent = "检定中";
+      if (window.Sfx && !G.sim) Sfx.ui("dice");   // 掷骰
       num.textContent = String(1 + Math.floor(Math.random() * 100));
       num.className = "check-num";
       box.classList.add("show");
@@ -2179,6 +2201,7 @@
       pushUndo("开始战斗");
       if (hotseat()) HotseatGame.startCombat();
       else dispatch({ type: "startCombat" });
+      if (window.Sfx) Sfx.ui("turn");   // 开战：第一回合开始
       if (hotseat()) await resolveQueues();
       if (state.ambush) {
         // 遭遇战：我方第一回合被跳过，直接进敌人回合
@@ -2286,6 +2309,7 @@
       if (!over && !G.ended) {
         await wait(250);
         await perform({ type: "battle.endEnemyTurn" }, { skillName: "", phase: "敌人回合结束 · 玩家回合开始" }, true);
+        if (window.Sfx) Sfx.ui("turn");   // 我方回合开始
         await resolveQueues();
         if (!checkEnd()) {
           phaseCard(`第 ${state.turnNo} 回合`, "player");
@@ -2771,6 +2795,7 @@
   }
   function setHint(html) { $("g-hint").innerHTML = html; }
   function flashHint(text) {
+    if (window.Sfx) Sfx.ui("error");   // 不能这样做
     const h = $("g-hint");
     h.dataset.flash = "1";
     h.innerHTML = `<span style="color:var(--foe)">${esc(text)}</span>`;
@@ -4121,7 +4146,7 @@
       await resolveQueues();
       if (state.combatPhase === "enemy") {
         const over = await enemyPhase();
-        if (!over) { await perform({ type: "battle.endEnemyTurn" }, { phase: "敌人回合结束 · 玩家回合开始" }, true); await resolveQueues(); }
+        if (!over) { await perform({ type: "battle.endEnemyTurn" }, { phase: "敌人回合结束 · 玩家回合开始" }, true); await resolveQueues(); if (window.Sfx) Sfx.ui("turn"); }
       }
       if (!G.ended && ["setup", "enemy"].includes(HotseatGame.getView().phase)) HotseatGame.beginRound();
     } finally { G.depth--; syncBusy(); autoSelect(true); refreshAll(); checkEnd(); resumeHotseat(); }

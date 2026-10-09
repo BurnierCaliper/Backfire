@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Backfire 音效调音台</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Ops+One&family=Noto+Sans+SC:wght@400;700;900&display=swap">
+<style>
+/* 布局：游戏同款铁皮面板；每个录音一块调音条（推子一排），顶部说明 + 底部常驻「复制参数」 */
+:root {
+  --ink: #0b0806; --steel: #1a1511; --plate: #231c16; --edge: #4d4337;
+  --paper: #ece0c6; --muted: #a8977b; --hazard: #f2c230; --holo: #3fe0ff; --changed: #ff9f1c;
+  --display: "Black Ops One", Impact, "Arial Black", sans-serif;
+  --body: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  color-scheme: dark;
+}
+body { margin: 0; background: var(--ink); color: var(--paper); font-family: var(--body); font-size: 14px; line-height: 1.55; }
+.wrap { max-width: 1040px; margin: 0 auto; padding-inline: 16px; padding-block: 20px 140px; }
+header.top { position: relative; padding: 16px 20px 26px; background: linear-gradient(#2a221b, var(--steel)); border: 2px solid var(--edge); }
+header.top::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 7px; background: repeating-linear-gradient(-45deg, var(--hazard) 0 12px, var(--ink) 12px 24px); }
+.tag { display: inline-block; font-family: var(--display); font-size: 13px; letter-spacing: .14em; padding: 3px 10px 2px; color: var(--ink); background: var(--hazard); transform: rotate(-2deg); box-shadow: 2px 2px 0 var(--ink); }
+h1 { margin: 10px 0 6px; font-size: clamp(22px, 4vw, 32px); font-weight: 900; letter-spacing: .04em; }
+.lede { margin: 0; max-width: 70ch; color: #d8ccb2; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 10px 0 0; padding: 0; list-style: none; font-size: 12px; color: var(--muted); }
+.legend b { color: var(--paper); }
+.groups { display: grid; gap: 12px; margin-top: 20px; }
+section.k { background: var(--steel); border: 1px solid var(--edge); padding: 12px 14px; }
+section.k.changed { border-color: var(--changed); }
+.k-h { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.k-h h2 { margin: 0; font-size: 17px; font-weight: 900; }
+.k-h .key { font-family: var(--display); font-size: 12px; letter-spacing: .1em; color: var(--muted); }
+.k-h .src { font-size: 12px; color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
+.k-h .src a { color: var(--muted); }
+.k-h .sp { flex: 1; }
+.play { font: inherit; font-weight: 900; font-size: 13px; padding: 6px 14px; color: var(--ink); background: var(--paper); border: 0; cursor: pointer; }
+.play:active { background: var(--hazard); }
+.reset { font: inherit; font-size: 12px; padding: 5px 10px; color: var(--muted); background: transparent; border: 1px solid rgba(236,224,198,.25); cursor: pointer; }
+.on { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.on input { accent-color: var(--hazard); }
+.faders { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px 14px; margin-top: 10px; }
+.f { display: grid; gap: 2px; min-width: 0; }
+.f label { display: flex; justify-content: space-between; gap: 6px; font-size: 12px; color: var(--muted); }
+.f label output { font-variant-numeric: tabular-nums; color: var(--paper); font-weight: 700; }
+.f.mod label output { color: var(--changed); }
+.f input[type=range] { width: 100%; accent-color: var(--hazard); }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--holo); outline-offset: 2px; }
+.tray { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px)); background: rgba(11,8,6,.96); border-top: 2px solid var(--edge); }
+.tray-in { max-width: 1040px; margin: 0 auto; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.tray .sum { flex: 1; min-width: 0; font-size: 13px; color: var(--muted); }
+.tray .sum b { color: var(--changed); }
+.copy { font: inherit; font-weight: 900; font-size: 14px; padding: 8px 16px; color: var(--ink); background: var(--hazard); border: 0; cursor: pointer; }
+textarea#out { display: block; width: 100%; max-width: 1040px; margin: 8px auto 0; height: 110px; box-sizing: border-box; font: 12px/1.5 ui-monospace, monospace; color: var(--paper); background: var(--plate); border: 1px solid var(--edge); }
+</style>
+</head>
+<body>
+<div class="wrap" data-sfx-none>
+  <header class="top">
+    <span class="tag">调音</span>
+    <h1>Backfire 音效调音台</h1>
+    <p class="lede">游戏里用到的每个录音音效都在这里。拖动推子会立刻生效，点「试听」听改后的效果；改过的推子会变成橙色。调好后点底部的「复制参数」，把文字发给我，我写进游戏。电属性、格挡、失衡、爆炸用的是程序合成音效，不在这里。</p>
+    <ul class="legend">
+      <li><b>音量</b> 倍数，1 = 原样</li>
+      <li><b>音高 / 速度</b> 1 = 原样，大于 1 更尖更快</li>
+      <li><b>起点 / 终点</b> 只播这一段（秒，终点 0 = 播到结尾）</li>
+      <li><b>淡出</b> 结尾渐弱的秒数</li>
+      <li><b>延迟</b> 触发后等多久才响</li>
+      <li><b>随机音高</b> 每次随机变一点，连续命中不单调</li>
+    </ul>
+  </header>
+  <div class="groups" id="groups"></div>
+</div>
+<div class="tray" data-sfx-none>
+  <div class="tray-in">
+    <div class="sum" id="sum">还没有改动。</div>
+    <button class="reset" id="reset-all">全部恢复默认</button>
+    <button class="copy" id="copy">复制参数</button>
+  </div>
+  <textarea id="out" hidden readonly aria-label="调音参数"></textarea>
+</div>
+<script src="sfx-samples.js"></script>
+<script src="sfx.js"></script>
+<script>
+const KEY = "backfire-sfx-tune";
+const DEF = JSON.parse(JSON.stringify(Sfx.TUNE));
+const KEYS = Object.keys(DEF).filter(k => window.SFX_SAMPLES && SFX_SAMPLES[k]);
+const DUR = {};
+const FIELDS = [
+  ["gain", "音量", 0, 2.5, 0.05], ["rate", "音高 / 速度", 0.5, 2, 0.01], ["start", "起点（秒）", 0, 0, 0.01], ["end", "终点（秒）", 0, 0, 0.01],
+  ["fade", "淡出（秒）", 0, 1.5, 0.01], ["delay", "延迟（秒）", 0, 0.5, 0.01], ["vary", "随机音高 ±", 0, 0.2, 0.01]
+];
+let tune = {};
+try { tune = JSON.parse(localStorage.getItem(KEY) || "{}") || {}; } catch (e) { tune = {}; }
+KEYS.forEach(k => { tune[k] = Object.assign({}, DEF[k], tune[k] || {}); });
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(tune)); } catch (e) {} };
+const srcNote = {};
+// sfx-samples.js 的注释里有来源；这里从 data URI 的长度估一下时长（22050Hz 16bit 单声道）
+KEYS.forEach(k => { const b64 = SFX_SAMPLES[k].split(",")[1] || ""; DUR[k] = Math.max(0.05, Math.round(((b64.length * 3 / 4) - 44) / 2 / 22050 * 100) / 100); });
+const fmt = (v) => (Math.round(v * 100) / 100).toString();
+const same = (a, b) => Math.abs(Number(a) - Number(b)) < 1e-6;
+function changed(k) { return FIELDS.some(([f]) => !same(tune[k][f], DEF[k][f])) || tune[k].on !== DEF[k].on; }
+
+function render() {
+  document.getElementById("groups").innerHTML = KEYS.map(k => {
+    const t = tune[k];
+    return `<section class="k${changed(k) ? " changed" : ""}" data-k="${k}">
+      <div class="k-h"><h2>${Sfx.UI_LABEL[k] || k}</h2><span class="key">${k}</span><span class="src">时长 ${DUR[k]}s</span><span class="sp"></span>
+        <label class="on"><input type="checkbox" data-f="on" ${t.on !== false ? "checked" : ""}> 启用</label>
+        <button class="reset" data-reset="${k}">恢复默认</button><button class="play" data-play="${k}">▶ 试听</button></div>
+      <div class="faders">${FIELDS.map(([f, name, min, max, step]) => {
+        const mx = (f === "start" || f === "end") ? DUR[k] : max;
+        return `<div class="f${same(t[f], DEF[k][f]) ? "" : " mod"}"><label for="${k}-${f}">${name}<output>${fmt(t[f])}</output></label>
+          <input id="${k}-${f}" type="range" min="${min}" max="${mx}" step="${step}" value="${t[f]}" data-f="${f}"></div>`;
+      }).join("")}</div>
+    </section>`;
+  }).join("");
+  paintSum();
+}
+function paintSum() {
+  const n = KEYS.filter(changed).length;
+  document.getElementById("sum").innerHTML = n ? `改动了 <b>${n}</b> 个音效` : "还没有改动。";
+}
+function play(k) { Sfx.playSample(k, { tune: tune[k] }); }
+document.addEventListener("input", e => {
+  const sec = e.target.closest("section.k"); if (!sec) return;
+  const k = sec.dataset.k, f = e.target.dataset.f;
+  if (f === "on") tune[k].on = e.target.checked;
+  else {
+    tune[k][f] = Number(e.target.value);
+    const box = e.target.closest(".f");
+    box.querySelector("output").textContent = fmt(tune[k][f]);
+    box.classList.toggle("mod", !same(tune[k][f], DEF[k][f]));
+  }
+  sec.classList.toggle("changed", changed(k)); save(); paintSum();
+});
+document.addEventListener("change", e => {
+  // 松开推子自动试听一次
+  const sec = e.target.closest("section.k");
+  if (sec && e.target.type === "range") play(sec.dataset.k);
+});
+document.addEventListener("click", e => {
+  const p = e.target.closest("[data-play]"); if (p) { play(p.dataset.play); return; }
+  const r = e.target.closest("[data-reset]");
+  if (r) { tune[r.dataset.reset] = Object.assign({}, DEF[r.dataset.reset]); save(); render(); }
+});
+document.getElementById("reset-all").addEventListener("click", () => { KEYS.forEach(k => { tune[k] = Object.assign({}, DEF[k]); }); save(); render(); document.getElementById("out").hidden = true; });
+function resultText() {
+  const ks = KEYS.filter(changed);
+  if (!ks.length) return "没有改动。";
+  return "音效调音参数（SFX_TUNE）：\n" + ks.map(k => {
+    const t = tune[k];
+    const parts = FIELDS.map(([f]) => `${f}: ${fmt(t[f])}`).concat([`on: ${t.on !== false}`]);
+    return `${k}（${Sfx.UI_LABEL[k] || k}）: { ${parts.join(", ")} }`;
+  }).join("\n");
+}
+document.getElementById("copy").addEventListener("click", () => {
+  const out = document.getElementById("out"); const text = resultText();
+  out.value = text; out.hidden = false;
+  const btn = document.getElementById("copy");
+  const done = (msg) => { btn.textContent = msg; setTimeout(() => { btn.textContent = "复制参数"; }, 1600); };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(() => done("已复制"), () => { out.select(); done("请手动复制下方文字"); });
+  else { out.select(); done("请手动复制下方文字"); }
+});
+render();
+</script>
+</body>
+</html>

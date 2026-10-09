@@ -149,6 +149,7 @@
     body.scrollTop = 0;
   }
   function open(data, kit) {
+    if (window.Sfx) Sfx.ui("open");
     list = Array.isArray(data) ? data : [];
     const all = weapons();
     cur = null;

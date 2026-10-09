@@ -108,6 +108,7 @@
     box.querySelector("#hs-body").scrollTop = 0;
   }
   function open(data, kit) {
+    if (root.Sfx) Sfx.ui("open");
     list = Array.isArray(data) ? data : [];
     cur = kit && list.some(h => h.kit === kit) ? kit : (list[0] && list[0].kit);
     // 点的是武器人：打开主人那一页
@@ -234,6 +235,7 @@
       .concat(rows.map(r => (r.sub ? "  " + r.name + "（武器人）" : r.name) + "\t" + COLS.map(([k]) => (r.sub && k === "battles") ? "—" : cell(r, k)).join("\t"))).join("\n");
   }
   function open() {
+    if (root.Sfx) Sfx.ui("open");
     if (!box) {
       box = document.createElement("div");
       box.className = "sheet cl-sheet";
