@@ -259,3 +259,15 @@ test("角色资料 / 武器 / 背包请求：递归去掉坚毅生命字段，�
   assert.equal(out.requestId, 9);
   assert.deepEqual(JSON.parse(JSON.stringify(out.bag)), { water: 500, kuizhi: 3, items: [{ id: "medkit", name: "简易医疗包", qty: 2, hint: "治疗一名友方 1d4+6 内层生命" }, { id: "stim", name: "强心注射剂", qty: 1, hint: "自身恢复 16 生命，失去 6 坚毅生命" }] });
 });
+
+test("特殊棋盘：玩家拿到区号、坐标、连接，所有区的场地和所有连接的间隙", () => {
+  const V = require("../online-view");
+  const state = { zoneMode: 4, board: { id: "square4", name: "x", zones: [{ id: 1, x: 0, y: 0 }, { id: 2, x: 1, y: 0 }, { id: 3, x: 0, y: 1 }, { id: 4, x: 1, y: 1, secret: 1 }], links: [[1, 2], [1, 3], [2, 4], [3, 4]], playerZone: 3 },
+    fields: { 4: { ice: true, fieldLock: "x" } }, gaps: { "1-3": { type: "wall", hp: 9, maxHp: 12 }, "2-4": { type: "door", open: true } }, units: [] };
+  const out = V.projectState(state);
+  assert.deepEqual(JSON.parse(JSON.stringify(out.board)), { zones: [{ id: 1, x: 0, y: 0 }, { id: 2, x: 1, y: 0 }, { id: 3, x: 0, y: 1 }, { id: 4, x: 1, y: 1 }], links: [[1, 2], [1, 3], [2, 4], [3, 4]], id: "square4" });
+  assert.equal(out.fields[4].ice, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(out.gaps["1-3"])), { hp: 9, maxHp: 12, type: "wall" });
+  assert.equal(out.gaps["2-4"].open, true);
+  assert.equal(V.projectState({ zoneMode: 3, units: [] }).board, undefined);
+});

@@ -566,3 +566,30 @@ test("联机：主持人用战斗模板开战，玩家一进战斗就看到摆�
   await shot(alice, "tpl-2-player-battle"); await shot(host, "tpl-3-host-battle");
   assert.deepEqual(f.errors, []);
 });
+
+test("联机：四区方形棋盘，玩家画面摆成 2×2，4 区和所有间隙都看得到", { timeout: 120000 }, async t => {
+  const f = await fixture(t); if (!f) return;
+  const { host, alice } = f;
+  await host.evaluate(() => { OnlineGame.start(); });
+  await alice.waitForFunction(() => OnlineGame.getView().screen === "exploration");
+  await host.evaluate(() => battleTemplateSave({ name: "仓库", board: "square4", enemies: [{ preset: "thug_knife", level: 1, zone: 4 }], fields: { 4: { ice: true } }, gaps: { "2-4": { type: "wall", hp: 20 } } }));
+  await host.click('#tr-tabs [data-tab="battles"]');
+  await host.click('[data-bt^="fight:"]');
+  await alice.waitForFunction(() => document.querySelectorAll("#online-stage .ol-zone").length === 4);
+  const r = await alice.evaluate(() => {
+    const zones = [...document.querySelectorAll("#online-stage .ol-zone")];
+    const box = id => zones.find(z => z.querySelector("h2").textContent === id + " 区").getBoundingClientRect();
+    const [b1, b2, b3, b4] = [1, 2, 3, 4].map(box);
+    return { grid: Math.abs(b1.top - b2.top) < 2 && Math.abs(b3.top - b4.top) < 2 && b3.top > b1.bottom - 1 && Math.abs(b1.left - b3.left) < 2,
+      foeIn4: /狂徒/.test(zones.find(z => z.querySelector("h2").textContent === "4 区").textContent),
+      ice4: /冰面/.test(zones.find(z => z.querySelector("h2").textContent === "4 区").textContent),
+      gaps: document.querySelector("#online-stage .ol-gaps").textContent };
+  });
+  assert.equal(r.grid, true, "2×2 排版");
+  assert.equal(r.foeIn4, true);
+  assert.equal(r.ice4, true);
+  assert.match(r.gaps, /2 ↔ 4：危墙 · 耐久 20/);
+  assert.match(r.gaps, /1 ↔ 3/);
+  if (process.env.BACKFIRE_SHOTS) await alice.screenshot({ path: path.join(process.env.BACKFIRE_SHOTS, "board-square4.png") });
+  assert.deepEqual(f.errors, []);
+});

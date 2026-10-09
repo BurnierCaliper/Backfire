@@ -60,8 +60,8 @@
 .ol-xp { color: #edc17d; }
 .ol-result { border-color: #c99a46; }
 .ol-result-grade { font-size: 24px; color: #f2c230; font-weight: 700; }
-.ol-zones { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: start; }
-.ol-zone { min-width: 0; padding: 12px; background: #1a1511; border: 1px solid #4d4337; }
+.ol-zones { display: grid; grid-template-columns: repeat(var(--ol-cols, 3), minmax(0, 1fr)); gap: 16px; align-items: start; }
+.ol-zone { grid-column: var(--ol-col, auto); grid-row: var(--ol-row, auto); min-width: 0; padding: 12px; background: #1a1511; border: 1px solid #4d4337; }
 .ol-zone > h2 { color: var(--sk-brass, #c99a46); padding-bottom: 8px; border-bottom: 1px solid #4d4337; }
 .ol-field { padding: 6px 8px; background: #393723; color: #e6dbb0; font-size: 12px; }
 .ol-gaps { display: flex; flex-wrap: wrap; gap: 8px 20px; padding: 10px 0; color: var(--sk-muted, #a8977b); }
@@ -152,7 +152,7 @@ body.ol-has-side .ol-toast { right: 344px; }
   .ol-card footer > button { flex: 1 1 140px; }
   .ol-stage { padding: 16px 10px 90px; }
   .ol-zones { grid-template-columns: 1fr; gap: 14px; }
-  .ol-zone { padding: 10px; }
+  .ol-zone { grid-column: auto; grid-row: auto; padding: 10px; }
   .ol-zone > h2 { font-size: 20px; }
   .ol-unit { margin: 10px 0; }
   .ol-action-options { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }

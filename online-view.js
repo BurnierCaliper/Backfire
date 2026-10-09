@@ -106,13 +106,29 @@
       });
     }
     out.props = arr(get(state, "props")).slice(0, 100).map(projectProp).filter(Boolean);
+    // 特殊棋盘（四区方形、五区十字……）：只发区号、坐标和连接，玩家端照着排版
+    const board = get(state, "board");
+    if (obj(board)) {
+      const zones = arr(get(board, "zones")).slice(0, 9).flatMap(z => {
+        const zid = number(get(z, "id")), x = number(get(z, "x")), y = number(get(z, "y"));
+        return Number.isInteger(zid) && zid >= 1 && zid <= 9 && Number.isInteger(x) && Number.isInteger(y) && x >= 0 && y >= 0 && x < 9 && y < 9 ? [{ id: zid, x, y }] : [];
+      });
+      const ids = new Set(zones.map(z => z.id));
+      const links = arr(get(board, "links")).slice(0, 20).flatMap(l => {
+        const a = number(get(l, 0)), b = number(get(l, 1));
+        return ids.has(a) && ids.has(b) && a !== b ? [[a, b]] : [];
+      });
+      if (zones.length) { out.board = { zones, links }; const bid = id(get(board, "id")); if (bid) out.board.id = bid; }
+    }
+    const zoneKeys = out.board ? out.board.zones.map(z => String(z.id)) : ["1", "2", "3"];
+    const gapKeys = out.board ? out.board.links.map(([a, b]) => Math.min(a, b) + "-" + Math.max(a, b)) : ["1-2", "2-3"];
     out.fields = {}; out.gaps = {};
-    for (const key of ["1", "2", "3"]) if (obj(get(get(state, "fields"), key))) {
+    for (const key of zoneKeys) if (obj(get(get(state, "fields"), key))) {
       const field = get(get(state, "fields"), key);
       out.fields[key] = selected(field, ["fire", "fireOn", "electric", "acid", "ice", "collapse", "energy", "energyVal", "harmonic", "heal", "highland", "abyss", "isolate", "collapseOn", "collapseLv", "ruinOn", "ruinHp", "ruinMax"]);
       out.fields[key].fieldLocked = !!get(field, "fieldLock");
     }
-    for (const key of ["1-2", "2-3"]) if (obj(get(get(state, "gaps"), key))) {
+    for (const key of gapKeys) if (obj(get(get(state, "gaps"), key))) {
       const gap = get(get(state, "gaps"), key), dto = copyFields(gap, {}, [], ["hp", "maxHp", "level"], ["open"]);
       enumField(gap, dto, "type", ["open", "bridge", "wall", "door", "void"]); out.gaps[key] = dto;
     }
