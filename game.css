@@ -293,12 +293,12 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
   gap: 2px;
   background: transparent;
 }
-/* 高能值：淡青绿色的液体从左往右灌进血条，右边是在晃的波浪液面。
- * 宽度 = 高能值 / 血量上限。液面越过血量（血条里还亮着的部分）就会自爆，快到时（高能 ≥ 血量 75%）液体发亮、闪动 */
+/* 高能值：亮青色的液体从左往右灌进血条，右边是在晃的波浪液面（纯色，不加阴影）。
+ * 宽度 = 高能值 / 血量上限。液面越过血量（血条里还亮着的部分）就会自爆，快到时（高能 ≥ 血量 75%）液体闪动 */
 .u-high {
   position: absolute;
   left: 0; top: 0; bottom: 0;
-  background: linear-gradient(180deg, rgba(190, 255, 236, .72), rgba(110, 232, 200, .62) 55%, rgba(70, 200, 175, .66));
+  background: #76f0f6;
   pointer-events: none;
   z-index: 5;
   transition: width .45s cubic-bezier(.3, .8, .3, 1);
@@ -308,13 +308,13 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
   position: absolute;
   top: 0; bottom: 0; right: -5px;
   width: 5px;
-  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='5' height='8'%3E%3Cpath d='M0 0H2Q5 2 2 4Q-1 6 2 8H0Z' fill='%2394f0d6' fill-opacity='.72'/%3E%3C/svg%3E") repeat-y;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='5' height='8'%3E%3Cpath d='M0 0H2Q5 2 2 4Q-1 6 2 8H0Z' fill='%2376f0f6'/%3E%3C/svg%3E") repeat-y;
   background-size: 5px 8px;
   animation: u-high-wave .8s linear infinite;
 }
-.u-high.danger { background: linear-gradient(180deg, rgba(225, 255, 245, .85), rgba(130, 250, 215, .78)); animation: u-high-pulse .9s ease-in-out infinite; }
+.u-high.danger { animation: u-high-pulse .9s ease-in-out infinite; }
 @keyframes u-high-wave { from { background-position: 0 0; } to { background-position: 0 8px; } }
-@keyframes u-high-pulse { 50% { box-shadow: 0 0 8px 1px rgba(120, 255, 220, .8); } }
+@keyframes u-high-pulse { 50% { opacity: .55; } }
 @media (prefers-reduced-motion: reduce) { .u-high, .u-high::after, .u-high.danger { animation: none; transition: none; } }
 .seg {
   position: relative;

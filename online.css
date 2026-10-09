@@ -226,7 +226,7 @@ body.ol-has-side .ol-toast { right: 344px; }
 
 /* 高能值液体条（样式和战斗画面的 .u-high 共用） */
 .ol-high { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; font-size: 12px; }
-.ol-high span { color: #7fe8cf; }
+.ol-high span { color: #76f0f6; }
 .ol-high-track { position: relative; height: 10px; background: #2c261f; }
 .ol-high-hp { position: absolute; left: 0; top: 0; bottom: 0; background: #d9644f; }
 .ol-high b { font-variant-numeric: tabular-nums; }
