@@ -11466,11 +11466,16 @@ function runSkillInner(id, optRun) {
         const torq = findKit("torque", state.units);
         const tAtk = torq ? (Number(torq.atk) || 0) : (Number(a.weaponAtk) || 0);
         let n = 0;
+        const hitIds = new Set();
         lines.push(`机枪扫射 ${zone} 区。`);
         while (pool > 0 && n < 300) {
           // 每一颗子弹打选中区域里的一个随机敌人（每颗都是单体攻击：照样触发过度自信的嘲讽）
+          // 说明里写「随机」，实际先保证区里每个敌人都挨到一颗（在还没挨过的里随机），都挨过之后才完全随机
           const alive = visibleEnemies(zone).filter(u => !u.dead);
-          const cur = alive[Math.floor(Math.random() * alive.length)];
+          const fresh = alive.filter(u => !hitIds.has(u.id));
+          const from = fresh.length ? fresh : alive;
+          const cur = from[Math.floor(Math.random() * from.length)];
+          if (cur) hitIds.add(cur.id);
           if (!cur) { lines.push(`${zone} 区没有敌人了，剩下的 ${pool} 点废料没打出去。`); break; }
           const roll = takeDice(1, 10, 0);
           const per = Math.floor(tAtk / 3) + roll.total;

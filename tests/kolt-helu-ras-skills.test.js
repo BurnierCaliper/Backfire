@@ -64,6 +64,7 @@ test("碎渣重炮（电钻机枪）：选区域，子弹随机打该区敌人�
   assert.ok(p.length >= 3, "好几颗子弹");
   assert.ok(p.every(x => x.element === "electric"));
   assert.ok(p.every(x => x.id === foes[0].id || x.id === foes[1].id), "只打 1 区");
+  assert.ok(new Set(p.slice(0, 2).map(x => x.id)).size === 2, "前两颗先把区里两个敌人各打一次");
   assert.equal(c.koltScrapTotal(k), 0, "废料用光");
   const broke = defs0.reduce((s, d, i) => s + d - foes[i].def, 0);
   assert.equal(broke, Math.floor(p.length / 2));
