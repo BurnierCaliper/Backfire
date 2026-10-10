@@ -2995,16 +2995,8 @@ function gapFall(unit, notes) {
   applyTrueDamage(unit.layers, fall);
   if (fall > 0) spawnFloater(unit, fall, "physical");
   notes.push(`${unit.name} 坠落，失去最大生命 10%（${fall}），移动失败。`);
-  if (isUnitDown(unit) && !unit.upOnShp) {
-    if (unit.isPlayer && !isWeaponUnit(unit) && !unit.dead) {
-      unit.dying = true;
-      clearStunOnDown(unit);
-      notes.push(`${unit.name} 坠落导致最内层归零，陷入濒死。`);
-    } else {
-      unit.dead = true;
-      notes.push(`${unit.name} 坠落致死（最内层归零）。`);
-    }
-  }
+  // 倒地统一结算（和坠入深渊同一套）：力竭 3 即死；起身中的人这 10% 改扣坚毅生命
+  applyKnockdown(unit, notes, { shpLoss: fall, cause: "坠落" });
 }
 
 /** 过一条间隔时的不稳桥梁：地面单位每过一次 −1d6 耐久，塌了就坠落（fail = 移动不生效） */
@@ -9138,6 +9130,19 @@ const SKILL_REQUIREMENT = {
   xia_summon:     (a) => weaponSummonWhy(a, "berniel"),
   chuan_summon:   (a) => weaponSummonWhy(a, "bili"),
   nora_summon:    (a) => weaponSummonWhy(a, "vitas"),
+  // 武器人主动收回为武器：要和持有者同区（扣费之前就置灰）
+  mint_return:     (a) => weaponReturnWhy(a),
+  vitas_return:    (a) => weaponReturnWhy(a),
+  latte_return:    (a) => weaponReturnWhy(a),
+  niu_return:      (a) => weaponReturnWhy(a),
+  naruto_return:   (a) => weaponReturnWhy(a),
+  mochi_return:    (a) => weaponReturnWhy(a),
+  berniel_return:  (a) => weaponReturnWhy(a),
+  bili_return:     (a) => weaponReturnWhy(a),
+  torque_return:   (a) => weaponReturnWhy(a),
+  ecmo_return:     (a) => weaponReturnWhy(a),
+  edc_return:      (a) => weaponReturnWhy(a),
+  xiaoxiao_return: (a) => weaponReturnWhy(a),
   nora_indwell:   (a) => piercedTarget(a) ? null : "场上没有刺入的目标",
   vitas_infuse:   () => piercedTarget(noraOf()) ? null : "场上没有刺入的目标",
   vitas_rip:      () => piercedTarget(noraOf()) ? null : "场上没有刺入的目标",
