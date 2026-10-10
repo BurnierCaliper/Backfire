@@ -882,7 +882,7 @@ function resolveAttack(ctx) {
     if (flags.holyShield) { mul *= 0.5; hAdd("圣盾：本次伤害减半。"); }
     if (flags.prideReduce) {
       const pr = typeof flags.prideReduce === "number" ? flags.prideReduce : 0.25;
-      mul *= 1 - pr; hAdd(`过度自信：满血时受伤 −${Math.round(pr * 100)}%。`);
+      mul *= 1 - pr; hAdd(`过度自信：血量不低于进入战斗时的上限，受伤 −${Math.round(pr * 100)}%。`);
     }
     // 事故幸存+：拉斯缪尔不稳态下受到的伤害 ×3（不再倒地 / 死亡）
     if (t.kit === "ras" && t.resources && t.resources.unstable && typeof passivePlus === "function" && passivePlus(t, 2)) {
@@ -998,6 +998,8 @@ function resolveAttack(ctx) {
 
   // 高压场地额外电伤改在 dealTo 里自动写入血条，避免这里只记账不结算。
 
+  // 过度自信：这次攻击受到的击破 −1
+  if (flags.prideReduce && totalBreak > 0) { totalBreak -= 1; add("过度自信：受到的击破 −1。"); }
   const defBefore = Number(t.def) || 0;
   let defAfter = defBefore;
   let helperBreak = 0;

@@ -1437,6 +1437,8 @@ function startCombat() {
   state.phaseClock = state.weather === "phase";
   markInnateEnvironment();
   liftOutOfAbyss();
+  // 过度自信看的是进入战斗时的血量上限：战斗中上限被抬高（护盾、临时层……）也不影响触发线
+  (state.units || []).forEach(u => { if (u.kit === "kolt") u.prideMaxHp = baseMaxHp(u); });
   applyPassivePlusAtStart();
   beginRound([]);
   startPlayerPhase();
@@ -2798,6 +2800,8 @@ function applyTypedDot(unit, amount, element, notes, label, opts) {
   }
   notes.push(label + ` → 实伤 ${Math.floor(res.total || 0)}`);
   if (typeof afterDamageTaken === "function") afterDamageTaken(unit, element, res.total || 0, Math.max(0, shieldBefore - shieldSum(unit)), notes, {});
+  // 聚焦只看受到的伤害属性对不对，不看来源：状态、场地、余波的伤害也推进序列
+  if (!unit.dead) advanceFocusOnHit(null, unit, element, res, notes);
   const sdKey = inferStatusDmgKey(label, element);
   if (PROC_DOT_FX[sdKey]) procFx(unit, PROC_DOT_FX[sdKey]);
   addStatusDmg(sdKey, res.total || 0);
@@ -4956,7 +4960,8 @@ function stripFocusLayer(target, layerType, lines) {
   }
 }
 
-/** 聚焦推进：按序列的下一个属性、对该目标造成伤害的攻击行动推进一步（多段攻击整次算一步），
+/** 聚焦推进：受到的伤害属性符合序列的下一个就推进一步，不看来源（攻击、状态、场地、余波都算；
+ *  同一个行动里多段攻击整次算一步），
  *  不要求打在被聚焦的那一层上。用符合天气（这天气下有增伤）的属性攻击时，不管序列要什么都推进一步。
  *  序列走完，被聚焦的层直接抹去（并造成 2 击破）。 */
 function weatherFavorsElement(target, element) {
@@ -6858,11 +6863,12 @@ function dealTo(attacker, target, opt) {
       extraDiceNote = [extraDiceNote, ...adj.text].filter(Boolean).join(" + ");
     }
   }
-  // 过度自信：现有血量 ≥ 血量上限即减伤。上限不含废物利用等临时血量，
-  // 所以靠临时层把血量堆回（甚至超过）上限时也会触发。
+  // 过度自信：现有血量 ≥ 进入战斗时的血量上限即减伤（并少受 1 击破）。战斗中上限被抬高也照原来的上限算，
+  // 所以靠临时层、护盾把血量堆过原来的上限就会触发
   if (target && target.kit === "kolt" && flags.action && !target.upOnShp && (typeof passiveOn !== "function" || passiveOn(target))) {
     const cur = totalCurHp(target);
-    const mx = baseMaxHp(target);
+    if (target.prideMaxHp == null) target.prideMaxHp = baseMaxHp(target);   // 中途上场的：第一次挨打时记下
+    const mx = Number(target.prideMaxHp) || 0;
     if (mx > 0 && cur >= mx) flags.prideReduce = typeof passivePlus === "function" && passivePlus(target, 2) ? 0.45 : true;   // 过度自信+：45%
   }
   if (attacker && (attacker.kit === "helu" || attacker.kit === "ecmo") && target && target.focuses && target.focuses.length) {
@@ -6939,7 +6945,7 @@ function dealTo(attacker, target, opt) {
     const deadLayer = broken[broken.length - 1];   // 一击打穿多层时取最里面那层
     if (deadLayer) state.lastBrokenLayer = { type: deadLayer.type, lost: deadLayer.max || 0, dmg: res.total || 0 };
   }
-  if (flags.action) advanceFocusOnHit(attacker, target, opt.element || res.element, res, extra);
+  advanceFocusOnHit(attacker, target, opt.element || res.element, res, extra);   // 聚焦不看来源，任何伤害都算
   // 不稳态：受到伤害就倒地（濒死）；已经起身（用坚毅生命继续战斗）时再受到伤害才直接死亡
   if (target && target.kit === "ras" && target.resources && target.resources.unstable && !target.dead &&
       !(typeof passivePlus === "function" && passivePlus(target, 2)) &&   // 事故幸存+：不倒地，改为伤害 / 治疗 ×3

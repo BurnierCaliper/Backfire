@@ -59,3 +59,41 @@ test("猛扑是「跃」：带着同区目标越过空隙，目标不会掉下�
   assert.equal(mochi.zone, 2);
   assert.equal(foe.zone, 2, "目标一起过去了，没有掉进空隙");
 });
+
+test("过度自信：血量不低于进入战斗时的血量上限就减伤 25%、少受 1 击破；战斗中上限被抬高也照原来的上限算", () => {
+  const { c, S, kit, foe } = field(["kolt", "helu"]);
+  const k = kit("kolt");
+  k.zone = foe.zone = 1;
+  const base = c.baseMaxHp(k);
+  assert.equal(k.prideMaxHp, base, "开战时记下");
+  k.def = k.defMax = 10;
+  // 上限被抬高（例如多了一层），现有血量超过原来的上限但没到新上限：照样触发
+  k.layers.push({ type: "flesh", current: 0, max: 50 });
+  k.layers[0].current = k.layers[0].max;
+  for (const l of k.layers) if (l !== k.layers[0] && l.max !== 50) l.current = l.max;
+  k.layers[k.layers.length - 1].current = 5;
+  assert.ok(c.totalHp(k) >= base && c.totalHp(k) < c.baseMaxHp(k));
+  const out = hit(c, foe, k, { atk: 20, baseBreak: 2 });
+  assert.equal(out.res.total, 15, "20 × 75%");
+  assert.equal(k.def, 9, "2 击破 − 1");
+  assert.match(out.res.log.join("\n"), /过度自信/);
+  // 血量低于原来的上限：不触发
+  k.layers = [{ type: "flesh", current: base - 1, max: base + 100, inner: true }];
+  k.def = 10;
+  const out2 = hit(c, foe, k, { atk: 8, baseBreak: 2 });
+  assert.equal(out2.res.total, 8, "不减伤");
+  assert.equal(k.def, 8);
+});
+
+test("聚焦不看来源：状态、场地等非攻击伤害只要属性对也推进序列", () => {
+  const { c, foe } = field();
+  foe.layers = [{ type: "armor", current: 100, max: 100 }, { type: "flesh", current: 100, max: 100, inner: true }];
+  foe.focuses = [{ layerType: "armor", seq: ["fire", "acid"], step: 0 }];
+  const notes = [];
+  c.applyTypedDot(foe, 5, "ice", notes, "测试冰伤");
+  assert.equal(foe.focuses[0].step, 0, "属性不对不推进");
+  c.applyTypedDot(foe, 5, "fire", notes, "灼烧");
+  assert.equal(foe.focuses[0].step, 1, "灼烧（状态伤害）推进了一步");
+  c.applyTypedDot(foe, 5, "acid", notes, "酸液地面");
+  assert.ok(!foe.layers.some(l => l.type === "armor" && l.current > 0), "场地伤害走完序列，装甲被抹去");
+});
