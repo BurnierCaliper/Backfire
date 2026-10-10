@@ -81,3 +81,32 @@ test("导体：按段计数，额外目标只吃触发的那一段，不重放�
   assert.equal(main.length, 3, "主目标仍是三段");
   assert.equal(extra[0].value, main[2].value, "额外的是触发的那一段，不是整次攻击");
 });
+
+test("导体额外一段按新目标重新结算：不继承原目标的飞行 / 减伤，按这一段自己的倍率", () => {
+  const go = (kit, skill, prep) => {
+    const c = H.load();
+    c.BattleSim.setup({ party: [kit], enemies: [{ id: "thug_knife", lv: 1, zone: 1 }, { id: "thug_knife", lv: 1, zone: 1 }], seed: "CONDRE" });
+    c.startCombat();
+    const S = c.S.state;
+    const a = c.findKit(kit, S.units); a.zone = kit === "ras" ? 2 : 1; a.self = "conductor"; a._conductorHits = 0;
+    const foes = S.units.filter(u => !u.isPlayer);
+    foes.forEach(f => { f.zone = 1; f.layers = [{ type: "flesh", current: 500, max: 500 }]; f.def = f.defMax = 30; });
+    prep(foes[0], a);
+    const pops = [];
+    c.spawnPopup = (u, spec) => { if (spec.kind === "dmg") pops.push({ who: u === foes[0] ? "main" : "extra", v: spec.value }); };
+    c.Commands.dispatch({ type: "skill", actor: a.id, skill, target: foes[0].id });
+    return { c, a, pops };
+  };
+  // 原目标飞行（伤害减半）：额外目标不会飞，拿完整的一段
+  const fly = go("ras", "ras_aa", (m) => { m.flying = true; });
+  const main = fly.pops.filter(p => p.who === "main"), extra = fly.pops.filter(p => p.who === "extra");
+  assert.equal(extra.length, 1);
+  assert.equal(extra[0].v, main[0].v * 2, "不继承原目标的飞行减半");
+  // 原目标咬牙坚持（减伤 50%）
+  const grit = go("ras", "ras_aa", (m) => { m.resources = Object.assign({}, m.resources, { gritTurn: true }); });
+  assert.equal(grit.pops.find(p => p.who === "extra").v, grit.pops.find(p => p.who === "main").v * 2, "不继承原目标的减伤");
+  // 柯尔特电钻普攻 0.3 / 0.3 / 0.4：第 3 段触发，额外那一下是 0.4 那一段
+  const k = go("kolt", "kolt_aa", (m, a) => { a.resources.bit = "drill"; });
+  const atk = k.c.effectiveAtk(k.a, k.c.S.state.units);
+  assert.equal(k.pops.find(p => p.who === "extra").v, Math.floor(atk * 0.4));
+});

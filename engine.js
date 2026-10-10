@@ -763,11 +763,16 @@ function resolveAttack(ctx) {
   for (let h = 0; h < hits; h++) {
     const hitLog = [];
     const hAdd = (s) => { hitLog.push(s); add(`#${h + 1} ${s}`); };
+    // hitMults：每段倍率不同的多段攻击（例如柯尔特电钻普攻 0.3 / 0.3 / 0.4）；多出来的段数沿用最后一段
+    const hm = Array.isArray(ctx.hitMults) && ctx.hitMults.length ? Number(ctx.hitMults[Math.min(h, ctx.hitMults.length - 1)]) || 0 : null;
+    const multAdj = hm == null ? 0 : hm - (Number(ctx.mult) || 0);
+    // 这一段的基础包（只含攻击者一侧：ATK × 倍率 + 固定 + 骰子 + 第一击加骰），还没吃目标一侧的任何修正。导体额外那一下用它重新结算
+    const segBase = Math.max(0, rawBase + atk * multAdj) + (h === 0 ? firstBonus : 0);
 
     if (flags.block === "assistOk") {
       let br = ctx.breakOnce ? onceBreak : (Number(ctx.baseBreak) || 0);
       if (ctx.breakOnce && h > 0) {
-        perHit.push({ dealt: 0, breakDealt: 0, layers: clone(layersWork) });
+        perHit.push({ dealt: 0, breakDealt: 0, base: segBase, layers: clone(layersWork) });
         continue;
       }
       if (flags.smash) br *= 2;
@@ -776,15 +781,12 @@ function resolveAttack(ctx) {
       if (weather === "phase" && Number(ctx.phaseStep) === 2) br += 1;
       totalBreak += br;
       hAdd("协助格挡成功：目标免伤，击破 " + br + " 改由格挡者承担。");
-      perHit.push({ dealt: 0, breakDealt: br, layers: clone(layersWork) });
+      perHit.push({ dealt: 0, breakDealt: br, base: segBase, layers: clone(layersWork) });
       continue;
     }
 
-    // hitMults：每段倍率不同的多段攻击（例如柯尔特电钻普攻 0.3 / 0.3 / 0.4）；多出来的段数沿用最后一段
-    const hm = Array.isArray(ctx.hitMults) && ctx.hitMults.length ? Number(ctx.hitMults[Math.min(h, ctx.hitMults.length - 1)]) || 0 : null;
-    const multAdj = hm == null ? 0 : hm - (Number(ctx.mult) || 0);
     if (multAdj) hAdd(`本段倍率 ${round2(hm)}`);
-    let packet = Math.max(0, rawBase + atk * multAdj) + (h === 0 ? firstBonus : 0);
+    let packet = segBase;
 
     const startIdx = pickStartIndex(layersWork, flags.pierce, flags.focusLayer);
     let startLayer = layersWork[startIdx] || layersWork.find(l => l.current > 0);
@@ -1041,6 +1043,7 @@ function resolveAttack(ctx) {
     perHit.push({
       dealt: hitDealt,
       intended: packet,   // 这一段打出去的伤害（不按剩余血量封顶），画面按段弹字用
+      base: segBase,      // 这一段吃目标修正之前的基础包（导体额外一下用）
       breakDealt: br,
       notes: hitLog,
       shp: onShp

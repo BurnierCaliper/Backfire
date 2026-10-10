@@ -12,6 +12,7 @@ const Bestiary = (() => {
   let root = null, filter = "all", sel = null, lv = null, party = 4, sub = "";
   let mode = "enemy", query = "";
   const MODES = [["hero", "角色"], ["enemy", "敌人"], ["prop", "配置物"], ["effect", "效果"]];
+  let heroLv = 1;   // 角色图鉴：查看哪个等级的技能（默认 1 级，点别的等级才显示后面的技能，免得剧透）
   const codexSel = { hero: null, prop: null, effect: null }, codexFilter = { hero: "all", prop: "all", effect: "all" };
 
   function build() {
@@ -46,7 +47,9 @@ const Bestiary = (() => {
       const tab = e.target.closest("[data-filter]");
       if (tab) { if (mode === "enemy") filter = tab.dataset.filter; else codexFilter[mode] = tab.dataset.filter; render(); return; }
       const cx = e.target.closest("[data-cx]");
-      if (cx) { codexSel[mode] = cx.dataset.cx; render(); root.querySelector(".bx-detail").scrollTop = 0; return; }
+      const hl = e.target.closest("[data-hxlv]");
+      if (hl) { heroLv = Number(hl.dataset.hxlv) || 1; render(); return; }
+      if (cx) { if (codexSel[mode] !== cx.dataset.cx) heroLv = 1; codexSel[mode] = cx.dataset.cx; render(); root.querySelector(".bx-detail").scrollTop = 0; return; }
       const card = e.target.closest("[data-kit]");
       if (card) { sel = card.dataset.kit; lv = null; render(); root.querySelector(".bx-detail").scrollTop = 0; return; }
       const ps = e.target.closest("[data-party]");
@@ -253,9 +256,17 @@ const Bestiary = (() => {
       body += sec("被动", `<ul class="bx-abil">${s.passives.map((p, i) => `<li><b>${esc(p.name)}</b><br>${esc(p.text)}
           ${p.next ? `<div class="hx-plus"><b>${esc(p.name)}+</b><span class="hx-tag">${esc(plusLv(i + 1))} 升级</span><br>${esc(p.next)}</div>`
             : i < 2 && !p.plus ? `<div class="hx-plus dim">被动升级：待定</div>` : ""}</li>`).join("")}</ul>`);
-      const skillLi = (k, lock) => textItem(k.name, k.text, [k.cost, lock ? `Lv${k.minLv} 解锁` : ""].filter(Boolean).join(" · "));
+      const skillLi = (k) => textItem(k.name, k.text, [k.cost, (k.minLv || 1) > 1 ? `Lv${k.minLv} 解锁` : ""].filter(Boolean).join(" · "));
       const roleIds = new Set((e.roleSkills || []).map(k => k.id));   // 职责技能单独列一节
-      body += sec("技能", `<ul class="bx-abil">${s.skills.now.filter(k => !roleIds.has(k.id)).map(k => skillLi(k)).join("")}</ul>`);
+      // 按等级查看：默认 1 级；可以点到后面的等级看那时会有的技能（角色和武器人的技能一起按等级筛）
+      const allOf = (sk) => (sk && sk.all) || (sk && sk.now) || [];
+      const atLv = (sk) => allOf(sk).filter(k => (k.minLv || 1) <= heroLv);
+      const lvs = Array.from(new Set([1].concat(allOf(s.skills).filter(k => !roleIds.has(k.id)).map(k => k.minLv || 1),
+        ...(s.weapons || []).map(w => allOf(w.skills).map(k => k.minLv || 1))))).sort((a, b) => a - b);
+      if (!lvs.includes(heroLv)) heroLv = lvs.filter(x => x <= heroLv).pop() || 1;
+      const lvPick = lvs.length > 1 ? `<div class="bx-lvpick"><span>查看等级</span>${lvs.map(x =>
+        `<button class="bx-tab${x === heroLv ? " on" : ""}" data-hxlv="${x}">Lv${x}</button>`).join("")}</div>` : "";
+      body += sec("技能", `${lvPick}<ul class="bx-abil">${atLv(s.skills).filter(k => !roleIds.has(k.id)).map(k => skillLi(k)).join("")}</ul>`);
       const ms = typeof ROLE_MILESTONES !== "undefined" ? ROLE_MILESTONES.join(" / ") : "5 / 10 / 15";
       if ((e.roleSkills || []).length) body += sec("职责技能", `<ul class="bx-abil">${e.roleSkills.map(k => textItem(k.name, k.text,
           [`${k.label}「${k.role}」${k.n}`, k.cost].filter(Boolean).join(" · "))).join("")}</ul>
@@ -269,7 +280,7 @@ const Bestiary = (() => {
           <div><small>格挡加成</small><b>${w.blockBonus != null ? "+" + w.blockBonus + "%" : "—"}</b></div>
         </div>
         <ul class="bx-abil">${(w.passives || []).map(p => textItem(p.name, p.text)).join("")}
-          ${((w.skills && w.skills.now) || []).map(k => skillLi(k)).join("")}
+          ${atLv(w.skills).map(k => skillLi(k)).join("")}
           ${w.assistBlock ? textItem("协助格挡", w.assistBlock) : ""}
           ${w.growth ? textItem("成长", w.growth) : ""}</ul>`)).join("");
     }

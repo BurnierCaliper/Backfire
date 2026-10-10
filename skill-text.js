@@ -422,7 +422,19 @@
       id: s.id, name: s.name, cost: skillCostText(s.id), hint: s.hint || "", text: skillText(s.id) || s.hint || ""
     }));
     // 当前等级还没有的技能不展示。skillList 已经按 minLv 滤过，升级后会自动出现在 now 里。
-    return { now: rows, later: [] };
+    // all：用高等级副本列出全部角色自己的技能（带解锁等级），只给图鉴的「按等级查看」用（默认只看 1 级，不剧透）；
+    // 角色资料卡不读它
+    const all = rows.map(r => Object.assign({ minLv: 1 }, r));
+    try {
+      const probe = Object.assign({}, u, { level: 99, roles: null, role2: null, resources: Object.assign({}, u.resources || {}) });
+      (skillList(probe) || []).forEach(s => {
+        if (!s || !s.id || seen[s.id] || !s.minLv || s.minLv <= (u.level || 1)) return;
+        seen[s.id] = true;
+        all.push({ id: s.id, name: s.name, minLv: s.minLv, cost: skillCostText(s.id), hint: s.hint || "", text: skillText(s.id) || s.hint || "" });
+      });
+    } catch (e) { /* 预览失败就只列当前的 */ }
+    all.sort((a, b) => a.minLv - b.minLv);
+    return { now: rows, later: [], all };
   }
   /** 武器补正系数和改装槽：{ coefs: [{ attr, name, coef }], slots: [{ id, name, text }|null] } */
   function weaponModRows(owner, kit) {

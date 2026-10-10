@@ -165,20 +165,24 @@ function afterAttackDealt(a, t, element, res, opt, notes) {
     }
   }
   // 导体：按攻击段数计数，不是按一次攻击行动。每三段让这一段再打到一个随机敌对目标；
-  // 雷鸣下变为每两段一次。额外打出去的是触发的那一段（取这一段打出去的伤害，不按原目标剩余血量封顶），
-  // 不是把整次多段攻击重放一遍。额外那一下自己不再计数，避免连环触发。
+  // 雷鸣下变为每两段一次。额外那一下是触发的那一段对新目标「重新结算」：用这一段吃目标修正之前的基础包
+  // （ATK × 这一段的倍率 + 骰子）和原始击破，再按新目标自己的情况算克制、飞行、减伤……
+  // 不拿原目标结算后的数值（以前原目标飞行 / 咬牙坚持，额外目标也跟着减半）。额外那一下自己不再计数，避免连环触发。
   if (a.self === "conductor" && !flags.conductorExtra) {
-    const segs = (res.perHit && res.perHit.length) ? res.perHit : [{ intended: res.intended || res.total || 0, dealt: res.total || 0, breakDealt: res.breakDealt || 0 }];
+    const segs = (res.perHit && res.perHit.length) ? res.perHit : [{ base: res.rawBase || 0 }];
+    const ob = opt._origBaseBreak !== undefined ? opt._origBaseBreak : opt.baseBreak;
+    const baseBr = ob != null ? Math.max(0, Number(ob) || 0) : 1;
     const every = currentWeatherFor(a) === "thunder" ? 2 : 3;
-    segs.forEach(seg => {
+    segs.forEach((seg, i) => {
       a._conductorHits = (Number(a._conductorHits) || 0) + 1;
       if (a._conductorHits % every !== 0) return;
       const pool = enemiesOf(a).filter(x => x.id !== t.id);
       const extra = pool.length ? pool[Math.floor(Math.random() * pool.length)] : null;
       if (!extra) return;
-      const dmg = Math.max(0, Number(seg.intended) || Number(seg.dealt) || 0);
-      const br = Math.max(0, Number(seg.breakDealt) || 0);
-      notes.push(`${a.name} 导体：第 ${a._conductorHits} 段额外击中 ${extra.name}（这一段 ${dmg}${br ? "，击破 " + br : ""}）。`);
+      const dmg = Math.max(0, Number(seg.base) || 0);
+      // 「共 N 击破」的多段攻击，击破只记在第一段；其余照原技能每段的击破
+      const br = opt.breakOnce ? (i === 0 ? baseBr : 0) : baseBr;
+      notes.push(`${a.name} 导体：第 ${a._conductorHits} 段额外击中 ${extra.name}。`);
       if (dmg <= 0 && br <= 0) return;
       const out = dealTo(a, extra, {
         element: element,
@@ -187,6 +191,8 @@ function afterAttackDealt(a, t, element, res, opt, notes) {
         hits: 1,
         baseBreak: br,
         atk: 0,
+        usePrep: false,
+        atkRange: opt.atkRange,
         flags: Object.assign({}, flags, { conductorExtra: true, blockResolved: true, block: "none", action: true })
       });
       if (out && out.extra) notes.push(...out.extra);
