@@ -125,12 +125,12 @@
     if (a.noMove || a.self === "frost" || (typeof isCrushing === "function" && isCrushing(a)) || (typeof touDuelVictim === "function" && touDuelVictim(a))) fail("这个单位现在不能移动");
     const f = (state.fields || {})[a.zone] || {};
     if (f.abyss && !a.flying) fail("地面单位不能从深渊移动");
-    const why = zoneReachable(a, dest); if (why) fail(why);
+    const why = zoneReachable(a, dest, true); if (why) fail(why);
     let ap = 0, bonus = 0;
     if (f.acid && !a.flying) ap = 1;
     else if (a.self !== "conductor") { if (enemyRankOf(a) === "minion") ap = 1; else bonus = 1; }
     const gap = (state.gaps || {})[gapKey(a.zone, dest)];
-    if (gap && gap.type === "void" && !a.flying) ap += 1;
+    if (gap && gap.type === "void" && !a.flying) { ap = 1; bonus = 0; }   // 越过空隙这一步花 1 行动点（不花附赠），另掷运动检定
     if ((a.ap || 0) < ap + extraAp || (a.bonus || 0) < bonus) fail("移动所需行动预算不足");
   }
   function checkFlow(a, cmd) {
@@ -166,7 +166,10 @@
     if (own(cmd, "dest")) fail("技能位置请使用分步选择");
     const sk = enemySkillList(a).find(s => s.id === cmd.skill);
     if (!sk || /协助|借机/.test(sk.label) || /_assist$|_opp$|_block$/.test(cmd.skill)) fail("这个敌人没有这项主动技能");
-    if ((a.ap || 0) < 1) fail("行动点不足");
+    // 技能花费：默认 1 行动点；赤牙的霰弹枪 / 掩体 2 行动点，追猎 1 附赠（enemies.js · enemySkillCost）
+    const cost = typeof enemySkillCost === "function" ? enemySkillCost(a, cmd.skill) : { ap: 1, bonus: 0 };
+    if ((a.ap || 0) < cost.ap) fail("行动点不足");
+    if ((a.bonus || 0) < cost.bonus) fail("附赠行动不足");
     if (cmd.skill === "en_chi_shot" && !(a.resources && a.resources.primed)) fail("霰弹枪尚未预热");
     const t = cmd.target == null ? null : unit(cmd.target);
     if (t && !present(t)) fail("目标不在场");

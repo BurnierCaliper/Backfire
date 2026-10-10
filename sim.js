@@ -111,7 +111,9 @@ const BattleSim = (function () {
 
   function resolveQueues(policy) {
     for (let guard = 0; guard < 60; guard++) {
-      if (outcome()) return;
+      // 敌人全灭时，还在等协助格挡的那一击照样落下（例：最后一只空投蜂群撞完就死了），不能直接丢掉
+      const done = outcome();
+      if (done && !(done === "player" && state.blockQueue && state.blockQueue.length)) return;
       if (state.blockQueue && state.blockQueue.length) {
         const job = state.blockQueue[0];
         const attacker = blockJobAttacker(job), target = unitById(job.targetId);
@@ -153,7 +155,7 @@ const BattleSim = (function () {
         const target = unitById(job.targetId), breaker = unitById(job.breakerId);
         const list = target ? eligibleAssisters(breaker, target) : [];
         let choice = null;
-        if (list.length) choice = job.vsPlayer ? EnemyAI.pickAssister(list) : policy.pickAssister(list, target);
+        if (list.length) choice = job.vsPlayer ? EnemyAI.pickAssister(list, target) : policy.pickAssister(list, target);
         const helper = unitById(choice);
         const extra = {};
         if (helper && helper.kit === "hiaki") {

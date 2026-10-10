@@ -263,7 +263,7 @@ function smithing() {
     }
   });
 }
-const MAIN_ATTR = { tou: "con", yuito: "int", xia: "str", ruby: "int", hiaki: "str", chuan: "int", nora: "int", kolt: "str", helu: "int", ras: "int" };
+const MAIN_ATTR = { tou: "con", yuito: "int", xia: "str", ruby: "int", hiaki: "str", chuan: "int", nora: "int", kolt: "str", helu: "int", ras: "int", longge: "int" };
 function levelChoices() {
   let guard = 0;
   while (guard++ < 40) {

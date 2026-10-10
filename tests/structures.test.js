@@ -90,6 +90,8 @@ test("范围攻击波及按钮所在区：触发一次（多个目标也只触�
   const { c, st, btn, door } = deviceField();
   const ruby = c.findKit("ruby", st.units);
   ruby.zone = 1;
+  // 手榴弹也炸到瑞比自己：血量放够，免得把自己炸成濒死（濒死时不能用道具）
+  ruby.layers.forEach(l => { l.max = 999; l.current = 999; });
   // 同区放两个敌人，用范围手榴弹炸 1 区
   st.units.filter(u => !u.isPlayer).forEach(u => { u.zone = 1; });
   c.bagAdd("bomb_e", 2);
@@ -523,6 +525,7 @@ test("灯的普通攻击：分步选目标里有危墙和同区配置物，打�
 
 test("灯的普通攻击耗圣盾打距离 1 的配置物：扣 1 圣盾；没圣盾时不花行动点", () => {
   const { c, st, tou, use } = touField();
+  st.gaps["1-2"] = c.emptyGap();   // 这里测射程：危墙倒塌之前打不到墙对面的配置物（手册第八章），先把墙拿掉
   const p = c.makeProp("battery", 2, 1);
   st.props.push(p);
   tou.ap = 2; tou.resources.shield = 1;
@@ -556,12 +559,13 @@ test("声波切割：没有圣盾、没有目标、目标距离不对都不花�
   use("tou_sonic", { target1: "gap:1-2", target2: foe.id }, foe.id);
   assert.equal(tou.ap, 1);
   assert.equal(tou.resources.shield, 1);
-  assert.ok(st.gaps["1-2"].hp < 30, "桥梁挨了一下");
+  // 声波切割照说明只有谐波伤害、没有击破；桥梁 / 危墙只吃击破，所以打不动（audit-P4-heroes）
+  assert.equal(st.gaps["1-2"].hp, 30, "桥梁打不动（没有击破）");
   assert.ok(c.totalHp(foe) < hpFoe);
-  // 只打危墙：吃 1 击破
+  // 只打危墙：没有击破，耐久不变，照样耗圣盾
   st.gaps["1-2"] = { type: "wall", hp: 8, maxHp: 8, open: false };
   use("tou_sonic", { target1: "gap:1-2" }, "gap:1-2");
-  assert.equal(st.gaps["1-2"].hp, 7, "危墙吃 1 击破");
+  assert.equal(st.gaps["1-2"].hp, 8, "危墙没有击破可吃");
   assert.equal(tou.resources.shield, 0);
   // 周围什么都没有：按钮直接不可用
   st.gaps["1-2"] = { type: "open", hp: 0 };

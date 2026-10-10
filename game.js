@@ -378,6 +378,8 @@
 
   function simulate(thunk, diceMode) {
     const saved = saveState();
+    // 「长休一次」的职责技能（全队集结）次数记在队伍档案里，不在 state：预演完也要还原，不然悬停一下就用掉了
+    const restOnce = typeof LEDGER !== "undefined" ? JSON.stringify(LEDGER.restOnce || {}) : null;
     const rnd = Math.random;
     const st = window.setTimeout;
     const outerTape = G.tape;
@@ -403,6 +405,7 @@
     G.sim = false;
     G.tape = outerTape;
     restoreState(saved);
+    if (restOnce != null && JSON.stringify(LEDGER.restOnce || {}) !== restOnce) LEDGER.restOnce = JSON.parse(restOnce);
     return { before, after, tape, err };
   }
 
@@ -3683,7 +3686,8 @@
     const kinds = [
       ["", "无"], ["fireOn", "火场"], ["ice", "冻土"], ["acid", "酸液"],
       ["electric", "高压"], ["energy", "能量场"], ["harmonic", "干涉场"],
-      ["heal", "恢复"], ["abyss", "深渊"], ["collapseOn", "塌陷"]
+      ["heal", "恢复"], ["abyss", "深渊"], ["collapseOn", "塌陷"],
+      ["ruinOn", "损毁地面"], ["isolate", "隔离区"]   // 规则层本来就支持（app.js · tickRuinGround、隔离区不吃天气），以前选不到
     ];
     for (let z = 1; z <= Number(state.zoneMode); z++) {
       const f = state.fields[z] || emptyField();

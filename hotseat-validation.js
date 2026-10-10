@@ -146,7 +146,9 @@
     if (cmd.target != null && !target) fail("没有这个可用目标", "invalid_target");
     const pinned = ["nora_aa", "vitas_slash"].includes(cmd.skill) && piercedTarget(cmd.skill === "nora_aa" ? actor : noraOf());
     if (pinned && !target) target = pinned;
-    if ((needsTarget.has(cmd.skill) || ["nora_aa", "vitas_slash"].includes(cmd.skill)) && !target) fail("请先选择技能目标", "invalid_target");
+    // 不倒战意 15 级选「全部友方」（行动点）不需要单独的目标
+    const wholeParty = cmd.skill === "role_sturdy" && flow.picks.mode === "all";
+    if (!wholeParty && (needsTarget.has(cmd.skill) || ["nora_aa", "vitas_slash"].includes(cmd.skill)) && !target) fail("请先选择技能目标", "invalid_target");
     const why = skillTargetError(actor, cmd.skill, target);
     if (why) fail(why, "invalid_target");
     if (!target || flow.hasUnit || pinned) return;
@@ -171,9 +173,12 @@
     if (actor.self === "frost") fail("霜结：无法自行移动", "invalid_move");
     const field = (state.fields || {})[from] || {};
     if (field.abyss && !actor.flying) fail("深渊只有飞行单位才能通过", "invalid_move");
-    const why = zoneReachable(actor, dest);
+    const why = zoneReachable(actor, dest, true);
     if (why) fail(why, "invalid_move");
     if (field.acid && !actor.flying && (actor.ap || 0) < 1) fail("离开酸液地面需要行动点", "invalid_move");
+    // 空隙：地面单位花 1 行动点做运动检定才能越过（检定在执行时掷）
+    const gap = (state.gaps || {})[gapKey(from, dest)];
+    if (gap && gap.type === "void" && !actor.flying && (actor.ap || 0) < 1) fail("越过空隙需要 1 行动点", "invalid_move");
   }
   function checkItem(actor, cmd) {
     const spec = typeof cmd.item === "string" && Object.hasOwn(ITEM_CATALOG, cmd.item) && ITEM_CATALOG[cmd.item];
@@ -190,6 +195,7 @@
     } else if (spec.target === "zone") {
       if (!Number.isInteger(cmd.dest) || cmd.dest < 1 || cmd.dest > Number(state.zoneMode)) fail("道具需要选择有效区域", "invalid_item");
       if (cmd.target != null) fail("区域道具不能夹带单位目标", "invalid_item");
+      if (typeof lineBlocked === "function" && lineBlocked(actor.zone, cmd.dest)) fail("隔着危墙 / 关着的门，道具影响不到那一区", "invalid_item");
     } else if (cmd.target != null && cmd.target !== actor.id) fail("这件道具只能对自己使用", "invalid_item");
     if (spec.target !== "zone" && cmd.dest != null) fail("这件道具不接受区域选项", "invalid_item");
   }

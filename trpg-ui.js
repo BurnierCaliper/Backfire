@@ -141,9 +141,11 @@
       const pool = livePartyCards().filter(c => !c.weaponOf);
       const on = new Set((window.GAME && GAME.partyKits) || []);
       const picks = pool.map(c => `<label class="tr-pick"><input type="checkbox" data-kit="${esc(c.kit)}" ${on.has(c.kit) ? "checked" : ""}>${esc(c.name)}<small>${esc(c.note || "")}</small></label>`).join("");
+      // 单项属性硬性上限 10：已经满的属性不列出来
       const attrs = heroes().filter(h => Number(h.attrPoints) > 0).map(h =>
         `<div class="tr-row"><b>${esc(h.name)}</b> 有 ${h.attrPoints} 点属性点：
-          ${Object.keys(ATTR_NAMES).map(k => `<button class="g-btn small" data-attr="${esc(h.kit)}:${k}">${ATTR_NAMES[k]} ${(h.attrs || {})[k] || 0} +1</button>`).join("")}</div>`).join("");
+          ${Object.keys(ATTR_NAMES).filter(k => (Number((h.attrs || {})[k]) || 0) < ATTR_HARD_MAX)
+            .map(k => `<button class="g-btn small" data-attr="${esc(h.kit)}:${k}">${ATTR_NAMES[k]} ${(h.attrs || {})[k] || 0} +1</button>`).join("")}</div>`).join("");
       return `<h3>队员</h3>
         <p class="r-hint">勾选参加这次跑团的角色。换人会按队伍记忆重新摆队伍，已有角色的等级、血量、物资不变。</p>
         <div class="tr-picks">${picks}</div>
@@ -297,18 +299,22 @@
     const all = ROGUE_SMITHS.flatMap(s => (s.blueprints || []).map(b => Object.assign({ smithName: s.name }, b)));
     const opt = (b) => `<option value="${esc(b.id)}">${esc(b.name)}（背包 ${bagCount(b.id)}）· ${esc(b.text)}</option>`;
     const groups = ROGUE_SMITHS.map(s => `<optgroup label="${esc(s.name)}">${(s.blueprints || []).map(b => opt(b)).join("")}</optgroup>`).join("");
+    const minLv = BLUEPRINT_MIN_LEVEL;
     const rows = heroes().flatMap(h => (h.linkedKits || []).map(k => {
       const cur = (h.weaponBlueprints || {})[k];
       const b = cur ? all.find(x => x.id === cur) : null;
-      return `<div class="tr-up"><b>${esc(weaponName(k))}</b>（${esc(h.name)}）${b ? `装着「<b>${esc(b.name)}</b>」<small> ${esc(b.text)}</small>
+      const lv = typeof trpgBpLevel === "function" ? trpgBpLevel(h, k) : trpgWeaponLevel(h, k);
+      // 「武器等级 + 羁绊」4 级才解锁客制化：不到 4 级装不上，已经装着的（旧存档、后台降级）不生效
+      const locked = lv < minLv ? `<span class="r-hint">「武器等级 + 羁绊」${minLv} 级才解锁客制化（现在 ${lv} 级）</span>` : "";
+      return `<div class="tr-up"><b>${esc(weaponName(k))}</b>（${esc(h.name)}）${b ? `装着「<b>${esc(b.name)}</b>」<small> ${esc(b.text)}</small>${lv < minLv ? `<b class="bad">（「武器等级 + 羁绊」不到 ${minLv} 级，不生效）</b>` : ""}
           <button class="g-btn small" data-bp-rm="${esc(h.kit)}:${esc(k)}">拆下（放回背包）</button>` : `<span class="r-hint">没有装图纸</span>`}
-        <div class="tr-row"><select data-bp-pick="${esc(h.kit)}:${esc(k)}">${groups}</select>
+        ${locked ? `<div class="tr-row">${locked}</div>` : `<div class="tr-row"><select data-bp-pick="${esc(h.kit)}:${esc(k)}">${groups}</select>
           <span>工钱 <input type="number" min="0" value="0" data-bp-fee="${esc(h.kit)}:${esc(k)}" style="width:90px"></span>
           <button class="g-btn small" data-bp-in="${esc(h.kit)}:${esc(k)}:0">装上（从背包）</button>
-          <button class="g-btn small" data-bp-in="${esc(h.kit)}:${esc(k)}:1">主持人直接装（不耗）</button></div></div>`;
+          <button class="g-btn small" data-bp-in="${esc(h.kit)}:${esc(k)}:1">主持人直接装（不耗）</button></div>`}</div>`;
     })).join("");
     return `<h3>客制化图纸 <button class="g-btn small" data-armory="${esc((heroes()[0] || {}).kit || "")}">在武器工坊里看实际效果</button></h3>
-      <p class="r-hint">一把武器只能装一张，装新的会把旧的放回背包；拆下也放回背包。工钱按剧情填（不同工匠收费不一样），主持人直接装不耗图纸也不收钱。</p>
+      <p class="r-hint">「武器等级 + 羁绊」到 ${minLv} 级才解锁客制化（和改装槽、被动升级一样）。一把武器只能装一张，装新的会把旧的放回背包；拆下也放回背包。工钱按剧情填（不同工匠收费不一样），主持人直接装不耗图纸也不收钱。</p>
       <div class="tr-row">给予图纸 <select id="tr-bp-give">${groups}</select><button class="g-btn small" id="tr-bp-give-btn">放进背包 +1</button></div>
       ${rows}`;
   }
@@ -322,7 +328,7 @@
         `<label>${esc((LAYER && LAYER[l.type]) || l.type)} ${numIn(`data-bs-layer="${k}" data-i="${i}" min="0" max="${l.max}"`, Number(l.current) || 0)} / ${l.max}</label>`).join("");
       const st = trpgHeroStatus(h);
       const attrs = Object.keys(ATTR_NAMES).map(a =>
-        `<label>${ATTR_NAMES[a]} ${numIn(`data-bs-attr="${k}" data-k="${a}" min="1"`, (h.attrs || {})[a] || 0, 48)}</label>`).join("");
+        `<label>${ATTR_NAMES[a]} ${numIn(`data-bs-attr="${k}" data-k="${a}" min="1" max="${ATTR_HARD_MAX}"`, (h.attrs || {})[a] || 0, 48)}</label>`).join("");
       const weapons = (h.linkedKits || []).map(w => {
         const hurt = LEDGER.weapons && LEDGER.weapons[w];
         const hurtText = hurt ? hurt.map(x => `${(LAYER && LAYER[x.type]) || x.type} ${x.current}`).join(" / ") : "";
@@ -335,7 +341,7 @@
       return `<div class="tr-up tr-bs">
         <div class="tr-row"><b>${esc(h.name)}</b>
           <label>状态 <select data-bs-status="${k}">${Object.keys(TRPG_STATUS).map(x => `<option value="${x}" ${x === st ? "selected" : ""}>${TRPG_STATUS[x]}</option>`).join("")}</select></label>
-          <label>等级 ${numIn(`data-bs-lv="${k}" min="1" max="25"`, h.level || 1, 52)}</label>
+          <label>等级 ${numIn(`data-bs-lv="${k}" min="1" max="20"`, h.level || 1, 52)}</label>
           <label>经验 ${numIn(`data-bs-xp="${k}" min="0"`, Number(h.xp) || 0, 72)}</label>
           <label>属性点 ${numIn(`data-bs-pts="${k}" min="0"`, Number(h.attrPoints) || 0, 48)}</label>
           <label>今天已短休 ${numIn(`data-bs-short="${k}" min="0"`, Number(LEDGER.shortUsed[h.kit]) || 0, 48)}</label></div>
@@ -484,6 +490,7 @@
     const bpOpts = (typeof ROGUE_SMITHS !== "undefined" ? ROGUE_SMITHS : []).flatMap(s => s.blueprints.map(b => [b.id, `${b.name}（${s.name}）`]));
     const list = (arr, kind, label) => arr.map((x, k) => `<span class="tk-chip">${esc(label(x))}<button class="g-btn small" data-te-act="del${kind}:${k}">×</button></span>`).join("");
     const e = t.escort;
+    const hbPay = trpgTaskHandbookPay(t.days, trpgPartyLevel());   // 主持人手册第三章的任务报酬，给主持人参考
     const escort = e ? `<h4>护送对象</h4><div class="tr-row">
         <select data-te="escort.kind" data-te-rerender="1">${options([["cart", "货车（不行动，不会失衡）"], ["vip", "人物（会躲开敌人、能还击）"]], e.kind)}</select>
         名字 ${inp("escort.name", e.name, 100)} 等级 ${inp("escort.level", e.level, 52, "number")}
@@ -497,6 +504,7 @@
       <h4>奖励</h4>
       <div class="tr-row">奎支 ${inp("reward.kuizhi", r.kuizhi, 90, "number")} 每人经验 ${inp("reward.xp", r.xp, 70, "number")}
         ${e ? `完好额外奎支 ${inp("reward.intactKuizhi", r.intactKuizhi, 90, "number")}` : ""}</div>
+      <p class="r-hint">手册参考（${hbPay.name}任务 ${Math.max(1, Number(t.days) || 1)} 天、队伍平均 ${trpgPartyLevel()} 级）：奎支 ${hbPay.range[0]}～${hbPay.range[1]}，每人经验 ${hbPay.xp}；按完成质量和关系上下浮动。</p>
       <div class="tr-row">物品 <select id="te-item">${options(itemOpts)}</select> ×${inp("_qty", 1, 52, "number").replace('data-te="_qty"', 'id="te-qty"')}
         <button class="g-btn small" data-te-act="addItem">＋</button> ${list(r.items, "Item", x => `${(ITEM_CATALOG[x.id] || {}).name}×${x.qty}`)}</div>
       <div class="tr-row">改装件 <select id="te-part">${options(partOpts)}</select><button class="g-btn small" data-te-act="addPart">＋</button>
@@ -1003,7 +1011,8 @@
   }
   function renderSlots() {
     const slots = trpgReadSlots();
-    $("tr-slot-list").innerHTML = slots.map((s, i) => {
+    const problem = trpgSlotsProblem();   // 空位文件坏了：已另存 .broken（读得出来的团照旧留着）
+    $("tr-slot-list").innerHTML = (problem ? `<p class="r-warn" style="grid-column:1/-1">⚠ ${esc(problem)}</p>` : "") + slots.map((s, i) => {
       const m = trpgSlotSummary(s);
       if (!m) return `<div class="tr-slot empty">
           <div class="tr-slot-head"><b>存档 ${i + 1}</b><span>空</span></div>
@@ -1132,6 +1141,9 @@
   function backFromBattle() {
     const r = $("g-result"); if (r) r.classList.remove("show");
     const ro = $("g-reopen"); if (ro) ro.classList.remove("show");
+    // 没结算就回来（放弃这场战斗）：耐久、「长休一次」技能的使用记录等队伍档案也回到开战前（trpg.js · trpgAbandonBattle）；
+    // 奎支、物品在下面重新摆队伍时按队伍记忆回滚
+    if (state.combatStarted && !GAME.ended) trpgAbandonBattle(GAME.campaign);
     TRPG.taskBattle = null;   // 没结算就回来：这场不算任务战斗
     undoStack = [];   // 战斗打完回来：之前的撤销点在战斗之前，撤回去会把整场战斗的结果一起抹掉，所以清空
     // 先切回探索画面再布置下一场：否则布置时战斗画面还在，开战前的大字会弹出来盖在探索画面上

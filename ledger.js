@@ -219,14 +219,16 @@ function weaponDurBase(kit) {
   const g = (typeof WEAPON_GROWTH !== "undefined" && WEAPON_GROWTH[kit]) || {};
   return (g.baseDur || 5) + Math.floor(lv / 2);
 }
-/** 武器上装的客制化图纸加成（单局在开战前写进 state.weaponMods；战斗原型没有） */
+/** 武器上装的客制化图纸加成（单局在开战前写进 state.weaponMods；战斗原型没有）。
+ *  武器不到 4 级时图纸不生效（mods.js · bpUnlocked：旧存档、后台把武器降了级） */
 function weaponMod(kit) {
-  return (kit && state.weaponMods && state.weaponMods[kit]) || {};
+  const m = kit && state.weaponMods && state.weaponMods[kit];
+  return m && (typeof bpUnlocked !== "function" || bpUnlocked(kit)) ? m : {};
 }
 /** 这个单位此刻吃到的图纸加成：角色看手里那把，武器人看自己 */
 function unitWeaponMod(u) {
   if (!u || !state.weaponMods) return {};
-  if (state.weaponMods[u.kit]) return state.weaponMods[u.kit];
+  if (state.weaponMods[u.kit]) return weaponMod(u.kit);
   return weaponMod(heldWeaponKit(u));
 }
 function weaponDur(kit) {
@@ -398,6 +400,12 @@ function advanceClock(minutes) {
   LEDGER.clock = c % 1440;
   return Math.floor(c / 1440);
 }
+/** 单局期间（rogue.js 换上了本局的档案）：第几天跟着单局的任务天数走（rogue.js · advanceDays 同步过来），
+ *  时钟过 0 点不另算一天；满 80 小时的力竭致死由单局结算（本局结束）。
+ *  以前两边各算各的，顶栏的天数和整局数据里每场战斗的时间对不上 */
+function ledgerInRun() {
+  return typeof Rogue !== "undefined" && typeof Rogue.inRunMode === "function" && Rogue.inRunMode();
+}
 function ledgerAdvance(hours, notes) {
   hours = Math.max(0, Number(hours) || 0);
   const minutes = Math.round(hours * 60);
@@ -406,12 +414,23 @@ function ledgerAdvance(hours, notes) {
   // 过了 0 点算新的一天，短休次数刷新
   const days = advanceClock(minutes);
   if (days > 0) {
-    LEDGER.day += days;
+    const inRun = ledgerInRun();
+    if (!inRun) LEDGER.day += days;
     LEDGER.shortUsed = {};
-    if (notes) notes.push(`进入第 ${LEDGER.day} 天，短休次数刷新。`);
+    if (notes) notes.push(inRun ? "过了 0 点，短休次数刷新。" : `进入第 ${LEDGER.day} 天，短休次数刷新。`);
   }
   const t = exhaustTier();
   if (t && notes) notes.push(`距上次长休 ${durationText(LEDGER.hours)}：${exhaustText(t)}`);
+  ledgerExhaustDeath(notes);
+}
+/** 满 80 小时没长休：全队力竭致死（手册第五章）。推进时间的地方都会走到这里：
+ *  跑团推进时间、短休、补给不够只能消磨时间的长休、战斗画面的休整面板。以前只有跑团推进时间判，
+ *  短休和消磨时间推过 80 小时不会死（记录却写着力竭致死）。单局由 rogue.js 自己结算（整局结束） */
+function ledgerExhaustDeath(notes) {
+  if (exhaustTier() < 4 || ledgerInRun()) return;
+  const gone = partyHeroes().filter(u => !u.dead);
+  gone.forEach(u => { u.dead = true; if (notes) notes.push(`${u.name} 力竭致死。`); });
+  if (gone.length) ledgerCapture();
 }
 function exhaustTier() {
   const h = LEDGER.hours;
@@ -593,10 +612,11 @@ function ledgerLongRest(plan, notes) {
   const keep = (tab) => (watch && tab && tab[watch] != null ? { [watch]: tab[watch] } : {});
   LEDGER.shortUsed = keep(LEDGER.shortUsed);
   LEDGER.restOnce = keep(LEDGER.restOnce);
-  // 时钟照常往前走；过了 0 点才换天（长休本身已经刷新了短休次数）
+  // 时钟照常往前走；过了 0 点才换天（长休本身已经刷新了短休次数）。单局按任务天数记日子，这里不换天
   const days = advanceClock(hours * 60);
-  LEDGER.day += days;
-  notes.push(days ? `醒来：进入第 ${LEDGER.day} 天，${clockText(LEDGER.clock)}。` : `醒来：${clockText(LEDGER.clock)}。`);
+  const newDay = days > 0 && !ledgerInRun();
+  if (newDay) LEDGER.day += days;
+  notes.push(newDay ? `醒来：进入第 ${LEDGER.day} 天，${clockText(LEDGER.clock)}。` : `醒来：${clockText(LEDGER.clock)}。`);
   ledgerCapture();
   return { ok: true, notes };
 }
@@ -653,8 +673,12 @@ function ledgerRepair(kit, notes) {
   restoreDurability(kit, used);
   notes.push(`用维修工具包修复 ${weaponName(kit)}：耐久 ${before} → ${weaponDur(kit)}，用掉 ${used} 点维修量（还剩 ${repairPoints()} 点）。`);
   const owner = weaponOwner(kit);
-  if (owner && owner.weaponHeld === false && !owner.dead) owner.weaponHeld = true;
+  if (owner && owner.weaponHeld === false && !owner.dead && !weaponOutOnField(kit)) owner.weaponHeld = true;
   return notes;
+}
+/** 这把武器此刻是不是以武器人的样子在场上（倒下没收回的也算）：在场时主人手里没有它 */
+function weaponOutOnField(kit) {
+  return (state.units || []).some(u => u.kit === kit && !u.hidden && !u.fused && !u._removed && (typeof isWeaponUnit !== "function" || isWeaponUnit(u)));
 }
 function ledgerHealItem(itemId, kit, notes) {
   notes = notes || [];
@@ -665,7 +689,7 @@ function ledgerHealItem(itemId, kit, notes) {
   const r = takeDice(n, 4, 6);
   bagAdd(itemId, -1);
   const before = totalHpOf(h);
-  healHeroFlesh(h, r.total);
+  healHeroFlesh(h, r.total, { inner: true });   // 医疗包：治疗内层生命，不溢到外层装甲
   notes.push(`对 ${h.name} 使用${ITEM_CATALOG[itemId].name}：${r.text}，实际恢复 ${totalHpOf(h) - before}。`);
   ledgerCapture();
   return notes;
@@ -686,13 +710,14 @@ function lowHpWarningText(list) {
 }
 function totalHpOf(u) { return (u.layers || []).reduce((s, l) => s + (Number(l.current) || 0), 0); }
 function totalHpMaxOf(u) { return (u.layers || []).reduce((s, l) => s + (Number(l.max) || 0), 0); }
-/** 休整时的治疗：从内到外补，死亡角色不能被治疗 */
-function healHeroFlesh(u, n) {
+/** 休整时的治疗：从内到外补，死亡角色不能被治疗。opt.inner：只补最内层（医疗包「治疗内层生命」） */
+function healHeroFlesh(u, n, opt) {
   if (!u || u.dead) return;
-  if (typeof healUnit === "function") { healUnit(u, n); return; }
+  if (typeof healUnit === "function") { healUnit(u, n, opt); return; }
   let left = Number(n) || 0;
-  for (let i = (u.layers || []).length - 1; i >= 0 && left > 0; i--) {
-    const l = u.layers[i];
+  const ls = opt && opt.inner ? (u.layers || []).slice(-1) : (u.layers || []);
+  for (let i = ls.length - 1; i >= 0 && left > 0; i--) {
+    const l = ls[i];
     const add = Math.min(left, (Number(l.max) || 0) - (Number(l.current) || 0));
     l.current += add;
     left -= add;

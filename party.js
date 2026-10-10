@@ -604,6 +604,12 @@ function skillCost(id) {
     if (fl && fl.picks && fl.picks.mode === "stay") return { ap: 1 };
     return { bonus: 1 };
   }
+  // 不倒战意 15 级：选「全部友方」时改用行动点
+  if (id === "role_sturdy") {
+    const fl = typeof state !== "undefined" ? state.skillFlow : null;
+    if (fl && fl.id === "role_sturdy" && fl.picks && fl.picks.mode === "all") return { ap: 1 };
+    return { bonus: 1 };
+  }
   const map = {
     ruby_aa: { ap: 1 }, ruby_trigger: { ap: 1 }, ruby_prep: { bonus: 1 }, ruby_assist: {},
     ruby_summon: { ap: 1, bonus: 1 }, ruby_boom: {}, wing_aa: { ap: 1 }, wing_steal: { ap: 1 },
@@ -687,7 +693,7 @@ const WEAPON_DEX = {
   bili: 2, vitas: 8, torque: 4, ecmo: 3, edc: 4, xiaoxiao: 5   // 小朋友：空手 30% + 武器 30% = 角色卡的 60%
 };
 /** 不是玩家角色、也没有敏捷的友方单位（剧情 NPC）沿用固定格挡率 */
-const FIXED_BLOCK = { captain_ox: 40, patrol_car: 40 };
+const FIXED_BLOCK = { captain_ox: 40, patrol_car: 40, chixia: 70 };   // 赤牙：受击时为自己格挡 70%（第九章）
 
 function unitDex(unit) {
   if (!unit) return 5;
@@ -702,12 +708,16 @@ function bareBlockFromDex(dex) {
 function bareBlockChance(unit) {
   return bareBlockFromDex(unitDex(unit));
 }
-/** 一把武器的格挡加成：武器本身 + 装在上面的格挡件（growth.js · partsBlock）。owner：持有者（角色单位） */
+/** 格挡率上限（玩家手册第二章）：武器格挡加成（含改装件）最多 45%，协助格挡率理论上限 95%（空手 50% + 武器 45%），
+ *  留 5% 失手。绯秋居合「必定成功」是唯一例外（app.js · finalBlockChance） */
+const WEAPON_BLOCK_CAP = 45;
+const BLOCK_CHANCE_CAP = 95;
+/** 一把武器的格挡加成：武器本身 + 装在上面的格挡件（growth.js · partsBlock），最多 45%。owner：持有者（角色单位） */
 function weaponBlockBonusOf(kit, owner) {
   const base = WEAPON_BLOCK_BONUS[kit];
   if (base == null) return null;
   const parts = owner && typeof weaponPartsOf === "function" ? weaponPartsOf(owner, kit) : [];
-  return base + (typeof partsBlock === "function" ? partsBlock(parts) : 0);
+  return Math.min(WEAPON_BLOCK_CAP, base + (typeof partsBlock === "function" ? partsBlock(parts) : 0));
 }
 /** 武器人的持有者（角色单位） */
 function weaponOwnerUnit(u) {
@@ -743,12 +753,18 @@ function blockStatusBonus(unit) {
   return unit && unit.kit === "xia" && unit.resources && unit.resources.engine ? 10 : 0;
 }
 
-function blockChance(unit) {
+/** 不封顶的协助格挡率（空手 + 武器 + 状态）：最终格挡率在 app.js · finalBlockChance 里加完各项修正再封顶 */
+function blockChanceRaw(unit) {
   if (!unit || !unit.kit) return null;
   if (FIXED_BLOCK[unit.kit] != null) return FIXED_BLOCK[unit.kit];
   if (!unit.isPlayer && !unit.weaponOf) return null;
   if (!unit.attrs && WEAPON_BLOCK_BONUS[unit.kit] == null) return null;
   return bareBlockChance(unit) + heldWeaponBlockBonus(unit) + blockStatusBonus(unit);
+}
+/** 协助格挡率（资料面板等显示用），最多 95% */
+function blockChance(unit) {
+  const c = blockChanceRaw(unit);
+  return c == null ? null : Math.min(BLOCK_CHANCE_CAP, c);
 }
 /** 给资料面板用：拆成空手 / 武器 / 其他三段 */
 function blockBreakdown(unit) {
@@ -970,41 +986,42 @@ function skillList(unit) {
 /** 职责技能的定义（手册第六步职责表）。unit 用来算与等级有关的提示文字。 */
 function roleSkillDef(role, n, unit) {
   unit = unit || {};
+  const lv = unit.level || 1;
   if (role === "直伤" && n === 1) return { id: "xia_prep", name: "准备", hint: "附赠 · 下回合伤害骰 +1d6（每5级提高骰子）· 对复数攻击只生效一次", bare: true };
-  if (role === "直伤" && n === 2) return { id: "role_refine", name: "精益求精", hint: `附赠 · 下一击弱点特效 · 每场${(unit.level || 1) >= 15 ? "两次" : "一次"}` };
+  if (role === "直伤" && n === 2) return { id: "role_refine", name: "精益求精", hint: `附赠 · 下一击弱点特效 · 每场${lv >= 15 ? "两次" : "一次"}` };
   if (role === "直伤" && n === 3) return { id: "role_pierce", name: "一击制敌", hint: "附赠 · 下一击穿刺 · 每场一次" };
   if (role === "直伤" && n === 4) return { id: "role_gambit", name: "破釜沉舟", hint: "行动点 · 下回合攻击双倍，自己受伤双倍 · 每场一次" };
   if (role === "异常" && n === 1) return { id: "role_activate", name: "激活", hint: "附赠 · 立刻触发目标一种状态" };
-  if (role === "异常" && n === 2) return { id: "role_spread", name: "传播", hint: "行动点 · 复制目标全部状态到另一单位" };
-  if (role === "异常" && n === 3) return { id: "role_double_dot", name: "加倍计量", hint: "附赠 · 目标本回合状态效果翻倍 · 每局限一次" };
+  if (role === "异常" && n === 2) return { id: "role_spread", name: "传播", hint: "行动点 · 把一个单位身上的属性状态效果复制给另一个单位（灼烧层数叠加，高能值取较大）" };
+  if (role === "异常" && n === 3) return { id: "role_double_dot", name: "加倍计量", hint: "附赠 · 一个敌人身上的状态本回合效果翻倍 · 每场一次" };
   if (role === "异常" && n === 4) return { id: "role_self_doom", name: "自我毁灭", hint: "附赠开关 · 施加状态翻倍，自己也吃一层" };
-  if (role === "击破" && n === 1) return { id: "hiaki_allin", name: "全力以赴", hint: "附赠 · 下一击猛击" };
+  if (role === "击破" && n === 1) return { id: "hiaki_allin", name: "全力以赴", hint: "附赠 · 下一击猛击 · 可空手", bare: true };
   if (role === "击破" && n === 2) return { id: "role_breakwave", name: "破势", hint: "附赠 · 同区架势=1（15级≤2）的敌人各 1 无属性击破" };
   if (role === "击破" && n === 3) return { id: "role_halve", name: "折戟", hint: "行动点 · 造成当前架势一半击破 · 每场一次" };
   if (role === "击破" && n === 4) return { id: "role_omen", name: "击破预告", hint: "行动点 · 下回合双倍击破，失败则自己失衡 · 每场一次" };
-  if (role === "坦克" && n === 1) return { id: "tou_taunt", name: "嘲讽", hint: "附赠 · 距离1以内敌人下次必须打自己 · 每场2次（5级3次，15级4次）· 可空手", bare: true };
+  if (role === "坦克" && n === 1) return { id: "tou_taunt", name: "嘲讽", hint: `附赠 · 距离1以内敌人下次必须打自己 · 每场${lv >= 15 ? 4 : lv >= 5 ? 3 : 2}次${lv >= 10 ? "，一回合可用多次" : "，每回合限一次"} · 可空手`, bare: true };
   if (role === "坦克" && n === 2) return { id: "role_lockdown", name: "禁足怒吼", hint: "行动点 · 同区敌人本回合不能移动且必须打坦克" };
   if (role === "坦克" && n === 3) return { id: "role_grit", name: "咬牙坚持", hint: "附赠 · 本回合减伤 50% · 每场两次" };
   if (role === "坦克" && n === 4) return { id: "role_stand", name: "屹立不倒", hint: "行动点 · 本回合免疫伤害和击破 · 每场一次" };
   if (role === "护卫" && n === 1) return { id: "role_cover", name: "掩护", hint: "附赠 · 此回合免费为指定队友协助格挡" };
-  if (role === "护卫" && n === 2) return { id: "role_fear", name: "恐惧怒吼", hint: "行动点 · 距离1内敌人本回合虚弱 · 每场两次" };
+  if (role === "护卫" && n === 2) return { id: "role_fear", name: "恐惧怒吼", hint: `行动点 · 距离1内敌人本回合虚弱 · 每场${lv >= 15 ? "三" : "两"}次` };
   if (role === "护卫" && n === 3) return { id: "role_guard_strike", name: "防守反击", hint: "行动点 · 本回合首次成功格挡追加一次协助攻击" };
   if (role === "护卫" && n === 4) return { id: "role_all_reflect", name: "全反击", hint: "行动点 · 本回合全队成功格挡反伤伤害与击破 · 每场一次" };
   if (role === "生存" && n === 1) return { id: "role_firstaid", name: "应急处理", hint: "行动点 · 距离1以内友方 1d4+2（半血取最大）" };
-  if (role === "生存" && n === 2) return { id: "role_buffer", name: "缓冲", hint: "附赠 · 距离1以内友方 2d4+4 护盾 · 每场一次" };
+  if (role === "生存" && n === 2) return { id: "role_buffer", name: "缓冲", hint: `附赠 · 距离1以内友方 2d4+4 护盾 · 每场${lv >= 15 ? "两次 · 可自选血量种类" : "一次"}` };
   if (role === "生存" && n === 3) return { id: "role_dome", name: "防护罩", hint: "行动点 · 同区 atk+10 护盾罩 · 每场一次" };
   if (role === "生存" && n === 4) return { id: "role_renew", name: "续命", hint: "行动点 · 任意距离一名友方恢复最大生命 50%，濒死则救回濒死前的状态并恢复 25% · 每场一次" };
   if (role === "环境手" && n === 1) return { id: "role_lock", name: "锁定", hint: "附赠 · 锁定一种天气或场地本回合不被修改" };
-  if (role === "环境手" && n === 2) return { id: "role_shelter", name: "保释", hint: "附赠 · 一名友方本回合豁免天气场地" };
+  if (role === "环境手" && n === 2) return { id: "role_shelter", name: "保释", hint: `附赠 · 一名友方本回合豁免天气场地 · 每场${lv >= 15 ? 3 : 2}次，一次附赠可连保多人` };
   if (role === "环境手" && n === 3) return { id: "role_harsh", name: "恶劣环境", hint: "附赠 · 一名单位本回合场地天气双倍 · 每场一次" };
   if (role === "环境手" && n === 4) return { id: "role_apocalypse", name: "末日", hint: "行动点 · 整场天气与场地翻倍且无法停止 · 每场一次" };
   if (role === "控场" && n === 1) return { id: "role_pull", name: "拉拽", hint: "附赠 · 把目标拉到自己区域" };
-  if (role === "控场" && n === 2) return { id: "role_boost", name: "借力", hint: "附赠 · 把一名友方移到任意区域" };
+  if (role === "控场" && n === 2) return { id: "role_boost", name: "借力", hint: "附赠 · 任意位置的一名其他友方移到任意区域" };
   if (role === "控场" && n === 3) return { id: "role_shake", name: "撼动", hint: "行动点 · 同区所有敌人不稳 · 每场一次" };
   if (role === "控场" && n === 4) return { id: "role_rearrange", name: "重整", hint: "行动点 · 距离1内单位各可移1区，并可改两名飞行 · 每场一次" };
   if (role === "辅助" && n === 1) return { id: "yuito_inspire", name: "助威", bare: true, hint: (unit.level || 1) >= 10 ? "10级：附赠=本回合振奋，或行动点=持续振奋" : "附赠 · 一名其他友方 · 本回合振奋" };
-  if (role === "辅助" && n === 2) return { id: "role_sturdy", name: "不倒战意", hint: "附赠 · 同区友方本回合坚挺" };
-  if (role === "辅助" && n === 3) return { id: "role_gold", name: "黄金时间", hint: "附赠 · 一种即时效果延长一回合 · 每场两次" };
+  if (role === "辅助" && n === 2) return { id: "role_sturdy", name: "不倒战意", hint: lv >= 15 ? "附赠 · 同区友方本回合坚挺 · 15级可改用行动点让全部友方坚挺" : "附赠 · 同区友方本回合坚挺" };
+  if (role === "辅助" && n === 3) return { id: "role_gold", name: "黄金时间", hint: "附赠 · 一个单位身上一种即时效果延长一回合 · 每场两次" };
   if (role === "辅助" && n === 4) return { id: "role_rally", name: "全队集结", hint: "行动点 · 同区队员获得主职责增益直到自己晕眩或濒死 · 长休一次" };
   return null;
 }

@@ -6,8 +6,11 @@ const cp = require("node:child_process");
 const vm = require("node:vm");
 const H = require("../tests/headless");
 
-const HEROES = ["ruby", "yuito", "hiaki", "tou", "xia", "chuan", "nora", "kolt", "helu", "ras"];
-const MAIN_ATTR = { tou: "con", yuito: "int", xia: "str", ruby: "int", hiaki: "str", chuan: "int", nora: "int", kolt: "str", helu: "int", ras: "int" };
+// R1 评估冻结的样本只从这 10 名里抽队伍（manifest 的哈希跟着名单走，不能改）。
+// 龙哥是后来加的：HEROES 里有他，playtest / 单场工具都能带（以前报 Invalid party）
+const R1_HEROES = ["ruby", "yuito", "hiaki", "tou", "xia", "chuan", "nora", "kolt", "helu", "ras"];
+const HEROES = R1_HEROES.concat(["longge"]);
+const MAIN_ATTR = { tou: "con", yuito: "int", xia: "str", ruby: "int", hiaki: "str", chuan: "int", nora: "int", kolt: "str", helu: "int", ras: "int", longge: "int" };
 const STRATEGIES = {
   matrix: { version: "basic-r1-v1", description: "BattleSim BASIC_POLICY; attack lowest-HP in-range target, move, assist/block; no consumables, no tactical lookahead. Preset levels, full health, no cybernetics; not natural progression or human performance." },
   campaign: { version: "smart-r1-v2", description: "Existing SMART one-action lookahead optimizes score gain, ally HP and enemy status. Main-attribute/first legal upgrade choices; constrained route, shop, rest and smith heuristics. Avoids risky elite side tasks when alternatives exist; after the main task, falls back to the best-paying legal side task if only excluded risky tasks remain, without forcing a stage. No battle consumables; summon skills disabled unless explicitly enabled. Not a complete player AI or human win-rate estimate." }
@@ -16,7 +19,7 @@ const clone = x => JSON.parse(JSON.stringify(x));
 const hash = x => crypto.createHash("sha256").update(typeof x === "string" || Buffer.isBuffer(x) ? x : JSON.stringify(x)).digest("hex");
 const normalizeSource = source => String(source).replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
 function rng(seed) { let s = 0; for (const ch of String(seed)) s = (s * 31 + ch.charCodeAt(0)) >>> 0; return () => ((s = (Math.imul(s, 1664525) + 1013904223) >>> 0) / 4294967296); }
-function partyFor(seed, size) { const r = rng(seed), pool = HEROES.slice(), party = []; while (party.length < size) party.push(pool.splice(Math.floor(r() * pool.length), 1)[0]); return party; }
+function partyFor(seed, size) { const r = rng(seed), pool = R1_HEROES.slice(), party = []; while (party.length < size) party.push(pool.splice(Math.floor(r() * pool.length), 1)[0]); return party; }
 function positiveInt(value, label) { const n = Number(value); if (!Number.isInteger(n) || n < 1) throw new Error(`${label} must be a positive integer`); return n; }
 function validateParty(party, solo = false) { if (!Array.isArray(party) || party.length < (solo ? 1 : 2) || party.length > 4 || new Set(party).size !== party.length || party.some(k => !HEROES.includes(k))) throw new Error("Invalid party: choose distinct known heroes, 2–4 in multiplayer"); }
 function chooseLevels(R, run, records = []) {
@@ -51,4 +54,4 @@ function provenance(command = process.argv.join(" ")) {
 }
 function reportPath(file) { const root = path.resolve(H.ROOT, "docs/r1"), resolved = path.resolve(H.ROOT, file); if (!resolved.startsWith(root + path.sep)) throw new Error("Generated reports must be inside docs/r1/"); fs.mkdirSync(path.dirname(resolved), { recursive: true }); return resolved; }
 function csv(rows) { if (!rows.length) return ""; const keys = [...new Set(rows.flatMap(Object.keys))], escape = v => '"' + String(v == null ? "" : typeof v === "object" ? JSON.stringify(v) : v).replaceAll('"', '""') + '"'; return [keys.map(escape).join(","), ...rows.map(r => keys.map(k => escape(r[k])).join(","))].join("\n") + "\n"; }
-module.exports = { HEROES, MAIN_ATTR, STRATEGIES, clone, hash, normalizeSource, rng, partyFor, positiveInt, validateParty, chooseLevels, withoutRandomDraws, heroSnapshot, fieldSnapshot, wilson, quantile, summarize, provenance, reportPath, csv };
+module.exports = { HEROES, R1_HEROES, MAIN_ATTR, STRATEGIES, clone, hash, normalizeSource, rng, partyFor, positiveInt, validateParty, chooseLevels, withoutRandomDraws, heroSnapshot, fieldSnapshot, wilson, quantile, summarize, provenance, reportPath, csv };

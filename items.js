@@ -137,7 +137,9 @@ function useRepairKit(actor, target, kit, notes) {
   const before = row.dur;
   const used = spendRepairPoints(row.need);
   restoreDurability(row.kit, used);
-  if (row.owner && row.owner.weaponHeld === false && !row.owner.dead && before <= 0 && typeof heldWeaponKit === "function") row.owner.weaponHeld = true;
+  // 修好的武器回到主人手里——除非它正以武器人在场（以前修在场的武器人会把主人也设成持械，两边同时拿着）
+  if (row.owner && row.owner.weaponHeld === false && !row.owner.dead && before <= 0 && typeof heldWeaponKit === "function" &&
+      !(typeof weaponOutOnField === "function" && weaponOutOnField(row.kit))) row.owner.weaponHeld = true;
   notes.push(`${actor.name} 用维修工具包修 ${row.name}：耐久 ${before} → ${weaponDur(row.kit)}，用掉 ${used} 点维修量（还剩 ${repairPoints()} 点）。`);
   return notes;
 }
@@ -150,16 +152,25 @@ function selfShpCost(u, n) {
 }
 function useItemOn(actor, itemId, target, zone) {
   const notes = [];
+  // 濒死没起身的人不能用道具（以前规则层不拦，只靠界面）
+  if (actor && actor.dying && !actor.upOnShp) { notes.push(`${actor.name} 濒死中。先点「起身」。`); return notes; }
   const spec = ITEM_CATALOG[itemId];
   if (!spec) { notes.push("没有这种道具。"); return notes; }
   if (spec.target === "weapon") return useRepairKit(actor, target, zone, notes);   // 维修工具包按点数用，不是一次一个
   if (bagCount(itemId) < 1) { notes.push(`没有${spec.name}。`); return notes; }
+  // 投掷类道具（手榴弹、酸液瓶、冲击炸弹）：危墙 / 关着的门倒塌 / 打开之前影响不到对面，扔过去没用，道具不用掉
+  if (spec.target === "zone" && typeof lineBlocked === "function") {
+    const z = zone != null ? Number(zone) : Number((target && target.zone) || actor.zone);
+    const block = lineBlocked(actor.zone, z);
+    if (block) { notes.push(`${actor.name} 的${spec.name}影响不到 ${z} 区：${block}`); return notes; }
+  }
   bagAdd(itemId, -1, notes);
   if (itemId === "medkit" || itemId === "clinic") {
     const t = target || actor;
     const n = itemId === "clinic" ? 2 : 1;
     const r = takeDice(n, 4, 6);
-    const got = typeof healUnit === "function" ? healUnit(t, r.total) : r.total;
+    // 治疗内层生命：只补最内层，不溢到外层装甲（以前从内往外一路补）
+    const got = typeof healUnit === "function" ? healUnit(t, r.total, { inner: true }) : r.total;
     notes.push(`${actor.name} 对 ${t.name} 使用${spec.name}，掷出 ${r.text}，实际恢复 ${Math.floor(got || 0)}` +
       (t.dying ? "（濒死不能靠治疗恢复）" : t.upOnShp ? "（起身中，治疗不回坚毅生命）" : "") + "。");
   } else if (itemId === "stim") {
