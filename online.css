@@ -72,6 +72,13 @@
 .ol-ally { border-left: 4px solid #39b896; }
 .ol-enemy { border-left: 4px solid #dd765f; }
 .ol-unit.ol-selected { box-shadow: 0 0 0 1px #f2c230; }
+/* 选目标 / 选区域：战场上亮起的卡片和区域可以直接点；编号和行动面板的按钮一一对应 */
+.ol-pickable, .ol-pickable-zone { cursor: pointer; outline: 2px dashed var(--sk-hazard, #f2c230); outline-offset: 2px; }
+.ol-pickable:hover, .ol-pickable:focus-visible { box-shadow: 0 0 0 3px #f2c230; background: #3a3024; }
+.ol-pickable-zone:hover, .ol-pickable-zone:focus-visible { box-shadow: inset 0 0 0 3px #f2c230; }
+.ol-pick-no { display: inline-grid; place-items: center; min-width: 22px; height: 22px; padding: 0 5px; margin-right: 6px; border-radius: 11px; background: var(--sk-hazard, #f2c230); color: #16120e; font: 800 13px/1 sans-serif; vertical-align: 2px; }
+.ol-pick-hint { margin: 0 0 8px; }
+.ol-button .ol-pick-no { background: #16120e; color: var(--sk-hazard, #f2c230); }
 .ol-unit.ol-impact { animation: ol-impact .18s ease-out; }
 .ol-layers { margin: 12px 0; display: grid; gap: 5px; }
 .ol-layer { display: grid; grid-template-columns: 30px minmax(20px, 1fr) auto; align-items: center; gap: 6px; font-size: 12px; }

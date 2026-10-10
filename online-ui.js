@@ -91,7 +91,13 @@
     bagBox.addEventListener("keydown", event => { event.stopPropagation(); if (event.key === "Escape") bagBox.hidden = true; });
     for (const node of [dock, stage, panel]) {
       node.addEventListener("click", click);
-      node.addEventListener("keydown", event => { event.stopPropagation(); if (event.key === "Escape" && panelOpen && view.screen !== "lobby") { panelOpen = false; render(); } });
+      node.addEventListener("keydown", event => {
+        event.stopPropagation();
+        if (event.key === "Escape" && panelOpen && view.screen !== "lobby") { panelOpen = false; render(); }
+        // 亮起的卡片 / 区域可以用键盘选：Tab 过去按回车或空格
+        const pick = (event.key === "Enter" || event.key === " ") && event.target.closest && event.target.closest("[data-pick-option]");
+        if (pick && pick === event.target && !disabled()) { event.preventDefault(); choose(Number(pick.dataset.pickOption)); }
+      });
       node.addEventListener("input", input); node.addEventListener("change", change);
       node.addEventListener("submit", event => { event.preventDefault(); if (event.target.id === "ol-message-form") sendMessage(); if (event.target.id === "ol-lobby-chat") sendLobbyChat(); });
     }
@@ -282,8 +288,20 @@
       const max = (u.layers || []).reduce((a, l) => a + (Number(l.max) || 0), 0) || 1, cur = (u.layers || []).reduce((a, l) => a + Math.max(0, Number(l.current) || 0), 0);
       return `<div class="ol-high" title="高能 ${esc(he)}：血量低于高能值时自爆"><span>高能</span><div class="ol-high-track"><i class="ol-high-hp" style="width:${Math.min(100, cur / max * 100)}%"></i><i class="u-high${he >= cur * 0.75 ? " danger" : ""}" style="width:${Math.min(100, he / max * 100)}%"></i></div><b>${esc(he)} / ${esc(cur)}</b></div>`;
     }
+    /** 正在选目标 / 选区域时：选项按值对上战场上的单位卡、配置物和区域，可以直接在战场上点。
+     *  卡片和下面的按钮标同一个编号——同名的敌人（两只狂徒）也分得清是哪一只。以前只有一列名字按钮 */
+    function fieldPicks() {
+      const ch = currentMenu?.choices;
+      if (!ch || !["unit", "zone"].includes(ch.kind) || disabled()) return null;
+      const map = new Map(); let n = 0;
+      (ch.options || []).forEach((o, index) => { if (o.value != null && o.value !== "" && !o.disabled) map.set(String(o.value), { index, n: ++n }); });
+      return map.size ? { kind: ch.kind, map } : null;
+    }
+    const pickAttrs = (pk, cls) => pk ? ` ${cls}" data-pick-option="${pk.index}" role="button" tabindex="0" aria-label="选第 ${pk.n} 项` : "";
+    const pickBadge = pk => pk ? `<span class="ol-pick-no" aria-hidden="true">${pk.n}</span>` : "";
     function card(u) {
       const owner = (hs().units || []).find(x => x.id === u.id)?.owner;
+      const fp = fieldPicks(), pk = fp && fp.kind === "unit" ? fp.map.get(String(u.id)) : null;
       const resources = Object.entries(u.resources || {}).filter(([k, v]) => names[k] && (typeof v === "number" || v === true)).map(([k, v]) => `${names[k]} ${v === true ? "" : v}`);
       const conditions = Object.entries(u.statuses || {}).filter(([k, v]) => names[k] && v).map(([k, v]) => `${names[k]}${typeof v === "number" && v !== 1 ? " " + v : ""}`);
       // 状态 / 效果画成图标（hud-icons.js）；没有图标模块时还是写字
@@ -292,19 +310,19 @@
       if (u.dying) conditions.unshift("倒地"); if (u.dead) conditions.unshift("阵亡"); if (u.stunned) conditions.unshift("失衡"); if (u.flying) conditions.push("飞行");
       const gauge = HI && u.hud && view.screen !== "exploration" ? HI.gauge(u.hud) : "";
       const available = view.screen === "battle" && u.isPlayer && owner === own() && hs().currentUnitId === u.id && hs().phase === "acting";
-      return `<article class="ol-unit${u.isPlayer ? " ol-ally" : " ol-enemy"}${selectedActor === u.id ? " ol-selected" : ""}" data-unit-id="${esc(u.id)}"><header><h3>${esc(u.name || u.id)}</h3><small>Lv${esc(u.level || 1)}</small></header>${owner ? `<small>${esc(playerName(owner))}${u.weaponOf ? " · 武器人" : ""}</small>` : ""}${u.isPlayer && !u.weaponOf ? `<p class="ol-xp">经验 ${esc(u.xp ?? 0)}${typeof xpToNext === "function" && xpToNext(u.level || 1) ? ` / ${esc(xpToNext(u.level || 1))}` : ""}</p>` : ""}${view.screen === "exploration" && u.isPlayer && !u.weaponOf && owner === own() ? attrMarkup(u) : ""}<div class="ol-layers">${(u.layers || []).map(l => `<div class="ol-layer"><span>${esc(labels[l.type] || "生命")}</span><meter min="0" max="${esc(Math.max(1, Number(l.max) || 1))}" value="${esc(Math.max(0, Number(l.current) || 0))}" aria-label="${esc(labels[l.type] || "生命")}"></meter><b>${esc(l.current ?? 0)} / ${esc(l.max ?? 0)}</b></div>`).join("")}${highBar(u)}</div><div class="ol-points"><span>行动 ${esc(u.ap ?? 0)} / ${esc(u.apMax ?? 0)}</span><span>附赠 ${esc(u.bonus ?? 0)} / ${esc(u.bonusMax ?? 0)}</span>${u.def != null ? `<span>架势 ${esc(u.def)} / ${esc(u.defMax ?? u.def)}</span>` : ""}</div>${gauge ? `<div class="hi-gauge ol-gauge" aria-label="${esc(u.name || "")}的角色仪表">${gauge}</div>` : resources.length ? `<p class="ol-muted">${esc(resources.join(" · "))}</p>` : ""}${badges.length ? `<div class="hi-badges ol-badges">${badges.map(b => HI.badge(b.key, b.stack)).join("")}</div>` : ""}${conditions.length ? `<p class="ol-conditions">${esc(conditions.join(" · "))}</p>` : ""}${available ? button("选择行动", "actor", `data-actor="${esc(u.id)}"`, disabled(), true) : ""}<span class="ol-popup" aria-live="polite"></span></article>`;
+      return `<article class="ol-unit${u.isPlayer ? " ol-ally" : " ol-enemy"}${selectedActor === u.id ? " ol-selected" : ""}${pickAttrs(pk, "ol-pickable")}" data-unit-id="${esc(u.id)}"><header><h3>${pickBadge(pk)}${esc(u.name || u.id)}</h3><small>Lv${esc(u.level || 1)}</small></header>${owner ? `<small>${esc(playerName(owner))}${u.weaponOf ? " · 武器人" : ""}</small>` : ""}${u.isPlayer && !u.weaponOf ? `<p class="ol-xp">经验 ${esc(u.xp ?? 0)}${typeof xpToNext === "function" && xpToNext(u.level || 1) ? ` / ${esc(xpToNext(u.level || 1))}` : ""}</p>` : ""}${view.screen === "exploration" && u.isPlayer && !u.weaponOf && owner === own() ? attrMarkup(u) : ""}<div class="ol-layers">${(u.layers || []).map(l => `<div class="ol-layer"><span>${esc(labels[l.type] || "生命")}</span><meter min="0" max="${esc(Math.max(1, Number(l.max) || 1))}" value="${esc(Math.max(0, Number(l.current) || 0))}" aria-label="${esc(labels[l.type] || "生命")}"></meter><b>${esc(l.current ?? 0)} / ${esc(l.max ?? 0)}</b></div>`).join("")}${highBar(u)}</div><div class="ol-points"><span>行动 ${esc(u.ap ?? 0)} / ${esc(u.apMax ?? 0)}</span><span>附赠 ${esc(u.bonus ?? 0)} / ${esc(u.bonusMax ?? 0)}</span>${u.def != null ? `<span>架势 ${esc(u.def)} / ${esc(u.defMax ?? u.def)}</span>` : ""}</div>${gauge ? `<div class="hi-gauge ol-gauge" aria-label="${esc(u.name || "")}的角色仪表">${gauge}</div>` : resources.length ? `<p class="ol-muted">${esc(resources.join(" · "))}</p>` : ""}${badges.length ? `<div class="hi-badges ol-badges">${badges.map(b => HI.badge(b.key, b.stack)).join("")}</div>` : ""}${conditions.length ? `<p class="ol-conditions">${esc(conditions.join(" · "))}</p>` : ""}${available ? button("选择行动", "actor", `data-actor="${esc(u.id)}"`, disabled(), true) : ""}<span class="ol-popup" aria-live="polite"></span></article>`;
     }
     function actionsMarkup() {
       const current = hs().currentUnitId, mine = (hs().units || []).some(u => u.id === current && u.owner === own());
       if (view.screen !== "battle" || hs().phase !== "acting" || !mine) return `<p class="ol-muted">${esc(view.packet?.manualPhase || view.manualPhase ? "主持人正在操控敌人" : hs().phase === "enemy" ? "敌方行动中" : "等待当前玩家行动")}</p>`;
       const choices = currentMenu?.choices;
-      return `<section class="ol-actions" aria-label="我的行动"><header><h3>${esc(choices?.title || "轮到你行动")}</h3>${currentMenu ? button("重选技能", "resetMenu", "", disabled()) : ""}</header>${choices ? choices.kind === "ready" ? `<p>选项已确认。</p>${button("执行行动", "execute", "", disabled() || !choices.command, true)}` : `<div class="ol-action-options">${(choices.options || []).map((o, index) => `<div>${button(o.label ?? String(o.value ?? "不选"), "option", `data-option="${index}"`, disabled() || o.disabled, true)}${o.sub || o.reason ? `<small>${esc(o.reason || o.sub)}</small>` : ""}</div>`).join("") || '<p class="ol-muted">当前没有可选项。</p>'}</div>` : button("选择行动", "actor", `data-actor="${esc(current)}"`, disabled(), true)}${button("结束我的行动", "endTurn", `data-actor="${esc(current)}"`, disabled())}</section>`;
+      return `<section class="ol-actions" aria-label="我的行动"><header><h3>${esc(choices?.title || "轮到你行动")}</h3>${currentMenu ? button("重选技能", "resetMenu", "", disabled()) : ""}</header>${choices ? choices.kind === "ready" ? `<p>选项已确认。</p>${button("执行行动", "execute", "", disabled() || !choices.command, true)}` : `${(() => { const fp = fieldPicks(); return fp ? `<p class="ol-muted ol-pick-hint">直接在战场上点${fp.kind === "zone" ? "亮起的区域" : "亮起的目标"}，编号和下面的按钮一一对应。</p>` : ""; })()}<div class="ol-action-options">${(() => { const fp = fieldPicks(); return (choices.options || []).map((o, index) => { const pk = fp && o.value != null ? fp.map.get(String(o.value)) : null; return `<div>${button(o.label ?? String(o.value ?? "不选"), "option", `data-option="${index}"`, disabled() || o.disabled, true).replace(/^(<button[^>]*>)/, `$1${pickBadge(pk)}`)}${o.sub || o.reason ? `<small>${esc(o.reason || o.sub)}</small>` : ""}</div>`; }).join(""); })() || '<p class="ol-muted">当前没有可选项。</p>'}</div>` : button("选择行动", "actor", `data-actor="${esc(current)}"`, disabled(), true)}${button("结束我的行动", "endTurn", `data-actor="${esc(current)}"`, disabled())}</section>`;
     }
     function stageMarkup() {
       const data = displayState || view.state, screen = view.screen;
       if (screen === "lobby" || !data) return '<div class="ol-wait"><h2>等待房间同步</h2><p>房主准备好后会更新这里。</p></div>';
       const units = (data.units || []).filter(u => !u.hidden), logs = view.packet?.publicLogs || [];
-      return `<header class="ol-stage-heading"><div><span class="ol-muted">${esc(view.roomCode)} · ${screen === "battle" ? `第 ${data.turnNo || 1} 回合` : screen === "ended" ? "遭遇结束" : "探索环节"}</span><h1>${screen === "battle" ? "战场" : screen === "ended" ? "战斗结算" : "与队伍同行"}</h1><div class="ol-info-tools">${button("角色资料", "info", 'data-info="sheet"', pending)}${button("武器", "info", 'data-info="armory"', pending)}${button("背包", "info", 'data-info="bag"', pending)}${button("战绩", "info", 'data-info="record"', pending)}</div></div>${weatherMarkup(data)}</header>${screen === "ended" ? resultMarkup() : ""}${suppliesMarkup(data)}${paused() ? '<p class="ol-pause" role="status">房间暂停，正在等待连接恢复。</p>' : ""}${view.offlineWait ? `<p class="ol-pause">${esc(view.offlineWait.name)} 离线，等待其返回。</p>` : ""}${checksMarkup()}${screen === "battle" || screen === "ended" ? `<div class="ol-zones"${zoneGrid(data).style}>${zoneGrid(data).zones.map(z => `<section class="ol-zone"${z.style}><h2>${z.id} 区</h2>${fieldsMarkup(data, z.id)}${units.filter(u => Number(u.zone) === z.id).map(card).join("") || '<p class="ol-muted">空区域</p>'}${(data.props || []).filter(p => Number(p.zone) === z.id && !p.destroyed).map(p => `<article class="ol-prop" data-prop-id="${esc(p.id)}"><b>${esc(p.name || p.kind || "配置物")}</b>${p.hp != null ? `<span>耐久 ${esc(p.hp)}${p.maxHp == null ? "" : " / " + esc(p.maxHp)}</span>` : ""}</article>`).join("")}</section>`).join("")}</div>${gapsMarkup(data)}${screen === "ended" ? "" : actionsMarkup()}` : `<p class="ol-muted">主持人正在管理探索与遭遇。右侧「小队」频道可以和大家聊天，「消息与成员」里可以私下回复主持人。</p><div class="ol-exploration-party">${units.filter(u => u.isPlayer && !u.weaponOf).map(card).join("")}</div>`}`;
+      return `<header class="ol-stage-heading"><div><span class="ol-muted">${esc(view.roomCode)} · ${screen === "battle" ? `第 ${data.turnNo || 1} 回合` : screen === "ended" ? "遭遇结束" : "探索环节"}</span><h1>${screen === "battle" ? "战场" : screen === "ended" ? "战斗结算" : "与队伍同行"}</h1><div class="ol-info-tools">${button("角色资料", "info", 'data-info="sheet"', pending)}${button("武器", "info", 'data-info="armory"', pending)}${button("背包", "info", 'data-info="bag"', pending)}${button("战绩", "info", 'data-info="record"', pending)}</div></div>${weatherMarkup(data)}</header>${screen === "ended" ? resultMarkup() : ""}${suppliesMarkup(data)}${paused() ? '<p class="ol-pause" role="status">房间暂停，正在等待连接恢复。</p>' : ""}${view.offlineWait ? `<p class="ol-pause">${esc(view.offlineWait.name)} 离线，等待其返回。</p>` : ""}${checksMarkup()}${screen === "battle" || screen === "ended" ? `<div class="ol-zones"${zoneGrid(data).style}>${zoneGrid(data).zones.map(z => { const zp = (() => { const fp = fieldPicks(); return fp && fp.kind === "zone" ? fp.map.get(String(z.id)) : null; })(); return `<section class="ol-zone${pickAttrs(zp, "ol-pickable-zone")}"${z.style}><h2>${pickBadge(zp)}${z.id} 区</h2>${fieldsMarkup(data, z.id)}${units.filter(u => Number(u.zone) === z.id).map(card).join("") || '<p class="ol-muted">空区域</p>'}${(data.props || []).filter(p => Number(p.zone) === z.id && !p.destroyed).map(p => { const fp = fieldPicks(), pp = fp && fp.kind === "unit" ? fp.map.get(String(p.id)) : null; return `<article class="ol-prop${pickAttrs(pp, "ol-pickable")}" data-prop-id="${esc(p.id)}"><b>${pickBadge(pp)}${esc(p.name || p.kind || "配置物")}</b>${p.hp != null ? `<span>耐久 ${esc(p.hp)}${p.maxHp == null ? "" : " / " + esc(p.maxHp)}</span>` : ""}</article>`; }).join("")}</section>`; }).join("")}</div>${gapsMarkup(data)}${screen === "ended" ? "" : actionsMarkup()}` : `<p class="ol-muted">主持人正在管理探索与遭遇。右侧「小队」频道可以和大家聊天，「消息与成员」里可以私下回复主持人。</p><div class="ol-exploration-party">${units.filter(u => u.isPlayer && !u.weaponOf).map(card).join("")}</div>`}`;
     }
     function observeMessages() {
       const rows = view.messages || [], incoming = rows.filter(m => !seenMessages.has(m.id) && m.from !== own());
@@ -593,7 +611,13 @@
     function input(event) { const key = event.target.dataset.field; if (key && Object.hasOwn(form, key)) form[key] = event.target.value; }
     function change(event) { input(event); if (event.target.dataset.assign) assignments[event.target.dataset.assign] = event.target.value; }
     async function click(event) {
-      const b = event.target.closest("[data-online]"); if (!b || b.disabled) return;
+      const b = event.target.closest("[data-online]");
+      if (!b) {
+        const pick = event.target.closest("[data-pick-option]");
+        if (pick && stage.contains(pick) && !disabled()) await choose(Number(pick.dataset.pickOption));
+        return;
+      }
+      if (b.disabled) return;
       switch (b.dataset.online) {
         case "createTab": entry = "create"; render(); break;
         case "joinTab": entry = "join"; render(); break;

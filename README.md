@@ -366,6 +366,8 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **联机玩家选目标直接在战场上点**（`online-ui.js · fieldPicks / card / actionsMarkup / click`、`online.css`）：以前联机玩家选目标只有一列名字按钮，同一区两只「狂徒（匕首）」分不清是哪只。现在选目标 / 选区域时，能选的单位卡、配置物和区域在战场上亮起（黄色虚线框）并标编号，点一下就选中；下面的按钮带同样的编号（「1. 狂徒（匕首）」「2. 狂徒（匕首）」），用按钮也对得上；键盘可以 Tab 到亮起的卡片按回车。主持人和单机本来就在战场上点，不变。回归测试在 `tests/online-session-ui.test.js`。
+
 - **联机「消息」「大厅交流」来新消息不再跳回最上面**（`online-ui.js · html / restoreScroll`）：这两个列表自带滚动条，以前每来一条消息整块面板重画、列表换成新的，滚动位置归零，一下跳回最旧的消息。现在记住玩家把每个列表滚到了哪：在底部（或从没滚过）就继续贴底看新消息；往上翻着看旧消息就停在原处；面板关掉再打开也一样。回归测试在 `tests/online-session-ui.test.js`。
 
 - **羁绊**（`growth.js · weaponBond / weaponRewardLevel / setWeaponBond`）：玩家角色和自己的每把武器（武器人）之间有羁绊，0–5 级，初始 0 级。
