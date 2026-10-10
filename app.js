@@ -487,15 +487,16 @@ function tagHighFrom(unit, kit) {
 function addHighEnergy(unit, reason) {
   if (!unit) return "";
   const weather = currentWeatherFor(unit);
-  const bonus = weather === "glow" ? 1 : 0;
+  const bonus = weather === "glow" ? envMult(unit) : 0;   // 微光：累积时 +1（恶劣环境 / 末日 +2）
   const d = statusDotDice("high", unit.level || 1, weather);
   const r = takeDice(d.n, d.s, (d.bonus || 0) + bonus);
   unit.statuses = unit.statuses || {};
   const fresh = !unit.statuses.high;
   unit.statuses.high = true;
   if (fresh) popStatus(unit, "high");
-  unit.highEnergy = (unit.highEnergy || 0) + r.total;
-  const line = `${unit.name} ${reason || "高能累积"} ${r.text} → 高能值 ${unit.highEnergy}`;
+  const gain = r.total * statusMult(unit);   // 加倍计量：高能累积翻倍
+  unit.highEnergy = (unit.highEnergy || 0) + gain;
+  const line = `${unit.name} ${reason || "高能累积"} ${r.text}${gain !== r.total ? " ×2（加倍计量）" : ""} → 高能值 ${unit.highEnergy}`;
   checkHighBoom(unit);
   return line;
 }
@@ -507,13 +508,39 @@ function currentLifeForHigh(unit) {
   return hp;
 }
 
+/** 判定自爆用的高能值：自身高能值，带高能状态的再加上所在能量场的场地高能（保释中的不算场地） */
+function highBoomValue(unit) {
+  const f = (state.fields && state.fields[unit.zone]) || emptyField();
+  const fieldHE = unit.statuses && unit.statuses.high && !fieldExempt(unit) ? (Number(f.energyVal) || 0) : 0;
+  return (Number(unit.highEnergy) || 0) + fieldHE;
+}
+
 function checkHighBoom(unit) {
   if (!unit || unit._highBooming || unit.dead || unit.hidden) return;
+  // 微光：蓄能状态下，高能值要在连续两个回合结束时都超过血量才自爆——平时不判，回合结束时判（glowStoreTurnEnd）
+  if (unit.self === "store" && currentWeatherFor(unit) === "glow") return;
   const hp = currentLifeForHigh(unit);
-  const f = (state.fields && state.fields[unit.zone]) || emptyField();
-  const fieldHE = unit.statuses && unit.statuses.high ? (Number(f.energyVal) || 0) : 0;
-  const val = (Number(unit.highEnergy) || 0) + fieldHE;
-  if (val > 0 && val >= hp) explodeHigh(unit, val);   // 这次爆炸的高能值含能量场叠上来的部分
+  const val = highBoomValue(unit);
+  if (val > 0 && hp < val) explodeHigh(unit, val);   // 血量「低于」高能值才自爆；这次爆炸的高能值含能量场叠上来的部分
+}
+
+/** 回合结束：微光 + 蓄能的单位，高能值超过血量记一次；连续两个回合结束都超过才自爆，中间有一次没超过就重新数 */
+function glowStoreTurnEnd(notes) {
+  state.units.forEach(u => {
+    if (!u) return;
+    if (offField(u) || u.self !== "store" || currentWeatherFor(u) !== "glow") { u._glowStoreOver = 0; return; }
+    const hp = currentLifeForHigh(u);
+    const val = highBoomValue(u);
+    if (!(val > 0 && hp < val)) { u._glowStoreOver = 0; return; }
+    u._glowStoreOver = (Number(u._glowStoreOver) || 0) + 1;
+    if (u._glowStoreOver < 2) {
+      notes.push(`${u.name} 微光 · 蓄能：高能值 ${val} 超过血量 ${hp}（第 1 个回合结束；下个回合结束还超过就自爆）。`);
+      return;
+    }
+    u._glowStoreOver = 0;
+    notes.push(`${u.name} 微光 · 蓄能：连续两个回合结束高能值都超过血量，自爆。`);
+    explodeHigh(u, val);
+  });
 }
 
 function highBoomHitsUnit(source, u) {
@@ -619,9 +646,10 @@ function registerZoneBreak(zone, amount) {
   if (!f || !f.collapseOn || f._collapsing) return [];
   f.collapse = (Number(f.collapse) || 0) + amount;
   const notes = [`${zone} 区塌陷计数 ${f.collapse - amount} → ${f.collapse}`];
-  while (f.collapse >= 5) {
-    f.collapse -= 5;
-    notes.push(`${zone} 区塌陷触发（计数清零后余 ${f.collapse}）。`);
+  // 累计满 5 点击破塌陷一次，然后计数器清零（不留余数：一次大击破不会连塌两次）
+  if (f.collapse >= 5) {
+    f.collapse = 0;
+    notes.push(`${zone} 区塌陷触发，计数清零。`);
     notes.push(...triggerCollapse(zone));
   }
   return notes;
@@ -636,9 +664,11 @@ function triggerCollapse(zone) {
   const n = 1 + milestone(lv, 4);
   const r = takeDice(n, 10, 0);
   notes.push(`${zone} 区塌陷：${r.text} 物理 + 2 击破（飞行免疫）。`);
-  state.units.filter(u => !u.hidden && !u.dead && Number(u.zone) === Number(zone) && !u.flying).forEach(u => {
-    dealBreak(u, 2, "physical", notes, "塌陷");
-    applyTypedDot(u, r.total, "physical", notes, `${u.name} 塌陷伤害`);
+  // 保释中的单位豁免场地；恶劣环境 / 末日让塌陷的击破和伤害翻倍
+  state.units.filter(u => !u.hidden && !u.dead && Number(u.zone) === Number(zone) && !u.flying && !fieldExempt(u)).forEach(u => {
+    const x = envMult(u);
+    dealBreak(u, 2 * x, "physical", notes, x > 1 ? "塌陷 ×2" : "塌陷");
+    applyTypedDot(u, r.total * x, "physical", notes, `${u.name} 塌陷伤害${x > 1 ? " ×2（场地效果翻倍）" : ""}`);
   });
   if (f.ruinOn) {
     notes.push(`${zone} 区损毁地面被塌陷直接摧毁，变为深渊。`);
@@ -1170,6 +1200,23 @@ function currentWeatherFor(unit) {
   if (f && f.isolate) return "none";
   return state.weather;
 }
+/** 这一区的天气：隔离区不受天气影响（火场叠层这类按区结算的用它，不看单位身上的保释） */
+function zoneWeather(zone) {
+  const f = state.fields[zone];
+  return f && f.isolate ? "none" : state.weather;
+}
+/** 保释：此回合豁免天气与场地——场地伤害、场地的回合开始 / 结束效果、冻土、干涉、高压都不吃 */
+function fieldExempt(unit) {
+  return !!(unit && (unit.shelterTurn || unit.isolate));
+}
+/** 恶劣环境（这个单位，到回合结束）/ 末日（整场，无法停止）：天气与场地效果翻倍。返回 2 或 1 */
+function envMult(unit) {
+  return state.apocalypse || (unit && unit.harshEnv) ? 2 : 1;
+}
+/** 加倍计量：这个单位身上所有状态此回合效果翻倍（状态结算的伤害、击破、高能累积 ×2）。返回 2 或 1 */
+function statusMult(unit) {
+  return unit && unit.instant && unit.instant.doubleStatus ? 2 : 1;
+}
 
 function doCalc(input) {
   input = input || readCalcInput();
@@ -1276,13 +1323,18 @@ function phaseWeatherName(step) {
   return "平衡";
 }
 
+/** 相位计数器：从第一次进入相位起持续运行，被其他天气覆盖也照走（state.phaseClock 记着它在跑）；
+ *  再次释放驻波时接入当前计数（helu_wave 不再归零） */
 function advancePhaseWeather() {
   const notes = [];
-  if (state.weather !== "phase") return notes;
+  if (state.weather === "phase") state.phaseClock = true;
+  if (!state.phaseClock) return notes;
   state.phaseStep = (Number(state.phaseStep) + 1) % 4;
   const sel = uiEl("phaseStep");
   if (sel) sel.value = String(state.phaseStep);
-  notes.push(`相位天气进入下一阶段：${phaseWeatherName(state.phaseStep)}（${state.phaseStep}）。`);
+  notes.push(state.weather === "phase"
+    ? `相位天气进入下一阶段：${phaseWeatherName(state.phaseStep)}（${state.phaseStep}）。`
+    : `相位计数器（被${weatherName(state.weather)}覆盖中）照常走到：${phaseWeatherName(state.phaseStep)}（${state.phaseStep}）。`);
   return notes;
 }
 
@@ -1381,6 +1433,9 @@ function startCombat() {
   const prePage = state.logPages[state.logPages.length - 1];
   if (prePage && prePage.lines.length) prePage.turn = 0;
   state.turnNo = 1;
+  // 整场战斗的天气开关从这一场开始算：末日（天气与场地翻倍）、相位计数器（开战就是相位天气的从现在开始走，否则第一次进入相位才走）
+  state.apocalypse = false;
+  state.phaseClock = state.weather === "phase";
   markInnateEnvironment();
   liftOutOfAbyss();
   applyPassivePlusAtStart();
@@ -1474,11 +1529,13 @@ function beginRound(notes) {
       const pinBefore = u.resources.piercedId;
       if (pinBefore && !piercedTarget(u)) notes.push("刺入目标已超出距离 1，刺入结束。");
     }
-    if (u.instant && u.instant.shift) {
+    // 黄金时间：被延长的即时效果这一次回合开始不结束，多保留一回合
+    const held = goldHeldInstants(u);
+    if (u.instant && u.instant.shift && held.indexOf("shift") < 0) {
       clearShift(u);
       notes.push(`${u.name} 错位结束，血层顺序恢复。`);
     }
-    if (typeof overloadRoundStart === "function" && overloadRoundStart(u, notes)) u._noShieldRefill = true;
+    if (held.indexOf("overload") < 0 && typeof overloadRoundStart === "function" && overloadRoundStart(u, notes)) u._noShieldRefill = true;
     if (typeof meltShieldRoundStart === "function" && meltShieldRoundStart(u, notes)) u._noShieldRefill = true;
     if (u.resources && u.resources.frostShell) { u.resources.frostShell = false; notes.push(`${u.name} 再次霜结的完全免疫结束。`); }
     if (typeof selfImmunities === "function") selfImmunities(u, notes);
@@ -1486,11 +1543,13 @@ function beginRound(notes) {
     // 即时效果都是单回合的：没被用掉的也在回合开始时失效
     if (u.instant) {
       const gone = [];
-      if (u.instant.melt) { u.instant.melt = false; gone.push("熔融"); }
-      if (u.instant.sting) { u.instant.sting = false; gone.push("刺骨"); }
-      if (u.instant.spread) { u.instant.spread = false; gone.push("扩散"); }
-      if (u.instant.refract) { u.instant.refract = false; gone.push("折射"); }
+      if (u.instant.melt && held.indexOf("melt") < 0) { u.instant.melt = false; gone.push("熔融"); }
+      if (u.instant.sting && held.indexOf("sting") < 0) { u.instant.sting = false; gone.push("刺骨"); }
+      if (u.instant.spread && held.indexOf("spread") < 0) { u.instant.spread = false; gone.push("扩散"); }
+      if (u.instant.refract && held.indexOf("refract") < 0) { u.instant.refract = false; gone.push("折射"); }
       if (gone.length) notes.push(`${u.name} ${gone.join("、")}结束。`);
+      if (held.length) notes.push(`${u.name} 黄金时间：${held.map(k => INSTANT_NAME[k] || k).join("、")}再保留一回合。`);
+      if (u.instant.goldHold) u.instant.goldHold = false;   // 只延长一回合
     }
     if (!u.stunned && (u.def || 0) > 0) u._imbalanceLock = false;
     if (u.kit === "livesand" && u.resources && u.resources.giant && !u.dead) {
@@ -1556,21 +1615,24 @@ function beginRound(notes) {
     if (f.energy) tickEnergyFieldFor(u, f, notes);
     if (f.acid && !u.flying) tickAcidFieldFor(u, weather, notes);
     if (f.heal) tickHealFieldFor(u, weather, notes);
-    if (f.ice && !u.flying) {
+    if (f.ice && !u.flying && !fieldExempt(u)) {
       notes.push(`${u.name} 处于冻土：对冰强制 25% 易伤。离开或进入时会自动结算运动检定与冰击破。`);
     }
-    convertUnstableInHv(u, notes);
-    if (u.stunned && u.self === "burn") {
-      u.self = "none";
-      u.selfBurnStacks = 0;
-      notes.push(`${u.name} 晕眩，自焚结束。`);
+    // 干涉叠层只在站在干涉场里时生效：已经离开（或换了区）的，叠层清掉
+    if (u.interfere && !(f.harmonic && (u.interfereZone == null || Number(u.interfereZone) === Number(u.zone)))) {
+      u.interfere = 0;
+      u.interfereZone = null;
+      notes.push(`${u.name} 不在原来的干涉场里，干涉叠层清空。`);
     }
+    convertUnstableInHv(u, notes);
+    // 晕眩后自我效果结束（所有自我效果；蓄能累积的高能值不清零）
+    if (typeof endSelfOnStun === "function") endSelfOnStun(u, notes);
     if (u.self === "burn") {
       notes.push(...tickSelfBurn(u, true));
     }
     if (u.self === "frost") {
-      const extra = weather === "snow" ? 2 : 1;
-      dealBreak(u, extra, "ice", notes, "霜结");
+      // 霜结每回合开始 1 冰击破：雪天只让冻伤和冻土的击破翻倍，这里不翻倍
+      dealBreak(u, 1, "ice", notes, "霜结");
     }
     if (u.self === "store") {
       u.highEnergy = (u.highEnergy || 0) + (u.level || 1);
@@ -1578,10 +1640,12 @@ function beginRound(notes) {
       checkHighBoom(u);
     }
     if (weather === "acid" && u.self === "splash") {
-      healUnit(u, u.level || 1);
-      notes.push(`${u.name} 酸雨溅射回复 ${u.level}`);
+      const regen = (u.level || 1) * envMult(u);
+      healUnit(u, regen);
+      notes.push(`${u.name} 酸雨溅射回复 ${regen}`);
     }
-    const sand = (u.layers || []).find(l => l.type === "sand");
+    // 沙尘恢复：认第一层还能回血的沙尘（沙灵聚合体外层沙壳打穿后上限是 0，二阶段起回的是内层沙尘）
+    const sand = (u.layers || []).find(l => l.type === "sand" && Number(l.max) > 0);
     if (u.kit === "tou" && u.resources && (typeof passiveOn !== "function" || passiveOn(u))) {
       u.resources.shield = Math.min(3, (u.resources.shield || 0) + 1);
       notes.push(`${u.name} 圣盾 +1 → ${u.resources.shield}`);
@@ -1591,7 +1655,7 @@ function beginRound(notes) {
     }
     if (sand && !u.sandLocked) {
       let regen = u.level || 1;
-      if (weather === "sand") regen *= 2;
+      if (weather === "sand") regen *= 2 * envMult(u);
       sand.current = Math.min(sand.max, Number(sand.current) + regen);
       notes.push(`${u.name} 沙尘恢复 ${regen}${weather === "sand" ? "（沙暴翻倍，与风向无关）" : ""}`);
     }
@@ -1614,6 +1678,16 @@ function beginRound(notes) {
 /** 不在场上的单位：收回的武器人、合体中的、已经死掉 / 移除的。回合开始 / 结束的结算都跳过它们 */
 function offField(u) {
   return !u || !!(u.hidden || u.fused || u.dead || u._removed);
+}
+
+/** 回合开始时会结束的即时效果（玩家手册第四章「即时效果」：单回合生效） */
+const INSTANT_NAME = { melt: "熔融", sting: "刺骨", overload: "过载", shift: "错位", spread: "扩散", refract: "折射" };
+/** 黄金时间延长的即时效果：instant.goldHold 为 true 时是身上现有的全部即时效果，写成效果名（如 "melt"）时只延长那一种 */
+function goldHeldInstants(u) {
+  const g = u && u.instant && u.instant.goldHold;
+  if (!g) return [];
+  const keys = typeof g === "string" ? [g] : Object.keys(INSTANT_NAME);
+  return keys.filter(k => INSTANT_NAME[k] && u.instant[k]);
 }
 
 function releaseAcidCharges(notes) {
@@ -1641,7 +1715,8 @@ function tickFireField(z, notes) {
   f.fireOn = true;
   if (!(Number(f.fire) > 0)) f.fire = 1;
   const stacks = Number(f.fire) || 1;
-  fieldUnits().filter(u => Number(u.zone) === Number(z) && !u.flying && !u.dead).forEach(u => {
+  // 保释中的单位豁免场地；恶劣环境 / 末日让场地伤害翻倍
+  fieldUnits().filter(u => Number(u.zone) === Number(z) && !u.flying && !u.dead && !fieldExempt(u)).forEach(u => {
     const weather = currentWeatherFor(u);
     const d = statusDotDice("firefield", u.level, weather);
     const parts = [];
@@ -1651,43 +1726,55 @@ function tickFireField(z, notes) {
       dmg += r.total;
       parts.push(r.text);
     }
-    applyTypedDot(u, dmg, "fire", notes, `${u.name} 火场${stacks}层 ${parts.join(" + ")} = ${dmg}`);
+    const x = envMult(u);
+    applyTypedDot(u, dmg * x, "fire", notes, `${u.name} 火场${stacks}层 ${parts.join(" + ")} = ${dmg}${x > 1 ? ` ×2（场地效果翻倍）= ${dmg * x}` : ""}`);
   });
-  const add = state.weather === "heat" ? 2 : 1;
+  // 酷暑让火场层数再 +1：看的是这一区的天气（隔离区不受天气影响）；末日把这 +1 也翻倍
+  const heat = zoneWeather(z) === "heat";
+  const add = 1 + (heat ? (state.apocalypse ? 2 : 1) : 0);
   f.fire += add;
-  notes.push(`${z} 区火场先结算伤害，然后层数 +${add} → ${f.fire}${state.weather === "heat" ? "（酷暑）" : ""}`);
+  notes.push(`${z} 区火场先结算伤害，然后层数 +${add} → ${f.fire}${heat ? "（酷暑）" : ""}`);
 }
 function tickEnergyFieldFor(u, f, notes) {
+  if (fieldExempt(u)) return;   // 保释：豁免场地，也不算进能量场人数
   const s = leveledSides(u.level || 1, 4);
   const r = takeDice(1, s, 0);
-  f.energyVal = (f.energyVal || 0) + r.total;
-  notes.push(`${u.name} 所在能量场累积 ${r.text} → 场地高能 ${f.energyVal}`);
+  const x = envMult(u);
+  f.energyVal = (f.energyVal || 0) + r.total * x;
+  notes.push(`${u.name} 所在能量场累积 ${r.text}${x > 1 ? " ×2" : ""} → 场地高能 ${f.energyVal}`);
 }
 function tickAcidFieldFor(u, weather, notes) {
+  if (fieldExempt(u)) return;
   const d = statusDotDice("acidfield", u.level, weather);
   const r = takeDice(d.n, d.s, 0);
-  applyTypedDot(u, r.total, "acid", notes, `${u.name} 酸液地面 ${r.text}`);
+  const x = envMult(u);
+  applyTypedDot(u, r.total * x, "acid", notes, `${u.name} 酸液地面 ${r.text}${x > 1 ? " ×2（场地效果翻倍）" : ""}`);
 }
 function tickHealFieldFor(u, weather, notes) {
+  if (fieldExempt(u)) return;
   const d = statusDotDice("healfield", u.level, weather);
   const r = takeDice(d.n, d.s, 0);
-  healUnit(u, r.total);
-  notes.push(`${u.name} 治愈场地 ${r.text} → +${r.total}`);
+  const heal = r.total * envMult(u);
+  healUnit(u, heal);
+  notes.push(`${u.name} 治愈场地 ${r.text}${heal !== r.total ? " ×2" : ""} → +${heal}`);
 }
+/** 能量场自爆（回合开始）：血量最低的单位血量低于场地高能值就自爆；自己带着高能值的单位（不只最低血那个），
+ *  阈值 = 自身高能 + 场地高能。都是「血量低于阈值」才爆，每回合最多一次，爆了场地高能清零（explodeHigh） */
 function checkEnergyFieldBoom(z, notes) {
   const f = state.fields[z];
   if (!f || !f.energy || !(f.energyVal > 0)) return;
-  const pool = fieldUnits().filter(u => Number(u.zone) === Number(z) && totalHp(u) > 0);
+  const pool = fieldUnits().filter(u => Number(u.zone) === Number(z) && totalHp(u) > 0 && !fieldExempt(u));
   if (!pool.length) return;
   pool.sort((a, b) => totalHp(a) - totalHp(b));
   const low = pool[0];
-  const hp = totalHp(low);
-  const combined = (low.highEnergy || 0) + f.energyVal;
-  notes.push(`${z} 区能量场高能 ${f.energyVal}，最低血 ${low.name} ${hp}${low.statuses && low.statuses.high ? "（含自身高能 " + (low.highEnergy || 0) + "）" : ""}。`);
-  if (hp < combined) {
-    notes.push(`${low.name} 生命低于高能阈值，自爆。`);
-    low.highEnergy = combined;
-    explodeHigh(low);
+  const own = u => Number(u.highEnergy) || 0;
+  const threshold = u => (u === low || own(u) > 0) ? own(u) + f.energyVal : 0;
+  notes.push(`${z} 区能量场高能 ${f.energyVal}，最低血 ${low.name} ${totalHp(low)}${own(low) ? "（含自身高能 " + own(low) + "）" : ""}。`);
+  const boom = pool.find(u => totalHp(u) < threshold(u));
+  if (boom) {
+    const th = threshold(boom);
+    notes.push(`${boom.name} 生命 ${totalHp(boom)} 低于高能阈值 ${th}${boom === low ? "" : `（自身高能 ${own(boom)} + 场地 ${f.energyVal}）`}，自爆。`);
+    explodeHigh(boom, th);
   }
 }
 
@@ -1799,8 +1886,11 @@ function turnEnd() {
   state.units.forEach(u => {
     if (offField(u)) return;   // 收回的武器人 / 死掉的单位：灼烧不叠层、不掉血
     const weather = currentWeatherFor(u);
-    if (typeof selfImmunities === "function") selfImmunities(u, notes);
+    if (typeof selfImmunities === "function") selfImmunities(u, notes);   // 自焚免疫灼烧：直接写进来的灼烧在这里清掉，不会先烫一跳
     if (typeof syncShockwave === "function") syncShockwave(u, notes);
+    // 加倍计量：这个单位的状态此回合效果翻倍；恶劣环境 / 末日：天气对状态的修正翻倍
+    const sm = statusMult(u);
+    const ex = envMult(u);
     if (Number(u.statuses && u.statuses.burn) > 0) {
       const d = statusDotDice("burn", u.level, weather);
       const stacks = Math.max(1, Math.floor(Number(u.statuses.burn) || 0));
@@ -1811,9 +1901,9 @@ function turnEnd() {
         dmg += r.total;
         parts.push(r.text);
       }
-      applyTypedDot(u, dmg, "fire", notes, `${u.name} 灼烧${stacks}层分别掷骰 ${parts.join(" + ")} = ${dmg}`);
+      applyTypedDot(u, dmg * sm, "fire", notes, `${u.name} 灼烧${stacks}层分别掷骰 ${parts.join(" + ")} = ${dmg}${sm > 1 ? ` ×2（加倍计量）= ${dmg * sm}` : ""}`);
       let add = 1;
-      if (weather === "heat") add += 1;
+      if (weather === "heat") add += ex;
       if (weather === "snow") add = 0;
       u.statuses.burn = stacks + add;
       if (add) notes.push(`${u.name} 灼烧结算后叠层 +${add} → ${u.statuses.burn}`);
@@ -1824,12 +1914,12 @@ function turnEnd() {
     }
     if (u.statuses.corr) {
       const armor = (u.layers || []).some(l => l.type === "armor" && l.current > 0);
-      const d = statusDotDice("corr", u.level, weather, armor);
+      const d = statusDotDice("corr", u.level, weather, armor, ex);
       const r = takeDice(d.n, d.s, 0);
-      applyTypedDot(u, r.total, "acid", notes, `${u.name} 腐蚀 ${r.text}`);
+      applyTypedDot(u, r.total * sm, "acid", notes, `${u.name} 腐蚀 ${r.text}${sm > 1 ? " ×2（加倍计量）" : ""}`);
     }
     if (u.statuses.frostbite) {
-      let br = weather === "snow" ? 2 : 1;
+      let br = weather === "snow" ? 2 * ex : 1;
       if (u.frostbiteBreakOverride != null) {
         br = Number(u.frostbiteBreakOverride) || 0;
         notes.push(`${u.name} 破冰：冻伤击破改为本次记录值 ${br}`);
@@ -1839,7 +1929,7 @@ function turnEnd() {
         notes.push(`${u.name} 酷暑：冻伤触发一次后结束`);
         u.statuses.frostbite = false;
       }
-      dealBreak(u, br, "ice", notes, "冻伤");
+      dealBreak(u, br * sm, "ice", notes, sm > 1 ? "冻伤 ×2（加倍计量）" : "冻伤");
     }
     // 过载：护盾在下回合开始时清零（effects.js · overloadRoundStart）
     if (u.statuses && u.statuses.sturdy) {
@@ -1901,14 +1991,7 @@ function turnEnd() {
       u.instant.omenArmed = false;
       u.instant.doubleBreak = false;
     }
-    if (u.instant && u.instant.goldHold) {
-      u.instant.goldHold = false;
-      notes.push(`${u.name} 黄金时间：即时效果再保留一回合。`);
-    } else if (u.instant) {
-      ["melt", "sting", "overload", "shift", "spread", "refract"].forEach(k => {
-        /* 即时效果默认回合结束不清，由施加者或黄金时间处理 */
-      });
-    }
+    // 黄金时间（instant.goldHold）在回合开始清除即时效果时认（beginRound · goldHeldInstants），这里不动
   });
   (state.props || []).filter(p => p.kind === "ironwall").forEach(p => {
     if (p.hp > 0 && !p._brokeWall) {
@@ -1944,6 +2027,7 @@ function turnEnd() {
   if ((state.props || []).some(p => p.kind === "battery")) {
     notes.push(...refillBatteryFactionShields());
   }
+  glowStoreTurnEnd(notes);   // 微光 · 蓄能：连续两个回合结束高能值都超过血量才自爆
   releaseButtons(notes);
   notes.push(...advancePhaseWeather());
   settleBossStuns(notes);
@@ -2017,14 +2101,15 @@ function shockPulse(source) {
   const weather = currentWeatherFor(source);
   const d = statusDotDice("shock", source.level || 1, weather);
   const r = takeDice(d.n, d.s, d.bonus || 0);
-  const dmg = Math.max(d.min || 1, r.total);
+  const sm = statusMult(source);   // 加倍计量：感电此回合效果翻倍
+  const dmg = Math.max(d.min || 1, r.total) * sm;
   const allies = fieldUnits().filter(u =>
     !u.dead && !u.hidden &&
     !ignoresAoe(u) &&
     Number(u.zone) === Number(source.zone) &&
     !!u.isPlayer === !!source.isPlayer
   );
-  notes.push(`${source.name} 感电触发 ${r.text} → ${dmg} 电击（同区同阵营：${allies.map(u => u.name).join("、") || "无"}）`);
+  notes.push(`${source.name} 感电触发 ${r.text} → ${dmg}${sm > 1 ? "（加倍计量 ×2）" : ""} 电击（同区同阵营：${allies.map(u => u.name).join("、") || "无"}）`);
   allies.forEach(u => {
     applyTypedDot(u, dmg, "electric", notes, `${u.name} 被感电波及`);
     if (typeof popStatus === "function") { /* damage floater already from applyTypedDot */ }
@@ -2071,6 +2156,8 @@ function pulseResonanceStatus(source, key) {
   if (!source || !source.statuses || !source.statuses.reso || source._resoBusy) return;
   if (!key || key === "reso") return;
   resonanceAllies(source).forEach(o => {
+    // 自焚免疫灼烧：共振分过来的灼烧也不吃
+    if (key === "burn" && o.self === "burn") { appendLog(`共振：${source.name} 的灼烧分享给 ${o.name}，但自焚免疫灼烧。`); return; }
     o._resoBusy = true;
     o.statuses = o.statuses || {};
     if (key === "burn") o.statuses.burn = (Number(o.statuses.burn) || 0) + 1;
@@ -2608,14 +2695,15 @@ function actionAccLine() {
 function pulseHighVoltage(target, amount, hitNo, hitMax) {
   const notes = [];
   if (!target || target._hvBusy) return notes;
-  if (!(Number(amount) > 0)) return notes;
+  if (!(Number(amount) > 0)) return notes;   // 这一下真的受了伤害才触发（被免疫、伤害为 0 不触发）
+  if (fieldExempt(target)) return notes;     // 保释：豁免场地
   const f = state.fields[target.zone] || {};
   if (!f.electric) return notes;
   const weather = currentWeatherFor(target);
   const d = statusDotDice("hvfield", target.level || 1, weather);
   const r = takeDice(d.n, d.s, 0);
   let dmg = r.total;
-  if (target.harshEnv || state.apocalypse) dmg *= 2;
+  dmg *= envMult(target);   // 恶劣环境 / 末日：场地效果翻倍
   target._hvBusy = true;
   const tag = (hitMax > 1) ? `第${hitNo}/${hitMax}击 ` : "";
   applyTypedDot(target, dmg, "electric", notes, `${target.name} 高压场地${tag}${r.text}${dmg !== r.total ? "×2" : ""}`);
@@ -2625,12 +2713,14 @@ function pulseHighVoltage(target, amount, hitNo, hitMax) {
 
 function convertUnstableInHv(u, notes) {
   if (!u || !u.statuses || !u.statuses.unstable) return;
+  if (fieldExempt(u)) return;   // 保释：豁免场地
   const f = state.fields[u.zone] || {};
   if (!f.electric) return;
   u.statuses.unstable = false;
   if (!u.stunned) {
     u.stunned = true;
     if (notes) notes.push(`${u.name} 在高压场地：不稳直接转为晕眩。`);
+    if (typeof endSelfOnStun === "function") endSelfOnStun(u, notes);
   }
 }
 
@@ -2638,6 +2728,11 @@ function applyTypedDot(unit, amount, element, notes, label, opts) {
   opts = opts || {};
   if (ignoresAoe(unit)) {
     notes.push(`${unit.name} 是飞碟触灵本体，不受该范围/余波伤害。`);
+    return;
+  }
+  // 屹立不倒：此回合不受任何来源的任何伤害（状态、场地、余波都挡）；再次霜结：下回合开始前完全免受伤害
+  if (unit && unit.resources && (unit.resources.standTurn || unit.resources.frostShell)) {
+    notes.push(`${label} → ${unit.name} ${unit.resources.standTurn ? "屹立不倒" : "再次霜结"}：不受伤害。`);
     return;
   }
   const fakeTarget = unit;
@@ -2674,15 +2769,16 @@ function applyTypedDot(unit, amount, element, notes, label, opts) {
   if (typeof afterDamageTaken === "function") afterDamageTaken(unit, element, res.total || 0, Math.max(0, shieldBefore - shieldSum(unit)), notes, {});
   const sdKey = inferStatusDmgKey(label, element);
   if (PROC_DOT_FX[sdKey]) procFx(unit, PROC_DOT_FX[sdKey]);
-  addStatusDmg(sdKey, res.total || amount);
+  addStatusDmg(sdKey, res.total || 0);
   noteSideDamage(res.total || 0, STATUS_DMG_NAME[sdKey] || "其他", unit);
   if (unit && unit.isPlayer) { const st = battleStat(unit); if (st) st.taken += Math.floor(Number(res.total) || 0) + Math.floor(Number(res.shpDealt) || 0); }
   if ((res.intended || res.total || 0) > 0) spawnFloater(unit, res.intended || res.total, element);
   if ((res.extraHarmonic || 0) > 0) spawnFloater(unit, res.extraHarmonic, element);
   checkHighBoom(unit);
-  if (!unit._resoBusy) notes.push(...pulseResonanceDamage(unit, res.total || amount, element));
+  // 共振分享、高压场地都按「真的受到的伤害」：没受到伤害（免疫、濒死倒地、0 伤）就不触发
+  if (!unit._resoBusy) notes.push(...pulseResonanceDamage(unit, res.total || 0, element));
   if (!unit._hvBusy && !/高压场地/.test(String(label || ""))) {
-    notes.push(...pulseHighVoltage(unit, res.total || amount));
+    notes.push(...pulseHighVoltage(unit, res.total || 0));
   }
 }
 
@@ -3554,6 +3650,29 @@ function triggerLeaveOpportunity(mover, fromZone, notes) {
   });
 }
 
+/** 离开冻土的检定：简单难度「运动」检定（手册第一章成功率表 ROGUE_CHECKS.chance：无熟练 50%，一级以上 100% 默认通过）。
+ *  种族的优势 / 劣势 / 失败重掷照 RACE_CHECK_PERKS（party.js · checkPerksFor）。返回 { ok, text } */
+function iceLeaveCheck(u) {
+  const level = typeof unitProfLevel === "function" ? unitProfLevel(u, "运动") : 0;
+  const table = typeof ROGUE_CHECKS !== "undefined" ? ROGUE_CHECKS.chance : [[0.5, 0, 0, 0], [1, 0.5, 0.25, 0.125], [1, 1, 0.5, 0.25], [1, 1, 0.75, 0.5]];
+  const base = (table[level] || [])[0] || 0;   // 第 0 列 = 简单
+  const lvText = ["没有熟练", "一级熟练", "二级熟练", "三级熟练"][level] || "";
+  if (base >= 1) return { ok: true, text: `简单「运动」检定（${lvText}，默认通过）` };
+  const hpLow = totalHp(u) * 2 < totalMaxHp(u);
+  const perks = u.isPlayer && typeof checkPerksFor === "function" ? checkPerksFor(u.kit, "运动", hpLow) : {};
+  const roll = () => Math.random() < base;
+  const once = () => perks.adv ? (roll() || roll()) : perks.dis ? (roll() && roll()) : roll();
+  let ok = once();
+  let rerolled = false;
+  if (!ok && perks.reroll) { rerolled = true; ok = once(); }
+  const tags = [perks.adv ? "优势" : "", perks.dis ? "劣势" : "", rerolled ? "失败后重掷" : ""].filter(Boolean).join("，");
+  return { ok, text: `简单「运动」检定（${lvText}，成功率 ${Math.round(base * 100)}%${tags ? "，" + tags : ""}）` };
+}
+/** 进出冻土的冰击破：1 点，雪天翻倍；恶劣环境 / 末日让场地效果再翻倍 */
+function iceFieldBreak(u) {
+  return (currentWeatherFor(u) === "snow" ? 2 : 1) * envMult(u);
+}
+
 /** 移动也整理成一块：「【谁】移动」+ 从哪到哪 + 花费 + 移动引起的事（借机攻击、场地……） */
 function doMove(unit, dest, moveOpt) {
   if (!unit) return;
@@ -3667,17 +3786,18 @@ function doMoveInner(unit, dest, moveOpt) {
   if (fromF.acid && !unit.flying && !overVoid) {
     notes.push("离开酸液地面：规则上消耗行动点而不是附赠行动。");
   }
-  if (fromF.ice && !unit.flying && !moveOpt.free) {
-    const roll = 1 + Math.floor(Math.random() * 20);
-    const dc = 10;
-    if (roll < dc) {
-      dealBreak(unit, 1, "ice", notes, "冻土离开失败");
-      notes.push(`离开冻土运动检定 d20=${roll}＜${dc}，失败：留在 ${from} 区并受 1 冰击破。`);
+  if (fromF.ice && !unit.flying && !moveOpt.free && !fieldExempt(unit)) {
+    // 离开冻土：简单难度「运动」检定（手册第一章成功率表：无熟练 50%，一级以上必过；种族优势 / 劣势 / 重掷照 RACE_CHECK_PERKS）
+    const chk = iceLeaveCheck(unit);
+    if (!chk.ok) {
+      const br = iceFieldBreak(unit);
+      dealBreak(unit, br, "ice", notes, "冻土离开失败");
+      notes.push(`离开冻土：${chk.text}，失败：留在 ${from} 区并受 ${br} 冰击破。`);
       paintSkillLog(notes.join("\n"));
       renderAll();
       return;
     }
-    notes.push(`离开冻土运动检定 d20=${roll}≥${dc}，成功。`);
+    notes.push(`离开冻土：${chk.text}，成功。`);
   }
   unit.zone = dest;
   convertUnstableInHv(unit, notes);
@@ -3692,28 +3812,15 @@ function doMoveInner(unit, dest, moveOpt) {
   renderAll();
 }
 
-/** 进入冻土：地面单位受 1 冰击破（雪天翻倍）。自己走进去、紧追跟进、被推进去都算 */
+/** 进入冻土：地面单位受 1 冰击破（雪天翻倍、恶劣环境 / 末日再翻倍；保释豁免）。自己走进去、紧追跟进、被推进去都算。
+ *  走通用击破：坚挺、屹立不倒、冰属性打进失衡的冰冻加伤、塌陷计数都照算 */
 function enterFrozenGround(unit, notes) {
   if (!unit || unit.kind || unit.flying || unit.dead) return;
   const toF = state.fields[unit.zone] || emptyField();
-  if (!toF.ice) return;
-  const br = state.weather === "snow" && currentWeatherFor(unit) === "snow" ? 2 : 1;
-  const defBeforeIce = Math.max(0, Number(unit.def) || 0);
-  const wasStunnedIce = !!unit.stunned;
-  unit.def = Math.max(0, defBeforeIce - br);
-  notes.push(`${unit.name} 进入冻土：冰击破 ${br}，架势 ${unit.def}`);
-  popBreak(unit, br, "ice");
-  if (unit.def <= 0) {
-    const brokeIntoStun = defBeforeIce > 0 && !wasStunnedIce;
-    unit.stunned = true;
-    if (brokeIntoStun) {
-      unit.instant = unit.instant || {};
-      unit.instant.iceNext = true;
-      notes.push(imbalanceLine(unit));
-      notes.push(`${unit.name} 因冰属性击破失衡：下次受到的攻击动作第一击 +50% 伤害。`);
-    }
-    queueAssistAttack(null, unit);
-  }
+  if (!toF.ice || fieldExempt(unit)) return;
+  const br = iceFieldBreak(unit);
+  notes.push(`${unit.name} 进入冻土：冰击破 ${br}。`);
+  dealBreak(unit, br, "ice", notes, "进入冻土");
 }
 
 /** 紧追：被紧追的单位移动后，施加紧追的一方自动跟到它所在的区域（不耗行动）。
@@ -3833,7 +3940,7 @@ function applyCombat(target, result, attacker) {
   // 深渊上空被击落：击落的 20% 之外再坠入深渊失去 10%（共 30% 最大生命），并离开深渊
   if (flyingBeforeHit && !target.flying) applyAbyssFall(target, null, notes);
   markPartyHurt(target, result);
-  maybeUnstableTrip(target, notes);
+  maybeUnstableTrip(target, notes, attacker);
   if (target.kit === "ufo_leg") {
     target.stunned = false;
     target.def = 0;
@@ -3968,11 +4075,8 @@ function applyCombat(target, result, attacker) {
       notes.push(`${attacker.name} 自焚×${st}：火焰伤害 +${10 * st}%，吸血 ${20 * st}% × ${Math.floor(raw)} = ${n}，回复 ${got}${attacker.upOnShp ? "（SHP）" : ""}`);
     }
   }
-  if (target && target.stunned && target.self === "burn") {
-    target.self = "none";
-    target.selfBurnStacks = 0;
-    notes.push(`${target.name} 晕眩，自焚结束。`);
-  }
+  // 晕眩后自我效果结束（所有自我效果；蓄能累积的高能值不清零）。攻击者被猛击反震打进失衡的，在 dealTo 结算完这一击后结束
+  if (typeof endSelfOnStun === "function") endSelfOnStun(target, notes);
   // 死刑：被标记的人倒下了 → 立刻转标
   if (typeof bossMechSync === "function") bossMechSync(notes);
   return notes;
@@ -3982,19 +4086,24 @@ function applyNeutralize(u) {
   const notes = [`【中和】结算 ${u ? u.name : "？"}`];
   if (!u) return notes;
   popStatus(u, "neutralize");
+  if (typeof selfImmunities === "function") selfImmunities(u, notes);   // 自我效果免疫的状态（自焚的灼烧、霜结的冻伤……）本来就不在身上
   const st = u.statuses || {};
   const keys = [];
   if ((Number(st.burn) || 0) > 0) keys.push("burn");
   if (st.corr) keys.push("corr");
   if (st.shock) keys.push("shock");
-  if (st.high || (u.highEnergy || 0) > 0) keys.push("high");
+  // 高能：只认高能状态。蓄能（自我效果）攒的高能值不是高能状态，中和不会把它当高能引爆
+  if (st.high) keys.push("high");
   if (st.frostbite) keys.push("frostbite");
   if (st.shockwave) keys.push("shockwave");
   if (st.reso) keys.push("reso");
   const n = keys.length;
   const bonus = Math.max(0, n - 1) * 0.07;
   if (n > 1) notes.push(`属性状态 ${n} 个，中和整体伤害 +${Math.round(bonus * 100)}%。`);
-  const scale = (v) => Math.floor((Number(v) || 0) * (1 + bonus));
+  // 加倍计量：状态此回合效果翻倍，中和的结算也翻倍
+  const sm = statusMult(u);
+  if (sm > 1) notes.push(`加倍计量：${u.name} 的状态结算翻倍。`);
+  const scale = (v) => Math.floor((Number(v) || 0) * (1 + bonus)) * sm;
   u._resoFull = !!st.reso;
 
   if (keys.indexOf("burn") >= 0) {
@@ -4007,7 +4116,7 @@ function applyNeutralize(u) {
   }
   if (keys.indexOf("corr") >= 0) {
     const armored = (u.layers || []).some(l => l.type === "armor");
-    const d = statusDotDice("corr", u.level || 1, currentWeatherFor(u), armored);
+    const d = statusDotDice("corr", u.level || 1, currentWeatherFor(u), armored, envMult(u));
     const raw = d.n * d.s;
     const dmg = scale(raw);
     applyTypedDot(u, dmg, "acid", notes, `${u.name} 中和腐蚀（${d.n}d${d.s}最大=${raw}）`);
@@ -4037,11 +4146,11 @@ function applyNeutralize(u) {
     st.high = false;
   }
   if (keys.indexOf("frostbite") >= 0) {
-    dealBreak(u, 2, "ice", notes, "中和冻伤");
+    dealBreak(u, 2 * sm, "ice", notes, "中和冻伤");
     st.frostbite = false;
   }
   if (keys.indexOf("shockwave") >= 0) {
-    dealBreak(u, 2, "physical", notes, "中和震荡");
+    dealBreak(u, 2 * sm, "physical", notes, "中和震荡");
     st.shockwave = false;
     if (typeof syncShockwave === "function") syncShockwave(u, notes);
   }
@@ -4686,7 +4795,7 @@ function tickSelfBurn(u, growStacks) {
   if (growStacks) {
     const heat = currentWeatherFor(u) === "heat";
     const maxSt = heat ? 10 : 5;
-    u.selfBurnStacks = Math.min(maxSt, stacks + 1 + (heat ? 1 : 0));
+    u.selfBurnStacks = Math.min(maxSt, stacks + 1 + (heat ? envMult(u) : 0));   // 酷暑再 +1（恶劣环境 / 末日 +2）
     notes.push(`自焚层数 ${stacks} → ${u.selfBurnStacks}${heat ? "（酷暑）" : ""}`);
   }
   return notes;
@@ -6077,8 +6186,8 @@ function copyStatuses(src, dest, notes) {
   return got;
 }
 
-/* 黄金时间（辅助三）：延长一个单位身上的一种即时效果。延长的那一种记在 instant.goldHold（结算按「有没有」判断照旧可用） */
-const INSTANT_NAME = { melt: "熔融", sting: "刺骨", overload: "过载", shift: "错位", spread: "扩散", refract: "折射" };
+/* 黄金时间（辅助三）：延长一个单位身上的一种即时效果。延长的那一种记在 instant.goldHold（结算按「有没有」判断照旧可用）。
+ * 即时效果的中文名 INSTANT_NAME 和回合开始的保留逻辑在前面「黄金时间」那一段（goldHeldInstants） */
 /** 单位身上能被黄金时间延长的即时效果（已经在延长的那一种不再列） */
 function goldKeys(u) {
   const ins = (u && u.instant) || {};
@@ -6121,6 +6230,7 @@ function activatableStatuses(t) {
 function triggerOneStatus(t, src, key) {
   const notes = [];
   if (!t) return ["没有目标。"];
+  if (typeof selfImmunities === "function") selfImmunities(t, notes);   // 自焚的灼烧、霜结的冻伤这类免疫的状态先清掉，不会被激活
   const list = activatableStatuses(t);
   if (!list.length) {
     notes.push(`${t.name} 身上没有可激活的状态。`);
@@ -6129,6 +6239,9 @@ function triggerOneStatus(t, src, key) {
   const pick = list.find(x => x.key === key) || list[0];
   const weather = currentWeatherFor(t);
   t.statuses = t.statuses || {};
+  // 和回合结束的那次结算一样：加倍计量让状态效果翻倍，恶劣环境 / 末日让天气的修正翻倍
+  const sm = statusMult(t);
+  const ex = envMult(t);
 
   if (pick.key === "burn") {
     const d = statusDotDice("burn", t.level, weather);
@@ -6140,9 +6253,9 @@ function triggerOneStatus(t, src, key) {
       dmg += r.total;
       parts.push(r.text);
     }
-    applyTypedDot(t, dmg, "fire", notes, `${t.name} 激活灼烧 ${stacks} 层：${parts.join(" + ")} = ${dmg}`);
+    applyTypedDot(t, dmg * sm, "fire", notes, `${t.name} 激活灼烧 ${stacks} 层：${parts.join(" + ")} = ${dmg}${sm > 1 ? ` ×2（加倍计量）= ${dmg * sm}` : ""}`);
     let add = 1;
-    if (weather === "heat") add += 1;
+    if (weather === "heat") add += ex;
     if (weather === "snow") add = 0;
     t.statuses.burn = stacks + add;
     if (add) notes.push(`${t.name} 灼烧结算后叠层 +${add} → ${t.statuses.burn}`);
@@ -6155,13 +6268,13 @@ function triggerOneStatus(t, src, key) {
   }
   if (pick.key === "corr") {
     const armor = (t.layers || []).some(l => l.type === "armor" && l.current > 0);
-    const d = statusDotDice("corr", t.level, weather, armor);
+    const d = statusDotDice("corr", t.level, weather, armor, ex);
     const r = takeDice(d.n, d.s, 0);
-    applyTypedDot(t, r.total, "acid", notes, `${t.name} 激活腐蚀 ${r.text}`);
+    applyTypedDot(t, r.total * sm, "acid", notes, `${t.name} 激活腐蚀 ${r.text}${sm > 1 ? " ×2（加倍计量）" : ""}`);
     return notes;
   }
   if (pick.key === "frostbite") {
-    let br = weather === "snow" ? 2 : 1;
+    let br = weather === "snow" ? 2 * ex : 1;
     if (t.frostbiteBreakOverride != null) {
       br = Number(t.frostbiteBreakOverride) || 0;
       notes.push(`${t.name} 破冰：冻伤击破改为本次记录值 ${br}`);
@@ -6172,16 +6285,16 @@ function triggerOneStatus(t, src, key) {
       t.statuses.frostbite = false;
     }
     notes.push(`${t.name} 激活冻伤。`);
-    dealBreak(t, br, "ice", notes, "冻伤");
+    dealBreak(t, br * sm, "ice", notes, sm > 1 ? "冻伤 ×2（加倍计量）" : "冻伤", { by: src });
     return notes;
   }
   if (pick.key === "shockwave") {
-    dealBreak(t, 1, "physical", notes, "激活震荡");
+    dealBreak(t, 1 * sm, "physical", notes, "激活震荡", { by: src });
     return notes;
   }
   if (pick.key === "high") {
-    const dmg = Number(t.highEnergy) || 0;
-    applyTypedDot(t, dmg, "energy", notes, `${t.name} 激活高能 ${dmg}`);
+    const dmg = (Number(t.highEnergy) || 0) * sm;
+    applyTypedDot(t, dmg, "energy", notes, `${t.name} 激活高能 ${dmg}${sm > 1 ? "（加倍计量 ×2）" : ""}`);
     return notes;
   }
   notes.push(`${t.name} 身上没有可激活的状态。`);
@@ -6696,6 +6809,9 @@ function dealTo(attacker, target, opt) {
   if (attacker.kit === "naruto" && typeof passivePlus === "function" && passivePlus(attacker, 1)) br += 1;   // 佩刀+：鳴門武器人击破 +1
   const dist = zoneDist(attacker.zone, target.zone, state.zoneMode);
   const wasDeadForGhost = !!(target && target.dead);
+  // 千钧：每个攻击行动总击破 +1 只加一次——这个行动里前面的攻击已经加过，就不再加
+  const anchorAcc = attacker && attacker.self === "anchor" ? state.actionAcc : null;
+  if (anchorAcc && anchorAcc.anchorBy && anchorAcc.anchorBy[attacker.id]) flags.anchorSpent = true;
   const res = resolveAttack({
     attacker, target,
     atk: opt.atk != null ? opt.atk : effectiveAtk(attacker, state.units),
@@ -6723,7 +6839,9 @@ function dealTo(attacker, target, opt) {
     atkRange: opt.atkRange || "any"
   });
   res.flags = flags;
+  if (anchorAcc && res.anchorBreak) (anchorAcc.anchorBy = anchorAcc.anchorBy || {})[attacker.id] = true;
   const wasStunnedT = !!target.stunned;
+  const dopplerT = target.self === "doppler";   // 被这一下打进失衡、多普勒随晕眩结束，这一下的击破照样传出去
   const shieldBeforeT = shieldSum(target);
   // 评分：这一击的加分倍率（克制等）。击杀、失衡在 applyCombat 里发生，先挂在目标身上给它们用
   const scoreBonus = attacker && attacker.isPlayer && target && !target.isPlayer ? attackScoreBonus(res, target) : 0;
@@ -6742,9 +6860,11 @@ function dealTo(attacker, target, opt) {
       attacker, action: !!flags.action, melee: dist === 0, startLayerType: res.startLayerType
     });
   }
-  if ((res.breakDealt || 0) > 0 && typeof onBreakTaken === "function") onBreakTaken(target, res.breakDealt, opt.element || res.element, extra);
+  if ((res.breakDealt || 0) > 0 && typeof onBreakTaken === "function") onBreakTaken(target, res.breakDealt, opt.element || res.element, extra, dopplerT);
   if (!wasStunnedT && target.stunned && typeof onBroken === "function") onBroken(target, extra);
   if (flags.action && !isReaction && typeof afterAttackDealt === "function") afterAttackDealt(attacker, target, opt.element || res.element, res, opt, extra);
+  // 猛击反震把攻击者自己打进失衡：这一击的霜结 / 溅射 / 导体照常结算完，再随晕眩结束自我效果
+  if (attacker && attacker !== target && attacker.stunned && typeof endSelfOnStun === "function") endSelfOnStun(attacker, extra);
   if ((res.total || 0) > 0 && layersBeforeHit) {
     // 只认敌人、只认这一击之前还有血、这一击之后归零（或被移除）的那一层；已经碎掉的层不会被后来的攻击反复记录
     const now = target.layers || [];
@@ -6790,10 +6910,12 @@ function dealTo(attacker, target, opt) {
   gainHighFromHits(target, res, extra);
   checkHighBoom(target);
   extra.push(...pulseResonanceDamage(target, res.total || 0, opt.element || res.element));
-  if (flags.block !== "assistOk" && flags.block !== "bareOk") {
-    const hits = (res.perHit && res.perHit.length) ? res.perHit : [{ dealt: res.total || res.intended || 0 }];
+  // 高压场地：每次真的受到伤害才额外电击（协助格挡成功免伤、被免疫、0 伤不触发；空手格挡成功挨一半照样触发）
+  if (flags.block !== "assistOk") {
+    const hits = (res.perHit && res.perHit.length) ? res.perHit : [{ dealt: res.total || 0 }];
     hits.forEach((h, i) => {
-      extra.push(...pulseHighVoltage(target, (h.dealt || h.total || h.intended || 0) || 1, i + 1, hits.length));
+      const dealt = Number(h.dealt) || 0;
+      if (dealt > 0) extra.push(...pulseHighVoltage(target, dealt, i + 1, hits.length));
     });
   }
   if (flags.smash && attacker.resources) attacker.resources.smashNext = false;
@@ -8436,9 +8558,12 @@ function procFx(unit, fx) {
 }
 const PROC_DOT_FX = { burn: "burn", selfburn: "selfBurn", shock: "shock", corr: "corr", reso: "reso", high: "high" };
 
-function dealBreak(unit, amount, element, notes, reason) {
+/** 不经过攻击的击破（状态、场地、技能直接给的击破……）。
+ *  opt.by：造成这次击破的单位——打进失衡时它不能接自己的协助攻击（queueAssistAttack） */
+function dealBreak(unit, amount, element, notes, reason, opt) {
   amount = Math.max(0, Math.floor(Number(amount) || 0));
   if (!unit || !amount) return;
+  opt = opt || {};
   if (/冻伤/.test(reason || "")) procFx(unit, "frost");
   notes = notes || [];
   let sink = unit;
@@ -8458,8 +8583,14 @@ function dealBreak(unit, amount, element, notes, reason) {
     notes.push(`${sink.name} 再次霜结：免受击破。`);
     return;
   }
+  // 屹立不倒：此回合不受任何来源的击破
+  if (sink.resources && sink.resources.standTurn) {
+    notes.push(`${sink.name} 屹立不倒：免受击破${reason && reason !== "击破" ? "（" + reason + "）" : ""}。`);
+    return;
+  }
   const before = Number(sink.def) || 0;
   const wasStunnedSink = !!sink.stunned;
+  const wasDoppler = sink.self === "doppler";   // 被这一下打进失衡、多普勒随晕眩结束，这一下照样传出去
   // 坚挺：任何来源的击破都不会把架势打到 1 以下
   if (sink.statuses && sink.statuses.sturdy && before >= 1 && amount > before - 1) {
     amount = before - 1;
@@ -8483,12 +8614,47 @@ function dealBreak(unit, amount, element, notes, reason) {
       notes.push(`${sink.name} 因冰属性击破失衡：下次受到的攻击动作第一击 +50% 伤害。`);
     }
     notes.push(imbalanceLine(sink));
-    queueAssistAttack(null, sink);
+    // 飞行单位被击破：和攻击打空架势一样强制击落，扣 20% 最大生命（engine.js · resolveAttack 的击落）
+    if (before > 0) knockdownByBreak(sink, notes);
+    if (typeof endSelfOnStun === "function") endSelfOnStun(sink, notes);
+    queueAssistAttack(opt.by || null, sink);
     if (brokeIntoStun && typeof onBroken === "function") onBroken(sink, notes);
   } else {
-    maybeUnstableTrip(sink, notes);
+    maybeUnstableTrip(sink, notes, opt.by);
   }
-  if (typeof onBreakTaken === "function") onBreakTaken(sink, amount, element, notes);
+  if (typeof onBreakTaken === "function") onBreakTaken(sink, amount, element, notes, wasDoppler);
+}
+
+/** 不经过攻击的击破把飞行单位打空架势：强制击落，扣除 20% 最大生命（真伤，从外层扣）。
+ *  机甲中的瑞比照攻击路径走解除机甲（坠落伤害、银翼+ 在 exitMecha 里结算） */
+function knockdownByBreak(u, notes) {
+  if (!u || !u.flying || u.dead) return;
+  if (u.kit === "ufo_body") return;   // 飞碟触灵本体的血量跟着机械足走（syncUfoBody），不吃击落
+  if (u.resources && u.resources.mecha) {
+    if (typeof exitMecha === "function") notes.push(...exitMecha(u, "被击落，机甲解除"));
+    return;
+  }
+  u.flying = false;
+  const loss = applyTrueDamage(u.layers || [], Math.floor(totalMaxHp(u) * 0.2));
+  if (loss > 0) spawnFloater(u, loss, "physical");
+  notes.push(`${u.name} 飞行中被击破：强制击落，扣除 20% 最大生命 ${loss}。`);
+  if (!isInnerDepleted(u) || u.upOnShp) return;
+  if (!u.isPlayer) {
+    settleEnemyKill(u, notes);
+    notes.push(`${u.name} 被击落摔死。`);
+    notes.push(...sweepDeadEnemies());
+  } else if (isWeaponUnit(u)) {
+    u.dead = true;
+    notes.push(`${u.name} 被击落，最内层归零，武器人倒下。`);
+  } else if (exhaustTierOf(u) >= 3) {
+    u.dead = true;
+    u.dying = false;
+    notes.push(`${u.name} 力竭 3：被击落后立刻死亡。`);
+  } else {
+    u.dying = true;
+    clearStunOnDown(u);
+    notes.push(`${u.name} 被击落，最内层生命归零，陷入濒死。`);
+  }
 }
 
 /** 挂上不稳：已经不稳的再挂一个 → 两个不稳转成晕眩（失衡）。返回 true = 现在是不稳状态 */
@@ -8500,6 +8666,7 @@ function applyUnstable(u, notes) {
     if (!u.stunned && !u.noPosture) {
       u.stunned = true;
       if (notes) { notes.push(`${u.name} 叠加两个不稳：转为晕眩。`); notes.push(imbalanceLine(u)); }
+      if (typeof endSelfOnStun === "function") endSelfOnStun(u, notes);   // 晕眩后自我效果结束
       queueAssistAttack(null, u);
     }
     return false;
@@ -8508,7 +8675,8 @@ function applyUnstable(u, notes) {
   return true;
 }
 
-function maybeUnstableTrip(u, notes) {
+/** by：让它掉到 1 架势的那个单位（不能接自己打出的失衡的协助攻击） */
+function maybeUnstableTrip(u, notes, by) {
   if (!u || u.stunned || u.dead || u.noPosture) return;
   if (u.statuses && u.statuses.sturdy) return;   // 坚挺：剩 1 架势也站得住
   if (!u.statuses || !u.statuses.unstable) return;
@@ -8518,7 +8686,8 @@ function maybeUnstableTrip(u, notes) {
   notes = notes || [];
   notes.push(`${u.name} 不稳：架势只剩 ${u.def}，直接失衡。`);
   notes.push(imbalanceLine(u));
-  queueAssistAttack(null, u);
+  if (typeof endSelfOnStun === "function") endSelfOnStun(u, notes);
+  queueAssistAttack(by || null, u);
 }
 
 function popBreak(unit, amount, element) {
@@ -8710,25 +8879,41 @@ function hitOne2(actor, target, opt, lines) {
   if (out && out.extra) lines.push(...out.extra);
 }
 
+/** 错位：最外面两层「还有血」的血量层互换位置（打空的层不算）。
+ *  两层各记一个标记（shiftSlot 1 = 原来在外的、2 = 原来在内的），层对象被复制、前面插进护盾、被抹掉也认得出来 */
 function applyShift(u) {
   if (!u) return;
   u.instant = u.instant || {};
   u.instant.shift = true;
   if (u._shiftSwapped) return;
-  if ((u.layers || []).length < 2) return;
-  const tmp = u.layers[0];
-  u.layers[0] = u.layers[1];
-  u.layers[1] = tmp;
+  const ls = u.layers || [];
+  const living = [];
+  ls.forEach((l, i) => { if (Number(l.current) > 0) living.push(i); });
+  if (living.length < 2) return;
+  const [i, j] = living;
+  ls[i].shiftSlot = 1;
+  ls[j].shiftSlot = 2;
+  const tmp = ls[i];
+  ls[i] = ls[j];
+  ls[j] = tmp;
   u._shiftSwapped = true;
 }
 
+/** 错位结束（回合开始）：按标记把那两层换回原来的先后；其中一层已经被抹掉 / 移除就不换（不会把内层换到最外层） */
 function clearShift(u) {
   if (!u) return;
-  if (u._shiftSwapped && (u.layers || []).length >= 2) {
-    const tmp = u.layers[0];
-    u.layers[0] = u.layers[1];
-    u.layers[1] = tmp;
+  const ls = u.layers || [];
+  if (u._shiftSwapped) {
+    const a = ls.findIndex(l => l && l.shiftSlot === 1);
+    const b = ls.findIndex(l => l && l.shiftSlot === 2);
+    // 现在「原来在内的」排在「原来在外的」前面：换回来
+    if (a >= 0 && b >= 0 && b < a) {
+      const tmp = ls[a];
+      ls[a] = ls[b];
+      ls[b] = tmp;
+    }
   }
+  ls.forEach(l => { if (l && l.shiftSlot != null) delete l.shiftSlot; });
   u._shiftSwapped = false;
   if (u.instant) u.instant.shift = false;
 }
@@ -10935,8 +11120,11 @@ function runSkillInner(id, optRun) {
         const err = setWeather("phase");
         if (err) lines.push(err);
         else {
-          state.phaseStep = 0;
-          lines.push("驻波：战场进入相位天气。");
+          // 相位计数器从第一次释放起一直在走（被覆盖也不停），再次释放接入当前计数，不归零
+          const resume = !!state.phaseClock;
+          if (!resume) state.phaseStep = 0;
+          state.phaseClock = true;
+          lines.push(resume ? `驻波：战场重新进入相位天气，接入当前计数（${phaseWeatherName(state.phaseStep)}）。` : "驻波：战场进入相位天气。");
         }
       } else if (a.resources && a.resources.scanned) {
         lines.push(...advancePhaseWeather());

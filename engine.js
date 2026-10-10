@@ -399,7 +399,9 @@ function inSkillRange(actor, target, text, zoneMode) {
   return d >= r.min && d <= r.max;
 }
 
-function chartMod(element, layerType, weather, field, acidRainCancelArmor) {
+/** field：受击者所在区的场地（飞行单位、保释中的单位由调用方传空——冻土对飞行无效）；
+ *  fieldMult：恶劣环境 / 末日让场地效果翻倍（冻土对冰 25% → 50%） */
+function chartMod(element, layerType, weather, field, acidRainCancelArmor, fieldMult) {
   let table = CHART[element];
   if (!table) return 0;
   let v = table[layerType] || 0;
@@ -408,7 +410,7 @@ function chartMod(element, layerType, weather, field, acidRainCancelArmor) {
     v = -v;
   }
   if (field && field.ice) {
-    if (element === "ice") v = 0.25;
+    if (element === "ice") v = 0.25 * (Number(fieldMult) || 1);
   }
   if (acidRainCancelArmor && layerType === "armor" && element !== "acid" && element !== "ice") {
     v += 0.25;
@@ -541,8 +543,10 @@ function leveledSides(level, baseSides) {
   return upgradeDieSides(baseSides || 4, dieStep(level, 5));
 }
 
-function statusDotDice(kind, level, weather, extraArmor = false) {
+/** envX：恶劣环境 / 末日让天气效果翻倍（腐蚀：酷暑 / 酸雨 +2 个骰，雪天骰数减半两次） */
+function statusDotDice(kind, level, weather, extraArmor = false, envX = 1) {
   const step = dieStep(level, 5);
+  envX = Math.max(1, Number(envX) || 1);
   if (kind === "burn") {
     const s = upgradeDieSides(4, step);
     return { n: 1, s, label: `1d${s}×层` };
@@ -554,9 +558,9 @@ function statusDotDice(kind, level, weather, extraArmor = false) {
   }
   if (kind === "corr") {
     let n = 2;
-    if (weather === "heat") n += 1;
-    if (weather === "acid") n += 1;
-    if (weather === "snow") n = Math.max(1, Math.floor(n / 2));
+    if (weather === "heat") n += envX;
+    if (weather === "acid") n += envX;
+    if (weather === "snow") n = Math.max(1, Math.floor(n / Math.pow(2, envX)));
     const s = upgradeDieSides(4, step + (extraArmor ? 1 : 0));
     return { n, s, label: `${n}d${s}` };
   }
@@ -601,10 +605,16 @@ function resolveAttack(ctx) {
   const a = ctx.attacker;
   const flags = ctx.flags || {};
   const weather = ctx.weather || "none";
-  const fieldT = ctx.targetField || {};
+  // 保释：此回合豁免天气与场地（天气由调用方的 currentWeatherFor 处理，场地在这里清空：冻土、干涉都不吃）
+  const fieldT = t && (t.shelterTurn || t.isolate) ? {} : (ctx.targetField || {});
   const fieldA = ctx.attackerField || {};
 
   if (!t) return { ok: false, log: ["没有受击者。"] };
+  // 只对「攻击」生效的修正（相位击破 ±1、错位受克制 +1 击破、扩散改属性、熔融沙尘 +1 击破、冰打熔融、千钧击破）：
+  // 灼烧 / 腐蚀这类状态伤害、场地伤害、雷击转移这类派生伤害（action: false 或 environment）都不吃
+  const isAttack = flags.action !== false && !flags.environment;
+  // 恶劣环境（这个单位，到回合结束）/ 末日（整场）：天气与场地效果翻倍
+  const envX = t.harshEnv || (typeof state !== "undefined" && state && state.apocalypse) ? 2 : 1;
 
   if (flags.immune) {
     // 血量层原样带回：应用结果时要用（原来缺了这一项，屹立不倒一挨打就报错）
@@ -615,7 +625,7 @@ function resolveAttack(ctx) {
       ok: true, total: 0, breakDealt: 0, hits: 0, log: ["屹立不倒 / 免疫：伤害与击破均为 0。"], reduced: Math.round(immuneRaw),
       perHit: [], preventSand: false, applied: [],
       layersAfter: clone(t.layers || []), defBefore: defNow, defAfter: defNow, broke: false,
-      element: ctx.element, flags, interfereAfter: t.interfere || 0
+      element: ctx.element, flags, interfereAfter: t.interfere || 0, interfereZone: t.interfereZone != null ? t.interfereZone : null
     };
   }
 
@@ -625,7 +635,8 @@ function resolveAttack(ctx) {
   }
 
   let element = ctx.element;
-  if (t.instant && t.instant.spread && t.statuses) {
+  // 扩散：此回合内「对其发动的攻击」改按最新状态属性结算（状态 / 场地伤害不改）
+  if (isAttack && t.instant && t.instant.spread && t.statuses) {
     const latest = t.statuses.latestElement;
     if (latest) {
       add(`扩散：本次按受击者最新状态属性结算（${ELE[latest]}）。`);
@@ -691,8 +702,17 @@ function resolveAttack(ctx) {
   let pierColdRetrig = false;
   let knockdownHp = 0;
   let selfBreak = 0;
-  let interfDelta = t.interfere || 0;
+  // 干涉场：叠层只在单位站在干涉场里时生效（叠层记着是在哪一区叠的，换了区就不算）；不在干涉场里挨打就清掉
+  const interfHere = !!fieldT.harmonic && (t.interfereZone == null || Number(t.interfereZone) === Number(t.zone));
+  let interfDelta = interfHere ? (Number(t.interfere) || 0) : 0;
   let firstStartType = null;
+  // 熔融：冰属性攻击 ×2 伤害、+1 击破只作用一次，然后熔融立刻结束（后面的段数不再吃熔融的任何效果）
+  let meltLive = !!(t.instant && t.instant.melt);
+  // 千钧：每个攻击行动总击破 +1，只加一次（不按段；同一行动里前面的攻击已经加过就不再加，见 app.js · dealTo）
+  let anchorDone = !!flags.anchorSpent;
+  let anchorBreak = false;
+  // 蚀刻残留：接下来受到此属性的伤害视为被克制（弱点特效、错位、干涉场都按克制算）
+  const etchAdv = (t.etchMarks || []).some(m => m && m.element === element);
 
   for (let h = 0; h < hits; h++) {
     const hitLog = [];
@@ -736,8 +756,9 @@ function resolveAttack(ctx) {
     let pct = 0;
     const acidRain = weather === "acid";
     const layerTypeForChart = onShp ? "shp" : startLayer.type;
-    let cMod = onShp ? 0 : chartMod(element, layerTypeForChart, weather, fieldT, acidRain);
-    if (!onShp && t.instant && t.instant.melt && startLayer && startLayer.type === "armor" && element === "physical") {
+    // 冻土对飞行单位无效：飞行的受击者不吃冻土的冰易伤
+    let cMod = onShp ? 0 : chartMod(element, layerTypeForChart, weather, t.flying ? null : fieldT, acidRain, envX);
+    if (!onShp && meltLive && startLayer && startLayer.type === "armor" && element === "physical") {
       hAdd(`克制表原值 ${pctTxt(cMod)}，熔融装甲将物理修正强制改为 +50%。`);
       cMod = 0.50;
     }
@@ -750,15 +771,16 @@ function resolveAttack(ctx) {
     else if (matchupKind(cMod) === "dis") disHits++;
     if (onShp) hAdd(`起身状态：克制表无修正（坚毅生命对全属性 0%）`);
     else hAdd(`克制表 ${ELE[element]} → ${LAYER[startLayer.type]}：${pctTxt(cMod)}（溢出不重算）`);
+    // 克制 / 劣势的判定（弱点特效、错位、干涉场用）：蚀刻残留让这一属性视为被克制
+    const kindNow = etchAdv ? "adv" : matchupKind(cMod);
 
-    const wPct = weatherDamagePct(weather, element);
-    if (wPct) { pct += wPct; hAdd(`天气：${pctTxt(wPct)}`); }
+    const wPct = weatherDamagePct(weather, element) * envX;
+    if (wPct) { pct += wPct; hAdd(`天气：${pctTxt(wPct)}${envX > 1 ? "（恶劣环境 / 末日：翻倍）" : ""}`); }
 
     if (flags.weak) {
-      const kind = matchupKind(cMod);
-      const w = kind === "adv" ? 0.25 : -0.25;
+      const w = kindNow === "adv" ? 0.25 : -0.25;
       pct += w;
-      hAdd(`弱点特效（${kind === "adv" ? "克制" : "非克制"}）：${pctTxt(w)}`);
+      hAdd(`弱点特效（${kindNow === "adv" ? (etchAdv && matchupKind(cMod) !== "adv" ? "蚀刻视为克制" : "克制") : "非克制"}）：${pctTxt(w)}`);
     }
 
     if (ctx.dist === 1 && ctx.atkRange !== "melee") {
@@ -771,7 +793,9 @@ function resolveAttack(ctx) {
       hAdd(`干涉场叠层带入：${pctTxt(interfDelta)}`);
     }
 
-    if (t.instant && t.instant.melt && element === "ice") {
+    // 冰属性攻击打熔融：×2 伤害、+1 击破，只作用一次（这一段之后熔融结束）
+    const meltIceHit = isAttack && meltLive && element === "ice" && !ghost;
+    if (meltIceHit) {
       hAdd("冰打熔融：伤害 ×2，击破 +1，并结束熔融。");
     }
 
@@ -792,7 +816,7 @@ function resolveAttack(ctx) {
       if (["physical", "acid", "energy", "harmonic", "ice"].includes(element)) {
         pct -= 0.25; hAdd("目标霜结：该类受伤 −25%。");
       }
-      if (weather === "snow") { pct -= 0.10; hAdd("雪天霜结：全属性再 −10%。"); }
+      if (weather === "snow") { pct -= 0.10 * envX; hAdd(`雪天霜结：全属性再 −${10 * envX}%。`); }
     }
     if (t.self === "splash") {
       if (element === "acid" || element === "fire") { pct -= 0.25; hAdd("目标溅射：酸/火受伤 −25%。"); }
@@ -822,7 +846,7 @@ function resolveAttack(ctx) {
     }
 
     if (weather === "phase" && Number(ctx.phaseStep) === 2) {
-      pct += 0.50; hAdd("相位波峰：伤害 +50%。");
+      pct += 0.50 * envX; hAdd(`相位波峰：伤害 +${50 * envX}%。`);
     }
 
     if (flags.icebreak) {
@@ -843,7 +867,6 @@ function resolveAttack(ctx) {
           const addp = Number(m.pct) || 0.1;
           pct += addp;
           hAdd("蚀刻残留：" + (ELE[element] || element) + " +" + Math.round(addp * 100) + "%，且视为被该属性克制。");
-          flags._etchAdv = true;
         }
       });
     }
@@ -852,7 +875,7 @@ function resolveAttack(ctx) {
     hAdd(`加算百分比合计 ${pctTxt(pct)} → ${round2(packet)}`);
 
     let mul = 1;
-    if (weather === "phase" && Number(ctx.phaseStep) === 0) { mul *= 0.5; hAdd("相位波谷：伤害减半。"); }
+    if (weather === "phase" && Number(ctx.phaseStep) === 0) { mul *= Math.pow(0.5, envX); hAdd(envX > 1 ? "相位波谷：伤害减半两次（恶劣环境 / 末日）。" : "相位波谷：伤害减半。"); }
     if (flags.doubleDeal) { mul *= 2; hAdd("造成伤害翻倍。"); }
     if (flags.doubleTake) { mul *= 2; hAdd("目标受伤翻倍。"); }
     if (flags.dr50) { mul *= 0.5; hAdd("目标减伤 +50%。"); }
@@ -867,7 +890,7 @@ function resolveAttack(ctx) {
     }
     if (flags.diceMin) { hAdd("决一死战：伤害掷骰已按最低值计算。"); }
     if (t.flying && flags.action) { mul *= 0.5; hAdd("飞行单位：攻击行动伤害减半。"); }
-    if (t.instant && t.instant.melt && element === "ice") { mul *= 2; }
+    if (meltIceHit) { mul *= 2; }
     if (flags.block === "bareOk") { mul *= 0.5; hAdd("空手格挡成功：伤害一半。"); }
     if (h === 0 && t.instant && t.instant.iceNext && flags.action !== false) {
       mul *= 1.5;
@@ -917,52 +940,48 @@ function resolveAttack(ctx) {
     if (skipBreak) br = 0;
     if (!skipBreak) {
       if (!onShp && startLayer && startLayer.type === "armor" && element === "physical") {
-        const melted = t.instant && t.instant.melt;
-        if (!melted) { br += 1; hAdd("物理打装甲：击破 +1。"); }
+        if (!meltLive) { br += 1; hAdd("物理打装甲：击破 +1。"); }
         else hAdd("熔融装甲：失去物理 +1 击破。");
       }
-      if (!onShp && t.instant && t.instant.melt && startLayer && startLayer.type === "sand") {
+      if (isAttack && !onShp && meltLive && startLayer && startLayer.type === "sand") {
         br += 1; hAdd("熔融沙尘：击破 +1。");
       }
-      if (t.instant && t.instant.melt && element === "ice") {
-        br += 1; meltEnded = true;
-      }
+      if (meltIceHit) br += 1;
       if (flags.smash) {
         selfBreak += br;
         br *= 2;
         hAdd("猛击：击破 ×2，攻击者承受原击破。");
       }
-      if (a && a.self === "anchor") { br += 1; hAdd("千钧：本攻击行动击破 +1。"); }
-      if (weather === "glow") {
-        if (br > 0) br = Math.max(1, br - 1);
-        hAdd("微光：击破 −1（不会减到 0）。");
+      if (a && a.self === "anchor" && isAttack && !anchorDone) {
+        br += 1; anchorDone = true; anchorBreak = true;
+        hAdd("千钧：本攻击行动击破 +1（一个行动只加一次）。");
       }
-      if (weather === "phase" && Number(ctx.phaseStep) === 0) { br = Math.max(0, br - 1); hAdd("相位波谷：击破 −1。"); }
-      if (weather === "phase" && Number(ctx.phaseStep) === 2) { br += 1; hAdd("相位波峰：击破 +1。"); }
-      if (t.instant && t.instant.shift) {
-        const meltArmor = !!(t.instant.melt && startLayer && startLayer.type === "armor" && element === "physical");
-        if (matchupKind(cMod) === "adv" || meltArmor || flags._etchAdv) {
+      if (weather === "glow") {
+        if (br > 0) br = Math.max(1, br - envX);
+        hAdd(`微光：击破 −${envX}（不会减到 0）。`);
+      }
+      if (isAttack && weather === "phase" && Number(ctx.phaseStep) === 0) { br = Math.max(0, br - envX); hAdd(`相位波谷：击破 −${envX}。`); }
+      if (isAttack && weather === "phase" && Number(ctx.phaseStep) === 2) { br += envX; hAdd(`相位波峰：击破 +${envX}。`); }
+      if (isAttack && t.instant && t.instant.shift) {
+        const meltArmor = !!(meltLive && startLayer && startLayer.type === "armor" && element === "physical");
+        if (kindNow === "adv" || meltArmor) {
           br += 1; hAdd(meltArmor ? "错位 + 熔融装甲加伤：击破 +1。" : "错位 + 克制/蚀刻：击破 +1。");
         }
       }
     }
-    if (fieldT.harmonic) {
-      if (matchupKind(cMod) === "adv") {
-        interfDelta += 0.25;
-        hAdd("干涉场：本次克制，下次伤害 +25%。");
-      } else if (matchupKind(cMod) === "dis") {
-        interfDelta -= 0.25;
-        hAdd("干涉场：本次劣势，下次伤害 −25%。");
+    // 冰打熔融用掉了：熔融立刻结束，这次攻击后面的段数不再吃熔融
+    if (meltIceHit) { meltLive = false; meltEnded = true; }
+    // 干涉场：每一段按「当前」叠层判断是不是反向（多段攻击里前一段叠上去的也算）
+    if (fieldT.harmonic && (kindNow === "adv" || kindNow === "dis")) {
+      const up = kindNow === "adv";
+      const step = 0.25 * envX;
+      const stepTxt = `${up ? "+" : "−"}${25 * envX}%`;
+      if (up ? interfDelta < 0 : interfDelta > 0) {
+        interfDelta = up ? step : -step;
+        hAdd(`干涉场遇到反向：清空后从 ${stepTxt} 重计。`);
       } else {
-        /* neutral does not flip */
-      }
-      if (matchupKind(cMod) === "adv" && (t.interfere || 0) < 0) {
-        interfDelta = 0.25;
-        hAdd("干涉场遇到反向：清空后从 +25% 重计。");
-      }
-      if (matchupKind(cMod) === "dis" && (t.interfere || 0) > 0) {
-        interfDelta = -0.25;
-        hAdd("干涉场遇到反向：清空后从 −25% 重计。");
+        interfDelta += up ? step : -step;
+        hAdd(`干涉场：本次${up ? "克制" : "劣势"}，下次伤害 ${stepTxt}。`);
       }
     }
 
@@ -1051,7 +1070,9 @@ function resolveAttack(ctx) {
     pierColdRetrig,
     knockdownHp,
     selfBreak,
+    anchorBreak,                            // 千钧这一下加过击破了（同一行动里后面的攻击不再加）
     interfereAfter: interfDelta,
+    interfereZone: interfDelta ? t.zone : null,   // 干涉叠层是在哪一区叠的（离开这一区就不再生效）
     layersAfter: layersWork,
     perHit,
     log,
@@ -1103,9 +1124,11 @@ function distributePacket(opt) {
   };
 
   if (opt.phaseHarmonic) {
-    notes.push("相位 + 谐波 + 晕眩：每一层血量都吃一次伤害包。");
+    notes.push("相位 + 谐波 + 晕眩：每一层血量都吃一次伤害包（只有一层就只吃一次）。");
+    let layersHit = 0;
     for (let i = 0; i < layers.length; i++) {
       if (Number(layers[i].current) > 0) {
+        layersHit++;
         const left = applyToIndex(i, remaining, "相位层：");
         if (left > 0) {
           let r = left;
@@ -1113,7 +1136,16 @@ function distributePacket(opt) {
         }
       }
     }
-    return { dealt, notes, extraHarmonic: remaining };
+    // 额外的那几次（第一层之外）：画面另外跳一个数字
+    return { dealt, notes, extraHarmonic: remaining * Math.max(0, layersHit - 1) };
+  }
+
+  // 谐波打晕眩：次外层 = 这一击之前从外往里第二层还有血的；单层目标没有次外层，不额外打
+  let second = null;
+  if (opt.harmonicStun) {
+    const livingBefore = [];
+    layers.forEach((l, i) => { if (Number(l.current) > 0) livingBefore.push(i); });
+    second = livingBefore[1] != null ? livingBefore[1] : null;
   }
 
   let idx = opt.startIdx;
@@ -1134,18 +1166,17 @@ function distributePacket(opt) {
     r = applyToIndex(j, r, "溢出：");
   }
 
-  if (opt.harmonicStun && !opt.phaseHarmonic) {
-    notes.push("谐波打晕眩：次外层再吃一次同等伤害包。");
-    const livingIdx = [];
-    layers.forEach((l, i) => { if (Number(l.current) > 0) livingIdx.push(i); });
-    const second = livingIdx[1] != null ? livingIdx[1] : livingIdx[0];
+  if (opt.harmonicStun) {
     if (second != null) {
+      notes.push("谐波打晕眩：次外层再吃一次同等伤害包。");
       let extra = opt.packet;
       extra = applyToIndex(second, extra, "谐波追加：");
       for (let j = second + 1; j < layers.length && extra > 0; j++) {
         extra = applyToIndex(j, extra, "谐波追加溢出：");
       }
       extraHarmonic += opt.packet;
+    } else {
+      notes.push("谐波打晕眩：只有一层血量，没有次外层，不额外结算。");
     }
   }
   return { dealt, notes, extraHarmonic };
@@ -1249,6 +1280,9 @@ function applyResultToUnit(target, result, attacker) {
   if (result.preventSand) target.sandLocked = true;
   if (result.meltEnded && target.instant) target.instant.melt = false;
   target.interfere = result.interfereAfter || 0;
+  // 干涉叠层记下是在哪一区叠的：离开这一区（换到别的干涉场也一样）就不再生效，回合开始清掉
+  target.interfereZone = !target.interfere ? null
+    : result.interfereZone !== undefined ? result.interfereZone : target.zone;
   target.damagedThisTurn = (target.damagedThisTurn || 0) + result.total;
   if (result.total > 0) target.gotHitThisTurn = true;
   if (result.selfBreak && attacker) {

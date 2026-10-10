@@ -540,6 +540,8 @@ function applyBattlefieldFeatures(features, level) {
       if (!fl) return;
       if (EFFECT[f.what] && typeof setZoneField === "function") setZoneField(f.zone, EFFECT[f.what]);
       else fl[f.what] = true;
+      // 塌陷区域的伤害骰按战斗等级（每 4 级 +1d10），以前单局生成的一直是 1 级
+      if (f.what === "collapseOn") fl.collapseLv = Math.max(1, Number(f.level != null ? f.level : level) || 1);
     } else if (f.type === "gap" && f.key) {
       // 战斗模板可以写死耐久、机关门开着
       const hp = f.hp != null ? Number(f.hp) : typeof defaultGapHp === "function" ? defaultGapHp(f.what) : 10;

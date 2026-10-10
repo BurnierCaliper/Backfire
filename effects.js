@@ -6,7 +6,8 @@
  *   afterAttackDealt     攻击者打完一次攻击行动之后（霜结回架势、溅射、导体额外目标、躲藏解除）
  *   onBreakTaken         受到击破之后（多普勒）
  *   onBroken             被打进失衡的那一刻（刺骨再触发、过载爆炸）
- *   selfImmunities       自我效果带来的免疫（自焚免疫灼烧已在 app.js）
+ *   endSelfOnStun        晕眩后自我效果结束（蓄能累积的高能值不清零）
+ *   selfImmunities       自我效果带来的免疫（自焚免疫灼烧、霜结免疫冻伤……）
  * 规则全部照手册原文，行内注释写了对应的句子。
  */
 
@@ -170,13 +171,15 @@ function afterAttackDealt(a, t, element, res, opt, notes) {
 }
 
 /* ---------- 击破 ---------- */
-/** 受到击破之后（多普勒：自身受到击破时，施加同量击破给同区域所有单位，不分敌我） */
-function onBreakTaken(u, amount, element, notes) {
-  if (!u || !(amount > 0) || u.self !== "doppler" || u._dopplerBusy) return;
+/** 受到击破之后（多普勒：自身受到击破时，施加同量击破给同区域所有单位，不分敌我）。
+ *  wasDoppler：这一下击破落下时还是多普勒（被这一下打进失衡、多普勒随晕眩结束了，这一下照样传出去） */
+function onBreakTaken(u, amount, element, notes, wasDoppler) {
+  if (!u || !(amount > 0) || u._dopplerBusy) return;
+  if (u.self !== "doppler" && !wasDoppler) return;
   u._dopplerBusy = true;
   (state.units || []).filter(x => x && x.id !== u.id && !x.dead && !x.hidden && !x._removed && Number(x.zone) === Number(u.zone)).forEach(x => {
     x._dopplerBusy = true;
-    dealBreak(x, amount, element || "harmonic", notes, `${u.name} 多普勒`);
+    dealBreak(x, amount, element || "harmonic", notes, `${u.name} 多普勒`, { by: u });
     x._dopplerBusy = false;
   });
   u._dopplerBusy = false;
@@ -199,6 +202,8 @@ function onBroken(u, notes) {
 /** 自我效果带来的免疫与限制。回合开始、回合结束、感电触发前都会检查 */
 function selfImmunities(u, notes) {
   if (!u || !u.statuses) return;
+  // 自焚：免疫灼烧。共振、赤牙「点燃」这类直接写进灼烧的来源，在回合结束结算前就清掉，不会先烫一跳
+  if (u.self === "burn" && Number(u.statuses.burn) > 0) { u.statuses.burn = 0; notes.push(`${u.name} 自焚：免疫灼烧，灼烧层清除。`); }
   // 霜结：免疫冻伤
   if (u.self === "frost" && u.statuses.frostbite) { u.statuses.frostbite = false; notes.push(`${u.name} 霜结：免疫冻伤。`); }
   // 溅射：免疫腐蚀
@@ -209,6 +214,21 @@ function selfImmunities(u, notes) {
     if ((Number(u.def) || 0) > 3) u.def = 3;
   }
 }
+/** 晕眩后自我效果结束（精简版 7.6 每一种都写了「晕眩后效果结束」；玩家手册第四章：晕眩后多数自我效果随之结束）。
+ *  蓄能累积的高能值不清零。被打进失衡的那一刻结算（攻击、击破、不稳、高压转晕眩……），回合开始再兜一次底。
+ *  返回 true = 结束了一种自我效果 */
+function endSelfOnStun(u, notes) {
+  if (!u || !u.stunned || !u.self || u.self === "none") return false;
+  const was = u.self;
+  u.self = "none";
+  u.selfBurnStacks = 0;
+  u._conductorHits = 0;
+  if (u.resources && u.resources.frostShell) u.resources.frostShell = false;   // 再次霜结的完全免疫随霜结一起结束
+  const name = typeof selfName === "function" ? selfName(was) : was;
+  if (notes) notes.push(`${u.name} 晕眩，${name}结束${was === "store" ? `（累计的高能值 ${Number(u.highEnergy) || 0} 不清零）` : ""}。`);
+  return true;
+}
+
 /** 自我效果对架势上限的限制（导体 3） */
 /** 震荡（玩家手册第四章「物理 · 震荡」）：架势条上限减少 2。
  *  直接改 defMax（界面、回满架势、协助攻击回满都跟着变），记下扣了多少，状态消失时还回去。
