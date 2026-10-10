@@ -58,3 +58,26 @@ test("导体：只对本来就是复数次的攻击 +1 次，重复最后一段�
   assert.equal(pops.length, 3);
   assert.equal(pops[2], pops[1], "重复的是最后一段");
 });
+
+test("导体：按段计数，额外目标只吃触发的那一段，不重放整次攻击", () => {
+  const c = H.load();
+  c.BattleSim.setup({
+    party: ["ras"],
+    enemies: [{ id: "thug_knife", lv: 1, zone: 2 }, { id: "thug_knife", lv: 1, zone: 2 }],
+    seed: "CONDSEG"
+  });
+  c.startCombat();
+  const S = c.S.state;
+  const r = c.findKit("ras", S.units); r.zone = 1; r.self = "conductor";
+  const foes = S.units.filter(u => !u.isPlayer);
+  foes.forEach(f => { f.zone = 2; f.layers = [{ type: "flesh", current: 500, max: 500 }]; });
+  const pops = [];
+  c.spawnPopup = (u, spec) => { if (spec.kind === "dmg") pops.push({ id: u.id, value: spec.value }); };
+  c.Commands.dispatch({ type: "skill", actor: r.id, skill: "ras_aa", target: foes[0].id });
+  assert.equal(r._conductorHits, 3, "两段加导体那一段，共记 3 段");
+  const extra = pops.filter(p => p.id === foes[1].id);
+  assert.equal(extra.length, 1, "额外目标只吃一段");
+  const main = pops.filter(p => p.id === foes[0].id);
+  assert.equal(main.length, 3, "主目标仍是三段");
+  assert.equal(extra[0].value, main[2].value, "额外的是触发的那一段，不是整次攻击");
+});
