@@ -1514,6 +1514,20 @@ function beginRound(notes) {
       notes.push(`研磨机+：结人获得 1 颗咖啡豆 → ${yu.resources.bean}。`);
     }
   }
+  // 扭矩「转移注意」：下回合开始自动变回武器（失去的装甲记为废料，见 endTorqueGuard）
+  state.units.forEach(u => {
+    if (u.kit === "torque" && u.resources && u.resources.divertGuard && !u.hidden && !u.dead) {
+      notes.push("转移注意结束：扭矩变回武器。");
+      notes.push(...returnWeapon(u));
+    }
+  });
+  // Ecmo 探测模式：每回合开始自动对所在区做一次环境扫描
+  state.units.forEach(u => {
+    if (u.kit === "ecmo" && u.resources && u.resources.probe && !u.hidden && !u.dead) {
+      (u.resources.probeZones = u.resources.probeZones || []).push(Number(u.zone));
+      heluScanAct(u, { dest: Number(u.zone), act: "spawn" }, notes);
+    }
+  });
   if (typeof mutinyTick === "function") mutinyTick(notes);
   if (typeof syncBpAll === "function") syncBpAll();
   state.units.forEach(u => {
@@ -1721,7 +1735,8 @@ function releaseAcidCharges(notes) {
       const atk = effectiveAtk(u, state.units);
       const kolt = findKit("kolt", state.units);
       visibleEnemies(z).forEach(t => {
-        const out = dealTo(u, t, { element: "acid", mult: 1, baseBreak: 1, atk, flags: { action: true, aoe: true } });
+        // 酸液炮蓄力是抛射：越过危墙 / 关着的门
+        const out = dealTo(u, t, { element: "acid", mult: 1, baseBreak: 1, atk, flags: { action: true, aoe: true, lob: true } });
         (out.extra || []).forEach(s => notes.push(s));
         // 卡面：被打到的敌人下一击必须攻击柯尔特
         if (kolt && !kolt.dead && !t.dead) { t.tauntTo = kolt.id; notes.push(`${t.name} 被嘲讽：下一击必须攻击柯尔特。`); }
@@ -1867,6 +1882,14 @@ function startEnemyPhase() {
 
 function endPlayerTurn() {
   snapshot();
+  // 汲取：拉斯缪尔每回合结束自动把 20% 累积能量转为光能
+  {
+    const ras = findKit("ras", state.units);
+    if (ras && !ras.dead && ras.resources && ras.resources.siphon && (Number(ras.resources.energyPct) || 0) > 0) {
+      appendLog("汲取：拉斯缪尔回合结束，20% 累积能量转为光能。");
+      convertRasLight(20);
+    }
+  }
   state.units.forEach(u => {
     if (u.resources && u.resources.preparedActive) {
       u.resources.preparedActive = false;
@@ -3793,6 +3816,8 @@ function doMoveInner(unit, dest, moveOpt) {
       if (!spendAp(unit, 1, "离开酸液地面")) return;
     } else if (unit.self === "conductor") {
       // 导体：移动不消耗附赠动作
+    } else if (unit.kit === "ecmo" && unit.resources && unit.resources.probe) {
+      // 探测模式：移动不消耗附赠动作
     } else if (unit.isPlayer) {
       if (!spendBonus(unit, 1, "移动")) return;
     } else if (enemyRankOf(unit) === "minion") {
@@ -3839,6 +3864,7 @@ function doMoveInner(unit, dest, moveOpt) {
     notes.push(`离开冻土：${chk.text}，成功。`);
   }
   unit.zone = dest;
+  if (unit.kit === "ecmo" && unit.resources && unit.resources.probe) (unit.resources.probeZones = unit.resources.probeZones || []).push(Number(dest));
   convertUnstableInHv(unit, notes);
   triggerLeaveOpportunity(unit, from, notes);
   if (typeof bpAfterEnemyMove === "function") bpAfterEnemyMove(unit, notes);   // 单局图纸：稳妥的距离
@@ -5026,6 +5052,56 @@ function convertRasLight(pct, bonusRate) {
   return gain;
 }
 
+/** 柯尔特的废料：上一个被摧毁的敌人血量层 + 腐坏抛射记下的腐蚀伤害 + 扭矩「转移注意」失去的装甲。
+ *  废物利用领走它们；碎渣重炮把它们全部装填打出去 */
+function koltScrapTotal(k) {
+  k = k || findKit("kolt", state.units);
+  const r = (k && k.resources) || {};
+  const last = state.lastBrokenLayer ? Math.floor(Number(state.lastBrokenLayer.lost) || 0) : 0;
+  const rot = Object.keys(r.rotStore || {}).reduce((s, t) => s + Math.floor(Number(r.rotStore[t]) || 0), 0);
+  return Math.max(0, last + rot + Math.floor(Number(r.divertArmor) || 0));
+}
+function koltScrapClear(k) {
+  state.lastBrokenLayer = null;
+  if (k && k.resources) { k.resources.rotStore = {}; k.resources.divertArmor = 0; }
+}
+/** 扭矩「转移注意」结束：失去的装甲记为废料（下次废物利用额外获得等量装甲） */
+function endTorqueGuard(w, notes) {
+  const r = w && w.resources;
+  if (!r || !r.divertGuard) return;
+  r.divertGuard = false;
+  const armorNow = (w.layers || []).filter(l => l.type === "armor").reduce((s, l) => s + (Number(l.current) || 0), 0);
+  const lost = Math.max(0, Math.floor((Number(r.divertArmor0) || 0) - armorNow));
+  r.divertArmor0 = 0;
+  const k = findKit("kolt", state.units);
+  if (k && lost > 0) {
+    k.resources = k.resources || {};
+    k.resources.divertArmor = (Number(k.resources.divertArmor) || 0) + lost;
+    notes.push(`转移注意：扭矩失去的 ${lost} 点装甲记为废料。`);
+  }
+}
+/** 探测模式变回武器：经过的每个区各触发一个配置物 */
+function ecmoProbeTrigger(a, notes) {
+  const r = a && a.resources;
+  if (!r || !r.probe) return;
+  const zones = Array.from(new Set((r.probeZones || []).map(Number)));
+  r.probe = false; r.probeZones = [];
+  zones.forEach(z => {
+    const p = (state.props || []).find(x => Number(x.zone) === z && !BARRIER_SIDE[x.kind] && !(x.kind === "scrap" && !scrapReady(x)));
+    if (!p) return;
+    const picks = { dest: z, act: "prop:" + p.id };
+    if (p.kind === "battery") picks.mode = "boom";
+    if (p.kind === "scrap") {
+      const t = scrapTargets(p, a)[0];
+      if (!t) { notes.push(`探测模式触发 ${p.name}：没有打得到的敌人。`); return; }
+      picks.target = t.id;
+    }
+    const out = [];
+    heluScanAct(a, picks, out);
+    notes.push(...out.map(x => String(x).replace(/^环境扫描：/, "探测模式：").replace(/Helumica 的敌人/g, `${a.name} 的敌人`)));
+  });
+}
+
 function swapKoltBit(actor, lines) {
   const k = findKit("kolt", state.units) || (actor && actor.kit === "kolt" ? actor : null);
   if (!k) return "drill";
@@ -6117,7 +6193,10 @@ function resetBattleFlags(u) {
   if (u.kit === "xia") { r.engine = false; r.fuel = 0; }
   if (u.kit === "yuito") r.bean = Math.max(1, Number(r.bean) || 0);
   if (u.kit === "ruby" && r.nano == null) r.nano = 40;
-  if (u.kit === "kolt") { r.bit = r.bit || "drill"; r.rotStore = {}; }
+  if (u.kit === "kolt") { r.bit = r.bit || "drill"; r.rotStore = {}; r.divertArmor = 0; }
+  if (u.kit === "torque") { r.divertGuard = false; r.divertArmor0 = 0; }
+  if (u.kit === "ecmo") { r.probe = false; r.probeZones = []; }
+  if (u.kit === "ras") r.siphon = false;
   if (u.kit === "ras") { r.energyPct = 0; r.light = 0; r.unstable = false; }
   if (u.kit === "helu") { r.scanned = false; r.lockLeft = roleLockCap(u); }
   if (u.kit === "torque") r.acidCharge = null;
@@ -6750,7 +6829,8 @@ function dealTo(attacker, target, opt) {
   // 敌人大多拿普通攻击当协助，以前没有标记，会进我方协助格挡队列）
   const assisting = !!opt.flags.assist || !!(attacker && state._assistBy && state._assistBy === attacker.id);
   // 危墙 / 关着的机关门挡住：先判，再进协助格挡（以前先弹格挡，格挡者花掉附赠、扣了耐久，这一击才被墙挡住）
-  if (attacker && target && target.zone != null && attacker.zone != null && !opt.flags.diffract && !opt.flags.locked) {
+  // lob：越墙的抛射（扭矩酸液炮蓄力、碎渣重炮的迫击炮）不被危墙 / 门挡住
+  if (attacker && target && target.zone != null && attacker.zone != null && !opt.flags.diffract && !opt.flags.locked && !opt.flags.lob) {
     const block = lineBlocked(attacker.zone, target.zone);
     if (block) {
       appendLog(block);
@@ -6831,6 +6911,7 @@ function dealTo(attacker, target, opt) {
   if (attacker.resources && attacker.resources.gambitStrike) flags.doubleDeal = true;
   if (target && target.resources && target.resources.gambitWound) flags.doubleTake = true;
   if (target && target.resources && target.resources.gritTurn) flags.dr50 = true;
+  if (target && target.resources && target.resources.divertGuard) flags.dr25 = true;   // 扭矩「转移注意」自保
   if (target && target.resources && target.resources.standTurn) flags.immune = true;
   if (target && target.resources && target.resources.frostShell) flags.immune = true;   // 再次霜结：完全免受伤害与击破
   if (target && target.instant && target.instant.doubleBreak) {
@@ -7288,6 +7369,8 @@ function returnWeapon(weapon) {
     owner.weaponHeld = true;
     owner.atk = (owner.personalAtk || 0) + (owner.weaponAtk || 0);
   }
+  if (weapon.kit === "ecmo") ecmoProbeTrigger(weapon, notes);
+  if (weapon.kit === "torque") endTorqueGuard(weapon, notes);
   weapon.hidden = true;
   if (weapon.kit === "xiaoxiao") longgeUnlock(owner, notes, "小朋友变回武器");
   notes.push(`${weapon.name} 已收回为武器。`);
@@ -8781,9 +8864,10 @@ function dealBreak(unit, amount, element, notes, reason, opt) {
   const wasStunnedSink = !!sink.stunned;
   const wasDoppler = sink.self === "doppler";   // 被这一下打进失衡、多普勒随晕眩结束，这一下照样传出去
   // 坚挺：任何来源的击破都不会把架势打到 1 以下
-  if (sink.statuses && sink.statuses.sturdy && before >= 1 && amount > before - 1) {
+  const guardFloor = !!(sink.resources && sink.resources.divertGuard);
+  if (((sink.statuses && sink.statuses.sturdy) || guardFloor) && before >= 1 && amount > before - 1) {
     amount = before - 1;
-    notes.push(`${sink.name} 坚挺：架势保留 1。`);
+    notes.push(`${sink.name} ${guardFloor ? "自保模式" : "坚挺"}：架势保留 1。`);
     if (amount <= 0) return;
   }
   sink.def = Math.max(0, before - amount);
@@ -9459,10 +9543,14 @@ const SKILL_REQUIREMENT = {
     : state.weatherLock ? `天气被「${state.weatherLock}」锁定，无法调转风向` : null,
   torque_strip:   (a) => ((findKit("kolt", state.units) || {}).resources || {}).bit === "acid" ? "拆卸模式需要电钻模式" : null,
   // 废物利用：要有「还没利用过的被摧毁的敌人血量层」或腐坏抛射攒下的记录才能用（同一层不能反复利用）
-  kolt_scrap:     (a) => state.lastBrokenLayer || Object.keys(res(a).rotStore || {}).some(k => (Number(res(a).rotStore[k]) || 0) > 0)
+  kolt_scrap:     (a) => state.lastBrokenLayer || (Number(res(a).divertArmor) || 0) > 0 || Object.keys(res(a).rotStore || {}).some(k => (Number(res(a).rotStore[k]) || 0) > 0)
     ? null : "还没有可以利用的残骸（被摧毁的敌人血量层，或腐坏抛射留下的记录）",
   kolt_rot:       (a) => ((findKit("kolt", state.units) || a).resources || {}).bit !== "acid" ? "腐坏抛射需要酸液炮模式" : null,
   kolt_mod:       (a) => ((findKit("kolt", state.units) || a).resources || {}).bit === "acid" ? "「非法」改装需要电钻模式" : null,
+  kolt_cannon:    (a) => koltScrapTotal(a) > 0 ? null : "没有废料可以装填",
+  ecmo_probe:     (a) => res(a).probe ? "已经在探测模式" : null,
+  edc_siphon:     () => findKit("ras", state.units) ? null : "拉斯缪尔不在场",
+  ras_torrent:    (a) => fieldUnits().some(u => !u.isPlayer && !u.dead && ((u.statuses && u.statuses.high) || (u.highEnergy || 0) > 0)) ? null : "场上没有高能状态的敌人",
   edc_drain:      (a) => {
     const ras = findKit("ras", state.units);
     if (!ras) return "拉斯缪尔不在场";
@@ -9705,6 +9793,13 @@ function skillTargetError(a, id, t) {
     const why = roleTargetError(a, id, t);
     if (why) return why;
   }
+  if (id === "kolt_cannon" && t) {
+    const acid = ((findKit("kolt", state.units) || a).resources || {}).bit === "acid";
+    const d = zoneDist(a.zone, t.zone, state.zoneMode);
+    if (acid ? (d < 1 || d > 2) : d > 1) return acid ? "迫击炮只能打距离 1-2 的敌人" : "机枪只能打距离 1 以内的敌人";
+    if (!acid && lineBlocked(a.zone, t.zone)) return lineBlocked(a.zone, t.zone);
+  }
+  if (id === "ras_torrent" && t && !((t.statuses && t.statuses.high) || (t.highEnergy || 0) > 0)) return "狂瀑要选已经处于高能状态的敌人";
   if (id === "solo_support") {
     const fl = state.skillFlow;
     const kit = fl && fl.picks ? fl.picks.partner : null;
@@ -11290,6 +11385,11 @@ function runSkillInner(id, optRun) {
       const rot = (a.resources && a.resources.rotStore) || {};
       Object.keys(rot).forEach(type => grant(type, Math.floor(Number(rot[type]) || 0), "腐坏回收"));
       if (a.resources) a.resources.rotStore = {};
+      // 扭矩「转移注意」失去的装甲：额外获得等量装甲
+      if (a.resources && (Number(a.resources.divertArmor) || 0) > 0) {
+        grant("armor", Math.floor(Number(a.resources.divertArmor)), "扭矩回收");
+        a.resources.divertArmor = 0;
+      }
       // 废物利用给自己回的血 / 加的层也算治疗（一般的治疗只统计给其他友方的）
       const gain = totalHp(a) - hp0;
       const st = gain > 0 ? battleStat(a) : null;
@@ -11316,6 +11416,48 @@ function runSkillInner(id, optRun) {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       applyInstantEffect(t, "overload", lines);
       lines.push(`「非法」改装：${t.name} 过载。`);
+    } else if (id === "kolt_cannon") {
+      // 碎渣重炮：把全部废料装填进武器。电钻 → 机枪：每颗子弹（扭矩atk/3 + 1d10）电击，各自独立掷骰，
+      // 最后不够一颗的废料也打成一发；每 4 颗 1 击破；目标倒下自动换距离 1 以内的下一个随机敌人。
+      // 酸液炮 → 迫击炮（越墙）：废料量的酸 +2 击破，同区其他敌人 1/3 溅射；主目标损失超过上限 25% 的血量再 +2 击破
+      if (!needT()) return paintSkillLog(lines.join("\n"));
+      const acid = (a.resources && a.resources.bit) === "acid";
+      let pool = koltScrapTotal(a);
+      koltScrapClear(a);
+      if (pool <= 0) { lines.push("没有废料可以装填。"); return paintSkillLog(lines.join("\n")); }
+      lines.push(`碎渣重炮：装填 ${pool} 点废料。`);
+      if (acid) {
+        const mx = totalMaxHp(t), hp0 = totalHp(t);
+        hitOne(a, t, { element: "acid", mult: 1, atk: pool, baseBreak: 2, atkRange: "any", flags: { action: true, lob: true } });
+        const lost = hp0 - (t.dead ? 0 : totalHp(t));
+        if (!t.dead && lost > mx * 0.25) {
+          lines.push(`迫击炮重创：${t.name} 损失 ${lost}（超过上限 ${mx} 的 25%），额外 2 击破。`);
+          dealBreak(t, 2, "acid", lines, "碎渣重炮", { by: a });
+        }
+        const splash = Math.floor(pool / 3);
+        if (splash > 0) visibleEnemies(t.zone).filter(u => u !== t && !u.dead).forEach(u => {
+          hitOne(a, u, { element: "acid", mult: 1, atk: splash, baseBreak: 0, atkRange: "any", usePrep: false, flags: { action: true, aoe: true, lob: true } });
+        });
+      } else {
+        const torq = findKit("torque", state.units);
+        const tAtk = torq ? (Number(torq.atk) || 0) : (Number(a.weaponAtk) || 0);
+        const reach = u => u && !u.isPlayer && !u.dead && !u.hidden && !u.fused && zoneDist(a.zone, u.zone, state.zoneMode) <= 1 && !lineBlocked(a.zone, u.zone);
+        let cur = t, n = 0;
+        while (pool > 0 && n < 300) {
+          if (!reach(cur)) {
+            const pool2 = fieldUnits().filter(reach);
+            cur = pool2[Math.floor(Math.random() * pool2.length)];
+            if (!cur) { lines.push(`距离 1 以内没有敌人了，剩下的 ${pool} 点废料没打出去。`); break; }
+            lines.push(`目标倒下，机枪转向 ${cur.name}。`);
+          }
+          const roll = takeDice(1, 10, 0);
+          const per = Math.floor(tAtk / 3) + roll.total;
+          const dmg = Math.min(pool, per);
+          pool -= dmg; n += 1;
+          hitOne(a, cur, { element: "electric", mult: 1, atk: dmg, baseBreak: n % 4 === 0 ? 1 : 0, atkRange: "any", usePrep: n === 1, flags: { action: true } });
+        }
+        lines.push(`碎渣重炮：共打出 ${n} 颗子弹。`);
+      }
     } else if (id === "kolt_summon") {
       const w = spawnWeapon(a, "torque");
       lines.push(w ? "扭矩已进入战场。" : "扭矩已在场。");
@@ -11378,6 +11520,14 @@ function runSkillInner(id, optRun) {
           lines.push(`${tgt.name} 被拆卸抽空，倒下。`);
         }
       }
+    } else if (id === "torque_divert") {
+      // 转移注意：全场被嘲讽的单位改打扭矩；扭矩进入自保（受伤 −25%，架势不低于 1），下回合开始变回武器
+      const taunted = (state.units || []).filter(u => u.tauntTo && !u.dead && u.id !== a.id);
+      taunted.forEach(u => { u.tauntTo = a.id; });
+      lines.push(taunted.length ? `转移注意：${taunted.map(u => u.name).join("、")} 改为攻击扭矩。` : "转移注意：场上没有被嘲讽的单位。");
+      a.resources.divertGuard = true;
+      a.resources.divertArmor0 = (a.layers || []).filter(l => l.type === "armor").reduce((s, l) => s + (Number(l.current) || 0), 0);
+      lines.push("扭矩缩成一团进入自保：受到的伤害 −25%，架势不会低于 1。下回合开始变回武器。");
     } else if (id === "torque_return") {
       lines.push(...returnWeapon(a));
     } else if (id === "helu_aa") {
@@ -11449,6 +11599,10 @@ function runSkillInner(id, optRun) {
       // 触发所有同区域配置物：和 Helumica 环境扫描触发配置物一样（heluScanAct）——
       // 爆炸桶 / 酸液桶直接引爆、电池引爆、碎渣机炮打一名打得到的敌人、炮台向 Ecmo 的敌人开一炮、按钮 / 拉杆触发一次
       ecmoBoomTriggerProps(a, lines);
+    } else if (id === "ecmo_probe") {
+      a.resources.probe = true;
+      a.resources.probeZones = [Number(a.zone)];
+      lines.push("探测模式：移动不消耗附赠动作，每回合开始扫描所在区；变回武器时触发经过的每个区的一个配置物。");
     } else if (id === "ecmo_return") {
       lines.push(...returnWeapon(a));
     } else if (id === "ras_aa") {
@@ -11495,6 +11649,25 @@ function runSkillInner(id, optRun) {
       a.self = "conductor";
       if (typeof spawnPopup === "function") spawnPopup(a, { kind: "status", text: "导体", element: "electric" });
       lines.push("不稳超导：转换 20% 累积能量为光能，自身获得导体效果。");
+    } else if (id === "ras_torrent") {
+      // 狂瀑：能量直接累积到 100%，每累积 20% 对高能目标打一次 0.2atk 能量，自己失去 10% 血量（不算受到伤害，最少留 1）
+      if (!needT()) return paintSkillLog(lines.join("\n"));
+      const steps = Math.max(0, Math.floor((100 - (Number(a.resources.energyPct) || 0)) / 20));
+      const loseHp = (u, amt) => {
+        let left = Math.min(amt, Math.max(0, totalHp(u) - 1));
+        const took = left;
+        (u.layers || []).forEach(l => { const d = Math.min(left, Number(l.current) || 0); l.current -= d; left -= d; });
+        return took;
+      };
+      for (let i = 0; i < steps && !t.dead; i++) {
+        addRasEnergy(20, "狂瀑");
+        hitOne(a, t, { element: "energy", mult: 0.2, baseBreak: 0, atk, atkRange: "any", usePrep: i === 0 });
+        const lost = loseHp(a, Math.ceil(totalMaxHp(a) * 0.1));
+        lines.push(`狂瀑：拉斯缪尔失去 ${lost} 血量。`);
+      }
+      const now = Number(a.resources.energyPct) || 0;
+      if (now < 100) addRasEnergy(100 - now, "狂瀑");
+      if (!steps) lines.push("累积能量已经满了，狂瀑没有额外的攻击。");
     } else if (id === "ras_summon") {
       const w = spawnWeapon(a, "edc");
       lines.push(w ? "EDC30k 已进入战场。" : "EDC30k 已在场。");
@@ -11530,6 +11703,19 @@ function runSkillInner(id, optRun) {
         visibleEnemies(a.zone).forEach(u => hitOne(a, u, { element: "energy", mult: 0, flat: Math.floor(light / 2), baseBreak: 1, atk: 0, flags: { action: true, aoe: true } }));
         ras.resources.light = 0;
         lines.push(`爆闪释放光能 ${light}。`);
+      }
+    } else if (id === "edc_siphon") {
+      // 汲取：拉斯缪尔每回合结束自动把 20% 累积能量转光能，EDC 变回武器；生效中再用（免费）结束汲取
+      const ras = findKit("ras", state.units);
+      if (!ras) lines.push("拉斯缪尔不在场。");
+      else if (ras.resources && ras.resources.siphon) {
+        ras.resources.siphon = false;
+        lines.push("汲取结束。");
+      } else {
+        ras.resources = ras.resources || {};
+        ras.resources.siphon = true;
+        lines.push("汲取：拉斯缪尔每回合结束时自动把 20% 累积能量转为光能。");
+        lines.push(...returnWeapon(a));
       }
     } else if (id === "edc_return") {
       lines.push(...returnWeapon(a));

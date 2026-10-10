@@ -380,6 +380,7 @@ const SKILL_RANGE = {
   xiaoxiao_punch: { min: 0, max: 0 },  // 直冲拳：近距离
   xiaoxiao_combo: { min: 0, max: 0 },  // 连续拳：近距离
   longge_heat: { min: 0, max: 0 },     // 热能轰击：手杖、霰弹枪都是近距离
+  ras_torrent: { min: 0, max: 99 },    // 狂瀑：任意距离的高能敌人
 };
 
 /* 技能能选哪一边的目标。界面原本是从提示文字里猜的（出现「友方」就只让选友方），
@@ -391,6 +392,8 @@ const SKILL_TARGET_SIDE = {
   nora_needle: "any",       // 针尖可以扎敌人，也可以扎队友当治疗手段
   nora_aa: "any",           // 有刺入时打刺入目标，刺入的可能是队友
   kolt_mod: "anySelf",
+  kolt_cannon: "enemy",
+  ras_torrent: "enemy",
   chuan_reclaim: "allySelf", // 回收护盾：任意一名友方（含自己）      // 「非法」改装：任意单位（含自己）施加过载
   role_renew: "ally",       // 续命：任意距离一名友方（以前没登记，被推断成敌方）
   role_harsh: "anySelf",    // 恶劣环境：「一名单位」敌我都行（以前被推断成只能选敌人）
@@ -403,6 +406,8 @@ const SKILL_RANGE_BY_STATE = {
   // 拔刀 / 胁构：只打同区；居合：先移动 1 距离再出刀，所以最远打到距离 1
   hiaki_aa: (a) => ((a && a.resources && a.resources.stance) === "iai" ? { min: 0, max: 1 } : { min: 0, max: 0 }),
   // 诺拉普攻：没有刺入时是「距离 1 的敌人」；有刺入时针尖把两人连在一起，刺入目标在同区也能打（刺入超过距离 1 会自己断）
+  // 碎渣重炮：酸液炮（迫击炮，越墙）距离 1-2；电钻（机枪）距离 0-1
+  kolt_cannon: (a) => ((a && a.resources && a.resources.bit) === "acid" ? { min: 1, max: 2 } : { min: 0, max: 1 }),
   nora_aa: (a) => (typeof piercedTargets === "function" && a && piercedTargets(a).length ? { min: 0, max: 1 } : { min: 1, max: 1 })
 };
 /** 技能射程：先看随状态变的表，再看固定表（SKILL_RANGE）。都没写返回 null（由提示文字推断） */
@@ -921,6 +926,7 @@ function resolveAttack(ctx) {
     if (flags.doubleDeal) { mul *= 2; hAdd("造成伤害翻倍。"); }
     if (flags.doubleTake) { mul *= 2; hAdd("目标受伤翻倍。"); }
     if (flags.dr50) { mul *= 0.5; hAdd("目标减伤 +50%。"); }
+    if (flags.dr25) { mul *= 0.75; hAdd("自保模式：受伤 −25%。"); }
     if (flags.holyShield) { mul *= 0.5; hAdd("圣盾：本次伤害减半。"); }
     if (flags.prideReduce) {
       const pr = typeof flags.prideReduce === "number" ? flags.prideReduce : 0.25;
