@@ -242,7 +242,9 @@
       if (pend) return `<div class="ol-attr"><p>等主持人确认：${esc(pend.attrs.map(a => ATTRS[a]).join("、"))} +1</p>${button("撤回", "attrCancel", `data-request="${esc(pend.id)}"`, disabled())}</div>${lastText}`;
       if (!(Number(u.attrPoints) > 0)) return lastText;
       const picked = u.attrPicks || [];
-      return `<div class="ol-attr"><p>有 ${esc(u.attrPoints)} 点属性点可以分配（选好后由主持人确认）</p><div class="ol-attr-btns">${Object.keys(ATTRS).map(k => button(`${ATTRS[k]} ${(u.attrs || {})[k] ?? ""} +1`, "attrRequest", `data-unit="${esc(u.id)}" data-attr="${k}"`, disabled() || (picked.length >= 1 && picked.includes(k)))).join("")}</div>${picked.length ? '<p class="ol-muted">8 级那一点不能加在曾经加过的同一项上。</p>' : ""}</div>${lastText}`;
+      // 单项属性硬性上限 10（玩家手册）：已经满的那项不能申请（以前能申请，主持人同意时才被拒）
+      const attrCap = typeof ATTR_HARD_MAX === "number" ? ATTR_HARD_MAX : 10;
+      return `<div class="ol-attr"><p>有 ${esc(u.attrPoints)} 点属性点可以分配（选好后由主持人确认）</p><div class="ol-attr-btns">${Object.keys(ATTRS).map(k => button(`${ATTRS[k]} ${(u.attrs || {})[k] ?? ""} +1`, "attrRequest", `data-unit="${esc(u.id)}" data-attr="${k}"`, disabled() || (picked.length >= 1 && picked.includes(k)) || (Number((u.attrs || {})[k]) || 0) >= attrCap)).join("")}</div>${picked.length ? '<p class="ol-muted">8 级那一点不能加在曾经加过的同一项上。</p>' : ""}</div>${lastText}`;
     }
     /** 主持人发起的检定：自己的角色点「掷骰」；结果所有人都看得到 */
     function checksMarkup() {
