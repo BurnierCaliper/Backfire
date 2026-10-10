@@ -79,14 +79,23 @@ test("碎渣重炮（电钻）：隔墙的区域不能选", () => {
   assert.ok(!zones.includes(2));
 });
 
-test("碎渣重炮（酸液迫击炮）：距离 1、越墙；废料量的酸 + 2 击破，同区 1/3 溅射，掉血超 25% 再 +2 击破；主目标被嘲讽", () => {
+test("碎渣重炮（酸液迫击炮）：距离 1-2、越墙；废料量的酸 + 2 击破，同区 1/3 溅射，掉血超 25% 再 +2 击破；主目标被嘲讽", () => {
   const { c, S, foes } = setup(["kolt"]);
   const k = c.findKit("kolt", S.units);
   k.resources.bit = "acid";
   foes[0].zone = 2;   // 2 区两个敌人
   S.gaps["1-2"] = Object.assign(c.emptyGap(), { type: "wall", hp: 10, maxHp: 10, level: 1 });
   const ids = c.skillFlowSteps("kolt_cannon", k, {}).find(s => s.key === "target").units.map(u => u.id);
-  assert.deepEqual(plain(ids).sort(), [foes[0].id, foes[2].id].sort(), "只有距离 1 的敌人");
+  assert.deepEqual(plain(ids).sort(), [foes[0].id, foes[2].id].sort(), "同区的打不了，只有距离 1-2 的敌人");
+  {
+    const mode0 = S.zoneMode;
+    S.zoneMode = 3;
+    const far = foes[1]; far.zone = 3;
+    assert.equal(c.zoneDist(1, 3, 3), 2);
+    assert.ok(c.skillFlowSteps("kolt_cannon", k, {}).find(s => s.key === "target").units.some(u => u.id === far.id), "距离 2 也能选");
+    assert.equal(c.skillTargetError(k, "kolt_cannon", far), null);
+    far.zone = 1; S.zoneMode = mode0;
+  }
   S.lastBrokenLayer = { type: "flesh", lost: 90, dmg: 90 };
   const p = pops(c);
   const def0 = foes[2].def;

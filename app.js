@@ -7924,9 +7924,9 @@ function skillFlowSteps(id, actor, picks) {
   if (id === "kolt_cannon") {
     const acid = ((findKit("kolt", state.units) || actor).resources || {}).bit === "acid";
     if (acid) {
-      // 迫击炮：距离 1 的一名敌人，越墙
-      return [{ key: "target", type: "unit", optional: false, label: "迫击炮目标（距离 1，可越墙）",
-        units: fieldUnits().filter(u => !u.isPlayer && !u.dead && !u.hidden && !u.fused && zoneDist(actor.zone, u.zone, state.zoneMode) === 1) }];
+      // 迫击炮：距离 1-2 的一名敌人，越墙
+      return [{ key: "target", type: "unit", optional: false, label: "迫击炮目标（距离 1-2，可越墙）",
+        units: fieldUnits().filter(u => { const d = zoneDist(actor.zone, u.zone, state.zoneMode); return !u.isPlayer && !u.dead && !u.hidden && !u.fused && d >= 1 && d <= 2; }) }];
     }
     // 机枪：选一个距离 1 以内、不隔墙的区域，子弹随机打那一区的敌人
     const zones = [];
@@ -9812,7 +9812,7 @@ function skillTargetError(a, id, t) {
     if (acid) {
       const tg = fl && fl.picks && fl.picks.target ? unitById(fl.picks.target) : t;
       if (!tg || tg.isPlayer) return "先选迫击炮的目标";
-      if (zoneDist(a.zone, tg.zone, state.zoneMode) !== 1) return "迫击炮只能打距离 1 的敌人";
+      { const d = zoneDist(a.zone, tg.zone, state.zoneMode); if (d < 1 || d > 2) return "迫击炮只能打距离 1-2 的敌人"; }
     } else {
       const z = fl && fl.picks && fl.picks.dest != null ? Number(fl.picks.dest) : (t ? Number(t.zone) : null);
       if (z == null) return "先选机枪扫射的区域";
@@ -11440,7 +11440,7 @@ function runSkillInner(id, optRun) {
     } else if (id === "kolt_cannon") {
       // 碎渣重炮：把全部废料装填进武器。电钻 → 机枪：选距离 1 以内的一个区域，每颗子弹（扭矩atk/3 + 1d10）电击、
       // 各自独立掷骰，打那一区的随机敌人；最后不够一颗的废料也打成一发；每 2 颗 1 击破。每颗都算单体攻击（吃过度自信的嘲讽）。
-      // 酸液炮 → 迫击炮（距离 1，越墙；主目标算单体攻击）：废料量的酸 +2 击破，同区其他敌人 1/3 溅射；主目标损失超过上限 25% 的血量再 +2 击破
+      // 酸液炮 → 迫击炮（距离 1-2，越墙；主目标算单体攻击）：废料量的酸 +2 击破，同区其他敌人 1/3 溅射；主目标损失超过上限 25% 的血量再 +2 击破
       const acid = (a.resources && a.resources.bit) === "acid";
       const flc = state.skillFlow;
       const mt = acid ? ((flc && flc.picks && flc.picks.target ? unitById(flc.picks.target) : null) || t) : null;
