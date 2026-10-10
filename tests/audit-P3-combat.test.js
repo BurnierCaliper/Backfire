@@ -26,6 +26,7 @@ function enemyHitsKolt(setupHelper, forced, baseBreak) {
   const { c, S } = setup(["kolt", "helu"]);
   const kolt = kit(S, "kolt"), helu = kit(S, "helu"), foe = foes(S)[0];
   kolt.zone = helu.zone = foe.zone = 1;
+  kolt.prideMaxHp = Infinity;   // 不让「过度自信」少吃 1 击破干扰这里的击破计算
   c.endPlayerTurn();
   if (setupHelper) setupHelper(c, S, kolt, helu);
   helu.bonus = 1; kolt.bonus = 0;

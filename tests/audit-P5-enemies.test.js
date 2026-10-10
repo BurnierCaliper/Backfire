@@ -12,6 +12,8 @@ function field(enemies, opt) {
   c.BattleSim.setup({ party: opt.party || ["kolt", "helu"], enemies, seed: opt.seed || "P5", zoneMode: opt.zoneMode || 2 });
   c.startCombat();
   const S = c.S.state;
+  // 这些用例测敌人的击破 / 失衡：关掉柯尔特「过度自信」的 −1 击破，免得满血的柯尔特少吃击破
+  S.units.forEach(u => { if (u.kit === "kolt") u.prideMaxHp = Infinity; });
   return {
     c, S,
     P: k => c.findKit(k, S.units),
