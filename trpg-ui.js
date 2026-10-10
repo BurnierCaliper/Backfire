@@ -746,7 +746,8 @@
     const fields = zones.map(z => {
       const f = t.fields[z] || {};
       return `<div class="tr-row">${z} 区 <select data-bt-field="${z}">${options(Object.keys(BATTLE_TEMPLATE_FIELD_KINDS).map(k => [k, BATTLE_TEMPLATE_FIELD_KINDS[k]]), battleTemplateFieldKind(f))}</select>
-        <label><input type="checkbox" data-bt-high="${z}"${f.highland ? " checked" : ""}> 高地</label></div>`;
+        <label><input type="checkbox" data-bt-high="${z}"${f.highland ? " checked" : ""}> 高地</label>
+        ${f.ruinOn ? `<label>耐久 <input type="number" min="1" style="width:60px" data-bt-ruin="${z}" value="${Number(f.ruinHp) || 30}"></label>` : ""}</div>`;
     }).join("");
     const gaps = battleTemplateGapKeys(t.board).map(k => {
       const g = t.gaps[k] || { type: "open", hp: null, open: false };
@@ -857,7 +858,10 @@
       el[ev] = () => { btSet(el.dataset.bte, el.value); if (el.dataset.bteRerender) render(); };
     });
     P.querySelectorAll("[data-bt-field]").forEach(el => {
-      el.onchange = () => { const z = el.dataset.btField; battleTemplateSetField(btEdit, z, el.value, !!(btEdit.fields[z] || {}).highland); };
+      el.onchange = () => { const z = el.dataset.btField; battleTemplateSetField(btEdit, z, el.value, !!(btEdit.fields[z] || {}).highland); render(); };
+    });
+    P.querySelectorAll("[data-bt-ruin]").forEach(el => {
+      el.onchange = () => { const z = el.dataset.btRuin; battleTemplateSetField(btEdit, z, "ruinOn", !!(btEdit.fields[z] || {}).highland, Number(el.value) || 1); };
     });
     P.querySelectorAll("[data-bt-high]").forEach(el => {
       el.onchange = () => { const z = el.dataset.btHigh; battleTemplateSetField(btEdit, z, battleTemplateFieldKind(btEdit.fields[z]), el.checked); };

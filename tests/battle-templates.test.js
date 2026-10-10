@@ -127,6 +127,23 @@ test("战斗模板：编辑表单改场地 / 高地，换成和战场配置一�
   assert.deepEqual(plain(t.fields[1]), { highland: true });
   c.battleTemplateSetField(t, 1, "", false);
   assert.equal(t.fields[1], undefined);
+  // 损毁地面（带耐久）、隔离区也能选
+  c.battleTemplateSetField(t, 2, "ruinOn", false, 45);
+  assert.equal(c.battleTemplateFieldKind(t.fields[2]), "ruinOn");
+  assert.equal(t.fields[2].ruinHp, 45); assert.equal(t.fields[2].ruinMax, 45);
+  c.battleTemplateSetField(t, 2, "ruinOn", true);
+  assert.equal(t.fields[2].ruinHp, 45, "只改高地时耐久保留");
+  c.battleTemplateSetField(t, 1, "isolate", false);
+  assert.equal(c.battleTemplateFieldKind(t.fields[1]), "isolate");
+});
+
+test("战场配置：损毁地面的耐久可以直接改", () => {
+  const c = field();
+  c.Commands.dispatch({ type: "battle.panel", action: "setField", zone: 1, kind: "ruinOn" });
+  c.Commands.dispatch({ type: "battle.panel", action: "ruinHp", zone: 1, hp: 55 });
+  assert.equal(c.S.state.fields[1].ruinOn, true);
+  assert.equal(c.S.state.fields[1].ruinHp, 55);
+  assert.equal(c.S.state.fields[1].ruinMax, 55);
 });
 
 test("跑团任务：战斗站选了模板，打这一站按模板摆（存的是拷贝）", () => {

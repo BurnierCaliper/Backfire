@@ -3705,6 +3705,7 @@
         dispatch({ type: "battle.panel", action: "setField", zone: z, kind: s.value });
         setView(snapAll(), false);
         refreshAll();
+        renderFieldSheet();   // 选了损毁地面要马上出现耐久输入框
       };
       row.appendChild(s);
       // 高地和其他区域效果共存：单独一个勾选框
@@ -3719,6 +3720,21 @@
       };
       hl.appendChild(hc); hl.appendChild(document.createTextNode("高地"));
       row.appendChild(hl);
+      if (f.ruinOn) {
+        // 损毁地面的耐久（坍塌前还能撑多少）
+        const rl = el("label", "");
+        rl.style.cssText = "display:inline-flex;align-items:center;gap:4px;margin-left:8px;font-size:13px";
+        const ri = document.createElement("input");
+        ri.type = "number"; ri.min = "1"; ri.style.width = "64px"; ri.value = Number(f.ruinHp) || 30;
+        ri.dataset.ruinZone = String(z);
+        ri.onchange = () => {
+          dispatch({ type: "battle.panel", action: "ruinHp", zone: z, hp: Number(ri.value) || 1 });
+          setView(snapAll(), false);
+          refreshAll();
+        };
+        rl.appendChild(document.createTextNode("耐久")); rl.appendChild(ri);
+        row.appendChild(rl);
+      }
       zbox.appendChild(row);
     }
     const gbox = $("g-gap-list");

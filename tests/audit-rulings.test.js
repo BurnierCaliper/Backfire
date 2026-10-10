@@ -97,3 +97,21 @@ test("聚焦不看来源：状态、场地等非攻击伤害只要属性对也�
   c.applyTypedDot(foe, 5, "acid", notes, "酸液地面");
   assert.ok(!foe.layers.some(l => l.type === "armor" && l.current > 0), "场地伤害走完序列，装甲被抹去");
 });
+
+test("哔哩哩协助格挡成功：自身不掉架势，把这一击原本伤害的 50% 以闪电反伤给进攻者", () => {
+  const { c, S, kit, foe } = field(["chuan", "kolt"]);
+  const ch = kit("chuan"), k = kit("kolt");
+  const bili = c.spawnWeapon(ch, "bili");
+  bili.zone = k.zone = foe.zone = 1; bili.bonus = 1; bili.def = bili.defMax = 3;
+  k.prideMaxHp = Infinity;
+  foe.layers = [{ type: "flesh", current: 500, max: 500, inner: true }];
+  c.endPlayerTurn();
+  bili.bonus = 1;
+  const hp0 = c.totalHp(k), foeHp = c.totalHp(foe);
+  c.dealTo(foe, k, { atk: 20, mult: 1, element: "physical", baseBreak: 2, flags: { action: true } });
+  c.finishBlock(bili.id, { roll: 1, ok: true });
+  assert.equal(c.totalHp(k), hp0, "柯尔特免伤");
+  assert.equal(bili.def, 3, "哔哩哩不掉架势");
+  assert.ok(foeHp - c.totalHp(foe) > 0, "进攻者挨了反伤");
+  assert.match(S.logPages.flatMap(p => p.lines).map(l => l.text).join("\n"), /格挡反伤/);
+});

@@ -5885,8 +5885,7 @@ function performAssistBlock(helper, target, attacker, forced, atkRange) {
       notes.push("川川格挡：电能 +1。");
     }
     if (helper.kit === "bili" && attacker) {
-      notes.push("哔哩哩格挡成功：反伤本次伤害的 50%，且自身不掉架势。");
-      helper.biliReflect = true;
+      notes.push("哔哩哩格挡成功：反伤本次伤害的 50%（闪电），且自身不掉架势。");
     }
     if (helper.kit === "niu" || helper.kit === "naruto") {
       notes.push(...returnWeapon(helper));
@@ -6973,7 +6972,14 @@ function dealTo(attacker, target, opt) {
   if (typeof bpAfterAttack === "function") bpAfterAttack(attacker, target, res, flags, extra);
   if (res && !res.pending) noteActionHit(target, res);
   if (flags.block === "assistOk") {
-    extra.push(...applyBlockBreakToHelper(flags.blockHelperId, res.helperBreak));
+    const bh = unitById(flags.blockHelperId);
+    if (bh && bh.kit === "bili") {
+      // 哔哩哩格挡成功：自身不掉架势，把这一击原本的伤害 50% 以闪电反伤给进攻者
+      if (attacker && !attacker.dead && !attacker.isProp) {
+        const back = Math.floor((Number(res.blockedRaw) || 0) * 0.5);
+        if (back > 0) applyTypedDot(attacker, back, "electric", extra, `${bh.name} 格挡反伤 → ${attacker.name}`);
+      }
+    } else extra.push(...applyBlockBreakToHelper(flags.blockHelperId, res.helperBreak));
   }
   if (extraDiceNote) extra.unshift("掷骰 " + extraDiceNote);
   gainHighFromHits(target, res, extra);
@@ -7056,7 +7062,7 @@ function dealTo(attacker, target, opt) {
     if ((res.breakDealt || 0) > 0) popBreak(target, res.breakDealt, ele);
     if (flags.block === "assistOk" && (res.helperBreak || 0) > 0) {
       const helper = unitById(flags.blockHelperId);
-      if (helper) popBreak(helper, res.helperBreak, ele);
+      if (helper && helper.kit !== "bili") popBreak(helper, res.helperBreak, ele);   // 哔哩哩格挡不掉架势
     }
   }
   return { res, extra };
