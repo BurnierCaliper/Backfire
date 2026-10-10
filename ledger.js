@@ -653,8 +653,12 @@ function ledgerRepair(kit, notes) {
   restoreDurability(kit, used);
   notes.push(`用维修工具包修复 ${weaponName(kit)}：耐久 ${before} → ${weaponDur(kit)}，用掉 ${used} 点维修量（还剩 ${repairPoints()} 点）。`);
   const owner = weaponOwner(kit);
-  if (owner && owner.weaponHeld === false && !owner.dead) owner.weaponHeld = true;
+  if (owner && owner.weaponHeld === false && !owner.dead && !weaponOutOnField(kit)) owner.weaponHeld = true;
   return notes;
+}
+/** 这把武器此刻是不是以武器人的样子在场上（倒下没收回的也算）：在场时主人手里没有它 */
+function weaponOutOnField(kit) {
+  return (state.units || []).some(u => u.kit === kit && !u.hidden && !u.fused && !u._removed && (typeof isWeaponUnit !== "function" || isWeaponUnit(u)));
 }
 function ledgerHealItem(itemId, kit, notes) {
   notes = notes || [];

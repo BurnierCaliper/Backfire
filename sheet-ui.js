@@ -46,7 +46,8 @@
   function blockText(b, unarmed) {
     if (!b) return "—";
     const extra = b.extra ? ` + 引擎 ${b.extra}%` : "";
-    return `<b>${b.total}%</b> <small>= 空手 ${b.bare}%（敏捷 ${b.dex}）${unarmed ? "，空手中" : ` + 武器 ${b.weapon}%`}${extra}</small>`;
+    const capped = b.bare + (unarmed ? 0 : b.weapon) + (b.extra || 0) > b.total ? "，封顶 95%" : "";
+    return `<b>${b.total}%</b> <small>= 空手 ${b.bare}%（敏捷 ${b.dex}）${unarmed ? "，空手中" : ` + 武器 ${b.weapon}%`}${extra}${capped}</small>`;
   }
   /** 补正系数 + 改装槽 */
   function modsHtml(m) {
@@ -94,7 +95,7 @@
       <div class="hs-attrs">${attrs}</div>
       <h5>被动</h5>${passives || '<p class="hs-note">无</p>'}
       ${h.assistAttack ? `<div class="hs-pass"><b>协助攻击</b><p>${esc(h.assistAttack)}</p></div>` : ""}
-      <div class="hs-pass"><b>协助格挡 · ${h.block ? h.block.total + "%" : ""}</b><p>${esc(h.assistBlock || "")}${h.assistBlock ? " " : ""}成功率 = 空手格挡（30% +（敏捷 − 5）× 5%，15%–50%）+ 手里武器的格挡加成。</p></div>
+      <div class="hs-pass"><b>协助格挡 · ${h.block ? h.block.total + "%" : ""}</b><p>${esc(h.assistBlock || "")}${h.assistBlock ? " " : ""}成功率 = 空手格挡（30% +（敏捷 − 5）× 5%，15%–50%）+ 手里武器的格挡加成（含改装件，最多 45%），最高 95%。</p></div>
       <h5>技能</h5>${skillsHtml(h.skills)}
       ${weapons}
     </div>`;

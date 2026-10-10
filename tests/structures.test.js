@@ -90,6 +90,8 @@ test("范围攻击波及按钮所在区：触发一次（多个目标也只触�
   const { c, st, btn, door } = deviceField();
   const ruby = c.findKit("ruby", st.units);
   ruby.zone = 1;
+  // 手榴弹也炸到瑞比自己：血量放够，免得把自己炸成濒死（濒死时不能用道具）
+  ruby.layers.forEach(l => { l.max = 999; l.current = 999; });
   // 同区放两个敌人，用范围手榴弹炸 1 区
   st.units.filter(u => !u.isPlayer).forEach(u => { u.zone = 1; });
   c.bagAdd("bomb_e", 2);

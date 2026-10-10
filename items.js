@@ -137,7 +137,9 @@ function useRepairKit(actor, target, kit, notes) {
   const before = row.dur;
   const used = spendRepairPoints(row.need);
   restoreDurability(row.kit, used);
-  if (row.owner && row.owner.weaponHeld === false && !row.owner.dead && before <= 0 && typeof heldWeaponKit === "function") row.owner.weaponHeld = true;
+  // 修好的武器回到主人手里——除非它正以武器人在场（以前修在场的武器人会把主人也设成持械，两边同时拿着）
+  if (row.owner && row.owner.weaponHeld === false && !row.owner.dead && before <= 0 && typeof heldWeaponKit === "function" &&
+      !(typeof weaponOutOnField === "function" && weaponOutOnField(row.kit))) row.owner.weaponHeld = true;
   notes.push(`${actor.name} 用维修工具包修 ${row.name}：耐久 ${before} → ${weaponDur(row.kit)}，用掉 ${used} 点维修量（还剩 ${repairPoints()} 点）。`);
   return notes;
 }
@@ -150,6 +152,8 @@ function selfShpCost(u, n) {
 }
 function useItemOn(actor, itemId, target, zone) {
   const notes = [];
+  // 濒死没起身的人不能用道具（以前规则层不拦，只靠界面）
+  if (actor && actor.dying && !actor.upOnShp) { notes.push(`${actor.name} 濒死中。先点「起身」。`); return notes; }
   const spec = ITEM_CATALOG[itemId];
   if (!spec) { notes.push("没有这种道具。"); return notes; }
   if (spec.target === "weapon") return useRepairKit(actor, target, zone, notes);   // 维修工具包按点数用，不是一次一个

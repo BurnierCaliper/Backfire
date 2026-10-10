@@ -552,13 +552,10 @@ function explodeHigh(unit, total) {
     if (acc && acc.actorIsPlayer) addScore("overkill", Math.floor(unit.overkill * SCORE_RULES.overkill), unitById(acc.actorId));
   }
   (unit.layers || []).forEach(l => { l.current = 0; });
-  if (unit.isPlayer && !isWeaponUnit(unit)) {
-    unit.dying = true;
-    unit.upOnShp = false;
-    clearStunOnDown(unit);
-  } else {
-    unit.dead = true;
-  }
+  // 倒地统一结算（applyKnockdown）：力竭 3 即死，起身中的人坚毅生命扣光死亡（以前被炸回濒死、还能再起身）
+  const downNotes = [];
+  applyKnockdown(unit, downNotes, { lethal: true, cause: "高能自爆" });
+  downNotes.forEach(s => appendLog(s));
   unit.highEnergy = 0;
   if (unit.statuses) unit.statuses.high = false;
   // 纳米科技：场上任何高能自爆都给瑞比 40 纳米能源
@@ -686,16 +683,8 @@ function applyAbyssFall(unit, prevZone, notes) {
   }
   unit.zone = back;
   notes.push(`${unit.name} 坠入深渊，失去最大生命 10%（${loss}）并回到 ${back} 区。`);
-  if (isUnitDown(unit) && !unit.upOnShp) {
-    if (unit.isPlayer && !isWeaponUnit(unit) && !unit.dead) {
-      unit.dying = true;
-      clearStunOnDown(unit);
-      notes.push(`${unit.name} 坠落导致最内层归零，陷入濒死。`);
-    } else {
-      unit.dead = true;
-      notes.push(`${unit.name} 坠落致死（最内层归零）。`);
-    }
-  }
+  // 倒地统一结算：力竭 3 即死；起身中的人这 10% 改扣坚毅生命（以前不扣、也不会死）
+  applyKnockdown(unit, notes, { shpLoss: loss, cause: "坠落" });
   return true;
 }
 
@@ -816,6 +805,8 @@ function unitCard(u, pos) {
   return wrap;
 }
 
+/** 格挡者承担这一击的击破（最少留 1）。只用于警卫队队长·牛的自动格挡（它自己的条文）；
+ *  一般的协助格挡按手册由被保护者照常扣架势（最少留 1），格挡者不扣（engine.js · resolveAttack） */
 function applyBlockBreakToHelper(helperId, amount) {
   const notes = [];
   const helper = unitById(helperId);
@@ -3558,13 +3549,14 @@ function triggerLeaveOpportunity(mover, fromZone, notes) {
     if (u.kit === "captain_wolf" && mover.isPlayer) {
       const n = addedDiceByLevel(u.level);
       notes.push(`${u.name} 对离开区域的 ${mover.name} 发动借机攻击。`);
-      dealTo(u, mover, { atk: 0, mult: 0, diceN: n, diceS: 6, element: "ice", baseBreak: 1, flags: { action: true, opportunity: true, blockResolved: true } });
+      // 借机是近战：目标已经走到隔壁才结算，带上 atkRange 免得被当成高地远程（±25%）
+      dealTo(u, mover, { atk: 0, mult: 0, diceN: n, diceS: 6, element: "ice", baseBreak: 1, atkRange: "melee", flags: { action: true, opportunity: true, blockResolved: true } });
       if (window.GAME && window.GAME.tape) window.GAME.tape.push({ type: "opp", attackerId: u.id, targetId: mover.id, name: u.name });
     }
     if (typeof bpLeaveOpportunity === "function") bpLeaveOpportunity(u, mover, notes);
     if (u.kit === "thug_knife" && mover.isPlayer) {
       notes.push(`${u.name} 对离开区域的 ${mover.name} 发动借机攻击。`);
-      dealTo(u, mover, { atk: effectiveAtk(u, state.units), mult: 1, diceN: 1, diceS: 8, element: "physical", baseBreak: 1, flags: { action: true, opportunity: true, blockResolved: true } });
+      dealTo(u, mover, { atk: effectiveAtk(u, state.units), mult: 1, diceN: 1, diceS: 8, element: "physical", baseBreak: 1, atkRange: "melee", flags: { action: true, opportunity: true, blockResolved: true } });
       if (window.GAME && window.GAME.tape) window.GAME.tape.push({ type: "opp", attackerId: u.id, targetId: mover.id, name: u.name });
     }
   });
@@ -3591,6 +3583,11 @@ function doMoveInner(unit, dest, moveOpt) {
     return;
   }
   moveOpt = moveOpt || {};
+  // 濒死没起身的人不能自己移动（以前规则层不拦，只靠界面）
+  if (unit.dying && !moveOpt.free && !moveOpt.forced) {
+    paintSkillLog(`${unit.name} 濒死中。先点「起身」。`);
+    return;
+  }
   const from = Number(unit.zone);
   const maxZ = Number(state.zoneMode);
   const notes = [];
@@ -3955,21 +3952,8 @@ function applyCombat(target, result, attacker) {
     notes.push(...exitMecha(target, "被击落，机甲解除"));
   }
   if (!target.isPlayer && isInnerDepleted(target) && !target._xpGiven) settleEnemyKill(target, notes);
-  if (target.isPlayer && !isWeaponUnit(target) && isInnerDepleted(target) && !target.upOnShp && !target.dead) {
-    if (exhaustTierOf(target) >= 3) {
-      target.dead = true;
-      target.dying = false;
-      notes.push(`${target.name} 力竭 3：被击倒后立刻死亡。`);
-    } else {
-      target.dying = true;
-      clearStunOnDown(target);
-      notes.push(`${target.name} 最内层生命归零，陷入濒死。不能靠治疗起身，可消耗起身改用坚毅生命继续战斗。`);
-    }
-  }
-  if (target.isPlayer && isWeaponUnit(target) && isInnerDepleted(target)) {
-    target.dead = true;
-    notes.push(`${target.name} 最内层归零，武器人倒下。`);
-  }
+  // 我方倒地：统一走 applyKnockdown（起身中的坚毅生命已在 applyResultToUnit 里扣过，这里不再扣）
+  if (target.isPlayer) applyKnockdown(target, notes);
   // 双相冲动：诺拉或维塔斯击杀单位后翻一次面
   if (attacker && (attacker.kit === "nora" || attacker.kit === "vitas") && (typeof passiveOn !== "function" || passiveOn(attacker)) &&
       (target.dead || (target.isPlayer && target.dying)) && !target._noraKillCounted) {
@@ -4419,27 +4403,39 @@ function spendBonus(u, n, reason) {
   return true;
 }
 
-function highlandBlockMod(helper, attacker) {
+/** 高地（手册）：高地对低地的远程攻击 −10% 协助格挡，反之 +10%。看这一击实际是不是隔区的远程攻击
+ *  （以前看单位卡上的 range，远近皆可的敌人隔区打不算）。atkRange：这一击的射程，近战（借机等）不算 */
+function highlandBlockMod(helper, attacker, atkRange) {
   if (!helper || !attacker) return 0;
+  if (atkRange === "melee") return 0;
+  if (zoneDist(Number(attacker.zone), Number(helper.zone), Number(state.zoneMode)) < 1) return 0;
   const hf = state.fields[helper.zone] || {};
   const af = state.fields[attacker.zone] || {};
   const atkHigh = !!af.highland;
   const helpHigh = !!hf.highland;
-  const ranged = attacker.range === "ranged" || (attacker.suggest && attacker.suggest.range === "ranged");
-  if (atkHigh && !helpHigh && ranged) return -10;
+  if (atkHigh && !helpHigh) return -10;
   if (helpHigh && !atkHigh) return 10;
   return 0;
 }
 
-function finalBlockChance(helper, attacker, protectedUnit) {
-  let c = blockChance(helper);
+/** 最终协助格挡率，最多 95%（手册：空手 50% + 武器 45%，留 5% 失手）；绯秋居合「必定成功」是 100%。
+ *  atkRange：这一击的射程（给高地判断用，可不传） */
+function finalBlockChance(helper, attacker, protectedUnit, atkRange) {
+  if (helper.kit === "hiaki" && helper.resources && helper.resources.stance === "iai") return 100;
+  let c = typeof blockChanceRaw === "function" ? blockChanceRaw(helper) : blockChance(helper);   // 先不封顶，加完修正再封顶
   if (c == null) c = 50;
-  if (helper.kit === "hiaki" && helper.resources && helper.resources.stance === "iai") c = 100;
-  c += highlandBlockMod(helper, attacker);
+  c += highlandBlockMod(helper, attacker, atkRange);
   if (helper.self === "anchor") c += 10;   // 千钧：格挡成功率 +10%
   if (helper.kit === "xiaoxiao" && protectedUnit && protectedUnit.kit === "longge") c += 15;   // 小朋友守护龙哥：60% → 75%
   if (helper.rallyBlock) c += helper.rallyBlock;
-  if (typeof bpBlockBonus === "function") c += bpBlockBonus(helper, protectedUnit);   // 单局图纸
+  if (typeof bpBlockBonus === "function") {
+    // 单局图纸。格挡者拿着的图纸「协助格挡 +N%」算进武器格挡加成：和武器本身、改装件一起最多 45%
+    let bp = bpBlockBonus(helper, protectedUnit);
+    const own = typeof bpMod === "function" ? Number(bpMod(helper).block) || 0 : 0;
+    const cap = typeof WEAPON_BLOCK_CAP !== "undefined" ? WEAPON_BLOCK_CAP : 45;
+    if (own > 0 && typeof heldWeaponBlockBonus === "function") bp -= Math.max(0, Math.min(own, heldWeaponBlockBonus(helper) + own - cap));
+    c += bp;
+  }
   if (typeof passivePlus === "function") {
     // 更换刀头+：电钻模式下柯尔特协助格挡 +10%
     if (helper.kit === "kolt" && (helper.resources || {}).bit !== "acid" && passivePlus(helper, 1)) c += 10;
@@ -4452,7 +4448,7 @@ function finalBlockChance(helper, attacker, protectedUnit) {
     const yu = findKit("yuito", state.units);
     if (yu && protectedUnit && yu.resources && yu.resources.bondId === protectedUnit.id && passivePlus(yu, 2)) c += 10;
   }
-  return Math.max(5, Math.min(100, c));
+  return Math.max(5, Math.min(typeof BLOCK_CHANCE_CAP !== "undefined" ? BLOCK_CHANCE_CAP : 95, c));
 }
 
 /* ---------- 力竭（手册第五章） ----------
@@ -4565,19 +4561,28 @@ const RETREAT_RULES = {
 function retreatHeroes() {
   return (state.units || []).filter(u => u.isPlayer && !isWeaponUnit(u) && !u.dead && !u._removed && !u.hidden);
 }
-/** 现在撤退属于哪一档 */
+/** 撤退时算「倒地」的人：濒死没起身。靠坚毅生命站着的不算倒地（可以断后），但算「有损伤」 */
+function retreatDown(u) {
+  return !!(u && u.dying && !u.upOnShp);
+}
+/** 现在撤退属于哪一档（作者裁定）：
+ *   半数倒地 = 倒地的人数 ≥ 一半；
+ *   有损伤   = 全员血量都 ≤ 50%，或有人 ≤ 25% / 倒地 / 靠坚毅生命起身；
+ *   其余算全员完好（以前掉 1 点血就算有损伤）。 */
 function retreatStatus() {
   const heroes = retreatHeroes();
-  const down = heroes.filter(u => u.dying || u.upOnShp).length;
+  const down = heroes.filter(retreatDown).length;
   if (heroes.length && down * 2 >= heroes.length) return "routed";
-  const hurt = heroes.some(u => u.dying || u.upOnShp || totalCurHp(u) < baseMaxHp(u));
+  const ratio = (u) => { const max = baseMaxHp(u); return max > 0 ? totalCurHp(u) / max : 1; };
+  const hurt = heroes.some(u => retreatDown(u) || u.upOnShp || ratio(u) <= 0.25) ||
+    (heroes.length > 0 && heroes.every(u => ratio(u) <= 0.5));
   return hurt ? "hurt" : "intact";
 }
-/** 可以断后的人：还站着的角色 */
+/** 可以断后的人：还站着的角色（靠坚毅生命起身的也算站着） */
 function retreatRearguards() {
-  return retreatHeroes().filter(u => !u.dying && !u.upOnShp);
+  return retreatHeroes().filter(u => !retreatDown(u));
 }
-/** 撤退的代价，给界面预先显示 */
+/** 撤退的代价，给界面预先显示（游戏版不写坚毅生命的数字：手册里坚毅生命对玩家不可见） */
 function retreatPreview() {
   const key = retreatStatus();
   const r = RETREAT_RULES[key];
@@ -4585,7 +4590,9 @@ function retreatPreview() {
   if (r.rearguard) lines.push("一人断后，挨一次无法格挡的攻击");
   if (r.kuizhiLoss) lines.push(`失去 ${Math.round(r.kuizhiLoss * 100)}% 奎支`);
   if (r.combatItems) lines.push("失去全部战斗道具");
-  lines.push(`每人坚毅 −${r.shp}${r.shpDown !== r.shp ? `，倒地者 −${r.shpDown}` : ""}${r.lethal ? "" : "（不致死）"}`);
+  lines.push(shpHidden()
+    ? `每人的坚毅生命都会被消磨${r.shpDown !== r.shp ? "，倒地的人更多" : ""}${r.lethal ? "" : "（不致死）"}`
+    : `每人坚毅 −${r.shp}${r.shpDown !== r.shp ? `，倒地者 −${r.shpDown}` : ""}${r.lethal ? "" : "（不致死）"}`);
   return { key, rule: r, lines };
 }
 
@@ -4602,12 +4609,20 @@ function performRetreat(rearguardId) {
     if (guard && striker) {
       const sg = striker.suggest || {};
       const dice = sg.dice || [0, 0];
+      const onShp = !!guard.upOnShp;
+      const hp0 = totalCurHp(guard), shp0 = Number(guard.shp) || 0;
       const out = dealTo(striker, guard, {
         atk: effectiveAtk(striker, state.units), mult: 1, flat: sg.flat || 0,
         diceN: dice[0], diceS: dice[1], element: sg.element || "physical", baseBreak: sg.baseBreak || 1,
         flags: { action: true, opp: true, blockResolved: true, block: "none" }
       });
-      notes.push(`${guard.name} 断后，挨了 ${striker.name} 一击：${Math.floor((out.res && out.res.total) || 0)} 伤害。`);
+      // 按断后的人实际掉了多少写（以前被防护罩 / 铁壁挡下时也写「挨了 N 伤害」）
+      const lost = Math.max(0, hp0 - totalCurHp(guard)) + Math.max(0, shp0 - (Number(guard.shp) || 0));
+      const wall = ((out && out.extra) || []).find(s => /替同区承受/.test(String(s)));
+      if (lost > 0) notes.push(onShp && shpHidden() ? `${guard.name} 断后，挨了 ${striker.name} 一击，打在坚毅生命上。`
+        : `${guard.name} 断后，挨了 ${striker.name} 一击：${Math.floor(lost)} 伤害。`);
+      else if (wall) notes.push(`${guard.name} 断后：${striker.name} 的一击被${String(wall).split("替同区承受")[0]}挡下，没有受伤。`);
+      else notes.push(`${guard.name} 断后：${striker.name} 的一击没有伤到人。`);
     }
   }
   if (r.kuizhiLoss > 0) {
@@ -4623,7 +4638,7 @@ function performRetreat(rearguardId) {
     gone.forEach(x => { x.qty = 0; });
   }
   retreatHeroes().forEach(u => {
-    const down = u.dying || u.upOnShp;
+    const down = retreatDown(u);   // 靠坚毅生命站着的不算倒地者
     const loss = down ? r.shpDown : r.shp;
     const before = Number(u.shp) || 0;
     u.shp = r.lethal ? Math.max(0, before - loss) : Math.max(Math.min(before, 1), before - loss);
@@ -5261,21 +5276,28 @@ function eligibleAssisters(breaker, broken) {
       !(typeof touDuelVictim === "function" && touDuelVictim(u) && broken.kit !== "tou")
     );
   }
-  const list = fieldUnits().filter(u =>
+  // 只列真正能出手的人：濒死没起身、失衡、抓在敌人身上的不行（以前飞碟本体失衡时这些人也列进来，
+  // 选上了先回满架势再被拒）；空手又没有能召回的武器（武器人已倒、耐久归零）的不行；
+  // 敌方单位不进我方名单（以前「飞碟触灵·本体」自己也在里面，选它 = 给首领回满架势）
+  return fieldUnits().filter(u =>
     u.isPlayer &&
     !isWeaponUnit(u) &&
     !u.dead && !u.hidden && !u.fused &&
-    (unitCanFight(u) || (u.upOnShp && unitIsCombatReady(u) && !u.stunned) || broken.kit === "ufo_body") &&
-    (assistSkillId(u) || broken.kit === "ufo_body") &&
+    unitCanFight(u) &&
+    assistSkillId(u) &&
+    assistWeaponReady(u) &&
     !(typeof isCrushing === "function" && isCrushing(u)) &&
     !u.isPartner &&                                          // 支援的伙伴打完就退场，不接协助攻击
     (!breaker || u.id !== breaker.id || isSoloHero(u)) &&   // 单人模式可以接自己打出的失衡
     (typeof bpCanAssistAttack !== "function" || bpCanAssistAttack(u))
   );
-  if (broken.kit === "ufo_body") {
-    if (list.every(u => u.id !== broken.id)) list.push(broken);
-  }
-  return list;
+}
+
+/** 协助攻击要拿着武器（手册：未持武器时先召回武器再发动）：手里有武器，或者场上有活着、耐久没归零的武器人可以召回 */
+function assistWeaponReady(u) {
+  if (!isUnarmed(u)) return true;
+  return fieldUnits().some(w => isWeaponUnit(w) && (w.weaponOf === u.kit || (u.linkedKits || []).indexOf(w.kit) >= 0) &&
+    !(typeof weaponBroken === "function" && weaponBroken(w.kit)));
 }
 
 function forceRecallWeapons(owner) {
@@ -5292,6 +5314,10 @@ function forceRecallWeapons(owner) {
     }
     w.hidden = true;
     notes.push(`${w.name} 因协助攻击被立刻收回为武器。`);
+    // 耐久归零的武器收回来也不能用：照常空手（绯秋换另一把刀）
+    if (typeof weaponBroken === "function" && weaponBroken(w.kit) && typeof heldWeaponKit === "function" && heldWeaponKit(owner) === w.kit) {
+      disarmBrokenWeapon(owner, notes);
+    }
   });
   return notes;
 }
@@ -5302,6 +5328,55 @@ function clearStunOnDown(u) {
   u.stunned = false;
   if (u.statuses) u.statuses.unstable = false;
   u._imbalanceLock = false;
+}
+
+/** 倒地统一结算：单位的最内层生命被打到 0 之后调用（攻击、高能自爆、坠入深渊、桥塌坠落……都走这里）。
+ *   · 玩家角色：力竭 3 → 立刻死亡；起身中（靠坚毅生命战斗）→ 这次的伤害改扣坚毅生命，扣光死亡，
+ *     没扣光照常站着——不会重新濒死、再起身一次；其余 → 陷入濒死（倒地时解除晕眩）。
+ *   · 武器人（含护送对象）、敌人等其他单位：死亡。
+ * 调用前先把伤害扣在血量层上；最内层还有血、已经死亡、已经濒死的不再处理。
+ * opt.shpLoss：起身中的人这次要扣的坚毅生命（攻击已由 applyResultToUnit 扣过，不传）；
+ * opt.lethal：秒杀（高能自爆），起身中的人坚毅生命直接扣光；
+ * opt.cause：写进记录的原因（「坠落」「高能自爆」…），不传按攻击的说法写。
+ * 返回 "dead" / "dying" / "shp"（起身中，扣了坚毅生命还站着）/ null（没有倒地）。
+ * 以前高能自爆、坠入深渊各写一套：绕过力竭 3 即死，起身中的人被炸 / 摔回濒死、坚毅不扣还能再起身。 */
+function applyKnockdown(unit, notes, opt) {
+  opt = opt || {};
+  notes = notes || [];
+  if (!unit || unit.dead || !isInnerDepleted(unit)) return null;
+  if (unit.isPlayer && !isWeaponUnit(unit)) {
+    if (unit.upOnShp) {
+      const before = Math.max(0, Number(unit.shp) || 0);
+      const loss = opt.lethal ? before : Math.max(0, Math.floor(Number(opt.shpLoss) || 0));
+      if (loss <= 0) return "shp";
+      unit.shp = Math.max(0, before - loss);
+      if (unit.shp > 0) {
+        notes.push(`${unit.name} 起身中，${opt.cause || "这次伤害"}改扣坚毅生命${shpHidden() ? "" : `（${before} → ${unit.shp}）`}。`);
+        return "shp";
+      }
+      unit.dead = true;
+      unit.upOnShp = false;
+      unit.dying = false;
+      notes.push(`${unit.name} 起身中，${opt.cause ? opt.cause + "打光了坚毅生命" : "坚毅生命耗尽"}，死亡。`);
+      return "dead";
+    }
+    if (unit.dying) return "dying";
+    if (exhaustTierOf(unit) >= 3) {
+      unit.dead = true;
+      unit.dying = false;
+      notes.push(`${unit.name} 力竭 3：被击倒后立刻死亡。`);
+      return "dead";
+    }
+    unit.dying = true;
+    clearStunOnDown(unit);
+    notes.push(opt.cause ? `${unit.name} ${opt.cause}导致最内层归零，陷入濒死。`
+      : `${unit.name} 最内层生命归零，陷入濒死。不能靠治疗起身，可消耗起身改用坚毅生命继续战斗。`);
+    return "dying";
+  }
+  unit.dead = true;
+  if (unit.isPlayer) notes.push(`${unit.name} 最内层归零，武器人倒下。`);
+  else if (opt.cause && !opt.lethal) notes.push(`${unit.name} ${opt.cause}致死（最内层归零）。`);
+  return "dead";
 }
 
 function queueAssistAttack(breaker, broken) {
@@ -5394,6 +5469,13 @@ function finishAssist(helperId, extra) {
   }
   const helper = unitById(helperId);
   if (!helper || !target) { presentAssistModal(); return; }
+  // 先确认这个人真能出手，再召回武器、回满架势（以前先回满架势再判，空手 / 濒死的人选上了白回架势、啥也没打）
+  if (!eligibleAssisters(unitById(job.breakerId), target).some(u => u.id === helper.id)) {
+    appendLog(`${helper.name} 现在不能发动协助攻击，请另选。`);
+    state.assistQueue.unshift(job);
+    presentAssistModal();
+    return;
+  }
   const notes = helper.isPlayer ? forceRecallWeapons(helper) : [];
   if (helper.kit === "longge" && extra.mode) {
     helper.resources = helper.resources || {};
@@ -5442,7 +5524,9 @@ function autoEnemyBlockers(target) {
   });
 }
 
-function tryOxAutoBlock(attacker, target) {
+/** 敌方的自动协助格挡。警卫队队长·牛按主持人手册它自己的条文：成功仍扣牛自己的架势（最少留 1），并反击 1 击破
+ *  （selfBreak）；安保巡逻车照一般的协助格挡：目标免伤、照常扣架势（最少留 1） */
+function tryOxAutoBlock(attacker, target, atkRange) {
   const oxes = autoEnemyBlockers(target);
   if (!oxes.length) return null;
   for (let i = 0; i < oxes.length; i++) {
@@ -5451,23 +5535,21 @@ function tryOxAutoBlock(attacker, target) {
       ox.resources = ox.resources || {};
       ox.resources.blockUsedThisTurn = true;
     }
-    const chance = finalBlockChance(ox, attacker);
+    const chance = finalBlockChance(ox, attacker, target, atkRange);
     const roll = 1 + Math.floor(Math.random() * 100);
     const ok = roll <= chance;
     appendLog(`${ox.name} 自动协助格挡 ${target.name}：d100=${roll} 成功率 ${chance}% → ${ok ? "成功" : "失败"}`);
     if (!ok) continue;
-    appendLog(`成功：目标免伤，击破由 ${ox.name} 承担（架势最少留 1）。${ox.kit === "captain_ox" ? "成功后反击 1 击破。" : ""}`);
-    if (attacker && ox.kit === "captain_ox") {
-      const before = Number(attacker.def) || 0;
-      attacker.def = Math.max(0, before - 1);
-      appendLog(`队长牛反击：${attacker.name} 架势 ${before} → ${attacker.def}`);
-      if (attacker.def <= 0) {
-        attacker.stunned = true;
-        appendLog(imbalanceLine(attacker));
-        queueAssistAttack(ox, attacker);
-      }
+    const selfBreak = ox.kit === "captain_ox";
+    appendLog(selfBreak ? `成功：目标免伤，击破由 ${ox.name} 承担（架势最少留 1）。成功后反击 1 击破。`
+      : "成功：目标免伤，但仍扣架势（最少留 1）。");
+    if (attacker && selfBreak) {
+      // 反击走 dealBreak：坚挺、塌陷计数、失衡后的协助攻击都照常（以前直接改架势）
+      const notes = [];
+      dealBreak(attacker, 1, "physical", notes, "队长牛反击", { by: ox });
+      notes.forEach(s => appendLog(s));
     }
-    return { ok: true, helperId: ox.id };
+    return { ok: true, helperId: ox.id, selfBreak };
   }
   return { ok: false };
 }
@@ -5477,8 +5559,10 @@ function eligibleBlockers(target, job) {
   if (!target || !target.isPlayer) return [];
   const tried = (job && job.tried) || [];
   const crushOut = (u) => !(typeof isCrushing === "function" && isCrushing(u));
+  // 倒下的不能格挡：死亡的（倒下的武器人、坚毅耗尽的角色）；濒死但起不来的（力竭、坚毅耗尽）也不给「起身并格挡」
+  const canStand = (u) => !u.dead && !(u.dying && !u.upOnShp && standUpBlocked(u));
   return state.units.filter(u =>
-    u.isPlayer && !u.hidden && !u.isPartner && (u.id !== target.id || isSoloHero(u)) &&   // 单人模式可以给自己协助格挡
+    u.isPlayer && !u.hidden && !u.isPartner && canStand(u) && (u.id !== target.id || isSoloHero(u)) &&   // 单人模式可以给自己协助格挡
     Number(u.zone) === Number(target.zone) &&
     !u.stunned && crushOut(u) && ((u.bonus || 0) >= 1 || target.coverBy === u.id) &&
     blockChance(u) != null && tried.indexOf(u.id) < 0 &&
@@ -5486,14 +5570,25 @@ function eligibleBlockers(target, job) {
   );
 }
 
-function performAssistBlock(helper, target, attacker, forced) {
+/** atkRange：这一击的射程（高地修正用，可不传） */
+function performAssistBlock(helper, target, attacker, forced, atkRange) {
   const notes = [];
   forced = forced || {};
-  // 濒死者不能直接格挡，但可以「起身并协助格挡」：先起身，再照常结算
+  // 死亡的单位不能格挡（以前倒下的武器人、坚毅耗尽的角色剩着附赠行动照样能挡，还扣耐久、触发被动）
+  if (!helper || helper.dead || helper.hidden) {
+    notes.push(`${helper ? helper.name : "格挡者"} 已经倒下，不能协助格挡。`);
+    return { ok: false, notes, invalid: true };
+  }
+  // 濒死者不能直接格挡，但可以「起身并协助格挡」：先起身，再照常结算；起不来的（力竭、坚毅耗尽）不能格挡
   if (typeof isDownProtected === "function" && isDownProtected(helper)) {
+    const why = standUpBlocked(helper);
+    if (why) {
+      notes.push(`${helper.name} ${why}，起不来，不能协助格挡。`);
+      return { ok: false, notes, invalid: true };
+    }
     standUp(helper);
+    if (isDownProtected(helper)) return { ok: false, notes, invalid: true };
     notes.push(`${helper.name} 起身以进行协助格挡。`);
-    if (isDownProtected(helper)) return { ok: false, notes };
   }
   const freeCover = target && target.coverBy === helper.id;
   if (!freeCover && !spendBonus(helper, 1, "协助格挡")) return { ok: false, notes };
@@ -5503,17 +5598,17 @@ function performAssistBlock(helper, target, attacker, forced) {
     notes.push(`思念：对 ${target.name} 施加牵挂（同时只能有一名）。`);
   }
   if (isUnarmed(helper)) {
-    const chance = finalBlockChance(helper, attacker, target);
+    const chance = finalBlockChance(helper, attacker, target, atkRange);
     const roll = forced.roll != null ? Number(forced.roll) : (1 + Math.floor(Math.random() * 100));
     const ok = forced.ok != null ? !!forced.ok : roll <= chance;
     notes.push(`${helper.name} 空手格挡 ${target.name}：d100=${roll} 成功率 ${chance}% → ${ok ? "成功" : "失败"}`);
     if (ok) {
-      notes.push("空手格挡成功：目标仍受一半伤害。格挡者下回合失去附赠行动。");
+      notes.push("空手格挡成功：目标仍受一半伤害，架势照扣（最少留 1）。格挡者下回合失去附赠行动。");
       helper.loseBonusNext = true;
     } else notes.push("空手格挡失败：目标照常受伤。");
     return { ok, notes, bare: true };
   }
-  const chance = finalBlockChance(helper, attacker, target);
+  const chance = finalBlockChance(helper, attacker, target, atkRange);
   // 手册第六章：发动格挡 −1 耐久（空手格挡不扣，已在上面返回）
   if (typeof ledgerOnBlock === "function") ledgerOnBlock(helper, notes);
   const rolls = forced.roll != null ? [Number(forced.roll)] : [1 + Math.floor(Math.random() * 100)];
@@ -5532,7 +5627,7 @@ function performAssistBlock(helper, target, attacker, forced) {
     notes.push("居合下协助格挡必定成功。");
   }
   if (ok) {
-    notes.push("成功：目标免伤，击破改由格挡者承担。");
+    notes.push("成功：目标免伤，但仍扣架势（最少留 1），格挡者不扣。");
     if (typeof bpAfterBlock === "function") bpAfterBlock(helper, target, notes);   // 单局图纸
     // 雷鸣：成功的协助格挡可以额外造成 等级 × 1d4 闪电伤害的反伤
     if (attacker && !attacker.dead && currentWeatherFor(helper) === "thunder") {
@@ -5552,7 +5647,7 @@ function performAssistBlock(helper, target, attacker, forced) {
       notes.push(typeof beanToLiquid === "function" && beanToLiquid() ? "咖啡豆 → 咖啡液。" : "成功但没有咖啡豆可转化。");
     }
     if (helper.kit === "kolt" && attacker) {
-      dealBreak(attacker, 1, "electric", notes, "协助格挡");
+      dealBreak(attacker, 1, "electric", notes, "协助格挡", { by: helper });
       queueKoltSwap(helper);
       notes.push("可选择是否更换刀头。");
     }
@@ -5570,7 +5665,7 @@ function performAssistBlock(helper, target, attacker, forced) {
       const c = longgeTakeBullet(helper, notes);
       if (!c) notes.push("小朋友没有子弹，不能反击。");
       else {
-        hitOne2(helper, attacker, { element: LONGGE_AMMO[c].element, mult: 1, baseBreak: 2, atk: effectiveAtk(helper, state.units), flags: { action: true, opportunity: true } }, notes);
+        hitOne2(helper, attacker, { element: LONGGE_AMMO[c].element, mult: 1, baseBreak: 2, atk: effectiveAtk(helper, state.units), atkRange: "melee", flags: { action: true, opportunity: true } }, notes);
         notes.push(`小朋友反击：一拳打向 ${attacker.name}（1×atk ${LONGGE_AMMO[c].name} + 2 击破）。`);
       }
     }
@@ -5583,15 +5678,8 @@ function performAssistBlock(helper, target, attacker, forced) {
         setHiakiStance(helper, "waki");
         notes.push("进入胁构。");
       } else if (st === "waki") {
-        if (attacker) {
-          attacker.def = Math.max(0, (attacker.def || 0) - 1);
-          notes.push(`胁构反伤 1 击破 → ${attacker.name} 架势 ${attacker.def}`);
-          if (attacker.def <= 0) {
-            attacker.stunned = true;
-            notes.push(imbalanceLine(attacker));
-            queueAssistAttack(helper, attacker);
-          }
-        }
+        // 走 dealBreak：坚挺、塌陷计数照常，打空照样失衡、触发协助攻击（以前直接改架势）
+        if (attacker) dealBreak(attacker, 1, "physical", notes, "胁构反伤", { by: helper });
         setHiakiStance(helper, "draw");
         notes.push("进入拔刀。");
       } else {
@@ -5608,20 +5696,20 @@ function performAssistBlock(helper, target, attacker, forced) {
       notes.push(`${attacker.name} 被年糕咬住，1 回合无法移动。`);
     }
     if (helper.kit === "xia" && attacker) {
-      attacker.def = Math.max(0, (attacker.def || 0) - 1);
-      notes.push(`夕夏格挡反打 1 击破 → ${attacker.name} 架势 ${attacker.def}`);
+      // 走 dealBreak：打空就失衡、触发协助攻击（以前直接改架势，敌人架势 0 却不失衡，下回合照常行动）
+      dealBreak(attacker, 1, "physical", notes, "夕夏格挡反打", { by: helper });
       if (helper.resources && helper.resources.engine) {
         const burn = Math.floor(effectiveAtk(helper, state.units) / 2);
-        hitOne2(helper, attacker, { atk: 0, mult: 0, flat: burn, element: "fire", baseBreak: 0, flags: { action: true, opportunity: true } }, notes);
+        hitOne2(helper, attacker, { atk: 0, mult: 0, flat: burn, element: "fire", baseBreak: 0, atkRange: "melee", flags: { action: true, opportunity: true } }, notes);
         notes.push(`引擎格挡：追加 ${burn} 火焰。`);
       }
     }
     if (helper.kit === "berniel" && attacker && ownerEngineOn("xia")) {
-      hitOne2(helper, attacker, { element: "physical", mult: 1, baseBreak: 0, atk: effectiveAtk(helper, state.units), flags: { action: true, opportunity: true } }, notes);
+      hitOne2(helper, attacker, { element: "physical", mult: 1, baseBreak: 0, atk: effectiveAtk(helper, state.units), atkRange: "melee", flags: { action: true, opportunity: true } }, notes);
       notes.push("引擎下柏妮尔格挡成功：对进攻者打出 1×atk 物理。");
     }
     if (helper.kit === "chuan" && attacker) {
-      dealBreak(attacker, 2, "electric", notes, "川川格挡");
+      dealBreak(attacker, 2, "electric", notes, "川川格挡", { by: helper });
       addCharge(1);
       notes.push("川川格挡：电能 +1。");
     }
@@ -5674,12 +5762,12 @@ function openBlockModal(job) {
   const again = job.tried && job.tried.length;
   text.textContent = again
     ? `${attacker ? attacker.name : "敌人"} 的攻击还没落下：前面的协助格挡失败了，其他队友可以继续尝试。`
-    : `${attacker ? attacker.name : "敌人"} 正在攻击 ${target ? target.name : "玩家"}。同区域有附赠行动的队友可以协助格挡。`;
+    : `${attacker ? attacker.name : "敌人"} 正在攻击 ${target ? target.name : "玩家"}。同区域有附赠行动的队友可以协助格挡：成功免伤，但仍扣架势（最少留 1）；空手格挡成功受一半伤害。`;
   box.innerHTML = "";
   helpers.forEach(h => {
     const b = document.createElement("button");
     b.className = "btn primary";
-    b.textContent = `${h.name} ${isUnarmed(h) ? "空手格挡" : "格挡"}（${finalBlockChance(h, attacker, target)}%）`;
+    b.textContent = `${h.name} ${isUnarmed(h) ? "空手格挡" : "格挡"}（${finalBlockChance(h, attacker, target, job.opt && job.opt.atkRange)}%）`;
     b.onclick = () => calcCommand("blockAnswer", { helper: h.id });
     box.appendChild(b);
   });
@@ -5726,10 +5814,10 @@ function finishBlockInner(helperId, forced) {
   let block = "none", blockHelperId = null;
   if (helperId) {
     const helper = unitById(helperId);
-    const out = performAssistBlock(helper, target, attacker, forced);
+    const out = performAssistBlock(helper, target, attacker, forced, job.opt && job.opt.atkRange);
     appendLog(out.notes.join("\n"));
     if (out.ok && helper && helper.isPlayer) addScore("block", SCORE_RULES.block, helper);   // 评分：协助格挡成功
-    const bst = battleStat(helper);   // 战场数据：发动协助格挡（含失败），成功次数
+    const bst = out.invalid ? null : battleStat(helper);   // 战场数据：发动协助格挡（含失败），成功次数；倒下 / 起不来的不算发动
     if (bst) { bst.blocks = (bst.blocks || 0) + 1; if (out.ok) bst.blockOk = (bst.blockOk || 0) + 1; }
     block = out.ok ? (out.bare ? "bareOk" : "assistOk") : "fail";
     if (out.ok && !out.bare) blockHelperId = helperId;
@@ -6461,12 +6549,22 @@ function dealTo(attacker, target, opt) {
   // 协助攻击无法被格挡：技能本身带 assist 标记的，以及「正在打协助攻击的人」打出的每一下（finishAssist 设的 state._assistBy；
   // 敌人大多拿普通攻击当协助，以前没有标记，会进我方协助格挡队列）
   const assisting = !!opt.flags.assist || !!(attacker && state._assistBy && state._assistBy === attacker.id);
+  // 危墙 / 关着的机关门挡住：先判，再进协助格挡（以前先弹格挡，格挡者花掉附赠、扣了耐久，这一击才被墙挡住）
+  if (attacker && target && target.zone != null && attacker.zone != null && !opt.flags.diffract && !opt.flags.locked) {
+    const block = lineBlocked(attacker.zone, target.zone);
+    if (block) {
+      appendLog(block);
+      return { res: { ok: false, total: 0, breakDealt: 0, log: [block], perHit: [] }, extra: [block] };
+    }
+  }
   if (attacker && attacker.isPlayer && target && !target.isPlayer && opt.flags.action && !assisting && !opt.flags.aoe && opt.flags.block !== "assistOk" && !opt.flags.blockResolved) {
-    const auto = tryOxAutoBlock(attacker, target);
+    const auto = tryOxAutoBlock(attacker, target, opt.atkRange);
     if (auto && auto.ok) {
       opt.flags.block = "assistOk";
       opt.flags.blockHelperId = auto.helperId;
       opt.flags.blockResolved = true;
+      // 警卫队队长·牛按自己的条文：成功仍扣牛自己的架势（最少留 1），目标不扣
+      if (auto.selfBreak) opt.flags.blockBreakToHelper = true;
     } else if (auto) {
       opt.flags.blockResolved = true;
     }
@@ -6497,7 +6595,7 @@ function dealTo(attacker, target, opt) {
   if (attacker && !attacker.isPlayer && target && target.isPlayer && opt.flags.action && !assisting && !opt.flags.aoe && opt.flags.block !== "assistOk" && !opt.flags.blockResolved) {
     const helpers = eligibleBlockers(target);
     if (helpers.length) {
-      appendLog(`→ ${target.name}：等待协助格挡（同区可以格挡的：${helpers.map(h => h.name + " " + finalBlockChance(h, attacker, target) + "%").join("、")}）`);
+      appendLog(`→ ${target.name}：等待协助格挡（同区可以格挡的：${helpers.map(h => h.name + " " + finalBlockChance(h, attacker, target, opt.atkRange) + "%").join("、")}）`);
       state.blockQueue = state.blockQueue || [];
       state.blockQueue.push({
         seq: (state.jobSeq = (Number(state.jobSeq) || 0) + 1),   // 这一击的编号：格挡骰和伤害骰按它定种子（Helumica 能预测）
@@ -6509,7 +6607,7 @@ function dealTo(attacker, target, opt) {
         opt: JSON.parse(JSON.stringify({
         atk: opt.atk, mult: opt.mult, flat: opt.flat, hits: opt.hits, baseHits: opt.baseHits, breakOnce: opt.breakOnce, element: opt.element,
         baseBreak: opt.baseBreak, diceN: opt.diceN, diceS: opt.diceS, diceB: opt.diceB, diceValue: opt.diceValue,
-        usePrep: opt.usePrep, flags: Object.assign({}, opt.flags, { blockResolved: false })
+        usePrep: opt.usePrep, atkRange: opt.atkRange, flags: Object.assign({}, opt.flags, { blockResolved: false })
       }))
       });
       presentBlockModal();
@@ -6517,13 +6615,6 @@ function dealTo(attacker, target, opt) {
     }
   }
   markXiaAttack(attacker);
-  if (attacker && target && target.zone != null && attacker.zone != null && !opt.flags.diffract && !opt.flags.locked) {
-    const block = lineBlocked(attacker.zone, target.zone);
-    if (block) {
-      appendLog(block);
-      return { res: { ok: false, total: 0, breakDealt: 0, log: [block], perHit: [] }, extra: [block] };
-    }
-  }
   const flags = makeDealFlags(opt.flags);
   if (target && target.kit === "chixia" && target.resources && target.resources.cover) {
     flags.dr50 = true;
@@ -6700,7 +6791,7 @@ function dealTo(attacker, target, opt) {
   applyAtkFxAfter(attacker, target, res, flags, extra, opt);
   if (typeof bpAfterAttack === "function") bpAfterAttack(attacker, target, res, flags, extra);
   if (res && !res.pending) noteActionHit(target, res);
-  if (flags.block === "assistOk") {
+  if (flags.block === "assistOk" && flags.blockBreakToHelper) {
     extra.push(...applyBlockBreakToHelper(flags.blockHelperId, res.helperBreak));
   }
   if (extraDiceNote) extra.unshift("掷骰 " + extraDiceNote);
@@ -6778,7 +6869,8 @@ function dealTo(attacker, target, opt) {
     if (flags.action !== false && !flags.environment && typeof attackConnected === "function" && attackConnected(res, flags)) {
       attackFxWords(flags).forEach(w => spawnPopup(target, { kind: "fxword", text: w.name, element: w.element }));
     }
-    if ((res.breakDealt || 0) > 0 && flags.block !== "assistOk") popBreak(target, res.breakDealt, ele);
+    // 协助格挡成功：击破照样扣在目标身上（最少留 1）；只有警卫队队长·牛的自动格挡由牛自己承担（helperBreak）
+    if ((res.breakDealt || 0) > 0) popBreak(target, res.breakDealt, ele);
     if (flags.block === "assistOk" && (res.helperBreak || 0) > 0) {
       const helper = unitById(flags.blockHelperId);
       if (helper) popBreak(helper, res.helperBreak, ele);
@@ -6913,6 +7005,8 @@ function spawnWeapon(owner, kit) {
   const card = livePartyCards().find(c => c.kit === kit);
   if (!card) return null;
   if (state.units.some(u => u.kit === kit && !u.hidden && !u.fused)) return null;
+  // 耐久为 0 的武器唤不出来（weaponSummonWhy 写了原因；以前在场时耐久被打光，收回后还能再唤出）
+  if (typeof weaponBroken === "function" && weaponBroken(kit)) return null;
   // 同场战斗内血量继承：收回时只是隐藏，再唤出沿用上次的血量层，并移除旧的隐藏单位
   const prev = state.units.find(x => x.kit === kit && x.hidden && !x.fused);
   if (prev && (prev.layers || []).reduce((s, l) => s + Math.max(0, Number(l.current) || 0), 0) <= 0) return null;
@@ -6983,7 +7077,20 @@ function returnWeapon(weapon) {
   weapon.hidden = true;
   if (weapon.kit === "xiaoxiao") longgeUnlock(owner, notes, "小朋友变回武器");
   notes.push(`${weapon.name} 已收回为武器。`);
+  // 在场时耐久被扣到 0（格挡）的武器收回来也不能用：主人空手（绯秋换另一把刀），本场也唤不出来（spawnWeapon）
+  if (typeof weaponBroken === "function" && weaponBroken(weapon.kit) && typeof heldWeaponKit === "function" && heldWeaponKit(owner) === weapon.kit) {
+    disarmBrokenWeapon(owner, notes);
+  }
   return notes;
+}
+
+/** 武器人主动「收回为武器 / 变回武器」的前提：要和持有者同区（玩家手册第二章「武器生物化」）。
+ *  技能自带的强制收回（攻击后变回武器、焰袭、格挡成功后变回、协助攻击前召回……）不受这条限制。可以返回 null */
+function weaponReturnWhy(weapon) {
+  const owner = weapon ? ownerOfWeapon(weapon, state.units) : null;
+  if (!owner) return null;
+  if (Number(owner.zone) !== Number(weapon.zone)) return `要和 ${owner.name} 同区才能收回为武器`;
+  return null;
 }
 
 function heldHiakiBlade(h) {
@@ -7673,13 +7780,15 @@ function skillFlowSteps(id, actor, picks) {
   }
   if (id === "bili_magnet") {
     const tgt = unitById(picks.target) || propByRef(picks.target);
+    // 任意距离 = 距离 0 或 1：只能吸距离 1 的目标、只能推到距离 1（以前三区制能一次拉 / 推两区）
+    const near = (z) => zoneDist(actor.zone, z, maxZ) <= 1;
     const steps = [{
       key: "target",
       type: "unit",
       optional: false,
-      label: "磁力移动目标（同区推远 / 其他区拉到身边）",
-      units: fieldUnits().filter(u => u.id !== actor.id && !u.dead && !u.hidden)
-        .concat((state.props || []).filter(p => p.movable !== false).map(p => ({ id: "prop:" + p.id, name: p.name, zone: p.zone })))
+      label: "磁力移动目标（同区推远 / 距离 1 拉到身边）",
+      units: fieldUnits().filter(u => u.id !== actor.id && !u.dead && !u.hidden && near(u.zone))
+        .concat((state.props || []).filter(p => p.movable !== false && near(p.zone)).map(p => ({ id: "prop:" + p.id, name: p.name, zone: p.zone })))
     }];
     if (tgt && Number(tgt.zone) === Number(actor.zone)) {
       steps.push({
@@ -7687,7 +7796,7 @@ function skillFlowSteps(id, actor, picks) {
         type: "zone",
         optional: false,
         label: "推向哪一区",
-        zones: zones.filter(z => Number(z) !== Number(tgt.zone))
+        zones: zones.filter(z => Number(z) !== Number(tgt.zone) && zoneDist(actor.zone, z, maxZ) === 1)
       });
     }
     return steps;
@@ -8736,7 +8845,7 @@ function tidyCalcLines(log, multi) {
     if (fin) { if (fin[2] != null) out.push(`${multi ? "  " : ""}取整为 ${fin[2]}`); return; }
     const main = s.match(/^主目标：(.+?) ([\d.]+) → ([\d.]+)（吸收 [\d.]+）$/);
     if (main) { out.push(`${multi ? "  " : ""}${main[1]} ${main[2]} → ${main[3]}`); return; }
-    if (/^协助格挡成功：目标免伤，击破 \d+ 改由格挡者承担。$/.test(s)) return;   // 下一行说得更完整
+    if (/^协助格挡成功：目标免伤，击破 \d+ (改由格挡者承担|仍扣在目标的架势上)。$/.test(s)) return;   // 下一行说得更完整
     out.push(`${multi ? "  " : ""}${s.replace(/（溢出不重算）/g, "")}`);
   });
   return out;
@@ -8761,7 +8870,9 @@ function formatHitLines(actor, target, out, captured) {
   const hits = (res.perHit || []).filter(Boolean);
   const dmg = Math.floor(res.total || 0), br = Number(res.breakDealt) || 0;
   let head = `  → ${tName}：`;
-  if (res.blocked) head += `被协助格挡挡下${br ? `（格挡者承受 ${br} 击破）` : ""}`;
+  // 协助格挡成功：免伤，击破照样扣在目标身上（最少留 1）；警卫队队长·牛的自动格挡由牛自己承担
+  const hb = Number(res.helperBreak) || 0;
+  if (res.blocked) head += `被协助格挡挡下${br ? `（仍扣 ${br} 架势，最少留 1）` : hb ? `（格挡者承受 ${hb} 击破）` : ""}`;
   else {
     head += `${dmg} 伤害`;
     if (br) head += `、${br} 击破`;
@@ -9103,20 +9214,22 @@ function envZones(actor, kind, range) {
   return out;
 }
 
-/** 武器人现在能不能唤出：ok / out（已在场）/ dead（本场已倒下，不能再唤出） */
+/** 武器人现在能不能唤出：ok / out（已在场）/ dead（本场已倒下，不能再唤出）/ wounded（上一场倒下没长休）/
+ *  broken（耐久为 0：spawnWeapon 不让唤出，绯秋分刀的可选列表也不列） */
 function weaponSummonState(owner, kit) {
+  const broken = typeof weaponBroken === "function" && weaponBroken(kit);
   const list = (state.units || []).filter(x => x.kit === kit && (!x.weaponOf || !owner || x.weaponOf === owner.kit));
   if (!list.length) {
     // 本场还没唤出过：看上一场留下的伤势
     const carried = typeof weaponCarryLayers === "function" ? weaponCarryLayers(kit) : null;
     if (carried && carried.reduce((sum, l) => sum + Math.max(0, Number(l.current) || 0), 0) <= 0) return "wounded";
-    return "ok";
+    return broken ? "broken" : "ok";
   }
   const alive = list.find(x => !x.dead);
   if (!alive) return "dead";
   if (!alive.hidden && !alive.fused) return "out";
   const hp = (alive.layers || []).reduce((sum, l) => sum + Math.max(0, Number(l.current) || 0), 0);
-  return hp <= 0 ? "dead" : "ok";
+  return hp <= 0 ? "dead" : broken ? "broken" : "ok";
 }
 function weaponSummonWhy(owner, kit) {
   if (typeof weaponBroken === "function" && weaponBroken(kit)) return `${weaponCardName(kit)} 耐久为 0，无法唤出`;
@@ -9216,6 +9329,14 @@ function skillTargetError(a, id, t) {
     const why = roleTargetError(a, id, t);
     if (why) return why;
   }
+  // 磁力移动是任意距离（0 或 1）：目标在分步里选，不经过下面的通用射程判定，在这里拦距离 2
+  if (id === "bili_magnet") {
+    const fl = state.skillFlow;
+    const tgt = fl && fl.picks && fl.picks.target ? (unitById(fl.picks.target) || propByRef(fl.picks.target)) : t;
+    if (tgt && zoneDist(a.zone, tgt.zone, state.zoneMode) > 1) return "磁力移动只能吸距离 1 以内的目标";
+    const dest = fl && fl.picks && fl.picks.dest != null && fl.picks.dest !== "" ? Number(fl.picks.dest) : null;
+    if (tgt && dest != null && Number(tgt.zone) === Number(a.zone) && zoneDist(a.zone, dest, state.zoneMode) !== 1) return "磁力移动只能把目标推到距离 1";
+  }
   if (id === "solo_support") {
     const fl = state.skillFlow;
     const kit = fl && fl.picks ? fl.picks.partner : null;
@@ -9299,6 +9420,14 @@ function runSkillInner(id, optRun) {
       : (state.combatPhase === "enemy" ? "现在是敌人回合，不能操作玩家技能。" : "现在是玩家回合，不能操作敌人技能。"));
     return;
   }
+  // 通用前置检查（配置物、角色 / 职责技能各分支之前）：
+  // 濒死没起身的人只能起身（或「起身并协助格挡」），不能扳拉杆、操控机炮、改写炮台……（以前这几条排在濒死检查前面，只靠界面拦）
+  if (a.dying && id !== "assist_block") { paintSkillLog(`${a.name} 濒死中。先点「起身」。`); return; }
+  // 武器人主动收回为武器要和持有者同区；技能自带的强制收回不走这里
+  if (/_return$/.test(String(id)) && isWeaponUnit(a)) {
+    const why = weaponReturnWhy(a);
+    if (why) { paintSkillLog(`${a.name} 现在不能收回：${why}。`); return; }
+  }
   if (String(id).indexOf("hack_turret:") === 0) {
     const pid = id.slice("hack_turret:".length);
     const p = (state.props || []).find(x => x.id === pid);
@@ -9327,7 +9456,6 @@ function runSkillInner(id, optRun) {
     paintSkillLog(`${a.name} ${p.kind === "lever" ? "扳动" : "按下"}了 ${p.name}。`);
     return;
   }
-  if (a.dying && id !== "assist_block") { paintSkillLog(`${a.name} 濒死中。先点「起身」。`); return; }
   if (a.isPlayer && isUnarmed(a) && id !== "assist_block" && id !== "bare_aa") {
     const allowed = (skillList(a) || []).some(s => s.id === id);
     if (!allowed) {
@@ -11092,10 +11220,8 @@ function runSkillInner(id, optRun) {
             /* reflect 1 break to attacker of the original hit: use skill target as the enemy if selected */
           }
           const enemy = t;
-          if (enemy && !enemy.isPlayer) {
-            enemy.def = Math.max(0, enemy.def - 1);
-            lines.push(`胁构反伤 1 击破 → ${enemy.name} 架势 ${enemy.def}`);
-          }
+          // 走 dealBreak：打空照样失衡、触发协助攻击（以前直接改架势）
+          if (enemy && !enemy.isPlayer) dealBreak(enemy, 1, "physical", lines, "胁构反伤", { by: a });
           setHiakiStance(a, "draw");
           lines.push("进入拔刀。");
         } else if (ok) {

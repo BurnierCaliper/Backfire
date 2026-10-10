@@ -328,7 +328,8 @@ const SKILL_RANGE = {
   ecmo_focus: { min: 0, max: 99 },
   ecmo_boom: { min: 0, max: 0 },
   ras_aa: { min: 1, max: 1 },
-  ras_dump: { min: 0, max: 99 },
+  ras_dump: { min: 0, max: 1 },      // 泄能：任意距离 = 距离 0 或 1
+  role_pull: { min: 0, max: 1 },     // 拉拽「从任意距离拉到此区域」：提示文字没写距离，按任意距离 = 0 或 1
   ras_flee: { min: 0, max: 99 },
   edc_shock: { min: 0, max: 1 },
   edc_flash: { min: 0, max: 0 },
@@ -370,7 +371,8 @@ function skillRangeFor(actor, id) {
 
 function parseSkillRange(text) {
   const s = String(text || "");
-  if (/任意距离/.test(s)) return { min: 0, max: 99 };
+  // 玩家手册第二章：任意距离 = 距离 0 或 1，打不到距离 2（以前当成不限距离，三区制能打 / 拉到距离 2）
+  if (/任意距离/.test(s)) return { min: 0, max: 1 };
   const scan = (chunk) => {
     if (!chunk) return null;
     if (/距离\s*1\s*以?内|1距离以?内/.test(chunk)) return { min: 0, max: 1 };
@@ -707,7 +709,8 @@ function resolveAttack(ctx) {
       if (weather === "phase" && Number(ctx.phaseStep) === 0) br = Math.max(0, br - 1);
       if (weather === "phase" && Number(ctx.phaseStep) === 2) br += 1;
       totalBreak += br;
-      hAdd("协助格挡成功：目标免伤，击破 " + br + " 改由格挡者承担。");
+      // 手册：成功的协助格挡目标免伤，但仍扣架势（最少留 1）；警卫队队长·牛按它自己的条文由牛承担
+      hAdd("协助格挡成功：目标免伤，击破 " + br + (flags.blockBreakToHelper ? " 改由格挡者承担。" : " 仍扣在目标的架势上。"));
       perHit.push({ dealt: 0, breakDealt: br, layers: clone(layersWork) });
       continue;
     }
@@ -979,12 +982,25 @@ function resolveAttack(ctx) {
   const defBefore = Number(t.def) || 0;
   let defAfter = defBefore;
   let helperBreak = 0;
-  if (flags.block === "assistOk") {
+  if (flags.block === "assistOk" && flags.blockBreakToHelper) {
+    // 警卫队队长·牛的自动格挡（主持人手册条文）：成功仍扣牛自己的架势（最少留 1），目标不扣
     defAfter = defBefore;
     helperBreak = Math.max(0, totalBreak);
     totalBreak = 0;
     totalDealt = 0;
     add(`协助格挡成功：目标免伤且不扣架势。格挡者承担结算后击破 ${helperBreak}（含微光/相位等修正）。`);
+  } else if (flags.block === "assistOk" || flags.block === "bareOk") {
+    // 手册第二章：协助格挡成功，目标免受伤害，但仍扣除架势条，最少保留 1；格挡者不扣。
+    // 空手格挡成功受一半伤害，架势同样最少留 1。以前协助格挡的击破全部转给格挡者，空手格挡可以被打进失衡
+    if (flags.block === "assistOk") totalDealt = 0;
+    const cap = Math.max(0, defBefore - 1);
+    if (totalBreak > cap) {
+      add(`${flags.block === "assistOk" ? "协助" : "空手"}格挡成功：击破 ${totalBreak} 只扣到架势剩 1（实扣 ${cap}）。`);
+      totalBreak = cap;
+    } else if (flags.block === "assistOk") {
+      add(`协助格挡成功：目标免伤，仍扣架势 ${totalBreak}（最少留 1）。`);
+    }
+    defAfter = Math.max(0, defBefore - totalBreak);
   } else {
     defAfter = Math.max(0, defBefore - totalBreak);
   }

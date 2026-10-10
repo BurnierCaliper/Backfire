@@ -708,12 +708,16 @@ function bareBlockFromDex(dex) {
 function bareBlockChance(unit) {
   return bareBlockFromDex(unitDex(unit));
 }
-/** 一把武器的格挡加成：武器本身 + 装在上面的格挡件（growth.js · partsBlock）。owner：持有者（角色单位） */
+/** 格挡率上限（玩家手册第二章）：武器格挡加成（含改装件）最多 45%，协助格挡率理论上限 95%（空手 50% + 武器 45%），
+ *  留 5% 失手。绯秋居合「必定成功」是唯一例外（app.js · finalBlockChance） */
+const WEAPON_BLOCK_CAP = 45;
+const BLOCK_CHANCE_CAP = 95;
+/** 一把武器的格挡加成：武器本身 + 装在上面的格挡件（growth.js · partsBlock），最多 45%。owner：持有者（角色单位） */
 function weaponBlockBonusOf(kit, owner) {
   const base = WEAPON_BLOCK_BONUS[kit];
   if (base == null) return null;
   const parts = owner && typeof weaponPartsOf === "function" ? weaponPartsOf(owner, kit) : [];
-  return base + (typeof partsBlock === "function" ? partsBlock(parts) : 0);
+  return Math.min(WEAPON_BLOCK_CAP, base + (typeof partsBlock === "function" ? partsBlock(parts) : 0));
 }
 /** 武器人的持有者（角色单位） */
 function weaponOwnerUnit(u) {
@@ -749,12 +753,18 @@ function blockStatusBonus(unit) {
   return unit && unit.kit === "xia" && unit.resources && unit.resources.engine ? 10 : 0;
 }
 
-function blockChance(unit) {
+/** 不封顶的协助格挡率（空手 + 武器 + 状态）：最终格挡率在 app.js · finalBlockChance 里加完各项修正再封顶 */
+function blockChanceRaw(unit) {
   if (!unit || !unit.kit) return null;
   if (FIXED_BLOCK[unit.kit] != null) return FIXED_BLOCK[unit.kit];
   if (!unit.isPlayer && !unit.weaponOf) return null;
   if (!unit.attrs && WEAPON_BLOCK_BONUS[unit.kit] == null) return null;
   return bareBlockChance(unit) + heldWeaponBlockBonus(unit) + blockStatusBonus(unit);
+}
+/** 协助格挡率（资料面板等显示用），最多 95% */
+function blockChance(unit) {
+  const c = blockChanceRaw(unit);
+  return c == null ? null : Math.min(BLOCK_CHANCE_CAP, c);
 }
 /** 给资料面板用：拆成空手 / 武器 / 其他三段 */
 function blockBreakdown(unit) {
