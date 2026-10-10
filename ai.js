@@ -20,7 +20,18 @@ const EnemyAI = (function () {
     return players().filter(u => unitAlive(u) && !u.hidden && !(u.dying && !u.upOnShp) &&
       !(typeof bpUntargetable === "function" && bpUntargetable(u)));   // 单局图纸：安全的迷彩（武器人形态）
   }
+  // 不按「打单个目标」瞄准的技能：标定区域的榴弹（落点任意），不看危墙
+  const ZONE_PICK = { en_gl: true, en_gl_fire: true };
+  // 不需要目标 / 不是攻击的技能：找站位时不拿它们来算「能不能打到」
+  const NO_TARGET = { en_agg3_debris: true, en_king_hold: true, en_bigsand_summon: true, en_bigsand_heal: true, ufo_prime: true,
+    ufo_boom: true, ufo_stomp: true, ufo_sweep: true, ufo_summon: true, en_agg2_overheat: true, en_giant_sand_pulse: true, en_thug_mutiny: true };
   function canAimSkill(u, sid, t) {
+    if (!inSkillReach(u, sid, t)) return false;
+    // 隔着危墙 / 关着的门打不到（dealTo 会挡下来）：以前照样瞄准，结果每回合白打
+    if (!ZONE_PICK[sid] && typeof lineBlocked === "function" && lineBlocked(u.zone, t.zone)) return false;
+    return true;
+  }
+  function inSkillReach(u, sid, t) {
     if (!u || !t || !unitAlive(t) || t.hidden || t.fused) return false;
     if (t.dying && !t.upOnShp) return false;
     const d = zdist(u.zone, t.zone);
@@ -124,6 +135,54 @@ const EnemyAI = (function () {
     const opts = adjacentZones(from).map(Number).filter(z => !abyss(z) && zdist(z, goal) < here);
     if (!opts.length) return null;
     return opts.sort((a, b) => zdist(a, goal) - zdist(b, goal) || a - b)[0];
+  }
+  /** 这一步移动付不付得起：杂兵用行动点，精英 / 首领只能用附赠行动；被禁足 / 霜结不能动 */
+  function canPayMove(u) {
+    if (!u || u.noMove || u.self === "frost") return false;
+    const rank = typeof enemyRankOf === "function" ? enemyRankOf(u) : "minion";
+    return rank === "minion" ? (u.ap || 0) >= 1 : (u.bonus || 0) >= 1;
+  }
+  /** 能正常走过去的相邻区（不隔危墙 / 关着的门；地面单位不走空隙、不进深渊） */
+  function walkableNeighbors(u) {
+    const from = Number(u.zone);
+    return adjacentZones(from).map(Number).filter(z => {
+      const g = typeof getGap === "function" ? getGap(from, z) : { type: "open" };
+      if (g.type === "wall" || (g.type === "door" && !g.open)) return false;
+      if (g.type === "void" && !u.flying) return false;
+      if (!u.flying && state.fields && state.fields[z] && state.fields[z].abyss) return false;
+      return true;
+    });
+  }
+  /** 找站位：在这里打不到人时，看走一步到哪个相邻区能打到（优先能打到原定目标的，其次能打到的人多的；
+   *  想保持距离的远程单位再优先没有敌人的区）。走一步也打不到、又没有固定射程的单位，就朝目标靠近一步。
+   *  only：强制目标（嘲讽 / 决一死战）时只算那一个人。找不到返回 null */
+  function firingStep(u, spec, prey, target, list, only) {
+    if (!canPayMove(u)) return null;
+    const sids = (list || []).map(s => s.id).filter(id => id && !NO_TARGET[id]);
+    if (!sids.length) return null;
+    const pool = only ? [only] : prey;
+    const from = u.zone;
+    let best = null;
+    walkableNeighbors(u).forEach(z => {
+      u.zone = z;
+      let hits = 0, hitsTarget = false;
+      try {
+        pool.forEach(p => {
+          if (sids.some(sid => canAimSkill(u, sid, p))) { hits++; if (p === target) hitsTarget = true; }
+        });
+      } finally { u.zone = from; }
+      if (!hits) return;
+      const quiet = spec && spec.dist === 1 && !preyInZone(prey, z).length ? 1 : 0;
+      const score = (hitsTarget ? 100 : 0) + hits * 10 + quiet;
+      if (!best || score > best.score || (score === best.score && z < best.z)) best = { z, score };
+    });
+    if (best) return best.z;
+    // 一步之内哪里都打不到：没有固定射程的单位（机枪机甲、巨人……）朝目标走一步，别原地干等
+    if (spec && spec.dist == null && target) {
+      const step = stepToward(u, target.zone);
+      if (step != null && walkableNeighbors(u).includes(Number(step))) return step;
+    }
+    return null;
   }
   function preyInZone(list, z) {
     return list.filter(p => Number(p.zone) === Number(z));
@@ -290,8 +349,10 @@ const EnemyAI = (function () {
       return zones.length ? { dest: zones[0].z } : null;
     }
     if (sid === "en_gl") {
+      // 榴弹发射时照样会被危墙 / 关着的门挡住：隔着墙的区不算人数
       const zones = [];
-      for (let z = 1; z <= Number(state.zoneMode); z++) zones.push({ z, n: preyInZone(prey, z).length });
+      const open = (z) => !(typeof lineBlocked === "function" && lineBlocked(u.zone, z));
+      for (let z = 1; z <= Number(state.zoneMode); z++) zones.push({ z, n: open(z) ? preyInZone(prey, z).length : 0 });
       zones.sort((a, b) => b.n - a.n);
       return zones.length && zones[0].n ? { dest: zones[0].z } : { dest: target ? Number(target.zone) : 1 };
     }
@@ -426,8 +487,14 @@ const EnemyAI = (function () {
     const fireNow = sid === "en_agg2_charge" && zdist(u.zone, target.zone) <= 1 && (u.bonus || 0) < 1;
     if (sid && (inRange || !step || noTargetNeeded || fireNow)) {
       // 打不到（射程外、自己又不移动）就不出手，免得每回合空放
-      if (noTargetNeeded || pick.forced || canAimSkill(u, sid, target)) return attack(sid, aiPicks(u, sid, target, prey));
-      if (step == null) return null;
+      if (noTargetNeeded || canAimSkill(u, sid, target)) return attack(sid, aiPicks(u, sid, target, prey));
+      if (step == null) {
+        // 这里打不到：先找一个走一步就能打到的站位；找不到时强制目标照旧硬打，其余不出手
+        const fs = firingStep(u, spec, prey, target, list, pick.forced ? target : null);
+        if (fs != null) return move(fs);
+        if (pick.forced) return attack(sid, aiPicks(u, sid, target, prey));
+        return null;
+      }
     }
     // 最后一个行动点还够不着时，有远距手段的就先用远距（扬尘体的卷扬）
     const lastAction = (u.ap || 0) <= 1 && (u.bonus || 0) <= 0;
@@ -447,8 +514,13 @@ const EnemyAI = (function () {
     const legal = retargetLegal(u, use, target, prey, pick.forced);
     if (legal.target) target = legal.target;
     if (legal.sid) use = legal.sid;
-    // 谁都打不到（远距离单位身边只剩同区的人、三区里隔着两区……）：这一步不出手，不空放
-    if (!pick.forced && !canAimSkill(u, use, target)) return null;
+    // 谁都打不到（远距离单位身边只剩同区的人、三区里隔着两区、隔着危墙……）：
+    // 先找一个走一步就能打到的站位；没有就这一步不出手，不空放（强制目标照旧硬打）
+    if (!canAimSkill(u, use, target)) {
+      const fs = firingStep(u, spec, prey, target, list, pick.forced ? target : null);
+      if (fs != null) return move(fs);
+      if (!pick.forced) return null;
+    }
     return attack(use, aiPicks(u, use, target, prey));
   }
 
