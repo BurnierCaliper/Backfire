@@ -154,6 +154,12 @@ function useItemOn(actor, itemId, target, zone) {
   if (!spec) { notes.push("没有这种道具。"); return notes; }
   if (spec.target === "weapon") return useRepairKit(actor, target, zone, notes);   // 维修工具包按点数用，不是一次一个
   if (bagCount(itemId) < 1) { notes.push(`没有${spec.name}。`); return notes; }
+  // 投掷类道具（手榴弹、酸液瓶、冲击炸弹）：危墙 / 关着的门倒塌 / 打开之前影响不到对面，扔过去没用，道具不用掉
+  if (spec.target === "zone" && typeof lineBlocked === "function") {
+    const z = zone != null ? Number(zone) : Number((target && target.zone) || actor.zone);
+    const block = lineBlocked(actor.zone, z);
+    if (block) { notes.push(`${actor.name} 的${spec.name}影响不到 ${z} 区：${block}`); return notes; }
+  }
   bagAdd(itemId, -1, notes);
   if (itemId === "medkit" || itemId === "clinic") {
     const t = target || actor;

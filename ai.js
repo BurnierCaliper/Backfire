@@ -386,9 +386,19 @@ const EnemyAI = (function () {
     });
 
     // 强制目标（嘲讽 / 决一死战）时不后撤，直接想办法打到人
-    const step = pick.forced && zdist(u.zone, target.zone) < (spec.dist || 0)
+    let step = pick.forced && zdist(u.zone, target.zone) < (spec.dist || 0)
       ? null
       : aiStep(u, target, spec, prey);
+    // 空隙：地面单位越过要花 1 行动点并过运动检定（敌人没有熟练，50%）。目标在空隙那边时照样去试
+    // （以前过不去，两区制桥塌后近战双方永远碰不到），有一样近、不用越过空隙的路就走那条；后撤不越过空隙，宁可留在原地打
+    if (step != null && !u.flying && typeof getGap === "function" && getGap(u.zone, step).type === "void") {
+      const near = zdist(step, target.zone);
+      const passable = (z) => { const g = getGap(u.zone, z); return g.type === "open" || g.type === "bridge" || (g.type === "door" && g.open); };
+      const alt = adjacentZones(u.zone).map(Number).find(z => z !== step && passable(z) && zdist(z, target.zone) === near &&
+        !(state.fields && state.fields[z] && state.fields[z].abyss));
+      if (near >= zdist(u.zone, target.zone)) step = null;
+      else if (alt != null) step = alt;
+    }
 
     let sid = aiSpecial(u, spec, target, prey, has, list);
     if (sid && !["en_agg3_debris", "en_king_hold", "en_bigsand_summon", "en_bigsand_heal", "ufo_prime", "ufo_boom", "ufo_stomp", "ufo_sweep", "en_agg2_overheat", "en_gl", "en_gl_fire"].includes(sid)) {

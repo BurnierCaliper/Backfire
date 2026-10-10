@@ -125,12 +125,12 @@
     if (a.noMove || a.self === "frost" || (typeof isCrushing === "function" && isCrushing(a)) || (typeof touDuelVictim === "function" && touDuelVictim(a))) fail("这个单位现在不能移动");
     const f = (state.fields || {})[a.zone] || {};
     if (f.abyss && !a.flying) fail("地面单位不能从深渊移动");
-    const why = zoneReachable(a, dest); if (why) fail(why);
+    const why = zoneReachable(a, dest, true); if (why) fail(why);
     let ap = 0, bonus = 0;
     if (f.acid && !a.flying) ap = 1;
     else if (a.self !== "conductor") { if (enemyRankOf(a) === "minion") ap = 1; else bonus = 1; }
     const gap = (state.gaps || {})[gapKey(a.zone, dest)];
-    if (gap && gap.type === "void" && !a.flying) ap += 1;
+    if (gap && gap.type === "void" && !a.flying) { ap = 1; bonus = 0; }   // 越过空隙这一步花 1 行动点（不花附赠），另掷运动检定
     if ((a.ap || 0) < ap + extraAp || (a.bonus || 0) < bonus) fail("移动所需行动预算不足");
   }
   function checkFlow(a, cmd) {

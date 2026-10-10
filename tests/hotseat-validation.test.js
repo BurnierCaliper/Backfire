@@ -118,7 +118,8 @@ test("无效移动不扣点：区域、障碍、霜结、禁足及酸液离开�
   for (const dest of [1, 0, 3, 4, 1.5, "2"]) untouched(f, { type: "move", actor: f.a.id, dest }, /区域/);
   const command = { type: "move", actor: f.a.id, dest: 2 };
   f.s.gaps["1-2"].type = "wall"; untouched(f, command, /危墙/);
-  f.s.gaps["1-2"].type = "void"; untouched(f, command, /空隙/);
+  // 空隙：地面单位花 1 行动点做运动检定才能越过——没有行动点时不能走
+  f.s.gaps["1-2"].type = "void"; f.a.ap = 0; untouched(f, command, /空隙/); f.a.ap = 4;
   f.s.gaps["1-2"].type = "open"; f.a.self = "frost"; untouched(f, command, /霜结/);
   f.a.self = null; f.a.noMove = true; untouched(f, command, /移动/);
   f.a.noMove = false; f.s.fields[1].acid = true; f.a.ap = 0; untouched(f, command, /酸液/);

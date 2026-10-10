@@ -346,7 +346,7 @@ function gapStatusText(g) {
   if (g.type === "bridge") return `通过扣 1d6 耐久。现 ${g.hp}（手册 10～30）。被攻击时只有击破扣耐久。毁后变空隙。飞行无视。`;
   if (g.type === "wall") return `挡住对面。现耐久 ${g.hp}（手册 1～15）。只有击破扣耐久，伤害打不动；倒向最后一击的另一侧。`;
   if (g.type === "door") return g.open ? "门开着，可通过。" : "门关着，不能通过也不能打对面。";
-  if (g.type === "void") return "地面不能过；飞行可过。强行通过需行动点+运动检定。";
+  if (g.type === "void") return "地面单位花 1 行动点、过简单运动检定才能越过（失败过不去，行动点照扣）；飞行可过。勾「允许强行通过」= 主持人判定检定成功。";
   return "";
 }
 
@@ -1954,9 +1954,13 @@ function turnEnd() {
 }
 
 /** 防卫自律炮台开一炮：自动攻击 atk 最高的目标（hitPlayers：打我方还是打敌方）。
- *  活着、看得见、没被危墙 / 关着的门挡住；不限距离，不能协助格挡 */
+ *  活着、看得见（不在躲藏）、没倒地（濒死还没起身）、没被危墙 / 关着的门挡住；不限距离，不能协助格挡。
+ *  真的打出伤害才挂高能：伤害为 0、被屏障整个挡下都不挂 */
 function turretShot(p, hitPlayers, notes) {
-  const foes = state.units.filter(u => !u.hidden && !u.dead && !!u.isPlayer === !!hitPlayers && !lineBlocked(p.zone, u.zone));
+  const side = (u) => !u.hidden && !u.dead && !u.fused && !u._removed && !!u.isPlayer === !!hitPlayers && u.kit !== "ironwall";
+  const foes = state.units.filter(u => side(u) && !(u.statuses && u.statuses.hide) && !(u.dying && !u.upOnShp) &&
+    u.kit !== "ufo_body" &&   // 飞碟本体不能被通常手段攻击，锁它就是白打
+    !lineBlocked(p.zone, u.zone));
   if (foes.length) {
     const atkOf = (u) => Number(effectiveAtk(u, state.units)) || Number(u.atk) || 0;
     foes.sort((a, b) => atkOf(b) - atkOf(a));
@@ -1964,14 +1968,27 @@ function turretShot(p, hitPlayers, notes) {
     const dmg = p.level || 1;
     const fake = unitOf("防卫炮台", p.level, [{ type: "armor", hp: 1 }], 0, dmg);
     fake.zone = p.zone;
+    fake.isPlayer = !hitPlayers;   // 我方炮台站在我方那边：敌人的废铁墙照样挡它
+    // 炮台这一炮是自己的一次攻击：屏障「已拦截本次行动」只看这一炮（不沿用上一次行动留下的记录）
+    const wallBefore = state.actionWallHit;
+    state.actionWallHit = {};
     const out = dealTo(fake, u, { atk: dmg, mult: 1, hits: 2, element: "energy", baseBreak: 0, flags: { action: true, blockResolved: true, propShot: true } });
-    u.statuses = u.statuses || {};
-    u.statuses.high = true;
-    u.highApplyTurn = state.turnNo;
-    notes.push(`防卫炮台锁定 ${u.name}（atk 最高）：施加高能，并打出 2 次 ${dmg} 能量（实际 ${Math.floor((out && out.res && out.res.total) || 0)}）。`);
+    const walled = Object.keys(state.actionWallHit || {}).length > 0;
+    state.actionWallHit = wallBefore;
+    const dealt = walled ? 0 : Math.floor((out && out.res && out.res.total) || 0);
+    if (dealt > 0) {
+      u.statuses = u.statuses || {};
+      u.statuses.high = true;
+      u.highApplyTurn = state.turnNo;
+      notes.push(`防卫炮台锁定 ${u.name}（atk 最高）：打出 2 次 ${dmg} 能量（实际 ${dealt}），施加高能。`);
+    } else {
+      notes.push(`防卫炮台锁定 ${u.name}（atk 最高）：打出 2 次 ${dmg} 能量，${walled ? "被屏障挡下" : "没有造成伤害"}，不施加高能。`);
+    }
     return true;
   }
-  if (state.units.some(u => !u.hidden && !u.dead && !!u.isPlayer === !!hitPlayers)) {
+  if (state.units.some(u => side(u) && !lineBlocked(p.zone, u.zone))) {
+    notes.push("防卫炮台：没有能锁定的敌对单位（躲藏 / 倒地没起身的不打）。");
+  } else if (state.units.some(side)) {
     notes.push("防卫炮台：敌对单位都在危墙 / 关着的门后面，打不到。");
   }
   return false;
@@ -2924,6 +2941,8 @@ function blockedByGap(from, dest) {
   return null;
 }
 
+/** 自己走一步能不能过这条间隔：true 能过；false 过不去（危墙 / 关着的门）；
+ *  "void" = 地面单位面对空隙，要花 1 行动点并通过简单难度运动检定才能越过（doMoveInner 结算） */
 function canCross(unit, from, dest, asObject) {
   const g = getGap(from, dest);
   const flying = unit && unit.flying;
@@ -2935,17 +2954,59 @@ function canCross(unit, from, dest, asObject) {
     paintSkillLog("机关门关着。先用按钮/拉杆打开。");
     return false;
   }
-  if (g.type === "void" && !flying && !asObject) {
-    const key = gapKey(from, dest);
-    if (state.forceVoid[key]) {
-      return "force-void";
-    }
-    paintSkillLog("空隙：地面单位不能通过。勾选间隔上的「允许强行通过」表示运动检定已成功（耗行动点）。飞行单位可直接过。");
-    return false;
-  }
+  if (g.type === "void" && !flying && !asObject) return "void";
   return true;
 }
 
+/* ===== 空隙：地面单位花 1 行动点、过简单难度「运动」检定才能越过（手册 7.3 间隔效果） ===== */
+const VOID_CROSS = { prof: "运动", diff: 0 };   // diff：ROGUE_CHECKS.chance 的列，0 = 简单
+/** 越过空隙的成功率：玩家按熟练等级（简单难度有熟练就默认通过）+ 种族的优势 / 劣势 / 重掷；敌人没有熟练，按无熟练 50% */
+function voidCrossOdds(u) {
+  const mine = !!(u && u.isPlayer);
+  const level = mine ? unitProfLevel(u, VOID_CROSS.prof) : 0;
+  const table = typeof ROGUE_CHECKS !== "undefined" ? ROGUE_CHECKS.chance : [[0.5, 0, 0, 0], [1, 0.5, 0.25, 0.125], [1, 1, 0.5, 0.25], [1, 1, 0.75, 0.5]];
+  const base = (table[level] || [])[VOID_CROSS.diff] || 0;
+  const hpLow = mine && totalHp(u) * 2 < totalMaxHp(u);
+  const perks = mine && typeof checkPerksFor === "function" ? checkPerksFor(u.kit, VOID_CROSS.prof, hpLow) : {};
+  let p = perks.adv ? 1 - (1 - base) * (1 - base) : perks.dis ? base * base : base;
+  if (perks.reroll) p = 1 - (1 - p) * (1 - p);
+  return { mine, level, base, chance: p, perks };
+}
+/** 掷越过空隙的运动检定（行动点由调用方先扣）。返回 { ok, text } */
+function rollVoidCross(u) {
+  const odds = voidCrossOdds(u);
+  const once = () => {
+    const roll = () => Math.random() < odds.base;
+    return odds.perks.adv ? (roll() || roll()) : odds.perks.dis ? (roll() && roll()) : roll();
+  };
+  let ok = odds.base >= 1 || once();   // 有熟练：简单难度默认通过，不掷骰
+  let rerolled = false;
+  if (!ok && odds.perks.reroll) { rerolled = true; ok = once(); }
+  const who = odds.mine ? ["没有熟练", "一级熟练", "二级熟练", "三级熟练"][odds.level] : "敌人没有熟练";
+  return { ok, text: `越过空隙：简单「${VOID_CROSS.prof}」检定（${who}，成功率 ${Math.round(odds.chance * 100)}%）${rerolled ? "，失败后重掷" : ""}` +
+    (ok ? "，成功。" : "，失败：没能过去，行动点照扣。") };
+}
+
+/** 地面单位从塌掉的桥 / 空隙掉下去：失去 10% 最大生命，移动不生效。
+ *  血量掉到 0 按倒地处理：玩家角色进濒死，其他单位死亡（和坠入深渊同一套写法） */
+function gapFall(unit, notes) {
+  const fall = Math.floor(totalMaxHp(unit) * 0.1);
+  applyTrueDamage(unit.layers, fall);
+  if (fall > 0) spawnFloater(unit, fall, "physical");
+  notes.push(`${unit.name} 坠落，失去最大生命 10%（${fall}），移动失败。`);
+  if (isUnitDown(unit) && !unit.upOnShp) {
+    if (unit.isPlayer && !isWeaponUnit(unit) && !unit.dead) {
+      unit.dying = true;
+      clearStunOnDown(unit);
+      notes.push(`${unit.name} 坠落导致最内层归零，陷入濒死。`);
+    } else {
+      unit.dead = true;
+      notes.push(`${unit.name} 坠落致死（最内层归零）。`);
+    }
+  }
+}
+
+/** 过一条间隔时的不稳桥梁：地面单位每过一次 −1d6 耐久，塌了就坠落（fail = 移动不生效） */
 function passGap(unit, from, dest) {
   const g = getGap(from, dest);
   const notes = [];
@@ -2958,17 +3019,58 @@ function passGap(unit, from, dest) {
       g.hp = 0;
       notes.push("桥梁坍塌，间隔变成空隙。");
       if (unit && !unit.flying) {
-        const fall = Math.floor(totalMaxHp(unit) * 0.1);
-        applyTrueDamage(unit.layers, fall);
-        notes.push(`${unit.name} 坠落，失去最大生命 10%（${fall}），移动失败。`);
+        gapFall(unit, notes);
         return { fail: true, notes };
       }
     }
   }
-  if (g.type === "void" && unit && !unit.flying && state.forceVoid[gapKey(from, dest)]) {
-    notes.push("地面单位强行通过空隙（已耗行动点，检定成功）。");
-  }
   return { fail: false, notes };
+}
+
+/** 不是自己走的移动（被推 / 拉、紧追跟上、冲刺类技能）沿最短路线过间隔，一条一条结算：
+ *  危墙 / 关着的门：过不去（有一条一样短、不隔墙的路就走那条）。
+ *  空隙：飞行单位照过；配置物掉下去消失；地面单位 fall 时坠落（被迫做地面移动），否则只是过不去。
+ *  不稳桥梁：地面单位每过一次 −1d6 耐久，塌了就坠落（配置物不算「有单位通过」）。
+ *  返回 true = 移动生效（notes 里是路上发生的事），false = 移动不生效 */
+function crossGapsForced(obj, from, dest, notes, fall) {
+  from = Number(from); dest = Number(dest);
+  if (from === dest) return true;
+  const isProp = !obj || !Array.isArray(obj.layers) || (state.props || []).includes(obj);
+  const shut = (a, b) => { const g = getGap(a, b); return g.type === "wall" || (g.type === "door" && !g.open); };
+  const any = zonePath(from, dest);
+  if (!any) return true;   // 不在这块棋盘上的区（旧存档 / 计算器）：照旧直接挪
+  const free = zonePath(from, dest, (a, b) => !shut(a, b));
+  const path = free && free.length <= any.length ? free : any;
+  const name = (obj && obj.name) || "配置物";
+  for (let i = 0; i < path.length - 1; i++) {
+    const g = getGap(path[i], path[i + 1]);
+    if (shut(path[i], path[i + 1])) {
+      notes.push(`${name} 被${g.type === "wall" ? "危墙" : "关着的机关门"}挡住（${gapKey(path[i], path[i + 1])} 区之间），没有移动。`);
+      return false;
+    }
+  }
+  for (let i = 0; i < path.length - 1; i++) {
+    const a = path[i], b = path[i + 1];
+    const g = getGap(a, b);
+    if (g.type === "void" && !(obj && obj.flying)) {
+      if (isProp) {
+        state.props = (state.props || []).filter(x => x !== obj);
+        notes.push(`${name} 掉进空隙（${gapKey(a, b)} 区之间），消失了。`);
+      } else if (fall) {
+        notes.push(`${name} 被迫越过空隙（${gapKey(a, b)} 区之间）：`);
+        gapFall(obj, notes);
+      } else {
+        notes.push(`${name} 被空隙挡住（${gapKey(a, b)} 区之间），过不去。`);
+      }
+      return false;
+    }
+    if (!isProp) {
+      const passed = passGap(obj, a, b);
+      notes.push(...passed.notes);
+      if (passed.fail) return false;
+    }
+  }
+  return true;
 }
 
 function toggleDevice(p, reason) {
@@ -3072,15 +3174,20 @@ function pulseDevicesInZone(zone, reason) {
   list.forEach(p => toggleDevice(p, reason || "受到范围效果"));
 }
 
-/** 记下这次行动的范围攻击波及了哪个区。hit = { element, dmg, attacker }：带伤害的范围攻击，
- *  结算（flushAoePulse）时同区可以打的配置物（爆炸桶、酸液桶、电池、炮台……）各挨一下 */
+/** 记下这次行动的范围攻击波及了哪个区。hit = { element, dmg, attacker, from }：带伤害的范围攻击，
+ *  结算（flushAoePulse）时同区可以打的配置物（爆炸桶、酸液桶、电池、炮台……）各挨一下。
+ *  from = 范围攻击从哪个区打过来（不给就按攻击者所在的区），用来判危墙 / 关着的门 */
 function markAoeZone(zone, hit) {
   if (zone == null) return;
   state.aoePulse = state.aoePulse || {};
   const z = Number(zone);
   if (!state.aoePulse[z] || state.aoePulse[z] === true) state.aoePulse[z] = { hits: [] };
   if (hit === "handled") state.aoePulse[z].propsDone = true;   // 技能自己已经打过区里的配置物，别再打一次
-  else if (hit && hit.element) state.aoePulse[z].hits.push(hit);
+  else if (hit && hit.element) {
+    const from = hit.from != null ? hit.from : (hit.attacker && hit.attacker.zone != null ? hit.attacker.zone : null);
+    state.aoePulse[z].hits.push(Object.assign({}, hit, { from: from != null ? Number(from) : null }));
+  }
+  if (!hit || hit === "handled") state.aoePulse[z].bare = true;   // 只记了区（没带来源）：照旧触发区里的按钮 / 拉杆
 }
 
 /** 范围攻击波及到的配置物：按钮 / 拉杆不在这里（它们按「被操作一次」处理） */
@@ -3098,8 +3205,11 @@ function flushAoePulse() {
     if (!zones.length) break;
     state.aoePulse = {};
     zones.forEach(z => {
+      // 危墙 / 关着的门：倒塌 / 打开之前，范围攻击影响不到墙对面的按钮、拉杆和配置物
+      const all = (map[z] && map[z].hits) || [];
+      const hits = all.filter(h => h.from == null || !lineBlocked(h.from, z));
+      if (all.length && !hits.length && !(map[z] && map[z].bare)) return;
       pulseDevicesInZone(Number(z), "受到范围伤害，视作被操作一次");
-      const hits = (map[z] && map[z].hits) || [];
       if (!hits.length || map[z].propsDone) return;
       // 一次范围攻击里同区每个配置物只挨一下：取伤害最高的那一段
       const hit = hits.reduce((a, b) => ((Number(b.dmg) || 0) > (Number(a.dmg) || 0) ? b : a));
@@ -3114,6 +3224,13 @@ function flushAoePulse() {
     });
   }
   state.aoePulse = {};
+  // 一次行动（或一次范围攻击）结算完：屏障「已拦截本次行动」的记录清掉，不留到下一次行动、回合结束的炮台那一炮
+  state.actionWallHit = {};
+  // 这次行动里召唤 / 生成的机械类单位，补上同阵营超充能电池的护盾
+  if (typeof grantMissingBatteryShields === "function") {
+    const got = grantMissingBatteryShields();
+    if (got.length) appendLog(got.join("\n"));
+  }
 }
 
 function fireScrap(p) {
@@ -3123,6 +3240,8 @@ function fireScrap(p) {
     appendLog("碎渣机炮只能打 2 距离内。");
     return;
   }
+  const block = lineBlocked(p.zone, t.zone);
+  if (block) { appendLog(`碎渣机炮打不到 ${t.name}：${block}`); return; }
   snapshot();
   appendLog(scrapShot(p, t));
   renderAll();
@@ -3136,12 +3255,14 @@ function scrapsFor(u) {
   if (!canControlScrap(u)) return [];
   return (state.props || []).filter(p => p.kind === "scrap" && (Number(p.hp) || 0) > 0 && Number(p.zone) === Number(u.zone));
 }
-/** 操控者的敌人里，在机炮 2 距离内的 */
+/** 操控者的敌人里，在机炮 2 距离内、打得到的：不隔着危墙 / 关着的门，不在躲藏，不是倒地没起身的人
+ *  （这些打出去也是白打，狂徒 AI 也就不会去白用机炮） */
 function scrapTargets(p, u) {
   if (!p || !u) return [];
   return (state.units || []).filter(t => t && !t.dead && !t.hidden && !t.fused && !t._removed &&
     !!t.isPlayer !== !!u.isPlayer && t.kit !== "ironwall" &&
-    zoneDist(Number(p.zone), Number(t.zone), state.zoneMode) <= 2);
+    zoneDist(Number(p.zone), Number(t.zone), state.zoneMode) <= 2 &&
+    !lineBlocked(p.zone, t.zone) && !(t.statuses && t.statuses.hide) && !(t.dying && !t.upOnShp));
 }
 /** 操控碎渣机炮（消耗 1 行动点）：玩家和狂徒都能用 */
 function controlScrap(a, p, t) {
@@ -3149,7 +3270,10 @@ function controlScrap(a, p, t) {
   if (!canControlScrap(a)) return `${a ? a.name : "该单位"} 不能操控碎渣机炮。`;
   if (Number(p.zone) !== Number(a.zone)) return "必须和碎渣机炮在同一区才能操控。";
   if (!t || t.isProp || !(state.units || []).includes(t)) return "先选碎渣机炮要打的敌人。";
-  if (!scrapTargets(p, a).includes(t)) return `${t.name} 不在碎渣机炮 2 距离内，或不是敌人。`;
+  if (!scrapTargets(p, a).includes(t)) {
+    const block = lineBlocked(p.zone, t.zone);
+    return block ? `碎渣机炮打不到 ${t.name}：${block}` : `${t.name} 不在碎渣机炮 2 距离内、打不到（躲藏 / 倒地），或不是敌人。`;
+  }
   if (!scrapReady(p)) return "碎渣机炮这一回合已经发射过了。";
   if (!spendAp(a, 1, "操控碎渣机炮")) return `${a.name} 行动点不足，无法操控碎渣机炮。`;
   return `${a.name} 操控碎渣机炮攻击 ${t.name}。\n` + scrapShot(p, t, a);
@@ -3158,7 +3282,7 @@ function controlScrap(a, p, t) {
 function scrapReady(p) {
   return !!p && p.firedRound !== Number(state.turnNo || 0);
 }
-/** 碎渣机炮开火一次：1d4 发，每发 6+等级 物理 +2 击破，开完耐久 −1。打玩家时可以被协助格挡 */
+/** 碎渣机炮开火一次：1d4 次 6+等级 物理，合计 2 击破（breakOnce：不是每发 2），开完耐久 −1。打玩家时可以被协助格挡 */
 function scrapShot(p, t, controller) {
   if (!scrapReady(p)) return "碎渣机炮这一回合已经发射过了。";
   p.firedRound = Number(state.turnNo || 0);
@@ -3171,10 +3295,10 @@ function scrapShot(p, t, controller) {
   if (controller && controller.isPlayer) fake.creditTo = controller.id;
   // 射程是「2 距离内」（选目标时已经限定），这里不再按近距离判定
   fake.propId = p.id;
-  const out = dealTo(fake, t, { atk: 0, mult: 0, flat, hits: n, element: "physical", baseBreak: 2, atkRange: "any", flags: { action: true, propShot: true, flyFree: true } });
+  const out = dealTo(fake, t, { atk: 0, mult: 0, flat, hits: n, element: "physical", baseBreak: 2, breakOnce: true, atkRange: "any", flags: { action: true, propShot: true, flyFree: true } });
   const wear = scrapWear(p, controller);
-  if (out && out.pending) return `碎渣机炮开火 ${n} 次，每次 ${flat} 物理 +2 击破，${t.name} 的队友可以协助格挡。\n${wear}`;
-  return `碎渣机炮开火 ${n} 次，每次 ${flat} 物理 +2 击破。合计伤害 ${Math.floor((out && out.res && out.res.total) || 0)}。\n${wear}`;
+  if (out && out.pending) return `碎渣机炮开火：1d4 次 → ${n} 次，每次 ${flat} 物理，合计 2 击破，${t.name} 的队友可以协助格挡。\n${wear}`;
+  return `碎渣机炮开火：1d4 次 → ${n} 次，每次 ${flat} 物理，合计 2 击破。合计伤害 ${Math.floor((out && out.res && out.res.total) || 0)}。\n${wear}`;
 }
 /** 碎渣机炮每用一次耐久 −1（和被攻击一样），耐久归零就报废 */
 function scrapWear(p, controller) {
@@ -3255,14 +3379,15 @@ function hitStructure(attacker, targetToken, opt) {
   renderAll();
 }
 
-/** 技能可以打到的配置物与危墙 / 桥梁（距离 minD–maxD）。危墙夹在两区之间：两边任一区在范围里就算 */
+/** 技能可以打到的配置物与危墙 / 桥梁（距离 minD–maxD）。危墙夹在两区之间：两边任一区在范围里就算。
+ *  隔着危墙 / 关着的门的不算（倒塌 / 打开之前影响不到对面）；墙本身从自己这一侧打得到 */
 function structureTargets(actor, minD, maxD) {
   const out = [];
   const inR = (z) => { const d = zoneDist(actor.zone, z, state.zoneMode); return d >= minD && d <= maxD; };
   (state.props || []).forEach(p => {
     if (BARRIER_SIDE[p.kind] === "player") return;   // 自己的铁壁 / 防护罩不当目标
     if (!(p.hp > 0) && p.kind !== "button" && p.kind !== "lever") return;
-    if (inR(p.zone)) out.push({ id: "prop:" + p.id, name: p.name, zone: p.zone, isPlayer: p.faction !== "enemy" });
+    if (inR(p.zone) && !lineBlocked(actor.zone, p.zone)) out.push({ id: "prop:" + p.id, name: p.name, zone: p.zone, isPlayer: p.faction !== "enemy" });
   });
   const zm = Number(state.zoneMode) || 2;
   Object.keys(state.gaps || {}).forEach(k => {
@@ -3271,9 +3396,19 @@ function structureTargets(actor, minD, maxD) {
     if (!boardGapKeys().includes(k)) return;   // 只看这块棋盘上真的有的连接
     const zs = k.split("-").map(Number);
     const z = zs.find(inR);
-    if (z != null) out.push({ id: "gap:" + k, name: `${gapLabel(g.type)}（${k} 区之间）`, zone: z, isPlayer: false });
+    // 至少有一侧不隔着别的墙 / 关着的门（墙自己挡的是对面，不挡它本身）
+    if (z != null && structureReachable(actor, "gap:" + k)) out.push({ id: "gap:" + k, name: `${gapLabel(g.type)}（${k} 区之间）`, zone: z, isPlayer: false });
   });
   return out;
+}
+/** 配置物 / 危墙 / 桥梁是不是隔着危墙或关着的门（不管射程）：配置物看它所在的区，
+ *  危墙 / 桥梁看两侧里有没有一侧不被挡。返回 true = 影响得到 */
+function structureReachable(actor, token) {
+  if (!actor || actor.zone == null) return true;
+  const s = String(token || "");
+  if (s.indexOf("gap:") === 0) return s.slice(4).split("-").map(Number).some(z => !lineBlocked(actor.zone, z));
+  const p = propByRef(s);
+  return !p || !lineBlocked(actor.zone, p.zone);
 }
 const isStructureToken = (id) => /^(gap|prop):/.test(String(id || ""));
 
@@ -3339,13 +3474,20 @@ function damageProp(p, opt, attacker) {
     return notes;
   } else {
     lose = Math.max(1, Math.floor(opt.dmg || 5));
-    // 写了血量类型的配置物（电池、炮台是装甲生命值）照属性克制表算倍率
+    // 写了血量类型的配置物（电池、炮台是装甲生命值）照属性克制表算倍率，和单位的装甲层一样吃天气：
+    // 天气增减伤、微光反转克制、酸雨装甲减伤失效（隔离区不受天气影响）
     const type = PROP_HP_TYPE[p.kind];
-    const m = type && CHART[element] ? 1 + (Number(CHART[element][type]) || 0) : 1;
+    let m = 1, chartOnly = 1;
+    if (type && CHART[element]) {
+      const f = state.fields[p.zone] || {};
+      const weather = f.isolate ? "none" : state.weather;
+      chartOnly = 1 + (Number(CHART[element][type]) || 0);
+      m = Math.max(0, round2(1 + chartMod(element, type, weather, f, weather === "acid") + weatherDamagePct(weather, element)));
+    }
     if (m !== 1) {
       const raw = lose;
       lose = Math.max(0, Math.floor(raw * m + 1e-6));
-      notes.push(`${p.name}是${LAYER[type] || type}生命：${ELE[element] || element}属性 ×${m}（${raw} → ${lose}）。`);
+      notes.push(`${p.name}是${LAYER[type] || type}生命：${ELE[element] || element}属性 ×${m}${m !== chartOnly ? "（含天气 / 场地）" : ""}（${raw} → ${lose}）。`);
     }
   }
   if (lose <= 0) {
@@ -3369,7 +3511,7 @@ function destroyProp(p, attacker) {
     const r = takeDice(1, 20, lv);
     const dmg = r.total;
     notes.push(`爆炸：同区 ${r.text} 火焰 + 2 击破。`);
-    markAoeZone(p.zone, { element: "fire", dmg, attacker });
+    markAoeZone(p.zone, { element: "fire", dmg, attacker, from: p.zone });   // 从桶所在的区炸开
     state.units.filter(u => !u.hidden && !u.dead && Number(u.zone) === Number(p.zone)).forEach(u => {
       const fake = unitOf("爆炸桶", lv, [{ type: "armor", hp: 1 }], 0, 0);
       fake.zone = p.zone;
@@ -3386,7 +3528,7 @@ function destroyProp(p, attacker) {
     const r = takeDice(lv, 4, 0);
     const dmg = r.total;
     notes.push(`电池爆炸：同区所有单位（不分敌我）${r.text} 电击。`);
-    markAoeZone(p.zone, { element: "electric", dmg, attacker });
+    markAoeZone(p.zone, { element: "electric", dmg, attacker, from: p.zone });
     state.units.filter(u => !u.hidden && !u.dead && Number(u.zone) === Number(p.zone)).forEach(u => {
       const fake = unitOf("电池", lv, [{ type: "armor", hp: 1 }], 0, 0);
       fake.zone = p.zone;
@@ -3480,9 +3622,17 @@ function doMoveInner(unit, dest, moveOpt) {
   }
   const cross = canCross(unit, from, dest, false);
   if (!cross) return;
+  // 空隙：地面单位这一步改花 1 行动点（不花附赠行动），还要过简单难度运动检定；技能里的移动不花行动点，过不去
+  const overVoid = cross === "void";
+  if (overVoid && moveOpt.free) {
+    paintSkillLog("空隙：地面单位要花 1 行动点并通过运动检定才能越过，技能里的移动过不去（飞行单位可以）。");
+    return;
+  }
   if (!moveOpt.free) {
     const fromF = state.fields[from] || emptyField();
-    if (fromF.acid && !unit.flying) {
+    if (overVoid) {
+      if (!spendAp(unit, 1, "越过空隙")) return;
+    } else if (fromF.acid && !unit.flying) {
       if (!spendAp(unit, 1, "离开酸液地面")) return;
     } else if (unit.self === "conductor") {
       // 导体：移动不消耗附赠动作
@@ -3497,6 +3647,17 @@ function doMoveInner(unit, dest, moveOpt) {
     }
   }
   snapshot();
+  if (overVoid) {
+    // 计算器里勾了「允许强行通过」= 主持人判定检定成功，不再掷骰（行动点照扣）
+    const chk = state.forceVoid && state.forceVoid[gapKey(from, dest)]
+      ? { ok: true, text: "越过空隙：主持人判定运动检定成功。" } : rollVoidCross(unit);
+    notes.push(chk.text);
+    if (!chk.ok) {
+      paintSkillLog(notes.join("\n"));
+      renderAll();
+      return;
+    }
+  }
   const passed = passGap(unit, from, dest);
   notes.push(...passed.notes);
   if (passed.fail) {
@@ -3504,7 +3665,7 @@ function doMoveInner(unit, dest, moveOpt) {
     renderAll();
     return;
   }
-  if (fromF.acid && !unit.flying) {
+  if (fromF.acid && !unit.flying && !overVoid) {
     notes.push("离开酸液地面：规则上消耗行动点而不是附赠行动。");
   }
   if (fromF.ice && !unit.flying && !moveOpt.free) {
@@ -3523,25 +3684,7 @@ function doMoveInner(unit, dest, moveOpt) {
   convertUnstableInHv(unit, notes);
   triggerLeaveOpportunity(unit, from, notes);
   if (typeof bpAfterEnemyMove === "function") bpAfterEnemyMove(unit, notes);   // 单局图纸：稳妥的距离
-  if (toF.ice && !unit.flying) {
-    const br = state.weather === "snow" && currentWeatherFor(unit) === "snow" ? 2 : 1;
-    const defBeforeIce = Math.max(0, Number(unit.def) || 0);
-    const wasStunnedIce = !!unit.stunned;
-    unit.def = Math.max(0, defBeforeIce - br);
-    notes.push(`进入冻土：冰击破 ${br}，架势 ${unit.def}`);
-    popBreak(unit, br, "ice");
-    if (unit.def <= 0) {
-      const brokeIntoStun = defBeforeIce > 0 && !wasStunnedIce;
-      unit.stunned = true;
-      if (brokeIntoStun) {
-        unit.instant = unit.instant || {};
-        unit.instant.iceNext = true;
-        notes.push(imbalanceLine(unit));
-        notes.push(`${unit.name} 因冰属性击破失衡：下次受到的攻击动作第一击 +50% 伤害。`);
-      }
-      queueAssistAttack(null, unit);
-    }
-  }
+  enterFrozenGround(unit, notes);
   applyAbyssFall(unit, from, notes);
   if (typeof afterMove === "function") afterMove(unit, notes);
   chaseFollow(unit, notes);
@@ -3550,7 +3693,32 @@ function doMoveInner(unit, dest, moveOpt) {
   renderAll();
 }
 
-/** 紧追：被紧追的单位移动后，施加紧追的一方自动跟到它所在的区域（不耗行动） */
+/** 进入冻土：地面单位受 1 冰击破（雪天翻倍）。自己走进去、紧追跟进、被推进去都算 */
+function enterFrozenGround(unit, notes) {
+  if (!unit || unit.kind || unit.flying || unit.dead) return;
+  const toF = state.fields[unit.zone] || emptyField();
+  if (!toF.ice) return;
+  const br = state.weather === "snow" && currentWeatherFor(unit) === "snow" ? 2 : 1;
+  const defBeforeIce = Math.max(0, Number(unit.def) || 0);
+  const wasStunnedIce = !!unit.stunned;
+  unit.def = Math.max(0, defBeforeIce - br);
+  notes.push(`${unit.name} 进入冻土：冰击破 ${br}，架势 ${unit.def}`);
+  popBreak(unit, br, "ice");
+  if (unit.def <= 0) {
+    const brokeIntoStun = defBeforeIce > 0 && !wasStunnedIce;
+    unit.stunned = true;
+    if (brokeIntoStun) {
+      unit.instant = unit.instant || {};
+      unit.instant.iceNext = true;
+      notes.push(imbalanceLine(unit));
+      notes.push(`${unit.name} 因冰属性击破失衡：下次受到的攻击动作第一击 +50% 伤害。`);
+    }
+    queueAssistAttack(null, unit);
+  }
+}
+
+/** 紧追：被紧追的单位移动后，施加紧追的一方自动跟到它所在的区域（不耗行动）。
+ *  跟上去也是地面移动：危墙 / 关着的门 / 空隙挡住就没跟上，过不稳桥梁照扣耐久，进冻土照受冰击破 */
 function chaseFollow(unit, notes) {
   if (!unit || !unit.statuses || !unit.statuses.chase || unit.dead) return;
   let ids = (unit.chasers || []).slice();
@@ -3562,13 +3730,16 @@ function chaseFollow(unit, notes) {
     const c = unitById(id);
     if (!c || c.dead || c.hidden || c.fused || c.id === unit.id) return;
     if (Number(c.zone) === Number(unit.zone)) return;
-    if (canCross(c, c.zone, unit.zone, false)) {
-      const from = c.zone;
-      c.zone = unit.zone;
-      notes.push(`${c.name} 紧追 ${unit.name}：${from} 区 → ${unit.zone} 区（不耗行动）。`);
+    const from = Number(c.zone);
+    const crossing = [];
+    if (crossGapsForced(c, from, unit.zone, crossing, false)) {
+      c.zone = Number(unit.zone);
+      notes.push(`${c.name} 紧追 ${unit.name}：${from} 区 → ${unit.zone} 区（不耗行动）。`, ...crossing);
+      enterFrozenGround(c, notes);
       applyAbyssFall(c, from, notes);
       if (typeof afterMove === "function") afterMove(c, notes);
     } else {
+      notes.push(...crossing);
       notes.push(`${c.name} 紧追 ${unit.name}，但间隔挡住，没跟上。`);
     }
   });
@@ -3658,7 +3829,10 @@ function applyCombat(target, result, attacker) {
     aggOuterBefore = outerL && outerL.type === "sand" ? Number(outerL.current) || 0 : 0;
     aggArmorBefore = armorL ? Number(armorL.current) || 0 : 0;
   }
+  const flyingBeforeHit = !!target.flying;
   notes.push(...applyResultToUnit(target, result, attacker));
+  // 深渊上空被击落：击落的 20% 之外再坠入深渊失去 10%（共 30% 最大生命），并离开深渊
+  if (flyingBeforeHit && !target.flying) applyAbyssFall(target, null, notes);
   markPartyHurt(target, result);
   maybeUnstableTrip(target, notes);
   if (target.kit === "ufo_leg") {
@@ -4079,8 +4253,16 @@ function displaceTo(obj, dest, notes, reason) {
   }
   const from = Number(obj.zone);
   if (from === dest) return true;
+  // 被推 / 拉也要过间隔：危墙、关着的门推不过去；推进空隙的地面单位坠落（失去 10% 最大生命）、配置物掉下去，
+  // 移动都不生效；过不稳桥梁的地面单位照常让桥 −1d6
+  const crossing = [];
+  if (!crossGapsForced(obj, from, dest, crossing, true)) {
+    notes.push(...crossing);
+    return false;
+  }
   obj.zone = dest;
-  notes.push(`${obj.name}${reason ? " " + reason : " 被移动"}：${from} 区 → ${dest} 区。`);
+  notes.push(`${obj.name}${reason ? " " + reason : " 被移动"}：${from} 区 → ${dest} 区。`, ...crossing);
+  enterFrozenGround(obj, notes);
   applyAbyssFall(obj, from, notes);
   if (!obj.kind) chaseFollow(obj, notes);   // 被推走也算移动：紧追的人跟上
   return true;
@@ -6863,18 +7045,19 @@ function loadLiveParty(kits) {
   paintSkillLog("已载入瑞比 / 结人 / 绯秋 / 灯。武器默认持在手上。用「唤出××」把武器人放到场上。");
 }
 
-function zoneReachable(unit, dest) {
+function zoneReachable(unit, dest, walk) {
   if (!unit) return "没有行动者。";
   dest = Number(dest);
   const from = Number(unit.zone);
   if (dest === from) return "必须换到另一个区域。";
   if (dest < 1 || dest > Number(state.zoneMode)) return "没有这个区域。";
-  // 沿连接找一条走得通的路线（直排就是一格一格往那边走）；走不通时说出最近一条路上挡着的是什么
+  // 沿连接找一条走得通的路线（直排就是一格一格往那边走）；走不通时说出最近一条路上挡着的是什么。
+  // walk：自己走一步的普通移动——空隙可以花 1 行动点做运动检定越过（doMoveInner 结算），不算挡住；技能里的移动照旧过不去
   const why = (a, b) => {
     const g = getGap(a, b);
     if (g.type === "wall") return "危墙挡住去路。";
     if (g.type === "door" && !g.open) return "机关门关着。";
-    if (g.type === "void" && !(unit.flying || (state.forceVoid && state.forceVoid[gapKey(a, b)]))) return "空隙挡住地面单位。";
+    if (g.type === "void" && !(unit.flying || walk || (state.forceVoid && state.forceVoid[gapKey(a, b)]))) return "空隙挡住地面单位。";
     return null;
   };
   if (zonePath(from, dest, (a, b) => !why(a, b))) return null;
@@ -7158,7 +7341,7 @@ function skillFlowSteps(id, actor, picks) {
       }
       if (p && p.kind === "scrap") {
         steps.push({ key: "target", type: "unit", optional: false, label: "碎渣机炮打谁（2 距离内的敌人）",
-          units: fieldUnits().filter(u => !u.isPlayer && !u.dead && !u.hidden && !u.fused && zoneDist(p.zone, u.zone, maxZ) <= 2) });
+          units: scrapTargets(p, actor) });   // 和直接操控同一份名单：不列隔着危墙 / 关着的门的
       }
     }
     if (act === "field:harmonic") {
@@ -8972,6 +9155,11 @@ function runSkillInner(id, optRun) {
       const ok = zs.some(reach);
       if (!ok) { paintSkillLog(`${a.name} 的该技能够不到 ${String(token).slice(4)} 区之间的${gapLabel((state.gaps[String(token).slice(4)] || {}).type)}。`); return; }
     }
+    // 隔着危墙 / 关着的门：倒塌 / 打开之前影响不到对面的配置物（不花行动点）
+    if (!structureReachable(a, token)) {
+      paintSkillLog(`${a.name} 打不到：${lineBlocked(a.zone, tokZones[0]) || "隔着危墙 / 关着的门。"}`);
+      return;
+    }
     // 打配置物 / 危墙也是一次行动，照常消耗行动点 / 附赠行动
     if (a.isPlayer && id !== "assist_block") {
       const cost = skillCost(id);
@@ -9356,6 +9544,8 @@ function runSkillInner(id, optRun) {
         if (dest == null) { lines.push("先选撞击终点区域。"); return paintSkillLog(lines.join("\n")); }
         if (!tgt) { lines.push("先选到达后攻击的敌人。"); return paintSkillLog(lines.join("\n")); }
         const dist = zoneDist(a.zone, dest, state.zoneMode);
+        // 一路开过去也是地面移动：不稳桥梁照常 −1d6，塌了就坠落、撞击落空
+        if (!crossGapsForced(a, a.zone, dest, lines, false)) return paintSkillLog(lines.join("\n"));
         a.zone = dest;
         // 全速狂飙（启动引擎+）：额外消耗所有燃油，每点额外 1 击破
         const fuelBrk = fl && fl.picks.mode === "full" ? takeFuel() : 0;

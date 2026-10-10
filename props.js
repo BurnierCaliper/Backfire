@@ -131,10 +131,27 @@ function syncBatteryShields(notes) {
   return notes;
 }
 
+/** 战斗中召唤 / 生成的机械类单位：补上同阵营超充能电池的护盾（只补还没有电池护盾的，
+ *  不动已有的层顺序——错位这类交换内外层的效果还在生效时也不会被打乱） */
+function grantMissingBatteryShields(notes) {
+  notes = notes || [];
+  if (!(state.props || []).some(p => p.kind === "battery")) return notes;
+  (state.units || []).forEach(u => {
+    if (!u || u.hidden || u.dead || u._shiftSwapped || !isMechanicalUnit(u)) return;
+    if ((u.layers || []).some(l => l.batteryShield)) return;
+    const want = batteryBonusFor(u);
+    if (want <= 0) return;
+    u.layers = [{ type: "shield", current: want, max: want, batteryShield: true }].concat(u.layers || []);
+    notes.push(`${u.name} 获得电池机械护盾 ${want}（最外层）。`);
+  });
+  return notes;
+}
+
 function refillBatteryFactionShields(notes) {
   notes = notes || [];
   const bats = (state.props || []).filter(p => p.kind === "battery");
   if (!bats.length) return notes;
+  grantMissingBatteryShields(notes);   // 这一回合新上场的机械单位先补上电池护盾
   (state.units || []).forEach(u => {
     if (u.hidden || u.dead) return;
     if (!bats.some(p => unitMatchesPropFaction(u, p))) return;

@@ -523,6 +523,7 @@ test("灯的普通攻击：分步选目标里有危墙和同区配置物，打�
 
 test("灯的普通攻击耗圣盾打距离 1 的配置物：扣 1 圣盾；没圣盾时不花行动点", () => {
   const { c, st, tou, use } = touField();
+  st.gaps["1-2"] = c.emptyGap();   // 这里测射程：危墙倒塌之前打不到墙对面的配置物（手册第八章），先把墙拿掉
   const p = c.makeProp("battery", 2, 1);
   st.props.push(p);
   tou.ap = 2; tou.resources.shield = 1;
