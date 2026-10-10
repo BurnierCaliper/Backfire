@@ -731,3 +731,29 @@ test("联机：玩家悬停单位 / 配置物，看到图鉴描述和身上效�
   await alice.waitForFunction(() => /爆炸桶[\s\S]*耐久/.test(document.querySelector(".unit-tip.show")?.textContent || ""));
   assert.deepEqual(f.errors, []);
 });
+
+test("联机：「消息」列表来新消息不再跳回最上面——在底部就贴底，往上翻着看旧的就停在原处", { timeout: 120000 }, async t => {
+  const fx = await fixture(t); if (!fx) return;
+  const { host, alice, errors } = fx;
+  const list = '#online-panel [data-keep-scroll="messages"]';
+  for (let i = 1; i <= 14; i++) await submit(host, { type: "gm.msg", to: "all", text: `第 ${i} 条：` + "前面的路被沙暴盖住了，".repeat(3) });
+  await alice.waitForFunction(sel => (document.querySelector(sel)?.children.length || 0) >= 14, list);
+  const metrics = () => alice.evaluate(sel => {
+    const el = document.querySelector(sel);
+    return { top: el.scrollTop, gap: el.scrollHeight - el.scrollTop - el.clientHeight, overflow: el.scrollHeight > el.clientHeight + 10 };
+  }, list);
+  let m = await metrics();
+  assert.ok(m.overflow, "消息够多，列表要能滚");
+  assert.ok(m.gap < 24, "从没滚过：贴底显示最新的消息 " + JSON.stringify(m));
+  await submit(host, { type: "gm.msg", to: "all", text: "第 15 条" });
+  await alice.waitForFunction(sel => document.querySelector(sel)?.innerText.includes("第 15 条"), list);
+  m = await metrics();
+  assert.ok(m.gap < 24, "在底部时来新消息：继续贴底（以前整块重画，跳回最上面）" + JSON.stringify(m));
+  // 往上翻到中间看旧消息
+  await alice.evaluate(sel => { const el = document.querySelector(sel); el.scrollTop = 40; el.dispatchEvent(new Event("scroll")); }, list);
+  await submit(host, { type: "gm.msg", to: "all", text: "第 16 条" });
+  await alice.waitForFunction(sel => document.querySelector(sel)?.innerText.includes("第 16 条"), list);
+  m = await metrics();
+  assert.ok(Math.abs(m.top - 40) <= 1, "往上翻着看旧消息时来新消息：停在原处 " + JSON.stringify(m));
+  assert.deepEqual(errors, []);
+});

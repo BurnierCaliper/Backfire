@@ -142,12 +142,30 @@
     const onCompEnd = () => { composing = false; if (deferred) { deferred = false; setTimeout(() => { if (!destroyed) render(); }, 0); } };
     document.addEventListener("compositionstart", onCompStart, true);
     document.addEventListener("compositionend", onCompEnd, true);
+    // 「消息」「大厅交流」这类自带滚动条的列表（data-keep-scroll）：整块重画会换成新的列表、滚动位置归零，
+    // 以前每来一条消息就跳回最上面。记下玩家把每个列表滚到了哪：在底部（或从没滚过）就继续贴底看新消息，往上翻着看旧的就停在原处
+    const keptScroll = {};
+    const onListScroll = e => {
+      const el = e.target;
+      if (!el || !el.dataset || !el.dataset.keepScroll) return;
+      keptScroll[el.dataset.keepScroll] = { top: el.scrollTop, bottom: el.scrollHeight - el.scrollTop - el.clientHeight < 24 };
+    };
+    document.addEventListener("scroll", onListScroll, true);
+    function restoreScroll(node) {
+      node.querySelectorAll("[data-keep-scroll]").forEach(el => {
+        const kept = keptScroll[el.dataset.keepScroll];
+        el.scrollTop = !kept || kept.bottom ? el.scrollHeight : kept.top;
+      });
+    }
     function html(node, markup, key) {
       if (lastMarkup[key] === markup) return;
       if (composing && node.contains(document.activeElement)) { deferred = true; return; }
       const focused = document.activeElement, id = focused && node.contains(focused) ? focused.id : "";
       const start = focused && typeof focused.selectionStart === "number" ? focused.selectionStart : null;
+      const nodeTop = node.scrollTop;
       lastMarkup[key] = markup; node.innerHTML = markup;
+      if (nodeTop) node.scrollTop = nodeTop;   // 面板 / 舞台自己的滚动位置也不动
+      restoreScroll(node);
       if (id && byId(id)) { const el = byId(id); el.focus({ preventScroll: true }); if (start != null && el.setSelectionRange) { try { el.setSelectionRange(start, start); } catch (_) {} } }
     }
     function entryMarkup() {
@@ -160,7 +178,7 @@
     }
     function messagesMarkup() {
       const rows = historyRows;
-      return `<section class="ol-messages"><h3>消息</h3><p class="ol-muted">消息保存在主持人设备；私信仅双方可见。</p>${typeof api.messageHistory === "function" && historyHasMore ? button(historyLoading ? "加载中…" : "查看更早消息", "messageHistory", "", historyLoading || paused()) : ""}<ol aria-live="polite">${rows.map(m => `<li data-message-id="${esc(m.id)}"><div><b>${esc(playerName(m.from))}</b> <small>${m.to === "all" ? "给全体" : m.from === own() ? "给 " + esc(playerName(m.to)) : "仅你可见"}</small></div><p>${esc(m.text)}</p></li>`).join("") || '<li class="ol-muted">还没有消息。</li>'}</ol><form id="ol-message-form">${view.isHost ? `<label>收件人<select id="ol-to" data-field="to">${option("all", "全体玩家", form.to === "all")}${players().filter(p => !p.gm).map(p => option(p.id, p.name, form.to === p.id)).join("")}</select></label>` : '<p class="ol-muted">回复只发送给主持人。</p>'}<label class="ol-sr-only" for="ol-message">消息正文</label><textarea id="ol-message" data-field="text" maxlength="2000" rows="3" placeholder="写一条消息…">${esc(form.text)}</textarea><button type="submit" class="ol-button ol-primary"${disabled() ? " disabled" : ""}>${view.isHost ? "发送消息" : "回复主持人"}</button></form></section>`;
+      return `<section class="ol-messages"><h3>消息</h3><p class="ol-muted">消息保存在主持人设备；私信仅双方可见。</p>${typeof api.messageHistory === "function" && historyHasMore ? button(historyLoading ? "加载中…" : "查看更早消息", "messageHistory", "", historyLoading || paused()) : ""}<ol aria-live="polite" data-keep-scroll="messages">${rows.map(m => `<li data-message-id="${esc(m.id)}"><div><b>${esc(playerName(m.from))}</b> <small>${m.to === "all" ? "给全体" : m.from === own() ? "给 " + esc(playerName(m.to)) : "仅你可见"}</small></div><p>${esc(m.text)}</p></li>`).join("") || '<li class="ol-muted">还没有消息。</li>'}</ol><form id="ol-message-form">${view.isHost ? `<label>收件人<select id="ol-to" data-field="to">${option("all", "全体玩家", form.to === "all")}${players().filter(p => !p.gm).map(p => option(p.id, p.name, form.to === p.id)).join("")}</select></label>` : '<p class="ol-muted">回复只发送给主持人。</p>'}<label class="ol-sr-only" for="ol-message">消息正文</label><textarea id="ol-message" data-field="text" maxlength="2000" rows="3" placeholder="写一条消息…">${esc(form.text)}</textarea><button type="submit" class="ol-button ol-primary"${disabled() ? " disabled" : ""}>${view.isHost ? "发送消息" : "回复主持人"}</button></form></section>`;
     }
     function mergeMessages(rows) {
       const unique = new Map();
@@ -188,7 +206,7 @@
       return `<div class="ol-card"><header><div><span class="ol-muted">${starting ? "大厅" : "联机房间"}</span><div class="ol-code-row"><h2 class="ol-code">${esc(view.roomCode)}</h2>${view.roomCode ? button("复制房间码", "copyCode") : ""}</div></div>${canClose ? button("收起", "close") : ""}</header><p class="ol-connection" role="status">${esc(paused() ? view.status?.connected ? "房主离线，等待恢复" : "连接中断，正在重连" : "已连接")}</p>${rosterMarkup()}${starting ? `<footer>${view.isHost ? button("开始跑团", "start", "", disabled() || !players().some(p => !p.gm && p.online), true) : '<p class="ol-muted">等待主持人分配角色并开始。</p>'}</footer>` : ""}${starting ? lobbyChatMarkup() : ""}${messagesMarkup()}<footer>${button("重新连接", "reconnect", "", pending)}${button(view.isHost ? "离开并保存" : "离开房间", "leave", "", pending)}</footer><p class="ol-notice" role="status">${esc(notice || view.notice || view.packet?.systemNotice || (view.storageError ? "本机保存失败，请保持页面打开并检查存储空间。" : ""))}</p></div>`;
     }
     function lobbyChatMarkup() {
-      return `<section class="ol-messages"><h3>大厅交流</h3><ol aria-live="polite">${(hs().chat || []).map(m => `<li><b>${esc(m.name || m.operatorName || "玩家")}</b><p>${esc(m.text)}</p></li>`).join("") || '<li class="ol-muted">在这里与所有人商量准备事项。</li>'}</ol><form id="ol-lobby-chat"><label class="ol-sr-only" for="ol-lobby-text">大厅聊天</label><input id="ol-lobby-text" data-field="chatText" maxlength="500" value="${esc(form.chatText)}" placeholder="所有人都能看到…"><button class="ol-button" type="submit"${disabled() ? " disabled" : ""}>发送到大厅</button></form></section>`;
+      return `<section class="ol-messages"><h3>大厅交流</h3><ol aria-live="polite" data-keep-scroll="lobby">${(hs().chat || []).map(m => `<li><b>${esc(m.name || m.operatorName || "玩家")}</b><p>${esc(m.text)}</p></li>`).join("") || '<li class="ol-muted">在这里与所有人商量准备事项。</li>'}</ol><form id="ol-lobby-chat"><label class="ol-sr-only" for="ol-lobby-text">大厅聊天</label><input id="ol-lobby-text" data-field="chatText" maxlength="500" value="${esc(form.chatText)}" placeholder="所有人都能看到…"><button class="ol-button" type="submit"${disabled() ? " disabled" : ""}>发送到大厅</button></form></section>`;
     }
     function fieldsMarkup(data, zone) {
       const field = data.fields?.[zone] || {}, parts = [];
@@ -511,7 +529,7 @@
         observeMessages();
       }
       panel.hidden = !(panelOpen || view.active && view.screen === "lobby");
-      if (!panel.hidden) html(panel, view.active ? roomMarkup() : entryMarkup(), "panel");
+      if (!panel.hidden) { html(panel, view.active ? roomMarkup() : entryMarkup(), "panel"); restoreScroll(panel); }
       renderSide();
       mountHostChat();
       if (!stage.hidden) html(stage, `${notice || view.notice || view.packet?.systemNotice ? `<p class="ol-notice" role="status">${esc(notice || view.notice || view.packet?.systemNotice)}</p>` : ""}${stageMarkup()}`, "stage");
@@ -662,7 +680,7 @@
     const instance = { render, open(which = "join") { entry = which; panelOpen = true; render(); }, destroy() {
       destroyed = true; playbackGeneration++; actionGeneration++; historyGeneration++; clearTimeout(toastTimer);
       document.removeEventListener("compositionstart", onCompStart, true); document.removeEventListener("compositionend", onCompEnd, true);
-      document.removeEventListener("click", onRollOpen); clearTimeout(titleTimer);
+      document.removeEventListener("click", onRollOpen); document.removeEventListener("scroll", onListScroll, true); clearTimeout(titleTimer);
       while (hostMounts.length) hostMounts.pop().remove(); document.body.classList.remove("ol-has-side", "ol-host-online", "ol-in-battle");
       for (const off of unsubs) if (typeof off === "function") off();
       for (const node of [...nodes, ...titleButtons]) node.remove();
