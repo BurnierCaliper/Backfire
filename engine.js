@@ -301,9 +301,9 @@ const SKILL_RANGE = {
   tou_sonic: { min: 0, max: 1 },
   tou_start: { min: 0, max: 1 },      // 先移动 ≤1，再对到达后的同区敌人施加错位
   mochi_pounce: { min: 0, max: 1 },   // 跃向距离 1 的敌人，或带走同区敌人
-  // 针尖把两人连在一起：对刺入目标出手不受「距离1」限制（刺入超过距离 1 会自己断）
-  nora_aa: { min: 0, max: 1 },
+  // 诺拉普攻的射程随刺入变化，见下面的 SKILL_RANGE_BY_STATE
   nora_needle: { min: 0, max: 1 },
+  latte_love: { min: 0, max: 99 },    // 爱意：移动到一名友方的区域（提示里的「同区」指移动之后）
   // 焰袭由夕夏在收回武器后结算，射程按夕夏算，技能内部另有判定。
   // 写在这里是为了避免提示里的「不同区」被解析成「同区」。
   berniel_flare: { min: 0, max: 99 },
@@ -331,7 +331,7 @@ const SKILL_RANGE = {
   ras_dump: { min: 0, max: 1 },      // 泄能：任意距离 = 距离 0 或 1
   role_pull: { min: 0, max: 1 },     // 拉拽「从任意距离拉到此区域」：提示文字没写距离，按任意距离 = 0 或 1
   ras_flee: { min: 0, max: 99 },
-  edc_shock: { min: 0, max: 1 },
+  edc_shock: { min: 1, max: 1 },      // 电流冲击：距离 1 的敌人
   edc_flash: { min: 0, max: 0 },
   // 龙哥：手杖近距离、霰弹枪远距离（距离 1），按分步里选的模式在技能内部再判定
   longge_aa: { min: 0, max: 1 },
@@ -360,7 +360,9 @@ const SKILL_TARGET_SIDE = {
 /** 射程随状态变的技能（例如绯秋的普攻按刀势）。返回 {min,max}，不在表里返回 null */
 const SKILL_RANGE_BY_STATE = {
   // 拔刀 / 胁构：只打同区；居合：先移动 1 距离再出刀，所以最远打到距离 1
-  hiaki_aa: (a) => ((a && a.resources && a.resources.stance) === "iai" ? { min: 0, max: 1 } : { min: 0, max: 0 })
+  hiaki_aa: (a) => ((a && a.resources && a.resources.stance) === "iai" ? { min: 0, max: 1 } : { min: 0, max: 0 }),
+  // 诺拉普攻：没有刺入时是「距离 1 的敌人」；有刺入时针尖把两人连在一起，刺入目标在同区也能打（刺入超过距离 1 会自己断）
+  nora_aa: (a) => (typeof piercedTargets === "function" && a && piercedTargets(a).length ? { min: 0, max: 1 } : { min: 1, max: 1 })
 };
 /** 技能射程：先看随状态变的表，再看固定表（SKILL_RANGE）。都没写返回 null（由提示文字推断） */
 function skillRangeFor(actor, id) {
@@ -1027,7 +1029,10 @@ function resolveAttack(ctx) {
   const broke = defBefore > 0 && defAfter <= 0;
   if (broke) {
     add("架势归零：目标将晕眩，直到其下一次行动。");
-    if (t.flying) {
+    if (t.flying && t.resources && t.resources.mecha) {
+      // 瑞比机甲被击落：结束机甲，瑞比和明特各自受坠落伤害（app.js · exitMecha）；以前这里先按整台机甲扣一次 20%，叠了两次
+      add("机甲被击落：结束机甲模式，瑞比和明特分别受到坠落伤害。");
+    } else if (t.flying) {
       knockdownHp = Math.floor(totalMaxHp(t) * 0.2);
       add(`飞行单位被击破：强制击落，并扣除 20% 最大生命 = ${knockdownHp}（真伤，应用时从外层扣）。`);
     }

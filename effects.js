@@ -72,6 +72,7 @@ function overloadRoundStart(u, notes) {
     if (l._overloadMax != null) { l.max = l._overloadMax; delete l._overloadMax; }
     l.current = 0;
   });
+  if (had && typeof dropMagnetShield === "function") dropMagnetShield(u);   // 川川给的护盾被过载清零：磁场护盾标记跟着作废
   notes.push(`${u.name} 过载结束${had ? "：护盾清零" : ""}。`);
   return had;
 }
