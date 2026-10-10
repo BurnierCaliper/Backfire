@@ -158,6 +158,12 @@ const EnemyAI = (function () {
    *  only：强制目标（嘲讽 / 决一死战）时只算那一个人。找不到返回 null */
   function firingStep(u, spec, prey, target, list, only) {
     if (!canPayMove(u)) return null;
+    // 手册：强盗头子守在亡命之王身边（远处的人用远程手段打），不为了找站位离开王；被挟持的王也不动
+    if (u.kit === "bandit_boss" && !(u.resources && u.resources.mutinied)) {
+      const king = typeof findKit === "function" ? findKit("outlaw_king", state.units) : null;
+      if (king && !king.dead) return null;
+    }
+    if (u.kit === "outlaw_king" && u.resources && u.resources.hostage) return null;
     const sids = (list || []).map(s => s.id).filter(id => id && !NO_TARGET[id]);
     if (!sids.length) return null;
     const pool = only ? [only] : prey;

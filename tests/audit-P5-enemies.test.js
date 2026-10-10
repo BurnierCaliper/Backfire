@@ -190,12 +190,13 @@ test("投料无人机 / 播撒者的腐蚀只在打中时施加：被协助格�
   assert.equal(k2.statuses.corr, false, "喷洒射程是远距离：同区打不到，也不上腐蚀");
 });
 
-test("人形沙灵：身边只有同区的人就不出手（不空放）；隔壁区有人就打隔壁区的", () => {
+test("人形沙灵：身边只有同区的人不空放，先走到隔壁区去打；隔壁区有人就打隔壁区的", () => {
   const { c, S, P, E } = field([{ id: "sand_human", lv: 3, zone: 2 }]);
   const s = E("sand_human"), k = P("kolt"), h = P("helu");
   k.zone = 2; h.zone = 2;
   S.combatPhase = "enemy"; c.refreshEnemyEconomy(s);
-  assert.equal(c.EnemyAI.plan(s), null);
+  const away = c.EnemyAI.plan(s);
+  assert.ok(away && /移动到 1 区/.test(away.meta.skillName), "不空放，走一步到能打到人的站位");
   h.zone = 1;
   const plan = c.EnemyAI.plan(s);
   assert.equal(plan.meta.targetId, h.id);
