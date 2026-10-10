@@ -1360,6 +1360,17 @@ test("悬停技能就预演：要选目标的技能（柯尔特普攻）每个�
   assert.deepEqual(dmg, dmg.slice().sort((a, b) => b - a), "按伤害从高到低");
   for (const f of foes) assert.match(await page.textContent(`.unit-wrap[data-id="${f}"] .pvtag.show`), /\d[\s\S]*击破/, "敌人卡上有伤害牌");
   assert.equal(await page.locator(`.unit-wrap[data-id="${kolt}"] .pvtag.show`).count(), 0, "别的单位的变化不画");
+  // 好几张卡同时出牌子：缩小、压在自己卡片的下边上，不盖住别的卡，也不压自己的血条和架势格
+  const tagLayout = await page.evaluate(() => {
+    const hit = (a, b) => a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1;
+    const wraps = [...document.querySelectorAll(".unit-wrap")];
+    return [...document.querySelectorAll(".pvtag.show")].map(t => {
+      const own = t.closest(".unit-wrap"), r = t.getBoundingClientRect();
+      const under = [...wraps.filter(w => w !== own), own.querySelector(".u-hp"), ...own.querySelectorAll(".pip")];
+      return { compact: t.classList.contains("compact"), covers: under.filter(x => hit(r, x.getBoundingClientRect())).length };
+    });
+  });
+  assert.ok(foes.length > 1 && tagLayout.every(x => x.compact && x.covers === 0), JSON.stringify(tagLayout));
   assert.equal(await apOf(page, kolt), ap0);
   assert.equal(await page.evaluate(() => GAME.arm), null, "没有进入选目标");
   await page.mouse.move(5, 5);
@@ -1383,6 +1394,7 @@ test("悬停技能就预演：要选目标的技能（柯尔特普攻）每个�
   await page.waitForSelector(`.unit-wrap[data-id="${yuito}"] .pvtag.show`);
   assert.match(await page.textContent(`.unit-wrap[data-id="${yuito}"] .pvtag.show`), /资源：咖啡豆 \d+ · 咖啡液 \d+ → 咖啡豆 \d+ · 咖啡液 \d+/);
   assert.match(await page.textContent("#g-pvbox"), /结人 资源：/);
+  assert.equal(await page.locator(".pvtag.show.compact").count(), 0, "瞄准一个目标：牌子照旧是卡片上方的大牌子");
   await page.keyboard.press("Escape");
   assert.deepEqual(o.errors, []);
 });

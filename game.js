@@ -1654,7 +1654,7 @@
       c.segs.forEach(sg => { if (!sg) return; sg.sure.style.width = sg.maybe.style.width = sg.heal.style.width = "0"; });
       c.pips.forEach(p => p.classList.remove("pv", "maybe"));
       c.wrap.classList.remove("pv-stun", "maybe", "ice", "pv-adv", "pv-dis");
-      c.tag.classList.remove("show");
+      c.tag.classList.remove("show", "compact");
     });
     if (!G.arm) idleBox();
   }
@@ -1727,6 +1727,14 @@
     }
   }
 
+  /** 好几张卡同时出伤害 / 治疗 / 击破这类数值牌时（悬停技能对每个候选目标的预演、范围技能）：
+   *  牌子收进卡片右下角、字小一号。不然下一排卡的牌子浮在卡片上方，正好盖住上一排卡的血量 */
+  function compactTags() {
+    const shown = [...cards.values()].filter(c => c.tag.classList.contains("show"));
+    const many = shown.filter(c => c.tag.querySelector(".dmg, .heal, .brk, .stun, .kill")).length > 1;
+    shown.forEach(c => { c.tag.classList.toggle("compact", many); if (many) c.tag.classList.remove("below"); });
+  }
+
   /** opts.cost：预览框标题下面先写一行消耗（悬停技能的预演用） */
   function showPreview(pv, title, opts) {
     clearPreview();
@@ -1735,6 +1743,7 @@
       if (!c || !p.changed) return;
       paintUnitPreview(c, p);
     });
+    compactTags();
     const box = $("g-pvbox");
     box.classList.add("live");   // 手机：预览浮在操作栏上面
     const lines = pv.lines.filter(t => !COST_LINE.test(t)).slice(0, 18);
@@ -1867,6 +1876,7 @@
     const rows = t.rows.filter(r => r.pv.meaningful).map(r => ({ r, p: r.pv.units.get(r.id) }))
       .sort((a, b) => num(b, "dmgHi") - num(a, "dmgHi") || num(b, "brHi") - num(a, "brHi") || (a.r.ally ? 1 : 0) - (b.r.ally ? 1 : 0));
     rows.forEach(({ r, p }) => { const c = cards.get(r.id); if (c && p && p.changed) paintUnitPreview(c, p); });
+    compactTags();
     if (!rows.length) {
       const why = (t.rows[0] && t.rows[0].pv.reason) || "没有可选目标";
       skillPvBox(`${sk.name} · 预演`, cost, `<div class="ln key pv-why">${esc(why)}</div>`);

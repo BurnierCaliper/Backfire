@@ -496,6 +496,22 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
 .pvtag .heal { font-family: var(--num); font-size: 20px; color: var(--heal); }
 .pvtag .note { font-size: 12px; color: var(--muted); }
 .pvtag .bad { font-size: 13px; color: var(--foe); }
+/* 好几张卡同时出数值牌（game.js · compactTags）：缩小、压在卡片右下角的下边上。
+ * 不盖住上一排的卡，也压不到自己的血条和架势格（要打掉的那几格会闪） */
+.pvtag.compact {
+  left: auto; right: 6px; top: auto; bottom: -4px; transform: none;
+  max-width: calc(100% - 12px); flex-wrap: wrap; justify-content: flex-end; align-items: center;
+  gap: 1px 5px; padding: 1px 5px; line-height: 1; white-space: normal;
+}
+.pvtag.compact > span { white-space: nowrap; line-height: 1; }
+.pvtag.compact > .note { white-space: normal; }
+.pvtag.compact .dmg { font-size: 14px; }
+.pvtag.compact .heal { font-size: 13px; }
+.pvtag.compact :is(.brk, .stun, .kill, .note, .bad) { font-size: 11px; }
+.pvtag.compact :is(.adv, .disadv) { font-size: 10px; padding: 1px 3px 0; letter-spacing: .05em; }
+.g-zone.dense-3 .pvtag.compact { padding: 0 4px; }
+.g-zone.dense-3 .pvtag.compact .dmg { font-size: 12px; }
+.g-zone.dense-3 .pvtag.compact :is(.brk, .stun, .kill, .note, .bad, .adv, .disadv) { font-size: 10px; }
 
 /* ---------- 演出层 ---------- */
 .g-fx { position: fixed; inset: 0; pointer-events: none; z-index: 30; }
@@ -877,6 +893,7 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
 .g-app[data-weather="snow"] .sk .cost { color: #4d5660; }
 .g-app[data-weather="snow"] .endturn small { color: #4d5660; }
 .g-app[data-weather="snow"] .pvbox, .g-app[data-weather="snow"] .lg { border-color: #cfd6de; }
+.g-app[data-weather="snow"] .pvbox .ln.pv-why { color: var(--foe); }   /* 悬停技能「不能用：…」照旧是红字 */
 
 .g-top a.g-btn { color: var(--bone); }
 .g-app[data-weather="snow"] .g-top a.g-btn { color: #2a3138; }
