@@ -575,21 +575,21 @@ test("联机：四区方形棋盘，玩家画面摆成 2×2，4 区和所有间�
   await host.evaluate(() => battleTemplateSave({ name: "仓库", board: "square4", enemies: [{ preset: "thug_knife", level: 1, zone: 4 }], fields: { 4: { ice: true } }, gaps: { "2-4": { type: "wall", hp: 20 } } }));
   await host.click('#tr-tabs [data-tab="battles"]');
   await host.click('[data-bt^="fight:"]');
-  await alice.waitForFunction(() => document.querySelectorAll("#online-stage .ol-zone").length === 4);
+  await alice.waitForFunction(() => document.querySelectorAll("#online-stage .ol-battle .g-zone").length === 4);
   const r = await alice.evaluate(() => {
-    const zones = [...document.querySelectorAll("#online-stage .ol-zone")];
-    const box = id => zones.find(z => z.querySelector("h2").textContent === id + " 区").getBoundingClientRect();
-    const [b1, b2, b3, b4] = [1, 2, 3, 4].map(box);
+    const zone = id => document.querySelector(`#online-stage .ol-battle .g-zone[data-num="${id}"]`);
+    const [b1, b2, b3, b4] = [1, 2, 3, 4].map(id => zone(id).getBoundingClientRect());
+    const gap = k => (document.querySelector(`#online-stage .ol-battle .g-gap[data-key="${k}"]`) || {}).textContent || "";
     return { grid: Math.abs(b1.top - b2.top) < 2 && Math.abs(b3.top - b4.top) < 2 && b3.top > b1.bottom - 1 && Math.abs(b1.left - b3.left) < 2,
-      foeIn4: /狂徒/.test(zones.find(z => z.querySelector("h2").textContent === "4 区").textContent),
-      ice4: /冰面/.test(zones.find(z => z.querySelector("h2").textContent === "4 区").textContent),
-      gaps: document.querySelector("#online-stage .ol-gaps").textContent };
+      foeIn4: /狂徒/.test(zone(4).textContent), ice4: /冻土/.test(zone(4).textContent), ice4cls: zone(4).classList.contains("field-ice"),
+      gap24: gap("2-4"), gap13: gap("1-3") };
   });
-  assert.equal(r.grid, true, "2×2 排版");
+  assert.equal(r.grid, true, "2×2 排版（和战斗画面同一种棋盘）");
   assert.equal(r.foeIn4, true);
   assert.equal(r.ice4, true);
-  assert.match(r.gaps, /2 ↔ 4：危墙 · 耐久 20/);
-  assert.match(r.gaps, /1 ↔ 3/);
+  assert.equal(r.ice4cls, true);
+  assert.match(r.gap24, /危墙\s*20/);
+  assert.match(r.gap13, /畅通/);
   if (process.env.BACKFIRE_SHOTS) await alice.screenshot({ path: path.join(process.env.BACKFIRE_SHOTS, "board-square4.png") });
   assert.deepEqual(f.errors, []);
 });
@@ -721,13 +721,13 @@ test("联机：玩家悬停单位 / 配置物，看到图鉴描述和身上效�
   await host.evaluate(() => battleTemplateSave({ name: "悬停", board: 2, enemies: [{ preset: "thug_knife", level: 1, zone: 2 }], props: [{ kind: "boom", zone: 2, faction: "enemy" }] }));
   await host.click('#tr-tabs [data-tab="battles"]');
   await host.click('[data-bt^="fight:"]');
-  await alice.waitForFunction(() => document.querySelectorAll("#online-stage .ol-enemy").length === 1);
-  await alice.hover("#online-stage .ol-enemy");
+  await alice.waitForFunction(() => document.querySelectorAll("#online-stage .ol-battle .unit.foe:not(.prop)").length === 1);
+  await alice.hover("#online-stage .ol-battle .unit-wrap:has(.unit.foe:not(.prop))");
   await alice.waitForSelector(".unit-tip.show");
   const txt = await alice.textContent(".unit-tip");
   assert.match(txt, /行动方式/);
   await alice.mouse.move(2, 2);
-  await alice.hover("#online-stage .ol-prop");
+  await alice.hover("#online-stage .ol-battle .unit-wrap[data-prop-id]");
   await alice.waitForFunction(() => /爆炸桶[\s\S]*耐久/.test(document.querySelector(".unit-tip.show")?.textContent || ""));
   assert.deepEqual(f.errors, []);
 });

@@ -1255,3 +1255,24 @@ test("悬停单位：浮窗里有图鉴描述和身上效果的文字", async (t
   assert.match(await page.textContent(".unit-tip"), /爆炸桶[\s\S]*耐久/);
   assert.deepEqual(errors, []);
 });
+
+test("战斗：Esc 关掉队伍配置 / 战场配置 / 背包 / 后台等面板；计算器旧弹窗不漏到页面上", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  const legacy = await page.evaluate(() => ({
+    assist: document.querySelectorAll("[id=assistModal]").length,
+    loose: [...document.querySelectorAll(".modal")].filter(m => !m.closest("#calc-core")).map(m => m.id)
+  }));
+  assert.deepEqual(legacy, { assist: 1, loose: [] });
+  await newTrpg(page);
+  await page.click("#tr-fight");
+  await page.waitForSelector("#g-start");
+  for (const [btn, sheet] of [["#g-party-cfg", "#g-party-sheet"], ["#g-field-cfg", "#g-field-sheet"], ["#g-bag", "#g-bag-sheet"], ["#g-bs", "#g-bs-sheet"]]) {
+    await page.click(btn);
+    await page.waitForSelector(sheet + ".show");
+    await page.keyboard.press("Escape");
+    await page.waitForSelector(sheet + ":not(.show)", { state: "attached" });
+  }
+  assert.equal(await page.evaluate(() => GAME.bsOpen), false);
+  assert.deepEqual(o.errors, []);
+});

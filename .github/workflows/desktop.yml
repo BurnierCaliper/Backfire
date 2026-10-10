@@ -1,0 +1,25 @@
+# 打 Windows 桌面版（tools/desktop/build.sh），打好的压缩包放在这次运行的 Artifacts 里下载。
+# 触发：Actions 页面手动点「Run workflow」，或者推送改到 tools/desktop/ 的提交。
+name: Windows 桌面版
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "tools/desktop/**"
+      - ".github/workflows/desktop.yml"
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 打包
+        run: tools/desktop/build.sh "$GITHUB_WORKSPACE/dist"
+      - name: 上传
+        uses: actions/upload-artifact@v4
+        with:
+          name: Backfire-win-x64
+          path: dist/Backfire-win32-x64
+          retention-days: 30

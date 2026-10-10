@@ -93,6 +93,8 @@
       const tabs = { enemies: "敌人", units: "单位", props: "配置物", field: "地形", weather: "天气", attack: "安排攻击" };
       container.innerHTML = `<button id="ogm-toggle" type="button" data-action="toggle" aria-expanded="${open}" aria-controls="ogm-panel">${view.manualPhase ? "敌人待操作 · " : ""}主持人工具</button>${open ? `<section id="ogm-panel" aria-label="主持人工具面板"><header><h2>主持人工具</h2>${button("关闭", "close", 'aria-label="关闭主持人工具"')}</header><div class="ogm-toolbar">${check("ogm-silent", "静默（不写玩家记录）", silent)}<span class="ogm-muted">仅主持人</span></div><nav aria-label="主持人工具类别">${Object.entries(tabs).map(([k, label]) => button(label, "tab", `data-tab="${k}" aria-pressed="${tab === k}"`)).join("")}</nav><p id="ogm-notice" role="status"${notice ? "" : " hidden"}>${esc(notice)}</p><div class="ogm-content">${({ enemies: enemiesMarkup, units: unitMarkup, props: propMarkup, field: fieldMarkup, weather: weatherMarkup, attack: attackMarkup })[tab]()}</div></section>` : ""}`;
     }
+    // Esc closes the panel wherever focus is (capture phase, before the stage swallows the key).
+    function onKey(event) { if (event.key === "Escape" && open && container) { event.preventDefault(); event.stopPropagation(); open = false; refresh(); } }
     function refresh() { if (container?.contains(document.activeElement)) document.activeElement.blur(); render(); }
     async function send(command) {
       if (busy) return;
@@ -163,8 +165,9 @@
       if (cmd) void send(cmd);
     }
     const off = typeof bridge.subscribe === "function" ? bridge.subscribe(render) : null;
+    if (typeof document !== "undefined") document.addEventListener("keydown", onKey, true);
     render();
-    return { render: refresh, destroy() { if (typeof off === "function") off(); container?.remove(); container = null; } };
+    return { render: refresh, destroy() { if (typeof off === "function") off(); if (typeof document !== "undefined") document.removeEventListener("keydown", onKey, true); container?.remove(); container = null; } };
   }
   root.OnlineGMUI = { mount };
 })(typeof globalThis !== "undefined" ? globalThis : window);

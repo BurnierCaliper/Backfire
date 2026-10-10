@@ -52,7 +52,7 @@ async function open(t, mobile = false) {
     // when no rules state or battle engine exists in its environment.
     for (const name of ["GAME", "state", "BattleCommands", "dispatch", "skillFlowSteps", "previewOf", "Screens"]) Object.defineProperty(window, name, { configurable: true, get() { throw new Error("Display touched rules: " + name); } });
   });
-  await page.addScriptTag({ path: path.resolve(__dirname, "..", "online-ui.js") });
+  for (const file of ["hud-icons.js", "unit-card.js", "unit-tip.js", "online-battle.js", "online-ui.js"]) await page.addScriptTag({ path: path.resolve(__dirname, "..", file) });
   return { page, errors };
 }
 async function player(page, patch = {}) { await page.evaluate(patch => fixture.set({ active: true, isHost: false, identity: { id: "p1" }, screen: "battle", ...patch }), patch); }
@@ -73,21 +73,46 @@ test("D3 display: title create/join forms send explicit room options and preserv
   assert.deepEqual(o.errors, []);
 });
 
-test("D3 display: player submits final normal, flow and item commands without local rules or forecasts", async t => {
+test("D3 display: player picks skills from the skill bar and targets on the field, like the other modes", async t => {
   const o = await open(t); if (!o) return; const { page } = o; await player(page);
-  await page.locator('[data-online="actor"]').first().click();
-  await page.getByRole("button", { name: "普通攻击", exact: true }).click(); await page.getByRole("button", { name: "敌人", exact: true }).click();
-  assert.equal((await calls(page)).filter(c => c.kind === "submit").length, 0);
-  await page.click('[data-online="execute"]');
-  assert.deepEqual((await calls(page)).find(c => c.kind === "submit").args, { type: "skill", actor: "a", skill: "ruby_aa", target: "enemy", picks: {} });
-  await page.locator('[data-online="actor"]').first().click(); await page.getByRole("button", { name: "分步技能", exact: true }).click();
-  await page.getByRole("button", { name: "治疗", exact: true }).click(); await page.getByRole("button", { name: "绯秋", exact: true }).click();
-  const lastMenu = (await calls(page)).filter(c => c.kind === "menu").at(-1).args;
-  assert.deepEqual(lastMenu, { actor: "a", skill: "flow", picks: { mode: "heal", target: "b" } });
-  await page.click('[data-online="execute"]');
-  await page.locator('[data-online="actor"]').first().click(); await page.getByRole("button", { name: "使用道具", exact: true }).click();
-  await page.getByRole("button", { name: "医疗包", exact: true }).click(); await page.getByRole("button", { name: "绯秋", exact: true }).click(); await page.click('[data-online="execute"]');
-  assert.deepEqual((await calls(page)).filter(c => c.kind === "submit").at(-1).args, { type: "useItem", actor: "a", item: "medkit", target: "b", dest: null });
+  const submits = () => calls(page).then(c => c.filter(x => x.kind === "submit"));
+  // 轮到自己：不用点「选择行动」，技能栏自动出来
+  await page.waitForSelector('.ol-battle [data-ob-skill="ruby_aa"]');
+  assert.equal(await page.locator('[data-online="actor"]').count(), 0);
+  // 普通攻击：选技能 → 战场上敌人亮起 → 点敌人就出手
+  await page.click('[data-ob-skill="ruby_aa"]');
+  await page.waitForSelector('.unit-wrap[data-unit-id="enemy"].is-targetable');
+  assert.equal(await page.locator('.unit-wrap[data-unit-id="a"].is-targetable').count(), 0);
+  assert.equal((await submits()).length, 0);
+  await page.click('.unit-wrap[data-unit-id="enemy"]');
+  await page.waitForFunction(() => fixture.calls.some(c => c.kind === "submit"));
+  assert.deepEqual((await submits())[0].args, { type: "skill", actor: "a", skill: "ruby_aa", target: "enemy", picks: {} });
+  // 分步技能：提示栏里选模式，再在战场上点友方
+  await page.waitForSelector('[data-ob-skill="flow"]:not([disabled])');
+  await page.click('[data-ob-skill="flow"]');
+  await page.getByRole("button", { name: "治疗", exact: true }).click();
+  await page.waitForSelector('.unit-wrap[data-unit-id="b"].is-targetable');
+  await page.click('.unit-wrap[data-unit-id="b"]');
+  await page.waitForFunction(() => fixture.calls.filter(c => c.kind === "submit").length === 2);
+  assert.deepEqual((await calls(page)).filter(c => c.kind === "menu").find(c => c.args.picks && c.args.picks.target).args, { actor: "a", skill: "flow", picks: { mode: "heal", target: "b" } });
+  // 道具：选道具 → 点友方
+  await page.waitForSelector('[data-ob-skill="__item"]:not([disabled])');
+  await page.click('[data-ob-skill="__item"]');
+  await page.getByRole("button", { name: "医疗包", exact: true }).click();
+  await page.waitForSelector('.unit-wrap[data-unit-id="b"].is-targetable');
+  await page.click('.unit-wrap[data-unit-id="b"]');
+  await page.waitForFunction(() => fixture.calls.filter(c => c.kind === "submit").length === 3);
+  assert.deepEqual((await submits()).at(-1).args, { type: "useItem", actor: "a", item: "medkit", target: "b", dest: null });
+  // 选了技能以后 Esc 取消，回到技能栏
+  await page.waitForSelector('[data-ob-skill="ruby_aa"]:not([disabled])');
+  await page.click('[data-ob-skill="ruby_aa"]');
+  await page.waitForSelector('.unit-wrap[data-unit-id="enemy"].is-targetable');
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(() => !document.querySelector(".unit-wrap.is-targetable"));
+  // 结束行动
+  await page.click(".ol-battle .endturn");
+  await page.waitForFunction(() => fixture.calls.some(c => c.kind === "submit" && c.args.type === "endTurn"));
+  assert.equal((await submits()).length, 4);
   assert.deepEqual(o.errors, []);
 });
 
@@ -119,10 +144,10 @@ test("D3 display: incoming tape plays snapshots in sequence and never mutates re
     fixture.received = packet; fixture.before = JSON.stringify(packet); fixture.playing = fixture.receive(packet);
   });
   await page.locator(".ol-popup.ol-visible").waitFor();
-  assert.match(await page.locator('[data-unit-id="a"]').innerText(), /26 \/ 35/);
-  assert.equal(await page.locator('[data-online="actor"]').first().isDisabled(), true);
+  assert.match(await page.locator('[data-unit-id="a"]').innerText(), /26\s*\/\s*35/);
+  assert.equal(await page.locator(".ol-battle [data-ob-skill]").first().isDisabled(), true, "演出中不能操作");
   await page.evaluate(() => fixture.playing);
-  assert.equal(await page.locator('[data-online="actor"]').first().isDisabled(), false);
+  await page.waitForFunction(() => document.querySelector(".ol-battle [data-ob-skill]") && !document.querySelector(".ol-battle [data-ob-skill]").disabled);
   assert.equal(await page.evaluate(() => JSON.stringify(fixture.received) === fixture.before), true);
   assert.deepEqual(o.errors, []);
 });
@@ -143,31 +168,34 @@ test("D3 display: a resync replaces an in-flight old snapshot and prevents its l
     sync.state.units[0].layers[0].current = 33;
     await fixture.receive(sync);
   });
-  assert.match(await page.locator('[data-unit-id="a"]').innerText(), /33 \/ 35/);
+  assert.match(await page.locator('[data-unit-id="a"]').innerText(), /33\s*\/\s*35/);
   await page.evaluate(() => fixture.oldAnimation);
-  assert.match(await page.locator('[data-unit-id="a"]').innerText(), /33 \/ 35/);
+  assert.match(await page.locator('[data-unit-id="a"]').innerText(), /33\s*\/\s*35/);
   assert.equal(await page.locator(".ol-popup.ol-visible").count(), 0);
   assert.deepEqual(o.errors, []);
 });
 
 test("D3 display: resync invalidates an outstanding old action menu response", async t => {
   const o = await open(t); if (!o) return; const { page } = o; await player(page);
-  await page.evaluate(() => { OnlineGame.actionMenu = () => new Promise(resolve => { fixture.resolveMenu = resolve; }); });
-  await page.locator('[data-online="actor"]').first().click();
+  await page.waitForSelector('.ol-battle [data-ob-skill="ruby_aa"]');
+  await page.evaluate(() => { fixture.resolvers = []; OnlineGame.actionMenu = () => new Promise(resolve => { fixture.resolvers.push(resolve); }); });
+  await page.click('[data-ob-skill="ruby_aa"]');
   await page.evaluate(async () => {
+    const stale = fixture.resolvers[0];
     const sync = JSON.parse(JSON.stringify(fixture.view.packet)); sync.type = "resync"; sync.displayOnly = true; sync.screen = "battle"; sync.tape = [];
     await fixture.receive(sync);
-    fixture.resolveMenu({ type: "actionOptions", displayOnly: true, actor: "a", choices: { kind: "ready", title: "过期菜单", options: [], command: { type: "standUp", actor: "a" } } });
+    stale({ type: "actionOptions", displayOnly: true, actor: "a", choices: { kind: "ready", title: "过期菜单", options: [], command: { type: "standUp", actor: "a" } } });
   });
-  await page.waitForFunction(() => !document.querySelector('[data-online="actor"]').disabled);
-  assert.equal(await page.locator('[data-online="execute"]').count(), 0);
+  await page.waitForTimeout(200);
+  assert.equal((await calls(page)).filter(c => c.kind === "submit").length, 0, "过期的菜单不会被执行");
   assert.doesNotMatch(await page.locator("#online-stage").innerText(), /过期菜单/);
   assert.deepEqual(o.errors, []);
 });
 
 test("D3 display: paused connection disables action and reconnect leaves the display state intact", async t => {
   const o = await open(t); if (!o) return; const { page } = o; await player(page, { status: { connected: true, hostOnline: false, paused: true, roster: [] } });
-  assert.equal(await page.locator('[data-online="actor"]').first().isDisabled(), true);
+  assert.equal(await page.locator(".ol-battle .endturn").isDisabled(), true);
+  assert.equal(await page.locator(".ol-battle [data-ob-skill]").count(), 0);
   await page.click('[data-online="openRoom"]'); await page.click('[data-online="reconnect"]');
   assert.equal((await calls(page)).filter(c => c.kind === "reconnect").length, 1);
   assert.equal((await calls(page)).filter(c => c.kind === "submit" || c.kind === "menu").length, 0);
@@ -190,7 +218,8 @@ test("D3 display: join form, lobby public chat and public field changes use the 
   });
   assert.equal(await page.isVisible("#online-panel"), false);
   const shown = await page.locator("#online-stage").innerText();
-  assert.match(shown, /火场 2/); assert.match(shown, /损毁地面 6 \/ 30/); assert.match(shown, /危墙 · 耐久 9/); assert.match(shown, /机关门 · 关/); assert.match(shown, /主持人正在操控敌人/);
+  assert.match(shown, /火场 2/); assert.match(shown, /损毁地面 6 \/ 30/); assert.match(shown, /危墙\s*9/); assert.match(shown, /机关门\s*关/); assert.match(shown, /主持人正在操控敌人/);
+  assert.equal(await page.locator('.g-zone[data-num="1"].field-fire').count(), 1);
   assert.equal(await page.locator('[data-online="actor"]').count(), 0);
   assert.deepEqual(o.errors, []);
 });
