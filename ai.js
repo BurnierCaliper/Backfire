@@ -234,11 +234,12 @@ const EnemyAI = (function () {
       const thugs = state.units.filter(x =>
         !x.isPlayer && !x.dead && !x.hidden && /^(thug_|bandit_boss)/.test(x.kit || ""));
       const scattered = thugs.some(x => Number(x.zone) !== Number(u.zone));
-      // 回防只在需要时下：有人冲进他所在的区，或者这一回合他挨了打（身边没人替他挡）。
-      // 狂徒出去打人不算——以前只要有狂徒不在身边就下回防，狂徒每回合走向玩家、回合末又被召回，永远打不到人
+      // 回防只在他危险时下（回防会花掉狂徒的行动点）：有人冲进他所在的区、或这一回合他挨了打，
+      // 而且身边没有狂徒能替他挡（同区还有狂徒就不叫）。狂徒出去打人不算危险
       const pressed = prey.some(p => Number(p.zone) === Number(u.zone));
       const hurt = (Number(u.damagedThisTurn) || 0) > 0;
-      if (scattered && thugs.length >= 2 && (pressed || hurt) && has("en_king_hold") && u._aiHoldTurn !== state.turnNo) {
+      const guarded = thugs.some(x => x !== u && Number(x.zone) === Number(u.zone));
+      if (scattered && thugs.length >= 2 && !guarded && (pressed || hurt) && has("en_king_hold") && u._aiHoldTurn !== state.turnNo) {
         return "en_king_hold";
       }
       if (sameZone && has("en_king_kill")) return "en_king_kill";

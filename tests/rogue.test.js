@@ -251,7 +251,7 @@ test("升级到 4 级、5 级：要选属性点和职责技能；8 级不能加�
   if (a8) assert.ok(!R.choiceOptions(run, h.kit, a8.index).some(o => o.value === "str"));
 });
 
-test("濒死的角色在战斗结束后恢复到 1 点生命；武器人伤势带到下一场", () => {
+test("濒死的角色在战斗结束后恢复到 1 点生命；武器人不带伤（每场开战满血）", () => {
   const { c, run, R } = fresh(["kolt", "helu"], "R11");
   R.acceptTask(run, "main");
   while (!R.battleSpec(run)) { run.task.index++; }
@@ -263,7 +263,7 @@ test("濒死的角色在战斗结束后恢复到 1 点生命；武器人伤势�
   torque.layers[0].current = 5;
   R.finishBattle(run, "win");
   assert.deepEqual(plain(run.party[0].hp), [{ type: "flesh", current: 1 }]);
-  assert.equal(c.weaponCarryLayers("torque")[0].current, 5);
+  assert.equal(c.weaponCarryLayers("torque"), null);
 });
 
 test("战斗结束武器耐久 −1（手册）", () => {
@@ -581,15 +581,13 @@ test("守夜：有人守夜一定不会被偷袭；守夜的人不恢复，短�
   assert.throws(() => { run.task.nodes[run.task.index] = { type: "rest", done: false }; R.restAtNode(run, "long", { watch: "nobody" }); }, /守夜/);
 });
 
-test("武器人守夜：他的伤势和耐久不恢复，别人的照常", () => {
+test("武器人守夜：他的耐久不恢复（武器人每场开战本来就满血）", () => {
   const { c, run, R } = fresh(["kolt", "helu"], "AM5");
   atRest(run, R);
   const w = R.watchOptions(run).find(x => x.weapon);
   const S = c.S;
-  S.LEDGER.weapons = { [w.kit]: [{ type: "flesh", current: 1 }], other: [{ type: "flesh", current: 1 }] };
   S.LEDGER.dur[w.kit] = 1;
   R.restAtNode(run, "long", { watch: w.kit });
-  assert.deepEqual(Object.keys(S.LEDGER.weapons), [w.kit]);
   assert.equal(S.LEDGER.dur[w.kit], 1);
 });
 

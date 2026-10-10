@@ -36,28 +36,25 @@ function enemyHitsKolt(setupHelper, forced, baseBreak) {
   return { c, S, kolt, helu, lost: hp0 - c.totalHp(kolt) };
 }
 
-/* ---------- 1. 协助格挡成功：被保护者照常扣架势（最少留 1），格挡者不扣 ---------- */
+/* ---------- 1. 协助格挡成功：目标免伤且不扣架势，击破由格挡者承担（作者定，最少留 1） ---------- */
 
-test("协助格挡成功：目标免伤但仍扣架势（最少留 1），格挡者不扣；空手格挡成功受一半伤害，架势也最少留 1", () => {
+test("协助格挡成功：目标免伤且不扣架势，击破由格挡者承担（最少留 1）；失败照常受伤、失衡", () => {
   const ok = enemyHitsKolt(null, { roll: 1, ok: true });
   assert.equal(ok.lost, 0, "免伤");
-  assert.equal(ok.kolt.def, 1, "3 击破只扣到剩 1");
-  assert.equal(ok.kolt.stunned, false, "不会被格挡下来的一击打进失衡");
-  assert.equal(ok.helu.def, 4, "格挡者不扣架势");
-  // 击破不够打到 1 的照常扣
-  const small = enemyHitsKolt((c, S, kolt) => {}, { roll: 1, ok: true }, 1);
-  assert.equal(small.kolt.def, 1, "2 − 1 = 1");
-  // 失败：照常受伤、照常失衡
+  assert.equal(ok.kolt.def, 2, "目标不扣架势");
+  assert.equal(ok.kolt.stunned, false);
+  assert.equal(ok.helu.def, 1, "格挡者承担 3 击破：4 → 1");
+  assert.match(logText(ok.S), /格挡者承担|改由格挡者承担/);
+  const small = enemyHitsKolt(null, { roll: 1, ok: true }, 1);
+  assert.equal(small.kolt.def, 2);
+  assert.equal(small.helu.def, 3, "4 − 1 = 3");
   const fail = enemyHitsKolt(null, { roll: 99, ok: false });
   assert.ok(fail.lost > 0);
   assert.equal(fail.kolt.stunned, true);
-  // 空手格挡（Ecmo 分出去，Helumica 空手）：伤害减半，架势最少留 1
+  // 空手格挡（Ecmo 分出去，Helumica 空手）：伤害减半
   const bare = enemyHitsKolt((c, S, kolt, helu) => { const w = c.spawnWeapon(helu, "ecmo"); w.zone = 2; }, { roll: 1, ok: true });
   assert.ok(bare.lost > 0 && bare.lost <= Math.ceil(fail.lost / 2), `空手格挡受一半伤害（${bare.lost} / ${fail.lost}）`);
-  assert.equal(bare.kolt.def, 1);
-  assert.equal(bare.kolt.stunned, false);
   assert.equal(bare.helu.loseBonusNext, true);
-  assert.doesNotMatch(logText(ok.S), /改由格挡者承担|格挡者承受/, "日志不再写击破由格挡者承担");
 });
 
 test("警卫队队长·牛的自动格挡按它自己的条文：牛扣自己架势（最少留 1），被保护者不扣；反击 1 击破打空照样失衡", () => {
@@ -75,7 +72,7 @@ test("警卫队队长·牛的自动格挡按它自己的条文：牛扣自己架
   assert.equal(kolt.stunned, true, "反击 1 击破走 dealBreak：打空就失衡");
 });
 
-test("安保巡逻车的自动格挡按一般规则：目标免伤、照常扣架势（最少留 1），巡逻车不扣", () => {
+test("安保巡逻车的自动格挡按一般规则：目标免伤、不扣架势，击破由巡逻车承担（最少留 1）", () => {
   const { c, S } = setup(["kolt", "helu"], [{ id: "patrol_car", lv: 1, zone: 1 }, { id: "thug_hammer", lv: 1, zone: 1 }]);
   const kolt = kit(S, "kolt"), car = kit(S, "patrol_car"), thug = kit(S, "thug_hammer");
   S.units.forEach(u => { u.zone = 1; });
@@ -84,62 +81,39 @@ test("安保巡逻车的自动格挡按一般规则：目标免伤、照常扣�
   vm.runInContext("Math", c).random = () => 0;
   c.dealTo(kolt, thug, { atk: 5, mult: 1, element: "physical", baseBreak: 3, flags: { action: true } });
   assert.equal(c.totalHp(thug), thugHp);
-  assert.equal(thug.def, 1);
+  assert.equal(thug.def, 2);
   assert.equal(thug.stunned, false);
-  assert.equal(car.def, carDef);
+  assert.equal(car.def, Math.max(1, carDef - 3));
 });
 
-/* ---------- 2. 格挡率上限 ---------- */
+/* ---------- 2. 格挡率不封顶（作者定） ---------- */
 
-test("格挡率上限：武器格挡加成（含改装件、图纸）最多 45%，最终格挡率最多 95%；绯秋居合仍是 100%", () => {
+test("格挡率不封顶：武器格挡加成（含改装件）照加，最终格挡率最多 100%；绯秋居合 100%", () => {
   const { c, S } = setup(["tou", "chuan"], [{ id: "thug_hammer", lv: 1, zone: 2 }]);
   const tou = kit(S, "tou"), chuan = kit(S, "chuan");
   tou.weaponLevels = Object.assign({}, tou.weaponLevels, { mochi: 7 });
   tou.weaponParts = Object.assign({}, tou.weaponParts, { mochi: ["s_block_dex", "s_block_str"] });   // 年糕 45 + 12 + 12
-  assert.equal(c.weaponBlockBonusOf("mochi", tou), 45);
-  assert.equal(c.blockBreakdown(tou).weapon, 45, "资料面板");
-  const arm = c.SkillText.armoryData().find(h => h.kit === "tou").weapons.find(w => w.kit === "mochi");
-  assert.equal(arm.blockBonus, 45, "武器工坊的持握格挡");
-  assert.ok(arm.blockAlone <= 95, "武器工坊的独立格挡");
-  tou.attrs.dex = 10;                              // 空手 50 + 年糕 45 = 95
-  assert.equal(c.blockChance(tou), 95);
-  tou.self = "anchor";                             // 千钧 +10
-  S.fields[tou.zone].highland = true;              // 我方高地 +10
-  const foe = foes(S)[0];
-  foe.zone = tou.zone === 1 ? 2 : 1;
-  S.fields[foe.zone].highland = false;
-  assert.equal(c.finalBlockChance(tou, foe, chuan), 95, "最终格挡率封顶 95%");
-  // 夕夏：空手 50 + 柏妮尔 45（改装件封顶）+ 引擎 10 = 105，面板值显示 95；负修正从没封顶的值算起
-  const x = setup(["xia", "tou"], [{ id: "thug_hammer", lv: 1, zone: 2 }]);
-  const xia = kit(x.S, "xia");
-  xia.attrs.dex = 10; xia.resources.engine = true;
-  xia.weaponLevels = Object.assign({}, xia.weaponLevels, { berniel: 7 });
-  xia.weaponParts = Object.assign({}, xia.weaponParts, { berniel: ["s_block_dex"] });
-  assert.equal(x.c.weaponBlockBonusOf("berniel", xia), 45);
-  assert.equal(x.c.blockChance(xia), 95);
-  const shooter = foes(x.S)[0];
-  shooter.zone = xia.zone === 1 ? 2 : 1;
-  x.S.fields[shooter.zone].highland = true;          // 敌人从高地隔区打过来 −10%
-  assert.equal(x.c.finalBlockChance(xia, shooter, kit(x.S, "tou")), 95, "105 − 10 = 95");
-  // 绯秋居合：必定成功
+  assert.equal(c.weaponBlockBonusOf("mochi", tou), 69);
+  tou.attrs.dex = 10;
+  assert.equal(c.blockChance(tou), 100, "面板最多显示 100%");
+  assert.equal(c.finalBlockChance(tou, foes(S)[0], chuan), 100);
   const h = setup(["hiaki", "tou"]);
   const hiaki = kit(h.S, "hiaki");
   hiaki.resources.stance = "iai";
   assert.equal(h.c.finalBlockChance(hiaki, foes(h.S)[0], kit(h.S, "tou")), 100);
 });
 
-test("图纸的「协助格挡 +N%」算进武器格挡加成，一起最多 45%", () => {
+test("图纸的「协助格挡 +N%」照加，不封顶（最终最多 100%）", () => {
   const { c, S } = setup(["tou", "chuan"], [{ id: "thug_hammer", lv: 1, zone: 2 }]);
   const tou = kit(S, "tou"), chuan = kit(S, "chuan");
   const touBase = c.finalBlockChance(tou, null, chuan), chuanBase = c.finalBlockChance(chuan, null, tou);
   S.weaponMods = { mochi: { block: 10 }, bili: { block: 10 } };
-  // 图纸武器 4 级才生效（主持人手册本版修订）
   tou.weaponLevels = Object.assign({}, tou.weaponLevels, { mochi: 4 });
   chuan.weaponLevels = Object.assign({}, chuan.weaponLevels, { bili: 4 });
-  assert.equal(c.finalBlockChance(tou, null, chuan), touBase, "年糕已经 45%，图纸加不上去");
-  assert.equal(c.finalBlockChance(chuan, null, tou), chuanBase + 10, "哔哩哩 35% + 10% = 45%");
+  assert.equal(c.finalBlockChance(tou, null, chuan), Math.min(100, touBase + 10));
+  assert.equal(c.finalBlockChance(chuan, null, tou), Math.min(100, chuanBase + 10));
   const row = c.bpEffectRows({ block: 10 }, { blockBase: 45 }).find(r => r.k === "协助格挡");
-  assert.match(row.v, /45% → 45%/);
+  assert.match(row.v, /45% → 55%/);
 });
 
 /* ---------- 3. 倒下的单位不能协助格挡 ---------- */
@@ -329,46 +303,20 @@ test("战斗中修在场的武器人：耐久回来，但主人不会跟着变�
   }
 });
 
-/* ---------- 8. 任意距离 = 距离 0 或 1 ---------- */
+/* ---------- 8. 任意距离不限距离（作者定：不改） ---------- */
 
-test("任意距离 = 距离 0 或 1：电光束、泄能打不到距离 2（不扣行动点、不挂状态）", () => {
+test("任意距离照旧不限距离：电光束、泄能打得到距离 2；磁力移动能吸距离 2 的目标", () => {
   const { c, S } = setup(["chuan", "ras"], [{ id: "thug_hammer", lv: 1, zone: 3 }], { zoneMode: 3 });
-  assert.deepEqual(plain(c.parseSkillRange("任意距离 · 1atk 电击 · 感电")), { min: 0, max: 1 });
-  assert.deepEqual(plain(c.skillRangeFor(null, "ras_dump")), { min: 0, max: 1 });
-  const chuan = kit(S, "chuan"), ras = kit(S, "ras"), foe = foes(S)[0];
-  const bili = c.spawnWeapon(chuan, "bili");
-  bili.zone = 1; ras.zone = 1; foe.zone = 3;
-  bili.ap = 1;
-  act(c, S, bili, foe, "bili_beam");
-  assert.equal(bili.ap, 1);
-  assert.ok(!foe.statuses.shock, "打不到就不挂感电");
-  ras.ap = 1;
-  act(c, S, ras, foe, "ras_dump");
-  assert.equal(ras.ap, 1);
-  assert.ok(!foe.statuses.high);
-  foe.zone = 2;
-  act(c, S, bili, foe, "bili_beam");
-  assert.equal(bili.ap, 0, "距离 1 照常");
-  assert.ok(foe.statuses.shock);
-});
-
-test("磁力移动：吸不到距离 2 的目标，推也只推到距离 1", () => {
-  const { c, S } = setup(["chuan", "helu"], [{ id: "thug_hammer", lv: 1, zone: 3 }], { zoneMode: 3 });
+  assert.deepEqual(plain(c.parseSkillRange("任意距离 · 1atk 电击 · 感电")), { min: 0, max: 99 });
+  assert.deepEqual(plain(c.skillRangeFor(null, "ras_dump")), { min: 0, max: 99 });
   const chuan = kit(S, "chuan"), foe = foes(S)[0];
   const bili = c.spawnWeapon(chuan, "bili");
   bili.zone = 1; foe.zone = 3; bili.ap = 1;
+  act(c, S, bili, foe, "bili_beam");
+  assert.equal(bili.ap, 0);
+  assert.ok(foe.statuses.shock, "距离 2 照样挂感电");
   const steps = c.skillFlowSteps("bili_magnet", bili, {});
-  assert.ok(!steps[0].units.some(u => u.id === foe.id), "分步名单里没有距离 2 的目标");
-  act(c, S, bili, null, "bili_magnet", { target: foe.id });
-  assert.equal(foe.zone, 3, "规则层也拦");
-  assert.equal(bili.ap, 1, "不扣行动点");
-  foe.zone = 1;
-  const push = c.skillFlowSteps("bili_magnet", bili, { target: foe.id });
-  assert.deepEqual(plain(push[1].zones), [2], "同区推远：只能推到距离 1");
-  act(c, S, bili, null, "bili_magnet", { target: foe.id, dest: 3 });
-  assert.equal(foe.zone, 1);
-  act(c, S, bili, null, "bili_magnet", { target: foe.id, dest: 2 });
-  assert.equal(foe.zone, 2);
+  assert.ok(steps[0].units.some(u => u.id === foe.id), "磁力移动名单里有距离 2 的目标");
 });
 
 /* ---------- 9. 危墙 / 关门先判，再进协助格挡 ---------- */

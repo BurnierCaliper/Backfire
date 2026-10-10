@@ -144,8 +144,7 @@
       // 单项属性硬性上限 10：已经满的属性不列出来
       const attrs = heroes().filter(h => Number(h.attrPoints) > 0).map(h =>
         `<div class="tr-row"><b>${esc(h.name)}</b> 有 ${h.attrPoints} 点属性点：
-          ${Object.keys(ATTR_NAMES).filter(k => (Number((h.attrs || {})[k]) || 0) < ATTR_HARD_MAX)
-            .map(k => `<button class="g-btn small" data-attr="${esc(h.kit)}:${k}">${ATTR_NAMES[k]} ${(h.attrs || {})[k] || 0} +1</button>`).join("")}</div>`).join("");
+          ${Object.keys(ATTR_NAMES).map(k => `<button class="g-btn small" data-attr="${esc(h.kit)}:${k}">${ATTR_NAMES[k]} ${(h.attrs || {})[k] || 0} +1</button>`).join("")}</div>`).join("");
       return `<h3>队员</h3>
         <p class="r-hint">勾选参加这次跑团的角色。换人会按队伍记忆重新摆队伍，已有角色的等级、血量、物资不变。</p>
         <div class="tr-picks">${picks}</div>
@@ -328,7 +327,7 @@
         `<label>${esc((LAYER && LAYER[l.type]) || l.type)} ${numIn(`data-bs-layer="${k}" data-i="${i}" min="0" max="${l.max}"`, Number(l.current) || 0)} / ${l.max}</label>`).join("");
       const st = trpgHeroStatus(h);
       const attrs = Object.keys(ATTR_NAMES).map(a =>
-        `<label>${ATTR_NAMES[a]} ${numIn(`data-bs-attr="${k}" data-k="${a}" min="1" max="${ATTR_HARD_MAX}"`, (h.attrs || {})[a] || 0, 48)}</label>`).join("");
+        `<label>${ATTR_NAMES[a]} ${numIn(`data-bs-attr="${k}" data-k="${a}" min="1"`, (h.attrs || {})[a] || 0, 48)}</label>`).join("");
       const weapons = (h.linkedKits || []).map(w => {
         const hurt = LEDGER.weapons && LEDGER.weapons[w];
         const hurtText = hurt ? hurt.map(x => `${(LAYER && LAYER[x.type]) || x.type} ${x.current}`).join(" / ") : "";

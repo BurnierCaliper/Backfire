@@ -419,8 +419,8 @@ test("桥塌坠落把血打到 0：玩家角色进濒死，敌人死亡", () => 
   assert.equal(foe.zone, 2);
 });
 
-/* ---------- 6 碎渣机炮合计 2 击破 ---------- */
-test("碎渣机炮：1d4 次伤害合计 2 击破（不是每发 2）", () => {
+/* ---------- 6 碎渣机炮每发 2 击破（作者定） ---------- */
+test("碎渣机炮：1d4 次伤害，每发 2 击破（作者定）", () => {
   const { c, S } = setup(["kolt", "helu"], [{ id: "thug_hammer", lv: 1, zone: 2 }]);
   const kolt = kit(S, "kolt"); kolt.zone = 1; kolt.ap = 2;
   const thug = foeOf(S); thug.zone = 2; beef(thug); thug.def = thug.defMax = 20;
@@ -430,8 +430,8 @@ test("碎渣机炮：1d4 次伤害合计 2 击破（不是每发 2）", () => {
   const h0 = c.totalHp(thug);
   c.runSkill("use_scrap:" + p.id);
   assert.equal(h0 - c.totalHp(thug), 28, "4 次 × 7");
-  assert.equal(thug.def, 18, "合计 2 击破");
-  assert.match(logText(S), /1d4 次 → 4 次，每次 7 物理，合计 2 击破/);
+  assert.equal(thug.def, 12, "4 发 × 2 击破");
+  assert.match(logText(S), /1d4 次 → 4 次，每次 7 物理 \+2 击破/);
 });
 
 /* ---------- 7 召唤的机械单位拿电池护盾 ---------- */

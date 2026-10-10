@@ -680,7 +680,7 @@ function skillCost(id) {
 
 /* 格挡率（玩家手册第二章「空手」「协助格挡」）：
  *   空手格挡 = 30% +（敏捷 − 5）× 5%，最低 15%，最高 50%；
- *   协助格挡 = 空手格挡 + 手里武器的格挡加成（5%–45%）。
+ *   协助格挡 = 空手格挡 + 手里武器的格挡加成。
  * 角色的敏捷读 attrs.dex（升级加点会改变格挡率）；武器人独立在场时用自己的敏捷 + 自己的格挡加成。 */
 /** 每把武器（武器人）的格挡加成 */
 const WEAPON_BLOCK_BONUS = {
@@ -708,11 +708,10 @@ function bareBlockFromDex(dex) {
 function bareBlockChance(unit) {
   return bareBlockFromDex(unitDex(unit));
 }
-/** 格挡率上限（玩家手册第二章）：武器格挡加成（含改装件）最多 45%，协助格挡率理论上限 95%（空手 50% + 武器 45%），
- *  留 5% 失手。绯秋居合「必定成功」是唯一例外（app.js · finalBlockChance） */
-const WEAPON_BLOCK_CAP = 45;
-const BLOCK_CHANCE_CAP = 95;
-/** 一把武器的格挡加成：武器本身 + 装在上面的格挡件（growth.js · partsBlock），最多 45%。owner：持有者（角色单位） */
+/** 格挡率不封顶（作者实测不影响平衡）：武器格挡加成不设上限，协助格挡率最多 100% */
+const WEAPON_BLOCK_CAP = Infinity;
+const BLOCK_CHANCE_CAP = 100;
+/** 一把武器的格挡加成：武器本身 + 装在上面的格挡件（growth.js · partsBlock）。owner：持有者（角色单位） */
 function weaponBlockBonusOf(kit, owner) {
   const base = WEAPON_BLOCK_BONUS[kit];
   if (base == null) return null;
@@ -761,7 +760,7 @@ function blockChanceRaw(unit) {
   if (!unit.attrs && WEAPON_BLOCK_BONUS[unit.kit] == null) return null;
   return bareBlockChance(unit) + heldWeaponBlockBonus(unit) + blockStatusBonus(unit);
 }
-/** 协助格挡率（资料面板等显示用），最多 95% */
+/** 协助格挡率（资料面板等显示用），最多 100% */
 function blockChance(unit) {
   const c = blockChanceRaw(unit);
   return c == null ? null : Math.min(BLOCK_CHANCE_CAP, c);

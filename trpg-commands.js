@@ -92,9 +92,7 @@ const BackstageCommands = (() => {
         break;
       case "attr": {
         u.attrs = u.attrs || { str: 5, con: 5, dex: 5, wil: 5, int: 5, sta: 5 };
-        // 单项属性硬性上限 10（玩家手册第二步）：填得再大也只到 10
-        if ((Number(c.value) || 0) > ATTR_HARD_MAX) appendLog(`单项属性最高 ${ATTR_HARD_MAX}（手册：硬性上限）。`);
-        const next = Math.max(1, Math.min(ATTR_HARD_MAX, Number(c.value) || 1)), prev = Number(u.attrs[c.attr]) || 5;
+        const next = Math.max(1, Number(c.value) || 1), prev = Number(u.attrs[c.attr]) || 5;
         if (next > prev && (u.attrPoints || 0) > 0) { u.attrPoints--; u.attrs[c.attr] = next; }
         else if (next <= prev) u.attrs[c.attr] = next;
         else appendLog(`${u.name} 没有可分配属性点。4 级和 8 级各得 1 点。`);

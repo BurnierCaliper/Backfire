@@ -327,8 +327,8 @@ function bpEffectRows(mod, ctx) {
     rows.push({ k: "耐久上限", v: `${ctx.durBase} → ${ctx.durMax}${mod.bigKill ? "（大杀器：耐久减半）" : ""}`, tone: ctx.durMax >= ctx.durBase ? "up" : "down" });
   }
   if (mod.def) rows.push({ k: "架势上限", v: `${sgn(Number(mod.def))}${ctx.defBase != null ? `（${ctx.defBase} → ${Math.max(1, ctx.defBase + Number(mod.def))}）` : ""}`, tone: mod.def > 0 ? "up" : "down" });
-  // 图纸的格挡加成算进武器格挡加成：和武器本身、改装件一起最多 45%（app.js · finalBlockChance）
-  const blockCap = typeof WEAPON_BLOCK_CAP !== "undefined" ? WEAPON_BLOCK_CAP : 45;
+  // 图纸的格挡加成算进武器格挡加成（WEAPON_BLOCK_CAP，目前不封顶；app.js · finalBlockChance）
+  const blockCap = typeof WEAPON_BLOCK_CAP !== "undefined" ? WEAPON_BLOCK_CAP : Infinity;
   if (mod.block) rows.push({ k: "协助格挡", v: `${sgn(Number(mod.block))}%${ctx.blockBase != null ? `（武器格挡加成 ${ctx.blockBase}% → ${Math.min(blockCap, ctx.blockBase + Number(mod.block))}%${ctx.blockBase + Number(mod.block) > blockCap ? `，封顶 ${blockCap}%` : ""}）` : ""}`, tone: mod.block > 0 ? "up" : "down" });
   if (mod.protectedBlock) rows.push({ k: "被队友格挡", v: `成功率 ${sgn(Number(mod.protectedBlock))}%`, tone: "up" });
   if (mod.bonusPerRound) rows.push({ k: "附赠动作", v: `每回合 +${mod.bonusPerRound}（角色拿着时）`, tone: "up" });

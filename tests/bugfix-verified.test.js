@@ -237,7 +237,7 @@ test("武器人收回再唤出：按类型对应血量层，前面插过护盾�
   assert.equal(t2.layers.find(l => l.type === "armor").current, 3);
 });
 
-test("瑞比机甲：明特装甲打空不会把瑞比判成濒死；战后瑞比和明特的伤势各记各的", () => {
+test("瑞比机甲：明特装甲打空不会把瑞比判成濒死；战后瑞比只记自己的伤势", () => {
   const { c, S } = setup(["ruby", "chuan"]);
   const r = kit(S, "ruby");
   r.resources.nano = 60;
@@ -254,7 +254,6 @@ test("瑞比机甲：明特装甲打空不会把瑞比判成濒死；战后瑞�
   c.ledgerCapture();
   assert.equal(c.LEDGER.heroes.ruby.layers.length, own.length, "瑞比只记自己的层");
   assert.equal(c.LEDGER.heroes.ruby.layers[own.length - 1], 9);
-  assert.ok(c.LEDGER.weapons.mint.every(l => l.current === 0), "明特的伤势记在明特名下");
 });
 
 test("结人死后牵挂不再代扛击破", () => {

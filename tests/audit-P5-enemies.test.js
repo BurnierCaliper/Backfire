@@ -353,12 +353,16 @@ test("赤牙：剿灭是她的协助攻击，可以接自己打出的失衡；�
   assert.equal(k2.zone, 1, "柯尔特不跟");
 });
 
-test("亡命之王 AI：狂徒出去打人不召回；有人冲进王的区或王挨了打才下回防；三区里强盗头子不对距离 2 空放火枪", () => {
+test("亡命之王 AI：只在危险时下回防（有人冲进王的区或王挨了打，且身边没有狂徒替他挡）；三区里强盗头子不对距离 2 空放火枪", () => {
   const { c, S, P, E } = field([{ id: "outlaw_king", lv: 3, zone: 2 }, { id: "bandit_boss", lv: 3, zone: 2 },
     { id: "thug_knife", lv: 3, zone: 2 }, { id: "thug_hammer", lv: 3, zone: 2 }]);
   const king = E("outlaw_king"), k = P("kolt");
   E("thug_knife").zone = 1; E("thug_hammer").zone = 1;   // 狂徒出去打人了
   S.combatPhase = "enemy"; c.refreshEnemyEconomy(king);
+  king.damagedThisTurn = 5;
+  assert.equal(c.EnemyAI.plan(king).meta.skillName, "攻击命令", "强盗头子还在身边替他挡：不叫回防");
+  E("bandit_boss").zone = 1;
+  king.damagedThisTurn = 0;
   assert.equal(c.EnemyAI.plan(king).meta.skillName, "攻击命令");
   king.damagedThisTurn = 5;
   assert.match(c.EnemyAI.plan(king).meta.skillName, /回防命令/, "王挨了打");
@@ -450,13 +454,16 @@ test("飞碟触灵被击毁走击杀结算：首领击杀分 +300、跑团经验
   assert.match(S.logPages.flatMap(p => p.lines).map(l => l.text).join("\n"), /击杀 飞碟触灵·本体 · 经验 ×2/);
 });
 
-test("飞碟触灵：自爆只打角色、不打自己召唤的看守；踩踏是 atk+1d4，不随等级升档", () => {
-  const { c, S } = field([{ id: "ufo_boss", lv: 3 }, { id: "guard_sword", lv: 3, zone: 2 }]);
-  const body = S.units.find(u => u.kit === "ufo_body"), g = S.units.find(u => u.kit === "guard_sword");
-  const gHp = c.totalHp(g);
+test("飞碟触灵：自爆打所有角色和它自己召唤的看守（作者定），别的敌人不打；踩踏是 atk+1d4，不随等级升档", () => {
+  const { c, S } = field([{ id: "ufo_boss", lv: 3 }, { id: "guard_sword", lv: 3, zone: 2 }, { id: "guard_gun", lv: 3, zone: 2 }]);
+  const body = S.units.find(u => u.kit === "ufo_body"), g = S.units.find(u => u.kit === "guard_sword"), other = S.units.find(u => u.kit === "guard_gun");
+  g.summonedBy = body.id;                      // 它自己召唤的
+  g.layers.forEach(l => { l.current = l.max = 9999; });
+  const gHp = c.totalHp(g), oHp = c.totalHp(other);
   body.resources.boomReady = true;
   c.detonateUfo(body);
-  assert.equal(c.totalHp(g), gHp);
+  assert.ok(c.totalHp(g) < gHp, "自己召唤的看守也挨炸");
+  assert.equal(c.totalHp(other), oHp, "不是它召唤的敌人不挨炸");
   assert.ok(S.units.filter(u => u.isPlayer && !u.hidden).some(u => c.totalHp(u) < c.totalMaxHp(u)));
 
   const f = field([{ id: "ufo_boss", lv: 10 }]);

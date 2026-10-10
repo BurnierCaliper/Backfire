@@ -237,18 +237,18 @@ function endSelfOnStun(u, notes) {
 function syncShockwave(u, notes) {
   if (!u || !u.statuses) return;
   const on = !!u.statuses.shockwave;
-  if (on && !u._waveCut) {
-    const cut = Math.min(2, Math.max(0, (Number(u.defMax) || 0) - 1));
-    if (!cut) return;
-    u._waveCut = cut;
-    u.defMax -= cut;
-    if ((Number(u.def) || 0) > u.defMax) u.def = u.defMax;
-    if (notes) notes.push(`${u.name} 震荡：架势上限 −${cut} → ${u.defMax}。`);
-  } else if (!on && u._waveCut) {
-    u.defMax += u._waveCut;
-    if (notes) notes.push(`${u.name} 震荡解除：架势上限恢复到 ${u.defMax}。`);
-    u._waveCut = 0;
-  }
+  // 加倍计量：震荡扣的上限也翻倍（−4），加倍计量结束后照常只扣 2
+  const mult = typeof statusMult === "function" ? statusMult(u) : 1;
+  const had = Number(u._waveCut) || 0;
+  const full = (Number(u.defMax) || 0) + had;   // 没被震荡扣过时的上限
+  const want = on ? Math.min(2 * mult, Math.max(0, full - 1)) : 0;
+  if (want === had) return;
+  u.defMax = full - want;
+  u._waveCut = want;
+  if ((Number(u.def) || 0) > u.defMax) u.def = u.defMax;
+  if (!notes) return;
+  if (want > 0) notes.push(`${u.name} 震荡${mult > 1 ? "（加倍计量）" : ""}：架势上限 −${want} → ${u.defMax}。`);
+  else notes.push(`${u.name} 震荡解除：架势上限恢复到 ${u.defMax}。`);
 }
 function syncShockwaveAll(notes) {
   ((typeof state !== "undefined" && state.units) || []).forEach(u => syncShockwave(u, notes));

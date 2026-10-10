@@ -328,8 +328,7 @@ const SKILL_RANGE = {
   ecmo_focus: { min: 0, max: 99 },
   ecmo_boom: { min: 0, max: 0 },
   ras_aa: { min: 1, max: 1 },
-  ras_dump: { min: 0, max: 1 },      // 泄能：任意距离 = 距离 0 或 1
-  role_pull: { min: 0, max: 1 },     // 拉拽「从任意距离拉到此区域」：提示文字没写距离，按任意距离 = 0 或 1
+  ras_dump: { min: 0, max: 99 },
   ras_flee: { min: 0, max: 99 },
   edc_shock: { min: 1, max: 1 },      // 电流冲击：距离 1 的敌人
   edc_flash: { min: 0, max: 0 },
@@ -373,8 +372,7 @@ function skillRangeFor(actor, id) {
 
 function parseSkillRange(text) {
   const s = String(text || "");
-  // 玩家手册第二章：任意距离 = 距离 0 或 1，打不到距离 2（以前当成不限距离，三区制能打 / 拉到距离 2）
-  if (/任意距离/.test(s)) return { min: 0, max: 1 };
+  if (/任意距离/.test(s)) return { min: 0, max: 99 };
   const scan = (chunk) => {
     if (!chunk) return null;
     if (/距离\s*1\s*以?内|1距离以?内/.test(chunk)) return { min: 0, max: 1 };
@@ -708,10 +706,10 @@ function resolveAttack(ctx) {
   const interfHere = !!fieldT.harmonic && (t.interfereZone == null || Number(t.interfereZone) === Number(t.zone));
   let interfDelta = interfHere ? (Number(t.interfere) || 0) : 0;
   let firstStartType = null;
-  // 熔融：冰属性攻击 ×2 伤害、+1 击破只作用一次，然后熔融立刻结束（后面的段数不再吃熔融的任何效果）
+  // 熔融：多段攻击每一段都吃熔融（冰 ×2 伤害、+1 击破），整次攻击结算完才结束（作者定：每段都算）
   let meltLive = !!(t.instant && t.instant.melt);
-  // 千钧：每个攻击行动总击破 +1，只加一次（不按段；同一行动里前面的攻击已经加过就不再加，见 app.js · dealTo）
-  let anchorDone = !!flags.anchorSpent;
+  // 千钧：每一段攻击都 +1 击破（作者定：每段都算）
+  const anchorDone = false;
   let anchorBreak = false;
   // 蚀刻残留：接下来受到此属性的伤害视为被克制（弱点特效、错位、干涉场都按克制算）
   const etchAdv = (t.etchMarks || []).some(m => m && m.element === element);
@@ -731,8 +729,7 @@ function resolveAttack(ctx) {
       if (weather === "phase" && Number(ctx.phaseStep) === 0) br = Math.max(0, br - 1);
       if (weather === "phase" && Number(ctx.phaseStep) === 2) br += 1;
       totalBreak += br;
-      // 手册：成功的协助格挡目标免伤，但仍扣架势（最少留 1）；警卫队队长·牛按它自己的条文由牛承担
-      hAdd("协助格挡成功：目标免伤，击破 " + br + (flags.blockBreakToHelper ? " 改由格挡者承担。" : " 仍扣在目标的架势上。"));
+      hAdd("协助格挡成功：目标免伤，击破 " + br + " 改由格挡者承担。");
       perHit.push({ dealt: 0, breakDealt: br, layers: clone(layersWork) });
       continue;
     }
@@ -795,7 +792,7 @@ function resolveAttack(ctx) {
       hAdd(`干涉场叠层带入：${pctTxt(interfDelta)}`);
     }
 
-    // 冰属性攻击打熔融：×2 伤害、+1 击破，只作用一次（这一段之后熔融结束）
+    // 冰属性攻击打熔融：每一段 ×2 伤害、+1 击破，攻击结算完熔融结束
     const meltIceHit = isAttack && meltLive && element === "ice" && !ghost;
     if (meltIceHit) {
       hAdd("冰打熔融：伤害 ×2，击破 +1，并结束熔融。");
@@ -877,7 +874,8 @@ function resolveAttack(ctx) {
     hAdd(`加算百分比合计 ${pctTxt(pct)} → ${round2(packet)}`);
 
     let mul = 1;
-    if (weather === "phase" && Number(ctx.phaseStep) === 0) { mul *= Math.pow(0.5, envX); hAdd(envX > 1 ? "相位波谷：伤害减半两次（恶劣环境 / 末日）。" : "相位波谷：伤害减半。"); }
+    // 波谷 −50% 伤害；恶劣环境 / 末日翻倍成 −100%（加减翻倍，不是再乘一次 ×0.5）
+    if (weather === "phase" && Number(ctx.phaseStep) === 0) { mul *= Math.max(0, 1 - 0.5 * envX); hAdd(envX > 1 ? "相位波谷：伤害 −100%（恶劣环境 / 末日）。" : "相位波谷：伤害减半。"); }
     if (flags.doubleDeal) { mul *= 2; hAdd("造成伤害翻倍。"); }
     if (flags.doubleTake) { mul *= 2; hAdd("目标受伤翻倍。"); }
     if (flags.dr50) { mul *= 0.5; hAdd("目标减伤 +50%。"); }
@@ -955,8 +953,8 @@ function resolveAttack(ctx) {
         hAdd("猛击：击破 ×2，攻击者承受原击破。");
       }
       if (a && a.self === "anchor" && isAttack && !anchorDone) {
-        br += 1; anchorDone = true; anchorBreak = true;
-        hAdd("千钧：本攻击行动击破 +1（一个行动只加一次）。");
+        br += 1; anchorBreak = true;
+        hAdd("千钧：击破 +1。");
       }
       if (weather === "glow") {
         if (br > 0) br = Math.max(1, br - envX);
@@ -971,8 +969,8 @@ function resolveAttack(ctx) {
         }
       }
     }
-    // 冰打熔融用掉了：熔融立刻结束，这次攻击后面的段数不再吃熔融
-    if (meltIceHit) { meltLive = false; meltEnded = true; }
+    // 冰打熔融：这次攻击结算完熔融结束（后面的段数照样吃熔融）
+    if (meltIceHit) meltEnded = true;
     // 干涉场：每一段按「当前」叠层判断是不是反向（多段攻击里前一段叠上去的也算）
     if (fieldT.harmonic && (kindNow === "adv" || kindNow === "dis")) {
       const up = kindNow === "adv";
@@ -1003,25 +1001,13 @@ function resolveAttack(ctx) {
   const defBefore = Number(t.def) || 0;
   let defAfter = defBefore;
   let helperBreak = 0;
-  if (flags.block === "assistOk" && flags.blockBreakToHelper) {
-    // 警卫队队长·牛的自动格挡（主持人手册条文）：成功仍扣牛自己的架势（最少留 1），目标不扣
+  if (flags.block === "assistOk") {
+    // 协助格挡成功（作者定的规则）：目标免伤且不扣架势，这一击的击破全部由格挡者承担（最少留 1）
     defAfter = defBefore;
     helperBreak = Math.max(0, totalBreak);
     totalBreak = 0;
     totalDealt = 0;
     add(`协助格挡成功：目标免伤且不扣架势。格挡者承担结算后击破 ${helperBreak}（含微光/相位等修正）。`);
-  } else if (flags.block === "assistOk" || flags.block === "bareOk") {
-    // 手册第二章：协助格挡成功，目标免受伤害，但仍扣除架势条，最少保留 1；格挡者不扣。
-    // 空手格挡成功受一半伤害，架势同样最少留 1。以前协助格挡的击破全部转给格挡者，空手格挡可以被打进失衡
-    if (flags.block === "assistOk") totalDealt = 0;
-    const cap = Math.max(0, defBefore - 1);
-    if (totalBreak > cap) {
-      add(`${flags.block === "assistOk" ? "协助" : "空手"}格挡成功：击破 ${totalBreak} 只扣到架势剩 1（实扣 ${cap}）。`);
-      totalBreak = cap;
-    } else if (flags.block === "assistOk") {
-      add(`协助格挡成功：目标免伤，仍扣架势 ${totalBreak}（最少留 1）。`);
-    }
-    defAfter = Math.max(0, defBefore - totalBreak);
   } else {
     defAfter = Math.max(0, defBefore - totalBreak);
   }

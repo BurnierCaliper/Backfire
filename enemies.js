@@ -1304,6 +1304,7 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
     if (p) {
       const u = p.build(a.level, state.partySize);
       u.zone = a.zone;
+      u.summonedBy = a.id;   // 飞碟自爆时连自己召唤的看守一起炸（detonateUfo）
       state.units.push(u);
       lines.push(`召唤 ${u.name} 到 ${u.zone} 区。`);
     }
@@ -1465,10 +1466,12 @@ function spawnUfoBoss(lv) {
 }
 
 function detonateUfo(body) {
-  const notes = [`飞碟触灵自爆：所有角色受到 ${3 * (body.atk || 0)} 火焰。`];
+  const notes = [`飞碟触灵自爆：所有角色和它召唤的机器人看守受到 ${3 * (body.atk || 0)} 火焰。`];
   const dmg = 3 * (body.atk || 0);
-  // 手册「对所有角色」：只炸我方，不炸它自己召唤的机器人看守
-  (state.units || []).filter(u => u.isPlayer && !u.hidden && !u.dead && u.id !== body.id).forEach(u => {
+  // 手册「对所有角色」，作者定：它自己召唤的机器人看守也一起炸
+  const legIds = ufoLivingLegs(body).map(u => u.id);
+  (state.units || []).filter(u => !u.hidden && !u.dead && u.id !== body.id &&
+    (u.isPlayer || (u.summonedBy && (u.summonedBy === body.id || legIds.includes(u.summonedBy))))).forEach(u => {
     const fake = unitOf("飞碟自爆", body.level, [{ type: "armor", hp: 1 }], 0, 0);
     fake.zone = u.zone;
     if (typeof dealTo === "function") {

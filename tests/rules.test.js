@@ -171,22 +171,19 @@ test("战斗结束：濒死的角色恢复到 1 点生命", () => {
   assert.equal(c.totalCurHp(kolt), 1);
 });
 
-test("武器人伤势跨战斗保留；上一场倒下的武器人长休前唤不出来", () => {
+test("武器人每场开战都满血（作者定）：上一场受伤、倒下都不影响下一场唤出", () => {
   const c = H.load();
   c.BattleSim.setup({ party: ["kolt", "helu"], enemies: [{ id: "thug_knife", lv: 1, zone: 2 }] });
   let st = c.S.state;
   const kolt = c.findKit("kolt", st.units);
   const torque = c.spawnWeapon(kolt, "torque");
-  torque.layers[0].current = 3;
+  torque.layers[0].current = 0; torque.dead = true;
   c.ledgerCapture();
   c.BattleSim.setup({ party: ["kolt", "helu"], enemies: [{ id: "thug_knife", lv: 1, zone: 2 }] });
   st = c.S.state;
+  assert.equal(c.weaponSummonWhy(c.findKit("kolt", st.units), "torque"), null);
   const t2 = c.spawnWeapon(c.findKit("kolt", st.units), "torque");
-  assert.equal(t2.layers[0].current, 3);
-  t2.layers[0].current = 0; t2.dead = true;
-  c.ledgerCapture();
-  c.BattleSim.setup({ party: ["kolt", "helu"], enemies: [{ id: "thug_knife", lv: 1, zone: 2 }] });
-  assert.equal(c.weaponSummonWhy(c.findKit("kolt", c.S.state.units), "torque").includes("长休"), true);
+  assert.equal(t2.layers[0].current, t2.layers[0].max);
 });
 
 test("撤退：全员完好 → 每人坚毅 −3 且不致死、耗时 2 小时", () => {

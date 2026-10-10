@@ -835,8 +835,7 @@ function unitCard(u, pos) {
   return wrap;
 }
 
-/** 格挡者承担这一击的击破（最少留 1）。只用于警卫队队长·牛的自动格挡（它自己的条文）；
- *  一般的协助格挡按手册由被保护者照常扣架势（最少留 1），格挡者不扣（engine.js · resolveAttack） */
+/** 协助格挡成功：格挡者承担这一击的击破（最少留 1），目标不扣（engine.js · resolveAttack 的 helperBreak） */
 function applyBlockBreakToHelper(helperId, amount) {
   const notes = [];
   const helper = unitById(helperId);
@@ -1988,7 +1987,10 @@ function turnEnd() {
     }
     if (u.shelterTurn) { u.shelterTurn = false; u.isolate = false; }
     if (u.harshEnv) u.harshEnv = false;
-    if (u.instant && u.instant.doubleStatus) u.instant.doubleStatus = false;
+    if (u.instant && u.instant.doubleStatus) {
+      u.instant.doubleStatus = false;
+      if (typeof syncShockwave === "function") syncShockwave(u, notes);   // 震荡扣的上限回到 2
+    }
     if (u.instant && u.instant.omenArmed) {
       if (u.stunned || u.instant.omenHit) {
         const caster = unitById(u.instant.omenFrom);
@@ -3150,7 +3152,7 @@ function passGap(unit, from, dest) {
  *  空隙：飞行单位照过；配置物掉下去消失；地面单位 fall 时坠落（被迫做地面移动），否则只是过不去。
  *  不稳桥梁：地面单位每过一次 −1d6 耐久，塌了就坠落（配置物不算「有单位通过」）。
  *  返回 true = 移动生效（notes 里是路上发生的事），false = 移动不生效 */
-function crossGapsForced(obj, from, dest, notes, fall) {
+function crossGapsForced(obj, from, dest, notes, fall, flyOver) {
   from = Number(from); dest = Number(dest);
   if (from === dest) return true;
   const isProp = !obj || !Array.isArray(obj.layers) || (state.props || []).includes(obj);
@@ -3170,7 +3172,7 @@ function crossGapsForced(obj, from, dest, notes, fall) {
   for (let i = 0; i < path.length - 1; i++) {
     const a = path[i], b = path[i + 1];
     const g = getGap(a, b);
-    if (g.type === "void" && !(obj && obj.flying)) {
+    if (g.type === "void" && !(obj && obj.flying) && !flyOver) {
       if (isProp) {
         state.props = (state.props || []).filter(x => x !== obj);
         notes.push(`${name} 掉进空隙（${gapKey(a, b)} 区之间），消失了。`);
@@ -3301,6 +3303,7 @@ function markAoeZone(zone, hit) {
   const z = Number(zone);
   if (!state.aoePulse[z] || state.aoePulse[z] === true) state.aoePulse[z] = { hits: [] };
   if (hit === "handled") state.aoePulse[z].propsDone = true;   // 技能自己已经打过区里的配置物，别再打一次
+  if (hit === "triggered") { state.aoePulse[z].propsDone = true; state.aoePulse[z].devicesDone = true; return; }   // 区里每个配置物都已经被触发过一次（Ecmo 音爆）
   else if (hit && hit.element) {
     const from = hit.from != null ? hit.from : (hit.attacker && hit.attacker.zone != null ? hit.attacker.zone : null);
     state.aoePulse[z].hits.push(Object.assign({}, hit, { from: from != null ? Number(from) : null }));
@@ -3327,7 +3330,7 @@ function flushAoePulse() {
       const all = (map[z] && map[z].hits) || [];
       const hits = all.filter(h => h.from == null || !lineBlocked(h.from, z));
       if (all.length && !hits.length && !(map[z] && map[z].bare)) return;
-      pulseDevicesInZone(Number(z), "受到范围伤害，视作被操作一次");
+      if (!map[z].devicesDone) pulseDevicesInZone(Number(z), "受到范围伤害，视作被操作一次");
       if (!hits.length || map[z].propsDone) return;
       // 一次范围攻击里同区每个配置物只挨一下：取伤害最高的那一段
       const hit = hits.reduce((a, b) => ((Number(b.dmg) || 0) > (Number(a.dmg) || 0) ? b : a));
@@ -3400,7 +3403,7 @@ function controlScrap(a, p, t) {
 function scrapReady(p) {
   return !!p && p.firedRound !== Number(state.turnNo || 0);
 }
-/** 碎渣机炮开火一次：1d4 次 6+等级 物理，合计 2 击破（breakOnce：不是每发 2），开完耐久 −1。打玩家时可以被协助格挡 */
+/** 碎渣机炮开火一次：1d4 次 6+等级 物理，每次 +2 击破，开完耐久 −1。打玩家时可以被协助格挡 */
 function scrapShot(p, t, controller) {
   if (!scrapReady(p)) return "碎渣机炮这一回合已经发射过了。";
   p.firedRound = Number(state.turnNo || 0);
@@ -3413,10 +3416,10 @@ function scrapShot(p, t, controller) {
   if (controller && controller.isPlayer) fake.creditTo = controller.id;
   // 射程是「2 距离内」（选目标时已经限定），这里不再按近距离判定
   fake.propId = p.id;
-  const out = dealTo(fake, t, { atk: 0, mult: 0, flat, hits: n, element: "physical", baseBreak: 2, breakOnce: true, atkRange: "any", flags: { action: true, propShot: true, flyFree: true } });
+  const out = dealTo(fake, t, { atk: 0, mult: 0, flat, hits: n, element: "physical", baseBreak: 2, atkRange: "any", flags: { action: true, propShot: true, flyFree: true } });
   const wear = scrapWear(p, controller);
-  if (out && out.pending) return `碎渣机炮开火：1d4 次 → ${n} 次，每次 ${flat} 物理，合计 2 击破，${t.name} 的队友可以协助格挡。\n${wear}`;
-  return `碎渣机炮开火：1d4 次 → ${n} 次，每次 ${flat} 物理，合计 2 击破。合计伤害 ${Math.floor((out && out.res && out.res.total) || 0)}。\n${wear}`;
+  if (out && out.pending) return `碎渣机炮开火：1d4 次 → ${n} 次，每次 ${flat} 物理 +2 击破，${t.name} 的队友可以协助格挡。\n${wear}`;
+  return `碎渣机炮开火：1d4 次 → ${n} 次，每次 ${flat} 物理 +2 击破。合计伤害 ${Math.floor((out && out.res && out.res.total) || 0)}。\n${wear}`;
 }
 /** 碎渣机炮每用一次耐久 −1（和被攻击一样），耐久归零就报废 */
 function scrapWear(p, controller) {
@@ -4365,7 +4368,8 @@ function canDisplace(obj) {
   return !obj.noMove;
 }
 
-function displaceTo(obj, dest, notes, reason) {
+/** opts.flyOver：带飞行 / 跃过描述的技能带着走，越过空隙不会掉下去 */
+function displaceTo(obj, dest, notes, reason, opts) {
   dest = Number(dest);
   if (!obj) return false;
   if (!canDisplace(obj)) {
@@ -4377,7 +4381,7 @@ function displaceTo(obj, dest, notes, reason) {
   // 被推 / 拉也要过间隔：危墙、关着的门推不过去；推进空隙的地面单位坠落（失去 10% 最大生命）、配置物掉下去，
   // 移动都不生效；过不稳桥梁的地面单位照常让桥 −1d6
   const crossing = [];
-  if (!crossGapsForced(obj, from, dest, crossing, true)) {
+  if (!crossGapsForced(obj, from, dest, crossing, true, !!(opts && opts.flyOver))) {
     notes.push(...crossing);
     return false;
   }
@@ -4551,7 +4555,7 @@ function highlandBlockMod(helper, attacker, atkRange) {
   return 0;
 }
 
-/** 最终协助格挡率，最多 95%（手册：空手 50% + 武器 45%，留 5% 失手）；绯秋居合「必定成功」是 100%。
+/** 最终协助格挡率，5%–100%；绯秋居合「必定成功」是 100%。
  *  atkRange：这一击的射程（给高地判断用，可不传） */
 function finalBlockChance(helper, attacker, protectedUnit, atkRange) {
   if (helper.kit === "hiaki" && helper.resources && helper.resources.stance === "iai") return 100;
@@ -4563,10 +4567,10 @@ function finalBlockChance(helper, attacker, protectedUnit, atkRange) {
   if (helper.kit === "xiaoxiao" && protectedUnit && protectedUnit.kit === "longge") c += 15;   // 小朋友守护龙哥：60% → 75%
   if (helper.rallyBlock) c += helper.rallyBlock;
   if (typeof bpBlockBonus === "function") {
-    // 单局图纸。格挡者拿着的图纸「协助格挡 +N%」算进武器格挡加成：和武器本身、改装件一起最多 45%
+    // 单局图纸。格挡者拿着的图纸「协助格挡 +N%」算进武器格挡加成（WEAPON_BLOCK_CAP，目前不封顶）
     let bp = bpBlockBonus(helper, protectedUnit);
     const own = typeof bpMod === "function" ? Number(bpMod(helper).block) || 0 : 0;
-    const cap = typeof WEAPON_BLOCK_CAP !== "undefined" ? WEAPON_BLOCK_CAP : 45;
+    const cap = typeof WEAPON_BLOCK_CAP !== "undefined" ? WEAPON_BLOCK_CAP : Infinity;
     if (own > 0 && typeof heldWeaponBlockBonus === "function") bp -= Math.max(0, Math.min(own, heldWeaponBlockBonus(helper) + own - cap));
     c += bp;
   }
@@ -4582,7 +4586,7 @@ function finalBlockChance(helper, attacker, protectedUnit, atkRange) {
     const yu = findKit("yuito", state.units);
     if (yu && protectedUnit && yu.resources && yu.resources.bondId === protectedUnit.id && passivePlus(yu, 2)) c += 10;
   }
-  return Math.max(5, Math.min(typeof BLOCK_CHANCE_CAP !== "undefined" ? BLOCK_CHANCE_CAP : 95, c));
+  return Math.max(5, Math.min(typeof BLOCK_CHANCE_CAP !== "undefined" ? BLOCK_CHANCE_CAP : 100, c));
 }
 
 /* ---------- 力竭（手册第五章） ----------
@@ -5685,8 +5689,7 @@ function autoEnemyBlockers(target) {
   }));
 }
 
-/** 敌方的自动协助格挡。警卫队队长·牛按主持人手册它自己的条文：成功仍扣牛自己的架势（最少留 1），并反击 1 击破
- *  （selfBreak）；安保巡逻车照一般的协助格挡：目标免伤、照常扣架势（最少留 1） */
+/** 敌方的自动协助格挡：成功时目标免伤，击破由格挡者承担（最少留 1）；警卫队队长·牛成功后另外反击 1 击破（selfBreak） */
 function tryOxAutoBlock(attacker, target, atkRange) {
   const oxes = autoEnemyBlockers(target);
   if (!oxes.length) return null;
@@ -5704,7 +5707,7 @@ function tryOxAutoBlock(attacker, target, atkRange) {
     if (!ok) continue;
     const selfBreak = ox.kit === "captain_ox";
     appendLog(selfBreak ? `成功：目标免伤，击破由 ${ox.name} 承担（架势最少留 1）。成功后反击 1 击破。`
-      : "成功：目标免伤，但仍扣架势（最少留 1）。");
+      : `成功：目标免伤，击破由 ${ox.name} 承担（架势最少留 1）。`);
     if (attacker && selfBreak) {
       // 反击走 dealBreak：坚挺、塌陷计数、失衡后的协助攻击都照常（以前直接改架势）
       const notes = [];
@@ -5789,7 +5792,7 @@ function performAssistBlock(helper, target, attacker, forced, atkRange) {
     notes.push("居合下协助格挡必定成功。");
   }
   if (ok) {
-    notes.push("成功：目标免伤，但仍扣架势（最少留 1），格挡者不扣。");
+    notes.push("成功：目标免伤，击破改由格挡者承担。");
     if (typeof bpAfterBlock === "function") bpAfterBlock(helper, target, notes);   // 单局图纸
     // 雷鸣：成功的协助格挡可以额外造成 等级 × 1d4 闪电伤害的反伤
     if (attacker && !attacker.dead && currentWeatherFor(helper) === "thunder") {
@@ -5925,7 +5928,7 @@ function openBlockModal(job) {
   const again = job.tried && job.tried.length;
   text.textContent = again
     ? `${attacker ? attacker.name : "敌人"} 的攻击还没落下：前面的协助格挡失败了，其他队友可以继续尝试。`
-    : `${attacker ? attacker.name : "敌人"} 正在攻击 ${target ? target.name : "玩家"}。同区域有附赠行动的队友可以协助格挡：成功免伤，但仍扣架势（最少留 1）；空手格挡成功受一半伤害。`;
+    : `${attacker ? attacker.name : "敌人"} 正在攻击 ${target ? target.name : "玩家"}。同区域有附赠行动的队友可以协助格挡：成功免伤，击破改由格挡者承担（最少留 1）；空手格挡成功受一半伤害。`;
   box.innerHTML = "";
   helpers.forEach(h => {
     const b = document.createElement("button");
@@ -6873,8 +6876,6 @@ function dealTo(attacker, target, opt) {
   const dist = zoneDist(attacker.zone, target.zone, state.zoneMode);
   const wasDeadForGhost = !!(target && target.dead);
   // 千钧：每个攻击行动总击破 +1 只加一次——这个行动里前面的攻击已经加过，就不再加
-  const anchorAcc = attacker && attacker.self === "anchor" ? state.actionAcc : null;
-  if (anchorAcc && anchorAcc.anchorBy && anchorAcc.anchorBy[attacker.id]) flags.anchorSpent = true;
   const res = resolveAttack({
     attacker, target,
     atk: opt.atk != null ? opt.atk : effectiveAtk(attacker, state.units),
@@ -6902,7 +6903,6 @@ function dealTo(attacker, target, opt) {
     atkRange: opt.atkRange || "any"
   });
   res.flags = flags;
-  if (anchorAcc && res.anchorBreak) (anchorAcc.anchorBy = anchorAcc.anchorBy || {})[attacker.id] = true;
   const wasStunnedT = !!target.stunned;
   const dopplerT = target.self === "doppler";   // 被这一下打进失衡、多普勒随晕眩结束，这一下的击破照样传出去
   const shieldBeforeT = shieldSum(target);
@@ -6966,7 +6966,7 @@ function dealTo(attacker, target, opt) {
   applyAtkFxAfter(attacker, target, res, flags, extra, opt);
   if (typeof bpAfterAttack === "function") bpAfterAttack(attacker, target, res, flags, extra);
   if (res && !res.pending) noteActionHit(target, res);
-  if (flags.block === "assistOk" && flags.blockBreakToHelper) {
+  if (flags.block === "assistOk") {
     extra.push(...applyBlockBreakToHelper(flags.blockHelperId, res.helperBreak));
   }
   if (extraDiceNote) extra.unshift("掷骰 " + extraDiceNote);
@@ -7046,7 +7046,7 @@ function dealTo(attacker, target, opt) {
     if (flags.action !== false && !flags.environment && typeof attackConnected === "function" && attackConnected(res, flags)) {
       attackFxWords(flags).forEach(w => spawnPopup(target, { kind: "fxword", text: w.name, element: w.element }));
     }
-    // 协助格挡成功：击破照样扣在目标身上（最少留 1）；只有警卫队队长·牛的自动格挡由牛自己承担（helperBreak）
+    // 协助格挡成功：击破由格挡者承担（helperBreak）
     if ((res.breakDealt || 0) > 0) popBreak(target, res.breakDealt, ele);
     if (flags.block === "assistOk" && (res.helperBreak || 0) > 0) {
       const helper = unitById(flags.blockHelperId);
@@ -7203,17 +7203,10 @@ function spawnWeapon(owner, kit) {
   if (typeof applyWeaponLevel === "function") applyWeaponLevel(u);
   // 队伍档案：武器人显示档案里的耐久
   if (typeof weaponDur === "function" && u.resources) u.resources.durability = weaponDur(kit);
-  // 单局状态：武器人跨战斗保留耐久与血量
+  // 单局状态：武器人跨战斗保留耐久（血量每场回满）
   if (typeof RUN !== "undefined" && RUN.active && RUN.carry && RUN.carry[kit]) {
     const c = RUN.carry[kit];
     if (c.durability != null && u.resources) u.resources.durability = c.durability;
-    inheritLayers(u, c.layers);
-  }
-  // 队伍档案：本场第一次唤出时，带着上一场留下的伤势
-  const carried = !prev && typeof weaponCarryLayers === "function" ? weaponCarryLayers(kit) : null;
-  if (carried) {
-    inheritLayers(u, carried);
-    if (totalCurHp(u) <= 0) return null;   // 上一场倒下、还没长休：唤不出来
   }
   // 维塔斯：双相与刺入属于武器系统，分出来时从诺拉那边同步过来
   if (kit === "vitas") {
@@ -7637,6 +7630,25 @@ function resolveHeluScan(picks) {
   appendLog(lines.join("\n"));
   if (typeof renderAll === "function") renderAll();
 }
+/** Ecmo 音爆：同区每个配置物按 Helumica 触发配置物的方式触发一次（危墙 / 屏障这类不算；本回合开过的碎渣机炮不算） */
+function ecmoBoomTriggerProps(a, lines) {
+  const z = Number(a.zone);
+  markAoeZone(z, "triggered");   // 音爆本身的范围伤害不再另外扳拉杆 / 打配置物（每个只触发这一次）
+  const list = (state.props || []).filter(p => Number(p.zone) === z && !BARRIER_SIDE[p.kind] && !(p.kind === "scrap" && !scrapReady(p)));
+  list.forEach(p => {
+    if (!(state.props || []).includes(p)) return;   // 前一个爆炸已经把它炸掉了
+    const picks = { dest: z, act: "prop:" + p.id };
+    if (p.kind === "battery") picks.mode = "boom";
+    if (p.kind === "scrap") {
+      const t = scrapTargets(p, a)[0];
+      if (!t) { lines.push(`音爆触发 ${p.name}：没有打得到的敌人。`); return; }
+      picks.target = t.id;
+    }
+    const out = [];
+    heluScanAct(a, picks, out);
+    lines.push(...out.map(x => String(x).replace(/^环境扫描：/, "音爆：").replace(/Helumica 的敌人/g, `${a.name} 的敌人`)));
+  });
+}
 /** 执行环境扫描的选择。picks：{ dest, act, mode, ally, target, sign } */
 function heluScanAct(a, picks, lines) {
   const z = picks.dest != null ? Number(picks.dest) : Number(a.zone);
@@ -8026,15 +8038,13 @@ function skillFlowSteps(id, actor, picks) {
   }
   if (id === "bili_magnet") {
     const tgt = unitById(picks.target) || propByRef(picks.target);
-    // 任意距离 = 距离 0 或 1：只能吸距离 1 的目标、只能推到距离 1（以前三区制能一次拉 / 推两区）
-    const near = (z) => zoneDist(actor.zone, z, maxZ) <= 1;
     const steps = [{
       key: "target",
       type: "unit",
       optional: false,
-      label: "磁力移动目标（同区推远 / 距离 1 拉到身边）",
-      units: fieldUnits().filter(u => u.id !== actor.id && !u.dead && !u.hidden && near(u.zone))
-        .concat((state.props || []).filter(p => p.movable !== false && near(p.zone)).map(p => ({ id: "prop:" + p.id, name: p.name, zone: p.zone })))
+      label: "磁力移动目标（同区推远 / 其他区拉到身边）",
+      units: fieldUnits().filter(u => u.id !== actor.id && !u.dead && !u.hidden)
+        .concat((state.props || []).filter(p => p.movable !== false).map(p => ({ id: "prop:" + p.id, name: p.name, zone: p.zone })))
     }];
     if (tgt && Number(tgt.zone) === Number(actor.zone)) {
       steps.push({
@@ -8042,7 +8052,7 @@ function skillFlowSteps(id, actor, picks) {
         type: "zone",
         optional: false,
         label: "推向哪一区",
-        zones: zones.filter(z => Number(z) !== Number(tgt.zone) && zoneDist(actor.zone, z, maxZ) === 1)
+        zones: zones.filter(z => Number(z) !== Number(tgt.zone))
       });
     }
     return steps;
@@ -8214,7 +8224,8 @@ function skillFlowSteps(id, actor, picks) {
         type: "zone",
         optional: false,
         label: "把目标带到哪一区",
-        zones: zones.filter(z => Number(z) !== Number(actor.zone) && !zoneReachable(actor, z))
+        // 猛扑是「跃」：和飞行一样能越过空隙（危墙、关着的门照样挡）
+        zones: zones.filter(z => Number(z) !== Number(actor.zone) && !zoneReachable({ zone: actor.zone, flying: true }, z))
       });
     }
     return steps;
@@ -9180,9 +9191,9 @@ function formatHitLines(actor, target, out, captured) {
   const hits = (res.perHit || []).filter(Boolean);
   const dmg = Math.floor(res.total || 0), br = Number(res.breakDealt) || 0;
   let head = `  → ${tName}：`;
-  // 协助格挡成功：免伤，击破照样扣在目标身上（最少留 1）；警卫队队长·牛的自动格挡由牛自己承担
+  // 协助格挡成功：免伤，击破由格挡者承担
   const hb = Number(res.helperBreak) || 0;
-  if (res.blocked) head += `被协助格挡挡下${br ? `（仍扣 ${br} 架势，最少留 1）` : hb ? `（格挡者承受 ${hb} 击破）` : ""}`;
+  if (res.blocked) head += `被协助格挡挡下${hb ? `（格挡者承受 ${hb} 击破）` : ""}`;
   else {
     head += `${dmg} 伤害`;
     if (br) head += `、${br} 击破`;
@@ -9541,15 +9552,12 @@ function envZones(actor, kind, range) {
   return out;
 }
 
-/** 武器人现在能不能唤出：ok / out（已在场）/ dead（本场已倒下，不能再唤出）/ wounded（上一场倒下没长休）/
- *  broken（耐久为 0：spawnWeapon 不让唤出，绯秋分刀的可选列表也不列） */
+/** 武器人现在能不能唤出：ok / out（已在场）/ dead（本场已倒下，不能再唤出）/
+ *  broken（耐久为 0：spawnWeapon 不让唤出，绯秋分刀的可选列表也不列）。武器人每场开战都回满，不看上一场 */
 function weaponSummonState(owner, kit) {
   const broken = typeof weaponBroken === "function" && weaponBroken(kit);
   const list = (state.units || []).filter(x => x.kit === kit && (!x.weaponOf || !owner || x.weaponOf === owner.kit));
   if (!list.length) {
-    // 本场还没唤出过：看上一场留下的伤势
-    const carried = typeof weaponCarryLayers === "function" ? weaponCarryLayers(kit) : null;
-    if (carried && carried.reduce((sum, l) => sum + Math.max(0, Number(l.current) || 0), 0) <= 0) return "wounded";
     return broken ? "broken" : "ok";
   }
   const alive = list.find(x => !x.dead);
@@ -9564,7 +9572,6 @@ function weaponSummonWhy(owner, kit) {
   const nm = typeof weaponCardName === "function" ? weaponCardName(kit) : kit;
   if (st === "out") return `${nm} 已经在场上`;
   if (st === "dead") return `${nm} 本场已倒下，无法再唤出`;
-  if (st === "wounded") return `${nm} 上一场倒下后还没长休，无法唤出`;
   return null;
 }
 /** 绯秋：还能分出哪几把刀 */
@@ -9655,14 +9662,6 @@ function skillTargetError(a, id, t) {
   if (/^role_(spread|shelter|boost|gold|double_dot|buffer|sturdy|halve|omen)$/.test(id)) {
     const why = roleTargetError(a, id, t);
     if (why) return why;
-  }
-  // 磁力移动是任意距离（0 或 1）：目标在分步里选，不经过下面的通用射程判定，在这里拦距离 2
-  if (id === "bili_magnet") {
-    const fl = state.skillFlow;
-    const tgt = fl && fl.picks && fl.picks.target ? (unitById(fl.picks.target) || propByRef(fl.picks.target)) : t;
-    if (tgt && zoneDist(a.zone, tgt.zone, state.zoneMode) > 1) return "磁力移动只能吸距离 1 以内的目标";
-    const dest = fl && fl.picks && fl.picks.dest != null && fl.picks.dest !== "" ? Number(fl.picks.dest) : null;
-    if (tgt && dest != null && Number(tgt.zone) === Number(a.zone) && zoneDist(a.zone, dest, state.zoneMode) !== 1) return "磁力移动只能把目标推到距离 1";
   }
   if (id === "solo_support") {
     const fl = state.skillFlow;
@@ -10274,7 +10273,7 @@ function runSkillInner(id, optRun) {
         const dest = fl && fl.picks.dest;
         if (!dest) { lines.push("带走同区目标时要再选目的地区。"); return paintSkillLog(lines.join("\n")); }
         a.zone = dest;
-        displaceTo(tgt, dest, lines, "被带走");
+        displaceTo(tgt, dest, lines, "被带走", { flyOver: true });
       } else {
         a.zone = tgt.zone;
         lines.push(`猛扑跃到 ${tgt.name} 所在的 ${tgt.zone} 区。`);
@@ -10586,8 +10585,8 @@ function runSkillInner(id, optRun) {
       if (!sTok && !tgt) { lines.push("先选目标。"); return paintSkillLog(lines.join("\n")); }
       a.resources.charge -= 3;
       if (sTok) {
-        // 对配置物伤害翻倍（2×atk → 4×atk），走配置物的正规结算：爆炸桶 / 酸液桶 / 碎渣机炮照各自的耐久规则扣，
-        // 爆炸桶打爆就爆炸并移出场；电池 / 炮台 / 屏障按伤害算；危墙 / 桥梁照常只吃击破。
+        // 爆炸桶 / 酸液桶 / 碎渣机炮直接摧毁；其余配置物伤害翻倍（2×atk → 4×atk）走正规结算：
+        // 电池 / 炮台 / 屏障按伤害算；危墙 / 桥梁照常只吃击破。
         // 以前直接改耐久：打爆的桶不爆炸也不移除，日志却写「摧毁配置物」
         const gk = sTok.indexOf("gap:") === 0 ? sTok.slice(4) : null;
         const standing = () => {
@@ -10597,7 +10596,10 @@ function runSkillInner(id, optRun) {
         };
         const was = standing();
         appendLog(lines.splice(0).join("\n"));
-        lines.push(...hitStructureCore(a, sTok, { element: "electric", dmg: Math.max(1, Math.floor((Number(atk) || 0) * 2 * 2)), brk: 2 }));
+        if (prop && (prop.kind === "boom" || prop.kind === "acid" || prop.kind === "scrap")) {
+          // 作者定：爆炸桶 / 酸液桶 / 碎渣机炮这类桶子直接摧毁（爆炸桶照常爆炸）
+          lines.push(`巨刃划空劈开 ${prop.name}。`, ...destroyProp(prop, a));
+        } else lines.push(...hitStructureCore(a, sTok, { element: "electric", dmg: Math.max(1, Math.floor((Number(atk) || 0) * 2 * 2)), brk: 2 }));
         if (was && !standing()) {
           a.resources.charge = (a.resources.charge || 0) + 1;
           lines.push("摧毁配置物，返还 1 电能。");
@@ -10856,12 +10858,11 @@ function runSkillInner(id, optRun) {
       // 分步里选的两个目标；没走分步（计算器直接选目标）时按距离归类
       const { t1, t2 } = touSonicPicks(a, t);
       a.resources.shield -= 1; touShieldHeal(a);   // 有没有圣盾、有没有目标在扣行动点之前就查过了（skillTargetError）
-      // 说明和提示都没写击破：只有谐波伤害（以前每个目标 1 击破）
       const strike = (x, mult, first) => {
         if (isStructureToken(x)) {
           appendLog(lines.splice(0).join("\n"));
-          appendLog(hitStructureCore(a, x, { element: "harmonic", dmg: Math.floor(atk * mult), brk: 0 }).join("\n"));
-        } else hitOne(a, x, { element: "harmonic", mult, baseBreak: 0, atk, atkRange: "any", usePrep: first });
+          appendLog(hitStructureCore(a, x, { element: "harmonic", dmg: Math.floor(atk * mult), brk: 1 }).join("\n"));
+        } else hitOne(a, x, { element: "harmonic", mult, baseBreak: 1, atk, atkRange: "any", usePrep: first });
       };
       if (t1) strike(t1, 1, true);
       if (t2) strike(t2, 0.5, !t1);
@@ -10939,6 +10940,7 @@ function runSkillInner(id, optRun) {
         t.instant = t.instant || {};
         t.instant.doubleStatus = true;
         lines.push(`${t.name} 本回合状态效果翻倍。`);
+        if (typeof syncShockwave === "function") syncShockwave(t, lines);   // 震荡扣的架势上限也翻倍
       }
     } else if (id === "role_self_doom") {
       a.resources.selfDoom = !a.resources.selfDoom;
@@ -11394,10 +11396,9 @@ function runSkillInner(id, optRun) {
         const focused = (u.focuses || []).some(f => f.layerType && (u.layers || []).some(l => l.type === f.layerType && l.current > 0));
         hitOne(a, u, { element: "harmonic", mult: 0.5, hits: focused ? 2 : 1, baseBreak: 0, atk, flags: { action: true, aoe: true } });
       });
-      // 触发所有同区域配置物：照「范围攻击会波及同区的配置物」结算（行动收尾时 flushAoePulse）——
-      // 按钮 / 拉杆触发一次，爆炸桶 / 酸液桶 / 电池……按谐波挨一下，日志写实际发生的事。
-      // 以前另外逐个写「音爆触发 X」（打不动的爆炸桶也写；同区有敌人时拉杆还会被扳两次，门开了又关）
-      markAoeZone(a.zone, { element: "harmonic", dmg: Math.floor(atk * 0.5), attacker: a });
+      // 触发所有同区域配置物：和 Helumica 环境扫描触发配置物一样（heluScanAct）——
+      // 爆炸桶 / 酸液桶直接引爆、电池引爆、碎渣机炮打一名打得到的敌人、炮台向 Ecmo 的敌人开一炮、按钮 / 拉杆触发一次
+      ecmoBoomTriggerProps(a, lines);
     } else if (id === "ecmo_return") {
       lines.push(...returnWeapon(a));
     } else if (id === "ras_aa") {

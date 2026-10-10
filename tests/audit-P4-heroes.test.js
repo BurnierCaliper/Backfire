@@ -22,13 +22,13 @@ const hit = (c, a, t, opt) => c.dealTo(a, t, Object.assign({ atk: 0, mult: 0, el
 
 /* ---------- 川川 ---------- */
 
-test("巨刃划空打配置物：按配置物规则结算，打爆的爆炸桶会爆炸并移出场，没打爆不写「摧毁」", () => {
+test("巨刃划空打配置物：爆炸桶 / 酸液桶 / 碎渣机炮直接摧毁（爆炸桶照常爆炸），其余按配置物规则结算", () => {
   const { c, S } = setup(["chuan", "nora"], [{ id: "thug_knife", lv: 1, zone: 1 }]);
   const ch = kit(S, "chuan"), foe = foesOf(S)[0];
   ch.level = 11; ready(ch, 1); foe.zone = 1; fatten(foe, 300);
   ch.layers.forEach(l => { l.current = l.max = 300; });               // 爆炸也会炸到川川：血厚一点，后面还要出手
-  // 耐久 1 的爆炸桶：电击扣 1 耐久 → 打爆 → 爆炸、移出场、返还 1 电能
-  const boom = c.makeProp("boom", 1, 1); boom.hp = 1; S.props.push(boom);
+  // 满耐久的爆炸桶：直接摧毁 → 爆炸、移出场、返还 1 电能
+  const boom = c.makeProp("boom", 1, 1); S.props.push(boom);
   ch.resources.charge = 3;
   const foeHp = c.totalHp(foe);
   cmd(c, { actor: ch.id, skill: "chuan_blade", target: "prop:" + boom.id, picks: { target: "prop:" + boom.id } });
@@ -36,16 +36,13 @@ test("巨刃划空打配置物：按配置物规则结算，打爆的爆炸桶�
   assert.match(logText(S), /爆炸/);
   assert.ok(c.totalHp(foe) < foeHp, "同区敌人挨了爆炸");
   assert.equal(ch.resources.charge, 1, "3 − 3 + 1（摧毁配置物返还）");
-  // 满耐久的爆炸桶：电击只扣 1 耐久，没打爆：不返还、不写「摧毁」
-  const boom2 = c.makeProp("boom", 1, 1); S.props.push(boom2);
-  ch.resources.charge = 3; ready(ch);
-  const mark = S.logPages.flatMap(p => p.lines).length;
-  cmd(c, { actor: ch.id, skill: "chuan_blade", target: "prop:" + boom2.id, picks: { target: "prop:" + boom2.id } });
-  const after = S.logPages.flatMap(p => p.lines).slice(mark).map(l => l.text).join("\n");
-  assert.equal(boom2.hp, 2);
-  assert.ok(S.props.includes(boom2));
-  assert.equal(ch.resources.charge, 0, "耗 3 电能，没有返还");
-  assert.doesNotMatch(after, /摧毁/);
+  // 酸液桶、碎渣机炮也直接摧毁
+  for (const kind of ["acid", "scrap"]) {
+    const p = c.makeProp(kind, 1, 1); S.props.push(p);
+    ch.resources.charge = 3; ready(ch);
+    cmd(c, { actor: ch.id, skill: "chuan_blade", target: "prop:" + p.id, picks: { target: "prop:" + p.id } });
+    assert.ok(!S.props.includes(p), kind + " 被摧毁");
+  }
   // 电池（装甲生命）：伤害翻倍 2×atk → 4×atk，电打装甲 ×0.75
   const bat = c.makeProp("battery", 1, 1); bat.hp = bat.maxHp = 999; S.props.push(bat);
   ch.resources.charge = 3; ready(ch);
@@ -223,28 +220,27 @@ test("龙哥：伤害预览（沙盒预演）里不真的窥探，也不写出�
   assert.ok(lg.resources.seen[0], "实战里照常窥探 1");
 });
 
-test("Ecmo 音爆：按「范围攻击波及同区配置物」结算——拉杆只扳一次，酸液桶按谐波挨一下，日志写实际发生的事", () => {
+test("Ecmo 音爆：同区配置物按 Helumica 触发配置物的方式各触发一次——拉杆扳一次，爆炸桶 / 酸液桶直接引爆", () => {
   const { c, S } = setup(["helu", "kolt"], [{ id: "thug_knife", lv: 1, zone: 1 }]);
   const helu = kit(S, "helu"), foe = foesOf(S)[0];
-  ready(helu, 1); foe.zone = 1; fatten(foe, 300);
+  ready(helu, 2); foe.zone = 1; fatten(foe, 300);
   S.gaps["1-2"] = { type: "door", hp: 0, open: false };
   const lever = c.makeProp("lever", 1, 1), acid = c.makeProp("acid", 1, 1), boom = c.makeProp("boom", 1, 1);
   S.props.push(lever, acid, boom);
   const ecmo = c.spawnWeapon(helu, "ecmo"); ready(ecmo, 1); ecmo.level = 2;
+  ecmo.layers.forEach(l => { l.current = l.max = 500; });
   const mark = S.logPages.flatMap(p => p.lines).length;
   cmd(c, { actor: ecmo.id, skill: "ecmo_boom" });
   const text = S.logPages.flatMap(p => p.lines).slice(mark).map(l => l.text).join("\n");
-  assert.equal(S.gaps["1-2"].open, true, "拉杆扳了一次（以前同区有敌人时会被扳两次，门开了又关）");
-  assert.ok(!S.props.includes(acid), "酸液桶吃谐波 −3 耐久，被摧毁");
-  assert.equal(boom.hp, 3, "爆炸桶不怕谐波");
-  assert.doesNotMatch(text, /音爆触发/);
+  assert.equal(S.gaps["1-2"].open, true, "拉杆扳了一次");
+  assert.ok(!S.props.includes(acid), "酸液桶直接引爆");
+  assert.ok(!S.props.includes(boom), "爆炸桶直接引爆");
+  assert.match(text, /音爆/);
   // 同区没有敌人也照样触发配置物
   foe.zone = 2;
-  const acid2 = c.makeProp("acid", 1, 1); S.props.push(acid2);
   ready(ecmo);
   cmd(c, { actor: ecmo.id, skill: "ecmo_boom" });
   assert.equal(S.gaps["1-2"].open, false, "又扳了一次");
-  assert.ok(!S.props.includes(acid2));
 });
 
 /* ---------- 拉斯缪尔 / EDC ---------- */
@@ -588,7 +584,7 @@ test("年糕格挡咬住敌人：持续到下一个敌人回合结束", () => {
   assert.ok(!foe.noMove, "然后松开");
 });
 
-test("声波切割照说明不给击破；超音波施加的折射能被共振分享", () => {
+test("声波切割每个目标 1 击破（作者定：不改）；超音波施加的折射能被共振分享", () => {
   const { c, S } = setup(["tou", "kolt"], [{ id: "thug_knife", lv: 1, zone: 1 }, { id: "thug_hammer", lv: 1, zone: 1 }]);
   const tou = kit(S, "tou"), [f1, f2] = foesOf(S);
   ready(tou, 1); tou.level = 3; f1.zone = f2.zone = 1; fatten(f1, 300); fatten(f2, 300);
@@ -596,7 +592,7 @@ test("声波切割照说明不给击破；超音波施加的折射能被共振�
   tou.resources.shield = 2;
   cmd(c, { actor: tou.id, skill: "tou_sonic", target: f1.id, picks: { target1: f1.id } });
   assert.ok(c.totalHp(f1) < 300);
-  assert.equal(f1.def, 9, "没有击破");
+  assert.equal(f1.def, 8, "1 击破");
   // 超音波：折射的键是 refract，共振照常分享
   f1.statuses.reso = true; f2.statuses.reso = true;
   ready(tou);

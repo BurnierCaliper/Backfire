@@ -78,7 +78,7 @@ const LEDGER = {
   clock: 480,          // 当天时刻：从 0 点起的分钟数（0–1439），新档从早上 8 点开始
   dur: {},             // 武器 kit → 当前耐久
   heroes: {},          // 角色 kit → { layers:[当前值], shp, dying, dead, upOnShp }
-  weapons: {},         // 武器人 kit → [{ type, current }]：武器人的伤势跨战斗保留，长休回满
+  weapons: {},         // 旧档留下的武器人伤势；现在武器人每场开战回满血，不再使用
   shortUsed: {},       // 角色 kit → 今天已用短休次数
   restOnce: {},        // 角色 kit → { 技能 key: 次数 }：「长休一次」的技能，长休才刷新
   career: null,        // 整局战场记录：{ battles: [每场摘要], kits: { kit: 累计数据 } }（careerRecordBattle）
@@ -323,19 +323,16 @@ function ledgerApplyToField(notes) {
   });
 }
 
-/** 武器人上次留下的伤势（spawnWeapon 唤出时用）。没有记录返回 null（满血） */
+/** 武器人上次留下的伤势。作者定：武器人每次开战都回满血（唯一上不了场的情况是耐久为 0），
+ *  所以不再跨战斗带伤，一律返回 null（满血） */
 function weaponCarryLayers(kit) {
-  return (LEDGER.weapons && LEDGER.weapons[kit]) || null;
+  return null;
 }
 
 /** 记下场上角色的状态 */
 function ledgerCapture() {
-  // 武器人：唤出过的（包括收回后隐藏的）记下伤势；这场没唤出过的保留上次的记录
-  // 明特在机甲里（fused）也要记：它的伤势在瑞比身上标了 mecha 的那几层（engine.js · persistentLayers）
-  (state.units || []).filter(u => u.isPlayer && isWeaponUnit(u) && !u.escort && !u._removed && (!u.fused || u.kit === "mint")).forEach(u => {
-    LEDGER.weapons = LEDGER.weapons || {};
-    LEDGER.weapons[u.kit] = persistentLayers(u);
-  });
+  // 武器人每次开战都回满血，不记伤势（weaponCarryLayers）
+  if (LEDGER.weapons) delete LEDGER.weapons;
   partyHeroes().forEach(h => {
     LEDGER.heroes[h.kit] = {
       layers: persistentLayers(h).map(l => l.current),
@@ -689,7 +686,7 @@ function ledgerHealItem(itemId, kit, notes) {
   const r = takeDice(n, 4, 6);
   bagAdd(itemId, -1);
   const before = totalHpOf(h);
-  healHeroFlesh(h, r.total, { inner: true });   // 医疗包：治疗内层生命，不溢到外层装甲
+  healHeroFlesh(h, r.total);   // 医疗包：和其他治疗一样从内往外补，可以治到外层（作者定）
   notes.push(`对 ${h.name} 使用${ITEM_CATALOG[itemId].name}：${r.text}，实际恢复 ${totalHpOf(h) - before}。`);
   ledgerCapture();
   return notes;

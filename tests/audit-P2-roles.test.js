@@ -275,16 +275,28 @@ test("借力：自己选友方和目的地（三区制从 1 区直接移到 3 �
 });
 
 /* ---------- 7 唤出 ---------- */
-test("唤出扭矩 / Ecmo / EDC：上一场倒下、还没长休时在扣费之前拦下", () => {
+test("唤出扭矩 / Ecmo / EDC：每场开战都满血唤出（上一场倒下也一样，作者定）；只有耐久为 0 时在扣费之前拦下", () => {
   for (const [owner, w, sid] of [["kolt", "torque", "kolt_summon"], ["helu", "ecmo", "helu_summon"], ["ras", "edc", "ras_summon"]]) {
-    const { c, S } = setup([owner, "yuito"], [{ id: "thug_knife", lv: 1, zone: 2 }]);
-    c.LEDGER.weapons = { [w]: [{ type: "armor", current: 0 }] };
-    const o = kit(S, owner); o.ap = 2; o.bonus = 2;
-    assert.match(String(c.skillRequirementError(o, sid)), /还没长休/, sid);
-    cmd(c, { actor: o.id, skill: sid });
-    assert.equal(o.ap, 2, sid + " 不扣行动点");
-    assert.equal(o.bonus, 2, sid + " 不扣附赠");
-    assert.ok(!S.units.some(u => u.kit === w), sid + " 没有唤出");
+    {
+      const { c, S } = setup([owner, "yuito"], [{ id: "thug_knife", lv: 1, zone: 2 }]);
+      c.LEDGER.weapons = { [w]: [{ type: "armor", current: 0 }] };   // 旧档里「上一场倒下」的记录不再起作用
+      const o = kit(S, owner); o.ap = 2; o.bonus = 2;
+      assert.equal(c.skillRequirementError(o, sid), null, sid);
+      cmd(c, { actor: o.id, skill: sid });
+      const wu = S.units.find(u => u.kit === w);
+      assert.ok(wu, sid + " 唤出来了");
+      assert.equal(wu.layers.reduce((n, l) => n + l.current, 0), wu.layers.reduce((n, l) => n + l.max, 0), sid + " 满血");
+    }
+    {
+      const { c, S } = setup([owner, "yuito"], [{ id: "thug_knife", lv: 1, zone: 2 }]);
+      c.LEDGER.dur[w] = 0;
+      const o = kit(S, owner); o.ap = 2; o.bonus = 2;
+      assert.match(String(c.skillRequirementError(o, sid)), /耐久/, sid);
+      cmd(c, { actor: o.id, skill: sid });
+      assert.equal(o.ap, 2, sid + " 不扣行动点");
+      assert.equal(o.bonus, 2, sid + " 不扣附赠");
+      assert.ok(!S.units.some(u => u.kit === w), sid + " 没有唤出");
+    }
   }
 });
 

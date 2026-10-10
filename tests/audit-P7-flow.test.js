@@ -162,7 +162,7 @@ test("跑团空位：文件坏了先另存 .broken；读得出来的团留着，
 });
 
 /* ---------- 4. 遭遇战胜利经验 ---------- */
-test("遭遇战胜利的额外经验只给战斗结束时还站着的人（倒地、战后被救回 1 血的没有）", () => {
+test("遭遇战胜利的额外经验给所有人（倒地的人也给，作者定）", () => {
   const { c, R, run } = rogue("P7-AMBXP");
   R.acceptTask(run, "main");
   run.task.nodes[run.task.index] = { type: "rest", done: false };
@@ -174,12 +174,10 @@ test("遭遇战胜利的额外经验只给战斗结束时还站着的人（倒�
   const kolt = c.findKit("kolt", st.units);
   kolt.layers.forEach(l => { l.current = 0; }); kolt.dying = true;
   st.units.filter(u => !u.isPlayer).forEach(u => { u.dead = true; u.layers.forEach(l => { l.current = 0; }); });
-  const xp0 = Object.fromEntries(run.party.map(h => [h.kit, h.xp]));
   c.settleBattleRewards("win");
   const notes = R.finishBattle(run, "win").join("\n");
   assert.match(notes, /Helumica 遭遇战胜利经验/);
-  assert.doesNotMatch(notes, /柯尔特 遭遇战胜利经验/);
-  assert.ok(run.party.find(h => h.kit === "helu").xp > xp0.helu);
+  assert.match(notes, /柯尔特 遭遇战胜利经验/);
   assert.match(notes, /柯尔特 从濒死中缓过来/, "倒地的人照常被救回 1 点生命");
 });
 
@@ -380,29 +378,20 @@ test("单局：休息点短休、进下一站前短休推过 80 小时，本局�
 });
 
 /* ---------- 12. 属性硬上限 10 ---------- */
-test("属性硬性上限 10：单局加点选项不列满 10 的，跑团加点 / 跑团后台 / 战斗后台都加不过 10", () => {
+test("属性不设硬性上限（作者定）：单局加点、跑团加点、跑团后台都能加过 10", () => {
   const { R, run } = rogue("P7-ATTR");
   const h = run.party[0];
   h.attrs = Object.assign({}, R.cardOf("kolt").attrs, { str: 10 });
-  h.pending = [{ type: "attr", level: 4, noRepeat: false }, { type: "attr", level: 8, noRepeat: true, solo: true }];
-  assert.ok(!R.choiceOptions(run, "kolt", 0).some(o => o.value === "str"));
-  assert.ok(R.choiceOptions(run, "kolt", 0).some(o => o.value === "con"));
-  assert.throws(() => R.choose(run, "kolt", 0, "str"), /不可选/);
-  assert.equal(h.attrs.str, 10);
-
+  h.pending = [{ type: "attr", level: 4, noRepeat: false }];
+  assert.ok(R.choiceOptions(run, "kolt", 0).some(o => o.value === "str"));
+  R.choose(run, "kolt", 0, "str");
+  assert.equal(h.attrs.str, 11);
   const { c, kolt } = trpg();
   kolt.attrs.str = 10; kolt.attrPoints = 1;
-  assert.match(c.trpgSpendAttr("kolt", "str").join(""), /最高 10/);
-  assert.equal(kolt.attrs.str, 10);
-  assert.equal(kolt.attrPoints, 1, "点数没花掉");
+  c.trpgSpendAttr("kolt", "str");
+  assert.equal(kolt.attrs.str, 11);
   c.trpgBackstageApply({ heroes: { kolt: { attrs: { con: 14 } } } });
-  assert.equal(kolt.attrs.con, 10);
-  kolt.attrs.dex = 9;
-  c.Commands.dispatch({ type: "backstage", action: "attr", actor: kolt.id, attr: "dex", value: 12 });
-  assert.equal(kolt.attrs.dex, 10);
-  assert.equal(kolt.attrPoints, 0);
-  // 跑团加点按钮不列已满 10 的
-  assert.match(src("trpg-ui.js"), /filter\(k => \(Number\(\(h\.attrs \|\| \{\}\)\[k\]\) \|\| 0\) < ATTR_HARD_MAX\)/);
+  assert.equal(kolt.attrs.con, 14);
 });
 
 /* ---------- 13. 后台等级上限 ---------- */
@@ -445,28 +434,18 @@ test("配置物图鉴：超充能电池摧毁时打同区所有单位（不分�
 });
 
 /* ---------- 15. 医疗包只治内层 ---------- */
-test("医疗包「治疗内层生命」：只补最内层，不溢到外层装甲（战斗中、战斗外都是）；短休照旧从内往外补", () => {
+test("医疗包和其他治疗一样从内往外补，可以治到外层（作者定；战斗中、战斗外都是）", () => {
   const { c, kolt } = trpg();
-  const reset = () => { kolt.layers = [{ type: "armor", current: 0, max: 10 }, { type: "flesh", current: 15, max: 20, inner: true }]; };
+  const reset = () => { kolt.layers = [{ type: "armor", current: 0, max: 10 }, { type: "flesh", current: 19, max: 20, inner: true }]; };
   reset();
   c.bagAdd("medkit", 2);
   c.useItemOn(kolt, "medkit", kolt);
-  assert.equal(kolt.layers[0].current, 0, "战斗中：装甲不动");
   assert.equal(kolt.layers[1].current, 20);
+  assert.ok(kolt.layers[0].current > 0, "战斗中：补满内层后补到装甲");
   reset();
   c.ledgerHealItem("medkit", "kolt", []);
-  assert.equal(kolt.layers[0].current, 0, "战斗外：装甲不动");
   assert.equal(kolt.layers[1].current, 20);
-  // 错位把内层换到外面：照样补内层那一层
-  kolt.layers = [{ type: "flesh", current: 5, max: 20, inner: true }, { type: "armor", current: 0, max: 10 }];
-  c.bagAdd("clinic", 1);
-  c.useItemOn(kolt, "clinic", kolt);
-  assert.ok(kolt.layers[0].current > 5);
-  assert.equal(kolt.layers[1].current, 0);
-  // 短休恢复的是「血量」：补满内层后继续补外层
-  kolt.layers = [{ type: "armor", current: 0, max: 10 }, { type: "flesh", current: 19, max: 20, inner: true }];
-  c.trpgShortRest(["kolt"]);
-  assert.ok(kolt.layers[0].current > 0);
+  assert.ok(kolt.layers[0].current > 0, "战斗外：一样");
 });
 
 /* ---------- 16. 跑团任务模板报酬 ---------- */

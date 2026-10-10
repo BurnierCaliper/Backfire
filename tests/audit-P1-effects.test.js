@@ -179,14 +179,14 @@ test("冻土的冰 25% 易伤对飞行单位无效", () => {
   assert.equal(hit(kit("kolt"), foe, "ice", env).res.total, 15, "飞行单位：照原克制（冰打星灵 −25%）");
 });
 
-test("熔融：冰属性攻击 ×2 伤害、+1 击破只作用一次（多段只第一段），然后熔融结束；冰持续伤害不触发", () => {
+test("熔融：冰属性攻击每一段都 ×2 伤害、+1 击破（作者定），攻击结算完熔融结束；冰持续伤害不触发", () => {
   const { c, foe, kit, hit } = field();
   layers(foe, [["flesh", 1000]]);
   foe.def = 20; foe.defMax = 20;
   c.applyInstantEffect(foe, "melt", []);
   const out = hit(kit("kolt"), foe, "ice", { hits: 3 });
-  assert.equal(out.res.total, 40);
-  assert.equal(out.res.breakDealt, 1);
+  assert.equal(out.res.total, 60);
+  assert.equal(out.res.breakDealt, 3);
   assert.equal(foe.instant.melt, false);
   c.applyInstantEffect(foe, "melt", []);
   c.applyTypedDot(foe, 10, "ice", [], "测试冰");
@@ -360,21 +360,21 @@ test("dealBreak：opt.by 记下失衡制造者（不能接自己的协助攻击�
   }
 });
 
-test("千钧：每个攻击行动总击破只 +1（不按段，同一行动的几次攻击也只加一次）", () => {
+test("千钧：每一段攻击都 +1 击破（作者定：每段都算）", () => {
   const { c, foe, kit, hit } = field();
   const kolt = kit("kolt");
   layers(foe, [["flesh", 1000]]);
   kolt.self = "anchor"; foe.def = 20; foe.defMax = 20;
-  assert.equal(hit(kolt, foe, "ice", { atk: 1, hits: 3 }).res.breakDealt, 1);
-  assert.equal(hit(kolt, foe, "ice", { atk: 1, hits: 3, baseBreak: 1 }).res.breakDealt, 4);
-  // 川川普攻：两下（共 1 击破），一个行动只加一次
+  assert.equal(hit(kolt, foe, "ice", { atk: 1, hits: 3 }).res.breakDealt, 3);
+  assert.equal(hit(kolt, foe, "ice", { atk: 1, hits: 3, baseBreak: 1 }).res.breakDealt, 6);
+  // 川川普攻：两下（共 1 击破），千钧每段 +1
   const f2 = field({ party: ["chuan", "helu"] });
   const ch = f2.kit("chuan");
   layers(f2.foe, [["flesh", 1000]]); f2.foe.def = 20; f2.foe.defMax = 20;
   ch.self = "anchor"; ch.resources.charge = 0;
   f2.st.attackerId = ch.id; f2.st.targetId = f2.foe.id; ch.ap = 5; ch.bonus = 5;
   f2.c.runSkill("chuan_aa");
-  assert.equal(f2.foe.def, 18);
+  assert.equal(f2.foe.def, 17);
 });
 
 test("蚀刻残留「视为被克制」：弱点特效按克制 +25%", () => {

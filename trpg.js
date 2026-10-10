@@ -128,7 +128,6 @@ function trpgSpendAttr(kit, attr) {
   if (!u) return ["没有这个角色。"];
   if (!(Number(u.attrPoints) > 0)) return [`${u.name} 没有可分配的属性点。`];
   if (typeof ATTR_NAMES !== "undefined" && !ATTR_NAMES[attr]) return ["没有这项属性。"];
-  if ((Number((u.attrs || {})[attr]) || 0) >= ATTR_HARD_MAX) return [`单项属性最高 ${ATTR_HARD_MAX}（手册：硬性上限），这一项不能再加。`];
   u.attrs = Object.assign({}, u.attrs || {});
   // 手册：8 级的那一点不能加在曾经加过的同一项上
   u.attrPicks = u.attrPicks || [];
@@ -311,7 +310,7 @@ function trpgBackstageApply(edit, why) {
     if (e.attrs) {
       u.attrs = Object.assign({}, u.attrs || {});
       Object.keys(e.attrs).forEach(k => {
-        const v = num(e.attrs[k], 1, ATTR_HARD_MAX);
+        const v = num(e.attrs[k], 1);
         const was = Number(u.attrs[k]) || 0;
         if (v != null && v !== was) { n(typeof ATTR_NAMES !== "undefined" ? ATTR_NAMES[k] || k : k, was, v); u.attrs[k] = v; restat = true; }
       });

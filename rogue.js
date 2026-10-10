@@ -578,7 +578,6 @@ const Rogue = (function () {
       const attrs = h.attrs || (cardOf(kit) || {}).attrs || {};
       return Object.keys(ATTR_NAMES)
         .filter(k => !(p.noRepeat && (h.attrPicks || []).indexOf(k) >= 0))
-        .filter(k => (Number(attrs[k]) || 0) < ATTR_HARD_MAX)   // 硬性上限 10：已经满的不列（选了也不收）
         .map(k => ({ value: k, label: `${ATTR_NAMES[k]} +1`, hint: `现在 ${attrs[k] || 0}` }));
     }
     if (p.type === "role2") {
@@ -781,8 +780,6 @@ const Rogue = (function () {
         if (info.left) notes.push(`支援次数还剩 ${info.left} 次，带到之后的战斗。`);
       }
     }
-    // 战斗结束这一刻还站着的人（没死、没倒地）：结算濒死会把倒地的人救回 1 点生命，先记下来
-    const standing = run.party.filter(h => { const u = findKit(h.kit, state.units); return u && !u.dead && !u.dying; }).map(h => h.kit);
     ledgerAfterBattle(notes);                 // 手册：耐久结算、濒死恢复到 1 点生命、记下武器人伤势
     if (run.solo && outcome === "win") {
       // 单人模式：击杀经验照常，每场胜利再固定 +50
@@ -796,12 +793,12 @@ const Rogue = (function () {
     const ambush = !!run.ambush && !boss;
     const ambushPlan = ambush ? run.ambush.plan || null : null;
     if (ambush && outcome === "win") {
-      // 遭遇战胜利：每个还站着的人额外 50 × 敌人等级 经验（倒地、战后才被救回 1 点生命的人没有；以前也给）
+      // 遭遇战胜利：每人额外 50 × 敌人等级 经验（倒地的人也给，作者定）
       const lv = enemyLevel(run, run.task.diff);
       const xp = AMB.xpPerLevel * lv;
       run.party.forEach(h => {
         const u = findKit(h.kit, state.units);
-        if (!u || u.dead || standing.indexOf(h.kit) < 0) return;
+        if (!u || u.dead) return;
         u.xp = (u.xp || 0) + xp;
         notes.push(`${u.name} 遭遇战胜利经验 +${xp}。`);
       });
