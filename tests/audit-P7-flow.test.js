@@ -112,7 +112,7 @@ test("客制化 4 级门槛写在界面上（单局工匠、队伍栏；跑团�
   assert.match(ui, /w\.level < minLv/);
   assert.match(ui, /级才解锁客制化（现在 \$\{w\.level\} 级）/);
   assert.match(ui, /w\.bpOff \?/);
-  assert.match(tu, /武器不到 \$\{minLv\} 级，不生效/);
+  assert.match(tu, /「武器等级 \+ 羁绊」不到 \$\{minLv\} 级，不生效/);   // 和改装槽、被动升级一样看武器等级 + 羁绊
   assert.match(tu, /级才解锁客制化（现在 \$\{lv\} 级）/);
 });
 

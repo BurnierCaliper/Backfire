@@ -430,7 +430,7 @@
     return {
       coefs: Object.keys(c).map(a => ({ attr: a, name: WEAPON_PART_ATTR_CN[a] || a, coef: c[a] })),
       slots: weaponPartRow(owner, kit).map(id => id ? { id, name: weaponPartLabel(id), text: weaponPartText(id) } : null),
-      nextSlotLv: WEAPON_PART_SLOT_LEVELS.find(x => x > (Number((owner.weaponLevels || {})[kit]) || 1)) || null
+      nextSlotLv: WEAPON_PART_SLOT_LEVELS.find(x => x > (typeof weaponRewardLevel === "function" ? weaponRewardLevel(owner, kit) : (Number((owner.weaponLevels || {})[kit]) || 1))) || null
     };
   }
   /** 武器人（不管在不在场）的资料 */
@@ -510,6 +510,9 @@
     const ws = weaponSheet(owner, kit, units);
     if (!ws) return null;
     const lv = Number((owner.weaponLevels || {})[kit]) || 1;
+    // 羁绊：加在武器等级上只用来解锁奖励（改装槽、被动升级），数值照武器等级算
+    const bond = typeof weaponBond === "function" ? weaponBond(owner, kit) : 0;
+    const rlv = lv + bond;
     const parts = typeof weaponPartsOf === "function" ? weaponPartsOf(owner, kit) : [];
     const bd = typeof weaponAtkBreakdown === "function" ? weaponAtkBreakdown(kit, owner.attrs, lv, parts) : null;
     const st = typeof state !== "undefined" ? state : {};
@@ -527,10 +530,10 @@
     const plusLv = typeof PASSIVE_PLUS_LEVEL !== "undefined" ? PASSIVE_PLUS_LEVEL : {};
     const track = slotLv.map((L, i) => ({ lv: L, text: `改装槽 ${i + 1}` }))
       .concat(Object.keys(plusLv).filter(n => pas[n - 1]).map(n => ({ lv: plusLv[n], text: `被动「${pas[n - 1].name}+」` })))
-      .sort((a, b) => a.lv - b.lv).map(x => Object.assign(x, { done: lv >= x.lv }));
+      .sort((a, b) => a.lv - b.lv).map(x => Object.assign(x, { done: rlv >= x.lv }));
     const row = typeof weaponPartRow === "function" ? weaponPartRow(owner, kit) : [];
     return {
-      kit, name: ws.name, owner: owner.kit, ownerName: owner.name, level: lv, maxLevel: 10,
+      kit, name: ws.name, owner: owner.kit, ownerName: owner.name, level: lv, maxLevel: 10, bond, bondMax: typeof BOND_MAX !== "undefined" ? BOND_MAX : 5, rewardLevel: rlv,
       held, out: ws.out, broken: dur != null && dur <= 0,
       atk, breakdown: bd, def: ws.def, layers: ws.layers,
       durability: dur, durMax, durBase,
@@ -538,7 +541,7 @@
       personalAtk: Number(owner.personalAtk) || 0,
       slots: row.map(id => id ? { id, name: WEAPON_PARTS[id].name, grade: WEAPON_PARTS[id].grade || "",
         text: weaponPartText(id), coef: Object.assign({}, WEAPON_PARTS[id].coef) } : null),
-      lockedSlots: slotLv.filter(L => L > lv),
+      lockedSlots: slotLv.filter(L => L > rlv),
       blueprint: mod ? Object.assign({ name: "客制化", text: "", smith: "" }, blueprintInfo(bpId) || {},
         { effects: typeof bpEffectRows === "function" ? bpEffectRows(mod, ctx) : [] }) : null,
       track

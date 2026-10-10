@@ -148,6 +148,10 @@ function trpgSpendAttr(kit, attr) {
 function trpgWeaponLevel(owner, kit) {
   return Number((owner.weaponLevels || {})[kit]) || 1;
 }
+/** 解锁客制化看的等级 = 武器等级 + 羁绊（和改装槽、被动升级一样，growth.js · weaponRewardLevel） */
+function trpgBpLevel(owner, kit) {
+  return typeof weaponRewardLevel === "function" ? weaponRewardLevel(owner, kit) : trpgWeaponLevel(owner, kit);
+}
 /** 升下一级要什么：{ next, mats: [{ key, id, name, need, have }], labor, canSelf, max } */
 function trpgUpgradeInfo(owner, kit) {
   const lv = trpgWeaponLevel(owner, kit);
@@ -216,7 +220,7 @@ function trpgSyncWeaponMods() {
   const mods = {}, ids = {};
   trpgHeroes().forEach(h => Object.keys(h.weaponBlueprints || {}).forEach(k => {
     const b = typeof blueprintSpec === "function" ? blueprintSpec(h.weaponBlueprints[k]) : null;
-    if (b && b.mod && trpgWeaponLevel(h, k) >= BLUEPRINT_MIN_LEVEL) { mods[k] = JSON.parse(JSON.stringify(b.mod)); ids[k] = b.id; }
+    if (b && b.mod && trpgBpLevel(h, k) >= BLUEPRINT_MIN_LEVEL) { mods[k] = JSON.parse(JSON.stringify(b.mod)); ids[k] = b.id; }
   }));
   state.weaponMods = Object.keys(mods).length ? mods : null;
   state.weaponBlueprints = Object.keys(ids).length ? ids : null;
@@ -235,8 +239,8 @@ function trpgInstallBlueprint(ownerKit, kit, bpId, fee, free) {
   if (!b) return ["没有这张图纸。"];
   const wname = typeof weaponName === "function" ? weaponName(kit) : kit;
   // 武器 4 级才解锁客制化（主持人手册「本版规则修订」）：主持人直接装也一样，先把武器升上去
-  const lv = trpgWeaponLevel(owner, kit);
-  if (lv < BLUEPRINT_MIN_LEVEL) return [`${wname} 要升到 ${BLUEPRINT_MIN_LEVEL} 级才能装客制化图纸（现在 ${lv} 级）。`];
+  const lv = trpgBpLevel(owner, kit);
+  if (lv < BLUEPRINT_MIN_LEVEL) return [`${wname} 的「武器等级 + 羁绊」要到 ${BLUEPRINT_MIN_LEVEL} 级才能装客制化图纸（现在 ${lv} 级）。`];
   const pay = free ? 0 : Math.max(0, Math.floor(Number(fee) || 0));
   if (!free && bagCount(bpId) < 1) return [`背包里没有图纸「${b.name}」。`];
   if (pay > (Number(state.kuizhi) || 0)) return [`奎支不够付工钱：要 ${pay}，手里只有 ${Number(state.kuizhi) || 0}。`];
@@ -354,6 +358,16 @@ function trpgBackstageApply(edit, why) {
           if (typeof setOwnedWeaponLevel === "function") setOwnedWeaponLevel(u, wk, v);
           else { u.weaponLevels = u.weaponLevels || {}; u.weaponLevels[wk] = v; }
           trpgSyncWeaponMods();   // 降到 4 级以下：装着的客制化图纸不再生效；升回去又生效
+        }
+      }
+      if (w.bond != null) {
+        const v = num(w.bond, 0, typeof BOND_MAX !== "undefined" ? BOND_MAX : 5);
+        const was = typeof weaponBond === "function" ? weaponBond(u, wk) : 0;
+        if (v != null && v !== was) {
+          change(`${wn} 羁绊`, was, v);
+          const ej = [];
+          if (typeof setWeaponBond === "function") setWeaponBond(u, wk, v, ej);
+          ej.forEach(t => notes.push(t));
         }
       }
       if (w.dur != null) {

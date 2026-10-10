@@ -209,6 +209,28 @@ function rollWeaponPart(grades, rnd) {
 const WEAPON_PART_ATTR_CN = { str: "力量", con: "体质", dex: "敏捷", wil: "意志", int: "智力", sta: "耐力" };
 function weaponPartSpec(id) { return WEAPON_PARTS[id] || null; }
 function weaponPartIds() { return Object.keys(WEAPON_PARTS); }
+/* ===== 羁绊：玩家角色和自己的武器（武器人）之间，0–5 级，跑团模式由主持人改 =====
+ * 羁绊等级直接加在武器等级上，只用来解锁武器升级奖励（改装槽、被动升级），
+ * 不算武器升级：atk、武器人血量、耐久、补正都还是按武器本身的等级算。 */
+const BOND_MAX = 5;
+function weaponBond(owner, kit) {
+  const v = Math.floor(Number(((owner && owner.bonds) || {})[kit]) || 0);
+  return Math.max(0, Math.min(BOND_MAX, v));
+}
+/** 解锁奖励用的等级 = 武器等级 + 羁绊 */
+function weaponRewardLevel(owner, kit) {
+  const lv = Number(((owner && owner.weaponLevels) || {})[kit]) || 1;
+  return lv + weaponBond(owner, kit);
+}
+/** 改羁绊等级（0–5）。降下来槽位变少时多出来的改装件退回背包，atk 照改装件重算 */
+function setWeaponBond(owner, kit, v, notes) {
+  if (!owner || !kit) return 0;
+  owner.bonds = owner.bonds || {};
+  owner.bonds[kit] = Math.max(0, Math.min(BOND_MAX, Math.floor(Number(v) || 0)));
+  if (typeof ejectExtraWeaponParts === "function") ejectExtraWeaponParts(owner, kit, notes);
+  refreshOwnerWeaponAtk(owner, kit);
+  return owner.bonds[kit];
+}
 function weaponPartSlots(lv) {
   lv = Math.max(1, Number(lv) || 1);
   return WEAPON_PART_SLOT_LEVELS.filter(x => lv >= x).length;
@@ -260,7 +282,7 @@ function weaponPartLabel(id) {
 }
 /** 武器槽位原样（含空槽），长度补齐到当前等级的槽数 */
 function weaponPartRow(owner, kit) {
-  const lv = Number(((owner && owner.weaponLevels) || {})[kit]) || 1;
+  const lv = weaponRewardLevel(owner, kit);   // 武器等级 + 羁绊
   const n = weaponPartSlots(lv);
   const raw = ((owner && owner.weaponParts) || {})[kit] || [];
   const row = [];
@@ -348,7 +370,7 @@ function refreshOwnerWeaponAtk(owner, kit) {
 function ejectExtraWeaponParts(owner, kit, notes) {
   const raw = ((owner && owner.weaponParts) || {})[kit];
   if (!raw) return;
-  const n = weaponPartSlots(Number((owner.weaponLevels || {})[kit]) || 1);
+  const n = weaponPartSlots(weaponRewardLevel(owner, kit));
   raw.slice(n).forEach(id => {
     if (id && WEAPON_PARTS[id] && typeof bagAdd === "function") {
       bagAdd(weaponPartItemId(id), 1);
@@ -364,7 +386,7 @@ function installWeaponPart(owner, kit, slot, partId, free) {
   if (!p) return ["没有这种改装件。"];
   if (!(owner.linkedKits || []).includes(kit)) return ["这把武器不属于这个角色。"];
   const row = weaponPartRow(owner, kit);
-  if (!row.length) return [`武器要到 ${WEAPON_PART_SLOT_LEVELS[0]} 级才有改装槽。`];
+  if (!row.length) return [`武器等级 + 羁绊要到 ${WEAPON_PART_SLOT_LEVELS[0]} 级才有改装槽。`];
   let i = slot == null || slot === "" ? row.indexOf(null) : Math.floor(Number(slot));
   if (i < 0) i = 0;
   if (!(i < row.length)) return [`这把武器只有 ${row.length} 个改装槽。`];
@@ -685,7 +707,8 @@ function heroOfUnit(u) {
 function heroWeaponLevel(hero) {
   if (!hero) return 0;
   const kits = (hero.linkedKits && hero.linkedKits.length) ? hero.linkedKits : (typeof defaultLinkedKits === "function" ? defaultLinkedKits(hero.kit) : []);
-  return kits.reduce((m, k) => Math.max(m, Number((hero.weaponLevels || {})[k]) || 1), 0);
+  // 被动升级看「武器等级 + 羁绊」（羁绊不提高数值，但能更早解锁奖励）
+  return kits.reduce((m, k) => Math.max(m, weaponRewardLevel(hero, k)), 0);
 }
 /** 这个角色（或它的武器人）的第 n 个被动是否已经升级 */
 function passivePlus(u, n) {

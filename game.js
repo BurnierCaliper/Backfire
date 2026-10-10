@@ -3189,6 +3189,7 @@
       // 跑团模式：武器等级、属性点、加过的属性、手册里还没做成系统的奖励（熟练项、专长……）
       weaponLevels: u.weaponLevels ? JSON.parse(JSON.stringify(u.weaponLevels)) : null,
       weaponParts: u.weaponParts ? JSON.parse(JSON.stringify(u.weaponParts)) : null,   // 武器改装槽
+      bonds: u.bonds ? JSON.parse(JSON.stringify(u.bonds)) : null,   // 羁绊（和每把武器之间，0–5）
       weaponBlueprints: u.weaponBlueprints ? JSON.parse(JSON.stringify(u.weaponBlueprints)) : null,   // 客制化图纸
       attrPoints: Number(u.attrPoints) || 0,
       attrPicks: (u.attrPicks || []).slice(),
@@ -3241,6 +3242,7 @@
       if (s.attrPicks) u.attrPicks = s.attrPicks.slice();
       if (s.notes) u.levelNotes = s.notes;
       if (typeof applyLevelStats === "function") applyLevelStats(u);
+      if (s.bonds) u.bonds = JSON.parse(JSON.stringify(s.bonds));   // 先放羁绊：改装槽数量要按「武器等级 + 羁绊」算
       if (s.weaponParts) u.weaponParts = JSON.parse(JSON.stringify(s.weaponParts));
       if (s.weaponBlueprints) u.weaponBlueprints = JSON.parse(JSON.stringify(s.weaponBlueprints));
       if (s.weaponLevels && typeof setOwnedWeaponLevel === "function") {

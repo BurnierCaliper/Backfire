@@ -48,10 +48,11 @@ function bpActive() {
  * 已经装在低于 4 级武器上的（旧存档、后台把武器降了级）留在武器上，但不生效：
  * 读图纸加成的地方（ledger.js · weaponMod / unitWeaponMod、passiveOn）都先问这里。 */
 const BLUEPRINT_MIN_LEVEL = 4;
-/** 这把武器在场上的等级（记在主人身上）；主人不在场返回 null */
+/** 解锁客制化看的等级 = 武器等级 + 羁绊（和改装槽、被动升级一样，growth.js · weaponRewardLevel）；主人不在场返回 null */
 function bpWeaponLevel(kit) {
   const owner = typeof weaponOwner === "function" ? weaponOwner(kit) : null;
-  return owner ? Number((owner.weaponLevels || {})[kit]) || 1 : null;
+  if (!owner) return null;
+  return typeof weaponRewardLevel === "function" ? weaponRewardLevel(owner, kit) : Number((owner.weaponLevels || {})[kit]) || 1;
 }
 /** 装在这把武器上的图纸此刻生不生效：武器 4 级以上（主人不在场时不拦） */
 function bpUnlocked(kit) {

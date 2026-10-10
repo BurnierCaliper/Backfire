@@ -110,7 +110,8 @@
       const weapons = (h.linkedKits || []).map(k => {
         const lv = (h.weaponLevels || {})[k] || 1;
         const d = weaponDur(k), m = weaponDurMax(k);
-        return `<div class="rh-w${d <= 0 ? " broken" : ""}">${esc(weaponName(k))} Lv${lv} · 耐久 ${d}/${m}${d <= 0 ? "（损坏）" : ""}</div>`;
+        const bond = typeof weaponBond === "function" ? weaponBond(h, k) : 0;
+        return `<div class="rh-w${d <= 0 ? " broken" : ""}">${esc(weaponName(k))} Lv${lv}${bond ? ` · 羁绊 ${bond}` : ""} · 耐久 ${d}/${m}${d <= 0 ? "（损坏）" : ""}</div>`;
       }).join("");
       return `<div class="rhero${h.dead ? " fallen" : h.dying ? " dying" : ""}">
         <div class="rh-top"><b>${esc(h.name)}</b><span>Lv${h.level || 1}${tag ? " · " + tag : ""}</span><button class="g-btn small rh-sheet" data-sheet="${esc(h.kit)}" title="数值、被动和技能说明">资料</button><button class="g-btn small rh-sheet" data-armory="${esc(h.kit)}" title="武器补正、atk 明细、改装件和客制化">武器</button></div>
@@ -273,7 +274,7 @@
         const name = weaponName(k);
         const coefs = weaponCoefs(k, weaponPartsOf(h, k));
         const coefTxt = Object.keys(coefs).map(a => `${WEAPON_PART_ATTR_CN[a] || a} ${coefs[a]}`).join(" · ");
-        if (!row.length) return `<div class="tr-up"><b>${esc(name)}</b>（${esc(h.name)}）没有改装槽（${WEAPON_PART_SLOT_LEVELS[0]} 级开放） · 补正 ${esc(coefTxt)}</div>`;
+        if (!row.length) return `<div class="tr-up"><b>${esc(name)}</b>（${esc(h.name)}）没有改装槽（武器等级 + 羁绊到 ${WEAPON_PART_SLOT_LEVELS[0]} 级开放） · 补正 ${esc(coefTxt)}</div>`;
         const slots = row.map((id, i) => `<div class="tr-row">槽 ${i + 1}：${id ? `<b>${esc(weaponPartLabel(id))}</b> <small>${esc(weaponPartText(id))}</small>
             <button class="g-btn small" data-part-rm="${esc(h.kit)}:${esc(k)}:${i}">拆下</button>` : `<span class="r-hint">空</span>`}
             <select data-part-pick="${esc(h.kit)}:${esc(k)}:${i}">${partOpts(p => `<option value="${esc(p)}">${esc(weaponPartLabel(p))} ${esc(weaponPartText(p))}（背包 ${bagCount(weaponPartItemId(p))}）</option>`)}</select>
@@ -286,7 +287,7 @@
           <button class="g-btn small" id="tr-part-give-btn">放进背包 +1</button></div>`;
       return `<p class="r-hint">手册：升级武器需要找到工作站；${U.selfMaxLevel} 级以上无法靠自己升级，要找专门的武器工匠（材料 + 加工费，不同工匠的费用要求不一样，按剧情改费用）。材料在商店「材料」里买，或在背包里给予。</p>${rows}
         <h3>改装槽 <button class="g-btn small" data-armory="${esc((heroes()[0] || {}).kit || "")}">打开武器工坊</button></h3>
-        <p class="r-hint">武器 ${WEAPON_PART_SLOT_LEVELS.join(" 级、")} 级各开放 1 个改装槽。改装件修改武器的属性补正系数；装上从背包拿走，拆下放回背包。</p>
+        <p class="r-hint">武器等级 + 羁绊到 ${WEAPON_PART_SLOT_LEVELS.join(" 级、")} 级各开放 1 个改装槽（羁绊在「后台」里改，只解锁奖励、不提高数值）。改装件修改武器的属性补正系数；装上从背包拿走，拆下放回背包。</p>
         ${give}${slotRows}
         ${blueprintPanel()}`;
     }
@@ -302,10 +303,10 @@
     const rows = heroes().flatMap(h => (h.linkedKits || []).map(k => {
       const cur = (h.weaponBlueprints || {})[k];
       const b = cur ? all.find(x => x.id === cur) : null;
-      const lv = trpgWeaponLevel(h, k);
-      // 武器 4 级才解锁客制化：不到 4 级装不上，已经装着的（旧存档、后台降级）不生效
-      const locked = lv < minLv ? `<span class="r-hint">武器 ${minLv} 级才解锁客制化（现在 ${lv} 级）</span>` : "";
-      return `<div class="tr-up"><b>${esc(weaponName(k))}</b>（${esc(h.name)}）${b ? `装着「<b>${esc(b.name)}</b>」<small> ${esc(b.text)}</small>${lv < minLv ? `<b class="bad">（武器不到 ${minLv} 级，不生效）</b>` : ""}
+      const lv = typeof trpgBpLevel === "function" ? trpgBpLevel(h, k) : trpgWeaponLevel(h, k);
+      // 「武器等级 + 羁绊」4 级才解锁客制化：不到 4 级装不上，已经装着的（旧存档、后台降级）不生效
+      const locked = lv < minLv ? `<span class="r-hint">「武器等级 + 羁绊」${minLv} 级才解锁客制化（现在 ${lv} 级）</span>` : "";
+      return `<div class="tr-up"><b>${esc(weaponName(k))}</b>（${esc(h.name)}）${b ? `装着「<b>${esc(b.name)}</b>」<small> ${esc(b.text)}</small>${lv < minLv ? `<b class="bad">（「武器等级 + 羁绊」不到 ${minLv} 级，不生效）</b>` : ""}
           <button class="g-btn small" data-bp-rm="${esc(h.kit)}:${esc(k)}">拆下（放回背包）</button>` : `<span class="r-hint">没有装图纸</span>`}
         ${locked ? `<div class="tr-row">${locked}</div>` : `<div class="tr-row"><select data-bp-pick="${esc(h.kit)}:${esc(k)}">${groups}</select>
           <span>工钱 <input type="number" min="0" value="0" data-bp-fee="${esc(h.kit)}:${esc(k)}" style="width:90px"></span>
@@ -313,7 +314,7 @@
           <button class="g-btn small" data-bp-in="${esc(h.kit)}:${esc(k)}:1">主持人直接装（不耗）</button></div>`}</div>`;
     })).join("");
     return `<h3>客制化图纸 <button class="g-btn small" data-armory="${esc((heroes()[0] || {}).kit || "")}">在武器工坊里看实际效果</button></h3>
-      <p class="r-hint">武器 ${minLv} 级才解锁客制化。一把武器只能装一张，装新的会把旧的放回背包；拆下也放回背包。工钱按剧情填（不同工匠收费不一样），主持人直接装不耗图纸也不收钱。</p>
+      <p class="r-hint">「武器等级 + 羁绊」到 ${minLv} 级才解锁客制化（和改装槽、被动升级一样）。一把武器只能装一张，装新的会把旧的放回背包；拆下也放回背包。工钱按剧情填（不同工匠收费不一样），主持人直接装不耗图纸也不收钱。</p>
       <div class="tr-row">给予图纸 <select id="tr-bp-give">${groups}</select><button class="g-btn small" id="tr-bp-give-btn">放进背包 +1</button></div>
       ${rows}`;
   }
@@ -333,6 +334,7 @@
         const hurtText = hurt ? hurt.map(x => `${(LAYER && LAYER[x.type]) || x.type} ${x.current}`).join(" / ") : "";
         return `<div class="tr-row"><b>${esc(weaponName(w))}</b>
           <label>等级 ${numIn(`data-bs-wlv="${k}" data-w="${esc(w)}" min="1" max="${HANDBOOK_WEAPON_UPGRADE.maxLevel}"`, trpgWeaponLevel(h, w), 52)}</label>
+          <label title="羁绊等级加在武器等级上，只用来更早解锁改装槽和被动升级，不提高 atk 等数值">羁绊 ${numIn(`data-bs-bond="${k}" data-w="${esc(w)}" min="0" max="${typeof BOND_MAX !== "undefined" ? BOND_MAX : 5}"`, typeof weaponBond === "function" ? weaponBond(h, w) : 0, 44)}</label>
           <label>耐久 ${numIn(`data-bs-dur="${k}" data-w="${esc(w)}" min="0" max="${weaponDurMax(w)}"`, weaponDur(w), 52)} / ${weaponDurMax(w)}</label>
           ${hurt ? `<label title="武器人上次留下的伤势：${esc(hurtText)}"><input type="checkbox" data-bs-heal="${k}" data-w="${esc(w)}"> 治好武器人伤势（${esc(hurtText)}）</label>` : ""}</div>`;
       }).join("");
@@ -383,6 +385,7 @@
     P.querySelectorAll("[data-bs-attr]").forEach(el => { H(el.dataset.bsAttr).attrs[el.dataset.k] = val(el); });
     P.querySelectorAll("[data-bs-wlv]").forEach(el => { W(el.dataset.bsWlv, el.dataset.w).level = val(el); });
     P.querySelectorAll("[data-bs-dur]").forEach(el => { W(el.dataset.bsDur, el.dataset.w).dur = val(el); });
+    P.querySelectorAll("[data-bs-bond]").forEach(el => { W(el.dataset.bsBond, el.dataset.w).bond = val(el); });
     P.querySelectorAll("[data-bs-heal]").forEach(el => { if (el.checked) W(el.dataset.bsHeal, el.dataset.w).heal = true; });
     return edit;
   }

@@ -1526,7 +1526,7 @@ const Rogue = (function () {
     const owner = run.party.find(h => (h.weapons || []).indexOf(kit) >= 0);
     if (!owner) throw new Error("队伍里没有这把武器");
     // 武器 4 级才解锁客制化（主持人手册「本版规则修订」；mods.js · BLUEPRINT_MIN_LEVEL）
-    const lv = (owner.weaponLevels || {})[kit] || 1;
+    const lv = typeof weaponRewardLevel === "function" ? weaponRewardLevel(owner, kit) : (owner.weaponLevels || {})[kit] || 1;
     if (lv < BLUEPRINT_MIN_LEVEL) throw new Error(`${heroName(kit)} 要升到 ${BLUEPRINT_MIN_LEVEL} 级才能装客制化图纸（现在 ${lv} 级）`);
     const cost = SR().installCost;
     if ((Number(state.kuizhi) || 0) < cost) throw new Error(`奎支不够：装图纸要 ${cost}，手里只有 ${Number(state.kuizhi) || 0}`);
@@ -1649,7 +1649,7 @@ const Rogue = (function () {
   /** 这把武器够不够 4 级、装的图纸能不能生效（mods.js · BLUEPRINT_MIN_LEVEL） */
   function bpLevelOk(run, kit) {
     const h = run.party.find(x => (x.weapons || []).indexOf(kit) >= 0);
-    return !!h && ((h.weaponLevels || {})[kit] || 1) >= BLUEPRINT_MIN_LEVEL;
+    return !!h && (typeof weaponRewardLevel === "function" ? weaponRewardLevel(h, kit) : (h.weaponLevels || {})[kit] || 1) >= BLUEPRINT_MIN_LEVEL;
   }
   /** 耐久上限变小（装上大杀器、耐久 −N 的图纸，或者旧存档里的图纸随升级生效）：当前耐久跟着压下来
    *  （跑团 trpg.js · trpgSyncWeaponMods 一样）。以前要等下次长休，期间耐久比上限还高 */

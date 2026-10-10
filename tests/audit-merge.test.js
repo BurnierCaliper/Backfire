@@ -70,3 +70,14 @@ test("非攻击击破（dealBreak）把深渊上空的飞行单位打落：共�
   assert.notEqual(crow.zone, 2, "坠落后离开深渊");
   assert.equal(crow.dead, false);
 });
+
+test("客制化图纸的 4 级门槛看「武器等级 + 羁绊」（和改装槽、被动升级一样）：3 级武器 + 1 级羁绊就生效", () => {
+  const { c, S } = setup(["tou", "kolt"]);
+  const tou = kit(S, "tou");
+  S.weaponMods = { mochi: { block: 10 } };
+  tou.weaponLevels = Object.assign({}, tou.weaponLevels, { mochi: 3 });
+  tou.bonds = { mochi: 0 };
+  assert.equal(c.bpUnlocked("mochi"), false, "3 级、没有羁绊：还没解锁");
+  tou.bonds = { mochi: 1 };
+  assert.equal(c.bpUnlocked("mochi"), true, "3 级 + 羁绊 1 = 4：解锁");
+});
