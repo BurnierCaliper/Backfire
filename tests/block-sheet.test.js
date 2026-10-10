@@ -113,7 +113,12 @@ test("技能说明：每个角色、武器人能学到的技能都有完整说�
   const data = c.SkillText.sheetData();
   assert.equal(data.length, 10);
   const missing = [];
-  data.forEach(h => [h].concat(h.weapons).forEach(x => x.skills.now.concat(x.skills.later).forEach(s => {
+  // 资料只展示当前等级的技能；说明完整性仍用 99 级副本核对，不写进资料
+  st.units.filter(u => u.isPlayer).forEach(u => {
+    const probe = Object.assign({}, u, { level: 99, resources: Object.assign({}, u.resources || {}) });
+    (c.skillList(probe) || []).forEach(s => { if (s && s.id && !c.SkillText.skillText(s.id)) missing.push(s.id); });
+  });
+  data.forEach(h => [h].concat(h.weapons).forEach(x => x.skills.now.forEach(s => {
     if (!c.SkillText.skillText(s.id)) missing.push(s.id);
   })));
   assert.deepEqual(missing, []);
@@ -135,7 +140,8 @@ test("角色资料：只读，不改动战场；数值和单位一致", () => {
   assert.equal(h.block.total, 70);
   assert.equal(JSON.stringify(h.weapons.map(w => [w.kit, w.blockBonus, w.blockAlone])), JSON.stringify([["niu", 40, 55], ["naruto", 30, 45]]));
   assert.equal(h.atk, c.effectiveAtk(c.findKit("hiaki", st.units), st.units));
-  assert.ok(h.skills.later.some(s => s.id === "hiaki_flash" && s.minLv === 2), "没到等级的技能也列出来");
+  assert.ok(!h.skills.now.some(s => s.id === "hiaki_flash"), "当前等级没有的技能不展示");
+  assert.equal(h.skills.later.length, 0);
 });
 
 test("单局：Rogue.sheetData 给出整队资料，不改动本局", () => {
