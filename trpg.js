@@ -354,6 +354,16 @@ function trpgBackstageApply(edit, why) {
           else { u.weaponLevels = u.weaponLevels || {}; u.weaponLevels[wk] = v; }
         }
       }
+      if (w.bond != null) {
+        const v = num(w.bond, 0, typeof BOND_MAX !== "undefined" ? BOND_MAX : 5);
+        const was = typeof weaponBond === "function" ? weaponBond(u, wk) : 0;
+        if (v != null && v !== was) {
+          change(`${wn} 羁绊`, was, v);
+          const ej = [];
+          if (typeof setWeaponBond === "function") setWeaponBond(u, wk, v, ej);
+          ej.forEach(t => notes.push(t));
+        }
+      }
       if (w.dur != null) {
         const v = num(w.dur, 0, weaponDurMax(wk));
         const was = weaponDur(wk);
