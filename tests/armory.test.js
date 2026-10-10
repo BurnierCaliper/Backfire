@@ -41,6 +41,7 @@ test("客制化：显示图纸名字、出处和换算后的实际数值", () =>
   c.S.state.weaponMods = { torque: { bigKill: true, def: -2, block: 10, atk: -4 } };
   c.S.state.weaponBlueprints = { torque: "bp_trevor_bigkill" };
   const kolt = c.findKit("kolt", c.S.state.units);
+  c.setOwnedWeaponLevel(kolt, "torque", 4);   // 武器 4 级才解锁客制化
   const w = weaponOf(c, "torque");
   assert.equal(w.blueprint.name, "大杀器");
   assert.match(w.blueprint.smith, /崔佛/);
@@ -77,6 +78,7 @@ test("单局：Rogue.armoryData 带上本局装的图纸", () => {
   const c = H.load();
   const R = c.Rogue;
   const run = R.newRun({ party: ["kolt", "helu"], seed: "ARM-RUN" });
+  run.party[0].weaponLevels.torque = 4;   // 武器 4 级才解锁客制化
   run.installed = { torque: "bp_trevor_bigkill" };
   const data = c.Commands.dispatch({ type: "run.query", action: "armoryData" }, { run });
   const w = data.flatMap(h => h.weapons).find(x => x.kit === "torque");

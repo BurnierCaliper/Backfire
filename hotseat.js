@@ -131,7 +131,10 @@
     function askSummary() {
       if (!ask) return null;
       return { id: ask.id, kind: ask.kind, jobId: ask.jobId, targetId: ask.targetId, deadline: ask.deadline,
-        waiting: ask.operators.filter(id => !ask.declined.includes(id)).map(id => ({ operatorId: id, operatorName: operatorMap.get(id).name })) };
+        waiting: ask.operators.filter(id => !ask.declined.includes(id) && !(ask.hands || []).some(h => h.operatorId === id)).map(id => ({ operatorId: id, operatorName: operatorMap.get(id).name })),
+        chooser: ask.chooser || null, chooserName: ask.chooser ? operatorMap.get(ask.chooser).name : null,
+        hands: (ask.hands || []).map(h => ({ operatorId: h.operatorId, operatorName: operatorMap.get(h.operatorId).name, unitId: h.unitId,
+          unitName: (rowFor(h.unitId) || {}).unitName || h.unitId, extra: clone(h.extra || {}) })) };
     }
     function snapshot() {
       return clone({ phase, turnNo, mode, gmId, operators, assignments, roster, slots,
@@ -277,7 +280,8 @@
       if (ask) {
         ask.candidates = ask.candidates.filter(id => byId.has(id));
         ask.operators = [...new Set(ask.candidates.map(id => byId.get(id).operatorId))];
-        if (!ask.operators.length || ask.operators.every(id => ask.declined.includes(id))) closeAsk("unavailable", null, {}, null);
+        if (ask.hands) ask.hands = ask.hands.filter(h => ask.candidates.includes(h.unitId));
+        if (!ask.operators.length || ask.operators.every(id => ask.declined.includes(id)) && !(ask.hands || []).length) closeAsk("unavailable", null, {}, null);
       }
       return notify ? emit("reconcile") : snapshot();
     }
@@ -403,14 +407,24 @@
       reconcile(false);
       const candidates = [...new Set(spec.candidates || [])].filter(id => rowFor(id));
       const owners = [...new Set(candidates.map(id => rowFor(id).operatorId))];
+      // 联机协助攻击：能协助的玩家先「举手」，由打出失衡的那名玩家（chooser）从举手的人里选谁出手
+      const chooser = spec.chooser && operatorMap.has(spec.chooser) ? spec.chooser : null;
       ask = { id: "ask-" + (++sequence), kind: spec.kind, jobId: spec.jobId == null ? null : spec.jobId,
-        targetId: spec.targetId || null, candidates, operators: owners, declined: [],
+        targetId: spec.targetId || null, candidates, operators: owners, declined: [], chooser, hands: [],
         deadline: now() + (Number.isFinite(spec.remainingMs) ? Math.max(0, Math.min(20000, spec.remainingMs)) : 20000) };
       closedAsk = null; const result = askSummary();
       if (!candidates.length) closeAsk("unavailable", null, {}, null);
       emit("askOpened"); return clone(result);
     }
-    function tick() { if (ask && now() >= ask.deadline) { closeAsk("timeout", null, {}, null); return emit("askTimeout"); } return snapshot(); }
+    function tick() {
+      if (ask && now() >= ask.deadline) {
+        // 到时间打出失衡的人还没选：有人举手就由最先举手的那位出手
+        const first = (ask.hands || [])[0];
+        if (first) { closeAsk("accepted", first.unitId, first.extra, first.operatorId); return emit("askAccepted"); }
+        closeAsk("timeout", null, {}, null); return emit("askTimeout");
+      }
+      return snapshot();
+    }
     function answer(id, askId, response) {
       operator(id); tick(); reconcile(false);
       if (!ask) {
@@ -418,9 +432,25 @@
         fail("stale_ask", "这个协助询问已经结束");
       }
       if (ask.id !== askId) fail("stale_ask", "这个协助询问已经结束");
+      const unitId = response && response.unitId || null;
+      if (ask.chooser && id === ask.chooser) {
+        // 打出失衡的玩家拍板：选一名举手的人（照他举手时选的方式出手），或自己的单位；不选就不发动
+        if (!unitId) { const result = closeAsk("declined", null, {}, null); emit("askDeclined"); return { status: "closed", accepted: false, result: clone(result) }; }
+        const hand = ask.hands.find(h => h.unitId === unitId);
+        if (hand) { const result = closeAsk("accepted", hand.unitId, hand.extra, hand.operatorId); emit("askAccepted"); return { status: "closed", accepted: true, result: clone(result) }; }
+        if (!ask.candidates.includes(unitId) || rowFor(unitId).operatorId !== id) fail("not_candidate", "只能选举手的人或自己的单位");
+        const result = closeAsk("accepted", unitId, clone(response.extra || {}), id); emit("askAccepted");
+        return { status: "closed", accepted: true, result: clone(result) };
+      }
       if (!ask.operators.includes(id)) fail("not_candidate", "这次询问没有发给你");
       if (ask.declined.includes(id)) fail("already_declined", "你已经放弃这次协助");
-      const unitId = response && response.unitId || null;
+      if (unitId && ask.chooser) {
+        if (!ask.candidates.includes(unitId) || rowFor(unitId).operatorId !== id) fail("not_candidate", "不能代替其他单位回答");
+        // 举手：记下（同一名玩家再举一次就换成新的选择），等打出失衡的人决定
+        ask.hands = ask.hands.filter(h => h.operatorId !== id);
+        ask.hands.push({ operatorId: id, unitId, extra: clone(response.extra || {}) });
+        emit("askHand"); return { status: "waiting", accepted: false, raised: true, result: null };
+      }
       if (unitId) {
         if (!ask.candidates.includes(unitId) || rowFor(unitId).operatorId !== id) fail("not_candidate", "不能代替其他单位回答");
         const extra = clone(response.extra || {});
@@ -428,14 +458,19 @@
         return { status: "closed", accepted: true, result: clone(result) };
       }
       ask.declined.push(id);
-      if (ask.operators.every(op => ask.declined.includes(op))) { const result = closeAsk("declined", null, {}, null); emit("askDeclined"); return { status: "closed", accepted: false, result: clone(result) }; }
+      if (ask.chooser) ask.hands = ask.hands.filter(h => h.operatorId !== id);
+      // 有人拍板时：举手的人还在、或打出失衡的人自己还没表态，就继续等他选
+      const chooserPending = ask.chooser && (ask.hands.length || ask.operators.includes(ask.chooser) && !ask.declined.includes(ask.chooser));
+      if (!chooserPending && ask.operators.every(op => ask.declined.includes(op))) { const result = closeAsk("declined", null, {}, null); emit("askDeclined"); return { status: "closed", accepted: false, result: clone(result) }; }
       emit("askDeclined"); return { status: "waiting", accepted: false, result: null };
     }
     function askFor(id) {
       operator(id); if (!ask) return null;
       const summary = askSummary(), declined = ask.declined.includes(id);
       const list = ask.candidates.map(rowFor).filter(r => r && r.operatorId === id);
-      return clone({ ...summary, eligible: list.length > 0, declined,
+      const isChooser = !!ask.chooser && ask.chooser === id;
+      const raised = (ask.hands || []).find(h => h.operatorId === id) || null;
+      return clone({ ...summary, eligible: list.length > 0 || isChooser && ask.hands.length > 0, declined, isChooser, raised: raised ? raised.unitId : null,
         options: declined ? [] : list.map(r => ({ unitId: r.unitId, unitName: r.unitName })) });
     }
     function chatMessage(id, text) {

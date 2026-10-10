@@ -31,12 +31,11 @@ const EnemyAI = (function () {
     const erg = typeof ENEMY_SKILL_RANGE !== "undefined" && sid ? ENEMY_SKILL_RANGE[sid] : null;
     if (erg === "melee") return d === 0;
     if (erg === "ranged") return d === 1;
-    if (sid === "en_aa" || !sid) {
-      const rg = u.range || "any";
-      if (rg === "melee") return d === 0;
-      if (rg === "ranged") return d === 1;
-      return d <= 1;
-    }
+    if (erg === "any") return d <= 1;
+    // 射程表里没有的技能按单位卡上的射程判断，和 dealTo 一致（以前一律按 0–1：远距离的人形沙灵瞄准同区的人，每回合空放）
+    const rg = u.range || "any";
+    if (rg === "melee") return d === 0;
+    if (rg === "ranged") return d === 1;
     return d <= 1;
   }
   function retargetLegal(u, sid, preferred, prey, forced) {
@@ -143,6 +142,11 @@ const EnemyAI = (function () {
   function aiTargetBase(u, spec, prey) {
     const duel = typeof touDuelVictim === "function" ? touDuelVictim(u) : null;
     if (duel && unitAlive(duel) && !(duel.dying && !duel.upOnShp)) return { unit: duel, forced: true };
+    // 禁足怒吼：这一回合只能攻击施放的坦克（回合结束清掉；不像嘲讽打一下就没了）
+    if (u.lockdownBy) {
+      const t = unitById(u.lockdownBy);
+      if (t && unitAlive(t) && !t.dying) return { unit: t, forced: true };
+    }
     if (u.tauntTo) {
       const t = unitById(u.tauntTo);
       if (t && unitAlive(t) && !t.dying) return { unit: t, forced: true };
@@ -230,7 +234,12 @@ const EnemyAI = (function () {
       const thugs = state.units.filter(x =>
         !x.isPlayer && !x.dead && !x.hidden && /^(thug_|bandit_boss)/.test(x.kit || ""));
       const scattered = thugs.some(x => Number(x.zone) !== Number(u.zone));
-      if (scattered && thugs.length >= 2 && has("en_king_hold") && u._aiHoldTurn !== state.turnNo) {
+      // 回防只在他危险时下（回防会花掉狂徒的行动点）：有人冲进他所在的区、或这一回合他挨了打，
+      // 而且身边没有狂徒能替他挡（同区还有狂徒就不叫）。狂徒出去打人不算危险
+      const pressed = prey.some(p => Number(p.zone) === Number(u.zone));
+      const hurt = (Number(u.damagedThisTurn) || 0) > 0;
+      const guarded = thugs.some(x => x !== u && Number(x.zone) === Number(u.zone));
+      if (scattered && thugs.length >= 2 && !guarded && (pressed || hurt) && has("en_king_hold") && u._aiHoldTurn !== state.turnNo) {
         return "en_king_hold";
       }
       if (sameZone && has("en_king_kill")) return "en_king_kill";
@@ -250,7 +259,7 @@ const EnemyAI = (function () {
       if (ph === 1) return sameZone ? "en_agg1_melee" : "en_agg1_range";
       if (ph === 2) {
         if (has("en_agg2_overheat")) return "en_agg2_overheat";
-        if (has("en_agg2_charge")) return "en_agg2_charge";
+        if (has("en_agg2_charge")) return "en_agg2_charge";   // 蓄满一回合：开炮（蓄力的那一回合技能表是空的）
         return sameZone ? "en_agg2_melee" : null;   // 主动接近，靠移动逻辑走过去
       }
       // 三阶段：每回合必吸引碎片一次 + 攻击一次
@@ -386,12 +395,22 @@ const EnemyAI = (function () {
     });
 
     // 强制目标（嘲讽 / 决一死战）时不后撤，直接想办法打到人
-    const step = pick.forced && zdist(u.zone, target.zone) < (spec.dist || 0)
+    let step = pick.forced && zdist(u.zone, target.zone) < (spec.dist || 0)
       ? null
       : aiStep(u, target, spec, prey);
+    // 空隙：地面单位越过要花 1 行动点并过运动检定（敌人没有熟练，50%）。目标在空隙那边时照样去试
+    // （以前过不去，两区制桥塌后近战双方永远碰不到），有一样近、不用越过空隙的路就走那条；后撤不越过空隙，宁可留在原地打
+    if (step != null && !u.flying && typeof getGap === "function" && getGap(u.zone, step).type === "void") {
+      const near = zdist(step, target.zone);
+      const passable = (z) => { const g = getGap(u.zone, z); return g.type === "open" || g.type === "bridge" || (g.type === "door" && g.open); };
+      const alt = adjacentZones(u.zone).map(Number).find(z => z !== step && passable(z) && zdist(z, target.zone) === near &&
+        !(state.fields && state.fields[z] && state.fields[z].abyss));
+      if (near >= zdist(u.zone, target.zone)) step = null;
+      else if (alt != null) step = alt;
+    }
 
     let sid = aiSpecial(u, spec, target, prey, has, list);
-    if (sid && !["en_agg3_debris", "en_king_hold", "en_bigsand_summon", "en_bigsand_heal", "ufo_prime", "ufo_boom", "ufo_stomp", "ufo_sweep", "en_agg2_overheat", "en_gl", "en_gl_fire"].includes(sid)) {
+    if (sid && !["en_agg3_debris", "en_king_hold", "en_bigsand_summon", "en_bigsand_heal", "ufo_prime", "ufo_boom", "ufo_stomp", "ufo_sweep", "en_agg2_overheat", "en_gl", "en_gl_fire", "en_giant_sand_pulse"].includes(sid)) {
       const rt = retargetLegal(u, sid, target, prey, pick.forced);
       if (rt.target) target = rt.target;
       if (rt.sid) sid = rt.sid;
@@ -401,8 +420,15 @@ const EnemyAI = (function () {
     // 手册：够不着就先移动；special 已经给出可用技能且位置合适时直接用
     const noTargetNeeded = sid === "en_agg3_debris" || sid === "en_king_hold" ||
       sid === "en_bigsand_summon" || sid === "en_bigsand_heal" || sid === "ufo_prime" ||
-      sid === "ufo_boom" || sid === "ufo_stomp" || sid === "ufo_sweep" || sid === "en_agg2_overheat";
-    if (sid && (inRange || !step || noTargetNeeded)) return attack(sid, aiPicks(u, sid, target, prey));
+      sid === "ufo_boom" || sid === "ufo_stomp" || sid === "ufo_sweep" || sid === "en_agg2_overheat" ||
+      sid === "en_giant_sand_pulse";   // 全域沙暴打所有区域，不用瞄准
+    // 聚合体的电能炮：贴近打 1d20 最好；没有附赠动作走不过去时就隔一区打（1d10），不白白耗着
+    const fireNow = sid === "en_agg2_charge" && zdist(u.zone, target.zone) <= 1 && (u.bonus || 0) < 1;
+    if (sid && (inRange || !step || noTargetNeeded || fireNow)) {
+      // 打不到（射程外、自己又不移动）就不出手，免得每回合空放
+      if (noTargetNeeded || pick.forced || canAimSkill(u, sid, target)) return attack(sid, aiPicks(u, sid, target, prey));
+      if (step == null) return null;
+    }
     // 最后一个行动点还够不着时，有远距手段的就先用远距（扬尘体的卷扬）
     const lastAction = (u.ap || 0) <= 1 && (u.bonus || 0) <= 0;
     if (step != null && lastAction && spec.farWhenLast && spec.far && has(spec.far) &&
@@ -421,6 +447,8 @@ const EnemyAI = (function () {
     const legal = retargetLegal(u, use, target, prey, pick.forced);
     if (legal.target) target = legal.target;
     if (legal.sid) use = legal.sid;
+    // 谁都打不到（远距离单位身边只剩同区的人、三区里隔着两区……）：这一步不出手，不空放
+    if (!pick.forced && !canAimSkill(u, use, target)) return null;
     return attack(use, aiPicks(u, use, target, prey));
   }
 
@@ -434,8 +462,13 @@ const EnemyAI = (function () {
     try { return aiPlan(u); } finally { Math.random = prev; }
   }
 
-  function aiPickAssister(list) {
-    return list.slice().sort((a, b) => (effectiveAtk(b, state.units) || 0) - (effectiveAtk(a, state.units) || 0))[0].id;
+  /** 敌人选谁来协助攻击：只在打得到的人里挑 atk 最高的；谁都打不到就不发动（返回 null）。
+   *  以前打不到的也会被选上：先回满架势，再打空。target 不给时取协助队列队首的目标 */
+  function aiPickAssister(list, target) {
+    const t = target || (state.assistQueue && state.assistQueue[0] ? unitById(state.assistQueue[0].targetId) : null);
+    const ok = (list || []).filter(u => !t || typeof enemyAssistReach !== "function" || enemyAssistReach(u, t));
+    if (!ok.length) return null;
+    return ok.slice().sort((a, b) => (effectiveAtk(b, state.units) || 0) - (effectiveAtk(a, state.units) || 0))[0].id;
   }
 
   /** 敌人回合的出手顺序：杂兵 → 精英 → BOSS */

@@ -3,7 +3,7 @@
   "use strict";
   let local = {};
   const types = ["skill", "move", "standUp", "useItem", "startCombat", "endTurn", "openingChoice", "blockAnswer", "assistAnswer", "koltSwapAnswer", "heluScanAnswer", "longgeSafetyAnswer", "retreat", "battle.endPlayerTurn", "battle.endEnemyTurn", "battle.enemyAction", "battle.finish", "battle.afterBattle", "battle.checkSolo", "battle.supportInfo", "battle.rememberCampaign", "battle.loadCampaign", "battle.cleanQueues", "battle.setup", "battle.setupRogue", "battle.panel", "battle.undo", "battle.continue"];
-  const panelActions = ["bagAdd", "currency", "water", "healItem", "repair", "advance", "shortRest", "longRest", "restore", "cheat", "saveSlot", "loadSlot", "clearSlot", "addParty", "removeParty", "addEnemy", "removeEnemy", "setField", "setGap", "gapHp", "rollWall", "toggleDoor", "addProp", "removeProp", "setZones", "setPartySize", "setWeather", "rollEncounter", "rollBossEncounter", "selectEncounter", "normalizeBag", "normalizeGaps", "normalizeField", "setHighland", "setExecution", "setShare", "setSpread", "setTower", "setDrops"];
+  const panelActions = ["bagAdd", "currency", "water", "healItem", "repair", "advance", "shortRest", "longRest", "restore", "cheat", "saveSlot", "loadSlot", "clearSlot", "addParty", "removeParty", "addEnemy", "removeEnemy", "setField", "ruinHp", "setGap", "gapHp", "rollWall", "toggleDoor", "addProp", "removeProp", "setZones", "setPartySize", "setWeather", "rollEncounter", "rollBossEncounter", "selectEncounter", "normalizeBag", "normalizeGaps", "normalizeField", "setHighland", "setExecution", "setShare", "setSpread", "setTower", "setDrops"];
   function configure(adapter) { local = Object.assign({}, local, adapter || {}); }
   function environment(context) { return Object.assign({}, local, context || {}); }
   // Rogue's legacy encounter rows explicitly contain level: undefined when they
@@ -51,13 +51,13 @@
     if (cmd.type === "battle.cleanQueues") oneOf(cmd.queue, ["block", "assist", "kolt", "helu", "longge"], "reaction queue");
     if (cmd.type === "heluScanAnswer" && cmd.picks != null && (typeof cmd.picks !== "object" || Array.isArray(cmd.picks))) throw new Error("picks must be an object");
     if (cmd.type === "battle.panel") {
-      if (cmd.action === "setField") oneOf(cmd.kind, ["", "fireOn", "ice", "acid", "electric", "energy", "harmonic", "heal", "abyss", "highland", "collapseOn"], "field kind");
+      if (cmd.action === "setField") oneOf(cmd.kind, ["", "fireOn", "ice", "acid", "electric", "energy", "harmonic", "heal", "abyss", "highland", "collapseOn", "ruinOn", "isolate"], "field kind");
       if (cmd.action === "setGap") oneOf(cmd.kind, ["open", "bridge", "wall", "door", "void"], "gap kind");
       if (["setGap", "gapHp", "rollWall", "toggleDoor"].includes(cmd.action)) oneOf(cmd.key, ["1-2", "2-3"], "gap key");
       if (cmd.action === "setWeather") oneOf(cmd.value, ["none", "heat", "snow", "acid", "thunder", "glow", "sand", "phase"], "weather");
       if (cmd.action === "setZones") oneOf(cmd.value, [2, 3].concat(typeof BOARD_LAYOUTS !== "undefined" ? Object.keys(BOARD_LAYOUTS) : []), "zone count");
       if (cmd.action === "setPartySize") oneOf(cmd.value, [2, 3, 4], "party size");
-      if (["setField", "setHighland", "addProp", "addParty", "addEnemy"].includes(cmd.action)) oneOf(cmd.zone, [1, 2, 3], "zone");
+      if (["setField", "ruinHp", "setHighland", "addProp", "addParty", "addEnemy"].includes(cmd.action)) oneOf(cmd.zone, [1, 2, 3], "zone");
       if (cmd.action === "addProp") {
         oneOf(cmd.kind, ["button", "lever", "battery", "boom", "acid", "scrap", "turret"], "prop kind");
         oneOf(cmd.faction, ["player", "enemy"], "prop faction");
@@ -113,7 +113,7 @@
         ? trackHealBy(a, () => useItemOn(a, cmd.item, unitById(cmd.target), cmd.dest))
         : useItemOn(a, cmd.item, unitById(cmd.target), cmd.dest);
       (notes || []).forEach(s => appendLog(s));
-      if ((a.bonus || 0) > 0) { a.bonus -= 1; if (typeof scoreSpend === "function") scoreSpend(a, 0, 1); }
+      if (!a.dying && (a.bonus || 0) > 0) { a.bonus -= 1; if (typeof scoreSpend === "function") scoreSpend(a, 0, 1); }   // 濒死时用不了道具，不扣附赠
       return;
     }
     if (cmd.picks && Object.keys(cmd.picks).length) state.skillFlow = { id: cmd.skill, actorId: cmd.actor, picks: Object.assign({}, cmd.picks), index: 99 };
@@ -226,6 +226,7 @@
         const f = emptyField(); if (cmd.kind) f[cmd.kind] = true; if (cmd.kind === "fireOn") f.fire = 1;
         f.highland = !!old.highland; state.fields[cmd.zone] = f; break;
       }
+      case "ruinHp": { const f = state.fields[cmd.zone] || emptyField(); f.ruinHp = f.ruinMax = Math.max(1, Math.floor(Number(cmd.hp) || 1)); state.fields[cmd.zone] = f; break; }   // 损毁地面的耐久
       case "setHighland": { const f = state.fields[cmd.zone] || emptyField(); f.highland = !!cmd.value; state.fields[cmd.zone] = f; break; }
       case "setGap": { const gap = state.gaps[cmd.key]; gap.type = cmd.kind; if (["bridge", "wall"].includes(gap.type)) { gap.hp = defaultGapHp(gap.type); gap.maxHp = gap.hp; gap.level = Number(g.level) || 1; } if (gap.type === "door") gap.open = false; if (gap.type === "open") { gap.hp = 0; gap.open = true; } break; }
       case "gapHp": state.gaps[cmd.key].hp = state.gaps[cmd.key].maxHp = Math.max(1, Math.floor(Number(cmd.hp) || 1)); break;
@@ -313,7 +314,12 @@
       case "koltSwapAnswer": return resolveKoltSwap(!!cmd.swap, cmd.target || null);
       case "heluScanAnswer": return resolveHeluScan(cmd.picks || null);
       case "longgeSafetyAnswer": return resolveLonggeSafety(!!cmd.front);
-      case "retreat": return performRetreat(cmd.rearguard || null);
+      case "retreat": {
+        // 这场不许撤退（单局首领战 spec.retreat === false）：指令层也拒绝，不只靠界面把按钮变灰
+        const g = env.game || root.GAME || {};
+        if (g.rogue && g.rogue.spec && g.rogue.spec.retreat === false) throw new Error("这场战斗不能撤退");
+        return performRetreat(cmd.rearguard || null);
+      }
       case "endTurn": if (env.endUnit) return env.endUnit(cmd);
       case "battle.endPlayerTurn": return seeded(cmd.seed, () => endPlayerTurn());
       case "battle.endEnemyTurn": return endEnemyTurn();

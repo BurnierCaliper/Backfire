@@ -128,7 +128,7 @@
         <div class="rh-row">血 ${bar(v.hp, v.hpMax, "hp")}<span>${v.hp}/${v.hpMax}</span></div>
         ${v.layers.length > 1 ? `<div class="rh-w">${esc(layerText(v.layers))}</div>` : ""}
         <div class="rh-row">经验 ${bar(v.xp, v.xpNext, "xp")}<span>${v.xp}/${v.xpNext || "满"}</span></div>
-        ${v.weapons.map(w => `<div class="rh-w${w.dur <= 0 ? " broken" : ""}">${esc(w.name)} Lv${w.level} · 耐久 ${w.dur}/${w.durMax}${w.dur <= 0 ? "（损坏：进战斗空手）" : ""}${w.blueprint ? ` · 图纸「${esc(w.blueprint.name)}」` : ""}${(w.parts || []).some(Boolean) ? ` · 改装 ${esc(w.parts.filter(Boolean).map(p => p.name).join("、"))}` : ""}${w.hp != null ? ` · 伤势 ${w.hp <= 0 ? "倒下（需长休）" : "血量 " + w.hp}` : ""}</div>`).join("")}
+        ${v.weapons.map(w => `<div class="rh-w${w.dur <= 0 ? " broken" : ""}">${esc(w.name)} Lv${w.level} · 耐久 ${w.dur}/${w.durMax}${w.dur <= 0 ? "（损坏：进战斗空手）" : ""}${w.blueprint ? ` · 图纸「${esc(w.blueprint.name)}」${w.bpOff ? `（武器 ${BLUEPRINT_MIN_LEVEL} 级才生效）` : ""}` : ""}${(w.parts || []).some(Boolean) ? ` · 改装 ${esc(w.parts.filter(Boolean).map(p => p.name).join("、"))}` : ""}${w.hp != null ? ` · 伤势 ${w.hp <= 0 ? "倒下（需长休）" : "血量 " + w.hp}` : ""}</div>`).join("")}
       </div>`;
     }).join("") + (run.solo ? `<div class="rhero solo-mates"><div class="rh-top"><b>伙伴</b><span>支援存量 ${Number(run.supportBank) || 0} 次</span></div>
         <div class="rh-w rh-solo">${esc((run.partners || []).map(Rogue.heroName).join("、"))} · 战斗里攒分换支援：门槛 ${ROGUE_SOLO.supportScore} 分，手里每有 1 次 +${ROGUE_SOLO.supportStep}，最多存 ${ROGUE_SOLO.supportMax} 次；每人一场一次</div></div>` : "")
@@ -414,12 +414,14 @@
     const k = Rogue.supplies().kuizhi;
     const weapons = run.party.flatMap(h => query("heroView", { kit: h.kit }).weapons);
     const short = k < cost ? `<b class="bad">现在手里 ${k}，还差 ${cost - k} 奎支。</b>` : "";
-    return `<p class="r-hint">手里的图纸：装一张 ${cost} 奎支，一把武器只能装一张（装新的会替换旧的）。${short}</p>
+    const minLv = BLUEPRINT_MIN_LEVEL;
+    return `<p class="r-hint">手里的图纸：装一张 ${cost} 奎支，一把武器只能装一张（装新的会替换旧的）。武器 ${minLv} 级才解锁客制化。${short}</p>
       ${bps.map(id => {
         const b = Rogue.blueprintById(id);
         return `<div class="bp-row"><span class="s-name">${esc(b.name)}<small>${esc(b.text)} · 来自 ${esc(b.smithName)}</small></span>
-          <div class="r-choices">${weapons.map(w =>
-            `<button class="g-btn" data-install="${esc(id)}" data-kit="${esc(w.kit)}" data-smith="${esc(smithId)}">装到 ${esc(w.name)}${w.blueprint ? `<small>替换「${esc(w.blueprint.name)}」</small>` : ""}</button>`).join("")}</div></div>`;
+          <div class="r-choices">${weapons.map(w => w.level < minLv
+            ? `<button class="g-btn" disabled>装到 ${esc(w.name)}<small>武器 ${minLv} 级才解锁客制化（现在 ${w.level} 级）</small></button>`
+            : `<button class="g-btn" data-install="${esc(id)}" data-kit="${esc(w.kit)}" data-smith="${esc(smithId)}">装到 ${esc(w.name)}${w.blueprint ? `<small>替换「${esc(w.blueprint.name)}」</small>` : ""}</button>`).join("")}</div></div>`;
       }).join("")}`;
   }
   function renderSmiths() {
@@ -743,7 +745,11 @@
     Screens.register("run", $("scr-run"), { onShow: render });
     $("party-back").onclick = () => Screens.show("title");
     $("party-go").onclick = () => {
-      if (sessionCommand("readSaved") && !confirm("已有一局在进行中。开新的一局会覆盖它，确定吗？")) return;
+      // 已经有一局（包括更新版本的游戏存下、这一版读不了的）：开新局会覆盖它，先问一句
+      const saved = sessionCommand("savedStatus");
+      const ask = saved === "newer" ? "有一局更新版本的游戏存下的进度（这一版读不了）。开新的一局会覆盖它，确定吗？"
+        : saved === "ok" ? "已有一局在进行中。开新的一局会覆盖它，确定吗？" : "";
+      if (ask && !confirm(ask)) return;
       try {
         const seed = RNG.newSeed();
         sessionCommand("newRun", solo.on

@@ -399,7 +399,18 @@
         if (own(option, "extra")) { const extra = choiceValue(get(option, "extra")); if (extra === undefined) return []; item.extra = extra; }
         return [item];
       });
-      dto.eligible = dto.options.length > 0; out.ask = dto;
+      // 协助攻击举手：举手名单只给打出失衡的那名玩家（他来选）；每个人只看到自己举的是哪一个
+      const chooser = get(ask, "isChooser") === true;
+      dto.isChooser = chooser;
+      dto.chooserName = text(get(ask, "chooserName"), 60);
+      dto.raised = id(get(ask, "raised")) ? get(ask, "raised") : null;
+      dto.hands = chooser ? arr(get(ask, "hands")).flatMap(h => {
+        const item = identifiers(h, copyFields(h, {}, ["label", "sub", "operatorName"]), ["helper"]);
+        if (!item.helper) return [];
+        if (own(h, "extra")) { const extra = choiceValue(get(h, "extra")); if (extra === undefined) return []; item.extra = extra; }
+        return [item];
+      }) : [];
+      dto.eligible = dto.options.length > 0 || dto.hands.length > 0; out.ask = dto;
     }
     return out;
   }

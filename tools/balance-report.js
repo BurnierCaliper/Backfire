@@ -18,11 +18,12 @@ function createManifest() {
       const seed = `R1-v1:campaign:${set}:${size}:${String(i).padStart(3, "0")}`;
       // Rotating contiguous groups guarantee every hero >= 2 appearances per size/set,
       // including the 15-run 2-player independent validation set (30 appearances).
-      const party = Array.from({ length: size }, (_, j) => B.HEROES[(i * size + j + (set === "validation" ? 3 : 0)) % B.HEROES.length]);
+      // 冻结的 R1 名单（龙哥之前的 10 人）：名单一变，种子对应的队伍就变了，manifest 也就对不上
+      const party = Array.from({ length: size }, (_, j) => B.R1_HEROES[(i * size + j + (set === "validation" ? 3 : 0)) % B.R1_HEROES.length]);
       scenarios.push({ id: seed, suite: "campaign", set, size, index: i, seed, party });
     }
   }
-  return { schema: "backfire-r1-manifest-v1", frozen: true, purpose: "Measurement only; unchanged score configuration. Validation seeds frozen before execution and excluded from fitting.", matrixCountsPerCell: { baseline: 100, validation: 50 }, campaignCountsPerSize: { baseline: 30, validation: 15 }, heroes: B.HEROES, scenarios, scenariosHash: B.hash(scenarios) };
+  return { schema: "backfire-r1-manifest-v1", frozen: true, purpose: "Measurement only; unchanged score configuration. Validation seeds frozen before execution and excluded from fitting.", matrixCountsPerCell: { baseline: 100, validation: 50 }, campaignCountsPerSize: { baseline: 30, validation: 15 }, heroes: B.R1_HEROES, scenarios, scenariosHash: B.hash(scenarios) };
 }
 function validateManifest(manifest) {
   if (manifest.schema !== "backfire-r1-manifest-v1" || !Array.isArray(manifest.scenarios)) throw new Error("Unsupported manifest");
@@ -79,7 +80,7 @@ function groupSummary(rows, scenarios) {
         const won = bosses.filter(b => b.outcome === "win").length;
         return { act, reached, reachDenominator: legal.length, reachRate: legal.length ? reached / legal.length : null, bossEntered: bosses.length, bossWins: won, bossWinRate: bosses.length ? won / bosses.length : null, bossWinRate95: B.wilson(won, bosses.length), bossOutcomes: B.summarize(bosses), battleScores: B.summarize(all.flatMap(r => r.battles || []).filter(b => b.act === act)), bossKinds: [...new Set(bosses.flatMap(b => (b.actualUnitsBefore || []).filter(u => !u.isPlayer).map(u => u.kit)))] };
       });
-      campaigns.push({ set, size, ...counts, legalStarts: legal.length, clearWins: wins.length, clearRate: legal.length ? wins.length / legal.length : null, clearRate95: B.wilson(wins.length, legal.length), legalEnds: all.filter(r => r.completed && ["win", "lose"].includes(r.outcome)).length, heroCoverage: Object.fromEntries(B.HEROES.map(k => [k, all.filter(r => r.party.includes(k)).length])), acts, endReasons: Object.fromEntries([...new Set(all.map(r => r.endReason || r.error))].map(reason => [reason, all.filter(r => (r.endReason || r.error) === reason).length])) });
+      campaigns.push({ set, size, ...counts, legalStarts: legal.length, clearWins: wins.length, clearRate: legal.length ? wins.length / legal.length : null, clearRate95: B.wilson(wins.length, legal.length), legalEnds: all.filter(r => r.completed && ["win", "lose"].includes(r.outcome)).length, heroCoverage: Object.fromEntries(B.R1_HEROES.map(k => [k, all.filter(r => r.party.includes(k)).length])), acts, endReasons: Object.fromEntries([...new Set(all.map(r => r.endReason || r.error))].map(reason => [reason, all.filter(r => (r.endReason || r.error) === reason).length])) });
     }
   }
   return { matrix, campaigns };

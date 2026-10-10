@@ -43,6 +43,23 @@ function bpActive() {
   return !!(typeof state !== "undefined" && state.weaponMods && Object.keys(state.weaponMods).length);
 }
 
+/* ---------- 武器 4 级才解锁客制化（主持人手册「本版规则修订」、玩家手册武器升级表 lv4） ----------
+ * 装图纸时就要求武器 ≥ 4 级（rogue.js · installBlueprint、trpg.js · trpgInstallBlueprint）。
+ * 已经装在低于 4 级武器上的（旧存档、后台把武器降了级）留在武器上，但不生效：
+ * 读图纸加成的地方（ledger.js · weaponMod / unitWeaponMod、passiveOn）都先问这里。 */
+const BLUEPRINT_MIN_LEVEL = 4;
+/** 解锁客制化看的等级 = 武器等级 + 羁绊（和改装槽、被动升级一样，growth.js · weaponRewardLevel）；主人不在场返回 null */
+function bpWeaponLevel(kit) {
+  const owner = typeof weaponOwner === "function" ? weaponOwner(kit) : null;
+  if (!owner) return null;
+  return typeof weaponRewardLevel === "function" ? weaponRewardLevel(owner, kit) : Number((owner.weaponLevels || {})[kit]) || 1;
+}
+/** 装在这把武器上的图纸此刻生不生效：武器 4 级以上（主人不在场时不拦） */
+function bpUnlocked(kit) {
+  const lv = bpWeaponLevel(kit);
+  return lv == null || lv >= BLUEPRINT_MIN_LEVEL;
+}
+
 /** 角色的被动效果是否生效（摩尔玛的 WAM-56 / MR-2165 会放弃角色自身的被动）。
  *  只要角色名下任何一把武器装了这类图纸就放弃，武器人上场时也一样（被动属于角色本人）。
  *  按作者的角色卡，十名角色的两个被动都接上了（放弃时按被动原文整个失效）：
@@ -57,7 +74,7 @@ function passiveOn(u) {
   let hero = u;
   if (u.weaponOf && typeof findKit === "function") hero = findKit(u.weaponOf, state.units) || u;
   const kits = [hero.kit].concat(hero.linkedKits || []);
-  return !kits.some(k => state.weaponMods[k] && state.weaponMods[k].noPassive);
+  return !kits.some(k => state.weaponMods[k] && state.weaponMods[k].noPassive && bpUnlocked(k));
 }
 const passiveOnKit = (kit) => passiveOn(typeof findKit === "function" ? findKit(kit, state.units) : null);
 
@@ -310,7 +327,9 @@ function bpEffectRows(mod, ctx) {
     rows.push({ k: "耐久上限", v: `${ctx.durBase} → ${ctx.durMax}${mod.bigKill ? "（大杀器：耐久减半）" : ""}`, tone: ctx.durMax >= ctx.durBase ? "up" : "down" });
   }
   if (mod.def) rows.push({ k: "架势上限", v: `${sgn(Number(mod.def))}${ctx.defBase != null ? `（${ctx.defBase} → ${Math.max(1, ctx.defBase + Number(mod.def))}）` : ""}`, tone: mod.def > 0 ? "up" : "down" });
-  if (mod.block) rows.push({ k: "协助格挡", v: `${sgn(Number(mod.block))}%${ctx.blockBase != null ? `（武器格挡加成 ${ctx.blockBase}% → ${ctx.blockBase + Number(mod.block)}%）` : ""}`, tone: mod.block > 0 ? "up" : "down" });
+  // 图纸的格挡加成算进武器格挡加成（WEAPON_BLOCK_CAP，目前不封顶；app.js · finalBlockChance）
+  const blockCap = typeof WEAPON_BLOCK_CAP !== "undefined" ? WEAPON_BLOCK_CAP : Infinity;
+  if (mod.block) rows.push({ k: "协助格挡", v: `${sgn(Number(mod.block))}%${ctx.blockBase != null ? `（武器格挡加成 ${ctx.blockBase}% → ${Math.min(blockCap, ctx.blockBase + Number(mod.block))}%${ctx.blockBase + Number(mod.block) > blockCap ? `，封顶 ${blockCap}%` : ""}）` : ""}`, tone: mod.block > 0 ? "up" : "down" });
   if (mod.protectedBlock) rows.push({ k: "被队友格挡", v: `成功率 ${sgn(Number(mod.protectedBlock))}%`, tone: "up" });
   if (mod.bonusPerRound) rows.push({ k: "附赠动作", v: `每回合 +${mod.bonusPerRound}（角色拿着时）`, tone: "up" });
   if (mod.weaponApPerRound) rows.push({ k: "行动点", v: `每回合 +${mod.weaponApPerRound}（武器人形态）`, tone: "up" });

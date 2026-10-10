@@ -25,7 +25,9 @@ const ZONE_THREATS = {
   sand_aggregate: (u) => {
     const r = u.resources || {};
     if (!r.forceCharge) return null;
-    return { zone: u.zone, label: "电能炮蓄力", ready: false };
+    // 机械臂挥击的那一回合在蓄力；到了下一回合就是这回合要开炮
+    const ready = r.chargeTurn == null || Number(typeof state !== "undefined" ? state.turnNo : 0) > Number(r.chargeTurn);
+    return { zone: u.zone, label: ready ? "电能炮待发" : "电能炮蓄力", ready };
   },
   boomcar: (u) => {
     const r = u.resources || {};
@@ -66,9 +68,46 @@ function zoneThreatsIn(zone) {
 
 function enemyAssistSkillId(u) {
   if (u && u.kit === "ufo_body") return "ufo_assist";
+  if (u && u.kit === "chixia") return "en_chi_exec";   // 赤牙的协助是「剿灭」（第九章）
   const list = (typeof enemySkillList === "function" && enemySkillList(u)) || [];
   const hit = list.find(s => s.id && s.id.indexOf("_assist") >= 0);
   return hit ? hit.id : "en_aa";
+}
+
+/** 敌人现在能不能对我方做协助攻击：被挟持的亡命之王无法行动；哗变中的狂徒只敢打强盗头子 */
+function enemyMayAssist(u) {
+  if (!u || u.isPlayer) return false;
+  if (u.kit === "outlaw_king" && u.resources && u.resources.hostage) return false;
+  if (/^thug_/.test(u.kit || "")) {
+    const king = findKit("outlaw_king", state.units);
+    if (king && !king.dead && king.resources && king.resources.hostage) return false;
+  }
+  return true;
+}
+
+/* 协助攻击的射程。自带移动的（冲到目标那一区再打）先走一格；无限距离的总能打到；
+ * 其余按技能射程（ENEMY_SKILL_RANGE，没登记的用单位卡上的 range），隔着危墙 / 关着的门打不到。 */
+const ENEMY_ASSIST_RUSH = ["en_thug_hammer_assist", "en_wolf_assist", "en_chi_exec"];
+const ENEMY_ASSIST_ANYWHERE = ["en_patrol_assist", "ufo_assist"];
+function enemyAssistReach(u, t) {
+  if (!u || !t) return false;
+  const sid = enemyAssistSkillId(u);
+  if (ENEMY_ASSIST_ANYWHERE.includes(sid)) return true;
+  const from = Number(u.zone), to = Number(t.zone);
+  const d = zoneDist(from, to, state.zoneMode);
+  if (ENEMY_ASSIST_RUSH.includes(sid)) {
+    if (d === 0) return true;
+    if (d > 1 || u.noMove) return false;
+    const g = typeof getGap === "function" ? getGap(from, to) : null;
+    return !g || !(g.type === "wall" || (g.type === "door" && !g.open) || (g.type === "void" && !u.flying));
+  }
+  const rg = ENEMY_SKILL_RANGE[sid] || u.range || "any";
+  const ok = rg === "melee" ? d === 0 : rg === "ranged" ? d === 1 : d <= 1;
+  return ok && !(typeof lineBlocked === "function" && lineBlocked(from, to));
+}
+/** 选协助者用：能出手、而且打得到（以前打不到的也在名单里，选了先回满架势，再打空） */
+function enemyAssistReady(u, t) {
+  return enemyMayAssist(u) && enemyAssistReach(u, t);
 }
 
 function extraDiceByLevel(lv) {
@@ -213,7 +252,8 @@ function enemySkillList(u) {
       { id: "en_wolf_assist", label: "协助：冲近攻击" }
     ],
     captain_ox: [
-      { id: "en_ox", label: "冲撞" }
+      { id: "en_ox", label: "冲撞" },
+      { id: "en_ox_assist", label: "协助：近距普通攻击" }
     ],
     captain_lizard: [
       { id: "en_liz", label: "酸弹" },
@@ -277,7 +317,11 @@ function enemySkillList(u) {
     }
     if (ph === 2) {
       if (r.forceOverheat) return [{ id: "en_agg2_overheat", label: "过热（跳过行动）" }];
-      if (r.forceCharge) return [{ id: "en_agg2_charge", label: "蓄力电能炮" }];
+      if (r.forceCharge) {
+        // 手册「蓄一回合」：机械臂挥击的这一回合剩下的行动都在蓄力，下一回合才能开炮
+        if (r.chargeTurn != null && Number(state.turnNo) <= Number(r.chargeTurn)) return [];
+        return [{ id: "en_agg2_charge", label: "发射电能炮（近距 1d20 / 远距 1d10）" }];
+      }
       return [
         { id: "en_approach", label: "移向目标" },
         { id: "en_agg2_melee", label: "机械臂挥击（近）" }
@@ -442,12 +486,98 @@ const ENEMY_SKILL_RANGE = {
   en_agg1_melee: "melee",
   en_agg1_range: "ranged",
   en_agg2_melee: "melee",
-  en_agg2_charge: "ranged",
+  en_agg2_charge: "any",          // 电能炮：近距 1d20，隔一区衰减为 1d10
   en_agg3_control: "melee",
   en_agg3_push: "melee",
-  en_chi_shot: "ranged",
-  en_chi_melee: "melee"
+  en_chi_shot: "any",             // 霰弹枪：近距 2×atk，远距 1.5×atk
+  en_chi_knife: "melee",
+  en_chi_exec: "melee",           // 剿灭：冲到目标那一区零距离射击
+  // 协助攻击（手册写明的射程）
+  en_bigsand_assist: "any",       // 大沙灵：任意距离 1.5×atk
+  en_giant_assist: "melee",       // 巨人：协助近距
+  en_thug_knife_assist: "melee",  // 匕首狂徒：协助近距
+  en_ox_assist: "melee"           // 牛队长：协助仅近距
 };
+
+/* 敌人技能的花费：默认 1 行动点（协助、借机这类反应不花）。
+ * 赤牙照第九章：霰弹枪射击、躲入掩体 2 行动点，追猎 1 附赠。 */
+const ENEMY_SKILL_COST = {
+  en_chi_shot: { ap: 2, bonus: 0 },
+  en_chi_cover: { ap: 2, bonus: 0 },
+  en_chi_hunt: { ap: 0, bonus: 1 }
+};
+function enemySkillCost(u, id) {
+  return ENEMY_SKILL_COST[id] || { ap: 1, bonus: 0 };
+}
+
+/** 区域范围技能（喷洒、流沙漩涡……）能不能打到 zone：按技能射程，隔着危墙 / 关着的门打不到 */
+function enemyZoneInRange(a, id, zone) {
+  const d = zoneDist(a.zone, zone, state.zoneMode);
+  const rg = ENEMY_SKILL_RANGE[id] || a.range || "any";
+  const ok = rg === "melee" ? d === 0 : rg === "ranged" ? d === 1 : d <= 1;
+  return ok && !(typeof lineBlocked === "function" && lineBlocked(a.zone, zone));
+}
+/** 某区还站着、能挨打的我方单位（倒地没起身的不算） */
+function standingPlayersIn(zone) {
+  return allPlayers().filter(u => !u.dead && Number(u.zone) === Number(zone) &&
+    !(typeof isDownProtected === "function" && isDownProtected(u)));
+}
+/** 这一击真的打出去了：在等协助格挡、或者已经结算（射程外 / 被危墙挡住 / 目标不能打的不算） */
+function enemyShotWentOut(out) {
+  return !!out && (!!out.pending || !!(out.res && out.res.ok !== false));
+}
+/** 这一击打中了：结算了、没被协助格挡挡下（附带效果只在这时生效） */
+function enemyHitLanded(out) {
+  return !!out && !out.pending && !!out.res && out.res.ok !== false &&
+    (typeof attackConnected !== "function" || attackConnected(out.res, out.res.flags));
+}
+
+/** 巨人协助「捏碎颅骨，造成倒地」：不是伤害，目标直接倒地——我方角色血量归零进入濒死，照倒地规则
+ *  （力竭 3 被击倒立刻死亡；已经靠坚毅生命起身的再次倒下；武器人倒下）。屹立不倒 / 再次霜结这类本回合不受任何伤害的照样挡住。
+ *  目标身上原有的自我效果不动（以前写成 self = "down"，既没倒地，又把千钧之类的自我效果冲掉了） */
+function crushSkullDown(t, lines) {
+  if (!t || t.dead) return;
+  if (typeof isDownProtected === "function" && isDownProtected(t)) { lines.push(`${t.name} 已经倒地。`); return; }
+  const r = t.resources || {};
+  if (r.standTurn || r.frostShell) { lines.push(`${t.name} 本回合不受任何伤害，没有被捏倒。`); return; }
+  if (r.mecha && typeof exitMecha === "function") lines.push(...exitMecha(t, "被捏碎颅骨，机甲解除").slice(1));
+  const lost = totalHp(t);
+  (t.layers || []).forEach(l => { l.current = 0; });
+  if (typeof markPartyHurt === "function") markPartyHurt(t, { total: lost });
+  if (typeof spawnPopup === "function") spawnPopup(t, { kind: "status", text: "倒地", element: "physical" });
+  if (!t.isPlayer) {
+    if (typeof settleEnemyKill === "function") settleEnemyKill(t, lines);
+  } else if (typeof isWeaponUnit === "function" && isWeaponUnit(t)) {
+    t.dead = true;
+    lines.push(`${t.name} 被捏碎，武器人倒下。`);
+  } else if (typeof exhaustTierOf === "function" && exhaustTierOf(t) >= 3) {
+    t.dead = true;
+    t.dying = false;
+    t.upOnShp = false;
+    lines.push(`${t.name} 被捏碎颅骨倒地。力竭 3：被击倒后立刻死亡。`);
+  } else {
+    t.dying = true;
+    t.upOnShp = false;
+    if (typeof clearStunOnDown === "function") clearStunOnDown(t);
+    lines.push(`${t.name} 被捏碎颅骨，倒地陷入濒死。`);
+  }
+  if (typeof bossMechSync === "function") bossMechSync(lines);   // 死刑等标记：被标记的人倒下了就转标
+}
+
+/** 高压巡逻艇（手册第十章）：回合开始若在飞行，就给自己过载——护盾翻倍；过载期间被击破，坠机之外再吃过载爆炸。
+ *  一直飞着就一直过载：回合开始不按「过载下回合开始时清零」清它的护盾（护盾照常一回合没挨打就回满，回满到翻倍后的上限）；
+ *  被击落后不再续上，这层过载到下回合开始照常清零。回合开始（app.js · beginRound）调用 */
+function boatKeepsOverload(u) {
+  return !!u && u.kit === "patrolboat" && !!u.flying && !u.dead && !u.hidden && !!(u.instant && u.instant.overload);
+}
+function boatOverloadRoundStart(u, notes) {
+  if (!u || u.kit !== "patrolboat" || !u.flying || u.dead || u.hidden) return;
+  if (u.instant && u.instant.overload) notes.push(`${u.name} 仍在飞行：过载持续（护盾翻倍）。`);
+  else if (typeof applyInstantEffect === "function") {
+    notes.push(`${u.name} 回合开始在飞行：给自己过载。`);
+    applyInstantEffect(u, "overload", notes);
+  }
+}
 
 function runEnemyAction(id, a, t, hitOne, lines, needT) {
   const atk = effectiveAtk(a, state.units);
@@ -457,6 +587,16 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
 
   const skillRange = ENEMY_SKILL_RANGE[id] || a.range || "any";
   const aa = (target, opt) => hitOne(a, target, Object.assign({ atk, atkRange: skillRange }, opt));
+
+  // 赤牙：自己再出手就离开掩体（掩体撑过我方回合，到她下一次出手为止）；霰弹枪的 −40% 协助格挡只算那一枪
+  if (a.kit === "chixia") {
+    a.resources = a.resources || {};
+    if (id !== "en_chi_cover" && a.resources.cover) {
+      a.resources.cover = false;
+      lines.push(`${a.name} 离开掩体。`);
+    }
+    if (id !== "en_chi_shot") a.blockMalus = 0;
+  }
 
   if (id === "en_approach") {
     if (!needT()) return true;
@@ -470,7 +610,7 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
     else stepTowardZone(a, otherZone(a.zone, t.zone));   // 往离目标最远的相邻区躲
     return true;
   }
-  if (id === "en_aa") {
+  if (id === "en_aa" || id === "en_ox_assist") {   // 牛队长的协助就是一次普通攻击，只是仅限近距（射程表）
     if (!needT()) return true;
     aa(t, {
       element: sg.element || "physical",
@@ -514,9 +654,10 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
   if (id === "en_thug_knife" || id === "en_thug_opp" || id === "en_thug_knife_assist") {
     if (!needT()) return true;
     if (id === "en_thug_knife") stepTowardZone(a, t.zone);
-    const react = id !== "en_thug_knife";   // 借机 / 协助不受射程与飞行附加代价限制
+    // 借机攻击是反应，不受射程限制；协助攻击照手册「近距」（射程表），距离 1 打不到
+    const opp = id === "en_thug_opp";
     aa(t, { element: "physical", mult: 1, diceN: id === "en_thug_knife" ? 1 : 0, diceS: 8, baseBreak: 1,
-            flags: react ? { action: true, opportunity: true } : undefined });
+            flags: opp ? { action: true, opportunity: true } : undefined });
     return true;
   }
   if (id === "en_thug_hammer") {
@@ -590,16 +731,15 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
   }
   if (id === "en_dump") {
     if (!needT()) return true;
-    aa(t, { element: "acid", mult: 1, diceN: 1, diceS: (typeof leveledSides === "function" ? leveledSides(a.level, 4) : 4), baseBreak: 0 });
-    t.statuses.corr = true;
-    if (typeof popStatus === "function") popStatus(t, "corr");
-    lines.push(`${t.name} 被施加腐蚀。`);
+    // 腐蚀只在打中时施加：被协助格挡住、射程外打不到都不上（同观测鸦的高能）
+    aa(t, { element: "acid", mult: 1, diceN: 1, diceS: (typeof leveledSides === "function" ? leveledSides(a.level, 4) : 4), baseBreak: 0, onConnect: { status: "corr" } });
     return true;
   }
   if (id === "en_swarm") {
     if (!needT()) return true;
     stepTowardZone(a, t.zone);
-    aa(t, { element: "physical", mult: 1, diceN: 2, diceS: 4, baseBreak: 1 });
+    // 2d4 + atk，每五级伤害骰升一档（手册）
+    aa(t, { element: "physical", mult: 1, diceN: 2, diceS: (typeof leveledSides === "function" ? leveledSides(a.level, 4) : 4), baseBreak: 1 });
     a.layers.forEach(l => { l.current = 0; });
     a.dead = true;
     lines.push(`${a.name} 撞击后损毁。`);
@@ -680,11 +820,18 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
   }
   if (id === "en_boss_assist") {
     if (!needT()) return true;
-    stepTowardZone(a, otherZone(t.zone), { free: true });
+    // 「远离并拔枪」：和目标同区就退到相邻区再远距开枪；已经隔着一区就原地开枪（以前三区里会朝目标走过去）
+    if (Number(a.zone) === Number(t.zone)) stepTowardZone(a, otherZone(a.zone, t.zone), { free: true });
     aa(t, { element: "fire", mult: 1, diceN: 1, diceS: 8, baseBreak: 2 });
-    state.units.filter(u => !u.isPlayer && String(u.kit || "").indexOf("thug") === 0 && !u.hidden).forEach(th => {
+    // 「所有狂徒立刻各做一次协助」：还能出手、打得到的狂徒各用自己的协助（锤狂徒是冲近 atk/2）；
+    // 死掉的（还没清出场的）、失衡的、哗变的不出手。协助攻击不能被格挡，所以出手期间记在 _assistBy 上
+    state.units.filter(th => th.id !== a.id && /^thug_/.test(th.kit || "") && !th.dead && !th._removed && !th.hidden &&
+      (typeof unitCanFight !== "function" || unitCanFight(th)) && enemyAssistReady(th, t)).forEach(th => {
+      if (typeof assistTargetGone === "function" && assistTargetGone(t)) return;
       lines.push(`${th.name} 因强盗头子连携发动协助。`);
-      hitOne(th, t, { atk: effectiveAtk(th, state.units), element: "physical", mult: 1, baseBreak: 1 });
+      const prevBy = state._assistBy;
+      state._assistBy = th.id;
+      try { runEnemyAction(enemyAssistSkillId(th), th, t, hitOne, lines, needT); } finally { state._assistBy = prevBy; }
     });
     return true;
   }
@@ -746,14 +893,17 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
     return true;
   }
   if (id === "en_bigsand_heal") {
-    const sands = state.units.filter(u => !u.hidden && (u.kit === "sand_beast" || u.kit === "sand_human" || u.kit === "bigsand") && u.id !== a.id);
-    if (!sands.length) { lines.push("场上没有其他沙灵。"); return true; }
+    // 手册：治疗最低沙灵 2d4（掷骰）。只治还活着的沙灵（刚被打死、还没清出场的不算）
+    const sands = state.units.filter(u => !u.hidden && !u.dead && !u._removed && totalHp(u) > 0 &&
+      (u.kit === "sand_beast" || u.kit === "sand_human" || u.kit === "bigsand") && u.id !== a.id);
+    if (!sands.length) { lines.push("场上没有其他活着的沙灵。"); return true; }
     sands.sort((x, y) => totalHp(x) - totalHp(y));
     const u = sands[0];
-    const heal = Math.floor(diceExpect(2, 4, 0));
+    const r = takeDice(2, 4, 0);
     const sand = (u.layers || []).find(l => l.type === "sand");
-    if (sand) sand.current = Math.min(sand.max, sand.current + heal);
-    lines.push(`治疗 ${u.name} 沙尘 ${heal}。`);
+    const before = sand ? Number(sand.current) || 0 : 0;
+    if (sand) sand.current = Math.min(sand.max, before + r.total);
+    lines.push(`治疗 ${u.name} 沙尘 ${r.text}，恢复 ${sand ? sand.current - before : 0}。`);
     return true;
   }
   if (id === "en_bigsand_assist") {
@@ -786,17 +936,25 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
     return true;
   }
   if (id === "en_giant_sand_pulse") {
+    // 范围攻击：不能格挡，不看距离（三区也打得到距离 2）
     fieldUnits().forEach(u => {
-      if (u.id === a.id) return;
-      aa(u, { element: "physical", mult: 1, baseBreak: 0 });
+      if (u.id === a.id || (typeof isDownProtected === "function" && isDownProtected(u))) return;
+      aa(u, { element: "physical", mult: 1, baseBreak: 0, flags: { action: true, aoe: true } });
     });
     lines.push("全域沙暴：对所有区域所有单位造成 1×ATK 物理。");
     return true;
   }
   if (id === "en_giant_sand_vortex") {
     if (!needT()) return true;
-    allPlayers().filter(u => Number(u.zone) === Number(t.zone)).forEach(u => {
-      aa(u, { element: "physical", mult: 1, baseBreak: 2 });
+    // 远距流沙漩涡：选距离 1 的一区，区内全员 atk 物理 2 击破（范围攻击，不能格挡），打中的人失去行动
+    const z = Number(t.zone);
+    if (!enemyZoneInRange(a, id, z)) {
+      lines.push(`流沙漩涡是远距离，打不到距离 ${zoneDist(a.zone, z, state.zoneMode)} 的 ${z} 区。`);
+      return true;
+    }
+    standingPlayersIn(z).forEach(u => {
+      const out = aa(u, { element: "physical", mult: 1, baseBreak: 2, flags: { action: true, aoe: true } });
+      if (!enemyHitLanded(out) || u.dead || u.dying) return;
       u.stunned = true;
       lines.push(`${u.name} 被流沙困住，无法行动。`);
     });
@@ -814,8 +972,12 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
   }
   if (id === "en_giant_assist") {
     if (!needT()) return true;
-    t.self = "down";
-    lines.push(`${t.name} 被捏碎颅骨，倒地。`);
+    // 手册「协助近距捏碎颅骨，造成倒地」：只能打同区的目标
+    if (Number(a.zone) !== Number(t.zone)) {
+      lines.push(`${a.name} 的协助是近距离，够不到距离 ${zoneDist(a.zone, t.zone, state.zoneMode)} 的 ${t.name}。`);
+      return true;
+    }
+    crushSkullDown(t, lines);
     return true;
   }
   if (id === "en_boat_arc") {
@@ -835,10 +997,15 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
   }
   if (id === "en_spread") {
     if (!needT()) return true;
-    allPlayers().filter(u => Number(u.zone) === Number(t.zone)).forEach(u => {
-      aa(u, { element: "acid", mult: 1, diceN: 1, diceS: (typeof leveledSides === "function" ? leveledSides(a.level, 6) : 6), baseBreak: 0 });
-      u.statuses.corr = true;
-      if (typeof popStatus === "function") popStatus(u, "corr");
+    // 喷洒：一区内全员 1d6+atk 酸（范围攻击，不能格挡），腐蚀只给打中的人。射程照单位卡（远距离：距离 1 的一区）
+    const z = Number(t.zone);
+    if (!enemyZoneInRange(a, id, z)) {
+      lines.push(`${a.name} 的喷洒打不到距离 ${zoneDist(a.zone, z, state.zoneMode)} 的 ${z} 区。`);
+      return true;
+    }
+    standingPlayersIn(z).forEach(u => {
+      aa(u, { element: "acid", mult: 1, diceN: 1, diceS: (typeof leveledSides === "function" ? leveledSides(a.level, 6) : 6), baseBreak: 0,
+        flags: { action: true, aoe: true }, onConnect: { status: "corr" } });
     });
     return true;
   }
@@ -902,8 +1069,16 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
     } else {
       lines.push("身边已经没有狂徒可以回防，废铁墙没能筑起来。");
     }
-    allPlayers().filter(u => Number(u.zone) !== Number(a.zone)).forEach(u => {
-      aa(u, { element: "electric", mult: 0.5, diceN: 1, diceS: 8, baseBreak: 1 });
+    // 电击霰弹：另一区全员 (atk + 1d8) ÷ 2 电击（README 的写法）。范围攻击，不能格挡；
+    // 打离他距离 1 的一区（三区里有两个时打人多的那个），不会隔着两区打
+    const shotZone = zoneNeighbors(a.zone).map(Number)
+      .filter(z => standingPlayersIn(z).length && !(typeof lineBlocked === "function" && lineBlocked(a.zone, z)))
+      .sort((x, y) => standingPlayersIn(y).length - standingPlayersIn(x).length || x - y)[0];
+    if (shotZone == null) lines.push("另一区没有能打到的人，电击霰弹落空。");
+    else standingPlayersIn(shotZone).forEach(u => {
+      const r = takeDice(1, 8, 0);
+      lines.push(`电击霰弹 → ${u.name}：(atk + ${r.text}) ÷ 2`);
+      aa(u, { element: "electric", mult: 0.5, diceValue: r.total / 2, baseBreak: 1, flags: { action: true, aoe: true } });
     });
     return true;
   }
@@ -923,8 +1098,11 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
   if (id === "en_chi_cover") {
     a.resources = a.resources || {};
     a.resources.cover = true;
+    a.resources.coverTurn = Number(state.turnNo) || 0;
     a.resources.primed = true;
-    lines.push("赤牙躲入掩体：本回合受击伤害 −50%、击破 0，并为下回合预热霰弹枪。此技能结束其回合。");
+    a.ap = 0;   // 使用后结束回合（2 行动点已经扣过，剩下的行动点 / 附赠也不再用）
+    a.bonus = 0;
+    lines.push("赤牙躲入掩体：受击伤害 −50%、击破 0，撑过我方回合，到她下次出手为止；并为下回合预热霰弹枪。此技能结束她的回合。");
     return true;
   }
   if (id === "en_chi_ignite") {
@@ -942,21 +1120,28 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
     if (!needT()) return true;
     if (!(a.resources && a.resources.primed)) { lines.push("需要先预热（躲入掩体 / 剿灭）。"); return true; }
     const near = Number(a.zone) === Number(t.zone);
-    aa(t, { element: "fire", mult: near ? 2 : 1.5, baseBreak: near ? 2 : 1 });
+    a.blockMalus = 40;   // 对这一枪的协助格挡成功率 −40%（finalBlockChance 读）
+    const out = aa(t, { element: "fire", mult: near ? 2 : 1.5, baseBreak: near ? 2 : 1 });
+    if (!enemyShotWentOut(out)) { lines.push("霰弹没有打出去，预热保留。"); return true; }
     a.resources.primed = false;
-    lines.push("霰弹射出，解除预热。协助格挡成功率 −40%（手记）。");
+    lines.push(`霰弹射出（${near ? "近距 2×atk、2 击破" : "远距 1.5×atk、1 击破"}），解除预热。对这一枪的协助格挡成功率 −40%。`);
     return true;
   }
   if (id === "en_chi_hunt") {
     if (!needT()) return true;
+    t.statuses = t.statuses || {};
     t.statuses.chase = true;
+    // 记下施加者：目标移动时跟过去的是赤牙（chaseFollow 读 chasers；以前没记，兜底成了柯尔特去跟）
+    t.chasers = (t.chasers || []).filter(x => x !== a.id).concat(a.id);
+    if (typeof popStatus === "function") popStatus(t, "chase");
     lines.push(`追猎：${t.name} 移动时赤牙会跟过去。`);
     return true;
   }
   if (id === "en_chi_exec") {
     if (!needT()) return true;
-    a.zone = t.zone;
     a.resources = a.resources || {};
+    // 剿灭（协助）：冲向目标（走一格，过不去就打不到）并预热，零距离射击 2.5×atk 火焰，然后免费移动一次，解除预热
+    if (Number(a.zone) !== Number(t.zone)) stepTowardZone(a, t.zone, { free: true });
     a.resources.primed = true;
     aa(t, { element: "fire", mult: 2.5, baseBreak: 2 });
     a.resources.primed = false;
@@ -988,7 +1173,7 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
       picks = foes.slice().sort(() => Math.random() - 0.5).slice(0, 2);
     }
     if (!picks.length) { lines.push("场上没有可踩踏的角色。"); return true; }
-    picks.forEach(u => aa(u, { element: "physical", mult: 1, diceN: 1, diceS: (typeof leveledSides === "function" ? leveledSides(a.level, 4) : 4), baseBreak: 2 }));
+    picks.forEach(u => aa(u, { element: "physical", mult: 1, diceN: 1, diceS: 4, baseBreak: 2 }));   // 手册 atk+1d4，没写升档
     lines.push("踩踏：" + picks.map(u => u.name).join("、"));
     return true;
   }
@@ -1040,18 +1225,26 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
     aa(t, { element: "electric", mult: 1, diceN: 1, diceS: 10, baseBreak: 2 });
     a.resources = a.resources || {};
     a.resources.forceCharge = true;
+    a.resources.chargeTurn = Number(state.turnNo) || 0;
     a.resources.forceOverheat = false;
-    lines.push("机械臂挥击后开始蓄力电能炮，下次行动必须使用电能炮。");
+    lines.push("机械臂挥击后开始蓄力电能炮：这一回合蓄力，下一回合发射。");
     return true;
   }
   if (id === "en_agg2_charge") {
     if (!needT()) return true;
-    const near = Number(a.zone) === Number(t.zone);
-    aa(t, { element: "electric", mult: 1, diceN: 1, diceS: near ? 20 : 10, baseBreak: 2 });
     a.resources = a.resources || {};
+    if (a.resources.chargeTurn != null && Number(state.turnNo) <= Number(a.resources.chargeTurn)) {
+      lines.push("电能炮还在蓄力，下一回合才能发射。");
+      return true;
+    }
+    // 近距 atk+1d20 电 2 击破；隔一区衰减为 atk+1d10。打出去了才算开炮（射程外打不到的不算），炮后必过热
+    const near = Number(a.zone) === Number(t.zone);
+    const out = aa(t, { element: "electric", mult: 1, diceN: 1, diceS: near ? 20 : 10, baseBreak: 2 });
+    if (!enemyShotWentOut(out)) { lines.push("电能炮没有打出去，蓄力保留。"); return true; }
     a.resources.forceCharge = false;
+    a.resources.chargeTurn = null;
     a.resources.forceOverheat = true;
-    lines.push("电能炮释放完毕，下次行动强制过热。");
+    lines.push(`电能炮${near ? "近距" : "隔区（衰减为 1d10）"}发射完毕，下次行动强制过热。`);
     return true;
   }
   if (id === "en_agg2_overheat") {
@@ -1066,16 +1259,20 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
     lines.push(`吸引碎片 ${a.resources.debrisCount}/2。`);
     if (a.resources.debrisCount >= 2) {
       a.resources.debrisCount = 0;
-      const restore = (a.level || 1) * 2;
+      // 装甲回满：按这只聚合体的等级、人数算回原本的装甲上限（进三阶段时装甲层的上限被清成 0；以前只回 等级×2）
+      const restore = typeof aggregateLayerHp === "function"
+        ? scaleByParty(aggregateLayerHp(a.level).armor, a.hpParty)
+        : (a.level || 1) * 2;
       let armorLayer = (a.layers || []).find(l => l.type === "armor");
       if (armorLayer) {
         armorLayer.max = Math.max(Number(armorLayer.max) || 0, restore);
-        armorLayer.current = restore;
+        armorLayer.current = armorLayer.max;
       } else {
         a.layers.splice(1, 0, { type: "armor", current: restore, max: restore });
       }
       a.resources.phase = 2;
       a.resources.forceCharge = false;
+      a.resources.chargeTurn = null;
       a.resources.forceOverheat = false;
       a.name = "沙灵聚合体·机械躯";
       a.dead = false;
@@ -1092,7 +1289,12 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
     if (!needT()) return true;
     if (typeof displaceTo === "function") displaceTo(a, t.zone, lines, "接近肉体操控目标");
     else a.zone = t.zone;
-    aa(t, { element: "physical", mult: 1, baseBreak: 0, flags: { action: true, blockResolved: true }, onConnect: { controlAlly: true, spendAp: 1 } });
+    const out = aa(t, { element: "physical", mult: 1, baseBreak: 0, flags: { action: true, blockResolved: true }, onConnect: { controlAlly: true } });
+    // 「并使其下回合失去行动点」：记个标记，我方回合开始算行动点时读（以前在敌人回合里扣，回合开始又被回满）
+    if (enemyHitLanded(out) && t.isPlayer && !t.dead) {
+      t.loseApNext = true;
+      lines.push(`${t.name} 被肉体操控：下回合失去行动点。`);
+    }
     return true;
   }
   if (id === "ufo_summon") {
@@ -1102,6 +1304,7 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
     if (p) {
       const u = p.build(a.level, state.partySize);
       u.zone = a.zone;
+      u.summonedBy = a.id;   // 飞碟自爆时连自己召唤的看守一起炸（detonateUfo）
       state.units.push(u);
       lines.push(`召唤 ${u.name} 到 ${u.zone} 区。`);
     }
@@ -1263,9 +1466,12 @@ function spawnUfoBoss(lv) {
 }
 
 function detonateUfo(body) {
-  const notes = [`飞碟触灵自爆：全区所有单位受到 ${3 * (body.atk || 0)} 火焰。`];
+  const notes = [`飞碟触灵自爆：所有角色和它召唤的机器人看守受到 ${3 * (body.atk || 0)} 火焰。`];
   const dmg = 3 * (body.atk || 0);
-  (state.units || []).filter(u => !u.hidden && !u.dead && u.id !== body.id).forEach(u => {
+  // 手册「对所有角色」，作者定：它自己召唤的机器人看守也一起炸
+  const legIds = ufoLivingLegs(body).map(u => u.id);
+  (state.units || []).filter(u => !u.hidden && !u.dead && u.id !== body.id &&
+    (u.isPlayer || (u.summonedBy && (u.summonedBy === body.id || legIds.includes(u.summonedBy))))).forEach(u => {
     const fake = unitOf("飞碟自爆", body.level, [{ type: "armor", hp: 1 }], 0, 0);
     fake.zone = u.zone;
     if (typeof dealTo === "function") {
@@ -1276,10 +1482,8 @@ function detonateUfo(body) {
   body.dead = true;
   (body.layers || []).forEach(l => { l.current = 0; });
   body.resources.boomReady = false;
-  if (!body._xpGiven) {
-    body._xpGiven = true;
-    if (typeof grantXpToPlayers === "function") grantXpToPlayers(xpDrop("boss", body.level), "击破飞碟触灵");
-  }
+  // 击杀照常结算（首领击杀分、跑团经验倍率、掉落），和别的首领一样走 settleEnemyKill
+  if (typeof settleEnemyKill === "function") settleEnemyKill(body, notes);
   notes.push("飞碟触灵在自爆中解体。");
   if (typeof sweepDeadEnemies === "function") notes.push(...sweepDeadEnemies());
   return notes;

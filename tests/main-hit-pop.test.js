@@ -4,11 +4,11 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const H = require("./headless");
 
-function hitInHv(kit) {
+function hitInHv(kit, zone) {
   const c = H.load();
   c.BattleSim.setup({ party: [kit], enemies: [{ id: "thug_knife", lv: 1, zone: 1 }], seed: "MAIN-POP" });
   c.startCombat();
-  const k = c.findKit(kit, c.S.state.units); k.zone = 1;
+  const k = c.findKit(kit, c.S.state.units); k.zone = zone || 1;
   const f = c.S.state.units.find(u => !u.isPlayer);
   f.layers.forEach(l => { l.current = l.max = 300; });
   c.setZoneField(1, "electric");
@@ -29,7 +29,8 @@ test("灯的物理普攻打在高压场地上：先弹电伤，攻击本身那�
 });
 
 test("诺拉的冰属性普攻同理", () => {
-  const main = hitInHv("nora").filter(p => p.main);
+  // 诺拉普攻（没有刺入时）照说明只能打距离 1 的敌人：站在隔壁 2 区打（audit-P4-heroes）
+  const main = hitInHv("nora", 2).filter(p => p.main);
   assert.equal(main.length, 1);
   assert.equal(main[0].element, "ice");
 });

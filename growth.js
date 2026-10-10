@@ -65,6 +65,9 @@ function ceilDiv2(n) {
   return Math.ceil(n / 2);
 }
 
+/** 六维属性的硬性上限：作者定不设上限 */
+const ATTR_HARD_MAX = Infinity;
+
 function derivedFromAttrs(attrs, level) {
   attrs = attrs || {};
   const str = Number(attrs.str) || 5;

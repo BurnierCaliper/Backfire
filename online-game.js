@@ -368,7 +368,9 @@
     const view = HotseatGame.getView(), unit = view.order.find(u => u?.actor === view.currentUnitId);
     for (const p of status.roster) if (p.role === "player" && !p.online) {
       const ask = HotseatGame.getViewFor(p.id).ask;
-      if (ask?.eligible && !ask.declined && ask.kind !== "choice") HotseatGame.receiveFrom(p.id, { type: "answer", askId: ask.id, helper: null, extra: {} });
+      // 掉线的人：协助询问一律不协助；掉线的是打出失衡、要拍板的人时，有人举手就让最先举手的出手，没人举手就等到时间
+      if (ask?.isChooser) { if (ask.hands?.length) HotseatGame.receiveFrom(p.id, { type: "answer", askId: ask.id, helper: ask.hands[0].helper }); }
+      else if (ask?.eligible && !ask.declined && ask.kind !== "choice") HotseatGame.receiveFrom(p.id, { type: "answer", askId: ask.id, helper: null, extra: {} });
       if (ask?.eligible && ask.kind === "choice") {
         const option = ask.options[0];
         if (offlineWait?.askId && offlineWait.actor === option.helper) offlineWait.askId = ask.id;

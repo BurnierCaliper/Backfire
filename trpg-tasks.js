@@ -85,17 +85,36 @@ function trpgTaskNormalize(t, old) {
   };
 }
 
-/** 按单局的任务模板给一份草稿（主持人再改） */
+/* 主持人手册第三章「任务金钱（现行基准）」「任务经验」：按任务长度（天数）给，经验再按队伍等级分档（每人）。
+ * 模板的默认报酬：奎支取区间中间，经验按队伍平均等级查表。主持人在任务编辑里随时改（手册：按完成质量和关系上下浮动）。
+ * 以前沿用单局的报酬（清剿 1500 奎支 / 15 经验），单局为了自己的节奏调过，和手册差得很远 */
+const TRPG_TASK_PAY = [
+  // 最多几天, 奎支区间, 每人经验（队伍 1–4 / 5–8 / 9–12 / 13–16 / 17–20 级）
+  { days: 2, name: "短", kuizhi: [2000, 3000], xp: [70, 100, 300, 500, 800] },
+  { days: 5, name: "中", kuizhi: [6000, 8000], xp: [100, 300, 500, 800, 1500] },
+  { days: 10, name: "长", kuizhi: [12000, 18000], xp: [300, 500, 1000, 2000, 4000] },
+  { days: Infinity, name: "极难", kuizhi: [20000, 30000], xp: [500, 1000, 2000, 5000, 10000] }
+];
+/** 手册的任务报酬：{ name 长度档, kuizhi 默认奎支, range [低, 高], xp 每人经验 } */
+function trpgTaskHandbookPay(days, level) {
+  const row = TRPG_TASK_PAY.find(r => Math.max(1, Number(days) || 1) <= r.days);
+  const band = Math.max(0, Math.min(row.xp.length - 1, Math.floor((Math.max(1, Number(level) || 1) - 1) / 4)));
+  return { name: row.name, kuizhi: Math.round((row.kuizhi[0] + row.kuizhi[1]) / 2 / 100) * 100, range: row.kuizhi.slice(), xp: row.xp[band] };
+}
+
+/** 按单局的任务模板给一份草稿（路线、目标、天数照单局的模板，报酬照手册；主持人再改） */
 function trpgTaskTemplate(kind) {
   const lv = trpgPartyLevel();
   const tpl = (typeof ROGUE_TASKS !== "undefined" ? ROGUE_TASKS : []).find(x => x.kind === kind);
   const fight = (type) => ({ type, note: "", enemies: [{ id: "thug_knife", lv, zone: 2 }, { id: "thug_hammer", lv, zone: 2 }], weather: "none", zoneMode: 2 });
   const nodes = [fight("battle"), { type: "rest", note: "可以长休的地方" }, fight(tpl && tpl.elite ? "elite" : "battle")];
-  const kuizhi = tpl ? tpl.reward.kuizhi : 1000;
+  const days = tpl ? tpl.days : 1;
+  const pay = trpgTaskHandbookPay(days, lv);
+  const kuizhi = pay.kuizhi;
   return {
     name: tpl ? tpl.name : "新任务", kind: TRPG_TASK_KINDS[kind] ? kind : "custom",
-    goal: tpl ? tpl.goal.replace("{region}", "外城区") : "", days: tpl ? tpl.days : 1,
-    reward: { kuizhi, xp: tpl ? tpl.reward.xp : 15, items: [], parts: [], blueprints: [],
+    goal: tpl ? tpl.goal.replace("{region}", "外城区") : "", days,
+    reward: { kuizhi, xp: pay.xp, items: [], parts: [], blueprints: [],
       intactKuizhi: kind === "escort" ? Math.round(kuizhi * ESCORT_RULES.intactBonus) : 0 },
     escort: kind === "escort" ? { kind: "cart", name: "", level: lv } : null,
     nodes

@@ -20,7 +20,7 @@ const BATTLE_TEMPLATE_PROPS = ["button", "lever", "battery", "boom", "acid", "sc
 const BATTLE_TEMPLATE_GAPS = ["open", "bridge", "wall", "door", "void"];
 const BATTLE_TEMPLATE_TIERS = { normal: "普通", elite: "精英", boss: "首领" };
 /** 编辑表单里一区的「主场地」选项（和战场配置面板的 setField 一样） */
-const BATTLE_TEMPLATE_FIELD_KINDS = { "": "无", fireOn: "火场", ice: "冰面", acid: "酸液", electric: "电场", energy: "能量", harmonic: "谐波", heal: "疗愈", abyss: "深渊", collapseOn: "坍塌" };
+const BATTLE_TEMPLATE_FIELD_KINDS = { "": "无", fireOn: "火场", ice: "冰面", acid: "酸液", electric: "电场", energy: "能量", harmonic: "谐波", heal: "疗愈", abyss: "深渊", collapseOn: "坍塌", ruinOn: "损毁地面", isolate: "隔离区" };
 
 function btClone(x) { return JSON.parse(JSON.stringify(x)); }
 function btInt(v, d, lo, hi) {
@@ -312,11 +312,16 @@ function battleTemplateFieldKind(f) {
   f = f || {};
   return Object.keys(BATTLE_TEMPLATE_FIELD_KINDS).find(k => k && f[k]) || "";
 }
-/** 编辑表单改了一区的主场地 / 高地：换成和战场配置面板一样的字段 */
-function battleTemplateSetField(t, zone, kind, highland) {
+/** 编辑表单改了一区的主场地 / 高地：换成和战场配置面板一样的字段。ruinHp：损毁地面的耐久（不给就用原来的 / 默认值） */
+function battleTemplateSetField(t, zone, kind, highland, ruinHp) {
   t.fields = t.fields || {};
+  const old = t.fields[zone] || {};
   const f = btFieldDefaults();
   if (kind && BATTLE_TEMPLATE_FIELD_KINDS[kind] !== undefined) { f[kind] = true; if (kind === "fireOn") f.fire = 1; }
+  if (kind === "ruinOn") {
+    const hp = ruinHp != null ? ruinHp : old.ruinOn ? old.ruinHp : null;
+    if (hp != null) f.ruinHp = f.ruinMax = btInt(hp, 30, 1, 999);
+  }
   f.highland = !!highland;
   const d = btFieldDiff(f);
   if (Object.keys(d).length) t.fields[zone] = d;

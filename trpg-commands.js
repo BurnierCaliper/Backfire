@@ -86,6 +86,8 @@ const BackstageCommands = (() => {
       }
       case "weaponLevel":
         setOwnedWeaponLevel(u, c.kit, c.value);
+        // 跑团：武器升到 / 降到 4 级上下，装着的客制化图纸跟着生效 / 失效（武器页、耐久上限一起重算）
+        if (typeof TRPG !== "undefined" && TRPG.active && typeof trpgSyncWeaponMods === "function") trpgSyncWeaponMods();
         appendLog(`${u.name} 的 ${weaponCardName(c.kit)} 设为 ${u.weaponLevels[c.kit]} 级。`);
         break;
       case "attr": {

@@ -56,6 +56,7 @@ test("同一位工匠升级满 5 次才能领图纸，只能领一次", () => {
 test("图纸花 5000 装到武器上：atk / 耐久上限 / 格挡加成在战斗里生效", () => {
   const { c, R, run } = atBoard("SM3");
   run.blueprints.push("bp_trevor_bigkill", "bp_teresa_light", "bp_zekahr_fool", "bp_tima_range");
+  run.party[0].weaponLevels.torque = 4; run.party[1].weaponLevels.ecmo = 4;   // 武器 4 级才解锁客制化
   const k0 = c.S.state.kuizhi;
   const id = run.smiths.find(x => R.smithInfo(run, x).canInstall);
   // 基准

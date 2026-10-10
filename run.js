@@ -540,6 +540,8 @@ function applyBattlefieldFeatures(features, level) {
       if (!fl) return;
       if (EFFECT[f.what] && typeof setZoneField === "function") setZoneField(f.zone, EFFECT[f.what]);
       else fl[f.what] = true;
+      // 塌陷区域的伤害骰按战斗等级（每 4 级 +1d10），以前单局生成的一直是 1 级
+      if (f.what === "collapseOn") fl.collapseLv = Math.max(1, Number(f.level != null ? f.level : level) || 1);
     } else if (f.type === "gap" && f.key) {
       // 战斗模板可以写死耐久、机关门开着
       const hp = f.hp != null ? Number(f.hp) : typeof defaultGapHp === "function" ? defaultGapHp(f.what) : 10;
@@ -567,11 +569,12 @@ const RACE_LONG_REST = {
 function raceOf(u) {
   if (u && u.race && RACE_LONG_REST[u.race]) return u.race;
   const n = (u && u.note) || "";
+  // 兽人要先判：「兽人-狼」里的「狼」不能被当成犬类人（和 ledger.js · heroRace 一致）
+  if (/兽人/.test(n)) return "beast";
   if (/鼠类人|兔/.test(n)) return "rodent";
   if (/猫类人|豹|虎/.test(n)) return "feline";
   if (/犬类人|狐|犬|狼/.test(n)) return "canine";
   if (/牛类人|马|羊/.test(n)) return "bovine";
-  if (/兽人/.test(n)) return "beast";
   if (/红皮人/.test(n)) return "red";
   return "human";
 }

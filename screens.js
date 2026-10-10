@@ -64,9 +64,11 @@ const Screens = (function () {
 
   function refreshTitle() {
     const run = typeof SaveStore !== "undefined" ? dispatch({ type: "run.session", action: "readSaved" }) : null;
+    // 更新版本的游戏存的档：这一版读不了，但不能说成「没有」（开新局前也会提醒会覆盖）
+    const newer = !run && typeof SaveStore !== "undefined" && dispatch({ type: "run.session", action: "savedStatus" }) === "newer";
     const cont = $("t-continue");
     cont.disabled = !run || !RunFlow.ready;
-    $("t-continue-sub").textContent = run ? runSummary(run) : "没有进行中的一局";
+    $("t-continue-sub").textContent = run ? runSummary(run) : newer ? "有一局更新版本的游戏存下的进度，这一版读不了" : "没有进行中的一局";
     $("t-new").disabled = !RunFlow.ready;
     if ($("t-solo")) $("t-solo").disabled = !RunFlow.ready;
     $("t-new-sub").textContent = RunFlow.ready ? "选择 2–4 名角色出发" : "单局流程在下一步（M1）接入";

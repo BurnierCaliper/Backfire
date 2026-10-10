@@ -243,3 +243,7 @@ body.ol-has-side .ol-toast { right: 344px; }
   .ol-battle .g-hud { position: static; max-height: none; box-shadow: none; }
   .ol-battle .g-field { height: auto; min-height: 60vh; }
 }
+/* 选目标 / 区域时的编号（同名敌人也分得清） */
+.ol-battle .unit-wrap, .ol-battle .g-zone { position: relative; }
+.ol-battle .ob-pick-no { position: absolute; z-index: 6; top: -9px; left: -9px; min-width: 22px; height: 22px; padding: 0 5px; border-radius: 11px; display: inline-flex; align-items: center; justify-content: center; font: 800 13px/1 var(--num, sans-serif); color: #111; background: var(--gold, #f2c230); border: 2px solid #111; box-shadow: 2px 2px 0 #0008; pointer-events: none; }
+.ol-battle .g-zone > .ob-pick-no { top: 6px; left: auto; right: 8px; }

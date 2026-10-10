@@ -1276,3 +1276,188 @@ test("战斗：Esc 关掉队伍配置 / 战场配置 / 背包 / 后台等面板�
   assert.equal(await page.evaluate(() => GAME.bsOpen), false);
   assert.deepEqual(o.errors, []);
 });
+
+/* ---------- 悬停技能就预演 ---------- */
+/** 开战时有选择（柯尔特的初始刀头）就选第一项 */
+async function startBattleAnswering(page, prep) {
+  await page.click("#tr-fight");
+  await page.waitForSelector("#g-start");
+  if (prep) await page.evaluate(prep);
+  await page.keyboard.press("Space");
+  for (let i = 0; i < 80; i++) {
+    if (await page.evaluate(() => state.combatStarted && state.combatPhase === "player" && GAME.depth === 0)) return;
+    const opt = page.locator("#g-choice.show .opts button");
+    if (await opt.count()) await opt.first().click().catch(() => {});
+    await page.waitForTimeout(150);
+  }
+  throw new Error("战斗没有开始");
+}
+/** 悬停前后要一模一样的东西：各单位的血量 / 行动点 / 资源 / 状态、记录条数、随机数位置、指令日志、G.lastCmd、队伍档案 */
+const pvFingerprint = () => JSON.stringify({
+  draws: RNG.draws(), rng: Math.random === RNG.fn,
+  units: state.units.map(u => [u.id, u.ap, u.bonus, u.zone, u.def, (u.layers || []).map(l => l.current), JSON.stringify(u.resources || {}), JSON.stringify(u.statuses || {})]),
+  logs: state.logPages.reduce((n, p) => n + p.lines.length, 0), pages: state.logPages.length,
+  history: Commands.history().length, lastCmd: JSON.stringify(GAME.lastCmd || null), ledger: JSON.stringify(LEDGER.save())
+});
+const pvTitle = (page) => page.evaluate(() => document.querySelector("#g-pvbox h4").textContent);
+
+test("悬停技能就预演：不用选目标的技能（拉响引擎）——写消耗和资源变化、卡上出数值牌，不扣点不放出去，局面 / 随机数 / 指令日志都不变；重复悬停用缓存；移开回到默认说明", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await newTrpg(page);
+  await page.evaluate(() => { GAME.partyKits = ["xia", "ruby"]; GAME.lastEncounter = null; });
+  await startBattle(page);
+  const xia = await selectHero(page, "xia");
+  const ap0 = await apOf(page, xia);
+  await page.evaluate(() => {
+    RNG.install("PV-HOVER");   // 装上种子随机数：悬停前后随机流的位置不能动
+    window.__units = state.units;
+    window.__sandboxes = 0;    // 每算一次预演开一次用完就扔的局面：数一数，看重复悬停有没有用缓存
+    const inspect = HotseatValidation.inspect;
+    HotseatValidation.inspect = (fn) => { window.__sandboxes++; return inspect(fn); };
+  });
+  const before = await page.evaluate(pvFingerprint);
+  const btn = page.locator("#g-skills button.sk", { hasText: "拉响引擎" });
+  await btn.hover();
+  await page.waitForFunction(() => /拉响引擎 · 预演/.test(document.querySelector("#g-pvbox h4").textContent));
+  const box = await page.textContent("#g-pvbox");
+  assert.match(box, /消耗 行动点 1（现有 1）/, "最上面一行写消耗");
+  assert.match(box, /夕夏 资源：引擎关闭 → 引擎启动/, "预览框写资源变化");
+  assert.match(box, /骰子按最小 \/ 最大各预演一次/);
+  assert.match(await page.textContent(`.unit-wrap[data-id="${xia}"] .pvtag.show`), /资源：引擎关闭 → 引擎启动/, "夕夏卡上出数值牌");
+  assert.equal(await apOf(page, xia), ap0, "悬停不扣行动点");
+  assert.equal(await page.evaluate(i => !!state.units.find(u => u.id === i).resources.engine, xia), false, "技能没放出去");
+  assert.equal(await page.evaluate(() => GAME.arm), null, "也没进入选目标");
+  assert.equal(await page.evaluate(pvFingerprint), before, "悬停前后局面、随机数、指令日志、G.lastCmd 都不变");
+  assert.ok(await page.evaluate(() => state.units === window.__units), "state 里的对象引用也原样还回来");
+  assert.equal(await page.evaluate(() => window.__sandboxes), 1);
+  // 移开：数值牌收起，预览框回到默认说明
+  await page.mouse.move(5, 5);
+  await page.waitForFunction(() => !/预演/.test(document.querySelector("#g-pvbox h4").textContent));
+  assert.equal(await page.locator(".pvtag.show").count(), 0);
+  assert.match(await page.textContent("#g-pvbox"), /鼠标停在技能上先看预演/);
+  // 同一个局面再悬停：用缓存，不重新跑沙盒
+  await btn.hover();
+  await page.waitForFunction(() => /拉响引擎 · 预演/.test(document.querySelector("#g-pvbox h4").textContent));
+  assert.equal(await page.evaluate(() => window.__sandboxes), 1, "重复悬停用缓存");
+  // 扫过按钮马上离开（不到 120 毫秒）不算
+  await page.mouse.move(5, 5);
+  await page.evaluate(() => {
+    const b = [...document.querySelectorAll("#g-skills button.sk")].find(x => /准备/.test(x.textContent));
+    b.dispatchEvent(new MouseEvent("mouseenter"));
+    b.dispatchEvent(new MouseEvent("mouseleave"));
+  });
+  await page.waitForTimeout(300);
+  assert.equal(await page.evaluate(() => window.__sandboxes), 1, "扫过不预演");
+  assert.ok(!/预演/.test(await pvTitle(page)));
+  assert.equal(await page.evaluate(pvFingerprint), before);
+  // 点下去照常直接放出去（只是先看了预演）
+  await btn.click();
+  await page.waitForFunction(i => state.units.find(u => u.id === i).resources.engine && GAME.depth === 0, xia);
+  assert.equal(await apOf(page, xia), ap0 - 1);
+  assert.deepEqual(o.errors, []);
+});
+
+test("悬停技能就预演：要选目标的技能（柯尔特普攻）每个敌人卡上出伤害牌、预览框每个目标一行，移开清掉；有分步的（直流短接）只写说明；瞄准预览也写资源变化", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await newTrpg(page);
+  await page.evaluate(() => { GAME.partyKits = ["kolt", "yuito"]; GAME.lastEncounter = null; });
+  await startBattleAnswering(page, () => {
+    const k = state.units.find(u => u.kit === "kolt");
+    state.units.filter(u => !u.isPlayer).forEach(u => { u.zone = k.zone; });   // 电钻打同区：敌人都放到柯尔特这一区
+    state.units.find(u => u.kit === "yuito").zone = k.zone === 1 ? 2 : 1;      // 结人的普攻打距离 1
+  });
+  const kolt = await selectHero(page, "kolt");
+  const ap0 = await apOf(page, kolt);
+  const foes = await page.evaluate(() => state.units.filter(u => !u.isPlayer && !u.dead).map(u => u.id));
+  const before = await page.evaluate(() => JSON.stringify(state.units.map(u => [u.id, u.ap, (u.layers || []).map(l => l.current), u.def])) + state.logPages.reduce((n, p) => n + p.lines.length, 0) + "|" + Commands.history().length);
+  await page.locator("#g-skills button.sk", { hasText: "普通攻击" }).hover();
+  await page.waitForFunction(() => /普通攻击 · 预演/.test(document.querySelector("#g-pvbox h4").textContent));
+  const rows = await page.$$eval("#g-pvbox .pv-row", rs => rs.map(r => r.textContent));
+  assert.equal(rows.length, foes.length, "每个目标一行：" + rows.join(" / "));
+  rows.forEach(r => assert.match(r, /：\S+ \d+(–\d+)?.* · 击破 \d/, r));
+  const dmg = rows.map(r => Number(r.match(/：\S+ (?:\d+–)?(\d+)/)[1]));   // 伤害的上限
+  assert.deepEqual(dmg, dmg.slice().sort((a, b) => b - a), "按伤害从高到低");
+  for (const f of foes) assert.match(await page.textContent(`.unit-wrap[data-id="${f}"] .pvtag.show`), /\d[\s\S]*击破/, "敌人卡上有伤害牌");
+  assert.equal(await page.locator(`.unit-wrap[data-id="${kolt}"] .pvtag.show`).count(), 0, "别的单位的变化不画");
+  // 好几张卡同时出牌子：缩小、压在自己卡片的下边上，不盖住别的卡，也不压自己的血条和架势格
+  const tagLayout = await page.evaluate(() => {
+    const hit = (a, b) => a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1;
+    const wraps = [...document.querySelectorAll(".unit-wrap")];
+    return [...document.querySelectorAll(".pvtag.show")].map(t => {
+      const own = t.closest(".unit-wrap"), r = t.getBoundingClientRect();
+      const under = [...wraps.filter(w => w !== own), own.querySelector(".u-hp"), ...own.querySelectorAll(".pip")];
+      return { compact: t.classList.contains("compact"), covers: under.filter(x => hit(r, x.getBoundingClientRect())).length };
+    });
+  });
+  assert.ok(foes.length > 1 && tagLayout.every(x => x.compact && x.covers === 0), JSON.stringify(tagLayout));
+  assert.equal(await apOf(page, kolt), ap0);
+  assert.equal(await page.evaluate(() => GAME.arm), null, "没有进入选目标");
+  await page.mouse.move(5, 5);
+  await page.waitForFunction(() => !document.querySelector(".pvtag.show"));
+  assert.ok(!/预演/.test(await pvTitle(page)), "移开回到默认说明");
+  // 有分步选择的技能：只写消耗和先选什么，不预演
+  await page.locator("#g-skills button.sk", { hasText: "直流短接" }).hover();
+  await page.waitForFunction(() => /^直流短接/.test(document.querySelector("#g-pvbox h4").textContent));
+  const flow = await page.textContent("#g-pvbox");
+  assert.match(flow, /消耗 行动点 1/);
+  assert.match(flow, /分步选择：先选「可先移动至多 1 区/);
+  assert.ok(!/预演/.test(await pvTitle(page)));
+  assert.equal(await page.locator(".pvtag.show").count(), 0, "分步技能不预演");
+  await page.mouse.move(5, 5);
+  assert.equal(await page.evaluate(() => JSON.stringify(state.units.map(u => [u.id, u.ap, (u.layers || []).map(l => l.current), u.def])) + state.logPages.reduce((n, p) => n + p.lines.length, 0) + "|" + Commands.history().length), before, "悬停不改变局面");
+  // 选好技能后瞄准：出手的人的资源变化也写出来（结人普攻：咖啡豆变咖啡液）
+  const yuito = await selectHero(page, "yuito");
+  await page.keyboard.press("1");
+  await page.waitForFunction(() => GAME.arm && GAME.arm.mode === "unit");
+  await page.hover(`.unit-wrap[data-id="${foes[0]}"]`);
+  await page.waitForSelector(`.unit-wrap[data-id="${yuito}"] .pvtag.show`);
+  assert.match(await page.textContent(`.unit-wrap[data-id="${yuito}"] .pvtag.show`), /资源：咖啡豆 \d+ · 咖啡液 \d+ → 咖啡豆 \d+ · 咖啡液 \d+/);
+  assert.match(await page.textContent("#g-pvbox"), /结人 资源：/);
+  assert.equal(await page.locator(".pvtag.show.compact").count(), 0, "瞄准一个目标：牌子照旧是卡片上方的大牌子");
+  await page.keyboard.press("Escape");
+  assert.deepEqual(o.errors, []);
+});
+
+test("手机竖屏：不用选目标的技能（拉响引擎）第一下只预演不扣点，点别的地方取消，再点一下才放出去", async (t) => {
+  if (!browser) { t.skip(skipWhy); return; }
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  t.after(() => context.close());
+  const page = await context.newPage();
+  const errors = [];
+  page.on("pageerror", e => errors.push("pageerror: " + e.message));
+  page.on("dialog", d => (d.type() === "prompt" ? d.accept("测试团") : d.accept()));
+  await page.goto(GAME_URL);
+  await newTrpg(page);
+  await page.evaluate(() => { GAME.partyKits = ["xia", "ruby"]; GAME.lastEncounter = null; });
+  await startBattle(page);
+  const xia = await page.evaluate(() => state.units.find(u => u.kit === "xia").id);
+  await page.locator("#g-party .pc", { hasText: "夕夏" }).first().tap();
+  await page.waitForFunction(i => GAME.actorId === i, xia);
+  const ap0 = await apOf(page, xia);
+  const engineOn = () => page.evaluate(i => !!state.units.find(u => u.id === i).resources.engine, xia);
+  const btn = page.locator("#g-skills button.sk", { hasText: "拉响引擎" });
+  await btn.tap();
+  await page.waitForFunction(() => /拉响引擎 · 预演/.test(document.querySelector("#g-pvbox h4").textContent));
+  await page.waitForTimeout(300);   // 触屏模拟出来的鼠标进出事件之后预演还在
+  assert.match(await pvTitle(page), /拉响引擎 · 预演/);
+  assert.equal(await apOf(page, xia), ap0, "第一下只预演");
+  assert.equal(await engineOn(), false);
+  assert.equal(await page.evaluate(() => document.querySelector("#g-pvbox").classList.contains("live")), true, "预演浮在操作栏上面");
+  assert.match(await page.textContent("#g-pvbox"), /资源：引擎关闭 → 引擎启动/);
+  assert.match(await page.textContent("#g-hint"), /再点一下放出去/);
+  // 点别的地方（战场空白处）：取消
+  await page.tap('.g-zone[data-num="1"]', { position: { x: 6, y: 6 } });
+  await page.waitForFunction(() => !GAME.skillTap && !/预演/.test(document.querySelector("#g-pvbox h4").textContent));
+  assert.equal(await page.locator(".pvtag.show").count(), 0);
+  // 取消后再点：又只是预演
+  await btn.tap();
+  await page.waitForFunction(() => /拉响引擎 · 预演/.test(document.querySelector("#g-pvbox h4").textContent));
+  assert.equal(await apOf(page, xia), ap0, "取消之后第一下还是只预演");
+  // 再点同一个按钮：放出去
+  await btn.tap();
+  await page.waitForFunction(i => state.units.find(u => u.id === i).resources.engine && GAME.depth === 0, xia, { timeout: 15000 });
+  assert.equal(await apOf(page, xia), ap0 - 1, "第二下才放出去");
+  assert.deepEqual(errors, []);
+});

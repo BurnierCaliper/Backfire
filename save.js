@@ -64,28 +64,52 @@ const SaveStore = (function () {
     }
   }
 
-  /** 读档并升级到最新版本。读不出来返回 null（坏档另存一份 .broken，不直接丢掉） */
+  /** 升级完的存档内容像不像样（JSON 合法但结构坏了的，比如 data 不是对象、队伍不是数组，也算坏档） */
+  const SHAPE = {
+    run: (d) => !!d && typeof d === "object" && !Array.isArray(d) && (d.party == null || Array.isArray(d.party)),
+    meta: (d) => !!d && typeof d === "object" && !Array.isArray(d) && (d.stats == null || typeof d.stats === "object")
+  };
+
+  /** 读档并升级到最新版本。读不出来返回 null（坏档另存一份 .broken，不直接丢掉）。
+   *  坏档包括：不是 JSON、外层格式不对、升级函数出错（以前直接抛出去）、升级完结构不对（以前原样交出去，也不备份） */
   function read(kind) {
     const ls = storage();
     if (!ls || !KEYS[kind]) return null;
     const raw = ls.getItem(KEYS[kind]);
     if (!raw) return null;
+    const broken = () => { try { ls.setItem(KEYS[kind] + ".broken", raw); } catch (e2) {} return null; };
     let env;
     try {
       env = JSON.parse(raw);
       if (!env || env.kind !== kind || typeof env.version !== "number" || !env.data) throw new Error("格式不对");
     } catch (e) {
-      try { ls.setItem(KEYS[kind] + ".broken", raw); } catch (e2) {}
-      return null;
+      return broken();
     }
-    if (env.version > CURRENT[kind]) return null;   // 更新版本的游戏存的档，这一版读不懂
+    if (env.version > CURRENT[kind]) return null;   // 更新版本的游戏存的档，这一版读不懂（原样留着，见 status）
     let data = env.data;
-    for (let v = env.version; v < CURRENT[kind]; v++) {
-      const up = MIGRATE[kind][v];
-      if (typeof up !== "function") return null;
-      data = up(data);
+    try {
+      for (let v = env.version; v < CURRENT[kind]; v++) {
+        const up = MIGRATE[kind][v];
+        if (typeof up !== "function") throw new Error(`没有第 ${v} 版的升级`);
+        data = up(data);
+      }
+      if (SHAPE[kind] && !SHAPE[kind](data)) throw new Error("结构不对");
+    } catch (e) {
+      return broken();
     }
     return data;
+  }
+
+  /** 存档此刻的情况（不改动存档）："none" 没有 / "ok" 能读 / "newer" 更新版本的游戏存的，这一版读不了 /
+   *  "broken" 坏档（已另存 .broken）。开新局前用它提醒会覆盖：以前更新版本的存档读成「没有存档」，直接被覆盖 */
+  function status(kind) {
+    const ls = storage();
+    const raw = ls && KEYS[kind] ? ls.getItem(KEYS[kind]) : null;
+    if (!raw) return "none";
+    let env = null;
+    try { env = JSON.parse(raw); } catch (e) { env = null; }
+    if (env && env.kind === kind && typeof env.version === "number" && env.version > CURRENT[kind]) return "newer";
+    return read(kind) != null ? "ok" : "broken";
   }
 
   function clear(kind) {
@@ -166,7 +190,7 @@ const SaveStore = (function () {
 
   return {
     KEYS, CURRENT, MIGRATE, PARTY_MIN, PARTY_MAX,
-    read, write, clear, has,
+    read, write, clear, has, status,
     newRun, newMeta, killHero, weaponsOf,
     saveRun: (d) => write("run", d), loadRun: () => read("run"), clearRun: () => clear("run"),
     saveMeta: (d) => write("meta", d), loadMeta: () => read("meta") || newMeta(),

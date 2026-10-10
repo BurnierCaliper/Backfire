@@ -23,7 +23,7 @@ test("frozen manifest has 36 cells, 5400 battles, 135 campaigns and disjoint see
     for (const size of [2, 3, 4]) {
       const runs = m.scenarios.filter(s => s.suite === "campaign" && s.set === set && s.size === size);
       assert.equal(runs.length, set === "baseline" ? 30 : 15);
-      B.HEROES.forEach(k => assert.ok(runs.filter(r => r.party.includes(k)).length >= 2, `${set}/${size}/${k}`));
+      m.heroes.forEach(k => assert.ok(runs.filter(r => r.party.includes(k)).length >= 2, `${set}/${size}/${k}`));
     }
   }
   m.scenarios[0].seed = "changed";

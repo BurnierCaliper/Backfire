@@ -62,16 +62,14 @@ function trpgAdjustWater(ml) {
   return [`水 ${ml > 0 ? "+" : ""}${ml} ml，现有 ${ledgerWater()} ml。`];
 }
 
-/* ---------- 时间与休息（规则都在 ledger.js，照手册第五章） ---------- */
+/* ---------- 时间与休息（规则都在 ledger.js，照手册第五章） ----------
+ * 满 80 小时力竭致死在 ledger.js · ledgerAdvance 里判（短休、消磨时间的长休推进时间也一样） */
 function trpgPassHours(h) {
   const notes = [];
   h = Math.max(0, Math.floor(Number(h) || 0));
   if (!h) return notes;
   notes.push(`经过 ${h} 小时。`);
   ledgerAdvance(h, notes);
-  if (exhaustTier() >= 4) {
-    trpgHeroes().filter(u => !u.dead).forEach(u => { u.dead = true; notes.push(`${u.name} 力竭致死。`); });
-  }
   ledgerCapture();
   return notes;
 }
@@ -82,9 +80,6 @@ function trpgPassMinutes(m) {
   if (!m) return notes;
   notes.push(`经过 ${durationText(m / 60)}。`);
   ledgerAdvance(m / 60, notes);
-  if (exhaustTier() >= 4) {
-    trpgHeroes().filter(u => !u.dead).forEach(u => { u.dead = true; notes.push(`${u.name} 力竭致死。`); });
-  }
   ledgerCapture();
   return notes;
 }
@@ -152,6 +147,10 @@ function trpgSpendAttr(kit, attr) {
 function trpgWeaponLevel(owner, kit) {
   return Number((owner.weaponLevels || {})[kit]) || 1;
 }
+/** 解锁客制化看的等级 = 武器等级 + 羁绊（和改装槽、被动升级一样，growth.js · weaponRewardLevel） */
+function trpgBpLevel(owner, kit) {
+  return typeof weaponRewardLevel === "function" ? weaponRewardLevel(owner, kit) : trpgWeaponLevel(owner, kit);
+}
 /** 升下一级要什么：{ next, mats: [{ key, id, name, need, have }], labor, canSelf, max } */
 function trpgUpgradeInfo(owner, kit) {
   const lv = trpgWeaponLevel(owner, kit);
@@ -185,6 +184,7 @@ function trpgUpgradeWeapon(ownerKit, kit, mode, fee) {
   }
   if (typeof setOwnedWeaponLevel === "function") setOwnedWeaponLevel(owner, kit, info.next);
   else { owner.weaponLevels = owner.weaponLevels || {}; owner.weaponLevels[kit] = info.next; }
+  trpgSyncWeaponMods();   // 升到 4 级：装着的客制化图纸开始生效
   ledgerCapture();
   return notes;
 }
@@ -213,12 +213,13 @@ function trpgRemovePart(ownerKit, kit, slot) {
 
 /* ---------- 客制化图纸（rogue-data.js · ROGUE_SMITHS 的图纸，背包物品 id 就是图纸 id） ----------
  * 装在哪把武器上记在角色身上：hero.weaponBlueprints[武器kit] = 图纸 id，一把武器一张。
- * 战斗规则读 state.weaponMods（mods.js）：每次摆队伍、装 / 拆之后按队伍重算一遍。 */
+ * 战斗规则读 state.weaponMods（mods.js）：每次摆队伍、装 / 拆、升降武器等级之后按队伍重算一遍。
+ * 武器 4 级才解锁客制化（mods.js · BLUEPRINT_MIN_LEVEL）：不到 4 级的（旧存档、后台降级）图纸留在武器上，但不生效。 */
 function trpgSyncWeaponMods() {
   const mods = {}, ids = {};
   trpgHeroes().forEach(h => Object.keys(h.weaponBlueprints || {}).forEach(k => {
     const b = typeof blueprintSpec === "function" ? blueprintSpec(h.weaponBlueprints[k]) : null;
-    if (b && b.mod) { mods[k] = JSON.parse(JSON.stringify(b.mod)); ids[k] = b.id; }
+    if (b && b.mod && trpgBpLevel(h, k) >= BLUEPRINT_MIN_LEVEL) { mods[k] = JSON.parse(JSON.stringify(b.mod)); ids[k] = b.id; }
   }));
   state.weaponMods = Object.keys(mods).length ? mods : null;
   state.weaponBlueprints = Object.keys(ids).length ? ids : null;
@@ -236,6 +237,9 @@ function trpgInstallBlueprint(ownerKit, kit, bpId, fee, free) {
   const b = typeof blueprintSpec === "function" ? blueprintSpec(bpId) : null;
   if (!b) return ["没有这张图纸。"];
   const wname = typeof weaponName === "function" ? weaponName(kit) : kit;
+  // 武器 4 级才解锁客制化（主持人手册「本版规则修订」）：主持人直接装也一样，先把武器升上去
+  const lv = trpgBpLevel(owner, kit);
+  if (lv < BLUEPRINT_MIN_LEVEL) return [`${wname} 的「武器等级 + 羁绊」要到 ${BLUEPRINT_MIN_LEVEL} 级才能装客制化图纸（现在 ${lv} 级）。`];
   const pay = free ? 0 : Math.max(0, Math.floor(Number(fee) || 0));
   if (!free && bagCount(bpId) < 1) return [`背包里没有图纸「${b.name}」。`];
   if (pay > (Number(state.kuizhi) || 0)) return [`奎支不够付工钱：要 ${pay}，手里只有 ${Number(state.kuizhi) || 0}。`];
@@ -300,9 +304,9 @@ function trpgBackstageApply(edit, why) {
     const e = edit.heroes[kit];
     if (!u || !e) return;
     const n = (label, a, b) => change(`${u.name} ${label}`, a, b);
-    // 等级、属性先改：会重算血量与坚毅上限
+    // 等级、属性先改：会重算血量与坚毅上限。角色满级 20（以前夹到 25）；单项属性硬性上限 10
     let restat = false;
-    if (e.level != null) { const v = num(e.level, 1, 25); if (v != null && v !== (u.level || 1)) { n("等级", u.level || 1, v); u.level = v; restat = true; } }
+    if (e.level != null) { const v = num(e.level, 1, 20); if (v != null && v !== (u.level || 1)) { n("等级", u.level || 1, v); u.level = v; restat = true; } }
     if (e.attrs) {
       u.attrs = Object.assign({}, u.attrs || {});
       Object.keys(e.attrs).forEach(k => {
@@ -352,6 +356,7 @@ function trpgBackstageApply(edit, why) {
           change(`${wn} 等级`, was, v);
           if (typeof setOwnedWeaponLevel === "function") setOwnedWeaponLevel(u, wk, v);
           else { u.weaponLevels = u.weaponLevels || {}; u.weaponLevels[wk] = v; }
+          trpgSyncWeaponMods();   // 降到 4 级以下：装着的客制化图纸不再生效；升回去又生效
         }
       }
       if (w.bond != null) {
@@ -384,32 +389,70 @@ function trpgBackstageApply(edit, why) {
   return [`后台调整${why ? "（" + why + "）" : ""}：`].concat(notes.map(x => "· " + x + "。"));
 }
 
+/* ---------- 放弃这场战斗（没结算就回到探索环节） ----------
+ * 队伍档案回到开战前存下的那一份（campaign.ledger）：耐久、「长休一次」技能的使用记录、武器人伤势……
+ * 都回到开战前；奎支、物品、等级由重新摆队伍时按队伍记忆回滚（game.js · applyCampaignToField）。
+ * 以前只回奎支和物品，提示却说回到开战前。返回是否回滚了 */
+function trpgAbandonBattle(campaign) {
+  if (!campaign || !campaign.ledger) return false;
+  LEDGER.load(JSON.parse(JSON.stringify(campaign.ledger)));
+  return true;
+}
+
 /* ---------- 存档：每个团一个空位 ----------
  * 空位里放：{ name, at, campaign（队伍记忆）, log（探索记录）, level（敌人等级）, enc（上次的遭遇） }
  * 玩的时候每个操作、每场战斗结算都自动写回当前空位。 */
 const TRPG_SLOT_COUNT = 3;
 const TRPG_SLOTS_KEY = "anterscale-trpg-slots";
+let trpgSlotsTrouble = null;   // 上次读空位时发现的问题：{ backedUp }（空位文件坏了）；没问题是 null
 function trpgReadSlots() {
+  let raw = null;
+  try { raw = localStorage.getItem(TRPG_SLOTS_KEY); } catch (e) { raw = null; }
   let arr = [];
-  try { arr = JSON.parse(localStorage.getItem(TRPG_SLOTS_KEY) || "[]") || []; } catch (e) { arr = []; }
-  if (!Array.isArray(arr)) arr = [];
-  // 旧版只有一份队伍记忆：第一次打开时放进空位 1
-  if (!arr.some(Boolean)) {
+  trpgSlotsTrouble = null;
+  if (raw != null) {
+    try { arr = JSON.parse(raw); } catch (e) { arr = null; }
+    const ok = Array.isArray(arr) && arr.every(s => s == null || trpgValidSlot(s));
+    if (!ok) {
+      // 空位文件坏了（写到一半断电之类）：先原样另存一份 .broken，读得出来的团照旧留着。
+      // 以前直接当成三个空位，再往随便哪个空位写一个团，另外两个就永久没了
+      let backedUp = false;
+      try {
+        if (localStorage.getItem(TRPG_SLOTS_KEY + ".broken") !== raw) localStorage.setItem(TRPG_SLOTS_KEY + ".broken", raw);
+        backedUp = true;
+      } catch (e) {}
+      trpgSlotsTrouble = { backedUp };
+      arr = Array.isArray(arr) ? arr.map(s => (s != null && trpgValidSlot(s) ? s : null)) : [];
+    }
+  } else {
+    // 旧版只有一份队伍记忆（anterscale-campaign）：只在空位文件从来没写过的时候搬进空位 1，搬一次就算数。
+    // 以前只要三个空位都空着就再搬一次，而战斗画面一直在重写这个旧键：删掉的团会带着最近进过的团的内容回来
     try {
       const old = localStorage.getItem("anterscale-campaign");
       if (old) {
         let log = [];
         try { log = JSON.parse(localStorage.getItem("anterscale-trpg-log") || "[]"); } catch (e) {}
         arr[0] = { name: "团 1", at: Date.now(), campaign: JSON.parse(old), log, level: 1, enc: null };
-        localStorage.setItem(TRPG_SLOTS_KEY, JSON.stringify(arr));
       }
+      while (arr.length < TRPG_SLOT_COUNT) arr.push(null);
+      localStorage.setItem(TRPG_SLOTS_KEY, JSON.stringify(arr));
     } catch (e) {}
   }
   while (arr.length < TRPG_SLOT_COUNT) arr.push(null);
   return arr.slice(0, TRPG_SLOT_COUNT);
 }
+/** 空位文件有没有问题（界面上提醒）：null 没问题，否则是一句说明 */
+function trpgSlotsProblem() {
+  trpgReadSlots();
+  if (!trpgSlotsTrouble) return null;
+  return trpgSlotsTrouble.backedUp
+    ? `存档空位的文件坏了：原来的内容已另存为 ${TRPG_SLOTS_KEY}.broken，读得出来的团照旧留着。`
+    : "存档空位的文件坏了，而且没能另存备份：先不要往空位里写，以免把读不出来的团覆盖掉。";
+}
 function trpgWriteSlot(i, data) {
   const arr = trpgReadSlots();
+  // 空位文件坏了又没能备份：不写，免得把读不出来的团当成空位覆盖掉
+  if (trpgSlotsTrouble && !trpgSlotsTrouble.backedUp) return false;
   arr[i] = data ? JSON.parse(JSON.stringify(Object.assign({}, data, { at: Date.now() }))) : null;
   try { localStorage.setItem(TRPG_SLOTS_KEY, JSON.stringify(arr)); return true; } catch (e) { return false; }
 }

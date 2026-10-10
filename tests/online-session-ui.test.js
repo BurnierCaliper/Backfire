@@ -731,3 +731,64 @@ test("联机：玩家悬停单位 / 配置物，看到图鉴描述和身上效�
   await alice.waitForFunction(() => /爆炸桶[\s\S]*耐久/.test(document.querySelector(".unit-tip.show")?.textContent || ""));
   assert.deepEqual(f.errors, []);
 });
+
+test("联机：「消息」列表来新消息不再跳回最上面——在底部就贴底，往上翻着看旧的就停在原处", { timeout: 120000 }, async t => {
+  const fx = await fixture(t); if (!fx) return;
+  const { host, alice, errors } = fx;
+  const list = '#online-panel [data-keep-scroll="messages"]';
+  for (let i = 1; i <= 14; i++) await submit(host, { type: "gm.msg", to: "all", text: `第 ${i} 条：` + "前面的路被沙暴盖住了，".repeat(3) });
+  await alice.waitForFunction(sel => (document.querySelector(sel)?.children.length || 0) >= 14, list);
+  const metrics = () => alice.evaluate(sel => {
+    const el = document.querySelector(sel);
+    return { top: el.scrollTop, gap: el.scrollHeight - el.scrollTop - el.clientHeight, overflow: el.scrollHeight > el.clientHeight + 10 };
+  }, list);
+  let m = await metrics();
+  assert.ok(m.overflow, "消息够多，列表要能滚");
+  assert.ok(m.gap < 24, "从没滚过：贴底显示最新的消息 " + JSON.stringify(m));
+  await submit(host, { type: "gm.msg", to: "all", text: "第 15 条" });
+  await alice.waitForFunction(sel => document.querySelector(sel)?.innerText.includes("第 15 条"), list);
+  m = await metrics();
+  assert.ok(m.gap < 24, "在底部时来新消息：继续贴底（以前整块重画，跳回最上面）" + JSON.stringify(m));
+  // 往上翻到中间看旧消息
+  await alice.evaluate(sel => { const el = document.querySelector(sel); el.scrollTop = 40; el.dispatchEvent(new Event("scroll")); }, list);
+  await submit(host, { type: "gm.msg", to: "all", text: "第 16 条" });
+  await alice.waitForFunction(sel => document.querySelector(sel)?.innerText.includes("第 16 条"), list);
+  m = await metrics();
+  assert.ok(Math.abs(m.top - 40) <= 1, "往上翻着看旧消息时来新消息：停在原处 " + JSON.stringify(m));
+  assert.deepEqual(errors, []);
+});
+
+test("联机：选目标时能选的敌人在战场上标编号，同名敌人也分得清；点哪只打哪只", { timeout: 120000 }, async t => {
+  const fx = await fixture(t); if (!fx) return;
+  const { host, alice, bob, aliceId, bobId, errors } = fx;
+  await host.evaluate(() => { OnlineGame.start(); });
+  await alice.waitForFunction(() => OnlineGame.getView().screen === "exploration");
+  // 两只一模一样的狂徒（匕首），都在 2 区；瑞比的普攻是「距离 1」
+  await host.evaluate(() => battleTemplateSave({ name: "两只狂徒", board: 2, weather: "none", playerZone: 1,
+    enemies: [{ preset: "thug_knife", level: 1, zone: 2 }, { preset: "thug_knife", level: 1, zone: 2 }] }));
+  await host.click('#tr-tabs [data-tab="battles"]');
+  await host.click('[data-bt^="fight:"]');
+  await alice.waitForFunction(() => OnlineGame.getView().screen === "battle");
+  await host.evaluate(() => { GAME.skip = true; GAME.instant = true; GAME.startOrEnd(); });
+  await host.waitForFunction(() => HotseatGame.getView().phase === "picking" && GAME.depth === 0, null, { timeout: 20000 });
+  const heroes = await host.evaluate(() => HotseatGame.getView().heroes);
+  for (const [index, hero] of heroes.entries()) assert.equal((await submit(hero.owner === aliceId ? alice : hero.owner === bobId ? bob : host, { type: "orderPick", actor: hero.id, index })).ok, true);
+  for (const page of [alice, bob, host]) assert.equal((await submit(page, { type: "orderConfirm" })).ok, true);
+  await host.waitForFunction(() => HotseatGame.getView().phase === "acting");
+  const first = heroes.find(h => h.owner === aliceId);
+  assert.equal(await host.evaluate(id => state.units.find(u => u.id === id).kit, first.id), "ruby", "这个用例用瑞比的普攻（距离 1）");
+  // 新的联机战斗画面：底部技能栏点「普通攻击」，能打的目标在战场上亮起并标编号
+  await alice.waitForSelector('#online-stage .ol-battle [data-ob-skill]:not([disabled])');
+  await alice.locator('#online-stage .ol-battle [data-ob-skill]', { hasText: "普通攻击" }).first().click();
+  await alice.waitForFunction(() => document.querySelectorAll("#online-stage .ol-battle .unit-wrap.is-targetable .ob-pick-no").length === 2);
+  const shown = await alice.evaluate(() => [...document.querySelectorAll("#online-stage .ol-battle .unit-wrap.is-targetable")].map(c => ({ id: c.dataset.unitId, no: c.querySelector(".ob-pick-no").textContent })));
+  assert.deepEqual(shown.map(c => c.no).sort(), ["1", "2"], "两只狂徒的卡片各有一个编号");
+  // 点战场上的第 2 只
+  const target = shown.find(c => c.no === "2").id, other = shown.find(c => c.no === "1").id;
+  const hpOf = id => host.evaluate(id => state.units.find(u => u.id === id).layers.reduce((s, l) => s + Math.max(0, l.current), 0), id);
+  const before = { target: await hpOf(target), other: await hpOf(other) };
+  await alice.click(`#online-stage .ol-battle .unit-wrap[data-unit-id="${target}"]`);
+  await host.waitForFunction(({ id, hp }) => { const u = state.units.find(x => x.id === id); return u.dead || u.layers.reduce((s, l) => s + Math.max(0, l.current), 0) < hp; }, { id: target, hp: before.target });
+  assert.equal(await hpOf(other), before.other, "没点的那只不挨打");
+  assert.deepEqual(errors, []);
+});

@@ -127,7 +127,7 @@ test("场地：火场 / 酸液 / 治愈立刻结算一次回合开始；冻土 1
 
   st.fields[2].collapseOn = true; st.fields[2].collapse = 1;
   scan(c, helu, { dest: 2, act: "field:collapseOn" });
-  assert.equal(st.fields[2].collapse, 1, "+5 触发一次塌陷，余 1");
+  assert.equal(st.fields[2].collapse, 0, "+5 触发一次塌陷，计数器清零（不留余数）");
 
   st.fields[1].ruinOn = true; st.fields[1].ruinHp = 30; st.fields[1].ruinMax = 30;
   scan(c, helu, { dest: 1, act: "field:ruinOn" });
