@@ -101,3 +101,12 @@ test("D3 GM UI: rejected commands show safe text and malformed negative values n
   await page.click('[data-action="spawn"]'); assert.match(await page.textContent("#ogm-notice"), /权限已失效/);
   assert.equal(await page.locator("#ogm-notice img").count(), 0); assert.deepEqual(f.errors, []);
 });
+
+test("D3 GM UI: Esc closes the tools panel whether focus is inside it or on the page", async t => {
+  const f = await fixture(t); if (!f) return; const { page } = f; await host(page);
+  await page.keyboard.press("Escape"); assert.equal(await page.locator("#ogm-panel").count(), 0);
+  await page.click("#ogm-toggle"); await page.focus("#ogm-enemy-level");
+  await page.keyboard.press("Escape"); assert.equal(await page.locator("#ogm-panel").count(), 0);
+  await page.evaluate(() => component.destroy());
+  assert.deepEqual(f.errors, []);
+});

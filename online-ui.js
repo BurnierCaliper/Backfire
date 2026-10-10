@@ -12,6 +12,8 @@
     if (!api || typeof api.getView !== "function" || typeof document === "undefined") return null;
     let view = {}, panelOpen = false, entry = "join", notice = "", pending = false, destroyed = false;
     let currentMenu = null, request = null, selectedActor = "", actionGeneration = 0, playbackGeneration = 0;
+    // 战斗画面（online-battle.js）：和单人 / 跑团同一套画面；skillOptions 是当前角色的技能栏，autoKey 防止重复自动取技能
+    let battle = null, skillOptions = [], skillsFor = "", autoKey = "";
     let displayState = null, animating = false, messagesInitialized = false, seenMessages = new Set(), toastTimer;
     let historyRows = [], historyRoom = "", historyHasMore = true, historyLoading = false, historyGeneration = 0;
     let form = { url: "", name: "", roomCode: "", slot: "0", campaignName: "", to: "all", text: "", chatText: "" }, assignments = {};
@@ -286,7 +288,7 @@
       const data = displayState || view.state, screen = view.screen;
       if (screen === "lobby" || !data) return '<div class="ol-wait"><h2>等待房间同步</h2><p>房主准备好后会更新这里。</p></div>';
       const units = (data.units || []).filter(u => !u.hidden), logs = view.packet?.publicLogs || [];
-      return `<header class="ol-stage-heading"><div><span class="ol-muted">${esc(view.roomCode)} · ${screen === "battle" ? `第 ${data.turnNo || 1} 回合` : screen === "ended" ? "遭遇结束" : "探索环节"}</span><h1>${screen === "battle" ? "战场" : screen === "ended" ? "战斗结算" : "与队伍同行"}</h1><div class="ol-info-tools">${button("角色资料", "info", 'data-info="sheet"', pending)}${button("武器", "info", 'data-info="armory"', pending)}${button("背包", "info", 'data-info="bag"', pending)}${button("战绩", "info", 'data-info="record"', pending)}</div></div>${weatherMarkup(data)}</header>${screen === "ended" ? resultMarkup() : ""}${suppliesMarkup(data)}${paused() ? '<p class="ol-pause" role="status">房间暂停，正在等待连接恢复。</p>' : ""}${view.offlineWait ? `<p class="ol-pause">${esc(view.offlineWait.name)} 离线，等待其返回。</p>` : ""}${checksMarkup()}${screen === "battle" || screen === "ended" ? `<div class="ol-zones"${zoneGrid(data).style}>${zoneGrid(data).zones.map(z => `<section class="ol-zone"${z.style}><h2>${z.id} 区</h2>${fieldsMarkup(data, z.id)}${units.filter(u => Number(u.zone) === z.id).map(card).join("") || '<p class="ol-muted">空区域</p>'}${(data.props || []).filter(p => Number(p.zone) === z.id && !p.destroyed).map(p => `<article class="ol-prop" data-prop-id="${esc(p.id)}"><b>${esc(p.name || p.kind || "配置物")}</b>${p.hp != null ? `<span>耐久 ${esc(p.hp)}${p.maxHp == null ? "" : " / " + esc(p.maxHp)}</span>` : ""}</article>`).join("")}</section>`).join("")}</div>${gapsMarkup(data)}${screen === "ended" ? "" : actionsMarkup()}` : `<p class="ol-muted">主持人正在管理探索与遭遇。右侧「小队」频道可以和大家聊天，「消息与成员」里可以私下回复主持人。</p><div class="ol-exploration-party">${units.filter(u => u.isPlayer && !u.weaponOf).map(card).join("")}</div>`}`;
+      return `<header class="ol-stage-heading"><div><span class="ol-muted">${esc(view.roomCode)} · ${screen === "battle" ? `第 ${data.turnNo || 1} 回合` : screen === "ended" ? "遭遇结束" : "探索环节"}</span><h1>${screen === "battle" ? "战场" : screen === "ended" ? "战斗结算" : "与队伍同行"}</h1><div class="ol-info-tools">${button("角色资料", "info", 'data-info="sheet"', pending)}${button("武器", "info", 'data-info="armory"', pending)}${button("背包", "info", 'data-info="bag"', pending)}${button("战绩", "info", 'data-info="record"', pending)}</div></div>${weatherMarkup(data)}</header>${screen === "ended" ? resultMarkup() : ""}${suppliesMarkup(data)}${paused() ? '<p class="ol-pause" role="status">房间暂停，正在等待连接恢复。</p>' : ""}${view.offlineWait ? `<p class="ol-pause">${esc(view.offlineWait.name)} 离线，等待其返回。</p>` : ""}${checksMarkup()}${screen === "battle" || screen === "ended" ? (global.OnlineBattle && global.UnitCard ? '<div class="ol-battle-slot"></div>' : `<div class="ol-zones"${zoneGrid(data).style}>${zoneGrid(data).zones.map(z => `<section class="ol-zone"${z.style}><h2>${z.id} 区</h2>${fieldsMarkup(data, z.id)}${units.filter(u => Number(u.zone) === z.id).map(card).join("") || '<p class="ol-muted">空区域</p>'}${(data.props || []).filter(p => Number(p.zone) === z.id && !p.destroyed).map(p => `<article class="ol-prop" data-prop-id="${esc(p.id)}"><b>${esc(p.name || p.kind || "配置物")}</b>${p.hp != null ? `<span>耐久 ${esc(p.hp)}${p.maxHp == null ? "" : " / " + esc(p.maxHp)}</span>` : ""}</article>`).join("")}</section>`).join("")}</div>${gapsMarkup(data)}${screen === "ended" ? "" : actionsMarkup()}`) : `<p class="ol-muted">主持人正在管理探索与遭遇。右侧「小队」频道可以和大家聊天，「消息与成员」里可以私下回复主持人。</p><div class="ol-exploration-party">${units.filter(u => u.isPlayer && !u.weaponOf).map(card).join("")}</div>`}`;
     }
     function observeMessages() {
       const rows = view.messages || [], incoming = rows.filter(m => !seenMessages.has(m.id) && m.from !== own());
@@ -514,7 +516,66 @@
       if (!panel.hidden) html(panel, view.active ? roomMarkup() : entryMarkup(), "panel");
       renderSide();
       mountHostChat();
-      if (!stage.hidden) html(stage, `${notice || view.notice || view.packet?.systemNotice ? `<p class="ol-notice" role="status">${esc(notice || view.notice || view.packet?.systemNotice)}</p>` : ""}${stageMarkup()}`, "stage");
+      if (!stage.hidden) paintStage();
+      if (view.active && !view.isHost) scheduleAutoMenu();
+    }
+    /** 舞台：文字部分照旧拼 HTML；战斗画面是常驻的一块（单位卡有动画，不能每次重建），每次画完再挂回占位处 */
+    function paintStage() {
+      html(stage, `${notice || view.notice || view.packet?.systemNotice ? `<p class="ol-notice" role="status">${esc(notice || view.notice || view.packet?.systemNotice)}</p>` : ""}${stageMarkup()}`, "stage");
+      const slot = stage.querySelector(".ol-battle-slot");
+      if (!slot) return;
+      const b = battleView();
+      if (!b) return;
+      if (b.el.parentElement !== slot) slot.appendChild(b.el);
+      b.update(displayState || view.state || {}, battleUi());
+    }
+    const myUnits = () => (hs().units || []).filter(u => u.owner === own()).map(u => u.id);
+    const isMyTurn = () => view.screen === "battle" && hs().phase === "acting" && myUnits().includes(hs().currentUnitId);
+    function battleUi() {
+      const data = displayState || view.state || {}, cur = hs().currentUnitId, acting = view.screen === "battle" && hs().phase === "acting";
+      const curUnit = (data.units || []).find(u => u.id === cur), mine = myUnits();
+      const choices = currentMenu?.choices || null;
+      let hint = "";
+      if (view.screen === "ended") hint = "战斗结束。";
+      else if (animating) hint = "结算中…";
+      else if (!acting) hint = view.packet?.manualPhase || view.manualPhase ? "主持人正在操控敌人。" : hs().phase === "enemy" ? "敌人行动中。" : "等待开始。";
+      else if (!mine.includes(cur)) hint = `等待 ${curUnit ? curUnit.name : "队友"}${curUnit && hs().units ? `（${playerName((hs().units.find(u => u.id === cur) || {}).owner)}）` : ""} 行动。`;
+      else if (!choices) hint = "正在取技能…";
+      else hint = `${curUnit ? curUnit.name : ""}　选择技能（1–9）。悬停技能看说明，空格结束行动。`;
+      return { mine, current: cur, acting, menu: choices, skills: skillsFor === cur && acting ? skillOptions : [],
+        armed: request && request.skill || "", hint, busy: disabled() };
+    }
+    function battleView() {
+      if (battle || !global.OnlineBattle) return battle;
+      battle = global.OnlineBattle.create({
+        onSkill: id => { if (!isMyTurn() || disabled()) return; menu({ actor: hs().currentUnitId, skill: id }); },
+        onOption: index => { if (!disabled()) choose(index); },
+        onUnit: id => {
+          const m = currentMenu?.choices; if (!m || disabled() || !request?.skill) return;
+          let i = (m.options || []).findIndex(o => !o.disabled && String(o.value) === String(id));
+          if (i < 0 && m.kind === "zone") {   // 区域选择时点到区里的单位，算点那个区
+            const u = ((displayState || view.state || {}).units || []).find(x => x.id === id);
+            if (u) i = (m.options || []).findIndex(o => !o.disabled && Number(o.value) === Number(u.zone));
+          }
+          if (i >= 0) choose(i);
+        },
+        onZone: z => {
+          const m = currentMenu?.choices; if (!m || disabled()) return;
+          const i = (m.options || []).findIndex(o => !o.disabled && Number(o.value) === Number(z));
+          if (i >= 0) choose(i);
+        },
+        onCancel: () => { if (request?.skill && !disabled()) menu({ actor: request.actor }); },
+        onEnd: async () => { if (!isMyTurn() || disabled()) return; const actor = hs().currentUnitId; if (await call(() => api.submit({ type: "endTurn", actor }))) { request = currentMenu = null; } }
+      });
+      return battle;
+    }
+    /** 轮到自己的角色：自动取技能栏（不用再点「选择行动」）。每个回合 / 每次结算后的新状态取一次 */
+    function scheduleAutoMenu() {
+      if (!isMyTurn() || request || pending || animating) return;
+      const key = hs().currentUnitId + ":" + (view.packet?.seq ?? "") + ":" + (hs().turnNo ?? "");
+      if (autoKey === key) return;
+      autoKey = key;
+      setTimeout(() => { if (!destroyed && isMyTurn() && !request && !pending) menu({ actor: hs().currentUnitId }); }, 0);
     }
     async function call(fn) {
       if (pending) return false;
@@ -532,7 +593,14 @@
         if (result?.ok === false || result?.error) { notice = result.error || "动作菜单不可用"; currentMenu = null; return; }
         if (result?.type !== "actionOptions" || result.displayOnly !== true) throw new Error("没有收到有效的动作选项");
         currentMenu = copy(result);
+        if (currentMenu.choices?.kind === "skill") { skillOptions = currentMenu.choices.options || []; skillsFor = request.actor; }
       });
+      // 选完最后一步（主机回「确认执行」）就直接执行，和其他模式点目标就出手一样
+      if (generation === actionGeneration && currentMenu?.choices?.kind === "ready" && currentMenu.choices.command && battle) {
+        const command = copy(currentMenu.choices.command), actor = request?.actor;
+        if (await call(() => api.submit(command))) { request = currentMenu = null; autoKey = ""; render(); }
+        else if (actor && !destroyed) { const why = notice; await menu({ actor }); if (why) { notice = why; render(); } }   // 没执行成功：回到技能栏，顶上写原因
+      }
     }
     async function choose(index) {
       const choices = currentMenu?.choices, chosen = choices?.options?.[index];
@@ -611,7 +679,7 @@
       if (destroyed || api.getView().isHost || packet?.displayOnly !== true) return;
       const generation = ++playbackGeneration;
       if (packet.type === "resync") {
-        actionGeneration++; request = currentMenu = null; selectedActor = "";
+        actionGeneration++; request = currentMenu = null; selectedActor = ""; autoKey = "";
         // A long disconnect can skip more than the live history window. Restart
         // pagination at this window, rather than retaining two disjoint ranges.
         historyRows = []; historyHasMore = true; historyLoading = false; historyGeneration++;
@@ -626,8 +694,8 @@
           if (destroyed || generation !== playbackGeneration) break;
           if (event.type !== "pop") continue;
           if (Array.isArray(event.snap)) displayState = { ...(displayState || packet.state || {}), units: copy(event.snap) };
-          html(stage, stageMarkup(), "stage");
-          const card = [...stage.querySelectorAll("[data-unit-id]")].find(node => node.dataset.unitId === event.unitId);
+          paintStage();
+          const card = (battle && battle.cardOf(event.unitId)) || [...stage.querySelectorAll("[data-unit-id]")].find(node => node.dataset.unitId === event.unitId);
           if (event.kind === "proc") {
             // 效果生效：卡上对应的图标放大一下并发光，不弹字
             if (card) global.HudIcons?.procIn(card, event.fx);
@@ -635,7 +703,9 @@
             continue;
           }
           if (card) {
-            const bubble = card.querySelector(".ol-popup");
+            // 战斗画面的单位卡没有自带弹字框：临时挂一个
+            let bubble = card.querySelector(".ol-popup");
+            if (!bubble) { bubble = document.createElement("span"); bubble.className = "ol-popup ol-pop-temp"; bubble.setAttribute("aria-live", "polite"); card.appendChild(bubble); }
             bubble.textContent = event.text || (event.value == null ? ({ dmg: "受击", heal: "恢复", break: "击破", status: "状态变化" }[event.kind] || "行动") : `${event.kind === "heal" ? "+" : event.kind === "dmg" ? "−" : ""}${event.value}`);
             const fk = (event.kind === "fxword" || event.kind === "status") && event.text && global.HudIcons?.keyOf(event.text);
             if (fk && event.kind === "fxword") { bubble.insertAdjacentHTML("afterbegin", global.HudIcons.badge(fk)); global.HudIcons.proc(bubble.firstElementChild); }
@@ -644,9 +714,9 @@
             if (global.HitFx && (event.kind === "dmg" || event.kind === "highboom")) global.HitFx.burst(event.element || "physical", card.getBoundingClientRect(), { big: event.kind === "highboom" });
           }
           await new Promise(resolve => setTimeout(resolve, 180));
-          if (card) { card.classList.remove("ol-impact"); card.querySelector(".ol-popup")?.classList.remove("ol-visible"); }
+          if (card) { card.classList.remove("ol-impact"); card.querySelector(".ol-popup")?.classList.remove("ol-visible"); card.querySelector(".ol-pop-temp")?.remove(); }
         }
-      } finally { if (generation === playbackGeneration) { animating = false; displayState = packet.state || displayState; } }
+      } finally { if (generation === playbackGeneration) { animating = false; displayState = packet.state || displayState; render(); } }
     }
     function addTitleButton(text, which) {
       const menu = document.querySelector("#scr-title .t-menu"); if (!menu) return;
@@ -660,7 +730,7 @@
     if (typeof api.onPacket === "function") unsubs.push(api.onPacket(playPacket));
     render();
     const instance = { render, open(which = "join") { entry = which; panelOpen = true; render(); }, destroy() {
-      destroyed = true; playbackGeneration++; actionGeneration++; historyGeneration++; clearTimeout(toastTimer);
+      destroyed = true; if (battle) { battle.destroy(); battle = null; } playbackGeneration++; actionGeneration++; historyGeneration++; clearTimeout(toastTimer);
       document.removeEventListener("compositionstart", onCompStart, true); document.removeEventListener("compositionend", onCompEnd, true);
       document.removeEventListener("click", onRollOpen); clearTimeout(titleTimer);
       while (hostMounts.length) hostMounts.pop().remove(); document.body.classList.remove("ol-has-side", "ol-host-online", "ol-in-battle");

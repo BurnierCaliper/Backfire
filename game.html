@@ -672,7 +672,6 @@
         </div>
       </div>
     </div>
-  </div>
 
   <div id="backstageModal" class="modal hidden" aria-hidden="true">
     <div class="modal-card modal-wide">
@@ -804,128 +803,6 @@
     </div>
   </div>
 </div>
-  </div>
-
-  <div id="backstageModal" class="modal hidden" aria-hidden="true">
-    <div class="modal-card modal-wide">
-      <div class="modal-head">
-        <h2>后台 · 主持人</h2>
-        <button class="btn small" id="btnCloseBackstage">关闭</button>
-      </div>
-      <div class="panel-body">
-        <p class="hint">改任何单位的血量、架势，或安排一次攻击 / 环境伤害。等级、经验、六维、坚毅生命也在这里。</p>
-        <div id="backstageBody"></div>
-      </div>
-    </div>
-  </div>
-
-  <div id="assistModal" class="modal hidden" aria-hidden="true">
-    <div class="modal-card">
-      <div class="modal-head">
-        <h2>协助攻击</h2>
-        <button class="btn small" id="btnAssistSkip">不发动</button>
-      </div>
-      <div class="panel-body">
-        <p class="hint" id="assistModalText">敌人失衡，其他玩家角色可以发动协助攻击。</p>
-        <div id="assistModalBtns" class="row"></div>
-      </div>
-    </div>
-  </div>
-
-  <div id="blockModal" class="modal hidden" aria-hidden="true">
-    <div class="modal-card">
-      <div class="modal-head">
-        <h2>协助格挡</h2>
-        <button class="btn small" id="btnBlockSkip">不格挡</button>
-      </div>
-      <div class="panel-body">
-        <p class="hint" id="blockModalText">同区域有人可以消耗附赠行动格挡。</p>
-        <div id="blockModalBtns" class="row"></div>
-      </div>
-    </div>
-  </div>
-
-  <div id="playerModal" class="modal hidden" aria-hidden="true">
-    <div class="modal-card">
-      <div class="modal-head">
-        <h2>加入玩家</h2>
-        <button class="btn small" id="btnClosePlayer">关闭</button>
-      </div>
-      <div class="panel-body">
-        <div class="row">
-          <label class="field">名字<input id="pcName" placeholder="例如 夕" /></label>
-          <label class="field">等级<input id="pcLv" type="number" min="1" value="1" /></label>
-          <label class="field">出场区域
-            <select id="pcZone">
-              <option value="1">1 区</option>
-              <option value="2">2 区</option>
-              <option value="3">3 区</option>
-            </select>
-          </label>
-          <label class="field">ATK<input id="pcAtk" type="number" value="5" /></label>
-          <label class="field">架势 DEF<input id="pcDef" type="number" value="4" /></label>
-          <label class="field">攻击距离
-            <select id="pcRange">
-              <option value="any">任意</option>
-              <option value="melee">近距离</option>
-              <option value="ranged">远距离</option>
-            </select>
-          </label>
-          <label class="field">常用属性
-            <select id="pcElem">
-              <option value="physical">物理</option>
-              <option value="fire">火</option>
-              <option value="acid">酸</option>
-              <option value="electric">电</option>
-              <option value="ice">冰</option>
-              <option value="energy">能量</option>
-              <option value="harmonic">谐波</option>
-            </select>
-          </label>
-        </div>
-        <div class="chk" style="margin:8px 0">
-          <label><input id="pcFly" type="checkbox" /> 飞行</label>
-        </div>
-        <div class="section-title">血量层（上 = 最外层）</div>
-        <div id="pcLayers"></div>
-        <div class="row">
-          <button class="btn small" id="pcAddLayer">加一层</button>
-        </div>
-        <div class="hr"></div>
-        <div class="section-title">模板角色</div>
-        <div class="row">
-          <label class="field" style="min-width:240px">选择角色
-            <select id="liveKitSel"></select>
-          </label>
-          <button class="btn primary" id="btnAddLiveKit">从模板加入战场</button>
-        </div>
-        <p class="hint">夕夏 / 川川以及实况组角色都在这里。武器人用技能「唤出」上场。</p>
-        <div class="row" style="margin-top:10px">
-          <button class="btn primary" id="btnAddPlayer">加入战场</button>
-          <button class="btn ok" id="btnSavePlayer">保存到卡组</button>
-          <button class="btn" id="btnSaveSelected">把当前选中存进卡组</button>
-        </div>
-        <div class="hr"></div>
-        <div class="row">
-          <label class="field" style="min-width:220px">已保存卡组
-            <select id="rosterSel"></select>
-          </label>
-          <button class="btn" id="btnLoadRoster">从卡组加入战场</button>
-          <button class="btn" id="btnEditRoster">载入到表单</button>
-          <button class="btn danger" id="btnDelRoster">删除这张卡</button>
-        </div>
-        <div class="row" style="margin-top:8px">
-          <button class="btn small" id="btnExportRoster">导出卡组 JSON</button>
-          <button class="btn small" id="btnImportRoster">导入卡组 JSON</button>
-          <input id="rosterFile" type="file" accept="application/json,.json" hidden />
-        </div>
-        <p class="hint" id="rosterHint">卡组保存在本浏览器里；导出 JSON 后换电脑也能用。</p>
-      </div>
-    </div>
-  </div>
-</div>
-</div>
-</div>
 
 <script>
 /* 游戏模式垫片：不让计算器读写它自己的存档，缺失的元素给一个隐藏替身。
@@ -996,6 +873,7 @@ window.GAME_MODE = true;
 <script src="icons.js"></script>
 <script src="hud-icons.js"></script>
 <script src="unit-tip.js"></script>
+<script src="unit-card.js"></script>
 <script src="sheet-ui.js"></script>
 <script src="armory-ui.js"></script>
 <script src="world-map.js"></script>
@@ -1014,6 +892,7 @@ window.GAME_MODE = true;
 <script src="online-game.js"></script>
 <script src="online-legacy.js"></script>
 <script src="online-gm-ui.js"></script>
+<script src="online-battle.js"></script>
 <script src="online-ui.js"></script>
 <script src="commands-debug.js"></script>
 </body>
