@@ -41,6 +41,8 @@
     // 柯尔特：电钻 / 酸液炮 / 过度自信
     drill: on => svg(`<path d="M4 16h14v8H4z" fill="${on ? C("blue") : C("off")}"/><path d="M18 14l16 6-16 6z" fill="${on ? "#c8d6ff" : "#5a5146"}"/><path d="M21 15l2 10M26 17l1.5 6" stroke="#0d0b09" stroke-width="1.4"/><path d="M8 24v6h4" stroke="${on ? C("blue") : C("off")}" stroke-width="2.4" fill="none"/>`),
     acid: on => svg(`<rect x="4" y="15" width="20" height="10" rx="2" fill="${on ? "#7ccf3a" : C("off")}"/><rect x="24" y="17" width="9" height="6" fill="${on ? "#a8f06a" : "#5a5146"}"/><path d="M33 20c3 0 4 4 2 7" stroke="${on ? "#c8ff8a" : "none"}" stroke-width="2" fill="none"/><circle cx="36" cy="31" r="2" fill="${on ? "#c8ff8a" : "none"}"/>`),
+    // 柯尔特：废料（一堆碎铁片 + 螺栓）
+    scrap: on => svg(`<path d="M5 33l5-9 7 3 4-8 6 5 5-4 4 13z" fill="${on ? "#9a8f7f" : C("off")}"/><path d="M12 24l3-7 6 2-2 6z" fill="${on ? "#c9b98a" : "#5a5146"}"/><path d="M24 19l5-6 3 3-4 5z" fill="${on ? "#7ccf3a" : "#4a4238"}"/><circle cx="17" cy="30" r="2" fill="#0d0b09"/><circle cx="28" cy="29" r="1.6" fill="#0d0b09"/>`),
     proud: on => svg(`<path d="M20 4 33 9v10c0 9-6 14-13 17C13 33 7 28 7 19V9z" fill="none" stroke="${on ? C("brass") : C("off")}" stroke-width="2.4"/><path d="M13 22l7-7 7 7M13 28l7-7 7 7" stroke="${on ? C("brass") : C("off")}" stroke-width="2.4" fill="none"/>`),
     // Helumica：频谱 / 环境扫描 / 锁定
     wave: on => svg(`<path d="M2 20h5l3-10 4 20 4-16 4 12 3-6h13" stroke="${on ? C("violet") : C("off")}" stroke-width="2.4" fill="none" stroke-linejoin="round"/>`),
@@ -258,7 +260,12 @@
         try { duel = has("touDuelVictim") && units.some(x => alive(x) && !x.isPlayer && root.touDuelVictim(x)); } catch (e) {}
         return { kit: "tou", shield: Math.max(0, Math.min(3, Number(r.shield) || 0)), duel, taunt: r.tauntLeft == null ? 2 : Math.max(0, Number(r.tauntLeft) || 0), bare: u.weaponHeld === false };
       }
-      case "kolt": return { kit: "kolt", bit: r.bit === "acid" ? "acid" : "drill", full: sumLayers(u, "max") > 0 && sumLayers(u, "current") >= sumLayers(u, "max"), cut: plus(2) ? 45 : 25 };
+      case "kolt": {
+        let scrap = 0;
+        try { if (has("koltScrapTotal")) scrap = Number(root.koltScrapTotal(u)) || 0; } catch (e) {}
+        return { kit: "kolt", bit: r.bit === "acid" ? "acid" : "drill", full: sumLayers(u, "max") > 0 && sumLayers(u, "current") >= sumLayers(u, "max"), cut: plus(2) ? 45 : 25,
+          showScrap: (Number(u.level) || 1) >= 2, scrap: Math.max(0, scrap) };
+      }
       case "helu": {
         let focus = 0, need = 0;
         units.forEach(x => { if (!alive(x) || x.isPlayer) return; (x.focuses || []).forEach(f => { const n = (f.seq || []).length; if (n && (!need || (f.step || 0) / n > focus / need)) { focus = Number(f.step) || 0; need = n; } }); });
@@ -300,7 +307,8 @@
       ind(I.duel(s.duel), s.duel ? "决一死战生效" : "决一死战未生效", s.duel ? "glow-red" : "") +
       `<div class="ind"><span class="num">${s.taunt}</span><span>嘲讽剩余</span></div>`,
     kolt: s => ind(I.drill(s.bit === "drill"), "电钻 · 电", "big " + (s.bit === "drill" ? "" : "dim")) + ind(I.acid(s.bit === "acid"), "酸液炮 · 酸", "big " + (s.bit === "acid" ? "" : "dim")) +
-      ind(I.proud(s.full), s.full ? `满血减伤 ${s.cut}%` : "未满血", s.full ? "glow-amber" : ""),
+      ind(I.proud(s.full), s.full ? `满血减伤 ${s.cut}%` : "未满血", s.full ? "glow-amber" : "") +
+      (s.showScrap ? `<div class="ind${s.scrap > 0 ? "" : " dim"}">${I.scrap(s.scrap > 0)}<span>废料 <b class="num">${s.scrap}</b></span></div>` : ""),
     helu: s => ind(I.wave(s.focus > 0), "频谱分析", s.focus > 0 ? "" : "dim") +
       (s.need ? `<div class="ind"><span class="focus">${Array.from({ length: s.need }, (_, i) => `<i class="${i < s.focus ? "on" : ""}"></i>`).join("")}</span><span>聚焦 ${s.focus}/${s.need}</span></div>` : "") +
       ind(I.radar(s.scan), s.scan ? "已扫描" : "未扫描", s.scan ? "glow-mint" : "") +

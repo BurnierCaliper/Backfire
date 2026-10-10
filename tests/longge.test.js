@@ -419,3 +419,183 @@ test("普通攻击能打危墙：手杖打同区边上的墙（冰 1 击破，�
   assert.equal(S.gaps["1-2"].hp, 8);
   assert.equal(lg.resources.ammo.length, 5, "霰弹枪耗 1 发");
 });
+
+// —— 新技能与被动升级 ——
+const lvUp = (lg, wl) => { lg.level = 11; lg.weaponLevels = Object.assign({}, lg.weaponLevels, { xiaoxiao: wl || 1 }); };
+const seenAll = lg => { lg.resources.seen = lg.resources.ammo.map(() => true); lg.resources.known = lg.resources.ammo.length; };
+
+test("技能解锁：热能轰击 3 级、饮弹 6 级、洗牌 11 级；完全换弹要胶囊弹药+", () => {
+  const { c, lg } = setup();
+  const ids = () => c.skillList(lg).map(s => s.id);
+  lg.level = 1;
+  ["longge_heat", "longge_drink", "longge_shuffle", "longge_reload"].forEach(id => assert.ok(!ids().includes(id), id));
+  lg.level = 3; assert.ok(ids().includes("longge_heat"));
+  lg.level = 6; assert.ok(ids().includes("longge_drink"));
+  lg.level = 11; assert.ok(ids().includes("longge_shuffle"));
+  assert.ok(!ids().includes("longge_reload"));
+  lvUp(lg, 10);
+  assert.ok(ids().includes("longge_reload"));
+});
+
+test("热能轰击：手杖给同区敌人熔融；不能打远处", () => {
+  const { c, lg, foes } = setup();
+  lvUp(lg);
+  const tids = c.skillFlowSteps("longge_heat", lg, {}).find(s => s.key === "target").units.map(u => u.id);
+  assert.ok(tids.includes(foes[0].id));
+  assert.ok(!tids.includes(foes[1].id));
+  cmd(c, { actor: lg.id, skill: "longge_heat", target: foes[0].id });
+  assert.ok(foes[0].instant && foes[0].instant.melt, "熔融");
+  assert.equal(lg.resources.ammo.length, 6);
+});
+
+test("热能轰击（霰弹枪）：红弹 → 同区敌人全熔融、同区友方按红弹治疗；蓝弹 → 同区友方各 1 冰击破", () => {
+  const { c, S, lg, foes } = setup();
+  lvUp(lg);
+  const kolt = c.findKit("kolt", S.units);
+  kolt.zone = 1;
+  const extra = foes[1]; extra.zone = 1;
+  lg.resources.trigger = true;
+  lg.resources.ammo = ["red", "blue", "blue"]; seenAll(lg);
+  kolt.layers[kolt.layers.length - 1].current = 1;
+  const before = c.totalHp(kolt);
+  cmd(c, { actor: lg.id, skill: "longge_heat", target: foes[0].id, picks: { mode: "gun", target: foes[0].id } });
+  const melted = f => !!(f.instant && f.instant.melt);
+  assert.ok(melted(foes[0]) && melted(extra), "同区敌人都熔融");
+  assert.ok(c.totalHp(kolt) > before, "同区友方被红弹治疗");
+  assert.equal(lg.resources.ammo.length, 2);
+  // 蓝弹
+  lg.ap = 3;
+  const defs = [lg.def, kolt.def];
+  cmd(c, { actor: lg.id, skill: "longge_heat", target: foes[0].id, picks: { mode: "gun", target: foes[0].id } });
+  assert.equal(lg.def, defs[0] - 1);
+  assert.equal(kolt.def, defs[1] - 1);
+});
+
+test("饮弹：蓝弹 → 霜结并按蓝弹治疗自己；红弹 → 自己受 1×atk 火焰并返还行动点", () => {
+  const { c, lg } = setup();
+  lvUp(lg);
+  lg.resources.ammo = ["blue", "red"]; seenAll(lg);
+  lg.layers[lg.layers.length - 1].current = 1;
+  const hp0 = c.totalHp(lg);
+  cmd(c, { actor: lg.id, skill: "longge_drink" });
+  assert.equal(c.totalHp(lg), Math.min(c.totalMaxHp(lg), hp0 + lg.level + 5));
+  assert.equal(lg.self, "frost", "霜结");
+  assert.equal(lg.ap, 2);
+  const hp1 = c.totalHp(lg);
+  cmd(c, { actor: lg.id, skill: "longge_drink" });
+  assert.ok(c.totalHp(lg) < hp1, "红弹烧自己");
+  assert.equal(lg.ap, 2, "红弹返还行动点");
+  assert.equal(lg.resources.ammo.length, 0);
+});
+
+test("洗牌：剩下的子弹重排、看过的作废；连续红打随机敌人，连续蓝治疗血最低的队友，都没有就窥探 1", () => {
+  const { c, S, lg, foes } = setup();
+  lvUp(lg);
+  const kolt = c.findKit("kolt", S.units);
+  // 全红 3 发：必然 3 连红 → 两次火焰
+  lg.resources.ammo = ["red", "red", "red"]; seenAll(lg);
+  const pops = capturePops(c);
+  cmd(c, { actor: lg.id, skill: "longge_shuffle" });
+  assert.equal(pops.filter(p => p.element === "fire").length, 2);
+  assert.ok(lg.resources.seen.every(x => !x), "看过的颜色作废");
+  // 全蓝 3 发：治疗两次
+  lg.ap = 3;
+  lg.resources.ammo = ["blue", "blue", "blue"];
+  kolt.layers[kolt.layers.length - 1].current = 1;
+  lg.layers[lg.layers.length - 1].current = Math.max(1, lg.layers[lg.layers.length - 1].max - 1);
+  const k0 = c.totalHp(kolt);
+  cmd(c, { actor: lg.id, skill: "longge_shuffle" });
+  assert.ok(c.totalHp(kolt) > k0, "血最低的柯尔特被治疗");
+  // 红蓝交替的两发不可能连续 → 窥探 1
+  lg.ap = 3;
+  lg.resources.ammo = ["red", "blue"];
+  const fhp = foes.map(f => f.layers[0].current);
+  cmd(c, { actor: lg.id, skill: "longge_shuffle" });
+  assert.equal(lg.resources.known, 1, "窥探 1");
+  assert.deepEqual(foes.map(f => f.layers[0].current), fhp);
+});
+
+test("胶囊弹药+：打光后 1 行动点完全换弹（随机 6 发，扳机要重新解锁）", () => {
+  const { c, lg } = setup();
+  lvUp(lg, 10);
+  lg.resources.ammo = ["red"]; seenAll(lg);
+  lg.resources.ammo = [];
+  lg.resources.seen = [];
+  cmd(c, { actor: lg.id, skill: "longge_reload" });
+  assert.equal(lg.resources.ammo.length, 6);
+  assert.equal(lg.resources.ammo.filter(x => x === "red").length, 3);
+  assert.equal(lg.resources.trigger, false);
+  assert.equal(lg.ap, 2);
+});
+
+test("枪管手杖+：霰弹枪普攻能打近距离，红弹再对同区其他敌人 0.75atk 火", () => {
+  const { c, S, lg, foes } = setup();
+  lvUp(lg, 5);
+  foes[1].zone = 1;
+  lg.resources.trigger = true;
+  lg.resources.ammo = ["red", "red"]; seenAll(lg);
+  const ids = c.skillFlowSteps("longge_aa", lg, { mode: "gun" }).find(s => s.key === "target").units.map(u => u.id);
+  assert.ok(ids.includes(foes[0].id), "近距离也能选");
+  const pops = capturePops(c);
+  cmd(c, { actor: lg.id, skill: "longge_aa", target: foes[0].id, picks: { mode: "gun", target: foes[0].id } });
+  assert.ok(pops.some(p => p.id === foes[0].id));
+  assert.ok(pops.some(p => p.id === foes[1].id && p.element === "fire"), "溅射同区另一个敌人");
+  assert.ok(S);
+});
+
+test("枪管手杖（未升级）：霰弹枪普攻只能打距离 1", () => {
+  const { c, lg, foes } = setup();
+  lg.resources.trigger = true;
+  const ids = c.skillFlowSteps("longge_aa", lg, { mode: "gun" }).find(s => s.key === "target").units.map(u => u.id);
+  assert.ok(!ids.includes(foes[0].id));
+  assert.ok(ids.includes(foes[1].id));
+});
+
+test("胶囊弹药+：长休排好下一场的 6 发顺序，只用一场", () => {
+  const { c, lg } = setup();
+  lvUp(lg, 10);
+  const opt = c.longRestOptions({});
+  assert.ok(opt.ammoOrders.length === 21);
+  assert.equal(opt.heroes.find(h => h.kit === "longge").ammo, "");
+  assert.equal(opt.heroes.find(h => h.kit === "kolt").ammo, null);
+  c.S.state.kuizhi = 0;
+  c.ledgerLongRest({ force: true, ammo: { longge: "RRRBBB" } }, []);
+  assert.equal(c.LEDGER.ammoOrder.longge, "RRRBBB");
+  assert.deepEqual(plain(c.longgeOpeningAmmo()), ["red", "red", "red", "blue", "blue", "blue"]);
+  assert.equal(c.LEDGER.ammoOrder.longge, undefined, "用掉就清");
+});
+
+test("小朋友 4 级爆发治疗：不用先窥探；不同色白扣行动点、不耗子弹；全红回满，全蓝 2×(等级+5) 临时护盾", () => {
+  const { c, S, lg } = setup();
+  lvUp(lg);
+  cmd(c, { actor: lg.id, skill: "longge_summon" });
+  const w = c.findKit("xiaoxiao", S.units);
+  w.zone = 1; w.ap = 3; w.level = 4;
+  assert.ok(c.skillList(w).some(s => s.id === "xiaoxiao_burst"));
+  const kolt = c.findKit("kolt", S.units);
+  kolt.zone = 1;
+  kolt.layers[kolt.layers.length - 1].current = 1;
+  // 没窥探也能用；颜色不对 → 白扣行动点，子弹不动
+  lg.resources.ammo = ["red", "blue", "red"];
+  lg.resources.seen = [false, false, false];
+  assert.equal(c.longgeBurstWhy(w), null, "没看到颜色也可以用");
+  const hp0 = c.totalHp(kolt);
+  cmd(c, { actor: w.id, skill: "xiaoxiao_burst", target: kolt.id, picks: { target: kolt.id } });
+  assert.equal(w.ap, 2, "白扣行动点");
+  assert.equal(lg.resources.ammo.length, 3, "子弹不消耗");
+  assert.equal(c.totalHp(kolt), hp0);
+  // 已经窥探到不同色：明知会失败，直接拦下
+  seenAll(lg);
+  assert.match(c.longgeBurstWhy(w), /同一种颜色/);
+  w.ap = 3;
+  lg.resources.ammo = ["red", "red", "red", "blue", "blue", "blue"];
+  lg.resources.seen = lg.resources.ammo.map(() => false);
+  assert.equal(c.longgeBurstWhy(w), null);
+  cmd(c, { actor: w.id, skill: "xiaoxiao_burst", target: kolt.id, picks: { target: kolt.id } });
+  assert.equal(c.totalHp(kolt), c.totalMaxHp(kolt));
+  w.ap = 3;
+  const hp = c.totalHp(kolt);
+  cmd(c, { actor: w.id, skill: "xiaoxiao_burst", target: kolt.id, picks: { target: kolt.id } });
+  assert.equal(c.totalHp(kolt) - hp, 2 * (lg.level + 5), "临时护盾");
+  assert.equal(lg.resources.ammo.length, 0);
+});

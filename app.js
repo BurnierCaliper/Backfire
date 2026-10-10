@@ -1514,6 +1514,20 @@ function beginRound(notes) {
       notes.push(`研磨机+：结人获得 1 颗咖啡豆 → ${yu.resources.bean}。`);
     }
   }
+  // 扭矩「转移注意」：下回合开始自动变回武器（失去的装甲记为废料，见 endTorqueGuard）
+  state.units.forEach(u => {
+    if (u.kit === "torque" && u.resources && u.resources.divertGuard && !u.hidden && !u.dead) {
+      notes.push("转移注意结束：扭矩变回武器。");
+      notes.push(...returnWeapon(u));
+    }
+  });
+  // Ecmo 探测模式：每回合开始自动对所在区做一次环境扫描
+  state.units.forEach(u => {
+    if (u.kit === "ecmo" && u.resources && u.resources.probe && !u.hidden && !u.dead) {
+      (u.resources.probeZones = u.resources.probeZones || []).push(Number(u.zone));
+      heluScanAct(u, { dest: Number(u.zone), act: "spawn" }, notes);
+    }
+  });
   if (typeof mutinyTick === "function") mutinyTick(notes);
   if (typeof syncBpAll === "function") syncBpAll();
   state.units.forEach(u => {
@@ -1680,8 +1694,10 @@ function beginRound(notes) {
       notes.push(`${u.name} 被击落：本回合沙尘不回复。`);
     }
     if (!u.gotHitThisTurn && !u._noShieldRefill) {
+      // 只回满单位自带的那部分：临时护盾扣掉的不回来（max 已经跟着减掉了）
+      syncTempShield(u);
       (u.layers || []).forEach(l => {
-        if (l.type === "shield") l.current = l.max;
+        if (l.type === "shield") { l.current = l.max; l._lastCur = l.current; }
       });
     }
     u._noShieldRefill = false;
@@ -1719,7 +1735,8 @@ function releaseAcidCharges(notes) {
       const atk = effectiveAtk(u, state.units);
       const kolt = findKit("kolt", state.units);
       visibleEnemies(z).forEach(t => {
-        const out = dealTo(u, t, { element: "acid", mult: 1, baseBreak: 1, atk, flags: { action: true, aoe: true } });
+        // 酸液炮蓄力是抛射：越过危墙 / 关着的门
+        const out = dealTo(u, t, { element: "acid", mult: 1, baseBreak: 1, atk, flags: { action: true, aoe: true, lob: true } });
         (out.extra || []).forEach(s => notes.push(s));
         // 卡面：被打到的敌人下一击必须攻击柯尔特
         if (kolt && !kolt.dead && !t.dead) { t.tauntTo = kolt.id; notes.push(`${t.name} 被嘲讽：下一击必须攻击柯尔特。`); }
@@ -1865,6 +1882,14 @@ function startEnemyPhase() {
 
 function endPlayerTurn() {
   snapshot();
+  // 汲取：拉斯缪尔每回合结束自动把 20% 累积能量转为光能
+  {
+    const ras = findKit("ras", state.units);
+    if (ras && !ras.dead && ras.resources && ras.resources.siphon && (Number(ras.resources.energyPct) || 0) > 0) {
+      appendLog("汲取：拉斯缪尔回合结束，20% 累积能量转为光能。");
+      convertRasLight(20);
+    }
+  }
   state.units.forEach(u => {
     if (u.resources && u.resources.preparedActive) {
       u.resources.preparedActive = false;
@@ -2036,8 +2061,9 @@ function turnEnd() {
   });
   state.units.forEach(u => {
     if (u && u._shieldRestoreAtTurnEnd) {
+      syncTempShield(u);
       (u.layers || []).forEach(l => {
-        if (l.type === "shield") l.current = l.max || l.current;
+        if (l.type === "shield") { l.current = l.max || l.current; l._lastCur = l.current; }
       });
       u._shieldRestoreAtTurnEnd = false;
       notes.push(`${u.name} 护盾在回合结束时回满（中和·感电）。`);
@@ -3790,6 +3816,8 @@ function doMoveInner(unit, dest, moveOpt) {
       if (!spendAp(unit, 1, "离开酸液地面")) return;
     } else if (unit.self === "conductor") {
       // 导体：移动不消耗附赠动作
+    } else if (unit.kit === "ecmo" && unit.resources && unit.resources.probe) {
+      // 探测模式：移动不消耗附赠动作
     } else if (unit.isPlayer) {
       if (!spendBonus(unit, 1, "移动")) return;
     } else if (enemyRankOf(unit) === "minion") {
@@ -3836,6 +3864,7 @@ function doMoveInner(unit, dest, moveOpt) {
     notes.push(`离开冻土：${chk.text}，成功。`);
   }
   unit.zone = dest;
+  if (unit.kit === "ecmo" && unit.resources && unit.resources.probe) (unit.resources.probeZones = unit.resources.probeZones || []).push(Number(dest));
   convertUnstableInHv(unit, notes);
   triggerLeaveOpportunity(unit, from, notes);
   if (typeof bpAfterEnemyMove === "function") bpAfterEnemyMove(unit, notes);   // 单局图纸：稳妥的距离
@@ -5023,6 +5052,56 @@ function convertRasLight(pct, bonusRate) {
   return gain;
 }
 
+/** 柯尔特的废料：上一个被摧毁的敌人血量层 + 腐坏抛射记下的腐蚀伤害 + 扭矩「转移注意」失去的装甲。
+ *  废物利用领走它们；碎渣重炮把它们全部装填打出去 */
+function koltScrapTotal(k) {
+  k = k || findKit("kolt", state.units);
+  const r = (k && k.resources) || {};
+  const last = state.lastBrokenLayer ? Math.floor(Number(state.lastBrokenLayer.lost) || 0) : 0;
+  const rot = Object.keys(r.rotStore || {}).reduce((s, t) => s + Math.floor(Number(r.rotStore[t]) || 0), 0);
+  return Math.max(0, last + rot + Math.floor(Number(r.divertArmor) || 0));
+}
+function koltScrapClear(k) {
+  state.lastBrokenLayer = null;
+  if (k && k.resources) { k.resources.rotStore = {}; k.resources.divertArmor = 0; }
+}
+/** 扭矩「转移注意」结束：失去的装甲记为废料（下次废物利用额外获得等量装甲） */
+function endTorqueGuard(w, notes) {
+  const r = w && w.resources;
+  if (!r || !r.divertGuard) return;
+  r.divertGuard = false;
+  const armorNow = (w.layers || []).filter(l => l.type === "armor").reduce((s, l) => s + (Number(l.current) || 0), 0);
+  const lost = Math.max(0, Math.floor((Number(r.divertArmor0) || 0) - armorNow));
+  r.divertArmor0 = 0;
+  const k = findKit("kolt", state.units);
+  if (k && lost > 0) {
+    k.resources = k.resources || {};
+    k.resources.divertArmor = (Number(k.resources.divertArmor) || 0) + lost;
+    notes.push(`转移注意：扭矩失去的 ${lost} 点装甲记为废料。`);
+  }
+}
+/** 探测模式变回武器：经过的每个区各触发一个配置物 */
+function ecmoProbeTrigger(a, notes) {
+  const r = a && a.resources;
+  if (!r || !r.probe) return;
+  const zones = Array.from(new Set((r.probeZones || []).map(Number)));
+  r.probe = false; r.probeZones = [];
+  zones.forEach(z => {
+    const p = (state.props || []).find(x => Number(x.zone) === z && !BARRIER_SIDE[x.kind] && !(x.kind === "scrap" && !scrapReady(x)));
+    if (!p) return;
+    const picks = { dest: z, act: "prop:" + p.id };
+    if (p.kind === "battery") picks.mode = "boom";
+    if (p.kind === "scrap") {
+      const t = scrapTargets(p, a)[0];
+      if (!t) { notes.push(`探测模式触发 ${p.name}：没有打得到的敌人。`); return; }
+      picks.target = t.id;
+    }
+    const out = [];
+    heluScanAct(a, picks, out);
+    notes.push(...out.map(x => String(x).replace(/^环境扫描：/, "探测模式：").replace(/Helumica 的敌人/g, `${a.name} 的敌人`)));
+  });
+}
+
 function swapKoltBit(actor, lines) {
   const k = findKit("kolt", state.units) || (actor && actor.kit === "kolt" ? actor : null);
   if (!k) return "drill";
@@ -5243,6 +5322,28 @@ function longgeBulletHeal(color, target, lines) {
   const got = healUnit(target, amt);
   lines.push(`${LONGGE_AMMO[color].name}治疗 ${target.name}：${color === "blue" ? "固定 " + amt : "已损失 " + lost + " 的 40% = " + amt} → 恢复 ${got}。`);
   return got;
+}
+/** 枪管手杖+：霰弹枪普攻也能打近距离 */
+function longgeGunNear(a) {
+  const lg = a && a.kit === "longge" ? a : longgeOf();
+  return !!(lg && typeof passivePlus === "function" && passivePlus(lg, 1));
+}
+/** 爆发治疗能不能用：要 3 发子弹。不用先窥探；只有已经看到的颜色就对不上时才拦下（明知会白扣行动点） */
+function longgeBurstWhy(a) {
+  const r = longgeRes(a) || { ammo: [], seen: [] };
+  if (r.ammo.length < 3) return "爆发治疗要 3 发子弹";
+  const known = [0, 1, 2].filter(i => r.seen[i]).map(i => r.ammo[i]);
+  if (known.some(c => c !== known[0])) return "已经窥探到接下来 3 发不是同一种颜色";
+  return null;
+}
+/** 胶囊弹药+：长休排好的下一场开局弹序（"RRBBRB" 这种 6 个字），没有就随机 */
+function longgeOpeningAmmo() {
+  const pre = typeof LEDGER !== "undefined" && LEDGER.ammoOrder && LEDGER.ammoOrder.longge;
+  if (typeof pre === "string" && /^[RB]{6}$/.test(pre) && (pre.match(/R/g) || []).length === 3) {
+    delete LEDGER.ammoOrder.longge;   // 只管下一场
+    return pre.split("").map(ch => ch === "R" ? "red" : "blue");
+  }
+  return longgeAmmoFresh();
 }
 /** 手杖协助攻击带的治疗给谁：所在区里血量比例最低的友方（含自己） */
 function longgeHealPick(a) {
@@ -6092,11 +6193,14 @@ function resetBattleFlags(u) {
   if (u.kit === "xia") { r.engine = false; r.fuel = 0; }
   if (u.kit === "yuito") r.bean = Math.max(1, Number(r.bean) || 0);
   if (u.kit === "ruby" && r.nano == null) r.nano = 40;
-  if (u.kit === "kolt") { r.bit = r.bit || "drill"; r.rotStore = {}; }
+  if (u.kit === "kolt") { r.bit = r.bit || "drill"; r.rotStore = {}; r.divertArmor = 0; }
+  if (u.kit === "torque") { r.divertGuard = false; r.divertArmor0 = 0; }
+  if (u.kit === "ecmo") { r.probe = false; r.probeZones = []; }
+  if (u.kit === "ras") r.siphon = false;
   if (u.kit === "ras") { r.energyPct = 0; r.light = 0; r.unstable = false; }
   if (u.kit === "helu") { r.scanned = false; r.lockLeft = roleLockCap(u); }
   if (u.kit === "torque") r.acidCharge = null;
-  if (u.kit === "longge") { r.trigger = false; r.ammo = longgeAmmoFresh(); r.known = 0; r.spitUsed = false; r.assistMode = null; }
+  if (u.kit === "longge") { r.trigger = false; r.ammo = longgeOpeningAmmo(); r.seen = r.ammo.map(() => false); r.known = 0; r.spitUsed = false; r.assistMode = null; }
   if (typeof canSpit === "function" && canSpit(u.kit)) r.spitElement = spitElementOf(u.kit);   // 吐酸的属性（长休时改，记在队伍档案）
   u.focuses = [];
   u.bondAtk = 0;
@@ -6650,6 +6754,8 @@ function applyAtkFxAfter(attacker, target, res, flags, extra, opt) {
 
 function dealTo(attacker, target, opt) {
   opt = opt || {};
+  // 原始击破（后面会被目标一侧的效果改写，例如「加倍击破」翻倍）：导体额外那一下按它重新结算
+  if (!("_origBaseBreak" in opt)) opt._origBaseBreak = opt.baseBreak;
   opt.flags = makeDealFlags(opt.flags);
   // 战场数据：击杀在伤害结算里就会发生，所以先记下「最后一击是谁」
   if (attacker && target && attacker.isPlayer && !target.isPlayer && (state.units || []).includes(attacker)) target._lastHitBy = attacker.id;
@@ -6725,7 +6831,8 @@ function dealTo(attacker, target, opt) {
   // 敌人大多拿普通攻击当协助，以前没有标记，会进我方协助格挡队列）
   const assisting = !!opt.flags.assist || !!(attacker && state._assistBy && state._assistBy === attacker.id);
   // 危墙 / 关着的机关门挡住：先判，再进协助格挡（以前先弹格挡，格挡者花掉附赠、扣了耐久，这一击才被墙挡住）
-  if (attacker && target && target.zone != null && attacker.zone != null && !opt.flags.diffract && !opt.flags.locked) {
+  // lob：越墙的抛射（扭矩酸液炮蓄力、碎渣重炮的迫击炮）不被危墙 / 门挡住
+  if (attacker && target && target.zone != null && attacker.zone != null && !opt.flags.diffract && !opt.flags.locked && !opt.flags.lob) {
     const block = lineBlocked(attacker.zone, target.zone);
     if (block) {
       appendLog(block);
@@ -6780,7 +6887,7 @@ function dealTo(attacker, target, opt) {
         targetId: target.id,
         onConnect: opt.onConnect || null,
         opt: JSON.parse(JSON.stringify({
-        atk: opt.atk, mult: opt.mult, flat: opt.flat, hits: opt.hits, baseHits: opt.baseHits, breakOnce: opt.breakOnce, element: opt.element,
+        atk: opt.atk, mult: opt.mult, hitMults: opt.hitMults, flat: opt.flat, hits: opt.hits, baseHits: opt.baseHits, breakOnce: opt.breakOnce, element: opt.element,
         baseBreak: opt.baseBreak, diceN: opt.diceN, diceS: opt.diceS, diceB: opt.diceB, diceValue: opt.diceValue,
         usePrep: opt.usePrep, atkRange: opt.atkRange, flags: Object.assign({}, opt.flags, { blockResolved: false })
       }))
@@ -6806,6 +6913,7 @@ function dealTo(attacker, target, opt) {
   if (attacker.resources && attacker.resources.gambitStrike) flags.doubleDeal = true;
   if (target && target.resources && target.resources.gambitWound) flags.doubleTake = true;
   if (target && target.resources && target.resources.gritTurn) flags.dr50 = true;
+  if (target && target.resources && target.resources.divertGuard) flags.dr25 = true;   // 扭矩「转移注意」自保
   if (target && target.resources && target.resources.standTurn) flags.immune = true;
   if (target && target.resources && target.resources.frostShell) flags.immune = true;   // 再次霜结：完全免受伤害与击破
   if (target && target.instant && target.instant.doubleBreak) {
@@ -6892,6 +7000,7 @@ function dealTo(attacker, target, opt) {
     element: opt.element || "physical",
     baseBreak: br,
     hits: opt.hits || 1,
+    hitMults: Array.isArray(opt.hitMults) ? opt.hitMults.slice() : null,
     breakOnce: !!opt.breakOnce,
     baseHits: opt.baseHits,
     // 这次攻击动作里刚被打死的敌人：留到动作结束，后面的攻击照常结算、全部算溢出
@@ -7129,14 +7238,7 @@ function addShieldLayer(u, amount, fromChuan) {
   amount = Math.floor(amount);
   // 原来的护盾已经没了（被打破、过载清零、被回收……）：留下的磁场护盾标记作废，按这次的来源重新算
   if (shieldSum(u) <= 0) dropMagnetShield(u);
-  let sh = (u.layers || []).find(l => l.type === "shield");
-  if (!sh) {
-    u.layers.unshift({ type: "shield", current: amount, max: amount, granted: true });
-  } else {
-    sh.current = Number(sh.current) + amount;
-    sh.max = Number(sh.max) + amount;
-    if (!sh.granted) sh.grantBonus = (Number(sh.grantBonus) || 0) + amount;
-  }
+  addTempShield(u, amount);   // 施加的护盾都是临时护盾：并进护盾层，不会回满（engine.js · addTempShield）
   if (fromChuan !== false) u.shieldFromChuan = true;
 }
 /** 磁场护盾的标记作废：川川 / 哔哩哩给的护盾没了（被打破、被过载清零、被回收） */
@@ -7270,6 +7372,8 @@ function returnWeapon(weapon) {
     owner.weaponHeld = true;
     owner.atk = (owner.personalAtk || 0) + (owner.weaponAtk || 0);
   }
+  if (weapon.kit === "ecmo") ecmoProbeTrigger(weapon, notes);
+  if (weapon.kit === "torque") endTorqueGuard(weapon, notes);
   weapon.hidden = true;
   if (weapon.kit === "xiaoxiao") longgeUnlock(owner, notes, "小朋友变回武器");
   notes.push(`${weapon.name} 已收回为武器。`);
@@ -7819,6 +7923,18 @@ function skillFlowSteps(id, actor, picks) {
     const zones = envZones(actor, "electric", 1);
     return [{ key: "dest", type: "zone", optional: zones.includes(Number(actor.zone)), label: "可先移动至多 1 区（只列出能铺高压场地的区）", zones }];
   }
+  if (id === "kolt_cannon") {
+    const acid = ((findKit("kolt", state.units) || actor).resources || {}).bit === "acid";
+    if (acid) {
+      // 迫击炮：距离 1-2 的一名敌人，越墙
+      return [{ key: "target", type: "unit", optional: false, label: "迫击炮目标（距离 1-2，可越墙）",
+        units: fieldUnits().filter(u => { const d = zoneDist(actor.zone, u.zone, state.zoneMode); return !u.isPlayer && !u.dead && !u.hidden && !u.fused && d >= 1 && d <= 2; }) }];
+    }
+    // 机枪：选一个距离 1 以内、不隔墙的区域，子弹随机打那一区的敌人
+    const zones = [];
+    for (let z = 1; z <= maxZ; z++) if (zoneDist(actor.zone, z, state.zoneMode) <= 1 && !lineBlocked(actor.zone, z) && visibleEnemies(z).length) zones.push(z);
+    return [{ key: "dest", type: "zone", optional: false, label: "机枪扫射哪个区域（距离 1 以内）", zones }];
+  }
   if (id === "torque_boost") {
     const bit = ((findKit("kolt", state.units) || {}).resources || {}).bit || "drill";
     if (bit === "acid") {
@@ -8132,23 +8248,31 @@ function skillFlowSteps(id, actor, picks) {
         zoneDist(actor.zone, u.zone, state.zoneMode) <= 1)
     }];
   }
-  if (id === "longge_aa" || id === "longge_chill") {
-    // 枪管手杖：扳机解锁、有子弹时先选手杖（近距离）还是霰弹枪（远距离 = 距离 1）
+  if (id === "longge_aa" || id === "longge_chill" || id === "longge_heat") {
+    // 枪管手杖：扳机解锁、有子弹时先选手杖（近距离）还是霰弹枪（普攻 / 冷气穿刺是远距离 = 距离 1，热能轰击是近距离）
     const steps = [];
     const gun = longgeGunReady(actor);
     if (gun) {
+      const near = id === "longge_aa" && longgeGunNear(actor);   // 枪管手杖+：霰弹枪普攻也能打近距离
       steps.push({ key: "mode", type: "choice", optional: false, label: "用手杖还是霰弹枪",
         options: id === "longge_aa"
-          ? [{ value: "cane", label: "手杖：近距离 1atk 冰 +1 击破 · 窥探 1" }, { value: "gun", label: "霰弹枪：远距离 1.5atk 子弹属性 +1 击破（耗 1 弹）" }]
-          : [{ value: "cane", label: "手杖：近距离施加刺骨" }, { value: "gun", label: "霰弹枪：远距离特殊射击（耗 1 弹）" }] });
+          ? [{ value: "cane", label: "手杖：近距离 1atk 冰 +1 击破 · 窥探 1" }, { value: "gun", label: `霰弹枪：${near ? "近 / 远" : "远"}距离 1.5atk 子弹属性 +1 击破（耗 1 弹）` }]
+          : id === "longge_heat"
+            ? [{ value: "cane", label: "手杖：近距离施加熔融" }, { value: "gun", label: "霰弹枪：近距离特殊射击（耗 1 弹）" }]
+            : [{ value: "cane", label: "手杖：近距离施加刺骨" }, { value: "gun", label: "霰弹枪：远距离特殊射击（耗 1 弹）" }] });
     }
-    const d = gun && picks.mode === "gun" ? 1 : 0;
-    // 普通攻击也能打配置物 / 危墙 / 桥梁（冷气穿刺只是上刺骨，不打物件）
-    const structs = id === "longge_aa" ? structureTargets(actor, d, d) : [];
+    const gunPick = gun && picks.mode === "gun";
+    const ds = !gunPick || id === "longge_heat" ? [0] : (id === "longge_aa" && longgeGunNear(actor) ? [0, 1] : [1]);
+    // 普通攻击也能打配置物 / 危墙 / 桥梁（冷气穿刺、热能轰击只是上效果，不打物件）
+    const structs = id === "longge_aa" ? structureTargets(actor, Math.min(...ds), Math.max(...ds)) : [];
     steps.push({ key: "target", type: "unit", optional: false, structures: structs.length > 0,
-      label: d ? "射击目标（距离 1）" : "目标（同区）",
-      units: fieldUnits().filter(u => !u.isPlayer && !u.dead && !u.hidden && !u.fused && zoneDist(actor.zone, u.zone, state.zoneMode) === d).concat(structs) });
+      label: ds.includes(1) ? (ds.includes(0) ? "射击目标（距离 0 或 1）" : "射击目标（距离 1）") : "目标（同区）",
+      units: fieldUnits().filter(u => !u.isPlayer && !u.dead && !u.hidden && !u.fused && ds.includes(zoneDist(actor.zone, u.zone, state.zoneMode))).concat(structs) });
     return steps;
+  }
+  if (id === "xiaoxiao_burst") {
+    return [{ key: "target", type: "unit", optional: false, label: "治疗谁（同区友方）",
+      units: fieldUnits().filter(u => u.isPlayer && !u.dead && !u.hidden && !u.fused && Number(u.zone) === Number(actor.zone)) }];
   }
   if (id === "tou_aa") {
     const spend = picks.rangeMode === "far";
@@ -8755,9 +8879,10 @@ function dealBreak(unit, amount, element, notes, reason, opt) {
   const wasStunnedSink = !!sink.stunned;
   const wasDoppler = sink.self === "doppler";   // 被这一下打进失衡、多普勒随晕眩结束，这一下照样传出去
   // 坚挺：任何来源的击破都不会把架势打到 1 以下
-  if (sink.statuses && sink.statuses.sturdy && before >= 1 && amount > before - 1) {
+  const guardFloor = !!(sink.resources && sink.resources.divertGuard);
+  if (((sink.statuses && sink.statuses.sturdy) || guardFloor) && before >= 1 && amount > before - 1) {
     amount = before - 1;
-    notes.push(`${sink.name} 坚挺：架势保留 1。`);
+    notes.push(`${sink.name} ${guardFloor ? "自保模式" : "坚挺"}：架势保留 1。`);
     if (amount <= 0) return;
   }
   sink.def = Math.max(0, before - amount);
@@ -9433,10 +9558,14 @@ const SKILL_REQUIREMENT = {
     : state.weatherLock ? `天气被「${state.weatherLock}」锁定，无法调转风向` : null,
   torque_strip:   (a) => ((findKit("kolt", state.units) || {}).resources || {}).bit === "acid" ? "拆卸模式需要电钻模式" : null,
   // 废物利用：要有「还没利用过的被摧毁的敌人血量层」或腐坏抛射攒下的记录才能用（同一层不能反复利用）
-  kolt_scrap:     (a) => state.lastBrokenLayer || Object.keys(res(a).rotStore || {}).some(k => (Number(res(a).rotStore[k]) || 0) > 0)
+  kolt_scrap:     (a) => state.lastBrokenLayer || (Number(res(a).divertArmor) || 0) > 0 || Object.keys(res(a).rotStore || {}).some(k => (Number(res(a).rotStore[k]) || 0) > 0)
     ? null : "还没有可以利用的残骸（被摧毁的敌人血量层，或腐坏抛射留下的记录）",
   kolt_rot:       (a) => ((findKit("kolt", state.units) || a).resources || {}).bit !== "acid" ? "腐坏抛射需要酸液炮模式" : null,
   kolt_mod:       (a) => ((findKit("kolt", state.units) || a).resources || {}).bit === "acid" ? "「非法」改装需要电钻模式" : null,
+  kolt_cannon:    (a) => koltScrapTotal(a) > 0 ? null : "没有废料可以装填",
+  ecmo_probe:     (a) => res(a).probe ? "已经在探测模式" : null,
+  edc_siphon:     () => findKit("ras", state.units) ? null : "拉斯缪尔不在场",
+  ras_torrent:    (a) => fieldUnits().some(u => !u.isPlayer && !u.dead && ((u.statuses && u.statuses.high) || (u.highEnergy || 0) > 0)) ? null : "场上没有高能状态的敌人",
   edc_drain:      (a) => {
     const ras = findKit("ras", state.units);
     if (!ras) return "拉斯缪尔不在场";
@@ -9468,6 +9597,10 @@ const SKILL_REQUIREMENT = {
   xiaoxiao_combo: (a) => (longgeRes(a) || { ammo: [] }).ammo.length >= 3 ? null : "连续拳要 3 发子弹",
   xiaoxiao_punch: (a) => (longgeRes(a) || { ammo: [] }).ammo.length ? null : "没有子弹了",
   xiaoxiao_heal:  (a) => (longgeRes(a) || { ammo: [] }).ammo.length ? null : "没有子弹了",
+  xiaoxiao_burst: (a) => longgeBurstWhy(a),
+  longge_drink:   (a) => (longgeRes(a) || { ammo: [] }).ammo.length ? null : "没有子弹了",
+  longge_shuffle: (a) => (longgeRes(a) || { ammo: [] }).ammo.length >= 2 ? null : "剩下的子弹不到 2 发，洗不了",
+  longge_reload:  (a) => !(typeof passivePlus === "function" && passivePlus(a, 2)) ? "需要胶囊弹药+" : (longgeRes(a) || { ammo: [1] }).ammo.length ? "子弹还没打光" : null,
   yuito_summon:   (a) => weaponSummonWhy(a, "latte"),
   tou_summon:     (a) => weaponSummonWhy(a, "mochi"),
   xia_summon:     (a) => weaponSummonWhy(a, "berniel"),
@@ -9675,6 +9808,21 @@ function skillTargetError(a, id, t) {
     const why = roleTargetError(a, id, t);
     if (why) return why;
   }
+  if (id === "kolt_cannon") {
+    const acid = ((findKit("kolt", state.units) || a).resources || {}).bit === "acid";
+    const fl = state.skillFlow;
+    if (acid) {
+      const tg = fl && fl.picks && fl.picks.target ? unitById(fl.picks.target) : t;
+      if (!tg || tg.isPlayer) return "先选迫击炮的目标";
+      { const d = zoneDist(a.zone, tg.zone, state.zoneMode); if (d < 1 || d > 2) return "迫击炮只能打距离 1-2 的敌人"; }
+    } else {
+      const z = fl && fl.picks && fl.picks.dest != null ? Number(fl.picks.dest) : (t ? Number(t.zone) : null);
+      if (z == null) return "先选机枪扫射的区域";
+      if (zoneDist(a.zone, z, state.zoneMode) > 1) return "机枪只能打距离 1 以内的区域";
+      if (lineBlocked(a.zone, z)) return lineBlocked(a.zone, z);
+    }
+  }
+  if (id === "ras_torrent" && t && !((t.statuses && t.statuses.high) || (t.highEnergy || 0) > 0)) return "狂瀑要选已经处于高能状态的敌人";
   if (id === "solo_support") {
     const fl = state.skillFlow;
     const kit = fl && fl.picks ? fl.picks.partner : null;
@@ -9692,19 +9840,27 @@ function skillTargetError(a, id, t) {
     if (t2 && (zoneOf(t2) == null || zoneDist(a.zone, zoneOf(t2), state.zoneMode) !== 1)) return "第二个目标要在距离 1";
   }
   // 龙哥 / 小朋友的近程技能打飞行目标：要多付 1 附赠行动，付不起就先拦下（免得子弹白白消耗）
-  if (["longge_aa", "longge_chill", "longge_spit", "xiaoxiao_punch", "xiaoxiao_combo"].includes(id) && !isStructureToken(state.targetId)) {
+  if (["longge_aa", "longge_chill", "longge_heat", "longge_spit", "xiaoxiao_punch", "xiaoxiao_combo"].includes(id) && !isStructureToken(state.targetId)) {
     const fl = state.skillFlow;
     const tgt = (fl && fl.picks && fl.picks.target) ? unitById(fl.picks.target) : t;
-    const gun = (id === "longge_aa" || id === "longge_chill") && longgeMode(a) === "gun";
+    const gun = (id === "longge_aa" || id === "longge_chill" || id === "longge_heat") && longgeMode(a) === "gun";
     const needBonus = (skillCost(id).bonus || 0) + 1;
     if (tgt && tgt.flying && !a.flying && !gun && Number(tgt.zone) === Number(a.zone) && (Number(a.bonus) || 0) < needBonus) return `${tgt.name} 在飞行，近程攻击需要额外 1 附赠行动`;
   }
-  if ((id === "longge_aa" || id === "longge_chill") && !isStructureToken(state.targetId)) {
+  if ((id === "longge_aa" || id === "longge_chill" || id === "longge_heat") && !isStructureToken(state.targetId)) {
     const fl = state.skillFlow;
     const tgt = (fl && fl.picks && fl.picks.target) ? unitById(fl.picks.target) : t;
     if (!tgt) return null;
     const gun = longgeMode(a) === "gun";
-    if (zoneDist(a.zone, tgt.zone, state.zoneMode) !== (gun ? 1 : 0)) return gun ? "霰弹枪只能打距离 1 的目标" : "手杖只能打同区的目标";
+    const d = zoneDist(a.zone, tgt.zone, state.zoneMode);
+    if (id === "longge_heat") { if (d !== 0) return "热能轰击只能打同区的目标"; }
+    else if (gun && id === "longge_aa" && longgeGunNear(a)) { if (d > 1) return "霰弹枪打不到这么远"; }
+    else if (d !== (gun ? 1 : 0)) return gun ? "霰弹枪只能打距离 1 的目标" : "手杖只能打同区的目标";
+  }
+  if (id === "xiaoxiao_burst") {
+    const fl = state.skillFlow;
+    const tgt = (fl && fl.picks && fl.picks.target) ? unitById(fl.picks.target) : t;
+    if (tgt && (!tgt.isPlayer || Number(tgt.zone) !== Number(a.zone))) return "爆发治疗只能给同区的友方";
   }
   if (id === "tou_aa" && !isStructureToken(state.targetId)) {
     const fl = state.skillFlow;
@@ -9930,7 +10086,7 @@ function runSkillInner(id, optRun) {
     }
     // 龙哥普攻：手杖只打同区，霰弹枪只打距离 1
     const lgGun = id === "longge_aa" && longgeMode(a) === "gun";
-    if (id === "longge_aa" && !tokZones.some(z => zoneDist(a.zone, z, state.zoneMode) === (lgGun ? 1 : 0))) {
+    if (id === "longge_aa" && !tokZones.some(z => { const d = zoneDist(a.zone, z, state.zoneMode); return lgGun ? (d === 1 || (d === 0 && longgeGunNear(a))) : d === 0; })) {
       paintSkillLog(lgGun ? "霰弹枪只能打距离 1 的目标。" : "手杖只能打同区的目标。");
       return;
     }
@@ -10672,9 +10828,9 @@ function runSkillInner(id, optRun) {
       shields.forEach(l => {
         if (l.temp || l.granted) { t.layers = t.layers.filter(x => x !== l); return; }
         l.current = 0;
-        const extra = (Number(l.grantBonus) || 0) + (Number(l.tempBonus) || 0);
+        const extra = (Number(l.grantBonus) || 0) + (Number(l.tempBonus) || 0) + (Number(l.tempShield) || 0);
         if (extra > 0) l.max = Math.max(0, (Number(l.max) || 0) - extra);
-        delete l.grantBonus; delete l.tempBonus;
+        delete l.grantBonus; delete l.tempBonus; l.tempShield = 0; l._lastCur = 0;
       });
       addCharge(2);
       lines.push(`回收护盾：清除 ${t.name} 的 ${had} 点护盾，川川电能 +2。`);
@@ -11185,7 +11341,7 @@ function runSkillInner(id, optRun) {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       const bit = (findKit("kolt", state.units) || a).resources.bit || "drill";
       if (bit === "acid") hitOne(a, t, { element: "acid", mult: 1, baseBreak: 1, atk, atkRange: "ranged" });
-      else hitOne(a, t, { element: "electric", mult: 0.4, hits: 3, baseBreak: 2, breakOnce: true, atk, atkRange: "melee" });
+      else hitOne(a, t, { element: "electric", mult: 0.3, hitMults: [0.3, 0.3, 0.4], hits: 3, baseBreak: 2, breakOnce: true, atk, atkRange: "melee" });
     } else if (id === "kolt_swap" || id === "torque_swap") {
       const next = swapKoltBit(a, lines);
       // 拆装部件换了刀头 → 柯尔特的被动「更换刀头」照样触发一次切刀追击（同区一名敌人，0.5×atk / 被动+ 0.75×atk）
@@ -11252,6 +11408,11 @@ function runSkillInner(id, optRun) {
       const rot = (a.resources && a.resources.rotStore) || {};
       Object.keys(rot).forEach(type => grant(type, Math.floor(Number(rot[type]) || 0), "腐坏回收"));
       if (a.resources) a.resources.rotStore = {};
+      // 扭矩「转移注意」失去的装甲：额外获得等量装甲
+      if (a.resources && (Number(a.resources.divertArmor) || 0) > 0) {
+        grant("armor", Math.floor(Number(a.resources.divertArmor)), "扭矩回收");
+        a.resources.divertArmor = 0;
+      }
       // 废物利用给自己回的血 / 加的层也算治疗（一般的治疗只统计给其他友方的）
       const gain = totalHp(a) - hp0;
       const st = gain > 0 ? battleStat(a) : null;
@@ -11278,6 +11439,54 @@ function runSkillInner(id, optRun) {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       applyInstantEffect(t, "overload", lines);
       lines.push(`「非法」改装：${t.name} 过载。`);
+    } else if (id === "kolt_cannon") {
+      // 碎渣重炮：把全部废料装填进武器。电钻 → 机枪：选距离 1 以内的一个区域，每颗子弹（扭矩atk/3 + 1d10）电击、
+      // 各自独立掷骰，打那一区的随机敌人；最后不够一颗的废料也打成一发；每 2 颗 1 击破。每颗都算单体攻击（吃过度自信的嘲讽）。
+      // 酸液炮 → 迫击炮（距离 1-2，越墙；主目标算单体攻击）：废料量的酸 +2 击破，同区其他敌人 1/3 溅射；主目标损失超过上限 25% 的血量再 +2 击破
+      const acid = (a.resources && a.resources.bit) === "acid";
+      const flc = state.skillFlow;
+      const mt = acid ? ((flc && flc.picks && flc.picks.target ? unitById(flc.picks.target) : null) || t) : null;
+      if (acid && (!mt || mt.isPlayer)) { lines.push("先选迫击炮的目标。"); return paintSkillLog(lines.join("\n")); }
+      const zone = flc && flc.picks && flc.picks.dest != null ? Number(flc.picks.dest) : (t ? Number(t.zone) : Number(a.zone));
+      let pool = koltScrapTotal(a);
+      koltScrapClear(a);
+      if (pool <= 0) { lines.push("没有废料可以装填。"); return paintSkillLog(lines.join("\n")); }
+      lines.push(`碎渣重炮：装填 ${pool} 点废料。`);
+      if (acid) {
+        const mx = totalMaxHp(mt), hp0 = totalHp(mt);
+        hitOne(a, mt, { element: "acid", mult: 1, atk: pool, baseBreak: 2, atkRange: "any", flags: { action: true, lob: true } });
+        const lost = hp0 - (mt.dead ? 0 : totalHp(mt));
+        if (!mt.dead && lost > mx * 0.25) {
+          lines.push(`迫击炮重创：${mt.name} 损失 ${lost}（超过上限 ${mx} 的 25%），额外 2 击破。`);
+          dealBreak(mt, 2, "acid", lines, "碎渣重炮", { by: a });
+        }
+        const splash = Math.floor(pool / 3);
+        if (splash > 0) visibleEnemies(mt.zone).filter(u => u !== mt && !u.dead).forEach(u => {
+          hitOne(a, u, { element: "acid", mult: 1, atk: splash, baseBreak: 0, atkRange: "any", usePrep: false, flags: { action: true, aoe: true, lob: true } });
+        });
+      } else {
+        const torq = findKit("torque", state.units);
+        const tAtk = torq ? (Number(torq.atk) || 0) : (Number(a.weaponAtk) || 0);
+        let n = 0;
+        const hitIds = new Set();
+        lines.push(`机枪扫射 ${zone} 区。`);
+        while (pool > 0 && n < 300) {
+          // 每一颗子弹打选中区域里的一个随机敌人（每颗都是单体攻击：照样触发过度自信的嘲讽）
+          // 说明里写「随机」，实际先保证区里每个敌人都挨到一颗（在还没挨过的里随机），都挨过之后才完全随机
+          const alive = visibleEnemies(zone).filter(u => !u.dead);
+          const fresh = alive.filter(u => !hitIds.has(u.id));
+          const from = fresh.length ? fresh : alive;
+          const cur = from[Math.floor(Math.random() * from.length)];
+          if (cur) hitIds.add(cur.id);
+          if (!cur) { lines.push(`${zone} 区没有敌人了，剩下的 ${pool} 点废料没打出去。`); break; }
+          const roll = takeDice(1, 10, 0);
+          const per = Math.floor(tAtk / 3) + roll.total;
+          const dmg = Math.min(pool, per);
+          pool -= dmg; n += 1;
+          hitOne(a, cur, { element: "electric", mult: 1, atk: dmg, baseBreak: n % 2 === 0 ? 1 : 0, atkRange: "any", usePrep: n === 1, flags: { action: true } });
+        }
+        lines.push(`碎渣重炮：共打出 ${n} 颗子弹。`);
+      }
     } else if (id === "kolt_summon") {
       const w = spawnWeapon(a, "torque");
       lines.push(w ? "扭矩已进入战场。" : "扭矩已在场。");
@@ -11340,6 +11549,14 @@ function runSkillInner(id, optRun) {
           lines.push(`${tgt.name} 被拆卸抽空，倒下。`);
         }
       }
+    } else if (id === "torque_divert") {
+      // 转移注意：全场被嘲讽的单位改打扭矩；扭矩进入自保（受伤 −25%，架势不低于 1），下回合开始变回武器
+      const taunted = (state.units || []).filter(u => u.tauntTo && !u.dead && u.id !== a.id);
+      taunted.forEach(u => { u.tauntTo = a.id; });
+      lines.push(taunted.length ? `转移注意：${taunted.map(u => u.name).join("、")} 改为攻击扭矩。` : "转移注意：场上没有被嘲讽的单位。");
+      a.resources.divertGuard = true;
+      a.resources.divertArmor0 = (a.layers || []).filter(l => l.type === "armor").reduce((s, l) => s + (Number(l.current) || 0), 0);
+      lines.push("扭矩缩成一团进入自保：受到的伤害 −25%，架势不会低于 1。下回合开始变回武器。");
     } else if (id === "torque_return") {
       lines.push(...returnWeapon(a));
     } else if (id === "helu_aa") {
@@ -11411,6 +11628,10 @@ function runSkillInner(id, optRun) {
       // 触发所有同区域配置物：和 Helumica 环境扫描触发配置物一样（heluScanAct）——
       // 爆炸桶 / 酸液桶直接引爆、电池引爆、碎渣机炮打一名打得到的敌人、炮台向 Ecmo 的敌人开一炮、按钮 / 拉杆触发一次
       ecmoBoomTriggerProps(a, lines);
+    } else if (id === "ecmo_probe") {
+      a.resources.probe = true;
+      a.resources.probeZones = [Number(a.zone)];
+      lines.push("探测模式：移动不消耗附赠动作，每回合开始扫描所在区；变回武器时触发经过的每个区的一个配置物。");
     } else if (id === "ecmo_return") {
       lines.push(...returnWeapon(a));
     } else if (id === "ras_aa") {
@@ -11457,6 +11678,25 @@ function runSkillInner(id, optRun) {
       a.self = "conductor";
       if (typeof spawnPopup === "function") spawnPopup(a, { kind: "status", text: "导体", element: "electric" });
       lines.push("不稳超导：转换 20% 累积能量为光能，自身获得导体效果。");
+    } else if (id === "ras_torrent") {
+      // 狂瀑：能量直接累积到 100%，每累积 20% 对高能目标打一次 0.2atk 能量，自己失去 10% 血量（不算受到伤害，最少留 1）
+      if (!needT()) return paintSkillLog(lines.join("\n"));
+      const steps = Math.max(0, Math.floor((100 - (Number(a.resources.energyPct) || 0)) / 20));
+      const loseHp = (u, amt) => {
+        let left = Math.min(amt, Math.max(0, totalHp(u) - 1));
+        const took = left;
+        (u.layers || []).forEach(l => { const d = Math.min(left, Number(l.current) || 0); l.current -= d; left -= d; });
+        return took;
+      };
+      for (let i = 0; i < steps && !t.dead; i++) {
+        addRasEnergy(20, "狂瀑");
+        hitOne(a, t, { element: "energy", mult: 0.2, baseBreak: 0, atk, atkRange: "any", usePrep: i === 0 });
+        const lost = loseHp(a, Math.ceil(totalMaxHp(a) * 0.1));
+        lines.push(`狂瀑：拉斯缪尔失去 ${lost} 血量。`);
+      }
+      const now = Number(a.resources.energyPct) || 0;
+      if (now < 100) addRasEnergy(100 - now, "狂瀑");
+      if (!steps) lines.push("累积能量已经满了，狂瀑没有额外的攻击。");
     } else if (id === "ras_summon") {
       const w = spawnWeapon(a, "edc");
       lines.push(w ? "EDC30k 已进入战场。" : "EDC30k 已在场。");
@@ -11493,13 +11733,33 @@ function runSkillInner(id, optRun) {
         ras.resources.light = 0;
         lines.push(`爆闪释放光能 ${light}。`);
       }
+    } else if (id === "edc_siphon") {
+      // 汲取：拉斯缪尔每回合结束自动把 20% 累积能量转光能，EDC 变回武器；生效中再用（免费）结束汲取
+      const ras = findKit("ras", state.units);
+      if (!ras) lines.push("拉斯缪尔不在场。");
+      else if (ras.resources && ras.resources.siphon) {
+        ras.resources.siphon = false;
+        lines.push("汲取结束。");
+      } else {
+        ras.resources = ras.resources || {};
+        ras.resources.siphon = true;
+        lines.push("汲取：拉斯缪尔每回合结束时自动把 20% 累积能量转为光能。");
+        lines.push(...returnWeapon(a));
+      }
     } else if (id === "edc_return") {
       lines.push(...returnWeapon(a));
     } else if (id === "longge_aa") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       if (longgeMode(a) === "gun") {
         const c = longgeTakeBullet(a, lines);
-        hitOne(a, t, { element: LONGGE_AMMO[c].element, mult: 1.5, baseBreak: 1, atk, atkRange: "ranged" });
+        const near = Number(t.zone) === Number(a.zone);
+        hitOne(a, t, { element: LONGGE_AMMO[c].element, mult: 1.5, baseBreak: 1, atk, atkRange: near ? "melee" : "ranged" });
+        // 枪管手杖+：近距离打出火弹，同区其他敌人各受 0.75×atk 火焰
+        if (near && c === "red") {
+          const others = visibleEnemies(a.zone).filter(u => u.id !== t.id);
+          if (others.length) lines.push("近距离火弹：火焰溅到同区其他敌人。");
+          others.forEach(u => hitOne(a, u, { element: "fire", mult: 0.75, baseBreak: 0, atk, flags: { action: true, aoe: true }, usePrep: false }));
+        }
       } else {
         hitOne(a, t, { element: "ice", mult: 1, baseBreak: 1, atk, atkRange: "melee" });
         longgePeek(a, 1, lines);   // 手杖普攻：窥探 1
@@ -11573,6 +11833,94 @@ function runSkillInner(id, optRun) {
         hitOne(a, t, { element: LONGGE_AMMO[c].element, mult: 1.5, baseBreak: 0, atk, flags: { action: true, assist: true } });
       }
       longgePeek(a, 2, lines);   // 无论哪种模式都窥探 2
+    } else if (id === "longge_heat") {
+      // 热能轰击：手杖 → 近距离敌人熔融；霰弹枪（近距离特殊射击）→ 红弹：同区所有敌人熔融、同区所有友方（含自己）按红弹治疗；
+      // 蓝弹：子弹气化，同区所有友方各受 1 冰击破（可能被打进失衡，触发敌人的协助攻击）
+      if (!needT()) return paintSkillLog(lines.join("\n"));
+      if (longgeMode(a) === "gun") {
+        const c = longgeTakeBullet(a, lines);
+        const z = Number(a.zone);
+        const allies = fieldUnits().filter(u => u.isPlayer && !u.dead && !u.hidden && !u.fused && Number(u.zone) === z);
+        if (c === "red") {
+          lines.push("热能轰击（霰弹枪 · 红弹）：子弹化作散射的火焰。");
+          visibleEnemies(z).forEach(u => applyInstantEffect(u, "melt", lines));
+          allies.forEach(u => longgeBulletHeal("red", u, lines));
+        } else {
+          lines.push("热能轰击（霰弹枪 · 蓝弹）：子弹瞬间气化。");
+          allies.forEach(u => dealBreak(u, 1, "ice", lines, "热能轰击（蓝弹气化）", { by: a }));
+        }
+      } else {
+        lines.push(`热能轰击（手杖）：${t.name} 熔融。`);
+        applyInstantEffect(t, "melt", lines);
+      }
+    } else if (id === "longge_drink") {
+      // 饮弹：枪口对准自己，消耗 1 发。蓝弹 → 霜结，并按蓝弹治疗自己；红弹 → 自己受 1×atk 火焰，返还行动点
+      const c = longgeTakeBullet(a, lines);
+      if (!c) lines.push("没有子弹了。");
+      else if (c === "blue") {
+        lines.push("饮弹（蓝弹）：进入霜结。");
+        lines.push(...castSelfEffect(a, "frost", []));
+        longgeBulletHeal("blue", a, lines);
+      } else {
+        lines.push("饮弹（红弹）：火焰灼身，行动点返还。");
+        applyTypedDot(a, Math.max(1, Math.floor(atk)), "fire", lines, `${a.name} 饮弹（红弹）`);
+        a.ap = (Number(a.ap) || 0) + (Number(skillCost(id).ap) || 1);
+      }
+    } else if (id === "longge_shuffle") {
+      // 洗牌：剩下的子弹重新随机排列（看过的颜色作废）。连续 2 红：随机敌人 1×atk 火；连续 3 红再来一次。
+      // 连续 2 蓝：治疗血量最低的队友（蓝弹治疗）；连续 3 蓝再治疗一名血量不满的队友。都没有就窥探 1
+      const r = longgeRes(a);
+      for (let i = r.ammo.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [r.ammo[i], r.ammo[j]] = [r.ammo[j], r.ammo[i]]; }
+      r.seen = r.ammo.map(() => false);
+      longgeSyncKnown(r);
+      lines.push(`洗牌：剩下的 ${r.ammo.length} 发重新排列（之前看过的颜色作废）。`);
+      const runOf = (color) => { let best = 0, cur = 0; r.ammo.forEach(c => { cur = c === color ? cur + 1 : 0; best = Math.max(best, cur); }); return best; };
+      const redRun = runOf("red"), blueRun = runOf("blue");
+      const pickRandom = (list) => list[Math.floor(Math.random() * list.length)];
+      for (let k = 0; k < (redRun >= 3 ? 2 : redRun >= 2 ? 1 : 0); k++) {
+        const foes = fieldUnits().filter(u => !u.isPlayer && !u.dead && !u.hidden && !u.fused);
+        const f = pickRandom(foes);
+        if (!f) break;
+        lines.push(`洗牌：连续红弹，火焰打向 ${f.name}。`);
+        hitOne(a, f, { element: "fire", mult: 1, baseBreak: 0, atk, atkRange: "any", flags: { action: true }, usePrep: false });
+      }
+      for (let k = 0; k < (blueRun >= 3 ? 2 : blueRun >= 2 ? 1 : 0); k++) {
+        const pals = fieldUnits().filter(u => u.isPlayer && !u.dead && !u.hidden && !u.fused);
+        const ratio = u => totalHp(u) / Math.max(1, totalMaxHp(u));
+        const target = k === 0 ? pals.slice().sort((x, y) => ratio(x) - ratio(y))[0] : pickRandom(pals.filter(u => totalHp(u) < totalMaxHp(u)));
+        if (!target) break;
+        lines.push(`洗牌：连续蓝弹，治疗 ${target.name}。`);
+        longgeBulletHeal("blue", target, lines);
+      }
+      if (redRun < 2 && blueRun < 2) longgePeek(a, 1, lines);
+    } else if (id === "longge_reload") {
+      // 胶囊弹药+：子弹打光后花 1 行动点完全换弹，重新获得随机的 6 发
+      const r = longgeRes(a);
+      r.ammo = longgeAmmoFresh();
+      r.seen = r.ammo.map(() => false);
+      longgeSyncKnown(r);
+      lines.push("完全换弹：重新装上 6 发（顺序随机）。扳机要重新解锁。");
+    } else if (id === "xiaoxiao_burst") {
+      // 爆发治疗：消耗 3 发。全红 → 同区友方生命回满；全蓝 → 获得 2×（龙哥等级 + 5）临时护盾。
+      // 不用先窥探；接下来 3 发不同色时技能失败，行动点白扣，子弹不消耗
+      if (!needT()) return paintSkillLog(lines.join("\n"));
+      if (!t.isPlayer || Number(t.zone) !== Number(a.zone)) { lines.push("爆发治疗只能给同区的友方。"); return paintSkillLog(lines.join("\n")); }
+      const nx = (longgeRes(a) || { ammo: [] }).ammo.slice(0, 3);
+      const sim = typeof window !== "undefined" && window.GAME && window.GAME.sim;
+      if (!sim && !(nx.length === 3 && nx.every(c => c === nx[0]))) {
+        lines.push("爆发治疗失败：接下来 3 发子弹颜色不一样，行动点白白消耗（子弹没有消耗）。");
+        return paintSkillLog(lines.join("\n"));
+      }
+      const shots = [longgeTakeBullet(a, lines), longgeTakeBullet(a, lines), longgeTakeBullet(a, lines)].filter(Boolean);
+      if (shots.length === 3 && shots.every(c => c === "red")) {
+        const got = healUnit(t, Math.max(0, totalMaxHp(t) - totalHp(t)));
+        lines.push(`爆发治疗（全红）：${t.name} 生命回满（恢复 ${got}）。`);
+      } else if (shots.length === 3 && shots.every(c => c === "blue")) {
+        const lg = longgeOf();
+        const amt = 2 * (((lg && lg.level) || 1) + 5);
+        addShieldLayer(t, amt, false);
+        lines.push(`爆发治疗（全蓝）：${t.name} 获得 ${amt} 点临时护盾。`);
+      } else lines.push("三发子弹颜色不一样，爆发治疗没有效果。");
     } else if (id === "xiaoxiao_punch") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       const c = longgeTakeBullet(a, lines);

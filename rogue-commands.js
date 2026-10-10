@@ -23,9 +23,9 @@ const RogueCommands = (function () {
   const actions = {
     acceptTask: (c, run) => Rogue.acceptTask(run, c.which),
     chooseNode: (c, run) => Rogue.chooseNode(run, c.index),
-    restAtNode: (c, run) => c.mode === "long" ? Rogue.restAtNode(run, c.mode, { watch: c.watch || null, food: c.food, sleep: c.sleep, spit: c.spit }) : Rogue.restAtNode(run, c.mode),
+    restAtNode: (c, run) => c.mode === "long" ? Rogue.restAtNode(run, c.mode, { watch: c.watch || null, food: c.food, sleep: c.sleep, spit: c.spit, ammo: c.ammo }) : Rogue.restAtNode(run, c.mode),
     shortRestBeforeNode: (_c, run) => Rogue.shortRestBeforeNode(run),
-    camp: (c, run) => Rogue.camp(run, { food: c.food, sleep: c.sleep, spit: c.spit }),
+    camp: (c, run) => Rogue.camp(run, { food: c.food, sleep: c.sleep, spit: c.spit, ammo: c.ammo }),
     buy: (c, run) => Rogue.buy(run, c.key, c.qty),
     introduceSmith: (c, run) => Rogue.introduceSmith(run, c.smith),
     upgradeWeapon: (c, run) => Rogue.upgradeWeapon(run, c.kit, c.smith),
@@ -61,8 +61,8 @@ const RogueCommands = (function () {
     healCost: (c, run) => Rogue.healCost(run, c.kit),
     presentSmiths: (_c, run) => Rogue.presentSmiths(run),
     smithInfo: (c, run) => Rogue.smithInfo(run, c.smith),
-    restPlan: (c, run) => Rogue.restPlan(run, { food: c.food, sleep: c.sleep, spit: c.spit }),
-    restOptions: (c, run) => Rogue.restOptions(run, { food: c.food, sleep: c.sleep, spit: c.spit }),
+    restPlan: (c, run) => Rogue.restPlan(run, { food: c.food, sleep: c.sleep, spit: c.spit, ammo: c.ammo }),
+    restOptions: (c, run) => Rogue.restOptions(run, { food: c.food, sleep: c.sleep, spit: c.spit, ammo: c.ammo }),
     sheetData: (_c, run) => Rogue.sheetData(run),
     armoryData: (_c, run) => Rogue.armoryData(run),
     shopStock: (_c, run) => Rogue.shopStock(run),
@@ -163,7 +163,7 @@ const RogueCommands = (function () {
     if (c.opt != null && (!Number.isInteger(c.opt) || c.opt < 0 || c.opt > 2)) throw new Error("检定选项必须是 0–2");
     if (c.action === "restAtNode" && !["long", "short", "leave"].includes(c.mode)) throw new Error("未知休息方式");
     const restMap = (m) => m == null || (typeof m === "object" && !Array.isArray(m) && Object.keys(m).every(k => typeof m[k] === "string"));
-    if (!restMap(c.food) || !restMap(c.sleep) || !restMap(c.spit)) throw new Error("长休的食物 / 睡眠道具 / 吐酸属性选择格式不对");
+    if (!restMap(c.food) || !restMap(c.sleep) || !restMap(c.spit) || !restMap(c.ammo)) throw new Error("长休的食物 / 睡眠道具 / 吐酸属性 / 弹序选择格式不对");
     if (c.action === "finishBattle" && !["win", "lose", "retreat"].includes(c.outcome)) throw new Error("未知战斗结局");
     if (c.action === "afterVictory" && typeof c.goOn !== "boolean") throw new Error("必须明确是否继续额外幕");
     if (c.action === "newRun" && (!Array.isArray(c.party) || !c.party.every(k => typeof k === "string") || typeof c.seed !== "string" || !c.seed || (c.solo && !Array.isArray(c.partners)))) throw new Error("新局必须包含队伍和明确种子");

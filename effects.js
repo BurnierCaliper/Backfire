@@ -40,12 +40,16 @@ function applyInstantEffect(u, key, notes, source) {
     stingPulse(u, "ice", notes, "刺骨");
   }
   if (key === "overload" && !already) {
-    // 过载：护盾值此回合内翻倍，下回合开始时清零
+    // 过载：护盾值此回合内翻倍（临时护盾也翻倍），下回合开始时清零
+    if (typeof syncTempShield === "function") syncTempShield(u);
     (u.layers || []).forEach(l => {
       if (l.type !== "shield") return;
       l._overloadMax = Number(l.max) || 0;
+      l._overloadTemp = Number(l.tempShield) || 0;
       l.max = l._overloadMax * 2;
       l.current = (Number(l.current) || 0) * 2;
+      if (l._overloadTemp) l.tempShield = l._overloadTemp * 2;
+      l._lastCur = l.current;
     });
     if ((u.layers || []).some(l => l.type === "shield")) notes.push(`${u.name} 过载：护盾本回合翻倍。`);
   }
@@ -69,9 +73,15 @@ function overloadRoundStart(u, notes) {
   (u.layers || []).forEach(l => {
     if (l.type !== "shield") return;
     had = true;
-    if (l._overloadMax != null) { l.max = l._overloadMax; delete l._overloadMax; }
+    if (typeof syncTempShield === "function") syncTempShield(u);
+    // 清零：临时护盾也一起没了，上限回到自带的那部分
+    if (l._overloadMax != null) { l.max = Math.max(0, l._overloadMax - (Number(l._overloadTemp) || 0)); delete l._overloadMax; delete l._overloadTemp; }
+    else l.max = Math.max(0, (Number(l.max) || 0) - (Number(l.tempShield) || 0));
+    l.tempShield = 0;
     l.current = 0;
+    l._lastCur = 0;
   });
+  if (typeof syncTempShield === "function") syncTempShield(u);   // 纯临时的护盾层去掉
   if (had && typeof dropMagnetShield === "function") dropMagnetShield(u);   // 川川给的护盾被过载清零：磁场护盾标记跟着作废
   notes.push(`${u.name} 过载结束${had ? "：护盾清零" : ""}。`);
   return had;
@@ -85,6 +95,7 @@ function overloadRoundStart(u, notes) {
  *   ctx        { attacker, action, melee, startLayerType }
  */
 function afterDamageTaken(u, element, dealt, shieldHit, notes, ctx) {
+  if (u && typeof syncTempShield === "function") syncTempShield(u);   // 临时护盾先扣（engine.js）
   if (!u || !(dealt > 0)) return;
   ctx = ctx || {};
   // 躲藏：受到伤害后解除
@@ -153,21 +164,39 @@ function afterAttackDealt(a, t, element, res, opt, notes) {
       });
     }
   }
-  // 导体：每三次攻击都会让第三次攻击额外击中一个随机敌对目标；雷鸣下变为每两次一次
+  // 导体：按攻击段数计数，不是按一次攻击行动。每三段让这一段再打到一个随机敌对目标；
+  // 雷鸣下变为每两段一次。额外那一下是触发的那一段对新目标「重新结算」：用这一段吃目标修正之前的基础包
+  // （ATK × 这一段的倍率 + 骰子）和原始击破，再按新目标自己的情况算克制、飞行、减伤……
+  // 不拿原目标结算后的数值（以前原目标飞行 / 咬牙坚持，额外目标也跟着减半）。额外那一下自己不再计数，避免连环触发。
   if (a.self === "conductor" && !flags.conductorExtra) {
-    a._conductorHits = (Number(a._conductorHits) || 0) + 1;
+    const segs = (res.perHit && res.perHit.length) ? res.perHit : [{ base: res.rawBase || 0 }];
+    const ob = opt._origBaseBreak !== undefined ? opt._origBaseBreak : opt.baseBreak;
+    const baseBr = ob != null ? Math.max(0, Number(ob) || 0) : 1;
     const every = currentWeatherFor(a) === "thunder" ? 2 : 3;
-    if (a._conductorHits % every === 0) {
+    segs.forEach((seg, i) => {
+      a._conductorHits = (Number(a._conductorHits) || 0) + 1;
+      if (a._conductorHits % every !== 0) return;
       const pool = enemiesOf(a).filter(x => x.id !== t.id);
-      const extra = pool[Math.floor(Math.random() * pool.length)];
-      if (extra) {
-        notes.push(`${a.name} 导体：第 ${a._conductorHits} 次攻击额外击中 ${extra.name}。`);
-        const out = dealTo(a, extra, Object.assign({}, opt, {
-          flags: Object.assign({}, flags, { conductorExtra: true, blockResolved: true, block: "none" })
-        }));
-        if (out && out.extra) notes.push(...out.extra);
-      }
-    }
+      const extra = pool.length ? pool[Math.floor(Math.random() * pool.length)] : null;
+      if (!extra) return;
+      const dmg = Math.max(0, Number(seg.base) || 0);
+      // 「共 N 击破」的多段攻击，击破只记在第一段；其余照原技能每段的击破
+      const br = opt.breakOnce ? (i === 0 ? baseBr : 0) : baseBr;
+      notes.push(`${a.name} 导体：第 ${a._conductorHits} 段额外击中 ${extra.name}。`);
+      if (dmg <= 0 && br <= 0) return;
+      const out = dealTo(a, extra, {
+        element: element,
+        mult: 0,
+        flat: dmg,
+        hits: 1,
+        baseBreak: br,
+        atk: 0,
+        usePrep: false,
+        atkRange: opt.atkRange,
+        flags: Object.assign({}, flags, { conductorExtra: true, blockResolved: true, block: "none", action: true })
+      });
+      if (out && out.extra) notes.push(...out.extra);
+    });
   }
 }
 

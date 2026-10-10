@@ -76,7 +76,15 @@ test("角色图鉴：11 名角色都有介绍和 1–5 星难度，带完整的�
   const hiaki = heroes.find(h => h.kit === "hiaki");
   assert.match(hiaki.sheet.passives[0].next, /丹生谷提供的以及武器人的协助格挡率/, "被动升级文字");
   assert.equal(hiaki.sheet.weapons.length, 2);
-  assert.ok(hiaki.sheet.skills.later.some(k => k.name === "一闪" && k.minLv === 2), "等级解锁的技能");
+  assert.ok(!hiaki.sheet.skills.now.some(k => k.name === "一闪"), "1 级不展示未解锁技能");
+  assert.equal(hiaki.sheet.skills.later.length, 0);
+  // 图鉴「按等级查看」：all 里列全部技能和解锁等级（默认只显示 1 级，点别的等级再看）
+  const hAll = hiaki.sheet.skills.all;
+  assert.ok(hAll.some(k => k.name === "一闪" && k.minLv === 2), "一闪 2 级解锁");
+  assert.ok(hAll.filter(k => (k.minLv || 1) <= 1).every(k => hiaki.sheet.skills.now.some(n => n.id === k.id)), "1 级的就是当前技能");
+  const kolt = heroes.find(h => h.kit === "kolt");
+  assert.ok(kolt.sheet.skills.all.some(k => k.id === "kolt_cannon" && k.minLv === 11));
+  assert.ok(kolt.sheet.weapons[0].skills.all.some(k => k.id === "torque_divert" && k.minLv === 4), "武器人的技能也按等级列");
   assert.equal(c.codexPlusLevel(1), 5);
   assert.equal(c.codexPlusLevel(2), 10);
   assert.equal(heroes.find(h => h.kit === "tou").stars, 2);

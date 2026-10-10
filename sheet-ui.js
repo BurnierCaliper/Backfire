@@ -38,10 +38,9 @@
   }
   function skillsHtml(sk) {
     if (!sk) return "";
-    const row = (s, locked) => `<div class="hs-skill${locked ? " locked" : ""}">
-      <div class="hs-sk-top"><b>${esc(s.name)}</b><span class="hs-cost">${esc(s.cost)}</span>${locked ? `<span class="hs-lv">Lv${s.minLv} 解锁</span>` : ""}</div>
-      <p>${esc(s.text)}</p></div>`;
-    return sk.now.map(s => row(s, false)).join("") + sk.later.map(s => row(s, true)).join("");
+    return (sk.now || []).map(s => `<div class="hs-skill">
+      <div class="hs-sk-top"><b>${esc(s.name)}</b><span class="hs-cost">${esc(s.cost)}</span></div>
+      <p>${esc(s.text)}</p></div>`).join("");
   }
   function blockText(b, unarmed) {
     if (!b) return "—";

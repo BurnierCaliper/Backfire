@@ -59,8 +59,46 @@ function totalMaxHp(unit) {
 function baseMaxHp(unit) {
   return (unit.layers || []).reduce((s, l) => {
     if (l.temp) return s;
-    return s + Math.max(0, Number(l.max || 0) - Number(l.tempBonus || 0));
+    return s + Math.max(0, Number(l.max || 0) - Number(l.tempBonus || 0) - tempShieldOf(l));
   }, 0);
+}
+
+/* ---------- 临时护盾 ----------
+ * 技能、道具、扫描……施加的护盾都是临时护盾（tempShield）：并在护盾层里显示，不算额外一层，克制表照护盾算；
+ * 但不会在「一回合没挨打」时回满——单位自带的那部分护盾才回满。挨打时临时护盾先扣。
+ * 护盾层的 max = 自带上限 + 剩下的临时护盾；临时护盾扣掉多少，max 就跟着少多少，所以「回满」（current = max）只补自带的部分。
+ * 不管伤害从哪条路扣的护盾，syncTempShield 按上次记下的 current（_lastCur）结算掉了多少。 */
+function tempShieldOf(layer) { return layer && layer.type === "shield" ? Math.max(0, Number(layer.tempShield) || 0) : 0; }
+function syncTempShield(unit) {
+  if (!unit || !unit.layers) return;
+  unit.layers.forEach(l => {
+    if (l.type !== "shield") return;
+    const cur = Math.max(0, Number(l.current) || 0);
+    const t = tempShieldOf(l);
+    if (t > 0 && l._lastCur != null) {
+      const use = Math.min(t, Math.max(0, Number(l._lastCur) - cur));
+      if (use > 0) { l.tempShield = t - use; l.max = Math.max(0, (Number(l.max) || 0) - use); }
+    }
+    if (tempShieldOf(l) > cur) { l.max = Math.max(0, (Number(l.max) || 0) - (tempShieldOf(l) - cur)); l.tempShield = cur; }
+    if (l.current > l.max) l.current = l.max;
+    l._lastCur = Math.max(0, Number(l.current) || 0);
+  });
+  // 纯临时的护盾层（单位本来没有护盾）用完就去掉
+  unit.layers = unit.layers.filter(l => !(l.type === "shield" && (l.granted || l.temp) && !l.batteryShield && !(Number(l.max) > 0)));
+}
+/** 加临时护盾：并进现有的护盾层（没有就新开一层，标 granted） */
+function addTempShield(unit, amt) {
+  amt = Math.max(0, Math.floor(Number(amt) || 0));
+  if (!unit || !amt) return null;
+  unit.layers = unit.layers || [];
+  syncTempShield(unit);
+  let layer = unit.layers.find(l => l.type === "shield" && !l.batteryShield);
+  if (!layer) { layer = { type: "shield", current: 0, max: 0, granted: true }; unit.layers.unshift(layer); }
+  layer.max = (Number(layer.max) || 0) + amt;
+  layer.current = (Number(layer.current) || 0) + amt;
+  layer.tempShield = tempShieldOf(layer) + amt;
+  layer._lastCur = layer.current;
+  return layer;
 }
 
 /** 给单位加一段临时血量层（战斗结束消失）。已有同类型的层就叠上去，并记在 tempBonus 里，
@@ -68,6 +106,7 @@ function baseMaxHp(unit) {
 function addTempLayer(unit, type, amt) {
   amt = Math.max(0, Number(amt) || 0);
   if (!unit || !amt) return null;
+  if (type === "shield") return addTempShield(unit, amt);   // 护盾一律是临时护盾
   unit.layers = unit.layers || [];
   let layer = unit.layers.find(l => l.type === type);
   if (!layer) {
@@ -90,7 +129,7 @@ function persistentLayers(unit) {
     if (ruby) src = (ruby.layers || []).filter(l => l.mecha);
   }
   return src.filter(l => !l.temp).map(l => {
-    const cap = Math.max(0, Number(l.max || 0) - Number(l.tempBonus || 0));
+    const cap = Math.max(0, Number(l.max || 0) - Number(l.tempBonus || 0) - tempShieldOf(l));
     return { type: l.type, current: Math.max(0, Math.min(cap, Number(l.current) || 0)) };
   });
 }
@@ -98,8 +137,10 @@ function persistentLayers(unit) {
 /** 战斗结束：去掉临时层，以及叠在原有层上的临时部分 */
 function stripTempLayers(unit) {
   if (!unit || !unit.layers) return;
-  unit.layers = unit.layers.filter(l => !l.temp);
+  unit.layers = unit.layers.filter(l => !l.temp && !(l.type === "shield" && l.granted));
   unit.layers.forEach(l => {
+    const ts = tempShieldOf(l);
+    if (ts) { l.max = Math.max(0, (Number(l.max) || 0) - ts); l.current = Math.min(Number(l.current) || 0, l.max); l.tempShield = 0; }
     const b = Number(l.tempBonus) || 0;
     if (!b) return;
     l.max = Math.max(0, (Number(l.max) || 0) - b);
@@ -337,7 +378,9 @@ const SKILL_RANGE = {
   longge_chill: { min: 0, max: 1 },
   longge_spit: { min: 0, max: 0 },     // 吐酸：近距离
   xiaoxiao_punch: { min: 0, max: 0 },  // 直冲拳：近距离
-  xiaoxiao_combo: { min: 0, max: 0 }   // 连续拳：近距离
+  xiaoxiao_combo: { min: 0, max: 0 },  // 连续拳：近距离
+  longge_heat: { min: 0, max: 0 },     // 热能轰击：手杖、霰弹枪都是近距离
+  ras_torrent: { min: 0, max: 99 },    // 狂瀑：任意距离的高能敌人
 };
 
 /* 技能能选哪一边的目标。界面原本是从提示文字里猜的（出现「友方」就只让选友方），
@@ -349,6 +392,7 @@ const SKILL_TARGET_SIDE = {
   nora_needle: "any",       // 针尖可以扎敌人，也可以扎队友当治疗手段
   nora_aa: "any",           // 有刺入时打刺入目标，刺入的可能是队友
   kolt_mod: "anySelf",
+  ras_torrent: "enemy",
   chuan_reclaim: "allySelf", // 回收护盾：任意一名友方（含自己）      // 「非法」改装：任意单位（含自己）施加过载
   role_renew: "ally",       // 续命：任意距离一名友方（以前没登记，被推断成敌方）
   role_harsh: "anySelf",    // 恶劣环境：「一名单位」敌我都行（以前被推断成只能选敌人）
@@ -361,6 +405,8 @@ const SKILL_RANGE_BY_STATE = {
   // 拔刀 / 胁构：只打同区；居合：先移动 1 距离再出刀，所以最远打到距离 1
   hiaki_aa: (a) => ((a && a.resources && a.resources.stance) === "iai" ? { min: 0, max: 1 } : { min: 0, max: 0 }),
   // 诺拉普攻：没有刺入时是「距离 1 的敌人」；有刺入时针尖把两人连在一起，刺入目标在同区也能打（刺入超过距离 1 会自己断）
+  // 碎渣重炮：酸液炮（迫击炮，越墙）距离 1-2；电钻（机枪，选区域）距离 0-1
+  kolt_cannon: (a) => ((a && a.resources && a.resources.bit) === "acid" ? { min: 1, max: 2 } : { min: 0, max: 1 }),
   nora_aa: (a) => (typeof piercedTargets === "function" && a && piercedTargets(a).length ? { min: 0, max: 1 } : { min: 1, max: 1 })
 };
 /** 技能射程：先看随状态变的表，再看固定表（SKILL_RANGE）。都没写返回 null（由提示文字推断） */
@@ -717,11 +763,16 @@ function resolveAttack(ctx) {
   for (let h = 0; h < hits; h++) {
     const hitLog = [];
     const hAdd = (s) => { hitLog.push(s); add(`#${h + 1} ${s}`); };
+    // hitMults：每段倍率不同的多段攻击（例如柯尔特电钻普攻 0.3 / 0.3 / 0.4）；多出来的段数沿用最后一段
+    const hm = Array.isArray(ctx.hitMults) && ctx.hitMults.length ? Number(ctx.hitMults[Math.min(h, ctx.hitMults.length - 1)]) || 0 : null;
+    const multAdj = hm == null ? 0 : hm - (Number(ctx.mult) || 0);
+    // 这一段的基础包（只含攻击者一侧：ATK × 倍率 + 固定 + 骰子 + 第一击加骰），还没吃目标一侧的任何修正。导体额外那一下用它重新结算
+    const segBase = Math.max(0, rawBase + atk * multAdj) + (h === 0 ? firstBonus : 0);
 
     if (flags.block === "assistOk") {
       let br = ctx.breakOnce ? onceBreak : (Number(ctx.baseBreak) || 0);
       if (ctx.breakOnce && h > 0) {
-        perHit.push({ dealt: 0, breakDealt: 0, layers: clone(layersWork) });
+        perHit.push({ dealt: 0, breakDealt: 0, base: segBase, layers: clone(layersWork) });
         continue;
       }
       if (flags.smash) br *= 2;
@@ -730,11 +781,12 @@ function resolveAttack(ctx) {
       if (weather === "phase" && Number(ctx.phaseStep) === 2) br += 1;
       totalBreak += br;
       hAdd("协助格挡成功：目标免伤，击破 " + br + " 改由格挡者承担。");
-      perHit.push({ dealt: 0, breakDealt: br, layers: clone(layersWork) });
+      perHit.push({ dealt: 0, breakDealt: br, base: segBase, layers: clone(layersWork) });
       continue;
     }
 
-    let packet = rawBase + (h === 0 ? firstBonus : 0);
+    if (multAdj) hAdd(`本段倍率 ${round2(hm)}`);
+    let packet = segBase;
 
     const startIdx = pickStartIndex(layersWork, flags.pierce, flags.focusLayer);
     let startLayer = layersWork[startIdx] || layersWork.find(l => l.current > 0);
@@ -879,6 +931,7 @@ function resolveAttack(ctx) {
     if (flags.doubleDeal) { mul *= 2; hAdd("造成伤害翻倍。"); }
     if (flags.doubleTake) { mul *= 2; hAdd("目标受伤翻倍。"); }
     if (flags.dr50) { mul *= 0.5; hAdd("目标减伤 +50%。"); }
+    if (flags.dr25) { mul *= 0.75; hAdd("自保模式：受伤 −25%。"); }
     if (flags.holyShield) { mul *= 0.5; hAdd("圣盾：本次伤害减半。"); }
     if (flags.prideReduce) {
       const pr = typeof flags.prideReduce === "number" ? flags.prideReduce : 0.25;
@@ -906,7 +959,7 @@ function resolveAttack(ctx) {
     packet = floored;
     totalIntended += packet;
     // 减伤：这一段比参照少了多少（空手格挡减半那部分不算，归格挡）
-    if (!ghost) totalReduced += Math.max(0, (refBase + (h === 0 ? firstBonus : 0)) * (flags.block === "bareOk" ? 0.5 : 1) - packet);
+    if (!ghost) totalReduced += Math.max(0, (Math.max(0, refBase + refAtk * multAdj) + (h === 0 ? firstBonus : 0)) * (flags.block === "bareOk" ? 0.5 : 1) - packet);
 
     let hitDealt = packet;
     if (ghost) {
@@ -990,6 +1043,7 @@ function resolveAttack(ctx) {
     perHit.push({
       dealt: hitDealt,
       intended: packet,   // 这一段打出去的伤害（不按剩余血量封顶），画面按段弹字用
+      base: segBase,      // 这一段吃目标修正之前的基础包（导体额外一下用）
       breakDealt: br,
       notes: hitLog,
       shp: onShp

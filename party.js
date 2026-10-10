@@ -599,6 +599,12 @@ function skillCost(id) {
     const r = typeof state !== "undefined" && typeof findKit === "function" ? findKit("ras", state.units) : null;
     if (r && r.resources && r.resources.unstable) return {};
   }
+  // 汲取：汲取生效时再用一次不耗行动点（结束汲取）
+  if (id === "edc_siphon") {
+    const r = typeof state !== "undefined" && typeof findKit === "function" ? findKit("ras", state.units) : null;
+    if (r && r.resources && r.resources.siphon) return {};
+    return { ap: 1 };
+  }
   if (id === "yuito_inspire") {
     const fl = typeof state !== "undefined" ? state.skillFlow : null;
     if (fl && fl.picks && fl.picks.mode === "stay") return { ap: 1 };
@@ -672,6 +678,9 @@ function skillCost(id) {
     ras_summon: { ap: 1, bonus: 1 },
     edc_drain: { ap: 1 }, edc_shock: { ap: 1 }, edc_flash: { ap: 1 }, edc_return: { ap: 1 },
     longge_aa: { ap: 1 }, longge_chill: { ap: 1 }, longge_spit: { bonus: 1 }, longge_assist: {}, longge_safety: { ap: 1 },
+    longge_heat: { ap: 1 }, longge_drink: { ap: 1 }, longge_shuffle: { ap: 1 }, longge_reload: { ap: 1 },
+    xiaoxiao_burst: { ap: 1 },
+    kolt_cannon: { ap: 1 }, torque_divert: { ap: 1 }, ecmo_probe: { ap: 1 }, ras_torrent: { ap: 1 },
     longge_summon: { ap: 1, bonus: 1 },
     xiaoxiao_punch: { ap: 1 }, xiaoxiao_heal: { ap: 1 }, xiaoxiao_combo: { ap: 1 }, xiaoxiao_return: { ap: 1 }
   };
@@ -907,19 +916,23 @@ function skillList(unit) {
   }
   if (unit.kit === "kolt") {
     const bit = (unit.resources && unit.resources.bit) || "drill";
-    add({ id: "kolt_aa", name: "普通攻击", hint: bit === "acid" ? "距离1 · 1atk 酸 +1击破" : "同区 · 三次 0.4atk 电 · 共2击破" });
+    add({ id: "kolt_aa", name: "普通攻击", hint: bit === "acid" ? "距离1 · 1atk 酸 +1击破" : "同区 · 0.3/0.3/0.4atk 三次电 · 共2击破" });
     add({ id: "kolt_short", name: "直流短接", hint: "需电钻 · 可先移≤1，再对同区铺高压场地" });
     add({ id: "kolt_chase", name: "紧追", hint: "附赠 · 对一个敌人施加紧追：它移动时柯尔特自动跟上", bare: true });
     add({ id: "kolt_scrap", name: "废物利用", hint: "获得上一个被摧毁的敌人血量层等量的对应血量（最多生命上限50%）· 另领腐坏抛射的记录", minLv: 2 });
     add({ id: "kolt_rot", name: "腐坏抛射", hint: "需酸液炮 · 距离1 · 施加腐蚀（不造成伤害，仍会嘲讽）· 腐蚀伤害记给下一次废物利用", minLv: 3 });
     add({ id: "kolt_mod", name: "「非法」改装", hint: "需电钻 · 1距离以内任意单位施加过载", minLv: 6 });
+    add({ id: "kolt_cannon", name: "碎渣重炮", hint: bit === "acid"
+      ? "耗全部废料 · 距离1-2 · 越墙迫击炮：废料量的酸 +2击破，同区其他敌人 1/3 溅射 · 主目标掉血超过上限 25% 再 +2击破"
+      : "耗全部废料 · 选距离1以内一个区域 · 废料分成每颗（扭矩atk/3+1d10）电击的子弹，随机打该区敌人 · 每2颗1击破", minLv: 11 });
     add({ id: "kolt_summon", name: "唤出扭矩", hint: "武器生物化" });
   }
   if (unit.kit === "torque") {
     const bit = koltBit();
-    add({ id: "torque_boost", name: "强化输出", hint: bit === "acid" ? "任意区域蓄力，下回合开始对该区酸液AOE" : "移动1后选一名敌人 · 1d4+1 次 0.5atk 电 · 共2击破" });
+    add({ id: "torque_boost", name: "强化输出", hint: bit === "acid" ? "任意区域蓄力（越墙），下回合开始对该区酸液AOE" : "移动1后选一名敌人 · 1d4+1 次 0.5atk 电 · 共2击破" });
     add({ id: "torque_swap", name: "拆装部件", hint: "更换刀头，再打对应距离 1atk +1击破，强制收回" });
     add({ id: "torque_strip", name: "拆卸模式", hint: "需电钻 · 同区 2击破，外层血量转给同区友方", minLv: 2 });
+    add({ id: "torque_divert", name: "转移注意", hint: "全场被嘲讽的单位改打扭矩 · 自保：受伤 −25%、架势不低于1 · 下回合开始变回武器，失去的装甲记为废料", minLv: 4 });
     add({ id: "torque_return", name: "收回为武器", hint: "需与柯尔特同区" });
   }
   if (unit.kit === "helu") {
@@ -933,6 +946,7 @@ function skillList(unit) {
     add({ id: "ecmo_bite", name: "叮咬", hint: "同区 · 1atk 物理 +1击破 · 造成失衡返还行动点" });
     add({ id: "ecmo_focus", name: "相控阵探头", hint: "任意敌人的任意血量层施加聚焦" });
     add({ id: "ecmo_boom", name: "音爆", hint: "同区全体 0.5atk 谐波 · 触发配置物 · 聚焦层打两次", minLv: 2 });
+    add({ id: "ecmo_probe", name: "探测模式", hint: "移动不耗附赠 · 每回合开始扫描所在区 · 变回武器时触发经过的每个区的一个配置物", minLv: 4 });
     add({ id: "ecmo_return", name: "收回为武器", hint: "需与 Helumica 同区" });
   }
   if (unit.kit === "ras") {
@@ -941,12 +955,14 @@ function skillList(unit) {
     add({ id: "ras_flee", name: "逃离", hint: "移动1 · +20%能量 · 原区一名敌人 1atk 电 · 不触发借机攻击。不稳则移动不限", minLv: 2 });
     add({ id: "ras_super", name: "不稳超导", hint: "20%能量转光能 · 自身导体 · 不稳态下免费", minLv: 3 });
     add({ id: "ras_rampage", name: "失控暴走", hint: "+40%能量 · 因此进入不稳态则同区变能量场；已在不稳态则全场变能量场", minLv: 6 });
+    add({ id: "ras_torrent", name: "狂瀑", hint: "任意距离 · 选高能状态的敌人 · 能量直接累积到 100%，每 20% 打 0.2atk 能量、自己失去 10% 血量", minLv: 11 });
     add({ id: "ras_summon", name: "唤出 EDC30k", hint: "武器生物化" });
   }
   if (unit.kit === "edc") {
     add({ id: "edc_drain", name: "引流", hint: "需与拉斯缪尔同区 · 累积能量全转光能 · 不稳+25%" });
     add({ id: "edc_shock", name: "电流冲击", hint: "距离1 · 1atk 电 +1击破 · 有光能则再打等量电击" });
     add({ id: "edc_flash", name: "爆闪", hint: "释放全部光能 · 同区每名敌人 光能/2 能量 +1击破", minLv: 2 });
+    add({ id: "edc_siphon", name: "汲取", hint: "拉斯缪尔每回合结束自动把 20% 累积能量转光能 · 变回武器 · 生效中再用：不耗行动点并结束汲取", minLv: 4 });
     add({ id: "edc_return", name: "收回为武器", hint: "需与拉斯缪尔同区" });
   }
   if (unit.kit === "longge") {
@@ -956,12 +972,17 @@ function skillList(unit) {
     add({ id: "longge_chill", name: "冷气穿刺", hint: gun ? "手杖：近距离施加刺骨 / 霰弹枪：远距离特殊射击（蓝弹刺骨并治疗该区友方，红弹 0.5atk 火）" : "手杖 · 近距离 · 施加刺骨" });
     add({ id: "longge_spit", name: "吐酸", hint: "附赠 · 近距离 · 角色本身 atk 的酸液伤害 · 每场一次（兽人-蜥蜴种族特长）", bare: true });
     add({ id: "longge_safety", name: "解开保险", hint: "解锁扳机 · 查看最后一发子弹，可以把它移到最前面", minLv: 2 });
+    add({ id: "longge_heat", name: "热能轰击", hint: gun ? "手杖：近距离施加熔融 / 霰弹枪：近距离特殊射击（红弹：同区敌人熔融、同区友方治疗；蓝弹：同区友方各 1 冰击破）" : "手杖 · 近距离 · 施加熔融", minLv: 3 });
+    add({ id: "longge_drink", name: "饮弹", hint: "枪口对准自己 · 耗 1 弹 · 蓝弹：霜结并按蓝弹治疗自己 / 红弹：自己受 1atk 火，返还行动点", minLv: 6 });
+    add({ id: "longge_shuffle", name: "洗牌", hint: "把剩下的子弹重新随机排列 · 连续 2 红：随机敌人 1atk 火（3 红再一次） · 连续 2 蓝：治疗血量最低的队友（3 蓝再一次） · 都没有就窥探 1", minLv: 11 });
+    if (typeof passivePlus === "function" && passivePlus(unit, 2)) add({ id: "longge_reload", name: "完全换弹", hint: "子弹打光时 · 重新装上随机的 6 发（胶囊弹药+）" });
     add({ id: "longge_summon", name: "唤出小朋友", hint: "武器生物化" });
   }
   if (unit.kit === "xiaoxiao") {
     add({ id: "xiaoxiao_punch", name: "直冲拳", hint: "耗 1 弹 · 近距离 · 1atk 子弹属性 +2击破" });
     add({ id: "xiaoxiao_heal", name: "治疗支援", hint: "耗 1 弹 · 同区友方按子弹颜色治疗 · 然后收回武器" });
     add({ id: "xiaoxiao_combo", name: "连续拳", hint: "耗 3 弹 · 近距离 · 全红升龙拳 3atk 火 +3击破 / 全蓝撼地拳 2atk 冰 +5击破 / 混合每发红 0.75atk 火、蓝 0.5atk 冰 +1击破", minLv: 2 });
+    add({ id: "xiaoxiao_burst", name: "爆发治疗", hint: "耗 3 弹 · 接下来 3 发不同色则白扣行动点 · 同区友方：全红回满生命 / 全蓝获得 2×（龙哥等级 + 5）临时护盾", minLv: 4 });
     add({ id: "xiaoxiao_return", name: "收回为武器", hint: "需与龙哥同区" });
   }
   if (isUnarmed(unit)) {
@@ -1121,6 +1142,11 @@ function resourceText(unit) {
     const mood = typeof noraMood === "function" ? (noraMood(n) === "cruel" ? "残忍" : "温和") : "";
     const pin = typeof piercedTarget === "function" ? piercedTarget(n) : null;
     return `${mood} · ${pin ? "刺入 " + pin.name : "无刺入"} · 耐久 ${r.durability != null ? r.durability : "—"}`;
+  }
+  if (unit.kit === "kolt") {
+    const bit = r.bit === "acid" ? "酸液炮" : "电钻";
+    const scrap = (unit.level || 1) >= 2 && typeof koltScrapTotal === "function" ? ` · 废料 ${koltScrapTotal(unit)}` : "";
+    return bit + scrap;
   }
   if (unit.kit === "longge") return `扳机${r.trigger ? "解锁" : "锁定"} · ${typeof longgeAmmoText === "function" ? longgeAmmoText(unit) : ""}${r.spitUsed ? " · 已吐酸" : ""}`;
   if (unit.kit === "xiaoxiao") {

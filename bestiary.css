@@ -169,3 +169,8 @@ body.bx-open { overflow: hidden; }
 .hx-plus.dim { color: var(--bx-muted); background: transparent; box-shadow: inset 2px 0 0 rgba(236, 224, 198, .2); }
 .hx-attrs { grid-template-columns: repeat(6, auto 1fr); margin-top: 10px; }
 @media (max-width: 820px) { .hx-attrs { grid-template-columns: repeat(3, auto 1fr); } }
+
+/* 角色图鉴：按等级查看技能（默认 1 级，免得剧透） */
+.bx-lvpick { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 10px; }
+.bx-lvpick > span { font-size: 12px; font-weight: 700; color: var(--bx-muted); margin-right: 4px; }
+.bx-lvpick .bx-tab { padding: 3px 10px; font-size: 13px; }
