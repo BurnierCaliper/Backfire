@@ -672,6 +672,8 @@ function skillCost(id) {
     ras_summon: { ap: 1, bonus: 1 },
     edc_drain: { ap: 1 }, edc_shock: { ap: 1 }, edc_flash: { ap: 1 }, edc_return: { ap: 1 },
     longge_aa: { ap: 1 }, longge_chill: { ap: 1 }, longge_spit: { bonus: 1 }, longge_assist: {}, longge_safety: { ap: 1 },
+    longge_heat: { ap: 1 }, longge_drink: { ap: 1 }, longge_shuffle: { ap: 1 }, longge_reload: { ap: 1 },
+    xiaoxiao_burst: { ap: 1 },
     longge_summon: { ap: 1, bonus: 1 },
     xiaoxiao_punch: { ap: 1 }, xiaoxiao_heal: { ap: 1 }, xiaoxiao_combo: { ap: 1 }, xiaoxiao_return: { ap: 1 }
   };
@@ -956,12 +958,17 @@ function skillList(unit) {
     add({ id: "longge_chill", name: "冷气穿刺", hint: gun ? "手杖：近距离施加刺骨 / 霰弹枪：远距离特殊射击（蓝弹刺骨并治疗该区友方，红弹 0.5atk 火）" : "手杖 · 近距离 · 施加刺骨" });
     add({ id: "longge_spit", name: "吐酸", hint: "附赠 · 近距离 · 角色本身 atk 的酸液伤害 · 每场一次（兽人-蜥蜴种族特长）", bare: true });
     add({ id: "longge_safety", name: "解开保险", hint: "解锁扳机 · 查看最后一发子弹，可以把它移到最前面", minLv: 2 });
+    add({ id: "longge_heat", name: "热能轰击", hint: gun ? "手杖：近距离施加熔融 / 霰弹枪：近距离特殊射击（红弹：同区敌人熔融、同区友方治疗；蓝弹：同区友方各 1 冰击破）" : "手杖 · 近距离 · 施加熔融", minLv: 3 });
+    add({ id: "longge_drink", name: "饮弹", hint: "枪口对准自己 · 耗 1 弹 · 蓝弹：霜结并按蓝弹治疗自己 / 红弹：自己受 1atk 火，返还行动点", minLv: 6 });
+    add({ id: "longge_shuffle", name: "洗牌", hint: "把剩下的子弹重新随机排列 · 连续 2 红：随机敌人 1atk 火（3 红再一次） · 连续 2 蓝：治疗血量最低的队友（3 蓝再一次） · 都没有就窥探 1", minLv: 11 });
+    if (typeof passivePlus === "function" && passivePlus(unit, 2)) add({ id: "longge_reload", name: "完全换弹", hint: "子弹打光时 · 重新装上随机的 6 发（胶囊弹药+）" });
     add({ id: "longge_summon", name: "唤出小朋友", hint: "武器生物化" });
   }
   if (unit.kit === "xiaoxiao") {
     add({ id: "xiaoxiao_punch", name: "直冲拳", hint: "耗 1 弹 · 近距离 · 1atk 子弹属性 +2击破" });
     add({ id: "xiaoxiao_heal", name: "治疗支援", hint: "耗 1 弹 · 同区友方按子弹颜色治疗 · 然后收回武器" });
     add({ id: "xiaoxiao_combo", name: "连续拳", hint: "耗 3 弹 · 近距离 · 全红升龙拳 3atk 火 +3击破 / 全蓝撼地拳 2atk 冰 +5击破 / 混合每发红 0.75atk 火、蓝 0.5atk 冰 +1击破", minLv: 2 });
+    add({ id: "xiaoxiao_burst", name: "爆发治疗", hint: "耗 3 弹 · 只有接下来 3 发同色才能用 · 同区友方：全红回满生命 / 全蓝获得 2×（龙哥等级 + 5）临时护盾", minLv: 4 });
     add({ id: "xiaoxiao_return", name: "收回为武器", hint: "需与龙哥同区" });
   }
   if (isUnarmed(unit)) {

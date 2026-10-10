@@ -3507,6 +3507,7 @@
   G.restFood = G.restFood || {};
   G.restSleep = G.restSleep || {};
   G.restSpit = G.restSpit || {};
+  G.restAmmo = G.restAmmo || {};
   function renderRestSheet() {
     const t = typeof exhaustTier === "function" ? exhaustTier() : 0;
     $("g-rest-time").innerHTML = `第 <b>${LEDGER.day}</b> 天 <b>${clockText(LEDGER.clock == null ? 480 : LEDGER.clock)}</b> · 距上次长休 <b>${durationText(LEDGER.hours || 0)}</b> · ` +
@@ -3556,6 +3557,15 @@
         psel.onchange = () => { G.restSpit[h.kit] = psel.value; };
         psel.disabled = h.dead;
       }
+      // 龙哥 胶囊弹药+：长休时排下一场开局的弹序
+      if (typeof canOrderAmmo === "function" && canOrderAmmo(h)) {
+        const asel = document.createElement("select");
+        [""].concat(AMMO_ORDERS).forEach(v => { const o = document.createElement("option"); o.value = v; o.textContent = v ? `下一场弹序：${v.replace(/R/g, "红").replace(/B/g, "蓝")}` : "下一场弹序：开局随机"; asel.appendChild(o); });
+        asel.value = G.restAmmo[h.kit] != null ? G.restAmmo[h.kit] : ((LEDGER.ammoOrder || {})[h.kit] || "");
+        asel.onchange = () => { G.restAmmo[h.kit] = asel.value; };
+        asel.disabled = h.dead;
+        if (!psel) psel = asel; else { const both = document.createElement("span"); both.append(psel, asel); psel = both; }
+      }
       const sr = el("button", "g-btn", `短休（剩 ${shortRestLeft(h)}）`);
       sr.disabled = inFight || h.dead || shortRestLeft(h) <= 0;
       sr.onclick = () => { panelCommit({ action: "shortRest", kits: [h.kit] }); renderRestSheet(); };
@@ -3595,7 +3605,7 @@
     const food = {};
     partyHeroes().forEach(h => { food[h.kit] = G.restFood[h.kit] || defaultFoodFor(); });
     const hsel = $("g-long-hours");
-    return { hours: Number(hsel && hsel.value) || 8, food, sleep: Object.assign({}, G.restSleep), spit: Object.assign({}, G.restSpit), force: !!($("g-long-force") && $("g-long-force").checked) };
+    return { hours: Number(hsel && hsel.value) || 8, food, sleep: Object.assign({}, G.restSleep), spit: Object.assign({}, G.restSpit), ammo: Object.assign({}, G.restAmmo), force: !!($("g-long-force") && $("g-long-force").checked) };
   }
 
   function renderSaveSheet() {

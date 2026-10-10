@@ -5247,6 +5247,28 @@ function longgeBulletHeal(color, target, lines) {
   lines.push(`${LONGGE_AMMO[color].name}治疗 ${target.name}：${color === "blue" ? "固定 " + amt : "已损失 " + lost + " 的 40% = " + amt} → 恢复 ${got}。`);
   return got;
 }
+/** 枪管手杖+：霰弹枪普攻也能打近距离 */
+function longgeGunNear(a) {
+  const lg = a && a.kit === "longge" ? a : longgeOf();
+  return !!(lg && typeof passivePlus === "function" && passivePlus(lg, 1));
+}
+/** 爆发治疗能不能用：要 3 发子弹，而且接下来 3 发已经窥探到、是同一种颜色 */
+function longgeBurstWhy(a) {
+  const r = longgeRes(a) || { ammo: [], seen: [] };
+  if (r.ammo.length < 3) return "爆发治疗要 3 发子弹";
+  if (!(r.seen[0] && r.seen[1] && r.seen[2])) return "要先窥探到接下来 3 发的颜色";
+  if (!(r.ammo[0] === r.ammo[1] && r.ammo[1] === r.ammo[2])) return "接下来 3 发不是同一种颜色";
+  return null;
+}
+/** 胶囊弹药+：长休排好的下一场开局弹序（"RRBBRB" 这种 6 个字），没有就随机 */
+function longgeOpeningAmmo() {
+  const pre = typeof LEDGER !== "undefined" && LEDGER.ammoOrder && LEDGER.ammoOrder.longge;
+  if (typeof pre === "string" && /^[RB]{6}$/.test(pre) && (pre.match(/R/g) || []).length === 3) {
+    delete LEDGER.ammoOrder.longge;   // 只管下一场
+    return pre.split("").map(ch => ch === "R" ? "red" : "blue");
+  }
+  return longgeAmmoFresh();
+}
 /** 手杖协助攻击带的治疗给谁：所在区里血量比例最低的友方（含自己） */
 function longgeHealPick(a) {
   const pool = fieldUnits().filter(u => u.isPlayer && !u.dead && !u.hidden && !u.fused && Number(u.zone) === Number(a.zone));
@@ -6099,7 +6121,7 @@ function resetBattleFlags(u) {
   if (u.kit === "ras") { r.energyPct = 0; r.light = 0; r.unstable = false; }
   if (u.kit === "helu") { r.scanned = false; r.lockLeft = roleLockCap(u); }
   if (u.kit === "torque") r.acidCharge = null;
-  if (u.kit === "longge") { r.trigger = false; r.ammo = longgeAmmoFresh(); r.known = 0; r.spitUsed = false; r.assistMode = null; }
+  if (u.kit === "longge") { r.trigger = false; r.ammo = longgeOpeningAmmo(); r.seen = r.ammo.map(() => false); r.known = 0; r.spitUsed = false; r.assistMode = null; }
   if (typeof canSpit === "function" && canSpit(u.kit)) r.spitElement = spitElementOf(u.kit);   // 吐酸的属性（长休时改，记在队伍档案）
   u.focuses = [];
   u.bondAtk = 0;
@@ -8128,23 +8150,31 @@ function skillFlowSteps(id, actor, picks) {
         zoneDist(actor.zone, u.zone, state.zoneMode) <= 1)
     }];
   }
-  if (id === "longge_aa" || id === "longge_chill") {
-    // 枪管手杖：扳机解锁、有子弹时先选手杖（近距离）还是霰弹枪（远距离 = 距离 1）
+  if (id === "longge_aa" || id === "longge_chill" || id === "longge_heat") {
+    // 枪管手杖：扳机解锁、有子弹时先选手杖（近距离）还是霰弹枪（普攻 / 冷气穿刺是远距离 = 距离 1，热能轰击是近距离）
     const steps = [];
     const gun = longgeGunReady(actor);
     if (gun) {
+      const near = id === "longge_aa" && longgeGunNear(actor);   // 枪管手杖+：霰弹枪普攻也能打近距离
       steps.push({ key: "mode", type: "choice", optional: false, label: "用手杖还是霰弹枪",
         options: id === "longge_aa"
-          ? [{ value: "cane", label: "手杖：近距离 1atk 冰 +1 击破 · 窥探 1" }, { value: "gun", label: "霰弹枪：远距离 1.5atk 子弹属性 +1 击破（耗 1 弹）" }]
-          : [{ value: "cane", label: "手杖：近距离施加刺骨" }, { value: "gun", label: "霰弹枪：远距离特殊射击（耗 1 弹）" }] });
+          ? [{ value: "cane", label: "手杖：近距离 1atk 冰 +1 击破 · 窥探 1" }, { value: "gun", label: `霰弹枪：${near ? "近 / 远" : "远"}距离 1.5atk 子弹属性 +1 击破（耗 1 弹）` }]
+          : id === "longge_heat"
+            ? [{ value: "cane", label: "手杖：近距离施加熔融" }, { value: "gun", label: "霰弹枪：近距离特殊射击（耗 1 弹）" }]
+            : [{ value: "cane", label: "手杖：近距离施加刺骨" }, { value: "gun", label: "霰弹枪：远距离特殊射击（耗 1 弹）" }] });
     }
-    const d = gun && picks.mode === "gun" ? 1 : 0;
-    // 普通攻击也能打配置物 / 危墙 / 桥梁（冷气穿刺只是上刺骨，不打物件）
-    const structs = id === "longge_aa" ? structureTargets(actor, d, d) : [];
+    const gunPick = gun && picks.mode === "gun";
+    const ds = !gunPick || id === "longge_heat" ? [0] : (id === "longge_aa" && longgeGunNear(actor) ? [0, 1] : [1]);
+    // 普通攻击也能打配置物 / 危墙 / 桥梁（冷气穿刺、热能轰击只是上效果，不打物件）
+    const structs = id === "longge_aa" ? structureTargets(actor, Math.min(...ds), Math.max(...ds)) : [];
     steps.push({ key: "target", type: "unit", optional: false, structures: structs.length > 0,
-      label: d ? "射击目标（距离 1）" : "目标（同区）",
-      units: fieldUnits().filter(u => !u.isPlayer && !u.dead && !u.hidden && !u.fused && zoneDist(actor.zone, u.zone, state.zoneMode) === d).concat(structs) });
+      label: ds.includes(1) ? (ds.includes(0) ? "射击目标（距离 0 或 1）" : "射击目标（距离 1）") : "目标（同区）",
+      units: fieldUnits().filter(u => !u.isPlayer && !u.dead && !u.hidden && !u.fused && ds.includes(zoneDist(actor.zone, u.zone, state.zoneMode))).concat(structs) });
     return steps;
+  }
+  if (id === "xiaoxiao_burst") {
+    return [{ key: "target", type: "unit", optional: false, label: "治疗谁（同区友方）",
+      units: fieldUnits().filter(u => u.isPlayer && !u.dead && !u.hidden && !u.fused && Number(u.zone) === Number(actor.zone)) }];
   }
   if (id === "tou_aa") {
     const spend = picks.rangeMode === "far";
@@ -9464,6 +9494,10 @@ const SKILL_REQUIREMENT = {
   xiaoxiao_combo: (a) => (longgeRes(a) || { ammo: [] }).ammo.length >= 3 ? null : "连续拳要 3 发子弹",
   xiaoxiao_punch: (a) => (longgeRes(a) || { ammo: [] }).ammo.length ? null : "没有子弹了",
   xiaoxiao_heal:  (a) => (longgeRes(a) || { ammo: [] }).ammo.length ? null : "没有子弹了",
+  xiaoxiao_burst: (a) => longgeBurstWhy(a),
+  longge_drink:   (a) => (longgeRes(a) || { ammo: [] }).ammo.length ? null : "没有子弹了",
+  longge_shuffle: (a) => (longgeRes(a) || { ammo: [] }).ammo.length >= 2 ? null : "剩下的子弹不到 2 发，洗不了",
+  longge_reload:  (a) => !(typeof passivePlus === "function" && passivePlus(a, 2)) ? "需要胶囊弹药+" : (longgeRes(a) || { ammo: [1] }).ammo.length ? "子弹还没打光" : null,
   yuito_summon:   (a) => weaponSummonWhy(a, "latte"),
   tou_summon:     (a) => weaponSummonWhy(a, "mochi"),
   xia_summon:     (a) => weaponSummonWhy(a, "berniel"),
@@ -9688,19 +9722,27 @@ function skillTargetError(a, id, t) {
     if (t2 && (zoneOf(t2) == null || zoneDist(a.zone, zoneOf(t2), state.zoneMode) !== 1)) return "第二个目标要在距离 1";
   }
   // 龙哥 / 小朋友的近程技能打飞行目标：要多付 1 附赠行动，付不起就先拦下（免得子弹白白消耗）
-  if (["longge_aa", "longge_chill", "longge_spit", "xiaoxiao_punch", "xiaoxiao_combo"].includes(id) && !isStructureToken(state.targetId)) {
+  if (["longge_aa", "longge_chill", "longge_heat", "longge_spit", "xiaoxiao_punch", "xiaoxiao_combo"].includes(id) && !isStructureToken(state.targetId)) {
     const fl = state.skillFlow;
     const tgt = (fl && fl.picks && fl.picks.target) ? unitById(fl.picks.target) : t;
-    const gun = (id === "longge_aa" || id === "longge_chill") && longgeMode(a) === "gun";
+    const gun = (id === "longge_aa" || id === "longge_chill" || id === "longge_heat") && longgeMode(a) === "gun";
     const needBonus = (skillCost(id).bonus || 0) + 1;
     if (tgt && tgt.flying && !a.flying && !gun && Number(tgt.zone) === Number(a.zone) && (Number(a.bonus) || 0) < needBonus) return `${tgt.name} 在飞行，近程攻击需要额外 1 附赠行动`;
   }
-  if ((id === "longge_aa" || id === "longge_chill") && !isStructureToken(state.targetId)) {
+  if ((id === "longge_aa" || id === "longge_chill" || id === "longge_heat") && !isStructureToken(state.targetId)) {
     const fl = state.skillFlow;
     const tgt = (fl && fl.picks && fl.picks.target) ? unitById(fl.picks.target) : t;
     if (!tgt) return null;
     const gun = longgeMode(a) === "gun";
-    if (zoneDist(a.zone, tgt.zone, state.zoneMode) !== (gun ? 1 : 0)) return gun ? "霰弹枪只能打距离 1 的目标" : "手杖只能打同区的目标";
+    const d = zoneDist(a.zone, tgt.zone, state.zoneMode);
+    if (id === "longge_heat") { if (d !== 0) return "热能轰击只能打同区的目标"; }
+    else if (gun && id === "longge_aa" && longgeGunNear(a)) { if (d > 1) return "霰弹枪打不到这么远"; }
+    else if (d !== (gun ? 1 : 0)) return gun ? "霰弹枪只能打距离 1 的目标" : "手杖只能打同区的目标";
+  }
+  if (id === "xiaoxiao_burst") {
+    const fl = state.skillFlow;
+    const tgt = (fl && fl.picks && fl.picks.target) ? unitById(fl.picks.target) : t;
+    if (tgt && (!tgt.isPlayer || Number(tgt.zone) !== Number(a.zone))) return "爆发治疗只能给同区的友方";
   }
   if (id === "tou_aa" && !isStructureToken(state.targetId)) {
     const fl = state.skillFlow;
@@ -9926,7 +9968,7 @@ function runSkillInner(id, optRun) {
     }
     // 龙哥普攻：手杖只打同区，霰弹枪只打距离 1
     const lgGun = id === "longge_aa" && longgeMode(a) === "gun";
-    if (id === "longge_aa" && !tokZones.some(z => zoneDist(a.zone, z, state.zoneMode) === (lgGun ? 1 : 0))) {
+    if (id === "longge_aa" && !tokZones.some(z => { const d = zoneDist(a.zone, z, state.zoneMode); return lgGun ? (d === 1 || (d === 0 && longgeGunNear(a))) : d === 0; })) {
       paintSkillLog(lgGun ? "霰弹枪只能打距离 1 的目标。" : "手杖只能打同区的目标。");
       return;
     }
@@ -11495,7 +11537,14 @@ function runSkillInner(id, optRun) {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       if (longgeMode(a) === "gun") {
         const c = longgeTakeBullet(a, lines);
-        hitOne(a, t, { element: LONGGE_AMMO[c].element, mult: 1.5, baseBreak: 1, atk, atkRange: "ranged" });
+        const near = Number(t.zone) === Number(a.zone);
+        hitOne(a, t, { element: LONGGE_AMMO[c].element, mult: 1.5, baseBreak: 1, atk, atkRange: near ? "melee" : "ranged" });
+        // 枪管手杖+：近距离打出火弹，同区其他敌人各受 0.75×atk 火焰
+        if (near && c === "red") {
+          const others = visibleEnemies(a.zone).filter(u => u.id !== t.id);
+          if (others.length) lines.push("近距离火弹：火焰溅到同区其他敌人。");
+          others.forEach(u => hitOne(a, u, { element: "fire", mult: 0.75, baseBreak: 0, atk, flags: { action: true, aoe: true }, usePrep: false }));
+        }
       } else {
         hitOne(a, t, { element: "ice", mult: 1, baseBreak: 1, atk, atkRange: "melee" });
         longgePeek(a, 1, lines);   // 手杖普攻：窥探 1
@@ -11569,6 +11618,87 @@ function runSkillInner(id, optRun) {
         hitOne(a, t, { element: LONGGE_AMMO[c].element, mult: 1.5, baseBreak: 0, atk, flags: { action: true, assist: true } });
       }
       longgePeek(a, 2, lines);   // 无论哪种模式都窥探 2
+    } else if (id === "longge_heat") {
+      // 热能轰击：手杖 → 近距离敌人熔融；霰弹枪（近距离特殊射击）→ 红弹：同区所有敌人熔融、同区所有友方（含自己）按红弹治疗；
+      // 蓝弹：子弹气化，同区所有友方各受 1 冰击破（可能被打进失衡，触发敌人的协助攻击）
+      if (!needT()) return paintSkillLog(lines.join("\n"));
+      if (longgeMode(a) === "gun") {
+        const c = longgeTakeBullet(a, lines);
+        const z = Number(a.zone);
+        const allies = fieldUnits().filter(u => u.isPlayer && !u.dead && !u.hidden && !u.fused && Number(u.zone) === z);
+        if (c === "red") {
+          lines.push("热能轰击（霰弹枪 · 红弹）：子弹化作散射的火焰。");
+          visibleEnemies(z).forEach(u => applyInstantEffect(u, "melt", lines));
+          allies.forEach(u => longgeBulletHeal("red", u, lines));
+        } else {
+          lines.push("热能轰击（霰弹枪 · 蓝弹）：子弹瞬间气化。");
+          allies.forEach(u => dealBreak(u, 1, "ice", lines, "热能轰击（蓝弹气化）", { by: a }));
+        }
+      } else {
+        lines.push(`热能轰击（手杖）：${t.name} 熔融。`);
+        applyInstantEffect(t, "melt", lines);
+      }
+    } else if (id === "longge_drink") {
+      // 饮弹：枪口对准自己，消耗 1 发。蓝弹 → 霜结，并按蓝弹治疗自己；红弹 → 自己受 1×atk 火焰，返还行动点
+      const c = longgeTakeBullet(a, lines);
+      if (!c) lines.push("没有子弹了。");
+      else if (c === "blue") {
+        lines.push("饮弹（蓝弹）：进入霜结。");
+        lines.push(...castSelfEffect(a, "frost", []));
+        longgeBulletHeal("blue", a, lines);
+      } else {
+        lines.push("饮弹（红弹）：火焰灼身，行动点返还。");
+        applyTypedDot(a, Math.max(1, Math.floor(atk)), "fire", lines, `${a.name} 饮弹（红弹）`);
+        a.ap = (Number(a.ap) || 0) + (Number(skillCost(id).ap) || 1);
+      }
+    } else if (id === "longge_shuffle") {
+      // 洗牌：剩下的子弹重新随机排列（看过的颜色作废）。连续 2 红：随机敌人 1×atk 火；连续 3 红再来一次。
+      // 连续 2 蓝：治疗血量最低的队友（蓝弹治疗）；连续 3 蓝再治疗一名血量不满的队友。都没有就窥探 1
+      const r = longgeRes(a);
+      for (let i = r.ammo.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [r.ammo[i], r.ammo[j]] = [r.ammo[j], r.ammo[i]]; }
+      r.seen = r.ammo.map(() => false);
+      longgeSyncKnown(r);
+      lines.push(`洗牌：剩下的 ${r.ammo.length} 发重新排列（之前看过的颜色作废）。`);
+      const runOf = (color) => { let best = 0, cur = 0; r.ammo.forEach(c => { cur = c === color ? cur + 1 : 0; best = Math.max(best, cur); }); return best; };
+      const redRun = runOf("red"), blueRun = runOf("blue");
+      const pickRandom = (list) => list[Math.floor(Math.random() * list.length)];
+      for (let k = 0; k < (redRun >= 3 ? 2 : redRun >= 2 ? 1 : 0); k++) {
+        const foes = fieldUnits().filter(u => !u.isPlayer && !u.dead && !u.hidden && !u.fused);
+        const f = pickRandom(foes);
+        if (!f) break;
+        lines.push(`洗牌：连续红弹，火焰打向 ${f.name}。`);
+        hitOne(a, f, { element: "fire", mult: 1, baseBreak: 0, atk, atkRange: "any", flags: { action: true }, usePrep: false });
+      }
+      for (let k = 0; k < (blueRun >= 3 ? 2 : blueRun >= 2 ? 1 : 0); k++) {
+        const pals = fieldUnits().filter(u => u.isPlayer && !u.dead && !u.hidden && !u.fused);
+        const ratio = u => totalHp(u) / Math.max(1, totalMaxHp(u));
+        const target = k === 0 ? pals.slice().sort((x, y) => ratio(x) - ratio(y))[0] : pickRandom(pals.filter(u => totalHp(u) < totalMaxHp(u)));
+        if (!target) break;
+        lines.push(`洗牌：连续蓝弹，治疗 ${target.name}。`);
+        longgeBulletHeal("blue", target, lines);
+      }
+      if (redRun < 2 && blueRun < 2) longgePeek(a, 1, lines);
+    } else if (id === "longge_reload") {
+      // 胶囊弹药+：子弹打光后花 1 行动点完全换弹，重新获得随机的 6 发
+      const r = longgeRes(a);
+      r.ammo = longgeAmmoFresh();
+      r.seen = r.ammo.map(() => false);
+      longgeSyncKnown(r);
+      lines.push("完全换弹：重新装上 6 发（顺序随机）。扳机要重新解锁。");
+    } else if (id === "xiaoxiao_burst") {
+      // 爆发治疗：消耗 3 发（接下来 3 发必须同色，见 longgeBurstWhy）。全红 → 同区友方生命回满；全蓝 → 获得 2×（龙哥等级 + 5）临时护盾
+      if (!needT()) return paintSkillLog(lines.join("\n"));
+      if (!t.isPlayer || Number(t.zone) !== Number(a.zone)) { lines.push("爆发治疗只能给同区的友方。"); return paintSkillLog(lines.join("\n")); }
+      const shots = [longgeTakeBullet(a, lines), longgeTakeBullet(a, lines), longgeTakeBullet(a, lines)].filter(Boolean);
+      if (shots.length === 3 && shots.every(c => c === "red")) {
+        const got = healUnit(t, Math.max(0, totalMaxHp(t) - totalHp(t)));
+        lines.push(`爆发治疗（全红）：${t.name} 生命回满（恢复 ${got}）。`);
+      } else if (shots.length === 3 && shots.every(c => c === "blue")) {
+        const lg = longgeOf();
+        const amt = 2 * (((lg && lg.level) || 1) + 5);
+        addShieldLayer(t, amt, false);
+        lines.push(`爆发治疗（全蓝）：${t.name} 获得 ${amt} 点临时护盾。`);
+      } else lines.push("三发子弹颜色不一样，爆发治疗没有效果。");
     } else if (id === "xiaoxiao_punch") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       const c = longgeTakeBullet(a, lines);

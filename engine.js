@@ -378,7 +378,8 @@ const SKILL_RANGE = {
   longge_chill: { min: 0, max: 1 },
   longge_spit: { min: 0, max: 0 },     // 吐酸：近距离
   xiaoxiao_punch: { min: 0, max: 0 },  // 直冲拳：近距离
-  xiaoxiao_combo: { min: 0, max: 0 }   // 连续拳：近距离
+  xiaoxiao_combo: { min: 0, max: 0 },  // 连续拳：近距离
+  longge_heat: { min: 0, max: 0 },     // 热能轰击：手杖、霰弹枪都是近距离
 };
 
 /* 技能能选哪一边的目标。界面原本是从提示文字里猜的（出现「友方」就只让选友方），
