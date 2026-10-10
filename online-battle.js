@@ -105,8 +105,22 @@
       cards.forEach(c => c.wrap.remove());
     }
 
+    /** 正在选目标 / 区域时，能选的按选项顺序编号（①②…）：同名的敌人（两只狂徒）也分得清是哪一只 */
+    function pickNumbers(ui, kind) {
+      if (!ui.menu || ui.menu.kind !== kind) return null;
+      const map = new Map(); let n = 0;
+      (ui.menu.options || []).forEach(o => { if (!o.disabled && o.value != null && o.value !== "") map.set(String(o.value), ++n); });
+      return map;
+    }
+    function setPickBadge(node, n) {
+      let b = node.querySelector(":scope > .ob-pick-no");
+      if (!n) { if (b) b.remove(); return; }
+      if (!b) { b = document.createElement("span"); b.className = "ob-pick-no"; b.setAttribute("aria-hidden", "true"); node.appendChild(b); }
+      b.textContent = String(n);
+    }
     function paintZones(data, ui) {
-      const zoneOpts = ui.menu && ui.menu.kind === "zone" ? new Set((ui.menu.options || []).filter(o => !o.disabled && o.value != null).map(o => Number(o.value))) : null;
+      const zoneNo = pickNumbers(ui, "zone");
+      const zoneOpts = zoneNo ? new Set([...zoneNo.keys()].map(Number)) : null;
       field.querySelectorAll(".g-zone").forEach(z => {
         const f = (data.fields || {})[z.dataset.num] || null;
         const cls = fieldClass(f), tags = fieldText(f);
@@ -114,6 +128,7 @@
         if (cls) z.classList.add(cls);
         z.querySelector(".zlabel").textContent = `${z.dataset.num} 区${tags ? "　" + tags : ""}`;
         z.classList.toggle("is-move-target", !!(zoneOpts && zoneOpts.has(Number(z.dataset.num))));
+        setPickBadge(z, zoneNo ? zoneNo.get(String(z.dataset.num)) : 0);
       });
       field.querySelectorAll(".g-gap").forEach(g => {
         const gp = (data.gaps || {})[g.dataset.key] || {};
@@ -129,7 +144,8 @@
       const snaps = (data.units || []).filter(u => !u.hidden).map(snapUnit)
         .concat((data.props || []).filter(p => !p.destroyed).map(snapProp));
       const seen = new Set();
-      const targets = ui.menu && ui.menu.kind === "unit" ? new Set((ui.menu.options || []).filter(o => !o.disabled && o.value != null).map(o => String(o.value))) : null;
+      const targetNo = pickNumbers(ui, "unit");
+      const targets = targetNo ? new Set(targetNo.keys()) : null;
       snaps.forEach(s => {
         seen.add(s.id);
         let c = cards.get(s.id);
@@ -146,6 +162,7 @@
         c.wrap.classList.toggle("is-actor", !!ui.current && s.id === ui.current && !!ui.acting);
         c.wrap.classList.toggle("is-targetable", !!targets && targets.has(s.id));
         c.wrap.classList.toggle("is-dim", !!targets && !targets.has(s.id) && s.id !== ui.current);
+        setPickBadge(c.wrap, targetNo ? targetNo.get(s.id) : 0);
       });
       cards.forEach((c, id) => { if (!seen.has(id)) { c.wrap.remove(); cards.delete(id); } });
     }
