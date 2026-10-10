@@ -421,18 +421,8 @@
     const rows = list.filter(s => s && s.id && !seen[s.id] && (seen[s.id] = true)).map(s => ({
       id: s.id, name: s.name, cost: skillCostText(s.id), hint: s.hint || "", text: skillText(s.id) || s.hint || ""
     }));
-    // 还没到等级的技能：用高等级的副本列出来，标上解锁等级（只列角色自己的技能，职责技能按升级选择）
-    const later = [];
-    try {
-      const probe = Object.assign({}, u, { level: 99, roles: null, role2: null, resources: Object.assign({}, u.resources || {}) });
-      (skillList(probe) || []).forEach(s => {
-        if (!s || !s.id || seen[s.id] || !s.minLv || s.minLv <= (u.level || 1)) return;
-        seen[s.id] = true;
-        later.push({ id: s.id, name: s.name, minLv: s.minLv, cost: skillCostText(s.id), hint: s.hint || "", text: skillText(s.id) || s.hint || "" });
-      });
-    } catch (e) { /* 预览失败就不列 */ }
-    later.sort((a, b) => a.minLv - b.minLv);
-    return { now: rows, later };
+    // 当前等级还没有的技能不展示。skillList 已经按 minLv 滤过，升级后会自动出现在 now 里。
+    return { now: rows, later: [] };
   }
   /** 武器补正系数和改装槽：{ coefs: [{ attr, name, coef }], slots: [{ id, name, text }|null] } */
   function weaponModRows(owner, kit) {

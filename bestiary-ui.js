@@ -255,7 +255,7 @@ const Bestiary = (() => {
             : i < 2 && !p.plus ? `<div class="hx-plus dim">被动升级：待定</div>` : ""}</li>`).join("")}</ul>`);
       const skillLi = (k, lock) => textItem(k.name, k.text, [k.cost, lock ? `Lv${k.minLv} 解锁` : ""].filter(Boolean).join(" · "));
       const roleIds = new Set((e.roleSkills || []).map(k => k.id));   // 职责技能单独列一节
-      body += sec("技能", `<ul class="bx-abil">${s.skills.now.filter(k => !roleIds.has(k.id)).map(k => skillLi(k)).join("")}${s.skills.later.filter(k => !roleIds.has(k.id)).map(k => skillLi(k, true)).join("")}</ul>`);
+      body += sec("技能", `<ul class="bx-abil">${s.skills.now.filter(k => !roleIds.has(k.id)).map(k => skillLi(k)).join("")}</ul>`);
       const ms = typeof ROLE_MILESTONES !== "undefined" ? ROLE_MILESTONES.join(" / ") : "5 / 10 / 15";
       if ((e.roleSkills || []).length) body += sec("职责技能", `<ul class="bx-abil">${e.roleSkills.map(k => textItem(k.name, k.text,
           [`${k.label}「${k.role}」${k.n}`, k.cost].filter(Boolean).join(" · "))).join("")}</ul>
@@ -269,7 +269,7 @@ const Bestiary = (() => {
           <div><small>格挡加成</small><b>${w.blockBonus != null ? "+" + w.blockBonus + "%" : "—"}</b></div>
         </div>
         <ul class="bx-abil">${(w.passives || []).map(p => textItem(p.name, p.text)).join("")}
-          ${((w.skills && w.skills.now) || []).concat((w.skills && w.skills.later) || []).map(k => skillLi(k, !!k.minLv)).join("")}
+          ${((w.skills && w.skills.now) || []).map(k => skillLi(k)).join("")}
           ${w.assistBlock ? textItem("协助格挡", w.assistBlock) : ""}
           ${w.growth ? textItem("成长", w.growth) : ""}</ul>`)).join("");
     }
