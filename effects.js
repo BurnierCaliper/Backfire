@@ -153,21 +153,33 @@ function afterAttackDealt(a, t, element, res, opt, notes) {
       });
     }
   }
-  // 导体：每三次攻击都会让第三次攻击额外击中一个随机敌对目标；雷鸣下变为每两次一次
+  // 导体：按攻击段数计数，不是按一次攻击行动。每三段让这一段再打到一个随机敌对目标；
+  // 雷鸣下变为每两段一次。额外打出去的是触发的那一段（取这一段打出去的伤害，不按原目标剩余血量封顶），
+  // 不是把整次多段攻击重放一遍。额外那一下自己不再计数，避免连环触发。
   if (a.self === "conductor" && !flags.conductorExtra) {
-    a._conductorHits = (Number(a._conductorHits) || 0) + 1;
+    const segs = (res.perHit && res.perHit.length) ? res.perHit : [{ intended: res.intended || res.total || 0, dealt: res.total || 0, breakDealt: res.breakDealt || 0 }];
     const every = currentWeatherFor(a) === "thunder" ? 2 : 3;
-    if (a._conductorHits % every === 0) {
+    segs.forEach(seg => {
+      a._conductorHits = (Number(a._conductorHits) || 0) + 1;
+      if (a._conductorHits % every !== 0) return;
       const pool = enemiesOf(a).filter(x => x.id !== t.id);
-      const extra = pool[Math.floor(Math.random() * pool.length)];
-      if (extra) {
-        notes.push(`${a.name} 导体：第 ${a._conductorHits} 次攻击额外击中 ${extra.name}。`);
-        const out = dealTo(a, extra, Object.assign({}, opt, {
-          flags: Object.assign({}, flags, { conductorExtra: true, blockResolved: true, block: "none" })
-        }));
-        if (out && out.extra) notes.push(...out.extra);
-      }
-    }
+      const extra = pool.length ? pool[Math.floor(Math.random() * pool.length)] : null;
+      if (!extra) return;
+      const dmg = Math.max(0, Number(seg.intended) || Number(seg.dealt) || 0);
+      const br = Math.max(0, Number(seg.breakDealt) || 0);
+      notes.push(`${a.name} 导体：第 ${a._conductorHits} 段额外击中 ${extra.name}（这一段 ${dmg}${br ? "，击破 " + br : ""}）。`);
+      if (dmg <= 0 && br <= 0) return;
+      const out = dealTo(a, extra, {
+        element: element,
+        mult: 0,
+        flat: dmg,
+        hits: 1,
+        baseBreak: br,
+        atk: 0,
+        flags: Object.assign({}, flags, { conductorExtra: true, blockResolved: true, block: "none", action: true })
+      });
+      if (out && out.extra) notes.push(...out.extra);
+    });
   }
 }
 
