@@ -166,7 +166,10 @@
     if (own(cmd, "dest")) fail("技能位置请使用分步选择");
     const sk = enemySkillList(a).find(s => s.id === cmd.skill);
     if (!sk || /协助|借机/.test(sk.label) || /_assist$|_opp$|_block$/.test(cmd.skill)) fail("这个敌人没有这项主动技能");
-    if ((a.ap || 0) < 1) fail("行动点不足");
+    // 技能花费：默认 1 行动点；赤牙的霰弹枪 / 掩体 2 行动点，追猎 1 附赠（enemies.js · enemySkillCost）
+    const cost = typeof enemySkillCost === "function" ? enemySkillCost(a, cmd.skill) : { ap: 1, bonus: 0 };
+    if ((a.ap || 0) < cost.ap) fail("行动点不足");
+    if ((a.bonus || 0) < cost.bonus) fail("附赠行动不足");
     if (cmd.skill === "en_chi_shot" && !(a.resources && a.resources.primed)) fail("霰弹枪尚未预热");
     const t = cmd.target == null ? null : unit(cmd.target);
     if (t && !present(t)) fail("目标不在场");

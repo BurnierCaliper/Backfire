@@ -693,7 +693,7 @@ const WEAPON_DEX = {
   bili: 2, vitas: 8, torque: 4, ecmo: 3, edc: 4, xiaoxiao: 5   // 小朋友：空手 30% + 武器 30% = 角色卡的 60%
 };
 /** 不是玩家角色、也没有敏捷的友方单位（剧情 NPC）沿用固定格挡率 */
-const FIXED_BLOCK = { captain_ox: 40, patrol_car: 40 };
+const FIXED_BLOCK = { captain_ox: 40, patrol_car: 40, chixia: 70 };   // 赤牙：受击时为自己格挡 70%（第九章）
 
 function unitDex(unit) {
   if (!unit) return 5;

@@ -1461,6 +1461,8 @@ function canControlUnit(u) {
 const SAND_HEADWIND_KEEP = 0.25;
 function refreshEnemyEconomy(u, notes) {
   if (!u || u.isPlayer) return;
+  const loseAp = !!u.loseApNext;   // 「下回合失去行动点」（同 refreshEconomy）
+  u.loseApNext = false;
   if (u.stunned || u.dead) {
     u.ap = 0; u.apMax = 0; u.bonus = 0; u.bonusMax = 0;
     return;
@@ -1487,6 +1489,7 @@ function refreshEnemyEconomy(u, notes) {
     u.statuses.unstable = false;
     if (notes) notes.push(`${u.name} 不稳：这回合失去附赠动作。`);
   }
+  if (loseAp) ap = 0;
   u.ap = Math.max(0, ap);
   u.apMax = u.ap;
   u.bonus = Math.max(0, bonus);
@@ -1535,7 +1538,8 @@ function beginRound(notes) {
       clearShift(u);
       notes.push(`${u.name} 错位结束，血层顺序恢复。`);
     }
-    if (held.indexOf("overload") < 0 && typeof overloadRoundStart === "function" && overloadRoundStart(u, notes)) u._noShieldRefill = true;
+    // 黄金时间延长的过载这回合不结束；还在飞的高压巡逻艇一直过载（下面重新给它过载），旧的过载不在这里清零护盾（enemies.js · boatKeepsOverload）
+    if (held.indexOf("overload") < 0 && typeof overloadRoundStart === "function" && !(typeof boatKeepsOverload === "function" && boatKeepsOverload(u)) && overloadRoundStart(u, notes)) u._noShieldRefill = true;
     if (typeof meltShieldRoundStart === "function" && meltShieldRoundStart(u, notes)) u._noShieldRefill = true;
     if (u.resources && u.resources.frostShell) { u.resources.frostShell = false; notes.push(`${u.name} 再次霜结的完全免疫结束。`); }
     if (typeof selfImmunities === "function") selfImmunities(u, notes);
@@ -1573,12 +1577,18 @@ function beginRound(notes) {
       u.resources.reflect = true;
       notes.push(`${u.name}：本回合第一次受到的攻击伤害将以能量属性反弹（不反弹击破）。`);
     }
-    if (u.kit === "spreader") {
+    if (u.kit === "spreader" && !u.dead && !u.hidden) {   // 死掉（还没清出场）的播撒者不再铺酸液
       const f = state.fields[u.zone] || emptyField();
       const err = setZoneField(u.zone, "acid");
-      notes.push(err || `${u.name} 低空作业：${u.zone} 区生成酸液地面（自身飞行免疫）。`);
+      notes.push(err || `${u.name} 低空作业：${u.zone} 区生成酸液地面（对自身无效）。`);
     }
-    if (u.kit === "chixia" && u.resources) u.resources.cover = false;
+    if (u.kit === "patrolboat" && typeof boatOverloadRoundStart === "function") boatOverloadRoundStart(u, notes);
+    // 赤牙的掩体「一回合内」有效：撑过我方回合，到她下次出手为止（enemies.js）；一直没出手的，过了一整回合在这里撤掉。
+    // 以前在这里一律清掉，我方回合开始前掩体就没了
+    if (u.kit === "chixia" && u.resources && u.resources.cover && Number(state.turnNo) >= (Number(u.resources.coverTurn) || 0) + 2) {
+      u.resources.cover = false;
+      notes.push(`${u.name} 的掩体撤掉了。`);
+    }
     if (u.kit === "boomcar" && u.resources && u.resources.fuse != null) {
       if (u.resources.fuse <= 0) notes.push(`${u.name} 引信已到，请点「引爆」。`);
       else notes.push(`${u.name} 引信 ${u.resources.fuse} 回合后自爆。`);
@@ -1613,7 +1623,7 @@ function beginRound(notes) {
     const weather = currentWeatherFor(u);
     const f = state.fields[u.zone] || emptyField();
     if (f.energy) tickEnergyFieldFor(u, f, notes);
-    if (f.acid && !u.flying) tickAcidFieldFor(u, weather, notes);
+    if (f.acid && !u.flying && u.kit !== "spreader") tickAcidFieldFor(u, weather, notes);   // 播撒者被击落后也不吃自己铺的酸液（手册：对自身无效）
     if (f.heal) tickHealFieldFor(u, weather, notes);
     if (f.ice && !u.flying && !fieldExempt(u)) {
       notes.push(`${u.name} 处于冻土：对冰强制 25% 易伤。离开或进入时会自动结算运动检定与冰击破。`);
@@ -1653,11 +1663,17 @@ function beginRound(notes) {
     if (weather === "sand") {
       notes.push(`${u.name} ${sandWindActionText(u)}`);
     }
-    if (sand && !u.sandLocked) {
+    // 扬尘体的沙尘也只在这里每回合回复一次（以前回合结束另有一段「悬沙」，叠起来回两次）。
+    // 手册「被击落则本回合不回复」：击落是永久落地，上次回复时还在飞、现在不飞了，就是这一回合被击落的
+    const dustDown = u.kit === "dustbody" && !!u._dustFlying && !u.flying;
+    if (u.kit === "dustbody") u._dustFlying = !!u.flying;
+    if (sand && !u.sandLocked && !dustDown) {
       let regen = u.level || 1;
       if (weather === "sand") regen *= 2 * envMult(u);
       sand.current = Math.min(sand.max, Number(sand.current) + regen);
       notes.push(`${u.name} 沙尘恢复 ${regen}${weather === "sand" ? "（沙暴翻倍，与风向无关）" : ""}`);
+    } else if (sand && dustDown) {
+      notes.push(`${u.name} 被击落：本回合沙尘不回复。`);
     }
     if (!u.gotHitThisTurn && !u._noShieldRefill) {
       (u.layers || []).forEach(l => {
@@ -1944,13 +1960,7 @@ function turnEnd() {
       u.statuses.inspire = false;
       notes.push(`${u.name} 振奋结束`);
     }
-    if (u.kit === "dustbody" && !u.stunned) {
-      const sand = (u.layers || []).find(l => l.type === "sand");
-      if (sand) {
-        sand.current = Math.min(sand.max, sand.current + (u.level || 1));
-        notes.push(`${u.name} 悬沙：沙尘 +${u.level}。`);
-      }
-    }
+    // 扬尘体的沙尘回复在回合开始（沙尘层的通用回复，被击落的那一回合不回），这里不再另回一次
     if (u.kit === "boomcar" && u.resources && u.resources.fuse != null) {
       u.resources.fuse -= 1;
     }
@@ -3978,8 +3988,9 @@ function applyCombat(target, result, attacker) {
       notes.push(`飞碟触灵剩余机械足 ${left}。`);
       if (left <= 0 && !body._xpGiven) {
         body.dead = true;
-        body._xpGiven = true;
-        grantXpToPlayers(xpDrop("boss", body.level), "击破飞碟触灵");
+        if (attacker && attacker.isPlayer) body._lastHitBy = attacker.id;
+        // 和别的首领一样走击杀结算：首领击杀分、跑团经验倍率、掉落（以前直接发经验，这些都漏了）
+        settleEnemyKill(body, notes);
         notes.push("全部机械足被摧毁，飞碟触灵死亡。");
       }
     }
@@ -3994,10 +4005,7 @@ function applyCombat(target, result, attacker) {
   if (target.kit === "ufo_body" && result.ok && (result.intended || result.total)) {
     const raw = result.intended || result.total;
     notes.push(...drainUfoLegs(target, raw));
-    if (target.dead && !target._xpGiven) {
-      target._xpGiven = true;
-      grantXpToPlayers(xpDrop("boss", target.level), "击破飞碟触灵");
-    }
+    if (target.dead && !target._xpGiven) settleEnemyKill(target, notes);
   }
   checkHighBoom(target);
   const shieldAfter = (target.layers || []).filter(l => l.type === "shield").reduce((s, l) => s + Number(l.current || 0), 0);
@@ -4290,10 +4298,7 @@ function sweepDeadEnemies() {
       if (body && ufoLivingLegs(body).filter(x => x.id !== u.id && !x._removed).length <= 0) {
         body.dead = true;
         notes.push("全部机械足被摧毁，飞碟触灵死亡。");
-        if (!body._xpGiven) {
-          body._xpGiven = true;
-          grantXpToPlayers(xpDrop("boss", body.level), "击破飞碟触灵");
-        }
+        if (!body._xpGiven) settleEnemyKill(body, notes);   // 击杀结算（首领击杀分、跑团经验倍率、掉落）
         removeEnemyFromField(body, notes);
       }
     }
@@ -4423,6 +4428,9 @@ function ambushSkipRound() {
 }
 function refreshEconomy(u) {
   if (!u || !u.isPlayer) return;
+  // 肉体操控（沙灵聚合体三阶段）：这一回合失去行动点（附赠动作照常）。标记只管一回合，不管这回合能不能行动都用掉
+  const loseAp = !!u.loseApNext;
+  u.loseApNext = false;
   if (u.escort) { u.ap = 0; u.apMax = 0; u.bonus = 0; u.bonusMax = 0; return; }   // 护送对象玩家不能操作
   if (typeof isCrushing === "function" && isCrushing(u)) {
     u.ap = 0; u.apMax = 0; u.bonus = 0; u.bonusMax = 0;
@@ -4454,6 +4462,7 @@ function refreshEconomy(u) {
   }
   if (state.fields[u.zone] && state.fields[u.zone].energy) ap += 1;
   if (typeof bpEconomy === "function") ({ ap, bonus } = bpEconomy(u, { ap, bonus }));   // 单局图纸
+  if (loseAp) ap = 0;
   u.ap = Math.max(0, ap);
   u.apMax = u.ap;
   u.bonus = Math.max(0, bonus);
@@ -4526,6 +4535,7 @@ function finalBlockChance(helper, attacker, protectedUnit, atkRange) {
   let c = typeof blockChanceRaw === "function" ? blockChanceRaw(helper) : blockChance(helper);   // 先不封顶，加完修正再封顶
   if (c == null) c = 50;
   c += highlandBlockMod(helper, attacker, atkRange);
+  if (attacker && Number(attacker.blockMalus) > 0) c -= Number(attacker.blockMalus);   // 赤牙霰弹枪：对这一枪的协助格挡 −40%
   if (helper.self === "anchor") c += 10;   // 千钧：格挡成功率 +10%
   if (helper.kit === "xiaoxiao" && protectedUnit && protectedUnit.kit === "longge") c += 15;   // 小朋友守护龙哥：60% → 75%
   if (helper.rallyBlock) c += helper.rallyBlock;
@@ -5373,8 +5383,9 @@ function eligibleAssisters(breaker, broken) {
       !u.dead && !u.hidden && !u.stunned &&
       (unitCanFight(u) || u.kit === "ufo_body") &&
       u.kit !== "ufo_leg" &&
-      (!breaker || u.id !== breaker.id || u.kit === "ufo_body") &&
-      !(typeof touDuelVictim === "function" && touDuelVictim(u) && broken.kit !== "tou")
+      (!breaker || u.id !== breaker.id || u.kit === "ufo_body" || u.kit === "chixia") &&   // 飞碟触灵、赤牙（剿灭）可以接自己打出的失衡
+      !(typeof touDuelVictim === "function" && touDuelVictim(u) && broken.kit !== "tou") &&
+      (typeof enemyMayAssist !== "function" || enemyMayAssist(u))   // 被挟持的王、哗变的狂徒不对我方出手（enemies.js）
     );
   }
   // 只列真正能出手的人：濒死没起身、失衡、抓在敌人身上的不行（以前飞碟本体失衡时这些人也列进来，
@@ -5616,13 +5627,15 @@ function finishAssist(helperId, extra) {
 
 function autoEnemyBlockers(target) {
   if (!target || target.isPlayer || target.dead) return [];
-  return fieldUnits().filter(u => {
+  // 赤牙：受击时花 1 附赠为自己格挡（第九章，70%，见 party.js · FIXED_BLOCK）
+  const self = target.kit === "chixia" && !target.stunned && (Number(target.bonus) || 0) >= 1 ? [target] : [];
+  return self.concat(fieldUnits().filter(u => {
     if (u.isPlayer || u.id === target.id || u.stunned || u.dead || u.hidden) return false;
     if (Number(u.zone) !== Number(target.zone)) return false;
     if (u.kit === "captain_ox") return true;
     if (u.kit === "patrol_car" && !(u.resources && u.resources.blockUsedThisTurn)) return true;
     return false;
-  });
+  }));
 }
 
 /** 敌方的自动协助格挡。警卫队队长·牛按主持人手册它自己的条文：成功仍扣牛自己的架势（最少留 1），并反击 1 击破
@@ -5636,10 +5649,11 @@ function tryOxAutoBlock(attacker, target, atkRange) {
       ox.resources = ox.resources || {};
       ox.resources.blockUsedThisTurn = true;
     }
+    if (ox.id === target.id) ox.bonus = Math.max(0, (Number(ox.bonus) || 0) - 1);   // 赤牙为自己格挡：花 1 附赠
     const chance = finalBlockChance(ox, attacker, target, atkRange);
     const roll = 1 + Math.floor(Math.random() * 100);
     const ok = roll <= chance;
-    appendLog(`${ox.name} 自动协助格挡 ${target.name}：d100=${roll} 成功率 ${chance}% → ${ok ? "成功" : "失败"}`);
+    appendLog(`${ox.id === target.id ? `${ox.name} 花 1 附赠为自己格挡` : `${ox.name} 自动协助格挡 ${target.name}`}：d100=${roll} 成功率 ${chance}% → ${ok ? "成功" : "失败"}`);
     if (!ok) continue;
     const selfBreak = ox.kit === "captain_ox";
     appendLog(selfBreak ? `成功：目标免伤，击破由 ${ox.name} 承担（架势最少留 1）。成功后反击 1 击破。`
@@ -9650,9 +9664,11 @@ function runSkillInner(id, optRun) {
   // 技能名里没有 assist，所以也看「这个单位此刻是不是在打协助攻击」（finishAssist 里设的 state._assistBy）
   const reaction = /_opp$|_block$|assist/.test(id) || id === "ufo_assist" || id === "en_ox_block" || id === "en_wolf_opp" || id === "en_thug_opp" ||
     (!!state._assistBy && a && state._assistBy === a.id);
-  if (!a.isPlayer && !reaction) {
-    if ((a.ap || 0) < 1) {
-      paintSkillLog(`${a.name} 行动点不足，无法使用该技能。`);
+  // 敌人技能默认花 1 行动点；赤牙的霰弹枪 / 掩体 2 行动点、追猎 1 附赠（enemies.js · enemySkillCost）
+  const enemyCost = !a.isPlayer && !reaction ? (typeof enemySkillCost === "function" ? enemySkillCost(a, id) : { ap: 1, bonus: 0 }) : null;
+  if (enemyCost) {
+    if ((a.ap || 0) < enemyCost.ap || (a.bonus || 0) < enemyCost.bonus) {
+      paintSkillLog(`${a.name} ${(a.ap || 0) < enemyCost.ap ? "行动点" : "附赠行动"}不足，无法使用该技能。`);
       return;
     }
   }
@@ -9795,8 +9811,9 @@ function runSkillInner(id, optRun) {
     const cost = skillCost(id);
     if (cost.ap) spendAp(a, cost.ap, skillNameHint(id));
     if (cost.bonus) spendBonus(a, cost.bonus, skillNameHint(id));
-  } else if (!a.isPlayer && !reaction) {
-    spendAp(a, 1, skillNameHint(id));
+  } else if (enemyCost) {
+    if (enemyCost.ap) spendAp(a, enemyCost.ap, skillNameHint(id));
+    if (enemyCost.bonus) spendBonus(a, enemyCost.bonus, skillNameHint(id));
   }
   const lines = [];
   const needT = () => {

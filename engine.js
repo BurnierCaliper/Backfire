@@ -1444,6 +1444,13 @@ function rebalanceEnemiesForParty(party, units) {
   return changed.length ? [`人数平衡：按 ${n} 人队重新换算 ${changed.join("、")} 的血量与架势。`] : [];
 }
 
+/** 沙灵聚合体三层血量（人数缩放前）：最外 30 沙尘 / 40 装甲 / 最内 50 沙尘，每级 +9 外沙尘 +8 装甲 +6 内沙尘。
+ *  三阶段「吸引碎片两次后装甲回满」也按这个算回装甲上限（enemies.js · en_agg3_debris） */
+function aggregateLayerHp(lv) {
+  const d = Math.max(0, (Number(lv) || 1) - 1);
+  return { outer: 30 + d * 9, armor: 40 + d * 8, inner: 50 + d * 6 };
+}
+
 function ufoLegStats(lv) {
   const extra = Math.max(0, (Number(lv) || 1) - 1);
   return {
@@ -1600,9 +1607,7 @@ function enemyPresets() {
     }},
     { id: "sand_aggregate", name: "沙灵聚合体", build(lv, p) {
       const d = Math.max(0, (lv || 1) - 1);
-      const outer = 30 + d * 9;
-      const armor = 40 + d * 8;
-      const inner = 50 + d * 6;
+      const { outer, armor, inner } = aggregateLayerHp(lv);
       const atk = 10 + d;
       const def = 11 + milestone(lv, 2);
       return unitOf("沙灵聚合体", lv, [
@@ -1680,14 +1685,17 @@ function enemySpawnZone(mode) {
 function unitOf(name, level, layers, def, atk, extra = {}) {
   const hpParty = extra.isPlayer ? null : _lastHpParty;
   _lastHpParty = null;
+  // 架势的人数加成和血量按同一个人数算：预设的 build(lv, p) 只把 p 交给了 scaleHp，这里接着用它
+  // （以前没传，按场上人数算，图鉴里 3 / 4 人队的架势就少了人数加成）
+  const party = extra.party != null ? extra.party : hpParty;
   return {
     id: uid(),
     name,
     level: level || 1,
     zone: extra.zone != null ? extra.zone : (extra.isPlayer ? 1 : enemySpawnZone()),
     layers: layers.map((l, i) => ({ type: l.type, current: l.hp, max: l.hp, inner: i === layers.length - 1 })),
-    def: extra.isPlayer ? def : scaleDef(def, extra.party, extra.kit, level),
-    defMax: extra.isPlayer ? def : scaleDef(def, extra.party, extra.kit, level),
+    def: extra.isPlayer ? def : scaleDef(def, party, extra.kit, level),
+    defMax: extra.isPlayer ? def : scaleDef(def, party, extra.kit, level),
     atk,
     flying: !!extra.flying,
     stunned: false,
@@ -1735,6 +1743,6 @@ function unitOf(name, level, layers, def, atk, extra = {}) {
     noPosture: !!extra.noPosture,
     party: extra.party,
     hpParty,
-    defParty: extra.isPlayer ? null : partyScaleCount(extra.party)
+    defParty: extra.isPlayer ? null : partyScaleCount(party)
   };
 }
