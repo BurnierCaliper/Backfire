@@ -1962,7 +1962,42 @@
     });
   }
 
+  /** 悬停说明（unit-tip.js）：图鉴里的简单描述 + 身上每个效果的文字说明 */
+  function unitTipHtml(id) {
+    if (!window.UnitTip) return "";
+    if (String(id).indexOf("gap:") === 0) {
+      const key = String(id).slice(4), g = (state.gaps || {})[key];
+      if (!g) return "";
+      const hp = (g.type === "bridge" || g.type === "wall") ? `耐久 ${g.hp || 0}` : g.type === "door" ? (g.open ? "开着" : "关着") : "";
+      return UnitTip.html({ kind: "gap", gapType: g.type }, [], { name: gapLabel(g.type) + "（" + key.replace("-", "–") + " 区之间）", sub: hp });
+    }
+    const s = G.view.get(id);
+    if (!s) return "";
+    if (s.isProp) {
+      const p = (state.props || []).find(x => "prop:" + x.id === id);
+      const hp = s.isDevice ? "" : `耐久 ${sumCur(s)}/${sumMax(s)}`;
+      return UnitTip.html({ kind: "prop", propKind: p && p.kind }, [], { name: s.name, sub: [hp, s.res, s.zone + " 区"].filter(Boolean).join(" · ") });
+    }
+    const u = unitById(id);
+    const owner = u && u.weaponOf ? state.units.find(x => x.kit === u.weaponOf && !isWeaponUnit(x)) : null;
+    const kind = s.isPlayer ? (s.weaponUnit ? "weapon" : "hero") : "enemy";
+    const tokens = [];
+    if (s.dead) tokens.push(s.isPlayer ? "倒下" : "");
+    if (s.dying && !s.dead) tokens.push("濒死");
+    if (s.upOnShp) tokens.push("起身");
+    if (s.stunned && !s.dead) tokens.push("失衡");
+    if (s.flying) tokens.push("飞行");
+    (s.status ? s.status.split(" · ") : []).forEach(t => { if (t && t !== "无状态") tokens.push(t); });
+    (s.hung || []).forEach(n => tokens.push(n));
+    return UnitTip.html({ kind, kit: s.kit, ownerName: owner && owner.name }, tokens.filter(Boolean), { name: s.name, sub: `Lv${s.level} · ${s.zone} 区` });
+  }
   function onCardHover(id, on) {
+    // 悬停说明：任何时候都能看（选目标时也一样），离开就收起；触屏没有悬停
+    if (window.UnitTip && !touchUI()) {
+      const anchor = cards.get(id) ? cards.get(id).wrap : String(id).indexOf("gap:") === 0 ? document.querySelector(`#g-field .g-gap[data-key="${String(id).slice(4)}"]`) : null;
+      if (on && anchor) { const h = unitTipHtml(id); if (h) UnitTip.show(anchor, h); else UnitTip.hide(); }
+      else UnitTip.hide();
+    }
     const gapNode = String(id).indexOf("gap:") === 0 ? document.querySelector(`#g-field .g-gap[data-key="${String(id).slice(4)}"]`) : null;
     const c = cards.get(id) || (gapNode ? { wrap: gapNode } : null);
     if (!c) return;
@@ -3151,6 +3186,7 @@
       // 跑团模式：武器等级、属性点、加过的属性、手册里还没做成系统的奖励（熟练项、专长……）
       weaponLevels: u.weaponLevels ? JSON.parse(JSON.stringify(u.weaponLevels)) : null,
       weaponParts: u.weaponParts ? JSON.parse(JSON.stringify(u.weaponParts)) : null,   // 武器改装槽
+      bonds: u.bonds ? JSON.parse(JSON.stringify(u.bonds)) : null,   // 羁绊（和每把武器之间，0–5）
       weaponBlueprints: u.weaponBlueprints ? JSON.parse(JSON.stringify(u.weaponBlueprints)) : null,   // 客制化图纸
       attrPoints: Number(u.attrPoints) || 0,
       attrPicks: (u.attrPicks || []).slice(),
@@ -3203,6 +3239,7 @@
       if (s.attrPicks) u.attrPicks = s.attrPicks.slice();
       if (s.notes) u.levelNotes = s.notes;
       if (typeof applyLevelStats === "function") applyLevelStats(u);
+      if (s.bonds) u.bonds = JSON.parse(JSON.stringify(s.bonds));   // 先放羁绊：改装槽数量要按「武器等级 + 羁绊」算
       if (s.weaponParts) u.weaponParts = JSON.parse(JSON.stringify(s.weaponParts));
       if (s.weaponBlueprints) u.weaponBlueprints = JSON.parse(JSON.stringify(s.weaponBlueprints));
       if (s.weaponLevels && typeof setOwnedWeaponLevel === "function") {

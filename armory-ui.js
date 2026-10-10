@@ -45,12 +45,15 @@
     if (!w.held && !w.out) tags.push('<span class="ar-chip dim">收着</span>');
     const notches = Array.from({ length: w.maxLevel }, (_, i) => {
       const L = i + 1, mark = w.track.find(x => x.lv === L);
-      return `<i class="${L <= w.level ? "on" : ""}${mark ? " mark" : ""}" title="${mark ? esc(`Lv${L} · ${mark.text}`) : "Lv" + L}"><b>${L}</b></i>`;
+      // 刻度：武器等级亮起；羁绊加上去的那几格（只算解锁奖励）用另一种颜色
+      const cls = L <= w.level ? "on" : L <= (w.rewardLevel || w.level) ? "bond" : "";
+      return `<i class="${cls}${mark ? " mark" : ""}" title="${mark ? esc(`Lv${L} · ${mark.text}`) : "Lv" + L}${cls === "bond" ? "（羁绊）" : ""}"><b>${L}</b></i>`;
     }).join("");
     return `<div class="ar-plate">
       <span class="ar-bolt tl"></span><span class="ar-bolt tr"></span><span class="ar-bolt bl"></span><span class="ar-bolt br"></span>
       <div class="ar-plate-top"><h4>${esc(w.name)}</h4><span class="ar-lv">LV<b>${w.level}</b></span></div>
       <div class="ar-plate-sub">${esc(w.ownerName)} 的武器 ${tags.join("")}</div>
+      <div class="ar-bond" title="羁绊等级加在武器等级上，只用来更早解锁武器升级奖励（改装槽、被动升级），不提高 atk 和其他数值">羁绊 <b>${w.bond || 0}</b> / ${w.bondMax || 5}${w.bond ? ` · 解锁奖励按 Lv${w.rewardLevel} 算` : ""}</div>
       <div class="ar-notch">${notches}</div>
     </div>`;
   }
@@ -113,7 +116,7 @@
       ? `<div class="ar-socket full"><span class="ar-grade g-${esc(s.grade || "C")}">${esc(s.grade || "?")}</span>
           <b>${esc(s.name)}</b><small>槽 ${i + 1}</small><p>${esc(s.text)}</p></div>`
       : `<div class="ar-socket empty"><span class="ar-grade">—</span><b>空槽</b><small>槽 ${i + 1}</small><p>还没装改装件</p></div>`).join("");
-    const locked = w.lockedSlots.map(L => `<div class="ar-socket locked"><span class="ar-grade">🔒</span><b>未开放</b><small>Lv${L}</small><p>武器升到 ${L} 级开放</p></div>`).join("");
+    const locked = w.lockedSlots.map(L => `<div class="ar-socket locked"><span class="ar-grade">🔒</span><b>未开放</b><small>Lv${L}</small><p>武器等级 + 羁绊到 ${L} 级开放</p></div>`).join("");
     return `<div class="ar-sockets">${filled}${locked}</div>`;
   }
   function blueprint(w) {

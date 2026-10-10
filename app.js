@@ -6820,6 +6820,7 @@ function spawnLiveCard(card, zone) {
     if (u.weaponLevels[k] == null) u.weaponLevels[k] = 1;
   });
   u.weaponParts = card.weaponParts ? JSON.parse(JSON.stringify(card.weaponParts)) : (u.weaponParts || {});
+  u.bonds = card.bonds ? Object.assign({}, card.bonds) : (u.bonds || {});
   if (u.kit === "hiaki" && typeof refreshHiakiAtk === "function") refreshHiakiAtk(u);
   if (typeof applyLevelStats === "function") applyLevelStats(u);
   return u;
