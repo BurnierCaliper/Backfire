@@ -366,6 +366,14 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **Windows 桌面版（exe）**（`tools/desktop/`）：用 Electron 把游戏包成双击就能玩的 `Backfire.exe`。`tools/desktop/build.sh [输出目录]` 一步打包（默认输出到 `dist/`，已加进 .gitignore）：
+  - 只放玩家需要的文件：`game.html`、计算器 `index.html`、根目录的脚本和样式、字体、地图图片。不带手册、设计文档、测试、工具和转发服务。
+  - 打成 `Backfire-win-x64-v版本号.zip`，里面附「使用说明.txt」。界面语言包只留中英文，压缩包约 140MB。版本号在 `tools/desktop/package.json`。
+  - Electron 不支持网页的 `prompt()`（给团起名、改存档名、填任务失败原因要用），桌面版由 `main.js` 弹一个小输入窗口代替，用法和浏览器里一样。`alert` / `confirm` 照常。
+  - F11 全屏，F12 开发者工具。外部链接用系统浏览器打开。
+  - 存档在 exe 自己的本机存储里，和浏览器版不互通，可以用游戏里的「存成文件 / 从文件读入」搬。
+  - 没有代码签名：第一次打开 Windows 会提示「已保护你的电脑」，点「更多信息 → 仍要运行」。图标暂时是 Electron 默认图标。
+
 - **羁绊**（`growth.js · weaponBond / weaponRewardLevel / setWeaponBond`）：玩家角色和自己的每把武器（武器人）之间有羁绊，0–5 级，初始 0 级。
   - 跑团模式由主持人在「后台」里改，每把武器一个「羁绊」输入框，改动记进探索记录。
   - 羁绊等级直接加在武器等级上，只用来**解锁武器升级奖励**：

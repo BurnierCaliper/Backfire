@@ -3,3 +3,4 @@ node_modules/
 relay/.dev.vars
 playwright-report/
 test-results/
+dist/
