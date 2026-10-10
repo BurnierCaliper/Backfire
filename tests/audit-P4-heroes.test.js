@@ -436,6 +436,9 @@ test("放弃被动：瑞比 / 明特协助格挡成功不加纳米；拉响引�
   const r = kit(S, "ruby"), x = kit(S, "xia"), foe = foesOf(S)[0];
   r.zone = x.zone = foe.zone = 1; r.bonus = 2;
   S.weaponMods = { mint: { noPassive: true }, berniel: { noPassive: true } };
+  // 图纸武器 4 级才生效（主持人手册本版修订）
+  r.weaponLevels = Object.assign({}, r.weaponLevels, { mint: 4 });
+  x.weaponLevels = Object.assign({}, x.weaponLevels, { berniel: 4 });
   const n0 = r.resources.nano;
   const res = c.performAssistBlock(r, x, foe, { ok: true, roll: 1 });
   assert.ok(res.ok);

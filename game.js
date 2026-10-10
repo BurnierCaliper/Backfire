@@ -3841,7 +3841,8 @@
     const kinds = [
       ["", "无"], ["fireOn", "火场"], ["ice", "冻土"], ["acid", "酸液"],
       ["electric", "高压"], ["energy", "能量场"], ["harmonic", "干涉场"],
-      ["heal", "恢复"], ["abyss", "深渊"], ["collapseOn", "塌陷"]
+      ["heal", "恢复"], ["abyss", "深渊"], ["collapseOn", "塌陷"],
+      ["ruinOn", "损毁地面"], ["isolate", "隔离区"]   // 规则层本来就支持（app.js · tickRuinGround、隔离区不吃天气），以前选不到
     ];
     for (let z = 1; z <= Number(state.zoneMode); z++) {
       const f = state.fields[z] || emptyField();

@@ -43,6 +43,22 @@ function bpActive() {
   return !!(typeof state !== "undefined" && state.weaponMods && Object.keys(state.weaponMods).length);
 }
 
+/* ---------- 武器 4 级才解锁客制化（主持人手册「本版规则修订」、玩家手册武器升级表 lv4） ----------
+ * 装图纸时就要求武器 ≥ 4 级（rogue.js · installBlueprint、trpg.js · trpgInstallBlueprint）。
+ * 已经装在低于 4 级武器上的（旧存档、后台把武器降了级）留在武器上，但不生效：
+ * 读图纸加成的地方（ledger.js · weaponMod / unitWeaponMod、passiveOn）都先问这里。 */
+const BLUEPRINT_MIN_LEVEL = 4;
+/** 这把武器在场上的等级（记在主人身上）；主人不在场返回 null */
+function bpWeaponLevel(kit) {
+  const owner = typeof weaponOwner === "function" ? weaponOwner(kit) : null;
+  return owner ? Number((owner.weaponLevels || {})[kit]) || 1 : null;
+}
+/** 装在这把武器上的图纸此刻生不生效：武器 4 级以上（主人不在场时不拦） */
+function bpUnlocked(kit) {
+  const lv = bpWeaponLevel(kit);
+  return lv == null || lv >= BLUEPRINT_MIN_LEVEL;
+}
+
 /** 角色的被动效果是否生效（摩尔玛的 WAM-56 / MR-2165 会放弃角色自身的被动）。
  *  只要角色名下任何一把武器装了这类图纸就放弃，武器人上场时也一样（被动属于角色本人）。
  *  按作者的角色卡，十名角色的两个被动都接上了（放弃时按被动原文整个失效）：
@@ -57,7 +73,7 @@ function passiveOn(u) {
   let hero = u;
   if (u.weaponOf && typeof findKit === "function") hero = findKit(u.weaponOf, state.units) || u;
   const kits = [hero.kit].concat(hero.linkedKits || []);
-  return !kits.some(k => state.weaponMods[k] && state.weaponMods[k].noPassive);
+  return !kits.some(k => state.weaponMods[k] && state.weaponMods[k].noPassive && bpUnlocked(k));
 }
 const passiveOnKit = (kit) => passiveOn(typeof findKit === "function" ? findKit(kit, state.units) : null);
 

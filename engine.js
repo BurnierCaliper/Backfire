@@ -1320,8 +1320,10 @@ function healUnit(unit, amount, opt) {
     return give;
   }
   let r = raw;
-  for (let i = (unit.layers || []).length - 1; i >= 0 && r > 0; i--) {
-    const l = unit.layers[i];
+  // opt.inner：医疗包「治疗内层生命」只补最内层（肉体 / 星灵），不溢到外层的装甲 / 护盾
+  const ls = opt.inner ? [innermostLayer(unit)].filter(Boolean) : (unit.layers || []);
+  for (let i = ls.length - 1; i >= 0 && r > 0; i--) {
+    const l = ls[i];
     const room = Math.max(0, Number(l.max) - Number(l.current));
     const give = Math.min(room, r);
     l.current = round2(Number(l.current) + give);

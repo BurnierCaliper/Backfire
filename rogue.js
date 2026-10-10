@@ -119,6 +119,7 @@ const Rogue = (function () {
     setXpRequirementScale(C.xpReqScale);
     if (run && run.world) {
       loadWorld(run);
+      LEDGER.day = Number(run.day) || 1;   // 旧存档里两套天数可能已经对不上：以本局的为准
       // 旧版存档升级上来时还没有主线：按当前幕补上
       if (!run.main && run.stage !== "over") {
         run.main = makeTask(run, ROGUE_MAIN_TASK, "main");
@@ -384,6 +385,8 @@ const Rogue = (function () {
 
   /** which：支线在任务板上的序号，或 "main" */
   function acceptTask(run, which) {
+    // 只能在任务板前接任务：任务中途接新任务会覆盖当前任务、跳过休整和期限检查（以前只靠界面拦）
+    if (run.stage !== "board") throw new Error("现在不在任务板前，不能接任务");
     const task = which === "main" ? run.main : (run.board || [])[which];
     const why = taskBlocked(run, task);
     if (why) throw new Error(why);
@@ -419,10 +422,15 @@ const Rogue = (function () {
   function passHours(run, hours, notes) {
     if (!hours) return;
     ledgerAdvance(hours, notes);
-    if (exhaustTierFromHours(hoursAwake()) >= 4) {
-      run.party.slice().forEach(h => killHero(run, h, notes, "力竭致死"));
-      endRun(run, false, "力竭致死：太久没能好好睡一觉。");
-    }
+    exhaustDeath(run, notes);
+  }
+  /** 满 80 小时：队伍力竭致死，本局结束。短休、补给不够只能硬撑的长休也会推进时间，都要判
+   *  （以前只有 passHours 判，短休推过 80 小时照样活着） */
+  function exhaustDeath(run, notes) {
+    if (run.stage === "over" || exhaustTierFromHours(hoursAwake()) < 4) return false;
+    run.party.slice().forEach(h => killHero(run, h, notes, "力竭致死"));
+    endRun(run, false, "力竭致死：太久没能好好睡一觉。");
+    return true;
   }
   function arriveAtNode(run, notes) {
     if (run.task.index > 0) passHours(run, C.hours.travel, notes);
@@ -570,6 +578,7 @@ const Rogue = (function () {
       const attrs = h.attrs || (cardOf(kit) || {}).attrs || {};
       return Object.keys(ATTR_NAMES)
         .filter(k => !(p.noRepeat && (h.attrPicks || []).indexOf(k) >= 0))
+        .filter(k => (Number(attrs[k]) || 0) < ATTR_HARD_MAX)   // 硬性上限 10：已经满的不列（选了也不收）
         .map(k => ({ value: k, label: `${ATTR_NAMES[k]} +1`, hint: `现在 ${attrs[k] || 0}` }));
     }
     if (p.type === "role2") {
@@ -762,6 +771,8 @@ const Rogue = (function () {
   function finishBattle(run, outcome) {
     const notes = [];
     const boss = run.stage === "boss";
+    // 首领战不能撤退（rogue-data.js · bossRetreat）：规则层也拒绝，撤退不能算击败首领（以前只靠界面拦）
+    if (boss && outcome === "retreat") throw new Error("首领战不能撤退");
     // 单人：这场没用完的支援次数带到之后的战斗
     if (run.solo && state.solo && typeof soloSupportInfo === "function") {
       const info = soloSupportInfo();
@@ -770,6 +781,8 @@ const Rogue = (function () {
         if (info.left) notes.push(`支援次数还剩 ${info.left} 次，带到之后的战斗。`);
       }
     }
+    // 战斗结束这一刻还站着的人（没死、没倒地）：结算濒死会把倒地的人救回 1 点生命，先记下来
+    const standing = run.party.filter(h => { const u = findKit(h.kit, state.units); return u && !u.dead && !u.dying; }).map(h => h.kit);
     ledgerAfterBattle(notes);                 // 手册：耐久结算、濒死恢复到 1 点生命、记下武器人伤势
     if (run.solo && outcome === "win") {
       // 单人模式：击杀经验照常，每场胜利再固定 +50
@@ -783,12 +796,12 @@ const Rogue = (function () {
     const ambush = !!run.ambush && !boss;
     const ambushPlan = ambush ? run.ambush.plan || null : null;
     if (ambush && outcome === "win") {
-      // 遭遇战胜利：每人额外 50 × 敌人等级 经验
+      // 遭遇战胜利：每个还站着的人额外 50 × 敌人等级 经验（倒地、战后才被救回 1 点生命的人没有；以前也给）
       const lv = enemyLevel(run, run.task.diff);
       const xp = AMB.xpPerLevel * lv;
       run.party.forEach(h => {
         const u = findKit(h.kit, state.units);
-        if (!u || u.dead) return;
+        if (!u || u.dead || standing.indexOf(h.kit) < 0) return;
         u.xp = (u.xp || 0) + xp;
         notes.push(`${u.name} 遭遇战胜利经验 +${xp}。`);
       });
@@ -1112,6 +1125,8 @@ const Rogue = (function () {
     const e = run.task && run.task.escort;
     if (e && !e.lost && e.kind === "vip" && e.cur != null) { e.cur = null; notes.push(`${e.name || "委托人"}也休息好了，血量回满。`); }
     notes.push(...r.notes);
+    // 补给不够只能消磨时间：时间照样过，满 80 小时力竭致死（以前这里不判）
+    if (!(r.out && r.out.ok)) exhaustDeath(run, notes);
     return r.out && r.out.ok;
   }
   /** 进下一站 / 首领战之前能短休的地方（休息点自己有短休按钮） */
@@ -1142,6 +1157,7 @@ const Rogue = (function () {
     const notes = ["原地歇一会儿。"];
     const r = withParty(run, () => ledgerShortRest(null, notes));
     notes.push(...r.notes);
+    exhaustDeath(run, notes);   // 短休也花 1 小时：推过 80 小时一样力竭致死
     return logAll(run, notes);
   }
 
@@ -1196,8 +1212,9 @@ const Rogue = (function () {
     } else {
       const r = withParty(run, () => ledgerShortRest(null, notes));
       notes.push(...r.notes);
+      exhaustDeath(run, notes);
     }
-    advanceNode(run, notes);
+    if (run.stage !== "over") advanceNode(run, notes);
     return logAll(run, notes);
   }
 
@@ -1436,6 +1453,11 @@ const Rogue = (function () {
     if (!id || here.indexOf(id) < 0) throw new Error("这里没有这位工匠");
     return id;
   }
+  /** 折扣写法：价格倍率 0.85 → 「85 折」，0.8 → 「8 折」（以前一律 ×10 取整，85 折写成了 9 折） */
+  function zhe(mul) {
+    const n = Math.round(Number(mul) * 100);
+    return `${n % 10 === 0 ? n / 10 : n} 折`;
+  }
   /** 工匠的收费说明（界面上显示） */
   function smithPriceNote(run, s) {
     const pr = s.price || {};
@@ -1443,12 +1465,12 @@ const Rogue = (function () {
     if (pr.needsIntro && !(run.smithIntro || {})[s.id]) out.push("不帮陌生人：先给他看看你的武器");
     if (pr.friendAfter) {
       const uses = (run.smithUses || {})[s.id] || 0;
-      out.push(uses >= pr.friendAfter ? `关系变好：总价 ${Math.round((1 - pr.friendDiscount) * 10)} 折`
-        : `在他这里升级满 ${pr.friendAfter} 次后关系变好，打 ${Math.round((1 - pr.friendDiscount) * 10)} 折`);
+      out.push(uses >= pr.friendAfter ? `关系变好：总价 ${zhe(1 - pr.friendDiscount)}`
+        : `在他这里升级满 ${pr.friendAfter} 次后关系变好，打 ${zhe(1 - pr.friendDiscount)}`);
     }
-    if (pr.armsDiscount) out.push(C.armsMember ? `ARMS 成员 ${Math.round((1 - pr.armsDiscount) * 10)} 折` : "对非成员也一视同仁");
+    if (pr.armsDiscount) out.push(C.armsMember ? `ARMS 成员 ${zhe(1 - pr.armsDiscount)}` : "对非成员也一视同仁");
     if (pr.laborHours) out.push(`不收加工费，5 级起每次要帮他建庇护所 ${pr.laborHours} 小时`);
-    if (pr.laborMul != null && pr.laborMul !== 1) out.push(`加工费 ${Math.round(pr.laborMul * 10)} 折`);
+    if (pr.laborMul != null && pr.laborMul !== 1) out.push(`加工费 ${zhe(pr.laborMul)}`);
     if (pr.extraMats) out.push(`每次多耗 ${pr.extraMats} 个材料`);
     if (s.canInstall === false) out.push("装不了图纸");
     return out.join("；");
@@ -1471,6 +1493,7 @@ const Rogue = (function () {
     state.kuizhi -= opt.cost;
     const h = run.party.find(x => x.kit === opt.owner);
     h.weaponLevels[kit] = opt.level + 1;
+    clampDur(run, h, kit);   // 旧存档里装在 3 级武器上的图纸升到 4 级才生效：大杀器这类会压低耐久上限
     run.smithUses[sid] = (run.smithUses[sid] || 0) + 1;
     const s = smithInfo(run, sid);
     const notes = [`${s.name} 把 ${opt.name} 升到 ${opt.level + 1} 级，花掉 ${opt.cost} 奎支。`];
@@ -1502,6 +1525,9 @@ const Rogue = (function () {
     if (i < 0) throw new Error("手里没有这张图纸");
     const owner = run.party.find(h => (h.weapons || []).indexOf(kit) >= 0);
     if (!owner) throw new Error("队伍里没有这把武器");
+    // 武器 4 级才解锁客制化（主持人手册「本版规则修订」；mods.js · BLUEPRINT_MIN_LEVEL）
+    const lv = (owner.weaponLevels || {})[kit] || 1;
+    if (lv < BLUEPRINT_MIN_LEVEL) throw new Error(`${heroName(kit)} 要升到 ${BLUEPRINT_MIN_LEVEL} 级才能装客制化图纸（现在 ${lv} 级）`);
     const cost = SR().installCost;
     if ((Number(state.kuizhi) || 0) < cost) throw new Error(`奎支不够：装图纸要 ${cost}，手里只有 ${Number(state.kuizhi) || 0}`);
     state.kuizhi -= cost;
@@ -1509,6 +1535,7 @@ const Rogue = (function () {
     const bp = blueprintById(bpId);
     const old = run.installed[kit] ? blueprintById(run.installed[kit]) : null;
     run.installed[kit] = bpId;
+    clampDur(run, owner, kit);
     const notes = [`${smithById(sid).name} 把「${bp.name}」装到 ${heroName(kit)} 上（${bp.text}），花掉 ${cost} 奎支。`];
     if (old) notes.push(`原来的「${old.name}」被拆掉了。`);
     return logAll(run, notes);
@@ -1610,14 +1637,25 @@ const Rogue = (function () {
     return logAll(run, [`拆下 ${heroName(kit)} 第 ${i + 1} 槽的 ${weaponPartLabel(id)}，放回背包（不要钱）。`]);
   }
 
-  /** 本局各武器的图纸加成：kit → { atk, dur, block } */
+  /** 本局各武器的图纸加成：kit → { atk, dur, block }。武器不到 4 级的（旧存档）图纸不生效 */
   function weaponModsOf(run) {
     const out = {};
     Object.keys((run && run.installed) || {}).forEach(k => {
       const bp = blueprintById(run.installed[k]);
-      if (bp && bp.mod) out[k] = Object.assign({}, bp.mod);
+      if (bp && bp.mod && bpLevelOk(run, k)) out[k] = Object.assign({}, bp.mod);
     });
     return out;
+  }
+  /** 这把武器够不够 4 级、装的图纸能不能生效（mods.js · BLUEPRINT_MIN_LEVEL） */
+  function bpLevelOk(run, kit) {
+    const h = run.party.find(x => (x.weapons || []).indexOf(kit) >= 0);
+    return !!h && ((h.weaponLevels || {})[kit] || 1) >= BLUEPRINT_MIN_LEVEL;
+  }
+  /** 耐久上限变小（装上大杀器、耐久 −N 的图纸，或者旧存档里的图纸随升级生效）：当前耐久跟着压下来
+   *  （跑团 trpg.js · trpgSyncWeaponMods 一样）。以前要等下次长休，期间耐久比上限还高 */
+  function clampDur(run, h, kit) {
+    const max = weaponDurMaxFor(h, kit, run);
+    if (LEDGER.dur[kit] != null && Number(LEDGER.dur[kit]) > max) LEDGER.dur[kit] = max;
   }
   /** 维修工具包（手册：修复 10 点耐久）。商店、工匠、休整时都能用 */
   function repairWeapon(run, kit) {
@@ -1666,6 +1704,7 @@ const Rogue = (function () {
   function advanceDays(run, n) {
     run.actDay = (run.actDay || 0) + n;
     run.day += n;
+    LEDGER.day = run.day;      // 队伍档案的「第几天」（整局数据里每场战斗的时间）跟着本局走，不再另算（ledger.js · ledgerInRun）
     LEDGER.shortUsed = {};     // 新的一天，短休次数刷新
   }
 
@@ -1746,6 +1785,7 @@ const Rogue = (function () {
         return { kit: k, name: heroName(k), level: (h.weaponLevels || {})[k] || 1,
           dur: weaponDurFor(h, k, run), durMax: weaponDurMaxFor(h, k, run), hp: cur,
           blueprint: (run.installed || {})[k] ? blueprintById(run.installed[k]) : null,
+          bpOff: !!(run.installed || {})[k] && !bpLevelOk(run, k),   // 装着图纸但武器不到 4 级：不生效
           parts: weaponPartRow(h, k).map(id => id ? { id, name: weaponPartLabel(id), text: weaponPartText(id) } : null) };
       })
     };

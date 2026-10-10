@@ -11847,7 +11847,9 @@ function weaponCardName(kit) {
 }
 
 function setOwnedWeaponLevel(owner, kit, lv) {
-  lv = Math.max(1, Number(lv) || 1);
+  // 武器满级 10（以前后台填多少是多少：明特 15 级 atk 70）
+  const maxLv = typeof HANDBOOK_WEAPON_UPGRADE !== "undefined" ? HANDBOOK_WEAPON_UPGRADE.maxLevel : 10;
+  lv = Math.max(1, Math.min(maxLv, Number(lv) || 1));
   owner.weaponLevels = owner.weaponLevels || {};
   owner.weaponLevels[kit] = lv;
   if (typeof ejectExtraWeaponParts === "function") ejectExtraWeaponParts(owner, kit);   // 等级降了，多出来的改装件退回背包

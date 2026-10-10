@@ -169,7 +169,8 @@ function useItemOn(actor, itemId, target, zone) {
     const t = target || actor;
     const n = itemId === "clinic" ? 2 : 1;
     const r = takeDice(n, 4, 6);
-    const got = typeof healUnit === "function" ? healUnit(t, r.total) : r.total;
+    // 治疗内层生命：只补最内层，不溢到外层装甲（以前从内往外一路补）
+    const got = typeof healUnit === "function" ? healUnit(t, r.total, { inner: true }) : r.total;
     notes.push(`${actor.name} 对 ${t.name} 使用${spec.name}，掷出 ${r.text}，实际恢复 ${Math.floor(got || 0)}` +
       (t.dying ? "（濒死不能靠治疗恢复）" : t.upOnShp ? "（起身中，治疗不回坚毅生命）" : "") + "。");
   } else if (itemId === "stim") {

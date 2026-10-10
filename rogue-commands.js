@@ -76,6 +76,8 @@ const RogueCommands = (function () {
   };
   const sessions = {
     readSaved() { return SaveStore.loadRun(); },
+    // 存档的情况：none / ok / newer（更新版本的游戏存的，这一版读不了）/ broken。开新局前提醒会覆盖
+    savedStatus() { return SaveStore.status("run"); },
     prepareParty(c, context) {
       const s = needSession(context);
       s.picked.length = 0;

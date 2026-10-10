@@ -133,6 +133,9 @@ test("图纸的「协助格挡 +N%」算进武器格挡加成，一起最多 45%
   const tou = kit(S, "tou"), chuan = kit(S, "chuan");
   const touBase = c.finalBlockChance(tou, null, chuan), chuanBase = c.finalBlockChance(chuan, null, tou);
   S.weaponMods = { mochi: { block: 10 }, bili: { block: 10 } };
+  // 图纸武器 4 级才生效（主持人手册本版修订）
+  tou.weaponLevels = Object.assign({}, tou.weaponLevels, { mochi: 4 });
+  chuan.weaponLevels = Object.assign({}, chuan.weaponLevels, { bili: 4 });
   assert.equal(c.finalBlockChance(tou, null, chuan), touBase, "年糕已经 45%，图纸加不上去");
   assert.equal(c.finalBlockChance(chuan, null, tou), chuanBase + 10, "哔哩哩 35% + 10% = 45%");
   const row = c.bpEffectRows({ block: 10 }, { blockBase: 45 }).find(r => r.k === "协助格挡");

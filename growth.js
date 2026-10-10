@@ -65,6 +65,10 @@ function ceilDiv2(n) {
   return Math.ceil(n / 2);
 }
 
+/** 六维属性的硬性上限（玩家手册第二步：单项下限 3，建卡时上限 8，硬性上限 10）。
+ *  升级加点（4 / 8 级、单人模式额外的）、跑团后台都不能把一项加到 10 以上 */
+const ATTR_HARD_MAX = 10;
+
 function derivedFromAttrs(attrs, level) {
   attrs = attrs || {};
   const str = Number(attrs.str) || 5;

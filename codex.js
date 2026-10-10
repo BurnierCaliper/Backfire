@@ -3,7 +3,7 @@
  * 和敌人图鉴（bestiary.js）放在同一个图鉴界面里（bestiary-ui.js 顶上的「敌人 / 配置物 / 效果」切换）。
  * 配置物和效果是规则说明，不需要遭遇过，一直都能查。
  * 文字按《游戏规则》第五章（伤害属性、血量层）、第七章（效果系统）、第八章（攻击效果、飞行、配置物）整理；
- * 和手册不同的地方以游戏里的实现为准（碎渣机炮每次使用也 −1 耐久）。
+ * 和手册不同的地方以游戏里的实现为准（碎渣机炮每次使用也 −1 耐久；超充能电池摧毁时炸同区所有单位，不分敌我）。
  * 铁壁 / 防护罩 / 废铁墙是技能造出来的配置物，手册配置物一节里没有，按技能说明写。 */
 "use strict";
 
@@ -45,7 +45,7 @@ const CODEX_PROPS = [
   {"id": "door", "name": "机关门", "place": "间隔", "movable": false, "lines": ["无限耐久值。", "受按钮或者拉杆控制开关。", "关闭时无法通过或者影响对面的区域。", "按钮和拉杆都需要消耗行动点来操作。", "可能存在定时门。"]},
   {"id": "button", "name": "按钮", "place": "区域", "movable": false, "lines": ["使用行动点可以按下，在回合结束前触发对应的装置效果。", "无限耐久。", "攻击也会触发它。"]},
   {"id": "lever", "name": "拉杆", "place": "区域", "movable": false, "lines": ["使用行动点可以切换状态，触发对应的装置效果。", "无限耐久。", "攻击也会触发它。"]},
-  {"id": "battery", "name": "超充能电池", "place": "区域", "movable": true, "lines": ["具有阵营标签。", "拥有15+3*等级点装甲生命值。", "存在期间为所有机械类同阵营单位增加5+2*等级点护盾。", "并且同阵营所有单位的护盾类型生命总是会在回合结束时回满，无论是否被攻击或者是完全击穿。", "摧毁时对同区域的同阵营单位造成等级*1d4点电击伤害。"]},
+  {"id": "battery", "name": "超充能电池", "place": "区域", "movable": true, "lines": ["具有阵营标签。", "拥有15+3*等级点装甲生命值。", "存在期间为所有机械类同阵营单位增加5+2*等级点护盾。", "并且同阵营所有单位的护盾类型生命总是会在回合结束时回满，无论是否被攻击或者是完全击穿。", "摧毁时对同区域所有单位（不分敌我）造成等级*1d4点电击伤害。"]},
   {"id": "boom", "name": "爆炸桶", "place": "区域", "movable": true, "lines": ["拥有3点耐久。", "受到火焰伤害时扣除3耐久。", "受到能量和雷电伤害时扣除1耐久。", "耐久归零时在所在区域产生剧烈爆炸，造成1d20+等级点火焰伤害和2击破。"]},
   {"id": "acid", "name": "酸液桶", "place": "区域", "movable": true, "lines": ["拥有3点耐久。", "受到谐波伤害时扣除3耐久。", "受到其余伤害扣除1耐久。", "耐久少于3时每回合对同区域随机单位造成4+等级点酸液伤害。", "耐久归零时在所在区域产生酸液地面。"]},
   {"id": "scrap", "name": "碎渣机炮", "place": "区域", "movable": false, "lines": ["可以被狂徒或者玩家单位操控。", "操控消耗1行动点。", "对一个2距离内的敌人发射碎渣，造成1d4次6+等级点物理伤害，造成2击破。", "耐久5，每次受到攻击或使用后减少1耐久。"]},
@@ -179,6 +179,12 @@ function codexHeroEntries() {
   const cards = livePartyCards();
   return cards.filter(c => c.attrs && HERO_CODEX[c.kit]).map(card => {
     const u = JSON.parse(JSON.stringify(card));
+    // 1 级数值用规则实际算出来的（applyLevelStats，和上场时一样），不照抄卡面：瑞比卡面架势 3，按耐力算是 4。
+    // 不用 spawnLiveCard（会消耗随机数，图鉴可能在战斗中打开）
+    u.layers = (card.layers || []).map(l => ({ type: l.type, current: Number(l.hp) || 0, max: Number(l.hp) || 0 }));
+    u.linkedKits = (card.linkedKits || (typeof defaultLinkedKits === "function" ? defaultLinkedKits(card.kit) : [])).slice();
+    u.weaponLevels = {};
+    if (typeof applyLevelStats === "function") { try { applyLevelStats(u); } catch (e) { /* 用卡面值 */ } }
     let sheet = null;
     try { sheet = ST ? ST.heroSheet(u, []) : null; } catch (e) { sheet = null; }
     const prof = typeof heroProfile === "function" ? heroProfile(card.kit) : null;

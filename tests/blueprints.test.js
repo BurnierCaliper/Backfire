@@ -10,7 +10,11 @@ function field(mods, enemies) {
   c.BattleSim.setup({
     party: ["kolt", "helu"], seed: "BP",
     enemies: enemies || [{ id: "thug_hammer", lv: 1, zone: 1 }, { id: "thug_knife", lv: 1, zone: 1 }],
-    before: (st) => { st.weaponMods = mods || {}; }
+    before: (st) => {
+      st.weaponMods = mods || {};
+      // 武器 4 级才解锁客制化：装了图纸的武器记成 4 级（只改等级记录）
+      st.units.forEach(u => Object.keys(mods || {}).forEach(k => { if ((u.linkedKits || []).includes(k)) u.weaponLevels[k] = 4; }));
+    }
   });
   c.startCombat();
   const st = c.S.state;
@@ -209,7 +213,11 @@ test("放弃被动：全部角色的两个被动都关掉（没装图纸时照�
     const c = H.load();
     const mods = {};
     if (off) weapons.forEach(k => { mods[k] = { noPassive: true }; });
-    c.BattleSim.setup({ party, seed: "NP", enemies: [{ id: "thug_hammer", lv: 1, zone: 1 }], before: (st) => { st.weaponMods = mods; } });
+    // 武器 4 级才解锁客制化：装了图纸的武器记成 4 级（只改等级记录）
+    c.BattleSim.setup({ party, seed: "NP", enemies: [{ id: "thug_hammer", lv: 1, zone: 1 }], before: (st) => {
+      st.weaponMods = mods;
+      st.units.forEach(u => (u.linkedKits || []).forEach(k => { if (mods[k]) u.weaponLevels[k] = 4; }));
+    } });
     c.startCombat();
     c.S.state.units.forEach(u => { u.zone = 1; });
     return c;

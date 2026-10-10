@@ -51,7 +51,7 @@
     if (cmd.type === "battle.cleanQueues") oneOf(cmd.queue, ["block", "assist", "kolt", "helu", "longge"], "reaction queue");
     if (cmd.type === "heluScanAnswer" && cmd.picks != null && (typeof cmd.picks !== "object" || Array.isArray(cmd.picks))) throw new Error("picks must be an object");
     if (cmd.type === "battle.panel") {
-      if (cmd.action === "setField") oneOf(cmd.kind, ["", "fireOn", "ice", "acid", "electric", "energy", "harmonic", "heal", "abyss", "highland", "collapseOn"], "field kind");
+      if (cmd.action === "setField") oneOf(cmd.kind, ["", "fireOn", "ice", "acid", "electric", "energy", "harmonic", "heal", "abyss", "highland", "collapseOn", "ruinOn", "isolate"], "field kind");
       if (cmd.action === "setGap") oneOf(cmd.kind, ["open", "bridge", "wall", "door", "void"], "gap kind");
       if (["setGap", "gapHp", "rollWall", "toggleDoor"].includes(cmd.action)) oneOf(cmd.key, ["1-2", "2-3"], "gap key");
       if (cmd.action === "setWeather") oneOf(cmd.value, ["none", "heat", "snow", "acid", "thunder", "glow", "sand", "phase"], "weather");
@@ -313,7 +313,12 @@
       case "koltSwapAnswer": return resolveKoltSwap(!!cmd.swap, cmd.target || null);
       case "heluScanAnswer": return resolveHeluScan(cmd.picks || null);
       case "longgeSafetyAnswer": return resolveLonggeSafety(!!cmd.front);
-      case "retreat": return performRetreat(cmd.rearguard || null);
+      case "retreat": {
+        // 这场不许撤退（单局首领战 spec.retreat === false）：指令层也拒绝，不只靠界面把按钮变灰
+        const g = env.game || root.GAME || {};
+        if (g.rogue && g.rogue.spec && g.rogue.spec.retreat === false) throw new Error("这场战斗不能撤退");
+        return performRetreat(cmd.rearguard || null);
+      }
       case "endTurn": if (env.endUnit) return env.endUnit(cmd);
       case "battle.endPlayerTurn": return seeded(cmd.seed, () => endPlayerTurn());
       case "battle.endEnemyTurn": return endEnemyTurn();

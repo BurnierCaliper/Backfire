@@ -140,6 +140,7 @@ test("跑团：主持人把图纸放进背包，装上（付工钱）后战斗�
   const c = trpg();
   assert.ok(c.ITEM_CATALOG.bp_trevor_bigkill, "图纸登记成背包物品");
   cmd(c, { action: "adjustItem", item: "bp_trevor_bigkill", amount: 1 });
+  c.setOwnedWeaponLevel(c.findKit("kolt", c.S.state.units), "torque", 4);   // 武器 4 级才解锁客制化
   const durBefore = c.weaponDurMax("torque");
   const lines = cmd(c, { action: "installBlueprint", owner: "kolt", kit: "torque", blueprint: "bp_trevor_bigkill", fee: 1000 });
   assert.ok(lines);
