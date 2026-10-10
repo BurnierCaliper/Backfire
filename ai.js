@@ -143,6 +143,11 @@ const EnemyAI = (function () {
   function aiTargetBase(u, spec, prey) {
     const duel = typeof touDuelVictim === "function" ? touDuelVictim(u) : null;
     if (duel && unitAlive(duel) && !(duel.dying && !duel.upOnShp)) return { unit: duel, forced: true };
+    // 禁足怒吼：这一回合只能攻击施放的坦克（回合结束清掉；不像嘲讽打一下就没了）
+    if (u.lockdownBy) {
+      const t = unitById(u.lockdownBy);
+      if (t && unitAlive(t) && !t.dying) return { unit: t, forced: true };
+    }
     if (u.tauntTo) {
       const t = unitById(u.tauntTo);
       if (t && unitAlive(t) && !t.dying) return { unit: t, forced: true };

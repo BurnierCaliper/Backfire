@@ -419,6 +419,16 @@ function statusLine(u) {
   if (yuito) s.push("牵挂");
   if (u.shieldFromChuan || u.magnetShield) s.push("磁场护盾");
   if (u.statuses && u.statuses.sturdy) s.push("坚挺");
+  // 职责技能挂上的标记：以前只记在字段上，画面看不到，出手预演也因此判「没有效果」、把目标全变灰
+  if (u.shelterTurn) s.push("保释");
+  if (u.harshEnv) s.push("恶劣环境");
+  if (u.instant && u.instant.doubleStatus) s.push("加倍计量");
+  if (u.instant && u.instant.goldHold) s.push("黄金时间" + (INSTANT_NAME[u.instant.goldHold] ? "（" + INSTANT_NAME[u.instant.goldHold] + "）" : ""));
+  if (u.instant && u.instant.omenArmed) s.push("击破预告");
+  if (u.lockdownBy) {
+    const tank = (state.units || []).find(x => x.id === u.lockdownBy);
+    s.push(tank ? "禁足（" + tank.name + "）" : "禁足");
+  }
   if (u.instant) {
     if (u.instant.melt) s.push("熔融");
     if (u.instant.sting) s.push("刺骨");
@@ -1884,7 +1894,7 @@ function turnEnd() {
     if (u.harshEnv) u.harshEnv = false;
     if (u.instant && u.instant.doubleStatus) u.instant.doubleStatus = false;
     if (u.instant && u.instant.omenArmed) {
-      if (u.stunned) {
+      if (u.stunned || u.instant.omenHit) {
         const caster = unitById(u.instant.omenFrom);
         if (caster && caster.resources && caster.resources.roleOnce) caster.resources.roleOnce.omen = Math.max(0, (caster.resources.roleOnce.omen || 1) - 1);
         notes.push(`${u.name} 已被击破，击破预告返还次数。`);
@@ -4303,6 +4313,8 @@ function makeDealFlags(extra) {
 function recoverFromStun(u, notes) {
   if (!u || !u.stunned) return;
   notes = notes || [];
+  // 击破预告：窗口里被打进过失衡就算成功（玩家回合打进的失衡在敌人回合开始就恢复了，回合结束时已不是失衡）
+  if (u.instant && u.instant.omenArmed) u.instant.omenHit = true;
   u.stunned = false;
   u._imbalanceLock = false;
   u._bossMarked = false;
@@ -5775,6 +5787,10 @@ function resetBattleFlags(u) {
   u.tauntTo = null;
   u.noMove = false;
   u.coverBy = null;
+  u.lockdownBy = null;
+  u.shelterTurn = false;
+  u.isolate = false;
+  u.harshEnv = false;
   u.loseBonusNext = false;
   u.itemAtkBonus = 0;
   u.highEnergy = 0;
@@ -5795,16 +5811,22 @@ function resetBattleFlags(u) {
   r.niuOut = false;
   r.narutoOut = false;
   r.mecha = false;
-  r.tauntLeft = 2;
+  r.tauntLeft = tauntCap(u);
+  r.tauntTurn = null;
   r.roleOnce = {};
   r.prepared = false;
   r.preparedPending = false;
   r.preparedActive = false;
   r.weakNext = false;
+  r.pierceNext = false;
+  r.gambitArmed = false;
   r.gambitStrike = false;
   r.gambitWound = false;
   r.gritTurn = false;
   r.standTurn = false;
+  r.guardStrike = false;
+  r.guardStrikeUsed = false;
+  r.allReflect = false;
   r.blockUsedThisTurn = false;
   if (u.kit === "hiaki" && !r.blade) r.blade = "niu";
   if (u.kit === "tou") r.shield = 0;
@@ -5832,7 +5854,13 @@ function roleLockCap(a) {
   const lv = Number(a && a.level) || 1;
   return lv >= 10 ? 3 : lv >= 5 ? 2 : 1;
 }
-/** 回合结束：职责「锁定」只锁这一回合，到点解开（主持人 / 全队集结的锁不动） */
+/** 嘲讽每场能用几次：2 次，5 级 3 次，15 级 4 次（10 级前每回合只能用一次，10 级起一回合内可以用多次） */
+function tauntCap(u) {
+  const lv = Number(u && u.level) || 1;
+  return lv >= 15 ? 4 : lv >= 5 ? 3 : 2;
+}
+/** 回合结束：职责「锁定」只锁这一回合，到点解开（主持人 / 全队集结的锁不动）；
+ *  禁足怒吼「只能攻击坦克」也只到这一回合（不能移动的部分由 turnEnd 清 noMove） */
 function releaseTurnLocks(notes) {
   if (state.weatherLockTurn) {
     state.weatherLockTurn = false;
@@ -5845,6 +5873,7 @@ function releaseTurnLocks(notes) {
       if (f.fieldLock) { f.fieldLock = null; if (notes) notes.push(`${z} 区场地锁定结束。`); }
     }
   });
+  (state.units || []).forEach(u => { if (u.lockdownBy) u.lockdownBy = null; });
 }
 
 function roleOnce(a, key, limit) {
@@ -5861,19 +5890,134 @@ function roleOnce(a, key, limit) {
   return true;
 }
 
-function copyStatuses(src, dest) {
-  if (!src || !dest) return;
+/* 有次数限制的职责技能（玩家手册第六步职责表）：技能 id → roleOnce 里记次数的名字、每场能用几次。
+ * 技能里扣次数（roleSpend）和 SKILL_REQUIREMENT 判「用完了」（roleCapWhy）都读这张表，
+ * 用完了在扣行动点 / 附赠动作之前就拦下、按钮变灰（以前先扣点，进了技能才说「已用完」）。 */
+const roleLv = (a) => Number(a && a.level) || 1;
+const ROLE_USE_CAP = {
+  role_refine:      { key: "refine",     name: "精益求精", cap: a => roleLv(a) >= 15 ? 2 : 1 },
+  role_pierce:      { key: "pierce",     name: "一击制敌", cap: () => 1 },
+  role_gambit:      { key: "gambit",     name: "破釜沉舟", cap: () => 1 },
+  role_double_dot:  { key: "doubleDot",  name: "加倍计量", cap: () => 1 },
+  role_halve:       { key: "halve",      name: "折戟",     cap: () => 1 },
+  role_omen:        { key: "omen",       name: "击破预告", cap: () => 1 },
+  role_grit:        { key: "grit",       name: "咬牙坚持", cap: () => 2 },
+  role_stand:       { key: "stand",      name: "屹立不倒", cap: () => 1 },
+  role_fear:        { key: "fear",       name: "恐惧怒吼", cap: a => roleLv(a) >= 15 ? 3 : 2 },
+  role_all_reflect: { key: "allReflect", name: "全反击",   cap: () => 1 },
+  role_buffer:      { key: "buffer",     name: "缓冲",     cap: a => roleLv(a) >= 15 ? 2 : 1 },
+  role_dome:        { key: "dome",       name: "防护罩",   cap: () => 1 },
+  role_renew:       { key: "renew",      name: "续命",     cap: () => 1 },
+  role_lock:        { key: "lock",       name: "锁定",     cap: a => roleLockCap(a) },
+  role_shelter:     { key: "shelter",    name: "保释",     cap: a => roleLv(a) >= 15 ? 3 : 2 },
+  role_harsh:       { key: "harsh",      name: "恶劣环境", cap: () => 1 },
+  role_apocalypse:  { key: "apocalypse", name: "末日",     cap: () => 1 },
+  role_shake:       { key: "shake",      name: "撼动",     cap: () => 1 },
+  role_rearrange:   { key: "rearrange",  name: "重整",     cap: () => 1 },
+  role_gold:        { key: "gold",       name: "黄金时间", cap: () => 2 },
+  role_rally:       { key: "rally",      name: "全队集结", cap: () => 1, rest: true }   // 一次长休限一次
+};
+/** 已经用了几次（只看不记）。「长休一次」的记在队伍档案里 */
+function roleUsed(a, key) {
+  if (!a) return 0;
+  if (typeof REST_ONCE_KEYS !== "undefined" && REST_ONCE_KEYS.indexOf(key) >= 0 && typeof LEDGER !== "undefined") {
+    return Number(((LEDGER.restOnce || {})[a.kit] || {})[key]) || 0;
+  }
+  return Number(((a.resources || {}).roleOnce || {})[key]) || 0;
+}
+/** 这个职责技能还能用几次（没有次数限制的返回 Infinity） */
+function roleUsesLeft(a, id) {
+  const c = ROLE_USE_CAP[id];
+  return c ? Math.max(0, c.cap(a) - roleUsed(a, c.key)) : Infinity;
+}
+/** 用完了返回原因，还能用返回 null */
+function roleCapWhy(a, id) {
+  const c = ROLE_USE_CAP[id];
+  if (!c || roleUsesLeft(a, id) > 0) return null;
+  return c.rest ? `${c.name}这次长休已经用过` : `本场${c.name}已用完（每场 ${c.cap(a)} 次）`;
+}
+/** 用掉一次（技能里调）；用完了返回 false */
+function roleSpend(a, id) {
+  const c = ROLE_USE_CAP[id];
+  return c ? roleOnce(a, c.key, c.cap(a)) : true;
+}
+
+/* 传播（异常二）：复制一个单位身上的状态效果，施加到另一个单位。
+ * 只复制七种属性状态效果；即时效果（熔融、错位……）、通用状态（虚弱、坚挺……）不复制。
+ * 不会拿来源身上「没有」的东西去盖掉承受者已有的状态：灼烧按施加叠层（承受者原有层数 + 来源层数），
+ * 高能值取两边较大的，其余是有 / 没有，承受者已有的保持不变。承受者自我效果的免疫照常（自焚、霜结、溅射、导体）。 */
+const SPREAD_STATUS = ["burn", "shock", "corr", "frostbite", "shockwave", "high", "reso"];
+const SPREAD_IMMUNE = { burn: "burn", frostbite: "frost", corr: "splash", shock: "conductor" };   // 状态 → 免疫它的自我效果
+/** 单位身上能被传播出去的属性状态 */
+function spreadKeys(u) {
+  const st = (u && u.statuses) || {};
+  return SPREAD_STATUS.filter(k => k === "burn" ? (Number(st.burn) || 0) > 0
+    : k === "high" ? !!st.high || (Number(u.highEnergy) || 0) > 0 : !!st[k]);
+}
+/** 从 src 传播到 dest，真正会加上的状态（空数组 = 传过去没有变化） */
+function spreadPlan(src, dest) {
+  if (!src || !dest || src.id === dest.id) return [];
+  const st = dest.statuses || {};
+  return spreadKeys(src).filter(k => {
+    if (SPREAD_IMMUNE[k] && dest.self === SPREAD_IMMUNE[k]) return false;
+    if (k === "burn") return true;
+    if (k === "high") return !st.high || (Number(src.highEnergy) || 0) > (Number(dest.highEnergy) || 0);
+    return !st[k];
+  });
+}
+/** 场上能当传播来源的单位：身上有属性状态，而且至少有一个别的单位接得住 */
+function spreadSources() {
+  const live = fieldUnits().filter(u => !u.fused);
+  return live.filter(u => spreadKeys(u).length && live.some(v => spreadPlan(u, v).length));
+}
+/** 执行传播，返回加上去的状态（文字） */
+function copyStatuses(src, dest, notes) {
+  const got = [];
+  if (!src || !dest) return got;
+  notes = notes || [];
   dest.statuses = dest.statuses || {};
-  Object.keys(src.statuses || {}).forEach(k => {
-    dest.statuses[k] = src.statuses[k];
+  spreadPlan(src, dest).forEach(k => {
+    if (k === "burn") {
+      const n = Math.floor(Number(src.statuses.burn) || 0);
+      grantBurn(dest, n, notes);
+      got.push(`灼烧 ${n} 层`);
+    } else if (k === "high") {
+      dest.statuses.high = true;
+      dest.highEnergy = Math.max(Number(dest.highEnergy) || 0, Number(src.highEnergy) || 0);
+      popStatus(dest, "high");
+      got.push(`高能 ${dest.highEnergy}`);
+    } else {
+      dest.statuses[k] = true;
+      popStatus(dest, k);   // 震荡顺带扣架势上限（syncShockwave）
+      got.push(STATUS_POP[k].name);
+    }
   });
-  if (typeof syncShockwave === "function") syncShockwave(dest, null);
-  dest.instant = dest.instant || {};
-  Object.keys(src.instant || {}).forEach(k => {
-    if (k === "omenFrom" || k === "omenArmed") return;
-    dest.instant[k] = src.instant[k];
-  });
-  dest.highEnergy = src.highEnergy || dest.highEnergy;
+  if (got.length && src.statuses && src.statuses.latestElement) dest.statuses.latestElement = src.statuses.latestElement;
+  if (dest.statuses.high) checkHighBoom(dest);   // 高能值超过血量当场自爆
+  return got;
+}
+
+/* 黄金时间（辅助三）：延长一个单位身上的一种即时效果。延长的那一种记在 instant.goldHold（结算按「有没有」判断照旧可用） */
+const INSTANT_NAME = { melt: "熔融", sting: "刺骨", overload: "过载", shift: "错位", spread: "扩散", refract: "折射" };
+/** 单位身上能被黄金时间延长的即时效果（已经在延长的那一种不再列） */
+function goldKeys(u) {
+  const ins = (u && u.instant) || {};
+  return Object.keys(INSTANT_NAME).filter(k => ins[k] && ins.goldHold !== k);
+}
+/** 加倍计量能翻倍的状态：属性状态 + 通用状态（有任何一种就行） */
+function hasAnyStatus(u) {
+  const st = (u && u.statuses) || {};
+  return spreadKeys(u).length > 0 || ["unstable", "weak", "inspire", "sturdy", "hide", "advantage", "chase"].some(k => !!st[k]);
+}
+/** 保释分步里依次选的几名友方（联机只转发 online-view.js 白名单里的分步名，所以用现成的这几个） */
+const SHELTER_PICKS = ["target", "target2", "ally"];
+/** 保释能选的友方：除自己以外在场、这一回合还没被保释的友方 */
+function shelterAllies(a) {
+  return fieldUnits().filter(u => u.isPlayer && (!a || u.id !== a.id) && !u.fused && !u.shelterTurn);
+}
+/** 借力能移动的友方：任意位置的其他友方（被定住、千钧这类不能被移动的不算） */
+function boostAllies(a) {
+  return fieldUnits().filter(u => u.isPlayer && (!a || u.id !== a.id) && !u.fused && canDisplace(u));
 }
 
 /** 目标身上可以被「激活」的状态。返回 [{ key, label }]，空数组表示没有可激活的东西。 */
@@ -7428,6 +7572,62 @@ function skillFlowSteps(id, actor, picks) {
     }
     return steps;
   }
+  if (id === "role_spread") {
+    // 传播：先选来源 target1（身上有属性状态效果的单位，敌我都行），再选承受者 target（另一个单位，复制过去要有变化）
+    const live = fieldUnits().filter(u => !u.fused);
+    const src = picks.target1 ? unitById(picks.target1) : null;
+    return [
+      { key: "target1", type: "unit", optional: false, label: "复制谁身上的状态（有属性状态效果的单位）", units: spreadSources() },
+      { key: "target", type: "unit", optional: false, label: "施加给哪一个单位（另一个单位）",
+        units: live.filter(u => !src || spreadPlan(src, u).length > 0) }
+    ];
+  }
+  if (id === "role_shelter") {
+    // 保释：一次附赠动作可以在这一回合里保释好几名友方，每人用掉一次（剩几次最多选几人）
+    const keys = SHELTER_PICKS;
+    const left = Math.min(keys.length, roleUsesLeft(actor, id));
+    const allies = shelterAllies(actor);
+    const steps = [];
+    for (let i = 0; i < left; i++) {
+      if (i > 0 && !picks[keys[i - 1]]) break;   // 上一步没选人就到此为止
+      const taken = keys.slice(0, i).map(k => picks[k]);
+      const units = allies.filter(u => taken.indexOf(u.id) < 0);
+      if (i > 0 && !units.length) break;          // 没有别的友方可以再保释了
+      steps.push({ key: keys[i], type: "unit", optional: i > 0,
+        label: i ? "同一个附赠动作再保释一名友方（可不选，每人用掉一次）" : "保释谁（此回合豁免天气与场地）", units });
+    }
+    return steps;
+  }
+  if (id === "role_boost") {
+    // 借力：任意位置的其他友方，移到任意一区
+    const tgt = picks.target ? unitById(picks.target) : null;
+    const all = [];
+    for (let z = 1; z <= maxZ; z++) all.push(z);
+    return [
+      { key: "target", type: "unit", optional: false, label: "借力移动哪一名友方（任意位置）", units: boostAllies(actor) },
+      { key: "dest", type: "zone", optional: false, label: "移到哪一区（任意距离）", zones: all.filter(z => !tgt || z !== Number(tgt.zone)) }
+    ];
+  }
+  if (id === "role_gold") {
+    // 黄金时间：一个身上有即时效果的单位（敌我都行）；有好几种时再选延长哪一种
+    const steps = [{ key: "target", type: "unit", optional: false, label: "延长谁身上的即时效果",
+      units: fieldUnits().filter(u => !u.fused && goldKeys(u).length > 0) }];
+    const tgt = picks.target ? unitById(picks.target) : null;
+    const keys = tgt ? goldKeys(tgt) : [];
+    if (keys.length > 1) steps.push({ key: "status", type: "choice", optional: false, label: `延长 ${tgt.name} 身上的哪一种即时效果`,
+      options: keys.map(k => ({ value: k, label: INSTANT_NAME[k] })) });
+    return steps;
+  }
+  if (id === "role_sturdy" && (actor.level || 1) >= 15) {
+    // 15 级：可以改用行动点，让全部友方此回合获得坚挺（选「一名友方」时再选目标）
+    return [{ key: "mode", type: "choice", optional: false, label: "不倒战意",
+      options: [{ value: "one", label: "附赠动作：一名同区友方此回合坚挺" }, { value: "all", label: "行动点：全部友方此回合坚挺" }] }];
+  }
+  if (id === "role_buffer" && (actor.level || 1) >= 15) {
+    // 15 级：缓冲可以自选给哪一种血量（选完再选目标）
+    return [{ key: "layer", type: "choice", optional: false, label: "缓冲给哪一种血量",
+      options: ["shield", "armor", "flesh", "sand", "spirit"].map(k => ({ value: k, label: LAYER[k] })) }];
+  }
   if (id === "ruby_trigger" || id === "ruby_short" || id === "wing_aa" || id === "mint_steal") {
     const units = (typeof fieldUnits === "function" ? fieldUnits() : state.units).filter(u =>
       u && !u.isPlayer && !u.dead && !u.hidden && !u.fused &&
@@ -8772,7 +8972,9 @@ const SKILL_REQUIREMENT = {
   yuito_espresso: (a) => (res(a).liquid || 0) < 1 ? "没有咖啡液" : null,
   yuito_extract:  (a) => (res(a).liquid || 0) < 1 ? "没有咖啡液"
     : !envZones(a, "acid", 1).length ? "距离 1 以内没有能变成酸液地面的区域（固有场地 / 深渊 / 损毁地面 / 被锁定）" : null,
-  tou_taunt:      (a) => (res(a).tauntLeft || 0) <= 0 ? "本场嘲讽次数已用尽" : null,
+  // 嘲讽：每场 2 次（5 级 3 次，15 级 4 次）；10 级前一回合只能用一次
+  tou_taunt:      (a) => (res(a).tauntLeft || 0) <= 0 ? "本场嘲讽次数已用尽"
+    : roleLv(a) < 10 && res(a).tauntTurn != null && res(a).tauntTurn === state.turnNo ? "10 级前每回合只能嘲讽一次" : null,
   solo_support:   (a) => soloSupportError(a),
   tou_sonic:      (a) => (res(a).shield || 0) < 1 ? "没有圣盾"
     : !skillFlowSteps("tou_sonic", a, {}).length ? "距离 1 以内没有可以打的目标" : null,
@@ -8812,6 +9014,9 @@ const SKILL_REQUIREMENT = {
   chuan_wall:     (a) => (res(a).charge || 0) < 1 ? "没有电能" : null,
   ruby_summon:    (a) => weaponSummonWhy(a, "mint"),
   longge_summon:  (a) => weaponSummonWhy(a, "xiaoxiao"),
+  kolt_summon:    (a) => weaponSummonWhy(a, "torque"),
+  helu_summon:    (a) => weaponSummonWhy(a, "ecmo"),
+  ras_summon:     (a) => weaponSummonWhy(a, "edc"),
   longge_spit:    (a) => res(a).spitUsed ? "本场已经吐过酸了（一局战斗仅限一次）" : null,
   longge_safety:  (a) => (longgeRes(a) || { ammo: [] }).ammo.length ? null : "没有子弹，扳机解不开",
   xiaoxiao_combo: (a) => (longgeRes(a) || { ammo: [] }).ammo.length >= 3 ? null : "连续拳要 3 发子弹",
@@ -8834,6 +9039,33 @@ const SKILL_REQUIREMENT = {
       .some(u => u && !u.isPlayer && !u.dead && !u.hidden && activatableStatuses(u).length > 0);
     return any ? null : "场上没有带状态效果的敌人";
   },
+  // 有次数的职责技能：用完了就拦下（ROLE_USE_CAP）。下面几个还要看场上有没有能用的对象
+  role_refine:      (a) => roleCapWhy(a, "role_refine"),
+  role_pierce:      (a) => roleCapWhy(a, "role_pierce"),
+  role_gambit:      (a) => roleCapWhy(a, "role_gambit"),
+  role_halve:       (a) => roleCapWhy(a, "role_halve"),
+  role_omen:        (a) => roleCapWhy(a, "role_omen"),
+  role_grit:        (a) => roleCapWhy(a, "role_grit"),
+  role_stand:       (a) => roleCapWhy(a, "role_stand"),
+  role_fear:        (a) => roleCapWhy(a, "role_fear"),
+  role_all_reflect: (a) => roleCapWhy(a, "role_all_reflect"),
+  role_buffer:      (a) => roleCapWhy(a, "role_buffer"),
+  role_dome:        (a) => roleCapWhy(a, "role_dome"),
+  role_renew:       (a) => roleCapWhy(a, "role_renew"),
+  role_lock:        (a) => roleCapWhy(a, "role_lock"),
+  role_harsh:       (a) => roleCapWhy(a, "role_harsh"),
+  role_apocalypse:  (a) => roleCapWhy(a, "role_apocalypse"),
+  role_shake:       (a) => roleCapWhy(a, "role_shake"),
+  role_rearrange:   (a) => roleCapWhy(a, "role_rearrange"),
+  role_rally:       (a) => roleCapWhy(a, "role_rally"),
+  role_double_dot:  (a) => roleCapWhy(a, "role_double_dot")
+    || (fieldUnits().some(u => !u.isPlayer && !u.fused && hasAnyStatus(u)) ? null : "场上没有带状态效果的敌人"),
+  role_gold:        (a) => roleCapWhy(a, "role_gold")
+    || (fieldUnits().some(u => !u.fused && goldKeys(u).length) ? null : "场上没有带即时效果的单位"),
+  role_shelter:     (a) => roleCapWhy(a, "role_shelter")
+    || (shelterAllies(a).length ? null : "没有可以保释的友方"),
+  role_spread:      () => spreadSources().length ? null : "场上没有能传播的属性状态效果（或者没有能接收的另一个单位）",
+  role_boost:       (a) => boostAllies(a).length ? null : "没有可以借力移动的其他友方",
   hiaki_summon:   (a) => {
     const usable = summonableBlades(a);
     // 已经选好了哪一把就直接校验那一把
@@ -8928,9 +9160,62 @@ function touSonicPicks(a, t) {
   return { t1, t2 };
 }
 
+/** 职责技能的目标检查（skillTargetError 用）：分步里选的对象不合法返回原因。
+ *  主目标还没选时返回 null，交给技能里的「先选……」（画面靠它判断还要选目标） */
+function roleTargetError(a, id, t) {
+  const fl = state.skillFlow;
+  const p = (fl && fl.picks) || {};
+  const tok = String(state.targetId || "");
+  // 折戟 / 击破预告 / 加倍计量只作用于敌人单位：配置物、危墙不是目标（以前会被当成攻击打一下）
+  if (/^role_(halve|omen|double_dot)$/.test(id) && (tok.indexOf("prop:") === 0 || tok.indexOf("gap:") === 0 || (t && (t.kind || t.isStructure)))) return "只能对敌人使用";
+  if (id === "role_spread") {
+    const src = p.target1 ? unitById(p.target1) : null;
+    const dest = p.target ? unitById(p.target) : t;
+    if (!src || offField(src) || !spreadKeys(src).length) return "先选一个身上有属性状态效果的单位当传播来源";
+    if (!dest || offField(dest) || dest.id === src.id) return "先选另一个单位当承受者";
+    if (!spreadPlan(src, dest).length) return `${dest.name} 已经有这些状态（或者免疫），传播过去没有变化`;
+  }
+  if (id === "role_shelter") {
+    const ids = SHELTER_PICKS.map(k => p[k]).filter(Boolean);
+    const list = ids.length ? ids : (t && t.id ? [t.id] : []);
+    if (!list.length) return null;
+    if (new Set(list).size !== list.length) return "同一名友方不用保释两次";
+    const ok = shelterAllies(a).map(u => u.id);
+    if (list.some(x => ok.indexOf(x) < 0)) return "保释只能选在场的其他友方（这一回合还没被保释的）";
+    if (list.length > roleUsesLeft(a, id)) return `保释本场只剩 ${roleUsesLeft(a, id)} 次`;
+  }
+  if (id === "role_boost") {
+    const tgt = p.target ? unitById(p.target) : t;
+    if (!tgt) return null;
+    if (boostAllies(a).indexOf(tgt) < 0) return "借力只能移动在场的其他友方（不能被移动的除外）";
+    if (p.dest == null) return "先选借力把友方移到哪一区";
+    const d = Number(p.dest);
+    if (!(d >= 1 && d <= Number(state.zoneMode)) || d === Number(tgt.zone)) return "借力要把友方移到另一个区";
+  }
+  if (id === "role_gold") {
+    const tgt = p.target ? unitById(p.target) : t;
+    if (!tgt) return null;
+    const keys = goldKeys(tgt);
+    if (!keys.length) return `${tgt.name} 身上没有可以延长的即时效果`;
+    if (p.status != null && keys.indexOf(p.status) < 0) return `${tgt.name} 身上没有这种即时效果`;
+  }
+  if (id === "role_double_dot" && t && t.id) {
+    if (t.isPlayer) return "加倍计量只能对敌人使用";
+    if (!hasAnyStatus(t)) return `${t.name} 身上没有状态效果，加倍计量没有可翻倍的`;
+  }
+  if (id === "role_buffer" && p.layer != null && !LAYER[p.layer]) return "没有这种血量种类";
+  if (id === "role_sturdy" && p.mode != null && p.mode !== "one" && p.mode !== "all") return "不倒战意只能选一名友方或全部友方";
+  return null;
+}
+
 /** 扣行动点之前先查目标：选不到合法目标的技能不白白花掉行动点。返回原因，null 表示可以 */
 function skillTargetError(a, id, t) {
   if (id === "role_renew" && t && !t.isPlayer) return "续命只能对友方使用";
+  // 职责技能：分步里选的对象不合法就在扣点之前拦下
+  if (/^role_(spread|shelter|boost|gold|double_dot|buffer|sturdy|halve|omen)$/.test(id)) {
+    const why = roleTargetError(a, id, t);
+    if (why) return why;
+  }
   if (id === "solo_support") {
     const fl = state.skillFlow;
     const kit = fl && fl.picks ? fl.picks.partner : null;
@@ -9470,8 +9755,10 @@ function runSkillInner(id, optRun) {
       if ((a.resources.tauntLeft || 0) <= 0) lines.push("本场嘲讽次数用尽。");
       else {
         a.resources.tauntLeft -= 1;
+        a.resources.tauntTurn = state.turnNo;   // 10 级前一回合只能嘲讽一次（SKILL_REQUIREMENT 判）
         tgt.tauntTo = a.id;
-        lines.push(`${tgt.name} 下次攻击必须打灯。剩余 ${a.resources.tauntLeft} 次。`);
+        // 坦克职责技能，柯尔特等也会用：写施放者自己的名字（以前一律写「必须打灯」）
+        lines.push(`${tgt.name} 下次攻击必须打${a.name}。剩余 ${a.resources.tauntLeft} 次。`);
       }
     } else if (id === "tou_assist") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
@@ -10077,19 +10364,20 @@ function runSkillInner(id, optRun) {
         lines.push(`${a.name} 将【${ATKFX[fx].name}】挂在下一次攻击上。晕眩不会清掉。`);
       }
     } else if (id === "role_refine") {
-      if (!roleOnce(a, "refine", (a.level || 1) >= 15 ? 2 : 1)) lines.push("精益求精本场次数已用完。");
+      // 职责技能的次数统一读 ROLE_USE_CAP（用完了在 SKILL_REQUIREMENT 就拦下，不扣点）
+      if (!roleSpend(a, "role_refine")) lines.push("精益求精本场次数已用完。");
       else {
         a.resources.weakNext = true;
         lines.push("精益求精：下一击带弱点特效。");
       }
     } else if (id === "role_pierce") {
-      if (!roleOnce(a, "pierce", 1)) lines.push("一击制敌本场已用完。");
+      if (!roleSpend(a, "role_pierce")) lines.push("一击制敌本场已用完。");
       else {
         a.resources.pierceNext = true;
         lines.push("一击制敌：下一击带穿刺。");
       }
     } else if (id === "role_gambit") {
-      if (!roleOnce(a, "gambit", 1)) lines.push("破釜沉舟本场已用完。");
+      if (!roleSpend(a, "role_gambit")) lines.push("破釜沉舟本场已用完。");
       else {
         a.resources.gambitArmed = true;
         // 受伤翻倍从现在开始，到自己下一个回合开始（下一次行动前）结束；以前是下回合起整场翻倍
@@ -10103,19 +10391,16 @@ function runSkillInner(id, optRun) {
       const key = fl && fl.picks ? fl.picks.status : null;
       lines.push(...triggerOneStatus(tgt, a, key));
     } else if (id === "role_spread") {
-      const src = t;
-      const destId = state.targetId;
-      const dest = unitById(destId);
-      if (!src) { lines.push("先选被复制状态的目标。"); return paintSkillLog(lines.join("\n")); }
-      const other = fieldUnits().find(u => u.id !== src.id && u.id === state.targetId) || fieldUnits().filter(u => u.id !== src.id && Number(u.zone) === Number(src.zone))[0];
-      if (!other) { lines.push("需要另一个同区或当前选中的承受者。请先点源，再点目标后重放。"); }
-      else {
-        copyStatuses(src, other);
-        lines.push(`传播：${src.name} 的状态复制到 ${other.name}。`);
-      }
+      // 来源和承受者都在分步里选（承受者也是这次的技能目标）；以前直接拿同区第一个别的单位，可能复制给自己人
+      const fl = state.skillFlow;
+      const src = fl && fl.picks && fl.picks.target1 ? unitById(fl.picks.target1) : null;
+      const dest = fl && fl.picks && fl.picks.target ? unitById(fl.picks.target) : t;
+      if (!src || !dest) { lines.push("先选传播的来源和承受者。"); return paintSkillLog(lines.join("\n")); }
+      const got = copyStatuses(src, dest, lines);
+      lines.push(got.length ? `传播：${src.name} 身上的${got.join("、")}施加到 ${dest.name}。` : `传播：${dest.name} 没有得到新的状态。`);
     } else if (id === "role_double_dot") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
-      if (!roleOnce(a, "doubleDot", 1)) lines.push("加倍计量本局限已用完。");
+      if (!roleSpend(a, "role_double_dot")) lines.push("加倍计量本场已用完。");
       else {
         t.instant = t.instant || {};
         t.instant.doubleStatus = true;
@@ -10126,48 +10411,52 @@ function runSkillInner(id, optRun) {
       lines.push(a.resources.selfDoom ? "自我毁灭开启：施加状态翻倍，自己也承受一层。" : "自我毁灭关闭。");
     } else if (id === "role_breakwave") {
       const cap = (a.level || 1) >= 15 ? 2 : 1;
-      visibleEnemies(a.zone).filter(u => (u.def || 0) > 0 && (u.def || 0) <= cap).forEach(u => {
-        dealBreak(u, 1, "none", lines, "破势");
+      // 已经死掉（还在淡出）的敌人不算
+      visibleEnemies(a.zone).filter(u => !u.dead && !u.fused && (u.def || 0) > 0 && (u.def || 0) <= cap).forEach(u => {
+        dealBreak(u, 1, "none", lines, "破势", { by: a });
       });
       lines.push(`破势：同区架势 ≤ ${cap} 的敌人各受 1 无属性击破。`);
     } else if (id === "role_halve") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
-      if (!roleOnce(a, "halve", 1)) lines.push("折戟本场已用完。");
+      if (!roleSpend(a, "role_halve")) lines.push("折戟本场已用完。");
       else {
         const amt = Math.floor((Number(t.def) || 0) / 2);
-        dealBreak(t, amt, "none", lines, "折戟");
+        dealBreak(t, amt, "none", lines, "折戟", { by: a });
         lines.push(`折戟：击破 ${amt}。`);
       }
     } else if (id === "role_omen") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
-      if (!roleOnce(a, "omen", 1)) lines.push("击破预告本场已用完。");
+      if (!roleSpend(a, "role_omen")) lines.push("击破预告本场已用完。");
       else {
         t.instant = t.instant || {};
         t.instant.doubleBreak = true;
         t.instant.omenFrom = a.id;
         t.instant.omenArmed = true;
+        t.instant.omenHit = false;   // 判定窗口里被打进失衡就记下（recoverFromStun），回合结束按它判成功
         lines.push(`${t.name} 下回合受到双倍击破。若该回合未能击破其架势，你将失衡。`);
       }
     } else if (id === "role_lockdown") {
-      visibleEnemies(a.zone).forEach(u => {
+      // 只到这一回合结束：不能移动（turnEnd 清 noMove），攻击只能打施放者（lockdownBy，releaseTurnLocks 清）。
+      // 以前借用嘲讽的 tauntTo：敌人这回合没出手就一直留到之后的回合；出手一次又提前没了
+      visibleEnemies(a.zone).filter(u => !u.dead && !u.fused).forEach(u => {
         u.noMove = true;
-        u.tauntTo = a.id;
+        u.lockdownBy = a.id;
       });
-      lines.push("禁足怒吼：同区敌人本回合无法移动，且必须打你。");
+      lines.push(`禁足怒吼：同区敌人本回合无法移动，且只能攻击${a.name}。`);
     } else if (id === "role_grit") {
-      if (!roleOnce(a, "grit", 2)) lines.push("咬牙坚持本场次数用尽。");
+      if (!roleSpend(a, "role_grit")) lines.push("咬牙坚持本场次数用尽。");
       else {
         a.resources.gritTurn = true;
         lines.push("咬牙坚持：本回合受伤减半。");
       }
     } else if (id === "role_stand") {
-      if (!roleOnce(a, "stand", 1)) lines.push("屹立不倒本场已用完。");
+      if (!roleSpend(a, "role_stand")) lines.push("屹立不倒本场已用完。");
       else {
         a.resources.standTurn = true;
         lines.push("屹立不倒：本回合免疫伤害和击破。");
       }
     } else if (id === "role_fear") {
-      if (!roleOnce(a, "fear", (a.level || 1) >= 15 ? 3 : 2)) lines.push("恐惧怒吼次数用尽。");
+      if (!roleSpend(a, "role_fear")) lines.push("恐惧怒吼次数用尽。");
       else {
         fieldUnits().filter(u => !u.isPlayer && zoneDist(a.zone, u.zone, state.zoneMode) <= 1).forEach(u => {
           u.statuses = u.statuses || {};
@@ -10181,21 +10470,25 @@ function runSkillInner(id, optRun) {
       a.resources.guardStrike = true;
       lines.push("防守反击：本回合第一次成功协助格挡会追加一次协助攻击。");
     } else if (id === "role_all_reflect") {
-      if (!roleOnce(a, "allReflect", 1)) lines.push("全反击本场已用完。");
+      if (!roleSpend(a, "role_all_reflect")) lines.push("全反击本场已用完。");
       else {
         a.resources.allReflect = true;
         lines.push("全反击：本回合全队成功格挡将反伤伤害与击破。");
       }
     } else if (id === "role_buffer") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
-      if (!roleOnce(a, "buffer", (a.level || 1) >= 15 ? 2 : 1)) lines.push("缓冲次数用尽。");
+      if (!roleSpend(a, "role_buffer")) lines.push("缓冲次数用尽。");
       else {
         const r = takeDice(2, 4, 4);
-        addShieldLayer(t, r.total, false);   // 生存职责给的护盾，不是川川的磁场护盾
-        lines.push(`缓冲：${t.name} 获得 ${r.total} 护盾（${r.text}）。`);
+        // 15 级后可以自选给哪一种血量（分步里选）；默认是护盾
+        const fl = state.skillFlow;
+        const kind = (a.level || 1) >= 15 && fl && fl.picks && LAYER[fl.picks.layer] ? fl.picks.layer : "shield";
+        if (kind === "shield") addShieldLayer(t, r.total, false);   // 生存职责给的护盾，不是川川的磁场护盾
+        else addTempLayer(t, kind, r.total);                        // 其他种类：战斗内的临时血量，战后去掉
+        lines.push(`缓冲：${t.name} 获得 ${r.total} 点${kind === "shield" ? "护盾" : LAYER[kind]}（${r.text}）。`);
       }
     } else if (id === "role_dome") {
-      if (!roleOnce(a, "dome", 1)) lines.push("防护罩本场已用完。");
+      if (!roleSpend(a, "role_dome")) lines.push("防护罩本场已用完。");
       else {
         const hp = Math.floor(atk + 10);
         // 防护罩是盾牌类配置物（和铁壁、废铁墙一样）：替同区我方挡攻击行动，范围攻击完全挡住，只有罩挨一下
@@ -10207,7 +10500,7 @@ function runSkillInner(id, optRun) {
       }
     } else if (id === "role_renew") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
-      if (!roleOnce(a, "renew", 1)) lines.push("续命本场已用完。");
+      if (!roleSpend(a, "role_renew")) lines.push("续命本场已用完。");
       else if (t.dying || t.upOnShp || totalHp(t) <= 0) {
         // 濒死（或已经靠坚毅生命起身）：直接救回濒死前的状态——不走坚毅生命那一套，不受力竭「不能起身」限制，
         // 之后受伤照常打血量层；恢复最大生命的 25%
@@ -10225,7 +10518,7 @@ function runSkillInner(id, optRun) {
     } else if (id === "role_lock") {
       // 每场一次（5 级两次，10 级三次）；只锁到这一回合结束（turnEnd 里解开）
       const cap = roleLockCap(a);
-      if (!roleOnce(a, "lock", cap)) lines.push(`锁定本场已用完（每场 ${cap} 次）。`);
+      if (!roleSpend(a, "role_lock")) lines.push(`锁定本场已用完（每场 ${cap} 次）。`);
       else if (state.weather && state.weather !== "none") {
         if (!state.weatherLock) { state.weatherLock = a.name + "锁定"; state.weatherLockTurn = true; }
         lines.push(`锁定天气：${weatherName(state.weather)} 本回合不会被修改。`);
@@ -10236,31 +10529,41 @@ function runSkillInner(id, optRun) {
       }
       if (a.kit === "helu") a.resources.lockLeft = Math.max(0, cap - ((a.resources.roleOnce || {}).lock || 0));
     } else if (id === "role_shelter") {
-      if (!needT()) return paintSkillLog(lines.join("\n"));
-      t.isolate = true;
-      t.shelterTurn = true;
-      lines.push(`${t.name} 本回合豁免天气与场地。`);
+      // 每场 2 次（15 级 3 次）；一次附赠动作可以在这一回合里保释好几名友方（分步里多选），每人用掉一次
+      const fl = state.skillFlow;
+      const ids = SHELTER_PICKS.map(k => fl && fl.picks ? fl.picks[k] : null).filter(Boolean);
+      const list = ids.length ? ids.map(x => unitById(x)).filter(Boolean) : (t ? [t] : []);
+      if (!list.length) { lines.push("先选要保释的友方。"); return paintSkillLog(lines.join("\n")); }
+      list.forEach(u => {
+        if (!roleSpend(a, "role_shelter")) { lines.push(`保释本场次数已用完，${u.name} 没有保释。`); return; }
+        u.isolate = true;
+        u.shelterTurn = true;
+        lines.push(`${u.name} 本回合豁免天气与场地。`);
+      });
     } else if (id === "role_harsh") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
-      if (!roleOnce(a, "harsh", 1)) lines.push("恶劣环境本场已用完。");
+      if (!roleSpend(a, "role_harsh")) lines.push("恶劣环境本场已用完。");
       else {
         t.harshEnv = true;
         lines.push(`${t.name} 本回合场地与天气效果翻倍。`);
       }
     } else if (id === "role_apocalypse") {
-      if (!roleOnce(a, "apocalypse", 1)) lines.push("末日本场已用完。");
+      if (!roleSpend(a, "role_apocalypse")) lines.push("末日本场已用完。");
       else {
         state.apocalypse = true;
         lines.push("末日：整场战斗天气与场地效果翻倍，无法停止。");
       }
     } else if (id === "role_boost") {
-      if (!needT()) return paintSkillLog(lines.join("\n"));
-      const dest = Number(hostValue("destZone", "")) || otherZone(t.zone);
-      displaceTo(t, dest, lines, "被借力移动");
+      // 目的地在分步里选（以前读一个不存在的界面元素 destZone，只能挪到默认的相邻区）
+      const fl = state.skillFlow;
+      const tgt = fl && fl.picks && fl.picks.target ? unitById(fl.picks.target) : t;
+      const dest = fl && fl.picks && fl.picks.dest != null ? Number(fl.picks.dest) : null;
+      if (!tgt || dest == null) { lines.push("先选借力移动的友方和目的地。"); return paintSkillLog(lines.join("\n")); }
+      displaceTo(tgt, dest, lines, "被借力移动");
     } else if (id === "role_shake") {
-      if (!roleOnce(a, "shake", 1)) lines.push("撼动本场已用完。");
+      if (!roleSpend(a, "role_shake")) lines.push("撼动本场已用完。");
       else {
-        visibleEnemies(a.zone).forEach(u => {
+        visibleEnemies(a.zone).filter(u => !u.dead && !u.fused).forEach(u => {
           u.noMove = true;
           if (!applyUnstable(u, lines)) return;
           convertUnstableInHv(u, lines);
@@ -10269,7 +10572,7 @@ function runSkillInner(id, optRun) {
         lines.push("撼动：同区敌人陷入不稳（本回合无法移动）。高压场上的不稳会立刻晕眩。");
       }
     } else if (id === "role_rearrange") {
-      if (!roleOnce(a, "rearrange", 1)) lines.push("重整本场已用完。");
+      if (!roleSpend(a, "role_rearrange")) lines.push("重整本场已用完。");
       else {
         fieldUnits().filter(u => zoneDist(a.zone, u.zone, state.zoneMode) <= 1 && u.id !== a.id)
           .concat((state.props || []).filter(p => p.movable && zoneDist(a.zone, p.zone, state.zoneMode) <= 1))   // 可移动的配置物也一样
@@ -10280,20 +10583,34 @@ function runSkillInner(id, optRun) {
         lines.push("重整：距离 1 内其他单位各移动 1 区。飞行切换请在单位面板手动改。");
       }
     } else if (id === "role_sturdy") {
-      if (!needT()) return paintSkillLog(lines.join("\n"));
-      t.statuses = t.statuses || {};
-      t.statuses.sturdy = true;
-      lines.push(`${t.name} 本回合获得坚挺。`);
+      const fl = state.skillFlow;
+      if ((a.level || 1) >= 15 && fl && fl.picks && fl.picks.mode === "all") {
+        // 15 级：用行动点让全部友方此回合获得坚挺（skillCost 按这个分步改收行动点）
+        const all = fieldUnits().filter(u => u.isPlayer && !u.fused);
+        all.forEach(u => { u.statuses = u.statuses || {}; u.statuses.sturdy = true; });
+        lines.push(`不倒战意：全部友方（${all.map(u => u.name).join("、")}）本回合获得坚挺。`);
+      } else {
+        if (!needT()) return paintSkillLog(lines.join("\n"));
+        t.statuses = t.statuses || {};
+        t.statuses.sturdy = true;
+        lines.push(`${t.name} 本回合获得坚挺。`);
+      }
     } else if (id === "role_gold") {
-      if (!needT()) return paintSkillLog(lines.join("\n"));
-      if (!roleOnce(a, "gold", 2)) lines.push("黄金时间次数用尽。");
+      // 目标和延长哪一种即时效果在分步里选（只有一种时不用选）
+      const fl = state.skillFlow;
+      const tgt = fl && fl.picks && fl.picks.target ? unitById(fl.picks.target) : t;
+      if (!tgt) { lines.push("先选黄金时间的目标。"); return paintSkillLog(lines.join("\n")); }
+      const keys = goldKeys(tgt);
+      const key = fl && fl.picks && keys.indexOf(fl.picks.status) >= 0 ? fl.picks.status : keys[0];
+      if (!key) lines.push(`${tgt.name} 身上没有可以延长的即时效果。`);
+      else if (!roleSpend(a, "role_gold")) lines.push("黄金时间次数用尽。");
       else {
-        t.instant = t.instant || {};
-        t.instant.goldHold = true;
-        lines.push(`${t.name} 的即时效果将延长一回合。`);
+        tgt.instant = tgt.instant || {};
+        tgt.instant.goldHold = key;   // 记下延长的是哪一种（按真值判断的地方照旧能用）
+        lines.push(`${tgt.name} 的${INSTANT_NAME[key]}将延长一回合。`);
       }
     } else if (id === "role_rally") {
-      if (!roleOnce(a, "rally", 1)) lines.push("全队集结本次长休已用过。");
+      if (!roleSpend(a, "role_rally")) lines.push("全队集结本次长休已用过。");
       else {
         a.resources.rallyOn = true;
         fieldUnits().filter(u => u.isPlayer && Number(u.zone) === Number(a.zone)).forEach(u => applyRallyBuff(u, lines));

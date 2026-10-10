@@ -351,6 +351,8 @@ const SKILL_TARGET_SIDE = {
   kolt_mod: "anySelf",
   chuan_reclaim: "allySelf", // 回收护盾：任意一名友方（含自己）      // 「非法」改装：任意单位（含自己）施加过载
   role_renew: "ally",       // 续命：任意距离一名友方（以前没登记，被推断成敌方）
+  role_harsh: "anySelf",    // 恶劣环境：「一名单位」敌我都行（以前被推断成只能选敌人）
+  role_double_dot: "enemy", // 加倍计量：一个敌人
   chuan_over: "anySelf"     // 电站超频：任意单位（敌人也行：主动让敌人过载），也可以对川川自己用
 };
 

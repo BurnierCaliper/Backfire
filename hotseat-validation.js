@@ -146,7 +146,9 @@
     if (cmd.target != null && !target) fail("没有这个可用目标", "invalid_target");
     const pinned = ["nora_aa", "vitas_slash"].includes(cmd.skill) && piercedTarget(cmd.skill === "nora_aa" ? actor : noraOf());
     if (pinned && !target) target = pinned;
-    if ((needsTarget.has(cmd.skill) || ["nora_aa", "vitas_slash"].includes(cmd.skill)) && !target) fail("请先选择技能目标", "invalid_target");
+    // 不倒战意 15 级选「全部友方」（行动点）不需要单独的目标
+    const wholeParty = cmd.skill === "role_sturdy" && flow.picks.mode === "all";
+    if (!wholeParty && (needsTarget.has(cmd.skill) || ["nora_aa", "vitas_slash"].includes(cmd.skill)) && !target) fail("请先选择技能目标", "invalid_target");
     const why = skillTargetError(actor, cmd.skill, target);
     if (why) fail(why, "invalid_target");
     if (!target || flow.hasUnit || pinned) return;
