@@ -776,6 +776,11 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
 .pvbox h4 { margin: 0 0 6px; font-size: 13px; color: var(--bone); }
 .pvbox .ln { line-height: 1.55; white-space: pre-wrap; }
 .pvbox .ln.key { color: var(--bone); }
+/* 悬停技能的预演（game.js · 悬停技能就预演）：消耗一行、每个目标一行、不能用的原因 */
+.pvbox .pv-cost { margin-bottom: 2px; }
+.pvbox .pv-row b { font-weight: 700; }
+.pvbox .ln.pv-why { color: var(--foe); }
+.pvbox .pv-other { margin-top: 2px; }
 .logs { flex: 1; overflow-y: auto; padding: 8px 14px 20px; }
 .lg { padding: 8px 0; border-bottom: 1px solid rgba(61, 51, 43, .6); }
 .lg .t { font-size: 13px; color: var(--bone); }
