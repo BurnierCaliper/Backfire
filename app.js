@@ -1680,8 +1680,10 @@ function beginRound(notes) {
       notes.push(`${u.name} 被击落：本回合沙尘不回复。`);
     }
     if (!u.gotHitThisTurn && !u._noShieldRefill) {
+      // 只回满单位自带的那部分：临时护盾扣掉的不回来（max 已经跟着减掉了）
+      syncTempShield(u);
       (u.layers || []).forEach(l => {
-        if (l.type === "shield") l.current = l.max;
+        if (l.type === "shield") { l.current = l.max; l._lastCur = l.current; }
       });
     }
     u._noShieldRefill = false;
@@ -2036,8 +2038,9 @@ function turnEnd() {
   });
   state.units.forEach(u => {
     if (u && u._shieldRestoreAtTurnEnd) {
+      syncTempShield(u);
       (u.layers || []).forEach(l => {
-        if (l.type === "shield") l.current = l.max || l.current;
+        if (l.type === "shield") { l.current = l.max || l.current; l._lastCur = l.current; }
       });
       u._shieldRestoreAtTurnEnd = false;
       notes.push(`${u.name} 护盾在回合结束时回满（中和·感电）。`);
@@ -7129,14 +7132,7 @@ function addShieldLayer(u, amount, fromChuan) {
   amount = Math.floor(amount);
   // 原来的护盾已经没了（被打破、过载清零、被回收……）：留下的磁场护盾标记作废，按这次的来源重新算
   if (shieldSum(u) <= 0) dropMagnetShield(u);
-  let sh = (u.layers || []).find(l => l.type === "shield");
-  if (!sh) {
-    u.layers.unshift({ type: "shield", current: amount, max: amount, granted: true });
-  } else {
-    sh.current = Number(sh.current) + amount;
-    sh.max = Number(sh.max) + amount;
-    if (!sh.granted) sh.grantBonus = (Number(sh.grantBonus) || 0) + amount;
-  }
+  addTempShield(u, amount);   // 施加的护盾都是临时护盾：并进护盾层，不会回满（engine.js · addTempShield）
   if (fromChuan !== false) u.shieldFromChuan = true;
 }
 /** 磁场护盾的标记作废：川川 / 哔哩哩给的护盾没了（被打破、被过载清零、被回收） */
@@ -10672,9 +10668,9 @@ function runSkillInner(id, optRun) {
       shields.forEach(l => {
         if (l.temp || l.granted) { t.layers = t.layers.filter(x => x !== l); return; }
         l.current = 0;
-        const extra = (Number(l.grantBonus) || 0) + (Number(l.tempBonus) || 0);
+        const extra = (Number(l.grantBonus) || 0) + (Number(l.tempBonus) || 0) + (Number(l.tempShield) || 0);
         if (extra > 0) l.max = Math.max(0, (Number(l.max) || 0) - extra);
-        delete l.grantBonus; delete l.tempBonus;
+        delete l.grantBonus; delete l.tempBonus; l.tempShield = 0; l._lastCur = 0;
       });
       addCharge(2);
       lines.push(`回收护盾：清除 ${t.name} 的 ${had} 点护盾，川川电能 +2。`);

@@ -59,8 +59,46 @@ function totalMaxHp(unit) {
 function baseMaxHp(unit) {
   return (unit.layers || []).reduce((s, l) => {
     if (l.temp) return s;
-    return s + Math.max(0, Number(l.max || 0) - Number(l.tempBonus || 0));
+    return s + Math.max(0, Number(l.max || 0) - Number(l.tempBonus || 0) - tempShieldOf(l));
   }, 0);
+}
+
+/* ---------- 临时护盾 ----------
+ * 技能、道具、扫描……施加的护盾都是临时护盾（tempShield）：并在护盾层里显示，不算额外一层，克制表照护盾算；
+ * 但不会在「一回合没挨打」时回满——单位自带的那部分护盾才回满。挨打时临时护盾先扣。
+ * 护盾层的 max = 自带上限 + 剩下的临时护盾；临时护盾扣掉多少，max 就跟着少多少，所以「回满」（current = max）只补自带的部分。
+ * 不管伤害从哪条路扣的护盾，syncTempShield 按上次记下的 current（_lastCur）结算掉了多少。 */
+function tempShieldOf(layer) { return layer && layer.type === "shield" ? Math.max(0, Number(layer.tempShield) || 0) : 0; }
+function syncTempShield(unit) {
+  if (!unit || !unit.layers) return;
+  unit.layers.forEach(l => {
+    if (l.type !== "shield") return;
+    const cur = Math.max(0, Number(l.current) || 0);
+    const t = tempShieldOf(l);
+    if (t > 0 && l._lastCur != null) {
+      const use = Math.min(t, Math.max(0, Number(l._lastCur) - cur));
+      if (use > 0) { l.tempShield = t - use; l.max = Math.max(0, (Number(l.max) || 0) - use); }
+    }
+    if (tempShieldOf(l) > cur) { l.max = Math.max(0, (Number(l.max) || 0) - (tempShieldOf(l) - cur)); l.tempShield = cur; }
+    if (l.current > l.max) l.current = l.max;
+    l._lastCur = Math.max(0, Number(l.current) || 0);
+  });
+  // 纯临时的护盾层（单位本来没有护盾）用完就去掉
+  unit.layers = unit.layers.filter(l => !(l.type === "shield" && (l.granted || l.temp) && !l.batteryShield && !(Number(l.max) > 0)));
+}
+/** 加临时护盾：并进现有的护盾层（没有就新开一层，标 granted） */
+function addTempShield(unit, amt) {
+  amt = Math.max(0, Math.floor(Number(amt) || 0));
+  if (!unit || !amt) return null;
+  unit.layers = unit.layers || [];
+  syncTempShield(unit);
+  let layer = unit.layers.find(l => l.type === "shield" && !l.batteryShield);
+  if (!layer) { layer = { type: "shield", current: 0, max: 0, granted: true }; unit.layers.unshift(layer); }
+  layer.max = (Number(layer.max) || 0) + amt;
+  layer.current = (Number(layer.current) || 0) + amt;
+  layer.tempShield = tempShieldOf(layer) + amt;
+  layer._lastCur = layer.current;
+  return layer;
 }
 
 /** 给单位加一段临时血量层（战斗结束消失）。已有同类型的层就叠上去，并记在 tempBonus 里，
@@ -68,6 +106,7 @@ function baseMaxHp(unit) {
 function addTempLayer(unit, type, amt) {
   amt = Math.max(0, Number(amt) || 0);
   if (!unit || !amt) return null;
+  if (type === "shield") return addTempShield(unit, amt);   // 护盾一律是临时护盾
   unit.layers = unit.layers || [];
   let layer = unit.layers.find(l => l.type === type);
   if (!layer) {
@@ -90,7 +129,7 @@ function persistentLayers(unit) {
     if (ruby) src = (ruby.layers || []).filter(l => l.mecha);
   }
   return src.filter(l => !l.temp).map(l => {
-    const cap = Math.max(0, Number(l.max || 0) - Number(l.tempBonus || 0));
+    const cap = Math.max(0, Number(l.max || 0) - Number(l.tempBonus || 0) - tempShieldOf(l));
     return { type: l.type, current: Math.max(0, Math.min(cap, Number(l.current) || 0)) };
   });
 }
@@ -98,8 +137,10 @@ function persistentLayers(unit) {
 /** 战斗结束：去掉临时层，以及叠在原有层上的临时部分 */
 function stripTempLayers(unit) {
   if (!unit || !unit.layers) return;
-  unit.layers = unit.layers.filter(l => !l.temp);
+  unit.layers = unit.layers.filter(l => !l.temp && !(l.type === "shield" && l.granted));
   unit.layers.forEach(l => {
+    const ts = tempShieldOf(l);
+    if (ts) { l.max = Math.max(0, (Number(l.max) || 0) - ts); l.current = Math.min(Number(l.current) || 0, l.max); l.tempShield = 0; }
     const b = Number(l.tempBonus) || 0;
     if (!b) return;
     l.max = Math.max(0, (Number(l.max) || 0) - b);

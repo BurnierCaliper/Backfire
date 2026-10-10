@@ -40,12 +40,16 @@ function applyInstantEffect(u, key, notes, source) {
     stingPulse(u, "ice", notes, "刺骨");
   }
   if (key === "overload" && !already) {
-    // 过载：护盾值此回合内翻倍，下回合开始时清零
+    // 过载：护盾值此回合内翻倍（临时护盾也翻倍），下回合开始时清零
+    if (typeof syncTempShield === "function") syncTempShield(u);
     (u.layers || []).forEach(l => {
       if (l.type !== "shield") return;
       l._overloadMax = Number(l.max) || 0;
+      l._overloadTemp = Number(l.tempShield) || 0;
       l.max = l._overloadMax * 2;
       l.current = (Number(l.current) || 0) * 2;
+      if (l._overloadTemp) l.tempShield = l._overloadTemp * 2;
+      l._lastCur = l.current;
     });
     if ((u.layers || []).some(l => l.type === "shield")) notes.push(`${u.name} 过载：护盾本回合翻倍。`);
   }
@@ -69,9 +73,15 @@ function overloadRoundStart(u, notes) {
   (u.layers || []).forEach(l => {
     if (l.type !== "shield") return;
     had = true;
-    if (l._overloadMax != null) { l.max = l._overloadMax; delete l._overloadMax; }
+    if (typeof syncTempShield === "function") syncTempShield(u);
+    // 清零：临时护盾也一起没了，上限回到自带的那部分
+    if (l._overloadMax != null) { l.max = Math.max(0, l._overloadMax - (Number(l._overloadTemp) || 0)); delete l._overloadMax; delete l._overloadTemp; }
+    else l.max = Math.max(0, (Number(l.max) || 0) - (Number(l.tempShield) || 0));
+    l.tempShield = 0;
     l.current = 0;
+    l._lastCur = 0;
   });
+  if (typeof syncTempShield === "function") syncTempShield(u);   // 纯临时的护盾层去掉
   if (had && typeof dropMagnetShield === "function") dropMagnetShield(u);   // 川川给的护盾被过载清零：磁场护盾标记跟着作废
   notes.push(`${u.name} 过载结束${had ? "：护盾清零" : ""}。`);
   return had;
@@ -85,6 +95,7 @@ function overloadRoundStart(u, notes) {
  *   ctx        { attacker, action, melee, startLayerType }
  */
 function afterDamageTaken(u, element, dealt, shieldHit, notes, ctx) {
+  if (u && typeof syncTempShield === "function") syncTempShield(u);   // 临时护盾先扣（engine.js）
   if (!u || !(dealt > 0)) return;
   ctx = ctx || {};
   // 躲藏：受到伤害后解除
