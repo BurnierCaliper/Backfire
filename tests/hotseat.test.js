@@ -212,6 +212,46 @@ test("协助不要求当前顺位，等待中普通行动暂停，全部拒绝�
   assert.equal(s.snapshot().ask, null); assert.equal(s.assertAction("a", "ruby"), true);
 });
 
+test("联机协助攻击：其他玩家举手，打出失衡的玩家从举手的人里选；不选就不发动，到时间由最先举手的人出手", () => {
+  const f = fixture(), s = f.s; force(f);
+  // 瑞比（甲）打出失衡：乙（绯秋）、主持人（夕夏）能协助
+  let ask = s.openAsk({ kind: "assist", candidates: ["hiaki", "xia"], chooser: "a" });
+  assert.equal(s.askFor("a").isChooser, true);
+  assert.equal(s.askFor("a").eligible, false, "还没人举手，甲没有可选的");
+  const r = s.answer("b", ask.id, { unitId: "hiaki", extra: { blade: "naruto" } });
+  assert.equal(r.status, "waiting"); assert.equal(r.raised, true);
+  assert.equal(s.snapshot().ask.hands.length, 1, "举手不会直接出手");
+  assert.equal(s.askFor("b").raised, "hiaki");
+  s.answer("gm", ask.id, { unitId: "xia" });
+  assert.deepEqual(plain(s.askFor("a").hands.map(h => h.unitId)), ["hiaki", "xia"]);
+  assert.equal(s.askFor("a").eligible, true);
+  assert.throws(() => s.answer("b", ask.id, { unitId: "xia" }), /不能代替/);
+  const done = s.answer("a", ask.id, { unitId: "hiaki" });
+  assert.equal(done.accepted, true);
+  assert.equal(done.result.unitId, "hiaki"); assert.equal(done.result.operatorId, "b");
+  assert.deepEqual(plain(done.result.extra), { blade: "naruto" }, "照举手时选的方式出手");
+  // 不选：不发动
+  ask = s.openAsk({ kind: "assist", candidates: ["hiaki", "xia"], chooser: "a" });
+  s.answer("b", ask.id, { unitId: "hiaki" });
+  assert.equal(s.answer("a", ask.id, { unitId: null }).result.reason, "declined");
+  // 放下手、其他人都不协助：没人举手就结束
+  ask = s.openAsk({ kind: "assist", candidates: ["hiaki", "xia"], chooser: "a" });
+  s.answer("b", ask.id, { unitId: "hiaki" });
+  s.answer("b", ask.id, { unitId: null });
+  assert.equal(s.snapshot().ask.hands.length, 0);
+  assert.equal(s.answer("gm", ask.id, { unitId: null }).result.reason, "declined");
+  // 到时间打出失衡的人还没选：最先举手的人出手
+  ask = s.openAsk({ kind: "assist", candidates: ["hiaki", "xia"], chooser: "a" });
+  s.answer("gm", ask.id, { unitId: "xia" });
+  s.answer("b", ask.id, { unitId: "hiaki" });
+  f.advance(20000); s.tick();
+  assert.equal(s.snapshot().closedAsk.unitId, "xia");
+  assert.equal(s.snapshot().closedAsk.reason, "accepted");
+  // 没有 chooser（单机热座等）：照旧先回答的人生效
+  ask = s.openAsk({ kind: "assist", candidates: ["hiaki", "xia"] });
+  assert.equal(s.answer("b", ask.id, { unitId: "hiaki" }).accepted, true);
+});
+
 test("候选离场和战斗结束关闭询问，重复回答不重复结算", () => {
   const f = fixture(), s = f.s; force(f); const events = []; s.onAskClosed(x => events.push(x));
   const ask = s.openAsk({ kind: "assist", candidates: ["hiaki"] });

@@ -125,7 +125,29 @@
       const options = ask.eligible && !ask.declined ? ask.options || [] : [];
       const waiting = (ask.waitingNames || []).join("、");
       const choice = ask.kind === "choice", canDecline = ask.allowDecline == null ? !choice : !!ask.allowDecline;
+      if (ask.kind === "assist" && ask.chooserName) { renderHandAsk(ask, options); return; }
       html(reaction, `<div class="hs-card hs-ask-card"><header class="hs-heading"><h2>${esc(ask.title || (choice ? "选择" : ask.kind === "block" ? "协助格挡" : "协助攻击"))}</h2><strong id="hs-countdown" role="timer" aria-label="回应剩余时间"${Number(ask.deadline) > 0 ? "" : " hidden"}></strong></header><p>${esc(ask.declined ? "你已选择不协助，正在等待其他玩家回应。" : options.length ? choice ? "请为自己操作的角色选择。" : "选择自己的单位协助。先回答「我来」的玩家生效。" : `正在等待${waiting || "符合条件的玩家"}回应。`)}</p><div class="hs-ask-options">${options.map((o, index) => `${button(`${choice ? "" : "我来 · "}${o.label || unitName(o.helper)}`, "answer", `data-option="${index}" data-helper="${esc(o.helper)}"`, false, "hs-primary")}${o.sub ? `<small>${esc(o.sub)}</small>` : ""}`).join("")}${options.length && canDecline ? button(ask.cancelLabel || "不协助", "decline") : ""}</div></div>`, "ask");
+      updateCountdown();
+    }
+    /** 联机协助攻击：其他人举手，打出失衡的那名玩家从举手的人里选（hotseat.js · answer） */
+    function renderHandAsk(ask, options) {
+      const hands = ask.hands || [];
+      const head = `<header class="hs-heading"><h2>${esc(ask.title || "协助攻击")}</h2><strong id="hs-countdown" role="timer" aria-label="回应剩余时间"${Number(ask.deadline) > 0 ? "" : " hidden"}></strong></header>`;
+      let body;
+      if (ask.isChooser) {
+        body = `<p>${esc(hands.length ? "你打出了失衡：选一名举手的队友来协助攻击（也可以用自己的单位）。" : "你打出了失衡：等队友举手，或用自己的单位协助攻击。到时间没选就由最先举手的人出手。")}</p>
+          <div class="hs-ask-options">${hands.map((h, index) => `${button(`选 ${h.label || unitName(h.helper)}`, "pickHand", `data-hand="${index}"`, false, "hs-primary")}<small>${esc(`${h.operatorName || ""} 举手${h.sub ? " · " + h.sub : ""}`)}</small>`).join("")}
+          ${options.map((o, index) => `${button(`我来 · ${o.label || unitName(o.helper)}`, "answer", `data-option="${index}" data-helper="${esc(o.helper)}"`)}${o.sub ? `<small>${esc(o.sub)}</small>` : ""}`).join("")}
+          ${button("不发动", "decline")}</div>`;
+      } else if (options.length) {
+        const mine = ask.raised ? options.find(o => o.helper === ask.raised) : null;
+        body = `<p>${esc(ask.raised ? `你已举手（${mine ? mine.label : unitName(ask.raised)}），等 ${ask.chooserName} 决定。可以改选或放弃。` : `${ask.chooserName} 打出了失衡：想协助攻击就举手，由 ${ask.chooserName} 决定谁出手。`)}</p>
+          <div class="hs-ask-options">${options.map((o, index) => `${button(`${ask.raised === o.helper ? "已举手 · " : "举手 · "}${o.label || unitName(o.helper)}`, "answer", `data-option="${index}" data-helper="${esc(o.helper)}"`, false, ask.raised ? "" : "hs-primary")}${o.sub ? `<small>${esc(o.sub)}</small>` : ""}`).join("")}
+          ${button(ask.raised ? "放下手" : "不协助", "decline")}</div>`;
+      } else {
+        body = `<p>${esc(ask.declined ? `你已选择不协助，等 ${ask.chooserName} 决定。` : `等 ${ask.chooserName} 决定谁来协助攻击。`)}</p>`;
+      }
+      html(reaction, `<div class="hs-card hs-ask-card">${head}${body}</div>`, "ask");
       updateCountdown();
     }
     function updateCountdown() {
@@ -178,6 +200,10 @@
         case "forceStart": await send({ type: "orderStart" }); break;
         case "move": await send({ type: "orderMove", actor: b.dataset.actor, index: Number(b.dataset.index) }); break;
         case "swapYes": case "swapNo": if (view.swap) await send({ type: "orderSwapAccept", requestId: view.swap.requestId, accept: b.dataset.hs === "swapYes" }); break;
+        case "pickHand": if (view.ask) {
+          const hand = (view.ask.hands || [])[Number(b.dataset.hand)];
+          if (hand) await send({ type: "answer", askId: view.ask.id, helper: hand.helper });
+        } break;
         case "answer": case "decline": if (view.ask) {
           const selected = (view.ask.options || [])[Number(b.dataset.option)], command = { type: "answer", askId: view.ask.id, helper: b.dataset.hs === "decline" ? null : selected.helper };
           if (b.dataset.hs === "answer" && Object.prototype.hasOwnProperty.call(selected, "extra")) command.extra = JSON.parse(JSON.stringify(selected.extra));

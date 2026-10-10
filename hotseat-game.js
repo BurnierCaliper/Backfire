@@ -63,9 +63,15 @@
     const ask = session.askFor(id);
     if (ask) {
       const detail = askDetails || {};
+      const sameExtra = (a, b) => JSON.stringify(a || {}) === JSON.stringify(b || {});
+      const labelOf = h => (detail.options || []).find(o => o.helper === h.unitId && sameExtra(o.extra, h.extra)) ||
+        (detail.options || []).find(o => o.helper === h.unitId) || { label: h.unitName, sub: "" };
       base.ask = { id: ask.id, kind: ask.kind, title: detail.title || "协助询问", deadline: ask.deadline,
         waitingNames: ask.waiting.map(p => p.operatorName), eligible: ask.eligible, declined: ask.declined,
-        options: (detail.options || []).filter(o => ask.options.some(u => u.unitId === o.helper)) };
+        options: (detail.options || []).filter(o => ask.options.some(u => u.unitId === o.helper)),
+        // 协助攻击举手：打出失衡的人（chooser）看得到谁举了手并从中选人；举手的人看得到自己举的是哪一个
+        chooserName: ask.chooserName || null, isChooser: !!ask.isChooser, raised: ask.raised || null,
+        hands: ask.chooser ? ask.hands.map(h => { const o = labelOf(h); return { helper: h.unitId, label: o.label, sub: o.sub || "", operatorName: h.operatorName, extra: copy(h.extra || {}) }; }) : [] };
     }
     if (choice) base.ask = { id: choice.id, kind: "choice", title: choice.title, deadline: null,
       eligible: id === choice.owner, declined: false, waitingNames: [config.players.find(p => p.id === choice.owner).name],
@@ -93,7 +99,10 @@
         if (cmd.askId !== choice.id || id !== choice.owner) fail("不能代替其他操作者回答");
         if (!choice.options.some(o => o.helper === cmd.helper && JSON.stringify(o.extra) === JSON.stringify(cmd.extra))) fail("选择已经失效");
       } else if (cmd.helper) {
-        if (!askDetails || !askDetails.options.some(o => o.helper === cmd.helper && JSON.stringify(o.extra || {}) === JSON.stringify(cmd.extra || {}))) fail("协助选项已经失效");
+        // 打出失衡的人选举手的人：按举手时的方式出手，不用再对选项
+        const open = session.snapshot().ask;
+        const hand = open && open.chooser === id && (open.hands || []).some(h => h.unitId === cmd.helper);
+        if (!hand && (!askDetails || !askDetails.options.some(o => o.helper === cmd.helper && JSON.stringify(o.extra || {}) === JSON.stringify(cmd.extra || {})))) fail("协助选项已经失效");
         const eligible = askDetails.eligible(); if (!eligible.some(u => u.id === cmd.helper)) fail("这名单位已不能协助");
       }
       return;
@@ -168,7 +177,11 @@
       const off = session.onAskClosed(result => { off(); askDetails = null; resolve(result); });
       const previous = restoredAsk; restoredAsk = null;
       const sameAsk = previous && previous.kind === kind && previous.jobId === (job.seq || null) && previous.targetId === (job.targetId || null);
-      const reopened = session.openAsk({ kind, jobId: job.seq || null, targetId: job.targetId || null, candidates: eligible().map(u => u.id),
+      // 联机协助攻击：打出失衡的那名玩家决定谁出手，其他人举手（hotseat.js · answer）
+      const breaker = kind === "assist" && network && job.breakerId ? state.units.find(u => u.id === job.breakerId) : null;
+      const breakerKit = breaker && breaker.isPlayer ? (breaker.weaponOf || breaker.kit) : null;
+      const chooser = breakerKit ? ownerByKit[breakerKit] || gm() : null;
+      const reopened = session.openAsk({ kind, jobId: job.seq || null, targetId: job.targetId || null, candidates: eligible().map(u => u.id), chooser,
         ...(sameAsk ? { remainingMs: previous.remainingMs } : {}) });
       if (sameAsk) {
         const waiting = new Set(previous.waiting.map(p => p.operatorId));

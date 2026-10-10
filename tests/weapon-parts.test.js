@@ -144,14 +144,14 @@ test("格挡件：拿在手里加到角色的协助格挡，武器人独立在�
   const before = c.blockChance(kolt);
   c.installWeaponPart(kolt, "torque", 0, "c_block_dex", true);
   c.installWeaponPart(kolt, "torque", 1, "b_block_int", true);
-  // C +5 和 B +8 叠加：扭矩 35 + 13 = 48，武器格挡加成（含改装件）封顶 45%（玩家手册第二章）
-  assert.equal(c.blockChance(kolt), before + 10, "C +5 和 B +8 叠加，到 45% 封顶");
-  assert.equal(c.weaponBlockBonusOf("torque", kolt), 45);
-  assert.equal(c.SkillText.armoryData().find(h => h.kit === "kolt").weapons.find(x => x.kit === "torque").blockBonus, 45, "武器工坊的持握格挡");
+  // C +5 和 B +8 叠加：扭矩 35 + 13 = 48（格挡率不封顶，作者定）
+  assert.equal(c.blockChance(kolt), Math.min(100, before + 13), "C +5 和 B +8 叠加");
+  assert.equal(c.weaponBlockBonusOf("torque", kolt), 48);
+  assert.equal(c.SkillText.armoryData().find(h => h.kit === "kolt").weapons.find(x => x.kit === "torque").blockBonus, 48, "武器工坊的持握格挡");
   // 武器人独立在场：它自己的格挡率也加
   const tq = c.spawnWeapon(kolt, "torque");
   assert.ok(tq && !tq.hidden);
-  assert.equal(c.blockChance(tq), c.bareBlockChance(tq) + 45);
+  assert.equal(c.blockChance(tq), Math.min(100, c.bareBlockChance(tq) + 48));
 });
 
 test("生命件：武器人每级装甲加成（按武器等级），装上 / 拆下马上改场上武器人的装甲；资料面板也算进去", () => {
