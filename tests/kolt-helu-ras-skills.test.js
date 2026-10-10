@@ -192,3 +192,19 @@ test("汲取：拉斯缪尔回合结束转 20% 能量为光能；EDC 变回武�
   assert.ok(r.resources.light > 0);
   assert.deepEqual(plain(c.skillCost("edc_siphon")), {});
 });
+
+test("柯尔特电钻普攻削弱：0.3 / 0.3 / 0.4 ×atk 三段电击，共 2 击破", () => {
+  const { c, S, foes } = setup(["kolt"], 1);
+  const k = c.findKit("kolt", S.units);
+  k.resources.bit = "drill";
+  k.atk = 10;
+  foes[0].layers = [{ type: "flesh", current: 200, max: 200 }];
+  const p = pops(c);
+  const def0 = foes[0].def;
+  cmd(c, { actor: k.id, skill: "kolt_aa", target: foes[0].id });
+  const hits = p.filter(x => x.id === foes[0].id);
+  assert.equal(hits.length, 3);
+  const atk = c.effectiveAtk(k, S.units);
+  assert.deepEqual(hits.map(x => x.value), [Math.floor(atk * 0.3), Math.floor(atk * 0.3), Math.floor(atk * 0.4)]);
+  assert.equal(foes[0].def, def0 - 2);
+});

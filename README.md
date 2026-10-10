@@ -368,6 +368,7 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **柯尔特电钻普攻削弱**（`app.js · kolt_aa`，`engine.js · hitMults`）：同区一个敌人，2 次 0.3×atk + 最后 1 次 0.4×atk 电击，共 2 击破（原来 3 次 0.4×atk）。多段攻击支持每段不同倍率；过载 / 导体 / 不稳多出来的段沿用最后一段的倍率。
 - **柯尔特 / Helumica / 拉斯缪尔新技能**（`app.js · kolt_cannon / torque_divert / ecmo_probe / ras_torrent / edc_siphon`）
   - 柯尔特 2 级起显示废料计数（单位卡文字 + 角色仪表图标）。废料 = 上一个被摧毁的敌人血量层 + 腐坏抛射记下的腐蚀伤害 + 扭矩「转移注意」失去的装甲。
   - 11 级碎渣重炮：装填全部废料。

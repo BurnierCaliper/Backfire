@@ -6885,7 +6885,7 @@ function dealTo(attacker, target, opt) {
         targetId: target.id,
         onConnect: opt.onConnect || null,
         opt: JSON.parse(JSON.stringify({
-        atk: opt.atk, mult: opt.mult, flat: opt.flat, hits: opt.hits, baseHits: opt.baseHits, breakOnce: opt.breakOnce, element: opt.element,
+        atk: opt.atk, mult: opt.mult, hitMults: opt.hitMults, flat: opt.flat, hits: opt.hits, baseHits: opt.baseHits, breakOnce: opt.breakOnce, element: opt.element,
         baseBreak: opt.baseBreak, diceN: opt.diceN, diceS: opt.diceS, diceB: opt.diceB, diceValue: opt.diceValue,
         usePrep: opt.usePrep, atkRange: opt.atkRange, flags: Object.assign({}, opt.flags, { blockResolved: false })
       }))
@@ -6998,6 +6998,7 @@ function dealTo(attacker, target, opt) {
     element: opt.element || "physical",
     baseBreak: br,
     hits: opt.hits || 1,
+    hitMults: Array.isArray(opt.hitMults) ? opt.hitMults.slice() : null,
     breakOnce: !!opt.breakOnce,
     baseHits: opt.baseHits,
     // 这次攻击动作里刚被打死的敌人：留到动作结束，后面的攻击照常结算、全部算溢出
@@ -11318,7 +11319,7 @@ function runSkillInner(id, optRun) {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       const bit = (findKit("kolt", state.units) || a).resources.bit || "drill";
       if (bit === "acid") hitOne(a, t, { element: "acid", mult: 1, baseBreak: 1, atk, atkRange: "ranged" });
-      else hitOne(a, t, { element: "electric", mult: 0.4, hits: 3, baseBreak: 2, breakOnce: true, atk, atkRange: "melee" });
+      else hitOne(a, t, { element: "electric", mult: 0.3, hitMults: [0.3, 0.3, 0.4], hits: 3, baseBreak: 2, breakOnce: true, atk, atkRange: "melee" });
     } else if (id === "kolt_swap" || id === "torque_swap") {
       const next = swapKoltBit(a, lines);
       // 拆装部件换了刀头 → 柯尔特的被动「更换刀头」照样触发一次切刀追击（同区一名敌人，0.5×atk / 被动+ 0.75×atk）

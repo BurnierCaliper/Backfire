@@ -781,7 +781,11 @@ function resolveAttack(ctx) {
       continue;
     }
 
-    let packet = rawBase + (h === 0 ? firstBonus : 0);
+    // hitMults：每段倍率不同的多段攻击（例如柯尔特电钻普攻 0.3 / 0.3 / 0.4）；多出来的段数沿用最后一段
+    const hm = Array.isArray(ctx.hitMults) && ctx.hitMults.length ? Number(ctx.hitMults[Math.min(h, ctx.hitMults.length - 1)]) || 0 : null;
+    const multAdj = hm == null ? 0 : hm - (Number(ctx.mult) || 0);
+    if (multAdj) hAdd(`本段倍率 ${round2(hm)}`);
+    let packet = Math.max(0, rawBase + atk * multAdj) + (h === 0 ? firstBonus : 0);
 
     const startIdx = pickStartIndex(layersWork, flags.pierce, flags.focusLayer);
     let startLayer = layersWork[startIdx] || layersWork.find(l => l.current > 0);
@@ -954,7 +958,7 @@ function resolveAttack(ctx) {
     packet = floored;
     totalIntended += packet;
     // 减伤：这一段比参照少了多少（空手格挡减半那部分不算，归格挡）
-    if (!ghost) totalReduced += Math.max(0, (refBase + (h === 0 ? firstBonus : 0)) * (flags.block === "bareOk" ? 0.5 : 1) - packet);
+    if (!ghost) totalReduced += Math.max(0, (Math.max(0, refBase + refAtk * multAdj) + (h === 0 ? firstBonus : 0)) * (flags.block === "bareOk" ? 0.5 : 1) - packet);
 
     let hitDealt = packet;
     if (ghost) {

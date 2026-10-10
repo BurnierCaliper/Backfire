@@ -916,7 +916,7 @@ function skillList(unit) {
   }
   if (unit.kit === "kolt") {
     const bit = (unit.resources && unit.resources.bit) || "drill";
-    add({ id: "kolt_aa", name: "普通攻击", hint: bit === "acid" ? "距离1 · 1atk 酸 +1击破" : "同区 · 三次 0.4atk 电 · 共2击破" });
+    add({ id: "kolt_aa", name: "普通攻击", hint: bit === "acid" ? "距离1 · 1atk 酸 +1击破" : "同区 · 0.3/0.3/0.4atk 三次电 · 共2击破" });
     add({ id: "kolt_short", name: "直流短接", hint: "需电钻 · 可先移≤1，再对同区铺高压场地" });
     add({ id: "kolt_chase", name: "紧追", hint: "附赠 · 对一个敌人施加紧追：它移动时柯尔特自动跟上", bare: true });
     add({ id: "kolt_scrap", name: "废物利用", hint: "获得上一个被摧毁的敌人血量层等量的对应血量（最多生命上限50%）· 另领腐坏抛射的记录", minLv: 2 });
