@@ -5252,12 +5252,12 @@ function longgeGunNear(a) {
   const lg = a && a.kit === "longge" ? a : longgeOf();
   return !!(lg && typeof passivePlus === "function" && passivePlus(lg, 1));
 }
-/** 爆发治疗能不能用：要 3 发子弹，而且接下来 3 发已经窥探到、是同一种颜色 */
+/** 爆发治疗能不能用：要 3 发子弹。不用先窥探；只有已经看到的颜色就对不上时才拦下（明知会白扣行动点） */
 function longgeBurstWhy(a) {
   const r = longgeRes(a) || { ammo: [], seen: [] };
   if (r.ammo.length < 3) return "爆发治疗要 3 发子弹";
-  if (!(r.seen[0] && r.seen[1] && r.seen[2])) return "要先窥探到接下来 3 发的颜色";
-  if (!(r.ammo[0] === r.ammo[1] && r.ammo[1] === r.ammo[2])) return "接下来 3 发不是同一种颜色";
+  const known = [0, 1, 2].filter(i => r.seen[i]).map(i => r.ammo[i]);
+  if (known.some(c => c !== known[0])) return "已经窥探到接下来 3 发不是同一种颜色";
   return null;
 }
 /** 胶囊弹药+：长休排好的下一场开局弹序（"RRBBRB" 这种 6 个字），没有就随机 */
@@ -11686,9 +11686,16 @@ function runSkillInner(id, optRun) {
       longgeSyncKnown(r);
       lines.push("完全换弹：重新装上 6 发（顺序随机）。扳机要重新解锁。");
     } else if (id === "xiaoxiao_burst") {
-      // 爆发治疗：消耗 3 发（接下来 3 发必须同色，见 longgeBurstWhy）。全红 → 同区友方生命回满；全蓝 → 获得 2×（龙哥等级 + 5）临时护盾
+      // 爆发治疗：消耗 3 发。全红 → 同区友方生命回满；全蓝 → 获得 2×（龙哥等级 + 5）临时护盾。
+      // 不用先窥探；接下来 3 发不同色时技能失败，行动点白扣，子弹不消耗
       if (!needT()) return paintSkillLog(lines.join("\n"));
       if (!t.isPlayer || Number(t.zone) !== Number(a.zone)) { lines.push("爆发治疗只能给同区的友方。"); return paintSkillLog(lines.join("\n")); }
+      const nx = (longgeRes(a) || { ammo: [] }).ammo.slice(0, 3);
+      const sim = typeof window !== "undefined" && window.GAME && window.GAME.sim;
+      if (!sim && !(nx.length === 3 && nx.every(c => c === nx[0]))) {
+        lines.push("爆发治疗失败：接下来 3 发子弹颜色不一样，行动点白白消耗（子弹没有消耗）。");
+        return paintSkillLog(lines.join("\n"));
+      }
       const shots = [longgeTakeBullet(a, lines), longgeTakeBullet(a, lines), longgeTakeBullet(a, lines)].filter(Boolean);
       if (shots.length === 3 && shots.every(c => c === "red")) {
         const got = healUnit(t, Math.max(0, totalMaxHp(t) - totalHp(t)));

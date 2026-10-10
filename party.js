@@ -968,7 +968,7 @@ function skillList(unit) {
     add({ id: "xiaoxiao_punch", name: "直冲拳", hint: "耗 1 弹 · 近距离 · 1atk 子弹属性 +2击破" });
     add({ id: "xiaoxiao_heal", name: "治疗支援", hint: "耗 1 弹 · 同区友方按子弹颜色治疗 · 然后收回武器" });
     add({ id: "xiaoxiao_combo", name: "连续拳", hint: "耗 3 弹 · 近距离 · 全红升龙拳 3atk 火 +3击破 / 全蓝撼地拳 2atk 冰 +5击破 / 混合每发红 0.75atk 火、蓝 0.5atk 冰 +1击破", minLv: 2 });
-    add({ id: "xiaoxiao_burst", name: "爆发治疗", hint: "耗 3 弹 · 只有接下来 3 发同色才能用 · 同区友方：全红回满生命 / 全蓝获得 2×（龙哥等级 + 5）临时护盾", minLv: 4 });
+    add({ id: "xiaoxiao_burst", name: "爆发治疗", hint: "耗 3 弹 · 接下来 3 发不同色则白扣行动点 · 同区友方：全红回满生命 / 全蓝获得 2×（龙哥等级 + 5）临时护盾", minLv: 4 });
     add({ id: "xiaoxiao_return", name: "收回为武器", hint: "需与龙哥同区" });
   }
   if (isUnarmed(unit)) {

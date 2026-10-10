@@ -184,7 +184,7 @@ test("应急处理（龙哥）：照手册 1d4+2，半血以下取最大 6", () 
   assert.equal(c.totalHp(kolt) - hp0, 6);
 });
 
-test("小朋友：装甲 12、架势 4、耐久 5（每五级 +1）、atk 5；格挡 60%，守护龙哥 75%", () => {
+test("小朋友：装甲 12、架势 4、耐久 5（每两级 +1）、atk 5；格挡 60%，守护龙哥 75%", () => {
   const { c, S, lg } = setup();
   cmd(c, { actor: lg.id, skill: "longge_summon" });
   const w = c.findKit("xiaoxiao", S.units);
@@ -194,9 +194,8 @@ test("小朋友：装甲 12、架势 4、耐久 5（每五级 +1）、atk 5；�
   assert.equal(w.defMax, 4);
   assert.equal(w.atk, 5);
   assert.equal(c.weaponBaseDur("xiaoxiao", 1), 5);
-  assert.equal(c.weaponBaseDur("xiaoxiao", 4), 5, "每五级 +1");
-  assert.equal(c.weaponBaseDur("xiaoxiao", 5), 6);
-  assert.equal(c.weaponBaseDur("xiaoxiao", 10), 7);
+  assert.equal(c.weaponBaseDur("xiaoxiao", 2), 6, "和其他武器一样每两级 +1");
+  assert.equal(c.weaponBaseDur("xiaoxiao", 5), 7);
   const kolt = c.findKit("kolt", S.units);
   const foe = S.units.find(u => !u.isPlayer);
   assert.equal(c.finalBlockChance(w, foe, kolt), 60);
@@ -566,24 +565,32 @@ test("胶囊弹药+：长休排好下一场的 6 发顺序，只用一场", () =
   assert.equal(c.LEDGER.ammoOrder.longge, undefined, "用掉就清");
 });
 
-test("小朋友 4 级爆发治疗：接下来 3 发看过且同色才能用；全红回满，全蓝 2×(等级+5) 临时护盾", () => {
+test("小朋友 4 级爆发治疗：不用先窥探；不同色白扣行动点、不耗子弹；全红回满，全蓝 2×(等级+5) 临时护盾", () => {
   const { c, S, lg } = setup();
   lvUp(lg);
   cmd(c, { actor: lg.id, skill: "longge_summon" });
   const w = c.findKit("xiaoxiao", S.units);
   w.zone = 1; w.ap = 3; w.level = 4;
   assert.ok(c.skillList(w).some(s => s.id === "xiaoxiao_burst"));
-  lg.resources.ammo = ["red", "red", "red", "blue", "blue", "blue"];
-  lg.resources.seen = [true, true, false, false, false, false];
-  assert.match(c.longgeBurstWhy(w), /窥探/);
-  seenAll(lg);
-  lg.resources.ammo = ["red", "blue", "red"];
-  assert.match(c.longgeBurstWhy(w), /同一种颜色/);
-  lg.resources.ammo = ["red", "red", "red", "blue", "blue", "blue"]; seenAll(lg);
-  assert.equal(c.longgeBurstWhy(w), null);
   const kolt = c.findKit("kolt", S.units);
   kolt.zone = 1;
   kolt.layers[kolt.layers.length - 1].current = 1;
+  // 没窥探也能用；颜色不对 → 白扣行动点，子弹不动
+  lg.resources.ammo = ["red", "blue", "red"];
+  lg.resources.seen = [false, false, false];
+  assert.equal(c.longgeBurstWhy(w), null, "没看到颜色也可以用");
+  const hp0 = c.totalHp(kolt);
+  cmd(c, { actor: w.id, skill: "xiaoxiao_burst", target: kolt.id, picks: { target: kolt.id } });
+  assert.equal(w.ap, 2, "白扣行动点");
+  assert.equal(lg.resources.ammo.length, 3, "子弹不消耗");
+  assert.equal(c.totalHp(kolt), hp0);
+  // 已经窥探到不同色：明知会失败，直接拦下
+  seenAll(lg);
+  assert.match(c.longgeBurstWhy(w), /同一种颜色/);
+  w.ap = 3;
+  lg.resources.ammo = ["red", "red", "red", "blue", "blue", "blue"];
+  lg.resources.seen = lg.resources.ammo.map(() => false);
+  assert.equal(c.longgeBurstWhy(w), null);
   cmd(c, { actor: w.id, skill: "xiaoxiao_burst", target: kolt.id, picks: { target: kolt.id } });
   assert.equal(c.totalHp(kolt), c.totalMaxHp(kolt));
   w.ap = 3;
