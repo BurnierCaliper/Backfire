@@ -8635,25 +8635,18 @@ function knockdownByBreak(u, notes) {
     return;
   }
   u.flying = false;
-  const loss = applyTrueDamage(u.layers || [], Math.floor(totalMaxHp(u) * 0.2));
+  const fall = Math.floor(totalMaxHp(u) * 0.2);
+  const loss = applyTrueDamage(u.layers || [], fall);
   if (loss > 0) spawnFloater(u, loss, "physical");
   notes.push(`${u.name} 飞行中被击破：强制击落，扣除 20% 最大生命 ${loss}。`);
-  if (!isInnerDepleted(u) || u.upOnShp) return;
-  if (!u.isPlayer) {
+  // 我方：倒地统一结算（力竭 3 即死、武器人倒下；和攻击打空架势的击落一样，起身中的人不另扣坚毅）
+  if (u.isPlayer) applyKnockdown(u, notes, { cause: "被击落" });
+  // 深渊上空被击落：再坠入深渊失去 10%（共 30%），并离开深渊（和攻击打空架势的击落一致）
+  if (!u.dead) applyAbyssFall(u, null, notes);
+  if (!u.isPlayer && isInnerDepleted(u)) {
     settleEnemyKill(u, notes);
     notes.push(`${u.name} 被击落摔死。`);
     notes.push(...sweepDeadEnemies());
-  } else if (isWeaponUnit(u)) {
-    u.dead = true;
-    notes.push(`${u.name} 被击落，最内层归零，武器人倒下。`);
-  } else if (exhaustTierOf(u) >= 3) {
-    u.dead = true;
-    u.dying = false;
-    notes.push(`${u.name} 力竭 3：被击落后立刻死亡。`);
-  } else {
-    u.dying = true;
-    clearStunOnDown(u);
-    notes.push(`${u.name} 被击落，最内层生命归零，陷入濒死。`);
   }
 }
 

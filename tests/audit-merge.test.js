@@ -55,3 +55,18 @@ test("武器人主动收回为武器：和持有者不同区时按钮置灰（�
   torque.zone = 1;
   assert.equal(c.skillRequirementError(torque, "torque_return"), null);
 });
+
+test("非攻击击破（dealBreak）把深渊上空的飞行单位打落：共失去 30% 最大生命并离开深渊", () => {
+  const { c, S } = setup(["kolt", "helu"], [{ id: "crow", lv: 1, zone: 2 }]);
+  const crow = S.units.find(u => u.kit === "crow");
+  crow.layers.forEach(l => { l.current = l.max = 100; });
+  crow.zone = 2; crow.flying = true; crow.def = crow.defMax = 1;
+  S.fields[2] = Object.assign(S.fields[2] || {}, { abyss: true });
+  const before = c.totalCurHp(crow);
+  const notes = [];
+  c.dealBreak(crow, 1, "ice", notes, "冻伤");
+  assert.equal(crow.flying, false);
+  assert.equal(before - c.totalCurHp(crow), 30, "击落 20 + 坠落 10");
+  assert.notEqual(crow.zone, 2, "坠落后离开深渊");
+  assert.equal(crow.dead, false);
+});
