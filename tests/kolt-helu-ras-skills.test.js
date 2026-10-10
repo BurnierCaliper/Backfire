@@ -51,49 +51,53 @@ test("废料计数：2 级起显示；上一个被摧毁的层 + 腐蚀记录 + 
   } finally { delete globalThis.koltScrapTotal; }
 });
 
-test("碎渣重炮（电钻机枪）：每颗独立掷骰，剩余不足一颗也打一发，每 4 颗 1 击破，耗光废料", () => {
+test("碎渣重炮（电钻机枪）：选区域，子弹随机打该区敌人；每颗独立掷骰，剩余也打一发，每 2 颗 1 击破；每颗都嘲讽", () => {
   const { c, S, foes } = setup(["kolt"]);
   const k = c.findKit("kolt", S.units);
   k.resources.bit = "drill";
+  const zones = c.skillFlowSteps("kolt_cannon", k, {}).find(s => s.key === "dest").zones;
+  assert.ok(zones.includes(1) && zones.includes(2));
   S.lastBrokenLayer = { type: "flesh", lost: 40, dmg: 40 };
   const p = pops(c);
-  const def0 = foes[0].def;
-  cmd(c, { actor: k.id, skill: "kolt_cannon", target: foes[0].id });
+  const defs0 = foes.map(f => f.def);
+  cmd(c, { actor: k.id, skill: "kolt_cannon", picks: { dest: 1 } });
   assert.ok(p.length >= 3, "好几颗子弹");
   assert.ok(p.every(x => x.element === "electric"));
+  assert.ok(p.every(x => x.id === foes[0].id || x.id === foes[1].id), "只打 1 区");
   assert.equal(c.koltScrapTotal(k), 0, "废料用光");
-  assert.equal(foes[0].def, def0 - Math.floor(p.length / 4));
+  const broke = defs0.reduce((s, d, i) => s + d - foes[i].def, 0);
+  assert.equal(broke, Math.floor(p.length / 2));
+  new Set(p.map(x => x.id)).forEach(id => assert.equal(S.units.find(u => u.id === id).tauntTo, k.id, "每颗都是单体攻击：被嘲讽"));
   assert.equal(k.ap, 2);
 });
 
-test("碎渣重炮（电钻）：目标倒下换距离 1 内的下一个敌人", () => {
-  const { c, S, foes } = setup(["kolt"]);
+test("碎渣重炮（电钻）：隔墙的区域不能选", () => {
+  const { c, S } = setup(["kolt"]);
   const k = c.findKit("kolt", S.units);
-  foes[0].layers = [{ type: "flesh", current: 1, max: 1 }];
-  S.lastBrokenLayer = { type: "flesh", lost: 60, dmg: 60 };
-  const p = pops(c);
-  cmd(c, { actor: k.id, skill: "kolt_cannon", target: foes[0].id });
-  assert.ok(foes[0].dead);
-  assert.ok(p.some(x => x.id !== foes[0].id), "换了目标");
+  S.gaps["1-2"] = Object.assign(c.emptyGap(), { type: "wall", hp: 10, maxHp: 10, level: 1 });
+  const zones = c.skillFlowSteps("kolt_cannon", k, {}).find(s => s.key === "dest").zones;
+  assert.ok(!zones.includes(2));
 });
 
-test("碎渣重炮（酸液迫击炮）：距离 1-2、越墙；废料量的酸 + 2 击破，同区 1/3 溅射，掉血超 25% 再 +2 击破", () => {
+test("碎渣重炮（酸液迫击炮）：距离 1、越墙；废料量的酸 + 2 击破，同区 1/3 溅射，掉血超 25% 再 +2 击破；主目标被嘲讽", () => {
   const { c, S, foes } = setup(["kolt"]);
   const k = c.findKit("kolt", S.units);
   k.resources.bit = "acid";
-  foes[2].zone = 2; foes[0].zone = 2;   // 两个敌人在 2 区
+  foes[0].zone = 2;   // 2 区两个敌人
   S.gaps["1-2"] = Object.assign(c.emptyGap(), { type: "wall", hp: 10, maxHp: 10, level: 1 });
-  assert.match(c.skillTargetError(k, "kolt_cannon", foes[1]) || "", /距离 1-2/, "同区打不了");
+  const ids = c.skillFlowSteps("kolt_cannon", k, {}).find(s => s.key === "target").units.map(u => u.id);
+  assert.deepEqual(plain(ids).sort(), [foes[0].id, foes[2].id].sort(), "只有距离 1 的敌人");
   S.lastBrokenLayer = { type: "flesh", lost: 90, dmg: 90 };
   const p = pops(c);
   const def0 = foes[2].def;
-  cmd(c, { actor: k.id, skill: "kolt_cannon", target: foes[2].id });
+  cmd(c, { actor: k.id, skill: "kolt_cannon", target: foes[2].id, picks: { target: foes[2].id } });
   const main = p.filter(x => x.id === foes[2].id);
   assert.ok(main.length && main[0].element === "acid", "隔着墙也打到");
-  assert.ok(main[0].value > 0);
   assert.equal(foes[2].def, def0 - 4, "掉血超过上限 25%：2 + 2 击破");
+  assert.equal(foes[2].tauntTo, k.id, "主目标被嘲讽");
   const sp = p.filter(x => x.id === foes[0].id);
   assert.ok(sp.length && sp[0].value < main[0].value, "同区溅射");
+  assert.notEqual(foes[0].tauntTo, k.id, "溅射是范围伤害，不嘲讽");
   assert.equal(c.koltScrapTotal(k), 0);
 });
 

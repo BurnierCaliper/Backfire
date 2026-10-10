@@ -392,7 +392,6 @@ const SKILL_TARGET_SIDE = {
   nora_needle: "any",       // 针尖可以扎敌人，也可以扎队友当治疗手段
   nora_aa: "any",           // 有刺入时打刺入目标，刺入的可能是队友
   kolt_mod: "anySelf",
-  kolt_cannon: "enemy",
   ras_torrent: "enemy",
   chuan_reclaim: "allySelf", // 回收护盾：任意一名友方（含自己）      // 「非法」改装：任意单位（含自己）施加过载
   role_renew: "ally",       // 续命：任意距离一名友方（以前没登记，被推断成敌方）
@@ -406,8 +405,8 @@ const SKILL_RANGE_BY_STATE = {
   // 拔刀 / 胁构：只打同区；居合：先移动 1 距离再出刀，所以最远打到距离 1
   hiaki_aa: (a) => ((a && a.resources && a.resources.stance) === "iai" ? { min: 0, max: 1 } : { min: 0, max: 0 }),
   // 诺拉普攻：没有刺入时是「距离 1 的敌人」；有刺入时针尖把两人连在一起，刺入目标在同区也能打（刺入超过距离 1 会自己断）
-  // 碎渣重炮：酸液炮（迫击炮，越墙）距离 1-2；电钻（机枪）距离 0-1
-  kolt_cannon: (a) => ((a && a.resources && a.resources.bit) === "acid" ? { min: 1, max: 2 } : { min: 0, max: 1 }),
+  // 碎渣重炮：酸液炮（迫击炮，越墙）距离 1；电钻（机枪，选区域）距离 0-1
+  kolt_cannon: (a) => ((a && a.resources && a.resources.bit) === "acid" ? { min: 1, max: 1 } : { min: 0, max: 1 }),
   nora_aa: (a) => (typeof piercedTargets === "function" && a && piercedTargets(a).length ? { min: 0, max: 1 } : { min: 1, max: 1 })
 };
 /** 技能射程：先看随状态变的表，再看固定表（SKILL_RANGE）。都没写返回 null（由提示文字推断） */

@@ -7921,6 +7921,18 @@ function skillFlowSteps(id, actor, picks) {
     const zones = envZones(actor, "electric", 1);
     return [{ key: "dest", type: "zone", optional: zones.includes(Number(actor.zone)), label: "可先移动至多 1 区（只列出能铺高压场地的区）", zones }];
   }
+  if (id === "kolt_cannon") {
+    const acid = ((findKit("kolt", state.units) || actor).resources || {}).bit === "acid";
+    if (acid) {
+      // 迫击炮：距离 1 的一名敌人，越墙
+      return [{ key: "target", type: "unit", optional: false, label: "迫击炮目标（距离 1，可越墙）",
+        units: fieldUnits().filter(u => !u.isPlayer && !u.dead && !u.hidden && !u.fused && zoneDist(actor.zone, u.zone, state.zoneMode) === 1) }];
+    }
+    // 机枪：选一个距离 1 以内、不隔墙的区域，子弹随机打那一区的敌人
+    const zones = [];
+    for (let z = 1; z <= maxZ; z++) if (zoneDist(actor.zone, z, state.zoneMode) <= 1 && !lineBlocked(actor.zone, z) && visibleEnemies(z).length) zones.push(z);
+    return [{ key: "dest", type: "zone", optional: false, label: "机枪扫射哪个区域（距离 1 以内）", zones }];
+  }
   if (id === "torque_boost") {
     const bit = ((findKit("kolt", state.units) || {}).resources || {}).bit || "drill";
     if (bit === "acid") {
@@ -9794,11 +9806,19 @@ function skillTargetError(a, id, t) {
     const why = roleTargetError(a, id, t);
     if (why) return why;
   }
-  if (id === "kolt_cannon" && t) {
+  if (id === "kolt_cannon") {
     const acid = ((findKit("kolt", state.units) || a).resources || {}).bit === "acid";
-    const d = zoneDist(a.zone, t.zone, state.zoneMode);
-    if (acid ? (d < 1 || d > 2) : d > 1) return acid ? "迫击炮只能打距离 1-2 的敌人" : "机枪只能打距离 1 以内的敌人";
-    if (!acid && lineBlocked(a.zone, t.zone)) return lineBlocked(a.zone, t.zone);
+    const fl = state.skillFlow;
+    if (acid) {
+      const tg = fl && fl.picks && fl.picks.target ? unitById(fl.picks.target) : t;
+      if (!tg || tg.isPlayer) return "先选迫击炮的目标";
+      if (zoneDist(a.zone, tg.zone, state.zoneMode) !== 1) return "迫击炮只能打距离 1 的敌人";
+    } else {
+      const z = fl && fl.picks && fl.picks.dest != null ? Number(fl.picks.dest) : (t ? Number(t.zone) : null);
+      if (z == null) return "先选机枪扫射的区域";
+      if (zoneDist(a.zone, z, state.zoneMode) > 1) return "机枪只能打距离 1 以内的区域";
+      if (lineBlocked(a.zone, z)) return lineBlocked(a.zone, z);
+    }
   }
   if (id === "ras_torrent" && t && !((t.statuses && t.statuses.high) || (t.highEnergy || 0) > 0)) return "狂瀑要选已经处于高能状态的敌人";
   if (id === "solo_support") {
@@ -11418,44 +11438,45 @@ function runSkillInner(id, optRun) {
       applyInstantEffect(t, "overload", lines);
       lines.push(`「非法」改装：${t.name} 过载。`);
     } else if (id === "kolt_cannon") {
-      // 碎渣重炮：把全部废料装填进武器。电钻 → 机枪：每颗子弹（扭矩atk/3 + 1d10）电击，各自独立掷骰，
-      // 最后不够一颗的废料也打成一发；每 4 颗 1 击破；目标倒下自动换距离 1 以内的下一个随机敌人。
-      // 酸液炮 → 迫击炮（越墙）：废料量的酸 +2 击破，同区其他敌人 1/3 溅射；主目标损失超过上限 25% 的血量再 +2 击破
-      if (!needT()) return paintSkillLog(lines.join("\n"));
+      // 碎渣重炮：把全部废料装填进武器。电钻 → 机枪：选距离 1 以内的一个区域，每颗子弹（扭矩atk/3 + 1d10）电击、
+      // 各自独立掷骰，打那一区的随机敌人；最后不够一颗的废料也打成一发；每 2 颗 1 击破。每颗都算单体攻击（吃过度自信的嘲讽）。
+      // 酸液炮 → 迫击炮（距离 1，越墙；主目标算单体攻击）：废料量的酸 +2 击破，同区其他敌人 1/3 溅射；主目标损失超过上限 25% 的血量再 +2 击破
       const acid = (a.resources && a.resources.bit) === "acid";
+      const flc = state.skillFlow;
+      const mt = acid ? ((flc && flc.picks && flc.picks.target ? unitById(flc.picks.target) : null) || t) : null;
+      if (acid && (!mt || mt.isPlayer)) { lines.push("先选迫击炮的目标。"); return paintSkillLog(lines.join("\n")); }
+      const zone = flc && flc.picks && flc.picks.dest != null ? Number(flc.picks.dest) : (t ? Number(t.zone) : Number(a.zone));
       let pool = koltScrapTotal(a);
       koltScrapClear(a);
       if (pool <= 0) { lines.push("没有废料可以装填。"); return paintSkillLog(lines.join("\n")); }
       lines.push(`碎渣重炮：装填 ${pool} 点废料。`);
       if (acid) {
-        const mx = totalMaxHp(t), hp0 = totalHp(t);
-        hitOne(a, t, { element: "acid", mult: 1, atk: pool, baseBreak: 2, atkRange: "any", flags: { action: true, lob: true } });
-        const lost = hp0 - (t.dead ? 0 : totalHp(t));
-        if (!t.dead && lost > mx * 0.25) {
-          lines.push(`迫击炮重创：${t.name} 损失 ${lost}（超过上限 ${mx} 的 25%），额外 2 击破。`);
-          dealBreak(t, 2, "acid", lines, "碎渣重炮", { by: a });
+        const mx = totalMaxHp(mt), hp0 = totalHp(mt);
+        hitOne(a, mt, { element: "acid", mult: 1, atk: pool, baseBreak: 2, atkRange: "any", flags: { action: true, lob: true } });
+        const lost = hp0 - (mt.dead ? 0 : totalHp(mt));
+        if (!mt.dead && lost > mx * 0.25) {
+          lines.push(`迫击炮重创：${mt.name} 损失 ${lost}（超过上限 ${mx} 的 25%），额外 2 击破。`);
+          dealBreak(mt, 2, "acid", lines, "碎渣重炮", { by: a });
         }
         const splash = Math.floor(pool / 3);
-        if (splash > 0) visibleEnemies(t.zone).filter(u => u !== t && !u.dead).forEach(u => {
+        if (splash > 0) visibleEnemies(mt.zone).filter(u => u !== mt && !u.dead).forEach(u => {
           hitOne(a, u, { element: "acid", mult: 1, atk: splash, baseBreak: 0, atkRange: "any", usePrep: false, flags: { action: true, aoe: true, lob: true } });
         });
       } else {
         const torq = findKit("torque", state.units);
         const tAtk = torq ? (Number(torq.atk) || 0) : (Number(a.weaponAtk) || 0);
-        const reach = u => u && !u.isPlayer && !u.dead && !u.hidden && !u.fused && zoneDist(a.zone, u.zone, state.zoneMode) <= 1 && !lineBlocked(a.zone, u.zone);
-        let cur = t, n = 0;
+        let n = 0;
+        lines.push(`机枪扫射 ${zone} 区。`);
         while (pool > 0 && n < 300) {
-          if (!reach(cur)) {
-            const pool2 = fieldUnits().filter(reach);
-            cur = pool2[Math.floor(Math.random() * pool2.length)];
-            if (!cur) { lines.push(`距离 1 以内没有敌人了，剩下的 ${pool} 点废料没打出去。`); break; }
-            lines.push(`目标倒下，机枪转向 ${cur.name}。`);
-          }
+          // 每一颗子弹打选中区域里的一个随机敌人（每颗都是单体攻击：照样触发过度自信的嘲讽）
+          const alive = visibleEnemies(zone).filter(u => !u.dead);
+          const cur = alive[Math.floor(Math.random() * alive.length)];
+          if (!cur) { lines.push(`${zone} 区没有敌人了，剩下的 ${pool} 点废料没打出去。`); break; }
           const roll = takeDice(1, 10, 0);
           const per = Math.floor(tAtk / 3) + roll.total;
           const dmg = Math.min(pool, per);
           pool -= dmg; n += 1;
-          hitOne(a, cur, { element: "electric", mult: 1, atk: dmg, baseBreak: n % 4 === 0 ? 1 : 0, atkRange: "any", usePrep: n === 1, flags: { action: true } });
+          hitOne(a, cur, { element: "electric", mult: 1, atk: dmg, baseBreak: n % 2 === 0 ? 1 : 0, atkRange: "any", usePrep: n === 1, flags: { action: true } });
         }
         lines.push(`碎渣重炮：共打出 ${n} 颗子弹。`);
       }
