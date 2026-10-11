@@ -2628,10 +2628,11 @@ function trackHealBy(actor, fn) {
   if (!st) return fn();
   const hpNow = (u) => (u.layers || []).reduce((a, l) => a + Math.max(0, Number(l.current) || 0), 0);
   const before = new Map();
-  const calm = new Set();
+  const calm = new Set(), marks = new Map();
   (state.units || []).forEach(u => {
     if (u.isPlayer && u !== actor && !u.hidden && !u.dead) before.set(u.id, hpNow(u));
     if (!u.isPlayer && !u.dead && !u.stunned) calm.add(u.id);
+    if (!u.isPlayer && typeof isBossUnit === "function" && isBossUnit(u)) marks.set(u.id, Number(u.stunMarks) || 0);
   });
   try { return fn(); } finally {
     (state.units || []).forEach(u => {
@@ -2639,7 +2640,9 @@ function trackHealBy(actor, fn) {
         const gain = hpNow(u) - before.get(u.id);
         if (gain > 0) { st.heal += gain; addScore("heal", gain * SCORE_RULES.heal, actor); }
       }
-      if (calm.has(u.id) && u.stunned && !u.dead) {
+      // 首领 / 精英没攒满标记的失衡会立刻恢复架势，这时按新记上的晕眩标记数算（一次行动打出两次也算两次）
+      const n = marks.has(u.id) ? Math.max(0, (Number(u.stunMarks) || 0) - marks.get(u.id)) : (calm.has(u.id) && u.stunned ? 1 : 0);
+      if (n > 0 && !u.dead) for (let i = 0; i < n; i++) {
         addScore("stagger", SCORE_RULES.stagger, actor, Number(u._staggerBonus) || 0);
         const ss = battleStat(actor); if (ss) ss.staggers = (ss.staggers || 0) + 1;   // 战场数据：打出失衡
       }
@@ -4192,6 +4195,7 @@ function applyCombat(target, result, attacker) {
   if (attacker && result.selfBreak && attacker.def <= 0) {
     queueAssistAttack(target, attacker);
   }
+  bossQuickRecover(target, notes);   // 首领 / 精英：标记没攒满的失衡，协助攻击排上队后立刻恢复架势
   if (attacker && attacker.self === "burn" && result.element === "fire") {
     const raw = Number(result.intended || result.total) || 0;
     const st = selfBurnStacksOf(attacker);
@@ -4527,6 +4531,7 @@ function recoverFromStun(u, notes) {
   u.stunned = false;
   u._imbalanceLock = false;
   u._bossMarked = false;
+  u._bossRefill = false;
   if (u.noPosture || u.kit === "ufo_leg") return;
   if (typeof canRestorePosture === "function" && !canRestorePosture(u)) {
     notes.push(`${u.name} 晕眩结束。千钧：无法恢复架势。`);
@@ -9041,6 +9046,7 @@ function dealBreak(unit, amount, element, notes, reason, opt) {
     maybeUnstableTrip(sink, notes, opt.by);
   }
   if (typeof onBreakTaken === "function") onBreakTaken(sink, amount, element, notes, wasDoppler);
+  bossQuickRecover(sink, notes);
 }
 
 /** 不经过攻击的击破把飞行单位打空架势：强制击落，扣除 20% 最大生命（真伤，从外层扣）。
@@ -9623,17 +9629,29 @@ function noteBossBreak(u) {
   if (!isBossUnit(u) || !u.stunned || u._bossMarked) return 0;
   u._bossMarked = true;
   u.stunMarks = Math.min(BOSS_STUN_MARKS, (Number(u.stunMarks) || 0) + 1);
+  // 标记没攒满：这次失衡结算完（协助攻击排上队之后）立刻恢复架势，后面的击破接着攒下一个标记，不会白白打在 0 架势上
+  if (u.stunMarks < BOSS_STUN_MARKS) u._bossRefill = true;
   return u.stunMarks;
 }
 function bossMarkText(u) {
   return u.stunMarks >= BOSS_STUN_MARKS
     ? `晕眩标记 ${u.stunMarks}/${BOSS_STUN_MARKS}：攒满了，下个回合真正晕眩。`
-    : `晕眩标记 ${u.stunMarks}/${BOSS_STUN_MARKS}：${enemyRankOf(u) === "boss" ? "首领" : "精英"}要攒满 ${BOSS_STUN_MARKS} 个才会晕眩，下个回合恢复架势照常行动。`;
+    : `晕眩标记 ${u.stunMarks}/${BOSS_STUN_MARKS}：${enemyRankOf(u) === "boss" ? "首领" : "精英"}要攒满 ${BOSS_STUN_MARKS} 个才会晕眩，架势立刻恢复，可以接着打下一个标记。`;
+}
+/** 没攒满标记的失衡：立刻恢复架势（协助攻击照常排队、照常打出） */
+function bossQuickRecover(u, notes) {
+  if (!u || !u._bossRefill) return;
+  u._bossRefill = false;
+  if (!u.stunned || u.dead) return;
+  const out = [];
+  recoverFromStun(u, out);
+  out.forEach(s => notes.push(s.replace("晕眩结束", "晕眩标记没攒满，失衡立刻结束")));
 }
 /** 兜底：没经过 imbalanceLine 的失衡（直接设成晕眩的那些）也记上标记 */
 function settleBossStuns(notes) {
   (state.units || []).forEach(u => {
     if (isBossUnit(u) && !u.dead && noteBossBreak(u) && notes) notes.push(`${u.name} ${bossMarkText(u)}`);
+    if (u && u._bossRefill) bossQuickRecover(u, notes || []);
   });
 }
 /** 敌人回合开始时：失衡中的首领，标记没攒满就只恢复架势、照常行动。返回 true 表示这样处理了 */

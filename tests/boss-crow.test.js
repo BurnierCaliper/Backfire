@@ -73,7 +73,7 @@ test("首领和 10 级起精英的架势是原来的 60%（四舍五入），人
   assert.equal(preset("thug_knife").build(1, 2).defMax, 3);
 });
 
-test("首领失衡和普通失衡一样（协助攻击、失衡分），只是记晕眩标记：没攒满 2 个，回合开始恢复架势照常行动；攒满才跳过回合", () => {
+test("首领失衡和普通失衡一样（协助攻击、失衡分），只是记晕眩标记：没攒满 2 个立刻恢复架势、照常行动；攒满才跳过回合", () => {
   const { c, st } = field(["ruby", "kolt"], [{ id: "outlaw_king", lv: 1, zone: 2 }]);
   const king = st.units.find(u => u.kit === "outlaw_king");
   const ruby = c.findKit("ruby", st.units);
@@ -83,14 +83,15 @@ test("首领失衡和普通失衡一样（协助攻击、失衡分），只是�
   st.assistQueue = [];
   st.attackerId = ruby.id; st.targetId = king.id;
   c.runSkill("ruby_aa");
-  assert.equal(king.stunned, true, "照常进入失衡");
-  assert.equal(king.stunMarks, 1);
+  assert.equal(king.stunMarks, 1, "照常进入失衡、记一个标记");
+  assert.equal(king.stunned, false, "标记没攒满：失衡立刻结束");
+  assert.equal(king.def, king.defMax, "架势立刻回满，后面的击破不会浪费");
   assert.ok(st.assistQueue.some(j => j.targetId === king.id), "照常给协助攻击");
   assert.equal(st.battleScore.parts.stagger, 50, "照常算打出失衡的分");
   const log = () => st.logPages.map(p => p.lines.map(l => l.text || l).join("\n")).join("\n");
   assert.match(log(), /晕眩标记 1\/2/);
   st.assistQueue = [];
-  // 敌人回合开始：标记没攒满，恢复架势、照常行动
+  // 敌人回合开始：照常行动
   c.endPlayerTurn();
   assert.equal(king.stunned, false);
   assert.equal(king.def, king.defMax);
@@ -120,16 +121,34 @@ test("10 级起的精英也攒晕眩标记：第一次失衡照常给协助攻�
   const wolf = st.units.find(u => u.kit === "captain_wolf");
   st.assistQueue = [];
   c.dealBreak(wolf, 99, "physical", [], "测试");
-  assert.equal(wolf.stunned, true);
   assert.equal(wolf.stunMarks, 1);
-  assert.ok(st.assistQueue.some(j => j.targetId === wolf.id));
+  assert.equal(wolf.stunned, false, "没攒满：立刻恢复架势");
+  assert.equal(wolf.def, wolf.defMax);
+  assert.ok(st.assistQueue.some(j => j.targetId === wolf.id), "照常给协助攻击");
   st.assistQueue = [];
   c.endPlayerTurn();
   assert.ok(wolf.ap >= 1, "照常行动");
   c.endEnemyTurn();
   c.dealBreak(wolf, 99, "physical", [], "测试");
+  assert.equal(wolf.stunned, true, "第二个标记：攒满了，留在失衡里");
   c.endPlayerTurn();
   assert.equal(wolf.ap, 0, "第二次：跳过回合");
+});
+
+test("首领 / 精英：同一个我方回合里打出两次失衡就攒满标记，第二次的击破不会浪费在 0 架势上", () => {
+  const { c, st } = field(["ruby", "kolt"], [{ id: "captain_wolf", lv: 10, zone: 1 }]);
+  const wolf = st.units.find(u => u.kit === "captain_wolf");
+  st.assistQueue = [];
+  c.dealBreak(wolf, wolf.def, "physical", [], "测试");
+  assert.equal(wolf.stunMarks, 1);
+  assert.equal(wolf.def, wolf.defMax, "第一次失衡后架势立刻回满");
+  c.dealBreak(wolf, 1, "physical", [], "测试");
+  assert.equal(wolf.def, wolf.defMax - 1, "接着的击破照常扣架势");
+  c.dealBreak(wolf, 99, "physical", [], "测试");
+  assert.equal(wolf.stunMarks, 2, "同一回合第二次失衡");
+  assert.equal(wolf.stunned, true);
+  c.endPlayerTurn();
+  assert.equal(wolf.ap, 0, "攒满：跳过回合");
 });
 
 test("10 级以下的精英照旧：一失衡就跳过下个回合，不记标记", () => {
