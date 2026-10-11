@@ -807,7 +807,7 @@ function skillList(unit) {
       add({ id: "wing_aa", name: "银翼·普通攻击", hint: "距离1以内 · 1atk+1d4 能量 1击破 · 同区其他 0.3atk" });
       add({ id: "wing_steal", name: "银翼·电力夺取", hint: "同区每个敌人 0.5atk 电 · 每人 +10纳米" });
       add({ id: "wing_surge", name: "银翼·电流激荡", hint: "距离1-2 · 1atk 电 1击破 · 打到护盾 +20纳米", minLv: 2 });
-      add({ id: "wing_boost", name: "银翼·机体强化", hint: "不耗行动 · 每回合纳米多耗 20 · atk +20% · 普攻溅射倍率 +0.1", minLv: 4 });
+      add({ id: "wing_boost", name: "银翼·机体强化", hint: "不耗行动 · 每回合纳米多耗 20 · atk +20% · 普攻溅射倍率 +0.1 · 无人机攻击次数 +1", minLv: 4 });
       add({ id: "wing_relay", name: "银翼·收发代理", hint: "无人机每回合结束激光：高能敌人（没有就血最少的）两次 0.2atk+1d12 能量 · 耗 10 纳米", minLv: 11 });
       add({ id: "ruby_unmecha", name: "解除机甲", hint: "立刻分开瑞比与明特" });
     }

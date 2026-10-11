@@ -88,8 +88,8 @@ test("明特 机体修复：耗 20 纳米，回 50% 上限、+1 架势", () => {
   assert.equal(m.def, 2);
 });
 
-test("银翼 机体强化：不耗行动，atk ×1.2，维持多耗 20，普攻溅射 0.4", () => {
-  const { c, S, K } = setup(["ruby"]);
+test("银翼 机体强化：不耗行动，atk ×1.2，维持多耗 20，普攻溅射 0.4，无人机攻击次数 +1", () => {
+  const { c, S, foes, K } = setup(["ruby"]);
   const r = K("ruby");
   const m = summon(c, S, r, "ruby_summon", "mint");
   r.resources.nano = 100;
@@ -101,6 +101,13 @@ test("银翼 机体强化：不耗行动，atk ×1.2，维持多耗 20，普攻�
   assert.ok(Math.abs(c.effectiveAtk(r, S.units) - atk0 * 1.2) < 1e-9);
   c.turnEnd();
   assert.equal(r.resources.nano, 60, "每回合 −40");
+  // 无人机攻击次数 +1：两次 → 三次
+  r.resources.drone = true; r.resources.nano = 100;
+  foes[2].statuses = { high: true };
+  const pops = [];
+  c.spawnPopup = (u, spec) => { if (spec.kind === "dmg" && u === foes[2]) pops.push(spec.value); };
+  c.turnEnd();
+  assert.equal(pops.length, 3);
 });
 
 test("结人 冷萃：冻土，敌人 0.5atk 冰 +1 击破，友方 +1 架势", () => {

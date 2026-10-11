@@ -2012,7 +2012,8 @@ function turnEnd() {
         if (tgt) {
           u.resources.nano -= 10;
           notes.push(`银翼·收发代理：无人机激光射向 ${tgt.name}（纳米 −10 → ${u.resources.nano}）。`);
-          for (let i = 0; i < 2 && !tgt.dead; i++) {
+          const shots = 2 + (u.resources.overdrive ? 1 : 0);   // 机体强化：无人机攻击次数 +1
+          for (let i = 0; i < shots && !tgt.dead; i++) {
             hitOne2(u, tgt, { element: "energy", mult: 0.2, diceN: 1, diceS: 12, baseBreak: 0, atk: effectiveAtk(u, state.units), atkRange: "any", usePrep: false, flags: { action: true } }, notes);
           }
         } else notes.push("银翼·收发代理：没有打得到的敌人，无人机这回合什么都不干。");
