@@ -468,3 +468,24 @@ details.smith .sm-price, details.smith .sm-prog.ready { color: var(--sk-hazard);
 .g-app[data-weather="acid"] .pvbox { background-color: #2b3228; }
 .g-app[data-weather="glow"] .pvbox { background-color: #352830; }
 .g-app[data-weather="phase"] .pvbox { background-color: #2e3236; }
+
+/* ---------- 武器生物化按钮：和结束回合同款的喷漆按钮，放在它左边；颜色跟着角色的主属性 ---------- */
+.hud-summon { display: flex; flex: 0 0 auto; }
+.summonbtn {
+  position: relative; isolation: isolate; width: 118px; min-height: 52px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 6px 8px;
+  background: transparent; border: 0; color: var(--sk-ink); cursor: pointer;
+  font-family: var(--sk-name); font-weight: 700; font-size: 15px; line-height: 1.1;
+}
+.summonbtn[hidden] { display: none; }
+.summonbtn::before {
+  content: ""; position: absolute; inset: 0; z-index: -1; background: var(--el, var(--sk-hazard)); filter: url(#sk-spray);
+  clip-path: polygon(4% 3%, 35% 0, 68% 5%, 96% 1%, 100% 45%, 97% 98%, 55% 94%, 3% 100%, 0 55%);
+}
+.summonbtn.back::before { clip-path: polygon(0 4%, 40% 0, 96% 3%, 100% 52%, 98% 100%, 45% 96%, 4% 99%, 1% 48%); }
+.summonbtn:hover:not([disabled]) { filter: brightness(1.1); }
+.summonbtn.armed { outline: 3px solid var(--sk-ink); outline-offset: -5px; }
+.summonbtn[disabled] { opacity: .4; cursor: default; }
+.summonbtn .sm-ic { width: 26px; height: 26px; display: block; }
+.summonbtn small { font-family: var(--sk-body); font-weight: 400; font-size: 11px; opacity: .75; }
+@media (max-width: 760px) { .summonbtn { width: auto; min-width: 96px; min-height: 46px; font-size: 13px; } }
