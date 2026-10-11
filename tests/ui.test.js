@@ -959,8 +959,8 @@ test("战斗评分：右上角显示评价并随得分变化；胜利时按评�
   assert.match(await page.textContent("#g-result .grade-badge"), /S/);
   assert.match(await page.textContent("#g-result p"), /战斗经验 ×2，每人额外 \+\d+/);
   const xp = await page.evaluate(() => partyHeroes().map(h => h.xp));
-  // 狂徒 lv1 = 5 经验，4 人平分每人 2；S 再翻一倍 → 每人 4
-  assert.deepEqual(xp, [4, 4, 4, 4]);
+  // 狂徒 lv1 = 5 经验，4 人平分每人 2；S 再翻一倍 → 每人 4；跑团战斗奖励：队伍最高 1 级 × 20 ÷ 4 人 = 5 → 每人 9
+  assert.deepEqual(xp, [9, 9, 9, 9]);
   await page.click("#g-explore-back");
   const last = await page.evaluate(() => [...document.querySelectorAll("#tr-log li")].pop().innerText);
   assert.match(last, /评价 S/);
