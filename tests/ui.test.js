@@ -982,7 +982,7 @@ test("奖励结算：真实 UI 评级触发 3→4 级，继续后与无界面的
   // 每人离 4 级仍差 1 点；只有 S 评价补发的 11 点经验才能触发升级。
   const finalBattleState = () => {
     state.turnNo = 4;
-    state.battleScore.total = 1500;
+    state.battleScore.total = battleGrade().lines.find(x => x[0] === "S")[1];   // 这场的 S 线（固定线 × 0.7 + 基准分 × 倍数 × 0.3）
     state.battleScore.hurt = true;
     state.battleGains.xp = 11;
     state.units.filter(u => !u.isPlayer).forEach(u => { u.dead = true; });

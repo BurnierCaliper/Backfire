@@ -228,7 +228,7 @@ test("评分：分数线 = 固定线 × 0.7 + 基准分 × 倍数 × 0.3；固�
   const par = c.scorePar();
   assert.ok(par > 0);
   const want = (act, fixed, k) => Math.ceil(((fixed + 150 * (act - 1)) * 0.7 + par * k * 0.3) / 10 - 1e-9) * 10;
-  const fixed = { C: [500, 0.7], B: [1000, 1.3], A: [1250, 1.6], S: [1500, 2.0], SS: [1750, 2.4], SSS: [2000, 2.8] };
+  const fixed = { C: [500, 0.7], B: [1000, 2.0], A: [1250, 2.6], S: [1500, 3.2], SS: [1750, 3.8], SSS: [2000, 4.4] };
   for (const act of [1, 4]) {
     st.scoreAct = act;
     const lines = c.battleGrade().lines;
@@ -239,15 +239,15 @@ test("评分：分数线 = 固定线 × 0.7 + 基准分 × 倍数 × 0.3；固�
     }
   }
   const at = (act, score) => { st.scoreAct = act; st.battleScore.total = score; return c.battleGrade(); };
-  const C1 = want(1, 500, 0.7), S1 = want(1, 1500, 2.0), B2 = want(2, 1000, 1.3);
+  const C1 = want(1, 500, 0.7), S1 = want(1, 1500, 3.2), B2 = want(2, 1000, 2.0);
   assert.equal(at(1, 0).grade, "D");
   assert.equal(at(1, C1 - 1).grade, "D");
   assert.equal(at(1, C1).grade, "C");
   assert.equal(at(1, S1).grade, "S");
   assert.equal(at(1, S1).xpMult, 2);
-  assert.equal(at(1, want(1, 2000, 2.8)).grade, "SSS");
-  assert.equal(at(1, want(1, 2000, 2.8)).xpMult, 2, "SSS 不提高经验倍率");
-  assert.equal(at(1, want(1, 1000, 1.3)).xpMult, 1.2);
+  assert.equal(at(1, want(1, 2000, 4.4)).grade, "SSS");
+  assert.equal(at(1, want(1, 2000, 4.4)).xpMult, 2, "SSS 不提高经验倍率");
+  assert.equal(at(1, want(1, 1000, 2.0)).xpMult, 1.2);
   const g = at(2, B2 - 1);
   assert.equal(g.grade, "C");
   assert.deepEqual(JSON.parse(JSON.stringify(g.next)), { grade: "B", need: B2 });
