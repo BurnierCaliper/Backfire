@@ -1528,6 +1528,11 @@ function beginRound(notes) {
       heluScanAct(u, { dest: Number(u.zone), act: "spawn" }, notes);
     }
   });
+  // 双重奏的 atk、粉落汤气都只到这个回合开始
+  state.units.forEach(u => {
+    if (u.duetAtk) { notes.push(`${u.name} 双重奏的 atk +${u.duetAtk} 消失。`); u.duetAtk = 0; }
+    if (u.kit === "hiaki" && u.resources && u.resources.powder) { u.resources.powder = false; notes.push("粉落汤气结束。"); }
+  });
   if (typeof mutinyTick === "function") mutinyTick(notes);
   if (typeof syncBpAll === "function") syncBpAll();
   state.units.forEach(u => {
@@ -1993,9 +1998,29 @@ function turnEnd() {
     if (u.kit === "boomcar" && u.resources && u.resources.fuse != null) {
       u.resources.fuse -= 1;
     }
+    if (u.kit === "ruby" && u.resources && u.resources.drone && !u.dead && !u.hidden) {
+      // 收发代理：平时提取纳米；机甲里改为对高能敌人（没有就血量最少的）发射两次 0.2atk+1d12 能量激光，耗 10 纳米
+      if (!u.resources.mecha) {
+        addNano(10);
+        notes.push(`收发代理：无人机提取纳米 +10 → ${u.resources.nano}`);
+      } else if ((u.resources.nano || 0) >= 10) {
+        const foes = fieldUnits().filter(x => !x.isPlayer && !x.dead && !x.hidden && !x.fused);
+        const high = foes.filter(x => (x.statuses && x.statuses.high) || (x.highEnergy || 0) > 0);
+        const pool = high.length ? high : foes;
+        const tgt = pool.slice().sort((x, y) => totalHp(x) - totalHp(y))[0];
+        if (tgt) {
+          u.resources.nano -= 10;
+          notes.push(`银翼·收发代理：无人机激光射向 ${tgt.name}（纳米 −10 → ${u.resources.nano}）。`);
+          for (let i = 0; i < 2 && !tgt.dead; i++) {
+            hitOne2(u, tgt, { element: "energy", mult: 0.2, diceN: 1, diceS: 12, baseBreak: 0, atk: effectiveAtk(u, state.units), atkRange: "any", usePrep: false, flags: { action: true, lob: true } }, notes);
+          }
+        }
+      } else notes.push("银翼·收发代理：纳米不足 10，无人机这回合没有发射。");
+    }
     if (u.kit === "ruby" && u.resources && u.resources.mecha) {
-      u.resources.nano = Math.max(0, (u.resources.nano || 0) - 20);
-      notes.push(`${u.name} 机甲维持：纳米 −20 → ${u.resources.nano}`);
+      const cost = 20 + (u.resources.overdrive ? 20 : 0);   // 机体强化：每回合多耗 20
+      u.resources.nano = Math.max(0, (u.resources.nano || 0) - cost);
+      notes.push(`${u.name} 机甲维持：纳米 −${cost} → ${u.resources.nano}`);
       if (u.resources.nano <= 0) notes.push(...exitMecha(u, "纳米耗尽，机甲结束"));
     }
     // 年糕咬住记了 noMoveUntil：持续到下一个敌人回合结束；其余禁足到这一回合结束
@@ -4592,6 +4617,7 @@ function highlandBlockMod(helper, attacker, atkRange) {
  *  atkRange：这一击的射程（给高地判断用，可不传） */
 function finalBlockChance(helper, attacker, protectedUnit, atkRange) {
   if (helper.kit === "hiaki" && helper.resources && helper.resources.stance === "iai") return 100;
+  if (helper.resources && helper.resources.standby) return 100;   // 丹生谷「待命」：下一次协助格挡必定成功
   let c = typeof blockChanceRaw === "function" ? blockChanceRaw(helper) : blockChance(helper);   // 先不封顶，加完修正再封顶
   if (c == null) c = 50;
   c += highlandBlockMod(helper, attacker, atkRange);
@@ -5897,6 +5923,13 @@ function performAssistBlock(helper, target, attacker, forced, atkRange) {
     ok = true;
     notes.push("居合下协助格挡必定成功。");
   }
+  // 丹生谷「待命」：这一次协助格挡必定成功（用掉）
+  const standbyUsed = !!(helper.resources && helper.resources.standby);
+  if (standbyUsed) {
+    helper.resources.standby = false;
+    ok = true;
+    notes.push("待命：这一次协助格挡必定成功。");
+  }
   if (ok) {
     notes.push("成功：目标免伤，击破改由格挡者承担。");
     if (typeof bpAfterBlock === "function") bpAfterBlock(helper, target, notes);   // 单局图纸
@@ -5943,7 +5976,24 @@ function performAssistBlock(helper, target, attacker, forced, atkRange) {
     if (helper.kit === "ecmo") {
       notes.push("音波偏转：自身不扣除架势。");
     }
-    if (helper.kit === "hiaki") {
+    if (standbyUsed && helper.kit === "niu") {
+      const owner = ownerOfWeapon(helper, state.units);
+      notes.push(...returnWeapon(helper));
+      if (owner) {
+        owner.resources.blade = "niu";
+        setHiakiStance(owner, "iai");
+        refreshHiakiAtk(owner);
+        notes.push("待命格挡成功：丹生谷变回武器，绯秋换持丹生谷进入居合。");
+      }
+    }
+    if (helper.kit === "hiaki" && helper.resources && helper.resources.powder) {
+      // 粉落汤气：格挡成功不切刀势，用另一把刀反击 1atk（鳴門 +1 击破）
+      const other = helper.resources.blade === "naruto" ? "niu" : "naruto";
+      if (attacker && !attacker.dead) {
+        hitOne2(helper, attacker, { element: other === "naruto" ? "ice" : "fire", mult: 1, baseBreak: other === "naruto" ? 1 : 0, atk: effectiveAtk(helper, state.units), atkRange: "any", flags: { action: true, opportunity: true } }, notes);
+        notes.push(`粉落汤气：${helper.name} 用${other === "naruto" ? "鳴門" : "丹生谷"}反击 ${attacker.name}，刀势不变。`);
+      }
+    } else if (helper.kit === "hiaki") {
       const st = helper.resources.stance || "draw";
       if (st === "iai") {
         setHiakiStance(helper, "waki");
@@ -6197,6 +6247,9 @@ function resetBattleFlags(u) {
   if (u.kit === "torque") { r.divertGuard = false; r.divertArmor0 = 0; }
   if (u.kit === "ecmo") { r.probe = false; r.probeZones = []; }
   if (u.kit === "ras") r.siphon = false;
+  if (u.kit === "ruby") { r.drone = false; r.overdrive = false; }
+  if (u.kit === "hiaki") r.powder = false;
+  if (u.kit === "niu") r.standby = false;
   if (u.kit === "ras") { r.energyPct = 0; r.light = 0; r.unstable = false; }
   if (u.kit === "helu") { r.scanned = false; r.lockLeft = roleLockCap(u); }
   if (u.kit === "torque") r.acidCharge = null;
@@ -6204,6 +6257,9 @@ function resetBattleFlags(u) {
   if (typeof canSpit === "function" && canSpit(u.kit)) r.spitElement = spitElementOf(u.kit);   // 吐酸的属性（长休时改，记在队伍档案）
   u.focuses = [];
   u.bondAtk = 0;
+  u.duetAtk = 0;
+  u.barrageBy = null;
+  u.algoTurn = null;
   u._hurtRound = null;
   stripTempLayers(u);
   (u.layers || []).forEach(l => { l.current = l.max; });
@@ -7273,6 +7329,20 @@ function setHiakiStance(u, stance) {
   if (stance !== "draw" && typeof passiveOn === "function" && !passiveOn(u)) { u.resources.stance = "draw"; return; }
   const prev = u.resources.stance || "draw";
   u.resources.stance = stance;
+  // 特盛乱打：之后进入居合时，被乱打过的敌人各被瞬间砍一刀（0.5atk 当前刀的属性，无视距离和障碍），标记去掉
+  if (stance === "iai" && prev !== "iai" && u.kit === "hiaki") {
+    const marked = (state.units || []).filter(x => x && !x.isPlayer && !x.dead && x.barrageBy === u.id);
+    if (marked.length) {
+      const notes = [];
+      const el = u.resources.blade === "naruto" ? "ice" : "fire";
+      marked.forEach(x => {
+        x.barrageBy = null;
+        hitOne2(u, x, { element: el, mult: 0.5, baseBreak: 0, atk: effectiveAtk(u, state.units), atkRange: "any", usePrep: false, flags: { action: true, lob: true } }, notes);
+      });
+      notes.unshift(`特盛乱打：进入居合，被乱打过的 ${marked.length} 个敌人各被瞬间砍一刀。`);
+      appendLog(notes.join("\n"));
+    }
+  }
   // 剑术+：每次切换刀势立刻获得 1 个附赠动作；没用掉的留到下回合，下回合结束时过期
   if (prev !== stance && typeof passivePlus === "function" && passivePlus(u, 2)) {
     u.bonus = (Number(u.bonus) || 0) + 1;
@@ -7518,6 +7588,7 @@ function exitMecha(ruby, reason) {
   else if (pre) ruby.layers = pre.layers;
   ruby.flying = false;
   ruby.resources.mecha = false;
+  ruby.resources.overdrive = false;   // 机体强化随机甲结束
   if (safe && ruby.stunned) ruby.stunned = false;
   // 架势还原成瑞比自己的上限 / 当前值（以前解除后一直用着明特的，10 级 5 → 3）；被击落失衡的留在 0。
   // 机甲期间挂上的震荡（上限 −2，_waveCut）照样扣在还原后的上限上，震荡解除时再加回来
@@ -8300,6 +8371,29 @@ function skillFlowSteps(id, actor, picks) {
         zoneDist(actor.zone, u.zone, state.zoneMode) <= maxD).concat(structureTargets(actor, 0, maxD))
     });
     return steps;
+  }
+  if (id === "tou_bash") {
+    // 盾击突进：先移动 ≤1（可留在本区），再选到达后同区的敌人；有圣盾时可以选再盾突一次
+    const dest = picks.dest != null ? Number(picks.dest) : Number(actor.zone);
+    const steps = [
+      { key: "dest", type: "zone", optional: false, label: "移动到哪一区（距离 ≤1，可留在本区）",
+        zones: zones.filter(z => Number(z) === Number(actor.zone) || skillMoveZones(actor, 1).includes(z)) },
+      { key: "target", type: "unit", optional: false, label: "盾击谁（到达后同区的敌人）",
+        units: fieldUnits().filter(u => !u.isPlayer && !u.dead && !u.hidden && Number(u.zone) === dest) }
+    ];
+    if (((actor.resources || {}).shield || 0) >= 1) {
+      steps.push({ key: "again", type: "choice", optional: false, label: "要不要耗 1 圣盾再盾突一次（1 击破 + 不稳）",
+        options: [{ value: "no", label: "不用" }, { value: "yes", label: "消耗 1 圣盾再盾突" }] });
+    }
+    return steps;
+  }
+  if (id === "yuito_cold") {
+    return [{ key: "dest", type: "zone", optional: false, label: "哪一区变成冻土（距离 ≤1，只列出场地能改变的区）",
+      zones: zones.filter(z => zoneDist(actor.zone, z, state.zoneMode) <= 1 && !fieldChangeWhy(z, "ice")) }];
+  }
+  if (id === "yuito_duet") {
+    return [{ key: "target", type: "unit", optional: false, label: "治疗谁（任意友方）",
+      units: fieldUnits().filter(u => u.isPlayer && !u.dead && !u.hidden && !u.fused) }];
   }
   if (id === "tou_start") {
     const dest = picks.dest != null ? Number(picks.dest) : Number(actor.zone);
@@ -9536,6 +9630,15 @@ function imbalanceLine(unit) {
  * ==================================================================== */
 const SKILL_REQUIREMENT = {
   hiaki_flash:    (a) => (res(a).stance || "draw") !== "iai" ? "只能在居合架势下使用" : null,
+  hiaki_barrage:  (a) => (res(a).stance || "draw") !== "waki" ? "只能在胁构架势下使用" : null,
+  hiaki_powder:   (a) => (res(a).stance || "draw") !== "iai" ? "只能在居合架势下使用" : res(a).powder ? "粉落汤气已经生效" : null,
+  niu_standby:    (a) => res(a).standby ? "已经在待命" : null,
+  ruby_relay:     () => (findKit("ruby", state.units) || {}).resources && findKit("ruby", state.units).resources.drone ? "已经有小型无人机" : null,
+  wing_relay:     () => (findKit("ruby", state.units) || {}).resources && findKit("ruby", state.units).resources.drone ? "已经有小型无人机" : null,
+  mint_repair:    () => (((findKit("ruby", state.units) || {}).resources || {}).nano || 0) >= 20 ? null : "纳米能源不足 20",
+  wing_boost:     (a) => res(a).overdrive ? "机体强化已经生效" : null,
+  yuito_cold:     (a) => (res(a).liquid || 0) >= 1 ? null : "没有咖啡液",
+  yuito_duet:     (a) => (res(a).liquid || 0) >= 2 ? null : "咖啡液不足 2",
   hiaki_pot:      (a) => res(a).blade !== "niu" ? "热锅只能用丹生谷发动" : null,
   yuito_amer:     (a) => (res(a).liquid || 0) < 1 ? "没有咖啡液" : null,
   yuito_espresso: (a) => (res(a).liquid || 0) < 1 ? "没有咖啡液" : null,
@@ -9892,6 +9995,7 @@ function skillTargetError(a, id, t) {
   let moveWhy = null;
   if (id === "hiaki_aa" && t && t.id && !isStructureToken(state.targetId) && (res(a).stance || "draw") === "iai") moveWhy = moveTo(t.zone, 1);
   if (id === "tou_start" && flp.dest != null) moveWhy = moveTo(flp.dest, 1);
+  if (id === "tou_bash" && flp.dest != null) moveWhy = moveTo(flp.dest, 1);
   if (id === "xia_selfburn" && flp.dest) moveWhy = moveTo(flp.dest, 1);
   if (id === "naruto_fly" && flp.dest != null) moveWhy = moveTo(flp.dest, 1);
   if (id === "latte_love" && t && t.id) moveWhy = moveTo(t.zone, null);
@@ -10205,7 +10309,7 @@ function runSkillInner(id, optRun) {
       const wingMain = hitOne(a, t, { element: "energy", mult: 1, diceN: 1, diceS: 4, baseBreak: 1, atk });
       if (wingMain && wingMain.res && wingMain.res.blocked) lines.push("主攻击被格挡，不产生溅射。");
       else visibleEnemies(t.zone).filter(u => u.id !== t.id).forEach(u => {
-        hitOne(a, u, { element: "energy", mult: 0.3, baseBreak: 0, atk, flags: { action: true, aoe: true }, usePrep: false });
+        hitOne(a, u, { element: "energy", mult: a.resources && a.resources.overdrive ? 0.4 : 0.3, baseBreak: 0, atk, flags: { action: true, aoe: true }, usePrep: false });   // 机体强化：溅射 +0.1
       });
     } else if (id === "wing_steal") {
       const foes = visibleEnemies(a.zone);
@@ -10969,16 +11073,22 @@ function runSkillInner(id, optRun) {
     } else if (id === "latte_love") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       a.zone = t.zone;
-      const n = extraDiceByLevel(a.level);
-      const healR = takeDice(n * 2, 4, 0);
+      // 2d4，每五级骰面升一档（2d6、2d8…）
+      const healR = takeDice(2, leveledSides(a.level, 4), 0);
       const heal = healR.total;
       lines.push(`爱意掷骰 ${healR.text}`);
+      const y = findKit("yuito", state.units);
+      // 目标在施加之前就已经被牵挂：拿铁自己也恢复同量的生命和架势（先判断再施加，不然每次都成立）
+      const already = !!(y && y.resources && y.resources.bondId === t.id);
       healUnit(t, heal);
       t.def = Math.min(t.defMax, (t.def || 0) + 1);
-      const y = findKit("yuito", state.units);
       if (y) setBond(y, t);
-      // 说明里没有「拿铁自己也恢复」：以前先施加牵挂再判断「目标已有牵挂」，每次都成立，拿铁白回一份
       lines.push(`爱意：${t.name} 恢复生命并 +1 架势，施加牵挂。`);
+      if (already && t !== a) {
+        healUnit(a, heal);
+        a.def = Math.min(a.defMax, (a.def || 0) + 1);
+        lines.push(`${t.name} 已经被牵挂：${a.name} 也恢复 ${heal} 生命并 +1 架势。`);
+      }
     } else if (id === "hiaki_flash") {
       if ((a.resources.stance || "draw") !== "iai") { lines.push("只能在居合下使用一闪。"); }
       else {
@@ -11058,6 +11168,147 @@ function runSkillInner(id, optRun) {
           boom();
           lines.push(`消耗 1 圣盾再触发一次音爆。灯圣盾 → ${tou.resources.shield}`);
         }
+      }
+    } else if (id === "ruby_algo") {
+      // 算法改变：任意距离的敌人施加扩散；这一回合内它每次受到伤害，瑞比 +5 纳米（engine.js · applyResultToUnit）
+      if (!needT()) return paintSkillLog(lines.join("\n"));
+      applyInstantEffect(t, "spread", lines);
+      t.algoTurn = state.turnNo;
+      lines.push(`算法改变：${t.name} 被施加扩散；这一回合它每次受到伤害，瑞比纳米 +5。`);
+    } else if (id === "ruby_relay" || id === "wing_relay") {
+      // 收发代理：放出小型无人机，不限时间。平时每回合 +10 纳米；瑞比在机甲里时改为每回合结束发射激光（turnEnd）
+      const ruby = findKit("ruby", state.units) || a;
+      ruby.resources = ruby.resources || {};
+      ruby.resources.drone = true;
+      lines.push(ruby.resources.mecha
+        ? "收发代理：小型无人机升空。银翼模式下每回合结束对高能敌人（没有就打血量最少的）发射激光，每次耗 10 纳米。"
+        : "收发代理：小型无人机升空，每回合为瑞比提取 10 纳米能源。进入机甲后自动改为发射激光。");
+    } else if (id === "wing_boost") {
+      // 银翼·机体强化（不耗行动）：每回合维持多耗 20 纳米；atk +20%；普攻溅射倍率 +0.1。解除机甲时结束
+      a.resources.overdrive = true;
+      a.atk = effectiveAtk(a, state.units);
+      lines.push("机体强化：每回合消耗的纳米能源 +20，atk +20%，普通攻击溅射倍率 +0.1。");
+    } else if (id === "mint_repair") {
+      // 机体修复：消耗 20 纳米，自身恢复 50% 生命上限，+1 架势
+      addNano(-20);
+      const got = healUnit(a, Math.floor(totalMaxHp(a) * 0.5));
+      a.def = Math.min(a.defMax || a.def, (Number(a.def) || 0) + 1);
+      lines.push(`机体修复：消耗 20 纳米，恢复 ${got} 生命，架势 +1。纳米 → ${(findKit("ruby", state.units) || {}).resources ? findKit("ruby", state.units).resources.nano : "—"}`);
+    } else if (id === "yuito_cold") {
+      // 冷萃：1 咖啡液。距离 ≤1 的区变冻土，那一区的敌人 0.5atk 冰 +1 击破，友方 +1 架势
+      const fl = state.skillFlow;
+      const z = fl && fl.picks.dest != null ? Number(fl.picks.dest) : Number(a.zone);
+      a.resources.liquid -= 1;
+      const ferr = setZoneField(z, "ice");
+      lines.push(ferr || `${z} 区变为冻土。`);
+      markAoeZone(z);
+      fieldUnits().filter(u => Number(u.zone) === z && !u.dead).forEach(u => {
+        if (u.isPlayer) {
+          if (!isWeaponUnit(u)) { u.def = Math.min(u.defMax || u.def, (Number(u.def) || 0) + 1); lines.push(`${u.name} 架势 +1。`); }
+        } else hitOne(a, u, { element: "ice", mult: 0.5, baseBreak: 1, atk, flags: { action: true, aoe: true } });
+      });
+    } else if (id === "yuito_duet") {
+      // 双重奏：2 咖啡液。任意友方恢复 等级×1d6；溢出的治疗变成等量 atk，下回合开始失去
+      const fl = state.skillFlow;
+      const tgt = fl && fl.picks.target ? unitById(fl.picks.target) : t;
+      if (!tgt || !tgt.isPlayer) { lines.push("先选要治疗的友方。"); return paintSkillLog(lines.join("\n")); }
+      a.resources.liquid -= 2;
+      const r = takeDice(Math.max(1, Number(a.level) || 1), 6, 0);
+      const got = healUnit(tgt, r.total);
+      const over = Math.max(0, r.total - (Number(got) || 0));
+      lines.push(`双重奏：${tgt.name} 治疗 ${r.text}，恢复 ${got}。`);
+      if (over > 0) {
+        tgt.duetAtk = (Number(tgt.duetAtk) || 0) + over;
+        lines.push(`溢出的 ${over} 点治疗变成 atk +${over}（下回合开始失去）。`);
+      }
+    } else if (id === "latte_claw") {
+      // 猫爪挥打：同区 1atk 酸 +1 击破，击退 1；+1 咖啡豆，打出失衡再 +1
+      if (!needT()) return paintSkillLog(lines.join("\n"));
+      const stun0 = !!t.stunned;
+      const dest = pushDest(a, t);
+      hitOne(a, t, { element: "acid", mult: 1, baseBreak: 1, atk, onConnect: { dest, reason: "被猫爪击退" } });
+      const y = findKit("yuito", state.units);
+      if (y) {
+        const gain = (!stun0 && t.stunned) ? 2 : 1;
+        y.resources.bean = (Number(y.resources.bean) || 0) + gain;
+        lines.push(`咖啡豆 +${gain}${gain > 1 ? "（打出失衡）" : ""} → ${y.resources.bean}`);
+      }
+    } else if (id === "hiaki_barrage") {
+      // 特盛乱打：仅胁构。同区每个敌人 1 击破并做乱打标记，进入拔刀；下次进入居合时被标记的各挨 0.5atk（setHiakiStance）
+      const el = a.resources.blade === "naruto" ? "ice" : "fire";
+      const foes = visibleEnemies(a.zone);
+      if (!foes.length) lines.push("同区没有敌人。");
+      foes.forEach(u => { dealBreak(u, 1, el, lines, "特盛乱打", { by: a }); if (!u.dead) u.barrageBy = a.id; });
+      setHiakiStance(a, "draw");
+      lines.push("特盛乱打：同区敌人各 1 击破并被标记，进入拔刀。下次进入居合时，被乱打过的敌人各被瞬间砍一刀。");
+    } else if (id === "hiaki_powder") {
+      // 粉落汤气：仅居合。下回合之前格挡成功不切刀势，并且每次都用另一把刀反击（beginRound 清掉）
+      a.resources.powder = true;
+      lines.push("粉落汤气：两把刀都摆在身旁。下回合之前格挡成功不切刀势，并用另一把刀反击。");
+    } else if (id === "niu_standby") {
+      a.resources.standby = true;
+      lines.push("待命：下一次协助格挡必定成功；成功后变回武器，绯秋换持丹生谷进入居合。");
+    } else if (id === "naruto_frost") {
+      // 霜取：近距离一击 3 冰击破；打出失衡就收回，绯秋换持鳴門进入胁构
+      if (!needT()) return paintSkillLog(lines.join("\n"));
+      const stun0 = !!t.stunned;
+      hitOne(a, t, { element: "ice", mult: 0, baseBreak: 3, atk, atkRange: "melee" });
+      if (!stun0 && t.stunned) {
+        const owner = ownerOfWeapon(a, state.units);
+        lines.push(...returnWeapon(a));
+        if (owner) {
+          owner.resources.blade = "naruto";
+          setHiakiStance(owner, "waki");
+          refreshHiakiAtk(owner);
+          lines.push("霜取打出失衡：鳴門收回，绯秋换持鳴門进入胁构。");
+        }
+      }
+    } else if (id === "tou_bash") {
+      // 盾击突进：移动 ≤1，对同区敌人 1atk 物理 + 震荡；可耗 1 圣盾再盾突：1 击破 + 不稳
+      const fl = state.skillFlow;
+      const dest = fl && fl.picks.dest != null ? Number(fl.picks.dest) : Number(a.zone);
+      const tgt = fl && fl.picks.target ? unitById(fl.picks.target) : t;
+      if (!tgt) { lines.push("先选盾击目标。"); return paintSkillLog(lines.join("\n")); }
+      if (dest !== Number(a.zone)) { const from = Number(a.zone); a.zone = dest; lines.push(`盾击突进：移动到 ${dest} 区。`); applyAbyssFall(a, from, lines); }
+      const out = hitOne(a, tgt, { element: "physical", mult: 1, baseBreak: 0, atk });
+      if (!tgt.dead && attackConnected(out && out.res, out && out.res && out.res.flags)) {
+        tgt.statuses = tgt.statuses || {};
+        tgt.statuses.shockwave = true;
+        popStatus(tgt, "shockwave");
+        lines.push(`${tgt.name} 震荡。`);
+      }
+      if (fl && fl.picks.again === "yes" && !tgt.dead) {
+        if ((a.resources.shield || 0) < 1) lines.push("圣盾不足，未能二次盾突。");
+        else {
+          a.resources.shield -= 1; touShieldHeal(a);
+          dealBreak(tgt, 1, "physical", lines, "二次盾突", { by: a });
+          if (!tgt.dead) { applyUnstable(tgt, lines); popStatus(tgt, "unstable"); }
+          lines.push(`二次盾突：1 击破，${tgt.name} 不稳。圣盾 → ${a.resources.shield}`);
+        }
+      }
+    } else if (id === "tou_accuse") {
+      // 赤诚控诉：距离 1 以内的敌人 1atk 谐波，嘲讽，圣盾 +2；被决一死战影响的再虚弱
+      if (!needT()) return paintSkillLog(lines.join("\n"));
+      const duel = typeof touDuelVictim === "function" && touDuelVictim(t) === a;
+      hitOne(a, t, { element: "harmonic", mult: 1, baseBreak: 0, atk, atkRange: "any" });
+      if (!t.dead) { t.tauntTo = a.id; lines.push(`${t.name} 被嘲讽：下次攻击必须打${a.name}。`); }
+      a.resources.shield = Math.min(3, (Number(a.resources.shield) || 0) + 2);
+      lines.push(`圣盾 +2 → ${a.resources.shield}`);
+      if (duel && !t.dead) {
+        t.statuses = t.statuses || {};
+        t.statuses.weak = true;
+        popStatus(t, "weak");
+        lines.push(`${t.name} 正处于决一死战：额外虚弱。`);
+      }
+    } else if (id === "mochi_bite") {
+      // 紧咬不放：同区 1atk 物理 +1 击破，嘲讽，并使其无法移动（到下一个敌人回合结束）
+      if (!needT()) return paintSkillLog(lines.join("\n"));
+      hitOne(a, t, { element: "physical", mult: 1, baseBreak: 1, atk });
+      if (!t.dead) {
+        t.tauntTo = a.id;
+        t.noMove = true;
+        t.noMoveUntil = (Number(state.turnNo) || 0) + (state.combatPhase === "enemy" ? 1 : 0);
+        lines.push(`${t.name} 被年糕死死咬住：嘲讽，无法移动。`);
       }
     } else if (id.indexOf("fx_") === 0) {
       const fx = id.slice(3);

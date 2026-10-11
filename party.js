@@ -681,6 +681,9 @@ function skillCost(id) {
     longge_heat: { ap: 1 }, longge_drink: { ap: 1 }, longge_shuffle: { ap: 1 }, longge_reload: { ap: 1 },
     xiaoxiao_burst: { ap: 1 },
     kolt_cannon: { ap: 1 }, torque_divert: { ap: 1 }, ecmo_probe: { ap: 1 }, ras_torrent: { ap: 1 },
+    ruby_algo: { ap: 1 }, ruby_relay: { ap: 1 }, wing_relay: { ap: 1 }, mint_repair: { ap: 1 }, wing_boost: {},
+    yuito_cold: { ap: 1 }, yuito_duet: { ap: 1 }, latte_claw: { ap: 1 }, hiaki_barrage: { ap: 1 }, hiaki_powder: { ap: 1 },
+    niu_standby: { ap: 1 }, naruto_frost: { ap: 1 }, tou_bash: { ap: 1 }, tou_accuse: { ap: 1 }, mochi_bite: { ap: 1 },
     longge_summon: { ap: 1, bonus: 1 },
     xiaoxiao_punch: { ap: 1 }, xiaoxiao_heal: { ap: 1 }, xiaoxiao_combo: { ap: 1 }, xiaoxiao_return: { ap: 1 }
   };
@@ -798,10 +801,14 @@ function skillList(unit) {
       add({ id: "ruby_summon", name: "唤出明特", hint: "武器生物化（需同区收回）" });
       add({ id: "ruby_surge", name: "电流激荡", hint: "距离1 · 1atk 电 1击破 · 打到护盾 +10纳米", minLv: 2 });
       add({ id: "ruby_short", name: "短路", hint: "距离1以内 · 施加感电", minLv: 3 });
+      add({ id: "ruby_algo", name: "算法改变", hint: "任意距离 · 施加扩散 · 此回合它每次受伤瑞比 +5 纳米", minLv: 6 });
+      add({ id: "ruby_relay", name: "收发代理", hint: "放出小型无人机：每回合 +10 纳米，不限时间（机甲时改为激光）", minLv: 11 });
     } else {
       add({ id: "wing_aa", name: "银翼·普通攻击", hint: "距离1以内 · 1atk+1d4 能量 1击破 · 同区其他 0.3atk" });
       add({ id: "wing_steal", name: "银翼·电力夺取", hint: "同区每个敌人 0.5atk 电 · 每人 +10纳米" });
       add({ id: "wing_surge", name: "银翼·电流激荡", hint: "距离1-2 · 1atk 电 1击破 · 打到护盾 +20纳米", minLv: 2 });
+      add({ id: "wing_boost", name: "银翼·机体强化", hint: "不耗行动 · 每回合纳米多耗 20 · atk +20% · 普攻溅射倍率 +0.1", minLv: 4 });
+      add({ id: "wing_relay", name: "银翼·收发代理", hint: "无人机每回合结束激光：高能敌人（没有就血最少的）两次 0.2atk+1d12 能量 · 耗 10 纳米", minLv: 11 });
       add({ id: "ruby_unmecha", name: "解除机甲", hint: "立刻分开瑞比与明特" });
     }
   }
@@ -810,6 +817,7 @@ function skillList(unit) {
       add({ id: "mint_mecha", name: "机甲模式", hint: "不耗行动 · 需与瑞比同区且纳米足够" });
       add({ id: "mint_steal", name: "电力夺取", hint: "距离1以内 · 1atk 电击 · +20纳米" });
       add({ id: "mint_banish", name: "驱逐", hint: "同区两次 0.5atk 电 · 共 1 击破 · 推开 1 格", minLv: 2 });
+      add({ id: "mint_repair", name: "机体修复", hint: "耗 20 纳米 · 自身恢复 50% 生命上限 · +1 架势", minLv: 4 });
       add({ id: "mint_return", name: "收回为武器", hint: "需与瑞比同区" });
     }
   }
@@ -818,6 +826,8 @@ function skillList(unit) {
     add({ id: "yuito_amer", name: "冰美式", hint: `消耗 1 咖啡液 · 治疗 2d${typeof leveledSides === "function" ? leveledSides(unit.level || 1, 4) : 4} 或 清场 0.75atk 冰 +1击破` });
     add({ id: "yuito_espresso", name: "意式浓缩", hint: "消耗 1 咖啡液 · 友方行动点+1 或 1atk 酸 +2击破", minLv: 2 });
     add({ id: "yuito_extract", name: "酸萃", hint: `消耗 1 咖啡液 · 区域变酸液 · 友方 ${typeof addedDiceByLevel === "function" ? addedDiceByLevel(unit.level || 1) : 1}d4 治疗 / 敌人同样骰数的酸`, minLv: 3 });
+    add({ id: "yuito_cold", name: "冷萃", hint: "消耗 1 咖啡液 · 距离≤1 的区变冻土 · 敌人 0.5atk 冰 +1击破 / 友方 +1 架势", minLv: 6 });
+    add({ id: "yuito_duet", name: "双重奏", hint: "消耗 2 咖啡液 · 任意友方恢复 等级×1d6 · 溢出的治疗变成 atk，下回合开始失去", minLv: 11 });
     add({ id: "yuito_summon", name: "唤出拿铁", hint: "武器生物化" });
   }
   if (unit.kit === "nora") {
@@ -840,7 +850,8 @@ function skillList(unit) {
   if (unit.kit === "latte") {
     add({ id: "latte_puff", name: "毛球攻击", hint: "距离1 · atk 酸 +1击破 · 豆→液" });
     add({ id: "latte_ice", name: "制冰机", hint: "天气变为雪天" });
-    add({ id: "latte_love", name: "爱意", hint: "移到友方同区 · 2d4 生命 +1 架势 · 牵挂", minLv: 2 });
+    add({ id: "latte_love", name: "爱意", hint: "移到友方同区 · 2d4 生命 +1 架势 · 牵挂（已有牵挂则拿铁也恢复同量）· 每五级骰面升级", minLv: 2 });
+    add({ id: "latte_claw", name: "猫爪挥打", hint: "同区 · 1atk 酸 +1击破 · 击退 1 · +1 咖啡豆（打出失衡再 +1）", minLv: 4 });
     add({ id: "latte_return", name: "收回为武器", hint: "需与结人同区" });
   }
   if (unit.kit === "hiaki") {
@@ -849,15 +860,19 @@ function skillList(unit) {
     add({ id: "hiaki_summon", name: "分出当前刀", hint: "武器生物化其中一把，另一把仍可持用" });
     add({ id: "hiaki_flash", name: "一闪", hint: "仅居合 · 同区全体 1atk +1击破 · 进入拔刀", minLv: 2 });
     add({ id: "hiaki_pot", name: "热锅", hint: "仅丹生谷 · 同区施加熔融", minLv: 3 });
+    add({ id: "hiaki_barrage", name: "特盛乱打", hint: "仅胁构 · 同区每个敌人 1 击破并标记 · 进入拔刀 · 下次进入居合时被标记的各挨 0.5atk（无视距离和障碍）", minLv: 6 });
+    add({ id: "hiaki_powder", name: "粉落汤气", hint: "仅居合 · 下回合之前格挡成功不切刀势，并用另一把刀反击 1atk（鳴門 +1 击破）", minLv: 11 });
   }
   if (unit.kit === "niu") {
     add({ id: "niu_slash", name: "斩炎", hint: "同区 · 1atk 火 +1击破 · 灼烧 · 变回武器" });
     add({ id: "niu_tsubame", name: "燕返", hint: "距离1 · 1atk 火 +1击破 · 收回并换持丹生谷，鳴門出场", minLv: 2 });
+    add({ id: "niu_standby", name: "待命", hint: "下一次协助格挡必定成功 · 成功则变回武器，绯秋换丹生谷居合", minLv: 4 });
     add({ id: "niu_return", name: "变回武器", hint: "需与绯秋同区" });
   }
   if (unit.kit === "naruto") {
     add({ id: "naruto_wind", name: "寒风", hint: "距离1 · 1atk 冰 +1击破 · 冻伤 · 变回武器" });
     add({ id: "naruto_fly", name: "燕飞", hint: "同区 0.5atk 冰 +1击破 · 然后移动 1 格", minLv: 2 });
+    add({ id: "naruto_frost", name: "霜取", hint: "同区 · 3 冰击破 · 打出失衡则收回，绯秋换鳴門胁构", minLv: 4 });
     add({ id: "naruto_return", name: "变回武器", hint: "需与绯秋同区" });
   }
   if (unit.kit === "tou") {
@@ -865,6 +880,8 @@ function skillList(unit) {
     add({ id: "tou_start", name: "圣战起始", hint: "移动≤1 · 同区施加错位 · 可耗圣盾带一人" });
     add({ id: "tou_sonic", name: "声波切割", hint: "同区目标 1atk 谐波、距离1 目标 0.5atk 谐波，可只选其一 · 耗 1 圣盾", minLv: 2 });
     add({ id: "tou_ultra", name: "超音波", hint: "同区施加折射", minLv: 3 });
+    add({ id: "tou_bash", name: "盾击突进", hint: "移动≤1 · 同区敌人 1atk 物理 + 震荡 · 可耗圣盾再盾突：1 击破 + 不稳", minLv: 6 });
+    add({ id: "tou_accuse", name: "赤诚控诉", hint: "距离1以内 · 1atk 谐波 · 嘲讽 · 圣盾 +2 · 决一死战中的敌人再虚弱", minLv: 11 });
     add({ id: "tou_summon", name: "唤出年糕", hint: "武器生物化" });
     /* 圣盾延射程已并入普通攻击的分步选择 */
   }
@@ -872,6 +889,7 @@ function skillList(unit) {
     add({ id: "mochi_pounce", name: "猛扑", hint: "跃向距离1敌人，或带走同区敌人 · atk+1d4 物理 +1击破" });
     add({ id: "mochi_roar", name: "吼叫", hint: "同区 atk+1d4 谐波 +1击破 · 强制换区" });
     add({ id: "mochi_boom", name: "音爆", hint: "同区每个敌人 0.5atk 谐波 +1击破 · 可再耗圣盾一次", minLv: 2 });
+    add({ id: "mochi_bite", name: "紧咬不放", hint: "同区 · 1atk 物理 +1击破 · 嘲讽 · 无法移动", minLv: 4 });
     add({ id: "mochi_return", name: "收回为武器", hint: "需与灯同区" });
   }
   if (unit.kit === "xia") {
@@ -1090,6 +1108,8 @@ function effectiveAtk(unit, units) {
   // 更换刀头+：酸液炮模式下柯尔特 atk +5；思念+：被牵挂且回合内未受伤累积的 atk 加成
   if (unit.kit === "kolt" && (unit.resources || {}).bit === "acid" && typeof passivePlus === "function" && passivePlus(unit, 1)) base += 5;
   if (unit.bondAtk) base += Number(unit.bondAtk) || 0;
+  if (unit.duetAtk) base += Number(unit.duetAtk) || 0;   // 双重奏：溢出的治疗，下回合开始失去
+  if (unit.resources && unit.resources.mecha && unit.resources.overdrive) base *= 1.2;   // 银翼·机体强化
   const tier = typeof exhaustTierOf === "function" ? exhaustTierOf(unit) : 0;
   return tier >= 2 ? Math.max(0, base - 3) : base;
 }
@@ -1116,7 +1136,7 @@ function baseEffectiveAtk(unit, units) {
 function resourceText(unit) {
   if (!unit || !unit.kit) return "";
   const r = unit.resources || {};
-  if (unit.kit === "ruby") return `纳米 ${r.nano || 0}/100${r.mecha ? " · 机甲中" : ""}${r.preparedActive ? " · 准备生效" : (r.preparedPending || r.prepared) ? " · 已准备" : ""}`;
+  if (unit.kit === "ruby") return `纳米 ${r.nano || 0}/100${r.mecha ? " · 机甲中" : ""}${r.overdrive ? " · 机体强化" : ""}${r.drone ? (r.mecha ? " · 无人机（激光）" : " · 无人机") : ""}${r.preparedActive ? " · 准备生效" : (r.preparedPending || r.prepared) ? " · 已准备" : ""}`;
   if (unit.kit === "mint") return `耐久 ${r.durability != null ? r.durability : "—"}`;
   if (unit.kit === "yuito") {
     const bond = r.bondName ? ` · 牵挂 ${r.bondName}` : " · 无牵挂";
