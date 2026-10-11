@@ -12019,7 +12019,8 @@ function runSkillInner(id, optRun) {
       if (longgeMode(a) === "gun") {
         const c = longgeTakeBullet(a, lines);
         const near = Number(t.zone) === Number(a.zone);
-        hitOne(a, t, { element: LONGGE_AMMO[c].element, mult: 1.5, baseBreak: 1, atk, atkRange: near ? "melee" : "ranged" });
+        // 开枪不是近身挥打：近距离打飞行目标也不用多付附赠行动（和出手前的检查一致）
+        hitOne(a, t, { element: LONGGE_AMMO[c].element, mult: 1.5, baseBreak: 1, atk, atkRange: near ? "melee" : "ranged", flags: { action: true, flyFree: true } });
         // 枪管手杖+：近距离打出火弹，同区其他敌人各受 0.75×atk 火焰
         if (near && c === "red") {
           const others = visibleEnemies(a.zone).filter(u => u.id !== t.id);

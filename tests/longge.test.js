@@ -543,6 +543,20 @@ test("枪管手杖+：霰弹枪普攻能打近距离，红弹再对同区其他�
   assert.ok(S);
 });
 
+test("枪管手杖+：霰弹枪近距离打同区飞行敌人不用多付附赠行动（开枪不是近身挥打）；提示写明近 / 远距离", () => {
+  const { c, lg, foes } = setup();
+  lvUp(lg, 5);
+  lg.resources.trigger = true;
+  lg.resources.ammo = ["blue", "blue"]; seenAll(lg);
+  foes[0].flying = true;
+  lg.bonus = 0;
+  assert.match(c.skillList(lg).find(s => s.id === "longge_aa").hint, /霰弹枪：近 \/ 远距离/);
+  const hp0 = c.totalHp(foes[0]);
+  cmd(c, { actor: lg.id, skill: "longge_aa", target: foes[0].id, picks: { mode: "gun", target: foes[0].id } });
+  assert.ok(c.totalHp(foes[0]) < hp0, "打中了");
+  assert.equal(lg.bonus, 0);
+});
+
 test("枪管手杖（未升级）：霰弹枪普攻只能打距离 1", () => {
   const { c, lg, foes } = setup();
   lg.resources.trigger = true;
