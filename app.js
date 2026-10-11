@@ -2494,6 +2494,7 @@ function resetBattleRecords() {
   state.scoreSeen = {};
   state.battleGains = { xp: 0, kuizhi: 0 };
   state.lastBrokenLayer = null;   // 废物利用：每场重新记（上一场打碎的层不能拿来用）
+  state.weaponFallen = {};        // 本场倒下过的武器（取回后 atk / 格挡加成减半）
 }
 /** 这场的基准分：把出现过的每个敌人（含中途召唤的）「打空血、击杀」的分加起来，按第一次见到时的数值算。
  *  击破、失衡不算进来：那是玩家打出来的漂亮操作，不当成默认该拿的分。 */
@@ -5713,8 +5714,52 @@ function applyKnockdown(unit, notes, opt) {
   }
   unit.dead = true;
   if (unit.isPlayer) notes.push(`${unit.name} 最内层归零，武器人倒下。`);
+  if (unit.isPlayer && isWeaponUnit(unit) && !unit.escort) onWeaponUnitDown(unit, notes);
   else if (opt.cause && !opt.lethal) notes.push(`${unit.name} ${opt.cause}致死（最内层归零）。`);
   return "dead";
+}
+
+/* ===== 武器人倒下与取回 =====
+ * 倒下的那一刻扣 2 点耐久（以前在战斗结束时扣），这把武器本场记为「倒下过」。
+ * 主人走到它倒下的区，花 1 行动点「取回武器」：拿回手里，本场不能再唤出，武器提供的 atk 和格挡加成减半
+ * （战斗中修好耐久也一样减半）。耐久扣到 0 的取回来也是坏的，修好之前照样空手。 */
+function onWeaponUnitDown(u, notes) {
+  state.weaponFallen = state.weaponFallen || {};
+  if (!state.weaponFallen[u.kit]) state.weaponFallen[u.kit] = "down";
+  if (!u._durCounted && typeof spendDurability === "function") {
+    u._durCounted = true;
+    spendDurability(u.kit, 2, "武器人被击败", notes);
+  }
+  const owner = typeof weaponOwnerUnit === "function" ? weaponOwnerUnit(u) : null;
+  if (owner && !owner.dead) notes.push(`${owner.name} 可以走到 ${u.zone} 区花 1 行动点取回 ${u.name}（本场不能再唤出，武器 atk 和格挡加成减半）。`);
+}
+/** 这把武器本场倒下过：主人拿着它时武器 atk、格挡加成减半 */
+function weaponHalved(kit) {
+  return !!(kit && state.weaponFallen && state.weaponFallen[kit]);
+}
+/** 这个角色倒在场上、还没取回的武器人 */
+function fallenWeapons(owner) {
+  if (!owner || !owner.isPlayer || owner.weaponOf || owner.dead) return [];
+  const kits = [owner.kit].concat(owner.linkedKits || []);
+  return (state.units || []).filter(u => u && u.isPlayer && u.dead && !u.hidden && !u._removed && !u.escort &&
+    typeof isWeaponUnit === "function" && isWeaponUnit(u) && (u.weaponOf === owner.kit || kits.includes(u.kit)));
+}
+function retrieveWeapon(owner, w, lines) {
+  w.hidden = true;            // 收回手里：不再留在场上（仍记为倒下，本场不能再唤出）
+  w._retrieved = true;
+  state.weaponFallen = state.weaponFallen || {};
+  state.weaponFallen[w.kit] = "back";
+  const broken = typeof weaponBroken === "function" && weaponBroken(w.kit);
+  if (owner.kit === "hiaki") {
+    owner.resources = owner.resources || {};
+    if (w.kit === "niu") owner.resources.niuOut = false;
+    if (w.kit === "naruto") owner.resources.narutoOut = false;
+    if (typeof refreshHiakiAtk === "function") refreshHiakiAtk(owner);
+  } else if (!broken) {
+    owner.weaponHeld = true;
+  }
+  lines.push(`${owner.name} 取回了 ${w.name}。本场不能再唤出，武器 atk 和格挡加成减半。`);
+  if (broken) lines.push(`${w.name} 耐久为 0，修好之前还是只能空手。`);
 }
 
 function queueAssistAttack(breaker, broken) {
@@ -8573,6 +8618,12 @@ function skillFlowSteps(id, actor, picks) {
       zones: zones.filter(z => zoneDist(actor.zone, z, state.zoneMode) <= 1 && !fieldChangeWhy(z, "acid"))
     }];
   }
+  if (id === "weapon_retrieve") {
+    const here = fallenWeapons(actor).filter(w => Number(w.zone) === Number(actor.zone));
+    if (here.length <= 1) return [];
+    return [{ key: "weapon", type: "choice", optional: false, label: "取回哪一个",
+              options: here.map(w => ({ value: w.id, label: w.name })) }];
+  }
   if (id === "hiaki_summon") {
     const usable = typeof summonableBlades === "function" ? summonableBlades(actor) : [];
     const label = { niu: "分出丹生谷", naruto: "分出鳴門" };
@@ -9724,6 +9775,12 @@ const SKILL_REQUIREMENT = {
   kolt_cannon:    (a) => koltScrapTotal(a) > 0 ? null : "没有废料可以装填",
   ecmo_probe:     (a) => res(a).probe ? "已经在探测模式" : null,
   edc_siphon:     () => findKit("ras", state.units) ? null : "拉斯缪尔不在场",
+  weapon_retrieve: (a) => {
+    const list = fallenWeapons(a);
+    if (!list.length) return "没有倒下的武器人";
+    if (list.some(w => Number(w.zone) === Number(a.zone))) return null;
+    return `要走到 ${list.map(w => w.name + " 倒下的 " + w.zone + " 区").join("、")}才能取回`;
+  },
   ras_super:      (a) => a && a.self === "conductor" ? "已经处于导体状态" : null,
   ras_torrent:    (a) => fieldUnits().some(u => !u.isPlayer && !u.dead && ((u.statuses && u.statuses.high) || (u.highEnergy || 0) > 0)) ? null : "场上没有高能状态的敌人",
   edc_drain:      (a) => {
@@ -10343,7 +10400,13 @@ function runSkillInner(id, optRun) {
   };
 
   try {
-    if (id === "solo_support") {
+    if (id === "weapon_retrieve") {
+      const here = fallenWeapons(a).filter(w => Number(w.zone) === Number(a.zone));
+      const pick = state.skillFlow && state.skillFlow.picks && state.skillFlow.picks.weapon;
+      const w = here.find(x => x.id === pick) || here[0];
+      if (!w) { lines.push("同区没有倒下的武器人。"); return paintSkillLog(lines.join("\n")); }
+      retrieveWeapon(a, w, lines);
+    } else if (id === "solo_support") {
       const fl = state.skillFlow;
       const tgt = fl && fl.picks && fl.picks.target ? unitById(fl.picks.target) : t;
       runSoloSupport(a, fl.picks.partner, tgt, lines);
@@ -11766,7 +11829,8 @@ function runSkillInner(id, optRun) {
       lines.push(`碎渣重炮：装填 ${pool} 点废料。`);
       if (acid) {
         const mx = totalMaxHp(mt), hp0 = totalHp(mt);
-        hitOne(a, mt, { element: "acid", mult: 1, atk: pool, baseBreak: 2, atkRange: "any", flags: { action: true, lob: true } });
+        const cut = weaponHalved("torque") ? 0.5 : 1;   // 扭矩倒下过：碎渣重炮总伤害 −50%
+        hitOne(a, mt, { element: "acid", mult: cut, atk: pool, baseBreak: 2, atkRange: "any", flags: { action: true, lob: true } });
         const lost = hp0 - (mt.dead ? 0 : totalHp(mt));
         if (!mt.dead && lost > mx * 0.25) {
           lines.push(`迫击炮重创：${mt.name} 损失 ${lost}（超过上限 ${mx} 的 25%），额外 2 击破。`);
@@ -11774,7 +11838,7 @@ function runSkillInner(id, optRun) {
         }
         const splash = Math.floor(pool / 3);
         if (splash > 0) visibleEnemies(mt.zone).filter(u => u !== mt && !u.dead).forEach(u => {
-          hitOne(a, u, { element: "acid", mult: 1, atk: splash, baseBreak: 0, atkRange: "any", usePrep: false, flags: { action: true, aoe: true, lob: true } });
+          hitOne(a, u, { element: "acid", mult: cut, atk: splash, baseBreak: 0, atkRange: "any", usePrep: false, flags: { action: true, aoe: true, lob: true } });
         });
       } else {
         const torq = findKit("torque", state.units);
@@ -11795,7 +11859,8 @@ function runSkillInner(id, optRun) {
           const per = Math.floor(tAtk / 3) + roll.total;
           const dmg = Math.min(pool, per);
           pool -= dmg; n += 1;
-          hitOne(a, cur, { element: "electric", mult: 1, atk: dmg, baseBreak: n % 2 === 0 ? 1 : 0, atkRange: "any", usePrep: n === 1, flags: { action: true } });
+          // 扭矩倒下过：子弹数照原来的 atk 算，每颗伤害减半（总伤害 −50%）
+          hitOne(a, cur, { element: "electric", mult: weaponHalved("torque") ? 0.5 : 1, atk: dmg, baseBreak: n % 2 === 0 ? 1 : 0, atkRange: "any", usePrep: n === 1, flags: { action: true } });
         }
         lines.push(`碎渣重炮：共打出 ${n} 颗子弹。`);
       }

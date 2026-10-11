@@ -738,6 +738,13 @@ function weaponOwnerUnit(u) {
 }
 /** 手里那把武器的格挡加成；空手、武器人已分出去 → 0 */
 function heldWeaponBlockBonus(unit) {
+  const v = heldWeaponBlockBonusRaw(unit);
+  if (!v || !unit || unit.weaponOf || typeof weaponHalved !== "function") return v;
+  // 倒下过一次（取回后）的武器：格挡加成减半
+  const kit = unit.kit === "hiaki" ? ((unit.resources || {}).blade || "niu") : (unit.linkedKits || [])[0];
+  return kit && weaponHalved(kit) ? Math.floor(v / 2) : v;
+}
+function heldWeaponBlockBonusRaw(unit) {
   if (!unit || !unit.kit) return 0;
   if (WEAPON_BLOCK_BONUS[unit.kit] != null && (unit.weaponOf || !unit.attrs)) return weaponBlockBonusOf(unit.kit, weaponOwnerUnit(unit));   // 武器人自己
   if (isUnarmed(unit)) return 0;
@@ -1011,6 +1018,10 @@ function skillList(unit) {
     const def = roleSkillDef(rs.role, rs.n, unit);
     if (def && !list.some(s => s.id === def.id)) add(def);   // 第二副职责可能和角色自带的技能重复
   });
+  // 武器人倒下后：主人走到它倒下的区，花 1 行动点取回（本场不能再唤出，武器 atk / 格挡加成减半）
+  if (typeof fallenWeapons === "function" && fallenWeapons(unit).length) {
+    add({ id: "weapon_retrieve", name: "取回武器", hint: "同区 · 取回倒下的武器人 · 本场不能再唤出，武器 atk 和格挡加成减半", bare: true });
+  }
   // 单人模式：支援（呼叫伙伴的协助攻击）
   if (typeof soloSupportSkill === "function") {
     const sup = soloSupportSkill(unit);
@@ -1117,9 +1128,11 @@ function effectiveAtk(unit, units) {
 
 function baseEffectiveAtk(unit, units) {
   if (!unit) return 0;
+  // 倒下过一次（取回后）的武器：武器提供的 atk 减半（本场有效）
+  const half = (kit, v) => (typeof weaponHalved === "function" && weaponHalved(kit)) ? Math.floor((Number(v) || 0) / 2) : (Number(v) || 0);
   if (unit.resources && unit.resources.mecha) {
     const mint = units.find(u => u.kit === "mint");
-    return (unit.personalAtk || 0) + ((mint && mint.personalAtk) || unit.weaponAtk || 8);
+    return (unit.personalAtk || 0) + half("mint", (mint && mint.personalAtk) || unit.weaponAtk || 8);
   }
   if (unit.kit === "hiaki") {
     const blade = (unit.resources && unit.resources.blade) || "niu";
@@ -1128,10 +1141,10 @@ function baseEffectiveAtk(unit, units) {
     const wAtk = typeof computeWeaponAtk === "function"
       ? computeWeaponAtk(blade, unit.attrs, lv, weaponPartsOf(unit, blade))
       : (blade === "niu" ? 7 : 6);
-    return (unit.personalAtk || 0) + (out ? 0 : wAtk);
+    return (unit.personalAtk || 0) + (out ? 0 : half(blade, wAtk));
   }
   if (unit.weaponHeld === false) return unit.personalAtk || 0;
-  return (unit.personalAtk || 0) + (unit.weaponAtk || 0);
+  return (unit.personalAtk || 0) + half((unit.linkedKits || [])[0], unit.weaponAtk || 0);
 }
 
 function resourceText(unit) {
