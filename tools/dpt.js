@@ -8,6 +8,7 @@
 //   每个候选在几组不同的骰子（平行世界）下各跑一遍取平均，同一步的所有候选用同一批种子（公平比较）；
 //   最后把找到的序列换新的种子重放取平均，作为报告的 DPT（不会比搜索时更「走运」）。
 // 只算伤害（假人掉的血）；击破、治疗另算。协助攻击、失衡等要队友触发的收益不算。
+// 假人打不碎，所以柯尔特「被摧毁的敌人血量层」的废料按估计注入：每 3 个回合一次 4 人队伍精英牛的护盾层（再按规则封顶）。
 //
 // 用法：node tools/dpt.js [--kits ruby,kolt] [--levels 1,5,10] [--turns 8] [--beam 40] [--worlds 3] [--seeds 5] [--json out.json]
 "use strict";
@@ -52,6 +53,9 @@ function setupField(kit, level, seed) {
   dummy.zone = 2;
   S.units.push(dummy);
   S.units.filter(u => u.isPlayer).forEach(u => { u.zone = 1; });
+  // 柯尔特的废料：训练假人只有一层血、永远打不碎，实战里「被摧毁的敌人血量层」拿不到。
+  // 按作者给的估计：每 3 个回合拿到一次精英「警卫队队长（牛）」的护盾层（4 人队伍的数值，再按废料规则封顶）
+  if (kit === "kolt") S.dptScrap = { every: 3, type: "shield", lost: c.spawnEnemyGroup("captain_ox", level, 4, 1)[0].layers[0].max };
   c.startCombat();
   c.S.RNG.install(`dpt:${kit}:${level}:${seed}`);
   return { c, S, dummy };
@@ -165,6 +169,9 @@ function endTurn(c) {
   const S = c.S.state;
   S.combatPhase = "player";
   // 假人不动：敌人回合只走回合流转
+  // 柯尔特：第 3、6……个回合开始时，当作刚打碎了一层牛的护盾（覆盖上一个，和实战一样只记最近一层）
+  const sc = S.dptScrap;
+  if (sc && Number(S.turnNo) % sc.every === 0) S.lastBrokenLayer = { type: sc.type, lost: sc.lost, dmg: sc.lost };
 }
 
 /* ---------- 束搜索 ---------- */
