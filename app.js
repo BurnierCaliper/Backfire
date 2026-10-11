@@ -515,8 +515,15 @@ function highBoomValue(unit) {
   return (Number(unit.highEnergy) || 0) + fieldHE;
 }
 
+/** 高能自爆在一次完整的攻击行动之后才判定：行动中（runSkill 里）只记下要判的单位，
+ *  让多段攻击全部打完、高能值继续累积，行动结束时再统一判（flushHighBooms） */
 function checkHighBoom(unit) {
   if (!unit || unit._highBooming || unit.dead || unit.hidden) return;
+  if ((Number(state._highDefer) || 0) > 0) {
+    state._highPending = state._highPending || [];
+    if (!state._highPending.includes(unit.id)) state._highPending.push(unit.id);
+    return;
+  }
   // 微光：蓄能状态下，高能值要在连续两个回合结束时都超过血量才自爆——平时不判，回合结束时判（glowStoreTurnEnd）
   if (unit.self === "store" && currentWeatherFor(unit) === "glow") return;
   const hp = currentLifeForHigh(unit);
@@ -524,6 +531,12 @@ function checkHighBoom(unit) {
   if (val > 0 && hp < val) explodeHigh(unit, val);   // 血量「低于」高能值才自爆；这次爆炸的高能值含能量场叠上来的部分
 }
 
+/** 行动结束：把行动中攒下的单位按顺序判一次高能自爆（这时已经不在行动中，余波连锁照常立即判） */
+function flushHighBooms() {
+  const ids = state._highPending || [];
+  state._highPending = [];
+  ids.forEach(id => { const u = unitById(id); if (u) checkHighBoom(u); });
+}
 /** 回合结束：微光 + 蓄能的单位，高能值超过血量记一次；连续两个回合结束都超过才自爆，中间有一次没超过就重新数 */
 function glowStoreTurnEnd(notes) {
   state.units.forEach(u => {
@@ -9691,6 +9704,7 @@ const SKILL_REQUIREMENT = {
   kolt_cannon:    (a) => koltScrapTotal(a) > 0 ? null : "没有废料可以装填",
   ecmo_probe:     (a) => res(a).probe ? "已经在探测模式" : null,
   edc_siphon:     () => findKit("ras", state.units) ? null : "拉斯缪尔不在场",
+  ras_super:      (a) => a && a.self === "conductor" ? "已经处于导体状态" : null,
   ras_torrent:    (a) => fieldUnits().some(u => !u.isPlayer && !u.dead && ((u.statuses && u.statuses.high) || (u.highEnergy || 0) > 0)) ? null : "场上没有高能状态的敌人",
   edc_drain:      (a) => {
     const ras = findKit("ras", state.units);
@@ -10054,7 +10068,11 @@ function runSkill(id, optRun) {
       // 启动引擎+：引擎已启动时使用带有启动引擎效果的技能，结算后获得 1 燃油
       const fuelGain = FUEL_SKILLS.includes(id) && xiaFuelOn() && ((findKit("xia", state.units) || {}).resources || {}).engine;
       const seqBefore = Number(state.actionSeq) || 0;
-      trackHealBy(a0, () => runSkillInner(id, optRun));
+      // 高能自爆等这次行动完整打完再判（嵌套的行动由最外层统一判）
+      state._highDefer = (Number(state._highDefer) || 0) + 1;
+      try { trackHealBy(a0, () => runSkillInner(id, optRun)); }
+      finally { state._highDefer = Math.max(0, (Number(state._highDefer) || 0) - 1); }
+      if (!state._highDefer) flushHighBooms();
       if (fuelGain && (Number(state.actionSeq) || 0) !== seqBefore) addFuel(1, "引擎运转");   // 真的出手了（开始了新的行动）才算
       const bossNotes = []; settleBossStuns(bossNotes); if (bossNotes.length) appendLog(bossNotes.join("\n"));
       applyFatigue(a0, id, scoreBefore);   // 招式疲劳：连续几个回合用同一招，这次行动的总得分打折
