@@ -2004,7 +2004,8 @@ function turnEnd() {
         addNano(10);
         notes.push(`收发代理：无人机提取纳米 +10 → ${u.resources.nano}`);
       } else if ((u.resources.nano || 0) >= 10) {
-        const foes = fieldUnits().filter(x => !x.isPlayer && !x.dead && !x.hidden && !x.fused);
+        // 激光不能穿墙：隔着危墙 / 关着的门的敌人不算可选目标；一个都没有就什么都不干（不耗纳米）
+        const foes = fieldUnits().filter(x => !x.isPlayer && !x.dead && !x.hidden && !x.fused && !lineBlocked(u.zone, x.zone));
         const high = foes.filter(x => (x.statuses && x.statuses.high) || (x.highEnergy || 0) > 0);
         const pool = high.length ? high : foes;
         const tgt = pool.slice().sort((x, y) => totalHp(x) - totalHp(y))[0];
@@ -2012,9 +2013,9 @@ function turnEnd() {
           u.resources.nano -= 10;
           notes.push(`银翼·收发代理：无人机激光射向 ${tgt.name}（纳米 −10 → ${u.resources.nano}）。`);
           for (let i = 0; i < 2 && !tgt.dead; i++) {
-            hitOne2(u, tgt, { element: "energy", mult: 0.2, diceN: 1, diceS: 12, baseBreak: 0, atk: effectiveAtk(u, state.units), atkRange: "any", usePrep: false, flags: { action: true, lob: true } }, notes);
+            hitOne2(u, tgt, { element: "energy", mult: 0.2, diceN: 1, diceS: 12, baseBreak: 0, atk: effectiveAtk(u, state.units), atkRange: "any", usePrep: false, flags: { action: true } }, notes);
           }
-        }
+        } else notes.push("银翼·收发代理：没有打得到的敌人，无人机这回合什么都不干。");
       } else notes.push("银翼·收发代理：纳米不足 10，无人机这回合没有发射。");
     }
     if (u.kit === "ruby" && u.resources && u.resources.mecha) {

@@ -64,6 +64,15 @@ test("瑞比 收发代理：每回合 +10 纳米；机甲里改为打高能敌�
   c.turnEnd();
   assert.ok(foes[2].layers[0].current < hp, "激光打高能的那个");
   assert.equal(r.resources.nano, 100 - 10 - 20, "激光 10 + 机甲维持 20");
+  // 激光不能穿墙；没有可选目标就什么都不干、不耗纳米
+  S.units.filter(u => !u.isPlayer).forEach(f => { f.zone = 2; });
+  r.zone = 1;
+  S.gaps["1-2"] = Object.assign(c.emptyGap(), { type: "wall", hp: 50, maxHp: 50, level: 1 });
+  r.resources.nano = 100;
+  const hp2 = foes[2].layers[0].current;
+  c.turnEnd();
+  assert.equal(foes[2].layers[0].current, hp2, "隔墙打不到");
+  assert.equal(r.resources.nano, 80, "只扣机甲维持 20，无人机不耗纳米");
 });
 
 test("明特 机体修复：耗 20 纳米，回 50% 上限、+1 架势", () => {
