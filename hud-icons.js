@@ -28,6 +28,8 @@
     // 诺拉：刺入（针尖），画在目标卡上
     needle: () => svg(`<path d="M20 4 24 26h-8z" fill="#e9eef2" stroke="#9fb3c2" stroke-width="1"/><path d="M20 26v10" stroke="#9fb3c2" stroke-width="2"/><circle cx="20" cy="37" r="2.4" fill="#e8364f"/>`),
     // 瑞比：纳米能源格 / 银翼
+    // 瑞比：小型无人机（机身 + 四个旋翼；激光模式时机腹射出一道光）
+    drone: (on, laser) => svg(`<path d="M8 14h24" stroke="${on ? "#b9c7d4" : C("off")}" stroke-width="2"/><ellipse cx="8" cy="12" rx="6" ry="1.8" fill="${on ? C("cyan") : C("off")}"/><ellipse cx="32" cy="12" rx="6" ry="1.8" fill="${on ? C("cyan") : C("off")}"/><path d="M8 13v3M32 13v3" stroke="${on ? "#b9c7d4" : C("off")}" stroke-width="2"/><rect x="13" y="15" width="14" height="8" rx="3" fill="${on ? "#d9e7f2" : C("off")}"/><circle cx="20" cy="19" r="2.2" fill="${on ? (laser ? C("red") : C("cyan")) : "#3a332b"}"/>${on && laser ? `<path d="M20 23l-4 13" stroke="${C("red")}" stroke-width="2.4" stroke-linecap="round"/>` : on ? `<path d="M17 26l3 4 3-4" fill="none" stroke="${C("cyan")}" stroke-width="2"/>` : ""}`),
     wing: on => svg(`<path d="M20 30 4 14c6 0 11 2 16 8 5-6 10-8 16-8z" fill="${on ? "#d9e7f2" : C("off")}" stroke="${on ? C("cyan") : "none"}" stroke-width="1.2"/><path d="M8 17l12 9 12-9" stroke="${on ? C("cyan") : "#5a5146"}" stroke-width="1.4" fill="none"/>`),
     // 结人：咖啡豆 / 咖啡杯 / 牵挂
     bean: on => svg(`<ellipse cx="10" cy="13" rx="7" ry="10" transform="rotate(25 10 13)" fill="${on ? "#8a5a3b" : C("off")}"/><path d="M6 5c5 5 3 12 7 17" stroke="${on ? "#3b2416" : "#2a241d"}" stroke-width="1.8" fill="none"/>`, "0 0 20 26"),
@@ -248,7 +250,9 @@
         try { if (has("noraMood")) mood = root.noraMood(u) === "cruel" ? "cruel" : "gentle"; } catch (e) {}
         return { kit: "nora", mood, pierce, lock: plus(2) };
       }
-      case "ruby": return { kit: "ruby", nano: Math.max(0, Math.min(100, Number(r.nano) || 0)), mecha: !!r.mecha };
+      case "ruby": return { kit: "ruby", nano: Math.max(0, Math.min(100, Number(r.nano) || 0)), mecha: !!r.mecha,
+        // 收发代理（11 级）解锁后才显示无人机图标；放出来之前是暗的
+        showDrone: (Number(u.level) || 1) >= 11, drone: !!r.drone, boost: !!r.overdrive };
       case "yuito": {
         const bond = r.bondId ? units.find(x => x.id === r.bondId && alive(x)) : null;
         return { kit: "yuito", bean: Math.max(0, Number(r.bean) || 0), liquid: Math.max(0, Number(r.liquid) || 0), bond: !!bond, bondName: bond ? String(bond.name || "") : "" };
@@ -291,7 +295,9 @@
       (s.lock ? ind(svg(`<rect x="10" y="18" width="20" height="15" rx="2" fill="${C("brass")}"/><path d="M14 18v-5a6 6 0 0 1 12 0v5" stroke="${C("brass")}" stroke-width="3" fill="none"/>`), "不再随机") : "") +
       ind(I.needle(), s.pierce ? "刺入" + (s.pierce > 1 ? " ×" + s.pierce : "") : "没有刺入", s.pierce ? "" : "dim"),
     ruby: s => `<div class="ind">${seg(Math.round(s.nano / 10), 10, s.nano >= 20 ? C("cyan") : "#d9644f", 8, 26)}<span>纳米 <b class="num">${s.nano}</b>/100</span></div>` +
-      ind(I.wing(s.mecha), s.mecha ? "机甲模式 · 每回合 −20" : s.nano >= 20 ? "可进入机甲" : "能源不足", "big " + (s.mecha ? "glow-cyan" : "")),
+      ind(I.wing(s.mecha), s.mecha ? `机甲模式 · 每回合 −${s.boost ? 40 : 20}` : s.nano >= 20 ? "可进入机甲" : "能源不足", "big " + (s.mecha ? "glow-cyan" : "")) +
+      (s.showDrone ? ind(I.drone(s.drone, s.mecha), !s.drone ? "无人机未放出" : s.mecha ? `无人机 · 激光 ×${s.boost ? 3 : 2}` : "无人机 · 每回合 +10 纳米",
+        s.drone ? (s.mecha ? "glow-red" : "glow-cyan") : "dim") : ""),
     yuito: s => `<div class="ind"><div class="pips">${s.bean ? Array.from({ length: Math.min(8, s.bean) }, () => I.bean(true)).join("") : I.bean(false)}</div><span>咖啡豆 ${s.bean}</span></div>` +
       `<div class="ind"><div class="pips">${s.liquid ? Array.from({ length: Math.min(6, s.liquid) }, () => `<span class="cup">${I.cup(true)}</span>`).join("") : `<span class="cup">${I.cup(false)}</span>`}</div><span>咖啡液 ${s.liquid}</span></div>` +
       ind(I.bond(s.bond), s.bond ? "牵挂：" + esc(s.bondName) : "没有牵挂", s.bond ? "glow-pink" : ""),
