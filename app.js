@@ -2295,7 +2295,7 @@ function battleStat(u) {
   return s;
 }
 /* ===== 战斗评分（像鬼泣那样，鼓励打得华丽） =====
- * 分值都在 SCORE_RULES；评价的分数线 = 固定线 × 0.7 + 基准分 × 倍数 × 0.3
+ * 分值都在 SCORE_RULES；评价的分数线 = 固定线 × 0.65 + 基准分 × 倍数 × 0.35
  * （固定线：SCORE_GRADES 第一幕的线，之后每幕 +SCORE_ACT_STEP；基准分：scorePar，按这场的敌人算）。
  * 单局用本幕；跑团模式 / 战斗原型按敌人等级对应到幕（ROGUE_CONFIG.actLevels）。 */
 const SCORE_RULES = {
@@ -2340,7 +2340,7 @@ function bigHitInfo(level, dmg) {
 // 基准分倍数拉开：基准分 400 左右时，相邻评价的间距和固定线一样（C→B 500，其余各 250）
 const SCORE_GRADES = [["SSS", 2000, 2, 4.4], ["SS", 1750, 2, 3.8], ["S", 1500, 2, 3.2], ["A", 1250, 1.5, 2.6], ["B", 1000, 1.2, 2.0], ["C", 500, 1, 0.7], ["D", 0, 1, 0]];
 // 分数线里固定线和基准分各占多少
-const SCORE_LINE_MIX = { fixed: 0.7, par: 0.3 };
+const SCORE_LINE_MIX = { fixed: 0.65, par: 0.35 };
 const SCORE_ACT_STEP = 150;   // 之后每一幕，各条分数线（D 除外）+150
 const SCORE_PART_NAMES = { dmg: "伤害", heal: "治疗 / 护盾", brk: "击破", stagger: "打出失衡", block: "协助格挡成功", reduce: "减伤", blockSave: "格挡减免", overkill: "溢出伤害", kill: "击杀", bonus: "克制 / 大伤害加成", action: "行动", speed: "速杀奖励", flawless: "无伤奖励", ambush: "遭遇战加成", fatigue: "招式疲劳（扣分）" };
 /** 这个角色这回合用这个技能，算连续第几个回合（不改记录）。
@@ -2505,7 +2505,7 @@ function scoreAct() {
   return ranges.length + Math.ceil((lv - ranges[ranges.length - 1][1]) / 5);   // 额外幕：每 5 级一幕
 }
 /** 某一幕的分数线：[[评价, 分数线, 经验倍率, 固定线, 基准分倍数], …]，高到低。
- *  给了基准分：分数线 = 固定线 × 0.7 + 基准分 × 倍数 × 0.3，向上取整到 10 的倍数（好看）；不给（par 为 null）只看固定线 */
+ *  给了基准分：分数线 = 固定线 × 0.65 + 基准分 × 倍数 × 0.35，向上取整到 10 的倍数（好看）；不给（par 为 null）只看固定线 */
 function gradeLines(act, par) {
   const step = SCORE_ACT_STEP * Math.max(0, (Number(act) || 1) - 1);
   return SCORE_GRADES.map(([g, line, xp, k]) => {

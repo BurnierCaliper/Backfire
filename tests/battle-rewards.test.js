@@ -15,7 +15,7 @@ function field() {
   return { c, st, heroes };
 }
 
-/** 这场某个评价的分数线（固定线 × 0.7 + 基准分 × 倍数 × 0.3）；"D" 给 C 线 − 1 */
+/** 这场某个评价的分数线（固定线 × 0.65 + 基准分 × 倍数 × 0.35）；"D" 给 C 线 − 1 */
 const lineOf = (c, g) => { const L = c.battleGrade().lines; return g === "D" ? L.find(x => x[0] === "C")[1] - 1 : L.find(x => x[0] === g)[1]; };
 for (const [grade, bonus] of [["D", 0], ["C", 0], ["B", 20], ["A", 50], ["S", 101], ["SS", 101], ["SSS", 101]]) {
   test(`共享奖励：现有 ${grade} 评价与 101 点战斗经验的倍率、向下取整保持不变`, () => {
