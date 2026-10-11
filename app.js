@@ -12153,11 +12153,14 @@ function runSkillInner(id, optRun) {
       const redRun = runOf("red"), blueRun = runOf("blue");
       const pickRandom = (list) => list[Math.floor(Math.random() * list.length)];
       for (let k = 0; k < (redRun >= 3 ? 2 : redRun >= 2 ? 1 : 0); k++) {
-        const foes = fieldUnits().filter(u => !u.isPlayer && !u.dead && !u.hidden && !u.fused);
+        // 只在打得到的敌人里随机：距离 1 以内、不隔危墙 / 关着的门、没在躲藏（以前从全场随机，抽到射程外的就打空）
+        const foes = fieldUnits().filter(u => !u.isPlayer && !u.dead && !u.hidden && !u.fused && !(u.statuses && u.statuses.hide) &&
+          zoneDist(a.zone, u.zone, state.zoneMode) <= 1 && !lineBlocked(a.zone, u.zone));
         const f = pickRandom(foes);
-        if (!f) break;
+        if (!f) { if (k === 0) lines.push("洗牌：连续红弹，但附近没有打得到的敌人。"); break; }
         lines.push(`洗牌：连续红弹，火焰打向 ${f.name}。`);
-        hitOne(a, f, { element: "fire", mult: 1, baseBreak: 0, atk, atkRange: "any", flags: { action: true }, usePrep: false });
+        // 火焰是子弹炸开的，打同区飞行敌人不用多付附赠行动
+        hitOne(a, f, { element: "fire", mult: 1, baseBreak: 0, atk, atkRange: "any", flags: { action: true, flyFree: true }, usePrep: false });
       }
       for (let k = 0; k < (blueRun >= 3 ? 2 : blueRun >= 2 ? 1 : 0); k++) {
         const pals = fieldUnits().filter(u => u.isPlayer && !u.dead && !u.hidden && !u.fused);
