@@ -2774,6 +2774,23 @@
     rows.forEach(r => { r.share = team > 0 ? Math.round((Number(r.dmg) || 0) / team * 1000) / 10 : 0; });
     return rows;
   }
+  /** 把武器人那一行并进主人那一行（数据加在一起，名字写「龙哥＋小朋友」）；输出占比重新算 */
+  const STAT_SUM_KEYS = ["dmg", "brk", "staggers", "kills", "assists", "blocks", "blockOk", "avoided", "reduced", "taken", "heal", "score"];
+  function mergeStatRows(rows) {
+    const out = [];
+    rows.forEach(r => {
+      const host = r.sub ? out[out.length - 1] : null;
+      if (!host) { out.push(Object.assign({}, r, { sub: false, parts: [r.name] })); return; }
+      STAT_SUM_KEYS.forEach(k => { host[k] = (Number(host[k]) || 0) + (Number(r[k]) || 0); });
+      host.parts.push(r.name);
+    });
+    out.forEach(r => { r.name = r.parts.join("＋"); });
+    const team = out.reduce((a, r) => a + (Number(r.dmg) || 0), 0);
+    out.forEach(r => { r.share = team > 0 ? Math.round((Number(r.dmg) || 0) / team * 1000) / 10 : 0; });
+    return out;
+  }
+  G.statsMerge = false;
+  const shownStatRows = () => G.statsMerge ? mergeStatRows(statRows()) : statRows();
   /** 表格单元格：输出占比带 %，协助格挡写「成功/次数」 */
   function statCell(r, k) {
     if (k === "share") return (Number(r.share) || 0).toFixed(1) + "%";
@@ -2781,7 +2798,9 @@
     return String(Math.round(Number(r[k]) || 0));
   }
   function openStats() {
-    const rows = statRows();
+    const rows = shownStatRows();
+    const mb = $("g-stats-merge");
+    if (mb) { mb.textContent = G.statsMerge ? "分开武器人" : "合并武器人"; mb.classList.toggle("on", G.statsMerge); }
     const tot = {}; STAT_COLS.forEach(([k]) => { tot[k] = rows.reduce((a, r) => a + (Number(r[k]) || 0), 0); });
     tot.blockOk = rows.reduce((a, r) => a + (Number(r.blockOk) || 0), 0);
     tot.share = rows.length && tot.dmg > 0 ? 100 : 0;
@@ -2803,13 +2822,14 @@
     $("g-stats-sheet").classList.add("show");
   }
   function statsText() {
-    const rows = statRows();
+    const rows = shownStatRows();
     const gr = typeof battleGrade === "function" ? battleGrade() : null;
     return [`战场数据（第 ${state.turnNo || 1} 回合）` + (gr ? ` · 评价 ${gr.grade} · ${gr.score} 分` : ""), "角色\t" + STAT_COLS.map(([, n]) => n).join("\t")]
       .concat(rows.map(r => (r.sub ? "  " + r.name + "（武器人）" : r.name) + "\t" + STAT_COLS.map(([k]) => statCell(r, k)).join("\t")))
       .join("\n");
   }
   G.statRows = statRows;
+  G.mergeStatRows = mergeStatRows;
   G.statsText = statsText;
 
   function paintUndo() {
@@ -4246,6 +4266,7 @@
       G.statsFromResult = true;
       openStats();
     };
+    if ($("g-stats-merge")) $("g-stats-merge").onclick = () => { G.statsMerge = !G.statsMerge; openStats(); };   // 角色和自己的武器人并成一行看
     $("g-stats-close").onclick = () => {
       $("g-stats-sheet").classList.remove("show");
       if (G.statsFromResult && G.ended) $("g-result").classList.add("show");

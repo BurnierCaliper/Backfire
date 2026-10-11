@@ -1449,3 +1449,32 @@ test("手机竖屏：不用选目标的技能（拉响引擎）第一下只预�
   assert.equal(await apOf(page, xia), ap0 - 1, "第二下才放出去");
   assert.deepEqual(errors, []);
 });
+
+test("战场数据 / 整局数据：「合并武器人」把角色和自己的武器人并成一行看", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await newTrpg(page);
+  await startBattle(page);
+  const rows = [
+    { id: "a", name: "龙哥", sub: false, dmg: 30, brk: 2, kills: 1, blocks: 1, blockOk: 1, taken: 5, heal: 0, score: 10 },
+    { id: "w", name: "小朋友", sub: true, dmg: 10, brk: 3, kills: 0, blocks: 2, blockOk: 1, taken: 4, heal: 6, score: 4 },
+    { id: "b", name: "柯尔特", sub: false, dmg: 60, brk: 1, kills: 2, blocks: 0, blockOk: 0, taken: 9, heal: 0, score: 20 }];
+  const m = await page.evaluate(r => GAME.mergeStatRows(r), rows);
+  assert.equal(m.length, 2);
+  assert.equal(m[0].name, "龙哥＋小朋友");
+  assert.deepEqual([m[0].dmg, m[0].brk, m[0].blocks, m[0].blockOk, m[0].taken, m[0].heal, m[0].score], [40, 5, 3, 2, 9, 6, 14]);
+  assert.equal(m[0].share, 40);
+  assert.equal(m[1].share, 60);
+  const c = await page.evaluate(r => CareerLog.mergeRows(r.map(x => Object.assign({ battles: 3 }, x))), rows);
+  assert.equal(c[0].name, "龙哥＋小朋友");
+  assert.equal(c[0].battles, 3, "出场按主人算");
+  assert.equal(Math.round(c[0].takenShare), 50);
+  await page.click("#g-stats");
+  assert.equal((await page.textContent("#g-stats-merge")).trim(), "合并武器人");
+  await page.click("#g-stats-merge");
+  assert.equal((await page.textContent("#g-stats-merge")).trim(), "分开武器人");
+  assert.match(await page.textContent("#g-stats-body"), /瑞比/);
+  await page.click("#g-stats-merge");
+  await page.click("#g-stats-close");
+  assert.deepEqual(o.errors, []);
+});

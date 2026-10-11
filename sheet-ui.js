@@ -176,8 +176,24 @@
   const COLS = [["battles", "出场"], ["dmg", "造成伤害"], ["share", "输出占比"], ["brk", "击破"], ["staggers", "打出失衡"], ["kills", "击杀"],
     ["assists", "协助攻击"], ["blocks", "协助格挡"], ["avoided", "格挡规避伤害"], ["reduced", "减伤减免"], ["taken", "承受伤害"], ["takenShare", "承伤占比"], ["heal", "治疗 / 护盾"], ["score", "得分"]];
   const OUT = { win: "胜利", lose: "战败", retreat: "撤退" };
-  let box = null;
+  let box = null, merge = false;   // merge：角色和自己的武器人并成一行看
   const n = (v) => Math.round(Number(v) || 0);
+  const SUM_KEYS = ["dmg", "brk", "staggers", "kills", "assists", "blocks", "blockOk", "avoided", "reduced", "taken", "heal", "score"];
+  /** 武器人那一行加进主人那一行（出场次数按主人算），名字写「龙哥＋小朋友」；占比重新算 */
+  function mergeRows(rows) {
+    const out = [];
+    rows.forEach(r => {
+      const host = r.sub ? out[out.length - 1] : null;
+      if (!host) { out.push(Object.assign({}, r, { sub: false, parts: [r.name] })); return; }
+      SUM_KEYS.forEach(k => { host[k] = n(host[k]) + n(r[k]); });
+      host.parts.push(r.name);
+    });
+    out.forEach(r => { r.name = r.parts.join("＋"); });
+    const dmg = out.reduce((a, r) => a + n(r.dmg), 0), taken = out.reduce((a, r) => a + n(r.taken), 0);
+    out.forEach(r => { r.share = dmg > 0 ? n(r.dmg) / dmg * 100 : 0; r.takenShare = taken > 0 ? n(r.taken) / taken * 100 : 0; });
+    return out;
+  }
+  const shownRows = (c) => merge ? mergeRows(rowsOf(c)) : rowsOf(c);
   function cell(r, k) {
     if (k === "share" || k === "takenShare") return (Number(r[k]) || 0).toFixed(1) + "%";
     if (k === "blocks") return `${n(r.blockOk)}/${n(r.blocks)}`;
@@ -203,7 +219,7 @@
     const c = typeof careerData === "function" ? careerData() : { battles: [], kits: {} };
     const battles = c.battles || [];
     if (!battles.length) return `<p class="sheet-empty">这一局还没有打过仗。打完一场战斗后，这里会累计每个角色的输出和团队贡献。</p>`;
-    const rows = rowsOf(c);
+    const rows = shownRows(c);
     const tot = {};
     ["dmg", "brk", "staggers", "kills", "assists", "blocks", "blockOk", "avoided", "reduced", "taken", "heal", "score"].forEach(k => { tot[k] = rows.reduce((a, r) => a + n(r[k]), 0); });
     const cnt = (o) => battles.filter(b => b.outcome === o).length;
@@ -230,7 +246,7 @@
   }
   function text() {
     const c = typeof careerData === "function" ? careerData() : { battles: [], kits: {} };
-    const rows = rowsOf(c);
+    const rows = shownRows(c);
     return [`整局数据 · ${(c.battles || []).length} 场战斗`, "角色\t" + COLS.map(([, t]) => t).join("\t")]
       .concat(rows.map(r => (r.sub ? "  " + r.name + "（武器人）" : r.name) + "\t" + COLS.map(([k]) => (r.sub && k === "battles") ? "—" : cell(r, k)).join("\t"))).join("\n");
   }
@@ -241,15 +257,21 @@
       box.className = "sheet cl-sheet";
       box.id = "career-sheet";
       box.innerHTML = `<div class="sheet-card stats-card cl-card"><div class="sheet-head"><h3>整局数据</h3>
-        <button class="g-btn small" id="cl-copy">复制</button><button class="g-btn" id="cl-close">关闭</button></div><div id="cl-body"></div></div>`;
+        <button class="g-btn small" id="cl-merge" title="把角色和自己的武器人并成一行看">合并武器人</button><button class="g-btn small" id="cl-copy">复制</button><button class="g-btn" id="cl-close">关闭</button></div><div id="cl-body"></div></div>`;
       document.body.appendChild(box);
       box.addEventListener("click", (e) => {
         if (e.target === box || e.target.id === "cl-close") box.classList.remove("show");
+        if (e.target.id === "cl-merge") { merge = !merge; paint(); }
         if (e.target.id === "cl-copy") { try { navigator.clipboard.writeText(text()); e.target.textContent = "已复制"; } catch (err) { /* 浏览器不让复制就算了 */ } }
       });
     }
-    box.querySelector("#cl-body").innerHTML = html();
+    paint();
     box.classList.add("show");
+  }
+  function paint() {
+    box.querySelector("#cl-body").innerHTML = html();
+    const b = box.querySelector("#cl-merge");
+    b.textContent = merge ? "分开武器人" : "合并武器人"; b.classList.toggle("on", merge);
   }
   if (typeof document !== "undefined") {
     document.addEventListener("click", (e) => {
@@ -259,5 +281,5 @@
       open();
     }, true);
   }
-  root.CareerLog = { open, html, text };
+  root.CareerLog = { open, html, text, mergeRows, setMerge: (v) => { merge = !!v; } };
 })(window);

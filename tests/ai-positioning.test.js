@@ -66,3 +66,41 @@ test("榴弹落点：不选隔着危墙的区", () => {
   plan.thunk();
   assert.equal(e.resources.glZone, 3);
 });
+
+/* 沙暴风向：飞行单位顺风 +1 行动点、逆风 −1 行动点，飞行敌人会自己走出逆风、走进顺风 */
+function windSetup(ez, pz, opt) {
+  opt = opt || {};
+  const c = H.load();
+  c.BattleSim.setup({ party: ["kolt", "ras"], board: "square4", enemies: [{ id: "buoy", lv: 3, zone: ez }], seed: "AIWIND" });
+  c.startCombat();
+  const S = c.S.state;
+  S.combatPhase = "enemy";
+  S.weather = opt.weather || "sand"; S.sandDir = "E";   // 往右吹：左边一列（1、3 区）顺风，右边一列（2、4 区）逆风
+  const e = S.units.find(u => !u.isPlayer && u.kit === "buoy");
+  const ps = S.units.filter(u => u.isPlayer && !u.hidden);
+  e.zone = ez; ps.forEach(p => { p.zone = pz; });
+  e.ap = 1; e.bonus = 1; e.stunned = false;
+  return { c, S, e, ps };
+}
+test("飞行敌人：两条一样近的路，挑顺风那条（不刮沙暴时照旧按区号走）", () => {
+  const calm = windSetup(1, 4, { weather: "none" });
+  assert.match(calm.c.EnemyAI.plan(calm.e).meta.skillName, /移动到 2 区/);
+  const { c, e } = windSetup(1, 4);
+  assert.equal(c.sandWindLabel(c.sandWind(3, 4, "E")), "顺风");
+  assert.equal(c.sandWindLabel(c.sandWind(2, 4, "E")), "逆风");
+  assert.match(c.EnemyAI.plan(e).meta.skillName, /移动到 3 区/);
+});
+test("飞行敌人：这一步没事可做时从逆风区飞到顺风区；地面敌人不管风向", () => {
+  const { c, e, ps } = windSetup(2, 4);
+  ps.forEach(p => { p.dying = true; p.upOnShp = false; });   // 没有能打的人
+  const plan = c.EnemyAI.plan(e);
+  assert.ok(plan, "要动");
+  assert.match(plan.meta.skillName, /移动到 1 区/);
+  e.flying = false;
+  assert.equal(c.EnemyAI.plan(e), null);
+});
+test("飞行敌人：已经在顺风区、同区有人就直接打，不乱飞", () => {
+  const { c, e } = windSetup(1, 1);
+  const plan = c.EnemyAI.plan(e);
+  assert.ok(plan && !/移动/.test(plan.meta.skillName));
+});

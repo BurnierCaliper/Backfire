@@ -385,7 +385,7 @@ const EnemyAI = (function () {
   }
 
   /** 手册第十章的行为描述 → 一次行动。 */
-  function aiPlan(u) {
+  function aiPlanBase(u) {
     if (typeof mutinyTick === "function") mutinyTick();
     const prey = validPrey();
     if (!prey.length) return null;
@@ -446,7 +446,8 @@ const EnemyAI = (function () {
 
     const move = (dest) => ({
       thunk: () => { state.attackerId = u.id; doMove(u, dest); },
-      meta: { actorId: u.id, skillName: `移动到 ${dest} 区` }
+      meta: { actorId: u.id, skillName: `移动到 ${dest} 区` },
+      ai: { kind: "move", dest: Number(dest), target }
     });
     const attack = (sid, picks) => ({
       thunk: () => {
@@ -458,7 +459,8 @@ const EnemyAI = (function () {
         if (sid === "en_king_hold") u._aiHoldTurn = state.turnNo;
         if (u.tauntTo === target.id) u.tauntTo = null;
       },
-      meta: { actorId: u.id, targetId: target.id, skillName: enemyLabel(u, sid) }
+      meta: { actorId: u.id, targetId: target.id, skillName: enemyLabel(u, sid) },
+      ai: { kind: "attack", sid, target, picks }
     });
 
     // 强制目标（嘲讽 / 决一死战）时不后撤，直接想办法打到人
@@ -528,6 +530,53 @@ const EnemyAI = (function () {
       if (!pick.forced) return null;
     }
     return attack(use, aiPicks(u, use, target, prey));
+  }
+
+  /* ---------- 沙暴风向：飞行敌人会自己走出逆风、走进顺风 ----------
+   * 回合开始时按所在区的风向结算：飞行单位顺风 +1 行动点、逆风 −1 行动点。
+   * - 本来就要移动：一样能走到 / 一样近的几个区里挑风向好的；
+   * - 精英 / 首领（移动用附赠行动）要出手前：换到风向更好、照样打得到原目标的相邻区再打；
+   * - 这一步没事可做（打不到人）：往风向更好的相邻区挪（杂兵移动要花行动点，只在这时才为风向挪）。 */
+  function windOf(u, z) {
+    if (!u || !u.flying || state.weather !== "sand" || typeof sandWind !== "function") return 0;
+    if (state.fields && state.fields[z] && state.fields[z].isolate) return 0;
+    return sandWind(z, state.zoneMode, state.sandDir);
+  }
+  function windStep(u, keep) {
+    if (!canPayMove(u)) return null;
+    const here = windOf(u, u.zone);
+    const opts = walkableNeighbors(u).filter(z => windOf(u, z) > here && (!keep || keep(z)));
+    if (!opts.length) return null;
+    return opts.sort((a, b) => windOf(u, b) - windOf(u, a) || a - b)[0];
+  }
+  function windMove(u, dest) {
+    return { thunk: () => { state.attackerId = u.id; doMove(u, dest); }, meta: { actorId: u.id, skillName: `移动到 ${dest} 区（${windOf(u, dest) > 0 ? "顺风" : "躲开逆风"}）` }, ai: { kind: "wind", dest } };
+  }
+  function aiPlan(u) {
+    const plan = aiPlanBase(u);
+    if (!u || !u.flying || state.weather !== "sand" || u.noMove || u.self === "frost") return plan;
+    if (typeof touDuelVictim === "function" && touDuelVictim(u)) return plan;   // 决一死战中不移动
+    const info = plan && plan.ai;
+    if (!plan) {
+      const z = windStep(u);
+      return z != null ? windMove(u, z) : null;
+    }
+    if (!info) return plan;
+    if (info.kind === "move") {
+      // 换一个一样近（离目标的距离相同）、风向更好的区走
+      const want = info.target ? zdist(info.dest, info.target.zone) : null;
+      const alt = want == null ? null : walkableNeighbors(u).filter(z => z !== info.dest && windOf(u, z) > windOf(u, info.dest) && zdist(z, info.target.zone) === want)
+        .sort((a, b) => windOf(u, b) - windOf(u, a) || a - b)[0];
+      return alt != null ? windMove(u, alt) : plan;
+    }
+    if (info.kind === "attack") {
+      const rank = typeof enemyRankOf === "function" ? enemyRankOf(u) : "minion";
+      if (rank === "minion" || !info.target || info.target.kind) return plan;   // 杂兵移动要花行动点，不为风向放弃出手
+      const from = u.zone;
+      const z = windStep(u, (zz) => { u.zone = zz; try { return canAimSkill(u, info.sid, info.target); } finally { u.zone = from; } });
+      return z != null ? windMove(u, z) : plan;
+    }
+    return plan;
   }
 
   /** 做决定时用「回合 + 单位 + 第几步」派生的固定随机数。
