@@ -402,3 +402,23 @@ test("D3 display: 主机发来的状态行、资源、武器耐久、区域预�
   assert.match(await page.locator('#online-stage .g-zone[data-num="2"] .zthreat').innerText(), /火雨/);
   assert.deepEqual(o.errors, []);
 });
+
+test("D3 display: 行动结算后舞台不跳回最上面（玩家往下翻着看战场时）", async t => {
+  const o = await open(t, true); if (!o) return; const { page } = o;
+  await player(page);
+  await page.evaluate(() => {
+    for (let i = 0; i < 8; i++) fixture.view.state.units.push({ id: "e" + i, name: "敌" + i, isPlayer: false, zone: 2, level: 1, ap: 1, apMax: 1, bonus: 0, bonusMax: 0, def: 3, defMax: 3, layers: [{ type: "flesh", current: 9, max: 9 }], statuses: {}, resources: {} });
+    fixture.emit();
+  });
+  const before = await page.evaluate(() => { const s = document.getElementById("online-stage"); s.scrollTop = s.scrollHeight; return s.scrollTop; });
+  assert.ok(before > 200, "舞台比一屏高、已经往下翻了");
+  await page.evaluate(() => {
+    const p = JSON.parse(JSON.stringify(fixture.view.packet)); p.state = JSON.parse(JSON.stringify(fixture.view.state)); p.screen = "battle";
+    p.state.turnNo = 2; p.state.units[2].layers[0].current = 20; p.publicLogs = [...p.publicLogs, { text: "红玉 · 普通攻击" }]; p.view.currentUnitId = "b";
+    return fixture.receive(p);
+  });
+  await page.waitForTimeout(300);
+  const after = await page.evaluate(() => document.getElementById("online-stage").scrollTop);
+  assert.ok(after > before - 200, `滚动位置保留（${before} → ${after}）`);
+  assert.deepEqual(o.errors, []);
+});

@@ -564,6 +564,9 @@
     }
     /** 舞台：文字部分照旧拼 HTML；战斗画面是常驻的一块（单位卡有动画，不能每次重建），每次画完再挂回占位处 */
     function paintStage() {
+      // 重画文字部分时战场那一块会先被拿掉，舞台一下子变矮、滚动位置被压到顶上；等战场挂回去再把滚动位置放回原处
+      // （以前玩家每行动一次，画面就跳回最上面，要再往下翻）
+      const top = stage.scrollTop;
       html(stage, `${notice || view.notice || view.packet?.systemNotice ? `<p class="ol-notice" role="status">${esc(notice || view.notice || view.packet?.systemNotice)}</p>` : ""}${stageMarkup()}`, "stage");
       const slot = stage.querySelector(".ol-battle-slot");
       if (!slot) return;
@@ -571,6 +574,7 @@
       if (!b) return;
       if (b.el.parentElement !== slot) slot.appendChild(b.el);
       b.update(displayState || view.state || {}, battleUi());
+      if (stage.scrollTop !== top) stage.scrollTop = top;
     }
     const myUnits = () => (hs().units || []).filter(u => u.owner === own()).map(u => u.id);
     const isMyTurn = () => view.screen === "battle" && hs().phase === "acting" && myUnits().includes(hs().currentUnitId);
