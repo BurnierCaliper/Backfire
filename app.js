@@ -4524,6 +4524,13 @@ function lineBlocked(aZone, bZone) {
   return false;
 }
 
+/** 破釜沉舟看谁身上的状态：玩家唤出的武器人跟着持有者（攻击双倍、受伤翻倍都一样） */
+function gambitRes(u) {
+  if (!u) return {};
+  const owner = u.weaponOf && typeof weaponOwnerUnit === "function" ? weaponOwnerUnit(u) : null;
+  return (owner ? owner.resources : u.resources) || {};
+}
+
 function makeDealFlags(extra) {
   const flags = Object.assign({ action: true, block: "none" }, extra || {});
   return flags;
@@ -7059,8 +7066,8 @@ function dealTo(attacker, target, opt) {
     flags.pierce = true;
     attacker.resources.pierceNext = false;
   }
-  if (attacker.resources && attacker.resources.gambitStrike) flags.doubleDeal = true;
-  if (target && target.resources && target.resources.gambitWound) flags.doubleTake = true;
+  if (gambitRes(attacker).gambitStrike) flags.doubleDeal = true;
+  if (gambitRes(target).gambitWound) flags.doubleTake = true;
   if (target && target.resources && target.resources.gritTurn) flags.dr50 = true;
   if (target && target.resources && target.resources.divertGuard) flags.dr25 = true;   // 扭矩「转移注意」自保
   if (target && target.resources && target.resources.standTurn) flags.immune = true;
@@ -12113,7 +12120,7 @@ function runSkillInner(id, optRun) {
       const light = ras && ras.resources ? (ras.resources.light || 0) : 0;
       if (light <= 0) lines.push("没有光能。");
       else {
-        visibleEnemies(a.zone).forEach(u => hitOne(a, u, { element: "energy", mult: 0, flat: Math.floor(light / 2), baseBreak: 1, atk: 0, flags: { action: true, aoe: true } }));
+        visibleEnemies(a.zone).forEach(u => hitOne(a, u, { element: "electric", mult: 0, flat: Math.floor(light / 2), baseBreak: 1, atk: 0, flags: { action: true, aoe: true } }));
         ras.resources.light = 0;
         lines.push(`爆闪释放光能 ${light}。`);
       }

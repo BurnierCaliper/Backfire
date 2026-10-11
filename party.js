@@ -986,7 +986,7 @@ function skillList(unit) {
   if (unit.kit === "edc") {
     add({ id: "edc_drain", name: "引流", hint: "需与拉斯缪尔同区 · 累积能量全转光能 · 不稳+25%" });
     add({ id: "edc_shock", name: "电流冲击", hint: "距离1 · 1atk 电 +1击破 · 有光能则再打等量电击" });
-    add({ id: "edc_flash", name: "爆闪", hint: "释放全部光能 · 同区每名敌人 光能/2 能量 +1击破", minLv: 2 });
+    add({ id: "edc_flash", name: "爆闪", hint: "释放全部光能 · 同区每名敌人 光能/2 电击 +1击破", minLv: 2 });
     add({ id: "edc_siphon", name: "汲取", hint: "拉斯缪尔每回合结束自动把 20% 累积能量转光能 · 变回武器 · 生效中再用：不耗行动点并结束汲取", minLv: 4 });
     add({ id: "edc_return", name: "收回为武器", hint: "需与拉斯缪尔同区" });
   }
