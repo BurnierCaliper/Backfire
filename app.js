@@ -2295,7 +2295,8 @@ function battleStat(u) {
   return s;
 }
 /* ===== 战斗评分（像鬼泣那样，鼓励打得华丽） =====
- * 分值都在 SCORE_RULES；评价按幕的固定分数线分段（SCORE_GRADES：第一幕的线，之后每幕 +SCORE_ACT_STEP）。
+ * 分值都在 SCORE_RULES；评价的分数线 = 固定线 × 0.7 + 基准分 × 倍数 × 0.3
+ * （固定线：SCORE_GRADES 第一幕的线，之后每幕 +SCORE_ACT_STEP；基准分：scorePar，按这场的敌人算）。
  * 单局用本幕；跑团模式 / 战斗原型按敌人等级对应到幕（ROGUE_CONFIG.actLevels）。 */
 const SCORE_RULES = {
   dmg: 1,          // 每点伤害（含连带伤害）
@@ -2334,10 +2335,11 @@ function bigHitInfo(level, dmg) {
   if (dmg < th) return { big: false, ratio: 0, th };
   return { big: true, ratio: Math.min(1, (dmg - th) / th), th };
 }
-// [评价, 至少几倍基准分, 战斗经验倍率]
-// [评价, 第一幕的分数线, 战斗经验倍率]。C 线以下是 D（经验不加成）。
-// 第一幕 C 500 / B 1000 / A 1250 / S 1500 / SS 1750 / SSS 2000。SS、SSS 只是更高的评价，经验倍率和 S 一样
-const SCORE_GRADES = [["SSS", 2000, 2], ["SS", 1750, 2], ["S", 1500, 2], ["A", 1250, 1.5], ["B", 1000, 1.2], ["C", 500, 1], ["D", 0, 1]];
+// [评价, 第一幕的固定线, 战斗经验倍率, 基准分倍数]。C 线以下是 D（经验不加成）。
+// 第一幕固定线 C 500 / B 1000 / A 1250 / S 1500 / SS 1750 / SSS 2000。SS、SSS 只是更高的评价，经验倍率和 S 一样
+const SCORE_GRADES = [["SSS", 2000, 2, 2.8], ["SS", 1750, 2, 2.4], ["S", 1500, 2, 2.0], ["A", 1250, 1.5, 1.6], ["B", 1000, 1.2, 1.3], ["C", 500, 1, 0.7], ["D", 0, 1, 0]];
+// 分数线里固定线和基准分各占多少
+const SCORE_LINE_MIX = { fixed: 0.7, par: 0.3 };
 const SCORE_ACT_STEP = 150;   // 之后每一幕，各条分数线（D 除外）+150
 const SCORE_PART_NAMES = { dmg: "伤害", heal: "治疗 / 护盾", brk: "击破", stagger: "打出失衡", block: "协助格挡成功", reduce: "减伤", blockSave: "格挡减免", overkill: "溢出伤害", kill: "击杀", bonus: "克制 / 大伤害加成", action: "行动", speed: "速杀奖励", flawless: "无伤奖励", ambush: "遭遇战加成", fatigue: "招式疲劳（扣分）" };
 /** 这个角色这回合用这个技能，算连续第几个回合（不改记录）。
@@ -2479,16 +2481,15 @@ function resetBattleRecords() {
   state.battleGains = { xp: 0, kuizhi: 0 };
   state.lastBrokenLayer = null;   // 废物利用：每场重新记（上一场打碎的层不能拿来用）
 }
-/** 这场的基准分：把出现过的每个敌人（含中途召唤的）「打空血、打空一次架势、打进一次失衡、击杀」的分加起来，
- *  按第一次见到时的数值算。这样架势高的敌人、血厚的敌人都在同一把尺子上。 */
+/** 这场的基准分：把出现过的每个敌人（含中途召唤的）「打空血、击杀」的分加起来，按第一次见到时的数值算。
+ *  击破、失衡不算进来：那是玩家打出来的漂亮操作，不当成默认该拿的分。 */
 function scorePar() {
   state.scoreSeen = state.scoreSeen || {};
   (state.units || []).forEach(u => {
     if (u.isPlayer || u.kit === "ironwall" || state.scoreSeen[u.id] != null) return;
     const hp = (u.layers || []).reduce((a, l) => a + (Number(l.max) || 0), 0);
     const rank = typeof enemyRankOf === "function" ? enemyRankOf(u) : "minion";
-    const posture = Math.max(0, Number(u.defMax) || 0);
-    state.scoreSeen[u.id] = hp * SCORE_RULES.dmg + posture * SCORE_RULES.brk + (posture > 0 ? SCORE_RULES.stagger : 0) + (SCORE_RULES.kill[rank] || 0);
+    state.scoreSeen[u.id] = hp * SCORE_RULES.dmg + (SCORE_RULES.kill[rank] || 0);
   });
   return Object.values(state.scoreSeen).reduce((a, n) => a + n, 0);
 }
@@ -2502,19 +2503,25 @@ function scoreAct() {
   for (let i = 0; i < ranges.length; i++) if (lv <= ranges[i][1]) return i + 1;
   return ranges.length + Math.ceil((lv - ranges[ranges.length - 1][1]) / 5);   // 额外幕：每 5 级一幕
 }
-/** 某一幕的分数线：[[评价, 分数线, 经验倍率], …]，高到低 */
-function gradeLines(act) {
+/** 某一幕的分数线：[[评价, 分数线, 经验倍率, 固定线, 基准分倍数], …]，高到低。
+ *  给了基准分：分数线 = 固定线 × 0.7 + 基准分 × 倍数 × 0.3（向下取整）；不给（par 为 null）只看固定线 */
+function gradeLines(act, par) {
   const step = SCORE_ACT_STEP * Math.max(0, (Number(act) || 1) - 1);
-  return SCORE_GRADES.map(([g, line, xp]) => [g, line > 0 ? line + step : 0, xp]);
+  return SCORE_GRADES.map(([g, line, xp, k]) => {
+    const fixed = line > 0 ? line + step : 0;
+    const v = fixed <= 0 ? 0 : par == null ? fixed : Math.floor(fixed * SCORE_LINE_MIX.fixed + (Number(par) || 0) * k * SCORE_LINE_MIX.par + 1e-6);
+    return [g, v, xp, fixed, k];
+  });
 }
 function battleGrade() {
   const score = state.battleScore ? state.battleScore.total : 0;
   const act = scoreAct();
-  const lines = gradeLines(act);
+  const par = scorePar();
+  const lines = gradeLines(act, par);
   const g = lines.find(x => score >= x[1]) || lines[lines.length - 1];
   const i = lines.indexOf(g);
   const next = i > 0 ? lines[i - 1] : null;
-  return { grade: g[0], xpMult: g[2], score, act, lines, next: next ? { grade: next[0], need: next[1] } : null,
+  return { grade: g[0], xpMult: g[2], score, act, par, lines, next: next ? { grade: next[0], need: next[1] } : null,
     floor: g[1], parts: Object.assign({}, (state.battleScore || {}).parts) };
 }
 

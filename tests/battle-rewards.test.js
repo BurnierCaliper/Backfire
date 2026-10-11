@@ -15,10 +15,13 @@ function field() {
   return { c, st, heroes };
 }
 
-for (const [score, grade, bonus] of [[499, "D", 0], [500, "C", 0], [1000, "B", 20], [1250, "A", 50], [1500, "S", 101], [1750, "SS", 101], [2000, "SSS", 101]]) {
+/** 这场某个评价的分数线（固定线 × 0.7 + 基准分 × 倍数 × 0.3）；"D" 给 C 线 − 1 */
+const lineOf = (c, g) => { const L = c.battleGrade().lines; return g === "D" ? L.find(x => x[0] === "C")[1] - 1 : L.find(x => x[0] === g)[1]; };
+for (const [grade, bonus] of [["D", 0], ["C", 0], ["B", 20], ["A", 50], ["S", 101], ["SS", 101], ["SSS", 101]]) {
   test(`共享奖励：现有 ${grade} 评价与 101 点战斗经验的倍率、向下取整保持不变`, () => {
     const { c, st, heroes } = field();
     c.grantXpToPlayers(101);
+    const score = lineOf(c, grade);
     st.battleScore.total = score;
     const reward = c.settleBattleRewards("win");
     assert.equal(reward.grade.grade, grade);
@@ -71,7 +74,8 @@ for (const outcome of ["lose", "retreat"]) {
   test(`共享奖励：${outcome} 不发胜利加分或评级经验，不能重复改判来领取`, () => {
     const { c, st, heroes } = field();
     c.grantXpToPlayers(101);
-    st.battleScore.total = 1750;
+    const ss = lineOf(c, "SS");
+    st.battleScore.total = ss;
     st.battleScore.hurt = false;
     st.turnNo = 1;
     const reward = c.settleBattleRewards(outcome);
@@ -79,7 +83,7 @@ for (const outcome of ["lose", "retreat"]) {
     assert.equal(reward.finishBonus, null);
     assert.equal(reward.xpBonus, 0);
     assert.equal(c.settleBattleRewards("win").outcome, outcome);
-    assert.equal(st.battleScore.total, 1750);
+    assert.equal(st.battleScore.total, ss);
     assert.equal(st.battleGains.xp, 101);
     assert.ok(heroes.every(u => u.xp === 101));
   });
