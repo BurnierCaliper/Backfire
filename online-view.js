@@ -79,6 +79,15 @@
       return dto;
     });
     if (mech.length) out.mechanics = mech;
+    // Helumica 的聚焦：哪一层、属性序列、走到第几步（公开信息，本地卡片上也写着）
+    const focusEls = ["fire", "acid", "electric", "ice", "energy", "physical", "harmonic"];
+    const focuses = arr(get(unit, "focuses")).slice(0, 5).filter(obj).map(f => {
+      const dto = {}; enumField(f, dto, "layerType", layerTypes);
+      dto.seq = arr(get(f, "seq")).slice(0, 12).filter(e => focusEls.includes(e));
+      const step = number(get(f, "step")); dto.step = step === undefined ? 0 : Math.max(0, Math.min(dto.seq.length, step));
+      return dto;
+    }).filter(f => f.layerType && f.seq.length);
+    if (focuses.length) out.focuses = focuses;
     // 状态图标（hud-icons.js）：自我效果、挂着的攻击效果、刺入 / 牵挂标记、角色仪表的数据
     enumField(unit, out, "self", ["burn", "frost", "splash", "conductor", "anchor", "store", "doppler"]);
     const sbs = number(get(unit, "selfBurnStacks")); if (sbs !== undefined) out.selfBurnStacks = sbs;

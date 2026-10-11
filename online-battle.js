@@ -11,6 +11,13 @@
   const ATK_NAME = { combust: "爆燃", icebreak: "破冰", bolt: "雷击", etch: "蚀刻", backflow: "倒流", inertia: "惯性", diffract: "衍射" };
   const DEVICE = ["button", "lever"];
 
+  const ELE_NAME = { fire: "火", acid: "酸", electric: "电", ice: "冰", energy: "能量", physical: "物理", harmonic: "谐波" };
+  const LAYER_NAME = { flesh: "肉体", armor: "装甲", shield: "护盾", sand: "沙尘", spirit: "星灵" };
+  /** 聚焦：和本地卡片一样写「聚焦装甲 火→[冰]→电」（方括号是下一步要的属性） */
+  function focusText(u) {
+    return (u.focuses || []).map(f => "聚焦" + (LAYER_NAME[f.layerType] || f.layerType) + " " +
+      (f.seq || []).map((e, i) => i === f.step ? "[" + (ELE_NAME[e] || e) + "]" : (ELE_NAME[e] || e)).join("→")).join(" · ");
+  }
   /** 投影过的单位 → 单位卡要的快照（字段和 game.js · snapUnit 一样；主机不发的就留空） */
   function snapUnit(u) {
     const layers = (u.layers || []).map(l => ({ type: l.type || "flesh", cur: Math.max(0, Math.round(Number(l.current) || 0)), max: Math.max(0, Number(l.max) || 0) }));
@@ -22,7 +29,7 @@
       flying: !!u.flying, highEnergy: Number(u.highEnergy) || 0,
       hung: ((u.resources || {}).nextAtkFx || []).map(k => ATK_NAME[k] || k),
       ap: Number(u.ap) || 0, apMax: Number(u.apMax) || 0, bonus: Number(u.bonus) || 0, bonusMax: Number(u.bonusMax) || 0,
-      status: "", res: "", atk: Math.round(Number(u.atk) || 0), weapon: !!u.weaponOf, dur: null, marks: [], casts: [],
+      status: focusText(u), res: "", atk: Math.round(Number(u.atk) || 0), weapon: !!u.weaponOf, dur: null, marks: [], casts: [],
       overkill: 0, killBig: false,
       badges: root.HudIcons ? HudIcons.unitBadges(u, u.marks) : []
     };

@@ -291,3 +291,12 @@ test("状态图标：自我效果、挂着的攻击效果、角色仪表数据�
   ]);
   assert.deepEqual(tape.map(e => e.kind + ":" + (e.fx || e.text || "")), ["proc:burn", "fxword:猛击"]);
 });
+
+test("聚焦：层、属性序列、当前步数发给玩家（只认白名单的层和属性）", () => {
+  const u = unit();
+  u.focuses = [{ layerType: "armor", seq: ["fire", "SECRET-EL", "ice", "electric"], step: 1 }, { layerType: "SECRET", seq: ["fire"], step: 0 }];
+  const out = V.projectUnit(u);
+  assert.deepEqual(JSON.parse(JSON.stringify(out.focuses)), [{ layerType: "armor", seq: ["fire", "ice", "electric"], step: 1 }]);
+  assert.doesNotMatch(JSON.stringify(out), /SECRET/);
+  assert.equal(V.projectUnit(unit()).focuses, undefined);
+});

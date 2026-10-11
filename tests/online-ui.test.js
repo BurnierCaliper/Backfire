@@ -376,3 +376,11 @@ test("跑团地图：玩家也能打开地图，看到主持人标的队伍位�
   assert.doesNotMatch(text, /把队伍移到这里/);
   assert.deepEqual(o.errors, []);
 });
+
+test("D3 display: 敌人身上的聚焦在玩家画面上写出来（和本地卡片一样）", async t => {
+  const o = await open(t); if (!o) return; const { page } = o;
+  await player(page);
+  await page.evaluate(() => { fixture.view.state.units[2].focuses = [{ layerType: "flesh", seq: ["fire", "ice", "electric"], step: 1 }]; fixture.emit(); });
+  assert.match(await page.locator('#online-stage [data-unit-id="enemy"]').first().innerText(), /聚焦肉体 火→\[冰\]→电/);
+  assert.deepEqual(o.errors, []);
+});
