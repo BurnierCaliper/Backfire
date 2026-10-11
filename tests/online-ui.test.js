@@ -384,3 +384,21 @@ test("D3 display: 敌人身上的聚焦在玩家画面上写出来（和本地�
   assert.match(await page.locator('#online-stage [data-unit-id="enemy"]').first().innerText(), /聚焦肉体 火→\[冰\]→电/);
   assert.deepEqual(o.errors, []);
 });
+
+test("D3 display: 主机发来的状态行、资源、武器耐久、区域预警都画在玩家的战场上", async t => {
+  const o = await open(t); if (!o) return; const { page } = o;
+  await player(page);
+  await page.evaluate(() => {
+    const st = fixture.view.state;
+    st.units[2].display = { status: "掩护(红玉) · 无法移动 · 嘲讽", atk: 12 };
+    st.units[0].display = { status: "扳机解锁", res: "纳米 40/100 · 机甲中", dur: { cur: 3, max: 5, name: "银翼" } };
+    st.zoneView = { 2: { threats: [{ label: "火雨 · 下回合", from: "敌人", ready: false }] } };
+    fixture.emit();
+  });
+  const enemy = await page.locator('#online-stage [data-unit-id="enemy"]').first().innerText();
+  assert.match(enemy, /掩护/); assert.match(enemy, /无法移动/); assert.match(enemy, /ATK 12/);
+  const mine = await page.locator('#online-stage [data-unit-id="a"]').first().innerText();
+  assert.match(mine, /纳米 40\/100/);
+  assert.match(await page.locator('#online-stage .g-zone[data-num="2"] .zthreat').innerText(), /火雨/);
+  assert.deepEqual(o.errors, []);
+});

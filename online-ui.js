@@ -123,7 +123,7 @@
       if (TIP_SELF[u.self]) tokens.push(TIP_SELF[u.self] + (u.self === "burn" && Number(u.selfBurnStacks) > 1 ? "×" + u.selfBurnStacks : ""));
       ((u.resources || {}).nextAtkFx || []).forEach(k => { if (TIP_ATK[k]) tokens.push(TIP_ATK[k]); });
       (u.marks || []).forEach(m => tokens.push(m === "needle" ? "刺入" : m === "bond" ? "牵挂" : ""));
-      tokens.push(...focusTokens(u));
+      statusTokens(u).forEach(t => { if (!tokens.includes(t)) tokens.push(t); });
       const owner = u.weaponOf ? (data.units || []).find(x => x.kit === u.weaponOf && !x.weaponOf) : null;
       const kind = u.isPlayer ? (u.weaponOf || u.weaponUnit ? "weapon" : "hero") : "enemy";
       return T.html({ kind, kit: u.kit, ownerName: owner && owner.name }, tokens.filter(Boolean), { name: u.name || u.id, sub: `Lv${u.level || 1} · ${u.zone} 区` });
@@ -286,6 +286,11 @@
       return (u.focuses || []).map(f => "聚焦" + (layer[f.layerType] || f.layerType) + " " + (f.seq || []).map((e, i) => i === f.step ? "[" + (ele[e] || e) + "]" : (ele[e] || e)).join("→"));
     }
     /** 高能值：淡青绿色的液体灌进一条总血条，液面越过血量就会自爆 */
+    /** 主机算好的状态行（和本地卡片一样）；旧主机没发就只拼聚焦 */
+    function statusTokens(u) {
+      const st = u.display && u.display.status;
+      return typeof st === "string" && st ? st.split(" · ").filter(Boolean) : focusTokens(u);
+    }
     function highBar(u) {
       const he = Number(u.highEnergy) || 0; if (he <= 0) return "";
       const max = (u.layers || []).reduce((a, l) => a + (Number(l.max) || 0), 0) || 1, cur = (u.layers || []).reduce((a, l) => a + Math.max(0, Number(l.current) || 0), 0);
@@ -298,7 +303,7 @@
       // 状态 / 效果画成图标（hud-icons.js）；没有图标模块时还是写字
       const HI = global.HudIcons, badges = HI ? HI.unitBadges(u, u.marks) : [];
       if (HI) conditions.length = 0;
-      if (u.dying) conditions.unshift("倒地"); if (u.dead) conditions.unshift("阵亡"); if (u.stunned) conditions.unshift("失衡"); if (u.flying) conditions.push("飞行"); conditions.push(...focusTokens(u));
+      if (u.dying) conditions.unshift("倒地"); if (u.dead) conditions.unshift("阵亡"); if (u.stunned) conditions.unshift("失衡"); if (u.flying) conditions.push("飞行"); conditions.push(...statusTokens(u).filter(t => !(HI && HI.covered(t)) && !conditions.includes(t)));
       const gauge = HI && u.hud && view.screen !== "exploration" ? HI.gauge(u.hud) : "";
       const available = view.screen === "battle" && u.isPlayer && owner === own() && hs().currentUnitId === u.id && hs().phase === "acting";
       return `<article class="ol-unit${u.isPlayer ? " ol-ally" : " ol-enemy"}${selectedActor === u.id ? " ol-selected" : ""}" data-unit-id="${esc(u.id)}"><header><h3>${esc(u.name || u.id)}</h3><small>Lv${esc(u.level || 1)}</small></header>${owner ? `<small>${esc(playerName(owner))}${u.weaponOf ? " · 武器人" : ""}</small>` : ""}${u.isPlayer && !u.weaponOf ? `<p class="ol-xp">经验 ${esc(u.xp ?? 0)}${typeof xpToNext === "function" && xpToNext(u.level || 1) ? ` / ${esc(xpToNext(u.level || 1))}` : ""}</p>` : ""}${view.screen === "exploration" && u.isPlayer && !u.weaponOf && owner === own() ? attrMarkup(u) : ""}<div class="ol-layers">${(u.layers || []).map(l => `<div class="ol-layer"><span>${esc(labels[l.type] || "生命")}</span><meter min="0" max="${esc(Math.max(1, Number(l.max) || 1))}" value="${esc(Math.max(0, Number(l.current) || 0))}" aria-label="${esc(labels[l.type] || "生命")}"></meter><b>${esc(l.current ?? 0)} / ${esc(l.max ?? 0)}</b></div>`).join("")}${highBar(u)}</div><div class="ol-points"><span>行动 ${esc(u.ap ?? 0)} / ${esc(u.apMax ?? 0)}</span><span>附赠 ${esc(u.bonus ?? 0)} / ${esc(u.bonusMax ?? 0)}</span>${u.def != null ? `<span>架势 ${esc(u.def)} / ${esc(u.defMax ?? u.def)}</span>` : ""}</div>${gauge ? `<div class="hi-gauge ol-gauge" aria-label="${esc(u.name || "")}的角色仪表">${gauge}</div>` : resources.length ? `<p class="ol-muted">${esc(resources.join(" · "))}</p>` : ""}${badges.length ? `<div class="hi-badges ol-badges">${badges.map(b => HI.badge(b.key, b.stack)).join("")}</div>` : ""}${conditions.length ? `<p class="ol-conditions">${esc(conditions.join(" · "))}</p>` : ""}${available ? button("选择行动", "actor", `data-actor="${esc(u.id)}"`, disabled(), true) : ""}<span class="ol-popup" aria-live="polite"></span></article>`;
