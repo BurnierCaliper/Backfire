@@ -71,3 +71,27 @@ test("不稳超导：已经处于导体状态时不能再放", () => {
   ras.self = "conductor";
   assert.match(c.skillRequirementError(ras, "ras_super"), /导体/);
 });
+
+test("高能状态的敌人在攻击行动中被打死：行动结束后照样高能自爆（余波、光能回收）", () => {
+  const c = H.load();
+  c.BattleSim.setup({ party: ["ras", "kolt"], enemies: [{ id: "thug_hammer", lv: 1, zone: 2 }, { id: "thug_hammer", lv: 1, zone: 2 }], seed: "RHK" });
+  c.startCombat();
+  const st = c.S.state;
+  const ras = c.findKit("ras", st.units);
+  const [foe, mate] = st.units.filter(u => !u.isPlayer);
+  ras.zone = 1; foe.zone = 2; mate.zone = 2; ras.ap = 3;
+  foe.layers = [{ type: "flesh", current: 1, max: 20 }];   // 第一段就打死
+  foe.statuses = Object.assign({}, foe.statuses, { high: true });
+  foe.highEnergy = 30;
+  mate.layers = [{ type: "flesh", current: 100, max: 100 }];
+  const lightBefore = Number(ras.resources.light) || 0;
+  const pops = [];
+  c.spawnPopup = (u, spec) => { if (u && u.id === foe.id) pops.push(spec.kind); };
+  st.attackerId = ras.id; st.targetId = foe.id;
+  c.runSkill("ras_aa");
+  assert.ok(pops.includes("highboom"), "打死后照样自爆：" + pops.join(","));
+  assert.equal(foe.dead, true);
+  assert.equal(foe.highEnergy, 0);
+  assert.ok((Number(ras.resources.light) || 0) >= lightBefore + 30, "拉斯缪尔回收光能");
+  assert.ok(c.totalHp(mate) < 100, "余波打到同区的同阵营敌人");
+});

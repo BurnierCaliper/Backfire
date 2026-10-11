@@ -517,13 +517,17 @@ function highBoomValue(unit) {
 
 /** 高能自爆在一次完整的攻击行动之后才判定：行动中（runSkill 里）只记下要判的单位，
  *  让多段攻击全部打完、高能值继续累积，行动结束时再统一判（flushHighBooms） */
-function checkHighBoom(unit) {
-  if (!unit || unit._highBooming || unit.dead || unit.hidden) return;
+function checkHighBoom(unit, opt) {
+  if (!unit || unit._highBooming) return;
+  // 行动中被打死的也要记下：等行动结束带着高能照样自爆（不能因为已经判死就漏掉）
   if ((Number(state._highDefer) || 0) > 0) {
+    if (unit.hidden && !unit.dead) return;
     state._highPending = state._highPending || [];
     if (!state._highPending.includes(unit.id)) state._highPending.push(unit.id);
     return;
   }
+  if (unit.hidden) return;
+  if (unit.dead && !(opt && opt.diedThisAction && !unit.isPlayer)) return;
   // 微光：蓄能状态下，高能值要在连续两个回合结束时都超过血量才自爆——平时不判，回合结束时判（glowStoreTurnEnd）
   if (unit.self === "store" && currentWeatherFor(unit) === "glow") return;
   const hp = currentLifeForHigh(unit);
@@ -535,7 +539,8 @@ function checkHighBoom(unit) {
 function flushHighBooms() {
   const ids = state._highPending || [];
   state._highPending = [];
-  ids.forEach(id => { const u = unitById(id); if (u) checkHighBoom(u); });
+  // 这次行动里被打死的敌人（已经判死、清场）只要身上还有高能，照样自爆
+  ids.forEach(id => { const u = unitById(id); if (u) checkHighBoom(u, { diedThisAction: true }); });
 }
 /** 回合结束：微光 + 蓄能的单位，高能值超过血量记一次；连续两个回合结束都超过才自爆，中间有一次没超过就重新数 */
 function glowStoreTurnEnd(notes) {
