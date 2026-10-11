@@ -2544,18 +2544,18 @@ function settleBattleRewards(outcome) {
       state.battleGains.xp += xpBonus;
     }
   }
-  // 跑团模式：打赢的每场战斗，每个角色额外获得「等级 × 20 / 人数」经验（向下取整；人数 = 这场上场的角色数）
+  // 跑团模式：打赢的每场战斗，每个角色额外获得「队伍最高等级 × 20 / 人数」经验（向下取整；人数 = 这场上场的角色数）
   const trpgXp = [];
   if (outcome === "win" && typeof TRPG !== "undefined" && TRPG.active) {
     const heroes = state.units.filter(u => u.isPlayer && !isWeaponUnit(u) && !u._removed);
     const n = Math.max(1, heroes.length);
-    heroes.filter(u => !u.dead).forEach(u => {
-      const add = Math.floor((Number(u.level) || 1) * 20 / n);
-      if (add <= 0) return;
+    const top = heroes.reduce((m, u) => Math.max(m, Number(u.level) || 1), 1);
+    const add = Math.floor(top * 20 / n);
+    if (add > 0) heroes.filter(u => !u.dead).forEach(u => {
       u.xp = (u.xp || 0) + add;
       trpgXp.push({ name: u.name, xp: add });
     });
-    if (trpgXp.length) appendLog(`战斗奖励经验（等级 × 20 / ${n} 人）：${trpgXp.map(x => `${x.name} +${x.xp}`).join("，")}。`);
+    if (trpgXp.length) appendLog(`战斗奖励经验（队伍最高 ${top} 级 × 20 / ${n} 人）：每人 +${add}。`);
   }
   const ups = [];
   const drops = outcome === "win" ? giveBattleDrops() : null;
