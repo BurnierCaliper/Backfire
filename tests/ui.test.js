@@ -728,7 +728,8 @@ test("高能自爆：震屏、大字、爆炸声、大号数字", async (t) => {
   await page.waitForTimeout(200);
   const seen = await page.evaluate(() => window.__seen);
   assert.ok(seen.some(x => /stamp boom\|高能自爆/.test(x)), "应该盖「高能自爆」大字");
-  assert.ok(seen.some(x => /pop .*boom\|999!/.test(x)), "应该有大号的自爆数字");
+  // 自爆在整次攻击打完后才判：这次攻击的能量伤害还会继续累积高能，数字 ≥ 999
+  assert.ok(seen.some(x => { const m = /pop .*boom\|(\d+)!/.exec(x); return m && Number(m[1]) >= 999; }), "应该有大号的自爆数字：" + seen.filter(x => /boom/.test(x)).join(" / "));
   // 自爆是重击：铭牌显示负血量，慢慢消失
   await page.waitForSelector(`.unit-wrap[data-id="${foe}"].dead-slow`, { timeout: 5000 });
   assert.match(await page.textContent(`.unit-wrap[data-id="${foe}"] .hpn`), /^−\d+\//);

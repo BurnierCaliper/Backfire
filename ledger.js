@@ -263,11 +263,32 @@ function spendDurability(kit, n, reason, notes) {
   if (unit && unit.resources) unit.resources.durability = after;
   if (notes && after !== before) notes.push(`${weaponName(kit)} 耐久 ${before} → ${after}（${reason}）`);
   if (after <= 0 && before > 0) {
-    if (notes) notes.push(`⚠ ${weaponName(kit)} 耐久归零，无法使用（修好之前都只能空手：维修工具包或长休）。`);
     const owner = weaponOwner(kit);
     if (owner && typeof spawnPopup === "function") spawnPopup(owner, { kind: "status", text: "武器损坏", element: "physical" });
-    if (owner && heldWeaponKit(owner) === kit) disarmBrokenWeapon(owner, notes);
+    if (inBattleNow()) {
+      // 战斗中才坏掉：这一场还能用（技能照常），只是 atk / 格挡加成减半、不能再唤出武器人；下一场开战前还没修好就完全用不了
+      markWeaponWorn(kit);
+      if (notes) notes.push(`⚠ ${weaponName(kit)} 耐久归零：这一场 atk 和格挡加成减半、不能再唤出武器人；修好之前，下一场就只能空手（维修工具包或长休）。`);
+    } else {
+      if (notes) notes.push(`⚠ ${weaponName(kit)} 耐久归零，无法使用（修好之前都只能空手：维修工具包或长休）。`);
+      if (owner && heldWeaponKit(owner) === kit) disarmBrokenWeapon(owner, notes);
+    }
   }
+}
+/** 正在打仗（开战之后、结算之前） */
+function inBattleNow() {
+  return typeof state !== "undefined" && !!state.combatStarted;
+}
+/** 这把武器本场受损了（武器人倒下 / 耐久归零 / 战斗中修理）：atk、格挡加成减半，不能再唤出武器人 */
+function markWeaponWorn(kit, why) {
+  if (!kit || typeof state === "undefined") return;
+  state.weaponFallen = state.weaponFallen || {};
+  if (!state.weaponFallen[kit]) state.weaponFallen[kit] = why || "worn";
+}
+/** 完全用不了的武器：耐久为 0，而且不是这一场打仗时才坏的（开战前就坏了） */
+function weaponUnusable(kit) {
+  if (!weaponBroken(kit)) return false;
+  return !(inBattleNow() && state.weaponFallen && state.weaponFallen[kit]);
 }
 function restoreDurability(kit, n) {
   const max = weaponDurMax(kit);
@@ -283,7 +304,7 @@ function disarmBrokenWeapon(hero, notes) {
     const r = hero.resources || {};
     const other = r.blade === "niu" ? "naruto" : "niu";
     const otherOut = other === "niu" ? r.niuOut : r.narutoOut;
-    if (!weaponBroken(other) && !otherOut) {
+    if (!weaponUnusable(other) && !otherOut) {
       r.blade = other;
       if (notes) notes.push(`绯秋 改持${weaponName(other)}。`);
       return;
@@ -694,6 +715,8 @@ function ledgerRepair(kit, notes) {
   if (before >= max) { notes.push(`${weaponName(kit)} 耐久已满。`); return notes; }
   const used = spendRepairPoints(max - before);
   restoreDurability(kit, used);
+  // 战斗中修好的武器不会立刻恢复如初：这一场仍按受损算（atk / 格挡加成减半、不能再唤出）
+  if (inBattleNow()) { markWeaponWorn(kit, "repaired"); notes.push(`（战斗中修理：${weaponName(kit)} 这一场仍按受损算，atk 和格挡加成减半、不能再唤出武器人）`); }
   notes.push(`用维修工具包修复 ${weaponName(kit)}：耐久 ${before} → ${weaponDur(kit)}，用掉 ${used} 点维修量（还剩 ${repairPoints()} 点）。`);
   const owner = weaponOwner(kit);
   if (owner && owner.weaponHeld === false && !owner.dead && !weaponOutOnField(kit)) owner.weaponHeld = true;

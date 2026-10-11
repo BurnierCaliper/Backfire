@@ -2892,8 +2892,10 @@
     const actor = unitById(G.actorId);
     // 武器生物化（唤出武器人 / 收回为武器）单独放到结束回合左边的特殊按钮里，不占技能栏
     const allSkills = gameSkills(actor);
-    const summonSk = allSkills.find(sk => isSummonSkill(sk.id)) || null;
-    const list = allSkills.filter(sk => sk !== summonSk);
+    // 武器人倒下后：这个按钮改成「取回武器」；倒下那把的唤出（本场不能再唤出）就不再占技能栏
+    const retrieveSk = allSkills.find(sk => sk.id === "weapon_retrieve") || null;
+    const summonSk = retrieveSk || allSkills.find(sk => isSummonSkill(sk.id)) || null;
+    const list = allSkills.filter(sk => sk !== summonSk && !(retrieveSk && isSummonSkill(sk.id) && blockReason(actor, sk)));
     const wireSkill = (b, sk, why) => {
       b.onclick = () => {
         if (window.HeroSheet) HeroSheet.hideTip();
@@ -2920,7 +2922,7 @@
       sb.onclick = sb.onmouseenter = sb.onmouseleave = null;
       if (summonSk) {
         const why = blockReason(actor, summonSk);
-        const back = /_return$/.test(summonSk.id);
+        const back = /_return$/.test(summonSk.id) || summonSk.id === "weapon_retrieve";
         const ele = mainElementOf(actor);
         sb.className = "summonbtn" + (back ? " back" : "") + (G.arm && G.arm.skillId === summonSk.id ? " armed" : "");
         sb.style.setProperty("--el", ele ? `var(--${ele})` : "var(--sk-hazard, #f2c230)");

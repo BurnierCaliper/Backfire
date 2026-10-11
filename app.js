@@ -515,8 +515,15 @@ function highBoomValue(unit) {
   return (Number(unit.highEnergy) || 0) + fieldHE;
 }
 
+/** 高能自爆在一次完整的攻击行动之后才判定：行动中（runSkill 里）只记下要判的单位，
+ *  让多段攻击全部打完、高能值继续累积，行动结束时再统一判（flushHighBooms） */
 function checkHighBoom(unit) {
   if (!unit || unit._highBooming || unit.dead || unit.hidden) return;
+  if ((Number(state._highDefer) || 0) > 0) {
+    state._highPending = state._highPending || [];
+    if (!state._highPending.includes(unit.id)) state._highPending.push(unit.id);
+    return;
+  }
   // 微光：蓄能状态下，高能值要在连续两个回合结束时都超过血量才自爆——平时不判，回合结束时判（glowStoreTurnEnd）
   if (unit.self === "store" && currentWeatherFor(unit) === "glow") return;
   const hp = currentLifeForHigh(unit);
@@ -524,6 +531,12 @@ function checkHighBoom(unit) {
   if (val > 0 && hp < val) explodeHigh(unit, val);   // 血量「低于」高能值才自爆；这次爆炸的高能值含能量场叠上来的部分
 }
 
+/** 行动结束：把行动中攒下的单位按顺序判一次高能自爆（这时已经不在行动中，余波连锁照常立即判） */
+function flushHighBooms() {
+  const ids = state._highPending || [];
+  state._highPending = [];
+  ids.forEach(id => { const u = unitById(id); if (u) checkHighBoom(u); });
+}
 /** 回合结束：微光 + 蓄能的单位，高能值超过血量记一次；连续两个回合结束都超过才自爆，中间有一次没超过就重新数 */
 function glowStoreTurnEnd(notes) {
   state.units.forEach(u => {
@@ -2481,6 +2494,7 @@ function resetBattleRecords() {
   state.scoreSeen = {};
   state.battleGains = { xp: 0, kuizhi: 0 };
   state.lastBrokenLayer = null;   // 废物利用：每场重新记（上一场打碎的层不能拿来用）
+  state.weaponFallen = {};        // 本场倒下过的武器（取回后 atk / 格挡加成减半）
 }
 /** 这场的基准分：把出现过的每个敌人（含中途召唤的）「打空血、击杀」的分加起来，按第一次见到时的数值算。
  *  击破、失衡不算进来：那是玩家打出来的漂亮操作，不当成默认该拿的分。 */
@@ -2615,10 +2629,11 @@ function trackHealBy(actor, fn) {
   if (!st) return fn();
   const hpNow = (u) => (u.layers || []).reduce((a, l) => a + Math.max(0, Number(l.current) || 0), 0);
   const before = new Map();
-  const calm = new Set();
+  const calm = new Set(), marks = new Map();
   (state.units || []).forEach(u => {
     if (u.isPlayer && u !== actor && !u.hidden && !u.dead) before.set(u.id, hpNow(u));
     if (!u.isPlayer && !u.dead && !u.stunned) calm.add(u.id);
+    if (!u.isPlayer && typeof isBossUnit === "function" && isBossUnit(u)) marks.set(u.id, Number(u.stunMarks) || 0);
   });
   try { return fn(); } finally {
     (state.units || []).forEach(u => {
@@ -2626,7 +2641,9 @@ function trackHealBy(actor, fn) {
         const gain = hpNow(u) - before.get(u.id);
         if (gain > 0) { st.heal += gain; addScore("heal", gain * SCORE_RULES.heal, actor); }
       }
-      if (calm.has(u.id) && u.stunned && !u.dead) {
+      // 首领 / 精英没攒满标记的失衡会立刻恢复架势，这时按新记上的晕眩标记数算（一次行动打出两次也算两次）
+      const n = marks.has(u.id) ? Math.max(0, (Number(u.stunMarks) || 0) - marks.get(u.id)) : (calm.has(u.id) && u.stunned ? 1 : 0);
+      if (n > 0 && !u.dead) for (let i = 0; i < n; i++) {
         addScore("stagger", SCORE_RULES.stagger, actor, Number(u._staggerBonus) || 0);
         const ss = battleStat(actor); if (ss) ss.staggers = (ss.staggers || 0) + 1;   // 战场数据：打出失衡
       }
@@ -4179,6 +4196,7 @@ function applyCombat(target, result, attacker) {
   if (attacker && result.selfBreak && attacker.def <= 0) {
     queueAssistAttack(target, attacker);
   }
+  bossQuickRecover(target, notes);   // 首领 / 精英：标记没攒满的失衡，协助攻击排上队后立刻恢复架势
   if (attacker && attacker.self === "burn" && result.element === "fire") {
     const raw = Number(result.intended || result.total) || 0;
     const st = selfBurnStacksOf(attacker);
@@ -4514,6 +4532,7 @@ function recoverFromStun(u, notes) {
   u.stunned = false;
   u._imbalanceLock = false;
   u._bossMarked = false;
+  u._bossRefill = false;
   if (u.noPosture || u.kit === "ufo_leg") return;
   if (typeof canRestorePosture === "function" && !canRestorePosture(u)) {
     notes.push(`${u.name} 晕眩结束。千钧：无法恢复架势。`);
@@ -5106,7 +5125,9 @@ function convertRasLight(pct, bonusRate) {
 function koltScrapTotal(k) {
   k = k || findKit("kolt", state.units);
   const r = (k && k.resources) || {};
-  const last = state.lastBrokenLayer ? Math.floor(Number(state.lastBrokenLayer.lost) || 0) : 0;
+  // 敌人失去血量层得来的废料：不超过柯尔特生命上限的一半（和废物利用的封顶一样）
+  const cap = k && typeof baseMaxHp === "function" ? Math.floor(baseMaxHp(k) * 0.5) : Infinity;
+  const last = state.lastBrokenLayer ? Math.min(cap, Math.floor(Number(state.lastBrokenLayer.lost) || 0)) : 0;
   const rot = Object.keys(r.rotStore || {}).reduce((s, t) => s + Math.floor(Number(r.rotStore[t]) || 0), 0);
   return Math.max(0, last + rot + Math.floor(Number(r.divertArmor) || 0));
 }
@@ -5615,7 +5636,7 @@ function eligibleAssisters(breaker, broken) {
 function assistWeaponReady(u) {
   if (!isUnarmed(u)) return true;
   return fieldUnits().some(w => isWeaponUnit(w) && (w.weaponOf === u.kit || (u.linkedKits || []).indexOf(w.kit) >= 0) &&
-    !(typeof weaponBroken === "function" && weaponBroken(w.kit)));
+    !(typeof weaponUnusable === "function" && weaponUnusable(w.kit)));
 }
 
 function forceRecallWeapons(owner) {
@@ -5632,8 +5653,8 @@ function forceRecallWeapons(owner) {
     }
     w.hidden = true;
     notes.push(`${w.name} 因协助攻击被立刻收回为武器。`);
-    // 耐久归零的武器收回来也不能用：照常空手（绯秋换另一把刀）
-    if (typeof weaponBroken === "function" && weaponBroken(w.kit) && typeof heldWeaponKit === "function" && heldWeaponKit(owner) === w.kit) {
+    // 开战前就坏了的武器收回来也不能用：照常空手（绯秋换另一把刀）；战斗中才坏的照常能用（减半）
+    if (typeof weaponUnusable === "function" && weaponUnusable(w.kit) && typeof heldWeaponKit === "function" && heldWeaponKit(owner) === w.kit) {
       disarmBrokenWeapon(owner, notes);
     }
   });
@@ -5693,8 +5714,52 @@ function applyKnockdown(unit, notes, opt) {
   }
   unit.dead = true;
   if (unit.isPlayer) notes.push(`${unit.name} 最内层归零，武器人倒下。`);
+  if (unit.isPlayer && isWeaponUnit(unit) && !unit.escort) onWeaponUnitDown(unit, notes);
   else if (opt.cause && !opt.lethal) notes.push(`${unit.name} ${opt.cause}致死（最内层归零）。`);
   return "dead";
+}
+
+/* ===== 武器人倒下与取回 =====
+ * 倒下的那一刻扣 2 点耐久（以前在战斗结束时扣），这把武器本场记为「倒下过」。
+ * 主人走到它倒下的区，花 1 行动点「取回武器」：拿回手里，本场不能再唤出，武器提供的 atk 和格挡加成减半
+ * （战斗中修好耐久也一样减半）。这一场里耐久扣到 0 的照样能取回、能用（减半）；只有开战前就坏了的武器才完全用不了。 */
+function onWeaponUnitDown(u, notes) {
+  state.weaponFallen = state.weaponFallen || {};
+  if (!state.weaponFallen[u.kit]) state.weaponFallen[u.kit] = "down";
+  if (!u._durCounted && typeof spendDurability === "function") {
+    u._durCounted = true;
+    spendDurability(u.kit, 2, "武器人被击败", notes);
+  }
+  const owner = typeof weaponOwnerUnit === "function" ? weaponOwnerUnit(u) : null;
+  if (owner && !owner.dead) notes.push(`${owner.name} 可以走到 ${u.zone} 区花 1 行动点取回 ${u.name}（本场不能再唤出，武器 atk 和格挡加成减半）。`);
+}
+/** 这把武器本场倒下过：主人拿着它时武器 atk、格挡加成减半 */
+function weaponHalved(kit) {
+  return !!(kit && state.weaponFallen && state.weaponFallen[kit]);
+}
+/** 这个角色倒在场上、还没取回的武器人 */
+function fallenWeapons(owner) {
+  if (!owner || !owner.isPlayer || owner.weaponOf || owner.dead) return [];
+  const kits = [owner.kit].concat(owner.linkedKits || []);
+  return (state.units || []).filter(u => u && u.isPlayer && u.dead && !u.hidden && !u._removed && !u.escort &&
+    typeof isWeaponUnit === "function" && isWeaponUnit(u) && (u.weaponOf === owner.kit || kits.includes(u.kit)));
+}
+function retrieveWeapon(owner, w, lines) {
+  w.hidden = true;            // 收回手里：不再留在场上（仍记为倒下，本场不能再唤出）
+  w._retrieved = true;
+  state.weaponFallen = state.weaponFallen || {};
+  state.weaponFallen[w.kit] = "back";
+  const broken = typeof weaponUnusable === "function" && weaponUnusable(w.kit);
+  if (owner.kit === "hiaki") {
+    owner.resources = owner.resources || {};
+    if (w.kit === "niu") owner.resources.niuOut = false;
+    if (w.kit === "naruto") owner.resources.narutoOut = false;
+    if (typeof refreshHiakiAtk === "function") refreshHiakiAtk(owner);
+  } else if (!broken) {
+    owner.weaponHeld = true;
+  }
+  lines.push(`${owner.name} 取回了 ${w.name}。本场不能再唤出，武器 atk 和格挡加成减半。`);
+  if (broken) lines.push(`${w.name} 开战前就已经损坏，修好之前还是只能空手。`);
 }
 
 function queueAssistAttack(breaker, broken) {
@@ -7402,6 +7467,7 @@ function spawnWeapon(owner, kit) {
   if (state.units.some(u => u.kit === kit && !u.hidden && !u.fused)) return null;
   // 耐久为 0 的武器唤不出来（weaponSummonWhy 写了原因；以前在场时耐久被打光，收回后还能再唤出）
   if (typeof weaponBroken === "function" && weaponBroken(kit)) return null;
+  if (typeof weaponHalved === "function" && weaponHalved(kit)) return null;   // 本场受损过（倒下 / 耐久归零 / 战斗中修理）：不能再唤出
   // 同场战斗内血量继承：收回时只是隐藏，再唤出沿用上次的血量层，并移除旧的隐藏单位
   const prev = state.units.find(x => x.kit === kit && x.hidden && !x.fused);
   if (prev && (prev.layers || []).reduce((s, l) => s + Math.max(0, Number(l.current) || 0), 0) <= 0) return null;
@@ -7470,8 +7536,8 @@ function returnWeapon(weapon) {
   weapon.hidden = true;
   if (weapon.kit === "xiaoxiao") longgeUnlock(owner, notes, "小朋友变回武器");
   notes.push(`${weapon.name} 已收回为武器。`);
-  // 在场时耐久被扣到 0（格挡）的武器收回来也不能用：主人空手（绯秋换另一把刀），本场也唤不出来（spawnWeapon）
-  if (typeof weaponBroken === "function" && weaponBroken(weapon.kit) && typeof heldWeaponKit === "function" && heldWeaponKit(owner) === weapon.kit) {
+  // 在场时耐久被扣到 0（格挡）：这一场才坏的，收回来照常能用（atk / 格挡减半），本场唤不出来；开战前就坏了的才只能空手
+  if (typeof weaponUnusable === "function" && weaponUnusable(weapon.kit) && typeof heldWeaponKit === "function" && heldWeaponKit(owner) === weapon.kit) {
     disarmBrokenWeapon(owner, notes);
   }
   return notes;
@@ -8553,6 +8619,12 @@ function skillFlowSteps(id, actor, picks) {
       zones: zones.filter(z => zoneDist(actor.zone, z, state.zoneMode) <= 1 && !fieldChangeWhy(z, "acid"))
     }];
   }
+  if (id === "weapon_retrieve") {
+    const here = fallenWeapons(actor).filter(w => Number(w.zone) === Number(actor.zone));
+    if (here.length <= 1) return [];
+    return [{ key: "weapon", type: "choice", optional: false, label: "取回哪一个",
+              options: here.map(w => ({ value: w.id, label: w.name })) }];
+  }
   if (id === "hiaki_summon") {
     const usable = typeof summonableBlades === "function" ? summonableBlades(actor) : [];
     const label = { niu: "分出丹生谷", naruto: "分出鳴門" };
@@ -9028,6 +9100,7 @@ function dealBreak(unit, amount, element, notes, reason, opt) {
     maybeUnstableTrip(sink, notes, opt.by);
   }
   if (typeof onBreakTaken === "function") onBreakTaken(sink, amount, element, notes, wasDoppler);
+  bossQuickRecover(sink, notes);
 }
 
 /** 不经过攻击的击破把飞行单位打空架势：强制击落，扣除 20% 最大生命（真伤，从外层扣）。
@@ -9610,17 +9683,29 @@ function noteBossBreak(u) {
   if (!isBossUnit(u) || !u.stunned || u._bossMarked) return 0;
   u._bossMarked = true;
   u.stunMarks = Math.min(BOSS_STUN_MARKS, (Number(u.stunMarks) || 0) + 1);
+  // 标记没攒满：这次失衡结算完（协助攻击排上队之后）立刻恢复架势，后面的击破接着攒下一个标记，不会白白打在 0 架势上
+  if (u.stunMarks < BOSS_STUN_MARKS) u._bossRefill = true;
   return u.stunMarks;
 }
 function bossMarkText(u) {
   return u.stunMarks >= BOSS_STUN_MARKS
     ? `晕眩标记 ${u.stunMarks}/${BOSS_STUN_MARKS}：攒满了，下个回合真正晕眩。`
-    : `晕眩标记 ${u.stunMarks}/${BOSS_STUN_MARKS}：${enemyRankOf(u) === "boss" ? "首领" : "精英"}要攒满 ${BOSS_STUN_MARKS} 个才会晕眩，下个回合恢复架势照常行动。`;
+    : `晕眩标记 ${u.stunMarks}/${BOSS_STUN_MARKS}：${enemyRankOf(u) === "boss" ? "首领" : "精英"}要攒满 ${BOSS_STUN_MARKS} 个才会晕眩，架势立刻恢复，可以接着打下一个标记。`;
+}
+/** 没攒满标记的失衡：立刻恢复架势（协助攻击照常排队、照常打出） */
+function bossQuickRecover(u, notes) {
+  if (!u || !u._bossRefill) return;
+  u._bossRefill = false;
+  if (!u.stunned || u.dead) return;
+  const out = [];
+  recoverFromStun(u, out);
+  out.forEach(s => notes.push(s.replace("晕眩结束", "晕眩标记没攒满，失衡立刻结束")));
 }
 /** 兜底：没经过 imbalanceLine 的失衡（直接设成晕眩的那些）也记上标记 */
 function settleBossStuns(notes) {
   (state.units || []).forEach(u => {
     if (isBossUnit(u) && !u.dead && noteBossBreak(u) && notes) notes.push(`${u.name} ${bossMarkText(u)}`);
+    if (u && u._bossRefill) bossQuickRecover(u, notes || []);
   });
 }
 /** 敌人回合开始时：失衡中的首领，标记没攒满就只恢复架势、照常行动。返回 true 表示这样处理了 */
@@ -9691,6 +9776,13 @@ const SKILL_REQUIREMENT = {
   kolt_cannon:    (a) => koltScrapTotal(a) > 0 ? null : "没有废料可以装填",
   ecmo_probe:     (a) => res(a).probe ? "已经在探测模式" : null,
   edc_siphon:     () => findKit("ras", state.units) ? null : "拉斯缪尔不在场",
+  weapon_retrieve: (a) => {
+    const list = fallenWeapons(a);
+    if (!list.length) return "没有倒下的武器人";
+    if (list.some(w => Number(w.zone) === Number(a.zone))) return null;
+    return `要走到 ${list.map(w => w.name + " 倒下的 " + w.zone + " 区").join("、")}才能取回`;
+  },
+  ras_super:      (a) => a && a.self === "conductor" ? "已经处于导体状态" : null,
   ras_torrent:    (a) => fieldUnits().some(u => !u.isPlayer && !u.dead && ((u.statuses && u.statuses.high) || (u.highEnergy || 0) > 0)) ? null : "场上没有高能状态的敌人",
   edc_drain:      (a) => {
     const ras = findKit("ras", state.units);
@@ -9839,6 +9931,7 @@ function weaponSummonState(owner, kit) {
 }
 function weaponSummonWhy(owner, kit) {
   if (typeof weaponBroken === "function" && weaponBroken(kit)) return `${weaponCardName(kit)} 耐久为 0，无法唤出`;
+  if (typeof weaponHalved === "function" && weaponHalved(kit) && weaponSummonState(owner, kit) !== "out") return `${weaponCardName(kit)} 本场受损过，不能再唤出`;
   const st = weaponSummonState(owner, kit);
   const nm = typeof weaponCardName === "function" ? weaponCardName(kit) : kit;
   if (st === "out") return `${nm} 已经在场上`;
@@ -10054,7 +10147,11 @@ function runSkill(id, optRun) {
       // 启动引擎+：引擎已启动时使用带有启动引擎效果的技能，结算后获得 1 燃油
       const fuelGain = FUEL_SKILLS.includes(id) && xiaFuelOn() && ((findKit("xia", state.units) || {}).resources || {}).engine;
       const seqBefore = Number(state.actionSeq) || 0;
-      trackHealBy(a0, () => runSkillInner(id, optRun));
+      // 高能自爆等这次行动完整打完再判（嵌套的行动由最外层统一判）
+      state._highDefer = (Number(state._highDefer) || 0) + 1;
+      try { trackHealBy(a0, () => runSkillInner(id, optRun)); }
+      finally { state._highDefer = Math.max(0, (Number(state._highDefer) || 0) - 1); }
+      if (!state._highDefer) flushHighBooms();
       if (fuelGain && (Number(state.actionSeq) || 0) !== seqBefore) addFuel(1, "引擎运转");   // 真的出手了（开始了新的行动）才算
       const bossNotes = []; settleBossStuns(bossNotes); if (bossNotes.length) appendLog(bossNotes.join("\n"));
       applyFatigue(a0, id, scoreBefore);   // 招式疲劳：连续几个回合用同一招，这次行动的总得分打折
@@ -10305,7 +10402,13 @@ function runSkillInner(id, optRun) {
   };
 
   try {
-    if (id === "solo_support") {
+    if (id === "weapon_retrieve") {
+      const here = fallenWeapons(a).filter(w => Number(w.zone) === Number(a.zone));
+      const pick = state.skillFlow && state.skillFlow.picks && state.skillFlow.picks.weapon;
+      const w = here.find(x => x.id === pick) || here[0];
+      if (!w) { lines.push("同区没有倒下的武器人。"); return paintSkillLog(lines.join("\n")); }
+      retrieveWeapon(a, w, lines);
+    } else if (id === "solo_support") {
       const fl = state.skillFlow;
       const tgt = fl && fl.picks && fl.picks.target ? unitById(fl.picks.target) : t;
       runSoloSupport(a, fl.picks.partner, tgt, lines);
@@ -11728,7 +11831,8 @@ function runSkillInner(id, optRun) {
       lines.push(`碎渣重炮：装填 ${pool} 点废料。`);
       if (acid) {
         const mx = totalMaxHp(mt), hp0 = totalHp(mt);
-        hitOne(a, mt, { element: "acid", mult: 1, atk: pool, baseBreak: 2, atkRange: "any", flags: { action: true, lob: true } });
+        const cut = weaponHalved("torque") ? 0.5 : 1;   // 扭矩倒下过：碎渣重炮总伤害 −50%
+        hitOne(a, mt, { element: "acid", mult: cut, atk: pool, baseBreak: 2, atkRange: "any", flags: { action: true, lob: true } });
         const lost = hp0 - (mt.dead ? 0 : totalHp(mt));
         if (!mt.dead && lost > mx * 0.25) {
           lines.push(`迫击炮重创：${mt.name} 损失 ${lost}（超过上限 ${mx} 的 25%），额外 2 击破。`);
@@ -11736,7 +11840,7 @@ function runSkillInner(id, optRun) {
         }
         const splash = Math.floor(pool / 3);
         if (splash > 0) visibleEnemies(mt.zone).filter(u => u !== mt && !u.dead).forEach(u => {
-          hitOne(a, u, { element: "acid", mult: 1, atk: splash, baseBreak: 0, atkRange: "any", usePrep: false, flags: { action: true, aoe: true, lob: true } });
+          hitOne(a, u, { element: "acid", mult: cut, atk: splash, baseBreak: 0, atkRange: "any", usePrep: false, flags: { action: true, aoe: true, lob: true } });
         });
       } else {
         const torq = findKit("torque", state.units);
@@ -11757,7 +11861,8 @@ function runSkillInner(id, optRun) {
           const per = Math.floor(tAtk / 3) + roll.total;
           const dmg = Math.min(pool, per);
           pool -= dmg; n += 1;
-          hitOne(a, cur, { element: "electric", mult: 1, atk: dmg, baseBreak: n % 2 === 0 ? 1 : 0, atkRange: "any", usePrep: n === 1, flags: { action: true } });
+          // 扭矩倒下过：子弹数照原来的 atk 算，每颗伤害减半（总伤害 −50%）
+          hitOne(a, cur, { element: "electric", mult: weaponHalved("torque") ? 0.5 : 1, atk: dmg, baseBreak: n % 2 === 0 ? 1 : 0, atkRange: "any", usePrep: n === 1, flags: { action: true } });
         }
         lines.push(`碎渣重炮：共打出 ${n} 颗子弹。`);
       }
@@ -12153,11 +12258,14 @@ function runSkillInner(id, optRun) {
       const redRun = runOf("red"), blueRun = runOf("blue");
       const pickRandom = (list) => list[Math.floor(Math.random() * list.length)];
       for (let k = 0; k < (redRun >= 3 ? 2 : redRun >= 2 ? 1 : 0); k++) {
-        const foes = fieldUnits().filter(u => !u.isPlayer && !u.dead && !u.hidden && !u.fused);
+        // 只在打得到的敌人里随机：距离 1 以内、不隔危墙 / 关着的门、没在躲藏（以前从全场随机，抽到射程外的就打空）
+        const foes = fieldUnits().filter(u => !u.isPlayer && !u.dead && !u.hidden && !u.fused && !(u.statuses && u.statuses.hide) &&
+          zoneDist(a.zone, u.zone, state.zoneMode) <= 1 && !lineBlocked(a.zone, u.zone));
         const f = pickRandom(foes);
-        if (!f) break;
+        if (!f) { if (k === 0) lines.push("洗牌：连续红弹，但附近没有打得到的敌人。"); break; }
         lines.push(`洗牌：连续红弹，火焰打向 ${f.name}。`);
-        hitOne(a, f, { element: "fire", mult: 1, baseBreak: 0, atk, atkRange: "any", flags: { action: true }, usePrep: false });
+        // 火焰是子弹炸开的，打同区飞行敌人不用多付附赠行动
+        hitOne(a, f, { element: "fire", mult: 1, baseBreak: 0, atk, atkRange: "any", flags: { action: true, flyFree: true }, usePrep: false });
       }
       for (let k = 0; k < (blueRun >= 3 ? 2 : blueRun >= 2 ? 1 : 0); k++) {
         const pals = fieldUnits().filter(u => u.isPlayer && !u.dead && !u.hidden && !u.fused);

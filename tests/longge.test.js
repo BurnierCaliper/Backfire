@@ -515,6 +515,28 @@ test("洗牌：剩下的子弹重排、看过的作废；连续红打随机敌�
   assert.deepEqual(foes.map(f => f.layers[0].current), fhp);
 });
 
+test("洗牌：连续红弹的火焰只在打得到的敌人里随机（距离 1 以内），不会抽到射程外的敌人打空", () => {
+  const { c, S, lg, foes } = setup();
+  lvUp(lg);
+  S.zoneMode = 3;
+  lg.zone = 1; foes[0].zone = 3; foes[1].zone = 2;   // 3 区的敌人距离 2，打不到
+  for (let seed = 0; seed < 12; seed++) {
+    lg.ap = 3;
+    lg.resources.ammo = ["red", "red", "red"]; seenAll(lg);
+    const far0 = foes[0].layers[0].current, near0 = foes[1].layers[0].current;
+    c.S.RNG.install("SHUF" + seed);
+    cmd(c, { actor: lg.id, skill: "longge_shuffle" });
+    assert.equal(foes[0].layers[0].current, far0, "射程外的敌人不挨打");
+    assert.ok(foes[1].layers[0].current < near0, "打得到的敌人挨了火焰");
+  }
+  // 附近一个打得到的都没有：不出火焰，也不报错
+  foes[1].zone = 3;
+  lg.ap = 3; lg.resources.ammo = ["red", "red"]; seenAll(lg);
+  const hp = foes.map(f => f.layers[0].current);
+  cmd(c, { actor: lg.id, skill: "longge_shuffle" });
+  assert.deepEqual(foes.map(f => f.layers[0].current), hp);
+});
+
 test("胶囊弹药+：打光后 1 行动点完全换弹（随机 6 发，扳机要重新解锁）", () => {
   const { c, lg } = setup();
   lvUp(lg, 10);
