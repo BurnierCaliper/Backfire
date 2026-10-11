@@ -2531,7 +2531,7 @@ function settleBattleRewards(outcome) {
   if (bs.rewardSettlement) return {
     outcome: bs.rewardSettlement.outcome, grade: bs.rewardSettlement.grade,
     finishBonus: null, xpBonus: 0, totalXpBonus: bs.rewardSettlement.xpBonus,
-    ups: bs.rewardSettlement.ups.slice(), drops: bs.rewardSettlement.drops || null, alreadySettled: true
+    ups: bs.rewardSettlement.ups.slice(), drops: bs.rewardSettlement.drops || null, trpgXp: bs.rewardSettlement.trpgXp || [], alreadySettled: true
   };
   const finishBonus = outcome === "win" ? applyFinishBonus() : null;
   const grade = battleGrade();
@@ -2544,9 +2544,22 @@ function settleBattleRewards(outcome) {
       state.battleGains.xp += xpBonus;
     }
   }
+  // 跑团模式：打赢的每场战斗，每个角色额外获得「等级 × 20 / 人数」经验（向下取整；人数 = 这场上场的角色数）
+  const trpgXp = [];
+  if (outcome === "win" && typeof TRPG !== "undefined" && TRPG.active) {
+    const heroes = state.units.filter(u => u.isPlayer && !isWeaponUnit(u) && !u._removed);
+    const n = Math.max(1, heroes.length);
+    heroes.filter(u => !u.dead).forEach(u => {
+      const add = Math.floor((Number(u.level) || 1) * 20 / n);
+      if (add <= 0) return;
+      u.xp = (u.xp || 0) + add;
+      trpgXp.push({ name: u.name, xp: add });
+    });
+    if (trpgXp.length) appendLog(`战斗奖励经验（等级 × 20 / ${n} 人）：${trpgXp.map(x => `${x.name} +${x.xp}`).join("，")}。`);
+  }
   const ups = [];
   const drops = outcome === "win" ? giveBattleDrops() : null;
-  bs.rewardSettlement = { outcome, grade, xpBonus, ups, drops };
+  bs.rewardSettlement = { outcome, grade, xpBonus, ups, drops, trpgXp };
   state.units.filter(u => u.isPlayer && !isWeaponUnit(u)).forEach(u => {
     const from = u.level;
     if (typeof tryLevelUp === "function" && tryLevelUp(u) && u.level > from) ups.push(`${u.name} ${from}→${u.level}`);
@@ -2555,7 +2568,7 @@ function settleBattleRewards(outcome) {
   const encName = typeof GAME !== "undefined" && GAME && GAME.encounter && GAME.encounter.name || "";
   if (typeof careerRecordBattle === "function") careerRecordBattle(outcome, grade, { name: encName, drops });
   if (typeof bestiaryRecordBattle === "function") bestiaryRecordBattle(outcome);   // 敌人图鉴：这场出现过的敌人记为遭遇过
-  return { outcome, grade, finishBonus, xpBonus, totalXpBonus: xpBonus, ups: ups.slice(), drops, alreadySettled: false };
+  return { outcome, grade, finishBonus, xpBonus, totalXpBonus: xpBonus, ups: ups.slice(), drops, trpgXp, alreadySettled: false };
 }
 
 /* 战斗掉落：主持人在「战场配置」或战斗模板里设好（奎支 + 物品），打赢才给，进背包。
