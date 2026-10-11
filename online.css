@@ -233,7 +233,8 @@ body.ol-has-side .ol-toast { right: 344px; }
 /* 联机玩家的战斗画面（online-battle.js）：和单人 / 跑团同一套战场、单位卡、底部栏 */
 .ol-battle { display: flex; flex-direction: column; margin: 8px 0 12px; border: 1px solid #4d4337; background: #120f0c; }
 .ol-battle .g-field { height: min(62vh, 660px); min-height: 380px; }
-.ol-battle .g-hud { position: static; }
+/* 技能栏贴在舞台底部：战场比一屏高时也不用每次往下翻去点技能 */
+.ol-battle .g-hud { position: sticky; bottom: 0; z-index: 8; }
 .ol-battle .pc.off { opacity: .6; }
 .ol-battle .pc.mine .k { color: var(--gold, #f2c230); }
 .ol-battle .hint .g-btn.small { margin-left: 6px; height: 26px; }

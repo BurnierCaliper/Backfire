@@ -256,7 +256,7 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
 .unit-wrap { filter: drop-shadow(0 2px 3px rgba(20, 30, 40, .28)); }
 .unit-wrap.is-actor::after { background: #3f8f78; }
 .unit-wrap.is-targetable .unit { cursor: crosshair; }
-.unit-wrap.is-targetable::after { background: rgba(40, 48, 58, .45); }
+.unit-wrap.is-targetable::after, .unit-wrap.pv-cand::after { background: rgba(40, 48, 58, .45); }
 .unit-wrap.is-hover::after { background: #1b1f24; }
 .unit-wrap.is-dim { opacity: .45; }
 .unit-wrap.pv-stun { filter: drop-shadow(0 0 12px rgba(214, 150, 30, .85)); }

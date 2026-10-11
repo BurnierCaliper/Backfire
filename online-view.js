@@ -42,6 +42,62 @@
     seen.delete(value); return out;
   }
   const layerTypes = ["flesh", "armor", "shield", "sand", "spirit"];
+  // 主机本地的展示函数（状态行、资源、实际 atk、首领标记……）：玩家端没有规则，靠主机算好了按白名单发过去
+  function call(name, ...args) { const fn = root[name]; if (typeof fn !== "function") return undefined; try { return fn(...args); } catch (e) { return undefined; } }
+  /** 「a · b · c」这种展示文字：一段一段过滤（含敏感字样的那一段丢掉，不连累整行） */
+  function tokenLine(v, max = 30) {
+    if (typeof v !== "string") return "";
+    return v.split(" · ").map(t => text(t.trim(), 48)).filter(t => t && t !== "无状态").slice(0, max).join(" · ");
+  }
+  const mechTypes = ["execution", "share", "spread", "tower"], phases = ["enemy", "player"];
+  function markDto(m, strings, numbers, booleans) {
+    if (!obj(m)) return null;
+    const o = {}; enumField(m, o, "type", mechTypes); if (!o.type) return null;
+    copyFields(m, o, strings, numbers, booleans); enumField(m, o, "phase", phases);
+    return o;
+  }
+  /** 单位卡上要的展示信息：和主机本地卡片同一套（game.js · snapUnit） */
+  function displayOf(unit) {
+    const d = {};
+    let status = call("statusLine", unit);
+    if (call("touDuelVictim", unit)) status = (typeof status === "string" && status !== "无状态" ? status + " · " : "") + "决一死战";
+    const st = tokenLine(status); if (st) d.status = st;
+    if (get(unit, "isPlayer")) { const r = tokenLine(call("resourceText", unit), 12); if (r) d.res = r; }
+    const atk = number(call("effectiveAtk", unit, root.state && root.state.units)); if (atk !== undefined) d.atk = Math.round(atk);
+    if (get(unit, "isPlayer") && !get(unit, "escort")) {
+      const weapon = typeof root.isWeaponUnit === "function" ? !!call("isWeaponUnit", unit) : !!get(unit, "weaponOf");
+      const kit = weapon ? get(unit, "kit") : call("heldWeaponKit", unit);
+      const max = number(call("weaponDurMax", kit));
+      if (typeof kit === "string" && max > 0) {
+        const r = get(unit, "resources");
+        const cur = weapon && number(get(r, "durability")) !== undefined ? get(r, "durability") : (number(call("weaponDur", kit)) ?? max);
+        d.dur = { cur: Math.max(0, Math.min(max, cur)), max };
+        const name = text(call("weaponName", kit), 40); if (name) d.dur.name = name;
+      }
+    }
+    const marks = arr(call("bossMarksOn", unit)).slice(0, 8).map(m => markDto(m, ["name", "by"], ["left", "pool", "group", "blast", "stack"], ["delayed"])).filter(Boolean);
+    if (marks.length) d.marks = marks;
+    const casts = arr(call("bossCastsBy", unit)).slice(0, 8).map(m => markDto(m, ["name", "target"], ["left"], [])).filter(Boolean);
+    if (casts.length) d.casts = casts;
+    if (!get(unit, "isPlayer") && (get(unit, "dead") || get(unit, "_removed"))) {
+      const ok = number(get(unit, "overkill")); if (ok > 0) d.overkill = Math.round(ok);
+      if (get(unit, "killBig") === true) d.killBig = true;
+    }
+    return Object.keys(d).length ? d : null;
+  }
+  /** 区域上的展示：已标定的范围攻击预警、沙暴风向、踩塔（game.js · snapEnv） */
+  function zoneViewOf(z, state) {
+    const v = {};
+    const threats = arr(call("zoneThreatsIn", z)).slice(0, 8).filter(obj).map(t => {
+      const o = {}; const label = text(get(t, "label"), 60); if (!label) return null;
+      o.label = label; const from = text(get(t, "from"), 40); if (from) o.from = from; if (get(t, "ready") === true) o.ready = true; return o;
+    }).filter(Boolean);
+    if (threats.length) v.threats = threats;
+    if (get(state, "weather") === "sand") { const w = text(call("sandWindLabel", call("sandWind", z, get(state, "zoneMode"), get(state, "sandDir"))), 8); if (w) v.wind = w; }
+    const towers = arr(call("bossZoneMarks", z)).slice(0, 4).map(m => markDto(m, ["name", "by"], ["left", "need", "have", "soak", "fail"], ["delayed"])).filter(Boolean);
+    if (towers.length) v.towers = towers;
+    return Object.keys(v).length ? v : null;
+  }
   const resourceNumbers = ["nano", "bean", "liquid", "durability", "shield", "tauntLeft", "charge", "energyPct", "light", "lockLeft", "smashUsed", "phase", "debrisCount"];
   const resourceFlags = ["mecha", "engine", "prepared", "preparedActive", "preparedPending", "smashNext", "smashOnce", "niuOut", "narutoOut", "forceCruelNext", "scanned", "unstable", "forceCharge", "forceOverheat"];
   const statusKeys = ["burn", "shock", "corr", "frostbite", "shockwave", "high", "reso", "unstable", "weak", "inspire", "hide", "advantage", "chase", "sturdy"];
@@ -79,6 +135,15 @@
       return dto;
     });
     if (mech.length) out.mechanics = mech;
+    // Helumica 的聚焦：哪一层、属性序列、走到第几步（公开信息，本地卡片上也写着）
+    const focusEls = ["fire", "acid", "electric", "ice", "energy", "physical", "harmonic"];
+    const focuses = arr(get(unit, "focuses")).slice(0, 5).filter(obj).map(f => {
+      const dto = {}; enumField(f, dto, "layerType", layerTypes);
+      dto.seq = arr(get(f, "seq")).slice(0, 12).filter(e => focusEls.includes(e));
+      const step = number(get(f, "step")); dto.step = step === undefined ? 0 : Math.max(0, Math.min(dto.seq.length, step));
+      return dto;
+    }).filter(f => f.layerType && f.seq.length);
+    if (focuses.length) out.focuses = focuses;
     // 状态图标（hud-icons.js）：自我效果、挂着的攻击效果、刺入 / 牵挂标记、角色仪表的数据
     enumField(unit, out, "self", ["burn", "frost", "splash", "conductor", "anchor", "store", "doppler"]);
     const sbs = number(get(unit, "selfBurnStacks")); if (sbs !== undefined) out.selfBurnStacks = sbs;
@@ -89,7 +154,8 @@
     try { if (arr(root.state && root.state.units).some(x => x && x.kit === "yuito" && x.resources && x.resources.bondId === get(unit, "id"))) marks.push("bond"); } catch (e) {}
     if (marks.length) out.marks = marks;
     if (obj(r) && get(unit, "isPlayer") && root.HudIcons) { let hud = null; try { hud = root.HudIcons.gaugeState(unit); } catch (e) {} const dto = projectHud(hud); if (dto) out.hud = dto; }
-    // status/res are legacy free-form strings and must not bypass these DTOs.
+    // status/res 不直接转发：上面 displayOf 一段一段过滤后放进 display
+    const display = displayOf(unit); if (display) out.display = display;
     return out;
   }
   /** 角色仪表的数据：只放数字、开关和几个固定取值的字段（gaugeState 的输出） */
@@ -113,7 +179,7 @@
   function projectProp(prop) {
     if (!obj(prop) || !id(get(prop, "id"))) return null;
     const out = identifiers(prop, {}, ["id"]);
-    copyFields(prop, out, ["name"], ["zone", "level", "hp", "maxHp"], ["destroyed"]);
+    copyFields(prop, out, ["name"], ["zone", "level", "hp", "maxHp", "shield", "shieldMax"], ["destroyed"]);
     enumField(prop, out, "kind", ["button", "lever", "battery", "boom", "acid", "scrap", "turret", "ironwall", "scrapwall", "dome"]);
     enumField(prop, out, "faction", ["player", "enemy", "neutral"]);
     return out;
@@ -165,6 +231,7 @@
       const gap = get(get(state, "gaps"), key), dto = copyFields(gap, {}, [], ["hp", "maxHp", "level"], ["open"]);
       enumField(gap, dto, "type", ["open", "bridge", "wall", "door", "void"]); out.gaps[key] = dto;
     }
+    for (const key of zoneKeys) { const zv = zoneViewOf(Number(key), state); if (zv) (out.zoneView = out.zoneView || {})[key] = zv; }
     return out;
   }
   const popupWords = new Set(["无效", "失衡", "起身", "倒下", "刺入", "温和", "残忍", "登场支援！", "聚焦抹层", "灼烧", "感电", "腐蚀", "冻伤", "震荡", "共振", "高能", "虚弱", "振奋", "躲藏", "优势", "紧追", "熔融", "刺骨", "过载", "错位", "扩散", "折射", "红弹", "蓝弹", "导体", "霜结", "自焚", "溅射", "千钧", "蓄能", "多普勒", "爆燃", "破冰", "雷击", "蚀刻", "倒流", "惯性", "衍射", "穿刺", "猛击", "弱点特效", "超载", "中和"]);
@@ -352,6 +419,15 @@
       if (isTitle) dto.title = true;
       return [dto];
     });
+    // 跑团地图：队伍位置（地点 id + 地图上的百分比坐标），玩家只读
+    const map = get(view, "map");
+    if (obj(map)) {
+      const place = get(map, "place");
+      const dto = { place: typeof place === "string" && /^[a-z0-9_-]{1,40}$/i.test(place) ? place : null };
+      const x = number(get(map, "x")), y = number(get(map, "y"));
+      if (x !== undefined && y !== undefined) { dto.x = Math.max(0, Math.min(100, x)); dto.y = Math.max(0, Math.min(100, y)); }
+      out.map = dto;
+    }
     // 主持人的大字（像 /title）：主标题、小字、风格、停留秒数
     const title = get(view, "title");
     if (obj(title) && id(get(title, "id"))) {

@@ -1496,7 +1496,7 @@
     cards.forEach(c => {
       c.segs.forEach(sg => { if (!sg) return; sg.sure.style.width = sg.maybe.style.width = sg.heal.style.width = "0"; });
       c.pips.forEach(p => p.classList.remove("pv", "maybe"));
-      c.wrap.classList.remove("pv-stun", "maybe", "ice", "pv-adv", "pv-dis");
+      c.wrap.classList.remove("pv-stun", "maybe", "ice", "pv-adv", "pv-dis", "pv-cand");
       c.tag.classList.remove("show", "compact");
     });
     if (!G.arm) idleBox();
@@ -1621,7 +1621,6 @@
    * 技能栏每重画一次（refreshHud）算一个新局面：同一个局面里同一个角色、同一个技能重复悬停直接用缓存。
    * 触屏没有悬停：不用选目标、也没有分步的技能第一下点按钮先预演，再点同一个按钮才放出去；点别的地方取消。 */
   const SKILL_PV_DELAY = 120;   // 停这么久（毫秒）才算：鼠标扫过一排按钮不卡
-  const SKILL_PV_TARGETS = 8;   // 要选目标的技能最多预演几个候选目标
   let hudEpoch = 0;             // refreshHud 每画一次技能栏 +1
   let skPvStamp = "";
   let skPvCache = new Map();    // actorId|skillId → 这个局面里算好的预演
@@ -1642,8 +1641,8 @@
     try { return window.HotseatValidation && HotseatValidation.inspect ? HotseatValidation.inspect(fn) : fn(); }
     finally { G.lastCmd = keep; }
   }
-  /** 这个技能悬停时画什么（缓存）。withTargets：要选目标的技能顺便把每个候选目标都预演一遍 */
-  function skillPvInfo(actor, sk, withTargets) {
+  /** 这个技能悬停时画什么（缓存） */
+  function skillPvInfo(actor, sk) {
     const stamp = skillPvStampNow();
     if (stamp !== skPvStamp) { skPvStamp = stamp; skPvCache = new Map(); }
     const key = actor.id + "|" + sk.id;
@@ -1652,7 +1651,6 @@
       info = disposablePreview(() => skillPvProbe(actor.id, sk));
       skPvCache.set(key, info);
     }
-    if (withTargets && info.kind === "target" && !info.targets) info.targets = disposablePreview(() => skillPvTargets(actor.id, sk));
     return info;
   }
   function skillPvProbe(actorId, sk) {
@@ -1667,81 +1665,31 @@
     const pv = previewOf(skillThunk(actorId, sk.id, null, {}));
     return pv.needsTarget ? { kind: "target", targets: null } : { kind: "self", pv };
   }
-  function skillPvTargets(actorId, sk) {
-    const actor = unitById(actorId);
-    const all = actor ? candidateUnits(actor, sk) : [];
-    const rows = all.slice(0, SKILL_PV_TARGETS).map(u => ({
-      id: u.id, name: u.name || targetName(u.id), zone: Number(u.zone) || 0, ally: !!u.isPlayer,
-      pv: previewOf(skillThunk(actorId, sk.id, u.id, {}))
-    }));
-    return { rows, more: Math.max(0, all.length - rows.length) };
-  }
   function skillCostText(actor, sk) {
     const c = sk.cost || {}, parts = [];
     if (c.ap) parts.push(`行动点 ${c.ap}（现有 ${Number(actor.ap) || 0}）`);
     if (c.bonus) parts.push(`附赠 ${c.bonus}（现有 ${Number(actor.bonus) || 0}）`);
     return parts.length ? "消耗 " + parts.join(" · ") : "不耗行动点和附赠";
   }
-  /** 一个单位的预演结果写成几段字（预览框里每个目标一行：「火 12–18 · 击破 2 · 可能失衡」） */
-  function pvSummaryParts(p) {
-    const out = [];
-    const span = (lo, hi) => lo === hi ? String(hi) : lo + "–" + hi;
-    const ele = typeof ELE !== "undefined" && ELE[p.element] || "";
-    if (p.dmgHi > 0) out.push(`<span class="e-${p.element}">${esc(ele)} ${span(p.dmgLo, p.dmgHi)}</span>${p.adv ? "（克制）" : p.dis ? "（劣势）" : ""}`);
-    if (p.healHi > 0) out.push(`<span class="e-heal">+${p.healHi}</span>`);
-    if (p.shpLoss > 0) out.push(`坚毅 −${p.shpLoss}`);
-    if (p.brHi > 0) out.push(`击破 ${span(p.brLo, p.brHi)}`);
-    if (p.stunSure) out.push(p.ice ? "失衡·冰冻" : "失衡");
-    if (p.stunMaybe) out.push(p.ice ? "可能失衡·冰冻" : "可能失衡");
-    if (p.killSure) out.push("击倒");
-    if (p.killMaybe) out.push("可能击倒");
-    if (p.zoneTo != null) out.push(`→ ${p.zoneTo} 区`);
-    if (p.newStatus.length) out.push("+" + esc(p.newStatus.join(" ")));
-    const res = resChangeText(p);
-    if (res) out.push(esc(res));
-    return out;
-  }
-  /** 卡片上看不出变化时，取记录里第一句有内容的话 */
-  function pvGist(pv) {
-    const t = pv.lines.map(s => s.trim()).filter(s => s && !COST_LINE.test(s) && !/^【/.test(s))[0] || "有效果";
-    return t.length > 40 ? t.slice(0, 39) + "…" : t;
-  }
   function skillPvBox(title, cost, body) {
     const box = $("g-pvbox");
     box.classList.add("live");
     box.innerHTML = `<h4>${esc(title)}</h4><div class="ln key pv-cost">${esc(cost)}</div>` + body;
   }
-  /** 要选目标的技能：每个候选目标的卡上只画它自己被选中时的结果；预览框每个目标一行，按伤害从高到低（一样高时敌人在前） */
+  /** 要选目标的技能：悬停技能按钮时只把能选的目标高亮出来（和选目标时一样），不在每张卡上画伤害——
+   *  那样看起来像范围技能。点了技能以后把鼠标移到单位上，才预览打这一个目标的结果 */
   function paintSkillPvTargets(sk, info, cost) {
     clearPreview();
-    const t = info.targets || { rows: [], more: 0 };
-    const num = (x, k) => (x.p && x.p[k]) || 0;
-    const rows = t.rows.filter(r => r.pv.meaningful).map(r => ({ r, p: r.pv.units.get(r.id) }))
-      .sort((a, b) => num(b, "dmgHi") - num(a, "dmgHi") || num(b, "brHi") - num(a, "brHi") || (a.r.ally ? 1 : 0) - (b.r.ally ? 1 : 0));
-    rows.forEach(({ r, p }) => { const c = cards.get(r.id); if (c && p && p.changed) paintUnitPreview(c, p); });
-    compactTags();
-    if (!rows.length) {
-      const why = (t.rows[0] && t.rows[0].pv.reason) || "没有可选目标";
-      skillPvBox(`${sk.name} · 预演`, cost, `<div class="ln key pv-why">${esc(why)}</div>`);
+    const actor = skillPvActor();
+    const cands = actor ? candidateUnits(actor, sk) : [];
+    cands.forEach(u => { const c = cards.get(u.id); if (c) c.wrap.classList.add("pv-cand"); });
+    if (!cands.length) {
+      skillPvBox(`${sk.name} · 预演`, cost, `<div class="ln key pv-why">没有可选目标</div>`);
       return;
     }
-    // 同名的目标（两个狂徒）站在不同的区时写上在几区
-    const label = (x) => new Set(rows.filter(y => y.r.name === x.r.name).map(y => y.r.zone)).size > 1 ? `${x.r.name}（${x.r.zone} 区）` : x.r.name;
-    let body = `<div class="ln">要选目标：按现在的数值对每个能选的目标各算一次${t.more ? `（只算了前 ${SKILL_PV_TARGETS} 个）` : ""}。</div>`;
-    body += rows.map(x => {
-      const parts = x.p ? pvSummaryParts(x.p) : [];
-      return `<div class="ln key pv-row"><b>${esc(label(x))}</b>：${parts.length ? parts.join(" · ") : esc(pvGist(x.r.pv))}</div>`;
-    }).join("");
-    // 出手的人自己、旁边被波及的人（按排第一的目标算）：资源、护盾、波及伤害……
-    const top = rows[0], others = [];
-    top.r.pv.units.forEach((p, id) => {
-      if (id === top.r.id || !p.changed) return;
-      const parts = pvSummaryParts(p);
-      if (parts.length) others.push(`${esc(p.name || targetName(id))} ${parts.join(" · ")}`);
-    });
-    if (others.length) body += `<div class="ln pv-other">选${esc(label(top))}时另外：${others.slice(0, 4).join("；")}${others.length > 4 ? "……" : ""}</div>`;
-    body += `<div class="ln">点技能后把鼠标移到目标上，看这一下的完整结算。骰子按最小 / 最大各预演一次；格挡等判定按失败预演。</div>`;
-    skillPvBox(`${sk.name} · 预演`, cost, body);
+    const names = cands.slice(0, 8).map(u => esc(u.name || targetName(u.id)));
+    skillPvBox(`${sk.name} · 选目标`, cost, `<div class="ln">能选的目标已经高亮：${names.join("、")}${cands.length > 8 ? " 等" : ""}。</div>` +
+      `<div class="ln">点技能后把鼠标移到目标上，看打这一个目标的完整结算。</div>`);
   }
   /** 把算好的预演画出来（卡片 + 预览框）。kind：self 不用选目标 / target 要选目标 / flow 分步（只写说明）/ note 出错 */
   function paintSkillPv(actor, sk, info) {
@@ -1763,7 +1711,7 @@
       return;
     }
     let info;
-    try { info = skillPvInfo(actor, sk, true); }
+    try { info = skillPvInfo(actor, sk); }
     catch (e) { info = { kind: "note", text: "预演出错：" + e.message }; }
     paintSkillPv(unitById(actor.id) || actor, sk, info);
   }
@@ -1787,7 +1735,7 @@
     const key = skillPvStampNow() + "|" + actor.id + "|" + sk.id;
     if (G.skillTap && G.skillTap.key === key) { G.skillTap = null; return false; }   // 第二下：放出去
     let info = null;
-    try { info = skillPvInfo(actor, sk, false); } catch (e) { info = null; }
+    try { info = skillPvInfo(actor, sk); } catch (e) { info = null; }
     if (!info || info.kind !== "self") { G.skillTap = null; return false; }   // 要选目标 / 分步：照旧直接进入选择
     paintSkillPv(unitById(actor.id) || actor, sk, info);
     G.skillTap = { key, skillId: sk.id };
@@ -2826,6 +2774,23 @@
     rows.forEach(r => { r.share = team > 0 ? Math.round((Number(r.dmg) || 0) / team * 1000) / 10 : 0; });
     return rows;
   }
+  /** 把武器人那一行并进主人那一行（数据加在一起，名字写「龙哥＋小朋友」）；输出占比重新算 */
+  const STAT_SUM_KEYS = ["dmg", "brk", "staggers", "kills", "assists", "blocks", "blockOk", "avoided", "reduced", "taken", "heal", "score"];
+  function mergeStatRows(rows) {
+    const out = [];
+    rows.forEach(r => {
+      const host = r.sub ? out[out.length - 1] : null;
+      if (!host) { out.push(Object.assign({}, r, { sub: false, parts: [r.name] })); return; }
+      STAT_SUM_KEYS.forEach(k => { host[k] = (Number(host[k]) || 0) + (Number(r[k]) || 0); });
+      host.parts.push(r.name);
+    });
+    out.forEach(r => { r.name = r.parts.join("＋"); });
+    const team = out.reduce((a, r) => a + (Number(r.dmg) || 0), 0);
+    out.forEach(r => { r.share = team > 0 ? Math.round((Number(r.dmg) || 0) / team * 1000) / 10 : 0; });
+    return out;
+  }
+  G.statsMerge = false;
+  const shownStatRows = () => G.statsMerge ? mergeStatRows(statRows()) : statRows();
   /** 表格单元格：输出占比带 %，协助格挡写「成功/次数」 */
   function statCell(r, k) {
     if (k === "share") return (Number(r.share) || 0).toFixed(1) + "%";
@@ -2833,7 +2798,9 @@
     return String(Math.round(Number(r[k]) || 0));
   }
   function openStats() {
-    const rows = statRows();
+    const rows = shownStatRows();
+    const mb = $("g-stats-merge");
+    if (mb) { mb.textContent = G.statsMerge ? "分开武器人" : "合并武器人"; mb.classList.toggle("on", G.statsMerge); }
     const tot = {}; STAT_COLS.forEach(([k]) => { tot[k] = rows.reduce((a, r) => a + (Number(r[k]) || 0), 0); });
     tot.blockOk = rows.reduce((a, r) => a + (Number(r.blockOk) || 0), 0);
     tot.share = rows.length && tot.dmg > 0 ? 100 : 0;
@@ -2851,17 +2818,18 @@
       const parts = Object.keys(SCORE_PART_NAMES).filter(k => gr.parts[k]).map(k => k === "fatigue" ? `招式疲劳 −${gr.parts[k]}` : `${SCORE_PART_NAMES[k]} ${gr.parts[k]}`).join(" · ");
       return `<p class="stats-grade"><b class="g-${gr.grade}">评价 ${gr.grade}</b> ${gr.score} 分（按第 ${gr.act} 幕的分数线）${gr.next ? `，距 ${gr.next.grade} 还差 ${Math.max(0, gr.next.need - gr.score)} 分` : ""}<br>${parts || "还没有得分"}</p>`;
     })()}
-    <p class="stats-turn">${state.combatStarted ? `第 ${state.turnNo || 1} 回合` : "还没开战"} · 第 ${typeof scoreAct === "function" ? scoreAct() : 1} 幕分数线：${gradeLines(typeof scoreAct === "function" ? scoreAct() : 1).filter(([, k]) => k > 0).map(([g, k, x]) => `${g} ≥ ${k}${x > 1 ? `（经验 ×${x}）` : ""}`).join("、")}，C 线以下为 D（每往后一幕各线 +${SCORE_ACT_STEP}）。速杀：${SCORE_SPEED.map(([n, m]) => `${n} 回合内 ×${m}`).join(" / ")}；无伤（我方没受任何伤害）：+${SCORE_FLAWLESS.points}、倍率 +${SCORE_FLAWLESS.mult}，和速杀倍率加算（胜利时整场分数再乘）${state.battleScore && state.battleScore.hurt ? "。本场已有人受伤" : ""}。得分里的击杀、团队分不一定能归到具体某人，所以个人得分加起来可能比总分少。</p>`;
+    <p class="stats-turn">${state.combatStarted ? `第 ${state.turnNo || 1} 回合` : "还没开战"} · 分数线（第 ${typeof scoreAct === "function" ? scoreAct() : 1} 幕固定线 × ${SCORE_LINE_MIX.fixed} + 本场基准分 ${scorePar()} × 倍数 × ${SCORE_LINE_MIX.par}）：${gradeLines(typeof scoreAct === "function" ? scoreAct() : 1, scorePar()).filter(([, k]) => k > 0).map(([g, k, x]) => `${g} ≥ ${k}${x > 1 ? `（经验 ×${x}）` : ""}`).join("、")}，C 线以下为 D。基准分 = 每个出现过的敌人的血量 + 击杀分（击破、失衡不算进基准，是额外的漂亮操作）；固定线每往后一幕 +${SCORE_ACT_STEP}。速杀：${SCORE_SPEED.map(([n, m]) => `${n} 回合内 ×${m}`).join(" / ")}；无伤（我方没受任何伤害）：+${SCORE_FLAWLESS.points}、倍率 +${SCORE_FLAWLESS.mult}，和速杀倍率加算（胜利时整场分数再乘）${state.battleScore && state.battleScore.hurt ? "。本场已有人受伤" : ""}。得分里的击杀、团队分不一定能归到具体某人，所以个人得分加起来可能比总分少。</p>`;
     $("g-stats-sheet").classList.add("show");
   }
   function statsText() {
-    const rows = statRows();
+    const rows = shownStatRows();
     const gr = typeof battleGrade === "function" ? battleGrade() : null;
     return [`战场数据（第 ${state.turnNo || 1} 回合）` + (gr ? ` · 评价 ${gr.grade} · ${gr.score} 分` : ""), "角色\t" + STAT_COLS.map(([, n]) => n).join("\t")]
       .concat(rows.map(r => (r.sub ? "  " + r.name + "（武器人）" : r.name) + "\t" + STAT_COLS.map(([k]) => statCell(r, k)).join("\t")))
       .join("\n");
   }
   G.statRows = statRows;
+  G.mergeStatRows = mergeStatRows;
   G.statsText = statsText;
 
   function paintUndo() {
@@ -2922,7 +2890,51 @@
     const box = $("g-skills");
     box.innerHTML = "";
     const actor = unitById(G.actorId);
-    const list = gameSkills(actor);
+    // 武器生物化（唤出武器人 / 收回为武器）单独放到结束回合左边的特殊按钮里，不占技能栏
+    const allSkills = gameSkills(actor);
+    const summonSk = allSkills.find(sk => isSummonSkill(sk.id)) || null;
+    const list = allSkills.filter(sk => sk !== summonSk);
+    const wireSkill = (b, sk, why) => {
+      b.onclick = () => {
+        if (window.HeroSheet) HeroSheet.hideTip();
+        stopSkillPv(false);
+        if (touchUI() && skillTapPv(sk, b)) return;   // 触屏：不用选目标的技能第一下先预演，再点一下才放出去
+        armSkill(sk);
+      };
+      b.onmouseenter = () => {
+        if (window.HeroSheet) HeroSheet.tip(b, HeroSheet.skillTipHtml(sk, why));
+        if (G.arm || G.depth > 0) return;
+        setHint(`<b>${esc(sk.name)}</b>　${esc(sk.hint || "")}${why ? `　<span style="color:var(--foe)">${esc(why)}</span>` : ""}`);
+        scheduleSkillPv(sk, b);
+      };
+      b.onmouseleave = () => {
+        if (window.HeroSheet) HeroSheet.hideTip();
+        if (G.skillTap && touchUI()) return;
+        if (!G.arm) setHint("");
+        stopSkillPv(true);
+      };
+    };
+    const sb = $("g-summon");
+    if (sb) {
+      sb.hidden = !summonSk;
+      sb.onclick = sb.onmouseenter = sb.onmouseleave = null;
+      if (summonSk) {
+        const why = blockReason(actor, summonSk);
+        const back = /_return$/.test(summonSk.id);
+        const ele = mainElementOf(actor);
+        sb.className = "summonbtn" + (back ? " back" : "") + (G.arm && G.arm.skillId === summonSk.id ? " armed" : "");
+        sb.style.setProperty("--el", ele ? `var(--${ele})` : "var(--sk-hazard, #f2c230)");
+        sb.dataset.skill = summonSk.id;
+        sb.disabled = !!why;
+        const cost = [];
+        if (summonSk.cost.ap) cost.push(`行动 ${summonSk.cost.ap}`);
+        if (summonSk.cost.bonus) cost.push(`附赠 ${summonSk.cost.bonus}`);
+        sb.innerHTML = `${summonIcon(back)}<span class="sm-nm">${esc(summonSk.name)}</span><small>${esc(cost.join(" · ") || "不耗行动")} · Q</small>`;
+        sb.setAttribute("aria-label", `${summonSk.name}${why ? "：" + why : ""}`);
+        wireSkill(sb, summonSk, why);
+      }
+    }
+    G.summonShown = summonSk;
     list.forEach((sk, i) => {
       const why = blockReason(actor, sk);
       const b = el("button", "sk" + (G.arm && G.arm.skillId === sk.id ? " armed" : ""));
@@ -2933,26 +2945,8 @@
       if (!cost.length) cost.push("不耗行动");
       b.innerHTML = `<span class="key">${i < 9 ? i + 1 : ""}</span><span class="nm">${esc(sk.name)}</span><span class="cost">${cost.join(" ")}</span>`;
       if (why) { b.disabled = true; b.setAttribute("aria-label", `${sk.name}：${why}`); }
-      b.onclick = () => {
-        if (window.HeroSheet) HeroSheet.hideTip();
-        stopSkillPv(false);
-        if (touchUI() && skillTapPv(sk, b)) return;   // 触屏：不用选目标的技能第一下先预演，再点一下才放出去
-        armSkill(sk);
-      };
-      b.onmouseenter = () => {
-        // 悬停：浮窗里显示完整技能说明（照角色卡，skill-text.js）
-        if (window.HeroSheet) HeroSheet.tip(b, HeroSheet.skillTipHtml(sk, why));
-        if (G.arm || G.depth > 0) return;
-        setHint(`<b>${esc(sk.name)}</b>　${esc(sk.hint || "")}${why ? `　<span style="color:var(--foe)">${esc(why)}</span>` : ""}`);
-        scheduleSkillPv(sk, b);   // 停一会儿就按当前数值预演：消耗、会打到谁、附带的变化
-      };
-      b.onmouseleave = () => {
-        if (window.HeroSheet) HeroSheet.hideTip();
-        // 触屏点了一下正在预演：手指点别的地方才取消（触屏模拟出来的鼠标进出不可靠，点完一下就可能先「离开」）
-        if (G.skillTap && touchUI()) return;
-        if (!G.arm) setHint("");
-        stopSkillPv(true);
-      };
+      // 悬停：浮窗里显示完整技能说明（照角色卡，skill-text.js）；停一会儿就按当前数值预演
+      wireSkill(b, sk, why);
       box.appendChild(b);
     });
     G.skillsShown = list;
@@ -2982,6 +2976,26 @@
       else if (hotseat()) { et.disabled = et.disabled || !!HotseatGame.reason(unitById(HotseatGame.currentUnit())); et.innerHTML = "结束单位行动<small>空格</small>"; }
     }
     if (!G.arm && G.depth === 0 && !$("g-hint").dataset.flash) setHint(defaultHint());
+  }
+
+  /** 武器生物化的技能：唤出武器人（xxx_summon、绯秋分出当前刀），以及武器人的收回为武器（xxx_return） */
+  function isSummonSkill(id) { return /_summon$/.test(id || "") || /_return$/.test(id || ""); }
+  /** 角色的主属性（卡面 note「人类黑客 · 能量/电 · 直伤专精」里斜杠前那个）；武器人跟着主人 */
+  function mainElementOf(u) {
+    if (!u) return null;
+    const owner = isWeaponUnit(u) && typeof ownerOfWeapon === "function" ? ownerOfWeapon(u, state.units) : null;
+    const src = owner || u;
+    const part = String(src.note || "").split("·").map(x => x.trim())[1] || "";
+    const cn = part.split("/")[0].trim();
+    return (typeof ELE_BY_CN !== "undefined" && ELE_BY_CN[cn]) || null;
+  }
+  /** 武器生物化的图标：一把刀被圆形箭头环绕（唤出 = 顺时针、刀上冒出生命的火花；收回 = 逆时针） */
+  function summonIcon(back) {
+    return `<svg class="sm-ic" viewBox="0 0 40 40" aria-hidden="true"><path d="M20 4a16 16 0 1 1-14.3 8.8" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/>` +
+      (back ? `<path d="M3 6v7.5h7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>`
+            : `<path d="M20 4l-5-3M20 4l-4 4" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/>`) +
+      `<path d="M13 27 25 15l2.2 2.2L15.2 29.2z" fill="currentColor"/><path d="M11 25l6 6M10.5 30.5l2.5-2.5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>` +
+      (back ? "" : `<path d="M28 9l1.2 2.6 2.6 1.2-2.6 1.2L28 16.6l-1.2-2.6-2.6-1.2 2.6-1.2z" fill="currentColor"/>`) + `</svg>`;
   }
 
   function defaultHint() {
@@ -4172,6 +4186,7 @@
       }
       if (e.key === "f" || e.key === "F") { toggleFast(); return; }
       const n = Number(e.key);
+      if ((e.key === "q" || e.key === "Q") && G.summonShown && !$("g-summon").disabled && !$("g-summon").hidden) { e.preventDefault(); armSkill(G.summonShown); return; }
       if (n >= 1 && n <= 9 && G.skillsShown && G.skillsShown[n - 1]) {
         e.preventDefault();
         armSkill(G.skillsShown[n - 1]);
@@ -4251,6 +4266,7 @@
       G.statsFromResult = true;
       openStats();
     };
+    if ($("g-stats-merge")) $("g-stats-merge").onclick = () => { G.statsMerge = !G.statsMerge; openStats(); };   // 角色和自己的武器人并成一行看
     $("g-stats-close").onclick = () => {
       $("g-stats-sheet").classList.remove("show");
       if (G.statsFromResult && G.ended) $("g-result").classList.add("show");

@@ -986,7 +986,8 @@ function skillList(unit) {
   if (unit.kit === "longge") {
     const r = unit.resources || {};
     const gun = !!r.trigger && (r.ammo || []).length > 0;
-    add({ id: "longge_aa", name: "普通攻击", hint: gun ? "手杖：近距离 1atk 冰 +1击破 · 窥探1 / 霰弹枪：远距离 1.5atk 子弹属性 +1击破（耗 1 弹）" : "手杖 · 近距离 · 1atk 冰 +1击破 · 窥探1（扳机解锁后可用霰弹枪）" });
+    const near = typeof passivePlus === "function" && passivePlus(unit, 1);   // 枪管手杖+：霰弹枪普攻也能打近距离
+    add({ id: "longge_aa", name: "普通攻击", hint: gun ? `手杖：近距离 1atk 冰 +1击破 · 窥探1 / 霰弹枪：${near ? "近 / 远距离" : "远距离"} 1.5atk 子弹属性 +1击破（耗 1 弹）${near ? " · 近距离火弹溅射同区其他敌人 0.75atk" : ""}` : "手杖 · 近距离 · 1atk 冰 +1击破 · 窥探1（扳机解锁后可用霰弹枪）" });
     add({ id: "longge_chill", name: "冷气穿刺", hint: gun ? "手杖：近距离施加刺骨 / 霰弹枪：远距离特殊射击（蓝弹刺骨并治疗该区友方，红弹 0.5atk 火）" : "手杖 · 近距离 · 施加刺骨" });
     add({ id: "longge_spit", name: "吐酸", hint: "附赠 · 近距离 · 角色本身 atk 的酸液伤害 · 每场一次（兽人-蜥蜴种族特长）", bare: true });
     add({ id: "longge_safety", name: "解开保险", hint: "解锁扳机 · 查看最后一发子弹，可以把它移到最前面", minLv: 2 });

@@ -11,8 +11,16 @@
   const ATK_NAME = { combust: "爆燃", icebreak: "破冰", bolt: "雷击", etch: "蚀刻", backflow: "倒流", inertia: "惯性", diffract: "衍射" };
   const DEVICE = ["button", "lever"];
 
+  const ELE_NAME = { fire: "火", acid: "酸", electric: "电", ice: "冰", energy: "能量", physical: "物理", harmonic: "谐波" };
+  const LAYER_NAME = { flesh: "肉体", armor: "装甲", shield: "护盾", sand: "沙尘", spirit: "星灵" };
+  /** 聚焦：和本地卡片一样写「聚焦装甲 火→[冰]→电」（方括号是下一步要的属性） */
+  function focusText(u) {
+    return (u.focuses || []).map(f => "聚焦" + (LAYER_NAME[f.layerType] || f.layerType) + " " +
+      (f.seq || []).map((e, i) => i === f.step ? "[" + (ELE_NAME[e] || e) + "]" : (ELE_NAME[e] || e)).join("→")).join(" · ");
+  }
   /** 投影过的单位 → 单位卡要的快照（字段和 game.js · snapUnit 一样；主机不发的就留空） */
   function snapUnit(u) {
+    const d = u.display || {};
     const layers = (u.layers || []).map(l => ({ type: l.type || "flesh", cur: Math.max(0, Math.round(Number(l.current) || 0)), max: Math.max(0, Number(l.max) || 0) }));
     return {
       id: u.id, name: u.name || u.id, level: u.level || 1, isPlayer: !!u.isPlayer, kit: u.kit || "", zone: Number(u.zone) || 1,
@@ -22,8 +30,10 @@
       flying: !!u.flying, highEnergy: Number(u.highEnergy) || 0,
       hung: ((u.resources || {}).nextAtkFx || []).map(k => ATK_NAME[k] || k),
       ap: Number(u.ap) || 0, apMax: Number(u.apMax) || 0, bonus: Number(u.bonus) || 0, bonusMax: Number(u.bonusMax) || 0,
-      status: "", res: "", atk: Math.round(Number(u.atk) || 0), weapon: !!u.weaponOf, dur: null, marks: [], casts: [],
-      overkill: 0, killBig: false,
+      // 状态行、资源、实际 atk、武器耐久、首领标记、溢出伤害：主机算好放在 display 里（旧主机没有就退回能自己拼的部分）
+      status: d.status != null ? d.status : focusText(u), res: d.res || "", atk: Math.round(Number(d.atk != null ? d.atk : u.atk) || 0), weapon: !!u.weaponOf,
+      dur: d.dur ? { cur: Number(d.dur.cur) || 0, max: Number(d.dur.max) || 0, name: d.dur.name || "" } : null, marks: d.marks || [], casts: d.casts || [],
+      overkill: Number(d.overkill) || 0, killBig: !!d.killBig,
       badges: root.HudIcons ? HudIcons.unitBadges(u, u.marks) : []
     };
   }
@@ -32,7 +42,9 @@
     const name = ({ button: "按钮", lever: "拉杆", battery: "超充能电池", boom: "爆炸桶", acid: "酸液桶", scrap: "碎渣机炮", turret: "防卫自律炮台", ironwall: "铁壁", scrapwall: "废铁墙", dome: "防护罩" })[p.kind] || p.kind || "配置物";
     return {
       id: "prop:" + p.id, name: p.name || name, isPlayer: p.faction !== "enemy", isProp: true, isDevice: DEVICE.includes(p.kind),
-      zone: Number(p.zone) || 1, level: p.level || 1, atk: 0, layers: [{ type: "armor", max, cur }],
+      zone: Number(p.zone) || 1, level: p.level || 1, atk: 0,
+      // 铁壁的外层护盾（川川多耗电能加的）画在装甲外面
+      layers: (Number(p.shieldMax) > 0 ? [{ type: "shield", max: Number(p.shieldMax), cur: Math.max(0, Number(p.shield) || 0) }] : []).concat([{ type: "armor", max, cur }]),
       def: 0, defMax: 0, ap: 0, apMax: 0, bonus: 0, bonusMax: 0, status: name, res: p.kind === "battery" || p.kind === "turret" ? (p.faction === "enemy" ? "敌方" : "我方") : "",
       highEnergy: 0, flying: false, stunned: false, dying: false, dead: !!p.destroyed || (cur <= 0 && !DEVICE.includes(p.kind)), hidden: false, marks: [], casts: [], hung: [], badges: []
     };
@@ -126,7 +138,32 @@
         const cls = fieldClass(f), tags = fieldText(f);
         [...z.classList].filter(c => /^field-/.test(c)).forEach(c => z.classList.remove(c));
         if (cls) z.classList.add(cls);
-        z.querySelector(".zlabel").textContent = `${z.dataset.num} 区${tags ? "　" + tags : ""}`;
+        const zv = (data.zoneView || {})[z.dataset.num] || {};
+        const lab = z.querySelector(".zlabel");
+        lab.textContent = `${z.dataset.num} 区${tags ? "　" + tags : ""}`;
+        if (zv.wind) lab.appendChild(make("span", "zwind " + (zv.wind === "顺风" ? "down" : zv.wind === "逆风" ? "up" : "calm"), esc("沙暴 " + zv.wind)));
+        // 区域预警：敌人已经标定、之后回合才落地的范围攻击（和本地战斗画面一样）
+        const th = zv.threats || [];
+        z.classList.toggle("threat", th.length > 0);
+        z.classList.toggle("threat-ready", th.some(t => t.ready));
+        let tb = z.querySelector(".zthreat");
+        if (!th.length) { if (tb) tb.remove(); }
+        else {
+          if (!tb) { tb = make("div", "zthreat"); z.appendChild(tb); }
+          tb.innerHTML = th.map(t => `<span class="${t.ready ? "rd" : ""}">${esc(t.label)}${t.from ? `<i>${esc(t.from)}</i>` : ""}</span>`).join("");
+        }
+        // 踩塔：区域边框 + 角上的牌子
+        const tw = zv.towers || [];
+        z.classList.toggle("tower", tw.length > 0);
+        z.classList.toggle("tower-ready", tw.some(t => t.left <= 0));
+        z.classList.toggle("tower-short", tw.some(t => t.have < t.need));
+        let tt = z.querySelector(".ztower");
+        if (!tw.length) { if (tt) tt.remove(); }
+        else {
+          if (!tt) { tt = make("div", "ztower"); z.appendChild(tt); }
+          const when = (t) => t.left > 0 ? `${t.left} 回合后` : `这回合${t.phase === "player" ? "我方" : "敌人"}回合开始时`;
+          tt.innerHTML = tw.map(t => `<span class="${t.have < t.need ? "short" : "ok"}" title="${esc(`${t.by || ""} 的${t.name || ""}：${when(t)}落下${t.delayed ? "（首领失衡，会推迟一回合）" : ""}。至少 ${t.need} 人站在这个区里踩住${t.soak > 0 ? `，每人挨 ${t.soak}` : ""}；没人踩住${t.fail != null ? (t.fail > 0 ? `，我方全员各挨 ${t.fail}` : "，我方全员挨巨额伤害") : "，会触发严重惩罚"}。不能格挡。`)}">${esc(t.name || "")} ${t.left > 0 ? t.left : "!"} · ${t.have}/${t.need} 人</span>`).join("");
+        }
         z.classList.toggle("is-move-target", !!(zoneOpts && zoneOpts.has(Number(z.dataset.num))));
         setPickBadge(z, zoneNo ? zoneNo.get(String(z.dataset.num)) : 0);
       });

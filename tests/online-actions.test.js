@@ -174,3 +174,26 @@ test("inspection restores draft side effects on menu failure and requires an exp
   unchanged(f, () => assert.throws(() => f.menu({ skill: "ruby_summon" }), /fixture preview/));
   assert.equal(f.c.GAME.sim, false);
 });
+
+test("联机展示：主机把本地卡片的状态行、资源、实际 atk、武器耐久、区域预警按白名单发给玩家", () => {
+  const f = fixture("kolt", "ruby");
+  const { c, state, actor, enemy } = f;
+  enemy.coverBy = actor.id; enemy.noMove = true; enemy.tauntTo = actor.id;
+  enemy.focuses = [{ layerType: "flesh", seq: ["fire", "ice"], step: 1 }];
+  actor.resources.bit = "acid";
+  const out = plain(c.OnlineView.projectState(state, {}));
+  const e = out.units.find(u => u.id === enemy.id), k = out.units.find(u => u.id === actor.id);
+  assert.match(e.display.status, /掩护[（(]柯尔特[）)]/);
+  assert.match(e.display.status, /无法移动/);
+  assert.match(e.display.status, /嘲讽/);
+  assert.match(e.display.status, /聚焦肉体 火→\[冰\]/);
+  assert.match(k.display.status, /酸液炮/);
+  assert.match(k.display.res, /酸液炮/);
+  assert.equal(k.display.atk, Math.round(c.effectiveAtk(actor, state.units)));
+  assert.ok(k.display.dur && k.display.dur.max > 0, "柯尔特手里武器的耐久");
+  assert.equal(e.display.res, undefined, "敌人不发资源行");
+  // 玩家端的卡片用上这些字段
+  const snap = c.OnlineBattle ? c.OnlineBattle.snapUnit(e) : null;
+  if (snap) assert.match(snap.status, /掩护/);
+  assert.doesNotMatch(JSON.stringify(out), /坚毅|shp/i);
+});

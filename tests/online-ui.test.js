@@ -358,3 +358,67 @@ test("D3 display: 加入时去掉粘贴进来的空格和标点", async t => {
   assert.equal((await calls(page)).find(c => c.kind === "join").args.roomCode, "ABCD23");
   assert.deepEqual(o.errors, []);
 });
+
+test("跑团地图：玩家也能打开地图，看到主持人标的队伍位置（只读）", async t => {
+  const o = await open(t); if (!o) return; const { page } = o;
+  for (const file of ["world-data.js", "world-travel.js", "world-map.js"]) await page.addScriptTag({ path: path.resolve(__dirname, "..", file) });
+  await page.addStyleTag({ path: path.resolve(__dirname, "..", "world-map.css") });
+  const place = await page.evaluate(() => WORLD_PLACES[0]);
+  await player(page, { screen: "exploration" });
+  await page.evaluate(p => { fixture.view.packet.view.map = { place: p.id, x: null, y: null }; fixture.emit(); }, place);
+  const btn = page.locator('[data-online="map"]');
+  assert.equal(await btn.count(), 1, "探索画面有「地图」按钮");
+  await btn.click();
+  await page.waitForSelector(".wm.show", { state: "attached" });
+  const text = await page.locator(".wm").textContent();
+  assert.match(text, new RegExp("队伍在" + place.name));
+  // 只读：玩家不能把队伍拖到别处（没有「把队伍移到这里」）
+  assert.doesNotMatch(text, /把队伍移到这里/);
+  assert.deepEqual(o.errors, []);
+});
+
+test("D3 display: 敌人身上的聚焦在玩家画面上写出来（和本地卡片一样）", async t => {
+  const o = await open(t); if (!o) return; const { page } = o;
+  await player(page);
+  await page.evaluate(() => { fixture.view.state.units[2].focuses = [{ layerType: "flesh", seq: ["fire", "ice", "electric"], step: 1 }]; fixture.emit(); });
+  assert.match(await page.locator('#online-stage [data-unit-id="enemy"]').first().innerText(), /聚焦肉体 火→\[冰\]→电/);
+  assert.deepEqual(o.errors, []);
+});
+
+test("D3 display: 主机发来的状态行、资源、武器耐久、区域预警都画在玩家的战场上", async t => {
+  const o = await open(t); if (!o) return; const { page } = o;
+  await player(page);
+  await page.evaluate(() => {
+    const st = fixture.view.state;
+    st.units[2].display = { status: "掩护(红玉) · 无法移动 · 嘲讽", atk: 12 };
+    st.units[0].display = { status: "扳机解锁", res: "纳米 40/100 · 机甲中", dur: { cur: 3, max: 5, name: "银翼" } };
+    st.zoneView = { 2: { threats: [{ label: "火雨 · 下回合", from: "敌人", ready: false }] } };
+    fixture.emit();
+  });
+  const enemy = await page.locator('#online-stage [data-unit-id="enemy"]').first().innerText();
+  assert.match(enemy, /掩护/); assert.match(enemy, /无法移动/); assert.match(enemy, /ATK 12/);
+  const mine = await page.locator('#online-stage [data-unit-id="a"]').first().innerText();
+  assert.match(mine, /纳米 40\/100/);
+  assert.match(await page.locator('#online-stage .g-zone[data-num="2"] .zthreat').innerText(), /火雨/);
+  assert.deepEqual(o.errors, []);
+});
+
+test("D3 display: 行动结算后舞台不跳回最上面（玩家往下翻着看战场时）", async t => {
+  const o = await open(t, true); if (!o) return; const { page } = o;
+  await player(page);
+  await page.evaluate(() => {
+    for (let i = 0; i < 8; i++) fixture.view.state.units.push({ id: "e" + i, name: "敌" + i, isPlayer: false, zone: 2, level: 1, ap: 1, apMax: 1, bonus: 0, bonusMax: 0, def: 3, defMax: 3, layers: [{ type: "flesh", current: 9, max: 9 }], statuses: {}, resources: {} });
+    fixture.emit();
+  });
+  const before = await page.evaluate(() => { const s = document.getElementById("online-stage"); s.scrollTop = s.scrollHeight; return s.scrollTop; });
+  assert.ok(before > 200, "舞台比一屏高、已经往下翻了");
+  await page.evaluate(() => {
+    const p = JSON.parse(JSON.stringify(fixture.view.packet)); p.state = JSON.parse(JSON.stringify(fixture.view.state)); p.screen = "battle";
+    p.state.turnNo = 2; p.state.units[2].layers[0].current = 20; p.publicLogs = [...p.publicLogs, { text: "红玉 · 普通攻击" }]; p.view.currentUnitId = "b";
+    return fixture.receive(p);
+  });
+  await page.waitForTimeout(300);
+  const after = await page.evaluate(() => document.getElementById("online-stage").scrollTop);
+  assert.ok(after > before - 200, `滚动位置保留（${before} → ${after}）`);
+  assert.deepEqual(o.errors, []);
+});

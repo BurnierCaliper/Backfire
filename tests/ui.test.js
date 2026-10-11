@@ -498,7 +498,8 @@ test("单人模式：选主角、三名伙伴、第二副职责出发；战斗�
       if ([...document.querySelectorAll(".unit-wrap")].some(w => /柯尔特/.test(w.textContent))) window.__partner = true;
     }).observe(document.body, { subtree: true, childList: true });
   });
-  const idx = await page.evaluate(() => GAME.gameSkills(unitById(GAME.actorId)).findIndex(s => s.id === "solo_support"));
+  // 数字键对应技能栏里显示的顺序（武器生物化单独放在结束回合左边的按钮里，不占数字键）
+  const idx = await page.evaluate(() => (GAME.skillsShown || []).findIndex(s => s.id === "solo_support"));
   assert.ok(idx >= 0, "主角有支援技能");
   await page.keyboard.press(String(idx + 1));
   await page.waitForSelector("#g-choice.show");
@@ -959,8 +960,8 @@ test("战斗评分：右上角显示评价并随得分变化；胜利时按评�
   assert.match(await page.textContent("#g-result .grade-badge"), /S/);
   assert.match(await page.textContent("#g-result p"), /战斗经验 ×2，每人额外 \+\d+/);
   const xp = await page.evaluate(() => partyHeroes().map(h => h.xp));
-  // 狂徒 lv1 = 5 经验，4 人平分每人 2；S 再翻一倍 → 每人 4
-  assert.deepEqual(xp, [4, 4, 4, 4]);
+  // 狂徒 lv1 = 5 经验，4 人平分每人 2；S 再翻一倍 → 每人 4；跑团战斗奖励：队伍最高 1 级 × 20 ÷ 4 人 = 5 → 每人 9
+  assert.deepEqual(xp, [9, 9, 9, 9]);
   await page.click("#g-explore-back");
   const last = await page.evaluate(() => [...document.querySelectorAll("#tr-log li")].pop().innerText);
   assert.match(last, /评价 S/);
@@ -981,7 +982,7 @@ test("奖励结算：真实 UI 评级触发 3→4 级，继续后与无界面的
   // 每人离 4 级仍差 1 点；只有 S 评价补发的 11 点经验才能触发升级。
   const finalBattleState = () => {
     state.turnNo = 4;
-    state.battleScore.total = 1500;
+    state.battleScore.total = battleGrade().lines.find(x => x[0] === "S")[1];   // 这场的 S 线（固定线 × 0.65 + 基准分 × 倍数 × 0.35）
     state.battleScore.hurt = true;
     state.battleGains.xp = 11;
     state.units.filter(u => !u.isPlayer).forEach(u => { u.dead = true; });
@@ -1358,7 +1359,7 @@ test("悬停技能就预演：不用选目标的技能（拉响引擎）——�
   assert.deepEqual(o.errors, []);
 });
 
-test("悬停技能就预演：要选目标的技能（柯尔特普攻）每个敌人卡上出伤害牌、预览框每个目标一行，移开清掉；有分步的（直流短接）只写说明；瞄准预览也写资源变化", async (t) => {
+test("悬停技能就预演：要选目标的技能（柯尔特普攻）只高亮能选的目标、不在卡上出伤害牌（不像范围技能）；有分步的（直流短接）只写说明；瞄准一个目标时才预览结算", async (t) => {
   const o = await open(t); if (!o) return;
   const { page } = o;
   await newTrpg(page);
@@ -1373,30 +1374,17 @@ test("悬停技能就预演：要选目标的技能（柯尔特普攻）每个�
   const foes = await page.evaluate(() => state.units.filter(u => !u.isPlayer && !u.dead).map(u => u.id));
   const before = await page.evaluate(() => JSON.stringify(state.units.map(u => [u.id, u.ap, (u.layers || []).map(l => l.current), u.def])) + state.logPages.reduce((n, p) => n + p.lines.length, 0) + "|" + Commands.history().length);
   await page.locator("#g-skills button.sk", { hasText: "普通攻击" }).hover();
-  await page.waitForFunction(() => /普通攻击 · 预演/.test(document.querySelector("#g-pvbox h4").textContent));
-  const rows = await page.$$eval("#g-pvbox .pv-row", rs => rs.map(r => r.textContent));
-  assert.equal(rows.length, foes.length, "每个目标一行：" + rows.join(" / "));
-  rows.forEach(r => assert.match(r, /：\S+ \d+(–\d+)?.* · 击破 \d/, r));
-  const dmg = rows.map(r => Number(r.match(/：\S+ (?:\d+–)?(\d+)/)[1]));   // 伤害的上限
-  assert.deepEqual(dmg, dmg.slice().sort((a, b) => b - a), "按伤害从高到低");
-  for (const f of foes) assert.match(await page.textContent(`.unit-wrap[data-id="${f}"] .pvtag.show`), /\d[\s\S]*击破/, "敌人卡上有伤害牌");
-  assert.equal(await page.locator(`.unit-wrap[data-id="${kolt}"] .pvtag.show`).count(), 0, "别的单位的变化不画");
-  // 好几张卡同时出牌子：缩小、压在自己卡片的下边上，不盖住别的卡，也不压自己的血条和架势格
-  const tagLayout = await page.evaluate(() => {
-    const hit = (a, b) => a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1;
-    const wraps = [...document.querySelectorAll(".unit-wrap")];
-    return [...document.querySelectorAll(".pvtag.show")].map(t => {
-      const own = t.closest(".unit-wrap"), r = t.getBoundingClientRect();
-      const under = [...wraps.filter(w => w !== own), own.querySelector(".u-hp"), ...own.querySelectorAll(".pip")];
-      return { compact: t.classList.contains("compact"), covers: under.filter(x => hit(r, x.getBoundingClientRect())).length };
-    });
-  });
-  assert.ok(foes.length > 1 && tagLayout.every(x => x.compact && x.covers === 0), JSON.stringify(tagLayout));
+  await page.waitForFunction(() => /普通攻击 · 选目标/.test(document.querySelector("#g-pvbox h4").textContent));
+  // 能选的目标高亮（和选目标时一样），卡上不出伤害牌
+  const cand = await page.$$eval(".unit-wrap.pv-cand", ws => ws.map(w => w.dataset.id));
+  assert.deepEqual(cand.slice().sort(), foes.slice().sort(), "能选的敌人都高亮");
+  assert.equal(await page.locator(".pvtag.show").count(), 0, "悬停技能按钮时不在每张卡上画伤害");
+  assert.match(await page.textContent("#g-pvbox"), /把鼠标移到目标上/);
   assert.equal(await apOf(page, kolt), ap0);
   assert.equal(await page.evaluate(() => GAME.arm), null, "没有进入选目标");
   await page.mouse.move(5, 5);
-  await page.waitForFunction(() => !document.querySelector(".pvtag.show"));
-  assert.ok(!/预演/.test(await pvTitle(page)), "移开回到默认说明");
+  await page.waitForFunction(() => !document.querySelector(".unit-wrap.pv-cand"));
+  assert.ok(!/预演|选目标/.test(await pvTitle(page)), "移开回到默认说明");
   // 有分步选择的技能：只写消耗和先选什么，不预演
   await page.locator("#g-skills button.sk", { hasText: "直流短接" }).hover();
   await page.waitForFunction(() => /^直流短接/.test(document.querySelector("#g-pvbox h4").textContent));
@@ -1460,4 +1448,33 @@ test("手机竖屏：不用选目标的技能（拉响引擎）第一下只预�
   await page.waitForFunction(i => state.units.find(u => u.id === i).resources.engine && GAME.depth === 0, xia, { timeout: 15000 });
   assert.equal(await apOf(page, xia), ap0 - 1, "第二下才放出去");
   assert.deepEqual(errors, []);
+});
+
+test("战场数据 / 整局数据：「合并武器人」把角色和自己的武器人并成一行看", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await newTrpg(page);
+  await startBattle(page);
+  const rows = [
+    { id: "a", name: "龙哥", sub: false, dmg: 30, brk: 2, kills: 1, blocks: 1, blockOk: 1, taken: 5, heal: 0, score: 10 },
+    { id: "w", name: "小朋友", sub: true, dmg: 10, brk: 3, kills: 0, blocks: 2, blockOk: 1, taken: 4, heal: 6, score: 4 },
+    { id: "b", name: "柯尔特", sub: false, dmg: 60, brk: 1, kills: 2, blocks: 0, blockOk: 0, taken: 9, heal: 0, score: 20 }];
+  const m = await page.evaluate(r => GAME.mergeStatRows(r), rows);
+  assert.equal(m.length, 2);
+  assert.equal(m[0].name, "龙哥＋小朋友");
+  assert.deepEqual([m[0].dmg, m[0].brk, m[0].blocks, m[0].blockOk, m[0].taken, m[0].heal, m[0].score], [40, 5, 3, 2, 9, 6, 14]);
+  assert.equal(m[0].share, 40);
+  assert.equal(m[1].share, 60);
+  const c = await page.evaluate(r => CareerLog.mergeRows(r.map(x => Object.assign({ battles: 3 }, x))), rows);
+  assert.equal(c[0].name, "龙哥＋小朋友");
+  assert.equal(c[0].battles, 3, "出场按主人算");
+  assert.equal(Math.round(c[0].takenShare), 50);
+  await page.click("#g-stats");
+  assert.equal((await page.textContent("#g-stats-merge")).trim(), "合并武器人");
+  await page.click("#g-stats-merge");
+  assert.equal((await page.textContent("#g-stats-merge")).trim(), "分开武器人");
+  assert.match(await page.textContent("#g-stats-body"), /瑞比/);
+  await page.click("#g-stats-merge");
+  await page.click("#g-stats-close");
+  assert.deepEqual(o.errors, []);
 });

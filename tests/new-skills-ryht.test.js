@@ -234,6 +234,20 @@ test("灯 盾击突进：移动后 1atk 物理 + 震荡；耗圣盾再 1 击破 
   assert.ok(foes[2].def < d0);
 });
 
+test("盾击突进：像界面一样先选了目标（state.targetId）也能打移动后同区、出发时距离 1 的敌人", () => {
+  const { c, S, foes, K } = setup(["tou"]);
+  const t = K("tou");
+  t.resources.shield = 0;
+  const hp0 = foes[2].layers[0].current;
+  S.attackerId = t.id; S.targetId = foes[2].id;
+  S.skillFlow = { id: "tou_bash", actorId: t.id, picks: { dest: 2, target: foes[2].id }, index: 99 };
+  c.runSkill("tou_bash");
+  S.skillFlow = null;
+  assert.equal(t.zone, 2, "移动过去了");
+  assert.ok(foes[2].layers[0].current < hp0, "打到了");
+  assert.equal(c.skillRangeFor(t, "tou_bash").max, 1);
+});
+
 test("灯 赤诚控诉：1atk 谐波，嘲讽，圣盾 +2（最多 3）；决一死战中的敌人再虚弱", () => {
   const { c, S, foes, K } = setup(["tou"]);
   const t = K("tou");

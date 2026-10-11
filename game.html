@@ -167,6 +167,7 @@
     <div class="hud-row">
       <div class="hi-gauge" id="g-gauge" aria-label="角色仪表"></div>
       <div class="skills" id="g-skills"></div>
+      <div class="hud-summon"><button class="summonbtn" id="g-summon" hidden></button></div>
       <div class="hud-side"><button class="endturn" id="g-endturn">结束回合<small>空格</small></button></div>
     </div>
     <div class="hint" id="g-hint"></div>
@@ -388,7 +389,7 @@
 </div>
 <div class="sheet" id="g-stats-sheet">
   <div class="sheet-card stats-card">
-    <div class="sheet-head"><h3>战场数据</h3><button class="g-btn small" id="g-stats-career" data-career="1" title="整局 / 整个跑团存档的累计数据">整局数据</button><button class="g-btn small" id="g-stats-copy">复制</button><button class="g-btn" id="g-stats-close">关闭</button></div>
+    <div class="sheet-head"><h3>战场数据</h3><button class="g-btn small" id="g-stats-career" data-career="1" title="整局 / 整个跑团存档的累计数据">整局数据</button><button class="g-btn small" id="g-stats-merge" title="把角色和自己的武器人并成一行看">合并武器人</button><button class="g-btn small" id="g-stats-copy">复制</button><button class="g-btn" id="g-stats-close">关闭</button></div>
     <div id="g-stats-body"></div>
     <p class="stats-note">伤害 / 击破：打在敌人身上的每一击，加上自己行动里引发的连带伤害（感电、共振、余波……）。输出占比：占全队造成伤害的百分比。协助格挡写「成功 / 发动次数」；格挡规避伤害：协助格挡成功挡下的这一击本来的伤害（未算抗性），空手格挡成功少挨的那一半（得分：每点 1 分）。减伤减免：受击时被天气、血量层抗性、角色能力、减半效果等减免掉的伤害，完全免伤也算（得分：每点 1.5 分）。承伤含坚毅生命和持续伤害。击杀按最后一击算。治疗：自己的行动让其他友方多出来的血量和护盾。撤销会连同数据一起回退。</p>
   </div>
