@@ -358,3 +358,21 @@ test("D3 display: 加入时去掉粘贴进来的空格和标点", async t => {
   assert.equal((await calls(page)).find(c => c.kind === "join").args.roomCode, "ABCD23");
   assert.deepEqual(o.errors, []);
 });
+
+test("跑团地图：玩家也能打开地图，看到主持人标的队伍位置（只读）", async t => {
+  const o = await open(t); if (!o) return; const { page } = o;
+  for (const file of ["world-data.js", "world-travel.js", "world-map.js"]) await page.addScriptTag({ path: path.resolve(__dirname, "..", file) });
+  await page.addStyleTag({ path: path.resolve(__dirname, "..", "world-map.css") });
+  const place = await page.evaluate(() => WORLD_PLACES[0]);
+  await player(page, { screen: "exploration" });
+  await page.evaluate(p => { fixture.view.packet.view.map = { place: p.id, x: null, y: null }; fixture.emit(); }, place);
+  const btn = page.locator('[data-online="map"]');
+  assert.equal(await btn.count(), 1, "探索画面有「地图」按钮");
+  await btn.click();
+  await page.waitForSelector(".wm.show", { state: "attached" });
+  const text = await page.locator(".wm").textContent();
+  assert.match(text, new RegExp("队伍在" + place.name));
+  // 只读：玩家不能把队伍拖到别处（没有「把队伍移到这里」）
+  assert.doesNotMatch(text, /把队伍移到这里/);
+  assert.deepEqual(o.errors, []);
+});

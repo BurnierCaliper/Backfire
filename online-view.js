@@ -352,6 +352,15 @@
       if (isTitle) dto.title = true;
       return [dto];
     });
+    // 跑团地图：队伍位置（地点 id + 地图上的百分比坐标），玩家只读
+    const map = get(view, "map");
+    if (obj(map)) {
+      const place = get(map, "place");
+      const dto = { place: typeof place === "string" && /^[a-z0-9_-]{1,40}$/i.test(place) ? place : null };
+      const x = number(get(map, "x")), y = number(get(map, "y"));
+      if (x !== undefined && y !== undefined) { dto.x = Math.max(0, Math.min(100, x)); dto.y = Math.max(0, Math.min(100, y)); }
+      out.map = dto;
+    }
     // 主持人的大字（像 /title）：主标题、小字、风格、停留秒数
     const title = get(view, "title");
     if (obj(title) && id(get(title, "id"))) {
