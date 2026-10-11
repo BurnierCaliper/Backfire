@@ -57,7 +57,7 @@ test("碎渣重炮（电钻机枪）：选区域，子弹随机打该区敌人�
   k.resources.bit = "drill";
   const zones = c.skillFlowSteps("kolt_cannon", k, {}).find(s => s.key === "dest").zones;
   assert.ok(zones.includes(1) && zones.includes(2));
-  S.lastBrokenLayer = { type: "flesh", lost: 40, dmg: 40 };
+  S.lastBrokenLayer = null; k.resources.rotStore = { flesh: 40 };   // 废料从腐蚀记录来（敌人血量层来的废料封顶为生命上限一半）
   const p = pops(c);
   const defs0 = foes.map(f => f.def);
   cmd(c, { actor: k.id, skill: "kolt_cannon", picks: { dest: 1 } });
@@ -97,7 +97,7 @@ test("碎渣重炮（酸液迫击炮）：距离 1-2、越墙；废料量的酸 
     assert.equal(c.skillTargetError(k, "kolt_cannon", far), null);
     far.zone = 1; S.zoneMode = mode0;
   }
-  S.lastBrokenLayer = { type: "flesh", lost: 90, dmg: 90 };
+  S.lastBrokenLayer = null; k.resources.rotStore = { flesh: 90 };   // 废料从腐蚀记录来（敌人血量层来的废料封顶为生命上限一半）
   const p = pops(c);
   const def0 = foes[2].def;
   cmd(c, { actor: k.id, skill: "kolt_cannon", target: foes[2].id, picks: { target: foes[2].id } });
@@ -221,4 +221,19 @@ test("柯尔特电钻普攻削弱：0.3 / 0.3 / 0.4 ×atk 三段电击，共 2 �
   const atk = c.effectiveAtk(k, S.units);
   assert.deepEqual(hits.map(x => x.value), [Math.floor(atk * 0.3), Math.floor(atk * 0.3), Math.floor(atk * 0.4)]);
   assert.equal(foes[0].def, def0 - 2);
+});
+
+test("废料计数：敌人失去血量层得来的废料不超过柯尔特生命上限的一半（腐蚀记录、转移注意的装甲另算）", () => {
+  const { c, S } = setup(["kolt"], 1);
+  const k = c.findKit("kolt", S.units);
+  k.level = 2;
+  const cap = Math.floor(c.baseMaxHp(k) * 0.5);
+  S.lastBrokenLayer = { type: "armor", lost: cap * 3, dmg: cap * 3 };
+  k.resources.rotStore = {}; k.resources.divertArmor = 0;
+  assert.equal(c.koltScrapTotal(k), cap, "大层封顶为生命上限一半");
+  k.resources.rotStore = { flesh: 3 };
+  assert.equal(c.koltScrapTotal(k), cap + 3);
+  S.lastBrokenLayer = { type: "armor", lost: cap - 1, dmg: cap - 1 };
+  k.resources.rotStore = {};
+  assert.equal(c.koltScrapTotal(k), cap - 1, "不到上限照实算");
 });

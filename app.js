@@ -5124,7 +5124,9 @@ function convertRasLight(pct, bonusRate) {
 function koltScrapTotal(k) {
   k = k || findKit("kolt", state.units);
   const r = (k && k.resources) || {};
-  const last = state.lastBrokenLayer ? Math.floor(Number(state.lastBrokenLayer.lost) || 0) : 0;
+  // 敌人失去血量层得来的废料：不超过柯尔特生命上限的一半（和废物利用的封顶一样）
+  const cap = k && typeof baseMaxHp === "function" ? Math.floor(baseMaxHp(k) * 0.5) : Infinity;
+  const last = state.lastBrokenLayer ? Math.min(cap, Math.floor(Number(state.lastBrokenLayer.lost) || 0)) : 0;
   const rot = Object.keys(r.rotStore || {}).reduce((s, t) => s + Math.floor(Number(r.rotStore[t]) || 0), 0);
   return Math.max(0, last + rot + Math.floor(Number(r.divertArmor) || 0));
 }
