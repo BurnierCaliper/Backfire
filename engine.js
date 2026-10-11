@@ -385,6 +385,7 @@ const SKILL_RANGE = {
   latte_claw: { min: 0, max: 0 },
   naruto_frost: { min: 0, max: 0 },
   tou_accuse: { min: 0, max: 1 },
+  tou_bash: { min: 0, max: 1 },        // 盾击突进：先移动 ≤1，再打到达后同区的敌人（按出发位置算是距离 0–1）
   mochi_bite: { min: 0, max: 0 },
   yuito_duet: { min: 0, max: 99 },
 };
