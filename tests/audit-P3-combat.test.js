@@ -263,7 +263,7 @@ test("武器人主动收回为武器要和持有者同区（不扣行动点）�
 
 /* ---------- 7. 耐久 0 的武器 ---------- */
 
-test("在场武器人耐久被格挡扣到 0：收回后主人空手，本场唤不出来", () => {
+test("在场武器人耐久被格挡扣到 0：这一场才坏的，收回后照常能用（atk 减半），本场唤不出来", () => {
   const { c, S } = setup(["kolt", "helu"]);
   const kolt = kit(S, "kolt"), helu = kit(S, "helu"), foe = foes(S)[0];
   S.units.forEach(u => { u.zone = 1; });
@@ -279,8 +279,8 @@ test("在场武器人耐久被格挡扣到 0：收回后主人空手，本场唤
   torque.ap = 1;
   act(c, S, torque, null, "torque_return");
   assert.equal(torque.hidden, true);
-  assert.equal(c.isUnarmed(kolt), true, "耐久 0 的武器收回来也只能空手");
-  assert.equal(c.effectiveAtk(kolt, S.units), kolt.personalAtk);
+  assert.equal(c.isUnarmed(kolt), false, "这一场才坏的：照常拿着");
+  assert.equal(c.effectiveAtk(kolt, S.units), kolt.personalAtk + Math.floor(kolt.weaponAtk / 2), "武器 atk 减半");
   assert.equal(c.spawnWeapon(kolt, "torque"), null, "本场唤不出来");
   assert.match(c.weaponSummonWhy(kolt, "torque"), /耐久为 0/);
 });

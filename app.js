@@ -5636,7 +5636,7 @@ function eligibleAssisters(breaker, broken) {
 function assistWeaponReady(u) {
   if (!isUnarmed(u)) return true;
   return fieldUnits().some(w => isWeaponUnit(w) && (w.weaponOf === u.kit || (u.linkedKits || []).indexOf(w.kit) >= 0) &&
-    !(typeof weaponBroken === "function" && weaponBroken(w.kit)));
+    !(typeof weaponUnusable === "function" && weaponUnusable(w.kit)));
 }
 
 function forceRecallWeapons(owner) {
@@ -5653,8 +5653,8 @@ function forceRecallWeapons(owner) {
     }
     w.hidden = true;
     notes.push(`${w.name} 因协助攻击被立刻收回为武器。`);
-    // 耐久归零的武器收回来也不能用：照常空手（绯秋换另一把刀）
-    if (typeof weaponBroken === "function" && weaponBroken(w.kit) && typeof heldWeaponKit === "function" && heldWeaponKit(owner) === w.kit) {
+    // 开战前就坏了的武器收回来也不能用：照常空手（绯秋换另一把刀）；战斗中才坏的照常能用（减半）
+    if (typeof weaponUnusable === "function" && weaponUnusable(w.kit) && typeof heldWeaponKit === "function" && heldWeaponKit(owner) === w.kit) {
       disarmBrokenWeapon(owner, notes);
     }
   });
@@ -5722,7 +5722,7 @@ function applyKnockdown(unit, notes, opt) {
 /* ===== 武器人倒下与取回 =====
  * 倒下的那一刻扣 2 点耐久（以前在战斗结束时扣），这把武器本场记为「倒下过」。
  * 主人走到它倒下的区，花 1 行动点「取回武器」：拿回手里，本场不能再唤出，武器提供的 atk 和格挡加成减半
- * （战斗中修好耐久也一样减半）。耐久扣到 0 的取回来也是坏的，修好之前照样空手。 */
+ * （战斗中修好耐久也一样减半）。这一场里耐久扣到 0 的照样能取回、能用（减半）；只有开战前就坏了的武器才完全用不了。 */
 function onWeaponUnitDown(u, notes) {
   state.weaponFallen = state.weaponFallen || {};
   if (!state.weaponFallen[u.kit]) state.weaponFallen[u.kit] = "down";
@@ -5749,7 +5749,7 @@ function retrieveWeapon(owner, w, lines) {
   w._retrieved = true;
   state.weaponFallen = state.weaponFallen || {};
   state.weaponFallen[w.kit] = "back";
-  const broken = typeof weaponBroken === "function" && weaponBroken(w.kit);
+  const broken = typeof weaponUnusable === "function" && weaponUnusable(w.kit);
   if (owner.kit === "hiaki") {
     owner.resources = owner.resources || {};
     if (w.kit === "niu") owner.resources.niuOut = false;
@@ -5759,7 +5759,7 @@ function retrieveWeapon(owner, w, lines) {
     owner.weaponHeld = true;
   }
   lines.push(`${owner.name} 取回了 ${w.name}。本场不能再唤出，武器 atk 和格挡加成减半。`);
-  if (broken) lines.push(`${w.name} 耐久为 0，修好之前还是只能空手。`);
+  if (broken) lines.push(`${w.name} 开战前就已经损坏，修好之前还是只能空手。`);
 }
 
 function queueAssistAttack(breaker, broken) {
@@ -7467,6 +7467,7 @@ function spawnWeapon(owner, kit) {
   if (state.units.some(u => u.kit === kit && !u.hidden && !u.fused)) return null;
   // 耐久为 0 的武器唤不出来（weaponSummonWhy 写了原因；以前在场时耐久被打光，收回后还能再唤出）
   if (typeof weaponBroken === "function" && weaponBroken(kit)) return null;
+  if (typeof weaponHalved === "function" && weaponHalved(kit)) return null;   // 本场受损过（倒下 / 耐久归零 / 战斗中修理）：不能再唤出
   // 同场战斗内血量继承：收回时只是隐藏，再唤出沿用上次的血量层，并移除旧的隐藏单位
   const prev = state.units.find(x => x.kit === kit && x.hidden && !x.fused);
   if (prev && (prev.layers || []).reduce((s, l) => s + Math.max(0, Number(l.current) || 0), 0) <= 0) return null;
@@ -7535,8 +7536,8 @@ function returnWeapon(weapon) {
   weapon.hidden = true;
   if (weapon.kit === "xiaoxiao") longgeUnlock(owner, notes, "小朋友变回武器");
   notes.push(`${weapon.name} 已收回为武器。`);
-  // 在场时耐久被扣到 0（格挡）的武器收回来也不能用：主人空手（绯秋换另一把刀），本场也唤不出来（spawnWeapon）
-  if (typeof weaponBroken === "function" && weaponBroken(weapon.kit) && typeof heldWeaponKit === "function" && heldWeaponKit(owner) === weapon.kit) {
+  // 在场时耐久被扣到 0（格挡）：这一场才坏的，收回来照常能用（atk / 格挡减半），本场唤不出来；开战前就坏了的才只能空手
+  if (typeof weaponUnusable === "function" && weaponUnusable(weapon.kit) && typeof heldWeaponKit === "function" && heldWeaponKit(owner) === weapon.kit) {
     disarmBrokenWeapon(owner, notes);
   }
   return notes;
@@ -9930,6 +9931,7 @@ function weaponSummonState(owner, kit) {
 }
 function weaponSummonWhy(owner, kit) {
   if (typeof weaponBroken === "function" && weaponBroken(kit)) return `${weaponCardName(kit)} 耐久为 0，无法唤出`;
+  if (typeof weaponHalved === "function" && weaponHalved(kit) && weaponSummonState(owner, kit) !== "out") return `${weaponCardName(kit)} 本场受损过，不能再唤出`;
   const st = weaponSummonState(owner, kit);
   const nm = typeof weaponCardName === "function" ? weaponCardName(kit) : kit;
   if (st === "out") return `${nm} 已经在场上`;

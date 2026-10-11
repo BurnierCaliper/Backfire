@@ -105,3 +105,45 @@ test("碎渣重炮：扭矩倒下过后，子弹数照原来的 atk 算，伤害
   assert.ok(sum(b) <= Math.ceil(sum(a) / 2) + b.length, `总伤害约减半：${sum(a)} → ${sum(b)}`);
   assert.ok(sum(b) < sum(a));
 });
+
+test("战斗中耐久打光：武器照常能用（技能、协助攻击），只是 atk / 格挡减半、不能唤出；开战前就坏了的才完全用不了", () => {
+  const c = H.load();
+  c.BattleSim.setup({ party: ["tou"], enemies: [{ id: "thug_hammer", lv: 1, zone: 1 }], seed: "WR2" });
+  c.startCombat();
+  const S = c.S.state;
+  const tou = c.findKit("tou", S.units);
+  const fullAtk = c.effectiveAtk(tou, S.units), fullBlock = c.heldWeaponBlockBonus(tou);
+  const notes = [];
+  c.spendDurability("mochi", 99, "测试", notes);
+  assert.equal(c.weaponDur("mochi"), 0);
+  assert.ok(!c.isUnarmed(tou), "这一场还拿着");
+  assert.ok(c.skillList(tou).some(s => s.id === "tou_bash" || s.id === "tou_aa"), "技能照常");
+  assert.ok(c.effectiveAtk(tou, S.units) < fullAtk, "atk 减半");
+  assert.equal(c.heldWeaponBlockBonus(tou), Math.floor(fullBlock / 2), "格挡加成减半");
+  assert.ok(c.skillRequirementError(tou, "tou_summon"), "不能唤出");
+  assert.match(notes.join("\n"), /这一场 atk 和格挡加成减半/);
+  // 战斗中修好：仍然减半
+  c.LEDGER.repair = 99; if (c.LEDGER.items) c.LEDGER.items.repair = 99;
+  c.restoreDurability("mochi", 5);
+  assert.ok(c.weaponDur("mochi") > 0);
+  assert.equal(c.heldWeaponBlockBonus(tou), Math.floor(fullBlock / 2), "修好了也减半");
+  assert.ok(c.skillRequirementError(tou, "tou_summon"), "修好了这一场也不能唤出");
+});
+
+test("开战前就耐久为 0 的武器：完全用不了（空手、不能唤出）；战斗中修好按受损算", () => {
+  const c = H.load();
+  c.BattleSim.setup({ party: ["tou"], enemies: [{ id: "thug_hammer", lv: 1, zone: 1 }], seed: "WR3" });
+  c.LEDGER.dur = Object.assign({}, c.LEDGER.dur, { mochi: 0 });
+  const tou0 = c.findKit("tou", c.S.state.units);
+  c.disarmBrokenWeapon(tou0, []);
+  c.startCombat();
+  const S = c.S.state;
+  const tou = c.findKit("tou", S.units);
+  assert.ok(c.isUnarmed(tou), "开战前坏了：空手");
+  assert.ok(c.weaponUnusable("mochi"));
+  assert.ok(c.skillRequirementError(tou, "tou_summon"));
+  c.repairPoints = () => 99; c.spendRepairPoints = n => n;
+  c.ledgerRepair("mochi", []);
+  assert.ok(!c.isUnarmed(tou), "修好拿回手里");
+  assert.ok(c.weaponHalved("mochi"), "战斗中修理：这一场按受损算");
+});
