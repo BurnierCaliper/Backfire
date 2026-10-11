@@ -2552,6 +2552,9 @@
         addLogPhase(`评价 ${gr.grade}：战斗经验 ×${gr.xpMult}，每人额外 +${rewards.xpBonus} 经验`);
       }
     }
+    // 跑团：每场额外的「等级 × 20 / 人数」经验
+    const trpgXpLine = (rewards.trpgXp || []).length ? "战斗奖励经验：" + rewards.trpgXp.map(x => `${x.name} +${x.xp}`).join("、") + "。" : "";
+    if (trpgXpLine) addLogPhase(trpgXpLine);
     const ups = rewards.ups;
     // 跑团版的队伍档案只在战斗原型里结算；Roguelike 由单局流程自己记
     if (!G.rogue) {
@@ -2564,7 +2567,7 @@
       durNotes.forEach(t => addLogPhase(t));
     }
     const loot = `背包现有 ${Number(state.kuizhi) || 0} 奎支`;
-    const lvline = (ups.length ? "升级：" + ups.join("、") + "。" : "") + (rewards.drops ? "战斗掉落：" + battleDropsText(rewards.drops) + "。" : "");
+    const lvline = trpgXpLine + (ups.length ? "升级：" + ups.join("、") + "。" : "") + (rewards.drops ? "战斗掉落：" + battleDropsText(rewards.drops) + "。" : "");
     box.querySelector("p").textContent = retreated
       ? `第 ${state.turnNo} 回合撤出战斗。${loot}。${lvline}`
       : win
