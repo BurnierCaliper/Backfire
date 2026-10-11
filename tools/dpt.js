@@ -1,7 +1,8 @@
 // 理想状态下每个角色（连同武器人）的最优输出循环与 DPT（每回合伤害）。
 //
 // 场地：两区直排，常态天气，没有场地效果；关闭属性克制表（state.noChart）。
-// 目标：一个训练假人——血量极高打不死、架势极高打不进失衡、不行动（只走回合流转：回合开始 / 结束的结算照常）。
+// 目标：一个训练假人——血量和同等级 4 人队伍的精英牛一样，掉到一半以下就补满（伤害照记）；架势极高打不进失衡；
+//   不行动（只走回合流转：回合开始 / 结束的结算照常）。
 // 角色：走单局的升级流程（主属性加点、第一个合法奖励），武器等级 = clamp(round(等级 × 0.6), 1, 10)，满血，没有义体、不用道具。
 // 搜索：束搜索。每一步列出所有合法动作（角色和在场武器人的每个技能 × 每种分步选择 × 每个目标、移动、结束回合），
 //   在沙盒里试跑，按「累计伤害」排序；同一种资源状态只留伤害最高的一个，免得束里塞满同一条路的变体、把攒资源的路线挤掉。
@@ -15,7 +16,11 @@
 const H = require("../tests/headless");
 const B = require("./balance-common");
 
-const DUMMY_HP = 1e9, DUMMY_DEF = 1e6;
+const DUMMY_DEF = 1e6;
+// 假人血量：同等级 4 人队伍精英「警卫队队长（牛）」的总血量（一层肉体）。掉到一半以下就补满，补之前掉的血记进总伤害。
+// 不用「打不死的超大血量」：有按目标生命百分比算的伤害（诺拉的留置针等），超大血量会算出离谱的数字；
+// 一直保持在半血以上也不会触发斩杀线之类的低血量效果
+const DUMMY_REFILL_AT = 0.5;
 
 function arg(name, def) {
   const i = process.argv.indexOf("--" + name);
@@ -48,7 +53,9 @@ function setupField(kit, level, seed) {
   S.fields = {}; S.gaps = {};
   const dummy = c.spawnEnemyGroup("thug_knife", level, 1, 2)[0];
   dummy.name = "训练假人";
-  dummy.layers = [{ type: "flesh", current: DUMMY_HP, max: DUMMY_HP }];
+  const hp = c.spawnEnemyGroup("captain_ox", level, 4, 2)[0].layers.reduce((a, l) => a + (Number(l.max) || 0), 0);
+  dummy.layers = [{ type: "flesh", current: hp, max: hp }];
+  S.dptBank = 0;   // 补血之前假人已经掉的血
   dummy.def = dummy.defMax = DUMMY_DEF;
   dummy.zone = 2;
   S.units.push(dummy);
@@ -61,8 +68,20 @@ function setupField(kit, level, seed) {
   return { c, S, dummy };
 }
 
-const dummyDamage = (S) => S.units.filter(u => !u.isPlayer && u.name === "训练假人")
+const dummyLost = (S) => S.units.filter(u => !u.isPlayer && u.name === "训练假人")
   .reduce((s, u) => s + (u.layers || []).reduce((a, l) => a + Math.max(0, (Number(l.max) || 0) - Math.max(0, Number(l.current) || 0)), 0), 0);
+const dummyDamage = (S) => (Number(S.dptBank) || 0) + dummyLost(S);
+/** 假人掉到一半以下：补满，掉的血记进总伤害（也会顺手把假人从「倒下」里拉回来） */
+function refillDummy(S) {
+  S.units.filter(u => !u.isPlayer && u.name === "训练假人").forEach(u => {
+    const max = (u.layers || []).reduce((a, l) => a + (Number(l.max) || 0), 0);
+    const cur = (u.layers || []).reduce((a, l) => a + Math.max(0, Number(l.current) || 0), 0);
+    if (!u.dead && cur >= max * DUMMY_REFILL_AT) return;
+    S.dptBank = (Number(S.dptBank) || 0) + (max - cur);
+    u.layers.forEach(l => { l.current = l.max; });
+    u.dead = false; u.dying = false; u._removed = false; u.hidden = false;
+  });
+}
 
 /* ---------- 局面存取（state + LEDGER） ---------- */
 function snap(c) {
@@ -161,12 +180,15 @@ function execute(c, cmd) {
   if (plain.type === "move") { delete plain.target; delete plain.picks; delete plain.skill; }
   try { c.BattleCommands.execute(plain); } catch (e) { return false; }
   try { c.BattleSim.resolveQueues(c.BattleSim.BASIC_POLICY); } catch (e) { /* 结算队列出错就当这一步无效 */ }
+  refillDummy(c.S.state);
   return true;
 }
 function endTurn(c) {
   c.endPlayerTurn();
+  refillDummy(c.S.state);
   c.endEnemyTurn();
   const S = c.S.state;
+  refillDummy(S);
   S.combatPhase = "player";
   // 假人不动：敌人回合只走回合流转
   // 柯尔特：第 3、6……个回合开始时，当作刚打碎了一层牛的护盾（覆盖上一个，和实战一样只记最近一层）
@@ -285,4 +307,4 @@ function rotationText(path) {
 }
 
 if (require.main === module) main();
-module.exports = { setupField, search, replay, dummyDamage, candidateActions, execute, snap, load, signature, endTurn, resolve };
+module.exports = { setupField, search, replay, dummyDamage, refillDummy, candidateActions, execute, snap, load, signature, endTurn, resolve };
