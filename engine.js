@@ -381,6 +381,12 @@ const SKILL_RANGE = {
   xiaoxiao_combo: { min: 0, max: 0 },  // 连续拳：近距离
   longge_heat: { min: 0, max: 0 },     // 热能轰击：手杖、霰弹枪都是近距离
   ras_torrent: { min: 0, max: 99 },    // 狂瀑：任意距离的高能敌人
+  ruby_algo: { min: 0, max: 99 },      // 算法改变：任意距离
+  latte_claw: { min: 0, max: 0 },
+  naruto_frost: { min: 0, max: 0 },
+  tou_accuse: { min: 0, max: 1 },
+  mochi_bite: { min: 0, max: 0 },
+  yuito_duet: { min: 0, max: 99 },
 };
 
 /* 技能能选哪一边的目标。界面原本是从提示文字里猜的（出现「友方」就只让选友方），
@@ -393,6 +399,12 @@ const SKILL_TARGET_SIDE = {
   nora_aa: "any",           // 有刺入时打刺入目标，刺入的可能是队友
   kolt_mod: "anySelf",
   ras_torrent: "enemy",
+  ruby_algo: "enemy",
+  latte_claw: "enemy",
+  naruto_frost: "enemy",
+  tou_accuse: "enemy",
+  mochi_bite: "enemy",
+  yuito_duet: "allySelf",
   chuan_reclaim: "allySelf", // 回收护盾：任意一名友方（含自己）      // 「非法」改装：任意单位（含自己）施加过载
   role_renew: "ally",       // 续命：任意距离一名友方（以前没登记，被推断成敌方）
   role_harsh: "anySelf",    // 恶劣环境：「一名单位」敌我都行（以前被推断成只能选敌人）
@@ -1331,6 +1343,11 @@ function applyResultToUnit(target, result, attacker) {
   target.interfereZone = !target.interfere ? null
     : result.interfereZone !== undefined ? result.interfereZone : target.zone;
   target.damagedThisTurn = (target.damagedThisTurn || 0) + result.total;
+  // 瑞比「算法改变」：被它标记的敌人这一回合每次受到伤害，瑞比 +5 纳米
+  if (result.total > 0 && target.algoTurn != null && typeof state !== "undefined" && target.algoTurn === state.turnNo && typeof addNano === "function") {
+    addNano(5);
+    if (typeof appendLog === "function") appendLog(`算法改变：${target.name} 受到伤害，瑞比纳米 +5。`);
+  }
   if (result.total > 0) target.gotHitThisTurn = true;
   if (result.selfBreak && attacker) {
     attacker.def = Math.max(0, (Number(attacker.def) || 0) - result.selfBreak);
