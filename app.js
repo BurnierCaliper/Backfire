@@ -2504,12 +2504,12 @@ function scoreAct() {
   return ranges.length + Math.ceil((lv - ranges[ranges.length - 1][1]) / 5);   // 额外幕：每 5 级一幕
 }
 /** 某一幕的分数线：[[评价, 分数线, 经验倍率, 固定线, 基准分倍数], …]，高到低。
- *  给了基准分：分数线 = 固定线 × 0.7 + 基准分 × 倍数 × 0.3（向下取整）；不给（par 为 null）只看固定线 */
+ *  给了基准分：分数线 = 固定线 × 0.7 + 基准分 × 倍数 × 0.3，向上取整到 10 的倍数（好看）；不给（par 为 null）只看固定线 */
 function gradeLines(act, par) {
   const step = SCORE_ACT_STEP * Math.max(0, (Number(act) || 1) - 1);
   return SCORE_GRADES.map(([g, line, xp, k]) => {
     const fixed = line > 0 ? line + step : 0;
-    const v = fixed <= 0 ? 0 : par == null ? fixed : Math.floor(fixed * SCORE_LINE_MIX.fixed + (Number(par) || 0) * k * SCORE_LINE_MIX.par + 1e-6);
+    const v = fixed <= 0 ? 0 : par == null ? fixed : Math.ceil((fixed * SCORE_LINE_MIX.fixed + (Number(par) || 0) * k * SCORE_LINE_MIX.par) / 10 - 1e-9) * 10;
     return [g, v, xp, fixed, k];
   });
 }

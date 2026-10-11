@@ -227,12 +227,16 @@ test("评分：分数线 = 固定线 × 0.7 + 基准分 × 倍数 × 0.3；固�
   c.resetBattleRecords();
   const par = c.scorePar();
   assert.ok(par > 0);
-  const want = (act, fixed, k) => Math.floor((fixed + 150 * (act - 1)) * 0.7 + par * k * 0.3 + 1e-6);
+  const want = (act, fixed, k) => Math.ceil(((fixed + 150 * (act - 1)) * 0.7 + par * k * 0.3) / 10 - 1e-9) * 10;
   const fixed = { C: [500, 0.7], B: [1000, 1.3], A: [1250, 1.6], S: [1500, 2.0], SS: [1750, 2.4], SSS: [2000, 2.8] };
   for (const act of [1, 4]) {
     st.scoreAct = act;
     const lines = c.battleGrade().lines;
-    for (const g of Object.keys(fixed)) assert.equal(lines.find(x => x[0] === g)[1], want(act, ...fixed[g]), `第 ${act} 幕 ${g}`);
+    for (const g of Object.keys(fixed)) {
+      const v = lines.find(x => x[0] === g)[1];
+      assert.equal(v, want(act, ...fixed[g]), `第 ${act} 幕 ${g}`);
+      assert.equal(v % 10, 0, "分数线是 10 的倍数");
+    }
   }
   const at = (act, score) => { st.scoreAct = act; st.battleScore.total = score; return c.battleGrade(); };
   const C1 = want(1, 500, 0.7), S1 = want(1, 1500, 2.0), B2 = want(2, 1000, 1.3);
