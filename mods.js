@@ -92,6 +92,15 @@ function bigKillAtk(kit) {
   if (typeof weaponDurBase !== "function") return 0;
   return Math.floor(weaponDurBase(kit) / 2) + 2;
 }
+/** 一个 atk 套上图纸的 atk 加值、比例、大杀器之后是多少（武器页、图纸说明用；bigKill：大杀器加的 atk） */
+function bpAtkAfter(mod, base, bigKill) {
+  mod = mod || {};
+  let a = Number(base) || 0;
+  if (mod.atkPct) a = Math.floor(a * (1 + Number(mod.atkPct)));
+  a += Number(mod.atk) || 0;
+  if (mod.bigKill) a += Number(bigKill) || 0;
+  return Math.max(0, a);
+}
 /** effectiveAtk 用：在基础 atk 上套图纸（atk 加值、比例、大杀器）和同区敌人的「近距离压制」 */
 function bpAtkAdjust(unit, base) {
   if (!bpActive() || !unit) return base;
@@ -307,13 +316,7 @@ function bpEffectRows(mod, ctx) {
   const rows = [];
   const sgn = (n) => (n > 0 ? "+" : "−") + Math.abs(n);
   const dice = (d) => `${d[0]}d${d[1]}`;
-  const atkAfter = (b) => {
-    let a = Number(b) || 0;
-    if (mod.atkPct) a = Math.floor(a * (1 + Number(mod.atkPct)));
-    a += Number(mod.atk) || 0;
-    if (mod.bigKill) a += Number(ctx.bigKill) || 0;
-    return Math.max(0, a);
-  };
+  const atkAfter = (b) => bpAtkAfter(mod, b, ctx.bigKill);
   if (mod.atk || mod.atkPct || mod.bigKill) {
     const parts = [];
     if (mod.atkPct) parts.push(`×${Math.round((1 + Number(mod.atkPct)) * 100)}%`);

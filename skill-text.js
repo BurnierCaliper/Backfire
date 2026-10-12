@@ -490,9 +490,13 @@
     let dur = null;
     try { if (typeof weaponDur === "function") dur = weaponDur(kit); } catch (e) { dur = null; }
     const info = kitInfo(kit) || {};
+    // 客制化改了 atk：资料卡上直接写改后的数
+    const wm = typeof state !== "undefined" && state.weaponMods && state.weaponMods[kit];
+    const atkFinal = wm && (wm.atk || wm.atkPct || wm.bigKill) && typeof bpAtkAfter === "function"
+      ? bpAtkAfter(wm, Number(w.atk) || 0, wm.bigKill && typeof bigKillAtk === "function" ? bigKillAtk(kit) : 0) : Number(w.atk) || 0;
     return {
       kit, name: w.name, level: w.level || 1, out,
-      atk: Number(w.atk) || 0, def: w.defMax != null ? w.defMax : w.def,
+      atk: Number(w.atk) || 0, atkFinal, def: w.defMax != null ? w.defMax : w.def,
       layers: layersOf(w), durability: dur,
       blockBonus: (typeof weaponBlockBonusOf === "function" ? weaponBlockBonusOf(kit, owner) : (typeof WEAPON_BLOCK_BONUS !== "undefined" && WEAPON_BLOCK_BONUS[kit])) || 0,
       blockAlone: typeof blockChance === "function" ? blockChance(w) : null,
@@ -562,7 +566,12 @@
       .concat(Object.keys(plusLv).filter(n => pas[n - 1]).map(n => ({ lv: plusLv[n], text: `被动「${pas[n - 1].name}+」` })))
       .sort((a, b) => a.lv - b.lv).map(x => Object.assign(x, { done: rlv >= x.lv }));
     const row = typeof weaponPartRow === "function" ? weaponPartRow(owner, kit) : [];
+    // 客制化改了 atk（atk 加值 / 比例 / 大杀器）：武器页最上面的 ATK 直接写改后的数，不只在下面的客制化里写
+    const modAtk = mod && (mod.atk || mod.atkPct || mod.bigKill) && typeof bpAtkAfter === "function";
+    const atkFinal = modAtk ? bpAtkAfter(mod, atk, ctx.bigKill) : atk;
+    const heldFinal = modAtk ? bpAtkAfter(mod, ctx.atkHeld, ctx.bigKill) : ctx.atkHeld;
     return {
+      atkBase: atk, atkFinal, heldBase: ctx.atkHeld, heldFinal,
       kit, name: ws.name, owner: owner.kit, ownerName: owner.name, level: lv, maxLevel: 10, bond, bondMax: typeof BOND_MAX !== "undefined" ? BOND_MAX : 5, rewardLevel: rlv,
       held, out: ws.out, broken: dur != null && dur <= 0,
       atk, breakdown: bd, def: ws.def, layers: ws.layers,
