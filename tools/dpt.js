@@ -196,6 +196,21 @@ function endTurn(c) {
   if (sc && Number(S.turnNo) % sc.every === 0) S.lastBrokenLayer = { type: sc.type, lost: sc.lost, dmg: sc.lost };
 }
 
+/** 假人身上会自己持续打伤害的东西（状态、聚焦、高能、被抓住……）：变了才需要重新往后看 */
+function dummyMark(S) {
+  const d = S.units.find(u => !u.isPlayer && u.name === "训练假人" && !u._removed);
+  const grab = S.units.filter(u => u.isPlayer).map(u => (u.resources || {}).crushId || null);
+  return JSON.stringify([d && d.statuses, d && d.focuses, d && d.highEnergy, d && d.highTags, grab, S.fields]);
+}
+/** 从当前局面什么都不做、一直结束回合到第 turns 回合，假人还会掉多少血 */
+function rollout(c, fromTurn, turns, seed) {
+  const S = c.S.state;
+  c.S.RNG.install(seed);
+  const d0 = dummyDamage(S);
+  for (let t = fromTurn; t <= turns; t++) endTurn(c);
+  return dummyDamage(S) - d0;
+}
+
 /* ---------- 束搜索 ---------- */
 function search(kit, level, opt) {
   // 每个节点同时带 W 个「平行世界」（同一串动作，不同的骰子）：候选动作在每个世界里各跑一遍，按平均伤害排序，
@@ -203,12 +218,15 @@ function search(kit, level, opt) {
   const W = Math.max(1, opt.worlds || 3);
   const { c, S } = setupField(kit, level, 0);
   const turns = opt.turns, width = opt.beam;
+  // 指定开局（做对照用）：先按顺序做完这几个动作，剩下的再搜
+  const opening = (opt.opening || []).map(tok => Object.assign({ turn: 1, label: tok.label || tok.skill }, tok));
+  opening.forEach(tok => execute(c, resolve(S, tok)));
   const base = snap(c);
-  let beam = [{ snaps: Array.from({ length: W }, () => base), dmg: 0, path: [], turnDmg: [] }];
+  let beam = [{ snaps: Array.from({ length: W }, () => base), dmg: dummyDamage(S), path: opening, turnDmg: [] }];
   const maxSteps = 10;   // 每回合最多几个动作（防止不耗行动的开关来回切）
   const mean = a => a.reduce((x, y) => x + y, 0) / a.length;
   for (let turn = 1; turn <= turns; turn++) {
-    let open = beam.map(b => Object.assign({}, b, { steps: 0, start: b.dmg }));
+    let open = beam.map(b => Object.assign({}, b, { steps: 0, start: b.dmg, future: b.score != null ? b.score - b.dmg : 0, score: b.score != null ? b.score : b.dmg }));
     const ended = [];
     for (let step = 0; step <= maxSteps && open.length; step++) {
       const next = new Map();
@@ -223,10 +241,19 @@ function search(kit, level, opt) {
         });
         load(c, endSnaps[0]);
         const dEnd = mean(endD);
-        ended.push({ snaps: endSnaps, dmg: dEnd, path: node.path.concat([{ turn, end: true }]), turnDmg: node.turnDmg.concat([dEnd - node.start]), key: bucketKey(S) });
+        const key = bucketKey(S);
+        // 往后看：从这里开始什么都不做、一直结束回合到第 turns 回合，还会自己打出多少（灼烧 / 腐蚀 / 冻伤、狂怒碾压……）。
+        // 只用来排序（束里留谁），记的伤害还是实际打出来的。不看的话，挂持续伤害的开局当回合几乎没伤害，会被提前剪掉
+        let future = 0;
+        if (opt.lookahead !== false && turn < turns) {
+          future = mean(endSnaps.map((sn, w) => { load(c, sn); return rollout(c, turn + 1, turns, `dpt:${kit}:${level}:t${turn}:look:w${w}`); }));
+          load(c, endSnaps[0]);
+        }
+        ended.push({ snaps: endSnaps, dmg: dEnd, score: dEnd + future, path: node.path.concat([{ turn, end: true }]), turnDmg: node.turnDmg.concat([dEnd - node.start]), key });
         if (node.steps >= maxSteps) return;
         load(c, node.snaps[0]);
         const before0 = signature(S);
+        const mark0 = dummyMark(S);
         // 先在基准世界里把编号换成「@kit」：各个世界里唤出的武器人编号不一样
         const cands = candidateActions(c).map(cmd => tokenize(S, cmd));
         cands.forEach(tok => {
@@ -242,10 +269,17 @@ function search(kit, level, opt) {
             ds.push(dummyDamage(S)); snaps.push(snap(c));
             if (w === 0) key0 = bucketKey(S);
           }
+          // 回合中途也往后看：这一步给假人挂上 / 改了会持续打伤害的东西（当下几乎没伤害），
+          // 只按当回合伤害排序的话还没到回合结束就被剪掉了。只在基准世界里看一次（省时间）
+          let future = node.future || 0;
+          if (opt.lookahead !== false) {
+            load(c, snaps[0]);
+            if (dummyMark(S) !== mark0) future = rollout(c, turn, turns, `dpt:${kit}:${level}:t${turn}:s${step}:look`);
+          }
           const d = mean(ds), key = key0 + "|" + Math.round(d * 10);
           const prev = next.get(key);
-          if (prev && prev.dmg >= d) return;
-          next.set(key, { snaps, dmg: d, path: node.path.concat([Object.assign({ turn }, tok)]), turnDmg: node.turnDmg, steps: node.steps + 1, start: node.start, key: key0 });
+          if (prev && prev.score >= d + future) return;
+          next.set(key, { snaps, dmg: d, future, score: d + future, path: node.path.concat([Object.assign({ turn }, tok)]), turnDmg: node.turnDmg, steps: node.steps + 1, start: node.start, key: key0 });
         });
       });
       open = keepBest([...next.values()], width);
@@ -258,8 +292,9 @@ function search(kit, level, opt) {
 function keepBest(list, width) {
   // 同一种资源状态（不含伤害）只留伤害最高的那个，再按伤害取前 width 个
   const byKey = new Map();
-  list.forEach(n => { const p = byKey.get(n.key); if (!p || n.dmg > p.dmg) byKey.set(n.key, n); });
-  return [...byKey.values()].sort((a, b) => b.dmg - a.dmg).slice(0, width);
+  const sc = n => (n.score != null ? n.score : n.dmg);
+  list.forEach(n => { const p = byKey.get(n.key); if (!p || sc(n) > sc(p)) byKey.set(n.key, n); });
+  return [...byKey.values()].sort((a, b) => sc(b) - sc(a)).slice(0, width);
 }
 
 /** 把找到的动作序列换种子重放：合法的照做，不合法的跳过 */
