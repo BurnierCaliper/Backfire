@@ -16,7 +16,6 @@
 const H = require("../tests/headless");
 const B = require("./balance-common");
 
-const DUMMY_DEF = 1e6;
 // 假人血量：同等级 4 人队伍精英「警卫队队长（牛）」的总血量（一层肉体）。掉到一半以下就补满，补之前掉的血记进总伤害。
 // 不用「打不死的超大血量」：有按目标生命百分比算的伤害（诺拉的留置针等），超大血量会算出离谱的数字；
 // 一直保持在半血以上也不会触发斩杀线之类的低血量效果
@@ -29,40 +28,10 @@ function arg(name, def) {
 
 /** 布置：角色按单局升级流程到 level 级，站 1 区；训练假人在 2 区 */
 function setupField(kit, level, seed) {
-  const c = H.load(), R = c.Rogue;
-  c.S.RNG.install(`dpt:${kit}:${level}:setup`);
-  const filler = B.HEROES.find(k => k !== kit);
-  const run = R.newRun({ party: [kit, filler], seed: `dpt:${kit}:${level}` });
-  run.party.forEach(h => {
-    const from = h.level || 1;
-    h.level = level; h.xp = 0; h.hp = null; h.shp = null;
-    R.queueLevelRewards(h, from, level, [], run);
-    Object.keys(h.weaponLevels || {}).forEach(k => { h.weaponLevels[k] = Math.max(1, Math.min(10, Math.round(level * 0.6))); });
-  });
-  B.chooseLevels(R, run, []);
-  run.party.forEach(h => { h.hp = null; h.shp = null; h.weaponState = {}; });
-  c.S.LEDGER.dur = {}; c.S.LEDGER.weapons = {}; c.S.LEDGER.heroes = {}; c.S.LEDGER.hours = 0;
-  // 借单局的 before（把升级后的角色数据写到场上的单位上）；队伍里只放这一个角色
-  run.act = 1; run.actDay = 0; R.makeBoard(run); R.acceptTask(run, "main");
-  run.task.nodes[run.task.index] = { type: "battle", done: false };
-  const spec = R.battleSpec(run);
-  // 布置用固定种子：单位编号每次都一样，重放时记下的动作才对得上；骰子的种子在布置完以后再换
-  c.BattleSim.setup({ party: [kit], enemies: [], seed: `dpt:${kit}:${level}:setup`, before: spec.before, zoneMode: 2 });
+  // 布置和游戏里的训练场是同一份代码（training.js）：手动打的和这里搜出来的数字可以直接对照
+  const c = H.load();
+  const { dummy } = c.Training.setupField(kit, level);
   const S = c.S.state;
-  S.zoneMode = 2; S.weather = "none"; S.noChart = true; S.board = null;
-  S.fields = {}; S.gaps = {};
-  const dummy = c.spawnEnemyGroup("thug_knife", level, 1, 2)[0];
-  dummy.name = "训练假人";
-  const hp = c.spawnEnemyGroup("captain_ox", level, 4, 2)[0].layers.reduce((a, l) => a + (Number(l.max) || 0), 0);
-  dummy.layers = [{ type: "flesh", current: hp, max: hp }];
-  S.dptBank = 0;   // 补血之前假人已经掉的血
-  dummy.def = dummy.defMax = DUMMY_DEF;
-  dummy.zone = 2;
-  S.units.push(dummy);
-  S.units.filter(u => u.isPlayer).forEach(u => { u.zone = 1; });
-  // 柯尔特的废料：训练假人只有一层血、永远打不碎，实战里「被摧毁的敌人血量层」拿不到。
-  // 按作者给的估计：每 3 个回合拿到一次精英「警卫队队长（牛）」的护盾层（4 人队伍的数值，再按废料规则封顶）
-  if (kit === "kolt") S.dptScrap = { every: 3, type: "shield", lost: c.spawnEnemyGroup("captain_ox", level, 4, 1)[0].layers[0].max };
   c.startCombat();
   c.S.RNG.install(`dpt:${kit}:${level}:${seed}`);
   return { c, S, dummy };

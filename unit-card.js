@@ -86,7 +86,11 @@
     // 架势
     const defBox = q(".u-def");
     const n = Math.max(s.defMax, s.def);
-    if (c.pips.length !== n) {
+    // 架势特别高（训练场的木桩等）：一格一个菱形画不下，改写数字
+    if (n > 40) {
+      defBox.textContent = n >= 100000 ? "架势 ∞" : `架势 ${s.def}/${s.defMax}`;
+      c.pips = [];
+    } else if (c.pips.length !== n) {
       defBox.innerHTML = "";
       c.pips = [];
       for (let i = 0; i < n; i++) { const p = el("i", "pip"); defBox.appendChild(p); c.pips.push(p); }
