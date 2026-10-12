@@ -216,11 +216,12 @@ const ENEMY_INFO = {
   guard_gun:   { faction: "安保", regions: ["外城区", "巨人城"], tokens: 1 },
   patrol_car:  { faction: "安保", regions: ["外城区", "巨人城"], tokens: 1 },
   boomcar:     { faction: "安保", regions: ["外城区", "巨人城"], tokens: 1 },
-  buoy:        { faction: "安保", regions: ["矿场", "巨人城"], tokens: 1 },
-  dumpdrone:   { faction: "安保", regions: ["矿场", "巨人城"], tokens: 1 },
-  swarm:       { faction: "安保", regions: ["外城区", "巨人城", "矿场"], tokens: 1, group: 3 },
-  patrolboat:  { faction: "安保", regions: ["巨人城", "矿场"], tokens: 2 },
-  spreader:    { faction: "安保", regions: ["矿场"], tokens: 2 },
+  buoy:        { faction: "安保", regions: ["巨人城"], tokens: 1 },
+  swarm:       { faction: "安保", regions: ["外城区", "巨人城"], tokens: 1, group: 3 },
+  patrolboat:  { faction: "安保", regions: ["巨人城"], tokens: 2 },
+  // 第一采矿场：用酸的安保机械（工蚁的部下）
+  dumpdrone:   { faction: "安保", regions: ["第一采矿场", "巨人城"], tokens: 1 },
+  spreader:    { faction: "安保", regions: ["第一采矿场"], tokens: 2 },
   // —— 警卫队（有机体，可与安保混编）——
   captain_wolf:   { faction: "警卫队", regions: ["巨人城", "外城区"], tokens: 2 },
   captain_ox:     { faction: "警卫队", regions: ["巨人城", "外城区"], tokens: 2 },
@@ -458,7 +459,7 @@ function finishEncounter(spec, opt) {
 /** 区域默认天气 */
 function regionWeather(region) {
   if (region === "沙漠") return Math.random() < 0.6 ? "sand" : "none";
-  if (region === "矿场") return Math.random() < 0.4 ? "acid" : "none";
+  if (region === "第一采矿场") return Math.random() < 0.4 ? "acid" : "none";
   if (region === "巨人城") return Math.random() < 0.3 ? "thunder" : "none";
   return "none";
 }
