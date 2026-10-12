@@ -6,7 +6,7 @@ const H = require("./headless");
 const B = require("../tools/balance-common");
 const M = require("../tools/balance-report");
 const { one } = require("../tools/score-by-act");
-const { runCampaign } = require("../tools/playtest");
+const { runCampaign, pickBoardTask } = require("../tools/playtest");
 
 test("balance tool imports do not start scenarios or print reports", () => {
   const out = cp.execFileSync(process.execPath, ["-e", "require('./tools/score-by-act');require('./tools/playtest');require('./tools/balance-report');console.log('inert')"], { cwd: H.ROOT, encoding: "utf8", timeout: 3000 });
@@ -48,17 +48,33 @@ test("source hashes are portable across CRLF/LF checkouts", () => {
 test("campaign board fallback progresses all four former legal-task dead ends", () => {
   const ids = ["R1-v1:campaign:baseline:2:011", "R1-v1:campaign:baseline:3:014", "R1-v1:campaign:baseline:4:022", "R1-v1:campaign:validation:3:006"];
   const manifest = M.createManifest();
-  // 这几个固定种子的场景以前会卡死在任务板上。规则改动会改变它们的走向（某一个可能不再走到那个死角），
-  // 所以要求：都能正常跑完、没有 bug，并且兜底逻辑至少在其中一个场景里被走到
-  let fallbacks = 0;
+  // 这几个固定种子的场景以前会卡死在任务板上：现在都要能正常跑完、没有 bug。
+  // 规则 / 内容改动会改变它们的走向（不一定再走到兜底分支），兜底分支本身由下一个用例直接测
   for (const id of ids) {
     const scenario = manifest.scenarios.find(s => s.id === id), result = M.executeScenario(scenario);
     assert.notEqual(result.outcome, "error", JSON.stringify(result.bugs));
     assert.equal(result.bugs.length, 0);
-    if (result.events.some(x => x.includes("按合法任务兜底"))) fallbacks++;
     assert.ok(result.completed || result.outcome === "timeout");
   }
-  assert.ok(fallbacks >= 1, "兜底逻辑没有被任何场景走到");
+});
+test("board pick: main done and only too-dangerous side tasks left → falls back to the best-paying legal task", () => {
+  const R = {
+    taskBlocked: () => false, taskWarning: () => false,
+    taskPay: (run, t) => ({ kuizhi: t.pay }), enemyLevel: () => 10, daysLeft: () => 5
+  };
+  const bounty = (name, pay) => ({ name, pay, days: 1, nodeTypes: ["battle"], hunt: true });
+  const run = { party: [{ level: 3 }, { level: 3 }], main: { done: true, days: 2 }, CONFIG_restDays: 1,
+    board: [bounty("悬赏甲", 100), bounty("悬赏乙", 300)] };
+  assert.deepEqual(pickBoardTask(R, run), { pick: 1, fallback: "悬赏乙" });
+  // 等级够了就正常接，不算兜底
+  run.party.forEach(h => { h.level = 20; });
+  assert.deepEqual(pickBoardTask(R, run), { pick: 1 });
+  // 主线没做完：不兜底，回去做主线
+  run.party.forEach(h => { h.level = 3; }); run.main.done = false;
+  assert.deepEqual(pickBoardTask(R, run), { pick: "main" });
+  // 主线做完、任务板上也没有能接的：交给上层报「没有能接的任务」
+  run.main.done = true; run.board = [];
+  assert.deepEqual(pickBoardTask(R, run), { pick: null });
 });
 test("single battles reproduce actual levels and default to no act-4 boost", () => {
   const options = { seed: "LEVEL-REPEAT", party: ["tou", "ruby", "xia"], maxRounds: 1 };
