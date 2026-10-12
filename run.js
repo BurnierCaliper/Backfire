@@ -475,7 +475,7 @@ function buildEncounter(spec, baseLevel, partySize) {
   if (!spec) return [];
   state.zoneMode = Number(spec.zoneMode) || 2;
   state.board = null;
-  state.weather = spec.weather || "none";
+  state.weather = spec.weather || "none"; state.weatherBy = null;
   if (state.weather === "sand" && typeof rollSandDir === "function") rollSandDir();   // 开场沙暴：风向随机
   buildEncounterField(spec);
   const made = spawnEncounterRows(spec.enemies, baseLevel, partySize);

@@ -89,6 +89,7 @@ function clearFieldEffects(f) {
   f.energyVal = 0;
   f.harmonic = false;
   f.heal = false;
+  f.by = null;   // 场地的所有者（环境分数）
 }
 
 /** 天气现在能不能改成 kind：能返回 null，不能返回原因（固有天气、被锁定） */
@@ -109,6 +110,8 @@ function setWeather(kind, opts) {
   if (why) return why;
   const was = state.weather;
   state.weather = kind;
+  // 天气的所有者（环境分数）：谁放的天气；主持人 / 固有天气没有所有者
+  if (kind !== was || opts.by != null) state.weatherBy = kind === "none" ? null : (opts.by != null ? opts.by : null);
   if (kind === "sand" && (was !== "sand" || opts.casterZone != null)) rollSandDir(opts.casterZone);
   const sel = uiEl("weather");
   if (sel) sel.value = kind;
@@ -148,6 +151,7 @@ function setZoneField(zone, kind, opts) {
   } else if (kind) {
     f[kind] = true;
   }
+  if (kind && kind !== "highland") f.by = opts.by != null ? opts.by : null;
   if (opts.lock) f.fieldLock = opts.lock;
   if (opts.unlock) f.fieldLock = null;
   return null;
@@ -1622,7 +1626,7 @@ function beginRound(notes) {
     }
     if (u.kit === "spreader" && !u.dead && !u.hidden) {   // 死掉（还没清出场）的播撒者不再铺酸液
       const f = state.fields[u.zone] || emptyField();
-      const err = setZoneField(u.zone, "acid");
+      const err = setZoneField(u.zone, "acid", { by: u.id });
       notes.push(err || `${u.name} 低空作业：${u.zone} 区生成酸液地面（对自身无效）。`);
     }
     if (u.kit === "patrolboat" && typeof boatOverloadRoundStart === "function") boatOverloadRoundStart(u, notes);
@@ -1778,7 +1782,7 @@ function tickFireField(z, notes) {
   if (!(Number(f.fire) > 0)) f.fire = 1;
   const stacks = Number(f.fire) || 1;
   // 保释中的单位豁免场地；恶劣环境 / 末日让场地伤害翻倍
-  fieldUnits().filter(u => Number(u.zone) === Number(z) && !u.flying && !u.dead && !fieldExempt(u)).forEach(u => {
+  fieldUnits().filter(u => Number(u.zone) === Number(z) && !u.flying && !u.dead && !fieldExempt(u)).forEach(u => withEnvOwner(f.by, () => {
     const weather = currentWeatherFor(u);
     const d = statusDotDice("firefield", u.level, weather);
     const parts = [];
@@ -1790,7 +1794,7 @@ function tickFireField(z, notes) {
     }
     const x = envMult(u);
     applyTypedDot(u, dmg * x, "fire", notes, `${u.name} 火场${stacks}层 ${parts.join(" + ")} = ${dmg}${x > 1 ? ` ×${x}（场地效果${x > 2 ? "×4" : "翻倍"}）= ${dmg * x}` : ""}`);
-  });
+  }));
   // 酷暑让火场层数再 +1：看的是这一区的天气（隔离区不受天气影响）；末日把这 +1 也翻倍
   const heat = zoneWeather(z) === "heat";
   const add = 1 + (heat ? (state.apocalypse ? 2 : 1) : 0);
@@ -1810,7 +1814,7 @@ function tickAcidFieldFor(u, weather, notes) {
   const d = statusDotDice("acidfield", u.level, weather);
   const r = takeDice(d.n, d.s, 0);
   const x = envMult(u);
-  applyTypedDot(u, r.total * x, "acid", notes, `${u.name} 酸液地面 ${r.text}${x > 1 ? ` ×${x}（场地效果${x > 2 ? "×4" : "翻倍"}）` : ""}`);
+  withEnvOwner((state.fields[u.zone] || {}).by, () => applyTypedDot(u, r.total * x, "acid", notes, `${u.name} 酸液地面 ${r.text}${x > 1 ? ` ×${x}（场地效果${x > 2 ? "×4" : "翻倍"}）` : ""}`));
 }
 function tickHealFieldFor(u, weather, notes) {
   if (fieldExempt(u)) return;
@@ -2100,6 +2104,7 @@ function turnEnd() {
         const dmg = 4 + (p.level || 1);
         const fake = unitOf("酸液桶", p.level, [{ type: "armor", hp: 1 }], 0, 0);
         fake.zone = p.zone;
+        fake.envSrc = true; fake.envBy = p.lastBy;   // 环境分数：记在最后打它的人身上
         dealTo(fake, u, { atk: 0, mult: 0, flat: dmg, element: "acid", baseBreak: 0, flags: { action: false } });
         notes.push(`酸液桶渗漏：随机打到 ${u.name}，${dmg} 酸伤。`);
       }
@@ -2146,6 +2151,7 @@ function turretShot(p, hitPlayers, notes) {
     const fake = unitOf("防卫炮台", p.level, [{ type: "armor", hp: 1 }], 0, dmg);
     fake.zone = p.zone;
     fake.isPlayer = !hitPlayers;   // 我方炮台站在我方那边：敌人的废铁墙照样挡它
+    fake.envSrc = true; fake.envBy = p.by;
     // 炮台这一炮是自己的一次攻击：屏障「已拦截本次行动」只看这一炮（不沿用上一次行动留下的记录）
     const wallBefore = state.actionWallHit;
     state.actionWallHit = {};
@@ -2329,7 +2335,8 @@ const SCORE_RULES = {
   reduce: 1.5,     // 我方受击时，减伤减免掉的每点伤害（天气、血量改造、角色能力……完全免伤也算）
   blockSave: 1,    // 协助格挡成功减免掉的每点伤害（空手格挡成功：少挨的那一半）
   ap: 10,          // 我方每用 1 点行动点
-  bonusAction: 5   // 我方每用 1 次附赠行动
+  bonusAction: 5,  // 我方每用 1 次附赠行动
+  env: 1.2         // 环境分数：利用配置物或场地（环境）造成的伤害 / 击破 / 溢出，分数 ×1.2
 };
 // 招式疲劳（像大乱斗的同招衰减）：同一个角色连续几个回合用同一个技能，这次行动的总得分打折。
 // 下标 = 连续第几个回合（1 不扣），超出表的按最后一项封顶
@@ -2362,7 +2369,7 @@ const SCORE_GRADES = [["SSS", 2000, 2, 4.4], ["SS", 1750, 2, 3.8], ["S", 1500, 2
 // 分数线里固定线和基准分各占多少
 const SCORE_LINE_MIX = { fixed: 0.65, par: 0.35 };
 const SCORE_ACT_STEP = 150;   // 之后每一幕，各条分数线（D 除外）+150
-const SCORE_PART_NAMES = { dmg: "伤害", heal: "治疗 / 护盾", brk: "击破", stagger: "打出失衡", block: "协助格挡成功", reduce: "减伤", blockSave: "格挡减免", overkill: "溢出伤害", kill: "击杀", bonus: "克制 / 大伤害加成", action: "行动", speed: "速杀奖励", flawless: "无伤奖励", ambush: "遭遇战加成", fatigue: "招式疲劳（扣分）" };
+const SCORE_PART_NAMES = { dmg: "伤害", heal: "治疗 / 护盾", brk: "击破", stagger: "打出失衡", block: "协助格挡成功", reduce: "减伤", blockSave: "格挡减免", overkill: "溢出伤害", kill: "击杀", bonus: "克制 / 大伤害加成", action: "行动", speed: "速杀奖励", flawless: "无伤奖励", ambush: "遭遇战加成", fatigue: "招式疲劳（扣分）", env: "环境" };
 /** 这个角色这回合用这个技能，算连续第几个回合（不改记录）。
  *  上回合用过 → 上回合的连续数 + 1；这回合已经用过 → 和这回合第一次一样；否则 1 */
 function fatigueStreak(u, skillId) {
@@ -2492,6 +2499,63 @@ function attackScoreBonus(res, target) {
     if (bh.big) b += SCORE_BONUS.bigHitMin + (SCORE_BONUS.bigHitMax - SCORE_BONUS.bigHitMin) * bh.ratio;
   }
   return b;
+}
+/* ===== 环境分数 =====
+ * 配置物（爆炸桶、电池、碎渣机炮、危墙倒塌、酸液桶……）和场地（火场、酸液地面、高压场地）打在敌人身上的伤害：
+ *   分数 ×1.2（SCORE_RULES.env），记在「环境的所有者」身上——场地是谁铺的（f.by）、配置物是谁触发的（打爆 / 操控）；
+ *   没有我方所有者（固有场地、敌人铺的）就记在触发它的人（这次行动的出手方）身上。
+ * 天气：我方利用天气多打出来的伤害、我方因天气少挨的伤害，天气的所有者（state.weatherBy，谁放的天气）
+ *   按这部分伤害的分值加分（伤害 ×1、减伤 ×1.5），记在「环境」里。 */
+let ENV_CTX = null;
+/** 结算场地伤害时标上场地的所有者 */
+function withEnvOwner(by, fn) {
+  const prev = ENV_CTX;
+  ENV_CTX = { by: by == null ? null : by };
+  try { return fn(); } finally { ENV_CTX = prev; }
+}
+/** 环境伤害该记在谁身上（单位 id）：配置物代打的假单位顺着操控 / 触发的人找过去 */
+function envCreditId(u) {
+  for (let i = 0; u != null && i < 6; i++) {
+    if (typeof u !== "object") u = unitById(u);
+    if (!u) return null;
+    if (u.envSrc || u.creditTo) { u = u.creditTo || u.envBy; continue; }
+    return u.id;
+  }
+  return null;
+}
+/** 环境分数记给哪个我方单位：所有者 / 触发者是我方就是他；否则是这次行动的出手方（我方） */
+function envCreditUnit(by) {
+  const id = envCreditId(by);
+  const u = id != null ? unitById(id) : null;
+  if (u && u.isPlayer) return u;
+  const acc = state.actionAcc;
+  return acc && acc.actorIsPlayer ? unitById(acc.actorId) || null : null;
+}
+/** 环境伤害打在敌人身上：伤害、击破的分 ×1.2 记成「环境」 */
+function scoreEnvHit(target, res, who, bonus) {
+  if (!target || target.isPlayer || !res) return null;
+  const st = battleStat(who);
+  if (!st) return null;
+  const dmg = Math.floor(Number(res.total) || 0), brk = Number(res.breakDealt) || 0;
+  st.dmg += dmg; st.brk += brk; st.env = (st.env || 0) + dmg;
+  addScore("env", (dmg * SCORE_RULES.dmg + brk * SCORE_RULES.brk) * SCORE_RULES.env, who, bonus);
+  return who;
+}
+/** 天气帮了我方：ours = 这一下是我方打出去的（含记给我方的环境 / 连带伤害）。天气没有我方所有者就不算 */
+function scoreWeatherHelp(attacker, target, res, ours) {
+  if (!res || !target || state.weatherBy == null) return;
+  const owner = unitById(state.weatherBy);
+  const st = battleStat(owner);
+  if (!st) return;
+  const up = Math.floor(Number(res.weatherUp) || 0), down = Math.floor(Number(res.weatherDown) || 0);
+  if (!target.isPlayer && ours && up > 0) {
+    st.weatherUp = (st.weatherUp || 0) + up;
+    addScore("env", up * SCORE_RULES.dmg, owner);
+  }
+  if (target.isPlayer && down > 0 && !(attacker && attacker.isPlayer)) {
+    st.weatherDown = (st.weatherDown || 0) + down;
+    addScore("env", Math.floor(down * SCORE_RULES.reduce), owner);
+  }
 }
 /** 每场战斗开始时清空：战场数据、评分、这场的经验 / 掉落 */
 function resetBattleRecords() {
@@ -2675,7 +2739,7 @@ function beginActionAcc(actor) {
 
 /** 记一笔本行动引发的连带伤害（不是攻击本身，而是状态、场地、余波等）。
  *  只算打在对面阵营身上的；不知道出手方时全算。 */
-function noteSideDamage(amount, label, unit) {
+function noteSideDamage(amount, label, unit, noScore) {
   const acc = state.actionAcc;
   const n = Math.floor(Number(amount) || 0);
   if (!acc || n <= 0) return;
@@ -2684,7 +2748,7 @@ function noteSideDamage(amount, label, unit) {
   acc.side += n;
   acc.sideBy[key] = (acc.sideBy[key] || 0) + n;
   // 战场数据：我方行动引发、落在敌人身上的连带伤害，算出手的人
-  if (acc.actorIsPlayer && !(unit && unit.isPlayer)) {
+  if (acc.actorIsPlayer && !(unit && unit.isPlayer) && !noScore) {
     const who = unitById(acc.actorId);
     const st = battleStat(who);
     if (st) { st.dmg += n; addScore("dmg", n * SCORE_RULES.dmg, who); }
@@ -2841,7 +2905,7 @@ function pulseHighVoltage(target, amount, hitNo, hitMax) {
   dmg *= ex;   // 恶劣环境 / 末日：场地效果翻倍（两个叠加 ×4）
   target._hvBusy = true;
   const tag = (hitMax > 1) ? `第${hitNo}/${hitMax}击 ` : "";
-  applyTypedDot(target, dmg, "electric", notes, `${target.name} 高压场地${tag}${r.text}${ex > 1 ? "×" + ex : ""}`);
+  withEnvOwner(f.by, () => applyTypedDot(target, dmg, "electric", notes, `${target.name} 高压场地${tag}${r.text}${ex > 1 ? "×" + ex : ""}`));
   target._hvBusy = false;
   return notes;
 }
@@ -2860,6 +2924,12 @@ function convertUnstableInHv(u, notes) {
 }
 
 function applyTypedDot(unit, amount, element, notes, label, opts) {
+  // 场地伤害（withEnvOwner 里）算环境分数；它引发的连带伤害（共振、高压……）各算各的，不沿用
+  const env = ENV_CTX;
+  ENV_CTX = null;
+  try { return applyTypedDotIn(env, unit, amount, element, notes, label, opts); } finally { ENV_CTX = env; }
+}
+function applyTypedDotIn(env, unit, amount, element, notes, label, opts) {
   opts = opts || {};
   if (ignoresAoe(unit)) {
     notes.push(`${unit.name} 是飞碟触灵本体，不受该范围/余波伤害。`);
@@ -2890,6 +2960,8 @@ function applyTypedDot(unit, amount, element, notes, label, opts) {
   const rotOwner = element === "acid" && unit.rotBy && unit.statuses && unit.statuses.corr && /腐蚀/.test(String(label || "")) ? unitById(unit.rotBy) : null;
   const byType = () => (unit.layers || []).reduce((m, l) => { m[l.type] = (m[l.type] || 0) + Math.max(0, Number(l.current) || 0); return m; }, {});
   const rotBefore = rotOwner ? byType() : null;
+  const envWho = env && unit && !unit.isPlayer ? envCreditUnit(env.by) : null;
+  if (envWho) unit._lastHitBy = envWho.id;   // 场地打死的敌人：击杀算环境的所有者
   notes.push(...applyCombat(unit, res, null));
   if (rotOwner) {
     const after = byType();
@@ -2908,7 +2980,10 @@ function applyTypedDot(unit, amount, element, notes, label, opts) {
   const sdKey = inferStatusDmgKey(label, element);
   if (PROC_DOT_FX[sdKey]) procFx(unit, PROC_DOT_FX[sdKey]);
   addStatusDmg(sdKey, res.total || 0);
-  noteSideDamage(res.total || 0, STATUS_DMG_NAME[sdKey] || "其他", unit);
+  noteSideDamage(res.total || 0, STATUS_DMG_NAME[sdKey] || "其他", unit, !!env);
+  if (env) { if (scoreEnvHit(unit, res, envWho)) scoreWeatherHelp(null, unit, res, true); }
+  else if (unit && !unit.isPlayer && state.actionAcc && state.actionAcc.actorIsPlayer) scoreWeatherHelp(null, unit, res, true);
+  if (unit && unit.isPlayer) scoreWeatherHelp(null, unit, res, false);
   if (unit && unit.isPlayer) { const st = battleStat(unit); if (st) st.taken += Math.floor(Number(res.total) || 0) + Math.floor(Number(res.shpDealt) || 0); }
   if ((res.intended || res.total || 0) > 0) spawnFloater(unit, res.intended || res.total, element);
   if ((res.extraHarmonic || 0) > 0) spawnFloater(unit, res.extraHarmonic, element);
@@ -3544,6 +3619,7 @@ function scrapShot(p, t, controller) {
   if (controller && controller.isPlayer) fake.creditTo = controller.id;
   // 射程是「2 距离内」（选目标时已经限定），这里不再按近距离判定
   fake.propId = p.id;
+  fake.envSrc = true;
   const out = dealTo(fake, t, { atk: 0, mult: 0, flat, hits: n, element: "physical", baseBreak: 2, atkRange: "any", flags: { action: true, propShot: true, flyFree: true } });
   const wear = scrapWear(p, controller);
   if (out && out.pending) return `碎渣机炮开火：1d4 次 → ${n} 次，每次 ${flat} 物理 +2 击破，${t.name} 的队友可以协助格挡。\n${wear}`;
@@ -3602,6 +3678,7 @@ function hitStructureCore(attacker, targetToken, opt) {
     const dmg = Math.max(1, Math.floor(opt.dmg || (effectiveAtk(attacker, state.units) || 5)));
     const br = Math.max(0, Math.floor(Number(opt.brk != null ? opt.brk : 1) || 0));
     g.lastFrom = attacker ? attacker.zone : 1;   // 手册：摧毁方向只看最后一击来源区域
+    g.lastBy = envCreditId(attacker);
     const before = Number(g.hp) || 0;
     // 危墙、不稳桥梁：受到击破时损失等量耐久值——伤害打不动，只有击破算
     void dmg;
@@ -3686,6 +3763,7 @@ function destroyGap(key, g) {
     victims.forEach(u => {
       const fake = unitOf("危墙", lv, [{ type: "armor", hp: 1 }], 0, 0);
       fake.zone = fallTo;
+      fake.envSrc = true; fake.envBy = g.lastBy;   // 环境分数：记在推倒它的人身上
       const out = dealTo(fake, u, {
         atk: 0, mult: 0, flat: dmg, hits: 1, element: "physical", baseBreak: 2,
         flags: { action: true, blockResolved: true, environment: true }
@@ -3744,6 +3822,7 @@ function damageProp(p, opt, attacker) {
     return notes;
   }
   p.hp = Math.max(0, p.hp - lose);
+  p.lastBy = envCreditId(attacker);   // 环境分数：最后打它的人（酸液桶渗漏记在他身上）
   notes.push(`${p.name} 耐久 −${lose} → ${p.hp}`);
   if (p.hp <= 0) notes.push(...destroyProp(p, attacker));
   return notes;
@@ -3764,13 +3843,15 @@ function destroyProp(p, attacker) {
     state.units.filter(u => !u.hidden && !u.dead && Number(u.zone) === Number(p.zone)).forEach(u => {
       const fake = unitOf("爆炸桶", lv, [{ type: "armor", hp: 1 }], 0, 0);
       fake.zone = p.zone;
+      fake.envSrc = true; fake.envBy = envCreditId(attacker);   // 环境分数：记在引爆它的人身上
       // 爆炸是范围伤害：不能协助格挡
       dealTo(fake, u, { atk: 0, mult: 0, flat: dmg, element: "fire", baseBreak: 2, flags: { action: true, aoe: true, blockResolved: true } });
     });
   }
   if (p.kind === "acid") {
     const f = state.fields[p.zone] || emptyField();
-    const err = setZoneField(p.zone, "acid");
+    // 酸液地面的所有者 = 打爆酸液桶的人（环境分数）
+    const err = setZoneField(p.zone, "acid", { by: envCreditId(attacker) });
     notes.push(err || `${p.zone} 区生成酸液地面。`);
   }
   if (p.kind === "battery") {
@@ -3781,6 +3862,7 @@ function destroyProp(p, attacker) {
     state.units.filter(u => !u.hidden && !u.dead && Number(u.zone) === Number(p.zone)).forEach(u => {
       const fake = unitOf("电池", lv, [{ type: "armor", hp: 1 }], 0, 0);
       fake.zone = p.zone;
+      fake.envSrc = true; fake.envBy = envCreditId(attacker);
       dealTo(fake, u, { atk: 0, mult: 0, flat: dmg, element: "electric", baseBreak: 0, flags: { action: true, aoe: true, blockResolved: true } });
     });
   }
@@ -6945,6 +7027,7 @@ function dealTo(attacker, target, opt) {
   opt.flags = makeDealFlags(opt.flags);
   // 战场数据：击杀在伤害结算里就会发生，所以先记下「最后一击是谁」
   if (attacker && target && attacker.isPlayer && !target.isPlayer && (state.units || []).includes(attacker)) target._lastHitBy = attacker.id;
+  else if (attacker && attacker.envSrc && target && !target.isPlayer) { const w = envCreditUnit(attacker); if (w) target._lastHitBy = w.id; }   // 配置物打死的：击杀算触发者
   if (!opt.flags.atkFx) armAtkFx(attacker, opt.flags);
   if (opt.flags.diffract) {
     opt.flags.blockResolved = true;
@@ -7207,7 +7290,7 @@ function dealTo(attacker, target, opt) {
   const dopplerT = target.self === "doppler";   // 被这一下打进失衡、多普勒随晕眩结束，这一下的击破照样传出去
   const shieldBeforeT = shieldSum(target);
   // 评分：这一击的加分倍率（克制等）。击杀、失衡在 applyCombat 里发生，先挂在目标身上给它们用
-  const scoreBonus = attacker && attacker.isPlayer && target && !target.isPlayer ? attackScoreBonus(res, target) : 0;
+  const scoreBonus = attacker && (attacker.isPlayer || attacker.envSrc) && target && !target.isPlayer ? attackScoreBonus(res, target) : 0;
   const wasStunnedForScore = !!(target && target.stunned);
   if (target && !target.isPlayer) target._killBonus = scoreBonus;
   // 废物利用的来源：记下这一击之前敌人每层的血量，之后只认这一击真正打碎的层
@@ -7297,14 +7380,20 @@ function dealTo(attacker, target, opt) {
     const ele = res.element || opt.element || "physical";
     state.lastHitElement = ele;   // 单人模式的支援：协助攻击之后按这一下的属性追加击破
     // 战场数据
-    if (attacker && target && attacker.isPlayer && !target.isPlayer) {
+    // 配置物打在敌人身上：环境分数（×1.2，记在触发 / 操控它的人身上）
+    const envWho = attacker && attacker.envSrc && target && !target.isPlayer ? envCreditUnit(attacker) : null;
+    if (attacker && attacker.envSrc) {
+      if (envWho && scoreEnvHit(target, res, envWho, scoreBonus)) scoreWeatherHelp(attacker, target, res, true);
+    } else if (attacker && target && attacker.isPlayer && !target.isPlayer) {
       const st = battleStat(attacker);
       if (st) {
         st.dmg += Math.floor(Number(res.total) || 0); st.brk += Number(res.breakDealt) || 0;
         addScore("dmg", Math.floor(Number(res.total) || 0) * SCORE_RULES.dmg, attacker, scoreBonus);
         addScore("brk", (Number(res.breakDealt) || 0) * SCORE_RULES.brk, attacker, scoreBonus);
+        scoreWeatherHelp(attacker, target, res, true);
       }
     }
+    if (target && target.isPlayer) scoreWeatherHelp(attacker, target, res, false);
     if (target && target.isPlayer) {
       const st = battleStat(target);
       if (st) st.taken += Math.floor(Number(res.total) || 0) + Math.floor(Number(res.shpDealt) || 0);
@@ -7319,7 +7408,8 @@ function dealTo(attacker, target, opt) {
     if (target && !target.isPlayer && (target.dead || totalHp(target) <= 0) && (res.intended || 0) > 0) {
       const over = Math.max(0, (res.intended || 0) - (res.total || 0));
       if (over > 0) target.overkill = (Number(target.overkill) || 0) + over;
-      if (over > 0 && attacker && attacker.isPlayer) addScore("overkill", Math.floor(over * SCORE_RULES.overkill), attacker, scoreBonus);
+      if (over > 0 && envWho) addScore("env", Math.floor(over * SCORE_RULES.overkill) * SCORE_RULES.env, envWho, scoreBonus);
+      else if (over > 0 && attacker && attacker.isPlayer && !attacker.envSrc) addScore("overkill", Math.floor(over * SCORE_RULES.overkill), attacker, scoreBonus);
       const maxHp = (target.layers || []).reduce((a, l) => a + (Number(l.max) || 0), 0);
       if ((res.intended || 0) >= maxHp * 0.5) target.killBig = true;
     }
@@ -8004,6 +8094,7 @@ function heluScanAct(a, picks, lines) {
     const g = (state.gaps || {})[key];
     if (!g || (g.type !== "wall" && g.type !== "bridge") || !((Number(g.hp) || 0) > 0)) { lines.push("那里已经没有危墙 / 桥梁了。"); return; }
     g.lastFrom = Number(a.zone);
+    g.lastBy = a.id;
     // 选了倒塌方向：倒塌按「最后一击来自哪一侧」往另一侧倒，这里把来源记成选定方向的对面
     const parts = key.split("-").map(Number), fall = Number(picks.fall);
     if (g.type === "wall" && parts.includes(fall)) g.lastFrom = fall === parts[0] ? parts[1] : parts[0];
@@ -10567,7 +10658,7 @@ function runSkillInner(id, optRun) {
       hitOne(a, t, { element: "acid", mult: 1, baseBreak: 1, atk });
       lines.push(beanToLiquid() ? "咖啡豆 → 咖啡液。" : "没有咖啡豆可转化。");
     } else if (id === "latte_ice") {
-      const err = setWeather("snow");
+      const err = setWeather("snow", { by: a.id });
       lines.push(err || "天气变为雪天。");
     } else if (id === "latte_return") {
       lines.push(...returnWeapon(a));
@@ -11225,7 +11316,7 @@ function runSkillInner(id, optRun) {
       if ((a.resources.liquid || 0) < 1) { lines.push("没有咖啡液。"); }
       else {
         a.resources.liquid -= 1;
-        const ferr = setZoneField(z, "acid");
+        const ferr = setZoneField(z, "acid", { by: a.id });
         if (ferr) lines.push(ferr);
         else lines.push(`${z} 区变为酸液地面。`);
         markAoeZone(z);
@@ -11371,7 +11462,7 @@ function runSkillInner(id, optRun) {
       const fl = state.skillFlow;
       const z = fl && fl.picks.dest != null ? Number(fl.picks.dest) : Number(a.zone);
       a.resources.liquid -= 1;
-      const ferr = setZoneField(z, "ice");
+      const ferr = setZoneField(z, "ice", { by: a.id });
       lines.push(ferr || `${z} 区变为冻土。`);
       markAoeZone(z);
       fieldUnits().filter(u => Number(u.zone) === z && !u.dead).forEach(u => {
@@ -11794,7 +11885,7 @@ function runSkillInner(id, optRun) {
       const fl = state.skillFlow;
       const dest = fl && fl.picks.dest != null ? Number(fl.picks.dest) : a.zone;
       if (dest !== Number(a.zone)) a.zone = dest;
-      const ferr = setZoneField(a.zone, "electric");
+      const ferr = setZoneField(a.zone, "electric", { by: a.id });
       if (ferr) lines.push(ferr);
       else lines.push(`${a.zone} 区变为高压场地。`);
     } else if (id === "kolt_chase") {
@@ -12006,7 +12097,7 @@ function runSkillInner(id, optRun) {
       hitOne(a, t, { element: "harmonic", mult: 1, baseBreak: 1, atk, atkRange: "ranged" });
     } else if (id === "helu_wave") {
       if (state.weather !== "phase") {
-        const err = setWeather("phase");
+        const err = setWeather("phase", { by: a.id });
         if (err) lines.push(err);
         else {
           // 相位计数器从第一次释放起一直在走（被覆盖也不停），再次释放接入当前计数，不归零
@@ -12021,7 +12112,7 @@ function runSkillInner(id, optRun) {
     } else if (id === "helu_storm") {
       // 大气干扰：进入沙暴；已经分析过战场（用过环境扫描）时，沙暴中再用可以调转风向
       if (state.weather !== "sand") {
-        const err = setWeather("sand", { casterZone: a.zone });
+        const err = setWeather("sand", { casterZone: a.zone, by: a.id });
         lines.push(err || `大气干扰：战场进入沙暴，风向 ${sandDirText(state.sandDir, state.zoneMode)}。`);
       } else if (a.resources && a.resources.scanned) {
         if (state.weatherLock) lines.push(`天气被「${state.weatherLock}」锁定，无法调转风向。`);
@@ -12112,7 +12203,7 @@ function runSkillInner(id, optRun) {
       if (!zones.length) lines.push("失控暴走：累积 40% 能量（未进入不稳态）。");
       else {
         lines.push(wasUnstable ? "失控暴走：已在不稳态，全场所有区域变为能量场！" : `失控暴走：进入不稳态，${a.zone} 区变为能量场。`);
-        zones.forEach(z => { const err = setZoneField(z, "energy"); if (err) lines.push(err); });
+        zones.forEach(z => { const err = setZoneField(z, "energy", { by: a.id }); if (err) lines.push(err); });
       }
     } else if (id === "ras_super") {
       // 不稳超导：转换 20% 累积能量为光能，给自己施加导体；不稳态下免费（skillCost）

@@ -132,7 +132,7 @@
     state.zoneMode = Number(g.zoneMode) || 2;
     state.board = null;
     state.partySize = 2;
-    state.weather = g.weather || "none";
+    state.weather = g.weather || "none"; state.weatherBy = null;
     if (typeof rollSandDir === "function") rollSandDir();
     state.weatherLock = null; state.phaseStep = 0; state.assistQueue = []; state.blockQueue = [];
     state.skillFlow = null; state.history = []; state.actionAcc = null; state.statusDmg = {};
@@ -292,7 +292,7 @@
         panel({ action: "normalizeField" }, env); break;
       }
       case "setPartySize": g.partySize = state.partySize = Number(cmd.value) || 2; break;
-      case "setWeather": { const was = state.weather; state.weather = cmd.value || "none"; if (cmd.persist) g.weather = state.weather; if (state.weather === "sand" && was !== "sand" && typeof rollSandDir === "function") rollSandDir(); break; }
+      case "setWeather": { const was = state.weather; state.weather = cmd.value || "none"; state.weatherBy = null; if (cmd.persist) g.weather = state.weather; if (state.weather === "sand" && was !== "sand" && typeof rollSandDir === "function") rollSandDir(); break; }
       case "rollEncounter": value = rollEncounter({ region: cmd.region, ...(cmd.faction ? { faction: cmd.faction } : {}) }); break;
       case "rollBossEncounter": { const bosses = Object.keys(ENEMY_INFO || {}).filter(k => ENEMY_INFO[k].boss && ENEMY_INFO[k].regions.indexOf(cmd.region) >= 0); if (bosses.length) value = rollBossEncounter(bosses[Math.floor(Math.random() * bosses.length)], { region: cmd.region }); break; }
       case "selectEncounter": g.lastEncounter = cmd.encounter; value = cmd.encounter; break;

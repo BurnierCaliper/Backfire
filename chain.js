@@ -80,7 +80,7 @@ const Chain = (function () {
     const enc = clone(c.stages[c.index]);
     if (typeof applyEncounterLayout === "function") applyEncounterLayout(enc);
     // 天气、回合、相位等这场战斗的东西不变；敌方单位、配置物、地面效果换成新区域的
-    const keep = { weather: state.weather, sandDir: state.sandDir, weatherLock: state.weatherLock, phaseStep: state.phaseStep };
+    const keep = { weather: state.weather, weatherBy: state.weatherBy, sandDir: state.sandDir, weatherLock: state.weatherLock, phaseStep: state.phaseStep };
     state.units = (state.units || []).filter(u => u.isPlayer);
     state.props = [];
     if (typeof buildEncounterField === "function") buildEncounterField(enc);
