@@ -2318,7 +2318,7 @@ function battleStat(u) {
  * 单局用本幕；跑团模式 / 战斗原型按敌人等级对应到幕（ROGUE_CONFIG.actLevels）。 */
 const SCORE_RULES = {
   dmg: 1,          // 每点伤害（含连带伤害）
-  heal: 1,         // 每点给其他友方的治疗 / 护盾
+  heal: 1.5,       // 每点给其他友方的治疗 / 护盾（让治疗者的贡献显得出来：比伤害高 50%）
   brk: 10,         // 每点击破
   stagger: 50,     // 打出失衡
   block: 30,       // 协助格挡成功
