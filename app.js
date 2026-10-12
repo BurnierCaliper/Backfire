@@ -7991,6 +7991,9 @@ function heluScanAct(a, picks, lines) {
     const g = (state.gaps || {})[key];
     if (!g || (g.type !== "wall" && g.type !== "bridge") || !((Number(g.hp) || 0) > 0)) { lines.push("那里已经没有危墙 / 桥梁了。"); return; }
     g.lastFrom = Number(a.zone);
+    // 选了倒塌方向：倒塌按「最后一击来自哪一侧」往另一侧倒，这里把来源记成选定方向的对面
+    const parts = key.split("-").map(Number), fall = Number(picks.fall);
+    if (g.type === "wall" && parts.includes(fall)) g.lastFrom = fall === parts[0] ? parts[1] : parts[0];
     g.hp = Math.max(0, (Number(g.hp) || 0) - 10);
     lines.push(`环境扫描：找到 ${key} 之间${gapLabel(g.type)}的薄弱点，耐久 −10 → ${g.hp}。`);
     if (g.hp <= 0) lines.push(...destroyGap(key, g));
@@ -8142,6 +8145,19 @@ function skillFlowSteps(id, actor, picks) {
     steps.push({ key: "act", type: "choice", optional: false, label: `${z} 区：扫描出配置物，或者和已有的配置物 / 地形 / 场地互动`,
       options: heluScanOptions(z) });
     const act = String(picks.act || "");
+    // 这一下会把危墙打塌（耐久 ≤ 10）：自己选往哪一区倒（以前固定往离 Helumica 远的那边倒）
+    if (act.indexOf("gap:") === 0) {
+      const key = act.slice(4), g = (state.gaps || {})[key];
+      if (g && g.type === "wall" && (Number(g.hp) || 0) > 0 && (Number(g.hp) || 0) <= 10) {
+        const who = zz => {
+          const us = fieldUnits().filter(u => Number(u.zone) === zz && !u.dead && !u.hidden && !u.fused);
+          const foe = us.filter(u => !u.isPlayer).length, ally = us.filter(u => u.isPlayer).length;
+          return `敌人 ${foe} 名、友方 ${ally} 名`;
+        };
+        steps.push({ key: "fall", type: "choice", optional: false, label: `${key} 之间的危墙要塌了：往哪一区倒（倒塌：物理伤害 + 2 击破，不分敌我）`,
+          options: key.split("-").map(Number).map(zz => ({ value: zz, label: `往 ${zz} 区倒（${who(zz)}）` })) });
+      }
+    }
     if (act.indexOf("prop:") === 0) {
       const p = (state.props || []).find(x => x.id === act.slice(5));
       if (p && p.kind === "battery") {
