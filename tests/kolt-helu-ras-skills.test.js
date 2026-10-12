@@ -237,3 +237,27 @@ test("废料计数：敌人失去血量层得来的废料不超过柯尔特生�
   k.resources.rotStore = {};
   assert.equal(c.koltScrapTotal(k), cap - 1, "不到上限照实算");
 });
+
+test("碎渣重炮（电钻机枪）扫射同区的飞行敌人：整轮只额外付 1 附赠行动；付不起就这一轮不打飞行的，子弹不作废", () => {
+  for (const bonus of [3, 0]) {
+    const c = H.load();
+    c.BattleSim.setup({ party: ["kolt", "yuito"], enemies: [{ id: "crow", lv: 5, zone: 1 }, { id: "crow", lv: 5, zone: 1 }, { id: "thug_knife", lv: 5, zone: 1 }], seed: "KCFLY" });
+    c.startCombat();
+    const S = c.S.state, k = c.findKit("kolt", S.units);
+    k.level = 10; k.zone = 1; k.resources.bit = "drill"; k.ap = 3; k.bonus = bonus;
+    const foes = S.units.filter(u => !u.isPlayer);
+    foes.forEach(u => { u.zone = 1; u.layers.forEach(l => { l.current = l.max = 999; }); });
+    S.lastBrokenLayer = null; k.resources.rotStore = { flesh: 60 };
+    const hp0 = foes.map(u => c.totalHp(u));
+    c.Commands.dispatch(JSON.parse(JSON.stringify({ type: "skill", actor: k.id, skill: "kolt_cannon", target: null, picks: { dest: 1 } })));
+    const lost = foes.map((u, i) => hp0[i] - c.totalHp(u));
+    if (bonus) {
+      assert.equal(k.bonus, bonus - 1, "两只飞行的都挨了子弹，也只付 1 次");
+      assert.ok(lost[0] > 0 && lost[1] > 0, "两只飞行的都打到了");
+    } else {
+      assert.equal(k.bonus, 0);
+      assert.equal(lost[0] + lost[1], 0, "付不起：不打飞行的");
+      assert.ok(lost[2] >= 60, "60 点废料全部打在地面的狂徒身上");
+    }
+  }
+});

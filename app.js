@@ -11881,10 +11881,27 @@ function runSkillInner(id, optRun) {
         let n = 0;
         const hitIds = new Set();
         lines.push(`机枪扫射 ${zone} 区。`);
+        // 扫射自己所在的区、里面有飞行的敌人：近程打飞行要额外 1 附赠行动——整轮扫射算一次攻击，只付一次
+        // （以前每颗子弹打到一个新的飞行敌人就各付一次，附赠付光后打到飞行敌人的子弹全部作废）；付不起就这一轮不打飞行的
+        let skipFly = false;
+        const flyers = Number(zone) === Number(a.zone) && !a.flying ? visibleEnemies(zone).filter(u => !u.dead && u.flying) : [];
+        if (flyers.length) {
+          state.flyPaid = state.flyPaid || {};
+          const unpaid = flyers.filter(u => !state.flyPaid[a.id + ">" + u.id]);
+          if (unpaid.length && (Number(a.bonus) || 0) >= 1) {
+            a.bonus -= 1;
+            scoreSpend(a, 0, 1);
+            lines.push(`扫射同区飞行中的敌人：整轮额外消耗 1 附赠行动。`);
+          } else if (unpaid.length) {
+            skipFly = true;
+            lines.push(`附赠行动不足：这一轮不打同区飞行中的敌人。`);
+          }
+          if (!skipFly) flyers.forEach(u => { state.flyPaid[a.id + ">" + u.id] = true; });
+        }
         while (pool > 0 && n < 300) {
           // 每一颗子弹打选中区域里的一个随机敌人（每颗都是单体攻击：照样触发过度自信的嘲讽）
           // 说明里写「随机」，实际先保证区里每个敌人都挨到一颗（在还没挨过的里随机），都挨过之后才完全随机
-          const alive = visibleEnemies(zone).filter(u => !u.dead);
+          const alive = visibleEnemies(zone).filter(u => !u.dead && !(skipFly && u.flying));
           const fresh = alive.filter(u => !hitIds.has(u.id));
           const from = fresh.length ? fresh : alive;
           const cur = from[Math.floor(Math.random() * from.length)];
