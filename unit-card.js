@@ -145,7 +145,7 @@
     // 有图标的状态画成徽章（hud-icons.js），没有图标的（聚焦、掩护、首领阶段……）还是写字
     const badges = icons ? (s.badges || []) : [];
     const badgeKey = badges.map(b => b.key + ":" + b.stack).join("|");
-    q(".u-status").innerHTML = execChip + highChip + (badges.length ? `<span class="hi-badges">${badges.map(b => HudIcons.badge(b.key, b.stack)).join("")}</span>` : "") + (s.status
+    q(".u-status").innerHTML = execChip + highChip + (badges.length ? `<span class="hi-badges">${badges.map(b => HudIcons.badge(b.key, b.stack, b.title)).join("")}</span>` : "") + (s.status
       ? s.status.split(" · ").filter(t => t && t !== "无状态" && !/^高能/.test(t) && !(icons && HudIcons.covered(t))).map(t => `<span class="chip">${esc(t)}</span>`).join("")
       : "");
     // 新挂上的、层数变了的徽章：生效一下（放大 + 发光）
