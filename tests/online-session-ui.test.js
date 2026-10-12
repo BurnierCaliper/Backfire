@@ -750,6 +750,36 @@ test("联机跑团：玩家的角色升级只弹在这名玩家的画面上，�
   assert.deepEqual(f.errors, []);
 });
 
+test("联机：模板配了援军和连续战斗，玩家画面顶上也有点线点和援军倒计时；打完第一场一起去下一个区域", { timeout: 120000 }, async t => {
+  const f = await fixture(t); if (!f) return;
+  const { host, alice } = f;
+  await host.evaluate(() => { OnlineGame.start(); window.__noLevelUpPopup = true; });
+  await alice.waitForFunction(() => OnlineGame.getView().screen === "exploration");
+  await host.evaluate(() => {
+    const a = battleTemplateSave({ name: "B 区", board: 3, enemies: [{ preset: "thug_knife", level: 1, zone: 3 }] });
+    battleTemplateSave({ name: "A 区", board: 2, enemies: [{ preset: "thug_knife", level: 1, zone: 2 }], waves: [{ turns: 3, enemies: [{ preset: "thug_hammer", level: 1, zone: 2 }] }], chain: [a.id] });
+  });
+  await host.click('#tr-tabs [data-tab="battles"]');
+  const id = await host.evaluate(() => battleTemplateList().find(x => x.name === "A 区").id);
+  await host.click(`[data-bt="fight:${id}"]`);
+  await host.evaluate(() => { GAME.skip = true; GAME.instant = true; GAME.startOrEnd(); });
+  await host.waitForFunction(() => state.combatStarted && GAME.depth === 0);
+  await alice.waitForFunction(() => OnlineGame.getView().screen === "battle" && !!document.querySelector("#online-stage .ol-chain"));
+  const bar = await alice.locator("#online-stage .ol-chain").innerText();
+  assert.match(bar, /第 1 \/ 2 场/); assert.match(bar, /援军 1 个 · 3 回合后抵达 2 区/);
+  assert.equal(await alice.locator("#online-stage .ol-chain .ch-dot").count(), 2);
+  // 场上的敌人打光：援军提前到下一回合
+  for (const uid of await host.evaluate(() => state.units.filter(u => !u.isPlayer && !u.dead).map(u => u.id))) assert.equal((await submit(host, { type: "gm.removeUnit", actor: uid, mode: "kill" })).ok, true);
+  await alice.waitForFunction(() => /下回合抵达/.test(document.querySelector("#online-stage .ol-chain")?.textContent || ""));
+  assert.equal(await host.evaluate(() => GAME.ended), false);
+  // 援军也打掉（直接放上场再击杀），第一场结束：去 B 区
+  await host.evaluate(() => { state.turnNo += 1; Chain.roundStart([]); OnlineGame.touch(); });
+  for (const uid of await host.evaluate(() => state.units.filter(u => !u.isPlayer && !u.dead).map(u => u.id))) assert.equal((await submit(host, { type: "gm.removeUnit", actor: uid, mode: "kill" })).ok, true);
+  await host.waitForFunction(() => state.chain && state.chain.index === 1);
+  await alice.waitForFunction(() => /第 2 \/ 2 场/.test(document.querySelector("#online-stage .ol-chain")?.textContent || "") && OnlineGame.getView().packet.state.zoneMode === 3);
+  assert.deepEqual(f.errors, []);
+});
+
 test("联机：主持人发大字，所有玩家画面中间弹出，几秒后淡出；小队频道留记录；刚进房间不重播旧的", { timeout: 120000 }, async t => {
   const f = await fixture(t); if (!f) return;
   const { host, alice, bob } = f;

@@ -123,6 +123,14 @@ function battleTemplateNormalize(t) {
   const props = (Array.isArray(t.props) ? t.props : []).filter(p => p && BATTLE_TEMPLATE_PROPS.includes(p.kind)).slice(0, 20)
     .map(p => ({ kind: p.kind, zone: zoneOk(p.zone, 1), level: lvOf(p.level), faction: p.faction === "enemy" ? "enemy" : "player" }));
   const defaultPlayer = (btLayout(board) || {}).playerZone || 1;
+  // 援军（chain.js）：第几回合抵达、敌人进哪个区；最多 6 波，每波最多 12 个
+  const waves = (Array.isArray(t.waves) ? t.waves : []).filter(w => w && typeof w === "object").slice(0, 6).map(w => ({
+    turns: btInt(w.turns, 2, 1, 30),
+    enemies: (Array.isArray(w.enemies) ? w.enemies : []).filter(e => e && typeof e.preset === "string" && (!presets || presets.includes(e.preset)))
+      .slice(0, 12).map(e => ({ preset: e.preset, level: lvOf(e.level), zone: zoneOk(e.zone, maxZ) }))
+  }));
+  // 连续战斗：打完接着打的模板（按 id；最多 9 场）
+  const chain = (Array.isArray(t.chain) ? t.chain : []).filter(id => typeof id === "string" && /^[\w-]{1,40}$/.test(id)).slice(0, 9);
   return {
     id: typeof t.id === "string" && /^[\w-]{1,40}$/.test(t.id) ? t.id : "bt" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
     name: String(t.name == null ? "" : t.name).trim().slice(0, 40) || "未命名战场",
@@ -131,7 +139,7 @@ function battleTemplateNormalize(t) {
     board,
     weather: BATTLE_TEMPLATE_WEATHERS.includes(t.weather) ? t.weather : "none",
     playerZone: zoneOk(t.playerZone, defaultPlayer),
-    enemies, fields, gaps, props,
+    enemies, fields, gaps, props, waves, chain,
     drops: btDrops(t.drops),
     updatedAt: Number(t.updatedAt) || Date.now()
   };
@@ -252,9 +260,26 @@ function battleTemplateCapture(name) {
 }
 
 /* ---------- 开战：模板 → 遭遇 ---------- */
-/** 转成 buildEncounter 认的遭遇格式（站位锁定，不再随机打乱） */
-function battleTemplateToEncounter(t) {
+/** 转成 buildEncounter 认的遭遇格式（站位锁定，不再随机打乱）。
+ *  带连续战斗的：后面几场按模板 id 找到，放进 enc.stages（它们自己的「连续战斗」不再往下展开）；掉落加在一起 */
+function battleTemplateToEncounter(t, nested) {
   t = battleTemplateNormalize(t);
+  const enc = btOneEncounter(t);
+  if (nested) return enc;
+  const next = t.chain.map(id => (typeof battleTemplateById === "function" ? battleTemplateById(id) : null)).filter(Boolean);
+  if (next.length) {
+    enc.stages = next.map(x => battleTemplateToEncounter(x, true));
+    const all = [enc.drops].concat(enc.stages.map(s => s.drops)).filter(Boolean);
+    if (all.length) {
+      const items = {};
+      all.forEach(d => (d.items || []).forEach(x => { items[x.id] = (items[x.id] || 0) + x.qty; }));
+      enc.drops = { kuizhi: all.reduce((s, d) => s + (Number(d.kuizhi) || 0), 0), items: Object.keys(items).map(id => ({ id, qty: items[id] })) };
+    }
+    enc.stages.forEach(s => { delete s.drops; delete s.weather; });
+  }
+  return enc;
+}
+function btOneEncounter(t) {
   const zones = battleTemplateZones(t.board);
   const enc = {
     id: "tpl:" + t.id, name: t.name, template: t.id, tier: t.tier,
@@ -269,6 +294,7 @@ function battleTemplateToEncounter(t) {
     fields: btClone(t.fields),
     features: []
   };
+  if (t.waves.length) enc.waves = t.waves.map(w => ({ turns: w.turns, enemies: w.enemies.map(e => Object.assign({ preset: e.preset, zone: e.zone, count: 1 }, e.level != null ? { level: e.level } : {})) }));
   if (t.drops) enc.drops = btClone(t.drops);
   if (typeof t.board === "string") enc.board = t.board;
   Object.keys(t.gaps).forEach(k => {
@@ -304,6 +330,8 @@ function battleTemplateSummary(t) {
   if (nf) extra.push(`${nf} 个区有场地`);
   if (ng) extra.push(`${ng} 处间隙`);
   if (t.props.length) extra.push(`${t.props.length} 个配置物`);
+  if (t.waves.length) extra.push(`援军 ${t.waves.length} 波`);
+  if (t.chain.length) extra.push(`连续 ${t.chain.length + 1} 场`);
   if (t.drops) extra.push("有掉落");
   return bits.join(" · ") + (extra.length ? `（${extra.join("、")}）` : "");
 }

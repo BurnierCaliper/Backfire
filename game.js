@@ -2470,6 +2470,15 @@
     const heroes = state.units.filter(u => u.isPlayer && !u.hidden && !u.dead && !isWeaponUnit(u));
     // 多人模式（含热座 / 联机）：全员倒地即失败，和 README 一致；只有单人主角能靠起身撑着不算输
     const standing = heroes.filter(u => typeof heroStillFighting === "function" ? heroStillFighting(u) : !u.dying);
+    if (!foes().length && (state.chain || (state.waves || []).length) && standing.length) {
+      // 还有援军 / 下一场（chain.js）：不结束，换了区域就重画战场
+      const r = systemCommand({ type: "battle.chain" });
+      if (r && r.continued) {
+        if (foes().length) { syncFieldDom(); setView(snapAll(), false); refreshAll(); phaseCard(`第 ${(state.chain ? state.chain.index : 0) + 1} 场`, "player"); }
+        else refreshAll();
+        return false;
+      }
+    }
     if (!foes().length) return finish(true);
     if (!standing.length) return finish(false);
     return false;
@@ -2772,6 +2781,13 @@
   }
 
   function refreshTop() {
+    // 连续战斗第几场、援军倒计时（chain.js）
+    // 浮在战场正上方（顶栏已经很挤）；战场重画时挂回去
+    let ch = document.getElementById("g-chain");
+    const field = $("g-field");
+    if (!ch && field) { ch = document.createElement("div"); ch.id = "g-chain"; ch.className = "g-chain"; ch.hidden = true; }
+    if (ch && field && ch.parentNode !== field) field.appendChild(ch);
+    if (ch && typeof Chain !== "undefined") { const h = Chain.barHtml(Chain.status()); ch.hidden = !h; if (ch.innerHTML !== h) ch.innerHTML = h; }
     $("g-round").textContent = state.combatStarted ? `第 ${state.turnNo || 1} 回合` : "准备中";
     const ph = $("g-phasel");
     ph.textContent = !state.combatStarted ? "等待开始" : (state.combatPhase === "enemy" ? "敌人行动" : "我方行动");
@@ -4156,7 +4172,8 @@
       over.title = "用现在的战场覆盖这个模板";
       over.onclick = () => {
         if (!confirm(`用现在的战场覆盖模板「${t.name}」？`)) return;
-        try { battleTemplateSave(Object.assign(battleTemplateCapture(t.name), { id: t.id, note: t.note })); flashHint("已覆盖模板「" + t.name + "」"); }
+        // 援军、连续战斗在场上看不出来：沿用模板里的
+        try { battleTemplateSave(Object.assign(battleTemplateCapture(t.name), { id: t.id, note: t.note, waves: t.waves, chain: t.chain })); flashHint("已覆盖模板「" + t.name + "」"); }
         catch (e) { flashHint(e.message); }
         renderTemplateList();
       };

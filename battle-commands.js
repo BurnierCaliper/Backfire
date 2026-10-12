@@ -2,7 +2,7 @@
 (function (root) {
   "use strict";
   let local = {};
-  const types = ["skill", "move", "standUp", "useItem", "startCombat", "endTurn", "openingChoice", "blockAnswer", "assistAnswer", "koltSwapAnswer", "heluScanAnswer", "longgeSafetyAnswer", "retreat", "battle.endPlayerTurn", "battle.endEnemyTurn", "battle.enemyAction", "battle.finish", "battle.afterBattle", "battle.checkSolo", "battle.supportInfo", "battle.rememberCampaign", "battle.loadCampaign", "battle.cleanQueues", "battle.setup", "battle.setupRogue", "battle.panel", "battle.undo", "battle.continue"];
+  const types = ["skill", "move", "standUp", "useItem", "startCombat", "endTurn", "openingChoice", "blockAnswer", "assistAnswer", "koltSwapAnswer", "heluScanAnswer", "longgeSafetyAnswer", "retreat", "battle.endPlayerTurn", "battle.endEnemyTurn", "battle.enemyAction", "battle.finish", "battle.afterBattle", "battle.checkSolo", "battle.supportInfo", "battle.rememberCampaign", "battle.loadCampaign", "battle.cleanQueues", "battle.setup", "battle.setupRogue", "battle.panel", "battle.undo", "battle.continue", "battle.chain"];
   const panelActions = ["bagAdd", "currency", "water", "healItem", "repair", "advance", "shortRest", "longRest", "restore", "cheat", "saveSlot", "loadSlot", "clearSlot", "addParty", "removeParty", "addEnemy", "removeEnemy", "setField", "ruinHp", "setGap", "gapHp", "rollWall", "toggleDoor", "addProp", "removeProp", "setZones", "setPartySize", "setWeather", "rollEncounter", "rollBossEncounter", "selectEncounter", "normalizeBag", "normalizeGaps", "normalizeField", "setHighland", "setExecution", "setShare", "setSpread", "setTower", "setDrops"];
   function configure(adapter) { local = Object.assign({}, local, adapter || {}); }
   function environment(context) { return Object.assign({}, local, context || {}); }
@@ -162,7 +162,9 @@
     if (typeof RUN !== "undefined" && RUN.active) RUN.apply();
     // 战斗掉落：遭遇（战斗模板）里带的；没有就清空，主持人可以在战场配置里再设
     state.battleDrops = enc && enc.drops && typeof normalizeBattleDrops === "function" ? normalizeBattleDrops(enc.drops) : null;
-    if (enc && typeof buildEncounter === "function") buildEncounter(enc, cmd.level, partyN);
+    // 援军、连续战斗（chain.js）
+    if (typeof Chain !== "undefined") Chain.clear();
+    if (enc && typeof buildEncounter === "function") { buildEncounter(enc, cmd.level, partyN); if (typeof Chain !== "undefined") Chain.init(enc, cmd.level, partyN); }
     else {
       const presets = enemyPresets();
       const plan = g.enemyPlan && g.enemyPlan.length ? g.enemyPlan : [{ id: "thug_knife", lv: cmd.level, zone: 2 }, { id: "thug_hammer", lv: cmd.level, zone: 2 }, { id: "bandit_boss", lv: cmd.level, zone: 2 }];
@@ -341,6 +343,8 @@
       case "battle.panel": return panel(cmd, env);
       case "battle.undo": return env.undo ? env.undo() : false;
       case "battle.continue": return env.continueBattle ? env.continueBattle(cmd.outcome) : false;
+      // 敌人打完：还有援军 / 下一场就不结束（chain.js）
+      case "battle.chain": { const notes = []; const goOn = typeof Chain !== "undefined" ? Chain.onCleared(notes) : false; notes.forEach(t => appendLog(t)); return { continued: goOn, notes }; }
     }
   }
   root.BattleCommands = { execute, configure, battleSpecData, types: types.slice(), panelActions: panelActions.slice() };

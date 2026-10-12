@@ -197,6 +197,22 @@
     enumField(state, out, "combatPhase", ["player", "enemy"]);
     enumField(state, out, "weather", ["none", "heat", "snow", "acid", "thunder", "glow", "sand", "phase"]);
     out.units = arr(get(state, "units")).slice(0, 200).map(projectUnit).filter(Boolean);
+    // 连续战斗第几场 / 共几场、援军还有几回合到哪个区（chain.js · status 的格式）
+    const chain = get(state, "chain"), waves = arr(get(state, "waves")).filter(w => obj(w) && !get(w, "done"));
+    if (obj(chain) || waves.length) {
+      const stages = obj(chain) ? arr(get(chain, "stages")) : [];
+      const t = number(get(state, "turnNo")) || 1;
+      out.chainStatus = {
+        total: Math.max(1, stages.length), index: obj(chain) ? Math.max(0, number(get(chain, "index")) || 0) : 0,
+        names: stages.slice(0, 12).map((s, i) => text(get(s, "name"), 40) || `第 ${i + 1} 场`),
+        waves: waves.slice(0, 8).map(w => {
+          const rows = arr(get(w, "enemies"));
+          return { no: number(get(w, "no")) || 0, in: Math.max(0, (number(get(w, "at")) || t) - t),
+            zones: [...new Set(rows.map(r => number(get(r, "zone")) || 2))].sort().map(z => z + " 区").join("、"),
+            count: rows.reduce((s, r) => s + Math.max(1, number(get(r, "count")) || 1), 0) };
+        })
+      };
+    }
     const bag = get(state, "bag");
     if (obj(bag)) {
       out.bag = copyFields(bag, {}, [], ["water"], []);

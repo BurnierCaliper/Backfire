@@ -83,7 +83,9 @@ const BattleSim = (function () {
       if (typeof applyEncounterLayout === "function") applyEncounterLayout(enc);
       if (enc.playerZone) state.units.forEach(u => { if (u.isPlayer && !u.hidden) u.zone = Number(enc.playerZone); });
       buildEncounter(enc, level, partyN);
+      if (typeof Chain !== "undefined") Chain.init(enc, level, partyN);
     } else {
+      if (typeof Chain !== "undefined") Chain.clear();
       (opt.enemies || []).forEach(row => {
         spawnEnemyGroup(row.id, Number(row.lv) || level, partyN, row.zone).forEach(u => state.units.push(u));
       });
@@ -96,7 +98,14 @@ const BattleSim = (function () {
     if (typeof soloDownCheck === "function") soloDownCheck([]);   // 单人：倒地起不来才算死亡
     const heroes = state.units.filter(u => u.isPlayer && !u.hidden && !u.dead && !isWeapon(u));
     const standing = heroes.filter(u => typeof heroStillFighting === "function" ? heroStillFighting(u) : !u.dying);
-    if (!EnemyAI.foes().length) return "player";
+    // 援军 / 连续战斗还没打完：继续（chain.js）
+    if (!EnemyAI.foes().length) {
+      const notes = [];
+      const goOn = typeof Chain !== "undefined" && Chain.onCleared(notes);
+      notes.forEach(t => appendLog(t));
+      if (!goOn) return "player";
+    }
+    if (!EnemyAI.foes().length) return null;
     if (!standing.length) return "enemy";
     return null;
   }

@@ -1518,6 +1518,8 @@ function refreshEnemyEconomy(u, notes) {
 function beginRound(notes) {
   notes = notes || [];
   startLogTurn();
+  // 援军（chain.js）：到了时候的这一波进场
+  if (typeof Chain !== "undefined") Chain.roundStart([]).forEach(t => appendLog(t));
   // 背水一战+：夏濒死并且起身时，每回合自动获得 1 点燃油
   {
     const xia = findKit("xia", state.units);
@@ -2527,8 +2529,10 @@ function scoreAct() {
  *  给了基准分：分数线 = 固定线 × 0.65 + 基准分 × 倍数 × 0.35，向上取整到 10 的倍数（好看）；不给（par 为 null）只看固定线 */
 function gradeLines(act, par) {
   const step = SCORE_ACT_STEP * Math.max(0, (Number(act) || 1) - 1);
+  // 援军、连续战斗：每多一波 / 一场，固定分数线 ×1.2（chain.js · fixedMult）
+  const fm = typeof Chain !== "undefined" ? Chain.fixedMult() : 1;
   return SCORE_GRADES.map(([g, line, xp, k]) => {
-    const fixed = line > 0 ? line + step : 0;
+    const fixed = line > 0 ? Math.round((line + step) * fm) : 0;
     const v = fixed <= 0 ? 0 : par == null ? fixed : Math.ceil((fixed * SCORE_LINE_MIX.fixed + (Number(par) || 0) * k * SCORE_LINE_MIX.par) / 10 - 1e-9) * 10;
     return [g, v, xp, fixed, k];
   });
@@ -7289,7 +7293,8 @@ function dealTo(attacker, target, opt) {
     else extra.push("格挡成功：位移与其他附带效果未生效。");
   }
   if (!res.pending) {
-    const ele = opt.element || res.element || "physical";
+    // 结算后实际用的属性（扩散会把攻击改成目标最新的状态属性）：伤害数字的颜色、图标、预览都跟着它
+    const ele = res.element || opt.element || "physical";
     state.lastHitElement = ele;   // 单人模式的支援：协助攻击之后按这一下的属性追加击破
     // 战场数据
     if (attacker && target && attacker.isPlayer && !target.isPlayer) {
