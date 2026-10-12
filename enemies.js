@@ -14,6 +14,11 @@ const ZONE_THREATS = {
     if (!r.glPending || !r.glZone) return null;
     return { zone: r.glZone, label: r.glReady ? "榴弹待发" : "榴弹标定", ready: !!r.glReady };
   },
+  ant_guard: (u) => {
+    const r = u.resources || {};
+    if (!r.shellPending || !r.shellZone) return null;
+    return { zone: r.shellZone, label: r.shellReady ? "大酸液弹待发" : "大酸液弹标定", ready: !!r.shellReady };
+  },
   ufo_body: (u) => {
     const r = u.resources || {};
     if (!r.boomReady) return null;
@@ -230,6 +235,14 @@ function enemySkillList(u) {
       { id: "en_patrol_assist", label: "协助攻击（无限距离谐波）" }
     ],
     dumpdrone: [{ id: "en_dump", label: "倾倒废液" }],
+    mine_guard: [
+      { id: "en_mine_guard", label: "酸液挥砍" },
+      { id: "en_mine_guard_assist", label: "协助攻击" }
+    ],
+    ant_guard: [
+      { id: "en_ant_spray", label: "酸液喷枪" },
+      { id: "en_ant_assist", label: "协助攻击" }
+    ],
     swarm: [{ id: "en_swarm", label: "撞击（自身死亡）" }],
     crow: [{ id: "en_crow", label: "声波" }],
     mecha_mg: [
@@ -357,6 +370,12 @@ function enemySkillList(u) {
     if (ready) list.unshift({ id: "en_gl_fire", label: "发射榴弹（" + u.resources.glZone + "区）" });
     else list.unshift({ id: "en_gl", label: "榴弹（选择区域）" });
   }
+  if (u.kit === "ant_guard") {
+    // 站在酸液地面上：从地面汲取酸，改用大酸液弹（先标定区域，下个敌人回合发射）；已标定的照常发射
+    const r = u.resources || {};
+    if (r.shellReady && r.shellZone) list.unshift({ id: "en_ant_shell_fire", label: "发射大酸液弹（" + r.shellZone + "区）" });
+    else if (!r.shellPending && onAcidGround(u)) list.unshift({ id: "en_ant_shell", label: "大酸液弹（选择区域）" });
+  }
   if (u.kit === "livesand") {
     if (u.resources && u.resources.giant) {
       list = [
@@ -424,6 +443,19 @@ function stepTowardZone(unit, destZone, opt) {
   return true;
 }
 
+/* 第一采矿场：酸液地面 */
+/** 站在酸液地面上（飞行单位不算） */
+function onAcidGround(u) {
+  const f = u && typeof state !== "undefined" && state.fields ? state.fields[u.zone] : null;
+  return !!(f && f.acid) && !u.flying;
+}
+/** 酸液地面不影响移动：离开不改花行动点 */
+const ACID_GROUND_WALKERS = { mine_guard: true, ant_guard: true };
+function acidGroundWalker(u) { return !!(u && ACID_GROUND_WALKERS[u.kit]); }
+/** 不吃酸液地面的伤害 */
+const ACID_GROUND_IMMUNE = { ant_guard: true };
+function acidGroundImmune(u) { return !!(u && ACID_GROUND_IMMUNE[u.kit]); }
+
 /** 相邻的另一个区。awayFrom 给了就挑离那个区最远的相邻区（一样远取编号小的）；
  *  不给就取编号最小的相邻区（直排：两区互换；三区 1、3 → 2，2 → 1，和以前一样） */
 function otherZone(zone, awayFrom) {
@@ -460,6 +492,9 @@ const ENEMY_SKILL_RANGE = {
   en_boom_fuse: "melee",
   en_buoy: "melee",
   en_dump: "ranged",
+  en_mine_guard: "melee",
+  en_mine_guard_assist: "melee",
+  en_ant_spray: "ranged",
   en_thug_knife: "melee",
   en_thug_hammer: "melee",
   en_crow: "melee",
@@ -736,6 +771,60 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
     if (!needT()) return true;
     // 腐蚀只在打中时施加：被协助格挡住、射程外打不到都不上（同观测鸦的高能）
     aa(t, { element: "acid", mult: 1, diceN: 1, diceS: (typeof leveledSides === "function" ? leveledSides(a.level, 4) : 4), baseBreak: 0, onConnect: { status: "corr" } });
+    return true;
+  }
+  if (id === "en_mine_guard" || id === "en_mine_guard_assist") {
+    if (!needT()) return true;
+    // 目标身上有腐蚀、或自己站在酸液地面上：打中后同区其他敌对单位再吃 0.5×atk 酸（不打同阵营）
+    const splash = !!(t.statuses && t.statuses.corr) || onAcidGround(a);
+    if (id === "en_mine_guard") stepTowardZone(a, t.zone);
+    aa(t, {
+      element: "acid",
+      mult: id === "en_mine_guard_assist" ? 0 : 1,
+      flat: id === "en_mine_guard_assist" ? 3 : (sg.flat || 0),
+      diceN: baseDice[0] || 1,
+      diceS: baseDice[1] || 4,
+      baseBreak: 1,
+      onConnect: splash ? { splash: { mult: 0.5, element: "acid" } } : undefined
+    });
+    return true;
+  }
+  if (id === "en_ant_spray") {
+    if (!needT()) return true;
+    aa(t, { element: "acid", mult: 1, diceN: 1, diceS: 6, baseBreak: 1, onConnect: { status: "corr" } });
+    return true;
+  }
+  if (id === "en_ant_assist") {
+    if (!needT()) return true;
+    aa(t, { element: "acid", mult: 1, baseBreak: 1 });
+    return true;
+  }
+  if (id === "en_ant_shell") {
+    if (!onAcidGround(a)) { lines.push(`${a.name} 不在酸液地面上，汲取不到酸。`); return true; }
+    const fl = state.skillFlow;
+    const zone = Number((fl && fl.picks && fl.picks.dest) || t && t.zone);
+    if (!(zone >= 1)) { lines.push("大酸液弹需要先选择落点区域。"); return true; }
+    a.resources = a.resources || {};
+    a.resources.shellZone = zone;
+    a.resources.shellPending = true;
+    a.resources.shellReady = false;
+    lines.push(`${a.name} 从酸液地面汲取酸，把大酸液弹标定在 ${zone} 区。下个敌人回合发射。`);
+    return true;
+  }
+  if (id === "en_ant_shell_fire") {
+    const r = a.resources || {};
+    const zone = Number(r.shellZone);
+    if (!(zone >= 1) || !r.shellReady) { lines.push("大酸液弹尚未就绪。先标定区域，等到下一个敌人回合再发射。"); return true; }
+    r.shellZone = 0; r.shellPending = false; r.shellReady = false;
+    const victims = standingPlayersIn(zone);
+    if (!victims.length) { lines.push(`大酸液弹落在 ${zone} 区，那里没有人。`); return true; }
+    // 随机一人 2×atk 酸 2 击破（单体，可以协助格挡）；同区其他人 等级+1d6 酸（范围，不能格挡）
+    const main = victims[Math.floor(Math.random() * victims.length)];
+    lines.push(`${a.name} 的大酸液弹在 ${zone} 区炸开，正中 ${main.name}。`);
+    aa(main, { element: "acid", mult: 2, baseBreak: 2 });
+    victims.filter(u => u.id !== main.id).forEach(u => {
+      aa(u, { element: "acid", mult: 0, flat: Number(a.level) || 1, diceN: 1, diceS: 6, baseBreak: 0, flags: { action: true, aoe: true } });
+    });
     return true;
   }
   if (id === "en_swarm") {

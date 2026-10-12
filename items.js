@@ -89,11 +89,11 @@ function rollEnemyLoot(u) {
   if (kit === "bandit_boss") return roll(3, 4, 0) * 50 + 50;
   // 主持人手册第十章（摧毁植入体的掉落；破解另计，由主持人给）
   if (kit === "mecha_mg" || kit === "mecha_gl") return roll(2, 6, 0) * 100;
-  if (kit === "captain_wolf" || kit === "captain_ox" || kit === "captain_lizard") return roll(1, 6, 0) * 50 + 100;
+  if (kit === "captain_wolf" || kit === "captain_ox" || kit === "captain_lizard" || kit === "ant_guard") return roll(1, 6, 0) * 50 + 100;
   if (kit === "giant") return roll(3, 6, 0) * 100 + 100;
   if (kit === "outlaw_king") return 0;
   const fixed = {
-    guard_sword: 20, guard_gun: 20, patrol_car: 30, buoy: 20, dumpdrone: 35,
+    guard_sword: 20, guard_gun: 20, patrol_car: 30, buoy: 20, dumpdrone: 35, mine_guard: 20,
     crow: 15, swarm: 200, patrolboat: 200, spreader: 180, watchcrow: 350, dustbody: 120
   };
   return fixed[kit] || 0;

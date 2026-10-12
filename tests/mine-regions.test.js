@@ -1,13 +1,13 @@
-// 采矿场的敌人分区（run.js · ENEMY_INFO / regionWeather）：第一采矿场 = 用酸的安保机械
+// 采矿场的敌人分区（run.js · ENEMY_INFO / regionWeather）：第一采矿场 = 用酸的安保部队
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const H = require("./headless");
 
-test("第一采矿场：只出用酸的安保机械，天气只会是酸雨或无", () => {
+test("第一采矿场：只出用酸的安保部队，天气只会是酸雨或无", () => {
   const c = H.load();
   const pool = c.regionPool("第一采矿场");
-  assert.deepEqual([...pool].sort(), ["dumpdrone", "spreader"]);
+  assert.deepEqual([...pool].sort(), ["ant_guard", "dumpdrone", "mine_guard", "spreader"]);
   const presets = c.enemyPresets();
   pool.forEach(k => {
     assert.equal(c.enemyInfo(k).faction, "安保", k);
@@ -28,6 +28,6 @@ test("第一采矿场的随机遭遇能抽出敌人", () => {
   for (let i = 0; i < 20; i++) {
     const spec = c.rollEncounter({ region: "第一采矿场" });
     assert.ok(spec.enemies.length > 0);
-    spec.enemies.forEach(e => assert.ok(["dumpdrone", "spreader"].includes(e.preset), e.preset));
+    spec.enemies.forEach(e => assert.ok(["ant_guard", "dumpdrone", "mine_guard", "spreader"].includes(e.preset), e.preset));
   }
 });

@@ -1567,6 +1567,26 @@ function enemyPresets() {
       if (lv >= 30) extraFlat = 20;
       return unitOf(this.name, lv, [{ type: "armor", hp: scaleHp(armor, p) }], def, atk, { kit: "guard_sword", range: "melee", dice, flat: extraFlat, element: "electric" });
     }},
+    // 第一采矿场：数值同机器人看守（剑），装甲的一半换成护盾（护盾在外）；攻击改成酸
+    { id: "mine_guard", name: "矿场看守机器人", build(lv, p) {
+      const extra = lv - 1;
+      const armor = 14 + extra * 5;
+      const shield = Math.round(armor / 2);
+      const def = 3 + Math.floor(lv / 5);
+      const atk = 4 + Math.floor(lv / 2);
+      let dice = [1, 4], extraFlat = 0;
+      if (lv >= 4) dice = [1, 6];
+      if (lv >= 8) dice = [1, 8];
+      if (lv >= 12) dice = [1, 10];
+      if (lv >= 16) dice = [1, 12];
+      if (lv >= 20) dice = [1, 20];
+      if (lv >= 25) extraFlat = 10;
+      if (lv >= 30) extraFlat = 20;
+      return unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(shield, p) },
+        { type: "armor", hp: scaleHp(armor - shield, p) }
+      ], def, atk, { kit: "mine_guard", range: "melee", dice, flat: extraFlat, element: "acid" });
+    }},
     { id: "guard_gun", name: "机器人看守（枪）", build(lv, p) {
       const armor = 12 + (lv - 1) * 4;
       const atk = 5 + (lv - 1);
@@ -1652,6 +1672,14 @@ function enemyPresets() {
         { type: "shield", hp: scaleHp(12 + (lv - 1) * 5 + milestone(lv, 2) * 5, p) },
         { type: "flesh", hp: scaleHp(14 + (lv - 1) * 2, p) }
       ], 4, 7 + milestone(lv, 2) + milestone(lv, 5), { kit: "captain_lizard", range: "ranged", dice: [1, 6], element: "acid", baseBreak: 2 });
+    }},
+    // 第一采矿场精英（暂定数值，按狼队长的总血量 / 架势 / atk 拆成护盾、装甲、肉体三层）
+    { id: "ant_guard", name: "蚁型特殊戒备兵种", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(10 + (lv - 1) * 4, p) },
+        { type: "armor", hp: scaleHp(10 + (lv - 1) * 3, p) },
+        { type: "flesh", hp: scaleHp(15 + (lv - 1) * 4, p) }
+      ], 4 + milestone(lv, 5), 8 + milestone(lv, 2) + milestone(lv, 5) * 2, { kit: "ant_guard", range: "ranged", dice: [1, 6], element: "acid" });
     }},
     { id: "bigsand", name: "大沙灵", build(lv, p) {
       return unitOf(this.name, lv, [{ type: "sand", hp: scaleHp(37 + (lv - 1) * 6 + milestone(lv, 2), p) }], 4, 5 + milestone(lv, 2), { kit: "bigsand", range: "melee", dice: [1, 4], element: "physical" });

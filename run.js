@@ -222,6 +222,8 @@ const ENEMY_INFO = {
   // 第一采矿场：用酸的安保机械（工蚁的部下）
   dumpdrone:   { faction: "安保", regions: ["第一采矿场", "巨人城"], tokens: 1 },
   spreader:    { faction: "安保", regions: ["第一采矿场"], tokens: 2 },
+  mine_guard:  { faction: "安保", regions: ["第一采矿场"], tokens: 1 },
+  ant_guard:   { faction: "安保", regions: ["第一采矿场"], tokens: 2 },
   // —— 警卫队（有机体，可与安保混编）——
   captain_wolf:   { faction: "警卫队", regions: ["巨人城", "外城区"], tokens: 2 },
   captain_ox:     { faction: "警卫队", regions: ["巨人城", "外城区"], tokens: 2 },

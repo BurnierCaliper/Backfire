@@ -21,7 +21,7 @@ const EnemyAI = (function () {
       !(typeof bpUntargetable === "function" && bpUntargetable(u)));   // 单局图纸：安全的迷彩（武器人形态）
   }
   // 不按「打单个目标」瞄准的技能：标定区域的榴弹（落点任意），不看危墙
-  const ZONE_PICK = { en_gl: true, en_gl_fire: true };
+  const ZONE_PICK = { en_gl: true, en_gl_fire: true, en_ant_shell: true, en_ant_shell_fire: true };
   // 不需要目标 / 不是攻击的技能：找站位时不拿它们来算「能不能打到」
   const NO_TARGET = { en_agg3_debris: true, en_king_hold: true, en_bigsand_summon: true, en_bigsand_heal: true, ufo_prime: true,
     ufo_boom: true, ufo_stomp: true, ufo_sweep: true, ufo_summon: true, en_agg2_overheat: true, en_giant_sand_pulse: true, en_thug_mutiny: true };
@@ -98,6 +98,7 @@ const EnemyAI = (function () {
     boomcar:        { dist: 0,    aim: "nearest", special: "boomcar", noBasic: true },
     buoy:           { dist: 0,    aim: "nearest", near: "en_buoy" },
     dumpdrone:      { dist: 1,    aim: "local",   near: "en_dump",           far: "en_dump" },
+    mine_guard:     { dist: 0,    aim: "local",   near: "en_mine_guard" },
     thug_knife:     { dist: 0,    aim: "local",   near: "en_thug_knife" },
     thug_hammer:    { dist: 0,    aim: "local",   near: "en_thug_hammer" },
     crow:           { dist: 0,    aim: "lowest",  near: "en_crow" },
@@ -111,6 +112,7 @@ const EnemyAI = (function () {
     captain_wolf:   { dist: 0,    aim: "local",   near: "en_wolf" },
     captain_ox:     { dist: 0,    aim: "local",   near: "en_ox" },
     captain_lizard: { dist: 1,    aim: "local",   near: "en_liz",            far: "en_liz" },
+    ant_guard:      { dist: 1,    aim: "local",   near: "en_ant_spray",      far: "en_ant_spray", special: "ant" },
     bigsand:        { dist: null, aim: "local",   near: "en_bigsand",        special: "bigsand" },
     livesand:       { dist: null, aim: "local",   special: "livesand" },
     giant:          { dist: null, aim: "local",   near: "en_giant_near",     far: "en_giant_far" },
@@ -276,6 +278,12 @@ const EnemyAI = (function () {
       if (has("en_gl_fire")) return "en_gl_fire";
       return has("en_gl") ? "en_gl" : null;
     }
+    if (spec.special === "ant") {
+      // 大酸液弹待发就发；站在酸液地面上就标定；否则用普通的酸液喷枪（交给 near / far）
+      if (has("en_ant_shell_fire")) return "en_ant_shell_fire";
+      if (has("en_ant_shell") && target && zdist(u.zone, target.zone) <= 1) return "en_ant_shell";
+      return null;
+    }
     if (spec.special === "bigsand") {
       const sands = state.units.filter(x =>
         !x.isPlayer && !x.dead && !x.hidden &&
@@ -354,8 +362,8 @@ const EnemyAI = (function () {
       zones.sort((a, b) => b.n - a.n);
       return zones.length ? { dest: zones[0].z } : null;
     }
-    if (sid === "en_gl") {
-      // 榴弹发射时照样会被危墙 / 关着的门挡住：隔着墙的区不算人数
+    if (sid === "en_gl" || sid === "en_ant_shell") {
+      // 榴弹 / 大酸液弹发射时照样会被危墙 / 关着的门挡住：隔着墙的区不算人数
       const zones = [];
       const open = (z) => !(typeof lineBlocked === "function" && lineBlocked(u.zone, z));
       for (let z = 1; z <= Number(state.zoneMode); z++) zones.push({ z, n: open(z) ? preyInZone(prey, z).length : 0 });
@@ -479,7 +487,7 @@ const EnemyAI = (function () {
     }
 
     let sid = aiSpecial(u, spec, target, prey, has, list);
-    if (sid && !["en_agg3_debris", "en_king_hold", "en_bigsand_summon", "en_bigsand_heal", "ufo_prime", "ufo_boom", "ufo_stomp", "ufo_sweep", "en_agg2_overheat", "en_gl", "en_gl_fire", "en_giant_sand_pulse"].includes(sid)) {
+    if (sid && !["en_agg3_debris", "en_king_hold", "en_bigsand_summon", "en_bigsand_heal", "ufo_prime", "ufo_boom", "ufo_stomp", "ufo_sweep", "en_agg2_overheat", "en_gl", "en_gl_fire", "en_ant_shell", "en_ant_shell_fire", "en_giant_sand_pulse"].includes(sid)) {
       const rt = retargetLegal(u, sid, target, prey, pick.forced);
       if (rt.target) target = rt.target;
       if (rt.sid) sid = rt.sid;

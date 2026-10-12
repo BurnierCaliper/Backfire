@@ -1826,6 +1826,7 @@ function tickEnergyFieldFor(u, f, notes) {
 }
 function tickAcidFieldFor(u, weather, notes) {
   if (fieldExempt(u)) return;
+  if (typeof acidGroundImmune === "function" && acidGroundImmune(u)) return;   // 蚁型特殊戒备兵种：不吃酸液地面
   const d = statusDotDice("acidfield", u.level, weather);
   const r = takeDice(d.n, d.s, 0);
   const x = envMult(u);
@@ -1923,6 +1924,10 @@ function startEnemyPhase() {
       if (u.kit === "mecha_gl" && u.resources && u.resources.glPending && u.resources.glZone && !u.resources.glReady) {
         u.resources.glReady = true;
         notes.push(`${u.name} 榴弹已就绪，可对 ${u.resources.glZone} 区发射。`);
+      }
+      if (u.kit === "ant_guard" && u.resources && u.resources.shellPending && u.resources.shellZone && !u.resources.shellReady) {
+        u.resources.shellReady = true;
+        notes.push(`${u.name} 大酸液弹已就绪，可对 ${u.resources.shellZone} 区发射。`);
       }
     }
   });
@@ -4017,7 +4022,7 @@ function doMoveInner(unit, dest, moveOpt) {
     const fromF = state.fields[from] || emptyField();
     if (overVoid) {
       if (!spendAp(unit, 1, "越过空隙")) return;
-    } else if (fromF.acid && !unit.flying) {
+    } else if (fromF.acid && !unit.flying && !(typeof acidGroundWalker === "function" && acidGroundWalker(unit))) {
       if (!spendAp(unit, 1, "离开酸液地面")) return;
     } else if (unit.self === "conductor") {
       // 导体：移动不消耗附赠动作
@@ -4052,7 +4057,7 @@ function doMoveInner(unit, dest, moveOpt) {
     renderAll();
     return;
   }
-  if (fromF.acid && !unit.flying && !overVoid) {
+  if (fromF.acid && !unit.flying && !overVoid && !(typeof acidGroundWalker === "function" && acidGroundWalker(unit))) {
     notes.push("离开酸液地面：规则上消耗行动点而不是附赠行动。");
   }
   if (fromF.ice && !unit.flying && !moveOpt.free && !fieldExempt(unit)) {
@@ -6834,6 +6839,14 @@ function runOnConnect(attacker, target, spec) {
       notes.push(`${target.name} 被操控，对 ${victim.name} 打出一次普通攻击。`);
     } else notes.push(`${target.name} 同区没有队友，操控未能转打队友。`);
   }
+  if (spec.splash) {
+    // 溅射（矿场看守机器人）：主攻击打中后，对目标那一区的其他敌对单位 mult×atk 范围伤害（不打同阵营，不能格挡）
+    const sp = spec.splash;
+    const others = (typeof enemiesOf === "function" ? enemiesOf(attacker) : []).filter(x =>
+      x.id !== target.id && Number(x.zone) === Number(target.zone) && !(typeof isDownProtected === "function" && isDownProtected(x)));
+    if (others.length) notes.push(`${attacker.name} 的攻击溅射到 ${others.map(x => x.name).join("、")}。`);
+    others.forEach(x => dealTo(attacker, x, { atk: effectiveAtk(attacker, state.units), mult: sp.mult, element: sp.element || "acid", baseBreak: 0, flags: { action: true, aoe: true } }));
+  }
   if (spec.spendAp) {
     target.ap = Math.max(0, (target.ap || 0) - spec.spendAp);
     notes.push(`${target.name} 行动点 −${spec.spendAp} → ${target.ap}`);
@@ -8473,12 +8486,12 @@ function skillFlowSteps(id, actor, picks) {
       }
     ];
   }
-  if (id === "en_gl") {
+  if (id === "en_gl" || id === "en_ant_shell") {
     return [{
       key: "dest",
       type: "zone",
       optional: false,
-      label: "榴弹落点区域",
+      label: id === "en_gl" ? "榴弹落点区域" : "大酸液弹落点区域",
       zones
     }];
   }
