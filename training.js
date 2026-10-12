@@ -5,7 +5,9 @@
  *   训练假人：血量 = 同等级 4 人队伍精英「警卫队队长（牛）」，掉到一半以下补满（掉的血照记）、被打死也拉回来；
  *   架势极高打不进失衡；不行动（ai.js 看 trainingDummy）。
  *   柯尔特：假人打不碎，「被摧毁的敌人血量层」的废料按每 3 个回合一次精英牛护盾层注入。
- * Training.setupField(kit, level) 规则层（无界面）也能用；Training.open() 是标题画面上的入口。
+ * 训练场还可以改：假人的血量层（照精英牛原样 / 自己配 1–3 层，总血量不变、平分）、天气、两个区各自的场地和高地、算不算属性克制。
+ *   不改就是上面的默认布置（tools/dpt.js 用的就是默认）。
+ * Training.setupField(kit, level, opts) 规则层（无界面）也能用；Training.open() 是标题画面上的入口。
  * 训练场只改内存里的局面，不存档；离开时重新载入页面，原来的跑团 / 单局进度照旧。 */
 (function (root) {
   "use strict";
@@ -15,6 +17,28 @@
   const DUMMY_DEF = 1e6;
   const REFILL_AT = 0.5;
   const TURNS = 8;
+  const LAYER_CN = { flesh: "肉体", armor: "装甲", shield: "护盾", sand: "沙尘", spirit: "星灵" };
+  const WEATHERS = [["none", "常态"], ["heat", "酷暑"], ["snow", "雪天"], ["acid", "酸雨"], ["thunder", "雷鸣"], ["glow", "微光"], ["sand", "沙暴"], ["phase", "相位"]];
+  const FIELDS = [["", "无"], ["fire", "火场"], ["electric", "高压场地"], ["acid", "酸液地面"], ["ice", "冻土"], ["energy", "能量场"], ["harmonic", "干涉场地"], ["heal", "治愈场地"]];
+  /** 默认布置（和自动搜索一样） */
+  const DEFAULT_OPTS = { layers: ["flesh"], weather: "none", fields: { 1: "", 2: "" }, high: { 1: false, 2: false }, chart: false };
+  function normOpts(o) {
+    o = Object.assign({}, DEFAULT_OPTS, o || {});
+    o.fields = Object.assign({ 1: "", 2: "" }, o.fields || {});
+    o.high = Object.assign({ 1: false, 2: false }, o.high || {});
+    if (o.layers !== "ox") o.layers = (Array.isArray(o.layers) ? o.layers : ["flesh"]).filter(t => LAYER_CN[t]).slice(0, 3);
+    if (Array.isArray(o.layers) && !o.layers.length) o.layers = ["flesh"];
+    if (!WEATHERS.some(w => w[0] === o.weather)) o.weather = "none";
+    return o;
+  }
+  /** 一行字说明这次的布置（面板和战斗记录用） */
+  function optsText(o) {
+    o = normOpts(o);
+    const layers = o.layers === "ox" ? "血量层照精英牛" : "血量层 " + o.layers.map(t => LAYER_CN[t]).join(" → ");
+    const wName = (WEATHERS.find(w => w[0] === o.weather) || [])[1];
+    const zone = z => [(FIELDS.find(f => f[0] === o.fields[z]) || [])[1], o.high[z] ? "高地" : ""].filter(x => x && x !== "无").join("+") || "无场地";
+    return `${layers} · ${wName} · 1 区 ${zone(1)} · 2 区 ${zone(2)} · ${o.chart ? "算属性克制" : "不算属性克制"}`;
+  }
 
   function chooseLevels(R, run) {
     for (let guard = 0; guard < 100; guard++) {
@@ -28,8 +52,9 @@
     throw new Error("Upgrade selection exceeded 100 choices");
   }
 
-  /** 布置：角色按单局升级流程到 level 级，站 1 区；训练假人在 2 区。返回 { dummy } */
-  function setupField(kit, level) {
+  /** 布置：角色按单局升级流程到 level 级，站 1 区；训练假人在 2 区。opts 见 DEFAULT_OPTS。返回 { dummy } */
+  function setupField(kit, level, opts) {
+    const o = normOpts(opts);
     const R = Rogue;
     RNG.install(`dpt:${kit}:${level}:setup`);
     const filler = HEROES.find(k => k !== kit);
@@ -51,14 +76,25 @@
     // 布置用固定种子：单位编号每次都一样（自动搜索重放时记下的动作才对得上）
     BattleSim.setup({ party: [kit], enemies: [], seed: `dpt:${kit}:${level}:setup`, before: spec.before, zoneMode: 2 });
     const S = state;
-    S.zoneMode = 2; S.weather = "none"; S.noChart = true; S.board = null;
+    S.zoneMode = 2; S.weather = o.weather; S.noChart = !o.chart; S.board = null; S.phaseStep = 0;
+    if (o.weather === "sand" && typeof rollSandDir === "function") rollSandDir();
     // 两个区都是空场地、中间没有障碍（不能留空对象：战斗画面排版要读每个区和区间）
     S.fields = { 1: emptyField(), 2: emptyField() }; S.gaps = { "1-2": emptyGap() };
+    [1, 2].forEach(z => {
+      if (o.fields[z]) setZoneField(z, o.fields[z]);
+      if (o.high[z]) S.fields[z].highland = true;
+    });
     const spawn = spawnEnemyGroup;
     const dummy = spawn("thug_knife", level, 1, 2)[0];
     dummy.name = DUMMY_NAME;
-    const hp = spawn("captain_ox", level, 4, 2)[0].layers.reduce((a, l) => a + (Number(l.max) || 0), 0);
-    dummy.layers = [{ type: "flesh", current: hp, max: hp }];
+    const ox = spawn("captain_ox", level, 4, 2)[0];
+    const hp = ox.layers.reduce((a, l) => a + (Number(l.max) || 0), 0);
+    if (o.layers === "ox") dummy.layers = ox.layers.map(l => ({ type: l.type, current: l.max, max: l.max }));
+    else {
+      // 自己配的层：总血量和精英牛一样，按层数平分（除不尽的给最里层）；数组第一个是最外层
+      const n = o.layers.length, each = Math.floor(hp / n);
+      dummy.layers = o.layers.map((t, i) => { const m = i === n - 1 ? hp - each * (n - 1) : each; return { type: t, current: m, max: m }; });
+    }
     dummy.def = dummy.defMax = DUMMY_DEF;
     dummy.zone = 2;
     dummy.trainingDummy = true;
@@ -66,7 +102,7 @@
     S.units.filter(u => u.isPlayer).forEach(u => { u.zone = 1; });
     S.dptBank = 0;   // 补血之前假人已经掉的血
     S.dptScrap = kit === "kolt" ? { every: 3, type: "shield", lost: spawn("captain_ox", level, 4, 1)[0].layers[0].max } : null;
-    S.training = { kit, level, turn: 0, turnStart: 0, per: [] };
+    S.training = { kit, level, opts: o, turn: 0, turnStart: 0, per: [] };
     return { dummy };
   }
 
@@ -125,7 +161,8 @@
       el.addEventListener("click", e => {
         const b = e.target.closest("button[data-tr]");
         if (!b) return;
-        if (b.dataset.tr === "restart") start(Training.kit, Training.level);
+        if (b.dataset.tr === "restart") start(Training.kit, Training.level, Training.opts);
+        if (b.dataset.tr === "config") open();
         if (b.dataset.tr === "exit") root.location.reload();
         if (b.dataset.tr === "fold") { el.classList.toggle("folded"); paint(); }
       });
@@ -143,18 +180,22 @@
     const rows = per.map((d, i) => `<tr${i + 1 === tr.turn ? ' style="color:#ffd56b"' : ""}><td>T${i + 1}${i + 1 === tr.turn ? "（进行中）" : ""}</td><td style="text-align:right">${Math.round(d)}</td></tr>`).join("");
     el.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px"><b>训练场 · ${esc(heroName(tr.kit))} Lv${esc(tr.level)}</b><button data-tr="fold" style="background:none;border:0;color:#d8b25a;cursor:pointer">${folded ? "展开" : "收起"}</button></div>`
       + (folded ? `<div>累计 ${Math.round(total)}</div>` : `<div style="color:#b9ad98;font-size:12px">${tr.turn ? `第 ${tr.turn} 回合` : "点「开始战斗」开打"} · 假人掉到一半补满，伤害照记</div>`
+      + `<div style="color:#b9ad98;font-size:12px">${esc(optsText(tr.opts))}</div>`
       + `<table style="width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;margin:6px 0">${rows}</table>`
       + `<div>前 ${TURNS} 回合合计 <b style="color:#ffd56b">${Math.round(first8)}</b>${per.length > TURNS ? ` · 全部 ${Math.round(total)}` : ""}</div>`
-      + `<div style="display:flex;gap:6px;margin-top:8px"><button class="g-train-btn" data-tr="restart">重新开始</button><button class="g-train-btn" data-tr="exit">离开训练场</button></div>`);
+      + `<div style="display:flex;gap:6px;margin-top:8px"><button class="g-train-btn" data-tr="restart">重新开始</button><button class="g-train-btn" data-tr="config">换布置</button><button class="g-train-btn" data-tr="exit">离开训练场</button></div>`);
   }
 
-  function start(kit, level) {
+  function start(kit, level, opts) {
+    const o = normOpts(opts);
     Training.active = true;
-    Training.kit = kit; Training.level = level;
+    Training.kit = kit; Training.level = level; Training.opts = o;
+    const plain = JSON.stringify(o) === JSON.stringify(normOpts(DEFAULT_OPTS));
     root.GAME.startCustomBattle(`训练场 · ${heroName(kit)} Lv${level}`, () => {
-      setupField(kit, level);
+      setupField(kit, level, o);
       RNG.install(`train:${kit}:${level}:${Date.now()}`);   // 布置用固定种子，打的时候骰子正常随机
-      return { notes: [`训练场：${heroName(kit)} Lv${level} 对训练假人（同等级精英牛的血量，掉到一半补满；不行动、打不进失衡；不算属性克制）。和输出循环页面上的数字同一套布置。点「开始战斗」开打。`] };
+      return { notes: [`训练场：${heroName(kit)} Lv${level} 对训练假人（同等级精英牛的总血量，掉到一半补满；不行动、打不进失衡）。${optsText(o)}。` +
+        (plain ? "和输出循环页面上的数字同一套布置。" : "") + "点「开始战斗」开打。"] };
     });
     if (typeof Screens !== "undefined") Screens.show("battle");
     paint();
@@ -169,22 +210,44 @@
       dlg.style.cssText = "background:#15110d;color:#f1e6cf;border:1px solid #d8b25a;border-radius:8px;padding:16px 18px;max-width:min(420px,calc(100vw - 32px))";
       doc.body.appendChild(dlg);
     }
+    const o = normOpts(Training.opts);
+    const sel = (id, list, cur) => `<select id="${id}">${list.map(([v, n]) => `<option value="${v}"${v === cur ? " selected" : ""}>${esc(n)}</option>`).join("")}</select>`;
+    const layerList = [["", "无"]].concat(Object.keys(LAYER_CN).map(k => [k, LAYER_CN[k]]));
+    const lay = o.layers === "ox" ? [] : o.layers;
     const lvOpts = Array.from({ length: 15 }, (_, i) => i + 1).map(l => `<option value="${l}"${l === (Training.level || 10) ? " selected" : ""}>${l} 级</option>`).join("");
     dlg.innerHTML = `<form method="dialog" style="display:grid;gap:10px">
       <h3 style="margin:0">训练场</h3>
       <p style="margin:0;color:#b9ad98;font-size:13px">单人对训练假人，手动打出伤害，和自动搜出来的输出循环对照。不存档，离开时页面会重新载入。</p>
       <label>角色 <select id="g-train-kit">${HEROES.map(k => `<option value="${k}"${k === Training.kit ? " selected" : ""}>${esc(heroName(k))}</option>`).join("")}</select></label>
       <label>等级 <select id="g-train-lv">${lvOpts}</select></label>
+      <fieldset style="border:1px solid #5a5146;border-radius:6px;padding:8px 10px;display:grid;gap:6px">
+        <legend>训练假人的血量层（总血量 = 同等级精英牛）</legend>
+        <label><input type="checkbox" id="g-train-ox"${o.layers === "ox" ? " checked" : ""}> 照精英牛原样（层的种类和血量都一样）</label>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">外层 ${sel("g-train-l0", layerList.slice(1), lay[0] || "flesh")} 中层 ${sel("g-train-l1", layerList, lay[1] || "")} 内层 ${sel("g-train-l2", layerList, lay[2] || "")}</div>
+        <small style="color:#b9ad98">自己配的层按层数平分总血量</small>
+      </fieldset>
+      <label>天气 ${sel("g-train-weather", WEATHERS, o.weather)}</label>
+      <div style="display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center">1 区（角色）${sel("g-train-f1", FIELDS, o.fields[1])}<label><input type="checkbox" id="g-train-h1"${o.high[1] ? " checked" : ""}> 高地</label></div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center">2 区（假人）${sel("g-train-f2", FIELDS, o.fields[2])}<label><input type="checkbox" id="g-train-h2"${o.high[2] ? " checked" : ""}> 高地</label></div>
+      <label><input type="checkbox" id="g-train-chart"${o.chart ? " checked" : ""}> 算属性克制（属性对血量层的克制；微光反转、冻土冰伤也在这里面）</label>
+      <small style="color:#b9ad98">全部默认（肉体一层、常态、无场地、不算克制）时和输出循环页面同一套布置。改了血量层 / 天气 / 场地会自动勾上「算属性克制」，可以再取消。</small>
       <div style="display:flex;gap:8px;justify-content:flex-end"><button class="g-train-btn" value="cancel">取消</button><button class="g-train-btn primary" value="go" id="g-train-go">进入训练场</button></div>
     </form>`;
+    const $ = id => doc.getElementById(id);
+    // 改了血量层 / 天气 / 场地：自动勾上「算属性克制」（不算的话层的种类、微光、冻土都没有区别）
+    ["g-train-ox", "g-train-l0", "g-train-l1", "g-train-l2", "g-train-weather", "g-train-f1", "g-train-f2"].forEach(id => { $(id).addEventListener("change", () => { $("g-train-chart").checked = true; }); });
     dlg.onclose = () => {
       if (dlg.returnValue !== "go") return;
-      start(doc.getElementById("g-train-kit").value, Number(doc.getElementById("g-train-lv").value) || 1);
+      const layers = $("g-train-ox").checked ? "ox" : ["g-train-l0", "g-train-l1", "g-train-l2"].map(id => $(id).value).filter(Boolean);
+      start($("g-train-kit").value, Number($("g-train-lv").value) || 1, {
+        layers, weather: $("g-train-weather").value, chart: $("g-train-chart").checked,
+        fields: { 1: $("g-train-f1").value, 2: $("g-train-f2").value }, high: { 1: $("g-train-h1").checked, 2: $("g-train-h2").checked }
+      });
     };
     if (dlg.showModal) dlg.showModal(); else dlg.setAttribute("open", "");
   }
 
-  const Training = { active: false, kit: null, level: 10, HEROES, TURNS, setupField, refillDummy, injectScrap, damage, tick, start, open, DUMMY_NAME };
+  const Training = { active: false, kit: null, level: 10, opts: null, DEFAULT_OPTS, normOpts, optsText, HEROES, TURNS, setupField, refillDummy, injectScrap, damage, tick, start, open, DUMMY_NAME };
   root.Training = Training;
 
   if (doc) {

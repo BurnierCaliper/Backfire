@@ -1513,3 +1513,28 @@ test("训练场：标题选角色和等级进场；对假人打一下记进本�
   assert.match(await page.textContent("#g-train"), /前 8 回合合计/);
   assert.deepEqual(o.errors, []);
 });
+
+test("训练场：可以换假人的血量层、天气、两个区的场地和高地；改了会自动勾上「算属性克制」", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await page.click("#t-training");
+  await page.selectOption("#g-train-kit", "xia");
+  await page.selectOption("#g-train-lv", "5");
+  assert.equal(await page.isChecked("#g-train-chart"), false, "默认不算克制");
+  await page.selectOption("#g-train-l0", "armor");
+  await page.selectOption("#g-train-l1", "flesh");
+  assert.equal(await page.isChecked("#g-train-chart"), true, "改了血量层自动勾上");
+  await page.selectOption("#g-train-weather", "snow");
+  await page.selectOption("#g-train-f2", "fire");
+  await page.check("#g-train-h1");
+  await page.click("#g-train-go");
+  await page.waitForFunction(() => state.training && state.training.kit === "xia" && GAME.depth === 0);
+  const st = await page.evaluate(() => { const d = state.units.find(u => u.trainingDummy); return { layers: d.layers.map(l => l.type), weather: state.weather, noChart: !!state.noChart, fire: !!state.fields[2].fireOn, high: !!state.fields[1].highland }; });
+  assert.deepEqual(st, { layers: ["armor", "flesh"], weather: "snow", noChart: false, fire: true, high: true });
+  assert.match(await page.textContent("#g-train"), /装甲 → 肉体 · 雪天 · 1 区 高地 · 2 区 火场 · 算属性克制/);
+  // 「重新开始」沿用这套布置
+  await page.click('#g-train button[data-tr="restart"]');
+  await page.waitForFunction(() => state.training && !state.combatStarted && GAME.depth === 0);
+  assert.equal(await page.evaluate(() => state.weather + "|" + state.units.find(u => u.trainingDummy).layers.map(l => l.type).join(",")), "snow|armor,flesh");
+  assert.deepEqual(o.errors, []);
+});
