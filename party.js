@@ -986,7 +986,7 @@ function skillList(unit) {
   if (unit.kit === "edc") {
     add({ id: "edc_drain", name: "引流", hint: "需与拉斯缪尔同区 · 累积能量全转光能 · 不稳+25%" });
     add({ id: "edc_shock", name: "电流冲击", hint: "距离1 · 1atk 电 +1击破 · 有光能则再打等量电击" });
-    add({ id: "edc_flash", name: "爆闪", hint: "释放全部光能 · 同区每名敌人 光能/2 能量 +1击破", minLv: 2 });
+    add({ id: "edc_flash", name: "爆闪", hint: "释放全部光能 · 同区每名敌人 光能/2 电击 +1击破", minLv: 2 });
     add({ id: "edc_siphon", name: "汲取", hint: "拉斯缪尔每回合结束自动把 20% 累积能量转光能 · 变回武器 · 生效中再用：不耗行动点并结束汲取", minLv: 4 });
     add({ id: "edc_return", name: "收回为武器", hint: "需与拉斯缪尔同区" });
   }
@@ -1000,7 +1000,7 @@ function skillList(unit) {
     add({ id: "longge_safety", name: "解开保险", hint: "解锁扳机 · 查看最后一发子弹，可以把它移到最前面", minLv: 2 });
     add({ id: "longge_heat", name: "热能轰击", hint: gun ? "手杖：近距离施加熔融 / 霰弹枪：近距离特殊射击（红弹：同区敌人熔融、同区友方治疗；蓝弹：同区友方各 1 冰击破）" : "手杖 · 近距离 · 施加熔融", minLv: 3 });
     add({ id: "longge_drink", name: "饮弹", hint: "枪口对准自己 · 耗 1 弹 · 蓝弹：霜结并按蓝弹治疗自己 / 红弹：自己受 1atk 火，返还行动点", minLv: 6 });
-    add({ id: "longge_shuffle", name: "洗牌", hint: "把剩下的子弹重新随机排列 · 连续 2 红：随机敌人 1atk 火（3 红再一次） · 连续 2 蓝：治疗血量最低的队友（3 蓝再一次） · 都没有就窥探 1", minLv: 11 });
+    add({ id: "longge_shuffle", name: "洗牌", hint: "把剩下的子弹重新随机排列 · 连续 2 红：随机敌人 1atk 火（3 红再一次） · 连续 2 蓝：治疗血量最低的队友（3 蓝再一次） · 都没有就窥探 1 · 子弹数量没变过不能连续洗", minLv: 11 });
     if (typeof passivePlus === "function" && passivePlus(unit, 2)) add({ id: "longge_reload", name: "完全换弹", hint: "子弹打光时 · 重新装上随机的 6 发（胶囊弹药+）" });
     add({ id: "longge_summon", name: "唤出小朋友", hint: "武器生物化" });
   }

@@ -517,13 +517,17 @@ function highBoomValue(unit) {
 
 /** 高能自爆在一次完整的攻击行动之后才判定：行动中（runSkill 里）只记下要判的单位，
  *  让多段攻击全部打完、高能值继续累积，行动结束时再统一判（flushHighBooms） */
-function checkHighBoom(unit) {
-  if (!unit || unit._highBooming || unit.dead || unit.hidden) return;
+function checkHighBoom(unit, opt) {
+  if (!unit || unit._highBooming) return;
+  // 行动中被打死的也要记下：等行动结束带着高能照样自爆（不能因为已经判死就漏掉）
   if ((Number(state._highDefer) || 0) > 0) {
+    if (unit.hidden && !unit.dead) return;
     state._highPending = state._highPending || [];
     if (!state._highPending.includes(unit.id)) state._highPending.push(unit.id);
     return;
   }
+  if (unit.hidden) return;
+  if (unit.dead && !(opt && opt.diedThisAction && !unit.isPlayer)) return;
   // 微光：蓄能状态下，高能值要在连续两个回合结束时都超过血量才自爆——平时不判，回合结束时判（glowStoreTurnEnd）
   if (unit.self === "store" && currentWeatherFor(unit) === "glow") return;
   const hp = currentLifeForHigh(unit);
@@ -535,7 +539,8 @@ function checkHighBoom(unit) {
 function flushHighBooms() {
   const ids = state._highPending || [];
   state._highPending = [];
-  ids.forEach(id => { const u = unitById(id); if (u) checkHighBoom(u); });
+  // 这次行动里被打死的敌人（已经判死、清场）只要身上还有高能，照样自爆
+  ids.forEach(id => { const u = unitById(id); if (u) checkHighBoom(u, { diedThisAction: true }); });
 }
 /** 回合结束：微光 + 蓄能的单位，高能值超过血量记一次；连续两个回合结束都超过才自爆，中间有一次没超过就重新数 */
 function glowStoreTurnEnd(notes) {
@@ -4519,6 +4524,13 @@ function lineBlocked(aZone, bZone) {
   return false;
 }
 
+/** 破釜沉舟看谁身上的状态：玩家唤出的武器人跟着持有者（攻击双倍、受伤翻倍都一样） */
+function gambitRes(u) {
+  if (!u) return {};
+  const owner = u.weaponOf && typeof weaponOwnerUnit === "function" ? weaponOwnerUnit(u) : null;
+  return (owner ? owner.resources : u.resources) || {};
+}
+
 function makeDealFlags(extra) {
   const flags = Object.assign({ action: true, block: "none" }, extra || {});
   return flags;
@@ -5376,6 +5388,7 @@ function longgeTakeBullet(u, lines) {
   if (!r.seen[0] && typeof window !== "undefined" && window.GAME && window.GAME.sim) c = takeDice(1, 2, 0).total <= 1 ? "blue" : "red";
   r.ammo.shift();
   r.seen.shift();
+  r.shuffleLock = false;   // 子弹数量变了：可以再洗牌
   longgeSyncKnown(r);
   lines.push(`消耗 1 发${LONGGE_AMMO[c].name}（剩 ${r.ammo.length} 发）。`);
   // 画面：开枪 / 出拳的人（龙哥或小朋友）头顶跳出红 / 蓝字，告诉玩家这一发是什么颜色
@@ -6341,7 +6354,7 @@ function resetBattleFlags(u) {
   if (u.kit === "ras") { r.energyPct = 0; r.light = 0; r.unstable = false; }
   if (u.kit === "helu") { r.scanned = false; r.lockLeft = roleLockCap(u); }
   if (u.kit === "torque") r.acidCharge = null;
-  if (u.kit === "longge") { r.trigger = false; r.ammo = longgeOpeningAmmo(); r.seen = r.ammo.map(() => false); r.known = 0; r.spitUsed = false; r.assistMode = null; }
+  if (u.kit === "longge") { r.trigger = false; r.ammo = longgeOpeningAmmo(); r.seen = r.ammo.map(() => false); r.shuffleLock = false; r.known = 0; r.spitUsed = false; r.assistMode = null; }
   if (typeof canSpit === "function" && canSpit(u.kit)) r.spitElement = spitElementOf(u.kit);   // 吐酸的属性（长休时改，记在队伍档案）
   u.focuses = [];
   u.bondAtk = 0;
@@ -7054,8 +7067,8 @@ function dealTo(attacker, target, opt) {
     flags.pierce = true;
     attacker.resources.pierceNext = false;
   }
-  if (attacker.resources && attacker.resources.gambitStrike) flags.doubleDeal = true;
-  if (target && target.resources && target.resources.gambitWound) flags.doubleTake = true;
+  if (gambitRes(attacker).gambitStrike) flags.doubleDeal = true;
+  if (gambitRes(target).gambitWound) flags.doubleTake = true;
   if (target && target.resources && target.resources.gritTurn) flags.dr50 = true;
   if (target && target.resources && target.resources.divertGuard) flags.dr25 = true;   // 扭矩「转移注意」自保
   if (target && target.resources && target.resources.standTurn) flags.immune = true;
@@ -9817,7 +9830,11 @@ const SKILL_REQUIREMENT = {
   xiaoxiao_heal:  (a) => (longgeRes(a) || { ammo: [] }).ammo.length ? null : "没有子弹了",
   xiaoxiao_burst: (a) => longgeBurstWhy(a),
   longge_drink:   (a) => (longgeRes(a) || { ammo: [] }).ammo.length ? null : "没有子弹了",
-  longge_shuffle: (a) => (longgeRes(a) || { ammo: [] }).ammo.length >= 2 ? null : "剩下的子弹不到 2 发，洗不了",
+  longge_shuffle: (a) => {
+    const r = longgeRes(a) || { ammo: [] };
+    if (r.ammo.length < 2) return "剩下的子弹不到 2 发，洗不了";
+    return r.shuffleLock ? "洗牌后子弹数量还没变过，不能连续洗牌" : null;
+  },
   longge_reload:  (a) => !(typeof passivePlus === "function" && passivePlus(a, 2)) ? "需要胶囊弹药+" : (longgeRes(a) || { ammo: [1] }).ammo.length ? "子弹还没打光" : null,
   yuito_summon:   (a) => weaponSummonWhy(a, "latte"),
   tou_summon:     (a) => weaponSummonWhy(a, "mochi"),
@@ -12108,7 +12125,7 @@ function runSkillInner(id, optRun) {
       const light = ras && ras.resources ? (ras.resources.light || 0) : 0;
       if (light <= 0) lines.push("没有光能。");
       else {
-        visibleEnemies(a.zone).forEach(u => hitOne(a, u, { element: "energy", mult: 0, flat: Math.floor(light / 2), baseBreak: 1, atk: 0, flags: { action: true, aoe: true } }));
+        visibleEnemies(a.zone).forEach(u => hitOne(a, u, { element: "electric", mult: 0, flat: Math.floor(light / 2), baseBreak: 1, atk: 0, flags: { action: true, aoe: true } }));
         ras.resources.light = 0;
         lines.push(`爆闪释放光能 ${light}。`);
       }
@@ -12252,6 +12269,7 @@ function runSkillInner(id, optRun) {
       const r = longgeRes(a);
       for (let i = r.ammo.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [r.ammo[i], r.ammo[j]] = [r.ammo[j], r.ammo[i]]; }
       r.seen = r.ammo.map(() => false);
+      r.shuffleLock = true;   // 洗过一次：子弹数量变动（开枪 / 消耗 / 换弹）之前不能再洗
       longgeSyncKnown(r);
       lines.push(`洗牌：剩下的 ${r.ammo.length} 发重新排列（之前看过的颜色作废）。`);
       const runOf = (color) => { let best = 0, cur = 0; r.ammo.forEach(c => { cur = c === color ? cur + 1 : 0; best = Math.max(best, cur); }); return best; };
@@ -12281,6 +12299,7 @@ function runSkillInner(id, optRun) {
       const r = longgeRes(a);
       r.ammo = longgeAmmoFresh();
       r.seen = r.ammo.map(() => false);
+      r.shuffleLock = false;
       longgeSyncKnown(r);
       lines.push("完全换弹：重新装上 6 发（顺序随机）。扳机要重新解锁。");
     } else if (id === "xiaoxiao_burst") {

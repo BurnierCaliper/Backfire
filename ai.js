@@ -553,6 +553,7 @@ const EnemyAI = (function () {
     return { thunk: () => { state.attackerId = u.id; doMove(u, dest); }, meta: { actorId: u.id, skillName: `移动到 ${dest} 区（${windOf(u, dest) > 0 ? "顺风" : "躲开逆风"}）` }, ai: { kind: "wind", dest } };
   }
   function aiPlan(u) {
+    if (u && u.trainingDummy) return null;   // 训练场的木桩：不行动
     const plan = aiPlanBase(u);
     if (!u || !u.flying || state.weather !== "sand" || u.noMove || u.self === "frost") return plan;
     if (typeof touDuelVictim === "function" && touDuelVictim(u)) return plan;   // 决一死战中不移动

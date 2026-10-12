@@ -1479,3 +1479,62 @@ test("战场数据 / 整局数据：「合并武器人」把角色和自己的�
   await page.click("#g-stats-close");
   assert.deepEqual(o.errors, []);
 });
+
+test("训练场：标题选角色和等级进场；对假人打一下记进本回合；假人不行动、掉到一半补满，战斗不会结束", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await page.click("#t-training");
+  await page.selectOption("#g-train-kit", "ras");
+  await page.selectOption("#g-train-lv", "10");
+  await page.click("#g-train-go");
+  await page.waitForFunction(() => state.training && state.training.kit === "ras" && GAME.depth === 0);
+  assert.equal(await page.evaluate(() => state.units.filter(u => !u.hidden).map(u => u.name).sort().join(",")), ["拉斯缪尔", "训练假人"].sort().join(","));
+  await page.keyboard.press("Space");
+  await page.waitForFunction(() => state.combatStarted && state.combatPhase === "player" && GAME.depth === 0, null, { timeout: 15000 });
+  const ras = await selectHero(page, "ras");
+  const hp0 = await page.evaluate(i => totalHp(state.units.find(u => u.id === i)), ras);
+  await page.keyboard.press("1");
+  await page.waitForFunction(() => GAME.arm && GAME.arm.mode === "unit");
+  const dummy = await page.evaluate(() => state.units.find(u => u.trainingDummy).id);
+  await page.click(`.unit-wrap[data-id="${dummy}"]`);
+  await page.waitForFunction(() => state.training.per[0] > 0 && GAME.depth === 0, null, { timeout: 10000 });
+  assert.match(await page.textContent("#g-train"), /训练场 · 拉斯缪尔 Lv10/);
+  // 打到只剩 1 血再结束回合：补满（掉的血照记），战斗不结束，进入第 2 回合
+  const before = await page.evaluate(() => Training.damage(state));
+  await page.evaluate(() => { const d = state.units.find(u => u.trainingDummy); d.layers[0].current = 1; });
+  await page.click("#g-endturn");
+  await page.waitForFunction(() => state.combatPhase === "player" && state.turnNo >= 2 && GAME.depth === 0 || GAME.ended, null, { timeout: 30000 });
+  assert.equal(await page.evaluate(() => GAME.ended), false, "假人补满，战斗没有结束");
+  const st = await page.evaluate(() => { const d = state.units.find(u => u.trainingDummy); return { hp: totalHp(d), max: totalMaxHp(d), per: state.training.per, dmg: Training.damage(state) }; });
+  assert.equal(st.hp, st.max, "补满了");
+  assert.ok(st.dmg >= Math.max(before, st.max - 1), "补血前掉的血照记（打到只剩 1 血 → 至少记 max − 1）");
+  assert.equal(st.per.length, 2);
+  assert.equal(await page.evaluate(i => totalHp(state.units.find(u => u.id === i)), ras), hp0, "假人不行动，没打拉斯缪尔");
+  assert.match(await page.textContent("#g-train"), /前 8 回合合计/);
+  assert.deepEqual(o.errors, []);
+});
+
+test("训练场：可以换假人的血量层、天气、两个区的场地和高地；改了会自动勾上「算属性克制」", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await page.click("#t-training");
+  await page.selectOption("#g-train-kit", "xia");
+  await page.selectOption("#g-train-lv", "5");
+  assert.equal(await page.isChecked("#g-train-chart"), false, "默认不算克制");
+  await page.selectOption("#g-train-l0", "armor");
+  await page.selectOption("#g-train-l1", "flesh");
+  assert.equal(await page.isChecked("#g-train-chart"), true, "改了血量层自动勾上");
+  await page.selectOption("#g-train-weather", "snow");
+  await page.selectOption("#g-train-f2", "fire");
+  await page.check("#g-train-h1");
+  await page.click("#g-train-go");
+  await page.waitForFunction(() => state.training && state.training.kit === "xia" && GAME.depth === 0);
+  const st = await page.evaluate(() => { const d = state.units.find(u => u.trainingDummy); return { layers: d.layers.map(l => l.type), weather: state.weather, noChart: !!state.noChart, fire: !!state.fields[2].fireOn, high: !!state.fields[1].highland }; });
+  assert.deepEqual(st, { layers: ["armor", "flesh"], weather: "snow", noChart: false, fire: true, high: true });
+  assert.match(await page.textContent("#g-train"), /装甲 → 肉体 · 雪天 · 1 区 高地 · 2 区 火场 · 算属性克制/);
+  // 「重新开始」沿用这套布置
+  await page.click('#g-train button[data-tr="restart"]');
+  await page.waitForFunction(() => state.training && !state.combatStarted && GAME.depth === 0);
+  assert.equal(await page.evaluate(() => state.weather + "|" + state.units.find(u => u.trainingDummy).layers.map(l => l.type).join(",")), "snow|armor,flesh");
+  assert.deepEqual(o.errors, []);
+});

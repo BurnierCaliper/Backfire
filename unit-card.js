@@ -86,7 +86,11 @@
     // 架势
     const defBox = q(".u-def");
     const n = Math.max(s.defMax, s.def);
-    if (c.pips.length !== n) {
+    // 架势特别高（训练场的木桩等）：一格一个菱形画不下，改写数字
+    if (n > 40) {
+      defBox.textContent = n >= 100000 ? "架势 ∞" : `架势 ${s.def}/${s.defMax}`;
+      c.pips = [];
+    } else if (c.pips.length !== n) {
       defBox.innerHTML = "";
       c.pips = [];
       for (let i = 0; i < n; i++) { const p = el("i", "pip"); defBox.appendChild(p); c.pips.push(p); }
@@ -145,7 +149,7 @@
     // 有图标的状态画成徽章（hud-icons.js），没有图标的（聚焦、掩护、首领阶段……）还是写字
     const badges = icons ? (s.badges || []) : [];
     const badgeKey = badges.map(b => b.key + ":" + b.stack).join("|");
-    q(".u-status").innerHTML = execChip + highChip + (badges.length ? `<span class="hi-badges">${badges.map(b => HudIcons.badge(b.key, b.stack)).join("")}</span>` : "") + (s.status
+    q(".u-status").innerHTML = execChip + highChip + (badges.length ? `<span class="hi-badges">${badges.map(b => HudIcons.badge(b.key, b.stack, b.title)).join("")}</span>` : "") + (s.status
       ? s.status.split(" · ").filter(t => t && t !== "无状态" && !/^高能/.test(t) && !(icons && HudIcons.covered(t))).map(t => `<span class="chip">${esc(t)}</span>`).join("")
       : "");
     // 新挂上的、层数变了的徽章：生效一下（放大 + 发光）

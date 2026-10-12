@@ -493,14 +493,14 @@ test("洗牌：剩下的子弹重排、看过的作废；连续红打随机敌�
   lvUp(lg);
   const kolt = c.findKit("kolt", S.units);
   // 全红 3 发：必然 3 连红 → 两次火焰
-  lg.resources.ammo = ["red", "red", "red"]; seenAll(lg);
+  lg.resources.shuffleLock = false; lg.resources.ammo = ["red", "red", "red"]; seenAll(lg);
   const pops = capturePops(c);
   cmd(c, { actor: lg.id, skill: "longge_shuffle" });
   assert.equal(pops.filter(p => p.element === "fire").length, 2);
   assert.ok(lg.resources.seen.every(x => !x), "看过的颜色作废");
   // 全蓝 3 发：治疗两次
   lg.ap = 3;
-  lg.resources.ammo = ["blue", "blue", "blue"];
+  lg.resources.shuffleLock = false; lg.resources.ammo = ["blue", "blue", "blue"];
   kolt.layers[kolt.layers.length - 1].current = 1;
   lg.layers[lg.layers.length - 1].current = Math.max(1, lg.layers[lg.layers.length - 1].max - 1);
   const k0 = c.totalHp(kolt);
@@ -508,7 +508,7 @@ test("洗牌：剩下的子弹重排、看过的作废；连续红打随机敌�
   assert.ok(c.totalHp(kolt) > k0, "血最低的柯尔特被治疗");
   // 红蓝交替的两发不可能连续 → 窥探 1
   lg.ap = 3;
-  lg.resources.ammo = ["red", "blue"];
+  lg.resources.shuffleLock = false; lg.resources.ammo = ["red", "blue"];
   const fhp = foes.map(f => f.layers[0].current);
   cmd(c, { actor: lg.id, skill: "longge_shuffle" });
   assert.equal(lg.resources.known, 1, "窥探 1");
@@ -522,7 +522,7 @@ test("洗牌：连续红弹的火焰只在打得到的敌人里随机（距离 1
   lg.zone = 1; foes[0].zone = 3; foes[1].zone = 2;   // 3 区的敌人距离 2，打不到
   for (let seed = 0; seed < 12; seed++) {
     lg.ap = 3;
-    lg.resources.ammo = ["red", "red", "red"]; seenAll(lg);
+    lg.resources.shuffleLock = false; lg.resources.ammo = ["red", "red", "red"]; seenAll(lg);
     const far0 = foes[0].layers[0].current, near0 = foes[1].layers[0].current;
     c.S.RNG.install("SHUF" + seed);
     cmd(c, { actor: lg.id, skill: "longge_shuffle" });
@@ -531,7 +531,7 @@ test("洗牌：连续红弹的火焰只在打得到的敌人里随机（距离 1
   }
   // 附近一个打得到的都没有：不出火焰，也不报错
   foes[1].zone = 3;
-  lg.ap = 3; lg.resources.ammo = ["red", "red"]; seenAll(lg);
+  lg.ap = 3; lg.resources.shuffleLock = false; lg.resources.ammo = ["red", "red"]; seenAll(lg);
   const hp = foes.map(f => f.layers[0].current);
   cmd(c, { actor: lg.id, skill: "longge_shuffle" });
   assert.deepEqual(foes.map(f => f.layers[0].current), hp);
@@ -634,4 +634,21 @@ test("小朋友 4 级爆发治疗：不用先窥探；不同色白扣行动点�
   cmd(c, { actor: w.id, skill: "xiaoxiao_burst", target: kolt.id, picks: { target: kolt.id } });
   assert.equal(c.totalHp(kolt) - hp, 2 * (lg.level + 5), "临时护盾");
   assert.equal(lg.resources.ammo.length, 0);
+});
+
+test("洗牌：洗过以后子弹数量没变过就不能连续洗；开枪 / 换弹之后可以再洗", () => {
+  const { c, lg } = setup();
+  lvUp(lg);
+  lg.ap = 3;
+  lg.resources.ammo = ["red", "blue", "red", "blue"]; seenAll(lg);
+  assert.equal(c.skillRequirementError(lg, "longge_shuffle"), null);
+  cmd(c, { actor: lg.id, skill: "longge_shuffle" });
+  assert.match(String(c.skillRequirementError(lg, "longge_shuffle")), /不能连续洗牌/);
+  const ap = lg.ap;
+  cmd(c, { actor: lg.id, skill: "longge_shuffle" });
+  assert.equal(lg.ap, ap, "被拦下，不扣行动点");
+  // 打出一发：数量变了，可以再洗
+  c.longgeTakeBullet(lg, []);
+  assert.equal(lg.resources.ammo.length, 3);
+  assert.equal(c.skillRequirementError(lg, "longge_shuffle"), null);
 });

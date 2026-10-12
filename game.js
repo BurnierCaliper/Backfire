@@ -2454,6 +2454,8 @@
 
   function checkEnd() {
     if (G.ended) return true;
+    // 训练场：训练假人掉到一半就补满、被打死也拉回来，战斗不会结束；顺便记每回合的伤害
+    if (window.Training && Training.active && !G.sim) Training.tick();
     if (!state.units || !state.units.length) return false;
     // 单人：主角倒地后还能用坚毅生命起身就不算输；起不来才算真正死亡
     const downNotes = dispatch({ type: "battle.checkSolo" });
@@ -2633,6 +2635,28 @@
     refreshAll();
     idleBox();
     battleIntro(spec.kind === "boss" || enc.tier === "boss" ? "boss" : spec.kind === "elite" || enc.tier === "elite" ? "elite" : "normal");
+  }
+
+  /**
+   * 自定义布置的战斗（训练场等）：setup() 自己布置战场（BattleSim.setup + 加单位），这里只接画面。
+   * 返回 setup() 的结果（可以带 notes：开场写进战斗记录的几行字）。
+   */
+  function startCustomBattle(title, setup) {
+    setRogueMode(null);
+    resetBattleView();
+    if ($("g-enc-name")) $("g-enc-name").textContent = title || "战斗";
+    const info = setup() || {};
+    G.undo = [];
+    G.encounter = null;
+    if ($("g-weather-sel")) $("g-weather-sel").value = state.weather;
+    syncFieldDom();
+    setView(snapAll(), false);
+    (info.notes || []).forEach(t => addLogPhase(t));
+    autoSelect(true);
+    refreshAll();
+    idleBox();
+    battleIntro("normal");
+    return info;
   }
 
   /* ---------- 开战前的大字：战斗类型、几区制、天气、场地 ----------
@@ -4439,6 +4463,7 @@
   G.skillThunk = skillThunk;
   G.snapAll = snapAll;
   G.setupBattle = setupBattle;
+  G.startCustomBattle = startCustomBattle;
   G.startRogueBattle = startRogueBattle;
   G.playCheck = playBlockCheck;   // 单局事件的检定也用同一个动画
   G.rememberCampaign = rememberCampaign;

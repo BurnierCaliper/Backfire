@@ -91,3 +91,30 @@ test("角色仪表：11 个角色都有数据和画面，读的是单位身上�
   assert.equal(HI.gauge(null), "");
   assert.equal(HI.gauge({ kit: "nobody" }), "");
 });
+
+test("晕眩标记：首领和 10 级起的精英一直挂「晕眩标记 n/2」徽章（0/2 也挂），普通敌人和玩家没有", () => {
+  const H = require("./headless");
+  const c = H.load();
+  c.BattleSim.setup({ party: ["kolt"], enemies: [{ id: "captain_ox", lv: 10, zone: 1 }, { id: "captain_ox", lv: 5, zone: 1 }, { id: "thug_knife", lv: 10, zone: 1 }], seed: "STM" });
+  c.startCombat();
+  const S = c.S.state;
+  const [elite10, elite5, thug] = S.units.filter(u => !u.isPlayer);
+  globalThis.isBossUnit = c.isBossUnit;
+  try {
+    assert.equal(c.isBossUnit(elite10), true);
+    const b = HI.unitBadges(elite10).find(x => x.key === "stunMark");
+    assert.ok(b, "10 级精英有徽章");
+    assert.equal(b.stack, "0/2");
+    assert.match(b.title, /攒满 2 个才会真正晕眩/);
+    elite10.stunMarks = 1;
+    assert.equal(HI.unitBadges(elite10).find(x => x.key === "stunMark").stack, "1/2");
+    assert.ok(!HI.unitBadges(elite5).some(x => x.key === "stunMark"), "10 级以下的精英没有");
+    assert.ok(!HI.unitBadges(thug).some(x => x.key === "stunMark"), "普通敌人没有");
+    assert.ok(!HI.unitBadges(c.findKit("kolt", S.units)).some(x => x.key === "stunMark"), "玩家没有");
+  } finally { delete globalThis.isBossUnit; }
+  // 联机投影过来的单位：主机给了 stunMax 就照着画
+  assert.equal(HI.unitBadges({ stunMax: 2, stunMarks: 1 })[0].stack, "1/2");
+  // 状态文字「晕眩标记 1/2」已经有图标，卡片上不再重复写字
+  assert.equal(HI.covered("晕眩标记 1/2"), true);
+  assert.match(HI.badge("stunMark", "1/2", "提示"), /title="提示"/);
+});

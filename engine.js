@@ -461,6 +461,8 @@ function inSkillRange(actor, target, text, zoneMode) {
 /** field：受击者所在区的场地（飞行单位、保释中的单位由调用方传空——冻土对飞行无效）；
  *  fieldMult：恶劣环境 / 末日让场地效果翻倍（冻土对冰 25% → 50%） */
 function chartMod(element, layerType, weather, field, acidRainCancelArmor, fieldMult) {
+  // 平衡测算（tools/dpt.js）：关掉属性克制表，所有属性对所有血量层都按 0 修正
+  if (typeof state !== "undefined" && state && state.noChart) return 0;
   let table = CHART[element];
   if (!table) return 0;
   let v = table[layerType] || 0;
