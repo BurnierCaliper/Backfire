@@ -804,7 +804,11 @@ const Rogue = (function () {
       });
     }
     captureParty(run, notes);
-    run.party.forEach(h => { delete h.pendingBreaks; });   // 检定受伤的击破已在开场结算
+    run.party.forEach(h => { delete h.pendingBreaks; });
+    if (outcome === "win" && run.party.length) {
+      const node = !boss && !ambush ? currentNode(run) : null;
+      rollItemDrops(run, boss ? "boss" : node && node.type === "elite" ? "elite" : "battle", notes);
+    }   // 检定受伤的击破已在开场结算
     // 护送：记下护送对象剩下的血量；被摧毁 = 任务失败
     const esc = !boss && run.task && run.task.escort;
     if (esc && !esc.lost && typeof escortStatus === "function") {
@@ -862,6 +866,31 @@ const Rogue = (function () {
     if (outcome === "retreat") notes.push("撤退：这一站的敌人没有解决，绕开继续前进。");
     advanceNode(run, notes);
     return logAll(run, notes);
+  }
+
+  /* ---------- 掉落的道具 / 改装件 ----------
+   * 单机直接进背包；联机单局（online-rogue.js）换成「按需求分配」：setLootHandler 接管 */
+  let lootHandler = null;
+  function setLootHandler(fn) { lootHandler = typeof fn === "function" ? fn : null; }
+  function grantLoot(run, id, qty, notes, source) {
+    if (!ITEM_CATALOG[id] || !(qty > 0)) return;
+    if (lootHandler && lootHandler(run, id, qty, notes, source) !== false) return;
+    bagAdd(id, qty);
+    notes.push(`${source ? source + "：" : ""}获得 ${ITEM_CATALOG[id].name} ×${qty}。`);
+  }
+  /** 打赢之后掉的道具（rogue-data.js · ROGUE_CONFIG.itemDrops）：kind = battle / elite / boss */
+  function rollItemDrops(run, kind, notes) {
+    const D = C.itemDrops;
+    if (!D || !(D.pool || []).length) return;
+    const key = `${run.seed}:drop:${run.act}:${run.taskNo}:${run.task ? run.task.index : "b"}:${run.day}:${kind}:${(run.dropNo = (run.dropNo || 0) + 1)}`;
+    const ids = withRng(key, () => {
+      const v = D[kind] == null ? D.battle : D[kind];
+      const n = v >= 1 ? Math.floor(v) : (Math.random() < v ? 1 : 0);
+      const out = [];
+      for (let i = 0; i < n; i++) out.push(pick(D.pool));
+      return out;
+    });
+    ids.forEach(id => grantLoot(run, id, 1, notes, "战利品"));
   }
 
   /* ---------- 节点推进 ---------- */
@@ -1668,8 +1697,8 @@ const Rogue = (function () {
     state.kuizhi = (Number(state.kuizhi) || 0) + pay.kuizhi;
     notes.push(`${t.key ? "主线" : "任务「" + t.name + "」"}完成：获得 ${pay.kuizhi} 奎支，每人 ${pay.xp} 经验。`);
     if (t.part && WEAPON_PARTS[t.part]) {
-      bagAdd(weaponPartItemId(t.part), 1);
       notes.push(`委托方额外给了一个改装件：${weaponPartLabel(t.part)}（${weaponPartText(t.part)}）。`);
+      grantLoot(run, weaponPartItemId(t.part), 1, notes, "任务报酬");
     }
     run.party.forEach(h => { h.xp = (h.xp || 0) + pay.xp; });
     const ei = escortInfo(run, t);
@@ -1822,6 +1851,7 @@ const Rogue = (function () {
     canClinic, cyberInfo, cyberPreview, cyberCost, modifyHero, healCost, healHero,
     pendingChoices, choiceOptions, choose, queueLevelRewards,
     camp, nextAct, afterVictory, endRun,
-    enterRunMode, leaveRunMode, syncWorld, save, inRunMode: () => !!stash
+    enterRunMode, leaveRunMode, syncWorld, save, inRunMode: () => !!stash,
+    setLootHandler, grantLoot, rollItemDrops
   };
 })();
