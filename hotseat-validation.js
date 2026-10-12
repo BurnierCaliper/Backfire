@@ -182,7 +182,7 @@
   }
   function checkItem(actor, cmd) {
     const spec = typeof cmd.item === "string" && Object.hasOwn(ITEM_CATALOG, cmd.item) && ITEM_CATALOG[cmd.item];
-    const have = spec && spec.target === "weapon" && typeof repairPoints === "function" ? repairPoints() : bagCount(cmd.item);
+    const have = spec && spec.target === "weapon" && typeof repairPoints === "function" ? repairPoints() : typeof itemCountFor === "function" ? itemCountFor(actor, cmd.item) : bagCount(cmd.item);
     if (!spec || !spec.combat || have < 1) fail("背包里没有这件可用战斗道具", "invalid_item");
     if (spec.target === "weapon") {
       // 维修工具包：dest 是要修的武器 kit

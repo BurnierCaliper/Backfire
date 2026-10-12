@@ -559,7 +559,7 @@
     if (state.combatPhase !== "player") return "敌人回合";
     if (!u || u.dead) return "已阵亡";
     if (sk.id === "__stand") return typeof standUpBlocked === "function" ? standUpBlocked(u) : null;
-    if (sk.id === "__item" && typeof bagList === "function" && !bagList().some(x => x.combat)) return "没有能在战斗中使用的道具";   // 维修工具包也算（战斗中能用）
+    if (sk.id === "__item" && typeof bagList === "function" && !bagList(u).some(x => x.combat)) return "没有能在战斗中使用的道具";   // 维修工具包也算（战斗中能用）
     if (u.stunned) return "失衡中，本回合无法行动";
     if ((sk.cost.ap || 0) > (u.ap || 0)) return "行动点不足";
     if ((sk.cost.bonus || 0) > (u.bonus || 0)) return "附赠行动不足";
@@ -2171,7 +2171,7 @@
     }
     if (sk.id === "__item") {
       // 维修工具包（没开封的 + 开封的）合成一项，按维修点数显示
-      const items = (typeof bagList === "function" ? bagList() : []).filter(x => x.combat && x.id !== "repair_kit_open");
+      const items = (typeof bagList === "function" ? bagList(actor) : []).filter(x => x.combat && x.id !== "repair_kit_open");
       if (typeof repairPoints === "function" && repairPoints() > 0 && !items.some(x => x.id === "repair_kit")) items.push(Object.assign({ qty: 0 }, ITEM_CATALOG.repair_kit, { id: "repair_kit" }));
       if (!items.length) { cancel(); flashHint("背包里没有能在战斗中使用的道具。"); return; }
       setHint("<b>使用道具</b>：选择一件。");
@@ -4472,6 +4472,8 @@
   G.setupBattle = setupBattle;
   G.startCustomBattle = startCustomBattle;
   G.startRogueBattle = startRogueBattle;
+  // 联机单局：房主刷新页面后，把结算面板的「继续」重新接回单局（rogue-ui.js · battleEnd）
+  G.resumeRogueBattle = (spec, onEnd) => setRogueMode({ spec, onEnd });
   G.playCheck = playBlockCheck;   // 单局事件的检定也用同一个动画
   G.rememberCampaign = rememberCampaign;
   G.doUndo = doUndo;

@@ -23,19 +23,52 @@
   if (window.HeroSheet) HeroSheet.register("run", () => (run ? query("sheetData") : []));
   if (window.Armory) Armory.register("run", () => (run ? query("armoryData") : []));
 
+  /* ---------- 联机单局（online-rogue.js）：要队伍一起决定的事改成投票，花钱从角色自己的钱包出 ---------- */
+  const online = () => !!(window.OnlineRogue && OnlineRogue.active());
+  const myId = () => (window.OnlineGame && OnlineGame.getView().identity || {}).id || "";
+  let payerKit = "";
+  /** 房主这边花钱用哪名角色的钱包（只能是房主自己操控的角色） */
+  function hostPayer() {
+    const kits = online() ? OnlineRogue.hostKits() : [];
+    if (!kits.includes(payerKit)) payerKit = kits[0] || "";
+    return payerKit;
+  }
+  function money() { return online() ? OnlineRogue.purse(hostPayer()) : Rogue.supplies().kuizhi; }
+
   function completeAction(notes, error) {
     lastError = error ? error.message : "";
     lastNotes = error ? [error.message] : Array.isArray(notes) ? notes : [];
     if (run && run.stage === "over") finishRun();
     else save();
     render();
+    if (online()) OnlineRogue.changed();
   }
-  function act(command) {
+  function doAct(command) {
     let notes, error;
     lastError = "";
     try { notes = dispatch(Object.assign({ type: "run" }, command), { run }); }
     catch (e) { error = e; }
     completeAction(notes, error);
+  }
+  function act(command) {
+    if (online()) {
+      try {
+        if (OnlineRogue.isTeamCommand(command)) {
+          const opt = OnlineRogue.matchOption(command);
+          if (!opt) throw new Error("这一步现在不能选");
+          OnlineRogue.vote(myId(), opt.id);
+          lastError = ""; lastNotes = [`你投了「${opt.label}」。等大家都投完（或者按「按现在的票数决定」）。`];
+          render();
+          return;
+        }
+        if (["buy", "buyPart", "sellPart"].includes(command.action) && !command.payer) {
+          if (!hostPayer()) throw new Error("房主没有自己操控的角色，不能花钱");
+          command = Object.assign({}, command, { payer: hostPayer() });
+        }
+        OnlineRogue.checkHost(command);
+      } catch (e) { completeAction(null, e); return; }
+    }
+    doAct(command);
   }
 
   /* ---------- 选队伍 ---------- */
@@ -115,7 +148,7 @@
     const foodTip = FOOD_ORDER.map(id => `${ITEM_CATALOG[id].name} ${s.food[id]}`).join(" · ");
     $("run-supplies").innerHTML =
       `<span>水 <b>${s.water}</b> ml</span><span title="${esc(foodTip)}">食物 <b>${s.foodTotal}</b></span>` +
-      `<span>奎支 <b>${s.kuizhi}</b></span>` +
+      (online() ? `<span title="每名角色的钱各算各的">奎支 ${run.party.map(h => `${esc(Rogue.heroName(h.kit))} <b>${OnlineRogue.purse(h.kit)}</b>`).join(" · ")}</span>` : `<span>奎支 <b>${s.kuizhi}</b></span>`) +
       `<span class="${tier ? "warn" : ""}">距上次长休 <b>${hrs}</b> 小时${tier ? " · " + EXHAUST[tier] : ""}</span>` +
       `<button class="g-btn small" data-career="1" title="本局每个角色的输出占比和团队贡献">整局数据</button>`;
     $("run-party").innerHTML = run.party.map(h => {
@@ -139,8 +172,13 @@
 
   /* ---------- 升级选择（手册第三章） ---------- */
   let lastLevelKey = "";
-  function renderLevelUps() {
+  /** 待选的升级：联机时只列房主自己操控的角色（别的角色由各自的玩家选） */
+  function myPending() {
     const pend = Rogue.pendingChoices(run);
+    return online() ? pend.filter(p => OnlineRogue.ownerOf(p.kit) === myId()) : pend;
+  }
+  function renderLevelUps() {
+    const pend = myPending();
     if (!pend.length) { lastLevelKey = ""; return ""; }
     const p = pend[0];
     // 新出现的升级：响一声升级音效（同一项重画界面不重复响）
@@ -268,21 +306,21 @@
           <button class="g-btn" id="r-rest-skip">不休息，直接离开<small>获得 ${C.restSkipKuizhi} 奎支 · 不花时间</small></button>
         </div>`;
     },
-    shop: () => `<p>路边有个摊子。手里有 ${Rogue.supplies().kuizhi} 奎支。</p>
+    shop: () => `<p>路边有个摊子。手里有 ${money()} 奎支。</p>
         ${shopList()}
         ${partRows(null)}
         ${repairRows()}
         <button class="g-btn r-main" id="r-leave">离开</button>`,
     smith: () => {
       const id = query("presentSmiths")[0];
-      return `<p>一位工匠愿意帮你改武器。手里有 ${Rogue.supplies().kuizhi} 奎支。</p>
+      return `<p>一位工匠愿意帮你改武器。手里有 ${money()} 奎支。</p>
         ${smithCard(id, true)}
         ${installRows(id)}
         ${partRows(id)}
         ${repairRows()}
         <button class="g-btn r-main" id="r-leave">离开</button>`;
     },
-    clinic: () => `<p>一家小诊所。手里有 ${Rogue.supplies().kuizhi} 奎支。</p>
+    clinic: () => `<p>一家小诊所。手里有 ${money()} 奎支。</p>
         ${clinicPanel()}
         <button class="g-btn r-main" id="r-leave">离开</button>`,
     check: () => checkPanel()
@@ -364,10 +402,10 @@
       if (btn) btn.disabled = true;
       return;
     }
-    const money = Rogue.supplies().kuizhi;
+    const cash = money();
     box.innerHTML = `改造后（外 → 内）：${esc(layerText(pv.layers))} · 费用 <b>${pv.cost}</b> 奎支` +
-      (pv.cost && money < pv.cost ? ' <span class="bad">奎支不够</span>' : "");
-    if (btn) btn.disabled = !pv.cost || money < pv.cost;
+      (pv.cost && cash < pv.cost ? ' <span class="bad">奎支不够</span>' : "");
+    if (btn) btn.disabled = !pv.cost || cash < pv.cost;
   }
   /** 商店货架（商店节点与休整时共用） */
   function shopList() {
@@ -378,14 +416,14 @@
       return `<div class="shop-row"><span class="s-name">${esc(Rogue.shopItemName(r))}<small>${esc(item ? item.hint || "" : "")}</small></span>
         <span class="s-have">${have != null ? "有 " + have : ""}</span>
         <span class="s-price">${r.price}</span>
-        <button class="g-btn" data-buy="${esc(r.key)}" ${s.kuizhi < r.price ? "disabled" : ""}>买</button></div>`;
+        <button class="g-btn" data-buy="${esc(r.key)}" ${money() < r.price ? "disabled" : ""}>买</button></div>`;
     }).join("")}</div>`;
   }
   /* ---------- 工匠：升级、图纸（任务板上随机来几位，任务里也可能遇到一位） ---------- */
   function smithCard(id, open) {
     const info = query("smithInfo", { smith: id });
     if (!info) return "";
-    const k = Rogue.supplies().kuizhi;
+    const k = money();
     const progress = info.claimed
       ? `已领图纸「${esc(Rogue.blueprintById(info.claimed).name)}」`
       : info.canClaim ? "可以领一张图纸" : `在他这里升级 ${info.uses}/${info.need} 次可领图纸`;
@@ -413,7 +451,7 @@
     if (!bps.length || !smithId) return "";
     if (!query("smithInfo", { smith: smithId }).canInstall) return `<p class="r-hint">手里有图纸，但 ${esc(query("smithInfo", { smith: smithId }).name)} 装不了，去找别的武器工匠。</p>`;
     const cost = ROGUE_SMITH_RULES.installCost;
-    const k = Rogue.supplies().kuizhi;
+    const k = money();
     const weapons = run.party.flatMap(h => query("heroView", { kit: h.kit }).weapons);
     const short = k < cost ? `<b class="bad">现在手里 ${k}，还差 ${cost - k} 奎支。</b>` : "";
     const minLv = BLUEPRINT_MIN_LEVEL;
@@ -430,7 +468,7 @@
     const ids = run.smiths || [];
     if (!ids.length) return "";
     return `<h2>工匠</h2>
-      <p class="r-hint">这次回城遇到 ${ids.length} 位工匠。手里有 ${Rogue.supplies().kuizhi} 奎支。在同一位工匠那里升级满 ${ROGUE_SMITH_RULES.blueprintAfter} 次，他会给你一张客制化图纸。</p>
+      <p class="r-hint">这次回城遇到 ${ids.length} 位工匠。手里有 ${money()} 奎支。在同一位工匠那里升级满 ${ROGUE_SMITH_RULES.blueprintAfter} 次，他会给你一张客制化图纸。</p>
       ${ids.map(id => smithCard(id, false)).join("")}
       ${installRows(ids.find(id => query("smithInfo", { smith: id }).canInstall) || ids[0])}
       ${partRows(ids[0])}`;
@@ -441,7 +479,7 @@
   /** 一位工匠摆出来卖的 3 件改装件（放在他的卡片里） */
   function partShelf(smithId) {
     if (typeof ROGUE_PARTS === "undefined") return "";
-    const k = Rogue.supplies().kuizhi;
+    const k = money();
     const rows = query("partOffers", { smith: smithId }).map((o, i) => `<div class="shop-row${o.sold ? " sold" : ""}">
         <span class="s-name">${esc(weaponPartLabel(o.id))}<small>${esc(weaponPartText(o.id))}${o.discount ? ` · <b class="pt-sale">八折</b>（原价 ${o.base}）` : ""}</small></span>
         <span class="s-have"></span><span class="s-price">${o.sold ? "—" : o.price}</span>
@@ -450,7 +488,7 @@
   }
   function partRows(smithId) {
     if (typeof ROGUE_PARTS === "undefined") return "";
-    const k = Rogue.supplies().kuizhi;
+    const k = money();
     const P = ROGUE_PARTS;
     const stock = query("partStock");
     const weapons = run.party.flatMap(h => query("heroView", { kit: h.kit }).weapons);
@@ -552,7 +590,7 @@
       case "task": return renderTask();
       case "camp": {
         const plan = query("restPlan", restSel);
-        const shopping = C.campShop ? `<p class="r-hint">回到城里，出发前可以补货。手里有 ${Rogue.supplies().kuizhi} 奎支。</p>${shopList()}${partRows(null)}${repairRows()}` : "";
+        const shopping = C.campShop ? `<p class="r-hint">回到城里，出发前可以补货。手里有 ${money()} 奎支。</p>${shopList()}${partRows(null)}${repairRows()}` : "";
         const clinic = C.campClinic ? `<h3 class="r-sub">诊所</h3>${clinicPanel()}` : "";
         const food = restFoodText(plan);
         return `<h2>休整</h2>
@@ -595,7 +633,7 @@
     const lv = run.stage === "over" ? "" : renderLevelUps();
     // 有待选的升级时先选完，再继续流程
     const err = lastError ? `<p class="r-warn r-error">没做成：${esc(lastError)}</p>` : "";
-    $("run-body").innerHTML = err + (lv || renderStage());
+    $("run-body").innerHTML = err + (online() ? onlinePanel() : "") + (lv || renderStage());
     const recent = lastNotes.length ? lastNotes : (run.log || []).slice(-6).map(l => l.text);
     $("run-log").innerHTML = recent.map(t => `<li>${esc(t)}</li>`).join("");
     bind();
@@ -608,22 +646,55 @@
     }
   }
 
+  /** 联机：队伍投票、战利品分配、房主用哪名角色的钱包 */
+  function onlinePanel() {
+    const v = OnlineRogue.viewFor(myId());
+    if (!v) return "";
+    const kits = OnlineRogue.hostKits();
+    const payer = kits.length > 1 ? `<label class="r-watch">花钱用：<select id="r-payer">${kits.map(k => `<option value="${esc(k)}"${k === hostPayer() ? " selected" : ""}>${esc(Rogue.heroName(k))}（${OnlineRogue.purse(k)} 奎支）</option>`).join("")}</select></label>`
+      : kits.length ? `<p class="r-hint">你操控 ${esc(Rogue.heroName(kits[0]))}，手里 ${OnlineRogue.purse(kits[0])} 奎支。</p>` : `<p class="r-hint">你没有操控角色：不能花钱，只能投票。</p>`;
+    const vote = v.vote.options.length ? `<div class="r-vote"><b>队伍投票</b>（${v.vote.voted}/${v.vote.voters} 人已投${v.vote.blocked ? " · " + esc(v.vote.blocked) : ""}）：点下面的按钮就是投票。
+        <ul>${v.vote.options.filter(o => o.voters.length).map(o => `<li>${esc(o.label)}：${esc(o.voters.join("、"))}</li>`).join("") || "<li>还没有人投票</li>"}</ul>
+        <button class="g-btn" id="r-force-vote" ${v.vote.voted ? "" : "disabled"}>按现在的票数决定</button></div>` : "";
+    const loot = v.loot.map(l => `<div class="r-vote"><b>战利品</b> ${esc(l.name)} ×${l.qty}（${esc(l.source)}）
+        需求：${esc(l.needs.join("、") || "无")} · 放弃：${esc(l.passes.join("、") || "无")}
+        <div class="r-choices">${l.mine.map(m => m.answer ? `<span>${esc(m.name)}：${m.answer === "need" ? "需求" : "放弃"}</span>`
+          : `<button class="g-btn" data-need="${l.no}" data-kit="${esc(m.kit)}" data-want="1">${esc(m.name)} 需求</button><button class="g-btn" data-need="${l.no}" data-kit="${esc(m.kit)}" data-want="0">${esc(m.name)} 放弃</button>`).join("")}</div></div>`).join("");
+    const forceLoot = v.loot.length ? `<button class="g-btn" id="r-force-loot">现在分配战利品</button>` : "";
+    const last = v.lastVote ? `<p class="r-hint">上一次队伍决定：${esc(v.lastVote)}</p>` : "";
+    const waits = v.waitingLevel.length ? `<p class="r-hint">等 ${esc(v.waitingLevel.join("、"))} 的玩家选升级。</p>` : "";
+    return `<section class="r-online">${payer}${last}${waits}${vote}${loot}${forceLoot}${v.lootLog.length ? `<p class="r-hint">${esc(v.lootLog.slice(-2).join(" "))}</p>` : ""}</section>`;
+  }
+
   function fight() {
-    // 有队员血量低于 20% 而且还能短休：先提醒一下
-    const low = query("lowHpWarning");
+    if (online()) { act({ fight: true }); return; }
+    realFight();
+  }
+  function battleEnd(outcome) {
+    if (run && run.online) run.online.battle = null;
+    act({ action: "finishBattle", outcome });
+    Screens.show("run");
+  }
+  function realFight() {
+    // 有队员血量低于 20% 而且还能短休：先提醒一下（联机时队伍已经投票决定了，不再问）
+    const low = online() ? null : query("lowHpWarning");
     if (low && low.length && !confirm(lowHpWarningText(low))) return;
     sessionCommand("startBattle", null, { startBattle(spec) {
       Screens.show("battle");
-      GAME.startRogueBattle(spec, (outcome) => {
-        act({ action: "finishBattle", outcome });
-        Screens.show("run");
-      });
+      // 联机：记下这场的首领 / 撤退规则，房主刷新页面后结算面板的「继续」还能交回单局
+      if (online()) run.online.battle = { title: spec.title || "", kind: spec.kind || "", retreat: spec.retreat };
+      GAME.startRogueBattle(spec, battleEnd);
+      if (online() && window.OnlineGame && OnlineGame.reassign) OnlineGame.reassign();
     } });
   }
 
   /** 熟练项检定：先结算，再按掷出的 d100 播和协助格挡一样的检定动画，最后刷新界面 */
   let checking = false;
   async function doCheck(kit, opt) {
+    if (online()) { act({ action: "attemptCheck", kit, opt: opt || 0 }); return; }
+    return realCheck(kit, opt);
+  }
+  async function realCheck(kit, opt) {
     if (checking) return;
     let result;
     try { result = dispatch({ type: "run", action: "attemptCheck", kit, opt: opt || 0 }, { run }); } catch (e) { completeAction(null, e); return; }
@@ -655,7 +726,7 @@
     const on = (id, fn) => { const b = $(id); if (b) b.onclick = fn; };
     body.querySelectorAll("[data-pick]").forEach(b => {
       b.onclick = () => {
-        const p = Rogue.pendingChoices(run)[0];
+        const p = myPending()[0];
         const o = query("choiceOptions", { kit: p.kit, index: p.index })[Number(b.dataset.pick)];
         act({ action: "choose", kit: p.kit, index: p.index, value: o.value });
       };
@@ -697,6 +768,13 @@
       b.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
     });
     on("r-fight", fight);
+    const pay = $("r-payer");
+    if (pay) pay.onchange = () => { payerKit = pay.value; render(); };
+    on("r-force-vote", () => { try { OnlineRogue.handle(myId(), { type: "rogue.force", what: "vote" }); } catch (e) { completeAction(null, e); } });
+    on("r-force-loot", () => { try { OnlineRogue.handle(myId(), { type: "rogue.force", what: "loot" }); } catch (e) { completeAction(null, e); } });
+    body.querySelectorAll("[data-need]").forEach(b => {
+      b.onclick = () => { try { OnlineRogue.need(myId(), Number(b.dataset.need), b.dataset.kit, b.dataset.want === "1"); } catch (e) { completeAction(null, e); } };
+    });
     on("r-long", () => {
       const w = $("r-watch");
       act(Object.assign({ action: "restAtNode", mode: "long", watch: (w && w.value) || null }, restSel));
@@ -735,6 +813,35 @@
       }
       return { here: Rogue.region(run), sub: `${run.solo ? "单人模式" : "单局"} · 第 ${run.act} 幕 · ${Rogue.region(run)}`, party: run.party.map(h => Rogue.heroName(h.kit)), route };
     },
+    /* ---------- 联机单局（online-game.js / online-rogue.js 用） ---------- */
+    current: () => run,
+    refresh() { if (run && Screens.is("run")) render(); },
+    /** 队伍投票定下来的事：真正去做 */
+    async perform(cmd) {
+      if (cmd.fight) return realFight();
+      if (cmd.action === "attemptCheck") return realCheck(cmd.kit, cmd.opt);
+      return doAct(cmd);
+    },
+    /** 玩家发来的个人指令：出错直接抛给玩家 */
+    actRaw(cmd) {
+      const notes = dispatch(Object.assign({ type: "run" }, cmd), { run });
+      completeAction(notes);
+      return notes;
+    },
+    /** 联机开局：去选队伍（不能选单人模式） */
+    startOnline() {
+      sessionCommand("prepareParty", { solo: false });
+      Screens.show("party");
+    },
+    onlineCheckpoint: () => (run ? JSON.parse(JSON.stringify({ run })) : null),
+    restoreOnline(saved) {
+      if (!saved || !saved.run) return;
+      sessionCommand("adopt", { run: saved.run });
+      lastNotes = ["房主恢复了房间。"];
+    },
+    /** 房主刷新时正在单局战斗里：把结算面板的「继续」重新接回单局 */
+    battleEnd,
+    battleSpecLite: () => (run && run.online && run.online.battle) || null,
     resume() {
       const result = sessionCommand("resume");
       if (!result.resumed) return;
@@ -765,6 +872,13 @@
       lastNotes = [`出发。种子 ${run.seed}。`];
       save();
       Screens.show("run");
+      if (window.OnlineRogue && OnlineRogue.enabled) {
+        // 联机：开局的钱分进各人钱包；把队伍摆上场，房间里才能把角色分给玩家
+        BattleSim.setup({ party: run.party.map(h => h.kit), enemies: [], before: () => Rogue.applyPartyToField(run) });
+        OnlineRogue.onNewRun(run);
+        if (window.OnlineGame && OnlineGame.reassign) OnlineGame.reassign();
+        render();
+      }
     };
     $("run-bestiary").onclick = () => {
       if (!window.Bestiary || !run) return;

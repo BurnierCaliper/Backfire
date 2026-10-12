@@ -84,7 +84,8 @@
     }
     function render() {
       view = bridge.getView();
-      if (!view || !view.active || !view.isHost) { if (container) container.remove(); container = null; open = false; silent = false; return; }
+      // 联机单局没有主持人：不放主持人工具
+      if (!view || !view.active || !view.isHost || view.mode === "rogue") { if (container) container.remove(); container = null; open = false; silent = false; return; }
       if (!container) { container = document.createElement("div"); container.id = "online-gm-tools"; container.className = "ogm-ui"; document.body.appendChild(container); container.addEventListener("click", onClick); container.addEventListener("change", onChange); }
       const focused = container.contains(document.activeElement) ? document.activeElement.id : "";
       // Notifications may arrive while the GM types. Preserve the pending form,
@@ -98,7 +99,7 @@
     function refresh() { if (container?.contains(document.activeElement)) document.activeElement.blur(); render(); }
     async function send(command) {
       if (busy) return;
-      view = bridge.getView(); if (!view?.active || !view.isHost) { render(); return; }
+      view = bridge.getView(); if (!view?.active || !view.isHost || view.mode === "rogue") { render(); return; }
       const form = container.querySelector("#ogm-panel"); if (form && !Array.from(form.querySelectorAll("input")).every(i => i.reportValidity())) return;
       command.silent = silent; busy = true; notice = "正在执行…";
       if (["gm.enemyAct", "gm.forceAttack"].includes(command.type)) open = false; // Let normal player reaction dialogs appear.

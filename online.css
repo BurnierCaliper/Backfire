@@ -248,3 +248,15 @@ body.ol-has-side .ol-toast { right: 344px; }
 .ol-battle .unit-wrap, .ol-battle .g-zone { position: relative; }
 .ol-battle .ob-pick-no { position: absolute; z-index: 6; top: -9px; left: -9px; min-width: 22px; height: 22px; padding: 0 5px; border-radius: 11px; display: inline-flex; align-items: center; justify-content: center; font: 800 13px/1 var(--num, sans-serif); color: #111; background: var(--gold, #f2c230); border: 2px solid #111; box-shadow: 2px 2px 0 #0008; pointer-events: none; }
 .ol-battle .g-zone > .ob-pick-no { top: 6px; left: auto; right: 8px; }
+
+/* 联机单局（online-ui.js · rogueMarkup）：投票、战利品、商店 / 工匠 / 诊所、队伍 */
+.ol-rogue-box { border: 1px solid var(--ol-line, #4a4036); border-radius: 6px; padding: 10px 12px; margin: 0 0 12px; background: rgba(0, 0, 0, .18); }
+.ol-rogue-box h3 { margin: 0 0 6px; font-size: 15px; }
+.ol-rogue-box ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.ol-rogue-box li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.ol-rogue-box li small { opacity: .75; }
+.ol-rogue-vote { border-color: #f5c542; }
+.ol-rogue-route { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 6px 0 0; padding-left: 20px; }
+.ol-rogue-route .ol-open { font-weight: 700; color: #f5c542; }
+.ol-rogue-party { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); gap: 10px; margin: 0 0 12px; }
+.ol-rogue-party > p { grid-column: 1 / -1; margin: 0; }
