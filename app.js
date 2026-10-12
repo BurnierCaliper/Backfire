@@ -2632,7 +2632,8 @@ function battleDropsText(d) {
 function trackHealBy(actor, fn) {
   const st = actor && actor.isPlayer ? battleStat(actor) : null;
   if (!st) return fn();
-  const hpNow = (u) => (u.layers || []).reduce((a, l) => a + Math.max(0, Number(l.current) || 0), 0);
+  // 瑞比机甲模式拼上去的明特装甲（l.mecha）不算瑞比的血：进机甲不是治疗
+  const hpNow = (u) => (u.layers || []).reduce((a, l) => a + (l.mecha ? 0 : Math.max(0, Number(l.current) || 0)), 0);
   const before = new Map();
   const calm = new Set(), marks = new Map();
   (state.units || []).forEach(u => {
