@@ -104,7 +104,7 @@
   function projectUnit(unit) {
     if (!obj(unit) || !id(get(unit, "id"))) return null;
     const out = identifiers(unit, {}, ["id", "kit", "weaponOf", "owner", "operatorId"]);
-    copyFields(unit, out, ["name"], ["level", "xp", "attrPoints", "zone", "atk", "def", "defMax", "ap", "apMax", "bonus", "bonusMax", "highEnergy", "stunMarks"], ["isPlayer", "weaponUnit", "isProp", "isGap", "isDevice", "dying", "stunned", "flying", "dead", "hidden", "noMove"]);
+    copyFields(unit, out, ["name", "escort"], ["level", "xp", "attrPoints", "zone", "atk", "def", "defMax", "ap", "apMax", "bonus", "bonusMax", "highEnergy", "stunMarks"], ["isPlayer", "weaponUnit", "isProp", "isGap", "isDevice", "dying", "stunned", "flying", "dead", "hidden", "noMove"]);
     if (get(unit, "fused") || get(unit, "_removed")) out.hidden = true;
     // 首领 / 10 级起精英：要攒几个晕眩标记才晕眩（玩家那边画「晕眩标记 n/2」徽章；他们自己算不出敌人的级别规则）
     try { if (!get(unit, "isPlayer") && typeof root.isBossUnit === "function" && root.isBossUnit(unit)) out.stunMax = 2; } catch (e) {}

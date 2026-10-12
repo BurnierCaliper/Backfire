@@ -134,6 +134,7 @@
       hidden: !!(u.hidden || u.fused),
       dead: !!(u.dead || u._removed),
       weaponUnit: (typeof isWeaponUnit === "function") ? !!isWeaponUnit(u) : !!u.weaponOf,
+      escort: u.escort || null,   // 护送对象（货车 / 委托人）：规则上按武器人处理，但画面上不能叫它武器人
       dying: !!u.dying,
       upOnShp: !!u.upOnShp,
       stunned: !!u.stunned,
@@ -868,9 +869,9 @@
   /** 玩家角色阵亡时弹一个提示框，需要确认才继续。角色会留在场上变灰。 */
   async function announceDeath(s) {
     if (G.ended) return;
-    const who = s.weaponUnit ? "武器人" : "队伍成员";
+    const who = s.escort ? "护送对象" : s.weaponUnit ? "武器人" : "队伍成员";
     const left = players().filter(u => !isWeaponUnit(u) && !u.dead).length;
-    const tail = s.weaponUnit
+    const tail = s.escort ? "护送失败。" : s.weaponUnit
       ? "本场无法再唤出。"
       : (left > 0 ? `队伍还剩 ${left} 人。` : "队伍已无人能战。");
     await openChoice(
@@ -2013,7 +2014,7 @@
     }
     const u = unitById(id);
     const owner = u && u.weaponOf ? state.units.find(x => x.kit === u.weaponOf && !isWeaponUnit(x)) : null;
-    const kind = s.isPlayer ? (s.weaponUnit ? "weapon" : "hero") : "enemy";
+    const kind = s.isPlayer ? (s.escort ? "escort" : s.weaponUnit ? "weapon" : "hero") : "enemy";
     const tokens = [];
     if (s.dead) tokens.push(s.isPlayer ? "倒下" : "");
     if (s.dying && !s.dead) tokens.push("濒死");
@@ -2022,7 +2023,7 @@
     if (s.flying) tokens.push("飞行");
     (s.status ? s.status.split(" · ") : []).forEach(t => { if (t && t !== "无状态") tokens.push(t); });
     (s.hung || []).forEach(n => tokens.push(n));
-    return UnitTip.html({ kind, kit: s.kit, ownerName: owner && owner.name }, tokens.filter(Boolean), { name: s.name, sub: `Lv${s.level} · ${s.zone} 区` });
+    return UnitTip.html({ kind, kit: s.kit, ownerName: owner && owner.name, escort: s.escort }, tokens.filter(Boolean), { name: s.name, sub: `Lv${s.level} · ${s.zone} 区` });
   }
   function onCardHover(id, on) {
     // 悬停说明：任何时候都能看（选目标时也一样），离开就收起；触屏没有悬停
