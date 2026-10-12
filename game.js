@@ -114,6 +114,11 @@
   window.selectedToken = () => state.targetId || "";
 
   /* ================= 2. 快照 ================= */
+  /** 敌人已经打死、身上还带着高能（这次行动结束时会高能自爆）：画面上先留着，等自爆演出完再消失 */
+  function highBoomPending(u) {
+    if (!u || u.isPlayer) return false;
+    try { return typeof highBoomValue === "function" && highBoomValue(u) > 0; } catch (e) { return false; }
+  }
   function snapUnit(u) {
     let status = "", res = "", atk = u.atk;
     try { status = statusLine(u); } catch (e) {}
@@ -132,7 +137,8 @@
       kit: u.kit || "",
       zone: Number(u.zone) || 1,
       hidden: !!(u.hidden || u.fused),
-      dead: !!(u.dead || u._removed),
+      // 带着高能被打死的敌人：高能自爆演完之前先不算死（卡片不淡出），自爆把高能清掉之后才淡出
+      dead: !!(u.dead || u._removed) && !highBoomPending(u),
       weaponUnit: (typeof isWeaponUnit === "function") ? !!isWeaponUnit(u) : !!u.weaponOf,
       escort: u.escort || null,   // 护送对象（货车 / 委托人）：规则上按武器人处理，但画面上不能叫它武器人
       dying: !!u.dying,

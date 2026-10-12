@@ -95,3 +95,24 @@ test("高能状态的敌人在攻击行动中被打死：行动结束后照样�
   assert.ok((Number(ras.resources.light) || 0) >= lightBefore + 30, "拉斯缪尔回收光能");
   assert.ok(c.totalHp(mate) < 100, "余波打到同区的同阵营敌人");
 });
+
+test("联机投影：带高能被打死、还没自爆的敌人不算死（玩家画面等自爆后才淡出）", () => {
+  const c = H.load();
+  c.BattleSim.setup({ party: ["ras", "kolt"], enemies: [{ id: "thug_hammer", lv: 1, zone: 2 }], seed: "RHP" });
+  c.startCombat();
+  const foe = c.S.state.units.find(u => !u.isPlayer);
+  foe.layers.forEach(l => { l.current = 0; });
+  foe.dead = true; foe._removed = true;
+  foe.statuses = Object.assign({}, foe.statuses, { high: true });
+  foe.highEnergy = 12;
+  globalThis.highBoomValue = c.highBoomValue;
+  try {
+    const OV = require("../online-view.js");
+    let p = OV.projectUnit(foe);
+    assert.equal(p.dead, false, "还带着高能：先不算死");
+    assert.equal(!!p.hidden, false);
+    foe.highEnergy = 0; foe.statuses.high = false;
+    p = OV.projectUnit(foe);
+    assert.equal(p.dead, true, "自爆之后算死");
+  } finally { delete globalThis.highBoomValue; }
+});

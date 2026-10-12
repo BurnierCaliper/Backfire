@@ -1538,3 +1538,39 @@ test("训练场：可以换假人的血量层、天气、两个区的场地和�
   assert.equal(await page.evaluate(() => state.weather + "|" + state.units.find(u => u.trainingDummy).layers.map(l => l.type).join(",")), "snow|armor,flesh");
   assert.deepEqual(o.errors, []);
 });
+
+test("高能自爆：带高能被打死的敌人，卡片要等高能自爆演出之后才淡出", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await newTrpg(page);
+  await page.evaluate(() => { GAME.partyKits = ["ras", "yuito"]; GAME.enemyPlan = [{ id: "thug_hammer", lv: 1, zone: 2 }, { id: "thug_hammer", lv: 1, zone: 2 }]; GAME.lastEncounter = null; });
+  await startBattle(page, () => {
+    state.units.filter(u => u.isPlayer).forEach(u => { u.zone = 1; });
+    const foes = state.units.filter(u => !u.isPlayer && !u.hidden);
+    foes.forEach(u => { u.zone = 2; });
+    const f = foes[0];
+    f.layers = [{ type: "flesh", current: 1, max: 20 }];
+    f.statuses = Object.assign({}, f.statuses, { high: true });
+    f.highEnergy = 30;
+    window.__boomId = f.id;
+  });
+  const foe = await page.evaluate(() => window.__boomId);
+  // 记下：这张卡第一次变成 dead 的时刻、高能自爆演出（震屏 / 大号数字）出现的时刻
+  await page.evaluate(i => {
+    window.__deadAt = 0; window.__boomAt = 0;
+    new MutationObserver(() => {
+      const card = document.querySelector(`.unit-wrap[data-id="${i}"]`);
+      if (!window.__deadAt && card && card.classList.contains("dead")) window.__deadAt = performance.now();
+      if (!window.__boomAt && (document.querySelector(".pop.boom") || document.getElementById("g-app").classList.contains("quake"))) window.__boomAt = performance.now();
+    }).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["class"] });
+  }, foe);
+  await selectHero(page, "ras");
+  await page.keyboard.press("1");
+  await page.waitForFunction(() => GAME.arm && GAME.arm.mode === "unit");
+  await page.click(`.unit-wrap[data-id="${foe}"]`);
+  await page.waitForFunction(() => window.__deadAt > 0 && GAME.depth === 0, null, { timeout: 20000 });
+  const r = await page.evaluate(() => ({ dead: window.__deadAt, boom: window.__boomAt }));
+  assert.ok(r.boom > 0, "播了高能自爆");
+  assert.ok(r.dead >= r.boom, `卡片在自爆演出之后才变 dead（dead ${Math.round(r.dead)} / boom ${Math.round(r.boom)}）`);
+  assert.deepEqual(o.errors, []);
+});
