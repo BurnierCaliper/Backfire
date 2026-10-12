@@ -147,3 +147,22 @@ test("临时护盾：施加的护盾并进护盾层、先挨打、不会在没�
   nextRound();
   assert.ok(!k.layers.some(l => l.type === "shield"), "临时护盾用完，护盾层去掉");
 });
+
+test("恶劣环境 + 末日叠加：天气 / 场地效果 ×4（高压场地伤害 ×1 / ×2 / ×2 / ×4）", () => {
+  const out = [];
+  for (const [apo, harsh] of [[false, false], [true, false], [false, true], [true, true]]) {
+    const { c, S, kit, foe } = field();
+    const k = kit("kolt");
+    k.zone = foe.zone = 1;
+    foe.layers = [{ type: "flesh", current: 999, max: 999 }];
+    c.setZoneField(1, "electric");
+    S.apocalypse = apo; foe.harshEnv = harsh;
+    assert.equal(c.envMult(foe), (apo ? 2 : 1) * (harsh ? 2 : 1));
+    c.S.RNG.install("HV4");
+    const h0 = c.totalHp(foe);
+    c.dealTo(k, foe, { atk: 0, mult: 0, flat: 1, element: "physical", baseBreak: 0, flags: { action: true, blockResolved: true } });
+    out.push(h0 - c.totalHp(foe) - 1);   // 减掉那 1 点攻击本身，剩下的是高压场地
+  }
+  assert.ok(out[0] > 0);
+  assert.deepEqual(out, [out[0], out[0] * 2, out[0] * 2, out[0] * 4]);
+});

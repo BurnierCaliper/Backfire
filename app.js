@@ -686,7 +686,7 @@ function triggerCollapse(zone) {
   state.units.filter(u => !u.hidden && !u.dead && Number(u.zone) === Number(zone) && !u.flying && !fieldExempt(u)).forEach(u => {
     const x = envMult(u);
     dealBreak(u, 2 * x, "physical", notes, x > 1 ? "塌陷 ×2" : "塌陷");
-    applyTypedDot(u, r.total * x, "physical", notes, `${u.name} 塌陷伤害${x > 1 ? " ×2（场地效果翻倍）" : ""}`);
+    applyTypedDot(u, r.total * x, "physical", notes, `${u.name} 塌陷伤害${x > 1 ? ` ×${x}（场地效果${x > 2 ? "×4" : "翻倍"}）` : ""}`);
   });
   if (f.ruinOn) {
     notes.push(`${zone} 区损毁地面被塌陷直接摧毁，变为深渊。`);
@@ -1226,9 +1226,9 @@ function zoneWeather(zone) {
 function fieldExempt(unit) {
   return !!(unit && (unit.shelterTurn || unit.isolate));
 }
-/** 恶劣环境（这个单位，到回合结束）/ 末日（整场，无法停止）：天气与场地效果翻倍。返回 2 或 1 */
+/** 恶劣环境（这个单位，到回合结束）/ 末日（整场，无法停止）：天气与场地效果翻倍；两个叠加再翻一倍（×4）。返回 1 / 2 / 4 */
 function envMult(unit) {
-  return state.apocalypse || (unit && unit.harshEnv) ? 2 : 1;
+  return (state.apocalypse ? 2 : 1) * (unit && unit.harshEnv ? 2 : 1);
 }
 /** 加倍计量：这个单位身上所有状态此回合效果翻倍（状态结算的伤害、击破、高能累积 ×2）。返回 2 或 1 */
 function statusMult(unit) {
@@ -1787,7 +1787,7 @@ function tickFireField(z, notes) {
       parts.push(r.text);
     }
     const x = envMult(u);
-    applyTypedDot(u, dmg * x, "fire", notes, `${u.name} 火场${stacks}层 ${parts.join(" + ")} = ${dmg}${x > 1 ? ` ×2（场地效果翻倍）= ${dmg * x}` : ""}`);
+    applyTypedDot(u, dmg * x, "fire", notes, `${u.name} 火场${stacks}层 ${parts.join(" + ")} = ${dmg}${x > 1 ? ` ×${x}（场地效果${x > 2 ? "×4" : "翻倍"}）= ${dmg * x}` : ""}`);
   });
   // 酷暑让火场层数再 +1：看的是这一区的天气（隔离区不受天气影响）；末日把这 +1 也翻倍
   const heat = zoneWeather(z) === "heat";
@@ -1808,7 +1808,7 @@ function tickAcidFieldFor(u, weather, notes) {
   const d = statusDotDice("acidfield", u.level, weather);
   const r = takeDice(d.n, d.s, 0);
   const x = envMult(u);
-  applyTypedDot(u, r.total * x, "acid", notes, `${u.name} 酸液地面 ${r.text}${x > 1 ? " ×2（场地效果翻倍）" : ""}`);
+  applyTypedDot(u, r.total * x, "acid", notes, `${u.name} 酸液地面 ${r.text}${x > 1 ? ` ×${x}（场地效果${x > 2 ? "×4" : "翻倍"}）` : ""}`);
 }
 function tickHealFieldFor(u, weather, notes) {
   if (fieldExempt(u)) return;
@@ -2832,10 +2832,11 @@ function pulseHighVoltage(target, amount, hitNo, hitMax) {
   const d = statusDotDice("hvfield", target.level || 1, weather);
   const r = takeDice(d.n, d.s, 0);
   let dmg = r.total;
-  dmg *= envMult(target);   // 恶劣环境 / 末日：场地效果翻倍
+  const ex = envMult(target);
+  dmg *= ex;   // 恶劣环境 / 末日：场地效果翻倍（两个叠加 ×4）
   target._hvBusy = true;
   const tag = (hitMax > 1) ? `第${hitNo}/${hitMax}击 ` : "";
-  applyTypedDot(target, dmg, "electric", notes, `${target.name} 高压场地${tag}${r.text}${dmg !== r.total ? "×2" : ""}`);
+  applyTypedDot(target, dmg, "electric", notes, `${target.name} 高压场地${tag}${r.text}${ex > 1 ? "×" + ex : ""}`);
   target._hvBusy = false;
   return notes;
 }

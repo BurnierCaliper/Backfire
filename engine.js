@@ -675,7 +675,8 @@ function resolveAttack(ctx) {
   // 灼烧 / 腐蚀这类状态伤害、场地伤害、雷击转移这类派生伤害（action: false 或 environment）都不吃
   const isAttack = flags.action !== false && !flags.environment;
   // 恶劣环境（这个单位，到回合结束）/ 末日（整场）：天气与场地效果翻倍
-  const envX = t.harshEnv || (typeof state !== "undefined" && state && state.apocalypse) ? 2 : 1;
+  // 恶劣环境 / 末日：天气与场地效果翻倍，两个叠加 ×4
+  const envX = (t.harshEnv ? 2 : 1) * (typeof state !== "undefined" && state && state.apocalypse ? 2 : 1);
 
   if (flags.immune) {
     // 血量层原样带回：应用结果时要用（原来缺了这一项，屹立不倒一挨打就报错）
