@@ -180,3 +180,20 @@ test("战斗画面：选区域时点到区里的单位 / 配置物卡片也算�
   assert.match(body, /G\.arm\.mode === "zone"/);
   assert.match(body, /pickZoneByClick\(zoneEl\)/);
 });
+
+test("危墙：这一下会打塌时自己选往哪一区倒；没到倒塌不问", () => {
+  const { c, st, helu, kolt, foe } = field();
+  st.gaps["1-2"] = { type: "wall", hp: 18, maxHp: 18, open: false, level: 1 };
+  assert.ok(!c.skillFlowSteps("helu_scan", helu, { dest: 1, act: "gap:1-2" }).some(s => s.key === "fall"), "耐久 18：扫一下塌不了，不问方向");
+  st.gaps["1-2"].hp = 10;
+  const step = c.skillFlowSteps("helu_scan", helu, { dest: 1, act: "gap:1-2" }).find(s => s.key === "fall");
+  assert.ok(step, "耐久 10：要问往哪倒");
+  assert.equal(JSON.stringify(step.options.map(o => o.value)), "[1,2]");
+  assert.match(step.options[0].label, /往 1 区倒（敌人 0 名、友方 2 名）/);
+  // 往 Helumica 自己这一区（1 区）倒：1 区的人挨砸，2 区的敌人没事（以前固定往离 Helumica 远的 2 区倒）
+  const k0 = c.totalHp(kolt), f0 = c.totalHp(foe);
+  scan(c, helu, { dest: 1, act: "gap:1-2", fall: 1 });
+  assert.equal(st.gaps["1-2"].type, "open", "倒了");
+  assert.ok(c.totalHp(kolt) < k0, "1 区的柯尔特被砸");
+  assert.equal(c.totalHp(foe), f0, "2 区的敌人没事");
+});

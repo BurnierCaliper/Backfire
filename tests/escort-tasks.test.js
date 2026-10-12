@@ -208,3 +208,20 @@ test("跑团任务：长休时护送的人物回满，货车不会", () => {
   c.trpgTaskRestEscort(notes);
   assert.equal(t.escort.cur, null);
 });
+
+test("护送对象的浮窗 / 联机投影：写「护送对象」和它自己的说明，不写成武器人", () => {
+  const c = field("vip");
+  const e = c.fieldEscort();
+  globalThis.ESCORT_KINDS = c.ESCORT_KINDS || { vip: { note: "敌人回合前会躲开有敌人的区域，能用手枪还击" } };
+  try {
+    const T = require("../unit-tip.js");
+    const d = T.describe({ kind: "escort", kit: e.kit, escort: e.escort });
+    assert.equal(d.kicker, "护送对象");
+    assert.match(d.text, /躲开有敌人的区域/);
+    assert.match(d.text, /护送失败/);
+    assert.doesNotMatch(JSON.stringify(d), /武器人/);
+  } finally { delete globalThis.ESCORT_KINDS; }
+  // 联机投影带上 escort（玩家那边据此画「护送对象」）
+  const OV = require("../online-view.js");
+  assert.equal(OV.projectUnit(e).escort, "vip");
+});

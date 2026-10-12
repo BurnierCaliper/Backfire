@@ -49,7 +49,7 @@
     return { name: raw, text: "" };
   }
 
-  const KIND_NAME = { hero: "角色", weapon: "武器人", enemy: "敌人", prop: "配置物", gap: "间隔" };
+  const KIND_NAME = { hero: "角色", weapon: "武器人", escort: "护送对象", enemy: "敌人", prop: "配置物", gap: "间隔" };
   /** 简单描述：角色看图鉴介绍，武器人看被动，敌人看行动方式和能力，配置物 / 间隔看配置物图鉴 */
   function describe(info) {
     info = info || {};
@@ -57,6 +57,10 @@
     if (info.kind === "hero") {
       const h = (g("HERO_CODEX") || {})[info.kit];
       if (h) out.text = h.intro;
+    } else if (info.kind === "escort") {
+      // 护送对象（货车 / 委托人）：我方单位，玩家不能操作；被摧毁 = 护送失败
+      const k = (g("ESCORT_KINDS") || {})[info.escort] || {};
+      out.text = [k.note, "玩家不能操作；被摧毁 = 护送失败"].filter(Boolean).join("。") + "。";
     } else if (info.kind === "weapon") {
       const st = root.SkillText && SkillText.kitInfo ? SkillText.kitInfo(info.kit) : null;
       out.kicker = info.ownerName ? info.ownerName + "的武器人" : "武器人";

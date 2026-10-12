@@ -310,7 +310,7 @@ test("评分：行动打进失衡 +50，协助格挡成功 +30，给其他友方
   ruby.layers.forEach(l => { l.current = Math.max(1, l.current - 5); });
   const r0 = c.totalHp(ruby);
   c.trackHealBy(kolt, () => c.healUnit(ruby, 3));
-  assert.equal(st.battleScore.parts.heal, c.totalHp(ruby) - r0);
+  assert.equal(st.battleScore.parts.heal, Math.floor((c.totalHp(ruby) - r0) * 1.5), "治疗每点 1.5 分");
 });
 
 test("评分：协助格挡成功 +30（记在格挡的人身上）", () => {

@@ -686,7 +686,7 @@ function triggerCollapse(zone) {
   state.units.filter(u => !u.hidden && !u.dead && Number(u.zone) === Number(zone) && !u.flying && !fieldExempt(u)).forEach(u => {
     const x = envMult(u);
     dealBreak(u, 2 * x, "physical", notes, x > 1 ? "塌陷 ×2" : "塌陷");
-    applyTypedDot(u, r.total * x, "physical", notes, `${u.name} 塌陷伤害${x > 1 ? " ×2（场地效果翻倍）" : ""}`);
+    applyTypedDot(u, r.total * x, "physical", notes, `${u.name} 塌陷伤害${x > 1 ? ` ×${x}（场地效果${x > 2 ? "×4" : "翻倍"}）` : ""}`);
   });
   if (f.ruinOn) {
     notes.push(`${zone} 区损毁地面被塌陷直接摧毁，变为深渊。`);
@@ -1226,9 +1226,9 @@ function zoneWeather(zone) {
 function fieldExempt(unit) {
   return !!(unit && (unit.shelterTurn || unit.isolate));
 }
-/** 恶劣环境（这个单位，到回合结束）/ 末日（整场，无法停止）：天气与场地效果翻倍。返回 2 或 1 */
+/** 恶劣环境（这个单位，到回合结束）/ 末日（整场，无法停止）：天气与场地效果翻倍；两个叠加再翻一倍（×4）。返回 1 / 2 / 4 */
 function envMult(unit) {
-  return state.apocalypse || (unit && unit.harshEnv) ? 2 : 1;
+  return (state.apocalypse ? 2 : 1) * (unit && unit.harshEnv ? 2 : 1);
 }
 /** 加倍计量：这个单位身上所有状态此回合效果翻倍（状态结算的伤害、击破、高能累积 ×2）。返回 2 或 1 */
 function statusMult(unit) {
@@ -1787,7 +1787,7 @@ function tickFireField(z, notes) {
       parts.push(r.text);
     }
     const x = envMult(u);
-    applyTypedDot(u, dmg * x, "fire", notes, `${u.name} 火场${stacks}层 ${parts.join(" + ")} = ${dmg}${x > 1 ? ` ×2（场地效果翻倍）= ${dmg * x}` : ""}`);
+    applyTypedDot(u, dmg * x, "fire", notes, `${u.name} 火场${stacks}层 ${parts.join(" + ")} = ${dmg}${x > 1 ? ` ×${x}（场地效果${x > 2 ? "×4" : "翻倍"}）= ${dmg * x}` : ""}`);
   });
   // 酷暑让火场层数再 +1：看的是这一区的天气（隔离区不受天气影响）；末日把这 +1 也翻倍
   const heat = zoneWeather(z) === "heat";
@@ -1808,7 +1808,7 @@ function tickAcidFieldFor(u, weather, notes) {
   const d = statusDotDice("acidfield", u.level, weather);
   const r = takeDice(d.n, d.s, 0);
   const x = envMult(u);
-  applyTypedDot(u, r.total * x, "acid", notes, `${u.name} 酸液地面 ${r.text}${x > 1 ? " ×2（场地效果翻倍）" : ""}`);
+  applyTypedDot(u, r.total * x, "acid", notes, `${u.name} 酸液地面 ${r.text}${x > 1 ? ` ×${x}（场地效果${x > 2 ? "×4" : "翻倍"}）` : ""}`);
 }
 function tickHealFieldFor(u, weather, notes) {
   if (fieldExempt(u)) return;
@@ -2318,7 +2318,7 @@ function battleStat(u) {
  * 单局用本幕；跑团模式 / 战斗原型按敌人等级对应到幕（ROGUE_CONFIG.actLevels）。 */
 const SCORE_RULES = {
   dmg: 1,          // 每点伤害（含连带伤害）
-  heal: 1,         // 每点给其他友方的治疗 / 护盾
+  heal: 1.5,       // 每点给其他友方的治疗 / 护盾（让治疗者的贡献显得出来：比伤害高 50%）
   brk: 10,         // 每点击破
   stagger: 50,     // 打出失衡
   block: 30,       // 协助格挡成功
@@ -2832,10 +2832,11 @@ function pulseHighVoltage(target, amount, hitNo, hitMax) {
   const d = statusDotDice("hvfield", target.level || 1, weather);
   const r = takeDice(d.n, d.s, 0);
   let dmg = r.total;
-  dmg *= envMult(target);   // 恶劣环境 / 末日：场地效果翻倍
+  const ex = envMult(target);
+  dmg *= ex;   // 恶劣环境 / 末日：场地效果翻倍（两个叠加 ×4）
   target._hvBusy = true;
   const tag = (hitMax > 1) ? `第${hitNo}/${hitMax}击 ` : "";
-  applyTypedDot(target, dmg, "electric", notes, `${target.name} 高压场地${tag}${r.text}${dmg !== r.total ? "×2" : ""}`);
+  applyTypedDot(target, dmg, "electric", notes, `${target.name} 高压场地${tag}${r.text}${ex > 1 ? "×" + ex : ""}`);
   target._hvBusy = false;
   return notes;
 }
@@ -7991,6 +7992,9 @@ function heluScanAct(a, picks, lines) {
     const g = (state.gaps || {})[key];
     if (!g || (g.type !== "wall" && g.type !== "bridge") || !((Number(g.hp) || 0) > 0)) { lines.push("那里已经没有危墙 / 桥梁了。"); return; }
     g.lastFrom = Number(a.zone);
+    // 选了倒塌方向：倒塌按「最后一击来自哪一侧」往另一侧倒，这里把来源记成选定方向的对面
+    const parts = key.split("-").map(Number), fall = Number(picks.fall);
+    if (g.type === "wall" && parts.includes(fall)) g.lastFrom = fall === parts[0] ? parts[1] : parts[0];
     g.hp = Math.max(0, (Number(g.hp) || 0) - 10);
     lines.push(`环境扫描：找到 ${key} 之间${gapLabel(g.type)}的薄弱点，耐久 −10 → ${g.hp}。`);
     if (g.hp <= 0) lines.push(...destroyGap(key, g));
@@ -8142,6 +8146,19 @@ function skillFlowSteps(id, actor, picks) {
     steps.push({ key: "act", type: "choice", optional: false, label: `${z} 区：扫描出配置物，或者和已有的配置物 / 地形 / 场地互动`,
       options: heluScanOptions(z) });
     const act = String(picks.act || "");
+    // 这一下会把危墙打塌（耐久 ≤ 10）：自己选往哪一区倒（以前固定往离 Helumica 远的那边倒）
+    if (act.indexOf("gap:") === 0) {
+      const key = act.slice(4), g = (state.gaps || {})[key];
+      if (g && g.type === "wall" && (Number(g.hp) || 0) > 0 && (Number(g.hp) || 0) <= 10) {
+        const who = zz => {
+          const us = fieldUnits().filter(u => Number(u.zone) === zz && !u.dead && !u.hidden && !u.fused);
+          const foe = us.filter(u => !u.isPlayer).length, ally = us.filter(u => u.isPlayer).length;
+          return `敌人 ${foe} 名、友方 ${ally} 名`;
+        };
+        steps.push({ key: "fall", type: "choice", optional: false, label: `${key} 之间的危墙要塌了：往哪一区倒（倒塌：物理伤害 + 2 击破，不分敌我）`,
+          options: key.split("-").map(Number).map(zz => ({ value: zz, label: `往 ${zz} 区倒（${who(zz)}）` })) });
+      }
+    }
     if (act.indexOf("prop:") === 0) {
       const p = (state.props || []).find(x => x.id === act.slice(5));
       if (p && p.kind === "battery") {
@@ -11865,10 +11882,27 @@ function runSkillInner(id, optRun) {
         let n = 0;
         const hitIds = new Set();
         lines.push(`机枪扫射 ${zone} 区。`);
+        // 扫射自己所在的区、里面有飞行的敌人：近程打飞行要额外 1 附赠行动——整轮扫射算一次攻击，只付一次
+        // （以前每颗子弹打到一个新的飞行敌人就各付一次，附赠付光后打到飞行敌人的子弹全部作废）；付不起就这一轮不打飞行的
+        let skipFly = false;
+        const flyers = Number(zone) === Number(a.zone) && !a.flying ? visibleEnemies(zone).filter(u => !u.dead && u.flying) : [];
+        if (flyers.length) {
+          state.flyPaid = state.flyPaid || {};
+          const unpaid = flyers.filter(u => !state.flyPaid[a.id + ">" + u.id]);
+          if (unpaid.length && (Number(a.bonus) || 0) >= 1) {
+            a.bonus -= 1;
+            scoreSpend(a, 0, 1);
+            lines.push(`扫射同区飞行中的敌人：整轮额外消耗 1 附赠行动。`);
+          } else if (unpaid.length) {
+            skipFly = true;
+            lines.push(`附赠行动不足：这一轮不打同区飞行中的敌人。`);
+          }
+          if (!skipFly) flyers.forEach(u => { state.flyPaid[a.id + ">" + u.id] = true; });
+        }
         while (pool > 0 && n < 300) {
           // 每一颗子弹打选中区域里的一个随机敌人（每颗都是单体攻击：照样触发过度自信的嘲讽）
           // 说明里写「随机」，实际先保证区里每个敌人都挨到一颗（在还没挨过的里随机），都挨过之后才完全随机
-          const alive = visibleEnemies(zone).filter(u => !u.dead);
+          const alive = visibleEnemies(zone).filter(u => !u.dead && !(skipFly && u.flying));
           const fresh = alive.filter(u => !hitIds.has(u.id));
           const from = fresh.length ? fresh : alive;
           const cur = from[Math.floor(Math.random() * from.length)];

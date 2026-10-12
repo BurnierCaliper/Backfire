@@ -680,6 +680,9 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
     if (typeof markAoeZone === "function") markAoeZone(a.zone, { element: "energy", dmg: (Number(a.atk) || 0) + 3, attacker: a });
     a.layers.forEach(l => { l.current = 0; });
     lines.push(`${a.name} 自爆后损毁。`);
+    // 自爆就是死亡：当场判死、清场（敌人行动之后不会再扫一遍阵亡，只把血清空的话它还算活着、战斗也结束不了）
+    a.dead = true;
+    if (typeof removeEnemyFromField === "function") { const out = []; removeEnemyFromField(a, out); lines.push(...out); }
     return true;
   }
   if (id === "en_sand_aa") {
