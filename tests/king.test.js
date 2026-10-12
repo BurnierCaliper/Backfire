@@ -167,3 +167,36 @@ test("废铁墙不挡敌人打我方；铁壁照旧只挡敌人", () => {
   assert.ok(c.totalHp(kolt) < hp);
   assert.equal(wall.hp, wall.maxHp);
 });
+
+test("行动顺序：亡命之王总是第一个行动（命令要用狂徒这一回合的行动点），其余照杂兵 → 精英 → 首领", () => {
+  const { c, st } = field();
+  const order = c.EnemyAI.actingOrder().map(id => st.units.find(u => u.id === id).kit);
+  assert.equal(order[0], "outlaw_king");
+  assert.ok(order.indexOf("thug_knife") < order.indexOf("bandit_boss"));
+});
+
+test("回防命令排在最前：狂徒还没行动，各花 1 行动点回到王身边筑废铁墙（以前王最后行动，狂徒行动点早用完了）", () => {
+  const c = H.load();
+  c.BattleSim.setup({ party: ["kolt", "yuito"], seed: "KH", zoneMode: 3,
+    enemies: [{ id: "outlaw_king", lv: 5, zone: 3 }, { id: "thug_knife", lv: 5, zone: 1 }, { id: "thug_hammer", lv: 5, zone: 1 }] });
+  c.startCombat();
+  const S = c.S.state; S.zoneMode = 3;
+  const king = c.findKit("outlaw_king", S.units);
+  const thugs = S.units.filter(u => /^thug_/.test(u.kit));
+  king.zone = 3; thugs.forEach(u => { u.zone = 1; });
+  c.findKit("kolt", S.units).zone = 3;   // 有人冲进王所在的区，身边又没有狂徒：该回防
+  c.findKit("yuito", S.units).zone = 1;
+  c.endPlayerTurn();
+  S.combatPhase = "enemy";
+  const ap0 = thugs.map(u => u.ap);
+  assert.ok(ap0.every(a => a > 0));
+  const first = S.units.find(u => u.id === c.EnemyAI.actingOrder()[0]);
+  assert.equal(first, king);
+  const plan = c.EnemyAI.plan(king);
+  assert.equal(plan.meta.skillName, "回防命令（筑废铁墙）");
+  plan.thunk();
+  assert.ok(thugs.every(u => Number(u.zone) === 3), "狂徒回到王身边");
+  assert.ok(thugs.every((u, i) => u.ap === ap0[i] - 1), "各花掉 1 行动点");
+  const wall = (S.props || []).find(p => p.kind === "scrapwall");
+  assert.ok(wall && wall.hp > 0, "废铁墙筑起来了");
+});
