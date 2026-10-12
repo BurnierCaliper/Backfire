@@ -684,6 +684,51 @@ test("联机：模板带的战斗掉落打赢后进背包，玩家结算里看�
   assert.deepEqual(f.errors, []);
 });
 
+test("联机：编辑器做的模板掉落——房主开战后刷新页面、玩家自己打赢，回到探索后队伍背包和玩家背包里都有；战绩里这场名字还在", { timeout: 120000 }, async t => {
+  const f = await fixture(t); if (!f) return;
+  const { host, alice, bob } = f;
+  await host.evaluate(() => { OnlineGame.start(); });
+  await alice.waitForFunction(() => OnlineGame.getView().screen === "exploration");
+  await host.click('#tr-tabs [data-tab="battles"]');
+  await host.click('[data-bt="new:"]');
+  await host.fill('[data-bte="name"]', "仓库守卫");
+  await host.fill("[data-bt-dropkz]", "300");
+  await host.selectOption("#bt-drop-item", "medkit"); await host.fill("#bt-drop-qty", "2");
+  await host.click('[data-bt-act="addDrop"]'); await host.click('[data-bt-act="save"]');
+  await host.click('[data-bt^="fight:"]');
+  await host.evaluate(aliceId => OnlineGame.assign(Object.fromEntries(HotseatGame.getView().heroes.filter(h => h.name === "绯秋").map(h => [h.id, aliceId]))), f.aliceId);
+  await host.evaluate(() => { GAME.skip = true; GAME.instant = true; GAME.startOrEnd(); });
+  await host.waitForFunction(() => state.combatStarted && GAME.depth === 0);
+  await host.reload(); await host.waitForFunction(() => !!window.OnlineGame && !!window.GAME);
+  await host.evaluate(async () => { GAME.skip = true; GAME.instant = true; await OnlineGame.resume(); });
+  await host.waitForFunction(() => !OnlineGame.isPaused() && state.combatStarted && GAME.depth === 0);
+  const before = await host.evaluate(() => ({ kz: Number(state.kuizhi) || 0, med: bagCount("medkit") }));
+  // 敌人只剩 1 点血、和绯秋同区；绯秋排第一个，由 Alice 自己普通攻击打赢
+  await host.evaluate(() => { state.units.forEach(u => { u.zone = 1; if (!u.isPlayer) { u.layers.forEach(l => { l.current = 0; }); u.layers[u.layers.length - 1].current = 1; u.def = 0; } }); });
+  const heroes = await host.evaluate(() => HotseatGame.getView().heroes.slice().sort((a, b) => (b.name === "绯秋") - (a.name === "绯秋")));
+  const pageFor = owner => owner === f.aliceId ? alice : owner === f.bobId ? bob : host;
+  for (const [index, hero] of heroes.entries()) assert.equal((await submit(pageFor(hero.owner), { type: "orderPick", actor: hero.id, index })).ok, true);
+  for (const page of [alice, bob, host]) assert.equal((await submit(page, { type: "orderConfirm" })).ok, true);
+  await host.waitForFunction(() => HotseatGame.getView().currentUnitId && GAME.depth === 0);
+  const cur = await host.evaluate(() => ({ actor: HotseatGame.getView().currentUnitId, target: state.units.find(u => !u.isPlayer && !u.dead).id }));
+  const menu = await alice.evaluate(c => OnlineGame.actionMenu({ actor: c.actor, skill: "hiaki_aa", target: c.target }), cur);
+  assert.equal(menu.choices.kind, "ready");
+  assert.equal((await submit(alice, menu.choices.command)).ok, true);
+  await host.waitForFunction(() => GAME.ended && GAME.lastOutcome === "win");
+  await host.evaluate(() => TrpgFlow.backFromBattle());
+  await host.waitForFunction(() => Screens.is("trpg"));
+  const back = await host.evaluate(() => ({ kz: Number(state.kuizhi) || 0, med: bagCount("medkit") }));
+  assert.ok(back.kz >= before.kz + 300); assert.equal(back.med, before.med + 2);
+  await alice.waitForFunction(() => OnlineGame.getView().screen === "exploration");
+  const bag = (await alice.evaluate(() => OnlineGame.sheetData())).bag;
+  assert.equal(bag.kuizhi, back.kz); assert.equal(bag.items.find(x => x.id === "medkit").qty, back.med);
+  await alice.click('[data-online="info"][data-info="record"]');
+  await alice.waitForSelector("#online-bag:not([hidden]) .ol-record");
+  const rec = await alice.locator("#online-bag").innerText();
+  assert.match(rec, /仓库守卫/); assert.match(rec, /掉落：300 奎支、简易医疗包×2/);
+  assert.deepEqual(f.errors, []);
+});
+
 test("联机：主持人发大字，所有玩家画面中间弹出，几秒后淡出；小队频道留记录；刚进房间不重播旧的", { timeout: 120000 }, async t => {
   const f = await fixture(t); if (!f) return;
   const { host, alice, bob } = f;
