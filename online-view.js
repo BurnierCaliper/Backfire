@@ -524,6 +524,10 @@
     if (own(packet, "publicLogs")) out.publicLogs = projectLogs(get(packet, "publicLogs"));
     // 联机单局：房主按收件人算好的单局画面（投票、钱包、战利品、自己能做的事），只去掉坚毅生命这类隐藏数值
     enumField(packet, out, "mode", ["trpg", "rogue"]);
+    // 升级提示：房主已经按收件人挑好（只有自己的角色、去掉了坚毅生命那一行）
+    if (own(packet, "levelUps")) out.levelUps = arr(get(packet, "levelUps")).slice(0, 10).filter(obj).map(ev => {
+      const e = scrubHidden(clone(ev)); e.stats = arr(e.stats).filter(r => obj(r) && r.key !== "shp"); return e;
+    });
     if (own(packet, "rogue")) { const r = get(packet, "rogue"); out.rogue = obj(r) ? scrubHidden(clone(r)) : null; }
     // Resync is another envelope using these same explicit projectors, not a
     // path for forwarding an opaque nested packet or raw save snapshot.

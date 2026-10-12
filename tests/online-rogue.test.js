@@ -123,6 +123,7 @@ test("联机单局：房主选队伍、分角色；开局的钱平分进各人�
 test("联机单局：精英战打赢——敌人掉的奎支平分；掉的道具按需求分；自己的钱买东西记在自己名下，别人用不了", { timeout: 120000 }, async t => {
   const f = await room(t); if (!f) return;
   const { host, alice, bob, hostId } = f;
+  await host.evaluate(() => { window.__noLevelUpPopup = true; });   // 这里不测升级提示
   await depart(f);
   for (const page of [alice, bob]) await submit(page, { type: "rogue.vote", option: "task:main" });
   await host.click('#run-body .r-go[data-which="main"]');
@@ -208,5 +209,32 @@ test("联机单局：房主刷新页面后单局、钱包、投票都还在", { 
   const after = await host.evaluate(() => ({ seed: RunFlow.current().seed, purse: RunFlow.current().party.map(h => OnlineRogue.purse(h.kit)), screen: Screens.current() }));
   assert.equal(after.seed, before.seed); assert.deepEqual(after.purse, before.purse); assert.equal(after.screen, "run");
   await alice.waitForFunction(() => !OnlineGame.isPaused() && (OnlineGame.getView().packet?.rogue?.vote?.options || []).some(o => o.id === "task:main" && o.mine));
+  assert.deepEqual(f.errors, []);
+});
+
+test("联机单局：角色升级只弹给操控它的玩家，列出新技能的完整说明；点「知道了」后房主那边也记为已看", { timeout: 120000 }, async t => {
+  const f = await room(t); if (!f) return;
+  const { host, alice, bob } = f;
+  await depart(f);
+  await host.evaluate(() => { const u = state.units.find(x => x.kit === "ruby"); u.xp = xpToNext(1) + xpToNext(2); tryLevelUp(u); OnlineGame.touch(); });
+  await alice.waitForSelector("#online-levelup:not([hidden]) .lvu-card");
+  const text = await alice.locator("#online-levelup").innerText();
+  assert.match(text, /瑞比 升到 3 级/);
+  assert.match(text, /电流激荡/); assert.match(text, /电击伤害/);
+  assert.doesNotMatch(text, /坚毅生命/, "坚毅生命对玩家保密");
+  if (process.env.BACKFIRE_SHOTS) await alice.screenshot({ path: path.join(process.env.BACKFIRE_SHOTS, "levelup-player.png") });
+  // Bob、房主不弹（瑞比不是他们的）
+  await new Promise(r => setTimeout(r, 900));
+  assert.equal(await bob.locator("#online-levelup:not([hidden])").count(), 0);
+  assert.equal(await host.locator("#g-levelup:not([hidden])").count(), 0);
+  await alice.click('#online-levelup [data-lvu="ok"]');
+  await host.waitForFunction(() => !LevelUp.unseen().length);
+  await alice.waitForSelector("#online-levelup", { state: "hidden" });
+  // 房主自己的拉斯缪尔升级：房主本机弹
+  await host.evaluate(() => { const u = state.units.find(x => x.kit === "ras"); u.xp = xpToNext(1); tryLevelUp(u); });
+  await host.waitForSelector("#g-levelup:not([hidden]) .lvu-card");
+  assert.match(await host.locator("#g-levelup").innerText(), /拉斯缪尔 升到 2 级/);
+  await host.click('#g-levelup [data-lvu="ok"]');
+  await host.waitForSelector("#g-levelup", { state: "hidden" });
   assert.deepEqual(f.errors, []);
 });

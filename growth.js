@@ -601,6 +601,8 @@ function grantXpToPlayers(amount, reason) {
 function tryLevelUp(u) {
   if (!u || isWeaponUnit(u)) return false;
   let changed = false;
+  // 升级提示（levelup.js）：升级前的能力，升完了比一比
+  const before = typeof LevelUp !== "undefined" && xpToNext(u.level) > 0 && (u.xp || 0) >= xpToNext(u.level) ? LevelUp.snapshot(u) : null;
   while (xpToNext(u.level) > 0 && (u.xp || 0) >= xpToNext(u.level)) {
     u.xp -= xpToNext(u.level);
     u.level += 1;
@@ -609,6 +611,7 @@ function tryLevelUp(u) {
     appendLog(`${u.name} 升到 ${u.level} 级。`);
     changed = true;
   }
+  if (changed && before) LevelUp.note("level", u, before);
   return changed;
 }
 

@@ -339,6 +339,23 @@
       const log = (r.log || []).length ? `<section class="ol-rogue-box" aria-label="最近发生"><h3>最近发生</h3><ul>${r.log.map(t => `<li>${esc(t)}</li>`).join("")}</ul></section>` : "";
       return head + over + choice + waits + loot + lootLog + vote + last + heroes + board + task + shop + smith + parts + clinic + log;
     }
+    /* ---------- 升级提示：自己操控的角色升级 / 武器升级 / 学到新技能（levelup-ui.js 的画法） ---------- */
+    const lvBox = make("div", "online-levelup", "lvu-overlay");
+    lvBox.hidden = true;
+    const lvDone = new Set();
+    lvBox.addEventListener("click", async event => {
+      const ok = event.target.closest('[data-lvu="ok"]'); if (!ok) return;
+      const id = lvBox.dataset.id; if (!id) return;
+      lvDone.add(id); paintLevelUps();
+      try { await api.submit({ type: "levelup.seen", id }); } catch (_) { /* 下次同步再说 */ }
+    });
+    function paintLevelUps() {
+      const list = !view.active || view.isHost || !global.LevelUpUI ? [] : (view.packet?.levelUps || []).filter(ev => ev && !lvDone.has(ev.id));
+      if (!list.length) { lvBox.hidden = true; lvBox.dataset.id = ""; return; }
+      global.LevelUpUI.ensureStyle();
+      if (lvBox.dataset.id !== list[0].id) { lvBox.innerHTML = global.LevelUpUI.html(list[0], { more: list.length - 1 }); lvBox.dataset.id = list[0].id; }
+      lvBox.hidden = false;
+    }
     function stageMarkup() {
       const data = displayState || view.state, screen = view.screen;
       if (screen === "lobby" || !data) return '<div class="ol-wait"><h2>等待房间同步</h2><p>房主准备好后会更新这里。</p></div>';
@@ -589,6 +606,7 @@
       lastScreen = view.screen;
       rogueHeroesSeen = heroCount > 0;
       panel.hidden = !(panelOpen || view.active && view.screen === "lobby" && !rogueHost);
+      paintLevelUps();
       if (!panel.hidden) html(panel, view.active ? roomMarkup() : entryMarkup(), "panel");
       renderSide();
       mountHostChat();

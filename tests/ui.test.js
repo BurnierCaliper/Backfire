@@ -48,6 +48,8 @@ async function open(t) {
   let promptAnswer = "测试团";
   page.on("dialog", d => (d.type() === "prompt" ? d.accept(promptAnswer) : d.accept()));
   await page.goto(GAME_URL);
+  // 升级提示会盖住画面：只有专门测它的用例打开（见「升级提示：本机」）
+  await page.evaluate(() => { window.__noLevelUpPopup = true; });
   t.after(() => context.close());
   return { page, errors, setPrompt: (s) => { promptAnswer = s; } };
 }
@@ -1573,4 +1575,23 @@ test("高能自爆：带高能被打死的敌人，卡片要等高能自爆演�
   assert.ok(r.boom > 0, "播了高能自爆");
   assert.ok(r.dead >= r.boom, `卡片在自爆演出之后才变 dead（dead ${Math.round(r.dead)} / boom ${Math.round(r.boom)}）`);
   assert.deepEqual(o.errors, []);
+});
+
+test("升级提示：本机（跑团）角色升级、主持人给武器升级，都会弹出画面列出新技能 / 被动升级，点「知道了」一条条看完", async t => {
+  const o = await open(t); if (!o) return;
+  const { page, errors } = o;
+  await page.evaluate(() => { window.__noLevelUpPopup = false; });
+  await newTrpg(page);
+  await page.evaluate(() => { const u = trpgHeroes()[0]; u.xp = xpToNext(u.level) + xpToNext(u.level + 1); tryLevelUp(u); });
+  await page.waitForSelector("#g-levelup:not([hidden]) .lvu-card");
+  const first = await page.locator("#g-levelup").innerText();
+  assert.match(first, /升到 \d+ 级/); assert.match(first, /新技能|数值/);
+  await page.evaluate(() => { const u = trpgHeroes()[0]; trpgUpgradeWeapon(u.kit, u.linkedKits[0], "gm"); });
+  await page.waitForFunction(() => /还有 1 条/.test(document.querySelector("#g-levelup")?.innerText || ""));
+  await page.click('#g-levelup [data-lvu="ok"]');
+  await page.waitForFunction(() => /武器升级/.test(document.querySelector("#g-levelup")?.innerText || ""));
+  await page.click('#g-levelup [data-lvu="ok"]');
+  await page.waitForSelector("#g-levelup", { state: "hidden" });
+  assert.equal(await page.evaluate(() => LevelUp.unseen().length), 0);
+  assert.deepEqual(errors, []);
 });

@@ -65,7 +65,7 @@
       R.queueLevelRewards(h, from, level, [], run);
       Object.keys(h.weaponLevels || {}).forEach(k => { h.weaponLevels[k] = Math.max(1, Math.min(10, Math.round(level * 0.6))); });
     });
-    chooseLevels(R, run);
+    if (typeof LevelUp !== "undefined") LevelUp.quiet(() => chooseLevels(R, run)); else chooseLevels(R, run);
     run.party.forEach(h => { h.hp = null; h.shp = null; h.weaponState = {}; });
     const L = LEDGER;
     L.dur = {}; L.weapons = {}; L.heroes = {}; L.hours = 0;

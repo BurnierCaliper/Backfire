@@ -729,6 +729,27 @@ test("联机：编辑器做的模板掉落——房主开战后刷新页面、�
   assert.deepEqual(f.errors, []);
 });
 
+test("联机跑团：玩家的角色升级只弹在这名玩家的画面上，带新技能说明；主持人操控的角色在主持人本机弹", { timeout: 120000 }, async t => {
+  const f = await fixture(t); if (!f) return;
+  const { host, alice, bob } = f;
+  await host.evaluate(() => { OnlineGame.start(); });
+  await alice.waitForFunction(() => OnlineGame.getView().screen === "exploration");
+  const kit = await host.evaluate(aliceId => { const h = HotseatGame.getView().heroes.find(x => x.owner === aliceId); const u = state.units.find(x => x.id === h.id); u.xp = xpToNext(u.level) ; tryLevelUp(u); OnlineGame.touch(); return u.kit; }, f.aliceId);
+  await alice.waitForSelector("#online-levelup:not([hidden]) .lvu-card");
+  assert.match(await alice.locator("#online-levelup").innerText(), /升到 \d+ 级/);
+  await new Promise(r => setTimeout(r, 900));
+  assert.equal(await bob.locator("#online-levelup:not([hidden])").count(), 0);
+  assert.equal(await host.locator("#g-levelup:not([hidden])").count(), 0);
+  await alice.click('#online-levelup [data-lvu="ok"]');
+  await host.waitForFunction(() => !LevelUp.unseen().length);
+  // 主持人操控的角色（没分配的）：主持人本机弹
+  await host.evaluate(() => { const own = OnlineGame.getView().identity.id; const h = HotseatGame.getView().heroes.find(x => x.owner === own); const u = state.units.find(x => x.id === h.id); u.xp = xpToNext(u.level); tryLevelUp(u); });
+  await host.waitForSelector("#g-levelup:not([hidden]) .lvu-card");
+  await host.click('#g-levelup [data-lvu="ok"]');
+  assert.ok(kit);
+  assert.deepEqual(f.errors, []);
+});
+
 test("联机：主持人发大字，所有玩家画面中间弹出，几秒后淡出；小队频道留记录；刚进房间不重播旧的", { timeout: 120000 }, async t => {
   const f = await fixture(t); if (!f) return;
   const { host, alice, bob } = f;

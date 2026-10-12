@@ -182,8 +182,10 @@ function trpgUpgradeWeapon(ownerKit, kit, mode, fee) {
   } else {
     notes.push(`主持人把 ${wname} 升到 ${info.next} 级（不耗材料和奎支）。`);
   }
+  const before = typeof LevelUp !== "undefined" ? LevelUp.snapshot(owner) : null;
   if (typeof setOwnedWeaponLevel === "function") setOwnedWeaponLevel(owner, kit, info.next);
   else { owner.weaponLevels = owner.weaponLevels || {}; owner.weaponLevels[kit] = info.next; }
+  if (before) LevelUp.note("weapon", owner, before, { weapon: wname });
   trpgSyncWeaponMods();   // 升到 4 级：装着的客制化图纸开始生效
   ledgerCapture();
   return notes;

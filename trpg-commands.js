@@ -77,19 +77,24 @@ const BackstageCommands = (() => {
     const u = unitById(c.actor); if (!u) return;
     switch (c.action) {
       case "set": {
+        const lvBefore = c.field === "level" && typeof LevelUp !== "undefined" ? LevelUp.snapshot(u) : null, oldLv = u.level || 1;
         u[c.field] = c.field === "level" ? Math.max(1, Number(c.value) || 1)
           : c.field === "zone" ? Math.max(1, Math.min(Number(state.zoneMode) || 3, Number(c.value) || 1))
           : Math.max(0, Number(c.value) || 0);
         if (c.field === "defMax" && (u.def || 0) > u.defMax) u.def = u.defMax;
-        if (c.field === "level") { applyLevelStats(u); if (u.kit === "hiaki") refreshHiakiAtk(u); }
+        if (c.field === "level") { applyLevelStats(u); if (u.kit === "hiaki") refreshHiakiAtk(u); if (lvBefore && u.level > oldLv) LevelUp.note("level", u, lvBefore); }
         break;
       }
-      case "weaponLevel":
+      case "weaponLevel": {
+        const before = typeof LevelUp !== "undefined" ? LevelUp.snapshot(u) : null;
+        const old = Number((u.weaponLevels || {})[c.kit]) || 1;
         setOwnedWeaponLevel(u, c.kit, c.value);
+        if (before && (Number(u.weaponLevels[c.kit]) || 1) > old) LevelUp.note("weapon", u, before, { weapon: weaponCardName(c.kit) });
         // 跑团：武器升到 / 降到 4 级上下，装着的客制化图纸跟着生效 / 失效（武器页、耐久上限一起重算）
         if (typeof TRPG !== "undefined" && TRPG.active && typeof trpgSyncWeaponMods === "function") trpgSyncWeaponMods();
         appendLog(`${u.name} 的 ${weaponCardName(c.kit)} 设为 ${u.weaponLevels[c.kit]} 级。`);
         break;
+      }
       case "attr": {
         u.attrs = u.attrs || { str: 5, con: 5, dex: 5, wil: 5, int: 5, sta: 5 };
         const next = Math.max(1, Number(c.value) || 1), prev = Number(u.attrs[c.attr]) || 5;

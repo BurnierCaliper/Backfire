@@ -541,7 +541,11 @@ const Rogue = (function () {
       if (u.dead) { killHero(run, h, notes, "永久死亡"); return; }
       if (u.level > from) {
         notes.push(`${u.name} 升到 ${u.level} 级。`);
+        const n0 = (h.pending || []).length;
         queueLevelRewards(h, from, u.level, notes, run);
+        // 升级提示里写上还要选的奖励
+        const PEND = { attr: "分配 1 点六维属性", prof: "一个自选熟练项", role: "一项职责技能", role2: "第二副职责的一个技能" };
+        if (typeof LevelUp !== "undefined") LevelUp.amend(h.kit, (h.pending || []).slice(n0).map(p => `${p.level} 级：${PEND[p.type] || "一项奖励"}（在升级选择里选）`));
       }
       captureHero(u, h);
     });
@@ -620,6 +624,9 @@ const Rogue = (function () {
     const ok = choiceOptions(run, kit, index).some(o => JSON.stringify(o.value) === JSON.stringify(value));
     if (!ok) throw new Error("这个选项不可选");
     const notes = [];
+    // 升级提示：学到的职责技能也弹出来，带完整说明
+    const learn = (p.type === "role" || p.type === "role2") && typeof LevelUp !== "undefined";
+    const before = learn ? withParty(run, () => LevelUp.snapshot(findKit(kit, state.units))).out : null;
     if (p.type === "attr") {
       h.attrs = Object.assign({}, h.attrs || (cardOf(kit) || {}).attrs || {});
       h.attrs[value] = (Number(h.attrs[value]) || 0) + 1;
@@ -639,6 +646,7 @@ const Rogue = (function () {
     h.pending.splice(index, 1);
     // 属性变了，血量上限等跟着变：摆上场重新算一次
     if (p.type === "attr") withParty(run, () => null);
+    if (before) withParty(run, () => LevelUp.note("choice", findKit(kit, state.units), before));
     return logAll(run, notes);
   }
 
@@ -1518,7 +1526,11 @@ const Rogue = (function () {
     if ((Number(state.kuizhi) || 0) < opt.cost) throw new Error("奎支不够");
     state.kuizhi -= opt.cost;
     const h = run.party.find(x => x.kit === opt.owner);
+    // 升级提示（levelup.js）：把队伍摆上场比一比武器升级前后多了什么
+    const snap = () => (typeof LevelUp !== "undefined" ? withParty(run, () => LevelUp.snapshot(findKit(h.kit, state.units))).out : null);
+    const before = snap();
     h.weaponLevels[kit] = opt.level + 1;
+    if (before) withParty(run, () => LevelUp.note("weapon", findKit(h.kit, state.units), before, { weapon: opt.name }));
     clampDur(run, h, kit);   // 旧存档里装在 3 级武器上的图纸升到 4 级才生效：大杀器这类会压低耐久上限
     run.smithUses[sid] = (run.smithUses[sid] || 0) + 1;
     const s = smithInfo(run, sid);
