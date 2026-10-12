@@ -6339,6 +6339,7 @@ function resetBattleFlags(u) {
   };
   u.instant = {};
   const r = u.resources = u.resources || {};
+  delete r.rallyDr;   // 全队集结的坦克减伤只在那一场有效
   r.stance = "draw";
   r.smashOnce = true;
   r.smashNext = false;

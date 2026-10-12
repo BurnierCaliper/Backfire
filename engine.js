@@ -938,21 +938,33 @@ function resolveAttack(ctx) {
       });
     }
 
-    packet *= (1 + pct);
-    hAdd(`加算百分比合计 ${pctTxt(pct)} → ${round2(packet)}`);
-
-    let mul = 1;
-    // 波谷 −50% 伤害；恶劣环境 / 末日翻倍成 −100%（加减翻倍，不是再乘一次 ×0.5）
-    if (weather === "phase" && Number(ctx.phaseStep) === 0) { mul *= Math.max(0, 1 - 0.5 * envX); hAdd(envX > 1 ? "相位波谷：伤害 −100%（恶劣环境 / 末日）。" : "相位波谷：伤害减半。"); }
-    if (flags.doubleDeal) { mul *= 2; hAdd("造成伤害翻倍。"); }
-    if (flags.doubleTake) { mul *= 2; hAdd("目标受伤翻倍。"); }
-    if (flags.dr50) { mul *= 0.5; hAdd("目标减伤 +50%。"); }
-    if (flags.dr25) { mul *= 0.75; hAdd("自保模式：受伤 −25%。"); }
-    if (flags.holyShield) { mul *= 0.5; hAdd("圣盾：本次伤害减半。"); }
+    // 以百分比写的增伤 / 减伤（攻击方、受击方都算）一律和上面的加在一起，不连乘：
+    // 相位波谷、减伤率、自保、过度自信、全队集结的坦克减伤、冰冻 +50%
+    // 波谷 −50% 伤害；恶劣环境 / 末日翻倍成 −100%
+    if (weather === "phase" && Number(ctx.phaseStep) === 0) { pct -= 0.5 * envX; hAdd(`相位波谷：伤害 −${50 * envX}%。`); }
+    if (flags.dr50) { pct -= 0.5; hAdd("目标减伤 +50%：−50%。"); }
+    if (flags.dr25) { pct -= 0.25; hAdd("自保模式：受伤 −25%。"); }
     if (flags.prideReduce) {
       const pr = typeof flags.prideReduce === "number" ? flags.prideReduce : 0.25;
-      mul *= 1 - pr; hAdd(`过度自信：血量不低于进入战斗时的上限，受伤 −${Math.round(pr * 100)}%。`);
+      pct -= pr; hAdd(`过度自信：血量不低于进入战斗时的上限，受伤 −${Math.round(pr * 100)}%。`);
     }
+    // 集结持续到自己失衡或濒死
+    if (t.resources && t.resources.rallyDr && (t.stunned || t.dying)) delete t.resources.rallyDr;
+    if (t.resources && t.resources.rallyDr) { pct -= 0.15; hAdd("全队集结（坦克）：全属性减伤 +15%：−15%。"); }
+    if (h === 0 && t.instant && t.instant.iceNext && flags.action !== false) {
+      pct += 0.5;
+      hAdd("冰冻（冰属性击破失衡）：本动作第一击伤害 +50%。");
+      t.instant.iceNext = false;
+    }
+
+    packet *= Math.max(0, 1 + pct);
+    hAdd(`加算百分比合计 ${pctTxt(pct)} → ${round2(packet)}`);
+
+    // 写成「翻倍 / 减半 / ×N」的才另外相乘
+    let mul = 1;
+    if (flags.doubleDeal) { mul *= 2; hAdd("造成伤害翻倍。"); }
+    if (flags.doubleTake) { mul *= 2; hAdd("目标受伤翻倍。"); }
+    if (flags.holyShield) { mul *= 0.5; hAdd("圣盾：本次伤害减半。"); }
     // 事故幸存+：拉斯缪尔不稳态下受到的伤害 ×3（不再倒地 / 死亡）
     if (t.kit === "ras" && t.resources && t.resources.unstable && typeof passivePlus === "function" && passivePlus(t, 2)) {
       mul *= 3; hAdd("事故幸存+：不稳态受伤 ×3。");
@@ -961,11 +973,6 @@ function resolveAttack(ctx) {
     if (t.flying && flags.action) { mul *= 0.5; hAdd("飞行单位：攻击行动伤害减半。"); }
     if (meltIceHit) { mul *= 2; }
     if (flags.block === "bareOk") { mul *= 0.5; hAdd("空手格挡成功：伤害一半。"); }
-    if (h === 0 && t.instant && t.instant.iceNext && flags.action !== false) {
-      mul *= 1.5;
-      hAdd("冰冻（冰属性击破失衡）：本动作第一击伤害 +50%。");
-      t.instant.iceNext = false;
-    }
     packet *= mul;
 
     packet = Math.max(0, packet);
