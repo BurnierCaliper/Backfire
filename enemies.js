@@ -888,7 +888,7 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
     for (let i = 0; i < n; i++) {
       const kind = kinds[i % 2];
       const p = enemyPresets().find(x => x.id === kind);
-      const u = p.build(a.level, state.partySize);
+      const u = applyEnemyIV(p.build(a.level, state.partySize));
       u.zone = a.zone;
       state.units.push(u);
     }
@@ -1305,7 +1305,7 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
     const kind = kinds[Math.floor(Math.random() * kinds.length)];
     const p = enemyPresets().find(x => x.id === kind);
     if (p) {
-      const u = p.build(a.level, state.partySize);
+      const u = applyEnemyIV(p.build(a.level, state.partySize));
       u.zone = a.zone;
       u.summonedBy = a.id;   // 飞碟自爆时连自己召唤的看守一起炸（detonateUfo）
       state.units.push(u);
@@ -1415,7 +1415,63 @@ function drainUfoLegs(body, amount) {
   return notes;
 }
 
-function spawnEnemyGroup(id, lv, partyN, zone) {
+/* ===== 个体值（杂兵、精英） =====
+ * 每个杂兵 / 精英生成时，血量和 atk 各自在 ±10% 内随机波动（整数百分比），记在 u.iv = { hp, atk }。
+ * 首领不波动。跑团模式里主持人可以写死具体的水平（战斗模板的敌人行、战斗中改单位），空着就随机。
+ * u.ivBase 记着波动之前的数值，改水平时按它重算（不会越改越偏）。
+ * ENEMY_IV.off > 0 时不波动（BattleSim.setup 默认关：测试、数值模拟要确定的数字；单局的战斗显式打开） */
+const ENEMY_IV = { range: 10, off: 0 };
+function ivEligible(u) {
+  if (!u || u.isPlayer || u.kit === "ufo_leg" || u.kit === "ufo_body" || u.kit === "ironwall") return false;
+  const r = typeof enemyRankOf === "function" ? enemyRankOf(u) : "minion";
+  return r === "minion" || r === "elite";
+}
+/** 水平（百分比）夹到 ±range 的整数；不是数字返回 null（= 随机） */
+function ivClamp(v) {
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(v);
+  if (!Number.isFinite(n)) return null;
+  return Math.max(-ENEMY_IV.range, Math.min(ENEMY_IV.range, Math.round(n)));
+}
+function ivRoll() {
+  return Math.round((Math.random() * 2 - 1) * ENEMY_IV.range) || 0;
+}
+/** 按水平重算血量和 atk：血量层上限 × (1 + hp%)，已经受的伤保持比例；atk / personalAtk × (1 + atk%)（保留一位小数） */
+function setEnemyIV(u, iv) {
+  if (!u || !Array.isArray(u.layers)) return u;
+  // 敌人出手用的是 personalAtk（面板显示 atk）：两个一起按水平算
+  if (!u.ivBase) u.ivBase = { atk: Number(u.atk) || 0, personalAtk: u.personalAtk != null ? Number(u.personalAtk) || 0 : null, max: u.layers.map(l => Number(l.max) || 0) };
+  const hp = ivClamp(iv && iv.hp) ?? 0, atk = ivClamp(iv && iv.atk) ?? 0;
+  const mh = 1 + hp / 100, ma = 1 + atk / 100;
+  u.layers.forEach((l, i) => {
+    const base = u.ivBase.max[i] != null ? u.ivBase.max[i] : Number(l.max) || 0;
+    if (!(base > 0)) return;
+    const oldMax = Number(l.max) || base, cur = Number(l.current) || 0;
+    const max = Math.max(1, Math.round(base * mh));
+    l.max = max;
+    l.current = cur >= oldMax ? max : Math.max(0, Math.min(max, Math.round(cur * max / oldMax)));
+  });
+  u.atk = Math.round(u.ivBase.atk * ma * 10) / 10;
+  if (u.ivBase.personalAtk != null) u.personalAtk = Math.round(u.ivBase.personalAtk * ma * 10) / 10;
+  u.iv = { hp, atk };
+  return u;
+}
+/** 生成时调用：iv 里写了的项照写，没写的随机（off 时整体不动、也不记 iv）。首领不波动 */
+function applyEnemyIV(u, iv) {
+  if (!ivEligible(u) || u.iv) return u;
+  const fixed = iv && (ivClamp(iv.hp) != null || ivClamp(iv.atk) != null);
+  if (ENEMY_IV.off > 0 && !fixed) return u;
+  const hp = ivClamp(iv && iv.hp), atk = ivClamp(iv && iv.atk);
+  return setEnemyIV(u, { hp: hp != null ? hp : (ENEMY_IV.off > 0 ? 0 : ivRoll()), atk: atk != null ? atk : (ENEMY_IV.off > 0 ? 0 : ivRoll()) });
+}
+/** 画面用：「血量 +7% · ATK −3%」 */
+function ivText(u) {
+  if (!u || !u.iv) return "";
+  const f = (n) => (n > 0 ? "+" : n < 0 ? "−" : "±") + Math.abs(n) + "%";
+  return `血量 ${f(u.iv.hp)} · ATK ${f(u.iv.atk)}`;
+}
+
+function spawnEnemyGroup(id, lv, partyN, zone, iv) {
   const z = zone != null ? Number(zone) : null;
   if (id === "ufo_boss" && typeof spawnUfoBoss === "function") {
     const pack = spawnUfoBoss(lv);
@@ -1427,7 +1483,7 @@ function spawnEnemyGroup(id, lv, partyN, zone) {
   }
   const p = enemyPresets().find(x => x.id === id);
   if (!p || !p.build) return [];
-  const u = p.build(lv, partyN);
+  const u = applyEnemyIV(p.build(lv, partyN), iv);
   if (z) u.zone = Math.min(z, Number(state.zoneMode) || z);
   if (typeof refreshEnemyEconomy === "function") refreshEnemyEconomy(u);
   return [u];

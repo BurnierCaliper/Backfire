@@ -122,6 +122,9 @@
       const max = number(get(layer, "max")); if (max !== undefined) result.max = max;
       return result;
     });
+    // 个体值（杂兵、精英）：血量 / ATK 水平（百分比，公开）
+    const iv = get(unit, "iv");
+    if (obj(iv)) { const h = number(get(iv, "hp")), a = number(get(iv, "atk")); if (h !== undefined && a !== undefined) out.iv = { hp: h, atk: a }; }
     out.statuses = selected(get(unit, "statuses"), statusKeys);
     out.instant = selected(get(unit, "instant"), ["melt", "sting", "overload", "shift", "spread", "refract", "iceNext"]);
     const r = get(unit, "resources"); out.resources = copyFields(r, {}, [], resourceNumbers, resourceFlags);

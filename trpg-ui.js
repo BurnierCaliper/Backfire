@@ -739,9 +739,13 @@
     const zones = battleTemplateZones(t.board);
     const zoneSel = (path, cur) => `<select data-bte="${path}">${options(zones.map(z => [z, z + " 区"]), cur)}</select>`;
     const lvTip = ' placeholder="随队" title="空着 = 跟着开战时的等级"';
+    // 个体值（杂兵、精英）：血量 / ATK 水平 −10～10%，空着 = 开战时随机
+    const ivTip = ' min="-10" max="10" step="1" placeholder="随机" title="个体值水平 −10～10（%），空着 = 开战时随机；首领不波动"';
+    const ivInp = (path, e) => `<span class="bt-iv">个体值 血量 ${inp(path + ".iv.hp", e.iv ? e.iv.hp : null, 54, "number", ivTip)}% ATK ${inp(path + ".iv.atk", e.iv ? e.iv.atk : null, 54, "number", ivTip)}%</span>`;
     const foes = t.enemies.map((e, j) => `<div class="tr-row">
         <select data-bte="enemies.${j}.preset">${options(presets, e.preset)}</select>
         等级 ${inp(`enemies.${j}.level`, e.level, 60, "number", lvTip)} 区域 ${zoneSel(`enemies.${j}.zone`, e.zone)}
+        ${ivInp(`enemies.${j}`, e)}
         ${e.mechanics ? `<span class="tk-chip">机制：${esc(e.mechanics.map(btMechName).join("、"))}<button class="g-btn small" data-bt-act="clearMech:${j}" title="去掉这个敌人身上的首领机制">×</button></span>` : ""}
         <button class="g-btn small" data-bt-act="delEnemy:${j}">删</button></div>`).join("");
     const fields = zones.map(z => {
@@ -766,7 +770,7 @@
         <div class="tr-row">第 ${j + 1} 波：开战后第 ${inp(`waves.${j}.turns`, w.turns, 50, "number", ' min="1"')} 回合开始时抵达（提前打光场上的敌人就下一回合到）
           <button class="g-btn small" data-bt-act="delWave:${j}">删这波</button></div>
         ${(w.enemies || []).map((e, k) => `<div class="tr-row">　<select data-bte="waves.${j}.enemies.${k}.preset">${options(presets, e.preset)}</select>
-          等级 ${inp(`waves.${j}.enemies.${k}.level`, e.level, 60, "number", lvTip)} 进入 ${zoneSel(`waves.${j}.enemies.${k}.zone`, e.zone)}
+          等级 ${inp(`waves.${j}.enemies.${k}.level`, e.level, 60, "number", lvTip)} 进入 ${zoneSel(`waves.${j}.enemies.${k}.zone`, e.zone)} ${ivInp(`waves.${j}.enemies.${k}`, e)}
           <button class="g-btn small" data-bt-act="delWaveEnemy:${j}-${k}">删</button></div>`).join("")}
         <div class="tr-row">　<button class="g-btn small" data-bt-act="addWaveEnemy:${j}">＋ 援军敌人</button></div></div>`).join("");
     const others = (typeof battleTemplateList === "function" ? battleTemplateList() : []).filter(x => x.id !== t.id).map(x => [x.id, x.name]);
@@ -817,9 +821,10 @@
   function btSet(path, v) {
     const keys = path.split(".");
     let o = btEdit;
-    for (let i = 0; i < keys.length - 1; i++) o = o[keys[i]];
+    for (let i = 0; i < keys.length - 1; i++) o = o[keys[i]] || (o[keys[i]] = {});
     const k = keys[keys.length - 1];
     if (k === "level") o[k] = v === "" ? null : Number(v);
+    else if (keys[keys.length - 2] === "iv") o[k] = v === "" || !Number.isFinite(Number(v)) ? null : Math.max(-10, Math.min(10, Math.round(Number(v))));
     else if (k === "zone" || k === "playerZone") o[k] = Number(v);
     else if (k === "board") o[k] = /^\d+$/.test(v) ? Number(v) : v;
     else o[k] = v;

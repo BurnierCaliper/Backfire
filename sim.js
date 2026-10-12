@@ -78,6 +78,13 @@ const BattleSim = (function () {
     if (typeof opt.before === "function") opt.before(state);
     const partyN = syncPartySizeFromField();
     const level = Number(opt.level) || 1;
+    // 个体值（enemies.js）：默认不波动（测试、数值模拟要确定的数字）；单局的战斗（battle.setupRogue）打开
+    const ivOff = typeof ENEMY_IV !== "undefined" && !opt.iv;
+    if (ivOff) ENEMY_IV.off++;
+    try { spawnAll(opt, level, partyN); } finally { if (ivOff) ENEMY_IV.off--; }
+    return state;
+  }
+  function spawnAll(opt, level, partyN) {
     if (opt.encounter) {
       const enc = JSON.parse(JSON.stringify(opt.encounter));
       if (typeof applyEncounterLayout === "function") applyEncounterLayout(enc);
@@ -87,10 +94,9 @@ const BattleSim = (function () {
     } else {
       if (typeof Chain !== "undefined") Chain.clear();
       (opt.enemies || []).forEach(row => {
-        spawnEnemyGroup(row.id, Number(row.lv) || level, partyN, row.zone).forEach(u => state.units.push(u));
+        spawnEnemyGroup(row.id, Number(row.lv) || level, partyN, row.zone, row.iv).forEach(u => state.units.push(u));
       });
     }
-    return state;
   }
 
   /* ---------- 胜负 ---------- */

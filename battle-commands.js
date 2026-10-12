@@ -174,6 +174,7 @@
         const p = presets.find(x => x.id === row.id);
         if (!p || !p.build) return;
         const u = p.build(Number(row.lv) || cmd.level, partyN);
+        if (typeof applyEnemyIV === "function") applyEnemyIV(u);
         u.zone = Math.min(Number(state.zoneMode), Number(row.zone) || Number(state.zoneMode)); state.units.push(u);
       });
     }
@@ -216,7 +217,7 @@
       case "addEnemy": {
         const p = enemyPresets().find(x => x.id === cmd.preset); if (!p) break;
         const partyN = typeof syncPartySizeFromField === "function" ? syncPartySizeFromField() : liveHeroCount();
-        const pack = typeof spawnEnemyGroup === "function" ? spawnEnemyGroup(cmd.preset, cmd.level, partyN, cmd.zone) : null;
+        const pack = typeof spawnEnemyGroup === "function" ? spawnEnemyGroup(cmd.preset, cmd.level, partyN, cmd.zone, cmd.iv) : null;
         if (pack && pack.length) pack.forEach(u => state.units.push(u));
         else { const u = p.build(cmd.level, partyN); u.zone = Math.min(cmd.zone, Number(state.zoneMode)); state.units.push(u); if (typeof refreshEnemyEconomy === "function") refreshEnemyEconomy(u); }
         g.enemyPlan = (g.enemyPlan || []).concat([{ id: cmd.preset, lv: cmd.level, zone: cmd.zone }]); break;

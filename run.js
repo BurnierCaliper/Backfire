@@ -522,6 +522,8 @@ function spawnEncounterRows(rows, baseLevel, partySize) {
         continue;
       }
       const u = p.build(lv(row.level), partySize);
+      // 个体值（enemies.js）：模板里主持人写死的水平照写，没写的随机
+      if (typeof applyEnemyIV === "function") applyEnemyIV(u, row.iv);
       u.zone = Number(row.zone) || 2;
       if (row.bounty) makeBountyTarget(u, row.bounty);
       // 战斗模板（battle-templates.js）里预先挂好的首领机制

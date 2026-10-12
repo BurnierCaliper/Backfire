@@ -101,9 +101,16 @@ function battleTemplateNormalize(t) {
   const zoneOk = (z, d) => { z = btInt(z, d, 1, maxZ); return zones.includes(z) ? z : d; };
   const presets = btPresetIds();
   const lvOf = v => (v === null || v === undefined || v === "") ? null : btInt(v, 1, 1, 30);
+  // 个体值水平（enemies.js）：−10～10，空着 = 开战时随机
+  const ivOf = v => (v === null || v === undefined || v === "" || !Number.isFinite(Number(v))) ? null : Math.max(-10, Math.min(10, Math.round(Number(v))));
+  const withIv = (row, e) => {
+    const iv = e && e.iv && typeof e.iv === "object" ? { hp: ivOf(e.iv.hp), atk: ivOf(e.iv.atk) } : null;
+    if (iv && (iv.hp != null || iv.atk != null)) row.iv = iv;
+    return row;
+  };
   const enemies = (Array.isArray(t.enemies) ? t.enemies : []).filter(e => e && typeof e.preset === "string" && (!presets || presets.includes(e.preset)))
     .slice(0, 30).map(e => {
-      const row = { preset: e.preset, level: lvOf(e.level), zone: zoneOk(e.zone, maxZ) };
+      const row = withIv({ preset: e.preset, level: lvOf(e.level), zone: zoneOk(e.zone, maxZ) }, e);
       const m = btMechanics(e.mechanics);
       if (m) row.mechanics = m;
       return row;
@@ -127,7 +134,7 @@ function battleTemplateNormalize(t) {
   const waves = (Array.isArray(t.waves) ? t.waves : []).filter(w => w && typeof w === "object").slice(0, 6).map(w => ({
     turns: btInt(w.turns, 2, 1, 30),
     enemies: (Array.isArray(w.enemies) ? w.enemies : []).filter(e => e && typeof e.preset === "string" && (!presets || presets.includes(e.preset)))
-      .slice(0, 12).map(e => ({ preset: e.preset, level: lvOf(e.level), zone: zoneOk(e.zone, maxZ) }))
+      .slice(0, 12).map(e => withIv({ preset: e.preset, level: lvOf(e.level), zone: zoneOk(e.zone, maxZ) }, e))
   }));
   // 连续战斗：打完接着打的模板（按 id；最多 9 场）
   const chain = (Array.isArray(t.chain) ? t.chain : []).filter(id => typeof id === "string" && /^[\w-]{1,40}$/.test(id)).slice(0, 9);
@@ -288,13 +295,14 @@ function btOneEncounter(t) {
     enemies: t.enemies.map(e => {
       const row = { preset: e.preset, zone: e.zone, count: 1 };
       if (e.level != null) row.level = e.level;
+      if (e.iv) row.iv = btClone(e.iv);
       if (e.mechanics) row.mechanics = btClone(e.mechanics);
       return row;
     }),
     fields: btClone(t.fields),
     features: []
   };
-  if (t.waves.length) enc.waves = t.waves.map(w => ({ turns: w.turns, enemies: w.enemies.map(e => Object.assign({ preset: e.preset, zone: e.zone, count: 1 }, e.level != null ? { level: e.level } : {})) }));
+  if (t.waves.length) enc.waves = t.waves.map(w => ({ turns: w.turns, enemies: w.enemies.map(e => Object.assign({ preset: e.preset, zone: e.zone, count: 1 }, e.level != null ? { level: e.level } : {}, e.iv ? { iv: btClone(e.iv) } : {})) }));
   if (t.drops) enc.drops = btClone(t.drops);
   if (typeof t.board === "string") enc.board = t.board;
   Object.keys(t.gaps).forEach(k => {

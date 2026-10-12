@@ -20,6 +20,12 @@
     if (typeof x !== "number" || !Number.isFinite(x) || x < min || x > max || (integer && !Number.isInteger(x))) fail(label + "超出合法范围");
     return x;
   }
+  /** 个体值水平 { hp, atk }：各 −10～10 的整数，null / 不写 = 随机（生成时）或不变（修改时） */
+  function ivCheck(iv) {
+    if (!iv || typeof iv !== "object" || Array.isArray(iv)) fail("个体值必须是 { hp, atk }");
+    keys(iv, ["hp", "atk"], "个体值");
+    ["hp", "atk"].forEach(k => { if (own(iv, k) && iv[k] !== null) number(iv[k], "个体值 " + k, -10, 10, true); });
+  }
   function bool(x, label) { if (typeof x !== "boolean") fail(label + "必须是布尔值"); }
   function one(x, values, label) { if (!values.includes(x)) fail("未知的" + label); }
   function zone(z, count = Number(state.zoneMode)) { return number(z, "区域", 1, count, true); }
@@ -61,7 +67,8 @@
   function patchUnit(u, p) {
     const numeric = ["hp", "shp", "shpMax", "def", "defMax", "ap", "apMax", "bonus", "bonusMax", "atk", "highEnergy"];
     const flags = ["stunned", "stun", "dying", "dead", "flying"];
-    keys(p, numeric.concat(flags, ["layers", "level", "zone", "statuses", "self"]), "单位补丁");
+    keys(p, numeric.concat(flags, ["layers", "level", "zone", "statuses", "self", "iv"]), "单位补丁");
+    if (own(p, "iv")) { if (typeof ivEligible !== "function" || !ivEligible(u)) fail("只有杂兵、精英有个体值"); ivCheck(p.iv); }
     if (!Object.keys(p).length) fail("单位补丁为空");
     numeric.forEach(k => { if (own(p, k)) number(p[k], k, 0, Number.MAX_SAFE_INTEGER, ["ap", "apMax", "bonus", "bonusMax"].includes(k)); });
     flags.forEach(k => { if (own(p, k)) bool(p[k], k); });
@@ -217,7 +224,7 @@
     if (!TYPES.includes(cmd.type)) fail("未知主持人指令");
     if (own(cmd, "silent")) bool(cmd.silent, "静默");
     const fields = {
-      spawnEnemy: ["enemyId", "level", "zone", "count"], removeUnit: ["actor", "mode"], editUnit: ["actor", "patch"],
+      spawnEnemy: ["enemyId", "level", "zone", "count", "iv"], removeUnit: ["actor", "mode"], editUnit: ["actor", "patch"],
       addProp: ["kind", "zone", "level", "faction", "link"], editProp: ["id", "patch"], removeProp: ["id", "mode"],
       editGap: ["key", "patch"], setField: ["zone", "patch"], setWeather: ["weather", "sandDir", "phaseStep", "lock"],
       setEncounter: ["encounter", "zoneMode"], forceAttack: ["input"], setManual: ["actors", "enabled"],
@@ -227,7 +234,7 @@
     switch (type) {
       case "spawnEnemy":
         if (!enemyPresets().some(p => p.id === cmd.enemyId && p.id !== "blank_pc")) fail("未知敌人种类");
-        level(cmd.level); zone(cmd.zone); if (own(cmd, "count")) number(cmd.count, "生成数量", 1, 100, true); break;
+        level(cmd.level); zone(cmd.zone); if (own(cmd, "count")) number(cmd.count, "生成数量", 1, 100, true); if (own(cmd, "iv")) ivCheck(cmd.iv); break;
       case "removeUnit": enemy(cmd.actor); one(cmd.mode, ["remove", "kill"], "移出模式"); break;
       case "editUnit": patchUnit(unit(cmd.actor), cmd.patch); break;
       case "addProp": one(cmd.kind, PROP_KINDS, "配置物种类"); zone(cmd.zone); if (own(cmd, "level")) level(cmd.level); if (own(cmd, "faction")) one(cmd.faction, ["player", "enemy"], "阵营"); if (own(cmd, "link")) gapKeyCheck(cmd.link); break;
@@ -256,6 +263,11 @@
   }
   function kill(u, notes) { (u.layers || []).forEach(l => { l.current = 0; }); settleEnemyKill(u, notes); notes.push(...sweepDeadEnemies()); }
   function edit(u, p, notes) {
+    // 个体值：按波动之前的数值重算血量上限和 atk（先做，后面同一次补丁里写的具体数值照样生效）
+    if (own(p, "iv")) {
+      const cur = u.iv || { hp: 0, atk: 0 }, pick = k => (p.iv[k] === null || p.iv[k] === undefined ? cur[k] : p.iv[k]);
+      setEnemyIV(u, { hp: pick("hp"), atk: pick("atk") });
+    }
     if (own(p, "level")) { u.level = p.level; if (typeof applyLevelStats === "function") applyLevelStats(u); }
     if (p.dead === false) { dmRevive(u); u._removed = false; }
     ["shpMax", "defMax", "apMax", "bonusMax", "atk", "zone", "self", "highEnergy", "flying", "dying", "dead"].forEach(k => { if (own(p, k)) u[k] = p[k]; });
@@ -283,7 +295,7 @@
         case "spawnEnemy": {
           const ids = [], eligible = state.combatStarted ? (Number(state.turnNo) || 1) + (state.combatPhase === "enemy" ? 1 : 0) : 1;
           for (let i = 0; i < (cmd.count || 1); i++) {
-            const pack = spawnEnemyGroup(cmd.enemyId, cmd.level, Number(state.partySize) || 2, cmd.zone);
+            const pack = spawnEnemyGroup(cmd.enemyId, cmd.level, Number(state.partySize) || 2, cmd.zone, cmd.iv);
             pack.forEach(u => { state.units.push(u); metadata.set(u.id, { eligibleEnemyRound: eligible }); ids.push(u.id); });
           }
           result = { ids, eligibleEnemyRound: eligible };

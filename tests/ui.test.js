@@ -1655,3 +1655,25 @@ test("战斗模板编辑器：加一波援军（抵达回合、敌人、区域�
   assert.match(await page.textContent("#tr-panel"), /连续 2 场/);
   assert.deepEqual(errors, []);
 });
+
+test("个体值：战斗模板编辑器写血量 / ATK 水平，开战后敌人照写，铭牌上停一下能看到", async t => {
+  const o = await open(t); if (!o) return;
+  const { page, errors } = o;
+  await newTrpg(page);
+  await page.click('#tr-tabs [data-tab="battles"]');
+  await page.click('[data-bt="new:"]');
+  await page.fill('[data-bte="name"]', "个体值");
+  await page.click('[data-bt-act="addEnemy"]');
+  await page.fill('[data-bte="enemies.0.iv.hp"]', "8");
+  await page.fill('[data-bte="enemies.0.iv.atk"]', "-6");
+  await page.click('[data-bt-act="save"]');
+  const tpl = await page.evaluate(() => JSON.parse(JSON.stringify(battleTemplateList().find(x => x.name === "个体值"))));
+  assert.deepEqual(tpl.enemies[0].iv, { hp: 8, atk: -6 });
+  // 用它开战：敌人的个体值照写，铭牌的等级上有提示
+  await page.click(`[data-bt="fight:${tpl.id}"]`);
+  await page.waitForSelector("#g-start");
+  const iv = await page.evaluate(() => { const u = state.units.find(x => !x.isPlayer && x.iv); return u && u.iv; });
+  assert.deepEqual(iv, { hp: 8, atk: -6 });
+  await page.waitForFunction(() => [...document.querySelectorAll(".unit.foe .u-lv")].some(e => /个体值：血量 \+8% · ATK −6%/.test(e.title)));
+  assert.deepEqual(errors, []);
+});

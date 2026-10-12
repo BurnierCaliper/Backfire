@@ -701,8 +701,13 @@ const Rogue = (function () {
   }
 
   /* ---------- 战斗 ---------- */
-  /** 当前节点 / 首领的战斗配置（给 BattleSim.setup 或战斗画面用） */
+  /** 当前节点 / 首领的战斗配置（给 BattleSim.setup 或战斗画面用）。单局的敌人有个体值（iv: true，enemies.js） */
   function battleSpec(run) {
+    const spec = battleSpecOf(run);
+    if (spec && spec.iv === undefined) spec.iv = true;
+    return spec;
+  }
+  function battleSpecOf(run) {
     const partyKits = run.party.map(h => h.kit);
     const before = () => {
       applyPartyToField(run); state.openingBreaks = openingBreaks(run); state.solo = soloBattleInfo(run); state.scoreAct = run.act;

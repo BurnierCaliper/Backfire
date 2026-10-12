@@ -1668,7 +1668,7 @@ function beginRound(notes) {
         const kind = kinds[Math.floor(Math.random() * kinds.length)];
         const p = enemyPresets().find(x => x.id === kind);
         if (p) {
-          const guard = p.build(u.level, state.partySize);
+          const guard = typeof applyEnemyIV === "function" ? applyEnemyIV(p.build(u.level, state.partySize)) : p.build(u.level, state.partySize);
           guard.zone = u.zone;
           state.units.push(guard);
           notes.push(`十级被动：召唤 ${guard.name}。`);
