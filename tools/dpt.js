@@ -202,12 +202,50 @@ function dummyMark(S) {
   const grab = S.units.filter(u => u.isPlayer).map(u => (u.resources || {}).crushId || null);
   return JSON.stringify([d && d.statuses, d && d.focuses, d && d.highEnergy, d && d.highTags, grab, S.fields]);
 }
+/** 「打法」分类：假人身上挂了哪些状态、角色 / 武器人处于哪种自我效果和状态、在不在场。
+ *  束里每一类至少留一个，免得「先铺垫、好几回合后才兑现」的打法（泄能攒高能、自焚……）在兑现之前就被普攻的各种变体挤掉 */
+function styleKey(S) {
+  const on = o => Object.keys(o || {}).filter(k => o[k]).sort().join(",");
+  const d = S.units.find(u => !u.isPlayer && u.name === "训练假人" && !u._removed);
+  const me = S.units.filter(u => u.isPlayer && !u._removed).map(u => [u.kit, u.hidden ? 0 : 1, u.self || "", on(u.statuses),
+    (u.resources || {}).unstable ? 1 : 0, (u.resources || {}).engine ? 1 : 0, (u.resources || {}).crushId ? 1 : 0, (u.resources || {}).mode || (u.resources || {}).bit || ""].join(":"));
+  return [d ? on(d.statuses) : "", ...me.sort()].join("|");
+}
 /** 从当前局面什么都不做、一直结束回合到第 turns 回合，假人还会掉多少血 */
 function rollout(c, fromTurn, turns, seed) {
   const S = c.S.state;
   c.S.RNG.install(seed);
   const d0 = dummyDamage(S);
   for (let t = fromTurn; t <= turns; t++) endTurn(c);
+  return dummyDamage(S) - d0;
+}
+
+/** 贪心打一回合：每一步把能做的技能都试一遍，挑当下伤害最高的那个做，直到没有能打出伤害的动作 */
+function greedyTurn(c, maxSteps) {
+  const S = c.S.state;
+  for (let i = 0; i < (maxSteps || 4); i++) {
+    const base = snap(c), d0 = dummyDamage(S);
+    let best = null, bestGain = 0;
+    candidateActions(c).filter(x => x.type === "skill").forEach(cmd => {
+      load(c, base);
+      if (!execute(c, cmd)) return;
+      const g = dummyDamage(S) - d0;
+      if (g > bestGain) { bestGain = g; best = snap(c); }
+    });
+    if (!best) { load(c, base); return; }
+    load(c, best);
+  }
+}
+/** 往后看（打下去版）：接下来 H 个回合每回合贪心地打，之后只结算持续伤害，到第 turns 回合为止。
+ *  「什么都不做」的往后看只看得到灼烧这类自己会掉的血，看不到自焚、导体、不稳态这种要接着打才兑现的增益 */
+function greedyRollout(c, fromTurn, turns, H, seed) {
+  const S = c.S.state;
+  c.S.RNG.install(seed);
+  const d0 = dummyDamage(S);
+  for (let t = fromTurn; t <= turns; t++) {
+    if (t < fromTurn + H) greedyTurn(c);
+    endTurn(c);
+  }
   return dummyDamage(S) - d0;
 }
 
@@ -224,9 +262,12 @@ function search(kit, level, opt) {
   const base = snap(c);
   let beam = [{ snaps: Array.from({ length: W }, () => base), dmg: dummyDamage(S), path: opening, turnDmg: [] }];
   const maxSteps = 10;   // 每回合最多几个动作（防止不耗行动的开关来回切）
+  const H = opt.horizon || turns;   // 打下去的往后看：贪心打几个回合（默认一直打到最后）
+  const gcache = new Map();
   const mean = a => a.reduce((x, y) => x + y, 0) / a.length;
   for (let turn = 1; turn <= turns; turn++) {
-    let open = beam.map(b => Object.assign({}, b, { steps: 0, start: b.dmg, future: b.score != null ? b.score - b.dmg : 0, score: b.score != null ? b.score : b.dmg }));
+    // 回合中途按「当回合伤害 + 什么都不做的往后看」排序（同一回合里大家口径一致）；回合结束时再按「打下去的往后看」排序
+    let open = beam.map(b => Object.assign({}, b, { steps: 0, start: b.dmg, future: b.pfut || 0, score: b.dmg + (b.pfut || 0) }));
     const ended = [];
     for (let step = 0; step <= maxSteps && open.length; step++) {
       const next = new Map();
@@ -244,12 +285,16 @@ function search(kit, level, opt) {
         const key = bucketKey(S);
         // 往后看：从这里开始什么都不做、一直结束回合到第 turns 回合，还会自己打出多少（灼烧 / 腐蚀 / 冻伤、狂怒碾压……）。
         // 只用来排序（束里留谁），记的伤害还是实际打出来的。不看的话，挂持续伤害的开局当回合几乎没伤害，会被提前剪掉
-        let future = 0;
+        let pfut = 0, gfut = 0;
         if (opt.lookahead !== false && turn < turns) {
-          future = mean(endSnaps.map((sn, w) => { load(c, sn); return rollout(c, turn + 1, turns, `dpt:${kit}:${level}:t${turn}:look:w${w}`); }));
+          pfut = mean(endSnaps.map((sn, w) => { load(c, sn); return rollout(c, turn + 1, turns, `dpt:${kit}:${level}:t${turn}:look:w${w}`); }));
+          // 打下去的往后看只在基准世界里算，同一个局面（资源状态）算过就复用
+          const ck = turn + "|" + key;
+          if (!gcache.has(ck)) { load(c, endSnaps[0]); gcache.set(ck, greedyRollout(c, turn + 1, turns, H, `dpt:${kit}:${level}:t${turn}:greedy`)); }
+          gfut = gcache.get(ck);
           load(c, endSnaps[0]);
         }
-        ended.push({ snaps: endSnaps, dmg: dEnd, score: dEnd + future, path: node.path.concat([{ turn, end: true }]), turnDmg: node.turnDmg.concat([dEnd - node.start]), key });
+        ended.push({ style: styleKey(S), snaps: endSnaps, dmg: dEnd, pfut, score: dEnd + Math.max(pfut, gfut), path: node.path.concat([{ turn, end: true }]), turnDmg: node.turnDmg.concat([dEnd - node.start]), key });
         if (node.steps >= maxSteps) return;
         load(c, node.snaps[0]);
         const before0 = signature(S);
@@ -279,15 +324,35 @@ function search(kit, level, opt) {
           const d = mean(ds), key = key0 + "|" + Math.round(d * 10);
           const prev = next.get(key);
           if (prev && prev.score >= d + future) return;
-          next.set(key, { snaps, dmg: d, future, score: d + future, path: node.path.concat([Object.assign({ turn }, tok)]), turnDmg: node.turnDmg, steps: node.steps + 1, start: node.start, key: key0 });
+          load(c, snaps[0]);
+          next.set(key, { style: styleKey(S), snaps, dmg: d, future, score: d + future, setup: tok.type === "skill" && d <= node.dmg, path: node.path.concat([Object.assign({ turn }, tok)]), turnDmg: node.turnDmg, steps: node.steps + 1, start: node.start, key: key0 });
         });
       });
-      open = keepBest([...next.values()], width);
+      // 当下不打伤害的技能（增益、换姿态、唤出……）另外保留一批名额，让它们活到回合结束、用「打下去的往后看」评估
+      const all = [...next.values()];
+      const kept = keepBest(all, width);
+      const keptSet = new Set(kept);
+      open = withStyles(opt.diversity === false ? [] : null, kept.concat(keepBest(all.filter(n => n.setup && !keptSet.has(n)), Math.ceil(width / 2))), all, width);
     }
-    beam = keepBest(ended, width);
+    beam = withStyles(opt.diversity === false ? [] : null, keepBest(ended, width), ended, width);
   }
   beam.sort((a, b) => b.dmg - a.dmg);
   return { c, best: beam[0] };
+}
+/** 在已经选好的束上，给还没有代表的每一类打法补一个（这一类里分数最高的），最多补 width 个 */
+function withStyles(off, kept, all, width) {
+  if (off) return kept;
+  const sc = n => (n.score != null ? n.score : n.dmg);
+  const have = new Set(kept.map(n => n.style)), keys = new Set(kept.map(n => n.key));
+  const best = new Map();
+  all.forEach(n => { if (n.style == null || have.has(n.style) || keys.has(n.key)) return; const p = best.get(n.style); if (!p || sc(n) > sc(p)) best.set(n.style, n); });
+  return kept.concat([...best.values()].sort((a, b) => sc(b) - sc(a)).slice(0, width));
+}
+/** 搜两遍（束里保不保留各类打法），取实际伤害高的：两种剪枝各有漏掉的打法，谁也不总比谁好 */
+function bestSearch(kit, level, opt) {
+  const a = search(kit, level, Object.assign({}, opt, { diversity: false }));
+  const b = search(kit, level, Object.assign({}, opt, { diversity: true }));
+  return a.best.dmg >= b.best.dmg ? a : b;
 }
 function keepBest(list, width) {
   // 同一种资源状态（不含伤害）只留伤害最高的那个，再按伤害取前 width 个
@@ -319,7 +384,7 @@ function main() {
   const rows = [];
   for (const kit of kits) for (const level of levels) {
     const t0 = Date.now();
-    const { best } = search(kit, level, { turns, beam, worlds });
+    const { best } = bestSearch(kit, level, { turns, beam, worlds });
     const reps = Array.from({ length: seeds }, (_, i) => replay(kit, level, best.path, i + 1, turns));
     const mean = reps.reduce((s, r) => s + r.total, 0) / reps.length;
     const perTurn = Array.from({ length: turns }, (_, t) => reps.reduce((s, r) => s + (r.perTurn[t] || 0), 0) / reps.length);
@@ -342,4 +407,4 @@ function rotationText(path) {
 }
 
 if (require.main === module) main();
-module.exports = { setupField, search, replay, dummyDamage, refillDummy, candidateActions, execute, snap, load, signature, endTurn, resolve };
+module.exports = { setupField, search, bestSearch, replay, dummyDamage, refillDummy, candidateActions, execute, snap, load, signature, endTurn, resolve };
