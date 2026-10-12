@@ -600,9 +600,13 @@ const EnemyAI = (function () {
   }
 
   /** 敌人回合的出手顺序：杂兵 → 精英 → BOSS */
+  /** 发号施令的敌人总是第一个行动：亡命之王的命令要用狂徒们这一回合的行动点（回防筑墙）、
+   *  改狂徒们的目标（攻击命令），排在最后的话狂徒早就把行动点用完了。其余照「杂兵 → 精英 → 首领」 */
+  const COMMANDERS = ["outlaw_king"];
   function actingOrder() {
     const r = { minion: 0, elite: 1, boss: 2 };
-    return foes().sort((a, b) => (r[enemyRankOf(a)] || 0) - (r[enemyRankOf(b)] || 0)).map(u => u.id);
+    const key = u => (COMMANDERS.includes(u.kit) ? -1 : (r[enemyRankOf(u)] || 0));
+    return foes().sort((a, b) => key(a) - key(b)).map(u => u.id);
   }
 
   return {

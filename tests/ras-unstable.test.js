@@ -116,3 +116,26 @@ test("联机投影：带高能被打死、还没自爆的敌人不算死（玩�
     assert.equal(p.dead, true, "自爆之后算死");
   } finally { delete globalThis.highBoomValue; }
 });
+
+test("不稳态：持续伤害（灼烧）、场地（高压场地）这类非攻击伤害同样倒地；起身后再挨持续伤害直接死亡", () => {
+  // 灼烧（状态结算）
+  {
+    const { c, ras } = field();
+    c.applyTypedDot(ras, 3, "fire", [], "拉斯缪尔 灼烧");
+    assert.equal(ras.dying, true, "灼烧也倒地");
+    assert.equal(ras.dead, false);
+    c.standUp(ras);
+    assert.equal(ras.upOnShp, true);
+    c.applyTypedDot(ras, 1, "fire", [], "拉斯缪尔 灼烧");
+    assert.equal(ras.dead, true, "起身后再挨灼烧：直接死亡");
+  }
+  // 高压场地：被打一下（连带场地电击），哪怕攻击本身是 0 伤也会被场地电到倒地
+  {
+    const { c, st, ras, foe } = field();
+    c.setZoneField(1, "electric");
+    ras.layers.forEach(l => { l.current = l.max = 500; });
+    const notes = c.pulseHighVoltage(ras, 1);
+    assert.ok(notes.some(t => /高压场地/.test(t)), "场地电到了");
+    assert.equal(ras.dying, true, "场地伤害也倒地");
+  }
+});

@@ -2632,7 +2632,8 @@ function battleDropsText(d) {
 function trackHealBy(actor, fn) {
   const st = actor && actor.isPlayer ? battleStat(actor) : null;
   if (!st) return fn();
-  const hpNow = (u) => (u.layers || []).reduce((a, l) => a + Math.max(0, Number(l.current) || 0), 0);
+  // 瑞比机甲模式拼上去的明特装甲（l.mecha）不算瑞比的血：进机甲不是治疗
+  const hpNow = (u) => (u.layers || []).reduce((a, l) => a + (l.mecha ? 0 : Math.max(0, Number(l.current) || 0)), 0);
   const before = new Map();
   const calm = new Set(), marks = new Map();
   (state.units || []).forEach(u => {
@@ -2896,6 +2897,7 @@ function applyTypedDot(unit, amount, element, notes, label, opts) {
     });
   }
   notes.push(label + ` → 实伤 ${Math.floor(res.total || 0)}`);
+  rasUnstableHit(unit, res, notes);   // 不稳态：持续伤害、场地、余波这类伤害同样倒地 / 起身后致死
   if (typeof afterDamageTaken === "function") afterDamageTaken(unit, element, res.total || 0, Math.max(0, shieldBefore - shieldSum(unit)), notes, {});
   // 聚焦只看受到的伤害属性对不对，不看来源：状态、场地、余波的伤害也推进序列
   if (!unit.dead) advanceFocusOnHit(null, unit, element, res, notes);
@@ -2911,6 +2913,27 @@ function applyTypedDot(unit, amount, element, notes, label, opts) {
   if (!unit._resoBusy) notes.push(...pulseResonanceDamage(unit, res.total || 0, element));
   if (!unit._hvBusy && !/高压场地/.test(String(label || ""))) {
     notes.push(...pulseHighVoltage(unit, res.total || 0));
+  }
+}
+
+/** 事故幸存 · 不稳态：受到任何来源的伤害（攻击、持续伤害、场地、余波……）就倒地（濒死）；
+ *  已经起身（用坚毅生命继续战斗）时再受到伤害、或力竭 3，直接死亡。以前只认攻击行动，灼烧、高压场地这类伤害不触发 */
+function rasUnstableHit(target, res, notes) {
+  if (!target || target.kit !== "ras" || !target.resources || !target.resources.unstable || target.dead) return;
+  if (typeof passivePlus === "function" && passivePlus(target, 2)) return;   // 事故幸存+：不倒地，改为伤害 / 治疗 ×3
+  if (!(((res && res.total) || 0) + ((res && res.shpDealt) || 0) > 0)) return;
+  (target.layers || []).forEach(l => { l.current = 0; });
+  const wasUp = !!target.upOnShp;
+  if (wasUp || (typeof exhaustTierOf === "function" && exhaustTierOf(target) >= 3)) {
+    target.shp = 0;
+    target.upOnShp = false;
+    target.dying = false;
+    target.dead = true;
+    notes.push(wasUp ? "不稳态：拉斯缪尔起身后再次受到伤害，立即死亡。" : "不稳态：拉斯缪尔受到伤害，力竭 3 下直接死亡。");
+  } else if (!target.dying) {
+    target.dying = true;
+    if (typeof clearStunOnDown === "function") clearStunOnDown(target);
+    notes.push("不稳态：拉斯缪尔受到伤害，倒地陷入濒死。");
   }
 }
 
@@ -7212,24 +7235,7 @@ function dealTo(attacker, target, opt) {
     if (deadLayer) state.lastBrokenLayer = { type: deadLayer.type, lost: deadLayer.max || 0, dmg: res.total || 0 };
   }
   advanceFocusOnHit(attacker, target, opt.element || res.element, res, extra);   // 聚焦不看来源，任何伤害都算
-  // 不稳态：受到伤害就倒地（濒死）；已经起身（用坚毅生命继续战斗）时再受到伤害才直接死亡
-  if (target && target.kit === "ras" && target.resources && target.resources.unstable && !target.dead &&
-      !(typeof passivePlus === "function" && passivePlus(target, 2)) &&   // 事故幸存+：不倒地，改为伤害 / 治疗 ×3
-      ((res.total || 0) + (res.shpDealt || 0)) > 0 && flags.action) {
-    (target.layers || []).forEach(l => { l.current = 0; });
-    const wasUp = !!target.upOnShp;
-    if (wasUp || (typeof exhaustTierOf === "function" && exhaustTierOf(target) >= 3)) {
-      target.shp = 0;
-      target.upOnShp = false;
-      target.dying = false;
-      target.dead = true;
-      extra.push(wasUp ? "不稳态：拉斯缪尔起身后再次受到伤害，立即死亡。" : "不稳态：拉斯缪尔受到伤害，力竭 3 下直接死亡。");
-    } else if (!target.dying) {
-      target.dying = true;
-      if (typeof clearStunOnDown === "function") clearStunOnDown(target);
-      extra.push("不稳态：拉斯缪尔受到伤害，倒地陷入濒死。");
-    }
-  }
+  rasUnstableHit(target, res, extra);
   if (attacker && (attacker.kit === "kolt" || attacker.kit === "torque") && target && !target.isPlayer && flags.action && !flags.aoe &&
       (typeof passiveOn !== "function" || passiveOn(attacker))) {
     target.tauntTo = (findKit("kolt", state.units) || attacker).id;
