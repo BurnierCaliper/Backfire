@@ -106,8 +106,10 @@
     }
     function renderBar() {
       const labels = { setup: "战前分配", picking: "选择行动顺序", acting: "我方行动", enemy: "敌方行动", ended: "战斗结束" };
-      const operator = view.network ? `<span>${esc(playerName(view.playerId))} · ${isHost() ? "主持人" : "玩家"}</span>` : `<label for="hs-player">当前操作员</label><select id="hs-player">${players().map(p => option(p.id, p.name + (p.gm ? " · 主持人" : ""), p.id === view.playerId)).join("")}</select>`;
-      html(byId("hs-bar"), `<strong class="hs-tag">${view.network ? "联机跑团" : "热座"}</strong>${operator}<span class="hs-phase">${esc(labels[view.phase] || "等待战斗")}</span>${view.network ? "" : button("分配角色", "openConfig", "", !mayConfigure())}`, "bar");
+      // 联机单局没有主持人：房主 / 玩家；标签写「联机单局」（房主看 OnlineGame，玩家看收到的包）
+      const rogue = view.network && (window.OnlineGame?.getView().mode === "rogue" || window.OnlineGame?.getView().packet?.mode === "rogue");
+      const operator = view.network ? `<span>${esc(playerName(view.playerId))} · ${isHost() ? (rogue ? "房主" : "主持人") : "玩家"}</span>` : `<label for="hs-player">当前操作员</label><select id="hs-player">${players().map(p => option(p.id, p.name + (p.gm ? " · 主持人" : ""), p.id === view.playerId)).join("")}</select>`;
+      html(byId("hs-bar"), `<strong class="hs-tag">${view.network ? (rogue ? "联机单局" : "联机跑团") : "热座"}</strong>${operator}<span class="hs-phase">${esc(labels[view.phase] || "等待战斗")}</span>${view.network ? "" : button("分配角色", "openConfig", "", !mayConfigure())}`, "bar");
       const visible = ["picking", "acting", "enemy"].includes(view.phase);
       byId("hs-order").hidden = !visible;
       if (!visible) return;

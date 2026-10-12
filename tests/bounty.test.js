@@ -65,8 +65,10 @@ test("检定和其他节点交替，一站一站加进路线；3 次成功找到
   assert.ok(tg);
   assert.match(tg.name, /^【目标】/);
   const base = c.enemyPresets().find(p => p.id === run.task.hunt.target.preset).build(spec.level, c.S.state.partySize);
-  assert.equal(tg.layers[0].max, Math.round(base.layers[0].max * 1.5));
-  assert.equal(c.effectiveAtk(tg, c.S.state.units), Math.round(base.personalAtk * 1.5));
+  // 目标也有个体值（enemies.js）：先按水平波动，再 ×1.5
+  const iv = tg.iv || { hp: 0, atk: 0 };
+  assert.equal(tg.layers[0].max, Math.round(Math.round(base.layers[0].max * (1 + iv.hp / 100)) * 1.5));
+  assert.equal(c.effectiveAtk(tg, c.S.state.units), Math.round(Math.round(base.personalAtk * (1 + iv.atk / 100) * 10) / 10 * 1.5));
   // 每一行敌人按代币算（成群的一行只算一次），目标再多算 1 枚：总数不超过精英战的 5 枚
   const tokens = spec.encounter.enemies.reduce((s, e) => s + c.enemyTokens(e.preset), 0);
   assert.ok(tokens + 1 <= 5, `目标多占 1 枚代币：${tokens} + 1`);

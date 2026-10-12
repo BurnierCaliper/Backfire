@@ -52,11 +52,19 @@ function bagAdd(id, qty, notes) {
   if (notes) notes.push(`${qty > 0 ? "获得" : "消耗"} ${spec.name} ×${Math.abs(qty)}`);
 }
 
-function bagList() {
+/* 联机单局按角色分物品（online-rogue.js）：某名单位能用的数量 = 自己的 + 队伍公用的。没装就是整个背包 */
+let itemAccess = null;
+function setItemAccess(fn) { itemAccess = typeof fn === "function" ? fn : null; }
+function itemCountFor(unit, id) {
+  return itemAccess && unit ? Math.max(0, Math.min(bagCount(id), Number(itemAccess(unit, id)) || 0)) : bagCount(id);
+}
+/** 背包里的物品；给了 unit 就只算这名单位能用的（联机单局） */
+function bagList(unit) {
   ensureBag();
   return state.bag.items
     .filter(x => (Number(x.qty) || 0) > 0 && ITEM_CATALOG[x.id])
-    .map(x => Object.assign({ qty: x.qty }, ITEM_CATALOG[x.id], { id: x.id }));
+    .map(x => Object.assign({ qty: unit ? itemCountFor(unit, x.id) : x.qty }, ITEM_CATALOG[x.id], { id: x.id }))
+    .filter(x => x.qty > 0);
 }
 
 function addKuizhi(n, notes, reason) {

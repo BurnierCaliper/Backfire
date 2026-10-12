@@ -119,6 +119,14 @@ const RogueCommands = (function () {
       Rogue.enterRunMode(s.run);
       return { resumed: true };
     },
+    /** 联机单局：房主刷新页面后，从联机存档接回这一局 */
+    adopt(c, context) {
+      const s = needSession(context);
+      if (!c.run || typeof c.run !== "object" || !Array.isArray(c.run.party)) throw new Error("没有可接回的单局");
+      s.run = c.run;
+      Rogue.enterRunMode(s.run);
+      return { adopted: true };
+    },
     save(_c, context) {
       const run = needRun(context);
       return { saved: run.stage !== "over" ? !!Rogue.save(run) : false };

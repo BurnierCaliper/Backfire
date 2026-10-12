@@ -2,7 +2,7 @@
 (function (root) {
   "use strict";
   let local = {};
-  const types = ["skill", "move", "standUp", "useItem", "startCombat", "endTurn", "openingChoice", "blockAnswer", "assistAnswer", "koltSwapAnswer", "heluScanAnswer", "longgeSafetyAnswer", "retreat", "battle.endPlayerTurn", "battle.endEnemyTurn", "battle.enemyAction", "battle.finish", "battle.afterBattle", "battle.checkSolo", "battle.supportInfo", "battle.rememberCampaign", "battle.loadCampaign", "battle.cleanQueues", "battle.setup", "battle.setupRogue", "battle.panel", "battle.undo", "battle.continue"];
+  const types = ["skill", "move", "standUp", "useItem", "startCombat", "endTurn", "openingChoice", "blockAnswer", "assistAnswer", "koltSwapAnswer", "heluScanAnswer", "longgeSafetyAnswer", "retreat", "battle.endPlayerTurn", "battle.endEnemyTurn", "battle.enemyAction", "battle.finish", "battle.afterBattle", "battle.checkSolo", "battle.supportInfo", "battle.rememberCampaign", "battle.loadCampaign", "battle.cleanQueues", "battle.setup", "battle.setupRogue", "battle.panel", "battle.undo", "battle.continue", "battle.chain"];
   const panelActions = ["bagAdd", "currency", "water", "healItem", "repair", "advance", "shortRest", "longRest", "restore", "cheat", "saveSlot", "loadSlot", "clearSlot", "addParty", "removeParty", "addEnemy", "removeEnemy", "setField", "ruinHp", "setGap", "gapHp", "rollWall", "toggleDoor", "addProp", "removeProp", "setZones", "setPartySize", "setWeather", "rollEncounter", "rollBossEncounter", "selectEncounter", "normalizeBag", "normalizeGaps", "normalizeField", "setHighland", "setExecution", "setShare", "setSpread", "setTower", "setDrops"];
   function configure(adapter) { local = Object.assign({}, local, adapter || {}); }
   function environment(context) { return Object.assign({}, local, context || {}); }
@@ -132,7 +132,7 @@
     state.zoneMode = Number(g.zoneMode) || 2;
     state.board = null;
     state.partySize = 2;
-    state.weather = g.weather || "none";
+    state.weather = g.weather || "none"; state.weatherBy = null;
     if (typeof rollSandDir === "function") rollSandDir();
     state.weatherLock = null; state.phaseStep = 0; state.assistQueue = []; state.blockQueue = [];
     state.skillFlow = null; state.history = []; state.actionAcc = null; state.statusDmg = {};
@@ -162,7 +162,9 @@
     if (typeof RUN !== "undefined" && RUN.active) RUN.apply();
     // 战斗掉落：遭遇（战斗模板）里带的；没有就清空，主持人可以在战场配置里再设
     state.battleDrops = enc && enc.drops && typeof normalizeBattleDrops === "function" ? normalizeBattleDrops(enc.drops) : null;
-    if (enc && typeof buildEncounter === "function") buildEncounter(enc, cmd.level, partyN);
+    // 援军、连续战斗（chain.js）
+    if (typeof Chain !== "undefined") Chain.clear();
+    if (enc && typeof buildEncounter === "function") { buildEncounter(enc, cmd.level, partyN); if (typeof Chain !== "undefined") Chain.init(enc, cmd.level, partyN); }
     else {
       const presets = enemyPresets();
       const plan = g.enemyPlan && g.enemyPlan.length ? g.enemyPlan : [{ id: "thug_knife", lv: cmd.level, zone: 2 }, { id: "thug_hammer", lv: cmd.level, zone: 2 }, { id: "bandit_boss", lv: cmd.level, zone: 2 }];
@@ -172,6 +174,7 @@
         const p = presets.find(x => x.id === row.id);
         if (!p || !p.build) return;
         const u = p.build(Number(row.lv) || cmd.level, partyN);
+        if (typeof applyEnemyIV === "function") applyEnemyIV(u);
         u.zone = Math.min(Number(state.zoneMode), Number(row.zone) || Number(state.zoneMode)); state.units.push(u);
       });
     }
@@ -214,7 +217,7 @@
       case "addEnemy": {
         const p = enemyPresets().find(x => x.id === cmd.preset); if (!p) break;
         const partyN = typeof syncPartySizeFromField === "function" ? syncPartySizeFromField() : liveHeroCount();
-        const pack = typeof spawnEnemyGroup === "function" ? spawnEnemyGroup(cmd.preset, cmd.level, partyN, cmd.zone) : null;
+        const pack = typeof spawnEnemyGroup === "function" ? spawnEnemyGroup(cmd.preset, cmd.level, partyN, cmd.zone, cmd.iv) : null;
         if (pack && pack.length) pack.forEach(u => state.units.push(u));
         else { const u = p.build(cmd.level, partyN); u.zone = Math.min(cmd.zone, Number(state.zoneMode)); state.units.push(u); if (typeof refreshEnemyEconomy === "function") refreshEnemyEconomy(u); }
         g.enemyPlan = (g.enemyPlan || []).concat([{ id: cmd.preset, lv: cmd.level, zone: cmd.zone }]); break;
@@ -290,7 +293,7 @@
         panel({ action: "normalizeField" }, env); break;
       }
       case "setPartySize": g.partySize = state.partySize = Number(cmd.value) || 2; break;
-      case "setWeather": { const was = state.weather; state.weather = cmd.value || "none"; if (cmd.persist) g.weather = state.weather; if (state.weather === "sand" && was !== "sand" && typeof rollSandDir === "function") rollSandDir(); break; }
+      case "setWeather": { const was = state.weather; state.weather = cmd.value || "none"; state.weatherBy = null; if (cmd.persist) g.weather = state.weather; if (state.weather === "sand" && was !== "sand" && typeof rollSandDir === "function") rollSandDir(); break; }
       case "rollEncounter": value = rollEncounter({ region: cmd.region, ...(cmd.faction ? { faction: cmd.faction } : {}) }); break;
       case "rollBossEncounter": { const bosses = Object.keys(ENEMY_INFO || {}).filter(k => ENEMY_INFO[k].boss && ENEMY_INFO[k].regions.indexOf(cmd.region) >= 0); if (bosses.length) value = rollBossEncounter(bosses[Math.floor(Math.random() * bosses.length)], { region: cmd.region }); break; }
       case "selectEncounter": g.lastEncounter = cmd.encounter; value = cmd.encounter; break;
@@ -341,6 +344,8 @@
       case "battle.panel": return panel(cmd, env);
       case "battle.undo": return env.undo ? env.undo() : false;
       case "battle.continue": return env.continueBattle ? env.continueBattle(cmd.outcome) : false;
+      // 敌人打完：还有援军 / 下一场就不结束（chain.js）
+      case "battle.chain": { const notes = []; const goOn = typeof Chain !== "undefined" ? Chain.onCleared(notes) : false; notes.forEach(t => appendLog(t)); return { continued: goOn, notes }; }
     }
   }
   root.BattleCommands = { execute, configure, battleSpecData, types: types.slice(), panelActions: panelActions.slice() };

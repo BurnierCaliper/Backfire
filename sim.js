@@ -26,7 +26,7 @@ const BattleSim = (function () {
     state.zoneMode = Number(opt.zoneMode) || 2;
     state.board = null;          // 特殊棋盘：setup 里按 opt.board 换上（普通战斗两区 / 三区直排）
     state.partySize = 2;
-    state.weather = opt.weather || "none";
+    state.weather = opt.weather || "none"; state.weatherBy = null;
     if (typeof rollSandDir === "function") rollSandDir();   // 每场重新定风向（不是沙暴时不起作用）
     state.weatherLock = null;
     state.phaseStep = 0;
@@ -78,17 +78,25 @@ const BattleSim = (function () {
     if (typeof opt.before === "function") opt.before(state);
     const partyN = syncPartySizeFromField();
     const level = Number(opt.level) || 1;
+    // 个体值（enemies.js）：默认不波动（测试、数值模拟要确定的数字）；单局的战斗（battle.setupRogue）打开
+    const ivOff = typeof ENEMY_IV !== "undefined" && !opt.iv;
+    if (ivOff) ENEMY_IV.off++;
+    try { spawnAll(opt, level, partyN); } finally { if (ivOff) ENEMY_IV.off--; }
+    return state;
+  }
+  function spawnAll(opt, level, partyN) {
     if (opt.encounter) {
       const enc = JSON.parse(JSON.stringify(opt.encounter));
       if (typeof applyEncounterLayout === "function") applyEncounterLayout(enc);
       if (enc.playerZone) state.units.forEach(u => { if (u.isPlayer && !u.hidden) u.zone = Number(enc.playerZone); });
       buildEncounter(enc, level, partyN);
+      if (typeof Chain !== "undefined") Chain.init(enc, level, partyN);
     } else {
+      if (typeof Chain !== "undefined") Chain.clear();
       (opt.enemies || []).forEach(row => {
-        spawnEnemyGroup(row.id, Number(row.lv) || level, partyN, row.zone).forEach(u => state.units.push(u));
+        spawnEnemyGroup(row.id, Number(row.lv) || level, partyN, row.zone, row.iv).forEach(u => state.units.push(u));
       });
     }
-    return state;
   }
 
   /* ---------- 胜负 ---------- */
@@ -96,7 +104,14 @@ const BattleSim = (function () {
     if (typeof soloDownCheck === "function") soloDownCheck([]);   // 单人：倒地起不来才算死亡
     const heroes = state.units.filter(u => u.isPlayer && !u.hidden && !u.dead && !isWeapon(u));
     const standing = heroes.filter(u => typeof heroStillFighting === "function" ? heroStillFighting(u) : !u.dying);
-    if (!EnemyAI.foes().length) return "player";
+    // 援军 / 连续战斗还没打完：继续（chain.js）
+    if (!EnemyAI.foes().length) {
+      const notes = [];
+      const goOn = typeof Chain !== "undefined" && Chain.onCleared(notes);
+      notes.forEach(t => appendLog(t));
+      if (!goOn) return "player";
+    }
+    if (!EnemyAI.foes().length) return null;
     if (!standing.length) return "enemy";
     return null;
   }

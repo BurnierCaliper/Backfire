@@ -64,7 +64,7 @@
     const weapons = h.weapons.map(w => `<section class="hs-weapon">
         <h4>${esc(w.name)} <small>Lv${w.level} · 武器人${w.out ? " · 在场" : ""}</small></h4>
         <div class="hs-stats">
-          <div><span>atk</span><b>${w.atk}</b></div>
+          <div><span>atk${w.atkFinal != null && w.atkFinal !== w.atk ? "（含客制化）" : ""}</span><b>${w.atkFinal != null && w.atkFinal !== w.atk ? `${w.atk} → ${w.atkFinal}` : w.atk}</b></div>
           <div><span>架势</span><b>${w.def != null ? w.def : "—"}</b></div>
           <div><span>耐久</span><b>${w.durability != null ? w.durability : "—"}</b></div>
           <div><span>持在手里提供格挡</span><b>+${w.blockBonus}%</b></div>

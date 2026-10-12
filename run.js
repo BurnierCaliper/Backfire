@@ -473,17 +473,19 @@ function encountersByTier(tier, region) {
 /** 按数据把敌人摆上场。返回摆好的单位数组。 */
 function buildEncounter(spec, baseLevel, partySize) {
   if (!spec) return [];
-  const lv = (v) => {
-    if (v == null) return baseLevel;
-    if (typeof v === "string" && /^[+-]/.test(v)) return Math.max(1, baseLevel + Number(v));
-    return Math.max(1, Number(v) || baseLevel);
-  };
-  const presets = enemyPresets();
-  const made = [];
   state.zoneMode = Number(spec.zoneMode) || 2;
   state.board = null;
-  state.weather = spec.weather || "none";
+  state.weather = spec.weather || "none"; state.weatherBy = null;
   if (state.weather === "sand" && typeof rollSandDir === "function") rollSandDir();   // 开场沙暴：风向随机
+  buildEncounterField(spec);
+  const made = spawnEncounterRows(spec.enemies, baseLevel, partySize);
+  applyBattlefieldFeatures(spec.features, baseLevel);
+  return made;
+}
+/** 遭遇的区、棋盘、场地（不动天气）。连续战斗换到下一个区域时也用这个（chain.js） */
+function buildEncounterField(spec) {
+  state.zoneMode = Number(spec.zoneMode) || 2;
+  state.board = null;
   state.fields = { 1: emptyField(), 2: emptyField(), 3: emptyField() };
   if (spec.board) applyBoard(spec.board);   // 特殊棋盘的遭遇（大型 boss）
   else if (state.gaps) {
@@ -492,9 +494,19 @@ function buildEncounter(spec, baseLevel, partySize) {
     ["1-2", "2-3"].forEach(k => { if (!state.gaps[k]) state.gaps[k] = emptyGap(); });
   }
   if (spec.fields) {
-    Object.keys(spec.fields).forEach(z => Object.assign(state.fields[z], spec.fields[z]));
+    Object.keys(spec.fields).forEach(z => { if (state.fields[z]) Object.assign(state.fields[z], spec.fields[z]); });
   }
-  (spec.enemies || []).forEach(row => {
+}
+/** 按遭遇里的敌人行摆上场：[{ preset, level, zone, count, bounty, mechanics }]。援军（chain.js）也用这个。返回摆好的单位 */
+function spawnEncounterRows(rows, baseLevel, partySize) {
+  const lv = (v) => {
+    if (v == null) return baseLevel;
+    if (typeof v === "string" && /^[+-]/.test(v)) return Math.max(1, baseLevel + Number(v));
+    return Math.max(1, Number(v) || baseLevel);
+  };
+  const presets = enemyPresets();
+  const made = [];
+  (rows || []).forEach(row => {
     const p = presets.find(x => x.id === row.preset);
     if (!p) return;
     const n = Math.max(1, Number(row.count) || 1);
@@ -510,6 +522,8 @@ function buildEncounter(spec, baseLevel, partySize) {
         continue;
       }
       const u = p.build(lv(row.level), partySize);
+      // 个体值（enemies.js）：模板里主持人写死的水平照写，没写的随机
+      if (typeof applyEnemyIV === "function") applyEnemyIV(u, row.iv);
       u.zone = Number(row.zone) || 2;
       if (row.bounty) makeBountyTarget(u, row.bounty);
       // 战斗模板（battle-templates.js）里预先挂好的首领机制
@@ -519,7 +533,6 @@ function buildEncounter(spec, baseLevel, partySize) {
     }
   });
   made.forEach(u => { if (typeof refreshEnemyEconomy === "function") refreshEnemyEconomy(u); });
-  applyBattlefieldFeatures(spec.features, baseLevel);
   return made;
 }
 

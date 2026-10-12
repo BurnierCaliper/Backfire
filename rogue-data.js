@@ -94,6 +94,9 @@ const ROGUE_CONFIG = {
   lootByRank: { minion: 80, elite: 460, boss: 920 },
   // 个别敌人不按三档、用自己的掉落（成群出现的穴鸦按杂兵给太多）
   lootByKit: { crow: 15 },
+  // 道具掉落（打赢才掉，进背包）：普通战斗 20% 掉一个随机道具，精英战一定掉一个，首领掉两个。
+  // 遭遇战（休息时被偷袭）按普通战斗算。pool 是能掉的道具（战斗里用的消耗品）
+  itemDrops: { battle: 0.2, elite: 1, boss: 2, pool: ["medkit", "clinic", "stim", "steroid", "bomb_e", "bomb_a", "shockbomb"] },
   // 诊所：任务之间回到城里时可以去（节点里也可能遇到，见 ROGUE_NODE_TYPES.clinic）
   campClinic: true,
 

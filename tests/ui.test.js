@@ -48,6 +48,8 @@ async function open(t) {
   let promptAnswer = "测试团";
   page.on("dialog", d => (d.type() === "prompt" ? d.accept(promptAnswer) : d.accept()));
   await page.goto(GAME_URL);
+  // 升级提示会盖住画面：只有专门测它的用例打开（见「升级提示：本机」）
+  await page.evaluate(() => { window.__noLevelUpPopup = true; });
   t.after(() => context.close());
   return { page, errors, setPrompt: (s) => { promptAnswer = s; } };
 }
@@ -1573,4 +1575,105 @@ test("高能自爆：带高能被打死的敌人，卡片要等高能自爆演�
   assert.ok(r.boom > 0, "播了高能自爆");
   assert.ok(r.dead >= r.boom, `卡片在自爆演出之后才变 dead（dead ${Math.round(r.dead)} / boom ${Math.round(r.boom)}）`);
   assert.deepEqual(o.errors, []);
+});
+
+test("升级提示：本机（跑团）角色升级、主持人给武器升级，都会弹出画面列出新技能 / 被动升级，点「知道了」一条条看完", async t => {
+  const o = await open(t); if (!o) return;
+  const { page, errors } = o;
+  await page.evaluate(() => { window.__noLevelUpPopup = false; });
+  await newTrpg(page);
+  await page.evaluate(() => { const u = trpgHeroes()[0]; u.xp = xpToNext(u.level) + xpToNext(u.level + 1); tryLevelUp(u); });
+  await page.waitForSelector("#g-levelup:not([hidden]) .lvu-card");
+  const first = await page.locator("#g-levelup").innerText();
+  assert.match(first, /升到 \d+ 级/); assert.match(first, /新技能|数值/);
+  await page.evaluate(() => { const u = trpgHeroes()[0]; trpgUpgradeWeapon(u.kit, u.linkedKits[0], "gm"); });
+  await page.waitForFunction(() => /还有 1 条/.test(document.querySelector("#g-levelup")?.innerText || ""));
+  await page.click('#g-levelup [data-lvu="ok"]');
+  await page.waitForFunction(() => /武器升级/.test(document.querySelector("#g-levelup")?.innerText || ""));
+  await page.click('#g-levelup [data-lvu="ok"]');
+  await page.waitForSelector("#g-levelup", { state: "hidden" });
+  assert.equal(await page.evaluate(() => LevelUp.unseen().length), 0);
+  assert.deepEqual(errors, []);
+});
+
+test("连续战斗 + 援军（跑团模板）：顶上点线点显示第几场、援军倒计时；打光提前叫来援军，再打完去下一个区域，最后一场打完才结束", async t => {
+  const o = await open(t); if (!o) return;
+  const { page, errors } = o;
+  await newTrpg(page);
+  await page.evaluate(() => {
+    const a = battleTemplateSave({ name: "仓库深处", board: 3, playerZone: 1, enemies: [{ preset: "thug_knife", level: 1, zone: 3 }], fields: { 2: { acid: true } } });
+    battleTemplateSave({ name: "仓库门口", board: 2, weather: "snow", enemies: [{ preset: "thug_knife", level: 1, zone: 2 }],
+      waves: [{ turns: 2, enemies: [{ preset: "thug_hammer", level: 1, zone: 2 }] }], chain: [a.id] });
+  });
+  await page.click('#tr-tabs [data-tab="battles"]');
+  await page.click('[data-bt^="fight:"]:not([data-bt*="' + await page.evaluate(() => battleTemplateList().find(x => x.name === "仓库深处").id) + '"])');
+  await page.waitForSelector("#g-start");
+  await page.keyboard.press("Space");
+  await page.waitForFunction(() => state.combatStarted && state.combatPhase === "player" && GAME.depth === 0, null, { timeout: 15000 });
+  await page.waitForSelector("#g-chain:not([hidden]) .ch-dot");
+  assert.equal(await page.locator("#g-chain .ch-dot").count(), 2);
+  assert.match(await page.textContent("#g-chain"), /第 1 \/ 2 场/);
+  assert.match(await page.textContent("#g-chain"), /援军 1 个 · 2 回合后抵达 2 区/);
+  if (process.env.BACKFIRE_SHOTS) await page.screenshot({ path: require("path").join(process.env.BACKFIRE_SHOTS, "chain-1.png") });
+  const kill = () => page.evaluate(() => { state.units.filter(u => !u.isPlayer && !u.dead).forEach(u => { u.layers.forEach(l => { l.current = 0; }); u.dead = true; }); GAME.checkEnd(); });
+  await kill();
+  assert.equal(await page.evaluate(() => GAME.ended), false, "还有援军，不结束");
+  await page.waitForFunction(() => /下回合抵达/.test(document.getElementById("g-chain").textContent));
+  await page.evaluate(() => { GAME.apWarnTurn = state.turnNo; });   // 不问「还有行动点」
+  await page.click("#g-endturn");
+  await page.waitForFunction(() => state.turnNo >= 2 && state.combatPhase === "player" && GAME.depth === 0, null, { timeout: 30000 });
+  assert.ok(await page.evaluate(() => state.units.some(u => !u.isPlayer && !u.dead && u.kit === "thug_hammer")), "援军进场");
+  await kill();
+  await page.waitForFunction(() => state.chain && state.chain.index === 1 && /第 2 \/ 2 场/.test(document.getElementById("g-chain").textContent));
+  const st = await page.evaluate(() => ({ zoneMode: state.zoneMode, weather: state.weather, ended: GAME.ended, acid: !!state.fields[2].acid, foes: state.units.filter(u => !u.isPlayer && !u.dead).length }));
+  assert.deepEqual(st, { zoneMode: 3, weather: "snow", ended: false, acid: true, foes: 1 });
+  if (process.env.BACKFIRE_SHOTS) await page.screenshot({ path: require("path").join(process.env.BACKFIRE_SHOTS, "chain-2.png") });
+  await kill();
+  await page.waitForFunction(() => GAME.ended && GAME.lastOutcome === "win");
+  assert.deepEqual(errors, []);
+});
+
+test("战斗模板编辑器：加一波援军（抵达回合、敌人、区域）、接一场连续战斗，保存后都在", async t => {
+  const o = await open(t); if (!o) return;
+  const { page, errors } = o;
+  await newTrpg(page);
+  await page.evaluate(() => { battleTemplateSave({ name: "下一场", board: 2, enemies: [{ preset: "thug_knife", zone: 2 }] }); });
+  await page.click('#tr-tabs [data-tab="battles"]');
+  await page.click('[data-bt="new:"]');
+  await page.fill('[data-bte="name"]', "带援军");
+  await page.click('[data-bt-act="addWave"]');
+  await page.fill('[data-bte="waves.0.turns"]', "4");
+  await page.selectOption('[data-bte="waves.0.enemies.0.preset"]', "thug_hammer");
+  await page.click('[data-bt-act="addWaveEnemy:0"]');
+  await page.click('[data-bt-act="addChain"]');
+  await page.click('[data-bt-act="save"]');
+  const t1 = await page.evaluate(() => JSON.parse(JSON.stringify(battleTemplateList().find(x => x.name === "带援军"))));
+  assert.equal(t1.waves.length, 1); assert.equal(t1.waves[0].turns, 4);
+  assert.deepEqual(t1.waves[0].enemies.map(e => e.preset), ["thug_hammer", "thug_knife"]);
+  assert.equal(t1.chain.length, 1);
+  assert.match(await page.textContent("#tr-panel"), /援军 1 波/);
+  assert.match(await page.textContent("#tr-panel"), /连续 2 场/);
+  assert.deepEqual(errors, []);
+});
+
+test("个体值：战斗模板编辑器写血量 / ATK 水平，开战后敌人照写，铭牌上停一下能看到", async t => {
+  const o = await open(t); if (!o) return;
+  const { page, errors } = o;
+  await newTrpg(page);
+  await page.click('#tr-tabs [data-tab="battles"]');
+  await page.click('[data-bt="new:"]');
+  await page.fill('[data-bte="name"]', "个体值");
+  await page.click('[data-bt-act="addEnemy"]');
+  await page.fill('[data-bte="enemies.0.iv.hp"]', "8");
+  await page.fill('[data-bte="enemies.0.iv.atk"]', "-6");
+  await page.click('[data-bt-act="save"]');
+  const tpl = await page.evaluate(() => JSON.parse(JSON.stringify(battleTemplateList().find(x => x.name === "个体值"))));
+  assert.deepEqual(tpl.enemies[0].iv, { hp: 8, atk: -6 });
+  // 用它开战：敌人的个体值照写，铭牌的等级上有提示
+  await page.click(`[data-bt="fight:${tpl.id}"]`);
+  await page.waitForSelector("#g-start");
+  const iv = await page.evaluate(() => { const u = state.units.find(x => !x.isPlayer && x.iv); return u && u.iv; });
+  assert.deepEqual(iv, { hp: 8, atk: -6 });
+  await page.waitForFunction(() => [...document.querySelectorAll(".unit.foe .u-lv")].some(e => /个体值：血量 \+8% · ATK −6%/.test(e.title)));
+  assert.deepEqual(errors, []);
 });

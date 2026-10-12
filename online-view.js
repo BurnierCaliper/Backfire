@@ -122,6 +122,9 @@
       const max = number(get(layer, "max")); if (max !== undefined) result.max = max;
       return result;
     });
+    // 个体值（杂兵、精英）：血量 / ATK 水平（百分比，公开）
+    const iv = get(unit, "iv");
+    if (obj(iv)) { const h = number(get(iv, "hp")), a = number(get(iv, "atk")); if (h !== undefined && a !== undefined) out.iv = { hp: h, atk: a }; }
     out.statuses = selected(get(unit, "statuses"), statusKeys);
     out.instant = selected(get(unit, "instant"), ["melt", "sting", "overload", "shift", "spread", "refract", "iceNext"]);
     const r = get(unit, "resources"); out.resources = copyFields(r, {}, [], resourceNumbers, resourceFlags);
@@ -197,6 +200,22 @@
     enumField(state, out, "combatPhase", ["player", "enemy"]);
     enumField(state, out, "weather", ["none", "heat", "snow", "acid", "thunder", "glow", "sand", "phase"]);
     out.units = arr(get(state, "units")).slice(0, 200).map(projectUnit).filter(Boolean);
+    // 连续战斗第几场 / 共几场、援军还有几回合到哪个区（chain.js · status 的格式）
+    const chain = get(state, "chain"), waves = arr(get(state, "waves")).filter(w => obj(w) && !get(w, "done"));
+    if (obj(chain) || waves.length) {
+      const stages = obj(chain) ? arr(get(chain, "stages")) : [];
+      const t = number(get(state, "turnNo")) || 1;
+      out.chainStatus = {
+        total: Math.max(1, stages.length), index: obj(chain) ? Math.max(0, number(get(chain, "index")) || 0) : 0,
+        names: stages.slice(0, 12).map((s, i) => text(get(s, "name"), 40) || `第 ${i + 1} 场`),
+        waves: waves.slice(0, 8).map(w => {
+          const rows = arr(get(w, "enemies"));
+          return { no: number(get(w, "no")) || 0, in: Math.max(0, (number(get(w, "at")) || t) - t),
+            zones: [...new Set(rows.map(r => number(get(r, "zone")) || 2))].sort().map(z => z + " 区").join("、"),
+            count: rows.reduce((s, r) => s + Math.max(1, number(get(r, "count")) || 1), 0) };
+        })
+      };
+    }
     const bag = get(state, "bag");
     if (obj(bag)) {
       out.bag = copyFields(bag, {}, [], ["water"], []);
@@ -522,6 +541,13 @@
     if (own(packet, "messages")) out.messages = projectMessages(get(packet, "messages"), context);
     if (get(packet, "type") === "messageHistory" && out.messages) out.messages = out.messages.slice(-100);
     if (own(packet, "publicLogs")) out.publicLogs = projectLogs(get(packet, "publicLogs"));
+    // 联机单局：房主按收件人算好的单局画面（投票、钱包、战利品、自己能做的事），只去掉坚毅生命这类隐藏数值
+    enumField(packet, out, "mode", ["trpg", "rogue"]);
+    // 升级提示：房主已经按收件人挑好（只有自己的角色、去掉了坚毅生命那一行）
+    if (own(packet, "levelUps")) out.levelUps = arr(get(packet, "levelUps")).slice(0, 10).filter(obj).map(ev => {
+      const e = scrubHidden(clone(ev)); e.stats = arr(e.stats).filter(r => obj(r) && r.key !== "shp"); return e;
+    });
+    if (own(packet, "rogue")) { const r = get(packet, "rogue"); out.rogue = obj(r) ? scrubHidden(clone(r)) : null; }
     // Resync is another envelope using these same explicit projectors, not a
     // path for forwarding an opaque nested packet or raw save snapshot.
     return out;

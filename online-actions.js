@@ -77,7 +77,7 @@
             return emit({ kind: "zone", key: "dest", title: "选择移动区域", options: zones.map(z => ({ value: z, label: `${z} 区` })) });
           }
           if (sk.id === "__item") {
-            const items = bagList().filter(item => item.combat);
+            const items = bagList(actor()).filter(item => item.combat);
             if (!request.item) {
               if (request.target != null || request.dest != null) fail("请先选择道具");
               return emit({ kind: "choice", key: "item", title: "选择战斗道具", options: items.map(item => ({ value: item.id, label: `${item.name} ×${item.qty}` })) });

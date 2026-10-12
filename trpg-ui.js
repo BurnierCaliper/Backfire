@@ -739,9 +739,13 @@
     const zones = battleTemplateZones(t.board);
     const zoneSel = (path, cur) => `<select data-bte="${path}">${options(zones.map(z => [z, z + " 区"]), cur)}</select>`;
     const lvTip = ' placeholder="随队" title="空着 = 跟着开战时的等级"';
+    // 个体值（杂兵、精英）：血量 / ATK 水平 −10～10%，空着 = 开战时随机
+    const ivTip = ' min="-10" max="10" step="1" placeholder="随机" title="个体值水平 −10～10（%），空着 = 开战时随机；首领不波动"';
+    const ivInp = (path, e) => `<span class="bt-iv">个体值 血量 ${inp(path + ".iv.hp", e.iv ? e.iv.hp : null, 54, "number", ivTip)}% ATK ${inp(path + ".iv.atk", e.iv ? e.iv.atk : null, 54, "number", ivTip)}%</span>`;
     const foes = t.enemies.map((e, j) => `<div class="tr-row">
         <select data-bte="enemies.${j}.preset">${options(presets, e.preset)}</select>
         等级 ${inp(`enemies.${j}.level`, e.level, 60, "number", lvTip)} 区域 ${zoneSel(`enemies.${j}.zone`, e.zone)}
+        ${ivInp(`enemies.${j}`, e)}
         ${e.mechanics ? `<span class="tk-chip">机制：${esc(e.mechanics.map(btMechName).join("、"))}<button class="g-btn small" data-bt-act="clearMech:${j}" title="去掉这个敌人身上的首领机制">×</button></span>` : ""}
         <button class="g-btn small" data-bt-act="delEnemy:${j}">删</button></div>`).join("");
     const fields = zones.map(z => {
@@ -761,6 +765,17 @@
         区域 ${zoneSel(`props.${j}.zone`, p.zone)} 等级 ${inp(`props.${j}.level`, p.level, 60, "number", lvTip)}
         阵营 <select data-bte="props.${j}.faction">${options([["player", "我方"], ["enemy", "敌方"]], p.faction)}</select>
         <button class="g-btn small" data-bt-act="delProp:${j}">删</button></div>`).join("");
+    // 援军：第几回合抵达，每个敌人进哪个区
+    const waves = (t.waves || []).map((w, j) => `<div class="tk-wave">
+        <div class="tr-row">第 ${j + 1} 波：开战后第 ${inp(`waves.${j}.turns`, w.turns, 50, "number", ' min="1"')} 回合开始时抵达（提前打光场上的敌人就下一回合到）
+          <button class="g-btn small" data-bt-act="delWave:${j}">删这波</button></div>
+        ${(w.enemies || []).map((e, k) => `<div class="tr-row">　<select data-bte="waves.${j}.enemies.${k}.preset">${options(presets, e.preset)}</select>
+          等级 ${inp(`waves.${j}.enemies.${k}.level`, e.level, 60, "number", lvTip)} 进入 ${zoneSel(`waves.${j}.enemies.${k}.zone`, e.zone)} ${ivInp(`waves.${j}.enemies.${k}`, e)}
+          <button class="g-btn small" data-bt-act="delWaveEnemy:${j}-${k}">删</button></div>`).join("")}
+        <div class="tr-row">　<button class="g-btn small" data-bt-act="addWaveEnemy:${j}">＋ 援军敌人</button></div></div>`).join("");
+    const others = (typeof battleTemplateList === "function" ? battleTemplateList() : []).filter(x => x.id !== t.id).map(x => [x.id, x.name]);
+    const chain = (t.chain || []).map((id, j) => `<div class="tr-row">第 ${j + 2} 场：<select data-bte="chain.${j}">${options(others.some(o => o[0] === id) ? others : others.concat([[id, "（模板已删除）"]]), id)}</select>
+        <button class="g-btn small" data-bt-act="delChain:${j}">删</button></div>`).join("");
     return `<div class="tr-up tk-edit">
       <h4>编辑战斗模板</h4>
       <div class="tr-row">名称 ${inp("name", t.name, 180)} 类型 <select data-bte="tier">${options(Object.keys(BATTLE_TEMPLATE_TIERS).map(k => [k, BATTLE_TEMPLATE_TIERS[k]]), t.tier)}</select></div>
@@ -774,6 +789,12 @@
       <h4>间隙</h4>${gaps}
       <h4>配置物</h4>${props || '<p class="r-hint">没有配置物。</p>'}
       <div class="tr-row"><button class="g-btn small" data-bt-act="addProp">＋ 配置物</button></div>
+      <h4>援军</h4>${waves || '<p class="r-hint">没有援军。</p>'}
+      <div class="tr-row"><button class="g-btn small" data-bt-act="addWave">＋ 一波援军</button></div>
+      <h4>连续战斗</h4>
+      <p class="r-hint">打完这一场（含援军）不结束，接着去下一个区域打下面的模板：场地、敌人换成那个模板的，天气、角色的血量和状态都不重置，仍算同一场战斗。</p>
+      ${chain || ""}
+      <div class="tr-row"><button class="g-btn small" data-bt-act="addChain" ${others.length ? "" : 'disabled title="先存好别的模板"'}>＋ 接一场</button></div>
       <h4>战斗掉落（打赢才给，直接进背包）</h4>
       <div class="tr-row">奎支 <input type="number" min="0" data-bt-dropkz="1" value="${(t.drops && t.drops.kuizhi) || 0}" style="width:90px">
         物品 <select id="bt-drop-item">${options(Object.keys(ITEM_CATALOG).map(id => [id, ITEM_CATALOG[id].name || id]))}</select>
@@ -800,9 +821,10 @@
   function btSet(path, v) {
     const keys = path.split(".");
     let o = btEdit;
-    for (let i = 0; i < keys.length - 1; i++) o = o[keys[i]];
+    for (let i = 0; i < keys.length - 1; i++) o = o[keys[i]] || (o[keys[i]] = {});
     const k = keys[keys.length - 1];
     if (k === "level") o[k] = v === "" ? null : Number(v);
+    else if (keys[keys.length - 2] === "iv") o[k] = v === "" || !Number.isFinite(Number(v)) ? null : Math.max(-10, Math.min(10, Math.round(Number(v))));
     else if (k === "zone" || k === "playerZone") o[k] = Number(v);
     else if (k === "board") o[k] = /^\d+$/.test(v) ? Number(v) : v;
     else o[k] = v;
@@ -822,6 +844,16 @@
       case "clearMech": delete t.enemies[j].mechanics; break;
       case "addProp": t.props.push({ kind: "boom", zone: zones[Math.min(1, zones.length - 1)], level: null, faction: "player" }); break;
       case "delProp": t.props.splice(j, 1); break;
+      case "addWave": t.waves = t.waves || []; t.waves.push({ turns: 2, enemies: [{ preset: "thug_knife", level: null, zone: zones[zones.length - 1] }] }); break;
+      case "delWave": (t.waves || []).splice(j, 1); break;
+      case "addWaveEnemy": if (t.waves && t.waves[j]) t.waves[j].enemies.push({ preset: "thug_knife", level: null, zone: zones[zones.length - 1] }); break;
+      case "delWaveEnemy": { const [a, b] = String(x).split("-").map(Number); if (t.waves && t.waves[a]) t.waves[a].enemies.splice(b, 1); break; }
+      case "addChain": {
+        const first = battleTemplateList().find(o => o.id !== t.id);
+        if (first) { t.chain = t.chain || []; t.chain.push(first.id); }
+        break;
+      }
+      case "delChain": (t.chain || []).splice(j, 1); break;
       case "addDrop": {
         t.drops = t.drops || { kuizhi: 0, items: [] };
         const id = $("bt-drop-item").value, qty = Math.max(1, Number($("bt-drop-qty").value) || 1);

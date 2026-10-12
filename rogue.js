@@ -541,7 +541,11 @@ const Rogue = (function () {
       if (u.dead) { killHero(run, h, notes, "永久死亡"); return; }
       if (u.level > from) {
         notes.push(`${u.name} 升到 ${u.level} 级。`);
+        const n0 = (h.pending || []).length;
         queueLevelRewards(h, from, u.level, notes, run);
+        // 升级提示里写上还要选的奖励
+        const PEND = { attr: "分配 1 点六维属性", prof: "一个自选熟练项", role: "一项职责技能", role2: "第二副职责的一个技能" };
+        if (typeof LevelUp !== "undefined") LevelUp.amend(h.kit, (h.pending || []).slice(n0).map(p => `${p.level} 级：${PEND[p.type] || "一项奖励"}（在升级选择里选）`));
       }
       captureHero(u, h);
     });
@@ -620,6 +624,9 @@ const Rogue = (function () {
     const ok = choiceOptions(run, kit, index).some(o => JSON.stringify(o.value) === JSON.stringify(value));
     if (!ok) throw new Error("这个选项不可选");
     const notes = [];
+    // 升级提示：学到的职责技能也弹出来，带完整说明
+    const learn = (p.type === "role" || p.type === "role2") && typeof LevelUp !== "undefined";
+    const before = learn ? withParty(run, () => LevelUp.snapshot(findKit(kit, state.units))).out : null;
     if (p.type === "attr") {
       h.attrs = Object.assign({}, h.attrs || (cardOf(kit) || {}).attrs || {});
       h.attrs[value] = (Number(h.attrs[value]) || 0) + 1;
@@ -639,6 +646,7 @@ const Rogue = (function () {
     h.pending.splice(index, 1);
     // 属性变了，血量上限等跟着变：摆上场重新算一次
     if (p.type === "attr") withParty(run, () => null);
+    if (before) withParty(run, () => LevelUp.note("choice", findKit(kit, state.units), before));
     return logAll(run, notes);
   }
 
@@ -693,8 +701,13 @@ const Rogue = (function () {
   }
 
   /* ---------- 战斗 ---------- */
-  /** 当前节点 / 首领的战斗配置（给 BattleSim.setup 或战斗画面用） */
+  /** 当前节点 / 首领的战斗配置（给 BattleSim.setup 或战斗画面用）。单局的敌人有个体值（iv: true，enemies.js） */
   function battleSpec(run) {
+    const spec = battleSpecOf(run);
+    if (spec && spec.iv === undefined) spec.iv = true;
+    return spec;
+  }
+  function battleSpecOf(run) {
     const partyKits = run.party.map(h => h.kit);
     const before = () => {
       applyPartyToField(run); state.openingBreaks = openingBreaks(run); state.solo = soloBattleInfo(run); state.scoreAct = run.act;
@@ -804,7 +817,11 @@ const Rogue = (function () {
       });
     }
     captureParty(run, notes);
-    run.party.forEach(h => { delete h.pendingBreaks; });   // 检定受伤的击破已在开场结算
+    run.party.forEach(h => { delete h.pendingBreaks; });
+    if (outcome === "win" && run.party.length) {
+      const node = !boss && !ambush ? currentNode(run) : null;
+      rollItemDrops(run, boss ? "boss" : node && node.type === "elite" ? "elite" : "battle", notes);
+    }   // 检定受伤的击破已在开场结算
     // 护送：记下护送对象剩下的血量；被摧毁 = 任务失败
     const esc = !boss && run.task && run.task.escort;
     if (esc && !esc.lost && typeof escortStatus === "function") {
@@ -862,6 +879,31 @@ const Rogue = (function () {
     if (outcome === "retreat") notes.push("撤退：这一站的敌人没有解决，绕开继续前进。");
     advanceNode(run, notes);
     return logAll(run, notes);
+  }
+
+  /* ---------- 掉落的道具 / 改装件 ----------
+   * 单机直接进背包；联机单局（online-rogue.js）换成「按需求分配」：setLootHandler 接管 */
+  let lootHandler = null;
+  function setLootHandler(fn) { lootHandler = typeof fn === "function" ? fn : null; }
+  function grantLoot(run, id, qty, notes, source) {
+    if (!ITEM_CATALOG[id] || !(qty > 0)) return;
+    if (lootHandler && lootHandler(run, id, qty, notes, source) !== false) return;
+    bagAdd(id, qty);
+    notes.push(`${source ? source + "：" : ""}获得 ${ITEM_CATALOG[id].name} ×${qty}。`);
+  }
+  /** 打赢之后掉的道具（rogue-data.js · ROGUE_CONFIG.itemDrops）：kind = battle / elite / boss */
+  function rollItemDrops(run, kind, notes) {
+    const D = C.itemDrops;
+    if (!D || !(D.pool || []).length) return;
+    const key = `${run.seed}:drop:${run.act}:${run.taskNo}:${run.task ? run.task.index : "b"}:${run.day}:${kind}:${(run.dropNo = (run.dropNo || 0) + 1)}`;
+    const ids = withRng(key, () => {
+      const v = D[kind] == null ? D.battle : D[kind];
+      const n = v >= 1 ? Math.floor(v) : (Math.random() < v ? 1 : 0);
+      const out = [];
+      for (let i = 0; i < n; i++) out.push(pick(D.pool));
+      return out;
+    });
+    ids.forEach(id => grantLoot(run, id, 1, notes, "战利品"));
   }
 
   /* ---------- 节点推进 ---------- */
@@ -1489,7 +1531,11 @@ const Rogue = (function () {
     if ((Number(state.kuizhi) || 0) < opt.cost) throw new Error("奎支不够");
     state.kuizhi -= opt.cost;
     const h = run.party.find(x => x.kit === opt.owner);
+    // 升级提示（levelup.js）：把队伍摆上场比一比武器升级前后多了什么
+    const snap = () => (typeof LevelUp !== "undefined" ? withParty(run, () => LevelUp.snapshot(findKit(h.kit, state.units))).out : null);
+    const before = snap();
     h.weaponLevels[kit] = opt.level + 1;
+    if (before) withParty(run, () => LevelUp.note("weapon", findKit(h.kit, state.units), before, { weapon: opt.name }));
     clampDur(run, h, kit);   // 旧存档里装在 3 级武器上的图纸升到 4 级才生效：大杀器这类会压低耐久上限
     run.smithUses[sid] = (run.smithUses[sid] || 0) + 1;
     const s = smithInfo(run, sid);
@@ -1668,8 +1714,8 @@ const Rogue = (function () {
     state.kuizhi = (Number(state.kuizhi) || 0) + pay.kuizhi;
     notes.push(`${t.key ? "主线" : "任务「" + t.name + "」"}完成：获得 ${pay.kuizhi} 奎支，每人 ${pay.xp} 经验。`);
     if (t.part && WEAPON_PARTS[t.part]) {
-      bagAdd(weaponPartItemId(t.part), 1);
       notes.push(`委托方额外给了一个改装件：${weaponPartLabel(t.part)}（${weaponPartText(t.part)}）。`);
+      grantLoot(run, weaponPartItemId(t.part), 1, notes, "任务报酬");
     }
     run.party.forEach(h => { h.xp = (h.xp || 0) + pay.xp; });
     const ei = escortInfo(run, t);
@@ -1822,6 +1868,7 @@ const Rogue = (function () {
     canClinic, cyberInfo, cyberPreview, cyberCost, modifyHero, healCost, healHero,
     pendingChoices, choiceOptions, choose, queueLevelRewards,
     camp, nextAct, afterVictory, endRun,
-    enterRunMode, leaveRunMode, syncWorld, save, inRunMode: () => !!stash
+    enterRunMode, leaveRunMode, syncWorld, save, inRunMode: () => !!stash,
+    setLootHandler, grantLoot, rollItemDrops
   };
 })();

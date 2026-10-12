@@ -14,24 +14,47 @@
   let queue = Promise.resolve(), gmQueue = Promise.resolve(), animation = Promise.resolve(), actionMenu = null, manualResolve = null, manualPhase = false;
   let offlineWait = null, storageError = false, epoch = 0;
   let pausedAt = null, resumeAI = false, awaitingResync = false;
+  // 房间玩法：trpg 跑团（有主持人） / rogue 联机单局（online-rogue.js：投票、各人钱包、按需求分战利品）
+  let mode = "trpg";
+  const rogue = () => mode === "rogue" && !!root.OnlineRogue;
+  const rogueTypes = ["rogue.vote", "rogue.need", "rogue.act", "rogue.force"];
+  /** 这名角色（kit）归哪个玩家：联机单局按单局里记的，跑团按热座分配；没分配的归房主 */
+  function ownerOfKit(kit) {
+    if (rogue()) return OnlineRogue.ownerOf(kit);
+    const view = HotseatGame.isActive() ? HotseatGame.getView() : null;
+    const row = view && view.heroes.find(h => (state.units.find(u => u.id === h.id) || {}).kit === kit);
+    return (row && row.owner) || identity?.id;
+  }
+  /** 发给某个玩家的升级提示：只有他自己操控的角色的；坚毅生命对玩家保密 */
+  function levelUpsFor(id) {
+    if (typeof LevelUp === "undefined") return [];
+    return LevelUp.unseen().filter(ev => ownerOfKit(ev.kit) === id)
+      .map(ev => ({ ...ev, stats: (ev.stats || []).filter(r => r.key !== "shp") })).slice(0, 10);
+  }
   const isHost = () => active && identity?.role === "host";
   const isPaused = () => active && (!status.connected || !status.hostOnline || status.paused);
   function notify() { for (const fn of listeners) { try { fn(); } catch (e) { console.error(e); } } }
   function error(message) { throw new Error(message); }
   function roster() { return status.roster.map(p => ({ id: p.id, name: p.name, gm: p.role === "host", online: !!p.online })); }
   function liveScreen() { return !started ? "lobby" : GAME.ended && Screens.is("battle") ? "ended" : Screens.is("battle") ? "battle" : "exploration"; }
+  /** 联机单局的角色分配按角色 kit（场上单位每次重摆 id 都会变） */
+  function rogueHeroes() {
+    const run = root.RunFlow?.current();
+    return run ? run.party.map(h => ({ id: h.kit, name: Rogue.heroName(h.kit), owner: OnlineRogue.ownerOf(h.kit) })) : [];
+  }
   function getView() {
-    return { active, isHost: isHost(), identity: copy(identity), status: copy(status), notice, storageError,
+    return { active, mode, isHost: isHost(), identity: copy(identity), status: copy(status), notice, storageError,
       screen: isHost() ? liveScreen() : remote?.screen || screen, roomCode: identity?.roomCode || "", players: roster(),
       packet: isHost() ? { state, view: HotseatGame.getView(), messages: messages.slice(-300), publicLogs: OnlineView.projectLogs(publicLogs), systemNotice } : remote,
       state: isHost() ? state : remote?.state, messages: isHost() ? messages.slice(-300) : remote?.messages || [],
-      heroes: isHost() ? HotseatGame.getView().heroes : remote?.view?.heroes || [], offlineWait: copy(isHost() ? offlineWait : remote?.offlineWait || null),
+      heroes: isHost() ? (rogue() ? rogueHeroes() : HotseatGame.getView().heroes) : remote?.view?.heroes || [], offlineWait: copy(isHost() ? offlineWait : remote?.offlineWait || null),
       manualPhase: isHost() ? manualPhase : !!remote?.manualPhase };
   }
   function save() {
     if (!endpoint || !identity) return;
     const data = { version: 1, credentials: endpoint.credentials(), identity, requestNo, savedAt: Date.now() };
-    if (isHost()) Object.assign(data, { game: GAME.onlineCheckpoint(), hotseat: HotseatGame.checkpoint(pausedAt ?? Date.now()), trpg: TrpgFlow.onlineCheckpoint(),
+    if (isHost()) Object.assign(data, { mode, levelUps: typeof LevelUp !== "undefined" ? LevelUp.save() : [], game: GAME.onlineCheckpoint(), hotseat: HotseatGame.checkpoint(pausedAt ?? Date.now()),
+      trpg: rogue() ? null : TrpgFlow.onlineCheckpoint(), rogue: rogue() ? RunFlow.onlineCheckpoint() : null,
       gm: GMCommands.snapshot(), screen: Screens.current(), started, seq, messageNo, messages, publicLogs, settledResult, systemNotice, offlineWait, requests: [...requests].slice(-200), requestHighWater: [...requestHighWater] });
     try { localStorage.setItem(KEY, JSON.stringify(data)); storageError = false; } catch (_) { storageError = true; }
   }
@@ -39,7 +62,8 @@
   function rawPacket(id, type = "result", tape = [], result = null) {
     const view = HotseatGame.getViewFor(id); view.players = roster(); view.network = true;
     return { protocol: PROTOCOL, build: BUILD, type, seq, state, tape, result: result || settledResult, view, screen: liveScreen(),
-      roomCode: identity.roomCode, hostName: identity.name, paused: isPaused(), messages, publicLogs, manualPhase, offlineWait, systemNotice };
+      roomCode: identity.roomCode, hostName: identity.name, paused: isPaused(), messages, publicLogs, manualPhase, offlineWait, systemNotice,
+      mode, rogue: rogue() ? OnlineRogue.viewFor(id) : null, levelUps: levelUpsFor(id) };
   }
   function sendProjected(id, packet) {
     const safe = OnlineView.projectPacket(packet, { recipientId: id, gmId: identity.id, itemCatalog: typeof ITEM_CATALOG !== "undefined" ? ITEM_CATALOG : {} });
@@ -57,7 +81,8 @@
   function resync(id) { if (isHost() && HotseatGame.isActive()) return sendProjected(id, rawPacket(id, "resync")); }
   function setupOperators(assignments) {
     const old = HotseatGame.isActive() ? HotseatGame.getView().heroes : [];
-    const next = assignments || Object.fromEntries(old.map(u => [u.id, u.owner]));
+    // 联机单局：角色归谁记在单局里（按角色 kit），场上的单位每次重摆 id 都会变
+    const next = assignments || (rogue() ? OnlineRogue.assignmentsFor(state.units.filter(u => u.isPlayer && !u.weaponOf)) : Object.fromEntries(old.map(u => [u.id, u.owner])));
     const ack = HotseatGame.enableOnline({ mode: "trpg", players: roster(), assignments: next });
     if (!ack.ok) error(ack.error);
   }
@@ -107,12 +132,14 @@
       } else if (!isHost() && next.connected && !next.paused && (before.paused || !before.connected)) {
         endpoint.send({ type: "resync", protocol: PROTOCOL, build: BUILD }).catch(() => {});
       }
+      if (isHost() && rogue()) OnlineRogue.changed();
       save(); notify();
     });
     mountOrder(); save(); notify();
   }
   async function create(options) {
     if (active) error("请先离开当前房间");
+    if (options.mode === "rogue") return createRogue(options);
     const index = Number(options.slot);
     if (!Number.isInteger(index) || index < 0 || index > 2) error("请选择跑团存档空位");
     const ep = await RelayTransport.createHost({ ...options, protocol: PROTOCOL, build: BUILD });
@@ -120,6 +147,17 @@
     if (trpgReadSlots()[index]) TrpgFlow.enter(index);
     else Commands.dispatch({ type: "trpg.ui", action: "new", index, name: options.campaignName || "联机跑团", level: 1 });
     GMCommands.reset(); restoring = true; bind(ep); configureGM(); configureActions(); setupOperators(); restoring = false;
+    started = false; screen = "lobby"; await ready(); publish(); return getView();
+  }
+  /** 联机单局：房主先选队伍出发，再把角色分给进房间的玩家，然后开始 */
+  async function createRogue(options) {
+    if (!root.OnlineRogue || !root.RunFlow) error("这个版本没有联机单局");
+    const ep = await RelayTransport.createHost({ ...options, protocol: PROTOCOL, build: BUILD });
+    mode = "rogue";
+    if (typeof TRPG !== "undefined") TRPG.active = false;
+    state.units = [];
+    RunFlow.startOnline();   // 选队伍画面（在热座会话接管指令之前）
+    GMCommands.reset(); restoring = true; bind(ep); OnlineRogue.enable(true, identity.id); configureGM(); configureActions(); setupOperators(); restoring = false;
     started = false; screen = "lobby"; await ready(); publish(); return getView();
   }
   async function join(options) {
@@ -138,7 +176,10 @@
       if (c.role === "host") {
         const ep = await RelayTransport.resumeHost({ ...c, hostToken: c.token });
         bind(ep); configureGM(); configureActions();
-        GAME.restoreOnline(saved.game); TrpgFlow.restoreOnline(saved.trpg); HotseatGame.restoreOnline(saved.hotseat); GMCommands.restore(saved.gm, gmContext);
+        mode = saved.mode === "rogue" ? "rogue" : "trpg";
+        if (rogue()) { OnlineRogue.enable(true, identity.id); RunFlow.restoreOnline(saved.rogue); }
+        if (typeof LevelUp !== "undefined") LevelUp.load(saved.levelUps || []);
+        GAME.restoreOnline(saved.game); if (!rogue()) TrpgFlow.restoreOnline(saved.trpg); HotseatGame.restoreOnline(saved.hotseat); GMCommands.restore(saved.gm, gmContext);
         started = saved.started; seq = saved.seq || 0; messages = saved.messages || []; publicLogs = saved.publicLogs || []; settledResult = saved.settledResult || null; systemNotice = saved.systemNotice || "";
         messageNo = Math.max(0, Number.isSafeInteger(saved.messageNo) ? saved.messageNo : 0,
           ...messages.map(m => /^msg-\d+$/.test(m.id) ? Number(m.id.slice(4)) : 0).filter(Number.isSafeInteger));
@@ -148,7 +189,9 @@
           requests.set(key, entry);
         }
         requestHighWater.clear(); for (const [id, number] of saved.requestHighWater || []) requestHighWater.set(id, number);
-        HotseatGame.system({ type: "screen", action: "show", name: saved.screen || "trpg" });
+        HotseatGame.system({ type: "screen", action: "show", name: saved.screen || (rogue() ? "run" : "trpg") });
+        // 单局战斗打到一半刷新：结算面板的「继续」重新接回单局
+        if (rogue() && Screens.is("battle") && RunFlow.battleSpecLite()) GAME.resumeRogueBattle(RunFlow.battleSpecLite(), RunFlow.battleEnd);
         restoring = false; await ready(); publish();
         (saved.hotseat?.openingChoice && !state.combatStarted ? GAME.startOrEnd() : GAME.resumeOnline()).catch(reportError);
       } else { restoring = false; return join({ ...c, name: saved.identity.name, resumeToken: c.token }); }
@@ -164,6 +207,15 @@
   async function execute(cmd, sender) {
     if (isPaused()) error("房主离线，房间暂停");
     if (!cmd || typeof cmd.type !== "string") error("无效指令");
+    if (cmd.type === "levelup.seen") {
+      const ev = typeof LevelUp !== "undefined" && LevelUp.unseen().find(e => e.id === cmd.id);
+      if (!ev || ownerOfKit(ev.kit) !== sender) error("这条升级提示不是你的");
+      LevelUp.markSeen(ev.id); publish(); return { ok: true };
+    }
+    if (rogueTypes.includes(cmd.type)) {
+      if (!rogue()) error("这个房间不是联机单局");
+      const result = OnlineRogue.handle(sender, cmd); publish(); return result && result.ok === false ? result : { ok: true };
+    }
     Commands.validate(cmd);
     if (cmd.type === "gm.msg" || cmd.type === "gmReply") {
       const context = Object.freeze({}); messageContexts.set(context, sender);
@@ -215,9 +267,22 @@
     });
     return { water: Number(bag.water) || 0, kuizhi: Number(state.kuizhi) || 0, items };
   }
-  function sheetPacket() {
+  function sheetPacket(recipient) {
     const ST = root.SkillText;
     let sheets = [], armory = [];
+    const run = rogue() && root.RunFlow ? RunFlow.current() : null;
+    // 联机单局：角色资料、武器按单局里的数据；背包是自己的钱包、自己名下的东西和队伍公用的补给
+    if (run) {
+      // 战斗中：场上就是队伍，直接读；战斗外按单局记录摆上场再读（会重摆场上，战斗中不能这样）
+      const live = OnlineRogue.inBattle();
+      try { sheets = live ? ST.sheetData() : Rogue.sheetData(run); } catch (e) { sheets = []; }
+      try { armory = live ? ST.armoryData() : Rogue.armoryData(run); } catch (e) { armory = []; }
+      const v = OnlineRogue.viewFor(recipient) || { heroes: [], freeItems: [] };
+      const mine = v.heroes.filter(h => h.mine);
+      const items = mine.flatMap(h => h.items.map(x => ({ ...x, name: (mine.length > 1 ? h.name + "：" : "") + x.name, hint: (ITEM_CATALOG[x.id] || {}).hint || "" })))
+        .concat(v.freeItems.map(x => ({ ...x, name: "（公用）" + x.name, hint: (ITEM_CATALOG[x.id] || {}).hint || "" })));
+      return { type: "sheetData", protocol: PROTOCOL, build: BUILD, sheets, armory, bag: { water: Number(state.bag?.water) || 0, kuizhi: mine.reduce((s, h) => s + h.purse, 0), items }, battles: (LEDGER.career?.battles || []).slice(-10) };
+    }
     try { sheets = ST ? ST.sheetData() : []; } catch (e) { sheets = []; }
     try { armory = ST && ST.armoryData ? ST.armoryData() : []; } catch (e) { armory = []; }
     const battles = typeof LEDGER !== "undefined" && LEDGER.career && Array.isArray(LEDGER.career.battles) ? LEDGER.career.battles.slice(-10) : [];
@@ -244,14 +309,14 @@
       if (packet.type === "resync") return resync(sender);
       if (!Number.isSafeInteger(packet.requestId) || packet.requestId < 1) error("无效指令编号");
       if (packet.type === "messageHistory") return sendProjected(sender, { ...messagePage(sender, packet), requestId: packet.requestId });
-      if (packet.type === "sheetData") return sendProjected(sender, { ...sheetPacket(), requestId: packet.requestId });
+      if (packet.type === "sheetData") return sendProjected(sender, { ...sheetPacket(sender), requestId: packet.requestId });
       if (packet.type === "actionOptions") {
         if (isPaused()) error("房间暂停");
         const menu = actionMenu.menu(packet.request, sender);
         return sendProjected(sender, { ...menu, type: "actionOptions", requestId: packet.requestId, protocol: PROTOCOL, build: BUILD });
       }
       if (packet.type !== "cmd") error("未知消息");
-      if (!packet.command || ![...controls, "skill", "move", "standUp", "useItem", "endTurn", "gmReply"].includes(packet.command.type)) error("只有主持人可以执行此操作");
+      if (!packet.command || ![...controls, ...rogueTypes, "levelup.seen", "skill", "move", "standUp", "useItem", "endTurn", "gmReply"].includes(packet.command.type)) error("只有主持人可以执行此操作");
       const key = sender + ":" + packet.requestId, fingerprint = JSON.stringify(packet.command), previous = requests.get(key);
       if (previous) {
         if (previous.fingerprint !== fingerprint) error("指令编号已经用于另一操作");
@@ -408,10 +473,34 @@
   root.OnlineGame = { PROTOCOL, BUILD, create, join, resume, submit, getView, isHost, isPaused, waitUntilReady, manualEnemyPhase, onActionSettled, flushGM, queueHostEdit, legacyAddedEnemies, reportError,
     takeAIResume() { const value = resumeAI; resumeAI = false; return value; },
     hasSaved: () => !!readSaved(), slots: () => trpgReadSlots().map((s, index) => ({ index, name: s?.name || "空白存档" })),
-    assign(assignments) { if (!isHost()) error("只有主持人可以分配角色"); setupOperators(assignments); publish(); return { ok: true }; },
-    start() { if (!isHost()) error("只有主持人可以开始"); if (!status.roster.some(p => p.role === "player" && p.online)) error("请等待至少一名玩家加入"); started = true; publish(); return { ok: true }; },
+    assign(assignments) {
+      if (!isHost()) error("只有主持人可以分配角色");
+      if (rogue()) {
+        const map = assignments || {}, ids = roster().map(p => p.id);
+        if (Object.values(map).some(pid => !ids.includes(pid))) error("没有这名玩家");
+        const counts = {};
+        Object.values(map).forEach(pid => { if (pid !== identity.id) counts[pid] = (counts[pid] || 0) + 1; });
+        if (Object.values(counts).some(n => n > 1)) error("每名玩家最多操控一名角色，没分配的角色由房主操控");
+        OnlineRogue.setOwners(map);
+        root.OnlineGame.reassign();
+      } else setupOperators(assignments);
+      publish(); return { ok: true };
+    },
+    /** 联机单局：角色归属变了 / 场上重摆过之后，重新分配战斗里的操控（战斗进行中不动） */
+    reassign() {
+      if (!isHost() || !rogue() || (state.combatStarted && !GAME.ended)) return;
+      const want = OnlineRogue.assignmentsFor(state.units.filter(u => u.isPlayer && !u.weaponOf));
+      const view = HotseatGame.isActive() ? HotseatGame.getView() : null;
+      const same = view && view.heroes.every(h => (want[h.id] || identity.id) === h.owner) && view.players.map(p => p.id).join("|") === roster().map(p => p.id).join("|");
+      if (same) return;
+      try { setupOperators(want); } catch (e) { notice = e.message; }
+    },
+    touch() { if (isHost()) publish(); },
+    players: () => roster(),
+    ownerOfKit,
+    start() { if (!isHost()) error("只有主持人可以开始"); if (rogue() && !RunFlow.current()) error("先选好队伍出发"); if (!status.roster.some(p => p.role === "player" && p.online)) error("请等待至少一名玩家加入"); started = true; publish(); return { ok: true }; },
     actionMenu: request => rpc("actionOptions", { request }),
-    sheetData: () => isHost() ? Promise.resolve(OnlineView.projectPacket(sheetPacket(), { recipientId: identity.id, gmId: identity.id })) : rpc("sheetData", {}),
+    sheetData: () => isHost() ? Promise.resolve(OnlineView.projectPacket(sheetPacket(identity.id), { recipientId: identity.id, gmId: identity.id })) : rpc("sheetData", {}),
     messageHistory: (request = {}) => isHost() ? Promise.resolve(messagePage(identity.id, request)) : rpc("messageHistory", { beforeId: request.beforeId || null }),
     subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     onPacket(fn) { packetListeners.add(fn); return () => packetListeners.delete(fn); },

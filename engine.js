@@ -725,6 +725,8 @@ function resolveAttack(ctx) {
   const refAtk = (Number(ctx.atk) || 0) * (a && a.statuses && a.statuses.inspire ? 1.25 : 1);
   const refBase = Math.max(0, refAtk * mult + (Number(ctx.flat) || 0) + diceV);
   let totalReduced = 0;
+  // 天气带来的伤害变化（环境分数：天气的所有者按这部分加分）：up 多打出来的，down 少挨的
+  let weatherUp = 0, weatherDown = 0;
   add(`基础包 = ATK ${round2(atk)} × 倍率 ${round2(mult)} + 固定 ${ctx.flat || 0} + 骰子 ${round2(diceV)} = ${round2(rawBase)}`);
   // 只加在第一击基础包上的骰（「准备」：复数攻击只生效一次），之后照样吃倍率和克制
   const firstBonus = Math.max(0, Number(ctx.firstHitBonus) || 0);
@@ -825,9 +827,12 @@ function resolveAttack(ctx) {
     const layerTypeForChart = onShp ? "shp" : startLayer.type;
     // 冻土对飞行单位无效：飞行的受击者不吃冻土的冰易伤
     let cMod = onShp ? 0 : chartMod(element, layerTypeForChart, weather, t.flying ? null : fieldT, acidRain, envX);
+    // 天气改了克制表的那部分（微光反转克制、酸雨让装甲减伤失效）
+    let wSum = onShp || weather === "none" ? 0 : cMod - chartMod(element, layerTypeForChart, "none", t.flying ? null : fieldT, false, envX);
     if (!onShp && meltLive && startLayer && startLayer.type === "armor" && element === "physical") {
       hAdd(`克制表原值 ${pctTxt(cMod)}，熔融装甲将物理修正强制改为 +50%。`);
       cMod = 0.50;
+      wSum = 0;
     }
     if (!onShp && typeof bpChartCap === "function") {
       const capped = bpChartCap(t, cMod);
@@ -842,7 +847,7 @@ function resolveAttack(ctx) {
     const kindNow = etchAdv ? "adv" : matchupKind(cMod);
 
     const wPct = weatherDamagePct(weather, element) * envX;
-    if (wPct) { pct += wPct; hAdd(`天气：${pctTxt(wPct)}${envX > 1 ? "（恶劣环境 / 末日：翻倍）" : ""}`); }
+    if (wPct) { pct += wPct; wSum += wPct; hAdd(`天气：${pctTxt(wPct)}${envX > 1 ? "（恶劣环境 / 末日：翻倍）" : ""}`); }
 
     if (flags.weak) {
       const w = kindNow === "adv" ? 0.25 : -0.25;
@@ -883,7 +888,7 @@ function resolveAttack(ctx) {
       if (["physical", "acid", "energy", "harmonic", "ice"].includes(element)) {
         pct -= 0.25; hAdd("目标霜结：该类受伤 −25%。");
       }
-      if (weather === "snow") { pct -= 0.10 * envX; hAdd(`雪天霜结：全属性再 −${10 * envX}%。`); }
+      if (weather === "snow") { pct -= 0.10 * envX; wSum -= 0.10 * envX; hAdd(`雪天霜结：全属性再 −${10 * envX}%。`); }
     }
     if (t.self === "splash") {
       if (element === "acid" || element === "fire") { pct -= 0.25; hAdd("目标溅射：酸/火受伤 −25%。"); }
@@ -913,7 +918,7 @@ function resolveAttack(ctx) {
     }
 
     if (weather === "phase" && Number(ctx.phaseStep) === 2) {
-      pct += 0.50 * envX; hAdd(`相位波峰：伤害 +${50 * envX}%。`);
+      pct += 0.50 * envX; wSum += 0.50 * envX; hAdd(`相位波峰：伤害 +${50 * envX}%。`);
     }
 
     if (flags.icebreak) {
@@ -938,21 +943,34 @@ function resolveAttack(ctx) {
       });
     }
 
-    packet *= (1 + pct);
-    hAdd(`加算百分比合计 ${pctTxt(pct)} → ${round2(packet)}`);
-
-    let mul = 1;
-    // 波谷 −50% 伤害；恶劣环境 / 末日翻倍成 −100%（加减翻倍，不是再乘一次 ×0.5）
-    if (weather === "phase" && Number(ctx.phaseStep) === 0) { mul *= Math.max(0, 1 - 0.5 * envX); hAdd(envX > 1 ? "相位波谷：伤害 −100%（恶劣环境 / 末日）。" : "相位波谷：伤害减半。"); }
-    if (flags.doubleDeal) { mul *= 2; hAdd("造成伤害翻倍。"); }
-    if (flags.doubleTake) { mul *= 2; hAdd("目标受伤翻倍。"); }
-    if (flags.dr50) { mul *= 0.5; hAdd("目标减伤 +50%。"); }
-    if (flags.dr25) { mul *= 0.75; hAdd("自保模式：受伤 −25%。"); }
-    if (flags.holyShield) { mul *= 0.5; hAdd("圣盾：本次伤害减半。"); }
+    // 以百分比写的增伤 / 减伤（攻击方、受击方都算）一律和上面的加在一起，不连乘：
+    // 相位波谷、减伤率、自保、过度自信、全队集结的坦克减伤、冰冻 +50%
+    // 波谷 −50% 伤害；恶劣环境 / 末日翻倍成 −100%
+    if (weather === "phase" && Number(ctx.phaseStep) === 0) { pct -= 0.5 * envX; wSum -= 0.5 * envX; hAdd(`相位波谷：伤害 −${50 * envX}%。`); }
+    if (flags.dr50) { pct -= 0.5; hAdd("目标减伤 +50%：−50%。"); }
+    if (flags.dr25) { pct -= 0.25; hAdd("自保模式：受伤 −25%。"); }
     if (flags.prideReduce) {
       const pr = typeof flags.prideReduce === "number" ? flags.prideReduce : 0.25;
-      mul *= 1 - pr; hAdd(`过度自信：血量不低于进入战斗时的上限，受伤 −${Math.round(pr * 100)}%。`);
+      pct -= pr; hAdd(`过度自信：血量不低于进入战斗时的上限，受伤 −${Math.round(pr * 100)}%。`);
     }
+    // 集结持续到自己失衡或濒死
+    if (t.resources && t.resources.rallyDr && (t.stunned || t.dying)) delete t.resources.rallyDr;
+    if (t.resources && t.resources.rallyDr) { pct -= 0.15; hAdd("全队集结（坦克）：全属性减伤 +15%：−15%。"); }
+    if (h === 0 && t.instant && t.instant.iceNext && flags.action !== false) {
+      pct += 0.5;
+      hAdd("冰冻（冰属性击破失衡）：本动作第一击伤害 +50%。");
+      t.instant.iceNext = false;
+    }
+
+    const packetNoWeather = wSum ? packet * Math.max(0, 1 + pct - wSum) : null;
+    packet *= Math.max(0, 1 + pct);
+    hAdd(`加算百分比合计 ${pctTxt(pct)} → ${round2(packet)}`);
+
+    // 写成「翻倍 / 减半 / ×N」的才另外相乘
+    let mul = 1;
+    if (flags.doubleDeal) { mul *= 2; hAdd("造成伤害翻倍。"); }
+    if (flags.doubleTake) { mul *= 2; hAdd("目标受伤翻倍。"); }
+    if (flags.holyShield) { mul *= 0.5; hAdd("圣盾：本次伤害减半。"); }
     // 事故幸存+：拉斯缪尔不稳态下受到的伤害 ×3（不再倒地 / 死亡）
     if (t.kit === "ras" && t.resources && t.resources.unstable && typeof passivePlus === "function" && passivePlus(t, 2)) {
       mul *= 3; hAdd("事故幸存+：不稳态受伤 ×3。");
@@ -961,11 +979,6 @@ function resolveAttack(ctx) {
     if (t.flying && flags.action) { mul *= 0.5; hAdd("飞行单位：攻击行动伤害减半。"); }
     if (meltIceHit) { mul *= 2; }
     if (flags.block === "bareOk") { mul *= 0.5; hAdd("空手格挡成功：伤害一半。"); }
-    if (h === 0 && t.instant && t.instant.iceNext && flags.action !== false) {
-      mul *= 1.5;
-      hAdd("冰冻（冰属性击破失衡）：本动作第一击伤害 +50%。");
-      t.instant.iceNext = false;
-    }
     packet *= mul;
 
     packet = Math.max(0, packet);
@@ -974,6 +987,10 @@ function resolveAttack(ctx) {
     else hAdd(`最终伤害包 ${floored}`);
     packet = floored;
     totalIntended += packet;
+    if (packetNoWeather != null && !ghost) {
+      const diff = packet - Math.floor(Math.max(0, packetNoWeather * mul) + 1e-9);
+      if (diff > 0) weatherUp += diff; else if (diff < 0) weatherDown -= diff;
+    }
     // 减伤：这一段比参照少了多少（空手格挡减半那部分不算，归格挡）
     if (!ghost) totalReduced += Math.max(0, (Math.max(0, refBase + refAtk * multAdj) + (h === 0 ? firstBonus : 0)) * (flags.block === "bareOk" ? 0.5 : 1) - packet);
 
@@ -1115,6 +1132,7 @@ function resolveAttack(ctx) {
     blockedRaw: flags.block === "assistOk" ? Math.round(rawBase * hits + firstBonus) : 0,
     // 受击方的减伤减免掉的伤害（天气、血量层抗性、角色能力、减半……；协助格挡成功的不算）
     reduced: flags.block === "assistOk" ? 0 : Math.round(totalReduced),
+    weatherUp, weatherDown,
     total: totalDealt,
     intended: totalIntended,
     extraHarmonic,

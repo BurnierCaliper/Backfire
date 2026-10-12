@@ -77,19 +77,24 @@ const BackstageCommands = (() => {
     const u = unitById(c.actor); if (!u) return;
     switch (c.action) {
       case "set": {
+        const lvBefore = c.field === "level" && typeof LevelUp !== "undefined" ? LevelUp.snapshot(u) : null, oldLv = u.level || 1;
         u[c.field] = c.field === "level" ? Math.max(1, Number(c.value) || 1)
           : c.field === "zone" ? Math.max(1, Math.min(Number(state.zoneMode) || 3, Number(c.value) || 1))
           : Math.max(0, Number(c.value) || 0);
         if (c.field === "defMax" && (u.def || 0) > u.defMax) u.def = u.defMax;
-        if (c.field === "level") { applyLevelStats(u); if (u.kit === "hiaki") refreshHiakiAtk(u); }
+        if (c.field === "level") { applyLevelStats(u); if (u.kit === "hiaki") refreshHiakiAtk(u); if (lvBefore && u.level > oldLv) LevelUp.note("level", u, lvBefore); }
         break;
       }
-      case "weaponLevel":
+      case "weaponLevel": {
+        const before = typeof LevelUp !== "undefined" ? LevelUp.snapshot(u) : null;
+        const old = Number((u.weaponLevels || {})[c.kit]) || 1;
         setOwnedWeaponLevel(u, c.kit, c.value);
+        if (before && (Number(u.weaponLevels[c.kit]) || 1) > old) LevelUp.note("weapon", u, before, { weapon: weaponCardName(c.kit) });
         // 跑团：武器升到 / 降到 4 级上下，装着的客制化图纸跟着生效 / 失效（武器页、耐久上限一起重算）
         if (typeof TRPG !== "undefined" && TRPG.active && typeof trpgSyncWeaponMods === "function") trpgSyncWeaponMods();
         appendLog(`${u.name} 的 ${weaponCardName(c.kit)} 设为 ${u.weaponLevels[c.kit]} 级。`);
         break;
+      }
       case "attr": {
         u.attrs = u.attrs || { str: 5, con: 5, dex: 5, wil: 5, int: 5, sta: 5 };
         const next = Math.max(1, Number(c.value) || 1), prev = Number(u.attrs[c.attr]) || 5;
@@ -233,7 +238,7 @@ const CalcCommands = (() => {
       case "loadLive": return loadLiveParty();
       case "blade": { const h = findKit("hiaki", state.units), want = c.value; if (h && h.resources) { if ((want === "niu" && h.resources.niuOut) || (want === "naruto" && h.resources.narutoOut)) { appendLog(`${want === "niu" ? "丹生谷" : "鳴門"} 已分出，收回前不能切换到这把刀。`); syncBladeSel(); return; } h.resources.blade = want; refreshHiakiAtk(h); render(); } return; }
       case "addProp": { snapshot(); const p = makeProp(c.kind, c.zone, c.level); p.faction = c.faction || "player"; state.props.push(p); appendLog(`在 ${c.zone} 区放置 ${p.name}（${p.faction === "enemy" ? "敌方" : "我方"}）。`); if (c.kind === "battery") syncBatteryShields().forEach(s => appendLog(s)); render(); return; }
-      case "addPreset": { snapshot(); if (c.id === "ufo_boss") { syncPartySizeFromField(); const pack = spawnUfoBoss(c.level); pack.forEach(v => state.units.push(v)); state.selectedId = state.attackerId = pack[0].id; appendLog(`飞碟触灵登场（Lv${c.level}）：本体在 2 区，机械足甲乙丙在 2 区，丁戊在 1 区。本体不能被通常攻击。`); render(); return; } const p = enemyPresets().find(v => v.id === c.id); if (!p) throw new Error("Unknown enemy preset"); const added = p.build(c.level, syncPartySizeFromField()); added.zone = enemySpawnZone(); state.units.push(added); state.selectedId = state.targetId = added.id; if (isMechanicalUnit(added)) syncBatteryShields().forEach(s => appendLog(s)); render(); return; }
+      case "addPreset": { snapshot(); if (c.id === "ufo_boss") { syncPartySizeFromField(); const pack = spawnUfoBoss(c.level); pack.forEach(v => state.units.push(v)); state.selectedId = state.attackerId = pack[0].id; appendLog(`飞碟触灵登场（Lv${c.level}）：本体在 2 区，机械足甲乙丙在 2 区，丁戊在 1 区。本体不能被通常攻击。`); render(); return; } const p = enemyPresets().find(v => v.id === c.id); if (!p) throw new Error("Unknown enemy preset"); const added = p.build(c.level, syncPartySizeFromField()); if (typeof applyEnemyIV === "function") applyEnemyIV(added, c.iv); added.zone = enemySpawnZone(); state.units.push(added); state.selectedId = state.targetId = added.id; if (isMechanicalUnit(added)) syncBatteryShields().forEach(s => appendLog(s)); render(); return; }
       case "calculate":
       case "applyAttack":
         if (!c.input || typeof c.input !== "object" || Array.isArray(c.input)) throw new Error("Calculator attack requires explicit input");
