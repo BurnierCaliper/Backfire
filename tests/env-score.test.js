@@ -136,3 +136,60 @@ test("SCORE_RULES / 名称：环境分数倍率 1.2，结算里叫「环境」",
   assert.equal(c.S.SCORE_RULES.env, 1.2);
   assert.match(require("fs").readFileSync(require("path").join(__dirname, "..", "app.js"), "utf8"), /env: "环境"/);
 });
+
+test("能量场自爆：炸掉的血量、溢出、余波都算环境分，记在能量场的所有者身上", () => {
+  const { c, st, foe, kolt } = field();
+  c.setZoneField(1, "energy", { by: kolt.id, force: true });
+  const f = st.fields[1];
+  f.energyVal = 50;
+  foe.layers = [{ type: "flesh", current: 20, max: 900 }];
+  st.units.filter(u => u.isPlayer).forEach(u => { u.zone = 2; });
+  c.checkEnergyFieldBoom(1, []);
+  assert.ok(c.totalHp(foe) <= 0);
+  assert.equal(st.battleStats[kolt.id].env, 20);
+  // 20 点 ×1.2 = 24；溢出 (50 − 20) × 1.5 = 45，×1.2 = 54
+  assert.equal(part(st, "env"), 24 + 54);
+  assert.equal(part(st, "overkill"), 0);
+});
+
+test("能量场自爆炸死了我方单位：这次不加环境分", () => {
+  const { c, st, foe, kolt, ruby } = field();
+  c.setZoneField(1, "energy", { by: kolt.id, force: true });
+  st.fields[1].energyVal = 50;
+  foe.layers = [{ type: "flesh", current: 20, max: 900 }];
+  st.units.filter(u => u.isPlayer && u !== ruby).forEach(u => { u.zone = 2; });
+  // 余波打爆同区的爆炸桶，爆炸桶炸死起身中的瑞比
+  st.props = [{ id: "pb2", kind: "boom", name: "爆炸桶", zone: 1, hp: 1, level: 1 }];
+  ruby.layers = [{ type: "flesh", current: 0, max: 300 }];
+  ruby.upOnShp = true; ruby.shp = 1;
+  c.checkEnergyFieldBoom(1, []);
+  assert.ok(c.totalHp(foe) <= 0);
+  assert.equal(ruby.dead, true);
+  assert.equal(part(st, "env"), 0);
+  assert.equal(st.battleStats[kolt.id].env || 0, 0);
+});
+
+test("损毁地面塌成深渊：掉下去的敌人失去的血量算环境分（记在这次行动的出手方身上）", () => {
+  const { c, st, foe, ruby } = field();
+  st.units.filter(u => u.isPlayer).forEach(u => { u.zone = 2; });
+  st.fields[1].ruinOn = true; st.fields[1].ruinHp = 0;
+  c.beginActionAcc(ruby);
+  const before = c.totalHp(foe);
+  c.destroyRuinGround(1, []);
+  const lost = before - c.totalHp(foe);
+  assert.equal(lost, 90);
+  assert.equal(st.battleStats[ruby.id].env, 90);
+  assert.equal(part(st, "env"), Math.floor(90 * 1.2));
+});
+
+test("塌陷：造成的伤害算环境分", () => {
+  const { c, st, foe, ruby } = field();
+  st.units.filter(u => u.isPlayer).forEach(u => { u.zone = 2; });
+  st.fields[1].collapseOn = true;
+  c.beginActionAcc(ruby);
+  const before = c.totalHp(foe);
+  c.triggerCollapse(1);
+  const lost = before - c.totalHp(foe);
+  assert.ok(lost > 0);
+  assert.equal(st.battleStats[ruby.id].env, lost);
+});

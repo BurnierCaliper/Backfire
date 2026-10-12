@@ -586,7 +586,9 @@ function highBoomVictims(source) {
 }
 
 /** 高能自爆。total：触发这次爆炸的高能值（含能量场叠加的部分）；不给就用单位自己的高能值 */
-function explodeHigh(unit, total) {
+/** opt.envBy：能量场自爆（场地造成的）——炸掉的血量、溢出、余波都算环境分，记在场地所有者 / 触发者身上 */
+function explodeHigh(unit, total, opt) {
+  opt = opt || {};
   if (!unit || unit._highBooming) return;
   unit._highBooming = true;
   const he = Math.max(Number(total) || 0, Number(unit.highEnergy) || 0);
@@ -595,10 +597,17 @@ function explodeHigh(unit, total) {
   appendLog(`【高能自爆】${unit.name} 高能值 ${he} ≥ 当前生命 ${lifeBefore}，立即秒杀。余波只打同阵营与无阵营配置物，${aoe} 能量。`);
   // 画面：专门的「高能自爆」演出（大字、震屏、爆炸声、大号数字），溢出部分显示成负血量
   spawnPopup(unit, { kind: "highboom", value: he, text: String(aoe), element: "energy" });
+  const envBoom = "envBy" in opt;
   if (!unit.isPlayer) {
     unit.overkill = Math.max(0, he - lifeBefore); unit.killBig = true;
     const acc = state.actionAcc;
-    if (acc && acc.actorIsPlayer) addScore("overkill", Math.floor(unit.overkill * SCORE_RULES.overkill), unitById(acc.actorId));
+    const envWho = envBoom ? envCreditUnit(opt.envBy) : null;
+    if (envWho) {
+      unit._lastHitBy = envWho.id;   // 击杀算环境的所有者
+      scoreEnvHit(unit, { total: lifeBefore, breakDealt: 0 }, envWho);
+      const over = Math.floor(unit.overkill * SCORE_RULES.overkill);
+      if (over > 0) envCommit(() => addScore("env", over * SCORE_RULES.env, envWho));
+    } else if (acc && acc.actorIsPlayer) addScore("overkill", Math.floor(unit.overkill * SCORE_RULES.overkill), unitById(acc.actorId));
   }
   (unit.layers || []).forEach(l => { l.current = 0; });
   // 倒地统一结算（applyKnockdown）：力竭 3 即死，起身中的人坚毅生命扣光死亡（以前被炸回濒死、还能再起身）
@@ -634,7 +643,8 @@ function explodeHigh(unit, total) {
       const maxB = (u.layers || []).reduce((a, l) => a + (Number(l.max) || 0), 0);
       // 先打标记再结算：演出里铭牌一变灰就走「慢慢消失」
       if (!u.isPlayer && aoe >= lifeB && aoe >= maxB * 0.5) u.killBig = true;
-      applyTypedDot(u, aoe, "energy", notes, `${u.name} 被高能余波击中 ${aoe}`);
+      const hitIt = () => applyTypedDot(u, aoe, "energy", notes, `${u.name} 被高能余波击中 ${aoe}`);
+      if (envBoom) withEnvOwner(opt.envBy, hitIt); else hitIt();
       // 被余波炸死的敌人同样显示负血量，炸掉一半以上血量的慢慢消失
       if (!u.isPlayer && (u.dead || totalHp(u) <= 0)) {   // dead 要等稍后清场才标，这里看血量
         u.overkill = (Number(u.overkill) || 0) + Math.max(0, aoe - lifeB);
@@ -690,7 +700,7 @@ function triggerCollapse(zone) {
   state.units.filter(u => !u.hidden && !u.dead && Number(u.zone) === Number(zone) && !u.flying && !fieldExempt(u)).forEach(u => {
     const x = envMult(u);
     dealBreak(u, 2 * x, "physical", notes, x > 1 ? "塌陷 ×2" : "塌陷");
-    applyTypedDot(u, r.total * x, "physical", notes, `${u.name} 塌陷伤害${x > 1 ? ` ×${x}（场地效果${x > 2 ? "×4" : "翻倍"}）` : ""}`);
+    withEnvOwner(f.by, () => applyTypedDot(u, r.total * x, "physical", notes, `${u.name} 塌陷伤害${x > 1 ? ` ×${x}（场地效果${x > 2 ? "×4" : "翻倍"}）` : ""}`));
   });
   if (f.ruinOn) {
     notes.push(`${zone} 区损毁地面被塌陷直接摧毁，变为深渊。`);
@@ -724,6 +734,11 @@ function applyAbyssFall(unit, prevZone, notes) {
     return true;
   }
   const loss = Math.floor(totalMaxHp(unit) * 0.1);
+  // 环境分数：把敌人弄进深渊（损毁地面塌掉、被击退进去……）——记在场地所有者 / 这次行动的出手方身上
+  if (!unit.isPlayer && loss > 0) {
+    const who = envCreditUnit(f.by);
+    if (who) { unit._lastHitBy = who.id; scoreEnvHit(unit, { total: Math.min(loss, totalHp(unit)), breakDealt: 0 }, who); }
+  }
   applyTrueDamage(unit.layers, loss);
   if ((loss || 0) > 0) spawnFloater(unit, loss, "physical");
   let back = Number(prevZone);
@@ -1840,7 +1855,13 @@ function checkEnergyFieldBoom(z, notes) {
   if (boom) {
     const th = threshold(boom);
     notes.push(`${boom.name} 生命 ${totalHp(boom)} 低于高能阈值 ${th}${boom === low ? "" : `（自身高能 ${own(boom)} + 场地 ${f.energyVal}）`}，自爆。`);
-    explodeHigh(boom, th);
+    // 环境分数：能量场的所有者（没有就是触发它的人）；这次自爆炸死了我方单位就不加
+    const alive = state.units.filter(u => u.isPlayer && !u.dead);
+    const hold = [], prevHold = ENV_HOLD;
+    ENV_HOLD = hold;
+    try { explodeHigh(boom, th, { envBy: f.by == null ? null : f.by }); } finally { ENV_HOLD = prevHold; }
+    if (alive.some(u => u.dead)) { if (hold.length) notes.push("能量场自爆炸死了我方单位：这次不加环境分。"); }
+    else hold.forEach(fn => envCommit(fn));
   }
 }
 
@@ -2507,7 +2528,9 @@ function attackScoreBonus(res, target) {
  * 天气：我方利用天气多打出来的伤害、我方因天气少挨的伤害，天气的所有者（state.weatherBy，谁放的天气）
  *   按这部分伤害的分值加分（伤害 ×1、减伤 ×1.5），记在「环境」里。 */
 let ENV_CTX = null;
-/** 结算场地伤害时标上场地的所有者 */
+// 能量场自爆期间先把环境分扣着（ENV_HOLD），炸完看有没有我方单位死亡：死了就整笔作废
+let ENV_HOLD = null;
+function envCommit(fn) { if (ENV_HOLD) ENV_HOLD.push(fn); else fn(); }/** 结算场地伤害时标上场地的所有者 */
 function withEnvOwner(by, fn) {
   const prev = ENV_CTX;
   ENV_CTX = { by: by == null ? null : by };
@@ -2537,8 +2560,10 @@ function scoreEnvHit(target, res, who, bonus) {
   const st = battleStat(who);
   if (!st) return null;
   const dmg = Math.floor(Number(res.total) || 0), brk = Number(res.breakDealt) || 0;
-  st.dmg += dmg; st.brk += brk; st.env = (st.env || 0) + dmg;
-  addScore("env", (dmg * SCORE_RULES.dmg + brk * SCORE_RULES.brk) * SCORE_RULES.env, who, bonus);
+  envCommit(() => {
+    st.dmg += dmg; st.brk += brk; st.env = (st.env || 0) + dmg;
+    addScore("env", (dmg * SCORE_RULES.dmg + brk * SCORE_RULES.brk) * SCORE_RULES.env, who, bonus);
+  });
   return who;
 }
 /** 天气帮了我方：ours = 这一下是我方打出去的（含记给我方的环境 / 连带伤害）。天气没有我方所有者就不算 */
@@ -2548,14 +2573,14 @@ function scoreWeatherHelp(attacker, target, res, ours) {
   const st = battleStat(owner);
   if (!st) return;
   const up = Math.floor(Number(res.weatherUp) || 0), down = Math.floor(Number(res.weatherDown) || 0);
-  if (!target.isPlayer && ours && up > 0) {
+  if (!target.isPlayer && ours && up > 0) envCommit(() => {
     st.weatherUp = (st.weatherUp || 0) + up;
     addScore("env", up * SCORE_RULES.dmg, owner);
-  }
-  if (target.isPlayer && down > 0 && !(attacker && attacker.isPlayer)) {
+  });
+  if (target.isPlayer && down > 0 && !(attacker && attacker.isPlayer)) envCommit(() => {
     st.weatherDown = (st.weatherDown || 0) + down;
     addScore("env", Math.floor(down * SCORE_RULES.reduce), owner);
-  }
+  });
 }
 /** 每场战斗开始时清空：战场数据、评分、这场的经验 / 掉落 */
 function resetBattleRecords() {
