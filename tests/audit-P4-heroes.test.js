@@ -313,11 +313,11 @@ test("扭矩电钻突进、拉斯缪尔逃离：危墙挡住的终点不列出�
   assert.deepEqual(plain(c.skillFlowSteps("ras_flee", ras, {})[0].zones), [2]);
 });
 
-test("拉斯缪尔：说明和日志写成和实现一致（达到 100%、攻击伤害、倒地）", () => {
+test("拉斯缪尔：说明和日志写成和实现一致（达到 100%、任何来源的伤害、倒地）", () => {
   const { c, S } = setup(["ras", "kolt"]);
   const p = c.SkillText.kitInfo("ras").passives.find(x => x.name === "事故幸存");
   assert.match(p.text, /达到 100%/);
-  assert.match(p.text, /受到攻击伤害就会倒地/);
+  assert.match(p.text, /受到任何来源的伤害（攻击、持续伤害、场地效果、余波……）就会倒地/);
   const ras = kit(S, "ras");
   ras.resources.energyPct = 90;
   c.addRasEnergy(20, "测试");
