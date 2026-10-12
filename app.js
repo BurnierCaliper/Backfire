@@ -5388,6 +5388,7 @@ function longgeTakeBullet(u, lines) {
   if (!r.seen[0] && typeof window !== "undefined" && window.GAME && window.GAME.sim) c = takeDice(1, 2, 0).total <= 1 ? "blue" : "red";
   r.ammo.shift();
   r.seen.shift();
+  r.shuffleLock = false;   // 子弹数量变了：可以再洗牌
   longgeSyncKnown(r);
   lines.push(`消耗 1 发${LONGGE_AMMO[c].name}（剩 ${r.ammo.length} 发）。`);
   // 画面：开枪 / 出拳的人（龙哥或小朋友）头顶跳出红 / 蓝字，告诉玩家这一发是什么颜色
@@ -6353,7 +6354,7 @@ function resetBattleFlags(u) {
   if (u.kit === "ras") { r.energyPct = 0; r.light = 0; r.unstable = false; }
   if (u.kit === "helu") { r.scanned = false; r.lockLeft = roleLockCap(u); }
   if (u.kit === "torque") r.acidCharge = null;
-  if (u.kit === "longge") { r.trigger = false; r.ammo = longgeOpeningAmmo(); r.seen = r.ammo.map(() => false); r.known = 0; r.spitUsed = false; r.assistMode = null; }
+  if (u.kit === "longge") { r.trigger = false; r.ammo = longgeOpeningAmmo(); r.seen = r.ammo.map(() => false); r.shuffleLock = false; r.known = 0; r.spitUsed = false; r.assistMode = null; }
   if (typeof canSpit === "function" && canSpit(u.kit)) r.spitElement = spitElementOf(u.kit);   // 吐酸的属性（长休时改，记在队伍档案）
   u.focuses = [];
   u.bondAtk = 0;
@@ -9829,7 +9830,11 @@ const SKILL_REQUIREMENT = {
   xiaoxiao_heal:  (a) => (longgeRes(a) || { ammo: [] }).ammo.length ? null : "没有子弹了",
   xiaoxiao_burst: (a) => longgeBurstWhy(a),
   longge_drink:   (a) => (longgeRes(a) || { ammo: [] }).ammo.length ? null : "没有子弹了",
-  longge_shuffle: (a) => (longgeRes(a) || { ammo: [] }).ammo.length >= 2 ? null : "剩下的子弹不到 2 发，洗不了",
+  longge_shuffle: (a) => {
+    const r = longgeRes(a) || { ammo: [] };
+    if (r.ammo.length < 2) return "剩下的子弹不到 2 发，洗不了";
+    return r.shuffleLock ? "洗牌后子弹数量还没变过，不能连续洗牌" : null;
+  },
   longge_reload:  (a) => !(typeof passivePlus === "function" && passivePlus(a, 2)) ? "需要胶囊弹药+" : (longgeRes(a) || { ammo: [1] }).ammo.length ? "子弹还没打光" : null,
   yuito_summon:   (a) => weaponSummonWhy(a, "latte"),
   tou_summon:     (a) => weaponSummonWhy(a, "mochi"),
@@ -12264,6 +12269,7 @@ function runSkillInner(id, optRun) {
       const r = longgeRes(a);
       for (let i = r.ammo.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [r.ammo[i], r.ammo[j]] = [r.ammo[j], r.ammo[i]]; }
       r.seen = r.ammo.map(() => false);
+      r.shuffleLock = true;   // 洗过一次：子弹数量变动（开枪 / 消耗 / 换弹）之前不能再洗
       longgeSyncKnown(r);
       lines.push(`洗牌：剩下的 ${r.ammo.length} 发重新排列（之前看过的颜色作废）。`);
       const runOf = (color) => { let best = 0, cur = 0; r.ammo.forEach(c => { cur = c === color ? cur + 1 : 0; best = Math.max(best, cur); }); return best; };
@@ -12293,6 +12299,7 @@ function runSkillInner(id, optRun) {
       const r = longgeRes(a);
       r.ammo = longgeAmmoFresh();
       r.seen = r.ammo.map(() => false);
+      r.shuffleLock = false;
       longgeSyncKnown(r);
       lines.push("完全换弹：重新装上 6 发（顺序随机）。扳机要重新解锁。");
     } else if (id === "xiaoxiao_burst") {
