@@ -274,8 +274,15 @@ function syncShockwave(u, notes) {
   if (want === had) return;
   u.defMax = full - want;
   u._waveCut = want;
-  if ((Number(u.def) || 0) > u.defMax) u.def = u.defMax;
+  const defWas = Number(u.def) || 0;
+  if (defWas > u.defMax) u.def = u.defMax;
+  // 没给 notes（popStatus 等处）：直接写进当前日志，按发生的时刻排
+  if (!notes && typeof appendLog === "function" && typeof state !== "undefined" && state && state.combatStarted) notes = { push: t => appendLog(t) };
   if (!notes) return;
+  if (defWas > u.defMax) {
+    notes.push(`${u.name} 震荡${mult > 1 ? "（加倍计量）" : ""}：架势上限 −${want} → ${u.defMax}，架势 ${defWas} → ${u.def}。`);
+    return;
+  }
   if (want > 0) notes.push(`${u.name} 震荡${mult > 1 ? "（加倍计量）" : ""}：架势上限 −${want} → ${u.defMax}。`);
   else notes.push(`${u.name} 震荡解除：架势上限恢复到 ${u.defMax}。`);
 }

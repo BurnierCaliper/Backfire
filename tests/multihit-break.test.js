@@ -46,7 +46,7 @@ test("拉斯缪尔普通攻击：两次 0.5atk 共 1 击破；不稳时四次共
   assert.equal(d1 - foe.def, 2);
 });
 
-test("拉斯缪尔逃离：先打原区域的敌人，再移动", () => {
+test("拉斯缪尔逃离：先移动，再打原区域的敌人", () => {
   const { c, st } = field(["ras"]);
   const ras = c.findKit("ras", st.units);
   ras.zone = 1;

@@ -2123,6 +2123,7 @@
     } else if (typeof inSkillRange === "function") {
       all = all.filter(u => inSkillRange(actor, u, hint, state.zoneMode));
     }
+    if (typeof skillTargetMoveOk === "function") all = all.filter(u => skillTargetMoveOk(actor, sk.id, u));
     if (side !== "ally" && side !== "allySelf" && side !== "anySelf") {
       const inRange = (fake) => ov
         ? (() => { const d = zoneDist(actor.zone, fake.zone, state.zoneMode); return d >= ov.min && d <= ov.max; })()
