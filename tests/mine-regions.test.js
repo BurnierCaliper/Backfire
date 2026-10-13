@@ -44,3 +44,24 @@ test("第二采矿场：只出用火的安保部队；随机遭遇抽得出", ()
   }
   assert.ok(c.worldPlaceOf("第二采矿场"), "能对到地图上的第二采矿场");
 });
+
+test("第三采矿场：30% 微光、20% 有一个区是能量场", () => {
+  const c = H.load();
+  let glow = 0, energy = 0;
+  const N = 2000;
+  for (let i = 0; i < N; i++) {
+    const w = c.regionWeather("第三采矿场");
+    assert.ok(["glow", "none"].includes(w));
+    if (w === "glow") glow++;
+    const f = c.regionFeatures("第三采矿场", 3);
+    if (f.length) {
+      energy++;
+      assert.equal(f.length, 1);
+      assert.equal(f[0].what, "energy");
+      assert.ok(f[0].zone >= 1 && f[0].zone <= 3);
+    }
+  }
+  assert.ok(Math.abs(glow / N - 0.3) < 0.05, "微光约 30%：" + glow / N);
+  assert.ok(Math.abs(energy / N - 0.2) < 0.05, "能量场约 20%：" + energy / N);
+  assert.equal(c.regionFeatures("第一采矿场", 3).length, 0, "其他区域不带");
+});

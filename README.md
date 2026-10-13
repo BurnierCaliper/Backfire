@@ -368,6 +368,8 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **第三采矿场的区域天气和场地**（run.js · `regionWeather`、`regionFeatures`、`finishEncounter`）：第三采矿场的随机遭遇 30% 是微光天气；20% 随机一个区是能量场。敌人还没做，遭遇面板暂时不加这个区域。测试：`tests/mine-regions.test.js`。
+
 - **蚁型特殊剿灭兵种的狙击加百分比伤害**（enemies.js · `en_hunter_assist`）：狙击（协助）= 1×atk + 目标血量上限（所有血量层上限之和）10% 的火伤，同一击打出（一起吃穿刺、爆燃、属性克制）。血越厚的人挨得越疼，坦克要躲开它的协助。
 
 - **蚁型特殊剿灭兵种上调攻击**（engine.js · `enemyPresets` 的 `ant_hunter`；enemies.js · `en_hunter_shot`）：原来照搬牛队长的 atk，20 级只有 14，是二矿伤害最低的敌人。

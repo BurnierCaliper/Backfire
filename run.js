@@ -458,6 +458,7 @@ function finishEncounter(spec, opt) {
   const zoneMode = Number(opt.zoneMode) || (Math.random() < 0.5 ? 2 : 3);
   spec.zoneMode = zoneMode;
   spec.weather = opt.weather != null ? opt.weather : regionWeather(spec.region);
+  if (!spec.features) { const feats = regionFeatures(spec.region, zoneMode); if (feats.length) spec.features = feats; }
   applyEncounterLayout(spec);
   spec.id = "roll:" + spec.region + ":" + (spec.faction || "") + ":" + spec.enemies.map(e => e.preset).join("+");
   return spec;
@@ -468,8 +469,19 @@ function regionWeather(region) {
   if (region === "沙漠") return Math.random() < 0.6 ? "sand" : "none";
   if (region === "第一采矿场") return Math.random() < 0.4 ? "acid" : "none";
   if (region === "第二采矿场") return Math.random() < 0.4 ? "heat" : "none";
+  if (region === "第三采矿场") return Math.random() < 0.3 ? "glow" : "none";
   if (region === "巨人城") return Math.random() < 0.3 ? "thunder" : "none";
   return "none";
+}
+
+/** 区域自带的场地：第三采矿场 20% 有一个区是能量场（随机一区） */
+function regionFeatures(region, zoneMode) {
+  const out = [];
+  if (region === "第三采矿场" && Math.random() < 0.2) {
+    const n = Number(zoneMode) || 2;
+    out.push({ type: "field", what: "energy", zone: 1 + Math.floor(Math.random() * n) });
+  }
+  return out;
 }
 
 function encounterById(id) {
