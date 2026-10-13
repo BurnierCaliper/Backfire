@@ -249,3 +249,18 @@ test("蚁型特殊剿灭兵种：我方被推进它的区也会退开、灼烧�
   for (let i = 0; i < 200; i++) seen.add(c.regionWeather("第二采矿场"));
   assert.deepEqual([...seen].sort(), ["heat", "none"]);
 });
+
+test("蚁型特殊剿灭兵种的狙击：1×atk + 目标血量上限 10%（血越厚挨得越疼）", () => {
+  const f = field([{ id: "ant_hunter", lv: 10, zone: 2 }]);
+  const a = f.E("ant_hunter"), k = f.P("kolt"), h = f.P("helu");
+  k.zone = 1; h.zone = 1;
+  // 同样的单层血量，上限 200 和 1000：差 80 = (1000 − 200) × 10%
+  const hitOn = (u, max) => {
+    u.layers = [{ type: "sand", current: max, max }];   // 火打沙尘不克制，方便核对数字
+    use(f, a, "en_hunter_assist", u);
+    return max - u.layers[0].current;
+  };
+  const thin = hitOn(k, 200), thick = hitOn(h, 1000);
+  assert.equal(thick - thin, 80);
+  assert.equal(thin, a.atk + 20);
+});

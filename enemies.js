@@ -1007,8 +1007,11 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
     return true;
   }
   if (id === "en_hunter_assist") {
+    // 狙击：1×atk + 目标血量上限 10% 的火伤（同一击里，一起吃穿刺 / 爆燃 / 克制），打坦克更疼
     if (!needT()) return true;
-    aa(t, { element: "fire", mult: 1, baseBreak: 1, flags: { action: true, pierce: true, atkFx: ["combust"] } });
+    const maxHp = (t.layers || []).reduce((sum, l) => sum + (Number(l.max) || 0), 0);
+    const pct = Math.round(maxHp * 0.1);
+    aa(t, { element: "fire", mult: 1, flat: pct, baseBreak: 1, flags: { action: true, pierce: true, atkFx: ["combust"] } });
     return true;
   }
   if (id === "en_hunter_heat") {

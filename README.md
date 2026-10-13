@@ -368,6 +368,8 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **蚁型特殊剿灭兵种的狙击加百分比伤害**（enemies.js · `en_hunter_assist`）：狙击（协助）= 1×atk + 目标血量上限（所有血量层上限之和）10% 的火伤，同一击打出（一起吃穿刺、爆燃、属性克制）。血越厚的人挨得越疼，坦克要躲开它的协助。
+
 - **蚁型特殊剿灭兵种上调攻击**（engine.js · `enemyPresets` 的 `ant_hunter`；enemies.js · `en_hunter_shot`）：原来照搬牛队长的 atk，20 级只有 14，是二矿伤害最低的敌人。
   - atk 改成线性成长：1 级 6、20 级 30（`round(6 + (等级 − 1) × 24 / 19)`，20 级以后照这条线继续涨）。
   - 灼热子弹加 1d8 伤害骰：atk + 1d8 火，1 击破，穿刺。狙击（协助）不变，仍是 1×atk，跟着新的 atk 涨。
