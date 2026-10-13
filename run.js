@@ -317,22 +317,32 @@ function pickByTokens(pool, tokens) {
   return enemies;
 }
 
-/* 三方混战（第三采矿场，三区制）：玩家在中间 2 区，安保和异星生物各占一边，两边各 3 枚代币，两个阵营也互相敌对 */
-const THREE_WAY = { region: "第三采矿场", factions: ["安保", "异星生物"], tokens: 3, chance: 0.5 };
-function rollThreeWay(opt) {
-  const sides = THREE_WAY.factions.slice();
+/* 三方混战（三区制）：玩家在中间 2 区，两个互相敌对的阵营各占一边，两边各 3 枚代币。
+ *   sides：两边各自的阵营（可混编的阵营写在一起）。chance：这个区域三区制的遭遇变成三方混战的概率 */
+const THREE_WAY = {
+  tokens: 3,
+  chance: 0.5,
+  regions: {
+    "第三采矿场": { name: "三方混战", sides: [["安保"], ["异星生物"]] },
+    "外城区": { name: "三方混战", sides: [["安保", "警卫队"], ["盗匪"]] }
+  }
+};
+function rollThreeWay(region, opt) {
+  const cfg = THREE_WAY.regions[region];
+  const sides = cfg.sides.slice();
   if (Math.random() < 0.5) sides.reverse();   // 谁在 1 区、谁在 3 区随机
   const enemies = [];
-  sides.forEach((f, i) => {
-    const pool = regionPool(THREE_WAY.region).filter(k => ENEMY_INFO[k].faction === f);
+  sides.forEach((fs, i) => {
+    const pool = regionPool(region).filter(k => fs.includes(ENEMY_INFO[k].faction));
     const zone = i === 0 ? 1 : 3;
     pickByTokens(pool, THREE_WAY.tokens).forEach(e => {
       for (let n = 0; n < Math.max(1, Number(e.count) || 1); n++) enemies.push({ preset: e.preset, count: 1, zone });
     });
   });
   const spec = {
-    name: `${THREE_WAY.region}·三方混战`, region: THREE_WAY.region, faction: "三方混战",
-    tier: "normal", tokens: THREE_WAY.tokens * 2, mixed: false, threeWay: true, enemies,
+    name: `${region}·${cfg.name}`, region, faction: cfg.name,
+    tier: enemies.some(e => enemyTokens(e.preset) >= 2 && !(ENEMY_INFO[e.preset] || {}).pack) ? "elite" : "normal",
+    tokens: THREE_WAY.tokens * 2, mixed: false, threeWay: true, enemies,
     layout: "threeway", layoutLocked: true, playerZone: 2
   };
   return finishEncounter(spec, Object.assign({}, opt, { zoneMode: 3 }));
@@ -343,12 +353,12 @@ function rollEncounter(opt) {
   opt = opt || {};
   const region = opt.region || "外城区";
 
-  // 第三采矿场：三区制的遭遇有 THREE_WAY.chance 的概率变成三方混战（指定了阵营 / 混战 / 不分地区的不算）。
+  // 第三采矿场 / 外城区：三区制的遭遇有 THREE_WAY.chance 的概率变成三方混战（指定了阵营 / 混战 / 不分地区的不算）。
   // 先定下区制（和平常一样两区 / 三区各一半），三区才掷三方混战
-  if (region === THREE_WAY.region && !opt.anyRegion && !opt.faction && opt.mixed == null) {
+  if (THREE_WAY.regions[region] && !opt.anyRegion && !opt.faction && opt.mixed == null) {
     const zm = Number(opt.zoneMode) || (Math.random() < 0.5 ? 2 : 3);
     const want = zm === 3 && (opt.threeWay != null ? !!opt.threeWay : Math.random() < THREE_WAY.chance);
-    if (want) return rollThreeWay(opt);
+    if (want) return rollThreeWay(region, opt);
     opt = Object.assign({}, opt, { zoneMode: zm });
   }
 

@@ -368,6 +368,12 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **盗匪和安保、警卫队互相敌对；外城区也有三方混战**（enemies.js · `HOSTILE_PAIRS`、`hostileTo`；run.js · `THREE_WAY.regions`、`rollThreeWay`）：
+  - 敌对规则同异星生物（见下面「三方混战」那一条）：会互相攻击、不问我方格挡、协助只找同伙。盗匪和其他阵营（沙灵、触灵、巨人……）照旧不敌对；异星生物和谁都敌对。
+  - 外城区的随机遭遇，三区制时 50% 变成三方混战：玩家在中间 2 区，安保 + 警卫队一边、盗匪一边，各 3 枚代币（成组的空投蜂群整组记 1 枚）。
+  - 单局第一幕在外城区，普通战斗 / 精英战也会遇到；三方混战两边固定各 3 枚代币，不跟着精英战的代币数走。悬赏、护送、遭遇战（偷袭）、首领战不会变成三方混战。
+  - 三方混战的设置改成按区域写（`THREE_WAY.regions`），以后别的区域照着加一行就行。测试：`tests/three-way.test.js`。
+
 - **陨体衍蛛的加伤只算别的衍蛛**（party.js · `effectiveAtk`）：改成除自己之外，场上每有一只活着的陨体衍蛛 atk +25%（两只一组各 +25%，单独一只不加）。
 
 - **三方混战：异星生物和安保互相敌对**（enemies.js · `hostileTo`、`hostilesOf`；ai.js · `validPrey`；app.js · `eligibleAssisters`、`queueAssistAttack`、`autoEnemyBlockers`；run.js · `rollThreeWay`、`THREE_WAY`、`pickByTokens`）：
