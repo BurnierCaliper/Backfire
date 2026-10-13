@@ -587,12 +587,17 @@ function unspentForLevel(lv) {
   return n;
 }
 
+/** 经验按跑团模式算：跑团模式本身，或者单局的长线养成（rogue.js · run.growth） */
+function trpgXpRules() {
+  if (typeof TRPG !== "undefined" && TRPG.active) return true;
+  return typeof Rogue !== "undefined" && !!Rogue.growthXp && Rogue.growthXp();
+}
 function grantXpToPlayers(amount, reason) {
   amount = Math.floor(Number(amount) || 0);
   if (amount <= 0) return;
   const heroes = fieldUnits().filter(u => u.isPlayer && !isWeaponUnit(u) && !u.dead);
   // 跑团模式照手册第三章：战斗经验「全队平分」（Roguelike 单局按自己的调校，每人拿全额）
-  const split = typeof TRPG !== "undefined" && TRPG.active && heroes.length > 1;
+  const split = trpgXpRules() && heroes.length > 1;
   const each = split ? Math.ceil(amount / heroes.length) : amount;
   if (split) appendLog(`${amount} 经验${reason ? "（" + reason + "）" : ""}由 ${heroes.length} 人平分，每人 ${each}。`);
   heroes.forEach(u => {

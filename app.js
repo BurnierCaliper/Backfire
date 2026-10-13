@@ -2694,9 +2694,9 @@ function settleBattleRewards(outcome) {
       state.battleGains.xp += xpBonus;
     }
   }
-  // 跑团模式：打赢的每场战斗，每个角色额外获得「队伍最高等级 × 20 / 人数」经验（向下取整；人数 = 这场上场的角色数）
+  // 跑团模式（和单局的长线养成）：打赢的每场战斗，每个角色额外获得「队伍最高等级 × 20 / 人数」经验（向下取整；人数 = 这场上场的角色数）
   const trpgXp = [];
-  if (outcome === "win" && typeof TRPG !== "undefined" && TRPG.active) {
+  if (outcome === "win" && typeof trpgXpRules === "function" && trpgXpRules()) {
     const heroes = state.units.filter(u => u.isPlayer && !isWeaponUnit(u) && !u._removed);
     const n = Math.max(1, heroes.length);
     const top = heroes.reduce((m, u) => Math.max(m, Number(u.level) || 1), 1);

@@ -234,6 +234,29 @@ const ROGUE_SOLO = {
   role2MaxSkill: 3
 };
 
+/* 长线养成模式（测试用，rogue.js · run.growth）：从 1 级一路养到高级，测专长、改装件、成长曲线。
+ * 和单局共用任务板、节点、工匠、客制化，不同的地方：
+ *   没有主线、期限和首领；敌人等级跟着队伍平均等级走（区域按这个等级落在哪一幕）
+ *   经验照跑团模式：升级所需经验不打折，击杀经验全队平分，打赢每场额外「最高等级 × 20 / 人数」
+ *   武器升级照跑团模式：要实物材料（商店常备）+ 工匠加工费
+ *   角色不会永久死亡：倒下的战后留 1 点生命；团灭只算任务失败
+ *   完成任务得到赫心融合体，在角色抽取机里抽角色：新角色入队（满员进候补），抽到已有的角色 +1 级
+ *   startParty  开局选几名角色            partyMax  同时上场几人（其余在候补，任务板前可以换）
+ *   fusionPerTask 每完成一个任务给几个赫心融合体   drawCost 抽一次要几个
+ *   recruitLevel  新抽到的角色从几级开始          maxLevel  抽到重复角色最多升到几级 */
+const ROGUE_GROWTH = {
+  startParty: 2,
+  partyMax: 4,
+  fusionPerTask: 1,
+  drawCost: 1,
+  recruitLevel: 1,
+  maxLevel: 20,
+  fusionItem: "heart_fusion"
+};
+if (typeof ITEM_CATALOG !== "undefined" && !ITEM_CATALOG.heart_fusion) {
+  ITEM_CATALOG.heart_fusion = { name: "赫心融合体", hint: "长线养成：在角色抽取机里抽一名角色（抽到已有的角色 +1 级）", goods: true };
+}
+
 /* 诊所（数值占位，按「一人一次改造平均约 3000 奎支」定）
  *   healPerHp   治疗：每恢复 1 点生命的价格（手册简易医疗包 600 奎支约治 8.5 点，约 70 / 点）
  *   cyberPerHp  义体改造：每改动 1 点肉体的价格（加、减都算；换成星灵按被换掉的肉体点数算）
