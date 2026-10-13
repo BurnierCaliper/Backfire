@@ -591,10 +591,11 @@ test("手机竖屏：战斗不横向溢出；点目标先预览、再点才出�
   await page.waitForFunction(() => state.combatStarted && GAME.depth === 0, null, { timeout: 15000 });
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   assert.ok(overflow <= 0, "横向溢出 " + overflow);
-  // 瑞比的普通攻击打距离 1：把敌人挪到隔壁区
+  // 瑞比的普通攻击打距离 1：把敌人挪到隔壁区。随机生成的战场可能在两区之间放了危墙（挡住攻击），一并拆掉
   const ruby = await page.evaluate(() => {
     const h = state.units.find(u => u.kit === "ruby");
     state.units.filter(u => !u.isPlayer).forEach(u => { u.zone = h.zone > 1 ? h.zone - 1 : 2; });
+    Object.keys(state.gaps || {}).forEach(k => { state.gaps[k] = emptyGap(); });
     GAME.refresh();
     return h.id;
   });
