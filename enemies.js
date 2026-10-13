@@ -510,11 +510,22 @@ function otherZone(zone, awayFrom) {
   return ns.find(x => zoneDist(x, awayFrom) === far);
 }
 
+/* 敌人出手时（runEnemyAction 期间）ENEMY_ACTOR 是出手的敌人：下面这几个「我方」名单就换成「和它敌对的单位」
+ * （我方 + 敌对阵营的敌人，友军阵营不打我方）。这样所有敌人的技能（范围攻击、挑目标）都按阵营分敌我，不用一个个改 */
+let ENEMY_ACTOR = null;
+function actorFoes() {
+  const a = ENEMY_ACTOR;
+  if (!a || typeof hostileTo !== "function") return null;
+  return (state.units || []).filter(u => u && hostileTo(a, u) && !u.hidden && !u._removed && !u.fused && u.kit !== "ironwall");
+}
 function playersInZone(z) {
-  return state.units.filter(u => u.isPlayer && !u.hidden && Number(u.zone) === Number(z));
+  const f = actorFoes();
+  return (f || state.units.filter(u => u.isPlayer && !u.hidden)).filter(u => Number(u.zone) === Number(z));
 }
 
 function allPlayers() {
+  const f = actorFoes();
+  if (f) return f;
   return state.units.filter(u => u.isPlayer && !u.hidden);
 }
 
@@ -706,10 +717,10 @@ function enemyIntents(u) {
 /** 蚁型特殊剿灭兵种：我方单位自己走进它所在的区时，用附赠行动退到相邻区（优先没有我方单位的区），并给走进来的人灼烧 1。
  *  照季玛的图纸「稳妥的距离」：被推、被拉进来的不算（app.js · doMoveInner 调用） */
 function hunterAfterMove(mover, notes) {
-  if (!mover || !mover.isPlayer) return;
+  if (!mover || mover.kind) return;
   const z = Number(mover.zone);
   (state.units || []).forEach(u => {
-    if (u.isPlayer || u.kit !== "ant_hunter" || u.dead || u.hidden || u.stunned || u.noMove || Number(u.zone) !== z) return;
+    if (u.isPlayer || u.kit !== "ant_hunter" || u.dead || u.hidden || u.stunned || u.noMove || Number(u.zone) !== z || !hostileTo(u, mover)) return;
     if ((Number(u.bonus) || 0) < 1) return;
     const open = (zz) => {
       const g = typeof getGap === "function" ? getGap(z, zz) : { type: "open" };
@@ -718,7 +729,7 @@ function hunterAfterMove(mover, notes) {
     };
     const adj = (typeof zoneNeighbors === "function" ? zoneNeighbors(z) : []).map(Number).filter(open);
     if (!adj.length) return;
-    const foesIn = (zz) => (state.units || []).some(e => e.isPlayer && !e.dead && !e.hidden && Number(e.zone) === zz);
+    const foesIn = (zz) => (state.units || []).some(e => hostileTo(u, e) && !e.dead && !e.hidden && Number(e.zone) === zz);
     const dest = adj.find(x => !foesIn(x)) || adj[0];
     u.bonus -= 1;
     u.zone = dest;
@@ -927,6 +938,11 @@ function antFireShell(a, aa, lines) {
 }
 
 function runEnemyAction(id, a, t, hitOne, lines, needT) {
+  const prev = ENEMY_ACTOR;
+  ENEMY_ACTOR = a && !a.isPlayer ? a : null;
+  try { return runEnemyActionInner(id, a, t, hitOne, lines, needT); } finally { ENEMY_ACTOR = prev; }
+}
+function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
   const atk = effectiveAtk(a, state.units);
   const sg = a.suggest || {};
   const diceN = extraDiceByLevel(a.level);
@@ -1302,7 +1318,7 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
       lines.push("榴弹尚未就绪。先标定区域，等到下一个敌人回合再发射。");
       return true;
     }
-    const victims = fieldUnits().filter(u => !u.dead && !u.hidden && Number(u.zone) === zone && u.id !== a.id && !!u.isPlayer);
+    const victims = fieldUnits().filter(u => !u.dead && !u.hidden && Number(u.zone) === zone && u.id !== a.id && hostileTo(a, u));
     if (!victims.length) lines.push(`${zone} 区没有玩家单位。`);
     victims.forEach(u => {
       aa(u, { element: "fire", mult: 1, diceN: 1, diceS: 4, baseBreak: 2, flags: { action: true, aoe: true } });

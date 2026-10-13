@@ -118,3 +118,33 @@ test("没有设同阵营：模板里放互相敌对的阵营，不管站位都�
   const plan = c.EnemyAI.plan(g); plan.thunk(); c.BattleSim.resolveQueues({ pickBlocker: () => null, pickAssister: l => l[0].id });
   assert.ok(c.totalHp(t) < t0, "同区的狂徒挨打");
 });
+
+test("敌人的范围攻击按阵营分敌我：友军播撒者的喷洒打同区的狂徒、不打我方；没设友军时也会打敌对阵营", () => {
+  const c = H.load();
+  const enc = c.battleTemplateToEncounter(c.battleTemplateNormalize({ name: "友军喷洒", board: 2, playerZone: 1, allyFaction: "安保",
+    enemies: [{ preset: "spreader", level: 3, zone: 2 }, { preset: "thug_knife", level: 3, zone: 1 }] }));
+  c.BattleSim.setup({ party: ["kolt"], encounter: enc, level: 3, seed: "SPRAY" });
+  c.startCombat();
+  const S = c.S.state;
+  const sp = S.units.find(u => u.kit === "spreader"), th = S.units.find(u => u.kit === "thug_knife"), k = c.findKit("kolt", S.units);
+  k.zone = 1; th.zone = 1;
+  const k0 = c.totalHp(k), t0 = c.totalHp(th);
+  S.combatPhase = "enemy"; sp.ap = 1; S.attackerId = sp.id; S.targetId = th.id;
+  c.runSkill("en_spread");
+  c.BattleSim.resolveQueues({ pickBlocker: () => null, pickAssister: l => l[0].id });
+  assert.ok(c.totalHp(th) < t0, "喷洒打到同区的狂徒");
+  assert.equal(c.totalHp(k), k0, "不打我方");
+  assert.equal(th.statuses.corr, true, "狂徒被腐蚀");
+  // 没有友军：三方混战里异星的范围攻击也会波及敌对的安保（同区的人都挨）
+  const c2 = H.load();
+  c2.BattleSim.setup({ party: ["kolt"], enemies: [{ id: "spreader", lv: 3, zone: 2 }, { id: "meteor_spider", lv: 3, zone: 1 }], seed: "SPRAY2" });
+  c2.startCombat();
+  const S2 = c2.S.state;
+  const sp2 = S2.units.find(u => u.kit === "spreader"), spi = S2.units.find(u => u.kit === "meteor_spider"), k2 = c2.findKit("kolt", S2.units);
+  k2.zone = 1; spi.zone = 1;
+  const s0 = c2.totalHp(spi);
+  S2.combatPhase = "enemy"; sp2.ap = 1; S2.attackerId = sp2.id; S2.targetId = k2.id;
+  c2.runSkill("en_spread");
+  c2.BattleSim.resolveQueues({ pickBlocker: () => null, pickAssister: l => l[0].id });
+  assert.ok(c2.totalHp(spi) < s0, "安保的喷洒也波及敌对的异星");
+});
