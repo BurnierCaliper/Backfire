@@ -31,3 +31,16 @@ test("第一采矿场的随机遭遇能抽出敌人", () => {
     spec.enemies.forEach(e => assert.ok(["ant_guard", "dumpdrone", "mine_guard", "spreader"].includes(e.preset), e.preset));
   }
 });
+
+test("第二采矿场：只出用火的安保部队；随机遭遇抽得出", () => {
+  const c = H.load();
+  const kits = ["ant_hunter", "flint_sweeper", "gas_collector", "mine_overseer"];
+  assert.deepEqual([...c.regionPool("第二采矿场")].sort(), kits);
+  c.regionPool("第二采矿场").forEach(k => assert.equal(c.enemyInfo(k).faction, "安保", k));
+  for (let i = 0; i < 20; i++) {
+    const spec = c.rollEncounter({ region: "第二采矿场" });
+    assert.ok(spec.enemies.length > 0);
+    spec.enemies.forEach(e => assert.ok(kits.includes(e.preset), e.preset));
+  }
+  assert.ok(c.worldPlaceOf("第二采矿场"), "能对到地图上的第二采矿场");
+});

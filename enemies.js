@@ -92,7 +92,7 @@ function enemyMayAssist(u) {
 
 /* 协助攻击的射程。自带移动的（冲到目标那一区再打）先走一格；无限距离的总能打到；
  * 其余按技能射程（ENEMY_SKILL_RANGE，没登记的用单位卡上的 range），隔着危墙 / 关着的门打不到。 */
-const ENEMY_ASSIST_RUSH = ["en_thug_hammer_assist", "en_wolf_assist", "en_chi_exec"];
+const ENEMY_ASSIST_RUSH = ["en_thug_hammer_assist", "en_wolf_assist", "en_chi_exec", "en_overseer_assist", "en_gas_assist"];
 const ENEMY_ASSIST_ANYWHERE = ["en_patrol_assist", "ufo_assist"];
 function enemyAssistReach(u, t) {
   if (!u || !t) return false;
@@ -244,6 +244,24 @@ function enemySkillList(u) {
     ant_guard: [
       { id: "en_ant_spray", label: "酸液喷枪" },
       { id: "en_ant_assist", label: "协助攻击" }
+    ],
+    mine_overseer: [
+      { id: "en_overseer", label: "火焰重锤（灼烧）" },
+      { id: "en_overseer_assist", label: "协助：冲近半伤" }
+    ],
+    flint_sweeper: [
+      { id: "en_flint", label: "发射火石（1d6 发）" },
+      { id: "en_flint_assist", label: "协助：爆炸火石" }
+    ],
+    gas_collector: [
+      { id: "en_gas_ignite", label: "点燃燃气（同区火焰 + 变火场）" },
+      { id: "en_gas_spray", label: "喷火（三段）" },
+      { id: "en_gas_assist", label: "协助：冲近灼烧 + 喷火" }
+    ],
+    ant_hunter: [
+      { id: "en_hunter_shot", label: "灼热子弹（穿刺）" },
+      { id: "en_hunter_heat", label: "把天气变为酷暑" },
+      { id: "en_hunter_assist", label: "协助：狙击（穿刺 + 爆燃）" }
     ],
     swarm: [{ id: "en_swarm", label: "撞击（自身死亡）" }],
     crow: [{ id: "en_crow", label: "声波" }],
@@ -498,6 +516,12 @@ const ENEMY_SKILL_RANGE = {
   en_mine_guard_assist: "melee",
   en_ant_spray: "ranged",
   en_ant_assist: "ranged",
+  en_overseer: "melee",
+  en_flint: "ranged",
+  en_flint_assist: "ranged",
+  en_gas_spray: "melee",
+  en_hunter_shot: "ranged",
+  en_hunter_assist: "ranged",
   en_thug_knife: "melee",
   en_thug_hammer: "melee",
   en_crow: "melee",
@@ -614,6 +638,66 @@ function boatOverloadRoundStart(u, notes) {
   else if (typeof applyInstantEffect === "function") {
     notes.push(`${u.name} 回合开始在飞行：给自己过载。`);
     applyInstantEffect(u, "overload", notes);
+  }
+}
+
+/* ===== 第二采矿场 ===== */
+/** 这一区是火场 */
+function zoneOnFire(z) {
+  const f = state.fields && state.fields[z];
+  return !!f && typeof fieldFireOn === "function" && fieldFireOn(f);
+}
+/** 燃气收集机能不能把这一区点成火场（不是火场、不是固有场地 / 深渊 / 被锁定） */
+function gasCanIgnite(z) {
+  if (zoneOnFire(z)) return false;
+  return typeof fieldChangeWhy === "function" ? !fieldChangeWhy(z, "fire") : true;
+}
+/** 燃气收集机：目标有灼烧时每段攻击回血（3% 血量上限 × 灼烧层数） */
+const GAS_LIFESTEAL = 0.03;
+/** 燃气收集机的喷火：近距离一人 3 段 0.5×atk 火，共 1 击破 */
+function gasSpray(a, t, aa) {
+  return aa(t, { element: "fire", mult: 0.5, hits: 3, baseBreak: 1, breakOnce: true, onConnect: { lifesteal: GAS_LIFESTEAL } });
+}
+/** 火石清扫机：站在火场里时，每一击都造成灼烧 */
+function flintOnConnect(a) {
+  return zoneOnFire(a.zone) ? { burnPerHit: true } : undefined;
+}
+/** 蚁型特殊剿灭兵种：我方单位自己走进它所在的区时，用附赠行动退到相邻区（优先没有我方单位的区），并给走进来的人灼烧 1。
+ *  照季玛的图纸「稳妥的距离」：被推、被拉进来的不算（app.js · doMoveInner 调用） */
+function hunterAfterMove(mover, notes) {
+  if (!mover || !mover.isPlayer) return;
+  const z = Number(mover.zone);
+  (state.units || []).forEach(u => {
+    if (u.isPlayer || u.kit !== "ant_hunter" || u.dead || u.hidden || u.stunned || u.noMove || Number(u.zone) !== z) return;
+    if ((Number(u.bonus) || 0) < 1) return;
+    const open = (zz) => {
+      const g = typeof getGap === "function" ? getGap(z, zz) : { type: "open" };
+      if (g.type === "wall" || (g.type === "door" && !g.open) || g.type === "void") return false;
+      return !(state.fields && state.fields[zz] && state.fields[zz].abyss);
+    };
+    const adj = (typeof zoneNeighbors === "function" ? zoneNeighbors(z) : []).map(Number).filter(open);
+    if (!adj.length) return;
+    const foesIn = (zz) => (state.units || []).some(e => e.isPlayer && !e.dead && !e.hidden && Number(e.zone) === zz);
+    const dest = adj.find(x => !foesIn(x)) || adj[0];
+    u.bonus -= 1;
+    u.zone = dest;
+    notes.push(`${mover.name} 走进来，${u.name} 用附赠行动退到 ${dest} 区。`);
+    if (typeof grantBurn === "function") {
+      const before = Number(mover.statuses && mover.statuses.burn) || 0;
+      grantBurn(mover, 1, notes);
+      const after = Number(mover.statuses && mover.statuses.burn) || 0;
+      if (after > before) notes.push(`${mover.name} 灼烧 +1 → ${after} 层。`);
+    }
+  });
+}
+/** 蚁型特殊剿灭兵种：敌人回合开始时，天气不是酷暑而且能改，就花 1 行动点把天气变成酷暑（app.js · startEnemyPhase 调用） */
+function hunterHeatAtTurnStart(u, notes) {
+  if (!u || u.kit !== "ant_hunter" || u.dead || u.hidden || u.stunned) return;
+  if (state.weather === "heat" || (Number(u.ap) || 0) < 1) return;
+  if (typeof weatherChangeWhy === "function" && weatherChangeWhy("heat")) return;
+  if (typeof setWeather === "function" && !setWeather("heat", { by: u.id })) {
+    u.ap -= 1;
+    notes.push(`${u.name} 回合开始：用 1 行动点把天气变为酷暑。`);
   }
 }
 
@@ -839,6 +923,86 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
     return true;
   }
 
+  if (id === "en_overseer") {
+    if (!needT()) return true;
+    stepTowardZone(a, t.zone);
+    aa(t, { element: "fire", mult: 1, diceN: 1, diceS: 6, baseBreak: 2, onConnect: { burn: 1 } });
+    return true;
+  }
+  if (id === "en_overseer_assist") {
+    // 同狂徒（锤）的协助：冲到目标那一区，atk/2，1 击破（改成火）
+    if (!needT()) return true;
+    stepTowardZone(a, t.zone, { free: true });
+    aa(t, { element: "fire", mult: 0.5, baseBreak: 1 });
+    return true;
+  }
+  if (id === "en_flint") {
+    if (!needT()) return true;
+    // 1d6 发火石，每发 0.5×atk + 1d4 火，只有第一发 1 击破。没被嘲讽就尽量分给不同的人（远距离、打得到的）
+    const shots = 1 + Math.floor(Math.random() * 6);
+    const forced = !!(a.tauntTo || a.lockdownBy || (typeof touDuelVictim === "function" && touDuelVictim(a)));
+    const others = forced ? [] : allPlayers().filter(u => u !== t && !u.dead && !(typeof isDownProtected === "function" && isDownProtected(u)) &&
+      zoneDist(a.zone, u.zone, state.zoneMode) === 1 && !(typeof lineBlocked === "function" && lineBlocked(a.zone, u.zone)));
+    const pool = [t].concat(others);
+    const per = new Map();
+    for (let i = 0; i < shots; i++) { const u = pool[i % pool.length]; per.set(u, (per.get(u) || 0) + 1); }
+    lines.push(`${a.name} 发射 ${shots} 发火石。`);
+    let first = true;
+    per.forEach((n, u) => {
+      aa(u, { element: "fire", mult: 0.5, diceN: 1, diceS: 4, hits: n, baseBreak: first ? 1 : 0, breakOnce: true, onConnect: flintOnConnect(a) });
+      first = false;
+    });
+    return true;
+  }
+  if (id === "en_flint_assist") {
+    if (!needT()) return true;
+    aa(t, { element: "fire", mult: 1.5, baseBreak: 1, flags: { action: true, atkFx: ["combust"] }, onConnect: flintOnConnect(a) });
+    return true;
+  }
+  if (id === "en_gas_ignite") {
+    const z = Number(a.zone);
+    if (zoneOnFire(z)) { lines.push(`${z} 区已经是火场。`); return true; }
+    if (!gasCanIgnite(z)) { lines.push(`${a.name} 点不着 ${z} 区：${fieldChangeWhy(z, "fire")}`); return true; }
+    standingPlayersIn(z).forEach(u => {
+      aa(u, { element: "fire", mult: 0.5, baseBreak: 0, flags: { action: true, aoe: true }, onConnect: { lifesteal: GAS_LIFESTEAL } });
+    });
+    const err = setZoneField(z, "fire", { by: a.id });
+    lines.push(err || `${a.name} 点燃收集的燃气：${z} 区变为火场。`);
+    return true;
+  }
+  if (id === "en_gas_spray") {
+    if (!needT()) return true;
+    gasSpray(a, t, aa);
+    return true;
+  }
+  if (id === "en_gas_assist") {
+    // 冲到目标那一区，先给目标灼烧 1，再喷火
+    if (!needT()) return true;
+    stepTowardZone(a, t.zone, { free: true });
+    if (typeof grantBurn === "function") {
+      grantBurn(t, 1, lines);
+      lines.push(`${t.name} 灼烧 → ${(t.statuses && t.statuses.burn) || 0} 层。`);
+    }
+    gasSpray(a, t, aa);
+    return true;
+  }
+  if (id === "en_hunter_shot") {
+    if (!needT()) return true;
+    aa(t, { element: "fire", mult: 1, baseBreak: 1, flags: { action: true, pierce: true } });
+    return true;
+  }
+  if (id === "en_hunter_assist") {
+    if (!needT()) return true;
+    aa(t, { element: "fire", mult: 1, baseBreak: 1, flags: { action: true, pierce: true, atkFx: ["combust"] } });
+    return true;
+  }
+  if (id === "en_hunter_heat") {
+    const why = state.weather === "heat" ? "天气已经是酷暑。" : (typeof weatherChangeWhy === "function" ? weatherChangeWhy("heat") : null);
+    if (why) { lines.push(why); return true; }
+    setWeather("heat", { by: a.id });
+    lines.push(`${a.name} 把天气变为酷暑。`);
+    return true;
+  }
   if (id === "en_swarm") {
     if (!needT()) return true;
     stepTowardZone(a, t.zone);

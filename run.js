@@ -224,6 +224,11 @@ const ENEMY_INFO = {
   spreader:    { faction: "安保", regions: ["第一采矿场"], tokens: 2 },
   mine_guard:  { faction: "安保", regions: ["第一采矿场"], tokens: 1 },
   ant_guard:   { faction: "安保", regions: ["第一采矿场"], tokens: 2 },
+  // 第二采矿场：用火的安保部队
+  mine_overseer: { faction: "安保", regions: ["第二采矿场"], tokens: 1 },
+  flint_sweeper: { faction: "安保", regions: ["第二采矿场"], tokens: 1 },
+  gas_collector: { faction: "安保", regions: ["第二采矿场"], tokens: 2 },
+  ant_hunter:    { faction: "安保", regions: ["第二采矿场"], tokens: 2 },
   // —— 警卫队（有机体，可与安保混编）——
   captain_wolf:   { faction: "警卫队", regions: ["巨人城", "外城区"], tokens: 2 },
   captain_ox:     { faction: "警卫队", regions: ["巨人城", "外城区"], tokens: 2 },

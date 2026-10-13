@@ -24,7 +24,7 @@ const EnemyAI = (function () {
   const ZONE_PICK = { en_gl: true, en_gl_fire: true, en_ant_shell: true, en_ant_shell_fire: true };
   // 不需要目标 / 不是攻击的技能：找站位时不拿它们来算「能不能打到」
   const NO_TARGET = { en_agg3_debris: true, en_king_hold: true, en_bigsand_summon: true, en_bigsand_heal: true, ufo_prime: true,
-    ufo_boom: true, ufo_stomp: true, ufo_sweep: true, ufo_summon: true, en_agg2_overheat: true, en_giant_sand_pulse: true, en_thug_mutiny: true };
+    ufo_boom: true, ufo_stomp: true, ufo_sweep: true, ufo_summon: true, en_agg2_overheat: true, en_giant_sand_pulse: true, en_thug_mutiny: true, en_gas_ignite: true, en_hunter_heat: true };
   function canAimSkill(u, sid, t) {
     if (!inSkillReach(u, sid, t)) return false;
     // 隔着危墙 / 关着的门打不到（dealTo 会挡下来）：以前照样瞄准，结果每回合白打
@@ -99,6 +99,8 @@ const EnemyAI = (function () {
     buoy:           { dist: 0,    aim: "nearest", near: "en_buoy" },
     dumpdrone:      { dist: 1,    aim: "local",   near: "en_dump",           far: "en_dump" },
     mine_guard:     { dist: 0,    aim: "local",   near: "en_mine_guard" },
+    mine_overseer:  { dist: 0,    aim: "local",   near: "en_overseer" },
+    flint_sweeper:  { dist: 1,    aim: "local",   near: "en_flint",          far: "en_flint" },
     thug_knife:     { dist: 0,    aim: "local",   near: "en_thug_knife" },
     thug_hammer:    { dist: 0,    aim: "local",   near: "en_thug_hammer" },
     crow:           { dist: 0,    aim: "lowest",  near: "en_crow" },
@@ -113,6 +115,8 @@ const EnemyAI = (function () {
     captain_ox:     { dist: 0,    aim: "local",   near: "en_ox" },
     captain_lizard: { dist: 1,    aim: "local",   near: "en_liz",            far: "en_liz" },
     ant_guard:      { dist: 1,    aim: "local",   near: "en_ant_spray",      far: "en_ant_spray", special: "ant" },
+    gas_collector:  { dist: 0,    aim: "local",   special: "gas" },
+    ant_hunter:     { dist: 1,    aim: "local",   near: "en_hunter_shot",    far: "en_hunter_shot" },
     bigsand:        { dist: null, aim: "local",   near: "en_bigsand",        special: "bigsand" },
     livesand:       { dist: null, aim: "local",   special: "livesand" },
     giant:          { dist: null, aim: "local",   near: "en_giant_near",     far: "en_giant_far" },
@@ -277,6 +281,13 @@ const EnemyAI = (function () {
     if (spec.special === "gl") {
       if (has("en_gl_fire")) return "en_gl_fire";
       return has("en_gl") ? "en_gl" : null;
+    }
+    if (spec.special === "gas") {
+      // 每回合先移动（够不着目标就先走过去），然后：所在区是火场就喷火；不是火场、能点着就点燃燃气
+      if (!sameZone && canPayMove(u)) return null;
+      if (zoneOnFire(u.zone)) return sameZone && has("en_gas_spray") ? "en_gas_spray" : null;
+      if (gasCanIgnite(u.zone) && has("en_gas_ignite")) return "en_gas_ignite";
+      return sameZone && has("en_gas_spray") ? "en_gas_spray" : null;   // 点不着（固有场地 / 被锁定）：照样喷火
     }
     if (spec.special === "ant") {
       // 大酸液弹待发就发；站在酸液地面上就标定；否则用普通的酸液喷枪（交给 near / far）
@@ -487,7 +498,7 @@ const EnemyAI = (function () {
     }
 
     let sid = aiSpecial(u, spec, target, prey, has, list);
-    if (sid && !["en_agg3_debris", "en_king_hold", "en_bigsand_summon", "en_bigsand_heal", "ufo_prime", "ufo_boom", "ufo_stomp", "ufo_sweep", "en_agg2_overheat", "en_gl", "en_gl_fire", "en_ant_shell", "en_ant_shell_fire", "en_giant_sand_pulse"].includes(sid)) {
+    if (sid && !["en_agg3_debris", "en_king_hold", "en_bigsand_summon", "en_bigsand_heal", "ufo_prime", "ufo_boom", "ufo_stomp", "ufo_sweep", "en_agg2_overheat", "en_gl", "en_gl_fire", "en_ant_shell", "en_ant_shell_fire", "en_gas_ignite", "en_giant_sand_pulse"].includes(sid)) {
       const rt = retargetLegal(u, sid, target, prey, pick.forced);
       if (rt.target) target = rt.target;
       if (rt.sid) sid = rt.sid;
@@ -498,7 +509,8 @@ const EnemyAI = (function () {
     const noTargetNeeded = sid === "en_agg3_debris" || sid === "en_king_hold" ||
       sid === "en_bigsand_summon" || sid === "en_bigsand_heal" || sid === "ufo_prime" ||
       sid === "ufo_boom" || sid === "ufo_stomp" || sid === "ufo_sweep" || sid === "en_agg2_overheat" ||
-      sid === "en_giant_sand_pulse";   // 全域沙暴打所有区域，不用瞄准
+      sid === "en_giant_sand_pulse" ||   // 全域沙暴打所有区域，不用瞄准
+      sid === "en_gas_ignite";           // 点燃燃气打自己所在的区
     // 聚合体的电能炮：贴近打 1d20 最好；没有附赠动作走不过去时就隔一区打（1d10），不白白耗着
     const fireNow = sid === "en_agg2_charge" && zdist(u.zone, target.zone) <= 1 && (u.bonus || 0) < 1;
     if (sid && (inRange || !step || noTargetNeeded || fireNow)) {

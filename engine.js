@@ -1681,6 +1681,35 @@ function enemyPresets() {
         { type: "flesh", hp: scaleHp(15 + (lv - 1) * 4, p) }
       ], 4 + milestone(lv, 5), 8 + milestone(lv, 2) + milestone(lv, 5) * 2, { kit: "ant_guard", range: "ranged", dice: [1, 6], element: "acid" });
     }},
+    // —— 第二采矿场（火）——
+    // 矿场监工：数值同狂徒（锤），血量的一半换成装甲（装甲在外）
+    { id: "mine_overseer", name: "矿场监工", build(lv, p) {
+      const hp = 20 + (lv - 1) * 6, armor = Math.round(hp / 2);
+      return unitOf(this.name, lv, [
+        { type: "armor", hp: scaleHp(armor, p) },
+        { type: "flesh", hp: scaleHp(hp - armor, p) }
+      ], 4 + milestone(lv, 10), 4 + (lv - 1), { kit: "mine_overseer", range: "melee", dice: [1, 6], element: "fire", baseBreak: 2 });
+    }},
+    // 火石清扫机：数值同机器人看守（枪）
+    { id: "flint_sweeper", name: "火石清扫机", build(lv, p) {
+      return unitOf(this.name, lv, [{ type: "armor", hp: scaleHp(12 + (lv - 1) * 4, p) }], 3 + milestone(lv, 10), 5 + (lv - 1),
+        { kit: "flint_sweeper", range: "ranged", dice: [1, 4], element: "fire" });
+    }},
+    // 燃气收集机：数值同机甲触灵（榴弹），星灵换成肉体
+    { id: "gas_collector", name: "燃气收集机", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(10 + (lv - 1) * 4 + milestone(lv, 5) * 2, p) },
+        { type: "armor", hp: scaleHp(15 + (lv - 1) * 4, p) },
+        { type: "flesh", hp: scaleHp(5 + (lv - 1) * 2, p) }
+      ], 5 + milestone(lv, 5), 6 + (lv - 1), { kit: "gas_collector", range: "melee", dice: [0, 0], element: "fire", baseBreak: 1 });
+    }},
+    // 蚁型特殊剿灭兵种：数值同牛队长，护盾换成装甲
+    { id: "ant_hunter", name: "蚁型特殊剿灭兵种", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "armor", hp: scaleHp(16 + (lv - 1) * 5 + milestone(lv, 5) * 4, p) },
+        { type: "flesh", hp: scaleHp(26 + (lv - 1) * 7, p) }
+      ], 5 + milestone(lv, 5), 6 + milestone(lv, 5) * 2, { kit: "ant_hunter", range: "ranged", dice: [0, 0], element: "fire", baseBreak: 1 });
+    }},
     { id: "bigsand", name: "大沙灵", build(lv, p) {
       return unitOf(this.name, lv, [{ type: "sand", hp: scaleHp(37 + (lv - 1) * 6 + milestone(lv, 2), p) }], 4, 5 + milestone(lv, 2), { kit: "bigsand", range: "melee", dice: [1, 4], element: "physical" });
     }},

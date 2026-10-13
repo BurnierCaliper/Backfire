@@ -1929,6 +1929,7 @@ function startEnemyPhase() {
         u.resources.shellReady = true;
         notes.push(`${u.name} 大酸液弹已就绪，可对 ${u.resources.shellZone} 区发射。`);
       }
+      if (u.kit === "ant_hunter" && typeof hunterHeatAtTurnStart === "function") hunterHeatAtTurnStart(u, notes);
     }
   });
   appendLog(notes.join("\n"));
@@ -4078,6 +4079,7 @@ function doMoveInner(unit, dest, moveOpt) {
   convertUnstableInHv(unit, notes);
   triggerLeaveOpportunity(unit, from, notes);
   if (typeof bpAfterEnemyMove === "function") bpAfterEnemyMove(unit, notes);   // 单局图纸：稳妥的距离
+  if (typeof hunterAfterMove === "function") hunterAfterMove(unit, notes);     // 蚁型特殊剿灭兵种：有人走进来就退开
   enterFrozenGround(unit, notes);
   applyAbyssFall(unit, from, notes);
   if (typeof afterMove === "function") afterMove(unit, notes);
@@ -6810,9 +6812,33 @@ function attackConnected(res, flags) {
   return b !== "assistOk" && b !== "bareOk";
 }
 
-function runOnConnect(attacker, target, spec) {
+function runOnConnect(attacker, target, spec, res) {
   const notes = [];
   if (!spec || !target) return notes;
+  // 这一击里真正打中的段数（多段攻击按段算；没有分段记录的算 1 段）
+  const landed = () => {
+    const ph = (res && res.perHit) || [];
+    return ph.length ? ph.filter(h => (Number(h.dealt) || 0) > 0).length : 1;
+  };
+  if (spec.lifesteal && attacker && !attacker.dead) {
+    // 燃气收集机：目标有灼烧时，每一段攻击恢复 最大血量 × lifesteal × 灼烧层数
+    const stacks = Math.floor(Number(target.statuses && target.statuses.burn) || 0);
+    if (stacks > 0) {
+      const maxHp = (attacker.layers || []).reduce((sum, l) => sum + (Number(l.max) || 0), 0);
+      const n = landed();
+      const got = n > 0 && typeof healUnit === "function" ? healUnit(attacker, Math.round(maxHp * spec.lifesteal * stacks) * n) : 0;
+      if (got > 0) notes.push(`${attacker.name} 从 ${target.name} 的灼烧（${stacks} 层）里吸收燃气：${n} 段，回复 ${got}。`);
+    }
+  }
+  if (spec.burn || spec.burnPerHit) {
+    const n = spec.burnPerHit ? landed() : Number(spec.burn) || 1;
+    if (n > 0 && typeof grantBurn === "function") {
+      const before = Number(target.statuses && target.statuses.burn) || 0;
+      grantBurn(target, n, notes);
+      const after = Number(target.statuses && target.statuses.burn) || 0;
+      if (after > before) notes.push(`${target.name} 灼烧 +${after - before} → ${after} 层。`);
+    }
+  }
   if (spec.dest != null) {
     const dest = Number(spec.dest);
     if (typeof displaceTo === "function") displaceTo(target, dest, notes, spec.reason || "被位移");
@@ -7024,7 +7050,10 @@ function applyAtkFxAfter(attacker, target, res, flags, extra, opt) {
     }
   }
 
-  if (list.indexOf("combust") >= 0 && target && (isInnerDepleted(target) || target.dead || (typeof isUnitDown === "function" && isUnitDown(target) && !target.upOnShp))) {
+  // 爆燃要「杀死」目标：敌人 = 最内层归零；我方 = 被打倒（打进濒死也算被击倒，作者定）。
+  // 靠坚毅生命站着的我方最内层本来就是 0，坚毅生命没打光就不算被打倒（以前每一击都会触发爆燃）
+  const knockedDown = target && (target.isPlayer ? (typeof isUnitDown === "function" ? isUnitDown(target) : isInnerDepleted(target)) : (isInnerDepleted(target) || target.dead));
+  if (list.indexOf("combust") >= 0 && knockedDown) {
     const over = Math.max(0, (Number(res.intended) || 0) - (Number(res.total) || 0));
     const foes = fieldUnits().filter(u => {
       if (!u || u.id === target.id || u.dead || u.hidden) return false;
@@ -7410,7 +7439,7 @@ function dealTo(attacker, target, opt) {
     }
   }
   if (opt.onConnect) {
-    if (attackConnected(res, flags)) extra.push(...runOnConnect(attacker, target, opt.onConnect));
+    if (attackConnected(res, flags)) extra.push(...runOnConnect(attacker, target, opt.onConnect, res));
     else extra.push("格挡成功：位移与其他附带效果未生效。");
   }
   if (!res.pending) {
