@@ -368,6 +368,8 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **护送对象不进战场数据**（app.js · `battleStat`；game.js · `statRows`）：护送任务的货车 / 委托人不再记伤害、承受伤害等战场数据，战场数据表里也不列（它不能操作，数据没有参考价值）。别人替它协助格挡照常记在格挡的人身上。测试：`tests/escort-tasks.test.js`。
+
 - **我方可以和某个敌人阵营同阵营（跑团战斗模板）**（battle-templates.js · `allyFaction`、`battleTemplateFactions`；trpg-ui.js 模板编辑器「我方阵营」；run.js · `buildEncounter` 写 `state.playerAllies`；enemies.js · `playerAllied`、`hostileTo`；app.js · `dealTo`、`settleEnemyKill`、`statusLine`；ai.js / game.js · `foes`）：
   - 模板编辑器多一项「我方阵营」：只有我方 / 和某个阵营同阵营（能和它混编的阵营一起算，例如选安保，警卫队也是友军）。从当前战场存模板时也会带上。
   - 友军：不打我方（范围攻击也跳过我方），我方的攻击也打不到它（单体打不出去，范围攻击跳过它）；它会和与它敌对的阵营互相打。状态栏写「友军」。

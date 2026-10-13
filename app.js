@@ -2356,6 +2356,7 @@ function addStatusDmg(key, amount) {
 function battleStat(u) {
   if (u && u.creditTo) u = unitById(u.creditTo);   // 碎渣机炮这类代打：记在操控的人身上
   if (!u || !u.isPlayer || !(state.units || []).includes(u)) return null;
+  if (u.escort) return null;   // 护送对象（货车 / 委托人）：数据没有参考价值，不记
   state.battleStats = state.battleStats || {};
   const s = state.battleStats[u.id] || (state.battleStats[u.id] = { name: u.name, kit: u.kit || "", weaponOf: u.weaponOf || null, dmg: 0, brk: 0, taken: 0, kills: 0, heal: 0,
     assists: 0, blocks: 0, blockOk: 0, avoided: 0, staggers: 0, reduced: 0 });

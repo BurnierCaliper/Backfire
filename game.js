@@ -2811,7 +2811,7 @@
     const stats = state.battleStats || {};
     const blank = (u) => ({ name: u.name, kit: u.kit, weaponOf: u.weaponOf || null, dmg: 0, brk: 0, taken: 0, kills: 0, heal: 0, score: 0,
       assists: 0, blocks: 0, blockOk: 0, avoided: 0, staggers: 0, reduced: 0 });
-    const units = (state.units || []).filter(u => u.isPlayer && !u._removed);
+    const units = (state.units || []).filter(u => u.isPlayer && !u._removed && !u.escort);   // 护送对象不列
     const heroes = units.filter(u => !isWeaponUnit(u));
     const rows = [];
     heroes.forEach(h => {
