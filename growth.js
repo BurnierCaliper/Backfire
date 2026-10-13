@@ -517,6 +517,11 @@ function applyCyberLayers(u, fleshMax) {
 
 function applyLevelStats(u) {
   if (!u || !u.isPlayer || isWeaponUnit(u)) return;
+  applyLevelStatsBase(u);
+  // 被动专长（feats.js · hooks.apply）：属性、等级算完以后再改；每次重算都从头来，所以不会叠加
+  if (typeof featHook === "function") featHook(u, "apply");
+}
+function applyLevelStatsBase(u) {
   // 固定成长（每级固定加血）只给没有六项属性的老卡用；有属性的角色一律按属性公式算，
   // 加体质 / 意志 / 耐力点才会生效，10 / 20 级也会加架势（夕夏、川川、诺拉以前带着 growth 走了这条路）
   if (u.growth && !u.attrs) {

@@ -1490,6 +1490,12 @@ function startCombat() {
   // 过度自信看的是进入战斗时的血量上限：战斗中上限被抬高（护盾、临时层……）也不影响触发线
   (state.units || []).forEach(u => { if (u.kit === "kolt") u.prideMaxHp = baseMaxHp(u); });
   applyPassivePlusAtStart();
+  // 专长（feats.js · hooks.battleStart）：开战时
+  if (typeof featHook === "function") {
+    const featNotes = [];
+    (state.units || []).forEach(u => { if (u.isPlayer && !u.dead && !u.hidden) featHook(u, "battleStart", undefined, featNotes); });
+    if (featNotes.length) appendLog(featNotes.join("\n"));
+  }
   beginRound([]);
   startPlayerPhase();
   appendLog("战斗开始。回合开始效果已结算。", "sep");
@@ -1586,6 +1592,8 @@ function beginRound(notes) {
     if (u.kit === "hiaki" && u.resources && u.resources.powder) { u.resources.powder = false; notes.push("粉落汤气结束。"); }
   });
   if (typeof mutinyTick === "function") mutinyTick(notes);
+  // 专长（feats.js · hooks.roundStart）：每回合开始
+  if (typeof featHook === "function") state.units.forEach(u => { if (u.isPlayer && !u.dead && !u.hidden) featHook(u, "roundStart", undefined, notes); });
   if (typeof syncBpAll === "function") syncBpAll();
   state.units.forEach(u => {
     // 夕夏濒死（倒地没起身）、晕眩或死了就不自动碾压（以前照碾）
@@ -8280,6 +8288,7 @@ function pushDest(a, t) {
 function skillFlowSteps(id, actor, picks) {
   picks = picks || {};
   if (!actor) return [];
+  if (typeof featOfSkill === "function" && featOfSkill(id)) return featSkillSteps(actor, id, picks);
   if (PUSH_SKILLS.includes(id)) {
     // 这两个技能只打同区：目标就在自己这一区，推去的区 = 这一区相连的区
     const zones = zoneNeighbors(actor.zone);
@@ -10239,6 +10248,7 @@ function summonableBlades(h) {
 
 /** 不满足前提时返回原因字符串，满足返回 null */
 function skillRequirementError(actor, id) {
+  if (actor && typeof featOfSkill === "function" && featOfSkill(id)) return featSkillWhy(actor, id);
   const fn = SKILL_REQUIREMENT[id];
   if (!actor || typeof fn !== "function") return null;
   try { return fn(actor) || null; } catch (e) { return null; }
@@ -10311,6 +10321,10 @@ function roleTargetError(a, id, t) {
 
 /** 扣行动点之前先查目标：选不到合法目标的技能不白白花掉行动点。返回原因，null 表示可以 */
 function skillTargetError(a, id, t) {
+  if (typeof featOfSkill === "function" && featOfSkill(id)) {
+    const fl = state.skillFlow;
+    return featSkillTargetWhy(a, id, t, fl && fl.id === id ? fl.picks : {});
+  }
   if (id === "role_renew" && t && !t.isPlayer) return "续命只能对友方使用";
   // 职责技能：分步里选的对象不合法就在扣点之前拦下
   if (/^role_(spread|shelter|boost|gold|double_dot|buffer|sturdy|halve|omen)$/.test(id)) {
@@ -10716,7 +10730,11 @@ function runSkillInner(id, optRun) {
   };
 
   try {
-    if (id === "weapon_retrieve") {
+    if (typeof featOfSkill === "function" && featOfSkill(id)) {
+      // 专长动作（feats.js）：行动点上面已经扣过
+      const fl = state.skillFlow;
+      runFeatSkill(a, id, { t, picks: (fl && fl.picks) || {}, lines, hitOne });
+    } else if (id === "weapon_retrieve") {
       const here = fallenWeapons(a).filter(w => Number(w.zone) === Number(a.zone));
       const pick = state.skillFlow && state.skillFlow.picks && state.skillFlow.picks.weapon;
       const w = here.find(x => x.id === pick) || here[0];

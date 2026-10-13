@@ -157,6 +157,7 @@
         <div class="rh-top"><b>${esc(v.name)}</b><span>Lv${v.level}${v.pending ? ' · <em>待选升级</em>' : ""}</span><button class="g-btn small rh-sheet" data-sheet="${esc(h.kit)}" data-sheet-src="run" title="数值、被动和技能说明">资料</button><button class="g-btn small rh-sheet" data-armory="${esc(h.kit)}" data-armory-src="run" title="武器补正、atk 明细、改装件和客制化">武器</button></div>
         ${v.race ? `<div class="rh-w rh-prof">${esc(v.race)} · ${esc(v.job)} · ${esc(Object.keys(v.profs).map(k => k + v.profs[k]).join(" "))}</div>` : ""}
         ${v.role2 ? `<div class="rh-w rh-solo">第二副职责 ${esc(v.role2)}${v.role2Skills.length ? "：" + esc(v.role2Skills.join("、")) : "（还没学技能）"}</div>` : ""}
+        ${v.feats.length ? `<div class="rh-w rh-solo">专长：${esc(v.feats.join("、"))}</div>` : ""}
         ${v.pendingBreak ? `<div class="rh-w broken">检定受伤：下一场开战时受到 ${v.pendingBreak} 击破</div>` : ""}
         <div class="rh-row">血 ${bar(v.hp, v.hpMax, "hp")}<span>${v.hp}/${v.hpMax}</span></div>
         ${v.layers.length > 1 ? `<div class="rh-w">${esc(layerText(v.layers))}</div>` : ""}
@@ -191,6 +192,8 @@
         ? `${p.name} ${p.choice.level} 级（单人模式）：从第二副职责里再学一个技能`
       : p.choice.type === "prof"
         ? `${p.name} ${p.choice.level} 级：一个自选熟练项（新学一项，或把已有的一项升一级，最高三级）`
+      : p.choice.type === "feat"
+        ? `${p.name} ${p.choice.level} 级：选择一项专长（不限职责和属性）`
         : `${p.name} ${p.choice.level} 级：选择一项职责技能`;
     const opts = query("choiceOptions", { kit: p.kit, index: p.index });
     return `<section class="levelup">

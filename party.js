@@ -594,6 +594,9 @@ function checkPerksFor(kit, prof, hpLow) {
 }
 
 function skillCost(id) {
+  // 专长动作：按专长里写的消耗（默认 1 行动点）
+  const featCost = typeof featSkillCost === "function" ? featSkillCost(id) : null;
+  if (featCost) return featCost;
   // 不稳超导：拉斯缪尔已经处于不稳态时免费释放
   if (id === "ras_super") {
     const r = typeof state !== "undefined" && typeof findKit === "function" ? findKit("ras", state.units) : null;
@@ -1022,6 +1025,8 @@ function skillList(unit) {
   if (typeof fallenWeapons === "function" && fallenWeapons(unit).length) {
     add({ id: "weapon_retrieve", name: "取回武器", hint: "同区 · 取回倒下的武器人 · 本场不能再唤出，武器 atk 和格挡加成减半", bare: true });
   }
+  // 专长带的战斗动作（feats.js）
+  if (typeof featSkills === "function") featSkills(unit).forEach(add);
   // 单人模式：支援（呼叫伙伴的协助攻击）
   if (typeof soloSupportSkill === "function") {
     const sup = soloSupportSkill(unit);

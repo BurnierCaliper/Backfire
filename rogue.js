@@ -451,6 +451,7 @@ const Rogue = (function () {
     u.attrPoints = 0;               // 属性点在单局里走升级选择，不用后台的可分配点
     u.cyberPlan = h.cyber ? Object.assign({}, h.cyber) : null;   // 义体改造（growth.js 按方案重建血量层）
     u.shpBonus = Number(h.shpBonus) || 0;   // 单人模式主角：坚毅生命上限 +15
+    u.feats = (h.feats || []).slice();      // 专长（feats.js）
     applyLevelStats(u);
     if (Array.isArray(h.hp)) {
       (u.layers || []).forEach((l, i) => {
@@ -507,7 +508,11 @@ const Rogue = (function () {
         if (h.role2 && L % SOLO.role2Every === 0 && role2Left(h).length) h.pending.push({ type: "role2", level: L });
       }
       (ROGUE_LEVEL_REWARDS[L] || []).forEach(r => {
-        if (r.type === "note") {
+        if (r.type === "note" && r.key === "feat" && typeof featsReady === "function" && featsReady() && featChoicesFor(h).length) {
+          // 专长（feats.js）：有内容可选就是升级选择，否则先记下欠一项
+          h.pending = h.pending || [];
+          h.pending.push({ type: "feat", level: L });
+        } else if (r.type === "note") {
           h.notes = h.notes || {};
           h.notes[r.key] = (h.notes[r.key] || 0) + 1;
           notes.push(`${heroName(h.kit)} ${L} 级：获得${r.text}（系统尚未实装，先记下）。`);
@@ -544,7 +549,7 @@ const Rogue = (function () {
         const n0 = (h.pending || []).length;
         queueLevelRewards(h, from, u.level, notes, run);
         // 升级提示里写上还要选的奖励
-        const PEND = { attr: "分配 1 点六维属性", prof: "一个自选熟练项", role: "一项职责技能", role2: "第二副职责的一个技能" };
+        const PEND = { attr: "分配 1 点六维属性", prof: "一个自选熟练项", role: "一项职责技能", role2: "第二副职责的一个技能", feat: "一项专长" };
         if (typeof LevelUp !== "undefined") LevelUp.amend(h.kit, (h.pending || []).slice(n0).map(p => `${p.level} 级：${PEND[p.type] || "一项奖励"}（在升级选择里选）`));
       }
       captureHero(u, h);
@@ -568,8 +573,17 @@ const Rogue = (function () {
   }
 
   /** 还没做的升级选择：[{ kit, name, index, choice }] */
+  /** 以前专长没有内容时只在 notes 上记「欠几项」：现在有专长可选了，补成待选 */
+  function settleOwedFeats(h) {
+    const owed = Number((h.notes || {}).feat) || 0;
+    if (!owed || typeof featsReady !== "function" || !featsReady() || !featChoicesFor(h).length) return;
+    h.pending = h.pending || [];
+    for (let i = 0; i < owed; i++) h.pending.push({ type: "feat", level: h.level || 1 });
+    delete h.notes.feat;
+  }
   function pendingChoices(run) {
     const out = [];
+    run.party.forEach(settleOwedFeats);
     run.party.forEach(h => (h.pending || []).forEach((p, i) => out.push({ kit: h.kit, name: heroName(h.kit), index: i, choice: p })));
     return out;
   }
@@ -598,6 +612,10 @@ const Rogue = (function () {
         .map(n => ({ value: n, label: have[n] ? `${n} ${have[n]} → ${have[n] + 1} 级` : `${n}（新学）`, hint: profCategory(n) }));
       // 已有的排前面（升级），新学的按手册顺序
       return opts.filter(o => have[o.value]).concat(opts.filter(o => !have[o.value]));
+    }
+    if (p.type === "feat") {
+      // 专长不限职责和属性：列出所有还能选的
+      return featChoicesFor(h).map(id => ({ value: id, label: featLabel(id), hint: FEATS[id].text || "" }));
     }
     if (p.type === "role") {
       const u = spawnLiveCard(cardOf(kit), 1);
@@ -639,13 +657,16 @@ const Rogue = (function () {
       const have = heroProfs(h);
       have[value] = (have[value] || 0) + 1;
       notes.push(`${heroName(kit)} 熟练项「${value}」${have[value] > 1 ? "升到 " + have[value] + " 级" : "（新学，一级）"}。`);
+    } else if (p.type === "feat") {
+      h.feats = (h.feats || []).concat(value);
+      notes.push(`${heroName(kit)} 获得专长：${featLabel(value)}。`);
     } else if (p.type === "role") {
       h.rolePicks = Object.assign({}, h.rolePicks || {}, { [p.level]: value });
       notes.push(`${heroName(kit)} 学会职责技能：${(roleSkillDef(value.role, value.n) || {}).name || value.role + value.n}。`);
     }
     h.pending.splice(index, 1);
     // 属性变了，血量上限等跟着变：摆上场重新算一次
-    if (p.type === "attr") withParty(run, () => null);
+    if (p.type === "attr" || p.type === "feat") withParty(run, () => null);
     if (before) withParty(run, () => LevelUp.note("choice", findKit(kit, state.units), before));
     return logAll(run, notes);
   }
@@ -1030,13 +1051,15 @@ const Rogue = (function () {
     if (!info || !h) return null;
     const level = Math.min(PROF_MAX, heroProfs(h)[profName(info.prof)] || 0);
     const v = heroView(run, h);
-    const perks = checkPerksFor(kit, info.prof, v.hp * 2 < v.hpMax);
+    let perks = checkPerksFor(kit, info.prof, v.hp * 2 < v.hpMax);
+    // 探索专长（feats.js · hooks.check）：重掷、优势、失败减伤……
+    if (typeof featHook === "function") perks = featHook(h, "check", Object.assign({}, perks), { run, prof: info.prof, diff: info.diff, kit });
     const base = checkChance(info.diff, level);
     // 优势：掷两次取好的；劣势：两次都要过；迎难直上：整个检定失败后再来一次
     let p = perks.adv ? 1 - (1 - base) * (1 - base) : perks.dis ? base * base : base;
     if (perks.reroll) p = 1 - (1 - p) * (1 - p);
     return { kit, opt: info.opt, prof: info.prof, diff: info.diff, diffName: info.diffName, name: v.name, level, base, chance: base ? p : 0, adv: perks.adv, dis: perks.dis,
-      reroll: perks.reroll, softFail: perks.softFail, perkText: perks.text, hp: v.hp, hpMax: v.hpMax };
+      reroll: perks.reroll, rerollName: perks.rerollName || "迎难直上", softFail: perks.softFail, perkText: perks.text, hp: v.hp, hpMax: v.hpMax };
   }
 
   /** 失败受伤：随机属性的伤害按克制表打在检定者的血量层上，最少留 1 点生命；击破留到下一场战斗开场 */
@@ -1101,12 +1124,12 @@ const Rogue = (function () {
         return o.adv ? a || b : a && b;
       };
       ok = once("");
-      if (!ok && o.reroll) { rerolled = true; ok = once("迎难直上重掷 · "); }
+      if (!ok && o.reroll) { rerolled = true; ok = once(`${o.rerollName}重掷 · `); }
     });
     run.lastCheck = { name: o.name, prof: info.prof, diffName: info.diffName, line, chance: o.chance, rolls, ok,
       adv: !!o.adv, dis: !!o.dis };
     notes.push(`${o.name} 进行${info.diffName}「${info.prof}」检定（${profText}${mod}，成功率 ${Math.round(o.chance * 1000) / 10}%）：` +
-      (rerolled ? `失败，迎难直上重掷——${ok ? "成功" : "还是失败"}。` : ok ? "成功。" : "失败。"));
+      (rerolled ? `失败，${o.rerollName}重掷——${ok ? "成功" : "还是失败"}。` : ok ? "成功。" : "失败。"));
     const node = currentNode(run);
     node.check.result = { kit, prof: o.level, ok, opt: info.opt, profName: info.prof };
     if (ok) {
@@ -1821,6 +1844,7 @@ const Rogue = (function () {
       role2Skills: (h.role2Picks || []).map(n => (roleSkillDef(h.role2, n) || {}).name || h.role2 + n),
       race: (heroProfile(h.kit) || {}).race || "", job: (heroProfile(h.kit) || {}).job || "",
       profs: Object.assign({}, heroProfs(h)),
+      feats: (typeof featIds === "function" ? featIds(h) : []).map(id => FEATS[id].name),
       pendingBreak: (h.pendingBreaks || []).reduce((a, b) => a + (Number(b.amount) || 0), 0),
       weapons: h.weapons.map(k => {
         const w = weaponCarryLayers(k);

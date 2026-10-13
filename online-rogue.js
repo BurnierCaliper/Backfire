@@ -404,7 +404,7 @@
     if (pend) {
       const t = pend.choice.type;
       choice = { kit: pend.kit, index: pend.index, name: pend.name, level: pend.choice.level,
-        title: t === "attr" ? "分配 1 点六维属性" + (pend.choice.noRepeat ? "（不能加在之前加过的同一项上）" : "") : t === "prof" ? "一个自选熟练项" : t === "role2" ? "从第二副职责里学一个技能" : "选择一项职责技能",
+        title: t === "attr" ? "分配 1 点六维属性" + (pend.choice.noRepeat ? "（不能加在之前加过的同一项上）" : "") : t === "prof" ? "一个自选熟练项" : t === "role2" ? "从第二副职责里学一个技能" : t === "feat" ? "选择一项专长（不限职责和属性）" : "选择一项职责技能",
         options: Rogue.choiceOptions(r, pend.kit, pend.index).map(o => ({ label: o.label, hint: o.hint || "", value: o.value })) };
     }
     const waitingLevel = [...new Set(Rogue.pendingChoices(r).filter(p => !mine.includes(p.kit)).map(p => p.name))];
