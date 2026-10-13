@@ -264,6 +264,14 @@ function enemySkillList(u) {
       { id: "en_miner_shot", label: "能量射线（倒流）" },
       { id: "en_miner_assist", label: "协助：能量射线（倒流）" }
     ],
+    meteor_spider: [
+      { id: "en_spider_bite", label: "撕咬" },
+      { id: "en_spider_assist", label: "协助：撕咬（施加高能）" }
+    ],
+    meteor_centipede: [
+      { id: "en_centi_shot", label: "弦振射线（高能 + 衍蛛追打）" },
+      { id: "en_centi_assist", label: "协助：弦振射线（衍蛛追打翻倍）" }
+    ],
     gas_collector: [
       { id: "en_gas_ignite", label: "点燃燃气（同区火焰 + 变火场）" },
       { id: "en_gas_spray", label: "喷火（三段）" },
@@ -533,6 +541,10 @@ const ENEMY_SKILL_RANGE = {
   en_gas_spray: "melee",
   en_hunter_shot: "ranged",
   en_miner_shot: "ranged",
+  en_spider_bite: "melee",
+  en_spider_assist: "melee",
+  en_centi_shot: "ranged",
+  en_centi_assist: "ranged",
   en_miner_assist: "ranged",
   en_hunter_assist: "ranged",
   en_thug_knife: "melee",
@@ -685,6 +697,7 @@ function flintRollShots(u, notes) {
 }
 /** 敌人名牌上的行动提示（红底白字的长方形）：这个敌人的回合将要做的特别行动。现在有：连击 */
 function enemyIntents(u) {
+  if (u && !u.isPlayer && u._linger && !u._removed) return ["待复活"];   // 微光下倒在场上的陨体衍蛛
   if (!u || u.isPlayer || u.dead || u.hidden || u.stunned) return [];
   const out = [];
   if (u.kit === "flint_sweeper" && Number(u.resources && u.resources.flintShots) >= 2) out.push("连击");
@@ -793,6 +806,77 @@ function minerDeathTransfer(target, killer, notes) {
   killer.highEnergy = (Number(killer.highEnergy) || 0) + he;
   notes.push(`${target.name} 坠毁：${killer.name} 被施加高能${he ? `，接过 ${he} 点高能值 → ${killer.highEnergy}` : ""}。`);
   if (typeof checkHighBoom === "function") checkHighBoom(killer);
+}
+
+/* ===== 第三采矿场 · 异星生物 ===== */
+const livingSpiders = () => (state.units || []).filter(u => u.kit === "meteor_spider" && !u.dead && !u.hidden && !u._removed);
+/** 陨体弦蚣打中之后：场上每只活着的陨体衍蛛立刻免费对同一个人打 1 点能量（times 次） */
+function spiderFollowUp(t, times, lines) {
+  const spiders = livingSpiders();
+  if (!t || t.dead || !spiders.length || times <= 0) return;
+  lines.push(`${spiders.length} 只陨体衍蛛跟着扑向 ${t.name}（各 ${times} 次）。`);
+  spiders.forEach(s => {
+    for (let i = 0; i < times; i++) {
+      const out = dealTo(s, t, { atk: 0, mult: 0, flat: 1, element: "energy", baseBreak: 0, flags: { action: true, anyRange: true, blockResolved: true, block: "none", atkFx: [] } });
+      if (out && out.extra) lines.push(...out.extra);
+    }
+  });
+}
+/** 异星生物死亡（app.js · sweepDeadEnemies 在清场前调用）。返回 true = 不离场（陨体衍蛛留在场上等复活）
+ *  陨体衍蛛：25% 把天气变成微光；微光下还有活着的衍蛛 → 留在场上，下回合结束时以 50% 血量、1 架势复活。
+ *  陨体弦蚣：微光下死亡分裂成 1–3 只陨体衍蛛。 */
+function alienOnDeath(u, notes) {
+  if (!u) return false;
+  if (u.kit === "meteor_centipede" && !u._splitDone) {
+    u._splitDone = true;
+    if (state.weather === "glow") {
+      const n = 1 + Math.floor(Math.random() * 3);
+      const p = enemyPresets().find(x => x.id === "meteor_spider");
+      for (let i = 0; i < n; i++) {
+        const s = typeof applyEnemyIV === "function" ? applyEnemyIV(p.build(u.level, state.partySize)) : p.build(u.level, state.partySize);
+        s.zone = u.zone;
+        state.units.push(s);
+      }
+      notes.push(`微光下，${u.name} 的尸体分裂成 ${n} 只陨体衍蛛。`);
+    }
+    return false;
+  }
+  if (u.kit !== "meteor_spider") return false;
+  u.dead = true;
+  if (!u._deathRolled) {
+    u._deathRolled = true;
+    if (Math.random() < 0.25 && state.weather !== "glow") {
+      const err = typeof setWeather === "function" ? setWeather("glow", { by: u.id }) : "无法改变天气";
+      notes.push(err ? `${u.name} 死去时想把天气变成微光：${err}` : `${u.name} 死去，碎裂的陨体让天气变成了微光。`);
+    }
+    if (state.weather === "glow" && livingSpiders().length) {
+      u._linger = { reviveTurn: (Number(state.turnNo) || 0) + 1 };
+      notes.push(`微光下，${u.name} 倒在场上没有离开：下回合结束时会复活（场上的陨体衍蛛全部死亡就不会再复活）。`);
+    }
+  }
+  return !!u._linger;
+}
+/** 回合结束（app.js · turnEnd）：留在场上的陨体衍蛛到点复活；场上已经没有活着的衍蛛就全部离场 */
+function spiderRoundEnd(notes) {
+  const lingering = (state.units || []).filter(u => u.kit === "meteor_spider" && u._linger && !u._removed);
+  if (!lingering.length) return;
+  if (!livingSpiders().length) {
+    notes.push("场上的陨体衍蛛已经全部死亡，倒下的衍蛛不会再复活。");
+    lingering.forEach(u => { u._linger = null; if (typeof removeEnemyFromField === "function") removeEnemyFromField(u, notes); });
+    return;
+  }
+  lingering.filter(u => (Number(state.turnNo) || 0) >= u._linger.reviveTurn).forEach(u => {
+    u._linger = null;
+    u._deathRolled = false;
+    u._revived = true;   // 复活后再被打死：不再给经验、掉落和击杀分（app.js · settleEnemyKill）
+    u._xpGiven = false;  // 让再次死亡照常判死
+    u.dead = false;
+    u.stunned = false;
+    u.statuses = {};
+    (u.layers || []).forEach(l => { l.current = Math.max(1, Math.round((Number(l.max) || 0) * 0.5)); });
+    u.def = Math.min(1, Number(u.defMax) || 1);
+    notes.push(`${u.name} 复活了（50% 血量，1 架势）。`);
+  });
 }
 
 /** 蚁型特殊戒备兵种：对标定的区发射大酸液弹。区内随机一人 2×atk 酸 2 击破（单体），同区其他人 等级+1d6 酸（范围） */
@@ -1033,6 +1117,19 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
   if (id === "en_miner_shot" || id === "en_miner_assist") {
     if (!needT()) return true;
     aa(t, { element: "energy", mult: 1, baseBreak: 1, flags: { action: true, atkFx: ["backflow"] } });
+    return true;
+  }
+  if (id === "en_spider_bite" || id === "en_spider_assist") {
+    if (!needT()) return true;
+    if (id === "en_spider_bite") stepTowardZone(a, t.zone);
+    aa(t, { element: "energy", mult: 1, baseBreak: 1, onConnect: id === "en_spider_assist" ? { status: "high" } : undefined });
+    return true;
+  }
+  if (id === "en_centi_shot" || id === "en_centi_assist") {
+    if (!needT()) return true;
+    const out = aa(t, { element: "energy", mult: 1, baseBreak: 1, onConnect: { status: "high" } });
+    // 打出去了（没被射程 / 危墙挡下）才让衍蛛追打；被格挡的照样追打（追打是另外的攻击）
+    if (enemyShotWentOut(out)) spiderFollowUp(t, id === "en_centi_assist" ? 2 : 1, lines);
     return true;
   }
   if (id === "en_overseer") {

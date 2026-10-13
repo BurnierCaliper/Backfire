@@ -103,6 +103,8 @@ const EnemyAI = (function () {
     flint_sweeper:  { dist: 1,    aim: "local",   near: "en_flint",          far: "en_flint" },
     alarm_bot:      { dist: null, aim: "local",   special: "alarm", fixed: true },
     meteor_miner:   { dist: 1,    aim: "local",   near: "en_miner_shot",     far: "en_miner_shot" },
+    meteor_spider:  { dist: 0,    aim: "local",   near: "en_spider_bite" },
+    meteor_centipede: { dist: 1,  aim: "lowest",  near: "en_centi_shot",     far: "en_centi_shot", fixed: true },
     thug_knife:     { dist: 0,    aim: "local",   near: "en_thug_knife" },
     thug_hammer:    { dist: 0,    aim: "local",   near: "en_thug_hammer" },
     crow:           { dist: 0,    aim: "lowest",  near: "en_crow" },
@@ -233,7 +235,14 @@ const EnemyAI = (function () {
     let aim = spec.aim || "local";
     // 手册：强盗头子在场时，所有狂徒集火血量最低者
     if (/^thug_/.test(u.kit || "") && foes().some(x => x.kit === "bandit_boss")) aim = "lowest";
-    if (aim === "lowest") return { unit: lowest(prey) };
+    if (aim === "lowest") {
+      // 不会移动的远程单位（陨体弦蚣）：在打得到的人里挑血量最低的
+      if (spec.fixed && spec.dist != null) {
+        const reach = prey.filter(p => zdist(u.zone, p.zone) === spec.dist);
+        if (reach.length) return { unit: lowest(reach) };
+      }
+      return { unit: lowest(prey) };
+    }
     if (aim === "nearest") return { unit: nearestFirst(u, prey)[0] };
     if (aim === "topAtk") {
       const s = prey.slice().sort((a, b) =>
@@ -260,7 +269,7 @@ const EnemyAI = (function () {
         return kz === from ? null : stepToward(u, kz);
       }
     }
-    if (spec.dist == null || u.noMove) return null;
+    if (spec.dist == null || u.noMove || spec.fixed) return null;   // fixed：不会主动移动
     const d = zdist(u.zone, target.zone);
     if (d === spec.dist) return null;
     if (d > spec.dist) {                            // 太远 → 接近一格

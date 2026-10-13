@@ -1979,6 +1979,7 @@ function turnEnd() {
   snapshot();
   const notes = ["—— 回合结束 ——"];
   releaseTurnLocks(notes);
+  if (typeof spiderRoundEnd === "function") spiderRoundEnd(notes);   // 陨体衍蛛：到点复活
   // 剑术+：这一回合切换刀势得到的附赠动作没用掉的，留到下回合（再下回合就过期）
   state.units.forEach(u => {
     const g = u.kit === "hiaki" && u.resources && u.resources.stanceGrant;
@@ -4511,6 +4512,7 @@ function isOutlawThugKit(kit) {
 
 function settleEnemyKill(target, notes) {
   if (!target || target.isPlayer || target._xpGiven) return;
+  if (target._revived) { target.dead = true; target._xpGiven = true; return; }   // 复活过的陨体衍蛛：再死不给经验、掉落、击杀分
   target.dead = true;
   target._xpGiven = true;
   // 战场数据：最后一击是谁打的算谁；持续伤害在某人行动中打死的，算那个人
@@ -4587,6 +4589,7 @@ function sweepDeadEnemies() {
         removeEnemyFromField(body, notes);
       }
     }
+    if (typeof alienOnDeath === "function" && alienOnDeath(u, notes)) return;   // 微光下的陨体衍蛛：留在场上等复活
     removeEnemyFromField(u, notes);
   });
   return notes;

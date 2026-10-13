@@ -93,7 +93,7 @@ function rollEnemyLoot(u) {
   if (kit === "giant") return roll(3, 6, 0) * 100 + 100;
   if (kit === "outlaw_king") return 0;
   const fixed = {
-    guard_sword: 20, guard_gun: 20, patrol_car: 30, buoy: 20, dumpdrone: 35, mine_guard: 20, flint_sweeper: 20, alarm_bot: 20, meteor_miner: 35,
+    guard_sword: 20, guard_gun: 20, patrol_car: 30, buoy: 20, dumpdrone: 35, mine_guard: 20, flint_sweeper: 20, alarm_bot: 20, meteor_miner: 35, meteor_spider: 10, meteor_centipede: 15,
     crow: 15, swarm: 200, patrolboat: 200, spreader: 180, watchcrow: 350, dustbody: 120
   };
   return fixed[kit] || 0;

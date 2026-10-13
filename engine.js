@@ -1731,6 +1731,17 @@ function enemyPresets() {
       u.self = "store";
       return u;
     }},
+    // —— 第三采矿场 · 异星生物（星灵）——
+    // 陨体衍蛛：血量同空投蜂群（全部星灵），架势同机器人看守（枪），atk 同巡检浮标
+    { id: "meteor_spider", name: "陨体衍蛛", build(lv, p) {
+      return unitOf(this.name, lv, [{ type: "spirit", hp: scaleHp(5 + (lv - 1) * 2, p) }], 3 + milestone(lv, 10), 4 + (lv - 1) * 2,
+        { kit: "meteor_spider", range: "melee", dice: [0, 0], element: "energy" });
+    }},
+    // 陨体弦蚣：数值同狂徒（匕首），血量全部星灵
+    { id: "meteor_centipede", name: "陨体弦蚣", build(lv, p) {
+      return unitOf(this.name, lv, [{ type: "spirit", hp: scaleHp(17 + (lv - 1) * 4, p) }], 3 + milestone(lv, 10), 5 + (lv - 1),
+        { kit: "meteor_centipede", range: "ranged", dice: [0, 0], element: "energy" });
+    }},
     { id: "bigsand", name: "大沙灵", build(lv, p) {
       return unitOf(this.name, lv, [{ type: "sand", hp: scaleHp(37 + (lv - 1) * 6 + milestone(lv, 2), p) }], 4, 5 + milestone(lv, 2), { kit: "bigsand", range: "melee", dice: [1, 4], element: "physical" });
     }},

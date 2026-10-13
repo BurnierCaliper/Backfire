@@ -138,7 +138,7 @@
       zone: Number(u.zone) || 1,
       hidden: !!(u.hidden || u.fused),
       // 带着高能被打死的敌人：高能自爆演完之前先不算死（卡片不淡出），自爆把高能清掉之后才淡出
-      dead: !!(u.dead || u._removed) && !highBoomPending(u),
+      dead: !!(u.dead || u._removed) && !highBoomPending(u) && !(u._linger && !u._removed),   // 微光下倒在场上等复活的陨体衍蛛：卡片留着
       weaponUnit: (typeof isWeaponUnit === "function") ? !!isWeaponUnit(u) : !!u.weaponOf,
       escort: u.escort || null,   // 护送对象（货车 / 委托人）：规则上按武器人处理，但画面上不能叫它武器人
       dying: !!u.dying,

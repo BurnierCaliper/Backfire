@@ -368,6 +368,18 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **第三采矿场异星生物杂兵：陨体衍蛛、陨体弦蚣**（engine.js · `enemyPresets`；party.js · `effectiveAtk`；enemies.js · `alienOnDeath`、`spiderRoundEnd`、`spiderFollowUp`；ai.js（`fixed` 不会主动移动、只挑打得到的人里血量最低的）；app.js · `sweepDeadEnemies`、`settleEnemyKill`、`turnEnd`；game.js · 等复活的卡片留着）：
+  - 新阵营「异星生物」，出没在第三采矿场；和安保不是一伙的（不混编，警戒自动机也不会因为它们挨打而醒）。
+  - **陨体衍蛛**（`meteor_spider`）：血量同空投蜂群（全部星灵），架势同机器人看守（枪），atk 同巡检浮标；两只一组记 1 枚代币。
+    - 主动接近；撕咬近距 1×atk 能量，1 击破。协助同普通攻击，另外施加高能。
+    - 场上每有一只活着的陨体衍蛛（含自己），atk +25%（两只各 +50%）。
+    - 死亡时 25% 把天气变成微光（固有天气 / 被锁定改不了）。
+    - 微光下死亡、场上还有活着的衍蛛：留在场上（名牌提示「待复活」），下回合结束时以 50% 血量、1 架势复活。回合结束时场上已经没有活着的衍蛛，倒下的就全部离场、不再复活。复活过的再被打死不再给经验、掉落和击杀分。
+  - **陨体弦蚣**（`meteor_centipede`）：数值同狂徒（匕首），血量全部星灵。远距离，不会主动移动，在打得到的人里挑血量最低的打。
+    - 弦振射线：远距 1×atk 能量，1 击破，打中施加高能；打出去之后场上每只活着的衍蛛立刻对同一个人免费打 1 点能量（不限距离、不能格挡）。协助同普通攻击，衍蛛追打 2 次。
+    - 微光下死亡：分裂成 1–3 只陨体衍蛛（同等级，在它所在的区）。
+  - 摧毁掉落：衍蛛 10 奎支、弦蚣 15 奎支（参照穴鸦 / 匕首狂徒）。测试：`tests/mine3-enemies.test.js`。
+
 - **休眠的图标**（hud-icons.js · `ICONS.dormant`、`unitBadges`；online-view.js 联机投影带上 `dormant`）：休眠的敌人名牌上挂一个灰蓝色圆角方块、里面是一大两小「Zzz」的图标（鼠标停上去有说明），醒来就消失；状态文字「休眠」不再重复写。联机玩家画面也看得到。测试：`tests/hud-icons.test.js`。
 
 - **第三采矿场安保杂兵（能量）：矿场警戒自动机、陨石开采机；新词条「休眠」**（engine.js · `enemyPresets`；enemies.js · `wakeDormant`、`dormantAfterMove`、`dormantOnAllyHurt`、`alarmApplyHigh`、`minerDeathTransfer`；ai.js；app.js · `dealTo`（`anyRange`、挨打叫醒）、`doMoveInner`、`displaceTo`、`checkHighBoom`、`settleEnemyKill`、`statusLine`）：

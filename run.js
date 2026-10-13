@@ -232,6 +232,9 @@ const ENEMY_INFO = {
   // 第三采矿场：用能量的安保部队（还会有异星生物）
   alarm_bot:     { faction: "安保", regions: ["第三采矿场"], tokens: 1 },
   meteor_miner:  { faction: "安保", regions: ["第三采矿场"], tokens: 1 },
+  // 第三采矿场：异星生物（星灵；和安保不是一伙的）。衍蛛两只一组记 1 枚代币
+  meteor_spider:    { faction: "异星生物", regions: ["第三采矿场"], tokens: 1, group: 2 },
+  meteor_centipede: { faction: "异星生物", regions: ["第三采矿场"], tokens: 1 },
   // —— 警卫队（有机体，可与安保混编）——
   captain_wolf:   { faction: "警卫队", regions: ["巨人城", "外城区"], tokens: 2 },
   captain_ox:     { faction: "警卫队", regions: ["巨人城", "外城区"], tokens: 2 },

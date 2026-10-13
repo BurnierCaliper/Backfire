@@ -1122,6 +1122,11 @@ function effectiveAtk(unit, units) {
   if (unit.bondAtk) base += Number(unit.bondAtk) || 0;
   if (unit.duetAtk) base += Number(unit.duetAtk) || 0;   // 双重奏：溢出的治疗，下回合开始失去
   if (unit.resources && unit.resources.mecha && unit.resources.overdrive) base *= 1.2;   // 银翼·机体强化
+  // 陨体衍蛛：场上每有一只活着的陨体衍蛛（含自己），atk +25%
+  if (unit.kit === "meteor_spider") {
+    const n = (units || []).filter(u => u && u.kit === "meteor_spider" && !u.dead && !u.hidden && !u._removed).length;
+    base = Math.round(base * (1 + 0.25 * Math.max(1, n)));
+  }
   const tier = typeof exhaustTierOf === "function" ? exhaustTierOf(unit) : 0;
   return tier >= 2 ? Math.max(0, base - 3) : base;
 }
