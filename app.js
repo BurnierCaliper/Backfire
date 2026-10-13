@@ -5779,9 +5779,14 @@ function runSoloSupport(a, kit, target, lines) {
 
 function eligibleAssisters(breaker, broken) {
   if (!broken || assistTargetGone(broken)) return [];
-  if (broken.isPlayer) {
+  // 敌人那边出手：我方失衡，或者敌人把敌对阵营的敌人打失衡（异星生物 ↔ 安保）。
+  // 只有和打出失衡的那一方是一伙、又和失衡的人敌对的敌人才协助
+  if (broken.isPlayer || (breaker && !breaker.isPlayer)) {
+    const hostile = (x, y) => typeof hostileTo === "function" ? hostileTo(x, y) : !!x.isPlayer !== !!y.isPlayer;
     return fieldUnits().filter(u =>
       !u.isPlayer &&
+      hostile(u, broken) &&
+      (!breaker || breaker.isPlayer || u.id === breaker.id || !hostile(u, breaker)) &&
       !u.dead && !u.hidden && !u.stunned &&
       (unitCanFight(u) || u.kit === "ufo_body") &&
       u.kit !== "ufo_leg" &&
@@ -5950,7 +5955,7 @@ function queueAssistAttack(breaker, broken) {
   if (broken._imbalanceLock) return;
   if (broken.isPlayer && typeof bpFirstBreakGuard === "function" && bpFirstBreakGuard(broken)) return;
   const list = eligibleAssisters(breaker, broken);
-  const side = broken.isPlayer ? "敌人" : "玩家角色";
+  const side = broken.isPlayer || (breaker && !breaker.isPlayer) ? "敌人" : "玩家角色";
   if (!list.length) {
     appendLog(`${broken.name} 失衡，但没有可发动协助攻击的${side}。`);
     return;
@@ -5964,7 +5969,7 @@ function queueAssistAttack(breaker, broken) {
   state.assistQueue.push({
     breakerId: breaker ? breaker.id : null,
     targetId: broken.id,
-    vsPlayer: !!broken.isPlayer
+    vsPlayer: !!broken.isPlayer || !!(breaker && !breaker.isPlayer)   // 敌人那边出手协助（AI 选人）
   });
   appendLog(`${broken.name} 失衡。可协助攻击的${side}：${list.map(u => u.name).join("、")}。`);
   presentAssistModal();
@@ -6078,6 +6083,7 @@ function autoEnemyBlockers(target) {
   return self.concat(fieldUnits().filter(u => {
     if (u.isPlayer || u.id === target.id || u.stunned || u.dead || u.hidden) return false;
     if (Number(u.zone) !== Number(target.zone)) return false;
+    if (typeof hostileTo === "function" && hostileTo(u, target)) return false;   // 敌对阵营不替它挡
     if (u.kit === "captain_ox") return true;
     if (u.kit === "patrol_car" && !(u.resources && u.resources.blockUsedThisTurn)) return true;
     return false;

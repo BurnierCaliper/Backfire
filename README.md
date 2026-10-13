@@ -368,6 +368,14 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **三方混战：异星生物和安保互相敌对**（enemies.js · `hostileTo`、`hostilesOf`；ai.js · `validPrey`；app.js · `eligibleAssisters`、`queueAssistAttack`、`autoEnemyBlockers`；run.js · `rollThreeWay`、`THREE_WAY`、`pickByTokens`）：
+  - **敌对**：异星生物和其他所有阵营的敌人互相视为敌人；其他阵营之间照旧是一伙的（安保 + 警卫队照常混编）。
+    - 敌人 AI 能打的人 = 我方 + 和它敌对的敌人（同样按各自的选目标规则，例如同区优先、打血量最低的）。
+    - 敌人打敌人：不问我方协助格挡，直接结算；被打死照常给我方经验、掉落和击杀分（全队的）。
+    - 失衡后的协助攻击：敌人把敌对阵营的敌人打失衡，只有和打出失衡的那一方一伙的敌人协助（AI 选人），我方不协助；敌人把我方打失衡，也只有打人那一方的同伙协助。牛队长、巡逻车不替敌对阵营挡。
+    - 矿场警戒自动机：敌对的异星生物走进它的区、或打了它的同伙，也会把它叫醒，并给那只异星生物施加高能；电涌也打身上有高能的异星生物。
+  - **三方混战的遭遇**：第三采矿场的随机遭遇，三区制时有 50% 变成三方混战（`THREE_WAY.chance`）：玩家在中间 2 区，安保和异星生物各占 1 区 / 3 区（随机），两边各 3 枚代币。指定了阵营、混战、两区制的不会变。测试：`tests/mine3-enemies.test.js`。
+
 - **第三采矿场异星生物杂兵：陨体衍蛛、陨体弦蚣**（engine.js · `enemyPresets`；party.js · `effectiveAtk`；enemies.js · `alienOnDeath`、`spiderRoundEnd`、`spiderFollowUp`；ai.js（`fixed` 不会主动移动、只挑打得到的人里血量最低的）；app.js · `sweepDeadEnemies`、`settleEnemyKill`、`turnEnd`；game.js · 等复活的卡片留着）：
   - 新阵营「异星生物」，出没在第三采矿场；和安保不是一伙的（不混编，警戒自动机也不会因为它们挨打而醒）。
   - **陨体衍蛛**（`meteor_spider`）：血量同空投蜂群（全部星灵），架势同机器人看守（枪），atk 同巡检浮标；两只一组记 1 枚代币。

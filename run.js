@@ -303,10 +303,54 @@ function regionFactions(region) {
 
 const pickOne = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
-/** 随机遭遇。opt: { region, tokens, mixed, faction, zoneMode, weather, level } */
+/** 按代币从池子里抽敌人：[{ preset, count }] */
+function pickByTokens(pool, tokens) {
+  const enemies = [];
+  let left = tokens;
+  for (let guard = 0; guard < 40 && left > 0; guard++) {
+    const ok = pool.filter(k => enemyTokens(k) <= left);
+    if (!ok.length) break;
+    const k = pickOne(ok);
+    enemies.push({ preset: k, count: groupCount(ENEMY_INFO[k]) });
+    left -= enemyTokens(k);
+  }
+  return enemies;
+}
+
+/* 三方混战（第三采矿场，三区制）：玩家在中间 2 区，安保和异星生物各占一边，两边各 3 枚代币，两个阵营也互相敌对 */
+const THREE_WAY = { region: "第三采矿场", factions: ["安保", "异星生物"], tokens: 3, chance: 0.5 };
+function rollThreeWay(opt) {
+  const sides = THREE_WAY.factions.slice();
+  if (Math.random() < 0.5) sides.reverse();   // 谁在 1 区、谁在 3 区随机
+  const enemies = [];
+  sides.forEach((f, i) => {
+    const pool = regionPool(THREE_WAY.region).filter(k => ENEMY_INFO[k].faction === f);
+    const zone = i === 0 ? 1 : 3;
+    pickByTokens(pool, THREE_WAY.tokens).forEach(e => {
+      for (let n = 0; n < Math.max(1, Number(e.count) || 1); n++) enemies.push({ preset: e.preset, count: 1, zone });
+    });
+  });
+  const spec = {
+    name: `${THREE_WAY.region}·三方混战`, region: THREE_WAY.region, faction: "三方混战",
+    tier: "normal", tokens: THREE_WAY.tokens * 2, mixed: false, threeWay: true, enemies,
+    layout: "threeway", layoutLocked: true, playerZone: 2
+  };
+  return finishEncounter(spec, Object.assign({}, opt, { zoneMode: 3 }));
+}
+
+/** 随机遭遇。opt: { region, tokens, mixed, faction, zoneMode, weather, level, threeWay } */
 function rollEncounter(opt) {
   opt = opt || {};
   const region = opt.region || "外城区";
+
+  // 第三采矿场：三区制的遭遇有 THREE_WAY.chance 的概率变成三方混战（指定了阵营 / 混战 / 不分地区的不算）。
+  // 先定下区制（和平常一样两区 / 三区各一半），三区才掷三方混战
+  if (region === THREE_WAY.region && !opt.anyRegion && !opt.faction && opt.mixed == null) {
+    const zm = Number(opt.zoneMode) || (Math.random() < 0.5 ? 2 : 3);
+    const want = zm === 3 && (opt.threeWay != null ? !!opt.threeWay : Math.random() < THREE_WAY.chance);
+    if (want) return rollThreeWay(opt);
+    opt = Object.assign({}, opt, { zoneMode: zm });
+  }
 
   // 代币：5% 变 5 枚
   const extra = opt.tokens == null && Math.random() < CHANCE_EXTRA_TOKEN;
@@ -327,16 +371,7 @@ function rollEncounter(opt) {
   }
   if (!pool.length) pool = regionPool(poolRegion);
 
-  const enemies = [];
-  let left = tokens;
-  for (let guard = 0; guard < 40 && left > 0; guard++) {
-    const ok = pool.filter(k => enemyTokens(k) <= left);
-    if (!ok.length) break;
-    const k = pickOne(ok);
-    const info = ENEMY_INFO[k];
-    enemies.push({ preset: k, count: groupCount(info) });
-    left -= enemyTokens(k);
-  }
+  const enemies = pickByTokens(pool, tokens);
 
   return finishEncounter({
     name: opt.anyRegion ? (mixed ? "遭遇·混战" : `遭遇·${faction}`) : mixed ? `${region}·混战` : `${region}·${faction}`,
@@ -453,6 +488,7 @@ function layoutLabel(kind) {
     all3: "全员 3 区",
     split23: "2 / 3 区对半",
     pincer: "夹击（玩家 2 区）",
+    threeway: "三方混战（玩家 2 区，两个阵营各占一边）",
     front2: "敌人 2 区",
     custom: "主持人预设"
   })[kind] || kind;

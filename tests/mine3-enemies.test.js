@@ -227,3 +227,75 @@ test("陨体衍蛛死亡时 25% 把天气变成微光；不是微光时死了就
   assert.equal(g.S.weather, "none");
   assert.ok(t1._removed, "照常离场");
 });
+
+/* ---------- 三方混战：异星生物 ↔ 安保互相敌对 ---------- */
+test("敌对：异星生物和其他阵营的敌人互相敌对；其他阵营之间照旧是一伙的", () => {
+  const c = H.load();
+  const P = { isPlayer: true }, sec = { kit: "alarm_bot" }, sec2 = { kit: "guard_sword" }, ali = { kit: "meteor_spider" }, ali2 = { kit: "meteor_centipede" }, liz = { kit: "captain_lizard" };
+  assert.equal(c.hostileTo(P, sec), true);
+  assert.equal(c.hostileTo(sec, ali), true);
+  assert.equal(c.hostileTo(ali, liz), true, "异星生物和警卫队也敌对");
+  assert.equal(c.hostileTo(sec, sec2), false);
+  assert.equal(c.hostileTo(sec, liz), false, "安保和警卫队照旧一伙");
+  assert.equal(c.hostileTo(ali, ali2), false);
+});
+
+test("三方混战的遭遇：三区，玩家在 2 区，安保和异星生物各占一边，各 3 枚代币", () => {
+  const c = H.load();
+  for (let i = 0; i < 30; i++) {
+    const spec = c.rollEncounter({ region: "第三采矿场", threeWay: true, zoneMode: 3 });
+    assert.equal(spec.zoneMode, 3); assert.equal(spec.playerZone, 2); assert.equal(spec.layout, "threeway");
+    const by = {};
+    spec.enemies.forEach(e => {
+      const f = c.enemyInfo(e.preset).faction;
+      by[f] = by[f] || { zones: new Set(), tokens: 0, spiders: 0 };
+      by[f].zones.add(e.zone);
+      if (e.preset === "meteor_spider") by[f].spiders++; else by[f].tokens += c.enemyTokens(e.preset);
+    });
+    assert.deepEqual(Object.keys(by).sort(), ["安保", "异星生物"]);
+    assert.equal(by["安保"].zones.size, 1); assert.equal(by["异星生物"].zones.size, 1);
+    assert.notEqual([...by["安保"].zones][0], [...by["异星生物"].zones][0], "各占一边");
+    assert.ok(![...by["安保"].zones, ...by["异星生物"].zones].includes(2), "两边是 1 区和 3 区");
+    assert.equal(by["安保"].tokens, 3);
+    assert.equal(by["异星生物"].tokens + by["异星生物"].spiders / 2, 3, "衍蛛两只记 1 枚");
+  }
+  // 两区制、指定阵营：不会变成三方混战
+  for (let i = 0; i < 20; i++) {
+    assert.notEqual(c.rollEncounter({ region: "第三采矿场", zoneMode: 2 }).layout, "threeway");
+    assert.notEqual(c.rollEncounter({ region: "第三采矿场", zoneMode: 3, faction: "安保" }).layout, "threeway");
+  }
+});
+
+test("三方混战里：衍蛛会去咬同区的安保；异星打安保不弹我方格挡；吵醒的警戒自动机给打人的异星施加高能；协助只找同伙", () => {
+  const f = field([{ id: "meteor_spider", lv: 5, zone: 3 }, { id: "alarm_bot", lv: 5, zone: 3 }, { id: "meteor_miner", lv: 5, zone: 3 }], { zoneMode: 3 });
+  const sp = f.E("meteor_spider"), bot = f.E("alarm_bot"), miner = f.E("meteor_miner"), k = f.P("kolt"), h = f.P("helu");
+  k.zone = 1; h.zone = 1; tank(miner);
+  f.S.combatPhase = "enemy"; f.c.refreshEnemyEconomy(sp);
+  const plan = f.c.EnemyAI.plan(sp);
+  assert.ok(plan, "衍蛛有事可做");
+  assert.match(plan.meta.skillName, /撕咬/, "同区就有敌对的安保：直接咬");
+  const m0 = f.c.totalHp(miner), b0 = f.c.totalHp(bot);
+  plan.thunk();
+  assert.equal((f.S.blockQueue || []).length, 0, "异星打安保：不问我方格挡");
+  f.c.BattleSim.resolveQueues(noBlock);
+  assert.ok(f.c.totalHp(miner) < m0 || f.c.totalHp(bot) < b0, "咬到了安保");
+  assert.equal(bot.dormant, false, "同伙挨打，警戒自动机醒了");
+  assert.equal(sp.statuses.high, true, "打人的衍蛛被施加高能");
+  // 衍蛛把安保打失衡：只有和衍蛛一伙的（异星）能协助，我方和安保都不行
+  const list = f.c.eligibleAssisters(sp, bot).map(u => u.kit);
+  assert.ok(!list.includes("alarm_bot") && !list.includes("meteor_miner") && !list.some(k => ["kolt", "helu"].includes(k)));
+  // 安保把衍蛛打失衡：安保那边的协助
+  const list2 = f.c.eligibleAssisters(miner, sp).map(u => u.kit);
+  assert.ok(list2.every(k => k !== "meteor_spider"));
+});
+
+test("三方混战整场自动对打：能打完、没有报错", () => {
+  for (let i = 0; i < 6; i++) {
+    const c = H.load();
+    const spec = c.rollEncounter({ region: "第三采矿场", threeWay: true, zoneMode: 3, level: 5 });
+    c.BattleSim.setup({ party: ["kolt", "helu", "tou"], encounter: spec, level: 5, seed: "TW" + i });
+    const r = c.BattleSim.run({ maxRounds: 25 });
+    assert.ok(["player", "enemy", "timeout"].includes(r.winner) || r.winner, "打出了结果：" + r.winner);
+    assert.ok(r.actions > 0);
+  }
+});

@@ -742,6 +742,28 @@ function hunterHeatAtTurnStart(u, notes) {
   }
 }
 
+/* ===== 阵营敌对 =====
+ * 异星生物和其他所有阵营的敌人互相视为敌人（会互相攻击、不互相协助）；其余敌人阵营之间照旧是一伙的。 */
+const HOSTILE_FACTION = "异星生物";
+function factionOf(u) {
+  if (!u) return null;
+  if (u.isPlayer) return "我方";
+  const i = typeof enemyInfo === "function" ? enemyInfo(u.kit) : null;
+  return (i && i.faction) || null;
+}
+/** a 和 b 是不是敌对的 */
+function hostileTo(a, b) {
+  if (!a || !b || a === b) return false;
+  if (!!a.isPlayer !== !!b.isPlayer) return true;
+  if (a.isPlayer) return false;
+  const fa = factionOf(a), fb = factionOf(b);
+  return !!fa && !!fb && fa !== fb && (fa === HOSTILE_FACTION || fb === HOSTILE_FACTION);
+}
+/** 场上和 a 敌对、还活着的单位 */
+function hostilesOf(a) {
+  return (state.units || []).filter(u => u && hostileTo(a, u) && !u.dead && !u.hidden && !u._removed && !u.fused && u.kit !== "ironwall");
+}
+
 /* ===== 第三采矿场 ===== */
 /** 身上有高能（状态或高能值） */
 function hasHigh(u) { return !!u && ((u.statuses && u.statuses.high) || (Number(u.highEnergy) || 0) > 0); }
@@ -761,20 +783,20 @@ function alarmApplyHigh(a, t, notes) {
 }
 /** 矿场警戒自动机要打的：所有身上有高能、还站着的敌对单位（不限距离） */
 function alarmTargets(a) {
-  return allPlayers().filter(u => !u.dead && hasHigh(u) && !(typeof isDownProtected === "function" && isDownProtected(u)));
+  return hostilesOf(a).filter(u => hasHigh(u) && !(typeof isDownProtected === "function" && isDownProtected(u)));
 }
 /** 休眠（通用词条）：开场休眠的敌人不行动、不协助，直到被叫醒。叫醒时 culprit 是吵醒它的单位（可能没有） */
 function wakeDormant(u, culprit, notes, why) {
   if (!u || !u.dormant || u.dead) return;
   u.dormant = false;
   notes.push(`${u.name} ${why || "被惊动"}，解除休眠。`);
-  if (u.kit === "alarm_bot" && culprit && !!culprit.isPlayer !== !!u.isPlayer) alarmApplyHigh(u, culprit, notes);
+  if (u.kit === "alarm_bot" && culprit && hostileTo(u, culprit)) alarmApplyHigh(u, culprit, notes);
 }
 /** 我方单位进入某区（自己走、被推都算）：叫醒那一区休眠的敌人（app.js · doMoveInner / displaceTo 调用） */
 function dormantAfterMove(mover, notes) {
-  if (!mover || !mover.isPlayer || mover.kind) return;
+  if (!mover || mover.kind) return;
   (state.units || []).forEach(u => {
-    if (u.dormant && !u.isPlayer && !u.dead && !u.hidden && Number(u.zone) === Number(mover.zone)) wakeDormant(u, mover, notes, `${mover.name} 进入它所在的区`);
+    if (u.dormant && !u.isPlayer && !u.dead && !u.hidden && hostileTo(u, mover) && Number(u.zone) === Number(mover.zone)) wakeDormant(u, mover, notes, `${mover.name} 进入它所在的区`);
   });
 }
 /** 敌人受到伤害：同阵营（含可混编的阵营，不含异星生物）休眠的单位都被叫醒，自己挨打也醒（app.js · dealTo 调用） */
@@ -788,7 +810,7 @@ function dormantOnAllyHurt(target, attacker) {
     const f = info(u.kit).faction;
     const same = u === target || (tf && f && (typeof alliesOf === "function" ? alliesOf(f) : [f]).includes(tf));
     if (!same) return;
-    wakeDormant(u, attacker && attacker.isPlayer ? attacker : null, notes, u === target ? "受到攻击" : `${target.name} 受到攻击`);
+    wakeDormant(u, attacker && hostileTo(u, attacker) ? attacker : null, notes, u === target ? "受到攻击" : `${target.name} 受到攻击`);
   });
   return notes;
 }

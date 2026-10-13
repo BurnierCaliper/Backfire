@@ -16,8 +16,12 @@ const EnemyAI = (function () {
     if (u.upOnShp) return Number(u.shp) || 0;
     return (u.layers || []).reduce((a, l) => a + Math.max(0, Number(l.current) || 0), 0);
   }
-  function validPrey() {
-    return players().filter(u => unitAlive(u) && !u.hidden && !(u.dying && !u.upOnShp) &&
+  /** 这个敌人能打的人：我方，以及和它敌对的其他阵营的敌人（异星生物 ↔ 其他阵营） */
+  function validPrey(me) {
+    const pool = me && typeof hostileTo === "function"
+      ? state.units.filter(u => hostileTo(me, u) && unitAlive(u) && u.kit !== "ironwall" && !u.fused)
+      : players();
+    return pool.filter(u => unitAlive(u) && !u.hidden && !(u.dying && !u.upOnShp) &&
       !(typeof bpUntargetable === "function" && bpUntargetable(u)));   // 单局图纸：安全的迷彩（武器人形态）
   }
   // 不按「打单个目标」瞄准的技能：标定区域的榴弹（落点任意），不看危墙
@@ -422,7 +426,7 @@ const EnemyAI = (function () {
   /** 手册第十章的行为描述 → 一次行动。 */
   function aiPlanBase(u) {
     if (typeof mutinyTick === "function") mutinyTick();
-    const prey = validPrey();
+    const prey = validPrey(u);
     if (!prey.length) return null;
 
     let list = [];
