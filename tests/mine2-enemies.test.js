@@ -46,7 +46,7 @@ function use(f, a, id, t) {
   f.c.BattleSim.resolveQueues(noBlock);
 }
 
-test("数值：监工 = 锤狂徒（一半血换装甲）、清扫机 = 枪看守、收集机 = 榴弹机甲（星灵换肉体）、剿灭兵种 = 牛队长（护盾换装甲）", () => {
+test("数值：监工 = 锤狂徒（一半血换装甲）、清扫机 = 枪看守、收集机 = 榴弹机甲（星灵换肉体）、剿灭兵种血量 = 牛队长（护盾换装甲），atk 1 级 6 → 20 级 30", () => {
   const c = H.load();
   [1, 5, 10, 15].forEach(lv => {
     const pair = (a, b) => [preset(c, a).build(lv, 1), preset(c, b).build(lv, 1)];
@@ -63,10 +63,12 @@ test("数值：监工 = 锤狂徒（一半血换装甲）、清扫机 = 枪看�
     [x, y] = pair("ant_hunter", "captain_ox");
     assert.equal(types(x), "armor>flesh");
     assert.deepEqual(x.layers.map(l => l.max), y.layers.map(l => l.max));
-    assert.deepEqual([x.defMax, x.atk, x.range], [y.defMax, y.atk, "ranged"]);
+    assert.deepEqual([x.defMax, x.range], [y.defMax, "ranged"]);
+    assert.equal(x.atk, Math.round(6 + (lv - 1) * 24 / 19), "atk 线性：1 级 6、20 级 30");
   });
   assert.deepEqual([...c.regionPool("第二采矿场")].sort(), ["ant_hunter", "flint_sweeper", "gas_collector", "mine_overseer"]);
   assert.deepEqual(["mine_overseer", "flint_sweeper", "gas_collector", "ant_hunter"].map(k => c.enemyRankOf({ kit: k })), ["minion", "minion", "elite", "elite"]);
+  assert.equal(preset(c, "ant_hunter").build(20, 1).atk, 30);
 });
 
 test("矿场监工：火焰重锤打中施加灼烧 1；协助冲近半伤", () => {

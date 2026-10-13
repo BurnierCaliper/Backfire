@@ -1703,12 +1703,12 @@ function enemyPresets() {
         { type: "flesh", hp: scaleHp(5 + (lv - 1) * 2, p) }
       ], 5 + milestone(lv, 5), 6 + (lv - 1), { kit: "gas_collector", range: "melee", dice: [0, 0], element: "fire", baseBreak: 1 });
     }},
-    // 蚁型特殊剿灭兵种：数值同牛队长，护盾换成装甲
+    // 蚁型特殊剿灭兵种：血量 / 架势同牛队长，护盾换成装甲；atk 线性成长（1 级 6、20 级 30）
     { id: "ant_hunter", name: "蚁型特殊剿灭兵种", build(lv, p) {
       return unitOf(this.name, lv, [
         { type: "armor", hp: scaleHp(16 + (lv - 1) * 5 + milestone(lv, 5) * 4, p) },
         { type: "flesh", hp: scaleHp(26 + (lv - 1) * 7, p) }
-      ], 5 + milestone(lv, 5), 6 + milestone(lv, 5) * 2, { kit: "ant_hunter", range: "ranged", dice: [0, 0], element: "fire", baseBreak: 1 });
+      ], 5 + milestone(lv, 5), Math.round(6 + (lv - 1) * 24 / 19), { kit: "ant_hunter", range: "ranged", dice: [1, 8], element: "fire", baseBreak: 1 });
     }},
     { id: "bigsand", name: "大沙灵", build(lv, p) {
       return unitOf(this.name, lv, [{ type: "sand", hp: scaleHp(37 + (lv - 1) * 6 + milestone(lv, 2), p) }], 4, 5 + milestone(lv, 2), { kit: "bigsand", range: "melee", dice: [1, 4], element: "physical" });

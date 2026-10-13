@@ -1003,7 +1003,7 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
   }
   if (id === "en_hunter_shot") {
     if (!needT()) return true;
-    aa(t, { element: "fire", mult: 1, baseBreak: 1, flags: { action: true, pierce: true } });
+    aa(t, { element: "fire", mult: 1, diceN: 1, diceS: 8, baseBreak: 1, flags: { action: true, pierce: true } });
     return true;
   }
   if (id === "en_hunter_assist") {

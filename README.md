@@ -368,6 +368,10 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **蚁型特殊剿灭兵种上调攻击**（engine.js · `enemyPresets` 的 `ant_hunter`；enemies.js · `en_hunter_shot`）：原来照搬牛队长的 atk，20 级只有 14，是二矿伤害最低的敌人。
+  - atk 改成线性成长：1 级 6、20 级 30（`round(6 + (等级 − 1) × 24 / 19)`，20 级以后照这条线继续涨）。
+  - 灼热子弹加 1d8 伤害骰：atk + 1d8 火，1 击破，穿刺。狙击（协助）不变，仍是 1×atk，跟着新的 atk 涨。
+
 - **连击与名牌上的行动提示**（enemies.js · `enemyIntents`、`flintRollShots`、`en_flint`；unit-card.js；game.js · `snapUnit`；online-view.js / online-battle.js；game.css · `.u-intents`）：
   - **连击**：一次行动里的多次攻击，每一次都单独结算——单独掷伤害骰、单独问协助格挡。火石清扫机的发射火石（2 发以上）是第一个连击。
   - **行动提示**：敌人这个回合将要做特别的行动时，名牌上方出现红底白字的长方形（现在只有「连击」，以后的其他提示也放这里）。联机的玩家画面也看得到。失衡的敌人不提示。
