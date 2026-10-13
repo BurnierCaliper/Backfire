@@ -118,3 +118,11 @@ test("晕眩标记：首领和 10 级起的精英一直挂「晕眩标记 n/2」
   assert.equal(HI.covered("晕眩标记 1/2"), true);
   assert.match(HI.badge("stunMark", "1/2", "提示"), /title="提示"/);
 });
+
+test("休眠：单位身上有休眠就挂「Zzz」图标，状态文字「休眠」不再重复写", () => {
+  const list = HI.unitBadges({ dormant: true, statuses: {} });
+  assert.deepEqual(list.map(b => b.key), ["dormant"]);
+  assert.match(HI.badge("dormant", ""), /data-fx="dormant"/);
+  assert.equal(HI.covered("休眠"), true);
+  assert.deepEqual(HI.unitBadges({ dormant: false, statuses: {} }), [], "醒了就不挂");
+});

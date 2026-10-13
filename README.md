@@ -368,6 +368,8 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **休眠的图标**（hud-icons.js · `ICONS.dormant`、`unitBadges`；online-view.js 联机投影带上 `dormant`）：休眠的敌人名牌上挂一个灰蓝色圆角方块、里面是一大两小「Zzz」的图标（鼠标停上去有说明），醒来就消失；状态文字「休眠」不再重复写。联机玩家画面也看得到。测试：`tests/hud-icons.test.js`。
+
 - **第三采矿场安保杂兵（能量）：矿场警戒自动机、陨石开采机；新词条「休眠」**（engine.js · `enemyPresets`；enemies.js · `wakeDormant`、`dormantAfterMove`、`dormantOnAllyHurt`、`alarmApplyHigh`、`minerDeathTransfer`；ai.js；app.js · `dealTo`（`anyRange`、挨打叫醒）、`doMoveInner`、`displaceTo`、`checkHighBoom`、`settleEnemyKill`、`statusLine`）：
   - **休眠**（通用词条，`u.dormant`）：休眠的敌人不行动、不协助，状态栏显示「休眠」。被叫醒的条件写在各个敌人身上。
   - **矿场警戒自动机**（`alarm_bot`，机械）：数值同机器人看守（剑），血量 40% 护盾（在外）+ 60% 装甲。不会主动移动，开场休眠。
