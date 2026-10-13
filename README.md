@@ -369,7 +369,7 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 ## 规则改动记录
 
 - **敌人的技能按阵营分敌我**（enemies.js · `ENEMY_ACTOR`、`actorFoes`、`runEnemyAction`）：敌人出手期间，「我方」名单（`allPlayers` / `playersInZone` / `standingPlayersIn`）换成「和出手的敌人敌对的单位」——我方 + 敌对阵营的敌人，友军阵营不算我方。所有敌人的范围攻击、挑目标都按阵营来：友军的范围攻击改打敌对阵营（例如友军播撒者喷洒同区的狂徒、不喷我方），三方混战里一方的范围攻击也会波及另一方。榴弹落点、剿灭兵种「有人走进来就退开」也一样按阵营判。
-  - 测试 `tests/audit-P5-enemies.test.js` 的「敌人协助的射程」改用四足沙灵打出失衡（狂徒和警卫队现在互相敌对，牛队长不帮狂徒）。
+  - 测试 `tests/audit-P5-enemies.test.js` 的「敌人协助的射程」改用四足沙灵打出失衡；`tests/audit-P3-combat.test.js` 的牛队长 / 巡逻车自动格挡改成保护安保的剑看守（狂徒和警卫队、安保现在互相敌对，不互相帮）。
 
 - **护送对象不进战场数据**（app.js · `battleStat`；game.js · `statRows`）：护送任务的货车 / 委托人不再记伤害、承受伤害等战场数据，战场数据表里也不列（它不能操作，数据没有参考价值）。别人替它协助格挡照常记在格挡的人身上。测试：`tests/escort-tasks.test.js`。
 
