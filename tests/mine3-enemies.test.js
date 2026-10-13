@@ -141,13 +141,15 @@ test("数值：陨体衍蛛 = 蜂群的血（全星灵）、枪看守的架势�
   assert.equal(c.enemyInfo("meteor_centipede").faction, "异星生物");
 });
 
-test("陨体衍蛛：场上每只活着的衍蛛 atk +25%；协助施加高能", () => {
+test("陨体衍蛛：除自己之外每只活着的衍蛛 atk +25%；协助施加高能", () => {
   const f = field([{ id: "meteor_spider", lv: 5, zone: 2 }, { id: "meteor_spider", lv: 5, zone: 2 }, { id: "meteor_spider", lv: 5, zone: 2 }]);
   const sp = f.S.units.filter(u => u.kit === "meteor_spider");
   const base = sp[0].atk;
-  assert.equal(f.c.effectiveAtk(sp[0], f.S.units), Math.round(base * 1.75), "三只：+75%");
+  assert.equal(f.c.effectiveAtk(sp[0], f.S.units), Math.round(base * 1.5), "三只：另外两只 +50%");
   sp[2].dead = true;
-  assert.equal(f.c.effectiveAtk(sp[0], f.S.units), Math.round(base * 1.5), "死了一只：+50%");
+  assert.equal(f.c.effectiveAtk(sp[0], f.S.units), Math.round(base * 1.25), "死了一只：+25%");
+  sp[1].dead = true;
+  assert.equal(f.c.effectiveAtk(sp[0], f.S.units), base, "只剩自己：不加");
   const k = f.P("kolt"); k.zone = 2; tank(k); k.statuses.high = false;
   use(f, sp[0], "en_spider_assist", k);
   assert.equal(k.statuses.high, true);

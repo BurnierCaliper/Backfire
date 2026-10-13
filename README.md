@@ -368,6 +368,8 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **陨体衍蛛的加伤只算别的衍蛛**（party.js · `effectiveAtk`）：改成除自己之外，场上每有一只活着的陨体衍蛛 atk +25%（两只一组各 +25%，单独一只不加）。
+
 - **三方混战：异星生物和安保互相敌对**（enemies.js · `hostileTo`、`hostilesOf`；ai.js · `validPrey`；app.js · `eligibleAssisters`、`queueAssistAttack`、`autoEnemyBlockers`；run.js · `rollThreeWay`、`THREE_WAY`、`pickByTokens`）：
   - **敌对**：异星生物和其他所有阵营的敌人互相视为敌人；其他阵营之间照旧是一伙的（安保 + 警卫队照常混编）。
     - 敌人 AI 能打的人 = 我方 + 和它敌对的敌人（同样按各自的选目标规则，例如同区优先、打血量最低的）。
