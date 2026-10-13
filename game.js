@@ -506,7 +506,7 @@
   /* ================= 4. 技能模型 ================= */
   function unitAlive(u) { return u && !u.hidden && !u.fused && !u.dead && !u._removed; }
   function players() { return state.units.filter(u => u.isPlayer && unitAlive(u)); }
-  function foes() { return state.units.filter(u => !u.isPlayer && unitAlive(u) && u.kit !== "ironwall"); }
+  function foes() { return state.units.filter(u => !u.isPlayer && unitAlive(u) && u.kit !== "ironwall" && !(typeof playerAllied === "function" && playerAllied(u))); }   // 友军不算要打的敌人
 
   function gameSkills(u) {
     if (!u || !u.isPlayer) return [];

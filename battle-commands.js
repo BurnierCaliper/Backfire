@@ -138,7 +138,7 @@
     state.skillFlow = null; state.history = []; state.actionAcc = null; state.statusDmg = {};
     state.turnNo = 1; state.logPages = [{ turn: 1, lines: [] }]; state.logIndex = 0;
     state.combatPhase = "player"; state.combatStarted = false; state.exhaustTier = 0;
-    state.openingBreaks = null; state.solo = null; state.scoreAct = null; state.ambush = false;
+    state.openingBreaks = null; state.solo = null; state.scoreAct = null; state.ambush = false; state.playerAllies = [];
     state.retreated = false; state.lootByRank = null; state.lootByKit = null;
     resetBattleRecords();
     g.undo = [];

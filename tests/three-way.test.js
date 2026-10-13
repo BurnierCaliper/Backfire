@@ -63,3 +63,58 @@ test("外城区三方混战整场自动对打：狂徒会去打安保 / 警卫�
   }
   assert.ok(fights > 0, "敌人之间打起来了");
 });
+
+test("我方和某阵营同阵营（战斗模板）：友军不打我方、我方打不到它，它去打敌对阵营；打赢不用打倒友军；友军倒下没有奖励", () => {
+  const c = H.load();
+  const tpl = c.battleTemplateNormalize({ name: "帮保安打狂徒", board: 3, playerZone: 2, allyFaction: "安保",
+    enemies: [{ preset: "guard_sword", level: 3, zone: 1 }, { preset: "thug_knife", level: 3, zone: 3 }, { preset: "thug_hammer", level: 3, zone: 3 }] });
+  assert.equal(tpl.allyFaction, "安保");
+  assert.match(c.battleTemplateSummary(tpl), /我方与安保同阵营/);
+  assert.equal(c.battleTemplateNormalize({ allyFaction: "乱写的" }).allyFaction, "", "不认识的阵营不收");
+  const enc = c.battleTemplateToEncounter(tpl);
+  c.BattleSim.setup({ party: ["kolt", "helu"], encounter: enc, level: 3, seed: "ALLY" });
+  c.startCombat();
+  const S = c.S.state;
+  assert.deepEqual([...S.playerAllies].sort(), ["安保", "警卫队"], "能混编的警卫队也算友军");
+  const g = S.units.find(u => u.kit === "guard_sword"), t = S.units.find(u => u.kit === "thug_knife"), k = c.findKit("kolt", S.units);
+  assert.equal(c.hostileTo(k, g), false); assert.equal(c.hostileTo(k, t), true); assert.equal(c.hostileTo(g, t), true);
+  assert.match(c.statusLine(g), /友军/);
+  // 我方打友军：打不出去
+  const g0 = c.totalHp(g);
+  k.zone = g.zone;
+  c.dealTo(k, g, { atk: 50, mult: 1, element: "physical", baseBreak: 1, atkRange: "any", flags: { action: true, blockResolved: true, block: "none" } });
+  assert.equal(c.totalHp(g), g0, "我方打不到友军");
+  // 友军的 AI 去打狂徒，不打我方
+  k.zone = 1;
+  S.combatPhase = "enemy"; c.refreshEnemyEconomy(g);
+  const plan = c.EnemyAI.plan(g);
+  assert.ok(plan, "友军有事做");
+  const kHp = c.totalHp(k);
+  plan.thunk(); c.BattleSim.resolveQueues({ pickBlocker: () => null, pickAssister: l => l[0].id });
+  assert.equal(c.totalHp(k), kHp, "友军不打我方");
+  // 打赢只要打倒敌对的：狂徒都倒下就赢（友军还活着）
+  S.units.filter(u => /^thug_/.test(u.kit)).forEach(u => { u.layers.forEach(l => { l.current = 0; }); u.dead = true; });
+  assert.equal(c.BattleSim.outcome(), "player");
+  // 友军倒下：没有经验
+  const xp0 = k.xp;
+  g.layers.forEach(l => { l.current = 0; });
+  c.settleEnemyKill(g, []);
+  assert.ok(g.dead); assert.equal(k.xp, xp0);
+});
+
+test("没有设同阵营：模板里放互相敌对的阵营，不管站位都会互相打", () => {
+  const c = H.load();
+  const enc = c.battleTemplateToEncounter(c.battleTemplateNormalize({ name: "随便摆", board: 2, playerZone: 1,
+    enemies: [{ preset: "guard_sword", level: 3, zone: 2 }, { preset: "thug_knife", level: 3, zone: 2 }] }));
+  c.BattleSim.setup({ party: ["kolt"], encounter: enc, level: 3, seed: "NOALLY" });
+  c.startCombat();
+  const S = c.S.state;
+  assert.deepEqual([...S.playerAllies], []);
+  const g = S.units.find(u => u.kit === "guard_sword"), t = S.units.find(u => u.kit === "thug_knife");
+  assert.equal(c.hostileTo(g, t), true);
+  // 柯尔特在 1 区（远），狂徒同区就有剑看守：剑看守会先打同区的狂徒
+  S.combatPhase = "enemy"; c.refreshEnemyEconomy(g);
+  const t0 = c.totalHp(t);
+  const plan = c.EnemyAI.plan(g); plan.thunk(); c.BattleSim.resolveQueues({ pickBlocker: () => null, pickAssister: l => l[0].id });
+  assert.ok(c.totalHp(t) < t0, "同区的狂徒挨打");
+});

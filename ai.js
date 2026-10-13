@@ -10,7 +10,7 @@ const EnemyAI = (function () {
 
   function unitAlive(u) { return u && !u.hidden && !u.fused && !u.dead && !u._removed; }
   function players() { return state.units.filter(u => u.isPlayer && unitAlive(u)); }
-  function foes() { return state.units.filter(u => !u.isPlayer && unitAlive(u) && u.kit !== "ironwall"); }
+  function foes() { return state.units.filter(u => !u.isPlayer && unitAlive(u) && u.kit !== "ironwall" && !(typeof playerAllied === "function" && playerAllied(u))); }   // 友军不算要打的敌人
 
   function hpOf(u) {
     if (u.upOnShp) return Number(u.shp) || 0;

@@ -550,6 +550,8 @@ function buildEncounter(spec, baseLevel, partySize) {
   state.board = null;
   state.weather = spec.weather || "none"; state.weatherBy = null;
   if (state.weather === "sand" && typeof rollSandDir === "function") rollSandDir();   // 开场沙暴：风向随机
+  // 我方同阵营（跑团战斗模板）：这个阵营和能和它混编的阵营都算友军
+  state.playerAllies = spec.allyFaction ? alliesOf(spec.allyFaction) : [];
   buildEncounterField(spec);
   const made = spawnEncounterRows(spec.enemies, baseLevel, partySize);
   applyBattlefieldFeatures(spec.features, baseLevel);

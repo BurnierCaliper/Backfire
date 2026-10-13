@@ -368,6 +368,13 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **我方可以和某个敌人阵营同阵营（跑团战斗模板）**（battle-templates.js · `allyFaction`、`battleTemplateFactions`；trpg-ui.js 模板编辑器「我方阵营」；run.js · `buildEncounter` 写 `state.playerAllies`；enemies.js · `playerAllied`、`hostileTo`；app.js · `dealTo`、`settleEnemyKill`、`statusLine`；ai.js / game.js · `foes`）：
+  - 模板编辑器多一项「我方阵营」：只有我方 / 和某个阵营同阵营（能和它混编的阵营一起算，例如选安保，警卫队也是友军）。从当前战场存模板时也会带上。
+  - 友军：不打我方（范围攻击也跳过我方），我方的攻击也打不到它（单体打不出去，范围攻击跳过它）；它会和与它敌对的阵营互相打。状态栏写「友军」。
+  - 打赢只要打倒敌对的敌人，友军不用打倒；友军倒下没有经验、掉落和击杀分。
+  - 敌对阵营本来就不看站位、不看区域：模板里只要放了互相敌对的阵营（异星生物 ↔ 其他、盗匪 ↔ 安保 / 警卫队），它们就会互相打，不用另外设「混战」。
+  - 已知的限制：友军原本打「同区所有我方」的范围攻击，现在只是跳过我方，不会改去打敌对阵营。测试：`tests/three-way.test.js`。
+
 - **盗匪和安保、警卫队互相敌对；外城区也有三方混战**（enemies.js · `HOSTILE_PAIRS`、`hostileTo`；run.js · `THREE_WAY.regions`、`rollThreeWay`）：
   - 敌对规则同异星生物（见下面「三方混战」那一条）：会互相攻击、不问我方格挡、协助只找同伙。盗匪和其他阵营（沙灵、触灵、巨人……）照旧不敌对；异星生物和谁都敌对。
   - 外城区的随机遭遇，三区制时 50% 变成三方混战：玩家在中间 2 区，安保 + 警卫队一边、盗匪一边，各 3 枚代币（成组的空投蜂群整组记 1 枚）。

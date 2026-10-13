@@ -753,10 +753,16 @@ function factionOf(u) {
   const i = typeof enemyInfo === "function" ? enemyInfo(u.kit) : null;
   return (i && i.faction) || null;
 }
+/** 这个敌人和我方是同阵营（跑团战斗模板可以设「我方与某阵营同阵营」，state.playerAllies） */
+function playerAllied(u) {
+  if (!u || u.isPlayer) return false;
+  const g = (typeof state !== "undefined" && state.playerAllies) || [];
+  return g.length > 0 && g.includes(factionOf(u));
+}
 /** a 和 b 是不是敌对的 */
 function hostileTo(a, b) {
   if (!a || !b || a === b) return false;
-  if (!!a.isPlayer !== !!b.isPlayer) return true;
+  if (!!a.isPlayer !== !!b.isPlayer) return !playerAllied(a.isPlayer ? b : a);
   if (a.isPlayer) return false;
   const fa = factionOf(a), fb = factionOf(b);
   if (!fa || !fb || fa === fb) return false;

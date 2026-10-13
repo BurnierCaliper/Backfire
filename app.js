@@ -450,6 +450,7 @@ function statusLine(u) {
     if (u.resources && u.resources.debrisCount) s.push("碎片" + u.resources.debrisCount + "/2");
   }
   if (u.dormant) s.push("休眠");
+  if (!u.isPlayer && typeof playerAllied === "function" && playerAllied(u)) s.push("友军");
   if (u.noMove) s.push("无法移动");
   if (u.tauntTo) s.push("嘲讽");
   if (typeof isPierced === "function" && isPierced(u)) s.push("刺入");
@@ -4513,6 +4514,11 @@ function isOutlawThugKit(kit) {
 function settleEnemyKill(target, notes) {
   if (!target || target.isPlayer || target._xpGiven) return;
   if (target._revived) { target.dead = true; target._xpGiven = true; return; }   // 复活过的陨体衍蛛：再死不给经验、掉落、击杀分
+  if (typeof playerAllied === "function" && playerAllied(target)) {   // 友军倒下：没有经验、掉落、击杀分
+    target.dead = true; target._xpGiven = true;
+    if (notes) notes.push(`友军 ${target.name} 倒下了。`);
+    return;
+  }
   target.dead = true;
   target._xpGiven = true;
   // 战场数据：最后一击是谁打的算谁；持续伤害在某人行动中打死的，算那个人
@@ -7135,6 +7141,16 @@ function dealTo(attacker, target, opt) {
   // 导体的额外目标是随机击中的，不受射程限制
   // 配置物（防卫炮台）的自动攻击不限距离
   // 维塔斯对刺入目标出手（扯下 / 加压灌输）：针尖就在目标身上，不受距离限制（viaPierce）
+  // 友军（和我方同阵营的敌人）：我方的攻击不打它（单体攻击打不出去，范围攻击跳过它）
+  if (attacker && attacker.isPlayer && target && !target.isPlayer && typeof playerAllied === "function" && playerAllied(target) && !opt.flags.environment) {
+    const msg = `${target.name} 是友军，不会被我方攻击。`;
+    if (!opt.flags.aoe) appendLog(msg);
+    return { res: { ok: false, total: 0, breakDealt: 0, log: [msg], perHit: [] }, extra: opt.flags.aoe ? [] : [msg] };
+  }
+  // 友军的攻击（包括原本打「同区所有我方」的范围攻击）不打我方
+  if (attacker && !attacker.isPlayer && target && target.isPlayer && typeof playerAllied === "function" && playerAllied(attacker) && !opt.flags.environment) {
+    return { res: { ok: false, total: 0, breakDealt: 0, log: [], perHit: [] }, extra: [] };
+  }
   // anyRange：不限距离的攻击（矿场警戒自动机打所有高能的敌人）
   if (attacker && target && opt.flags.action && !opt.flags.aoe && !isReaction && !opt.flags.conductorExtra && !opt.flags.propShot && !opt.flags.locked && !opt.flags.viaPierce && !opt.flags.anyRange) {
     const d = zoneDist(Number(attacker.zone), Number(target.zone), Number(state.zoneMode));

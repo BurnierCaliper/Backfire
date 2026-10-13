@@ -783,6 +783,8 @@
       <div class="tr-row">战场 <select data-bte="board" data-bte-rerender="1">${options(BT_BOARDS, t.board)}</select>
         天气 <select data-bte="weather">${options(Object.keys(WX).map(k => [k, WX[k]]), t.weather)}</select>
         我方站在 ${zoneSel("playerZone", t.playerZone)}</div>
+      <div class="tr-row">我方阵营 <select data-bte="allyFaction">${options([["", "只有我方"]].concat((typeof battleTemplateFactions === "function" ? battleTemplateFactions() : []).map(f => [f, "和「" + f + "」同阵营"])), t.allyFaction || "")}</select>
+        <span class="r-hint">同阵营的敌人是友军：不打我方、我方也打不到它，它会和与它敌对的阵营（例如安保 ↔ 盗匪、异星生物）互相打；打赢不用打倒友军。敌对的阵营不管站在哪都会互相打。</span></div>
       <h4>敌人</h4>${foes || '<p class="r-hint">还没有敌人。</p>'}
       <div class="tr-row"><button class="g-btn small" data-bt-act="addEnemy">＋ 敌人</button></div>
       <h4>场地</h4>${fields}
