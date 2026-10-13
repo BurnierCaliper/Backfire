@@ -368,6 +368,12 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **战斗日志：按时间顺序、架势变化写全**（app.js · `appendLog` / `withPendingLines` / `formatHitLines`；effects.js · `syncShockwave`）——只改日志，不改规则：
+  - 技能代码先攒在本地 `lines` 里的话，在同一次行动中有别处直接写日志（击破、状态、震荡等）之前先写出去，不会再被后发生的事抢到前面。
+  - 每一击的结果行写出这一击前后的架势：「→ 狂徒：10 伤害、1 击破，架势 12 → 11」（熔融沙尘的 +1 击破等加成都算在里面）。
+  - 震荡压低架势上限、把当前架势一起压下来时写出来：「狂徒 震荡：架势上限 −2 → 10，架势 11 → 10。」（以前 popStatus 挂震荡时不写）。
+  - 盾击突进：先写「震荡。」再写它扣上限。
+  - 测试：tests/log-chronology.test.js。
 - **敌人个体值（杂兵、精英）**（enemies.js · `applyEnemyIV` / `setEnemyIV`）：
   - 每个杂兵 / 精英生成时，血量和 ATK 各自在 ±10% 内随机波动（整数百分比，`u.iv = { hp, atk }`）。
     - 血量：每一层上限 ×(1 + 血量%)，四舍五入；ATK：×(1 + ATK%)，保留一位小数。
