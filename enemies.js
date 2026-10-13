@@ -98,6 +98,8 @@ function enemyAssistReach(u, t) {
   if (!u || !t) return false;
   const sid = enemyAssistSkillId(u);
   if (ENEMY_ASSIST_ANYWHERE.includes(sid)) return true;
+  // 蚁型特殊戒备兵种：大酸液弹蓄力中时，协助就是对标定的区发射，不看目标在哪
+  if (sid === "en_ant_assist" && u.resources && u.resources.shellPending && Number(u.resources.shellZone) >= 1) return true;
   const from = Number(u.zone), to = Number(t.zone);
   const d = zoneDist(from, to, state.zoneMode);
   if (ENEMY_ASSIST_RUSH.includes(sid)) {
@@ -495,6 +497,7 @@ const ENEMY_SKILL_RANGE = {
   en_mine_guard: "melee",
   en_mine_guard_assist: "melee",
   en_ant_spray: "ranged",
+  en_ant_assist: "ranged",
   en_thug_knife: "melee",
   en_thug_hammer: "melee",
   en_crow: "melee",
@@ -612,6 +615,21 @@ function boatOverloadRoundStart(u, notes) {
     notes.push(`${u.name} 回合开始在飞行：给自己过载。`);
     applyInstantEffect(u, "overload", notes);
   }
+}
+
+/** 蚁型特殊戒备兵种：对标定的区发射大酸液弹。区内随机一人 2×atk 酸 2 击破（单体），同区其他人 等级+1d6 酸（范围） */
+function antFireShell(a, aa, lines) {
+  const r = a.resources = a.resources || {};
+  const zone = Number(r.shellZone);
+  r.shellZone = 0; r.shellPending = false; r.shellReady = false;
+  const victims = standingPlayersIn(zone);
+  if (!victims.length) { lines.push(`大酸液弹落在 ${zone} 区，那里没有人。`); return; }
+  const main = victims[Math.floor(Math.random() * victims.length)];
+  lines.push(`${a.name} 的大酸液弹在 ${zone} 区炸开，正中 ${main.name}。`);
+  aa(main, { element: "acid", mult: 2, baseBreak: 2 });
+  victims.filter(u => u.id !== main.id).forEach(u => {
+    aa(u, { element: "acid", mult: 0, flat: Number(a.level) || 1, diceN: 1, diceS: 6, baseBreak: 0, flags: { action: true, aoe: true } });
+  });
 }
 
 function runEnemyAction(id, a, t, hitOne, lines, needT) {
@@ -795,6 +813,9 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
     return true;
   }
   if (id === "en_ant_assist") {
+    // 大酸液弹已经标定（蓄力中，不管到没到发射回合）：协助时立刻对标定的区发射；否则远距 1×atk 酸
+    const r = a.resources || {};
+    if (r.shellPending && Number(r.shellZone) >= 1) { antFireShell(a, aa, lines); return true; }
     if (!needT()) return true;
     aa(t, { element: "acid", mult: 1, baseBreak: 1 });
     return true;
@@ -813,20 +834,11 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
   }
   if (id === "en_ant_shell_fire") {
     const r = a.resources || {};
-    const zone = Number(r.shellZone);
-    if (!(zone >= 1) || !r.shellReady) { lines.push("大酸液弹尚未就绪。先标定区域，等到下一个敌人回合再发射。"); return true; }
-    r.shellZone = 0; r.shellPending = false; r.shellReady = false;
-    const victims = standingPlayersIn(zone);
-    if (!victims.length) { lines.push(`大酸液弹落在 ${zone} 区，那里没有人。`); return true; }
-    // 随机一人 2×atk 酸 2 击破（单体，可以协助格挡）；同区其他人 等级+1d6 酸（范围，不能格挡）
-    const main = victims[Math.floor(Math.random() * victims.length)];
-    lines.push(`${a.name} 的大酸液弹在 ${zone} 区炸开，正中 ${main.name}。`);
-    aa(main, { element: "acid", mult: 2, baseBreak: 2 });
-    victims.filter(u => u.id !== main.id).forEach(u => {
-      aa(u, { element: "acid", mult: 0, flat: Number(a.level) || 1, diceN: 1, diceS: 6, baseBreak: 0, flags: { action: true, aoe: true } });
-    });
+    if (!(Number(r.shellZone) >= 1) || !r.shellReady) { lines.push("大酸液弹尚未就绪。先标定区域，等到下一个敌人回合再发射。"); return true; }
+    antFireShell(a, aa, lines);
     return true;
   }
+
   if (id === "en_swarm") {
     if (!needT()) return true;
     stepTowardZone(a, t.zone);

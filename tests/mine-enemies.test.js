@@ -138,3 +138,35 @@ test("蚁型特殊戒备兵种：平时酸液喷枪（远距 + 腐蚀）；站�
   assert.ok(lost[0] > 0 && lost[1] > lost[0], "两人都挨打，主目标更重：" + lost);
   assert.equal(a.resources.shellPending, false);
 });
+
+test("蚁型特殊戒备兵种的协助：平时远距 1×atk 酸；大酸液弹蓄力中（还没到发射回合也算）就立刻对标定的区发射", () => {
+  const setup = () => {
+    const f = field([{ id: "ant_guard", lv: 5, zone: 2 }, { id: "mine_guard", lv: 5, zone: 1 }]);
+    const a = f.E("ant_guard"), g = f.E("mine_guard"), k = f.P("kolt"), h = f.P("helu");
+    k.zone = 1; h.zone = 1; tank(k); tank(h);
+    f.S.combatPhase = "enemy";
+    const breakK = () => { k.def = 1; f.c.dealTo(g, k, { atk: 1, mult: 1, element: "acid", baseBreak: 1, atkRange: "any", flags: { action: true, blockResolved: true, block: "none" } }); };
+    return Object.assign(f, { a, g, k, h, breakK });
+  };
+  // 平时：远距离 1×atk 酸，打被击破的人
+  let { c, a, k, h, breakK } = setup();
+  assert.equal(c.enemyAssistSkillId(a), "en_ant_assist");
+  assert.equal(c.enemyAssistReach(a, k), true, "距离 1 打得到");
+  breakK();
+  let k0 = c.totalHp(k), h0 = c.totalHp(h);
+  c.finishAssist(a.id, {});
+  assert.ok(c.totalHp(k) < k0, "打中被击破的人");
+  assert.equal(c.totalHp(h), h0, "不波及旁人");
+  // 蓄力中：协助时立刻发射，落在标定的区（就算被击破的人不在那里、也不管距离）
+  ({ c, a, k, h, breakK } = setup());
+  const g = c.S.state.units.find(u => u.kit === "mine_guard");
+  a.resources.shellZone = 1; a.resources.shellPending = true; a.resources.shellReady = false;
+  k.zone = 2; g.zone = 2;
+  assert.equal(c.enemyAssistReach(a, k), true, "同区本来打不到，蓄力中照样协助");
+  breakK();
+  k0 = c.totalHp(k); h0 = c.totalHp(h);
+  c.finishAssist(a.id, {});
+  assert.equal(a.resources.shellPending, false, "大酸液弹已发射");
+  assert.ok(c.totalHp(h) < h0, "落在标定的 1 区");
+  assert.equal(c.totalHp(k), k0, "不在 1 区的人不挨这一发");
+});
