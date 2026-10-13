@@ -159,6 +159,8 @@
   // 首领 / 10 级起精英的晕眩标记：两颗星（要失衡两次），数字是「已攒 / 要攒」
   add("stunMark", "晕眩标记", "circ", "#ffb347", c => `<path d="M13 11l1.6 3.3 3.6.5-2.6 2.5.6 3.6-3.2-1.7-3.2 1.7.6-3.6-2.6-2.5 3.6-.5z" fill="${c}"/><path d="M27 11l1.6 3.3 3.6.5-2.6 2.5.6 3.6-3.2-1.7-3.2 1.7.6-3.6-2.6-2.5 3.6-.5z" fill="${c}"/><ellipse cx="20" cy="28" rx="11" ry="3.6" fill="none" stroke="${c}" stroke-width="1.8"/>`);
   // 休眠（通用词条）：通用状态的圆角方块，灰蓝色描边，里面是一大两小的「Zzz」
+  // 下潜：沙面上的一道波纹 + 往下的箭头
+  ICONS.submerged = { key: "submerged", name: "下潜", shape: "raw", color: "#d9a35f", raw: () => svg(`<rect x="3" y="3" width="34" height="34" rx="7" fill="#15110d" stroke="#d9a35f" stroke-width="2.4"/><path d="M7 15c3-3 6-3 9 0s6 3 9 0 5-2 8 0" fill="none" stroke="#f0cf9a" stroke-width="2.4" stroke-linecap="round"/><path d="M20 19v12M15 26l5 5 5-5" fill="none" stroke="#d9a35f" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>`) };
   ICONS.dormant = { key: "dormant", name: "休眠", shape: "raw", color: "#8fb4d9", raw: () => svg(`<rect x="3" y="3" width="34" height="34" rx="7" fill="#15110d" stroke="#8fb4d9" stroke-width="2.4"/><path d="M8 11h9l-9 10h9" fill="none" stroke="#d6e6f5" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M19 19h7l-7 8h7" fill="none" stroke="#b3cde6" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M27 26h5l-5 6h5" fill="none" stroke="#8fb4d9" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>`) };
   // 别人挂上的标记：诺拉的刺入、结人的牵挂
   ICONS.needle = { key: "needle", name: "刺入", shape: "raw", color: "#9fb3c2", raw: () => I.needle() };
@@ -213,6 +215,7 @@
     const hung = (u.resources && Array.isArray(u.resources.nextAtkFx)) ? u.resources.nextAtkFx : [];
     hung.forEach(id => { if (ATK_KEY[id]) out.push({ key: ATK_KEY[id], stack: "" }); });
     (extra || []).forEach(k => { if (ICONS[k] && !out.some(b => b.key === k)) out.push({ key: k, stack: "" }); });
+    if (u.submerged) out.unshift({ key: "submerged", stack: "", title: "下潜：选不中、范围攻击打不到；只有谐波攻击和塌陷打得到（打到就被迫浮上来 +1 击破）。自己攻击时解除" });
     if (u.dormant) out.unshift({ key: "dormant", stack: "", title: "休眠：不行动、不协助，被叫醒后才开始行动" });
     // 首领和 10 级起的精英：一直挂着晕眩标记（0/2 也挂），开打前就看得出要失衡两次才会晕眩
     const max = stunMarkMax(u);

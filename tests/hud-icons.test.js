@@ -126,3 +126,9 @@ test("休眠：单位身上有休眠就挂「Zzz」图标，状态文字「休�
   assert.equal(HI.covered("休眠"), true);
   assert.deepEqual(HI.unitBadges({ dormant: false, statuses: {} }), [], "醒了就不挂");
 });
+
+test("下潜：挂下潜徽章，浮上来就不挂", () => {
+  assert.deepEqual(HI.unitBadges({ submerged: true, statuses: {} }).map(b => b.key), ["submerged"]);
+  assert.match(HI.badge("submerged", ""), /data-fx="submerged"/);
+  assert.deepEqual(HI.unitBadges({ submerged: false, statuses: {} }), []);
+});

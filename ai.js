@@ -21,7 +21,8 @@ const EnemyAI = (function () {
     const pool = me && typeof hostileTo === "function"
       ? state.units.filter(u => hostileTo(me, u) && unitAlive(u) && u.kit !== "ironwall" && !u.fused)
       : players();
-    return pool.filter(u => unitAlive(u) && !u.hidden && !(u.dying && !u.upOnShp) &&
+    // 下潜中的单位选不中（谐波攻击能打，敌人的 AI 先不专门找它）
+    return pool.filter(u => unitAlive(u) && !u.hidden && !u.submerged && !(u.dying && !u.upOnShp) &&
       !(typeof bpUntargetable === "function" && bpUntargetable(u)));   // 单局图纸：安全的迷彩（武器人形态）
   }
   // 不按「打单个目标」瞄准的技能：标定区域的榴弹（落点任意），不看危墙

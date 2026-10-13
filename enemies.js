@@ -757,7 +757,7 @@ function hunterHeatAtTurnStart(u, notes) {
  * 异星生物和其他所有阵营的敌人互相视为敌人；盗匪和安保、警卫队互相视为敌人（会互相攻击、不互相协助）。
  * 其余敌人阵营之间照旧是一伙的。 */
 const HOSTILE_FACTION = "异星生物";
-const HOSTILE_PAIRS = [["盗匪", "安保"], ["盗匪", "警卫队"]];
+const HOSTILE_PAIRS = [["盗匪", "安保"], ["盗匪", "警卫队"], ["沙漠生物", "沙灵"]];
 function factionOf(u) {
   if (!u) return null;
   if (u.isPlayer) return "我方";

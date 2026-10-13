@@ -412,6 +412,7 @@ function statusLine(u) {
     if (u.statuses.weak) s.push("虚弱");
     if (u.statuses.inspire) s.push("振奋");
     if (u.statuses.hide) s.push("躲藏");
+    if (u.submerged) s.push("下潜");
     if (u.statuses.advantage) s.push("优势");
     if (u.statuses.chase) s.push("紧追");
   }
@@ -714,6 +715,7 @@ function triggerCollapse(zone) {
     const x = envMult(u);
     dealBreak(u, 2 * x, "physical", notes, x > 1 ? "塌陷 ×2" : "塌陷");
     withEnvOwner(f.by, () => applyTypedDot(u, r.total * x, "physical", notes, `${u.name} 塌陷伤害${x > 1 ? ` ×${x}（场地效果${x > 2 ? "×4" : "翻倍"}）` : ""}`));
+    if (u.submerged && typeof surfaceUnit === "function") surfaceUnit(u, notes, true, "塌陷震", "physical");   // 下潜也躲不过塌陷
   });
   if (f.ruinOn) {
     notes.push(`${zone} 区损毁地面被塌陷直接摧毁，变为深渊。`);
@@ -2190,7 +2192,7 @@ function turnEnd() {
  *  真的打出伤害才挂高能：伤害为 0、被屏障整个挡下都不挂 */
 function turretShot(p, hitPlayers, notes) {
   const side = (u) => !u.hidden && !u.dead && !u.fused && !u._removed && !!u.isPlayer === !!hitPlayers && u.kit !== "ironwall";
-  const foes = state.units.filter(u => side(u) && !(u.statuses && u.statuses.hide) && !(u.dying && !u.upOnShp) &&
+  const foes = state.units.filter(u => side(u) && !(u.statuses && u.statuses.hide) && !u.submerged && !(u.dying && !u.upOnShp) &&
     u.kit !== "ufo_body" &&   // 飞碟本体不能被通常手段攻击，锁它就是白打
     !lineBlocked(p.zone, u.zone));
   if (foes.length) {
@@ -3641,7 +3643,7 @@ function scrapTargets(p, u) {
   return (state.units || []).filter(t => t && !t.dead && !t.hidden && !t.fused && !t._removed &&
     !!t.isPlayer !== !!u.isPlayer && t.kit !== "ironwall" &&
     zoneDist(Number(p.zone), Number(t.zone), state.zoneMode) <= 2 &&
-    !lineBlocked(p.zone, t.zone) && !(t.statuses && t.statuses.hide) && !(t.dying && !t.upOnShp));
+    !lineBlocked(p.zone, t.zone) && !(t.statuses && t.statuses.hide) && !t.submerged && !(t.dying && !t.upOnShp));
 }
 /** 操控碎渣机炮（消耗 1 行动点）：玩家和狂徒都能用 */
 function controlScrap(a, p, t) {
@@ -7173,6 +7175,22 @@ function dealTo(attacker, target, opt) {
       appendLog(msg);
       return { res: { ok: false, total: 0, breakDealt: 0, log: [msg], perHit: [] }, extra: [msg] };
     }
+  }
+  // 下潜（effects.js）：攻击时自己先浮上来；下潜中的目标只有谐波攻击（单体、范围都算）打得到，打到就被迫解除 +1 击破
+  if (attacker && attacker.submerged && !attacker.envSrc && !opt.flags.environment) {
+    const n = [];
+    surfaceUnit(attacker, n, false, "发动攻击");
+    n.forEach(t => appendLog(t));
+  }
+  if (target && target.submerged && attacker && !opt.flags.environment) {
+    if (opt.element !== "harmonic") {
+      const msg = `${target.name} 下潜中，${opt.flags.aoe ? "没有被波及" : "不能被选作攻击目标"}。`;
+      if (!opt.flags.aoe) appendLog(msg);
+      return { res: { ok: false, total: 0, breakDealt: 0, log: [msg], perHit: [] }, extra: opt.flags.aoe ? [] : [msg] };
+    }
+    const n = [];
+    surfaceUnit(target, n, true, "谐波震", "harmonic");
+    n.forEach(t => appendLog(t));
   }
   // 躲藏：不会被选做攻击目标（范围攻击、反应不是「选目标」，照常波及）
   if (target && target.statuses && target.statuses.hide && opt.flags.action && !opt.flags.aoe && !isReaction && !opt.flags.conductorExtra && !opt.flags.locked) {
@@ -12613,7 +12631,7 @@ function runSkillInner(id, optRun) {
       const pickRandom = (list) => list[Math.floor(Math.random() * list.length)];
       for (let k = 0; k < (redRun >= 3 ? 2 : redRun >= 2 ? 1 : 0); k++) {
         // 只在打得到的敌人里随机：距离 1 以内、不隔危墙 / 关着的门、没在躲藏（以前从全场随机，抽到射程外的就打空）
-        const foes = fieldUnits().filter(u => !u.isPlayer && !u.dead && !u.hidden && !u.fused && !(u.statuses && u.statuses.hide) &&
+        const foes = fieldUnits().filter(u => !u.isPlayer && !u.dead && !u.hidden && !u.fused && !(u.statuses && u.statuses.hide) && !u.submerged &&
           zoneDist(a.zone, u.zone, state.zoneMode) <= 1 && !lineBlocked(a.zone, u.zone));
         const f = pickRandom(foes);
         if (!f) { if (k === 0) lines.push("洗牌：连续红弹，但附近没有打得到的敌人。"); break; }

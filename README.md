@@ -368,6 +368,14 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **新词条「下潜」**（effects.js · `submergeUnit`、`surfaceUnit`、`isSubmerged`；app.js · `dealTo`、`triggerCollapse`；ai.js · `validPrey`；hud-icons.js 下潜图标）：单位钻进沙层，`u.submerged`。定位和飞行类似，哪个敌人都可以带（先给沙漠生物用）。
+  - 下潜中不能被选为目标，范围攻击也打不到（不掉血、不扣架势）；敌人的 AI 不会挑下潜的单位当猎物，炮台、碎渣机炮、龙哥洗牌的随机火焰也不会打它。
+  - 自己发动攻击时下潜解除（主动解除，没有代价）。
+  - 例外：**谐波攻击**（单体、范围都算）打得到下潜的单位；**塌陷区域**的伤害也打得到。被这两种打到时下潜被迫解除，并受到 1 击破（谐波打的算谐波击破）。
+  - 状态栏写「下潜」，名牌上有下潜图标（沙面波纹 + 向下箭头）。
+  - 阵营：沙漠生物和沙灵互相敌对（enemies.js · `HOSTILE_PAIRS`），会互相攻击。沙漠生物本身还没做。
+  - 测试 `tests/submerge.test.js`、`tests/hud-icons.test.js`。
+
 - **长线养成模式（测试用）**（rogue.js · `run.growth`、`drawInfo`、`drawHero`、`swapHero`、`partyLevel`；rogue-data.js · `ROGUE_GROWTH`；growth.js · `trpgXpRules`；标题画面「长线养成」）：从 1 级一路养到高级，用来测专长、改装件、成长曲线。接在单局上，和单局共用任务板、任务节点、工匠、客制化图纸、改装件。
   - 开局选 2 名角色。没有主线、期限和首领，任务随便接；敌人等级 = 队伍平均等级（+ 任务难度、精英加成），区域按这个等级落在哪一幕的等级段里。
   - 经验照跑团模式：升级所需经验不打折（单局是 1/3），击杀经验全队平分，打赢每场额外「最高等级 × 20 / 人数」。任务报酬的经验照单局。
