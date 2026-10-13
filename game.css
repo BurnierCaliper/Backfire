@@ -470,6 +470,11 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
 .unit-wrap.downed .chip { background: rgba(255,255,255,.12); color: #cfc9c2; }
 .unit-wrap.downed .u-econ, .unit-wrap.downed .u-atk { display: none; }  /* 给「倒下」标记让位 */
 
+/* 名牌上方的行动提示（连击……）：红底白字的长方形，悬在卡片上沿外 */
+.u-intents { position: absolute; left: 0; right: 0; bottom: calc(100% + 3px); display: none; justify-content: center; gap: 4px; z-index: 4; pointer-events: none; }
+.unit-wrap.has-intent .u-intents { display: flex; }
+.u-intent { background: #c8102e; color: #fff; font-weight: 700; font-size: 12px; line-height: 1; padding: 3px 8px; letter-spacing: .08em; white-space: nowrap; box-shadow: 0 1px 2px rgba(0, 0, 0, .35); }
+
 /* 预览数值牌 */
 .pvtag {
   position: absolute;

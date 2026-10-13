@@ -24,14 +24,24 @@
        <span class="u-flag stun">失衡</span><span class="u-flag dying">濒死</span><span class="u-flag downed">倒下</span>`);
     const flash = el("div", "flash");
     const tag = el("div", "pvtag");
-    wrap.append(unit, flash, tag);
-    const c = { id: s.id, wrap, unit, flash, tag, segs: [], pips: [], layersKey: "", prev: null };
+    const intents = el("div", "u-intents");   // 名牌上方的行动提示（连击……）：红底白字
+    wrap.append(intents, unit, flash, tag);
+    const c = { id: s.id, wrap, unit, flash, tag, intents, segs: [], pips: [], layersKey: "", prev: null };
     return c;
   }
 
   function update(c, s, opts) {
     const q = (sel) => c.unit.querySelector(sel);
     q(".u-name").textContent = s.name;
+    if (c.intents) {
+      const list = Array.isArray(s.intents) ? s.intents : [];
+      const key = list.join("|");
+      if (c.intents.dataset.key !== key) {
+        c.intents.dataset.key = key;
+        c.intents.innerHTML = list.map(x => `<span class="u-intent">${esc(x)}</span>`).join("");
+      }
+      c.wrap.classList.toggle("has-intent", list.length > 0);
+    }
     q(".u-lv").textContent = "Lv" + s.level;
     // 个体值（杂兵、精英）：铭牌上停一下就能看到血量 / ATK 水平
     const ivSign = (n) => (n > 0 ? "+" : n < 0 ? "−" : "±") + Math.abs(n) + "%";

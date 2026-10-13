@@ -79,6 +79,8 @@
     if (marks.length) d.marks = marks;
     const casts = arr(call("bossCastsBy", unit)).slice(0, 8).map(m => markDto(m, ["name", "target"], ["left"], [])).filter(Boolean);
     if (casts.length) d.casts = casts;
+    const intents = arr(call("enemyIntents", unit)).slice(0, 4).map(x => text(x, 12)).filter(Boolean);
+    if (intents.length) d.intents = intents;
     if (!get(unit, "isPlayer") && (get(unit, "dead") || get(unit, "_removed"))) {
       const ok = number(get(unit, "overkill")); if (ok > 0) d.overkill = Math.round(ok);
       if (get(unit, "killBig") === true) d.killBig = true;

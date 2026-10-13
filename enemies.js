@@ -660,7 +660,22 @@ function gasSpray(a, t, aa) {
 }
 /** 火石清扫机：站在火场里时，每一击都造成灼烧 */
 function flintOnConnect(a) {
-  return zoneOnFire(a.zone) ? { burnPerHit: true } : undefined;
+  return zoneOnFire(a.zone) ? { burn: 1 } : undefined;
+}
+/** 火石清扫机：回合开始先掷好下一次发射几发（1d6），还没打出去就留着。2 发以上是连击，名牌上预警 */
+function flintRollShots(u, notes) {
+  if (!u || u.dead || u.hidden) return;
+  u.resources = u.resources || {};
+  if (Number(u.resources.flintShots) >= 1) return;
+  u.resources.flintShots = 1 + Math.floor(Math.random() * 6);
+  if (u.resources.flintShots >= 2 && notes) notes.push(`${u.name} 装填了 ${u.resources.flintShots} 发火石：下次发射是连击。`);
+}
+/** 敌人名牌上的行动提示（红底白字的长方形）：这个敌人的回合将要做的特别行动。现在有：连击 */
+function enemyIntents(u) {
+  if (!u || u.isPlayer || u.dead || u.hidden || u.stunned) return [];
+  const out = [];
+  if (u.kit === "flint_sweeper" && Number(u.resources && u.resources.flintShots) >= 2) out.push("连击");
+  return out;
 }
 /** 蚁型特殊剿灭兵种：我方单位自己走进它所在的区时，用附赠行动退到相邻区（优先没有我方单位的区），并给走进来的人灼烧 1。
  *  照季玛的图纸「稳妥的距离」：被推、被拉进来的不算（app.js · doMoveInner 调用） */
@@ -938,20 +953,20 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
   }
   if (id === "en_flint") {
     if (!needT()) return true;
-    // 1d6 发火石，每发 0.5×atk + 1d4 火，只有第一发 1 击破。没被嘲讽就尽量分给不同的人（远距离、打得到的）
-    const shots = 1 + Math.floor(Math.random() * 6);
+    // 连击：1d6 发火石（回合开始时已经掷好，名牌上有「连击」预警），每发单独结算、单独格挡：0.5×atk + 1d4 火，只有第一发 1 击破。
+    // 没被嘲讽就按顺序轮流分给远距离、打得到的不同的人（先打选定的目标）
+    a.resources = a.resources || {};
+    const shots = Number(a.resources.flintShots) >= 1 ? Number(a.resources.flintShots) : 1 + Math.floor(Math.random() * 6);
+    a.resources.flintShots = null;
     const forced = !!(a.tauntTo || a.lockdownBy || (typeof touDuelVictim === "function" && touDuelVictim(a)));
     const others = forced ? [] : allPlayers().filter(u => u !== t && !u.dead && !(typeof isDownProtected === "function" && isDownProtected(u)) &&
       zoneDist(a.zone, u.zone, state.zoneMode) === 1 && !(typeof lineBlocked === "function" && lineBlocked(a.zone, u.zone)));
     const pool = [t].concat(others);
-    const per = new Map();
-    for (let i = 0; i < shots; i++) { const u = pool[i % pool.length]; per.set(u, (per.get(u) || 0) + 1); }
-    lines.push(`${a.name} 发射 ${shots} 发火石。`);
-    let first = true;
-    per.forEach((n, u) => {
-      aa(u, { element: "fire", mult: 0.5, diceN: 1, diceS: 4, hits: n, baseBreak: first ? 1 : 0, breakOnce: true, onConnect: flintOnConnect(a) });
-      first = false;
-    });
+    lines.push(`${a.name} ${shots >= 2 ? "连击：" : ""}发射 ${shots} 发火石。`);
+    for (let i = 0; i < shots; i++) {
+      const u = pool[i % pool.length];
+      aa(u, { element: "fire", mult: 0.5, diceN: 1, diceS: 4, baseBreak: i === 0 ? 1 : 0, onConnect: flintOnConnect(a) });
+    }
     return true;
   }
   if (id === "en_flint_assist") {

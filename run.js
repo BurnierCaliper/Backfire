@@ -467,6 +467,7 @@ function finishEncounter(spec, opt) {
 function regionWeather(region) {
   if (region === "沙漠") return Math.random() < 0.6 ? "sand" : "none";
   if (region === "第一采矿场") return Math.random() < 0.4 ? "acid" : "none";
+  if (region === "第二采矿场") return Math.random() < 0.4 ? "heat" : "none";
   if (region === "巨人城") return Math.random() < 0.3 ? "thunder" : "none";
   return "none";
 }

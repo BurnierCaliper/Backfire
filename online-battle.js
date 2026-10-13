@@ -34,6 +34,7 @@
       status: d.status != null ? d.status : focusText(u), res: d.res || "", atk: Math.round(Number(d.atk != null ? d.atk : u.atk) || 0), weapon: !!u.weaponOf,
       dur: d.dur ? { cur: Number(d.dur.cur) || 0, max: Number(d.dur.max) || 0, name: d.dur.name || "" } : null, marks: d.marks || [], casts: d.casts || [],
       overkill: Number(d.overkill) || 0, killBig: !!d.killBig,
+      intents: Array.isArray(d.intents) ? d.intents.filter(x => typeof x === "string").slice(0, 4) : [],
       iv: u.iv ? { hp: Number(u.iv.hp) || 0, atk: Number(u.iv.atk) || 0 } : null,
       badges: root.HudIcons ? HudIcons.unitBadges(u, u.marks) : []
     };

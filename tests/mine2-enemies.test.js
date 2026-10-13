@@ -84,18 +84,21 @@ test("火石清扫机：1d6 发分给远距离的不同的人，只有第一发 
   k.zone = 1; h.zone = 1; tank(k); tank(h);
   k.statuses.burn = 0; h.statuses.burn = 0;
   const def0 = [k.def, h.def];
-  f.c.Math.random = () => 0.999;   // 1d6 掷出 6 发
+  s.resources.flintShots = 6;   // 回合开始掷好的 6 发
   use(f, s, "en_flint", k);
-  assert.match(f.logs(), /发射 6 发火石/);
+  assert.match(f.logs(), /连击：发射 6 发火石/);
+  assert.equal(s.resources.flintShots, null, "打出去就用掉了");
   assert.ok(k.layers[0].current < 999 && h.layers[0].current < 999, "两个人都挨打");
   assert.equal(def0[0] - k.def + def0[1] - h.def, 1, "整次只有 1 击破");
   assert.equal(k.statuses.burn + h.statuses.burn, 0, "不在火场：不灼烧");
   f.c.setZoneField(2, "fire", {});
+  s.resources.flintShots = 6;
   use(f, s, "en_flint", k);
   assert.equal(k.statuses.burn + h.statuses.burn, 6, "火场里每一发都灼烧");
   // 被嘲讽：全打嘲讽的人
   k.statuses.burn = 0; h.statuses.burn = 0;
   s.tauntTo = h.id;
+  s.resources.flintShots = 6;
   use(f, s, "en_flint", h);
   assert.deepEqual([k.statuses.burn, h.statuses.burn], [0, 6]);
 });
@@ -201,4 +204,46 @@ test("蚁型特殊剿灭兵种：固有天气改不了就不花行动点；灼�
   k.layers[1].current = 1; const h0 = f.c.totalHp(h);
   use(f, a, "en_hunter_assist", k);
   assert.ok(f.c.totalHp(h) < h0, "爆燃溢出");
+});
+
+test("连击：火石清扫机每一发单独结算、单独格挡、单独掷骰；回合开始先掷好发数，2 发以上名牌上预警「连击」", () => {
+  const f = field([{ id: "flint_sweeper", lv: 5, zone: 2 }]);
+  const s = f.E("flint_sweeper"), k = f.P("kolt"), h = f.P("helu");
+  k.zone = 1; h.zone = 1; tank(k); tank(h); k.bonus = 3; h.bonus = 3;
+  // 每一发都单独问一次协助格挡（同区有人能格挡）
+  s.resources.flintShots = 3;
+  f.S.combatPhase = "enemy"; s.ap = 1; f.S.attackerId = s.id; f.S.targetId = k.id;
+  f.c.runSkill("en_flint");
+  assert.equal(f.S.blockQueue.length, 3, "三发 = 三次格挡");
+  f.c.BattleSim.resolveQueues(noBlock);
+  // 回合开始掷发数：2 发以上预警
+  s.resources.flintShots = null;
+  f.c.Math.random = () => 0.999;
+  f.c.flintRollShots(s, []);
+  assert.equal(s.resources.flintShots, 6);
+  assert.deepEqual(plain(f.c.enemyIntents(s)), ["连击"]);
+  s.resources.flintShots = 1;
+  assert.deepEqual(plain(f.c.enemyIntents(s)), [], "只有 1 发不是连击");
+  s.resources.flintShots = 4; s.stunned = true;
+  assert.deepEqual(plain(f.c.enemyIntents(s)), [], "失衡了不提示");
+  s.stunned = false;
+  // 回合开始（我方回合）会掷好，没打出去就留着
+  s.resources.flintShots = null;
+  f.c.Math.random = () => 0.5;
+  f.c.endPlayerTurn(); f.S.units.filter(u => !u.isPlayer).forEach(u => { u.ap = 0; }); f.c.endEnemyTurn();
+  assert.equal(s.resources.flintShots, 4);
+});
+
+test("蚁型特殊剿灭兵种：我方被推进它的区也会退开、灼烧；第二采矿场 40% 酷暑", () => {
+  const f = field([{ id: "ant_hunter", lv: 5, zone: 2 }]);
+  const a = f.E("ant_hunter"), k = f.P("kolt");
+  k.zone = 1; k.statuses.burn = 0; a.bonus = 1;
+  f.c.displaceTo(k, 2, [], "被推");
+  assert.equal(k.zone, 2);
+  assert.equal(a.zone, 1);
+  assert.equal(k.statuses.burn, 1);
+  const c = H.load();
+  const seen = new Set();
+  for (let i = 0; i < 200; i++) seen.add(c.regionWeather("第二采矿场"));
+  assert.deepEqual([...seen].sort(), ["heat", "none"]);
 });

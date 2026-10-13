@@ -1645,6 +1645,7 @@ function beginRound(notes) {
       notes.push(err || `${u.name} 低空作业：${u.zone} 区生成酸液地面（对自身无效）。`);
     }
     if (u.kit === "patrolboat" && typeof boatOverloadRoundStart === "function") boatOverloadRoundStart(u, notes);
+    if (u.kit === "flint_sweeper" && typeof flintRollShots === "function") flintRollShots(u, notes);   // 连击预警：先掷好下一次发射几发
     // 赤牙的掩体「一回合内」有效：撑过我方回合，到她下次出手为止（enemies.js）；一直没出手的，过了一整回合在这里撤掉。
     // 以前在这里一律清掉，我方回合开始前掩体就没了
     if (u.kit === "chixia" && u.resources && u.resources.cover && Number(state.turnNo) >= (Number(u.resources.coverTurn) || 0) + 2) {
@@ -4636,6 +4637,7 @@ function displaceTo(obj, dest, notes, reason, opts) {
   enterFrozenGround(obj, notes);
   applyAbyssFall(obj, from, notes);
   if (!obj.kind) chaseFollow(obj, notes);   // 被推走也算移动：紧追的人跟上
+  if (!obj.kind && typeof hunterAfterMove === "function") hunterAfterMove(obj, notes);   // 蚁型特殊剿灭兵种：被推进它的区也会退开
   return true;
 }
 
