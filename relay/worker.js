@@ -155,6 +155,15 @@ export class Room {
       connection.ready = message.ready; ws.serializeAttachment(connection); this.publish();
       this.send(ws, this.packet("ack", { id: message.id })); return;
     }
+    // 主持人释放玩家座位：丢掉这个座位的恢复令牌，昵称和名额可以重新使用；该座位在线的连接被断开（4003 released）
+    if (message.kind === "release") {
+      if (!isHost || typeof message.id !== "string" || !/^[a-zA-Z0-9:_-]{1,96}$/.test(message.id) || typeof message.seat !== "string") { this.error(ws, "只有主持人可以释放座位", message.id || null); return; }
+      const index = this.meta.seats.findIndex(seat => seat.id === message.seat && seat.role === "player");
+      if (index < 0) { this.error(ws, "没有这个玩家座位", message.id); return; }
+      this.meta.seats.splice(index, 1); await this.ctx.storage.put("room", this.meta);
+      for (const peer of this.authenticated()) if (this.data(peer).id === message.seat) { peer.serializeAttachment({ released: true }); try { peer.close(4003, "released"); } catch (_) {} }
+      this.publish(); this.send(ws, this.packet("ack", { id: message.id })); return;
+    }
     if (!["data", "chunk"].includes(message.kind) || typeof message.id !== "string" || !/^[a-zA-Z0-9:_-]{1,96}$/.test(message.id)) { this.error(ws, "无效的转发消息", message.id || null); return; }
     const status = this.status();
     if (!isHost && status.paused) { this.error(ws, "主持人离线或正在恢复，房间已暂停", message.id, "paused"); return; }

@@ -294,6 +294,17 @@
       }
       assignments = next; reconcile(false); return emit("assignments");
     }
+    /** 主持人接管某个操作者的全部角色（例如玩家掉线）：战斗中也可以；角色和武器人改由主持人操作，顺序格子不变 */
+    function takeOver(id, playerId) {
+      host(id); operator(playerId);
+      if (playerId === gmId) fail("take_over", "不能接管主持人自己的角色");
+      const kits = Object.keys(assignments).filter(heroId => assignments[heroId] === playerId);
+      if (!kits.length) fail("take_over", "这名玩家没有可接管的角色");
+      for (const heroId of kits) delete assignments[heroId];
+      confirmed.delete(playerId);
+      swaps = swaps.filter(s => s.requester !== playerId && s.responder !== playerId);
+      return reconcile(true);
+    }
     function beginRound(number) {
       if (!Number.isInteger(number) || number < 1) fail("round", "回合编号无效");
       if (phase === "ended") fail("ended", "战斗已经结束");
@@ -520,7 +531,7 @@
     }
     setAssignments(options.assignments || {});
     return { snapshot, reconcile, setAssignments, beginRound, pick: place, confirm, forceStart, move, acceptSwap,
-      assertAction, finishUnit, markSpent, openAsk, answer, tick, askFor, chat: chatMessage, endBattle, reset, checkpoint, restore,
+      assertAction, finishUnit, markSpent, takeOver, openAsk, answer, tick, askFor, chat: chatMessage, endBattle, reset, checkpoint, restore,
       openCheck, rollCheck: rollCheckFor, closeCheck, requestAttr, decideAttr, skillRoll, showTitle,
       ownerOf: unitId => (rowFor(unitId) || {}).operatorId || null,
       extendAsk(ms) { if (ask && Number.isFinite(ms) && ms > 0) { ask.deadline += ms; emit("askResumed"); } },

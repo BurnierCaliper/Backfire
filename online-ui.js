@@ -177,7 +177,13 @@
     }
     function rosterMarkup() {
       const heroes = view.heroes || [], mayAssign = view.isHost && ["lobby", "exploration", "ended"].includes(view.screen);
-      return `<section><h3>房间成员</h3><ul class="ol-roster">${players().map(p => `<li><span><b>${esc(p.name)}</b>${p.gm ? ' <small>主持人</small>' : ""}</span><span class="${p.online ? "ol-online" : "ol-muted"}">${p.online ? "在线" : "离线"}</span><small>${esc(heroes.filter(h => h.owner === p.id).map(h => h.name).join("、") || (p.gm ? "未分配角色由主持人操作" : "等待分配角色"))}</small></li>`).join("")}</ul>${mayAssign ? `<div class="ol-assignments">${heroes.map(h => `<label><span>${esc(h.name)}</span><select data-assign="${esc(h.id)}" aria-label="${esc(h.name)}的玩家">${players().map(p => option(p.id, p.name + (p.gm ? " · 主持人" : ""), (assignments[h.id] || h.owner) === p.id)).join("")}</select></label>`).join("")}</div>${button("保存角色分配", "assign", "", disabled() || !heroes.length)}` : ""}</section>`;
+      return `<section><h3>房间成员</h3><ul class="ol-roster">${players().map(p => `<li><span><b>${esc(p.name)}</b>${p.gm ? ' <small>主持人</small>' : ""}</span><span class="${p.online ? "ol-online" : "ol-muted"}">${p.online ? "在线" : "离线"}</span><small>${esc(heroes.filter(h => h.owner === p.id).map(h => h.name).join("、") || (p.gm ? "未分配角色由主持人操作" : "等待分配角色"))}</small>${view.isHost && !p.gm ? seatTools(p) : ""}</li>`).join("")}</ul>${mayAssign ? `<div class="ol-assignments">${heroes.map(h => `<label><span>${esc(h.name)}</span><select data-assign="${esc(h.id)}" aria-label="${esc(h.name)}的玩家">${players().map(p => option(p.id, p.name + (p.gm ? " · 主持人" : ""), (assignments[h.id] || h.owner) === p.id)).join("")}</select></label>`).join("")}</div>${button("保存角色分配", "assign", "", disabled() || !heroes.length)}` : ""}</section>`;
+    }
+    /** 主持人对玩家座位的操作：掉线时「接管」他的角色（战斗中也行）；「释放座位」让丢了恢复令牌的人能用同一个昵称重新加入 */
+    function seatTools(p) {
+      const units = (view.packet?.view?.units || []).filter(u => u.owner === p.id);
+      const take = !p.online && units.length ? button("接管", "takeOver", `data-player="${esc(p.id)}" title="由主持人替他操作 ${esc(units.map(u => u.name).join("、"))}"`, pending) : "";
+      return `<span class="ol-seat-tools">${take}${button("释放座位", "releaseSeat", `data-player="${esc(p.id)}" data-name="${esc(p.name)}"`, pending)}</span>`;
     }
     function messagesMarkup() {
       const rows = historyRows;
@@ -335,9 +341,31 @@
       const smith = r.smith && payer ? `<section class="ol-rogue-box" aria-label="工匠"><h3>${esc(r.smith.name)}（你有 ${esc(purse)} 奎支）</h3><ul>${r.smith.upgrades.map(o => `<li>${esc(o.name)} Lv${esc(o.level)} ${o.max ? "已满级" : rogueAct(`升到 ${o.level + 1} 级（${o.cost}）`, { action: "upgradeWeapon", kit: o.kit, smith: r.smith.id }, purse < o.cost)}</li>`).join("")}${r.smith.offers.map(o => `<li>改装件 ${esc(o.name)}<small>${esc(o.text)}</small> ${o.sold ? "已卖出" : rogueAct(`买（${o.price}）`, { action: "buyPart", smith: r.smith.id, index: o.index, payer }, purse < o.price)}</li>`).join("")}</ul></section>` : "";
       const slots = r.smith ? r.smith.slots || [] : [];
       const parts = r.parts && r.parts.length && payer ? `<section class="ol-rogue-box" aria-label="改装件"><h3>你的改装件</h3><ul>${r.parts.map((p, i) => `<li>${esc(p.name)} ×${esc(p.have)}<small>${esc(p.text)}</small> ${rogueAct(`卖掉（${p.sell}）`, { action: "sellPart", part: p.id, payer })}${slots.length ? `<select id="ol-rp-${i}" aria-label="装到哪个槽">${slots.map(x => option(`${x.kit}:${x.slot}`, `${x.name} 槽 ${x.slot + 1}${x.cur ? "（现在：" + x.cur + "）" : ""}`, false)).join("")}</select>${button(`装上（${p.install}）`, "roguePartInstall", `data-part="${esc(p.id)}" data-select="ol-rp-${i}" data-smith="${esc(r.smith.id)}"`, disabled() || purse < p.install)}` : ""}</li>`).join("")}</ul></section>` : "";
-      const clinic = r.clinic && r.clinic.length ? `<section class="ol-rogue-box" aria-label="诊所"><h3>诊所（你有 ${esc(purse)} 奎支）</h3><ul>${r.clinic.map(c => `<li>${esc(c.name)} ${c.cost ? rogueAct(`治疗到满血（${c.cost}）`, { action: "healHero", kit: c.kit }, purse < c.cost) : "满血"}</li>`).join("")}</ul></section>` : "";
+      const filled = slots.filter(x => x.cur);
+      const unmount = r.smith && filled.length ? `<section class="ol-rogue-box" aria-label="拆改装件"><h3>已装的改装件</h3><ul>${filled.map(x => `<li>${esc(x.name)} 槽 ${esc(x.slot + 1)}：${esc(x.cur)} ${rogueAct("拆下（不要钱）", { action: "removePart", kit: x.kit, slot: x.slot, smith: r.smith.id })}</li>`).join("")}</ul></section>` : "";
+      const clinic = r.clinic && r.clinic.length ? `<section class="ol-rogue-box" aria-label="诊所"><h3>诊所（你有 ${esc(purse)} 奎支）</h3><ul>${r.clinic.map(c => `<li>${esc(c.name)} ${c.cost ? rogueAct(`治疗到满血（${c.cost}）`, { action: "healHero", kit: c.kit }, purse < c.cost) : "满血"}</li>${c.cyber ? cyberMarkup(c, purse) : ""}`).join("")}</ul></section>` : "";
       const log = (r.log || []).length ? `<section class="ol-rogue-box" aria-label="最近发生"><h3>最近发生</h3><ul>${r.log.map(t => `<li>${esc(t)}</li>`).join("")}</ul></section>` : "";
-      return head + over + choice + waits + loot + lootLog + vote + last + heroes + board + task + shop + smith + parts + clinic + log;
+      return head + over + choice + waits + loot + lootLog + vote + last + heroes + board + task + shop + smith + parts + unmount + clinic + log;
+    }
+    /** 义体改造：和单机诊所一样填装甲 / 护盾 / 沙尘层的点数、要不要换成星灵；价格按房主发来的单价估 */
+    const CYBER_LAYERS = [["armor", "装甲"], ["shield", "护盾"], ["sand", "沙尘"]];
+    const cyberDraft = {};   // 正在填的改造方案（重画时保留）
+    function cyberPlanOf(kit) {
+      const box = stage.querySelector(`[data-cyber-box="${CSS.escape(kit)}"]`);
+      if (!box) return null;
+      const plan = { spirit: !!box.querySelector("[data-cy-spirit]")?.checked };
+      for (const [k] of CYBER_LAYERS) plan[k] = Math.max(0, Math.floor(Number(box.querySelector(`[data-cy-layer="${k}"]`)?.value) || 0));
+      return plan;
+    }
+    function cyberEstimate(c, plan) {
+      const a = c.cyber.current || {};
+      let pts = CYBER_LAYERS.reduce((s, [k]) => s + Math.abs((plan[k] || 0) - (Number(a[k]) || 0)), 0);
+      if (!!a.spirit !== !!plan.spirit) pts += c.cyber.fleshMax - CYBER_LAYERS.reduce((s, [k]) => s + (plan[k] || 0), 0);
+      return pts * (Number(c.cyber.perHp) || 0);
+    }
+    function cyberMarkup(c, purse) {
+      const cur = cyberDraft[c.kit] || c.cyber.current || {};
+      return `<li class="ol-cyber" data-cyber-box="${esc(c.kit)}"><span>义体改造（肉体 ${esc(c.cyber.fleshMax)}，最多改 ${esc(c.cyber.limit)} 点）</span>${CYBER_LAYERS.map(([k, label]) => `<label>${label}<input type="number" min="0" max="${esc(c.cyber.limit)}" step="1" data-cy-layer="${k}" value="${esc(Number(cur[k]) || 0)}"></label>`).join("")}<label><input type="checkbox" data-cy-spirit${cur.spirit ? " checked" : ""}> 换成星灵</label>${button("改造", "rogueCyber", `data-kit="${esc(c.kit)}" data-purse="${esc(purse)}"`, disabled())}</li>`;
     }
     /* ---------- 升级提示：自己操控的角色升级 / 武器升级 / 学到新技能（levelup-ui.js 的画法） ---------- */
     const lvBox = make("div", "online-levelup", "lvu-overlay");
@@ -663,9 +691,15 @@
           if (i >= 0) choose(i);
         },
         onCancel: () => { if (request?.skill && !disabled()) menu({ actor: request.actor }); },
-        onEnd: async () => { if (!isMyTurn() || disabled()) return; const actor = hs().currentUnitId; if (await call(() => api.submit({ type: "endTurn", actor }))) { request = currentMenu = null; } }
+        onEnd: async () => { if (!isMyTurn() || disabled()) return; const actor = hs().currentUnitId; if (!endTurnOk(actor)) return; if (await call(() => api.submit({ type: "endTurn", actor }))) { request = currentMenu = null; } }
       });
       return battle;
+    }
+    /** 结束行动前：这个单位还有行动点或附赠没用就先问一句（防止误触） */
+    function endTurnOk(actor) {
+      const u = (((displayState || view.state || {}).units) || []).find(x => x.id === actor);
+      if (!u || !((Number(u.ap) || 0) > 0 || (Number(u.bonus) || 0) > 0)) return true;
+      return confirm(`${u.name || "这个单位"} 还有 ${Number(u.ap) || 0} 点行动、${Number(u.bonus) || 0} 次附赠没用，确定结束行动吗？`);
     }
     /** 轮到自己的角色：自动取技能栏（不用再点「选择行动」）。每个回合 / 每次结算后的新状态取一次 */
     function scheduleAutoMenu() {
@@ -738,7 +772,10 @@
       const text = form.chatText.trim(); if (!text || disabled()) return;
       if (await call(() => api.submit({ type: "chat", text }))) { form.chatText = ""; render(); }
     }
-    function input(event) { const key = event.target.dataset.field; if (key && Object.hasOwn(form, key)) form[key] = event.target.value; }
+    function input(event) {
+      const box = event.target.closest && event.target.closest("[data-cyber-box]");
+      if (box) { cyberDraft[box.dataset.cyberBox] = cyberPlanOf(box.dataset.cyberBox); return; }
+      const key = event.target.dataset.field; if (key && Object.hasOwn(form, key)) form[key] = event.target.value; }
     function change(event) { input(event); if (event.target.dataset.field === "mode") render(); if (event.target.dataset.assign) assignments[event.target.dataset.assign] = event.target.value; }
     async function click(event) {
       const b = event.target.closest("[data-online]"); if (!b || b.disabled) return;
@@ -761,12 +798,17 @@
         case "copyCode": await copyRoomCode(); break;
         case "leave": await call(() => api.leave()); break;
         case "assign": await call(() => api.assign(Object.fromEntries((view.heroes || []).map(h => [h.id, assignments[h.id] || h.owner || own()])))); assignments = {}; break;
+        case "takeOver": if (typeof api.takeOver === "function") await call(() => api.takeOver(b.dataset.player)); break;
+        case "releaseSeat":
+          if (typeof api.releaseSeat !== "function") break;
+          if (!confirm(`释放「${b.dataset.name}」的座位？\n他会被移出房间，角色交回主持人；之后可以用同一个昵称重新加入（丢了恢复令牌、换了设备时用）。`)) break;
+          await call(() => api.releaseSeat(b.dataset.player)); break;
         case "start": if (await call(() => api.start())) { panelOpen = false; render(); } break;
         case "actor": await menu({ actor: b.dataset.actor }); break;
         case "resetMenu": if (request) await menu({ actor: request.actor }); break;
         case "option": await choose(Number(b.dataset.option)); break;
         case "execute": if (currentMenu?.choices?.command && !disabled()) { const command = copy(currentMenu.choices.command); if (await call(() => api.submit(command))) { currentMenu = request = null; render(); } } break;
-        case "endTurn": if (!disabled()) await call(() => api.submit({ type: "endTurn", actor: b.dataset.actor })); break;
+        case "endTurn": if (!disabled() && endTurnOk(b.dataset.actor)) await call(() => api.submit({ type: "endTurn", actor: b.dataset.actor })); break;
         case "info": await openInfo(b.dataset.info); break;
         case "map": openMap(); break;
         case "showLog": sideTab.battle = "log"; renderSide(true); side.querySelector(".ol-side-log")?.scrollIntoView({ block: "nearest" }); break;
@@ -776,6 +818,16 @@
         case "rogueUnvote": if (!disabled()) await call(() => api.submit({ type: "rogue.vote", option: null })); break;
         case "rogueNeed": if (!disabled()) await call(() => api.submit({ type: "rogue.need", loot: Number(b.dataset.loot), kit: b.dataset.kit, need: b.dataset.want === "1" })); break;
         case "rogueAct": if (!disabled()) await call(() => api.submit({ type: "rogue.act", command: JSON.parse(b.dataset.cmd) })); break;
+        case "rogueCyber": {
+          const kit = b.dataset.kit, plan = cyberPlanOf(kit), c = (view.packet?.rogue?.clinic || []).find(x => x.kit === kit);
+          if (!plan || !c || !c.cyber || disabled()) break;
+          const cost = cyberEstimate(c, plan);
+          if (!cost) { notice = "方案没有变化"; render(); break; }
+          if (cost > Number(b.dataset.purse)) { notice = `预计要 ${cost} 奎支，你的钱不够`; render(); break; }
+          if (!confirm(`给 ${c.name} 做义体改造，预计花 ${cost} 奎支？\n伤势照旧带着，缺的血先从外层扣。`)) break;
+          if (await call(() => api.submit({ type: "rogue.act", command: { action: "modifyHero", kit, plan } }))) delete cyberDraft[kit];
+          break;
+        }
         case "roguePartInstall": {
           const [kit, slot] = String(byId(b.dataset.select)?.value || ":").split(":");
           if (!disabled() && kit) await call(() => api.submit({ type: "rogue.act", command: { action: "installPart", kit, slot: Number(slot), part: b.dataset.part, smith: b.dataset.smith } }));
