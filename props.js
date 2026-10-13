@@ -86,7 +86,7 @@ function makeProp(kind, zone, level) {
 const MECHANICAL_KITS = {
   guard_sword: true, guard_gun: true, boomcar: true, buoy: true,
   dumpdrone: true, swarm: true, patrolboat: true, spreader: true, patrol_car: true,
-  mine_guard: true, flint_sweeper: true, gas_collector: true
+  mine_guard: true, flint_sweeper: true, gas_collector: true, alarm_bot: true, meteor_miner: true
 };
 
 function isMechanicalUnit(u) {

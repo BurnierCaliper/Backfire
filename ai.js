@@ -24,7 +24,7 @@ const EnemyAI = (function () {
   const ZONE_PICK = { en_gl: true, en_gl_fire: true, en_ant_shell: true, en_ant_shell_fire: true };
   // 不需要目标 / 不是攻击的技能：找站位时不拿它们来算「能不能打到」
   const NO_TARGET = { en_agg3_debris: true, en_king_hold: true, en_bigsand_summon: true, en_bigsand_heal: true, ufo_prime: true,
-    ufo_boom: true, ufo_stomp: true, ufo_sweep: true, ufo_summon: true, en_agg2_overheat: true, en_giant_sand_pulse: true, en_thug_mutiny: true, en_gas_ignite: true, en_hunter_heat: true };
+    ufo_boom: true, ufo_stomp: true, ufo_sweep: true, ufo_summon: true, en_agg2_overheat: true, en_giant_sand_pulse: true, en_thug_mutiny: true, en_gas_ignite: true, en_hunter_heat: true, en_alarm_zap: true };
   function canAimSkill(u, sid, t) {
     if (!inSkillReach(u, sid, t)) return false;
     // 隔着危墙 / 关着的门打不到（dealTo 会挡下来）：以前照样瞄准，结果每回合白打
@@ -101,6 +101,8 @@ const EnemyAI = (function () {
     mine_guard:     { dist: 0,    aim: "local",   near: "en_mine_guard" },
     mine_overseer:  { dist: 0,    aim: "local",   near: "en_overseer" },
     flint_sweeper:  { dist: 1,    aim: "local",   near: "en_flint",          far: "en_flint" },
+    alarm_bot:      { dist: null, aim: "local",   special: "alarm", fixed: true },
+    meteor_miner:   { dist: 1,    aim: "local",   near: "en_miner_shot",     far: "en_miner_shot" },
     thug_knife:     { dist: 0,    aim: "local",   near: "en_thug_knife" },
     thug_hammer:    { dist: 0,    aim: "local",   near: "en_thug_hammer" },
     crow:           { dist: 0,    aim: "lowest",  near: "en_crow" },
@@ -145,6 +147,7 @@ const EnemyAI = (function () {
   /** 这一步移动付不付得起：杂兵用行动点，精英 / 首领只能用附赠行动；被禁足 / 霜结不能动 */
   function canPayMove(u) {
     if (!u || u.noMove || u.self === "frost") return false;
+    if (AI_SPEC[u.kit] && AI_SPEC[u.kit].fixed) return false;   // 不会主动移动（矿场警戒自动机）
     const rank = typeof enemyRankOf === "function" ? enemyRankOf(u) : "minion";
     return rank === "minion" ? (u.ap || 0) >= 1 : (u.bonus || 0) >= 1;
   }
@@ -281,6 +284,10 @@ const EnemyAI = (function () {
     if (spec.special === "gl") {
       if (has("en_gl_fire")) return "en_gl_fire";
       return has("en_gl") ? "en_gl" : null;
+    }
+    if (spec.special === "alarm") {
+      // 不移动：场上有高能的敌人就电涌，没有就待机
+      return has("en_alarm_zap") && alarmTargets(u).length ? "en_alarm_zap" : null;
     }
     if (spec.special === "gas") {
       // 每回合先移动（够不着目标就先走过去），然后：所在区是火场就喷火；不是火场、能点着就点燃燃气
@@ -498,7 +505,7 @@ const EnemyAI = (function () {
     }
 
     let sid = aiSpecial(u, spec, target, prey, has, list);
-    if (sid && !["en_agg3_debris", "en_king_hold", "en_bigsand_summon", "en_bigsand_heal", "ufo_prime", "ufo_boom", "ufo_stomp", "ufo_sweep", "en_agg2_overheat", "en_gl", "en_gl_fire", "en_ant_shell", "en_ant_shell_fire", "en_gas_ignite", "en_giant_sand_pulse"].includes(sid)) {
+    if (sid && !["en_agg3_debris", "en_king_hold", "en_bigsand_summon", "en_bigsand_heal", "ufo_prime", "ufo_boom", "ufo_stomp", "ufo_sweep", "en_agg2_overheat", "en_gl", "en_gl_fire", "en_ant_shell", "en_ant_shell_fire", "en_gas_ignite", "en_alarm_zap", "en_giant_sand_pulse"].includes(sid)) {
       const rt = retargetLegal(u, sid, target, prey, pick.forced);
       if (rt.target) target = rt.target;
       if (rt.sid) sid = rt.sid;
@@ -510,7 +517,8 @@ const EnemyAI = (function () {
       sid === "en_bigsand_summon" || sid === "en_bigsand_heal" || sid === "ufo_prime" ||
       sid === "ufo_boom" || sid === "ufo_stomp" || sid === "ufo_sweep" || sid === "en_agg2_overheat" ||
       sid === "en_giant_sand_pulse" ||   // 全域沙暴打所有区域，不用瞄准
-      sid === "en_gas_ignite";           // 点燃燃气打自己所在的区
+      sid === "en_gas_ignite" ||         // 点燃燃气打自己所在的区
+      sid === "en_alarm_zap";            // 电涌打所有高能的敌人，不用瞄准
     // 聚合体的电能炮：贴近打 1d20 最好；没有附赠动作走不过去时就隔一区打（1d10），不白白耗着
     const fireNow = sid === "en_agg2_charge" && zdist(u.zone, target.zone) <= 1 && (u.bonus || 0) < 1;
     if (sid && (inRange || !step || noTargetNeeded || fireNow)) {
@@ -574,6 +582,7 @@ const EnemyAI = (function () {
   }
   function aiPlan(u) {
     if (u && u.trainingDummy) return null;   // 训练场的木桩：不行动
+    if (u && u.dormant) return null;         // 休眠：不行动，直到被叫醒
     const plan = aiPlanBase(u);
     if (!u || !u.flying || state.weather !== "sand" || u.noMove || u.self === "frost") return plan;
     if (typeof touDuelVictim === "function" && touDuelVictim(u)) return plan;   // 决一死战中不移动

@@ -1710,6 +1710,27 @@ function enemyPresets() {
         { type: "flesh", hp: scaleHp(26 + (lv - 1) * 7, p) }
       ], 5 + milestone(lv, 5), Math.round(6 + (lv - 1) * 24 / 19), { kit: "ant_hunter", range: "ranged", dice: [1, 8], element: "fire", baseBreak: 1 });
     }},
+    // —— 第三采矿场（能量）——
+    // 矿场警戒自动机：数值同机器人看守（剑），血量 60% 装甲 + 40% 护盾（护盾在外）；开场休眠
+    { id: "alarm_bot", name: "矿场警戒自动机", build(lv, p) {
+      const total = 14 + (lv - 1) * 5, shield = Math.round(total * 0.4);
+      const u = unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(shield, p) },
+        { type: "armor", hp: scaleHp(total - shield, p) }
+      ], 3 + Math.floor(lv / 5), 4 + Math.floor(lv / 2), { kit: "alarm_bot", range: "any", dice: [1, 4], element: "energy" });
+      u.dormant = true;
+      return u;
+    }},
+    // 陨石开采机：数值同投料无人机，血量 60% 星灵 + 40% 护盾（护盾在外）；开场带蓄能
+    { id: "meteor_miner", name: "陨石开采机", build(lv, p) {
+      const total = 8 + (lv - 1) * 3, shield = Math.round(total * 0.4);
+      const u = unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(shield, p) },
+        { type: "spirit", hp: scaleHp(total - shield, p) }
+      ], 2 + milestone(lv, 2), 5 + (lv - 1) * 2, { kit: "meteor_miner", flying: true, range: "ranged", dice: [0, 0], element: "energy" });
+      u.self = "store";
+      return u;
+    }},
     { id: "bigsand", name: "大沙灵", build(lv, p) {
       return unitOf(this.name, lv, [{ type: "sand", hp: scaleHp(37 + (lv - 1) * 6 + milestone(lv, 2), p) }], 4, 5 + milestone(lv, 2), { kit: "bigsand", range: "melee", dice: [1, 4], element: "physical" });
     }},

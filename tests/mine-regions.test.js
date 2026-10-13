@@ -64,4 +64,8 @@ test("第三采矿场：30% 微光、20% 有一个区是能量场", () => {
   assert.ok(Math.abs(glow / N - 0.3) < 0.05, "微光约 30%：" + glow / N);
   assert.ok(Math.abs(energy / N - 0.2) < 0.05, "能量场约 20%：" + energy / N);
   assert.equal(c.regionFeatures("第一采矿场", 3).length, 0, "其他区域不带");
+  for (let i = 0; i < 20; i++) {
+    const spec = c.rollEncounter({ region: "第三采矿场" });
+    assert.ok(spec.enemies.length > 0, "随机遭遇抽得出敌人");
+  }
 });

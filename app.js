@@ -449,6 +449,7 @@ function statusLine(u) {
     if (u.resources && u.resources.forceOverheat) s.push("将过热");
     if (u.resources && u.resources.debrisCount) s.push("碎片" + u.resources.debrisCount + "/2");
   }
+  if (u.dormant) s.push("休眠");
   if (u.noMove) s.push("无法移动");
   if (u.tauntTo) s.push("嘲讽");
   if (typeof isPierced === "function" && isPierced(u)) s.push("刺入");
@@ -536,6 +537,17 @@ function checkHighBoom(unit, opt) {
   if (unit.self === "store" && currentWeatherFor(unit) === "glow") return;
   const hp = currentLifeForHigh(unit);
   const val = highBoomValue(unit);
+  // 陨石开采机被我方打死：高能值转给杀它的人，自己不自爆（还活着时蓄能撑爆照常自爆）
+  if (val > 0 && hp <= 0 && unit.kit === "meteor_miner" && typeof minerDeathTransfer === "function") {
+    const acc = state.actionAcc;
+    const killer = unitById(unit._lastHitBy) || (acc && acc.actorIsPlayer ? unitById(acc.actorId) : null);
+    if (killer && killer.isPlayer && !killer.dead) {
+      const notes = [];
+      minerDeathTransfer(unit, killer, notes);
+      notes.forEach(s => appendLog(s));
+      return;
+    }
+  }
   if (val > 0 && hp < val) explodeHigh(unit, val);   // 血量「低于」高能值才自爆；这次爆炸的高能值含能量场叠上来的部分
 }
 
@@ -4081,6 +4093,7 @@ function doMoveInner(unit, dest, moveOpt) {
   triggerLeaveOpportunity(unit, from, notes);
   if (typeof bpAfterEnemyMove === "function") bpAfterEnemyMove(unit, notes);   // 单局图纸：稳妥的距离
   if (typeof hunterAfterMove === "function") hunterAfterMove(unit, notes);     // 蚁型特殊剿灭兵种：有人走进来就退开
+  if (typeof dormantAfterMove === "function") dormantAfterMove(unit, notes);   // 休眠的敌人：有人进它的区就醒
   enterFrozenGround(unit, notes);
   applyAbyssFall(unit, from, notes);
   if (typeof afterMove === "function") afterMove(unit, notes);
@@ -4508,6 +4521,7 @@ function settleEnemyKill(target, notes) {
     if (st) st.kills += 1;
     // 评分：敌人倒下就算（谁打的都算全队的分；能归到人的记在那个人身上）
     if (target.kit !== "ironwall") addScore("kill", SCORE_RULES.kill[enemyRankOf(target)] || SCORE_RULES.kill.minion, killer, Number(target._killBonus) || 0);
+    if (typeof minerDeathTransfer === "function") minerDeathTransfer(target, killer, notes);   // 陨石开采机：高能转给杀它的人
   }
   const rank = ENEMY_RANK[target.kit] || "minion";
   // 跑团模式：手册「遭遇战敌人先动，经验双倍；困难遭遇三倍」，由主持人在战斗顶栏选
@@ -4638,6 +4652,7 @@ function displaceTo(obj, dest, notes, reason, opts) {
   applyAbyssFall(obj, from, notes);
   if (!obj.kind) chaseFollow(obj, notes);   // 被推走也算移动：紧追的人跟上
   if (!obj.kind && typeof hunterAfterMove === "function") hunterAfterMove(obj, notes);   // 蚁型特殊剿灭兵种：被推进它的区也会退开
+  if (!obj.kind && typeof dormantAfterMove === "function") dormantAfterMove(obj, notes);   // 休眠的敌人：被推进它的区也会醒
   return true;
 }
 
@@ -7111,7 +7126,8 @@ function dealTo(attacker, target, opt) {
   // 导体的额外目标是随机击中的，不受射程限制
   // 配置物（防卫炮台）的自动攻击不限距离
   // 维塔斯对刺入目标出手（扯下 / 加压灌输）：针尖就在目标身上，不受距离限制（viaPierce）
-  if (attacker && target && opt.flags.action && !opt.flags.aoe && !isReaction && !opt.flags.conductorExtra && !opt.flags.propShot && !opt.flags.locked && !opt.flags.viaPierce) {
+  // anyRange：不限距离的攻击（矿场警戒自动机打所有高能的敌人）
+  if (attacker && target && opt.flags.action && !opt.flags.aoe && !isReaction && !opt.flags.conductorExtra && !opt.flags.propShot && !opt.flags.locked && !opt.flags.viaPierce && !opt.flags.anyRange) {
     const d = zoneDist(Number(attacker.zone), Number(target.zone), Number(state.zoneMode));
     const rg = opt.atkRange || (attacker.isPlayer ? "any" : (attacker.range || "any"));
     const okRange = rg === "melee" ? d === 0 : rg === "ranged" ? d === 1 : d <= 1;
@@ -7444,6 +7460,9 @@ function dealTo(attacker, target, opt) {
     if (attackConnected(res, flags)) extra.push(...runOnConnect(attacker, target, opt.onConnect, res));
     else extra.push("格挡成功：位移与其他附带效果未生效。");
   }
+  // 休眠：同阵营的敌人挨打（真的掉了血）就叫醒休眠的同伴
+  if (target && !target.isPlayer && (Number(res.total) || 0) > 0 && typeof dormantOnAllyHurt === "function") extra.push(...dormantOnAllyHurt(target, attacker));
+
   if (!res.pending) {
     // 结算后实际用的属性（扩散会把攻击改成目标最新的状态属性）：伤害数字的颜色、图标、预览都跟着它
     const ele = res.element || opt.element || "physical";

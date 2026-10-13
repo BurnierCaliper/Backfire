@@ -82,6 +82,7 @@ function enemyAssistSkillId(u) {
 /** 敌人现在能不能对我方做协助攻击：被挟持的亡命之王无法行动；哗变中的狂徒只敢打强盗头子 */
 function enemyMayAssist(u) {
   if (!u || u.isPlayer) return false;
+  if (u.dormant) return false;   // 休眠：不协助
   if (u.kit === "outlaw_king" && u.resources && u.resources.hostage) return false;
   if (/^thug_/.test(u.kit || "")) {
     const king = findKit("outlaw_king", state.units);
@@ -93,11 +94,13 @@ function enemyMayAssist(u) {
 /* 协助攻击的射程。自带移动的（冲到目标那一区再打）先走一格；无限距离的总能打到；
  * 其余按技能射程（ENEMY_SKILL_RANGE，没登记的用单位卡上的 range），隔着危墙 / 关着的门打不到。 */
 const ENEMY_ASSIST_RUSH = ["en_thug_hammer_assist", "en_wolf_assist", "en_chi_exec", "en_overseer_assist", "en_gas_assist"];
-const ENEMY_ASSIST_ANYWHERE = ["en_patrol_assist", "ufo_assist"];
+const ENEMY_ASSIST_ANYWHERE = ["en_patrol_assist", "ufo_assist", "en_alarm_assist"];
 function enemyAssistReach(u, t) {
   if (!u || !t) return false;
   const sid = enemyAssistSkillId(u);
   if (ENEMY_ASSIST_ANYWHERE.includes(sid)) return true;
+  // 矿场警戒自动机：协助打所有高能的敌人，场上有人高能才出手
+  if (sid === "en_alarm_assist") return alarmTargets(u).length > 0;
   // 蚁型特殊戒备兵种：大酸液弹蓄力中时，协助就是对标定的区发射，不看目标在哪
   if (sid === "en_ant_assist" && u.resources && u.resources.shellPending && Number(u.resources.shellZone) >= 1) return true;
   const from = Number(u.zone), to = Number(t.zone);
@@ -252,6 +255,14 @@ function enemySkillList(u) {
     flint_sweeper: [
       { id: "en_flint", label: "发射火石（1d6 发）" },
       { id: "en_flint_assist", label: "协助：爆炸火石" }
+    ],
+    alarm_bot: [
+      { id: "en_alarm_zap", label: "电涌（所有高能的敌人 3 段）" },
+      { id: "en_alarm_assist", label: "协助：所有高能的敌人 1×atk" }
+    ],
+    meteor_miner: [
+      { id: "en_miner_shot", label: "能量射线（倒流）" },
+      { id: "en_miner_assist", label: "协助：能量射线（倒流）" }
     ],
     gas_collector: [
       { id: "en_gas_ignite", label: "点燃燃气（同区火焰 + 变火场）" },
@@ -521,6 +532,8 @@ const ENEMY_SKILL_RANGE = {
   en_flint_assist: "ranged",
   en_gas_spray: "melee",
   en_hunter_shot: "ranged",
+  en_miner_shot: "ranged",
+  en_miner_assist: "ranged",
   en_hunter_assist: "ranged",
   en_thug_knife: "melee",
   en_thug_hammer: "melee",
@@ -714,6 +727,72 @@ function hunterHeatAtTurnStart(u, notes) {
     u.ap -= 1;
     notes.push(`${u.name} 回合开始：用 1 行动点把天气变为酷暑。`);
   }
+}
+
+/* ===== 第三采矿场 ===== */
+/** 身上有高能（状态或高能值） */
+function hasHigh(u) { return !!u && ((u.statuses && u.statuses.high) || (Number(u.highEnergy) || 0) > 0); }
+/** 矿场警戒自动机施加高能：目标已经高能就改成 1 点能量伤害 */
+function alarmApplyHigh(a, t, notes) {
+  if (!t || t.dead) return;
+  if (hasHigh(t)) {
+    notes.push(`${t.name} 已经高能：改为受到 1 点能量伤害。`);
+    const out = dealTo(a, t, { atk: 0, mult: 0, flat: 1, element: "energy", baseBreak: 0, flags: { action: false, blockResolved: true, block: "none", atkFx: [] } });
+    if (out && out.extra) notes.push(...out.extra);
+    return;
+  }
+  t.statuses = t.statuses || {};
+  t.statuses.high = true;
+  if (typeof popStatus === "function") popStatus(t, "high");
+  notes.push(`${t.name} 被施加高能。`);
+}
+/** 矿场警戒自动机要打的：所有身上有高能、还站着的敌对单位（不限距离） */
+function alarmTargets(a) {
+  return allPlayers().filter(u => !u.dead && hasHigh(u) && !(typeof isDownProtected === "function" && isDownProtected(u)));
+}
+/** 休眠（通用词条）：开场休眠的敌人不行动、不协助，直到被叫醒。叫醒时 culprit 是吵醒它的单位（可能没有） */
+function wakeDormant(u, culprit, notes, why) {
+  if (!u || !u.dormant || u.dead) return;
+  u.dormant = false;
+  notes.push(`${u.name} ${why || "被惊动"}，解除休眠。`);
+  if (u.kit === "alarm_bot" && culprit && !!culprit.isPlayer !== !!u.isPlayer) alarmApplyHigh(u, culprit, notes);
+}
+/** 我方单位进入某区（自己走、被推都算）：叫醒那一区休眠的敌人（app.js · doMoveInner / displaceTo 调用） */
+function dormantAfterMove(mover, notes) {
+  if (!mover || !mover.isPlayer || mover.kind) return;
+  (state.units || []).forEach(u => {
+    if (u.dormant && !u.isPlayer && !u.dead && !u.hidden && Number(u.zone) === Number(mover.zone)) wakeDormant(u, mover, notes, `${mover.name} 进入它所在的区`);
+  });
+}
+/** 敌人受到伤害：同阵营（含可混编的阵营，不含异星生物）休眠的单位都被叫醒，自己挨打也醒（app.js · dealTo 调用） */
+function dormantOnAllyHurt(target, attacker) {
+  const notes = [];
+  if (!target || target.isPlayer) return notes;
+  const info = (k) => (typeof enemyInfo === "function" ? enemyInfo(k) : null) || {};
+  const tf = info(target.kit).faction;
+  (state.units || []).forEach(u => {
+    if (!u.dormant || u.isPlayer || u.dead || u.hidden) return;
+    const f = info(u.kit).faction;
+    const same = u === target || (tf && f && (typeof alliesOf === "function" ? alliesOf(f) : [f]).includes(tf));
+    if (!same) return;
+    wakeDormant(u, attacker && attacker.isPlayer ? attacker : null, notes, u === target ? "受到攻击" : `${target.name} 受到攻击`);
+  });
+  return notes;
+}
+/** 陨石开采机被我方打死：给杀它的人施加高能，并把自己的高能值转过去（不再自己高能自爆）。app.js · settleEnemyKill 调用 */
+function minerDeathTransfer(target, killer, notes) {
+  if (!target || target.kit !== "meteor_miner" || !killer || !killer.isPlayer || killer.dead || target._minerDone) return;
+  target._minerDone = true;
+  const he = Math.max(0, Number(target.highEnergy) || 0);
+  target.highEnergy = 0;
+  if (target.statuses) target.statuses.high = false;
+  killer.statuses = killer.statuses || {};
+  const fresh = !killer.statuses.high;
+  killer.statuses.high = true;
+  if (fresh && typeof popStatus === "function") popStatus(killer, "high");
+  killer.highEnergy = (Number(killer.highEnergy) || 0) + he;
+  notes.push(`${target.name} 坠毁：${killer.name} 被施加高能${he ? `，接过 ${he} 点高能值 → ${killer.highEnergy}` : ""}。`);
+  if (typeof checkHighBoom === "function") checkHighBoom(killer);
 }
 
 /** 蚁型特殊戒备兵种：对标定的区发射大酸液弹。区内随机一人 2×atk 酸 2 击破（单体），同区其他人 等级+1d6 酸（范围） */
@@ -938,6 +1017,24 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
     return true;
   }
 
+  if (id === "en_alarm_zap") {
+    // 所有高能的敌人：3 段 0.3×atk + 1d4 能量，共 1 击破（不限距离）
+    const list = alarmTargets(a);
+    if (!list.length) { lines.push("场上没有高能的敌人。"); return true; }
+    list.forEach(u => aa(u, { element: "energy", mult: 0.3, diceN: 1, diceS: 4, hits: 3, baseBreak: 1, breakOnce: true, flags: { action: true, anyRange: true } }));
+    return true;
+  }
+  if (id === "en_alarm_assist") {
+    const list = alarmTargets(a);
+    if (!list.length) { lines.push("场上没有高能的敌人。"); return true; }
+    list.forEach(u => aa(u, { element: "energy", mult: 1, baseBreak: 1, flags: { action: true, anyRange: true } }));
+    return true;
+  }
+  if (id === "en_miner_shot" || id === "en_miner_assist") {
+    if (!needT()) return true;
+    aa(t, { element: "energy", mult: 1, baseBreak: 1, flags: { action: true, atkFx: ["backflow"] } });
+    return true;
+  }
   if (id === "en_overseer") {
     if (!needT()) return true;
     stepTowardZone(a, t.zone);

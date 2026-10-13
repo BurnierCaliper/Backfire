@@ -229,6 +229,9 @@ const ENEMY_INFO = {
   flint_sweeper: { faction: "安保", regions: ["第二采矿场"], tokens: 1 },
   gas_collector: { faction: "安保", regions: ["第二采矿场"], tokens: 2 },
   ant_hunter:    { faction: "安保", regions: ["第二采矿场"], tokens: 2 },
+  // 第三采矿场：用能量的安保部队（还会有异星生物）
+  alarm_bot:     { faction: "安保", regions: ["第三采矿场"], tokens: 1 },
+  meteor_miner:  { faction: "安保", regions: ["第三采矿场"], tokens: 1 },
   // —— 警卫队（有机体，可与安保混编）——
   captain_wolf:   { faction: "警卫队", regions: ["巨人城", "外城区"], tokens: 2 },
   captain_ox:     { faction: "警卫队", regions: ["巨人城", "外城区"], tokens: 2 },
