@@ -11593,12 +11593,22 @@ function runSkillInner(id, optRun) {
       const tgt = fl && fl.picks.target ? unitById(fl.picks.target) : t;
       if (!tgt) { lines.push("先选盾击目标。"); return paintSkillLog(lines.join("\n")); }
       if (dest !== Number(a.zone)) { const from = Number(a.zone); a.zone = dest; lines.push(`盾击突进：移动到 ${dest} 区。`); applyAbyssFall(a, from, lines); }
-      const out = hitOne(a, tgt, { element: "physical", mult: 1, baseBreak: 0, atk });
-      if (!tgt.dead && attackConnected(out && out.res, out && out.res && out.res.flags)) {
-        tgt.statuses = tgt.statuses || {};
+      // 技能说明的顺序：先施加震荡（架势上限 −2，超出的架势压下来），再结算这一击的伤害 / 击破（熔融沙尘 +1 等照常），最后才是可选的二次盾突。
+      // 以前先打后挂震荡：满架势时这一击的击破会被震荡压上限抹掉。
+      tgt.statuses = tgt.statuses || {};
+      const waveHad = !!tgt.statuses.shockwave;
+      const waveSnap = { def: tgt.def, defMax: tgt.defMax, cut: tgt._waveCut };
+      if (!waveHad) {
         tgt.statuses.shockwave = true;
-        lines.push(`${tgt.name} 震荡。`);   // 先说挂上震荡，再写它扣上限（popStatus → syncShockwave）
-        popStatus(tgt, "shockwave");
+        lines.push(`${tgt.name} 震荡。`);
+        popStatus(tgt, "shockwave");   // → syncShockwave：写出上限和架势的变化
+      }
+      const out = hitOne(a, tgt, { element: "physical", mult: 1, baseBreak: 0, atk });
+      // 这一击没打中（闪避、格挡、墙……）：震荡也没挂上，原样还回去（等协助格挡结果的不动）
+      if (!waveHad && !tgt.dead && out && !out.pending && !(out.res && out.res.pending) && !attackConnected(out.res, out.res && out.res.flags)) {
+        tgt.statuses.shockwave = false;
+        tgt.def = waveSnap.def; tgt.defMax = waveSnap.defMax; tgt._waveCut = waveSnap.cut;
+        lines.push(`没有打中：${tgt.name} 的震荡不生效，架势上限和架势还原。`);
       }
       if (fl && fl.picks.again === "yes" && !tgt.dead) {
         if ((a.resources.shield || 0) < 1) lines.push("圣盾不足，未能二次盾突。");
