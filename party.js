@@ -830,7 +830,7 @@ function skillList(unit) {
   }
   if (unit.kit === "yuito") {
     add({ id: "yuito_aa", name: "普通攻击", hint: "距离1 · 1atk 冰 +1击破 · 豆→液" });
-    add({ id: "yuito_amer", name: "冰美式", hint: `消耗 1 咖啡液 · 治疗 2d${typeof leveledSides === "function" ? leveledSides(unit.level || 1, 4) : 4} 或 清场 0.75atk 冰 +1击破` });
+    add({ id: "yuito_amer", name: "冰美式", hint: "消耗 1 咖啡液 · 治疗同伴 +1 架势 或 清场 0.75atk 冰 +1击破" });
     add({ id: "yuito_espresso", name: "意式浓缩", hint: "消耗 1 咖啡液 · 友方行动点+1 或 1atk 酸 +2击破", minLv: 2 });
     add({ id: "yuito_extract", name: "酸萃", hint: `消耗 1 咖啡液 · 区域变酸液 · 友方 ${typeof addedDiceByLevel === "function" ? addedDiceByLevel(unit.level || 1) : 1}d4 治疗 / 敌人同样骰数的酸`, minLv: 3 });
     add({ id: "yuito_cold", name: "冷萃", hint: "消耗 1 咖啡液 · 距离≤1 的区变冻土 · 敌人 0.5atk 冰 +1击破 / 友方 +1 架势", minLv: 6 });
