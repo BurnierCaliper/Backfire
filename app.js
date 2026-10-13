@@ -6442,7 +6442,9 @@ function finishBlockInner(helperId, forced) {
   if (blockHelperId) opt.flags.blockHelperId = blockHelperId;
   if (attacker && target) {
     let out;
+    const defBefore = target.def != null ? Number(target.def) || 0 : null;
     const captured = withLogSink(() => { out = dealTo(attacker, target, opt); });
+    if (out && defBefore != null) out.defBefore = defBefore;
     if (out && out.res && !out.pending) formatHitLines(attacker, target, out, captured).forEach(s => appendLog(s));
     // 战场数据：格挡规避的伤害（协助格挡成功：这一击本来的伤害；空手格挡成功：少挨的那一半）
     const saver = helperId ? battleStat(unitById(helperId)) : null;
@@ -7153,7 +7155,7 @@ function dealTo(attacker, target, opt) {
     return { res: { ok: false, total: 0, breakDealt: 0, log: [], perHit: [] }, extra: [] };
   }
   // anyRange：不限距离的攻击（矿场警戒自动机打所有高能的敌人）
-  if (attacker && target && opt.flags.action && !opt.flags.aoe && !isReaction && !opt.flags.conductorExtra && !opt.flags.propShot && !opt.flags.locked && !opt.flags.viaPierce && !opt.flags.anyRange) {
+  if (attacker && target && opt.flags.action && !opt.flags.aoe && !isReaction && !opt.flags.conductorExtra && !opt.flags.propShot && !opt.flags.locked && !opt.flags.viaPierce && !opt.flags.anyRange && !opt.flags.skillRange) {
     const d = zoneDist(Number(attacker.zone), Number(target.zone), Number(state.zoneMode));
     const rg = opt.atkRange || (attacker.isPlayer ? "any" : (attacker.range || "any"));
     const okRange = rg === "melee" ? d === 0 : rg === "ranged" ? d === 1 : d <= 1;
@@ -8043,6 +8045,14 @@ function zoneReachable(unit, dest, walk) {
 /** 技能里的「移动」（燕飞、圣战起始、居合、引火烧身、爱意、电钻突进、逃离……）能不能走到 dest：
  *  沿相连的区走，危墙 / 关着的机关门 / 空隙（地面单位）挡路，最多 maxSteps 步（不给就不限）；地面单位不能主动走进深渊。
  *  走得到返回 null，否则返回原因。以前这些技能直接改所在区，能穿墙 */
+/** 选目标时：技能要先移动到目标那一区才出手的（绯秋居合普攻），走不过去（深渊、墙、门）的目标不列出 */
+function skillTargetMoveOk(actor, id, u) {
+  if (!actor || !u || u.zone == null) return true;
+  if (id === "hiaki_aa" && ((actor.resources || {}).stance || "draw") === "iai" && Number(u.zone) !== Number(actor.zone)) {
+    return !skillMoveWhy(actor, Number(u.zone), 1);
+  }
+  return true;
+}
 function skillMoveWhy(unit, dest, maxSteps) {
   const why = zoneReachable(unit, dest);
   if (why) return why;
@@ -9672,6 +9682,31 @@ function attachFloaters(wrap, unitId) {
  * 同一块里重复的行只留一条；「等待协助格挡选择」这类占位行不写。 */
 const LOG_SINKS = [];
 let LOG_ACTOR_ID = null;   // 当前这块日志是谁的行动（花费行里是别人时才写名字）
+/* 按时间顺序：技能代码先把要说的话 push 进本地的 lines，最后才一起写出；
+ * 但同一时刻别处（击破、状态、震荡、配置物……）是直接 appendLog 的，会抢到前面去。
+ * 登记在这里的 lines：在同一个收集桶里有人直接写日志之前，先把 lines 里已经攒下的话写出去，保证先发生的先写。 */
+const LOG_PENDING = [];
+function flushPendingLog(sink, text) {
+  const top = LOG_PENDING[LOG_PENDING.length - 1];
+  if (!top || top.sink !== sink || !top.lines.length) return;
+  // 这次写的正是 lines 攒下的话（paintSkillLog(lines.join(...))）：不用先写一遍
+  const joined = top.lines.join("\n");
+  if (text != null && (String(text) === joined || String(text).startsWith(joined + "\n"))) { top.lines.length = 0; return; }
+  top.lines.splice(0).forEach(t => String(t == null ? "" : t).split(/\n/).forEach(l => sink.push(l)));
+}
+/** 让 fn 执行期间，lines 里攒的话在别人直接写日志之前先写出去（只在当前收集桶里） */
+function dropPendingFor(sink) {
+  for (let i = LOG_PENDING.length - 1; i >= 0; i--) if (LOG_PENDING[i].sink === sink) {
+    // 技能提前 return、没把 lines 写出去：剩下的照原样丢掉（和以前一样），只撤登记
+    LOG_PENDING.splice(i, 1);
+  }
+}
+function withPendingLines(lines, fn) {
+  const sink = LOG_SINKS[LOG_SINKS.length - 1];
+  if (!sink) return fn();
+  LOG_PENDING.push({ lines, sink });
+  try { return fn(); } finally { const i = LOG_PENDING.findIndex(p => p.lines === lines); if (i >= 0) LOG_PENDING.splice(i, 1); }
+}   // 当前这块日志是谁的行动（花费行里是别人时才写名字）
 function logSinkActive() { return LOG_SINKS.length > 0; }
 function withLogSink(fn) {
   const sink = [];
@@ -9772,6 +9807,9 @@ function formatHitLines(actor, target, out, captured) {
     head += `${dmg} 伤害`;
     if (br) head += `、${br} 击破`;
     if (hits.length > 1) head += `（${hits.length} 击）`;
+    // 架势：这一击前后实际的架势（含坚挺、背水一战等修正；协助格挡成功时不变）
+    const defAfter = target && target.def != null ? Number(target.def) || 0 : null;
+    if (out && out.defBefore != null && defAfter != null && out.defBefore !== defAfter) head += `，架势 ${out.defBefore} → ${defAfter}`;
     if (res.broke) head += "，打破架势";
   }
   L.push(head);
@@ -9820,6 +9858,7 @@ function appendLog(text, kind) {
   if (text == null || String(text) === "") return;   // 空字符串不写成空行
   if (LOG_SINKS.length) {
     const sink = LOG_SINKS[LOG_SINKS.length - 1];
+    flushPendingLog(sink, text);
     String(text == null ? "" : text).split(/\n/).forEach(l => sink.push(l));
     return;
   }
@@ -10390,7 +10429,7 @@ function runSkill(id, optRun) {
   LOG_ACTOR_ID = a0 ? a0.id : null;
   let lines;
   try {
-    lines = withLogSink(() => {
+    lines = withLogSink(sink => { try {
       state.aoePulse = {};            // 只算这一次行动的范围攻击
       state.actionKills = [];         // 这一次行动里打死的敌人（动作结束前还能吃到后面的攻击、算溢出）
       state.flyPaid = {};             // 这一次行动里已经为「近程打飞行」付过附赠行动的（攻击者 > 目标）
@@ -10408,7 +10447,7 @@ function runSkill(id, optRun) {
       applyFatigue(a0, id, scoreBefore);   // 招式疲劳：连续几个回合用同一招，这次行动的总得分打折
       flushAoePulse();                // 波及到的按钮 / 拉杆各触发一次（提前 return 的分支也算）
       state.actionAcc = null;         // 行动结束：之后的持续伤害不再算到这个人头上
-    });
+    } finally { dropPendingFor(sink); } });
   } finally { LOG_ACTOR_ID = prevActor; }
   const block = tidyActionBlock(title, lines);
   if (block.length) appendLog(block.join("\n"));
@@ -10627,6 +10666,8 @@ function runSkillInner(id, optRun) {
     if (enemyCost.bonus) spendBonus(a, enemyCost.bonus, skillNameHint(id));
   }
   const lines = [];
+  const sinkNow = LOG_SINKS[LOG_SINKS.length - 1];
+  if (sinkNow) LOG_PENDING.push({ lines, sink: sinkNow });   // runSkill 结束时撤掉（见 dropPendingFor）
   const needT = () => {
     if (!t) { lines.push("先在「技能目标」里选对象。"); return false; }
     return true;
@@ -10637,7 +10678,12 @@ function runSkillInner(id, optRun) {
   const hitOne = (actor, target, opt) => {
     // 命中过程中立刻写出的日志（击杀、经验、掉落……）先收起来，排在这一击的结果后面
     let out;
+    // 攻击者不是这次行动的发起人（比如召唤物、残骸）时写明是谁打的；这一击之前攒下的话先写出去
+    if (actor && actor.id !== a.id) lines.push(`  ${actor.name} 出手：`);
+    appendLog(lines.splice(0).join("\n"));
+    const defBefore = target && target.def != null ? Number(target.def) || 0 : null;
     const captured = withLogSink(() => { out = dealTo(actor, target, opt); });
+    if (out && defBefore != null) out.defBefore = defBefore;
     // 过载 / 导体：一个技能里分几下（各 1 次）打同一个目标，也算复数次攻击 → 结尾重复最后一段
     if (actor && ((actor.instant && actor.instant.overload) || actor.self === "conductor") && target && !target.kind) {
       const n = opt.hits || 1;
@@ -10645,10 +10691,27 @@ function runSkillInner(id, optRun) {
         overloadSeq.push({ actor, target, opt: Object.assign({}, opt, { usePrep: false, hits: 1 }) });
       }
     }
-    // 攻击者不是这次行动的发起人（比如召唤物、残骸）时写明是谁打的
-    if (actor && actor.id !== a.id) lines.push(`  ${actor.name} 出手：`);
-    appendLog(lines.splice(0).join("\n"));
     formatHitLines(actor, target, out, captured).forEach(s => appendLog(s));
+    return out;
+  };
+  /* 「先施加震荡，再结算这一击」（盾击突进 / 全速撞击，按技能说明的顺序）：
+   * 震荡先压架势上限（超出的架势压下来），这一击的击破再照常扣（熔融沙尘 +1 等不会被上限抹掉）。
+   * 这一击没打中（闪避、格挡、射程……）：震荡不生效，上限和架势原样还回去；等协助格挡结果的那一击不动。 */
+  const waveThenHit = (tgt, opt) => {
+    tgt.statuses = tgt.statuses || {};
+    const had = !!tgt.statuses.shockwave;
+    const snap = { def: tgt.def, defMax: tgt.defMax, cut: tgt._waveCut };
+    if (!had) {
+      tgt.statuses.shockwave = true;
+      lines.push(`${tgt.name} 震荡。`);
+      popStatus(tgt, "shockwave");   // → syncShockwave：写出上限和架势的变化
+    }
+    const out = hitOne(a, tgt, opt);
+    if (!had && !tgt.dead && out && !out.pending && !(out.res && out.res.pending) && !attackConnected(out.res, out.res && out.res.flags)) {
+      tgt.statuses.shockwave = false;
+      tgt.def = snap.def; tgt.defMax = snap.defMax; tgt._waveCut = snap.cut;
+      lines.push(`没有打中：${tgt.name} 的震荡不生效，架势上限和架势还原。`);
+    }
     return out;
   };
 
@@ -10873,21 +10936,32 @@ function runSkillInner(id, optRun) {
       const tgt = (fl && fl.picks.target) ? unitById(fl.picks.target) : t;
       if (!tgt) { lines.push("先选错位目标。"); return paintSkillLog(lines.join("\n")); }
       const from = Number(a.zone);
-      a.zone = dest;
-      applyShift(tgt);
-      popStatus(tgt, "shift");
-      lines.push(`移动到 ${dest} 区，对 ${tgt.name} 施加错位（次外层与最外层互换至下回合开始）。`);
-      if (fl && fl.picks.carryMode === "yes" && fl.picks.carry) {
+      // 技能说明的顺序：（耗圣盾带的人）和灯一起移动 → 两人的落地效果一起结算 → 再对到达后同区的敌人施加错位
+      let buddy = null;
+      if (fl && fl.picks.carryMode === "yes" && fl.picks.carry && dest !== from) {
         if ((a.resources.shield || 0) < 1) lines.push("圣盾不足，未能带人。");
         else {
-          a.resources.shield -= 1; touShieldHeal(a);
-          const buddy = unitById(fl.picks.carry) || propByRef(fl.picks.carry);
-          if (buddy) {
-            if (typeof displaceTo === "function") displaceTo(buddy, dest, lines, "随圣战起始一起移动");
-            else buddy.zone = dest;
-            lines.push(`消耗 1 圣盾，${buddy.name} 从 ${from} 区带到 ${dest} 区。圣盾 → ${a.resources.shield}`);
+          buddy = unitById(fl.picks.carry) || propByRef(fl.picks.carry);
+          if (buddy && Number(buddy.zone) !== from) buddy = null;
+        }
+      }
+      if (dest !== from) {
+        a.zone = dest;
+        lines.push(`移动到 ${dest} 区。`);
+        // 带的人和灯同时到：先把两人都放到终点，再各自结算落地（坠落、冻土、紧追……）
+        if (buddy) {
+          if (displaceTo(buddy, dest, lines, "随圣战起始一起移动")) {
+            a.resources.shield -= 1; touShieldHeal(a);
+            lines.push(`消耗 1 圣盾带 ${buddy.name} 同行。圣盾 → ${a.resources.shield}`);
           }
         }
+        applyAbyssFall(a, from, lines);
+      }
+      if (Number(tgt.zone) !== Number(a.zone) || tgt.dead) lines.push(`${tgt.name} 不在 ${a.zone} 区，没能施加错位。`);
+      else {
+        applyShift(tgt);
+        popStatus(tgt, "shift");
+        lines.push(`对 ${tgt.name} 施加错位（次外层与最外层互换至下回合开始）。`);
       }
     } else if (id === "tou_taunt") {
       const fl = state.skillFlow;
@@ -10982,14 +11056,9 @@ function runSkillInner(id, optRun) {
         // 全速狂飙（启动引擎+）：额外消耗所有燃油，每点额外 1 击破
         const fuelBrk = fl && fl.picks.mode === "full" ? takeFuel() : 0;
         // 技能描述：atk 物理 + 震荡，每移 1 格 +1 击破（没有错位）。
-        // 先结算这一击再挂震荡：以前先挂，满架势的目标因为上限 −2 先掉 2 架势，再吃这一击的击破
-        const ramOut = hitOne(a, tgt, { element: "physical", mult: 1, baseBreak: 1 + dist + fuelBrk, atk });
-        if (!tgt.dead && attackConnected(ramOut && ramOut.res, ramOut && ramOut.res && ramOut.res.flags)) {
-          tgt.statuses = tgt.statuses || {};
-          tgt.statuses.shockwave = true;
-          popStatus(tgt, "shockwave");
-        }
-        lines.push(`${fuelBrk ? "全速狂飙" : "全速撞击"}移动 ${dist} 区，震荡，击破 ${1 + dist + fuelBrk}${fuelBrk ? `（消耗 ${fuelBrk} 燃油）` : ""}。`);
+        // 和盾击突进统一：移动 → 先施加震荡（压上限）→ 这一击的伤害 / 击破（见 waveThenHit）
+        lines.push(`${fuelBrk ? "全速狂飙" : "全速撞击"}：移动 ${dist} 区到 ${dest} 区，这一击 ${1 + dist + fuelBrk} 击破${fuelBrk ? `（消耗 ${fuelBrk} 燃油）` : ""}。`);
+        waveThenHit(tgt, { element: "physical", mult: 1, baseBreak: 1 + dist + fuelBrk, atk });
       }
     } else if (id === "xia_summon") {
       const w = spawnWeapon(a, "berniel");
@@ -11647,13 +11716,8 @@ function runSkillInner(id, optRun) {
       const tgt = fl && fl.picks.target ? unitById(fl.picks.target) : t;
       if (!tgt) { lines.push("先选盾击目标。"); return paintSkillLog(lines.join("\n")); }
       if (dest !== Number(a.zone)) { const from = Number(a.zone); a.zone = dest; lines.push(`盾击突进：移动到 ${dest} 区。`); applyAbyssFall(a, from, lines); }
-      const out = hitOne(a, tgt, { element: "physical", mult: 1, baseBreak: 0, atk });
-      if (!tgt.dead && attackConnected(out && out.res, out && out.res && out.res.flags)) {
-        tgt.statuses = tgt.statuses || {};
-        tgt.statuses.shockwave = true;
-        popStatus(tgt, "shockwave");
-        lines.push(`${tgt.name} 震荡。`);
-      }
+      // 技能说明的顺序：移动 → 先施加震荡 → 这一击的伤害 / 击破（熔融沙尘 +1 等照常）→ 可选的二次盾突（见 waveThenHit）
+      waveThenHit(tgt, { element: "physical", mult: 1, baseBreak: 0, atk });
       if (fl && fl.picks.again === "yes" && !tgt.dead) {
         if ((a.resources.shield || 0) < 1) lines.push("圣盾不足，未能二次盾突。");
         else {
@@ -12301,12 +12365,15 @@ function runSkillInner(id, optRun) {
       const tgt = (fl && fl.picks.target) ? unitById(fl.picks.target) : t;
       const from = a.zone;
       if (dest == null) { lines.push("先选逃离终点。"); return paintSkillLog(lines.join("\n")); }
-      // 卡面：对「原区域」的一名敌人造成伤害——先在原地打，再移动
-      if (tgt && Number(tgt.zone) === Number(from)) hitOne(a, tgt, { element: "electric", mult: 1, baseBreak: 0, atk });
-      else if (tgt) lines.push(`${tgt.name} 不在原区域，打不到。`);
+      // 技能说明的顺序：移动 → 累积 20% 能量 → 对「原区域」的一名敌人出手。
+      // 这一击按远距离攻击判定（atkRange: "ranged"：高地、协助格挡、近程打飞行等都按远程算）；
+      // 目标限定在原区域（出手前选定、这里再核对），所以不再按「距离 1」卡射程（skillRange：不稳态走远了也打得到原区域）
+      const inFrom = !!(tgt && Number(tgt.zone) === Number(from));
       a.zone = dest;
-      addRasEnergy(20, "逃离");
       lines.push(`逃离：从 ${from} 区到 ${dest} 区。`);
+      addRasEnergy(20, "逃离");
+      if (inFrom) hitOne(a, tgt, { element: "electric", mult: 1, baseBreak: 0, atk, atkRange: "ranged", flags: { action: true, skillRange: true } });
+      else if (tgt) lines.push(`${tgt.name} 不在原区域，打不到。`);
     } else if (id === "ras_rampage") {
       // 失控暴走：累积 40% 能量；因此进入不稳态 → 同区变能量场；本来就在不稳态 → 全场所有区域变能量场
       const wasUnstable = !!(a.resources && a.resources.unstable);
