@@ -7069,7 +7069,7 @@ function dealTo(attacker, target, opt) {
   // 导体的额外目标是随机击中的，不受射程限制
   // 配置物（防卫炮台）的自动攻击不限距离
   // 维塔斯对刺入目标出手（扯下 / 加压灌输）：针尖就在目标身上，不受距离限制（viaPierce）
-  if (attacker && target && opt.flags.action && !opt.flags.aoe && !isReaction && !opt.flags.conductorExtra && !opt.flags.propShot && !opt.flags.locked && !opt.flags.viaPierce) {
+  if (attacker && target && opt.flags.action && !opt.flags.aoe && !isReaction && !opt.flags.conductorExtra && !opt.flags.propShot && !opt.flags.locked && !opt.flags.viaPierce && !opt.flags.skillRange) {
     const d = zoneDist(Number(attacker.zone), Number(target.zone), Number(state.zoneMode));
     const rg = opt.atkRange || (attacker.isPlayer ? "any" : (attacker.range || "any"));
     const okRange = rg === "melee" ? d === 0 : rg === "ranged" ? d === 1 : d <= 1;
@@ -7956,6 +7956,14 @@ function zoneReachable(unit, dest, walk) {
 /** 技能里的「移动」（燕飞、圣战起始、居合、引火烧身、爱意、电钻突进、逃离……）能不能走到 dest：
  *  沿相连的区走，危墙 / 关着的机关门 / 空隙（地面单位）挡路，最多 maxSteps 步（不给就不限）；地面单位不能主动走进深渊。
  *  走得到返回 null，否则返回原因。以前这些技能直接改所在区，能穿墙 */
+/** 选目标时：技能要先移动到目标那一区才出手的（绯秋居合普攻），走不过去（深渊、墙、门）的目标不列出 */
+function skillTargetMoveOk(actor, id, u) {
+  if (!actor || !u || u.zone == null) return true;
+  if (id === "hiaki_aa" && ((actor.resources || {}).stance || "draw") === "iai" && Number(u.zone) !== Number(actor.zone)) {
+    return !skillMoveWhy(actor, Number(u.zone), 1);
+  }
+  return true;
+}
 function skillMoveWhy(unit, dest, maxSteps) {
   const why = zoneReachable(unit, dest);
   if (why) return why;
@@ -10597,6 +10605,26 @@ function runSkillInner(id, optRun) {
     formatHitLines(actor, target, out, captured).forEach(s => appendLog(s));
     return out;
   };
+  /* 「先施加震荡，再结算这一击」（盾击突进 / 全速撞击，按技能说明的顺序）：
+   * 震荡先压架势上限（超出的架势压下来），这一击的击破再照常扣（熔融沙尘 +1 等不会被上限抹掉）。
+   * 这一击没打中（闪避、格挡、射程……）：震荡不生效，上限和架势原样还回去；等协助格挡结果的那一击不动。 */
+  const waveThenHit = (tgt, opt) => {
+    tgt.statuses = tgt.statuses || {};
+    const had = !!tgt.statuses.shockwave;
+    const snap = { def: tgt.def, defMax: tgt.defMax, cut: tgt._waveCut };
+    if (!had) {
+      tgt.statuses.shockwave = true;
+      lines.push(`${tgt.name} 震荡。`);
+      popStatus(tgt, "shockwave");   // → syncShockwave：写出上限和架势的变化
+    }
+    const out = hitOne(a, tgt, opt);
+    if (!had && !tgt.dead && out && !out.pending && !(out.res && out.res.pending) && !attackConnected(out.res, out.res && out.res.flags)) {
+      tgt.statuses.shockwave = false;
+      tgt.def = snap.def; tgt.defMax = snap.defMax; tgt._waveCut = snap.cut;
+      lines.push(`没有打中：${tgt.name} 的震荡不生效，架势上限和架势还原。`);
+    }
+    return out;
+  };
 
   try {
     if (id === "weapon_retrieve") {
@@ -10819,21 +10847,32 @@ function runSkillInner(id, optRun) {
       const tgt = (fl && fl.picks.target) ? unitById(fl.picks.target) : t;
       if (!tgt) { lines.push("先选错位目标。"); return paintSkillLog(lines.join("\n")); }
       const from = Number(a.zone);
-      a.zone = dest;
-      applyShift(tgt);
-      popStatus(tgt, "shift");
-      lines.push(`移动到 ${dest} 区，对 ${tgt.name} 施加错位（次外层与最外层互换至下回合开始）。`);
-      if (fl && fl.picks.carryMode === "yes" && fl.picks.carry) {
+      // 技能说明的顺序：（耗圣盾带的人）和灯一起移动 → 两人的落地效果一起结算 → 再对到达后同区的敌人施加错位
+      let buddy = null;
+      if (fl && fl.picks.carryMode === "yes" && fl.picks.carry && dest !== from) {
         if ((a.resources.shield || 0) < 1) lines.push("圣盾不足，未能带人。");
         else {
-          a.resources.shield -= 1; touShieldHeal(a);
-          const buddy = unitById(fl.picks.carry) || propByRef(fl.picks.carry);
-          if (buddy) {
-            if (typeof displaceTo === "function") displaceTo(buddy, dest, lines, "随圣战起始一起移动");
-            else buddy.zone = dest;
-            lines.push(`消耗 1 圣盾，${buddy.name} 从 ${from} 区带到 ${dest} 区。圣盾 → ${a.resources.shield}`);
+          buddy = unitById(fl.picks.carry) || propByRef(fl.picks.carry);
+          if (buddy && Number(buddy.zone) !== from) buddy = null;
+        }
+      }
+      if (dest !== from) {
+        a.zone = dest;
+        lines.push(`移动到 ${dest} 区。`);
+        // 带的人和灯同时到：先把两人都放到终点，再各自结算落地（坠落、冻土、紧追……）
+        if (buddy) {
+          if (displaceTo(buddy, dest, lines, "随圣战起始一起移动")) {
+            a.resources.shield -= 1; touShieldHeal(a);
+            lines.push(`消耗 1 圣盾带 ${buddy.name} 同行。圣盾 → ${a.resources.shield}`);
           }
         }
+        applyAbyssFall(a, from, lines);
+      }
+      if (Number(tgt.zone) !== Number(a.zone) || tgt.dead) lines.push(`${tgt.name} 不在 ${a.zone} 区，没能施加错位。`);
+      else {
+        applyShift(tgt);
+        popStatus(tgt, "shift");
+        lines.push(`对 ${tgt.name} 施加错位（次外层与最外层互换至下回合开始）。`);
       }
     } else if (id === "tou_taunt") {
       const fl = state.skillFlow;
@@ -10928,14 +10967,9 @@ function runSkillInner(id, optRun) {
         // 全速狂飙（启动引擎+）：额外消耗所有燃油，每点额外 1 击破
         const fuelBrk = fl && fl.picks.mode === "full" ? takeFuel() : 0;
         // 技能描述：atk 物理 + 震荡，每移 1 格 +1 击破（没有错位）。
-        // 先结算这一击再挂震荡：以前先挂，满架势的目标因为上限 −2 先掉 2 架势，再吃这一击的击破
-        const ramOut = hitOne(a, tgt, { element: "physical", mult: 1, baseBreak: 1 + dist + fuelBrk, atk });
-        if (!tgt.dead && attackConnected(ramOut && ramOut.res, ramOut && ramOut.res && ramOut.res.flags)) {
-          tgt.statuses = tgt.statuses || {};
-          tgt.statuses.shockwave = true;
-          popStatus(tgt, "shockwave");
-        }
-        lines.push(`${fuelBrk ? "全速狂飙" : "全速撞击"}移动 ${dist} 区，震荡，击破 ${1 + dist + fuelBrk}${fuelBrk ? `（消耗 ${fuelBrk} 燃油）` : ""}。`);
+        // 和盾击突进统一：移动 → 先施加震荡（压上限）→ 这一击的伤害 / 击破（见 waveThenHit）
+        lines.push(`${fuelBrk ? "全速狂飙" : "全速撞击"}：移动 ${dist} 区到 ${dest} 区，这一击 ${1 + dist + fuelBrk} 击破${fuelBrk ? `（消耗 ${fuelBrk} 燃油）` : ""}。`);
+        waveThenHit(tgt, { element: "physical", mult: 1, baseBreak: 1 + dist + fuelBrk, atk });
       }
     } else if (id === "xia_summon") {
       const w = spawnWeapon(a, "berniel");
@@ -11593,23 +11627,8 @@ function runSkillInner(id, optRun) {
       const tgt = fl && fl.picks.target ? unitById(fl.picks.target) : t;
       if (!tgt) { lines.push("先选盾击目标。"); return paintSkillLog(lines.join("\n")); }
       if (dest !== Number(a.zone)) { const from = Number(a.zone); a.zone = dest; lines.push(`盾击突进：移动到 ${dest} 区。`); applyAbyssFall(a, from, lines); }
-      // 技能说明的顺序：先施加震荡（架势上限 −2，超出的架势压下来），再结算这一击的伤害 / 击破（熔融沙尘 +1 等照常），最后才是可选的二次盾突。
-      // 以前先打后挂震荡：满架势时这一击的击破会被震荡压上限抹掉。
-      tgt.statuses = tgt.statuses || {};
-      const waveHad = !!tgt.statuses.shockwave;
-      const waveSnap = { def: tgt.def, defMax: tgt.defMax, cut: tgt._waveCut };
-      if (!waveHad) {
-        tgt.statuses.shockwave = true;
-        lines.push(`${tgt.name} 震荡。`);
-        popStatus(tgt, "shockwave");   // → syncShockwave：写出上限和架势的变化
-      }
-      const out = hitOne(a, tgt, { element: "physical", mult: 1, baseBreak: 0, atk });
-      // 这一击没打中（闪避、格挡、墙……）：震荡也没挂上，原样还回去（等协助格挡结果的不动）
-      if (!waveHad && !tgt.dead && out && !out.pending && !(out.res && out.res.pending) && !attackConnected(out.res, out.res && out.res.flags)) {
-        tgt.statuses.shockwave = false;
-        tgt.def = waveSnap.def; tgt.defMax = waveSnap.defMax; tgt._waveCut = waveSnap.cut;
-        lines.push(`没有打中：${tgt.name} 的震荡不生效，架势上限和架势还原。`);
-      }
+      // 技能说明的顺序：移动 → 先施加震荡 → 这一击的伤害 / 击破（熔融沙尘 +1 等照常）→ 可选的二次盾突（见 waveThenHit）
+      waveThenHit(tgt, { element: "physical", mult: 1, baseBreak: 0, atk });
       if (fl && fl.picks.again === "yes" && !tgt.dead) {
         if ((a.resources.shield || 0) < 1) lines.push("圣盾不足，未能二次盾突。");
         else {
@@ -12257,12 +12276,15 @@ function runSkillInner(id, optRun) {
       const tgt = (fl && fl.picks.target) ? unitById(fl.picks.target) : t;
       const from = a.zone;
       if (dest == null) { lines.push("先选逃离终点。"); return paintSkillLog(lines.join("\n")); }
-      // 卡面：对「原区域」的一名敌人造成伤害——先在原地打，再移动
-      if (tgt && Number(tgt.zone) === Number(from)) hitOne(a, tgt, { element: "electric", mult: 1, baseBreak: 0, atk });
-      else if (tgt) lines.push(`${tgt.name} 不在原区域，打不到。`);
+      // 技能说明的顺序：移动 → 累积 20% 能量 → 对「原区域」的一名敌人出手。
+      // 这一击按远距离攻击判定（atkRange: "ranged"：高地、协助格挡、近程打飞行等都按远程算）；
+      // 目标限定在原区域（出手前选定、这里再核对），所以不再按「距离 1」卡射程（skillRange：不稳态走远了也打得到原区域）
+      const inFrom = !!(tgt && Number(tgt.zone) === Number(from));
       a.zone = dest;
-      addRasEnergy(20, "逃离");
       lines.push(`逃离：从 ${from} 区到 ${dest} 区。`);
+      addRasEnergy(20, "逃离");
+      if (inFrom) hitOne(a, tgt, { element: "electric", mult: 1, baseBreak: 0, atk, atkRange: "ranged", flags: { action: true, skillRange: true } });
+      else if (tgt) lines.push(`${tgt.name} 不在原区域，打不到。`);
     } else if (id === "ras_rampage") {
       // 失控暴走：累积 40% 能量；因此进入不稳态 → 同区变能量场；本来就在不稳态 → 全场所有区域变能量场
       const wasUnstable = !!(a.resources && a.resources.unstable);

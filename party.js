@@ -884,10 +884,10 @@ function skillList(unit) {
   }
   if (unit.kit === "tou") {
     add({ id: "tou_aa", name: "普通攻击", hint: "同区 · 1atk 物理 +1击破 · 可在技能里耗圣盾打邻区" });
-    add({ id: "tou_start", name: "圣战起始", hint: "移动≤1 · 同区施加错位 · 可耗圣盾带一人" });
+    add({ id: "tou_start", name: "圣战起始", hint: "移动≤1（可耗圣盾带一人同行）→ 同区施加错位" });
     add({ id: "tou_sonic", name: "声波切割", hint: "同区目标 1atk 谐波、距离1 目标 0.5atk 谐波，可只选其一 · 耗 1 圣盾", minLv: 2 });
     add({ id: "tou_ultra", name: "超音波", hint: "同区施加折射", minLv: 3 });
-    add({ id: "tou_bash", name: "盾击突进", hint: "移动≤1 · 同区敌人 1atk 物理 + 震荡 · 可耗圣盾再盾突：1 击破 + 不稳", minLv: 6 });
+    add({ id: "tou_bash", name: "盾击突进", hint: "移动≤1 · 同区敌人先震荡再 1atk 物理 · 可耗圣盾再盾突：1 击破 + 不稳", minLv: 6 });
     add({ id: "tou_accuse", name: "赤诚控诉", hint: "距离1以内 · 1atk 谐波 · 嘲讽 · 圣盾 +2 · 决一死战中的敌人再虚弱", minLv: 11 });
     add({ id: "tou_summon", name: "唤出年糕", hint: "武器生物化" });
     /* 圣盾延射程已并入普通攻击的分步选择 */
@@ -904,7 +904,7 @@ function skillList(unit) {
     if ((unit.resources || {}).engine && typeof passivePlus === "function" && passivePlus(unit, 1)) add({ id: "xia_engine", name: "加油", hint: "获得 2 燃油 · 不会导致引擎熄火" });
     else add({ id: "xia_engine", name: "拉响引擎", hint: "发动引擎" });
     add({ id: "xia_execute", name: "处决", hint: "引擎+目标晕眩 · 1d8+1.5atk 火焰 · 穿刺", minLv: 2 });
-    add({ id: "xia_ram", name: "全速撞击", hint: "引擎 · 移动≤2 · atk物理+震荡 · 每移1格+1击破", minLv: 3 });
+    add({ id: "xia_ram", name: "全速撞击", hint: "引擎 · 移动≤2 · 先震荡再 atk物理 · 每移1格+1击破", minLv: 3 });
     add({ id: "xia_selfburn", name: "引火烧身", hint: "需引擎 · 进入自焚，可选立刻移动 1 距离", minLv: 6, bare: true });
     add({ id: "xia_crush", name: "狂怒碾压", hint: "同区 · 需引擎 · 1.5atk 物理 +3击破 · 未死未失衡则抓住敌人，每回合自动重复", minLv: 11 });
     add({ id: "xia_summon", name: "唤出柏妮尔", hint: "武器生物化" });
@@ -977,7 +977,7 @@ function skillList(unit) {
   if (unit.kit === "ras") {
     add({ id: "ras_aa", name: "普通攻击", hint: "远距离 · 两次 0.5atk 能量 共1击破 · 累积20%能量" });
     add({ id: "ras_dump", name: "泄能", hint: "任意距离 · 施加高能 · 转化20%能量为光能" });
-    add({ id: "ras_flee", name: "逃离", hint: "移动1 · +20%能量 · 原区一名敌人 1atk 电 · 不触发借机攻击。不稳则移动不限", minLv: 2 });
+    add({ id: "ras_flee", name: "逃离", hint: "移动1 → +20%能量 → 原区一名敌人 1atk 电（远距离）· 不触发借机攻击。不稳则移动不限", minLv: 2 });
     add({ id: "ras_super", name: "不稳超导", hint: "20%能量转光能 · 自身导体 · 不稳态下免费", minLv: 3 });
     add({ id: "ras_rampage", name: "失控暴走", hint: "+40%能量 · 因此进入不稳态则同区变能量场；已在不稳态则全场变能量场", minLv: 6 });
     add({ id: "ras_torrent", name: "狂瀑", hint: "任意距离 · 选高能状态的敌人 · 能量直接累积到 100%，每 20% 打 0.2atk 能量、自己失去 10% 血量", minLv: 11 });

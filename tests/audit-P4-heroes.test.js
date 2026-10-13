@@ -669,14 +669,14 @@ test("引火自焚最多 5 层（酷暑 10 层）", () => {
   assert.equal(x.selfBurnStacks, 5);
 });
 
-test("全速撞击先结算伤害再挂震荡：满架势的目标不多掉 2", () => {
+test("全速撞击先挂震荡再结算这一击（和盾击突进一样）：9/9 → 震荡压到 7/7 → 2 击破 → 5", () => {
   const { c, S } = setup(["xia", "kolt"], [{ id: "thug_knife", lv: 1, zone: 2 }]);
   const x = kit(S, "xia"), foe = foesOf(S)[0];
   ready(x, 1); x.level = 3; x.resources.engine = true;
   foe.zone = 2; fatten(foe, 300); foe.def = foe.defMax = 9;
   cmd(c, { actor: x.id, skill: "xia_ram", target: foe.id, picks: { dest: 2, target: foe.id } });
-  assert.equal(foe.def, 7, "1 + 移动 1 区 = 2 击破，没有多掉");
   assert.equal(foe.defMax, 7, "震荡：上限 −2");
+  assert.equal(foe.def, 5, "先震荡 9 → 7，再吃 1 + 移动 1 区 = 2 击破 → 5");
   assert.ok(foe.statuses.shockwave);
 });
 

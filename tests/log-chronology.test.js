@@ -71,3 +71,73 @@ test("震荡压低架势上限时，当前架势被压下来也写进日志", ()
   assert.equal(foe.def, 6);
   assert.ok(allLines(S).slice(from).some(s => /震荡：架势上限 −2 → 6，架势 8 → 6。/.test(s)));
 });
+
+// ---- 多步技能按说明的顺序结算 ----
+function field2(party, enemies) {
+  const c = H.load();
+  c.BattleSim.setup({ party, enemies: enemies || [{ id: "thug_knife", lv: 1, zone: 1 }], seed: "STEPS" });
+  c.startCombat();
+  const S = c.S.state;
+  S.units.filter(u => u.isPlayer).forEach(h => { h.zone = 1; h.level = 11; h.ap = 5; h.bonus = 5; });
+  S.units.filter(u => !u.isPlayer).forEach(f => { f.layers = [{ type: "flesh", current: 300, max: 300 }]; f.def = f.defMax = 10; });
+  return { c, S, K: k => c.findKit(k, S.units), foes: S.units.filter(u => !u.isPlayer) };
+}
+
+test("逃离：先移动 → 累积 20% 能量 → 再按远距离攻击打原区域的敌人；日志同序", () => {
+  const { c, S, K, foes } = field2(["ras"]);
+  const ras = K("ras"), foe = foes[0];
+  ras.zone = 1; foe.zone = 1;
+  const from = allLines(S).length;
+  const h0 = c.totalHp(foe);
+  c.Commands.dispatch(plain({ type: "skill", actor: ras.id, skill: "ras_flee", picks: { dest: 2, target: foe.id } }));
+  assert.equal(ras.zone, 2);
+  assert.ok(c.totalHp(foe) < h0, "打到了原区域的敌人");
+  const L = allLines(S).slice(from);
+  const at = re => L.findIndex(s => re.test(s));
+  const mv = at(/逃离：从 1 区到 2 区/), en = at(/累积能量 \+20%/), hit = at(/→ 狂徒（匕首）：\d+ 伤害/);
+  assert.ok(mv >= 0 && en > mv && hit > en, L.join("\n"));
+});
+
+test("逃离：不稳态走远了（距离 2）也能打到原区域的敌人，按远距离判定（不付近程打飞行的附赠行动）", () => {
+  const { c, S, K, foes } = field2(["ras"]);
+  S.zoneMode = 3;
+  const ras = K("ras"), foe = foes[0];
+  ras.zone = 1; foe.zone = 1; foe.flying = true;
+  ras.resources.unstable = true; ras.resources.energyPct = 120;
+  const b0 = ras.bonus, h0 = c.totalHp(foe);
+  c.Commands.dispatch(plain({ type: "skill", actor: ras.id, skill: "ras_flee", picks: { dest: 3, target: foe.id } }));
+  assert.equal(ras.zone, 3);
+  assert.ok(c.totalHp(foe) < h0, "距离 2 也打到了");
+  assert.equal(ras.bonus, b0, "远距离攻击：不用为近程打飞行付附赠行动");
+});
+
+test("圣战起始：带的人和灯一起到 → 再施加错位；日志同序", () => {
+  const { c, S, K, foes } = field2(["tou", "kolt"], [{ id: "thug_knife", lv: 1, zone: 2 }]);
+  const tou = K("tou"), kolt = K("kolt"), foe = foes[0];
+  tou.zone = kolt.zone = 1; foe.zone = 2; tou.resources.shield = 2;
+  const from = allLines(S).length;
+  c.Commands.dispatch(plain({ type: "skill", actor: tou.id, skill: "tou_start", picks: { dest: 2, target: foe.id, carryMode: "yes", carry: kolt.id } }));
+  assert.equal(tou.zone, 2); assert.equal(kolt.zone, 2);
+  assert.equal(tou.resources.shield, 1);
+  const L = allLines(S).slice(from);
+  const at = re => L.findIndex(s => re.test(s));
+  const carry = at(/随圣战起始一起移动：1 区 → 2 区/), shift = at(/对 狂徒（匕首） 施加错位/);
+  assert.ok(carry >= 0 && shift > carry, L.join("\n"));
+});
+
+test("绯秋居合普攻：深渊里的目标（飞行）不列出，也不能硬选", () => {
+  const { c, S, K, foes } = field2(["hiaki"], [{ id: "thug_knife", lv: 1, zone: 2 }]);
+  const h = K("hiaki"), foe = foes[0];
+  h.zone = 1; foe.zone = 2; foe.flying = true;
+  h.resources.stance = "iai";
+  S.fields[2] = Object.assign({}, S.fields[2] || {}, { abyss: true });
+  assert.equal(c.skillTargetMoveOk(h, "hiaki_aa", foe), false);
+  S.fields[2].abyss = false;
+  assert.equal(c.skillTargetMoveOk(h, "hiaki_aa", foe), true);
+  S.fields[2].abyss = true;
+  const ap0 = h.ap;
+  S.targetId = foe.id;
+  c.Commands.dispatch(plain({ type: "skill", actor: h.id, skill: "hiaki_aa", target: foe.id }));
+  assert.equal(h.zone, 1, "没有走进深渊");
+  assert.equal(h.ap, ap0, "不扣行动点");
+});
