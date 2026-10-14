@@ -298,3 +298,20 @@ test("富集出现率：沙暴里更常见", () => {
   const calm = rate("none"), storm = rate("sand");
   assert.ok(storm > calm, `平时 ${calm} 沙暴 ${storm}`);
 });
+
+test("沙漠生物的材料：低级为主，不掉稀有晶体 / 赫心结晶；打碎珊瑚枝掉金属", () => {
+  const c = H.load();
+  for (const lv of [1, 5, 10, 15, 20, 30]) {
+    for (let i = 0; i < 200; i++) {
+      const mats = c.enrichedMaterials(lv);
+      assert.ok(mats.every(m => ["mat_metal", "mat_alloy", "mat_polymer"].includes(m.id)), JSON.stringify(mats));
+      assert.ok(mats.some(m => m.id === "mat_metal"), "金属每次都有");
+    }
+  }
+  const { c: c2, st, kolt } = field([{ id: "sandfish_drive", lv: 5, zone: 2 }], { seed: "BRMET" });
+  const br = c2.makeProp("coral_branch", 2, 5); st.props.push(br);
+  const m0 = c2.bagCount("mat_metal");
+  c2.damageProp(br, { dmg: 9999, element: "fire" }, kolt);
+  assert.ok(!st.props.includes(br));
+  assert.equal(c2.bagCount("mat_metal"), m0 + 1);
+});

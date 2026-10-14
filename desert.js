@@ -454,6 +454,8 @@ function coralPropDamaged(p, lose, notes) {
 /** 珊瑚被摧毁（app.js · destroyProp） */
 function coralPropDestroyed(p, notes) {
   if (p.kind === "coral_branch" || p.kind === "coral_tentacle") releaseEntangled(p.id, notes, "脱困（缠住他的珊瑚断了）");
+  // 打碎珊瑚枝：金属骨骼散落一地（低级材料）
+  if (p.kind === "coral_branch") grantDesertMaterials([{ id: "mat_metal", qty: (Number(p.level) || 1) >= 10 ? 2 : 1 }], notes, `${p.name} 碎掉的金属骨骼`);
 }
 /** 沙漠的战场特征（run.js · regionFeatures）：沙珊瑚台地 / 沙珊瑚枝 */
 function desertFeatures(zoneMode) {
@@ -480,31 +482,38 @@ function makeEnriched(u) {
 }
 /** 掉落的奎支倍率（app.js · settleEnemyKill） */
 function desertLootMult(u) { return u && u.enriched ? DESERT.enriched.kuizhiMult : 1; }
-/** 富集个体掉的武器升级材料：按等级 [{ id, qty }] */
+/** 沙漠生物掉的武器升级材料：低级材料为主，不掉高级材料（稀有晶体、赫心结晶）。按等级 [{ id, qty }]
+ *  作者定：这些敌人不会掉很高级的材料，低级材料更常见 */
 function enrichedMaterials(level) {
   const lv = Number(level) || 1;
   const out = [];
   const chance = (p) => Math.random() < p;
-  if (lv <= 5) out.push({ id: "mat_metal", qty: 1 + Math.floor(Math.random() * 2) });
-  else if (lv <= 10) { out.push({ id: "mat_metal", qty: 2 }); if (chance(0.3)) out.push({ id: "mat_alloy", qty: 1 }); }
-  else if (lv <= 15) { out.push({ id: "mat_alloy", qty: 1 }); if (chance(0.25)) out.push({ id: "mat_polymer", qty: 1 }); }
-  else { out.push({ id: "mat_polymer", qty: 1 }); if (chance(0.1)) out.push({ id: "mat_crystal", qty: 1 }); }
+  const between = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
+  if (lv <= 5) out.push({ id: "mat_metal", qty: between(1, 2) });
+  else if (lv <= 10) { out.push({ id: "mat_metal", qty: 2 }); if (chance(0.2)) out.push({ id: "mat_alloy", qty: 1 }); }
+  else if (lv <= 15) { out.push({ id: "mat_metal", qty: between(2, 3) }); if (chance(0.35)) out.push({ id: "mat_alloy", qty: 1 }); }
+  else { out.push({ id: "mat_metal", qty: 3 }, { id: "mat_alloy", qty: 1 }); if (chance(0.1)) out.push({ id: "mat_polymer", qty: 1 }); }
   return out;
 }
-/** 富集个体被打倒：掉材料。跑团模式、长线养成给实物；普通单局里升级不收实物材料，按物品表折成奎支 */
-function desertEnrichedDrops(u, notes) {
-  if (!u || !u.enriched) return;
-  const mats = enrichedMaterials(u.level);
+/** 给材料：跑团模式、长线养成、沙盒给实物；普通单局里武器升级不收实物材料，按物品表折成奎支 */
+function grantDesertMaterials(mats, notes, source) {
+  if (!mats.length) return;
   const real = (typeof TRPG !== "undefined" && TRPG.active) || (typeof Rogue !== "undefined" && Rogue.growthXp && Rogue.growthXp()) ||
     !(typeof Rogue !== "undefined" && Rogue.inRunMode && Rogue.inRunMode());
   const name = (id) => (ITEM_CATALOG[id] || {}).name || id;
+  const list = mats.map(m => `${name(m.id)}×${m.qty}`).join("、");
   if (real) {
     mats.forEach(m => bagAdd(m.id, m.qty));
     if (state.battleGains) (state.battleGains.items = state.battleGains.items || []).push(...mats);
-    notes.push(`${u.name} 体内的矿物：${mats.map(m => `${name(m.id)}×${m.qty}`).join("、")}。`);
+    notes.push(`${source}：${list}。`);
   } else {
     const price = (id) => ((typeof HANDBOOK_MATERIALS !== "undefined" && HANDBOOK_MATERIALS[id.replace(/^mat_/, "")]) || {}).price || 0;
     const k = mats.reduce((s, m) => s + price(m.id) * m.qty, 0);
-    if (k > 0 && typeof addKuizhi === "function") addKuizhi(k, notes, `${u.name} 体内的矿物（${mats.map(m => `${name(m.id)}×${m.qty}`).join("、")}，折价）`);
+    if (k > 0 && typeof addKuizhi === "function") addKuizhi(k, notes, `${source}（${list}，折价）`);
   }
+}
+/** 富集个体被打倒：掉材料 */
+function desertEnrichedDrops(u, notes) {
+  if (!u || !u.enriched) return;
+  grantDesertMaterials(enrichedMaterials(u.level), notes, `${u.name} 体内的矿物`);
 }
