@@ -75,15 +75,19 @@
   const picked = [];
   // 单人模式：一名主角、三名伙伴、一个第二副职责
   const solo = { on: false, hero: null, partners: [], role2: null };
-  const session = { get run() { return run; }, set run(value) { run = value; }, picked, solo };
+  // 长线养成：开局选 ROGUE_GROWTH.startParty 名角色
+  const growth = { on: false };
+  const session = { get run() { return run; }, set run(value) { run = value; }, picked, solo, growth };
   const sessionCommand = (action, fields, context) => dispatch(Object.assign({ type: "run.session", action }, fields || {}), Object.assign({ session }, context || {}));
   const PARTY_TIP = "挑 2–4 名角色出发。每人都带着自己的专属武器人；角色永久死亡时，武器人也会一起离开。";
   const SOLO_TIP = `先点一名角色当主角，再挑 ${ROGUE_SOLO.partners} 名伙伴（战斗里用「支援」叫他们登场打协助攻击），最后选一个第二副职责。` +
     `单人模式：每回合 ${ROGUE_SOLO.apPerRound} 行动点，能给自己协助格挡、接自己打出的失衡；每场胜利额外 +${ROGUE_SOLO.battleXp} 经验，` +
     `每 ${ROGUE_SOLO.attrEvery} 级多一次六维属性，每 ${ROGUE_SOLO.role2Every} 级从第二副职责里多学一个技能。`;
+  const GROWTH_TIP = `挑 ${ROGUE_GROWTH.startParty} 名角色组成初始小队。没有期限和首领，接任务赚钱、升级、强化武器（经验和武器升级的材料照跑团模式）；` +
+    `每完成一个任务得到赫心融合体，在任务板旁的角色抽取机里抽角色：新角色入队，抽到已有的角色 +1 级。角色不会永久死亡。`;
   function renderParty() {
-    $("party-title").textContent = solo.on ? "单人模式 · 选择主角与伙伴" : "选择队伍";
-    $("party-tip").textContent = solo.on ? SOLO_TIP : PARTY_TIP;
+    $("party-title").textContent = solo.on ? "单人模式 · 选择主角与伙伴" : growth.on ? "长线养成 · 选择初始小队" : "选择队伍";
+    $("party-tip").textContent = solo.on ? SOLO_TIP : growth.on ? GROWTH_TIP : PARTY_TIP;
     const box = $("party-grid");
     box.innerHTML = Rogue.heroPool().map(c => {
       const isHero = solo.on && solo.hero === c.kit;
@@ -124,6 +128,11 @@
       return;
     }
     const n = picked.length;
+    if (growth.on) {
+      $("party-go").disabled = n !== ROGUE_GROWTH.startParty;
+      $("party-count").textContent = `已选 ${n}/${ROGUE_GROWTH.startParty} 人` + (n ? "：" + picked.map(Rogue.heroName).join("、") : "");
+      return;
+    }
     $("party-go").disabled = !(n >= SaveStore.PARTY_MIN && n <= SaveStore.PARTY_MAX);
     $("party-count").textContent = `已选 ${n} 人（${SaveStore.PARTY_MIN}–${SaveStore.PARTY_MAX} 人）` +
       (n ? "：" + picked.map(Rogue.heroName).join("、") : "");
@@ -136,12 +145,25 @@
   }
   const EXHAUST = ["", "力竭：无法用坚毅起身", "力竭 2：atk −3 def −1", "力竭 3：击倒即死", "力竭致死"];
 
+  /** 时钟：「21:40 🌙夜晚」；沙暴（漠汛）时沙漠生物按夜晚行动 */
+  function clockHtml(min, opt) {
+    opt = opt || {};
+    const night = isNightClock(min);
+    const icon = window.Icons && Icons.daynight ? Icons.daynight(night) : "";
+    return `<span class="r-clock ${night ? "night" : "day"}">${icon}<b>${clockText(min)}</b> ${night ? "夜晚" : "白天"}${opt.days ? `<small>（+${opt.days} 天）</small>` : ""}</span>`;
+  }
+  /** 「醒来：05:40 ☀ 白天」 */
+  const wakeHtml = (hours, label) => { const t = clockAfter(hours); return `${label || "醒来"} ${clockHtml(t.min, { days: t.days })}`; };
   function renderHeader() {
     const extra = run.act > C.acts ? "（额外）" : "";
+    if (run.growth) {
+      $("run-where").textContent = `长线养成 · ${Rogue.region(run)} · 队伍平均 ${Rogue.partyLevel(run)} 级`;
+      $("run-day").innerHTML = `第 ${run.day} 天 · ${clockHtml(clockNow())} · 没有期限`;
+    } else
     $("run-where").textContent = `第 ${run.act} 幕${extra} · ${Rogue.region(run)}`;
     const main = run.main;
     const mainText = !main ? "" : main.done ? " · 主线已完成" : ` · 主线需 ${main.days} 天`;
-    $("run-day").textContent = `第 ${run.day} 天 · 本幕剩 ${Rogue.daysLeft(run)}/${C.daysPerAct} 天${mainText}`;
+    if (!run.growth) $("run-day").innerHTML = `第 ${run.day} 天 · ${clockHtml(clockNow())} · 本幕剩 ${Rogue.daysLeft(run)}/${C.daysPerAct} 天${mainText}`;
     const s = Rogue.supplies();
     const hrs = Rogue.hoursAwake();
     const tier = exhaustTierFromHours(hrs);
@@ -157,6 +179,7 @@
         <div class="rh-top"><b>${esc(v.name)}</b><span>Lv${v.level}${v.pending ? ' · <em>待选升级</em>' : ""}</span><button class="g-btn small rh-sheet" data-sheet="${esc(h.kit)}" data-sheet-src="run" title="数值、被动和技能说明">资料</button><button class="g-btn small rh-sheet" data-armory="${esc(h.kit)}" data-armory-src="run" title="武器补正、atk 明细、改装件和客制化">武器</button></div>
         ${v.race ? `<div class="rh-w rh-prof">${esc(v.race)} · ${esc(v.job)} · ${esc(Object.keys(v.profs).map(k => k + v.profs[k]).join(" "))}</div>` : ""}
         ${v.role2 ? `<div class="rh-w rh-solo">第二副职责 ${esc(v.role2)}${v.role2Skills.length ? "：" + esc(v.role2Skills.join("、")) : "（还没学技能）"}</div>` : ""}
+        ${v.feats.length ? `<div class="rh-w rh-solo">专长：${esc(v.feats.join("、"))}</div>` : ""}
         ${v.pendingBreak ? `<div class="rh-w broken">检定受伤：下一场开战时受到 ${v.pendingBreak} 击破</div>` : ""}
         <div class="rh-row">血 ${bar(v.hp, v.hpMax, "hp")}<span>${v.hp}/${v.hpMax}</span></div>
         ${v.layers.length > 1 ? `<div class="rh-w">${esc(layerText(v.layers))}</div>` : ""}
@@ -191,6 +214,12 @@
         ? `${p.name} ${p.choice.level} 级（单人模式）：从第二副职责里再学一个技能`
       : p.choice.type === "prof"
         ? `${p.name} ${p.choice.level} 级：一个自选熟练项（新学一项，或把已有的一项升一级，最高三级）`
+      : p.choice.type === "feat"
+        ? `${p.name} ${p.choice.level} 级：选择一项专长（不限职责和属性，可以选这一级或更低级的）`
+      : p.choice.type === "featFull"
+        ? `${p.name} 兼修：选一张专长①–③的职责涉猎专长，改成原职责技能的完整版`
+      : p.choice.type === "prof3"
+        ? `${p.name} 万事通：选一项熟练项升到三级`
         : `${p.name} ${p.choice.level} 级：选择一项职责技能`;
     const opts = query("choiceOptions", { kit: p.kit, index: p.index });
     return `<section class="levelup">
@@ -220,7 +249,37 @@
       <button class="g-btn r-go${t.key ? " r-main" : ""}" data-which="${which}" ${why ? "disabled" : ""}>${why ? esc(why) : t.key ? "执行主线" : "接下任务"}</button>
     </div>`;
   }
+  /** 长线养成：角色抽取机 + 候补 */
+  function renderGrowth() {
+    if (!run.growth) return "";
+    const d = query("drawInfo");
+    const fusion = ITEM_CATALOG[ROGUE_GROWTH.fusionItem].name;
+    const owned = d.pool.filter(p => p.owned).map(p => `${p.name} ${p.level} 级`).join("、");
+    const full = run.party.length >= ROGUE_GROWTH.partyMax;
+    const reserve = (run.reserve || []).map(h => {
+      const name = Rogue.heroName(h.kit);
+      const swaps = full
+        ? run.party.map(p => `<button class="g-btn small" data-swap-in="${esc(h.kit)}" data-swap-out="${esc(p.kit)}">换下 ${esc(Rogue.heroName(p.kit))}</button>`).join("")
+        : `<button class="g-btn small" data-swap-in="${esc(h.kit)}">上场</button>`;
+      return `<div class="shop-row"><span class="s-name">${esc(name)}<small>${h.level || 1} 级</small></span><span class="s-have"></span><span class="s-price"></span><span>${swaps}</span></div>`;
+    }).join("");
+    const bench = run.party.length > 1
+      ? `<p class="r-hint">队伍里的人也可以先换到候补：${run.party.map(p => `<button class="g-btn small" data-swap-out-only="${esc(p.kit)}">${esc(Rogue.heroName(p.kit))} 下场</button>`).join(" ")}</p>` : "";
+    return `<h2>角色抽取机</h2>
+      <p class="r-hint">投入 ${d.cost} 个${esc(fusion)}抽一名角色（每名角色机会相同）：新角色加入队伍（满 ${ROGUE_GROWTH.partyMax} 人进候补），抽到已有的角色 +1 级（${ROGUE_GROWTH.maxLevel} 级封顶）。手里有 <b>${d.fusion}</b> 个。</p>
+      <p class="r-hint">已有：${esc(owned)}</p>
+      <button class="g-btn r-main" id="r-draw" ${d.canDraw ? "" : "disabled"}>${d.canDraw ? "抽一次" : esc(d.why)}</button>
+      ${reserve ? `<h3>候补</h3><div class="shop">${reserve}</div>` : ""}
+      ${bench}`;
+  }
   function renderBoard() {
+    if (run.growth) {
+      return `<h2>任务板</h2>
+      <p class="r-hint">长线养成：没有主线和期限，任务随便接。敌人等级跟着队伍平均等级走；团灭只算任务失败，角色不会永久死亡。</p>
+      <div class="task-list">${(run.board || []).map((t, i) => taskCard(t, i)).join("")}</div>
+      ${renderGrowth()}
+      ${renderSmiths()}`;
+    }
     return `<h2>任务板</h2>
       <p class="r-hint">主线开幕就已接下，要在本幕天数用完之前完成，否则本局结束。本幕的天数用完时迎战首领；主线完成后剩下的日子可以继续做支线。支线只写了大致目标、时间、报酬和补给，天数够才能接。</p>
       <div class="task-list">${run.main && !run.main.done ? taskCard(run.main, "main") : ""}${(run.board || []).map((t, i) => taskCard(t, i)).join("")}</div>
@@ -238,6 +297,9 @@
     const fix = repairPoints() ? "可以先用维修工具包修一下：" : "用维修工具包（商店有卖）或长休才能修好。";
     return `<p class="r-warn">⚠ ${esc(who)} 耐久为 0，这场战斗只能空手作战。${fix}</p>${repairRows()}`;
   }
+  // 舌灿莲花（专长）：每个任务一次，谈掉一场普通战斗
+  const parleyBtns = () => (Rogue.parleyOptions ? Rogue.parleyOptions(run) : []).map(o =>
+    `<button class="g-btn" data-parley="${esc(o.kit)}">${esc(o.name)} 交涉（舌灿莲花 · 普通「${esc(o.prof)}」· 成功率 ${Math.round(o.chance * 100)}%）<small>成功就不用打，但没有掉落和经验；每个任务一次</small></button>`).join("");
   const fightBtn = (label) => Rogue.brokenWeapons(run).length
     ? `<button class="g-btn r-main" id="r-fight">仍然${label}（有人空手）</button>`
     : `<button class="g-btn r-main" id="r-fight">${label}</button>`;
@@ -280,7 +342,7 @@
         ${need.ok ? "" : `<br><span class="r-bad">不够：${esc(need.lack.join("，"))}</span>`}</p></div>`;
   }
   const NODE_PANELS = {
-    battle: () => `<p>前方有敌人拦路。</p>${brokenWarn()}${fightBtn("迎战")}`,
+    battle: () => `<p>前方有敌人拦路。</p>${brokenWarn()}${fightBtn("迎战")}${parleyBtns()}`,
     elite: () => `<p>前方有棘手的敌人。</p>${brokenWarn()}${fightBtn("迎战")}`,
     rest: () => {
       if (run.ambush) {
@@ -301,8 +363,8 @@
         <label class="r-watch">守夜：<select id="r-watch"><option value="">不安排守夜</option>${watchOpts}</select></label>
         <div class="r-choices">
           <button class="g-btn r-main" id="r-long" ${plan.ok ? "" : "disabled"}>长休 ${C.hours.longRest} 小时
-            <small>${plan.ok ? `消耗 ${plan.water} ml 水、${esc(food)}` : "补给不足：" + esc(plan.lack.join("，"))} · 血量回满、耐久回满、武器人痊愈、清空力竭</small></button>
-          <button class="g-btn" id="r-short">短休 ${C.hours.shortRest} 小时<small>不消耗补给 · 每人回复 等级×2+体质 · 一天两次</small></button>
+            <small>${wakeHtml(C.hours.longRest)} · ${plan.ok ? `消耗 ${plan.water} ml 水、${esc(food)}` : "补给不足：" + esc(plan.lack.join("，"))} · 血量回满、耐久回满、武器人痊愈、清空力竭</small></button>
+          <button class="g-btn" id="r-short">短休 ${C.hours.shortRest} 小时<small>${wakeHtml(C.hours.shortRest, "休息到")} · 不消耗补给 · 每人回复 等级×2+体质 · 一天两次</small></button>
           <button class="g-btn" id="r-rest-skip">不休息，直接离开<small>获得 ${C.restSkipKuizhi} 奎支 · 不花时间</small></button>
         </div>`;
     },
@@ -430,10 +492,10 @@
     const rows = info.needsIntro
       ? `<p class="r-hint">他不帮陌生人强化武器。</p><button class="g-btn" data-intro="${esc(id)}">给他看看你的武器</button>`
       : Rogue.smithOptions(run, id).map(o =>
-      `<div class="shop-row"><span class="s-name">${esc(o.name)}<small>现在 ${o.level} 级${o.hours ? ` · 要帮忙 ${o.hours} 小时` : ""}</small></span>
+      `<div class="shop-row"><span class="s-name">${esc(o.name)}<small>现在 ${o.level} 级${o.hours ? ` · 要帮忙 ${o.hours} 小时` : ""}${o.mats && !o.max ? ` · 材料 ${esc(o.mats.map(m => `${m.name} ${m.have}/${m.need}`).join("、"))}` : ""}</small></span>
         <span class="s-have"></span>
         <span class="s-price">${o.max ? "满级" : o.cost}</span>
-        <button class="g-btn" data-upgrade="${esc(o.kit)}" data-smith="${esc(id)}" ${o.max || k < o.cost ? "disabled" : ""}>升到 ${o.level + 1} 级</button></div>`).join("");
+        <button class="g-btn" data-upgrade="${esc(o.kit)}" data-smith="${esc(id)}" ${o.max || k < o.cost || (o.mats && !o.enough) ? "disabled" : ""}>升到 ${o.level + 1} 级</button></div>`).join("");
     const claim = info.canClaim ? `<p class="r-hint">${esc(info.name)} 愿意把自己的客制化图纸给你一张（只能挑一张）：</p>
       <div class="r-choices">${info.blueprints.map(b =>
         `<button class="g-btn" data-claim="${esc(b.id)}" data-smith="${esc(id)}">${esc(b.name)}<small>${esc(b.text)}</small></button>`).join("")}</div>` : "";
@@ -530,7 +592,7 @@
     const sh = query("canShortRestBefore");
     const left = (sh.who || []).map(x => `${x.name} ${x.left}`).join("、");
     const shortBtn = `<button class="g-btn" id="r-short-before" ${sh.ok ? "" : "disabled"}>短休 ${C.hours.shortRest} 小时
-        <small>${sh.ok ? `不消耗补给 · 每人回复 等级×2+体质 · 今天还能短休：${esc(left)}` : esc(sh.why || "")}</small></button>`;
+        <small>${sh.ok ? `${wakeHtml(C.hours.shortRest, "休息到")} · 不消耗补给 · 每人回复 等级×2+体质 · 今天还能短休：${esc(left)}` : esc(sh.why || "")}</small></button>`;
     return `<div class="rest-before">${shortBtn}</div>`;
   }
 
@@ -543,7 +605,7 @@
     Object.keys(ROGUE_NODE_TYPES).forEach(k => { labels[k] = ROGUE_NODE_TYPES[k].label; });
     return RouteMap.html({
       region: Rogue.region(run), title: `${t.key ? "主线" : t.name}路线图`,
-      cols, nodes: t.nodes, pick, index: t.index, labels,
+      cols, nodes: t.nodes, pick, index: t.index, labels, eta: Rogue.routeEta(run),
       choices: Rogue.nodeChoices(run).map(o => o.i), links: Rogue.routeLinks,
       seed: `${run.seed}:map:${run.taskNo}`
     });
@@ -600,7 +662,7 @@
           ${shopping}
           ${clinic}
           ${restPlanner()}
-          <button class="g-btn r-main" id="r-camp">休整<small>${plan.ok ? `消耗 ${plan.water} ml 水、${esc(food)}` : "补给不足：不回血"}</small></button>`;
+          <button class="g-btn r-main" id="r-camp">休整<small>${wakeHtml(C.hours.longRest)} · ${plan.ok ? `消耗 ${plan.water} ml 水、${esc(food)}` : "补给不足：不回血"}</small></button>`;
       }
       case "boss":
         return `<h2>第 ${run.act} 幕 · 首领</h2>
@@ -768,6 +830,10 @@
       b.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
     });
     on("r-fight", fight);
+    document.querySelectorAll("[data-parley]").forEach(b => { b.onclick = () => act({ action: "parley", kit: b.dataset.parley }); });
+    on("r-draw", () => act({ action: "drawHero" }));
+    body.querySelectorAll("[data-swap-in]").forEach(b => { b.onclick = () => act({ action: "swapHero", in: b.dataset.swapIn, out: b.dataset.swapOut || null }); });
+    body.querySelectorAll("[data-swap-out-only]").forEach(b => { b.onclick = () => act({ action: "swapHero", out: b.dataset.swapOutOnly }); });
     const pay = $("r-payer");
     if (pay) pay.onchange = () => { payerKit = pay.value; render(); };
     on("r-force-vote", () => { try { OnlineRogue.handle(myId(), { type: "rogue.force", what: "vote" }); } catch (e) { completeAction(null, e); } });
@@ -800,7 +866,7 @@
   window.RunFlow = {
     ready: true,
     start(opt) {
-      sessionCommand("prepareParty", { solo: !!(opt && opt.solo) });
+      sessionCommand("prepareParty", { solo: !!(opt && opt.solo), growth: !!(opt && opt.growth) });
       Screens.show("party");
     },
     /** 角鳞星地图（world-map.js）：这一幕的区域是当前位置，各幕按顺序连成路线 */
@@ -864,7 +930,7 @@
         const seed = RNG.newSeed();
         sessionCommand("newRun", solo.on
           ? { party: [solo.hero], partners: solo.partners.slice(), role2: solo.role2, solo: true, seed }
-          : { party: picked.slice(), seed });
+          : { party: picked.slice(), seed, growth: growth.on });
       } catch (e) {
         $("party-count").textContent = e.message;
         return;

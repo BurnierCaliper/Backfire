@@ -6,7 +6,7 @@
  *
  * 模板格式：
  *   { id, name, note, tier: "normal" | "elite" | "boss", board: 2 | 3 | "line4" | "square4" | "cross5",
- *     weather, playerZone,
+ *     weather, playerZone, allyFaction（我方与哪个敌人阵营同阵营，"" = 只有自己）,
  *     enemies: [{ preset, level (null = 跟着战斗等级), zone, mechanics?: [首领机制配置] }],
  *     fields: { 区号: { 和默认场地不同的字段 } },
  *     gaps: { "1-2": { type, hp (null = 按规则掷), open } },
@@ -23,6 +23,13 @@ const BATTLE_TEMPLATE_TIERS = { normal: "普通", elite: "精英", boss: "首领
 const BATTLE_TEMPLATE_FIELD_KINDS = { "": "无", fireOn: "火场", ice: "冰面", acid: "酸液", electric: "电场", energy: "能量", harmonic: "谐波", heal: "疗愈", abyss: "深渊", collapseOn: "坍塌", ruinOn: "损毁地面", isolate: "隔离区" };
 
 function btClone(x) { return JSON.parse(JSON.stringify(x)); }
+/** 可以选来和我方同阵营的敌人阵营（遭遇表里出现过的阵营） */
+function battleTemplateFactions() {
+  if (typeof ENEMY_INFO === "undefined") return [];
+  const out = [];
+  Object.keys(ENEMY_INFO).forEach(k => { const f = ENEMY_INFO[k].faction; if (f && !out.includes(f)) out.push(f); });
+  return out;
+}
 function btInt(v, d, lo, hi) {
   let n = v === null || v === undefined || v === "" ? d : Math.floor(Number(v));
   if (!isFinite(n)) n = d;
@@ -146,6 +153,7 @@ function battleTemplateNormalize(t) {
     board,
     weather: BATTLE_TEMPLATE_WEATHERS.includes(t.weather) ? t.weather : "none",
     playerZone: zoneOk(t.playerZone, defaultPlayer),
+    allyFaction: battleTemplateFactions().includes(t.allyFaction) ? t.allyFaction : "",
     enemies, fields, gaps, props, waves, chain,
     drops: btDrops(t.drops),
     updatedAt: Number(t.updatedAt) || Date.now()
@@ -262,6 +270,7 @@ function battleTemplateCapture(name) {
     name, board, weather: state.weather || "none", drops: state.battleDrops || null,
     tier: enc && BATTLE_TEMPLATE_TIERS[enc.tier] ? enc.tier : "normal",
     playerZone: btMostCommon(heroes.map(u => Number(u.zone) || 1), (btLayout(board) || {}).playerZone || 1),
+    allyFaction: (state.playerAllies || [])[0] || "",
     enemies, fields, gaps, props
   });
 }
@@ -290,7 +299,7 @@ function btOneEncounter(t) {
   const zones = battleTemplateZones(t.board);
   const enc = {
     id: "tpl:" + t.id, name: t.name, template: t.id, tier: t.tier,
-    zoneMode: zones.length, weather: t.weather, playerZone: t.playerZone,
+    zoneMode: zones.length, weather: t.weather, playerZone: t.playerZone, allyFaction: t.allyFaction || "",
     layout: "custom", layoutLocked: true,
     enemies: t.enemies.map(e => {
       const row = { preset: e.preset, zone: e.zone, count: 1 };
@@ -331,6 +340,7 @@ function battleTemplateSummary(t) {
   const bits = [battleTemplateBoardName(t.board)];
   if (t.tier !== "normal") bits.push(BATTLE_TEMPLATE_TIERS[t.tier]);
   if (W[t.weather]) bits.push(W[t.weather]);
+  if (t.allyFaction) bits.push(`我方与${t.allyFaction}同阵营`);
   const foes = t.enemies.map(e => `${btEnemyName(e.preset)} ${e.level != null ? "Lv" + e.level : "Lv随队"}（${e.zone} 区）${e.mechanics ? "·机制" : ""}`);
   bits.push(foes.length ? foes.join("、") : "没有敌人");
   const extra = [];

@@ -55,6 +55,7 @@ const BattleSim = (function () {
     state.solo = null;           // 单人模式：在 before 里写进来
     state.scoreAct = null;       // 评分按第几幕的分数线：单局在 before 里写进来
     state.ambush = false;        // 遭遇战（长休被偷袭）：第一回合我方没有行动，分数 ×2
+    state.playerAllies = [];     // 和我方同阵营的敌人阵营（跑团战斗模板设的；buildEncounter 里写进来）
   }
 
   /**

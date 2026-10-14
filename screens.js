@@ -59,6 +59,7 @@ const Screens = (function () {
       const card = typeof livePartyCards === "function" ? livePartyCards().find(c => c.kit === h.kit) : null;
       return card ? card.name : h.kit;
     });
+    if (run.growth) return `长线养成 · 第 ${run.day} 天 · ${names.join("、")}`;
     return `${run.solo ? "单人模式 · " : ""}第 ${run.act} 幕 · 第 ${run.day} 天 · ${names.join("、")}`;
   }
 
@@ -71,6 +72,7 @@ const Screens = (function () {
     $("t-continue-sub").textContent = run ? runSummary(run) : newer ? "有一局更新版本的游戏存下的进度，这一版读不了" : "没有进行中的一局";
     $("t-new").disabled = !RunFlow.ready;
     if ($("t-solo")) $("t-solo").disabled = !RunFlow.ready;
+    if ($("t-growth")) $("t-growth").disabled = !RunFlow.ready;
     $("t-new-sub").textContent = RunFlow.ready ? "选择 2–4 名角色出发" : "单局流程在下一步（M1）接入";
   }
 
@@ -89,6 +91,7 @@ const Screens = (function () {
     });
     $("t-new").onclick = () => RunFlow.start();
     if ($("t-solo")) $("t-solo").onclick = () => RunFlow.start({ solo: true });
+    if ($("t-growth")) $("t-growth").onclick = () => RunFlow.start({ growth: true });
     $("t-continue").onclick = () => RunFlow.resume();
     if ($("t-codex")) $("t-codex").onclick = () => { if (window.Bestiary) Bestiary.open({ mode: "hero", sub: "主菜单" }); };
     $("t-sandbox").onclick = () => {

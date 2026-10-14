@@ -591,10 +591,11 @@ test("手机竖屏：战斗不横向溢出；点目标先预览、再点才出�
   await page.waitForFunction(() => state.combatStarted && GAME.depth === 0, null, { timeout: 15000 });
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   assert.ok(overflow <= 0, "横向溢出 " + overflow);
-  // 瑞比的普通攻击打距离 1：把敌人挪到隔壁区
+  // 瑞比的普通攻击打距离 1：把敌人挪到隔壁区。随机生成的战场可能在两区之间放了危墙（挡住攻击），一并拆掉
   const ruby = await page.evaluate(() => {
     const h = state.units.find(u => u.kit === "ruby");
     state.units.filter(u => !u.isPlayer).forEach(u => { u.zone = h.zone > 1 ? h.zone - 1 : 2; });
+    Object.keys(state.gaps || {}).forEach(k => { state.gaps[k] = emptyGap(); });
     GAME.refresh();
     return h.id;
   });
@@ -621,7 +622,8 @@ test("格挡成功：敌方队长·牛格挡住攻击时，响起钢铁碰撞声
   const o = await open(t); if (!o) return;
   const { page } = o;
   await newTrpg(page);
-  await page.evaluate(() => { GAME.enemyPlan = [{ id: "captain_ox", lv: 1, zone: 2 }, { id: "thug_knife", lv: 1, zone: 2 }]; GAME.lastEncounter = null; });
+  // 牛队长替同伙（同为官方的安保机器人看守）挡；狂徒是盗匪，和警卫队敌对，牛不会替它挡
+  await page.evaluate(() => { GAME.enemyPlan = [{ id: "captain_ox", lv: 1, zone: 2 }, { id: "guard_sword", lv: 1, zone: 2 }]; GAME.lastEncounter = null; });
   await startBattle(page);
   await page.evaluate(() => {
     window.__parry = 0;
@@ -632,7 +634,7 @@ test("格挡成功：敌方队长·牛格挡住攻击时，响起钢铁碰撞声
   await selectHero(page, "ruby");
   await page.keyboard.press("1");
   await page.waitForFunction(() => GAME.arm && GAME.arm.mode === "unit");
-  const thug = await page.evaluate(() => state.units.find(u => u.kit === "thug_knife").id);
+  const thug = await page.evaluate(() => state.units.find(u => u.kit === "guard_sword").id);
   await page.click(`.unit-wrap[data-id="${thug}"]`);
   await page.waitForFunction(() => window.__parry > 0 && GAME.depth === 0, null, { timeout: 15000 });
   assert.deepEqual(o.errors, []);

@@ -98,6 +98,7 @@ function afterDamageTaken(u, element, dealt, shieldHit, notes, ctx) {
   if (u && typeof syncTempShield === "function") syncTempShield(u);   // 临时护盾先扣（engine.js）
   if (!u || !(dealt > 0)) return;
   ctx = ctx || {};
+  if (typeof dustBugAfterHit === "function") dustBugAfterHit(u, notes);   // 尘虫：挨打后摊平
   // 躲藏：受到伤害后解除
   if (u.statuses && u.statuses.hide) {
     u.statuses.hide = false;
@@ -141,6 +142,29 @@ function meltShieldRoundStart(u, notes) {
 }
 
 /* ---------- 攻击之后 ---------- */
+/* ---------- 下潜（u.submerged）：钻进沙层 / 地下。定位和飞行类似，任何单位都可以带 ----------
+ *   下潜中不能被选为目标，范围攻击也打不到；自己发动攻击时解除（主动解除，没有代价）。
+ *   例外：谐波攻击（单体、范围都算）照样打得到；塌陷区域的伤害也打得到。被这两种打到时下潜被迫解除，受到 1 击破。 */
+function isSubmerged(u) {
+  return !!(u && u.submerged && !u.dead);
+}
+/** 进入下潜 */
+function submergeUnit(u, notes) {
+  if (!u || u.dead || u.submerged) return false;
+  u.submerged = true;
+  if (notes) notes.push(`${u.name} 下潜。`);
+  return true;
+}
+/** 解除下潜。forced：被谐波 / 塌陷打出来，受到 1 击破（element 是这一击的属性） */
+function surfaceUnit(u, notes, forced, why, element) {
+  if (!u || !u.submerged) return false;
+  u.submerged = false;
+  notes = notes || [];
+  notes.push(`${u.name} ${forced ? `被${why || "打"}出沙层，下潜被迫解除` : `${why || "发动攻击"}，下潜解除`}。`);
+  if (forced && typeof dealBreak === "function") dealBreak(u, 1, element || "physical", notes, "下潜被迫解除");
+  return true;
+}
+
 /** 攻击者打完一次攻击行动（dealTo，action 且不是反应） */
 function afterAttackDealt(a, t, element, res, opt, notes) {
   if (!a || !t || !res || res.ok === false) return;

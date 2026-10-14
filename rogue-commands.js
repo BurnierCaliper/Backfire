@@ -45,11 +45,14 @@ const RogueCommands = (function () {
       return { notes, check: check || null };
     },
     skipCheck: (_c, run) => Rogue.skipCheck(run),
+    parley: (c, run) => Rogue.parley(run, c.kit),
     choose: (c, run) => Rogue.choose(run, c.kit, c.index, c.value),
     leaveNode: (_c, run) => Rogue.leaveNode(run),
     nextAct: (_c, run) => Rogue.nextAct(run),
     afterVictory: (c, run) => Rogue.afterVictory(run, c.goOn),
-    finishBattle: (c, run) => Rogue.finishBattle(run, c.outcome)
+    finishBattle: (c, run) => Rogue.finishBattle(run, c.outcome),
+    drawHero: (_c, run) => Rogue.drawHero(run).notes,
+    swapHero: (c, run) => Rogue.swapHero(run, c.out || null, c.in || null)
   };
   const queries = {
     heroView: (c, run) => Rogue.heroView(run, hero(run, c.kit)),
@@ -72,7 +75,8 @@ const RogueCommands = (function () {
     partStock: () => Rogue.partStock(),
     canSellParts: (_c, run) => Rogue.canSellParts(run),
     canShortRestBefore: (_c, run) => Rogue.canShortRestBefore(run),
-    watchOptions: (_c, run) => Rogue.watchOptions(run)
+    watchOptions: (_c, run) => Rogue.watchOptions(run),
+    drawInfo: (_c, run) => Rogue.drawInfo(run)
   };
   const sessions = {
     readSaved() { return SaveStore.loadRun(); },
@@ -82,10 +86,11 @@ const RogueCommands = (function () {
       const s = needSession(context);
       s.picked.length = 0;
       s.solo.on = !!c.solo; s.solo.hero = null; s.solo.partners = []; s.solo.role2 = null;
+      if (s.growth) s.growth.on = !c.solo && !!c.growth;
       return { solo: s.solo.on };
     },
     toggleHero(c, context) {
-      const { picked, solo } = needSession(context), k = c.kit;
+      const s = needSession(context), { picked, solo } = s, k = c.kit;
       if (!Rogue.heroPool().some(h => h.kit === k)) throw new Error("没有这个角色");
       if (solo.on) {
         if (solo.hero === k) { solo.hero = null; solo.role2 = null; }
@@ -95,7 +100,7 @@ const RogueCommands = (function () {
       } else {
         const i = picked.indexOf(k);
         if (i >= 0) picked.splice(i, 1);
-        else if (picked.length < SaveStore.PARTY_MAX) picked.push(k);
+        else if (picked.length < (s.growth && s.growth.on ? ROGUE_GROWTH.startParty : SaveStore.PARTY_MAX)) picked.push(k);
       }
       return { picked: picked.slice(), solo: { on: solo.on, hero: solo.hero, partners: solo.partners.slice(), role2: solo.role2 } };
     },
@@ -109,8 +114,9 @@ const RogueCommands = (function () {
       const s = needSession(context);
       const options = { party: c.party.slice(), seed: c.seed };
       if (c.solo) { options.solo = true; options.partners = c.partners.slice(); options.role2 = c.role2; }
+      else if (c.growth) options.growth = true;
       s.run = Rogue.newRun(options);
-      return { seed: s.run.seed, solo: s.run.solo };
+      return { seed: s.run.seed, solo: s.run.solo, growth: !!s.run.growth };
     },
     resume(_c, context) {
       const s = needSession(context), saved = SaveStore.loadRun();

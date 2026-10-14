@@ -387,8 +387,9 @@ test("亡命之王 AI：只在危险时下回防（有人冲进王的区或王�
 });
 
 test("敌人协助的射程照手册：大沙灵任意距离、牛队长 / 匕首狂徒近距；AI 只选打得到的", () => {
-  const { c, S, P, E } = field([{ id: "bigsand", lv: 3, zone: 2 }, { id: "captain_ox", lv: 3, zone: 2 }, { id: "thug_knife", lv: 3, zone: 2 }, { id: "thug_hammer", lv: 1, zone: 1 }]);
-  const k = P("kolt"), big = E("bigsand"), ox = E("captain_ox"), kn = E("thug_knife"), ham = E("thug_hammer");
+  // 打出失衡的用四足沙灵：沙灵和狂徒、警卫队都不敌对，三个都能来协助（狂徒和警卫队互相敌对，打出失衡的若是狂徒，牛队长就不帮它）
+  const { c, S, P, E } = field([{ id: "bigsand", lv: 3, zone: 2 }, { id: "captain_ox", lv: 3, zone: 2 }, { id: "thug_knife", lv: 3, zone: 2 }, { id: "sand_beast", lv: 1, zone: 1 }]);
+  const k = P("kolt"), big = E("bigsand"), ox = E("captain_ox"), kn = E("thug_knife"), ham = E("sand_beast");
   k.zone = 1; S.combatPhase = "enemy"; k.def = 1; tank(k);
   hit(c, ham, k, { atk: 1, baseBreak: 1 });
   const list = c.eligibleAssisters(ham, k);

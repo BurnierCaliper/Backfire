@@ -29,7 +29,10 @@ function propKindName(kind) {
     turret: "防卫自律炮台",
     ironwall: "铁壁",
     scrapwall: "废铁墙",
-    dome: "防护罩"
+    dome: "防护罩",
+    coral_branch: "沙珊瑚枝",
+    coral_tentacle: "沙珊瑚触须",
+    death_statue: "死亡雕像"
   })[kind] || kind;
 }
 
@@ -75,6 +78,18 @@ function makeProp(kind, zone, level) {
     base.faction = "player";
     base.layerType = "shield";
   }
+  if (kind === "coral_branch") {   // 沙珊瑚（desert.js）：金属骨骼，装甲生命
+    base.hp = base.maxHp = 30 + 4 * (lv - 1);
+    base.faction = "neutral";
+  }
+  if (kind === "coral_tentacle") {
+    base.hp = base.maxHp = 8 + 3 * (lv - 1);
+    base.faction = "neutral";
+  }
+  if (kind === "death_statue") {   // 被沙珊瑚缠住时死掉的单位，被珊瑚分泌的金属骨骼覆盖（desert.js）：掩体
+    base.hp = base.maxHp = 20 + 3 * (lv - 1);
+    base.faction = "neutral";
+  }
   if (kind === "scrapwall") {   // 亡命之王「回防命令」：耐久由命令掷骰决定
     base.hp = base.maxHp = 1;
     base.movable = false;
@@ -85,7 +100,8 @@ function makeProp(kind, zone, level) {
 
 const MECHANICAL_KITS = {
   guard_sword: true, guard_gun: true, boomcar: true, buoy: true,
-  dumpdrone: true, swarm: true, patrolboat: true, spreader: true, patrol_car: true
+  dumpdrone: true, swarm: true, patrolboat: true, spreader: true, patrol_car: true,
+  mine_guard: true, flint_sweeper: true, gas_collector: true, alarm_bot: true, meteor_miner: true
 };
 
 function isMechanicalUnit(u) {

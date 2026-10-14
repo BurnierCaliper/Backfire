@@ -134,6 +134,8 @@ const ROGUE_BATTLEFIELD = {
     { type: "field", what: "heal",     name: "治愈场地", weight: 1 },
     { type: "field", what: "highland", name: "高地",     weight: 2 },
     { type: "field", what: "collapseOn", name: "塌陷区域", weight: 2, regions: ["沙漠"] },
+    { type: "field", what: "coral",      name: "沙珊瑚台地", weight: 1, regions: ["沙漠"] },   // 自带高地；夜晚 / 沙暴伸出触须抓人（desert.js）
+    { type: "prop",  what: "coral_branch", name: "沙珊瑚枝", weight: 2, regions: ["沙漠"], faction: "neutral" },
     { type: "gap",   what: "bridge",   name: "不稳桥梁", weight: 2 },
     { type: "gap",   what: "wall",     name: "危墙",     weight: 2 }
   ]
@@ -233,6 +235,29 @@ const ROGUE_SOLO = {
   role2Every: 5,
   role2MaxSkill: 3
 };
+
+/* 长线养成模式（测试用，rogue.js · run.growth）：从 1 级一路养到高级，测专长、改装件、成长曲线。
+ * 和单局共用任务板、节点、工匠、客制化，不同的地方：
+ *   没有主线、期限和首领；敌人等级跟着队伍平均等级走（区域按这个等级落在哪一幕）
+ *   经验照跑团模式：升级所需经验不打折，击杀经验全队平分，打赢每场额外「最高等级 × 20 / 人数」
+ *   武器升级照跑团模式：要实物材料（商店常备）+ 工匠加工费
+ *   角色不会永久死亡：倒下的战后留 1 点生命；团灭只算任务失败
+ *   完成任务得到赫心融合体，在角色抽取机里抽角色：新角色入队（满员进候补），抽到已有的角色 +1 级
+ *   startParty  开局选几名角色            partyMax  同时上场几人（其余在候补，任务板前可以换）
+ *   fusionPerTask 每完成一个任务给几个赫心融合体   drawCost 抽一次要几个
+ *   recruitLevel  新抽到的角色从几级开始          maxLevel  抽到重复角色最多升到几级 */
+const ROGUE_GROWTH = {
+  startParty: 2,
+  partyMax: 4,
+  fusionPerTask: 1,
+  drawCost: 1,
+  recruitLevel: 1,
+  maxLevel: 20,
+  fusionItem: "heart_fusion"
+};
+if (typeof ITEM_CATALOG !== "undefined" && !ITEM_CATALOG.heart_fusion) {
+  ITEM_CATALOG.heart_fusion = { name: "赫心融合体", hint: "长线养成：在角色抽取机里抽一名角色（抽到已有的角色 +1 级）", goods: true };
+}
 
 /* 诊所（数值占位，按「一人一次改造平均约 3000 奎支」定）
  *   healPerHp   治疗：每恢复 1 点生命的价格（手册简易医疗包 600 奎支约治 8.5 点，约 70 / 点）
@@ -440,27 +465,32 @@ function blueprintSpec(id) {
 })();
 
 /* 升级时要做的选择（手册第三章「升级时你会得到什么」）。
- * 角色卡上 minLv 的技能（lv2、lv11、lv17 的「一项技能」、效果位技能）到级自动解锁，不在这里。
- *   attr      可分配的六维属性点；noRepeat：不能加在之前加过的同一项上（lv8）
+ * 角色卡上 minLv 的技能（lv2、lv9、lv17 的「一项技能」、效果位技能）到级自动解锁，不在这里。
+ *   attr      可分配的六维属性点；noRepeat：不能加在之前加过的同一项上（lv8）；lv19 那点可以重复
  *   role      职责技能二选一（lv5 副一/主二，lv10 主二/主三，lv15 主三/主四）
  *   prof      一个自选熟练项：新学一项，或把已有的一项升一级（最高三级）
+ *   feat      一项专长（feats.js），7 / 11 / 13 / 16 级
  *   note      系统还没做的奖励：先记在角色身上，等对应系统做好再兑现 */
 const ROGUE_LEVEL_REWARDS = {
   3:  [{ type: "prof" }],                      // 一个自选熟练项（已有的再选一次 = 升一级，最高三级）
   4:  [{ type: "attr" }],
   5:  [{ type: "role" }],
-  7:  [{ type: "prof" }],                      // 一个自选熟练项（已有的再选一次 = 升一级，最高三级）
+  7:  [{ type: "note", key: "feat", text: "一项专长" }],
   8:  [{ type: "attr", noRepeat: true }],
-  9:  [{ type: "note", key: "feat", text: "一项专长" }],
   10: [{ type: "role" }],
+  11: [{ type: "note", key: "feat", text: "一项专长" }],
   12: [{ type: "prof" }],                      // 一个自选熟练项（已有的再选一次 = 升一级，最高三级）
   13: [{ type: "note", key: "feat", text: "一项专长" }],
   14: [{ type: "note", key: "lv14", text: "自己回合内可用 1 行动点转化为 1 附赠动作" }],
   15: [{ type: "role" }],
   16: [{ type: "note", key: "feat", text: "一项专长" }],
-  18: [{ type: "prof" }],                      // 一个自选熟练项（已有的再选一次 = 升一级，最高三级）
-  19: [{ type: "note", key: "feat", text: "一项专长" }],
+  18: [{ type: "prof" }, { type: "prof" }],    // 两个自选熟练项
+  19: [{ type: "attr" }],                      // 这一点可以加在之前加过的同一项上
   20: [{ type: "note", key: "ultimate", text: "强力终极技能" }]
 };
+
+/* 专长在哪几级拿（rogue.js · settleOwedFeats 用来给旧存档补欠的专长） */
+const FEAT_LEVELS = Object.keys(ROGUE_LEVEL_REWARDS).map(Number)
+  .filter(L => ROGUE_LEVEL_REWARDS[L].some(r => r.type === "note" && r.key === "feat"));
 
 const ATTR_NAMES = { str: "力量", con: "体质", dex: "敏捷", wil: "意志", int: "智力", sta: "耐力" };

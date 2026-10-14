@@ -14,6 +14,11 @@ const ZONE_THREATS = {
     if (!r.glPending || !r.glZone) return null;
     return { zone: r.glZone, label: r.glReady ? "榴弹待发" : "榴弹标定", ready: !!r.glReady };
   },
+  ant_guard: (u) => {
+    const r = u.resources || {};
+    if (!r.shellPending || !r.shellZone) return null;
+    return { zone: r.shellZone, label: r.shellReady ? "大酸液弹待发" : "大酸液弹标定", ready: !!r.shellReady };
+  },
   ufo_body: (u) => {
     const r = u.resources || {};
     if (!r.boomReady) return null;
@@ -77,6 +82,7 @@ function enemyAssistSkillId(u) {
 /** 敌人现在能不能对我方做协助攻击：被挟持的亡命之王无法行动；哗变中的狂徒只敢打强盗头子 */
 function enemyMayAssist(u) {
   if (!u || u.isPlayer) return false;
+  if (u.dormant) return false;   // 休眠：不协助
   if (u.kit === "outlaw_king" && u.resources && u.resources.hostage) return false;
   if (/^thug_/.test(u.kit || "")) {
     const king = findKit("outlaw_king", state.units);
@@ -87,12 +93,17 @@ function enemyMayAssist(u) {
 
 /* 协助攻击的射程。自带移动的（冲到目标那一区再打）先走一格；无限距离的总能打到；
  * 其余按技能射程（ENEMY_SKILL_RANGE，没登记的用单位卡上的 range），隔着危墙 / 关着的门打不到。 */
-const ENEMY_ASSIST_RUSH = ["en_thug_hammer_assist", "en_wolf_assist", "en_chi_exec"];
-const ENEMY_ASSIST_ANYWHERE = ["en_patrol_assist", "ufo_assist"];
+const ENEMY_ASSIST_RUSH = ["en_thug_hammer_assist", "en_wolf_assist", "en_chi_exec", "en_overseer_assist", "en_gas_assist",
+  "en_fish_lead_assist", "en_fish_drive_assist", "en_fish_ambush_assist"];   // 沙鱼群起：冲到失衡的人那一区
+const ENEMY_ASSIST_ANYWHERE = ["en_patrol_assist", "ufo_assist", "en_alarm_assist"];
 function enemyAssistReach(u, t) {
   if (!u || !t) return false;
   const sid = enemyAssistSkillId(u);
   if (ENEMY_ASSIST_ANYWHERE.includes(sid)) return true;
+  // 矿场警戒自动机：协助打所有高能的敌人，场上有人高能才出手
+  if (sid === "en_alarm_assist") return alarmTargets(u).length > 0;
+  // 蚁型特殊戒备兵种：大酸液弹蓄力中时，协助就是对标定的区发射，不看目标在哪
+  if (sid === "en_ant_assist" && u.resources && u.resources.shellPending && Number(u.resources.shellZone) >= 1) return true;
   const from = Number(u.zone), to = Number(t.zone);
   const d = zoneDist(from, to, state.zoneMode);
   if (ENEMY_ASSIST_RUSH.includes(sid)) {
@@ -230,6 +241,62 @@ function enemySkillList(u) {
       { id: "en_patrol_assist", label: "协助攻击（无限距离谐波）" }
     ],
     dumpdrone: [{ id: "en_dump", label: "倾倒废液" }],
+    mine_guard: [
+      { id: "en_mine_guard", label: "酸液挥砍" },
+      { id: "en_mine_guard_assist", label: "协助攻击" }
+    ],
+    ant_guard: [
+      { id: "en_ant_spray", label: "酸液喷枪" },
+      { id: "en_ant_assist", label: "协助攻击" }
+    ],
+    mine_overseer: [
+      { id: "en_overseer", label: "火焰重锤（灼烧）" },
+      { id: "en_overseer_assist", label: "协助：冲近半伤" }
+    ],
+    flint_sweeper: [
+      { id: "en_flint", label: "发射火石（1d6 发）" },
+      { id: "en_flint_assist", label: "协助：爆炸火石" }
+    ],
+    alarm_bot: [
+      { id: "en_alarm_zap", label: "电涌（所有高能的敌人 3 段）" },
+      { id: "en_alarm_assist", label: "协助：所有高能的敌人 1×atk" }
+    ],
+    meteor_miner: [
+      { id: "en_miner_shot", label: "能量射线（倒流）" },
+      { id: "en_miner_assist", label: "协助：能量射线（倒流）" }
+    ],
+    sandfish_lead: [
+      { id: "en_fish_lead_hit", label: "撞击（白天 +2 击破）/ 撕咬（夜晚）" },
+      { id: "en_fish_lead_assist", label: "群起：撞击 / 撕咬" }
+    ],
+    sandfish_drive: [
+      { id: "en_fish_drive_tail", label: "甩尾（白天推开）/ 乱咬（夜晚）" },
+      { id: "en_fish_drive_assist", label: "群起：甩尾 / 乱咬" }
+    ],
+    sandfish_ambush: [
+      { id: "en_fish_ambush_bite", label: "腾咬（白天）/ 猛咬（夜晚）" },
+      { id: "en_fish_ambush_assist", label: "群起：腾咬 / 猛咬" }
+    ],
+    dust_bug: [],
+    tube_worm: [],
+    meteor_spider: [
+      { id: "en_spider_bite", label: "撕咬" },
+      { id: "en_spider_assist", label: "协助：撕咬（施加高能）" }
+    ],
+    meteor_centipede: [
+      { id: "en_centi_shot", label: "弦振射线（高能 + 衍蛛追打）" },
+      { id: "en_centi_assist", label: "协助：弦振射线（衍蛛追打翻倍）" }
+    ],
+    gas_collector: [
+      { id: "en_gas_ignite", label: "点燃燃气（同区火焰 + 变火场）" },
+      { id: "en_gas_spray", label: "喷火（三段）" },
+      { id: "en_gas_assist", label: "协助：冲近灼烧 + 喷火" }
+    ],
+    ant_hunter: [
+      { id: "en_hunter_shot", label: "灼热子弹（穿刺）" },
+      { id: "en_hunter_heat", label: "把天气变为酷暑" },
+      { id: "en_hunter_assist", label: "协助：狙击（穿刺 + 爆燃）" }
+    ],
     swarm: [{ id: "en_swarm", label: "撞击（自身死亡）" }],
     crow: [{ id: "en_crow", label: "声波" }],
     mecha_mg: [
@@ -357,6 +424,12 @@ function enemySkillList(u) {
     if (ready) list.unshift({ id: "en_gl_fire", label: "发射榴弹（" + u.resources.glZone + "区）" });
     else list.unshift({ id: "en_gl", label: "榴弹（选择区域）" });
   }
+  if (u.kit === "ant_guard") {
+    // 站在酸液地面上：从地面汲取酸，改用大酸液弹（先标定区域，下个敌人回合发射）；已标定的照常发射
+    const r = u.resources || {};
+    if (r.shellReady && r.shellZone) list.unshift({ id: "en_ant_shell_fire", label: "发射大酸液弹（" + r.shellZone + "区）" });
+    else if (!r.shellPending && onAcidGround(u)) list.unshift({ id: "en_ant_shell", label: "大酸液弹（选择区域）" });
+  }
   if (u.kit === "livesand") {
     if (u.resources && u.resources.giant) {
       list = [
@@ -424,6 +497,19 @@ function stepTowardZone(unit, destZone, opt) {
   return true;
 }
 
+/* 第一采矿场：酸液地面 */
+/** 站在酸液地面上（飞行单位不算） */
+function onAcidGround(u) {
+  const f = u && typeof state !== "undefined" && state.fields ? state.fields[u.zone] : null;
+  return !!(f && f.acid) && !u.flying;
+}
+/** 酸液地面不影响移动：离开不改花行动点 */
+const ACID_GROUND_WALKERS = { mine_guard: true, ant_guard: true };
+function acidGroundWalker(u) { return !!(u && ACID_GROUND_WALKERS[u.kit]); }
+/** 不吃酸液地面的伤害 */
+const ACID_GROUND_IMMUNE = { ant_guard: true };
+function acidGroundImmune(u) { return !!(u && ACID_GROUND_IMMUNE[u.kit]); }
+
 /** 相邻的另一个区。awayFrom 给了就挑离那个区最远的相邻区（一样远取编号小的）；
  *  不给就取编号最小的相邻区（直排：两区互换；三区 1、3 → 2，2 → 1，和以前一样） */
 function otherZone(zone, awayFrom) {
@@ -439,11 +525,22 @@ function otherZone(zone, awayFrom) {
   return ns.find(x => zoneDist(x, awayFrom) === far);
 }
 
+/* 敌人出手时（runEnemyAction 期间）ENEMY_ACTOR 是出手的敌人：下面这几个「我方」名单就换成「和它敌对的单位」
+ * （我方 + 敌对阵营的敌人，友军阵营不打我方）。这样所有敌人的技能（范围攻击、挑目标）都按阵营分敌我，不用一个个改 */
+let ENEMY_ACTOR = null;
+function actorFoes() {
+  const a = ENEMY_ACTOR;
+  if (!a || typeof hostileTo !== "function") return null;
+  return (state.units || []).filter(u => u && hostileTo(a, u) && !u.hidden && !u._removed && !u.fused && u.kit !== "ironwall");
+}
 function playersInZone(z) {
-  return state.units.filter(u => u.isPlayer && !u.hidden && Number(u.zone) === Number(z));
+  const f = actorFoes();
+  return (f || state.units.filter(u => u.isPlayer && !u.hidden)).filter(u => Number(u.zone) === Number(z));
 }
 
 function allPlayers() {
+  const f = actorFoes();
+  if (f) return f;
   return state.units.filter(u => u.isPlayer && !u.hidden);
 }
 
@@ -460,6 +557,23 @@ const ENEMY_SKILL_RANGE = {
   en_boom_fuse: "melee",
   en_buoy: "melee",
   en_dump: "ranged",
+  en_mine_guard: "melee",
+  en_mine_guard_assist: "melee",
+  en_ant_spray: "ranged",
+  en_ant_assist: "ranged",
+  en_overseer: "melee",
+  en_flint: "ranged",
+  en_flint_assist: "ranged",
+  en_gas_spray: "melee",
+  en_hunter_shot: "ranged",
+  en_miner_shot: "ranged",
+  en_spider_bite: "melee",
+  en_fish_lead_hit: "melee", en_fish_drive_tail: "melee", en_fish_ambush_bite: "melee",
+  en_spider_assist: "melee",
+  en_centi_shot: "ranged",
+  en_centi_assist: "ranged",
+  en_miner_assist: "ranged",
+  en_hunter_assist: "ranged",
   en_thug_knife: "melee",
   en_thug_hammer: "melee",
   en_crow: "melee",
@@ -579,7 +693,276 @@ function boatOverloadRoundStart(u, notes) {
   }
 }
 
+/* ===== 第二采矿场 ===== */
+/** 这一区是火场 */
+function zoneOnFire(z) {
+  const f = state.fields && state.fields[z];
+  return !!f && typeof fieldFireOn === "function" && fieldFireOn(f);
+}
+/** 燃气收集机能不能把这一区点成火场（不是火场、不是固有场地 / 深渊 / 被锁定） */
+function gasCanIgnite(z) {
+  if (zoneOnFire(z)) return false;
+  return typeof fieldChangeWhy === "function" ? !fieldChangeWhy(z, "fire") : true;
+}
+/** 燃气收集机：目标有灼烧时每段攻击回血（3% 血量上限 × 灼烧层数） */
+const GAS_LIFESTEAL = 0.03;
+/** 燃气收集机的喷火：近距离一人 3 段 0.5×atk 火，共 1 击破 */
+function gasSpray(a, t, aa) {
+  return aa(t, { element: "fire", mult: 0.5, hits: 3, baseBreak: 1, breakOnce: true, onConnect: { lifesteal: GAS_LIFESTEAL } });
+}
+/** 火石清扫机：站在火场里时，每一击都造成灼烧 */
+function flintOnConnect(a) {
+  return zoneOnFire(a.zone) ? { burn: 1 } : undefined;
+}
+/** 火石清扫机：回合开始先掷好下一次发射几发（1d6），还没打出去就留着。2 发以上是连击，名牌上预警 */
+function flintRollShots(u, notes) {
+  if (!u || u.dead || u.hidden) return;
+  u.resources = u.resources || {};
+  if (Number(u.resources.flintShots) >= 1) return;
+  u.resources.flintShots = 1 + Math.floor(Math.random() * 6);
+  if (u.resources.flintShots >= 2 && notes) notes.push(`${u.name} 装填了 ${u.resources.flintShots} 发火石：下次发射是连击。`);
+}
+/** 敌人名牌上的行动提示（红底白字的长方形）：这个敌人的回合将要做的特别行动。现在有：连击 */
+function enemyIntents(u) {
+  if (u && !u.isPlayer && u._linger && !u._removed) return ["待复活"];   // 微光下倒在场上的陨体衍蛛
+  if (!u || u.isPlayer || u.dead || u.hidden || u.stunned) return [];
+  const out = [];
+  if (u.kit === "flint_sweeper" && Number(u.resources && u.resources.flintShots) >= 2) out.push("连击");
+  if (u.enriched) out.push("富集");   // 富集变种（desert.js）：打倒掉材料，会逃跑
+  return out;
+}
+/** 蚁型特殊剿灭兵种：我方单位自己走进它所在的区时，用附赠行动退到相邻区（优先没有我方单位的区），并给走进来的人灼烧 1。
+ *  照季玛的图纸「稳妥的距离」：被推、被拉进来的不算（app.js · doMoveInner 调用） */
+function hunterAfterMove(mover, notes) {
+  if (!mover || mover.kind) return;
+  const z = Number(mover.zone);
+  (state.units || []).forEach(u => {
+    if (u.isPlayer || u.kit !== "ant_hunter" || u.dead || u.hidden || u.stunned || u.noMove || Number(u.zone) !== z || !hostileTo(u, mover)) return;
+    if ((Number(u.bonus) || 0) < 1) return;
+    const open = (zz) => {
+      const g = typeof getGap === "function" ? getGap(z, zz) : { type: "open" };
+      if (g.type === "wall" || (g.type === "door" && !g.open) || g.type === "void") return false;
+      return !(state.fields && state.fields[zz] && state.fields[zz].abyss);
+    };
+    const adj = (typeof zoneNeighbors === "function" ? zoneNeighbors(z) : []).map(Number).filter(open);
+    if (!adj.length) return;
+    const foesIn = (zz) => (state.units || []).some(e => hostileTo(u, e) && !e.dead && !e.hidden && Number(e.zone) === zz);
+    const dest = adj.find(x => !foesIn(x)) || adj[0];
+    u.bonus -= 1;
+    u.zone = dest;
+    notes.push(`${mover.name} 走进来，${u.name} 用附赠行动退到 ${dest} 区。`);
+    if (typeof grantBurn === "function") {
+      const before = Number(mover.statuses && mover.statuses.burn) || 0;
+      grantBurn(mover, 1, notes);
+      const after = Number(mover.statuses && mover.statuses.burn) || 0;
+      if (after > before) notes.push(`${mover.name} 灼烧 +1 → ${after} 层。`);
+    }
+  });
+}
+/** 蚁型特殊剿灭兵种：敌人回合开始时，天气不是酷暑而且能改，就花 1 行动点把天气变成酷暑（app.js · startEnemyPhase 调用） */
+function hunterHeatAtTurnStart(u, notes) {
+  if (!u || u.kit !== "ant_hunter" || u.dead || u.hidden || u.stunned) return;
+  if (state.weather === "heat" || (Number(u.ap) || 0) < 1) return;
+  if (typeof weatherChangeWhy === "function" && weatherChangeWhy("heat")) return;
+  if (typeof setWeather === "function" && !setWeather("heat", { by: u.id })) {
+    u.ap -= 1;
+    notes.push(`${u.name} 回合开始：用 1 行动点把天气变为酷暑。`);
+  }
+}
+
+/* ===== 阵营敌对 =====
+ * 异星生物和其他所有阵营的敌人互相视为敌人；盗匪和安保、警卫队互相视为敌人（会互相攻击、不互相协助）。
+ * 其余敌人阵营之间照旧是一伙的。 */
+const HOSTILE_FACTION = "异星生物";
+const HOSTILE_PAIRS = [["盗匪", "安保"], ["盗匪", "警卫队"], ["沙漠生物", "沙灵"]];
+function factionOf(u) {
+  if (!u) return null;
+  if (u.isPlayer) return "我方";
+  const i = typeof enemyInfo === "function" ? enemyInfo(u.kit) : null;
+  return (i && i.faction) || null;
+}
+/** 这个敌人和我方是同阵营（跑团战斗模板可以设「我方与某阵营同阵营」，state.playerAllies） */
+function playerAllied(u) {
+  if (!u || u.isPlayer) return false;
+  const g = (typeof state !== "undefined" && state.playerAllies) || [];
+  return g.length > 0 && g.includes(factionOf(u));
+}
+/** a 和 b 是不是敌对的 */
+function hostileTo(a, b) {
+  if (!a || !b || a === b) return false;
+  // 中立生物（尘虫、管虫）：谁都不当它是敌人；要打它得专门去打（玩家手动、沙鱼捕食）
+  if (typeof isNeutralCreature === "function" && (isNeutralCreature(a) || isNeutralCreature(b))) return false;
+  if (!!a.isPlayer !== !!b.isPlayer) return !playerAllied(a.isPlayer ? b : a);
+  if (a.isPlayer) return false;
+  const fa = factionOf(a), fb = factionOf(b);
+  if (!fa || !fb || fa === fb) return false;
+  if (fa === HOSTILE_FACTION || fb === HOSTILE_FACTION) return true;
+  return HOSTILE_PAIRS.some(([x, y]) => (fa === x && fb === y) || (fa === y && fb === x));
+}
+/** 场上和 a 敌对、还活着的单位 */
+function hostilesOf(a) {
+  return (state.units || []).filter(u => u && hostileTo(a, u) && !u.dead && !u.hidden && !u._removed && !u.fused && u.kit !== "ironwall");
+}
+
+/* ===== 第三采矿场 ===== */
+/** 身上有高能（状态或高能值） */
+function hasHigh(u) { return !!u && ((u.statuses && u.statuses.high) || (Number(u.highEnergy) || 0) > 0); }
+/** 矿场警戒自动机施加高能：目标已经高能就改成 1 点能量伤害 */
+function alarmApplyHigh(a, t, notes) {
+  if (!t || t.dead) return;
+  if (hasHigh(t)) {
+    notes.push(`${t.name} 已经高能：改为受到 1 点能量伤害。`);
+    const out = dealTo(a, t, { atk: 0, mult: 0, flat: 1, element: "energy", baseBreak: 0, flags: { action: false, blockResolved: true, block: "none", atkFx: [] } });
+    if (out && out.extra) notes.push(...out.extra);
+    return;
+  }
+  t.statuses = t.statuses || {};
+  t.statuses.high = true;
+  if (typeof popStatus === "function") popStatus(t, "high");
+  notes.push(`${t.name} 被施加高能。`);
+}
+/** 矿场警戒自动机要打的：所有身上有高能、还站着的敌对单位（不限距离） */
+function alarmTargets(a) {
+  return hostilesOf(a).filter(u => hasHigh(u) && !(typeof isDownProtected === "function" && isDownProtected(u)));
+}
+/** 休眠（通用词条）：开场休眠的敌人不行动、不协助，直到被叫醒。叫醒时 culprit 是吵醒它的单位（可能没有） */
+function wakeDormant(u, culprit, notes, why) {
+  if (!u || !u.dormant || u.dead) return;
+  u.dormant = false;
+  notes.push(`${u.name} ${why || "被惊动"}，解除休眠。`);
+  if (u.kit === "alarm_bot" && culprit && hostileTo(u, culprit)) alarmApplyHigh(u, culprit, notes);
+}
+/** 我方单位进入某区（自己走、被推都算）：叫醒那一区休眠的敌人（app.js · doMoveInner / displaceTo 调用） */
+function dormantAfterMove(mover, notes) {
+  if (!mover || mover.kind) return;
+  (state.units || []).forEach(u => {
+    if (u.dormant && !u.isPlayer && !u.dead && !u.hidden && hostileTo(u, mover) && Number(u.zone) === Number(mover.zone)) wakeDormant(u, mover, notes, `${mover.name} 进入它所在的区`);
+  });
+}
+/** 敌人受到伤害：同阵营（含可混编的阵营，不含异星生物）休眠的单位都被叫醒，自己挨打也醒（app.js · dealTo 调用） */
+function dormantOnAllyHurt(target, attacker) {
+  const notes = [];
+  if (!target || target.isPlayer) return notes;
+  const info = (k) => (typeof enemyInfo === "function" ? enemyInfo(k) : null) || {};
+  const tf = info(target.kit).faction;
+  (state.units || []).forEach(u => {
+    if (!u.dormant || u.isPlayer || u.dead || u.hidden) return;
+    const f = info(u.kit).faction;
+    const same = u === target || (tf && f && (typeof alliesOf === "function" ? alliesOf(f) : [f]).includes(tf));
+    if (!same) return;
+    wakeDormant(u, attacker && hostileTo(u, attacker) ? attacker : null, notes, u === target ? "受到攻击" : `${target.name} 受到攻击`);
+  });
+  return notes;
+}
+/** 陨石开采机被我方打死：给杀它的人施加高能，并把自己的高能值转过去（不再自己高能自爆）。app.js · settleEnemyKill 调用 */
+function minerDeathTransfer(target, killer, notes) {
+  if (!target || target.kit !== "meteor_miner" || !killer || !killer.isPlayer || killer.dead || target._minerDone) return;
+  target._minerDone = true;
+  const he = Math.max(0, Number(target.highEnergy) || 0);
+  target.highEnergy = 0;
+  if (target.statuses) target.statuses.high = false;
+  killer.statuses = killer.statuses || {};
+  const fresh = !killer.statuses.high;
+  killer.statuses.high = true;
+  if (fresh && typeof popStatus === "function") popStatus(killer, "high");
+  killer.highEnergy = (Number(killer.highEnergy) || 0) + he;
+  notes.push(`${target.name} 坠毁：${killer.name} 被施加高能${he ? `，接过 ${he} 点高能值 → ${killer.highEnergy}` : ""}。`);
+  if (typeof checkHighBoom === "function") checkHighBoom(killer);
+}
+
+/* ===== 第三采矿场 · 异星生物 ===== */
+const livingSpiders = () => (state.units || []).filter(u => u.kit === "meteor_spider" && !u.dead && !u.hidden && !u._removed);
+/** 陨体弦蚣打中之后：场上每只活着的陨体衍蛛立刻免费对同一个人打 1 点能量（times 次） */
+function spiderFollowUp(t, times, lines) {
+  const spiders = livingSpiders();
+  if (!t || t.dead || !spiders.length || times <= 0) return;
+  lines.push(`${spiders.length} 只陨体衍蛛跟着扑向 ${t.name}（各 ${times} 次）。`);
+  spiders.forEach(s => {
+    for (let i = 0; i < times; i++) {
+      const out = dealTo(s, t, { atk: 0, mult: 0, flat: 1, element: "energy", baseBreak: 0, flags: { action: true, anyRange: true, blockResolved: true, block: "none", atkFx: [] } });
+      if (out && out.extra) lines.push(...out.extra);
+    }
+  });
+}
+/** 异星生物死亡（app.js · sweepDeadEnemies 在清场前调用）。返回 true = 不离场（陨体衍蛛留在场上等复活）
+ *  陨体衍蛛：25% 把天气变成微光；微光下还有活着的衍蛛 → 留在场上，下回合结束时以 50% 血量、1 架势复活。
+ *  陨体弦蚣：微光下死亡分裂成 1–3 只陨体衍蛛。 */
+function alienOnDeath(u, notes) {
+  if (!u) return false;
+  if (u.kit === "meteor_centipede" && !u._splitDone) {
+    u._splitDone = true;
+    if (state.weather === "glow") {
+      const n = 1 + Math.floor(Math.random() * 3);
+      const p = enemyPresets().find(x => x.id === "meteor_spider");
+      for (let i = 0; i < n; i++) {
+        const s = typeof applyEnemyIV === "function" ? applyEnemyIV(p.build(u.level, state.partySize)) : p.build(u.level, state.partySize);
+        s.zone = u.zone;
+        state.units.push(s);
+      }
+      notes.push(`微光下，${u.name} 的尸体分裂成 ${n} 只陨体衍蛛。`);
+    }
+    return false;
+  }
+  if (u.kit !== "meteor_spider") return false;
+  u.dead = true;
+  if (!u._deathRolled) {
+    u._deathRolled = true;
+    if (Math.random() < 0.25 && state.weather !== "glow") {
+      const err = typeof setWeather === "function" ? setWeather("glow", { by: u.id }) : "无法改变天气";
+      notes.push(err ? `${u.name} 死去时想把天气变成微光：${err}` : `${u.name} 死去，碎裂的陨体让天气变成了微光。`);
+    }
+    if (state.weather === "glow" && livingSpiders().length) {
+      u._linger = { reviveTurn: (Number(state.turnNo) || 0) + 1 };
+      notes.push(`微光下，${u.name} 倒在场上没有离开：下回合结束时会复活（场上的陨体衍蛛全部死亡就不会再复活）。`);
+    }
+  }
+  return !!u._linger;
+}
+/** 回合结束（app.js · turnEnd）：留在场上的陨体衍蛛到点复活；场上已经没有活着的衍蛛就全部离场 */
+function spiderRoundEnd(notes) {
+  const lingering = (state.units || []).filter(u => u.kit === "meteor_spider" && u._linger && !u._removed);
+  if (!lingering.length) return;
+  if (!livingSpiders().length) {
+    notes.push("场上的陨体衍蛛已经全部死亡，倒下的衍蛛不会再复活。");
+    lingering.forEach(u => { u._linger = null; if (typeof removeEnemyFromField === "function") removeEnemyFromField(u, notes); });
+    return;
+  }
+  lingering.filter(u => (Number(state.turnNo) || 0) >= u._linger.reviveTurn).forEach(u => {
+    u._linger = null;
+    u._deathRolled = false;
+    u._revived = true;   // 复活后再被打死：不再给经验、掉落和击杀分（app.js · settleEnemyKill）
+    u._xpGiven = false;  // 让再次死亡照常判死
+    u.dead = false;
+    u.stunned = false;
+    u.statuses = {};
+    (u.layers || []).forEach(l => { l.current = Math.max(1, Math.round((Number(l.max) || 0) * 0.5)); });
+    u.def = Math.min(1, Number(u.defMax) || 1);
+    notes.push(`${u.name} 复活了（50% 血量，1 架势）。`);
+  });
+}
+
+/** 蚁型特殊戒备兵种：对标定的区发射大酸液弹。区内随机一人 2×atk 酸 2 击破（单体），同区其他人 等级+1d6 酸（范围） */
+function antFireShell(a, aa, lines) {
+  const r = a.resources = a.resources || {};
+  const zone = Number(r.shellZone);
+  r.shellZone = 0; r.shellPending = false; r.shellReady = false;
+  const victims = standingPlayersIn(zone);
+  if (!victims.length) { lines.push(`大酸液弹落在 ${zone} 区，那里没有人。`); return; }
+  const main = victims[Math.floor(Math.random() * victims.length)];
+  lines.push(`${a.name} 的大酸液弹在 ${zone} 区炸开，正中 ${main.name}。`);
+  aa(main, { element: "acid", mult: 2, baseBreak: 2 });
+  victims.filter(u => u.id !== main.id).forEach(u => {
+    aa(u, { element: "acid", mult: 0, flat: Number(a.level) || 1, diceN: 1, diceS: 6, baseBreak: 0, flags: { action: true, aoe: true } });
+  });
+}
+
 function runEnemyAction(id, a, t, hitOne, lines, needT) {
+  const prev = ENEMY_ACTOR;
+  ENEMY_ACTOR = a && !a.isPlayer ? a : null;
+  try { return runEnemyActionInner(id, a, t, hitOne, lines, needT); } finally { ENEMY_ACTOR = prev; }
+}
+function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
+  if (typeof desertEnemyAction === "function" && desertEnemyAction(id, a, t, hitOne, lines, needT)) return true;   // 沙鱼（desert.js）
   const atk = effectiveAtk(a, state.units);
   const sg = a.suggest || {};
   const diceN = extraDiceByLevel(a.level);
@@ -738,6 +1121,168 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
     aa(t, { element: "acid", mult: 1, diceN: 1, diceS: (typeof leveledSides === "function" ? leveledSides(a.level, 4) : 4), baseBreak: 0, onConnect: { status: "corr" } });
     return true;
   }
+  if (id === "en_mine_guard" || id === "en_mine_guard_assist") {
+    if (!needT()) return true;
+    // 目标身上有腐蚀、或自己站在酸液地面上：打中后同区其他敌对单位再吃 0.5×atk 酸（不打同阵营）
+    const splash = !!(t.statuses && t.statuses.corr) || onAcidGround(a);
+    if (id === "en_mine_guard") stepTowardZone(a, t.zone);
+    aa(t, {
+      element: "acid",
+      mult: id === "en_mine_guard_assist" ? 0 : 1,
+      flat: id === "en_mine_guard_assist" ? 3 : (sg.flat || 0),
+      diceN: baseDice[0] || 1,
+      diceS: baseDice[1] || 4,
+      baseBreak: 1,
+      onConnect: splash ? { splash: { mult: 0.5, element: "acid" } } : undefined
+    });
+    return true;
+  }
+  if (id === "en_ant_spray") {
+    if (!needT()) return true;
+    aa(t, { element: "acid", mult: 1, diceN: 1, diceS: 6, baseBreak: 1, onConnect: { status: "corr" } });
+    return true;
+  }
+  if (id === "en_ant_assist") {
+    // 大酸液弹已经标定（蓄力中，不管到没到发射回合）：协助时立刻对标定的区发射；否则远距 1×atk 酸
+    const r = a.resources || {};
+    if (r.shellPending && Number(r.shellZone) >= 1) { antFireShell(a, aa, lines); return true; }
+    if (!needT()) return true;
+    aa(t, { element: "acid", mult: 1, baseBreak: 1 });
+    return true;
+  }
+  if (id === "en_ant_shell") {
+    if (!onAcidGround(a)) { lines.push(`${a.name} 不在酸液地面上，汲取不到酸。`); return true; }
+    const fl = state.skillFlow;
+    const zone = Number((fl && fl.picks && fl.picks.dest) || t && t.zone);
+    if (!(zone >= 1)) { lines.push("大酸液弹需要先选择落点区域。"); return true; }
+    a.resources = a.resources || {};
+    a.resources.shellZone = zone;
+    a.resources.shellPending = true;
+    a.resources.shellReady = false;
+    lines.push(`${a.name} 从酸液地面汲取酸，把大酸液弹标定在 ${zone} 区。下个敌人回合发射。`);
+    return true;
+  }
+  if (id === "en_ant_shell_fire") {
+    const r = a.resources || {};
+    if (!(Number(r.shellZone) >= 1) || !r.shellReady) { lines.push("大酸液弹尚未就绪。先标定区域，等到下一个敌人回合再发射。"); return true; }
+    antFireShell(a, aa, lines);
+    return true;
+  }
+
+  if (id === "en_alarm_zap") {
+    // 所有高能的敌人：3 段 0.3×atk + 1d4 能量，共 1 击破（不限距离）
+    const list = alarmTargets(a);
+    if (!list.length) { lines.push("场上没有高能的敌人。"); return true; }
+    list.forEach(u => aa(u, { element: "energy", mult: 0.3, diceN: 1, diceS: 4, hits: 3, baseBreak: 1, breakOnce: true, flags: { action: true, anyRange: true } }));
+    return true;
+  }
+  if (id === "en_alarm_assist") {
+    const list = alarmTargets(a);
+    if (!list.length) { lines.push("场上没有高能的敌人。"); return true; }
+    list.forEach(u => aa(u, { element: "energy", mult: 1, baseBreak: 1, flags: { action: true, anyRange: true } }));
+    return true;
+  }
+  if (id === "en_miner_shot" || id === "en_miner_assist") {
+    if (!needT()) return true;
+    aa(t, { element: "energy", mult: 1, baseBreak: 1, flags: { action: true, atkFx: ["backflow"] } });
+    return true;
+  }
+  if (id === "en_spider_bite" || id === "en_spider_assist") {
+    if (!needT()) return true;
+    if (id === "en_spider_bite") stepTowardZone(a, t.zone);
+    aa(t, { element: "energy", mult: 1, baseBreak: 1, onConnect: id === "en_spider_assist" ? { status: "high" } : undefined });
+    return true;
+  }
+  if (id === "en_centi_shot" || id === "en_centi_assist") {
+    if (!needT()) return true;
+    const out = aa(t, { element: "energy", mult: 1, baseBreak: 1, onConnect: { status: "high" } });
+    // 打出去了（没被射程 / 危墙挡下）才让衍蛛追打；被格挡的照样追打（追打是另外的攻击）
+    if (enemyShotWentOut(out)) spiderFollowUp(t, id === "en_centi_assist" ? 2 : 1, lines);
+    return true;
+  }
+  if (id === "en_overseer") {
+    if (!needT()) return true;
+    stepTowardZone(a, t.zone);
+    aa(t, { element: "fire", mult: 1, diceN: 1, diceS: 6, baseBreak: 2, onConnect: { burn: 1 } });
+    return true;
+  }
+  if (id === "en_overseer_assist") {
+    // 同狂徒（锤）的协助：冲到目标那一区，atk/2，1 击破（改成火）
+    if (!needT()) return true;
+    stepTowardZone(a, t.zone, { free: true });
+    aa(t, { element: "fire", mult: 0.5, baseBreak: 1 });
+    return true;
+  }
+  if (id === "en_flint") {
+    if (!needT()) return true;
+    // 连击：1d6 发火石（回合开始时已经掷好，名牌上有「连击」预警），每发单独结算、单独格挡：0.5×atk + 1d4 火，只有第一发 1 击破。
+    // 没被嘲讽就按顺序轮流分给远距离、打得到的不同的人（先打选定的目标）
+    a.resources = a.resources || {};
+    const shots = Number(a.resources.flintShots) >= 1 ? Number(a.resources.flintShots) : 1 + Math.floor(Math.random() * 6);
+    a.resources.flintShots = null;
+    const forced = !!(a.tauntTo || a.lockdownBy || (typeof touDuelVictim === "function" && touDuelVictim(a)));
+    const others = forced ? [] : allPlayers().filter(u => u !== t && !u.dead && !(typeof isDownProtected === "function" && isDownProtected(u)) &&
+      zoneDist(a.zone, u.zone, state.zoneMode) === 1 && !(typeof lineBlocked === "function" && lineBlocked(a.zone, u.zone)));
+    const pool = [t].concat(others);
+    lines.push(`${a.name} ${shots >= 2 ? "连击：" : ""}发射 ${shots} 发火石。`);
+    for (let i = 0; i < shots; i++) {
+      const u = pool[i % pool.length];
+      aa(u, { element: "fire", mult: 0.5, diceN: 1, diceS: 4, baseBreak: i === 0 ? 1 : 0, onConnect: flintOnConnect(a) });
+    }
+    return true;
+  }
+  if (id === "en_flint_assist") {
+    if (!needT()) return true;
+    aa(t, { element: "fire", mult: 1.5, baseBreak: 1, flags: { action: true, atkFx: ["combust"] }, onConnect: flintOnConnect(a) });
+    return true;
+  }
+  if (id === "en_gas_ignite") {
+    const z = Number(a.zone);
+    if (zoneOnFire(z)) { lines.push(`${z} 区已经是火场。`); return true; }
+    if (!gasCanIgnite(z)) { lines.push(`${a.name} 点不着 ${z} 区：${fieldChangeWhy(z, "fire")}`); return true; }
+    standingPlayersIn(z).forEach(u => {
+      aa(u, { element: "fire", mult: 0.5, baseBreak: 0, flags: { action: true, aoe: true }, onConnect: { lifesteal: GAS_LIFESTEAL } });
+    });
+    const err = setZoneField(z, "fire", { by: a.id });
+    lines.push(err || `${a.name} 点燃收集的燃气：${z} 区变为火场。`);
+    return true;
+  }
+  if (id === "en_gas_spray") {
+    if (!needT()) return true;
+    gasSpray(a, t, aa);
+    return true;
+  }
+  if (id === "en_gas_assist") {
+    // 冲到目标那一区，先给目标灼烧 1，再喷火
+    if (!needT()) return true;
+    stepTowardZone(a, t.zone, { free: true });
+    if (typeof grantBurn === "function") {
+      grantBurn(t, 1, lines);
+      lines.push(`${t.name} 灼烧 → ${(t.statuses && t.statuses.burn) || 0} 层。`);
+    }
+    gasSpray(a, t, aa);
+    return true;
+  }
+  if (id === "en_hunter_shot") {
+    if (!needT()) return true;
+    aa(t, { element: "fire", mult: 1, diceN: 1, diceS: 8, baseBreak: 1, flags: { action: true, pierce: true } });
+    return true;
+  }
+  if (id === "en_hunter_assist") {
+    // 狙击：1×atk + 目标血量上限 10% 的火伤（同一击里，一起吃穿刺 / 爆燃 / 克制），打坦克更疼
+    if (!needT()) return true;
+    const maxHp = (t.layers || []).reduce((sum, l) => sum + (Number(l.max) || 0), 0);
+    const pct = Math.round(maxHp * 0.1);
+    aa(t, { element: "fire", mult: 1, flat: pct, baseBreak: 1, flags: { action: true, pierce: true, atkFx: ["combust"] } });
+    return true;
+  }
+  if (id === "en_hunter_heat") {
+    const why = state.weather === "heat" ? "天气已经是酷暑。" : (typeof weatherChangeWhy === "function" ? weatherChangeWhy("heat") : null);
+    if (why) { lines.push(why); return true; }
+    setWeather("heat", { by: a.id });
+    lines.push(`${a.name} 把天气变为酷暑。`);
+    return true;
+  }
   if (id === "en_swarm") {
     if (!needT()) return true;
     stepTowardZone(a, t.zone);
@@ -793,7 +1338,7 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
       lines.push("榴弹尚未就绪。先标定区域，等到下一个敌人回合再发射。");
       return true;
     }
-    const victims = fieldUnits().filter(u => !u.dead && !u.hidden && Number(u.zone) === zone && u.id !== a.id && !!u.isPlayer);
+    const victims = fieldUnits().filter(u => !u.dead && !u.hidden && Number(u.zone) === zone && u.id !== a.id && hostileTo(a, u));
     if (!victims.length) lines.push(`${zone} 区没有玩家单位。`);
     victims.forEach(u => {
       aa(u, { element: "fire", mult: 1, diceN: 1, diceS: 4, baseBreak: 2, flags: { action: true, aoe: true } });

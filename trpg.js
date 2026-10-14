@@ -32,7 +32,7 @@ function trpgBuy(key, qty, free) {
   const row = trpgShopRow(key);
   qty = Math.max(1, Math.floor(Number(qty) || 1));
   if (!row) return ["没有这件商品。"];
-  const cost = row.price * qty;
+  const cost = Math.round(row.price * qty * (typeof featHaggleMul === "function" ? featHaggleMul(trpgHeroes(), 1) : 1));   // 巧手匠人：八折
   if (!free && (Number(state.kuizhi) || 0) < cost) return [`奎支不够：${trpgShopName(row)} ×${qty} 要 ${cost}，手里只有 ${Number(state.kuizhi) || 0}。`];
   if (!free) state.kuizhi = (Number(state.kuizhi) || 0) - cost;
   if (row.give.water) setLedgerWater(ledgerWater() + row.give.water * qty);
@@ -131,7 +131,7 @@ function trpgSpendAttr(kit, attr) {
   u.attrs = Object.assign({}, u.attrs || {});
   // 手册：8 级的那一点不能加在曾经加过的同一项上
   u.attrPicks = u.attrPicks || [];
-  if (u.attrPicks.length >= 1 && u.attrPicks.indexOf(attr) >= 0) {
+  if (u.attrPicks.length === 1 && u.attrPicks.indexOf(attr) >= 0) {   // 19 级那点（第三点）可以重复
     return ["8 级的属性点不能加在曾经加过的同一项上。"];
   }
   u.attrs[attr] = (Number(u.attrs[attr]) || 0) + 1;
@@ -141,6 +141,28 @@ function trpgSpendAttr(kit, attr) {
   ledgerCapture();
   const nm = typeof ATTR_NAMES !== "undefined" ? ATTR_NAMES[attr] : attr;
   return [`${u.name} ${nm} +1（现在 ${u.attrs[attr]}）。`];
+}
+
+/* ---------- 专长（feats.js）：7 / 11 / 13 / 16 级各一项，主持人在队伍页分配 ----------
+ * fullId：选「兼修」时一起选要升成完整版的涉猎专长。多面手 / 万事通的熟练项照旧由主持人记在角色卡上 */
+function trpgPickFeat(kit, id, fullId) {
+  const u = trpgHeroes().find(h => h.kit === kit);
+  if (!u) return ["没有这个角色。"];
+  if (!(Number(u.featPoints) > 0)) return [`${u.name} 没有可以分配的专长。`];
+  if (typeof featChoicesFor !== "function" || featChoicesFor(u, u.level).indexOf(id) < 0) return ["这项专长现在不能选。"];
+  const f = FEATS[id];
+  if (id === "dualclass" && featFullOptions(u).indexOf(fullId) < 0) return ["兼修要选一张专长①–③的职责涉猎专长。"];
+  u.feats = (u.feats || []).concat(id);
+  if (id === "dualclass") u.featFull = (u.featFull || []).concat(fullId);
+  u.featPoints -= 1;
+  if (typeof applyLevelStats === "function") applyLevelStats(u);
+  ledgerCapture();
+  const out = [`${u.name} 获得专长：${featLabel(id)}。`];
+  if (id === "dualclass") out.push(`兼修：「${FEATS[fullId].name}」改成原职责技能的完整版。`);
+  if (id === "versatile") out.push("多面手：三项熟练项各升一级（主持人记在角色卡上）。");
+  if (id === "polymath") out.push("万事通：选一项熟练项升到三级（主持人记在角色卡上）。");
+  if (f.explore) out.push("探索专长：检定、商店、休息时由主持人照卡面结算。");
+  return out;
 }
 
 /* ---------- 武器升级（手册：材料 + 4 级以上找工匠付费） ---------- */

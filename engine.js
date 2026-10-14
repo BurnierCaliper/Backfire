@@ -855,10 +855,17 @@ function resolveAttack(ctx) {
       hAdd(`弱点特效（${kindNow === "adv" ? (etchAdv && matchupKind(cMod) !== "adv" ? "蚀刻视为克制" : "克制") : "非克制"}）：${pctTxt(w)}`);
     }
 
-    if (ctx.dist === 1 && ctx.atkRange !== "melee") {
+    if (ctx.dist >= 1 && ctx.atkRange !== "melee") {   // 隔区的远程攻击（三区模式隔两区的也算）
       if (ctx.highA && !ctx.highT) { pct += 0.25; hAdd("高地打低地远程：+25%。"); }
-      if (!ctx.highA && ctx.highT) { pct -= 0.25; hAdd("低地打高地远程：−25%。"); }
+      const pointBlank = typeof featHas === "function" && featHas(ctx.attacker, "pointblank");   // 抵近射击（feats.js）
+      if (!ctx.highA && ctx.highT && !pointBlank) { pct -= 0.25; hAdd("低地打高地远程：−25%。"); }
+      if (!ctx.highA && ctx.highT && pointBlank) hAdd("低地打高地远程：抵近射击，不受 −25%。");
     }
+    // 无可阻挡（feats.js）：这一击无视目标的百分比减伤（血量层照常要打）
+    const noDr = !!flags.unstoppable;
+    if (noDr) hAdd("无可阻挡：无视目标的百分比减伤。");
+    // 尘虫摊平（desert.js）：受到的伤害 −50%
+    if (t && t.resources && t.resources.flattened && !noDr) { pct -= (typeof DESERT !== "undefined" ? DESERT.flattenCut : 0.5); hAdd("摊平：受到伤害 −50%。"); }
 
     if (interfDelta) {
       pct += interfDelta;
@@ -947,15 +954,15 @@ function resolveAttack(ctx) {
     // 相位波谷、减伤率、自保、过度自信、全队集结的坦克减伤、冰冻 +50%
     // 波谷 −50% 伤害；恶劣环境 / 末日翻倍成 −100%
     if (weather === "phase" && Number(ctx.phaseStep) === 0) { pct -= 0.5 * envX; wSum -= 0.5 * envX; hAdd(`相位波谷：伤害 −${50 * envX}%。`); }
-    if (flags.dr50) { pct -= 0.5; hAdd("目标减伤 +50%：−50%。"); }
-    if (flags.dr25) { pct -= 0.25; hAdd("自保模式：受伤 −25%。"); }
-    if (flags.prideReduce) {
+    if (flags.dr50 && !noDr) { pct -= 0.5; hAdd("目标减伤 +50%：−50%。"); }
+    if (flags.dr25 && !noDr) { pct -= 0.25; hAdd("自保模式：受伤 −25%。"); }
+    if (flags.prideReduce && !noDr) {
       const pr = typeof flags.prideReduce === "number" ? flags.prideReduce : 0.25;
       pct -= pr; hAdd(`过度自信：血量不低于进入战斗时的上限，受伤 −${Math.round(pr * 100)}%。`);
     }
     // 集结持续到自己失衡或濒死
     if (t.resources && t.resources.rallyDr && (t.stunned || t.dying)) delete t.resources.rallyDr;
-    if (t.resources && t.resources.rallyDr) { pct -= 0.15; hAdd("全队集结（坦克）：全属性减伤 +15%：−15%。"); }
+    if (t.resources && t.resources.rallyDr && !noDr) { pct -= 0.15; hAdd("全队集结（坦克）：全属性减伤 +15%：−15%。"); }
     if (h === 0 && t.instant && t.instant.iceNext && flags.action !== false) {
       pct += 0.5;
       hAdd("冰冻（冰属性击破失衡）：本动作第一击伤害 +50%。");
@@ -970,7 +977,7 @@ function resolveAttack(ctx) {
     let mul = 1;
     if (flags.doubleDeal) { mul *= 2; hAdd("造成伤害翻倍。"); }
     if (flags.doubleTake) { mul *= 2; hAdd("目标受伤翻倍。"); }
-    if (flags.holyShield) { mul *= 0.5; hAdd("圣盾：本次伤害减半。"); }
+    if (flags.holyShield && !noDr) { mul *= 0.5; hAdd("圣盾：本次伤害减半。"); }
     // 事故幸存+：拉斯缪尔不稳态下受到的伤害 ×3（不再倒地 / 死亡）
     if (t.kit === "ras" && t.resources && t.resources.unstable && typeof passivePlus === "function" && passivePlus(t, 2)) {
       mul *= 3; hAdd("事故幸存+：不稳态受伤 ×3。");
@@ -1567,6 +1574,26 @@ function enemyPresets() {
       if (lv >= 30) extraFlat = 20;
       return unitOf(this.name, lv, [{ type: "armor", hp: scaleHp(armor, p) }], def, atk, { kit: "guard_sword", range: "melee", dice, flat: extraFlat, element: "electric" });
     }},
+    // 第一采矿场：数值同机器人看守（剑），装甲的一半换成护盾（护盾在外）；攻击改成酸
+    { id: "mine_guard", name: "矿场看守机器人", build(lv, p) {
+      const extra = lv - 1;
+      const armor = 14 + extra * 5;
+      const shield = Math.round(armor / 2);
+      const def = 3 + Math.floor(lv / 5);
+      const atk = 4 + Math.floor(lv / 2);
+      let dice = [1, 4], extraFlat = 0;
+      if (lv >= 4) dice = [1, 6];
+      if (lv >= 8) dice = [1, 8];
+      if (lv >= 12) dice = [1, 10];
+      if (lv >= 16) dice = [1, 12];
+      if (lv >= 20) dice = [1, 20];
+      if (lv >= 25) extraFlat = 10;
+      if (lv >= 30) extraFlat = 20;
+      return unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(shield, p) },
+        { type: "armor", hp: scaleHp(armor - shield, p) }
+      ], def, atk, { kit: "mine_guard", range: "melee", dice, flat: extraFlat, element: "acid" });
+    }},
     { id: "guard_gun", name: "机器人看守（枪）", build(lv, p) {
       const armor = 12 + (lv - 1) * 4;
       const atk = 5 + (lv - 1);
@@ -1652,6 +1679,107 @@ function enemyPresets() {
         { type: "shield", hp: scaleHp(12 + (lv - 1) * 5 + milestone(lv, 2) * 5, p) },
         { type: "flesh", hp: scaleHp(14 + (lv - 1) * 2, p) }
       ], 4, 7 + milestone(lv, 2) + milestone(lv, 5), { kit: "captain_lizard", range: "ranged", dice: [1, 6], element: "acid", baseBreak: 2 });
+    }},
+    // 第一采矿场精英（暂定数值，按狼队长的总血量 / 架势 / atk 拆成护盾、装甲、肉体三层）
+    { id: "ant_guard", name: "蚁型特殊戒备兵种", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(10 + (lv - 1) * 4, p) },
+        { type: "armor", hp: scaleHp(10 + (lv - 1) * 3, p) },
+        { type: "flesh", hp: scaleHp(15 + (lv - 1) * 4, p) }
+      ], 4 + milestone(lv, 5), 8 + milestone(lv, 2) + milestone(lv, 5) * 2, { kit: "ant_guard", range: "ranged", dice: [1, 6], element: "acid" });
+    }},
+    // —— 第二采矿场（火）——
+    // 矿场监工：数值同狂徒（锤），血量的一半换成装甲（装甲在外）
+    { id: "mine_overseer", name: "矿场监工", build(lv, p) {
+      const hp = 20 + (lv - 1) * 6, armor = Math.round(hp / 2);
+      return unitOf(this.name, lv, [
+        { type: "armor", hp: scaleHp(armor, p) },
+        { type: "flesh", hp: scaleHp(hp - armor, p) }
+      ], 4 + milestone(lv, 10), 4 + (lv - 1), { kit: "mine_overseer", range: "melee", dice: [1, 6], element: "fire", baseBreak: 2 });
+    }},
+    // 火石清扫机：数值同机器人看守（枪）
+    { id: "flint_sweeper", name: "火石清扫机", build(lv, p) {
+      return unitOf(this.name, lv, [{ type: "armor", hp: scaleHp(12 + (lv - 1) * 4, p) }], 3 + milestone(lv, 10), 5 + (lv - 1),
+        { kit: "flint_sweeper", range: "ranged", dice: [1, 4], element: "fire" });
+    }},
+    // 燃气收集机：数值同机甲触灵（榴弹），星灵换成肉体
+    { id: "gas_collector", name: "燃气收集机", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(10 + (lv - 1) * 4 + milestone(lv, 5) * 2, p) },
+        { type: "armor", hp: scaleHp(15 + (lv - 1) * 4, p) },
+        { type: "flesh", hp: scaleHp(5 + (lv - 1) * 2, p) }
+      ], 5 + milestone(lv, 5), 6 + (lv - 1), { kit: "gas_collector", range: "melee", dice: [0, 0], element: "fire", baseBreak: 1 });
+    }},
+    // 蚁型特殊剿灭兵种：血量 / 架势同牛队长，护盾换成装甲；atk 线性成长（1 级 6、20 级 30）
+    { id: "ant_hunter", name: "蚁型特殊剿灭兵种", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "armor", hp: scaleHp(16 + (lv - 1) * 5 + milestone(lv, 5) * 4, p) },
+        { type: "flesh", hp: scaleHp(26 + (lv - 1) * 7, p) }
+      ], 5 + milestone(lv, 5), Math.round(6 + (lv - 1) * 24 / 19), { kit: "ant_hunter", range: "ranged", dice: [1, 8], element: "fire", baseBreak: 1 });
+    }},
+    // —— 第三采矿场（能量）——
+    // 矿场警戒自动机：数值同机器人看守（剑），血量 60% 装甲 + 40% 护盾（护盾在外）；开场休眠
+    { id: "alarm_bot", name: "矿场警戒自动机", build(lv, p) {
+      const total = 14 + (lv - 1) * 5, shield = Math.round(total * 0.4);
+      const u = unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(shield, p) },
+        { type: "armor", hp: scaleHp(total - shield, p) }
+      ], 3 + Math.floor(lv / 5), 4 + Math.floor(lv / 2), { kit: "alarm_bot", range: "any", dice: [1, 4], element: "energy" });
+      u.dormant = true;
+      return u;
+    }},
+    // 陨石开采机：数值同投料无人机，血量 60% 星灵 + 40% 护盾（护盾在外）；开场带蓄能
+    { id: "meteor_miner", name: "陨石开采机", build(lv, p) {
+      const total = 8 + (lv - 1) * 3, shield = Math.round(total * 0.4);
+      const u = unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(shield, p) },
+        { type: "spirit", hp: scaleHp(total - shield, p) }
+      ], 2 + milestone(lv, 2), 5 + (lv - 1) * 2, { kit: "meteor_miner", flying: true, range: "ranged", dice: [0, 0], element: "energy" });
+      u.self = "store";
+      return u;
+    }},
+    // —— 第三采矿场 · 异星生物（星灵）——
+    // 陨体衍蛛：血量同空投蜂群（全部星灵），架势同机器人看守（枪），atk 同巡检浮标
+    { id: "meteor_spider", name: "陨体衍蛛", build(lv, p) {
+      return unitOf(this.name, lv, [{ type: "spirit", hp: scaleHp(5 + (lv - 1) * 2, p) }], 3 + milestone(lv, 10), 4 + (lv - 1) * 2,
+        { kit: "meteor_spider", range: "melee", dice: [0, 0], element: "energy" });
+    }},
+    // 陨体弦蚣：数值同狂徒（匕首），血量全部星灵
+    { id: "meteor_centipede", name: "陨体弦蚣", build(lv, p) {
+      return unitOf(this.name, lv, [{ type: "spirit", hp: scaleHp(17 + (lv - 1) * 4, p) }], 3 + milestone(lv, 10), 5 + (lv - 1),
+        { kit: "meteor_centipede", range: "ranged", dice: [0, 0], element: "energy" });
+    }},
+    // —— 沙漠生物（desert.js）：沙尘 + 装甲 ——
+    { id: "sandfish_lead", name: "领潮沙鱼", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "sand", hp: scaleHp(15 + (lv - 1) * 4, p) },
+        { type: "armor", hp: scaleHp(20 + (lv - 1) * 5, p) }
+      ], 5 + milestone(lv, 5), 6 + (lv - 1), { kit: "sandfish_lead", range: "melee", dice: [1, 6], element: "physical", baseBreak: 2 });
+    }},
+    { id: "sandfish_drive", name: "赶潮沙鱼", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "sand", hp: scaleHp(6 + (lv - 1) * 2, p) },
+        { type: "armor", hp: scaleHp(8 + (lv - 1) * 2, p) }
+      ], 3 + milestone(lv, 10), 4 + (lv - 1), { kit: "sandfish_drive", range: "melee", dice: [1, 4], element: "physical" });
+    }},
+    { id: "sandfish_ambush", name: "伏咬沙鱼", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "sand", hp: scaleHp(5 + (lv - 1) * 2, p) },
+        { type: "armor", hp: scaleHp(7 + (lv - 1) * 2, p) }
+      ], 3 + milestone(lv, 10), 6 + (lv - 1), { kit: "sandfish_ambush", range: "melee", dice: [1, 6], element: "physical" });
+    }},
+    // —— 中立生物：不攻击，血量 = 沙鱼吞掉它能回的血 ——
+    { id: "dust_bug", name: "尘虫", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "sand", hp: scaleHp(2 + (lv - 1), p) },
+        { type: "armor", hp: scaleHp(3 + (lv - 1), p) }
+      ], 2 + milestone(lv, 10), 0, { kit: "dust_bug", range: "melee", dice: [0, 0], element: "physical" });
+    }},
+    { id: "tube_worm", name: "管虫", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "sand", hp: scaleHp(3 + (lv - 1), p) },
+        { type: "armor", hp: scaleHp(5 + (lv - 1), p) }
+      ], 1 + milestone(lv, 10), 0, { kit: "tube_worm", range: "melee", dice: [0, 0], element: "physical" });
     }},
     { id: "bigsand", name: "大沙灵", build(lv, p) {
       return unitOf(this.name, lv, [{ type: "sand", hp: scaleHp(37 + (lv - 1) * 6 + milestone(lv, 2), p) }], 4, 5 + milestone(lv, 2), { kit: "bigsand", range: "melee", dice: [1, 4], element: "physical" });

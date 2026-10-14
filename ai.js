@@ -10,21 +10,27 @@ const EnemyAI = (function () {
 
   function unitAlive(u) { return u && !u.hidden && !u.fused && !u.dead && !u._removed; }
   function players() { return state.units.filter(u => u.isPlayer && unitAlive(u)); }
-  function foes() { return state.units.filter(u => !u.isPlayer && unitAlive(u) && u.kit !== "ironwall"); }
+  function foes() { return state.units.filter(u => !u.isPlayer && unitAlive(u) && u.kit !== "ironwall" && !(typeof playerAllied === "function" && playerAllied(u)) &&
+    !(typeof isNeutralCreature === "function" && isNeutralCreature(u))); }   // 友军、中立生物不算要打的敌人
 
   function hpOf(u) {
     if (u.upOnShp) return Number(u.shp) || 0;
     return (u.layers || []).reduce((a, l) => a + Math.max(0, Number(l.current) || 0), 0);
   }
-  function validPrey() {
-    return players().filter(u => unitAlive(u) && !u.hidden && !(u.dying && !u.upOnShp) &&
+  /** 这个敌人能打的人：我方，以及和它敌对的其他阵营的敌人（异星生物 ↔ 其他阵营） */
+  function validPrey(me) {
+    const pool = me && typeof hostileTo === "function"
+      ? state.units.filter(u => hostileTo(me, u) && unitAlive(u) && u.kit !== "ironwall" && !u.fused)
+      : players();
+    // 下潜中的单位选不中（谐波攻击能打，敌人的 AI 先不专门找它）
+    return pool.filter(u => unitAlive(u) && !u.hidden && !u.submerged && !(u.dying && !u.upOnShp) &&
       !(typeof bpUntargetable === "function" && bpUntargetable(u)));   // 单局图纸：安全的迷彩（武器人形态）
   }
   // 不按「打单个目标」瞄准的技能：标定区域的榴弹（落点任意），不看危墙
-  const ZONE_PICK = { en_gl: true, en_gl_fire: true };
+  const ZONE_PICK = { en_gl: true, en_gl_fire: true, en_ant_shell: true, en_ant_shell_fire: true };
   // 不需要目标 / 不是攻击的技能：找站位时不拿它们来算「能不能打到」
   const NO_TARGET = { en_agg3_debris: true, en_king_hold: true, en_bigsand_summon: true, en_bigsand_heal: true, ufo_prime: true,
-    ufo_boom: true, ufo_stomp: true, ufo_sweep: true, ufo_summon: true, en_agg2_overheat: true, en_giant_sand_pulse: true, en_thug_mutiny: true };
+    ufo_boom: true, ufo_stomp: true, ufo_sweep: true, ufo_summon: true, en_agg2_overheat: true, en_giant_sand_pulse: true, en_thug_mutiny: true, en_gas_ignite: true, en_hunter_heat: true, en_alarm_zap: true };
   function canAimSkill(u, sid, t) {
     if (!inSkillReach(u, sid, t)) return false;
     // 隔着危墙 / 关着的门打不到（dealTo 会挡下来）：以前照样瞄准，结果每回合白打
@@ -98,6 +104,16 @@ const EnemyAI = (function () {
     boomcar:        { dist: 0,    aim: "nearest", special: "boomcar", noBasic: true },
     buoy:           { dist: 0,    aim: "nearest", near: "en_buoy" },
     dumpdrone:      { dist: 1,    aim: "local",   near: "en_dump",           far: "en_dump" },
+    mine_guard:     { dist: 0,    aim: "local",   near: "en_mine_guard" },
+    mine_overseer:  { dist: 0,    aim: "local",   near: "en_overseer" },
+    flint_sweeper:  { dist: 1,    aim: "local",   near: "en_flint",          far: "en_flint" },
+    alarm_bot:      { dist: null, aim: "local",   special: "alarm", fixed: true },
+    meteor_miner:   { dist: 1,    aim: "local",   near: "en_miner_shot",     far: "en_miner_shot" },
+    meteor_spider:  { dist: 0,    aim: "local",   near: "en_spider_bite" },
+    sandfish_lead:  { dist: 0,    aim: "local",   near: "en_fish_lead_hit" },
+    sandfish_drive: { dist: 0,    aim: "local",   near: "en_fish_drive_tail" },
+    sandfish_ambush:{ dist: 0,    aim: "local",   near: "en_fish_ambush_bite" },
+    meteor_centipede: { dist: 1,  aim: "lowest",  near: "en_centi_shot",     far: "en_centi_shot", fixed: true },
     thug_knife:     { dist: 0,    aim: "local",   near: "en_thug_knife" },
     thug_hammer:    { dist: 0,    aim: "local",   near: "en_thug_hammer" },
     crow:           { dist: 0,    aim: "lowest",  near: "en_crow" },
@@ -111,6 +127,9 @@ const EnemyAI = (function () {
     captain_wolf:   { dist: 0,    aim: "local",   near: "en_wolf" },
     captain_ox:     { dist: 0,    aim: "local",   near: "en_ox" },
     captain_lizard: { dist: 1,    aim: "local",   near: "en_liz",            far: "en_liz" },
+    ant_guard:      { dist: 1,    aim: "local",   near: "en_ant_spray",      far: "en_ant_spray", special: "ant" },
+    gas_collector:  { dist: 0,    aim: "local",   special: "gas" },
+    ant_hunter:     { dist: 1,    aim: "local",   near: "en_hunter_shot",    far: "en_hunter_shot" },
     bigsand:        { dist: null, aim: "local",   near: "en_bigsand",        special: "bigsand" },
     livesand:       { dist: null, aim: "local",   special: "livesand" },
     giant:          { dist: null, aim: "local",   near: "en_giant_near",     far: "en_giant_far" },
@@ -139,6 +158,7 @@ const EnemyAI = (function () {
   /** 这一步移动付不付得起：杂兵用行动点，精英 / 首领只能用附赠行动；被禁足 / 霜结不能动 */
   function canPayMove(u) {
     if (!u || u.noMove || u.self === "frost") return false;
+    if (AI_SPEC[u.kit] && AI_SPEC[u.kit].fixed) return false;   // 不会主动移动（矿场警戒自动机）
     const rank = typeof enemyRankOf === "function" ? enemyRankOf(u) : "minion";
     return rank === "minion" ? (u.ap || 0) >= 1 : (u.bonus || 0) >= 1;
   }
@@ -224,7 +244,14 @@ const EnemyAI = (function () {
     let aim = spec.aim || "local";
     // 手册：强盗头子在场时，所有狂徒集火血量最低者
     if (/^thug_/.test(u.kit || "") && foes().some(x => x.kit === "bandit_boss")) aim = "lowest";
-    if (aim === "lowest") return { unit: lowest(prey) };
+    if (aim === "lowest") {
+      // 不会移动的远程单位（陨体弦蚣）：在打得到的人里挑血量最低的
+      if (spec.fixed && spec.dist != null) {
+        const reach = prey.filter(p => zdist(u.zone, p.zone) === spec.dist);
+        if (reach.length) return { unit: lowest(reach) };
+      }
+      return { unit: lowest(prey) };
+    }
     if (aim === "nearest") return { unit: nearestFirst(u, prey)[0] };
     if (aim === "topAtk") {
       const s = prey.slice().sort((a, b) =>
@@ -251,7 +278,9 @@ const EnemyAI = (function () {
         return kz === from ? null : stepToward(u, kz);
       }
     }
-    if (spec.dist == null || u.noMove) return null;
+    if (spec.dist == null || u.noMove || spec.fixed) return null;   // fixed：不会主动移动
+    if (typeof sinkStuck === "function" && sinkStuck(u)) return null;   // 陷在流沙里走不出去
+    if (u.entangled) return null;   // 被沙珊瑚缠住
     const d = zdist(u.zone, target.zone);
     if (d === spec.dist) return null;
     if (d > spec.dist) {                            // 太远 → 接近一格
@@ -275,6 +304,23 @@ const EnemyAI = (function () {
     if (spec.special === "gl") {
       if (has("en_gl_fire")) return "en_gl_fire";
       return has("en_gl") ? "en_gl" : null;
+    }
+    if (spec.special === "alarm") {
+      // 不移动：场上有高能的敌人就电涌，没有就待机
+      return has("en_alarm_zap") && alarmTargets(u).length ? "en_alarm_zap" : null;
+    }
+    if (spec.special === "gas") {
+      // 每回合先移动（够不着目标就先走过去），然后：所在区是火场就喷火；不是火场、能点着就点燃燃气
+      if (!sameZone && canPayMove(u)) return null;
+      if (zoneOnFire(u.zone)) return sameZone && has("en_gas_spray") ? "en_gas_spray" : null;
+      if (gasCanIgnite(u.zone) && has("en_gas_ignite")) return "en_gas_ignite";
+      return sameZone && has("en_gas_spray") ? "en_gas_spray" : null;   // 点不着（固有场地 / 被锁定）：照样喷火
+    }
+    if (spec.special === "ant") {
+      // 大酸液弹待发就发；站在酸液地面上就标定；否则用普通的酸液喷枪（交给 near / far）
+      if (has("en_ant_shell_fire")) return "en_ant_shell_fire";
+      if (has("en_ant_shell") && target && zdist(u.zone, target.zone) <= 1) return "en_ant_shell";
+      return null;
     }
     if (spec.special === "bigsand") {
       const sands = state.units.filter(x =>
@@ -354,8 +400,8 @@ const EnemyAI = (function () {
       zones.sort((a, b) => b.n - a.n);
       return zones.length ? { dest: zones[0].z } : null;
     }
-    if (sid === "en_gl") {
-      // 榴弹发射时照样会被危墙 / 关着的门挡住：隔着墙的区不算人数
+    if (sid === "en_gl" || sid === "en_ant_shell") {
+      // 榴弹 / 大酸液弹发射时照样会被危墙 / 关着的门挡住：隔着墙的区不算人数
       const zones = [];
       const open = (z) => !(typeof lineBlocked === "function" && lineBlocked(u.zone, z));
       for (let z = 1; z <= Number(state.zoneMode); z++) zones.push({ z, n: open(z) ? preyInZone(prey, z).length : 0 });
@@ -387,7 +433,7 @@ const EnemyAI = (function () {
   /** 手册第十章的行为描述 → 一次行动。 */
   function aiPlanBase(u) {
     if (typeof mutinyTick === "function") mutinyTick();
-    const prey = validPrey();
+    const prey = validPrey(u);
     if (!prey.length) return null;
 
     let list = [];
@@ -478,8 +524,10 @@ const EnemyAI = (function () {
       else if (alt != null) step = alt;
     }
 
+    // 沙漠生物的习性：夜晚 / 沙暴不走进有沙珊瑚的区（desert.js · coralAvoid）
+    if (step != null && typeof coralAvoid === "function" && coralAvoid(u, step)) step = null;
     let sid = aiSpecial(u, spec, target, prey, has, list);
-    if (sid && !["en_agg3_debris", "en_king_hold", "en_bigsand_summon", "en_bigsand_heal", "ufo_prime", "ufo_boom", "ufo_stomp", "ufo_sweep", "en_agg2_overheat", "en_gl", "en_gl_fire", "en_giant_sand_pulse"].includes(sid)) {
+    if (sid && !["en_agg3_debris", "en_king_hold", "en_bigsand_summon", "en_bigsand_heal", "ufo_prime", "ufo_boom", "ufo_stomp", "ufo_sweep", "en_agg2_overheat", "en_gl", "en_gl_fire", "en_ant_shell", "en_ant_shell_fire", "en_gas_ignite", "en_alarm_zap", "en_giant_sand_pulse"].includes(sid)) {
       const rt = retargetLegal(u, sid, target, prey, pick.forced);
       if (rt.target) target = rt.target;
       if (rt.sid) sid = rt.sid;
@@ -490,7 +538,9 @@ const EnemyAI = (function () {
     const noTargetNeeded = sid === "en_agg3_debris" || sid === "en_king_hold" ||
       sid === "en_bigsand_summon" || sid === "en_bigsand_heal" || sid === "ufo_prime" ||
       sid === "ufo_boom" || sid === "ufo_stomp" || sid === "ufo_sweep" || sid === "en_agg2_overheat" ||
-      sid === "en_giant_sand_pulse";   // 全域沙暴打所有区域，不用瞄准
+      sid === "en_giant_sand_pulse" ||   // 全域沙暴打所有区域，不用瞄准
+      sid === "en_gas_ignite" ||         // 点燃燃气打自己所在的区
+      sid === "en_alarm_zap";            // 电涌打所有高能的敌人，不用瞄准
     // 聚合体的电能炮：贴近打 1d20 最好；没有附赠动作走不过去时就隔一区打（1d10），不白白耗着
     const fireNow = sid === "en_agg2_charge" && zdist(u.zone, target.zone) <= 1 && (u.bonus || 0) < 1;
     if (sid && (inRange || !step || noTargetNeeded || fireNow)) {
@@ -554,6 +604,14 @@ const EnemyAI = (function () {
   }
   function aiPlan(u) {
     if (u && u.trainingDummy) return null;   // 训练场的木桩：不行动
+    if (u && u.dormant) return null;         // 休眠：不行动，直到被叫醒
+    if (typeof sinkLocked === "function" && sinkLocked(u)) return null;   // 流沙没顶：不能行动
+    if (typeof isNeutralCreature === "function" && isNeutralCreature(u)) return null;   // 中立生物不行动
+    if (typeof sandFishPlan === "function") {   // 沙鱼：捕食、白天的伏咬沙鱼潜伏不动（desert.js）
+      const fp = sandFishPlan(u);
+      if (fp === "wait") return null;
+      if (fp) return fp;
+    }
     const plan = aiPlanBase(u);
     if (!u || !u.flying || state.weather !== "sand" || u.noMove || u.self === "frost") return plan;
     if (typeof touDuelVictim === "function" && touDuelVictim(u)) return plan;   // 决一死战中不移动

@@ -122,6 +122,8 @@
         <div class="rh-row">坚毅 <span>${Number(h.shp) || 0}/${Number(h.shpMax) || 0}</span></div>
         <div class="rh-row">经验 <span>${Number(h.xp) || 0}/${xpNext || "满"}</span></div>
         ${Number(h.attrPoints) > 0 ? `<div class="rh-w tr-attn">有 ${h.attrPoints} 点属性点可分配（队伍页）</div>` : ""}
+        ${Number(h.featPoints) > 0 ? `<div class="rh-w tr-attn">有 ${h.featPoints} 项专长可选（队伍页）</div>` : ""}
+        ${(h.feats || []).length && typeof featLabel === "function" ? `<div class="rh-w">专长：${esc(h.feats.map(id => (FEATS[id] || {}).name || id).join("、"))}</div>` : ""}
         ${weapons}
       </div>`;
     }).join("") || `<p class="r-hint">还没有队员。到「队伍」页选人。</p>`;
@@ -145,6 +147,15 @@
       const attrs = heroes().filter(h => Number(h.attrPoints) > 0).map(h =>
         `<div class="tr-row"><b>${esc(h.name)}</b> 有 ${h.attrPoints} 点属性点：
           ${Object.keys(ATTR_NAMES).map(k => `<button class="g-btn small" data-attr="${esc(h.kit)}:${k}">${ATTR_NAMES[k]} ${(h.attrs || {})[k] || 0} +1</button>`).join("")}</div>`).join("");
+      // 专长（feats.js）：有专长点的角色，选一项（兼修再选一张涉猎专长）
+      const featRows = typeof featChoicesFor !== "function" ? "" : heroes().filter(h => Number(h.featPoints) > 0).map(h => {
+        const opts = featChoicesFor(h, h.level).map(id => `<option value="${esc(id)}">${esc(featLabel(id))} · ${esc(FEATS[id].text || "")}</option>`).join("");
+        const full = featFullOptions(h).map(id => `<option value="${esc(id)}">${esc(FEATS[id].name)}</option>`).join("");
+        return `<div class="tr-row"><b>${esc(h.name)}</b> 有 ${h.featPoints} 项专长：
+          <select data-feat-pick="${esc(h.kit)}" style="max-width:100%">${opts}</select>
+          ${full ? `<select data-feat-full="${esc(h.kit)}" title="兼修升级哪一张">${full}</select>` : ""}
+          <button class="g-btn small" data-feat-go="${esc(h.kit)}">选定</button></div>`;
+      }).join("");
       return `<h3>队员</h3>
         <p class="r-hint">勾选参加这次跑团的角色。换人会按队伍记忆重新摆队伍，已有角色的等级、血量、物资不变。</p>
         <div class="tr-picks">${picks}</div>
@@ -155,9 +166,10 @@
           <select id="tr-xp-who"><option value="">全员</option>${heroes().map(h => `<option value="${esc(h.kit)}">${esc(h.name)}</option>`).join("")}</select>
           <button class="g-btn" id="tr-xp-go">发放</button>
         </div>
-        <p class="r-hint">升级照手册第三章：4 级、8 级各 1 点属性点（8 级那点不能加在曾经加过的同一项上）；职责技能按角色卡自动解锁；熟练项、专长由主持人记在角色卡上。</p>
+        <p class="r-hint">升级照手册第三章：4 级、8 级、19 级各 1 点属性点（8 级那点不能加在曾经加过的同一项上，19 级的可以）；职责技能按角色卡自动解锁；熟练项、专长由主持人记在角色卡上。</p>
         ${attrRequestsHtml()}
         ${attrs ? `<h3>分配属性点</h3>${attrs}` : ""}
+        ${featRows ? `<h3>分配专长</h3><p class="r-hint">7 / 11 / 13 / 16 级各一项，可以选这一级或更低级的。选「兼修」时再选要升成完整版的涉猎专长。</p>${featRows}` : ""}
         <h3>重新开团</h3>
         <button class="g-btn" id="tr-reset">清空这个存档的进度（等级、物资、时间全部归零）</button>
         <p class="r-hint">要同时带别的团，点顶栏「换存档」用另一个空位。</p>`;
@@ -783,6 +795,8 @@
       <div class="tr-row">战场 <select data-bte="board" data-bte-rerender="1">${options(BT_BOARDS, t.board)}</select>
         天气 <select data-bte="weather">${options(Object.keys(WX).map(k => [k, WX[k]]), t.weather)}</select>
         我方站在 ${zoneSel("playerZone", t.playerZone)}</div>
+      <div class="tr-row">我方阵营 <select data-bte="allyFaction">${options([["", "只有我方"]].concat((typeof battleTemplateFactions === "function" ? battleTemplateFactions() : []).map(f => [f, "和「" + f + "」同阵营"])), t.allyFaction || "")}</select>
+        <span class="r-hint">同阵营的敌人是友军：不打我方、我方也打不到它，它会和与它敌对的阵营（例如安保 ↔ 盗匪、异星生物）互相打；打赢不用打倒友军。敌对的阵营不管站在哪都会互相打。</span></div>
       <h4>敌人</h4>${foes || '<p class="r-hint">还没有敌人。</p>'}
       <div class="tr-row"><button class="g-btn small" data-bt-act="addEnemy">＋ 敌人</button></div>
       <h4>场地</h4>${fields}
@@ -956,6 +970,11 @@
     });
     on("tr-xp-go", () => act(ruleCommand("giveXp", { kits: $("tr-xp-who").value ? [$("tr-xp-who").value] : null, amount: $("tr-xp").value })));
     P.querySelectorAll("[data-attr]").forEach(b => { b.onclick = () => { const [k, a] = b.dataset.attr.split(":"); act(ruleCommand("spendAttr", { kit: k, attr: a })); }; });
+    P.querySelectorAll("[data-feat-go]").forEach(b => { b.onclick = () => {
+      const k = b.dataset.featGo;
+      const pick = P.querySelector(`[data-feat-pick="${k}"]`), full = P.querySelector(`[data-feat-full="${k}"]`);
+      if (pick && pick.value) act(ruleCommand("pickFeat", { kit: k, feat: pick.value, full: full ? full.value : null }));
+    }; });
     on("tr-reset", () => {
       if (!confirm(`清空存档「${slotName}」的进度？等级、经验、物资、奎支、时间、探索记录都会归零（名字保留）。`)) return;
       uiCommand("reset");

@@ -166,6 +166,8 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
 .g-zone.field-electric { background: #f4efd8; border-color: #ddd4a8; }
 .g-zone.field-ice { background: #e4eef6; border-color: #c5d5e4; }
 .g-zone.field-acid { background: #e4f0e3; border-color: #c3d8c0; }
+.g-zone.field-quicksand { background: #efe2c6; border-color: #d4bd8f; }
+.g-zone.field-coral { background: #f5e1d8; border-color: #dcb3a2; }
 .g-zone.field-energy { background: #ddf2f3; border-color: #b7d8da; }
 .g-zone.field-harmonic { background: #f5e8ee; border-color: #e0c8d2; }
 .g-zone.field-collapse { background: #e8d7b8; border-color: #cbb58a; }
@@ -242,6 +244,52 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
 .unit.prop .u-name { font-size: 12px; max-width: 72px; }
 .unit.prop .u-hp { width: 70%; height: 8px; }
 .g-field.z3 .unit.prop { width: 72px; height: 72px; }
+
+/* ---------- 中立生物（desert.js · 尘虫、管虫）：迷你名牌 ----------
+ * 只留名字、细血条、架势和几个小标签；沙黄色细框，和红框的敌人、蓝框的我方分开 */
+.grp.neutral { gap: 6px; }
+.unit.mini {
+  width: 86px; padding: 5px 6px 5px 9px; background: #fffaf0;
+  --side: #c99a46; box-shadow: inset 0 0 0 2px #c99a46;
+  clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px));
+}
+.unit.mini .u-head { margin: 0; }
+.unit.mini .u-name { font-size: 12px; }
+.unit.mini .u-lv { font-size: 10px; margin-left: auto; }
+.unit.mini .u-atk, .unit.mini .u-hpline, .unit.mini .u-dur, .unit.mini .u-econ, .unit.mini .u-res,
+.unit.mini .u-flag { display: none !important; }
+.unit.mini .u-hp { height: 5px; margin: 4px 0 3px; }
+.unit.mini .u-def .pip { width: 6px; height: 6px; }
+.unit.mini .u-foot { margin: 2px 0 0; min-height: 0; }
+.unit.mini .u-status .chip { font-size: 9px; padding: 0 3px; line-height: 12px; background: #efe2c6; color: #6c4a16; }
+.unit.mini .u-status .chip.m-seen { background: #d6f6ff; color: #0b5a6b; }
+.unit.mini .u-status .chip.m-stun { background: #ffe2a8; color: #7a4a00; }
+.unit-wrap.stunned .unit.mini { box-shadow: inset 0 0 0 2px #f2c230; }
+
+/* 夜晚下潜的中立生物：区角上的「沙下动静 ×N」，点开看每一只 */
+.sandstir-wrap { position: absolute; left: 10px; bottom: 10px; z-index: 3; }
+.sandstir {
+  display: flex; align-items: center; gap: 7px; cursor: pointer; text-align: left;
+  background: #15110d; color: #f0cf9a; border: 2px solid #d9a35f; padding: 5px 10px 5px 6px;
+  font: 700 13px var(--ui-cn, sans-serif);
+  clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px));
+}
+.sandstir svg { width: 22px; height: 22px; flex: none; }
+.sandstir small { display: block; font-weight: 400; font-size: 10px; color: #c9b48c; }
+.sandstir-pop {
+  display: none; position: absolute; left: 0; bottom: calc(100% + 6px); width: 230px;
+  background: #15110d; color: #ece0c6; border: 2px solid #d9a35f; padding: 8px 10px; font-size: 12px;
+}
+.sandstir-wrap.open .sandstir-pop { display: block; }
+.sandstir-pop h4 { margin: 0 0 6px; font-size: 13px; color: #f0cf9a; }
+.sandstir-pop .r { display: flex; align-items: center; gap: 6px; margin: 4px 0; cursor: pointer; }
+.sandstir-pop .r:hover { background: rgba(217, 163, 95, .15); }
+.sandstir-pop .r .n { width: 34px; }
+.sandstir-pop .r .bar { flex: 1; height: 5px; background: #3b342c; position: relative; }
+.sandstir-pop .r .bar i { position: absolute; left: 0; top: 0; bottom: 0; background: #d9a35f; }
+.sandstir-pop .r em { font-style: normal; font-size: 10px; color: #3fe0ff; }
+.sandstir-pop .r small { font-size: 10px; color: #a8977b; }
+.sandstir-pop footer { margin-top: 6px; font-size: 10px; color: #a8977b; border-top: 1px dashed #4d4337; padding-top: 5px; }
 .grp.prop { min-height: 0; }
 .unit-wrap { position: relative; isolation: isolate; }
 .unit-wrap::after {                   /* 选中 / 可选 / 预告：铭牌背后大一圈的底板 */
@@ -469,6 +517,11 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
 .unit-wrap.downed .pip.on { background: #8a847d; border-color: #8a847d; }
 .unit-wrap.downed .chip { background: rgba(255,255,255,.12); color: #cfc9c2; }
 .unit-wrap.downed .u-econ, .unit-wrap.downed .u-atk { display: none; }  /* 给「倒下」标记让位 */
+
+/* 名牌上方的行动提示（连击……）：红底白字的长方形，悬在卡片上沿外 */
+.u-intents { position: absolute; left: 0; right: 0; bottom: calc(100% + 3px); display: none; justify-content: center; gap: 4px; z-index: 4; pointer-events: none; }
+.unit-wrap.has-intent .u-intents { display: flex; }
+.u-intent { background: #c8102e; color: #fff; font-weight: 700; font-size: 12px; line-height: 1; padding: 3px 8px; letter-spacing: .08em; white-space: nowrap; box-shadow: 0 1px 2px rgba(0, 0, 0, .35); }
 
 /* 预览数值牌 */
 .pvtag {
@@ -1722,6 +1775,8 @@ body:not([data-screen="battle"]) .g-rank { display: none !important; }
   .grp, .g-field.z3 .grp { gap: 8px; }
   .grp > .unit-wrap { width: calc(50% - 4px); max-width: 210px; }
   .grp > .unit-wrap.prop-wrap, .grp.prop > .unit-wrap { width: auto; }
+  .grp.neutral > .unit-wrap { width: auto; }
+  .unit.mini, .g-field.z3 .unit.mini { width: 78px; padding: 4px 5px 4px 8px; }
   .unit, .g-field.z3 .unit { width: 100%; padding: 6px 7px 5px 11px; }
   .unit.prop, .g-field.z3 .unit.prop { width: 72px; height: 72px; }
   .u-name, .g-field.z3 .u-name { font-size: 13px; }
@@ -1800,6 +1855,29 @@ body:not([data-screen="battle"]) .g-rank { display: none !important; }
 }
 .rm-scroll { overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
 .rm-svg { display: block; width: 100%; min-width: 640px; height: auto; }
+/* 夜晚的战场（game.js · applyEnv）：区域底色压暗偏蓝（inset 阴影盖在底色上、名牌之下），四周暗角；场地颜色还看得出来 */
+.g-app.is-night .g-zone { box-shadow: inset 0 0 0 9999px rgba(14, 22, 52, .55); border-color: #3c4566; }
+.g-app.is-night .g-zone .zlabel { color: #c8d2f0; }
+.g-app.is-night .g-zone::before { color: rgba(200, 210, 240, .12); }
+.night-vignette { position: absolute; inset: 0; pointer-events: none; z-index: 5;
+  background: radial-gradient(ellipse at 50% 40%, transparent 55%, rgba(5, 8, 20, .55) 100%); }
+/* 战斗顶栏的时钟 */
+.g-clock { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; white-space: nowrap; color: #ece0c6; }
+.g-clock .dnicon { width: 18px; height: 18px; }
+.g-clock.day b { color: #f2c230; }
+.g-clock.night b { color: #9fb4ff; }
+.g-clock small { font-size: 11px; color: #e2a24f; margin-left: 4px; }
+.g-app[data-weather="snow"] .g-clock { color: #2a3138; }
+/* 路线图上每一列的预计到达时刻（昼夜会改变敌人的行为） */
+.rm-eta text { font: 700 12px var(--ui-cn, sans-serif); paint-order: stroke; stroke: #0b0806; stroke-width: 3px; }
+.rm-eta.day text, .rm-eta.day .rm-eta-ic { fill: #f2c230; }
+.rm-eta.night text, .rm-eta.night .rm-eta-ic { fill: #9fb4ff; }
+/* 单局顶栏 / 休息按钮里的时钟 */
+.r-clock { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
+.r-clock .dnicon { width: 15px; height: 15px; }
+.r-clock.day b { color: #f2c230; }
+.r-clock.night b { color: #9fb4ff; }
+.r-clock small { font-size: 10px; opacity: .8; }
 .rm-title {
   position: absolute; left: 10px; top: 6px; z-index: 2; pointer-events: none;
   font-size: 24px; font-weight: 900; line-height: 1; color: #ece0c6;

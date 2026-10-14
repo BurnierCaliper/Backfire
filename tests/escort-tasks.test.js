@@ -225,3 +225,14 @@ test("护送对象的浮窗 / 联机投影：写「护送对象」和它自己�
   const OV = require("../online-view.js");
   assert.equal(OV.projectUnit(e).escort, "vip");
 });
+
+test("护送对象不进战场数据：挨打、反击都不记，战场数据表里也不列", () => {
+  const c = field("vip");
+  c.startCombat();
+  const e = c.fieldEscort(), thug = c.S.state.units.find(u => u.kit === "thug_knife");
+  assert.equal(c.battleStat(e), null);
+  e.zone = thug.zone;
+  c.dealTo(thug, e, { atk: 3, mult: 1, element: "physical", baseBreak: 0, atkRange: "any", flags: { action: true, blockResolved: true, block: "none" } });
+  assert.ok(!(c.S.state.battleStats || {})[e.id], "护送对象没有战场数据");
+  assert.ok(c.battleStat(c.findKit("kolt", c.S.state.units)), "角色照常记");
+});

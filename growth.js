@@ -7,10 +7,10 @@ const XP_BY_RANK = {
 const ENEMY_RANK = {
   guard_sword: "minion", guard_gun: "minion", thug_knife: "minion", thug_hammer: "minion",
   boomcar: "minion", sand_beast: "minion", sand_human: "minion", buoy: "minion",
-  dumpdrone: "minion", swarm: "minion", crow: "minion", patrol_car: "minion",
+  dumpdrone: "minion", mine_guard: "minion", mine_overseer: "minion", flint_sweeper: "minion", alarm_bot: "minion", meteor_miner: "minion", meteor_spider: "minion", meteor_centipede: "minion", sandfish_drive: "minion", sandfish_ambush: "minion", dust_bug: "minion", tube_worm: "minion", sandfish_lead: "elite", swarm: "minion", crow: "minion", patrol_car: "minion",
   mecha_mg: "elite", mecha_gl: "elite", bandit_boss: "elite", captain_wolf: "elite",
   captain_ox: "elite", captain_lizard: "elite", bigsand: "elite", livesand: "elite",
-  giant: "elite", patrolboat: "elite", spreader: "elite", watchcrow: "elite", dustbody: "elite",
+  giant: "elite", patrolboat: "elite", spreader: "elite", ant_guard: "elite", gas_collector: "elite", ant_hunter: "elite", watchcrow: "elite", dustbody: "elite",
   outlaw_king: "boss", chixia: "boss", sand_aggregate: "boss",
   ufo_body: "boss", ufo_leg: "minion"
 };
@@ -517,6 +517,11 @@ function applyCyberLayers(u, fleshMax) {
 
 function applyLevelStats(u) {
   if (!u || !u.isPlayer || isWeaponUnit(u)) return;
+  applyLevelStatsBase(u);
+  // 被动专长（feats.js · hooks.apply）：属性、等级算完以后再改；每次重算都从头来，所以不会叠加
+  if (typeof featHook === "function") featHook(u, "apply");
+}
+function applyLevelStatsBase(u) {
   // 固定成长（每级固定加血）只给没有六项属性的老卡用；有属性的角色一律按属性公式算，
   // 加体质 / 意志 / 耐力点才会生效，10 / 20 级也会加架势（夕夏、川川、诺拉以前带着 growth 走了这条路）
   if (u.growth && !u.attrs) {
@@ -582,12 +587,17 @@ function unspentForLevel(lv) {
   return n;
 }
 
+/** 经验按跑团模式算：跑团模式本身，或者单局的长线养成（rogue.js · run.growth） */
+function trpgXpRules() {
+  if (typeof TRPG !== "undefined" && TRPG.active) return true;
+  return typeof Rogue !== "undefined" && !!Rogue.growthXp && Rogue.growthXp();
+}
 function grantXpToPlayers(amount, reason) {
   amount = Math.floor(Number(amount) || 0);
   if (amount <= 0) return;
   const heroes = fieldUnits().filter(u => u.isPlayer && !isWeaponUnit(u) && !u.dead);
   // 跑团模式照手册第三章：战斗经验「全队平分」（Roguelike 单局按自己的调校，每人拿全额）
-  const split = typeof TRPG !== "undefined" && TRPG.active && heroes.length > 1;
+  const split = trpgXpRules() && heroes.length > 1;
   const each = split ? Math.ceil(amount / heroes.length) : amount;
   if (split) appendLog(`${amount} 经验${reason ? "（" + reason + "）" : ""}由 ${heroes.length} 人平分，每人 ${each}。`);
   heroes.forEach(u => {
@@ -606,7 +616,9 @@ function tryLevelUp(u) {
   while (xpToNext(u.level) > 0 && (u.xp || 0) >= xpToNext(u.level)) {
     u.xp -= xpToNext(u.level);
     u.level += 1;
-    if (u.level === 4 || u.level === 8) u.attrPoints = (u.attrPoints || 0) + 1;
+    if (u.level === 4 || u.level === 8 || u.level === 19) u.attrPoints = (u.attrPoints || 0) + 1;   // 19 级那点可以加在加过的同一项上
+    // 专长（7 / 11 / 13 / 16 级）：跑团模式由主持人在队伍页分配（单局走升级选择，不读这个）
+    if (typeof FEAT_LEVELS !== "undefined" && FEAT_LEVELS.indexOf(u.level) >= 0) u.featPoints = (u.featPoints || 0) + 1;
     applyLevelStats(u);
     appendLog(`${u.name} 升到 ${u.level} 级。`);
     changed = true;

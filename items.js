@@ -85,16 +85,16 @@ function rollEnemyLoot(u) {
   if (Number(u.lootKuizhi) > 0) return Number(u.lootKuizhi);
   const kit = u.kit || "";
   const roll = (n, s, b) => (typeof takeDice === "function" ? takeDice(n, s, b).total : n * Math.ceil(s / 2) + (b || 0));
-  if (kit === "thug_knife" || kit === "thug_hammer") return roll(1, 4, 0) * 10;
+  if (kit === "thug_knife" || kit === "thug_hammer" || kit === "mine_overseer") return roll(1, 4, 0) * 10;
   if (kit === "bandit_boss") return roll(3, 4, 0) * 50 + 50;
   // 主持人手册第十章（摧毁植入体的掉落；破解另计，由主持人给）
-  if (kit === "mecha_mg" || kit === "mecha_gl") return roll(2, 6, 0) * 100;
-  if (kit === "captain_wolf" || kit === "captain_ox" || kit === "captain_lizard") return roll(1, 6, 0) * 50 + 100;
+  if (kit === "mecha_mg" || kit === "mecha_gl" || kit === "gas_collector") return roll(2, 6, 0) * 100;
+  if (kit === "captain_wolf" || kit === "captain_ox" || kit === "captain_lizard" || kit === "ant_guard" || kit === "ant_hunter" || kit === "sandfish_lead") return roll(1, 6, 0) * 50 + 100;
   if (kit === "giant") return roll(3, 6, 0) * 100 + 100;
   if (kit === "outlaw_king") return 0;
   const fixed = {
-    guard_sword: 20, guard_gun: 20, patrol_car: 30, buoy: 20, dumpdrone: 35,
-    crow: 15, swarm: 200, patrolboat: 200, spreader: 180, watchcrow: 350, dustbody: 120
+    guard_sword: 20, guard_gun: 20, patrol_car: 30, buoy: 20, dumpdrone: 35, mine_guard: 20, flint_sweeper: 20, alarm_bot: 20, meteor_miner: 35, meteor_spider: 10, meteor_centipede: 15,
+    crow: 15, sandfish_drive: 20, sandfish_ambush: 20, swarm: 200, patrolboat: 200, spreader: 180, watchcrow: 350, dustbody: 120
   };
   return fixed[kit] || 0;
 }

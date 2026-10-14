@@ -6,6 +6,7 @@ const TrpgCommands = (() => {
   const handlers = {
     giveXp: c => trpgGiveXp(c.kits, c.amount),
     spendAttr: c => trpgSpendAttr(c.kit, c.attr),
+    pickFeat: c => trpgPickFeat(c.kit, c.feat, c.full),
     passHours: c => trpgPassHours(c.hours),
     passMinutes: c => trpgPassMinutes(c.minutes),
     passUntil: c => trpgPassUntil(c.time),
@@ -100,7 +101,7 @@ const BackstageCommands = (() => {
         const next = Math.max(1, Number(c.value) || 1), prev = Number(u.attrs[c.attr]) || 5;
         if (next > prev && (u.attrPoints || 0) > 0) { u.attrPoints--; u.attrs[c.attr] = next; }
         else if (next <= prev) u.attrs[c.attr] = next;
-        else appendLog(`${u.name} 没有可分配属性点。4 级和 8 级各得 1 点。`);
+        else appendLog(`${u.name} 没有可分配属性点。4 级、8 级、19 级各得 1 点。`);
         break;
       }
       case "recalc": applyLevelStats(u); appendLog(`${u.name} 已按规则重算 HP/ATK/DEF/SHP。`); break;

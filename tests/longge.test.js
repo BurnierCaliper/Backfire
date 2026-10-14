@@ -424,14 +424,15 @@ test("普通攻击能打危墙：手杖打同区边上的墙（冰 1 击破，�
 const lvUp = (lg, wl) => { lg.level = 11; lg.weaponLevels = Object.assign({}, lg.weaponLevels, { xiaoxiao: wl || 1 }); };
 const seenAll = lg => { lg.resources.seen = lg.resources.ammo.map(() => true); lg.resources.known = lg.resources.ammo.length; };
 
-test("技能解锁：热能轰击 3 级、饮弹 6 级、洗牌 11 级；完全换弹要胶囊弹药+", () => {
+test("技能解锁：热能轰击 3 级、饮弹 6 级、洗牌 9 级；完全换弹要胶囊弹药+", () => {
   const { c, lg } = setup();
   const ids = () => c.skillList(lg).map(s => s.id);
   lg.level = 1;
   ["longge_heat", "longge_drink", "longge_shuffle", "longge_reload"].forEach(id => assert.ok(!ids().includes(id), id));
   lg.level = 3; assert.ok(ids().includes("longge_heat"));
   lg.level = 6; assert.ok(ids().includes("longge_drink"));
-  lg.level = 11; assert.ok(ids().includes("longge_shuffle"));
+  lg.level = 8; assert.ok(!ids().includes("longge_shuffle"));
+  lg.level = 9; assert.ok(ids().includes("longge_shuffle"));
   assert.ok(!ids().includes("longge_reload"));
   lvUp(lg, 10);
   assert.ok(ids().includes("longge_reload"));
@@ -651,4 +652,20 @@ test("洗牌：洗过以后子弹数量没变过就不能连续洗；开枪 / �
   c.longgeTakeBullet(lg, []);
   assert.equal(lg.resources.ammo.length, 3);
   assert.equal(c.skillRequirementError(lg, "longge_shuffle"), null);
+});
+
+test("热能轰击 · 蓝弹气化 吃全力以赴（只有第一下）：击破 ×2、龙哥承受原击破，用掉", () => {
+  const { c, S, lg, foes } = setup();
+  lvUp(lg);
+  const kolt = c.findKit("kolt", S.units);
+  kolt.zone = 1;
+  lg.resources.trigger = true;
+  lg.resources.ammo = ["blue", "blue"]; seenAll(lg);
+  lg.def = lg.defMax = 6; kolt.def = kolt.defMax = 6;
+  lg.resources.smashNext = true;
+  cmd(c, { actor: lg.id, skill: "longge_heat", target: foes[0].id, picks: { mode: "gun", target: foes[0].id } });
+  assert.equal(lg.resources.smashNext, false);
+  // 第一下（2 击破）+ 反震 1 + 第二下照常 1 → 两人共掉 4
+  assert.equal((6 - lg.def) + (6 - kolt.def), 4);
+  assert.ok([lg.def, kolt.def].includes(4) || lg.def === 3, "有一人吃到 ×2");
 });

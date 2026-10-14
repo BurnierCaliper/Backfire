@@ -210,3 +210,23 @@ test("native WebSocket automatic reconnect keeps its token and waits for explici
   await player.send({ afterAutoReconnect: true }); await until(() => received.length === 1);
   assert.equal(received[0].from, player.identity.id);
 });
+
+test("host releases a player seat: token is dropped, socket closed, nickname and slot reusable", async t => {
+  const server = await createLocalRelayServer();
+  let host, player, again, intruder;
+  t.after(async () => { host?.close(); player?.close(); again?.close(); intruder?.close(); await server.close(); });
+  host = await Relay.createHost({ url: server.url, name: "GM", ...version, autoReconnect: false }); await host.setReady(true);
+  player = await Relay.join({ url: server.url, roomCode: host.identity.roomCode, name: "Alice", ...version, autoReconnect: false });
+  const lost = player.credentials(), seat = player.identity.id;
+  // 玩家不能释放座位
+  await assert.rejects(player.releaseSeat(seat), /只有主持人/);
+  await assert.rejects(host.releaseSeat("p_missing"), /没有这个玩家座位/);
+  await host.releaseSeat(seat);
+  await until(() => !player.status().connected);
+  await until(() => !host.status().roster.some(p => p.id === seat));
+  // 旧令牌失效；同一个昵称可以重新加入，拿到新座位
+  await assert.rejects(Relay.join({ url: server.url, roomCode: lost.roomCode, name: "Alice", ...version, resumeToken: lost.token, autoReconnect: false }), /恢复令牌无效/);
+  again = await Relay.join({ url: server.url, roomCode: host.identity.roomCode, name: "Alice", ...version, autoReconnect: false });
+  assert.notEqual(again.identity.id, seat);
+  await until(() => host.status().roster.some(p => p.id === again.identity.id && p.online));
+});

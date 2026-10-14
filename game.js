@@ -138,7 +138,7 @@
       zone: Number(u.zone) || 1,
       hidden: !!(u.hidden || u.fused),
       // 带着高能被打死的敌人：高能自爆演完之前先不算死（卡片不淡出），自爆把高能清掉之后才淡出
-      dead: !!(u.dead || u._removed) && !highBoomPending(u),
+      dead: !!(u.dead || u._removed) && !highBoomPending(u) && !(u._linger && !u._removed),   // 微光下倒在场上等复活的陨体衍蛛：卡片留着
       weaponUnit: (typeof isWeaponUnit === "function") ? !!isWeaponUnit(u) : !!u.weaponOf,
       escort: u.escort || null,   // 护送对象（货车 / 委托人）：规则上按武器人处理，但画面上不能叫它武器人
       dying: !!u.dying,
@@ -168,12 +168,22 @@
       badges: unitBadgesOf(u),
       res,
       iv: u.iv ? { hp: Number(u.iv.hp) || 0, atk: Number(u.iv.atk) || 0 } : null,   // 个体值（杂兵、精英）
+      intents: (() => { try { return typeof enemyIntents === "function" ? enemyIntents(u) : []; } catch (e) { return []; } })(),   // 名牌上的行动提示（连击……）
       atk: Math.round(Number(atk) || 0),
       weapon: !!u.weaponOf,
       dur: weaponDurSnap(u),
       // 首领机制（boss-mechanics.js）：身上的死刑标记 / 首领正在倒数的死刑
       marks: typeof bossMarksOn === "function" ? bossMarksOn(u) : [],
       casts: typeof bossCastsBy === "function" ? bossCastsBy(u) : [],
+      // 中立生物（desert.js）：迷你名牌；夜晚下潜的不画名牌，折进区角的「沙下动静」
+      neutral: typeof isNeutralCreature === "function" && isNeutralCreature(u),
+      submerged: !!u.submerged,
+      leaveIn: u.leaveIn != null ? Number(u.leaveIn) : null,
+      neutralTags: typeof isNeutralCreature === "function" && isNeutralCreature(u) ? [
+        u.stunned ? { key: "stun", text: "失衡" } : null,
+        u.resources && u.resources.flattened ? { key: "flat", text: "摊平" } : null,
+        u.detected ? { key: "seen", text: "已发现" } : null
+      ].filter(Boolean) : [],
       overkill: !u.isPlayer && (u.dead || u._removed) ? Math.max(0, Math.round(Number(u.overkill) || 0)) : 0,
       killBig: !u.isPlayer && !!u.killBig
     };
@@ -202,7 +212,7 @@
     } catch (e) { return null; }
   }
   const WEATHER_NAME = { none: "常态", heat: "酷暑", snow: "雪天", acid: "酸雨", thunder: "雷鸣", glow: "微光", sand: "沙暴", phase: "相位" };
-  const FIELD_CLASSES = ["field-fire", "field-electric", "field-ice", "field-acid", "field-energy", "field-harmonic", "field-collapse", "field-abyss"];
+  const FIELD_CLASSES = ["field-fire", "field-electric", "field-ice", "field-acid", "field-quicksand", "field-coral", "field-energy", "field-harmonic", "field-collapse", "field-abyss"];
   function snapEnv() {
     const zones = {};
     for (let z = 1; z <= Number(state.zoneMode || 2); z++) {
@@ -225,7 +235,14 @@
     if (state.weatherLock) weatherText += "（锁定）";
     // 机关门开关也算画面状态：打按钮 / 拉杆的预演靠它判断「有效果」
     const doors = Object.keys(state.gaps || {}).map(k => k + ":" + (state.gaps[k].open ? 1 : 0)).join(",");
-    return { weather: state.weather || "none", weatherText, zones, doors };
+    // 时钟：昼夜会改变沙漠生物的行为；沙暴（漠汛）时它们按夜晚行动
+    let clock = null;
+    try {
+      const min = clockNow();
+      const desertish = (state.units || []).some(u => !u.dead && typeof enemyInfo === "function" && /沙漠生物|中立生物/.test((enemyInfo(u.kit) || {}).faction || ""));
+      clock = { min, text: clockText(min), night: isNightClock(min), sandNight: state.weather === "sand" && desertish };
+    } catch (e) {}
+    return { weather: state.weather || "none", weatherText, zones, doors, clock };
   }
   function snapProp(p) {
     const max = Math.max(1, Number(p.maxHp) || Number(p.hp) || 1);
@@ -286,6 +303,23 @@
     const wi = window.Icons ? Icons.weather(env.weather) : "";
     $("g-weather").innerHTML = wi + esc("天气 " + env.weatherText);
     $("g-weather").classList.toggle("has-icon", !!wi);
+    const ck = $("g-clock");
+    if (ck) {
+      const c = env.clock;
+      ck.innerHTML = !c ? "" : (window.Icons && Icons.daynight ? Icons.daynight(c.night) : "") +
+        `<b>${esc(c.text)}</b> ${c.night ? "夜晚" : "白天"}${c.sandNight && !c.night ? `<small>漠汛：沙漠生物按夜晚行动</small>` : ""}`;
+      ck.className = "g-clock" + (c ? (c.night ? " night" : " day") : "");
+      ck.hidden = !c;
+    }
+    // 夜晚的战场：区域底色压暗偏蓝、四周暗角（名牌照常亮）
+    const night = !!(env.clock && env.clock.night);
+    $("g-app").classList.toggle("is-night", night);
+    const fieldEl = document.querySelector(".g-zone") && document.querySelector(".g-zone").parentElement;
+    if (fieldEl) {
+      let vg = fieldEl.querySelector(".night-vignette");
+      if (night && !vg) { vg = el("div", "night-vignette"); fieldEl.appendChild(vg); }
+      else if (!night && vg) vg.remove();
+    }
     if ($("g-weather-sel") && env.weather) $("g-weather-sel").value = env.weather;
     document.querySelectorAll(".g-zone").forEach(z => {
       const e = env.zones[z.dataset.num] || {};
@@ -505,7 +539,7 @@
   /* ================= 4. 技能模型 ================= */
   function unitAlive(u) { return u && !u.hidden && !u.fused && !u.dead && !u._removed; }
   function players() { return state.units.filter(u => u.isPlayer && unitAlive(u)); }
-  function foes() { return state.units.filter(u => !u.isPlayer && unitAlive(u) && u.kit !== "ironwall"); }
+  function foes() { return state.units.filter(u => !u.isPlayer && unitAlive(u) && u.kit !== "ironwall" && !(typeof isNeutralCreature === "function" && isNeutralCreature(u)) && !(typeof playerAllied === "function" && playerAllied(u))); }   // 友军不算要打的敌人
 
   function gameSkills(u) {
     if (!u || !u.isPlayer) return [];
@@ -599,10 +633,15 @@
   /* ================= 5. 画面 ================= */
   const cards = new Map();
 
-  function zoneGroup(zone, isPlayer, isProp) {
+  function zoneGroup(zone, isPlayer, isProp, neutral) {
     const z = document.querySelector(`.g-zone[data-num="${zone}"]`) || document.querySelector(".g-zone");
     if (!z) return document.querySelector(".g-zone");
     if (isProp) return z.querySelector(".grp.prop") || z.querySelector(".grp.player");
+    if (neutral) {   // 中立生物：区里单独一排迷你名牌（排在最下面）
+      let g = z.querySelector(".grp.neutral");
+      if (!g) { g = el("div", "grp neutral"); z.appendChild(g); }
+      return g;
+    }
     return z.querySelector(isPlayer ? ".grp.player" : ".grp.enemy");
   }
 
@@ -619,7 +658,7 @@
   function updateCard(c, s) { UnitCard.update(c, s, { sim: G.sim }); }
 
   function placeCard(c, s, animate) {
-    const grp = zoneGroup(s.zone, s.isPlayer, s.isProp);
+    const grp = zoneGroup(s.zone, s.isPlayer, s.isProp, s.neutral);
     if (c.wrap.parentElement === grp) return;
     const first = c.wrap.isConnected ? c.wrap.getBoundingClientRect() : null;
     if (first && animate && !s.isProp && window.Sfx && !G.sim) Sfx.ui("move");   // 换区移动：脚步声
@@ -642,7 +681,7 @@
     applyEnv(snaps.env);
     next.forEach((s, id) => {
       if (s.isGap) return;   // 危墙 / 桥梁画在区域间的竖条上（paintGaps）
-      if (s.hidden) {
+      if (s.hidden || (s.neutral && s.submerged && !s.dead)) {   // 下潜的中立生物：不画名牌（见 paintSandStir）
         const c = cards.get(id);
         if (c) { c.wrap.remove(); cards.delete(id); }
         return;
@@ -667,8 +706,37 @@
     });
     G.view = next;
     paintGaps();
+    paintSandStir(snaps);
     fitZones();
     return beats;
+  }
+
+  /** 夜晚下潜的中立生物（尘虫迁徙）：每个区角上一块「沙下动静 ×N」，点开看每只的状态；谐波选目标时点列表里的那一只 */
+  const STIR_ICON = `<svg viewBox="0 0 40 40" aria-hidden="true"><path d="M5 16c4-4 8-4 12 0s8 4 12 0 5-3 7 0" fill="none" stroke="#f0cf9a" stroke-width="2.6" stroke-linecap="round"/><path d="M5 25c4-4 8-4 12 0s8 4 12 0 5-3 7 0" fill="none" stroke="#d9a35f" stroke-width="2.2" stroke-linecap="round" opacity=".8"/><circle cx="12" cy="32" r="2" fill="#d9a35f"/><circle cx="22" cy="33" r="2" fill="#d9a35f"/><circle cx="30" cy="31" r="2" fill="#d9a35f"/></svg>`;
+  function paintSandStir(snaps) {
+    document.querySelectorAll(".g-zone").forEach(z => {
+      const zone = Number(z.dataset.num);
+      const list = snaps.filter(s => s.neutral && s.submerged && !s.dead && !s.hidden && Number(s.zone) === zone);
+      let box = z.querySelector(".sandstir-wrap");
+      if (!list.length) { if (box) box.remove(); return; }
+      if (!box) {
+        box = el("div", "sandstir-wrap");
+        box.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const row = e.target.closest("[data-stir-id]");
+          if (row) { onCardClick(row.dataset.stirId); return; }
+          box.classList.toggle("open");
+        });
+        z.appendChild(box);
+      }
+      const names = [...new Set(list.map(s => s.name))].join("、");
+      const pct = (s) => Math.round(sumCur(s) / Math.max(1, sumMax(s)) * 100);
+      box.innerHTML = `<div class="sandstir-pop"><h4>沙下动静 · ${zone} 区（${list.length} 只${esc(names)}）</h4>` +
+        list.map(s => `<div class="r" data-stir-id="${esc(s.id)}"><span class="n">${esc(s.name)}</span><span class="bar"><i style="width:${pct(s)}%"></i></span>` +
+          `${(s.neutralTags || []).some(t => t.key === "seen") ? "<em>已被发现</em>" : ""}<small>${s.leaveIn != null ? `${s.leaveIn} 回合后离开` : "在沙下"}</small></div>`).join("") +
+        `<footer>下潜中：只有谐波攻击和塌陷打得到。沙鱼发现后会去吃。</footer></div>` +
+        `<button class="sandstir" type="button" title="点开看看">${STIR_ICON}<span>沙下动静 ×${list.length}<small>${esc(names)}迁徙中 · 点开看看</small></span></button>`;
+    });
   }
 
   /** 区域里单位太多时逐级缩小铭牌，避免压到下方的角色选单 */
@@ -1234,8 +1302,9 @@
         const attacker = blockJobAttacker(job), target = unitById(job.targetId);
         if (!attacker || !target) { systemCommand({ type: "battle.cleanQueues", queue: "block" }); continue; }
         const helpers = eligibleBlockers(target, job);
+        const walls = typeof featIronwallDeclarers === "function" ? featIronwallDeclarers(target) : [];   // 铁壁（feats.js）
         let choice = null;
-        if (helpers.length) choice = await promptBlock(job, attacker, target, helpers);
+        if (helpers.length || walls.length) choice = await promptBlock(job, attacker, target, helpers, walls);
         const blocker = unitById(choice);
         let forced = null;
         if (blocker) {
@@ -1459,7 +1528,8 @@
     });
   }
 
-  function promptBlock(job, attacker, target, helpers) {
+  function promptBlock(job, attacker, target, helpers, walls) {
+    walls = walls || [];
     if (hotseat()) return HotseatGame.requestAsk("block", `${job.opt && job.opt.flags && job.opt.flags.execution ? `【死刑 ${job.opt.flags.execHit}/${job.opt.flags.execHits}】` : ""}${attacker.name} 攻击 ${target.name} · 协助格挡`,
       helpers.map(h => ({ helper: h.id, label: h.name, sub: `格挡成功率 ${finalBlockChance(h, attacker, target)}%` })),
       () => eligibleBlockers(target, job), job).then(answer => answer.unitId);
@@ -1477,7 +1547,12 @@
         sub: `成功率 ${finalBlockChance(h, attacker, target)}% · 消耗附赠行动${h.dying && !h.upOnShp ? " · 会先起身，之后受伤改打坚毅生命" : ""}`,
         value: h.id,
         onHover: noBlock
-      })),
+      })).concat(walls.map(h => ({
+        label: `${h.name} 铁壁`,
+        sub: "专长 · 这一击视为协助格挡成功（免伤，击破由自己承担、最少留 1）· 每场一次 · 不花附赠动作",
+        value: "ironwall:" + h.id,
+        onHover: noBlock
+      }))),
       { label: "不格挡", value: null, onHover: noBlock, showOnOpen: true }
     );
   }
@@ -2118,10 +2193,13 @@
     else if (side === "enemy") all = all.filter(u => !u.isPlayer);
     // 写明了射程（engine.js · SKILL_RANGE）的技能以表为准，不从提示文字里猜
     const ov = typeof skillRangeFor === "function" ? skillRangeFor(actor, sk.id) : null;
+    // 抵近射击（专长）：写着距离 1 的攻击也能打同区
+    const pointBlank = typeof featHas === "function" && featHas(actor, "pointblank") && side === "enemy";
+    const near = (u) => pointBlank && zoneDist(actor.zone, u.zone, state.zoneMode) === 0;
     if (ov) {
-      all = all.filter(u => { const d = zoneDist(actor.zone, u.zone, state.zoneMode); return d >= ov.min && d <= ov.max; });
+      all = all.filter(u => { const d = zoneDist(actor.zone, u.zone, state.zoneMode); return (d >= ov.min && d <= ov.max) || (ov.min === 1 && near(u)); });
     } else if (typeof inSkillRange === "function") {
-      all = all.filter(u => inSkillRange(actor, u, hint, state.zoneMode));
+      all = all.filter(u => inSkillRange(actor, u, hint, state.zoneMode) || near(u));
     }
     if (typeof skillTargetMoveOk === "function") all = all.filter(u => skillTargetMoveOk(actor, sk.id, u));
     if (side !== "ally" && side !== "allySelf" && side !== "anySelf") {
@@ -2231,7 +2309,14 @@
       try { steps = skillFlowSteps(sk.id, live, picks) || []; } catch (e) { steps = []; }
       const step = steps.find(s => picks[s.key] === undefined);
       if (!step) break;
-      const isLast = steps.every(s => s.key === step.key || picks[s.key] !== undefined);
+      // 选了这一项以后还有没有下一步：要按选了之后的步骤算（猛扑选同区目标后才多出「带到哪一区」），
+      // 否则预演缺着后面的选项，结算成「要再选」→ 判为无效，同区目标点不了
+      const withPick = v => Object.assign({}, picks, { [step.key]: v });
+      const isLastWith = v => {
+        let next = [];
+        try { next = skillFlowSteps(sk.id, live, withPick(v)) || []; } catch (e) { next = steps; }
+        return next.every(s => withPick(v)[s.key] !== undefined);
+      };
       let value = null;
       if (step.type === "zone") {
         setHint(`<b>${esc(sk.name)}</b>：${esc(step.label)}`);
@@ -2241,7 +2326,7 @@
         setHint(`<b>${esc(sk.name)}</b>：${esc(step.label)}　<span style="color:var(--faint)">${touchUI() ? "点空白处取消" : "右键取消"}</span>`);
         const cands = (step.units || []).map(u => ({
           id: u.id,
-          thunk: isLast ? skillThunk(actor.id, sk.id, u.id, Object.assign({}, picks, { [step.key]: u.id })) : null
+          thunk: isLastWith(u.id) ? skillThunk(actor.id, sk.id, u.id, withPick(u.id)) : null
         }));
         const got = await pickUnit(cands, label, step.optional ? [{ label: "不选，继续", value: "skip" }] : null);
         if (stale()) return;
@@ -2323,6 +2408,28 @@
   }
 
   /* ================= 10. 回合流程 ================= */
+  const SPACE_SAFE = "button, a[href], summary, [role=button], [role=tab], [role=option], [contenteditable], [tabindex]:not([tabindex='-1'])";
+  // 鼠标 / 触屏点过的按钮会留着焦点：记下来，空格不当成「按下它」（:focus-visible 在按键那一刻也会变真，用不了）；按 Tab 换焦点后才算键盘焦点
+  let pointerFocusEl = null;
+  if (typeof document !== "undefined") {
+    document.addEventListener("pointerdown", e => { pointerFocusEl = e.target && e.target.closest ? e.target.closest(SPACE_SAFE) : null; }, true);
+    document.addEventListener("keydown", e => { if (e.key === "Tab") pointerFocusEl = null; }, true);
+  }
+  const kbdFocus = el => { const hit = el && el.closest ? el.closest(SPACE_SAFE) : null; return !!hit && hit !== pointerFocusEl; };
+  /** 空格：热座 / 联机里结束的是当前这个单位的行动；它还有行动点或附赠没用时先问一句 */
+  async function spaceStartOrEnd() {
+    if (state.combatStarted && hotseat() && !G.depth && !G.ended && !choiceResolve) {
+      const cur = unitById(HotseatGame.currentUnit());
+      if (cur && ((cur.ap || 0) > 0 || (cur.bonus || 0) > 0)) {
+        const ans = await openChoice("结束行动", `${cur.name} 还有 ${cur.ap || 0} 点行动、${cur.bonus || 0} 次附赠没用，确定结束行动吗？`, [
+          { label: "确定结束", value: "yes" },
+          { label: "继续行动", value: "no" }
+        ]);
+        if (ans !== "yes") return;
+      }
+    }
+    return clickStartOrEnd();
+  }
   async function clickStartOrEnd() {
     if (G.depth > 0 || G.ended || choiceResolve) return;
     if (!state.combatStarted) {
@@ -2687,7 +2794,7 @@
   const INTRO_TIER = { boss: ["首领战斗", "#ff2e3f"], elite: ["精英战斗", "#ff9f1c"], normal: ["普通战斗", "#9aa6b2"] };
   const INTRO_FIELD = [
     ["fire", "火场", "#ff6a2b"], ["electric", "高压场地", "#ffd23f"], ["acid", "酸液地面", "#7ee04a"],
-    ["ice", "冻土", "#8fdcff"], ["energy", "能量场", "#fff08a"], ["harmonic", "干涉场地", "#c07bff"],
+    ["ice", "冻土", "#8fdcff"], ["quicksand", "流沙", "#d9a35f"], ["coral", "沙珊瑚台地", "#e8957a"], ["energy", "能量场", "#fff08a"], ["harmonic", "干涉场地", "#c07bff"],
     ["heal", "治愈场地", "#6ee7a8"], ["highland", "高地", "#d8c3a5"], ["abyss", "深渊", "#7a6cff"],
     ["collapseOn", "塌陷区域", "#b08968"], ["isolate", "隔离", "#9aa6b2"]
   ];
@@ -2811,7 +2918,7 @@
     const stats = state.battleStats || {};
     const blank = (u) => ({ name: u.name, kit: u.kit, weaponOf: u.weaponOf || null, dmg: 0, brk: 0, taken: 0, kills: 0, heal: 0, score: 0,
       assists: 0, blocks: 0, blockOk: 0, avoided: 0, staggers: 0, reduced: 0 });
-    const units = (state.units || []).filter(u => u.isPlayer && !u._removed);
+    const units = (state.units || []).filter(u => u.isPlayer && !u._removed && !u.escort);   // 护送对象不列
     const heroes = units.filter(u => !isWeaponUnit(u));
     const rows = [];
     heroes.forEach(h => {
@@ -4019,7 +4126,7 @@
     const zbox = $("g-field-zones");
     zbox.innerHTML = "";
     const kinds = [
-      ["", "无"], ["fireOn", "火场"], ["ice", "冻土"], ["acid", "酸液"],
+      ["", "无"], ["fireOn", "火场"], ["ice", "冻土"], ["acid", "酸液"], ["quicksand", "流沙"], ["coral", "沙珊瑚台地"],
       ["electric", "高压"], ["energy", "能量场"], ["harmonic", "干涉场"],
       ["heal", "恢复"], ["abyss", "深渊"], ["collapseOn", "塌陷"],
       ["ruinOn", "损毁地面"], ["isolate", "隔离区"]   // 规则层本来就支持（app.js · tickRuinGround、隔离区不吃天气），以前选不到
@@ -4227,7 +4334,12 @@
       }
       if (e.key === "Escape") { e.preventDefault(); disarm(); return; }
       if ((e.key === "z" || e.key === "Z") && (e.ctrlKey || e.metaKey)) { e.preventDefault(); doUndo(); return; }
-      if (e.key === " ") { e.preventDefault(); clickStartOrEnd(); return; }
+      if (e.key === " ") {
+        // 用键盘把焦点移到按钮、链接等可以操作的东西上时，空格是「按下它」，不是结束行动；
+        // 鼠标点过的按钮也会留着焦点，那不算（不然点完撤销再按空格会又撤销一次）
+        if (e.target && e.target.closest && e.target.closest(SPACE_SAFE) && kbdFocus(e.target)) return;
+        e.preventDefault(); spaceStartOrEnd(); return;
+      }
       if (e.key === "Tab") {
         e.preventDefault();
         const list = [...document.querySelectorAll("#g-party .pc")].map(b => unitById(b.dataset.id)).filter(Boolean);

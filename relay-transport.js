@@ -129,7 +129,7 @@
           cancelPending("连接已断开；未确认指令不会自动重发");
           notify({ connected: false, hostOnline: false, paused: true, reason: event.reason || "连接已断开" });
           if (!settled) { settled = true; reject(new Error(event.reason || "加入房间失败")); }
-          if ([1008, 4001, 4002].includes(event.code) || event.reason === "expired") disposed = true;
+          if ([1008, 4001, 4002, 4003].includes(event.code) || event.reason === "expired") disposed = true;
           else reconnectLater();
         });
       }).finally(() => { connecting = null; });
@@ -168,6 +168,8 @@
         } catch (error) { return Promise.reject(error); }
       },
       setReady(ready) { if (role !== "host" || typeof ready !== "boolean") return Promise.reject(new Error("只有主持人可以恢复房间")); const id = "ready_" + (++sequence); return sendFrames([stamp("ready", { id, ready })], id); },
+      /** 主持人释放玩家座位（旧版转发服务不认识这条消息，会回「无效的转发消息」） */
+      releaseSeat(seat) { if (role !== "host" || typeof seat !== "string" || !seat) return Promise.reject(new Error("只有主持人可以释放座位")); const id = "release_" + (++sequence); return sendFrames([stamp("release", { id, seat })], id); },
       onMessage(fn) { if (typeof fn !== "function") throw new TypeError("onMessage requires function"); messages.add(fn); const pending = backlog; backlog = []; backlogBytes = 0; for (const message of pending) { try { fn(copy(message.value), message.from); } catch (_) {} } return () => messages.delete(fn); },
       onStatus(fn) { if (typeof fn !== "function") throw new TypeError("onStatus requires function"); statuses.add(fn); try { fn(copy(status)); } catch (_) {} return () => statuses.delete(fn); },
       close() { disposed = true; clearTimeout(reconnectTimer); clearInterval(heartbeat); cancelPending("连接已关闭"); if (ws) ws.close(1000, "closed"); notify({ connected: false, paused: true }); },

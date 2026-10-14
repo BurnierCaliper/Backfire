@@ -403,6 +403,23 @@ function dayPeriod(min) {
   const h = Math.floor((((Number(min) || 0) % 1440) + 1440) % 1440 / 60);
   return h < 5 ? "深夜" : h < 8 ? "清晨" : h < 12 ? "上午" : h < 14 ? "中午" : h < 18 ? "下午" : h < 20 ? "傍晚" : "夜晚";
 }
+/* 昼夜（沙漠生物等会按昼夜换行为，desert.js）：白天 05:00–18:00，夜晚 18:00–05:00 */
+const DAY_NIGHT = { nightFrom: 18 * 60, nightTo: 5 * 60 };
+function isNightClock(min) {
+  const m = ((Math.floor(Number(min) || 0) % 1440) + 1440) % 1440;
+  return m >= DAY_NIGHT.nightFrom || m < DAY_NIGHT.nightTo;
+}
+/** 现在的时钟（分钟） */
+function clockNow() {
+  return typeof LEDGER !== "undefined" && LEDGER.clock != null ? Number(LEDGER.clock) : CLOCK_START;
+}
+/** 从现在起过 hours 小时：{ min（当天分钟）, days（跨过几个 0 点）, text, night } */
+function clockAfter(hours, from) {
+  const start = from != null ? Number(from) : clockNow();
+  const total = start + Math.round((Number(hours) || 0) * 60);
+  const min = ((total % 1440) + 1440) % 1440;
+  return { min, days: Math.floor(total / 1440), text: clockText(min), night: isNightClock(min) };
+}
 /** 「3 小时 20 分」 */
 function durationText(hours) {
   const total = Math.round((Number(hours) || 0) * 60);
@@ -606,7 +623,11 @@ function ledgerLongRest(plan, notes) {
     notes.push(`长休 ${hours} 小时（主持人强制，不扣补给）。`);
   }
   // 守夜：选一名角色或武器人整夜放哨。他不吃长休的恢复，也不刷新短休次数和「长休一次」的技能
-  const watch = plan.watch || null;
+  // 荒野向导（feats.js）：守夜的人照常恢复
+  const watchHero = plan.watch ? partyHeroes().find(x => x.kit === plan.watch) : null;
+  const ranger = !!(watchHero && typeof featHas === "function" && typeof featExploreOk === "function" && featExploreOk() && featHas(watchHero, "ranger"));
+  const watch = ranger ? null : (plan.watch || null);
+  if (ranger) notes.push(`${unitNameOf(plan.watch)} 守夜（荒野向导）：一边放哨一边歇着，长休照常恢复。`);
   if (watch) notes.push(`${unitNameOf(watch)} 守夜：这次长休不恢复，短休次数和「长休一次」的技能也不刷新。`);
   // 胶囊弹药+：排好下一场开局的 6 发子弹顺序（空 = 随机）
   Object.keys(plan.ammo || {}).forEach(kit => {
@@ -656,6 +677,18 @@ function ledgerLongRest(plan, notes) {
   const keep = (tab) => (watch && tab && tab[watch] != null ? { [watch]: tab[watch] } : {});
   LEDGER.shortUsed = keep(LEDGER.shortUsed);
   LEDGER.restOnce = keep(LEDGER.restOnce);
+  // 伙夫（feats.js）：每个带伙夫的人让坚毅生命最少的一名角色多恢复 2 点
+  if (typeof featPartyCount === "function" && typeof featExploreOk === "function" && featExploreOk()) {
+    const alive = partyHeroes().filter(x => !x.dead && !isWeaponUnit(x));
+    for (let i = featPartyCount(alive, "cook"); i > 0; i--) {
+      const low = alive.filter(x => (Number(x.shp) || 0) < (Number(x.shpMax) || 0) && x.kit !== watch)
+        .sort((a, b) => ((Number(a.shp) || 0) - (Number(b.shp) || 0)))[0];
+      if (!low) break;
+      const before = Number(low.shp) || 0;
+      low.shp = Math.min(Number(low.shpMax) || 0, before + FEAT_CFG.cook);
+      notes.push(`伙夫：${low.name} 吃得好，坚毅生命多恢复 ${low.shp - before} 点。`);
+    }
+  }
   // 时钟照常往前走；过了 0 点才换天（长休本身已经刷新了短休次数）。单局按任务天数记日子，这里不换天
   const days = advanceClock(hours * 60);
   const newDay = days > 0 && !ledgerInRun();

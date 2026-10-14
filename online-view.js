@@ -79,6 +79,8 @@
     if (marks.length) d.marks = marks;
     const casts = arr(call("bossCastsBy", unit)).slice(0, 8).map(m => markDto(m, ["name", "target"], ["left"], [])).filter(Boolean);
     if (casts.length) d.casts = casts;
+    const intents = arr(call("enemyIntents", unit)).slice(0, 4).map(x => text(x, 12)).filter(Boolean);
+    if (intents.length) d.intents = intents;
     if (!get(unit, "isPlayer") && (get(unit, "dead") || get(unit, "_removed"))) {
       const ok = number(get(unit, "overkill")); if (ok > 0) d.overkill = Math.round(ok);
       if (get(unit, "killBig") === true) d.killBig = true;
@@ -104,7 +106,7 @@
   function projectUnit(unit) {
     if (!obj(unit) || !id(get(unit, "id"))) return null;
     const out = identifiers(unit, {}, ["id", "kit", "weaponOf", "owner", "operatorId"]);
-    copyFields(unit, out, ["name", "escort"], ["level", "xp", "attrPoints", "zone", "atk", "def", "defMax", "ap", "apMax", "bonus", "bonusMax", "highEnergy", "stunMarks"], ["isPlayer", "weaponUnit", "isProp", "isGap", "isDevice", "dying", "stunned", "flying", "dead", "hidden", "noMove"]);
+    copyFields(unit, out, ["name", "escort"], ["level", "xp", "attrPoints", "zone", "atk", "def", "defMax", "ap", "apMax", "bonus", "bonusMax", "highEnergy", "stunMarks", "sink"], ["isPlayer", "weaponUnit", "isProp", "isGap", "isDevice", "dying", "stunned", "flying", "dead", "hidden", "noMove", "dormant", "submerged", "neutral"]);
     if (get(unit, "fused") || get(unit, "_removed")) out.hidden = true;
     // 带着高能被打死的敌人：高能自爆演完之前先不算死（和本机画面一样，卡片等自爆后才淡出）
     if (out.dead && !out.isPlayer && (number(call("highBoomValue", unit)) || 0) > 0) { out.dead = false; out.hidden = false; }

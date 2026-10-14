@@ -26,7 +26,7 @@
   // 个人行为：花自己的钱、动自己的东西（choose 是升级选择，不花钱）
   const PERSONAL = ["buy", "buyPart", "sellPart", "installPart", "removePart", "upgradeWeapon", "repairWeapon", "healHero", "modifyHero"];
   // 玩家可以自己发的个人指令（其余的个人行为由房主代自己的角色做）
-  const REMOTE = ["buy", "buyPart", "sellPart", "installPart", "upgradeWeapon", "repairWeapon", "healHero", "choose"];
+  const REMOTE = ["buy", "buyPart", "sellPart", "installPart", "removePart", "upgradeWeapon", "repairWeapon", "healHero", "modifyHero", "choose"];
   let enabled = false, resolving = false, hostId = "";
 
   const flow = () => root.RunFlow || null;
@@ -224,7 +224,12 @@
       case "task": {
         const node = Rogue.currentNode(r);
         if (!node) { Rogue.nodeChoices(r).forEach(o => add("node:" + o.i, "下一站走「" + nodeLabel(o) + "」", { action: "chooseNode", index: o.i })); break; }
-        if (node.type === "battle" || node.type === "elite") { add("fight", node.type === "elite" ? "迎战（精英战）" : "迎战", { fight: true }); shortRest(); }
+        if (node.type === "battle" || node.type === "elite") {
+          add("fight", node.type === "elite" ? "迎战（精英战）" : "迎战", { fight: true });
+          // 舌灿莲花（专长）：每个任务一次，谈掉一场普通战斗
+          (Rogue.parleyOptions ? Rogue.parleyOptions(r) : []).forEach(o => add("parley:" + o.kit, `${name(o.kit)} 交涉（舌灿莲花 · 成功率 ${Math.round(o.chance * 100)}%）`, { action: "parley", kit: o.kit }));
+          shortRest();
+        }
         else if (node.type === "rest") {
           if (r.ambush) add("fight", "迎击偷袭的敌人", { fight: true });
           else {
@@ -280,7 +285,7 @@
     return options(r).find(same) || null;
   }
   function isTeamCommand(cmd) {
-    return !!cmd && (cmd.fight || ["acceptTask", "chooseNode", "restAtNode", "shortRestBeforeNode", "camp", "attemptCheck", "skipCheck", "leaveNode", "nextAct", "afterVictory"].includes(cmd.action));
+    return !!cmd && (cmd.fight || ["acceptTask", "chooseNode", "restAtNode", "shortRestBeforeNode", "camp", "attemptCheck", "skipCheck", "parley", "leaveNode", "nextAct", "afterVictory"].includes(cmd.action));
   }
   function vote(playerId, optionId) {
     const r = run();
@@ -351,6 +356,8 @@
     if (G_Screens && Screens.is("battle")) fail("战斗中不能做这件事");
     const kit = c.action === "choose" ? c.kit : payerOf(r, c);
     if (!living(r).includes(kit) || ownerOf(r, kit) !== playerId) fail("只能动自己的角色");
+    // 付钱的人和被动到的角色 / 武器必须是同一个人的（拆改装件、义体改造、治疗……不能拿自己的钱动别人的东西）
+    if (c.action !== "choose") checkItems(r, c, kit);
     flow().actRaw(c);
     changed();
     return { ok: true };
@@ -404,7 +411,7 @@
     if (pend) {
       const t = pend.choice.type;
       choice = { kit: pend.kit, index: pend.index, name: pend.name, level: pend.choice.level,
-        title: t === "attr" ? "分配 1 点六维属性" + (pend.choice.noRepeat ? "（不能加在之前加过的同一项上）" : "") : t === "prof" ? "一个自选熟练项" : t === "role2" ? "从第二副职责里学一个技能" : "选择一项职责技能",
+        title: t === "attr" ? "分配 1 点六维属性" + (pend.choice.noRepeat ? "（不能加在之前加过的同一项上）" : "") : t === "prof" ? "一个自选熟练项" : t === "role2" ? "从第二副职责里学一个技能" : t === "feat" ? "选择一项专长（不限职责和属性）" : t === "featFull" ? "兼修：选一张职责涉猎专长升成完整版" : t === "prof3" ? "万事通：选一项熟练项升到三级" : "选择一项职责技能",
         options: Rogue.choiceOptions(r, pend.kit, pend.index).map(o => ({ label: o.label, hint: o.hint || "", value: o.value })) };
     }
     const waitingLevel = [...new Set(Rogue.pendingChoices(r).filter(p => !mine.includes(p.kit)).map(p => p.name))];
@@ -422,7 +429,9 @@
       const have = mine.reduce((s, k) => s + (Number((d.owned[k] || {})[id]) || 0), 0) + (mine.length ? free(r, id) : 0);
       return { id: p.id, name: p.name, text: p.text, sell: p.sell, install: p.install, have: Math.min(have, p.qty) };
     }).filter(p => p.have > 0) : null;
-    const clinic = Rogue.canClinic(r) ? r.party.filter(h => mine.includes(h.kit)).map(h => ({ kit: h.kit, name: name(h.kit), cost: Rogue.healCost(r, h.kit) })) : null;
+    // 诊所：治疗；义体改造带上现在的方案和上限，玩家那边按同样的公式估价（真正扣多少以房主结算为准）
+    const cyberOf = kit => { try { const i = Rogue.cyberInfo(r, kit); return { current: i.current, limit: i.limit, rate: i.rate, fleshMax: i.fleshMax, perHp: (typeof ROGUE_CLINIC !== "undefined" && ROGUE_CLINIC.cyberPerHp) || 0 }; } catch (e) { return null; } };
+    const clinic = Rogue.canClinic(r) ? r.party.filter(h => mine.includes(h.kit)).map(h => ({ kit: h.kit, name: name(h.kit), cost: Rogue.healCost(r, h.kit), cyber: cyberOf(h.kit) })) : null;
     return {
       act: r.act, day: r.day, region: Rogue.region(r), daysLeft: Rogue.daysLeft(r), daysPerAct: C.daysPerAct, stage: r.stage,
       main: r.main ? { done: !!r.main.done, days: r.main.days } : null,
@@ -452,6 +461,14 @@
     Object.entries(map || {}).forEach(([kit, pid]) => { if (living(r).includes(kit) && pid && pid !== hostId) d.owners[kit] = pid; });
     changed();
   }
+  /** 座位被释放的玩家：他的角色回到房主 */
+  function release(playerId) {
+    const r = run();
+    if (!r) return;
+    const d = data(r);
+    for (const kit of Object.keys(d.owners)) if (d.owners[kit] === playerId) delete d.owners[kit];
+    changed();
+  }
   /** 战斗里的操控分配（hotseat）：按单局里记的「角色 → 玩家」 */
   function assignmentsFor(units) {
     const r = run();
@@ -464,7 +481,7 @@
   root.OnlineRogue = {
     enable(on, host) { enabled = !!on; hostId = host || hostId; if (G_SaveStore && SaveStore.useOnlineRunSlot) SaveStore.useOnlineRunSlot(!!on); },
     get enabled() { return enabled; }, active, data, options, matchOption, isTeamCommand, vote, unvote, tryResolve, need, forceLoot,
-    handle, checkHost, viewFor, onNewRun, setOwners, assignmentsFor, changed, ownerOf: kit => (run() ? ownerOf(run(), kit) : hostId),
+    handle, checkHost, viewFor, onNewRun, setOwners, release, assignmentsFor, changed, ownerOf: kit => (run() ? ownerOf(run(), kit) : hostId),
     hostKits: () => (run() ? kitsOf(run(), hostId) : []), purse: kit => (run() ? Number(data(run()).purse[kit]) || 0 : 0),
     available: (kit, id) => (run() ? available(run(), kit, id) : 0), blocker: () => (run() ? blocker(run()) : ""), inBattle
   };
