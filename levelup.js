@@ -27,6 +27,12 @@ const LevelUp = (function () {
     if (!u || !u.kit) return null;
     const c = clone(u);
     c.resources = Object.assign({}, c.resources || {});
+    // 按「武器在手」比较：武器人正被唤出时，角色身上要拿着武器才列出的技能会暂时消失，
+    // 升级前后都在场时，新学会的这类技能就比不出来（以前升级提示漏写，看起来像没学到）
+    if (!c.weaponOf) {
+      c.weaponHeld = true;
+      if (c.kit === "hiaki") { c.resources.niuOut = false; c.resources.narutoOut = false; }
+    }
     try { if (typeof applyLevelStats === "function") applyLevelStats(c); } catch (e) { /* 老卡没有属性 */ }
     let passives = [];
     try { passives = typeof SkillText !== "undefined" ? SkillText.passivesOf(c) : []; } catch (e) { passives = []; }
