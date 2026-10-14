@@ -29,7 +29,9 @@ function propKindName(kind) {
     turret: "防卫自律炮台",
     ironwall: "铁壁",
     scrapwall: "废铁墙",
-    dome: "防护罩"
+    dome: "防护罩",
+    coral_branch: "沙珊瑚枝",
+    coral_tentacle: "沙珊瑚触须"
   })[kind] || kind;
 }
 
@@ -74,6 +76,14 @@ function makeProp(kind, zone, level) {
     base.movable = false;
     base.faction = "player";
     base.layerType = "shield";
+  }
+  if (kind === "coral_branch") {   // 沙珊瑚（desert.js）：金属骨骼，装甲生命
+    base.hp = base.maxHp = 30 + 4 * (lv - 1);
+    base.faction = "neutral";
+  }
+  if (kind === "coral_tentacle") {
+    base.hp = base.maxHp = 8 + 3 * (lv - 1);
+    base.faction = "neutral";
   }
   if (kind === "scrapwall") {   // 亡命之王「回防命令」：耐久由命令掷骰决定
     base.hp = base.maxHp = 1;

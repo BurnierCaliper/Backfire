@@ -280,6 +280,7 @@ const EnemyAI = (function () {
     }
     if (spec.dist == null || u.noMove || spec.fixed) return null;   // fixed：不会主动移动
     if (typeof sinkStuck === "function" && sinkStuck(u)) return null;   // 陷在流沙里走不出去
+    if (u.entangled) return null;   // 被沙珊瑚缠住
     const d = zdist(u.zone, target.zone);
     if (d === spec.dist) return null;
     if (d > spec.dist) {                            // 太远 → 接近一格
@@ -523,6 +524,8 @@ const EnemyAI = (function () {
       else if (alt != null) step = alt;
     }
 
+    // 沙漠生物的习性：夜晚 / 沙暴不走进有沙珊瑚的区（desert.js · coralAvoid）
+    if (step != null && typeof coralAvoid === "function" && coralAvoid(u, step)) step = null;
     let sid = aiSpecial(u, spec, target, prey, has, list);
     if (sid && !["en_agg3_debris", "en_king_hold", "en_bigsand_summon", "en_bigsand_heal", "ufo_prime", "ufo_boom", "ufo_stomp", "ufo_sweep", "en_agg2_overheat", "en_gl", "en_gl_fire", "en_ant_shell", "en_ant_shell_fire", "en_gas_ignite", "en_alarm_zap", "en_giant_sand_pulse"].includes(sid)) {
       const rt = retargetLegal(u, sid, target, prey, pick.forced);

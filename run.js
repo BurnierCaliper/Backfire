@@ -539,6 +539,7 @@ function regionWeather(region) {
 /** 区域自带的场地：第三采矿场 20% 有一个区是能量场（随机一区） */
 function regionFeatures(region, zoneMode) {
   const out = [];
+  if (region === "沙漠" && typeof desertFeatures === "function") out.push(...desertFeatures(zoneMode));   // 沙珊瑚台地 / 沙珊瑚枝
   if (region === "第三采矿场" && Math.random() < 0.2) {
     const n = Number(zoneMode) || 2;
     out.push({ type: "field", what: "energy", zone: 1 + Math.floor(Math.random() * n) });
@@ -627,7 +628,7 @@ function applyBattlefieldFeatures(features, level) {
   if (!features || !features.length) return;
   state.props = state.props || [];
   state.gaps = state.gaps || { "1-2": emptyGap(), "2-3": emptyGap() };
-  const EFFECT = { fire: "fire", acid: "acid", ice: "ice", electric: "electric", energy: "energy", harmonic: "harmonic", heal: "heal" };
+  const EFFECT = { fire: "fire", acid: "acid", ice: "ice", electric: "electric", energy: "energy", harmonic: "harmonic", heal: "heal", quicksand: "quicksand", coral: "coral" };
   features.forEach(f => {
     if (f.type === "prop" && typeof makeProp === "function") {
       const p = makeProp(f.what, f.zone, f.level != null ? f.level : level);

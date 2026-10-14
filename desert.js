@@ -31,6 +31,9 @@ const DESERT = {
   flattenCut: 0.5,
   quicksandFade: 0.5,
   bugLeave: [2, 3],          // 夜晚的尘虫几回合后钻走
+  coral: { platform: 0.15, branch: 0.25 },
+  // 富集变种：体内矿物丰富。armorMult 装甲层倍率，kuizhiMult 奎支倍率，fleeFrom 第几回合起会逃，fleeChance 每回合逃走的概率
+  enriched: { chance: 0.1, sandChance: 0.25, armorMult: 1.5, kuizhiMult: 5, fleeFrom: 3, fleeChance: 0.3 },   // 沙漠遭遇里出现沙珊瑚台地（一个区）/ 沙珊瑚枝的概率
   spawn: {                   // 有沙鱼的沙漠遭遇里配的中立生物（不占代币）
     bugsDay: { chance: 0.6, count: [3, 5] },
     bugsNight: { chance: 0.7, count: [4, 6] },
@@ -73,6 +76,8 @@ function desertBattleStart(notes) {
       u.leaveIn = DESERT.bugLeave[0] + Math.floor(Math.random() * (DESERT.bugLeave[1] - DESERT.bugLeave[0] + 1));
     }
     if (u.kit === "sandfish_ambush") u.submerged = true;   // 伏咬沙鱼开场就在沙下
+    // 富集变种：每只沙漠生物 10%（沙暴 25%）
+    if (isSandFish(u) && !u.enriched && Math.random() < (state.weather === "sand" ? DESERT.enriched.sandChance : DESERT.enriched.chance)) makeEnriched(u);
   });
   if (sandFishes().length || desertPrey().length) {
     notes.push(night ? (state.weather === "sand" ? "漠汛的沙暴遮住了光：沙漠生物按夜晚行动。" : "夜晚：沙漠生物活跃起来。")
@@ -126,9 +131,11 @@ function desertRoundStart(notes) {
     if (u.kit === "dust_bug" && u.resources && u.resources.flattened && u.resources.flatTurn !== state.turnNo) u.resources.flattened = false;
   });
   wormQuicksandTick(notes, false);
+  coralRoundStart(notes);
 }
 /** 回合结束：夜晚的尘虫往没有沙鱼的区游，时间到了就钻走 */
 function desertRoundEnd(notes) {
+  coralRoundEnd(notes);
   desertPrey().filter(u => u.kit === "dust_bug" && u.submerged && u.leaveIn != null).forEach(u => {
     u.leaveIn -= 1;
     if (u.leaveIn <= 0) {
@@ -191,6 +198,13 @@ function desertEnemyPhaseStart(notes) {
   fishes.filter(f => f.kit === "sandfish_ambush" && !f.submerged && !f.stunned).forEach(f => {
     f.submerged = true;
     notes.push(`${f.name} 重新潜入沙下。`);
+  });
+  // 富集个体胆小：第 3 回合起每回合 30% 下潜逃走（什么都不掉）
+  fishes.filter(f => f.enriched && !f.stunned && Number(state.turnNo) >= DESERT.enriched.fleeFrom).forEach(f => {
+    if (Math.random() >= DESERT.enriched.fleeChance) return;
+    f._removed = true;
+    f.submerged = false;
+    notes.push(`${f.name} 带着一肚子矿物下潜逃走了！`);
   });
   // 母系：领潮死了，鱼群溃散
   if (fishLeaderGone()) {
@@ -288,7 +302,8 @@ function driveDest(f, t) {
   if (!zs.length) return null;
   const score = (z) => (sandFishes().some(x => x.kit === "sandfish_ambush" && x.submerged && Number(x.zone) === z) ? 4 : 0) +
     (sandFishes().some(x => x.kit === "sandfish_lead" && Number(x.zone) === z) ? 2 : 0) +
-    (state.fields[z] && state.fields[z].quicksand ? 1 : 0);
+    (state.fields[z] && state.fields[z].quicksand ? 1 : 0) +
+    (desertNight() && coralInZone(z) ? 3 : 0);   // 夜晚：把猎物甩进沙珊瑚
   return zs.sort((a, b) => score(b) - score(a))[0];
 }
 
@@ -297,7 +312,11 @@ function desertEnemyAction(id, a, t, hitOne, lines, needT) {
   if (!/^en_fish_/.test(String(id))) return false;
   if (!needT()) return true;
   const assist = /_assist$/.test(id);
-  if (!assist && Number(a.zone) !== Number(t.zone) && typeof stepTowardZone === "function") stepTowardZone(a, t.zone);
+  if (!assist && Number(a.zone) !== Number(t.zone) && typeof stepTowardZone === "function" && !coralAvoid(a, t.zone)) stepTowardZone(a, t.zone);
+  if (assist && Number(a.zone) !== Number(t.zone) && coralAvoid(a, t.zone)) {
+    lines.push(`${a.name} 不敢靠近 ${t.zone} 区的沙珊瑚，没有扑上去。`);
+    return true;
+  }
   if (assist && Number(a.zone) !== Number(t.zone)) {
     lines.push(`${a.name} 冲向 ${t.zone} 区。`);
     a.zone = Number(t.zone);
@@ -311,7 +330,7 @@ function sandFishPlan(u) {
   if (!isSandFish(u) || u.stunned) return null;
   const night = desertNight();
   const hungry = night || totalHp(u) < totalMaxHp(u) * DESERT.hungryBelow;
-  const prey = desertPrey().filter(p => p.detected);
+  const prey = desertPrey().filter(p => p.detected && !coralAvoid(u, p.zone));
   if (hungry && prey.length && (u.ap || 0) > 0) {
     const d = (p) => zoneDist(Number(u.zone), Number(p.zone), state.zoneMode);
     const p = prey.sort((x, y) => d(x) - d(y) || totalHp(x) - totalHp(y))[0];
@@ -350,4 +369,142 @@ function addDesertNeutrals(spec) {
   if (Math.random() < bugs.chance) spec.enemies.push({ preset: "dust_bug", count: between(bugs.count[0], bugs.count[1]), zone: 1 + Math.floor(Math.random() * zm) });
   if (Math.random() < DESERT.spawn.worms.chance) spec.enemies.push({ preset: "tube_worm", count: between(DESERT.spawn.worms.count[0], DESERT.spawn.worms.count[1]), zone: zoneAway() });
   return spec;
+}
+
+/* =========================================================
+ * 沙珊瑚（主持人手册：从地底向上延伸，台地接受阳光；光线变暗就伸出触须抓取矿物和活物，同化进自身结构）
+ *   场地「沙珊瑚台地」（state.fields[z].coral）：战斗在珊瑚上面进行，自带高地效果（app.js · isHighGround）。
+ *     夜晚 / 沙暴：每回合开始从缝隙里伸出一根「沙珊瑚触须」（配置物，同区最多 2 根），抓住台地上随机一个能抓的单位。
+ *   配置物「沙珊瑚枝」：单独伸出来的一根分支，可以被摧毁。白天没有动作；夜晚 / 沙暴每回合结束抓住同区一个能抓的单位（最多同时抓 2 个）。
+ *   缠绕（u.entangled）：不能移动，位移也带不走；每回合开始受到「等级 + 1d6」物理伤害（同化）。
+ *     碳基生物「没有松开这个分支」：只有砍断才能脱困——触须被摧毁；或珊瑚枝被摧毁 / 一回合内被打掉 25% 耐久（砍断触须）。
+ *   不按阵营豁免：谁都会被抓（飞行的抓不到）。沙漠生物有避开珊瑚的习性（AI 夜晚不走进去、群起也不扑过去），
+ *   赶潮沙鱼反而会把猎物往珊瑚那边甩；沙灵不躲（它们不是原生生物）。
+ * ========================================================= */
+const CORAL = { tentacleHp: [8, 3], branchHp: [30, 4], maxTentacles: 2, maxGrabs: 2, cutPct: 0.25, dmgDie: 6 };
+const coralProps = (z) => (state.props || []).filter(p => (p.kind === "coral_branch" || p.kind === "coral_tentacle") && (z == null || Number(p.zone) === Number(z)));
+/** 这一区有没有会抓人的沙珊瑚（台地或珊瑚枝） */
+function coralInZone(z) {
+  const f = state.fields && state.fields[z];
+  return !!(f && f.coral) || coralProps(z).some(p => p.kind === "coral_branch");
+}
+/** 沙漠生物的习性：夜晚 / 沙暴不靠近会抓人的沙珊瑚 */
+function coralAvoid(u, z) {
+  if (!u || z == null || !desertNight()) return false;
+  const fac = typeof factionOf === "function" ? factionOf(u) : null;
+  return fac === "沙漠生物" && coralInZone(Number(z));
+}
+function canEntangle(u) {
+  return !!u && !u.dead && !u.hidden && !u._removed && !u.fused && !u.flying && Array.isArray(u.layers) && !u.entangled &&
+    !(state.props || []).includes(u);
+}
+function entangle(u, src, notes) {
+  u.entangled = { src: src.id, name: src.name, level: Number(src.level) || 1 };
+  notes.push(`${src.name} 伸出触须缠住了 ${u.name}：动不了，每回合被同化（受到伤害），只有砍断触须才能脱困。`);
+}
+function releaseEntangled(srcId, notes, why) {
+  (state.units || []).filter(u => u.entangled && u.entangled.src === srcId).forEach(u => {
+    u.entangled = null;
+    notes.push(`${u.name} ${why || "挣脱了沙珊瑚"}。`);
+  });
+}
+const grabsOf = (srcId) => (state.units || []).filter(u => u.entangled && u.entangled.src === srcId && !u.dead).length;
+/** 回合开始：同化伤害；夜晚台地伸出触须 */
+function coralRoundStart(notes) {
+  // 抓着人的源头没了（被摧毁、被移走）：松开
+  (state.units || []).forEach(u => {
+    if (u.entangled && !(state.props || []).some(p => p.id === u.entangled.src)) { u.entangled = null; notes.push(`${u.name} 身上的触须断了，脱困。`); }
+  });
+  (state.units || []).filter(u => u.entangled && !u.dead && !u.hidden).forEach(u => {
+    const r = takeDice(1, CORAL.dmgDie, Number(u.entangled.level) || 1);
+    applyTypedDot(u, r.total, "physical", notes, `${u.name} 被${u.entangled.name}同化 ${r.text}`);
+  });
+  coralProps().forEach(p => { p._roundDmg = 0; });
+  if (!desertNight()) return;
+  const zm = Number(state.zoneMode) || 2;
+  for (let z = 1; z <= zm; z++) {
+    const f = state.fields[z];
+    if (!f || !f.coral) continue;
+    if (coralProps(z).filter(p => p.kind === "coral_tentacle").length >= CORAL.maxTentacles) continue;
+    const cand = (state.units || []).filter(u => Number(u.zone) === z && canEntangle(u));
+    if (!cand.length) continue;
+    const lv = Math.max(1, ...(state.units || []).filter(u => !u.isPlayer).map(u => Number(u.level) || 1), 1);
+    const t = makeProp("coral_tentacle", z, lv);
+    state.props.push(t);
+    entangle(cand[Math.floor(Math.random() * cand.length)], t, notes);
+  }
+}
+/** 回合结束：夜晚的珊瑚枝抓人 */
+function coralRoundEnd(notes) {
+  if (!desertNight()) return;
+  coralProps().filter(p => p.kind === "coral_branch" && p.hp > 0 && grabsOf(p.id) < CORAL.maxGrabs).forEach(p => {
+    const cand = (state.units || []).filter(u => Number(u.zone) === Number(p.zone) && canEntangle(u));
+    if (cand.length) entangle(cand[Math.floor(Math.random() * cand.length)], p, notes);
+  });
+}
+/** 珊瑚挨打（app.js · damageProp）：珊瑚枝一回合内被打掉 25% 耐久，触须被砍断 */
+function coralPropDamaged(p, lose, notes) {
+  if (p.kind !== "coral_branch") return;
+  p._roundDmg = (Number(p._roundDmg) || 0) + lose;
+  if (grabsOf(p.id) && p._roundDmg >= Math.ceil(p.maxHp * CORAL.cutPct)) {
+    releaseEntangled(p.id, notes, "身上的触须被砍断，脱困");
+    p._roundDmg = 0;
+  }
+}
+/** 珊瑚被摧毁（app.js · destroyProp） */
+function coralPropDestroyed(p, notes) {
+  if (p.kind === "coral_branch" || p.kind === "coral_tentacle") releaseEntangled(p.id, notes, "脱困（缠住他的珊瑚断了）");
+}
+/** 沙漠的战场特征（run.js · regionFeatures）：沙珊瑚台地 / 沙珊瑚枝 */
+function desertFeatures(zoneMode) {
+  const out = [];
+  const zm = Number(zoneMode) || 2;
+  const zone = () => 1 + Math.floor(Math.random() * zm);
+  if (Math.random() < DESERT.coral.platform) out.push({ type: "field", what: "coral", zone: zone() });
+  if (Math.random() < DESERT.coral.branch) out.push({ type: "prop", what: "coral_branch", zone: zone() });
+  return out;
+}
+
+/* ---------- 富集变种（「富集 + 名字」，参照《深岩银河》的战利品虫） ---------- */
+/** 变成富集个体：装甲层 ×1.5（满血），名字前加「富集」 */
+function makeEnriched(u) {
+  if (!u || u.enriched) return u;
+  u.enriched = true;
+  if (!/^富集/.test(u.name)) u.name = "富集" + u.name;
+  (u.layers || []).forEach(l => {
+    if (l.type !== "armor") return;
+    l.max = Math.round(Number(l.max) * DESERT.enriched.armorMult);
+    l.current = l.max;
+  });
+  return u;
+}
+/** 掉落的奎支倍率（app.js · settleEnemyKill） */
+function desertLootMult(u) { return u && u.enriched ? DESERT.enriched.kuizhiMult : 1; }
+/** 富集个体掉的武器升级材料：按等级 [{ id, qty }] */
+function enrichedMaterials(level) {
+  const lv = Number(level) || 1;
+  const out = [];
+  const chance = (p) => Math.random() < p;
+  if (lv <= 5) out.push({ id: "mat_metal", qty: 1 + Math.floor(Math.random() * 2) });
+  else if (lv <= 10) { out.push({ id: "mat_metal", qty: 2 }); if (chance(0.3)) out.push({ id: "mat_alloy", qty: 1 }); }
+  else if (lv <= 15) { out.push({ id: "mat_alloy", qty: 1 }); if (chance(0.25)) out.push({ id: "mat_polymer", qty: 1 }); }
+  else { out.push({ id: "mat_polymer", qty: 1 }); if (chance(0.1)) out.push({ id: "mat_crystal", qty: 1 }); }
+  return out;
+}
+/** 富集个体被打倒：掉材料。跑团模式、长线养成给实物；普通单局里升级不收实物材料，按物品表折成奎支 */
+function desertEnrichedDrops(u, notes) {
+  if (!u || !u.enriched) return;
+  const mats = enrichedMaterials(u.level);
+  const real = (typeof TRPG !== "undefined" && TRPG.active) || (typeof Rogue !== "undefined" && Rogue.growthXp && Rogue.growthXp()) ||
+    !(typeof Rogue !== "undefined" && Rogue.inRunMode && Rogue.inRunMode());
+  const name = (id) => (ITEM_CATALOG[id] || {}).name || id;
+  if (real) {
+    mats.forEach(m => bagAdd(m.id, m.qty));
+    if (state.battleGains) (state.battleGains.items = state.battleGains.items || []).push(...mats);
+    notes.push(`${u.name} 体内的矿物：${mats.map(m => `${name(m.id)}×${m.qty}`).join("、")}。`);
+  } else {
+    const price = (id) => ((typeof HANDBOOK_MATERIALS !== "undefined" && HANDBOOK_MATERIALS[id.replace(/^mat_/, "")]) || {}).price || 0;
+    const k = mats.reduce((s, m) => s + price(m.id) * m.qty, 0);
+    if (k > 0 && typeof addKuizhi === "function") addKuizhi(k, notes, `${u.name} 体内的矿物（${mats.map(m => `${name(m.id)}×${m.qty}`).join("、")}，折价）`);
+  }
 }

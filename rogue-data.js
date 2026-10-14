@@ -134,6 +134,8 @@ const ROGUE_BATTLEFIELD = {
     { type: "field", what: "heal",     name: "治愈场地", weight: 1 },
     { type: "field", what: "highland", name: "高地",     weight: 2 },
     { type: "field", what: "collapseOn", name: "塌陷区域", weight: 2, regions: ["沙漠"] },
+    { type: "field", what: "coral",      name: "沙珊瑚台地", weight: 1, regions: ["沙漠"] },   // 自带高地；夜晚 / 沙暴伸出触须抓人（desert.js）
+    { type: "prop",  what: "coral_branch", name: "沙珊瑚枝", weight: 2, regions: ["沙漠"], faction: "neutral" },
     { type: "gap",   what: "bridge",   name: "不稳桥梁", weight: 2 },
     { type: "gap",   what: "wall",     name: "危墙",     weight: 2 }
   ]

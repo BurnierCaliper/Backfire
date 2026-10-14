@@ -368,6 +368,15 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **沙珊瑚：台地（场地）和珊瑚枝（配置物）；缠绕**（desert.js · `CORAL`、`coralRoundStart`、`coralRoundEnd`、`coralAvoid`、`desertFeatures`；app.js · `isHighGround`、`canDisplace`、`damageProp`、`destroyProp`；props.js；codex.js）：
+  - **沙珊瑚台地**：战斗在珊瑚上面进行，占一区的主场地，自带高地效果。白天就是高地；夜晚 / 沙暴每回合开始从缝隙里伸出一根「沙珊瑚触须」（配置物，耐久 8+3×(等级−1)，同区最多 2 根），缠住台地上随机一个地面单位。
+  - **沙珊瑚枝**：单独伸出来的一根分支（配置物，装甲生命 30+4×(等级−1)），可以被摧毁。白天没有动作；夜晚 / 沙暴每回合结束缠住同区一个地面单位（最多同时 2 个）。
+  - **缠绕**：不能移动，位移也带不走；每回合开始受到 等级+1d6 物理伤害（同化）。只有砍断才能脱困：触须被摧毁，或珊瑚枝被摧毁 / 一回合内被打掉 25% 耐久。飞行单位抓不到。
+  - **不按阵营豁免**：谁都会被抓。沙漠生物有躲开珊瑚的习性（AI 夜晚不走进有珊瑚的区，群起也不扑过去，捕食不去珊瑚那边）；赶潮沙鱼反而优先把猎物甩进珊瑚。沙灵不躲（不是原生生物），更容易被珊瑚绞死。
+  - 沙漠遭遇 15% 有一个区是沙珊瑚台地、25% 有一根珊瑚枝（`DESERT.coral`）；单局的随机战场池也加了这两样。图鉴（配置物 / 场地）补了流沙、沙珊瑚台地、珊瑚枝、触须。
+- **富集变种**（desert.js · `makeEnriched`、`desertLootMult`、`enrichedMaterials`、`desertEnrichedDrops`）：所有沙鱼开战时 10%（沙暴 25%）是富集个体——名字前加「富集」、名牌上有「富集」提示，装甲 ×1.5。打倒奎支 ×5，并按等级掉武器升级材料（1–5 级金属 1–2；6–10 级金属 2，30% 再给精炼合金；11–15 级精炼合金 1，25% 再给聚合材料；16 级起聚合材料 1，10% 再给稀有晶体）。跑团模式、长线养成给实物；普通单局里武器升级不收实物，按物品表折成奎支。第 3 回合起每回合 30% 下潜逃走，逃了什么都不掉。
+  - 测试 `tests/desert-creatures.test.js`（沙珊瑚、富集各补了用例）。
+
 - **夜晚的战场**（game.js · `applyEnv`；game.css · `.is-night`、`.night-vignette`）：时钟在夜晚（18:00–05:00）时，战场的区域底色压暗、偏蓝，四周加一圈暗角；名牌照常亮，场地颜色还看得出来。天气动效做过演示、暂不加入，记在 ROADMAP「天气动效」，草稿在 `art/weather-fx-draft.css`。
 
 - **时间看得见：昼夜现在会改变敌人的行为**（ledger.js · `DAY_NIGHT`、`isNightClock`、`clockNow`、`clockAfter`；icons.js · `Icons.daynight`；rogue.js · `routeEta`；rogue-ui.js、routemap.js、game.js 顶栏）：

@@ -60,6 +60,7 @@ function emptyField() {
     acid: false,
     ice: false,
     quicksand: false,
+    coral: false,
     collapse: 0,
     energy: false,
     energyVal: 0,
@@ -77,7 +78,9 @@ function emptyField() {
   };
 }
 
-const FIELD_EFFECT_KEYS = ["fireOn", "electric", "acid", "ice", "quicksand", "energy", "harmonic", "heal"];
+const FIELD_EFFECT_KEYS = ["fireOn", "electric", "acid", "ice", "quicksand", "coral", "energy", "harmonic", "heal"];
+/** 高地：高地本身，或者沙珊瑚台地（战斗在珊瑚上面进行，desert.js） */
+function isHighGround(f) { return !!(f && (f.highland || f.coral)); }
 
 function clearFieldEffects(f) {
   if (!f) return;
@@ -87,6 +90,7 @@ function clearFieldEffects(f) {
   f.acid = false;
   f.ice = false;
   f.quicksand = false;
+  f.coral = false;
   f.energy = false;
   f.energyVal = 0;
   f.harmonic = false;
@@ -204,6 +208,7 @@ function fieldThemeClass(f) {
   if (f.ice) return "field-ice";
   if (f.acid) return "field-acid";
   if (f.quicksand) return "field-quicksand";
+  if (f.coral) return "field-coral";
   if (f.energy) return "field-energy";
   if (f.harmonic) return "field-harmonic";
   return "";
@@ -275,6 +280,7 @@ function buildZoneBox(z) {
       <label><input type="checkbox" data-k="acid" ${f.acid ? "checked" : ""}>酸液地面</label>
       <label><input type="checkbox" data-k="ice" ${f.ice ? "checked" : ""}>冻土</label>
       <label><input type="checkbox" data-k="quicksand" ${f.quicksand ? "checked" : ""}>流沙</label>
+      <label><input type="checkbox" data-k="coral" ${f.coral ? "checked" : ""}>沙珊瑚台地</label>
       <label><input type="checkbox" data-k="energy" ${f.energy ? "checked" : ""}>能量场</label>
       <label><input type="checkbox" data-k="harmonic" ${f.harmonic ? "checked" : ""}>干涉场</label>
       <label><input type="checkbox" data-k="heal" ${f.heal ? "checked" : ""}>治愈</label>
@@ -417,6 +423,7 @@ function statusLine(u) {
     if (u.statuses.inspire) s.push("振奋");
     if (u.statuses.hide) s.push("躲藏");
     if (u.submerged) s.push("下潜");
+    if (u.entangled) s.push("被缠绕");
     if (u.resources && u.resources.flattened) s.push("摊平");
     if (u.detected && typeof isDesertPrey === "function" && isDesertPrey(u)) s.push("已被发现");
     if (sinkOf(u) && inQuicksand(u)) s.push("下陷 " + sinkOf(u) + (sinkOf(u) >= QUICKSAND.lockAt ? "（没顶）" : ""));
@@ -804,6 +811,7 @@ function fieldTags(f) {
   if (f.acid) a.push("酸液");
   if (f.ice) a.push("冻土");
   if (f.quicksand) a.push("流沙");
+  if (f.coral) a.push("沙珊瑚台地（高地）");
   if (f.energy) a.push("能量场" + (f.energyVal ? f.energyVal : ""));
   if (f.harmonic) a.push("干涉");
   if (f.heal) a.push("治愈");
@@ -1395,8 +1403,8 @@ function doCalc(input) {
     zoneMode: state.zoneMode,
     attackerField: attacker ? state.fields[attacker.zone] : {},
     targetField: target ? state.fields[target.zone] : {},
-    highA: attacker && state.fields[attacker.zone] && state.fields[attacker.zone].highland,
-    highT: target && state.fields[target.zone] && state.fields[target.zone].highland,
+    highA: attacker && isHighGround(state.fields[attacker.zone]),
+    highT: target && isHighGround(state.fields[target.zone]),
     dist,
     atkRange: input.atkRange
   });
@@ -3928,7 +3936,7 @@ function destroyGap(key, g) {
 }
 
 /** 写了血量类型的配置物：被打时按属性克制表算倍率 */
-const PROP_HP_TYPE = { battery: "armor", turret: "armor" };
+const PROP_HP_TYPE = { battery: "armor", turret: "armor", coral_branch: "armor", coral_tentacle: "armor" };
 function damageProp(p, opt, attacker) {
   const notes = [];
   const element = opt.element || "physical";
@@ -3974,12 +3982,14 @@ function damageProp(p, opt, attacker) {
   p.hp = Math.max(0, p.hp - lose);
   p.lastBy = envCreditId(attacker);   // 环境分数：最后打它的人（酸液桶渗漏记在他身上）
   notes.push(`${p.name} 耐久 −${lose} → ${p.hp}`);
+  if (typeof coralPropDamaged === "function") coralPropDamaged(p, lose, notes);   // 沙珊瑚枝：一回合打掉 25% 砍断触须
   if (p.hp <= 0) notes.push(...destroyProp(p, attacker));
   return notes;
 }
 
 function destroyProp(p, attacker) {
   const notes = [`${p.name} 被摧毁。`];
+  if (typeof coralPropDestroyed === "function") coralPropDestroyed(p, notes);   // 沙珊瑚：被抓的人脱困
   if (BARRIER_SIDE[p.kind]) {
     notes.push(...breakIronWall(p, []));
     return notes;
@@ -4128,6 +4138,11 @@ function doMoveInner(unit, dest, moveOpt) {
   // 深渊：地面单位不能主动走进去（被推进去才会坠落）；万一站在里面，可以走出来
   if (toF.abyss && !unit.flying && !moveOpt.forced) {
     paintSkillLog("深渊不能站人。飞行单位才能过。");
+    return;
+  }
+  // 沙珊瑚缠绕：动不了，只有砍断触须才能脱困（desert.js）
+  if (unit.entangled && !moveOpt.forced) {
+    paintSkillLog(`${unit.name} 被${unit.entangled.name}缠住了，动不了：先砍断触须（打珊瑚）。`);
     return;
   }
   // 流沙：下陷 2 层起自己走不出去（技能里的移动也一样；被推、被拉不受限）
@@ -4659,7 +4674,9 @@ function settleEnemyKill(target, notes) {
   const mult = typeof TRPG !== "undefined" && TRPG.active ? Math.max(1, Number(state.xpMult) || 1) : 1;
   const amt = xpDrop(rank, target.level) * mult;
   grantXpToPlayers(amt, `击杀 ${target.name}${mult > 1 ? ` · 经验 ×${mult}` : ""}`);
-  const loot = typeof rollEnemyLoot === "function" ? rollEnemyLoot(target) : (target.kit === "patrol_car" ? 30 : 0);
+  let loot = typeof rollEnemyLoot === "function" ? rollEnemyLoot(target) : (target.kit === "patrol_car" ? 30 : 0);
+  if (typeof desertLootMult === "function") loot = Math.round(loot * desertLootMult(target));   // 富集个体：奎支 ×5
+  if (typeof desertEnrichedDrops === "function") desertEnrichedDrops(target, notes);          // 富集个体：武器升级材料
   if (loot > 0 && state.battleGains) state.battleGains.kuizhi += loot;
   if (loot > 0 && typeof addKuizhi === "function") addKuizhi(loot, notes, target.name);
   else if (target.kit === "patrol_car") {
@@ -4758,6 +4775,7 @@ function canDisplace(obj) {
   if (obj.kind) return obj.movable !== false;
   if (obj.self === "anchor") return false;                          // 千钧：免受其他单位的位移效果
   if (obj.resources && obj.resources.frostShell) return false;      // 再次霜结：免受位移
+  if (obj.entangled) return false;                                  // 被沙珊瑚缠住：位移也带不走
   return !obj.noMove;
 }
 
@@ -4957,8 +4975,8 @@ function highlandBlockMod(helper, attacker, atkRange) {
   if (zoneDist(Number(attacker.zone), Number(helper.zone), Number(state.zoneMode)) < 1) return 0;
   const hf = state.fields[helper.zone] || {};
   const af = state.fields[attacker.zone] || {};
-  const atkHigh = !!af.highland;
-  const helpHigh = !!hf.highland;
+  const atkHigh = isHighGround(af);
+  const helpHigh = isHighGround(hf);
   if (atkHigh && !helpHigh) return -10;
   if (helpHigh && !atkHigh) return 10;
   return 0;
@@ -7544,8 +7562,8 @@ function dealTo(attacker, target, opt) {
     zoneMode: state.zoneMode,
     attackerField: state.fields[attacker.zone] || {},
     targetField: state.fields[target.zone] || {},
-    highA: state.fields[attacker.zone] && state.fields[attacker.zone].highland,
-    highT: state.fields[target.zone] && state.fields[target.zone].highland,
+    highA: isHighGround(state.fields[attacker.zone]),
+    highT: isHighGround(state.fields[target.zone]),
     dist,
     atkRange: opt.atkRange || "any"
   });

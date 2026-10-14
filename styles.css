@@ -474,6 +474,7 @@ label.field input:focus, label.field select:focus { outline: 1px solid var(--gol
 .battlefield .zone.field-ice { background: #e4eef6; border-color: #c5d5e4; }
 .battlefield .zone.field-acid { background: #e4f0e3; border-color: #c3d8c0; }
 .battlefield .zone.field-quicksand { background: #efe2c6; border-color: #d4bd8f; }
+.battlefield .zone.field-coral { background: #f5e1d8; border-color: #dcb3a2; }
 .battlefield .zone.field-energy { background: #ddf2f3; border-color: #b7d8da; }
 .battlefield .zone.field-harmonic { background: #f5e8ee; border-color: #e0c8d2; }
 .battlefield .zone.field-collapse { background: #e8d7b8; border-color: #cbb58a; }

@@ -728,6 +728,7 @@ function enemyIntents(u) {
   if (!u || u.isPlayer || u.dead || u.hidden || u.stunned) return [];
   const out = [];
   if (u.kit === "flint_sweeper" && Number(u.resources && u.resources.flintShots) >= 2) out.push("连击");
+  if (u.enriched) out.push("富集");   // 富集变种（desert.js）：打倒掉材料，会逃跑
   return out;
 }
 /** 蚁型特殊剿灭兵种：我方单位自己走进它所在的区时，用附赠行动退到相邻区（优先没有我方单位的区），并给走进来的人灼烧 1。

@@ -211,3 +211,90 @@ test("主动捕食：白天血量低于一半的沙鱼去咬被发现的尘虫�
   const night = mk(true, 0.9);
   assert.match(night.c.EnemyAI.plan(night.lead).meta.skillName, /捕食/, "夜晚不管血量都吃");
 });
+
+test("沙珊瑚台地：自带高地；夜晚每回合伸出触须抓人，被抓的不能移动、推不走、每回合受伤；砍断触须脱困", () => {
+  const { c, st, kolt, helu } = field([{ id: "sandfish_drive", lv: 5, zone: 2 }], { night: true, seed: "CORAL1" });
+  st.fields[1].coral = true;
+  kolt.zone = 1; helu.zone = 2;
+  assert.equal(c.isHighGround(st.fields[1]), true);
+  c.desertRoundStart([]);
+  const t = st.props.find(p => p.kind === "coral_tentacle");
+  assert.ok(t, "伸出一根触须");
+  assert.equal(kolt.entangled && kolt.entangled.src, t.id);
+  st.attackerId = kolt.id; kolt.bonus = 5; kolt.ap = 5;
+  c.doMove(kolt, 2);
+  assert.equal(kolt.zone, 1, "缠住了动不了");
+  c.displaceTo(kolt, 2, [], "被推");
+  assert.equal(kolt.zone, 1, "推也推不走");
+  const hp = c.totalHp(kolt);
+  c.desertRoundStart([]);
+  assert.ok(c.totalHp(kolt) < hp, "同化伤害");
+  c.damageProp(t, { dmg: 999, element: "physical" }, helu);
+  assert.equal(kolt.entangled, null, "触须被砍断就脱困");
+});
+
+test("沙珊瑚台地白天只是高地：不伸触须", () => {
+  const { c, st, kolt } = field([{ id: "sandfish_drive", lv: 5, zone: 2 }], { seed: "CORAL2" });
+  st.fields[1].coral = true; kolt.zone = 1;
+  c.desertRoundStart([]);
+  assert.ok(!st.props.some(p => p.kind === "coral_tentacle"));
+  assert.ok(!kolt.entangled);
+});
+
+test("沙珊瑚枝：夜晚回合结束抓人；一回合打掉 25% 耐久砍断触须；沙漠生物不往珊瑚那边走，赶潮会把人甩过去", () => {
+  const { c, st, kolt, helu, by } = field([{ id: "sandfish_drive", lv: 5, zone: 2 }, { id: "sand_beast", lv: 5, zone: 1 }], { night: true, seed: "CORAL3" });
+  const br = c.makeProp("coral_branch", 1, 5); st.props.push(br);
+  kolt.zone = 2; helu.zone = 2;
+  const sand = by("sand_beast")[0];
+  c.desertRoundEnd([]);
+  assert.ok(sand.entangled, "沙灵不躲，被抓住了");
+  assert.equal(c.coralAvoid(by("sandfish_drive")[0], 1), true, "沙鱼夜里不靠近珊瑚");
+  assert.equal(c.coralAvoid(sand, 1), false, "沙灵不躲");
+  assert.equal(c.driveDest(by("sandfish_drive")[0], kolt), 1, "甩尾往珊瑚那边甩");
+  c.damageProp(br, { dmg: Math.ceil(br.maxHp * 0.5), element: "physical" }, kolt);   // 装甲吃物理有折扣，打一半上去确保过 25%
+  assert.equal(sand.entangled, null, "一回合打掉 25% 耐久就砍断");
+  assert.ok(br.hp > 0);
+});
+
+test("沙漠生物的 AI 夜晚不走进沙珊瑚的区", () => {
+  const { c, st, kolt, helu, by } = field([{ id: "sandfish_drive", lv: 5, zone: 2 }], { night: true, seed: "CORAL4" });
+  st.fields[1].coral = true;
+  kolt.zone = 1; helu.zone = 1;
+  const fish = by("sandfish_drive")[0];
+  fish.ap = 2; st.combatPhase = "enemy";
+  const plan = c.EnemyAI.plan(fish);
+  if (plan) { plan.thunk(); }
+  assert.equal(fish.zone, 2, "猎物都在珊瑚台地上，它宁可不过去");
+});
+
+test("富集变种：装甲 ×1.5、名字加富集；打倒奎支 ×5 + 材料（沙盒给实物）；第 3 回合起会逃", () => {
+  const { c, st, by } = field([{ id: "sandfish_drive", lv: 7, zone: 2 }, { id: "sandfish_drive", lv: 7, zone: 2 }], { seed: "RICH" });
+  const [a, b] = by("sandfish_drive");
+  const armor0 = a.layers.find(l => l.type === "armor").max;
+  c.makeEnriched(a);
+  assert.match(a.name, /^富集/);
+  assert.equal(a.layers.find(l => l.type === "armor").max, Math.round(armor0 * 1.5));
+  assert.ok(c.enemyIntents(a).includes("富集"));
+  const k0 = Number(st.kuizhi) || 0, metal0 = c.bagCount("mat_metal");
+  a.layers.forEach(l => { l.current = 0; });
+  c.settleEnemyKill(a, []);
+  assert.equal((Number(st.kuizhi) || 0) - k0, 20 * 5, "赶潮掉 20 奎支，富集 ×5");
+  assert.ok(c.bagCount("mat_metal") >= metal0 + 2, "7 级：金属 ×2");
+  c.makeEnriched(b);
+  st.turnNo = 3;
+  for (let i = 0; i < 30 && !b._removed; i++) c.desertEnemyPhaseStart([]);
+  assert.equal(b._removed, true, "富集个体会逃走");
+});
+
+test("富集出现率：沙暴里更常见", () => {
+  const rate = (weather) => {
+    let n = 0, all = 0;
+    for (let i = 0; i < 80; i++) {
+      const f = field([{ id: "sandfish_drive", lv: 3, zone: 2 }, { id: "sandfish_drive", lv: 3, zone: 2 }], { weather, seed: "RR" + weather + i });
+      f.by("sandfish_drive").forEach(u => { all++; if (u.enriched) n++; });
+    }
+    return n / all;
+  };
+  const calm = rate("none"), storm = rate("sand");
+  assert.ok(storm > calm, `平时 ${calm} 沙暴 ${storm}`);
+});
