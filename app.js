@@ -2193,6 +2193,7 @@ function turnEnd() {
           notes.push(`银翼·收发代理：无人机激光射向 ${tgt.name}（纳米 −10 → ${u.resources.nano}）。`);
           const shots = 2 + (u.resources.overdrive ? 1 : 0);   // 机体强化：无人机攻击次数 +1
           for (let i = 0; i < shots && !tgt.dead; i++) {
+            // 每一发照普通命中的格式写进回合结束的日志（hitOne2 现在会写出伤害行）
             hitOne2(u, tgt, { element: "energy", mult: 0.2, diceN: 1, diceS: 12, baseBreak: 0, atk: effectiveAtk(u, state.units), atkRange: "any", usePrep: false, flags: { action: true } }, notes);
           }
         } else notes.push("银翼·收发代理：没有打得到的敌人，无人机这回合什么都不干。");
@@ -2492,6 +2493,7 @@ const SCORE_RULES = {
   reduce: 1.5,     // 我方受击时，减伤减免掉的每点伤害（天气、血量改造、角色能力……完全免伤也算）
   blockSave: 1,    // 协助格挡成功减免掉的每点伤害（空手格挡成功：少挨的那一半）
   ap: 10,          // 我方每用 1 点行动点
+  apGiftShare: 0.5,   // 队友给的行动点（意式浓缩……）：用它的那次行动得的分，这个比例记在给行动点的人身上
   bonusAction: 5,  // 我方每用 1 次附赠行动
   env: 1.2         // 环境分数：利用配置物或场地（环境）造成的伤害 / 击破 / 溢出，分数 ×1.2
 };
@@ -2644,8 +2646,55 @@ function addScore(kind, pts, u, bonus) {
   state.battleScore.total += pts + extra;
   state.battleScore.parts[kind] = (state.battleScore.parts[kind] || 0) + pts;
   if (extra > 0) state.battleScore.parts.bonus = (state.battleScore.parts.bonus || 0) + extra;
+  // 这次行动用的是队友给的行动点：分数的一部分（apGiftShare）记在给行动点的人身上（队伍总分不变）
+  const share = state._apShare;
+  if (share && u && u.id === share.actorId) {
+    const giver = unitById(share.giverId);
+    const gst = giver && giver !== u ? battleStat(giver) : null;
+    const give = gst ? Math.floor((pts + extra) * share.ratio + 1e-6) : 0;
+    if (gst && give > 0) gst.score = (gst.score || 0) + give;
+    const st = battleStat(u);
+    if (st) st.score = (st.score || 0) + pts + extra - give;
+    return;
+  }
   const st = battleStat(u);
   if (st) st.score = (st.score || 0) + pts + extra;
+}
+/** 用技能给队友加行动点（意式浓缩……）：记下是谁给的，那个行动点打出来的分数分一半给他（SCORE_RULES.apGiftShare）。
+ *  给自己加 / 返还行动点不算。行动点在回合开始重新补满时，没用掉的赠送一起作废 */
+function grantAllyAp(giver, target, n, lines) {
+  n = Math.max(0, Math.floor(Number(n) || 0));
+  if (!target || !n) return;
+  target.ap = (Number(target.ap) || 0) + n;
+  target.apMax = Math.max(Number(target.apMax) || 0, target.ap);
+  if (giver && giver.id !== target.id && target.isPlayer) {
+    target.resources = target.resources || {};
+    target.resources.apGifts = (target.resources.apGifts || []).concat([{ from: giver.id, n }]);
+  }
+  if (lines) lines.push(`${target.name} 行动点 +${n}。`);
+}
+/** 这次行动会不会用到队友给的行动点：自己的行动点先用，赠送的算最后那几点。
+ *  会用到就返回 { actorId, giverId, ratio, used }（ratio 按这次花的行动点里赠送的占多少折算） */
+function apShareFor(a, cost) {
+  const gifts = (a && a.resources && a.resources.apGifts) || [];
+  cost = Math.max(0, Number(cost) || 0);
+  if (!gifts.length || !cost) return null;
+  const gifted = gifts.reduce((s, g) => s + (Number(g.n) || 0), 0);
+  const left = (Number(a.ap) || 0) - cost;
+  const used = Math.min(cost, gifted - Math.max(0, left));
+  if (used <= 0) return null;
+  return { actorId: a.id, giverId: gifts[0].from, ratio: (SCORE_RULES.apGiftShare || 0) * used / cost, used };
+}
+/** 用掉了赠送的行动点：从最早的赠送开始扣 */
+function consumeApGifts(a, used) {
+  const gifts = (a.resources && a.resources.apGifts) || [];
+  let left = used;
+  while (left > 0 && gifts.length) {
+    const g = gifts[0], take = Math.min(left, Number(g.n) || 0);
+    g.n -= take; left -= take;
+    if (g.n <= 0) gifts.shift();
+  }
+  if (!gifts.length && a.resources) delete a.resources.apGifts;
 }
 /** 一击的额外倍率之和（各项加算） */
 function attackScoreBonus(res, target) {
@@ -4893,6 +4942,7 @@ function ambushSkipRound() {
 }
 function refreshEconomy(u) {
   if (!u || !u.isPlayer) return;
+  if (u.resources) delete u.resources.apGifts;   // 回合开始重新补行动点：上回合没用掉的赠送作废
   // 肉体操控（沙灵聚合体三阶段）：这一回合失去行动点（附赠动作照常）。标记只管一回合，不管这回合能不能行动都用掉
   const loseAp = !!u.loseApNext;
   u.loseApNext = false;
@@ -6416,8 +6466,8 @@ function performAssistBlock(helper, target, attacker, forced, atkRange) {
       const c = longgeTakeBullet(helper, notes);
       if (!c) notes.push("小朋友没有子弹，不能反击。");
       else {
-        hitOne2(helper, attacker, { element: LONGGE_AMMO[c].element, mult: 1, baseBreak: 2, atk: effectiveAtk(helper, state.units), atkRange: "melee", flags: { action: true, opportunity: true } }, notes);
         notes.push(`小朋友反击：一拳打向 ${attacker.name}（1×atk ${LONGGE_AMMO[c].name} + 2 击破）。`);
+        hitOne2(helper, attacker, { element: LONGGE_AMMO[c].element, mult: 1, baseBreak: 2, atk: effectiveAtk(helper, state.units), atkRange: "melee", flags: { action: true, opportunity: true } }, notes);
       }
     }
     if (helper.kit === "ecmo") {
@@ -6437,8 +6487,8 @@ function performAssistBlock(helper, target, attacker, forced, atkRange) {
       // 粉落汤气：格挡成功不切刀势，用另一把刀反击 1atk（鳴門 +1 击破）
       const other = helper.resources.blade === "naruto" ? "niu" : "naruto";
       if (attacker && !attacker.dead) {
-        hitOne2(helper, attacker, { element: other === "naruto" ? "ice" : "fire", mult: 1, baseBreak: other === "naruto" ? 1 : 0, atk: effectiveAtk(helper, state.units), atkRange: "any", flags: { action: true, opportunity: true } }, notes);
         notes.push(`粉落汤气：${helper.name} 用${other === "naruto" ? "鳴門" : "丹生谷"}反击 ${attacker.name}，刀势不变。`);
+        hitOne2(helper, attacker, { element: other === "naruto" ? "ice" : "fire", mult: 1, baseBreak: other === "naruto" ? 1 : 0, atk: effectiveAtk(helper, state.units), atkRange: "any", flags: { action: true, opportunity: true } }, notes);
       }
     } else if (helper.kit === "hiaki") {
       const st = helper.resources.stance || "draw";
@@ -6469,13 +6519,13 @@ function performAssistBlock(helper, target, attacker, forced, atkRange) {
       dealBreak(attacker, 1, "physical", notes, "夕夏格挡反打", { by: helper });
       if (helper.resources && helper.resources.engine) {
         const burn = Math.floor(effectiveAtk(helper, state.units) / 2);
-        hitOne2(helper, attacker, { atk: 0, mult: 0, flat: burn, element: "fire", baseBreak: 0, atkRange: "melee", flags: { action: true, opportunity: true } }, notes);
         notes.push(`引擎格挡：追加 ${burn} 火焰。`);
+        hitOne2(helper, attacker, { atk: 0, mult: 0, flat: burn, element: "fire", baseBreak: 0, atkRange: "melee", flags: { action: true, opportunity: true } }, notes);
       }
     }
     if (helper.kit === "berniel" && attacker && ownerEngineOn("xia")) {
-      hitOne2(helper, attacker, { element: "physical", mult: 1, baseBreak: 0, atk: effectiveAtk(helper, state.units), atkRange: "melee", flags: { action: true, opportunity: true } }, notes);
       notes.push("引擎下柏妮尔格挡成功：对进攻者打出 1×atk 物理。");
+      hitOne2(helper, attacker, { element: "physical", mult: 1, baseBreak: 0, atk: effectiveAtk(helper, state.units), atkRange: "melee", flags: { action: true, opportunity: true } }, notes);
     }
     if (helper.kit === "chuan" && attacker) {
       dealBreak(attacker, 2, "electric", notes, "川川格挡", { by: helper });
@@ -6705,6 +6755,7 @@ function resetBattleFlags(u) {
   r.blockUsedThisTurn = false;
   // 专长（feats.js）：每场的次数、挂在下一击 / 这一回合上的效果
   r.featUsed = {};
+  delete r.apGifts;
   delete r.whetDice; delete r.unstoppableNext; delete r.reviveGuard; delete r.alertGiven; delete r.attackSeq;
   r.chargeTurn = null; r.chargeUsed = null; r.blinkReady = null; r.blinkUsed = null;
   u.coverOnce = false;
@@ -7592,6 +7643,9 @@ function dealTo(attacker, target, opt) {
   if (attacker.kit === "naruto" && typeof passivePlus === "function" && passivePlus(attacker, 1)) br += 1;   // 佩刀+：鳴門武器人击破 +1
   const dist = zoneDist(attacker.zone, target.zone, state.zoneMode);
   if (typeof featBreakBonus === "function") br = featBreakBonus(attacker, target, opt, flags, br, dist, isReaction);   // 冲阵 / 硬骨头 / 无可阻挡
+  // 抵近射击：远距离攻击打同区（这一击是远程、或这个技能是靠抵近射击才打得到同区）→ 倍率 ×60%
+  if (attacker && attacker.isPlayer && dist === 0 && flags.action !== false && !flags.environment && !flags.aoe && !isReaction &&
+      typeof featHas === "function" && featHas(attacker, "pointblank") && (opt.atkRange === "ranged" || state._pointBlankShot === attacker.id)) flags.pointBlank = true;
   const wasDeadForGhost = !!(target && target.dead);
   // 千钧：每个攻击行动总击破 +1 只加一次——这个行动里前面的攻击已经加过，就不再加
   const res = resolveAttack({
@@ -9844,8 +9898,13 @@ function crushOnce(a, t, auto) {
 }
 /** 在没有 runSkill 闭包的地方也能打一次伤害 */
 function hitOne2(actor, target, opt, lines) {
-  const out = dealTo(actor, target, opt);
-  if (out && out.extra) lines.push(...out.extra);
+  // 和技能里的命中一样写出「→ 目标：N 伤害、击破、架势变化」（以前只收 extra，伤害那一行丢掉了，PR #48）
+  const defBefore = target && target.def != null ? Number(target.def) || 0 : null;
+  let out;
+  const captured = withLogSink(() => { out = dealTo(actor, target, opt); });
+  if (out && defBefore != null) out.defBefore = defBefore;
+  lines.push(...formatHitLines(actor, target, out, captured));
+  return out;
 }
 
 /** 错位：最外面两层「还有血」的血量层互换位置（打空的层不算）。
@@ -10690,10 +10749,16 @@ function runSkill(id, optRun) {
       const fuelGain = FUEL_SKILLS.includes(id) && xiaFuelOn() && ((findKit("xia", state.units) || {}).resources || {}).engine;
       const seqBefore = Number(state.actionSeq) || 0;
       const apBefore = a0 ? Number(a0.ap) || 0 : 0;
+      // 用队友给的行动点出手：这次行动的分数分一部分给给行动点的人（addScore 按 state._apShare 分）
+      const apShare = a0 && a0.isPlayer && !state._apShare ? apShareFor(a0, (skillCost(id) || {}).ap) : null;
+      if (apShare) state._apShare = apShare;
       // 高能自爆等这次行动完整打完再判（嵌套的行动由最外层统一判）
       state._highDefer = (Number(state._highDefer) || 0) + 1;
       try { trackHealBy(a0, () => runSkillInner(id, optRun)); }
-      finally { state._highDefer = Math.max(0, (Number(state._highDefer) || 0) - 1); }
+      finally {
+        state._highDefer = Math.max(0, (Number(state._highDefer) || 0) - 1);
+        if (apShare) { state._apShare = null; if ((Number(a0.ap) || 0) < apBefore) consumeApGifts(a0, apShare.used); }
+      }
       // 跃迁（feats.js）：这次花了行动点、真的打出了攻击
       if (a0 && typeof featAfterAction === "function") featAfterAction(a0, (Number(a0.ap) || 0) < apBefore);
       if (!state._highDefer) flushHighBooms();
@@ -10710,6 +10775,7 @@ function runSkill(id, optRun) {
 
 function runSkillInner(id, optRun) {
   optRun = optRun || {};
+  state._pointBlankShot = null;   // 抵近射击：这次行动是不是靠它才打得到同区（下面射程检查里设）
   const a = unitById(state.attackerId);
   const token = selectedToken();
   const t = skillTargetAny();
@@ -10820,16 +10886,19 @@ function runSkillInner(id, optRun) {
     let hint = "";
     if (ov) {
       const dd = zoneDist(a.zone, t.zone, state.zoneMode);
-      inRange = (dd >= ov.min && dd <= ov.max) || (dd === 0 && ov.min === 1 && typeof featHas === "function" && featHas(a, "pointblank"));
+      inRange = dd >= ov.min && dd <= ov.max;
       hint = "x";
-    } else if (typeof featHas === "function" && featHas(a, "pointblank") && t.zone != null && zoneDist(a.zone, t.zone, state.zoneMode) === 0) {
-      inRange = true;   // 抵近射击：写着「距离 1」的攻击也能打同区
     } else {
       try {
         const sk = (skillList(a) || []).find(s => s.id === id);
         if (sk) hint = (sk.hint || "") + " " + (sk.name || "");
       } catch (e) {}
       inRange = !hint || inSkillRange(a, t, hint, state.zoneMode);
+    }
+    // 抵近射击（feats.js）：只能打远处（距离 1 起）的攻击也能打同区，这样打出的攻击倍率 ×60%（dealTo · flags.pointBlank）
+    if (!inRange && t.zone != null && zoneDist(a.zone, t.zone, state.zoneMode) === 0 && typeof featHas === "function" && featHas(a, "pointblank")) {
+      const r = ov || (typeof parseSkillRange === "function" ? parseSkillRange(hint) : null);
+      if (r && r.min >= 1) { inRange = true; state._pointBlankShot = a.id; }
     }
     if (hint && !inRange) {
       const d = zoneDist(a.zone, t.zone, state.zoneMode);
@@ -11755,9 +11824,7 @@ function runSkillInner(id, optRun) {
       else {
         a.resources.liquid -= 1;
         if (mode === "ap") {
-          tgt.ap = (tgt.ap || 0) + 1;
-          tgt.apMax = Math.max(tgt.apMax || 0, tgt.ap);
-          lines.push(`${tgt.name} 行动点 +1。`);
+          grantAllyAp(a, tgt, 1, lines);   // 这个行动点打出来的分数一半记在结人身上
         } else {
           hitOne(a, tgt, { element: "acid", mult: 1, baseBreak: 2, atk });
         }
@@ -13015,6 +13082,7 @@ function runSkillInner(id, optRun) {
     lines.push("结算出错：" + err.message);
   } finally {
     if (a) delete a._dabbleNerf;
+    state._pointBlankShot = null;
   }
   const extraBy = a ? [a.instant && a.instant.overload ? "过载" : null, a.self === "conductor" ? "导体" : null].filter(Boolean) : [];
   if (extraBy.length && overloadSeq.length >= 2) {

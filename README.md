@@ -368,6 +368,15 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **战斗日志：无人机激光和其他「技能外的命中」写出伤害行**（PR #48 合并 + 补充；app.js · `hitOne2`；tests/drone-log.test.js）：瑞比的无人机激光在回合结束打出的伤害以前没写进日志，只有「激光射向 X」，血直接掉了（PR #48）。原因是这类不在技能里的命中走 `hitOne2`，它只收附带文字、从不写「→ 目标：N 伤害、击破、架势变化」这一行。合并时把 `hitOne2` 本身改成和技能里的命中同样的格式，PR 里列的其他遗留处一起好了：小朋友格挡反击、绯秋「粉落汤气」反击、夕夏引擎格挡追加火焰、柏妮尔格挡反击、特盛乱打进居合的瞬斩、狂怒碾压。这几处的说明文字挪到伤害结果前面（先说发生了什么，再写打了多少）。
+
+- **抵近射击削弱：远距离攻击打同区，倍率只有原本的 60%**（feats.js · `FEAT_CFG.pointblank`；app.js · `dealTo` 的 `flags.pointBlank`、`runSkillInner` 射程检查；engine.js · `resolveAttack`；tests/feat-content.test.js）：防止远程角色贴脸也照打全额。只算靠这张专长才打得到同区的那几下：远距离攻击（`atkRange: "ranged"`）打距离 0，或者写着「距离 1」的技能靠抵近射击打同区。本来就能打同区的攻击（近距离、任意距离）不受影响；打距离 1 照常。低地打高地不吃 −25% 这条不变。
+
+- **评分：队友给的行动点，分数分一半给提供的人**（app.js · `grantAllyAp` / `apShareFor` / `addScore`、`SCORE_RULES.apGiftShare`；tests/ap-gift-score.test.js）：用技能给队友加了行动点（目前是结人的意式浓缩），队友用这个行动点出手的那次行动，得到的分数（行动分、伤害、击破、击杀……）**50% 记在提供行动点的人身上**，队伍总分不变。
+  - 自己的行动点先用，赠送的算最后那几点：队友本来还有行动点时，先出手的那一下全算他自己的，用到赠送的那一点时才分。一次花 2 点、其中 1 点是赠送的，就分 25%。
+  - 给自己加 / 返还行动点（狂怒碾压击杀返还、饮弹红弹返还）不算。回合开始补满行动点时，没用掉的赠送作废。
+  - 以后新技能给队友加行动点，都走 `grantAllyAp`，自动按这条规则分分数；战场数据面板的说明也写上了。
+
 - **联机大厅修正（issue #44）**（relay/worker.js、relay-transport.js、online-game.js、online-ui.js、online.css、game.js · 队伍栏；tests/relay.test.js、tests/online-ui.test.js、tests/online-session-ui.test.js；docs/d3/relay.md）：
   - **幽灵座位自动清掉**：加入时转发服务先登记座位、再发 `joined`，客户端没收到就会留下一个谁也回不去的座位（最长 24 小时，占名额和昵称）。现在新版客户端收到 `joined` 后回一句确认；20 秒内没确认的座位自动清掉，还没确认就断开的立刻清掉。旧版客户端不受影响。
   - **本机任意端口都能连**：以前只认 `localhost:8080` / `127.0.0.1:8080`，换个端口打开游戏就被拒绝。现在本机任意端口默认放行（转发服务变量 `ALLOW_LOCAL_PORTS="0"` 可以关掉）。

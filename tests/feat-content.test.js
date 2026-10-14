@@ -156,6 +156,38 @@ test("抵近射击：远距离攻击能打同区；低地打高地不吃 −25%"
   assert.ok(dmg(true) > dmg(false));
 });
 
+test("抵近射击：远距离攻击打同区时倍率只有 60%；打距离 1 照常", () => {
+  const dmg = (feat, zoneT) => {
+    const b = battle([{ id: "captain_ox", lv: 3, zone: 1 }], "FC6c");
+    const foe = b.foes[0];
+    foe.layers = [{ type: "flesh", current: 900, max: 900 }];
+    b.helu.zone = 1; foe.zone = zoneT;
+    if (feat) b.helu.feats = ["pointblank"];
+    const hp0 = b.c.totalHp(foe);
+    hit(b.c, b.helu, foe, { atkRange: "ranged", atk: 50 });
+    return hp0 - b.c.totalHp(foe);
+  };
+  const far = dmg(true, 2), near = dmg(true, 1);
+  assert.ok(far > 0 && near > 0);
+  assert.ok(Math.abs(near - Math.round(far * 0.6)) <= 1, `同区 ${near} ≈ 距离 1 的 ${far} × 60%`);
+  assert.equal(dmg(false, 2), far, "距离 1 有没有专长都一样");
+});
+
+test("抵近射击：写着距离 1 的技能（Helumica 普攻）靠它打同区，也只有 60%", () => {
+  const run = (zoneT) => {
+    const b = battle([{ id: "captain_ox", lv: 3, zone: 1 }], "FC6d", (c, S, k, h) => { h.feats = ["pointblank"]; });
+    const foe = b.foes[0];
+    foe.layers = [{ type: "flesh", current: 900, max: 900 }];
+    b.helu.zone = 1; foe.zone = zoneT; b.helu.ap = 2;
+    const hp0 = b.c.totalHp(foe);
+    use(b.c, b.S, b.helu, "helu_aa", foe.id);
+    return hp0 - b.c.totalHp(foe);
+  };
+  const far = run(2), near = run(1);
+  assert.ok(near > 0, "同区打得到");
+  assert.ok(near < far, `同区 ${near} < 距离 1 的 ${far}`);
+});
+
 test("荒原行者：空隙花附赠不检定；进冻土不受击破；近程打飞行不额外花附赠", () => {
   const { c, S, kolt } = battle([{ id: "thug_knife", lv: 3, zone: 2 }], "FC7", (c, S, k) => { k.feats = ["wanderer"]; });
   kolt.zone = 1;
