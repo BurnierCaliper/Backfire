@@ -3936,7 +3936,7 @@ function destroyGap(key, g) {
 }
 
 /** 写了血量类型的配置物：被打时按属性克制表算倍率 */
-const PROP_HP_TYPE = { battery: "armor", turret: "armor", coral_branch: "armor", coral_tentacle: "armor" };
+const PROP_HP_TYPE = { battery: "armor", turret: "armor", coral_branch: "armor", coral_tentacle: "armor", death_statue: "armor" };
 function damageProp(p, opt, attacker) {
   const notes = [];
   const element = opt.element || "physical";
@@ -3975,6 +3975,8 @@ function damageProp(p, opt, attacker) {
       notes.push(`${p.name}是${LAYER[type] || type}生命：${ELE[element] || element}属性 ×${m}${m !== chartOnly ? "（含天气 / 场地）" : ""}（${raw} → ${lose}）。`);
     }
   }
+  // 沙珊瑚白天吸热：火焰不伤它，反而回复同样多的耐久（desert.js）
+  if (typeof coralAbsorbsFire === "function" && coralAbsorbsFire(p, element, lose, notes)) return notes;
   if (lose <= 0) {
     notes.push(p.kind === "boom" ? `${p.name} 只怕火焰、能量和雷电：${ELE[element] || element}属性打不动它。` : `${p.name} 没有受到伤害。`);
     return notes;
@@ -3984,6 +3986,7 @@ function damageProp(p, opt, attacker) {
   notes.push(`${p.name} 耐久 −${lose} → ${p.hp}`);
   if (typeof coralPropDamaged === "function") coralPropDamaged(p, lose, notes);   // 沙珊瑚枝：一回合打掉 25% 砍断触须
   if (p.hp <= 0) notes.push(...destroyProp(p, attacker));
+  if (typeof coralGasBurst === "function") coralGasBurst(p, element, attacker, notes);   // 夜晚被火打中：可燃气爆燃
   return notes;
 }
 
@@ -4707,6 +4710,7 @@ function settleEnemyKill(target, notes) {
 
 function sweepDeadEnemies() {
   const notes = [];
+  if (typeof deathStatueSweep === "function") deathStatueSweep(notes);   // 被沙珊瑚缠住时死掉的：留下死亡雕像
   const list = (state.units || []).slice();
   list.forEach(u => {
     if (!u || u.isPlayer || u._removed) return;
@@ -4977,9 +4981,11 @@ function highlandBlockMod(helper, attacker, atkRange) {
   const af = state.fields[attacker.zone] || {};
   const atkHigh = isHighGround(af);
   const helpHigh = isHighGround(hf);
-  if (atkHigh && !helpHigh) return -10;
-  if (helpHigh && !atkHigh) return 10;
-  return 0;
+  // 死亡雕像（desert.js）：同区有一座，挨隔区的远程攻击时协助格挡 +10%（几座都只算一次）
+  const statue = typeof statueCoverIn === "function" && statueCoverIn(helper.zone) ? 10 : 0;
+  if (atkHigh && !helpHigh) return -10 + statue;
+  if (helpHigh && !atkHigh) return 10 + statue;
+  return statue;
 }
 
 /** 最终协助格挡率，5%–100%；绯秋居合「必定成功」是 100%。

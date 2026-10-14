@@ -31,7 +31,8 @@ function propKindName(kind) {
     scrapwall: "废铁墙",
     dome: "防护罩",
     coral_branch: "沙珊瑚枝",
-    coral_tentacle: "沙珊瑚触须"
+    coral_tentacle: "沙珊瑚触须",
+    death_statue: "死亡雕像"
   })[kind] || kind;
 }
 
@@ -83,6 +84,10 @@ function makeProp(kind, zone, level) {
   }
   if (kind === "coral_tentacle") {
     base.hp = base.maxHp = 8 + 3 * (lv - 1);
+    base.faction = "neutral";
+  }
+  if (kind === "death_statue") {   // 被沙珊瑚缠住时死掉的单位，被珊瑚分泌的金属骨骼覆盖（desert.js）：掩体
+    base.hp = base.maxHp = 20 + 3 * (lv - 1);
     base.faction = "neutral";
   }
   if (kind === "scrapwall") {   // 亡命之王「回防命令」：耐久由命令掷骰决定

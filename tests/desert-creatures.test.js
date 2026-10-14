@@ -311,7 +311,51 @@ test("沙漠生物的材料：低级为主，不掉稀有晶体 / 赫心结晶�
   const { c: c2, st, kolt } = field([{ id: "sandfish_drive", lv: 5, zone: 2 }], { seed: "BRMET" });
   const br = c2.makeProp("coral_branch", 2, 5); st.props.push(br);
   const m0 = c2.bagCount("mat_metal");
-  c2.damageProp(br, { dmg: 9999, element: "fire" }, kolt);
+  c2.damageProp(br, { dmg: 9999, element: "physical" }, kolt);
   assert.ok(!st.props.includes(br));
   assert.equal(c2.bagCount("mat_metal"), m0 + 1);
+});
+
+test("可燃气：白天火焰打珊瑚反而回复；夜晚被火打中整区爆燃（不分敌我，包括被缠住的人），每回合最多一次", () => {
+  const day = field([{ id: "sandfish_drive", lv: 5, zone: 2 }], { seed: "GAS1" });
+  const br = day.c.makeProp("coral_branch", 1, 5); day.st.props.push(br);
+  br.hp = 20;
+  day.c.damageProp(br, { dmg: 6, element: "fire" }, day.kolt);
+  assert.ok(br.hp > 20, `白天吸热回复：${br.hp}`);
+
+  const { c, st, kolt, helu, by } = field([{ id: "sandfish_drive", lv: 5, zone: 2 }, { id: "sand_beast", lv: 5, zone: 1 }], { night: true, seed: "GAS2" });
+  const b2 = c.makeProp("coral_branch", 1, 5); st.props.push(b2);
+  const sand = by("sand_beast")[0];
+  kolt.zone = 1; helu.zone = 2;
+  sand.entangled = { src: b2.id, name: b2.name, level: 5 };
+  const hpK = c.totalHp(kolt), hpS = c.totalHp(sand), hpH = c.totalHp(helu), bh = b2.hp;
+  c.damageProp(b2, { dmg: 2, element: "fire" }, helu);
+  assert.ok(c.totalHp(kolt) < hpK, "同区的我方也被炸");
+  assert.ok(c.totalHp(sand) < hpS, "被缠住的沙灵也被炸");
+  assert.equal(c.totalHp(helu), hpH, "别的区不受影响");
+  assert.ok(b2.hp < bh - 2, "珊瑚自己也挨了爆燃");
+  const hp2 = c.totalHp(kolt);
+  c.damageProp(b2, { dmg: 2, element: "fire" }, helu);
+  assert.equal(c.totalHp(kolt), hp2, "同一回合不会再炸一次");
+});
+
+test("死亡雕像：被缠住时死掉的留下雕像（掩体：同区挨隔区远程协助格挡 +10%）；打碎掉金属", () => {
+  const { c, st, kolt, helu, by } = field([{ id: "sandfish_drive", lv: 5, zone: 2 }, { id: "sand_beast", lv: 5, zone: 1 }], { night: true, seed: "STATUE" });
+  const b = c.makeProp("coral_branch", 1, 5); st.props.push(b);
+  const sand = by("sand_beast")[0];
+  sand.entangled = { src: b.id, name: b.name, level: 5 };
+  sand.layers.forEach(l => { l.current = 0; }); sand.dead = true;
+  c.sweepDeadEnemies();
+  const statue = st.props.find(p => p.kind === "death_statue");
+  assert.ok(statue, "留下雕像");
+  assert.match(statue.name, /沙灵/);
+  assert.equal(statue.zone, 1);
+  kolt.zone = 1; helu.zone = 1;
+  const fish = by("sandfish_drive")[0]; fish.zone = 2;
+  assert.equal(c.highlandBlockMod(helu, fish, "ranged"), 10, "隔区远程：+10%");
+  assert.equal(c.highlandBlockMod(helu, fish, "melee"), 0, "近战不算");
+  const m0 = c.bagCount("mat_metal");
+  c.damageProp(statue, { dmg: 9999, element: "physical" }, kolt);
+  assert.equal(c.bagCount("mat_metal"), m0 + 1);
+  assert.equal(c.statueCoverIn(1), false);
 });

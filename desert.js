@@ -453,9 +453,11 @@ function coralPropDamaged(p, lose, notes) {
 }
 /** 珊瑚被摧毁（app.js · destroyProp） */
 function coralPropDestroyed(p, notes) {
+  if (!isCoralProp(p) && p.kind !== "death_statue") return;
   if (p.kind === "coral_branch" || p.kind === "coral_tentacle") releaseEntangled(p.id, notes, "脱困（缠住他的珊瑚断了）");
   // 打碎珊瑚枝：金属骨骼散落一地（低级材料）
   if (p.kind === "coral_branch") grantDesertMaterials([{ id: "mat_metal", qty: (Number(p.level) || 1) >= 10 ? 2 : 1 }], notes, `${p.name} 碎掉的金属骨骼`);
+  if (p.kind === "death_statue") grantDesertMaterials([{ id: "mat_metal", qty: 1 }], notes, `${p.name} 碎掉的金属骨骼`);
 }
 /** 沙漠的战场特征（run.js · regionFeatures）：沙珊瑚台地 / 沙珊瑚枝 */
 function desertFeatures(zoneMode) {
@@ -516,4 +518,56 @@ function grantDesertMaterials(mats, notes, source) {
 function desertEnrichedDrops(u, notes) {
   if (!u || !u.enriched) return;
   grantDesertMaterials(enrichedMaterials(u.level), notes, `${u.name} 体内的矿物`);
+}
+
+/* ---------- 可燃气通道：白天吸热，夜晚被火打中爆燃 ---------- */
+const isCoralProp = (p) => !!p && (p.kind === "coral_branch" || p.kind === "coral_tentacle");
+/** 白天：火焰打沙珊瑚不掉耐久，反而回复同样多（app.js · damageProp）。返回 true 表示已经处理 */
+function coralAbsorbsFire(p, element, amount, notes) {
+  if (!isCoralProp(p) || element !== "fire" || desertNight() || !(amount > 0)) return false;
+  const before = p.hp;
+  p.hp = Math.min(p.maxHp, p.hp + amount);
+  notes.push(`${p.name} 白天在吸热：火焰没有伤到它，反而回复 ${p.hp - before} 点耐久 → ${p.hp}。`);
+  return true;
+}
+/** 夜晚 / 沙暴：火焰点着了珊瑚里的可燃气，整区爆燃（不分敌我，包括被它缠住的人）；每根珊瑚每回合最多一次 */
+function coralGasBurst(p, element, attacker, notes) {
+  if (!isCoralProp(p) || element !== "fire" || !desertNight() || p._burstTurn === state.turnNo) return;
+  p._burstTurn = state.turnNo;
+  const lv = Number(p.level) || 1;
+  const r = takeDice(2, 6, lv);
+  notes.push(`${p.name} 里的可燃气被点着了：${p.zone} 区爆燃，所有单位 ${r.text} 火焰 + 1 击破！`);
+  if (typeof markAoeZone === "function") markAoeZone(p.zone, { element: "fire", dmg: r.total, attacker, from: p.zone });
+  (state.units || []).filter(u => !u.hidden && !u.dead && !u._removed && Number(u.zone) === Number(p.zone)).forEach(u => {
+    const fake = unitOf("可燃气爆燃", lv, [{ type: "armor", hp: 1 }], 0, 0);
+    fake.zone = p.zone;
+    fake.envSrc = true; fake.envBy = typeof envCreditId === "function" ? envCreditId(attacker) : null;
+    dealTo(fake, u, { atk: 0, mult: 0, flat: r.total, element: "fire", baseBreak: 1, flags: { action: true, aoe: true, blockResolved: true } });
+  });
+  // 珊瑚自己也挨这一下（通常会砍断触须）
+  if ((state.props || []).includes(p) && p.hp > 0) {
+    p.hp = Math.max(0, p.hp - r.total);
+    notes.push(`${p.name} 自己也被炸到：耐久 −${r.total} → ${p.hp}`);
+    coralPropDamaged(p, r.total, notes);
+    if (p.hp <= 0 && typeof destroyProp === "function") notes.push(...destroyProp(p, attacker));
+  }
+}
+
+/* ---------- 死亡雕像：被缠住时死掉的，被珊瑚的金属骨骼覆盖（掩体） ---------- */
+/** 清理死亡单位时（app.js · sweepDeadEnemies）：被缠住时死掉的留下一座雕像。我方只有真正死亡才算（濒死不算） */
+function deathStatueSweep(notes) {
+  (state.units || []).forEach(u => {
+    if (!u || !u.entangled || u._statued || !u.dead || u.hidden) return;
+    u._statued = true;
+    const lv = Number(u.entangled.level) || Number(u.level) || 1;
+    const st = makeProp("death_statue", u.zone, lv);
+    st.name = `死亡雕像（${String(u.name).replace(/^富集/, "")}）`;
+    state.props.push(st);
+    u.entangled = null;
+    notes.push(`${u.name} 至死都没被放开：沙珊瑚分泌的金属骨骼把它覆盖了，留下一座${st.name}（掩体）。`);
+  });
+}
+/** 这一区有没有死亡雕像（掩体：挨隔区的远程攻击时协助格挡 +10%） */
+function statueCoverIn(z) {
+  return (state.props || []).some(p => p.kind === "death_statue" && p.hp > 0 && Number(p.zone) === Number(z));
 }

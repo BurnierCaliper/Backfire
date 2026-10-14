@@ -368,6 +368,11 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **沙珊瑚的可燃气通道、死亡雕像**（desert.js · `coralAbsorbsFire`、`coralGasBurst`、`deathStatueSweep`、`statueCoverIn`；app.js · `damageProp`、`sweepDeadEnemies`、`highlandBlockMod`；props.js；codex.js）：
+  - **可燃气**：白天火焰打沙珊瑚枝 / 触须不掉耐久，反而回复同样多（吸热）。夜晚 / 沙暴被火焰打中：照常掉耐久，并且同区所有单位（不分敌我，包括被缠住的人）受到 等级+2d6 火焰 +1 击破（范围伤害，不能协助格挡），珊瑚自己也挨这一下（通常会砍断触须）。每根珊瑚每回合最多爆燃一次。火攻是最快的救人办法，但被缠住的队友也会被炸。
+  - **死亡雕像**：被缠住时死掉的单位（我方只有真正死亡才算，濒死不算）留下「死亡雕像（名字）」配置物：装甲生命 20+3×(等级−1)，不能移动。掩体：同区的单位挨其他区打来的远程攻击时，协助格挡 +10%（几座只算一次，和高地修正叠加）。打碎掉金属。
+  - 测试 `tests/desert-creatures.test.js`。
+
 - **沙珊瑚：台地（场地）和珊瑚枝（配置物）；缠绕**（desert.js · `CORAL`、`coralRoundStart`、`coralRoundEnd`、`coralAvoid`、`desertFeatures`；app.js · `isHighGround`、`canDisplace`、`damageProp`、`destroyProp`；props.js；codex.js）：
   - **沙珊瑚台地**：战斗在珊瑚上面进行，占一区的主场地，自带高地效果。白天就是高地；夜晚 / 沙暴每回合开始从缝隙里伸出一根「沙珊瑚触须」（配置物，耐久 8+3×(等级−1)，同区最多 2 根），缠住台地上随机一个地面单位。
   - **沙珊瑚枝**：单独伸出来的一根分支（配置物，装甲生命 30+4×(等级−1)），可以被摧毁。白天没有动作；夜晚 / 沙暴每回合结束缠住同区一个地面单位（最多同时 2 个）。
