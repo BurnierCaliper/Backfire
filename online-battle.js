@@ -278,10 +278,17 @@
     });
     /** 键盘：1–9 选技能，Esc / 右键取消，空格结束行动（输入框里打字时不管） */
     const SPACE_SAFE = "button, a[href], summary, [role=button], [role=tab], [role=option], [contenteditable], [tabindex]:not([tabindex='-1'])";
+    // 鼠标 / 触屏点过的按钮会留着焦点：记下来，空格不当成「按下它」（:focus-visible 在按键那一刻也会变真，用不了）；按 Tab 换焦点后才算键盘焦点
+    let pointerFocusEl = null;
+    if (typeof document !== "undefined") {
+      document.addEventListener("pointerdown", e => { pointerFocusEl = e.target && e.target.closest ? e.target.closest(SPACE_SAFE) : null; }, true);
+      document.addEventListener("keydown", e => { if (e.key === "Tab") pointerFocusEl = null; }, true);
+    }
+    const kbdFocus = el => { const hit = el && el.closest ? el.closest(SPACE_SAFE) : null; return !!hit && hit !== pointerFocusEl; };
     function onKey(e) {
       if (!el.isConnected || e.target.closest && e.target.closest("input, textarea, select")) return;
-      // 焦点在按钮等可以操作的东西上时，空格交给浏览器「按下它」，不结束行动
-      if (e.key === " " && e.target.closest && e.target.closest(SPACE_SAFE)) return;
+      // 用键盘把焦点移到按钮等可以操作的东西上时，空格交给浏览器「按下它」，不结束行动（鼠标点过留下的焦点不算）
+      if (e.key === " " && e.target.closest && e.target.closest(SPACE_SAFE) && kbdFocus(e.target)) return;
       const ui = last.ui || {};
       if (e.key === "Escape" && ui.armed && cb.onCancel) { cb.onCancel(); e.preventDefault(); return; }
       if (/^[1-9]$/.test(e.key)) {

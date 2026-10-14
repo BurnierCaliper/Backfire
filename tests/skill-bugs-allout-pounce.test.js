@@ -91,3 +91,24 @@ test("没有全力以赴时破势不动绯秋架势", () => {
   assert.equal(foes[0].def, 0);
   assert.equal(h.def, 5);
 });
+
+test("猛击反震把自己打进失衡：和正常攻击一样写失衡、敌人排上协助攻击；屹立不倒时不掉架势", () => {
+  const { c, S, foes, K } = setup(["hiaki"]);
+  const h = K("hiaki");
+  h.resources.stance = "waki"; h.def = h.defMax = 1;
+  h.resources.smashNext = true;
+  S.assistQueue = [];
+  const notes = [];
+  c.smashableBreak(h, foes[0], 1, "fire", notes, "特盛乱打");
+  assert.equal(h.def, 0);
+  assert.equal(h.stunned, true);
+  assert.ok(notes.some(t => /失衡/.test(t)), "写出失衡");
+  assert.ok((S.assistQueue || []).length > 0, "敌人可以对失衡的绯秋协助攻击");
+  const b = setup(["hiaki"]);
+  const h2 = b.K("hiaki");
+  h2.def = h2.defMax = 3;
+  h2.resources.smashNext = true;
+  h2.resources.standTurn = true;
+  b.c.smashableBreak(h2, b.foes[0], 1, "fire", [], "特盛乱打");
+  assert.equal(h2.def, 3, "屹立不倒：反震不掉架势");
+});

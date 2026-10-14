@@ -9518,23 +9518,22 @@ function procFx(unit, fx) {
 }
 const PROC_DOT_FX = { burn: "burn", selfburn: "selfBurn", shock: "shock", corr: "corr", reso: "reso", high: "high" };
 
-/** 不经过攻击的击破（状态、场地、技能直接给的击破……）。
- *  opt.by：造成这次击破的单位——打进失衡时它不能接自己的协助攻击（queueAssistAttack） */
 /** 直接结算击破、不走 dealTo 的技能（特盛乱打、破势、蓝弹气化）也吃「下一击」上的猛击（全力以赴）：
- *  只有第一下吃到——击破 ×2、攻击者承受原击破（架势归 0 失衡），然后用掉，和 dealTo 打多个目标时一样 */
+ *  只有第一下吃到——击破 ×2、攻击者承受原击破，然后用掉，和 dealTo 打多个目标时一样。
+ *  反震也走 dealBreak：打进失衡时写失衡、结束自我效果、敌人可以协助攻击，屹立不倒 / 坚挺照算（和正常攻击的反震一样） */
 function smashableBreak(a, u, amount, element, notes, reason) {
   if (a && a.resources && a.resources.smashNext) {
     a.resources.smashNext = false;
     notes.push(`全力以赴：对 ${u.name} 的${reason}带猛击（击破 ×2，${a.name} 承受原击破）。`);
     dealBreak(u, amount * 2, element, notes, reason + "·猛击", { by: a });
-    a.def = Math.max(0, (Number(a.def) || 0) - amount);
-    notes.push(`猛击反震：${a.name} 架势 −${amount}`);
-    if (a.def <= 0) a.stunned = true;
+    dealBreak(a, amount, "none", notes, "猛击反震", { by: u });
     return;
   }
   dealBreak(u, amount, element, notes, reason, { by: a });
 }
 
+/** 不经过攻击的击破（状态、场地、技能直接给的击破……）。
+ *  opt.by：造成这次击破的单位——打进失衡时它不能接自己的协助攻击（queueAssistAttack） */
 function dealBreak(unit, amount, element, notes, reason, opt) {
   amount = Math.max(0, Math.floor(Number(amount) || 0));
   if (!unit || !amount) return;

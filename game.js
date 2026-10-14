@@ -2409,6 +2409,13 @@
 
   /* ================= 10. 回合流程 ================= */
   const SPACE_SAFE = "button, a[href], summary, [role=button], [role=tab], [role=option], [contenteditable], [tabindex]:not([tabindex='-1'])";
+  // 鼠标 / 触屏点过的按钮会留着焦点：记下来，空格不当成「按下它」（:focus-visible 在按键那一刻也会变真，用不了）；按 Tab 换焦点后才算键盘焦点
+  let pointerFocusEl = null;
+  if (typeof document !== "undefined") {
+    document.addEventListener("pointerdown", e => { pointerFocusEl = e.target && e.target.closest ? e.target.closest(SPACE_SAFE) : null; }, true);
+    document.addEventListener("keydown", e => { if (e.key === "Tab") pointerFocusEl = null; }, true);
+  }
+  const kbdFocus = el => { const hit = el && el.closest ? el.closest(SPACE_SAFE) : null; return !!hit && hit !== pointerFocusEl; };
   /** 空格：热座 / 联机里结束的是当前这个单位的行动；它还有行动点或附赠没用时先问一句 */
   async function spaceStartOrEnd() {
     if (state.combatStarted && hotseat() && !G.depth && !G.ended && !choiceResolve) {
@@ -4328,8 +4335,9 @@
       if (e.key === "Escape") { e.preventDefault(); disarm(); return; }
       if ((e.key === "z" || e.key === "Z") && (e.ctrlKey || e.metaKey)) { e.preventDefault(); doUndo(); return; }
       if (e.key === " ") {
-        // 焦点在按钮、链接等可以操作的东西上时，空格是「按下它」，不是结束行动
-        if (e.target && e.target.closest && e.target.closest(SPACE_SAFE)) return;
+        // 用键盘把焦点移到按钮、链接等可以操作的东西上时，空格是「按下它」，不是结束行动；
+        // 鼠标点过的按钮也会留着焦点，那不算（不然点完撤销再按空格会又撤销一次）
+        if (e.target && e.target.closest && e.target.closest(SPACE_SAFE) && kbdFocus(e.target)) return;
         e.preventDefault(); spaceStartOrEnd(); return;
       }
       if (e.key === "Tab") {

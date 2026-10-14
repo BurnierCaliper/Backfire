@@ -110,4 +110,12 @@ test("联机战斗画面：焦点在按钮上按空格不结束行动；焦点�
   await page.evaluate(() => document.activeElement.blur());
   await page.keyboard.press(" ");
   assert.equal(await page.evaluate(() => window.ended), 1);
+  // 鼠标点过的按钮留着焦点：这不算键盘焦点，空格照样结束行动（不会再按一次那个按钮）
+  await page.evaluate(() => {   // 标题画面盖在上面，直接派发「点下去」再聚焦（和真的点一下一样留着焦点）
+    const b = document.querySelector(".ol-battle [data-ob-skill]");
+    b.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    b.focus();
+  });
+  await page.keyboard.press(" ");
+  assert.equal(await page.evaluate(() => window.ended), 2);
 });
