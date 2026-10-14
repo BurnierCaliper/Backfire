@@ -205,6 +205,29 @@ test("D3 display: paused connection disables action and reconnect leaves the dis
   assert.deepEqual(o.errors, []);
 });
 
+test("联机跑团主持人：大厅里勾选队员换人；探索时顶栏有「角色分配」入口；战斗中说明不能改", async t => {
+  const o = await open(t); if (!o) return; const { page } = o;
+  await page.evaluate(() => {
+    OnlineGame.partyChoices = () => [{ kit: "ruby", name: "瑞比", on: true }, { kit: "hiaki", name: "绯秋", on: true }, { kit: "kolt", name: "柯尔特", on: false }];
+    OnlineGame.setParty = kits => { fixture.calls.push({ kind: "setParty", args: kits }); return { ok: true }; };
+    fixture.set({ active: true, isHost: true, identity: { id: "gm" }, screen: "lobby" });
+  });
+  await page.waitForSelector("[data-party-kit=kolt]");
+  await page.check("[data-party-kit=kolt]"); await page.uncheck("[data-party-kit=ruby]");
+  await page.click('[data-online="setParty"]');
+  assert.deepEqual((await calls(page)).find(c => c.kind === "setParty").args, ["hiaki", "kolt"]);
+  await page.evaluate(() => fixture.set({ screen: "exploration" }));
+  await page.click('[data-online="openAssign"]');
+  assert.equal(await page.isVisible("#ol-assign-head"), true);
+  assert.equal(await page.locator("[data-assign]").count(), 2);
+  await page.evaluate(() => fixture.set({ screen: "battle" }));
+  assert.equal(await page.locator('[data-online="openAssign"]').count(), 0);
+  // 面板还开着（刚才点开的）：战斗中只写说明，没有分配下拉框
+  assert.match(await page.locator("#online-panel").innerText(), /战斗中不能改角色分配/);
+  assert.equal(await page.locator("[data-assign]").count(), 0);
+  assert.deepEqual(o.errors, []);
+});
+
 test("加入房间只要填房间码：转发服务默认用 Backfire 的那个；本机存不了昵称也不报错", async t => {
   const o = await open(t, true); if (!o) return; const { page } = o;
   await page.getByRole("button", { name: /加入房间/ }).click();

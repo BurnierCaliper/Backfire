@@ -1,6 +1,7 @@
 // Optional relay: identity, room lifecycle and bounded forwarding only. No game
 // rules, battle state, private-message history or save files are stored here.
 const FRAME_MAX = 50 * 1024, MESSAGE_MAX = 2 * 1024 * 1024, WIRE = 1;
+const SEAT_CONFIRM_MS = 20000;   // 新座位要在这么久之内确认（客户端收到 joined 后的 confirm），不然当幽灵座位清掉（env.SEAT_CONFIRM_MS 可改，测试用）
 const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const encoder = new TextEncoder();
 const size = value => encoder.encode(value).length;
@@ -32,21 +33,36 @@ async function limitedBody(request, limit) {
   return new TextDecoder().decode(joined);
 }
 function origins(env) { return String(env.ALLOWED_ORIGINS || "").split(",").map(x => x.trim()).filter(Boolean); }
-function originAllowed(request, env) { const origin = request.headers.get("Origin"); return !origin || origins(env).includes(origin); }
+// 本机开的网页（localhost / 127.0.0.1 / [::1] 的任意端口）默认都放行，不用一个个端口写进 ALLOWED_ORIGINS；
+// 部署时把 ALLOW_LOCAL_PORTS 设成 "0" 可以关掉，只认 ALLOWED_ORIGINS 里写的
+const LOCAL_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d{1,5})?$/;
+function originAllowed(request, env) {
+  const origin = request.headers.get("Origin");
+  if (!origin || origins(env).includes(origin)) return true;
+  return String(env.ALLOW_LOCAL_PORTS ?? "1") !== "0" && LOCAL_ORIGIN.test(origin);
+}
 function cors(request, env) {
   const origin = request.headers.get("Origin");
   return origin && originAllowed(request, env) ? { "Access-Control-Allow-Origin": origin, "Vary": "Origin", "Access-Control-Allow-Methods": "POST,GET,OPTIONS", "Access-Control-Allow-Headers": "Content-Type", "Access-Control-Max-Age": "600" } : {};
+}
+// 被拒绝的来源也带上 CORS 头：网页才读得到「这个网站来源未获许可」，不然只看得到「连不上」
+function denyHeaders(request) {
+  const origin = request.headers.get("Origin");
+  return origin ? { "Access-Control-Allow-Origin": origin, "Vary": "Origin" } : {};
 }
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url), headers = cors(request, env);
-    if (!originAllowed(request, env)) return json({ error: "这个网站来源未获转发服务许可" }, 403);
+    if (!originAllowed(request, env)) return json({ error: "这个网站来源未获转发服务许可", code: "origin", origin: request.headers.get("Origin") }, 403, denyHeaders(request));
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers });
     if (url.pathname === "/health") return json({ ok: true, wire: WIRE }, 200, headers);
     const joining = /^\/rooms\/([A-Z2-9]{6})$/.exec(url.pathname);
     const creating = request.method === "POST" && url.pathname === "/rooms";
-    if (!creating && !(joining && request.method === "GET" && request.headers.get("Upgrade")?.toLowerCase() === "websocket")) return json({ error: "不存在的转发接口" }, 404, headers);
+    const upgrading = request.headers.get("Upgrade")?.toLowerCase() === "websocket";
+    // 不带 WebSocket 升级的 GET /rooms/XXXXXX：只查房间在不在（连接失败时网页用来说清楚是哪里出了问题）
+    const checking = joining && request.method === "GET" && !upgrading;
+    if (!creating && !(joining && request.method === "GET")) return json({ error: "不存在的转发接口" }, 404, headers);
     // Rate-limit before room lookup, including failed room-code guesses. The IP
     // is only hashed into a short-lived limiter object; never broadcast or log it.
     const admissionId = await hash(request.headers.get("CF-Connecting-IP") || "local");
@@ -70,6 +86,7 @@ export default {
       } catch (error) { return json({ error: error.message || "开房请求无效" }, 400, headers); }
     }
     const room = env.ROOMS.get(env.ROOMS.idFromName(joining[1]));
+    if (checking) { const r = await room.fetch("https://internal/exists"); return json(await r.json(), r.status, headers); }
     return room.fetch(new Request("https://internal/socket", request));
   }
 };
@@ -96,6 +113,7 @@ export class Room {
     ctx.blockConcurrencyWhile(async () => { this.meta = await ctx.storage.get("room") || null; });
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
   }
+  confirmMs() { return Math.max(1000, Number(this.env.SEAT_CONFIRM_MS) || SEAT_CONFIRM_MS); }
   packet(kind, values = {}) { return { v: WIRE, protocol: this.meta.protocol, build: this.meta.build, kind, ...values }; }
   connections() { return this.ctx.getWebSockets().filter(ws => ws.readyState === 1); }
   data(ws) { return ws.deserializeAttachment() || {}; }
@@ -124,7 +142,8 @@ export class Room {
         return json({ roomCode: input.code, hostToken, hostId: "host", expiresAt: this.meta.expiresAt, protocol: input.protocol, build: input.build });
       });
     }
-    if (!this.meta || this.meta.expiresAt <= Date.now()) return json({ error: "房间不存在或已过期" }, 404);
+    if (!this.meta || this.meta.expiresAt <= Date.now()) return json({ error: "房间不存在或已过期", code: "no_room" }, 404);
+    if (new URL(request.url).pathname === "/exists") return json({ ok: true, hostOnline: !!this.host() });
     if (this.connections().length >= 12) return json({ error: "连接过多，请稍后重试" }, 429);
     const pair = new WebSocketPair(), [client, server] = Object.values(pair);
     this.ctx.acceptWebSocket(server);
@@ -150,6 +169,12 @@ export class Room {
     const isHost = connection.role === "host";
     if (connection.frames > (isHost ? 2400 : 120) || connection.bytes > (isHost ? 12 * 1024 * 1024 : 256 * 1024)) { this.error(ws, "消息过快，请稍后重试", message.id, "rate_limit", true); return; }
     ws.serializeAttachment(connection);
+    // 新座位的确认：客户端收到 joined（拿到恢复令牌）后马上回一句。20 秒内没确认的座位当成幽灵座位清掉（alarm）
+    if (message.kind === "confirm") {
+      const seat = this.meta.seats.find(p => p.id === connection.id);
+      if (seat && seat.pending) { delete seat.pending; await this.ctx.storage.put("room", this.meta); }
+      return;
+    }
     if (message.kind === "ready") {
       if (!isHost || typeof message.ready !== "boolean" || typeof message.id !== "string" || !/^[a-zA-Z0-9:_-]{1,96}$/.test(message.id)) { this.error(ws, "只有主持人可恢复房间，且须提供有效消息编号", message.id); return; }
       connection.ready = message.ready; ws.serializeAttachment(connection); this.publish();
@@ -201,6 +226,7 @@ export class Room {
         const digest = await hash(message.token);
         seat = this.meta.seats.find(p => p.tokenHash === digest && p.role === message.role);
         if (!seat) throw new Error("恢复令牌无效");
+        if (seat.pending) { delete seat.pending; await this.ctx.storage.put("room", this.meta); }   // 拿着令牌回来 = 收到过 joined
       } else {
         if (message.role === "host") throw new Error("主持人必须提供恢复令牌");
         const name = nameOf(message.name);
@@ -209,17 +235,29 @@ export class Room {
         if (!this.host()) throw new Error("主持人离线，请等待主持人回来");
         issuedToken = randomHex(32);
         seat = { id: "p_" + randomHex(12), role: "player", name, tokenHash: await hash(issuedToken) };
+        // 会回确认的客户端（新版）：座位先记成待确认，20 秒内收不到确认就清掉（没收到 joined 的人不会留下幽灵座位）
+        if (message.confirm === true) seat.pending = Date.now();
         this.meta.seats.push(seat); await this.ctx.storage.put("room", this.meta);
+        if (seat.pending) await this.ctx.storage.setAlarm(Math.min(this.meta.expiresAt, Date.now() + this.confirmMs()));
       }
       // A valid token may replace a stale connection, but nickname alone never
       // chooses an existing seat. Old socket close events cannot evict the new one.
       for (const peer of this.authenticated()) if (this.data(peer).id === seat.id) { peer.serializeAttachment({ replaced: true }); peer.close(4001, "replaced"); }
       ws.serializeAttachment({ ...this.data(ws), id: seat.id, role: seat.role, ready: false });
-      this.send(ws, this.packet("joined", { identity: { id: seat.id, name: seat.name, role: seat.role, roomCode: this.meta.code }, resumeToken: issuedToken, ...this.status() }));
+      this.send(ws, this.packet("joined", { identity: { id: seat.id, name: seat.name, role: seat.role, roomCode: this.meta.code }, resumeToken: issuedToken, ...(seat.pending ? { confirmSeat: true } : {}), ...this.status() }));
       this.publish();
     } catch (error) { this.error(ws, error.message || "加入失败", null, "join", true); }
   }
-  webSocketClose(ws, code, reason) { try { ws.close(code === 1006 ? 1011 : code, reason); } catch (_) {} this.publish(); }
+  webSocketClose(ws, code, reason) {
+    try { ws.close(code === 1006 ? 1011 : code, reason); } catch (_) {}
+    // 还没确认就断开的新座位：直接清掉（这个人没拿到恢复令牌，回不来）
+    const id = this.data(ws).id, seat = id && this.meta && this.meta.seats.find(p => p.id === id && p.pending);
+    if (seat && !this.authenticated().some(peer => this.data(peer).id === id)) {
+      this.meta.seats = this.meta.seats.filter(p => p !== seat);
+      return this.ctx.storage.put("room", this.meta).then(() => this.publish());
+    }
+    this.publish();
+  }
   webSocketError(ws) { try { ws.close(1011, "connection_error"); } catch (_) {} this.publish(); }
   async alarm() {
     if (!this.meta || this.meta.expiresAt <= Date.now()) {
@@ -232,6 +270,15 @@ export class Room {
       if (!c.id && Date.now() - c.opened >= 15000) ws.close(1008, "join_timeout");
       else if (!c.id) pending = true;
     }
+    // 幽灵座位：20 秒内没确认的新座位清掉，在线的连接也断开（4003 released：令牌作废，可以用同一个昵称重新加入）
+    const stale = this.meta.seats.filter(p => p.pending && Date.now() - p.pending >= this.confirmMs());
+    if (stale.length) {
+      this.meta.seats = this.meta.seats.filter(p => !stale.includes(p));
+      await this.ctx.storage.put("room", this.meta);
+      for (const peer of this.authenticated()) if (stale.some(p => p.id === this.data(peer).id)) { peer.serializeAttachment({ released: true }); try { peer.close(4003, "unconfirmed"); } catch (_) {} }
+      this.publish();
+    }
+    if (this.meta.seats.some(p => p.pending)) pending = true;
     await this.ctx.storage.setAlarm(pending ? Math.min(this.meta.expiresAt, Date.now() + 15000) : this.meta.expiresAt);
   }
 }

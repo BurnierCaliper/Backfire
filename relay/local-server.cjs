@@ -11,7 +11,7 @@ async function createLocalRelayServer(options = {}) {
     // Miniflare 5 uses a shared resource persistence root; the legacy
     // durableObjectsPersist option is no longer forwarded by its converter.
     ...(options.persistPath ? { resourcePersistencePath: path.resolve(options.persistPath) } : {}),
-    bindings: { ALLOWED_ORIGINS: (options.origins || ["null", "http://localhost:8080", "http://127.0.0.1:8080"]).join(","), ROOM_TTL_SECONDS: String(options.ttlSeconds || 86400) }
+    bindings: { ALLOWED_ORIGINS: (options.origins || ["null", "http://localhost:8080", "http://127.0.0.1:8080"]).join(","), ROOM_TTL_SECONDS: String(options.ttlSeconds || 86400), ...(options.seatConfirmMs ? { SEAT_CONFIRM_MS: String(options.seatConfirmMs) } : {}) }
   }));
   try { const address = await runtime.ready; return { url: address.origin, runtime, close: () => runtime.dispose() }; }
   catch (error) { await runtime.dispose(); throw error; }

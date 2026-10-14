@@ -3010,15 +3010,25 @@
       all.filter(w => isWeaponUnit(w) && (w.weaponOf === h.kit || (h.linkedKits || []).includes(w.kit))).forEach(w => { if (!ordered.includes(w)) ordered.push(w); });
     });
     all.forEach(u => { if (!ordered.includes(u)) ordered.push(u); });
+    // 热座 / 联机：角色卡上写出是谁在操控（武器人跟着主人）
+    const hsView = window.HotseatGame && HotseatGame.isActive && HotseatGame.isActive() ? HotseatGame.getView() : null;
+    const operatorOf = (u) => {
+      if (!hsView) return "";
+      const hero = isWeaponUnit(u) ? (state.units.find(h => h.kit === u.weaponOf) || u) : u;
+      const row = (hsView.heroes || []).find(h => h.id === hero.id);
+      const p = row && (hsView.players || []).find(x => x.id === row.owner);
+      return p ? p.name : "";
+    };
     ordered.forEach((u, i) => {
       const s = snapUnit(u);
+      const op = operatorOf(u);
       const b = el("button", "pc" + (isWeaponUnit(u) ? " weapon" : "") + (s.dead ? " downed" : "") +
         (u.id === G.actorId ? " on" : "") + ((s.ap + s.bonus === 0 && !s.dying) || s.stunned ? " off" : ""));
       const pct = sumMax(s) ? (sumCur(s) / sumMax(s)) * 100 : 0;
       let econ = "";
       for (let k = 0; k < Math.max(s.apMax, s.ap); k++) econ += `<i class="econ-ap${k < s.ap ? " on" : ""}"></i>`;
       for (let k = 0; k < Math.max(s.bonusMax, s.bonus); k++) econ += `<i class="econ-bonus${k < s.bonus ? " on" : ""}"></i>`;
-      b.innerHTML = `<span class="n"><span>${esc(u.name)}</span><span class="k">${i < 9 ? "" : ""}</span></span>
+      b.innerHTML = `<span class="n"><span>${esc(u.name)}</span><span class="k">${i < 9 ? "" : ""}</span></span>${op ? `<span class="pc-op" title="操控者">${esc(op)}</span>` : ""}
         <div class="mini"><i style="width:${pct}%"></i></div>
         <div class="u-econ">${s.dead ? '<span style="font-size:11px;color:#9d9081">倒下</span>' : econ}${!s.dead && s.stunned ? '<span style="font-size:11px;color:var(--gold)">失衡</span>' : ""}${!s.dead && s.dying ? '<span style="font-size:11px;color:var(--foe)">濒死</span>' : ""}</div>`;
       b.dataset.id = u.id;

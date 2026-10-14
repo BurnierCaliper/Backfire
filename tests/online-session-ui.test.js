@@ -888,3 +888,24 @@ test("联机：选目标时能选的敌人在战场上标编号，同名敌人�
   assert.equal(await hpOf(other), before.other, "没点的那只不挨打");
   assert.deepEqual(errors, []);
 });
+
+test("联机跑团（issue #44）：主持人在大厅换队员——留下的角色还是原来的人操控，新加入的归主持人；玩家画面跟着更新", { timeout: 120000 }, async t => {
+  const f = await fixture(t); if (!f) return;
+  const { host, alice, aliceId } = f;
+  const before = await host.evaluate(() => HotseatGame.getView().heroes.map(h => ({ kit: state.units.find(u => u.id === h.id).kit, owner: h.owner })));
+  const keep = before.find(h => h.owner === aliceId);
+  assert.ok(keep, "fixture 给 Alice 分了角色");
+  const choices = await host.evaluate(() => OnlineGame.partyChoices());
+  const extra = choices.find(c => !c.on);
+  assert.ok(extra, "还有没上场的角色可以换上来");
+  const kits = [keep.kit, extra.kit];
+  assert.deepEqual(await host.evaluate(k => OnlineGame.setParty(k), kits), { ok: true });
+  const after = await host.evaluate(() => HotseatGame.getView().heroes.map(h => ({ kit: state.units.find(u => u.id === h.id).kit, owner: h.owner })));
+  const gm = await host.evaluate(() => OnlineGame.getView().identity.id);
+  assert.deepEqual(after.map(h => h.kit).sort(), kits.slice().sort());
+  assert.equal(after.find(h => h.kit === keep.kit).owner, aliceId, "留下的角色还归 Alice");
+  assert.equal(after.find(h => h.kit === extra.kit).owner, gm, "新加入的归主持人");
+  const name = extra.name;
+  await alice.waitForFunction(n => (OnlineGame.getView().heroes || []).some(h => h.name === n), name);
+  assert.deepEqual(f.errors, []);
+});

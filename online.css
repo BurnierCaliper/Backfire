@@ -20,6 +20,8 @@
 .ol-button.ol-primary:hover:not(:disabled) { background: #ffda55; }
 .ol-muted { color: var(--sk-muted, #a8977b); }
 .ol-relay { margin: 12px 0; }
+.ol-party-list { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 8px 0 10px; }
+.ol-ui label.ol-check { display: inline-flex; align-items: center; gap: 6px; margin: 0; }
 .ol-relay > summary { cursor: pointer; color: var(--sk-muted, #a8977b); }
 .ol-relay[open] > summary { margin-bottom: 4px; }
 .ol-online { color: var(--sk-mint, #39e6b4); }
