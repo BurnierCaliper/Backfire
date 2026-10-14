@@ -59,6 +59,7 @@ function emptyField() {
     electric: false,
     acid: false,
     ice: false,
+    quicksand: false,
     collapse: 0,
     energy: false,
     energyVal: 0,
@@ -76,7 +77,7 @@ function emptyField() {
   };
 }
 
-const FIELD_EFFECT_KEYS = ["fireOn", "electric", "acid", "ice", "energy", "harmonic", "heal"];
+const FIELD_EFFECT_KEYS = ["fireOn", "electric", "acid", "ice", "quicksand", "energy", "harmonic", "heal"];
 
 function clearFieldEffects(f) {
   if (!f) return;
@@ -85,6 +86,7 @@ function clearFieldEffects(f) {
   f.electric = false;
   f.acid = false;
   f.ice = false;
+  f.quicksand = false;
   f.energy = false;
   f.energyVal = 0;
   f.harmonic = false;
@@ -201,6 +203,7 @@ function fieldThemeClass(f) {
   if (f.electric) return "field-electric";
   if (f.ice) return "field-ice";
   if (f.acid) return "field-acid";
+  if (f.quicksand) return "field-quicksand";
   if (f.energy) return "field-energy";
   if (f.harmonic) return "field-harmonic";
   return "";
@@ -271,6 +274,7 @@ function buildZoneBox(z) {
       <label><input type="checkbox" data-k="electric" ${f.electric ? "checked" : ""}>高压</label>
       <label><input type="checkbox" data-k="acid" ${f.acid ? "checked" : ""}>酸液地面</label>
       <label><input type="checkbox" data-k="ice" ${f.ice ? "checked" : ""}>冻土</label>
+      <label><input type="checkbox" data-k="quicksand" ${f.quicksand ? "checked" : ""}>流沙</label>
       <label><input type="checkbox" data-k="energy" ${f.energy ? "checked" : ""}>能量场</label>
       <label><input type="checkbox" data-k="harmonic" ${f.harmonic ? "checked" : ""}>干涉场</label>
       <label><input type="checkbox" data-k="heal" ${f.heal ? "checked" : ""}>治愈</label>
@@ -413,6 +417,7 @@ function statusLine(u) {
     if (u.statuses.inspire) s.push("振奋");
     if (u.statuses.hide) s.push("躲藏");
     if (u.submerged) s.push("下潜");
+    if (sinkOf(u) && inQuicksand(u)) s.push("下陷 " + sinkOf(u) + (sinkOf(u) >= QUICKSAND.lockAt ? "（没顶）" : ""));
     if (u.statuses.advantage) s.push("优势");
     if (u.statuses.chase) s.push("紧追");
   }
@@ -796,6 +801,7 @@ function fieldTags(f) {
   if (f.electric) a.push("高压");
   if (f.acid) a.push("酸液");
   if (f.ice) a.push("冻土");
+  if (f.quicksand) a.push("流沙");
   if (f.energy) a.push("能量场" + (f.energyVal ? f.energyVal : ""));
   if (f.harmonic) a.push("干涉");
   if (f.heal) a.push("治愈");
@@ -1260,6 +1266,81 @@ function zoneWeather(zone) {
 function fieldExempt(unit) {
   return !!(unit && (unit.shelterTurn || unit.isolate));
 }
+
+/* ---------- 流沙（场地 quicksand）：下陷 u.sink 0–3，越挣扎陷得越深 ----------
+ *   走进流沙 +1；回合结束时，这回合在流沙里花过行动点 +1，一个行动点都没花 −1（冷静下来慢慢浮出）。
+ *   每回合开始：失去 生命上限 × 5% × 下陷层数（窒息：不分属性、不吃克制、没有击破）。
+ *   下陷 2 层起自己走不出去（技能里的移动也不行）；被同伴「拉出流沙」或者被任何位移带出这一区，下陷清零。
+ *   3 层「没顶」：不能用行动点和附赠动作，也不能协助攻击 / 协助格挡，直到脱困（下陷降到 2 层以下）。
+ *   飞行、保释 / 隔离中的单位不受影响；沙灵和沙漠生物（沙里的原住民）完全免疫。 */
+const QUICKSAND = { maxSink: 3, pctPerSink: 0.05, stuckAt: 2, lockAt: 3, natives: ["沙灵", "沙漠生物"] };
+function quicksandImmune(u) {
+  if (!u || u.flying || !Array.isArray(u.layers) || fieldExempt(u)) return true;
+  const fac = !u.isPlayer && typeof factionOf === "function" ? factionOf(u) : null;
+  return !!fac && QUICKSAND.natives.indexOf(fac) >= 0;
+}
+function inQuicksand(u) {
+  if (!u || offField(u)) return false;
+  const f = state.fields && state.fields[u.zone];
+  return !!(f && f.quicksand) && !quicksandImmune(u);
+}
+function sinkOf(u) { return Math.max(0, Number(u && u.sink) || 0); }
+/** 自己走不出流沙（2 层起） */
+function sinkStuck(u) { return inQuicksand(u) && sinkOf(u) >= QUICKSAND.stuckAt; }
+/** 没顶（3 层）：不能用行动点、附赠动作，不能协助 */
+function sinkLocked(u) { return inQuicksand(u) && sinkOf(u) >= QUICKSAND.lockAt; }
+function addSink(u, n, notes, why) {
+  if (!inQuicksand(u)) return;
+  const before = sinkOf(u);
+  const after = Math.max(0, Math.min(QUICKSAND.maxSink, before + n));
+  if (after === before) return;
+  u.sink = after;
+  if (notes) {
+    notes.push(`${u.name} ${why ? why + "：" : ""}下陷 ${before} → ${after}` +
+      (after >= QUICKSAND.lockAt ? "（没顶：不能用行动点和附赠动作，也不能协助）"
+        : after >= QUICKSAND.stuckAt && before < QUICKSAND.stuckAt ? "（自己走不出去了）" : "") + "。");
+  }
+}
+function clearSink(u, notes, why) {
+  if (!u || !sinkOf(u)) { if (u) u.sink = 0; return; }
+  u.sink = 0;
+  if (notes) notes.push(`${u.name} ${why || "离开流沙"}，下陷清零。`);
+}
+/** 回合结束：这回合花过行动点就陷得更深，没花就慢慢浮出来。sideIsPlayer：结算哪一方 */
+function quicksandTurnEnd(sideIsPlayer, notes) {
+  (state.units || []).forEach(u => {
+    if (!!u.isPlayer !== !!sideIsPlayer) return;
+    const spent = !!u._sinkSpent;
+    u._sinkSpent = false;
+    if (!inQuicksand(u)) { if (sinkOf(u)) clearSink(u, notes, "不在流沙里"); return; }
+    addSink(u, spent ? 1 : -1, notes, spent ? "在流沙里挣扎" : "没有挣扎，慢慢浮出");
+  });
+}
+/** 回合开始：窒息伤害 */
+function tickQuicksandFor(u, notes) {
+  if (!inQuicksand(u) || !sinkOf(u)) return;
+  const pct = QUICKSAND.pctPerSink * sinkOf(u) * envMult(u);
+  const dmg = Math.max(1, Math.floor(totalMaxHp(u) * pct));
+  applyTrueDamage(u.layers, dmg);
+  spawnFloater(u, dmg, "physical");
+  notes.push(`${u.name} 下陷 ${sinkOf(u)} 层，窒息：失去生命上限 ${Math.round(pct * 100)}%（${dmg}）。`);
+  applyKnockdown(u, notes, { shpLoss: dmg, cause: "窒息" });
+}
+/** 拉出流沙（我方通用动作，附赠）：同区或相邻区一名下陷的友方，下陷清零；在相邻区就把他拉到自己这一区 */
+function sandPullTargets(a) {
+  if (!a) return [];
+  return fieldUnits().filter(u => u.isPlayer && u.id !== a.id && !u.dead && inQuicksand(u) && sinkOf(u) > 0 &&
+    zoneDist(Number(a.zone), Number(u.zone), state.zoneMode) <= 1 && !lineBlocked(a.zone, u.zone));
+}
+function runSandPull(a, t, lines) {
+  if (!t || sandPullTargets(a).indexOf(t) < 0) { lines.push("先选一名陷在流沙里的友方（同区或相邻区）。"); return; }
+  if (Number(t.zone) !== Number(a.zone)) {
+    displaceTo(t, Number(a.zone), lines, `被 ${a.name} 拉出流沙`);
+    clearSink(t, lines, "被拉出流沙");
+  } else {
+    clearSink(t, lines, `被 ${a.name} 拽了上来`);
+  }
+}
 /** 恶劣环境（这个单位，到回合结束）/ 末日（整场，无法停止）：天气与场地效果翻倍；两个叠加再翻一倍（×4）。返回 1 / 2 / 4 */
 function envMult(unit) {
   return (state.apocalypse ? 2 : 1) * (unit && unit.harshEnv ? 2 : 1);
@@ -1711,6 +1792,8 @@ function beginRound(notes) {
     if (f.energy) tickEnergyFieldFor(u, f, notes);
     if (f.acid && !u.flying && u.kit !== "spreader") tickAcidFieldFor(u, weather, notes);   // 播撒者被击落后也不吃自己铺的酸液（手册：对自身无效）
     if (f.heal) tickHealFieldFor(u, weather, notes);
+    if (f.quicksand) tickQuicksandFor(u, notes);
+    else if (sinkOf(u)) clearSink(u, notes, "已经不在流沙里");
     if (f.ice && !u.flying && !fieldExempt(u)) {
       notes.push(`${u.name} 处于冻土：对冰强制 25% 易伤。离开或进入时会自动结算运动检定与冰击破。`);
     }
@@ -1976,12 +2059,15 @@ function endPlayerTurn() {
       appendLog(`${u.name} 本回合未打出第一次攻击，「准备」消失。`);
     }
   });
+  // 流沙：我方这回合花过行动点就陷得更深，没花就浮出来一点
+  { const sk = []; quicksandTurnEnd(true, sk); sk.forEach(t => appendLog(t)); }
   appendLog("玩家回合结束。");
   startEnemyPhase();
 }
 
 function endEnemyTurn() {
   snapshot();
+  { const sk = []; quicksandTurnEnd(false, sk); sk.forEach(t => appendLog(t)); }   // 流沙：敌人一方
   appendLog("敌人回合结束。");
   turnEnd();
 }
@@ -4037,6 +4123,11 @@ function doMoveInner(unit, dest, moveOpt) {
     paintSkillLog("深渊不能站人。飞行单位才能过。");
     return;
   }
+  // 流沙：下陷 2 层起自己走不出去（技能里的移动也一样；被推、被拉不受限）
+  if (sinkStuck(unit) && !moveOpt.forced) {
+    paintSkillLog(`${unit.name} 下陷 ${sinkOf(unit)} 层，自己走不出流沙：要等下陷降下来，或者让同伴拉出来、被位移带出去。`);
+    return;
+  }
   const cross = canCross(unit, from, dest, false);
   if (!cross) return;
   // 空隙：地面单位这一步改花 1 行动点（不花附赠行动），还要过简单难度运动检定；技能里的移动不花行动点，过不去
@@ -4107,6 +4198,7 @@ function doMoveInner(unit, dest, moveOpt) {
   if (typeof bpAfterEnemyMove === "function") bpAfterEnemyMove(unit, notes);   // 单局图纸：稳妥的距离
   if (typeof hunterAfterMove === "function") hunterAfterMove(unit, notes);     // 蚁型特殊剿灭兵种：有人走进来就退开
   if (typeof dormantAfterMove === "function") dormantAfterMove(unit, notes);   // 休眠的敌人：有人进它的区就醒
+  quicksandAfterZoneChange(unit, notes, "走出流沙");
   enterFrozenGround(unit, notes);
   applyAbyssFall(unit, from, notes);
   if (typeof afterMove === "function") afterMove(unit, notes);
@@ -4118,6 +4210,12 @@ function doMoveInner(unit, dest, moveOpt) {
 
 /** 进入冻土：地面单位受 1 冰击破（雪天翻倍、恶劣环境 / 末日再翻倍；保释豁免）。自己走进去、紧追跟进、被推进去都算。
  *  走通用击破：坚挺、屹立不倒、冰属性打进失衡的冰冻加伤、塌陷计数都照算 */
+/** 换区之后的流沙：离开原来的流沙下陷清零；走进 / 被推进流沙 +1 */
+function quicksandAfterZoneChange(unit, notes, why) {
+  if (!unit || unit.kind || unit.dead) return;
+  if (sinkOf(unit)) clearSink(unit, notes, why || "离开流沙");
+  if (inQuicksand(unit)) addSink(unit, 1, notes, "陷进流沙");
+}
 function enterFrozenGround(unit, notes) {
   if (!unit || unit.kind || unit.flying || unit.dead) return;
   const toF = state.fields[unit.zone] || emptyField();
@@ -4668,6 +4766,7 @@ function displaceTo(obj, dest, notes, reason, opts) {
   }
   obj.zone = dest;
   notes.push(`${obj.name}${reason ? " " + reason : " 被移动"}：${from} 区 → ${dest} 区。`, ...crossing);
+  quicksandAfterZoneChange(obj, notes, "被带出流沙");
   enterFrozenGround(obj, notes);
   applyAbyssFall(obj, from, notes);
   if (!obj.kind) chaseFollow(obj, notes);   // 被推走也算移动：紧追的人跟上
@@ -4802,11 +4901,13 @@ function prepDieSides(u) {
 function spendAp(u, n, reason) {
   n = n || 1;
   if (!u) return true;
+  if (sinkLocked(u)) { appendLog(`${u.name} 陷在流沙里没顶，无法${reason || "行动"}。`); return false; }
   if ((u.ap || 0) < n) {
     appendLog(`${u.name} 行动点不足（${u.ap || 0}/${u.apMax || 0}），无法${reason || "行动"}。`);
     return false;
   }
   u.ap -= n;
+  if (inQuicksand(u)) u._sinkSpent = true;   // 流沙：这回合花过行动点，回合结束陷得更深
   syncBladeTwin(u);   // 绯秋两把刀的武器人共享行动点（佩刀）
   scoreSpend(u, n, 0);
   appendLog(logSinkActive()
@@ -4818,6 +4919,7 @@ function spendAp(u, n, reason) {
 function spendBonus(u, n, reason) {
   n = n || 1;
   if (!u) return true;
+  if (sinkLocked(u)) { appendLog(`${u.name} 陷在流沙里没顶，无法${reason || "行动"}。`); return false; }
   if ((u.bonus || 0) < n) {
     appendLog(`${u.name} 附赠行动不足（${u.bonus || 0}/${u.bonusMax || 0}），无法${reason || "行动"}。`);
     return false;
@@ -5621,7 +5723,7 @@ function unitIsCombatReady(u) {
 }
 
 function unitCanFight(u) {
-  return !!(unitIsCombatReady(u) && !u.stunned);
+  return !!(unitIsCombatReady(u) && !u.stunned && !sinkLocked(u));   // 流沙没顶：不能协助
 }
 
 /** 协助攻击的目标已经不在了：死亡、被移出战场、倒地受保护（濒死没起身），或最内层生命归零。
@@ -6098,7 +6200,7 @@ function autoEnemyBlockers(target) {
   // 赤牙：受击时花 1 附赠为自己格挡（第九章，70%，见 party.js · FIXED_BLOCK）
   const self = target.kit === "chixia" && !target.stunned && (Number(target.bonus) || 0) >= 1 ? [target] : [];
   return self.concat(fieldUnits().filter(u => {
-    if (u.isPlayer || u.id === target.id || u.stunned || u.dead || u.hidden) return false;
+    if (u.isPlayer || u.id === target.id || u.stunned || u.dead || u.hidden || sinkLocked(u)) return false;
     if (Number(u.zone) !== Number(target.zone)) return false;
     if (typeof hostileTo === "function" && hostileTo(u, target)) return false;   // 敌对阵营不替它挡
     if (u.kit === "captain_ox") return true;
@@ -6147,7 +6249,7 @@ function eligibleBlockers(target, job) {
   return state.units.filter(u =>
     u.isPlayer && !u.hidden && !u.isPartner && canStand(u) && (u.id !== target.id || isSoloHero(u)) &&   // 单人模式可以给自己协助格挡
     Number(u.zone) === Number(target.zone) &&
-    !u.stunned && crushOut(u) && ((u.bonus || 0) >= 1 || target.coverBy === u.id) &&
+    !u.stunned && !sinkLocked(u) && crushOut(u) && ((u.bonus || 0) >= 1 || target.coverBy === u.id) &&
     blockChance(u) != null && tried.indexOf(u.id) < 0 &&
     (typeof bpCanAssistBlock !== "function" || bpCanAssistBlock(u))
   );
@@ -8307,6 +8409,7 @@ function skillFlowSteps(id, actor, picks) {
   picks = picks || {};
   if (!actor) return [];
   if (typeof featOfSkill === "function" && featOfSkill(id)) return featSkillSteps(actor, id, picks);
+  if (id === "sand_pull") return [{ key: "target", type: "unit", optional: false, label: "把谁拉出流沙（距离 1 以内陷住的友方）", units: sandPullTargets(actor) }];
   if (PUSH_SKILLS.includes(id)) {
     // 这两个技能只打同区：目标就在自己这一区，推去的区 = 这一区相连的区
     const zones = zoneNeighbors(actor.zone);
@@ -10069,6 +10172,7 @@ const SKILL_REQUIREMENT = {
   tou_taunt:      (a) => (res(a).tauntLeft || 0) <= 0 ? "本场嘲讽次数已用尽"
     : roleLv(a) < 10 && res(a).tauntTurn != null && res(a).tauntTurn === state.turnNo ? "10 级前每回合只能嘲讽一次" : null,
   solo_support:   (a) => soloSupportError(a),
+  sand_pull:      (a) => sandPullTargets(a).length ? null : "距离 1 以内没有陷在流沙里的友方",
   tou_sonic:      (a) => (res(a).shield || 0) < 1 ? "没有圣盾"
     : !skillFlowSteps("tou_sonic", a, {}).length ? "距离 1 以内没有可以打的目标" : null,
   kolt_short:     (a) => ((findKit("kolt", state.units) || a).resources || {}).bit === "acid" ? "直流短接需要电钻模式"
@@ -10342,6 +10446,11 @@ function skillTargetError(a, id, t) {
   if (typeof featOfSkill === "function" && featOfSkill(id)) {
     const fl = state.skillFlow;
     return featSkillTargetWhy(a, id, t, fl && fl.id === id ? fl.picks : {});
+  }
+  if (id === "sand_pull") {
+    const fl = state.skillFlow;
+    const tgt = fl && fl.id === id && fl.picks && fl.picks.target ? unitById(fl.picks.target) : t;
+    if (!tgt || sandPullTargets(a).indexOf(tgt) < 0) return "要选距离 1 以内陷在流沙里的友方";
   }
   if (id === "role_renew" && t && !t.isPlayer) return "续命只能对友方使用";
   // 职责技能：分步里选的对象不合法就在扣点之前拦下
@@ -10752,6 +10861,10 @@ function runSkillInner(id, optRun) {
       // 专长动作（feats.js）：行动点上面已经扣过
       const fl = state.skillFlow;
       runFeatSkill(a, id, { t, picks: (fl && fl.picks) || {}, lines, hitOne });
+    } else if (id === "sand_pull") {
+      const fl = state.skillFlow;
+      const tgt = fl && fl.picks && fl.picks.target ? unitById(fl.picks.target) : t;
+      runSandPull(a, tgt, lines);
     } else if (id === "weapon_retrieve") {
       const here = fallenWeapons(a).filter(w => Number(w.zone) === Number(a.zone));
       const pick = state.skillFlow && state.skillFlow.picks && state.skillFlow.picks.weapon;

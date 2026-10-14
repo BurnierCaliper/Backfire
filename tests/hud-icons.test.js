@@ -132,3 +132,10 @@ test("下潜：挂下潜徽章，浮上来就不挂", () => {
   assert.match(HI.badge("submerged", ""), /data-fx="submerged"/);
   assert.deepEqual(HI.unitBadges({ submerged: false, statuses: {} }), []);
 });
+
+test("下陷：挂下陷徽章，层数跟着走", () => {
+  const b = HI.unitBadges({ sink: 2, statuses: {} });
+  assert.deepEqual(b.map(x => x.key), ["sink"]);
+  assert.equal(b[0].stack, "2");
+  assert.deepEqual(HI.unitBadges({ sink: 0, statuses: {} }), []);
+});

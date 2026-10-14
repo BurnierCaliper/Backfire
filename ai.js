@@ -275,6 +275,7 @@ const EnemyAI = (function () {
       }
     }
     if (spec.dist == null || u.noMove || spec.fixed) return null;   // fixed：不会主动移动
+    if (typeof sinkStuck === "function" && sinkStuck(u)) return null;   // 陷在流沙里走不出去
     const d = zdist(u.zone, target.zone);
     if (d === spec.dist) return null;
     if (d > spec.dist) {                            // 太远 → 接近一格
@@ -597,6 +598,7 @@ const EnemyAI = (function () {
   function aiPlan(u) {
     if (u && u.trainingDummy) return null;   // 训练场的木桩：不行动
     if (u && u.dormant) return null;         // 休眠：不行动，直到被叫醒
+    if (typeof sinkLocked === "function" && sinkLocked(u)) return null;   // 流沙没顶：不能行动
     const plan = aiPlanBase(u);
     if (!u || !u.flying || state.weather !== "sand" || u.noMove || u.self === "frost") return plan;
     if (typeof touDuelVictim === "function" && touDuelVictim(u)) return plan;   // 决一死战中不移动

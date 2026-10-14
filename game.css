@@ -166,6 +166,7 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
 .g-zone.field-electric { background: #f4efd8; border-color: #ddd4a8; }
 .g-zone.field-ice { background: #e4eef6; border-color: #c5d5e4; }
 .g-zone.field-acid { background: #e4f0e3; border-color: #c3d8c0; }
+.g-zone.field-quicksand { background: #efe2c6; border-color: #d4bd8f; }
 .g-zone.field-energy { background: #ddf2f3; border-color: #b7d8da; }
 .g-zone.field-harmonic { background: #f5e8ee; border-color: #e0c8d2; }
 .g-zone.field-collapse { background: #e8d7b8; border-color: #cbb58a; }

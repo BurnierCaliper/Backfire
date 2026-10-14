@@ -594,6 +594,7 @@ function checkPerksFor(kit, prof, hpLow) {
 }
 
 function skillCost(id) {
+  if (id === "sand_pull") return { bonus: 1 };
   // 专长动作：按专长里写的消耗（默认 1 行动点）
   const featCost = typeof featSkillCost === "function" ? featSkillCost(id) : null;
   if (featCost) return featCost;
@@ -1024,6 +1025,10 @@ function skillList(unit) {
   // 武器人倒下后：主人走到它倒下的区，花 1 行动点取回（本场不能再唤出，武器 atk / 格挡加成减半）
   if (typeof fallenWeapons === "function" && fallenWeapons(unit).length) {
     add({ id: "weapon_retrieve", name: "取回武器", hint: "同区 · 取回倒下的武器人 · 本场不能再唤出，武器 atk 和格挡加成减半", bare: true });
+  }
+  // 流沙（app.js · QUICKSAND）：把陷住的同伴拉出来
+  if (typeof sandPullTargets === "function" && sandPullTargets(unit).length) {
+    add({ id: "sand_pull", name: "拉出流沙", hint: "附赠 · 距离1以内 · 一名陷在流沙里的友方下陷清零（在相邻区就拉到自己这一区）", bare: true });
   }
   // 专长带的战斗动作（feats.js）
   if (typeof featSkills === "function") featSkills(unit).forEach(add);

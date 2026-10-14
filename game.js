@@ -203,7 +203,7 @@
     } catch (e) { return null; }
   }
   const WEATHER_NAME = { none: "常态", heat: "酷暑", snow: "雪天", acid: "酸雨", thunder: "雷鸣", glow: "微光", sand: "沙暴", phase: "相位" };
-  const FIELD_CLASSES = ["field-fire", "field-electric", "field-ice", "field-acid", "field-energy", "field-harmonic", "field-collapse", "field-abyss"];
+  const FIELD_CLASSES = ["field-fire", "field-electric", "field-ice", "field-acid", "field-quicksand", "field-energy", "field-harmonic", "field-collapse", "field-abyss"];
   function snapEnv() {
     const zones = {};
     for (let z = 1; z <= Number(state.zoneMode || 2); z++) {
@@ -2688,7 +2688,7 @@
   const INTRO_TIER = { boss: ["首领战斗", "#ff2e3f"], elite: ["精英战斗", "#ff9f1c"], normal: ["普通战斗", "#9aa6b2"] };
   const INTRO_FIELD = [
     ["fire", "火场", "#ff6a2b"], ["electric", "高压场地", "#ffd23f"], ["acid", "酸液地面", "#7ee04a"],
-    ["ice", "冻土", "#8fdcff"], ["energy", "能量场", "#fff08a"], ["harmonic", "干涉场地", "#c07bff"],
+    ["ice", "冻土", "#8fdcff"], ["quicksand", "流沙", "#d9a35f"], ["energy", "能量场", "#fff08a"], ["harmonic", "干涉场地", "#c07bff"],
     ["heal", "治愈场地", "#6ee7a8"], ["highland", "高地", "#d8c3a5"], ["abyss", "深渊", "#7a6cff"],
     ["collapseOn", "塌陷区域", "#b08968"], ["isolate", "隔离", "#9aa6b2"]
   ];
@@ -4020,7 +4020,7 @@
     const zbox = $("g-field-zones");
     zbox.innerHTML = "";
     const kinds = [
-      ["", "无"], ["fireOn", "火场"], ["ice", "冻土"], ["acid", "酸液"],
+      ["", "无"], ["fireOn", "火场"], ["ice", "冻土"], ["acid", "酸液"], ["quicksand", "流沙"],
       ["electric", "高压"], ["energy", "能量场"], ["harmonic", "干涉场"],
       ["heal", "恢复"], ["abyss", "深渊"], ["collapseOn", "塌陷"],
       ["ruinOn", "损毁地面"], ["isolate", "隔离区"]   // 规则层本来就支持（app.js · tickRuinGround、隔离区不吃天气），以前选不到
