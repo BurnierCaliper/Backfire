@@ -2492,6 +2492,7 @@ const SCORE_RULES = {
   reduce: 1.5,     // 我方受击时，减伤减免掉的每点伤害（天气、血量改造、角色能力……完全免伤也算）
   blockSave: 1,    // 协助格挡成功减免掉的每点伤害（空手格挡成功：少挨的那一半）
   ap: 10,          // 我方每用 1 点行动点
+  apGiftShare: 0.5,   // 队友给的行动点（意式浓缩……）：用它的那次行动得的分，这个比例记在给行动点的人身上
   bonusAction: 5,  // 我方每用 1 次附赠行动
   env: 1.2         // 环境分数：利用配置物或场地（环境）造成的伤害 / 击破 / 溢出，分数 ×1.2
 };
@@ -2644,8 +2645,55 @@ function addScore(kind, pts, u, bonus) {
   state.battleScore.total += pts + extra;
   state.battleScore.parts[kind] = (state.battleScore.parts[kind] || 0) + pts;
   if (extra > 0) state.battleScore.parts.bonus = (state.battleScore.parts.bonus || 0) + extra;
+  // 这次行动用的是队友给的行动点：分数的一部分（apGiftShare）记在给行动点的人身上（队伍总分不变）
+  const share = state._apShare;
+  if (share && u && u.id === share.actorId) {
+    const giver = unitById(share.giverId);
+    const gst = giver && giver !== u ? battleStat(giver) : null;
+    const give = gst ? Math.floor((pts + extra) * share.ratio + 1e-6) : 0;
+    if (gst && give > 0) gst.score = (gst.score || 0) + give;
+    const st = battleStat(u);
+    if (st) st.score = (st.score || 0) + pts + extra - give;
+    return;
+  }
   const st = battleStat(u);
   if (st) st.score = (st.score || 0) + pts + extra;
+}
+/** 用技能给队友加行动点（意式浓缩……）：记下是谁给的，那个行动点打出来的分数分一半给他（SCORE_RULES.apGiftShare）。
+ *  给自己加 / 返还行动点不算。行动点在回合开始重新补满时，没用掉的赠送一起作废 */
+function grantAllyAp(giver, target, n, lines) {
+  n = Math.max(0, Math.floor(Number(n) || 0));
+  if (!target || !n) return;
+  target.ap = (Number(target.ap) || 0) + n;
+  target.apMax = Math.max(Number(target.apMax) || 0, target.ap);
+  if (giver && giver.id !== target.id && target.isPlayer) {
+    target.resources = target.resources || {};
+    target.resources.apGifts = (target.resources.apGifts || []).concat([{ from: giver.id, n }]);
+  }
+  if (lines) lines.push(`${target.name} 行动点 +${n}。`);
+}
+/** 这次行动会不会用到队友给的行动点：自己的行动点先用，赠送的算最后那几点。
+ *  会用到就返回 { actorId, giverId, ratio, used }（ratio 按这次花的行动点里赠送的占多少折算） */
+function apShareFor(a, cost) {
+  const gifts = (a && a.resources && a.resources.apGifts) || [];
+  cost = Math.max(0, Number(cost) || 0);
+  if (!gifts.length || !cost) return null;
+  const gifted = gifts.reduce((s, g) => s + (Number(g.n) || 0), 0);
+  const left = (Number(a.ap) || 0) - cost;
+  const used = Math.min(cost, gifted - Math.max(0, left));
+  if (used <= 0) return null;
+  return { actorId: a.id, giverId: gifts[0].from, ratio: (SCORE_RULES.apGiftShare || 0) * used / cost, used };
+}
+/** 用掉了赠送的行动点：从最早的赠送开始扣 */
+function consumeApGifts(a, used) {
+  const gifts = (a.resources && a.resources.apGifts) || [];
+  let left = used;
+  while (left > 0 && gifts.length) {
+    const g = gifts[0], take = Math.min(left, Number(g.n) || 0);
+    g.n -= take; left -= take;
+    if (g.n <= 0) gifts.shift();
+  }
+  if (!gifts.length && a.resources) delete a.resources.apGifts;
 }
 /** 一击的额外倍率之和（各项加算） */
 function attackScoreBonus(res, target) {
@@ -4893,6 +4941,7 @@ function ambushSkipRound() {
 }
 function refreshEconomy(u) {
   if (!u || !u.isPlayer) return;
+  if (u.resources) delete u.resources.apGifts;   // 回合开始重新补行动点：上回合没用掉的赠送作废
   // 肉体操控（沙灵聚合体三阶段）：这一回合失去行动点（附赠动作照常）。标记只管一回合，不管这回合能不能行动都用掉
   const loseAp = !!u.loseApNext;
   u.loseApNext = false;
@@ -6705,6 +6754,7 @@ function resetBattleFlags(u) {
   r.blockUsedThisTurn = false;
   // 专长（feats.js）：每场的次数、挂在下一击 / 这一回合上的效果
   r.featUsed = {};
+  delete r.apGifts;
   delete r.whetDice; delete r.unstoppableNext; delete r.reviveGuard; delete r.alertGiven; delete r.attackSeq;
   r.chargeTurn = null; r.chargeUsed = null; r.blinkReady = null; r.blinkUsed = null;
   u.coverOnce = false;
@@ -10690,10 +10740,16 @@ function runSkill(id, optRun) {
       const fuelGain = FUEL_SKILLS.includes(id) && xiaFuelOn() && ((findKit("xia", state.units) || {}).resources || {}).engine;
       const seqBefore = Number(state.actionSeq) || 0;
       const apBefore = a0 ? Number(a0.ap) || 0 : 0;
+      // 用队友给的行动点出手：这次行动的分数分一部分给给行动点的人（addScore 按 state._apShare 分）
+      const apShare = a0 && a0.isPlayer && !state._apShare ? apShareFor(a0, (skillCost(id) || {}).ap) : null;
+      if (apShare) state._apShare = apShare;
       // 高能自爆等这次行动完整打完再判（嵌套的行动由最外层统一判）
       state._highDefer = (Number(state._highDefer) || 0) + 1;
       try { trackHealBy(a0, () => runSkillInner(id, optRun)); }
-      finally { state._highDefer = Math.max(0, (Number(state._highDefer) || 0) - 1); }
+      finally {
+        state._highDefer = Math.max(0, (Number(state._highDefer) || 0) - 1);
+        if (apShare) { state._apShare = null; if ((Number(a0.ap) || 0) < apBefore) consumeApGifts(a0, apShare.used); }
+      }
       // 跃迁（feats.js）：这次花了行动点、真的打出了攻击
       if (a0 && typeof featAfterAction === "function") featAfterAction(a0, (Number(a0.ap) || 0) < apBefore);
       if (!state._highDefer) flushHighBooms();
@@ -11755,9 +11811,7 @@ function runSkillInner(id, optRun) {
       else {
         a.resources.liquid -= 1;
         if (mode === "ap") {
-          tgt.ap = (tgt.ap || 0) + 1;
-          tgt.apMax = Math.max(tgt.apMax || 0, tgt.ap);
-          lines.push(`${tgt.name} 行动点 +1。`);
+          grantAllyAp(a, tgt, 1, lines);   // 这个行动点打出来的分数一半记在结人身上
         } else {
           hitOne(a, tgt, { element: "acid", mult: 1, baseBreak: 2, atk });
         }
