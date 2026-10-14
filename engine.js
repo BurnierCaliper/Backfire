@@ -978,6 +978,10 @@ function resolveAttack(ctx) {
     if (flags.doubleDeal) { mul *= 2; hAdd("造成伤害翻倍。"); }
     if (flags.doubleTake) { mul *= 2; hAdd("目标受伤翻倍。"); }
     if (flags.holyShield && !noDr) { mul *= 0.5; hAdd("圣盾：本次伤害减半。"); }
+    if (flags.pointBlank) {   // 抵近射击（feats.js）：远距离攻击打同区，倍率只有原本的 60%
+      const pb = typeof FEAT_CFG !== "undefined" && FEAT_CFG.pointblank ? FEAT_CFG.pointblank.mult : 0.6;
+      mul *= pb; hAdd(`抵近射击：远距离攻击打同区，倍率 ×${pb}。`);
+    }
     // 事故幸存+：拉斯缪尔不稳态下受到的伤害 ×3（不再倒地 / 死亡）
     if (t.kit === "ras" && t.resources && t.resources.unstable && typeof passivePlus === "function" && passivePlus(t, 2)) {
       mul *= 3; hAdd("事故幸存+：不稳态受伤 ×3。");

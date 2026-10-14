@@ -7642,6 +7642,9 @@ function dealTo(attacker, target, opt) {
   if (attacker.kit === "naruto" && typeof passivePlus === "function" && passivePlus(attacker, 1)) br += 1;   // 佩刀+：鳴門武器人击破 +1
   const dist = zoneDist(attacker.zone, target.zone, state.zoneMode);
   if (typeof featBreakBonus === "function") br = featBreakBonus(attacker, target, opt, flags, br, dist, isReaction);   // 冲阵 / 硬骨头 / 无可阻挡
+  // 抵近射击：远距离攻击打同区（这一击是远程、或这个技能是靠抵近射击才打得到同区）→ 倍率 ×60%
+  if (attacker && attacker.isPlayer && dist === 0 && flags.action !== false && !flags.environment && !flags.aoe && !isReaction &&
+      typeof featHas === "function" && featHas(attacker, "pointblank") && (opt.atkRange === "ranged" || state._pointBlankShot === attacker.id)) flags.pointBlank = true;
   const wasDeadForGhost = !!(target && target.dead);
   // 千钧：每个攻击行动总击破 +1 只加一次——这个行动里前面的攻击已经加过，就不再加
   const res = resolveAttack({
@@ -10766,6 +10769,7 @@ function runSkill(id, optRun) {
 
 function runSkillInner(id, optRun) {
   optRun = optRun || {};
+  state._pointBlankShot = null;   // 抵近射击：这次行动是不是靠它才打得到同区（下面射程检查里设）
   const a = unitById(state.attackerId);
   const token = selectedToken();
   const t = skillTargetAny();
@@ -10876,16 +10880,19 @@ function runSkillInner(id, optRun) {
     let hint = "";
     if (ov) {
       const dd = zoneDist(a.zone, t.zone, state.zoneMode);
-      inRange = (dd >= ov.min && dd <= ov.max) || (dd === 0 && ov.min === 1 && typeof featHas === "function" && featHas(a, "pointblank"));
+      inRange = dd >= ov.min && dd <= ov.max;
       hint = "x";
-    } else if (typeof featHas === "function" && featHas(a, "pointblank") && t.zone != null && zoneDist(a.zone, t.zone, state.zoneMode) === 0) {
-      inRange = true;   // 抵近射击：写着「距离 1」的攻击也能打同区
     } else {
       try {
         const sk = (skillList(a) || []).find(s => s.id === id);
         if (sk) hint = (sk.hint || "") + " " + (sk.name || "");
       } catch (e) {}
       inRange = !hint || inSkillRange(a, t, hint, state.zoneMode);
+    }
+    // 抵近射击（feats.js）：只能打远处（距离 1 起）的攻击也能打同区，这样打出的攻击倍率 ×60%（dealTo · flags.pointBlank）
+    if (!inRange && t.zone != null && zoneDist(a.zone, t.zone, state.zoneMode) === 0 && typeof featHas === "function" && featHas(a, "pointblank")) {
+      const r = ov || (typeof parseSkillRange === "function" ? parseSkillRange(hint) : null);
+      if (r && r.min >= 1) { inRange = true; state._pointBlankShot = a.id; }
     }
     if (hint && !inRange) {
       const d = zoneDist(a.zone, t.zone, state.zoneMode);
@@ -13069,6 +13076,7 @@ function runSkillInner(id, optRun) {
     lines.push("结算出错：" + err.message);
   } finally {
     if (a) delete a._dabbleNerf;
+    state._pointBlankShot = null;
   }
   const extraBy = a ? [a.instant && a.instant.overload ? "过载" : null, a.self === "conductor" ? "导体" : null].filter(Boolean) : [];
   if (extraBy.length && overloadSeq.length >= 2) {

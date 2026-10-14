@@ -368,6 +368,8 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **抵近射击削弱：远距离攻击打同区，倍率只有原本的 60%**（feats.js · `FEAT_CFG.pointblank`；app.js · `dealTo` 的 `flags.pointBlank`、`runSkillInner` 射程检查；engine.js · `resolveAttack`；tests/feat-content.test.js）：防止远程角色贴脸也照打全额。只算靠这张专长才打得到同区的那几下：远距离攻击（`atkRange: "ranged"`）打距离 0，或者写着「距离 1」的技能靠抵近射击打同区。本来就能打同区的攻击（近距离、任意距离）不受影响；打距离 1 照常。低地打高地不吃 −25% 这条不变。
+
 - **评分：队友给的行动点，分数分一半给提供的人**（app.js · `grantAllyAp` / `apShareFor` / `addScore`、`SCORE_RULES.apGiftShare`；tests/ap-gift-score.test.js）：用技能给队友加了行动点（目前是结人的意式浓缩），队友用这个行动点出手的那次行动，得到的分数（行动分、伤害、击破、击杀……）**50% 记在提供行动点的人身上**，队伍总分不变。
   - 自己的行动点先用，赠送的算最后那几点：队友本来还有行动点时，先出手的那一下全算他自己的，用到赠送的那一点时才分。一次花 2 点、其中 1 点是赠送的，就分 25%。
   - 给自己加 / 返还行动点（狂怒碾压击杀返还、饮弹红弹返还）不算。回合开始补满行动点时，没用掉的赠送作废。

@@ -38,6 +38,7 @@ const FEAT_SKILL_PREFIX = "feat_";
 /* 数值（策划改这里） */
 const FEAT_CFG = {
   whet:       { base: 2, perLevels: 5 },        // 磨刀：下回合伤害骰 +(2 + 等级÷5)d6
+  pointblank: { mult: 0.6 },                    // 抵近射击：远距离攻击打同区时，倍率只有原本的 60%
   bandage:    { die: 4, flat: 2 },              // 战地包扎：1d4 + 2 + 等级
   alert:      { mult: 0.5, brk: 1 },            // 警戒：敌人进区时 0.5×atk + 1 击破
   unstoppable: { brk: 2 },                      // 无可阻挡：击破 +2
@@ -51,7 +52,7 @@ const FEATS = {
   wanderer: { name: "荒原行者", kind: "passive", tier: 1,
     text: "酸液地面、冻土、空隙只要附赠动作就能离开或通过，不用检定，进入冻土也不受击破；近程攻击飞行单位不额外消耗附赠动作，把飞行单位打进失衡时把它击落到你所在区域。" },
   pointblank: { name: "抵近射击", kind: "passive", tier: 1,
-    text: "远距离攻击也可以打距离 0 的目标；从低地打高地不受 −25% 伤害。" },
+    text: "远距离攻击也可以打距离 0 的目标（这样打的倍率只有原本的 60%）；从低地打高地不受 −25% 伤害。" },
   tough: { name: "硬骨头", kind: "passive", tier: 1,
     text: "生命上限 + 等级；空手攻击 +1 击破，你的武器人在场时空手攻击改为 1.5×atk。",
     hooks: {
