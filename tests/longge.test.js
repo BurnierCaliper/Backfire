@@ -653,3 +653,19 @@ test("洗牌：洗过以后子弹数量没变过就不能连续洗；开枪 / �
   assert.equal(lg.resources.ammo.length, 3);
   assert.equal(c.skillRequirementError(lg, "longge_shuffle"), null);
 });
+
+test("热能轰击 · 蓝弹气化 吃全力以赴（只有第一下）：击破 ×2、龙哥承受原击破，用掉", () => {
+  const { c, S, lg, foes } = setup();
+  lvUp(lg);
+  const kolt = c.findKit("kolt", S.units);
+  kolt.zone = 1;
+  lg.resources.trigger = true;
+  lg.resources.ammo = ["blue", "blue"]; seenAll(lg);
+  lg.def = lg.defMax = 6; kolt.def = kolt.defMax = 6;
+  lg.resources.smashNext = true;
+  cmd(c, { actor: lg.id, skill: "longge_heat", target: foes[0].id, picks: { mode: "gun", target: foes[0].id } });
+  assert.equal(lg.resources.smashNext, false);
+  // 第一下（2 击破）+ 反震 1 + 第二下照常 1 → 两人共掉 4
+  assert.equal((6 - lg.def) + (6 - kolt.def), 4);
+  assert.ok([lg.def, kolt.def].includes(4) || lg.def === 3, "有一人吃到 ×2");
+});
