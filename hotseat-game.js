@@ -287,6 +287,17 @@
     assertActionFrom(id, actor) { return session.assertAction(id, actor); },
     extendAsk(ms) { session?.extendAsk(ms); },
     validateFrom(id, cmd) { return validate(cmd, id); },
+    /** 主持人接管某名玩家的角色（玩家掉线时，战斗中也能用）；之后由主持人在本机替他行动 */
+    takeOver(id) {
+      if (!active()) fail("热座尚未配置");
+      if (id === gm() || !config.players.some(p => p.id === id)) fail("没有这名玩家");
+      session.takeOver(gm(), id);
+      for (const kit of Object.keys(ownerByKit)) if (ownerByKit[kit] === id) ownerByKit[kit] = gm();
+      if (config.assignments) for (const u of Object.keys(config.assignments)) if (config.assignments[u] === id) delete config.assignments[u];
+      if (choice && choice.owner === id) choice.owner = gm();
+      authority.broadcast(); refresh();
+      return { ok: true };
+    },
     checkpoint(now = Date.now()) { if (!active()) return null; const snapshot = session.checkpoint(); return copy({ config, ownerByKit, playerId, session: snapshot,
       askRemainingMs: snapshot.ask ? Math.max(0, snapshot.ask.deadline - now) : null, newRoundSpends, choiceNo, openingChoice: !!choice && !state.combatStarted }); },
     restoreOnline(saved) { network = enabled = true; configured = false; config = copy(saved.config); ownerByKit = copy(saved.ownerByKit); playerId = saved.playerId; newRoundSpends = saved.newRoundSpends || null; choiceNo = saved.choiceNo || 0;

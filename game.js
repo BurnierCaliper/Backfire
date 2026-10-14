@@ -2408,6 +2408,21 @@
   }
 
   /* ================= 10. 回合流程 ================= */
+  const SPACE_SAFE = "button, a[href], summary, [role=button], [role=tab], [role=option], [contenteditable], [tabindex]:not([tabindex='-1'])";
+  /** 空格：热座 / 联机里结束的是当前这个单位的行动；它还有行动点或附赠没用时先问一句 */
+  async function spaceStartOrEnd() {
+    if (state.combatStarted && hotseat() && !G.depth && !G.ended && !choiceResolve) {
+      const cur = unitById(HotseatGame.currentUnit());
+      if (cur && ((cur.ap || 0) > 0 || (cur.bonus || 0) > 0)) {
+        const ans = await openChoice("结束行动", `${cur.name} 还有 ${cur.ap || 0} 点行动、${cur.bonus || 0} 次附赠没用，确定结束行动吗？`, [
+          { label: "确定结束", value: "yes" },
+          { label: "继续行动", value: "no" }
+        ]);
+        if (ans !== "yes") return;
+      }
+    }
+    return clickStartOrEnd();
+  }
   async function clickStartOrEnd() {
     if (G.depth > 0 || G.ended || choiceResolve) return;
     if (!state.combatStarted) {
@@ -4312,7 +4327,11 @@
       }
       if (e.key === "Escape") { e.preventDefault(); disarm(); return; }
       if ((e.key === "z" || e.key === "Z") && (e.ctrlKey || e.metaKey)) { e.preventDefault(); doUndo(); return; }
-      if (e.key === " ") { e.preventDefault(); clickStartOrEnd(); return; }
+      if (e.key === " ") {
+        // 焦点在按钮、链接等可以操作的东西上时，空格是「按下它」，不是结束行动
+        if (e.target && e.target.closest && e.target.closest(SPACE_SAFE)) return;
+        e.preventDefault(); spaceStartOrEnd(); return;
+      }
       if (e.key === "Tab") {
         e.preventDefault();
         const list = [...document.querySelectorAll("#g-party .pc")].map(b => unitById(b.dataset.id)).filter(Boolean);

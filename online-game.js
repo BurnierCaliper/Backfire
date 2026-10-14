@@ -82,7 +82,9 @@
   function setupOperators(assignments) {
     const old = HotseatGame.isActive() ? HotseatGame.getView().heroes : [];
     // 联机单局：角色归谁记在单局里（按角色 kit），场上的单位每次重摆 id 都会变
-    const next = assignments || (rogue() ? OnlineRogue.assignmentsFor(state.units.filter(u => u.isPlayer && !u.weaponOf)) : Object.fromEntries(old.map(u => [u.id, u.owner])));
+    // 已经离开房间（座位被释放）的玩家不在名单里：他的角色回到房主
+    const ids = roster().map(p => p.id);
+    const next = assignments || (rogue() ? OnlineRogue.assignmentsFor(state.units.filter(u => u.isPlayer && !u.weaponOf)) : Object.fromEntries(old.filter(u => ids.includes(u.owner)).map(u => [u.id, u.owner])));
     const ack = HotseatGame.enableOnline({ mode: "trpg", players: roster(), assignments: next });
     if (!ack.ok) error(ack.error);
   }
@@ -494,6 +496,33 @@
       const same = view && view.heroes.every(h => (want[h.id] || identity.id) === h.owner) && view.players.map(p => p.id).join("|") === roster().map(p => p.id).join("|");
       if (same) return;
       try { setupOperators(want); } catch (e) { notice = e.message; }
+    },
+    /** 接管：玩家掉线时，房主把他的角色（连同武器人）接过来自己操作。战斗中也可以；
+     *  联机单局里只管这一场战斗，打完按单局记的归属还给他；跑团里一直归房主，要还给他就在「保存角色分配」里重新分配 */
+    takeOver(playerId) {
+      if (!isHost()) error("只有主持人可以接管角色");
+      const p = status.roster.find(x => x.id === playerId && x.role === "player");
+      if (!p) error("没有这名玩家");
+      if (!HotseatGame.isActive()) error("现在没有可接管的角色");
+      const ack = HotseatGame.takeOver(playerId);
+      if (!ack.ok) error(ack.error);
+      if (offlineWait && offlineWait.owner === playerId) offlineWait = null;
+      publish(); return { ok: true };
+    },
+    /** 释放座位：转发服务丢掉这名玩家的恢复令牌（昵称和名额可以重新用），他的角色回到房主 */
+    async releaseSeat(playerId) {
+      if (!isHost()) error("只有主持人可以释放座位");
+      const p = status.roster.find(x => x.id === playerId && x.role === "player");
+      if (!p) error("没有这名玩家");
+      if (typeof endpoint.releaseSeat !== "function") error("这个版本的转发连接不支持释放座位");
+      await endpoint.releaseSeat(playerId);
+      if (rogue()) OnlineRogue.release(playerId);
+      if (HotseatGame.isActive() && HotseatGame.getView().heroes.some(h => h.owner === playerId)) {
+        try { HotseatGame.takeOver(playerId); } catch (e) { notice = e.message; }
+      }
+      if (offlineWait && offlineWait.owner === playerId) offlineWait = null;
+      recipientWires.delete(playerId);
+      publish(); return { ok: true };
     },
     touch() { if (isHost()) publish(); },
     players: () => roster(),

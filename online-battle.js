@@ -277,8 +277,11 @@
       if (sk && !sk.contains(e.relatedTarget) && root.HeroSheet) HeroSheet.hideTip();
     });
     /** 键盘：1–9 选技能，Esc / 右键取消，空格结束行动（输入框里打字时不管） */
+    const SPACE_SAFE = "button, a[href], summary, [role=button], [role=tab], [role=option], [contenteditable], [tabindex]:not([tabindex='-1'])";
     function onKey(e) {
       if (!el.isConnected || e.target.closest && e.target.closest("input, textarea, select")) return;
+      // 焦点在按钮等可以操作的东西上时，空格交给浏览器「按下它」，不结束行动
+      if (e.key === " " && e.target.closest && e.target.closest(SPACE_SAFE)) return;
       const ui = last.ui || {};
       if (e.key === "Escape" && ui.armed && cb.onCancel) { cb.onCancel(); e.preventDefault(); return; }
       if (/^[1-9]$/.test(e.key)) {
