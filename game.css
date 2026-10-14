@@ -1854,6 +1854,12 @@ body:not([data-screen="battle"]) .g-rank { display: none !important; }
 }
 .rm-scroll { overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
 .rm-svg { display: block; width: 100%; min-width: 640px; height: auto; }
+/* 夜晚的战场（game.js · applyEnv）：区域底色压暗偏蓝（inset 阴影盖在底色上、名牌之下），四周暗角；场地颜色还看得出来 */
+.g-app.is-night .g-zone { box-shadow: inset 0 0 0 9999px rgba(14, 22, 52, .55); border-color: #3c4566; }
+.g-app.is-night .g-zone .zlabel { color: #c8d2f0; }
+.g-app.is-night .g-zone::before { color: rgba(200, 210, 240, .12); }
+.night-vignette { position: absolute; inset: 0; pointer-events: none; z-index: 5;
+  background: radial-gradient(ellipse at 50% 40%, transparent 55%, rgba(5, 8, 20, .55) 100%); }
 /* 战斗顶栏的时钟 */
 .g-clock { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; white-space: nowrap; color: #ece0c6; }
 .g-clock .dnicon { width: 18px; height: 18px; }

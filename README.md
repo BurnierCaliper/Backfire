@@ -368,6 +368,8 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **夜晚的战场**（game.js · `applyEnv`；game.css · `.is-night`、`.night-vignette`）：时钟在夜晚（18:00–05:00）时，战场的区域底色压暗、偏蓝，四周加一圈暗角；名牌照常亮，场地颜色还看得出来。天气动效做过演示、暂不加入，记在 ROADMAP「天气动效」，草稿在 `art/weather-fx-draft.css`。
+
 - **时间看得见：昼夜现在会改变敌人的行为**（ledger.js · `DAY_NIGHT`、`isNightClock`、`clockNow`、`clockAfter`；icons.js · `Icons.daynight`；rogue.js · `routeEta`；rogue-ui.js、routemap.js、game.js 顶栏）：
   - 单局顶栏常驻时钟：「第 3 天 · ☀ 16:30 白天」/「🌙 21:40 夜晚」（以前只写第几天）。
   - 战斗顶栏在天气旁边显示时钟；沙暴而场上有沙漠生物时补一句「漠汛：沙漠生物按夜晚行动」。

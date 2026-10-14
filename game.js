@@ -311,6 +311,15 @@
       ck.className = "g-clock" + (c ? (c.night ? " night" : " day") : "");
       ck.hidden = !c;
     }
+    // 夜晚的战场：区域底色压暗偏蓝、四周暗角（名牌照常亮）
+    const night = !!(env.clock && env.clock.night);
+    $("g-app").classList.toggle("is-night", night);
+    const fieldEl = document.querySelector(".g-zone") && document.querySelector(".g-zone").parentElement;
+    if (fieldEl) {
+      let vg = fieldEl.querySelector(".night-vignette");
+      if (night && !vg) { vg = el("div", "night-vignette"); fieldEl.appendChild(vg); }
+      else if (!night && vg) vg.remove();
+    }
     if ($("g-weather-sel") && env.weather) $("g-weather-sel").value = env.weather;
     document.querySelectorAll(".g-zone").forEach(z => {
       const e = env.zones[z.dataset.num] || {};
