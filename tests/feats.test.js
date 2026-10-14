@@ -1,13 +1,15 @@
-// 专长框架（feats.js）：9 / 13 / 16 / 19 级各一项，不限职责和属性；被动 / 战斗动作 / 探索三类挂钩
+// 专长框架（feats.js）：7 / 11 / 13 / 16 级各一项，不限职责和属性；被动 / 战斗动作 / 探索三类挂钩
+// 这里换成测试用的几项专长测框架本身；正式专长的规则见 feat-content.test.js
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const H = require("./headless");
 const plain = (x) => JSON.parse(JSON.stringify(x));
 
-/** 测试用的三项专长（正式内容由策划写进 feats.js · FEATS） */
+/** 测试用的几项专长（先清掉正式内容，只测框架） */
 function addSamples(c) {
   const F = c.S.FEATS;
+  Object.keys(F).forEach(k => { delete F[k]; });
   F.t_tough = { id: "t_tough", name: "测试·强韧", kind: "passive", text: "架势上限 +1", repeatable: true,
     hooks: { apply: (u) => { u.defMax = (u.defMax || 0) + 1; u.def = Math.min(u.def, u.defMax); } } };
   F.t_jab = { id: "t_jab", name: "测试·刺拳", kind: "action", text: "附赠：同区一名敌人 0.5atk 物理",
@@ -31,12 +33,13 @@ function levelTo(run, R, h, xp) {
   R.restAtNode(run, "short");
 }
 
-test("没有专长内容时：9 级只记下欠一项专长；写进内容后补成待选", () => {
+test("没有专长内容时：7 级只记下欠一项专长；写进内容后补成待选", () => {
   const { c, run, R } = fresh(["kolt", "helu"], "FT1");
-  assert.equal(Object.keys(c.S.FEATS).length, 0);
+  const F = c.S.FEATS;
+  Object.keys(F).forEach(k => { delete F[k]; });
   const h = run.party[0];
   levelTo(run, R, h, 999999);
-  assert.ok(h.level >= 9);
+  assert.ok(h.level >= 7);
   const owed = h.notes.feat;
   assert.ok(owed >= 1);
   assert.ok(!R.pendingChoices(run).some(p => p.choice.type === "feat"));
@@ -53,7 +56,7 @@ test("升级选专长：谁都能选全部专长，不可重复的选过就不�
   levelTo(run, R, h, 999999);
   const feat = () => R.pendingChoices(run).find(p => p.kit === h.kit && p.choice.type === "feat");
   const first = feat();
-  assert.ok(first, "9 级应该有一项专长待选");
+  assert.ok(first, "7 级应该有一项专长待选");
   const ids = plain(R.choiceOptions(run, h.kit, first.index).map(o => o.value)).sort();
   assert.deepEqual(ids, ["t_jab", "t_lucky", "t_start", "t_tough"]);
   R.choose(run, h.kit, first.index, "t_jab");
@@ -123,4 +126,13 @@ test("探索专长：检定失败可以重掷，名字写进记录", () => {
   R.attemptCheck(run, "kolt");
   const rolls = run.lastCheck.rolls;
   if (!rolls[0].ok) assert.match(rolls[1].label, /好运重掷/);
+});
+
+test("升级表改过：旧存档按旧表（9 / 13 / 16 / 19）拿的专长不够时，按新表（7 / 11 / 13 / 16）补成待选", () => {
+  const { c, run, R } = fresh(["kolt", "helu"], "FT6");
+  const h = run.party[0];
+  h.level = 14; h.feats = ["wanderer"]; h.pending = []; h.notes = {};   // 旧表 14 级只有 9、13 级两项，这里只记了一项
+  const owed = R.pendingChoices(run).filter(p => p.kit === h.kit && p.choice.type === "feat").length;
+  assert.equal(owed, 2, "新表 14 级该有 3 项（7 / 11 / 13），已有 1 项，补 2 项");
+  assert.equal(R.pendingChoices(run).filter(p => p.kit === h.kit && p.choice.type === "feat").length, 2, "再看一次不会重复补");
 });

@@ -215,7 +215,11 @@
       : p.choice.type === "prof"
         ? `${p.name} ${p.choice.level} 级：一个自选熟练项（新学一项，或把已有的一项升一级，最高三级）`
       : p.choice.type === "feat"
-        ? `${p.name} ${p.choice.level} 级：选择一项专长（不限职责和属性）`
+        ? `${p.name} ${p.choice.level} 级：选择一项专长（不限职责和属性，可以选这一级或更低级的）`
+      : p.choice.type === "featFull"
+        ? `${p.name} 兼修：选一张专长①–③的职责涉猎专长，改成原职责技能的完整版`
+      : p.choice.type === "prof3"
+        ? `${p.name} 万事通：选一项熟练项升到三级`
         : `${p.name} ${p.choice.level} 级：选择一项职责技能`;
     const opts = query("choiceOptions", { kit: p.kit, index: p.index });
     return `<section class="levelup">
@@ -293,6 +297,9 @@
     const fix = repairPoints() ? "可以先用维修工具包修一下：" : "用维修工具包（商店有卖）或长休才能修好。";
     return `<p class="r-warn">⚠ ${esc(who)} 耐久为 0，这场战斗只能空手作战。${fix}</p>${repairRows()}`;
   }
+  // 舌灿莲花（专长）：每个任务一次，谈掉一场普通战斗
+  const parleyBtns = () => (Rogue.parleyOptions ? Rogue.parleyOptions(run) : []).map(o =>
+    `<button class="g-btn" data-parley="${esc(o.kit)}">${esc(o.name)} 交涉（舌灿莲花 · 普通「${esc(o.prof)}」· 成功率 ${Math.round(o.chance * 100)}%）<small>成功就不用打，但没有掉落和经验；每个任务一次</small></button>`).join("");
   const fightBtn = (label) => Rogue.brokenWeapons(run).length
     ? `<button class="g-btn r-main" id="r-fight">仍然${label}（有人空手）</button>`
     : `<button class="g-btn r-main" id="r-fight">${label}</button>`;
@@ -335,7 +342,7 @@
         ${need.ok ? "" : `<br><span class="r-bad">不够：${esc(need.lack.join("，"))}</span>`}</p></div>`;
   }
   const NODE_PANELS = {
-    battle: () => `<p>前方有敌人拦路。</p>${brokenWarn()}${fightBtn("迎战")}`,
+    battle: () => `<p>前方有敌人拦路。</p>${brokenWarn()}${fightBtn("迎战")}${parleyBtns()}`,
     elite: () => `<p>前方有棘手的敌人。</p>${brokenWarn()}${fightBtn("迎战")}`,
     rest: () => {
       if (run.ambush) {
@@ -823,6 +830,7 @@
       b.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
     });
     on("r-fight", fight);
+    document.querySelectorAll("[data-parley]").forEach(b => { b.onclick = () => act({ action: "parley", kit: b.dataset.parley }); });
     on("r-draw", () => act({ action: "drawHero" }));
     body.querySelectorAll("[data-swap-in]").forEach(b => { b.onclick = () => act({ action: "swapHero", in: b.dataset.swapIn, out: b.dataset.swapOut || null }); });
     body.querySelectorAll("[data-swap-out-only]").forEach(b => { b.onclick = () => act({ action: "swapHero", out: b.dataset.swapOutOnly }); });

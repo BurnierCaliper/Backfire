@@ -476,8 +476,13 @@ const Rogue = (function () {
     endRun(run, false, "力竭致死：太久没能好好睡一觉。");
     return true;
   }
+  /** 走到下一个节点要几小时（荒野向导 −1/3） */
+  function travelHours(run) {
+    const mul = typeof featTravelMul === "function" ? featTravelMul(run && run.party) : 1;
+    return Math.round(C.hours.travel * mul * 10) / 10;
+  }
   function arriveAtNode(run, notes) {
-    if (run.task.index > 0) passHours(run, C.hours.travel, notes);
+    if (run.task.index > 0) passHours(run, travelHours(run), notes);
     const left = nodeChoices(run);
     if (left.length === 1) chooseNode(run, left[0].i);   // 只有一条路：直接走
   }
@@ -496,6 +501,7 @@ const Rogue = (function () {
     u.cyberPlan = h.cyber ? Object.assign({}, h.cyber) : null;   // 义体改造（growth.js 按方案重建血量层）
     u.shpBonus = Number(h.shpBonus) || 0;   // 单人模式主角：坚毅生命上限 +15
     u.feats = (h.feats || []).slice();      // 专长（feats.js）
+    u.featFull = (h.featFull || []).slice();   // 兼修升成完整版的涉猎专长
     applyLevelStats(u);
     if (Array.isArray(h.hp)) {
       (u.layers || []).forEach((l, i) => {
@@ -552,7 +558,7 @@ const Rogue = (function () {
         if (h.role2 && L % SOLO.role2Every === 0 && role2Left(h).length) h.pending.push({ type: "role2", level: L });
       }
       (ROGUE_LEVEL_REWARDS[L] || []).forEach(r => {
-        if (r.type === "note" && r.key === "feat" && typeof featsReady === "function" && featsReady() && featChoicesFor(h).length) {
+        if (r.type === "note" && r.key === "feat" && typeof featsReady === "function" && featsReady() && featChoicesFor(h, L).length) {
           // 专长（feats.js）：有内容可选就是升级选择，否则先记下欠一项
           h.pending = h.pending || [];
           h.pending.push({ type: "feat", level: L });
@@ -599,7 +605,7 @@ const Rogue = (function () {
         const n0 = (h.pending || []).length;
         queueLevelRewards(h, from, u.level, notes, run);
         // 升级提示里写上还要选的奖励
-        const PEND = { attr: "分配 1 点六维属性", prof: "一个自选熟练项", role: "一项职责技能", role2: "第二副职责的一个技能", feat: "一项专长" };
+        const PEND = { attr: "分配 1 点六维属性", prof: "一个自选熟练项", role: "一项职责技能", role2: "第二副职责的一个技能", feat: "一项专长", featFull: "兼修：选一张涉猎专长升成完整版", prof3: "万事通：一项熟练升到三级" };
         if (typeof LevelUp !== "undefined") LevelUp.amend(h.kit, (h.pending || []).slice(n0).map(p => `${p.level} 级：${PEND[p.type] || "一项奖励"}（在升级选择里选）`));
       }
       captureHero(u, h);
@@ -623,8 +629,15 @@ const Rogue = (function () {
   }
 
   /** 还没做的升级选择：[{ kit, name, index, choice }] */
-  /** 以前专长没有内容时只在 notes 上记「欠几项」：现在有专长可选了，补成待选 */
+  /** 以前专长没有内容时只在 notes 上记「欠几项」：现在有专长可选了，补成待选。
+   *  升级表改过（专长从 9 / 13 / 16 / 19 改成 7 / 11 / 13 / 16）：按现在的表数一数这个等级该有几项，
+   *  已有的 + 待选的 + 欠着的不够就补上（多拿的不收回） */
   function settleOwedFeats(h) {
+    if (typeof FEAT_LEVELS !== "undefined") {
+      const should = FEAT_LEVELS.filter(L => L <= (Number(h.level) || 1)).length;
+      const have = (h.feats || []).length + (h.pending || []).filter(p => p.type === "feat").length + (Number((h.notes || {}).feat) || 0);
+      if (should > have) { h.notes = h.notes || {}; h.notes.feat = (Number(h.notes.feat) || 0) + should - have; }
+    }
     const owed = Number((h.notes || {}).feat) || 0;
     if (!owed || typeof featsReady !== "function" || !featsReady() || !featChoicesFor(h).length) return;
     h.pending = h.pending || [];
@@ -664,8 +677,22 @@ const Rogue = (function () {
       return opts.filter(o => have[o.value]).concat(opts.filter(o => !have[o.value]));
     }
     if (p.type === "feat") {
-      // 专长不限职责和属性：列出所有还能选的
-      return featChoicesFor(h).map(id => ({ value: id, label: featLabel(id), hint: FEATS[id].text || "" }));
+      // 专长不限职责和属性：列出这一级（和更低级）还能选的
+      return featChoicesFor(h, p.level).map(id => ({ value: id, label: featLabel(id), hint: FEATS[id].text || "" }));
+    }
+    if (p.type === "featFull") {
+      // 兼修：选一张 ①–③ 的职责涉猎专长升成原技能的完整版
+      return featFullOptions(h).map(id => {
+        const d = FEATS[id].dabble;
+        const def = roleSkillDef(d.role, d.n, { level: h.level }) || {};
+        return { value: id, label: `${FEATS[id].name} → ${def.name || d.base}（完整版）`, hint: def.hint || "" };
+      });
+    }
+    if (p.type === "prof3") {
+      // 万事通：选一项熟练升到三级
+      const have = heroProfs(h);
+      return PROF_LIST.filter(n => (have[n] || 0) < PROF_MAX)
+        .map(n => ({ value: n, label: `${n} ${have[n] || 0} → ${PROF_MAX} 级`, hint: profCategory(n) }));
     }
     if (p.type === "role") {
       const u = spawnLiveCard(cardOf(kit), 1);
@@ -710,13 +737,23 @@ const Rogue = (function () {
     } else if (p.type === "feat") {
       h.feats = (h.feats || []).concat(value);
       notes.push(`${heroName(kit)} 获得专长：${featLabel(value)}。`);
+      // 选了以后还要再选的（多面手的三项熟练、兼修选哪张、万事通的三级熟练）
+      const more = typeof FEATS[value].onTake === "function" ? FEATS[value].onTake(h) || [] : [];
+      more.forEach(x => h.pending.push(Object.assign({ level: p.level }, x)));
+    } else if (p.type === "featFull") {
+      h.featFull = (h.featFull || []).concat(value);
+      notes.push(`${heroName(kit)} 兼修：「${FEATS[value].name}」改成原职责技能的完整版。`);
+    } else if (p.type === "prof3") {
+      const have = heroProfs(h);
+      have[value] = PROF_MAX;
+      notes.push(`${heroName(kit)} 万事通：熟练项「${value}」升到 ${PROF_MAX} 级。`);
     } else if (p.type === "role") {
       h.rolePicks = Object.assign({}, h.rolePicks || {}, { [p.level]: value });
       notes.push(`${heroName(kit)} 学会职责技能：${(roleSkillDef(value.role, value.n) || {}).name || value.role + value.n}。`);
     }
     h.pending.splice(index, 1);
     // 属性变了，血量上限等跟着变：摆上场重新算一次
-    if (p.type === "attr" || p.type === "feat") withParty(run, () => null);
+    if (p.type === "attr" || p.type === "feat" || p.type === "featFull") withParty(run, () => null);
     if (before) withParty(run, () => LevelUp.note("choice", findKit(kit, state.units), before));
     return logAll(run, notes);
   }
@@ -892,6 +929,9 @@ const Rogue = (function () {
     if (outcome === "win" && run.party.length) {
       const node = !boss && !ambush ? currentNode(run) : null;
       rollItemDrops(run, boss ? "boss" : node && node.type === "elite" ? "elite" : "battle", notes);
+      // 拾荒者（feats.js，跑团规则）：每个带这张专长的人多掷一次战利品
+      const scav = typeof featExploreOk === "function" && featExploreOk() ? featPartyCount(run.party, "scavenger") : 0;
+      for (let i = 0; i < scav; i++) { notes.push("拾荒者：又在战场上翻了一遍。"); rollItemDrops(run, "battle", notes); }
     }   // 检定受伤的击破已在开场结算
     // 护送：记下护送对象剩下的血量；被摧毁 = 任务失败
     const esc = !boss && run.task && run.task.escort;
@@ -1110,7 +1150,8 @@ const Rogue = (function () {
     const info = checkInfo(run, opt);
     const h = run.party.find(x => x.kit === kit);
     if (!info || !h) return null;
-    const level = Math.min(PROF_MAX, heroProfs(h)[profName(info.prof)] || 0);
+    let level = Math.min(PROF_MAX, heroProfs(h)[profName(info.prof)] || 0);
+    if (!level && typeof featHas === "function" && featExploreOk() && featHas(h, "polymath")) level = 1;   // 万事通：没有的熟练项视为一级
     const v = heroView(run, h);
     let perks = checkPerksFor(kit, info.prof, v.hp * 2 < v.hpMax);
     // 探索专长（feats.js · hooks.check）：重掷、优势、失败减伤……
@@ -1120,7 +1161,7 @@ const Rogue = (function () {
     let p = perks.adv ? 1 - (1 - base) * (1 - base) : perks.dis ? base * base : base;
     if (perks.reroll) p = 1 - (1 - p) * (1 - p);
     return { kit, opt: info.opt, prof: info.prof, diff: info.diff, diffName: info.diffName, name: v.name, level, base, chance: base ? p : 0, adv: perks.adv, dis: perks.dis,
-      reroll: perks.reroll, rerollName: perks.rerollName || "迎难直上", softFail: perks.softFail, perkText: perks.text, hp: v.hp, hpMax: v.hpMax };
+      reroll: perks.reroll, rerollName: perks.rerollName || "迎难直上", softFail: perks.softFail, noHurt: !!perks.noHurt, perkText: perks.text, hp: v.hp, hpMax: v.hpMax };
   }
 
   /** 失败受伤：随机属性的伤害按克制表打在检定者的血量层上，最少留 1 点生命；击破留到下一场战斗开场 */
@@ -1187,15 +1228,20 @@ const Rogue = (function () {
       ok = once("");
       if (!ok && o.reroll) { rerolled = true; ok = once(`${o.rerollName}重掷 · `); }
     });
+    // 赌徒的运气（feats.js）：每长休一次，失败改成成功
+    const gambled = !ok && typeof featGambleSave === "function" && featGambleSave(h);
+    if (gambled) ok = true;
     run.lastCheck = { name: o.name, prof: info.prof, diffName: info.diffName, line, chance: o.chance, rolls, ok,
       adv: !!o.adv, dis: !!o.dis };
     notes.push(`${o.name} 进行${info.diffName}「${info.prof}」检定（${profText}${mod}，成功率 ${Math.round(o.chance * 1000) / 10}%）：` +
-      (rerolled ? `失败，${o.rerollName}重掷——${ok ? "成功" : "还是失败"}。` : ok ? "成功。" : "失败。"));
+      (gambled ? "失败——赌徒的运气：改成成功。" : rerolled ? `失败，${o.rerollName}重掷——${ok ? "成功" : "还是失败"}。` : ok ? "成功。" : "失败。"));
     const node = currentNode(run);
     node.check.result = { kit, prof: o.level, ok, opt: info.opt, profName: info.prof };
     if (ok) {
       state.kuizhi = (Number(state.kuizhi) || 0) + info.reward;
       notes.push(`获得 ${info.reward} 奎支（现有 ${state.kuizhi}）。`);
+    } else if (info.injure && o.noHurt) {
+      notes.push("眼尖：看出了危险，没有受伤。");
     } else if (info.injure) {
       withRng(`${run.seed}:checkhurt:${run.taskNo}:${run.task.index}`, () => injureHero(run, h, Object.assign({ softFail: o.softFail }, info), notes));
     } else {
@@ -1206,6 +1252,38 @@ const Rogue = (function () {
     return logAll(run, notes);
   }
   /** 不检定，直接绕过去：没有奖励也不会受伤 */
+  /* ---------- 舌灿莲花（feats.js，跑团规则）：每个任务一次，用普通交涉检定谈掉一场普通战斗 ---------- */
+  function parleyOptions(run) {
+    const node = run && run.task ? currentNode(run) : null;
+    if (!node || node.type !== "battle" || node.done || run.ambush || run.task.parleyUsed) return [];
+    if (typeof featExploreOk !== "function" || !featExploreOk()) return [];
+    const talk = PROFICIENCIES["交涉类"];
+    return run.party.filter(h => featHas(h, "silver")).map(h => {
+      const have = heroProfs(h);
+      const prof = talk.reduce((b, n) => ((have[n] || 0) > (have[b] || 0) ? n : b), talk[0]);
+      let level = Math.min(PROF_MAX, have[prof] || 0);
+      if (!level && featHas(h, "polymath")) level = 1;
+      const base = checkChance("normal", level);
+      return { kit: h.kit, name: heroName(h.kit), prof, level, chance: 1 - (1 - base) * (1 - base) };   // 交涉类有优势
+    }).filter(o => o.chance > 0);   // 普通难度没有熟练项不能尝试
+  }
+  function parley(run, kit) {
+    const o = parleyOptions(run).find(x => x.kit === kit);
+    if (!o) throw new Error("现在不能交涉");
+    const h = run.party.find(x => x.kit === kit);
+    run.task.parleyUsed = true;
+    const notes = [];
+    let ok = withRng(`${run.seed}:parley:${run.taskNo}:${run.task.index}`, () => Math.random() < o.chance);
+    const gambled = !ok && typeof featGambleSave === "function" && featGambleSave(h);
+    if (gambled) ok = true;
+    notes.push(`${o.name} 舌灿莲花：普通「${o.prof}」检定（优势，成功率 ${Math.round(o.chance * 1000) / 10}%）——` +
+      (ok ? `${gambled ? "失败，赌徒的运气改成成功：" : "成功："}对方让开了路（这一场没有掉落和经验）。` : "失败，谈崩了，只能打。"));
+    if (ok) {
+      passHours(run, NODE.check.hours, notes);
+      if (run.stage !== "over") advanceNode(run, notes);
+    }
+    return logAll(run, notes);
+  }
   function skipCheck(run) {
     if (!checkInfo(run)) throw new Error("当前节点不是检定");
     const notes = ["没有冒险，绕了过去。"];
@@ -1459,7 +1537,7 @@ const Rogue = (function () {
     const row = shopStock(run).find(r => r.key === key);
     if (!row) throw new Error(ROGUE_SHOP.some(r => r.key === key) ? "这家店没有这件商品" : "没有这件商品");
     qty = Math.max(1, Math.floor(Number(qty) || 1));
-    const cost = row.price * qty;
+    const cost = Math.round(row.price * qty * (typeof featHaggleMul === "function" ? featHaggleMul(run.party, 1) : 1));   // 巧手匠人：八折
     if ((Number(state.kuizhi) || 0) < cost) throw new Error("奎支不够");
     state.kuizhi -= cost;
     if (row.give.water) setLedgerWater(water() + row.give.water * qty);
@@ -1487,6 +1565,7 @@ const Rogue = (function () {
     let mul = pr.priceMul != null ? pr.priceMul : 1;
     if (run && smithId && pr.friendAfter && ((run.smithUses || {})[smithId] || 0) >= pr.friendAfter) mul *= 1 - (pr.friendDiscount || 0);
     if (pr.armsDiscount && C.armsMember) mul *= 1 - pr.armsDiscount;
+    if (run && typeof featHaggleMul === "function") mul = featHaggleMul(run.party, mul);   // 巧手匠人：八折，不和别的折扣叠加
     if (run && run.growth) {
       // 长线养成照跑团模式：材料要实物（背包里拿），奎支只付加工费（按工匠的收费规则打折 / 加价）
       const fee = Math.round(labor * mul / 100) * 100;
@@ -1989,12 +2068,12 @@ const Rogue = (function () {
     return cols.map((col, c) => {
       if (c < idx) return null;
       if (c === idx) {
-        if (!here) h = idx > 0 ? C.hours.travel : 0;   // 还没选这一站：走过去要时间
+        if (!here) h = idx > 0 ? travelHours(run) : 0;   // 还没选这一站：走过去要时间
         const out = clockAfter(h);
         h += hoursOf(here ? here.type : col[0]);
         return out;
       }
-      h += C.hours.travel;
+      h += travelHours(run);
       const out = clockAfter(h);
       const n = t.nodes[c];
       h += hoursOf(n ? n.type : col.reduce((m, x) => Math.max(m, hoursOf(x)), 0));
@@ -2056,7 +2135,7 @@ const Rogue = (function () {
     heroView, supplies, hoursAwake, brokenWeapons,
     makeBoard, taskBlocked, taskWarning, acceptTask, currentNode, nodeChoices, chooseNode, routeLinks,
     battleSpec, applyPartyToField, finishBattle,
-    checkInfo, checkChance, checkOdds, attemptCheck, skipCheck, heroProfs,
+    checkInfo, checkChance, checkOdds, attemptCheck, skipCheck, heroProfs, parleyOptions, parley,
     role2Options, soloBattleInfo,
     restPlan, restOptions, canLongRest, sheetData, armoryData, lowHpWarning, escortInfo, partOffers, buyPart, sellPart, canSellParts, partStock, partSellPrice, partInstallCost, installPart, removePart, restAtNode, leaveNode, canShortRestBefore, shortRestBeforeNode,
     ambushChance, watchOptions,

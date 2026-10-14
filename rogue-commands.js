@@ -45,6 +45,7 @@ const RogueCommands = (function () {
       return { notes, check: check || null };
     },
     skipCheck: (_c, run) => Rogue.skipCheck(run),
+    parley: (c, run) => Rogue.parley(run, c.kit),
     choose: (c, run) => Rogue.choose(run, c.kit, c.index, c.value),
     leaveNode: (_c, run) => Rogue.leaveNode(run),
     nextAct: (_c, run) => Rogue.nextAct(run),

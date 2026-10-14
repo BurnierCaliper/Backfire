@@ -224,7 +224,12 @@
       case "task": {
         const node = Rogue.currentNode(r);
         if (!node) { Rogue.nodeChoices(r).forEach(o => add("node:" + o.i, "下一站走「" + nodeLabel(o) + "」", { action: "chooseNode", index: o.i })); break; }
-        if (node.type === "battle" || node.type === "elite") { add("fight", node.type === "elite" ? "迎战（精英战）" : "迎战", { fight: true }); shortRest(); }
+        if (node.type === "battle" || node.type === "elite") {
+          add("fight", node.type === "elite" ? "迎战（精英战）" : "迎战", { fight: true });
+          // 舌灿莲花（专长）：每个任务一次，谈掉一场普通战斗
+          (Rogue.parleyOptions ? Rogue.parleyOptions(r) : []).forEach(o => add("parley:" + o.kit, `${name(o.kit)} 交涉（舌灿莲花 · 成功率 ${Math.round(o.chance * 100)}%）`, { action: "parley", kit: o.kit }));
+          shortRest();
+        }
         else if (node.type === "rest") {
           if (r.ambush) add("fight", "迎击偷袭的敌人", { fight: true });
           else {
@@ -280,7 +285,7 @@
     return options(r).find(same) || null;
   }
   function isTeamCommand(cmd) {
-    return !!cmd && (cmd.fight || ["acceptTask", "chooseNode", "restAtNode", "shortRestBeforeNode", "camp", "attemptCheck", "skipCheck", "leaveNode", "nextAct", "afterVictory"].includes(cmd.action));
+    return !!cmd && (cmd.fight || ["acceptTask", "chooseNode", "restAtNode", "shortRestBeforeNode", "camp", "attemptCheck", "skipCheck", "parley", "leaveNode", "nextAct", "afterVictory"].includes(cmd.action));
   }
   function vote(playerId, optionId) {
     const r = run();
@@ -404,7 +409,7 @@
     if (pend) {
       const t = pend.choice.type;
       choice = { kit: pend.kit, index: pend.index, name: pend.name, level: pend.choice.level,
-        title: t === "attr" ? "分配 1 点六维属性" + (pend.choice.noRepeat ? "（不能加在之前加过的同一项上）" : "") : t === "prof" ? "一个自选熟练项" : t === "role2" ? "从第二副职责里学一个技能" : t === "feat" ? "选择一项专长（不限职责和属性）" : "选择一项职责技能",
+        title: t === "attr" ? "分配 1 点六维属性" + (pend.choice.noRepeat ? "（不能加在之前加过的同一项上）" : "") : t === "prof" ? "一个自选熟练项" : t === "role2" ? "从第二副职责里学一个技能" : t === "feat" ? "选择一项专长（不限职责和属性）" : t === "featFull" ? "兼修：选一张职责涉猎专长升成完整版" : t === "prof3" ? "万事通：选一项熟练项升到三级" : "选择一项职责技能",
         options: Rogue.choiceOptions(r, pend.kit, pend.index).map(o => ({ label: o.label, hint: o.hint || "", value: o.value })) };
     }
     const waitingLevel = [...new Set(Rogue.pendingChoices(r).filter(p => !mine.includes(p.kit)).map(p => p.name))];

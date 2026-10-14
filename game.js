@@ -1302,8 +1302,9 @@
         const attacker = blockJobAttacker(job), target = unitById(job.targetId);
         if (!attacker || !target) { systemCommand({ type: "battle.cleanQueues", queue: "block" }); continue; }
         const helpers = eligibleBlockers(target, job);
+        const walls = typeof featIronwallDeclarers === "function" ? featIronwallDeclarers(target) : [];   // 铁壁（feats.js）
         let choice = null;
-        if (helpers.length) choice = await promptBlock(job, attacker, target, helpers);
+        if (helpers.length || walls.length) choice = await promptBlock(job, attacker, target, helpers, walls);
         const blocker = unitById(choice);
         let forced = null;
         if (blocker) {
@@ -1527,7 +1528,8 @@
     });
   }
 
-  function promptBlock(job, attacker, target, helpers) {
+  function promptBlock(job, attacker, target, helpers, walls) {
+    walls = walls || [];
     if (hotseat()) return HotseatGame.requestAsk("block", `${job.opt && job.opt.flags && job.opt.flags.execution ? `【死刑 ${job.opt.flags.execHit}/${job.opt.flags.execHits}】` : ""}${attacker.name} 攻击 ${target.name} · 协助格挡`,
       helpers.map(h => ({ helper: h.id, label: h.name, sub: `格挡成功率 ${finalBlockChance(h, attacker, target)}%` })),
       () => eligibleBlockers(target, job), job).then(answer => answer.unitId);
@@ -1545,7 +1547,12 @@
         sub: `成功率 ${finalBlockChance(h, attacker, target)}% · 消耗附赠行动${h.dying && !h.upOnShp ? " · 会先起身，之后受伤改打坚毅生命" : ""}`,
         value: h.id,
         onHover: noBlock
-      })),
+      })).concat(walls.map(h => ({
+        label: `${h.name} 铁壁`,
+        sub: "专长 · 这一击视为协助格挡成功（免伤，击破由自己承担、最少留 1）· 每场一次 · 不花附赠动作",
+        value: "ironwall:" + h.id,
+        onHover: noBlock
+      }))),
       { label: "不格挡", value: null, onHover: noBlock, showOnOpen: true }
     );
   }
@@ -2186,10 +2193,13 @@
     else if (side === "enemy") all = all.filter(u => !u.isPlayer);
     // 写明了射程（engine.js · SKILL_RANGE）的技能以表为准，不从提示文字里猜
     const ov = typeof skillRangeFor === "function" ? skillRangeFor(actor, sk.id) : null;
+    // 抵近射击（专长）：写着距离 1 的攻击也能打同区
+    const pointBlank = typeof featHas === "function" && featHas(actor, "pointblank") && side === "enemy";
+    const near = (u) => pointBlank && zoneDist(actor.zone, u.zone, state.zoneMode) === 0;
     if (ov) {
-      all = all.filter(u => { const d = zoneDist(actor.zone, u.zone, state.zoneMode); return d >= ov.min && d <= ov.max; });
+      all = all.filter(u => { const d = zoneDist(actor.zone, u.zone, state.zoneMode); return (d >= ov.min && d <= ov.max) || (ov.min === 1 && near(u)); });
     } else if (typeof inSkillRange === "function") {
-      all = all.filter(u => inSkillRange(actor, u, hint, state.zoneMode));
+      all = all.filter(u => inSkillRange(actor, u, hint, state.zoneMode) || near(u));
     }
     if (typeof skillTargetMoveOk === "function") all = all.filter(u => skillTargetMoveOk(actor, sk.id, u));
     if (side !== "ally" && side !== "allySelf" && side !== "anySelf") {

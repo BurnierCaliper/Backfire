@@ -623,7 +623,11 @@ function ledgerLongRest(plan, notes) {
     notes.push(`长休 ${hours} 小时（主持人强制，不扣补给）。`);
   }
   // 守夜：选一名角色或武器人整夜放哨。他不吃长休的恢复，也不刷新短休次数和「长休一次」的技能
-  const watch = plan.watch || null;
+  // 荒野向导（feats.js）：守夜的人照常恢复
+  const watchHero = plan.watch ? partyHeroes().find(x => x.kit === plan.watch) : null;
+  const ranger = !!(watchHero && typeof featHas === "function" && typeof featExploreOk === "function" && featExploreOk() && featHas(watchHero, "ranger"));
+  const watch = ranger ? null : (plan.watch || null);
+  if (ranger) notes.push(`${unitNameOf(plan.watch)} 守夜（荒野向导）：一边放哨一边歇着，长休照常恢复。`);
   if (watch) notes.push(`${unitNameOf(watch)} 守夜：这次长休不恢复，短休次数和「长休一次」的技能也不刷新。`);
   // 胶囊弹药+：排好下一场开局的 6 发子弹顺序（空 = 随机）
   Object.keys(plan.ammo || {}).forEach(kit => {
@@ -673,6 +677,18 @@ function ledgerLongRest(plan, notes) {
   const keep = (tab) => (watch && tab && tab[watch] != null ? { [watch]: tab[watch] } : {});
   LEDGER.shortUsed = keep(LEDGER.shortUsed);
   LEDGER.restOnce = keep(LEDGER.restOnce);
+  // 伙夫（feats.js）：每个带伙夫的人让坚毅生命最少的一名角色多恢复 2 点
+  if (typeof featPartyCount === "function" && typeof featExploreOk === "function" && featExploreOk()) {
+    const alive = partyHeroes().filter(x => !x.dead && !isWeaponUnit(x));
+    for (let i = featPartyCount(alive, "cook"); i > 0; i--) {
+      const low = alive.filter(x => (Number(x.shp) || 0) < (Number(x.shpMax) || 0) && x.kit !== watch)
+        .sort((a, b) => ((Number(a.shp) || 0) - (Number(b.shp) || 0)))[0];
+      if (!low) break;
+      const before = Number(low.shp) || 0;
+      low.shp = Math.min(Number(low.shpMax) || 0, before + FEAT_CFG.cook);
+      notes.push(`伙夫：${low.name} 吃得好，坚毅生命多恢复 ${low.shp - before} 点。`);
+    }
+  }
   // 时钟照常往前走；过了 0 点才换天（长休本身已经刷新了短休次数）。单局按任务天数记日子，这里不换天
   const days = advanceClock(hours * 60);
   const newDay = days > 0 && !ledgerInRun();

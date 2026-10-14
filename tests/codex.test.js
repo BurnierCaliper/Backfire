@@ -83,7 +83,7 @@ test("角色图鉴：11 名角色都有介绍和 1–5 星难度，带完整的�
   assert.ok(hAll.some(k => k.name === "一闪" && k.minLv === 2), "一闪 2 级解锁");
   assert.ok(hAll.filter(k => (k.minLv || 1) <= 1).every(k => hiaki.sheet.skills.now.some(n => n.id === k.id)), "1 级的就是当前技能");
   const kolt = heroes.find(h => h.kit === "kolt");
-  assert.ok(kolt.sheet.skills.all.some(k => k.id === "kolt_cannon" && k.minLv === 11));
+  assert.ok(kolt.sheet.skills.all.some(k => k.id === "kolt_cannon" && k.minLv === 9));
   assert.ok(kolt.sheet.weapons[0].skills.all.some(k => k.id === "torque_divert" && k.minLv === 4), "武器人的技能也按等级列");
   assert.equal(c.codexPlusLevel(1), 5);
   assert.equal(c.codexPlusLevel(2), 10);

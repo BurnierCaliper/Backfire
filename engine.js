@@ -857,10 +857,15 @@ function resolveAttack(ctx) {
 
     if (ctx.dist >= 1 && ctx.atkRange !== "melee") {   // 隔区的远程攻击（三区模式隔两区的也算）
       if (ctx.highA && !ctx.highT) { pct += 0.25; hAdd("高地打低地远程：+25%。"); }
-      if (!ctx.highA && ctx.highT) { pct -= 0.25; hAdd("低地打高地远程：−25%。"); }
+      const pointBlank = typeof featHas === "function" && featHas(ctx.attacker, "pointblank");   // 抵近射击（feats.js）
+      if (!ctx.highA && ctx.highT && !pointBlank) { pct -= 0.25; hAdd("低地打高地远程：−25%。"); }
+      if (!ctx.highA && ctx.highT && pointBlank) hAdd("低地打高地远程：抵近射击，不受 −25%。");
     }
+    // 无可阻挡（feats.js）：这一击无视目标的百分比减伤（血量层照常要打）
+    const noDr = !!flags.unstoppable;
+    if (noDr) hAdd("无可阻挡：无视目标的百分比减伤。");
     // 尘虫摊平（desert.js）：受到的伤害 −50%
-    if (t && t.resources && t.resources.flattened) { pct -= (typeof DESERT !== "undefined" ? DESERT.flattenCut : 0.5); hAdd("摊平：受到伤害 −50%。"); }
+    if (t && t.resources && t.resources.flattened && !noDr) { pct -= (typeof DESERT !== "undefined" ? DESERT.flattenCut : 0.5); hAdd("摊平：受到伤害 −50%。"); }
 
     if (interfDelta) {
       pct += interfDelta;
@@ -949,15 +954,15 @@ function resolveAttack(ctx) {
     // 相位波谷、减伤率、自保、过度自信、全队集结的坦克减伤、冰冻 +50%
     // 波谷 −50% 伤害；恶劣环境 / 末日翻倍成 −100%
     if (weather === "phase" && Number(ctx.phaseStep) === 0) { pct -= 0.5 * envX; wSum -= 0.5 * envX; hAdd(`相位波谷：伤害 −${50 * envX}%。`); }
-    if (flags.dr50) { pct -= 0.5; hAdd("目标减伤 +50%：−50%。"); }
-    if (flags.dr25) { pct -= 0.25; hAdd("自保模式：受伤 −25%。"); }
-    if (flags.prideReduce) {
+    if (flags.dr50 && !noDr) { pct -= 0.5; hAdd("目标减伤 +50%：−50%。"); }
+    if (flags.dr25 && !noDr) { pct -= 0.25; hAdd("自保模式：受伤 −25%。"); }
+    if (flags.prideReduce && !noDr) {
       const pr = typeof flags.prideReduce === "number" ? flags.prideReduce : 0.25;
       pct -= pr; hAdd(`过度自信：血量不低于进入战斗时的上限，受伤 −${Math.round(pr * 100)}%。`);
     }
     // 集结持续到自己失衡或濒死
     if (t.resources && t.resources.rallyDr && (t.stunned || t.dying)) delete t.resources.rallyDr;
-    if (t.resources && t.resources.rallyDr) { pct -= 0.15; hAdd("全队集结（坦克）：全属性减伤 +15%：−15%。"); }
+    if (t.resources && t.resources.rallyDr && !noDr) { pct -= 0.15; hAdd("全队集结（坦克）：全属性减伤 +15%：−15%。"); }
     if (h === 0 && t.instant && t.instant.iceNext && flags.action !== false) {
       pct += 0.5;
       hAdd("冰冻（冰属性击破失衡）：本动作第一击伤害 +50%。");
@@ -972,7 +977,7 @@ function resolveAttack(ctx) {
     let mul = 1;
     if (flags.doubleDeal) { mul *= 2; hAdd("造成伤害翻倍。"); }
     if (flags.doubleTake) { mul *= 2; hAdd("目标受伤翻倍。"); }
-    if (flags.holyShield) { mul *= 0.5; hAdd("圣盾：本次伤害减半。"); }
+    if (flags.holyShield && !noDr) { mul *= 0.5; hAdd("圣盾：本次伤害减半。"); }
     // 事故幸存+：拉斯缪尔不稳态下受到的伤害 ×3（不再倒地 / 死亡）
     if (t.kit === "ras" && t.resources && t.resources.unstable && typeof passivePlus === "function" && passivePlus(t, 2)) {
       mul *= 3; hAdd("事故幸存+：不稳态受伤 ×3。");

@@ -71,9 +71,9 @@ test("角色仪表：11 个角色都有数据和画面，读的是单位身上�
     assert.doesNotThrow(() => JSON.stringify(st));
   }
   assert.equal(HI.gaugeState({ kit: "xia", resources: { fuel: 99 } }).fuel, 5);
-  // 瑞比：收发代理（11 级）解锁后才有无人机图标；放出后亮起，机甲里是激光模式
-  assert.doesNotMatch(HI.gauge(HI.gaugeState({ kit: "ruby", level: 10, resources: { nano: 30 } })), /无人机/);
-  assert.match(HI.gauge(HI.gaugeState({ kit: "ruby", level: 11, resources: { nano: 30 } })), /无人机未放出/);
+  // 瑞比：收发代理（9 级）解锁后才有无人机图标；放出后亮起，机甲里是激光模式
+  assert.doesNotMatch(HI.gauge(HI.gaugeState({ kit: "ruby", level: 8, resources: { nano: 30 } })), /无人机/);
+  assert.match(HI.gauge(HI.gaugeState({ kit: "ruby", level: 9, resources: { nano: 30 } })), /无人机未放出/);
   assert.match(HI.gauge(HI.gaugeState({ kit: "ruby", level: 11, resources: { nano: 30, drone: true } })), /无人机 · 每回合 \+10 纳米/);
   assert.match(HI.gauge(HI.gaugeState({ kit: "ruby", level: 11, resources: { nano: 60, drone: true, mecha: true, overdrive: true } })), /无人机 · 激光 ×3/);
   assert.equal(HI.gaugeState({ kit: "hiaki", resources: { stance: "waki", niuOut: true } }).stance, "guard");

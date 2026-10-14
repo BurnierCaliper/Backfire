@@ -595,6 +595,9 @@ function checkPerksFor(kit, prof, hpLow) {
 
 function skillCost(id) {
   if (id === "sand_pull") return { bonus: 1 };
+  // 人器一心（feats.js）：唤出武器人只花附赠（每场一次），武器人变回武器不花行动点
+  const featAdj = typeof featCostAdjust === "function" ? featCostAdjust(id) : null;
+  if (featAdj) return featAdj;
   // 专长动作：按专长里写的消耗（默认 1 行动点）
   const featCost = typeof featSkillCost === "function" ? featSkillCost(id) : null;
   if (featCost) return featCost;
@@ -813,13 +816,13 @@ function skillList(unit) {
       add({ id: "ruby_surge", name: "电流激荡", hint: "距离1 · 1atk 电 1击破 · 打到护盾 +10纳米", minLv: 2 });
       add({ id: "ruby_short", name: "短路", hint: "距离1以内 · 施加感电", minLv: 3 });
       add({ id: "ruby_algo", name: "算法改变", hint: "任意距离 · 施加扩散 · 此回合它每次受伤瑞比 +5 纳米", minLv: 6 });
-      add({ id: "ruby_relay", name: "收发代理", hint: "放出小型无人机：每回合 +10 纳米，不限时间（机甲时改为激光）", minLv: 11 });
+      add({ id: "ruby_relay", name: "收发代理", hint: "放出小型无人机：每回合 +10 纳米，不限时间（机甲时改为激光）", minLv: 9 });
     } else {
       add({ id: "wing_aa", name: "银翼·普通攻击", hint: "距离1以内 · 1atk+1d4 能量 1击破 · 同区其他 0.3atk" });
       add({ id: "wing_steal", name: "银翼·电力夺取", hint: "同区每个敌人 0.5atk 电 · 每人 +10纳米" });
       add({ id: "wing_surge", name: "银翼·电流激荡", hint: "距离1-2 · 1atk 电 1击破 · 打到护盾 +20纳米", minLv: 2 });
       add({ id: "wing_boost", name: "银翼·机体强化", hint: "不耗行动 · 每回合纳米多耗 20 · atk +20% · 普攻溅射倍率 +0.1 · 无人机攻击次数 +1", minLv: 4 });
-      add({ id: "wing_relay", name: "银翼·收发代理", hint: "无人机每回合结束激光：高能敌人（没有就血最少的）两次 0.2atk+1d12 能量 · 耗 10 纳米", minLv: 11 });
+      add({ id: "wing_relay", name: "银翼·收发代理", hint: "无人机每回合结束激光：高能敌人（没有就血最少的）两次 0.2atk+1d12 能量 · 耗 10 纳米", minLv: 9 });
       add({ id: "ruby_unmecha", name: "解除机甲", hint: "立刻分开瑞比与明特" });
     }
   }
@@ -838,7 +841,7 @@ function skillList(unit) {
     add({ id: "yuito_espresso", name: "意式浓缩", hint: "消耗 1 咖啡液 · 友方行动点+1 或 1atk 酸 +2击破", minLv: 2 });
     add({ id: "yuito_extract", name: "酸萃", hint: `消耗 1 咖啡液 · 区域变酸液 · 友方 ${typeof addedDiceByLevel === "function" ? addedDiceByLevel(unit.level || 1) : 1}d4 治疗 / 敌人同样骰数的酸`, minLv: 3 });
     add({ id: "yuito_cold", name: "冷萃", hint: "消耗 1 咖啡液 · 距离≤1 的区变冻土 · 敌人 0.5atk 冰 +1击破 / 友方 +1 架势", minLv: 6 });
-    add({ id: "yuito_duet", name: "双重奏", hint: "消耗 2 咖啡液 · 任意友方恢复 等级×1d6 · 溢出的治疗变成 atk，下回合开始失去", minLv: 11 });
+    add({ id: "yuito_duet", name: "双重奏", hint: "消耗 2 咖啡液 · 任意友方恢复 等级×1d6 · 溢出的治疗变成 atk，下回合开始失去", minLv: 9 });
     add({ id: "yuito_summon", name: "唤出拿铁", hint: "武器生物化" });
   }
   if (unit.kit === "nora") {
@@ -849,7 +852,7 @@ function skillList(unit) {
     add({ id: "nora_soothe", name: "安抚", hint: "附赠 · 安抚维塔斯，切换为温和", minLv: 2, bare: true });
     add({ id: "nora_indwell", name: "留置针", hint: "对刺入目标施加刺骨与 1 冻伤", minLv: 3 });
     add({ id: "nora_pressure", name: "压力升高", hint: "下回合开始必定转为残忍 · 下一击带衍射", minLv: 6 });
-    add({ id: "nora_sonic", name: "声波震击", hint: "同区全体 0.5atk 谐波 +1击破 · 刺入目标额外再吃一次", minLv: 11 });
+    add({ id: "nora_sonic", name: "声波震击", hint: "同区全体 0.5atk 谐波 +1击破 · 刺入目标额外再吃一次", minLv: 9 });
   }
   if (unit.kit === "vitas") {
     add({ id: "vitas_infuse", name: "加压灌输", hint: "对刺入目标 · 温和 2d4+2 治疗并 +1 架势／残忍 1atk 冰 +1击破与两次冻伤" });
@@ -872,7 +875,7 @@ function skillList(unit) {
     add({ id: "hiaki_flash", name: "一闪", hint: "仅居合 · 同区全体 1atk +1击破 · 进入拔刀", minLv: 2 });
     add({ id: "hiaki_pot", name: "热锅", hint: "仅丹生谷 · 同区施加熔融", minLv: 3 });
     add({ id: "hiaki_barrage", name: "特盛乱打", hint: "仅胁构 · 同区每个敌人 1 击破并标记 · 进入拔刀 · 下次进入居合时被标记的各挨 0.5atk（无视距离和障碍）", minLv: 6 });
-    add({ id: "hiaki_powder", name: "粉落汤气", hint: "仅居合 · 下回合之前格挡成功不切刀势，并用另一把刀反击 1atk（鳴門 +1 击破）", minLv: 11 });
+    add({ id: "hiaki_powder", name: "粉落汤气", hint: "仅居合 · 下回合之前格挡成功不切刀势，并用另一把刀反击 1atk（鳴門 +1 击破）", minLv: 9 });
   }
   if (unit.kit === "niu") {
     add({ id: "niu_slash", name: "斩炎", hint: "同区 · 1atk 火 +1击破 · 灼烧 · 变回武器" });
@@ -892,7 +895,7 @@ function skillList(unit) {
     add({ id: "tou_sonic", name: "声波切割", hint: "同区目标 1atk 谐波、距离1 目标 0.5atk 谐波，可只选其一 · 耗 1 圣盾", minLv: 2 });
     add({ id: "tou_ultra", name: "超音波", hint: "同区施加折射", minLv: 3 });
     add({ id: "tou_bash", name: "盾击突进", hint: "移动≤1 · 同区敌人先震荡再 1atk 物理 · 可耗圣盾再盾突：1 击破 + 不稳", minLv: 6 });
-    add({ id: "tou_accuse", name: "赤诚控诉", hint: "距离1以内 · 1atk 谐波 · 嘲讽 · 圣盾 +2 · 决一死战中的敌人再虚弱", minLv: 11 });
+    add({ id: "tou_accuse", name: "赤诚控诉", hint: "距离1以内 · 1atk 谐波 · 嘲讽 · 圣盾 +2 · 决一死战中的敌人再虚弱", minLv: 9 });
     add({ id: "tou_summon", name: "唤出年糕", hint: "武器生物化" });
     /* 圣盾延射程已并入普通攻击的分步选择 */
   }
@@ -910,7 +913,7 @@ function skillList(unit) {
     add({ id: "xia_execute", name: "处决", hint: "引擎+目标晕眩 · 1d8+1.5atk 火焰 · 穿刺", minLv: 2 });
     add({ id: "xia_ram", name: "全速撞击", hint: "引擎 · 移动≤2 · 先震荡再 atk物理 · 每移1格+1击破", minLv: 3 });
     add({ id: "xia_selfburn", name: "引火烧身", hint: "需引擎 · 进入自焚，可选立刻移动 1 距离", minLv: 6, bare: true });
-    add({ id: "xia_crush", name: "狂怒碾压", hint: "同区 · 需引擎 · 1.5atk 物理 +3击破 · 未死未失衡则抓住敌人，每回合自动重复", minLv: 11 });
+    add({ id: "xia_crush", name: "狂怒碾压", hint: "同区 · 需引擎 · 1.5atk 物理 +3击破 · 未死未失衡则抓住敌人，每回合自动重复", minLv: 9 });
     add({ id: "xia_summon", name: "唤出柏妮尔", hint: "武器生物化" });
   }
   if (unit.kit === "berniel") {
@@ -926,7 +929,7 @@ function skillList(unit) {
     add({ id: "chuan_wall", name: "铁壁", hint: "耗1电能 · 同区挡伤盾 atk+1d6 装甲 · 电能≥3可多耗1加 atk 护盾", minLv: 2 });
     add({ id: "chuan_over", name: "电站超频", hint: "任意单位（可对自己）过载 · +1电能；已有≥3电能则改为 atk/2 护盾", minLv: 3 });
     add({ id: "chuan_pulse", name: "高能脉冲", hint: "对自身施加蓄能", minLv: 6 });
-    add({ id: "chuan_blade", name: "巨刃划空", hint: "1距离以内 · 耗3电能 · 2atk 电击 +2击破 · 对配置物伤害翻倍 · 击穿血量层或摧毁配置物返还1电能", minLv: 11 });
+    add({ id: "chuan_blade", name: "巨刃划空", hint: "1距离以内 · 耗3电能 · 2atk 电击 +2击破 · 对配置物伤害翻倍 · 击穿血量层或摧毁配置物返还1电能", minLv: 9 });
     add({ id: "chuan_summon", name: "唤出哔哩哩", hint: "武器生物化" });
   }
   // 被动升级后才有的技能
@@ -953,7 +956,7 @@ function skillList(unit) {
     add({ id: "kolt_mod", name: "「非法」改装", hint: "需电钻 · 1距离以内任意单位施加过载", minLv: 6 });
     add({ id: "kolt_cannon", name: "碎渣重炮", hint: bit === "acid"
       ? "耗全部废料 · 距离1-2 · 越墙迫击炮：废料量的酸 +2击破，同区其他敌人 1/3 溅射 · 主目标掉血超过上限 25% 再 +2击破"
-      : "耗全部废料 · 选距离1以内一个区域 · 废料分成每颗（扭矩atk/3+1d10）电击的子弹，随机打该区敌人 · 每2颗1击破", minLv: 11 });
+      : "耗全部废料 · 选距离1以内一个区域 · 废料分成每颗（扭矩atk/3+1d10）电击的子弹，随机打该区敌人 · 每2颗1击破", minLv: 9 });
     add({ id: "kolt_summon", name: "唤出扭矩", hint: "武器生物化" });
   }
   if (unit.kit === "torque") {
@@ -984,7 +987,7 @@ function skillList(unit) {
     add({ id: "ras_flee", name: "逃离", hint: "移动1 → +20%能量 → 原区一名敌人 1atk 电（远距离）· 不触发借机攻击。不稳则移动不限", minLv: 2 });
     add({ id: "ras_super", name: "不稳超导", hint: "20%能量转光能 · 自身导体 · 不稳态下免费", minLv: 3 });
     add({ id: "ras_rampage", name: "失控暴走", hint: "+40%能量 · 因此进入不稳态则同区变能量场；已在不稳态则全场变能量场", minLv: 6 });
-    add({ id: "ras_torrent", name: "狂瀑", hint: "任意距离 · 选高能状态的敌人 · 能量直接累积到 100%，每 20% 打 0.2atk 能量、自己失去 10% 血量", minLv: 11 });
+    add({ id: "ras_torrent", name: "狂瀑", hint: "任意距离 · 选高能状态的敌人 · 能量直接累积到 100%，每 20% 打 0.2atk 能量、自己失去 10% 血量", minLv: 9 });
     add({ id: "ras_summon", name: "唤出 EDC30k", hint: "武器生物化" });
   }
   if (unit.kit === "edc") {
@@ -1004,7 +1007,7 @@ function skillList(unit) {
     add({ id: "longge_safety", name: "解开保险", hint: "解锁扳机 · 查看最后一发子弹，可以把它移到最前面", minLv: 2 });
     add({ id: "longge_heat", name: "热能轰击", hint: gun ? "手杖：近距离施加熔融 / 霰弹枪：近距离特殊射击（红弹：同区敌人熔融、同区友方治疗；蓝弹：同区友方各 1 冰击破）" : "手杖 · 近距离 · 施加熔融", minLv: 3 });
     add({ id: "longge_drink", name: "饮弹", hint: "枪口对准自己 · 耗 1 弹 · 蓝弹：霜结并按蓝弹治疗自己 / 红弹：自己受 1atk 火，返还行动点", minLv: 6 });
-    add({ id: "longge_shuffle", name: "洗牌", hint: "把剩下的子弹重新随机排列 · 连续 2 红：随机敌人 1atk 火（3 红再一次） · 连续 2 蓝：治疗血量最低的队友（3 蓝再一次） · 都没有就窥探 1 · 子弹数量没变过不能连续洗", minLv: 11 });
+    add({ id: "longge_shuffle", name: "洗牌", hint: "把剩下的子弹重新随机排列 · 连续 2 红：随机敌人 1atk 火（3 红再一次） · 连续 2 蓝：治疗血量最低的队友（3 蓝再一次） · 都没有就窥探 1 · 子弹数量没变过不能连续洗", minLv: 9 });
     if (typeof passivePlus === "function" && passivePlus(unit, 2)) add({ id: "longge_reload", name: "完全换弹", hint: "子弹打光时 · 重新装上随机的 6 发（胶囊弹药+）" });
     add({ id: "longge_summon", name: "唤出小朋友", hint: "武器生物化" });
   }

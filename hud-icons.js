@@ -274,8 +274,8 @@
         return { kit: "nora", mood, pierce, lock: plus(2) };
       }
       case "ruby": return { kit: "ruby", nano: Math.max(0, Math.min(100, Number(r.nano) || 0)), mecha: !!r.mecha,
-        // 收发代理（11 级）解锁后才显示无人机图标；放出来之前是暗的
-        showDrone: (Number(u.level) || 1) >= 11, drone: !!r.drone, boost: !!r.overdrive };
+        // 收发代理（9 级）解锁后才显示无人机图标；放出来之前是暗的
+        showDrone: (Number(u.level) || 1) >= 9, drone: !!r.drone, boost: !!r.overdrive };
       case "yuito": {
         const bond = r.bondId ? units.find(x => x.id === r.bondId && alive(x)) : null;
         return { kit: "yuito", bean: Math.max(0, Number(r.bean) || 0), liquid: Math.max(0, Number(r.liquid) || 0), bond: !!bond, bondName: bond ? String(bond.name || "") : "" };

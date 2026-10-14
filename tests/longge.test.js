@@ -424,14 +424,15 @@ test("普通攻击能打危墙：手杖打同区边上的墙（冰 1 击破，�
 const lvUp = (lg, wl) => { lg.level = 11; lg.weaponLevels = Object.assign({}, lg.weaponLevels, { xiaoxiao: wl || 1 }); };
 const seenAll = lg => { lg.resources.seen = lg.resources.ammo.map(() => true); lg.resources.known = lg.resources.ammo.length; };
 
-test("技能解锁：热能轰击 3 级、饮弹 6 级、洗牌 11 级；完全换弹要胶囊弹药+", () => {
+test("技能解锁：热能轰击 3 级、饮弹 6 级、洗牌 9 级；完全换弹要胶囊弹药+", () => {
   const { c, lg } = setup();
   const ids = () => c.skillList(lg).map(s => s.id);
   lg.level = 1;
   ["longge_heat", "longge_drink", "longge_shuffle", "longge_reload"].forEach(id => assert.ok(!ids().includes(id), id));
   lg.level = 3; assert.ok(ids().includes("longge_heat"));
   lg.level = 6; assert.ok(ids().includes("longge_drink"));
-  lg.level = 11; assert.ok(ids().includes("longge_shuffle"));
+  lg.level = 8; assert.ok(!ids().includes("longge_shuffle"));
+  lg.level = 9; assert.ok(ids().includes("longge_shuffle"));
   assert.ok(!ids().includes("longge_reload"));
   lvUp(lg, 10);
   assert.ok(ids().includes("longge_reload"));

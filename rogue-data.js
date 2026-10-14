@@ -465,27 +465,32 @@ function blueprintSpec(id) {
 })();
 
 /* 升级时要做的选择（手册第三章「升级时你会得到什么」）。
- * 角色卡上 minLv 的技能（lv2、lv11、lv17 的「一项技能」、效果位技能）到级自动解锁，不在这里。
- *   attr      可分配的六维属性点；noRepeat：不能加在之前加过的同一项上（lv8）
+ * 角色卡上 minLv 的技能（lv2、lv9、lv17 的「一项技能」、效果位技能）到级自动解锁，不在这里。
+ *   attr      可分配的六维属性点；noRepeat：不能加在之前加过的同一项上（lv8）；lv19 那点可以重复
  *   role      职责技能二选一（lv5 副一/主二，lv10 主二/主三，lv15 主三/主四）
  *   prof      一个自选熟练项：新学一项，或把已有的一项升一级（最高三级）
+ *   feat      一项专长（feats.js），7 / 11 / 13 / 16 级
  *   note      系统还没做的奖励：先记在角色身上，等对应系统做好再兑现 */
 const ROGUE_LEVEL_REWARDS = {
   3:  [{ type: "prof" }],                      // 一个自选熟练项（已有的再选一次 = 升一级，最高三级）
   4:  [{ type: "attr" }],
   5:  [{ type: "role" }],
-  7:  [{ type: "prof" }],                      // 一个自选熟练项（已有的再选一次 = 升一级，最高三级）
+  7:  [{ type: "note", key: "feat", text: "一项专长" }],
   8:  [{ type: "attr", noRepeat: true }],
-  9:  [{ type: "note", key: "feat", text: "一项专长" }],
   10: [{ type: "role" }],
+  11: [{ type: "note", key: "feat", text: "一项专长" }],
   12: [{ type: "prof" }],                      // 一个自选熟练项（已有的再选一次 = 升一级，最高三级）
   13: [{ type: "note", key: "feat", text: "一项专长" }],
   14: [{ type: "note", key: "lv14", text: "自己回合内可用 1 行动点转化为 1 附赠动作" }],
   15: [{ type: "role" }],
   16: [{ type: "note", key: "feat", text: "一项专长" }],
-  18: [{ type: "prof" }],                      // 一个自选熟练项（已有的再选一次 = 升一级，最高三级）
-  19: [{ type: "note", key: "feat", text: "一项专长" }],
+  18: [{ type: "prof" }, { type: "prof" }],    // 两个自选熟练项
+  19: [{ type: "attr" }],                      // 这一点可以加在之前加过的同一项上
   20: [{ type: "note", key: "ultimate", text: "强力终极技能" }]
 };
+
+/* 专长在哪几级拿（rogue.js · settleOwedFeats 用来给旧存档补欠的专长） */
+const FEAT_LEVELS = Object.keys(ROGUE_LEVEL_REWARDS).map(Number)
+  .filter(L => ROGUE_LEVEL_REWARDS[L].some(r => r.type === "note" && r.key === "feat"));
 
 const ATTR_NAMES = { str: "力量", con: "体质", dex: "敏捷", wil: "意志", int: "智力", sta: "耐力" };
