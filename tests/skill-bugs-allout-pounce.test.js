@@ -69,3 +69,25 @@ test("战斗画面分步选择：是否最后一步按「选了这一项之后�
   assert.match(g, /thunk: isLastWith\(u\.id\) \? skillThunk\(actor\.id, sk\.id, u\.id, withPick\(u\.id\)\) : null/);
   assert.doesNotMatch(g, /const isLast = steps\.every/);
 });
+
+test("全力以赴 → 破势：第一个敌人击破 ×2，绯秋承受原击破，用掉；第二个照常", () => {
+  const { c, foes, K } = setup(["hiaki"]);
+  const h = K("hiaki");
+  h.def = h.defMax = 5;
+  foes[0].def = 1; foes[1].def = 1;
+  h.resources.smashNext = true;
+  cmd(c, { actor: h.id, skill: "role_breakwave" });
+  assert.equal(foes[0].def, 0);
+  assert.equal(foes[1].def, 0);
+  assert.equal(h.def, 4, "反震 1");
+  assert.equal(h.resources.smashNext, false);
+});
+
+test("没有全力以赴时破势不动绯秋架势", () => {
+  const { c, foes, K } = setup(["hiaki"]);
+  const h = K("hiaki");
+  h.def = h.defMax = 5; foes[0].def = 1;
+  cmd(c, { actor: h.id, skill: "role_breakwave" });
+  assert.equal(foes[0].def, 0);
+  assert.equal(h.def, 5);
+});

@@ -9204,6 +9204,21 @@ const PROC_DOT_FX = { burn: "burn", selfburn: "selfBurn", shock: "shock", corr: 
 
 /** 不经过攻击的击破（状态、场地、技能直接给的击破……）。
  *  opt.by：造成这次击破的单位——打进失衡时它不能接自己的协助攻击（queueAssistAttack） */
+/** 直接结算击破、不走 dealTo 的技能（特盛乱打、破势、蓝弹气化）也吃「下一击」上的猛击（全力以赴）：
+ *  只有第一下吃到——击破 ×2、攻击者承受原击破（架势归 0 失衡），然后用掉，和 dealTo 打多个目标时一样 */
+function smashableBreak(a, u, amount, element, notes, reason) {
+  if (a && a.resources && a.resources.smashNext) {
+    a.resources.smashNext = false;
+    notes.push(`全力以赴：对 ${u.name} 的${reason}带猛击（击破 ×2，${a.name} 承受原击破）。`);
+    dealBreak(u, amount * 2, element, notes, reason + "·猛击", { by: a });
+    a.def = Math.max(0, (Number(a.def) || 0) - amount);
+    notes.push(`猛击反震：${a.name} 架势 −${amount}`);
+    if (a.def <= 0) a.stunned = true;
+    return;
+  }
+  dealBreak(u, amount, element, notes, reason, { by: a });
+}
+
 function dealBreak(unit, amount, element, notes, reason, opt) {
   amount = Math.max(0, Math.floor(Number(amount) || 0));
   if (!unit || !amount) return;
@@ -11595,20 +11610,7 @@ function runSkillInner(id, optRun) {
       const el = a.resources.blade === "naruto" ? "ice" : "fire";
       const foes = visibleEnemies(a.zone);
       if (!foes.length) lines.push("同区没有敌人。");
-      // 全力以赴（猛击）挂在「下一击」上：乱打的第一下吃到（击破 ×2，绯秋承受原击破），和其他攻击一样打完就用掉
-      let smash = !!(a.resources && a.resources.smashNext);
-      foes.forEach(u => {
-        if (smash) {
-          smash = false;
-          a.resources.smashNext = false;
-          lines.push(`全力以赴：对 ${u.name} 的乱打带猛击（击破 ×2，绯秋承受原击破）。`);
-          dealBreak(u, 2, el, lines, "特盛乱打·猛击", { by: a });
-          a.def = Math.max(0, (Number(a.def) || 0) - 1);
-          lines.push(`猛击反震：${a.name} 架势 −1`);
-          if (a.def <= 0) a.stunned = true;
-        } else dealBreak(u, 1, el, lines, "特盛乱打", { by: a });
-        if (!u.dead) u.barrageBy = a.id;
-      });
+      foes.forEach(u => { smashableBreak(a, u, 1, el, lines, "特盛乱打"); if (!u.dead) u.barrageBy = a.id; });
       setHiakiStance(a, "draw");
       lines.push("特盛乱打：同区敌人各 1 击破并被标记，进入拔刀。下次进入居合时，被乱打过的敌人各被瞬间砍一刀。");
     } else if (id === "hiaki_powder") {
@@ -11733,7 +11735,7 @@ function runSkillInner(id, optRun) {
       const cap = (a.level || 1) >= 15 ? 2 : 1;
       // 已经死掉（还在淡出）的敌人不算
       visibleEnemies(a.zone).filter(u => !u.dead && !u.fused && (u.def || 0) > 0 && (u.def || 0) <= cap).forEach(u => {
-        dealBreak(u, 1, "none", lines, "破势", { by: a });
+        smashableBreak(a, u, 1, "none", lines, "破势");
       });
       lines.push(`破势：同区架势 ≤ ${cap} 的敌人各受 1 无属性击破。`);
     } else if (id === "role_halve") {
@@ -12486,7 +12488,7 @@ function runSkillInner(id, optRun) {
           allies.forEach(u => longgeBulletHeal("red", u, lines));
         } else {
           lines.push("热能轰击（霰弹枪 · 蓝弹）：子弹瞬间气化。");
-          allies.forEach(u => dealBreak(u, 1, "ice", lines, "热能轰击（蓝弹气化）", { by: a }));
+          allies.forEach(u => smashableBreak(a, u, 1, "ice", lines, "热能轰击（蓝弹气化）"));
         }
       } else {
         lines.push(`热能轰击（手杖）：${t.name} 熔融。`);
