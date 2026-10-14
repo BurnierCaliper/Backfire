@@ -1854,6 +1854,23 @@ body:not([data-screen="battle"]) .g-rank { display: none !important; }
 }
 .rm-scroll { overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
 .rm-svg { display: block; width: 100%; min-width: 640px; height: auto; }
+/* 战斗顶栏的时钟 */
+.g-clock { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; white-space: nowrap; color: #ece0c6; }
+.g-clock .dnicon { width: 18px; height: 18px; }
+.g-clock.day b { color: #f2c230; }
+.g-clock.night b { color: #9fb4ff; }
+.g-clock small { font-size: 11px; color: #e2a24f; margin-left: 4px; }
+.g-app[data-weather="snow"] .g-clock { color: #2a3138; }
+/* 路线图上每一列的预计到达时刻（昼夜会改变敌人的行为） */
+.rm-eta text { font: 700 12px var(--ui-cn, sans-serif); paint-order: stroke; stroke: #0b0806; stroke-width: 3px; }
+.rm-eta.day text, .rm-eta.day .rm-eta-ic { fill: #f2c230; }
+.rm-eta.night text, .rm-eta.night .rm-eta-ic { fill: #9fb4ff; }
+/* 单局顶栏 / 休息按钮里的时钟 */
+.r-clock { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
+.r-clock .dnicon { width: 15px; height: 15px; }
+.r-clock.day b { color: #f2c230; }
+.r-clock.night b { color: #9fb4ff; }
+.r-clock small { font-size: 10px; opacity: .8; }
 .rm-title {
   position: absolute; left: 10px; top: 6px; z-index: 2; pointer-events: none;
   font-size: 24px; font-weight: 900; line-height: 1; color: #ece0c6;

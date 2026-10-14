@@ -368,6 +368,13 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **时间看得见：昼夜现在会改变敌人的行为**（ledger.js · `DAY_NIGHT`、`isNightClock`、`clockNow`、`clockAfter`；icons.js · `Icons.daynight`；rogue.js · `routeEta`；rogue-ui.js、routemap.js、game.js 顶栏）：
+  - 单局顶栏常驻时钟：「第 3 天 · ☀ 16:30 白天」/「🌙 21:40 夜晚」（以前只写第几天）。
+  - 战斗顶栏在天气旁边显示时钟；沙暴而场上有沙漠生物时补一句「漠汛：沙漠生物按夜晚行动」。
+  - 路线图每一列下面写**预计到达时刻**（太阳 / 月亮 + 「约 21:30」，跨天写 +1天）：从现在起按「路上 3 小时 + 每个节点的时间」往后推，不算休息；还没选的岔路按耗时最长的节点算。
+  - 休息按钮写**醒来 / 休息到几点**：长休、短休、任务之间的休整都有，可以拿休息来躲开夜晚。
+  - 昼夜分界（白天 05:00–18:00）挪到 ledger.js，desert.js 照用。测试 `tests/daynight.test.js`。
+
 - **沙漠生物：三种沙鱼；中立生物：尘虫、管虫**（新文件 desert.js；engine.js · `enemyPresets`；enemies.js；ai.js；run.js · `ENEMY_INFO`、`finishEncounter`；app.js 的回合 / 协助 / 结算挂钩；game.js、unit-card.js、game.css 迷你名牌和「沙下动静」）。设定见主持人手册「沙漠生态补完」，设计记录见 IDEAS.md。
   - **昼夜**：白天 05:00–18:00，夜晚 18:00–05:00（看时钟）；沙暴（漠汛）不管几点都按夜晚。沙漠生物两套行动：白天保守、靠击破把猎物拍晕；夜晚放弃击破、全力打伤害。
   - **领潮沙鱼**（精英，2 代币）：白天撞击 1atk+1d6、2 击破（10 级起 3）；夜晚撕咬 1.5atk+1d8、1 击破。负责声呐探测；它倒下后鱼群失去协调（不再群起、不再探测，每回合每只 30% 下潜逃走）。

@@ -235,7 +235,14 @@
     if (state.weatherLock) weatherText += "（锁定）";
     // 机关门开关也算画面状态：打按钮 / 拉杆的预演靠它判断「有效果」
     const doors = Object.keys(state.gaps || {}).map(k => k + ":" + (state.gaps[k].open ? 1 : 0)).join(",");
-    return { weather: state.weather || "none", weatherText, zones, doors };
+    // 时钟：昼夜会改变沙漠生物的行为；沙暴（漠汛）时它们按夜晚行动
+    let clock = null;
+    try {
+      const min = clockNow();
+      const desertish = (state.units || []).some(u => !u.dead && typeof enemyInfo === "function" && /沙漠生物|中立生物/.test((enemyInfo(u.kit) || {}).faction || ""));
+      clock = { min, text: clockText(min), night: isNightClock(min), sandNight: state.weather === "sand" && desertish };
+    } catch (e) {}
+    return { weather: state.weather || "none", weatherText, zones, doors, clock };
   }
   function snapProp(p) {
     const max = Math.max(1, Number(p.maxHp) || Number(p.hp) || 1);
@@ -296,6 +303,14 @@
     const wi = window.Icons ? Icons.weather(env.weather) : "";
     $("g-weather").innerHTML = wi + esc("天气 " + env.weatherText);
     $("g-weather").classList.toggle("has-icon", !!wi);
+    const ck = $("g-clock");
+    if (ck) {
+      const c = env.clock;
+      ck.innerHTML = !c ? "" : (window.Icons && Icons.daynight ? Icons.daynight(c.night) : "") +
+        `<b>${esc(c.text)}</b> ${c.night ? "夜晚" : "白天"}${c.sandNight && !c.night ? `<small>漠汛：沙漠生物按夜晚行动</small>` : ""}`;
+      ck.className = "g-clock" + (c ? (c.night ? " night" : " day") : "");
+      ck.hidden = !c;
+    }
     if ($("g-weather-sel") && env.weather) $("g-weather-sel").value = env.weather;
     document.querySelectorAll(".g-zone").forEach(z => {
       const e = env.zones[z.dataset.num] || {};

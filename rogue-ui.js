@@ -145,16 +145,25 @@
   }
   const EXHAUST = ["", "力竭：无法用坚毅起身", "力竭 2：atk −3 def −1", "力竭 3：击倒即死", "力竭致死"];
 
+  /** 时钟：「21:40 🌙夜晚」；沙暴（漠汛）时沙漠生物按夜晚行动 */
+  function clockHtml(min, opt) {
+    opt = opt || {};
+    const night = isNightClock(min);
+    const icon = window.Icons && Icons.daynight ? Icons.daynight(night) : "";
+    return `<span class="r-clock ${night ? "night" : "day"}">${icon}<b>${clockText(min)}</b> ${night ? "夜晚" : "白天"}${opt.days ? `<small>（+${opt.days} 天）</small>` : ""}</span>`;
+  }
+  /** 「醒来：05:40 ☀ 白天」 */
+  const wakeHtml = (hours, label) => { const t = clockAfter(hours); return `${label || "醒来"} ${clockHtml(t.min, { days: t.days })}`; };
   function renderHeader() {
     const extra = run.act > C.acts ? "（额外）" : "";
     if (run.growth) {
       $("run-where").textContent = `长线养成 · ${Rogue.region(run)} · 队伍平均 ${Rogue.partyLevel(run)} 级`;
-      $("run-day").textContent = `第 ${run.day} 天 · 没有期限`;
+      $("run-day").innerHTML = `第 ${run.day} 天 · ${clockHtml(clockNow())} · 没有期限`;
     } else
     $("run-where").textContent = `第 ${run.act} 幕${extra} · ${Rogue.region(run)}`;
     const main = run.main;
     const mainText = !main ? "" : main.done ? " · 主线已完成" : ` · 主线需 ${main.days} 天`;
-    if (!run.growth) $("run-day").textContent = `第 ${run.day} 天 · 本幕剩 ${Rogue.daysLeft(run)}/${C.daysPerAct} 天${mainText}`;
+    if (!run.growth) $("run-day").innerHTML = `第 ${run.day} 天 · ${clockHtml(clockNow())} · 本幕剩 ${Rogue.daysLeft(run)}/${C.daysPerAct} 天${mainText}`;
     const s = Rogue.supplies();
     const hrs = Rogue.hoursAwake();
     const tier = exhaustTierFromHours(hrs);
@@ -347,8 +356,8 @@
         <label class="r-watch">守夜：<select id="r-watch"><option value="">不安排守夜</option>${watchOpts}</select></label>
         <div class="r-choices">
           <button class="g-btn r-main" id="r-long" ${plan.ok ? "" : "disabled"}>长休 ${C.hours.longRest} 小时
-            <small>${plan.ok ? `消耗 ${plan.water} ml 水、${esc(food)}` : "补给不足：" + esc(plan.lack.join("，"))} · 血量回满、耐久回满、武器人痊愈、清空力竭</small></button>
-          <button class="g-btn" id="r-short">短休 ${C.hours.shortRest} 小时<small>不消耗补给 · 每人回复 等级×2+体质 · 一天两次</small></button>
+            <small>${wakeHtml(C.hours.longRest)} · ${plan.ok ? `消耗 ${plan.water} ml 水、${esc(food)}` : "补给不足：" + esc(plan.lack.join("，"))} · 血量回满、耐久回满、武器人痊愈、清空力竭</small></button>
+          <button class="g-btn" id="r-short">短休 ${C.hours.shortRest} 小时<small>${wakeHtml(C.hours.shortRest, "休息到")} · 不消耗补给 · 每人回复 等级×2+体质 · 一天两次</small></button>
           <button class="g-btn" id="r-rest-skip">不休息，直接离开<small>获得 ${C.restSkipKuizhi} 奎支 · 不花时间</small></button>
         </div>`;
     },
@@ -576,7 +585,7 @@
     const sh = query("canShortRestBefore");
     const left = (sh.who || []).map(x => `${x.name} ${x.left}`).join("、");
     const shortBtn = `<button class="g-btn" id="r-short-before" ${sh.ok ? "" : "disabled"}>短休 ${C.hours.shortRest} 小时
-        <small>${sh.ok ? `不消耗补给 · 每人回复 等级×2+体质 · 今天还能短休：${esc(left)}` : esc(sh.why || "")}</small></button>`;
+        <small>${sh.ok ? `${wakeHtml(C.hours.shortRest, "休息到")} · 不消耗补给 · 每人回复 等级×2+体质 · 今天还能短休：${esc(left)}` : esc(sh.why || "")}</small></button>`;
     return `<div class="rest-before">${shortBtn}</div>`;
   }
 
@@ -589,7 +598,7 @@
     Object.keys(ROGUE_NODE_TYPES).forEach(k => { labels[k] = ROGUE_NODE_TYPES[k].label; });
     return RouteMap.html({
       region: Rogue.region(run), title: `${t.key ? "主线" : t.name}路线图`,
-      cols, nodes: t.nodes, pick, index: t.index, labels,
+      cols, nodes: t.nodes, pick, index: t.index, labels, eta: Rogue.routeEta(run),
       choices: Rogue.nodeChoices(run).map(o => o.i), links: Rogue.routeLinks,
       seed: `${run.seed}:map:${run.taskNo}`
     });
@@ -646,7 +655,7 @@
           ${shopping}
           ${clinic}
           ${restPlanner()}
-          <button class="g-btn r-main" id="r-camp">休整<small>${plan.ok ? `消耗 ${plan.water} ml 水、${esc(food)}` : "补给不足：不回血"}</small></button>`;
+          <button class="g-btn r-main" id="r-camp">休整<small>${wakeHtml(C.hours.longRest)} · ${plan.ok ? `消耗 ${plan.water} ml 水、${esc(food)}` : "补给不足：不回血"}</small></button>`;
       }
       case "boss":
         return `<h2>第 ${run.act} 幕 · 首领</h2>

@@ -25,7 +25,6 @@
  * ========================================================= */
 
 const DESERT = {
-  nightFrom: 18 * 60, nightTo: 5 * 60,
   detect: { day: 0.06, night: 0.35, leaderless: 0.5 },
   hungryBelow: 0.5,
   fleeChance: 0.3,
@@ -58,10 +57,7 @@ const desertPrey = () => (state.units || []).filter(u => isDesertPrey(u) && dese
 /** 现在是不是夜晚（沙暴天气按夜晚） */
 function desertNight() {
   if (state.weather === "sand") return true;
-  const clock = typeof LEDGER !== "undefined" && LEDGER.clock != null ? Number(LEDGER.clock)
-    : (typeof CLOCK_START !== "undefined" ? CLOCK_START : 8 * 60);
-  const m = ((clock % 1440) + 1440) % 1440;
-  return m >= DESERT.nightFrom || m < DESERT.nightTo;
+  return isNightClock(clockNow());
 }
 
 /* ---------- 开战：中立生物就位 ---------- */
@@ -342,11 +338,7 @@ function addDesertNeutrals(spec) {
   if (!spec || spec.region !== "沙漠" || !Array.isArray(spec.enemies)) return spec;
   const hasFish = spec.enemies.some(e => SAND_FISH_KITS.indexOf(e.preset) >= 0);
   if (!hasFish) return spec;
-  const night = spec.weather === "sand" || (() => {
-    const c = typeof LEDGER !== "undefined" && LEDGER.clock != null ? Number(LEDGER.clock) : 8 * 60;
-    const m = ((c % 1440) + 1440) % 1440;
-    return m >= DESERT.nightFrom || m < DESERT.nightTo;
-  })();
+  const night = spec.weather === "sand" || isNightClock(clockNow());
   const zm = Number(spec.zoneMode) || 2;
   const between = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
   const zoneAway = () => {

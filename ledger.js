@@ -403,6 +403,23 @@ function dayPeriod(min) {
   const h = Math.floor((((Number(min) || 0) % 1440) + 1440) % 1440 / 60);
   return h < 5 ? "深夜" : h < 8 ? "清晨" : h < 12 ? "上午" : h < 14 ? "中午" : h < 18 ? "下午" : h < 20 ? "傍晚" : "夜晚";
 }
+/* 昼夜（沙漠生物等会按昼夜换行为，desert.js）：白天 05:00–18:00，夜晚 18:00–05:00 */
+const DAY_NIGHT = { nightFrom: 18 * 60, nightTo: 5 * 60 };
+function isNightClock(min) {
+  const m = ((Math.floor(Number(min) || 0) % 1440) + 1440) % 1440;
+  return m >= DAY_NIGHT.nightFrom || m < DAY_NIGHT.nightTo;
+}
+/** 现在的时钟（分钟） */
+function clockNow() {
+  return typeof LEDGER !== "undefined" && LEDGER.clock != null ? Number(LEDGER.clock) : CLOCK_START;
+}
+/** 从现在起过 hours 小时：{ min（当天分钟）, days（跨过几个 0 点）, text, night } */
+function clockAfter(hours, from) {
+  const start = from != null ? Number(from) : clockNow();
+  const total = start + Math.round((Number(hours) || 0) * 60);
+  const min = ((total % 1440) + 1440) % 1440;
+  return { min, days: Math.floor(total / 1440), text: clockText(min), night: isNightClock(min) };
+}
 /** 「3 小时 20 分」 */
 function durationText(hours) {
   const total = Math.round((Number(hours) || 0) * 60);

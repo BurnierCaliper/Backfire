@@ -1977,6 +1977,31 @@ const Rogue = (function () {
     return logAll(run, notes);
   }
 
+  /** 路线图上每一列大约几点到（只算节点本身和路上的时间，不算休息）：[{ text, night, days } | null] */
+  function routeEta(run) {
+    const t = run && run.task;
+    if (!t) return [];
+    const cols = t.cols || t.nodes.map(n => [n ? n.type : "battle"]);
+    const hoursOf = (type) => Number((NODE[type] || {}).hours) || 0;
+    const idx = t.index || 0;
+    const here = t.nodes[idx];
+    let h = 0;
+    return cols.map((col, c) => {
+      if (c < idx) return null;
+      if (c === idx) {
+        if (!here) h = idx > 0 ? C.hours.travel : 0;   // 还没选这一站：走过去要时间
+        const out = clockAfter(h);
+        h += hoursOf(here ? here.type : col[0]);
+        return out;
+      }
+      h += C.hours.travel;
+      const out = clockAfter(h);
+      const n = t.nodes[c];
+      h += hoursOf(n ? n.type : col.reduce((m, x) => Math.max(m, hoursOf(x)), 0));
+      return out;
+    });
+  }
+
   /** 界面用：一名角色的当前状态（上限按等级算好） */
   function heroView(run, h) {
     const u = spawnLiveCard(cardOf(h.kit), 1);
@@ -2040,7 +2065,7 @@ const Rogue = (function () {
     smithQuote, introduceSmith,
     canClinic, cyberInfo, cyberPreview, cyberCost, modifyHero, healCost, healHero,
     pendingChoices, choiceOptions, choose, queueLevelRewards,
-    drawInfo, drawHero, swapHero, partyLevel, growthXp: () => growthOn,
+    drawInfo, drawHero, swapHero, partyLevel, growthXp: () => growthOn, routeEta,
     camp, nextAct, afterVictory, endRun,
     enterRunMode, leaveRunMode, syncWorld, save, inRunMode: () => !!stash,
     setLootHandler, grantLoot, rollItemDrops

@@ -39,5 +39,14 @@
     return `<svg class="eicon" viewBox="0 0 48 48" aria-label="${NAME[el]}" role="img"><g class="o">${g}</g><g class="c">${g}</g></svg>`;
   }
 
-  root.Icons = { element, weather, GLYPH, NAME, WEATHER };
+  /* 昼夜图标：太阳 / 月亮（同样的粗线画法） */
+  const DAYNIGHT = {
+    day: { c: "#f2c230", g: `<circle cx="24" cy="24" r="8"/>` + [0, 45, 90, 135, 180, 225, 270, 315].map(a => `<path class="thin" transform="rotate(${a} 24 24)" d="M24 6 V10"/>`).join("") },
+    night: { c: "#9fb4ff", g: `<path d="M29 7 A17 17 0 1 0 41 31 A13 13 0 1 1 29 7 Z"/><circle class="solid" cx="37" cy="12" r="1.6"/><circle class="solid" cx="42" cy="20" r="1.2"/>` }
+  };
+  function daynight(night) {
+    const d = DAYNIGHT[night ? "night" : "day"];
+    return `<svg class="eicon wicon dnicon" viewBox="0 0 48 48" style="color:${d.c}" aria-hidden="true"><g class="o">${d.g}</g><g class="c">${d.g}</g></svg>`;
+  }
+  root.Icons = { element, weather, daynight, GLYPH, NAME, WEATHER };
 })(typeof window !== "undefined" ? window : globalThis);
