@@ -368,6 +368,8 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **Helumica 补上业余熟练「躲藏」**（party.js · `HERO_PROFILES`，issue #44）：角色卡表格里漏了一项业余，作者确认是躲藏（一级）。单局开局、检定成功率、专长「已会熟练」的判断都按这个算。同时修了两处注释：mods.js 里 Helumica 的被动名改成「频谱分析」（聚焦是它施加的效果），并写明龙哥的被动还没接「放弃被动」（待作者定，见 IDEAS.md）。
+
 - **联机不用再填转发服务地址**（online-ui.js · `DEFAULT_RELAY`、online.css · `.ol-relay`；tests/online-ui.test.js）：开房 / 加入房间默认连到已部署的 `https://backfire-relay.richardguu22.workers.dev`，地址栏收进「转发服务：默认（一般不用改）」的折叠里，要换别的服务再展开填（空着 = 默认）。加入房间只要填昵称和房间码；昵称记在本机，下次自动带出（存不了就算了，不影响联机）。
 
 - **合并协作者的修复（PR #45 / #42 / #40）**：
