@@ -2193,7 +2193,12 @@ function turnEnd() {
           notes.push(`银翼·收发代理：无人机激光射向 ${tgt.name}（纳米 −10 → ${u.resources.nano}）。`);
           const shots = 2 + (u.resources.overdrive ? 1 : 0);   // 机体强化：无人机攻击次数 +1
           for (let i = 0; i < shots && !tgt.dead; i++) {
-            hitOne2(u, tgt, { element: "energy", mult: 0.2, diceN: 1, diceS: 12, baseBreak: 0, atk: effectiveAtk(u, state.units), atkRange: "any", usePrep: false, flags: { action: true } }, notes);
+            // 每一发照普通命中的格式写进回合结束的日志（hitOne2 只收 extra，伤害行会丢掉）
+            const defBefore = tgt.def != null ? Number(tgt.def) || 0 : null;
+            let out;
+            const captured = withLogSink(() => { out = dealTo(u, tgt, { element: "energy", mult: 0.2, diceN: 1, diceS: 12, baseBreak: 0, atk: effectiveAtk(u, state.units), atkRange: "any", usePrep: false, flags: { action: true } }); });
+            if (out && defBefore != null) out.defBefore = defBefore;
+            notes.push(...formatHitLines(u, tgt, out, captured));
           }
         } else notes.push("银翼·收发代理：没有打得到的敌人，无人机这回合什么都不干。");
       } else notes.push("银翼·收发代理：纳米不足 10，无人机这回合没有发射。");
