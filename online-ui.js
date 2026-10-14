@@ -16,7 +16,12 @@
     let battle = null, skillOptions = [], skillsFor = "", autoKey = "";
     let displayState = null, animating = false, messagesInitialized = false, seenMessages = new Set(), toastTimer;
     let historyRows = [], historyRoom = "", historyHasMore = true, historyLoading = false, historyGeneration = 0;
-    let form = { url: "", name: "", roomCode: "", slot: "0", campaignName: "", mode: "trpg", to: "all", text: "", chatText: "" }, assignments = {};
+    // 默认的转发服务（docs/d3/relay.md 里部署的那一个）：大家都用它，就不用每次填；要换别的服务再展开「更换转发服务」
+    const DEFAULT_RELAY = "https://backfire-relay.richardguu22.workers.dev";
+    // 昵称记在本机（只是方便，读不到就空着）
+    const NAME_KEY = "backfire.online.name";
+    const savedName = (() => { try { return localStorage.getItem(NAME_KEY) || ""; } catch (e) { return ""; } })();
+    let form = { url: "", name: savedName, roomCode: "", slot: "0", campaignName: "", mode: "trpg", to: "all", text: "", chatText: "" }, assignments = {};
     const unsubs = [], nodes = [], titleButtons = [], lastMarkup = {};
     const byId = id => document.getElementById(id);
     const own = () => view.identity && view.identity.id;
@@ -173,7 +178,7 @@
     }
     function entryMarkup() {
       const slots = typeof api.slots === "function" ? api.slots() : [];
-      return `<div class="ol-card"><header><h2>${entry === "create" ? "联机开房" : "加入房间"}</h2>${button("关闭", "close")}</header><div class="ol-entry-tabs">${button("我来主持", "createTab", "", pending, entry === "create")}${button("加入朋友", "joinTab", "", pending, entry === "join")}</div><label>转发服务地址<input id="ol-url" data-field="url" type="url" placeholder="https://你的转发服务" value="${esc(form.url)}" autocomplete="url"></label><label>昵称<input id="ol-name" data-field="name" maxlength="24" value="${esc(form.name)}" autocomplete="nickname"></label>${entry === "create" ? `<label>玩法<select id="ol-mode" data-field="mode">${option("trpg", "跑团（我当主持人）", form.mode !== "rogue")}${option("rogue", "联机单局（Roguelike，一起闯）", form.mode === "rogue")}</select></label>` : ""}${entry === "create" && form.mode === "rogue" ? `<p class="ol-muted">联机单局：创建后你先选队伍出发，再把角色分给进房间的朋友。路线大家投票决定，钱各算各的，战利品按需求分。</p>` : entry === "create" ? `<label>跑团存档<select id="ol-slot" data-field="slot">${slots.map(s => option(s.index, `${s.index + 1} · ${s.name}`, String(s.index) === form.slot)).join("")}</select></label><label>新团名称<input id="ol-campaign" data-field="campaignName" maxlength="40" placeholder="空白存档使用此名称" value="${esc(form.campaignName)}"></label>` : `<label>房间码<input id="ol-code" data-field="roomCode" maxlength="16" autocapitalize="characters" spellcheck="false" placeholder="六位房间码" value="${esc(form.roomCode)}"></label>`}<p class="ol-muted">使用与朋友相同的转发服务地址。进入房间后，断线会自动尝试重连。</p><footer>${button(pending ? "连接中…" : entry === "create" ? "创建房间" : "加入", "connect", "", pending, true)}${api.hasSaved?.() ? button("恢复上次房间", "resume", "", pending) : ""}</footer><p class="ol-notice" role="status">${esc(notice)}</p></div>`;
+      return `<div class="ol-card"><header><h2>${entry === "create" ? "联机开房" : "加入房间"}</h2>${button("关闭", "close")}</header><div class="ol-entry-tabs">${button("我来主持", "createTab", "", pending, entry === "create")}${button("加入朋友", "joinTab", "", pending, entry === "join")}</div><details class="ol-relay"${form.url.trim() ? " open" : ""}><summary>转发服务：${form.url.trim() ? "自定义" : "默认"}（一般不用改）</summary><label>转发服务地址（空着 = 默认）<input id="ol-url" data-field="url" type="url" placeholder="${esc(DEFAULT_RELAY)}" value="${esc(form.url)}" autocomplete="url"></label></details><label>昵称<input id="ol-name" data-field="name" maxlength="24" value="${esc(form.name)}" autocomplete="nickname"></label>${entry === "create" ? `<label>玩法<select id="ol-mode" data-field="mode">${option("trpg", "跑团（我当主持人）", form.mode !== "rogue")}${option("rogue", "联机单局（Roguelike，一起闯）", form.mode === "rogue")}</select></label>` : ""}${entry === "create" && form.mode === "rogue" ? `<p class="ol-muted">联机单局：创建后你先选队伍出发，再把角色分给进房间的朋友。路线大家投票决定，钱各算各的，战利品按需求分。</p>` : entry === "create" ? `<label>跑团存档<select id="ol-slot" data-field="slot">${slots.map(s => option(s.index, `${s.index + 1} · ${s.name}`, String(s.index) === form.slot)).join("")}</select></label><label>新团名称<input id="ol-campaign" data-field="campaignName" maxlength="40" placeholder="空白存档使用此名称" value="${esc(form.campaignName)}"></label>` : `<label>房间码<input id="ol-code" data-field="roomCode" maxlength="16" autocapitalize="characters" spellcheck="false" placeholder="六位房间码" value="${esc(form.roomCode)}"></label>`}<p class="ol-muted">${entry === "create" ? "创建后把房间码发给朋友。" : "填朋友发来的房间码就能进去。"}大家都用默认的转发服务就行。进入房间后，断线会自动尝试重连。</p><footer>${button(pending ? "连接中…" : entry === "create" ? "创建房间" : "加入", "connect", "", pending, true)}${api.hasSaved?.() ? button("恢复上次房间", "resume", "", pending) : ""}</footer><p class="ol-notice" role="status">${esc(notice)}</p></div>`;
     }
     function rosterMarkup() {
       const heroes = view.heroes || [], mayAssign = view.isHost && ["lobby", "exploration", "ended"].includes(view.screen);
@@ -786,7 +791,8 @@
         case "openRoom": panelOpen = true; render(); break;
         case "messageHistory": await earlierMessages(); break;
         case "connect": {
-          const opts = { url: form.url.trim(), name: form.name.trim() || (entry === "create" ? "主持人" : "玩家") };
+          const opts = { url: form.url.trim() || DEFAULT_RELAY, name: form.name.trim() || (entry === "create" ? "主持人" : "玩家") };
+          try { if (form.name.trim()) localStorage.setItem(NAME_KEY, form.name.trim()); } catch (e) { /* 存不了就算了 */ }
           if (entry === "create" && form.mode === "rogue") opts.mode = "rogue";
           else if (entry === "create") Object.assign(opts, { slot: Number(form.slot), campaignName: form.campaignName.trim() || "联机跑团" });
           else opts.roomCode = form.roomCode.replace(/[^0-9a-z]/gi, "").toUpperCase();   // 粘贴时带的空格、标点去掉

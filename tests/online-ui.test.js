@@ -62,7 +62,7 @@ test("D3 display: title create/join forms send explicit room options and preserv
   const o = await open(t); if (!o) return; const { page } = o;
   assert.equal(await page.isVisible("#online-stage"), false);
   await page.getByRole("button", { name: /联机开房/ }).click();
-  await page.fill("#ol-url", "http://localhost:8799"); await page.fill("#ol-name", "测试主持");
+  await page.click(".ol-relay summary"); await page.fill("#ol-url", "http://localhost:8799"); await page.fill("#ol-name", "测试主持");
   await page.selectOption("#ol-slot", "1"); await page.fill("#ol-campaign", "新的团");
   await page.click('[data-online="connect"]');
   assert.deepEqual((await calls(page))[0], { kind: "create", args: { url: "http://localhost:8799", name: "测试主持", slot: 1, campaignName: "新的团" } });
@@ -205,10 +205,22 @@ test("D3 display: paused connection disables action and reconnect leaves the dis
   assert.deepEqual(o.errors, []);
 });
 
+test("加入房间只要填房间码：转发服务默认用 Backfire 的那个；本机存不了昵称也不报错", async t => {
+  const o = await open(t, true); if (!o) return; const { page } = o;
+  await page.getByRole("button", { name: /加入房间/ }).click();
+  assert.equal(await page.isVisible("#ol-url"), false, "转发服务地址收起来了");
+  await page.fill("#ol-name", "夕夏"); await page.fill("#ol-code", "abcd23");
+  await page.click('[data-online="connect"]');
+  assert.deepEqual((await calls(page)).find(c => c.kind === "join").args, { url: "https://backfire-relay.richardguu22.workers.dev", name: "夕夏", roomCode: "ABCD23" });
+  // 这个测试页面不让用 localStorage：存不了也不报错（o.errors 为空），昵称照常发出去
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  assert.deepEqual(o.errors, []);
+});
+
 test("D3 display: join form, lobby public chat and public field changes use the presentation contract", async t => {
   const o = await open(t, true); if (!o) return; const { page } = o;
   await page.getByRole("button", { name: /加入房间/ }).click();
-  await page.fill("#ol-url", "http://localhost:8799"); await page.fill("#ol-name", "路人甲"); await page.fill("#ol-code", "abcd23");
+  await page.click(".ol-relay summary"); await page.fill("#ol-url", "http://localhost:8799"); await page.fill("#ol-name", "路人甲"); await page.fill("#ol-code", "abcd23");
   await page.click('[data-online="connect"]');
   assert.deepEqual((await calls(page)).find(c => c.kind === "join").args, { url: "http://localhost:8799", name: "路人甲", roomCode: "ABCD23" });
   await page.fill("#ol-lobby-text", "我来选红玉"); await page.locator('#ol-lobby-chat button[type="submit"]').click();
@@ -333,7 +345,7 @@ test("D3 display: resync restarts pagination at the new window after a long disc
 test("D3 display: 房间码可以一键复制；粘贴带空格 / 小写的房间码也能加入", async t => {
   const o = await open(t); if (!o) return; const { page } = o;
   await page.getByRole("button", { name: /联机开房/ }).click();
-  await page.fill("#ol-url", "http://localhost:8799"); await page.fill("#ol-name", "测试主持");
+  await page.click(".ol-relay summary"); await page.fill("#ol-url", "http://localhost:8799"); await page.fill("#ol-name", "测试主持");
   await page.click('[data-online="connect"]');
   await page.getByRole("button", { name: /消息与成员/ }).click().catch(() => {});
   // 记下被复制的文字：有剪贴板接口时截住 writeText，没有时（本地文件 / 非安全来源）走选中文字 + copy 事件
@@ -356,7 +368,7 @@ test("D3 display: 房间码可以一键复制；粘贴带空格 / 小写的房�
 test("D3 display: 加入时去掉粘贴进来的空格和标点", async t => {
   const o = await open(t); if (!o) return; const { page } = o;
   await page.getByRole("button", { name: /加入房间/ }).click();
-  await page.fill("#ol-url", "http://localhost:8799"); await page.fill("#ol-name", "路人乙"); await page.fill("#ol-code", " abcd-23 ");
+  await page.click(".ol-relay summary"); await page.fill("#ol-url", "http://localhost:8799"); await page.fill("#ol-name", "路人乙"); await page.fill("#ol-code", " abcd-23 ");
   await page.click('[data-online="connect"]');
   assert.equal((await calls(page)).find(c => c.kind === "join").args.roomCode, "ABCD23");
   assert.deepEqual(o.errors, []);

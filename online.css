@@ -19,6 +19,9 @@
 .ol-button.ol-primary { background: var(--sk-hazard, #f2c230); color: var(--sk-ink, #0b0806); }
 .ol-button.ol-primary:hover:not(:disabled) { background: #ffda55; }
 .ol-muted { color: var(--sk-muted, #a8977b); }
+.ol-relay { margin: 12px 0; }
+.ol-relay > summary { cursor: pointer; color: var(--sk-muted, #a8977b); }
+.ol-relay[open] > summary { margin-bottom: 4px; }
 .ol-online { color: var(--sk-mint, #39e6b4); }
 .ol-notice, .ol-pause { color: #ffe0a3; background: #442116; padding: 10px; overflow-wrap: anywhere; }
 .ol-notice:empty { display: none; }
