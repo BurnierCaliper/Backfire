@@ -855,7 +855,7 @@ function resolveAttack(ctx) {
       hAdd(`弱点特效（${kindNow === "adv" ? (etchAdv && matchupKind(cMod) !== "adv" ? "蚀刻视为克制" : "克制") : "非克制"}）：${pctTxt(w)}`);
     }
 
-    if (ctx.dist === 1 && ctx.atkRange !== "melee") {
+    if (ctx.dist >= 1 && ctx.atkRange !== "melee") {   // 隔区的远程攻击（三区模式隔两区的也算）
       if (ctx.highA && !ctx.highT) { pct += 0.25; hAdd("高地打低地远程：+25%。"); }
       if (!ctx.highA && ctx.highT) { pct -= 0.25; hAdd("低地打高地远程：−25%。"); }
     }
