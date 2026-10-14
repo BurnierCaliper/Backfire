@@ -11595,7 +11595,20 @@ function runSkillInner(id, optRun) {
       const el = a.resources.blade === "naruto" ? "ice" : "fire";
       const foes = visibleEnemies(a.zone);
       if (!foes.length) lines.push("同区没有敌人。");
-      foes.forEach(u => { dealBreak(u, 1, el, lines, "特盛乱打", { by: a }); if (!u.dead) u.barrageBy = a.id; });
+      // 全力以赴（猛击）挂在「下一击」上：乱打的第一下吃到（击破 ×2，绯秋承受原击破），和其他攻击一样打完就用掉
+      let smash = !!(a.resources && a.resources.smashNext);
+      foes.forEach(u => {
+        if (smash) {
+          smash = false;
+          a.resources.smashNext = false;
+          lines.push(`全力以赴：对 ${u.name} 的乱打带猛击（击破 ×2，绯秋承受原击破）。`);
+          dealBreak(u, 2, el, lines, "特盛乱打·猛击", { by: a });
+          a.def = Math.max(0, (Number(a.def) || 0) - 1);
+          lines.push(`猛击反震：${a.name} 架势 −1`);
+          if (a.def <= 0) a.stunned = true;
+        } else dealBreak(u, 1, el, lines, "特盛乱打", { by: a });
+        if (!u.dead) u.barrageBy = a.id;
+      });
       setHiakiStance(a, "draw");
       lines.push("特盛乱打：同区敌人各 1 击破并被标记，进入拔刀。下次进入居合时，被乱打过的敌人各被瞬间砍一刀。");
     } else if (id === "hiaki_powder") {

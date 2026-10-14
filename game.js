@@ -2231,7 +2231,14 @@
       try { steps = skillFlowSteps(sk.id, live, picks) || []; } catch (e) { steps = []; }
       const step = steps.find(s => picks[s.key] === undefined);
       if (!step) break;
-      const isLast = steps.every(s => s.key === step.key || picks[s.key] !== undefined);
+      // 选了这一项以后还有没有下一步：要按选了之后的步骤算（猛扑选同区目标后才多出「带到哪一区」），
+      // 否则预演缺着后面的选项，结算成「要再选」→ 判为无效，同区目标点不了
+      const withPick = v => Object.assign({}, picks, { [step.key]: v });
+      const isLastWith = v => {
+        let next = [];
+        try { next = skillFlowSteps(sk.id, live, withPick(v)) || []; } catch (e) { next = steps; }
+        return next.every(s => withPick(v)[s.key] !== undefined);
+      };
       let value = null;
       if (step.type === "zone") {
         setHint(`<b>${esc(sk.name)}</b>：${esc(step.label)}`);
@@ -2241,7 +2248,7 @@
         setHint(`<b>${esc(sk.name)}</b>：${esc(step.label)}　<span style="color:var(--faint)">${touchUI() ? "点空白处取消" : "右键取消"}</span>`);
         const cands = (step.units || []).map(u => ({
           id: u.id,
-          thunk: isLast ? skillThunk(actor.id, sk.id, u.id, Object.assign({}, picks, { [step.key]: u.id })) : null
+          thunk: isLastWith(u.id) ? skillThunk(actor.id, sk.id, u.id, withPick(u.id)) : null
         }));
         const got = await pickUnit(cands, label, step.optional ? [{ label: "不选，继续", value: "skip" }] : null);
         if (stale()) return;
