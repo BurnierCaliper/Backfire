@@ -39,3 +39,22 @@ for (const od of [false, true]) test(`无人机激光的每一发伤害都写进
   const sum = hits.reduce((a, [s]) => a + Number(s.match(/：(\d+) 伤害/)[1]), 0);
   assert.equal(sum, dealt, "日志里的伤害加起来等于实际掉血");
 });
+
+// PR #48 的遗留：其他走 hitOne2 的地方（格挡反击、特盛乱打进居合、狂怒碾压……）也要写出伤害行
+test("hitOne2 写出「→ 目标：N 伤害」；狂怒碾压的记录里有伤害行", () => {
+  const c = H.load();
+  c.BattleSim.setup({ party: ["xia", "kolt"], enemies: [{ id: "thug_knife", lv: 1, zone: 1 }], seed: "HIT2" });
+  c.startCombat();
+  const S = c.S.state;
+  const xia = c.findKit("xia", S.units), kolt = c.findKit("kolt", S.units), foe = S.units.find(u => !u.isPlayer);
+  foe.layers = [{ type: "flesh", current: 500, max: 500 }];
+  xia.zone = kolt.zone = foe.zone = 1;
+  const lines = [];
+  const hp0 = foe.layers[0].current;
+  c.hitOne2(kolt, foe, { element: "physical", mult: 1, baseBreak: 1, atk: 10, flags: { action: true } }, lines);
+  const row = lines.find(s => /→ 狂徒（匕首）：\d+ 伤害/.test(s));
+  assert.ok(row, lines.join("\n"));
+  assert.equal(Number(row.match(/：(\d+) 伤害/)[1]), hp0 - foe.layers[0].current);
+  const crush = c.crushOnce(xia, foe, false);
+  assert.ok(crush.some(s => /→ 狂徒（匕首）：\d+ 伤害/.test(s)), crush.join("\n"));
+});

@@ -2193,12 +2193,8 @@ function turnEnd() {
           notes.push(`银翼·收发代理：无人机激光射向 ${tgt.name}（纳米 −10 → ${u.resources.nano}）。`);
           const shots = 2 + (u.resources.overdrive ? 1 : 0);   // 机体强化：无人机攻击次数 +1
           for (let i = 0; i < shots && !tgt.dead; i++) {
-            // 每一发照普通命中的格式写进回合结束的日志（hitOne2 只收 extra，伤害行会丢掉）
-            const defBefore = tgt.def != null ? Number(tgt.def) || 0 : null;
-            let out;
-            const captured = withLogSink(() => { out = dealTo(u, tgt, { element: "energy", mult: 0.2, diceN: 1, diceS: 12, baseBreak: 0, atk: effectiveAtk(u, state.units), atkRange: "any", usePrep: false, flags: { action: true } }); });
-            if (out && defBefore != null) out.defBefore = defBefore;
-            notes.push(...formatHitLines(u, tgt, out, captured));
+            // 每一发照普通命中的格式写进回合结束的日志（hitOne2 现在会写出伤害行）
+            hitOne2(u, tgt, { element: "energy", mult: 0.2, diceN: 1, diceS: 12, baseBreak: 0, atk: effectiveAtk(u, state.units), atkRange: "any", usePrep: false, flags: { action: true } }, notes);
           }
         } else notes.push("银翼·收发代理：没有打得到的敌人，无人机这回合什么都不干。");
       } else notes.push("银翼·收发代理：纳米不足 10，无人机这回合没有发射。");
@@ -6470,8 +6466,8 @@ function performAssistBlock(helper, target, attacker, forced, atkRange) {
       const c = longgeTakeBullet(helper, notes);
       if (!c) notes.push("小朋友没有子弹，不能反击。");
       else {
-        hitOne2(helper, attacker, { element: LONGGE_AMMO[c].element, mult: 1, baseBreak: 2, atk: effectiveAtk(helper, state.units), atkRange: "melee", flags: { action: true, opportunity: true } }, notes);
         notes.push(`小朋友反击：一拳打向 ${attacker.name}（1×atk ${LONGGE_AMMO[c].name} + 2 击破）。`);
+        hitOne2(helper, attacker, { element: LONGGE_AMMO[c].element, mult: 1, baseBreak: 2, atk: effectiveAtk(helper, state.units), atkRange: "melee", flags: { action: true, opportunity: true } }, notes);
       }
     }
     if (helper.kit === "ecmo") {
@@ -6491,8 +6487,8 @@ function performAssistBlock(helper, target, attacker, forced, atkRange) {
       // 粉落汤气：格挡成功不切刀势，用另一把刀反击 1atk（鳴門 +1 击破）
       const other = helper.resources.blade === "naruto" ? "niu" : "naruto";
       if (attacker && !attacker.dead) {
-        hitOne2(helper, attacker, { element: other === "naruto" ? "ice" : "fire", mult: 1, baseBreak: other === "naruto" ? 1 : 0, atk: effectiveAtk(helper, state.units), atkRange: "any", flags: { action: true, opportunity: true } }, notes);
         notes.push(`粉落汤气：${helper.name} 用${other === "naruto" ? "鳴門" : "丹生谷"}反击 ${attacker.name}，刀势不变。`);
+        hitOne2(helper, attacker, { element: other === "naruto" ? "ice" : "fire", mult: 1, baseBreak: other === "naruto" ? 1 : 0, atk: effectiveAtk(helper, state.units), atkRange: "any", flags: { action: true, opportunity: true } }, notes);
       }
     } else if (helper.kit === "hiaki") {
       const st = helper.resources.stance || "draw";
@@ -6523,13 +6519,13 @@ function performAssistBlock(helper, target, attacker, forced, atkRange) {
       dealBreak(attacker, 1, "physical", notes, "夕夏格挡反打", { by: helper });
       if (helper.resources && helper.resources.engine) {
         const burn = Math.floor(effectiveAtk(helper, state.units) / 2);
-        hitOne2(helper, attacker, { atk: 0, mult: 0, flat: burn, element: "fire", baseBreak: 0, atkRange: "melee", flags: { action: true, opportunity: true } }, notes);
         notes.push(`引擎格挡：追加 ${burn} 火焰。`);
+        hitOne2(helper, attacker, { atk: 0, mult: 0, flat: burn, element: "fire", baseBreak: 0, atkRange: "melee", flags: { action: true, opportunity: true } }, notes);
       }
     }
     if (helper.kit === "berniel" && attacker && ownerEngineOn("xia")) {
-      hitOne2(helper, attacker, { element: "physical", mult: 1, baseBreak: 0, atk: effectiveAtk(helper, state.units), atkRange: "melee", flags: { action: true, opportunity: true } }, notes);
       notes.push("引擎下柏妮尔格挡成功：对进攻者打出 1×atk 物理。");
+      hitOne2(helper, attacker, { element: "physical", mult: 1, baseBreak: 0, atk: effectiveAtk(helper, state.units), atkRange: "melee", flags: { action: true, opportunity: true } }, notes);
     }
     if (helper.kit === "chuan" && attacker) {
       dealBreak(attacker, 2, "electric", notes, "川川格挡", { by: helper });
@@ -9902,8 +9898,13 @@ function crushOnce(a, t, auto) {
 }
 /** 在没有 runSkill 闭包的地方也能打一次伤害 */
 function hitOne2(actor, target, opt, lines) {
-  const out = dealTo(actor, target, opt);
-  if (out && out.extra) lines.push(...out.extra);
+  // 和技能里的命中一样写出「→ 目标：N 伤害、击破、架势变化」（以前只收 extra，伤害那一行丢掉了，PR #48）
+  const defBefore = target && target.def != null ? Number(target.def) || 0 : null;
+  let out;
+  const captured = withLogSink(() => { out = dealTo(actor, target, opt); });
+  if (out && defBefore != null) out.defBefore = defBefore;
+  lines.push(...formatHitLines(actor, target, out, captured));
+  return out;
 }
 
 /** 错位：最外面两层「还有血」的血量层互换位置（打空的层不算）。

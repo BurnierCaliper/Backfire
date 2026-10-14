@@ -368,6 +368,8 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **战斗日志：无人机激光和其他「技能外的命中」写出伤害行**（PR #48 合并 + 补充；app.js · `hitOne2`；tests/drone-log.test.js）：瑞比的无人机激光在回合结束打出的伤害以前没写进日志，只有「激光射向 X」，血直接掉了（PR #48）。原因是这类不在技能里的命中走 `hitOne2`，它只收附带文字、从不写「→ 目标：N 伤害、击破、架势变化」这一行。合并时把 `hitOne2` 本身改成和技能里的命中同样的格式，PR 里列的其他遗留处一起好了：小朋友格挡反击、绯秋「粉落汤气」反击、夕夏引擎格挡追加火焰、柏妮尔格挡反击、特盛乱打进居合的瞬斩、狂怒碾压。这几处的说明文字挪到伤害结果前面（先说发生了什么，再写打了多少）。
+
 - **抵近射击削弱：远距离攻击打同区，倍率只有原本的 60%**（feats.js · `FEAT_CFG.pointblank`；app.js · `dealTo` 的 `flags.pointBlank`、`runSkillInner` 射程检查；engine.js · `resolveAttack`；tests/feat-content.test.js）：防止远程角色贴脸也照打全额。只算靠这张专长才打得到同区的那几下：远距离攻击（`atkRange: "ranged"`）打距离 0，或者写着「距离 1」的技能靠抵近射击打同区。本来就能打同区的攻击（近距离、任意距离）不受影响；打距离 1 照常。低地打高地不吃 −25% 这条不变。
 
 - **评分：队友给的行动点，分数分一半给提供的人**（app.js · `grantAllyAp` / `apShareFor` / `addScore`、`SCORE_RULES.apGiftShare`；tests/ap-gift-score.test.js）：用技能给队友加了行动点（目前是结人的意式浓缩），队友用这个行动点出手的那次行动，得到的分数（行动分、伤害、击破、击杀……）**50% 记在提供行动点的人身上**，队伍总分不变。
