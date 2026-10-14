@@ -102,6 +102,7 @@ test("联机单局：房主选队伍、分角色；开局的钱平分进各人�
   // 升级：瑞比有一项待选，Alice 自己选；没选完之前投票不结算
   await host.evaluate(() => { RunFlow.current().party.find(h => h.kit === "ruby").pending = [{ type: "attr", level: 2, noRepeat: false }]; OnlineRogue.changed(); });
   await alice.waitForFunction(() => !!OnlineGame.getView().packet.rogue.choice);
+  await bob.waitForFunction(() => (OnlineGame.getView().packet?.rogue?.waitingLevel || []).length > 0);   // Bob 的画面也要等这次更新到（两边收到的先后不一定）
   assert.match((await rogueView(bob)).waitingLevel.join(), /瑞比/);
   const opts = (await rogueView(alice)).vote.options;
   for (const page of [alice, bob]) await submit(page, { type: "rogue.vote", option: opts[0].id });

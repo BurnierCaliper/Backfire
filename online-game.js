@@ -139,12 +139,15 @@
     });
     mountOrder(); save(); notify();
   }
+  // 连接中可以取消（联机面板的「取消」）：开房、加入都带着这个信号
+  let connectAbort = null;
+  const connectSignal = () => { connectAbort = typeof AbortController === "function" ? new AbortController() : null; return connectAbort ? connectAbort.signal : undefined; };
   async function create(options) {
     if (active) error("请先离开当前房间");
     if (options.mode === "rogue") return createRogue(options);
     const index = Number(options.slot);
     if (!Number.isInteger(index) || index < 0 || index > 2) error("请选择跑团存档空位");
-    const ep = await RelayTransport.createHost({ ...options, protocol: PROTOCOL, build: BUILD });
+    const ep = await RelayTransport.createHost({ ...options, protocol: PROTOCOL, build: BUILD, signal: connectSignal() });
     // Existing slot loading/creation remains on the established command path.
     if (trpgReadSlots()[index]) TrpgFlow.enter(index);
     else Commands.dispatch({ type: "trpg.ui", action: "new", index, name: options.campaignName || "联机跑团", level: 1 });
@@ -154,7 +157,7 @@
   /** 联机单局：房主先选队伍出发，再把角色分给进房间的玩家，然后开始 */
   async function createRogue(options) {
     if (!root.OnlineRogue || !root.RunFlow) error("这个版本没有联机单局");
-    const ep = await RelayTransport.createHost({ ...options, protocol: PROTOCOL, build: BUILD });
+    const ep = await RelayTransport.createHost({ ...options, protocol: PROTOCOL, build: BUILD, signal: connectSignal() });
     mode = "rogue";
     if (typeof TRPG !== "undefined") TRPG.active = false;
     state.units = [];
@@ -164,7 +167,7 @@
   }
   async function join(options) {
     if (active) error("请先离开当前房间");
-    const ep = await RelayTransport.join({ ...options, protocol: PROTOCOL, build: BUILD });
+    const ep = await RelayTransport.join({ ...options, protocol: PROTOCOL, build: BUILD, signal: options.resumeToken ? undefined : connectSignal() });
     bind(ep); screen = "lobby"; document.body.classList.add("online-player");
     if (!status.paused) await ep.send({ type: "resync", protocol: PROTOCOL, build: BUILD });
     return getView();
@@ -525,6 +528,31 @@
       publish(); return { ok: true };
     },
     touch() { if (isHost()) publish(); },
+    /** 联机跑团：主持人能选的队员（大厅 / 探索时换人用）：[{ kit, name, on }] */
+    partyChoices() {
+      if (!isHost() || rogue() || typeof livePartyCards !== "function") return [];
+      const on = new Set((root.GAME && GAME.partyKits) || []);
+      return livePartyCards().filter(c => !c.weaponOf).map(c => ({ kit: c.kit, name: c.name, on: on.has(c.kit) }));
+    },
+    /** 联机跑团：换队员（不在战斗中）。留下来的角色保留原来的操控者，新来的先归主持人 */
+    setParty(kits) {
+      if (!isHost()) error("只有主持人可以换队员");
+      if (rogue()) error("联机单局在单局画面选队伍");
+      if (state.combatStarted && !GAME.ended) error("战斗中不能换队员");
+      const valid = new Set((typeof livePartyCards === "function" ? livePartyCards() : []).filter(c => !c.weaponOf).map(c => c.kit));
+      kits = (Array.isArray(kits) ? kits : []).filter((k, i, a) => valid.has(k) && a.indexOf(k) === i);
+      if (!kits.length) error("至少选一名队员");
+      const ownerByKit = {};
+      (HotseatGame.isActive() ? HotseatGame.getView().heroes : []).forEach(h => { const u = state.units.find(x => x.id === h.id); if (u) ownerByKit[u.kit] = h.owner; });
+      Commands.dispatch({ type: "trpg.ui", action: "party", kits, level: (root.GAME && GAME.level) || 1 });
+      const ids = roster().map(p => p.id);
+      const next = {};
+      state.units.filter(u => u.isPlayer && !u.weaponOf).forEach(u => { const o = ownerByKit[u.kit]; if (o && ids.includes(o)) next[u.id] = o; });
+      setupOperators(next);
+      publish(); return { ok: true };
+    },
+    /** 取消正在进行的开房 / 加入（连接中的等待可能要十几秒） */
+    cancelConnect() { if (connectAbort) { connectAbort.abort(); connectAbort = null; } return { ok: true }; },
     players: () => roster(),
     ownerOfKit,
     start() { if (!isHost()) error("只有主持人可以开始"); if (rogue() && !RunFlow.current()) error("先选好队伍出发"); if (!status.roster.some(p => p.role === "player" && p.online)) error("请等待至少一名玩家加入"); started = true; publish(); return { ok: true }; },

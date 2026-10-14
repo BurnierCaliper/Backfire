@@ -21,6 +21,7 @@
     // 昵称记在本机（只是方便，读不到就空着）
     const NAME_KEY = "backfire.online.name";
     const savedName = (() => { try { return localStorage.getItem(NAME_KEY) || ""; } catch (e) { return ""; } })();
+    let partyDraft = null;   // 主持人正在勾的队员（还没点「按勾选换队员」）
     let form = { url: "", name: savedName, roomCode: "", slot: "0", campaignName: "", mode: "trpg", to: "all", text: "", chatText: "" }, assignments = {};
     const unsubs = [], nodes = [], titleButtons = [], lastMarkup = {};
     const byId = id => document.getElementById(id);
@@ -178,11 +179,14 @@
     }
     function entryMarkup() {
       const slots = typeof api.slots === "function" ? api.slots() : [];
-      return `<div class="ol-card"><header><h2>${entry === "create" ? "联机开房" : "加入房间"}</h2>${button("关闭", "close")}</header><div class="ol-entry-tabs">${button("我来主持", "createTab", "", pending, entry === "create")}${button("加入朋友", "joinTab", "", pending, entry === "join")}</div><details class="ol-relay"${form.url.trim() ? " open" : ""}><summary>转发服务：${form.url.trim() ? "自定义" : "默认"}（一般不用改）</summary><label>转发服务地址（空着 = 默认）<input id="ol-url" data-field="url" type="url" placeholder="${esc(DEFAULT_RELAY)}" value="${esc(form.url)}" autocomplete="url"></label></details><label>昵称<input id="ol-name" data-field="name" maxlength="24" value="${esc(form.name)}" autocomplete="nickname"></label>${entry === "create" ? `<label>玩法<select id="ol-mode" data-field="mode">${option("trpg", "跑团（我当主持人）", form.mode !== "rogue")}${option("rogue", "联机单局（Roguelike，一起闯）", form.mode === "rogue")}</select></label>` : ""}${entry === "create" && form.mode === "rogue" ? `<p class="ol-muted">联机单局：创建后你先选队伍出发，再把角色分给进房间的朋友。路线大家投票决定，钱各算各的，战利品按需求分。</p>` : entry === "create" ? `<label>跑团存档<select id="ol-slot" data-field="slot">${slots.map(s => option(s.index, `${s.index + 1} · ${s.name}`, String(s.index) === form.slot)).join("")}</select></label><label>新团名称<input id="ol-campaign" data-field="campaignName" maxlength="40" placeholder="空白存档使用此名称" value="${esc(form.campaignName)}"></label>` : `<label>房间码<input id="ol-code" data-field="roomCode" maxlength="16" autocapitalize="characters" spellcheck="false" placeholder="六位房间码" value="${esc(form.roomCode)}"></label>`}<p class="ol-muted">${entry === "create" ? "创建后把房间码发给朋友。" : "填朋友发来的房间码就能进去。"}大家都用默认的转发服务就行。进入房间后，断线会自动尝试重连。</p><footer>${button(pending ? "连接中…" : entry === "create" ? "创建房间" : "加入", "connect", "", pending, true)}${api.hasSaved?.() ? button("恢复上次房间", "resume", "", pending) : ""}</footer><p class="ol-notice" role="status">${esc(notice)}</p></div>`;
+      return `<div class="ol-card"><header><h2>${entry === "create" ? "联机开房" : "加入房间"}</h2>${button("关闭", "close")}</header><div class="ol-entry-tabs">${button("我来主持", "createTab", "", pending, entry === "create")}${button("加入朋友", "joinTab", "", pending, entry === "join")}</div><details class="ol-relay"${form.url.trim() ? " open" : ""}><summary>转发服务：${form.url.trim() ? "自定义" : "默认"}（一般不用改）</summary><label>转发服务地址（空着 = 默认）<input id="ol-url" data-field="url" type="url" placeholder="${esc(DEFAULT_RELAY)}" value="${esc(form.url)}" autocomplete="url"></label></details><label>昵称<input id="ol-name" data-field="name" maxlength="24" value="${esc(form.name)}" autocomplete="nickname"></label>${entry === "create" ? `<label>玩法<select id="ol-mode" data-field="mode">${option("trpg", "跑团（我当主持人）", form.mode !== "rogue")}${option("rogue", "联机单局（Roguelike，一起闯）", form.mode === "rogue")}</select></label>` : ""}${entry === "create" && form.mode === "rogue" ? `<p class="ol-muted">联机单局：创建后你先选队伍出发，再把角色分给进房间的朋友。路线大家投票决定，钱各算各的，战利品按需求分。</p>` : entry === "create" ? `<label>跑团存档<select id="ol-slot" data-field="slot">${slots.map(s => option(s.index, `${s.index + 1} · ${s.name}`, String(s.index) === form.slot)).join("")}</select></label><label>新团名称<input id="ol-campaign" data-field="campaignName" maxlength="40" placeholder="空白存档使用此名称" value="${esc(form.campaignName)}"></label>` : `<label>房间码<input id="ol-code" data-field="roomCode" maxlength="16" autocapitalize="characters" spellcheck="false" placeholder="六位房间码" value="${esc(form.roomCode)}"></label>`}<p class="ol-muted">${entry === "create" ? "创建后把房间码发给朋友。" : "填朋友发来的房间码就能进去。"}大家都用默认的转发服务就行。进入房间后，断线会自动尝试重连。</p><footer>${button(pending ? "连接中…" : entry === "create" ? "创建房间" : "加入", "connect", "", pending, true)}${pending && api.cancelConnect ? button("取消", "cancelConnect") : ""}${api.hasSaved?.() ? button("恢复上次房间", "resume", "", pending) : ""}</footer><p class="ol-notice" role="status">${esc(notice)}</p></div>`;
     }
     function rosterMarkup() {
       const heroes = view.heroes || [], mayAssign = view.isHost && ["lobby", "exploration", "ended"].includes(view.screen);
-      return `<section><h3>房间成员</h3><ul class="ol-roster">${players().map(p => `<li><span><b>${esc(p.name)}</b>${p.gm ? ' <small>主持人</small>' : ""}</span><span class="${p.online ? "ol-online" : "ol-muted"}">${p.online ? "在线" : "离线"}</span><small>${esc(heroes.filter(h => h.owner === p.id).map(h => h.name).join("、") || (p.gm ? "未分配角色由主持人操作" : "等待分配角色"))}</small>${view.isHost && !p.gm ? seatTools(p) : ""}</li>`).join("")}</ul>${mayAssign ? `<div class="ol-assignments">${heroes.map(h => `<label><span>${esc(h.name)}</span><select data-assign="${esc(h.id)}" aria-label="${esc(h.name)}的玩家">${players().map(p => option(p.id, p.name + (p.gm ? " · 主持人" : ""), (assignments[h.id] || h.owner) === p.id)).join("")}</select></label>`).join("")}</div>${button("保存角色分配", "assign", "", disabled() || !heroes.length)}` : ""}</section>`;
+      // 联机跑团：主持人在大厅 / 探索时直接勾选队员（单机的「队伍」页被房间面板挡着）
+      const choices = mayAssign && view.mode !== "rogue" && api.partyChoices ? api.partyChoices() : [];
+      const partyPicker = choices.length ? `<section class="ol-party-pick" aria-label="队员"><h3>队员</h3><p class="ol-muted">勾选这次跑团的角色。换人后，留下来的角色还是原来的人操控，新加入的先归主持人。</p><div class="ol-party-list">${choices.map(c => `<label class="ol-check"><input type="checkbox" data-party-kit="${esc(c.kit)}"${(partyDraft ? partyDraft.includes(c.kit) : c.on) ? " checked" : ""}> ${esc(c.name)}</label>`).join("")}</div>${button("按勾选换队员", "setParty", "", disabled())}</section>` : "";
+      return `<section><h3>房间成员</h3><ul class="ol-roster">${players().map(p => `<li><span><b>${esc(p.name)}</b>${p.gm ? ' <small>主持人</small>' : ""}</span><span class="${p.online ? "ol-online" : "ol-muted"}">${p.online ? "在线" : "离线"}</span><small>${esc(heroes.filter(h => h.owner === p.id).map(h => h.name).join("、") || (p.gm ? "未分配角色由主持人操作" : "等待分配角色"))}</small>${view.isHost && !p.gm ? seatTools(p) : ""}</li>`).join("")}</ul>${mayAssign ? `<h3 id="ol-assign-head">角色分配</h3><div class="ol-assignments">${heroes.map(h => `<label><span>${esc(h.name)}</span><select data-assign="${esc(h.id)}" aria-label="${esc(h.name)}的玩家">${players().map(p => option(p.id, p.name + (p.gm ? " · 主持人" : ""), (assignments[h.id] || h.owner) === p.id)).join("")}</select></label>`).join("")}</div>${button("保存角色分配", "assign", "", disabled() || !heroes.length)}` : view.isHost && view.screen === "battle" ? '<p class="ol-muted">战斗中不能改角色分配；玩家掉线可以先「接管」，打完回到探索再重新分配。</p>' : ""}</section>${partyPicker}`;
     }
     /** 主持人对玩家座位的操作：掉线时「接管」他的角色（战斗中也行）；「释放座位」让丢了恢复令牌的人能用同一个昵称重新加入 */
     function seatTools(p) {
@@ -628,7 +632,8 @@
       if (view.active) {
         if (!animating) displayState = view.state || null;
         if (request && (request.actor !== hs().currentUnitId || hs().phase !== "acting")) { request = currentMenu = null; actionGeneration++; }
-        html(dock, button(`${view.roomCode || "房间"} · ${paused() ? "重连中" : "消息与成员"}`, "openRoom", "", false), "dock");
+        html(dock, button(`${view.roomCode || "房间"} · ${paused() ? "重连中" : "消息与成员"}`, "openRoom", "", false) +
+          (view.isHost && view.mode !== "rogue" && ["exploration", "ended"].includes(view.screen) ? button("角色分配", "openAssign", "", false) : ""), "dock");
         observeMessages();
       }
       // 联机单局的房主：大厅里先要在单局画面选队伍，房间面板不挡着；队伍选好（有角色可分）时自动打开一次
@@ -781,13 +786,17 @@
       const box = event.target.closest && event.target.closest("[data-cyber-box]");
       if (box) { cyberDraft[box.dataset.cyberBox] = cyberPlanOf(box.dataset.cyberBox); return; }
       const key = event.target.dataset.field; if (key && Object.hasOwn(form, key)) form[key] = event.target.value; }
-    function change(event) { input(event); if (event.target.dataset.field === "mode") render(); if (event.target.dataset.assign) assignments[event.target.dataset.assign] = event.target.value; }
+    function change(event) {
+      input(event); if (event.target.dataset.field === "mode") render(); if (event.target.dataset.assign) assignments[event.target.dataset.assign] = event.target.value;
+      if (event.target.dataset.partyKit) partyDraft = [...document.querySelectorAll("[data-party-kit]")].filter(x => x.checked).map(x => x.dataset.partyKit);
+    }
     async function click(event) {
       const b = event.target.closest("[data-online]"); if (!b || b.disabled) return;
       switch (b.dataset.online) {
         case "createTab": entry = "create"; render(); break;
         case "joinTab": entry = "join"; render(); break;
         case "close": panelOpen = false; render(); break;
+        case "cancelConnect": api.cancelConnect?.(); break;   // 连接中的「取消」：call() 收到「已取消连接」后恢复表单
         case "openRoom": panelOpen = true; render(); break;
         case "messageHistory": await earlierMessages(); break;
         case "connect": {
@@ -803,6 +812,12 @@
         case "reconnect": await call(() => api.reconnect()); break;
         case "copyCode": await copyRoomCode(); break;
         case "leave": await call(() => api.leave()); break;
+        case "setParty": {
+          const kits = partyDraft || [...document.querySelectorAll("[data-party-kit]")].filter(x => x.checked).map(x => x.dataset.partyKit);
+          if (await call(() => api.setParty(kits))) { partyDraft = null; assignments = {}; }
+          break;
+        }
+        case "openAssign": panelOpen = true; render(); document.getElementById("ol-assign-head")?.scrollIntoView({ block: "start" }); break;
         case "assign": await call(() => api.assign(Object.fromEntries((view.heroes || []).map(h => [h.id, assignments[h.id] || h.owner || own()])))); assignments = {}; break;
         case "takeOver": if (typeof api.takeOver === "function") await call(() => api.takeOver(b.dataset.player)); break;
         case "releaseSeat":
