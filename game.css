@@ -243,6 +243,52 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
 .unit.prop .u-name { font-size: 12px; max-width: 72px; }
 .unit.prop .u-hp { width: 70%; height: 8px; }
 .g-field.z3 .unit.prop { width: 72px; height: 72px; }
+
+/* ---------- 中立生物（desert.js · 尘虫、管虫）：迷你名牌 ----------
+ * 只留名字、细血条、架势和几个小标签；沙黄色细框，和红框的敌人、蓝框的我方分开 */
+.grp.neutral { gap: 6px; }
+.unit.mini {
+  width: 86px; padding: 5px 6px 5px 9px; background: #fffaf0;
+  --side: #c99a46; box-shadow: inset 0 0 0 2px #c99a46;
+  clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px));
+}
+.unit.mini .u-head { margin: 0; }
+.unit.mini .u-name { font-size: 12px; }
+.unit.mini .u-lv { font-size: 10px; margin-left: auto; }
+.unit.mini .u-atk, .unit.mini .u-hpline, .unit.mini .u-dur, .unit.mini .u-econ, .unit.mini .u-res,
+.unit.mini .u-flag { display: none !important; }
+.unit.mini .u-hp { height: 5px; margin: 4px 0 3px; }
+.unit.mini .u-def .pip { width: 6px; height: 6px; }
+.unit.mini .u-foot { margin: 2px 0 0; min-height: 0; }
+.unit.mini .u-status .chip { font-size: 9px; padding: 0 3px; line-height: 12px; background: #efe2c6; color: #6c4a16; }
+.unit.mini .u-status .chip.m-seen { background: #d6f6ff; color: #0b5a6b; }
+.unit.mini .u-status .chip.m-stun { background: #ffe2a8; color: #7a4a00; }
+.unit-wrap.stunned .unit.mini { box-shadow: inset 0 0 0 2px #f2c230; }
+
+/* 夜晚下潜的中立生物：区角上的「沙下动静 ×N」，点开看每一只 */
+.sandstir-wrap { position: absolute; left: 10px; bottom: 10px; z-index: 3; }
+.sandstir {
+  display: flex; align-items: center; gap: 7px; cursor: pointer; text-align: left;
+  background: #15110d; color: #f0cf9a; border: 2px solid #d9a35f; padding: 5px 10px 5px 6px;
+  font: 700 13px var(--ui-cn, sans-serif);
+  clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px));
+}
+.sandstir svg { width: 22px; height: 22px; flex: none; }
+.sandstir small { display: block; font-weight: 400; font-size: 10px; color: #c9b48c; }
+.sandstir-pop {
+  display: none; position: absolute; left: 0; bottom: calc(100% + 6px); width: 230px;
+  background: #15110d; color: #ece0c6; border: 2px solid #d9a35f; padding: 8px 10px; font-size: 12px;
+}
+.sandstir-wrap.open .sandstir-pop { display: block; }
+.sandstir-pop h4 { margin: 0 0 6px; font-size: 13px; color: #f0cf9a; }
+.sandstir-pop .r { display: flex; align-items: center; gap: 6px; margin: 4px 0; cursor: pointer; }
+.sandstir-pop .r:hover { background: rgba(217, 163, 95, .15); }
+.sandstir-pop .r .n { width: 34px; }
+.sandstir-pop .r .bar { flex: 1; height: 5px; background: #3b342c; position: relative; }
+.sandstir-pop .r .bar i { position: absolute; left: 0; top: 0; bottom: 0; background: #d9a35f; }
+.sandstir-pop .r em { font-style: normal; font-size: 10px; color: #3fe0ff; }
+.sandstir-pop .r small { font-size: 10px; color: #a8977b; }
+.sandstir-pop footer { margin-top: 6px; font-size: 10px; color: #a8977b; border-top: 1px dashed #4d4337; padding-top: 5px; }
 .grp.prop { min-height: 0; }
 .unit-wrap { position: relative; isolation: isolate; }
 .unit-wrap::after {                   /* 选中 / 可选 / 预告：铭牌背后大一圈的底板 */
@@ -1728,6 +1774,8 @@ body:not([data-screen="battle"]) .g-rank { display: none !important; }
   .grp, .g-field.z3 .grp { gap: 8px; }
   .grp > .unit-wrap { width: calc(50% - 4px); max-width: 210px; }
   .grp > .unit-wrap.prop-wrap, .grp.prop > .unit-wrap { width: auto; }
+  .grp.neutral > .unit-wrap { width: auto; }
+  .unit.mini, .g-field.z3 .unit.mini { width: 78px; padding: 4px 5px 4px 8px; }
   .unit, .g-field.z3 .unit { width: 100%; padding: 6px 7px 5px 11px; }
   .unit.prop, .g-field.z3 .unit.prop { width: 72px; height: 72px; }
   .u-name, .g-field.z3 .u-name { font-size: 13px; }

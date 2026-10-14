@@ -13,7 +13,7 @@
   function create(s) {
     const wrap = el("div", "unit-wrap");
     wrap.dataset.id = s.id;
-    const unit = el("div", "unit " + (s.isProp ? "prop " : "") + (s.isDevice ? "device " : "") + (s.isPlayer ? "player" : "foe"),
+    const unit = el("div", "unit " + (s.isProp ? "prop " : "") + (s.isDevice ? "device " : "") + (s.neutral ? "mini neutral " : "") + (s.isPlayer ? "player" : "foe"),
       `<div class="u-head"><span class="u-name"></span><span class="u-lv"></span><span class="u-atk"></span></div>
        <div class="u-hp"></div>
        <div class="u-hpline"><span class="hpn"></span><span class="shpn"></span></div>
@@ -173,6 +173,8 @@
       badges.forEach(b => { if (before[b.key] !== String(b.stack)) HudIcons.procIn(q(".u-status"), b.key); });
     }
     c.prevBadges = badgeKey;
+    // 中立生物的迷你名牌：只挂几个小标签（失衡 / 摊平 / 已发现）
+    if (s.neutral) q(".u-status").innerHTML = (s.neutralTags || []).map(t => `<span class="chip m-${esc(t.key)}">${esc(t.text)}</span>`).join("");
     // 有耐久条时，资源文字里的「耐久 N」就不重复写了
     const resText = s.dur ? String(s.res || "").split(" · ").filter(t => !/^耐久 /.test(t)).join(" · ") : (s.res || "");
     q(".u-res").textContent = resText;

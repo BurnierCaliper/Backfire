@@ -10,7 +10,8 @@ const EnemyAI = (function () {
 
   function unitAlive(u) { return u && !u.hidden && !u.fused && !u.dead && !u._removed; }
   function players() { return state.units.filter(u => u.isPlayer && unitAlive(u)); }
-  function foes() { return state.units.filter(u => !u.isPlayer && unitAlive(u) && u.kit !== "ironwall" && !(typeof playerAllied === "function" && playerAllied(u))); }   // 友军不算要打的敌人
+  function foes() { return state.units.filter(u => !u.isPlayer && unitAlive(u) && u.kit !== "ironwall" && !(typeof playerAllied === "function" && playerAllied(u)) &&
+    !(typeof isNeutralCreature === "function" && isNeutralCreature(u))); }   // 友军、中立生物不算要打的敌人
 
   function hpOf(u) {
     if (u.upOnShp) return Number(u.shp) || 0;
@@ -109,6 +110,9 @@ const EnemyAI = (function () {
     alarm_bot:      { dist: null, aim: "local",   special: "alarm", fixed: true },
     meteor_miner:   { dist: 1,    aim: "local",   near: "en_miner_shot",     far: "en_miner_shot" },
     meteor_spider:  { dist: 0,    aim: "local",   near: "en_spider_bite" },
+    sandfish_lead:  { dist: 0,    aim: "local",   near: "en_fish_lead_hit" },
+    sandfish_drive: { dist: 0,    aim: "local",   near: "en_fish_drive_tail" },
+    sandfish_ambush:{ dist: 0,    aim: "local",   near: "en_fish_ambush_bite" },
     meteor_centipede: { dist: 1,  aim: "lowest",  near: "en_centi_shot",     far: "en_centi_shot", fixed: true },
     thug_knife:     { dist: 0,    aim: "local",   near: "en_thug_knife" },
     thug_hammer:    { dist: 0,    aim: "local",   near: "en_thug_hammer" },
@@ -599,6 +603,12 @@ const EnemyAI = (function () {
     if (u && u.trainingDummy) return null;   // 训练场的木桩：不行动
     if (u && u.dormant) return null;         // 休眠：不行动，直到被叫醒
     if (typeof sinkLocked === "function" && sinkLocked(u)) return null;   // 流沙没顶：不能行动
+    if (typeof isNeutralCreature === "function" && isNeutralCreature(u)) return null;   // 中立生物不行动
+    if (typeof sandFishPlan === "function") {   // 沙鱼：捕食、白天的伏咬沙鱼潜伏不动（desert.js）
+      const fp = sandFishPlan(u);
+      if (fp === "wait") return null;
+      if (fp) return fp;
+    }
     const plan = aiPlanBase(u);
     if (!u || !u.flying || state.weather !== "sand" || u.noMove || u.self === "frost") return plan;
     if (typeof touDuelVictim === "function" && touDuelVictim(u)) return plan;   // 决一死战中不移动

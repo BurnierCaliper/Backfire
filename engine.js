@@ -859,6 +859,8 @@ function resolveAttack(ctx) {
       if (ctx.highA && !ctx.highT) { pct += 0.25; hAdd("高地打低地远程：+25%。"); }
       if (!ctx.highA && ctx.highT) { pct -= 0.25; hAdd("低地打高地远程：−25%。"); }
     }
+    // 尘虫摊平（desert.js）：受到的伤害 −50%
+    if (t && t.resources && t.resources.flattened) { pct -= (typeof DESERT !== "undefined" ? DESERT.flattenCut : 0.5); hAdd("摊平：受到伤害 −50%。"); }
 
     if (interfDelta) {
       pct += interfDelta;
@@ -1741,6 +1743,38 @@ function enemyPresets() {
     { id: "meteor_centipede", name: "陨体弦蚣", build(lv, p) {
       return unitOf(this.name, lv, [{ type: "spirit", hp: scaleHp(17 + (lv - 1) * 4, p) }], 3 + milestone(lv, 10), 5 + (lv - 1),
         { kit: "meteor_centipede", range: "ranged", dice: [0, 0], element: "energy" });
+    }},
+    // —— 沙漠生物（desert.js）：沙尘 + 装甲 ——
+    { id: "sandfish_lead", name: "领潮沙鱼", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "sand", hp: scaleHp(15 + (lv - 1) * 4, p) },
+        { type: "armor", hp: scaleHp(20 + (lv - 1) * 5, p) }
+      ], 5 + milestone(lv, 5), 6 + (lv - 1), { kit: "sandfish_lead", range: "melee", dice: [1, 6], element: "physical", baseBreak: 2 });
+    }},
+    { id: "sandfish_drive", name: "赶潮沙鱼", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "sand", hp: scaleHp(6 + (lv - 1) * 2, p) },
+        { type: "armor", hp: scaleHp(8 + (lv - 1) * 2, p) }
+      ], 3 + milestone(lv, 10), 4 + (lv - 1), { kit: "sandfish_drive", range: "melee", dice: [1, 4], element: "physical" });
+    }},
+    { id: "sandfish_ambush", name: "伏咬沙鱼", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "sand", hp: scaleHp(5 + (lv - 1) * 2, p) },
+        { type: "armor", hp: scaleHp(7 + (lv - 1) * 2, p) }
+      ], 3 + milestone(lv, 10), 6 + (lv - 1), { kit: "sandfish_ambush", range: "melee", dice: [1, 6], element: "physical" });
+    }},
+    // —— 中立生物：不攻击，血量 = 沙鱼吞掉它能回的血 ——
+    { id: "dust_bug", name: "尘虫", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "sand", hp: scaleHp(2 + (lv - 1), p) },
+        { type: "armor", hp: scaleHp(3 + (lv - 1), p) }
+      ], 2 + milestone(lv, 10), 0, { kit: "dust_bug", range: "melee", dice: [0, 0], element: "physical" });
+    }},
+    { id: "tube_worm", name: "管虫", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "sand", hp: scaleHp(3 + (lv - 1), p) },
+        { type: "armor", hp: scaleHp(5 + (lv - 1), p) }
+      ], 1 + milestone(lv, 10), 0, { kit: "tube_worm", range: "melee", dice: [0, 0], element: "physical" });
     }},
     { id: "bigsand", name: "大沙灵", build(lv, p) {
       return unitOf(this.name, lv, [{ type: "sand", hp: scaleHp(37 + (lv - 1) * 6 + milestone(lv, 2), p) }], 4, 5 + milestone(lv, 2), { kit: "bigsand", range: "melee", dice: [1, 4], element: "physical" });

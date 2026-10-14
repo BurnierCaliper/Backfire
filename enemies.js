@@ -93,7 +93,8 @@ function enemyMayAssist(u) {
 
 /* 协助攻击的射程。自带移动的（冲到目标那一区再打）先走一格；无限距离的总能打到；
  * 其余按技能射程（ENEMY_SKILL_RANGE，没登记的用单位卡上的 range），隔着危墙 / 关着的门打不到。 */
-const ENEMY_ASSIST_RUSH = ["en_thug_hammer_assist", "en_wolf_assist", "en_chi_exec", "en_overseer_assist", "en_gas_assist"];
+const ENEMY_ASSIST_RUSH = ["en_thug_hammer_assist", "en_wolf_assist", "en_chi_exec", "en_overseer_assist", "en_gas_assist",
+  "en_fish_lead_assist", "en_fish_drive_assist", "en_fish_ambush_assist"];   // 沙鱼群起：冲到失衡的人那一区
 const ENEMY_ASSIST_ANYWHERE = ["en_patrol_assist", "ufo_assist", "en_alarm_assist"];
 function enemyAssistReach(u, t) {
   if (!u || !t) return false;
@@ -264,6 +265,20 @@ function enemySkillList(u) {
       { id: "en_miner_shot", label: "能量射线（倒流）" },
       { id: "en_miner_assist", label: "协助：能量射线（倒流）" }
     ],
+    sandfish_lead: [
+      { id: "en_fish_lead_hit", label: "撞击（白天 +2 击破）/ 撕咬（夜晚）" },
+      { id: "en_fish_lead_assist", label: "群起：撞击 / 撕咬" }
+    ],
+    sandfish_drive: [
+      { id: "en_fish_drive_tail", label: "甩尾（白天推开）/ 乱咬（夜晚）" },
+      { id: "en_fish_drive_assist", label: "群起：甩尾 / 乱咬" }
+    ],
+    sandfish_ambush: [
+      { id: "en_fish_ambush_bite", label: "腾咬（白天）/ 猛咬（夜晚）" },
+      { id: "en_fish_ambush_assist", label: "群起：腾咬 / 猛咬" }
+    ],
+    dust_bug: [],
+    tube_worm: [],
     meteor_spider: [
       { id: "en_spider_bite", label: "撕咬" },
       { id: "en_spider_assist", label: "协助：撕咬（施加高能）" }
@@ -553,6 +568,7 @@ const ENEMY_SKILL_RANGE = {
   en_hunter_shot: "ranged",
   en_miner_shot: "ranged",
   en_spider_bite: "melee",
+  en_fish_lead_hit: "melee", en_fish_drive_tail: "melee", en_fish_ambush_bite: "melee",
   en_spider_assist: "melee",
   en_centi_shot: "ranged",
   en_centi_assist: "ranged",
@@ -773,6 +789,8 @@ function playerAllied(u) {
 /** a 和 b 是不是敌对的 */
 function hostileTo(a, b) {
   if (!a || !b || a === b) return false;
+  // 中立生物（尘虫、管虫）：谁都不当它是敌人；要打它得专门去打（玩家手动、沙鱼捕食）
+  if (typeof isNeutralCreature === "function" && (isNeutralCreature(a) || isNeutralCreature(b))) return false;
   if (!!a.isPlayer !== !!b.isPlayer) return !playerAllied(a.isPlayer ? b : a);
   if (a.isPlayer) return false;
   const fa = factionOf(a), fb = factionOf(b);
@@ -943,6 +961,7 @@ function runEnemyAction(id, a, t, hitOne, lines, needT) {
   try { return runEnemyActionInner(id, a, t, hitOne, lines, needT); } finally { ENEMY_ACTOR = prev; }
 }
 function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
+  if (typeof desertEnemyAction === "function" && desertEnemyAction(id, a, t, hitOne, lines, needT)) return true;   // 沙鱼（desert.js）
   const atk = effectiveAtk(a, state.units);
   const sg = a.suggest || {};
   const diceN = extraDiceByLevel(a.level);

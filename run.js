@@ -262,6 +262,13 @@ const ENEMY_INFO = {
   // —— 野生动物：只在外城区与沙漠 ——
   // 穴鸦成群出现（4–6 只一群），一群占满一场的 4 枚代币；pack：成群的杂兵，不算精英战
   crow: { faction: "野生", regions: ["外城区", "沙漠"], tokens: 4, group: [4, 6], pack: true },
+  // —— 沙漠生物（desert.js）：沙鱼群；和沙灵互相敌对 ——
+  sandfish_lead:   { faction: "沙漠生物", regions: ["沙漠"], tokens: 2 },
+  sandfish_drive:  { faction: "沙漠生物", regions: ["沙漠"], tokens: 1 },
+  sandfish_ambush: { faction: "沙漠生物", regions: ["沙漠"], tokens: 1 },
+  // —— 中立生物：不占代币，不进随机抽取；有沙鱼的沙漠遭遇按 DESERT.spawn 另外配 ——
+  dust_bug:  { faction: "中立生物", regions: ["沙漠"], tokens: 0, neutral: true },
+  tube_worm: { faction: "中立生物", regions: ["沙漠"], tokens: 0, neutral: true },
   // —— 古代造物：沙漠 ——
   watchcrow: { faction: "古代造物", regions: ["沙漠"], tokens: 2 }
 };
@@ -289,6 +296,7 @@ function regionPool(region, opt) {
   return Object.keys(ENEMY_INFO).filter(k => {
     const i = ENEMY_INFO[k];
     if (i.boss && !opt.boss) return false;
+    if (i.neutral) return false;   // 中立生物不当敌人抽
     return !region || i.regions.indexOf(region) >= 0;
   });
 }
@@ -512,6 +520,8 @@ function finishEncounter(spec, opt) {
   spec.weather = opt.weather != null ? opt.weather : regionWeather(spec.region);
   if (!spec.features) { const feats = regionFeatures(spec.region, zoneMode); if (feats.length) spec.features = feats; }
   applyEncounterLayout(spec);
+  // 有沙鱼的沙漠遭遇：配上尘虫 / 管虫（中立生物，不占代币，desert.js · DESERT.spawn）
+  if (typeof addDesertNeutrals === "function") addDesertNeutrals(spec);
   spec.id = "roll:" + spec.region + ":" + (spec.faction || "") + ":" + spec.enemies.map(e => e.preset).join("+");
   return spec;
 }

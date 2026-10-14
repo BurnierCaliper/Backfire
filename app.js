@@ -417,6 +417,8 @@ function statusLine(u) {
     if (u.statuses.inspire) s.push("振奋");
     if (u.statuses.hide) s.push("躲藏");
     if (u.submerged) s.push("下潜");
+    if (u.resources && u.resources.flattened) s.push("摊平");
+    if (u.detected && typeof isDesertPrey === "function" && isDesertPrey(u)) s.push("已被发现");
     if (sinkOf(u) && inQuicksand(u)) s.push("下陷 " + sinkOf(u) + (sinkOf(u) >= QUICKSAND.lockAt ? "（没顶）" : ""));
     if (u.statuses.advantage) s.push("优势");
     if (u.statuses.chase) s.push("紧追");
@@ -1573,6 +1575,8 @@ function startCombat() {
   // 过度自信看的是进入战斗时的血量上限：战斗中上限被抬高（护盾、临时层……）也不影响触发线
   (state.units || []).forEach(u => { if (u.kit === "kolt") u.prideMaxHp = baseMaxHp(u); });
   applyPassivePlusAtStart();
+  // 沙漠生物 / 中立生物（desert.js）：夜晚下潜的尘虫、管虫的流沙、伏咬沙鱼埋伏
+  if (typeof desertBattleStart === "function") { const dn = []; desertBattleStart(dn); if (dn.length) appendLog(dn.join("\n")); }
   // 专长（feats.js · hooks.battleStart）：开战时
   if (typeof featHook === "function") {
     const featNotes = [];
@@ -1675,6 +1679,7 @@ function beginRound(notes) {
     if (u.kit === "hiaki" && u.resources && u.resources.powder) { u.resources.powder = false; notes.push("粉落汤气结束。"); }
   });
   if (typeof mutinyTick === "function") mutinyTick(notes);
+  if (typeof desertRoundStart === "function") desertRoundStart(notes);   // 尘虫摊平结束、管虫流沙
   // 专长（feats.js · hooks.roundStart）：每回合开始
   if (typeof featHook === "function") state.units.forEach(u => { if (u.isPlayer && !u.dead && !u.hidden) featHook(u, "roundStart", undefined, notes); });
   if (typeof syncBpAll === "function") syncBpAll();
@@ -2039,6 +2044,7 @@ function startEnemyPhase() {
       if (u.kit === "ant_hunter" && typeof hunterHeatAtTurnStart === "function") hunterHeatAtTurnStart(u, notes);
     }
   });
+  if (typeof desertEnemyPhaseStart === "function") desertEnemyPhaseStart(notes);   // 沙鱼：重新下潜、声呐探测、母系溃散
   appendLog(notes.join("\n"));
   renderAll();
 }
@@ -2077,6 +2083,7 @@ function turnEnd() {
   const notes = ["—— 回合结束 ——"];
   releaseTurnLocks(notes);
   if (typeof spiderRoundEnd === "function") spiderRoundEnd(notes);   // 陨体衍蛛：到点复活
+  if (typeof desertRoundEnd === "function") desertRoundEnd(notes);   // 夜晚的尘虫迁徙 / 离开
   // 剑术+：这一回合切换刀势得到的附赠动作没用掉的，留到下回合（再下回合就过期）
   state.units.forEach(u => {
     const g = u.kit === "hiaki" && u.resources && u.resources.stanceGrant;
@@ -4199,6 +4206,7 @@ function doMoveInner(unit, dest, moveOpt) {
   if (typeof hunterAfterMove === "function") hunterAfterMove(unit, notes);     // 蚁型特殊剿灭兵种：有人走进来就退开
   if (typeof dormantAfterMove === "function") dormantAfterMove(unit, notes);   // 休眠的敌人：有人进它的区就醒
   quicksandAfterZoneChange(unit, notes, "走出流沙");
+  if (typeof ambushOnEnter === "function") ambushOnEnter(unit, notes);   // 走进伏咬沙鱼的区
   enterFrozenGround(unit, notes);
   applyAbyssFall(unit, from, notes);
   if (typeof afterMove === "function") afterMove(unit, notes);
@@ -4623,6 +4631,12 @@ function isOutlawThugKit(kit) {
 function settleEnemyKill(target, notes) {
   if (!target || target.isPlayer || target._xpGiven) return;
   if (target._revived) { target.dead = true; target._xpGiven = true; return; }   // 复活过的陨体衍蛛：再死不给经验、掉落、击杀分
+  if (typeof isNeutralCreature === "function" && isNeutralCreature(target)) {   // 中立生物：没有经验、掉落、击杀分
+    target.dead = true; target._xpGiven = true;
+    if (notes && !target._eaten) notes.push(`${target.name} 死了。`);
+    return;
+  }
+  if (typeof desertOnDeath === "function") desertOnDeath(target, notes);   // 领潮沙鱼：母系溃散
   if (typeof playerAllied === "function" && playerAllied(target)) {   // 友军倒下：没有经验、掉落、击杀分
     target.dead = true; target._xpGiven = true;
     if (notes) notes.push(`友军 ${target.name} 倒下了。`);
@@ -4767,6 +4781,8 @@ function displaceTo(obj, dest, notes, reason, opts) {
   obj.zone = dest;
   notes.push(`${obj.name}${reason ? " " + reason : " 被移动"}：${from} 区 → ${dest} 区。`, ...crossing);
   quicksandAfterZoneChange(obj, notes, "被带出流沙");
+  if (!obj.kind) obj._pushedTurn = state.turnNo;   // 伏咬沙鱼：这回合被推过的猎物多 1 击破
+  if (!obj.kind && typeof ambushOnEnter === "function") ambushOnEnter(obj, notes);   // 被推进伏咬沙鱼的区
   enterFrozenGround(obj, notes);
   applyAbyssFall(obj, from, notes);
   if (!obj.kind) chaseFollow(obj, notes);   // 被推走也算移动：紧追的人跟上
@@ -4901,7 +4917,7 @@ function prepDieSides(u) {
 function spendAp(u, n, reason) {
   n = n || 1;
   if (!u) return true;
-  if (sinkLocked(u)) { appendLog(`${u.name} 陷在流沙里没顶，无法${reason || "行动"}。`); return false; }
+  if (sinkLocked(u)) { appendLog(`${u.name} 陷在流沙里没顶，无法${!reason || /^[a-z_:]+$/.test(reason) ? "行动" : reason}。`); return false; }
   if ((u.ap || 0) < n) {
     appendLog(`${u.name} 行动点不足（${u.ap || 0}/${u.apMax || 0}），无法${reason || "行动"}。`);
     return false;
@@ -4919,7 +4935,7 @@ function spendAp(u, n, reason) {
 function spendBonus(u, n, reason) {
   n = n || 1;
   if (!u) return true;
-  if (sinkLocked(u)) { appendLog(`${u.name} 陷在流沙里没顶，无法${reason || "行动"}。`); return false; }
+  if (sinkLocked(u)) { appendLog(`${u.name} 陷在流沙里没顶，无法${!reason || /^[a-z_:]+$/.test(reason) ? "行动" : reason}。`); return false; }
   if ((u.bonus || 0) < n) {
     appendLog(`${u.name} 附赠行动不足（${u.bonus || 0}/${u.bonusMax || 0}），无法${reason || "行动"}。`);
     return false;
@@ -5911,7 +5927,8 @@ function eligibleAssisters(breaker, broken) {
       u.kit !== "ufo_leg" &&
       (!breaker || u.id !== breaker.id || u.kit === "ufo_body" || u.kit === "chixia") &&   // 飞碟触灵、赤牙（剿灭）可以接自己打出的失衡
       !(typeof touDuelVictim === "function" && touDuelVictim(u) && broken.kit !== "tou") &&
-      (typeof enemyMayAssist !== "function" || enemyMayAssist(u))   // 被挟持的王、哗变的狂徒不对我方出手（enemies.js）
+      (typeof enemyMayAssist !== "function" || enemyMayAssist(u)) &&   // 被挟持的王、哗变的狂徒不对我方出手（enemies.js）
+      !(typeof fishFrenzyUsed === "function" && fishFrenzyUsed(u))      // 沙鱼每回合只群起一次
     );
   }
   // 只列真正能出手的人：濒死没起身、失衡、抓在敌人身上的不行（以前飞碟本体失衡时这些人也列进来，
@@ -6072,6 +6089,7 @@ function queueAssistAttack(breaker, broken) {
     if (!broken || broken.def > 0) return;
   }
   if (broken._imbalanceLock) return;
+  if (typeof preyBroken === "function" && preyBroken(breaker, broken)) return;   // 尘虫 / 管虫失衡：被沙鱼吞掉（desert.js）
   if (broken.isPlayer && typeof bpFirstBreakGuard === "function" && bpFirstBreakGuard(broken)) return;
   const list = eligibleAssisters(breaker, broken);
   const side = broken.isPlayer || (breaker && !breaker.isPlayer) ? "敌人" : "玩家角色";
@@ -6191,6 +6209,7 @@ function finishAssist(helperId, extra) {
   try { runSkill(sidSkill); } finally { state._assistBy = null; }
   state.attackerId = prevAtk;
   state.targetId = prevT;
+  if (typeof fishFrenzyContinue === "function") fishFrenzyContinue(job, helper, target);   // 沙鱼群起：下一只接着上
   renderAll();
   presentAssistModal();
 }
@@ -7285,14 +7304,18 @@ function dealTo(attacker, target, opt) {
     n.forEach(t => appendLog(t));
   }
   if (target && target.submerged && attacker && !opt.flags.environment) {
-    if (opt.element !== "harmonic") {
+    // 沙鱼的声呐找得到沙下的尘虫 / 管虫（捕食），不算把它打出来
+    const fishPrey = typeof isSandFish === "function" && isSandFish(attacker) && isDesertPrey(target);
+    if (!fishPrey && opt.element !== "harmonic") {
       const msg = `${target.name} 下潜中，${opt.flags.aoe ? "没有被波及" : "不能被选作攻击目标"}。`;
       if (!opt.flags.aoe) appendLog(msg);
       return { res: { ok: false, total: 0, breakDealt: 0, log: [msg], perHit: [] }, extra: opt.flags.aoe ? [] : [msg] };
     }
-    const n = [];
-    surfaceUnit(target, n, true, "谐波震", "harmonic");
-    n.forEach(t => appendLog(t));
+    if (!fishPrey) {
+      const n = [];
+      surfaceUnit(target, n, true, "谐波震", "harmonic");
+      n.forEach(t => appendLog(t));
+    }
   }
   // 躲藏：不会被选做攻击目标（范围攻击、反应不是「选目标」，照常波及）
   if (target && target.statuses && target.statuses.hide && opt.flags.action && !opt.flags.aoe && !isReaction && !opt.flags.conductorExtra && !opt.flags.locked) {

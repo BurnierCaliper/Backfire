@@ -98,6 +98,7 @@ function afterDamageTaken(u, element, dealt, shieldHit, notes, ctx) {
   if (u && typeof syncTempShield === "function") syncTempShield(u);   // 临时护盾先扣（engine.js）
   if (!u || !(dealt > 0)) return;
   ctx = ctx || {};
+  if (typeof dustBugAfterHit === "function") dustBugAfterHit(u, notes);   // 尘虫：挨打后摊平
   // 躲藏：受到伤害后解除
   if (u.statuses && u.statuses.hide) {
     u.statuses.hide = false;

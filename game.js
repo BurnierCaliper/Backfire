@@ -175,6 +175,15 @@
       // 首领机制（boss-mechanics.js）：身上的死刑标记 / 首领正在倒数的死刑
       marks: typeof bossMarksOn === "function" ? bossMarksOn(u) : [],
       casts: typeof bossCastsBy === "function" ? bossCastsBy(u) : [],
+      // 中立生物（desert.js）：迷你名牌；夜晚下潜的不画名牌，折进区角的「沙下动静」
+      neutral: typeof isNeutralCreature === "function" && isNeutralCreature(u),
+      submerged: !!u.submerged,
+      leaveIn: u.leaveIn != null ? Number(u.leaveIn) : null,
+      neutralTags: typeof isNeutralCreature === "function" && isNeutralCreature(u) ? [
+        u.stunned ? { key: "stun", text: "失衡" } : null,
+        u.resources && u.resources.flattened ? { key: "flat", text: "摊平" } : null,
+        u.detected ? { key: "seen", text: "已发现" } : null
+      ].filter(Boolean) : [],
       overkill: !u.isPlayer && (u.dead || u._removed) ? Math.max(0, Math.round(Number(u.overkill) || 0)) : 0,
       killBig: !u.isPlayer && !!u.killBig
     };
@@ -506,7 +515,7 @@
   /* ================= 4. 技能模型 ================= */
   function unitAlive(u) { return u && !u.hidden && !u.fused && !u.dead && !u._removed; }
   function players() { return state.units.filter(u => u.isPlayer && unitAlive(u)); }
-  function foes() { return state.units.filter(u => !u.isPlayer && unitAlive(u) && u.kit !== "ironwall" && !(typeof playerAllied === "function" && playerAllied(u))); }   // 友军不算要打的敌人
+  function foes() { return state.units.filter(u => !u.isPlayer && unitAlive(u) && u.kit !== "ironwall" && !(typeof isNeutralCreature === "function" && isNeutralCreature(u)) && !(typeof playerAllied === "function" && playerAllied(u))); }   // 友军不算要打的敌人
 
   function gameSkills(u) {
     if (!u || !u.isPlayer) return [];
@@ -600,10 +609,15 @@
   /* ================= 5. 画面 ================= */
   const cards = new Map();
 
-  function zoneGroup(zone, isPlayer, isProp) {
+  function zoneGroup(zone, isPlayer, isProp, neutral) {
     const z = document.querySelector(`.g-zone[data-num="${zone}"]`) || document.querySelector(".g-zone");
     if (!z) return document.querySelector(".g-zone");
     if (isProp) return z.querySelector(".grp.prop") || z.querySelector(".grp.player");
+    if (neutral) {   // 中立生物：区里单独一排迷你名牌（排在最下面）
+      let g = z.querySelector(".grp.neutral");
+      if (!g) { g = el("div", "grp neutral"); z.appendChild(g); }
+      return g;
+    }
     return z.querySelector(isPlayer ? ".grp.player" : ".grp.enemy");
   }
 
@@ -620,7 +634,7 @@
   function updateCard(c, s) { UnitCard.update(c, s, { sim: G.sim }); }
 
   function placeCard(c, s, animate) {
-    const grp = zoneGroup(s.zone, s.isPlayer, s.isProp);
+    const grp = zoneGroup(s.zone, s.isPlayer, s.isProp, s.neutral);
     if (c.wrap.parentElement === grp) return;
     const first = c.wrap.isConnected ? c.wrap.getBoundingClientRect() : null;
     if (first && animate && !s.isProp && window.Sfx && !G.sim) Sfx.ui("move");   // 换区移动：脚步声
@@ -643,7 +657,7 @@
     applyEnv(snaps.env);
     next.forEach((s, id) => {
       if (s.isGap) return;   // 危墙 / 桥梁画在区域间的竖条上（paintGaps）
-      if (s.hidden) {
+      if (s.hidden || (s.neutral && s.submerged && !s.dead)) {   // 下潜的中立生物：不画名牌（见 paintSandStir）
         const c = cards.get(id);
         if (c) { c.wrap.remove(); cards.delete(id); }
         return;
@@ -668,8 +682,37 @@
     });
     G.view = next;
     paintGaps();
+    paintSandStir(snaps);
     fitZones();
     return beats;
+  }
+
+  /** 夜晚下潜的中立生物（尘虫迁徙）：每个区角上一块「沙下动静 ×N」，点开看每只的状态；谐波选目标时点列表里的那一只 */
+  const STIR_ICON = `<svg viewBox="0 0 40 40" aria-hidden="true"><path d="M5 16c4-4 8-4 12 0s8 4 12 0 5-3 7 0" fill="none" stroke="#f0cf9a" stroke-width="2.6" stroke-linecap="round"/><path d="M5 25c4-4 8-4 12 0s8 4 12 0 5-3 7 0" fill="none" stroke="#d9a35f" stroke-width="2.2" stroke-linecap="round" opacity=".8"/><circle cx="12" cy="32" r="2" fill="#d9a35f"/><circle cx="22" cy="33" r="2" fill="#d9a35f"/><circle cx="30" cy="31" r="2" fill="#d9a35f"/></svg>`;
+  function paintSandStir(snaps) {
+    document.querySelectorAll(".g-zone").forEach(z => {
+      const zone = Number(z.dataset.num);
+      const list = snaps.filter(s => s.neutral && s.submerged && !s.dead && !s.hidden && Number(s.zone) === zone);
+      let box = z.querySelector(".sandstir-wrap");
+      if (!list.length) { if (box) box.remove(); return; }
+      if (!box) {
+        box = el("div", "sandstir-wrap");
+        box.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const row = e.target.closest("[data-stir-id]");
+          if (row) { onCardClick(row.dataset.stirId); return; }
+          box.classList.toggle("open");
+        });
+        z.appendChild(box);
+      }
+      const names = [...new Set(list.map(s => s.name))].join("、");
+      const pct = (s) => Math.round(sumCur(s) / Math.max(1, sumMax(s)) * 100);
+      box.innerHTML = `<div class="sandstir-pop"><h4>沙下动静 · ${zone} 区（${list.length} 只${esc(names)}）</h4>` +
+        list.map(s => `<div class="r" data-stir-id="${esc(s.id)}"><span class="n">${esc(s.name)}</span><span class="bar"><i style="width:${pct(s)}%"></i></span>` +
+          `${(s.neutralTags || []).some(t => t.key === "seen") ? "<em>已被发现</em>" : ""}<small>${s.leaveIn != null ? `${s.leaveIn} 回合后离开` : "在沙下"}</small></div>`).join("") +
+        `<footer>下潜中：只有谐波攻击和塌陷打得到。沙鱼发现后会去吃。</footer></div>` +
+        `<button class="sandstir" type="button" title="点开看看">${STIR_ICON}<span>沙下动静 ×${list.length}<small>${esc(names)}迁徙中 · 点开看看</small></span></button>`;
+    });
   }
 
   /** 区域里单位太多时逐级缩小铭牌，避免压到下方的角色选单 */
