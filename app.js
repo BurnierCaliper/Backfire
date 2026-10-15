@@ -460,8 +460,9 @@ function statusLine(u) {
   if (u.kit === "sand_aggregate") {
     const ph = (u.resources && u.resources.phase) || 1;
     s.push(ph === 1 ? "一阶段" : ph === 2 ? "二阶段" : "三阶段");
-    if (u.resources && u.resources.forceCharge) s.push("蓄力中");
-    if (u.resources && u.resources.forceOverheat) s.push("将过热");
+    const dr = typeof mechChargeDr === "function" ? mechChargeDr(u) : 0;
+    if (dr > 0) s.push(`电能炮蓄满（减伤 ${Math.round(dr * 100)}%）`);
+    if (u.resources && Number(u.resources.meltHoldTurn) >= Number(state.turnNo) && u.instant && u.instant.melt) s.push("过热");
     if (u.resources && u.resources.debrisCount) s.push("碎片" + u.resources.debrisCount + "/2");
   }
   if (u.dormant) s.push("休眠");
@@ -1725,7 +1726,9 @@ function beginRound(notes) {
     // 即时效果都是单回合的：没被用掉的也在回合开始时失效
     if (u.instant) {
       const gone = [];
-      if (u.instant.melt && held.indexOf("melt") < 0) { u.instant.melt = false; gone.push("熔融"); }
+      // 过热熔融（沙灵聚合体开炮后）：留到开炮之后那个我方回合结束
+      const meltHold = u.resources && Number(u.resources.meltHoldTurn) >= Number(state.turnNo);
+      if (u.instant.melt && held.indexOf("melt") < 0 && !meltHold) { u.instant.melt = false; gone.push("熔融"); }
       if (u.instant.sting && held.indexOf("sting") < 0) { u.instant.sting = false; gone.push("刺骨"); }
       if (u.instant.spread && held.indexOf("spread") < 0) { u.instant.spread = false; gone.push("扩散"); }
       if (u.instant.refract && held.indexOf("refract") < 0) { u.instant.refract = false; gone.push("折射"); }
@@ -1774,6 +1777,7 @@ function beginRound(notes) {
       if (u.resources.fuse <= 0) notes.push(`${u.name} 引信已到，请点「引爆」。`);
       else notes.push(`${u.name} 引信 ${u.resources.fuse} 回合后自爆。`);
     }
+    if (u.kit === "outlaw_king" && typeof kingRally === "function") kingRally(u, notes);
     if (u.kit === "ufo_body" && !u.dead) {
       const n = ufoLivingLegs(u).length;
       notes.push(`${u.name} 剩余机械足 ${n}。`);
@@ -4514,15 +4518,16 @@ function applyCombat(target, result, attacker) {
       target.resources.phase = 2;
       target.name = "沙灵聚合体·机械躯";
       notes.push("外层沙壳破碎，进入二阶段。");
+      if (typeof aggDisarmSpread === "function") aggDisarmSpread(target, notes);
+      if (typeof aggArmCannon === "function") aggArmCannon(target, notes);
     }
     const ph2 = target.resources.phase || 1;
     if (ph2 === 2 && aggArmorBefore > 0 && armorL && armorL.current <= 0) {
       if (armorL) armorL.max = 0;
       target.resources.phase = 3;
-      target.resources.forceCharge = false;
-      target.resources.forceOverheat = false;
       target.name = "沙灵聚合体·核心";
       notes.push("装甲被击破，进入三阶段。");
+      if (typeof aggDisarmCannon === "function") aggDisarmCannon(target, notes);
     }
   }
   notes.push(...sweepDeadEnemies());
@@ -6619,7 +6624,7 @@ function finishBlock(helperId, forced) {
   const job = (state.blockQueue || [])[0];
   const attacker0 = job ? blockJobAttacker(job) : null;
   const xf = job && job.opt && job.opt.flags;
-  const title = !attacker0 ? "" : xf && xf.execution ? `【${attacker0.name}】死刑 第 ${xf.execHit}/${xf.execHits} 段落下` : `【${attacker0.name}】的攻击落下`;
+  const title = !attacker0 ? "" : xf && xf.execution ? `【${attacker0.name}】${xf.execName || "死刑"} 第 ${xf.execHit}/${xf.execHits} 段落下` : `【${attacker0.name}】的攻击落下`;
   const prevActor = LOG_ACTOR_ID;
   LOG_ACTOR_ID = attacker0 ? attacker0.id : null;
   let lines;
@@ -7555,6 +7560,11 @@ function dealTo(attacker, target, opt) {
     flags.dr50 = true;
     opt.baseBreak = 0;
   }
+  // 首领机制蓄满能量（沙灵聚合体开炮那一回合）：受到的伤害降低（boss-mechanics.js · mechChargeDr）
+  if (target && !target.isPlayer && typeof mechChargeDr === "function") {
+    const dr = mechChargeDr(target);
+    if (dr > 0) { flags.drPct = (Number(flags.drPct) || 0) + dr; flags.drWhy = "蓄满能量"; }
+  }
   // 挂在「下一击」上的猛击 / 穿刺 / 弱点特效只作用于真正的攻击行动，
   // 不作用于这一击派生出来的环境伤害（雷击转移、爆燃溢出、反弹……），也不会被它们提前用掉
   const realAttack = flags.action !== false && !flags.environment;
@@ -7922,6 +7932,8 @@ function beanToLiquid() {
 }
 
 /** 绯秋切换刀势。放弃被动「剑术」时一直停在拔刀 */
+/** 剑术+：每回合最多靠切换刀势拿几个附赠动作 */
+const HIAKI_STANCE_BONUS_PER_TURN = 1;
 function setHiakiStance(u, stance) {
   if (!u) return;
   u.resources = u.resources || {};
@@ -7942,11 +7954,13 @@ function setHiakiStance(u, stance) {
       appendLog(notes.join("\n"));
     }
   }
-  // 剑术+：每次切换刀势立刻获得 1 个附赠动作；没用掉的留到下回合，下回合结束时过期
+  // 剑术+：切换刀势立刻获得 1 个附赠动作，每回合最多 1 个（作者定：以前每次切换都给，协助格挡切刀势能无限格挡）；
+  // 没用掉的留到下回合，下回合结束时过期
   if (prev !== stance && typeof passivePlus === "function" && passivePlus(u, 2)) {
-    u.bonus = (Number(u.bonus) || 0) + 1;
     const turn = Number(state.turnNo) || 0;
     const g = u.resources.stanceGrant && u.resources.stanceGrant.turn === turn ? u.resources.stanceGrant : { turn, n: 0 };
+    if (g.n >= HIAKI_STANCE_BONUS_PER_TURN) return;
+    u.bonus = (Number(u.bonus) || 0) + 1;
     g.n += 1;
     u.resources.stanceGrant = g;
     appendLog(`剑术+：${u.name} 切换刀势，获得 1 个附赠动作。`);

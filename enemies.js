@@ -27,13 +27,6 @@ const ZONE_THREATS = {
     for (let z = 1; z <= n; z++) out.push({ zone: z, label: "自爆待发", ready: true });
     return out;
   },
-  sand_aggregate: (u) => {
-    const r = u.resources || {};
-    if (!r.forceCharge) return null;
-    // 机械臂挥击的那一回合在蓄力；到了下一回合就是这回合要开炮
-    const ready = r.chargeTurn == null || Number(typeof state !== "undefined" ? state.turnNo : 0) > Number(r.chargeTurn);
-    return { zone: u.zone, label: ready ? "电能炮待发" : "电能炮蓄力", ready };
-  },
   boomcar: (u) => {
     const r = u.resources || {};
     if (r.fuse == null || Number(r.fuse) > 0) return null;
@@ -176,6 +169,51 @@ function kingGuardFor(king) {
   const guards = (state.units || []).filter(u => isOutlawThug(u) && Number(u.zone) === Number(king.zone));
   if (!guards.length) return null;
   return guards.sort((a, b) => totalHp(b) - totalHp(a))[0];
+}
+
+/** 亡命之王 · 公开处刑：挂上死刑机制（数值见 engine.js · KING_CFG）。分段在落下时按还站着的手下现算 */
+function kingArmExecution(u) {
+  if (!u || typeof addBossMechanic !== "function" || (u.mechanics || []).some(m => m.kingExec)) return;
+  const E = KING_CFG.exec;
+  addBossMechanic(u, { type: "execution", kingExec: true, name: "公开处刑", phase: "enemy", pick: "maxHp",
+    firstTurn: E.firstTurn, turns: E.turns, interval: E.interval, then: "repeat", hitsHook: "kingExecution", hook: "kingGrab" });
+}
+function kingExecutionHits(king) {
+  const E = KING_CFG.exec;
+  const crew = (state.units || []).filter(u => isOutlawThug(u) && !u.dying && !(u.resources && u.resources.mutinied));
+  return [{ mult: E.kingMult, diceS: leveledSides(king.level, E.kingDie), element: "acid", baseBreak: 1 }].concat(crew.map(u => ({
+    byId: u.id, atk: typeof effectiveAtk === "function" ? effectiveAtk(u, state.units) : Number(u.atk) || 0,
+    mult: E.crewMult, diceS: leveledSides(u.level, E.crewDie), element: "physical", baseBreak: 1
+  })));
+}
+/** 处刑落下后：强盗头子还在就试着擒拿刚挨刀的人 */
+function kingExecutionGrab(king, m, notes) {
+  const t = m && m.st && m.st.lastTargetId ? unitById(m.st.lastTargetId) : null;
+  const boss = (state.units || []).find(u => u.kit === "bandit_boss" && !u.hidden && !u.dead && !(u.resources && u.resources.mutinied));
+  if (!t || t.dead || !boss) return;
+  if (Math.random() < KING_CFG.exec.grab) { t.stunned = true; notes.push(`${boss.name} 擒拿 ${t.name} 成功：失去下回合行动。`); }
+  else notes.push(`${boss.name} 擒拿 ${t.name} 失败。`);
+}
+/** 召集狂徒：回合开始时手下不够就补一个（KING_CFG.rally） */
+function kingRally(king, notes) {
+  if (!king || king.dead || king.hidden || (king.resources && king.resources.hostage)) return;
+  const R = KING_CFG.rally;
+  const crew = (state.units || []).filter(u => isOutlawThug(u) && !(u.resources && u.resources.mutinied));
+  if (crew.length >= R.min || crew.length >= R.cap) return;
+  king.resources = king.resources || {};
+  const turn = Number(state.turnNo) || 1;
+  if (king.resources.rallyTurn != null && turn - Number(king.resources.rallyTurn) < R.every) return;
+  king.resources.rallyTurn = turn;
+  const n = Number(king.resources.rallyCount) || 0;
+  const kind = n % 2 === 0 ? "thug_knife" : "thug_hammer";
+  king.resources.rallyCount = n + 1;
+  const p = enemyPresets().find(x => x.id === kind);
+  if (!p) return;
+  const t = typeof applyEnemyIV === "function" ? applyEnemyIV(p.build(king.level, state.partySize)) : p.build(king.level, state.partySize);
+  t.zone = king.zone;
+  state.units.push(t);
+  if (typeof refreshEnemyEconomy === "function") refreshEnemyEconomy(t);
+  notes.push(`${king.name} 召集狂徒：${t.name} 赶到 ${t.zone} 区（手下 ${crew.length + 1} 个）。`);
 }
 
 /** 攻击命令指定的目标：所有狂徒改打此人（目标倒下或王被挟持 / 死亡后失效） */
@@ -383,12 +421,7 @@ function enemySkillList(u) {
       ];
     }
     if (ph === 2) {
-      if (r.forceOverheat) return [{ id: "en_agg2_overheat", label: "过热（跳过行动）" }];
-      if (r.forceCharge) {
-        // 手册「蓄一回合」：机械臂挥击的这一回合剩下的行动都在蓄力，下一回合才能开炮
-        if (r.chargeTurn != null && Number(state.turnNo) <= Number(r.chargeTurn)) return [];
-        return [{ id: "en_agg2_charge", label: "发射电能炮（近距 1d20 / 远距 1d10）" }];
-      }
+      // 电能炮改成「死刑」首领机制（aggArmCannon），不再占行动、也不再空过一回合
       return [
         { id: "en_approach", label: "移向目标" },
         { id: "en_agg2_melee", label: "机械臂挥击（近）" }
@@ -600,7 +633,6 @@ const ENEMY_SKILL_RANGE = {
   en_agg1_melee: "melee",
   en_agg1_range: "ranged",
   en_agg2_melee: "melee",
-  en_agg2_charge: "any",          // 电能炮：近距 1d20，隔一区衰减为 1d10
   en_agg3_control: "melee",
   en_agg3_push: "melee",
   en_chi_shot: "any",             // 霰弹枪：近距 2×atk，远距 1.5×atk
@@ -1577,7 +1609,7 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
   }
   if (id === "en_king_atk") {
     if (!needT()) return true;
-    aa(t, { element: "fire", mult: 1, diceN: 1, diceS: 4, baseBreak: 1 });
+    aa(t, { element: "fire", mult: 1, diceN: 1, diceS: leveledSides(a.level, 4), baseBreak: 1 });
     a.resources = a.resources || {};
     a.resources.focusId = t.id;
     lines.push(`所有狂徒目标切换为 ${t.name}。`);
@@ -1585,7 +1617,7 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
   }
   if (id === "en_king_kill") {
     if (!needT()) return true;
-    aa(t, { element: "acid", mult: 1, diceN: 1, diceS: 6, baseBreak: 1 });
+    aa(t, { element: "acid", mult: 1, diceN: 1, diceS: leveledSides(a.level, 6), baseBreak: 1 });
     const boss = state.units.find(u => u.kit === "bandit_boss" && !u.hidden && !u.dead);
     if (boss && Math.random() < 0.5) {
       t.stunned = true;
@@ -1771,34 +1803,6 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
   if (id === "en_agg2_melee") {
     if (!needT()) return true;
     aa(t, { element: "electric", mult: 1, diceN: 1, diceS: 10, baseBreak: 2 });
-    a.resources = a.resources || {};
-    a.resources.forceCharge = true;
-    a.resources.chargeTurn = Number(state.turnNo) || 0;
-    a.resources.forceOverheat = false;
-    lines.push("机械臂挥击后开始蓄力电能炮：这一回合蓄力，下一回合发射。");
-    return true;
-  }
-  if (id === "en_agg2_charge") {
-    if (!needT()) return true;
-    a.resources = a.resources || {};
-    if (a.resources.chargeTurn != null && Number(state.turnNo) <= Number(a.resources.chargeTurn)) {
-      lines.push("电能炮还在蓄力，下一回合才能发射。");
-      return true;
-    }
-    // 近距 atk+1d20 电 2 击破；隔一区衰减为 atk+1d10。打出去了才算开炮（射程外打不到的不算），炮后必过热
-    const near = Number(a.zone) === Number(t.zone);
-    const out = aa(t, { element: "electric", mult: 1, diceN: 1, diceS: near ? 20 : 10, baseBreak: 2 });
-    if (!enemyShotWentOut(out)) { lines.push("电能炮没有打出去，蓄力保留。"); return true; }
-    a.resources.forceCharge = false;
-    a.resources.chargeTurn = null;
-    a.resources.forceOverheat = true;
-    lines.push(`电能炮${near ? "近距" : "隔区（衰减为 1d10）"}发射完毕，下次行动强制过热。`);
-    return true;
-  }
-  if (id === "en_agg2_overheat") {
-    a.resources = a.resources || {};
-    a.resources.forceOverheat = false;
-    lines.push("过热：跳过本次行动。");
     return true;
   }
   if (id === "en_agg3_debris") {
@@ -1819,12 +1823,10 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
         a.layers.splice(1, 0, { type: "armor", current: restore, max: restore });
       }
       a.resources.phase = 2;
-      a.resources.forceCharge = false;
-      a.resources.chargeTurn = null;
-      a.resources.forceOverheat = false;
       a.name = "沙灵聚合体·机械躯";
       a.dead = false;
       lines.push(`碎片吸收完成，恢复装甲 ${restore}，回到二阶段。`);
+      aggArmCannon(a, lines);
     }
     return true;
   }
@@ -1859,6 +1861,51 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
     return true;
   }
   return false;
+}
+
+/** 沙灵聚合体二阶段：挂上电能炮（死刑机制，数值见 engine.js · AGG_CANNON）。已经挂着就不重复挂 */
+function aggArmCannon(u, notes) {
+  if (!u || typeof addBossMechanic !== "function") return;
+  if (bossMechList(u, "execution").some(m => m.aggCannon)) return;
+  addBossMechanic(u, {
+    type: "execution", aggCannon: true, name: "电能炮", element: "electric", phase: "enemy", pick: "maxHp",
+    turns: AGG_CANNON.turns, interval: AGG_CANNON.interval, then: "repeat",
+    firstTurn: Number(state.turnNo) || 1,
+    hits: AGG_CANNON.hits.map(h => Object.assign({ element: "electric" }, h)),
+    far: Object.assign({}, AGG_CANNON.far), splash: AGG_CANNON.splash, chargeDr: AGG_CANNON.chargeDr,
+    hook: "aggOverheat"
+  });
+  if (typeof bossMechSync === "function") bossMechSync(notes);
+}
+/** 沙灵聚合体一阶段：挂上沙尘爆裂（远离机制，AGG_SPREAD）；外层沙壳打穿时卸下 */
+function aggArmSpread(u) {
+  if (!u || typeof addBossMechanic !== "function" || (u.mechanics || []).some(m => m.aggSpread)) return;
+  addBossMechanic(u, { type: "spread", aggSpread: true, name: "沙尘爆裂", element: "physical", phase: "enemy",
+    firstTurn: AGG_SPREAD.firstTurn, turns: AGG_SPREAD.turns, interval: AGG_SPREAD.interval, then: "repeat",
+    blast: { mult: AGG_SPREAD.blast } });
+}
+function aggDisarmSpread(u, notes) {
+  if (!u || !u.mechanics || !u.mechanics.some(m => m.aggSpread)) return;
+  u.mechanics = u.mechanics.filter(m => !m.aggSpread);
+  if (!u.mechanics.length) delete u.mechanics;
+  if (notes) notes.push("沙壳碎了，沙尘爆裂的标记散去。");
+}
+/** 进三阶段：机械躯散架，电能炮卸下（回到二阶段时重新挂上、重新倒数） */
+function aggDisarmCannon(u, notes) {
+  if (!u || !u.mechanics) return;
+  const had = u.mechanics.some(m => m.aggCannon);
+  u.mechanics = u.mechanics.filter(m => !m.aggCannon);
+  if (!u.mechanics.length) delete u.mechanics;
+  if (had && notes) notes.push("机械躯散架，电能炮停止蓄力。");
+}
+/** 电能炮开完：机体过热，给自己上熔融（留到下一个我方回合结束，engine.js · beginRound 那边看 meltHoldTurn） */
+function aggOverheat(boss, m, notes) {
+  if (!boss || boss.dead) return;
+  boss.instant = boss.instant || {};
+  boss.instant.melt = true;
+  boss.resources = boss.resources || {};
+  boss.resources.meltHoldTurn = (Number(state.turnNo) || 1) + 1;
+  notes.push(`${boss.name} 开炮后机体过热：自身熔融（冰伤害 ×2、物理打装甲 +50%），持续到下一个我方回合结束。`);
 }
 
 function ufoPackId(u) {

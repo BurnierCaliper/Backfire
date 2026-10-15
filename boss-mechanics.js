@@ -109,6 +109,8 @@ function mechZoneOptions() {
 }
 /** 首领专属的后续（落下之后调用），按名字注册 */
 const BOSS_MECH_HOOKS = {};
+/** 落下时现算分段的首领（死刑 hitsHook），按名字注册 */
+const BOSS_MECH_HITS = {};
 
 function unitMaxHp(u) { return ((u && u.layers) || []).reduce((a, l) => a + (Number(l.max) || 0), 0); }
 
@@ -234,6 +236,11 @@ function bossMechPhaseStart(phase, notes) {
         notes.push(`${boss.name} 失衡，「${c.name}」被打断蓄力，推迟一回合（第 ${m.st.due} 回合落下）。`);
         return;
       }
+      if (boss.resources && boss.resources.hostage) {
+        m.st.due = turn + 1;
+        notes.push(`${boss.name} 被挟持，「${c.name}」推迟一回合（第 ${m.st.due} 回合落下）。`);
+        return;
+      }
       castBossMech(boss, m, notes);
     });
   });
@@ -271,19 +278,54 @@ function flushMechNotes(notes) { if (notes.length) { appendLog(notes.join("\n"))
 
 /* ---------- 死刑 ---------- */
 function castExecution(boss, m, c, t, notes) {
-  notes.push(`【${c.name}】${boss.name} 对 ${t.name} 执行${c.name}！（${(c.hits || []).length} 段）`);
+  // 可选 hitsHook：落下这一刻再决定分几段（BOSS_MECH_HITS[名字](boss, mech, target) → hits），例如亡命之王按还活着的手下数
+  if (c.hitsHook && BOSS_MECH_HITS[c.hitsHook]) c = Object.assign({}, c, { hits: BOSS_MECH_HITS[c.hitsHook](boss, m, t) || [] });
+  // 可选 far：目标和首领不同区时每一段改用 far 的倍率 / 骰子（电能炮隔区衰减）
+  const far = !!(c.far && typeof zoneDist === "function" && zoneDist(boss.zone, t.zone, state.zoneMode) >= 1);
+  notes.push(`【${c.name}】${boss.name} 对 ${t.name} 执行${c.name}！（${(c.hits || []).length} 段${far ? "，隔区衰减" : ""}）`);
   if (typeof spawnPopup === "function") spawnPopup(t, { kind: "status", text: c.name + "！", element: (c.hits[0] && c.hits[0].element) || boss.element || "physical" });
   flushMechNotes(notes);
+  const zoneAtCast = Number(t.zone);
+  m.st.lastTargetId = t.id;
   (c.hits || []).forEach((h, i) => {
     if (!t || t.dead) return;
-    const out = dealTo(boss, t, {
-      atk: mechAtk(boss, h), mult: h.mult != null ? Number(h.mult) : (h.flat ? 0 : 1), flat: Number(h.flat) || 0, hits: 1,
-      element: h.element || boss.element || "physical",
-      baseBreak: h.baseBreak != null ? Number(h.baseBreak) : 1,
-      flags: { action: true, locked: true, execution: true, mechId: m.st.uid, execHit: i + 1, execHits: c.hits.length }
+    const seg = far ? Object.assign({}, h, c.far) : h;
+    // 可选 byId：这一段由别的单位出手（亡命之王的手下各补一刀；格挡反击打的是出手的人）
+    const by = seg.byId ? (state.units || []).find(u => u.id === seg.byId && mechStanding(u)) : null;
+    if (seg.byId && !by) return;
+    const out = dealTo(by || boss, t, {
+      atk: mechAtk(boss, seg), mult: seg.mult != null ? Number(seg.mult) : (seg.flat ? 0 : 1), flat: Number(seg.flat) || 0, hits: 1,
+      diceN: seg.diceS ? (Number(seg.diceN) || 1) : 0, diceS: Number(seg.diceS) || 0,
+      element: seg.element || boss.element || "physical",
+      baseBreak: seg.baseBreak != null ? Number(seg.baseBreak) : 1,
+      flags: { action: true, locked: true, execution: true, execName: c.name, mechId: m.st.uid, execHit: i + 1, execHits: c.hits.length }
     });
-    if (out && !out.pending && out.res) appendLog(`${c.name} 第 ${i + 1}/${c.hits.length} 段 → ${t.name}：${Math.floor(Number(out.res.total) || 0)} 伤害。`);
+    if (out && !out.pending && out.res) appendLog(`${c.name} 第 ${i + 1}/${c.hits.length} 段${by ? `（${by.name}）` : ""} → ${t.name}：${Math.floor(Number(out.res.total) || 0)} 伤害。`);
   });
+  // 可选 splash：目标落下时所在区的其他友方各挨 splash × atk（范围伤害，不能格挡）
+  const sp = Number(c.splash) || 0;
+  if (sp > 0) {
+    const dmg = Math.max(0, Math.round(sp * mechAtk(boss, {})));
+    const group = (state.units || []).filter(u => u.isPlayer && u !== t && mechStanding(u) && Number(u.zone) === zoneAtCast);
+    if (group.length) appendLog(`${c.name} 波及 ${zoneAtCast} 区：${group.map(u => u.name).join("、")} 各挨 ${dmg}（范围，不能格挡）。`);
+    group.forEach(u => {
+      const out = dealTo(boss, u, {
+        atk: 0, mult: 0, flat: dmg, hits: 1, element: (c.hits[0] && c.hits[0].element) || boss.element || "physical", baseBreak: 0,
+        flags: { action: true, locked: true, aoe: true, mechId: m.st.uid, blockResolved: true, block: "none" }
+      });
+      if (out && out.res) appendLog(`${c.name} 波及 → ${u.name}：${Math.floor(Number(out.res.total) || 0)} 伤害。`);
+    });
+  }
+}
+/** 蓄满能量的首领这回合受到的减伤（机制配置 chargeDr：倒数到 0、这回合就要落下时生效）。没有就是 0 */
+function mechChargeDr(u) {
+  if (!u || u.isPlayer || !state.combatStarted || u.stunned) return 0;
+  const turn = Number(state.turnNo) || 1;
+  return markedMechs(u).reduce((best, m) => {
+    const c = mechConfig(m);
+    if (!(Number(c.chargeDr) > 0) || !m.st || m.st.done || m.st.due == null || m.st.due > turn) return best;
+    return Math.max(best, Number(c.chargeDr));
+  }, 0);
 }
 
 /* ---------- 分担 ---------- */
@@ -456,3 +498,8 @@ function bossZoneMarks(z) {
   });
   return out;
 }
+
+/* ---------- 各首领专属的分段 / 后续（函数写在 enemies.js，这里加载时登记，读档后也找得到） ---------- */
+if (typeof kingExecutionHits === "function") BOSS_MECH_HITS.kingExecution = kingExecutionHits;
+if (typeof kingExecutionGrab === "function") BOSS_MECH_HOOKS.kingGrab = kingExecutionGrab;
+if (typeof aggOverheat === "function") BOSS_MECH_HOOKS.aggOverheat = aggOverheat;

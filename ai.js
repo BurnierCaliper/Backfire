@@ -368,11 +368,7 @@ const EnemyAI = (function () {
     if (spec.special === "aggregate") {
       const ph = r.phase || 1;
       if (ph === 1) return sameZone ? "en_agg1_melee" : "en_agg1_range";
-      if (ph === 2) {
-        if (has("en_agg2_overheat")) return "en_agg2_overheat";
-        if (has("en_agg2_charge")) return "en_agg2_charge";   // 蓄满一回合：开炮（蓄力的那一回合技能表是空的）
-        return sameZone ? "en_agg2_melee" : null;   // 主动接近，靠移动逻辑走过去
-      }
+      if (ph === 2) return sameZone ? "en_agg2_melee" : null;   // 主动接近，靠移动逻辑走过去（电能炮是死刑机制，回合开始自己落下）
       // 三阶段：每回合必吸引碎片一次 + 攻击一次
       if (u._aiDebrisTurn !== state.turnNo && has("en_agg3_debris")) return "en_agg3_debris";
       if (has("en_agg3_control")) return "en_agg3_control";
@@ -541,9 +537,7 @@ const EnemyAI = (function () {
       sid === "en_giant_sand_pulse" ||   // 全域沙暴打所有区域，不用瞄准
       sid === "en_gas_ignite" ||         // 点燃燃气打自己所在的区
       sid === "en_alarm_zap";            // 电涌打所有高能的敌人，不用瞄准
-    // 聚合体的电能炮：贴近打 1d20 最好；没有附赠动作走不过去时就隔一区打（1d10），不白白耗着
-    const fireNow = sid === "en_agg2_charge" && zdist(u.zone, target.zone) <= 1 && (u.bonus || 0) < 1;
-    if (sid && (inRange || !step || noTargetNeeded || fireNow)) {
+    if (sid && (inRange || !step || noTargetNeeded)) {
       // 打不到（射程外、自己又不移动）就不出手，免得每回合空放
       if (noTargetNeeded || canAimSkill(u, sid, target)) return attack(sid, aiPicks(u, sid, target, prey));
       if (step == null) {
