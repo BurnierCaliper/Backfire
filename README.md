@@ -368,6 +368,15 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **工坊第 2 步：商店积分，兑换自我效果道具**（作者定；rogue-data.js · `ROGUE_SHOP_POINTS`；rogue.js · `earnShopPoints` / `shopPoints` / `redeemList` / `redeem`；rogue-commands.js · `redeem` / `shopPoints`；rogue-ui.js；online-rogue.js、online-ui.js；tests/shop-points.test.js）
+  - 在单局商店**每花 3,000 奎支得 1 积分**，零头累计到下次。打八折的「巧手匠人」按实际花掉的钱算。
+  - 积分只能在有商店的地方，兑换 7 种自我效果道具：自焚、霜结、溅射 3 积分；导体、千钧、蓄能、多普勒 4 积分。积分在这一局内有效。
+  - 商店货架下面多了「积分兑换」：写着现有积分、再花多少奎支得下一分。
+  - **联机单局**：
+    - 积分记在付钱的那名角色名下：谁花钱谁攒；兑换到的道具记在兑换人名下，和买东西一样。
+    - 玩家的商店面板也能看到自己的积分，可以兑换。
+  - 跑团模式的积分（记在队伍账上、主持人手动增减）放到第 5 步，和主持人工具一起做。
+
 - **工坊第 1 步：36 种效果道具，商店售卖**（作者定，设计见 [docs/workshop-design.md](docs/workshop-design.md)；items.js · `EFFECT_ITEMS` / `itemUseError` / `itemTargetUnits` / `itemTargetZones` / `useEffectItem`；battle-commands.js；hotseat-validation.js；game.js、online-actions.js；rogue-data.js · `ROGUE_SHOP` / `ROGUE_SHOP_RULES.effectCount`；rogue.js · `shopStock`；trpg-data.js · `HANDBOOK_SHOP`；tests/effect-items.test.js）
   - 游戏里现有的每一种效果对应一个道具，共 36 个：
     - 属性状态 7 个（投掷罐）、即时效果 7 个（弹针）、通用状态 8 个（增益 / 减益、闪光震撼弹）；

@@ -24,9 +24,9 @@
   const copy = v => JSON.parse(JSON.stringify(v));
   const fail = text => { throw new Error(text); };
   // 个人行为：花自己的钱、动自己的东西（choose 是升级选择，不花钱）
-  const PERSONAL = ["buy", "buyPart", "sellPart", "installPart", "removePart", "upgradeWeapon", "repairWeapon", "healHero", "modifyHero"];
+  const PERSONAL = ["buy", "redeem", "buyPart", "sellPart", "installPart", "removePart", "upgradeWeapon", "repairWeapon", "healHero", "modifyHero"];
   // 玩家可以自己发的个人指令（其余的个人行为由房主代自己的角色做）
-  const REMOTE = ["buy", "buyPart", "sellPart", "installPart", "removePart", "upgradeWeapon", "repairWeapon", "healHero", "modifyHero", "choose"];
+  const REMOTE = ["buy", "redeem", "buyPart", "sellPart", "installPart", "removePart", "upgradeWeapon", "repairWeapon", "healHero", "modifyHero", "choose"];
   let enabled = false, resolving = false, hostId = "";
 
   const flow = () => root.RunFlow || null;
@@ -138,12 +138,13 @@
       checkItems(r, cmd, payer);
       const pool = Number(state.kuizhi) || 0, before = bagSnap();
       state.kuizhi = Number(d.purse[payer]) || 0;
+      r._pointsPayer = payer;   // 商店积分记在付钱的那名角色名下（rogue.js · pointsBook）
       try {
         const out = next();
         d.purse[payer] = Math.max(0, Number(state.kuizhi) || 0);
         applyBagDiff(r, before, payer);
         return out;
-      } finally { state.kuizhi = pool; }
+      } finally { state.kuizhi = pool; delete r._pointsPayer; }
     }
     const out = next();
     const notes = Array.isArray(out) ? out : Array.isArray(out && out.notes) ? out.notes : [];
@@ -423,6 +424,9 @@
     const waitingLevel = [...new Set(Rogue.pendingChoices(r).filter(p => !mine.includes(p.kit)).map(p => p.name))];
     // 个人能做的事：商店、工匠、诊所
     const shop = Rogue.canShop(r) ? Rogue.shopStock(r).map(row => ({ key: row.key, name: Rogue.shopItemName(row), price: row.price, team: !row.give.item || !ownable(row.give.item) })) : null;
+    // 商店积分：各人自己的（记在自己操控的角色名下）
+    const pointsOf = kit => { r._pointsPayer = kit; try { return Rogue.shopPoints(r); } finally { delete r._pointsPayer; } };
+    const points = shop && mine[0] ? Object.assign(pointsOf(mine[0]), { redeem: Rogue.redeemList() }) : null;
     const smithId = (Rogue.presentSmiths(r) || [])[0] || null;
     const smith = smithId ? {
       id: smithId, name: (Rogue.smithInfo(r, smithId) || {}).name || "工匠",
@@ -452,7 +456,7 @@
         needs: living(r).filter(k => l.needs[k] === "need").map(name), passes: living(r).filter(k => l.needs[k] === "pass").map(name),
         mine: mine.map(k => ({ kit: k, name: name(k), answer: l.needs[k] || "" })) })),
       lootLog: d.lootLog.slice(-5).map(x => x.text),
-      choice, waitingLevel, shop, smith, parts, clinic,
+      choice, waitingLevel, shop, points, smith, parts, clinic,
       log: (r.log || []).slice(-8).map(l => l.text)
     };
   }

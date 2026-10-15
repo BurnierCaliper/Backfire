@@ -61,7 +61,7 @@
           render();
           return;
         }
-        if (["buy", "buyPart", "sellPart"].includes(command.action) && !command.payer) {
+        if (["buy", "redeem", "buyPart", "sellPart"].includes(command.action) && !command.payer) {
           if (!hostPayer()) throw new Error("房主没有自己操控的角色，不能花钱");
           command = Object.assign({}, command, { payer: hostPayer() });
         }
@@ -479,7 +479,16 @@
         <span class="s-have">${have != null ? "有 " + have : ""}</span>
         <span class="s-price">${r.price}</span>
         <button class="g-btn" data-buy="${esc(r.key)}" ${money() < r.price ? "disabled" : ""}>买</button></div>`;
-    }).join("")}</div>`;
+    }).join("")}</div>${redeemList()}`;
+  }
+  /** 商店积分：每花 ROGUE_SHOP_POINTS.per 奎支得 1 分，兑换自我效果道具（联机时是房主自己的积分） */
+  function redeemList() {
+    const pts = online() ? (() => { const kit = hostPayer(); if (!kit) return null; run._pointsPayer = kit; try { return Rogue.shopPoints(run); } finally { delete run._pointsPayer; } })() : query("shopPoints");
+    if (!pts) return "";
+    const list = Rogue.redeemList();
+    return `<h4 class="r-sub">积分兑换 · 现有 <b>${pts.points}</b> 积分（每花 ${pts.per} 奎支得 1 分，再花 ${pts.next} 得下一分）</h4><div class="shop">${list.map(it => `<div class="shop-row"><span class="s-name">${esc(it.name)}<small>${esc(it.hint)}</small></span>
+        <span class="s-have">有 ${bagCount(it.id)}</span><span class="s-price">${it.points} 分</span>
+        <button class="g-btn" data-redeem="${esc(it.id)}" ${pts.points < it.points ? "disabled" : ""}>兑换</button></div>`).join("")}</div>`;
   }
   /* ---------- 工匠：升级、图纸（任务板上随机来几位，任务里也可能遇到一位） ---------- */
   function smithCard(id, open) {
@@ -800,6 +809,7 @@
       };
     });
     body.querySelectorAll("[data-buy]").forEach(b => { b.onclick = () => { if (window.Sfx) Sfx.ui("coin"); act({ action: "buy", key: b.dataset.buy, qty: 1 }); }; });
+    body.querySelectorAll("[data-redeem]").forEach(b => { b.onclick = () => { if (window.Sfx) Sfx.ui("coin"); act({ action: "redeem", item: b.dataset.redeem }); }; });
     body.querySelectorAll("[data-upgrade]").forEach(b => { b.onclick = () => act({ action: "upgradeWeapon", kit: b.dataset.upgrade, smith: b.dataset.smith }); });
     body.querySelectorAll("[data-intro]").forEach(b => { b.onclick = () => act({ action: "introduceSmith", smith: b.dataset.intro }); });
     body.querySelectorAll("[data-claim]").forEach(b => { b.onclick = () => act({ action: "claimBlueprint", smith: b.dataset.smith, blueprint: b.dataset.claim }); });

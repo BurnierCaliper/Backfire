@@ -1543,7 +1543,46 @@ const Rogue = (function () {
     state.kuizhi -= cost;
     if (row.give.water) setLedgerWater(water() + row.give.water * qty);
     if (row.give.item) bagAdd(row.give.item, qty);
-    return logAll(run, [`买下 ${shopItemName(row)} ×${qty}，花掉 ${cost} 奎支。`]);
+    const notes = [`买下 ${shopItemName(row)} ×${qty}，花掉 ${cost} 奎支。`];
+    earnShopPoints(run, cost, notes);
+    return logAll(run, notes);
+  }
+
+  /* ---------- 商店积分（ROGUE_SHOP_POINTS）：联机时记在付钱的那名角色名下（online-rogue.js 设 _pointsPayer），单人记在队伍名下 ---------- */
+  function pointsBook(run) {
+    const key = run._pointsPayer || "team";
+    run.shopPoints = run.shopPoints || {};
+    return run.shopPoints[key] || (run.shopPoints[key] = { points: 0, carry: 0 });
+  }
+  function earnShopPoints(run, cost, notes) {
+    const per = (typeof ROGUE_SHOP_POINTS !== "undefined" && ROGUE_SHOP_POINTS.per) || 0;
+    if (!per || !(cost > 0)) return;
+    const b = pointsBook(run);
+    b.carry += cost;
+    const got = Math.floor(b.carry / per);
+    b.carry -= got * per;
+    b.points += got;
+    if (got && notes) notes.push(`商店积分 +${got} → ${b.points}（自我效果道具可以用积分兑换）。`);
+  }
+  /** { points, carry, per, next（再花多少奎支得下一分）} */
+  function shopPoints(run) {
+    const b = pointsBook(run), per = (typeof ROGUE_SHOP_POINTS !== "undefined" && ROGUE_SHOP_POINTS.per) || 0;
+    return { points: b.points, carry: b.carry, per, next: per ? per - b.carry : 0 };
+  }
+  /** 积分能兑换的道具：[{ id, name, hint, points }] */
+  function redeemList() {
+    return (typeof EFFECT_ITEMS !== "undefined" ? EFFECT_ITEMS : []).filter(it => it.points > 0)
+      .map(it => ({ id: it.id, name: it.name, hint: (ITEM_CATALOG[it.id] || {}).hint || "", points: it.points }));
+  }
+  function redeem(run, itemId) {
+    if (!canShop(run)) throw new Error("这里没有商店");
+    const it = redeemList().find(x => x.id === itemId);
+    if (!it) throw new Error("这件东西不能用积分兑换");
+    const b = pointsBook(run);
+    if (b.points < it.points) throw new Error(`积分不够（要 ${it.points}，现有 ${b.points}）`);
+    b.points -= it.points;
+    bagAdd(itemId, 1);
+    return logAll(run, [`用 ${it.points} 积分兑换 ${it.name}（剩 ${b.points} 积分）。`]);
   }
 
   /* ---------- 工匠 ---------- */
@@ -2140,7 +2179,7 @@ const Rogue = (function () {
     role2Options, soloBattleInfo,
     restPlan, restOptions, canLongRest, sheetData, armoryData, lowHpWarning, escortInfo, partOffers, buyPart, sellPart, canSellParts, partStock, partSellPrice, partInstallCost, installPart, removePart, restAtNode, leaveNode, canShortRestBefore, shortRestBeforeNode,
     ambushChance, watchOptions,
-    buy, canShop, shopItemName, shopStock, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
+    buy, shopPoints, redeemList, redeem,  canShop, shopItemName, shopStock, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
     presentSmiths, smithInfo, claimBlueprint, installBlueprint, blueprintById, weaponModsOf,
     smithQuote, introduceSmith,
     canClinic, cyberInfo, cyberPreview, cyberCost, modifyHero, healCost, healHero,

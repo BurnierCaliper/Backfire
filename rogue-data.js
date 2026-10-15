@@ -302,6 +302,9 @@ const ROGUE_MAIN_TASK = {
 /* 商店：always 的（最便宜的水和食物）每家都有；其余商品每家随机进货 ROGUE_SHOP_RULES.randomCount 种；
  * 效果道具（items.js · EFFECT_ITEMS，自我效果除外）另外随机进 effectCount 种，不和水、食物、医疗包抢位置 */
 const ROGUE_SHOP_RULES = { randomCount: 8, effectCount: 4 };
+/* 商店积分（作者定，docs/workshop-design.md 第 6 节）：在商店每花 per 奎支得 1 积分，零头累计到下次；
+ * 积分只能兑换自我效果道具（items.js · EFFECT_ITEMS 里 kind 为 self 的，各自的 points）。这一局内有效。 */
+const ROGUE_SHOP_POINTS = { per: 3000 };
 const ROGUE_SHOP = [
   { key: "water_500",  name: "瓶装水 500 ml",  price: 600,  give: { water: 500 }, always: true },
   { key: "water_1000", name: "罐装水 1000 ml", price: 1000, give: { water: 1000 } },
