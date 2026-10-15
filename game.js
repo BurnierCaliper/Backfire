@@ -2262,14 +2262,21 @@
       if (!itemId) { cancel(); return; }
       const spec = ITEM_CATALOG[itemId];
       let targetId = null, dest = null;
-      if (spec && spec.target === "ally") {
-        const cands = players().map(u => ({ id: u.id, invalidOk: true }));
-        setHint("<b>" + spec.name + "</b>：选择友方。");
+      // 效果道具（items.js · EFFECT_ITEMS）：只列射程内、能用的目标 / 区域
+      const unitsFor = () => (typeof itemTargetUnits === "function" ? itemTargetUnits(actor, itemId) : players());
+      if (spec && (spec.target === "ally" || spec.target === "enemy")) {
+        const list = unitsFor();
+        if (!list.length) { cancel(); flashHint(`${spec.name}：距离 ${typeof EFFECT_ITEM_RANGE !== "undefined" ? EFFECT_ITEM_RANGE : 1} 以内没有能选的${spec.target === "ally" ? "友方" : "敌人"}。`); return; }
+        const cands = list.map(u => ({ id: u.id, invalidOk: true }));
+        setHint("<b>" + spec.name + "</b>：选择" + (spec.target === "ally" ? "友方" : "敌人") + "。");
         targetId = await pickUnit(cands, (id) => spec.name + " → " + targetName(id));
         if (stale()) return;
         if (!targetId) { cancel(); return; }
       } else if (spec && spec.target === "zone") {
-        dest = await pickZone(boardZoneIds(), () => null);
+        const zones = typeof itemTargetZones === "function" ? itemTargetZones(actor, itemId) : boardZoneIds();
+        if (!zones.length) { cancel(); flashHint(`${spec.name}：附近没有能用的区域。`); return; }
+        setHint("<b>" + spec.name + "</b>：选择区域。");
+        dest = await pickZone(zones, () => null);
         if (stale()) return;
         if (dest == null) { cancel(); return; }
       } else if (spec && spec.target === "weapon") {

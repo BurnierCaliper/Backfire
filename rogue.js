@@ -1520,13 +1520,14 @@ const Rogue = (function () {
     const place = shopPlace(run);
     if (!run.shopStock || run.shopStock.place !== place) {
       const n = (typeof ROGUE_SHOP_RULES !== "undefined" && ROGUE_SHOP_RULES.randomCount) || 8;
-      const pool = ROGUE_SHOP.filter(r => !r.always).map(r => r.key);
-      const picked = withRng(`${run.seed}:shop:${place}`, () => {
-        const left = pool.slice(), out = [];
-        while (out.length < n && left.length) out.push(left.splice(Math.floor(Math.random() * left.length), 1)[0]);
-        return out;
-      });
-      run.shopStock = { place, keys: ROGUE_SHOP.filter(r => r.always).map(r => r.key).concat(pool.filter(k => picked.includes(k))) };
+      const pool = ROGUE_SHOP.filter(r => !r.always && !r.effect).map(r => r.key);
+      const fxPool = ROGUE_SHOP.filter(r => r.effect).map(r => r.key);
+      const fxN = (typeof ROGUE_SHOP_RULES !== "undefined" && ROGUE_SHOP_RULES.effectCount) || 0;
+      const draw = (list, k) => { const left = list.slice(), out = []; while (out.length < k && left.length) out.push(left.splice(Math.floor(Math.random() * left.length), 1)[0]); return out; };
+      const picked = withRng(`${run.seed}:shop:${place}`, () => draw(pool, n));
+      // 效果道具另用一条随机流抽：加了它们以后，原来那 8 种商品的进货不变
+      const fxPicked = withRng(`${run.seed}:shopfx:${place}`, () => draw(fxPool, fxN));
+      run.shopStock = { place, keys: ROGUE_SHOP.filter(r => r.always).map(r => r.key).concat(pool.filter(k => picked.includes(k)), fxPool.filter(k => fxPicked.includes(k))) };
     }
     const rows = ROGUE_SHOP.filter(r => run.shopStock.keys.includes(r.key));
     // 长线养成：武器升级要实物材料，商店常备（价格照物品表）

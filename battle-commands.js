@@ -113,7 +113,7 @@
         ? trackHealBy(a, () => useItemOn(a, cmd.item, unitById(cmd.target), cmd.dest))
         : useItemOn(a, cmd.item, unitById(cmd.target), cmd.dest);
       (notes || []).forEach(s => appendLog(s));
-      if (!a.dying && (a.bonus || 0) > 0) { a.bonus -= 1; if (typeof scoreSpend === "function") scoreSpend(a, 0, 1); }   // 濒死时用不了道具，不扣附赠
+      if (!a.dying && !(notes && notes.unused) && (a.bonus || 0) > 0) { a.bonus -= 1; if (typeof scoreSpend === "function") scoreSpend(a, 0, 1); }   // 濒死时用不了道具、道具没用出去（射程不够等），不扣附赠
       return;
     }
     if (cmd.picks && Object.keys(cmd.picks).length) state.skillFlow = { id: cmd.skill, actorId: cmd.actor, picks: Object.assign({}, cmd.picks), index: 99 };

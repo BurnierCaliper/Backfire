@@ -368,6 +368,31 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **工坊第 1 步：36 种效果道具，商店售卖**（作者定，设计见 [docs/workshop-design.md](docs/workshop-design.md)；items.js · `EFFECT_ITEMS` / `itemUseError` / `itemTargetUnits` / `itemTargetZones` / `useEffectItem`；battle-commands.js；hotseat-validation.js；game.js、online-actions.js；rogue-data.js · `ROGUE_SHOP` / `ROGUE_SHOP_RULES.effectCount`；rogue.js · `shopStock`；trpg-data.js · `HANDBOOK_SHOP`；tests/effect-items.test.js）
+  - 游戏里现有的每一种效果对应一个道具，共 36 个：
+    - 属性状态 7 个（投掷罐）、即时效果 7 个（弹针）、通用状态 8 个（增益 / 减益、闪光震撼弹）；
+    - 场地 7 个、自我效果 7 个。
+  - 名字、价格、熟练项、难度都照设计文档。
+  - **全部花附赠动作**（作者定）。
+  - **射程**：
+    - 投掷罐、场地：距离 1 以内的一个区域；投掷罐打区域里的全部单位，不分敌我，和现有炸弹一样。
+    - 弹针、减益：距离 1 以内的一个敌人。
+    - 增益：自己或距离 1 以内的一名友方。
+    - 烟雾弹：一个区域里的全部友方。
+    - 自我效果：只能对自己用。
+    - 隔着危墙 / 关着的门用不了。
+  - **闪光震撼弹**（晕眩）：
+    - 首领无效，直接用不出去；
+    - 10 级起要攒 2 个晕眩标记的精英，只推进 1 个标记（照失衡的规则）。
+  - 效果照现有规则结算：灼烧层数、两个不稳转晕眩、高压场地里不稳直接晕眩、震荡、共振共享、自我效果带来的免疫、扩散认「最新施加」的属性、紧追让施加者跟着走……
+  - 场地道具改不了固有场地、深渊、损毁地面。
+  - **用不出去不扣**：射程外、目标不对、场地改不了时，道具不扣，附赠动作也不扣。以前投掷类道具被危墙挡住时，道具不扣，但附赠动作照样扣掉了。
+  - 界面（本地、联机、热座）只列射程内能选的目标 / 区域；对敌道具在联机里多了「选择敌人」这一步。校验和规则层用同一套检查。
+  - **商店**：
+    - 单局：每家店在原来的 8 种商品之外，另外随机进 4 种效果道具（`ROGUE_SHOP_RULES.effectCount`）。效果道具用另一条随机流抽，原来那 8 种的进货不变。
+    - 自我效果道具不在商店卖：之后做积分兑换和制作。
+    - 跑团物品表加了「效果道具」一组（29 种）。
+
 - **issue #44 新报告的问题**（enemies.js · `en_boat_arc` / `en_gl_fire` / `en_ant_shell_fire`；ai.js · 巡逻艇；online-rogue.js · `blocker` / `checkHost`、玩家的升级面板；online-ui.js；party.js；codex.js、bestiary-ui.js、bestiary.css；tests/duel-ranged.test.js、tests/online-rogue.test.js）
   - **高压巡逻艇被牵制在同区**：电弧扫射本来只打距离 1 的区，被决一死战锁在同区时整场不出手。现在照「没有近身攻击就抵近射击」，扫自己所在的区，倍率 ×0.6，感电先给牵制者。
   - **已经标定好的榴弹 / 大酸液弹**：被牵制时，如果落点不在牵制者所在的区，发射改成重新标定到牵制者所在的区（下个敌人回合才发射）。

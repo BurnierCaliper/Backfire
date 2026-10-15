@@ -299,8 +299,9 @@ const ROGUE_MAIN_TASK = {
 };
 
 /* 商店。价格照手册「常见物价」。give：water 是毫升；item 是背包物品 id（ITEM_CATALOG / 补给物品）。 */
-/* 商店：always 的（最便宜的水和食物）每家都有；其余商品每家随机进货 ROGUE_SHOP_RULES.randomCount 种 */
-const ROGUE_SHOP_RULES = { randomCount: 8 };
+/* 商店：always 的（最便宜的水和食物）每家都有；其余商品每家随机进货 ROGUE_SHOP_RULES.randomCount 种；
+ * 效果道具（items.js · EFFECT_ITEMS，自我效果除外）另外随机进 effectCount 种，不和水、食物、医疗包抢位置 */
+const ROGUE_SHOP_RULES = { randomCount: 8, effectCount: 4 };
 const ROGUE_SHOP = [
   { key: "water_500",  name: "瓶装水 500 ml",  price: 600,  give: { water: 500 }, always: true },
   { key: "water_1000", name: "罐装水 1000 ml", price: 1000, give: { water: 1000 } },
@@ -318,7 +319,8 @@ const ROGUE_SHOP = [
   { key: "bomb_e",       price: 1000, give: { item: "bomb_e" } },
   { key: "bomb_a",       price: 1000, give: { item: "bomb_a" } },
   { key: "shockbomb",    price: 1200, give: { item: "shockbomb" } }
-];
+].concat((typeof EFFECT_ITEMS !== "undefined" ? EFFECT_ITEMS : []).filter(it => it.price > 0)
+  .map(it => ({ key: it.id, price: it.price, give: { item: it.id }, effect: true })));
 
 /* 材料（物品表的价格）。单局里升级不收实物材料，按这张表折成奎支。 */
 const ROGUE_MATERIALS = HANDBOOK_MATERIALS;   // 与跑团模式共用（trpg-data.js）

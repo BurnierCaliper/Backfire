@@ -78,12 +78,14 @@ const HANDBOOK_SHOP = [
   { group: "地图与票券", key: "map_giant",      price: 5000,  give: { item: "map_giant" } },
   { group: "地图与票券", key: "map_giant_full", price: 15000, give: { item: "map_giant_full" } },
   { group: "地图与票券", key: "ticket_dome",    price: 5000,  give: { item: "ticket_dome" } },
+].concat((typeof EFFECT_ITEMS !== "undefined" ? EFFECT_ITEMS : []).filter(it => it.price > 0)
+  .map(it => ({ group: "效果道具", key: it.id, price: it.price, give: { item: it.id } })), [
   { group: "材料", key: "mat_metal",   price: 1000,   give: { item: "mat_metal" } },
   { group: "材料", key: "mat_alloy",   price: 5000,   give: { item: "mat_alloy" } },
   { group: "材料", key: "mat_polymer", price: 10000,  give: { item: "mat_polymer" } },
   { group: "材料", key: "mat_crystal", price: 50000,  give: { item: "mat_crystal" }, note: "黑市售价" },
   { group: "材料", key: "mat_heart",   price: 100000, give: { item: "mat_heart" },   note: "黑市售价" }
-];
+]);
 
 /* 没有战斗效果的物品，登记进背包物品表（ITEM_CATALOG，items.js） */
 const HANDBOOK_GOODS = {

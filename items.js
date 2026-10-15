@@ -10,7 +10,84 @@ const ITEM_CATALOG = {
   shockbomb:  { name: "冲击炸弹", hint: "对一个区域全部单位造成 2 击破", target: "zone", combat: true }
 };
 
-/* 武器改装件也放在背包里（growth.js 的 WEAPON_PARTS，物品 id = part_改装件id） */
+/* ===== 效果道具（作者 10/15 定稿，docs/workshop-design.md）=====
+ * 游戏里现有的每一种效果对应一个道具，共 36 个。全部花附赠动作（game.js / battle-commands.js 的 __item）。
+ *   kind  status 属性状态（投掷罐：一个区域内全部单位，不分敌我）
+ *         instant 即时效果（弹针：一个敌人）
+ *         common 通用状态（增益给自己 / 友方，减益给敌人；烟雾弹给一个区域的友方）
+ *         stun 晕眩（一个敌人；首领无效，要攒 2 个晕眩标记的精英只推进 1 个）
+ *         field 场地（一个区域）
+ *         self 自我效果（只能对自己用；商店不卖，积分兑换或制作）
+ *   target zone / enemy / ally / self；range 距离几区以内（自我效果没有）
+ *   price 商店价（奎支）；points 积分（自我效果）；prof / diff 制作要的熟练项和难度（第 4 步用） */
+const EFFECT_ITEMS = [
+  // ① 属性状态 → 投掷罐
+  { id: "fx_burn",      name: "燃烧瓶",     kind: "status",  key: "burn",       target: "zone",  price: 1200, prof: "科技理论", diff: "easy" },
+  { id: "fx_corr",      name: "腐蚀喷雾",   kind: "status",  key: "corr",       target: "zone",  price: 1200, prof: "科技理论", diff: "easy" },
+  { id: "fx_shock",     name: "电解液罐",   kind: "status",  key: "shock",      target: "zone",  price: 1200, prof: "电器维修", diff: "easy" },
+  { id: "fx_high",      name: "辐能粉尘",   kind: "status",  key: "high",       target: "zone",  price: 1800, prof: "电器维修", diff: "easy" },
+  { id: "fx_quake",     name: "震荡雷",     kind: "status",  key: "shockwave",  target: "zone",  price: 1500, prof: "机械维修", diff: "easy" },
+  { id: "fx_frost",     name: "液氮罐",     kind: "status",  key: "frostbite",  target: "zone",  price: 1200, prof: "医疗",     diff: "easy" },
+  { id: "fx_reso",      name: "共鸣音叉",   kind: "status",  key: "reso",       target: "zone",  price: 1800, prof: "数据操作", diff: "easy" },
+  // ② 即时效果 → 弹针
+  { id: "fx_melt",      name: "铝热弹",     kind: "instant", key: "melt",       target: "enemy", price: 1500, prof: "科技理论", diff: "normal" },
+  { id: "fx_neutral",   name: "中和凝胶",   kind: "instant", key: "neutralize", target: "enemy", price: 2000, prof: "科技理论", diff: "normal" },
+  { id: "fx_overload",  name: "超频针",     kind: "instant", key: "overload",   target: "enemy", price: 1500, prof: "电器维修", diff: "normal" },
+  { id: "fx_spread",    name: "散能弹",     kind: "instant", key: "spread",     target: "enemy", price: 2000, prof: "电器维修", diff: "normal" },
+  { id: "fx_shift",     name: "相位钉",     kind: "instant", key: "shift",      target: "enemy", price: 1800, prof: "机械维修", diff: "normal" },
+  { id: "fx_sting",     name: "冰锥弹",     kind: "instant", key: "sting",      target: "enemy", price: 1500, prof: "巧手",     diff: "normal" },
+  { id: "fx_refract",   name: "棱镜弹",     kind: "instant", key: "refract",    target: "enemy", price: 1800, prof: "数据操作", diff: "normal" },
+  // ③ 通用状态 → 增益 / 减益
+  { id: "fx_trip",      name: "绊索",       kind: "common",  key: "unstable",   target: "enemy", price: 1800, prof: "机械维修", diff: "easy" },
+  { id: "fx_beacon",    name: "追踪信标",   kind: "common",  key: "chase",      target: "enemy", price: 1500, prof: "机械维修", diff: "normal" },
+  { id: "fx_calm",      name: "镇定剂",     kind: "common",  key: "sturdy",     target: "ally",  price: 1500, prof: "医疗",     diff: "easy" },
+  { id: "fx_rouse",     name: "兴奋剂",     kind: "common",  key: "inspire",    target: "ally",  price: 1800, prof: "医疗",     diff: "normal" },
+  { id: "fx_weak",      name: "麻痹毒针",   kind: "common",  key: "weak",       target: "enemy", price: 1800, prof: "医疗",     diff: "normal" },
+  { id: "fx_smoke",     name: "烟雾弹",     kind: "common",  key: "hide",       target: "zone",  price: 1500, prof: "巧手",     diff: "easy", alliesOnly: true },
+  { id: "fx_scope",     name: "瞄准镜贴片", kind: "common",  key: "advantage",  target: "ally",  price: 1500, prof: "巧手",     diff: "easy" },
+  { id: "fx_flash",     name: "闪光震撼弹", kind: "stun",    key: "stun",       target: "enemy", price: 4000, prof: "巧手",     diff: "hard" },
+  // ④ 场地
+  { id: "fx_f_fire",    name: "凝固汽油罐", kind: "field",   key: "fire",       target: "zone",  price: 2000, prof: "科技理论", diff: "hard" },
+  { id: "fx_f_electric",name: "高压桩",     kind: "field",   key: "electric",   target: "zone",  price: 2000, prof: "电器维修", diff: "hard" },
+  { id: "fx_f_acid",    name: "酸液桶",     kind: "field",   key: "acid",       target: "zone",  price: 2000, prof: "机械维修", diff: "hard" },
+  { id: "fx_f_heal",    name: "医疗雾化器", kind: "field",   key: "heal",       target: "zone",  price: 2500, prof: "医疗",     diff: "hard" },
+  { id: "fx_f_ice",     name: "冷凝弹",     kind: "field",   key: "ice",        target: "zone",  price: 2000, prof: "巧手",     diff: "hard" },
+  { id: "fx_f_harmonic",name: "谐波发生器", kind: "field",   key: "harmonic",   target: "zone",  price: 2500, prof: "数据操作", diff: "hard" },
+  { id: "fx_f_energy",  name: "能量核心",   kind: "field",   key: "energy",     target: "zone",  price: 3000, prof: "数据操作", diff: "hard" },
+  // ⑤ 自我效果
+  { id: "fx_s_burn",     name: "点火核心",   kind: "self",   key: "burn",      target: "self",  points: 3, prof: "科技理论", diff: "extreme" },
+  { id: "fx_s_conductor",name: "超导线圈",   kind: "self",   key: "conductor", target: "self",  points: 4, prof: "电器维修", diff: "extreme" },
+  { id: "fx_s_anchor",   name: "配重块",     kind: "self",   key: "anchor",    target: "self",  points: 4, prof: "机械维修", diff: "extreme" },
+  { id: "fx_s_frost",    name: "冰封外壳",   kind: "self",   key: "frost",     target: "self",  points: 3, prof: "医疗",     diff: "extreme" },
+  { id: "fx_s_splash",   name: "酸液涂层",   kind: "self",   key: "splash",    target: "self",  points: 3, prof: "巧手",     diff: "extreme" },
+  { id: "fx_s_store",    name: "蓄能电池",   kind: "self",   key: "store",     target: "self",  points: 4, prof: "数据操作", diff: "extreme" },
+  { id: "fx_s_doppler",  name: "共振频发器", kind: "self",   key: "doppler",   target: "self",  points: 4, prof: "数据操作", diff: "extreme" }
+];
+/** 道具的射程（区）：自我效果之外都是距离 1 以内 */
+const EFFECT_ITEM_RANGE = 1;
+const EFFECT_STATUS_CN = { burn: "灼烧", corr: "腐蚀", shock: "感电", high: "高能", shockwave: "震荡", frostbite: "冻伤", reso: "共振",
+  unstable: "不稳", chase: "紧追", sturdy: "坚挺", inspire: "振奋", weak: "虚弱", hide: "躲藏", advantage: "优势" };
+const EFFECT_INSTANT_CN = { melt: "熔融", neutralize: "中和", overload: "过载", spread: "扩散", shift: "错位", sting: "刺骨", refract: "折射" };
+const EFFECT_FIELD_CN = { fire: "火场", electric: "高压场地", acid: "酸液地面", heal: "治愈场地", ice: "冻土", harmonic: "干涉场", energy: "能量场" };
+const EFFECT_SELF_CN = { burn: "自焚", conductor: "导体", anchor: "千钧", frost: "霜结", splash: "溅射", store: "蓄能", doppler: "多普勒" };
+/** 状态对应的属性（扩散按「最新施加」的属性结算） */
+const EFFECT_STATUS_ELEMENT = { burn: "fire", corr: "acid", shock: "electric", high: "energy", shockwave: "physical", frostbite: "ice", reso: "harmonic" };
+function effectItemHint(it) {
+  const r = `距离 ${EFFECT_ITEM_RANGE} 以内`;
+  if (it.kind === "status") return `对${r}的一个区域内全部单位（不分敌我）施加${EFFECT_STATUS_CN[it.key]}`;
+  if (it.kind === "instant") return `对${r}的一个敌人施加${EFFECT_INSTANT_CN[it.key]}`;
+  if (it.kind === "stun") return `让${r}的一个敌人晕眩。首领无效；要攒 2 个晕眩标记的精英只推进 1 个标记`;
+  if (it.kind === "common") return it.alliesOnly ? `${r}的一个区域内全部友方获得${EFFECT_STATUS_CN[it.key]}`
+    : it.target === "ally" ? `自己或${r}的一名友方获得${EFFECT_STATUS_CN[it.key]}` : `对${r}的一个敌人施加${EFFECT_STATUS_CN[it.key]}`;
+  if (it.kind === "field") return `把${r}的一个区域变成${EFFECT_FIELD_CN[it.key]}（固有场地、深渊、损毁地面改不了）`;
+  if (it.kind === "self") return `自己获得自我效果「${EFFECT_SELF_CN[it.key]}」`;
+  return "";
+}
+EFFECT_ITEMS.forEach(it => {
+  ITEM_CATALOG[it.id] = { name: it.name, hint: effectItemHint(it) + "。附赠动作。", target: it.target, combat: true, effect: it };
+});
+
+/* 武器改装件也放在背包里/* 武器改装件也放在背包里（growth.js 的 WEAPON_PARTS，物品 id = part_改装件id） */
 function registerWeaponPartItems() {
   if (typeof WEAPON_PARTS === "undefined") return;
   Object.keys(WEAPON_PARTS).forEach(id => {
@@ -166,11 +243,19 @@ function useItemOn(actor, itemId, target, zone) {
   if (!spec) { notes.push("没有这种道具。"); return notes; }
   if (spec.target === "weapon") return useRepairKit(actor, target, zone, notes);   // 维修工具包按点数用，不是一次一个
   if (bagCount(itemId) < 1) { notes.push(`没有${spec.name}。`); return notes; }
+  // 效果道具：先看能不能用（射程、目标、场地能不能改……），不能用就不扣道具
+  if (spec.effect) {
+    const why = itemUseError(actor, itemId, target, zone);
+    if (why) { notes.push(why); notes.unused = true; return notes; }   // 没用掉：不扣附赠动作（battle-commands.js）
+    bagAdd(itemId, -1, notes);
+    useEffectItem(actor, spec.effect, target, zone, notes);
+    return notes;
+  }
   // 投掷类道具（手榴弹、酸液瓶、冲击炸弹）：危墙 / 关着的门倒塌 / 打开之前影响不到对面，扔过去没用，道具不用掉
   if (spec.target === "zone" && typeof lineBlocked === "function") {
     const z = zone != null ? Number(zone) : Number((target && target.zone) || actor.zone);
     const block = lineBlocked(actor.zone, z);
-    if (block) { notes.push(`${actor.name} 的${spec.name}影响不到 ${z} 区：${block}`); return notes; }
+    if (block) { notes.push(`${actor.name} 的${spec.name}影响不到 ${z} 区：${block}`); notes.unused = true; return notes; }
   }
   bagAdd(itemId, -1, notes);
   if (itemId === "medkit" || itemId === "clinic") {
@@ -225,6 +310,116 @@ function useItemOn(actor, itemId, target, zone) {
     if (typeof flushAoePulse === "function") flushAoePulse();
   }
   return notes;
+}
+
+/* ===== 效果道具的目标、射程、使用 ===== */
+function effectItemOf(itemId) { const spec = ITEM_CATALOG[itemId]; return spec && spec.effect ? spec.effect : null; }
+function itemZoneDist(a, b) { return typeof zoneDist === "function" ? zoneDist(Number(a), Number(b), state.zoneMode) : Math.abs(Number(a) - Number(b)); }
+function itemPresent(u) { return !!u && !u.dead && !u.hidden && !u.fused && !u._removed; }
+/** 能被道具瞄准的敌人：在场、看得见、选得中（下潜、不可选中的不行） */
+function itemEnemyOk(actor, u) {
+  if (!itemPresent(u) || u.isPlayer || u.untargetable || u.submerged || u.kit === "ironwall") return false;
+  if (typeof isNeutralCreature === "function" && isNeutralCreature(u)) return true;
+  return !(typeof playerAllied === "function" && playerAllied(u));
+}
+/** 用这件道具的问题（空 = 可以用）。规则层、游戏界面、联机 / 热座的校验共用 */
+function itemUseError(actor, itemId, target, zone) {
+  const it = effectItemOf(itemId);
+  if (!it || !actor) return null;
+  const R = EFFECT_ITEM_RANGE;
+  if (it.target === "self") return target && target !== actor ? `${it.name}只能对自己用。` : null;
+  if (it.target === "zone") {
+    const z = Number(zone);
+    if (!(z >= 1)) return `${it.name}需要选一个区域。`;
+    if (itemZoneDist(actor.zone, z) > R) return `${it.name}只能用在距离 ${R} 以内的区域。`;
+    const block = typeof lineBlocked === "function" ? lineBlocked(actor.zone, z) : null;
+    if (block) return `${it.name}影响不到 ${z} 区：${block}`;
+    if (it.kind === "field" && typeof fieldChangeWhy === "function") return fieldChangeWhy(z, it.key) || null;
+    return null;
+  }
+  if (!target) return `${it.name}需要选一个${it.target === "ally" ? "友方" : "敌人"}。`;
+  if (itemZoneDist(actor.zone, target.zone) > R) return `${it.name}只能用在距离 ${R} 以内的目标。`;
+  if (it.target === "ally") return itemPresent(target) && target.isPlayer ? null : `${it.name}要选在场的友方。`;
+  if (!itemEnemyOk(actor, target)) return `${it.name}要选看得见、选得中的敌人。`;
+  const block = typeof lineBlocked === "function" ? lineBlocked(actor.zone, target.zone) : null;
+  if (block) return `${it.name}打不到 ${target.name}：${block}`;
+  if (it.kind === "stun" && typeof enemyRankOf === "function" && enemyRankOf(target) === "boss") return `${target.name} 是首领，闪光震撼弹对首领无效。`;
+  return null;
+}
+/** 界面用：这件道具能选的单位 / 区域 */
+function itemTargetUnits(actor, itemId) {
+  const it = effectItemOf(itemId);
+  const list = (state.units || []).filter(itemPresent);
+  if (!it) return list.filter(u => u.isPlayer);   // 旧道具（医疗包）：照旧任意友方
+  if (it.target === "self") return [actor];
+  return list.filter(u => (it.target === "ally" ? u.isPlayer : !u.isPlayer) && !itemUseError(actor, itemId, u, null));
+}
+function itemTargetZones(actor, itemId) {
+  const all = typeof boardZoneIds === "function" ? boardZoneIds() : Array.from({ length: Number(state.zoneMode) || 2 }, (_, i) => i + 1);
+  const it = effectItemOf(itemId);
+  return it ? all.filter(z => !itemUseError(actor, itemId, null, z)) : all;
+}
+/** 给一个单位挂上道具的状态（属性状态、通用状态），连带的规则（灼烧层数、不稳叠加、震荡、共振共享、自我效果免疫……）照常结算 */
+function itemApplyStatus(actor, u, key, notes) {
+  u.statuses = u.statuses || {};
+  if (key === "burn") {
+    if (typeof grantBurn === "function") grantBurn(u, 1, notes);
+    if (u.self !== "burn") notes.push(`${u.name} 灼烧 → ${u.statuses.burn} 层。`);
+  } else if (key === "unstable") {
+    if (typeof applyUnstable === "function" && applyUnstable(u, notes)) {
+      notes.push(`${u.name} 陷入不稳。`);
+      if (typeof convertUnstableInHv === "function") convertUnstableInHv(u, notes);
+    }
+  } else {
+    if (key === "chase") u.chasers = (u.chasers || []).filter(id => id !== actor.id).concat(actor.id);
+    if (key === "high") u.highApplyTurn = state.turnNo;
+    u.statuses[key] = true;
+    if (key === "shockwave" && typeof syncShockwave === "function") syncShockwave(u, notes);
+    notes.push(`${u.name} 获得${EFFECT_STATUS_CN[key] || key}。`);
+  }
+  if (EFFECT_STATUS_ELEMENT[key]) u.statuses.latestElement = EFFECT_STATUS_ELEMENT[key];
+  if (key !== "burn" && key !== "unstable" && typeof popStatus === "function") popStatus(u, key);
+  if (typeof pulseResonanceStatus === "function") pulseResonanceStatus(u, key);
+  if (typeof selfImmunities === "function") selfImmunities(u, notes);   // 自焚免疫灼烧、霜结免疫冻伤……
+}
+/** 闪光震撼弹：失衡晕眩。首领无效（itemUseError 已拦）；10 级起的精英按首领规则只推进 1 个晕眩标记（imbalanceLine 里记） */
+function itemStun(u, notes) {
+  if (u.stunned) { notes.push(`${u.name} 已经在失衡中。`); return; }
+  if (u.noPosture) { notes.push(`${u.name} 没有架势，不会失衡。`); return; }
+  u.stunned = true;
+  notes.push(typeof imbalanceLine === "function" ? imbalanceLine(u) : `${u.name} 失衡。`);
+  if (typeof endSelfOnStun === "function") endSelfOnStun(u, notes);
+  if (typeof queueAssistAttack === "function") queueAssistAttack(null, u);
+}
+function useEffectItem(actor, it, target, zone, notes) {
+  if (it.target === "zone") {
+    const z = Number(zone);
+    if (it.kind === "field") {
+      const why = typeof setZoneField === "function" ? setZoneField(z, it.key, { by: actor.id }) : null;
+      notes.push(why || `${actor.name} 使用${it.name}：${z} 区变成${EFFECT_FIELD_CN[it.key]}。`);
+      return;
+    }
+    notes.push(`${actor.name} 向 ${z} 区使用${it.name}。`);
+    const units = (state.units || []).filter(u => itemPresent(u) && Number(u.zone) === z && u.kit !== "ironwall" && (!it.alliesOnly || u.isPlayer));
+    if (!units.length) notes.push(`${z} 区没有单位。`);
+    units.forEach(u => {
+      if (!it.alliesOnly && typeof aoeShieldFor === "function" && aoeShieldFor(u)) { notes.push(`${u.name} 被${aoeShieldFor(u).name}护住，没受影响。`); return; }
+      itemApplyStatus(actor, u, it.key, notes);
+    });
+    return;
+  }
+  const t = it.target === "self" ? actor : target;
+  notes.push(`${actor.name} 对 ${t === actor ? "自己" : t.name} 使用${it.name}。`);
+  if (it.kind === "self") { if (typeof castSelfEffect === "function") castSelfEffect(actor, it.key, notes); notes.push(`${actor.name} 获得自我效果「${EFFECT_SELF_CN[it.key]}」。`); return; }
+  if (it.kind === "stun") { itemStun(t, notes); return; }
+  if (it.kind === "instant") {
+    if (it.key === "neutralize") { if (typeof applyNeutralize === "function") notes.push(...applyNeutralize(t)); return; }
+    if (it.key === "shift") { if (typeof applyShift === "function") applyShift(t); if (typeof popStatus === "function") popStatus(t, "shift"); notes.push(`${t.name} 错位：最外两层血量互换。`); return; }
+    if (typeof applyInstantEffect === "function") applyInstantEffect(t, it.key, notes, actor);
+    notes.push(`${t.name} 被施加${EFFECT_INSTANT_CN[it.key]}。`);
+    return;
+  }
+  itemApplyStatus(actor, t, it.key, notes);
 }
 
 function cheatFillBag() {
