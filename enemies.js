@@ -248,6 +248,37 @@ function mutinyTick(notes) {
   if (notes) notes.push(note); else appendLog(note);
 }
 
+/** 敌人这一回合被强制攻击的对象：灯的决一死战、禁足怒吼、嘲讽（没有就是 null） */
+function enemyForcedTarget(u) {
+  if (!u || u.isPlayer) return null;
+  const ok = (t) => t && !t.dead && !t.hidden && !(t.dying && !t.upOnShp) ? t : null;
+  const duel = typeof touDuelVictim === "function" ? ok(touDuelVictim(u)) : null;
+  if (duel) return duel;
+  if (u.lockdownBy) { const t = ok(unitById(u.lockdownBy)); if (t) return t; }
+  if (u.tauntTo) { const t = ok(unitById(u.tauntTo)); if (t) return t; }
+  return null;
+}
+/** 有没有能打同区的攻击（近距离 / 任意距离；协助、借机这类反应不算） */
+function enemyHasNearAttack(u) {
+  return (enemySkillList(u) || []).some(s => {
+    if (!s || !s.id || /_assist$|_opp$/.test(s.id) || s.id === "en_approach" || s.id === "en_flee") return false;
+    const r = ENEMY_SKILL_RANGE[s.id] || (s.id === "en_aa" ? (u.range || "any") : null);
+    return r === "melee" || r === "any";
+  });
+}
+/** 作者定：被强制攻击的对象就在同区、自己又没有近身攻击时，远距离攻击可以抵近射击（倍率同专长「抵近射击」，60%） */
+function enemyForcedPointBlank(a, t) {
+  if (!a || a.isPlayer || !t || Number(a.zone) !== Number(t.zone)) return false;
+  return enemyForcedTarget(a) === t && !enemyHasNearAttack(a);
+}
+/** 选区攻击（榴弹、大酸液弹）被强制攻击时：只能选强制对象所在的区。返回实际落点和要写的日志 */
+function forcedZonePick(a, zone, lines) {
+  const f = enemyForcedTarget(a);
+  if (!f || Number(f.zone) === Number(zone)) return zone;
+  lines.push(`${a.name} 被 ${f.name} 牵制：落点只能选 ${f.zone} 区。`);
+  return Number(f.zone);
+}
+
 function enemySkillList(u) {
   if (!u || u.isPlayer) return [];
   const common = [
@@ -1200,8 +1231,9 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
   if (id === "en_ant_shell") {
     if (!onAcidGround(a)) { lines.push(`${a.name} 不在酸液地面上，汲取不到酸。`); return true; }
     const fl = state.skillFlow;
-    const zone = Number((fl && fl.picks && fl.picks.dest) || t && t.zone);
+    let zone = Number((fl && fl.picks && fl.picks.dest) || t && t.zone);
     if (!(zone >= 1)) { lines.push("大酸液弹需要先选择落点区域。"); return true; }
+    zone = forcedZonePick(a, zone, lines);
     a.resources = a.resources || {};
     a.resources.shellZone = zone;
     a.resources.shellPending = true;
@@ -1367,11 +1399,12 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
   }
   if (id === "en_gl") {
     const fl = state.skillFlow;
-    const zone = Number((fl && fl.picks && fl.picks.dest) || t && t.zone);
+    let zone = Number((fl && fl.picks && fl.picks.dest) || t && t.zone);
     if (!(zone >= 1)) {
       lines.push("榴弹需要先选择落点区域。");
       return true;
     }
+    zone = forcedZonePick(a, zone, lines);
     a.resources = a.resources || {};
     a.resources.glZone = zone;
     a.resources.glPending = true;

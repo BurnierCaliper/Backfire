@@ -47,7 +47,7 @@ const EnemyAI = (function () {
     // 之前这里没查它，远距技能被当成 0–1 都能打，于是瞄准同区的人、结果打不到。
     const erg = typeof ENEMY_SKILL_RANGE !== "undefined" && sid ? ENEMY_SKILL_RANGE[sid] : null;
     if (erg === "melee") return d === 0;
-    if (erg === "ranged") return d === 1;
+    if (erg === "ranged") return d === 1 || (d === 0 && typeof enemyForcedPointBlank === "function" && enemyForcedPointBlank(u, t));
     if (erg === "any") return d <= 1;
     // 射程表里没有的技能按单位卡上的射程判断，和 dealTo 一致（以前一律按 0–1：远距离的人形沙灵瞄准同区的人，每回合空放）
     const rg = u.range || "any";
@@ -402,6 +402,9 @@ const EnemyAI = (function () {
       return zones.length ? { dest: zones[0].z } : null;
     }
     if (sid === "en_gl" || sid === "en_ant_shell") {
+      // 被决一死战 / 嘲讽牵制：只能选牵制者所在的区（作者定）
+      const forced = typeof enemyForcedTarget === "function" ? enemyForcedTarget(u) : null;
+      if (forced) return { dest: Number(forced.zone) };
       // 榴弹 / 大酸液弹发射时照样会被危墙 / 关着的门挡住：隔着墙的区不算人数
       const zones = [];
       const open = (z) => !(typeof lineBlocked === "function" && lineBlocked(u.zone, z));
@@ -510,8 +513,9 @@ const EnemyAI = (function () {
       ai: { kind: "attack", sid, target, picks }
     });
 
-    // 强制目标（嘲讽 / 决一死战）时不后撤，直接想办法打到人
-    let step = pick.forced && zdist(u.zone, target.zone) < (spec.dist || 0)
+    // 强制目标（嘲讽 / 决一死战）时不后撤，直接想办法打到人；决一死战里根本不能移动
+    const duelLocked = typeof touDuelVictim === "function" && !!touDuelVictim(u);
+    let step = duelLocked || (pick.forced && zdist(u.zone, target.zone) < (spec.dist || 0))
       ? null
       : aiStep(u, target, spec, prey);
     // 空隙：地面单位越过要花 1 行动点并过运动检定（敌人没有熟练，50%）。目标在空隙那边时照样去试
@@ -547,7 +551,8 @@ const EnemyAI = (function () {
       if (noTargetNeeded || canAimSkill(u, sid, target)) return attack(sid, aiPicks(u, sid, target, prey));
       if (step == null) {
         // 这里打不到：先找一个走一步就能打到的站位；找不到时强制目标照旧硬打，其余不出手
-        const fs = firingStep(u, spec, prey, target, list, pick.forced ? target : null);
+        // （决一死战不能移动：不找站位，以前每回合都规划移动、被拦下，整场不出手）
+        const fs = duelLocked ? null : firingStep(u, spec, prey, target, list, pick.forced ? target : null);
         if (fs != null) return move(fs);
         if (pick.forced) return attack(sid, aiPicks(u, sid, target, prey));
         return null;
@@ -574,7 +579,7 @@ const EnemyAI = (function () {
     // 谁都打不到（远距离单位身边只剩同区的人、三区里隔着两区、隔着危墙……）：
     // 先找一个走一步就能打到的站位；没有就这一步不出手，不空放（强制目标照旧硬打）
     if (!canAimSkill(u, use, target)) {
-      const fs = firingStep(u, spec, prey, target, list, pick.forced ? target : null);
+      const fs = duelLocked ? null : firingStep(u, spec, prey, target, list, pick.forced ? target : null);
       if (fs != null) return move(fs);
       if (!pick.forced) return null;
     }

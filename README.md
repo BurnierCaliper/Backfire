@@ -368,6 +368,13 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **决一死战 / 嘲讽下的远程敌人：不再整场空过；没有近身攻击就抵近射击；选区攻击只能选牵制者所在的区**（作者定；enemies.js · `enemyForcedTarget` / `enemyHasNearAttack` / `enemyForcedPointBlank` / `forcedZonePick`、`en_gl` / `en_ant_shell`；app.js · `dealTo` 射程检查与 `flags.pointBlank`；ai.js · `inSkillReach` / `aiPicks` / `aiPlanBase`；tests/duel-ranged.test.js）
+  - **bug**：被灯的决一死战锁住的远程敌人（蚁型戒备兵种、榴弹机甲……）。AI 每回合都规划「走远一点再开枪」，而决一死战不允许移动，于是每回合都被拦下，整场不出手（平衡测试里 Lv10 整场 0 伤害）。
+  - **AI**：决一死战里不再找站位、不再规划移动。
+  - **抵近射击**：被牵制（决一死战、禁足怒吼、嘲讽）的敌人，如果牵制者就在同区、自己又没有近身攻击，远距离攻击可以打同区的牵制者，倍率 ×0.6（同专长「抵近射击」）。有近身攻击的敌人照旧用近身攻击。
+  - **选区攻击**（榴弹、大酸液弹）被牵制时，落点只能选牵制者所在的区。AI 照这样选；主持人手动选了别的区也会改过来，并写进日志。
+  - 逐个检查了所有敌人在决一死战里的行为：剩下不出手的只有自爆小车（等引信）、警戒自动机（只打带高能的人）、尘虫 / 管虫（中立）、飞碟的机械足（本来就不行动）。
+
 - **亡命之王：公开处刑改成他回合用的技能；手下被打倒就回防**（作者定，先做进游戏里实际游玩再调；engine.js · `KING_CFG.exec` / `KING_CFG.hold`；enemies.js · `en_king_exec`、`kingCastExecution` / `kingExecutionReady`、`en_king_hold`；ai.js；app.js · `settleEnemyKill`；gm-commands.js、online-gm-ui.js；bestiary.js；tests/king-execution.test.js）
   - **公开处刑**：不再开场自动倒数。现在是王在自己回合用的技能（1 行动点），标记血量上限最高的人，**两回合后**的敌人回合开始时落下（分段、格挡、擒拿和之前一样）。
     - AI：没有还没落下的处刑、并且离上次标记已经过了 3 回合（`exec.cooldown`），就会用。

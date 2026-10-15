@@ -7414,7 +7414,8 @@ function dealTo(attacker, target, opt) {
   if (attacker && target && opt.flags.action && !opt.flags.aoe && !isReaction && !opt.flags.conductorExtra && !opt.flags.propShot && !opt.flags.locked && !opt.flags.viaPierce && !opt.flags.anyRange && !opt.flags.skillRange) {
     const d = zoneDist(Number(attacker.zone), Number(target.zone), Number(state.zoneMode));
     const rg = opt.atkRange || (attacker.isPlayer ? "any" : (attacker.range || "any"));
-    const pointBlank = typeof featHas === "function" && featHas(attacker, "pointblank");   // 抵近射击（feats.js）
+    const pointBlank = (typeof featHas === "function" && featHas(attacker, "pointblank"))   // 抵近射击（feats.js）
+      || (typeof enemyForcedPointBlank === "function" && enemyForcedPointBlank(attacker, target));   // 被牵制又没有近身攻击的敌人（enemies.js）
     const okRange = rg === "melee" ? d === 0 : rg === "ranged" ? (d === 1 || (pointBlank && d === 0)) : d <= 1;
     if (!okRange) {
       const name = rg === "melee" ? "近距离" : rg === "ranged" ? "远距离" : "任意距离";
@@ -7660,6 +7661,9 @@ function dealTo(attacker, target, opt) {
   // 抵近射击：远距离攻击打同区（这一击是远程、或这个技能是靠抵近射击才打得到同区）→ 倍率 ×60%
   if (attacker && attacker.isPlayer && dist === 0 && flags.action !== false && !flags.environment && !flags.aoe && !isReaction &&
       typeof featHas === "function" && featHas(attacker, "pointblank") && (opt.atkRange === "ranged" || state._pointBlankShot === attacker.id)) flags.pointBlank = true;
+  // 被决一死战 / 嘲讽牵制、又没有近身攻击的敌人：远距离攻击打同区的牵制者，同样 ×60%
+  if (attacker && !attacker.isPlayer && dist === 0 && opt.atkRange === "ranged" && flags.action !== false && !flags.environment && !flags.aoe && !isReaction &&
+      typeof enemyForcedPointBlank === "function" && enemyForcedPointBlank(attacker, target)) flags.pointBlank = true;
   const wasDeadForGhost = !!(target && target.dead);
   // 千钧：每个攻击行动总击破 +1 只加一次——这个行动里前面的攻击已经加过，就不再加
   const res = resolveAttack({
