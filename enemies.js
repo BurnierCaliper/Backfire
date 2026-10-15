@@ -942,6 +942,20 @@ function spiderRoundEnd(notes) {
 }
 
 /** 蚁型特殊戒备兵种：对标定的区发射大酸液弹。区内随机一人 2×atk 酸 2 击破（单体），同区其他人 等级+1d6 酸（范围） */
+/** #44（主人定）：被嘲讽（含决一死战、禁足怒吼）后，选区类型攻击必须选嘲讽对象所在的区；
+ *  已经标定好的区域不是那个区就必须重新选区。返回强制目标所在区，没有强制目标返回 0 */
+function tauntForcedZone(a) {
+  if (!a || a.isPlayer) return 0;
+  const ok = t => t && !t.dead && !t.hidden && !(t.dying && !t.upOnShp);
+  const duel = typeof touDuelVictim === "function" ? touDuelVictim(a) : null;
+  if (ok(duel)) return Number(duel.zone) || 0;
+  for (const id of [a.lockdownBy, a.tauntTo]) {
+    const t = id ? state.units.find(x => x.id === id) : null;
+    if (ok(t) && !t.dying) return Number(t.zone) || 0;
+  }
+  return 0;
+}
+
 function antFireShell(a, aa, lines) {
   const r = a.resources = a.resources || {};
   const zone = Number(r.shellZone);
@@ -1153,7 +1167,7 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
   if (id === "en_ant_shell") {
     if (!onAcidGround(a)) { lines.push(`${a.name} 不在酸液地面上，汲取不到酸。`); return true; }
     const fl = state.skillFlow;
-    const zone = Number((fl && fl.picks && fl.picks.dest) || t && t.zone);
+    const zone = tauntForcedZone(a) || Number((fl && fl.picks && fl.picks.dest) || t && t.zone);   // #44
     if (!(zone >= 1)) { lines.push("大酸液弹需要先选择落点区域。"); return true; }
     a.resources = a.resources || {};
     a.resources.shellZone = zone;
@@ -1165,6 +1179,12 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
   if (id === "en_ant_shell_fire") {
     const r = a.resources || {};
     if (!(Number(r.shellZone) >= 1) || !r.shellReady) { lines.push("大酸液弹尚未就绪。先标定区域，等到下一个敌人回合再发射。"); return true; }
+    const forcedZ = tauntForcedZone(a);
+    if (forcedZ && forcedZ !== Number(r.shellZone)) {   // #44：同榴弹，改为重新标定（酸已经汲取，不用再站酸液地面）
+      lines.push(`${a.name} 被嘲讽，放弃 ${r.shellZone} 区的标定，把大酸液弹重新标定在 ${forcedZ} 区。下个敌人回合发射。`);
+      r.shellZone = forcedZ; r.shellPending = true; r.shellReady = false;
+      return true;
+    }
     antFireShell(a, aa, lines);
     return true;
   }
@@ -1320,7 +1340,8 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
   }
   if (id === "en_gl") {
     const fl = state.skillFlow;
-    const zone = Number((fl && fl.picks && fl.picks.dest) || t && t.zone);
+    const forcedZ = tauntForcedZone(a);
+    const zone = forcedZ || Number((fl && fl.picks && fl.picks.dest) || t && t.zone);   // #44：被嘲讽只能标定嘲讽对象所在区
     if (!(zone >= 1)) {
       lines.push("榴弹需要先选择落点区域。");
       return true;
@@ -1336,6 +1357,14 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
     const zone = Number(a.resources && a.resources.glZone);
     if (!(zone >= 1) || !(a.resources && a.resources.glReady)) {
       lines.push("榴弹尚未就绪。先标定区域，等到下一个敌人回合再发射。");
+      return true;
+    }
+    const forcedZ = tauntForcedZone(a);
+    if (forcedZ && forcedZ !== zone) {   // #44：已标定的区不是嘲讽对象所在区：改为重新标定
+      a.resources.glZone = forcedZ;
+      a.resources.glPending = true;
+      a.resources.glReady = false;
+      lines.push(`${a.name} 被嘲讽，放弃 ${zone} 区的标定，把榴弹重新标定在 ${forcedZ} 区。下个敌人回合可发射。`);
       return true;
     }
     const victims = fieldUnits().filter(u => !u.dead && !u.hidden && Number(u.zone) === zone && u.id !== a.id && hostileTo(a, u));

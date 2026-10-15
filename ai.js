@@ -391,7 +391,7 @@ const EnemyAI = (function () {
   }
 
   /** 给需要额外选择的技能补上 picks（榴弹落点、激光区域、穿刺的两个目标） */
-  function aiPicks(u, sid, target, prey) {
+  function aiPicks(u, sid, target, prey, forced) {
     if (sid === "ufo_sweep") {
       const zones = [];
       for (let z = 1; z <= Number(state.zoneMode); z++) {
@@ -401,6 +401,8 @@ const EnemyAI = (function () {
       return zones.length ? { dest: zones[0].z } : null;
     }
     if (sid === "en_gl" || sid === "en_ant_shell") {
+      // #44：被嘲讽 / 决一死战时只能选强制目标所在的区
+      if (forced && target) return { dest: Number(target.zone) };
       // 榴弹 / 大酸液弹发射时照样会被危墙 / 关着的门挡住：隔着墙的区不算人数
       const zones = [];
       const open = (z) => !(typeof lineBlocked === "function" && lineBlocked(u.zone, z));
@@ -545,12 +547,12 @@ const EnemyAI = (function () {
     const fireNow = sid === "en_agg2_charge" && zdist(u.zone, target.zone) <= 1 && (u.bonus || 0) < 1;
     if (sid && (inRange || !step || noTargetNeeded || fireNow)) {
       // 打不到（射程外、自己又不移动）就不出手，免得每回合空放
-      if (noTargetNeeded || canAimSkill(u, sid, target)) return attack(sid, aiPicks(u, sid, target, prey));
+      if (noTargetNeeded || canAimSkill(u, sid, target)) return attack(sid, aiPicks(u, sid, target, prey, pick.forced));
       if (step == null) {
         // 这里打不到：先找一个走一步就能打到的站位；找不到时强制目标照旧硬打，其余不出手
         const fs = firingStep(u, spec, prey, target, list, pick.forced ? target : null);
         if (fs != null) return move(fs);
-        if (pick.forced) return attack(sid, aiPicks(u, sid, target, prey));
+        if (pick.forced) return attack(sid, aiPicks(u, sid, target, prey, pick.forced));
         return null;
       }
     }
@@ -558,10 +560,10 @@ const EnemyAI = (function () {
     const lastAction = (u.ap || 0) <= 1 && (u.bonus || 0) <= 0;
     if (step != null && lastAction && spec.farWhenLast && spec.far && has(spec.far) &&
         zdist(u.zone, target.zone) <= 1) {
-      return attack(spec.far, aiPicks(u, spec.far, target, prey));
+      return attack(spec.far, aiPicks(u, spec.far, target, prey, pick.forced));
     }
     if (step != null) return move(step);
-    if (sid) return attack(sid, aiPicks(u, sid, target, prey));
+    if (sid) return attack(sid, aiPicks(u, sid, target, prey, pick.forced));
 
     const same = Number(target.zone) === Number(u.zone);
     let use = same ? (spec.near || spec.far) : spec.far;
@@ -579,7 +581,7 @@ const EnemyAI = (function () {
       if (fs != null) return move(fs);
       if (!pick.forced) return null;
     }
-    return attack(use, aiPicks(u, use, target, prey));
+    return attack(use, aiPicks(u, use, target, prey, pick.forced));
   }
 
   /* ---------- 沙暴风向：飞行敌人会自己走出逆风、走进顺风 ----------

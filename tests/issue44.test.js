@@ -155,3 +155,65 @@ test("#44 电站超频：技能文案写 2 电能", () => {
   assert.match(src, /chuan_over: "电站超频：[^"]*获得 2 电能/);
   assert.ok(c);
 });
+
+/* ---------- 5. 嘲讽下的选区攻击（主人定）：必须选嘲讽对象所在区；已标定的要重新选区 ---------- */
+function glField() {
+  const c = H.load();
+  c.BattleSim.setup({ party: ["kolt", "ras", "ruby"], enemies: [{ id: "mecha_gl", lv: 3, zone: 2 }], seed: "I44GL", zoneMode: 3 });
+  c.startCombat();
+  const S = c.S.state;
+  S.zoneMode = 3; S.combatPhase = "enemy";
+  const e = S.units.find(u => u.kit === "mecha_gl");
+  const [kolt, ras, ruby] = ["kolt", "ras", "ruby"].map(k => c.findKit(k, S.units));
+  [kolt, ras, ruby].forEach(big);
+  e.zone = 2; ras.zone = 1; ruby.zone = 1; kolt.zone = 3;   // 1 区人多，嘲讽者在 3 区
+  e.ap = 1; e.bonus = 1; e.stunned = false;
+  return { c, S, e, kolt, ras, ruby };
+}
+test("#44 嘲讽下的榴弹：标定时选嘲讽对象所在区，不选人最多的区", () => {
+  const { c, e, kolt } = glField();
+  const free = c.EnemyAI.plan(e);
+  assert.equal(free.ai.picks.dest, 1, "没被嘲讽：选人最多的 1 区");
+  e.tauntTo = kolt.id;
+  const plan = c.EnemyAI.plan(e);
+  plan.thunk();
+  assert.equal(e.resources.glZone, 3);
+});
+test("#44 嘲讽下的榴弹：已标定在别的区时不发射，改为重新标定嘲讽对象所在区", () => {
+  const { c, S, e, kolt, ras, ruby } = glField();
+  Object.assign(e.resources, { glZone: 1, glPending: true, glReady: true });
+  e.tauntTo = kolt.id;
+  const hp = [ras, ruby].map(u => c.totalHp(u));
+  S.attackerId = e.id; S.targetId = kolt.id;
+  c.runSkill("en_gl_fire");
+  assert.equal(e.resources.glZone, 3);
+  assert.equal(e.resources.glReady, false);
+  assert.deepEqual([ras, ruby].map(u => c.totalHp(u)), hp, "1 区没人挨炸");
+});
+test("#44 嘲讽下的榴弹：已标定的就是嘲讽对象所在区时照常发射", () => {
+  const { c, S, e, kolt } = glField();
+  Object.assign(e.resources, { glZone: 3, glPending: true, glReady: true });
+  e.tauntTo = kolt.id;
+  const hp = c.totalHp(kolt);
+  S.attackerId = e.id; S.targetId = kolt.id;
+  c.runSkill("en_gl_fire");
+  assert.ok(c.totalHp(kolt) < hp);
+  assert.equal(e.resources.glReady, false);
+});
+test("#44 嘲讽下的大酸液弹（蚁型戒备兵种）：已标定在别的区时改为重新标定嘲讽对象所在区", () => {
+  const c = H.load();
+  c.BattleSim.setup({ party: ["kolt", "ras"], enemies: [{ id: "ant_guard", lv: 3, zone: 2 }], seed: "I44ANT", zoneMode: 3 });
+  c.startCombat();
+  const S = c.S.state; S.zoneMode = 3; S.combatPhase = "enemy";
+  const e = S.units.find(u => u.kit === "ant_guard");
+  const kolt = c.findKit("kolt", S.units), ras = c.findKit("ras", S.units);
+  [kolt, ras].forEach(big);
+  e.zone = 2; ras.zone = 1; kolt.zone = 3;
+  e.resources = Object.assign(e.resources || {}, { shellZone: 1, shellPending: true, shellReady: true });
+  e.tauntTo = kolt.id;
+  const hp = c.totalHp(ras);
+  S.attackerId = e.id; S.targetId = kolt.id;
+  c.runSkill("en_ant_shell_fire");
+  assert.equal(e.resources.shellZone, 3);
+  assert.equal(c.totalHp(ras), hp);
+});
