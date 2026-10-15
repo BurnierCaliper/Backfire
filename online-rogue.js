@@ -168,6 +168,7 @@
   /* ---------- 掉落：按需求分配 ---------- */
   if (G_Rogue && Rogue.setLootHandler) Rogue.setLootHandler((r, id, qty, notes, source) => {
     if (!active() || r !== run()) return false;
+    if (!ownable(id)) return false;   // 队伍公用的东西（制作材料……）直接进公用背包，不用大家选需求
     const d = data(r);
     d.loot.push({ no: ++d.lootNo, id, qty, source: source || "战利品", needs: {} });
     notes.push(`${source || "战利品"}：${itemName(id)} ×${qty}——各人选「需求」或「放弃」，在需求的人里抽一个。`);

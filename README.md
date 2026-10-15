@@ -368,6 +368,25 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **工坊第 3 步：制作材料与掉落**（作者定；items.js · `CRAFT_MATERIALS` / `CRAFT_DROPS` / `craftClassesOf` / `rollCraftMaterials`；rogue.js · `rollMaterialDrops`；online-rogue.js；trpg-data.js · `HANDBOOK_SHOP`「制作材料（黑市）」；tests/craft-materials.test.js）
+  - 7 种材料，放在队伍背包里共用：
+    - 废料（壳体）；
+    - 化工残液 / 燃气浓缩物（化学）；
+    - 废线圈 / 电芯（电子）；
+    - 沙鱼鳞 / 星灵组织（生物）。
+  - 掉什么看敌人身上的东西：
+    - 酸 / 火属性 → 化学；
+    - 电 / 能量属性 → 电子；
+    - 有沙尘层 → 沙鱼鳞；有星灵层 → 星灵组织；
+    - 有装甲 / 护盾层 → 废料。
+  - 掉多少看敌人档次（数字都在 `CRAFT_DROPS`）：
+    - 杂兵：常见材料 40%，精制 3%，废料 0–1；
+    - 精英：常见材料保底 1 份，精制 40%，废料 1–2；
+    - 首领：常见材料 2 份，精制 1 份，废料 2–3。
+  - 单局：战斗胜利后，每个被打倒的敌人掷一次材料，结算里会写出来。
+  - 联机单局：材料直接进队伍背包，不走需求 / 贪婪分配。
+  - 跑团手册商店多了「制作材料（黑市）」，按参考价 3 倍卖；单局没有黑市，材料只能靠打。
+
 - **工坊第 2 步：商店积分，兑换自我效果道具**（作者定；rogue-data.js · `ROGUE_SHOP_POINTS`；rogue.js · `earnShopPoints` / `shopPoints` / `redeemList` / `redeem`；rogue-commands.js · `redeem` / `shopPoints`；rogue-ui.js；online-rogue.js、online-ui.js；tests/shop-points.test.js）
   - 在单局商店**每花 3,000 奎支得 1 积分**，零头累计到下次。打八折的「巧手匠人」按实际花掉的钱算。
   - 积分只能在有商店的地方，兑换 7 种自我效果道具：自焚、霜结、溅射 3 积分；导体、千钧、蓄能、多普勒 4 积分。积分在这一局内有效。

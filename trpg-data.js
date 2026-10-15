@@ -85,7 +85,7 @@ const HANDBOOK_SHOP = [
   { group: "材料", key: "mat_polymer", price: 10000,  give: { item: "mat_polymer" } },
   { group: "材料", key: "mat_crystal", price: 50000,  give: { item: "mat_crystal" }, note: "黑市售价" },
   { group: "材料", key: "mat_heart",   price: 100000, give: { item: "mat_heart" },   note: "黑市售价" }
-]);
+], (typeof CRAFT_MATERIALS !== "undefined" ? CRAFT_MATERIALS : []).map(m => ({ group: "制作材料（黑市）", key: m.id, price: m.price * (typeof CRAFT_BLACK_MARKET !== "undefined" ? CRAFT_BLACK_MARKET : 3), give: { item: m.id }, note: "黑市售价" })));
 
 /* 没有战斗效果的物品，登记进背包物品表（ITEM_CATALOG，items.js） */
 const HANDBOOK_GOODS = {

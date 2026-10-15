@@ -929,6 +929,7 @@ const Rogue = (function () {
     if (outcome === "win" && run.party.length) {
       const node = !boss && !ambush ? currentNode(run) : null;
       rollItemDrops(run, boss ? "boss" : node && node.type === "elite" ? "elite" : "battle", notes);
+      rollMaterialDrops(run, notes);
       // 拾荒者（feats.js，跑团规则）：每个带这张专长的人多掷一次战利品
       const scav = typeof featExploreOk === "function" && featExploreOk() ? featPartyCount(run.party, "scavenger") : 0;
       for (let i = 0; i < scav; i++) { notes.push("拾荒者：又在战场上翻了一遍。"); rollItemDrops(run, "battle", notes); }
@@ -1012,6 +1013,20 @@ const Rogue = (function () {
     if (lootHandler && lootHandler(run, id, qty, notes, source) !== false) return;
     bagAdd(id, qty);
     notes.push(`${source ? source + "：" : ""}获得 ${ITEM_CATALOG[id].name} ×${qty}。`);
+  }
+  /** 打赢之后打倒的敌人掉制作材料（items.js · rollCraftMaterials）：合在一起记一行，进背包（材料是队伍公用的） */
+  function rollMaterialDrops(run, notes) {
+    if (typeof rollCraftMaterials !== "function") return;
+    const foes = (state.units || []).filter(u => u && !u.isPlayer && (u.dead || u._removed) && !u.summonedBy && u.kit !== "ironwall" && u.kit !== "ufo_leg" &&
+      !(typeof isNeutralCreature === "function" && isNeutralCreature(u)));
+    if (!foes.length) return;
+    const key = `${run.seed}:mats:${run.act}:${run.taskNo}:${run.task ? run.task.index : "b"}:${run.day}:${(run.matNo = (run.matNo || 0) + 1)}`;
+    const total = {};
+    withRng(key, () => foes.forEach(u => rollCraftMaterials(u).forEach(m => { total[m.id] = (total[m.id] || 0) + m.qty; })));
+    const ids = Object.keys(total);
+    if (!ids.length) return;
+    ids.forEach(id => grantLoot(run, id, total[id], [], "材料"));
+    notes.push(`材料：${ids.map(id => `${ITEM_CATALOG[id].name} ×${total[id]}`).join("、")}。`);
   }
   /** 打赢之后掉的道具（rogue-data.js · ROGUE_CONFIG.itemDrops）：kind = battle / elite / boss */
   function rollItemDrops(run, kind, notes) {

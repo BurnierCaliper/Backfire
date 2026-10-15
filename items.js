@@ -87,7 +87,55 @@ EFFECT_ITEMS.forEach(it => {
   ITEM_CATALOG[it.id] = { name: it.name, hint: effectItemHint(it) + "。附赠动作。", target: it.target, combat: true, effect: it };
 });
 
-/* 武器改装件也放在背包里/* 武器改装件也放在背包里（growth.js 的 WEAPON_PARTS，物品 id = part_改装件id） */
+/* ===== 制作材料（作者 10/15 定稿，docs/workshop-design.md 第 4 节）=====
+ * 结构材料（金属 → 赫心结晶）照旧只用于武器升级；道具制作另用这 7 种。队伍公用（supply：联机时不按需求分配，直接进公用背包）。
+ *   cls：chem 化学 / elec 电子 / bio 生物；tier：1 常见、2 精制；price 参考价（黑市按 CRAFT_BLACK_MARKET 倍出售） */
+const CRAFT_MATERIALS = [
+  { id: "cm_scrap",  name: "废料",       price: 100, cls: "shell", tier: 0, hint: "道具的壳体。机械敌人掉落；拆解道具也能拿回" },
+  { id: "cm_chem",   name: "化工残液",   price: 200, cls: "chem",  tier: 1, hint: "化学 · 常见。酸 / 火系敌人掉落" },
+  { id: "cm_gas",    name: "燃气浓缩物", price: 600, cls: "chem",  tier: 2, hint: "化学 · 精制。精英、首领，第二采矿场的燃气机械掉落" },
+  { id: "cm_coil",   name: "废线圈",     price: 200, cls: "elec",  tier: 1, hint: "电子 · 常见。电 / 能量系机械掉落" },
+  { id: "cm_cell",   name: "电芯",       price: 600, cls: "elec",  tier: 2, hint: "电子 · 精制。精英、首领，第三采矿场、巨人城机械掉落" },
+  { id: "cm_scale",  name: "沙鱼鳞",     price: 200, cls: "bio",   tier: 1, hint: "生物 · 常见。带沙尘层的沙漠生物掉落" },
+  { id: "cm_spirit", name: "星灵组织",   price: 600, cls: "bio",   tier: 2, hint: "生物 · 精制。带星灵层的敌人（触灵、陨体衍蛛、弦蚣……）掉落" }
+];
+const CRAFT_BLACK_MARKET = 3;   // 道具材料普通商店不卖，黑市按参考价的几倍卖
+/* 打倒一个敌人掉多少材料：按档次。common / refined 是每个材料类别各掷一次的概率（≥1 表示保底这么多份）；scrap 是废料 [最少, 最多]（有装甲 / 护盾的机械才掉） */
+const CRAFT_DROPS = {
+  minion: { common: 0.4, refined: 0.03, scrap: [0, 1] },
+  elite:  { common: 1,   refined: 0.4,  scrap: [1, 2] },
+  boss:   { common: 2,   refined: 1,    scrap: [2, 3] }
+};
+CRAFT_MATERIALS.forEach(m => { ITEM_CATALOG[m.id] = { name: m.name, hint: m.hint, combat: false, supply: true, material: "craft" }; });
+/** 这个敌人属于哪些材料类别：酸 / 火 → 化学；电 / 能量 → 电子；沙尘层 → 生物（沙鱼鳞）；星灵层 → 生物（星灵组织）；装甲 / 护盾 → 机械（废料） */
+function craftClassesOf(u) {
+  const el = String((u.suggest && u.suggest.element) || u.element || "physical");
+  const types = (u.layers || []).map(l => l.type);
+  return {
+    chem: el === "acid" || el === "fire",
+    elec: el === "electric" || el === "energy",
+    sand: types.includes("sand"),
+    spirit: types.includes("spirit"),
+    mech: types.includes("armor") || types.includes("shield")
+  };
+}
+/** 掷一个敌人的材料掉落 → [{ id, qty }]（用调用方装好的随机数） */
+function rollCraftMaterials(u) {
+  if (!u || u.isPlayer) return [];
+  const rank = typeof enemyRankOf === "function" ? enemyRankOf(u) : "minion";
+  const D = CRAFT_DROPS[rank] || CRAFT_DROPS.minion;
+  const c = craftClassesOf(u), out = {};
+  const add = (id, n) => { if (n > 0) out[id] = (out[id] || 0) + n; };
+  const roll = (p) => p >= 1 ? Math.floor(p) : (Math.random() < p ? 1 : 0);
+  if (c.mech) add("cm_scrap", D.scrap[0] + Math.floor(Math.random() * (D.scrap[1] - D.scrap[0] + 1)));
+  if (c.chem) { add("cm_chem", roll(D.common)); add("cm_gas", roll(D.refined)); }
+  if (c.elec) { add("cm_coil", roll(D.common)); add("cm_cell", roll(D.refined)); }
+  if (c.sand) add("cm_scale", roll(D.common));
+  if (c.spirit) add("cm_spirit", roll(Math.max(D.refined, D.common * 0.5)));
+  return Object.keys(out).map(id => ({ id, qty: out[id] }));
+}
+
+/* 武器改装件也放在背包里（growth.js 的 WEAPON_PARTS，物品 id = part_改装件id） */
 function registerWeaponPartItems() {
   if (typeof WEAPON_PARTS === "undefined") return;
   Object.keys(WEAPON_PARTS).forEach(id => {
