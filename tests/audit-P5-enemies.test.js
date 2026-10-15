@@ -328,6 +328,7 @@ test("亡命之王 AI：只在危险时下回防（有人冲进王的区或王�
     { id: "thug_knife", lv: 3, zone: 2 }, { id: "thug_hammer", lv: 3, zone: 2 }]);
   const king = E("outlaw_king"), k = P("kolt");
   E("thug_knife").zone = 1; E("thug_hammer").zone = 1;   // 狂徒出去打人了
+  king.resources.execTurn = S.turnNo;   // 公开处刑冷却中：这条只看回防的触发
   S.combatPhase = "enemy"; c.refreshEnemyEconomy(king);
   king.damagedThisTurn = 5;
   assert.equal(c.EnemyAI.plan(king).meta.skillName, "攻击命令", "强盗头子还在身边替他挡：不叫回防");

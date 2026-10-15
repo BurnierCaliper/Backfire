@@ -1,4 +1,4 @@
-// 亡命之王强化：公开处刑（死刑机制，手下各补一刀）、回防后的齐射、狂徒援军、攻击 / 处死命令的骰子随等级升档（engine.js · KING_CFG）
+// 亡命之王强化：公开处刑（他回合用的技能：标记 → 两回合后落下，手下各补一刀）、手下倒下就回防 + 齐射、狂徒援军、骰子随等级升档（engine.js · KING_CFG）
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -24,31 +24,41 @@ function field(lv) {
 const CFG = c => vm.runInContext("KING_CFG", c);
 const setTurn = (st, n) => { st.turnNo = n; st.logPages.push({ turn: n, lines: [{ text: "" }] }); };
 const noBlock = { pickBlocker: () => null, pickAssister: l => l[0].id };
-const exec = king => king.mechanics.find(m => m.kingExec);
+const exec = king => (king.mechanics || []).find(m => m.kingExec);
+/** 王在敌人回合用公开处刑 */
+function castExec(c, st, king) {
+  st.combatPhase = "enemy"; king.ap = 1; st.attackerId = king.id; st.targetId = null;
+  c.runSkill("en_king_exec");
+  return exec(king);
+}
 
-test("开场挂上公开处刑：锁定血量上限最高的人，按配置的回合落下", () => {
+test("公开处刑是王回合用的技能：开场没有；用了以后标记血量上限最高的人，两回合后的敌人回合开始时落下", () => {
   const { c, st, king, kolt } = field();
-  const m = exec(king);
-  c.bossMechSync([]);
-  assert.ok(m, "挂上公开处刑");
+  assert.equal(exec(king), undefined, "开场不自动挂");
+  assert.ok(c.enemySkillList(king).some(x => x.id === "en_king_exec"));
+  const m = castExec(c, st, king);
+  assert.ok(m, "用了就挂上");
   assert.equal(m.st.targetId, kolt.id);
-  assert.equal(m.st.due, CFG(c).exec.firstTurn + CFG(c).exec.turns);
-  assert.ok(st.combatStarted);
+  assert.equal(m.st.due, st.turnNo + CFG(c).exec.turns);
+  assert.equal(c.kingExecutionReady(king), false, "还没落下不能再用");
 });
 
 test("落下：王一刀 + 每个还站着的手下各补一刀；先清掉手下，处刑就少几刀", () => {
   {
     const { c, st, king, logs } = field();
-    const m = exec(king); c.bossMechSync([]);
+    const m = castExec(c, st, king);
     setTurn(st, m.st.due); st.combatPhase = "enemy";
     c.bossMechPhaseStart("enemy", []); c.BattleSim.resolveQueues(noBlock);
     assert.match(logs(), /执行公开处刑！（4 段）/, "王 + 强盗头子 + 两个狂徒");
+    assert.equal(m.st.done, true, "只落一次");
+    setTurn(st, m.st.due + 1);
+    assert.equal(c.kingExecutionReady(king), true, "过了冷却可以再用");
     assert.match(logs(), /【强盗头子】公开处刑 第 2\/4 段落下|【狂徒（[^）]+）】公开处刑 第 2\/4 段落下/, "手下那几刀由手下出手");
   }
   {
     const { c, st, king, knife, hammer, kill, logs } = field();
     kill(knife); kill(hammer);
-    const m = exec(king); c.bossMechSync([]);
+    const m = castExec(c, st, king);
     setTurn(st, m.st.due); st.combatPhase = "enemy";
     c.bossMechPhaseStart("enemy", []); c.BattleSim.resolveQueues(noBlock);
     assert.match(logs(), /执行公开处刑！（2 段）/, "只剩王和强盗头子");
@@ -57,7 +67,7 @@ test("落下：王一刀 + 每个还站着的手下各补一刀；先清掉手�
 
 test("王被挟持（哗变）时处刑推迟一回合", () => {
   const { c, st, king, logs } = field();
-  const m = exec(king); c.bossMechSync([]);
+  const m = castExec(c, st, king);
   king.resources.hostage = true;
   const due = m.st.due;
   setTurn(st, due); st.combatPhase = "enemy";
@@ -88,13 +98,30 @@ test("回防命令：标记我方每个角色（武器人不算），下一个�
 
 test("齐射和公开处刑撞在同一回合：处刑往后推一回合；上一轮没打出去不重复挂", () => {
   const { c, st, king, kolt } = field();
-  const ex = exec(king); c.bossMechSync([]);
+  const ex = castExec(c, st, king);
   setTurn(st, ex.st.due - 1); st.combatPhase = "enemy"; king.ap = 1; st.attackerId = king.id; st.targetId = kolt.id;
   const due = ex.st.due;
   c.runSkill("en_king_hold");
   assert.equal(ex.st.due, due + 1, "处刑让位给齐射");
   king.ap = 1; c.runSkill("en_king_hold");
   assert.equal(king.mechanics.filter(m => m.kingVolley).length, 1);
+});
+
+test("AI：手下被打倒过，王这回合改用回防命令；3 回合内最多一次", () => {
+  const { c, st, king, knife, kill } = field();
+  king.resources.execTurn = st.turnNo;   // 先不让公开处刑抢这一手
+  kill(knife);
+  assert.equal(king.resources.crewDown, true);
+  st.combatPhase = "enemy"; c.refreshEnemyEconomy(king);
+  assert.equal(c.EnemyAI.plan(king).meta.skillName, "回防命令（筑废铁墙）");
+  c.EnemyAI.plan(king).thunk();
+  assert.equal(king.resources.holdTurn, st.turnNo);
+  king.resources.crewDown = true;
+  setTurn(st, st.turnNo + 2); c.refreshEnemyEconomy(king);
+  const p2 = c.EnemyAI.plan(king);
+  assert.notEqual(p2 && p2.meta.skillName, "回防命令（筑废铁墙）", "冷却中");
+  setTurn(st, king.resources.holdTurn + CFG(c).hold.cooldown); c.refreshEnemyEconomy(king);
+  assert.equal(c.EnemyAI.plan(king).meta.skillName, "回防命令（筑废铁墙）", "冷却过了");
 });
 
 test("首领战开场就写着狂徒援军；援军到王身边集合；场上全灭就不来了", () => {

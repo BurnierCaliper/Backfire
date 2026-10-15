@@ -1575,7 +1575,8 @@ const AGG_CANNON = {
 };
 
 /** 亡命之王（作者定的强化：用首领机制把「指挥官」做实，boss-mechanics.js）
- *  exec · 公开处刑（死刑）：从第 firstTurn 回合起锁定血量上限最高的我方单位，turns 回合后在敌人回合开始时落下，之后每 interval 回合一次。
+ *  exec · 公开处刑（死刑，王在自己回合用的技能，花 1 行动点）：标记血量上限最高的我方单位，turns 回合后的敌人回合开始时落下；
+ *    落下之后过 cooldown 回合（从标记那回合算）才会再用。
  *    第一刀是王自己：kingMult × atk + 1d(kingDie 随等级升档) 酸；之后每个还站着的手下（狂徒 / 强盗头子）各补一刀：
  *    crewMult × 自己的 atk + 1d(crewDie 随等级升档)。每一刀都可以协助格挡——先清掉手下，处刑就轻。
  *    落下后强盗头子还在：grab 概率擒拿，目标失去下回合行动。王被挟持（哗变）时推迟。
@@ -1584,8 +1585,10 @@ const AGG_CANNON = {
  *  援军：首领战开场就写着狂徒援军要赶来（run.js · ENEMY_INFO.outlaw_king.waves，chain.js）；场上敌人全灭、战斗结束就不来了。
  *  攻击命令 / 处死命令的骰子随等级升档（每 5 级一档，和杂兵一样）。 */
 const KING_CFG = {
-  exec: { firstTurn: 1, turns: 3, interval: 3, kingMult: 1.5, kingDie: 6, crewMult: 1, crewDie: 6, grab: 0.5 },
-  volley: { mult: 1, diceS: 8, baseBreak: 2 }
+  exec: { turns: 2, cooldown: 3, kingMult: 1.5, kingDie: 6, crewMult: 1, crewDie: 6, grab: 0.5 },
+  volley: { mult: 1, diceS: 8, baseBreak: 2 },
+  // 回防：手下（狂徒 / 强盗头子）被打倒过，王下次行动改成回防命令；cooldown 回合内最多一次（作者定：先设 3，实际游玩再调）
+  hold: { cooldown: 3 }
 };
 
 /** 沙灵聚合体一阶段 · 沙尘爆裂（作者定：「远离」首领机制）：开场标记我方全员，turns 回合后在敌人回合开始时
@@ -1888,7 +1891,6 @@ function enemyPresets() {
         { type: "armor", hp: scaleHp(35 + (lv - 1) * 7, p) },
         { type: "flesh", hp: scaleHp(50 + (lv - 1) * 11, p) }
       ], 7 + milestone(lv, 5), 11 + (lv - 1) + milestone(lv, 5) * 2, { kit: "outlaw_king", range: "any", dice: [1, leveledSides(lv, 4)], element: "fire" });
-      if (typeof kingArmExecution === "function") kingArmExecution(u);   // 公开处刑（死刑机制，KING_CFG）
       return u;
     }},
     { id: "chixia", name: "赤牙", build(lv, p) {

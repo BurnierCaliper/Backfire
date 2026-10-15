@@ -29,7 +29,7 @@ const EnemyAI = (function () {
   // 不按「打单个目标」瞄准的技能：标定区域的榴弹（落点任意），不看危墙
   const ZONE_PICK = { en_gl: true, en_gl_fire: true, en_ant_shell: true, en_ant_shell_fire: true };
   // 不需要目标 / 不是攻击的技能：找站位时不拿它们来算「能不能打到」
-  const NO_TARGET = { en_agg3_debris: true, en_king_hold: true, en_bigsand_summon: true, en_bigsand_heal: true, ufo_prime: true,
+  const NO_TARGET = { en_agg3_debris: true, en_king_hold: true, en_king_exec: true, en_bigsand_summon: true, en_bigsand_heal: true, ufo_prime: true,
     ufo_boom: true, ufo_stomp: true, ufo_sweep: true, ufo_summon: true, en_agg2_overheat: true, en_giant_sand_pulse: true, en_thug_mutiny: true, en_gas_ignite: true, en_hunter_heat: true, en_alarm_zap: true };
   function canAimSkill(u, sid, t) {
     if (!inSkillReach(u, sid, t)) return false;
@@ -350,9 +350,14 @@ const EnemyAI = (function () {
       const pressed = prey.some(p => Number(p.zone) === Number(u.zone));
       const hurt = (Number(u.damagedThisTurn) || 0) > 0;
       const guarded = thugs.some(x => x !== u && Number(x.zone) === Number(u.zone));
-      if (scattered && thugs.length >= 2 && !guarded && (pressed || hurt) && has("en_king_hold") && u._aiHoldTurn !== state.turnNo) {
+      const holdReady = r.holdTurn == null || state.turnNo - Number(r.holdTurn) >= (Number(KING_CFG.hold.cooldown) || 0);
+      // 手下被打倒过：这回合改成回防（之后狂徒们齐射）
+      if (r.crewDown && holdReady && has("en_king_hold")) return "en_king_hold";
+      if (scattered && thugs.length >= 2 && !guarded && (pressed || hurt) && holdReady && has("en_king_hold") && u._aiHoldTurn !== state.turnNo) {
         return "en_king_hold";
       }
+      // 公开处刑：没有挂着的、离上次标记过了冷却就用（标记 → 两回合后落下）
+      if (has("en_king_exec") && typeof kingExecutionReady === "function" && kingExecutionReady(u)) return "en_king_exec";
       if (sameZone && has("en_king_kill")) return "en_king_kill";
       return has("en_king_atk") ? "en_king_atk" : "en_king_kill";
     }
@@ -523,7 +528,7 @@ const EnemyAI = (function () {
     // 沙漠生物的习性：夜晚 / 沙暴不走进有沙珊瑚的区（desert.js · coralAvoid）
     if (step != null && typeof coralAvoid === "function" && coralAvoid(u, step)) step = null;
     let sid = aiSpecial(u, spec, target, prey, has, list);
-    if (sid && !["en_agg3_debris", "en_king_hold", "en_bigsand_summon", "en_bigsand_heal", "ufo_prime", "ufo_boom", "ufo_stomp", "ufo_sweep", "en_agg2_overheat", "en_gl", "en_gl_fire", "en_ant_shell", "en_ant_shell_fire", "en_gas_ignite", "en_alarm_zap", "en_giant_sand_pulse"].includes(sid)) {
+    if (sid && !["en_agg3_debris", "en_king_hold", "en_king_exec", "en_bigsand_summon", "en_bigsand_heal", "ufo_prime", "ufo_boom", "ufo_stomp", "ufo_sweep", "en_agg2_overheat", "en_gl", "en_gl_fire", "en_ant_shell", "en_ant_shell_fire", "en_gas_ignite", "en_alarm_zap", "en_giant_sand_pulse"].includes(sid)) {
       const rt = retargetLegal(u, sid, target, prey, pick.forced);
       if (rt.target) target = rt.target;
       if (rt.sid) sid = rt.sid;
@@ -531,7 +536,7 @@ const EnemyAI = (function () {
     const inRange = target && zdist(u.zone, target.zone) === (spec.dist == null ? zdist(u.zone, target.zone) : spec.dist);
 
     // 手册：够不着就先移动；special 已经给出可用技能且位置合适时直接用
-    const noTargetNeeded = sid === "en_agg3_debris" || sid === "en_king_hold" ||
+    const noTargetNeeded = sid === "en_agg3_debris" || sid === "en_king_hold" || sid === "en_king_exec" ||
       sid === "en_bigsand_summon" || sid === "en_bigsand_heal" || sid === "ufo_prime" ||
       sid === "ufo_boom" || sid === "ufo_stomp" || sid === "ufo_sweep" || sid === "en_agg2_overheat" ||
       sid === "en_giant_sand_pulse" ||   // 全域沙暴打所有区域，不用瞄准

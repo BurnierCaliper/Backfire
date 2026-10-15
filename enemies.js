@@ -171,12 +171,28 @@ function kingGuardFor(king) {
   return guards.sort((a, b) => totalHp(b) - totalHp(a))[0];
 }
 
-/** 亡命之王 · 公开处刑：挂上死刑机制（数值见 engine.js · KING_CFG）。分段在落下时按还站着的手下现算 */
-function kingArmExecution(u) {
-  if (!u || typeof addBossMechanic !== "function" || (u.mechanics || []).some(m => m.kingExec)) return;
+/** 亡命之王 · 公开处刑（他回合用的技能）：标记血量上限最高的人，KING_CFG.exec.turns 回合后的敌人回合开始时落下（死刑机制）。
+ *  分段在落下时按还站着的手下现算。返回日志行 */
+function kingCastExecution(king, lines) {
+  if (!king || typeof addBossMechanic !== "function") return;
   const E = KING_CFG.exec;
-  addBossMechanic(u, { type: "execution", kingExec: true, name: "公开处刑", phase: "enemy", pick: "maxHp",
-    firstTurn: E.firstTurn, turns: E.turns, interval: E.interval, then: "repeat", hitsHook: "kingExecution", hook: "kingGrab" });
+  if (king.mechanics) king.mechanics = king.mechanics.filter(m => !(m.kingExec && m.st && m.st.done));
+  if ((king.mechanics || []).some(m => m.kingExec)) { lines.push("上一次公开处刑还没落下。"); return; }
+  const turn = Number(state.turnNo) || 1;
+  addBossMechanic(king, { type: "execution", kingExec: true, name: "公开处刑", phase: "enemy", pick: "maxHp",
+    firstTurn: turn, turns: E.turns, then: "once", hitsHook: "kingExecution", hook: "kingGrab" });
+  king.resources = king.resources || {};
+  king.resources.execTurn = turn;
+  if (typeof bossMechSync === "function") bossMechSync(lines);
+  // 和已经挂着的齐射撞在同一回合：处刑往后推一回合
+  const ex = king.mechanics.find(m => m.kingExec), vo = king.mechanics.find(m => m.kingVolley && m.st && !m.st.done);
+  if (ex && vo && ex.st && ex.st.due === vo.st.due) { ex.st.due += 1; lines.push(`公开处刑让位给齐射，推迟到第 ${ex.st.due} 回合。`); }
+}
+/** 现在能不能用公开处刑：没有还没落下的，并且离上次标记过了 cooldown 回合 */
+function kingExecutionReady(king) {
+  if (!king || (king.mechanics || []).some(m => m.kingExec && !(m.st && m.st.done))) return false;
+  const last = king.resources && king.resources.execTurn;
+  return last == null || (Number(state.turnNo) || 1) - Number(last) >= KING_CFG.exec.cooldown;
 }
 function kingExecutionHits(king) {
   const E = KING_CFG.exec;
@@ -386,7 +402,8 @@ function enemySkillList(u) {
     outlaw_king: [
       { id: "en_king_atk", label: "攻击命令" },
       { id: "en_king_kill", label: "处死命令" },
-      { id: "en_king_hold", label: "回防命令（筑废铁墙）" }
+      { id: "en_king_hold", label: "回防命令（筑废铁墙）" },
+      { id: "en_king_exec", label: "公开处刑（标记血量上限最高的人，两回合后落下）" }
     ],
     ufo_body: [],
     ufo_leg: [],
@@ -1623,7 +1640,15 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
     } else if (boss) lines.push("强盗头子擒拿失败。");
     return true;
   }
+  if (id === "en_king_exec") {
+    kingCastExecution(a, lines);
+    return true;
+  }
   if (id === "en_king_hold") {
+    // 记下这次回防（冷却从这回合算），「手下被打倒过」的标记用掉
+    a.resources = a.resources || {};
+    a.resources.holdTurn = Number(state.turnNo) || 1;
+    a.resources.crewDown = false;
     // 主持人手册：所有人回到他所在区，消耗行动点筑废铁墙（1d4×狂徒人数装甲，每五级升骰）；
     // 他用电击霰弹对另一区全员 atk+1d8/2 电击。
     // 废铁墙照川川的铁壁做：放在王所在区，同区敌方单位挨我方攻击行动时只有墙吃这一下，撑到下一个敌人回合开始。

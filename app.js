@@ -4770,6 +4770,11 @@ function settleEnemyKill(target, notes) {
       notes.push(`挟持者已死，${king.name} 恢复行动。`);
     }
   }
+  // 手下被打倒：王下次行动改成回防命令（ai.js，KING_CFG.hold.cooldown 回合内最多一次）
+  if (isOutlawThugKit(target.kit)) {
+    const king = findKit("outlaw_king", state.units);
+    if (king && !king.dead) { king.resources = king.resources || {}; king.resources.crewDown = true; }
+  }
   if (isOutlawThugKit(target.kit) && typeof mutinyTick === "function") mutinyTick(notes);
 }
 

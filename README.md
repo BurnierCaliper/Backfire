@@ -368,6 +368,15 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **亡命之王：公开处刑改成他回合用的技能；手下被打倒就回防**（作者定，先做进游戏里实际游玩再调；engine.js · `KING_CFG.exec` / `KING_CFG.hold`；enemies.js · `en_king_exec`、`kingCastExecution` / `kingExecutionReady`、`en_king_hold`；ai.js；app.js · `settleEnemyKill`；gm-commands.js、online-gm-ui.js；bestiary.js；tests/king-execution.test.js）
+  - **公开处刑**：不再开场自动倒数。现在是王在自己回合用的技能（1 行动点），标记血量上限最高的人，**两回合后**的敌人回合开始时落下（分段、格挡、擒拿和之前一样）。
+    - AI：没有还没落下的处刑、并且离上次标记已经过了 3 回合（`exec.cooldown`），就会用。
+    - 和齐射撞在同一回合时，处刑往后推一回合。
+  - **回防命令**：手下（狂徒 / 强盗头子）被打倒过，王下次行动就改成回防命令，之后照旧接齐射。**每 3 回合最多一次**（`hold.cooldown`）。
+    - 原来的触发条件（手下分散、王被近身或挨打、身边没人护着）照旧保留，同样受这个冷却限制。
+    - 冷却和「手下被打倒过」的标记记在回防命令本身上，主持人手动放回防也算。
+  - 模拟里这样设大约每场回防 3 次以上、瑞比队很难打；作者决定先按这个设定实际游玩，再根据手感调整。
+
 - **亡命之王：回防命令之后的齐射；召集狂徒改成开场就写着的狂徒援军**（作者定；engine.js · `KING_CFG.volley`；enemies.js · `kingArmVolley` / `kingVolleySpent`、`en_king_hold`；boss-mechanics.js · 新机制「齐射」`volley`；run.js · `OUTLAW_KING_WAVES`、`spawnEncounterRows` 的 `near`、`rollBossEncounter` 带上首领的援军；chain.js · `cancelOnClear`；unit-card.js、game.css、online-view.js、bestiary.js；tests/king-execution.test.js）
   - **齐射**：
     - 王用回防命令时，狂徒们拔枪瞄准**我方每个角色**（武器人不算），角色身上挂橙框和「齐射」标记。
