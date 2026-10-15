@@ -368,6 +368,29 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **工坊第 4 步：制作道具**（作者定，设计见 [docs/workshop-design.md](docs/workshop-design.md) 第 5 节；items.js · `CRAFT_RECIPES` / `CRAFT_RULES` / `craftFailLoss`；rogue-data.js · `ROGUE_CRAFT`；rogue.js · `craftPlace` / `craftList` / `craftOdds` / `craft` / `learnOptions` / `learnRecipe` / `rollRecipeChip`；rogue-commands.js；rogue-ui.js「工坊」面板；tests/crafting.test.js、tests/ui.test.js）
+  - 36 个效果道具都能做，配方照设计文档；材料从队伍背包里扣。
+  - **在哪做**：
+    - 城里（任务板、休整）和工匠节点是工坊，五类都能做；
+    - 休息点只能做投掷罐、弹针、增益 / 减益；场地和自我效果要工作台。
+  - **成功率**：照手册的熟练项检定表（0 级只能做简单，50%）；万事通、种族特长、探索专长的优势 / 重掷照常算。
+  - **打下手**：另一名有对应熟练项的队友帮忙 → 优势（掷两次取好的）；他这次就不能做自己的。
+  - **同时做**：每人做一样，一起开工；时间按最久的那个人算（简单、普通 1 小时，困难 2，极难 3），计入力竭。
+  - **失败**：时间照花；非壳体材料随机丢一半（向上取整），废料、金属不丢。
+  - **金属**：单局里背包没有金属实物时，按参考价 1,000 奎支一份补；失败不扣。
+  - **学配方**：
+    - 简单配方一开始就会；
+    - 其余的向工匠学，每位工匠教一类熟练项（以下对应是我按人设定的，可改，在 `ROGUE_CRAFT.smithProfs`）：
+      - 崔佛 → 机械维修；
+      - 特蕾莎 → 电器维修；
+      - 泽卡尔 → 数据操作；
+      - 季玛 → 巧手；
+      - 摩尔玛 → 科技理论；
+      - 努尔 & 哈米德 → 医疗。
+    - 学费：普通 800，困难 1,500，极难 2,500 奎支；
+    - 打赢精英 25%、首领必定掉配方芯片：直接学会一张还不会的配方，优先队伍里有人能做的。
+  - 联机单局暂时不显示工坊面板；联机同步、跑团主持人工具和拆解放到第 5 步。
+
 - **工坊第 3 步：制作材料与掉落**（作者定；items.js · `CRAFT_MATERIALS` / `CRAFT_DROPS` / `craftClassesOf` / `rollCraftMaterials`；rogue.js · `rollMaterialDrops`；online-rogue.js；trpg-data.js · `HANDBOOK_SHOP`「制作材料（黑市）」；tests/craft-materials.test.js）
   - 7 种材料，放在队伍背包里共用：
     - 废料（壳体）；

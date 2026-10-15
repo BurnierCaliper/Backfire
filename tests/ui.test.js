@@ -1679,3 +1679,21 @@ test("个体值：战斗模板编辑器写血量 / ATK 水平，开战后敌人�
   await page.waitForFunction(() => [...document.querySelectorAll(".unit.foe .u-lv")].some(e => /个体值：血量 \+8% · ATK −6%/.test(e.title)));
   assert.deepEqual(errors, []);
 });
+
+test("单局：任务板上的工坊能制作道具", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await page.click("#t-new");
+  await page.click('.hero-pick[data-kit="kolt"]');
+  await page.click('.hero-pick[data-kit="helu"]');
+  await page.click("#party-go");
+  await page.waitForSelector("#scr-run:not([hidden])");
+  await page.evaluate(() => { bagAdd("cm_scrap", 1); bagAdd("cm_coil", 2); });
+  await page.waitForSelector("#r-craft");
+  await page.click("#r-craft > summary");
+  await page.selectOption('[data-craft-item="kolt"]', "fx_shock");
+  await page.click("#r-craft-go");
+  await page.waitForFunction(() => bagCount("fx_shock") === 1);
+  assert.match(await page.textContent("#run-log"), /电解液罐：成功/);
+  assert.deepEqual(o.errors, []);
+});

@@ -930,6 +930,7 @@ const Rogue = (function () {
       const node = !boss && !ambush ? currentNode(run) : null;
       rollItemDrops(run, boss ? "boss" : node && node.type === "elite" ? "elite" : "battle", notes);
       rollMaterialDrops(run, notes);
+      if (boss || (node && node.type === "elite")) rollRecipeChip(run, boss ? "boss" : "elite", notes);
       // 拾荒者（feats.js，跑团规则）：每个带这张专长的人多掷一次战利品
       const scav = typeof featExploreOk === "function" && featExploreOk() ? featPartyCount(run.party, "scavenger") : 0;
       for (let i = 0; i < scav; i++) { notes.push("拾荒者：又在战场上翻了一遍。"); rollItemDrops(run, "battle", notes); }
@@ -1600,6 +1601,172 @@ const Rogue = (function () {
     return logAll(run, [`用 ${it.points} 积分兑换 ${it.name}（剩 ${b.points} 积分）。`]);
   }
 
+  /* ---------- 制作（items.js · CRAFT_RECIPES / CRAFT_RULES；rogue-data.js · ROGUE_CRAFT）---------- */
+  const CR = () => (typeof ROGUE_CRAFT !== "undefined" ? ROGUE_CRAFT : { smithProfs: {}, learnPrice: {}, chip: {} });
+  const metalPrice = () => ((ROGUE_MATERIALS || {}).metal || {}).price || 1000;
+  /** 现在能在哪做：bench 工坊（城里、工匠节点，五类都能做）/ rest 休息点（场地、自我效果做不了）/ null */
+  function craftPlace(run) {
+    if (!run || run.stage === "over" || run.ambush) return null;
+    if (run.stage === "board" || run.stage === "camp") return "bench";
+    const node = currentNode(run);
+    if (node && node.type === "smith") return "bench";
+    if (node && node.type === "rest") return "rest";
+    return null;
+  }
+  function knowsRecipe(run, id) {
+    const it = typeof craftItem === "function" ? craftItem(id) : null;
+    if (!it) return false;
+    return CRAFT_RULES.knownDiffs.includes(it.diff) || (run.recipes || []).includes(id);
+  }
+  /** 一名角色在某个熟练项上的等级（万事通：没有的视为一级） */
+  function profLevel(h, prof) {
+    let level = Math.min(PROF_MAX, heroProfs(h)[profName(prof)] || 0);
+    if (!level && typeof featHas === "function" && featExploreOk() && featHas(h, "polymath")) level = 1;
+    return level;
+  }
+  /** 制作成功率：手册检定表 × 优劣势（打下手的队友给优势）× 重掷 */
+  function craftOdds(run, kit, itemId, helper) {
+    const it = craftItem(itemId);
+    const h = run.party.find(x => x.kit === kit);
+    if (!it || !h) return null;
+    const level = profLevel(h, it.prof);
+    const v = heroView(run, h);
+    let perks = checkPerksFor(kit, it.prof, v.hp * 2 < v.hpMax);
+    if (typeof featHook === "function") perks = featHook(h, "check", Object.assign({}, perks), { run, prof: it.prof, diff: it.diff, kit, craft: true });
+    const hh = helper ? run.party.find(x => x.kit === helper) : null;
+    const helped = !!(hh && hh.kit !== kit && profLevel(hh, it.prof) > 0);
+    const adv = !!perks.adv || helped, dis = !!perks.dis && !adv;
+    const base = checkChance(it.diff, level);
+    let p = adv ? 1 - (1 - base) * (1 - base) : dis ? base * base : base;
+    if (perks.reroll) p = 1 - (1 - p) * (1 - p);
+    return { kit, item: it.id, prof: it.prof, diff: it.diff, diffName: ROGUE_CHECKS.diffs[it.diff].name, level, base, chance: base ? p : 0,
+      adv, dis, helped, reroll: !!perks.reroll, perkText: perks.text, hours: CRAFT_RULES.hours[it.diff] };
+  }
+  /** 配方一览：[{ id, name, prof, diff, diffName, hours, known, bench, mats: [{ id, name, need, have }], metalKuizhi }] */
+  function craftList(run) {
+    return EFFECT_ITEMS.filter(it => CRAFT_RECIPES[it.id]).map(it => {
+      const rc = CRAFT_RECIPES[it.id];
+      const mats = Object.keys(rc).map(id => ({ id, name: (ITEM_CATALOG[id] || {}).name || id, need: rc[id], have: bagCount(id) }));
+      const metal = mats.find(m => m.id === "mat_metal");
+      return { id: it.id, name: it.name, kind: it.kind, prof: it.prof, diff: it.diff, diffName: ROGUE_CHECKS.diffs[it.diff].name,
+        hours: CRAFT_RULES.hours[it.diff], known: knowsRecipe(run, it.id), bench: CRAFT_RULES.benchKinds.includes(it.kind),
+        learnPrice: CR().learnPrice[it.diff] || 0, mats, metalKuizhi: metal ? Math.max(0, metal.need - metal.have) * metalPrice() : 0 };
+    });
+  }
+  /** 一起开工：jobs = [{ kit, item, helper? }]。大家同时做，花的时间按最久的那个人算。
+   *  材料从队伍背包里扣；单局里没有金属实物时按参考价付奎支。失败：时间照花，非壳体材料损失一半（向上取整） */
+  function craft(run, jobs) {
+    const place = craftPlace(run);
+    if (!place) throw new Error("这里不能制作（城里、工匠处、休息点才行）");
+    jobs = (Array.isArray(jobs) ? jobs : [jobs]).filter(Boolean);
+    if (!jobs.length) throw new Error("没有要做的东西");
+    const busy = new Set();
+    jobs.forEach(j => {
+      const it = craftItem(j.item);
+      if (!it) throw new Error("没有这个配方");
+      const h = run.party.find(x => x.kit === j.kit);
+      if (!h) throw new Error("队伍里没有这名角色");
+      if (busy.has(j.kit)) throw new Error(`${heroName(j.kit)} 同时只能做一样东西`);
+      busy.add(j.kit);
+      if (j.helper) {
+        if (busy.has(j.helper)) throw new Error(`${heroName(j.helper)} 已经在忙了`);
+        const hh = run.party.find(x => x.kit === j.helper);
+        if (!hh) throw new Error("打下手的人不在队伍里");
+        if (!profLevel(hh, it.prof)) throw new Error(`打下手要有「${it.prof}」熟练项`);
+        busy.add(j.helper);
+      }
+      if (!knowsRecipe(run, it.id)) throw new Error(`还不会做${it.name}`);
+      if (place === "rest" && CRAFT_RULES.benchKinds.includes(it.kind)) throw new Error(`${it.name}要在工坊的工作台上做`);
+      if (!craftOdds(run, j.kit, it.id, null).base) throw new Error(`${heroName(j.kit)} 没有「${it.prof}」熟练，做不了${ROGUE_CHECKS.diffs[it.diff].name}配方`);
+    });
+    // 材料够不够（合在一起算）
+    const need = {};
+    jobs.forEach(j => { const rc = CRAFT_RECIPES[j.item]; Object.keys(rc).forEach(id => { need[id] = (need[id] || 0) + rc[id]; }); });
+    const lack = Object.keys(need).filter(id => id !== "mat_metal" && bagCount(id) < need[id]);
+    if (lack.length) throw new Error("材料不够：" + lack.map(id => `${ITEM_CATALOG[id].name} 差 ${need[id] - bagCount(id)}`).join("，"));
+    const metalPay = Math.max(0, (need.mat_metal || 0) - bagCount("mat_metal")) * metalPrice();
+    if (metalPay > (Number(state.kuizhi) || 0)) throw new Error(`金属不够，按参考价补要 ${metalPay} 奎支`);
+    const notes = [];
+    let hours = 0;
+    run.craftNo = (run.craftNo || 0) + 1;
+    jobs.forEach(j => {
+      const it = craftItem(j.item), rc = CRAFT_RECIPES[it.id];
+      const o = craftOdds(run, j.kit, it.id, j.helper);
+      hours = Math.max(hours, o.hours);
+      const r = withRng(`${run.seed}:craft:${run.craftNo}:${j.kit}`, () => {
+        const once = () => {
+          if (o.base >= 1) return true;
+          const a = Math.random() < o.base;
+          if (!o.adv && !o.dis) return a;
+          const b = Math.random() < o.base;
+          return o.adv ? a || b : a && b;
+        };
+        let ok = once();
+        if (!ok && o.reroll) ok = once();
+        return { ok, loss: ok ? null : craftFailLoss(rc) };
+      });
+      const spend = r.ok ? rc : r.loss;
+      const used = [];
+      Object.keys(spend).forEach(id => {
+        let n = spend[id];
+        if (id === "mat_metal") {
+          const fromBag = Math.min(n, bagCount(id));
+          if (fromBag) bagAdd(id, -fromBag);
+          const rest = n - fromBag;
+          if (rest) state.kuizhi = (Number(state.kuizhi) || 0) - rest * metalPrice();
+        } else bagAdd(id, -n);
+        used.push(`${ITEM_CATALOG[id].name}×${n}`);
+      });
+      const who = heroName(j.kit) + (o.helped ? `（${heroName(j.helper)} 打下手）` : "");
+      if (r.ok) {
+        bagAdd(it.id, 1);
+        notes.push(`${who} 制作${it.name}：成功（${Math.round(o.chance * 100)}%）。用掉 ${used.join("、")}。`);
+      } else {
+        notes.push(`${who} 制作${it.name}：失败（${Math.round(o.chance * 100)}%）。损失 ${used.join("、") || "无"}，壳体留着。`);
+      }
+    });
+    notes.push(`制作花了 ${hours} 小时。`);
+    passHours(run, hours, notes);
+    return logAll(run, notes);
+  }
+  /** 向在场的工匠学配方：只教自己那一类熟练项的，简单配方本来就会 */
+  function learnOptions(run) {
+    const out = [];
+    presentSmiths(run).forEach(sid => {
+      const prof = CR().smithProfs[sid];
+      if (!prof) return;
+      EFFECT_ITEMS.filter(it => it.prof === prof && CRAFT_RECIPES[it.id] && !knowsRecipe(run, it.id)).forEach(it =>
+        out.push({ smith: sid, smithName: (smithById(sid) || {}).name || sid, item: it.id, name: it.name, prof, diff: it.diff,
+          diffName: ROGUE_CHECKS.diffs[it.diff].name, price: CR().learnPrice[it.diff] || 0 }));
+    });
+    return out;
+  }
+  function learnRecipe(run, itemId, smithId) {
+    const o = learnOptions(run).find(x => x.item === itemId && (!smithId || x.smith === smithId));
+    if (!o) throw new Error("这里没有人教这张配方");
+    if ((Number(state.kuizhi) || 0) < o.price) throw new Error(`奎支不够（要 ${o.price}）`);
+    state.kuizhi = (Number(state.kuizhi) || 0) - o.price;
+    run.recipes = (run.recipes || []).concat([itemId]);
+    return logAll(run, [`向${o.smithName}学会了${o.name}的配方（${o.diffName} · ${o.prof}），花 ${o.price} 奎支。`]);
+  }
+  /** 打赢精英 / 首领：按概率掉一张配方芯片，学会一张还不会的配方（优先队伍里有人能做的熟练项） */
+  function rollRecipeChip(run, kind, notes) {
+    const p = CR().chip[kind] || 0;
+    if (!(p > 0) || typeof CRAFT_RECIPES === "undefined") return;
+    const key = `${run.seed}:chip:${run.act}:${run.taskNo}:${run.task ? run.task.index : "b"}:${run.day}:${(run.chipNo = (run.chipNo || 0) + 1)}`;
+    const id = withRng(key, () => {
+      if (Math.random() >= p) return null;
+      const left = EFFECT_ITEMS.filter(it => CRAFT_RECIPES[it.id] && !knowsRecipe(run, it.id));
+      if (!left.length) return null;
+      const good = left.filter(it => run.party.some(h => profLevel(h, it.prof) > 0));
+      return pick(good.length ? good : left).id;
+    });
+    if (!id) return;
+    run.recipes = (run.recipes || []).concat([id]);
+    const it = craftItem(id);
+    notes.push(`配方芯片：学会了${it.name}的配方（${ROGUE_CHECKS.diffs[it.diff].name} · ${it.prof}）。`);
+  }
+
   /* ---------- 工匠 ---------- */
   /** 升到某一级的报价（rogue-data.js · ROGUE_SMITH.recipe × 材料价 + 加工费，再按工匠的收费规则）。
    *  smithId 不给时按标准价算。返回 { cost, hours, mats, labor } 或 null（没有这一级） */
@@ -2194,7 +2361,7 @@ const Rogue = (function () {
     role2Options, soloBattleInfo,
     restPlan, restOptions, canLongRest, sheetData, armoryData, lowHpWarning, escortInfo, partOffers, buyPart, sellPart, canSellParts, partStock, partSellPrice, partInstallCost, installPart, removePart, restAtNode, leaveNode, canShortRestBefore, shortRestBeforeNode,
     ambushChance, watchOptions,
-    buy, shopPoints, redeemList, redeem,  canShop, shopItemName, shopStock, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
+    buy, shopPoints, redeemList, redeem, craftPlace, craftList, craftOdds, craft, knowsRecipe, learnOptions, learnRecipe, rollRecipeChip,  canShop, shopItemName, shopStock, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
     presentSmiths, smithInfo, claimBlueprint, installBlueprint, blueprintById, weaponModsOf,
     smithQuote, introduceSmith,
     canClinic, cyberInfo, cyberPreview, cyberCost, modifyHero, healCost, healHero,

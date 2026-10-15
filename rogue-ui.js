@@ -278,12 +278,14 @@
       <p class="r-hint">长线养成：没有主线和期限，任务随便接。敌人等级跟着队伍平均等级走；团灭只算任务失败，角色不会永久死亡。</p>
       <div class="task-list">${(run.board || []).map((t, i) => taskCard(t, i)).join("")}</div>
       ${renderGrowth()}
-      ${renderSmiths()}`;
+      ${renderSmiths()}
+      ${craftPanel()}`;
     }
     return `<h2>任务板</h2>
       <p class="r-hint">主线开幕就已接下，要在本幕天数用完之前完成，否则本局结束。本幕的天数用完时迎战首领；主线完成后剩下的日子可以继续做支线。支线只写了大致目标、时间、报酬和补给，天数够才能接。</p>
       <div class="task-list">${run.main && !run.main.done ? taskCard(run.main, "main") : ""}${(run.board || []).map((t, i) => taskCard(t, i)).join("")}</div>
-      ${renderSmiths()}`;
+      ${renderSmiths()}
+      ${craftPanel()}`;
   }
 
   /* ---------- 任务节点 ---------- */
@@ -366,7 +368,8 @@
             <small>${wakeHtml(C.hours.longRest)} · ${plan.ok ? `消耗 ${plan.water} ml 水、${esc(food)}` : "补给不足：" + esc(plan.lack.join("，"))} · 血量回满、耐久回满、武器人痊愈、清空力竭</small></button>
           <button class="g-btn" id="r-short">短休 ${C.hours.shortRest} 小时<small>${wakeHtml(C.hours.shortRest, "休息到")} · 不消耗补给 · 每人回复 等级×2+体质 · 一天两次</small></button>
           <button class="g-btn" id="r-rest-skip">不休息，直接离开<small>获得 ${C.restSkipKuizhi} 奎支 · 不花时间</small></button>
-        </div>`;
+        </div>
+        ${craftPanel()}`;
     },
     shop: () => `<p>路边有个摊子。手里有 ${money()} 奎支。</p>
         ${shopList()}
@@ -380,6 +383,7 @@
         ${installRows(id)}
         ${partRows(id)}
         ${repairRows()}
+        ${craftPanel()}
         <button class="g-btn r-main" id="r-leave">离开</button>`;
     },
     clinic: () => `<p>一家小诊所。手里有 ${money()} 奎支。</p>
@@ -387,6 +391,44 @@
         <button class="g-btn r-main" id="r-leave">离开</button>`,
     check: () => checkPanel()
   };
+
+  /* ---------- 工坊：制作道具、学配方（rogue.js · craft / learnRecipe）。联机同步留到工坊第 5 步 ---------- */
+  let craftOpen = false;
+  function craftPanel() {
+    if (online() || typeof CRAFT_RECIPES === "undefined") return "";
+    const place = query("craftPlace");
+    if (!place) return "";
+    const list = query("craftList");
+    const learn = query("learnOptions");
+    const here = list.filter(r => r.known && (place === "bench" || !r.bench));
+    const heroes = run.party.filter(h => !h.dead);
+    const matIds = ["cm_scrap", "cm_chem", "cm_gas", "cm_coil", "cm_cell", "cm_scale", "cm_spirit", "mat_metal"];
+    const stock = matIds.map(id => `${esc((ITEM_CATALOG[id] || {}).name || id)} ${bagCountOf(id)}`).join(" · ");
+    const rows = heroes.map(h => {
+      const opts = here.map(r => {
+        const o = query("craftOdds", { kit: h.kit, item: r.id });
+        return o && o.base ? `<option value="${esc(r.id)}">${esc(r.name)} · ${esc(r.prof)}${esc(r.diffName)} · ${pctText(o.chance)} · ${r.hours} 小时</option>` : "";
+      }).join("");
+      const helpers = heroes.filter(x => x.kit !== h.kit).map(x => `<option value="${esc(x.kit)}">${esc(Rogue.heroName(x.kit))} 打下手</option>`).join("");
+      return `<div class="shop-row"><b>${esc(Rogue.heroName(h.kit))}</b>
+        <select data-craft-item="${esc(h.kit)}"><option value="">不做</option>${opts}</select>
+        <select data-craft-help="${esc(h.kit)}"><option value="">没人帮</option>${helpers}</select></div>`;
+    }).join("");
+    const recipeRows = list.map(r => {
+      const mats = r.mats.map(m => `${esc(m.name)} ${m.have}/${m.need}`).join("、");
+      const lo = learn.find(x => x.item === r.id);
+      const tail = r.known ? (place === "rest" && r.bench ? "要工作台" : "会做")
+        : lo ? `<button class="g-btn" data-learn="${esc(r.id)}" data-smith="${esc(lo.smith)}" ${money() < lo.price ? "disabled" : ""}>向${esc(lo.smithName)}学 · ${lo.price} 奎支</button>` : "还不会";
+      return `<li>${esc(r.name)} · ${esc(r.prof)} · ${esc(r.diffName)} · ${r.hours} 小时 · ${mats}${r.metalKuizhi ? `（缺的金属按 ${r.metalKuizhi} 奎支补）` : ""} · ${tail}</li>`;
+    }).join("");
+    return `<details class="r-craft" id="r-craft" ${craftOpen ? "open" : ""}><summary>工坊：制作道具（${place === "bench" ? "工作台：五类都能做" : "休息点：场地、自我效果做不了"}）</summary>
+      <p class="r-hint">每人同时做一样，时间按最久的那个人算，计入力竭。成功率照熟练项检定表；有对应熟练项的队友可以打下手给优势，但他这段时间不能做自己的。失败时材料丢一半（向上取整），废料和金属留着。</p>
+      <p class="r-hint">材料：${stock}</p>
+      ${here.length ? rows + `<button class="g-btn r-main" id="r-craft-go">开工</button>` : `<p class="r-hint">这里没有会做的配方。</p>`}
+      <details><summary>全部配方</summary><ul class="r-recipes">${recipeRows}</ul></details>
+    </details>`;
+  }
+  function bagCountOf(id) { return typeof bagCount === "function" ? bagCount(id) : 0; }
 
   /* ---------- 熟练项检定（事件内容占位） ---------- */
   const LV_TEXT = ["没有熟练", "一级熟练", "二级熟练", "三级熟练"];
@@ -670,6 +712,7 @@
             : `长休需要 ${plan.water} ml 水、${esc(food)}。补给不足（` + esc(plan.lack.join("，")) + "），只能硬撑着过夜：不回血，力竭继续累积。"}</p>
           ${shopping}
           ${clinic}
+          ${craftPanel()}
           ${restPlanner()}
           <button class="g-btn r-main" id="r-camp">休整<small>${wakeHtml(C.hours.longRest)} · ${plan.ok ? `消耗 ${plan.water} ml 水、${esc(food)}` : "补给不足：不回血"}</small></button>`;
       }
@@ -809,6 +852,19 @@
       };
     });
     body.querySelectorAll("[data-buy]").forEach(b => { b.onclick = () => { if (window.Sfx) Sfx.ui("coin"); act({ action: "buy", key: b.dataset.buy, qty: 1 }); }; });
+    const cp = $("r-craft");
+    if (cp) cp.addEventListener("toggle", () => { craftOpen = cp.open; });
+    body.querySelectorAll("[data-learn]").forEach(b => { b.onclick = () => act({ action: "learnRecipe", item: b.dataset.learn, smith: b.dataset.smith }); });
+    on("r-craft-go", () => {
+      const jobs = [];
+      body.querySelectorAll("[data-craft-item]").forEach(sel => {
+        if (!sel.value) return;
+        const help = body.querySelector(`[data-craft-help="${sel.dataset.craftItem}"]`);
+        jobs.push({ kit: sel.dataset.craftItem, item: sel.value, helper: (help && help.value) || null });
+      });
+      if (!jobs.length) { lastError = "先给至少一个人选要做的东西"; render(); return; }
+      act({ action: "craft", jobs });
+    });
     body.querySelectorAll("[data-redeem]").forEach(b => { b.onclick = () => { if (window.Sfx) Sfx.ui("coin"); act({ action: "redeem", item: b.dataset.redeem }); }; });
     body.querySelectorAll("[data-upgrade]").forEach(b => { b.onclick = () => act({ action: "upgradeWeapon", kit: b.dataset.upgrade, smith: b.dataset.smith }); });
     body.querySelectorAll("[data-intro]").forEach(b => { b.onclick = () => act({ action: "introduceSmith", smith: b.dataset.intro }); });

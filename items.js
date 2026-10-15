@@ -135,6 +135,56 @@ function rollCraftMaterials(u) {
   return Object.keys(out).map(id => ({ id, qty: out[id] }));
 }
 
+/* ===== 制作配方（docs/workshop-design.md 第 3、5 节）=====
+ * 键是道具 id，值是 { 材料 id: 份数 }。mat_metal 是结构材料「金属」（单局里没有实物时按参考价付奎支）。
+ * 难度、熟练项读 EFFECT_ITEMS 上的 prof / diff */
+const CRAFT_RECIPES = (() => {
+  const S = "cm_scrap", CH = "cm_chem", GA = "cm_gas", CO = "cm_coil", CE = "cm_cell", SC = "cm_scale", SP = "cm_spirit", ME = "mat_metal";
+  return {
+  fx_burn: { [S]: 1, [GA]: 1, [CH]: 1 },   fx_corr: { [S]: 1, [CH]: 2 },          fx_shock: { [S]: 1, [CO]: 2 },
+  fx_high: { [S]: 1, [CE]: 1, [CO]: 1 },   fx_quake: { [S]: 2, [CO]: 1 },         fx_frost: { [S]: 1, [CH]: 1, [CE]: 1 },
+  fx_reso: { [S]: 1, [CE]: 2 },
+  fx_melt: { [S]: 2, [GA]: 1, [CH]: 1 },   fx_neutral: { [S]: 1, [CH]: 2, [SC]: 1 }, fx_overload: { [S]: 2, [CE]: 1, [CO]: 1 },
+  fx_spread: { [S]: 2, [CE]: 1, [GA]: 1 }, fx_shift: { [S]: 3, [CE]: 1 },         fx_sting: { [S]: 2, [CE]: 1, [CH]: 1 },
+  fx_refract: { [S]: 2, [CE]: 2 },
+  fx_trip: { [S]: 2, [CO]: 1 },            fx_beacon: { [S]: 1, [CO]: 2 },        fx_calm: { [SC]: 1, [CH]: 1, [S]: 1 },
+  fx_rouse: { [SP]: 1, [CE]: 1, [S]: 1 },  fx_weak: { [SP]: 1, [CH]: 1, [S]: 1 }, fx_smoke: { [S]: 1, [CH]: 2 },
+  fx_scope: { [S]: 1, [CO]: 1, [CE]: 1 },  fx_flash: { [S]: 1, [GA]: 1, [CE]: 1 },
+  fx_f_fire: { [S]: 3, [GA]: 2 },          fx_f_electric: { [S]: 3, [CE]: 1, [CO]: 2 }, fx_f_acid: { [S]: 3, [GA]: 1, [CH]: 2 },
+  fx_f_heal: { [S]: 3, [SP]: 2 },          fx_f_ice: { [S]: 3, [CE]: 1, [CH]: 2 }, fx_f_harmonic: { [S]: 3, [CE]: 3 },
+  fx_f_energy: { [S]: 3, [CE]: 2, [CO]: 1 },
+  fx_s_burn: { [ME]: 1, [SP]: 1, [GA]: 2 },        fx_s_conductor: { [ME]: 1, [SP]: 1, [CE]: 1, [CO]: 2 },
+  fx_s_anchor: { [ME]: 2, [SP]: 1, [CE]: 1 },      fx_s_frost: { [ME]: 1, [SP]: 1, [CE]: 1, [CH]: 2 },
+  fx_s_splash: { [ME]: 1, [SP]: 1, [GA]: 1, [CH]: 2 }, fx_s_store: { [ME]: 1, [SP]: 1, [CE]: 2 },
+  fx_s_doppler: { [ME]: 1, [SP]: 1, [CE]: 2, [CO]: 1 }
+  };
+})();
+/* 制作规则：
+ *   hours     每档难度花几小时（计入距上次长休）
+ *   failLoss  失败时损失非壳体材料的比例（向上取整）；shells 是壳体，失败不损失
+ *   benchKinds 要工作台（工坊）才能做的道具类别；休息点只能做其余的
+ *   knownDiffs 一开始就会的难度 */
+const CRAFT_RULES = {
+  hours: { easy: 1, normal: 1, hard: 2, extreme: 3 },
+  failLoss: 0.5,
+  shells: ["cm_scrap", "mat_metal"],
+  benchKinds: ["field", "self"],
+  knownDiffs: ["easy"]
+};
+function craftItem(id) { return EFFECT_ITEMS.find(it => it.id === id && CRAFT_RECIPES[id]) || null; }
+/** 失败时损失哪些材料：非壳体材料摊开成一份一份，用调用方装好的随机数挑 ceil(总份数 × failLoss) 份 → { id: 份数 } */
+function craftFailLoss(recipe) {
+  const pool = [];
+  Object.keys(recipe).forEach(id => { if (!CRAFT_RULES.shells.includes(id)) for (let i = 0; i < recipe[id]; i++) pool.push(id); });
+  let n = Math.ceil(pool.length * CRAFT_RULES.failLoss);
+  const out = {};
+  while (n-- > 0 && pool.length) {
+    const id = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
+    out[id] = (out[id] || 0) + 1;
+  }
+  return out;
+}
+
 /* 武器改装件也放在背包里（growth.js 的 WEAPON_PARTS，物品 id = part_改装件id） */
 function registerWeaponPartItems() {
   if (typeof WEAPON_PARTS === "undefined") return;
