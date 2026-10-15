@@ -194,26 +194,24 @@ function kingExecutionGrab(king, m, notes) {
   if (Math.random() < KING_CFG.exec.grab) { t.stunned = true; notes.push(`${boss.name} 擒拿 ${t.name} 成功：失去下回合行动。`); }
   else notes.push(`${boss.name} 擒拿 ${t.name} 失败。`);
 }
-/** 召集狂徒：回合开始时手下不够就补一个（KING_CFG.rally） */
-function kingRally(king, notes) {
-  if (!king || king.dead || king.hidden || (king.resources && king.resources.hostage)) return;
-  const R = KING_CFG.rally;
-  const crew = (state.units || []).filter(u => isOutlawThug(u) && !(u.resources && u.resources.mutinied));
-  if (crew.length >= R.min || crew.length >= R.cap) return;
-  king.resources = king.resources || {};
+/** 回防命令之后的齐射：标记我方每个角色，下一个敌人回合开始时王各开一枪（KING_CFG.volley） */
+function kingArmVolley(king, lines) {
+  if (!king || typeof addBossMechanic !== "function") return;
+  if (king.mechanics) king.mechanics = king.mechanics.filter(m => !(m.kingVolley && m.st && m.st.done));
+  if ((king.mechanics || []).some(m => m.kingVolley)) return;   // 上一轮还没打出去
   const turn = Number(state.turnNo) || 1;
-  if (king.resources.rallyTurn != null && turn - Number(king.resources.rallyTurn) < R.every) return;
-  king.resources.rallyTurn = turn;
-  const n = Number(king.resources.rallyCount) || 0;
-  const kind = n % 2 === 0 ? "thug_knife" : "thug_hammer";
-  king.resources.rallyCount = n + 1;
-  const p = enemyPresets().find(x => x.id === kind);
-  if (!p) return;
-  const t = typeof applyEnemyIV === "function" ? applyEnemyIV(p.build(king.level, state.partySize)) : p.build(king.level, state.partySize);
-  t.zone = king.zone;
-  state.units.push(t);
-  if (typeof refreshEnemyEconomy === "function") refreshEnemyEconomy(t);
-  notes.push(`${king.name} 召集狂徒：${t.name} 赶到 ${t.zone} 区（手下 ${crew.length + 1} 个）。`);
+  addBossMechanic(king, { type: "volley", kingVolley: true, name: "齐射", element: "physical", phase: "enemy",
+    firstTurn: turn, turns: 1, then: "once", shot: Object.assign({}, KING_CFG.volley), hook: "kingVolleySpent" });
+  if (typeof bossMechSync === "function") bossMechSync(lines);
+  // 和公开处刑撞在同一回合：处刑往后推一回合（不然一回合开头连挨处刑和齐射）
+  const ex = (king.mechanics || []).find(m => m.kingExec && m.st && !m.st.done && m.st.due === turn + 1);
+  if (ex) { ex.st.due += 1; lines.push(`公开处刑让位给齐射，推迟到第 ${ex.st.due} 回合。`); }
+}
+/** 齐射打完：用掉王这一回合的行动点（敌人回合开始时结算，行动点在之后刷新，所以记成「这回合失去行动点」） */
+function kingVolleySpent(king, m, notes) {
+  if (!king || king.dead) return;
+  king.loseApNext = true;
+  notes.push(`${king.name} 这一回合的行动点用在了齐射上。`);
 }
 
 /** 攻击命令指定的目标：所有狂徒改打此人（目标倒下或王被挟持 / 死亡后失效） */
@@ -1649,6 +1647,8 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
     } else {
       lines.push("身边已经没有狂徒可以回防，废铁墙没能筑起来。");
     }
+    // 回防之后：狂徒们拔枪，下一个敌人回合开始时王朝我方每人各开一枪（齐射，KING_CFG.volley）
+    kingArmVolley(a, lines);
     // 电击霰弹：另一区全员 (atk + 1d8) ÷ 2 电击（README 的写法）。范围攻击，不能格挡；
     // 打离他距离 1 的一区（三区里有两个时打人多的那个），不会隔着两区打
     const shotZone = zoneNeighbors(a.zone).map(Number)

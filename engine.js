@@ -1579,11 +1579,13 @@ const AGG_CANNON = {
  *    第一刀是王自己：kingMult × atk + 1d(kingDie 随等级升档) 酸；之后每个还站着的手下（狂徒 / 强盗头子）各补一刀：
  *    crewMult × 自己的 atk + 1d(crewDie 随等级升档)。每一刀都可以协助格挡——先清掉手下，处刑就轻。
  *    落下后强盗头子还在：grab 概率擒拿，目标失去下回合行动。王被挟持（哗变）时推迟。
- *  rally · 召集狂徒：手下少于 min 个时，每 every 回合在王身边补一个狂徒（匕首 / 锤轮流），手下最多 cap 个。
+ *  volley · 齐射（回防命令之后）：回防时标记我方每个角色，下一个敌人回合开始时王朝每人各开一枪（mult × atk + 1d(diceS)，物理，
+ *    baseBreak 击破，每枪都能协助格挡）。开枪用掉王那一回合的行动点。和公开处刑撞在同一回合时，处刑往后推一回合。
+ *  援军：首领战开场就写着狂徒援军要赶来（run.js · ENEMY_INFO.outlaw_king.waves，chain.js）；场上敌人全灭、战斗结束就不来了。
  *  攻击命令 / 处死命令的骰子随等级升档（每 5 级一档，和杂兵一样）。 */
 const KING_CFG = {
   exec: { firstTurn: 1, turns: 3, interval: 3, kingMult: 1.5, kingDie: 6, crewMult: 1, crewDie: 6, grab: 0.5 },
-  rally: { min: 2, every: 2, cap: 3 }
+  volley: { mult: 1, diceS: 8, baseBreak: 2 }
 };
 
 /** 沙灵聚合体一阶段 · 沙尘爆裂（作者定：「远离」首领机制）：开场标记我方全员，turns 回合后在敌人回合开始时

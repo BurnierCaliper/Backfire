@@ -49,7 +49,7 @@
     if (typeof v !== "string") return "";
     return v.split(" · ").map(t => text(t.trim(), 48)).filter(t => t && t !== "无状态").slice(0, max).join(" · ");
   }
-  const mechTypes = ["execution", "share", "spread", "tower"], phases = ["enemy", "player"];
+  const mechTypes = ["execution", "share", "spread", "tower", "volley"], phases = ["enemy", "player"];
   function markDto(m, strings, numbers, booleans) {
     if (!obj(m)) return null;
     const o = {}; enumField(m, o, "type", mechTypes); if (!o.type) return null;
@@ -75,7 +75,7 @@
         const name = text(call("weaponName", kit), 40); if (name) d.dur.name = name;
       }
     }
-    const marks = arr(call("bossMarksOn", unit)).slice(0, 8).map(m => markDto(m, ["name", "by"], ["left", "pool", "group", "blast", "stack"], ["delayed"])).filter(Boolean);
+    const marks = arr(call("bossMarksOn", unit)).slice(0, 8).map(m => markDto(m, ["name", "by", "shot"], ["left", "pool", "group", "blast", "stack", "brk", "mates"], ["delayed"])).filter(Boolean);
     if (marks.length) d.marks = marks;
     const casts = arr(call("bossCastsBy", unit)).slice(0, 8).map(m => markDto(m, ["name", "target"], ["left"], [])).filter(Boolean);
     if (casts.length) d.casts = casts;
@@ -136,7 +136,7 @@
     enumField(r, out.resources, "bit", ["acid", "drill"]);
     identifiers(r, out.resources, ["bondId", "piercedId"]);
     // 首领机制（死刑 / 分担 / 远离 / 踩塔）是公开的预告：只给标记目标、落下回合和时机，不给伤害数值
-    const mech = arr(get(unit, "mechanics")).slice(0, 8).filter(m => obj(m) && ["execution", "share", "spread", "tower"].includes(get(m, "type"))).map(m => {
+    const mech = arr(get(unit, "mechanics")).slice(0, 8).filter(m => obj(m) && ["execution", "share", "spread", "tower", "volley"].includes(get(m, "type"))).map(m => {
       const dto = { type: get(m, "type") }; copyFields(m, dto, ["name"], ["need", "count"], []); enumField(m, dto, "phase", ["enemy", "player"]);
       const st = get(m, "st"); dto.st = copyFields(st, {}, [], ["due"], ["done"]); identifiers(st, dto.st, ["targetId"]);
       const ids = arr(get(st, "targetIds")).slice(0, 20).map(id).filter(Boolean); if (ids.length) dto.st.targetIds = ids;

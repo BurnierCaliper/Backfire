@@ -1777,7 +1777,6 @@ function beginRound(notes) {
       if (u.resources.fuse <= 0) notes.push(`${u.name} 引信已到，请点「引爆」。`);
       else notes.push(`${u.name} 引信 ${u.resources.fuse} 回合后自爆。`);
     }
-    if (u.kit === "outlaw_king" && typeof kingRally === "function") kingRally(u, notes);
     if (u.kit === "ufo_body" && !u.dead) {
       const n = ufoLivingLegs(u).length;
       notes.push(`${u.name} 剩余机械足 ${n}。`);

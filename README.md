@@ -368,6 +368,20 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **亡命之王：回防命令之后的齐射；召集狂徒改成开场就写着的狂徒援军**（作者定；engine.js · `KING_CFG.volley`；enemies.js · `kingArmVolley` / `kingVolleySpent`、`en_king_hold`；boss-mechanics.js · 新机制「齐射」`volley`；run.js · `OUTLAW_KING_WAVES`、`spawnEncounterRows` 的 `near`、`rollBossEncounter` 带上首领的援军；chain.js · `cancelOnClear`；unit-card.js、game.css、online-view.js、bestiary.js；tests/king-execution.test.js）
+  - **齐射**：
+    - 王用回防命令时，狂徒们拔枪瞄准**我方每个角色**（武器人不算），角色身上挂橙框和「齐射」标记。
+    - 下一个敌人回合开始时，王朝每个还站着的被瞄准者各开一枪：atk + 1d8，物理，2 击破。枪数固定等于角色人数。
+    - 每一枪都能协助格挡。要站在一起、留着附赠动作互相挡。
+    - 开枪用掉王这一回合的行动点，不占用其他单位的行动点。
+    - 和公开处刑撞在同一回合时，处刑往后推一回合。上一轮还没打出去，就不重复挂。
+  - **狂徒援军**（代替上一版的「召集狂徒」）：
+    - 首领战开场就写着援军要赶来：第 3、6 回合各来匕首、锤狂徒一个，都是杂兵，跟着王进场（`near`）。用的是现有的连续战斗 / 援军机制，顶上有倒计时。
+    - **场上的敌人全灭、战斗结束，援军就不来了**：援军新增 `cancelOnClear` 选项。普通援军照旧，敌人全灭时提前到下一回合抵达。
+    - 固定分数线照援军规则，每一波 ×1.2。
+  - **首领机制「齐射」**（boss-mechanics.js，所有首领都能用）：标记我方每个角色，到时首领各开一枪（`shot: { mult, diceS, baseBreak }`），每枪可格挡。选法 `heroes` 表示全员但不含武器人。
+  - **公开处刑的分段**：说明里写清楚，手下补刀算的是落下那一刻还站着的手下，援军赶到的狂徒也算。
+
 - **首领强化：沙灵聚合体、亡命之王用上首领机制**（作者定方向；engine.js · `AGG_CANNON` / `AGG_SPREAD` / `AGG_HP_MULT` / `KING_CFG`；enemies.js · `aggArmCannon` / `aggArmSpread` / `aggOverheat` / `kingArmExecution` / `kingExecutionHits` / `kingRally`；boss-mechanics.js；ai.js；bestiary.js；tests/aggregate-cannon.test.js、tests/king-execution.test.js）。
   - **为什么改**：终局模拟里飞碟能打死人，另外两个几乎打不痛。拆开看有三个原因：
     - 这两个首领的攻击全是单体，一回合一下，正好被协助格挡和坦克吃掉（亡命之王 83%、沙灵聚合体 90% 的出手是 0 伤害）。
@@ -382,7 +396,7 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
     - 三层血量 ×1.5（`AGG_HP_MULT`），让机制有时间放出来。
   - **亡命之王**：
     - **公开处刑**（死刑机制）：开场锁定血量上限最高的人，第 4 回合敌人回合开始时落下，之后每 3 回合一次。王先砍一刀（1.5×atk + 1d6 酸，骰子随等级升档），每个还站着的手下再各补一刀（自己的 atk + 1d6）。每一刀都能协助格挡——先清掉手下，处刑就轻。落下后强盗头子还在就 50% 擒拿（目标失去下回合行动）。王被挟持时推迟。
-    - **召集狂徒**：手下（狂徒 + 强盗头子）不到 2 个时，每 2 回合在王身边补一个狂徒（匕首 / 锤轮流）。
+    - ~~召集狂徒~~（已改成开场就写着的狂徒援军，见上一条）。
     - 攻击命令 / 处死命令的骰子随等级升档（每 5 级一档，和杂兵一样；20 级是 1d12 / 1d20）。
   - **死刑机制扩展**（boss-mechanics.js，所有首领都能用）：
     - 每段可以带骰子（`diceS`）、由别的单位出手（`byId`）。

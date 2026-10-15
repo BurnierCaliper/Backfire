@@ -76,9 +76,6 @@ test("首领和 10 级起精英的架势是原来的 60%（四舍五入），人
 test("首领失衡和普通失衡一样（协助攻击、失衡分），只是记晕眩标记：没攒满 2 个立刻恢复架势、照常行动；攒满才跳过回合", () => {
   const { c, st } = field(["ruby", "kolt"], [{ id: "outlaw_king", lv: 1, zone: 2 }]);
   const king = st.units.find(u => u.kit === "outlaw_king");
-  // 这条只看晕眩标记：撤掉开场召集来的狂徒（会替王挨打），并且不再召集
-  st.units = st.units.filter(u => !/^thug_/.test(u.kit || ""));
-  king.resources.rallyTurn = Infinity;
   const ruby = c.findKit("ruby", st.units);
   ruby.zone = 1;
   // 第一次失衡：用瑞比的普通攻击打空架势
