@@ -113,11 +113,18 @@ test("联机单局：房主选队伍、分角色；开局的钱平分进各人�
   assert.equal(await host.evaluate(() => JSON.stringify([RunFlow.current().task.index, RunFlow.current().task.nodes])), stageBefore);
   // Bob 不能替瑞比选
   const choice = (await rogueView(alice)).choice;
+  assert.equal(choice.more, 0, "玩家界面也知道后面还有几项待选");
   assert.equal((await submit(bob, { type: "rogue.act", command: { action: "choose", kit: "ruby", index: choice.index, value: choice.options[0].value } })).ok, false);
   await alice.click('#online-stage [data-online="rogueAct"]');
   await host.waitForFunction(() => !Rogue.pendingChoices(RunFlow.current()).length);
   // 选完了：人早就投齐，马上按票数结算
   await host.waitForFunction(s => JSON.stringify([RunFlow.current().task.index, RunFlow.current().task.nodes]) !== s || Screens.is("battle"), stageBefore);
+  // 掉线：Bob 操控的结人还有待选升级，Bob 掉线以后不再卡全队（回来照样能选）
+  if (await host.evaluate(() => Screens.is("battle"))) { assert.deepEqual(f.errors, []); return; }
+  await host.evaluate(() => { RunFlow.current().party.find(h => h.kit === "yuito").pending = [{ type: "attr", level: 2, noRepeat: false }]; OnlineRogue.changed(); });
+  assert.match(await host.evaluate(() => OnlineRogue.blocker()), /等 结人 选完升级/);
+  await bob.close();
+  await host.waitForFunction(() => OnlineRogue.blocker() === "", null, { timeout: 30000 });
   assert.deepEqual(f.errors, []);
 });
 

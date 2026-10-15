@@ -57,3 +57,23 @@ test("选区攻击（榴弹）被牵制时只能选牵制者所在的区：AI �
   assert.match(t.st.logPages.flatMap(p => p.lines).map(l => l.text).join("\n"), /被 柯尔特 牵制：落点只能选 1 区/);
   assert.ok(logs());
 });
+
+test("高压巡逻艇被牵制在同区：电弧扫射抵近打自己所在的区（×0.6），感电先给牵制者", () => {
+  const { c, st, tou, a, logs } = field("patrolboat");
+  st.combatPhase = "enemy"; c.refreshEnemyEconomy(a);
+  const p = c.EnemyAI.plan(a);
+  assert.match(p.meta.skillName, /电弧扫射/);
+  p.thunk(); c.BattleSim.resolveQueues(noBlock);
+  assert.match(logs(), /电弧扫射抵近打自己所在的 2 区/);
+  assert.equal(tou.statuses.shock, true);
+});
+
+test("已经标定好的榴弹 / 大酸液弹：被牵制时落点不在牵制者所在的区，发射改成重新标定", () => {
+  const { c, st, a, tou, logs } = field("mecha_gl", { zoneMode: 3 });
+  Object.assign(a.resources, { glZone: 1, glPending: true, glReady: true });
+  st.combatPhase = "enemy"; a.ap = 1; st.attackerId = a.id; st.targetId = tou.id;
+  c.runSkill("en_gl_fire");
+  assert.equal(a.resources.glZone, 2);
+  assert.equal(a.resources.glReady, false, "下个敌人回合才发射");
+  assert.match(logs(), /放弃原来的 1 区，榴弹重新标定在 2 区/);
+});

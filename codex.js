@@ -169,7 +169,7 @@ const HERO_CODEX = {
   hiaki: { stars: 4, intro: "双刀剑客，火属性大太刀【丹生谷】和冰属性打刀【鳴門】可以随时切换，也能把其中一把分出去变成武器人并肩作战。技能会随拔刀、居合、胁构三种刀势派生出不同效果。顺好刀势的节奏后，输出和格挡都很强。" },
   tou: { stars: 2, intro: "站在最前面的盾。「决一死战」逼同区唯一的敌人只能打他，而且伤害骰取最低；圣盾点每回合自动回复，挨打时消耗一点就能把伤害减半。规则直白，站好位置就能发挥作用，最适合新手。" },
   xia: { stars: 3, intro: "开着引擎往前冲的近战。拉响引擎后多数技能都会变强，但一回合不攻击引擎就会熄火，所以要一直保持进攻。濒死起身后引擎总是开着，越到绝境越凶。被动升级后加入燃油槽，火属性伤害的爆发会更高，玩法也稍微复杂一些。" },
-  chuan: { stars: 3, intro: "攻守兼备的电工。用技能积攒电能，再换成铁壁、电站超频这类强力技能。他施加的护盾被打破时，会把同区敌人全部推到另一区并造成击破，可以用来解围或者控场。需要规划电能怎么花、护盾放在哪里。" },
+  chuan: { stars: 3, fullName: "哈雷 川川 托马斯", intro: "攻守兼备的电工。用技能积攒电能，再换成铁壁、电站超频这类强力技能。他施加的护盾被打破时，会把同区敌人全部推到另一区并造成击破，可以用来解围或者控场。需要规划电能怎么花、护盾放在哪里。" },
   nora: { stars: 4, intro: "拿着注射器的远程冰属性辅助。武器系统在温和和残忍两种状态之间随机切换，同一个技能在两种状态下效果不同。针尖留在敌人身上会形成「刺入」，配合冷气注射打出额外的冰伤。状态不由自己决定，要临场应变。" },
   kolt: { stars: 2, intro: "爱出风头的改装狂。电钻（电）和酸液炮（酸）两种刀头可以随时更换，换刀头时顺手打一下同区敌人。他打过的敌人都会被嘲讽来打他，满血时受到的伤害降低。思路简单：抢仇恨、换刀头打克制。" },
   helu: { stars: 5, intro: "战场分析师。用聚焦锁定敌人的血量层，按照正确的步骤攻击就能直接抹掉整层血量，再附加 2 击破。精英和首领需要走更多步，用符合当前天气的属性攻击可以推进步数。还能扫描环境、预测敌人的下一步行动。需要整队配合他的节奏，上限极高。" },
@@ -211,7 +211,7 @@ function codexHeroEntries() {
       group: HERO_CODEX[card.kit].stars <= 2 ? "easy" : HERO_CODEX[card.kit].stars === 3 ? "mid" : "hard",
       groupName: "难度 " + HERO_CODEX[card.kit].stars + " 星",
       // 搜索用：介绍、种族职业、被动和技能的名字与说明
-      lines: [HERO_CODEX[card.kit].intro, prof ? prof.race + " " + prof.job : ""].concat(sheet ? [].concat(
+      lines: [HERO_CODEX[card.kit].intro, HERO_CODEX[card.kit].fullName || "", prof ? prof.race + " " + prof.job : ""].concat(sheet ? [].concat(
         sheet.passives.map(x => x.name + " " + x.text + " " + (x.next || "")),
         sheet.skills.now.concat(sheet.skills.later).map(x => x.name + " " + x.text),
         sheet.weapons.map(w => w.name), roleSkills.map(x => x.name + " " + x.text)) : [])

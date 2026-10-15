@@ -172,7 +172,7 @@ kit: (u) => ({ zone, label, ready })   // 也可以返回数组表示多个区�
 
 渲染逻辑就是计算器那一份（`app.js · renderBackstage`），游戏只是把它的容器搬进自己的面板，所以两边永远一致。
 
-角色卡带 `enName` 字段（Rabbie / Yuhito / Akari / Hiaki 等），只用于显示；内部的 `kit` 标识没有改，存档和技能 id 不受影响。
+角色卡带 `enName` 字段（Rabbie / Yuhito / Akari / Hiaki / Harley 等），只用于显示；内部的 `kit` 标识没有改，存档和技能 id 不受影响。
 
 ## 新角色：诺拉 / 维塔斯
 
@@ -367,6 +367,13 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 测试：`tests/effects.test.js` 每条效果一个用例。
 
 ## 规则改动记录
+
+- **issue #44 新报告的问题**（enemies.js · `en_boat_arc` / `en_gl_fire` / `en_ant_shell_fire`；ai.js · 巡逻艇；online-rogue.js · `blocker` / `checkHost`、玩家的升级面板；online-ui.js；party.js；codex.js、bestiary-ui.js、bestiary.css；tests/duel-ranged.test.js、tests/online-rogue.test.js）
+  - **高压巡逻艇被牵制在同区**：电弧扫射本来只打距离 1 的区，被决一死战锁在同区时整场不出手。现在照「没有近身攻击就抵近射击」，扫自己所在的区，倍率 ×0.6，感电先给牵制者。
+  - **已经标定好的榴弹 / 大酸液弹**：被牵制时，如果落点不在牵制者所在的区，发射改成重新标定到牵制者所在的区（下个敌人回合才发射）。
+  - **联机单局 · 掉线玩家的待选升级不再卡全队**：以前不管在不在线都要等他选完，房主替选又会被拒。现在和战利品分配一样只等在线的人；操控者掉线时，房主也可以替他选，他回来以后照样能自己选。
+  - **联机单局 · 玩家的升级面板写出后面还有几项待选**（房主界面本来就有）。
+  - **川川的英文名改成 Harley**；角色图鉴在名字下面显示全名「哈雷 川川 托马斯」，搜索也能搜到。内部标识（`chuan`、技能 id、存档键）不变。
 
 - **决一死战 / 嘲讽下的远程敌人：不再整场空过；没有近身攻击就抵近射击；选区攻击只能选牵制者所在的区**（作者定；enemies.js · `enemyForcedTarget` / `enemyHasNearAttack` / `enemyForcedPointBlank` / `forcedZonePick`、`en_gl` / `en_ant_shell`；app.js · `dealTo` 射程检查与 `flags.pointBlank`；ai.js · `inSkillReach` / `aiPicks` / `aiPlanBase`；tests/duel-ranged.test.js）
   - **bug**：被灯的决一死战锁住的远程敌人（蚁型戒备兵种、榴弹机甲……）。AI 每回合都规划「走远一点再开枪」，而决一死战不允许移动，于是每回合都被拦下，整场不出手（平衡测试里 Lv10 整场 0 伤害）。

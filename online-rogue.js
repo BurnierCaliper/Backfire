@@ -270,7 +270,9 @@
   }
   /** 还不能结算投票的原因（空 = 可以） */
   function blocker(r) {
-    const pend = Rogue.pendingChoices(r);
+    // 掉线玩家的角色还没选的升级不卡全队（和战利品分配一样只等在线的人）；回来以后照样能选，房主也可以替他选
+    const online = onlineIds();
+    const pend = Rogue.pendingChoices(r).filter(p => online.includes(ownerOf(r, p.kit)));
     if (pend.length) return `等 ${[...new Set(pend.map(p => p.name))].join("、")} 选完升级`;
     if (G_Screens && Screens.is("battle")) return "战斗中";
     if (root.GAME && GAME.depth > 0) return "正在结算";
@@ -366,6 +368,8 @@
   function checkHost(c) {
     if (!active() || !PERSONAL.includes(c.action) && c.action !== "choose") return;
     const r = run(), kit = c.action === "choose" ? c.kit : payerOf(r, c);
+    // 操控者掉线时，房主可以替他选升级（不然只能等他回来）
+    if (c.action === "choose" && !onlineIds().includes(ownerOf(r, kit))) return;
     if (ownerOf(r, kit) !== hostId) fail(`${name(kit)} 由 ${playerName(ownerOf(r, kit))} 操控，房主不能替他花钱或做选择`);
   }
 
@@ -407,12 +411,14 @@
     }) : null;
     // 升级：自己的角色要选的第一项
     let choice = null;
-    const pend = Rogue.pendingChoices(r).find(p => mine.includes(p.kit));
+    const myPend = Rogue.pendingChoices(r).filter(p => mine.includes(p.kit));
+    const pend = myPend[0];
     if (pend) {
       const t = pend.choice.type;
       choice = { kit: pend.kit, index: pend.index, name: pend.name, level: pend.choice.level,
         title: t === "attr" ? "分配 1 点六维属性" + (pend.choice.noRepeat ? "（不能加在之前加过的同一项上）" : "") : t === "prof" ? "一个自选熟练项" : t === "role2" ? "从第二副职责里学一个技能" : t === "feat" ? "选择一项专长（不限职责和属性）" : t === "featFull" ? "兼修：选一张职责涉猎专长升成完整版" : t === "prof3" ? "万事通：选一项熟练项升到三级" : "选择一项职责技能",
-        options: Rogue.choiceOptions(r, pend.kit, pend.index).map(o => ({ label: o.label, hint: o.hint || "", value: o.value })) };
+        options: Rogue.choiceOptions(r, pend.kit, pend.index).map(o => ({ label: o.label, hint: o.hint || "", value: o.value })),
+        more: myPend.length - 1 };   // 后面还有几项待选（房主界面有，玩家界面以前没有）
     }
     const waitingLevel = [...new Set(Rogue.pendingChoices(r).filter(p => !mine.includes(p.kit)).map(p => p.name))];
     // 个人能做的事：商店、工匠、诊所

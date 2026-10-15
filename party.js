@@ -252,7 +252,7 @@ function livePartyCards() {
     },
     {
       kit: "chuan",
-      enName: "Chuan",
+      enName: "Harley",
       name: "川川",
       level: 1,
       zone: 1,

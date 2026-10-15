@@ -1244,6 +1244,13 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
   if (id === "en_ant_shell_fire") {
     const r = a.resources || {};
     if (!(Number(r.shellZone) >= 1) || !r.shellReady) { lines.push("大酸液弹尚未就绪。先标定区域，等到下一个敌人回合再发射。"); return true; }
+    // 被牵制：已经标定好的落点不在牵制者所在的区，必须重新标定（作者定）
+    const fz = forcedZonePick(a, Number(r.shellZone), []);
+    if (fz !== Number(r.shellZone)) {
+      lines.push(`${a.name} 被牵制：放弃原来的 ${r.shellZone} 区，大酸液弹重新标定在 ${fz} 区，下个敌人回合发射。`);
+      Object.assign(r, { shellZone: fz, shellPending: true, shellReady: false });
+      return true;
+    }
     antFireShell(a, aa, lines);
     return true;
   }
@@ -1416,6 +1423,13 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
     const zone = Number(a.resources && a.resources.glZone);
     if (!(zone >= 1) || !(a.resources && a.resources.glReady)) {
       lines.push("榴弹尚未就绪。先标定区域，等到下一个敌人回合再发射。");
+      return true;
+    }
+    // 被牵制：已经标定好的落点不在牵制者所在的区，必须重新标定（作者定）
+    const fz = forcedZonePick(a, zone, []);
+    if (fz !== zone) {
+      Object.assign(a.resources, { glZone: fz, glPending: true, glReady: false });
+      lines.push(`${a.name} 被牵制：放弃原来的 ${zone} 区，榴弹重新标定在 ${fz} 区，下个敌人回合发射。`);
       return true;
     }
     const victims = fieldUnits().filter(u => !u.dead && !u.hidden && Number(u.zone) === zone && u.id !== a.id && hostileTo(a, u));
@@ -1609,12 +1623,16 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
     return true;
   }
   if (id === "en_boat_arc") {
-    const hit = allPlayers().filter(u => zoneDist(a.zone, u.zone, state.zoneMode) === 1);
+    // 被牵制（决一死战 / 嘲讽）而牵制者就在同区：电弧扫射抵近打自己所在的区，×0.6（作者定：没有近身攻击就抵近射击）
+    const forced = enemyForcedTarget(a);
+    const pb = !!(forced && Number(forced.zone) === Number(a.zone));
+    const hit = pb ? standingPlayersIn(a.zone) : allPlayers().filter(u => zoneDist(a.zone, u.zone, state.zoneMode) === 1);
+    if (pb) lines.push(`${a.name} 被 ${forced.name} 牵制：电弧扫射抵近打自己所在的 ${a.zone} 区（倍率 ×0.6）。`);
     hit.forEach(u => {
-      aa(u, { element: "electric", mult: 1, diceN: 1, diceS: (typeof leveledSides === "function" ? leveledSides(a.level, 6) : 6), baseBreak: 1, flags: { action: true, aoe: true } });
+      aa(u, { element: "electric", mult: pb ? 0.6 : 1, diceN: 1, diceS: (typeof leveledSides === "function" ? leveledSides(a.level, 6) : 6), baseBreak: 1, flags: { action: true, aoe: true } });
     });
-    // 手册：可对一人施加感电。挑一个还没有感电的目标。
-    const pick = hit.find(u => !(u.statuses && u.statuses.shock)) || hit[0];
+    // 手册：可对一人施加感电。挑一个还没有感电的目标（被牵制时先给牵制者）。
+    const pick = (pb && hit.includes(forced) ? forced : null) || hit.find(u => !(u.statuses && u.statuses.shock)) || hit[0];
     if (pick) {
       pick.statuses = pick.statuses || {};
       pick.statuses.shock = true;

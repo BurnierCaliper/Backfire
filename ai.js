@@ -338,6 +338,9 @@ const EnemyAI = (function () {
     }
     if (spec.special === "boat") {
       // 电弧扫射打距离 1 的全部敌人，感电是它自带的附加，没有单体攻击
+      // 被牵制而牵制者在同区：抵近扫自己所在的区（enemies.js · en_boat_arc）
+      const forced = typeof enemyForcedTarget === "function" ? enemyForcedTarget(u) : null;
+      if (forced && Number(forced.zone) === Number(u.zone)) return "en_boat_arc";
       return prey.some(p => zdist(u.zone, p.zone) === 1) ? "en_boat_arc" : null;
     }
     if (spec.special === "king") {
