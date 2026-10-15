@@ -261,6 +261,7 @@ body.ol-has-side .ol-toast { right: 344px; }
 .ol-rogue-box ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .ol-rogue-box li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
 .ol-rogue-box li small { opacity: .75; }
+.ol-rogue-box select { max-width: 100%; }
 .ol-rogue-vote { border-color: #f5c542; }
 .ol-rogue-route { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 6px 0 0; padding-left: 20px; }
 .ol-rogue-route .ol-open { font-weight: 700; color: #f5c542; }

@@ -61,7 +61,7 @@
           render();
           return;
         }
-        if (["buy", "redeem", "buyPart", "sellPart"].includes(command.action) && !command.payer) {
+        if (["buy", "redeem", "buyPart", "sellPart", "learnRecipe", "salvage"].includes(command.action) && !command.payer) {
           if (!hostPayer()) throw new Error("房主没有自己操控的角色，不能花钱");
           command = Object.assign({}, command, { payer: hostPayer() });
         }
@@ -395,7 +395,7 @@
   /* ---------- 工坊：制作道具、学配方（rogue.js · craft / learnRecipe）。联机同步留到工坊第 5 步 ---------- */
   let craftOpen = false;
   function craftPanel() {
-    if (online() || typeof CRAFT_RECIPES === "undefined") return "";
+    if (typeof CRAFT_RECIPES === "undefined") return "";
     const place = query("craftPlace");
     if (!place) return "";
     const list = query("craftList");
@@ -404,7 +404,9 @@
     const heroes = run.party.filter(h => !h.dead);
     const matIds = ["cm_scrap", "cm_chem", "cm_gas", "cm_coil", "cm_cell", "cm_scale", "cm_spirit", "mat_metal"];
     const stock = matIds.map(id => `${esc((ITEM_CATALOG[id] || {}).name || id)} ${bagCountOf(id)}`).join(" · ");
-    const rows = heroes.map(h => {
+    const net = online(), mineKits = net ? OnlineRogue.hostKits() : null;
+    const queue = net ? query("craftQueue") : [];
+    const rows = heroes.filter(h => !net || mineKits.includes(h.kit)).map(h => {
       const opts = here.map(r => {
         const o = query("craftOdds", { kit: h.kit, item: r.id });
         return o && o.base ? `<option value="${esc(r.id)}">${esc(r.name)} · ${esc(r.prof)}${esc(r.diffName)} · ${pctText(o.chance)} · ${r.hours} 小时</option>` : "";
@@ -424,7 +426,10 @@
     return `<details class="r-craft" id="r-craft" ${craftOpen ? "open" : ""}><summary>工坊：制作道具（${place === "bench" ? "工作台：五类都能做" : "休息点：场地、自我效果做不了"}）</summary>
       <p class="r-hint">每人同时做一样，时间按最久的那个人算，计入力竭。成功率照熟练项检定表；有对应熟练项的队友可以打下手给优势，但他这段时间不能做自己的。失败时材料丢一半（向上取整），废料和金属留着。</p>
       <p class="r-hint">材料：${stock}</p>
-      ${here.length ? rows + `<button class="g-btn r-main" id="r-craft-go">开工</button>` : `<p class="r-hint">这里没有会做的配方。</p>`}
+      ${net ? `<p class="r-hint">联机：每人给自己的角色排一样（玩家在自己的画面上排），房主按「开工」大家一起做。补金属的钱从做的人自己的钱包出。</p>
+        <ul class="r-recipes">${queue.map(j => `<li>${esc(j.name)}：${esc(j.itemName)}${j.helperName ? `（${esc(j.helperName)} 打下手）` : ""} · ${pctText(j.chance)} · ${j.hours} 小时</li>`).join("") || "<li>还没有人排活。</li>"}</ul>` : ""}
+      ${here.length ? rows + (net ? `<button class="g-btn" id="r-craft-queue">排上我的角色</button><button class="g-btn r-main" id="r-craft-run" ${queue.length ? "" : "disabled"}>开工</button>`
+        : `<button class="g-btn r-main" id="r-craft-go">开工</button>`) : `<p class="r-hint">这里没有会做的配方。</p>`}
       <details><summary>全部配方</summary><ul class="r-recipes">${recipeRows}</ul></details>
       ${salvageRows()}
     </details>`;
@@ -873,6 +878,13 @@
       if (!jobs.length) { lastError = "先给至少一个人选要做的东西"; render(); return; }
       act({ action: "craft", jobs });
     });
+    on("r-craft-queue", () => {
+      body.querySelectorAll("[data-craft-item]").forEach(sel => {
+        const help = body.querySelector(`[data-craft-help="${sel.dataset.craftItem}"]`);
+        act({ action: "setCraftJob", kit: sel.dataset.craftItem, item: sel.value || null, helper: (help && help.value) || null });
+      });
+    });
+    on("r-craft-run", () => act({ action: "craftQueued" }));
     body.querySelectorAll("[data-redeem]").forEach(b => { b.onclick = () => { if (window.Sfx) Sfx.ui("coin"); act({ action: "redeem", item: b.dataset.redeem }); }; });
     body.querySelectorAll("[data-upgrade]").forEach(b => { b.onclick = () => act({ action: "upgradeWeapon", kit: b.dataset.upgrade, smith: b.dataset.smith }); });
     body.querySelectorAll("[data-intro]").forEach(b => { b.onclick = () => act({ action: "introduceSmith", smith: b.dataset.intro }); });

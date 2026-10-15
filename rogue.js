@@ -1653,6 +1653,10 @@ const Rogue = (function () {
         learnPrice: CR().learnPrice[it.diff] || 0, mats, metalKuizhi: metal ? Math.max(0, metal.need - metal.have) * metalPrice() : 0 };
     });
   }
+  /* 联机单局（online-rogue.js）接管：金属的钱从做的人自己钱包出（balance / pay），做出来的东西记在做的人名下（made） */
+  let craftHooks = null;
+  function setCraftHooks(h) { craftHooks = h && typeof h === "object" ? h : null; }
+  const hook = (run) => (craftHooks && (!craftHooks.applies || craftHooks.applies(run)) ? craftHooks : null);
   /** 一起开工：jobs = [{ kit, item, helper? }]。大家同时做，花的时间按最久的那个人算。
    *  材料从队伍背包里扣；单局里没有金属实物时按参考价付奎支。失败：时间照花，非壳体材料损失一半（向上取整） */
   function craft(run, jobs) {
@@ -1684,8 +1688,19 @@ const Rogue = (function () {
     jobs.forEach(j => { const rc = CRAFT_RECIPES[j.item]; Object.keys(rc).forEach(id => { need[id] = (need[id] || 0) + rc[id]; }); });
     const lack = Object.keys(need).filter(id => id !== "mat_metal" && bagCount(id) < need[id]);
     if (lack.length) throw new Error("材料不够：" + lack.map(id => `${ITEM_CATALOG[id].name} 差 ${need[id] - bagCount(id)}`).join("，"));
-    const metalPay = Math.max(0, (need.mat_metal || 0) - bagCount("mat_metal")) * metalPrice();
-    if (metalPay > (Number(state.kuizhi) || 0)) throw new Error(`金属不够，按参考价补要 ${metalPay} 奎支`);
+    // 金属：背包里的先按顺序分给各人，不够的按参考价付奎支（联机时各付各的）
+    const H = hook(run), metalOwe = {};
+    let metalLeft = bagCount("mat_metal");
+    jobs.forEach(j => {
+      const n = CRAFT_RECIPES[j.item].mat_metal || 0, fromBag = Math.min(n, metalLeft);
+      metalLeft -= fromBag;
+      if (n - fromBag) metalOwe[j.kit] = (metalOwe[j.kit] || 0) + (n - fromBag) * metalPrice();
+    });
+    if (H) Object.keys(metalOwe).forEach(k => { if (metalOwe[k] > H.balance(run, k)) throw new Error(`${heroName(k)} 的奎支不够补金属（要 ${metalOwe[k]}）`); });
+    else {
+      const metalPay = Object.values(metalOwe).reduce((a, b) => a + b, 0);
+      if (metalPay > (Number(state.kuizhi) || 0)) throw new Error(`金属不够，按参考价补要 ${metalPay} 奎支`);
+    }
     const notes = [];
     let hours = 0;
     run.craftNo = (run.craftNo || 0) + 1;
@@ -1713,13 +1728,15 @@ const Rogue = (function () {
           const fromBag = Math.min(n, bagCount(id));
           if (fromBag) bagAdd(id, -fromBag);
           const rest = n - fromBag;
-          if (rest) state.kuizhi = (Number(state.kuizhi) || 0) - rest * metalPrice();
+          if (rest && H) H.pay(run, j.kit, rest * metalPrice());
+          else if (rest) state.kuizhi = (Number(state.kuizhi) || 0) - rest * metalPrice();
         } else bagAdd(id, -n);
         used.push(`${ITEM_CATALOG[id].name}×${n}`);
       });
       const who = heroName(j.kit) + (o.helped ? `（${heroName(j.helper)} 打下手）` : "");
       if (r.ok) {
         bagAdd(it.id, 1);
+        if (H && H.made) H.made(run, j.kit, it.id);
         notes.push(`${who} 制作${it.name}：成功（${Math.round(o.chance * 100)}%）。用掉 ${used.join("、")}。`);
       } else {
         notes.push(`${who} 制作${it.name}：失败（${Math.round(o.chance * 100)}%）。损失 ${used.join("、") || "无"}，壳体留着。`);
@@ -1728,6 +1745,51 @@ const Rogue = (function () {
     notes.push(`制作花了 ${hours} 小时。`);
     passHours(run, hours, notes);
     return logAll(run, notes);
+  }
+  /* 排队开工（联机时各人给自己的角色排一样，房主按「开工」一起做；时间照样按最久的算） */
+  function craftJobsOf(run) {
+    if (!craftPlace(run)) { run.craftJobs = {}; return run.craftJobs; }
+    return (run.craftJobs = run.craftJobs || {});
+  }
+  function setCraftJob(run, kit, item, helper) {
+    if (!craftPlace(run)) throw new Error("这里不能制作");
+    if (!run.party.some(h => h.kit === kit)) throw new Error("队伍里没有这名角色");
+    const q = craftJobsOf(run);
+    if (!item) {
+      if (!q[kit]) return [];
+      delete q[kit];
+      return logAll(run, [`${heroName(kit)} 不做东西了。`]);
+    }
+    if (helper === kit) throw new Error("不能给自己打下手");
+    const others = Object.keys(q).filter(k => k !== kit);
+    if (others.some(k => q[k].helper === kit)) throw new Error(`${heroName(kit)} 已经在给别人打下手`);
+    if (helper && (q[helper] && helper !== kit || others.some(k => q[k].helper === helper))) throw new Error(`${heroName(helper)} 已经在忙了`);
+    // 单独验一遍这一样能不能做（材料最后开工时合起来算）
+    const it = craftItem(item);
+    if (!it) throw new Error("没有这个配方");
+    if (!knowsRecipe(run, item)) throw new Error(`还不会做${it.name}`);
+    if (craftPlace(run) === "rest" && CRAFT_RULES.benchKinds.includes(it.kind)) throw new Error(`${it.name}要在工坊的工作台上做`);
+    const o = craftOdds(run, kit, item, helper);
+    if (!o.base) throw new Error(`${heroName(kit)} 没有「${it.prof}」熟练，做不了${o.diffName}配方`);
+    if (helper && !o.helped) throw new Error(`打下手要有「${it.prof}」熟练项`);
+    q[kit] = { item, helper: helper || null };
+    return logAll(run, [`${heroName(kit)} 准备制作${it.name}${helper ? `（${heroName(helper)} 打下手）` : ""}：成功率 ${Math.round(o.chance * 100)}%，${o.hours} 小时。`]);
+  }
+  /** 排好的活：[{ kit, name, item, itemName, helper, helperName, chance, hours }] */
+  function craftQueue(run) {
+    const q = craftJobsOf(run);
+    return Object.keys(q).map(kit => {
+      const o = craftOdds(run, kit, q[kit].item, q[kit].helper) || {};
+      return { kit, name: heroName(kit), item: q[kit].item, itemName: (ITEM_CATALOG[q[kit].item] || {}).name || q[kit].item,
+        helper: q[kit].helper, helperName: q[kit].helper ? heroName(q[kit].helper) : "", chance: o.chance || 0, hours: o.hours || 0 };
+    });
+  }
+  function craftQueued(run) {
+    const q = craftJobsOf(run), kits = Object.keys(q);
+    if (!kits.length) throw new Error("还没有人排活");
+    const notes = craft(run, kits.map(kit => ({ kit, item: q[kit].item, helper: q[kit].helper })));
+    run.craftJobs = {};
+    return notes;
   }
   /** 背包里能拆的东西：[{ id, name, qty, yield: [{ id, name, qty }] }] */
   function salvageList() {
@@ -2379,7 +2441,7 @@ const Rogue = (function () {
     role2Options, soloBattleInfo,
     restPlan, restOptions, canLongRest, sheetData, armoryData, lowHpWarning, escortInfo, partOffers, buyPart, sellPart, canSellParts, partStock, partSellPrice, partInstallCost, installPart, removePart, restAtNode, leaveNode, canShortRestBefore, shortRestBeforeNode,
     ambushChance, watchOptions,
-    buy, shopPoints, redeemList, redeem, craftPlace, craftList, craftOdds, craft, knowsRecipe, learnOptions, learnRecipe, rollRecipeChip, salvageList, salvage,  canShop, shopItemName, shopStock, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
+    buy, shopPoints, redeemList, redeem, craftPlace, craftList, craftOdds, craft, knowsRecipe, learnOptions, learnRecipe, rollRecipeChip, salvageList, salvage, setCraftHooks, setCraftJob, craftQueue, craftQueued,  canShop, shopItemName, shopStock, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
     presentSmiths, smithInfo, claimBlueprint, installBlueprint, blueprintById, weaponModsOf,
     smithQuote, introduceSmith,
     canClinic, cyberInfo, cyberPreview, cyberCost, modifyHero, healCost, healHero,

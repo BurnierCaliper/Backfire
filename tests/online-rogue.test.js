@@ -246,3 +246,40 @@ test("联机单局：角色升级只弹给操控它的玩家，列出新技能�
   await host.waitForSelector("#g-levelup", { state: "hidden" });
   assert.deepEqual(f.errors, []);
 });
+
+test("联机单局：工坊——各人给自己的角色排活，房主按「开工」一起做；做出来的归自己；学配方从自己钱包出", { timeout: 120000 }, async t => {
+  const f = await room(t); if (!f) return;
+  const { host, alice, bob } = f;
+  await depart(f);
+  await host.evaluate(() => {
+    bagAdd("cm_scrap", 2); bagAdd("cm_chem", 3); bagAdd("cm_scale", 1);
+    RunFlow.current().smiths = ["tima"];   // 季玛教巧手
+    OnlineRogue.changed();
+  });
+  await alice.waitForFunction(() => !!OnlineGame.getView().packet?.rogue?.workshop);
+  const wk = await rogueView(alice);
+  assert.ok(wk.workshop.mine[0].options.some(o => o.id === "fx_smoke"), "瑞比（巧手）能做烟雾弹");
+  assert.equal((await submit(alice, { type: "rogue.act", command: { action: "setCraftJob", kit: "yuito", item: "fx_calm" } })).ok, false, "不能给别人的角色排活");
+  assert.equal((await submit(alice, { type: "rogue.act", command: { action: "setCraftJob", kit: "ruby", item: "fx_smoke" } })).ok, true);
+  assert.equal((await submit(bob, { type: "rogue.act", command: { action: "setCraftJob", kit: "yuito", item: "fx_calm" } })).ok, true);
+  await host.waitForFunction(() => Rogue.craftQueue(RunFlow.current()).length === 2);
+  const h0 = await host.evaluate(() => Rogue.hoursAwake());
+  await host.click("#r-craft > summary");
+  await host.click("#r-craft-run");
+  await host.waitForFunction(() => bagCount("fx_smoke") === 1 && bagCount("fx_calm") === 1);
+  assert.equal(await host.evaluate(() => Rogue.hoursAwake()) - h0, 1, "同时做，时间按最久的算");
+  const owned = await host.evaluate(() => OnlineRogue.data().owned);
+  assert.equal(owned.ruby.fx_smoke, 1);
+  assert.equal(owned.yuito.fx_calm, 1);
+  // 学配方：从自己的钱包出
+  const before = await host.evaluate(() => OnlineRogue.purse("ruby"));
+  await host.evaluate(() => { OnlineRogue.data().purse.ruby = 5000; OnlineRogue.changed(); });
+  assert.equal((await submit(alice, { type: "rogue.act", command: { action: "learnRecipe", item: "fx_sting", smith: "tima", payer: "ruby" } })).ok, true);
+  assert.equal(await host.evaluate(() => OnlineRogue.purse("ruby")), 5000 - 800);
+  assert.ok(await host.evaluate(() => Rogue.knowsRecipe(RunFlow.current(), "fx_sting")));
+  assert.ok(before >= 0);
+  // 拆解：只能拆自己的或者公用的
+  assert.equal((await submit(bob, { type: "rogue.act", command: { action: "salvage", item: "fx_smoke", payer: "yuito" } })).ok, false);
+  assert.equal((await submit(alice, { type: "rogue.act", command: { action: "salvage", item: "fx_smoke", payer: "ruby" } })).ok, true);
+  assert.deepEqual(f.errors, []);
+});

@@ -368,6 +368,20 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **工坊第 5 步（三）：联机同步**（作者定；rogue.js · `setCraftJob` / `craftQueue` / `craftQueued` / `setCraftHooks`；online-rogue.js；online-ui.js 玩家画面的「工坊」；rogue-ui.js；tests/online-rogue.test.js）
+  - 联机单局里，每个玩家都能在自己的画面上看到工坊。
+  - 制作：
+    - 每人给自己的角色排一样（选做什么、谁打下手），房主按「开工」大家一起做；
+    - 时间照样按最久的那个人算；
+    - 只能给自己的角色排活；打下手可以找任何队友。
+  - 钱和东西：
+    - 补金属的钱从做的人自己的钱包出；
+    - 做出来的道具记在做的人名下；
+    - 材料是队伍公用的，从公用背包里扣；
+    - 学配方的学费从学的人自己的钱包出，学会了全队都会。
+  - 拆解：只能拆自己名下的或者公用的东西；拆出来的材料归队伍公用。
+  - 本机单人照旧：在面板上给每个人选好，直接开工。
+
 - **工坊第 5 步（二）：跑团主持人工具**（作者定，设计文档第 7 节；ledger.js · `LEDGER.workshop`；trpg.js · `trpgEarnPoints` / `trpgPointsInfo` / `trpgAdjustPoints` / `trpgRedeem` / `trpgTeachRecipe` / `trpgCraftOdds` / `trpgCraft` / `trpgSalvage`；trpg-commands.js；trpg-ui.js 新的「工坊」页；tests/trpg-workshop.test.js、tests/ui.test.js）
   - 跑团的配方和商店积分记在队伍账上，跟着存档空位走。
   - 商店积分：

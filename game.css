@@ -1341,6 +1341,7 @@ body.rogue-battle .g-top label:has(#g-weather-sel) { display: none !important; }
 
 .run-body { min-width: 0; }
 .r-hint { margin: 0 0 14px; font-size: 13px; color: var(--muted); line-height: 1.6; }
+.r-craft select { max-width: 100%; }
 .r-warn { margin: 0 0 12px; padding: 8px 10px; font-size: 13px; line-height: 1.6; color: var(--foe); border: 1px solid var(--foe); border-radius: 6px; }
 .rh-w.broken { color: var(--foe); font-weight: 600; }
 .task-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }

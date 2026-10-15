@@ -24,9 +24,9 @@
   const copy = v => JSON.parse(JSON.stringify(v));
   const fail = text => { throw new Error(text); };
   // 个人行为：花自己的钱、动自己的东西（choose 是升级选择，不花钱）
-  const PERSONAL = ["buy", "redeem", "buyPart", "sellPart", "installPart", "removePart", "upgradeWeapon", "repairWeapon", "healHero", "modifyHero"];
+  const PERSONAL = ["buy", "redeem", "learnRecipe", "salvage", "setCraftJob", "buyPart", "sellPart", "installPart", "removePart", "upgradeWeapon", "repairWeapon", "healHero", "modifyHero"];
   // 玩家可以自己发的个人指令（其余的个人行为由房主代自己的角色做）
-  const REMOTE = ["buy", "redeem", "buyPart", "sellPart", "installPart", "removePart", "upgradeWeapon", "repairWeapon", "healHero", "modifyHero", "choose"];
+  const REMOTE = ["buy", "redeem", "learnRecipe", "salvage", "setCraftJob", "buyPart", "sellPart", "installPart", "removePart", "upgradeWeapon", "repairWeapon", "healHero", "modifyHero", "choose"];
   let enabled = false, resolving = false, hostId = "";
 
   const flow = () => root.RunFlow || null;
@@ -126,6 +126,8 @@
     }
     if ((c.action === "installPart" || c.action === "removePart" || c.action === "upgradeWeapon" || c.action === "repairWeapon") && heroOf(r, c.kit)?.kit !== payer) fail("只能动自己角色的武器");
     if ((c.action === "healHero" || c.action === "modifyHero") && c.kit !== payer) fail("只能给自己的角色治疗、改造");
+    if (c.action === "setCraftJob" && c.kit !== payer) fail("只能给自己的角色排活");
+    if (c.action === "salvage" && available(r, payer, c.item) < 1) fail("这件东西不是你的");
   }
 
   /* ---------- 规则指令外面包一层：钱从谁的钱包出、进账怎么分 ---------- */
@@ -150,6 +152,13 @@
     const notes = Array.isArray(out) ? out : Array.isArray(out && out.notes) ? out.notes : [];
     settle(r, notes);
     return out;
+  });
+  // 制作：补金属的钱从做的人自己的钱包出；做出来的道具记在做的人名下
+  if (G_Rogue && Rogue.setCraftHooks) Rogue.setCraftHooks({
+    applies: r => active() && r === run(),
+    balance: (r, kit) => Number(data(r).purse[kit]) || 0,
+    pay: (r, kit, n) => { const d = data(r); d.purse[kit] = Math.max(0, (Number(d.purse[kit]) || 0) - n); },
+    made: (r, kit, id) => { if (ownable(id)) addOwned(data(r), kit, id, 1); }
   });
   // 战斗里用道具：自己的 + 公用的；用掉的先从自己名下扣
   if (typeof setItemAccess === "function") setItemAccess((unit, id) => {
@@ -442,6 +451,19 @@
     }).filter(p => p.have > 0) : null;
     // 诊所：治疗；义体改造带上现在的方案和上限，玩家那边按同样的公式估价（真正扣多少以房主结算为准）
     const cyberOf = kit => { try { const i = Rogue.cyberInfo(r, kit); return { current: i.current, limit: i.limit, rate: i.rate, fleshMax: i.fleshMax, perHp: (typeof ROGUE_CLINIC !== "undefined" && ROGUE_CLINIC.cyberPerHp) || 0 }; } catch (e) { return null; } };
+    // 工坊：大家排的活、自己的角色能做什么、能学的配方、能拆的东西
+    const place = Rogue.craftPlace(r);
+    const workshop = place && mine.length ? {
+      place, queue: Rogue.craftQueue(r),
+      mine: r.party.filter(h => mine.includes(h.kit)).map(h => ({ kit: h.kit, name: name(h.kit),
+        options: Rogue.craftList(r).filter(x => x.known && (place === "bench" || !x.bench)).map(x => {
+          const o = Rogue.craftOdds(r, h.kit, x.id) || {};
+          return o.base ? { id: x.id, name: x.name, chance: o.chance, hours: x.hours, prof: x.prof, mats: x.mats.map(m => `${m.name} ${m.have}/${m.need}`).join("、") } : null;
+        }).filter(Boolean) })),
+      helpers: living(r).map(k => ({ kit: k, name: name(k) })),
+      learn: Rogue.learnOptions(r),
+      salvage: Rogue.salvageList().map(x => Object.assign(x, { have: mine.reduce((s, k) => s + (Number((d.owned[k] || {})[x.id]) || 0), 0) + free(r, x.id) })).filter(x => x.have > 0)
+    } : null;
     const clinic = Rogue.canClinic(r) ? r.party.filter(h => mine.includes(h.kit)).map(h => ({ kit: h.kit, name: name(h.kit), cost: Rogue.healCost(r, h.kit), cyber: cyberOf(h.kit) })) : null;
     return {
       act: r.act, day: r.day, region: Rogue.region(r), daysLeft: Rogue.daysLeft(r), daysPerAct: C.daysPerAct, stage: r.stage,
@@ -457,7 +479,7 @@
         needs: living(r).filter(k => l.needs[k] === "need").map(name), passes: living(r).filter(k => l.needs[k] === "pass").map(name),
         mine: mine.map(k => ({ kit: k, name: name(k), answer: l.needs[k] || "" })) })),
       lootLog: d.lootLog.slice(-5).map(x => x.text),
-      choice, waitingLevel, shop, points, smith, parts, clinic,
+      choice, waitingLevel, shop, points, smith, parts, clinic, workshop,
       log: (r.log || []).slice(-8).map(l => l.text)
     };
   }

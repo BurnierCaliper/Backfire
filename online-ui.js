@@ -355,8 +355,16 @@
       const filled = slots.filter(x => x.cur);
       const unmount = r.smith && filled.length ? `<section class="ol-rogue-box" aria-label="拆改装件"><h3>已装的改装件</h3><ul>${filled.map(x => `<li>${esc(x.name)} 槽 ${esc(x.slot + 1)}：${esc(x.cur)} ${rogueAct("拆下（不要钱）", { action: "removePart", kit: x.kit, slot: x.slot, smith: r.smith.id })}</li>`).join("")}</ul></section>` : "";
       const clinic = r.clinic && r.clinic.length ? `<section class="ol-rogue-box" aria-label="诊所"><h3>诊所（你有 ${esc(purse)} 奎支）</h3><ul>${r.clinic.map(c => `<li>${esc(c.name)} ${c.cost ? rogueAct(`治疗到满血（${c.cost}）`, { action: "healHero", kit: c.kit }, purse < c.cost) : "满血"}</li>${c.cyber ? cyberMarkup(c, purse) : ""}`).join("")}</ul></section>` : "";
+      const wk = r.workshop;
+      const workshop = wk && payer ? `<section class="ol-rogue-box" aria-label="工坊"><h3>工坊（${wk.place === "bench" ? "工作台：五类都能做" : "休息点：场地、自我效果做不了"}）</h3>
+        <p class="ol-muted">每人给自己的角色排一样，房主按「开工」大家一起做，时间按最久的算。有对应熟练项的队友打下手给优势。补金属的钱从你自己的钱包出；做出来的东西归你。</p>
+        <ul>${(wk.queue || []).map(j => `<li>${esc(j.name)}：${esc(j.itemName)}${j.helperName ? `（${esc(j.helperName)} 打下手）` : ""} · ${esc(Math.round(j.chance * 100))}% · ${esc(j.hours)} 小时</li>`).join("") || "<li>还没有人排活。</li>"}</ul>
+        ${(wk.mine || []).map(m => `<div class="ol-attr-btns"><b>${esc(m.name)}</b><select id="ol-wk-item-${esc(m.kit)}" aria-label="做什么">${option("", "不做", false)}${m.options.map(o => option(o.id, `${o.name} · ${o.prof} · ${Math.round(o.chance * 100)}% · ${o.hours} 小时 · ${o.mats}`, (wk.queue || []).some(j => j.kit === m.kit && j.item === o.id))).join("")}</select><select id="ol-wk-help-${esc(m.kit)}" aria-label="谁打下手">${option("", "没人帮", false)}${wk.helpers.filter(x => x.kit !== m.kit).map(x => option(x.kit, x.name + " 打下手", (wk.queue || []).some(j => j.kit === m.kit && j.helper === x.kit))).join("")}</select>${button("排上", "rogueCraftJob", `data-kit="${esc(m.kit)}"`, disabled(), true)}</div>`).join("")}
+        ${(wk.learn || []).length ? `<h4>向${esc(wk.learn[0].smithName)}学配方（你有 ${esc(purse)} 奎支）</h4><ul>${wk.learn.map(l => `<li>${esc(l.name)} · ${esc(l.prof)} · ${esc(l.diffName)} ${rogueAct(`学（${l.price}）`, { action: "learnRecipe", item: l.item, smith: l.smith, payer }, purse < l.price)}</li>`).join("")}</ul>` : ""}
+        ${(wk.salvage || []).length ? `<h4>拆解（不花时间）</h4><ul>${wk.salvage.map(x => `<li>${esc(x.name)} ×${esc(x.have)} → ${esc(x.yield.map(y => `${y.name}×${y.qty}`).join("、"))} ${rogueAct("拆一件", { action: "salvage", item: x.id, payer })}</li>`).join("")}</ul>` : ""}
+      </section>` : "";
       const log = (r.log || []).length ? `<section class="ol-rogue-box" aria-label="最近发生"><h3>最近发生</h3><ul>${r.log.map(t => `<li>${esc(t)}</li>`).join("")}</ul></section>` : "";
-      return head + over + choice + waits + loot + lootLog + vote + last + heroes + board + task + shop + smith + parts + unmount + clinic + log;
+      return head + over + choice + waits + loot + lootLog + vote + last + heroes + board + task + shop + smith + parts + unmount + clinic + workshop + log;
     }
     /** 义体改造：和单机诊所一样填装甲 / 护盾 / 沙尘层的点数、要不要换成星灵；价格按房主发来的单价估 */
     const CYBER_LAYERS = [["armor", "装甲"], ["shield", "护盾"], ["sand", "沙尘"]];
@@ -849,6 +857,11 @@
           if (cost > Number(b.dataset.purse)) { notice = `预计要 ${cost} 奎支，你的钱不够`; render(); break; }
           if (!confirm(`给 ${c.name} 做义体改造，预计花 ${cost} 奎支？\n伤势照旧带着，缺的血先从外层扣。`)) break;
           if (await call(() => api.submit({ type: "rogue.act", command: { action: "modifyHero", kit, plan } }))) delete cyberDraft[kit];
+          break;
+        }
+        case "rogueCraftJob": {
+          const kit = b.dataset.kit, item = byId("ol-wk-item-" + kit)?.value || null, helper = byId("ol-wk-help-" + kit)?.value || null;
+          if (!disabled() && kit) await call(() => api.submit({ type: "rogue.act", command: { action: "setCraftJob", kit, item, helper } }));
           break;
         }
         case "roguePartInstall": {
