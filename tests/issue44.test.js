@@ -135,3 +135,23 @@ test("#44 协助攻击：敌人协助同样受墙限制", () => {
   st.gaps["1-2"] = { type: "wall", hp: 10, maxHp: 10 };
   assert.ok(!c.eligibleAssisters(a, K("ruby")).some(u => u.id === b.id));
 });
+
+/* ---------- 4. 电站超频：电能 <3 时 +2，≥3 时照旧给 atk/2 护盾 ---------- */
+for (const [ch, want, shield] of [[0, 2, false], [2, 4, false], [3, 3, true]]) {
+  test(`#44 电站超频：电能 ${ch} → ${want}${shield ? "，并给护盾" : ""}`, () => {
+    const { c, st, K } = field(["chuan", "kolt"]);
+    const chuan = K("chuan"), kolt = K("kolt");
+    chuan.resources.charge = ch;
+    const sh0 = kolt.layers.filter(l => l.type === "shield").length;
+    st.attackerId = chuan.id; st.targetId = kolt.id;
+    c.runSkill("chuan_over");
+    assert.equal(chuan.resources.charge, want);
+    assert.equal(kolt.layers.filter(l => l.type === "shield").length > sh0, shield);
+  });
+}
+test("#44 电站超频：技能文案写 2 电能", () => {
+  const { c } = field(["chuan"]);
+  const src = require("fs").readFileSync(require("path").join(H.ROOT, "skill-text.js"), "utf8");
+  assert.match(src, /chuan_over: "电站超频：[^"]*获得 2 电能/);
+  assert.ok(c);
+});

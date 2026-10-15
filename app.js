@@ -11760,8 +11760,8 @@ function runSkillInner(id, optRun) {
         addShieldLayer(t, sh);
         lines.push(`电站超频：${t.name} 过载，并获得 ${sh} 护盾（电能≥3不增加电能）。`);
       } else {
-        addCharge(1);
-        lines.push(`电站超频：${t.name} 过载，电能 +1。`);
+        addCharge(2);   // #44 方案 A：电能 <3 时 +2（原 +1）
+        lines.push(`电站超频：${t.name} 过载，电能 +2。`);
       }
     } else if (id === "chuan_summon") {
       const w = spawnWeapon(a, "bili");
