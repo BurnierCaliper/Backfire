@@ -105,3 +105,33 @@ test("#44 磁场护盾：免位移（noMove）的敌人推不动", () => {
   fire();
   assert.equal(Number(foe.zone), 2);
 });
+
+/* ---------- 3. 协助攻击不能穿墙 ---------- */
+function assistField() {
+  const r = field(["ruby", "hiaki", "kolt"], [{ id: "thug_hammer", lv: 1, zone: 2 }]);
+  const { st, K, foe } = r;
+  st.zoneMode = 3;
+  [K("ruby"), K("hiaki"), K("kolt"), foe].forEach(big);
+  K("kolt").zone = 2; K("ruby").zone = 1; K("hiaki").zone = 3; foe.zone = 2;
+  return r;
+}
+test("#44 协助攻击：被危墙隔开的远程 / 近战角色都不能选为协助者", () => {
+  const { c, st, K, foe } = assistField();
+  const ids = () => c.eligibleAssisters(K("kolt"), foe).map(u => u.kit).sort().join(",");
+  assert.equal(ids(), "hiaki,ruby", "没有墙时都能协助");
+  st.gaps["1-2"] = { type: "wall", hp: 10, maxHp: 10 };
+  st.gaps["2-3"] = { type: "door", open: false };
+  assert.equal(ids(), "", "危墙 / 关着的机关门隔开：都不能协助");
+  st.gaps["2-3"].open = true;
+  assert.equal(ids(), "hiaki", "门打开后恢复");
+});
+test("#44 协助攻击：敌人协助同样受墙限制", () => {
+  const c0 = field(["ruby", "kolt"], [{ id: "thug_hammer", lv: 1, zone: 2 }, { id: "thug_knife", lv: 1, zone: 1 }]);
+  const { c, st, K } = c0;
+  st.zoneMode = 3;
+  const [a, b] = st.units.filter(u => !u.isPlayer);
+  a.zone = 2; b.zone = 1; K("ruby").zone = 2;
+  assert.ok(c.eligibleAssisters(a, K("ruby")).some(u => u.id === b.id));
+  st.gaps["1-2"] = { type: "wall", hp: 10, maxHp: 10 };
+  assert.ok(!c.eligibleAssisters(a, K("ruby")).some(u => u.id === b.id));
+});

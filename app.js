@@ -6015,7 +6015,8 @@ function eligibleAssisters(breaker, broken) {
       (!breaker || u.id !== breaker.id || u.kit === "ufo_body" || u.kit === "chixia") &&   // 飞碟触灵、赤牙（剿灭）可以接自己打出的失衡
       !(typeof touDuelVictim === "function" && touDuelVictim(u) && broken.kit !== "tou") &&
       (typeof enemyMayAssist !== "function" || enemyMayAssist(u)) &&   // 被挟持的王、哗变的狂徒不对我方出手（enemies.js）
-      !(typeof fishFrenzyUsed === "function" && fishFrenzyUsed(u))      // 沙鱼每回合只群起一次
+      !(typeof fishFrenzyUsed === "function" && fishFrenzyUsed(u)) &&   // 沙鱼每回合只群起一次
+      !lineBlocked(u.zone, broken.zone)                                 // #44：协助攻击不能穿墙（危墙 / 关着的机关门）
     );
   }
   // 只列真正能出手的人：濒死没起身、失衡、抓在敌人身上的不行（以前飞碟本体失衡时这些人也列进来，
@@ -6031,7 +6032,8 @@ function eligibleAssisters(breaker, broken) {
     !(typeof isCrushing === "function" && isCrushing(u)) &&
     !u.isPartner &&                                          // 支援的伙伴打完就退场，不接协助攻击
     (!breaker || u.id !== breaker.id || isSoloHero(u)) &&   // 单人模式可以接自己打出的失衡
-    (typeof bpCanAssistAttack !== "function" || bpCanAssistAttack(u))
+    (typeof bpCanAssistAttack !== "function" || bpCanAssistAttack(u)) &&
+    !lineBlocked(u.zone, broken.zone)                       // #44：协助攻击无论远近都不能穿墙，被墙隔开的不能选
   );
 }
 
@@ -6219,9 +6221,9 @@ function presentAssistModal() {
   const box = uiEl("assistModalBtns");
   if (!modal || !box) return;
   if (job.vsPlayer) {
-    text.textContent = `${target ? target.name : "玩家"} 陷入失衡。选择一名敌人发动协助攻击。飞碟触灵可以由自己造成的失衡接协助攻击。${breaker && breaker.kit !== "ufo_body" ? breaker.name + " 作为造成失衡者不能为自己这一击发动。" : ""}`;
+    text.textContent = `${target ? target.name : "玩家"} 陷入失衡。选择一名敌人发动协助攻击。飞碟触灵可以由自己造成的失衡接协助攻击。${breaker && breaker.kit !== "ufo_body" ? breaker.name + " 作为造成失衡者不能为自己这一击发动。" : ""}被危墙 / 关着的机关门隔开的敌人不能协助攻击。`;
   } else {
-    text.textContent = `${target ? target.name : "敌人"} 陷入失衡。选择一名其他玩家角色发动协助攻击。飞碟触灵本体失衡时也可被协助攻击；${breaker ? breaker.name : "造成失衡者"} 不能为自己这一击发动。`;
+    text.textContent = `${target ? target.name : "敌人"} 陷入失衡。选择一名其他玩家角色发动协助攻击。飞碟触灵本体失衡时也可被协助攻击；${breaker ? breaker.name : "造成失衡者"} 不能为自己这一击发动；被危墙 / 关着的机关门隔开的角色不能协助攻击。`;
   }
   box.innerHTML = "";
   list.forEach(h => {
@@ -11570,7 +11572,8 @@ function runSkillInner(id, optRun) {
     } else if (id === "nora_assist") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       if (Number(a.zone) === Number(t.zone)) {
-        const dest = zoneNeighbors(a.zone)[0];
+        // #44：后退也要能走得到（skillMoveZones 查地形），退到的区和目标之间不能隔墙
+        const dest = skillMoveZones(a, 1).map(Number).find(z => z !== Number(a.zone) && !lineBlocked(z, t.zone));
         if (dest) { a.zone = dest; lines.push(`协助攻击：先退到 ${dest} 区再发射针尖。`); }
       }
       hitOne(a, t, { element: "ice", mult: 1, baseBreak: 0, atk, flags: { action: true, assist: true } });
