@@ -37,7 +37,118 @@ function trpgBuy(key, qty, free) {
   if (!free) state.kuizhi = (Number(state.kuizhi) || 0) - cost;
   if (row.give.water) setLedgerWater(ledgerWater() + row.give.water * qty);
   if (row.give.item) bagAdd(row.give.item, qty);
-  return [`${free ? "主持人给予" : "买下"} ${trpgShopName(row)} ×${qty}${free ? "" : `，花掉 ${cost} 奎支（剩 ${state.kuizhi}）`}。`];
+  const out = [`${free ? "主持人给予" : "买下"} ${trpgShopName(row)} ×${qty}${free ? "" : `，花掉 ${cost} 奎支（剩 ${state.kuizhi}）`}。`];
+  if (!free) trpgEarnPoints(cost, out);
+  return out;
+}
+
+/* ---------- 工坊（docs/workshop-design.md 第 5–7 节）----------
+ * 配方、商店积分记在队伍账上（LEDGER.workshop），跟着存档空位走。
+ * 制作检定照常由玩家掷：主持人可以让程序掷，也可以直接记下玩家掷出的结果；难度可以改。地点不强制，主持人按剧情判断。 */
+function trpgWorkshop() {
+  if (!LEDGER.workshop) LEDGER.workshop = { recipes: [], points: 0, carry: 0 };
+  return LEDGER.workshop;
+}
+function trpgEarnPoints(spent, out) {
+  const per = typeof ROGUE_SHOP_POINTS !== "undefined" ? Number(ROGUE_SHOP_POINTS.per) || 0 : 0;
+  if (!per || !(spent > 0)) return;
+  const w = trpgWorkshop();
+  const total = w.carry + spent, got = Math.floor(total / per);
+  w.carry = total - got * per;
+  w.points += got;
+  if (got && out) out.push(`商店积分 +${got} → ${w.points}。`);
+}
+function trpgPointsInfo() {
+  const w = trpgWorkshop(), per = typeof ROGUE_SHOP_POINTS !== "undefined" ? Number(ROGUE_SHOP_POINTS.per) || 0 : 0;
+  return { points: w.points, carry: w.carry, per, next: per ? per - w.carry : 0 };
+}
+function trpgAdjustPoints(n, why) {
+  n = Math.floor(Number(n) || 0);
+  if (!n) return [];
+  const w = trpgWorkshop();
+  w.points = Math.max(0, w.points + n);
+  return [`商店积分 ${n > 0 ? "+" : ""}${n}${why ? "（" + why + "）" : ""}，现有 ${w.points}。`];
+}
+function trpgRedeem(itemId) {
+  const it = EFFECT_ITEMS.find(x => x.id === itemId && x.points > 0);
+  if (!it) return ["这件东西不能用积分兑换。"];
+  const w = trpgWorkshop();
+  if (w.points < it.points) return [`积分不够：${it.name} 要 ${it.points}，现有 ${w.points}。`];
+  w.points -= it.points;
+  bagAdd(it.id, 1);
+  return [`用 ${it.points} 积分兑换 ${it.name}（剩 ${w.points} 积分）。`];
+}
+function trpgKnowsRecipe(id) {
+  const it = craftItem(id);
+  return !!it && (CRAFT_RULES.knownDiffs.includes(it.diff) || trpgWorkshop().recipes.includes(id));
+}
+/** 主持人教会 / 收回一张配方 */
+function trpgTeachRecipe(id, on) {
+  const it = craftItem(id);
+  if (!it) return ["没有这个配方。"];
+  const w = trpgWorkshop();
+  w.recipes = w.recipes.filter(x => x !== id);
+  if (on !== false) w.recipes.push(id);
+  return [on !== false ? `学会了${it.name}的配方（${ROGUE_CHECKS.diffs[it.diff].name} · ${it.prof}）。` : `收回${it.name}的配方。`];
+}
+function trpgProfLevel(u, prof) {
+  const p = heroProfile(u.kit), profs = (p && p.profs) || {};
+  let level = Math.min(PROF_MAX, Number(profs[profName(prof)] || profs[prof]) || 0);
+  if (!level && typeof featHas === "function" && featHas(u, "polymath")) level = 1;
+  return level;
+}
+/** 成功率：diff 不给时按配方的难度（主持人可以改）；helper 有对应熟练项就给优势 */
+function trpgCraftOdds(kit, itemId, diff, helper) {
+  const it = craftItem(itemId), u = trpgHeroes().find(h => h.kit === kit);
+  if (!it || !u) return null;
+  diff = ROGUE_CHECKS.diffs[diff] ? diff : it.diff;
+  const level = trpgProfLevel(u, it.prof);
+  const hp = (u.layers || []).reduce((a, l) => a + (Number(l.current) || 0), 0), max = (u.layers || []).reduce((a, l) => a + (Number(l.max) || 0), 0);
+  const perks = checkPerksFor(u.kit, it.prof, hp * 2 < max);
+  const hu = helper && helper !== kit ? trpgHeroes().find(h => h.kit === helper) : null;
+  const helped = !!(hu && trpgProfLevel(hu, it.prof) > 0);
+  const adv = !!perks.adv || helped, dis = !!perks.dis && !adv;
+  const base = ROGUE_CHECKS.chance[level][["easy", "normal", "hard", "extreme"].indexOf(diff)] || 0;
+  let chance = adv ? 1 - (1 - base) * (1 - base) : dis ? base * base : base;
+  if (perks.reroll) chance = 1 - (1 - chance) * (1 - chance);
+  return { kit, item: it.id, name: u.name, prof: it.prof, diff, diffName: ROGUE_CHECKS.diffs[diff].name, level, base, chance: base ? chance : 0,
+    adv, dis, reroll: !!perks.reroll, helped, hours: CRAFT_RULES.hours[diff] };
+}
+/** 制作一样：c = { kit, item, diff?, helper?, result: "roll"（程序掷）/ "ok" / "fail"（记下玩家掷的结果）}。材料要背包里有实物（金属也是） */
+function trpgCraft(c) {
+  c = c || {};
+  const it = craftItem(c.item);
+  if (!it) return ["没有这个配方。"];
+  if (!trpgKnowsRecipe(it.id)) return [`还不会做${it.name}（在工坊页教会配方）。`];
+  const o = trpgCraftOdds(c.kit, it.id, c.diff, c.helper);
+  if (!o) return ["没有这名角色。"];
+  const rc = CRAFT_RECIPES[it.id];
+  const lack = Object.keys(rc).filter(id => bagCount(id) < rc[id]);
+  if (lack.length) return ["材料不够：" + lack.map(id => `${ITEM_CATALOG[id].name} 差 ${rc[id] - bagCount(id)}`).join("，") + "。"];
+  let ok, rollText = "";
+  if (c.result === "ok" || c.result === "fail") ok = c.result === "ok";
+  else {
+    if (!o.base) return [`${o.name} 没有「${it.prof}」熟练，做不了${o.diffName}的东西。`];
+    const r = typeof Hotseat !== "undefined" ? Hotseat.rollCheck({ base: o.base, adv: o.adv, dis: o.dis, reroll: o.reroll }) : { ok: Math.random() < o.chance, rolls: [] };
+    ok = r.ok;
+    rollText = r.rolls.length ? `d100 ${r.rolls.map(x => x.roll == null ? x.label : (x.label ? x.label + " " : "") + x.roll).join("，")} → ` : "";
+  }
+  const spend = ok ? rc : craftFailLoss(rc);
+  Object.keys(spend).forEach(id => bagAdd(id, -spend[id]));
+  const used = Object.keys(spend).map(id => `${ITEM_CATALOG[id].name}×${spend[id]}`).join("、") || "无";
+  const helperName = o.helped ? `（${(trpgHeroes().find(h => h.kit === c.helper) || {}).name} 打下手）` : "";
+  const out = [`${o.name}${helperName} 制作${it.name}（${o.diffName} · 成功率 ${Math.round(o.chance * 1000) / 10}%）：${rollText}${ok ? "成功" : "失败"}。` +
+    (ok ? `用掉 ${used}。` : `损失 ${used}，壳体留着。`)];
+  if (ok) bagAdd(it.id, 1);
+  return out.concat(trpgPassHours(o.hours));
+}
+function trpgSalvage(itemId) {
+  const y = salvageYield(itemId);
+  if (!y) return ["这件东西拆不了。"];
+  if (bagCount(itemId) < 1) return ["背包里没有这件东西。"];
+  bagAdd(itemId, -1);
+  Object.keys(y).forEach(id => bagAdd(id, y[id]));
+  return [`拆掉 ${ITEM_CATALOG[itemId].name}：拿回 ${Object.keys(y).map(id => `${ITEM_CATALOG[id].name}×${y[id]}`).join("、")}。`];
 }
 /** 背包里的东西 ±n（丢弃、剧情里拿走 / 得到） */
 function trpgAdjustItem(id, n) {

@@ -87,13 +87,14 @@ const LEDGER = {
   placePos: null,      // 跑团：标记拖到了地图上任意位置时的坐标 { x, y }（百分比）；place 记最近的地点
   spit: {},            // 角色 kit → 吐酸攻击的属性（兽人-蜥蜴种族特长，长休时可以换；没写是酸）
   ammoOrder: {},       // 胶囊弹药+：龙哥长休排好的下一场开局弹序（"RRBBRB"），用一场就清掉
+  workshop: null,      // 跑团工坊（trpg.js）：{ recipes: 学会的配方, points: 商店积分, carry: 积分零头（奎支）}
 
   /** 存进队伍档案 */
   save() {
     return JSON.parse(JSON.stringify({
       day: this.day, hours: this.hours, clock: this.clock, dur: this.dur,
       heroes: this.heroes, weapons: this.weapons, shortUsed: this.shortUsed,
-      restOnce: this.restOnce, career: this.career, tasks: this.tasks || [], place: this.place || null, placePos: this.placePos || null, spit: this.spit || {}, ammoOrder: this.ammoOrder || {}, water: ledgerWater()
+      restOnce: this.restOnce, career: this.career, tasks: this.tasks || [], place: this.place || null, placePos: this.placePos || null, spit: this.spit || {}, ammoOrder: this.ammoOrder || {}, workshop: this.workshop || null, water: ledgerWater()
     }));
   },
   load(s) {
@@ -112,6 +113,8 @@ const LEDGER = {
     this.placePos = s.placePos && isFinite(Number(s.placePos.x)) && isFinite(Number(s.placePos.y)) ? { x: Number(s.placePos.x), y: Number(s.placePos.y) } : null;
     this.spit = s.spit && typeof s.spit === "object" ? Object.assign({}, s.spit) : {};
     this.ammoOrder = s.ammoOrder && typeof s.ammoOrder === "object" ? Object.assign({}, s.ammoOrder) : {};
+    this.workshop = s.workshop && typeof s.workshop === "object"
+      ? { recipes: Array.isArray(s.workshop.recipes) ? s.workshop.recipes.slice() : [], points: Number(s.workshop.points) || 0, carry: Number(s.workshop.carry) || 0 } : null;
     if (s.water != null) setLedgerWater(s.water);
   },
   reset() { this.load({}); }

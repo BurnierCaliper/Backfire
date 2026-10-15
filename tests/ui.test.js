@@ -1697,3 +1697,26 @@ test("单局：任务板上的工坊能制作道具", async (t) => {
   assert.match(await page.textContent("#run-log"), /电解液罐：成功/);
   assert.deepEqual(o.errors, []);
 });
+
+test("跑团模式：工坊页能教配方、制作、调积分，刷新后配方还在", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await newTrpg(page);
+  await page.evaluate(() => { bagAdd("cm_scrap", 1); bagAdd("cm_coil", 2); });
+  await page.click('[data-tab="workshop"]');
+  const kit = await page.$eval("#wk-kit", el => el.value);
+  await page.selectOption("#wk-item", "fx_shock");
+  await page.click('[data-craft="ok"]');
+  await page.waitForFunction(() => bagCount("fx_shock") === 1);
+  await page.click('[data-teach="fx_overload:1"]');
+  await page.click("#wk-pts-add");
+  assert.ok(await page.evaluate(() => trpgKnowsRecipe("fx_overload") && trpgPointsInfo().points === 1));
+  await page.reload();
+  await page.evaluate(() => { window.__noLevelUpPopup = true; });
+  await page.click("#t-sandbox");
+  await page.click('[data-open="0"]');
+  await page.waitForSelector("#scr-trpg:not([hidden])");
+  assert.ok(await page.evaluate(() => trpgKnowsRecipe("fx_overload")));
+  assert.ok(kit);
+  assert.deepEqual(o.errors, []);
+});

@@ -368,6 +368,22 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **工坊第 5 步（二）：跑团主持人工具**（作者定，设计文档第 7 节；ledger.js · `LEDGER.workshop`；trpg.js · `trpgEarnPoints` / `trpgPointsInfo` / `trpgAdjustPoints` / `trpgRedeem` / `trpgTeachRecipe` / `trpgCraftOdds` / `trpgCraft` / `trpgSalvage`；trpg-commands.js；trpg-ui.js 新的「工坊」页；tests/trpg-workshop.test.js、tests/ui.test.js）
+  - 跑团的配方和商店积分记在队伍账上，跟着存档空位走。
+  - 商店积分：
+    - 在跑团商店「买」也是每花 3,000 奎支得 1 分；主持人「给予」不算。
+    - 主持人可以手动增减积分。
+    - 工坊页可以兑换自我效果道具。
+  - 配方：简单的一开始就会；其余的由主持人在工坊页「教会」或「收回」（工匠教学、配方芯片都按剧情来）。
+  - 制作：
+    - 主持人选谁做、做什么、谁打下手，页面显示成功率；
+    - 难度默认按配方，主持人可以改；
+    - 可以让程序掷骰，也可以直接「记成功 / 记失败」（玩家自己掷的）；
+    - 时间、材料损失和单局一样；
+    - 地点不强制，主持人按剧情判断；材料要背包里有实物（金属也是）。
+  - 拆解和单局一样。
+  - 发材料、发道具照旧用「商店 · 给予」和背包的 ±1。
+
 - **工坊第 5 步（一）：拆解**（作者定；items.js · `CRAFT_RULES.salvage` / `partScrap` / `salvageYield`；rogue.js · `salvageList` / `salvage`；rogue-commands.js；rogue-ui.js 工坊面板「拆解」；tests/crafting.test.js）
   - 在工坊或休息点，可以把用不上的效果道具、武器改装件拆回材料。不花时间。
   - 效果道具：

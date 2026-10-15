@@ -17,7 +17,7 @@
   const UNDO_MAX = 20;
 
   const TABS = [
-    ["party", "队伍"], ["sheet", "角色"], ["rest", "时间与休息"], ["shop", "商店"], ["bag", "背包"], ["smith", "武器升级"], ["tasks", "任务"], ["checks", "检定"], ["battles", "战斗模板"], ["backstage", "后台"]
+    ["party", "队伍"], ["sheet", "角色"], ["rest", "时间与休息"], ["shop", "商店"], ["bag", "背包"], ["smith", "武器升级"], ["workshop", "工坊"], ["tasks", "任务"], ["checks", "检定"], ["battles", "战斗模板"], ["backstage", "后台"]
   ];
 
   function heroes() { return trpgHeroes(); }
@@ -657,6 +657,66 @@
       </div>
       ${cards || '<p class="r-hint">还没有检定。</p>'}`;
   };
+  /* ---------- 工坊：制作、学配方、积分、拆解（trpg.js · trpgCraft 等）---------- */
+  const craftForm = { kit: "", item: "", diff: "", helper: "" };
+  PANELS.workshop = function () {
+    const hs = heroes().filter(h => !h.dead);
+    if (!hs.some(h => h.kit === craftForm.kit)) craftForm.kit = (hs[0] || {}).kit || "";
+    const items = EFFECT_ITEMS.filter(it => CRAFT_RECIPES[it.id]);
+    if (!items.some(it => it.id === craftForm.item)) craftForm.item = items[0].id;
+    const pts = trpgPointsInfo();
+    const o = craftForm.kit ? trpgCraftOdds(craftForm.kit, craftForm.item, craftForm.diff, craftForm.helper) : null;
+    const it = craftItem(craftForm.item), rc = CRAFT_RECIPES[craftForm.item];
+    const mats = Object.keys(rc).map(id => `<span class="${bagCount(id) >= rc[id] ? "" : "bad"}">${esc(ITEM_CATALOG[id].name)} ${bagCount(id)}/${rc[id]}</span>`).join("、");
+    const known = trpgKnowsRecipe(craftForm.item);
+    const sel = (attr, list, cur) => `<select ${attr}>${list.map(([v, n]) => `<option value="${esc(v)}"${v === cur ? " selected" : ""}>${esc(n)}</option>`).join("")}</select>`;
+    const diffs = [["", `按配方（${ROGUE_CHECKS.diffs[it.diff].name}）`]].concat(Object.keys(ROGUE_CHECKS.diffs).map(k => [k, ROGUE_CHECKS.diffs[k].name]));
+    const recipeRows = items.map(r => {
+      const k = trpgKnowsRecipe(r.id), easy = CRAFT_RULES.knownDiffs.includes(r.diff);
+      const m = Object.keys(CRAFT_RECIPES[r.id]).map(id => `${ITEM_CATALOG[id].name}×${CRAFT_RECIPES[r.id][id]}`).join(" + ");
+      return `<div class="tr-row"><b>${esc(r.name)}</b> <span class="r-hint">${esc(r.prof)} · ${esc(ROGUE_CHECKS.diffs[r.diff].name)} · ${CRAFT_RULES.hours[r.diff]} 小时 · ${esc(m)}</span>
+        ${easy ? '<span class="r-hint">一开始就会</span>' : `<button class="g-btn small" data-teach="${esc(r.id)}:${k ? 0 : 1}">${k ? "收回配方" : "教会"}</button>`}</div>`;
+    }).join("");
+    const salv = bagList().filter(x => salvageYield(x.id)).map(x => {
+      const y = salvageYield(x.id);
+      return `<div class="tr-row">${esc(x.name)} ×${x.qty} → ${esc(Object.keys(y).map(id => `${ITEM_CATALOG[id].name}×${y[id]}`).join("、"))}
+        <button class="g-btn small" data-salvage="${esc(x.id)}">拆一件</button></div>`;
+    }).join("");
+    const redeem = EFFECT_ITEMS.filter(x => x.points > 0).map(x =>
+      `<button class="g-btn small" data-redeem="${esc(x.id)}" ${pts.points < x.points ? "disabled" : ""}>${esc(x.name)} · ${x.points} 积分</button>`).join("");
+    return `<p class="r-hint">规则见设计文档第 5 节：简单、普通 1 小时，困难 2，极难 3（会推进时间）；失败时非壳体材料丢一半（向上取整），废料、金属留着；有对应熟练项的队友打下手给优势。
+        城里、工匠处的工坊五类都能做；野外休息点只能做投掷罐、弹针、增益 / 减益（主持人按剧情判断）。材料在「商店 · 制作材料（黑市）」里买或给予。</p>
+      <h3>制作</h3>
+      <div class="tr-up">
+        <div class="tr-row">谁做 ${sel('id="wk-kit"', hs.map(h => [h.kit, h.name]), craftForm.kit)}
+          做什么 ${sel('id="wk-item"', items.map(r => [r.id, `${r.name}${trpgKnowsRecipe(r.id) ? "" : "（还不会）"}`]), craftForm.item)}
+          难度 ${sel('id="wk-diff"', diffs, craftForm.diff)}
+          打下手 ${sel('id="wk-helper"', [["", "没人帮"]].concat(hs.filter(h => h.kit !== craftForm.kit).map(h => [h.kit, h.name])), craftForm.helper)}</div>
+        <div class="r-hint">${esc(it.prof)} · 材料：${mats}${o ? ` · ${["没有熟练", "一级熟练", "二级熟练", "三级熟练"][o.level]} · 成功率 ${pct(o.chance)}${o.adv ? " · 优势" : o.dis ? " · 劣势" : ""}${o.reroll ? " · 失败可重掷" : ""} · ${o.hours} 小时` : ""}</div>
+        <div class="tr-row">${known ? `<button class="g-btn" data-craft="roll" ${o && o.base ? "" : "disabled"}>掷骰制作</button>
+          <button class="g-btn small" data-craft="ok">记成功（玩家掷的）</button><button class="g-btn small" data-craft="fail">记失败（玩家掷的）</button>` : '<span class="r-hint">还不会这张配方：在下面教会。</span>'}</div>
+      </div>
+      <h3>商店积分</h3>
+      <div class="tr-row">现有 <b>${pts.points}</b> 积分（在商店每花 ${pts.per} 奎支得 1 分，再花 ${pts.next} 得下一分）
+        <input type="number" id="wk-pts" value="1" style="width:70px"> <button class="g-btn small" id="wk-pts-add">＋</button><button class="g-btn small" id="wk-pts-sub">－</button></div>
+      <div class="tr-row">兑换：${redeem}</div>
+      <h3>配方</h3>${recipeRows}
+      <h3>拆解（不花时间）</h3>${salv || '<p class="r-hint">背包里没有能拆的东西。</p>'}`;
+  };
+  function bindWorkshop(P) {
+    const k = $("wk-kit"); if (!k) return;
+    k.onchange = () => { craftForm.kit = k.value; render(); };
+    $("wk-item").onchange = () => { craftForm.item = $("wk-item").value; craftForm.diff = ""; render(); };
+    $("wk-diff").onchange = () => { craftForm.diff = $("wk-diff").value; render(); };
+    $("wk-helper").onchange = () => { craftForm.helper = $("wk-helper").value; render(); };
+    P.querySelectorAll("[data-craft]").forEach(b => { b.onclick = () => act(ruleCommand("craft", { kit: craftForm.kit, item: craftForm.item, diff: craftForm.diff || null, helper: craftForm.helper || null, result: b.dataset.craft })); });
+    P.querySelectorAll("[data-teach]").forEach(b => { b.onclick = () => { const [item, on] = b.dataset.teach.split(":"); act(ruleCommand("teachRecipe", { item, on: on === "1" })); }; });
+    P.querySelectorAll("[data-salvage]").forEach(b => { b.onclick = () => act(ruleCommand("salvage", { item: b.dataset.salvage })); });
+    P.querySelectorAll("[data-redeem]").forEach(b => { b.onclick = () => act(ruleCommand("redeem", { item: b.dataset.redeem })); });
+    const n = () => Math.abs(Number($("wk-pts").value) || 0);
+    $("wk-pts-add").onclick = () => act(ruleCommand("adjustPoints", { amount: n(), why: "主持人" }));
+    $("wk-pts-sub").onclick = () => act(ruleCommand("adjustPoints", { amount: -n(), why: "主持人" }));
+  }
   /** 联机时走房间（玩家马上看到）；本机热座直接交给热座会话 */
   async function checkSubmit(cmd) {
     const net = window.OnlineGame && OnlineGame.isHost && OnlineGame.isHost();
@@ -959,6 +1019,7 @@
     bindTasks(P);
     bindTemplates(P);
     bindChecks(P);
+    bindWorkshop(P);
     bindAttrRequests(P);
     const on = (id, fn) => { const b = $(id); if (b) b.onclick = fn; };
     $("tr-tabs").querySelectorAll("[data-tab]").forEach(b => { b.onclick = () => { tab = b.dataset.tab; render(); }; });
