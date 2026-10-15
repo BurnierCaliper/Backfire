@@ -1729,6 +1729,24 @@ const Rogue = (function () {
     passHours(run, hours, notes);
     return logAll(run, notes);
   }
+  /** 背包里能拆的东西：[{ id, name, qty, yield: [{ id, name, qty }] }] */
+  function salvageList() {
+    ensureBag();
+    return state.bag.items.filter(r => r.qty > 0 && salvageYield(r.id)).map(r => {
+      const y = salvageYield(r.id);
+      return { id: r.id, name: ITEM_CATALOG[r.id].name, qty: r.qty, yield: Object.keys(y).map(id => ({ id, name: ITEM_CATALOG[id].name, qty: y[id] })) };
+    });
+  }
+  /** 拆一件：道具拆回壳体和一半材料，改装件拆成废料。不花时间 */
+  function salvage(run, itemId) {
+    if (!craftPlace(run)) throw new Error("这里不能拆（城里、工匠处、休息点才行）");
+    const y = salvageYield(itemId);
+    if (!y) throw new Error("这件东西拆不了");
+    if (bagCount(itemId) < 1) throw new Error("背包里没有这件东西");
+    bagAdd(itemId, -1);
+    Object.keys(y).forEach(id => bagAdd(id, y[id]));
+    return logAll(run, [`拆掉 ${ITEM_CATALOG[itemId].name}：拿回 ${Object.keys(y).map(id => `${ITEM_CATALOG[id].name}×${y[id]}`).join("、")}。`]);
+  }
   /** 向在场的工匠学配方：只教自己那一类熟练项的，简单配方本来就会 */
   function learnOptions(run) {
     const out = [];
@@ -2361,7 +2379,7 @@ const Rogue = (function () {
     role2Options, soloBattleInfo,
     restPlan, restOptions, canLongRest, sheetData, armoryData, lowHpWarning, escortInfo, partOffers, buyPart, sellPart, canSellParts, partStock, partSellPrice, partInstallCost, installPart, removePart, restAtNode, leaveNode, canShortRestBefore, shortRestBeforeNode,
     ambushChance, watchOptions,
-    buy, shopPoints, redeemList, redeem, craftPlace, craftList, craftOdds, craft, knowsRecipe, learnOptions, learnRecipe, rollRecipeChip,  canShop, shopItemName, shopStock, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
+    buy, shopPoints, redeemList, redeem, craftPlace, craftList, craftOdds, craft, knowsRecipe, learnOptions, learnRecipe, rollRecipeChip, salvageList, salvage,  canShop, shopItemName, shopStock, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
     presentSmiths, smithInfo, claimBlueprint, installBlueprint, blueprintById, weaponModsOf,
     smithQuote, introduceSmith,
     canClinic, cyberInfo, cyberPreview, cyberCost, modifyHero, healCost, healHero,

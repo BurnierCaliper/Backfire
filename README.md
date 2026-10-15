@@ -368,6 +368,14 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **工坊第 5 步（一）：拆解**（作者定；items.js · `CRAFT_RULES.salvage` / `partScrap` / `salvageYield`；rogue.js · `salvageList` / `salvage`；rogue-commands.js；rogue-ui.js 工坊面板「拆解」；tests/crafting.test.js）
+  - 在工坊或休息点，可以把用不上的效果道具、武器改装件拆回材料。不花时间。
+  - 效果道具：
+    - 壳体（废料、金属）全部拿回；
+    - 其余材料合起来拿回一半，向下取整，先给便宜的。比如超频针拆回废料 ×2 + 废线圈 ×1。
+  - 武器改装件拆成废料：C 级 2 份、B 级 3、A 级 4、S 级 6。
+  - 7 种基础道具（医疗包、注射剂、手榴弹……）没有配方，拆不了。
+
 - **工坊第 4 步：制作道具**（作者定，设计见 [docs/workshop-design.md](docs/workshop-design.md) 第 5 节；items.js · `CRAFT_RECIPES` / `CRAFT_RULES` / `craftFailLoss`；rogue-data.js · `ROGUE_CRAFT`；rogue.js · `craftPlace` / `craftList` / `craftOdds` / `craft` / `learnOptions` / `learnRecipe` / `rollRecipeChip`；rogue-commands.js；rogue-ui.js「工坊」面板；tests/crafting.test.js、tests/ui.test.js）
   - 36 个效果道具都能做，配方照设计文档；材料从队伍背包里扣。
   - **在哪做**：

@@ -169,9 +169,33 @@ const CRAFT_RULES = {
   failLoss: 0.5,
   shells: ["cm_scrap", "mat_metal"],
   benchKinds: ["field", "self"],
-  knownDiffs: ["easy"]
+  knownDiffs: ["easy"],
+  /* 拆解（不花时间，工坊和休息点都能拆）：壳体全拿回；其余材料合起来拿回 salvage 的比例（向下取整，先给便宜的）；
+   * 武器改装件按等级拆出 partScrap 份废料 */
+  salvage: 0.5,
+  partScrap: { C: 2, B: 3, A: 4, S: 6 }
 };
 function craftItem(id) { return EFFECT_ITEMS.find(it => it.id === id && CRAFT_RECIPES[id]) || null; }
+/** 拆一件东西能拿回什么 → { 材料 id: 份数 }；拆不了返回 null。背包里的改装件 id 是 part_改装件id */
+function salvageYield(itemId) {
+  const spec = ITEM_CATALOG[itemId];
+  if (!spec) return null;
+  if (spec.part && typeof WEAPON_PARTS !== "undefined" && WEAPON_PARTS[spec.part]) {
+    const n = CRAFT_RULES.partScrap[WEAPON_PARTS[spec.part].grade] || 0;
+    return n ? { cm_scrap: n } : null;
+  }
+  const rc = CRAFT_RECIPES[itemId];
+  if (!rc) return null;
+  const out = {}, pool = [];
+  Object.keys(rc).forEach(id => {
+    if (CRAFT_RULES.shells.includes(id)) out[id] = rc[id];
+    else for (let i = 0; i < rc[id]; i++) pool.push(id);
+  });
+  const price = id => (CRAFT_MATERIALS.find(m => m.id === id) || {}).price || 0;
+  pool.sort((a, b) => price(a) - price(b));
+  pool.slice(0, Math.floor(pool.length * CRAFT_RULES.salvage)).forEach(id => { out[id] = (out[id] || 0) + 1; });
+  return out;
+}
 /** 失败时损失哪些材料：非壳体材料摊开成一份一份，用调用方装好的随机数挑 ceil(总份数 × failLoss) 份 → { id: 份数 } */
 function craftFailLoss(recipe) {
   const pool = [];

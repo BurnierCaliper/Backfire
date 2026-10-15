@@ -426,7 +426,14 @@
       <p class="r-hint">材料：${stock}</p>
       ${here.length ? rows + `<button class="g-btn r-main" id="r-craft-go">开工</button>` : `<p class="r-hint">这里没有会做的配方。</p>`}
       <details><summary>全部配方</summary><ul class="r-recipes">${recipeRows}</ul></details>
+      ${salvageRows()}
     </details>`;
+  }
+  function salvageRows() {
+    const list = query("salvageList");
+    if (!list.length) return "";
+    return `<details><summary>拆解（不花时间）</summary><ul class="r-recipes">${list.map(x =>
+      `<li>${esc(x.name)} ×${x.qty} → ${x.yield.map(y => `${esc(y.name)}×${y.qty}`).join("、")} <button class="g-btn" data-salvage="${esc(x.id)}">拆一件</button></li>`).join("")}</ul></details>`;
   }
   function bagCountOf(id) { return typeof bagCount === "function" ? bagCount(id) : 0; }
 
@@ -854,6 +861,7 @@
     body.querySelectorAll("[data-buy]").forEach(b => { b.onclick = () => { if (window.Sfx) Sfx.ui("coin"); act({ action: "buy", key: b.dataset.buy, qty: 1 }); }; });
     const cp = $("r-craft");
     if (cp) cp.addEventListener("toggle", () => { craftOpen = cp.open; });
+    body.querySelectorAll("[data-salvage]").forEach(b => { b.onclick = () => act({ action: "salvage", item: b.dataset.salvage }); });
     body.querySelectorAll("[data-learn]").forEach(b => { b.onclick = () => act({ action: "learnRecipe", item: b.dataset.learn, smith: b.dataset.smith }); });
     on("r-craft-go", () => {
       const jobs = [];

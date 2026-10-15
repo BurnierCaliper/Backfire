@@ -134,3 +134,43 @@ test("首领必掉配方芯片：学会一张还不会的", () => {
   assert.equal((run.recipes || []).length, 1);
   assert.match(notes.join(""), /配方芯片/);
 });
+
+test("拆解：壳体全拿回，其余材料拿回一半（向下取整，先给便宜的）；不花时间", () => {
+  const { R, run, give, count } = setup();
+  give("fx_overload", 1);   // 废料 ×2 + 电芯 + 废线圈
+  const h0 = R.hoursAwake();
+  R.salvage(run, "fx_overload");
+  assert.equal(count("fx_overload"), 0);
+  assert.equal(count("cm_scrap"), 2);
+  assert.equal(count("cm_coil"), 1, "便宜的废线圈先给");
+  assert.equal(count("cm_cell"), 0);
+  assert.equal(R.hoursAwake(), h0);
+});
+
+test("拆解：自我效果的金属是壳体，全拿回；基础道具拆不了", () => {
+  const { R, run, give, count } = setup();
+  give("fx_s_anchor", 1);   // 金属 ×2 + 星灵组织 + 电芯
+  R.salvage(run, "fx_s_anchor");
+  assert.equal(count("mat_metal"), 2);
+  assert.equal(count("cm_spirit") + count("cm_cell"), 1);
+  give("medkit", 1);
+  assert.ok(R.salvageList().some(x => x.id === "fx_s_anchor") === false && !R.salvageList().some(x => x.id === "medkit"));
+  assert.throws(() => R.salvage(run, "medkit"), /拆不了/);
+});
+
+test("拆解：武器改装件按等级拆成废料", () => {
+  const { c, R, run, count } = setup();
+  const pid = vm.runInContext(`Object.keys(WEAPON_PARTS).find(id => WEAPON_PARTS[id].grade === "B")`, c);
+  const item = vm.runInContext(`weaponPartItemId(${JSON.stringify(pid)})`, c);
+  c.bagAdd(item, 1);
+  R.salvage(run, item);
+  assert.equal(count("cm_scrap"), 3);
+});
+
+test("拆解：不在工坊 / 休息点不能拆", () => {
+  const { R, run, give } = setup();
+  give("fx_shock", 1);
+  run.stage = "task";
+  run.task = { nodes: [{ type: "battle" }], index: 0 };
+  assert.throws(() => R.salvage(run, "fx_shock"), /不能拆/);
+});
