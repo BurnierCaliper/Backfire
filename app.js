@@ -7844,13 +7844,32 @@ function triggerMagnetShield(broken) {
   const c = findKit("chuan", state.units);
   if (!c || Number(c.zone) !== Number(broken.zone)) return notes;
   if (typeof passiveOn === "function" && !passiveOn(c)) return notes;   // 放弃被动「磁场护盾」
-  const dest = otherZone(c.zone);
-  notes.push(`磁场护盾：${broken.name} 上由川川/哔哩哩施加的护盾被破坏，效果触发后解除。同区敌人被推到 ${dest} 区并各受 1 击破。`);
+  const dest = magnetPushDest(c.zone);
+  notes.push(`磁场护盾：${broken.name} 上由川川/哔哩哩施加的护盾被破坏，效果触发后解除。同区敌人${dest != null ? `被推向 ${dest} 区` : "无处可推"}并各受 1 击破。`);
   visibleEnemies(c.zone).filter(u => !ignoresAoe(u)).forEach(u => {
-    u.zone = dest;
+    if (dest != null) displaceTo(u, dest, notes, "被磁场护盾推开");   // #44：走标准推人逻辑（墙、空隙、深渊、流沙……照常结算）
     dealBreak(u, 1, "electric", notes, "磁场护盾");
   });
   return notes;
+}
+/** 磁场护盾推人的目标区（#44，夕夏定）：只在隔着可通行间隔（非危墙、非关着的机关门）的相邻区里选；
+ *  优先危险区域（空隙、深渊、不稳桥梁、流沙、冻土、伏咬沙鱼、火场、酸液），危险区之间随机（对局种子）；
+ *  没有危险区才推向普通区；无处可推返回 null */
+function magnetPushDest(zone) {
+  zone = Number(zone);
+  const ns = typeof zoneNeighbors === "function" ? zoneNeighbors(zone) : [];
+  const cand = (ns.length ? ns : [otherZone(zone)]).map(Number).filter(z => z !== zone && state.fields[z]);
+  const open = cand.filter(z => { const g = getGap(zone, z); return !(g.type === "wall" || (g.type === "door" && !g.open)); });
+  if (!open.length) return null;
+  const hazard = z => {
+    const g = getGap(zone, z), f = state.fields[z] || {};
+    if (g.type === "void" || g.type === "bridge") return true;
+    if (f.abyss || f.quicksand || f.ice || f.fireOn || (Number(f.fire) || 0) > 0 || f.acid) return true;
+    return (state.units || []).some(u => u.kit === "sandfish_ambush" && !u.dead && Number(u.zone) === z);
+  };
+  const danger = open.filter(hazard);
+  if (danger.length) return danger[Math.floor(Math.random() * danger.length)];
+  return open[0];
 }
 
 function ownerEngineOn(kit) {
