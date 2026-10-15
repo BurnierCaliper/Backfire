@@ -6517,12 +6517,14 @@ function performAssistBlock(helper, target, attacker, forced, atkRange) {
     if (helper.kit === "xia" && attacker) {
       // 走 dealBreak：打空就失衡、触发协助攻击（以前直接改架势，敌人架势 0 却不失衡，下回合照常行动）
       dealBreak(attacker, 1, "physical", notes, "夕夏格挡反打", { by: helper });
+      addFuel(1, "协助格挡", notes);   // #44：解锁燃油槽后协助格挡成功 +1 燃油（引擎开不开都给）
       if (helper.resources && helper.resources.engine) {
         const burn = Math.floor(effectiveAtk(helper, state.units) / 2);
         notes.push(`引擎格挡：追加 ${burn} 火焰。`);
         hitOne2(helper, attacker, { atk: 0, mult: 0, flat: burn, element: "fire", baseBreak: 0, atkRange: "melee", flags: { action: true, opportunity: true } }, notes);
       }
     }
+    if (helper.kit === "berniel" && attacker) addFuel(1, "柏妮尔协助格挡", notes);   // #44：同上，引擎开不开都给
     if (helper.kit === "berniel" && attacker && ownerEngineOn("xia")) {
       notes.push("引擎下柏妮尔格挡成功：对进攻者打出 1×atk 物理。");
       hitOne2(helper, attacker, { element: "physical", mult: 1, baseBreak: 0, atk: effectiveAtk(helper, state.units), atkRange: "melee", flags: { action: true, opportunity: true } }, notes);
@@ -7577,7 +7579,8 @@ function dealTo(attacker, target, opt) {
     attacker.resources.weakNext = false;
   }
   // 启动引擎+：夏 / 柏妮尔的火属性攻击动作自动消耗所有燃油，伤害 +燃油×10%（处决每点 15%）；一个动作只消耗一次
-  if (flags.action && (opt.element || "physical") === "fire" && attacker && (attacker.kit === "xia" || attacker.kit === "berniel") && xiaFuelOn()) {
+  // #44：格挡反打（opportunity）不消耗燃油
+  if (flags.action && !flags.opportunity && (opt.element || "physical") === "fire" && attacker && (attacker.kit === "xia" || attacker.kit === "berniel") && xiaFuelOn()) {
     const acc = state.actionAcc || {};   // 没有行动记账（例如主持人出手）时按这一击单独算
     if (acc.fuelPct == null) {
       const n = takeFuel();
