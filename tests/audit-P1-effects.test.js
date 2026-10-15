@@ -169,6 +169,22 @@ test("干涉场：叠层只在站在干涉场里时生效，离开就清掉；�
   assert.equal(foe.interfere, 0.75);
 });
 
+test("干涉场叠层封顶 ±100%：到顶后不再叠加（以前会叠到 −2425% 把伤害变成 0）", () => {
+  const { st, foe, kit, hit } = field();
+  const kolt = kit("kolt");
+  layers(foe, [["flesh", 100000]]);
+  st.fields[1].harmonic = true;
+  for (let i = 0; i < 8; i++) hit(kolt, foe, "fire");
+  assert.equal(foe.interfere, 1, "克制叠到 +100% 为止");
+  layers(foe, [["armor", 100000]]);
+  for (let i = 0; i < 9; i++) hit(kolt, foe, "fire");
+  assert.equal(foe.interfere, -1, "反向清空后劣势也只叠到 −100%");
+  foe.interfere = -24; foe.interfereZone = 1;
+  const b = hp(foe);
+  hit(kolt, foe, "fire");
+  assert.ok(b - hp(foe) >= 0 && foe.interfere >= -1, "旧存档里超上限的叠层按上限算");
+});
+
 test("冻土的冰 25% 易伤对飞行单位无效", () => {
   const { c, st, foe, kit, hit } = field();
   st.fields[1].ice = true;

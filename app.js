@@ -8526,7 +8526,7 @@ function heluScanAct(a, picks, lines) {
       const up = picks.sign !== "-";
       here.forEach(u => {
         const cur = Number(u.interfere) || 0;
-        u.interfere = up ? (cur < 0 ? 0.25 : cur + 0.25) : (cur > 0 ? -0.25 : cur - 0.25);
+        u.interfere = up ? (cur < 0 ? 0.25 : Math.min(INTERFERE_CAP, cur + 0.25)) : (cur > 0 ? -0.25 : Math.max(-INTERFERE_CAP, cur - 0.25));
         lines.push(`${u.name} 干涉 ${up ? "+" : "−"}25% → 下次伤害 ${u.interfere > 0 ? "+" : ""}${Math.round(u.interfere * 100)}%`);
       });
       if (!here.length) lines.push("区里没有单位。");

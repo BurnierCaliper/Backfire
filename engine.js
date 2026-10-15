@@ -585,6 +585,8 @@ function weatherDamagePct(weather, element) {
   }
 }
 
+/** 干涉场叠层上限（作者定）：±100%，到顶后不再叠加（以前无上限，曾叠到 −2425% 把伤害全变成 0） */
+const INTERFERE_CAP = 1;
 function milestone(level, every = 5) {
   // 达到 5/10/15… 或 2/4/6… 的当级就加，不是下一级才加
   return Math.floor(Math.max(1, Number(level) || 1) / every);
@@ -768,7 +770,7 @@ function resolveAttack(ctx) {
   let selfBreak = 0;
   // 干涉场：叠层只在单位站在干涉场里时生效（叠层记着是在哪一区叠的，换了区就不算）；不在干涉场里挨打就清掉
   const interfHere = !!fieldT.harmonic && (t.interfereZone == null || Number(t.interfereZone) === Number(t.zone));
-  let interfDelta = interfHere ? (Number(t.interfere) || 0) : 0;
+  let interfDelta = interfHere ? Math.max(-INTERFERE_CAP, Math.min(INTERFERE_CAP, Number(t.interfere) || 0)) : 0;
   let firstStartType = null;
   // 熔融：多段攻击每一段都吃熔融（冰 ×2 伤害、+1 击破），整次攻击结算完才结束（作者定：每段都算）
   let meltLive = !!(t.instant && t.instant.melt);
@@ -1077,8 +1079,11 @@ function resolveAttack(ctx) {
         interfDelta = up ? step : -step;
         hAdd(`干涉场遇到反向：清空后从 ${stepTxt} 重计。`);
       } else {
-        interfDelta += up ? step : -step;
-        hAdd(`干涉场：本次${up ? "克制" : "劣势"}，下次伤害 ${stepTxt}。`);
+        const before = interfDelta;
+        interfDelta = Math.max(-INTERFERE_CAP, Math.min(INTERFERE_CAP, interfDelta + (up ? step : -step)));
+        hAdd(interfDelta === before
+          ? `干涉场：叠层已到上限 ${pctTxt(interfDelta)}，不再叠加。`
+          : `干涉场：本次${up ? "克制" : "劣势"}，下次伤害 ${stepTxt}。`);
       }
     }
 
