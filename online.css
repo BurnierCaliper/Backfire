@@ -372,3 +372,8 @@ body.online-player .ol-dock .ol-button { min-height: 36px; padding: 6px 12px; }
   .ol-exploration-party .ol-unit .ol-points { gap: 2px 8px; }
 }
 @media (max-width: 760px) { body.online-player:not(.ol-in-battle) .ol-weather-none { display: none; } }
+/* 游戏内确认框（代替原生 confirm）：比其他弹窗高一层，垂直居中 */
+.ol-confirm { z-index: 110; align-items: center; }
+.ol-confirm .ol-card { max-width: 420px; }
+.ol-confirm p { margin: 0; color: #e7dcc6; line-height: 1.6; }
+.ol-confirm-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px; }

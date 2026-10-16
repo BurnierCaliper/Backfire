@@ -65,6 +65,10 @@
     // 大字：主持人发，所有人画面中间出现（像 Minecraft 的 /title）
     const titleShow = make("div", "online-title", "ol-title-show", { "aria-live": "assertive" });
     titleShow.hidden = true;
+    // 游戏内确认框（代替浏览器原生 confirm()：不阻塞页面、和游戏画风一致；Esc / 点外面 = 取消）
+    const confirmBox = make("section", "online-confirm", "ol-overlay ol-bag ol-roll ol-confirm", { role: "alertdialog", "aria-modal": "true", "aria-label": "确认" });
+    confirmBox.hidden = true;
+    let confirmResolve = null;
     const titleBox = make("section", "online-title-form", "ol-overlay ol-bag ol-roll", { role: "dialog", "aria-label": "发大字" });
     titleBox.hidden = true;
     const titleForm = { text: "", sub: "", tone: "plain", seconds: 4 };
@@ -116,6 +120,11 @@
     });
     rollBox.addEventListener("input", event => { if (event.target.id === "ol-roll-note") rollForm.note = event.target.value; });
     rollBox.addEventListener("keydown", event => { event.stopPropagation(); if (event.key === "Escape") rollBox.hidden = true; if (event.key === "Enter" && event.target.id === "ol-roll-note") doRoll(); });
+    confirmBox.addEventListener("click", event => {
+      if (event.target === confirmBox || event.target.closest('[data-confirm="no"]')) closeConfirm(false);
+      else if (event.target.closest('[data-confirm="yes"]')) closeConfirm(true);
+    });
+    confirmBox.addEventListener("keydown", event => { event.stopPropagation(); if (event.key === "Escape") { event.preventDefault(); closeConfirm(false); } });
     suppliesBox.addEventListener("click", event => { if (event.target === suppliesBox || event.target.closest('[data-online="suppliesClose"]')) { suppliesOpen = false; suppliesBox.hidden = true; } });
     suppliesBox.addEventListener("keydown", event => { if (event.key === "Escape") { suppliesOpen = false; suppliesBox.hidden = true; } });
     bagBox.addEventListener("keydown", event => { event.stopPropagation(); if (event.key === "Escape") bagBox.hidden = true; });
@@ -763,6 +772,18 @@
       const perks = u && typeof checkPerksFor === "function" ? checkPerksFor(u.kit, rollForm.prof, false) : {};
       rollBox.innerHTML = `<div class="ol-card"><header><h2>掷骰 · d100</h2><button type="button" class="ol-button" data-roll="close">关闭</button></header>${units.length ? `<label>角色<select id="ol-roll-unit">${units.map(x => option(x.id, x.name, x.id === rollForm.unit)).join("")}</select></label><label>熟练项<select id="ol-roll-prof">${profOpts}</select></label><p class="ol-roll-lines"><b>${esc(LV[level])}</b>　点数越低越好：${esc(rollLines(level))}${perks.adv ? "（种族优势：掷两颗取低）" : perks.dis ? "（种族劣势：掷两颗取高）" : ""}</p><label>说明（可不填）<input id="ol-roll-note" maxlength="80" value="${esc(rollForm.note)}" placeholder="比如：撬开仓库的锁"></label>${view.isHost ? `<label class="ol-check-line"><input type="checkbox" id="ol-roll-secret"${rollForm.secret ? " checked" : ""}> 暗骰（结果只有主持人看得到）</label>` : ""}<footer><button type="button" class="ol-button ol-primary" data-roll="go"${disabled() ? " disabled" : ""}>掷 d100</button></footer>` : '<p class="ol-muted">还没有分配到你的角色。</p>'}</div>`;
     }
+    /** 游戏内确认：返回 Promise<boolean>。同时只开一个，新的会把旧的当作取消 */
+    function askConfirm(title, text, okLabel = "确定", cancelLabel = "取消") {
+      if (confirmResolve) closeConfirm(false);
+      confirmBox.innerHTML = `<div class="ol-card"><header><h2>${esc(title)}</h2></header>${String(text || "").split("\n").map(t => `<p>${esc(t)}</p>`).join("")}<div class="ol-confirm-actions"><button type="button" class="ol-button" data-confirm="no">${esc(cancelLabel)}</button><button type="button" class="ol-button ol-primary" data-confirm="yes">${esc(okLabel)}</button></div></div>`;
+      confirmBox.hidden = false;
+      confirmBox.querySelector('[data-confirm="yes"]')?.focus({ preventScroll: true });
+      return new Promise(resolve => { confirmResolve = resolve; });
+    }
+    function closeConfirm(ok) {
+      confirmBox.hidden = true; confirmBox.innerHTML = "";
+      const r = confirmResolve; confirmResolve = null; if (r) r(!!ok);
+    }
     function openRoll() { if (!view.active) return; paintRoll(); rollBox.hidden = false; rollBox.querySelector("#ol-roll-prof, [data-roll=close]")?.focus({ preventScroll: true }); }
     async function doRoll() {
       if (!rollForm.unit || !rollForm.prof || disabled()) return;
@@ -890,15 +911,17 @@
           if (i >= 0) choose(i);
         },
         onCancel: () => { if (request?.skill && !disabled()) menu({ actor: request.actor }); },
-        onEnd: async () => { if (!isMyTurn() || disabled()) return; const actor = hs().currentUnitId; if (!endTurnOk(actor)) return; if (await call(() => api.submit({ type: "endTurn", actor }))) { request = currentMenu = null; } }
+        onEnd: async () => { if (!isMyTurn() || disabled()) return; const actor = hs().currentUnitId; if (!(await endTurnOk(actor))) return; if (await call(() => api.submit({ type: "endTurn", actor }))) { request = currentMenu = null; } }
       });
       return battle;
     }
     /** 结束行动前：这个单位还有行动点或附赠没用就先问一句（防止误触） */
-    function endTurnOk(actor) {
+    async function endTurnOk(actor) {
       const u = (((displayState || view.state || {}).units) || []).find(x => x.id === actor);
       if (!u || !((Number(u.ap) || 0) > 0 || (Number(u.bonus) || 0) > 0)) return true;
-      return confirm(`${u.name || "这个单位"} 还有 ${Number(u.ap) || 0} 点行动、${Number(u.bonus) || 0} 次附赠没用，确定结束行动吗？`);
+      const ok = await askConfirm("结束行动", `${u.name || "这个单位"} 还有 ${Number(u.ap) || 0} 点行动、${Number(u.bonus) || 0} 次附赠没用，确定结束行动吗？`, "结束行动", "继续行动");
+      // 等确认的这段时间里回合可能已经变了（超时 / 主持人操作），只在还是这名角色时才结束
+      return ok && isMyTurn() && hs().currentUnitId === actor;
     }
     /** 轮到自己的角色：自动取技能栏（不用再点「选择行动」）。每个回合 / 每次结算后的新状态取一次 */
     function scheduleAutoMenu() {
@@ -1014,14 +1037,14 @@
         case "takeOver": if (typeof api.takeOver === "function") await call(() => api.takeOver(b.dataset.player)); break;
         case "releaseSeat":
           if (typeof api.releaseSeat !== "function") break;
-          if (!confirm(`释放「${b.dataset.name}」的座位？\n他会被移出房间，角色交回主持人；之后可以用同一个昵称重新加入（丢了恢复令牌、换了设备时用）。`)) break;
+          if (!(await askConfirm("释放座位", `释放「${b.dataset.name}」的座位？\n他会被移出房间，角色交回主持人；之后可以用同一个昵称重新加入（丢了恢复令牌、换了设备时用）。`, "释放座位"))) break;
           await call(() => api.releaseSeat(b.dataset.player)); break;
         case "start": if (await call(() => api.start())) { panelOpen = false; render(); } break;
         case "actor": await menu({ actor: b.dataset.actor }); break;
         case "resetMenu": if (request) await menu({ actor: request.actor }); break;
         case "option": await choose(Number(b.dataset.option)); break;
         case "execute": if (currentMenu?.choices?.command && !disabled()) { const command = copy(currentMenu.choices.command); if (await call(() => api.submit(command))) { currentMenu = request = null; render(); } } break;
-        case "endTurn": if (!disabled() && endTurnOk(b.dataset.actor)) await call(() => api.submit({ type: "endTurn", actor: b.dataset.actor })); break;
+        case "endTurn": if (!disabled() && await endTurnOk(b.dataset.actor)) await call(() => api.submit({ type: "endTurn", actor: b.dataset.actor })); break;
         case "info": await openInfo(b.dataset.info); break;
         case "quests": openQuests(); break;
         case "map": openMap(); break;
@@ -1042,7 +1065,7 @@
           const cost = cyberEstimate(c, plan);
           if (!cost) { notice = "方案没有变化"; render(); break; }
           if (cost > Number(b.dataset.purse)) { notice = `预计要 ${cost} 奎支，${c.name} 的钱包不够`; render(); break; }
-          if (!confirm(`申请给 ${c.name} 做义体改造，预计花 ${cost} 奎支？\n主持人同意后才会改；伤势照旧带着，缺的血先从外层扣。`)) break;
+          if (!(await askConfirm("义体改造", `申请给 ${c.name} 做义体改造，预计花 ${cost} 奎支？\n主持人同意后才会改；伤势照旧带着，缺的血先从外层扣。`, "提交申请"))) break;
           if (await call(() => api.submit({ type: "cyberRequest", kit, plan }))) delete cyberDraft[kit];
           break;
         }
@@ -1052,7 +1075,7 @@
           const cost = cyberEstimate(c, plan);
           if (!cost) { notice = "方案没有变化"; render(); break; }
           if (cost > Number(b.dataset.purse)) { notice = `预计要 ${cost} 奎支，你的钱不够`; render(); break; }
-          if (!confirm(`给 ${c.name} 做义体改造，预计花 ${cost} 奎支？\n伤势照旧带着，缺的血先从外层扣。`)) break;
+          if (!(await askConfirm("义体改造", `给 ${c.name} 做义体改造，预计花 ${cost} 奎支？\n伤势照旧带着，缺的血先从外层扣。`, "改造"))) break;
           if (await call(() => api.submit({ type: "rogue.act", command: { action: "modifyHero", kit, plan } }))) delete cyberDraft[kit];
           break;
         }
