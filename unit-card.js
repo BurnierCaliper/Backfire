@@ -149,8 +149,10 @@
 
     // 高能和其他状态放在同一行、同一种样式（之前放在行动点那一行，字体大小不一样）
     const icons = !!window.HudIcons;
-    const highChip = !icons && (s.highEnergy > 0 || (s.status && /高能/.test(s.status)))
-      ? `<span class="chip">高能${s.highEnergy > 0 ? " " + s.highEnergy : ""}</span>` : "";
+    // #52：高能只看高能状态（状态文字里的「高能」）；没有高能状态的高能值显示成蓄能
+    const isHigh = !!(s.status && /(^| )高能( |$)/.test(s.status));
+    const highChip = icons ? "" : isHigh ? `<span class="chip">高能${s.highEnergy > 0 ? " " + s.highEnergy : ""}</span>`
+      : s.highEnergy > 0 ? `<span class="chip">蓄能 ${s.highEnergy}</span>` : "";
     // 首领机制（死刑 / 分担）的标记：被标记的人身上一个倒计时，首领身上写着标了谁
     const when = (x) => x.left > 0 ? `${x.left} 回合后` : `这回合${x.phase === "player" ? "我方" : "敌人"}回合开始时`;
     const markTip = (x) => x.type === "volley"

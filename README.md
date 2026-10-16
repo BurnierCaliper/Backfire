@@ -368,6 +368,11 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **蓄能和高能分开；专长「铁壁」改名「以身作盾」**（issue #52；enemies.js · `hasHigh`；app.js · `statusLine`、`gainHighFromHits`、收发代理激光选目标、`spreadKeys`（传播）、激活的状态列表、狂瀑的条件和选目标；hud-icons.js · `unitBadges`；online-ui.js；unit-card.js；feats.js；tests/store-vs-high.test.js）
+  - **有高能只看高能状态**：以前高能值 > 0 就算高能，蓄能单位（陨石开采机、用高能脉冲的玩家……）开场就显示高能图标，还会被狂瀑、收发代理的激光当成高能目标，传播也能把它的高能值复制出去。现在这些都只看高能状态；能量伤害涨高能值也只对高能状态生效。
+  - **显示**：有高能状态写「高能 N」；没有高能状态、只是攒着高能值的写「蓄能 N」（徽章是蓄能图标带数字；蓄能结束后留下的高能值也这样写）。
+  - 高能自爆（`checkHighBoom`）和死亡时把高能值转给击杀者照旧。
+  - **专长「铁壁」改名「以身作盾」**：和川川的「铁壁」（技能 / 配置物）重名，改掉。专长 id 还是 `ironwall`，旧存档照读；格挡询问里的按钮、日志也改成「以身作盾」。
 - **专长：铁壁 / 挺身 / 人器一心改次数，新专长「决不后退」；结人协助攻击；绯秋的刀技打配置物**（issue #52；feats.js · `featShortUsed` / `featUnbowedAuto` / `featUnbowedReset`，`featOnceLeft` / `featUseOnce` 按专长的 `short` / `rest` 记次数；ledger.js · `LEDGER.shortOnce` / `useShortOnce` / `shortOnceUsed`；app.js · `finishBlockInner`、`dealBreak`、`recoverFromStun`、`clearStunOnDown`、`hiakiStructureHit` / `tsubameFollowUp`；engine.js · `applyResultToUnit`；game.js · `promptBlock`；tests/issue52-feats.test.js、tests/feat-content.test.js）
   - **每次短休 N 次**：新的次数周期，记在 `LEDGER.shortOnce`（跟存档走）。这个人短休时刷新；长休也刷新（守夜的人不刷新，和其他长休次数一样）。换一场战斗不刷新。
   - **铁壁**：每场 1 次 → 每次短休 1 次。说明改成：「每次短休 1 次：你或同区友方被敌人的单体攻击打中、结算前，可以宣布「铁壁」。这一击视为协助格挡成功，必定挡住，目标完全免伤且不掉架势，这一击的击破改由你承担（架势至少留 1，不会因此失衡）。不消耗附赠动作。」

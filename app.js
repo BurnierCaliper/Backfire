@@ -416,7 +416,9 @@ function statusLine(u) {
     if (u.statuses.corr) s.push("腐蚀");
     if (u.statuses.frostbite) s.push("冻伤");
     if (u.statuses.shockwave) s.push("震荡");
-    if (u.statuses.high || (u.highEnergy || 0) > 0) s.push("高能 " + (u.highEnergy || 0));
+    // #52：「高能」只看高能状态；没有高能状态、只是攒着高能值的（蓄能）写成「蓄能 N」
+    if (u.statuses.high) s.push("高能 " + (u.highEnergy || 0));
+    else if ((u.highEnergy || 0) > 0) s.push("蓄能 " + u.highEnergy);
     if (u.statuses.reso) s.push("共振");
     if (u.statuses.unstable) s.push("不稳");
     if (u.statuses.weak) s.push("虚弱");
@@ -492,8 +494,7 @@ function statusLine(u) {
 
 function gainHighFromHits(target, res, extra) {
   if (!target || !res) return;
-  const hasHigh = (target.statuses && target.statuses.high) || (target.highEnergy || 0) > 0;
-  if (!hasHigh) return;
+  if (!(target.statuses && target.statuses.high)) return;   // 只有高能状态才吃能量伤害涨高能值（蓄能不算）
   if ((res.element || "") !== "energy") return;
   const hits = (res.perHit && res.perHit.length) ? res.perHit : [{ dealt: res.total }];
   const damaging = hits.filter(h => (h.dealt || 0) > 0);
@@ -2191,7 +2192,7 @@ function turnEnd() {
       } else if ((u.resources.nano || 0) >= 10) {
         // 激光不能穿墙：隔着危墙 / 关着的门的敌人不算可选目标；一个都没有就什么都不干（不耗纳米）
         const foes = fieldUnits().filter(x => !x.isPlayer && !x.dead && !x.hidden && !x.fused && !lineBlocked(u.zone, x.zone));
-        const high = foes.filter(x => (x.statuses && x.statuses.high) || (x.highEnergy || 0) > 0);
+        const high = foes.filter(x => x.statuses && x.statuses.high);   // 蓄能单位不算高能目标
         const pool = high.length ? high : foes;
         const tgt = pool.slice().sort((x, y) => totalHp(x) - totalHp(y))[0];
         if (tgt) {
@@ -6684,7 +6685,7 @@ function openBlockModal(job) {
   (typeof featIronwallDeclarers === "function" ? featIronwallDeclarers(target) : []).forEach(h => {
     const b = document.createElement("button");
     b.className = "btn primary";
-    b.textContent = `${h.name} 铁壁（必定挡住 · 每次短休一次）`;
+    b.textContent = `${h.name} 以身作盾（必定挡住 · 每次短休一次）`;
     b.onclick = () => calcCommand("blockAnswer", { helper: "ironwall:" + h.id });
     box.appendChild(b);
   });
@@ -6730,11 +6731,11 @@ function finishBlockInner(helperId, forced) {
   const target = unitById(job.targetId);
   let block = "none", blockHelperId = null;
   if (helperId && String(helperId).indexOf("ironwall:") === 0) {
-    // 铁壁（feats.js）：宣布这一击视为协助格挡成功：免伤，击破由宣布的人承担（最少留 1），不花附赠动作
+    // 以身作盾（feats.js · ironwall）：宣布这一击视为协助格挡成功：免伤，击破由宣布的人承担（最少留 1），不花附赠动作
     const wall = unitById(String(helperId).slice("ironwall:".length));
     if (wall && typeof featIronwallDeclarers === "function" && featIronwallDeclarers(target).indexOf(wall) >= 0) {
       featUseOnce(wall, "ironwall");
-      appendLog(`${wall.name} 铁壁：这一击视为协助格挡成功。`);
+      appendLog(`${wall.name} 以身作盾：这一击视为协助格挡成功。`);
       block = "assistOk";
       blockHelperId = wall.id;
       addScore("block", SCORE_RULES.block, wall);   // 评分：和协助格挡成功一样（#52）
@@ -6779,7 +6780,7 @@ function finishBlockInner(helperId, forced) {
     if (out && defBefore != null) out.defBefore = defBefore;
     if (out && out.res && !out.pending) formatHitLines(attacker, target, out, captured).forEach(s => appendLog(s));
     // 战场数据：格挡规避的伤害（协助格挡成功：这一击本来的伤害；空手格挡成功：少挨的那一半）
-    // 铁壁的 helperId 是「ironwall:单位」：记到宣布的人身上
+    // 以身作盾的 helperId 是「ironwall:单位」：记到宣布的人身上
     const saverUnit = blockHelperId ? unitById(blockHelperId) : helperId ? unitById(helperId) : null;
     const saver = saverUnit ? battleStat(saverUnit) : null;
     if (saver && out && out.res) {
@@ -6992,7 +6993,7 @@ const SPREAD_IMMUNE = { burn: "burn", frostbite: "frost", corr: "splash", shock:
 function spreadKeys(u) {
   const st = (u && u.statuses) || {};
   return SPREAD_STATUS.filter(k => k === "burn" ? (Number(st.burn) || 0) > 0
-    : k === "high" ? !!st.high || (Number(u.highEnergy) || 0) > 0 : !!st[k]);
+    : !!st[k]);   // 高能只看高能状态，蓄能攒的高能值不算
 }
 /** 从 src 传播到 dest，真正会加上的状态（空数组 = 传过去没有变化） */
 function spreadPlan(src, dest) {
@@ -7071,7 +7072,7 @@ function activatableStatuses(t) {
   if (st.corr) out.push({ key: "corr", label: "腐蚀" });
   if (st.frostbite) out.push({ key: "frostbite", label: "冻伤" });
   if (st.shockwave) out.push({ key: "shockwave", label: "震荡" });
-  if (st.high || (Number(t.highEnergy) || 0) > 0) out.push({ key: "high", label: `高能 ${Number(t.highEnergy) || 0}` });
+  if (st.high) out.push({ key: "high", label: `高能 ${Number(t.highEnergy) || 0}` });
   return out;
 }
 
@@ -7636,7 +7637,7 @@ function dealTo(attacker, target, opt) {
   }
   if (attacker && !attacker.isPlayer && target && target.isPlayer && opt.flags.action && !assisting && !opt.flags.aoe && opt.flags.block !== "assistOk" && !opt.flags.blockResolved) {
     const helpers = eligibleBlockers(target);
-    const walls = typeof featIronwallDeclarers === "function" ? featIronwallDeclarers(target) : [];   // 铁壁（feats.js）
+    const walls = typeof featIronwallDeclarers === "function" ? featIronwallDeclarers(target) : [];   // 以身作盾（feats.js）
     if (helpers.length || walls.length) {
       appendLog(`→ ${target.name}：等待协助格挡（同区可以格挡的：${helpers.map(h => h.name + " " + finalBlockChance(h, attacker, target, opt.atkRange) + "%").join("、")}）`);
       state.blockQueue = state.blockQueue || [];
@@ -10526,7 +10527,7 @@ const SKILL_REQUIREMENT = {
     return `要走到 ${list.map(w => w.name + " 倒下的 " + w.zone + " 区").join("、")}才能取回`;
   },
   ras_super:      (a) => a && a.self === "conductor" ? "已经处于导体状态" : null,
-  ras_torrent:    (a) => fieldUnits().some(u => !u.isPlayer && !u.dead && ((u.statuses && u.statuses.high) || (u.highEnergy || 0) > 0)) ? null : "场上没有高能状态的敌人",
+  ras_torrent:    (a) => fieldUnits().some(u => !u.isPlayer && !u.dead && u.statuses && u.statuses.high) ? null : "场上没有高能状态的敌人",
   edc_drain:      (a) => {
     const ras = findKit("ras", state.units);
     if (!ras) return "拉斯缪尔不在场";
@@ -10798,7 +10799,7 @@ function skillTargetError(a, id, t) {
       if (lineBlocked(a.zone, z)) return lineBlocked(a.zone, z);
     }
   }
-  if (id === "ras_torrent" && t && !((t.statuses && t.statuses.high) || (t.highEnergy || 0) > 0)) return "狂瀑要选已经处于高能状态的敌人";
+  if (id === "ras_torrent" && t && !(t.statuses && t.statuses.high)) return "狂瀑要选已经处于高能状态的敌人";
   if (id === "solo_support") {
     const fl = state.skillFlow;
     const kit = fl && fl.picks ? fl.picks.partner : null;

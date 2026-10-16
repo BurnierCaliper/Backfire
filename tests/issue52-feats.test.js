@@ -1,4 +1,4 @@
-// #52：铁壁 / 挺身改成每次短休 1 次，人器一心每长休 1 次，新专长「决不后退」；绯秋的刀技打配置物照刀势和刀算
+// #52：以身作盾（原专长铁壁） / 挺身改成每次短休 1 次，人器一心每长休 1 次，新专长「决不后退」；绯秋的刀技打配置物照刀势和刀算
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -23,8 +23,8 @@ function use(c, S, actor, id, targetId, picks) {
   S.skillFlow = null;
 }
 
-/* ---------- 铁壁 ---------- */
-test("铁壁：每次短休 1 次（下一场还是用过的），短休 / 长休刷新；宣布的人拿协助格挡的分", () => {
+/* ---------- 以身作盾（原专长铁壁，id 还是 ironwall） ---------- */
+test("以身作盾：每次短休 1 次（下一场还是用过的），短休 / 长休刷新；宣布的人拿协助格挡的分", () => {
   const { c, S, units: [kolt], foes } = battle(["kolt", "helu"], null, (c, S, k) => { k.feats = ["ironwall"]; });
   const foe = foes[0];
   kolt.zone = foe.zone; kolt.bonus = 0;
@@ -38,7 +38,7 @@ test("铁壁：每次短休 1 次（下一场还是用过的），短休 / 长�
   assert.equal(c.featIronwallDeclarers(kolt).length, 0, "用掉了");
   const stat = c.battleStat(kolt);
   assert.equal(stat.blockOk, 1, "记一次格挡成功");
-  // 换一场（每场的次数清掉）：铁壁还是用过的
+  // 换一场（每场的次数清掉）：以身作盾还是用过的
   c.resetBattleFlags(kolt);
   assert.equal(c.featIronwallDeclarers(kolt).length, 0, "不是每场刷新");
   // 短休刷新
@@ -49,7 +49,8 @@ test("铁壁：每次短休 1 次（下一场还是用过的），短休 / 长�
   void score0;
 });
 
-test("铁壁的说明是夕夏定的新文字", () => {
+test("以身作盾的名字和说明是夕夏定的", () => {
+  assert.equal(H.load().featDef("ironwall").name, "以身作盾");
   const c = H.load();
   assert.match(c.featDef("ironwall").text, /^每次短休 1 次：/);
   assert.match(c.featDef("ironwall").text, /不消耗附赠动作。$/);

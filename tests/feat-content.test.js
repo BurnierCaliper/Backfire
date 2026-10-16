@@ -235,7 +235,7 @@ test("还魂：被打到 0 留 1 点、到自己下回合前免伤；每场一�
   assert.equal(c.applyKnockdown(kolt, n), "dying", "第二次就倒地了");
 });
 
-test("铁壁：宣布后这一击视为协助格挡成功（免伤），每次短休一次；没有能格挡的人也会停下来问", () => {
+test("以身作盾（原铁壁）：宣布后这一击视为协助格挡成功（免伤），每次短休一次；没有能格挡的人也会停下来问", () => {
   const { c, S, kolt, helu, foes } = battle([{ id: "thug_knife", lv: 3, zone: 1 }], "FC10", (c, S, k) => { k.feats = ["ironwall"]; });
   const foe = foes[0];
   kolt.zone = foe.zone; helu.zone = 2;
@@ -244,7 +244,7 @@ test("铁壁：宣布后这一击视为协助格挡成功（免伤），每次�
   S.blockQueue = [];
   const hp0 = c.totalHp(kolt);
   const out = c.dealTo(foe, kolt, { atk: 30, mult: 1, element: "physical", baseBreak: 1, flags: { action: true } });
-  assert.equal(out.pending, true, "等着宣布铁壁");
+  assert.equal(out.pending, true, "等着宣布以身作盾");
   c.finishBlock("ironwall:" + kolt.id);
   assert.equal(c.totalHp(kolt), hp0, "免伤");
   assert.equal(c.featIronwallDeclarers(kolt).length, 0, "用掉了");

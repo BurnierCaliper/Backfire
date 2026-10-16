@@ -212,8 +212,8 @@ const FEATS = {
     } } },
 
   /* ===== 专长③（13 级） ===== */
-  ironwall: { name: "铁壁", kind: "passive", tier: 3,
-    text: "每次短休 1 次：你或同区友方被敌人的单体攻击打中、结算前，可以宣布「铁壁」。这一击视为协助格挡成功，必定挡住，目标完全免伤且不掉架势，这一击的击破改由你承担（架势至少留 1，不会因此失衡）。不消耗附赠动作。",
+  ironwall: { name: "以身作盾", kind: "passive", tier: 3,
+    text: "每次短休 1 次：你或同区友方被敌人的单体攻击打中、结算前，可以宣布「以身作盾」。这一击视为协助格挡成功，必定挡住，目标完全免伤且不掉架势，这一击的击破改由你承担（架势至少留 1，不会因此失衡）。不消耗附赠动作。",
     short: 1 },
   pickup: { name: "拉一把", kind: "action", tier: 3,
     text: "每场 1 次，行动点：对同区一名濒死友方使用一件医疗道具，他以该道具的治疗量起身，不扣坚毅生命。",
@@ -589,7 +589,7 @@ function featHealItems() {
   }).map(id => ({ id, name: ITEM_CATALOG[id].name, heal: Number(ITEM_CATALOG[id].heal), qty: bagCount(id) }));
 }
 
-/** 被动的次数（还魂每场、铁壁每次短休、人器一心每长休）：还剩没有。次数周期看专长上的 short / rest */
+/** 被动的次数（还魂每场、以身作盾每次短休、人器一心每长休）：还剩没有。次数周期看专长上的 short / rest */
 function featOnceLeft(u, id) {
   if (!featHas(u, id)) return false;
   const f = FEATS[id];
@@ -649,7 +649,7 @@ function featUnbowedReset(u) {
   if (used && used.unbowed) { u.resources.featUsed = Object.assign({}, used); delete u.resources.featUsed.unbowed; }
 }
 
-/** 铁壁：这一击（敌人打 target）可以宣布铁壁的人 */
+/** 以身作盾（id 仍是 ironwall，旧存档照读）：这一击（敌人打 target）可以宣布的人 */
 function featIronwallDeclarers(target) {
   if (!target || !target.isPlayer || typeof state === "undefined") return [];
   return (state.units || []).filter(u => u.isPlayer && !u.dead && !u.hidden && !(u.dying && !u.upOnShp) &&

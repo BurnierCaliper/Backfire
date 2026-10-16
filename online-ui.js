@@ -126,9 +126,10 @@
       if (u.stunned && !u.dead) tokens.push("失衡");
       if (u.flying) tokens.push("飞行");
       Object.keys(TIP_STATUS).forEach(k => { if (st[k]) tokens.push(k === "burn" && Number(st.burn) > 0 ? "灼烧×" + st.burn : TIP_STATUS[k]); });
-      if (st.high || Number(u.highEnergy) > 0) tokens.push("高能 " + (Number(u.highEnergy) || 0));
+      if (st.high) tokens.push("高能 " + (Number(u.highEnergy) || 0));
+      else if (Number(u.highEnergy) > 0) tokens.push("蓄能 " + Number(u.highEnergy));   // 蓄能攒的高能值，不算高能（#52）
       Object.keys(TIP_INSTANT).forEach(k => { if ((u.instant || {})[k]) tokens.push(TIP_INSTANT[k]); });
-      if (TIP_SELF[u.self]) tokens.push(TIP_SELF[u.self] + (u.self === "burn" && Number(u.selfBurnStacks) > 1 ? "×" + u.selfBurnStacks : ""));
+      if (TIP_SELF[u.self] && !(u.self === "store" && !st.high && Number(u.highEnergy) > 0)) tokens.push(TIP_SELF[u.self] + (u.self === "burn" && Number(u.selfBurnStacks) > 1 ? "×" + u.selfBurnStacks : ""));
       ((u.resources || {}).nextAtkFx || []).forEach(k => { if (TIP_ATK[k]) tokens.push(TIP_ATK[k]); });
       (u.marks || []).forEach(m => tokens.push(m === "needle" ? "刺入" : m === "bond" ? "牵挂" : ""));
       statusTokens(u).forEach(t => { if (!tokens.includes(t)) tokens.push(t); });
