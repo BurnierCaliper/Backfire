@@ -368,6 +368,15 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **修：技能打配置物 / 危墙时命中后效果全部丢失**（issue #52；app.js · `makeStructProxy` / `dealToStructure` / `structProxyFinish`、`runSkillInner` 的配置物分支、`unitById`、`dealTo`、`formatHitLines`、`popStatus`；tests/structure-hit.test.js、tests/issue52-feats.test.js）
+  - 以前玩家的技能打配置物 / 危墙走一条通用打法：属性和倍率从技能说明里猜，打完直接结束，技能自己的分支整段跳过——命中后的资源（咖啡豆转液、纳米、电能……）、换刀 / 收回武器、技能自身的消耗（意式浓缩不扣咖啡液、川川不扣电能）全丢。
+  - 现在打配置物**算命中**：换上一个「替身」目标，照常走技能自己的分支；`dealTo` 认出替身，用技能真实的属性、倍率、骰子、击破（含佩刀、专长加的击破）交给 `hitStructureCore`。
+    - 技能消耗照扣，命中后的资源照拿；挂着的下一击效果（猛击、穿刺、弱点、准备 / 磨刀）照常用掉，准备的骰子加进伤害。
+    - **状态和减益对物体无效**：写在替身上就丢掉，日志提示一句「是物体：状态和减益对它无效」；不弹状态字。
+    - **吸血和附带治疗不给**（不经过单位的伤害结算，自焚吸血这类不会触发）。
+  - 待定的几项先按这样做：打出失衡类条件永远不算（物体没有架势）；击退不推动配置物；打配置物不记伤害统计 / 经验；危墙被多段攻击打，每段的击破各算一次；打桶刷资源暂时不限。
+  - 技能自己没打这个目标的（只上状态的、分步没选好的）就不再白打一下；技能结算出错时才照以前的通用打法补一下，行动点不白扣。
+  - 灯、龙哥的普攻打配置物原本就有自己的规则，照旧；敌人打配置物也照旧。绯秋那几招的专门处理（`hiakiStructureHit`）拿掉，改走这条统一的路（燕返的后续还是 `tsubameFollowUp`）。
 - **天气动效正式加入**（PR #53 作者做的 7 种；weather-fx.css（由 `art/weather-fx-draft.css` 转正）；weather-fx.js · `WeatherFx.sync` / `phaseStepName` / `layerClass`；game.js · `applyEnv`；game.html；tests/weather-fx.test.js）
   - 战场里放一层 `.wfx-{天气}`，界面按 `#g-app` 的 `data-weather` 换色：
     - 沙暴：一阵阵沙雾顺着风向卷过战场，面板上淡淡的横向雾带（风向读 `data-sand-dir`）；

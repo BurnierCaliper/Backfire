@@ -185,6 +185,8 @@ function undo() {
 }
 
 function unitById(id) {
+  // 打配置物 / 危墙时的替身（structProxy）：技能分支里按 id 找目标也找得到它
+  if (state._structProxy && id != null && state._structProxy.id === id) return state._structProxy;
   return state.units.find(u => u.id === id);
 }
 
@@ -3886,37 +3888,69 @@ function tsubameFollowUp(a, lines) {
   }
 }
 
-/** 绯秋一家的刀技打配置物 / 危墙（行动点已经扣过）：返回日志行（只管 HIAKI_STRUCT_SKILLS 里的几招）。
- *  普通攻击按刀势（拔刀 1atk+1 击破 / 居合 1.5atk，隔区先移过去 / 胁构 1atk+2 击破），属性随手里的刀（丹生谷火、鳴門冰）；
- *  斩炎 / 寒风打完变回武器，燕返打完收回并换刀 */
-const HIAKI_STRUCT_SKILLS = ["hiaki_aa", "niu_slash", "naruto_wind", "niu_tsubame"];
-function hiakiStructureHit(a, id, token, tokZones) {
-  const atk = effectiveAtk(a, state.units) || 5;
-  const lines = [];
-  const hit = (element, mult, brk) => lines.push(...hitStructureCore(a, token, { element, dmg: Math.max(1, Math.floor(atk * mult)), brk }));
-  if (id === "hiaki_aa") {
-    const r = a.resources = a.resources || {};
-    const blade = heldHiakiBlade(a) || r.blade;
-    r.blade = blade;
-    refreshHiakiAtk(a);
-    const el = blade === "naruto" ? "ice" : "fire";
-    const st = r.stance || "draw";
-    const z = tokZones && tokZones.length === 1 ? Number(tokZones[0]) : null;
-    if (st === "iai" && z != null && !isNaN(z) && Number(a.zone) !== z) {
-      const from = Number(a.zone);
-      a.zone = z;
-      lines.push(`居合：先移动 1 距离到 ${z} 区。`);
-      applyAbyssFall(a, from, lines);
+/* ---------- 打配置物 / 危墙算命中（#52） ---------- */
+/** 替身目标：技能分支把它当成一个普通目标用（读 zone / statuses / def……），dealTo 认出 isStructure 交给 dealToStructure。
+ *  写在替身身上的状态、减益都是丢掉的（物体不吃状态）；它不在 state.units 里，范围攻击、选目标列表都看不到它 */
+function makeStructProxy(token, tokZones, a) {
+  const tok = String(token);
+  const isGap = tok.indexOf("gap:") === 0;
+  const p = isGap ? null : propByRef(tok);
+  const g = isGap ? (state.gaps || {})[tok.slice(4)] : null;
+  // 危墙夹在两区之间：取离攻击者近的那一区（居合这类「移到目标区」的就移到这一侧）
+  const zones = (tokZones || []).map(Number).filter(z => !isNaN(z));
+  const zone = zones.slice().sort((x, y) => zoneDist(a.zone, x, state.zoneMode) - zoneDist(a.zone, y, state.zoneMode))[0];
+  return {
+    id: tok, structToken: tok, isStructure: true, kind: "structure",
+    name: p ? p.name : `${gapLabel(g ? g.type : "wall")}（${tok.slice(4)} 区之间）`,
+    zone: zone != null ? zone : Number(a.zone), level: (p && p.level) || 1, isPlayer: !!(p && p.faction !== "enemy" && p.faction),
+    statuses: {}, instant: {}, resources: {}, layers: [], marks: [], focuses: [],
+    def: 0, defMax: 0, noPosture: true, stunned: false, dead: false, hidden: false, flying: false
+  };
+}
+/** dealTo 打到替身：用技能真实的属性 / 倍率 / 骰子 / 击破算一下，交给 hitStructureCore。
+ *  攻击者身上挂着的下一击效果（猛击、穿刺、弱点、准备 / 磨刀）照常用掉；吸血、击退、打出失衡都不算（物体没有架势、不会被推走） */
+function dealToStructure(attacker, target, opt) {
+  const flags = opt.flags || {};
+  const r = attacker && attacker.resources;
+  const realAttack = flags.action !== false && !flags.environment;
+  let prep = 0;
+  if (r && realAttack) {
+    if (r.smashNext) r.smashNext = false;
+    if (r.pierceNext) r.pierceNext = false;
+    if (r.weakNext) r.weakNext = false;
+    if (r.preparedActive && opt.usePrep !== false) {
+      const whet = Number(r.whetDice) || 0;
+      prep = (whet ? takeDice(whet, 6, 0) : takeDice(1, prepDieSides(attacker), 0)).total;
+      delete r.whetDice;
+      r.preparedActive = false; r.prepared = false;
     }
-    const atk2 = effectiveAtk(a, state.units) || 5;
-    const mult = st === "iai" ? 1.5 : 1, brk = st === "waki" ? 2 : st === "iai" ? 0 : 1;
-    lines.push(...hitStructureCore(a, token, { element: el, dmg: Math.max(1, Math.floor(atk2 * mult)), brk }));
-    return lines;
   }
-  if (id === "niu_slash") { hit("fire", 1, 1); lines.push(...returnWeapon(a)); return lines; }
-  if (id === "naruto_wind") { hit("ice", 1, 1); lines.push(...returnWeapon(a)); return lines; }
-  if (id === "niu_tsubame") { hit("fire", 1, 1); tsubameFollowUp(a, lines); return lines; }
-  return lines;
+  const atk = opt.atk != null ? Number(opt.atk) : effectiveAtk(attacker, state.units);
+  const hits = Math.max(1, Number(opt.hits) || 1);
+  let dice = opt.diceValue;
+  if (dice == null) dice = (opt.diceN && opt.diceS) ? takeDice(opt.diceN, opt.diceS, opt.diceB || 0).total : 0;
+  let dmg = prep;
+  for (let i = 0; i < hits; i++) {
+    const m = Array.isArray(opt.hitMults) && opt.hitMults[i] != null ? Number(opt.hitMults[i]) : (opt.mult != null ? Number(opt.mult) : 1);
+    dmg += atk * m + (Number(opt.flat) || 0) + (Number(dice) || 0);
+  }
+  let br = opt.baseBreak != null ? Number(opt.baseBreak) : 1;
+  if (attacker && attacker.rallyBreak) br += attacker.rallyBreak;
+  if (attacker && attacker.kit === "hiaki" && r && r.blade === "naruto" && (typeof passiveOn !== "function" || passiveOn(attacker))) br += 1;   // 佩刀
+  if (attacker && attacker.kit === "naruto" && typeof passivePlus === "function" && passivePlus(attacker, 1)) br += 1;
+  if (typeof featBreakBonus === "function") {
+    try { br = featBreakBonus(attacker, target, opt, flags, br, zoneDist(attacker.zone, target.zone, state.zoneMode), false); } catch (e) {}
+  }
+  target._hit = true;
+  const lines = hitStructureCore(attacker, target.structToken, { element: opt.element || "physical", dmg: Math.max(1, Math.floor(dmg)), brk: Math.max(0, br) });
+  return { structure: true, lines, extra: [], res: { ok: true, structure: true, total: Math.max(0, Math.floor(dmg)), breakDealt: 0, perHit: [], log: [], flags } };
+}
+/** 技能结算完：技能分支出错、替身一下都没挨 → 照以前的通用打法打一下（行动点已经扣了，不白扣）；
+ *  技能自己没打它（只上状态的、没选好分步的……）就不打。写在替身上的状态提示一句无效 */
+function structProxyFinish(a, id, proxy, lines) {
+  if (proxy._crashed && !proxy._hit) lines.push(...hitStructureCore(a, proxy.structToken, structureHitOpt(a, id)));
+  const st = proxy.statuses || {}, ins = proxy.instant || {};
+  if (Object.keys(st).some(k => k !== "latestElement" && st[k]) || Object.keys(ins).some(k => ins[k])) lines.push(`${proxy.name} 是物体：状态和减益对它无效。`);
 }
 
 /** 战斗画面的受击：给配置物 / 危墙也发一个「伤害弹字」，画面据此播前冲、受击变白和数字 */
@@ -7471,6 +7505,7 @@ function dealTo(attacker, target, opt) {
   // 原始击破（后面会被目标一侧的效果改写，例如「加倍击破」翻倍）：导体额外那一下按它重新结算
   if (!("_origBaseBreak" in opt)) opt._origBaseBreak = opt.baseBreak;
   opt.flags = makeDealFlags(opt.flags);
+  if (target && target.isStructure) return dealToStructure(attacker, target, opt);   // 打配置物 / 危墙的替身（#52）
   // 战场数据：击杀在伤害结算里就会发生，所以先记下「最后一击是谁」
   if (attacker && target && attacker.isPlayer && !target.isPlayer && (state.units || []).includes(attacker)) target._lastHitBy = attacker.id;
   else if (attacker && attacker.envSrc && target && !target.isPlayer) { const w = envCreditUnit(attacker); if (w) target._lastHitBy = w.id; }   // 配置物打死的：击杀算触发者
@@ -10104,6 +10139,7 @@ function clearShift(u) {
 }
 
 function popStatus(unit, key) {
+  if (unit && unit.isStructure) return;   // 物体不吃状态（#52）
   if (key === "shockwave" && typeof syncShockwave === "function") syncShockwave(unit, null);
   const meta = STATUS_POP[key];
   if (meta) spawnPopup(unit, { kind: "status", text: meta.name, element: meta.element });
@@ -10240,6 +10276,7 @@ function tidyCalcLines(log, multi) {
 
 /** 一次命中写成几行：结果 → 掷骰 → 计算 → 后果 */
 function formatHitLines(actor, target, out, captured) {
+  if (out && out.structure) return (out.lines || []).map(s => "  " + s);   // 打配置物 / 危墙（dealToStructure）
   const L = [];
   const res = (out && out.res) || {};
   const extra = (out && out.extra) || [];
@@ -10935,7 +10972,8 @@ function runSkillInner(id, optRun) {
   state._pointBlankShot = null;   // 抵近射击：这次行动是不是靠它才打得到同区（下面射程检查里设）
   const a = unitById(state.attackerId);
   const token = selectedToken();
-  const t = skillTargetAny();
+  state._structProxy = null;
+  let t = skillTargetAny();
   if (!a) { paintSkillLog("先选攻击者。"); return; }
   if (a.dead) { paintSkillLog(`${a.name} 已死亡，无法行动。`); return; }
   if (!optRun.ignorePhase && !canControlUnit(a) && id !== "assist_block") {
@@ -11106,6 +11144,13 @@ function runSkillInner(id, optRun) {
       return;
     }
     if (id === "hiaki_aa" && !(heldHiakiBlade(a) || (a.resources || {}).blade)) { paintSkillLog("两把刀都已分出，空手不能用刀技。"); return; }
+    // #52：玩家的技能打配置物 / 危墙算命中——换上一个替身目标，照常走技能自己的分支（属性、倍率、击破、命中后效果、技能消耗都照技能算）；
+    // dealTo 认出替身，把这一击交给 hitStructureCore（dealToStructure）。灯 / 龙哥的普攻在上面另算，敌人还是走通用打法
+    const unified = a.isPlayer && id !== "assist_block" && id !== "tou_aa" && id !== "longge_aa";
+    if (unified) {
+      t = makeStructProxy(token, tokZones, a);
+      state._structProxy = t;
+    } else {
     // 打配置物 / 危墙也是一次行动，照常消耗行动点 / 附赠行动
     if (a.isPlayer && id !== "assist_block") {
       const cost = skillCost(id);
@@ -11115,13 +11160,6 @@ function runSkillInner(id, optRun) {
       if (!spendAp(a, 1, skillNameHint(id))) return;
     }
     if (touFar) { a.resources.shield -= 1; touShieldHeal(a); appendLog(`消耗 1 圣盾，射程变为距离 1。`); }
-    // 绯秋的刀技打配置物 / 危墙：照刀势和刀的属性算，打完照样收回 / 换刀（#52：以前走通用打法，只有物理 1atk、没有后续）
-    if (HIAKI_STRUCT_SKILLS.indexOf(id) >= 0) {
-      snapshot();
-      appendLog(hiakiStructureHit(a, id, token, tokZones).join("\n"));
-      renderAll();
-      return;
-    }
     if (id === "longge_aa") {
       // 手杖：1atk 冰 +1 击破，窥探 1；霰弹枪：耗 1 发，1.5atk 子弹属性 +1 击破
       snapshot();
@@ -11142,6 +11180,7 @@ function runSkillInner(id, optRun) {
     }
     hitStructure(a, token, structureHitOpt(a, id));
     return;
+    }
   }
   snapshot();
   beginActionAcc(a);
@@ -13252,9 +13291,13 @@ function runSkillInner(id, optRun) {
     }
   } catch (err) {
     lines.push("结算出错：" + err.message);
+    if (state._structProxy) state._structProxy._crashed = true;
   } finally {
     if (a) delete a._dabbleNerf;
     state._pointBlankShot = null;
+    const proxy = state._structProxy;
+    state._structProxy = null;
+    if (proxy) structProxyFinish(a, id, proxy, lines);
   }
   const extraBy = a ? [a.instant && a.instant.overload ? "过载" : null, a.self === "conductor" ? "导体" : null].filter(Boolean) : [];
   if (extraBy.length && overloadSeq.length >= 2) {
