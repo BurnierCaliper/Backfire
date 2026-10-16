@@ -109,7 +109,7 @@
  * calculator dialogs live outside the original screen roots; hiding individual
  * screen IDs leaves those dialogs in the outer document and its scroll range. */
 body.online-player { overflow: hidden; }
-body.online-player > :not(.ol-ui):not(.hs-ui):not(.hs-sheet):not(.ar-sheet):not(#sk-tip):not(.sk-tip):not(.unit-tip):not(.rr-overlay) { display: none !important; }
+body.online-player > :not(.ol-ui):not(.hs-ui):not(.hs-sheet):not(.ar-sheet):not(.wm):not(#sk-tip):not(.sk-tip):not(.unit-tip):not(.rr-overlay) { display: none !important; }
 /* 玩家看自己的角色资料 / 武器页：压在联机舞台上面 */
 body.online-player .hs-sheet, body.online-player .ar-sheet { z-index: 95; }
 /* 玩家右侧栏：战斗（记录）/ 小队 两个频道 */
@@ -311,3 +311,69 @@ body.ol-has-side .ol-toast { right: 344px; }
 .ol-shop-price s { opacity: .6; }
 .ol-shop-rows input[type="number"] { width: 64px; }
 .ol-shop-redeem { display: flex; flex-wrap: wrap; gap: 6px; }
+/* 物资弹窗（钱包 / 商店 / 诊所 / 公共物资）与舞台顶上的提示 */
+.ol-supplies-card { width: min(720px, 100%); display: flex; flex-direction: column; gap: 14px; }
+.ol-supplies-card > section { margin: 0; }
+.ol-button[data-alert="1"] { border-color: var(--sk-amber, #e7b13c); box-shadow: 0 0 0 2px #e7b13c66; }
+/* 玩家的地图（world-map.js 挂在 body 下）不能被「隐藏遗留面板」的规则一起藏掉 */
+body.online-player > .wm { z-index: 200; }
+/* 协助 / 格挡询问压在房间面板、物资弹窗、浮动按钮之上（倒计时到了会自动放弃，不能被挡住） */
+#hs-reaction { z-index: 97; }
+/* 房间暂停横幅：固定在顶栏下方 */
+.ol-pause-bar { position: fixed; z-index: 80; left: 0; right: 0; top: var(--hs-top-height, 0px); padding: 8px 16px; background: #5a1f17; color: #ffe2d6; font-weight: 700; text-align: center; border-bottom: 2px solid #a8432f; }
+body.ol-paused .ol-stage { padding-top: 56px; }
+.ol-check-no { display: block; max-width: 22em; text-align: right; }
+/* 「房间码 · 消息与成员」：玩家画面放进顶栏右侧，不再浮在内容上 */
+body.online-player .ol-dock { top: 8px; bottom: auto; right: 14px; z-index: 82; }
+body.online-player .ol-dock .ol-button { min-height: 36px; padding: 6px 12px; }
+/* 探索：四张角色卡在 1280 宽也排成一行，卡片按内容高度对齐（不拉成一样高留大片空白） */
+.ol-exploration-party { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; align-items: start; }
+.ol-exploration-party .ol-unit { margin: 0; }
+@media (max-width: 760px) {
+  .ol-exploration-party { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .ol-exploration-party .ol-unit { padding: 8px; font-size: 13px; }
+  .ol-stage-heading h1 { font-size: 22px; margin: 2px 0 6px; }
+  .ol-stage-heading .ol-info-tools { gap: 6px; }
+  .ol-stage-heading .ol-info-tools .ol-button { padding: 6px 8px; min-height: 34px; }
+  body.online-player .ol-dock .ol-button { font-size: 12px; padding: 4px 8px; min-height: 30px; max-width: 46vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+@media (max-width: 760px) {
+  body.online-player #hs-bar .hs-tag { display: none; }
+  body.online-player .ol-dock .ol-button { max-width: 40vw; }
+  .ol-explore-hint { display: none; }
+  .ol-stage-heading .ol-weather { padding: 4px 8px; }
+}
+@media (max-width: 760px) { body.online-player #hs-bar > span:not(.hs-phase) { display: none; } }
+/* 手机竖屏：顶栏留出阶段文字；探索时聊天栏默认收成底部一条 */
+.ol-side-fold { flex: 0 0 auto; padding: 0 12px; background: transparent; color: var(--sk-muted, #a8977b); border: 0; border-left: 1px solid #4d4337; font: inherit; cursor: pointer; }
+@media (max-width: 760px) {
+  body.online-player #hs-bar .hs-phase { display: inline; margin-right: auto; }
+  /* 收起时只留频道标签和输入框：随时能说话，看历史再展开 */
+  .ol-side.ol-side-folded { height: auto; max-height: 104px; }
+  .ol-side.ol-side-folded > :not(.ol-side-tabs):not(.ol-side-form) { display: none !important; }
+  body.ol-has-side.ol-side-folded .ol-stage { bottom: 104px; }
+  body.ol-has-side.ol-side-folded .hs-overlay { bottom: 104px; }
+}
+@media (max-width: 760px) {
+  /* 手机：房间码在右上按钮里、阶段在顶栏，舞台标题行省掉；工具按钮一行横滑 */
+  body.online-player:not(.ol-in-battle) .ol-stage-heading > div > .ol-muted:first-child,
+  body.online-player:not(.ol-in-battle) .ol-stage-heading h1 { display: none; }
+  body.online-player:not(.ol-in-battle) .ol-stage-heading { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  body.online-player:not(.ol-in-battle) .ol-stage-heading > div { min-width: 0; flex: 1 1 auto; }
+  body.online-player:not(.ol-in-battle) .ol-stage-heading .ol-info-tools { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  body.online-player:not(.ol-in-battle) .ol-stage-heading .ol-info-tools .ol-button { flex: 0 0 auto; }
+  body.online-player:not(.ol-in-battle) .ol-stage { padding-top: max(10px, calc(54px - var(--hs-top-height, 0px))); }
+  body.online-player:not(.ol-in-battle) .ol-check { padding: 8px 10px; }
+  body.online-player:not(.ol-in-battle) .ol-checks { margin-bottom: 10px; }
+}
+@media (max-width: 760px) {
+  .ol-exploration-party .ol-unit > *, .ol-exploration-party .ol-unit header h3 { margin-top: 2px; margin-bottom: 2px; }
+  .ol-exploration-party .ol-unit .ol-layers { gap: 2px; }
+  .ol-exploration-party .ol-unit .ol-points { gap: 2px 8px; }
+}
+@media (max-width: 760px) { body.online-player:not(.ol-in-battle) .ol-weather-none { display: none; } }
+/* 游戏内确认框（代替原生 confirm）：比其他弹窗高一层，垂直居中 */
+.ol-confirm { z-index: 110; align-items: center; }
+.ol-confirm .ol-card { max-width: 420px; }
+.ol-confirm p { margin: 0; color: #e7dcc6; line-height: 1.6; }
+.ol-confirm-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px; }
