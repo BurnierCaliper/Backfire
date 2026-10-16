@@ -4433,7 +4433,7 @@
     $("g-long-go").onclick = () => {
       const r = panelCommit({ action: "longRest", plan: currentRestPlan() });
       renderRestSheet();
-      if (r && r.report && window.RestReport) RestReport.show(r.report, { gm: !(typeof shpHidden === "function" && shpHidden()) });
+      if (r && r.report && window.RestReport) RestReport.play(r.report, { gm: !(typeof shpHidden === "function" && shpHidden()) });
     };
     $("g-restore-all").onclick = () => { panelCommit({ action: "restore" }); renderRestSheet(); };
     $("g-cheat").onclick = () => {

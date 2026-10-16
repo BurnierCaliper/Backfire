@@ -971,9 +971,19 @@ test("联机跑团：主持人长休，玩家画面也弹结算（不带坚毅�
   await alice.waitForTimeout(300);
   await host.click('[data-tab="rest"]');
   await host.click("#tr-long-force");
-  await host.waitForSelector("#rest-report:not([hidden])");
+  // 营地：主持人和玩家都看到；玩家那边等主持人开始，不显示坚毅
+  await host.waitForSelector("#rest-report .rr-camp");
+  await alice.waitForSelector("#rest-report .rr-camp");
+  const camp = await alice.locator("#rest-report").innerText();
+  assert.match(camp, /营地[\s\S]*等/);
+  assert.doesNotMatch(camp, /坚毅/);
+  assert.equal(await alice.locator('#rest-report [data-rr="start"]').count(), 0, "玩家没有开始按钮");
+  await host.click('#rest-report [data-rr="start"]');
+  await host.click('#rest-report [data-rr="skip"]').catch(() => {});
+  await host.waitForSelector('#rest-report [data-rr="close"]');
   assert.match(await host.locator("#rest-report").innerText(), /坚毅 .*（仅主持人）/);
-  await alice.waitForSelector("#rest-report:not([hidden])");
+  // 玩家：营地关掉，播日月动画，再弹结算
+  await alice.waitForFunction(() => /长休结束/.test(document.getElementById("rest-report").innerText), null, { timeout: 15000 });
   const text = await alice.locator("#rest-report").innerText();
   assert.match(text, /长休结束/);
   assert.match(text, /「[^」]+」/);

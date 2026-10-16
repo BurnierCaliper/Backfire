@@ -44,7 +44,7 @@
     render();
     if (online()) OnlineRogue.changed();
     // 长休结算画面：刚长休完弹一次（玩家看的，坚毅只给一句话）
-    if (run && run.lastRest && run.lastRest.id !== shownRest && window.RestReport) { shownRest = run.lastRest.id; RestReport.show(run.lastRest, { gm: false }); }
+    if (run && run.lastRest && run.lastRest.id !== shownRest && window.RestReport) { shownRest = run.lastRest.id; RestReport.play(run.lastRest, { gm: false }); }
   }
   function doAct(command) {
     let notes, error;
@@ -935,9 +935,15 @@
     body.querySelectorAll("[data-need]").forEach(b => {
       b.onclick = () => { try { OnlineRogue.need(myId(), Number(b.dataset.need), b.dataset.kit, b.dataset.want === "1"); } catch (e) { completeAction(null, e); } };
     });
+    // 长休先进营地（issue #52）：看看全队状态和补给，再「开始长休」。联机时是队伍投票，不进营地
+    const withCamp = (go) => {
+      if (online() || !window.RestReport) return go();
+      RestReport.camp(query("campStatus", restSel), { host: true, onStart: go });
+    };
     on("r-long", () => {
       const w = $("r-watch");
-      act(Object.assign({ action: "restAtNode", mode: "long", watch: (w && w.value) || null }, restSel));
+      const cmd = Object.assign({ action: "restAtNode", mode: "long", watch: (w && w.value) || null }, restSel);
+      withCamp(() => act(cmd));
     });
     on("r-short", () => act({ action: "restAtNode", mode: "short" }));
     on("r-rest-skip", () => act({ action: "restAtNode", mode: "leave" }));
@@ -945,7 +951,7 @@
     on("r-leave", () => act({ action: "leaveNode" }));
     body.querySelectorAll("[data-check]").forEach(b => { b.onclick = () => doCheck(b.dataset.check, Number(b.dataset.opt) || 0); });
     on("r-check-skip", () => act({ action: "skipCheck" }));
-    on("r-camp", () => act(Object.assign({ action: "camp" }, restSel)));
+    on("r-camp", () => withCamp(() => act(Object.assign({ action: "camp" }, restSel))));
     body.querySelectorAll("[data-rest-food]").forEach(el => { el.onchange = () => { restSel.food[el.dataset.restFood] = el.value; render(); }; });
     body.querySelectorAll("[data-rest-sleep]").forEach(el => { el.onchange = () => { restSel.sleep[el.dataset.restSleep] = el.value; render(); }; });
     body.querySelectorAll("[data-rest-ammo]").forEach(el => { el.onchange = () => { restSel.ammo = restSel.ammo || {}; restSel.ammo[el.dataset.restAmmo] = el.value; render(); }; });

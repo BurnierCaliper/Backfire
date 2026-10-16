@@ -79,7 +79,12 @@
     save();
     render();
     // 长休结算画面：主持人本机弹（主持人看得到坚毅数值），联机玩家那边由 online-ui.js 弹
-    if (TRPG.lastRest && TRPG.lastRest.id !== shownRest && window.RestReport) { shownRest = TRPG.lastRest.id; RestReport.show(TRPG.lastRest, { gm: true }); }
+    if (TRPG.lastRest && TRPG.lastRest.id !== shownRest && window.RestReport) { shownRest = TRPG.lastRest.id; RestReport.play(TRPG.lastRest, { gm: true }); }
+    else if (TRPG.camp && window.RestReport && !RestReport.isOpen("camp")) {
+      const plan = TRPG.camp.plan;
+      RestReport.camp(TRPG.camp.status, { host: true, gm: true, force: TRPG.camp.force,
+        onStart: () => act(ruleCommand("longRest", { plan })), onCancel: () => act(ruleCommand("campClose")) });
+    }
   }
   let shownRest = null;
   /** 按记忆重新摆队伍（从战斗画面回来、换队员时） */
@@ -1113,8 +1118,9 @@
       P.querySelectorAll("[data-ammo]").forEach(s => { ammo[s.dataset.ammo] = s.value; });
       return { hours: Number($("tr-long-h").value) || 8, food, sleep, spit, ammo, force };
     };
-    on("tr-long", () => act(ruleCommand("longRest", { plan: restPlan(false) })));
-    on("tr-long-force", () => act(ruleCommand("longRest", { plan: restPlan(true) })));
+    // 长休先进营地（issue #52）：大家看看状态、聊聊天，主持人点「开始长休」才真的休息
+    on("tr-long", () => act(ruleCommand("campOpen", { plan: restPlan(false) })));
+    on("tr-long-force", () => act(ruleCommand("campOpen", { plan: restPlan(true) })));
     on("tr-restore", () => act(ruleCommand("restore")));
     // 商店
     const qty = (key) => (P.querySelector(`[data-qty="${key}"]`) || {}).value || 1;

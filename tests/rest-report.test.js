@@ -77,3 +77,31 @@ test("结算画面：玩家版不写坚毅数值，主持人版写", () => {
   assert.match(RR.html(rep, { gm: true }), /坚毅 3 → <b>7<\/b>\/9/);
   assert.match(RR.html(rep, { gm: false }), /一夜无梦/);
 });
+
+test("日月：白天 05:00–18:00 是太阳，其余是月亮；中午太阳在弧顶，日出在左、日落在右", () => {
+  require("../rest-report.js");
+  const RR = globalThis.RestReport;
+  assert.equal(RR.skyPos(5 * 60).body, "sun");
+  assert.equal(RR.skyPos(17 * 60 + 59).body, "sun");
+  assert.equal(RR.skyPos(18 * 60).body, "moon");
+  assert.equal(RR.skyPos(2 * 60).body, "moon");
+  const dawn = RR.skyPos(5 * 60), noon = RR.skyPos(11 * 60 + 30), dusk = RR.skyPos(17 * 60 + 59);
+  assert.ok(dawn.x < noon.x && noon.x < dusk.x);
+  assert.ok(noon.y < dawn.y && noon.y < dusk.y, "中午最高");
+  assert.notEqual(RR.skyColor(12 * 60), RR.skyColor(0), "天空颜色随时间变");
+});
+
+test("营地：全队状态和补给够不够；联机投影不带坚毅数值", () => {
+  const c = trpgField();
+  c.trpgCampOpen({ hours: 8 });
+  const camp = plain(vm.runInContext("TRPG.camp", c));
+  assert.ok(camp.status.heroes.length >= 2);
+  assert.equal(camp.status.ok, true);
+  assert.ok(camp.status.water.need > 0);
+  assert.match(camp.status.heroes[0].mood, /^(精力充沛|还撑得住|疲惫|快撑不住了)$/);
+  const V = require("../online-view.js");
+  const out = plain(V.projectCamp(camp.status));
+  assert.ok(!/shp/.test(JSON.stringify(out)));
+  c.trpgLongRest(camp.plan);
+  assert.equal(vm.runInContext("TRPG.camp", c), null, "长休完营地收起");
+});

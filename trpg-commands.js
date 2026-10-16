@@ -12,6 +12,8 @@ const TrpgCommands = (() => {
     passUntil: c => trpgPassUntil(c.time),
     shortRest: c => trpgShortRest(c.kits),
     longRest: c => trpgLongRest(c.plan),
+    campOpen: c => trpgCampOpen(c.plan),
+    campClose: () => trpgCampClose(),
     restore: () => ledgerRestoreAll([]),
     buy: c => trpgBuy(c.key, c.qty, c.free),
     adjustKuizhi: c => trpgAdjustKuizhi(c.amount, c.why),

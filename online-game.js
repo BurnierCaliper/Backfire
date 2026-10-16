@@ -68,6 +68,7 @@
       quests: !rogue() && typeof trpgQuestLog === "function" ? trpgQuestLog(id, id === identity.id) : null,
       // 长休结算（跑团；单局的在 rogue.lastRest 里）和游戏时钟：online-view.js · projectRest / clock 白名单
       rest: !rogue() && typeof TRPG !== "undefined" ? TRPG.lastRest || null : null,
+      camp: !rogue() && typeof TRPG !== "undefined" && TRPG.camp ? Object.assign({ force: TRPG.camp.force }, TRPG.camp.status) : null,
       clock: typeof LEDGER !== "undefined" ? { day: LEDGER.day, clock: LEDGER.clock } : null };
   }
   function sendProjected(id, packet) {

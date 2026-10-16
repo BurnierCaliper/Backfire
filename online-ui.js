@@ -595,8 +595,15 @@
       const r = view.packet?.mode === "rogue" ? view.packet?.rogue?.lastRest : view.packet?.rest;
       const id = r && r.id ? r.id : null;
       if (restSeen === undefined) { restSeen = id; return; }
-      if (id && id !== restSeen && global.RestReport) global.RestReport.show(r, { gm: false });
+      if (id && id !== restSeen && global.RestReport) global.RestReport.play(r, { gm: false });
       restSeen = id;
+    }
+    /** 营地（跑团，长休前）：主持人开了营地就显示全队状态，收起就关掉 */
+    function observeCamp() {
+      if (!global.RestReport || view.packet?.mode === "rogue") return;
+      const c = view.packet?.camp;
+      if (c && !global.RestReport.isOpen("camp")) global.RestReport.camp(c, { host: false, hostName: view.hostName || view.packet?.hostName || "", force: c.force });
+      if (!c && global.RestReport.isOpen("camp")) global.RestReport.hide();
     }
     /* ---------- 大字 ---------- */
     const TITLE_PRESETS = [["援军来了", "hope"], ["他们来了", "danger"], ["小心！", "danger"], ["天亮了", "hope"]];
@@ -714,7 +721,7 @@
         html(dock, button(`${view.roomCode || "房间"} · ${paused() ? "重连中" : "消息与成员"}`, "openRoom", "", false) +
           (view.isHost && view.mode !== "rogue" && ["exploration", "ended"].includes(view.screen) ? button("角色分配", "openAssign", "", false) : ""), "dock");
         observeMessages();
-        if (!view.isHost) { observeQuests(); observeRest(); }
+        if (!view.isHost) { observeQuests(); observeCamp(); observeRest(); }
       }
       // 联机单局的房主：大厅里先要在单局画面选队伍，房间面板不挡着；队伍选好（有角色可分）时自动打开一次
       const rogueHost = view.active && view.isHost && view.mode === "rogue";

@@ -646,6 +646,20 @@ function restReport(b, a, ctx) {
   };
 }
 
+/** 营地画面（长休前）：全队状态、补给够不够。坚毅只给一个短词（shpMoodLabel），数值只给主持人（shp 字段，联机投影去掉） */
+function campStatus(plan) {
+  const snap = restSnapshot();
+  const need = longRestNeeds(plan || {});
+  const foodNeed = Object.keys(need.food).reduce((n, id) => n + (Number(need.food[id]) || 0), 0);
+  const tier = typeof exhaustTierFromHours === "function" ? exhaustTierFromHours(snap.hours) : 0;
+  return {
+    day: snap.day, clock: snap.clock, hoursAwake: Math.floor(snap.hours), exhaust: tier,
+    water: { need: need.water, have: snap.water }, food: { need: foodNeed, have: snap.food }, ok: need.ok, lack: need.lack.slice(),
+    heroes: snap.heroes.map(h => ({ kit: h.kit, name: h.name, dead: h.dead, dying: h.dying, hp: h.hp, hpMax: h.hpMax, shp: h.shp, shpMax: h.shpMax,
+      mood: h.dead ? "" : (typeof shpMoodLabel === "function" ? shpMoodLabel(h.shp, h.shpMax) : ""), weapons: h.weapons }))
+  };
+}
+
 function ledgerLongRest(plan, notes) {
   notes = notes || [];
   plan = plan || {};

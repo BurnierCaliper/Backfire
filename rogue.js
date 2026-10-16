@@ -1329,6 +1329,8 @@ const Rogue = (function () {
     return withParty(run, () => longRestOptions(restChoice(plan))).out;
   }
   function canLongRest(run, plan) { return restPlan(run, plan).ok; }
+  /** 营地画面（长休前，ledger.js · campStatus）：把队伍摆上场算一份，不改动本局 */
+  function campStatusOf(run, plan) { return withParty(run, () => campStatus(restChoice(plan))).out; }
   /** 角色资料面板（skill-text.js）：把队伍摆上场算一份，不改动本局 */
   function sheetData(run) {
     if (typeof SkillText === "undefined") return [];
@@ -2465,7 +2467,7 @@ const Rogue = (function () {
     role2Options, soloBattleInfo,
     restPlan, restOptions, canLongRest, sheetData, armoryData, lowHpWarning, escortInfo, partOffers, buyPart, sellPart, canSellParts, partStock, partSellPrice, partInstallCost, installPart, removePart, restAtNode, leaveNode, canShortRestBefore, shortRestBeforeNode,
     ambushChance, watchOptions,
-    interludeOptions, buy, shopPoints, redeemList, redeem, craftPlace, craftList, craftOdds, craft, knowsRecipe, learnOptions, learnRecipe, rollRecipeChip, salvageList, salvage, setCraftHooks, setCraftJob, craftQueue, craftQueued,  canShop, shopItemName, shopStock, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
+    interludeOptions, campStatus: campStatusOf, buy, shopPoints, redeemList, redeem, craftPlace, craftList, craftOdds, craft, knowsRecipe, learnOptions, learnRecipe, rollRecipeChip, salvageList, salvage, setCraftHooks, setCraftJob, craftQueue, craftQueued,  canShop, shopItemName, shopStock, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
     presentSmiths, smithInfo, claimBlueprint, installBlueprint, blueprintById, weaponModsOf,
     smithQuote, introduceSmith,
     canClinic, cyberInfo, cyberPreview, cyberCost, modifyHero, healCost, healHero,

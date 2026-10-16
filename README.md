@@ -368,6 +368,19 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **长休：营地阶段和日月动画**（issue #52 第二期；ledger.js · `campStatus`；rest-report.js · `RestReport.camp` / `RestReport.play` / `skyPos` / `skyColor`；trpg.js · `trpgCampOpen` / `trpgCampClose`（`TRPG.camp`）；trpg-commands.js；trpg-ui.js；rogue.js · `campStatus`；rogue-ui.js；online-game.js（包里加 `camp`）；online-view.js · `projectCamp`；online-ui.js；game.css；tests/rest-report.test.js、tests/ui.test.js、tests/online-session-ui.test.js）
+  - **营地**：点「长休」不再马上睡，先进营地画面。
+    - 写着时间、距上次长休多久、力竭状态，长休要多少水和食物、够不够（不够标红）；
+    - 每人一行：首字圆头像、血量、武器耐久、一个坚毅短词（精力充沛 / 还撑得住 / 疲惫 / 快撑不住了）；
+    - 主持人 / 单机玩家按「开始长休」才真的休息，也可以「先不休息」。
+  - **联机跑团**：主持人开营地，玩家画面也显示营地，写着「等主持人开始长休，可以在小队频道里聊聊」；玩家没有开始按钮。营地数据经过 `projectCamp` 白名单，不带坚毅。
+  - **日月动画**：开始长休后，太阳和月亮在同一条弧线上交替（白天 05:00–18:00 是太阳），位置照游戏时钟，从入睡的时刻走到醒来的时刻。
+    - 天空颜色随时间变（夜蓝 → 晨橙 → 天蓝 → 暮红）；过了午夜天数 +1（单局按任务记天数，不写天数）；
+    - 约 1.5–4 秒，可以「跳过」；播完弹结算画面。
+    - 每个人的画面按结算里的开始 / 结束时间自己播，不逐帧同步。系统设了「减少动态效果」就直接显示结算。
+  - 联机单局的长休本来就是队伍投票，不进营地，直接播动画和结算。
+  - 羁绊对话卡是 #52 说的第二期，还没做。
+
 - **长休结算画面**（issue #52 第一期；ledger.js · `restSnapshot` / `restReport`（`ledgerLongRest` 返回 `report`）；新文件 rest-report.js · `RestReport.html` / `RestReport.show`；rogue.js（`run.lastRest`）、trpg.js（`TRPG.lastRest`）、game.js（战斗画面的休整浮层）；online-game.js（包里加 `rest`、`clock`）；online-view.js · `projectRest`；online-rogue.js；online-ui.js；online.css、game.css；tests/rest-report.test.js、tests/ui.test.js、tests/online-session-ui.test.js）
   - 长休完弹一个结算画面，写着：
     - 时间从几点到几点（跨天写天数）、睡了几小时；

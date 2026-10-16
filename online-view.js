@@ -554,10 +554,25 @@
     if (own(packet, "quests")) out.quests = projectQuests(get(packet, "quests"));
     // 长休结算：不带坚毅（只带那一句 mood）；游戏时钟
     if (own(packet, "rest")) out.rest = projectRest(get(packet, "rest"));
+    if (own(packet, "camp")) out.camp = projectCamp(get(packet, "camp"));
     if (own(packet, "clock")) { const ck = get(packet, "clock"); out.clock = obj(ck) ? { day: Math.max(1, Math.floor(Number(ck.day) || 1)), clock: ((Math.floor(Number(ck.clock) || 0) % 1440) + 1440) % 1440 } : null; }
     // Resync is another envelope using these same explicit projectors, not a
     // path for forwarding an opaque nested packet or raw save snapshot.
     return out;
+  }
+  /** 营地（长休前）：全队状态和补给，坚毅只留短词 mood */
+  function projectCamp(c) {
+    if (!obj(c)) return null;
+    const str = (v, n) => typeof v === "string" ? v.slice(0, n) : "";
+    const num = v => (typeof v === "number" && isFinite(v) ? Math.floor(v) : 0);
+    const nh = v => (obj(v) ? { need: num(v.need), have: num(v.have) } : { need: 0, have: 0 });
+    return {
+      day: num(c.day), clock: num(c.clock), hoursAwake: num(c.hoursAwake), exhaust: num(c.exhaust), force: !!c.force,
+      water: nh(c.water), food: nh(c.food), ok: !!c.ok, lack: arr(c.lack).slice(0, 8).map(x => str(x, 60)),
+      heroes: arr(c.heroes).slice(0, 12).filter(obj).map(h => ({ kit: str(h.kit, 40), name: str(h.name, 40), dead: !!h.dead, dying: !!h.dying,
+        hp: num(h.hp), hpMax: num(h.hpMax), mood: str(h.mood, 20),
+        weapons: arr(h.weapons).slice(0, 4).filter(obj).map(w => ({ name: str(w.name, 40), dur: num(w.dur), max: num(w.max) })) }))
+    };
   }
   function projectRest(r) {
     if (!obj(r)) return null;
@@ -618,7 +633,7 @@
     });
     return out;
   }
-  const api = { SCHEMA, projectPacket, projectQuests, projectRest, projectSheets, projectBagDetail, projectUnit, projectState, projectTape, projectMessages, projectLogs, projectView, projectActionMenu, safeText: text, safeError };
+  const api = { SCHEMA, projectPacket, projectQuests, projectRest, projectCamp, projectSheets, projectBagDetail, projectUnit, projectState, projectTape, projectMessages, projectLogs, projectView, projectActionMenu, safeText: text, safeError };
   root.OnlineView = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof globalThis !== "undefined" ? globalThis : window);

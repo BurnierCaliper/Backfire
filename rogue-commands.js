@@ -77,6 +77,7 @@ const RogueCommands = (function () {
     shopStock: (_c, run) => Rogue.shopStock(run),
     shopPoints: (_c, run) => Rogue.shopPoints(run),
     interludeOptions: (_c, run) => Rogue.interludeOptions(run),
+    campStatus: (c, run) => Rogue.campStatus(run, { food: c.food, sleep: c.sleep, spit: c.spit, ammo: c.ammo }),
     craftPlace: (_c, run) => Rogue.craftPlace(run),
     craftList: (_c, run) => Rogue.craftList(run),
     craftOdds: (c, run) => Rogue.craftOdds(run, c.kit, c.item, c.helper),

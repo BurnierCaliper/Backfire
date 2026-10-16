@@ -96,6 +96,8 @@ test("跑团模式：开团、买东西、休息、升级武器、后台改数�
   await page.click('[data-tab="rest"]');
   await page.click('[data-hours="8"]');
   await page.click("#tr-long-force");
+  await page.click('#rest-report [data-rr="start"]');   // 营地：开始长休
+  await page.click('#rest-report [data-rr="skip"]').catch(() => {});   // 日月动画
   await page.click('#rest-report [data-rr="close"]');   // 长休结算画面
   await page.click("#tr-bs");
   await page.fill("#bs-kz", "4321");
@@ -449,6 +451,7 @@ test("单局：休息点可以选守夜；没人守夜被偷袭时进遭遇战�
   assert.match(await page.textContent("#r-ambush-chance"), /100%/);
   assert.ok(await page.locator('#r-watch option[value="ruby"]').count() === 1);
   await page.click("#r-long");
+  await page.click('#rest-report [data-rr="start"]');   // 营地：开始长休
   await page.waitForSelector("#r-fight");
   assert.match(await page.textContent("#run-body"), /偷袭/);
   await page.click("#r-fight");
@@ -1764,7 +1767,16 @@ test("单局：休整（长休）后弹出结算画面——血量、补给、�
   await page.waitForSelector("#scr-run:not([hidden])");
   await page.evaluate(() => { RunFlow.current().stage = "camp"; RunFlow.refresh(); });
   await page.click("#r-camp");
-  await page.waitForSelector("#rest-report:not([hidden])");
+  // 先进营地：全队状态、补给够不够
+  await page.waitForSelector("#rest-report .rr-camp");
+  const camp = await page.locator("#rest-report").innerText();
+  assert.match(camp, /营地[\s\S]*长休需要[\s\S]*柯尔特/);
+  assert.doesNotMatch(camp, /坚毅/);
+  await page.click('#rest-report [data-rr="start"]');
+  // 日月动画：太阳 / 月亮在弧线上
+  await page.waitForSelector("#rest-report .rr-skycard");
+  await page.click('#rest-report [data-rr="skip"]');
+  await page.waitForSelector('#rest-report [data-rr="close"]');
   const text = await page.locator("#rest-report").innerText();
   assert.match(text, /长休结束|没能好好休息/);
   assert.match(text, /柯尔特[\s\S]*血量/);
