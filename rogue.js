@@ -2343,20 +2343,14 @@ const Rogue = (function () {
     return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
   }
   function dailySeed(date) { return "daily-" + dailyDate(date); }
-  /** 种子定队伍：至少一名主职责是输出（damageRoles）的，主职责尽量不重复；人不够时再放宽 */
+  /** 种子定队伍：从全部角色里随便抽，不限职责搭配（全是坦克、没有输出都可能，方便测极端情况） */
   function dailyParty(seed, size) {
     size = size || D().partySize || 4;
-    const pool = heroPool().map(c => ({ kit: c.kit, role: (c.roles || {}).primary || "" }));
+    const left = heroPool().map(c => c.kit);
     return withRng(`${seed}:daily-party`, () => {
-      const left = pool.slice(), order = [];
-      while (left.length) order.push(left.splice(Math.floor(Math.random() * left.length), 1)[0]);
-      const dmg = D().damageRoles || [];
-      const out = [], roles = new Set();
-      const first = order.find(x => dmg.indexOf(x.role) >= 0);
-      if (first) { out.push(first); roles.add(first.role); }
-      order.forEach(x => { if (out.length < size && out.indexOf(x) < 0 && !roles.has(x.role)) { out.push(x); roles.add(x.role); } });
-      order.forEach(x => { if (out.length < size && out.indexOf(x) < 0) out.push(x); });
-      return out.map(x => x.kit);
+      const out = [];
+      while (out.length < size && left.length) out.push(left.splice(Math.floor(Math.random() * left.length), 1)[0]);
+      return out;
     });
   }
   /** 每日挑战的专长选项：这个人第 N 次选专长 → 按种子抽 featOffer 个（抽一次就记下，读档、刷新都一样），并记一次「出现」 */

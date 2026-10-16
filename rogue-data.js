@@ -45,8 +45,8 @@ const ROGUE_CONFIG = {
   // 额外幕不选，照表走
   altRegions: { 2: "第一采矿场", 3: "第二采矿场", 4: "第三采矿场" },
   // 每日挑战（#52，rogue.js · dailySeed / dailyParty）：每天一个固定种子，大家打同一局，用来统计专长的选取率
-  //   partySize 随机队伍几人；damageRoles 至少要有一名主职责在这里面的（输出）；featOffer 专长每次给几个选项；keepRuns 本机最多记几局
-  daily: { partySize: 4, damageRoles: ["直伤", "击破"], featOffer: 4, keepRuns: 200 },
+  //   partySize 随机队伍几人（任何组合都行，方便测极端搭配）；featOffer 专长每次给几个选项；keepRuns 本机最多记几局
+  daily: { partySize: 4, featOffer: 4, keepRuns: 200 },
   // 每个区域的轮换 BOSS 池（占位：目前只接入了 3 个 BOSS，没有 BOSS 的区域从全部 BOSS 里抽）
   bosses: {
     "外城区": ["outlaw_king"],

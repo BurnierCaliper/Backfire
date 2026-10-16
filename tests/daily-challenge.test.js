@@ -9,7 +9,7 @@ const { execSync } = require("node:child_process");
 const H = require("./headless");
 const plain = (x) => JSON.parse(JSON.stringify(x));
 
-test("种子和队伍：按日期固定；4 人、不重复、至少一名输出，主职责尽量不重复", () => {
+test("种子和队伍：按日期固定；4 人、不重复，不限职责搭配", () => {
   const c = H.load();
   const R = c.Rogue;
   assert.equal(R.dailySeed("2026-10-16"), "daily-2026-10-16");
@@ -18,9 +18,10 @@ test("种子和队伍：按日期固定；4 人、不重复、至少一名输出
   assert.deepEqual(a, b, "同一天同一支队伍");
   assert.equal(a.length, 4);
   assert.equal(new Set(a).size, 4);
+  // 不限职责：抽很多天，会出现主职责重复的队伍
   const role = (k) => (R.cardOf(k).roles || {}).primary;
-  assert.ok(a.some(k => ["直伤", "击破"].includes(role(k))), "至少一名输出");
-  assert.equal(new Set(a.map(role)).size, 4, "主职责不重复");
+  const dup = Array.from({ length: 60 }, (_, i) => plain(R.dailyParty("daily-x-" + i))).some(p => new Set(p.map(role)).size < p.length);
+  assert.ok(dup, "有主职责重复的组合");
   const days = ["2026-10-17", "2026-10-18", "2026-10-19", "2026-10-20"].map(d => plain(R.dailyParty(R.dailySeed(d))).join());
   assert.ok(new Set(days.concat(a.join())).size > 1, "不同日子队伍会变");
 });
