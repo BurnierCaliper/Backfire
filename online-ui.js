@@ -54,7 +54,10 @@
     // 物资（钱包 / 商店 / 诊所 / 队伍公共物资）：收进弹窗，不再压在舞台内容上面把战场、检定挤下去
     const suppliesBox = make("section", "online-supplies", "ol-overlay ol-bag ol-supplies-box", { role: "dialog", "aria-label": "物资" });
     suppliesBox.hidden = true;
-    let suppliesOpen = false;
+    let suppliesOpen = false, privUnread = 0, autoResumeTried = false;
+    // 房间暂停：固定在顶栏下面的一条横幅，不会被内容挤到下面
+    const pauseBar = make("div", "online-pause", "ol-pause-bar", { role: "status", "aria-live": "polite" });
+    pauseBar.hidden = true;
     // 掷骰：选角色、选熟练项，掷一颗 d100（点数越低越好）
     const rollBox = make("section", "online-roll", "ol-overlay ol-bag ol-roll", { role: "dialog", "aria-label": "掷骰" });
     rollBox.hidden = true;
@@ -260,7 +263,7 @@
       return `<div class="ol-gaps">${Object.entries(data.gaps || {}).filter(([key]) => /^\d-\d$/.test(key)).map(([key, gap]) => `<span>${esc(key.replace("-", " ↔ "))}：${esc(labels[gap.type] || "间隔")}${["wall", "bridge"].includes(gap.type) ? ` · 耐久 ${esc(gap.hp ?? 0)}` : gap.type === "door" ? gap.open ? " · 开" : " · 关" : ""}</span>`).join("")}</div>`;
     }
     /** 跑团私人钱包（房主按收件人算好：自己的角色有余额，队友只有名字）：看余额、给队友转钱 */
-    const purseDraft = { from: "", to: "", n: "100" };   // 转账表单：包刷新重画时保留填了一半的值
+    const purseDraft = { from: "", to: "", n: "" };   // 转账表单：包刷新重画时保留填了一半的值
     const shopDraft = { payer: "", qty: {} };              // 商店：由谁付、每件填的数量（包刷新时保留）
     /** 跑团商人（主持人开着的那家店，房主算好的 view.packet.shop）：玩家用自己角色的钱包买，积分兑换用队伍积分 */
     function shopMarkup() {
@@ -295,7 +298,7 @@
       return `<section class="ol-purse" aria-label="私人钱包"><h3>私人钱包</h3><div class="ol-points">${mine.map(h => `<span>${esc(h.name)} <b>${esc(h.amount)}</b> 奎支</span>`).join("")}</div>
         <div class="ol-purse-send"><label>从 <select id="ol-purse-from" data-purse="from">${mine.map(h => option(h.kit, h.name, h.kit === purseDraft.from)).join("")}</select></label>
         <label>转给 <select id="ol-purse-to" data-purse="to">${to.map(([k, n]) => option(k, n, k === purseDraft.to)).join("")}</select></label>
-        <label><input type="number" id="ol-purse-n" data-purse="n" min="1" step="1" value="${esc(purseDraft.n)}" aria-label="转多少奎支"> 奎支</label>${button("转过去", "purseTransfer", "", disabled())}</div>
+        <label><input type="number" id="ol-purse-n" data-purse="n" min="1" max="${esc(Math.max(1, Number((mine.find(h => h.kit === purseDraft.from) || mine[0]).amount) || 0))}" step="1" placeholder="数额" value="${esc(purseDraft.n)}" aria-label="转多少奎支"> 奎支</label>${button("转过去", "purseTransfer", "", disabled())}</div>
         <p class="ol-muted">任务的奎支报酬自动平分进各人钱包，个人任务的只进你自己的。转账会写进小队频道。</p></section>`;
     }
     function suppliesMarkup(data) {
@@ -349,8 +352,9 @@
       const rows = open.concat(recent);
       if (!rows.length) return "";
       return `<section class="ol-checks" aria-label="检定">${rows.map(c => `<article class="ol-check${c.status === "open" ? " ol-open" : ""}"><header><h3>${esc(c.diffName)}「${esc(c.prof)}」检定</h3><small>${c.status === "open" ? "进行中" : "已结束"}</small></header>${c.note ? `<p>${esc(c.note)}</p>` : ""}<ul>${(c.targets || []).map(t => {
-        const odds = `成功率 ${Math.round((t.base || 0) * 1000) / 10}%${t.adv ? " · 优势" : t.dis ? " · 劣势" : ""}${t.reroll ? " · 失败可重掷" : ""}`;
-        const res = t.result ? `<b class="${t.result.ok ? "ol-ok" : "ol-bad"}">${t.result.ok ? "成功" : "失败"}</b> <small>${esc(t.result.rolls.map(r => r.roll == null ? r.label : (r.label ? r.label + " " : "") + r.roll).join("，"))}</small>` : c.status === "open" && mineIds.has(t.unitId) ? button("掷骰", "checkRoll", `data-check="${esc(c.id)}" data-unit="${esc(t.unitId)}"`, disabled() || !(t.base > 0), true) : '<small class="ol-muted">等待掷骰</small>';
+        const can = t.base > 0;
+        const odds = `成功率 ${Math.round((t.base || 0) * 1000) / 10}%${can && t.adv ? " · 优势" : can && t.dis ? " · 劣势" : ""}${can && t.reroll ? " · 失败可重掷" : ""}`;
+        const res = t.result ? `<b class="${t.result.ok ? "ol-ok" : "ol-bad"}">${t.result.ok ? "成功" : "失败"}</b> <small>${esc(t.result.rolls.map(r => r.roll == null ? r.label : (r.label ? r.label + " " : "") + r.roll).join("，"))}</small>` : c.status === "open" && !can ? '<small class="ol-muted ol-check-no">成功率 0%：这项熟练不够、这个难度没法尝试，由主持人决定怎么处理</small>' : c.status === "open" && mineIds.has(t.unitId) ? button("掷骰", "checkRoll", `data-check="${esc(c.id)}" data-unit="${esc(t.unitId)}"`, disabled(), true) : '<small class="ol-muted">等待掷骰</small>';
         return `<li><span><b>${esc(t.name)}</b><small>${esc(odds)}</small></span>${res}</li>`;
       }).join("")}</ul></article>`).join("")}</section>`;
     }
@@ -477,11 +481,12 @@
       if (screen === "lobby" || !data) return '<div class="ol-wait"><h2>等待房间同步</h2><p>房主准备好后会更新这里。</p></div>';
       if (view.packet?.mode === "rogue" && view.packet.rogue && screen === "exploration") return rogueMarkup(view.packet.rogue);
       const units = (data.units || []).filter(u => !u.hidden), logs = view.packet?.publicLogs || [];
-      return `<header class="ol-stage-heading"><div><span class="ol-muted">${esc(view.roomCode)} · ${screen === "battle" ? `第 ${data.turnNo || 1} 回合` : screen === "ended" ? "遭遇结束" : "探索环节"}</span>${screen === "battle" && global.Chain && data.chainStatus ? `<div class="ol-chain">${global.Chain.barHtml(data.chainStatus)}</div>` : ""}<h1>${screen === "battle" ? "战场" : screen === "ended" ? "战斗结算" : "与队伍同行"}</h1><div class="ol-info-tools">${global.WorldMap ? button("地图", "map") : ""}${button("角色资料", "info", 'data-info="sheet"', pending)}${button("武器", "info", 'data-info="armory"', pending)}${button("背包", "info", 'data-info="bag"', pending)}${button("战绩", "info", 'data-info="record"', pending)}${suppliesButton()}${view.packet?.mode !== "rogue" ? button(`任务日志${questList().some(q => q.status === "active") ? ` · ${questList().filter(q => q.status === "active").length}` : ""}`, "quests") : ""}</div></div>${weatherMarkup(data)}</header>${screen === "ended" ? resultMarkup() : ""}${paused() ? '<p class="ol-pause" role="status">房间暂停，正在等待连接恢复。</p>' : ""}${view.offlineWait ? `<p class="ol-pause">${esc(view.offlineWait.name)} 离线，等待其返回。</p>` : ""}${checksMarkup()}${screen === "battle" || screen === "ended" ? (global.OnlineBattle && global.UnitCard ? '<div class="ol-battle-slot"></div>' : `<div class="ol-zones"${zoneGrid(data).style}>${zoneGrid(data).zones.map(z => `<section class="ol-zone"${z.style}><h2>${z.id} 区</h2>${fieldsMarkup(data, z.id)}${units.filter(u => Number(u.zone) === z.id).map(card).join("") || '<p class="ol-muted">空区域</p>'}${(data.props || []).filter(p => Number(p.zone) === z.id && !p.destroyed).map(p => `<article class="ol-prop" data-prop-id="${esc(p.id)}"><b>${esc(p.name || p.kind || "配置物")}</b>${p.hp != null ? `<span>耐久 ${esc(p.hp)}${p.maxHp == null ? "" : " / " + esc(p.maxHp)}</span>` : ""}</article>`).join("")}</section>`).join("")}</div>${gapsMarkup(data)}${screen === "ended" ? "" : actionsMarkup()}`) : `<p class="ol-muted">主持人正在管理探索与遭遇。右侧「小队」频道可以和大家聊天，「消息与成员」里可以私下回复主持人。</p><div class="ol-exploration-party">${units.filter(u => u.isPlayer && !u.weaponOf).map(card).join("")}</div>`}`;
+      return `<header class="ol-stage-heading"><div><span class="ol-muted">${esc(view.roomCode)} · ${screen === "battle" ? `第 ${data.turnNo || 1} 回合` : screen === "ended" ? "遭遇结束" : "探索环节"}</span>${screen === "battle" && global.Chain && data.chainStatus ? `<div class="ol-chain">${global.Chain.barHtml(data.chainStatus)}</div>` : ""}<h1>${screen === "battle" ? "战场" : screen === "ended" ? "战斗结算" : "与队伍同行"}</h1><div class="ol-info-tools">${global.WorldMap ? button("地图", "map") : ""}${button("角色资料", "info", 'data-info="sheet"', pending)}${button("武器", "info", 'data-info="armory"', pending)}${button("背包", "info", 'data-info="bag"', pending)}${button("战绩", "info", 'data-info="record"', pending)}${suppliesButton()}${view.packet?.mode !== "rogue" ? button(`任务日志${questList().some(q => q.status === "active") ? ` · ${questList().filter(q => q.status === "active").length}` : ""}`, "quests") : ""}</div></div>${weatherMarkup(data)}</header>${screen === "ended" ? resultMarkup() : ""}${checksMarkup()}${screen === "battle" || screen === "ended" ? (global.OnlineBattle && global.UnitCard ? '<div class="ol-battle-slot"></div>' : `<div class="ol-zones"${zoneGrid(data).style}>${zoneGrid(data).zones.map(z => `<section class="ol-zone"${z.style}><h2>${z.id} 区</h2>${fieldsMarkup(data, z.id)}${units.filter(u => Number(u.zone) === z.id).map(card).join("") || '<p class="ol-muted">空区域</p>'}${(data.props || []).filter(p => Number(p.zone) === z.id && !p.destroyed).map(p => `<article class="ol-prop" data-prop-id="${esc(p.id)}"><b>${esc(p.name || p.kind || "配置物")}</b>${p.hp != null ? `<span>耐久 ${esc(p.hp)}${p.maxHp == null ? "" : " / " + esc(p.maxHp)}</span>` : ""}</article>`).join("")}</section>`).join("")}</div>${gapsMarkup(data)}${screen === "ended" ? "" : actionsMarkup()}`) : `<p class="ol-muted ol-explore-hint">主持人正在管理探索与遭遇。右侧「小队」频道可以和大家聊天，「消息与成员」里可以私下回复主持人。</p><div class="ol-exploration-party">${units.filter(u => u.isPlayer && !u.weaponOf).map(card).join("")}</div>`}`;
     }
     function observeMessages() {
       const rows = view.messages || [], incoming = rows.filter(m => !seenMessages.has(m.id) && m.from !== own());
       for (const m of rows) seenMessages.add(m.id);
+      if (messagesInitialized && incoming.length && !panelOpen) privUnread += incoming.length;   // 消息提示一闪就没：在「消息与成员」按钮上留个未读数
       if (messagesInitialized && incoming.length) {
         const message = incoming[incoming.length - 1];
         toast.textContent = `${message.to === "all" ? "主持人消息" : "仅你可见"}：${message.text}`; toast.hidden = false;
@@ -796,7 +801,7 @@
       if (view.active) {
         if (!animating) displayState = view.state || null;
         if (request && (request.actor !== hs().currentUnitId || hs().phase !== "acting")) { request = currentMenu = null; actionGeneration++; }
-        html(dock, button(`${view.roomCode || "房间"} · ${paused() ? "重连中" : "消息与成员"}`, "openRoom", "", false) +
+        html(dock, button(`${view.roomCode || "房间"} · ${paused() ? "重连中" : "消息与成员"}${privUnread && !view.isHost ? ` · ${privUnread} 条新消息` : ""}`, "openRoom", privUnread && !view.isHost ? 'data-alert="1"' : "", false) +
           (view.isHost && view.mode !== "rogue" && ["exploration", "ended"].includes(view.screen) ? button("角色分配", "openAssign", "", false) : ""), "dock");
         observeMessages();
         if (!view.isHost) { observeQuests(); observeCamp(); observeRest(); observeShop(); }
@@ -808,7 +813,13 @@
       if (rogueHost && lastScreen === "lobby" && view.screen !== "lobby") panelOpen = false;   // 开始了：收起房间面板
       lastScreen = view.screen;
       rogueHeroesSeen = heroCount > 0;
+      // 有协助 / 格挡询问轮到我回应：先收起房间面板和物资弹窗，别把询问挡住（倒计时到了会自动放弃）
+      const myAsk = view.active && !view.isHost && hs().ask && hs().ask.eligible && !hs().ask.declined;
+      if (myAsk && view.screen !== "lobby") { panelOpen = false; suppliesOpen = false; }
       panel.hidden = !(panelOpen || view.active && view.screen === "lobby" && !rogueHost);
+      pauseBar.hidden = !(view.active && !view.isHost && view.screen !== "lobby" && (paused() || view.offlineWait));
+      if (!pauseBar.hidden) pauseBar.textContent = paused() ? "⏸ 房间暂停：正在等待连接恢复，恢复后会自动继续。" : `⏳ ${view.offlineWait.name} 离线，等待其返回。`;
+      document.body.classList.toggle("ol-paused", !pauseBar.hidden);
       paintLevelUps();
       if (!panel.hidden) html(panel, view.active ? roomMarkup() : entryMarkup(), "panel");
       renderSide();
@@ -966,7 +977,7 @@
         case "joinTab": entry = "join"; render(); break;
         case "close": panelOpen = false; render(); break;
         case "cancelConnect": api.cancelConnect?.(); break;   // 连接中的「取消」：call() 收到「已取消连接」后恢复表单
-        case "openRoom": panelOpen = true; render(); break;
+        case "openRoom": panelOpen = true; privUnread = 0; render(); break;
         case "messageHistory": await earlierMessages(); break;
         case "connect": {
           const opts = { url: form.url.trim() || DEFAULT_RELAY, name: form.name.trim() || (entry === "create" ? "主持人" : "玩家") };
@@ -1097,6 +1108,25 @@
       menu.appendChild(b); titleButtons.push(b);
     }
     addTitleButton("联机开房", "create"); addTitleButton("加入房间", "join");
+    // 刷新 / 误关页面后：玩家自动回到上次的房间；失败就留在标题页，给一个显眼的「回到房间」按钮
+    function addResumeButton() {
+      const info = api.savedInfo?.(); const menu = document.querySelector("#scr-title .t-menu");
+      if (!info || !menu || document.getElementById("ol-title-resume")) return;
+      const b = document.createElement("button"); b.type = "button"; b.className = "t-btn ol-title-entry ol-title-resume"; b.id = "ol-title-resume";
+      b.innerHTML = `<b>回到房间 ${esc(info.roomCode || "")}</b><small>${info.role === "host" ? "恢复你主持的房间" : `以「${esc(info.name)}」重新连上`}</small>`;
+      b.onclick = async () => { entry = "join"; if (await call(() => api.resume())) { panelOpen = false; b.remove(); render(); } else { panelOpen = true; render(); } };
+      menu.prepend(b); titleButtons.push(b);
+    }
+    async function autoResume() {
+      if (autoResumeTried || destroyed) return; autoResumeTried = true;
+      const info = api.savedInfo?.();
+      if (!info || info.role !== "player" || api.getView()?.active) { if (info) addResumeButton(); return; }
+      notice = `正在回到房间 ${info.roomCode}…`;
+      try { const r = await api.resume(); if (r && r.ok === false) throw new Error(r.error || "恢复失败"); notice = ""; }
+      catch (e) { notice = `没能自动回到房间：${e.message || e}`; addResumeButton(); toast.textContent = notice; toast.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { toast.hidden = true; }, 6000); }
+      render();
+    }
+    if (typeof api.savedInfo === "function") setTimeout(autoResume, 0);
     if (typeof api.subscribe === "function") unsubs.push(api.subscribe(render));
     if (typeof api.onPacket === "function") unsubs.push(api.onPacket(playPacket));
     render();

@@ -208,9 +208,14 @@
     if (!status.paused) await ep.send({ type: "resync", protocol: PROTOCOL, build: BUILD });
     return getView();
   }
-  async function resume() {
+  // 同时来的两次恢复（刷新后自动恢复 + 手动点「恢复」）合并成一次；已经用同一个身份回到房间就直接返回
+  let resuming = null;
+  function resume() { if (resuming) return resuming; resuming = doResume().finally(() => { resuming = null; }); return resuming; }
+  async function doResume() {
+    const saved = readSaved();
+    if (active && saved && identity && saved.identity && saved.identity.id === identity.id) return getView();
     if (active) error("已经在房间中");
-    const saved = readSaved(); if (!saved) error("没有可恢复的房间");
+    if (!saved) error("没有可恢复的房间");
     const c = saved.credentials; if (c.build !== BUILD || c.protocol !== PROTOCOL) error("版本不同，请刷新并新建房间");
     requestNo = Math.max(requestNo, saved.requestNo || 0); restoring = true;
     try {
@@ -513,7 +518,8 @@
   root.addEventListener("pagehide", save);
   root.OnlineGame = { PROTOCOL, BUILD, create, join, resume, submit, getView, isHost, isPaused, waitUntilReady, manualEnemyPhase, onActionSettled, flushGM, queueHostEdit, legacyAddedEnemies, reportError,
     takeAIResume() { const value = resumeAI; resumeAI = false; return value; },
-    hasSaved: () => !!readSaved(), slots: () => trpgReadSlots().map((s, index) => ({ index, name: s?.name || "空白存档" })),
+    hasSaved: () => !!readSaved(),
+    savedInfo: () => { const s = readSaved(); return s ? { role: s.credentials?.role || "", roomCode: s.credentials?.roomCode || "", name: s.identity?.name || "" } : null; }, slots: () => trpgReadSlots().map((s, index) => ({ index, name: s?.name || "空白存档" })),
     assign(assignments) {
       if (!isHost()) error("只有主持人可以分配角色");
       if (rogue()) {

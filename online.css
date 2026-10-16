@@ -109,7 +109,7 @@
  * calculator dialogs live outside the original screen roots; hiding individual
  * screen IDs leaves those dialogs in the outer document and its scroll range. */
 body.online-player { overflow: hidden; }
-body.online-player > :not(.ol-ui):not(.hs-ui):not(.hs-sheet):not(.ar-sheet):not(#sk-tip):not(.sk-tip):not(.unit-tip):not(.rr-overlay) { display: none !important; }
+body.online-player > :not(.ol-ui):not(.hs-ui):not(.hs-sheet):not(.ar-sheet):not(.wm):not(#sk-tip):not(.sk-tip):not(.unit-tip):not(.rr-overlay) { display: none !important; }
 /* 玩家看自己的角色资料 / 武器页：压在联机舞台上面 */
 body.online-player .hs-sheet, body.online-player .ar-sheet { z-index: 95; }
 /* 玩家右侧栏：战斗（记录）/ 小队 两个频道 */
@@ -315,3 +315,32 @@ body.ol-has-side .ol-toast { right: 344px; }
 .ol-supplies-card { width: min(720px, 100%); display: flex; flex-direction: column; gap: 14px; }
 .ol-supplies-card > section { margin: 0; }
 .ol-button[data-alert="1"] { border-color: var(--sk-amber, #e7b13c); box-shadow: 0 0 0 2px #e7b13c66; }
+/* 玩家的地图（world-map.js 挂在 body 下）不能被「隐藏遗留面板」的规则一起藏掉 */
+body.online-player > .wm { z-index: 200; }
+/* 协助 / 格挡询问压在房间面板、物资弹窗、浮动按钮之上（倒计时到了会自动放弃，不能被挡住） */
+#hs-reaction { z-index: 97; }
+/* 房间暂停横幅：固定在顶栏下方 */
+.ol-pause-bar { position: fixed; z-index: 80; left: 0; right: 0; top: var(--hs-top-height, 0px); padding: 8px 16px; background: #5a1f17; color: #ffe2d6; font-weight: 700; text-align: center; border-bottom: 2px solid #a8432f; }
+body.ol-paused .ol-stage { padding-top: 56px; }
+.ol-check-no { display: block; max-width: 22em; text-align: right; }
+/* 「房间码 · 消息与成员」：玩家画面放进顶栏右侧，不再浮在内容上 */
+body.online-player .ol-dock { top: 8px; bottom: auto; right: 14px; z-index: 82; }
+body.online-player .ol-dock .ol-button { min-height: 36px; padding: 6px 12px; }
+/* 探索：四张角色卡在 1280 宽也排成一行，卡片按内容高度对齐（不拉成一样高留大片空白） */
+.ol-exploration-party { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; align-items: start; }
+.ol-exploration-party .ol-unit { margin: 0; }
+@media (max-width: 760px) {
+  .ol-exploration-party { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .ol-exploration-party .ol-unit { padding: 8px; font-size: 13px; }
+  .ol-stage-heading h1 { font-size: 22px; margin: 2px 0 6px; }
+  .ol-stage-heading .ol-info-tools { gap: 6px; }
+  .ol-stage-heading .ol-info-tools .ol-button { padding: 6px 8px; min-height: 34px; }
+  body.online-player .ol-dock .ol-button { font-size: 12px; padding: 4px 8px; min-height: 30px; max-width: 46vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+@media (max-width: 760px) {
+  body.online-player #hs-bar .hs-tag { display: none; }
+  body.online-player .ol-dock .ol-button { max-width: 40vw; }
+  .ol-explore-hint { display: none; }
+  .ol-stage-heading .ol-weather { padding: 4px 8px; }
+}
+@media (max-width: 760px) { body.online-player #hs-bar > span:not(.hs-phase) { display: none; } }
