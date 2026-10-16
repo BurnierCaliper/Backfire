@@ -436,3 +436,38 @@ body.online-player.ol-in-battle .ol-battle .sk.blocked .cost { color: #d9a07a; }
   body.online-player.ol-in-battle .ol-stage-heading .ol-info-tools { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; max-width: 100%; }
   body.online-player.ol-in-battle .ol-stage-heading .ol-info-tools button { flex: none; }
 }
+
+/* 战斗中的检定：一行窄条，不压战场 */
+.ol-checks-compact { gap: 4px; margin: 0 0 6px; }
+.ol-check-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 3px 10px; background: #1f1a14; border: 1px solid var(--sk-brass, #c99a46); font-size: 13px; }
+.ol-check-bar > b { color: var(--sk-brass, #c99a46); }
+.ol-check-bar .ol-check-who { display: inline-flex; align-items: center; gap: 4px; }
+.ol-check-bar .ol-check-who .ol-button { min-height: 24px; padding: 0 8px; font-size: 12px; }
+.ol-check-bar .ol-ok { color: var(--sk-mint, #39e6b4); }
+.ol-check-bar .ol-bad { color: #e06a4f; }
+/* 桌面端玩家战斗：顺序栏、操作区收紧一点，把高度让给战场（1280×800 开着检定时战场仍有约 400px） */
+@media (min-width: 821px) {
+  body.online-player.ol-in-battle .hs-turn { padding: 1px 14px; font-size: 13px; }
+  body.online-player.ol-in-battle .hs-strip { padding-bottom: 5px; }
+  body.online-player.ol-in-battle .hs-strip li { padding: 2px 8px; min-height: 0; }
+  body.online-player.ol-in-battle .hs-strip li > div { display: flex; align-items: baseline; gap: 6px; }
+  body.online-player.ol-in-battle .hs-strip b, body.online-player.ol-in-battle .hs-strip small { display: inline; }
+  body.online-player.ol-in-battle .hs-slot-num { font-size: 16px; }
+  body.online-player.ol-in-battle .hs-strip .hs-button { padding: 2px 7px; min-height: 0; }
+  body.online-player.ol-in-battle .ol-stage { padding-top: 6px; padding-bottom: 6px; }
+  body.online-player.ol-in-battle .ol-stage-heading { margin-bottom: 4px; }
+  body.online-player.ol-in-battle .ol-stage-heading .ol-info-tools button { min-height: 26px; }
+  body.online-player.ol-in-battle .ol-checks-compact { margin-bottom: 4px; }
+  body.online-player.ol-in-battle .ol-battle .g-hud { padding: 4px 12px 6px; }
+  body.online-player.ol-in-battle .ol-battle .party { margin-bottom: 4px; }
+  body.online-player.ol-in-battle .ol-battle .sk { display: inline-flex; align-items: baseline; gap: 8px; padding: 5px 10px 5px 26px; min-height: 0; }
+  body.online-player.ol-in-battle .ol-battle .sk .key { top: 6px; }
+  body.online-player.ol-in-battle .ol-battle .sk .nm { font-size: 15px; white-space: nowrap; }
+  body.online-player.ol-in-battle .ol-battle .sk .cost { font-size: 11px; white-space: nowrap; }
+  body.online-player.ol-in-battle .ol-battle .hud-row { align-items: center; }
+  body.online-player.ol-in-battle .ol-battle .hud-row { gap: 10px; }
+  body.online-player.ol-in-battle .ol-battle .hud-side { margin-left: auto; }
+  /* 提示栏放到队伍条右边那块空地上，不再单独占一行 */
+  body.online-player.ol-in-battle .ol-battle .g-hud .hint { position: absolute; top: 8px; right: 12px; width: 42%; max-height: 52px; overflow-y: auto; margin: 0; font-size: 12px; line-height: 1.45; text-align: right; }
+  body.online-player.ol-in-battle .ol-battle .g-hud .party { margin-right: 44%; }
+}

@@ -248,17 +248,39 @@
     function update(data, ui) {
       data = data || {}; ui = ui || {};
       last = { data, ui };
+      if (root.HeroSheet && HeroSheet.hideTip && (ui.armed || ui.busy)) HeroSheet.hideTip();
       layout(data);
       paintZones(data, ui);
       paintCards(data, ui);
       paintHud(data, ui);
+      fitZones();
     }
+
+    /** 区里单位多时逐级缩小铭牌（和 Roguelike 战斗画面同一套 dense-1…3 样式）。
+     *  只量自己的 DOM，不调用 GAME（显示层约定），量不下了才在区内滚动 */
+    function fitZones() {
+      if (typeof getComputedStyle !== "function") return;
+      const LV = ["dense-1", "dense-2", "dense-3"];
+      const overflowing = z => {
+        const cs = getComputedStyle(z);
+        const grps = [...z.querySelectorAll(".grp")].filter(g => g.children.length);
+        const content = grps.reduce((sum, g) => sum + g.offsetHeight, 0) + Math.max(0, grps.length - 1) * (parseFloat(cs.rowGap) || 0) +
+          (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+        return z.clientHeight > 0 && content > z.clientHeight + 1;
+      };
+      field.querySelectorAll(".g-zone").forEach(z => {
+        LV.forEach(c => z.classList.remove(c));
+        for (let i = 0; i < LV.length && overflowing(z); i++) { LV.forEach(c => z.classList.remove(c)); z.classList.add(LV[i]); }
+      });
+    }
+    if (typeof ResizeObserver === "function") { let fitQueued = false; new ResizeObserver(() => { if (fitQueued) return; fitQueued = true; requestAnimationFrame(() => { fitQueued = false; fitZones(); }); }).observe(field); }
 
     // 点击：技能、分步选项、取消、结束行动；区域
     el.addEventListener("click", (e) => {
       const t = e.target;
       const sk = t.closest("[data-ob-skill]");
-      if (sk && !sk.disabled) { if (root.HeroSheet) HeroSheet.hideTip(); if (cb.onSkill) cb.onSkill(sk.dataset.obSkill); return; }
+      if (sk) { tipMuted = sk; if (root.HeroSheet) HeroSheet.hideTip(); }
+      if (sk && !sk.disabled) { if (cb.onSkill) cb.onSkill(sk.dataset.obSkill); return; }
       const op = t.closest("[data-ob-opt]");
       if (op && !op.disabled) { if (cb.onOption) cb.onOption(Number(op.dataset.obOpt)); return; }
       const b = t.closest("[data-ob]");
@@ -268,16 +290,25 @@
     });
     el.addEventListener("contextmenu", (e) => { if (last.ui.armed && cb.onCancel) { e.preventDefault(); cb.onCancel(); } });
     // 技能悬停：完整技能说明（和战斗画面同一个浮窗）
+    // 点过技能后浮窗关掉，直到鼠标离开这个按钮才会再出现（重绘换掉按钮时也不会留着）
+    let tipMuted = null;
     el.addEventListener("mouseover", (e) => {
       const sk = e.target.closest && e.target.closest("[data-ob-skill]");
       if (!sk || !root.HeroSheet || !HeroSheet.tip) return;
+      if (tipMuted && tipMuted.dataset && tipMuted.dataset.obSkill === sk.dataset.obSkill) return;
       const o = (last.ui.skills || []).find(x => x.value === sk.dataset.obSkill);
       if (o) HeroSheet.tip(sk, HeroSheet.skillTipHtml({ id: o.value, name: o.label, hint: "" }, o.reason || ""));
     });
     el.addEventListener("mouseout", (e) => {
       const sk = e.target.closest && e.target.closest("[data-ob-skill]");
-      if (sk && !sk.contains(e.relatedTarget) && root.HeroSheet) HeroSheet.hideTip();
+      if (sk && !sk.contains(e.relatedTarget)) {
+        const to = e.relatedTarget && e.relatedTarget.closest ? e.relatedTarget.closest("[data-ob-skill]") : null;
+        if (!to || !tipMuted || to.dataset.obSkill !== tipMuted.dataset.obSkill) tipMuted = null;
+        if (root.HeroSheet) HeroSheet.hideTip();
+      }
     });
+    el.addEventListener("mouseleave", () => { tipMuted = null; if (root.HeroSheet) HeroSheet.hideTip(); });
+    el.addEventListener("pointerdown", (e) => { if (e.target.closest && !e.target.closest("[data-ob-skill]") && root.HeroSheet) HeroSheet.hideTip(); });
     /** 键盘：1–9 选技能，Esc / 右键取消，空格结束行动（输入框里打字时不管） */
     const SPACE_SAFE = "button, a[href], summary, [role=button], [role=tab], [role=option], [contenteditable], [tabindex]:not([tabindex='-1'])";
     // 鼠标 / 触屏点过的按钮会留着焦点：记下来，空格不当成「按下它」（:focus-visible 在按键那一刻也会变真，用不了）；按 Tab 换焦点后才算键盘焦点
