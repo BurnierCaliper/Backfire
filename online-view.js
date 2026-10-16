@@ -49,7 +49,7 @@
     if (typeof v !== "string") return "";
     return v.split(" · ").map(t => text(t.trim(), 48)).filter(t => t && t !== "无状态").slice(0, max).join(" · ");
   }
-  const mechTypes = ["execution", "share", "spread", "tower"], phases = ["enemy", "player"];
+  const mechTypes = ["execution", "share", "spread", "tower", "volley"], phases = ["enemy", "player"];
   function markDto(m, strings, numbers, booleans) {
     if (!obj(m)) return null;
     const o = {}; enumField(m, o, "type", mechTypes); if (!o.type) return null;
@@ -75,7 +75,7 @@
         const name = text(call("weaponName", kit), 40); if (name) d.dur.name = name;
       }
     }
-    const marks = arr(call("bossMarksOn", unit)).slice(0, 8).map(m => markDto(m, ["name", "by"], ["left", "pool", "group", "blast", "stack"], ["delayed"])).filter(Boolean);
+    const marks = arr(call("bossMarksOn", unit)).slice(0, 8).map(m => markDto(m, ["name", "by", "shot"], ["left", "pool", "group", "blast", "stack", "brk", "mates"], ["delayed"])).filter(Boolean);
     if (marks.length) d.marks = marks;
     const casts = arr(call("bossCastsBy", unit)).slice(0, 8).map(m => markDto(m, ["name", "target"], ["left"], [])).filter(Boolean);
     if (casts.length) d.casts = casts;
@@ -136,7 +136,7 @@
     enumField(r, out.resources, "bit", ["acid", "drill"]);
     identifiers(r, out.resources, ["bondId", "piercedId"]);
     // 首领机制（死刑 / 分担 / 远离 / 踩塔）是公开的预告：只给标记目标、落下回合和时机，不给伤害数值
-    const mech = arr(get(unit, "mechanics")).slice(0, 8).filter(m => obj(m) && ["execution", "share", "spread", "tower"].includes(get(m, "type"))).map(m => {
+    const mech = arr(get(unit, "mechanics")).slice(0, 8).filter(m => obj(m) && ["execution", "share", "spread", "tower", "volley"].includes(get(m, "type"))).map(m => {
       const dto = { type: get(m, "type") }; copyFields(m, dto, ["name"], ["need", "count"], []); enumField(m, dto, "phase", ["enemy", "player"]);
       const st = get(m, "st"); dto.st = copyFields(st, {}, [], ["due"], ["done"]); identifiers(st, dto.st, ["targetId"]);
       const ids = arr(get(st, "targetIds")).slice(0, 20).map(id).filter(Boolean); if (ids.length) dto.st.targetIds = ids;
@@ -550,9 +550,26 @@
       const e = scrubHidden(clone(ev)); e.stats = arr(e.stats).filter(r => obj(r) && r.key !== "shp"); return e;
     });
     if (own(packet, "rogue")) { const r = get(packet, "rogue"); out.rogue = obj(r) ? scrubHidden(clone(r)) : null; }
+    // 任务日志：只留玩家该看的字段（主持人备注、敌人配置、隐藏站的内容在房主那边就去掉了，这里再按白名单过一遍）
+    if (own(packet, "quests")) out.quests = projectQuests(get(packet, "quests"));
     // Resync is another envelope using these same explicit projectors, not a
     // path for forwarding an opaque nested packet or raw save snapshot.
     return out;
+  }
+  function projectQuests(list) {
+    if (!Array.isArray(list)) return null;
+    const str = (v, n) => typeof v === "string" ? v.slice(0, n) : "";
+    const num = v => (typeof v === "number" && isFinite(v) ? Math.max(0, Math.floor(v)) : 0);
+    const STATUS = ["posted", "active", "done", "failed"], STEP = ["done", "cur", "todo"];
+    return list.slice(0, 40).filter(obj).map(q => ({
+      id: str(q.id, 40), name: str(q.name, 40), category: q.category === "main" ? "main" : "side",
+      status: STATUS.includes(q.status) ? q.status : "posted", goal: str(q.goal, 400), days: num(q.days),
+      private: !!q.private, index: num(q.index), got: !!q.got, failWhy: str(q.failWhy, 120),
+      reward: obj(q.reward) ? { xp: num(q.reward.xp), kuizhi: num(q.reward.kuizhi), items: arr(q.reward.items).slice(0, 20).map(x => str(x, 60)) } : { xp: 0, kuizhi: 0, items: [] },
+      steps: arr(q.steps).slice(0, 20).filter(obj).map(st => st.hidden
+        ? { title: "", state: STEP.includes(st.state) ? st.state : "todo", hidden: true, xp: 0, kuizhi: 0, got: false }
+        : { title: str(st.title, 120), state: STEP.includes(st.state) ? st.state : "todo", hidden: false, xp: num(st.xp), kuizhi: num(st.kuizhi), got: !!st.got })
+    })).filter(q => q.id);
   }
   /* 玩家请求的角色资料、武器页和背包明细：都是规则说明和公开数值，只去掉坚毅生命这类隐藏数值 */
   const hiddenSheetKey = /^(shp|shpMax|shpBase|shpBonus|upOnShp)$/i;
@@ -581,7 +598,7 @@
     });
     return out;
   }
-  const api = { SCHEMA, projectPacket, projectSheets, projectBagDetail, projectUnit, projectState, projectTape, projectMessages, projectLogs, projectView, projectActionMenu, safeText: text, safeError };
+  const api = { SCHEMA, projectPacket, projectQuests, projectSheets, projectBagDetail, projectUnit, projectState, projectTape, projectMessages, projectLogs, projectView, projectActionMenu, safeText: text, safeError };
   root.OnlineView = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof globalThis !== "undefined" ? globalThis : window);

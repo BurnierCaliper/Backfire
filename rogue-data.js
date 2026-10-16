@@ -299,8 +299,21 @@ const ROGUE_MAIN_TASK = {
 };
 
 /* 商店。价格照手册「常见物价」。give：water 是毫升；item 是背包物品 id（ITEM_CATALOG / 补给物品）。 */
-/* 商店：always 的（最便宜的水和食物）每家都有；其余商品每家随机进货 ROGUE_SHOP_RULES.randomCount 种 */
-const ROGUE_SHOP_RULES = { randomCount: 8 };
+/* 商店：always 的（最便宜的水和食物）每家都有；其余商品每家随机进货 ROGUE_SHOP_RULES.randomCount 种；
+ * 效果道具（items.js · EFFECT_ITEMS，自我效果除外）另外随机进 effectCount 种，不和水、食物、医疗包抢位置 */
+const ROGUE_SHOP_RULES = { randomCount: 8, effectCount: 4 };
+/* 商店积分（作者定，docs/workshop-design.md 第 6 节）：在商店每花 per 奎支得 1 积分，零头累计到下次；
+ * 积分只能兑换自我效果道具（items.js · EFFECT_ITEMS 里 kind 为 self 的，各自的 points）。这一局内有效。 */
+const ROGUE_SHOP_POINTS = { per: 3000 };
+/* 制作（docs/workshop-design.md 第 5 节；通用规则在 items.js · CRAFT_RULES）
+ *   smithProfs  每位工匠教哪一类熟练项的配方（简单配方一开始就会，其余向对应的工匠学）
+ *   learnPrice  学一张配方的学费（奎支），按难度
+ *   chip        打赢精英 / 首领掉配方芯片的概率：学会一张还不会的配方（优先能做的熟练项） */
+const ROGUE_CRAFT = {
+  smithProfs: { trevor: "机械维修", teresa: "电器维修", zekahr: "数据操作", tima: "巧手", morma: "科技理论", nurhamid: "医疗" },
+  learnPrice: { normal: 800, hard: 1500, extreme: 2500 },
+  chip: { elite: 0.25, boss: 1 }
+};
 const ROGUE_SHOP = [
   { key: "water_500",  name: "瓶装水 500 ml",  price: 600,  give: { water: 500 }, always: true },
   { key: "water_1000", name: "罐装水 1000 ml", price: 1000, give: { water: 1000 } },
@@ -318,7 +331,8 @@ const ROGUE_SHOP = [
   { key: "bomb_e",       price: 1000, give: { item: "bomb_e" } },
   { key: "bomb_a",       price: 1000, give: { item: "bomb_a" } },
   { key: "shockbomb",    price: 1200, give: { item: "shockbomb" } }
-];
+].concat((typeof EFFECT_ITEMS !== "undefined" ? EFFECT_ITEMS : []).filter(it => it.price > 0)
+  .map(it => ({ key: it.id, price: it.price, give: { item: it.id }, effect: true })));
 
 /* 材料（物品表的价格）。单局里升级不收实物材料，按这张表折成奎支。 */
 const ROGUE_MATERIALS = HANDBOOK_MATERIALS;   // 与跑团模式共用（trpg-data.js）

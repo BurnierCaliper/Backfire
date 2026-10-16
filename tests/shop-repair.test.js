@@ -12,7 +12,8 @@ test("商店：最便宜的水和食物一定有，其余商品每家随机 8 �
   const always = c.S.ROGUE_SHOP.filter(r => r.always).map(r => r.key);
   assert.equal(always.slice().sort().join(), ["food_liquid", "water_500"].join());
   always.forEach(k => assert.ok(a.includes(k), k));
-  assert.equal(a.length, always.length + 8);
+  assert.equal(a.length, always.length + 8 + require("node:vm").runInContext("ROGUE_SHOP_RULES.effectCount", c), "8 种普通商品 + 另外进的效果道具");
+  assert.equal(a.filter(k => c.S.ROGUE_SHOP.find(r => r.key === k).effect).length, require("node:vm").runInContext("ROGUE_SHOP_RULES.effectCount", c));
   assert.equal(R.shopStock(run).map(r => r.key).join(), a.join(), "同一家店看几次都一样");
   const missing = c.S.ROGUE_SHOP.find(r => !a.includes(r.key));
   if (missing) assert.throws(() => R.buy(run, missing.key, 1), /这家店没有/);

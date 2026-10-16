@@ -89,6 +89,10 @@
               if (request.dest != null) fail("友方道具不接受区域选项");
               return emit({ kind: "unit", key: "target", title: "选择友方", options: state.units.filter(u => present(u) && u.isPlayer && legal(command(u.id, null))).map(optionFor) });
             }
+            if (item.target === "enemy" && request.target == null) {
+              if (request.dest != null) fail("对敌道具不接受区域选项");
+              return emit({ kind: "unit", key: "target", title: "选择敌人", options: state.units.filter(u => present(u) && !u.isPlayer && legal(command(u.id, null))).map(optionFor) });
+            }
             if (item.target === "zone" && request.dest == null) {
               if (request.target != null) fail("区域道具不接受单位目标");
               return emit({ kind: "zone", key: "dest", title: "选择道具区域", options: boardZoneIds().filter(z => legal(command(null, z))).map(z => ({ value: z, label: `${z} 区` })) });

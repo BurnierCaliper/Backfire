@@ -15,6 +15,7 @@
     // 战斗画面（online-battle.js）：和单人 / 跑团同一套画面；skillOptions 是当前角色的技能栏，autoKey 防止重复自动取技能
     let battle = null, skillOptions = [], skillsFor = "", autoKey = "";
     let displayState = null, animating = false, messagesInitialized = false, seenMessages = new Set(), toastTimer;
+    let questSeen = null, questBoxOpen = false;   // 任务日志：上一包的摘要（算「任务更新」提示）、日志面板开着没
     let historyRows = [], historyRoom = "", historyHasMore = true, historyLoading = false, historyGeneration = 0;
     // 默认的转发服务（docs/d3/relay.md 里部署的那一个）：大家都用它，就不用每次填；要换别的服务再展开「更换转发服务」
     const DEFAULT_RELAY = "https://backfire-relay.richardguu22.workers.dev";
@@ -337,7 +338,7 @@
       const head = `<header class="ol-stage-heading"><div><span class="ol-muted">${esc(view.roomCode)} · 联机单局 · ${esc(stageName)}</span><h1>第 ${esc(r.act)} 幕 · ${esc(r.region)}</h1><p class="ol-muted">第 ${esc(r.day)} 天 · 本幕剩 ${esc(r.daysLeft)}/${esc(r.daysPerAct)} 天${r.main ? r.main.done ? " · 主线已完成" : ` · 主线需 ${esc(r.main.days)} 天` : ""} · 队伍公用：水 ${esc(r.supplies.water)} ml · 食物 ${esc(r.supplies.food)} 份 · 距上次长休 ${esc(r.supplies.hours)} 小时</p><div class="ol-info-tools">${button("角色资料", "info", 'data-info="sheet"', pending)}${button("武器", "info", 'data-info="armory"', pending)}${button("背包", "info", 'data-info="bag"', pending)}${button("战绩", "info", 'data-info="record"', pending)}</div></div></header>`;
       const over = r.result ? `<section class="ol-result"><h2>${r.result.win ? "通关" : "本局结束"}</h2><p>${esc(r.result.text)}</p></section>` : "";
       const heroes = `<section class="ol-rogue-party" aria-label="队伍">${(r.heroes || []).map(h => `<article class="ol-unit ol-ally${h.mine ? " ol-selected" : ""}"><header><h3>${esc(h.name)}</h3><small>Lv${esc(h.level)}${h.pending ? " · 待选升级" : ""}</small></header><small>${esc(h.ownerName)}${h.mine ? "（你）" : ""}</small><p>血 ${esc(h.hp)}/${esc(h.hpMax)} · 经验 ${esc(h.xp)}${h.xpNext ? "/" + esc(h.xpNext) : ""} · <b>${esc(h.purse)} 奎支</b></p><p class="ol-muted">${esc((h.weapons || []).map(w => `${w.name} Lv${w.level} 耐久 ${w.dur}/${w.durMax}`).join("；"))}</p>${(h.items || []).length ? `<p>名下：${esc(h.items.map(x => `${x.name}×${x.qty}`).join("、"))}</p>` : ""}</article>`).join("")}${(r.fallen || []).length ? `<p class="ol-muted">阵亡：${esc(r.fallen.join("、"))}</p>` : ""}${(r.freeItems || []).length ? `<p class="ol-muted">队伍公用：${esc(r.freeItems.map(x => `${x.name}×${x.qty}`).join("、"))}</p>` : ""}</section>`;
-      const choice = r.choice ? `<section class="ol-rogue-box" aria-label="升级"><h3>${esc(r.choice.name)} ${esc(r.choice.level)} 级：${esc(r.choice.title)}</h3><div class="ol-attr-btns">${r.choice.options.map(o => rogueAct(o.label + (o.hint ? "（" + o.hint + "）" : ""), { action: "choose", kit: r.choice.kit, index: r.choice.index, value: o.value }, false, true)).join("")}</div></section>` : "";
+      const choice = r.choice ? `<section class="ol-rogue-box" aria-label="升级"><h3>${esc(r.choice.name)} ${esc(r.choice.level)} 级：${esc(r.choice.title)}${r.choice.more > 0 ? ` <small class="ol-muted">还有 ${esc(r.choice.more)} 项待选</small>` : ""}</h3><div class="ol-attr-btns">${r.choice.options.map(o => rogueAct(o.label + (o.hint ? "（" + o.hint + "）" : ""), { action: "choose", kit: r.choice.kit, index: r.choice.index, value: o.value }, false, true)).join("")}</div></section>` : "";
       const v = r.vote || { options: [] };
       const vote = v.options.length ? `<section class="ol-rogue-box ol-rogue-vote" aria-label="队伍投票"><h3>队伍投票</h3><p class="ol-muted">${esc(v.voted)}/${esc(v.voters)} 人已投。所有在线的人投完按多数决定，平票随机。${v.blocked ? esc(v.blocked) + "。" : ""}</p><ul>${v.options.map(o => `<li>${button((o.mine ? "✔ " : "") + o.label, "rogueVote", `data-option="${esc(o.id)}"`, disabled(), o.mine)}<small>${esc(o.voters.join("、"))}</small></li>`).join("")}</ul>${v.options.some(o => o.mine) ? button("撤回我的票", "rogueUnvote", "", disabled()) : ""}</section>` : "";
       const last = r.lastVote ? `<p class="ol-muted">上一次队伍决定：${esc(r.lastVote)}</p>` : "";
@@ -346,15 +347,25 @@
       const lootLog = (r.lootLog || []).length ? `<p class="ol-muted">${esc(r.lootLog.slice(-3).join(" "))}</p>` : "";
       const board = r.board ? `<section class="ol-rogue-box" aria-label="任务板"><h3>任务板</h3><ul>${r.board.map(t => `<li><b>${esc(t.name)}</b>（${esc(t.days)} 天 · 报酬 ${esc(t.kuizhi)} 奎支 · 每人 ${esc(t.xp)} 经验）<br><small>${esc(t.goal)}${t.blocked ? " · " + esc(t.blocked) : ""}</small></li>`).join("")}</ul></section>` : "";
       const task = r.task ? `<section class="ol-rogue-box" aria-label="任务"><h3>${esc(r.task.name)}</h3><p class="ol-muted">${esc(r.task.goal)}</p><ol class="ol-rogue-route">${r.task.nodes.map(n => `<li class="${n.current ? "ol-open" : n.done ? "ol-muted" : ""}">${esc(n.label)}${n.done ? " ✓" : n.current ? " ←" : ""}</li>`).join("")}</ol></section>` : "";
-      const shop = r.shop && payer ? `<section class="ol-rogue-box" aria-label="商店"><h3>商店（你有 ${esc(purse)} 奎支）</h3><ul>${r.shop.map(row => `<li>${esc(row.name)} · ${esc(row.price)} 奎支${row.team ? " · 归队伍公用" : ""} ${rogueAct("买", { action: "buy", key: row.key, qty: 1, payer }, purse < row.price)}</li>`).join("")}</ul></section>` : "";
+      const pts = r.points;
+      const redeem = pts && pts.redeem && pts.redeem.length ? `<h4>积分兑换（你有 ${esc(pts.points)} 积分，再花 ${esc(pts.next)} 奎支得 1 分）</h4><ul>${pts.redeem.map(it => `<li>${esc(it.name)} · ${esc(it.points)} 积分 ${rogueAct("兑换", { action: "redeem", item: it.id, payer }, pts.points < it.points)}</li>`).join("")}</ul>` : "";
+      const shop = r.shop && payer ? `<section class="ol-rogue-box" aria-label="商店"><h3>商店（你有 ${esc(purse)} 奎支）</h3><ul>${r.shop.map(row => `<li>${esc(row.name)} · ${esc(row.price)} 奎支${row.team ? " · 归队伍公用" : ""} ${rogueAct("买", { action: "buy", key: row.key, qty: 1, payer }, purse < row.price)}</li>`).join("")}</ul>${redeem}</section>` : "";
       const smith = r.smith && payer ? `<section class="ol-rogue-box" aria-label="工匠"><h3>${esc(r.smith.name)}（你有 ${esc(purse)} 奎支）</h3><ul>${r.smith.upgrades.map(o => `<li>${esc(o.name)} Lv${esc(o.level)} ${o.max ? "已满级" : rogueAct(`升到 ${o.level + 1} 级（${o.cost}）`, { action: "upgradeWeapon", kit: o.kit, smith: r.smith.id }, purse < o.cost)}</li>`).join("")}${r.smith.offers.map(o => `<li>改装件 ${esc(o.name)}<small>${esc(o.text)}</small> ${o.sold ? "已卖出" : rogueAct(`买（${o.price}）`, { action: "buyPart", smith: r.smith.id, index: o.index, payer }, purse < o.price)}</li>`).join("")}</ul></section>` : "";
       const slots = r.smith ? r.smith.slots || [] : [];
       const parts = r.parts && r.parts.length && payer ? `<section class="ol-rogue-box" aria-label="改装件"><h3>你的改装件</h3><ul>${r.parts.map((p, i) => `<li>${esc(p.name)} ×${esc(p.have)}<small>${esc(p.text)}</small> ${rogueAct(`卖掉（${p.sell}）`, { action: "sellPart", part: p.id, payer })}${slots.length ? `<select id="ol-rp-${i}" aria-label="装到哪个槽">${slots.map(x => option(`${x.kit}:${x.slot}`, `${x.name} 槽 ${x.slot + 1}${x.cur ? "（现在：" + x.cur + "）" : ""}`, false)).join("")}</select>${button(`装上（${p.install}）`, "roguePartInstall", `data-part="${esc(p.id)}" data-select="ol-rp-${i}" data-smith="${esc(r.smith.id)}"`, disabled() || purse < p.install)}` : ""}</li>`).join("")}</ul></section>` : "";
       const filled = slots.filter(x => x.cur);
       const unmount = r.smith && filled.length ? `<section class="ol-rogue-box" aria-label="拆改装件"><h3>已装的改装件</h3><ul>${filled.map(x => `<li>${esc(x.name)} 槽 ${esc(x.slot + 1)}：${esc(x.cur)} ${rogueAct("拆下（不要钱）", { action: "removePart", kit: x.kit, slot: x.slot, smith: r.smith.id })}</li>`).join("")}</ul></section>` : "";
       const clinic = r.clinic && r.clinic.length ? `<section class="ol-rogue-box" aria-label="诊所"><h3>诊所（你有 ${esc(purse)} 奎支）</h3><ul>${r.clinic.map(c => `<li>${esc(c.name)} ${c.cost ? rogueAct(`治疗到满血（${c.cost}）`, { action: "healHero", kit: c.kit }, purse < c.cost) : "满血"}</li>${c.cyber ? cyberMarkup(c, purse) : ""}`).join("")}</ul></section>` : "";
+      const wk = r.workshop;
+      const workshop = wk && payer ? `<section class="ol-rogue-box" aria-label="工坊"><h3>工坊（${wk.place === "bench" ? "工作台：五类都能做" : "休息点：场地、自我效果做不了"}）</h3>
+        <p class="ol-muted">每人给自己的角色排一样，房主按「开工」大家一起做，时间按最久的算。有对应熟练项的队友打下手给优势。补金属的钱从你自己的钱包出；做出来的东西归你。</p>
+        <ul>${(wk.queue || []).map(j => `<li>${esc(j.name)}：${esc(j.itemName)}${j.helperName ? `（${esc(j.helperName)} 打下手）` : ""} · ${esc(Math.round(j.chance * 100))}% · ${esc(j.hours)} 小时</li>`).join("") || "<li>还没有人排活。</li>"}</ul>
+        ${(wk.mine || []).map(m => `<div class="ol-attr-btns"><b>${esc(m.name)}</b><select id="ol-wk-item-${esc(m.kit)}" aria-label="做什么">${option("", "不做", false)}${m.options.map(o => option(o.id, `${o.name} · ${o.prof} · ${Math.round(o.chance * 100)}% · ${o.hours} 小时 · ${o.mats}`, (wk.queue || []).some(j => j.kit === m.kit && j.item === o.id))).join("")}</select><select id="ol-wk-help-${esc(m.kit)}" aria-label="谁打下手">${option("", "没人帮", false)}${wk.helpers.filter(x => x.kit !== m.kit).map(x => option(x.kit, x.name + " 打下手", (wk.queue || []).some(j => j.kit === m.kit && j.helper === x.kit))).join("")}</select>${button("排上", "rogueCraftJob", `data-kit="${esc(m.kit)}"`, disabled(), true)}</div>`).join("")}
+        ${(wk.learn || []).length ? `<h4>向${esc(wk.learn[0].smithName)}学配方（你有 ${esc(purse)} 奎支）</h4><ul>${wk.learn.map(l => `<li>${esc(l.name)} · ${esc(l.prof)} · ${esc(l.diffName)} ${rogueAct(`学（${l.price}）`, { action: "learnRecipe", item: l.item, smith: l.smith, payer }, purse < l.price)}</li>`).join("")}</ul>` : ""}
+        ${(wk.salvage || []).length ? `<h4>拆解（不花时间）</h4><ul>${wk.salvage.map(x => `<li>${esc(x.name)} ×${esc(x.have)} → ${esc(x.yield.map(y => `${y.name}×${y.qty}`).join("、"))} ${rogueAct("拆一件", { action: "salvage", item: x.id, payer })}</li>`).join("")}</ul>` : ""}
+      </section>` : "";
       const log = (r.log || []).length ? `<section class="ol-rogue-box" aria-label="最近发生"><h3>最近发生</h3><ul>${r.log.map(t => `<li>${esc(t)}</li>`).join("")}</ul></section>` : "";
-      return head + over + choice + waits + loot + lootLog + vote + last + heroes + board + task + shop + smith + parts + unmount + clinic + log;
+      return head + over + choice + waits + loot + lootLog + vote + last + heroes + board + task + shop + smith + parts + unmount + clinic + workshop + log;
     }
     /** 义体改造：和单机诊所一样填装甲 / 护盾 / 沙尘层的点数、要不要换成星灵；价格按房主发来的单价估 */
     const CYBER_LAYERS = [["armor", "装甲"], ["shield", "护盾"], ["sand", "沙尘"]];
@@ -398,7 +409,7 @@
       if (screen === "lobby" || !data) return '<div class="ol-wait"><h2>等待房间同步</h2><p>房主准备好后会更新这里。</p></div>';
       if (view.packet?.mode === "rogue" && view.packet.rogue && screen === "exploration") return rogueMarkup(view.packet.rogue);
       const units = (data.units || []).filter(u => !u.hidden), logs = view.packet?.publicLogs || [];
-      return `<header class="ol-stage-heading"><div><span class="ol-muted">${esc(view.roomCode)} · ${screen === "battle" ? `第 ${data.turnNo || 1} 回合` : screen === "ended" ? "遭遇结束" : "探索环节"}</span>${screen === "battle" && global.Chain && data.chainStatus ? `<div class="ol-chain">${global.Chain.barHtml(data.chainStatus)}</div>` : ""}<h1>${screen === "battle" ? "战场" : screen === "ended" ? "战斗结算" : "与队伍同行"}</h1><div class="ol-info-tools">${global.WorldMap ? button("地图", "map") : ""}${button("角色资料", "info", 'data-info="sheet"', pending)}${button("武器", "info", 'data-info="armory"', pending)}${button("背包", "info", 'data-info="bag"', pending)}${button("战绩", "info", 'data-info="record"', pending)}</div></div>${weatherMarkup(data)}</header>${screen === "ended" ? resultMarkup() : ""}${suppliesMarkup(data)}${paused() ? '<p class="ol-pause" role="status">房间暂停，正在等待连接恢复。</p>' : ""}${view.offlineWait ? `<p class="ol-pause">${esc(view.offlineWait.name)} 离线，等待其返回。</p>` : ""}${checksMarkup()}${screen === "battle" || screen === "ended" ? (global.OnlineBattle && global.UnitCard ? '<div class="ol-battle-slot"></div>' : `<div class="ol-zones"${zoneGrid(data).style}>${zoneGrid(data).zones.map(z => `<section class="ol-zone"${z.style}><h2>${z.id} 区</h2>${fieldsMarkup(data, z.id)}${units.filter(u => Number(u.zone) === z.id).map(card).join("") || '<p class="ol-muted">空区域</p>'}${(data.props || []).filter(p => Number(p.zone) === z.id && !p.destroyed).map(p => `<article class="ol-prop" data-prop-id="${esc(p.id)}"><b>${esc(p.name || p.kind || "配置物")}</b>${p.hp != null ? `<span>耐久 ${esc(p.hp)}${p.maxHp == null ? "" : " / " + esc(p.maxHp)}</span>` : ""}</article>`).join("")}</section>`).join("")}</div>${gapsMarkup(data)}${screen === "ended" ? "" : actionsMarkup()}`) : `<p class="ol-muted">主持人正在管理探索与遭遇。右侧「小队」频道可以和大家聊天，「消息与成员」里可以私下回复主持人。</p><div class="ol-exploration-party">${units.filter(u => u.isPlayer && !u.weaponOf).map(card).join("")}</div>`}`;
+      return `<header class="ol-stage-heading"><div><span class="ol-muted">${esc(view.roomCode)} · ${screen === "battle" ? `第 ${data.turnNo || 1} 回合` : screen === "ended" ? "遭遇结束" : "探索环节"}</span>${screen === "battle" && global.Chain && data.chainStatus ? `<div class="ol-chain">${global.Chain.barHtml(data.chainStatus)}</div>` : ""}<h1>${screen === "battle" ? "战场" : screen === "ended" ? "战斗结算" : "与队伍同行"}</h1><div class="ol-info-tools">${global.WorldMap ? button("地图", "map") : ""}${button("角色资料", "info", 'data-info="sheet"', pending)}${button("武器", "info", 'data-info="armory"', pending)}${button("背包", "info", 'data-info="bag"', pending)}${button("战绩", "info", 'data-info="record"', pending)}${view.packet?.mode !== "rogue" ? button(`任务日志${questList().some(q => q.status === "active") ? ` · ${questList().filter(q => q.status === "active").length}` : ""}`, "quests") : ""}</div></div>${weatherMarkup(data)}</header>${screen === "ended" ? resultMarkup() : ""}${suppliesMarkup(data)}${paused() ? '<p class="ol-pause" role="status">房间暂停，正在等待连接恢复。</p>' : ""}${view.offlineWait ? `<p class="ol-pause">${esc(view.offlineWait.name)} 离线，等待其返回。</p>` : ""}${checksMarkup()}${screen === "battle" || screen === "ended" ? (global.OnlineBattle && global.UnitCard ? '<div class="ol-battle-slot"></div>' : `<div class="ol-zones"${zoneGrid(data).style}>${zoneGrid(data).zones.map(z => `<section class="ol-zone"${z.style}><h2>${z.id} 区</h2>${fieldsMarkup(data, z.id)}${units.filter(u => Number(u.zone) === z.id).map(card).join("") || '<p class="ol-muted">空区域</p>'}${(data.props || []).filter(p => Number(p.zone) === z.id && !p.destroyed).map(p => `<article class="ol-prop" data-prop-id="${esc(p.id)}"><b>${esc(p.name || p.kind || "配置物")}</b>${p.hp != null ? `<span>耐久 ${esc(p.hp)}${p.maxHp == null ? "" : " / " + esc(p.maxHp)}</span>` : ""}</article>`).join("")}</section>`).join("")}</div>${gapsMarkup(data)}${screen === "ended" ? "" : actionsMarkup()}`) : `<p class="ol-muted">主持人正在管理探索与遭遇。右侧「小队」频道可以和大家聊天，「消息与成员」里可以私下回复主持人。</p><div class="ol-exploration-party">${units.filter(u => u.isPlayer && !u.weaponOf).map(card).join("")}</div>`}`;
     }
     function observeMessages() {
       const rows = view.messages || [], incoming = rows.filter(m => !seenMessages.has(m.id) && m.from !== own());
@@ -520,6 +531,64 @@
       const items = (bag && bag.items) || [];
       return `<div class="ol-card"><header><h2>背包</h2><button type="button" class="ol-button" data-bag="close">关闭</button></header><div class="ol-points"><span>奎支 ${esc(bag?.kuizhi ?? 0)}</span><span>水 ${esc(bag?.water ?? 0)} ml</span></div><ul class="ol-bag-list">${items.map(it => `<li><div><b>${esc(it.name)}</b><span>× ${esc(it.qty)}</span></div>${it.hint ? `<p>${esc(it.hint)}</p>` : ""}</li>`).join("") || '<li class="ol-muted">背包是空的。</li>'}</ul><p class="ol-muted">队伍共用的背包。使用道具请在自己的行动里选「使用道具」。</p></div>`;
     }
+    /* ---------- 任务日志（房主按收件人算好，online-view.js · projectQuests 白名单）---------- */
+    const QUEST_STATUS = { posted: ["可接", "ol-q-posted"], active: ["进行中", "ol-q-active"], done: ["已完成", "ol-q-done"], failed: ["失败", "ol-q-failed"] };
+    const questList = () => (Array.isArray(view.packet?.quests) ? view.packet.quests : []);
+    function questRewardText(xp, kuizhi) {
+      const out = [];
+      if (xp) out.push(`<span class="ol-q-xp">+${esc(xp)} 经验</span>`);
+      if (kuizhi) out.push(`<span class="ol-q-kz">+${esc(kuizhi)} 奎支</span>`);
+      return out.join(" · ");
+    }
+    function questCard(q) {
+      const [stText, stCls] = QUEST_STATUS[q.status] || ["", ""];
+      const steps = q.steps.length ? `<ol class="ol-q-steps">${q.steps.map(st => {
+        const rw = questRewardText(st.xp, st.kuizhi);
+        const mark = st.state === "done" ? "✔" : st.state === "cur" ? "▶" : "·";
+        return `<li class="ol-q-${st.state}${st.hidden ? " ol-q-lock" : ""}"><span class="ol-q-mark">${mark}</span><span class="ol-q-t">${st.hidden ? "？？？（尚未揭示）" : esc(st.title)}</span>${rw ? `<span class="ol-q-rw${st.got ? " ol-q-got" : ""}">${rw}${st.got ? " · 已领" : ""}</span>` : ""}</li>`;
+      }).join("")}</ol>` : "";
+      const r = q.reward || {};
+      const done = q.got ? " ✓" : "";
+      const chips = [r.xp ? `<span class="ol-q-xp">经验 ${esc(r.xp)}/人${done}</span>` : "", r.kuizhi ? `<span class="ol-q-kz">奎支 ${esc(r.kuizhi)}${done}</span>` : ""]
+        .concat((r.items || []).map(x => `<span>${esc(x)}${done}</span>`)).filter(Boolean).join("");
+      return `<article class="ol-q-card ${stCls}"><header><b>${esc(q.name)}</b><span class="ol-q-tag${q.category === "main" ? " ol-q-main" : ""}">${q.category === "main" ? "主线" : "支线"}${q.private ? " · 仅你可见" : ""}</span><span class="ol-q-st">${stText}</span>${q.days ? `<span class="ol-muted">${esc(q.days)} 天</span>` : ""}</header>${q.goal ? `<p class="ol-q-goal">${esc(q.goal)}</p>` : ""}${q.status === "failed" && q.failWhy ? `<p class="ol-muted">${esc(q.failWhy)}</p>` : ""}${steps}${chips ? `<div class="ol-q-rewards"><span class="ol-muted">完成奖励</span>${chips}</div>` : ""}</article>`;
+    }
+    function questMarkup() {
+      const list = questList();
+      const order = { active: 0, posted: 1, done: 2, failed: 3 };
+      const group = (cat, title) => {
+        const rows = list.filter(q => q.category === cat).sort((a, b) => order[a.status] - order[b.status]);
+        return `<h3 class="ol-q-sec">${title}</h3>${rows.map(questCard).join("") || '<p class="ol-muted">暂无。</p>'}`;
+      };
+      return `<div class="ol-card ol-quest-card"><header><h2>任务日志</h2><button type="button" class="ol-button" data-bag="close">关闭</button></header>${group("main", "主线任务")}${group("side", "支线任务")}<p class="ol-muted">任务由主持人发布和推进。每一步的奖励在完成这一步时发：经验每人一份，奎支进队伍钱包。</p></div>`;
+    }
+    function openQuests() {
+      bagBox.innerHTML = questMarkup(); bagBox.hidden = false; questBoxOpen = true;
+      bagBox.querySelector('[data-bag="close"]')?.focus({ preventScroll: true });
+    }
+    /** 和上一包比：新任务、推进、完成、失败 → 提示一句（第一次收到不提示） */
+    function observeQuests() {
+      const list = questList();
+      const now = Object.fromEntries(list.map(q => [q.id, { status: q.status, done: q.steps.filter(s => s.state === "done").length, name: q.name, q }]));
+      if (questSeen) {
+        let msg = "";
+        for (const id of Object.keys(now)) {
+          const a = questSeen[id], b = now[id];
+          if (!a) msg = `新任务：「${b.name}」（${b.q.category === "main" ? "主线" : "支线"}）`;
+          else if (a.status !== b.status && b.status === "done") msg = `任务完成：「${b.name}」${b.q.reward.xp ? ` · 每人 +${b.q.reward.xp} 经验` : ""}${b.q.reward.kuizhi ? ` · +${b.q.reward.kuizhi} 奎支` : ""}`;
+          else if (a.status !== b.status && b.status === "failed") msg = `任务失败：「${b.name}」`;
+          else if (a.status !== b.status && b.status === "active") msg = `接下任务：「${b.name}」`;
+          else if (b.done > a.done) {
+            const st = b.q.steps[b.done - 1] || {};
+            msg = `任务更新：「${b.name}」推进到第 ${b.done + 1} 步${st.xp ? ` · 每人 +${st.xp} 经验` : ""}${st.kuizhi ? ` · +${st.kuizhi} 奎支` : ""}`;
+          }
+        }
+        if (msg) { toast.textContent = "📜 " + msg; toast.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { toast.hidden = true; }, 4500); }
+      }
+      questSeen = now;
+      if (questBoxOpen && !bagBox.hidden) bagBox.innerHTML = questMarkup();   // 面板开着：跟着更新
+      if (bagBox.hidden) questBoxOpen = false;
+    }
     /* ---------- 大字 ---------- */
     const TITLE_PRESETS = [["援军来了", "hope"], ["他们来了", "danger"], ["小心！", "danger"], ["天亮了", "hope"]];
     function paintTitleForm() {
@@ -619,6 +688,7 @@
       if (historyRoom !== nextRoom) {
         historyRoom = nextRoom; historyRows = []; historyHasMore = true; historyLoading = false; historyGeneration++;
         seenMessages = new Set(); messagesInitialized = false; clearTimeout(toastTimer); toast.hidden = true;
+        questSeen = null; questBoxOpen = false;
       }
       if (view.active) historyRows = mergeMessages([...historyRows, ...(view.messages || [])]);
       playTitle();
@@ -635,6 +705,7 @@
         html(dock, button(`${view.roomCode || "房间"} · ${paused() ? "重连中" : "消息与成员"}`, "openRoom", "", false) +
           (view.isHost && view.mode !== "rogue" && ["exploration", "ended"].includes(view.screen) ? button("角色分配", "openAssign", "", false) : ""), "dock");
         observeMessages();
+        if (!view.isHost) observeQuests();
       }
       // 联机单局的房主：大厅里先要在单局画面选队伍，房间面板不挡着；队伍选好（有角色可分）时自动打开一次
       const rogueHost = view.active && view.isHost && view.mode === "rogue";
@@ -831,6 +902,7 @@
         case "execute": if (currentMenu?.choices?.command && !disabled()) { const command = copy(currentMenu.choices.command); if (await call(() => api.submit(command))) { currentMenu = request = null; render(); } } break;
         case "endTurn": if (!disabled() && endTurnOk(b.dataset.actor)) await call(() => api.submit({ type: "endTurn", actor: b.dataset.actor })); break;
         case "info": await openInfo(b.dataset.info); break;
+        case "quests": openQuests(); break;
         case "map": openMap(); break;
         case "showLog": sideTab.battle = "log"; renderSide(true); side.querySelector(".ol-side-log")?.scrollIntoView({ block: "nearest" }); break;
         case "checkRoll": if (!disabled()) await call(() => api.submit({ type: "checkRoll", checkId: b.dataset.check, unitId: b.dataset.unit })); break;
@@ -847,6 +919,11 @@
           if (cost > Number(b.dataset.purse)) { notice = `预计要 ${cost} 奎支，你的钱不够`; render(); break; }
           if (!confirm(`给 ${c.name} 做义体改造，预计花 ${cost} 奎支？\n伤势照旧带着，缺的血先从外层扣。`)) break;
           if (await call(() => api.submit({ type: "rogue.act", command: { action: "modifyHero", kit, plan } }))) delete cyberDraft[kit];
+          break;
+        }
+        case "rogueCraftJob": {
+          const kit = b.dataset.kit, item = byId("ol-wk-item-" + kit)?.value || null, helper = byId("ol-wk-help-" + kit)?.value || null;
+          if (!disabled() && kit) await call(() => api.submit({ type: "rogue.act", command: { action: "setCraftJob", kit, item, helper } }));
           break;
         }
         case "roguePartInstall": {

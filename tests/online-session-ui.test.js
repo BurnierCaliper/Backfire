@@ -909,3 +909,56 @@ test("联机跑团（issue #44）：主持人在大厅换队员——留下的�
   await alice.waitForFunction(n => (OnlineGame.getView().heroes || []).some(h => h.name === n), name);
   assert.deepEqual(f.errors, []);
 });
+
+test("联机：任务日志——主持人新建主线、配每一站奖励和隐藏站，玩家打开「任务日志」看得到；推进时弹「任务更新」；主持人备注玩家看不到", { timeout: 120000 }, async t => {
+  const f = await fixture(t); if (!f) return;
+  const { host, alice, bob } = f;
+  await host.evaluate(() => { OnlineGame.start(); });
+  for (const page of [alice, bob]) await page.waitForFunction(() => OnlineGame.getView().screen === "exploration");
+  await host.click('[data-tab="tasks"]');
+  await host.selectOption("#tk-cat", "main");
+  await host.click('[data-tk="new:custom"]');
+  await host.click('[data-tk^="edit:"]');
+  await host.fill('[data-te="name"]', "锈港的余烬");
+  await host.fill('[data-te="goal"]', "查清码头仓库失火的真相");
+  await host.fill('[data-te="gmNote"]', "长老就是幕后买家");
+  await host.fill('[data-te="nodes.0.title"]', "在酒馆打听失火传闻");
+  await host.fill('[data-te="nodes.0.reward.xp"]', "50");
+  await host.fill('[data-te="nodes.1.title"]', "潜入 7 号仓库");
+  await host.fill('[data-te="nodes.1.reward.kuizhi"]', "1500");
+  await host.fill('[data-te="nodes.2.title"]', "把账本交给长老");
+  await host.check('[data-te-hide="2"]');
+  await host.click('[data-te-act="save"]');
+  // 草稿：玩家看不到
+  await alice.waitForTimeout(400);
+  assert.equal((await alice.evaluate(() => OnlineGame.getView().packet?.quests || [])).length, 0, "草稿不给玩家");
+  await host.click('[data-tk^="post:"]');
+  await host.click('[data-tk^="accept:"]');
+  await alice.waitForFunction(() => (OnlineGame.getView().packet?.quests || []).some(q => q.status === "active"));
+  const q = (await alice.evaluate(() => OnlineGame.getView().packet.quests))[0];
+  assert.equal(q.name, "锈港的余烬");
+  assert.equal(q.category, "main");
+  assert.equal(q.steps[0].title, "在酒馆打听失火传闻");
+  assert.equal(q.steps[0].xp, 50);
+  assert.equal(q.steps[2].hidden, true);
+  const raw = JSON.stringify(await alice.evaluate(() => OnlineGame.getView().packet.quests));
+  assert.ok(!/长老就是幕后买家|把账本交给长老|thug_knife/.test(raw), "玩家拿不到主持人备注、隐藏站、敌人配置：" + raw);
+  // 推进：玩家弹提示
+  await host.click('[data-tk^="node:"]');
+  await alice.waitForSelector("#online-toast:not([hidden])");
+  assert.match(await alice.locator("#online-toast").innerText(), /任务更新：「锈港的余烬」推进到第 2 步 · 每人 \+50 经验/);
+  // 打开任务日志面板
+  await alice.click('[data-online="quests"]');
+  const panel = await alice.locator("#online-bag").innerText();
+  assert.match(panel, /主线任务[\s\S]*锈港的余烬[\s\S]*在酒馆打听失火传闻[\s\S]*已领[\s\S]*潜入 7 号仓库[\s\S]*？？？/);
+  assert.match(panel, /支线任务/);
+  // 面板开着时推进：跟着更新
+  await host.click('[data-tk^="node:"]');
+  await alice.waitForFunction(() => /把账本交给长老/.test(document.getElementById("online-bag").innerText));
+  if (process.env.BACKFIRE_SHOTS) {
+    await alice.screenshot({ path: path.join(process.env.BACKFIRE_SHOTS, "quest-player.png") });
+    await bob.click('[data-online="quests"]'); await bob.screenshot({ path: path.join(process.env.BACKFIRE_SHOTS, "quest-player-mobile.png") });
+    await host.screenshot({ path: path.join(process.env.BACKFIRE_SHOTS, "quest-host.png"), fullPage: true });
+  }
+  assert.deepEqual(f.errors, []);
+});

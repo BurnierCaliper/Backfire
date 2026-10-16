@@ -3,7 +3,8 @@
  * 遭遇（run.js 的遭遇格式 / 战斗模板转出来的）可以多带两样东西：
  *   waves：援军 [{ turns: 3, enemies: [{ preset, level, zone, count }] }]
  *          这一场开始后第 turns 个回合开始时抵达，进入写好的区域。
- *          抵达之前场上的敌人就全死了：援军在下一回合开始时抵达（不用干等）。
+ *          抵达之前场上的敌人就全死了：援军在下一回合开始时抵达（不用干等）；
+ *          写了 cancelOnClear 的援军例外：场上全灭就算战斗结束，它不来了（亡命之王的狂徒援军）。
  *   stages：后面接着打的场次 [遭遇, 遭遇, …]（第一场就是遭遇本身）
  *          这一场的敌人（含援军）全部打完，不结束战斗，而是前往下一个区域：
  *          换上下一场的区、棋盘、场地、间隙、配置物和敌人。仍是同一场战斗：
@@ -22,7 +23,7 @@ const Chain = (function () {
 
   function wavesOf(enc, base) {
     return (Array.isArray(enc && enc.waves) ? enc.waves : []).filter(w => w && Array.isArray(w.enemies) && w.enemies.length)
-      .map((w, i) => ({ no: i + 1, at: base + Math.max(1, Math.floor(Number(w.turns) || 1)), enemies: clone(w.enemies), done: false }));
+      .map((w, i) => ({ no: i + 1, at: base + Math.max(1, Math.floor(Number(w.turns) || 1)), enemies: clone(w.enemies), done: false, cancelOnClear: !!w.cancelOnClear }));
   }
   const waveCount = (enc) => (Array.isArray(enc && enc.waves) ? enc.waves.filter(w => w && Array.isArray(w.enemies) && w.enemies.length).length : 0);
 
@@ -62,6 +63,9 @@ const Chain = (function () {
   function onCleared(notes) {
     notes = notes || [];
     if (foes().length) return true;
+    // 战斗已经结束才赶到的援军：不来了
+    const late = pending().filter(w => w.cancelOnClear);
+    if (late.length) { late.forEach(w => { w.done = true; w.cancelled = true; }); notes.push(`战斗已经结束，${late.length} 波援军不会再赶来了。`); }
     const left = pending();
     if (left.length) {
       const next = left.reduce((a, w) => (w.at < a.at ? w : a), left[0]);

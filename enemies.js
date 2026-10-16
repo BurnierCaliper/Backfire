@@ -27,13 +27,6 @@ const ZONE_THREATS = {
     for (let z = 1; z <= n; z++) out.push({ zone: z, label: "自爆待发", ready: true });
     return out;
   },
-  sand_aggregate: (u) => {
-    const r = u.resources || {};
-    if (!r.forceCharge) return null;
-    // 机械臂挥击的那一回合在蓄力；到了下一回合就是这回合要开炮
-    const ready = r.chargeTurn == null || Number(typeof state !== "undefined" ? state.turnNo : 0) > Number(r.chargeTurn);
-    return { zone: u.zone, label: ready ? "电能炮待发" : "电能炮蓄力", ready };
-  },
   boomcar: (u) => {
     const r = u.resources || {};
     if (r.fuse == null || Number(r.fuse) > 0) return null;
@@ -178,6 +171,65 @@ function kingGuardFor(king) {
   return guards.sort((a, b) => totalHp(b) - totalHp(a))[0];
 }
 
+/** 亡命之王 · 公开处刑（他回合用的技能）：标记血量上限最高的人，KING_CFG.exec.turns 回合后的敌人回合开始时落下（死刑机制）。
+ *  分段在落下时按还站着的手下现算。返回日志行 */
+function kingCastExecution(king, lines) {
+  if (!king || typeof addBossMechanic !== "function") return;
+  const E = KING_CFG.exec;
+  if (king.mechanics) king.mechanics = king.mechanics.filter(m => !(m.kingExec && m.st && m.st.done));
+  if ((king.mechanics || []).some(m => m.kingExec)) { lines.push("上一次公开处刑还没落下。"); return; }
+  const turn = Number(state.turnNo) || 1;
+  addBossMechanic(king, { type: "execution", kingExec: true, name: "公开处刑", phase: "enemy", pick: "maxHp",
+    firstTurn: turn, turns: E.turns, then: "once", hitsHook: "kingExecution", hook: "kingGrab" });
+  king.resources = king.resources || {};
+  king.resources.execTurn = turn;
+  if (typeof bossMechSync === "function") bossMechSync(lines);
+  // 和已经挂着的齐射撞在同一回合：处刑往后推一回合
+  const ex = king.mechanics.find(m => m.kingExec), vo = king.mechanics.find(m => m.kingVolley && m.st && !m.st.done);
+  if (ex && vo && ex.st && ex.st.due === vo.st.due) { ex.st.due += 1; lines.push(`公开处刑让位给齐射，推迟到第 ${ex.st.due} 回合。`); }
+}
+/** 现在能不能用公开处刑：没有还没落下的，并且离上次标记过了 cooldown 回合 */
+function kingExecutionReady(king) {
+  if (!king || (king.mechanics || []).some(m => m.kingExec && !(m.st && m.st.done))) return false;
+  const last = king.resources && king.resources.execTurn;
+  return last == null || (Number(state.turnNo) || 1) - Number(last) >= KING_CFG.exec.cooldown;
+}
+function kingExecutionHits(king) {
+  const E = KING_CFG.exec;
+  const crew = (state.units || []).filter(u => isOutlawThug(u) && !u.dying && !(u.resources && u.resources.mutinied));
+  return [{ mult: E.kingMult, diceS: leveledSides(king.level, E.kingDie), element: "acid", baseBreak: 1 }].concat(crew.map(u => ({
+    byId: u.id, atk: typeof effectiveAtk === "function" ? effectiveAtk(u, state.units) : Number(u.atk) || 0,
+    mult: E.crewMult, diceS: leveledSides(u.level, E.crewDie), element: "physical", baseBreak: 1
+  })));
+}
+/** 处刑落下后：强盗头子还在就试着擒拿刚挨刀的人 */
+function kingExecutionGrab(king, m, notes) {
+  const t = m && m.st && m.st.lastTargetId ? unitById(m.st.lastTargetId) : null;
+  const boss = (state.units || []).find(u => u.kit === "bandit_boss" && !u.hidden && !u.dead && !(u.resources && u.resources.mutinied));
+  if (!t || t.dead || !boss) return;
+  if (Math.random() < KING_CFG.exec.grab) { t.stunned = true; notes.push(`${boss.name} 擒拿 ${t.name} 成功：失去下回合行动。`); }
+  else notes.push(`${boss.name} 擒拿 ${t.name} 失败。`);
+}
+/** 回防命令之后的齐射：标记我方每个角色，下一个敌人回合开始时王各开一枪（KING_CFG.volley） */
+function kingArmVolley(king, lines) {
+  if (!king || typeof addBossMechanic !== "function") return;
+  if (king.mechanics) king.mechanics = king.mechanics.filter(m => !(m.kingVolley && m.st && m.st.done));
+  if ((king.mechanics || []).some(m => m.kingVolley)) return;   // 上一轮还没打出去
+  const turn = Number(state.turnNo) || 1;
+  addBossMechanic(king, { type: "volley", kingVolley: true, name: "齐射", element: "physical", phase: "enemy",
+    firstTurn: turn, turns: 1, then: "once", shot: Object.assign({}, KING_CFG.volley), hook: "kingVolleySpent" });
+  if (typeof bossMechSync === "function") bossMechSync(lines);
+  // 和公开处刑撞在同一回合：处刑往后推一回合（不然一回合开头连挨处刑和齐射）
+  const ex = (king.mechanics || []).find(m => m.kingExec && m.st && !m.st.done && m.st.due === turn + 1);
+  if (ex) { ex.st.due += 1; lines.push(`公开处刑让位给齐射，推迟到第 ${ex.st.due} 回合。`); }
+}
+/** 齐射打完：用掉王这一回合的行动点（敌人回合开始时结算，行动点在之后刷新，所以记成「这回合失去行动点」） */
+function kingVolleySpent(king, m, notes) {
+  if (!king || king.dead) return;
+  king.loseApNext = true;
+  notes.push(`${king.name} 这一回合的行动点用在了齐射上。`);
+}
+
 /** 攻击命令指定的目标：所有狂徒改打此人（目标倒下或王被挟持 / 死亡后失效） */
 function kingFocusTarget() {
   const king = findKit("outlaw_king", state.units);
@@ -194,6 +246,37 @@ function mutinyTick(notes) {
   const note = checkMutiny(state);
   if (!note) return;
   if (notes) notes.push(note); else appendLog(note);
+}
+
+/** 敌人这一回合被强制攻击的对象：灯的决一死战、禁足怒吼、嘲讽（没有就是 null） */
+function enemyForcedTarget(u) {
+  if (!u || u.isPlayer) return null;
+  const ok = (t) => t && !t.dead && !t.hidden && !(t.dying && !t.upOnShp) ? t : null;
+  const duel = typeof touDuelVictim === "function" ? ok(touDuelVictim(u)) : null;
+  if (duel) return duel;
+  if (u.lockdownBy) { const t = ok(unitById(u.lockdownBy)); if (t) return t; }
+  if (u.tauntTo) { const t = ok(unitById(u.tauntTo)); if (t) return t; }
+  return null;
+}
+/** 有没有能打同区的攻击（近距离 / 任意距离；协助、借机这类反应不算） */
+function enemyHasNearAttack(u) {
+  return (enemySkillList(u) || []).some(s => {
+    if (!s || !s.id || /_assist$|_opp$/.test(s.id) || s.id === "en_approach" || s.id === "en_flee") return false;
+    const r = ENEMY_SKILL_RANGE[s.id] || (s.id === "en_aa" ? (u.range || "any") : null);
+    return r === "melee" || r === "any";
+  });
+}
+/** 作者定：被强制攻击的对象就在同区、自己又没有近身攻击时，远距离攻击可以抵近射击（倍率同专长「抵近射击」，60%） */
+function enemyForcedPointBlank(a, t) {
+  if (!a || a.isPlayer || !t || Number(a.zone) !== Number(t.zone)) return false;
+  return enemyForcedTarget(a) === t && !enemyHasNearAttack(a);
+}
+/** 选区攻击（榴弹、大酸液弹）被强制攻击时：只能选强制对象所在的区。返回实际落点和要写的日志 */
+function forcedZonePick(a, zone, lines) {
+  const f = enemyForcedTarget(a);
+  if (!f || Number(f.zone) === Number(zone)) return zone;
+  lines.push(`${a.name} 被 ${f.name} 牵制：落点只能选 ${f.zone} 区。`);
+  return Number(f.zone);
 }
 
 function enemySkillList(u) {
@@ -350,7 +433,8 @@ function enemySkillList(u) {
     outlaw_king: [
       { id: "en_king_atk", label: "攻击命令" },
       { id: "en_king_kill", label: "处死命令" },
-      { id: "en_king_hold", label: "回防命令（筑废铁墙）" }
+      { id: "en_king_hold", label: "回防命令（筑废铁墙）" },
+      { id: "en_king_exec", label: "公开处刑（标记血量上限最高的人，两回合后落下）" }
     ],
     ufo_body: [],
     ufo_leg: [],
@@ -377,18 +461,16 @@ function enemySkillList(u) {
     const ph = (u.resources && u.resources.phase) || 1;
     const r = u.resources || {};
     if (ph === 1) {
-      return [
+      const list = [
         { id: "en_agg1_melee", label: "沙爪挥击（近）" },
         { id: "en_agg1_range", label: "砂岩块（远）" }
       ];
+      if (aggRushArmed(u)) list.unshift({ id: "en_agg1_rush", label: "狂暴连打（冲到预告目标的区连打）" });
+      else if (aggRushCanPrep(u)) list.push({ id: "en_agg1_rush_prep", label: "预备狂暴连打（下回合冲过去连打）" });
+      return list;
     }
     if (ph === 2) {
-      if (r.forceOverheat) return [{ id: "en_agg2_overheat", label: "过热（跳过行动）" }];
-      if (r.forceCharge) {
-        // 手册「蓄一回合」：机械臂挥击的这一回合剩下的行动都在蓄力，下一回合才能开炮
-        if (r.chargeTurn != null && Number(state.turnNo) <= Number(r.chargeTurn)) return [];
-        return [{ id: "en_agg2_charge", label: "发射电能炮（近距 1d20 / 远距 1d10）" }];
-      }
+      // 电能炮改成「死刑」首领机制（aggArmCannon），不再占行动、也不再空过一回合
       return [
         { id: "en_approach", label: "移向目标" },
         { id: "en_agg2_melee", label: "机械臂挥击（近）" }
@@ -600,7 +682,6 @@ const ENEMY_SKILL_RANGE = {
   en_agg1_melee: "melee",
   en_agg1_range: "ranged",
   en_agg2_melee: "melee",
-  en_agg2_charge: "any",          // 电能炮：近距 1d20，隔一区衰减为 1d10
   en_agg3_control: "melee",
   en_agg3_push: "melee",
   en_chi_shot: "any",             // 霰弹枪：近距 2×atk，远距 1.5×atk
@@ -948,7 +1029,9 @@ function antFireShell(a, aa, lines) {
   r.shellZone = 0; r.shellPending = false; r.shellReady = false;
   const victims = standingPlayersIn(zone);
   if (!victims.length) { lines.push(`大酸液弹落在 ${zone} 区，那里没有人。`); return; }
-  const main = victims[Math.floor(Math.random() * victims.length)];
+  // 决一死战：被决斗时只能打灯（正中的就是灯；其余人的范围波及在 dealTo 里拦下）
+  const duel = typeof touDuelVictim === "function" ? touDuelVictim(a) : null;
+  const main = duel && victims.includes(duel) ? duel : victims[Math.floor(Math.random() * victims.length)];
   lines.push(`${a.name} 的大酸液弹在 ${zone} 区炸开，正中 ${main.name}。`);
   aa(main, { element: "acid", mult: 2, baseBreak: 2 });
   victims.filter(u => u.id !== main.id).forEach(u => {
@@ -1153,8 +1236,9 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
   if (id === "en_ant_shell") {
     if (!onAcidGround(a)) { lines.push(`${a.name} 不在酸液地面上，汲取不到酸。`); return true; }
     const fl = state.skillFlow;
-    const zone = Number((fl && fl.picks && fl.picks.dest) || t && t.zone);
+    let zone = Number((fl && fl.picks && fl.picks.dest) || t && t.zone);
     if (!(zone >= 1)) { lines.push("大酸液弹需要先选择落点区域。"); return true; }
+    zone = forcedZonePick(a, zone, lines);
     a.resources = a.resources || {};
     a.resources.shellZone = zone;
     a.resources.shellPending = true;
@@ -1165,6 +1249,13 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
   if (id === "en_ant_shell_fire") {
     const r = a.resources || {};
     if (!(Number(r.shellZone) >= 1) || !r.shellReady) { lines.push("大酸液弹尚未就绪。先标定区域，等到下一个敌人回合再发射。"); return true; }
+    // 被牵制：已经标定好的落点不在牵制者所在的区，必须重新标定（作者定）
+    const fz = forcedZonePick(a, Number(r.shellZone), []);
+    if (fz !== Number(r.shellZone)) {
+      lines.push(`${a.name} 被牵制：放弃原来的 ${r.shellZone} 区，大酸液弹重新标定在 ${fz} 区，下个敌人回合发射。`);
+      Object.assign(r, { shellZone: fz, shellPending: true, shellReady: false });
+      return true;
+    }
     antFireShell(a, aa, lines);
     return true;
   }
@@ -1320,11 +1411,12 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
   }
   if (id === "en_gl") {
     const fl = state.skillFlow;
-    const zone = Number((fl && fl.picks && fl.picks.dest) || t && t.zone);
+    let zone = Number((fl && fl.picks && fl.picks.dest) || t && t.zone);
     if (!(zone >= 1)) {
       lines.push("榴弹需要先选择落点区域。");
       return true;
     }
+    zone = forcedZonePick(a, zone, lines);
     a.resources = a.resources || {};
     a.resources.glZone = zone;
     a.resources.glPending = true;
@@ -1336,6 +1428,13 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
     const zone = Number(a.resources && a.resources.glZone);
     if (!(zone >= 1) || !(a.resources && a.resources.glReady)) {
       lines.push("榴弹尚未就绪。先标定区域，等到下一个敌人回合再发射。");
+      return true;
+    }
+    // 被牵制：已经标定好的落点不在牵制者所在的区，必须重新标定（作者定）
+    const fz = forcedZonePick(a, zone, []);
+    if (fz !== zone) {
+      Object.assign(a.resources, { glZone: fz, glPending: true, glReady: false });
+      lines.push(`${a.name} 被牵制：放弃原来的 ${zone} 区，榴弹重新标定在 ${fz} 区，下个敌人回合发射。`);
       return true;
     }
     const victims = fieldUnits().filter(u => !u.dead && !u.hidden && Number(u.zone) === zone && u.id !== a.id && hostileTo(a, u));
@@ -1529,12 +1628,16 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
     return true;
   }
   if (id === "en_boat_arc") {
-    const hit = allPlayers().filter(u => zoneDist(a.zone, u.zone, state.zoneMode) === 1);
+    // 被牵制（决一死战 / 嘲讽）而牵制者就在同区：电弧扫射抵近打自己所在的区，×0.6（作者定：没有近身攻击就抵近射击）
+    const forced = enemyForcedTarget(a);
+    const pb = !!(forced && Number(forced.zone) === Number(a.zone));
+    const hit = pb ? standingPlayersIn(a.zone) : allPlayers().filter(u => zoneDist(a.zone, u.zone, state.zoneMode) === 1);
+    if (pb) lines.push(`${a.name} 被 ${forced.name} 牵制：电弧扫射抵近打自己所在的 ${a.zone} 区（倍率 ×0.6）。`);
     hit.forEach(u => {
-      aa(u, { element: "electric", mult: 1, diceN: 1, diceS: (typeof leveledSides === "function" ? leveledSides(a.level, 6) : 6), baseBreak: 1, flags: { action: true, aoe: true } });
+      aa(u, { element: "electric", mult: pb ? 0.6 : 1, diceN: 1, diceS: (typeof leveledSides === "function" ? leveledSides(a.level, 6) : 6), baseBreak: 1, flags: { action: true, aoe: true } });
     });
-    // 手册：可对一人施加感电。挑一个还没有感电的目标。
-    const pick = hit.find(u => !(u.statuses && u.statuses.shock)) || hit[0];
+    // 手册：可对一人施加感电。挑一个还没有感电的目标（被牵制时先给牵制者）。
+    const pick = (pb && hit.includes(forced) ? forced : null) || hit.find(u => !(u.statuses && u.statuses.shock)) || hit[0];
     if (pick) {
       pick.statuses = pick.statuses || {};
       pick.statuses.shock = true;
@@ -1577,7 +1680,7 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
   }
   if (id === "en_king_atk") {
     if (!needT()) return true;
-    aa(t, { element: "fire", mult: 1, diceN: 1, diceS: 4, baseBreak: 1 });
+    aa(t, { element: "fire", mult: 1, diceN: 1, diceS: leveledSides(a.level, 4), baseBreak: 1 });
     a.resources = a.resources || {};
     a.resources.focusId = t.id;
     lines.push(`所有狂徒目标切换为 ${t.name}。`);
@@ -1585,7 +1688,7 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
   }
   if (id === "en_king_kill") {
     if (!needT()) return true;
-    aa(t, { element: "acid", mult: 1, diceN: 1, diceS: 6, baseBreak: 1 });
+    aa(t, { element: "acid", mult: 1, diceN: 1, diceS: leveledSides(a.level, 6), baseBreak: 1 });
     const boss = state.units.find(u => u.kit === "bandit_boss" && !u.hidden && !u.dead);
     if (boss && Math.random() < 0.5) {
       t.stunned = true;
@@ -1593,7 +1696,15 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
     } else if (boss) lines.push("强盗头子擒拿失败。");
     return true;
   }
+  if (id === "en_king_exec") {
+    kingCastExecution(a, lines);
+    return true;
+  }
   if (id === "en_king_hold") {
+    // 记下这次回防（冷却从这回合算），「手下被打倒过」的标记用掉
+    a.resources = a.resources || {};
+    a.resources.holdTurn = Number(state.turnNo) || 1;
+    a.resources.crewDown = false;
     // 主持人手册：所有人回到他所在区，消耗行动点筑废铁墙（1d4×狂徒人数装甲，每五级升骰）；
     // 他用电击霰弹对另一区全员 atk+1d8/2 电击。
     // 废铁墙照川川的铁壁做：放在王所在区，同区敌方单位挨我方攻击行动时只有墙吃这一下，撑到下一个敌人回合开始。
@@ -1617,6 +1728,8 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
     } else {
       lines.push("身边已经没有狂徒可以回防，废铁墙没能筑起来。");
     }
+    // 回防之后：狂徒们拔枪，下一个敌人回合开始时王朝我方每人各开一枪（齐射，KING_CFG.volley）
+    kingArmVolley(a, lines);
     // 电击霰弹：另一区全员 (atk + 1d8) ÷ 2 电击（README 的写法）。范围攻击，不能格挡；
     // 打离他距离 1 的一区（三区里有两个时打人多的那个），不会隔着两区打
     const shotZone = zoneNeighbors(a.zone).map(Number)
@@ -1758,6 +1871,8 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
     if (typeof detonateUfo === "function") lines.push(...detonateUfo(a));
     return true;
   }
+  if (id === "en_agg1_rush_prep") { lines.push(...aggRushPrep(a)); return true; }
+  if (id === "en_agg1_rush") { aggRushRelease(a, aa, lines); return true; }
   if (id === "en_agg1_melee") {
     if (!needT()) return true;
     aa(t, { element: "physical", mult: 1, diceN: 1, diceS: 8, baseBreak: 3 });
@@ -1771,34 +1886,6 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
   if (id === "en_agg2_melee") {
     if (!needT()) return true;
     aa(t, { element: "electric", mult: 1, diceN: 1, diceS: 10, baseBreak: 2 });
-    a.resources = a.resources || {};
-    a.resources.forceCharge = true;
-    a.resources.chargeTurn = Number(state.turnNo) || 0;
-    a.resources.forceOverheat = false;
-    lines.push("机械臂挥击后开始蓄力电能炮：这一回合蓄力，下一回合发射。");
-    return true;
-  }
-  if (id === "en_agg2_charge") {
-    if (!needT()) return true;
-    a.resources = a.resources || {};
-    if (a.resources.chargeTurn != null && Number(state.turnNo) <= Number(a.resources.chargeTurn)) {
-      lines.push("电能炮还在蓄力，下一回合才能发射。");
-      return true;
-    }
-    // 近距 atk+1d20 电 2 击破；隔一区衰减为 atk+1d10。打出去了才算开炮（射程外打不到的不算），炮后必过热
-    const near = Number(a.zone) === Number(t.zone);
-    const out = aa(t, { element: "electric", mult: 1, diceN: 1, diceS: near ? 20 : 10, baseBreak: 2 });
-    if (!enemyShotWentOut(out)) { lines.push("电能炮没有打出去，蓄力保留。"); return true; }
-    a.resources.forceCharge = false;
-    a.resources.chargeTurn = null;
-    a.resources.forceOverheat = true;
-    lines.push(`电能炮${near ? "近距" : "隔区（衰减为 1d10）"}发射完毕，下次行动强制过热。`);
-    return true;
-  }
-  if (id === "en_agg2_overheat") {
-    a.resources = a.resources || {};
-    a.resources.forceOverheat = false;
-    lines.push("过热：跳过本次行动。");
     return true;
   }
   if (id === "en_agg3_debris") {
@@ -1819,12 +1906,10 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
         a.layers.splice(1, 0, { type: "armor", current: restore, max: restore });
       }
       a.resources.phase = 2;
-      a.resources.forceCharge = false;
-      a.resources.chargeTurn = null;
-      a.resources.forceOverheat = false;
       a.name = "沙灵聚合体·机械躯";
       a.dead = false;
       lines.push(`碎片吸收完成，恢复装甲 ${restore}，回到二阶段。`);
+      aggArmCannon(a, lines);
     }
     return true;
   }
@@ -1859,6 +1944,137 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
     return true;
   }
   return false;
+}
+
+/** 沙灵聚合体二阶段：挂上电能炮（死刑机制，数值见 engine.js · AGG_CANNON）。已经挂着就不重复挂 */
+/* ---------- 沙灵聚合体一阶段 · 狂暴连打（engine.js · AGG_RUSH）---------- */
+const aggRushStanding = t => t && !t.dead && !t.hidden && !(t.dying && !t.upOnShp);
+function aggRushFoes(a) {
+  return (state.units || []).filter(u => u.isPlayer && aggRushStanding(u) && (typeof hostileTo !== "function" || hostileTo(a, u)));
+}
+/** 预备好了、这回合可以出手（预备是上一回合或更早） */
+function aggRushArmed(u) {
+  const r = (u && u.resources) || {};
+  return !!(r.rush && Number(r.rush.turn) < Number(state.turnNo) && ((r.phase || 1) === 1));
+}
+function aggRushCanPrep(u) {
+  const r = (u && u.resources) || {};
+  if ((r.phase || 1) !== 1 || r.rush) return false;
+  const t = Number(state.turnNo) || 1;
+  return t >= AGG_RUSH.firstTurn && t >= (Number(r.rushNext) || 0);
+}
+/** 预备：被牵制就锁牵制者，否则随机一名敌人 */
+function aggRushPrep(a) {
+  const r = a.resources = a.resources || {};
+  const forced = typeof enemyForcedTarget === "function" ? enemyForcedTarget(a) : null;
+  const foes = aggRushFoes(a);
+  const t = forced || (foes.length ? foes[Math.floor(Math.random() * foes.length)] : null);
+  if (!t) return [`${a.name} 找不到可以连打的目标。`];
+  r.rush = { targetId: t.id, turn: Number(state.turnNo) || 1 };
+  return [`${a.name} 沙壳鼓胀，盯上了 ${t.name}：下个敌人回合冲过去狂暴连打 ${AGG_RUSH.hits} 击（每击 ${AGG_RUSH.mult}×atk+1d${AGG_RUSH.diceS} 物理、${AGG_RUSH.baseBreak} 击破，协助格挡 +${AGG_RUSH.blockBonus}%；全部挡下它自己受 ${AGG_RUSH.selfBreak} 击破）。`];
+}
+/** 出手时打谁：被嘲讽转火牵制者；原目标倒下就随机换一个 */
+function aggRushTarget(a) {
+  const r = a.resources || {};
+  const forced = typeof enemyForcedTarget === "function" ? enemyForcedTarget(a) : null;
+  if (forced) return forced;
+  const marked = r.rush && (state.units || []).find(u => u.id === r.rush.targetId);
+  if (aggRushStanding(marked)) return marked;
+  const foes = aggRushFoes(a);
+  return foes.length ? foes[Math.floor(Math.random() * foes.length)] : null;
+}
+function aggRushRelease(a, aa, lines) {
+  const r = a.resources = a.resources || {};
+  const t = aggRushTarget(a);
+  const markedId = r.rush && r.rush.targetId;
+  r.rush = null;
+  r.rushNext = (Number(state.turnNo) || 1) + AGG_RUSH.cooldown;
+  if (!t) { lines.push(`${a.name} 的狂暴连打没有目标，散了劲。`); return; }
+  if (markedId && t.id !== markedId) lines.push(`${a.name} 被牵制，狂暴连打转向 ${t.name}！`);
+  if (Number(a.zone) !== Number(t.zone)) {
+    const stuck = a.noMove || (typeof touDuelVictim === "function" && touDuelVictim(a)) || a.self === "anchor";
+    if (stuck) { lines.push(`${a.name} 动不了，冲不到 ${t.name} 身边，狂暴连打落空。`); return; }
+    if (typeof lineBlocked === "function" && lineBlocked(a.zone, t.zone)) { lines.push(`${a.name} 想冲向 ${t.name}，被墙挡住，狂暴连打落空。`); return; }
+    a.zone = Number(t.zone);
+    lines.push(`${a.name} 冲到 ${t.zone} 区！`);
+  }
+  lines.push(`【狂暴连打】${a.name} 对 ${t.name} 连打 ${AGG_RUSH.hits} 击！（每击都能协助格挡，成功率 +${AGG_RUSH.blockBonus}%）`);
+  r.rushHit = { done: 0, blocked: 0, issuing: true, open: true };
+  a.rushBlock = AGG_RUSH.blockBonus;   // finalBlockChance 读：这几击的协助格挡 +10%
+  for (let i = 0; i < AGG_RUSH.hits; i++) {
+    if (!aggRushStanding(t)) break;
+    aa(t, { element: "physical", mult: AGG_RUSH.mult, diceN: 1, diceS: AGG_RUSH.diceS, baseBreak: AGG_RUSH.baseBreak, atkRange: "melee",
+      flags: { action: true, aggRush: true } });
+  }
+  r.rushHit.issuing = false;
+  lines.push(...aggRushSettle(a));
+}
+/** dealTo 每一击结算完（立刻结算的、等协助格挡结果的都算）调这里：记下是不是被挡下 */
+function aggRushHitDone(a, blocked) {
+  const h = a && a.resources && a.resources.rushHit;
+  if (!h || !h.open) return [];
+  h.done += 1;
+  if (blocked) h.blocked += 1;
+  return h.issuing ? [] : aggRushSettle(a);
+}
+/** 所有连打都落下了（队列里没有等格挡的）：全部被挡下就自己吃击破 */
+function aggRushSettle(a) {
+  const h = a && a.resources && a.resources.rushHit;
+  if (!h || !h.open) return [];
+  if ((state.blockQueue || []).some(j => j.attackerId === a.id && j.opt && j.opt.flags && j.opt.flags.aggRush)) return [];
+  h.open = false;
+  a.rushBlock = 0;
+  const notes = [];
+  if (h.done >= AGG_RUSH.hits && h.blocked >= AGG_RUSH.hits) {
+    notes.push(`${a.name} 的狂暴连打全部被挡下，反震得沙壳崩裂！`);
+    if (typeof dealBreak === "function") dealBreak(a, AGG_RUSH.selfBreak, "physical", notes, "狂暴连打全被挡下");
+  }
+  return notes;
+}
+
+function aggArmCannon(u, notes) {
+  if (u && u.resources) u.resources.rush = null;   // 狂暴连打是一阶段的：预备好还没出手的，进二阶段作废
+  if (!u || typeof addBossMechanic !== "function") return;
+  if (bossMechList(u, "execution").some(m => m.aggCannon)) return;
+  addBossMechanic(u, {
+    type: "execution", aggCannon: true, name: "电能炮", element: "electric", phase: "enemy", pick: "maxHp",
+    turns: AGG_CANNON.turns, interval: AGG_CANNON.interval, then: "repeat",
+    firstTurn: Number(state.turnNo) || 1,
+    hits: AGG_CANNON.hits.map(h => Object.assign({ element: "electric" }, h)),
+    far: Object.assign({}, AGG_CANNON.far), splash: AGG_CANNON.splash, chargeDr: AGG_CANNON.chargeDr,
+    hook: "aggOverheat"
+  });
+  if (typeof bossMechSync === "function") bossMechSync(notes);
+}
+/** 沙灵聚合体一阶段：挂上沙尘爆裂（远离机制，AGG_SPREAD）；外层沙壳打穿时卸下 */
+function aggArmSpread(u) {
+  if (!u || typeof addBossMechanic !== "function" || (u.mechanics || []).some(m => m.aggSpread)) return;
+  addBossMechanic(u, { type: "spread", aggSpread: true, name: "沙尘爆裂", element: "physical", phase: "enemy",
+    firstTurn: AGG_SPREAD.firstTurn, turns: AGG_SPREAD.turns, interval: AGG_SPREAD.interval, then: "repeat",
+    blast: { mult: AGG_SPREAD.blast } });
+}
+function aggDisarmSpread(u, notes) {
+  if (!u || !u.mechanics || !u.mechanics.some(m => m.aggSpread)) return;
+  u.mechanics = u.mechanics.filter(m => !m.aggSpread);
+  if (!u.mechanics.length) delete u.mechanics;
+  if (notes) notes.push("沙壳碎了，沙尘爆裂的标记散去。");
+}
+/** 进三阶段：机械躯散架，电能炮卸下（回到二阶段时重新挂上、重新倒数） */
+function aggDisarmCannon(u, notes) {
+  if (!u || !u.mechanics) return;
+  const had = u.mechanics.some(m => m.aggCannon);
+  u.mechanics = u.mechanics.filter(m => !m.aggCannon);
+  if (!u.mechanics.length) delete u.mechanics;
+  if (had && notes) notes.push("机械躯散架，电能炮停止蓄力。");
+}
+/** 电能炮开完：机体过热，给自己上熔融（留到下一个我方回合结束，engine.js · beginRound 那边看 meltHoldTurn） */
+function aggOverheat(boss, m, notes) {
+  if (!boss || boss.dead) return;
+  boss.instant = boss.instant || {};
+  boss.instant.melt = true;
+  boss.resources = boss.resources || {};
+  boss.resources.meltHoldTurn = (Number(state.turnNo) || 1) + 1;
+  notes.push(`${boss.name} 开炮后机体过热：自身熔融（冰伤害 ×2、物理打装甲 +50%），持续到下一个我方回合结束。`);
 }
 
 function ufoPackId(u) {

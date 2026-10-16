@@ -47,39 +47,6 @@ function nextRound(c, S) {
   c.endEnemyTurn();
 }
 
-test("沙灵聚合体二阶段：机械臂之后蓄力一回合才开炮，区域预警看得到；近距那一炮打得到；打出去才过热", () => {
-  const { c, S, P, E, logs } = field([{ id: "sand_aggregate", lv: 5, zone: 2 }]);
-  const a = E("sand_aggregate"), k = P("kolt"), h = P("helu");
-  a.resources.phase = 2; a.layers[0].current = 0; a.layers[0].max = 0;
-  k.zone = 2; h.zone = 1; tank(k); tank(h);
-  S.combatPhase = "enemy"; c.refreshEnemyEconomy(a);
-  assert.deepEqual(aiTurn(c, a), ["机械臂挥击（近）"], "第二动在蓄力，不开炮");
-  assert.equal(a.resources.forceCharge, true);
-  assert.equal(c.enemySkillList(a).length, 0, "蓄力的这一回合没有别的行动");
-  assert.deepEqual(plain(c.zoneThreats().map(t => [t.zone, t.label, t.ready])), [[2, "电能炮蓄力", false]]);
-  S.turnNo += 1;
-  assert.deepEqual(plain(c.zoneThreats().map(t => [t.label, t.ready])), [["电能炮待发", true]], "下一回合就要开炮");
-  S.combatPhase = "enemy"; c.refreshEnemyEconomy(a);
-  const hp0 = c.totalHp(k);
-  const steps = aiTurn(c, a);
-  assert.match(steps[0], /发射电能炮/);
-  assert.match(steps[1], /过热/, "炮后过热，跳过一次行动");
-  assert.ok(c.totalHp(k) < hp0, "同区那一炮打到了");
-  assert.match(logs(), /1d20/);
-  assert.equal(a.resources.forceCharge, false);
-  assert.equal(a.resources.forceOverheat, false, "过热已经跳过");
-
-  // 射程外（三区隔两区）：没打出去，蓄力保留，也不过热
-  const f = field([{ id: "sand_aggregate", lv: 5, zone: 3 }], { zoneMode: 3 });
-  const b = f.E("sand_aggregate"), k2 = f.P("kolt");
-  b.resources.phase = 2; b.resources.forceCharge = true; b.resources.chargeTurn = 0;
-  k2.zone = 1;
-  f.S.combatPhase = "enemy"; b.ap = 1; f.S.attackerId = b.id; f.S.targetId = k2.id;
-  f.c.runSkill("en_agg2_charge");
-  assert.equal(b.resources.forceCharge, true);
-  assert.equal(b.resources.forceOverheat, false);
-});
-
 test("巨人协助「捏碎颅骨」：同区目标倒地进入濒死，自我效果不动；力竭 3 直接死亡；隔一区的巨人不会被选来协助", () => {
   const { c, S, P, E } = field([{ id: "giant", lv: 3, zone: 1 }, { id: "thug_knife", lv: 1, zone: 1 }]);
   const k = P("kolt"), g = E("giant"), kn = E("thug_knife");
@@ -361,6 +328,7 @@ test("亡命之王 AI：只在危险时下回防（有人冲进王的区或王�
     { id: "thug_knife", lv: 3, zone: 2 }, { id: "thug_hammer", lv: 3, zone: 2 }]);
   const king = E("outlaw_king"), k = P("kolt");
   E("thug_knife").zone = 1; E("thug_hammer").zone = 1;   // 狂徒出去打人了
+  king.resources.execTurn = S.turnNo;   // 公开处刑冷却中：这条只看回防的触发
   S.combatPhase = "enemy"; c.refreshEnemyEconomy(king);
   king.damagedThisTurn = 5;
   assert.equal(c.EnemyAI.plan(king).meta.skillName, "攻击命令", "强盗头子还在身边替他挡：不叫回防");

@@ -6,6 +6,10 @@
  *     escort: null 或 { kind: cart / vip, name, hp, def, atk, level, cur 当前血量（null = 满）, lost },
  *     nodes: [{ type, note, enemies: [{ id, lv, zone }], weather, zoneMode, done }], index 走到第几站 }
  * 路线（nodes）、每一站的敌人和天气、奖励都由主持人预先配置，进行中也能改。
+ * 任务日志（联机玩家也看得到，trpgQuestLog）：
+ *   category main 主线 / side 支线；visibility { mode: party 全队 / players, ids: 房间成员 id }；gmNote 只给主持人看；
+ *   每一站：title 玩家看到的步骤文字（空着就只写站的类型）、hidden 没揭示前玩家只看到「？？？」、reward { xp 每人, kuizhi 队伍 } 完成这一站时发；
+ *   granted { nodes: 已发过奖励的站, complete } 记账：每站奖励只发一次，回退再推进不重发。
  * 打战斗站：trpgTaskPrepareBattle 返回这一站的敌人配置并记下 TRPG.taskBattle，
  * 摆战场时护送对象跟着上场（trpgSpawnTaskEscort），战斗结算后 trpgTaskAfterBattle 记血量、推进路线。 */
 "use strict";
@@ -17,10 +21,28 @@ const TRPG_WEATHERS = ["none", "heat", "snow", "acid", "thunder", "glow", "sand"
 
 function trpgTasks() {
   if (!Array.isArray(LEDGER.tasks)) LEDGER.tasks = [];
+  LEDGER.tasks.forEach(trpgTaskUpgrade);
   return LEDGER.tasks;
+}
+/** 旧存档的任务补上任务日志的字段（分类、可见范围、每站奖励、发奖记账） */
+function trpgTaskUpgrade(t) {
+  if (!t || t._v === 2) return;
+  if (t.category !== "main") t.category = "side";
+  if (!t.visibility || !t.visibility.mode) t.visibility = { mode: "party", ids: [] };
+  if (typeof t.gmNote !== "string") t.gmNote = "";
+  if (typeof t.failWhy !== "string") t.failWhy = "";
+  (t.nodes || []).forEach(n => {
+    if (typeof n.title !== "string") n.title = "";
+    n.hidden = !!n.hidden;
+    if (!n.reward || typeof n.reward !== "object") n.reward = { xp: 0, kuizhi: 0 };
+  });
+  if (!t.granted) t.granted = trpgTaskGranted(null, t.nodes);
+  Object.defineProperty(t, "_v", { value: 2, enumerable: false, configurable: true, writable: true });
 }
 function trpgTaskById(id) { return trpgTasks().find(t => t.id === id) || null; }
 function trpgActiveTask() { return trpgTasks().find(t => t.status === "active") || null; }
+/** 任务日志可以多条同时进行（主线 + 几条支线） */
+function trpgActiveTasks() { return trpgTasks().filter(t => t.status === "active"); }
 function trpgPartyLevel() {
   const hs = trpgHeroes();
   return hs.length ? Math.max(1, Math.round(hs.reduce((s, h) => s + (Number(h.level) || 1), 0) / hs.length)) : 1;
@@ -42,6 +64,8 @@ function trpgTaskNormalizeNode(n) {
   const presets = typeof enemyPresets === "function" ? enemyPresets().map(p => p.id) : [];
   return {
     type, note: tStr(n.note, 300), done: !!n.done,
+    title: tStr(n.title, 120), hidden: !!n.hidden,
+    reward: { xp: tNum(n.reward && n.reward.xp, 0, 0), kuizhi: tNum(n.reward && n.reward.kuizhi, 0, 0) },
     enemies: fight ? (Array.isArray(n.enemies) ? n.enemies : []).filter(e => e && (!presets.length || presets.includes(e.id)))
       .slice(0, 12).map(e => ({ id: e.id, lv: tNum(e.lv, 1, 1, 30), zone: tNum(e.zone, 2, 1, 9) })) : [],
     weather: fight && TRPG_WEATHERS.includes(n.weather) ? n.weather : "none",
@@ -81,8 +105,22 @@ function trpgTaskNormalize(t, old) {
       lost: !!(old.escort && old.escort.lost)
     } : null,
     nodes: (Array.isArray(t.nodes) ? t.nodes : []).slice(0, 20).map(trpgTaskNormalizeNode),
-    index: old.index != null ? old.index : 0
+    index: old.index != null ? old.index : 0,
+    category: (t.category || old.category) === "main" ? "main" : "side",
+    visibility: trpgTaskVisibility(t.visibility || old.visibility),
+    gmNote: tStr(t.gmNote, 400),
+    granted: trpgTaskGranted(old.granted || t.granted, old.nodes || t.nodes),
+    failWhy: tStr(old.failWhy, 120)
   };
+}
+function trpgTaskVisibility(v) {
+  if (v && v.mode === "players") return { mode: "players", ids: (Array.isArray(v.ids) ? v.ids : []).map(x => tStr(x, 80)).filter(Boolean).slice(0, 16) };
+  return { mode: "party", ids: [] };
+}
+/** 发奖记账。旧存档没有：已经走过的站当作发过了（免得推进时补发） */
+function trpgTaskGranted(g, nodes) {
+  if (g && typeof g === "object") return { nodes: (Array.isArray(g.nodes) ? g.nodes : []).map(Number).filter(n => n >= 0), complete: !!g.complete };
+  return { nodes: (Array.isArray(nodes) ? nodes : []).map((n, i) => (n && n.done ? i : -1)).filter(i => i >= 0), complete: false };
 }
 
 /* 主持人手册第三章「任务金钱（现行基准）」「任务经验」：按任务长度（天数）给，经验再按队伍等级分档（每人）。
@@ -122,12 +160,12 @@ function trpgTaskTemplate(kind) {
 }
 
 /* ---------- 主持人操作 ---------- */
-function trpgTaskCreate(kind) {
+function trpgTaskCreate(kind, category) {
   const list = trpgTasks();
   const id = "t" + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36);
-  const t = trpgTaskNormalize(trpgTaskTemplate(kind), { id });
+  const t = trpgTaskNormalize(Object.assign(trpgTaskTemplate(kind), { category }), { id });
   list.push(t);
-  return [`新建任务草稿「${t.name}」（${TRPG_TASK_KINDS[t.kind]}）。`];
+  return [`新建${t.category === "main" ? "主线" : "支线"}任务草稿「${t.name}」（${TRPG_TASK_KINDS[t.kind]}）。`];
 }
 /** 保存主持人改过的任务（状态、走到第几站、护送对象当前血量保留） */
 function trpgTaskSave(data) {
@@ -135,6 +173,7 @@ function trpgTaskSave(data) {
   if (!old) return ["没有这个任务。"];
   const t = trpgTaskNormalize(data, old);
   t.index = Math.min(old.index || 0, t.nodes.length);
+  t.granted = trpgTaskGranted(old.granted, old.nodes);
   if (t.escort && old.escort && old.escort.cur != null) t.escort.cur = Math.min(old.escort.cur, escortSpec(t.escort, t.escort.level).hpMax);
   Object.keys(old).forEach(k => delete old[k]);
   Object.assign(old, t);
@@ -160,11 +199,12 @@ function trpgTaskAccept(id) {
   const t = trpgTaskById(id);
   if (!t) return ["没有这个任务。"];
   if (t.status !== "posted") return ["只能接下已发布的任务。"];
-  const cur = trpgActiveTask();
-  if (cur) return [`已经有进行中的任务「${cur.name}」，先结算它。`];
+  // 任务日志：主线、支线可以同时进行（一场战斗一次只打一个任务的站，TRPG.taskBattle 按任务记）
   t.status = "active";
   t.index = 0;
   t.nodes.forEach(n => { n.done = false; });
+  t.granted = { nodes: [], complete: false };
+  if (t.nodes[0]) t.nodes[0].hidden = false;   // 走到的这一站自动揭示
   if (t.escort) { t.escort.cur = null; t.escort.lost = false; }
   const sp = t.escort ? escortSpec(t.escort, t.escort.level) : null;
   return [`接下任务「${t.name}」：${t.goal || ""}（${t.nodes.length} 站${t.days ? `，${t.days} 天` : ""}）${sp ? `。护送 ${sp.name}（血量 ${sp.hpMax}）` : ""}。`];
@@ -175,10 +215,54 @@ function trpgTaskNodeDone(id) {
   if (!t || t.status !== "active") return ["没有进行中的这个任务。"];
   const n = t.nodes[t.index];
   if (!n) return ["路线已经走完了，可以结算任务。"];
+  const at = t.index;
   n.done = true;
+  n.hidden = false;
   t.index += 1;
   const next = t.nodes[t.index];
-  return [`任务「${t.name}」第 ${t.index} 站（${TRPG_NODE_TYPES[n.type]}）完成。${next ? `下一站：${TRPG_NODE_TYPES[next.type]}${next.note ? "（" + next.note + "）" : ""}。` : "路线走完了，可以结算任务。"}`];
+  if (next) next.hidden = false;   // 走到的下一站自动揭示
+  const notes = [`任务「${t.name}」第 ${at + 1} 站（${trpgNodeLabel(n)}）完成。${next ? `下一站：${trpgNodeLabel(next)}。` : "路线走完了，可以结算任务。"}`];
+  t.granted = t.granted || { nodes: [], complete: false };
+  if (!t.granted.nodes.includes(at)) {
+    t.granted.nodes.push(at);
+    notes.push(...trpgTaskGrant(n.reward, `「${t.name}」第 ${at + 1} 站`));
+  }
+  return notes;
+}
+function trpgNodeLabel(n) { return n.title || (TRPG_NODE_TYPES[n.type] + (n.note ? "（" + n.note + "）" : "")); }
+/** 发奖励（奎支进队伍钱包，经验全队每人）。返回日志行 */
+function trpgTaskGrant(r, label) {
+  r = r || {};
+  const notes = [];
+  if (r.kuizhi > 0) notes.push(...trpgAdjustKuizhi(r.kuizhi, label));
+  if (r.xp > 0) notes.push(...trpgGiveXp(null, r.xp));
+  if (notes.length && typeof ledgerCapture === "function") ledgerCapture();
+  return notes;
+}
+/** 回退一站：不收回已经发过的奖励（记账保留，再推进不重发；要收回用「后台」手动改） */
+function trpgTaskRollback(id) {
+  const t = trpgTaskById(id);
+  if (!t || t.status !== "active") return ["没有进行中的这个任务。"];
+  if (!(t.index > 0)) return ["已经在第一站了。"];
+  t.index -= 1;
+  const n = t.nodes[t.index];
+  n.done = false;
+  return [`任务「${t.name}」回退到第 ${t.index + 1} 站（${trpgNodeLabel(n)}）。已经发过的奖励不收回。`];
+}
+/** 揭示 / 隐藏某一站（玩家的任务日志里显示「？？？」） */
+function trpgTaskReveal(id, node, hidden) {
+  const t = trpgTaskById(id);
+  const n = t && t.nodes[Number(node)];
+  if (!n) return ["没有这一站。"];
+  n.hidden = !!hidden;
+  return [hidden ? `任务「${t.name}」第 ${Number(node) + 1} 站对玩家隐藏。` : `任务「${t.name}」揭示第 ${Number(node) + 1} 站：${trpgNodeLabel(n)}。`];
+}
+/** 任务日志里的顺序：往前 / 往后挪一格 */
+function trpgTaskMove(id, dir) {
+  const list = trpgTasks(), i = list.findIndex(t => t.id === id), j = i + (dir < 0 ? -1 : 1);
+  if (i < 0 || j < 0 || j >= list.length) return [];
+  list.splice(j, 0, list.splice(i, 1)[0]);
+  return [];
 }
 /** 打当前这一站：返回 { enemies, weather, zoneMode }（选了模板就是 { template }），并记下这场是任务战斗 */
 function trpgTaskPrepareBattle(id) {
@@ -224,6 +308,9 @@ function trpgTaskAfterBattle(outcome) {
 function trpgTaskComplete(id) {
   const t = trpgTaskById(id);
   if (!t || t.status !== "active") return ["没有进行中的这个任务。"];
+  t.granted = t.granted || { nodes: [], complete: false };
+  if (t.granted.complete) { t.status = "done"; return [`任务「${t.name}」完成（奖励之前已经发过）。`]; }
+  t.granted.complete = true;
   const r = t.reward;
   const notes = [`任务「${t.name}」完成！`];
   if (r.kuizhi) { state.kuizhi = (Number(state.kuizhi) || 0) + r.kuizhi; notes.push(`报酬 ${r.kuizhi} 奎支。`); }
@@ -247,14 +334,41 @@ function trpgTaskFail(id, why) {
   const t = trpgTaskById(id);
   if (!t || t.status !== "active") return ["没有进行中的这个任务。"];
   t.status = "failed";
+  t.failWhy = tStr(why, 120);
   if (TRPG.taskBattle && TRPG.taskBattle.id === id) TRPG.taskBattle = null;
   return [`任务「${t.name}」失败${why ? "：" + why : ""}。没有报酬。`];
 }
 /** 长休时护送的人物也休息（货车不会自己好） */
 function trpgTaskRestEscort(notes) {
-  const t = trpgActiveTask();
-  if (t && t.escort && !t.escort.lost && t.escort.kind === "vip" && t.escort.cur != null) {
-    t.escort.cur = null;
-    notes.push(`${escortSpec(t.escort, t.escort.level).name}也休息好了，血量回满。`);
-  }
+  trpgActiveTasks().forEach(t => {
+    if (t.escort && !t.escort.lost && t.escort.kind === "vip" && t.escort.cur != null) {
+      t.escort.cur = null;
+      notes.push(`${escortSpec(t.escort, t.escort.level).name}也休息好了，血量回满。`);
+    }
+  });
+}
+
+/* ---------- 任务日志（玩家看到的样子）----------
+ * 房主按收件人算好（online-game.js · rawPacket 的 quests），online-view.js · projectQuests 再按白名单过一遍。
+ * 不给玩家：草稿、没指定给他的任务、主持人备注、敌人配置、模板、隐藏站的文字和奖励。
+ * viewerId：房间成员 id；isGM：主持人自己看（全部都看得到） */
+function trpgQuestLog(viewerId, isGM) {
+  return trpgTasks().filter(t => t.status !== "draft" && (isGM || t.visibility.mode !== "players" || t.visibility.ids.includes(viewerId)))
+    .map(t => {
+      const g = t.granted || { nodes: [], complete: false };
+      const steps = t.nodes.map((n, i) => {
+        const state = t.status === "active" ? (i < t.index ? "done" : i === t.index ? "cur" : "todo") : t.status === "done" ? "done" : "todo";
+        if (n.hidden && state !== "done" && state !== "cur") return { title: "", state, hidden: true, xp: 0, kuizhi: 0, got: false };
+        return { title: n.title || TRPG_NODE_TYPES[n.type], state, hidden: false, xp: n.reward.xp, kuizhi: n.reward.kuizhi, got: g.nodes.includes(i) };
+      });
+      return {
+        id: t.id, name: t.name, category: t.category, status: t.status, goal: t.goal, days: t.days,
+        private: t.visibility.mode === "players", steps, index: t.index,
+        reward: { xp: t.reward.xp, kuizhi: t.reward.kuizhi, items: t.reward.items.map(x => `${(ITEM_CATALOG[x.id] || {}).name || x.id}×${x.qty}`)
+          .concat(t.reward.parts.map(id => typeof weaponPartLabel === "function" ? weaponPartLabel(id) : id))
+          .concat(t.reward.blueprints.map(id => `图纸「${(typeof blueprintSpec === "function" && blueprintSpec(id) || {}).name || id}」`)) },
+        got: !!g.complete, failWhy: t.status === "failed" ? t.failWhy || "" : ""
+      };
+    })
+    .sort((a, b) => (a.category === b.category ? 0 : a.category === "main" ? -1 : 1));
 }

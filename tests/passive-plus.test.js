@@ -179,6 +179,10 @@ test("绯秋：鳴門武器人击破 +1；切换刀势得 1 附赠动作", () =>
   assert.equal(h.bonus, b0 + 1);
   c.setHiakiStance(h, "iai");
   assert.equal(h.bonus, b0 + 1, "没有切换不给");
+  c.setHiakiStance(h, "waki");
+  c.setHiakiStance(h, "iai");
+  assert.equal(h.bonus, b0 + 1, "每回合最多 1 个：协助格挡来回切刀势不能无限格挡");
+  assert.equal(h.resources.stance, "iai", "刀势照常切换");
 });
 
 test("灯：两个敌人同区也都被决一死战吸引（只有一个敌人时才取最低骰）；开局 +1 圣盾；消耗圣盾回 2d10", () => {

@@ -460,10 +460,14 @@ function statusLine(u) {
   if (u.kit === "sand_aggregate") {
     const ph = (u.resources && u.resources.phase) || 1;
     s.push(ph === 1 ? "一阶段" : ph === 2 ? "二阶段" : "三阶段");
-    if (u.resources && u.resources.forceCharge) s.push("蓄力中");
-    if (u.resources && u.resources.forceOverheat) s.push("将过热");
+    const dr = typeof mechChargeDr === "function" ? mechChargeDr(u) : 0;
+    if (dr > 0) s.push(`电能炮蓄满（减伤 ${Math.round(dr * 100)}%）`);
+    if (u.resources && Number(u.resources.meltHoldTurn) >= Number(state.turnNo) && u.instant && u.instant.melt) s.push("过热");
     if (u.resources && u.resources.debrisCount) s.push("碎片" + u.resources.debrisCount + "/2");
+    if (u.resources && u.resources.rush) s.push("预备狂暴连打");
   }
+  // 被沙灵聚合体盯上的狂暴连打目标
+  if (u.isPlayer && (state.units || []).some(x => x.kit === "sand_aggregate" && !x.dead && x.resources && x.resources.rush && x.resources.rush.targetId === u.id)) s.push("连打预告");
   if (u.dormant) s.push("休眠");
   if (!u.isPlayer && typeof playerAllied === "function" && playerAllied(u)) s.push("友军");
   if (u.noMove) s.push("无法移动");
@@ -1725,7 +1729,9 @@ function beginRound(notes) {
     // 即时效果都是单回合的：没被用掉的也在回合开始时失效
     if (u.instant) {
       const gone = [];
-      if (u.instant.melt && held.indexOf("melt") < 0) { u.instant.melt = false; gone.push("熔融"); }
+      // 过热熔融（沙灵聚合体开炮后）：留到开炮之后那个我方回合结束
+      const meltHold = u.resources && Number(u.resources.meltHoldTurn) >= Number(state.turnNo);
+      if (u.instant.melt && held.indexOf("melt") < 0 && !meltHold) { u.instant.melt = false; gone.push("熔融"); }
       if (u.instant.sting && held.indexOf("sting") < 0) { u.instant.sting = false; gone.push("刺骨"); }
       if (u.instant.spread && held.indexOf("spread") < 0) { u.instant.spread = false; gone.push("扩散"); }
       if (u.instant.refract && held.indexOf("refract") < 0) { u.instant.refract = false; gone.push("折射"); }
@@ -2491,7 +2497,7 @@ const SCORE_RULES = {
   overkill: 1.5,   // 打死敌人时溢出的每点伤害（向下取整）
   kill: { minion: 20, elite: 100, boss: 300 },
   reduce: 1.5,     // 我方受击时，减伤减免掉的每点伤害（天气、血量改造、角色能力……完全免伤也算）
-  blockSave: 1,    // 协助格挡成功减免掉的每点伤害（空手格挡成功：少挨的那一半）
+  blockSave: 1.2,  // 协助格挡成功减免掉的每点伤害（#44：1 → 1.2）（空手格挡成功：少挨的那一半）
   ap: 10,          // 我方每用 1 点行动点
   apGiftShare: 0.5,   // 队友给的行动点（意式浓缩……）：用它的那次行动得的分，这个比例记在给行动点的人身上
   bonusAction: 5,  // 我方每用 1 次附赠行动
@@ -2971,6 +2977,8 @@ function noteSideDamage(amount, label, unit, noScore) {
  *   废铁墙（亡命之王「回防命令」，敌方）：挡我方攻击行动，撑到下一个敌人回合开始
  * 同区这一方的单位挨一次攻击行动：只有墙吃这一下（按装甲层算克制），这次行动打在同区的其余伤害全被挡住。 */
 const BARRIER_SIDE = { ironwall: "player", scrapwall: "enemy", dome: "player" };
+/** 巨刃划空打危墙 / 不稳桥梁这类只按击破掉耐久的间隔：固定扣这么多耐久，取代原来的 2 击破（#44，夕夏定） */
+const CHUAN_BLADE_GAP_DUR = 10;
 function barrierIn(zone, side) {
   return (state.props || []).find(p => BARRIER_SIDE[p.kind] === side && Number(p.zone) === Number(zone) && p.hp > 0);
 }
@@ -3890,10 +3898,15 @@ function hitStructureCore(attacker, targetToken, opt) {
     g.lastFrom = attacker ? attacker.zone : 1;   // 手册：摧毁方向只看最后一击来源区域
     g.lastBy = envCreditId(attacker);
     const before = Number(g.hp) || 0;
-    // 危墙、不稳桥梁：受到击破时损失等量耐久值——伤害打不动，只有击破算
+    // 危墙、不稳桥梁：受到击破时损失等量耐久值——伤害打不动，只有击破算（opt.gapDur：固定扣耐久，巨刃划空用）
     void dmg;
-    g.hp = Math.max(0, g.hp - br);
-    notes.push(`攻击间隔 ${key}（${gapLabel(g.type)}）：击破 ${br} → 耐久 ${g.hp}${br ? "" : `（伤害打不动${gapLabel(g.type)}，要靠击破）`}`);
+    if (opt.gapDur != null) {
+      g.hp = Math.max(0, g.hp - Math.max(0, Math.floor(Number(opt.gapDur) || 0)));
+      notes.push(`攻击间隔 ${key}（${gapLabel(g.type)}）：耐久 −${opt.gapDur} → ${g.hp}`);
+    } else {
+      g.hp = Math.max(0, g.hp - br);
+      notes.push(`攻击间隔 ${key}（${gapLabel(g.type)}）：击破 ${br} → 耐久 ${g.hp}${br ? "" : `（伤害打不动${gapLabel(g.type)}，要靠击破）`}`);
+    }
     popStructure(targetToken, g.level, before - g.hp, opt.element, "打不动");
     if (g.hp <= 0) notes.push(...destroyGap(key, g));
   } else if (String(targetToken).indexOf("prop:") === 0) {
@@ -4514,15 +4527,16 @@ function applyCombat(target, result, attacker) {
       target.resources.phase = 2;
       target.name = "沙灵聚合体·机械躯";
       notes.push("外层沙壳破碎，进入二阶段。");
+      if (typeof aggDisarmSpread === "function") aggDisarmSpread(target, notes);
+      if (typeof aggArmCannon === "function") aggArmCannon(target, notes);
     }
     const ph2 = target.resources.phase || 1;
     if (ph2 === 2 && aggArmorBefore > 0 && armorL && armorL.current <= 0) {
       if (armorL) armorL.max = 0;
       target.resources.phase = 3;
-      target.resources.forceCharge = false;
-      target.resources.forceOverheat = false;
       target.name = "沙灵聚合体·核心";
       notes.push("装甲被击破，进入三阶段。");
+      if (typeof aggDisarmCannon === "function") aggDisarmCannon(target, notes);
     }
   }
   notes.push(...sweepDeadEnemies());
@@ -4765,6 +4779,11 @@ function settleEnemyKill(target, notes) {
       king.resources.hostage = false;
       notes.push(`挟持者已死，${king.name} 恢复行动。`);
     }
+  }
+  // 手下被打倒：王下次行动改成回防命令（ai.js，KING_CFG.hold.cooldown 回合内最多一次）
+  if (isOutlawThugKit(target.kit)) {
+    const king = findKit("outlaw_king", state.units);
+    if (king && !king.dead) { king.resources = king.resources || {}; king.resources.crewDown = true; }
   }
   if (isOutlawThugKit(target.kit) && typeof mutinyTick === "function") mutinyTick(notes);
 }
@@ -5060,6 +5079,7 @@ function finalBlockChance(helper, attacker, protectedUnit, atkRange) {
   if (c == null) c = 50;
   c += highlandBlockMod(helper, attacker, atkRange);
   if (attacker && Number(attacker.blockMalus) > 0) c -= Number(attacker.blockMalus);   // 赤牙霰弹枪：对这一枪的协助格挡 −40%
+  if (attacker && Number(attacker.rushBlock) > 0) c += Number(attacker.rushBlock);       // 沙灵聚合体狂暴连打：每一击的协助格挡 +10%（AGG_RUSH）
   if (helper.self === "anchor") c += 10;   // 千钧：格挡成功率 +10%
   if (helper.kit === "xiaoxiao" && protectedUnit && protectedUnit.kit === "longge") c += 15;   // 小朋友守护龙哥：60% → 75%
   if (helper.rallyBlock) c += helper.rallyBlock;
@@ -6015,7 +6035,8 @@ function eligibleAssisters(breaker, broken) {
       (!breaker || u.id !== breaker.id || u.kit === "ufo_body" || u.kit === "chixia") &&   // 飞碟触灵、赤牙（剿灭）可以接自己打出的失衡
       !(typeof touDuelVictim === "function" && touDuelVictim(u) && broken.kit !== "tou") &&
       (typeof enemyMayAssist !== "function" || enemyMayAssist(u)) &&   // 被挟持的王、哗变的狂徒不对我方出手（enemies.js）
-      !(typeof fishFrenzyUsed === "function" && fishFrenzyUsed(u))      // 沙鱼每回合只群起一次
+      !(typeof fishFrenzyUsed === "function" && fishFrenzyUsed(u)) &&   // 沙鱼每回合只群起一次
+      !lineBlocked(u.zone, broken.zone)                                 // #44：协助攻击不能穿墙（危墙 / 关着的机关门）
     );
   }
   // 只列真正能出手的人：濒死没起身、失衡、抓在敌人身上的不行（以前飞碟本体失衡时这些人也列进来，
@@ -6031,7 +6052,8 @@ function eligibleAssisters(breaker, broken) {
     !(typeof isCrushing === "function" && isCrushing(u)) &&
     !u.isPartner &&                                          // 支援的伙伴打完就退场，不接协助攻击
     (!breaker || u.id !== breaker.id || isSoloHero(u)) &&   // 单人模式可以接自己打出的失衡
-    (typeof bpCanAssistAttack !== "function" || bpCanAssistAttack(u))
+    (typeof bpCanAssistAttack !== "function" || bpCanAssistAttack(u)) &&
+    !lineBlocked(u.zone, broken.zone)                       // #44：协助攻击无论远近都不能穿墙，被墙隔开的不能选
   );
 }
 
@@ -6219,9 +6241,9 @@ function presentAssistModal() {
   const box = uiEl("assistModalBtns");
   if (!modal || !box) return;
   if (job.vsPlayer) {
-    text.textContent = `${target ? target.name : "玩家"} 陷入失衡。选择一名敌人发动协助攻击。飞碟触灵可以由自己造成的失衡接协助攻击。${breaker && breaker.kit !== "ufo_body" ? breaker.name + " 作为造成失衡者不能为自己这一击发动。" : ""}`;
+    text.textContent = `${target ? target.name : "玩家"} 陷入失衡。选择一名敌人发动协助攻击。飞碟触灵可以由自己造成的失衡接协助攻击。${breaker && breaker.kit !== "ufo_body" ? breaker.name + " 作为造成失衡者不能为自己这一击发动。" : ""}被危墙 / 关着的机关门隔开的敌人不能协助攻击。`;
   } else {
-    text.textContent = `${target ? target.name : "敌人"} 陷入失衡。选择一名其他玩家角色发动协助攻击。飞碟触灵本体失衡时也可被协助攻击；${breaker ? breaker.name : "造成失衡者"} 不能为自己这一击发动。`;
+    text.textContent = `${target ? target.name : "敌人"} 陷入失衡。选择一名其他玩家角色发动协助攻击。飞碟触灵本体失衡时也可被协助攻击；${breaker ? breaker.name : "造成失衡者"} 不能为自己这一击发动；被危墙 / 关着的机关门隔开的角色不能协助攻击。`;
   }
   box.innerHTML = "";
   list.forEach(h => {
@@ -6517,12 +6539,14 @@ function performAssistBlock(helper, target, attacker, forced, atkRange) {
     if (helper.kit === "xia" && attacker) {
       // 走 dealBreak：打空就失衡、触发协助攻击（以前直接改架势，敌人架势 0 却不失衡，下回合照常行动）
       dealBreak(attacker, 1, "physical", notes, "夕夏格挡反打", { by: helper });
+      addFuel(1, "协助格挡", notes);   // #44：解锁燃油槽后协助格挡成功 +1 燃油（引擎开不开都给）
       if (helper.resources && helper.resources.engine) {
         const burn = Math.floor(effectiveAtk(helper, state.units) / 2);
         notes.push(`引擎格挡：追加 ${burn} 火焰。`);
         hitOne2(helper, attacker, { atk: 0, mult: 0, flat: burn, element: "fire", baseBreak: 0, atkRange: "melee", flags: { action: true, opportunity: true } }, notes);
       }
     }
+    if (helper.kit === "berniel" && attacker) addFuel(1, "柏妮尔协助格挡", notes);   // #44：同上，引擎开不开都给
     if (helper.kit === "berniel" && attacker && ownerEngineOn("xia")) {
       notes.push("引擎下柏妮尔格挡成功：对进攻者打出 1×atk 物理。");
       hitOne2(helper, attacker, { element: "physical", mult: 1, baseBreak: 0, atk: effectiveAtk(helper, state.units), atkRange: "melee", flags: { action: true, opportunity: true } }, notes);
@@ -6619,7 +6643,7 @@ function finishBlock(helperId, forced) {
   const job = (state.blockQueue || [])[0];
   const attacker0 = job ? blockJobAttacker(job) : null;
   const xf = job && job.opt && job.opt.flags;
-  const title = !attacker0 ? "" : xf && xf.execution ? `【${attacker0.name}】死刑 第 ${xf.execHit}/${xf.execHits} 段落下` : `【${attacker0.name}】的攻击落下`;
+  const title = !attacker0 ? "" : xf && xf.execution ? `【${attacker0.name}】${xf.execName || "死刑"} 第 ${xf.execHit}/${xf.execHits} 段落下` : `【${attacker0.name}】的攻击落下`;
   const prevActor = LOG_ACTOR_ID;
   LOG_ACTOR_ID = attacker0 ? attacker0.id : null;
   let lines;
@@ -7405,7 +7429,8 @@ function dealTo(attacker, target, opt) {
   if (attacker && target && opt.flags.action && !opt.flags.aoe && !isReaction && !opt.flags.conductorExtra && !opt.flags.propShot && !opt.flags.locked && !opt.flags.viaPierce && !opt.flags.anyRange && !opt.flags.skillRange) {
     const d = zoneDist(Number(attacker.zone), Number(target.zone), Number(state.zoneMode));
     const rg = opt.atkRange || (attacker.isPlayer ? "any" : (attacker.range || "any"));
-    const pointBlank = typeof featHas === "function" && featHas(attacker, "pointblank");   // 抵近射击（feats.js）
+    const pointBlank = (typeof featHas === "function" && featHas(attacker, "pointblank"))   // 抵近射击（feats.js）
+      || (typeof enemyForcedPointBlank === "function" && enemyForcedPointBlank(attacker, target));   // 被牵制又没有近身攻击的敌人（enemies.js）
     const okRange = rg === "melee" ? d === 0 : rg === "ranged" ? (d === 1 || (pointBlank && d === 0)) : d <= 1;
     if (!okRange) {
       const name = rg === "melee" ? "近距离" : rg === "ranged" ? "远距离" : "任意距离";
@@ -7483,6 +7508,17 @@ function dealTo(attacker, target, opt) {
   const assisting = !!opt.flags.assist || !!(attacker && state._assistBy && state._assistBy === attacker.id);
   // 危墙 / 关着的机关门挡住：先判，再进协助格挡（以前先弹格挡，格挡者花掉附赠、扣了耐久，这一击才被墙挡住）
   // lob：越墙的抛射（扭矩酸液炮蓄力、碎渣重炮的迫击炮）不被危墙 / 门挡住
+  // 决一死战（#44）：被决斗的敌人只能攻击灯——它的范围攻击（电弧扫射、榴弹……）也只打得到灯，同区的其他人不被波及。
+  // 首领机制（死刑、齐射……）和环境伤害不算它的攻击行动，不拦
+  if (attacker && !attacker.isPlayer && target && target.isPlayer && opt.flags.action && opt.flags.aoe && !opt.flags.environment && !opt.flags.mechId && !opt.flags.execution &&
+      typeof touDuelVictim === "function") {
+    const duel = touDuelVictim(attacker);
+    if (duel && target.id !== duel.id) {
+      const msg = `决一死战：${attacker.name} 只打得到 ${duel.name}，${target.name} 没被波及。`;
+      appendLog(msg);
+      return { res: { ok: false, total: 0, breakDealt: 0, log: [msg], perHit: [] }, extra: [msg] };
+    }
+  }
   if (attacker && target && target.zone != null && attacker.zone != null && !opt.flags.diffract && !opt.flags.locked && !opt.flags.lob) {
     const block = lineBlocked(attacker.zone, target.zone);
     if (block) {
@@ -7555,6 +7591,11 @@ function dealTo(attacker, target, opt) {
     flags.dr50 = true;
     opt.baseBreak = 0;
   }
+  // 首领机制蓄满能量（沙灵聚合体开炮那一回合）：受到的伤害降低（boss-mechanics.js · mechChargeDr）
+  if (target && !target.isPlayer && typeof mechChargeDr === "function") {
+    const dr = mechChargeDr(target);
+    if (dr > 0) { flags.drPct = (Number(flags.drPct) || 0) + dr; flags.drWhy = "蓄满能量"; }
+  }
   // 挂在「下一击」上的猛击 / 穿刺 / 弱点特效只作用于真正的攻击行动，
   // 不作用于这一击派生出来的环境伤害（雷击转移、爆燃溢出、反弹……），也不会被它们提前用掉
   const realAttack = flags.action !== false && !flags.environment;
@@ -7577,7 +7618,8 @@ function dealTo(attacker, target, opt) {
     attacker.resources.weakNext = false;
   }
   // 启动引擎+：夏 / 柏妮尔的火属性攻击动作自动消耗所有燃油，伤害 +燃油×10%（处决每点 15%）；一个动作只消耗一次
-  if (flags.action && (opt.element || "physical") === "fire" && attacker && (attacker.kit === "xia" || attacker.kit === "berniel") && xiaFuelOn()) {
+  // #44：格挡反打（opportunity）不消耗燃油
+  if (flags.action && !flags.opportunity && (opt.element || "physical") === "fire" && attacker && (attacker.kit === "xia" || attacker.kit === "berniel") && xiaFuelOn()) {
     const acc = state.actionAcc || {};   // 没有行动记账（例如主持人出手）时按这一击单独算
     if (acc.fuelPct == null) {
       const n = takeFuel();
@@ -7646,6 +7688,9 @@ function dealTo(attacker, target, opt) {
   // 抵近射击：远距离攻击打同区（这一击是远程、或这个技能是靠抵近射击才打得到同区）→ 倍率 ×60%
   if (attacker && attacker.isPlayer && dist === 0 && flags.action !== false && !flags.environment && !flags.aoe && !isReaction &&
       typeof featHas === "function" && featHas(attacker, "pointblank") && (opt.atkRange === "ranged" || state._pointBlankShot === attacker.id)) flags.pointBlank = true;
+  // 被决一死战 / 嘲讽牵制、又没有近身攻击的敌人：远距离攻击打同区的牵制者，同样 ×60%
+  if (attacker && !attacker.isPlayer && dist === 0 && opt.atkRange === "ranged" && flags.action !== false && !flags.environment && !flags.aoe && !isReaction &&
+      typeof enemyForcedPointBlank === "function" && enemyForcedPointBlank(attacker, target)) flags.pointBlank = true;
   const wasDeadForGhost = !!(target && target.dead);
   // 千钧：每个攻击行动总击破 +1 只加一次——这个行动里前面的攻击已经加过，就不再加
   const res = resolveAttack({
@@ -7767,6 +7812,11 @@ function dealTo(attacker, target, opt) {
     if (attackConnected(res, flags)) extra.push(...runOnConnect(attacker, target, opt.onConnect, res));
     else extra.push("格挡成功：位移与其他附带效果未生效。");
   }
+  // 沙灵聚合体狂暴连打：每一击落下就记一次（被挡下没有），全部落下后判断是不是全被挡下（enemies.js · aggRushHitDone）
+  if (flags.aggRush && !res.pending && typeof aggRushHitDone === "function") {
+    const b = flags.block || (res.flags && res.flags.block);
+    extra.push(...aggRushHitDone(attacker, b === "assistOk" || b === "bareOk"));
+  }
   // 休眠：同阵营的敌人挨打（真的掉了血）就叫醒休眠的同伴
   if (target && !target.isPlayer && (Number(res.total) || 0) > 0 && typeof dormantOnAllyHurt === "function") extra.push(...dormantOnAllyHurt(target, attacker));
 
@@ -7841,13 +7891,32 @@ function triggerMagnetShield(broken) {
   const c = findKit("chuan", state.units);
   if (!c || Number(c.zone) !== Number(broken.zone)) return notes;
   if (typeof passiveOn === "function" && !passiveOn(c)) return notes;   // 放弃被动「磁场护盾」
-  const dest = otherZone(c.zone);
-  notes.push(`磁场护盾：${broken.name} 上由川川/哔哩哩施加的护盾被破坏，效果触发后解除。同区敌人被推到 ${dest} 区并各受 1 击破。`);
+  const dest = magnetPushDest(c.zone);
+  notes.push(`磁场护盾：${broken.name} 上由川川/哔哩哩施加的护盾被破坏，效果触发后解除。同区敌人${dest != null ? `被推向 ${dest} 区` : "无处可推"}并各受 1 击破。`);
   visibleEnemies(c.zone).filter(u => !ignoresAoe(u)).forEach(u => {
-    u.zone = dest;
+    if (dest != null) displaceTo(u, dest, notes, "被磁场护盾推开");   // #44：走标准推人逻辑（墙、空隙、深渊、流沙……照常结算）
     dealBreak(u, 1, "electric", notes, "磁场护盾");
   });
   return notes;
+}
+/** 磁场护盾推人的目标区（#44，夕夏定）：只在隔着可通行间隔（非危墙、非关着的机关门）的相邻区里选；
+ *  优先危险区域（空隙、深渊、不稳桥梁、流沙、冻土、伏咬沙鱼、火场、酸液），危险区之间随机（对局种子）；
+ *  没有危险区才推向普通区；无处可推返回 null */
+function magnetPushDest(zone) {
+  zone = Number(zone);
+  const ns = typeof zoneNeighbors === "function" ? zoneNeighbors(zone) : [];
+  const cand = (ns.length ? ns : [otherZone(zone)]).map(Number).filter(z => z !== zone && state.fields[z]);
+  const open = cand.filter(z => { const g = getGap(zone, z); return !(g.type === "wall" || (g.type === "door" && !g.open)); });
+  if (!open.length) return null;
+  const hazard = z => {
+    const g = getGap(zone, z), f = state.fields[z] || {};
+    if (g.type === "void" || g.type === "bridge") return true;
+    if (f.abyss || f.quicksand || f.ice || f.fireOn || (Number(f.fire) || 0) > 0 || f.acid) return true;
+    return (state.units || []).some(u => u.kit === "sandfish_ambush" && !u.dead && Number(u.zone) === z);
+  };
+  const danger = open.filter(hazard);
+  if (danger.length) return danger[Math.floor(Math.random() * danger.length)];
+  return open[0];
 }
 
 function ownerEngineOn(kit) {
@@ -7922,6 +7991,8 @@ function beanToLiquid() {
 }
 
 /** 绯秋切换刀势。放弃被动「剑术」时一直停在拔刀 */
+/** 剑术+：每回合最多靠切换刀势拿几个附赠动作 */
+const HIAKI_STANCE_BONUS_PER_TURN = 1;
 function setHiakiStance(u, stance) {
   if (!u) return;
   u.resources = u.resources || {};
@@ -7942,17 +8013,28 @@ function setHiakiStance(u, stance) {
       appendLog(notes.join("\n"));
     }
   }
-  // 剑术+：每次切换刀势立刻获得 1 个附赠动作；没用掉的留到下回合，下回合结束时过期
+  // 剑术+：切换刀势立刻获得 1 个附赠动作，每回合最多 1 个（作者定：以前每次切换都给，协助格挡切刀势能无限格挡）；
+  // 没用掉的留到下回合，下回合结束时过期
   if (prev !== stance && typeof passivePlus === "function" && passivePlus(u, 2)) {
-    u.bonus = (Number(u.bonus) || 0) + 1;
     const turn = Number(state.turnNo) || 0;
     const g = u.resources.stanceGrant && u.resources.stanceGrant.turn === turn ? u.resources.stanceGrant : { turn, n: 0 };
+    if (g.n >= HIAKI_STANCE_BONUS_PER_TURN) return;
+    u.bonus = (Number(u.bonus) || 0) + 1;
     g.n += 1;
     u.resources.stanceGrant = g;
     appendLog(`剑术+：${u.name} 切换刀势，获得 1 个附赠动作。`);
   }
 }
 
+/** 牵挂（#44）：结人、拿铁给被牵挂的人治疗时，所有治疗骰取最大值。返回 { total, text, maxed } */
+function bondHealDice(healer, target, n, sides, bonus) {
+  const y = findKit("yuito", state.units);
+  const mine = healer && (healer.kit === "yuito" || healer.kit === "latte");
+  const maxed = !!(mine && y && y.resources && target && y.resources.bondId === target.id);
+  if (!maxed) return Object.assign(takeDice(n, sides, bonus || 0), { maxed: false });
+  const total = n * sides + (Number(bonus) || 0);
+  return { total, text: `最大值 ${n}*${sides}${bonus ? "+" + bonus : ""} = ${total}`, maxed: true };
+}
 function setBond(yuito, ally) {
   if (!yuito || !ally) return;
   if (typeof passiveOn === "function" && !passiveOn(yuito)) return;   // 放弃被动「思念」
@@ -8526,7 +8608,7 @@ function heluScanAct(a, picks, lines) {
       const up = picks.sign !== "-";
       here.forEach(u => {
         const cur = Number(u.interfere) || 0;
-        u.interfere = up ? (cur < 0 ? 0.25 : cur + 0.25) : (cur > 0 ? -0.25 : cur - 0.25);
+        u.interfere = up ? (cur < 0 ? 0.25 : Math.min(INTERFERE_CAP, cur + 0.25)) : (cur > 0 ? -0.25 : Math.max(-INTERFERE_CAP, cur - 0.25));
         lines.push(`${u.name} 干涉 ${up ? "+" : "−"}25% → 下次伤害 ${u.interfere > 0 ? "+" : ""}${Math.round(u.interfere * 100)}%`);
       });
       if (!here.length) lines.push("区里没有单位。");
@@ -11136,11 +11218,10 @@ function runSkillInner(id, optRun) {
         if (mode === "heal") {
           // 每五级骰面升一档：2d4 → 2d6 → 2d8 …（骰子个数不变）
           const sides = leveledSides(y.level, 4);
-          const bonded = y.resources.bondId === tgt.id;
-          const r = bonded ? { total: 2 * sides, text: `最大值 2*${sides}` } : takeDice(2, sides, 0);
+          const r = bondHealDice(y, tgt, 2, sides, 0);
           healUnit(tgt, r.total);
           tgt.def = Math.min(tgt.defMax || tgt.def, (Number(tgt.def) || 0) + 1);
-          lines.push(`冰美式治疗 ${tgt.name} ${r.text}${bonded ? "（牵挂取最大值）" : ""}，架势 +1。`);
+          lines.push(`冰美式治疗 ${tgt.name} ${r.text}${r.maxed ? "（牵挂取最大值）" : ""}，架势 +1。`);
         } else {
           visibleEnemies(tgt.zone).forEach(u => {
             hitOne(a, u, { element: "ice", mult: 0.75, baseBreak: 1, atk, flags: { action: true, aoe: true } });
@@ -11548,7 +11629,8 @@ function runSkillInner(id, optRun) {
     } else if (id === "nora_assist") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       if (Number(a.zone) === Number(t.zone)) {
-        const dest = zoneNeighbors(a.zone)[0];
+        // #44：后退也要能走得到（skillMoveZones 查地形），退到的区和目标之间不能隔墙
+        const dest = skillMoveZones(a, 1).map(Number).find(z => z !== Number(a.zone) && !lineBlocked(z, t.zone));
         if (dest) { a.zone = dest; lines.push(`协助攻击：先退到 ${dest} 区再发射针尖。`); }
       }
       hitOne(a, t, { element: "ice", mult: 1, baseBreak: 0, atk, flags: { action: true, assist: true } });
@@ -11635,10 +11717,16 @@ function runSkillInner(id, optRun) {
       if ((a.resources.charge || 0) < 3) { lines.push("巨刃划空需要 3 电能。"); return paintSkillLog(lines.join("\n")); }
       const fl2 = state.skillFlow;
       const ref = (fl2 && fl2.picks && fl2.picks.target) || token || null;
-      const prop = ref && !unitById(ref) ? propByRef(ref) : null;
-      const sTok = isStructureToken(ref) ? String(ref) : (prop ? "prop:" + prop.id : null);   // 配置物 / 危墙 / 桥梁
-      const tgt = sTok ? null : ((ref ? unitById(ref) : null) || t);
+      let prop = ref && !unitById(ref) ? propByRef(ref) : null;
+      let sTok = isStructureToken(ref) ? String(ref) : (prop ? "prop:" + prop.id : null);   // 配置物 / 危墙 / 桥梁
+      let tgt = sTok ? null : ((ref ? unitById(ref) : null) || t);
       if (!sTok && !tgt) { lines.push("先选目标。"); return paintSkillLog(lines.join("\n")); }
+      // #44（夕夏定）：瞄准躲在敌方屏障（废铁墙……）后面的敌人，这一刀本来就会被屏障拦下——直接改砍屏障，走配置物的翻倍和摧毁返还
+      const shield = tgt && !tgt.isPlayer ? barrierIn(tgt.zone, "enemy") : null;
+      if (shield) {
+        lines.push(`${shield.name} 挡在 ${tgt.name} 前面，巨刃划空改砍 ${shield.name}。`);
+        prop = shield; sTok = "prop:" + shield.id; tgt = null;
+      }
       a.resources.charge -= 3;
       if (sTok) {
         // 爆炸桶 / 酸液桶 / 碎渣机炮直接摧毁；其余配置物伤害翻倍（2×atk → 4×atk）走正规结算：
@@ -11655,7 +11743,8 @@ function runSkillInner(id, optRun) {
         if (prop && (prop.kind === "boom" || prop.kind === "acid" || prop.kind === "scrap")) {
           // 作者定：爆炸桶 / 酸液桶 / 碎渣机炮这类桶子直接摧毁（爆炸桶照常爆炸）
           lines.push(`巨刃划空劈开 ${prop.name}。`, ...destroyProp(prop, a));
-        } else lines.push(...hitStructureCore(a, sTok, { element: "electric", dmg: Math.max(1, Math.floor((Number(atk) || 0) * 2 * 2)), brk: 2 }));
+        } else lines.push(...hitStructureCore(a, sTok, { element: "electric", dmg: Math.max(1, Math.floor((Number(atk) || 0) * 2 * 2)), brk: 2,
+          gapDur: gk ? CHUAN_BLADE_GAP_DUR : null }));   // 危墙 / 桥梁：固定扣 10 耐久（#44）
         if (was && !standing()) {
           a.resources.charge = (a.resources.charge || 0) + 1;
           lines.push("摧毁配置物，返还 1 电能。");
@@ -11735,8 +11824,8 @@ function runSkillInner(id, optRun) {
         addShieldLayer(t, sh);
         lines.push(`电站超频：${t.name} 过载，并获得 ${sh} 护盾（电能≥3不增加电能）。`);
       } else {
-        addCharge(1);
-        lines.push(`电站超频：${t.name} 过载，电能 +1。`);
+        addCharge(2);   // #44 方案 A：电能 <3 时 +2（原 +1）
+        lines.push(`电站超频：${t.name} 过载，电能 +2。`);
       }
     } else if (id === "chuan_summon") {
       const w = spawnWeapon(a, "bili");
@@ -11847,7 +11936,11 @@ function runSkillInner(id, optRun) {
         const dmg = dmgR.total;
         lines.push(`酸萃掷骰 治疗 ${healR.text} / 伤害 ${dmgR.text}`);
         fieldUnits().filter(u => Number(u.zone) === Number(z)).forEach(u => {
-          if (u.isPlayer && !isWeaponUnit(u)) { healUnit(u, heal); lines.push(`${u.name} 恢复 ${heal}`); }
+          if (u.isPlayer && !isWeaponUnit(u)) {
+            const hb = bondHealDice(a, u, nd, 4, 0);   // 被牵挂的人：骰子取最大值
+            const amt = hb.maxed ? hb.total : heal;
+            healUnit(u, amt); lines.push(`${u.name} 恢复 ${amt}${hb.maxed ? "（牵挂取最大值）" : ""}`);
+          }
           // 区域效果是范围攻击：打飞行敌人不用逐个多付附赠（以前对每只飞行敌人各扣 1 个，不够时后面的不受伤）
           else if (!u.isPlayer) hitOne(a, u, { atk: 0, mult: 0, flat: dmg, element: "acid", baseBreak: 0, flags: { action: true, aoe: true } });
         });
@@ -11856,9 +11949,10 @@ function runSkillInner(id, optRun) {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       a.zone = t.zone;
       // 2d4，每五级骰面升一档（2d6、2d8…）
-      const healR = takeDice(2, leveledSides(a.level, 4), 0);
+      // 牵挂：目标在这次施加之前就被牵挂，治疗骰取最大值（先治疗后挂牵挂的时序待定，先按施加前算）
+      const healR = bondHealDice(a, t, 2, leveledSides(a.level, 4), 0);
       const heal = healR.total;
-      lines.push(`爱意掷骰 ${healR.text}`);
+      lines.push(`爱意掷骰 ${healR.text}${healR.maxed ? "（牵挂取最大值）" : ""}`);
       const y = findKit("yuito", state.units);
       // 目标在施加之前就已经被牵挂：拿铁自己也恢复同量的生命和架势（先判断再施加，不然每次都成立）
       const already = !!(y && y.resources && y.resources.bondId === t.id);
@@ -11995,10 +12089,10 @@ function runSkillInner(id, optRun) {
       const tgt = fl && fl.picks.target ? unitById(fl.picks.target) : t;
       if (!tgt || !tgt.isPlayer) { lines.push("先选要治疗的友方。"); return paintSkillLog(lines.join("\n")); }
       a.resources.liquid -= 2;
-      const r = takeDice(Math.max(1, Number(a.level) || 1), 6, 0);
+      const r = bondHealDice(a, tgt, Math.max(1, Number(a.level) || 1), 6, 0);   // 牵挂：取最大值
       const got = healUnit(tgt, r.total);
       const over = Math.max(0, r.total - (Number(got) || 0));
-      lines.push(`双重奏：${tgt.name} 治疗 ${r.text}，恢复 ${got}。`);
+      lines.push(`双重奏：${tgt.name} 治疗 ${r.text}${r.maxed ? "（牵挂取最大值）" : ""}，恢复 ${got}。`);
       if (over > 0) {
         tgt.duetAtk = (Number(tgt.duetAtk) || 0) + over;
         lines.push(`溢出的 ${over} 点治疗变成 atk +${over}（下回合开始失去）。`);

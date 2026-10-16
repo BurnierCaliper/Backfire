@@ -160,6 +160,7 @@ body.bx-open { overflow: hidden; }
 .bx-card.hero .bx-rank { font-size: 13px; letter-spacing: .05em; }
 .bx-card.hero { --c: var(--bx-hazard); }
 .hx-en { font-size: 14px; font-weight: 700; color: var(--bx-muted); letter-spacing: .05em; }
+.hx-full { margin: -2px 0 6px; font-size: 13px; color: var(--bx-muted); }
 .hx-diff { display: flex; align-items: baseline; gap: 10px; margin: -4px 0 8px; font-size: 13px; color: var(--bx-muted); }
 .hx-diff b { font-size: 20px; }
 .hx-intro { margin: 0 0 12px; font-size: 14px; line-height: 1.8; color: var(--bx-paper); }

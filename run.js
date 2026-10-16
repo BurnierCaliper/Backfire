@@ -77,6 +77,12 @@ const RNG = {
 
 /* ===== 2. 遭遇数据 ============================================== */
 
+/** 亡命之王的狂徒援军（作者定）：开场就写着要赶来（chain.js），到王身边集合；战斗已经结束（场上全灭）就不来了 */
+const OUTLAW_KING_WAVES = [
+  { turns: 3, cancelOnClear: true, enemies: [{ preset: "thug_knife", zone: 2, near: "outlaw_king" }, { preset: "thug_hammer", zone: 2, near: "outlaw_king" }] },
+  { turns: 6, cancelOnClear: true, enemies: [{ preset: "thug_knife", zone: 2, near: "outlaw_king" }, { preset: "thug_hammer", zone: 2, near: "outlaw_king" }] }
+];
+
 /* 一场战斗写成数据，setupBattle 照着摆。
  *   enemies: [{ preset, level, zone, count? }]
  *   zoneMode 2 或 3；weather 见 engine；fields 按区写场地
@@ -176,7 +182,8 @@ const ENCOUNTERS = [
       { preset: "bandit_boss", zone: 2 },
       { preset: "thug_knife", zone: 2 },
       { preset: "thug_hammer", zone: 2 }
-    ]
+    ],
+    waves: OUTLAW_KING_WAVES
   },
   {
     id: "boss_aggregate",
@@ -245,7 +252,8 @@ const ENEMY_INFO = {
   bandit_boss: { faction: "盗匪", regions: ["外城区"], tokens: 2 },
   // 主持人手册：每次出场带强盗头子、匕首狂徒、锤狂徒各一，和他同区（固定随从，不按代币抽）
   outlaw_king: { faction: "盗匪", regions: ["外城区"], tokens: 4, boss: true,
-                 escorts: ["bandit_boss", "thug_knife", "thug_hammer"] },
+                 escorts: ["bandit_boss", "thug_knife", "thug_hammer"],
+                 waves: OUTLAW_KING_WAVES },
   // —— 沙灵 ——
   sand_beast: { faction: "沙灵", regions: ["沙漠"], tokens: 1 },
   sand_human: { faction: "沙灵", regions: ["沙漠"], tokens: 1 },
@@ -450,11 +458,13 @@ function rollBossEncounter(bossPreset, opt) {
     enemies.push({ preset: k, count: groupCount(ENEMY_INFO[k]) });
     left -= enemyTokens(k);
   }
-  return finishEncounter({
+  const spec = {
     name: (info && bossPreset) ? `${region}·首领战` : "首领战",
     region, faction: info ? info.faction : null, tier: "boss",
     tokens, mixed: false, enemies
-  }, opt);
+  };
+  if (info && Array.isArray(info.waves)) spec.waves = JSON.parse(JSON.stringify(info.waves));   // 首领自带的援军
+  return finishEncounter(spec, opt);
 }
 
 /** 三区站位：全在 3 区 / 2+3 对半 / 玩家在 2、敌人 1+3 对半。飞碟触灵不改。 */
@@ -610,7 +620,9 @@ function spawnEncounterRows(rows, baseLevel, partySize) {
       const u = p.build(lv(row.level), partySize);
       // 个体值（enemies.js）：模板里主持人写死的水平照写，没写的随机
       if (typeof applyEnemyIV === "function") applyEnemyIV(u, row.iv);
-      u.zone = Number(row.zone) || 2;
+      // near：跟着某个单位进场（援军赶到亡命之王身边），那个单位不在了就照写的区
+      const nearU = row.near ? (state.units || []).find(x => !x.isPlayer && !x.dead && !x.hidden && x.kit === row.near) : null;
+      u.zone = nearU ? Number(nearU.zone) : (Number(row.zone) || 2);
       if (row.bounty) makeBountyTarget(u, row.bounty);
       // 战斗模板（battle-templates.js）里预先挂好的首领机制
       if (Array.isArray(row.mechanics) && typeof addBossMechanic === "function") row.mechanics.forEach(m => addBossMechanic(u, JSON.parse(JSON.stringify(m))));

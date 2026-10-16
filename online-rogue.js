@@ -24,9 +24,9 @@
   const copy = v => JSON.parse(JSON.stringify(v));
   const fail = text => { throw new Error(text); };
   // 个人行为：花自己的钱、动自己的东西（choose 是升级选择，不花钱）
-  const PERSONAL = ["buy", "buyPart", "sellPart", "installPart", "removePart", "upgradeWeapon", "repairWeapon", "healHero", "modifyHero"];
+  const PERSONAL = ["buy", "redeem", "learnRecipe", "salvage", "setCraftJob", "buyPart", "sellPart", "installPart", "removePart", "upgradeWeapon", "repairWeapon", "healHero", "modifyHero"];
   // 玩家可以自己发的个人指令（其余的个人行为由房主代自己的角色做）
-  const REMOTE = ["buy", "buyPart", "sellPart", "installPart", "removePart", "upgradeWeapon", "repairWeapon", "healHero", "modifyHero", "choose"];
+  const REMOTE = ["buy", "redeem", "learnRecipe", "salvage", "setCraftJob", "buyPart", "sellPart", "installPart", "removePart", "upgradeWeapon", "repairWeapon", "healHero", "modifyHero", "choose"];
   let enabled = false, resolving = false, hostId = "";
 
   const flow = () => root.RunFlow || null;
@@ -126,6 +126,8 @@
     }
     if ((c.action === "installPart" || c.action === "removePart" || c.action === "upgradeWeapon" || c.action === "repairWeapon") && heroOf(r, c.kit)?.kit !== payer) fail("只能动自己角色的武器");
     if ((c.action === "healHero" || c.action === "modifyHero") && c.kit !== payer) fail("只能给自己的角色治疗、改造");
+    if (c.action === "setCraftJob" && c.kit !== payer) fail("只能给自己的角色排活");
+    if (c.action === "salvage" && available(r, payer, c.item) < 1) fail("这件东西不是你的");
   }
 
   /* ---------- 规则指令外面包一层：钱从谁的钱包出、进账怎么分 ---------- */
@@ -138,17 +140,25 @@
       checkItems(r, cmd, payer);
       const pool = Number(state.kuizhi) || 0, before = bagSnap();
       state.kuizhi = Number(d.purse[payer]) || 0;
+      r._pointsPayer = payer;   // 商店积分记在付钱的那名角色名下（rogue.js · pointsBook）
       try {
         const out = next();
         d.purse[payer] = Math.max(0, Number(state.kuizhi) || 0);
         applyBagDiff(r, before, payer);
         return out;
-      } finally { state.kuizhi = pool; }
+      } finally { state.kuizhi = pool; delete r._pointsPayer; }
     }
     const out = next();
     const notes = Array.isArray(out) ? out : Array.isArray(out && out.notes) ? out.notes : [];
     settle(r, notes);
     return out;
+  });
+  // 制作：补金属的钱从做的人自己的钱包出；做出来的道具记在做的人名下
+  if (G_Rogue && Rogue.setCraftHooks) Rogue.setCraftHooks({
+    applies: r => active() && r === run(),
+    balance: (r, kit) => Number(data(r).purse[kit]) || 0,
+    pay: (r, kit, n) => { const d = data(r); d.purse[kit] = Math.max(0, (Number(d.purse[kit]) || 0) - n); },
+    made: (r, kit, id) => { if (ownable(id)) addOwned(data(r), kit, id, 1); }
   });
   // 战斗里用道具：自己的 + 公用的；用掉的先从自己名下扣
   if (typeof setItemAccess === "function") setItemAccess((unit, id) => {
@@ -167,6 +177,7 @@
   /* ---------- 掉落：按需求分配 ---------- */
   if (G_Rogue && Rogue.setLootHandler) Rogue.setLootHandler((r, id, qty, notes, source) => {
     if (!active() || r !== run()) return false;
+    if (!ownable(id)) return false;   // 队伍公用的东西（制作材料……）直接进公用背包，不用大家选需求
     const d = data(r);
     d.loot.push({ no: ++d.lootNo, id, qty, source: source || "战利品", needs: {} });
     notes.push(`${source || "战利品"}：${itemName(id)} ×${qty}——各人选「需求」或「放弃」，在需求的人里抽一个。`);
@@ -270,7 +281,9 @@
   }
   /** 还不能结算投票的原因（空 = 可以） */
   function blocker(r) {
-    const pend = Rogue.pendingChoices(r);
+    // 掉线玩家的角色还没选的升级不卡全队（和战利品分配一样只等在线的人）；回来以后照样能选，房主也可以替他选
+    const online = onlineIds();
+    const pend = Rogue.pendingChoices(r).filter(p => online.includes(ownerOf(r, p.kit)));
     if (pend.length) return `等 ${[...new Set(pend.map(p => p.name))].join("、")} 选完升级`;
     if (G_Screens && Screens.is("battle")) return "战斗中";
     if (root.GAME && GAME.depth > 0) return "正在结算";
@@ -366,6 +379,8 @@
   function checkHost(c) {
     if (!active() || !PERSONAL.includes(c.action) && c.action !== "choose") return;
     const r = run(), kit = c.action === "choose" ? c.kit : payerOf(r, c);
+    // 操控者掉线时，房主可以替他选升级（不然只能等他回来）
+    if (c.action === "choose" && !onlineIds().includes(ownerOf(r, kit))) return;
     if (ownerOf(r, kit) !== hostId) fail(`${name(kit)} 由 ${playerName(ownerOf(r, kit))} 操控，房主不能替他花钱或做选择`);
   }
 
@@ -407,16 +422,21 @@
     }) : null;
     // 升级：自己的角色要选的第一项
     let choice = null;
-    const pend = Rogue.pendingChoices(r).find(p => mine.includes(p.kit));
+    const myPend = Rogue.pendingChoices(r).filter(p => mine.includes(p.kit));
+    const pend = myPend[0];
     if (pend) {
       const t = pend.choice.type;
       choice = { kit: pend.kit, index: pend.index, name: pend.name, level: pend.choice.level,
         title: t === "attr" ? "分配 1 点六维属性" + (pend.choice.noRepeat ? "（不能加在之前加过的同一项上）" : "") : t === "prof" ? "一个自选熟练项" : t === "role2" ? "从第二副职责里学一个技能" : t === "feat" ? "选择一项专长（不限职责和属性）" : t === "featFull" ? "兼修：选一张职责涉猎专长升成完整版" : t === "prof3" ? "万事通：选一项熟练项升到三级" : "选择一项职责技能",
-        options: Rogue.choiceOptions(r, pend.kit, pend.index).map(o => ({ label: o.label, hint: o.hint || "", value: o.value })) };
+        options: Rogue.choiceOptions(r, pend.kit, pend.index).map(o => ({ label: o.label, hint: o.hint || "", value: o.value })),
+        more: myPend.length - 1 };   // 后面还有几项待选（房主界面有，玩家界面以前没有）
     }
     const waitingLevel = [...new Set(Rogue.pendingChoices(r).filter(p => !mine.includes(p.kit)).map(p => p.name))];
     // 个人能做的事：商店、工匠、诊所
     const shop = Rogue.canShop(r) ? Rogue.shopStock(r).map(row => ({ key: row.key, name: Rogue.shopItemName(row), price: row.price, team: !row.give.item || !ownable(row.give.item) })) : null;
+    // 商店积分：各人自己的（记在自己操控的角色名下）
+    const pointsOf = kit => { r._pointsPayer = kit; try { return Rogue.shopPoints(r); } finally { delete r._pointsPayer; } };
+    const points = shop && mine[0] ? Object.assign(pointsOf(mine[0]), { redeem: Rogue.redeemList() }) : null;
     const smithId = (Rogue.presentSmiths(r) || [])[0] || null;
     const smith = smithId ? {
       id: smithId, name: (Rogue.smithInfo(r, smithId) || {}).name || "工匠",
@@ -431,6 +451,19 @@
     }).filter(p => p.have > 0) : null;
     // 诊所：治疗；义体改造带上现在的方案和上限，玩家那边按同样的公式估价（真正扣多少以房主结算为准）
     const cyberOf = kit => { try { const i = Rogue.cyberInfo(r, kit); return { current: i.current, limit: i.limit, rate: i.rate, fleshMax: i.fleshMax, perHp: (typeof ROGUE_CLINIC !== "undefined" && ROGUE_CLINIC.cyberPerHp) || 0 }; } catch (e) { return null; } };
+    // 工坊：大家排的活、自己的角色能做什么、能学的配方、能拆的东西
+    const place = Rogue.craftPlace(r);
+    const workshop = place && mine.length ? {
+      place, queue: Rogue.craftQueue(r),
+      mine: r.party.filter(h => mine.includes(h.kit)).map(h => ({ kit: h.kit, name: name(h.kit),
+        options: Rogue.craftList(r).filter(x => x.known && (place === "bench" || !x.bench)).map(x => {
+          const o = Rogue.craftOdds(r, h.kit, x.id) || {};
+          return o.base ? { id: x.id, name: x.name, chance: o.chance, hours: x.hours, prof: x.prof, mats: x.mats.map(m => `${m.name} ${m.have}/${m.need}`).join("、") } : null;
+        }).filter(Boolean) })),
+      helpers: living(r).map(k => ({ kit: k, name: name(k) })),
+      learn: Rogue.learnOptions(r),
+      salvage: Rogue.salvageList().map(x => Object.assign(x, { have: mine.reduce((s, k) => s + (Number((d.owned[k] || {})[x.id]) || 0), 0) + free(r, x.id) })).filter(x => x.have > 0)
+    } : null;
     const clinic = Rogue.canClinic(r) ? r.party.filter(h => mine.includes(h.kit)).map(h => ({ kit: h.kit, name: name(h.kit), cost: Rogue.healCost(r, h.kit), cyber: cyberOf(h.kit) })) : null;
     return {
       act: r.act, day: r.day, region: Rogue.region(r), daysLeft: Rogue.daysLeft(r), daysPerAct: C.daysPerAct, stage: r.stage,
@@ -446,7 +479,7 @@
         needs: living(r).filter(k => l.needs[k] === "need").map(name), passes: living(r).filter(k => l.needs[k] === "pass").map(name),
         mine: mine.map(k => ({ kit: k, name: name(k), answer: l.needs[k] || "" })) })),
       lootLog: d.lootLog.slice(-5).map(x => x.text),
-      choice, waitingLevel, shop, smith, parts, clinic,
+      choice, waitingLevel, shop, points, smith, parts, clinic, workshop,
       log: (r.log || []).slice(-8).map(l => l.text)
     };
   }

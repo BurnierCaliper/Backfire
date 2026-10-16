@@ -585,6 +585,8 @@ function weatherDamagePct(weather, element) {
   }
 }
 
+/** 干涉场叠层上限（作者定）：±100%，到顶后不再叠加（以前无上限，曾叠到 −2425% 把伤害全变成 0） */
+const INTERFERE_CAP = 1;
 function milestone(level, every = 5) {
   // 达到 5/10/15… 或 2/4/6… 的当级就加，不是下一级才加
   return Math.floor(Math.max(1, Number(level) || 1) / every);
@@ -768,7 +770,7 @@ function resolveAttack(ctx) {
   let selfBreak = 0;
   // 干涉场：叠层只在单位站在干涉场里时生效（叠层记着是在哪一区叠的，换了区就不算）；不在干涉场里挨打就清掉
   const interfHere = !!fieldT.harmonic && (t.interfereZone == null || Number(t.interfereZone) === Number(t.zone));
-  let interfDelta = interfHere ? (Number(t.interfere) || 0) : 0;
+  let interfDelta = interfHere ? Math.max(-INTERFERE_CAP, Math.min(INTERFERE_CAP, Number(t.interfere) || 0)) : 0;
   let firstStartType = null;
   // 熔融：多段攻击每一段都吃熔融（冰 ×2 伤害、+1 击破），整次攻击结算完才结束（作者定：每段都算）
   let meltLive = !!(t.instant && t.instant.melt);
@@ -956,6 +958,7 @@ function resolveAttack(ctx) {
     if (weather === "phase" && Number(ctx.phaseStep) === 0) { pct -= 0.5 * envX; wSum -= 0.5 * envX; hAdd(`相位波谷：伤害 −${50 * envX}%。`); }
     if (flags.dr50 && !noDr) { pct -= 0.5; hAdd("目标减伤 +50%：−50%。"); }
     if (flags.dr25 && !noDr) { pct -= 0.25; hAdd("自保模式：受伤 −25%。"); }
+    if (flags.drPct && !noDr) { pct -= Number(flags.drPct) || 0; hAdd(`${flags.drWhy || "减伤"}：−${Math.round((Number(flags.drPct) || 0) * 100)}%。`); }
     if (flags.prideReduce && !noDr) {
       const pr = typeof flags.prideReduce === "number" ? flags.prideReduce : 0.25;
       pct -= pr; hAdd(`过度自信：血量不低于进入战斗时的上限，受伤 −${Math.round(pr * 100)}%。`);
@@ -1077,8 +1080,11 @@ function resolveAttack(ctx) {
         interfDelta = up ? step : -step;
         hAdd(`干涉场遇到反向：清空后从 ${stepTxt} 重计。`);
       } else {
-        interfDelta += up ? step : -step;
-        hAdd(`干涉场：本次${up ? "克制" : "劣势"}，下次伤害 ${stepTxt}。`);
+        const before = interfDelta;
+        interfDelta = Math.max(-INTERFERE_CAP, Math.min(INTERFERE_CAP, interfDelta + (up ? step : -step)));
+        hAdd(interfDelta === before
+          ? `干涉场：叠层已到上限 ${pctTxt(interfDelta)}，不再叠加。`
+          : `干涉场：本次${up ? "克制" : "劣势"}，下次伤害 ${stepTxt}。`);
       }
     }
 
@@ -1543,12 +1549,57 @@ function rebalanceEnemiesForParty(party, units) {
   return changed.length ? [`人数平衡：按 ${n} 人队重新换算 ${changed.join("、")} 的血量与架势。`] : [];
 }
 
-/** 沙灵聚合体三层血量（人数缩放前）：最外 30 沙尘 / 40 装甲 / 最内 50 沙尘，每级 +9 外沙尘 +8 装甲 +6 内沙尘。
+/** 沙灵聚合体三层血量（人数缩放前）：最外 30 沙尘 / 40 装甲 / 最内 50 沙尘，每级 +9 外沙尘 +8 装甲 +6 内沙尘，再 × AGG_HP_MULT。
  *  三阶段「吸引碎片两次后装甲回满」也按这个算回装甲上限（enemies.js · en_agg3_debris） */
 function aggregateLayerHp(lv) {
   const d = Math.max(0, (Number(lv) || 1) - 1);
-  return { outer: 30 + d * 9, armor: 40 + d * 8, inner: 50 + d * 6 };
+  const k = AGG_HP_MULT;
+  return { outer: Math.round((30 + d * 9) * k), armor: Math.round((40 + d * 8) * k), inner: Math.round((50 + d * 6) * k) };
 }
+/** 沙灵聚合体三层血量的倍率（终局平衡：原本三个首领里它血最少，聪明打法 6 回合就打穿，机制来不及放） */
+const AGG_HP_MULT = 1.5;
+
+/** 沙灵聚合体二阶段 · 电能炮（作者定：做成「死刑」首领机制，boss-mechanics.js）
+ *  进入二阶段就锁定血量上限最高的我方单位，turns 回合后在敌人回合开始时开炮；开完炮过 interval 回合再开下一炮。
+ *  hits：每一段 mult × atk + 1d(diceS)，各自可以协助格挡；目标和聚合体不同区时每段衰减为 far.mult × atk + 1d(far.diceS)。
+ *  splash：目标所在区的其他友方各挨 splash × atk（范围伤害，不能格挡）——要分开站。
+ *  chargeDr：开炮那一回合（倒数到 0）聚合体蓄满能量，我方这回合打它伤害 −chargeDr——要考虑防御和移动，而不是硬拼。
+ *  开炮后机体过热：给自己上熔融，留到下一个我方回合结束（以前是空过一回合）。 */
+const AGG_CANNON = {
+  turns: 1,
+  interval: 2,
+  hits: [{ mult: 1, diceS: 20, baseBreak: 2 }, { mult: 1, diceS: 20, baseBreak: 1 }],
+  far: { mult: 0.5, diceS: 10 },
+  splash: 0.5,
+  chargeDr: 0.5
+};
+
+/** 亡命之王（作者定的强化：用首领机制把「指挥官」做实，boss-mechanics.js）
+ *  exec · 公开处刑（死刑，王在自己回合用的技能，花 1 行动点）：标记血量上限最高的我方单位，turns 回合后的敌人回合开始时落下；
+ *    落下之后过 cooldown 回合（从标记那回合算）才会再用。
+ *    第一刀是王自己：kingMult × atk + 1d(kingDie 随等级升档) 酸；之后每个还站着的手下（狂徒 / 强盗头子）各补一刀：
+ *    crewMult × 自己的 atk + 1d(crewDie 随等级升档)。每一刀都可以协助格挡——先清掉手下，处刑就轻。
+ *    落下后强盗头子还在：grab 概率擒拿，目标失去下回合行动。王被挟持（哗变）时推迟。
+ *  volley · 齐射（回防命令之后）：回防时标记我方每个角色，下一个敌人回合开始时王朝每人各开一枪（mult × atk + 1d(diceS)，物理，
+ *    baseBreak 击破，每枪都能协助格挡）。开枪用掉王那一回合的行动点。和公开处刑撞在同一回合时，处刑往后推一回合。
+ *  援军：首领战开场就写着狂徒援军要赶来（run.js · ENEMY_INFO.outlaw_king.waves，chain.js）；场上敌人全灭、战斗结束就不来了。
+ *  攻击命令 / 处死命令的骰子随等级升档（每 5 级一档，和杂兵一样）。 */
+const KING_CFG = {
+  exec: { turns: 2, cooldown: 3, kingMult: 1.5, kingDie: 6, crewMult: 1, crewDie: 6, grab: 0.5 },
+  volley: { mult: 1, diceS: 8, baseBreak: 2 },
+  // 回防：手下（狂徒 / 强盗头子）被打倒过，王下次行动改成回防命令；cooldown 回合内最多一次（作者定：先设 3，实际游玩再调）
+  hold: { cooldown: 3 }
+};
+
+/** 沙灵聚合体一阶段 · 沙尘爆裂（作者定：「远离」首领机制）：开场标记我方全员，turns 回合后在敌人回合开始时
+ *  每个被标记的人在自己所在的区爆炸一次，对这个区每个友方各 blast × atk（不能格挡）——要分开站。之后每 interval 回合一次；外层沙壳打穿就停。 */
+const AGG_SPREAD = { firstTurn: 1, turns: 1, interval: 2, blast: 0.6 };
+
+/** 沙灵聚合体一阶段 · 狂暴连打（作者定）：聚合体回合花 1 行动点预备，指定一名随机敌人（被嘲讽 / 决一死战时就是牵制者）；
+ *  下一个敌人回合冲到目标所在的区连打 hits 击：每击 mult × atk + 1d(diceS) 物理、baseBreak 击破，每击都能协助格挡，成功率 +blockBonus%。
+ *  出手时被嘲讽就转火牵制者；原目标倒下就随机换一个。全部被格挡下来：聚合体自己受到 selfBreak 击破。
+ *  firstTurn 起才会预备；打完过 cooldown 回合（从出手那回合算）才会再预备。进入二阶段就作废。 */
+const AGG_RUSH = { firstTurn: 2, cooldown: 3, hits: 4, mult: 1, diceS: 8, baseBreak: 1, blockBonus: 10, selfBreak: 4 };
 
 function ufoLegStats(lv) {
   const extra = Math.max(0, (Number(lv) || 1) - 1);
@@ -1830,20 +1881,23 @@ function enemyPresets() {
       const { outer, armor, inner } = aggregateLayerHp(lv);
       const atk = 10 + d;
       const def = 11 + milestone(lv, 2);
-      return unitOf("沙灵聚合体", lv, [
+      const u = unitOf("沙灵聚合体", lv, [
         { type: "sand", hp: scaleHp(outer, p) },
         { type: "armor", hp: scaleHp(armor, p) },
         { type: "sand", hp: scaleHp(inner, p) }
       ], def, atk, {
         kit: "sand_aggregate", range: "any", element: "physical", dice: [1, 8], baseBreak: 3,
-        resources: { phase: 1, debrisCount: 0, forceCharge: false, forceOverheat: false }
+        resources: { phase: 1, debrisCount: 0 }
       });
+      if (typeof aggArmSpread === "function") aggArmSpread(u);   // 一阶段：沙尘爆裂（远离机制）
+      return u;
     }},
     { id: "outlaw_king", name: "亡命之王", build(lv, p) {
-      return unitOf(this.name, lv, [
+      const u = unitOf(this.name, lv, [
         { type: "armor", hp: scaleHp(35 + (lv - 1) * 7, p) },
         { type: "flesh", hp: scaleHp(50 + (lv - 1) * 11, p) }
-      ], 7 + milestone(lv, 5), 11 + (lv - 1) + milestone(lv, 5) * 2, { kit: "outlaw_king", range: "any", dice: [1, 4], element: "fire" });
+      ], 7 + milestone(lv, 5), 11 + (lv - 1) + milestone(lv, 5) * 2, { kit: "outlaw_king", range: "any", dice: [1, leveledSides(lv, 4)], element: "fire" });
+      return u;
     }},
     { id: "chixia", name: "赤牙", build(lv, p) {
       const table = {

@@ -189,6 +189,14 @@
       if (typeof cmd.dest !== "string" || !repairTargets().some(r => r.kit === cmd.dest && r.need > 0)) fail("维修工具包需要选一把要修的武器", "invalid_item");
       return;
     }
+    // 效果道具（36 种）：目标、射程、场地能不能改……都按规则层的同一套检查（items.js · itemUseError）
+    if (spec.effect && typeof itemUseError === "function") {
+      if (spec.target === "zone" && (!Number.isInteger(cmd.dest) || cmd.target != null)) fail("道具需要选择有效区域", "invalid_item");
+      if (spec.target !== "zone" && cmd.dest != null) fail("这件道具不接受区域选项", "invalid_item");
+      const why = itemUseError(actor, cmd.item, cmd.target == null ? null : unitById(cmd.target), cmd.dest);
+      if (why) fail(why, "invalid_item");
+      return;
+    }
     if (spec.target === "ally") {
       const target = unitById(cmd.target);
       if (!present(target) || !target.isPlayer) fail("道具需要选择在场友方", "invalid_item");

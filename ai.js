@@ -29,7 +29,7 @@ const EnemyAI = (function () {
   // 不按「打单个目标」瞄准的技能：标定区域的榴弹（落点任意），不看危墙
   const ZONE_PICK = { en_gl: true, en_gl_fire: true, en_ant_shell: true, en_ant_shell_fire: true };
   // 不需要目标 / 不是攻击的技能：找站位时不拿它们来算「能不能打到」
-  const NO_TARGET = { en_agg3_debris: true, en_king_hold: true, en_bigsand_summon: true, en_bigsand_heal: true, ufo_prime: true,
+  const NO_TARGET = { en_agg3_debris: true, en_agg1_rush: true, en_agg1_rush_prep: true, en_king_hold: true, en_king_exec: true, en_bigsand_summon: true, en_bigsand_heal: true, ufo_prime: true,
     ufo_boom: true, ufo_stomp: true, ufo_sweep: true, ufo_summon: true, en_agg2_overheat: true, en_giant_sand_pulse: true, en_thug_mutiny: true, en_gas_ignite: true, en_hunter_heat: true, en_alarm_zap: true };
   function canAimSkill(u, sid, t) {
     if (!inSkillReach(u, sid, t)) return false;
@@ -47,7 +47,7 @@ const EnemyAI = (function () {
     // 之前这里没查它，远距技能被当成 0–1 都能打，于是瞄准同区的人、结果打不到。
     const erg = typeof ENEMY_SKILL_RANGE !== "undefined" && sid ? ENEMY_SKILL_RANGE[sid] : null;
     if (erg === "melee") return d === 0;
-    if (erg === "ranged") return d === 1;
+    if (erg === "ranged") return d === 1 || (d === 0 && typeof enemyForcedPointBlank === "function" && enemyForcedPointBlank(u, t));
     if (erg === "any") return d <= 1;
     // 射程表里没有的技能按单位卡上的射程判断，和 dealTo 一致（以前一律按 0–1：远距离的人形沙灵瞄准同区的人，每回合空放）
     const rg = u.range || "any";
@@ -338,6 +338,9 @@ const EnemyAI = (function () {
     }
     if (spec.special === "boat") {
       // 电弧扫射打距离 1 的全部敌人，感电是它自带的附加，没有单体攻击
+      // 被牵制而牵制者在同区：抵近扫自己所在的区（enemies.js · en_boat_arc）
+      const forced = typeof enemyForcedTarget === "function" ? enemyForcedTarget(u) : null;
+      if (forced && Number(forced.zone) === Number(u.zone)) return "en_boat_arc";
       return prey.some(p => zdist(u.zone, p.zone) === 1) ? "en_boat_arc" : null;
     }
     if (spec.special === "king") {
@@ -350,9 +353,14 @@ const EnemyAI = (function () {
       const pressed = prey.some(p => Number(p.zone) === Number(u.zone));
       const hurt = (Number(u.damagedThisTurn) || 0) > 0;
       const guarded = thugs.some(x => x !== u && Number(x.zone) === Number(u.zone));
-      if (scattered && thugs.length >= 2 && !guarded && (pressed || hurt) && has("en_king_hold") && u._aiHoldTurn !== state.turnNo) {
+      const holdReady = r.holdTurn == null || state.turnNo - Number(r.holdTurn) >= (Number(KING_CFG.hold.cooldown) || 0);
+      // 手下被打倒过：这回合改成回防（之后狂徒们齐射）
+      if (r.crewDown && holdReady && has("en_king_hold")) return "en_king_hold";
+      if (scattered && thugs.length >= 2 && !guarded && (pressed || hurt) && holdReady && has("en_king_hold") && u._aiHoldTurn !== state.turnNo) {
         return "en_king_hold";
       }
+      // 公开处刑：没有挂着的、离上次标记过了冷却就用（标记 → 两回合后落下）
+      if (has("en_king_exec") && typeof kingExecutionReady === "function" && kingExecutionReady(u)) return "en_king_exec";
       if (sameZone && has("en_king_kill")) return "en_king_kill";
       return has("en_king_atk") ? "en_king_atk" : "en_king_kill";
     }
@@ -367,12 +375,13 @@ const EnemyAI = (function () {
     }
     if (spec.special === "aggregate") {
       const ph = r.phase || 1;
-      if (ph === 1) return sameZone ? "en_agg1_melee" : "en_agg1_range";
-      if (ph === 2) {
-        if (has("en_agg2_overheat")) return "en_agg2_overheat";
-        if (has("en_agg2_charge")) return "en_agg2_charge";   // 蓄满一回合：开炮（蓄力的那一回合技能表是空的）
-        return sameZone ? "en_agg2_melee" : null;   // 主动接近，靠移动逻辑走过去
+      if (ph === 1) {
+        // 狂暴连打：预备好了就出手（冲到目标的区）；能预备就先预备，剩下的行动点照常打
+        if (has("en_agg1_rush")) return "en_agg1_rush";
+        if (has("en_agg1_rush_prep")) return "en_agg1_rush_prep";
+        return sameZone ? "en_agg1_melee" : "en_agg1_range";
       }
+      if (ph === 2) return sameZone ? "en_agg2_melee" : null;   // 主动接近，靠移动逻辑走过去（电能炮是死刑机制，回合开始自己落下）
       // 三阶段：每回合必吸引碎片一次 + 攻击一次
       if (u._aiDebrisTurn !== state.turnNo && has("en_agg3_debris")) return "en_agg3_debris";
       if (has("en_agg3_control")) return "en_agg3_control";
@@ -401,6 +410,9 @@ const EnemyAI = (function () {
       return zones.length ? { dest: zones[0].z } : null;
     }
     if (sid === "en_gl" || sid === "en_ant_shell") {
+      // 被决一死战 / 嘲讽牵制：只能选牵制者所在的区（作者定）
+      const forced = typeof enemyForcedTarget === "function" ? enemyForcedTarget(u) : null;
+      if (forced) return { dest: Number(forced.zone) };
       // 榴弹 / 大酸液弹发射时照样会被危墙 / 关着的门挡住：隔着墙的区不算人数
       const zones = [];
       const open = (z) => !(typeof lineBlocked === "function" && lineBlocked(u.zone, z));
@@ -509,8 +521,9 @@ const EnemyAI = (function () {
       ai: { kind: "attack", sid, target, picks }
     });
 
-    // 强制目标（嘲讽 / 决一死战）时不后撤，直接想办法打到人
-    let step = pick.forced && zdist(u.zone, target.zone) < (spec.dist || 0)
+    // 强制目标（嘲讽 / 决一死战）时不后撤，直接想办法打到人；决一死战里根本不能移动
+    const duelLocked = typeof touDuelVictim === "function" && !!touDuelVictim(u);
+    let step = duelLocked || (pick.forced && zdist(u.zone, target.zone) < (spec.dist || 0))
       ? null
       : aiStep(u, target, spec, prey);
     // 空隙：地面单位越过要花 1 行动点并过运动检定（敌人没有熟练，50%）。目标在空隙那边时照样去试
@@ -527,7 +540,7 @@ const EnemyAI = (function () {
     // 沙漠生物的习性：夜晚 / 沙暴不走进有沙珊瑚的区（desert.js · coralAvoid）
     if (step != null && typeof coralAvoid === "function" && coralAvoid(u, step)) step = null;
     let sid = aiSpecial(u, spec, target, prey, has, list);
-    if (sid && !["en_agg3_debris", "en_king_hold", "en_bigsand_summon", "en_bigsand_heal", "ufo_prime", "ufo_boom", "ufo_stomp", "ufo_sweep", "en_agg2_overheat", "en_gl", "en_gl_fire", "en_ant_shell", "en_ant_shell_fire", "en_gas_ignite", "en_alarm_zap", "en_giant_sand_pulse"].includes(sid)) {
+    if (sid && !["en_agg3_debris", "en_agg1_rush", "en_agg1_rush_prep", "en_king_hold", "en_king_exec", "en_bigsand_summon", "en_bigsand_heal", "ufo_prime", "ufo_boom", "ufo_stomp", "ufo_sweep", "en_agg2_overheat", "en_gl", "en_gl_fire", "en_ant_shell", "en_ant_shell_fire", "en_gas_ignite", "en_alarm_zap", "en_giant_sand_pulse"].includes(sid)) {
       const rt = retargetLegal(u, sid, target, prey, pick.forced);
       if (rt.target) target = rt.target;
       if (rt.sid) sid = rt.sid;
@@ -535,20 +548,20 @@ const EnemyAI = (function () {
     const inRange = target && zdist(u.zone, target.zone) === (spec.dist == null ? zdist(u.zone, target.zone) : spec.dist);
 
     // 手册：够不着就先移动；special 已经给出可用技能且位置合适时直接用
-    const noTargetNeeded = sid === "en_agg3_debris" || sid === "en_king_hold" ||
+    const noTargetNeeded = sid === "en_agg3_debris" || sid === "en_king_hold" || sid === "en_king_exec" ||
+      sid === "en_agg1_rush" || sid === "en_agg1_rush_prep" ||   // 狂暴连打自己找目标、自己冲过去
       sid === "en_bigsand_summon" || sid === "en_bigsand_heal" || sid === "ufo_prime" ||
       sid === "ufo_boom" || sid === "ufo_stomp" || sid === "ufo_sweep" || sid === "en_agg2_overheat" ||
       sid === "en_giant_sand_pulse" ||   // 全域沙暴打所有区域，不用瞄准
       sid === "en_gas_ignite" ||         // 点燃燃气打自己所在的区
       sid === "en_alarm_zap";            // 电涌打所有高能的敌人，不用瞄准
-    // 聚合体的电能炮：贴近打 1d20 最好；没有附赠动作走不过去时就隔一区打（1d10），不白白耗着
-    const fireNow = sid === "en_agg2_charge" && zdist(u.zone, target.zone) <= 1 && (u.bonus || 0) < 1;
-    if (sid && (inRange || !step || noTargetNeeded || fireNow)) {
+    if (sid && (inRange || !step || noTargetNeeded)) {
       // 打不到（射程外、自己又不移动）就不出手，免得每回合空放
       if (noTargetNeeded || canAimSkill(u, sid, target)) return attack(sid, aiPicks(u, sid, target, prey));
       if (step == null) {
         // 这里打不到：先找一个走一步就能打到的站位；找不到时强制目标照旧硬打，其余不出手
-        const fs = firingStep(u, spec, prey, target, list, pick.forced ? target : null);
+        // （决一死战不能移动：不找站位，以前每回合都规划移动、被拦下，整场不出手）
+        const fs = duelLocked ? null : firingStep(u, spec, prey, target, list, pick.forced ? target : null);
         if (fs != null) return move(fs);
         if (pick.forced) return attack(sid, aiPicks(u, sid, target, prey));
         return null;
@@ -575,7 +588,7 @@ const EnemyAI = (function () {
     // 谁都打不到（远距离单位身边只剩同区的人、三区里隔着两区、隔着危墙……）：
     // 先找一个走一步就能打到的站位；没有就这一步不出手，不空放（强制目标照旧硬打）
     if (!canAimSkill(u, use, target)) {
-      const fs = firingStep(u, spec, prey, target, list, pick.forced ? target : null);
+      const fs = duelLocked ? null : firingStep(u, spec, prey, target, list, pick.forced ? target : null);
       if (fs != null) return move(fs);
       if (!pick.forced) return null;
     }

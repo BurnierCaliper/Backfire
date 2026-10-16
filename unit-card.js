@@ -153,7 +153,9 @@
       ? `<span class="chip">高能${s.highEnergy > 0 ? " " + s.highEnergy : ""}</span>` : "";
     // 首领机制（死刑 / 分担）的标记：被标记的人身上一个倒计时，首领身上写着标了谁
     const when = (x) => x.left > 0 ? `${x.left} 回合后` : `这回合${x.phase === "player" ? "我方" : "敌人"}回合开始时`;
-    const markTip = (x) => x.type === "spread"
+    const markTip = (x) => x.type === "volley"
+      ? `${x.by} 的${x.name}：${when(x)}朝这个人开一枪（${x.shot || "atk"}、${x.brk != null ? x.brk : 2} 击破）${x.delayed ? "（首领失衡，会推迟一回合）" : ""}。每一枪都可以协助格挡——站在一起、留着附赠动作互相挡（现在同区还有 ${x.mates || 0} 个被瞄准的队友）。`
+      : x.type === "spread"
       ? `${x.by} 的${x.name}：${when(x)}在这个人所在的区爆炸，${x.blast > 0 ? `每次对同区每个友方 ${x.blast}` : "每次波及同区每个友方"}，不能格挡。同一个区有几个标记就炸几次——现在这里有 ${x.stack} 个标记${x.stack > 1 ? `，每人会挨 ${x.stack} 次，快分开站` : "，没有和别人重叠"}。${x.delayed ? "（首领失衡，会推迟一回合）" : ""}`
       : x.type === "share"
       ? `${x.by} 的${x.name}：${when(x)}落下${x.delayed ? "（首领失衡，会推迟一回合）" : ""}。${x.pool > 0 ? `伤害池 ${x.pool}，` : ""}由这个人所在区的所有友方平均分担，不能格挡——大家聚过来一起扛（现在同区 ${x.group} 人${x.pool > 0 ? `，每人约 ${Math.ceil(x.pool / Math.max(1, x.group))}` : ""}）。`
@@ -187,6 +189,7 @@
     c.wrap.classList.toggle("shared", sh.length > 0 && !ex.length && !s.dead);
     c.wrap.classList.toggle("spread", sp.length > 0 && !ex.length && !sh.length && !s.dead);
     c.wrap.classList.toggle("spread-clash", sp.some(x => x.stack > 1) && !s.dead);
+    c.wrap.classList.toggle("volley", (s.marks || []).some(x => x.type === "volley") && !ex.length && !sh.length && !sp.length && !s.dead);
     c.wrap.classList.toggle("doom-now", (s.marks || []).some(x => x.left <= 0) && !s.dead);
     c.wrap.classList.toggle("dying", s.dying && !s.dead);
     c.wrap.classList.toggle("dead", s.dead && !s.isPlayer);

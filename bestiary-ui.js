@@ -287,6 +287,7 @@ const Bestiary = (() => {
     box.innerHTML = `<div class="bx-d">
         <div class="bx-kicker">角色 · ${esc([e.race, e.job].filter(Boolean).join(" · "))}</div>
         <h4>${esc(e.name)}${e.enName ? ` <small class="hx-en">${esc(e.enName)}</small>` : ""}</h4>
+        ${e.fullName ? `<div class="hx-full">全名：${esc(e.fullName)}</div>` : ""}
         <div class="hx-diff"><span>游玩难度</span><b class="hx-stars" aria-label="${e.stars} 星（满分 5 星）">${starText(e.stars)}</b></div>
         <p class="hx-intro">${esc(e.intro)}</p>
         <div class="bx-chips">${profs ? `<span class="bx-chip dim">熟练：${esc(profs)}</span>` : ""}${e.note ? `<span class="bx-chip dim">${esc(e.note)}</span>` : ""}</div>
