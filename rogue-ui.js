@@ -14,6 +14,7 @@
   const C = ROGUE_CONFIG;
 
   let run = null;          // 当前这一局
+  let shownRest = null;    // 已经弹过的长休结算（rest-report.js）
   let lastNotes = [];      // 上一步发生了什么（显示在记录栏）
   let lastError = "";
   let restSel = { food: {}, sleep: {}, spit: {}, ammo: {} };   // 长休界面：每个角色选的食物 / 睡眠道具（没选的按默认）      // 上一步为什么没做成（显示在主面板顶上，免得按了像没反应）
@@ -42,6 +43,8 @@
     else save();
     render();
     if (online()) OnlineRogue.changed();
+    // 长休结算画面：刚长休完弹一次（玩家看的，坚毅只给一句话）
+    if (run && run.lastRest && run.lastRest.id !== shownRest && window.RestReport) { shownRest = run.lastRest.id; RestReport.play(run.lastRest, { gm: false }); }
   }
   function doAct(command) {
     let notes, error;
@@ -77,7 +80,8 @@
   const solo = { on: false, hero: null, partners: [], role2: null };
   // 长线养成：开局选 ROGUE_GROWTH.startParty 名角色
   const growth = { on: false };
-  const session = { get run() { return run; }, set run(value) { run = value; }, picked, solo, growth };
+  // 换一局（新开 / 读档）时，已经有的长休结算不重弹
+  const session = { get run() { return run; }, set run(value) { run = value; shownRest = value && value.lastRest ? value.lastRest.id : null; }, picked, solo, growth };
   const sessionCommand = (action, fields, context) => dispatch(Object.assign({ type: "run.session", action }, fields || {}), Object.assign({ session }, context || {}));
   const PARTY_TIP = "挑 2–4 名角色出发。每人都带着自己的专属武器人；角色永久死亡时，武器人也会一起离开。";
   const SOLO_TIP = `先点一名角色当主角，再挑 ${ROGUE_SOLO.partners} 名伙伴（战斗里用「支援」叫他们登场打协助攻击），最后选一个第二副职责。` +
@@ -319,8 +323,8 @@
     if (!o.heroes.length) return "";
     const need = o.need;
     const rows = o.heroes.map(h => {
-      const foods = o.foods.map(f => `<option value="${esc(f.id)}" ${f.id === h.foodId ? "selected" : ""}>${esc(f.name)}${f.shp ? `（坚毅 +${f.shp}/份）` : ""} · 有 ${f.have}</option>`).join("");
-      const sleeps = `<option value="">不用</option>` + o.sleeps.map(x => `<option value="${esc(x.id)}" ${x.id === h.sleepId ? "selected" : ""}>${esc(x.name)}（每小时坚毅 +${x.bonus}） · 有 ${x.have}</option>`).join("");
+      const foods = o.foods.map(f => `<option value="${esc(f.id)}" ${f.id === h.foodId ? "selected" : ""}>${esc(f.name)}${f.shp ? (typeof shpHidden === "function" && shpHidden() ? "（多恢复坚毅）" : `（坚毅 +${f.shp}/份）`) : ""} · 有 ${f.have}</option>`).join("");
+      const sleeps = `<option value="">不用</option>` + o.sleeps.map(x => `<option value="${esc(x.id)}" ${x.id === h.sleepId ? "selected" : ""}>${esc(x.name)}（${typeof shpHidden === "function" && shpHidden() ? "睡得更好，多恢复坚毅" : `每小时坚毅 +${x.bonus}`}） · 有 ${x.have}</option>`).join("");
       // 兽人-蜥蜴：长休时可以换吐酸攻击的属性
       const spit = h.spit ? `<br><small>吐酸</small> <select data-rest-spit="${esc(h.kit)}">${(o.spitElements || []).map(e => `<option value="${esc(e.id)}" ${e.id === h.spit ? "selected" : ""}>${esc(e.name)}</option>`).join("")}</select>` : "";
       // 龙哥 胶囊弹药+：排下一场开局的弹序
@@ -732,10 +736,14 @@
         return `<h2>第 ${run.act} 幕 · 首领</h2>
           <p class="r-hint">首领战不能撤退；输了，本局就此结束。</p>
           ${restBeforeRow()}${brokenWarn()}${fightBtn("迎战首领")}`;
-      case "interlude":
+      case "interlude": {
+        // 幕间选择：下一幕去哪
+        const opts = query("interludeOptions");
         return `<h2>第 ${run.act} 幕 · 落幕</h2>
-          <p class="r-hint">幕间选择会在之后的版本加入。</p>
-          <button class="g-btn r-main" id="r-next">前往第 ${run.act + 1} 幕</button>`;
+          <p class="r-hint">${opts.length > 1 ? `选下一幕去哪。两条路都通往第 ${run.act + 1} 幕，敌人等级一样，遇到的敌人、天气和战场不同。` : `前往第 ${run.act + 1} 幕。`}</p>
+          <div class="r-choices r-interlude">${opts.map(o => `<button class="g-btn${o.alt ? "" : " r-main"}" data-next-region="${esc(o.region)}">第 ${run.act + 1} 幕：${esc(o.region)}${o.alt ? "（采矿场）" : ""}
+            <small>${esc(o.desc)}${o.desc ? " · " : ""}会遇到：${esc(o.enemies.slice(0, 8).join("、"))}${o.enemies.length > 8 ? " 等" : ""}</small></button>`).join("")}</div>`;
+      }
       case "victory":
         return `<h2 class="win">四幕通关</h2>
           <p class="r-hint">可以就此收手，也可以继续挑战额外的 ${C.extraActs} 幕：敌人会强到 ${C.extraActLevels.map(r => r[1]).join("、")} 级。</p>
@@ -927,9 +935,15 @@
     body.querySelectorAll("[data-need]").forEach(b => {
       b.onclick = () => { try { OnlineRogue.need(myId(), Number(b.dataset.need), b.dataset.kit, b.dataset.want === "1"); } catch (e) { completeAction(null, e); } };
     });
+    // 长休先进营地（issue #52）：看看全队状态和补给，再「开始长休」。联机时是队伍投票，不进营地
+    const withCamp = (go) => {
+      if (online() || !window.RestReport) return go();
+      RestReport.camp(query("campStatus", restSel), { host: true, onStart: go });
+    };
     on("r-long", () => {
       const w = $("r-watch");
-      act(Object.assign({ action: "restAtNode", mode: "long", watch: (w && w.value) || null }, restSel));
+      const cmd = Object.assign({ action: "restAtNode", mode: "long", watch: (w && w.value) || null }, restSel);
+      withCamp(() => act(cmd));
     });
     on("r-short", () => act({ action: "restAtNode", mode: "short" }));
     on("r-rest-skip", () => act({ action: "restAtNode", mode: "leave" }));
@@ -937,12 +951,13 @@
     on("r-leave", () => act({ action: "leaveNode" }));
     body.querySelectorAll("[data-check]").forEach(b => { b.onclick = () => doCheck(b.dataset.check, Number(b.dataset.opt) || 0); });
     on("r-check-skip", () => act({ action: "skipCheck" }));
-    on("r-camp", () => act(Object.assign({ action: "camp" }, restSel)));
+    on("r-camp", () => withCamp(() => act(Object.assign({ action: "camp" }, restSel))));
     body.querySelectorAll("[data-rest-food]").forEach(el => { el.onchange = () => { restSel.food[el.dataset.restFood] = el.value; render(); }; });
     body.querySelectorAll("[data-rest-sleep]").forEach(el => { el.onchange = () => { restSel.sleep[el.dataset.restSleep] = el.value; render(); }; });
     body.querySelectorAll("[data-rest-ammo]").forEach(el => { el.onchange = () => { restSel.ammo = restSel.ammo || {}; restSel.ammo[el.dataset.restAmmo] = el.value; render(); }; });
     body.querySelectorAll("[data-rest-spit]").forEach(el => { el.onchange = () => { restSel.spit = restSel.spit || {}; restSel.spit[el.dataset.restSpit] = el.value; render(); }; });
     on("r-next", () => act({ action: "nextAct" }));
+    body.querySelectorAll("[data-next-region]").forEach(b => { b.onclick = () => act({ action: "nextAct", region: b.dataset.nextRegion }); });
     on("r-win", () => act({ action: "afterVictory", goOn: false }));
     on("r-more", () => act({ action: "afterVictory", goOn: true }));
     on("r-home", () => { sessionCommand("leave", { save: false }); Screens.show("title"); });
@@ -955,15 +970,28 @@
       sessionCommand("prepareParty", { solo: !!(opt && opt.solo), growth: !!(opt && opt.growth) });
       Screens.show("party");
     },
+    /** 每日挑战（#52）：今天的种子定队伍，直接出发（不进选人画面） */
+    startDaily() {
+      const saved = sessionCommand("savedStatus");
+      const ask = saved === "newer" ? "有一局更新版本的游戏存下的进度（这一版读不了）。开每日挑战会覆盖它，确定吗？"
+        : saved === "ok" ? "已有一局在进行中。开每日挑战会覆盖它，确定吗？" : "";
+      if (ask && !confirm(ask)) return false;
+      const seed = Rogue.dailySeed();
+      sessionCommand("newRun", { party: Rogue.dailyParty(seed), seed, daily: true });
+      lastNotes = [`每日挑战出发。今天的种子 ${seed}，队伍和专长选项大家都一样。`];
+      save();
+      Screens.show("run");
+      return true;
+    },
     /** 角鳞星地图（world-map.js）：这一幕的区域是当前位置，各幕按顺序连成路线 */
     mapOptions() {
       if (!run) return null;
       const C = ROGUE_CONFIG, total = Rogue.totalActs(run);
       const route = [];
       for (let a = 1; a <= total; a++) {
-        route.push({ place: C.regions[(a - 1) % C.regions.length], label: `第 ${a} 幕`, state: a < run.act ? "done" : a === run.act ? "now" : "next" });
+        route.push({ place: (run.regionPick && run.regionPick[a]) || C.regions[(a - 1) % C.regions.length], label: `第 ${a} 幕`, state: a < run.act ? "done" : a === run.act ? "now" : "next" });   // 幕间选过采矿场的照选的
       }
-      return { here: Rogue.region(run), sub: `${run.solo ? "单人模式" : "单局"} · 第 ${run.act} 幕 · ${Rogue.region(run)}`, party: run.party.map(h => Rogue.heroName(h.kit)), route };
+      return { here: Rogue.region(run), sub: `${run.solo ? "单人模式" : run.daily ? "每日挑战 " + run.daily.date : "单局"} · 第 ${run.act} 幕 · ${Rogue.region(run)}`, party: run.party.map(h => Rogue.heroName(h.kit)), route };
     },
     /* ---------- 联机单局（online-game.js / online-rogue.js 用） ---------- */
     current: () => run,

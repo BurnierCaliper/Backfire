@@ -106,7 +106,7 @@
  * calculator dialogs live outside the original screen roots; hiding individual
  * screen IDs leaves those dialogs in the outer document and its scroll range. */
 body.online-player { overflow: hidden; }
-body.online-player > :not(.ol-ui):not(.hs-ui):not(.hs-sheet):not(.ar-sheet):not(#sk-tip):not(.sk-tip):not(.unit-tip) { display: none !important; }
+body.online-player > :not(.ol-ui):not(.hs-ui):not(.hs-sheet):not(.ar-sheet):not(#sk-tip):not(.sk-tip):not(.unit-tip):not(.rr-overlay) { display: none !important; }
 /* 玩家看自己的角色资料 / 武器页：压在联机舞台上面 */
 body.online-player .hs-sheet, body.online-player .ar-sheet { z-index: 95; }
 /* 玩家右侧栏：战斗（记录）/ 小队 两个频道 */
@@ -277,6 +277,7 @@ body.ol-has-side .ol-toast { right: 344px; }
 .ol-q-card header b { font-size: 15px; }
 .ol-q-tag { font-size: 12px; color: #9d9081; }
 .ol-q-tag.ol-q-main { color: #f2b33d; }
+.ol-q-tag.ol-q-personal { color: #8fd6ff; }
 .ol-q-st { font-size: 11px; padding: 0 7px; border: 1px solid #4d4337; }
 .ol-q-active .ol-q-st { border-color: #f2b33d; color: #f2b33d; }
 .ol-q-done .ol-q-st { border-color: #8fe39a; color: #8fe39a; }

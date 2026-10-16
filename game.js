@@ -315,6 +315,8 @@
     const night = !!(env.clock && env.clock.night);
     $("g-app").classList.toggle("is-night", night);
     const fieldEl = document.querySelector(".g-zone") && document.querySelector(".g-zone").parentElement;
+    // 天气动效（weather-fx.js / weather-fx.css，PR #53）：战场叠加层 + 界面的 data-sand-dir / data-phase-step
+    if (window.WeatherFx) WeatherFx.sync({ field: fieldEl, app: $("g-app"), weather: env.weather, sandDir: state.sandDir, phaseStep: state.phaseStep });
     if (fieldEl) {
       let vg = fieldEl.querySelector(".night-vignette");
       if (night && !vg) { vg = el("div", "night-vignette"); fieldEl.appendChild(vg); }
@@ -1302,7 +1304,7 @@
         const attacker = blockJobAttacker(job), target = unitById(job.targetId);
         if (!attacker || !target) { systemCommand({ type: "battle.cleanQueues", queue: "block" }); continue; }
         const helpers = eligibleBlockers(target, job);
-        const walls = typeof featIronwallDeclarers === "function" ? featIronwallDeclarers(target) : [];   // 铁壁（feats.js）
+        const walls = typeof featIronwallDeclarers === "function" ? featIronwallDeclarers(target) : [];   // 以身作盾（feats.js）
         let choice = null;
         if (helpers.length || walls.length) choice = await promptBlock(job, attacker, target, helpers, walls);
         const blocker = unitById(choice);
@@ -1530,9 +1532,13 @@
 
   function promptBlock(job, attacker, target, helpers, walls) {
     walls = walls || [];
+    // 以身作盾（feats.js）：选项带 extra.ironwall，回答时换成 "ironwall:单位"
+    const wallOk = () => (typeof featIronwallDeclarers === "function" ? featIronwallDeclarers(target) : []);
     if (hotseat()) return HotseatGame.requestAsk("block", `${job.opt && job.opt.flags && job.opt.flags.execution ? `【${job.opt.flags.execName || "死刑"} ${job.opt.flags.execHit}/${job.opt.flags.execHits}】` : ""}${attacker.name} 攻击 ${target.name} · 协助格挡`,
-      helpers.map(h => ({ helper: h.id, label: h.name, sub: `格挡成功率 ${finalBlockChance(h, attacker, target)}%` })),
-      () => eligibleBlockers(target, job), job).then(answer => answer.unitId);
+      helpers.map(h => ({ helper: h.id, label: h.name, sub: `格挡成功率 ${finalBlockChance(h, attacker, target)}%` }))
+        .concat(walls.map(h => ({ helper: h.id, label: `${h.name} 以身作盾`, sub: "专长 · 必定挡住，击破由自己承担 · 每次短休一次", extra: { ironwall: true } }))),
+      () => { const list = eligibleBlockers(target, job); wallOk().forEach(w => { if (list.indexOf(w) < 0) list.push(w); }); return list; }, job)
+      .then(answer => (answer.unitId && answer.extra && answer.extra.ironwall ? "ironwall:" + answer.unitId : answer.unitId));
     const noBlock = () => showPreview(previewOf(() => finishBlock(null)), `${attacker.name} → ${target.name}（不格挡）`);
     const again = job.tried && job.tried.length;
     // 首领机制·死刑：标题写明是死刑的第几段（每一段都要单独挡）
@@ -1548,8 +1554,8 @@
         value: h.id,
         onHover: noBlock
       })).concat(walls.map(h => ({
-        label: `${h.name} 铁壁`,
-        sub: "专长 · 这一击视为协助格挡成功（免伤，击破由自己承担、最少留 1）· 每场一次 · 不花附赠动作",
+        label: `${h.name} 以身作盾`,
+        sub: "专长 · 这一击视为协助格挡成功（免伤，击破由自己承担、最少留 1）· 每次短休一次 · 不花附赠动作",
         value: "ironwall:" + h.id,
         onHover: noBlock
       }))),
@@ -1635,7 +1641,7 @@
     if (p.dmgHi > 0 && p.dis) h += `<span class="disadv">劣势</span>`;
     if (p.dmgHi > 0) h += `<span class="dmg e-${p.element}${p.dis ? " dis" : ""}">${window.Icons ? Icons.element(p.element) : ""}${p.dmgLo === p.dmgHi ? p.dmgHi : p.dmgLo + "–" + p.dmgHi}</span>`;
     if (p.healHi > 0) h += `<span class="heal">+${p.healHi}</span>`;
-    if (p.shpLoss > 0) h += `<span class="note">坚毅 −${p.shpLoss}</span>`;
+    if (p.shpLoss > 0) h += `<span class="note">${typeof shpHidden === "function" && shpHidden() ? "伤到坚毅" : `坚毅 −${p.shpLoss}`}</span>`;
     if (p.brHi > 0) h += `<span class="brk">击破 ${p.brLo === p.brHi ? p.brHi : p.brLo + "–" + p.brHi}</span>`;
     if (p.stunSure) h += `<span class="stun${p.ice ? " ice" : ""}">失衡${p.ice ? "·冰冻" : ""}</span>`;
     if (p.stunMaybe) h += `<span class="stun${p.ice ? " ice" : ""}">可能失衡</span>`;
@@ -3736,7 +3742,7 @@
       const ssel = document.createElement("select");
       const sleepOpt = (v, t) => { const o = document.createElement("option"); o.value = v; o.textContent = t; ssel.appendChild(o); };
       sleepOpt("", "不用睡眠道具");
-      sleepItemIds().forEach(id => sleepOpt(id, `睡 ${ITEM_CATALOG[id].name}（每小时坚毅 +${ITEM_CATALOG[id].sleep} · 有 ${bagCount(id)}）`));
+      sleepItemIds().forEach(id => sleepOpt(id, `睡 ${ITEM_CATALOG[id].name}（${typeof shpHidden === "function" && shpHidden() ? "睡得更好，多恢复坚毅" : `每小时坚毅 +${ITEM_CATALOG[id].sleep}`} · 有 ${bagCount(id)}）`));
       ssel.value = h.dead ? "" : sleepFor(currentRestPlan(), h.kit);
       ssel.onchange = () => { G.restSleep[h.kit] = ssel.value; renderRestSheet(); };
       ssel.disabled = h.dead;
@@ -4430,7 +4436,11 @@
     $("g-short-all").onclick = () => { panelCommit({ action: "shortRest", kits: null }); renderRestSheet(); };
     $("g-long-hours").onchange = renderRestSheet;
     $("g-long-force").onchange = renderRestSheet;
-    $("g-long-go").onclick = () => { panelCommit({ action: "longRest", plan: currentRestPlan() }); renderRestSheet(); };
+    $("g-long-go").onclick = () => {
+      const r = panelCommit({ action: "longRest", plan: currentRestPlan() });
+      renderRestSheet();
+      if (r && r.report && window.RestReport) RestReport.play(r.report, { gm: !(typeof shpHidden === "function" && shpHidden()) });
+    };
     $("g-restore-all").onclick = () => { panelCommit({ action: "restore" }); renderRestSheet(); };
     $("g-cheat").onclick = () => {
       dispatch({ type: "battle.panel", action: "cheat" }).notes.forEach(s => appendLog(s));

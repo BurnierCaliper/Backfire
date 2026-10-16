@@ -222,3 +222,55 @@ function codexHeroEntries() {
 function codexPlusLevel(n) {
   return typeof PASSIVE_PLUS_LEVEL !== "undefined" ? PASSIVE_PLUS_LEVEL[n] || null : null;
 }
+
+/* ---------- 专长图鉴（#52） ---------- */
+/** 专长条目：直接读 feats.js · FEATS，文字和选专长时看到的一样。全部列出（不做解锁），探索专长也列，带标签 */
+const CODEX_FEAT_TIER_MARK = ["①", "②", "③", "④"];
+const CODEX_ROLE_SKILL_NO = ["", "一", "二", "三", "四"];
+/** 次数：每场 / 每次短休 / 每长休（战斗动作看 skill，被动看专长上的 short / rest）；说明里自己写清楚的（还魂、决不后退……）返回 "" */
+function codexFeatUses(f) {
+  const s = f.skill || {};
+  if (s.short || f.short) return `每次短休 ${s.short || f.short} 次`;
+  if (s.rest || f.rest) return `每长休 ${s.rest || f.rest} 次${s.rest ? "（同一场最多 1 次）" : ""}`;
+  if (s.uses) return `每场 ${s.uses} 次`;
+  return "";
+}
+function codexCostText(c) {
+  if (!c) return "";
+  const out = [];
+  if (c.ap) out.push(`行动点 ${c.ap}`);
+  if (c.bonus) out.push(`附赠 ${c.bonus}`);
+  return out.join(" + ") || "不花行动";
+}
+/** 消耗：另写的削弱版看 skill.cost；直接调用原技能的涉猎专长看原技能 */
+function codexFeatCost(f) {
+  if (!f.skill) return "";
+  if (f.skill.cost) return codexCostText(f.skill.cost);
+  if (f.dabble && typeof skillCost === "function") { try { return codexCostText(skillCost(f.dabble.base)); } catch (e) { return ""; } }
+  return "";
+}
+function codexFeatEntries() {
+  if (typeof FEATS === "undefined") return [];
+  return Object.keys(FEATS).map(id => {
+    const f = FEATS[id];
+    const lv = typeof FEAT_TIER_LEVEL !== "undefined" ? FEAT_TIER_LEVEL[f.tier] : null;
+    const kindName = f.dabble ? "涉猎" : (typeof FEAT_KIND_NAME !== "undefined" && FEAT_KIND_NAME[f.kind]) || "专长";
+    let dabbleFrom = "";
+    if (f.dabble) {
+      let base = null;
+      try { base = typeof roleSkillDef === "function" ? roleSkillDef(f.dabble.role, f.dabble.n, null) : null; } catch (e) { base = null; }
+      dabbleFrom = `${f.dabble.role}职责 ${CODEX_ROLE_SKILL_NO[f.dabble.n] || f.dabble.n} 号技能${base ? "「" + base.name + "」" : ""}的涉猎版；已经会这个技能的角色不能选`;
+    }
+    const tags = [];
+    if (f.repeatable) tags.push("可以重复选");
+    if (f.explore) tags.push("跑团规则（探索）");
+    if (f.trpgOnly) tags.push("只在跑团模式");
+    if (typeof f.requires === "function") tags.push("有选取前提");
+    return {
+      id: "feat:" + id, featId: id, name: f.name, tier: f.tier, level: lv,
+      group: "t" + f.tier, groupName: `专长${CODEX_FEAT_TIER_MARK[f.tier - 1] || ""}${lv ? " · " + lv + " 级" : ""}`,
+      kindName, uses: codexFeatUses(f), cost: codexFeatCost(f), dabbleFrom, tags,
+      lines: [f.text || ""].filter(Boolean)
+    };
+  }).sort((a, b) => a.tier - b.tier);
+}

@@ -61,7 +61,9 @@ const LevelUp = (function () {
   /** 两次快照之间多了什么 */
   function diff(a, b) {
     if (!a || !b) return null;
-    const stats = STAT.filter(([k]) => Math.round(a.stats[k]) !== Math.round(b.stats[k]))
+    // 坚毅生命对玩家不可见（手册）：升级提示里不写坚毅上限
+    const hideShp = typeof shpHidden === "function" && shpHidden();
+    const stats = STAT.filter(([k]) => !(hideShp && k === "shp") && Math.round(a.stats[k]) !== Math.round(b.stats[k]))
       .map(([key, label]) => ({ key, label, from: Math.round(a.stats[key]), to: Math.round(b.stats[key]) }));
     const skills = Object.keys(b.skills).filter(id => !a.skills[id]).map(id => skillRow(b.skills[id]));
     const passives = b.passives.map((p, i) => {

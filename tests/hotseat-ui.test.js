@@ -431,7 +431,7 @@ test("D2 integration: a non-GM's winning hit records the TRPG result, saves it a
   page.on("dialog", dialog => dialog.accept(dialog.type() === "prompt" ? "D2 热座团" : undefined));
   await page.goto(pathToFileURL(path.resolve(__dirname, "..", "game.html")).href + "?hotseat=1");
   await page.click('[data-hs="closeConfig"]');
-  await page.click("#t-sandbox");
+  await page.click("#t-online"); await page.click("#t-sandbox");
   await page.click('[data-new="0"]');
   await page.evaluate(() => Commands.dispatch({ type: "trpg.ui", action: "party", kits: ["ruby", "helu"], level: 1 }));
   await page.click("#tr-fight");

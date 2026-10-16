@@ -48,7 +48,9 @@ const Rogue = (function () {
 
   /* ---------- 幕、区域、天数、敌人等级 ---------- */
   const totalActs = (run) => C.acts + (run.extra ? C.extraActs : 0);
-  const region = (run) => C.regions[((run.growth ? growthAct(run) : run.act) - 1) % C.regions.length];
+  /** 这一幕在哪：幕间选过的就用选的（run.regionPick[幕]），否则照 C.regions 的表 */
+  const defaultRegion = (act) => C.regions[(act - 1) % C.regions.length];
+  const region = (run) => (!run.growth && run.regionPick && run.regionPick[run.act]) || defaultRegion(run.growth ? growthAct(run) : run.act);
   const daysLeft = (run) => Math.max(0, C.daysPerAct - (run.actDay || 0));
   /* ---------- 长线养成（rogue-data.js · ROGUE_GROWTH） ---------- */
   const G = () => (typeof ROGUE_GROWTH !== "undefined" ? ROGUE_GROWTH : { startParty: 2, partyMax: 4, fusionPerTask: 1, drawCost: 1, recruitLevel: 1, maxLevel: 20, fusionItem: "heart_fusion" });
@@ -202,6 +204,12 @@ const Rogue = (function () {
     run.smithClaimed = {};   // 工匠 id → 已经领过的图纸 id
     run.blueprints = [];     // 领到、还没装上的图纸 id
     run.installed = {};      // 武器 kit → 装上的图纸 id
+    if (opt.daily) {
+      if (opt.solo || opt.growth) throw new Error("每日挑战不能和单人模式 / 长线养成一起开。");
+      const m = /^daily-(\d{4}-\d{2}-\d{2})$/.exec(String(run.seed || ""));
+      run.daily = { date: m ? m[1] : dailyDate(opt.date), offers: {} };
+      run.featLog = [];      // 每次专长选择：{ key, kit, level, offered, picked }（选取率 = 被选 / 出现）
+    }
     if (opt.growth) {
       if (opt.solo) throw new Error("长线养成不能和单人模式一起开。");
       if (run.party.length !== G().startParty) throw new Error(`长线养成开局选 ${G().startParty} 名角色。`);
@@ -678,7 +686,9 @@ const Rogue = (function () {
     }
     if (p.type === "feat") {
       // 专长不限职责和属性：列出这一级（和更低级）还能选的
-      return featChoicesFor(h, p.level).map(id => ({ value: id, label: featLabel(id), hint: FEATS[id].text || "" }));
+      let ids = featChoicesFor(h, p.level);
+      if (run.daily) ids = dailyFeatOffer(run, h, p, ids);   // 每日挑战：按种子固定抽 4 个
+      return ids.map(id => ({ value: id, label: featLabel(id), hint: FEATS[id].text || "" }));
     }
     if (p.type === "featFull") {
       // 兼修：选一张 ①–③ 的职责涉猎专长升成原技能的完整版
@@ -735,6 +745,7 @@ const Rogue = (function () {
       have[value] = (have[value] || 0) + 1;
       notes.push(`${heroName(kit)} 熟练项「${value}」${have[value] > 1 ? "升到 " + have[value] + " 级" : "（新学，一级）"}。`);
     } else if (p.type === "feat") {
+      if (run.daily) dailyNotePick(run, kit, value);   // 每日挑战：记下这次选了哪个（在加进 feats 之前，按出现的那一行找）
       h.feats = (h.feats || []).concat(value);
       notes.push(`${heroName(kit)} 获得专长：${featLabel(value)}。`);
       // 选了以后还要再选的（多面手的三项熟练、兼修选哪张、万事通的三级熟练）
@@ -964,7 +975,7 @@ const Rogue = (function () {
         notes.push("打退了偷袭的敌人，总算可以睡下了。");
         // 偷袭前选好的吃什么、睡什么；打完补给变了不够就按默认再分一次
         const plan = ambushPlan;
-        doLongRest(run, notes, null, plan && canLongRest(run, plan) ? plan : null);
+        doLongRest(run, notes, null, plan && canLongRest(run, plan) ? plan : null, { text: "长休前被偷袭：打退了敌人才睡下。" });
       } else {
         notes.push("撤退：没能在这里休息，连夜离开。");
         passHours(run, NODE.battle.hours, notes);
@@ -1327,6 +1338,8 @@ const Rogue = (function () {
     return withParty(run, () => longRestOptions(restChoice(plan))).out;
   }
   function canLongRest(run, plan) { return restPlan(run, plan).ok; }
+  /** 营地画面（长休前，ledger.js · campStatus）：把队伍摆上场算一份，不改动本局 */
+  function campStatusOf(run, plan) { return withParty(run, () => campStatus(restChoice(plan))).out; }
   /** 角色资料面板（skill-text.js）：把队伍摆上场算一份，不改动本局 */
   function sheetData(run) {
     if (typeof SkillText === "undefined") return [];
@@ -1337,8 +1350,10 @@ const Rogue = (function () {
     if (typeof SkillText === "undefined" || !SkillText.armoryData) return [];
     return withParty(run, () => SkillText.armoryData()).out;
   }
-  function doLongRest(run, notes, watch, plan) {
+  function doLongRest(run, notes, watch, plan, ambush) {
     const r = withParty(run, () => ledgerLongRest(Object.assign(restChoice(plan), { hours: C.hours.longRest, watch: watch || null }), notes));
+    // 长休结算画面（rest-report.js）：玩家看的，坚毅只给一句模糊的话
+    if (r.out && r.out.report) run.lastRest = Object.assign(r.out.report, ambush ? { ambush } : {});
     const e = run.task && run.task.escort;
     if (e && !e.lost && e.kind === "vip" && e.cur != null) { e.cur = null; notes.push(`${e.name || "委托人"}也休息好了，血量回满。`); }
     notes.push(...r.notes);
@@ -2270,10 +2285,30 @@ const Rogue = (function () {
   }
 
   /* ---------- 幕间、额外幕、结局 ---------- */
-  function nextAct(run) {
+  /** 幕间选择：下一幕可以去哪（原本的区域，第 2–4 幕再加一个采矿场）。
+   *  [{ region, alt, desc, enemies: [名字…] }]；额外幕只有原本的区域 */
+  function interludeOptions(run) {
+    const next = run.act + 1;
+    const out = [defaultRegion(next)];
+    const alt = !run.extra && C.altRegions && C.altRegions[next];
+    if (alt && out.indexOf(alt) < 0) out.push(alt);
+    const places = typeof WORLD_PLACES !== "undefined" ? WORLD_PLACES : [];
+    const info = typeof ENEMY_INFO !== "undefined" ? ENEMY_INFO : {};
+    const names = typeof enemyPresets === "function" ? Object.fromEntries(enemyPresets().map(p => [p.id, p.name])) : {};
+    return out.map((reg, i) => ({
+      region: reg, alt: i > 0, desc: ((places.find(p => p.name === reg) || {}).desc) || "",
+      enemies: Object.keys(info).filter(id => (info[id].regions || []).indexOf(reg) >= 0).map(id => names[id] || id)
+    }));
+  }
+  /** 去下一幕。pick：幕间选的区域（不给就走原本的区域） */
+  function nextAct(run, pick) {
     if (run.stage !== "interlude") throw new Error("现在不是幕间");
+    const opts = interludeOptions(run);
+    const choice = pick ? opts.find(o => o.region === pick) : opts[0];
+    if (!choice) throw new Error("下一幕不能去这里");
     run.act += 1;
-    const notes = [`进入第 ${run.act} 幕：${region(run)}。`];
+    run.regionPick = Object.assign({}, run.regionPick || {}, { [run.act]: choice.region });
+    const notes = [`进入第 ${run.act} 幕：${region(run)}${choice.alt ? "（幕间选择：改走采矿场）" : ""}。`];
     startAct(run);
     return logAll(run, notes);
   }
@@ -2292,6 +2327,79 @@ const Rogue = (function () {
     run.stage = "over";
     run.result = { win: !!win, text, act: run.act, day: run.day, extra: !!run.extra };
     log(run, (win ? "通关：" : "失败：") + text);
+    if (run.daily) dailyRecord(run);
+  }
+
+  /* ---------- 每日挑战（#52） ----------
+   * 每天一个固定种子（本机日期），所有人打同一局：队伍由种子抽，专长每次 4 选 1、选项也由种子定。
+   * 每次专长选择记下「出现了哪几个、选了哪个」，局结束时连同队伍和结果存到本机（DAILY_STATS_KEY），用来算选取率。 */
+  const DAILY_STATS_KEY = "antlerscale.daily.v1";
+  const D = () => C.daily || {};
+  const pad2 = (n) => String(n).padStart(2, "0");
+  /** 本机日期 YYYY-MM-DD；传字符串就原样用 */
+  function dailyDate(date) {
+    if (typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date)) return date;
+    const d = date instanceof Date ? date : new Date();
+    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  }
+  function dailySeed(date) { return "daily-" + dailyDate(date); }
+  /** 种子定队伍：从全部角色里随便抽，不限职责搭配（全是坦克、没有输出都可能，方便测极端情况） */
+  function dailyParty(seed, size) {
+    size = size || D().partySize || 4;
+    const left = heroPool().map(c => c.kit);
+    return withRng(`${seed}:daily-party`, () => {
+      const out = [];
+      while (out.length < size && left.length) out.push(left.splice(Math.floor(Math.random() * left.length), 1)[0]);
+      return out;
+    });
+  }
+  /** 每日挑战的专长选项：这个人第 N 次选专长 → 按种子抽 featOffer 个（抽一次就记下，读档、刷新都一样），并记一次「出现」 */
+  function dailyFeatOffer(run, h, p, ids) {
+    const key = `${h.kit}:${(h.feats || []).length}`;
+    const offers = run.daily.offers = run.daily.offers || {};
+    if (!offers[key]) {
+      const n = D().featOffer || 4;
+      offers[key] = withRng(`${run.seed}:feat:${key}`, () => {
+        const left = ids.slice(), out = [];
+        while (out.length < n && left.length) out.push(left.splice(Math.floor(Math.random() * left.length), 1)[0]);
+        return out;
+      });
+      run.featLog = run.featLog || [];
+      run.featLog.push({ key, kit: h.kit, level: p.level, offered: offers[key].slice(), picked: null });
+    }
+    return offers[key].filter(id => ids.indexOf(id) >= 0);
+  }
+  function dailyNotePick(run, kit, value) {
+    const row = (run.featLog || []).find(r => r.kit === kit && r.picked == null && r.offered.indexOf(value) >= 0);
+    if (row) row.picked = value;
+  }
+  function dailyStorage() {
+    try { return typeof localStorage !== "undefined" ? localStorage : null; } catch (e) { return null; }
+  }
+  function dailyStats() {
+    const ls = dailyStorage();
+    try { const s = ls && JSON.parse(ls.getItem(DAILY_STATS_KEY) || "null"); return s && Array.isArray(s.runs) ? s : { runs: [] }; } catch (e) { return { runs: [] }; }
+  }
+  /** 局结束：把这一局的队伍、结果、专长选择存到本机（同一局只记一次） */
+  function dailyRecord(run) {
+    if (!run.daily || run.daily.recorded) return;
+    run.daily.recorded = true;
+    const s = dailyStats();
+    s.runs.push({ date: run.daily.date, seed: run.seed, party: run.party.map(h => h.kit), result: clone(run.result || null), feats: clone(run.featLog || []) });
+    const keep = D().keepRuns || 200;
+    if (s.runs.length > keep) s.runs = s.runs.slice(-keep);
+    const ls = dailyStorage();
+    try { if (ls) ls.setItem(DAILY_STATS_KEY, JSON.stringify(s)); } catch (e) { /* 存不下就算了 */ }
+  }
+  /** 选取率：{ 专长 id: { shown, picked, rate } }（本机记下的每日挑战） */
+  function featPickRates(stats) {
+    const out = {};
+    ((stats || dailyStats()).runs || []).forEach(r => (r.feats || []).forEach(f => {
+      (f.offered || []).forEach(id => { const o = out[id] = out[id] || { shown: 0, picked: 0 }; o.shown++; });
+      if (f.picked) { const o = out[f.picked] = out[f.picked] || { shown: 0, picked: 0 }; o.picked++; }
+    }));
+    Object.keys(out).forEach(id => { out[id].rate = out[id].shown ? out[id].picked / out[id].shown : 0; });
+    return out;
   }
 
   /* ---------- 长线养成：角色抽取机、候补 ---------- */
@@ -2441,11 +2549,12 @@ const Rogue = (function () {
     role2Options, soloBattleInfo,
     restPlan, restOptions, canLongRest, sheetData, armoryData, lowHpWarning, escortInfo, partOffers, buyPart, sellPart, canSellParts, partStock, partSellPrice, partInstallCost, installPart, removePart, restAtNode, leaveNode, canShortRestBefore, shortRestBeforeNode,
     ambushChance, watchOptions,
-    buy, shopPoints, redeemList, redeem, craftPlace, craftList, craftOdds, craft, knowsRecipe, learnOptions, learnRecipe, rollRecipeChip, salvageList, salvage, setCraftHooks, setCraftJob, craftQueue, craftQueued,  canShop, shopItemName, shopStock, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
+    interludeOptions, campStatus: campStatusOf, buy, shopPoints, redeemList, redeem, craftPlace, craftList, craftOdds, craft, knowsRecipe, learnOptions, learnRecipe, rollRecipeChip, salvageList, salvage, setCraftHooks, setCraftJob, craftQueue, craftQueued,  canShop, shopItemName, shopStock, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
     presentSmiths, smithInfo, claimBlueprint, installBlueprint, blueprintById, weaponModsOf,
     smithQuote, introduceSmith,
     canClinic, cyberInfo, cyberPreview, cyberCost, modifyHero, healCost, healHero,
     pendingChoices, choiceOptions, choose, queueLevelRewards,
+    dailyDate, dailySeed, dailyParty, dailyStats, featPickRates,
     drawInfo, drawHero, swapHero, partyLevel, growthXp: () => growthOn, routeEta,
     camp, nextAct, afterVictory, endRun,
     enterRunMode, leaveRunMode, syncWorld, save, inRunMode: () => !!stash,

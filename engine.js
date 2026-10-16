@@ -1342,6 +1342,8 @@ function applyResultToUnit(target, result, attacker) {
     spent = Math.max(0, (Number(target.def) || 0) - 1);
     notes.push(`${target.name} 坚挺：架势保留 1。`);
   }
+  // 决不后退（feats.js）：这一击要把架势打空时，有附赠动作就先 +2 架势
+  if (spent > 0 && typeof featUnbowedAuto === "function") featUnbowedAuto(target, spent, notes);
   target.lostDefThisTurn = (target.lostDefThisTurn || 0) + spent;
   const defBeforeHit = Math.max(0, Number(target.def) || 0);
   const wasStunned = !!target.stunned;

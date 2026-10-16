@@ -15,7 +15,8 @@
     // 战斗画面（online-battle.js）：和单人 / 跑团同一套画面；skillOptions 是当前角色的技能栏，autoKey 防止重复自动取技能
     let battle = null, skillOptions = [], skillsFor = "", autoKey = "";
     let displayState = null, animating = false, messagesInitialized = false, seenMessages = new Set(), toastTimer;
-    let questSeen = null, questBoxOpen = false;   // 任务日志：上一包的摘要（算「任务更新」提示）、日志面板开着没
+    let questSeen = null, questBoxOpen = false;
+    let restSeen;   // 已经弹过的长休结算（第一次收到不弹，免得进房间就弹旧的）   // 任务日志：上一包的摘要（算「任务更新」提示）、日志面板开着没
     let historyRows = [], historyRoom = "", historyHasMore = true, historyLoading = false, historyGeneration = 0;
     // 默认的转发服务（docs/d3/relay.md 里部署的那一个）：大家都用它，就不用每次填；要换别的服务再展开「更换转发服务」
     const DEFAULT_RELAY = "https://backfire-relay.richardguu22.workers.dev";
@@ -125,9 +126,10 @@
       if (u.stunned && !u.dead) tokens.push("失衡");
       if (u.flying) tokens.push("飞行");
       Object.keys(TIP_STATUS).forEach(k => { if (st[k]) tokens.push(k === "burn" && Number(st.burn) > 0 ? "灼烧×" + st.burn : TIP_STATUS[k]); });
-      if (st.high || Number(u.highEnergy) > 0) tokens.push("高能 " + (Number(u.highEnergy) || 0));
+      if (st.high) tokens.push("高能 " + (Number(u.highEnergy) || 0));
+      else if (Number(u.highEnergy) > 0) tokens.push("蓄能 " + Number(u.highEnergy));   // 蓄能攒的高能值，不算高能（#52）
       Object.keys(TIP_INSTANT).forEach(k => { if ((u.instant || {})[k]) tokens.push(TIP_INSTANT[k]); });
-      if (TIP_SELF[u.self]) tokens.push(TIP_SELF[u.self] + (u.self === "burn" && Number(u.selfBurnStacks) > 1 ? "×" + u.selfBurnStacks : ""));
+      if (TIP_SELF[u.self] && !(u.self === "store" && !st.high && Number(u.highEnergy) > 0)) tokens.push(TIP_SELF[u.self] + (u.self === "burn" && Number(u.selfBurnStacks) > 1 ? "×" + u.selfBurnStacks : ""));
       ((u.resources || {}).nextAtkFx || []).forEach(k => { if (TIP_ATK[k]) tokens.push(TIP_ATK[k]); });
       (u.marks || []).forEach(m => tokens.push(m === "needle" ? "刺入" : m === "bond" ? "牵挂" : ""));
       statusTokens(u).forEach(t => { if (!tokens.includes(t)) tokens.push(t); });
@@ -551,7 +553,7 @@
       const done = q.got ? " ✓" : "";
       const chips = [r.xp ? `<span class="ol-q-xp">经验 ${esc(r.xp)}/人${done}</span>` : "", r.kuizhi ? `<span class="ol-q-kz">奎支 ${esc(r.kuizhi)}${done}</span>` : ""]
         .concat((r.items || []).map(x => `<span>${esc(x)}${done}</span>`)).filter(Boolean).join("");
-      return `<article class="ol-q-card ${stCls}"><header><b>${esc(q.name)}</b><span class="ol-q-tag${q.category === "main" ? " ol-q-main" : ""}">${q.category === "main" ? "主线" : "支线"}${q.private ? " · 仅你可见" : ""}</span><span class="ol-q-st">${stText}</span>${q.days ? `<span class="ol-muted">${esc(q.days)} 天</span>` : ""}</header>${q.goal ? `<p class="ol-q-goal">${esc(q.goal)}</p>` : ""}${q.status === "failed" && q.failWhy ? `<p class="ol-muted">${esc(q.failWhy)}</p>` : ""}${steps}${chips ? `<div class="ol-q-rewards"><span class="ol-muted">完成奖励</span>${chips}</div>` : ""}</article>`;
+      return `<article class="ol-q-card ${stCls}"><header><b>${esc(q.name)}</b><span class="ol-q-tag${q.category === "main" ? " ol-q-main" : q.category === "personal" ? " ol-q-personal" : ""}">${q.category === "main" ? "主线" : q.category === "personal" ? `个人${q.owner ? " · " + esc(q.owner) : ""}` : "支线"}${q.private ? " · 仅你可见" : ""}</span><span class="ol-q-st">${stText}</span>${q.days ? `<span class="ol-muted">${esc(q.days)} 天</span>` : ""}</header>${q.goal ? `<p class="ol-q-goal">${esc(q.goal)}</p>` : ""}${q.status === "failed" && q.failWhy ? `<p class="ol-muted">${esc(q.failWhy)}</p>` : ""}${steps}${chips ? `<div class="ol-q-rewards"><span class="ol-muted">完成奖励</span>${chips}</div>` : ""}</article>`;
     }
     function questMarkup() {
       const list = questList();
@@ -560,7 +562,7 @@
         const rows = list.filter(q => q.category === cat).sort((a, b) => order[a.status] - order[b.status]);
         return `<h3 class="ol-q-sec">${title}</h3>${rows.map(questCard).join("") || '<p class="ol-muted">暂无。</p>'}`;
       };
-      return `<div class="ol-card ol-quest-card"><header><h2>任务日志</h2><button type="button" class="ol-button" data-bag="close">关闭</button></header>${group("main", "主线任务")}${group("side", "支线任务")}<p class="ol-muted">任务由主持人发布和推进。每一步的奖励在完成这一步时发：经验每人一份，奎支进队伍钱包。</p></div>`;
+      return `<div class="ol-card ol-quest-card"><header><h2>任务日志</h2><button type="button" class="ol-button" data-bag="close">关闭</button></header>${group("main", "主线任务")}${group("side", "支线任务")}${list.some(q => q.category === "personal") ? group("personal", "个人任务") : ""}<p class="ol-muted">任务由主持人发布和推进。每一步的奖励在完成这一步时发：经验每人一份，奎支进队伍钱包。个人任务只有你看得到，经验只给你的角色。</p></div>`;
     }
     function openQuests() {
       bagBox.innerHTML = questMarkup(); bagBox.hidden = false; questBoxOpen = true;
@@ -574,7 +576,7 @@
         let msg = "";
         for (const id of Object.keys(now)) {
           const a = questSeen[id], b = now[id];
-          if (!a) msg = `新任务：「${b.name}」（${b.q.category === "main" ? "主线" : "支线"}）`;
+          if (!a) msg = `新任务：「${b.name}」（${b.q.category === "main" ? "主线" : b.q.category === "personal" ? "个人" : "支线"}）`;
           else if (a.status !== b.status && b.status === "done") msg = `任务完成：「${b.name}」${b.q.reward.xp ? ` · 每人 +${b.q.reward.xp} 经验` : ""}${b.q.reward.kuizhi ? ` · +${b.q.reward.kuizhi} 奎支` : ""}`;
           else if (a.status !== b.status && b.status === "failed") msg = `任务失败：「${b.name}」`;
           else if (a.status !== b.status && b.status === "active") msg = `接下任务：「${b.name}」`;
@@ -588,6 +590,21 @@
       questSeen = now;
       if (questBoxOpen && !bagBox.hidden) bagBox.innerHTML = questMarkup();   // 面板开着：跟着更新
       if (bagBox.hidden) questBoxOpen = false;
+    }
+    /** 长休结算：房主那边长休完，玩家画面也弹（单局在 rogue.lastRest，跑团在 rest） */
+    function observeRest() {
+      const r = view.packet?.mode === "rogue" ? view.packet?.rogue?.lastRest : view.packet?.rest;
+      const id = r && r.id ? r.id : null;
+      if (restSeen === undefined) { restSeen = id; return; }
+      if (id && id !== restSeen && global.RestReport) global.RestReport.play(r, { gm: false });
+      restSeen = id;
+    }
+    /** 营地（跑团，长休前）：主持人开了营地就显示全队状态，收起就关掉 */
+    function observeCamp() {
+      if (!global.RestReport || view.packet?.mode === "rogue") return;
+      const c = view.packet?.camp;
+      if (c && !global.RestReport.isOpen("camp")) global.RestReport.camp(c, { host: false, hostName: view.hostName || view.packet?.hostName || "", force: c.force });
+      if (!c && global.RestReport.isOpen("camp")) global.RestReport.hide();
     }
     /* ---------- 大字 ---------- */
     const TITLE_PRESETS = [["援军来了", "hope"], ["他们来了", "danger"], ["小心！", "danger"], ["天亮了", "hope"]];
@@ -688,7 +705,7 @@
       if (historyRoom !== nextRoom) {
         historyRoom = nextRoom; historyRows = []; historyHasMore = true; historyLoading = false; historyGeneration++;
         seenMessages = new Set(); messagesInitialized = false; clearTimeout(toastTimer); toast.hidden = true;
-        questSeen = null; questBoxOpen = false;
+        questSeen = null; questBoxOpen = false; restSeen = undefined;
       }
       if (view.active) historyRows = mergeMessages([...historyRows, ...(view.messages || [])]);
       playTitle();
@@ -705,7 +722,7 @@
         html(dock, button(`${view.roomCode || "房间"} · ${paused() ? "重连中" : "消息与成员"}`, "openRoom", "", false) +
           (view.isHost && view.mode !== "rogue" && ["exploration", "ended"].includes(view.screen) ? button("角色分配", "openAssign", "", false) : ""), "dock");
         observeMessages();
-        if (!view.isHost) observeQuests();
+        if (!view.isHost) { observeQuests(); observeCamp(); observeRest(); }
       }
       // 联机单局的房主：大厅里先要在单局画面选队伍，房间面板不挡着；队伍选好（有角色可分）时自动打开一次
       const rogueHost = view.active && view.isHost && view.mode === "rogue";

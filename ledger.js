@@ -81,6 +81,7 @@ const LEDGER = {
   weapons: {},         // 旧档留下的武器人伤势；现在武器人每场开战回满血，不再使用
   shortUsed: {},       // 角色 kit → 今天已用短休次数
   restOnce: {},        // 角色 kit → { 技能 key: 次数 }：「长休一次」的技能，长休才刷新
+  shortOnce: {},       // 角色 kit → { key: 次数 }：「每次短休 N 次」的专长（铁壁、挺身），这个人短休 / 长休时刷新
   career: null,        // 整局战场记录：{ battles: [每场摘要], kits: { kit: 累计数据 } }（careerRecordBattle）
   tasks: [],           // 跑团：主持人发布的任务（trpg-tasks.js）
   place: null,         // 跑团：队伍在角鳞星地图上的位置（world-data.js · WORLD_PLACES 的 id）
@@ -94,7 +95,7 @@ const LEDGER = {
     return JSON.parse(JSON.stringify({
       day: this.day, hours: this.hours, clock: this.clock, dur: this.dur,
       heroes: this.heroes, weapons: this.weapons, shortUsed: this.shortUsed,
-      restOnce: this.restOnce, career: this.career, tasks: this.tasks || [], place: this.place || null, placePos: this.placePos || null, spit: this.spit || {}, ammoOrder: this.ammoOrder || {}, workshop: this.workshop || null, water: ledgerWater()
+      restOnce: this.restOnce, shortOnce: this.shortOnce || {}, career: this.career, tasks: this.tasks || [], place: this.place || null, placePos: this.placePos || null, spit: this.spit || {}, ammoOrder: this.ammoOrder || {}, workshop: this.workshop || null, water: ledgerWater()
     }));
   },
   load(s) {
@@ -107,6 +108,7 @@ const LEDGER = {
     this.weapons = s.weapons || {};
     this.shortUsed = s.shortUsed || {};
     this.restOnce = s.restOnce || {};
+    this.shortOnce = s.shortOnce && typeof s.shortOnce === "object" ? s.shortOnce : {};
     this.career = s.career || null;
     this.tasks = Array.isArray(s.tasks) ? s.tasks : [];
     this.place = typeof s.place === "string" ? s.place : null;
@@ -179,6 +181,16 @@ function careerRecordBattle(outcome, grade, extra) {
 
 /* ===== 「长休一次」的技能 ===== */
 const REST_ONCE_KEYS = ["rally"];
+/** 「每次短休 N 次」：用掉一次（用完了返回 false）；shortOnceUsed 看用了几次 */
+function shortOnceUsed(kit, key) { return Number(((LEDGER.shortOnce || {})[kit] || {})[key]) || 0; }
+function useShortOnce(kit, key, limit) {
+  LEDGER.shortOnce = LEDGER.shortOnce || {};
+  const row = LEDGER.shortOnce[kit] = LEDGER.shortOnce[kit] || {};
+  const n = Number(row[key]) || 0;
+  if (n >= (limit || 1)) return false;
+  row[key] = n + 1;
+  return true;
+}
 /** 用一次「长休一次」的技能。用完了返回 false */
 function useRestOnce(kit, key, limit) {
   LEDGER.restOnce = LEDGER.restOnce || {};
@@ -496,6 +508,7 @@ function ledgerShortRest(kits, notes) {
     const before = totalHpOf(h);
     healHeroFlesh(h, heal);
     LEDGER.shortUsed[h.kit] = (Number(LEDGER.shortUsed[h.kit]) || 0) + 1;
+    if (LEDGER.shortOnce) delete LEDGER.shortOnce[h.kit];   // 「每次短休 N 次」的专长刷新
     notes.push(`${h.name} 短休恢复 ${totalHpOf(h) - before} 点（今日剩 ${shortRestLeft(h)} 次）。`);
     any = true;
   });
@@ -607,15 +620,69 @@ function unitNameOf(kit) {
 }
 
 /** 长休。plan.watch：守夜者的 kit（角色或武器人），他这次不恢复 */
+/* ---------- 长休结算画面（issue #52）----------
+ * 休息前后各取一次只读快照，算出每人的变化。坚毅生命的数值只给主持人（shp 字段，联机投影 / 游戏版界面都不显示），
+ * 玩家只看到按比例抽的一句（mood，SHP_MOOD_LINES）。 */
+function restSnapshot() {
+  const heroes = (typeof partyHeroes === "function" ? partyHeroes() : []).filter(h => !(typeof isWeaponUnit === "function" && isWeaponUnit(h)));
+  const sum = (h, k) => (h.layers || []).reduce((n, l) => n + Math.max(0, Number(l[k]) || 0), 0);
+  const foods = FOOD_ORDER.reduce((n, id) => n + (typeof bagCount === "function" ? bagCount(id) : 0), 0);
+  return {
+    day: LEDGER.day, clock: LEDGER.clock, hours: Number(LEDGER.hours) || 0, water: ledgerWater(), food: foods,
+    heroes: heroes.map(h => ({
+      kit: h.kit, name: h.name, dead: !!h.dead, dying: !!(h.dying && !h.upOnShp),
+      hp: sum(h, "current"), hpMax: sum(h, "max"), shp: Number(h.shp) || 0, shpMax: Number(h.shpMax) || 0,
+      weapons: (h.linkedKits || []).map(k => ({ kit: k, name: unitNameOf(k), dur: weaponDur(k), max: weaponDurMax(k) }))
+    }))
+  };
+}
+function restReport(b, a, ctx) {
+  ctx = ctx || {};
+  const tier = (hrs) => (typeof exhaustTierFromHours === "function" ? exhaustTierFromHours(hrs) : 0);
+  const rnd = typeof Math.random === "function" ? Math.random : () => 0;
+  return {
+    id: "rest-" + Date.now().toString(36) + Math.floor(rnd() * 1e6).toString(36),
+    ok: !!ctx.ok, hours: ctx.hours || 0, forced: !!ctx.forced,
+    from: { day: b.day, clock: b.clock }, to: { day: a.day, clock: a.clock },
+    water: Math.max(0, b.water - a.water), food: Math.max(0, b.food - a.food),
+    exhaust: [tier(b.hours), tier(a.hours)],
+    watch: ctx.watch ? unitNameOf(ctx.watch) : "", ambush: ctx.ambush || null,
+    heroes: a.heroes.map(h => {
+      const o = b.heroes.find(x => x.kit === h.kit) || h;
+      return {
+        kit: h.kit, name: h.name, dead: h.dead, watch: ctx.watch === h.kit || (h.weapons || []).some(w => w.kit === ctx.watch),
+        hp: [o.hp, h.hp], hpMax: h.hpMax, shp: [o.shp, h.shp], shpMax: h.shpMax,
+        mood: h.dead ? "" : (typeof shpMoodLine === "function" ? shpMoodLine(h.shp, h.shpMax) : ""),
+        weapons: h.weapons.map(w => { const ow = (o.weapons || []).find(x => x.kit === w.kit) || w; return { name: w.name, dur: [ow.dur, w.dur], max: w.max }; })
+      };
+    })
+  };
+}
+
+/** 营地画面（长休前）：全队状态、补给够不够。坚毅只给一个短词（shpMoodLabel），数值只给主持人（shp 字段，联机投影去掉） */
+function campStatus(plan) {
+  const snap = restSnapshot();
+  const need = longRestNeeds(plan || {});
+  const foodNeed = Object.keys(need.food).reduce((n, id) => n + (Number(need.food[id]) || 0), 0);
+  const tier = typeof exhaustTierFromHours === "function" ? exhaustTierFromHours(snap.hours) : 0;
+  return {
+    day: snap.day, clock: snap.clock, hoursAwake: Math.floor(snap.hours), exhaust: tier,
+    water: { need: need.water, have: snap.water }, food: { need: foodNeed, have: snap.food }, ok: need.ok, lack: need.lack.slice(),
+    heroes: snap.heroes.map(h => ({ kit: h.kit, name: h.name, dead: h.dead, dying: h.dying, hp: h.hp, hpMax: h.hpMax, shp: h.shp, shpMax: h.shpMax,
+      mood: h.dead ? "" : (typeof shpMoodLabel === "function" ? shpMoodLabel(h.shp, h.shpMax) : ""), weapons: h.weapons }))
+  };
+}
+
 function ledgerLongRest(plan, notes) {
   notes = notes || [];
   plan = plan || {};
   const hours = Math.max(8, Math.min(12, Number(plan.hours) || 8));
   const need = longRestNeeds(plan);
+  const before = restSnapshot();
   if (!need.ok && !plan.force) {
     notes.push(`补给不足，无法长休：${need.lack.join("，")}。只能消磨时间。`);
     ledgerAdvance(hours, notes);
-    return { ok: false, notes };
+    return { ok: false, notes, report: restReport(before, restSnapshot(), { ok: false, hours }) };
   }
   if (!plan.force) {
     setLedgerWater(ledgerWater() - need.water);
@@ -680,6 +747,7 @@ function ledgerLongRest(plan, notes) {
   const keep = (tab) => (watch && tab && tab[watch] != null ? { [watch]: tab[watch] } : {});
   LEDGER.shortUsed = keep(LEDGER.shortUsed);
   LEDGER.restOnce = keep(LEDGER.restOnce);
+  LEDGER.shortOnce = keep(LEDGER.shortOnce);   // 长休也刷新「每次短休 N 次」（守夜的人不刷新）
   // 伙夫（feats.js）：每个带伙夫的人让坚毅生命最少的一名角色多恢复 2 点
   if (typeof featPartyCount === "function" && typeof featExploreOk === "function" && featExploreOk()) {
     const alive = partyHeroes().filter(x => !x.dead && !isWeaponUnit(x));
@@ -689,7 +757,7 @@ function ledgerLongRest(plan, notes) {
       if (!low) break;
       const before = Number(low.shp) || 0;
       low.shp = Math.min(Number(low.shpMax) || 0, before + FEAT_CFG.cook);
-      notes.push(`伙夫：${low.name} 吃得好，坚毅生命多恢复 ${low.shp - before} 点。`);
+      notes.push(typeof shpHidden === "function" && shpHidden() ? `伙夫：${low.name} 吃得好，坚毅生命多恢复了一些。` : `伙夫：${low.name} 吃得好，坚毅生命多恢复 ${low.shp - before} 点。`);
     }
   }
   // 时钟照常往前走；过了 0 点才换天（长休本身已经刷新了短休次数）。单局按任务天数记日子，这里不换天
@@ -698,7 +766,7 @@ function ledgerLongRest(plan, notes) {
   if (newDay) LEDGER.day += days;
   notes.push(newDay ? `醒来：进入第 ${LEDGER.day} 天，${clockText(LEDGER.clock)}。` : `醒来：${clockText(LEDGER.clock)}。`);
   ledgerCapture();
-  return { ok: true, notes };
+  return { ok: true, notes, report: restReport(before, restSnapshot(), { ok: true, hours, forced: !!plan.force, watch: plan.watch || null }) };
 }
 
 /** 主持人：全员复原（不扣补给、不推进时间） */

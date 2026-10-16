@@ -10,6 +10,8 @@
 
 const TRPG = {
   active: false,
+  lastRest: null,    // 最近一次长休的结算（ledger.js · restReport）
+  camp: null,        // 营地（长休前）：{ plan, force, status: ledger.js · campStatus }；联机玩家也看到
   taskBattle: null   // 正在打的任务战斗 { id, index }（trpg-tasks.js）
 };
 
@@ -209,9 +211,23 @@ function trpgShortRest(kits) {
 }
 /** plan：{ hours, food: { kit: foodId }, force } */
 function trpgLongRest(plan) {
+  TRPG.camp = null;
   const r = ledgerLongRest(plan || {}, []);
   if (typeof trpgTaskRestEscort === "function") trpgTaskRestEscort(r.notes);
+  if (r.report) TRPG.lastRest = r.report;   // 长休结算画面：主持人本机弹，联机玩家收到 rest 包（online-view.js · projectRest）
   return r.notes;
+}
+
+/** 营地（issue #52）：长休前大家围着篝火坐下，看全队状态和补给；主持人点「开始长休」才真的休息 */
+function trpgCampOpen(plan) {
+  plan = plan || {};
+  TRPG.camp = { plan: JSON.parse(JSON.stringify(plan)), force: !!plan.force, status: campStatus(plan) };
+  return ["队伍在营地坐下，准备长休。"];
+}
+function trpgCampClose() {
+  if (!TRPG.camp) return [];
+  TRPG.camp = null;
+  return ["先不休息，收起营地。"];
 }
 
 /* ---------- 道具 ---------- */

@@ -85,7 +85,7 @@
       <div class="hs-stats">
         <div><span>atk</span><b>${h.atk}</b><small>${h.personalAtk} 角色${h.weaponAtk ? ` + ${h.weaponAtk} 武器` : ""}</small></div>
         <div><span>架势</span><b>${h.def}/${h.defMax}</b></div>
-        <div><span>坚毅生命</span><b>${h.shp != null ? h.shp : "—"}/${h.shpMax != null ? h.shpMax : "—"}</b></div>
+        <div><span>坚毅生命</span><b>${typeof shpHidden === "function" && shpHidden() ? (h.shp != null && h.shpMax ? esc(shpMoodLabel(h.shp, h.shpMax)) : "—") : `${h.shp != null ? h.shp : "—"}/${h.shpMax != null ? h.shpMax : "—"}`}</b></div>
         <div><span>义体改造率</span><b>${h.cyber != null ? h.cyber + "%" : "—"}</b></div>
         <div class="wide"><span>协助格挡</span>${blockText(h.block, h.unarmed)}</div>
         <div class="wide"><span>长休消耗</span><b>${h.rest ? `${h.rest.water} ml 水 · ${h.rest.food} 份食物` : "—"}</b></div>

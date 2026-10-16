@@ -41,12 +41,22 @@ const ROGUE_CONFIG = {
 
   // 各幕所在区域（占位，之后会改）。额外幕依次沿用这张表。
   regions: ["外城区", "沙漠", "巨人城", "天网设施"],
+  // 幕间选择（作者定）：打完一幕的首领，选下一幕去哪。除了上面这张表的区域，第 2–4 幕还可以改去采矿场（第几幕 → 区域）。
+  // 额外幕不选，照表走
+  altRegions: { 2: "第一采矿场", 3: "第二采矿场", 4: "第三采矿场" },
+  // 每日挑战（#52，rogue.js · dailySeed / dailyParty）：每天一个固定种子，大家打同一局，用来统计专长的选取率
+  //   partySize 随机队伍几人（任何组合都行，方便测极端搭配）；featOffer 专长每次给几个选项；keepRuns 本机最多记几局
+  daily: { partySize: 4, featOffer: 4, keepRuns: 200 },
   // 每个区域的轮换 BOSS 池（占位：目前只接入了 3 个 BOSS，没有 BOSS 的区域从全部 BOSS 里抽）
   bosses: {
     "外城区": ["outlaw_king"],
     "沙漠": ["sand_aggregate"],
     "巨人城": [],
-    "天网设施": ["ufo_boss"]
+    "天网设施": ["ufo_boss"],
+    // 采矿场还没有专属首领：从全部首领里抽
+    "第一采矿场": [],
+    "第二采矿场": [],
+    "第三采矿场": []
   },
 
   // 休息点不休息、直接离开：省下的时间换成一笔奎支（打零工 / 捡到的东西）
@@ -128,12 +138,12 @@ const ROGUE_BATTLEFIELD = {
     { type: "field", what: "fire",     name: "火场",     weight: 2 },
     { type: "field", what: "acid",     name: "酸液地面", weight: 2 },
     { type: "field", what: "ice",      name: "冻土",     weight: 1, regions: ["外城区", "巨人城"] },
-    { type: "field", what: "electric", name: "高压场地", weight: 2, regions: ["巨人城", "天网设施", "外城区"] },
-    { type: "field", what: "energy",   name: "能量场",   weight: 1, regions: ["天网设施"] },
+    { type: "field", what: "electric", name: "高压场地", weight: 2, regions: ["巨人城", "天网设施", "外城区", "第二采矿场", "第三采矿场"] },
+    { type: "field", what: "energy",   name: "能量场",   weight: 1, regions: ["天网设施", "第三采矿场"] },
     { type: "field", what: "harmonic", name: "干涉场地", weight: 1, minAct: 2 },
     { type: "field", what: "heal",     name: "治愈场地", weight: 1 },
     { type: "field", what: "highland", name: "高地",     weight: 2 },
-    { type: "field", what: "collapseOn", name: "塌陷区域", weight: 2, regions: ["沙漠"] },
+    { type: "field", what: "collapseOn", name: "塌陷区域", weight: 2, regions: ["沙漠", "第一采矿场"] },
     { type: "field", what: "coral",      name: "沙珊瑚台地", weight: 1, regions: ["沙漠"] },   // 自带高地；夜晚 / 沙暴伸出触须抓人（desert.js）
     { type: "prop",  what: "coral_branch", name: "沙珊瑚枝", weight: 2, regions: ["沙漠"], faction: "neutral" },
     { type: "gap",   what: "bridge",   name: "不稳桥梁", weight: 2 },
@@ -150,7 +160,11 @@ const ROGUE_TASK_WEATHER = {
     "外城区": ["heat", "acid", "thunder", "snow"],
     "沙漠": ["sand", "heat"],
     "巨人城": ["thunder", "acid", "snow", "glow"],
-    "天网设施": ["glow", "phase", "thunder"]
+    "天网设施": ["glow", "phase", "thunder"],
+    // 采矿场（占位）：露天矿坑晒、酸雨；熔岩矿场热；晶矿发光、相位
+    "第一采矿场": ["heat", "acid", "sand"],
+    "第二采矿场": ["heat", "acid"],
+    "第三采矿场": ["glow", "phase", "thunder"]
   }
 };
 

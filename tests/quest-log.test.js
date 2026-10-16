@@ -124,3 +124,48 @@ test("联机投影（online-view.js · projectQuests）：白名单之外的字�
   assert.ok(!/秘密|secret|enemies|泄漏|"hp"/.test(text), text);
   assert.equal(out[0].steps[1].xp, 0);
 });
+
+/* ---------- 个人任务 ---------- */
+test("个人任务：只有操控那名角色的玩家看得到，别人连有这条任务都不知道；主持人全看得到", () => {
+  const { c, make } = field();
+  const t = make("personal", { owner: "helu" });
+  assert.equal(t.category, "personal");
+  assert.equal(t.owner, "helu");
+  c.trpgTaskSetStatus(t.id, "posted");
+  const mine = plain(c.trpgQuestLog("p-helu", false, ["helu"]));
+  assert.equal(mine.length, 1);
+  assert.equal(mine[0].category, "personal");
+  assert.equal(mine[0].private, true);
+  assert.equal(mine[0].owner, "Helumica");
+  assert.equal(plain(c.trpgQuestLog("p-kolt", false, ["kolt"])).length, 0, "别人看不到");
+  assert.equal(plain(c.trpgQuestLog("p-x", false, [])).length, 0, "没有角色的也看不到");
+  assert.equal(plain(c.trpgQuestLog("gm", true, [])).length, 1, "主持人看得到");
+  // 「指定玩家」的可见范围对个人任务不起作用
+  c.trpgTaskSave(Object.assign(plain(t), { visibility: { mode: "players", ids: ["p-kolt"] } }));
+  assert.equal(plain(c.trpgQuestLog("p-kolt", false, ["kolt"])).length, 0);
+});
+
+test("个人任务：经验只给那名角色，奎支照样进队伍；新建时先挂在第一名角色身上", () => {
+  const { c, make } = field();
+  const t = make("personal", { owner: "helu" });
+  c.trpgTaskSetStatus(t.id, "posted"); c.trpgTaskAccept(t.id);
+  vm.runInContext("globalThis.__xpKits = []; (function(){ const o = trpgGiveXp; trpgGiveXp = function(k, n){ globalThis.__xpKits.push(k); return o(k, n); }; })()", c);
+  c.trpgTaskNodeDone(t.id);
+  c.trpgTaskNodeDone(t.id);
+  assert.equal(c.S.state.kuizhi, 1500);
+  const kits = plain(vm.runInContext("globalThis.__xpKits", c));
+  assert.ok(kits.length >= 2);
+  kits.forEach(k => assert.deepEqual(k, ["helu"]));
+  c.trpgTaskCreate("custom", "personal");
+  const fresh = c.trpgTasks()[c.trpgTasks().length - 1];
+  assert.equal(fresh.category, "personal");
+  assert.equal(fresh.owner, "kolt");
+});
+
+test("个人任务：玩家收到的包照白名单过（分类、属于谁）", () => {
+  const OV = require("../online-view.js");
+  const out = OV.projectQuests([{ id: "q1", name: "家书", category: "personal", owner: "Helumica", status: "active", steps: [], reward: {}, gmNote: "不该出现" }]);
+  assert.equal(out[0].category, "personal");
+  assert.equal(out[0].owner, "Helumica");
+  assert.ok(!("gmNote" in out[0]));
+});

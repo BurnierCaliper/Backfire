@@ -5,7 +5,7 @@ const assert = require("node:assert/strict");
 const HI = require("../hud-icons.js");
 
 test("徽章：属性状态、通用状态、即时 / 自我效果、挂着的攻击效果都有图标，层数跟着走", () => {
-  const u = { statuses: { burn: 3, shock: true, frostbite: true, shockwave: true, reso: true, unstable: true, weak: true, inspire: true, sturdy: true, hide: true, advantage: true, chase: true, corr: true },
+  const u = { statuses: { burn: 3, shock: true, frostbite: true, shockwave: true, reso: true, unstable: true, weak: true, inspire: true, sturdy: true, hide: true, advantage: true, chase: true, corr: true, high: true },
     highEnergy: 7, instant: { melt: true, sting: true, overload: true, shift: true, spread: true, refract: true, iceNext: true },
     self: "burn", selfBurnStacks: 2, resources: { nextAtkFx: ["combust", "icebreak", "bolt", "etch", "backflow", "inertia", "diffract", "unknown"] } };
   const list = HI.unitBadges(u);

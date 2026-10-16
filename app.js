@@ -185,6 +185,8 @@ function undo() {
 }
 
 function unitById(id) {
+  // 打配置物 / 危墙时的替身（structProxy）：技能分支里按 id 找目标也找得到它
+  if (state._structProxy && id != null && state._structProxy.id === id) return state._structProxy;
   return state.units.find(u => u.id === id);
 }
 
@@ -416,7 +418,9 @@ function statusLine(u) {
     if (u.statuses.corr) s.push("腐蚀");
     if (u.statuses.frostbite) s.push("冻伤");
     if (u.statuses.shockwave) s.push("震荡");
-    if (u.statuses.high || (u.highEnergy || 0) > 0) s.push("高能 " + (u.highEnergy || 0));
+    // #52：「高能」只看高能状态；没有高能状态、只是攒着高能值的（蓄能）写成「蓄能 N」
+    if (u.statuses.high) s.push("高能 " + (u.highEnergy || 0));
+    else if ((u.highEnergy || 0) > 0) s.push("蓄能 " + u.highEnergy);
     if (u.statuses.reso) s.push("共振");
     if (u.statuses.unstable) s.push("不稳");
     if (u.statuses.weak) s.push("虚弱");
@@ -492,8 +496,7 @@ function statusLine(u) {
 
 function gainHighFromHits(target, res, extra) {
   if (!target || !res) return;
-  const hasHigh = (target.statuses && target.statuses.high) || (target.highEnergy || 0) > 0;
-  if (!hasHigh) return;
+  if (!(target.statuses && target.statuses.high)) return;   // 只有高能状态才吃能量伤害涨高能值（蓄能不算）
   if ((res.element || "") !== "energy") return;
   const hits = (res.perHit && res.perHit.length) ? res.perHit : [{ dealt: res.total }];
   const damaging = hits.filter(h => (h.dealt || 0) > 0);
@@ -2191,7 +2194,7 @@ function turnEnd() {
       } else if ((u.resources.nano || 0) >= 10) {
         // 激光不能穿墙：隔着危墙 / 关着的门的敌人不算可选目标；一个都没有就什么都不干（不耗纳米）
         const foes = fieldUnits().filter(x => !x.isPlayer && !x.dead && !x.hidden && !x.fused && !lineBlocked(u.zone, x.zone));
-        const high = foes.filter(x => (x.statuses && x.statuses.high) || (x.highEnergy || 0) > 0);
+        const high = foes.filter(x => x.statuses && x.statuses.high);   // 蓄能单位不算高能目标
         const pool = high.length ? high : foes;
         const tgt = pool.slice().sort((x, y) => totalHp(x) - totalHp(y))[0];
         if (tgt) {
@@ -3871,6 +3874,85 @@ function structureHitOpt(a, skillId) {
   };
 }
 
+/** 燕返的后续：丹生谷收回，绯秋换持丹生谷，鳴門出场（打单位和打配置物共用） */
+function tsubameFollowUp(a, lines) {
+  const owner = ownerOfWeapon(a, state.units);
+  lines.push(...returnWeapon(a));
+  if (owner) {
+    owner.resources.blade = "niu";
+    refreshHiakiAtk(owner);
+    // 鳴門耐久为 0 / 本场已倒下：不能被燕返带出来（以前照样出场）
+    const why = weaponSummonWhy(owner, "naruto");
+    const w = why ? null : spawnWeapon(owner, "naruto");
+    lines.push(w ? "持刀改为丹生谷，鳴門出场。" : why ? `持刀改为丹生谷；${why}。` : "鳴門已在场。");
+  }
+}
+
+/* ---------- 打配置物 / 危墙算命中（#52） ---------- */
+/** 替身目标：技能分支把它当成一个普通目标用（读 zone / statuses / def……），dealTo 认出 isStructure 交给 dealToStructure。
+ *  写在替身身上的状态、减益都是丢掉的（物体不吃状态）；它不在 state.units 里，范围攻击、选目标列表都看不到它 */
+function makeStructProxy(token, tokZones, a) {
+  const tok = String(token);
+  const isGap = tok.indexOf("gap:") === 0;
+  const p = isGap ? null : propByRef(tok);
+  const g = isGap ? (state.gaps || {})[tok.slice(4)] : null;
+  // 危墙夹在两区之间：取离攻击者近的那一区（居合这类「移到目标区」的就移到这一侧）
+  const zones = (tokZones || []).map(Number).filter(z => !isNaN(z));
+  const zone = zones.slice().sort((x, y) => zoneDist(a.zone, x, state.zoneMode) - zoneDist(a.zone, y, state.zoneMode))[0];
+  return {
+    id: tok, structToken: tok, isStructure: true, kind: "structure",
+    name: p ? p.name : `${gapLabel(g ? g.type : "wall")}（${tok.slice(4)} 区之间）`,
+    zone: zone != null ? zone : Number(a.zone), level: (p && p.level) || 1, isPlayer: !!(p && p.faction !== "enemy" && p.faction),
+    statuses: {}, instant: {}, resources: {}, layers: [], marks: [], focuses: [],
+    def: 0, defMax: 0, noPosture: true, stunned: false, dead: false, hidden: false, flying: false
+  };
+}
+/** dealTo 打到替身：用技能真实的属性 / 倍率 / 骰子 / 击破算一下，交给 hitStructureCore。
+ *  攻击者身上挂着的下一击效果（猛击、穿刺、弱点、准备 / 磨刀）照常用掉；吸血、击退、打出失衡都不算（物体没有架势、不会被推走） */
+function dealToStructure(attacker, target, opt) {
+  const flags = opt.flags || {};
+  const r = attacker && attacker.resources;
+  const realAttack = flags.action !== false && !flags.environment;
+  let prep = 0;
+  if (r && realAttack) {
+    if (r.smashNext) r.smashNext = false;
+    if (r.pierceNext) r.pierceNext = false;
+    if (r.weakNext) r.weakNext = false;
+    if (r.preparedActive && opt.usePrep !== false) {
+      const whet = Number(r.whetDice) || 0;
+      prep = (whet ? takeDice(whet, 6, 0) : takeDice(1, prepDieSides(attacker), 0)).total;
+      delete r.whetDice;
+      r.preparedActive = false; r.prepared = false;
+    }
+  }
+  const atk = opt.atk != null ? Number(opt.atk) : effectiveAtk(attacker, state.units);
+  const hits = Math.max(1, Number(opt.hits) || 1);
+  let dice = opt.diceValue;
+  if (dice == null) dice = (opt.diceN && opt.diceS) ? takeDice(opt.diceN, opt.diceS, opt.diceB || 0).total : 0;
+  let dmg = prep;
+  for (let i = 0; i < hits; i++) {
+    const m = Array.isArray(opt.hitMults) && opt.hitMults[i] != null ? Number(opt.hitMults[i]) : (opt.mult != null ? Number(opt.mult) : 1);
+    dmg += atk * m + (Number(opt.flat) || 0) + (Number(dice) || 0);
+  }
+  let br = opt.baseBreak != null ? Number(opt.baseBreak) : 1;
+  if (attacker && attacker.rallyBreak) br += attacker.rallyBreak;
+  if (attacker && attacker.kit === "hiaki" && r && r.blade === "naruto" && (typeof passiveOn !== "function" || passiveOn(attacker))) br += 1;   // 佩刀
+  if (attacker && attacker.kit === "naruto" && typeof passivePlus === "function" && passivePlus(attacker, 1)) br += 1;
+  if (typeof featBreakBonus === "function") {
+    try { br = featBreakBonus(attacker, target, opt, flags, br, zoneDist(attacker.zone, target.zone, state.zoneMode), false); } catch (e) {}
+  }
+  target._hit = true;
+  const lines = hitStructureCore(attacker, target.structToken, { element: opt.element || "physical", dmg: Math.max(1, Math.floor(dmg)), brk: Math.max(0, br) });
+  return { structure: true, lines, extra: [], res: { ok: true, structure: true, total: Math.max(0, Math.floor(dmg)), breakDealt: 0, perHit: [], log: [], flags } };
+}
+/** 技能结算完：技能分支出错、替身一下都没挨 → 照以前的通用打法打一下（行动点已经扣了，不白扣）；
+ *  技能自己没打它（只上状态的、没选好分步的……）就不打。写在替身上的状态提示一句无效 */
+function structProxyFinish(a, id, proxy, lines) {
+  if (proxy._crashed && !proxy._hit) lines.push(...hitStructureCore(a, proxy.structToken, structureHitOpt(a, id)));
+  const st = proxy.statuses || {}, ins = proxy.instant || {};
+  if (Object.keys(st).some(k => k !== "latestElement" && st[k]) || Object.keys(ins).some(k => ins[k])) lines.push(`${proxy.name} 是物体：状态和减益对它无效。`);
+}
+
 /** 战斗画面的受击：给配置物 / 危墙也发一个「伤害弹字」，画面据此播前冲、受击变白和数字 */
 function popStructure(token, level, value, element, text) {
   if (typeof spawnPopup !== "function") return;
@@ -4576,7 +4658,9 @@ function applyCombat(target, result, attacker) {
     if (raw > 0) {
       const n = Math.floor(raw * 0.2 * st);
       const got = healUnit(attacker, n, { selfBurn: true });
-      notes.push(`${attacker.name} 自焚×${st}：火焰伤害 +${10 * st}%，吸血 ${20 * st}% × ${Math.floor(raw)} = ${n}，回复 ${got}${attacker.upOnShp ? "（SHP）" : ""}`);
+      notes.push(attacker.upOnShp && shpHidden()
+        ? `${attacker.name} 自焚×${st}：火焰伤害 +${10 * st}%，吸血恢复了一些坚毅生命`
+        : `${attacker.name} 自焚×${st}：火焰伤害 +${10 * st}%，吸血 ${20 * st}% × ${Math.floor(raw)} = ${n}，回复 ${got}${attacker.upOnShp ? "（SHP）" : ""}`);
     }
   }
   // 晕眩后自我效果结束（所有自我效果；蓄能累积的高能值不清零）。攻击者被猛击反震打进失衡的，在 dealTo 结算完这一击后结束
@@ -4938,6 +5022,7 @@ function recoverFromStun(u, notes) {
   // 击破预告：窗口里被打进过失衡就算成功（玩家回合打进的失衡在敌人回合开始就恢复了，回合结束时已不是失衡）
   if (u.instant && u.instant.omenArmed) u.instant.omenHit = true;
   u.stunned = false;
+  if (typeof featUnbowedReset === "function") featUnbowedReset(u);   // 决不后退：晕眩后重置
   u._imbalanceLock = false;
   u._bossMarked = false;
   u._bossRefill = false;
@@ -5318,6 +5403,24 @@ function shpHidden() {
   if (typeof TRPG !== "undefined" && TRPG.active) return false;
   return typeof GAME_MODE !== "undefined" && !!GAME_MODE;
 }
+/* 坚毅对玩家只给模糊说法（issue #52，作者定）：按坚毅占上限的比例分四档（80% 以上 / 50–80% / 20–50% / 20% 以下），
+ * 每档 5 句随机抽一句（休息结算用）；角色资料这类常驻的地方用一个短词 */
+const SHP_MOOD_LINES = [
+  ["你休息得不错，醒来时神清气爽。", "一夜无梦，四肢重新充满了力气。", "晨光照在脸上，你觉得今天什么都能扛下来。", "你伸了个长长的懒腰，连骨头都轻快了。", "篝火的余温还在，你从没睡得这么踏实过。"],
+  ["睡得还行，只是肩膀还有点沉。", "你恢复了大半精神，但还没有回到最好的状态。", "醒来时有些迷糊，喝口水就好多了。", "夜里醒了几次，好在后半夜睡得安稳。", "身体还算听使唤，只是腿脚有点发酸。"],
+  ["你翻来覆去很久才睡着，醒来时眼皮依然很重。", "休息让你缓了口气，但疲惫像潮水一样还没退去。", "梦里全是昨天的战斗，你醒来时比入睡时更累。", "你勉强爬起来，每个动作都要比平时多用一分力。", "风声吵了一整夜，你觉得自己好像根本没睡着。"],
+  ["尽管你尝试休息了，身体里的疲惫却从来没有完全恢复。", "你几乎没有合眼。再这样下去，总有一刻会撑不住。", "你醒来时手还在发抖，好像有什么东西被一点一点耗尽了。", "你盯着熄灭的篝火发呆，连站起来都要下很大决心。", "胸口闷得发慌，休息只是让你暂时忘了自己有多累。"]
+];
+const SHP_MOOD_LABELS = ["精力充沛", "还撑得住", "疲惫", "快撑不住了"];
+function shpMoodTier(shp, max) {
+  const r = (Number(max) || 0) > 0 ? (Number(shp) || 0) / Number(max) : 1;
+  return r >= 0.8 ? 0 : r >= 0.5 ? 1 : r >= 0.2 ? 2 : 3;
+}
+function shpMoodLine(shp, max, rnd) {
+  const lines = SHP_MOOD_LINES[shpMoodTier(shp, max)];
+  return lines[Math.floor((typeof rnd === "function" ? rnd() : Math.random()) * lines.length) % lines.length];
+}
+function shpMoodLabel(shp, max) { return SHP_MOOD_LABELS[shpMoodTier(shp, max)]; }
 
 function selfBurnStacksOf(u) {
   return Math.max(1, Number(u && u.selfBurnStacks) || 1);
@@ -6089,6 +6192,7 @@ function forceRecallWeapons(owner) {
 /** 进入濒死时解除晕眩（倒地了就不再处于失衡状态） */
 function clearStunOnDown(u) {
   if (!u) return;
+  if (u.stunned && typeof featUnbowedReset === "function") featUnbowedReset(u);   // 决不后退：晕眩后重置
   u.stunned = false;
   if (u.statuses) u.statuses.unstable = false;
   u._imbalanceLock = false;
@@ -6407,8 +6511,7 @@ function performAssistBlock(helper, target, attacker, forced, atkRange) {
   }
   const freeCover = target && target.coverBy === helper.id;
   if (!freeCover && !spendBonus(helper, 1, "协助格挡")) return { ok: false, notes };
-  if (freeCover) notes.push(`${helper.name} 因${target.coverOnce ? "挺身" : "掩护"}免费格挡。`);
-  if (freeCover && target.coverOnce) { target.coverBy = null; target.coverOnce = false; }   // 挺身（feats.js）：只挡这一次
+  if (freeCover) notes.push(`${helper.name} 因掩护免费格挡。`);
   if (helper.kit === "yuito" && target && target.id !== helper.id) {
     setBond(helper, target);
     notes.push(`思念：对 ${target.name} 施加牵挂（同时只能有一名）。`);
@@ -6616,7 +6719,7 @@ function openBlockModal(job) {
   (typeof featIronwallDeclarers === "function" ? featIronwallDeclarers(target) : []).forEach(h => {
     const b = document.createElement("button");
     b.className = "btn primary";
-    b.textContent = `${h.name} 铁壁（必定挡住 · 每场一次）`;
+    b.textContent = `${h.name} 以身作盾（必定挡住 · 每次短休一次）`;
     b.onclick = () => calcCommand("blockAnswer", { helper: "ironwall:" + h.id });
     box.appendChild(b);
   });
@@ -6662,13 +6765,16 @@ function finishBlockInner(helperId, forced) {
   const target = unitById(job.targetId);
   let block = "none", blockHelperId = null;
   if (helperId && String(helperId).indexOf("ironwall:") === 0) {
-    // 铁壁（feats.js）：宣布这一击视为协助格挡成功：免伤，击破由宣布的人承担（最少留 1），不花附赠动作
+    // 以身作盾（feats.js · ironwall）：宣布这一击视为协助格挡成功：免伤，击破由宣布的人承担（最少留 1），不花附赠动作
     const wall = unitById(String(helperId).slice("ironwall:".length));
     if (wall && typeof featIronwallDeclarers === "function" && featIronwallDeclarers(target).indexOf(wall) >= 0) {
       featUseOnce(wall, "ironwall");
-      appendLog(`${wall.name} 铁壁：这一击视为协助格挡成功。`);
+      appendLog(`${wall.name} 以身作盾：这一击视为协助格挡成功。`);
       block = "assistOk";
       blockHelperId = wall.id;
+      addScore("block", SCORE_RULES.block, wall);   // 评分：和协助格挡成功一样（#52）
+      const bst = battleStat(wall);
+      if (bst) { bst.blocks = (bst.blocks || 0) + 1; bst.blockOk = (bst.blockOk || 0) + 1; }
     }
   } else if (helperId) {
     const helper = unitById(helperId);
@@ -6708,11 +6814,13 @@ function finishBlockInner(helperId, forced) {
     if (out && defBefore != null) out.defBefore = defBefore;
     if (out && out.res && !out.pending) formatHitLines(attacker, target, out, captured).forEach(s => appendLog(s));
     // 战场数据：格挡规避的伤害（协助格挡成功：这一击本来的伤害；空手格挡成功：少挨的那一半）
-    const saver = helperId ? battleStat(unitById(helperId)) : null;
+    // 以身作盾的 helperId 是「ironwall:单位」：记到宣布的人身上
+    const saverUnit = blockHelperId ? unitById(blockHelperId) : helperId ? unitById(helperId) : null;
+    const saver = saverUnit ? battleStat(saverUnit) : null;
     if (saver && out && out.res) {
       const saved = block === "assistOk" ? Number(out.res.blockedRaw) || 0 : block === "bareOk" ? Math.round(Number(out.res.total) || 0) : 0;
       saver.avoided = (saver.avoided || 0) + Math.max(0, saved);
-      if (saved > 0) addScore("blockSave", Math.floor(saved * SCORE_RULES.blockSave), unitById(helperId));   // 评分：格挡减免的伤害
+      if (saved > 0) addScore("blockSave", Math.floor(saved * SCORE_RULES.blockSave), saverUnit);   // 评分：格挡减免的伤害
     }
   }
 }
@@ -6782,7 +6890,6 @@ function resetBattleFlags(u) {
   delete r.apGifts;
   delete r.whetDice; delete r.unstoppableNext; delete r.reviveGuard; delete r.alertGiven; delete r.attackSeq;
   r.chargeTurn = null; r.chargeUsed = null; r.blinkReady = null; r.blinkUsed = null;
-  u.coverOnce = false;
   if (u.kit === "hiaki" && !r.blade) r.blade = "niu";
   if (u.kit === "tou") r.shield = 0;
   if (!isWeaponUnit(u)) u.weaponHeld = true;
@@ -6920,7 +7027,7 @@ const SPREAD_IMMUNE = { burn: "burn", frostbite: "frost", corr: "splash", shock:
 function spreadKeys(u) {
   const st = (u && u.statuses) || {};
   return SPREAD_STATUS.filter(k => k === "burn" ? (Number(st.burn) || 0) > 0
-    : k === "high" ? !!st.high || (Number(u.highEnergy) || 0) > 0 : !!st[k]);
+    : !!st[k]);   // 高能只看高能状态，蓄能攒的高能值不算
 }
 /** 从 src 传播到 dest，真正会加上的状态（空数组 = 传过去没有变化） */
 function spreadPlan(src, dest) {
@@ -6999,7 +7106,7 @@ function activatableStatuses(t) {
   if (st.corr) out.push({ key: "corr", label: "腐蚀" });
   if (st.frostbite) out.push({ key: "frostbite", label: "冻伤" });
   if (st.shockwave) out.push({ key: "shockwave", label: "震荡" });
-  if (st.high || (Number(t.highEnergy) || 0) > 0) out.push({ key: "high", label: `高能 ${Number(t.highEnergy) || 0}` });
+  if (st.high) out.push({ key: "high", label: `高能 ${Number(t.highEnergy) || 0}` });
   return out;
 }
 
@@ -7398,6 +7505,7 @@ function dealTo(attacker, target, opt) {
   // 原始击破（后面会被目标一侧的效果改写，例如「加倍击破」翻倍）：导体额外那一下按它重新结算
   if (!("_origBaseBreak" in opt)) opt._origBaseBreak = opt.baseBreak;
   opt.flags = makeDealFlags(opt.flags);
+  if (target && target.isStructure) return dealToStructure(attacker, target, opt);   // 打配置物 / 危墙的替身（#52）
   // 战场数据：击杀在伤害结算里就会发生，所以先记下「最后一击是谁」
   if (attacker && target && attacker.isPlayer && !target.isPlayer && (state.units || []).includes(attacker)) target._lastHitBy = attacker.id;
   else if (attacker && attacker.envSrc && target && !target.isPlayer) { const w = envCreditUnit(attacker); if (w) target._lastHitBy = w.id; }   // 配置物打死的：击杀算触发者
@@ -7564,7 +7672,7 @@ function dealTo(attacker, target, opt) {
   }
   if (attacker && !attacker.isPlayer && target && target.isPlayer && opt.flags.action && !assisting && !opt.flags.aoe && opt.flags.block !== "assistOk" && !opt.flags.blockResolved) {
     const helpers = eligibleBlockers(target);
-    const walls = typeof featIronwallDeclarers === "function" ? featIronwallDeclarers(target) : [];   // 铁壁（feats.js）
+    const walls = typeof featIronwallDeclarers === "function" ? featIronwallDeclarers(target) : [];   // 以身作盾（feats.js）
     if (helpers.length || walls.length) {
       appendLog(`→ ${target.name}：等待协助格挡（同区可以格挡的：${helpers.map(h => h.name + " " + finalBlockChance(h, attacker, target, opt.atkRange) + "%").join("、")}）`);
       state.blockQueue = state.blockQueue || [];
@@ -9698,6 +9806,8 @@ function dealBreak(unit, amount, element, notes, reason, opt) {
     notes.push(`${sink.name} 屹立不倒：免受击破${reason && reason !== "击破" ? "（" + reason + "）" : ""}。`);
     return;
   }
+  // 决不后退（feats.js）：这下击破要把架势打空时，有附赠动作就先 +2 架势（坚挺另算，在下面）
+  if (!((sink.statuses && sink.statuses.sturdy) || (sink.resources && sink.resources.divertGuard)) && typeof featUnbowedAuto === "function") featUnbowedAuto(sink, amount, notes);
   const before = Number(sink.def) || 0;
   const wasStunnedSink = !!sink.stunned;
   const wasDoppler = sink.self === "doppler";   // 被这一下打进失衡、多普勒随晕眩结束，这一下照样传出去
@@ -10029,6 +10139,7 @@ function clearShift(u) {
 }
 
 function popStatus(unit, key) {
+  if (unit && unit.isStructure) return;   // 物体不吃状态（#52）
   if (key === "shockwave" && typeof syncShockwave === "function") syncShockwave(unit, null);
   const meta = STATUS_POP[key];
   if (meta) spawnPopup(unit, { kind: "status", text: meta.name, element: meta.element });
@@ -10165,6 +10276,7 @@ function tidyCalcLines(log, multi) {
 
 /** 一次命中写成几行：结果 → 掷骰 → 计算 → 后果 */
 function formatHitLines(actor, target, out, captured) {
+  if (out && out.structure) return (out.lines || []).map(s => "  " + s);   // 打配置物 / 危墙（dealToStructure）
   const L = [];
   const res = (out && out.res) || {};
   const extra = (out && out.extra) || [];
@@ -10452,7 +10564,7 @@ const SKILL_REQUIREMENT = {
     return `要走到 ${list.map(w => w.name + " 倒下的 " + w.zone + " 区").join("、")}才能取回`;
   },
   ras_super:      (a) => a && a.self === "conductor" ? "已经处于导体状态" : null,
-  ras_torrent:    (a) => fieldUnits().some(u => !u.isPlayer && !u.dead && ((u.statuses && u.statuses.high) || (u.highEnergy || 0) > 0)) ? null : "场上没有高能状态的敌人",
+  ras_torrent:    (a) => fieldUnits().some(u => !u.isPlayer && !u.dead && u.statuses && u.statuses.high) ? null : "场上没有高能状态的敌人",
   edc_drain:      (a) => {
     const ras = findKit("ras", state.units);
     if (!ras) return "拉斯缪尔不在场";
@@ -10724,7 +10836,7 @@ function skillTargetError(a, id, t) {
       if (lineBlocked(a.zone, z)) return lineBlocked(a.zone, z);
     }
   }
-  if (id === "ras_torrent" && t && !((t.statuses && t.statuses.high) || (t.highEnergy || 0) > 0)) return "狂瀑要选已经处于高能状态的敌人";
+  if (id === "ras_torrent" && t && !(t.statuses && t.statuses.high)) return "狂瀑要选已经处于高能状态的敌人";
   if (id === "solo_support") {
     const fl = state.skillFlow;
     const kit = fl && fl.picks ? fl.picks.partner : null;
@@ -10860,7 +10972,8 @@ function runSkillInner(id, optRun) {
   state._pointBlankShot = null;   // 抵近射击：这次行动是不是靠它才打得到同区（下面射程检查里设）
   const a = unitById(state.attackerId);
   const token = selectedToken();
-  const t = skillTargetAny();
+  state._structProxy = null;
+  let t = skillTargetAny();
   if (!a) { paintSkillLog("先选攻击者。"); return; }
   if (a.dead) { paintSkillLog(`${a.name} 已死亡，无法行动。`); return; }
   if (!optRun.ignorePhase && !canControlUnit(a) && id !== "assist_block") {
@@ -11030,6 +11143,14 @@ function runSkillInner(id, optRun) {
       paintSkillLog(`${a.name} 打不到：${lineBlocked(a.zone, tokZones[0]) || "隔着危墙 / 关着的门。"}`);
       return;
     }
+    if (id === "hiaki_aa" && !(heldHiakiBlade(a) || (a.resources || {}).blade)) { paintSkillLog("两把刀都已分出，空手不能用刀技。"); return; }
+    // #52：玩家的技能打配置物 / 危墙算命中——换上一个替身目标，照常走技能自己的分支（属性、倍率、击破、命中后效果、技能消耗都照技能算）；
+    // dealTo 认出替身，把这一击交给 hitStructureCore（dealToStructure）。灯 / 龙哥的普攻在上面另算，敌人还是走通用打法
+    const unified = a.isPlayer && id !== "assist_block" && id !== "tou_aa" && id !== "longge_aa";
+    if (unified) {
+      t = makeStructProxy(token, tokZones, a);
+      state._structProxy = t;
+    } else {
     // 打配置物 / 危墙也是一次行动，照常消耗行动点 / 附赠行动
     if (a.isPlayer && id !== "assist_block") {
       const cost = skillCost(id);
@@ -11059,6 +11180,7 @@ function runSkillInner(id, optRun) {
     }
     hitStructure(a, token, structureHitOpt(a, id));
     return;
+    }
   }
   snapshot();
   beginActionAcc(a);
@@ -11244,6 +11366,10 @@ function runSkillInner(id, optRun) {
     } else if (id === "yuito_assist") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       hitOne(a, t, { element: "ice", mult: 1, baseBreak: 0, atk, flags: { action: true, assist: true } });
+      // #52：拿到这颗豆之前，先把手上的咖啡豆全部转成咖啡液
+      let brewed = 0;
+      while (beanToLiquid()) brewed++;
+      if (brewed) lines.push(`咖啡豆全部转成咖啡液：+${brewed} → 咖啡液 ${a.resources.liquid}`);
       a.resources.bean = (a.resources.bean || 0) + 1;
       lines.push("咖啡豆 +1 → " + a.resources.bean);
     } else if (id === "yuito_summon") {
@@ -11983,16 +12109,7 @@ function runSkillInner(id, optRun) {
     } else if (id === "niu_tsubame") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       hitOne(a, t, { element: "fire", mult: 1, baseBreak: 1, atk });
-      const owner = ownerOfWeapon(a, state.units);
-      lines.push(...returnWeapon(a));
-      if (owner) {
-        owner.resources.blade = "niu";
-        refreshHiakiAtk(owner);
-        // 鳴門耐久为 0 / 本场已倒下：不能被燕返带出来（以前照样出场）
-        const why = weaponSummonWhy(owner, "naruto");
-        const w = why ? null : spawnWeapon(owner, "naruto");
-        lines.push(w ? "持刀改为丹生谷，鳴門出场。" : why ? `持刀改为丹生谷；${why}。` : "鳴門已在场。");
-      }
+      tsubameFollowUp(a, lines);
     } else if (id === "naruto_fly") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       hitOne(a, t, { element: "ice", mult: 0.5, baseBreak: 1, atk });
@@ -13174,9 +13291,13 @@ function runSkillInner(id, optRun) {
     }
   } catch (err) {
     lines.push("结算出错：" + err.message);
+    if (state._structProxy) state._structProxy._crashed = true;
   } finally {
     if (a) delete a._dabbleNerf;
     state._pointBlankShot = null;
+    const proxy = state._structProxy;
+    state._structProxy = null;
+    if (proxy) structProxyFinish(a, id, proxy, lines);
   }
   const extraBy = a ? [a.instant && a.instant.overload ? "过载" : null, a.self === "conductor" ? "导体" : null].filter(Boolean) : [];
   if (extraBy.length && overloadSeq.length >= 2) {

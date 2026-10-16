@@ -54,7 +54,7 @@ const RogueCommands = (function () {
     parley: (c, run) => Rogue.parley(run, c.kit),
     choose: (c, run) => Rogue.choose(run, c.kit, c.index, c.value),
     leaveNode: (_c, run) => Rogue.leaveNode(run),
-    nextAct: (_c, run) => Rogue.nextAct(run),
+    nextAct: (c, run) => Rogue.nextAct(run, c.region || null),
     afterVictory: (c, run) => Rogue.afterVictory(run, c.goOn),
     finishBattle: (c, run) => Rogue.finishBattle(run, c.outcome),
     drawHero: (_c, run) => Rogue.drawHero(run).notes,
@@ -76,6 +76,8 @@ const RogueCommands = (function () {
     armoryData: (_c, run) => Rogue.armoryData(run),
     shopStock: (_c, run) => Rogue.shopStock(run),
     shopPoints: (_c, run) => Rogue.shopPoints(run),
+    interludeOptions: (_c, run) => Rogue.interludeOptions(run),
+    campStatus: (c, run) => Rogue.campStatus(run, { food: c.food, sleep: c.sleep, spit: c.spit, ammo: c.ammo }),
     craftPlace: (_c, run) => Rogue.craftPlace(run),
     craftList: (_c, run) => Rogue.craftList(run),
     craftOdds: (c, run) => Rogue.craftOdds(run, c.kit, c.item, c.helper),
@@ -128,8 +130,9 @@ const RogueCommands = (function () {
       const options = { party: c.party.slice(), seed: c.seed };
       if (c.solo) { options.solo = true; options.partners = c.partners.slice(); options.role2 = c.role2; }
       else if (c.growth) options.growth = true;
+      else if (c.daily) options.daily = true;
       s.run = Rogue.newRun(options);
-      return { seed: s.run.seed, solo: s.run.solo, growth: !!s.run.growth };
+      return { seed: s.run.seed, solo: s.run.solo, growth: !!s.run.growth, daily: !!s.run.daily };
     },
     resume(_c, context) {
       const s = needSession(context), saved = SaveStore.loadRun();

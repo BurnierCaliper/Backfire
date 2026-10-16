@@ -207,13 +207,15 @@
     if (!u) return [];
     const out = [], st = u.statuses || {};
     Object.keys(STATUS_KEY).forEach(k => {
-      if (k === "high") { const he = Number(u.highEnergy) || 0; if (st.high || he > 0) out.push({ key: "high", stack: he > 0 ? he : "" }); return; }
+      // 高能只看高能状态；没有高能状态的高能值记在蓄能徽章上（#52）
+      if (k === "high") { const he = Number(u.highEnergy) || 0; if (st.high) out.push({ key: "high", stack: he > 0 ? he : "" }); else if (he > 0 && u.self !== "store") out.push({ key: "store", stack: he }); return; }
       const v = st[k];
       if (v) out.push({ key: STATUS_KEY[k], stack: k === "burn" && Number(v) > 0 ? Number(v) : "" });
     });
     const ins = u.instant || {};
     Object.keys(INSTANT_KEY).forEach(k => { if (ins[k]) out.push({ key: INSTANT_KEY[k], stack: "" }); });
-    if (u.self && SELF_KEY[u.self]) out.push({ key: SELF_KEY[u.self], stack: u.self === "burn" && Number(u.selfBurnStacks) > 1 ? Number(u.selfBurnStacks) : "" });
+    if (u.self && SELF_KEY[u.self]) out.push({ key: SELF_KEY[u.self], stack: u.self === "burn" && Number(u.selfBurnStacks) > 1 ? Number(u.selfBurnStacks)
+      : u.self === "store" && !st.high && Number(u.highEnergy) > 0 ? Number(u.highEnergy) : "" });
     const hung = (u.resources && Array.isArray(u.resources.nextAtkFx)) ? u.resources.nextAtkFx : [];
     hung.forEach(id => { if (ATK_KEY[id]) out.push({ key: ATK_KEY[id], stack: "" }); });
     (extra || []).forEach(k => { if (ICONS[k] && !out.some(b => b.key === k)) out.push({ key: k, stack: "" }); });

@@ -235,7 +235,7 @@ test("还魂：被打到 0 留 1 点、到自己下回合前免伤；每场一�
   assert.equal(c.applyKnockdown(kolt, n), "dying", "第二次就倒地了");
 });
 
-test("铁壁：宣布后这一击视为协助格挡成功（免伤），每场一次；没有能格挡的人也会停下来问", () => {
+test("以身作盾（原铁壁）：宣布后这一击视为协助格挡成功（免伤），每次短休一次；没有能格挡的人也会停下来问", () => {
   const { c, S, kolt, helu, foes } = battle([{ id: "thug_knife", lv: 3, zone: 1 }], "FC10", (c, S, k) => { k.feats = ["ironwall"]; });
   const foe = foes[0];
   kolt.zone = foe.zone; helu.zone = 2;
@@ -244,7 +244,7 @@ test("铁壁：宣布后这一击视为协助格挡成功（免伤），每场�
   S.blockQueue = [];
   const hp0 = c.totalHp(kolt);
   const out = c.dealTo(foe, kolt, { atk: 30, mult: 1, element: "physical", baseBreak: 1, flags: { action: true } });
-  assert.equal(out.pending, true, "等着宣布铁壁");
+  assert.equal(out.pending, true, "等着宣布以身作盾");
   c.finishBlock("ironwall:" + kolt.id);
   assert.equal(c.totalHp(kolt), hp0, "免伤");
   assert.equal(c.featIronwallDeclarers(kolt).length, 0, "用掉了");
@@ -313,7 +313,7 @@ test("推搡：协助格挡成功后把攻击者推到相邻区域", () => {
   assert.notEqual(foe.zone, 1);
 });
 
-test("人器一心：唤出武器人只花附赠（每场一次）；号召：开战时同区我方获得护盾", () => {
+test("人器一心：唤出武器人只花附赠（每长休一次）；号召：开战时同区我方获得护盾", () => {
   const { c, S, kolt, helu } = battle(null, "FC16", (c, S, k, h) => { k.feats = ["onemind", "rally"]; h.zone = k.zone; });
   S.attackerId = kolt.id;
   assert.deepEqual(plain(c.skillCost("kolt_summon")), { bonus: 1 });
@@ -323,7 +323,7 @@ test("人器一心：唤出武器人只花附赠（每场一次）；号召：�
   assert.deepEqual(plain(c.skillCost("kolt_summon")), { ap: 1, bonus: 1 });
 });
 
-test("挺身：只免费格挡一次", () => {
+test("挺身：这一回合每次都免费格挡（#52：以前只挡一次）", () => {
   const { c, S, kolt, helu, foes } = battle(null, "FC17", (c, S, k, h) => { h.feats = ["standin"]; });
   kolt.zone = helu.zone;
   helu.bonus = 1;
@@ -331,7 +331,7 @@ test("挺身：只免费格挡一次", () => {
   assert.equal(kolt.coverBy, helu.id);
   helu.bonus = 0;
   c.performAssistBlock(helu, kolt, foes[0], { roll: 1 });
-  assert.equal(kolt.coverBy, null, "挡过一次就没了");
+  assert.equal(kolt.coverBy, helu.id, "挡过一次还在，回合结束才清掉");
 });
 
 /* ---------- 探索专长（跑团规则） ---------- */

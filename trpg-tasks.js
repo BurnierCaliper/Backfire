@@ -7,7 +7,9 @@
  *     nodes: [{ type, note, enemies: [{ id, lv, zone }], weather, zoneMode, done }], index 走到第几站 }
  * 路线（nodes）、每一站的敌人和天气、奖励都由主持人预先配置，进行中也能改。
  * 任务日志（联机玩家也看得到，trpgQuestLog）：
- *   category main 主线 / side 支线；visibility { mode: party 全队 / players, ids: 房间成员 id }；gmNote 只给主持人看；
+ *   category main 主线 / side 支线 / personal 个人；visibility { mode: party 全队 / players, ids: 房间成员 id }；gmNote 只给主持人看；
+ *   个人任务：owner 是一名角色（kit），只有操控这名角色的玩家看得到（别的玩家连有这条任务都不知道，visibility 不用），
+ *   每一站和完成的经验只给这名角色（奎支、物品照样进队伍）；
  *   每一站：title 玩家看到的步骤文字（空着就只写站的类型）、hidden 没揭示前玩家只看到「？？？」、reward { xp 每人, kuizhi 队伍 } 完成这一站时发；
  *   granted { nodes: 已发过奖励的站, complete } 记账：每站奖励只发一次，回退再推进不重发。
  * 打战斗站：trpgTaskPrepareBattle 返回这一站的敌人配置并记下 TRPG.taskBattle，
@@ -27,7 +29,8 @@ function trpgTasks() {
 /** 旧存档的任务补上任务日志的字段（分类、可见范围、每站奖励、发奖记账） */
 function trpgTaskUpgrade(t) {
   if (!t || t._v === 2) return;
-  if (t.category !== "main") t.category = "side";
+  if (t.category !== "main" && t.category !== "personal") t.category = "side";
+  if (typeof t.owner !== "string") t.owner = "";
   if (!t.visibility || !t.visibility.mode) t.visibility = { mode: "party", ids: [] };
   if (typeof t.gmNote !== "string") t.gmNote = "";
   if (typeof t.failWhy !== "string") t.failWhy = "";
@@ -106,13 +109,25 @@ function trpgTaskNormalize(t, old) {
     } : null,
     nodes: (Array.isArray(t.nodes) ? t.nodes : []).slice(0, 20).map(trpgTaskNormalizeNode),
     index: old.index != null ? old.index : 0,
-    category: (t.category || old.category) === "main" ? "main" : "side",
+    category: trpgTaskCategory(t.category || old.category),
+    owner: trpgTaskCategory(t.category || old.category) === "personal" ? tStr(t.owner != null ? t.owner : old.owner, 40) : "",
     visibility: trpgTaskVisibility(t.visibility || old.visibility),
     gmNote: tStr(t.gmNote, 400),
     granted: trpgTaskGranted(old.granted || t.granted, old.nodes || t.nodes),
     failWhy: tStr(old.failWhy, 120)
   };
 }
+/** 角色的名字（个人任务写「属于谁」用） */
+function trpgHeroLabel(kit) {
+  if (!kit) return "";
+  if (typeof Rogue !== "undefined" && Rogue.heroName) return Rogue.heroName(kit);
+  const c = typeof livePartyCards === "function" ? livePartyCards().find(x => x.kit === kit) : null;
+  return c ? c.name : kit;
+}
+function trpgTaskCategory(c) { return c === "main" || c === "personal" ? c : "side"; }
+const TRPG_TASK_CATEGORY = { main: "主线", side: "支线", personal: "个人" };
+/** 这个任务的经验发给谁：个人任务只给它的角色，其他给全队（null） */
+function trpgTaskXpKits(t) { return t && t.category === "personal" && t.owner ? [t.owner] : null; }
 function trpgTaskVisibility(v) {
   if (v && v.mode === "players") return { mode: "players", ids: (Array.isArray(v.ids) ? v.ids : []).map(x => tStr(x, 80)).filter(Boolean).slice(0, 16) };
   return { mode: "party", ids: [] };
@@ -163,9 +178,11 @@ function trpgTaskTemplate(kind) {
 function trpgTaskCreate(kind, category) {
   const list = trpgTasks();
   const id = "t" + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36);
-  const t = trpgTaskNormalize(Object.assign(trpgTaskTemplate(kind), { category }), { id });
+  // 个人任务先挂在第一名角色身上，主持人在编辑里换人
+  const owner = category === "personal" ? ((typeof trpgHeroes === "function" ? trpgHeroes() : []).find(h => !h.weaponOf) || {}).kit || "" : "";
+  const t = trpgTaskNormalize(Object.assign(trpgTaskTemplate(kind), { category, owner }), { id });
   list.push(t);
-  return [`新建${t.category === "main" ? "主线" : "支线"}任务草稿「${t.name}」（${TRPG_TASK_KINDS[t.kind]}）。`];
+  return [`新建${TRPG_TASK_CATEGORY[t.category]}任务草稿「${t.name}」（${TRPG_TASK_KINDS[t.kind]}）。`];
 }
 /** 保存主持人改过的任务（状态、走到第几站、护送对象当前血量保留） */
 function trpgTaskSave(data) {
@@ -225,17 +242,17 @@ function trpgTaskNodeDone(id) {
   t.granted = t.granted || { nodes: [], complete: false };
   if (!t.granted.nodes.includes(at)) {
     t.granted.nodes.push(at);
-    notes.push(...trpgTaskGrant(n.reward, `「${t.name}」第 ${at + 1} 站`));
+    notes.push(...trpgTaskGrant(n.reward, `「${t.name}」第 ${at + 1} 站`, trpgTaskXpKits(t)));
   }
   return notes;
 }
 function trpgNodeLabel(n) { return n.title || (TRPG_NODE_TYPES[n.type] + (n.note ? "（" + n.note + "）" : "")); }
 /** 发奖励（奎支进队伍钱包，经验全队每人）。返回日志行 */
-function trpgTaskGrant(r, label) {
+function trpgTaskGrant(r, label, kits) {
   r = r || {};
   const notes = [];
   if (r.kuizhi > 0) notes.push(...trpgAdjustKuizhi(r.kuizhi, label));
-  if (r.xp > 0) notes.push(...trpgGiveXp(null, r.xp));
+  if (r.xp > 0) notes.push(...trpgGiveXp(kits || null, r.xp));
   if (notes.length && typeof ledgerCapture === "function") ledgerCapture();
   return notes;
 }
@@ -325,7 +342,7 @@ function trpgTaskComplete(id) {
   r.items.forEach(x => { bagAdd(x.id, x.qty); notes.push(`获得 ${ITEM_CATALOG[x.id].name} ×${x.qty}。`); });
   r.parts.forEach(id => { bagAdd(weaponPartItemId(id), 1); notes.push(`获得改装件 ${weaponPartLabel(id)}。`); });
   r.blueprints.forEach(id => { bagAdd(id, 1); notes.push(`获得客制化图纸「${blueprintSpec(id).name}」。`); });
-  if (r.xp) notes.push(...trpgGiveXp(null, r.xp));
+  if (r.xp) notes.push(...trpgGiveXp(trpgTaskXpKits(t), r.xp));
   t.status = "done";
   if (typeof ledgerCapture === "function") ledgerCapture();
   return notes;
@@ -351,9 +368,16 @@ function trpgTaskRestEscort(notes) {
 /* ---------- 任务日志（玩家看到的样子）----------
  * 房主按收件人算好（online-game.js · rawPacket 的 quests），online-view.js · projectQuests 再按白名单过一遍。
  * 不给玩家：草稿、没指定给他的任务、主持人备注、敌人配置、模板、隐藏站的文字和奖励。
- * viewerId：房间成员 id；isGM：主持人自己看（全部都看得到） */
-function trpgQuestLog(viewerId, isGM) {
-  return trpgTasks().filter(t => t.status !== "draft" && (isGM || t.visibility.mode !== "players" || t.visibility.ids.includes(viewerId)))
+ * viewerId：房间成员 id；isGM：主持人自己看（全部都看得到）；viewerKits：这名玩家操控的角色（看个人任务用） */
+function trpgQuestVisible(t, viewerId, isGM, viewerKits) {
+  if (t.status === "draft") return false;
+  if (isGM) return true;
+  if (t.category === "personal") return !!t.owner && (viewerKits || []).includes(t.owner);
+  return t.visibility.mode !== "players" || t.visibility.ids.includes(viewerId);
+}
+function trpgQuestLog(viewerId, isGM, viewerKits) {
+  const order = { main: 0, side: 1, personal: 2 };
+  return trpgTasks().filter(t => trpgQuestVisible(t, viewerId, isGM, viewerKits))
     .map(t => {
       const g = t.granted || { nodes: [], complete: false };
       const steps = t.nodes.map((n, i) => {
@@ -363,12 +387,13 @@ function trpgQuestLog(viewerId, isGM) {
       });
       return {
         id: t.id, name: t.name, category: t.category, status: t.status, goal: t.goal, days: t.days,
-        private: t.visibility.mode === "players", steps, index: t.index,
+        private: t.category === "personal" || t.visibility.mode === "players", steps, index: t.index,
+        owner: t.category === "personal" ? trpgHeroLabel(t.owner) : "",
         reward: { xp: t.reward.xp, kuizhi: t.reward.kuizhi, items: t.reward.items.map(x => `${(ITEM_CATALOG[x.id] || {}).name || x.id}×${x.qty}`)
           .concat(t.reward.parts.map(id => typeof weaponPartLabel === "function" ? weaponPartLabel(id) : id))
           .concat(t.reward.blueprints.map(id => `图纸「${(typeof blueprintSpec === "function" && blueprintSpec(id) || {}).name || id}」`)) },
         got: !!g.complete, failWhy: t.status === "failed" ? t.failWhy || "" : ""
       };
     })
-    .sort((a, b) => (a.category === b.category ? 0 : a.category === "main" ? -1 : 1));
+    .sort((a, b) => order[a.category] - order[b.category]);
 }

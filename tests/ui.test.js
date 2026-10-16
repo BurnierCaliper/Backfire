@@ -55,7 +55,7 @@ async function open(t) {
 }
 
 async function newTrpg(page, slot) {
-  await page.click("#t-sandbox");
+  await page.click("#t-online"); await page.click("#t-sandbox");
   await page.click(`[data-new="${slot || 0}"]`);
   await page.waitForSelector("#scr-trpg:not([hidden])");
 }
@@ -79,7 +79,7 @@ const apOf = (page, id) => page.evaluate(i => state.units.find(u => u.id === i).
 test("标题画面正常打开，没有报错", async (t) => {
   const o = await open(t); if (!o) return;
   await o.page.waitForSelector("#scr-title:not([hidden])");
-  for (const id of ["#t-new", "#t-sandbox"]) assert.ok(await o.page.isVisible(id));
+  for (const id of ["#t-local", "#t-online"]) assert.ok(await o.page.isVisible(id));
   assert.deepEqual(o.errors, []);
 });
 
@@ -96,6 +96,9 @@ test("跑团模式：开团、买东西、休息、升级武器、后台改数�
   await page.click('[data-tab="rest"]');
   await page.click('[data-hours="8"]');
   await page.click("#tr-long-force");
+  await page.click('#rest-report [data-rr="start"]');   // 营地：开始长休
+  await page.click('#rest-report [data-rr="skip"]').catch(() => {});   // 日月动画
+  await page.click('#rest-report [data-rr="close"]');   // 长休结算画面
   await page.click("#tr-bs");
   await page.fill("#bs-kz", "4321");
   await page.click("#bs-apply");
@@ -104,7 +107,7 @@ test("跑团模式：开团、买东西、休息、升级武器、后台改数�
   assert.match(s1.wl, /:2/);
   assert.ok(s1.log >= 6);
   await page.reload();
-  await page.click("#t-sandbox");
+  await page.click("#t-online"); await page.click("#t-sandbox");
   await page.click('[data-open="0"]');
   const s2 = await page.evaluate(() => ({ kz: state.kuizhi, wl: JSON.stringify(partyHeroes().map(h => h.weaponLevels || {})), log: document.querySelectorAll("#tr-log li").length }));
   assert.deepEqual(s2, s1);
@@ -308,7 +311,7 @@ test("跑团战斗：击杀得到经验和奎支，结算写进探索记录", as
 test("单局：选队伍出发，任务板正常显示", async (t) => {
   const o = await open(t); if (!o) return;
   const { page } = o;
-  await page.click("#t-new");
+  await page.click("#t-local"); await page.click("#t-new");
   await page.waitForSelector("#scr-party:not([hidden])");
   const picks = page.locator(".hero-pick");
   await picks.nth(0).click(); await picks.nth(1).click();
@@ -321,7 +324,7 @@ test("单局：选队伍出发，任务板正常显示", async (t) => {
 test("单局：刷新后继续保留种子、队伍和任务进度", async (t) => {
   const o = await open(t); if (!o) return;
   const { page } = o;
-  await page.click("#t-new");
+  await page.click("#t-local"); await page.click("#t-new");
   await page.click('.hero-pick[data-kit="ruby"]');
   await page.click('.hero-pick[data-kit="yuito"]');
   await page.click("#party-go");
@@ -333,7 +336,7 @@ test("单局：刷新后继续保留种子、队伍和任务进度", async (t) =
   };
   const before = await page.evaluate(progress);
   await page.reload();
-  await page.click("#t-continue");
+  await page.click("#t-local"); await page.click("#t-continue");
   await page.waitForSelector("#scr-run:not([hidden])");
   assert.deepEqual(await page.evaluate(progress), before);
   assert.deepEqual(o.errors, []);
@@ -342,7 +345,7 @@ test("单局：刷新后继续保留种子、队伍和任务进度", async (t) =
 test("单局：路线图——四个区域各有底图；走到岔路时点地图上发光的节点选下一站；走过的节点打勾", async (t) => {
   const o = await open(t); if (!o) return;
   const { page } = o;
-  await page.click("#t-new");
+  await page.click("#t-local"); await page.click("#t-new");
   await page.waitForSelector("#scr-party:not([hidden])");
   await page.click('.hero-pick[data-kit="ruby"]');
   await page.click('.hero-pick[data-kit="yuito"]');
@@ -380,7 +383,7 @@ test("单局：路线图——四个区域各有底图；走到岔路时点地�
 test("单局：熟练项检定节点——每个人的熟练等级和成功率，点人检定后前进", async (t) => {
   const o = await open(t); if (!o) return;
   const { page } = o;
-  await page.click("#t-new");
+  await page.click("#t-local"); await page.click("#t-new");
   await page.waitForSelector("#scr-party:not([hidden])");
   // 选瑞比和结人
   await page.click('.hero-pick[data-kit="ruby"]');
@@ -420,7 +423,7 @@ test("单局：熟练项检定节点——每个人的熟练等级和成功率�
 test("单局：休息点可以选守夜；没人守夜被偷袭时进遭遇战，我方跳过第一回合；战斗前只剩短休", async (t) => {
   const o = await open(t); if (!o) return;
   const { page } = o;
-  await page.click("#t-new");
+  await page.click("#t-local"); await page.click("#t-new");
   await page.waitForSelector("#scr-party:not([hidden])");
   await page.click('.hero-pick[data-kit="ruby"]');
   await page.click('.hero-pick[data-kit="yuito"]');
@@ -448,6 +451,7 @@ test("单局：休息点可以选守夜；没人守夜被偷袭时进遭遇战�
   assert.match(await page.textContent("#r-ambush-chance"), /100%/);
   assert.ok(await page.locator('#r-watch option[value="ruby"]').count() === 1);
   await page.click("#r-long");
+  await page.click('#rest-report [data-rr="start"]');   // 营地：开始长休
   await page.waitForSelector("#r-fight");
   assert.match(await page.textContent("#run-body"), /偷袭/);
   await page.click("#r-fight");
@@ -463,7 +467,7 @@ test("单局：休息点可以选守夜；没人守夜被偷袭时进遭遇战�
 test("单人模式：选主角、三名伙伴、第二副职责出发；战斗里 2 行动点，攒够分数后用支援叫伙伴登场", async (t) => {
   const o = await open(t); if (!o) return;
   const { page } = o;
-  await page.click("#t-solo");
+  await page.click("#t-local"); await page.click("#t-solo");
   await page.waitForSelector("#scr-party:not([hidden])");
   assert.match(await page.textContent("#party-title"), /单人模式/);
   await page.click('.hero-pick[data-kit="ruby"]');
@@ -527,7 +531,7 @@ test("单人模式：选主角、三名伙伴、第二副职责出发；战斗�
 test("单人模式：主角倒地不判负，下个玩家回合可以用坚毅生命起身", async (t) => {
   const o = await open(t); if (!o) return;
   const { page } = o;
-  await page.click("#t-solo");
+  await page.click("#t-local"); await page.click("#t-solo");
   await page.waitForSelector("#scr-party:not([hidden])");
   await page.click('.hero-pick[data-kit="ruby"]');
   for (const k of ["kolt", "yuito", "tou"]) await page.click(`.hero-pick[data-kit="${k}"]`);
@@ -572,7 +576,7 @@ test("手机竖屏：战斗不横向溢出；点目标先预览、再点才出�
   page.on("pageerror", e => errors.push("pageerror: " + e.message));
   await page.goto(GAME_URL);
   assert.match(await page.textContent(".t-name"), /Antlerscale\s*Backfire/);
-  await page.click("#t-new");
+  await page.click("#t-local"); await page.click("#t-new");
   await page.waitForSelector("#scr-party:not([hidden])");
   for (const k of ["ruby", "yuito"]) await page.click(`.hero-pick[data-kit="${k}"]`);
   await page.click("#party-go");
@@ -856,7 +860,7 @@ test("探索环节撤销：买错东西可以撤回；打完仗回来不能撤�
   await page.keyboard.press("Control+z");
   assert.deepEqual(await s(), { kz: 5000, med: 0, log: 1 });
   // 刷新后也是撤销后的样子
-  await page.reload(); await page.click("#t-sandbox"); await page.click('[data-open="0"]');
+  await page.reload(); await page.click("#t-online"); await page.click("#t-sandbox"); await page.click('[data-open="0"]');
   assert.deepEqual(await s(), { kz: 5000, med: 0, log: 1 });
   // 进战斗再回来：撤销清空
   await page.click('[data-tab="shop"]');
@@ -1097,7 +1101,7 @@ test("音效：七种属性都能合成，有声、不削顶、不出错", async
   });
   assert.ok(!boom.bad && boom.peak > 0.05 && boom.peak < 1, "爆炸声音量 " + boom.peak);
   // 开关
-  await o.page.click("#t-sandbox");
+  await o.page.click("#t-online"); await o.page.click("#t-sandbox");
   await o.page.click('[data-new="0"]');
   await o.page.click("#tr-fight");
   await o.page.click("#g-sfx");
@@ -1487,7 +1491,7 @@ test("战场数据 / 整局数据：「合并武器人」把角色和自己的�
 test("训练场：标题选角色和等级进场；对假人打一下记进本回合；假人不行动、掉到一半补满，战斗不会结束", async (t) => {
   const o = await open(t); if (!o) return;
   const { page } = o;
-  await page.click("#t-training");
+  await page.click("#t-local"); await page.click("#t-training");
   await page.selectOption("#g-train-kit", "ras");
   await page.selectOption("#g-train-lv", "10");
   await page.click("#g-train-go");
@@ -1521,7 +1525,7 @@ test("训练场：标题选角色和等级进场；对假人打一下记进本�
 test("训练场：可以换假人的血量层、天气、两个区的场地和高地；改了会自动勾上「算属性克制」", async (t) => {
   const o = await open(t); if (!o) return;
   const { page } = o;
-  await page.click("#t-training");
+  await page.click("#t-local"); await page.click("#t-training");
   await page.selectOption("#g-train-kit", "xia");
   await page.selectOption("#g-train-lv", "5");
   assert.equal(await page.isChecked("#g-train-chart"), false, "默认不算克制");
@@ -1683,7 +1687,7 @@ test("个体值：战斗模板编辑器写血量 / ATK 水平，开战后敌人�
 test("单局：任务板上的工坊能制作道具", async (t) => {
   const o = await open(t); if (!o) return;
   const { page } = o;
-  await page.click("#t-new");
+  await page.click("#t-local"); await page.click("#t-new");
   await page.click('.hero-pick[data-kit="kolt"]');
   await page.click('.hero-pick[data-kit="helu"]');
   await page.click("#party-go");
@@ -1713,10 +1717,72 @@ test("跑团模式：工坊页能教配方、制作、调积分，刷新后配�
   assert.ok(await page.evaluate(() => trpgKnowsRecipe("fx_overload") && trpgPointsInfo().points === 1));
   await page.reload();
   await page.evaluate(() => { window.__noLevelUpPopup = true; });
-  await page.click("#t-sandbox");
+  await page.click("#t-online"); await page.click("#t-sandbox");
   await page.click('[data-open="0"]');
   await page.waitForSelector("#scr-trpg:not([hidden])");
   assert.ok(await page.evaluate(() => trpgKnowsRecipe("fx_overload")));
   assert.ok(kit);
+  assert.deepEqual(o.errors, []);
+});
+
+test("单局：幕间选择——第 1 幕打完可以改去第一采矿场", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await page.click("#t-local"); await page.click("#t-new");
+  await page.click('.hero-pick[data-kit="kolt"]');
+  await page.click('.hero-pick[data-kit="helu"]');
+  await page.click("#party-go");
+  await page.waitForSelector("#scr-run:not([hidden])");
+  await page.evaluate(() => { RunFlow.current().stage = "interlude"; RunFlow.refresh(); });
+  await page.waitForSelector('[data-next-region="第一采矿场"]');
+  assert.match(await page.textContent("#run-body"), /第 2 幕：沙漠[\s\S]*第 2 幕：第一采矿场/);
+  await page.click('[data-next-region="第一采矿场"]');
+  await page.waitForFunction(() => RunFlow.current().act === 2);
+  assert.match(await page.textContent("#run-where"), /第一采矿场/);
+  assert.deepEqual(o.errors, []);
+});
+
+test("单局：角色资料里坚毅生命只写模糊说法，不写数字（手册：坚毅对玩家保密）", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await page.click("#t-local"); await page.click("#t-new");
+  await page.click('.hero-pick[data-kit="kolt"]');
+  await page.click('.hero-pick[data-kit="helu"]');
+  await page.click("#party-go");
+  await page.waitForSelector("#scr-run:not([hidden])");
+  await page.click('[data-sheet="kolt"]');
+  await page.waitForSelector("#hs-body .hs-stats");
+  const cell = await page.evaluate(() => [...document.querySelectorAll("#hs-body .hs-stats > div")].find(d => /坚毅生命/.test(d.textContent)).querySelector("b").textContent);
+  assert.match(cell, /^(精力充沛|还撑得住|疲惫|快撑不住了)$/);
+  assert.deepEqual(o.errors, []);
+});
+
+test("单局：休整（长休）后弹出结算画面——血量、补给、每人一句状态，不写坚毅", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await page.click("#t-local"); await page.click("#t-new");
+  await page.click('.hero-pick[data-kit="kolt"]');
+  await page.click('.hero-pick[data-kit="helu"]');
+  await page.click("#party-go");
+  await page.waitForSelector("#scr-run:not([hidden])");
+  await page.evaluate(() => { RunFlow.current().stage = "camp"; RunFlow.refresh(); });
+  await page.click("#r-camp");
+  // 先进营地：全队状态、补给够不够
+  await page.waitForSelector("#rest-report .rr-camp");
+  const camp = await page.locator("#rest-report").innerText();
+  assert.match(camp, /营地[\s\S]*长休需要[\s\S]*柯尔特/);
+  assert.doesNotMatch(camp, /坚毅/);
+  await page.click('#rest-report [data-rr="start"]');
+  // 日月动画：太阳 / 月亮在弧线上
+  await page.waitForSelector("#rest-report .rr-skycard");
+  await page.click('#rest-report [data-rr="skip"]');
+  await page.waitForSelector('#rest-report [data-rr="close"]');
+  const text = await page.locator("#rest-report").innerText();
+  assert.match(text, /长休结束|没能好好休息/);
+  assert.match(text, /柯尔特[\s\S]*血量/);
+  assert.match(text, /「[^」]+」/, "每人一句状态");
+  assert.doesNotMatch(text, /坚毅/);
+  await page.click('#rest-report [data-rr="close"]');
+  await page.waitForSelector("#rest-report", { state: "hidden" });
   assert.deepEqual(o.errors, []);
 });

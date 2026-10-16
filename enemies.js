@@ -886,8 +886,8 @@ function hostilesOf(a) {
 }
 
 /* ===== 第三采矿场 ===== */
-/** 身上有高能（状态或高能值） */
-function hasHigh(u) { return !!u && ((u.statuses && u.statuses.high) || (Number(u.highEnergy) || 0) > 0); }
+/** 身上有高能状态（#52：蓄能攒的高能值不算） */
+function hasHigh(u) { return !!(u && u.statuses && u.statuses.high); }
 /** 矿场警戒自动机施加高能：目标已经高能就改成 1 点能量伤害 */
 function alarmApplyHigh(a, t, notes) {
   if (!t || t.dead) return;
