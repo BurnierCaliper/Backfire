@@ -224,8 +224,10 @@
       const costText = (id) => root.SkillText && SkillText.skillCostText ? SkillText.skillCostText(id) : "";
       hud.querySelector(".skills").innerHTML = skills.map((o, i) => {
         const cost = costText(o.value);
-        return `<button type="button" class="sk${ui.armed === o.value ? " armed" : ""}" data-ob-skill="${esc(o.value)}"${o.disabled || ui.busy ? " disabled" : ""} aria-label="${esc(o.label + (o.reason ? "：" + o.reason : ""))}">
-          <span class="key">${i < 9 ? i + 1 : ""}</span><span class="nm">${esc(o.label)}</span><span class="cost">${esc(cost || (o.reason || ""))}</span></button>`;
+        // 灰掉的技能写明原因（行动点不足 / 没有能用的道具…），鼠标悬停和读屏都能看到
+        const why = o.disabled ? (o.reason || "现在不能使用") : ui.busy ? "正在同步，请稍候" : "";
+        return `<button type="button" class="sk${ui.armed === o.value ? " armed" : ""}${o.disabled ? " blocked" : ""}" data-ob-skill="${esc(o.value)}"${o.disabled || ui.busy ? " disabled" : ""}${why ? ` title="${esc(why)}"` : ""} aria-label="${esc(o.label + (why ? "：" + why : ""))}">
+          <span class="key">${i < 9 ? i + 1 : ""}</span><span class="nm">${esc(o.label)}</span><span class="cost">${esc(o.disabled ? why : cost)}</span></button>`;
       }).join("") || (ui.acting && mine.has(ui.current) ? '<p class="ol-muted">正在取技能…</p>' : "");
       const end = hud.querySelector(".endturn");
       end.disabled = !(ui.acting && mine.has(ui.current)) || !!ui.busy;

@@ -155,9 +155,11 @@ test("D2 UI: 390px order bar offers touch movement, locks spent slots and reques
   assert.equal(await page.locator('[data-drag-actor="c"]').getAttribute("draggable"), "false");
   assert.equal(await page.locator('[data-drag-actor="b"]').getAttribute("draggable"), "false");
   assert.equal(await page.locator('[data-drag-actor="a"]').getAttribute("draggable"), "true");
-  assert.ok(await page.getByRole("button", { name: "夕夏前移", exact: true }).isDisabled());
-  await page.getByRole("button", { name: "夕夏后移", exact: true }).click();
-  assert.deepEqual((await calls(page)).at(-1), { type: "orderMove", actor: "a", index: 2 });
+  // 行动阶段只留一个「延后」：挪到本回合最后；前移 / 后移和「空位 · 拖到这里」只在选顺序时出现
+  assert.equal(await page.getByRole("button", { name: "夕夏前移", exact: true }).count(), 0);
+  assert.equal(await page.locator(".hs-tail").count(), 0);
+  await page.getByRole("button", { name: "夕夏延后，移至末尾", exact: true }).click();
+  assert.deepEqual((await calls(page)).at(-1), { type: "orderMove", actor: "a", index: 3 });
   await setView(page, { swap: { requestId: "swap-1", from: "a", to: "b", recipient: "p2" } });
   assert.equal(await page.locator('[data-hs="swapYes"]').count(), 0);
   await page.selectOption("#hs-player", "p2");
@@ -175,8 +177,8 @@ test("D2 UI: desktop drag and touch buttons send the same explicit move command"
   await setView(page, { phase: "acting", mode: "coop", currentUnitId: "a", order: [{ actor: "a", owner: "p1" }, { actor: "b", owner: "p2" }], canConfigure: false });
   await page.locator('[data-drag-actor="a"]').dragTo(page.locator('[data-drag-actor="b"]'));
   assert.deepEqual((await calls(page)).at(-1), { type: "orderMove", actor: "a", index: 1 });
-  await page.getByRole("button", { name: "夕夏后移", exact: true }).click();
-  assert.deepEqual((await calls(page)).at(-1), { type: "orderMove", actor: "a", index: 1 });
+  await page.getByRole("button", { name: "夕夏延后，移至末尾", exact: true }).click();
+  assert.deepEqual((await calls(page)).at(-1), { type: "orderMove", actor: "a", index: 2 });
   assert.deepEqual(o.errors, []);
 });
 
