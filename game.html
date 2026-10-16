@@ -31,15 +31,28 @@
   <div class="t-card">
     <h1 class="t-name">Antlerscale<span>Backfire</span></h1>
     <p class="t-sub">角鳞 · 在巨人的阴影下，活到明天</p>
-    <div class="t-menu">
-      <button class="t-btn primary" id="t-continue"><b>继续</b><small id="t-continue-sub"></small></button>
-      <button class="t-btn" id="t-new"><b>新的一局</b><small id="t-new-sub"></small></button>
-      <button class="t-btn" id="t-solo"><b>单人模式</b><small>一名主角 + 三名伙伴支援：每回合 2 行动点，能给自己协助格挡 / 协助攻击</small></button>
-      <button class="t-btn" id="t-growth"><b>长线养成</b><small>测试用：两名角色起步，没有期限，接任务赚钱升级；完成任务拿赫心融合体抽角色</small></button>
-      <button class="t-btn" id="t-sandbox"><b>跑团模式</b><small>主持人用：探索环节买东西、休息、升级；战斗环节自由配遭遇。数值照原手册</small></button>
-      <button class="t-btn" id="t-training"><b>训练场</b><small>单人对训练假人手动打 8 回合，记每回合伤害，和自动搜出来的输出循环对照</small></button>
-      <button class="t-btn" id="t-codex"><b>图鉴</b><small>角色的技能、被动和升级效果，敌人、配置物和所有效果</small></button>
-      <a class="t-btn" href="index.html"><b>跑团版 · 规则计算器</b><small>主持人用的分层结算工具</small></a>
+    <!-- 主菜单只有两个大入口；点进去是各自的子菜单（Esc / 返回 回到这里） -->
+    <div class="t-home" id="t-home">
+      <button class="t-btn t-big primary" id="t-local" data-view="local"><b>本地玩法</b><small>继续 / 新的一局 / 单人 / 长线养成 / 训练场</small></button>
+      <button class="t-btn t-big" id="t-online" data-view="online"><b>联机玩法</b><small>跑团：主持人开房，朋友用房间码加入</small></button>
+      <div class="t-links"><button class="t-link" id="t-codex" title="角色的技能、被动和升级效果，敌人、配置物和所有效果">图鉴</button></div>
+    </div>
+    <div class="t-panel" id="t-panel-local" data-view="local" hidden>
+      <div class="t-panel-head"><button class="t-back" data-back="local" title="返回（Esc）">← 返回</button><h2>本地玩法</h2></div>
+      <div class="t-list">
+        <button class="t-btn primary" id="t-continue"><b>继续</b><small id="t-continue-sub"></small></button>
+        <button class="t-btn" id="t-new"><b>新的一局</b><small id="t-new-sub"></small></button>
+        <button class="t-btn" id="t-solo"><b>单人模式</b><small>一名主角 + 三名伙伴支援：每回合 2 行动点，能给自己协助格挡 / 协助攻击</small></button>
+        <button class="t-btn" id="t-growth"><b>长线养成</b><small>测试用：两名角色起步，没有期限，接任务赚钱升级；完成任务拿赫心融合体抽角色</small></button>
+        <button class="t-btn" id="t-training"><b>训练场</b><small>单人对训练假人手动打 8 回合，记每回合伤害，和自动搜出来的输出循环对照</small></button>
+      </div>
+    </div>
+    <div class="t-panel" id="t-panel-online" data-view="online" hidden>
+      <div class="t-panel-head"><button class="t-back" data-back="online" title="返回（Esc）">← 返回</button><h2>联机玩法</h2></div>
+      <!-- online-ui.js 会把「联机开房」「加入房间」追加到这个 .t-menu 里 -->
+      <div class="t-menu">
+        <button class="t-btn" id="t-sandbox"><b>跑团模式</b><small>主持人用：探索环节买东西、休息、升级；战斗环节自由配遭遇。数值照原手册</small></button>
+      </div>
     </div>
   </div>
 </section>
