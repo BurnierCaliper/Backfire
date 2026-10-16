@@ -2974,6 +2974,8 @@ function noteSideDamage(amount, label, unit, noScore) {
  *   废铁墙（亡命之王「回防命令」，敌方）：挡我方攻击行动，撑到下一个敌人回合开始
  * 同区这一方的单位挨一次攻击行动：只有墙吃这一下（按装甲层算克制），这次行动打在同区的其余伤害全被挡住。 */
 const BARRIER_SIDE = { ironwall: "player", scrapwall: "enemy", dome: "player" };
+/** 巨刃划空打危墙 / 不稳桥梁这类只按击破掉耐久的间隔：固定扣这么多耐久，取代原来的 2 击破（#44，夕夏定） */
+const CHUAN_BLADE_GAP_DUR = 10;
 function barrierIn(zone, side) {
   return (state.props || []).find(p => BARRIER_SIDE[p.kind] === side && Number(p.zone) === Number(zone) && p.hp > 0);
 }
@@ -3893,10 +3895,15 @@ function hitStructureCore(attacker, targetToken, opt) {
     g.lastFrom = attacker ? attacker.zone : 1;   // 手册：摧毁方向只看最后一击来源区域
     g.lastBy = envCreditId(attacker);
     const before = Number(g.hp) || 0;
-    // 危墙、不稳桥梁：受到击破时损失等量耐久值——伤害打不动，只有击破算
+    // 危墙、不稳桥梁：受到击破时损失等量耐久值——伤害打不动，只有击破算（opt.gapDur：固定扣耐久，巨刃划空用）
     void dmg;
-    g.hp = Math.max(0, g.hp - br);
-    notes.push(`攻击间隔 ${key}（${gapLabel(g.type)}）：击破 ${br} → 耐久 ${g.hp}${br ? "" : `（伤害打不动${gapLabel(g.type)}，要靠击破）`}`);
+    if (opt.gapDur != null) {
+      g.hp = Math.max(0, g.hp - Math.max(0, Math.floor(Number(opt.gapDur) || 0)));
+      notes.push(`攻击间隔 ${key}（${gapLabel(g.type)}）：耐久 −${opt.gapDur} → ${g.hp}`);
+    } else {
+      g.hp = Math.max(0, g.hp - br);
+      notes.push(`攻击间隔 ${key}（${gapLabel(g.type)}）：击破 ${br} → 耐久 ${g.hp}${br ? "" : `（伤害打不动${gapLabel(g.type)}，要靠击破）`}`);
+    }
     popStructure(targetToken, g.level, before - g.hp, opt.element, "打不动");
     if (g.hp <= 0) notes.push(...destroyGap(key, g));
   } else if (String(targetToken).indexOf("prop:") === 0) {
@@ -11682,10 +11689,16 @@ function runSkillInner(id, optRun) {
       if ((a.resources.charge || 0) < 3) { lines.push("巨刃划空需要 3 电能。"); return paintSkillLog(lines.join("\n")); }
       const fl2 = state.skillFlow;
       const ref = (fl2 && fl2.picks && fl2.picks.target) || token || null;
-      const prop = ref && !unitById(ref) ? propByRef(ref) : null;
-      const sTok = isStructureToken(ref) ? String(ref) : (prop ? "prop:" + prop.id : null);   // 配置物 / 危墙 / 桥梁
-      const tgt = sTok ? null : ((ref ? unitById(ref) : null) || t);
+      let prop = ref && !unitById(ref) ? propByRef(ref) : null;
+      let sTok = isStructureToken(ref) ? String(ref) : (prop ? "prop:" + prop.id : null);   // 配置物 / 危墙 / 桥梁
+      let tgt = sTok ? null : ((ref ? unitById(ref) : null) || t);
       if (!sTok && !tgt) { lines.push("先选目标。"); return paintSkillLog(lines.join("\n")); }
+      // #44（夕夏定）：瞄准躲在敌方屏障（废铁墙……）后面的敌人，这一刀本来就会被屏障拦下——直接改砍屏障，走配置物的翻倍和摧毁返还
+      const shield = tgt && !tgt.isPlayer ? barrierIn(tgt.zone, "enemy") : null;
+      if (shield) {
+        lines.push(`${shield.name} 挡在 ${tgt.name} 前面，巨刃划空改砍 ${shield.name}。`);
+        prop = shield; sTok = "prop:" + shield.id; tgt = null;
+      }
       a.resources.charge -= 3;
       if (sTok) {
         // 爆炸桶 / 酸液桶 / 碎渣机炮直接摧毁；其余配置物伤害翻倍（2×atk → 4×atk）走正规结算：
@@ -11702,7 +11715,8 @@ function runSkillInner(id, optRun) {
         if (prop && (prop.kind === "boom" || prop.kind === "acid" || prop.kind === "scrap")) {
           // 作者定：爆炸桶 / 酸液桶 / 碎渣机炮这类桶子直接摧毁（爆炸桶照常爆炸）
           lines.push(`巨刃划空劈开 ${prop.name}。`, ...destroyProp(prop, a));
-        } else lines.push(...hitStructureCore(a, sTok, { element: "electric", dmg: Math.max(1, Math.floor((Number(atk) || 0) * 2 * 2)), brk: 2 }));
+        } else lines.push(...hitStructureCore(a, sTok, { element: "electric", dmg: Math.max(1, Math.floor((Number(atk) || 0) * 2 * 2)), brk: 2,
+          gapDur: gk ? CHUAN_BLADE_GAP_DUR : null }));   // 危墙 / 桥梁：固定扣 10 耐久（#44）
         if (was && !standing()) {
           a.resources.charge = (a.resources.charge || 0) + 1;
           lines.push("摧毁配置物，返还 1 电能。");

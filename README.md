@@ -368,6 +368,12 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **巨刃划空 × 屏障、危墙**（issue #44，夕夏定；app.js · `CHUAN_BLADE_GAP_DUR`、`hitStructureCore` 的 `gapDur`；skill-text.js、party.js；tests/chuan-blade.test.js）
+  - 瞄准躲在敌方屏障（废铁墙等）后面的敌人时，直接改砍屏障。
+    - 以前这一刀被屏障拦下：只吃 2×atk，不翻倍，也不返还电能。
+    - 现在走配置物的规则：伤害翻倍，砍塌了返还 1 电能。
+  - 打危墙、不稳桥梁这类只按击破掉耐久的间隔：固定扣 10 耐久，取代原来的 2 击破。
+
 - **issue #44 已定规则（合并 PR #50）**（app.js、party.js、skill-text.js；tests/issue44.test.js）
   - **协助格挡给燃油**：
     - 格挡反打不再自动耗燃油；

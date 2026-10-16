@@ -929,7 +929,7 @@ function skillList(unit) {
     add({ id: "chuan_wall", name: "铁壁", hint: "耗1电能 · 同区挡伤盾 atk+1d6 装甲 · 电能≥3可多耗1加 atk 护盾", minLv: 2 });
     add({ id: "chuan_over", name: "电站超频", hint: "任意单位（可对自己）过载 · +2电能；已有≥3电能则改为 atk/2 护盾", minLv: 3 });
     add({ id: "chuan_pulse", name: "高能脉冲", hint: "对自身施加蓄能", minLv: 6 });
-    add({ id: "chuan_blade", name: "巨刃划空", hint: "1距离以内 · 耗3电能 · 2atk 电击 +2击破 · 对配置物伤害翻倍 · 击穿血量层或摧毁配置物返还1电能", minLv: 9 });
+    add({ id: "chuan_blade", name: "巨刃划空", hint: "1距离以内 · 耗3电能 · 2atk 电击 +2击破 · 对配置物伤害翻倍 · 敌人躲在屏障后改砍屏障 · 危墙 / 桥梁固定 −10 耐久 · 击穿血量层或摧毁配置物返还1电能", minLv: 9 });
     add({ id: "chuan_summon", name: "唤出哔哩哩", hint: "武器生物化" });
   }
   // 被动升级后才有的技能
