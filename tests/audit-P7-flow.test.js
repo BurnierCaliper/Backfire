@@ -449,25 +449,28 @@ test("医疗包和其他治疗一样从内往外补，可以治到外层（作�
 });
 
 /* ---------- 16. 跑团任务模板报酬 ---------- */
-test("跑团任务模板的报酬照主持人手册（按任务长度给奎支，经验按队伍等级），主持人能改", () => {
+test("跑团任务的手册报酬（按任务长度给奎支，经验按队伍等级）：新任务默认不给，编辑里一键按手册填；主持人能改", () => {
   const { c } = trpg();
+  // 新任务没有默认奖励（配置了才有，见 tests/quest-log.test.js）
   const t = c.trpgTaskTemplate("clear");
-  assert.ok(t.reward.kuizhi >= 2000 && t.reward.kuizhi <= 3000, "短任务 2000～3000");
-  assert.equal(t.reward.xp, 70, "短任务、队伍 1–4 级：每人 70");
-  const esc = c.trpgTaskTemplate("escort");
-  assert.equal(esc.reward.intactKuizhi, Math.round(esc.reward.kuizhi * vm.runInContext("ESCORT_RULES.intactBonus", c)));
-  heroesOf(c).forEach(u => { u.level = 6; });
-  assert.equal(c.trpgTaskTemplate("clear").reward.xp, 100, "队伍 5–8 级：每人 100");
+  assert.equal(t.reward.kuizhi, 0);
+  assert.equal(t.reward.xp, 0);
+  assert.equal(c.trpgTaskTemplate("escort").reward.intactKuizhi, 0);
+  // 手册表还在：编辑里「按手册填奎支和经验」用它
+  const p1 = plain(c.trpgTaskHandbookPay(1, 1));
+  assert.ok(p1.kuizhi >= 2000 && p1.kuizhi <= 3000, "短任务 2000～3000");
+  assert.equal(p1.xp, 70, "短任务、队伍 1–4 级：每人 70");
+  assert.equal(c.trpgTaskHandbookPay(1, 6).xp, 100, "队伍 5–8 级：每人 100");
   assert.deepEqual(plain(c.trpgTaskHandbookPay(4, 1)), { name: "中", kuizhi: 7000, range: [6000, 8000], xp: 100 });
   assert.deepEqual(plain(c.trpgTaskHandbookPay(8, 13)), { name: "长", kuizhi: 15000, range: [12000, 18000], xp: 2000 });
   assert.deepEqual(plain(c.trpgTaskHandbookPay(15, 20)), { name: "极难", kuizhi: 25000, range: [20000, 30000], xp: 10000 });
-  // 新建草稿用的就是这份默认值；保存时主持人改的数照收
+  // 保存时主持人填的数照收
   c.trpgTaskCreate("scout");
   const task = c.trpgTasks().slice(-1)[0];
-  assert.equal(task.reward.xp, 100);
   c.trpgTaskSave(Object.assign(plain(task), { reward: Object.assign(plain(task.reward), { kuizhi: 4321 }) }));
   assert.equal(c.trpgTaskById(task.id).reward.kuizhi, 4321);
   assert.match(src("trpg-ui.js"), /trpgTaskHandbookPay\(t\.days, trpgPartyLevel\(\)\)/);
+  assert.match(src("trpg-ui.js"), /data-te-act="handbookPay"/);
 });
 
 /* ---------- 17. 跑团战斗配置：损毁地面、隔离区 ---------- */

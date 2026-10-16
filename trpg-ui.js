@@ -508,7 +508,7 @@
     const vis = t.category === "personal" ? `只有操控 ${esc(t.owner ? trpgHeroLabel(t.owner) : "（没选角色）")} 的玩家可见`
       : t.visibility && t.visibility.mode === "players" ? `仅 ${esc(questPlayerNames(t.visibility.ids))} 可见` : "全队可见";
     return `<div class="tr-up tk-card${t.status === "active" ? " on" : ""}">
-      <div class="tk-head"><b>${esc(t.name)}</b><span class="tk-cat${t.category === "main" ? " main" : t.category === "personal" ? " personal" : ""}">${TRPG_TASK_CATEGORY[t.category] || "支线"}</span><span class="tk-kind">${esc(TRPG_TASK_KINDS[t.kind])}</span>${st}<span class="tk-days">${t.days} 天</span><span class="tk-vis">${vis}</span></div>
+      <div class="tk-head"><b>${esc(t.name)}</b><span class="tk-cat${t.category === "main" ? " main" : t.category === "personal" ? " personal" : ""}">${TRPG_TASK_CATEGORY[t.category] || "支线"}</span><span class="tk-kind">${esc(TRPG_TASK_KINDS[t.kind])}</span>${st}${t.days ? `<span class="tk-days">${t.days} 天</span>` : ""}${t.nodes.length ? "" : '<span class="tk-kind">剧情（无路线）</span>'}<span class="tk-vis">${vis}</span></div>
       ${t.goal ? `<p class="tk-goal">${esc(t.goal)}</p>` : ""}
       ${t.gmNote ? `<p class="r-hint">主持人备注（玩家看不到）：${esc(t.gmNote)}</p>` : ""}
       ${t.status === "failed" && t.failWhy ? `<p class="r-hint">失败原因：${esc(t.failWhy)}</p>` : ""}
@@ -559,9 +559,10 @@
           <button class="g-btn small" data-te-act="delNode:${i}">删这一站</button></div>${rwRow}${foes}</div>`;
     }).join("");
     const r = t.reward;
-    const itemOpts = Object.keys(ITEM_CATALOG).filter(id => !ITEM_CATALOG[id].part && !ITEM_CATALOG[id].blueprint).map(id => [id, ITEM_CATALOG[id].name]);
-    const partOpts = Object.keys(WEAPON_PARTS).map(id => [id, `${weaponPartLabel(id)} ${weaponPartText(id)}`]);
-    const bpOpts = (typeof ROGUE_SMITHS !== "undefined" ? ROGUE_SMITHS : []).flatMap(s => s.blueprints.map(b => [b.id, `${b.name}（${s.name}）`]));
+    // 选单第一项是空的：没选东西就不会加进奖励（以前默认选着第一件，看起来像默认会给）
+    const itemOpts = [["", "（选物品）"]].concat(Object.keys(ITEM_CATALOG).filter(id => !ITEM_CATALOG[id].part && !ITEM_CATALOG[id].blueprint).map(id => [id, ITEM_CATALOG[id].name]));
+    const partOpts = [["", "（选改装件）"]].concat(Object.keys(WEAPON_PARTS).map(id => [id, `${weaponPartLabel(id)} ${weaponPartText(id)}`]));
+    const bpOpts = [["", "（选图纸）"]].concat((typeof ROGUE_SMITHS !== "undefined" ? ROGUE_SMITHS : []).flatMap(s => s.blueprints.map(b => [b.id, `${b.name}（${s.name}）`])));
     const list = (arr, kind, label) => arr.map((x, k) => `<span class="tk-chip">${esc(label(x))}<button class="g-btn small" data-te-act="del${kind}:${k}">×</button></span>`).join("");
     const e = t.escort;
     const hbPay = trpgTaskHandbookPay(t.days, trpgPartyLevel());   // 主持人手册第三章的任务报酬，给主持人参考
@@ -573,7 +574,7 @@
     return `<div class="tr-up tk-edit">
       <h4>编辑任务</h4>
       <div class="tr-row">名称 ${inp("name", t.name, 160)} 类型 <select data-te="kind" data-te-rerender="1">${options(Object.keys(TRPG_TASK_KINDS).map(k => [k, TRPG_TASK_KINDS[k]]), t.kind)}</select>
-        天数 ${inp("days", t.days, 52, "number")}</div>
+        天数 ${inp("days", t.days, 52, "number")} <span class="r-hint">（0 = 不写天数）</span></div>
       <div class="tr-row">分类 <select data-te="category" data-te-rerender="1">${options([["main", "主线"], ["side", "支线"], ["personal", "个人"]], t.category || "side")}</select>
         ${t.category === "personal" ? `属于角色 <select data-te="owner">${options([["", "（选一名角色）"]].concat(trpgHeroes().filter(h => !h.weaponOf).map(h => [h.kit, trpgHeroLabel(h.kit)])), t.owner || "")}</select>
         <span class="r-hint">只有操控这名角色的玩家看得到（其他玩家连有这条任务都不知道）；经验只给这名角色，奎支和物品照样进队伍。</span></div>` : `
@@ -581,17 +582,20 @@
         ${(t.visibility || {}).mode === "players" ? (questRoster().length ? questRoster().map(p => `<label class="tr-pick"><input type="checkbox" data-te-vis="${esc(p.id)}" ${(t.visibility.ids || []).includes(p.id) ? "checked" : ""}>${esc(p.name)}</label>`).join("") : '<span class="r-hint">现在没有联机玩家；开房后再勾选。</span>') : ""}</div>`}
       <div class="tr-row">目标（玩家可见） <textarea data-te="goal" rows="2" style="width:100%">${esc(t.goal)}</textarea></div>
       <div class="tr-row">主持人备注（只有主持人看得到） ${inp("gmNote", t.gmNote, 420)}</div>
-      <h4>奖励</h4>
+      <h4>奖励（不填就没有奖励）</h4>
       <div class="tr-row">奎支 ${inp("reward.kuizhi", r.kuizhi, 90, "number")} 每人经验 ${inp("reward.xp", r.xp, 70, "number")}
         ${e ? `完好额外奎支 ${inp("reward.intactKuizhi", r.intactKuizhi, 90, "number")}` : ""}</div>
-      <p class="r-hint">手册参考（${hbPay.name}任务 ${Math.max(1, Number(t.days) || 1)} 天、队伍平均 ${trpgPartyLevel()} 级）：奎支 ${hbPay.range[0]}～${hbPay.range[1]}，每人经验 ${hbPay.xp}；按完成质量和关系上下浮动。</p>
+      <p class="r-hint">手册参考（${hbPay.name}任务 ${Math.max(1, Number(t.days) || 1)} 天、队伍平均 ${trpgPartyLevel()} 级）：奎支 ${hbPay.range[0]}～${hbPay.range[1]}，每人经验 ${hbPay.xp}；按完成质量和关系上下浮动。
+        <button class="g-btn small" data-te-act="handbookPay">按手册填奎支和经验</button></p>
       <div class="tr-row">物品 <select id="te-item">${options(itemOpts)}</select> ×${inp("_qty", 1, 52, "number").replace('data-te="_qty"', 'id="te-qty"')}
         <button class="g-btn small" data-te-act="addItem">＋</button> ${list(r.items, "Item", x => `${(ITEM_CATALOG[x.id] || {}).name}×${x.qty}`)}</div>
       <div class="tr-row">改装件 <select id="te-part">${options(partOpts)}</select><button class="g-btn small" data-te-act="addPart">＋</button>
         <button class="g-btn small" data-te-act="randPart:C">随机 C</button><button class="g-btn small" data-te-act="randPart:B">随机 B</button> ${list(r.parts, "Part", id => weaponPartLabel(id))}</div>
       <div class="tr-row">图纸 <select id="te-bp">${options(bpOpts)}</select><button class="g-btn small" data-te-act="addBp">＋</button> ${list(r.blueprints, "Bp", id => (blueprintSpec(id) || {}).name || id)}</div>
       ${escort}
-      <h4>路线（按顺序走；战斗站预先配置敌人、天气、战场）</h4>
+      <h4>路线（可以不填）</h4>
+      <p class="r-hint">不填路线就是剧情任务：玩家只看到标题、描述和奖励，由你在合适的时候「结算任务」或「判定失败」。要按站推进时再加站（战斗站可以预先配置敌人、天气、战场）。
+        ${t.kind !== "custom" ? `<button class="g-btn small" data-te-act="templateRoute">按「${esc(TRPG_TASK_KINDS[t.kind])}」模板填路线</button>` : ""}</p>
       ${nodes}
       <div class="tr-row"><button class="g-btn small" data-te-act="addNode:battle">＋ 战斗站</button><button class="g-btn small" data-te-act="addNode:rest">＋ 休息点</button><button class="g-btn small" data-te-act="addNode:event">＋ 事件</button></div>
       <div class="tr-row"><button class="g-btn" data-te-act="save">保存</button><button class="g-btn" data-te-act="cancel">取消</button></div>
@@ -605,7 +609,7 @@
       const rows = list.filter(t => (t.category || "side") === cat).sort((a, b) => order[a.status] - order[b.status]);
       return `<h3 class="tk-sec">${title}</h3>${rows.map(t => taskEdit && taskEdit.id === t.id ? taskEditorHtml(taskEdit) : taskCardHtml(t)).join("") || '<p class="r-hint">暂无。</p>'}`;
     };
-    return `<p class="r-hint">任务日志：主持人在这里发布主线和支线任务。先建草稿，配置路线（每一站给玩家看的步骤、完成这一站的奖励、战斗站的敌人）和完成奖励，再「发布」；队伍「接下」后按站推进，可以同时进行好几条。
+    return `<p class="r-hint">任务日志：主持人在这里发布主线、支线和个人任务。新任务只有标题和描述，没有路线、没有奖励——要的话在「编辑」里加（奖励不填就没有；路线不填就是剧情任务，由你「结算」或「判定失败」）。再「发布」；队伍「接下」后有路线的按站推进，可以同时进行好几条。
         联机玩家点「任务日志」就能看到：草稿、只指定给别人的任务、主持人备注、敌人配置、隐藏的站都看不到。每一站的奖励只发一次（回退再推进不重发，也不收回）。</p>
       <div class="tr-row">新建 <select id="tk-cat">${options([["main", "主线"], ["side", "支线"], ["personal", "个人"]], newTaskCat)}</select> 任务：${Object.keys(TRPG_TASK_KINDS).map(k => `<button class="g-btn small" data-tk="new:${k}">${esc(TRPG_TASK_KINDS[k])}</button>`).join("")}</div>
       ${group("main", "主线任务")}${group("side", "支线任务")}${group("personal", "个人任务（只给那名角色的玩家看）")}`;
@@ -639,12 +643,14 @@
       case "down": if (i < t.nodes.length - 1) t.nodes.splice(i + 1, 0, t.nodes.splice(i, 1)[0]); break;
       case "addEnemy": t.nodes[i].enemies.push({ id: "thug_knife", lv, zone: 2 }); break;
       case "delEnemy": t.nodes[i].enemies.splice(j, 1); break;
-      case "addItem": t.reward.items.push({ id: $("te-item").value, qty: Math.max(1, Number($("te-qty").value) || 1) }); break;
+      case "addItem": if ($("te-item").value) t.reward.items.push({ id: $("te-item").value, qty: Math.max(1, Number($("te-qty").value) || 1) }); break;
+      case "handbookPay": { const p = trpgTaskHandbookPay(t.days, trpgPartyLevel()); t.reward.kuizhi = p.kuizhi; t.reward.xp = p.xp; if (t.escort) t.reward.intactKuizhi = Math.round(p.kuizhi * ESCORT_RULES.intactBonus); break; }
+      case "templateRoute": { const r = trpgTaskTemplateRoute(t.kind); t.nodes = t.nodes.concat(r.nodes.map(trpgTaskNormalizeNode)); if (!t.days) t.days = r.days; break; }
       case "delItem": t.reward.items.splice(i, 1); break;
-      case "addPart": t.reward.parts.push($("te-part").value); break;
+      case "addPart": if ($("te-part").value) t.reward.parts.push($("te-part").value); break;
       case "randPart": t.reward.parts.push(rollWeaponPart({ [x]: 1 })); break;
       case "delPart": t.reward.parts.splice(i, 1); break;
-      case "addBp": t.reward.blueprints.push($("te-bp").value); break;
+      case "addBp": if ($("te-bp").value) t.reward.blueprints.push($("te-bp").value); break;
       case "delBp": t.reward.blueprints.splice(i, 1); break;
     }
     render();
