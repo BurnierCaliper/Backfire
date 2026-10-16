@@ -63,6 +63,9 @@
 .ol-weather-phase { color: #a9e4df; background: #213c3f; }
 .ol-supplies, .ol-result { margin: 16px 0; padding: 14px; border: 1px solid #655947; background: #211c16; }
 .ol-supplies ul { display: flex; flex-wrap: wrap; gap: 6px 22px; padding-left: 20px; margin-bottom: 0; }
+.ol-purse { margin: 16px 0; padding: 14px; border: 1px solid #6b5a2e; background: #241f12; }
+.ol-purse-send { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-top: 8px; }
+.ol-purse-send input[type="number"] { width: 90px; }
 .ol-xp { color: #edc17d; }
 .ol-result { border-color: #c99a46; }
 .ol-result-grade { font-size: 24px; color: #f2c230; font-weight: 700; }
@@ -296,3 +299,15 @@ body.ol-has-side .ol-toast { right: 344px; }
 .ol-q-kz { color: #f2b33d; }
 .ol-q-rewards { display: flex; flex-wrap: wrap; gap: 6px 10px; margin-top: 6px; font-size: 12px; }
 .ol-q-rewards > span:not(.ol-muted) { padding: 1px 8px; border: 1px solid #4d4337; background: rgba(0, 0, 0, .3); }
+/* 跑团商人（主持人开着的那家店） */
+.ol-shop { margin: 16px 0; padding: 14px; border: 2px solid #b8893a; background: #261d10; }
+.ol-shop header { display: flex; align-items: center; gap: 10px; }
+.ol-shop h3 { margin: 0; }
+.ol-shop h4 { margin: 12px 0 4px; }
+.ol-shop-rows { list-style: none; padding: 0; margin: 0; }
+.ol-shop-rows li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 6px 0; border-top: 1px solid #3c3122; }
+.ol-shop-name { flex: 1 1 220px; display: flex; flex-direction: column; }
+.ol-shop-name small { color: var(--muted, #b9ab95); }
+.ol-shop-price s { opacity: .6; }
+.ol-shop-rows input[type="number"] { width: 64px; }
+.ol-shop-redeem { display: flex; flex-wrap: wrap; gap: 6px; }

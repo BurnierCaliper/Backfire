@@ -253,9 +253,48 @@
       const labels = { open: "畅通", wall: "危墙", bridge: "不稳桥梁", door: "机关门", void: "空隙" };
       return `<div class="ol-gaps">${Object.entries(data.gaps || {}).filter(([key]) => /^\d-\d$/.test(key)).map(([key, gap]) => `<span>${esc(key.replace("-", " ↔ "))}：${esc(labels[gap.type] || "间隔")}${["wall", "bridge"].includes(gap.type) ? ` · 耐久 ${esc(gap.hp ?? 0)}` : gap.type === "door" ? gap.open ? " · 开" : " · 关" : ""}</span>`).join("")}</div>`;
     }
+    /** 跑团私人钱包（房主按收件人算好：自己的角色有余额，队友只有名字）：看余额、给队友转钱 */
+    const purseDraft = { from: "", to: "", n: "100" };   // 转账表单：包刷新重画时保留填了一半的值
+    const shopDraft = { payer: "", qty: {} };              // 商店：由谁付、每件填的数量（包刷新时保留）
+    /** 跑团商人（主持人开着的那家店，房主算好的 view.packet.shop）：玩家用自己角色的钱包买，积分兑换用队伍积分 */
+    function shopMarkup() {
+      const s = view.packet?.shop;
+      if (!s || !Array.isArray(s.rows)) return "";
+      const mine = ((view.packet?.purse || {}).heroes || []).filter(h => h.mine && h.amount != null);
+      if (!mine.some(h => h.kit === shopDraft.payer)) shopDraft.payer = mine[0] ? mine[0].kit : "";
+      const wallet = (mine.find(h => h.kit === shopDraft.payer) || {}).amount ?? 0;
+      const groups = [];
+      s.rows.forEach(r => { if (!groups.includes(r.group)) groups.push(r.group); });
+      const z = (100 - s.discount) / 10;
+      const rows = groups.map(g => `<h4>${esc(g || "商品")}</h4><ul class="ol-shop-rows">${s.rows.filter(r => r.group === g).map(r => {
+        const n = Math.max(1, Number(shopDraft.qty[r.key]) || 1), out = r.stock === 0;
+        return `<li><span class="ol-shop-name"><b>${esc(r.name)}</b>${r.hint ? `<small>${esc(r.hint)}</small>` : ""}</span>
+          <span class="ol-shop-price">${r.price !== r.base ? `<s>${esc(r.base)}</s> ` : ""}<b>${esc(r.price)}</b> 奎支${r.stock != null ? ` · 剩 ${esc(r.stock)}` : ""}</span>
+          <input type="number" min="1" step="1" value="${esc(n)}" data-shop-qty="${esc(r.key)}" aria-label="买几份">${button(out ? "卖完了" : "买", "shopBuy", `data-key="${esc(r.key)}"`, disabled() || out || !shopDraft.payer || wallet < r.price * n)}</li>`;
+      }).join("")}</ul>`).join("");
+      const pts = s.points ? `<h4>积分兑换（队伍商店积分 ${esc(s.points.have)}）</h4><div class="ol-shop-redeem">${s.points.rows.map(x => button(`${x.name} · ${x.points} 积分`, "shopRedeem", `data-item="${esc(x.item)}"`, disabled() || s.points.have < x.points)).join("") || '<span class="ol-muted">这里没有能兑换的东西。</span>'}</div>` : "";
+      return `<section class="ol-shop" aria-label="商店"><header><h3>🛒 ${esc(s.name)}</h3>${s.discount ? `<span class="ol-q-tag ol-q-main">${esc(Number.isInteger(z) ? z : z.toFixed(1))} 折</span>` : ""}</header>
+        ${s.note ? `<p class="ol-muted">${esc(s.note)}</p>` : ""}
+        ${mine.length ? `<label>由谁付 <select data-shop-payer>${mine.map(h => option(h.kit, `${h.name}（${h.amount} 奎支）`, h.kit === shopDraft.payer)).join("")}</select></label>` : '<p class="ol-muted">你还没有操控的角色，不能买东西。</p>'}
+        ${rows || '<p class="ol-muted">这家店还没有商品。</p>'}${pts}
+        <p class="ol-muted">买到的东西进队伍背包；买东西照常攒商店积分。主持人关店后这里就收起来。</p></section>`;
+    }
+    function purseMarkup() {
+      const p = view.packet?.purse;
+      if (!p || !Array.isArray(p.heroes)) return "";
+      const mine = p.heroes.filter(h => h.mine && h.amount != null);
+      if (!mine.length) return "";
+      const others = p.heroes.filter(h => !h.mine);
+      const to = [["party", "队伍公账"]].concat(others.map(h => [h.kit, h.name]));
+      return `<section class="ol-purse" aria-label="私人钱包"><h3>私人钱包</h3><div class="ol-points">${mine.map(h => `<span>${esc(h.name)} <b>${esc(h.amount)}</b> 奎支</span>`).join("")}</div>
+        <div class="ol-purse-send"><label>从 <select id="ol-purse-from" data-purse="from">${mine.map(h => option(h.kit, h.name, h.kit === purseDraft.from)).join("")}</select></label>
+        <label>转给 <select id="ol-purse-to" data-purse="to">${to.map(([k, n]) => option(k, n, k === purseDraft.to)).join("")}</select></label>
+        <label><input type="number" id="ol-purse-n" data-purse="n" min="1" step="1" value="${esc(purseDraft.n)}" aria-label="转多少奎支"> 奎支</label>${button("转过去", "purseTransfer", "", disabled())}</div>
+        <p class="ol-muted">任务的奎支报酬自动平分进各人钱包，个人任务的只进你自己的。转账会写进小队频道。</p></section>`;
+    }
     function suppliesMarkup(data) {
       const bag = data.bag || {}, items = (bag.items || []).filter(item => item.qty > 0);
-      return `<section class="ol-supplies" aria-label="队伍公共物资"><h3>队伍公共物资</h3><div class="ol-points"><span>奎支 ${esc(data.kuizhi ?? 0)}</span><span>水 ${esc(bag.water ?? 0)} ml</span></div><ul>${items.map(item => `<li>${esc(item.name || item.id)} × ${esc(item.qty)}</li>`).join("") || '<li class="ol-muted">背包为空</li>'}</ul></section>`;
+      return `${shopMarkup()}${trpgClinicMarkup()}${purseMarkup()}<section class="ol-supplies" aria-label="队伍公共物资"><h3>队伍公共物资</h3><div class="ol-points"><span>${view.packet?.purse ? "队伍公账" : "奎支"} ${esc(data.kuizhi ?? 0)}</span><span>水 ${esc(bag.water ?? 0)} ml</span></div><ul>${items.map(item => `<li>${esc(item.name || item.id)} × ${esc(item.qty)}</li>`).join("") || '<li class="ol-muted">背包为空</li>'}</ul></section>`;
     }
     function weatherMarkup(data) {
       const symbols = { none: "☀", heat: "♨", snow: "❄", acid: "☂", thunder: "ϟ", glow: "✦", sand: "≋", phase: "◒" };
@@ -385,9 +424,18 @@
       if (!!a.spirit !== !!plan.spirit) pts += c.cyber.fleshMax - CYBER_LAYERS.reduce((s, [k]) => s + (plan[k] || 0), 0);
       return pts * (Number(c.cyber.perHp) || 0);
     }
-    function cyberMarkup(c, purse) {
+    function cyberMarkup(c, purse, action, label) {
       const cur = cyberDraft[c.kit] || c.cyber.current || {};
-      return `<li class="ol-cyber" data-cyber-box="${esc(c.kit)}"><span>义体改造（肉体 ${esc(c.cyber.fleshMax)}，最多改 ${esc(c.cyber.limit)} 点）</span>${CYBER_LAYERS.map(([k, label]) => `<label>${label}<input type="number" min="0" max="${esc(c.cyber.limit)}" step="1" data-cy-layer="${k}" value="${esc(Number(cur[k]) || 0)}"></label>`).join("")}<label><input type="checkbox" data-cy-spirit${cur.spirit ? " checked" : ""}> 换成星灵</label>${button("改造", "rogueCyber", `data-kit="${esc(c.kit)}" data-purse="${esc(purse)}"`, disabled())}</li>`;
+      return `<li class="ol-cyber" data-cyber-box="${esc(c.kit)}"><span>义体改造（肉体 ${esc(c.cyber.fleshMax)}，最多改 ${esc(c.cyber.limit)} 点）</span>${CYBER_LAYERS.map(([k, label]) => `<label>${label}<input type="number" min="0" max="${esc(c.cyber.limit)}" step="1" data-cy-layer="${k}" value="${esc(Number(cur[k]) || 0)}"></label>`).join("")}<label><input type="checkbox" data-cy-spirit${cur.spirit ? " checked" : ""}> 换成星灵</label>${button(label || "改造", action || "rogueCyber", `data-kit="${esc(c.kit)}" data-purse="${esc(purse)}"`, disabled())}</li>`;
+    }
+    /** 跑团诊所（主持人开放时）：给自己的角色填改造方案、提交申请，主持人同意后才生效；钱从这名角色的钱包出 */
+    function trpgClinicMarkup() {
+      const c = view.packet?.clinic;
+      if (!c || !Array.isArray(c.heroes) || !c.heroes.length) return "";
+      const st = { pending: "等主持人同意", done: "已改造", denied: "被拒绝" };
+      return `<section class="ol-rogue-box ol-trpg-clinic" aria-label="诊所"><h3>🦾 诊所：义体改造</h3><ul>${c.heroes.map(h => `${cyberMarkup(h, h.purse, "trpgCyber", "申请改造")}
+        <li class="ol-muted">${esc(h.name)} 的钱包 ${esc(h.purse)} 奎支 · 改造率 ${esc(Math.round(h.cyber.rate * 100))}% · 每动 1 点肉体 ${esc(h.cyber.perHp)} 奎支${h.request ? ` · 最近的申请：${esc(st[h.request.status])}${h.request.cost ? `（${esc(h.request.cost)} 奎支）` : ""}${h.request.note ? "：" + esc(h.request.note) : ""}` : ""}</li>`).join("")}</ul>
+        <p class="ol-muted">一个角色最多 3 种血量，最内层要留肉体或星灵。伤势照旧带着，缺的血先从外层扣。</p></section>`;
     }
     /* ---------- 升级提示：自己操控的角色升级 / 武器升级 / 学到新技能（levelup-ui.js 的画法） ---------- */
     const lvBox = make("div", "online-levelup", "lvu-overlay");
@@ -569,6 +617,17 @@
       bagBox.querySelector('[data-bag="close"]')?.focus({ preventScroll: true });
     }
     /** 和上一包比：新任务、推进、完成、失败 → 提示一句（第一次收到不提示） */
+    /** 主持人开店 / 关店：提示一句（第一次收到不提示） */
+    let shopSeen;
+    function observeShop() {
+      const s = view.packet?.shop || null, id = s ? s.id : null;
+      if (shopSeen !== undefined && shopSeen !== id) {
+        toast.textContent = s ? `🛒「${s.name}」开张了，可以买东西` : "🛒 商店收摊了";
+        toast.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { toast.hidden = true; }, 4500);
+        if (s) stage.querySelector(".ol-shop")?.scrollIntoView({ block: "nearest" });
+      }
+      shopSeen = id;
+    }
     function observeQuests() {
       const list = questList();
       const now = Object.fromEntries(list.map(q => [q.id, { status: q.status, done: q.steps.filter(s => s.state === "done").length, name: q.name, q }]));
@@ -722,7 +781,7 @@
         html(dock, button(`${view.roomCode || "房间"} · ${paused() ? "重连中" : "消息与成员"}`, "openRoom", "", false) +
           (view.isHost && view.mode !== "rogue" && ["exploration", "ended"].includes(view.screen) ? button("角色分配", "openAssign", "", false) : ""), "dock");
         observeMessages();
-        if (!view.isHost) { observeQuests(); observeCamp(); observeRest(); }
+        if (!view.isHost) { observeQuests(); observeCamp(); observeRest(); observeShop(); }
       }
       // 联机单局的房主：大厅里先要在单局画面选队伍，房间面板不挡着；队伍选好（有角色可分）时自动打开一次
       const rogueHost = view.active && view.isHost && view.mode === "rogue";
@@ -873,6 +932,9 @@
     function input(event) {
       const box = event.target.closest && event.target.closest("[data-cyber-box]");
       if (box) { cyberDraft[box.dataset.cyberBox] = cyberPlanOf(box.dataset.cyberBox); return; }
+      if (event.target.dataset.purse) { purseDraft[event.target.dataset.purse] = event.target.value; return; }
+      if (event.target.dataset.shopQty) { shopDraft.qty[event.target.dataset.shopQty] = event.target.value; return; }
+      if (event.target.hasAttribute && event.target.hasAttribute("data-shop-payer")) { shopDraft.payer = event.target.value; if (event.type === "change") render(); return; }
       const key = event.target.dataset.field; if (key && Object.hasOwn(form, key)) form[key] = event.target.value; }
     function change(event) {
       input(event); if (event.target.dataset.field === "mode") render(); if (event.target.dataset.assign) assignments[event.target.dataset.assign] = event.target.value;
@@ -924,10 +986,23 @@
         case "showLog": sideTab.battle = "log"; renderSide(true); side.querySelector(".ol-side-log")?.scrollIntoView({ block: "nearest" }); break;
         case "checkRoll": if (!disabled()) await call(() => api.submit({ type: "checkRoll", checkId: b.dataset.check, unitId: b.dataset.unit })); break;
         case "attrRequest": if (!disabled()) await call(() => api.submit({ type: "attrRequest", unitId: b.dataset.unit, attr: b.dataset.attr })); break;
+        case "shopBuy": if (!disabled()) { if (global.Sfx) Sfx.ui("coin"); await call(() => api.submit({ type: "shopBuy", merchant: view.packet?.shop?.id, key: b.dataset.key, qty: Math.max(1, Number(shopDraft.qty[b.dataset.key]) || 1), payer: shopDraft.payer })); } break;
+        case "shopRedeem": if (!disabled()) await call(() => api.submit({ type: "shopRedeem", merchant: view.packet?.shop?.id, item: b.dataset.item })); break;
+        case "purseTransfer": if (!disabled()) await call(() => api.submit({ type: "purseTransfer", from: byId("ol-purse-from")?.value, to: byId("ol-purse-to")?.value, amount: Number(byId("ol-purse-n")?.value) || 0 })); break;
         case "rogueVote": if (!disabled()) await call(() => api.submit({ type: "rogue.vote", option: b.dataset.option })); break;
         case "rogueUnvote": if (!disabled()) await call(() => api.submit({ type: "rogue.vote", option: null })); break;
         case "rogueNeed": if (!disabled()) await call(() => api.submit({ type: "rogue.need", loot: Number(b.dataset.loot), kit: b.dataset.kit, need: b.dataset.want === "1" })); break;
         case "rogueAct": if (!disabled()) await call(() => api.submit({ type: "rogue.act", command: JSON.parse(b.dataset.cmd) })); break;
+        case "trpgCyber": {
+          const kit = b.dataset.kit, plan = cyberPlanOf(kit), c = (view.packet?.clinic?.heroes || []).find(x => x.kit === kit);
+          if (!plan || !c || disabled()) break;
+          const cost = cyberEstimate(c, plan);
+          if (!cost) { notice = "方案没有变化"; render(); break; }
+          if (cost > Number(b.dataset.purse)) { notice = `预计要 ${cost} 奎支，${c.name} 的钱包不够`; render(); break; }
+          if (!confirm(`申请给 ${c.name} 做义体改造，预计花 ${cost} 奎支？\n主持人同意后才会改；伤势照旧带着，缺的血先从外层扣。`)) break;
+          if (await call(() => api.submit({ type: "cyberRequest", kit, plan }))) delete cyberDraft[kit];
+          break;
+        }
         case "rogueCyber": {
           const kit = b.dataset.kit, plan = cyberPlanOf(kit), c = (view.packet?.rogue?.clinic || []).find(x => x.kit === kit);
           if (!plan || !c || !c.cyber || disabled()) break;

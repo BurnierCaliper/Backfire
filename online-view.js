@@ -410,6 +410,9 @@
     if (!value) return "操作未生效，请检查当前权限与可用选项";
     const reasons = [
       [/不是你的|不属于你|不能代替/, "不能操作或代答其他玩家的单位"],
+      [/只能从自己角色的钱包/, "只能从自己角色的钱包转钱"], [/只能用自己角色的钱包/, "只能用自己角色的钱包付钱"], [/已经关门/, "这家店已经关门了"], [/只能给自己的角色申请/, "只能给自己的角色申请改造"], [/诊所现在没开/, "诊所现在没开"],
+      [/最多只能改造|内层必须|最多 \d+ 种血量|改造量必须/, "改造方案不合规则"], [/方案没有变化/, "方案没有变化"], [/钱包里的钱不够/, "钱包里的钱不够"],
+      [/卖完了|只剩 \d+ 份/, "库存不够了"], [/积分不够/, "商店积分不够"], [/不能用积分兑换|换不到/, "这家店换不到这件"], [/奎支不够/, "钱包里的钱不够"], [/不够转|奎支，不够/, "钱包里的钱不够"], [/不能转给自己/, "不能转给自己"],
       [/还没轮到|不是你的回合|当前顺位/, "还没轮到这个单位"],
       [/行动点不足/, "行动点不足"], [/附赠行动不足/, "附赠行动不足"],
       [/只有房主|只有主持人/, "只有主持人可以执行此操作"],
@@ -552,6 +555,9 @@
     if (own(packet, "rogue")) { const r = get(packet, "rogue"); out.rogue = obj(r) ? scrubHidden(clone(r)) : null; }
     // 任务日志：只留玩家该看的字段（主持人备注、敌人配置、隐藏站的内容在房主那边就去掉了，这里再按白名单过一遍）
     if (own(packet, "quests")) out.quests = projectQuests(get(packet, "quests"));
+    if (own(packet, "purse")) out.purse = projectPurse(get(packet, "purse"));
+    if (own(packet, "shop")) out.shop = projectShop(get(packet, "shop"));
+    if (own(packet, "clinic")) out.clinic = projectClinic(get(packet, "clinic"));
     // 长休结算：不带坚毅（只带那一句 mood）；游戏时钟
     if (own(packet, "rest")) out.rest = projectRest(get(packet, "rest"));
     if (own(packet, "camp")) out.camp = projectCamp(get(packet, "camp"));
@@ -590,6 +596,40 @@
         weapons: arr(h.weapons).slice(0, 4).filter(obj).map(w => ({ name: str(w.name, 40), dur: pair(w.dur), max: num(w.max) }))
       }))
     };
+  }
+  /** 跑团私人钱包：{ party 公账, heroes: [{ kit, name, amount?（只有自己的 / 主持人才有）, mine }] } */
+  function projectPurse(p) {
+    if (!obj(p)) return null;
+    const num = v => (typeof v === "number" && isFinite(v) ? Math.max(0, Math.floor(v)) : null);
+    const str = (v, n) => typeof v === "string" ? v.slice(0, n) : "";
+    return { party: num(p.party) || 0, heroes: arr(p.heroes).slice(0, 12).filter(obj).map(h => {
+      const o = { kit: str(h.kit, 40), name: str(h.name, 40), mine: !!h.mine };
+      if (num(h.amount) != null) o.amount = num(h.amount);
+      return o;
+    }).filter(h => h.kit) };
+  }
+  /** 跑团商人（主持人开着的那家店）：名字、介绍、折扣、商品（名字、说明、原价、现价、库存）、积分兑换 */
+  function projectShop(s) {
+    if (!obj(s)) return null;
+    const str = (v, n) => typeof v === "string" ? v.slice(0, n) : "";
+    const num = v => (typeof v === "number" && isFinite(v) ? Math.max(0, Math.floor(v)) : 0);
+    const pts = obj(s.points) ? { have: num(s.points.have), rows: arr(s.points.rows).slice(0, 60).filter(obj).map(r => ({ item: str(r.item, 40), name: str(r.name, 40), points: num(r.points) })).filter(r => r.item) } : null;
+    return { id: str(s.id, 40), name: str(s.name, 30), note: str(s.note, 200), discount: num(s.discount),
+      rows: arr(s.rows).slice(0, 200).filter(obj).map(r => ({ key: str(r.key, 40), name: str(r.name, 60), hint: str(r.hint, 160), group: str(r.group, 30),
+        base: num(r.base), price: num(r.price), stock: r.stock == null ? null : num(r.stock) })).filter(r => r.key),
+      points: pts };
+  }
+  /** 跑团诊所：自己的角色的改造信息（肉体上限、可改上限、改造率、单价、现在的方案）和最近一条申请的状态 */
+  function projectClinic(c) {
+    if (!obj(c)) return null;
+    const str = (v, n) => typeof v === "string" ? v.slice(0, n) : "";
+    const num = v => (typeof v === "number" && isFinite(v) ? Math.max(0, v) : 0);
+    const plan = p => obj(p) ? { armor: Math.floor(num(p.armor)), shield: Math.floor(num(p.shield)), sand: Math.floor(num(p.sand)), spirit: !!p.spirit } : { armor: 0, shield: 0, sand: 0, spirit: false };
+    return { heroes: arr(c.heroes).slice(0, 8).filter(obj).map(h => ({
+      kit: str(h.kit, 40), name: str(h.name, 40), purse: Math.floor(num(h.purse)),
+      cyber: obj(h.cyber) ? { current: plan(h.cyber.current), limit: Math.floor(num(h.cyber.limit)), rate: num(h.cyber.rate), fleshMax: Math.floor(num(h.cyber.fleshMax)), perHp: Math.floor(num(h.cyber.perHp)) } : null,
+      request: obj(h.request) ? { status: ["pending", "done", "denied"].includes(h.request.status) ? h.request.status : "pending", cost: Math.floor(num(h.request.cost)), note: str(h.request.note, 80) } : null
+    })).filter(h => h.kit && h.cyber) };
   }
   function projectQuests(list) {
     if (!Array.isArray(list)) return null;
@@ -633,7 +673,7 @@
     });
     return out;
   }
-  const api = { SCHEMA, projectPacket, projectQuests, projectRest, projectCamp, projectSheets, projectBagDetail, projectUnit, projectState, projectTape, projectMessages, projectLogs, projectView, projectActionMenu, safeText: text, safeError };
+  const api = { SCHEMA, projectPacket, projectQuests, projectPurse, projectShop, projectClinic, projectRest, projectCamp, projectSheets, projectBagDetail, projectUnit, projectState, projectTape, projectMessages, projectLogs, projectView, projectActionMenu, safeText: text, safeError };
   root.OnlineView = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof globalThis !== "undefined" ? globalThis : window);

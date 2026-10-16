@@ -5,7 +5,7 @@
   const PROTOCOL = 1, BUILD = "backfire-d3-v1", KEY = "backfire-online-v1";
   const copy = v => JSON.parse(JSON.stringify(v));
   const listeners = new Set(), packetListeners = new Set(), pending = new Map(), requests = new Map(), requestHighWater = new Map();
-  const gmContext = Object.freeze({}), controls = new Set(["orderPick", "orderConfirm", "orderMove", "orderSwapAccept", "answer", "chat", "checkOpen", "checkRoll", "checkClose", "attrRequest", "attrDecide", "skillRoll", "showTitle"]);
+  const gmContext = Object.freeze({}), controls = new Set(["orderPick", "orderConfirm", "orderMove", "orderSwapAccept", "answer", "chat", "checkOpen", "checkRoll", "checkClose", "attrRequest", "attrDecide", "skillRoll", "showTitle", "purseTransfer", "shopBuy", "shopRedeem", "cyberRequest"]);
   const messageContexts = new WeakMap();
   const recipientWires = new Map(), displayWire = OnlineWire.create();
   let endpoint = null, identity = null, status = { connected: false, paused: true, roster: [] }, active = false;
@@ -66,6 +66,12 @@
       mode, rogue: rogue() ? OnlineRogue.viewFor(id) : null, levelUps: levelUpsFor(id),
       // 任务日志（跑团）：房主按收件人挑好（草稿、没指定给他的不给），online-view.js 再按白名单投影
       quests: !rogue() && typeof trpgQuestLog === "function" ? trpgQuestLog(id, id === identity.id, kitsOwnedBy(id)) : null,
+      // 跑团私人钱包：自己操控的角色看得到余额，队友只给名字（转账用）；主持人看全部（online-view.js · projectPurse）
+      purse: !rogue() && typeof trpgPurse === "function" && typeof TRPG !== "undefined" && TRPG.active ? purseFor(id, id === identity.id) : null,
+      // 跑团商人：主持人开着的那家店（trpg-merchants.js · trpgMerchantView；online-view.js · projectShop 白名单）
+      shop: !rogue() && typeof trpgMerchantView === "function" && typeof TRPG !== "undefined" && TRPG.active ? trpgMerchantView() : null,
+      // 跑团诊所开放时：自己操控的角色的改造信息和申请状态（online-view.js · projectClinic）
+      clinic: !rogue() && typeof trpgCyberInfo === "function" && typeof TRPG !== "undefined" && TRPG.active && TRPG.clinicOpen ? clinicFor(id, id === identity.id) : null,
       // 长休结算（跑团；单局的在 rogue.lastRest 里）和游戏时钟：online-view.js · projectRest / clock 白名单
       rest: !rogue() && typeof TRPG !== "undefined" ? TRPG.lastRest || null : null,
       camp: !rogue() && typeof TRPG !== "undefined" && TRPG.camp ? Object.assign({ force: TRPG.camp.force }, TRPG.camp.status) : null,
@@ -85,6 +91,24 @@
     save(); notify();
   }
   function resync(id) { if (isHost() && HotseatGame.isActive()) return sendProjected(id, rawPacket(id, "resync")); }
+  function clinicFor(id, isGM) {
+    const mine = isGM ? (typeof trpgHeroes === "function" ? trpgHeroes().map(h => h.kit) : []) : kitsOwnedBy(id);
+    return { heroes: mine.map(kit => {
+      const info = trpgCyberInfo(kit);
+      if (!info) return null;
+      const req = (TRPG.cyberRequests || []).filter(r => r.kit === kit).slice(-1)[0] || null;
+      return { kit, name: info.name, purse: trpgPurse(kit), cyber: { current: info.current, limit: info.limit, rate: info.rate, fleshMax: info.fleshMax, perHp: info.perHp },
+        request: req ? { status: req.status, cost: req.cost, note: req.note } : null };
+    }).filter(Boolean) };
+  }
+  function purseFor(id, isGM) {
+    const mine = isGM ? null : kitsOwnedBy(id);
+    const heroes = typeof trpgHeroes === "function" ? trpgHeroes().filter(h => !h.dead) : [];
+    return {
+      party: trpgPurse("party"),
+      heroes: heroes.map(h => (isGM || mine.includes(h.kit) ? { kit: h.kit, name: h.name, amount: trpgPurse(h.kit), mine: !isGM } : { kit: h.kit, name: h.name }))
+    };
+  }
   /** 这名房间成员操控的角色 kit（个人任务只给操控这名角色的人看，trpg-tasks.js · trpgQuestLog） */
   function kitsOwnedBy(pid) {
     if (typeof HotseatGame === "undefined" || !HotseatGame.isActive()) return [];

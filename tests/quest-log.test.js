@@ -44,7 +44,7 @@ test("新建可以选主线 / 支线；主线、支线可以同时进行", () =>
   assert.equal(s.status, "active", "不再限制只能一个进行中");
 });
 
-test("完成一站发这一站的奖励（经验每人、奎支进队伍）；回退再推进不重发", () => {
+test("完成一站发这一站的奖励（经验每人、奎支平分进各人钱包）；回退再推进不重发", () => {
   const { c, make, xp } = field();
   const t = make("main");
   c.trpgTaskSetStatus(t.id, "posted"); c.trpgTaskAccept(t.id);
@@ -53,12 +53,14 @@ test("完成一站发这一站的奖励（经验每人、奎支进队伍）；�
   assert.equal(xp() - x0, 50);
   c.trpgTaskNodeDone(t.id);
   assert.equal(xp() - x0, 170);
-  assert.equal(c.S.state.kuizhi, 1500);
+  const wallets = () => [c.trpgPurse("kolt"), c.trpgPurse("helu")];
+  assert.deepEqual(wallets(), [750, 750], "两人平分");
+  assert.equal(c.S.state.kuizhi, 0, "不进公账");
   c.trpgTaskRollback(t.id);
   assert.equal(t.index, 1);
-  assert.equal(c.S.state.kuizhi, 1500, "回退不收回");
+  assert.deepEqual(wallets(), [750, 750], "回退不收回");
   c.trpgTaskNodeDone(t.id);
-  assert.equal(c.S.state.kuizhi, 1500, "再推进不重发");
+  assert.deepEqual(wallets(), [750, 750], "再推进不重发");
   assert.equal(xp() - x0, 170);
 });
 
@@ -145,14 +147,16 @@ test("个人任务：只有操控那名角色的玩家看得到，别人连有�
   assert.equal(plain(c.trpgQuestLog("p-kolt", false, ["kolt"])).length, 0);
 });
 
-test("个人任务：经验只给那名角色，奎支照样进队伍；新建时先挂在第一名角色身上", () => {
+test("个人任务：经验和奎支都只给那名角色（奎支进他的私人钱包）；新建时先挂在第一名角色身上", () => {
   const { c, make } = field();
   const t = make("personal", { owner: "helu" });
   c.trpgTaskSetStatus(t.id, "posted"); c.trpgTaskAccept(t.id);
   vm.runInContext("globalThis.__xpKits = []; (function(){ const o = trpgGiveXp; trpgGiveXp = function(k, n){ globalThis.__xpKits.push(k); return o(k, n); }; })()", c);
   c.trpgTaskNodeDone(t.id);
   c.trpgTaskNodeDone(t.id);
-  assert.equal(c.S.state.kuizhi, 1500);
+  assert.equal(c.trpgPurse("helu"), 1500, "进 Helumica 的钱包");
+  assert.equal(c.trpgPurse("kolt"), 0);
+  assert.equal(c.S.state.kuizhi, 0);
   const kits = plain(vm.runInContext("globalThis.__xpKits", c));
   assert.ok(kits.length >= 2);
   kits.forEach(k => assert.deepEqual(k, ["helu"]));
