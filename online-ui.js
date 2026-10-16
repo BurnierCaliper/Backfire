@@ -47,7 +47,7 @@
     toast.hidden = true;
     // 玩家右侧栏：「战斗 / 记录」和「小队」两个频道。输入框只建一次，收到新消息只更新列表，不会打断输入
     const side = make("aside", "online-side", "ol-side", { "aria-label": "战斗记录与小队聊天" });
-    side.innerHTML = `<nav class="ol-side-tabs" role="tablist"><button type="button" role="tab" data-side="log" class="ol-tab"></button><button type="button" role="tab" data-side="chat" class="ol-tab">小队<span class="ol-badge" hidden></span></button></nav><ol class="ol-side-log" aria-live="polite"></ol><ol class="ol-side-chat" aria-live="polite"></ol><form class="ol-side-form" id="ol-side-form"><label class="ol-sr-only" for="ol-side-text">小队消息</label><button type="button" class="ol-button ol-dice" data-roll-open="1" title="选一个熟练项掷 d100">🎲 掷骰</button><input id="ol-side-text" maxlength="500" autocomplete="off" placeholder="和队友说点什么…"><button type="submit" class="ol-button ol-primary">发送</button></form>`;
+    side.innerHTML = `<nav class="ol-side-tabs" role="tablist"><button type="button" role="tab" data-side="log" class="ol-tab"></button><button type="button" role="tab" data-side="chat" class="ol-tab">小队<span class="ol-badge" hidden></span></button><button type="button" class="ol-side-fold" data-side-fold hidden>展开 ▴</button></nav><ol class="ol-side-log" aria-live="polite"></ol><ol class="ol-side-chat" aria-live="polite"></ol><form class="ol-side-form" id="ol-side-form"><label class="ol-sr-only" for="ol-side-text">小队消息</label><button type="button" class="ol-button ol-dice" data-roll-open="1" title="选一个熟练项掷 d100">🎲 掷骰</button><input id="ol-side-text" maxlength="500" autocomplete="off" placeholder="和队友说点什么…"><button type="submit" class="ol-button ol-primary">发送</button></form>`;
     side.hidden = true;
     const bagBox = make("section", "online-bag", "ol-overlay ol-bag", { role: "dialog", "aria-label": "背包" });
     bagBox.hidden = true;
@@ -70,8 +70,19 @@
     const titleForm = { text: "", sub: "", tone: "plain", seconds: 4 };
     let lastTitle = null, titlePrimed = false, titleTimer = null;
     let sideTab = { battle: "log", other: "chat" }, sideKeys = { log: "", chat: "" }, seenChat = new Set(), chatPrimed = false, unread = 0, chatSending = false;
+    // 手机竖屏探索：聊天栏默认收成底部一条（只剩频道标签），点标签展开、点「收起」再收回去
+    let sideOpen = false;
+    const phoneSide = () => typeof matchMedia === "function" && matchMedia("(max-width: 760px)").matches && !(view.screen === "battle" || view.screen === "ended");
+    function paintSideFold() {
+      const fold = phoneSide() && !sideOpen && !side.hidden;
+      side.classList.toggle("ol-side-folded", fold); document.body.classList.toggle("ol-side-folded", fold);
+      const t = side.querySelector("[data-side-fold]"); if (t) { t.hidden = !phoneSide(); t.textContent = sideOpen ? "收起 ▾" : "展开 ▴"; }
+    }
+    if (typeof addEventListener === "function") addEventListener("resize", () => { if (!destroyed) paintSideFold(); });
     side.addEventListener("click", event => {
+      if (event.target.closest("[data-side-fold]")) { sideOpen = !sideOpen; paintSideFold(); return; }
       const tab = event.target.closest("[data-side]"); if (!tab) return;
+      if (phoneSide() && !sideOpen) { sideOpen = true; paintSideFold(); }
       sideTab[view.screen === "battle" || view.screen === "ended" ? "battle" : "other"] = tab.dataset.side; renderSide(true);
       if (tab.dataset.side === "chat") side.querySelector("#ol-side-text")?.focus({ preventScroll: true });
     });
@@ -516,6 +527,7 @@
       return fresh.length;
     }
     function renderSide(force) {
+      paintSideFold();
       if (side.hidden) return;
       const battle = view.screen === "battle" || view.screen === "ended";
       const tab = sideTab[battle ? "battle" : "other"];
