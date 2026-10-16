@@ -12,7 +12,9 @@ const TRPG = {
   active: false,
   lastRest: null,    // 最近一次长休的结算（ledger.js · restReport）
   camp: null,        // 营地（长休前）：{ plan, force, status: ledger.js · campStatus }；联机玩家也看到
-  taskBattle: null   // 正在打的任务战斗 { id, index }（trpg-tasks.js）
+  taskBattle: null,  // 正在打的任务战斗 { id, index }（trpg-tasks.js）
+  clinicOpen: false, // 诊所向联机玩家开放（玩家可以申请义体改造），主持人在「诊所」页开关
+  cyberRequests: []  // 联机玩家的改造申请：[{ id, kit, plan, by, byName, status: pending / done / denied, note }]
 };
 
 function trpgHeroes() {
@@ -221,6 +223,87 @@ function trpgPayWith(payer, fn) {
     if (Array.isArray(out)) out.push(`（由 ${trpgPurseName(payer)} 付，钱包剩 ${trpgPurse(payer)}）`);
     return out;
   } finally { state.kuizhi = pool; }
+}
+/* ---------- 诊所：义体改造（规则和单局一样：growth.js · cyberPlanError / cyberLayersFor，价格 ROGUE_CLINIC.cyberPerHp）----------
+ * 方案记在角色身上（u.cyberPlan），跟着跑团存档走（game.js · packHero）；升级后按方案重建血量层。
+ * 主持人在「诊所」页直接改（可以选由谁付）；联机玩家在诊所开放时提交申请，主持人同意后才改，钱从那名角色的钱包出。 */
+function trpgHero(kit) { return trpgHeroes().find(h => h.kit === kit) || null; }
+/** 没改造时的肉体上限（和 applyLevelStats 一样算） */
+function trpgFleshMax(u) {
+  if (u.growth && !u.attrs) return (u.baseHp || 14) + (u.growth.hp || 0) * Math.max(0, (u.level || 1) - 1);
+  return u.attrs ? derivedFromAttrs(u.attrs, u.level).hp : ((u.layers || []).reduce((s, l) => s + (Number(l.max) || 0), 0));
+}
+function trpgCyberPlan(p) {
+  p = p || {};
+  return { armor: Math.floor(Number(p.armor) || 0), shield: Math.floor(Number(p.shield) || 0), sand: Math.floor(Number(p.sand) || 0), spirit: !!p.spirit };
+}
+/** { fleshMax, rate, limit, current, perHp } */
+function trpgCyberInfo(kit) {
+  const u = trpgHero(kit);
+  if (!u) return null;
+  const fleshMax = trpgFleshMax(u), rate = cyberRateOf(u.attrs, u.level);
+  return { kit, name: u.name, fleshMax, rate, limit: cyberConvertLimit(fleshMax, rate), current: trpgCyberPlan(u.cyberPlan), perHp: ROGUE_CLINIC.cyberPerHp };
+}
+/** 改造预览：{ error, cost, layers（从外到内） } —— 动了多少点肉体（加减都算），换成 / 换回星灵按被换的肉体点数算 */
+function trpgCyberPreview(kit, plan) {
+  const info = trpgCyberInfo(kit);
+  if (!info) return { error: "没有这名角色", cost: 0, layers: [] };
+  const p = trpgCyberPlan(plan), a = info.current;
+  const error = cyberPlanError(p, info.fleshMax, info.rate);
+  if (error) return Object.assign({ error, cost: 0, layers: [] }, info);
+  let pts = CYBER_OUTER.reduce((s, t) => s + Math.abs(p[t] - a[t]), 0);
+  if (a.spirit !== p.spirit) pts += info.fleshMax - CYBER_OUTER.reduce((s, t) => s + p[t], 0);
+  return Object.assign({ error: null, cost: pts * info.perHp, layers: cyberLayersFor(info.fleshMax, p) }, info);
+}
+/** 做改造：扣钱（state.kuizhi —— 由谁付由 trpgPayWith 换好），按方案重建血量层；伤势照旧带着（缺的先从外层扣，最内层至少留 1）。
+ *  free：主持人直接改，不收钱 */
+function trpgModifyHero(kit, plan, free) {
+  const u = trpgHero(kit);
+  if (!u) return ["没有这名角色。"];
+  const pv = trpgCyberPreview(kit, plan);
+  if (pv.error) return [pv.error + "。"];
+  if (!pv.cost) return ["方案没有变化。"];
+  if (!free && (Number(state.kuizhi) || 0) < pv.cost) return [`奎支不够：改造要 ${pv.cost}，只有 ${Number(state.kuizhi) || 0}。`];
+  if (!free) state.kuizhi -= pv.cost;
+  const before = (u.layers || []).reduce((s, l) => s + (Number(l.current) || 0), 0);
+  const beforeMax = (u.layers || []).reduce((s, l) => s + (Number(l.max) || 0), 0);
+  let missing = Math.max(0, beforeMax - before);
+  const p = trpgCyberPlan(plan);
+  u.cyberPlan = (p.armor || p.shield || p.sand || p.spirit) ? p : null;
+  u.layers = pv.layers.map((l, i) => ({ type: l.type, current: l.max, max: l.max, inner: i === pv.layers.length - 1 }));
+  u.layers.forEach((l, i) => {
+    const keep = i === u.layers.length - 1 ? 1 : 0;
+    const take = Math.min(missing, Math.max(0, l.current - keep));
+    l.current -= take; missing -= take;
+  });
+  if (typeof ledgerCapture === "function") ledgerCapture();
+  const text = pv.layers.map(l => `${LAYER[l.type] || l.type} ${l.max}`).join(" / ");
+  return [`义体改造：${u.name} 完成改造（${text}）${free ? "，主持人免费安排" : `，花掉 ${pv.cost} 奎支`}。`];
+}
+/** 改造成功了吗（失败时规则函数返回一句说明） */
+function trpgModifyOk(notes) { return /^义体改造：/.test((notes || [])[0] || ""); }
+
+/* 联机玩家的改造申请（主持人同意 / 拒绝） */
+function trpgCyberRequest(kit, plan, by, byName) {
+  if (!TRPG.clinicOpen) return { error: "诊所现在没开" };
+  const pv = trpgCyberPreview(kit, plan);
+  if (pv.error) return { error: pv.error };
+  if (!pv.cost) return { error: "方案没有变化" };
+  if (trpgPurse(kit) < pv.cost) return { error: `钱包里的钱不够：要 ${pv.cost}，只有 ${trpgPurse(kit)}` };
+  TRPG.cyberRequests = (TRPG.cyberRequests || []).filter(r => !(r.kit === kit && r.status === "pending")).slice(-20);
+  const r = { id: "cy" + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36), kit, plan: trpgCyberPlan(plan), by, byName: String(byName || "").slice(0, 30), status: "pending", cost: pv.cost, note: "" };
+  TRPG.cyberRequests.push(r);
+  return { request: r };
+}
+function trpgCyberDecide(id, ok) {
+  const r = (TRPG.cyberRequests || []).find(x => x.id === id && x.status === "pending");
+  if (!r) return ["没有这条申请（可能已经处理过了）。"];
+  const name = (trpgHero(r.kit) || {}).name || r.kit;
+  if (!ok) { r.status = "denied"; return [`拒绝了 ${name} 的义体改造申请。`]; }
+  const notes = trpgPayWith(r.kit, () => trpgModifyHero(r.kit, r.plan, false));
+  r.status = trpgModifyOk(notes) ? "done" : "denied";
+  r.note = r.status === "done" ? "" : String(notes[0] || "").slice(0, 80);
+  return notes;
 }
 function trpgAdjustWater(ml) {
   ml = Math.floor(Number(ml) || 0);

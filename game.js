@@ -3491,6 +3491,7 @@
       weaponBlueprints: u.weaponBlueprints ? JSON.parse(JSON.stringify(u.weaponBlueprints)) : null,   // 客制化图纸
       attrPoints: Number(u.attrPoints) || 0,
       attrPicks: (u.attrPicks || []).slice(),
+      cyberPlan: u.cyberPlan ? JSON.parse(JSON.stringify(u.cyberPlan)) : null,   // 义体改造方案（跑团诊所，trpg.js · trpgModifyHero）
       notes: u.levelNotes ? JSON.parse(JSON.stringify(u.levelNotes)) : null
     };
   }
@@ -3539,6 +3540,11 @@
       if (s.attrPoints != null) u.attrPoints = s.attrPoints;
       if (s.attrPicks) u.attrPicks = s.attrPicks.slice();
       if (s.notes) u.levelNotes = s.notes;
+      if (s.cyberPlan) {
+        // 义体改造：按方案重建血量层（applyLevelStats 只会重建已经有方案的单位，先摆一层肉体给它换）
+        u.cyberPlan = JSON.parse(JSON.stringify(s.cyberPlan));
+        u.layers = [{ type: "flesh", current: 1, max: 1, inner: true }];
+      } else if (u.cyberPlan) { delete u.cyberPlan; u.layers = [{ type: "flesh", current: 1, max: 1, inner: true }]; }
       if (typeof applyLevelStats === "function") applyLevelStats(u);
       if (s.bonds) u.bonds = JSON.parse(JSON.stringify(s.bonds));   // 先放羁绊：改装槽数量要按「武器等级 + 羁绊」算
       if (s.weaponParts) u.weaponParts = JSON.parse(JSON.stringify(s.weaponParts));

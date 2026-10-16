@@ -368,6 +368,14 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **跑团诊所：义体改造**（trpg.js · `trpgCyberInfo` / `trpgCyberPreview` / `trpgModifyHero` / `trpgCyberRequest` / `trpgCyberDecide`，`TRPG.clinicOpen` / `TRPG.cyberRequests`；trpg-commands.js · `modifyHero` / `clinicOpen` / `cyberDecide`；trpg-ui.js · 「诊所」页；game.js · `packHero` / `applyCampaignToField` 存读 `cyberPlan`；hotseat-game.js · `cyberRequest`；online-game.js（包里加 `clinic`）；online-view.js · `projectClinic`；online-ui.js；tests/trpg-clinic.test.js、tests/online-session-ui.test.js）
+  - 以前只有单局能做义体改造，跑团只显示一个改造率。现在跑团多一个「诊所」页，规则和价格跟单局一样：
+    - 可改的肉体点数 = 肉体上限 × 改造率；一个角色最多 3 种血量，最内层要留肉体或星灵；
+    - 每动 1 点肉体 200 奎支，加减都算；换成 / 换回星灵按被换的肉体点数算；
+    - 伤势照旧带着，缺的血先从外层扣（最内层至少留 1）。
+  - **主持人**：每名角色一行，填装甲 / 护盾 / 沙尘的点数、要不要换成星灵，下面实时显示改完的血量层和价格。「改造」按「由谁付」扣钱（私人钱包或公账），也可以「主持人免费改」。
+  - **联机玩家**：主持人勾上「诊所向联机玩家开放」后，玩家的探索画面出现「诊所：义体改造」，只列自己操控的角色。填好方案点「申请改造」，主持人的诊所页会出现这条申请，点「同意」才生效，钱从那名角色的钱包扣；也可以「拒绝」。玩家画面显示申请状态（等主持人同意 / 已改造 / 被拒绝）。不能给别人的角色申请。
+  - 改造方案存在角色身上，跟着跑团存档走；读档、换人重摆场面时按方案重建血量层，升级后改造依然有效。
 - **跑团商人**（新文件 trpg-merchants.js；ledger.js · `LEDGER.merchants` / `LEDGER.shopOpen`；trpg-commands.js · `merchantCreate` / `merchantSave` / `merchantDelete` / `merchantOpen` / `merchantBuy` / `merchantRedeem`；trpg-ui.js · 「商人」页；hotseat-game.js · `shopBuy` / `shopRedeem`；online-game.js（包里加 `shop`）；online-view.js · `projectShop`；online-ui.js；online.css；tests/trpg-merchants.test.js、tests/online-session-ui.test.js）
   - **主持人设置商人**：跑团的「商人」页可以新建好几个商人，每个有名字和一句介绍（玩家看得到）。
     - **卖什么**：从手册商店里勾选（按分类折叠）。每件可以单独定价（空着照手册价）、限库存（空着不限）。

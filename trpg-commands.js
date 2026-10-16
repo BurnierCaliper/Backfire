@@ -18,6 +18,9 @@ const TrpgCommands = (() => {
     buy: c => trpgBuy(c.key, c.qty, c.free),
     adjustKuizhi: c => trpgAdjustKuizhi(c.amount, c.why),
     purseTransfer: c => trpgPurseTransfer(c.from, c.to, c.amount),
+    modifyHero: c => trpgModifyHero(c.kit, c.plan, !!c.free),
+    clinicOpen: c => { TRPG.clinicOpen = !!c.on; return [TRPG.clinicOpen ? "诊所开门了：联机玩家可以申请义体改造。" : "诊所关门了。"]; },
+    cyberDecide: c => trpgCyberDecide(c.id, !!c.ok),
     merchantCreate: c => trpgMerchantCreate(c.name),
     merchantSave: c => trpgMerchantSave(c.merchant),
     merchantDelete: c => trpgMerchantDelete(c.id),
@@ -58,7 +61,7 @@ const TrpgCommands = (() => {
     clearSlot: c => trpgClearSlot(c.index)
   };
   // 花钱的操作可以指定由谁付（payer：角色 kit；不写 / "party" = 队伍公账）
-  const PAYABLE = new Set(["buy", "repair", "upgradeWeapon", "installPart", "installBlueprint", "craft", "redeem", "teachRecipe"]);
+  const PAYABLE = new Set(["buy", "repair", "upgradeWeapon", "installPart", "installBlueprint", "craft", "redeem", "teachRecipe", "modifyHero"]);
   function execute(c) {
     if (!Object.hasOwn(handlers, c.action)) throw new Error("Unknown TRPG action: " + c.action);
     if (c.payer && PAYABLE.has(c.action)) return trpgPayWith(c.payer, () => handlers[c.action](c));

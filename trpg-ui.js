@@ -17,7 +17,7 @@
   const UNDO_MAX = 20;
 
   const TABS = [
-    ["party", "队伍"], ["sheet", "角色"], ["rest", "时间与休息"], ["shop", "商店"], ["merchants", "商人"], ["bag", "背包"], ["smith", "武器升级"], ["workshop", "工坊"], ["tasks", "任务"], ["checks", "检定"], ["battles", "战斗模板"], ["backstage", "后台"]
+    ["party", "队伍"], ["sheet", "角色"], ["rest", "时间与休息"], ["shop", "商店"], ["merchants", "商人"], ["clinic", "诊所"], ["bag", "背包"], ["smith", "武器升级"], ["workshop", "工坊"], ["tasks", "任务"], ["checks", "检定"], ["battles", "战斗模板"], ["backstage", "后台"]
   ];
 
   function heroes() { return trpgHeroes(); }
@@ -28,7 +28,7 @@
   }
   // 花钱的操作由谁付（私人钱包，trpg.js · trpgPayWith）：面板上的「由谁付」选单，默认队伍公账
   let payer = "party";
-  const PAYABLE = ["buy", "repair", "upgradeWeapon", "installPart", "installBlueprint", "craft", "redeem", "teachRecipe", "merchantBuy"];
+  const PAYABLE = ["buy", "repair", "upgradeWeapon", "installPart", "installBlueprint", "craft", "redeem", "teachRecipe", "merchantBuy", "modifyHero"];
   function ruleCommand(action, data) {
     const c = Object.assign({ type: "trpg", action }, data || {});
     if (PAYABLE.includes(action) && payer !== "party" && c.payer == null && !c.free) c.payer = payer;
@@ -745,6 +745,44 @@
   };
   /* ---------- 工坊：制作、学配方、积分、拆解（trpg.js · trpgCraft 等）---------- */
   const craftForm = { kit: "", item: "", diff: "", helper: "" };
+  /* ---------- 诊所：义体改造（trpg.js · trpgModifyHero；联机玩家的申请在上面，主持人同意才改）---------- */
+  const cyberForm = {};   // kit → 正在填的方案（重画时保留）
+  const CY_LAYERS = [["armor", "装甲"], ["shield", "护盾"], ["sand", "沙尘"]];
+  PANELS.clinic = function () {
+    const reqs = (TRPG.cyberRequests || []).filter(r => r.status === "pending");
+    const reqHtml = reqs.length ? `<h3>玩家的改造申请</h3>${reqs.map(r => {
+      const pv = trpgCyberPreview(r.kit, r.plan), h = heroes().find(x => x.kit === r.kit);
+      return `<div class="tr-row"><b>${esc(h ? h.name : r.kit)}</b>（${esc(r.byName)} 申请）：${esc(pv.error || pv.layers.map(l => `${LAYER[l.type] || l.type} ${l.max}`).join(" / "))}
+        · ${pv.cost} 奎支（从 ${esc(h ? h.name : r.kit)} 的钱包出，现有 ${trpgPurse(r.kit)}）
+        <button class="g-btn small r-main" data-cyd="${esc(r.id)}:1" ${pv.error ? "disabled" : ""}>同意</button><button class="g-btn small" data-cyd="${esc(r.id)}:0">拒绝</button></div>`;
+    }).join("")}` : "";
+    const rows = heroes().filter(h => !h.dead).map(h => {
+      const info = trpgCyberInfo(h.kit);
+      const plan = cyberForm[h.kit] || info.current;
+      const pv = trpgCyberPreview(h.kit, plan);
+      const cur = (h.layers || []).map(l => `${LAYER[l.type] || l.type} ${l.current}/${l.max}`).join(" / ");
+      return `<div class="tr-up"><div class="tk-head"><b>${esc(h.name)}</b><span class="tk-kind">改造率 ${Math.round(info.rate * 100)}% · 肉体 ${info.fleshMax}，最多改 ${info.limit} 点</span></div>
+        <div class="r-hint">现在：${esc(cur)}</div>
+        <div class="tr-row" data-cy-box="${esc(h.kit)}">${CY_LAYERS.map(([k, n]) => `${n} <input type="number" min="0" max="${info.limit}" data-cy="${k}" value="${esc(plan[k] || 0)}" style="width:56px">`).join(" ")}
+          <label class="tr-pick"><input type="checkbox" data-cy="spirit" ${plan.spirit ? "checked" : ""}>换成星灵</label></div>
+        <div class="tr-row">${pv.error ? `<span class="warn">${esc(pv.error)}</span>` : `改完：${esc(pv.layers.map(l => `${LAYER[l.type] || l.type} ${l.max}`).join(" / "))} · ${pv.cost ? `要 ${pv.cost} 奎支` : "方案没有变化"}`}
+          <button class="g-btn small r-main" data-cy-go="${esc(h.kit)}" ${pv.error || !pv.cost ? "disabled" : ""}>改造（由下面选的人付）</button>
+          <button class="g-btn small" data-cy-free="${esc(h.kit)}" ${pv.error || !pv.cost ? "disabled" : ""}>主持人免费改</button></div></div>`;
+    }).join("");
+    return `<p class="r-hint">义体改造规则和单局一样：可改的肉体点数 = 肉体上限 × 改造率；一个角色最多 3 种血量，最内层要留肉体或星灵；每动 1 点肉体 ${ROGUE_CLINIC.cyberPerHp} 奎支（加减都算，换成 / 换回星灵按被换的肉体点数算）。伤势照旧带着，缺的血先从外层扣。</p>
+      <div class="tr-row"><label class="tr-pick"><input type="checkbox" id="tr-clinic-open" ${TRPG.clinicOpen ? "checked" : ""}>诊所向联机玩家开放（玩家可以给自己的角色申请改造，你同意后才生效）</label></div>
+      ${reqHtml}${payerHtml()}${rows}`;
+  };
+  function bindClinic(P) {
+    const box = (kit) => P.querySelector(`[data-cy-box="${kit}"]`);
+    const planOf = (kit) => { const b = box(kit); const p = { spirit: !!(b.querySelector('[data-cy="spirit"]') || {}).checked }; CY_LAYERS.forEach(([k]) => { p[k] = Math.max(0, Math.floor(Number((b.querySelector(`[data-cy="${k}"]`) || {}).value) || 0)); }); return p; };
+    P.querySelectorAll("[data-cy-box]").forEach(b => { b.onchange = () => { cyberForm[b.dataset.cyBox] = planOf(b.dataset.cyBox); render(); }; });
+    P.querySelectorAll("[data-cy-go]").forEach(b => { b.onclick = () => { const k = b.dataset.cyGo; act(ruleCommand("modifyHero", { kit: k, plan: planOf(k) })); delete cyberForm[k]; }; });
+    P.querySelectorAll("[data-cy-free]").forEach(b => { b.onclick = () => { const k = b.dataset.cyFree; act(ruleCommand("modifyHero", { kit: k, plan: planOf(k), free: true })); delete cyberForm[k]; }; });
+    P.querySelectorAll("[data-cyd]").forEach(b => { b.onclick = () => { const [id, ok] = b.dataset.cyd.split(":"); act(ruleCommand("cyberDecide", { id, ok: ok === "1" })); }; });
+    const open = $("tr-clinic-open");
+    if (open) open.onchange = () => act(ruleCommand("clinicOpen", { on: open.checked }));
+  }
   /* ---------- 商人（trpg-merchants.js）：主持人设置商人、卖什么、打折、积分兑换；开店后联机玩家同步看到 ---------- */
   let merchantEdit = null;
   PANELS.merchants = function () {
@@ -1173,10 +1211,10 @@
     if (tableSub || !window.HotseatGame) return;
     tableSub = true;
     HotseatGame.subscribe(() => {
-      if (!HotseatGame.isActive() || !Screens.is("trpg") || !["checks", "party", "merchants", "bag", "shop", "workshop"].includes(tab)) return;
+      if (!HotseatGame.isActive() || !Screens.is("trpg") || !["checks", "party", "merchants", "bag", "shop", "workshop", "clinic"].includes(tab)) return;
       // 玩家那边的检定、属性点申请、转账、在商人那里买 / 兑换：主持人面板跟着刷新
       const v = HotseatGame.getView(), key = JSON.stringify([v.checks, v.attrRequests, LEDGER.purse, Number(state.kuizhi) || 0,
-        (LEDGER.merchants || []).map(m => m.rows.map(r => r.stock)), (LEDGER.workshop || {}).points || 0, bagList().map(x => x.id + x.qty)]);
+        (LEDGER.merchants || []).map(m => m.rows.map(r => r.stock)), (LEDGER.workshop || {}).points || 0, bagList().map(x => x.id + x.qty), (TRPG.cyberRequests || []).map(r => r.id + r.status)]);
       if (key === tableKey) return;
       tableKey = key;
       const a = document.activeElement;
@@ -1192,6 +1230,7 @@
     bindChecks(P);
     bindWorkshop(P);
     bindMerchants(P);
+    bindClinic(P);
     bindAttrRequests(P);
     const on = (id, fn) => { const b = $(id); if (b) b.onclick = fn; };
     $("tr-tabs").querySelectorAll("[data-tab]").forEach(b => { b.onclick = () => { tab = b.dataset.tab; render(); }; });

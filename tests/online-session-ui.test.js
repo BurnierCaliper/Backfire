@@ -1062,6 +1062,35 @@ test("联机：跑团商人——主持人设置商品和折扣、开店，玩�
   assert.deepEqual(f.errors, []);
 });
 
+test("联机：跑团诊所——主持人开放诊所，玩家申请义体改造，主持人同意后生效、从玩家角色的钱包扣钱、跟着存档走", { timeout: 120000 }, async t => {
+  const f = await fixture(t); if (!f) return;
+  const { host, alice, bob, aliceId } = f;
+  await host.evaluate(() => { OnlineGame.start(); });
+  for (const page of [alice, bob]) await page.waitForFunction(() => OnlineGame.getView().screen === "exploration");
+  const aKit = await host.evaluate(pid => { const h = HotseatGame.getView().heroes.find(x => x.owner === pid); return state.units.find(u => u.id === h.id).kit; }, aliceId);
+  await host.evaluate(a => { LEDGER.purse = { [a]: 5000 }; }, aKit);
+  await host.click('[data-tab="clinic"]');
+  await host.check("#tr-clinic-open");
+  await alice.waitForSelector(".ol-trpg-clinic");
+  assert.equal(await bob.evaluate(k => (OnlineGame.getView().packet?.clinic?.heroes || []).some(h => h.kit === k), aKit), false, "Bob 看不到 Alice 角色的诊所信息");
+  await alice.fill(`.ol-trpg-clinic [data-cyber-box="${aKit}"] [data-cy-layer="armor"]`, "2");
+  await alice.click(`.ol-trpg-clinic [data-online="trpgCyber"][data-kit="${aKit}"]`);
+  await host.waitForSelector("[data-cyd]");
+  assert.match(await host.locator("#tr-panel").innerText(), /玩家的改造申请[\s\S]*400 奎支/);
+  await alice.waitForFunction(() => /等主持人同意/.test(document.querySelector(".ol-trpg-clinic")?.innerText || ""));
+  await host.click('[data-cyd$=":1"]');
+  await host.waitForFunction(k => { const u = state.units.find(x => x.kit === k); return u.cyberPlan && u.cyberPlan.armor === 2 && trpgPurse(k) === 4600; }, aKit);
+  await alice.waitForFunction(() => /已改造/.test(document.querySelector(".ol-trpg-clinic")?.innerText || ""));
+  assert.equal(await host.evaluate(k => GAME.campaign.party.find(p => p.kit === k).cyberPlan.armor, aKit), 2, "存进跑团档案");
+  // 重摆场面（读档 / 换人时走 applyCampaignToField）：血量层照方案重建
+  const rebuilt = await host.evaluate(k => { GAME.setupBattle(1); const u = state.units.find(x => x.kit === k); return u.layers.map(l => l.type); }, aKit);
+  assert.deepEqual(rebuilt, ["armor", "flesh"]);
+  // Bob 不能给 Alice 的角色申请
+  const bad = await bob.evaluate(k => OnlineGame.submit({ type: "cyberRequest", kit: k, plan: { armor: 3 } }).then(r => JSON.stringify(r), e => e.message), aKit);
+  assert.match(bad, /"ok":false.*只能给自己的角色申请改造/);
+  assert.deepEqual(f.errors, []);
+});
+
 test("联机跑团：主持人长休，玩家画面也弹结算（不带坚毅）；主持人那边看得到坚毅数值", { timeout: 120000 }, async t => {
   const f = await fixture(t); if (!f) return;
   const { host, alice } = f;

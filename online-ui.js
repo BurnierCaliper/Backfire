@@ -294,7 +294,7 @@
     }
     function suppliesMarkup(data) {
       const bag = data.bag || {}, items = (bag.items || []).filter(item => item.qty > 0);
-      return `${shopMarkup()}${purseMarkup()}<section class="ol-supplies" aria-label="队伍公共物资"><h3>队伍公共物资</h3><div class="ol-points"><span>${view.packet?.purse ? "队伍公账" : "奎支"} ${esc(data.kuizhi ?? 0)}</span><span>水 ${esc(bag.water ?? 0)} ml</span></div><ul>${items.map(item => `<li>${esc(item.name || item.id)} × ${esc(item.qty)}</li>`).join("") || '<li class="ol-muted">背包为空</li>'}</ul></section>`;
+      return `${shopMarkup()}${trpgClinicMarkup()}${purseMarkup()}<section class="ol-supplies" aria-label="队伍公共物资"><h3>队伍公共物资</h3><div class="ol-points"><span>${view.packet?.purse ? "队伍公账" : "奎支"} ${esc(data.kuizhi ?? 0)}</span><span>水 ${esc(bag.water ?? 0)} ml</span></div><ul>${items.map(item => `<li>${esc(item.name || item.id)} × ${esc(item.qty)}</li>`).join("") || '<li class="ol-muted">背包为空</li>'}</ul></section>`;
     }
     function weatherMarkup(data) {
       const symbols = { none: "☀", heat: "♨", snow: "❄", acid: "☂", thunder: "ϟ", glow: "✦", sand: "≋", phase: "◒" };
@@ -424,9 +424,18 @@
       if (!!a.spirit !== !!plan.spirit) pts += c.cyber.fleshMax - CYBER_LAYERS.reduce((s, [k]) => s + (plan[k] || 0), 0);
       return pts * (Number(c.cyber.perHp) || 0);
     }
-    function cyberMarkup(c, purse) {
+    function cyberMarkup(c, purse, action, label) {
       const cur = cyberDraft[c.kit] || c.cyber.current || {};
-      return `<li class="ol-cyber" data-cyber-box="${esc(c.kit)}"><span>义体改造（肉体 ${esc(c.cyber.fleshMax)}，最多改 ${esc(c.cyber.limit)} 点）</span>${CYBER_LAYERS.map(([k, label]) => `<label>${label}<input type="number" min="0" max="${esc(c.cyber.limit)}" step="1" data-cy-layer="${k}" value="${esc(Number(cur[k]) || 0)}"></label>`).join("")}<label><input type="checkbox" data-cy-spirit${cur.spirit ? " checked" : ""}> 换成星灵</label>${button("改造", "rogueCyber", `data-kit="${esc(c.kit)}" data-purse="${esc(purse)}"`, disabled())}</li>`;
+      return `<li class="ol-cyber" data-cyber-box="${esc(c.kit)}"><span>义体改造（肉体 ${esc(c.cyber.fleshMax)}，最多改 ${esc(c.cyber.limit)} 点）</span>${CYBER_LAYERS.map(([k, label]) => `<label>${label}<input type="number" min="0" max="${esc(c.cyber.limit)}" step="1" data-cy-layer="${k}" value="${esc(Number(cur[k]) || 0)}"></label>`).join("")}<label><input type="checkbox" data-cy-spirit${cur.spirit ? " checked" : ""}> 换成星灵</label>${button(label || "改造", action || "rogueCyber", `data-kit="${esc(c.kit)}" data-purse="${esc(purse)}"`, disabled())}</li>`;
+    }
+    /** 跑团诊所（主持人开放时）：给自己的角色填改造方案、提交申请，主持人同意后才生效；钱从这名角色的钱包出 */
+    function trpgClinicMarkup() {
+      const c = view.packet?.clinic;
+      if (!c || !Array.isArray(c.heroes) || !c.heroes.length) return "";
+      const st = { pending: "等主持人同意", done: "已改造", denied: "被拒绝" };
+      return `<section class="ol-rogue-box ol-trpg-clinic" aria-label="诊所"><h3>🦾 诊所：义体改造</h3><ul>${c.heroes.map(h => `${cyberMarkup(h, h.purse, "trpgCyber", "申请改造")}
+        <li class="ol-muted">${esc(h.name)} 的钱包 ${esc(h.purse)} 奎支 · 改造率 ${esc(Math.round(h.cyber.rate * 100))}% · 每动 1 点肉体 ${esc(h.cyber.perHp)} 奎支${h.request ? ` · 最近的申请：${esc(st[h.request.status])}${h.request.cost ? `（${esc(h.request.cost)} 奎支）` : ""}${h.request.note ? "：" + esc(h.request.note) : ""}` : ""}</li>`).join("")}</ul>
+        <p class="ol-muted">一个角色最多 3 种血量，最内层要留肉体或星灵。伤势照旧带着，缺的血先从外层扣。</p></section>`;
     }
     /* ---------- 升级提示：自己操控的角色升级 / 武器升级 / 学到新技能（levelup-ui.js 的画法） ---------- */
     const lvBox = make("div", "online-levelup", "lvu-overlay");
@@ -984,6 +993,16 @@
         case "rogueUnvote": if (!disabled()) await call(() => api.submit({ type: "rogue.vote", option: null })); break;
         case "rogueNeed": if (!disabled()) await call(() => api.submit({ type: "rogue.need", loot: Number(b.dataset.loot), kit: b.dataset.kit, need: b.dataset.want === "1" })); break;
         case "rogueAct": if (!disabled()) await call(() => api.submit({ type: "rogue.act", command: JSON.parse(b.dataset.cmd) })); break;
+        case "trpgCyber": {
+          const kit = b.dataset.kit, plan = cyberPlanOf(kit), c = (view.packet?.clinic?.heroes || []).find(x => x.kit === kit);
+          if (!plan || !c || disabled()) break;
+          const cost = cyberEstimate(c, plan);
+          if (!cost) { notice = "方案没有变化"; render(); break; }
+          if (cost > Number(b.dataset.purse)) { notice = `预计要 ${cost} 奎支，${c.name} 的钱包不够`; render(); break; }
+          if (!confirm(`申请给 ${c.name} 做义体改造，预计花 ${cost} 奎支？\n主持人同意后才会改；伤势照旧带着，缺的血先从外层扣。`)) break;
+          if (await call(() => api.submit({ type: "cyberRequest", kit, plan }))) delete cyberDraft[kit];
+          break;
+        }
         case "rogueCyber": {
           const kit = b.dataset.kit, plan = cyberPlanOf(kit), c = (view.packet?.rogue?.clinic || []).find(x => x.kit === kit);
           if (!plan || !c || !c.cyber || disabled()) break;

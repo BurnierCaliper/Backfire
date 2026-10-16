@@ -12,7 +12,7 @@
   const packetListeners = new Set();
   const listeners = new Set(), authorityContext = {}, actionTypes = new Set(["skill", "move", "standUp", "useItem"]);
   const automatic = new Set(["battle.supportInfo", "battle.checkSolo", "battle.rememberCampaign", "battle.loadCampaign"]);
-  const tableTypes = new Set(["checkOpen", "checkRoll", "checkClose", "attrRequest", "attrDecide", "skillRoll", "showTitle", "purseTransfer", "shopBuy", "shopRedeem"]);
+  const tableTypes = new Set(["checkOpen", "checkRoll", "checkClose", "attrRequest", "attrDecide", "skillRoll", "showTitle", "purseTransfer", "shopBuy", "shopRedeem", "cyberRequest"]);
   const orderTypes = new Set(["orderPick", "orderConfirm", "orderStart", "orderMove", "orderSwapAccept", "answer", "chat", ...tableTypes]);
   const copy = value => JSON.parse(JSON.stringify(value));
   const active = () => !!(enabled && configured && session && authority && !state.solo);
@@ -270,6 +270,18 @@
       if (root.GAME && GAME.rememberCampaign) GAME.rememberCampaign();
       session.chat(sender, "🛒 " + notes.join(" "));
       return { notes };
+    },
+    // 跑团诊所（trpg.js · trpgCyberRequest）：玩家只能给自己操控的角色申请义体改造，主持人在「诊所」页同意后才生效
+    cyberRequest: c => {
+      if (typeof trpgCyberRequest !== "function" || typeof TRPG === "undefined" || !TRPG.active) fail("只有跑团模式有诊所");
+      const kit = String(c.kit || "");
+      const own = heroes().find(u => u.kit === kit);
+      if (!own || (sender !== gm() && session.ownerOf(own.id) !== sender)) fail("只能给自己的角色申请改造");
+      const name = (config.players.find(p => p.id === sender) || {}).name || "";
+      const out = trpgCyberRequest(kit, c.plan, sender, name);
+      if (out.error) fail(out.error);
+      session.chat(sender, `🦾 申请给 ${own.name} 做义体改造（${out.request.cost} 奎支），等主持人同意`);
+      return { request: out.request.id };
     },
     shopRedeem: c => {
       if (typeof trpgMerchantRedeem !== "function" || typeof TRPG === "undefined" || !TRPG.active) fail("只有跑团模式有商人");
