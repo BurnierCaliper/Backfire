@@ -70,9 +70,9 @@
     const titleForm = { text: "", sub: "", tone: "plain", seconds: 4 };
     let lastTitle = null, titlePrimed = false, titleTimer = null;
     let sideTab = { battle: "log", other: "chat" }, sideKeys = { log: "", chat: "" }, seenChat = new Set(), chatPrimed = false, unread = 0, chatSending = false;
-    // 手机竖屏探索：聊天栏默认收成底部一条（只剩频道标签），点标签展开、点「收起」再收回去
+    // 手机竖屏探索 / 战斗：聊天栏默认收成底部一条（只剩频道标签），点标签展开、点「收起」再收回去
     let sideOpen = false;
-    const phoneSide = () => typeof matchMedia === "function" && matchMedia("(max-width: 760px)").matches && !(view.screen === "battle" || view.screen === "ended");
+    const phoneSide = () => typeof matchMedia === "function" && matchMedia("(max-width: 760px)").matches;   // 战斗画面同样默认收起，战场和技能栏不被挤掉
     function paintSideFold() {
       const fold = phoneSide() && !sideOpen && !side.hidden;
       side.classList.toggle("ol-side-folded", fold); document.body.classList.toggle("ol-side-folded", fold);
@@ -844,7 +844,7 @@
     function paintStage() {
       // 重画文字部分时战场那一块会先被拿掉，舞台一下子变矮、滚动位置被压到顶上；等战场挂回去再把滚动位置放回原处
       // （以前玩家每行动一次，画面就跳回最上面，要再往下翻）
-      const top = stage.scrollTop;
+      const top = stage.scrollTop, fieldEl = battle && battle.el.querySelector(".g-field"), fieldTop = fieldEl ? fieldEl.scrollTop : 0;
       html(stage, `${notice || view.notice || view.packet?.systemNotice ? `<p class="ol-notice" role="status">${esc(notice || view.notice || view.packet?.systemNotice)}</p>` : ""}${stageMarkup()}`, "stage");
       const slot = stage.querySelector(".ol-battle-slot");
       if (!slot) return;
@@ -853,6 +853,10 @@
       if (b.el.parentElement !== slot) slot.appendChild(b.el);
       b.update(displayState || view.state || {}, battleUi());
       if (stage.scrollTop !== top) stage.scrollTop = top;
+      // 战斗中舞台本身不滚动，是战场自己滚动：同样放回原处
+      if (fieldEl && fieldEl.isConnected && fieldEl.scrollTop !== fieldTop) fieldEl.scrollTop = fieldTop;
+      // 和单局一样：区域里单位多时逐级缩小铭牌（game.js fitZones），不让卡片被裁掉
+      if (global.GAME && typeof global.GAME.fitZones === "function" && global.requestAnimationFrame) global.requestAnimationFrame(() => { try { global.GAME.fitZones(); } catch (_) { /* 画不全也不卡画面 */ } });
     }
     const myUnits = () => (hs().units || []).filter(u => u.owner === own()).map(u => u.id);
     const isMyTurn = () => view.screen === "battle" && hs().phase === "acting" && myUnits().includes(hs().currentUnitId);
