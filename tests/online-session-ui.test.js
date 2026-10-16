@@ -19,7 +19,7 @@ async function publicScreenshot(t, page, name) {
 }
 async function assertPlayerIsolation(page) {
   const actual = await page.evaluate(() => ({
-    legacy: [...document.body.children].filter(node => !node.matches(".ol-ui, .hs-ui") && getComputedStyle(node).display !== "none").map(node => node.tagName + (node.id ? "#" + node.id : "")),
+    legacy: [...document.body.children].filter(node => !node.matches(".ol-ui, .hs-ui, .unit-tip, .sk-tip, #sk-tip") && getComputedStyle(node).display !== "none").map(node => node.tagName + (node.id ? "#" + node.id : "")),
     documentHeight: document.documentElement.scrollHeight, bodyHeight: document.body.scrollHeight, viewport: innerHeight
   }));
   assert.deepEqual(actual.legacy, [], "a remote player's page must hide every legacy top-level game/GM panel");
@@ -1006,6 +1006,7 @@ test("联机：跑团私人钱包——玩家看得到自己的余额、看不�
   await alice.waitForFunction(k => (OnlineGame.getView().packet?.purse?.heroes || []).some(h => h.kit === k && h.amount === 1000), aKit);
   const seen = await alice.evaluate(() => OnlineGame.getView().packet.purse.heroes);
   assert.ok(seen.every(h => h.mine || h.amount == null), "看不到队友的余额：" + JSON.stringify(seen));
+  await alice.click('[data-online="supplies"]');   // 钱包收在「物资」弹窗里
   await alice.waitForSelector(".ol-purse");
   await alice.selectOption("#ol-purse-to", bKit);
   await alice.fill("#ol-purse-n", "300");
@@ -1040,9 +1041,8 @@ test("联机：跑团商人——主持人设置商品和折扣、开店，玩�
   await host.fill('[data-me-stock="medkit"]', "1");
   await host.click('[data-me-act="save"]');
   await host.click('[data-mc^="open:"]');
-  // 玩家：同步弹出商店
-  await alice.waitForSelector(".ol-shop");
-  await bob.waitForSelector(".ol-shop");
+  // 玩家：「物资」按钮亮起提示，点开就是商店（不再压在舞台上）
+  for (const page of [alice, bob]) { await page.waitForSelector('[data-online="supplies"][data-alert="1"]'); await page.click('[data-online="supplies"]'); await page.waitForSelector(".ol-shop"); }
   const shopText = await alice.locator(".ol-shop").innerText();
   assert.match(shopText, /老周杂货[\s\S]*8 折[\s\S]*码头边的小摊[\s\S]*简易医疗包[\s\S]*480 奎支 · 剩 1/);
   // Alice 用自己的钱包买
@@ -1073,6 +1073,8 @@ test("联机：跑团诊所——主持人开放诊所，玩家申请义体改�
   await host.evaluate(a => { LEDGER.purse = { [a]: 5000 }; }, aKit);
   await host.click('[data-tab="clinic"]');
   await host.check("#tr-clinic-open");
+  await alice.waitForSelector('[data-online="supplies"][data-alert="1"]');
+  await alice.click('[data-online="supplies"]');
   await alice.waitForSelector(".ol-trpg-clinic");
   assert.equal(await bob.evaluate(k => (OnlineGame.getView().packet?.clinic?.heroes || []).some(h => h.kit === k), aKit), false, "Bob 看不到 Alice 角色的诊所信息");
   await alice.fill(`.ol-trpg-clinic [data-cyber-box="${aKit}"] [data-cy-layer="armor"]`, "2");

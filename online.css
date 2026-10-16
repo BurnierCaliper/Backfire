@@ -311,3 +311,7 @@ body.ol-has-side .ol-toast { right: 344px; }
 .ol-shop-price s { opacity: .6; }
 .ol-shop-rows input[type="number"] { width: 64px; }
 .ol-shop-redeem { display: flex; flex-wrap: wrap; gap: 6px; }
+/* 物资弹窗（钱包 / 商店 / 诊所 / 公共物资）与舞台顶上的提示 */
+.ol-supplies-card { width: min(720px, 100%); display: flex; flex-direction: column; gap: 14px; }
+.ol-supplies-card > section { margin: 0; }
+.ol-button[data-alert="1"] { border-color: var(--sk-amber, #e7b13c); box-shadow: 0 0 0 2px #e7b13c66; }
