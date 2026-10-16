@@ -1720,3 +1720,20 @@ test("跑团模式：工坊页能教配方、制作、调积分，刷新后配�
   assert.ok(kit);
   assert.deepEqual(o.errors, []);
 });
+
+test("单局：幕间选择——第 1 幕打完可以改去第一采矿场", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await page.click("#t-new");
+  await page.click('.hero-pick[data-kit="kolt"]');
+  await page.click('.hero-pick[data-kit="helu"]');
+  await page.click("#party-go");
+  await page.waitForSelector("#scr-run:not([hidden])");
+  await page.evaluate(() => { RunFlow.current().stage = "interlude"; RunFlow.refresh(); });
+  await page.waitForSelector('[data-next-region="第一采矿场"]');
+  assert.match(await page.textContent("#run-body"), /第 2 幕：沙漠[\s\S]*第 2 幕：第一采矿场/);
+  await page.click('[data-next-region="第一采矿场"]');
+  await page.waitForFunction(() => RunFlow.current().act === 2);
+  assert.match(await page.textContent("#run-where"), /第一采矿场/);
+  assert.deepEqual(o.errors, []);
+});

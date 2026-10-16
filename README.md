@@ -368,6 +368,21 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **单局：幕间选择，采矿场进入单局**（作者定；rogue-data.js · `ROGUE_CONFIG.altRegions`；rogue.js · `interludeOptions` / `nextAct(run, region)` / `region(run)` 读 `run.regionPick`；rogue-commands.js；rogue-ui.js 幕间画面、地图路线；online-rogue.js 幕间投票；tests/interlude.test.js、tests/ui.test.js、tests/online-rogue.test.js）
+  - 打完一幕的首领，选下一幕去哪：
+    - 第 2 幕：沙漠 / 第一采矿场；
+    - 第 3 幕：巨人城 / 第二采矿场；
+    - 第 4 幕：天网设施 / 第三采矿场。
+  - 两条路敌人等级一样；选项上写着区域简介和会遇到的敌人。额外幕不选，照原来的表走。
+  - 选了采矿场，这一幕的普通战、精英战、悬赏都抽采矿场的敌人。第三采矿场照样有三方混战。地图上的路线也跟着变。
+    - 以前采矿场的 12 种敌人只会在休息点被偷袭时随机碰到。
+  - 联机单局：幕间是队伍投票，两个区域各是一个选项。
+  - 采矿场的天气、战场地形是我先配的占位：
+    - 第一采矿场：酷暑、酸雨、沙暴；有塌陷区域；
+    - 第二采矿场：酷暑、酸雨；有高压场地；
+    - 第三采矿场：微光、相位、雷暴；有高压场地、能量场。
+  - 采矿场还没有专属首领，首领从全部首领里抽（和巨人城一样）。
+
 - **联机跑团：任务日志**（作者提的设计稿；trpg-tasks.js · `trpgTaskGrant` / `trpgTaskRollback` / `trpgTaskReveal` / `trpgTaskMove` / `trpgQuestLog` / `trpgTaskUpgrade`；trpg-commands.js；trpg-ui.js「任务」页；online-game.js（包里加 `quests`）；online-view.js · `projectQuests`；online-ui.js「任务日志」面板和更新提示；online.css、game.css；tests/quest-log.test.js、tests/online-session-ui.test.js）
   - 在现有的跑团任务上扩展，没有另起一套；旧存档的任务自动补上新字段。
   - **主线 / 支线**：新建时选分类，任务页按主线、支线分组；↑↓ 调整在日志里的顺序。

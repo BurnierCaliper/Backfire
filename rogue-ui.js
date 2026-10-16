@@ -732,10 +732,14 @@
         return `<h2>第 ${run.act} 幕 · 首领</h2>
           <p class="r-hint">首领战不能撤退；输了，本局就此结束。</p>
           ${restBeforeRow()}${brokenWarn()}${fightBtn("迎战首领")}`;
-      case "interlude":
+      case "interlude": {
+        // 幕间选择：下一幕去哪
+        const opts = query("interludeOptions");
         return `<h2>第 ${run.act} 幕 · 落幕</h2>
-          <p class="r-hint">幕间选择会在之后的版本加入。</p>
-          <button class="g-btn r-main" id="r-next">前往第 ${run.act + 1} 幕</button>`;
+          <p class="r-hint">${opts.length > 1 ? `选下一幕去哪。两条路都通往第 ${run.act + 1} 幕，敌人等级一样，遇到的敌人、天气和战场不同。` : `前往第 ${run.act + 1} 幕。`}</p>
+          <div class="r-choices r-interlude">${opts.map(o => `<button class="g-btn${o.alt ? "" : " r-main"}" data-next-region="${esc(o.region)}">第 ${run.act + 1} 幕：${esc(o.region)}${o.alt ? "（采矿场）" : ""}
+            <small>${esc(o.desc)}${o.desc ? " · " : ""}会遇到：${esc(o.enemies.slice(0, 8).join("、"))}${o.enemies.length > 8 ? " 等" : ""}</small></button>`).join("")}</div>`;
+      }
       case "victory":
         return `<h2 class="win">四幕通关</h2>
           <p class="r-hint">可以就此收手，也可以继续挑战额外的 ${C.extraActs} 幕：敌人会强到 ${C.extraActLevels.map(r => r[1]).join("、")} 级。</p>
@@ -943,6 +947,7 @@
     body.querySelectorAll("[data-rest-ammo]").forEach(el => { el.onchange = () => { restSel.ammo = restSel.ammo || {}; restSel.ammo[el.dataset.restAmmo] = el.value; render(); }; });
     body.querySelectorAll("[data-rest-spit]").forEach(el => { el.onchange = () => { restSel.spit = restSel.spit || {}; restSel.spit[el.dataset.restSpit] = el.value; render(); }; });
     on("r-next", () => act({ action: "nextAct" }));
+    body.querySelectorAll("[data-next-region]").forEach(b => { b.onclick = () => act({ action: "nextAct", region: b.dataset.nextRegion }); });
     on("r-win", () => act({ action: "afterVictory", goOn: false }));
     on("r-more", () => act({ action: "afterVictory", goOn: true }));
     on("r-home", () => { sessionCommand("leave", { save: false }); Screens.show("title"); });
@@ -961,7 +966,7 @@
       const C = ROGUE_CONFIG, total = Rogue.totalActs(run);
       const route = [];
       for (let a = 1; a <= total; a++) {
-        route.push({ place: C.regions[(a - 1) % C.regions.length], label: `第 ${a} 幕`, state: a < run.act ? "done" : a === run.act ? "now" : "next" });
+        route.push({ place: (run.regionPick && run.regionPick[a]) || C.regions[(a - 1) % C.regions.length], label: `第 ${a} 幕`, state: a < run.act ? "done" : a === run.act ? "now" : "next" });   // 幕间选过采矿场的照选的
       }
       return { here: Rogue.region(run), sub: `${run.solo ? "单人模式" : "单局"} · 第 ${run.act} 幕 · ${Rogue.region(run)}`, party: run.party.map(h => Rogue.heroName(h.kit)), route };
     },

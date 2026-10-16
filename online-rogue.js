@@ -264,7 +264,10 @@
       }
       case "camp": add("camp", "休整（补给够就长休，不够硬撑）", { action: "camp" }); break;
       case "boss": add("fight", "迎战首领", { fight: true }); shortRest(); break;
-      case "interlude": add("nextAct", `前往第 ${r.act + 1} 幕`, { action: "nextAct" }); break;
+      case "interlude":
+        // 幕间选择：下一幕去哪（原本的区域 / 采矿场），队伍投票
+        Rogue.interludeOptions(r).forEach(o => add("nextAct:" + o.region, `前往第 ${r.act + 1} 幕：${o.region}${o.alt ? "（改走采矿场）" : ""}`, { action: "nextAct", region: o.region }));
+        break;
       case "victory": add("win:stop", "就此收手（通关）", { action: "afterVictory", goOn: false }); add("win:more", "继续挑战额外幕", { action: "afterVictory", goOn: true }); break;
     }
     return out;
@@ -294,7 +297,7 @@
     const r = run();
     if (!r) return null;
     const same = o => (cmd.fight && o.cmd.fight) || (!cmd.fight && !o.cmd.fight && o.cmd.action === cmd.action &&
-      ["which", "index", "mode", "kit", "opt", "goOn"].every(k => o.cmd[k] == null || o.cmd[k] === cmd[k]));
+      ["which", "index", "mode", "kit", "opt", "goOn", "region"].every(k => o.cmd[k] == null || o.cmd[k] === cmd[k]));
     return options(r).find(same) || null;
   }
   function isTeamCommand(cmd) {

@@ -48,7 +48,9 @@ const Rogue = (function () {
 
   /* ---------- 幕、区域、天数、敌人等级 ---------- */
   const totalActs = (run) => C.acts + (run.extra ? C.extraActs : 0);
-  const region = (run) => C.regions[((run.growth ? growthAct(run) : run.act) - 1) % C.regions.length];
+  /** 这一幕在哪：幕间选过的就用选的（run.regionPick[幕]），否则照 C.regions 的表 */
+  const defaultRegion = (act) => C.regions[(act - 1) % C.regions.length];
+  const region = (run) => (!run.growth && run.regionPick && run.regionPick[run.act]) || defaultRegion(run.growth ? growthAct(run) : run.act);
   const daysLeft = (run) => Math.max(0, C.daysPerAct - (run.actDay || 0));
   /* ---------- 长线养成（rogue-data.js · ROGUE_GROWTH） ---------- */
   const G = () => (typeof ROGUE_GROWTH !== "undefined" ? ROGUE_GROWTH : { startParty: 2, partyMax: 4, fusionPerTask: 1, drawCost: 1, recruitLevel: 1, maxLevel: 20, fusionItem: "heart_fusion" });
@@ -2270,10 +2272,30 @@ const Rogue = (function () {
   }
 
   /* ---------- 幕间、额外幕、结局 ---------- */
-  function nextAct(run) {
+  /** 幕间选择：下一幕可以去哪（原本的区域，第 2–4 幕再加一个采矿场）。
+   *  [{ region, alt, desc, enemies: [名字…] }]；额外幕只有原本的区域 */
+  function interludeOptions(run) {
+    const next = run.act + 1;
+    const out = [defaultRegion(next)];
+    const alt = !run.extra && C.altRegions && C.altRegions[next];
+    if (alt && out.indexOf(alt) < 0) out.push(alt);
+    const places = typeof WORLD_PLACES !== "undefined" ? WORLD_PLACES : [];
+    const info = typeof ENEMY_INFO !== "undefined" ? ENEMY_INFO : {};
+    const names = typeof enemyPresets === "function" ? Object.fromEntries(enemyPresets().map(p => [p.id, p.name])) : {};
+    return out.map((reg, i) => ({
+      region: reg, alt: i > 0, desc: ((places.find(p => p.name === reg) || {}).desc) || "",
+      enemies: Object.keys(info).filter(id => (info[id].regions || []).indexOf(reg) >= 0).map(id => names[id] || id)
+    }));
+  }
+  /** 去下一幕。pick：幕间选的区域（不给就走原本的区域） */
+  function nextAct(run, pick) {
     if (run.stage !== "interlude") throw new Error("现在不是幕间");
+    const opts = interludeOptions(run);
+    const choice = pick ? opts.find(o => o.region === pick) : opts[0];
+    if (!choice) throw new Error("下一幕不能去这里");
     run.act += 1;
-    const notes = [`进入第 ${run.act} 幕：${region(run)}。`];
+    run.regionPick = Object.assign({}, run.regionPick || {}, { [run.act]: choice.region });
+    const notes = [`进入第 ${run.act} 幕：${region(run)}${choice.alt ? "（幕间选择：改走采矿场）" : ""}。`];
     startAct(run);
     return logAll(run, notes);
   }
@@ -2441,7 +2463,7 @@ const Rogue = (function () {
     role2Options, soloBattleInfo,
     restPlan, restOptions, canLongRest, sheetData, armoryData, lowHpWarning, escortInfo, partOffers, buyPart, sellPart, canSellParts, partStock, partSellPrice, partInstallCost, installPart, removePart, restAtNode, leaveNode, canShortRestBefore, shortRestBeforeNode,
     ambushChance, watchOptions,
-    buy, shopPoints, redeemList, redeem, craftPlace, craftList, craftOdds, craft, knowsRecipe, learnOptions, learnRecipe, rollRecipeChip, salvageList, salvage, setCraftHooks, setCraftJob, craftQueue, craftQueued,  canShop, shopItemName, shopStock, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
+    interludeOptions, buy, shopPoints, redeemList, redeem, craftPlace, craftList, craftOdds, craft, knowsRecipe, learnOptions, learnRecipe, rollRecipeChip, salvageList, salvage, setCraftHooks, setCraftJob, craftQueue, craftQueued,  canShop, shopItemName, shopStock, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
     presentSmiths, smithInfo, claimBlueprint, installBlueprint, blueprintById, weaponModsOf,
     smithQuote, introduceSmith,
     canClinic, cyberInfo, cyberPreview, cyberCost, modifyHero, healCost, healHero,

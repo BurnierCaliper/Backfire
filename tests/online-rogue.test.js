@@ -283,3 +283,22 @@ test("联机单局：工坊——各人给自己的角色排活，房主按「�
   assert.equal((await submit(alice, { type: "rogue.act", command: { action: "salvage", item: "fx_smoke", payer: "ruby" } })).ok, true);
   assert.deepEqual(f.errors, []);
 });
+
+test("联机单局：幕间选择是队伍投票——下一幕去原本的区域还是采矿场，多数决定", { timeout: 120000 }, async t => {
+  const f = await room(t); if (!f) return;
+  const { host, alice, bob } = f;
+  await depart(f);
+  await host.evaluate(() => { RunFlow.current().stage = "interlude"; OnlineRogue.changed(); RunFlow.refresh(); });
+  await alice.waitForFunction(() => OnlineGame.getView().packet?.rogue?.stage === "interlude");
+  const r = await rogueView(alice);
+  assert.deepEqual(r.vote.options.map(o => o.id), ["nextAct:沙漠", "nextAct:第一采矿场"]);
+  assert.match(r.vote.options[1].label, /第一采矿场/);
+  // Alice、Bob 投采矿场，房主在自己的画面上点「沙漠」；2 : 1 去采矿场
+  await alice.click('#online-stage [data-online="rogueVote"][data-option="nextAct:第一采矿场"]');
+  assert.equal((await submit(bob, { type: "rogue.vote", option: "nextAct:第一采矿场" })).ok, true);
+  await host.click('#run-body [data-next-region="沙漠"]');
+  await host.waitForFunction(() => RunFlow.current().act === 2);
+  assert.equal(await host.evaluate(() => Rogue.region(RunFlow.current())), "第一采矿场");
+  await alice.waitForFunction(() => OnlineGame.getView().packet?.rogue?.region === "第一采矿场");
+  assert.deepEqual(f.errors, []);
+});
