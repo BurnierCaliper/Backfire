@@ -17,6 +17,8 @@ const TrpgCommands = (() => {
     restore: () => ledgerRestoreAll([]),
     buy: c => trpgBuy(c.key, c.qty, c.free),
     adjustKuizhi: c => trpgAdjustKuizhi(c.amount, c.why),
+    purseTransfer: c => trpgPurseTransfer(c.from, c.to, c.amount),
+    purseSplit: c => { const n = c.amount == null ? trpgPurse("party") : Math.min(trpgPurse("party"), Math.floor(Number(c.amount) || 0)); if (n <= 0) return ["队伍公账没有钱可分。"]; trpgPurseSet("party", trpgPurse("party") - n); return trpgPurseSplit(n, null, "公账分给大家"); },
     adjustWater: c => trpgAdjustWater(c.amount),
     adjustItem: c => trpgAdjustItem(c.item, c.amount),
     heal: c => trpgUseHeal(c.item, c.kit),
@@ -49,8 +51,11 @@ const TrpgCommands = (() => {
     writeSlot: c => trpgWriteSlot(c.index, c.slot),
     clearSlot: c => trpgClearSlot(c.index)
   };
+  // 花钱的操作可以指定由谁付（payer：角色 kit；不写 / "party" = 队伍公账）
+  const PAYABLE = new Set(["buy", "repair", "upgradeWeapon", "installPart", "installBlueprint", "craft", "redeem", "teachRecipe"]);
   function execute(c) {
     if (!Object.hasOwn(handlers, c.action)) throw new Error("Unknown TRPG action: " + c.action);
+    if (c.payer && PAYABLE.has(c.action)) return trpgPayWith(c.payer, () => handlers[c.action](c));
     return handlers[c.action](c);
   }
   Commands.register("trpg", execute, { domain: "trpg" });

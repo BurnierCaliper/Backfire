@@ -89,13 +89,14 @@ const LEDGER = {
   spit: {},            // 角色 kit → 吐酸攻击的属性（兽人-蜥蜴种族特长，长休时可以换；没写是酸）
   ammoOrder: {},       // 胶囊弹药+：龙哥长休排好的下一场开局弹序（"RRBBRB"），用一场就清掉
   workshop: null,      // 跑团工坊（trpg.js）：{ recipes: 学会的配方, points: 商店积分, carry: 积分零头（奎支）}
+  purse: {},           // 跑团：角色 kit → 私人钱包里的奎支（trpg.js · trpgPurse…）；state.kuizhi 是队伍公账
 
   /** 存进队伍档案 */
   save() {
     return JSON.parse(JSON.stringify({
       day: this.day, hours: this.hours, clock: this.clock, dur: this.dur,
       heroes: this.heroes, weapons: this.weapons, shortUsed: this.shortUsed,
-      restOnce: this.restOnce, shortOnce: this.shortOnce || {}, career: this.career, tasks: this.tasks || [], place: this.place || null, placePos: this.placePos || null, spit: this.spit || {}, ammoOrder: this.ammoOrder || {}, workshop: this.workshop || null, water: ledgerWater()
+      restOnce: this.restOnce, shortOnce: this.shortOnce || {}, career: this.career, tasks: this.tasks || [], place: this.place || null, placePos: this.placePos || null, spit: this.spit || {}, ammoOrder: this.ammoOrder || {}, workshop: this.workshop || null, purse: this.purse || {}, water: ledgerWater()
     }));
   },
   load(s) {
@@ -117,6 +118,8 @@ const LEDGER = {
     this.ammoOrder = s.ammoOrder && typeof s.ammoOrder === "object" ? Object.assign({}, s.ammoOrder) : {};
     this.workshop = s.workshop && typeof s.workshop === "object"
       ? { recipes: Array.isArray(s.workshop.recipes) ? s.workshop.recipes.slice() : [], points: Number(s.workshop.points) || 0, carry: Number(s.workshop.carry) || 0 } : null;
+    this.purse = {};
+    if (s.purse && typeof s.purse === "object") Object.keys(s.purse).forEach(k => { const v = Math.floor(Number(s.purse[k]) || 0); if (v > 0) this.purse[k] = v; });
     if (s.water != null) setLedgerWater(s.water);
   },
   reset() { this.load({}); }

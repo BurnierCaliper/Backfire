@@ -26,7 +26,31 @@
   function uiCommand(action, data) {
     return Commands.dispatch(Object.assign({ type: "trpg.ui", action, level: Number(($("g-level") || {}).value) || 1 }, data || {}));
   }
-  function ruleCommand(action, data) { return Object.assign({ type: "trpg", action }, data || {}); }
+  // 花钱的操作由谁付（私人钱包，trpg.js · trpgPayWith）：面板上的「由谁付」选单，默认队伍公账
+  let payer = "party";
+  const PAYABLE = ["buy", "repair", "upgradeWeapon", "installPart", "installBlueprint", "craft", "redeem", "teachRecipe"];
+  function ruleCommand(action, data) {
+    const c = Object.assign({ type: "trpg", action }, data || {});
+    if (PAYABLE.includes(action) && payer !== "party" && c.payer == null && !c.free) c.payer = payer;
+    return c;
+  }
+  function payerHtml() {
+    const opts = [["party", `队伍公账（${trpgPurse("party")}）`]].concat(heroes().filter(h => !h.dead).map(h => [h.kit, `${h.name}（${trpgPurse(h.kit)}）`]));
+    if (!opts.some(([k]) => k === payer)) payer = "party";
+    return `<div class="tr-row tr-payer">由谁付 <select data-payer>${opts.map(([k, n]) => `<option value="${esc(k)}"${k === payer ? " selected" : ""}>${esc(n)}</option>`).join("")}</select>
+      <span class="r-hint">买东西、修理、升级、改装、制作、兑换都从这里扣钱。</span></div>`;
+  }
+  function walletHtml() {
+    const hs = heroes().filter(h => !h.dead);
+    const all = [["party", "队伍公账"]].concat(hs.map(h => [h.kit, h.name]));
+    const sel = (id) => `<select id="${id}">${all.map(([k, n]) => `<option value="${esc(k)}">${esc(n)}</option>`).join("")}</select>`;
+    return `<h3>钱包</h3>
+      <div class="tr-wallets"><span>队伍公账 <b>${trpgPurse("party")}</b></span>${hs.map(h => `<span>${esc(h.name)} <b>${trpgPurse(h.kit)}</b></span>`).join("")}</div>
+      <p class="r-hint">任务的奎支报酬自动平分进各人钱包（个人任务只进那名角色的）；战斗掉落、下面「获得 / 花掉」的钱进出队伍公账。</p>
+      <div class="tr-row">转账 ${sel("tr-pay-from")} → ${sel("tr-pay-to")} <input type="number" id="tr-pay-n" min="1" value="100" style="width:90px"> 奎支
+        <button class="g-btn small" id="tr-pay-go">转过去</button>
+        <button class="g-btn small" id="tr-pay-split" ${trpgPurse("party") ? "" : "disabled"}>把公账平分给大家</button></div>`;
+  }
 
   /* ---------- 存 / 读：每个操作、每场战斗结算都自动写回当前存档空位 ---------- */
   function writeSlotNow() {
@@ -102,7 +126,8 @@
     $("tr-clock").innerHTML = `第 <b>${LEDGER.day || 1}</b> 天 <b class="tr-time">${clockText(ck)}</b> ${dayPeriod(ck)} · 距上次长休 <b>${durationText(LEDGER.hours || 0)}</b>` +
       (t ? ` · <span class="warn">${esc(exhaustText(t))}</span>` : "");
     const food = FOOD_ORDER.reduce((s, id) => s + bagCount(id), 0);
-    $("tr-supplies").innerHTML = `<span>奎支 <b>${Number(state.kuizhi) || 0}</b></span><span>水 <b>${ledgerWater()}</b> ml</span><span>食物 <b>${food}</b> 份</span>` +
+    const purses = heroes().filter(h => !h.dead).reduce((s, h) => s + trpgPurse(h.kit), 0);
+    $("tr-supplies").innerHTML = `<span title="队伍公账 / 各人钱包合计">公账 <b>${Number(state.kuizhi) || 0}</b> · 钱包 <b>${purses}</b></span><span>水 <b>${ledgerWater()}</b> ml</span><span>食物 <b>${food}</b> 份</span>` +
       `<button class="g-btn small" data-career="1" title="这个存档所有战斗里每个角色的输出占比和团队贡献">整局数据</button>`;
   }
 
@@ -233,7 +258,7 @@
     shop() {
       const groups = [];
       HANDBOOK_SHOP.forEach(r => { if (groups.indexOf(r.group) < 0) groups.push(r.group); });
-      return `<p class="r-hint">价格照手册物品表。「买」扣奎支；「给予」是主持人直接给（战利品、奖励），不扣钱。</p>` +
+      return payerHtml() + `<p class="r-hint">价格照手册物品表。「买」扣奎支；「给予」是主持人直接给（战利品、奖励），不扣钱。</p>` +
         groups.map(g => `<h3>${esc(g)}</h3><div class="shop">${HANDBOOK_SHOP.filter(r => r.group === g).map(r => {
           const id = r.give.item;
           const have = r.give.water ? `${ledgerWater()} ml` : `有 ${bagCount(id)}`;
@@ -250,8 +275,8 @@
       const heal = items.filter(x => x.id === "medkit" || x.id === "clinic");
       const kits = repairPoints();
       const weapons = heroes().flatMap(h => (h.linkedKits || []).map(k => ({ k, name: weaponName(k), d: weaponDur(k), m: weaponDurMax(k) })));
-      return `<h3>奎支与水</h3>
-        <div class="tr-row">奎支 <input type="number" id="tr-kz" value="100" style="width:100px">
+      return walletHtml() + payerHtml() + `<h3>奎支与水</h3>
+        <div class="tr-row">队伍公账 <input type="number" id="tr-kz" value="100" style="width:100px">
           <button class="g-btn small" id="tr-kz-add">＋ 获得</button><button class="g-btn small" id="tr-kz-sub">－ 花掉</button>
           <input type="text" id="tr-kz-why" placeholder="原因（可不填）" style="width:160px"></div>
         <div class="tr-row">水 <input type="number" id="tr-water" value="1000" style="width:100px"> ml
@@ -745,7 +770,7 @@
     }).join("");
     const redeem = EFFECT_ITEMS.filter(x => x.points > 0).map(x =>
       `<button class="g-btn small" data-redeem="${esc(x.id)}" ${pts.points < x.points ? "disabled" : ""}>${esc(x.name)} · ${x.points} 积分</button>`).join("");
-    return `<p class="r-hint">规则见设计文档第 5 节：简单、普通 1 小时，困难 2，极难 3（会推进时间）；失败时非壳体材料丢一半（向上取整），废料、金属留着；有对应熟练项的队友打下手给优势。
+    return payerHtml() + `<p class="r-hint">规则见设计文档第 5 节：简单、普通 1 小时，困难 2，极难 3（会推进时间）；失败时非壳体材料丢一半（向上取整），废料、金属留着；有对应熟练项的队友打下手给优势。
         城里、工匠处的工坊五类都能做；野外休息点只能做投掷罐、弹针、增益 / 减益（主持人按剧情判断）。材料在「商店 · 制作材料（黑市）」里买或给予。</p>
       <h3>制作</h3>
       <div class="tr-up">
@@ -1129,6 +1154,10 @@
     const qty = (key) => (P.querySelector(`[data-qty="${key}"]`) || {}).value || 1;
     P.querySelectorAll("[data-buy]").forEach(b => { b.onclick = () => { if (window.Sfx) Sfx.ui("coin"); act(ruleCommand("buy", { key: b.dataset.buy, qty: qty(b.dataset.buy), free: false })); }; });
     P.querySelectorAll("[data-give]").forEach(b => { b.onclick = () => act(ruleCommand("buy", { key: b.dataset.give, qty: qty(b.dataset.give), free: true })); });
+    // 钱包：由谁付、转账、公账平分
+    P.querySelectorAll("[data-payer]").forEach(s => { s.onchange = () => { payer = s.value; render(); }; });
+    on("tr-pay-go", () => act(ruleCommand("purseTransfer", { from: $("tr-pay-from").value, to: $("tr-pay-to").value, amount: Number($("tr-pay-n").value) || 0 })));
+    on("tr-pay-split", () => act(ruleCommand("purseSplit", {})));
     // 背包
     const why = () => ($("tr-kz-why") || {}).value || "";
     on("tr-kz-add", () => act(ruleCommand("adjustKuizhi", { amount: Math.abs(Number($("tr-kz").value) || 0), why: why() })));

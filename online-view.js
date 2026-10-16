@@ -410,6 +410,7 @@
     if (!value) return "操作未生效，请检查当前权限与可用选项";
     const reasons = [
       [/不是你的|不属于你|不能代替/, "不能操作或代答其他玩家的单位"],
+      [/只能从自己角色的钱包/, "只能从自己角色的钱包转钱"], [/不够转|奎支，不够/, "钱包里的钱不够"], [/不能转给自己/, "不能转给自己"],
       [/还没轮到|不是你的回合|当前顺位/, "还没轮到这个单位"],
       [/行动点不足/, "行动点不足"], [/附赠行动不足/, "附赠行动不足"],
       [/只有房主|只有主持人/, "只有主持人可以执行此操作"],
@@ -552,6 +553,7 @@
     if (own(packet, "rogue")) { const r = get(packet, "rogue"); out.rogue = obj(r) ? scrubHidden(clone(r)) : null; }
     // 任务日志：只留玩家该看的字段（主持人备注、敌人配置、隐藏站的内容在房主那边就去掉了，这里再按白名单过一遍）
     if (own(packet, "quests")) out.quests = projectQuests(get(packet, "quests"));
+    if (own(packet, "purse")) out.purse = projectPurse(get(packet, "purse"));
     // 长休结算：不带坚毅（只带那一句 mood）；游戏时钟
     if (own(packet, "rest")) out.rest = projectRest(get(packet, "rest"));
     if (own(packet, "camp")) out.camp = projectCamp(get(packet, "camp"));
@@ -590,6 +592,17 @@
         weapons: arr(h.weapons).slice(0, 4).filter(obj).map(w => ({ name: str(w.name, 40), dur: pair(w.dur), max: num(w.max) }))
       }))
     };
+  }
+  /** 跑团私人钱包：{ party 公账, heroes: [{ kit, name, amount?（只有自己的 / 主持人才有）, mine }] } */
+  function projectPurse(p) {
+    if (!obj(p)) return null;
+    const num = v => (typeof v === "number" && isFinite(v) ? Math.max(0, Math.floor(v)) : null);
+    const str = (v, n) => typeof v === "string" ? v.slice(0, n) : "";
+    return { party: num(p.party) || 0, heroes: arr(p.heroes).slice(0, 12).filter(obj).map(h => {
+      const o = { kit: str(h.kit, 40), name: str(h.name, 40), mine: !!h.mine };
+      if (num(h.amount) != null) o.amount = num(h.amount);
+      return o;
+    }).filter(h => h.kit) };
   }
   function projectQuests(list) {
     if (!Array.isArray(list)) return null;
@@ -633,7 +646,7 @@
     });
     return out;
   }
-  const api = { SCHEMA, projectPacket, projectQuests, projectRest, projectCamp, projectSheets, projectBagDetail, projectUnit, projectState, projectTape, projectMessages, projectLogs, projectView, projectActionMenu, safeText: text, safeError };
+  const api = { SCHEMA, projectPacket, projectQuests, projectPurse, projectRest, projectCamp, projectSheets, projectBagDetail, projectUnit, projectState, projectTape, projectMessages, projectLogs, projectView, projectActionMenu, safeText: text, safeError };
   root.OnlineView = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof globalThis !== "undefined" ? globalThis : window);

@@ -247,11 +247,11 @@ function trpgTaskNodeDone(id) {
   return notes;
 }
 function trpgNodeLabel(n) { return n.title || (TRPG_NODE_TYPES[n.type] + (n.note ? "（" + n.note + "）" : "")); }
-/** 发奖励（奎支进队伍钱包，经验全队每人）。返回日志行 */
+/** 发奖励（奎支平分进各人钱包——个人任务只进那名角色的；经验全队每人 / 个人任务只给那名角色）。返回日志行 */
 function trpgTaskGrant(r, label, kits) {
   r = r || {};
   const notes = [];
-  if (r.kuizhi > 0) notes.push(...trpgAdjustKuizhi(r.kuizhi, label));
+  if (r.kuizhi > 0) notes.push(...trpgPurseSplit(r.kuizhi, kits, label));
   if (r.xp > 0) notes.push(...trpgGiveXp(kits || null, r.xp));
   if (notes.length && typeof ledgerCapture === "function") ledgerCapture();
   return notes;
@@ -330,13 +330,13 @@ function trpgTaskComplete(id) {
   t.granted.complete = true;
   const r = t.reward;
   const notes = [`任务「${t.name}」完成！`];
-  if (r.kuizhi) { state.kuizhi = (Number(state.kuizhi) || 0) + r.kuizhi; notes.push(`报酬 ${r.kuizhi} 奎支。`); }
+  if (r.kuizhi) notes.push(...trpgPurseSplit(r.kuizhi, trpgTaskXpKits(t), "报酬"));
   if (t.escort) {
     const sp = escortSpec(t.escort, t.escort.level);
     const hp = t.escort.cur != null ? t.escort.cur : sp.hpMax;
     if (escortIntact(hp, sp.hpMax) && r.intactKuizhi) {
-      state.kuizhi += r.intactKuizhi;
       notes.push(`${sp.name}完好送达（${hp}/${sp.hpMax}）：额外 ${r.intactKuizhi} 奎支。`);
+      notes.push(...trpgPurseSplit(r.intactKuizhi, trpgTaskXpKits(t), "完好送达"));
     } else notes.push(`${sp.name}送到了（${hp}/${sp.hpMax}）${escortIntact(hp, sp.hpMax) ? "" : "，受损严重，没有额外报酬"}。`);
   }
   r.items.forEach(x => { bagAdd(x.id, x.qty); notes.push(`获得 ${ITEM_CATALOG[x.id].name} ×${x.qty}。`); });

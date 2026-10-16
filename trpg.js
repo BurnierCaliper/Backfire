@@ -168,6 +168,60 @@ function trpgAdjustKuizhi(n, why) {
   state.kuizhi = Math.max(0, (Number(state.kuizhi) || 0) + n);
   return [`奎支 ${n > 0 ? "+" : ""}${n}${why ? "（" + why + "）" : ""}，现有 ${state.kuizhi}。`];
 }
+/* ---------- 私人钱包 ----------
+ * 每名角色一个钱包（LEDGER.purse，跟着跑团存档走）；state.kuizhi 是队伍公账（战斗掉落、主持人加减的钱进这里）。
+ * 任务的奎支报酬自动平分进还活着的角色的钱包（个人任务只进那名角色的）；队员之间可以互相转钱，公账也能转进 / 转出。
+ * 买东西、升级武器、改装、制作……主持人可以选「由谁付」：选了角色就从他的钱包扣（trpg-commands.js · payer）。 */
+const TRPG_PARTY_PURSE = "party";
+function trpgPurseKits() { return trpgHeroes().filter(h => !h.dead).map(h => h.kit); }
+function trpgPurse(kit) {
+  if (kit === TRPG_PARTY_PURSE) return Math.max(0, Number(state.kuizhi) || 0);
+  return Math.max(0, Math.floor(Number((LEDGER.purse || {})[kit]) || 0));
+}
+function trpgPurseSet(kit, n) {
+  n = Math.max(0, Math.floor(Number(n) || 0));
+  if (kit === TRPG_PARTY_PURSE) { state.kuizhi = n; return; }
+  LEDGER.purse = LEDGER.purse || {};
+  if (n) LEDGER.purse[kit] = n; else delete LEDGER.purse[kit];
+}
+function trpgPurseName(kit) { return kit === TRPG_PARTY_PURSE ? "队伍公账" : (typeof trpgHeroLabel === "function" ? trpgHeroLabel(kit) : kit); }
+/** 把 amount 奎支平分进 kits 的钱包（默认还活着的全队）；分不尽的零头从前面的人起每人多 1。返回日志行 */
+function trpgPurseSplit(amount, kits, why) {
+  amount = Math.floor(Number(amount) || 0);
+  kits = (kits && kits.length ? kits : trpgPurseKits()).slice();
+  if (amount <= 0) return [];
+  if (!kits.length) { trpgPurseSet(TRPG_PARTY_PURSE, trpgPurse(TRPG_PARTY_PURSE) + amount); return [`${amount} 奎支${why ? "（" + why + "）" : ""}：没有能分的人，进队伍公账。`]; }
+  const each = Math.floor(amount / kits.length), rest = amount - each * kits.length;
+  kits.forEach((k, i) => trpgPurseSet(k, trpgPurse(k) + each + (i < rest ? 1 : 0)));
+  if (kits.length === 1) return [`${amount} 奎支${why ? "（" + why + "）" : ""}进 ${trpgPurseName(kits[0])} 的钱包（现有 ${trpgPurse(kits[0])}）。`];
+  return [`${amount} 奎支${why ? "（" + why + "）" : ""}平分给 ${kits.length} 人：每人 ${each}${rest ? `（零头 ${rest} 从前面的人起每人多 1）` : ""}。`];
+}
+/** 转钱：from / to 是角色 kit 或 "party"（队伍公账） */
+function trpgPurseTransfer(from, to, amount) {
+  amount = Math.floor(Number(amount) || 0);
+  const ok = (k) => k === TRPG_PARTY_PURSE || trpgHeroes().some(h => h.kit === k);
+  if (!ok(from) || !ok(to)) return ["没有这个钱包。"];
+  if (from === to) return ["不能转给自己。"];
+  if (amount <= 0) return ["转多少要大于 0。"];
+  if (trpgPurse(from) < amount) return [`${trpgPurseName(from)} 只有 ${trpgPurse(from)} 奎支，不够转 ${amount}。`];
+  trpgPurseSet(from, trpgPurse(from) - amount);
+  trpgPurseSet(to, trpgPurse(to) + amount);
+  if (typeof ledgerCapture === "function") ledgerCapture();
+  return [`${trpgPurseName(from)} 转给 ${trpgPurseName(to)} ${amount} 奎支（${trpgPurseName(from)} 剩 ${trpgPurse(from)}，${trpgPurseName(to)} 现有 ${trpgPurse(to)}）。`];
+}
+/** 用某名角色的钱包付这次操作的钱：把他的钱包换成 state.kuizhi 跑一遍，跑完写回（公账原样还回去） */
+function trpgPayWith(payer, fn) {
+  if (!payer || payer === TRPG_PARTY_PURSE) return fn();
+  if (!trpgHeroes().some(h => h.kit === payer)) return ["没有这名角色。"];
+  const pool = Number(state.kuizhi) || 0;
+  state.kuizhi = trpgPurse(payer);
+  try {
+    const out = fn();
+    trpgPurseSet(payer, state.kuizhi);
+    if (Array.isArray(out)) out.push(`（由 ${trpgPurseName(payer)} 付，钱包剩 ${trpgPurse(payer)}）`);
+    return out;
+  } finally { state.kuizhi = pool; }
+}
 function trpgAdjustWater(ml) {
   ml = Math.floor(Number(ml) || 0);
   if (!ml) return [];

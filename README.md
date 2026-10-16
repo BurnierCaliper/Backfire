@@ -368,6 +368,13 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **跑团私人钱包**（ledger.js · `LEDGER.purse`；trpg.js · `trpgPurse` / `trpgPurseSplit` / `trpgPurseTransfer` / `trpgPayWith`；trpg-tasks.js；trpg-commands.js · `purseTransfer` / `purseSplit` / `payer`；trpg-ui.js；hotseat-game.js · `purseTransfer`；online-game.js · `purseFor`；online-view.js · `projectPurse`；online-ui.js；tests/trpg-purse.test.js、tests/quest-log.test.js、tests/online-session-ui.test.js）
+  - 每名角色一个钱包，跟着跑团存档走；原来的「奎支」改叫**队伍公账**（战斗掉落、主持人「获得 / 花掉」的钱还进出这里）。
+  - **任务奖金自动平分**：任务每一站和完成时的奎支报酬（含护送完好的额外报酬）平分进还活着的角色的钱包，零头从前面的人起每人多 1。**个人任务的钱只进那名角色的钱包**。
+  - **转账**：主持人在「背包」页的「钱包」里可以在任意两个钱包（含公账）之间转钱，也能一键把公账平分给大家。
+    联机玩家在探索画面的「私人钱包」里，可以从自己角色的钱包转给队友或公账；不能动别人的钱包。每笔转账都会写进小队频道。
+  - **由谁付**：主持人的商店、背包、工坊页多一个「由谁付」选单（默认公账）。选了角色，买东西、修理、升级、改装、装图纸、制作、兑换都从他的钱包扣，钱不够照常拦下。
+  - **玩家能看到什么**：自己角色的余额和公账；队友只看得到名字（转账时选人用），看不到余额。主持人看全部。
 - **跑团任务日志：个人任务**（trpg-tasks.js · `category: "personal"` / `owner` / `trpgQuestVisible` / `trpgTaskXpKits` / `trpgHeroLabel`；online-game.js · `kitsOwnedBy`；online-view.js · `projectQuests`；online-ui.js；trpg-ui.js；online.css、game.css；tests/quest-log.test.js）
   - 主持人新建任务时多一个分类「个人」，在编辑里选「属于角色」（新建时先挂在第一名角色身上）。
   - **只有操控这名角色的玩家看得到**：房主按每个人操控的角色算好再发，别的玩家的包里根本没有这条任务（连有这条任务都不知道）；「指定玩家可见」对个人任务不起作用。主持人全都看得到。

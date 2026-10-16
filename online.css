@@ -63,6 +63,9 @@
 .ol-weather-phase { color: #a9e4df; background: #213c3f; }
 .ol-supplies, .ol-result { margin: 16px 0; padding: 14px; border: 1px solid #655947; background: #211c16; }
 .ol-supplies ul { display: flex; flex-wrap: wrap; gap: 6px 22px; padding-left: 20px; margin-bottom: 0; }
+.ol-purse { margin: 16px 0; padding: 14px; border: 1px solid #6b5a2e; background: #241f12; }
+.ol-purse-send { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-top: 8px; }
+.ol-purse-send input[type="number"] { width: 90px; }
 .ol-xp { color: #edc17d; }
 .ol-result { border-color: #c99a46; }
 .ol-result-grade { font-size: 24px; color: #f2c230; font-weight: 700; }

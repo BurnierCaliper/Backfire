@@ -253,9 +253,24 @@
       const labels = { open: "畅通", wall: "危墙", bridge: "不稳桥梁", door: "机关门", void: "空隙" };
       return `<div class="ol-gaps">${Object.entries(data.gaps || {}).filter(([key]) => /^\d-\d$/.test(key)).map(([key, gap]) => `<span>${esc(key.replace("-", " ↔ "))}：${esc(labels[gap.type] || "间隔")}${["wall", "bridge"].includes(gap.type) ? ` · 耐久 ${esc(gap.hp ?? 0)}` : gap.type === "door" ? gap.open ? " · 开" : " · 关" : ""}</span>`).join("")}</div>`;
     }
+    /** 跑团私人钱包（房主按收件人算好：自己的角色有余额，队友只有名字）：看余额、给队友转钱 */
+    const purseDraft = { from: "", to: "", n: "100" };   // 转账表单：包刷新重画时保留填了一半的值
+    function purseMarkup() {
+      const p = view.packet?.purse;
+      if (!p || !Array.isArray(p.heroes)) return "";
+      const mine = p.heroes.filter(h => h.mine && h.amount != null);
+      if (!mine.length) return "";
+      const others = p.heroes.filter(h => !h.mine);
+      const to = [["party", "队伍公账"]].concat(others.map(h => [h.kit, h.name]));
+      return `<section class="ol-purse" aria-label="私人钱包"><h3>私人钱包</h3><div class="ol-points">${mine.map(h => `<span>${esc(h.name)} <b>${esc(h.amount)}</b> 奎支</span>`).join("")}</div>
+        <div class="ol-purse-send"><label>从 <select id="ol-purse-from" data-purse="from">${mine.map(h => option(h.kit, h.name, h.kit === purseDraft.from)).join("")}</select></label>
+        <label>转给 <select id="ol-purse-to" data-purse="to">${to.map(([k, n]) => option(k, n, k === purseDraft.to)).join("")}</select></label>
+        <label><input type="number" id="ol-purse-n" data-purse="n" min="1" step="1" value="${esc(purseDraft.n)}" aria-label="转多少奎支"> 奎支</label>${button("转过去", "purseTransfer", "", disabled())}</div>
+        <p class="ol-muted">任务的奎支报酬自动平分进各人钱包，个人任务的只进你自己的。转账会写进小队频道。</p></section>`;
+    }
     function suppliesMarkup(data) {
       const bag = data.bag || {}, items = (bag.items || []).filter(item => item.qty > 0);
-      return `<section class="ol-supplies" aria-label="队伍公共物资"><h3>队伍公共物资</h3><div class="ol-points"><span>奎支 ${esc(data.kuizhi ?? 0)}</span><span>水 ${esc(bag.water ?? 0)} ml</span></div><ul>${items.map(item => `<li>${esc(item.name || item.id)} × ${esc(item.qty)}</li>`).join("") || '<li class="ol-muted">背包为空</li>'}</ul></section>`;
+      return `${purseMarkup()}<section class="ol-supplies" aria-label="队伍公共物资"><h3>队伍公共物资</h3><div class="ol-points"><span>${view.packet?.purse ? "队伍公账" : "奎支"} ${esc(data.kuizhi ?? 0)}</span><span>水 ${esc(bag.water ?? 0)} ml</span></div><ul>${items.map(item => `<li>${esc(item.name || item.id)} × ${esc(item.qty)}</li>`).join("") || '<li class="ol-muted">背包为空</li>'}</ul></section>`;
     }
     function weatherMarkup(data) {
       const symbols = { none: "☀", heat: "♨", snow: "❄", acid: "☂", thunder: "ϟ", glow: "✦", sand: "≋", phase: "◒" };
@@ -873,6 +888,7 @@
     function input(event) {
       const box = event.target.closest && event.target.closest("[data-cyber-box]");
       if (box) { cyberDraft[box.dataset.cyberBox] = cyberPlanOf(box.dataset.cyberBox); return; }
+      if (event.target.dataset.purse) { purseDraft[event.target.dataset.purse] = event.target.value; return; }
       const key = event.target.dataset.field; if (key && Object.hasOwn(form, key)) form[key] = event.target.value; }
     function change(event) {
       input(event); if (event.target.dataset.field === "mode") render(); if (event.target.dataset.assign) assignments[event.target.dataset.assign] = event.target.value;
@@ -924,6 +940,7 @@
         case "showLog": sideTab.battle = "log"; renderSide(true); side.querySelector(".ol-side-log")?.scrollIntoView({ block: "nearest" }); break;
         case "checkRoll": if (!disabled()) await call(() => api.submit({ type: "checkRoll", checkId: b.dataset.check, unitId: b.dataset.unit })); break;
         case "attrRequest": if (!disabled()) await call(() => api.submit({ type: "attrRequest", unitId: b.dataset.unit, attr: b.dataset.attr })); break;
+        case "purseTransfer": if (!disabled()) await call(() => api.submit({ type: "purseTransfer", from: byId("ol-purse-from")?.value, to: byId("ol-purse-to")?.value, amount: Number(byId("ol-purse-n")?.value) || 0 })); break;
         case "rogueVote": if (!disabled()) await call(() => api.submit({ type: "rogue.vote", option: b.dataset.option })); break;
         case "rogueUnvote": if (!disabled()) await call(() => api.submit({ type: "rogue.vote", option: null })); break;
         case "rogueNeed": if (!disabled()) await call(() => api.submit({ type: "rogue.need", loot: Number(b.dataset.loot), kit: b.dataset.kit, need: b.dataset.want === "1" })); break;

@@ -12,7 +12,7 @@
   const packetListeners = new Set();
   const listeners = new Set(), authorityContext = {}, actionTypes = new Set(["skill", "move", "standUp", "useItem"]);
   const automatic = new Set(["battle.supportInfo", "battle.checkSolo", "battle.rememberCampaign", "battle.loadCampaign"]);
-  const tableTypes = new Set(["checkOpen", "checkRoll", "checkClose", "attrRequest", "attrDecide", "skillRoll", "showTitle"]);
+  const tableTypes = new Set(["checkOpen", "checkRoll", "checkClose", "attrRequest", "attrDecide", "skillRoll", "showTitle", "purseTransfer"]);
   const orderTypes = new Set(["orderPick", "orderConfirm", "orderStart", "orderMove", "orderSwapAccept", "answer", "chat", ...tableTypes]);
   const copy = value => JSON.parse(JSON.stringify(value));
   const active = () => !!(enabled && configured && session && authority && !state.solo);
@@ -254,6 +254,20 @@
     attrDecide: c => session.decideAttr(sender, c.requestId, c.decision),
     skillRoll: c => session.skillRoll(sender, rollSpec(c), !!c.secret),
     showTitle: c => session.showTitle(sender, c),
+    // 跑团私人钱包（trpg.js）：玩家只能从自己角色的钱包转出；主持人哪个钱包都能动。转完写进小队频道，大家看得到
+    purseTransfer: c => {
+      if (typeof trpgPurseTransfer !== "function" || typeof TRPG === "undefined" || !TRPG.active) fail("只有跑团模式有私人钱包");
+      const from = String(c.from || ""), to = String(c.to || "");
+      if (sender !== gm()) {
+        const own = heroes().find(u => u.kit === from);
+        if (!own || session.ownerOf(own.id) !== sender) fail("只能从自己角色的钱包转钱");
+      }
+      const notes = trpgPurseTransfer(from, to, c.amount);
+      if (!/^.+ 转给 /.test(notes[0] || "")) fail(notes[0] || "转不了");
+      if (root.GAME && GAME.rememberCampaign) GAME.rememberCampaign();
+      session.chat(sender, "💰 " + notes[0]);
+      return { notes };
+    },
     answer: c => { if (choice) { const old = choice; choice = null; old.finish(c.extra.index); return { accepted: true }; } return session.answer(sender, c.askId, { unitId: c.helper || null, extra: c.extra || {} }); }
   };
   for (const [type, fn] of Object.entries(orderHandlers)) {

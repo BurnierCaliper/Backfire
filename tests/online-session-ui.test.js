@@ -990,6 +990,33 @@ test("联机：个人任务——主持人给 Alice 的角色发个人任务，A
   assert.deepEqual(f.errors, []);
 });
 
+test("联机：跑团私人钱包——玩家看得到自己的余额、看不到队友的，能给队友转钱，不能动别人的钱包", { timeout: 120000 }, async t => {
+  const f = await fixture(t); if (!f) return;
+  const { host, alice, bob, aliceId, bobId } = f;
+  await host.evaluate(() => { OnlineGame.start(); });
+  for (const page of [alice, bob]) await page.waitForFunction(() => OnlineGame.getView().screen === "exploration");
+  const kitOf = id => host.evaluate(pid => { const h = HotseatGame.getView().heroes.find(x => x.owner === pid); return state.units.find(u => u.id === h.id).kit; }, id);
+  const aKit = await kitOf(aliceId), bKit = await kitOf(bobId);
+  await host.evaluate(([a, b]) => { LEDGER.purse = { [a]: 1000, [b]: 10 }; OnlineGame.publish ? OnlineGame.publish() : HotseatGame.notify && HotseatGame.notify(); }, [aKit, bKit]);
+  // 主持人随便做一步让包刷新
+  await host.click('[data-tab="bag"]');
+  await host.click("#tr-water-add");
+  await alice.waitForFunction(k => (OnlineGame.getView().packet?.purse?.heroes || []).some(h => h.kit === k && h.amount === 1000), aKit);
+  const seen = await alice.evaluate(() => OnlineGame.getView().packet.purse.heroes);
+  assert.ok(seen.every(h => h.mine || h.amount == null), "看不到队友的余额：" + JSON.stringify(seen));
+  await alice.waitForSelector(".ol-purse");
+  await alice.selectOption("#ol-purse-to", bKit);
+  await alice.fill("#ol-purse-n", "300");
+  await alice.click('[data-online="purseTransfer"]');
+  await host.waitForFunction(([a, b]) => trpgPurse(a) === 700 && trpgPurse(b) === 310, [aKit, bKit]);
+  await bob.waitForFunction(k => (OnlineGame.getView().packet?.purse?.heroes || []).some(h => h.kit === k && h.amount === 310), bKit);
+  // 不能从别人的钱包转
+  const bad = await alice.evaluate(b => OnlineGame.submit({ type: "purseTransfer", from: b, to: "party", amount: 1 }).then(r => "ok " + JSON.stringify(r), e => e.message), bKit);
+  assert.match(bad, /"ok":false.*只能从自己角色的钱包转钱/);
+  assert.equal(await host.evaluate(b => trpgPurse(b), bKit), 310);
+  assert.deepEqual(f.errors, []);
+});
+
 test("联机跑团：主持人长休，玩家画面也弹结算（不带坚毅）；主持人那边看得到坚毅数值", { timeout: 120000 }, async t => {
   const f = await fixture(t); if (!f) return;
   const { host, alice } = f;

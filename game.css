@@ -2319,3 +2319,4 @@ body:not([data-screen="battle"]) .g-rank { display: none !important; }
 .rr-sun { background: radial-gradient(circle, #fff3c4 30%, #f2b33d 70%); box-shadow: 0 0 24px 8px rgba(242, 179, 61, .55); }
 .rr-moon { background: radial-gradient(circle at 35% 35%, #f4f1e6 40%, #c9c3b0 75%); box-shadow: 0 0 18px 4px rgba(220, 220, 255, .35); opacity: 0; }
 .rr-clock { position: absolute; left: 12px; bottom: 8px; font-family: var(--num, sans-serif); font-size: 22px; color: var(--bone); text-shadow: 0 1px 3px #000; }
+.tr-wallets { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 4px 0 6px; }

@@ -170,7 +170,9 @@ test("跑团任务：打战斗站按配置摆敌人，护送对象上场；赢�
   cmd(c, { action: "taskNodeDone", id: t.id });
   const done = cmd(c, { action: "taskComplete", id: t.id });
   assert.equal(t.status, "done");
-  assert.equal(c.S.state.kuizhi, 1500, done.join("\n"));
+  // 报酬 1000 + 完好送达 500 平分进各人钱包（跑团私人钱包），不进公账
+  const purses = c.partyHeroes().reduce((sum, h) => sum + c.trpgPurse(h.kit), 0);
+  assert.equal(purses, 1500, done.join("\n"));
   assert.equal(c.bagCount("medkit"), 1);
   assert.equal(c.bagCount("part_b_int_con"), 1);
   assert.equal(c.bagCount("bp_trevor_bigkill"), 1);
