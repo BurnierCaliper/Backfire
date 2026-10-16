@@ -11326,6 +11326,10 @@ function runSkillInner(id, optRun) {
     } else if (id === "yuito_assist") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       hitOne(a, t, { element: "ice", mult: 1, baseBreak: 0, atk, flags: { action: true, assist: true } });
+      // #52：拿到这颗豆之前，先把手上的咖啡豆全部转成咖啡液
+      let brewed = 0;
+      while (beanToLiquid()) brewed++;
+      if (brewed) lines.push(`咖啡豆全部转成咖啡液：+${brewed} → 咖啡液 ${a.resources.liquid}`);
       a.resources.bean = (a.resources.bean || 0) + 1;
       lines.push("咖啡豆 +1 → " + a.resources.bean);
     } else if (id === "yuito_summon") {

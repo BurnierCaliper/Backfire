@@ -197,3 +197,23 @@ test("斩炎打配置物：火属性，打完变回武器", () => {
   assert.equal(boom.hp, hp0 - 3);
   assert.ok(!S.units.some(u => u.id === niu.id && !u.dead && !u.hidden), "变回武器了");
 });
+
+test("人器一心：只有用过半价唤出的那一场，武器人变回武器才不花行动点", () => {
+  const { c, S, units: [yuito] } = battle(["yuito", "kolt"], null, (c, S, y) => { y.feats = ["onemind"]; });
+  const latte = c.spawnWeapon(yuito, "latte");
+  S.attackerId = latte.id;
+  assert.equal(JSON.stringify(c.skillCost("latte_return")), JSON.stringify({ ap: 1 }), "还没用过：照常花行动点");
+  c.featCostSpent(yuito, "yuito_summon");
+  assert.equal(JSON.stringify(c.skillCost("latte_return")), JSON.stringify({}), "这一场用过：免费");
+  c.resetBattleFlags(yuito);
+  assert.equal(JSON.stringify(c.skillCost("latte_return")), JSON.stringify({ ap: 1 }), "下一场又要花");
+});
+
+test("结人协助攻击：拿到咖啡豆之前，先把手上的咖啡豆全部转成咖啡液", () => {
+  const { c, S, units: [yuito], foes } = battle(["yuito", "kolt"], [{ id: "thug_knife", lv: 3, zone: 1 }]);
+  yuito.zone = foes[0].zone;
+  yuito.resources.bean = 3; yuito.resources.liquid = 1;
+  use(c, S, yuito, "yuito_assist", foes[0].id);
+  assert.equal(yuito.resources.liquid, 4);
+  assert.equal(yuito.resources.bean, 1);
+});

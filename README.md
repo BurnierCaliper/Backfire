@@ -368,13 +368,14 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
-- **专长：铁壁 / 挺身 / 人器一心改次数，新专长「决不后退」；绯秋的刀技打配置物**（issue #52；feats.js · `featShortUsed` / `featUnbowedAuto` / `featUnbowedReset`，`featOnceLeft` / `featUseOnce` 按专长的 `short` / `rest` 记次数；ledger.js · `LEDGER.shortOnce` / `useShortOnce` / `shortOnceUsed`；app.js · `finishBlockInner`、`dealBreak`、`recoverFromStun`、`clearStunOnDown`、`hiakiStructureHit` / `tsubameFollowUp`；engine.js · `applyResultToUnit`；game.js · `promptBlock`；tests/issue52-feats.test.js、tests/feat-content.test.js）
+- **专长：铁壁 / 挺身 / 人器一心改次数，新专长「决不后退」；结人协助攻击；绯秋的刀技打配置物**（issue #52；feats.js · `featShortUsed` / `featUnbowedAuto` / `featUnbowedReset`，`featOnceLeft` / `featUseOnce` 按专长的 `short` / `rest` 记次数；ledger.js · `LEDGER.shortOnce` / `useShortOnce` / `shortOnceUsed`；app.js · `finishBlockInner`、`dealBreak`、`recoverFromStun`、`clearStunOnDown`、`hiakiStructureHit` / `tsubameFollowUp`；engine.js · `applyResultToUnit`；game.js · `promptBlock`；tests/issue52-feats.test.js、tests/feat-content.test.js）
   - **每次短休 N 次**：新的次数周期，记在 `LEDGER.shortOnce`（跟存档走）。这个人短休时刷新；长休也刷新（守夜的人不刷新，和其他长休次数一样）。换一场战斗不刷新。
   - **铁壁**：每场 1 次 → 每次短休 1 次。说明改成：「每次短休 1 次：你或同区友方被敌人的单体攻击打中、结算前，可以宣布「铁壁」。这一击视为协助格挡成功，必定挡住，目标完全免伤且不掉架势，这一击的击破改由你承担（架势至少留 1，不会因此失衡）。不消耗附赠动作。」
     - 评分：宣布的人拿协助格挡成功的 30 分，格挡减免的伤害 ×1.2 也记到他身上（以前 `ironwall:` 这个答复找不到人，减免分丢了）；战场数据记一次格挡成功。
     - 热座 / 联机的格挡询问也有「铁壁」选项了（以前只有单机的格挡框有）。
   - **挺身**：每场 1 次 → 每次短休 1 次，仍花 1 附赠；不再「只挡一次」：这一回合内那名队友每次被单体攻击，你都能免费协助格挡（照常掷成功率），回合结束清掉，和掩护一样。
-  - **人器一心**：每场 1 次 → 每长休 1 次（武器生物化只花附赠）；武器人变回武器不花行动点照旧。
+  - **人器一心**：每场 1 次 → 每长休 1 次（武器生物化只花附赠）。说明改成「每长休 1 次，武器生物化只消耗附赠动作；那一场战斗里，武器人变回武器不消耗行动点。」——以前只要有这个专长，收回就永远免费；现在只有用过半价唤出的那一场免费。
+  - **结人的协助攻击**：拿到那 1 颗咖啡豆之前，先把手上的咖啡豆全部转成咖啡液（放弃被动「研磨机」时不转）。
   - **决不后退**（新，专长②，11 级）：「每场 1 次（晕眩后重置），附赠：为自己恢复 2 架势（不超过上限）。受到击破即将失衡时，若还有附赠动作且次数未用，自动发动。」
     - 自动发动在扣架势之前：攻击（`applyResultToUnit`，结人代扛之后）和其他击破（`dealBreak`）都算；只有 +2 之后真的不会失衡才发动，不白花附赠。
     - 主动和自动共用这 1 次；晕眩恢复（或倒地清掉晕眩）后次数回来。

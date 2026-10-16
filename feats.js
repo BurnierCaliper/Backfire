@@ -239,7 +239,7 @@ const FEATS = {
         ctx.lines.push(`拉一把：${a.name} 用 ${it.name} 把 ${t.name} 拉了起来，恢复 ${got}，不扣坚毅生命。`);
       } } },
   onemind: { name: "人器一心", kind: "passive", tier: 3,
-    text: "每长休 1 次，武器生物化只消耗附赠动作；本次长休内武器人变回武器不消耗行动点。",
+    text: "每长休 1 次，武器生物化只消耗附赠动作；那一场战斗里，武器人变回武器不消耗行动点。",
     rest: 1 },
   rally: { name: "号召", kind: "passive", tier: 3,
     text: "每场开战时，你所在区域的我方（含自己）获得 等级÷2（向上取整）点护盾。",
@@ -731,7 +731,8 @@ function featAfterAction(a, apSpent) {
   if (a.resources.blinkUsed !== state.turnNo) a.resources.blinkReady = state.turnNo;
 }
 
-/** 人器一心：唤出武器人只花附赠（每场 1 次）；武器人变回武器不花行动点（party.js · skillCost） */
+/** 人器一心：唤出武器人只花附赠（每长休 1 次）；用了的那一场，武器人变回武器不花行动点（party.js · skillCost）。
+ *  「这一场用过」记在 resources.featUsed.onemind 上，开战清空（app.js · resetBattleFlags） */
 function featCostAdjust(id) {
   const a = featActor();
   if (!a) return null;
@@ -739,12 +740,16 @@ function featCostAdjust(id) {
   if (/_summon$/.test(sid) && featOnceLeft(a, "onemind")) return { bonus: 1 };
   if (/_return$/.test(sid) && a.weaponOf) {
     const owner = (state.units || []).find(u => u.kit === a.weaponOf);
-    if (owner && featHas(owner, "onemind")) return {};
+    if (owner && featHas(owner, "onemind") && ((owner.resources || {}).featUsed || {}).onemind) return {};
   }
   return null;
 }
 function featCostSpent(a, id) {
-  if (a && /_summon$/.test(String(id || "")) && featOnceLeft(a, "onemind")) featUseOnce(a, "onemind");
+  if (a && /_summon$/.test(String(id || "")) && featOnceLeft(a, "onemind")) {
+    featUseOnce(a, "onemind");
+    a.resources = a.resources || {};
+    a.resources.featUsed = Object.assign({}, a.resources.featUsed || {}, { onemind: 1 });   // 这一场收回免费
+  }
 }
 
 /** 跑团规则下队伍里有没有人带某个专长（档案 h 或场上单位） */
