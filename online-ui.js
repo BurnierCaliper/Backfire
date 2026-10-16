@@ -855,8 +855,6 @@
       if (stage.scrollTop !== top) stage.scrollTop = top;
       // 战斗中舞台本身不滚动，是战场自己滚动：同样放回原处
       if (fieldEl && fieldEl.isConnected && fieldEl.scrollTop !== fieldTop) fieldEl.scrollTop = fieldTop;
-      // 和单局一样：区域里单位多时逐级缩小铭牌（game.js fitZones），不让卡片被裁掉
-      if (global.GAME && typeof global.GAME.fitZones === "function" && global.requestAnimationFrame) global.requestAnimationFrame(() => { try { global.GAME.fitZones(); } catch (_) { /* 画不全也不卡画面 */ } });
     }
     const myUnits = () => (hs().units || []).filter(u => u.owner === own()).map(u => u.id);
     const isMyTurn = () => view.screen === "battle" && hs().phase === "acting" && myUnits().includes(hs().currentUnitId);

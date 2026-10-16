@@ -385,6 +385,8 @@ body.online-player.ol-in-battle .ol-stage-heading .ol-info-tools button { min-he
 body.online-player.ol-in-battle .ol-stage > .ol-battle-slot { flex: 1 1 auto; min-height: 0; display: flex; }
 body.online-player.ol-in-battle .ol-battle { flex: 1 1 auto; min-height: 0; margin: 0; }
 body.online-player.ol-in-battle .ol-battle .g-field { flex: 1 1 auto; height: auto; min-height: 0; overflow: auto; }
+/* 区域里单位多时该区自己滚动，卡片不被裁掉（玩家端不碰 GAME，不能用 fitZones） */
+body.online-player.ol-in-battle .ol-battle .g-zone { overflow-y: auto; scrollbar-width: thin; }
 body.online-player.ol-in-battle .ol-weather { white-space: nowrap; }
 body.online-player.ol-in-battle .ol-weather { padding: 3px 8px; gap: 6px; }
 body.online-player.ol-in-battle .ol-weather-icon { font-size: 18px; }
