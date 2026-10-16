@@ -368,6 +368,12 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **跑团任务：剧情任务、奖励只按配置给**（trpg-tasks.js · `trpgTaskTemplate` / `trpgTaskTemplateRoute`；trpg-ui.js 任务编辑；tests/quest-log.test.js、tests/escort-tasks.test.js、tests/online-session-ui.test.js）
+  - 跑团的任务更像剧情推进，不是接一单活。新建任务现在**只有标题和描述**：
+    - **没有路线**：不填路线就是剧情任务，玩家只看到标题、描述（和配了的奖励），主持人在合适的时候「结算任务」或「判定失败」；要按站推进时再在编辑里加站，清剿 / 护送这些类型可以「按模板填路线」（单局模板的三站和天数）。
+    - **没有默认奖励**：以前新任务自带按手册算的奎支和经验；现在奖励全是 0，配置了才发。编辑里可以「按手册填奎支和经验」一键填参考值。
+    - 物品 / 改装件 / 图纸的选单第一项是空的（以前默认选着第一件，看起来像默认会给），没选就加不进去；加了的可以点 × 去掉。
+  - 天数填 0 = 不写天数；主持人的任务卡片上没路线的写「剧情（无路线）」。
 - **跑团诊所：义体改造**（trpg.js · `trpgCyberInfo` / `trpgCyberPreview` / `trpgModifyHero` / `trpgCyberRequest` / `trpgCyberDecide`，`TRPG.clinicOpen` / `TRPG.cyberRequests`；trpg-commands.js · `modifyHero` / `clinicOpen` / `cyberDecide`；trpg-ui.js · 「诊所」页；game.js · `packHero` / `applyCampaignToField` 存读 `cyberPlan`；hotseat-game.js · `cyberRequest`；online-game.js（包里加 `clinic`）；online-view.js · `projectClinic`；online-ui.js；tests/trpg-clinic.test.js、tests/online-session-ui.test.js）
   - 以前只有单局能做义体改造，跑团只显示一个改造率。现在跑团多一个「诊所」页，规则和价格跟单局一样：
     - 可改的肉体点数 = 肉体上限 × 改造率；一个角色最多 3 种血量，最内层要留肉体或星灵；

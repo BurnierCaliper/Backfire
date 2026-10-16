@@ -922,6 +922,8 @@ test("联机：任务日志——主持人新建主线、配每一站奖励和�
   await host.fill('[data-te="name"]', "锈港的余烬");
   await host.fill('[data-te="goal"]', "查清码头仓库失火的真相");
   await host.fill('[data-te="gmNote"]', "长老就是幕后买家");
+  // 新任务没有路线（剧情任务）：这里要按站推进，加三站
+  for (let i = 0; i < 3; i++) await host.click('[data-te-act="addNode:event"]');
   await host.fill('[data-te="nodes.0.title"]', "在酒馆打听失火传闻");
   await host.fill('[data-te="nodes.0.reward.xp"]', "50");
   await host.fill('[data-te="nodes.1.title"]', "潜入 7 号仓库");

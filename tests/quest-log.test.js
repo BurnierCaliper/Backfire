@@ -173,3 +173,42 @@ test("个人任务：玩家收到的包照白名单过（分类、属于谁）",
   assert.equal(out[0].owner, "Helumica");
   assert.ok(!("gmNote" in out[0]));
 });
+
+/* ---------- 剧情任务：没有路线、没有默认奖励 ---------- */
+test("新任务只有标题和描述：没有路线、没有奖励（配置了才有）", () => {
+  const { c } = field();
+  ["custom", "clear", "escort"].forEach(kind => {
+    c.trpgTaskCreate(kind, "main");
+    const t = c.trpgTasks()[c.trpgTasks().length - 1];
+    assert.equal(t.nodes.length, 0, kind);
+    assert.deepEqual(plain(t.reward), { kuizhi: 0, xp: 0, items: [], parts: [], blueprints: [], intactKuizhi: 0 }, kind);
+  });
+  // 编辑里「按模板填路线」：照单局的模板给一条路线
+  const route = plain(c.trpgTaskTemplateRoute("clear"));
+  assert.ok(route.nodes.length >= 3 && route.days >= 1);
+});
+
+test("剧情任务（无路线）：发布、接下、直接结算；没配奖励就什么都不发，配了才发", () => {
+  const { c, xp } = field();
+  c.trpgTaskCreate("custom", "main");
+  const t = c.trpgTasks()[c.trpgTasks().length - 1];
+  c.trpgTaskSave(Object.assign(plain(t), { name: "旧港的约定", goal: "去见那个人" }));
+  c.trpgTaskSetStatus(t.id, "posted"); c.trpgTaskAccept(t.id);
+  const log = plain(c.trpgQuestLog("p1", false, []));
+  assert.equal(log[0].name, "旧港的约定");
+  assert.equal(log[0].steps.length, 0);
+  const x0 = xp(), bag0 = c.bagList().length;
+  const out = c.trpgTaskComplete(t.id);
+  assert.equal(t.status, "done", out.join("\n"));
+  assert.equal(xp(), x0, "没有经验");
+  assert.equal(c.bagList().length, bag0, "没有道具 / 改装件");
+  assert.equal(c.trpgPurse("kolt") + c.trpgPurse("helu") + (c.S.state.kuizhi || 0), 0, "没有钱");
+  // 配了奖励的才发
+  c.trpgTaskCreate("custom", "side");
+  const u = c.trpgTasks()[c.trpgTasks().length - 1];
+  c.trpgTaskSave(Object.assign(plain(u), { reward: { kuizhi: 1000, xp: 0, items: [{ id: "medkit", qty: 1 }], parts: [], blueprints: [] } }));
+  c.trpgTaskSetStatus(u.id, "posted"); c.trpgTaskAccept(u.id);
+  c.trpgTaskComplete(u.id);
+  assert.equal(c.bagCount("medkit"), 1);
+  assert.equal(c.trpgPurse("kolt") + c.trpgPurse("helu"), 1000);
+});

@@ -183,6 +183,8 @@ test("跑团任务：护送对象被摧毁 → 任务失败；任务跟着存档
   const c = trpg();
   cmd(c, { action: "taskCreate", kind: "escort" });
   const t = c.trpgTasks()[0];
+  // 新任务没有路线（剧情任务）：像主持人一样「按模板填路线」
+  cmd(c, { action: "taskSave", task: Object.assign(plain(t), { nodes: plain(c.trpgTaskTemplateRoute("escort").nodes) }) });
   cmd(c, { action: "taskStatus", id: t.id, status: "posted" });
   cmd(c, { action: "taskAccept", id: t.id });
   const cfg = c.trpgTaskPrepareBattle(t.id);

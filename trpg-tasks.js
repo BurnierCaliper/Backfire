@@ -155,23 +155,25 @@ function trpgTaskHandbookPay(days, level) {
   return { name: row.name, kuizhi: Math.round((row.kuizhi[0] + row.kuizhi[1]) / 2 / 100) * 100, range: row.kuizhi.slice(), xp: row.xp[band] };
 }
 
-/** 按单局的任务模板给一份草稿（路线、目标、天数照单局的模板，报酬照手册；主持人再改） */
+/** 新任务草稿：跑团的任务更像剧情推进，所以一开始只有标题和描述——没有路线、没有奖励（配置了才有）。
+ *  清剿 / 护送这些类型照单局的模板给个名字和目标；路线、报酬要的话在编辑里按模板 / 手册一键填（trpgTaskTemplateRoute / trpgTaskHandbookPay） */
 function trpgTaskTemplate(kind) {
+  const lv = trpgPartyLevel();
+  const tpl = kind !== "custom" ? (typeof ROGUE_TASKS !== "undefined" ? ROGUE_TASKS : []).find(x => x.kind === kind) : null;
+  return {
+    name: tpl ? tpl.name : "新任务", kind: TRPG_TASK_KINDS[kind] ? kind : "custom",
+    goal: tpl ? tpl.goal.replace("{region}", "外城区") : "", days: 0,
+    reward: { kuizhi: 0, xp: 0, items: [], parts: [], blueprints: [], intactKuizhi: 0 },
+    escort: kind === "escort" ? { kind: "cart", name: "", level: lv } : null,
+    nodes: []
+  };
+}
+/** 按单局的任务模板给一条路线（战斗 → 休息点 → 战斗 / 精英战）和天数；编辑里「按模板填路线」用 */
+function trpgTaskTemplateRoute(kind) {
   const lv = trpgPartyLevel();
   const tpl = (typeof ROGUE_TASKS !== "undefined" ? ROGUE_TASKS : []).find(x => x.kind === kind);
   const fight = (type) => ({ type, note: "", enemies: [{ id: "thug_knife", lv, zone: 2 }, { id: "thug_hammer", lv, zone: 2 }], weather: "none", zoneMode: 2 });
-  const nodes = [fight("battle"), { type: "rest", note: "可以长休的地方" }, fight(tpl && tpl.elite ? "elite" : "battle")];
-  const days = tpl ? tpl.days : 1;
-  const pay = trpgTaskHandbookPay(days, lv);
-  const kuizhi = pay.kuizhi;
-  return {
-    name: tpl ? tpl.name : "新任务", kind: TRPG_TASK_KINDS[kind] ? kind : "custom",
-    goal: tpl ? tpl.goal.replace("{region}", "外城区") : "", days,
-    reward: { kuizhi, xp: pay.xp, items: [], parts: [], blueprints: [],
-      intactKuizhi: kind === "escort" ? Math.round(kuizhi * ESCORT_RULES.intactBonus) : 0 },
-    escort: kind === "escort" ? { kind: "cart", name: "", level: lv } : null,
-    nodes
-  };
+  return { days: tpl ? tpl.days : 1, nodes: [fight("battle"), { type: "rest", note: "可以长休的地方" }, fight(tpl && tpl.elite ? "elite" : "battle")] };
 }
 
 /* ---------- 主持人操作 ---------- */
