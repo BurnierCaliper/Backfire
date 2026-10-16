@@ -285,7 +285,7 @@
     HotseatGame.validateFrom(sender, cmd);
     if (cmd.type === "endTurn") await HotseatGame.withOperator(sender, () => GAME.endTurn());
     else {
-      const result = await HotseatGame.withOperator(sender, () => GAME.act(cmd, { actorId: cmd.actor, skillName: cmd.skill || cmd.type }));
+      const result = await HotseatGame.withOperator(sender, () => GAME.act(cmd, { actorId: cmd.actor, skillName: actionLabel(cmd) }));
       if (result === false) error("规则不允许这个行动");
     }
     publish(); return { ok: true };
@@ -457,6 +457,19 @@
     await new Promise(resolve => { manualResolve = resolve; });
     manualPhase = false; publish();
   }
+  /** 战斗记录里的行动名：查技能的中文名，不把内部技能 id（ruby_aa）露给玩家 */
+  function actionLabel(cmd) {
+    const fixed = { move: "移动", standUp: "起身", useItem: "使用道具", endTurn: "结束行动" }[cmd.type];
+    if (fixed) return fixed;
+    const id = cmd.skill;
+    if (!id) return "行动";
+    try {
+      const actor = state.units.find(u => u.id === cmd.actor);
+      const sk = actor && typeof GAME !== "undefined" && typeof GAME.gameSkills === "function" ? (GAME.gameSkills(actor) || []).find(s => s.id === id) : null;
+      if (sk && sk.name) return sk.name;
+    } catch (_) { /* 取不到就用通用名 */ }
+    return { __move: "移动", __item: "使用道具", __stand: "起身" }[id] || "行动";
+  }
   function onActionSettled(cmd, result, tape, meta) {
     if (!isHost() || restoring) return;
     if (!meta.onlineError && result?.executed !== false) systemNotice = "";
@@ -468,7 +481,7 @@
       if (cmd.type?.startsWith("gm.")) publicLogs.push({ kind: "gm", summary: { "gm.editUnit": "主持人更新了单位数据", "gm.setWeather": "主持人更新了天气", "gm.addProp": "主持人添加了配置物" }[cmd.type] || "主持人调整了战场",
         action: cmd.type === "gm.spawnEnemy" ? "spawn" : cmd.type === "gm.removeUnit" ? cmd.mode : cmd.type === "gm.removeProp" ? (cmd.mode === "destroy" ? "propDestroy" : "propRemove") : cmd.type === "gm.setManual" ? (cmd.enabled ? "manualOn" : "manualOff") : "edit",
         unitName: cmd.type === "gm.spawnEnemy" ? enemyPresets().find(p => p.id === cmd.enemyId)?.name : meta.unitName, propName: meta.propName, zone: cmd.zone, level: cmd.level, at: Date.now() });
-      else if (actor) publicLogs.push({ kind: "action", actorName: actor.name, actionName: meta.skillName || cmd.skill || "行动", at: Date.now() });
+      else if (actor) publicLogs.push({ kind: "action", actorName: actor.name, actionName: (meta.skillName && meta.skillName !== cmd.skill && meta.skillName !== cmd.type ? meta.skillName : actionLabel(cmd)), at: Date.now() });
       else publicLogs.push({ kind: "phase", phase: state.combatPhase, turn: state.turnNo, at: Date.now() });
       publicLogs = publicLogs.slice(-100);
     }
