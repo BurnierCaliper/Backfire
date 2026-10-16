@@ -77,3 +77,15 @@ test("已经标定好的榴弹 / 大酸液弹：被牵制时落点不在牵制�
   assert.equal(a.resources.glReady, false, "下个敌人回合才发射");
   assert.match(logs(), /放弃原来的 1 区，榴弹重新标定在 2 区/);
 });
+
+test("决一死战（#44 违规）：被决斗的敌人范围攻击只打得到灯，同区的其他人不被波及", () => {
+  const { c, st, tou, kolt, a, logs } = field("patrolboat");
+  kolt.zone = 2;   // 柯尔特也站在灯这一区
+  const k0 = c.totalHp(kolt), t0 = c.totalHp(tou);
+  st.combatPhase = "enemy"; c.refreshEnemyEconomy(a);
+  const p = c.EnemyAI.plan(a);
+  p.thunk(); c.BattleSim.resolveQueues(noBlock);
+  assert.ok(c.totalHp(tou) < t0, "灯挨打");
+  assert.equal(c.totalHp(kolt), k0, "柯尔特没被波及");
+  assert.match(logs(), /决一死战：.*只打得到 灯/);
+});

@@ -1029,7 +1029,9 @@ function antFireShell(a, aa, lines) {
   r.shellZone = 0; r.shellPending = false; r.shellReady = false;
   const victims = standingPlayersIn(zone);
   if (!victims.length) { lines.push(`大酸液弹落在 ${zone} 区，那里没有人。`); return; }
-  const main = victims[Math.floor(Math.random() * victims.length)];
+  // 决一死战：被决斗时只能打灯（正中的就是灯；其余人的范围波及在 dealTo 里拦下）
+  const duel = typeof touDuelVictim === "function" ? touDuelVictim(a) : null;
+  const main = duel && victims.includes(duel) ? duel : victims[Math.floor(Math.random() * victims.length)];
   lines.push(`${a.name} 的大酸液弹在 ${zone} 区炸开，正中 ${main.name}。`);
   aa(main, { element: "acid", mult: 2, baseBreak: 2 });
   victims.filter(u => u.id !== main.id).forEach(u => {

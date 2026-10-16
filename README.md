@@ -368,6 +368,14 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **issue #44 收尾**（app.js · `bondHealDice`、`SCORE_RULES.blockSave`、`dealTo` 的决一死战检查；tests/bond-heal.test.js、tests/duel-ranged.test.js、tests/reduce-score.test.js、tests/structures.test.js）
+  - **牵挂（bug）**：结人、拿铁给被牵挂的人治疗时，所有治疗骰都取最大值。以前只有冰美式。
+    - 现在冰美式、爱意、酸萃、双重奏都算；
+    - 爱意按施加之前就被牵挂来算（「先治疗后挂牵挂」的时序还在讨论）。
+  - **评分**：协助格挡挡下的伤害每点从 1 分改成 1.2 分（向下取整）；每次格挡成功 +30 不变。
+  - **决一死战（违规）**：被决斗的敌人只能攻击灯，它的范围攻击（电弧扫射、榴弹……）也只打得到灯，同区其他人不被波及；大酸液弹正中的就是灯。首领机制（死刑、齐射）和环境伤害不算它的攻击，照旧。
+  - 核实过、不用改：单人模式的「支援」伙伴直接在目标所在区登场，不存在穿墙协助。
+
 - **沙灵聚合体一阶段：狂暴连打**（作者定；engine.js · `AGG_RUSH`；enemies.js · `aggRushPrep` / `aggRushRelease` / `aggRushHitDone` / `aggRushSettle`；ai.js；app.js（协助格挡 +10%、状态栏）；bestiary.js；tests/aggregate-rush.test.js）
   - **预备**：花 1 行动点，盯上一名随机敌人；被嘲讽、决一死战时就盯牵制者。
     - 敌人卡片上显示「连打预告」，聚合体显示「预备狂暴连打」。

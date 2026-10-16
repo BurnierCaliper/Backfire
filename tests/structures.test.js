@@ -326,8 +326,8 @@ test("评分：协助格挡成功 +30（记在格挡的人身上）", () => {
   c.finishBlock(ruby.id, { roll: 1, ok: true, chance: 50 });
   assert.equal(st.battleScore.parts.block, 30);
   assert.equal(st.battleScore.parts.action, 5, "格挡用掉 1 次附赠行动 +5");
-  assert.equal(st.battleScore.parts.blockSave, 5, "挡下的 5 点伤害算格挡减免");
-  assert.equal(st.battleStats[ruby.id].score, 40);
+  assert.equal(st.battleScore.parts.blockSave, 6, "挡下的 5 点伤害 × 1.2 算格挡减免");
+  assert.equal(st.battleStats[ruby.id].score, 41);
 });
 
 test("评分：触发属性克制的一击，伤害 / 击破 / 溢出 / 击杀分 +25%，单独记成「克制加成」", () => {

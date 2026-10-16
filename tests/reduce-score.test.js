@@ -41,13 +41,13 @@ test("完全免伤（屹立不倒）也算：整击都是减免", () => {
   assert.equal(st.battleScore.parts.reduce, 18);
 });
 
-test("协助格挡成功：减免的伤害 ×1 记成「格挡减免」分，记在格挡的人身上，不算受击者的减伤", () => {
+test("协助格挡成功：减免的伤害 ×1.2（向下取整）记成「格挡减免」分，记在格挡的人身上，不算受击者的减伤", () => {
   const { c, st, foe, ruby, kolt } = field();
   kolt.layers = [{ type: "flesh", current: 300, max: 300 }];
   ruby.bonus = 1;
   c.dealTo(foe, kolt, hitOpt(8, { blockResolved: false }));
   c.finishBlock(ruby.id, { roll: 1, ok: true, chance: 60 });
-  assert.equal(st.battleScore.parts.blockSave, 8);
+  assert.equal(st.battleScore.parts.blockSave, 9, "8 × 1.2 = 9.6 → 9");
   assert.equal(st.battleStats[ruby.id].avoided, 8);
   assert.equal(st.battleScore.parts.reduce || 0, 0);
 });
@@ -59,7 +59,7 @@ test("空手格挡成功：少挨的那一半算格挡减免，不重复算成�
   kolt.bonus = 1; kolt.weaponHeld = false;
   c.dealTo(foe, ruby, hitOpt(10, { blockResolved: false }));
   c.finishBlock(kolt.id, { roll: 1, ok: true, chance: 60 });
-  assert.equal(st.battleScore.parts.blockSave, 5);
+  assert.equal(st.battleScore.parts.blockSave, 6, "少挨 5 点 × 1.2 = 6");
   assert.equal(st.battleScore.parts.reduce || 0, 0);
 });
 

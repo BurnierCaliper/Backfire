@@ -2497,7 +2497,7 @@ const SCORE_RULES = {
   overkill: 1.5,   // 打死敌人时溢出的每点伤害（向下取整）
   kill: { minion: 20, elite: 100, boss: 300 },
   reduce: 1.5,     // 我方受击时，减伤减免掉的每点伤害（天气、血量改造、角色能力……完全免伤也算）
-  blockSave: 1,    // 协助格挡成功减免掉的每点伤害（空手格挡成功：少挨的那一半）
+  blockSave: 1.2,  // 协助格挡成功减免掉的每点伤害（#44：1 → 1.2）（空手格挡成功：少挨的那一半）
   ap: 10,          // 我方每用 1 点行动点
   apGiftShare: 0.5,   // 队友给的行动点（意式浓缩……）：用它的那次行动得的分，这个比例记在给行动点的人身上
   bonusAction: 5,  // 我方每用 1 次附赠行动
@@ -7508,6 +7508,17 @@ function dealTo(attacker, target, opt) {
   const assisting = !!opt.flags.assist || !!(attacker && state._assistBy && state._assistBy === attacker.id);
   // 危墙 / 关着的机关门挡住：先判，再进协助格挡（以前先弹格挡，格挡者花掉附赠、扣了耐久，这一击才被墙挡住）
   // lob：越墙的抛射（扭矩酸液炮蓄力、碎渣重炮的迫击炮）不被危墙 / 门挡住
+  // 决一死战（#44）：被决斗的敌人只能攻击灯——它的范围攻击（电弧扫射、榴弹……）也只打得到灯，同区的其他人不被波及。
+  // 首领机制（死刑、齐射……）和环境伤害不算它的攻击行动，不拦
+  if (attacker && !attacker.isPlayer && target && target.isPlayer && opt.flags.action && opt.flags.aoe && !opt.flags.environment && !opt.flags.mechId && !opt.flags.execution &&
+      typeof touDuelVictim === "function") {
+    const duel = touDuelVictim(attacker);
+    if (duel && target.id !== duel.id) {
+      const msg = `决一死战：${attacker.name} 只打得到 ${duel.name}，${target.name} 没被波及。`;
+      appendLog(msg);
+      return { res: { ok: false, total: 0, breakDealt: 0, log: [msg], perHit: [] }, extra: [msg] };
+    }
+  }
   if (attacker && target && target.zone != null && attacker.zone != null && !opt.flags.diffract && !opt.flags.locked && !opt.flags.lob) {
     const block = lineBlocked(attacker.zone, target.zone);
     if (block) {
@@ -8015,6 +8026,15 @@ function setHiakiStance(u, stance) {
   }
 }
 
+/** 牵挂（#44）：结人、拿铁给被牵挂的人治疗时，所有治疗骰取最大值。返回 { total, text, maxed } */
+function bondHealDice(healer, target, n, sides, bonus) {
+  const y = findKit("yuito", state.units);
+  const mine = healer && (healer.kit === "yuito" || healer.kit === "latte");
+  const maxed = !!(mine && y && y.resources && target && y.resources.bondId === target.id);
+  if (!maxed) return Object.assign(takeDice(n, sides, bonus || 0), { maxed: false });
+  const total = n * sides + (Number(bonus) || 0);
+  return { total, text: `最大值 ${n}*${sides}${bonus ? "+" + bonus : ""} = ${total}`, maxed: true };
+}
 function setBond(yuito, ally) {
   if (!yuito || !ally) return;
   if (typeof passiveOn === "function" && !passiveOn(yuito)) return;   // 放弃被动「思念」
@@ -11198,11 +11218,10 @@ function runSkillInner(id, optRun) {
         if (mode === "heal") {
           // 每五级骰面升一档：2d4 → 2d6 → 2d8 …（骰子个数不变）
           const sides = leveledSides(y.level, 4);
-          const bonded = y.resources.bondId === tgt.id;
-          const r = bonded ? { total: 2 * sides, text: `最大值 2*${sides}` } : takeDice(2, sides, 0);
+          const r = bondHealDice(y, tgt, 2, sides, 0);
           healUnit(tgt, r.total);
           tgt.def = Math.min(tgt.defMax || tgt.def, (Number(tgt.def) || 0) + 1);
-          lines.push(`冰美式治疗 ${tgt.name} ${r.text}${bonded ? "（牵挂取最大值）" : ""}，架势 +1。`);
+          lines.push(`冰美式治疗 ${tgt.name} ${r.text}${r.maxed ? "（牵挂取最大值）" : ""}，架势 +1。`);
         } else {
           visibleEnemies(tgt.zone).forEach(u => {
             hitOne(a, u, { element: "ice", mult: 0.75, baseBreak: 1, atk, flags: { action: true, aoe: true } });
@@ -11917,7 +11936,11 @@ function runSkillInner(id, optRun) {
         const dmg = dmgR.total;
         lines.push(`酸萃掷骰 治疗 ${healR.text} / 伤害 ${dmgR.text}`);
         fieldUnits().filter(u => Number(u.zone) === Number(z)).forEach(u => {
-          if (u.isPlayer && !isWeaponUnit(u)) { healUnit(u, heal); lines.push(`${u.name} 恢复 ${heal}`); }
+          if (u.isPlayer && !isWeaponUnit(u)) {
+            const hb = bondHealDice(a, u, nd, 4, 0);   // 被牵挂的人：骰子取最大值
+            const amt = hb.maxed ? hb.total : heal;
+            healUnit(u, amt); lines.push(`${u.name} 恢复 ${amt}${hb.maxed ? "（牵挂取最大值）" : ""}`);
+          }
           // 区域效果是范围攻击：打飞行敌人不用逐个多付附赠（以前对每只飞行敌人各扣 1 个，不够时后面的不受伤）
           else if (!u.isPlayer) hitOne(a, u, { atk: 0, mult: 0, flat: dmg, element: "acid", baseBreak: 0, flags: { action: true, aoe: true } });
         });
@@ -11926,9 +11949,10 @@ function runSkillInner(id, optRun) {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       a.zone = t.zone;
       // 2d4，每五级骰面升一档（2d6、2d8…）
-      const healR = takeDice(2, leveledSides(a.level, 4), 0);
+      // 牵挂：目标在这次施加之前就被牵挂，治疗骰取最大值（先治疗后挂牵挂的时序待定，先按施加前算）
+      const healR = bondHealDice(a, t, 2, leveledSides(a.level, 4), 0);
       const heal = healR.total;
-      lines.push(`爱意掷骰 ${healR.text}`);
+      lines.push(`爱意掷骰 ${healR.text}${healR.maxed ? "（牵挂取最大值）" : ""}`);
       const y = findKit("yuito", state.units);
       // 目标在施加之前就已经被牵挂：拿铁自己也恢复同量的生命和架势（先判断再施加，不然每次都成立）
       const already = !!(y && y.resources && y.resources.bondId === t.id);
@@ -12065,10 +12089,10 @@ function runSkillInner(id, optRun) {
       const tgt = fl && fl.picks.target ? unitById(fl.picks.target) : t;
       if (!tgt || !tgt.isPlayer) { lines.push("先选要治疗的友方。"); return paintSkillLog(lines.join("\n")); }
       a.resources.liquid -= 2;
-      const r = takeDice(Math.max(1, Number(a.level) || 1), 6, 0);
+      const r = bondHealDice(a, tgt, Math.max(1, Number(a.level) || 1), 6, 0);   // 牵挂：取最大值
       const got = healUnit(tgt, r.total);
       const over = Math.max(0, r.total - (Number(got) || 0));
-      lines.push(`双重奏：${tgt.name} 治疗 ${r.text}，恢复 ${got}。`);
+      lines.push(`双重奏：${tgt.name} 治疗 ${r.text}${r.maxed ? "（牵挂取最大值）" : ""}，恢复 ${got}。`);
       if (over > 0) {
         tgt.duetAtk = (Number(tgt.duetAtk) || 0) + over;
         lines.push(`溢出的 ${over} 点治疗变成 atk +${over}（下回合开始失去）。`);
