@@ -368,6 +368,25 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **联机跑团：任务日志**（作者提的设计稿；trpg-tasks.js · `trpgTaskGrant` / `trpgTaskRollback` / `trpgTaskReveal` / `trpgTaskMove` / `trpgQuestLog` / `trpgTaskUpgrade`；trpg-commands.js；trpg-ui.js「任务」页；online-game.js（包里加 `quests`）；online-view.js · `projectQuests`；online-ui.js「任务日志」面板和更新提示；online.css、game.css；tests/quest-log.test.js、tests/online-session-ui.test.js）
+  - 在现有的跑团任务上扩展，没有另起一套；旧存档的任务自动补上新字段。
+  - **主线 / 支线**：新建时选分类，任务页按主线、支线分组；↑↓ 调整在日志里的顺序。
+  - **多条并行**：可以同时进行好几条任务（以前只能一条）。一场战斗还是一次只打一个任务的站。
+  - **每一站的奖励**：编辑时每一站可以填「完成奖励：经验/人、奎支」，按「这一站完成」时发。
+    - 经验全队每人，奎支进队伍钱包；不乘战斗经验倍率，和任务结算一样。
+    - 每站只发一次：回退再推进不重发；回退也不收回，要收回用「后台」手动改。
+    - 完成奖励也只发一次。
+  - **给玩家看的内容**：
+    - 每一站可以写「玩家看到的步骤」；原来的「说明」现在只给主持人看。
+    - 一站可以先对玩家隐藏，玩家日志里显示「？？？（尚未揭示）」；走到这一站会自动揭示，也可以在任务卡上手动「揭示」。
+    - 任务可以设成「指定玩家」可见，只有勾选的玩家看得到。
+    - 「主持人备注」只有主持人看得到。
+  - **联机玩家**：画面上多了「任务日志」按钮，旁边写着进行中的条数。
+    - 面板里分主线、支线：每一步打勾或高亮当前步，写出每步奖励、「已领」，以及完成奖励。
+    - 有新任务、推进、完成、失败时，弹一句「📜 任务更新：……」。
+    - 面板开着时跟着更新。
+  - **信息隔离**：草稿、没指定给他的任务、主持人备注、主持人说明、敌人配置、隐藏站的文字和奖励，房主在发包前就去掉了；`online-view.js` 再按白名单过一遍。
+
 - **issue #44 收尾**（app.js · `bondHealDice`、`SCORE_RULES.blockSave`、`dealTo` 的决一死战检查；tests/bond-heal.test.js、tests/duel-ranged.test.js、tests/reduce-score.test.js、tests/structures.test.js）
   - **牵挂（bug）**：结人、拿铁给被牵挂的人治疗时，所有治疗骰都取最大值。以前只有冰美式。
     - 现在冰美式、爱意、酸萃、双重奏都算；

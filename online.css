@@ -267,3 +267,31 @@ body.ol-has-side .ol-toast { right: 344px; }
 .ol-rogue-route .ol-open { font-weight: 700; color: #f5c542; }
 .ol-rogue-party { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); gap: 10px; margin: 0 0 12px; }
 .ol-rogue-party > p { grid-column: 1 / -1; margin: 0; }
+
+/* ---------- 任务日志（玩家）：主线 / 支线，步骤竖排，当前步金色，完成划线，隐藏「？？？」 ---------- */
+.ol-quest-card { max-width: 720px; max-height: 88vh; overflow-y: auto; }
+.ol-q-sec { margin: 16px 0 6px; padding-bottom: 3px; font-size: 13px; letter-spacing: .1em; color: #cbb99a; border-bottom: 1px solid #4d4337; }
+.ol-q-card { margin: 0 0 8px; padding: 10px 12px; background: #231c16; border: 1px solid #4d4337; }
+.ol-q-card.ol-q-active { border-color: #f2b33d; }
+.ol-q-card header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: flex-start; gap: 6px 10px; margin: 0; }
+.ol-q-card header b { font-size: 15px; }
+.ol-q-tag { font-size: 12px; color: #9d9081; }
+.ol-q-tag.ol-q-main { color: #f2b33d; }
+.ol-q-st { font-size: 11px; padding: 0 7px; border: 1px solid #4d4337; }
+.ol-q-active .ol-q-st { border-color: #f2b33d; color: #f2b33d; }
+.ol-q-done .ol-q-st { border-color: #8fe39a; color: #8fe39a; }
+.ol-q-failed .ol-q-st { border-color: #c44a44; color: #f0a09a; }
+.ol-q-done, .ol-q-failed { opacity: .85; }
+.ol-q-goal { margin: 4px 0; }
+.ol-q-steps { margin: 6px 0 4px; padding: 0; list-style: none; }
+.ol-q-steps li { display: flex; flex-wrap: wrap; gap: 4px 8px; padding: 3px 0 3px 8px; margin: 2px 0; border-left: 3px solid #4d4337; }
+.ol-q-steps li.ol-q-done { opacity: .6; }
+.ol-q-steps li.ol-q-done .ol-q-t { text-decoration: line-through; }
+.ol-q-steps li.ol-q-cur { border-color: #f2b33d; color: #f2b33d; }
+.ol-q-steps li.ol-q-lock { color: #6b6056; }
+.ol-q-rw { margin-left: auto; font-size: 12px; white-space: nowrap; }
+.ol-q-rw.ol-q-got { opacity: .7; }
+.ol-q-xp { color: #8cc0f0; }
+.ol-q-kz { color: #f2b33d; }
+.ol-q-rewards { display: flex; flex-wrap: wrap; gap: 6px 10px; margin-top: 6px; font-size: 12px; }
+.ol-q-rewards > span:not(.ol-muted) { padding: 1px 8px; border: 1px solid #4d4337; background: rgba(0, 0, 0, .3); }

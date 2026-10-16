@@ -445,7 +445,9 @@
     return `<div class="tk-route">${t.nodes.map((n, i) => {
       const cls = t.status === "active" ? (i < t.index ? " done" : i === t.index ? " cur" : "") : "";
       const foes = n.template ? `：模板「${n.template.name}」` : n.enemies.length ? `：${n.enemies.map(e => `${presetName(e.id)} Lv${e.lv}`).join("、")}${n.weather !== "none" ? ` · ${WX[n.weather]}` : ""}` : "";
-      return `<span class="tk-node${cls}" title="${esc(n.note || "")}">${i + 1}. ${esc(NODE_T()[n.type])}${esc(foes)}${n.note ? ` · ${esc(n.note)}` : ""}</span>`;
+      const rw = [n.reward && n.reward.xp ? `+${n.reward.xp} 经验` : "", n.reward && n.reward.kuizhi ? `+${n.reward.kuizhi} 奎支` : ""].filter(Boolean).join(" ");
+      const got = t.granted && t.granted.nodes.includes(i);
+      return `<span class="tk-node${cls}${n.hidden ? " tk-hid" : ""}" title="${esc(n.note || "")}">${i + 1}. ${n.hidden ? "🔒" : ""}${esc(n.title || NODE_T()[n.type])}${n.title ? ` · ${esc(NODE_T()[n.type])}` : ""}${esc(foes)}${n.note ? ` · ${esc(n.note)}` : ""}${rw ? ` <b class="tk-rw${got ? " got" : ""}">${esc(rw)}${got ? " ✓" : ""}</b>` : ""}</span>`;
     }).join("")}</div>`;
   }
   function taskCardHtml(t) {
@@ -458,19 +460,39 @@
     if (t.status === "posted") btns.push(`<button class="g-btn small" data-tk="accept:${id}">队伍接下任务</button>`, `<button class="g-btn small" data-tk="unpost:${id}">撤回为草稿</button>`);
     if (t.status === "active") {
       if (fight) btns.push(`<button class="g-btn small tk-go" data-tk="fight:${id}">打这一站（${esc(NODE_T()[node.type])}）</button>`);
-      if (node) btns.push(`<button class="g-btn small" data-tk="node:${id}">这一站完成</button>`);
+      if (node) {
+        const got = t.granted && t.granted.nodes.includes(t.index);
+        const rw = !got && node.reward ? [node.reward.xp ? `每人 +${node.reward.xp} 经验` : "", node.reward.kuizhi ? `+${node.reward.kuizhi} 奎支` : ""].filter(Boolean).join("、") : "";
+        btns.push(`<button class="g-btn small" data-tk="node:${id}">这一站完成${rw ? `（发 ${esc(rw)}）` : ""}</button>`);
+      }
+      if (t.index > 0) btns.push(`<button class="g-btn small" data-tk="back:${id}" title="已经发过的奖励不收回，再推进也不重发">回退一步</button>`);
       btns.push(`<button class="g-btn small" data-tk="complete:${id}">结算任务（发奖励）</button>`, `<button class="g-btn small" data-tk="fail:${id}">判定失败</button>`);
     }
     btns.push(`<button class="g-btn small" data-tk="edit:${id}">编辑</button>`);
+    btns.push(`<button class="g-btn small" data-tk="up:${id}" title="任务日志里往前挪">↑</button><button class="g-btn small" data-tk="down:${id}" title="任务日志里往后挪">↓</button>`);
+    const hiddenNodes = t.nodes.map((n, i) => (n.hidden ? i : -1)).filter(i => i >= 0);
     if (t.status !== "active") btns.push(`<button class="g-btn small" data-tk="del:${id}">删除</button>`);
+    const vis = t.visibility && t.visibility.mode === "players" ? `仅 ${esc(questPlayerNames(t.visibility.ids))} 可见` : "全队可见";
     return `<div class="tr-up tk-card${t.status === "active" ? " on" : ""}">
-      <div class="tk-head"><b>${esc(t.name)}</b><span class="tk-kind">${esc(TRPG_TASK_KINDS[t.kind])}</span>${st}<span class="tk-days">${t.days} 天</span></div>
+      <div class="tk-head"><b>${esc(t.name)}</b><span class="tk-cat${t.category === "main" ? " main" : ""}">${t.category === "main" ? "主线" : "支线"}</span><span class="tk-kind">${esc(TRPG_TASK_KINDS[t.kind])}</span>${st}<span class="tk-days">${t.days} 天</span><span class="tk-vis">${vis}</span></div>
       ${t.goal ? `<p class="tk-goal">${esc(t.goal)}</p>` : ""}
+      ${t.gmNote ? `<p class="r-hint">主持人备注（玩家看不到）：${esc(t.gmNote)}</p>` : ""}
+      ${t.status === "failed" && t.failWhy ? `<p class="r-hint">失败原因：${esc(t.failWhy)}</p>` : ""}
       <div class="r-hint">报酬：${esc(taskRewardText(t))}</div>
       ${t.escort ? `<div class="r-hint">${taskEscortText(t)}</div>` : ""}
       ${taskRoute(t)}
       ${node ? `<div class="r-hint">当前：第 ${t.index + 1} 站 ${esc(NODE_T()[node.type])}${node.note ? " · " + esc(node.note) : ""}</div>` : t.status === "active" ? `<div class="r-hint">路线走完了，可以结算。</div>` : ""}
+      ${hiddenNodes.length && t.status !== "draft" ? `<div class="tr-row"><span class="r-hint">对玩家隐藏中：</span>${hiddenNodes.map(i => `<button class="g-btn small" data-tk="reveal:${id}:${i}">揭示第 ${i + 1} 站</button>`).join("")}</div>` : ""}
       <div class="tr-row">${btns.join("")}</div></div>`;
+  }
+  /** 联机房间里的玩家（不含主持人）：指定谁能看到这个任务 */
+  function questRoster() {
+    const v = window.OnlineGame && OnlineGame.getView ? OnlineGame.getView() : null;
+    return v && v.active ? (v.players || []).filter(p => !p.gm) : [];
+  }
+  function questPlayerNames(ids) {
+    const r = questRoster();
+    return (ids || []).map(id => (r.find(p => p.id === id) || {}).name || "（不在房间的玩家）").join("、") || "没有人";
   }
   /** 编辑表单：data-te="路径" 的输入直接改 taskEdit；data-te-act 增删行 */
   function taskEditorHtml(t) {
@@ -490,11 +512,17 @@
           <div class="tr-row"><button class="g-btn small" data-te-act="addEnemy:${i}">＋ 敌人</button>
             天气 <select data-te="nodes.${i}.weather">${options(Object.keys(WX).map(k => [k, WX[k]]), n.weather)}</select>
             战场 <select data-te="nodes.${i}.zoneMode">${options([[2, "两区"], [3, "三区"], ["line4", "四区直排"], ["square4", "四区方形 2×2"], ["cross5", "五区十字"]], n.zoneMode)}</select></div></div>`;
-      return `<div class="tk-enode"><div class="tr-row"><b>第 ${i + 1} 站</b>
+      const got = t.granted && t.granted.nodes.includes(i);
+      if (!n.reward) n.reward = { xp: 0, kuizhi: 0 };
+      const rwRow = `<div class="tr-row">玩家看到的步骤 ${inp(`nodes.${i}.title`, n.title || "", 240)}
+          ${got ? `<span class="r-hint">奖励已发 ✓（+${n.reward.xp} 经验 · +${n.reward.kuizhi} 奎支，改了也不会再发）</span>`
+            : `完成奖励：经验/人 ${inp(`nodes.${i}.reward.xp`, n.reward.xp, 60, "number")} 奎支 ${inp(`nodes.${i}.reward.kuizhi`, n.reward.kuizhi, 80, "number")}`}
+          <label class="tr-pick"><input type="checkbox" data-te-hide="${i}" ${n.hidden ? "checked" : ""}>对玩家隐藏（显示「？？？」）</label></div>`;
+      return `<div class="tk-enode${got ? " tk-got" : ""}"><div class="tr-row"><b>第 ${i + 1} 站</b>
           <select data-te="nodes.${i}.type" data-te-rerender="1">${options(Object.keys(NODE_T()).map(k => [k, NODE_T()[k]]), n.type)}</select>
-          说明 ${inp(`nodes.${i}.note`, n.note, 260)}
+          说明（主持人） ${inp(`nodes.${i}.note`, n.note, 220)}
           <button class="g-btn small" data-te-act="up:${i}">↑</button><button class="g-btn small" data-te-act="down:${i}">↓</button>
-          <button class="g-btn small" data-te-act="delNode:${i}">删这一站</button></div>${foes}</div>`;
+          <button class="g-btn small" data-te-act="delNode:${i}">删这一站</button></div>${rwRow}${foes}</div>`;
     }).join("");
     const r = t.reward;
     const itemOpts = Object.keys(ITEM_CATALOG).filter(id => !ITEM_CATALOG[id].part && !ITEM_CATALOG[id].blueprint).map(id => [id, ITEM_CATALOG[id].name]);
@@ -512,7 +540,11 @@
       <h4>编辑任务</h4>
       <div class="tr-row">名称 ${inp("name", t.name, 160)} 类型 <select data-te="kind" data-te-rerender="1">${options(Object.keys(TRPG_TASK_KINDS).map(k => [k, TRPG_TASK_KINDS[k]]), t.kind)}</select>
         天数 ${inp("days", t.days, 52, "number")}</div>
-      <div class="tr-row">目标 <textarea data-te="goal" rows="2" style="width:100%">${esc(t.goal)}</textarea></div>
+      <div class="tr-row">分类 <select data-te="category">${options([["main", "主线"], ["side", "支线"]], t.category || "side")}</select>
+        可见 <select data-te="visibility.mode" data-te-rerender="1">${options([["party", "全队"], ["players", "指定玩家"]], (t.visibility || {}).mode || "party")}</select>
+        ${(t.visibility || {}).mode === "players" ? (questRoster().length ? questRoster().map(p => `<label class="tr-pick"><input type="checkbox" data-te-vis="${esc(p.id)}" ${(t.visibility.ids || []).includes(p.id) ? "checked" : ""}>${esc(p.name)}</label>`).join("") : '<span class="r-hint">现在没有联机玩家；开房后再勾选。</span>') : ""}</div>
+      <div class="tr-row">目标（玩家可见） <textarea data-te="goal" rows="2" style="width:100%">${esc(t.goal)}</textarea></div>
+      <div class="tr-row">主持人备注（只有主持人看得到） ${inp("gmNote", t.gmNote, 420)}</div>
       <h4>奖励</h4>
       <div class="tr-row">奎支 ${inp("reward.kuizhi", r.kuizhi, 90, "number")} 每人经验 ${inp("reward.xp", r.xp, 70, "number")}
         ${e ? `完好额外奎支 ${inp("reward.intactKuizhi", r.intactKuizhi, 90, "number")}` : ""}</div>
@@ -529,14 +561,18 @@
       <div class="tr-row"><button class="g-btn" data-te-act="save">保存</button><button class="g-btn" data-te-act="cancel">取消</button></div>
     </div>`;
   }
+  let newTaskCat = "side";
   PANELS.tasks = function () {
     const list = trpgTasks();
     const order = { active: 0, posted: 1, draft: 2, done: 3, failed: 4 };
-    const cards = list.slice().sort((a, b) => order[a.status] - order[b.status]).map(t => taskEdit && taskEdit.id === t.id ? taskEditorHtml(taskEdit) : taskCardHtml(t)).join("");
-    return `<p class="r-hint">主持人在这里发布任务：先建草稿、配置路线（每一站是什么，战斗站的敌人、天气、战场）和奖励，再「发布」给队伍看，队伍「接下」后按站推进。
-        战斗站点「打这一站」会按配置摆好敌人进入战斗，打赢自动走到下一站；护送任务的护送对象会跟着上场，血量跨战斗保留。走完路线后「结算任务」发奖励。</p>
-      <div class="tr-row">新建任务：${Object.keys(TRPG_TASK_KINDS).map(k => `<button class="g-btn small" data-tk="new:${k}">${esc(TRPG_TASK_KINDS[k])}</button>`).join("")}</div>
-      ${cards || '<p class="r-hint">还没有任务。</p>'}`;
+    const group = (cat, title) => {
+      const rows = list.filter(t => (t.category === "main" ? "main" : "side") === cat).sort((a, b) => order[a.status] - order[b.status]);
+      return `<h3 class="tk-sec">${title}</h3>${rows.map(t => taskEdit && taskEdit.id === t.id ? taskEditorHtml(taskEdit) : taskCardHtml(t)).join("") || '<p class="r-hint">暂无。</p>'}`;
+    };
+    return `<p class="r-hint">任务日志：主持人在这里发布主线和支线任务。先建草稿，配置路线（每一站给玩家看的步骤、完成这一站的奖励、战斗站的敌人）和完成奖励，再「发布」；队伍「接下」后按站推进，可以同时进行好几条。
+        联机玩家点「任务日志」就能看到：草稿、只指定给别人的任务、主持人备注、敌人配置、隐藏的站都看不到。每一站的奖励只发一次（回退再推进不重发，也不收回）。</p>
+      <div class="tr-row">新建 <select id="tk-cat">${options([["main", "主线"], ["side", "支线"]], newTaskCat)}</select> 任务：${Object.keys(TRPG_TASK_KINDS).map(k => `<button class="g-btn small" data-tk="new:${k}">${esc(TRPG_TASK_KINDS[k])}</button>`).join("")}</div>
+      ${group("main", "主线任务")}${group("side", "支线任务")}`;
   };
   function teSet(path, v) {
     const keys = path.split(".");
@@ -560,7 +596,8 @@
     switch (cmd) {
       case "save": taskEdit = null; act(ruleCommand("taskSave", { task: JSON.parse(JSON.stringify(t)) })); return;
       case "cancel": taskEdit = null; break;
-      case "addNode": t.nodes.push(x === "battle" ? { type: "battle", note: "", enemies: [{ id: "thug_knife", lv, zone: 2 }], weather: "none", zoneMode: 2 } : { type: x, note: "", enemies: [], weather: "none", zoneMode: 2 }); break;
+      case "addNode": t.nodes.push(Object.assign(x === "battle" ? { type: "battle", note: "", enemies: [{ id: "thug_knife", lv, zone: 2 }], weather: "none", zoneMode: 2 } : { type: x, note: "", enemies: [], weather: "none", zoneMode: 2 },
+        { title: "", hidden: false, reward: { xp: 0, kuizhi: 0 } })); break;
       case "delNode": t.nodes.splice(i, 1); break;
       case "up": if (i > 0) t.nodes.splice(i - 1, 0, t.nodes.splice(i, 1)[0]); break;
       case "down": if (i < t.nodes.length - 1) t.nodes.splice(i + 1, 0, t.nodes.splice(i, 1)[0]); break;
@@ -580,7 +617,10 @@
     P.querySelectorAll("[data-tk]").forEach(b => {
       b.onclick = () => {
         const [cmd, id] = b.dataset.tk.split(":");
-        if (cmd === "new") return act(ruleCommand("taskCreate", { kind: id }));
+        if (cmd === "new") return act(ruleCommand("taskCreate", { kind: id, category: newTaskCat }));
+        if (cmd === "back") { if (confirm("回退一步？已经发过的奖励不会收回。")) act(ruleCommand("taskRollback", { id })); return; }
+        if (cmd === "reveal") return act(ruleCommand("taskReveal", { id, node: Number(b.dataset.tk.split(":")[2]), hidden: false }));
+        if (cmd === "up" || cmd === "down") return act(ruleCommand("taskMove", { id, dir: cmd === "up" ? -1 : 1 }));
         if (cmd === "edit") { taskEdit = JSON.parse(JSON.stringify(trpgTaskById(id))); return render(); }
         if (cmd === "del") { if (confirm("删除这个任务？")) act(ruleCommand("taskDelete", { id })); return; }
         if (cmd === "post") return act(ruleCommand("taskStatus", { id, status: "posted" }));
@@ -603,7 +643,17 @@
         }
       };
     });
+    const cat = $("tk-cat");
+    if (cat) cat.onchange = () => { newTaskCat = cat.value; };
     if (!taskEdit) return;
+    P.querySelectorAll("[data-te-hide]").forEach(el => { el.onchange = () => { taskEdit.nodes[Number(el.dataset.teHide)].hidden = el.checked; }; });
+    P.querySelectorAll("[data-te-vis]").forEach(el => {
+      el.onchange = () => {
+        const v = taskEdit.visibility = taskEdit.visibility || { mode: "players", ids: [] };
+        v.ids = (v.ids || []).filter(x => x !== el.dataset.teVis);
+        if (el.checked) v.ids.push(el.dataset.teVis);
+      };
+    });
     P.querySelectorAll("[data-te]").forEach(el => {
       const ev = el.tagName === "SELECT" ? "onchange" : "oninput";
       el[ev] = () => { teSet(el.dataset.te, el.value); if (el.dataset.teRerender) render(); };
