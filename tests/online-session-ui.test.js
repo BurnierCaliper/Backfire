@@ -1017,6 +1017,51 @@ test("联机：跑团私人钱包——玩家看得到自己的余额、看不�
   assert.deepEqual(f.errors, []);
 });
 
+test("联机：跑团商人——主持人设置商品和折扣、开店，玩家画面同步弹出，用自己的钱包买；关店后收起", { timeout: 120000 }, async t => {
+  const f = await fixture(t); if (!f) return;
+  const { host, alice, bob, aliceId, bobId } = f;
+  await host.evaluate(() => { OnlineGame.start(); });
+  for (const page of [alice, bob]) await page.waitForFunction(() => OnlineGame.getView().screen === "exploration");
+  const kitOf = id => host.evaluate(pid => { const h = HotseatGame.getView().heroes.find(x => x.owner === pid); return state.units.find(u => u.id === h.id).kit; }, id);
+  const aKit = await kitOf(aliceId), bKit = await kitOf(bobId);
+  await host.evaluate(([a, b]) => { LEDGER.purse = { [a]: 3000, [b]: 0 }; }, [aKit, bKit]);
+  // 主持人：新建商人 → 编辑（名字、八折、卖医疗包、限 1 份）→ 保存 → 开店
+  await host.click('[data-tab="merchants"]');
+  await host.fill("#mc-name", "老周");
+  await host.click('[data-mc="new:"]');
+  await host.click('[data-mc^="edit:"]');
+  await host.fill('[data-me="name"]', "老周杂货");
+  await host.fill('[data-me="discount"]', "20");
+  await host.fill('[data-me="note"]', "码头边的小摊");
+  await host.click('details summary:has-text("医疗与战斗")');
+  await host.check('[data-me-row="medkit"]');
+  await host.fill('[data-me-stock="medkit"]', "1");
+  await host.click('[data-me-act="save"]');
+  await host.click('[data-mc^="open:"]');
+  // 玩家：同步弹出商店
+  await alice.waitForSelector(".ol-shop");
+  await bob.waitForSelector(".ol-shop");
+  const shopText = await alice.locator(".ol-shop").innerText();
+  assert.match(shopText, /老周杂货[\s\S]*8 折[\s\S]*码头边的小摊[\s\S]*简易医疗包[\s\S]*480 奎支 · 剩 1/);
+  // Alice 用自己的钱包买
+  await alice.click('[data-online="shopBuy"][data-key="medkit"]');
+  await host.waitForFunction(k => trpgPurse(k) === 2520 && bagCount("medkit") === 1, aKit);
+  await bob.waitForFunction(() => /卖完了/.test(document.querySelector(".ol-shop")?.innerText || ""));
+  // 不能用别人的钱包
+  const bad = await bob.evaluate(([m, a]) => OnlineGame.submit({ type: "shopBuy", merchant: m, key: "medkit", qty: 1, payer: a }).then(r => JSON.stringify(r), e => e.message),
+    [await host.evaluate(() => LEDGER.shopOpen), aKit]);
+  assert.match(bad, /"ok":false.*只能用自己角色的钱包付钱/);
+  await host.waitForFunction(() => /剩 0/.test(document.getElementById("tr-panel").innerText), null, { timeout: 5000 });   // 主持人面板跟着刷新
+  if (process.env.BACKFIRE_SHOTS) {
+    await alice.locator(".ol-shop").screenshot({ path: path.join(process.env.BACKFIRE_SHOTS, "shop-player.png") });
+    await host.locator("#tr-panel").screenshot({ path: path.join(process.env.BACKFIRE_SHOTS, "shop-host.png") });
+  }
+  // 关店：玩家画面收起
+  await host.click('[data-mc="close:"]');
+  await alice.waitForFunction(() => !document.querySelector(".ol-shop"));
+  assert.deepEqual(f.errors, []);
+});
+
 test("联机跑团：主持人长休，玩家画面也弹结算（不带坚毅）；主持人那边看得到坚毅数值", { timeout: 120000 }, async t => {
   const f = await fixture(t); if (!f) return;
   const { host, alice } = f;

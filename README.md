@@ -368,6 +368,15 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **跑团商人**（新文件 trpg-merchants.js；ledger.js · `LEDGER.merchants` / `LEDGER.shopOpen`；trpg-commands.js · `merchantCreate` / `merchantSave` / `merchantDelete` / `merchantOpen` / `merchantBuy` / `merchantRedeem`；trpg-ui.js · 「商人」页；hotseat-game.js · `shopBuy` / `shopRedeem`；online-game.js（包里加 `shop`）；online-view.js · `projectShop`；online-ui.js；online.css；tests/trpg-merchants.test.js、tests/online-session-ui.test.js）
+  - **主持人设置商人**：跑团的「商人」页可以新建好几个商人，每个有名字和一句介绍（玩家看得到）。
+    - **卖什么**：从手册商店里勾选（按分类折叠）。每件可以单独定价（空着照手册价）、限库存（空着不限）。
+    - **整店打折**：填 20 就是八折。和巧手匠人的八折不叠加，取便宜的。
+    - **积分兑换**：每个商人单独决定这里能不能用商店积分兑换，以及能换哪些效果道具。
+  - **开店 / 关店**：主持人在探索环节点「开店」，联机玩家的画面同步弹出这家店并提示「开张了」；同一时间只开一家，「关店」后玩家画面收起。开着的店跟着存档走。
+  - **玩家买东西**：选「由谁付」（只能选自己操控的角色），钱从那名角色的私人钱包出，东西进队伍背包，照常攒商店积分；卖完的显示「卖完了」。积分兑换用队伍的商店积分。每笔买卖都会写进小队频道。
+  - 主持人那边也有这家店的柜台，可以选「由谁付」替任何人买。玩家买完，主持人的面板跟着刷新（库存、钱包、积分）。
+  - 拦下的情况：店已经关门、用别人的钱包、库存不够、钱不够、这家店不卖 / 换不到、积分不够。
 - **跑团私人钱包**（ledger.js · `LEDGER.purse`；trpg.js · `trpgPurse` / `trpgPurseSplit` / `trpgPurseTransfer` / `trpgPayWith`；trpg-tasks.js；trpg-commands.js · `purseTransfer` / `purseSplit` / `payer`；trpg-ui.js；hotseat-game.js · `purseTransfer`；online-game.js · `purseFor`；online-view.js · `projectPurse`；online-ui.js；tests/trpg-purse.test.js、tests/quest-log.test.js、tests/online-session-ui.test.js）
   - 每名角色一个钱包，跟着跑团存档走；原来的「奎支」改叫**队伍公账**（战斗掉落、主持人「获得 / 花掉」的钱还进出这里）。
   - **任务奖金自动平分**：任务每一站和完成时的奎支报酬（含护送完好的额外报酬）平分进还活着的角色的钱包，零头从前面的人起每人多 1。**个人任务的钱只进那名角色的钱包**。

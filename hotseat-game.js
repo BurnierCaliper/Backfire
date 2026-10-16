@@ -12,7 +12,7 @@
   const packetListeners = new Set();
   const listeners = new Set(), authorityContext = {}, actionTypes = new Set(["skill", "move", "standUp", "useItem"]);
   const automatic = new Set(["battle.supportInfo", "battle.checkSolo", "battle.rememberCampaign", "battle.loadCampaign"]);
-  const tableTypes = new Set(["checkOpen", "checkRoll", "checkClose", "attrRequest", "attrDecide", "skillRoll", "showTitle", "purseTransfer"]);
+  const tableTypes = new Set(["checkOpen", "checkRoll", "checkClose", "attrRequest", "attrDecide", "skillRoll", "showTitle", "purseTransfer", "shopBuy", "shopRedeem"]);
   const orderTypes = new Set(["orderPick", "orderConfirm", "orderStart", "orderMove", "orderSwapAccept", "answer", "chat", ...tableTypes]);
   const copy = value => JSON.parse(JSON.stringify(value));
   const active = () => !!(enabled && configured && session && authority && !state.solo);
@@ -255,6 +255,32 @@
     skillRoll: c => session.skillRoll(sender, rollSpec(c), !!c.secret),
     showTitle: c => session.showTitle(sender, c),
     // 跑团私人钱包（trpg.js）：玩家只能从自己角色的钱包转出；主持人哪个钱包都能动。转完写进小队频道，大家看得到
+    // 跑团商人（trpg-merchants.js）：只能在主持人开着的那家店买；钱从自己角色的钱包出（主持人可以替任何人付）
+    shopBuy: c => {
+      if (typeof trpgMerchantBuy !== "function" || typeof TRPG === "undefined" || !TRPG.active) fail("只有跑团模式有商人");
+      const open = trpgMerchantOpenNow();
+      if (!open || open.id !== c.merchant) fail("这家店已经关门了");
+      const payer = String(c.payer || "");
+      if (sender !== gm()) {
+        const own = heroes().find(u => u.kit === payer);
+        if (!own || session.ownerOf(own.id) !== sender) fail("只能用自己角色的钱包付钱");
+      }
+      const notes = trpgMerchantBuy(open.id, c.key, c.qty, payer || null);
+      if (!trpgMerchantOk(notes)) fail(notes[0] || "买不了");
+      if (root.GAME && GAME.rememberCampaign) GAME.rememberCampaign();
+      session.chat(sender, "🛒 " + notes.join(" "));
+      return { notes };
+    },
+    shopRedeem: c => {
+      if (typeof trpgMerchantRedeem !== "function" || typeof TRPG === "undefined" || !TRPG.active) fail("只有跑团模式有商人");
+      const open = trpgMerchantOpenNow();
+      if (!open || open.id !== c.merchant) fail("这家店已经关门了");
+      const notes = trpgMerchantRedeem(open.id, c.item);
+      if (!trpgMerchantOk(notes)) fail(notes[0] || "换不了");
+      if (root.GAME && GAME.rememberCampaign) GAME.rememberCampaign();
+      session.chat(sender, "🎟 " + notes.join(" "));
+      return { notes };
+    },
     purseTransfer: c => {
       if (typeof trpgPurseTransfer !== "function" || typeof TRPG === "undefined" || !TRPG.active) fail("只有跑团模式有私人钱包");
       const from = String(c.from || ""), to = String(c.to || "");

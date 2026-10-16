@@ -17,7 +17,7 @@
   const UNDO_MAX = 20;
 
   const TABS = [
-    ["party", "队伍"], ["sheet", "角色"], ["rest", "时间与休息"], ["shop", "商店"], ["bag", "背包"], ["smith", "武器升级"], ["workshop", "工坊"], ["tasks", "任务"], ["checks", "检定"], ["battles", "战斗模板"], ["backstage", "后台"]
+    ["party", "队伍"], ["sheet", "角色"], ["rest", "时间与休息"], ["shop", "商店"], ["merchants", "商人"], ["bag", "背包"], ["smith", "武器升级"], ["workshop", "工坊"], ["tasks", "任务"], ["checks", "检定"], ["battles", "战斗模板"], ["backstage", "后台"]
   ];
 
   function heroes() { return trpgHeroes(); }
@@ -28,7 +28,7 @@
   }
   // 花钱的操作由谁付（私人钱包，trpg.js · trpgPayWith）：面板上的「由谁付」选单，默认队伍公账
   let payer = "party";
-  const PAYABLE = ["buy", "repair", "upgradeWeapon", "installPart", "installBlueprint", "craft", "redeem", "teachRecipe"];
+  const PAYABLE = ["buy", "repair", "upgradeWeapon", "installPart", "installBlueprint", "craft", "redeem", "teachRecipe", "merchantBuy"];
   function ruleCommand(action, data) {
     const c = Object.assign({ type: "trpg", action }, data || {});
     if (PAYABLE.includes(action) && payer !== "party" && c.payer == null && !c.free) c.payer = payer;
@@ -745,6 +745,89 @@
   };
   /* ---------- 工坊：制作、学配方、积分、拆解（trpg.js · trpgCraft 等）---------- */
   const craftForm = { kit: "", item: "", diff: "", helper: "" };
+  /* ---------- 商人（trpg-merchants.js）：主持人设置商人、卖什么、打折、积分兑换；开店后联机玩家同步看到 ---------- */
+  let merchantEdit = null;
+  PANELS.merchants = function () {
+    const list = trpgMerchants(), open = trpgMerchantOpenNow();
+    const card = (m) => {
+      const isOpen = open && open.id === m.id;
+      return `<div class="tr-up tk-card${isOpen ? " on" : ""}"><div class="tk-head"><b>${esc(m.name)}</b>
+          ${m.discount ? `<span class="tk-cat main">${esc(trpgDiscountText(m.discount))}</span>` : ""}<span class="tk-kind">${m.rows.length} 件商品</span>
+          <span class="tk-vis">${m.points.on ? `积分兑换 ${m.points.items.length} 种` : "不能积分兑换"}</span>${isOpen ? '<span class="tk-st">营业中（玩家看得到）</span>' : ""}</div>
+        ${m.note ? `<p class="tk-goal">${esc(m.note)}</p>` : ""}
+        <div class="tr-row">${isOpen ? `<button class="g-btn small" data-mc="close:">关店</button>` : `<button class="g-btn small r-main" data-mc="open:${esc(m.id)}">开店（玩家画面同步弹出）</button>`}
+          <button class="g-btn small" data-mc="edit:${esc(m.id)}">编辑</button><button class="g-btn small" data-mc="del:${esc(m.id)}">删除</button></div></div>`;
+    };
+    const front = open ? (() => {
+      const v = trpgMerchantView();
+      return `<h3>「${esc(v.name)}」柜台</h3>${payerHtml()}
+        <div class="shop">${v.rows.map(r => `<div class="shop-row"><span class="s-name">${esc(r.name)}${r.hint ? `<small>${esc(r.hint)}</small>` : ""}</span>
+          <span class="s-have">${r.stock == null ? "不限" : `剩 ${r.stock}`}</span><span class="s-price">${r.price}${r.price !== r.base ? ` <s>${r.base}</s>` : ""}</span>
+          <input type="number" min="1" value="1" data-mq="${esc(r.key)}" style="width:52px">
+          <button class="g-btn small" data-mbuy="${esc(r.key)}" ${r.stock === 0 ? "disabled" : ""}>买</button></div>`).join("") || '<p class="r-hint">这个商人还没有商品。</p>'}</div>
+        ${v.points ? `<p class="r-hint">商店积分 ${v.points.have}：${v.points.rows.map(x => `<button class="g-btn small" data-mredeem="${esc(x.item)}" ${v.points.have < x.points ? "disabled" : ""}>${esc(x.name)} · ${x.points} 积分</button>`).join(" ") || "（没有选可兑换的道具）"}</p>` : ""}`;
+    })() : "";
+    return `<p class="r-hint">设置商人和他们卖的东西：可以单独改价、限库存、整店打折（和巧手匠人的八折不叠加，取便宜的），也可以决定在这里能不能用商店积分兑换、能换哪些。
+        「开店」后联机玩家的画面会同步弹出这家店，玩家用自己角色的钱包买；同一时间只开一家，「关店」后玩家画面收起。</p>
+      <div class="tr-row">新商人 <input type="text" id="mc-name" placeholder="名字" style="width:140px"><button class="g-btn small" data-mc="new:">新建</button></div>
+      ${front}
+      <h3>商人</h3>${list.map(m => merchantEdit && merchantEdit.id === m.id ? merchantEditorHtml(merchantEdit) : card(m)).join("") || '<p class="r-hint">还没有商人。</p>'}`;
+  };
+  function merchantEditorHtml(m) {
+    const groups = [];
+    HANDBOOK_SHOP.forEach(r => { if (!groups.includes(r.group)) groups.push(r.group); });
+    const rowOf = (key) => m.rows.find(r => r.key === key);
+    const redeemable = EFFECT_ITEMS.filter(x => x.points > 0);
+    return `<div class="tr-up tk-card tk-edit"><h4>编辑商人</h4>
+      <div class="tr-row">名字 <input type="text" data-me="name" value="${esc(m.name)}" style="width:140px">
+        打折 <input type="number" data-me="discount" min="0" max="90" value="${esc(m.discount)}" style="width:56px">%（填 20 = 八折）</div>
+      <div class="tr-row">介绍（玩家看得到） <input type="text" data-me="note" value="${esc(m.note)}" style="width:100%"></div>
+      <h4>卖什么</h4><p class="r-hint">勾上就卖。价格空着照手册价，库存空着不限量。</p>
+      ${groups.map(g => `<details${HANDBOOK_SHOP.some(r => r.group === g && rowOf(r.key)) ? " open" : ""}><summary>${esc(g)}（${HANDBOOK_SHOP.filter(r => r.group === g && rowOf(r.key)).length}）</summary>
+        ${HANDBOOK_SHOP.filter(r => r.group === g).map(r => { const on = rowOf(r.key); return `<div class="tr-row"><label class="tr-pick"><input type="checkbox" data-me-row="${esc(r.key)}" ${on ? "checked" : ""}>${esc(trpgShopName(r))}</label>
+          <span class="r-hint">手册价 ${r.price}</span>${on ? ` 价格 <input type="number" min="0" data-me-price="${esc(r.key)}" value="${on.price == null ? "" : esc(on.price)}" placeholder="${r.price}" style="width:80px">
+          库存 <input type="number" min="0" data-me-stock="${esc(r.key)}" value="${on.stock == null ? "" : esc(on.stock)}" placeholder="不限" style="width:60px">` : ""}</div>`; }).join("")}</details>`).join("")}
+      <h4>积分兑换</h4>
+      <div class="tr-row"><label class="tr-pick"><input type="checkbox" data-me-pon ${m.points.on ? "checked" : ""}>在这家店可以用商店积分兑换</label></div>
+      ${m.points.on ? `<div class="tr-row">${redeemable.map(x => `<label class="tr-pick"><input type="checkbox" data-me-pt="${esc(x.id)}" ${m.points.items.includes(x.id) ? "checked" : ""}>${esc(x.name)}（${x.points}）</label>`).join("")}</div>` : ""}
+      <div class="tr-row"><button class="g-btn r-main" data-me-act="save">保存</button><button class="g-btn" data-me-act="cancel">取消</button></div></div>`;
+  }
+  function bindMerchants(P) {
+    P.querySelectorAll("[data-mc]").forEach(b => {
+      b.onclick = () => {
+        const [cmd, id] = b.dataset.mc.split(":");
+        if (cmd === "new") return act(ruleCommand("merchantCreate", { name: ($("mc-name") || {}).value || "" }));
+        if (cmd === "open") return act(ruleCommand("merchantOpen", { id }));
+        if (cmd === "close") return act(ruleCommand("merchantOpen", { id: null }));
+        if (cmd === "edit") { merchantEdit = JSON.parse(JSON.stringify(trpgMerchantById(id))); return render(); }
+        if (cmd === "del" && confirm("删掉这个商人？")) return act(ruleCommand("merchantDelete", { id }));
+      };
+    });
+    const open = trpgMerchantOpenNow();
+    P.querySelectorAll("[data-mbuy]").forEach(b => { b.onclick = () => { if (window.Sfx) Sfx.ui("coin"); act(ruleCommand("merchantBuy", { id: open.id, key: b.dataset.mbuy, qty: Number((P.querySelector(`[data-mq="${b.dataset.mbuy}"]`) || {}).value) || 1 })); }; });
+    P.querySelectorAll("[data-mredeem]").forEach(b => { b.onclick = () => act(ruleCommand("merchantRedeem", { id: open.id, item: b.dataset.mredeem })); });
+    if (!merchantEdit) return;
+    const m = merchantEdit;
+    P.querySelectorAll("[data-me]").forEach(el => { el.oninput = () => { m[el.dataset.me] = el.type === "number" ? Number(el.value) || 0 : el.value; }; });
+    P.querySelectorAll("[data-me-row]").forEach(el => { el.onchange = () => {
+      const key = el.dataset.meRow;
+      if (el.checked) { if (!m.rows.some(r => r.key === key)) m.rows.push({ key, price: null, stock: null }); }
+      else m.rows = m.rows.filter(r => r.key !== key);
+      render();
+    }; });
+    const num = (v) => (v === "" ? null : Math.max(0, Math.floor(Number(v) || 0)));
+    P.querySelectorAll("[data-me-price]").forEach(el => { el.oninput = () => { const r = m.rows.find(x => x.key === el.dataset.mePrice); if (r) r.price = num(el.value); }; });
+    P.querySelectorAll("[data-me-stock]").forEach(el => { el.oninput = () => { const r = m.rows.find(x => x.key === el.dataset.meStock); if (r) r.stock = num(el.value); }; });
+    P.querySelectorAll("[data-me-pon]").forEach(el => { el.onchange = () => { m.points.on = el.checked; render(); }; });
+    P.querySelectorAll("[data-me-pt]").forEach(el => { el.onchange = () => {
+      const id = el.dataset.mePt;
+      m.points.items = el.checked ? m.points.items.concat(id).filter((x, i, a) => a.indexOf(x) === i) : m.points.items.filter(x => x !== id);
+    }; });
+    P.querySelectorAll("[data-me-act]").forEach(b => { b.onclick = () => {
+      if (b.dataset.meAct === "save") { const data = merchantEdit; merchantEdit = null; return act(ruleCommand("merchantSave", { merchant: data })); }
+      merchantEdit = null; render();
+    }; });
+  }
   PANELS.workshop = function () {
     const hs = heroes().filter(h => !h.dead);
     if (!hs.some(h => h.kit === craftForm.kit)) craftForm.kit = (hs[0] || {}).kit || "";
@@ -1090,8 +1173,10 @@
     if (tableSub || !window.HotseatGame) return;
     tableSub = true;
     HotseatGame.subscribe(() => {
-      if (!HotseatGame.isActive() || !Screens.is("trpg") || !["checks", "party"].includes(tab)) return;
-      const v = HotseatGame.getView(), key = JSON.stringify([v.checks, v.attrRequests]);
+      if (!HotseatGame.isActive() || !Screens.is("trpg") || !["checks", "party", "merchants", "bag", "shop", "workshop"].includes(tab)) return;
+      // 玩家那边的检定、属性点申请、转账、在商人那里买 / 兑换：主持人面板跟着刷新
+      const v = HotseatGame.getView(), key = JSON.stringify([v.checks, v.attrRequests, LEDGER.purse, Number(state.kuizhi) || 0,
+        (LEDGER.merchants || []).map(m => m.rows.map(r => r.stock)), (LEDGER.workshop || {}).points || 0, bagList().map(x => x.id + x.qty)]);
       if (key === tableKey) return;
       tableKey = key;
       const a = document.activeElement;
@@ -1106,6 +1191,7 @@
     bindTemplates(P);
     bindChecks(P);
     bindWorkshop(P);
+    bindMerchants(P);
     bindAttrRequests(P);
     const on = (id, fn) => { const b = $(id); if (b) b.onclick = fn; };
     $("tr-tabs").querySelectorAll("[data-tab]").forEach(b => { b.onclick = () => { tab = b.dataset.tab; render(); }; });
