@@ -368,6 +368,20 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **issue #44 已定规则（合并 PR #50）**（app.js、party.js、skill-text.js；tests/issue44.test.js）
+  - **协助格挡给燃油**：
+    - 格挡反打不再自动耗燃油；
+    - 解锁燃油槽后，夏、柏妮尔协助格挡成功各 +1 燃油，引擎开不开都给。
+  - **磁场护盾推人**（`magnetPushDest`）：
+    - 只推向不隔危墙、关着的机关门的相邻区；
+    - 优先推进危险区（空隙、深渊、不稳桥梁、流沙、冻土、伏咬沙鱼、火场、酸液），危险区之间随机选；没有危险区才推向普通区；
+    - 推人走 `displaceTo`，坠落、流沙、免位移照常结算；无处可推就不推，1 击破照给。
+  - **协助攻击不能穿墙**：
+    - 被危墙或关着的机关门隔开的单位，不能被选来协助攻击，敌我都一样；
+    - 诺拉协助前的后退要走得到，也不会退到和目标隔墙的区。
+  - **电站超频**：电能不到 3 时 +2 电能（原 +1）。
+  - PR 里「嘲讽下的选区攻击」和本分支已有的实现（`enemyForcedTarget` / `forcedZonePick`）重复，合并时保留本分支的写法；PR 的测试照样全过。
+
 - **工坊第 5 步（三）：联机同步**（作者定；rogue.js · `setCraftJob` / `craftQueue` / `craftQueued` / `setCraftHooks`；online-rogue.js；online-ui.js 玩家画面的「工坊」；rogue-ui.js；tests/online-rogue.test.js）
   - 联机单局里，每个玩家都能在自己的画面上看到工坊。
   - 制作：

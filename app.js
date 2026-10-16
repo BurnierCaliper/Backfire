@@ -6024,7 +6024,8 @@ function eligibleAssisters(breaker, broken) {
       (!breaker || u.id !== breaker.id || u.kit === "ufo_body" || u.kit === "chixia") &&   // 飞碟触灵、赤牙（剿灭）可以接自己打出的失衡
       !(typeof touDuelVictim === "function" && touDuelVictim(u) && broken.kit !== "tou") &&
       (typeof enemyMayAssist !== "function" || enemyMayAssist(u)) &&   // 被挟持的王、哗变的狂徒不对我方出手（enemies.js）
-      !(typeof fishFrenzyUsed === "function" && fishFrenzyUsed(u))      // 沙鱼每回合只群起一次
+      !(typeof fishFrenzyUsed === "function" && fishFrenzyUsed(u)) &&   // 沙鱼每回合只群起一次
+      !lineBlocked(u.zone, broken.zone)                                 // #44：协助攻击不能穿墙（危墙 / 关着的机关门）
     );
   }
   // 只列真正能出手的人：濒死没起身、失衡、抓在敌人身上的不行（以前飞碟本体失衡时这些人也列进来，
@@ -6040,7 +6041,8 @@ function eligibleAssisters(breaker, broken) {
     !(typeof isCrushing === "function" && isCrushing(u)) &&
     !u.isPartner &&                                          // 支援的伙伴打完就退场，不接协助攻击
     (!breaker || u.id !== breaker.id || isSoloHero(u)) &&   // 单人模式可以接自己打出的失衡
-    (typeof bpCanAssistAttack !== "function" || bpCanAssistAttack(u))
+    (typeof bpCanAssistAttack !== "function" || bpCanAssistAttack(u)) &&
+    !lineBlocked(u.zone, broken.zone)                       // #44：协助攻击无论远近都不能穿墙，被墙隔开的不能选
   );
 }
 
@@ -6228,9 +6230,9 @@ function presentAssistModal() {
   const box = uiEl("assistModalBtns");
   if (!modal || !box) return;
   if (job.vsPlayer) {
-    text.textContent = `${target ? target.name : "玩家"} 陷入失衡。选择一名敌人发动协助攻击。飞碟触灵可以由自己造成的失衡接协助攻击。${breaker && breaker.kit !== "ufo_body" ? breaker.name + " 作为造成失衡者不能为自己这一击发动。" : ""}`;
+    text.textContent = `${target ? target.name : "玩家"} 陷入失衡。选择一名敌人发动协助攻击。飞碟触灵可以由自己造成的失衡接协助攻击。${breaker && breaker.kit !== "ufo_body" ? breaker.name + " 作为造成失衡者不能为自己这一击发动。" : ""}被危墙 / 关着的机关门隔开的敌人不能协助攻击。`;
   } else {
-    text.textContent = `${target ? target.name : "敌人"} 陷入失衡。选择一名其他玩家角色发动协助攻击。飞碟触灵本体失衡时也可被协助攻击；${breaker ? breaker.name : "造成失衡者"} 不能为自己这一击发动。`;
+    text.textContent = `${target ? target.name : "敌人"} 陷入失衡。选择一名其他玩家角色发动协助攻击。飞碟触灵本体失衡时也可被协助攻击；${breaker ? breaker.name : "造成失衡者"} 不能为自己这一击发动；被危墙 / 关着的机关门隔开的角色不能协助攻击。`;
   }
   box.innerHTML = "";
   list.forEach(h => {
@@ -6526,12 +6528,14 @@ function performAssistBlock(helper, target, attacker, forced, atkRange) {
     if (helper.kit === "xia" && attacker) {
       // 走 dealBreak：打空就失衡、触发协助攻击（以前直接改架势，敌人架势 0 却不失衡，下回合照常行动）
       dealBreak(attacker, 1, "physical", notes, "夕夏格挡反打", { by: helper });
+      addFuel(1, "协助格挡", notes);   // #44：解锁燃油槽后协助格挡成功 +1 燃油（引擎开不开都给）
       if (helper.resources && helper.resources.engine) {
         const burn = Math.floor(effectiveAtk(helper, state.units) / 2);
         notes.push(`引擎格挡：追加 ${burn} 火焰。`);
         hitOne2(helper, attacker, { atk: 0, mult: 0, flat: burn, element: "fire", baseBreak: 0, atkRange: "melee", flags: { action: true, opportunity: true } }, notes);
       }
     }
+    if (helper.kit === "berniel" && attacker) addFuel(1, "柏妮尔协助格挡", notes);   // #44：同上，引擎开不开都给
     if (helper.kit === "berniel" && attacker && ownerEngineOn("xia")) {
       notes.push("引擎下柏妮尔格挡成功：对进攻者打出 1×atk 物理。");
       hitOne2(helper, attacker, { element: "physical", mult: 1, baseBreak: 0, atk: effectiveAtk(helper, state.units), atkRange: "melee", flags: { action: true, opportunity: true } }, notes);
@@ -7592,7 +7596,8 @@ function dealTo(attacker, target, opt) {
     attacker.resources.weakNext = false;
   }
   // 启动引擎+：夏 / 柏妮尔的火属性攻击动作自动消耗所有燃油，伤害 +燃油×10%（处决每点 15%）；一个动作只消耗一次
-  if (flags.action && (opt.element || "physical") === "fire" && attacker && (attacker.kit === "xia" || attacker.kit === "berniel") && xiaFuelOn()) {
+  // #44：格挡反打（opportunity）不消耗燃油
+  if (flags.action && !flags.opportunity && (opt.element || "physical") === "fire" && attacker && (attacker.kit === "xia" || attacker.kit === "berniel") && xiaFuelOn()) {
     const acc = state.actionAcc || {};   // 没有行动记账（例如主持人出手）时按这一击单独算
     if (acc.fuelPct == null) {
       const n = takeFuel();
@@ -7859,13 +7864,32 @@ function triggerMagnetShield(broken) {
   const c = findKit("chuan", state.units);
   if (!c || Number(c.zone) !== Number(broken.zone)) return notes;
   if (typeof passiveOn === "function" && !passiveOn(c)) return notes;   // 放弃被动「磁场护盾」
-  const dest = otherZone(c.zone);
-  notes.push(`磁场护盾：${broken.name} 上由川川/哔哩哩施加的护盾被破坏，效果触发后解除。同区敌人被推到 ${dest} 区并各受 1 击破。`);
+  const dest = magnetPushDest(c.zone);
+  notes.push(`磁场护盾：${broken.name} 上由川川/哔哩哩施加的护盾被破坏，效果触发后解除。同区敌人${dest != null ? `被推向 ${dest} 区` : "无处可推"}并各受 1 击破。`);
   visibleEnemies(c.zone).filter(u => !ignoresAoe(u)).forEach(u => {
-    u.zone = dest;
+    if (dest != null) displaceTo(u, dest, notes, "被磁场护盾推开");   // #44：走标准推人逻辑（墙、空隙、深渊、流沙……照常结算）
     dealBreak(u, 1, "electric", notes, "磁场护盾");
   });
   return notes;
+}
+/** 磁场护盾推人的目标区（#44，夕夏定）：只在隔着可通行间隔（非危墙、非关着的机关门）的相邻区里选；
+ *  优先危险区域（空隙、深渊、不稳桥梁、流沙、冻土、伏咬沙鱼、火场、酸液），危险区之间随机（对局种子）；
+ *  没有危险区才推向普通区；无处可推返回 null */
+function magnetPushDest(zone) {
+  zone = Number(zone);
+  const ns = typeof zoneNeighbors === "function" ? zoneNeighbors(zone) : [];
+  const cand = (ns.length ? ns : [otherZone(zone)]).map(Number).filter(z => z !== zone && state.fields[z]);
+  const open = cand.filter(z => { const g = getGap(zone, z); return !(g.type === "wall" || (g.type === "door" && !g.open)); });
+  if (!open.length) return null;
+  const hazard = z => {
+    const g = getGap(zone, z), f = state.fields[z] || {};
+    if (g.type === "void" || g.type === "bridge") return true;
+    if (f.abyss || f.quicksand || f.ice || f.fireOn || (Number(f.fire) || 0) > 0 || f.acid) return true;
+    return (state.units || []).some(u => u.kit === "sandfish_ambush" && !u.dead && Number(u.zone) === z);
+  };
+  const danger = open.filter(hazard);
+  if (danger.length) return danger[Math.floor(Math.random() * danger.length)];
+  return open[0];
 }
 
 function ownerEngineOn(kit) {
@@ -11570,7 +11594,8 @@ function runSkillInner(id, optRun) {
     } else if (id === "nora_assist") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       if (Number(a.zone) === Number(t.zone)) {
-        const dest = zoneNeighbors(a.zone)[0];
+        // #44：后退也要能走得到（skillMoveZones 查地形），退到的区和目标之间不能隔墙
+        const dest = skillMoveZones(a, 1).map(Number).find(z => z !== Number(a.zone) && !lineBlocked(z, t.zone));
         if (dest) { a.zone = dest; lines.push(`协助攻击：先退到 ${dest} 区再发射针尖。`); }
       }
       hitOne(a, t, { element: "ice", mult: 1, baseBreak: 0, atk, flags: { action: true, assist: true } });
@@ -11757,8 +11782,8 @@ function runSkillInner(id, optRun) {
         addShieldLayer(t, sh);
         lines.push(`电站超频：${t.name} 过载，并获得 ${sh} 护盾（电能≥3不增加电能）。`);
       } else {
-        addCharge(1);
-        lines.push(`电站超频：${t.name} 过载，电能 +1。`);
+        addCharge(2);   // #44 方案 A：电能 <3 时 +2（原 +1）
+        lines.push(`电站超频：${t.name} 过载，电能 +2。`);
       }
     } else if (id === "chuan_summon") {
       const w = spawnWeapon(a, "bili");
