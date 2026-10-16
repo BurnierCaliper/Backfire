@@ -464,7 +464,10 @@ function statusLine(u) {
     if (dr > 0) s.push(`电能炮蓄满（减伤 ${Math.round(dr * 100)}%）`);
     if (u.resources && Number(u.resources.meltHoldTurn) >= Number(state.turnNo) && u.instant && u.instant.melt) s.push("过热");
     if (u.resources && u.resources.debrisCount) s.push("碎片" + u.resources.debrisCount + "/2");
+    if (u.resources && u.resources.rush) s.push("预备狂暴连打");
   }
+  // 被沙灵聚合体盯上的狂暴连打目标
+  if (u.isPlayer && (state.units || []).some(x => x.kit === "sand_aggregate" && !x.dead && x.resources && x.resources.rush && x.resources.rush.targetId === u.id)) s.push("连打预告");
   if (u.dormant) s.push("休眠");
   if (!u.isPlayer && typeof playerAllied === "function" && playerAllied(u)) s.push("友军");
   if (u.noMove) s.push("无法移动");
@@ -5076,6 +5079,7 @@ function finalBlockChance(helper, attacker, protectedUnit, atkRange) {
   if (c == null) c = 50;
   c += highlandBlockMod(helper, attacker, atkRange);
   if (attacker && Number(attacker.blockMalus) > 0) c -= Number(attacker.blockMalus);   // 赤牙霰弹枪：对这一枪的协助格挡 −40%
+  if (attacker && Number(attacker.rushBlock) > 0) c += Number(attacker.rushBlock);       // 沙灵聚合体狂暴连打：每一击的协助格挡 +10%（AGG_RUSH）
   if (helper.self === "anchor") c += 10;   // 千钧：格挡成功率 +10%
   if (helper.kit === "xiaoxiao" && protectedUnit && protectedUnit.kit === "longge") c += 15;   // 小朋友守护龙哥：60% → 75%
   if (helper.rallyBlock) c += helper.rallyBlock;
@@ -7796,6 +7800,11 @@ function dealTo(attacker, target, opt) {
   if (opt.onConnect) {
     if (attackConnected(res, flags)) extra.push(...runOnConnect(attacker, target, opt.onConnect, res));
     else extra.push("格挡成功：位移与其他附带效果未生效。");
+  }
+  // 沙灵聚合体狂暴连打：每一击落下就记一次（被挡下没有），全部落下后判断是不是全被挡下（enemies.js · aggRushHitDone）
+  if (flags.aggRush && !res.pending && typeof aggRushHitDone === "function") {
+    const b = flags.block || (res.flags && res.flags.block);
+    extra.push(...aggRushHitDone(attacker, b === "assistOk" || b === "bareOk"));
   }
   // 休眠：同阵营的敌人挨打（真的掉了血）就叫醒休眠的同伴
   if (target && !target.isPlayer && (Number(res.total) || 0) > 0 && typeof dormantOnAllyHurt === "function") extra.push(...dormantOnAllyHurt(target, attacker));

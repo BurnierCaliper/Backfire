@@ -368,6 +368,18 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **沙灵聚合体一阶段：狂暴连打**（作者定；engine.js · `AGG_RUSH`；enemies.js · `aggRushPrep` / `aggRushRelease` / `aggRushHitDone` / `aggRushSettle`；ai.js；app.js（协助格挡 +10%、状态栏）；bestiary.js；tests/aggregate-rush.test.js）
+  - **预备**：花 1 行动点，盯上一名随机敌人；被嘲讽、决一死战时就盯牵制者。
+    - 敌人卡片上显示「连打预告」，聚合体显示「预备狂暴连打」。
+  - **出手**：下个敌人回合冲到目标所在的区，连打 4 击，每击 atk + 1d8 物理、1 击破。
+    - 出手时被嘲讽，就转火牵制者；原目标倒下就随机换一个。
+    - 动不了（决一死战、无法移动、千钧）或者隔着墙，这次连打落空。
+  - **格挡**：每一击都能协助格挡，成功率 +10%。4 击全被挡下（空手格挡成功也算），聚合体自己受 4 击破。
+  - **频率**（作者没定，我先这样设，数字都在 `AGG_RUSH`）：
+    - 第 2 回合起才会预备；
+    - 出手那回合起 3 回合后才会再预备；
+    - 进入二阶段时，预备好还没出手的作废。
+
 - **巨刃划空 × 屏障、危墙**（issue #44，夕夏定；app.js · `CHUAN_BLADE_GAP_DUR`、`hitStructureCore` 的 `gapDur`；skill-text.js、party.js；tests/chuan-blade.test.js）
   - 瞄准躲在敌方屏障（废铁墙等）后面的敌人时，直接改砍屏障。
     - 以前这一刀被屏障拦下：只吃 2×atk，不翻倍，也不返还电能。

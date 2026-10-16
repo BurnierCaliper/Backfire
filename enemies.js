@@ -461,10 +461,13 @@ function enemySkillList(u) {
     const ph = (u.resources && u.resources.phase) || 1;
     const r = u.resources || {};
     if (ph === 1) {
-      return [
+      const list = [
         { id: "en_agg1_melee", label: "沙爪挥击（近）" },
         { id: "en_agg1_range", label: "砂岩块（远）" }
       ];
+      if (aggRushArmed(u)) list.unshift({ id: "en_agg1_rush", label: "狂暴连打（冲到预告目标的区连打）" });
+      else if (aggRushCanPrep(u)) list.push({ id: "en_agg1_rush_prep", label: "预备狂暴连打（下回合冲过去连打）" });
+      return list;
     }
     if (ph === 2) {
       // 电能炮改成「死刑」首领机制（aggArmCannon），不再占行动、也不再空过一回合
@@ -1866,6 +1869,8 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
     if (typeof detonateUfo === "function") lines.push(...detonateUfo(a));
     return true;
   }
+  if (id === "en_agg1_rush_prep") { lines.push(...aggRushPrep(a)); return true; }
+  if (id === "en_agg1_rush") { aggRushRelease(a, aa, lines); return true; }
   if (id === "en_agg1_melee") {
     if (!needT()) return true;
     aa(t, { element: "physical", mult: 1, diceN: 1, diceS: 8, baseBreak: 3 });
@@ -1940,7 +1945,93 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
 }
 
 /** 沙灵聚合体二阶段：挂上电能炮（死刑机制，数值见 engine.js · AGG_CANNON）。已经挂着就不重复挂 */
+/* ---------- 沙灵聚合体一阶段 · 狂暴连打（engine.js · AGG_RUSH）---------- */
+const aggRushStanding = t => t && !t.dead && !t.hidden && !(t.dying && !t.upOnShp);
+function aggRushFoes(a) {
+  return (state.units || []).filter(u => u.isPlayer && aggRushStanding(u) && (typeof hostileTo !== "function" || hostileTo(a, u)));
+}
+/** 预备好了、这回合可以出手（预备是上一回合或更早） */
+function aggRushArmed(u) {
+  const r = (u && u.resources) || {};
+  return !!(r.rush && Number(r.rush.turn) < Number(state.turnNo) && ((r.phase || 1) === 1));
+}
+function aggRushCanPrep(u) {
+  const r = (u && u.resources) || {};
+  if ((r.phase || 1) !== 1 || r.rush) return false;
+  const t = Number(state.turnNo) || 1;
+  return t >= AGG_RUSH.firstTurn && t >= (Number(r.rushNext) || 0);
+}
+/** 预备：被牵制就锁牵制者，否则随机一名敌人 */
+function aggRushPrep(a) {
+  const r = a.resources = a.resources || {};
+  const forced = typeof enemyForcedTarget === "function" ? enemyForcedTarget(a) : null;
+  const foes = aggRushFoes(a);
+  const t = forced || (foes.length ? foes[Math.floor(Math.random() * foes.length)] : null);
+  if (!t) return [`${a.name} 找不到可以连打的目标。`];
+  r.rush = { targetId: t.id, turn: Number(state.turnNo) || 1 };
+  return [`${a.name} 沙壳鼓胀，盯上了 ${t.name}：下个敌人回合冲过去狂暴连打 ${AGG_RUSH.hits} 击（每击 ${AGG_RUSH.mult}×atk+1d${AGG_RUSH.diceS} 物理、${AGG_RUSH.baseBreak} 击破，协助格挡 +${AGG_RUSH.blockBonus}%；全部挡下它自己受 ${AGG_RUSH.selfBreak} 击破）。`];
+}
+/** 出手时打谁：被嘲讽转火牵制者；原目标倒下就随机换一个 */
+function aggRushTarget(a) {
+  const r = a.resources || {};
+  const forced = typeof enemyForcedTarget === "function" ? enemyForcedTarget(a) : null;
+  if (forced) return forced;
+  const marked = r.rush && (state.units || []).find(u => u.id === r.rush.targetId);
+  if (aggRushStanding(marked)) return marked;
+  const foes = aggRushFoes(a);
+  return foes.length ? foes[Math.floor(Math.random() * foes.length)] : null;
+}
+function aggRushRelease(a, aa, lines) {
+  const r = a.resources = a.resources || {};
+  const t = aggRushTarget(a);
+  const markedId = r.rush && r.rush.targetId;
+  r.rush = null;
+  r.rushNext = (Number(state.turnNo) || 1) + AGG_RUSH.cooldown;
+  if (!t) { lines.push(`${a.name} 的狂暴连打没有目标，散了劲。`); return; }
+  if (markedId && t.id !== markedId) lines.push(`${a.name} 被牵制，狂暴连打转向 ${t.name}！`);
+  if (Number(a.zone) !== Number(t.zone)) {
+    const stuck = a.noMove || (typeof touDuelVictim === "function" && touDuelVictim(a)) || a.self === "anchor";
+    if (stuck) { lines.push(`${a.name} 动不了，冲不到 ${t.name} 身边，狂暴连打落空。`); return; }
+    if (typeof lineBlocked === "function" && lineBlocked(a.zone, t.zone)) { lines.push(`${a.name} 想冲向 ${t.name}，被墙挡住，狂暴连打落空。`); return; }
+    a.zone = Number(t.zone);
+    lines.push(`${a.name} 冲到 ${t.zone} 区！`);
+  }
+  lines.push(`【狂暴连打】${a.name} 对 ${t.name} 连打 ${AGG_RUSH.hits} 击！（每击都能协助格挡，成功率 +${AGG_RUSH.blockBonus}%）`);
+  r.rushHit = { done: 0, blocked: 0, issuing: true, open: true };
+  a.rushBlock = AGG_RUSH.blockBonus;   // finalBlockChance 读：这几击的协助格挡 +10%
+  for (let i = 0; i < AGG_RUSH.hits; i++) {
+    if (!aggRushStanding(t)) break;
+    aa(t, { element: "physical", mult: AGG_RUSH.mult, diceN: 1, diceS: AGG_RUSH.diceS, baseBreak: AGG_RUSH.baseBreak, atkRange: "melee",
+      flags: { action: true, aggRush: true } });
+  }
+  r.rushHit.issuing = false;
+  lines.push(...aggRushSettle(a));
+}
+/** dealTo 每一击结算完（立刻结算的、等协助格挡结果的都算）调这里：记下是不是被挡下 */
+function aggRushHitDone(a, blocked) {
+  const h = a && a.resources && a.resources.rushHit;
+  if (!h || !h.open) return [];
+  h.done += 1;
+  if (blocked) h.blocked += 1;
+  return h.issuing ? [] : aggRushSettle(a);
+}
+/** 所有连打都落下了（队列里没有等格挡的）：全部被挡下就自己吃击破 */
+function aggRushSettle(a) {
+  const h = a && a.resources && a.resources.rushHit;
+  if (!h || !h.open) return [];
+  if ((state.blockQueue || []).some(j => j.attackerId === a.id && j.opt && j.opt.flags && j.opt.flags.aggRush)) return [];
+  h.open = false;
+  a.rushBlock = 0;
+  const notes = [];
+  if (h.done >= AGG_RUSH.hits && h.blocked >= AGG_RUSH.hits) {
+    notes.push(`${a.name} 的狂暴连打全部被挡下，反震得沙壳崩裂！`);
+    if (typeof dealBreak === "function") dealBreak(a, AGG_RUSH.selfBreak, "physical", notes, "狂暴连打全被挡下");
+  }
+  return notes;
+}
+
 function aggArmCannon(u, notes) {
+  if (u && u.resources) u.resources.rush = null;   // 狂暴连打是一阶段的：预备好还没出手的，进二阶段作废
   if (!u || typeof addBossMechanic !== "function") return;
   if (bossMechList(u, "execution").some(m => m.aggCannon)) return;
   addBossMechanic(u, {

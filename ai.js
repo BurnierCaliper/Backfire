@@ -29,7 +29,7 @@ const EnemyAI = (function () {
   // 不按「打单个目标」瞄准的技能：标定区域的榴弹（落点任意），不看危墙
   const ZONE_PICK = { en_gl: true, en_gl_fire: true, en_ant_shell: true, en_ant_shell_fire: true };
   // 不需要目标 / 不是攻击的技能：找站位时不拿它们来算「能不能打到」
-  const NO_TARGET = { en_agg3_debris: true, en_king_hold: true, en_king_exec: true, en_bigsand_summon: true, en_bigsand_heal: true, ufo_prime: true,
+  const NO_TARGET = { en_agg3_debris: true, en_agg1_rush: true, en_agg1_rush_prep: true, en_king_hold: true, en_king_exec: true, en_bigsand_summon: true, en_bigsand_heal: true, ufo_prime: true,
     ufo_boom: true, ufo_stomp: true, ufo_sweep: true, ufo_summon: true, en_agg2_overheat: true, en_giant_sand_pulse: true, en_thug_mutiny: true, en_gas_ignite: true, en_hunter_heat: true, en_alarm_zap: true };
   function canAimSkill(u, sid, t) {
     if (!inSkillReach(u, sid, t)) return false;
@@ -375,7 +375,12 @@ const EnemyAI = (function () {
     }
     if (spec.special === "aggregate") {
       const ph = r.phase || 1;
-      if (ph === 1) return sameZone ? "en_agg1_melee" : "en_agg1_range";
+      if (ph === 1) {
+        // 狂暴连打：预备好了就出手（冲到目标的区）；能预备就先预备，剩下的行动点照常打
+        if (has("en_agg1_rush")) return "en_agg1_rush";
+        if (has("en_agg1_rush_prep")) return "en_agg1_rush_prep";
+        return sameZone ? "en_agg1_melee" : "en_agg1_range";
+      }
       if (ph === 2) return sameZone ? "en_agg2_melee" : null;   // 主动接近，靠移动逻辑走过去（电能炮是死刑机制，回合开始自己落下）
       // 三阶段：每回合必吸引碎片一次 + 攻击一次
       if (u._aiDebrisTurn !== state.turnNo && has("en_agg3_debris")) return "en_agg3_debris";
@@ -535,7 +540,7 @@ const EnemyAI = (function () {
     // 沙漠生物的习性：夜晚 / 沙暴不走进有沙珊瑚的区（desert.js · coralAvoid）
     if (step != null && typeof coralAvoid === "function" && coralAvoid(u, step)) step = null;
     let sid = aiSpecial(u, spec, target, prey, has, list);
-    if (sid && !["en_agg3_debris", "en_king_hold", "en_king_exec", "en_bigsand_summon", "en_bigsand_heal", "ufo_prime", "ufo_boom", "ufo_stomp", "ufo_sweep", "en_agg2_overheat", "en_gl", "en_gl_fire", "en_ant_shell", "en_ant_shell_fire", "en_gas_ignite", "en_alarm_zap", "en_giant_sand_pulse"].includes(sid)) {
+    if (sid && !["en_agg3_debris", "en_agg1_rush", "en_agg1_rush_prep", "en_king_hold", "en_king_exec", "en_bigsand_summon", "en_bigsand_heal", "ufo_prime", "ufo_boom", "ufo_stomp", "ufo_sweep", "en_agg2_overheat", "en_gl", "en_gl_fire", "en_ant_shell", "en_ant_shell_fire", "en_gas_ignite", "en_alarm_zap", "en_giant_sand_pulse"].includes(sid)) {
       const rt = retargetLegal(u, sid, target, prey, pick.forced);
       if (rt.target) target = rt.target;
       if (rt.sid) sid = rt.sid;
@@ -544,6 +549,7 @@ const EnemyAI = (function () {
 
     // 手册：够不着就先移动；special 已经给出可用技能且位置合适时直接用
     const noTargetNeeded = sid === "en_agg3_debris" || sid === "en_king_hold" || sid === "en_king_exec" ||
+      sid === "en_agg1_rush" || sid === "en_agg1_rush_prep" ||   // 狂暴连打自己找目标、自己冲过去
       sid === "en_bigsand_summon" || sid === "en_bigsand_heal" || sid === "ufo_prime" ||
       sid === "ufo_boom" || sid === "ufo_stomp" || sid === "ufo_sweep" || sid === "en_agg2_overheat" ||
       sid === "en_giant_sand_pulse" ||   // 全域沙暴打所有区域，不用瞄准

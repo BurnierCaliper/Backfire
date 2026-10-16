@@ -11,7 +11,7 @@
   const gapNames = { open: "畅通", bridge: "不稳桥梁", wall: "危墙", door: "机关门", void: "空隙" };
   const numericUnit = { hp: "最内层生命", shp: "坚毅生命（仅主持人）", shpMax: "坚毅生命上限", def: "架势", defMax: "架势上限", ap: "行动点", apMax: "行动点上限", bonus: "附赠行动", bonusMax: "附赠行动上限", atk: "个人 ATK", level: "等级", zone: "所在区", highEnergy: "高能层数" };
   const flagUnit = { stunned: "失衡", dying: "濒死", dead: "倒下", flying: "飞行" };
-  const NO_TARGET = new Set("en_boom_fuse en_patrol_chase en_patrol_near en_gl en_gl_fire en_ant_shell en_ant_shell_fire en_gas_ignite en_hunter_heat en_alarm_zap en_bigsand_summon en_bigsand_heal en_live_absorb en_giant_sand_pulse en_boat_arc en_king_hold en_king_exec en_thug_mutiny en_chi_cover ufo_stomp ufo_sweep ufo_prime ufo_boom en_agg2_overheat en_agg3_debris ufo_summon".split(" "));
+  const NO_TARGET = new Set("en_boom_fuse en_patrol_chase en_patrol_near en_gl en_gl_fire en_ant_shell en_ant_shell_fire en_gas_ignite en_hunter_heat en_alarm_zap en_bigsand_summon en_bigsand_heal en_live_absorb en_giant_sand_pulse en_boat_arc en_king_hold en_king_exec en_thug_mutiny en_chi_cover ufo_stomp ufo_sweep ufo_prime ufo_boom en_agg2_overheat en_agg3_debris en_agg1_rush en_agg1_rush_prep ufo_summon".split(" "));
   function mount(bridge) {
     if (!bridge || typeof bridge.getView !== "function" || typeof bridge.submit !== "function") throw new TypeError("OnlineGMUI requires getView and submit");
     let view, container = null, open = false, tab = "enemies", busy = false, notice = "", silent = false;

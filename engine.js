@@ -1595,6 +1595,12 @@ const KING_CFG = {
  *  每个被标记的人在自己所在的区爆炸一次，对这个区每个友方各 blast × atk（不能格挡）——要分开站。之后每 interval 回合一次；外层沙壳打穿就停。 */
 const AGG_SPREAD = { firstTurn: 1, turns: 1, interval: 2, blast: 0.6 };
 
+/** 沙灵聚合体一阶段 · 狂暴连打（作者定）：聚合体回合花 1 行动点预备，指定一名随机敌人（被嘲讽 / 决一死战时就是牵制者）；
+ *  下一个敌人回合冲到目标所在的区连打 hits 击：每击 mult × atk + 1d(diceS) 物理、baseBreak 击破，每击都能协助格挡，成功率 +blockBonus%。
+ *  出手时被嘲讽就转火牵制者；原目标倒下就随机换一个。全部被格挡下来：聚合体自己受到 selfBreak 击破。
+ *  firstTurn 起才会预备；打完过 cooldown 回合（从出手那回合算）才会再预备。进入二阶段就作废。 */
+const AGG_RUSH = { firstTurn: 2, cooldown: 3, hits: 4, mult: 1, diceS: 8, baseBreak: 1, blockBonus: 10, selfBreak: 4 };
+
 function ufoLegStats(lv) {
   const extra = Math.max(0, (Number(lv) || 1) - 1);
   return {
