@@ -1242,10 +1242,9 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
 .t-btn.t-big b { font-size: 26px; }
 .t-panel-head { display: flex; align-items: center; gap: 12px; }
 .t-panel-head h2 { margin: 0; font-size: 20px; }
-.t-back, .t-link { background: none; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); font: inherit; font-size: 13px; padding: 4px 10px; cursor: pointer; }
-.t-back:hover, .t-link:hover { color: var(--bone); border-color: var(--bone); }
-.t-back:focus-visible, .t-link:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
-.t-links { display: flex; justify-content: center; gap: 10px; margin-top: 6px; }
+.t-back { background: none; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); font: inherit; font-size: 13px; padding: 4px 10px; cursor: pointer; }
+.t-back:hover { color: var(--bone); border-color: var(--bone); }
+.t-back:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .t-btn {
   display: flex;
   flex-direction: column;

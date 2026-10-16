@@ -140,8 +140,8 @@
 .t-btn.t-big b { font-size: 34px; }
 .t-btn.t-big small { font-size: 13.5px; }
 .t-panel-head h2 { font-family: var(--sk-name); font-size: 26px; color: var(--sk-canvas); text-shadow: 2px 2px 0 var(--sk-ink); }
-.t-back, .t-link { font-family: var(--sk-label); background: var(--sk-steel); border: 2px solid var(--sk-ink); border-radius: 0; color: var(--sk-canvas); box-shadow: 3px 3px 0 rgba(0, 0, 0, .5); }
-.t-back:hover, .t-link:hover { color: var(--sk-hazard); border-color: var(--sk-ink); }
+.t-back { font-family: var(--sk-label); background: var(--sk-steel); border: 2px solid var(--sk-ink); border-radius: 0; color: var(--sk-canvas); box-shadow: 3px 3px 0 rgba(0, 0, 0, .5); }
+.t-back:hover { color: var(--sk-hazard); border-color: var(--sk-ink); }
 .t-btn {
   gap: 2px; padding: 10px 16px 11px;
   background-color: var(--sk-steel);
