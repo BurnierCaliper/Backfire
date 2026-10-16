@@ -553,7 +553,7 @@
       const done = q.got ? " ✓" : "";
       const chips = [r.xp ? `<span class="ol-q-xp">经验 ${esc(r.xp)}/人${done}</span>` : "", r.kuizhi ? `<span class="ol-q-kz">奎支 ${esc(r.kuizhi)}${done}</span>` : ""]
         .concat((r.items || []).map(x => `<span>${esc(x)}${done}</span>`)).filter(Boolean).join("");
-      return `<article class="ol-q-card ${stCls}"><header><b>${esc(q.name)}</b><span class="ol-q-tag${q.category === "main" ? " ol-q-main" : ""}">${q.category === "main" ? "主线" : "支线"}${q.private ? " · 仅你可见" : ""}</span><span class="ol-q-st">${stText}</span>${q.days ? `<span class="ol-muted">${esc(q.days)} 天</span>` : ""}</header>${q.goal ? `<p class="ol-q-goal">${esc(q.goal)}</p>` : ""}${q.status === "failed" && q.failWhy ? `<p class="ol-muted">${esc(q.failWhy)}</p>` : ""}${steps}${chips ? `<div class="ol-q-rewards"><span class="ol-muted">完成奖励</span>${chips}</div>` : ""}</article>`;
+      return `<article class="ol-q-card ${stCls}"><header><b>${esc(q.name)}</b><span class="ol-q-tag${q.category === "main" ? " ol-q-main" : q.category === "personal" ? " ol-q-personal" : ""}">${q.category === "main" ? "主线" : q.category === "personal" ? `个人${q.owner ? " · " + esc(q.owner) : ""}` : "支线"}${q.private ? " · 仅你可见" : ""}</span><span class="ol-q-st">${stText}</span>${q.days ? `<span class="ol-muted">${esc(q.days)} 天</span>` : ""}</header>${q.goal ? `<p class="ol-q-goal">${esc(q.goal)}</p>` : ""}${q.status === "failed" && q.failWhy ? `<p class="ol-muted">${esc(q.failWhy)}</p>` : ""}${steps}${chips ? `<div class="ol-q-rewards"><span class="ol-muted">完成奖励</span>${chips}</div>` : ""}</article>`;
     }
     function questMarkup() {
       const list = questList();
@@ -562,7 +562,7 @@
         const rows = list.filter(q => q.category === cat).sort((a, b) => order[a.status] - order[b.status]);
         return `<h3 class="ol-q-sec">${title}</h3>${rows.map(questCard).join("") || '<p class="ol-muted">暂无。</p>'}`;
       };
-      return `<div class="ol-card ol-quest-card"><header><h2>任务日志</h2><button type="button" class="ol-button" data-bag="close">关闭</button></header>${group("main", "主线任务")}${group("side", "支线任务")}<p class="ol-muted">任务由主持人发布和推进。每一步的奖励在完成这一步时发：经验每人一份，奎支进队伍钱包。</p></div>`;
+      return `<div class="ol-card ol-quest-card"><header><h2>任务日志</h2><button type="button" class="ol-button" data-bag="close">关闭</button></header>${group("main", "主线任务")}${group("side", "支线任务")}${list.some(q => q.category === "personal") ? group("personal", "个人任务") : ""}<p class="ol-muted">任务由主持人发布和推进。每一步的奖励在完成这一步时发：经验每人一份，奎支进队伍钱包。个人任务只有你看得到，经验只给你的角色。</p></div>`;
     }
     function openQuests() {
       bagBox.innerHTML = questMarkup(); bagBox.hidden = false; questBoxOpen = true;
@@ -576,7 +576,7 @@
         let msg = "";
         for (const id of Object.keys(now)) {
           const a = questSeen[id], b = now[id];
-          if (!a) msg = `新任务：「${b.name}」（${b.q.category === "main" ? "主线" : "支线"}）`;
+          if (!a) msg = `新任务：「${b.name}」（${b.q.category === "main" ? "主线" : b.q.category === "personal" ? "个人" : "支线"}）`;
           else if (a.status !== b.status && b.status === "done") msg = `任务完成：「${b.name}」${b.q.reward.xp ? ` · 每人 +${b.q.reward.xp} 经验` : ""}${b.q.reward.kuizhi ? ` · +${b.q.reward.kuizhi} 奎支` : ""}`;
           else if (a.status !== b.status && b.status === "failed") msg = `任务失败：「${b.name}」`;
           else if (a.status !== b.status && b.status === "active") msg = `接下任务：「${b.name}」`;

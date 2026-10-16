@@ -963,6 +963,33 @@ test("联机：任务日志——主持人新建主线、配每一站奖励和�
   assert.deepEqual(f.errors, []);
 });
 
+test("联机：个人任务——主持人给 Alice 的角色发个人任务，Alice 看得到、Bob 的包里根本没有", { timeout: 120000 }, async t => {
+  const f = await fixture(t); if (!f) return;
+  const { host, alice, bob, aliceId } = f;
+  await host.evaluate(() => { OnlineGame.start(); });
+  for (const page of [alice, bob]) await page.waitForFunction(() => OnlineGame.getView().screen === "exploration");
+  const aliceKit = await host.evaluate(id => { const h = HotseatGame.getView().heroes.find(x => x.owner === id); return state.units.find(u => u.id === h.id).kit; }, aliceId);
+  await host.click('[data-tab="tasks"]');
+  await host.selectOption("#tk-cat", "personal");
+  await host.click('[data-tk="new:custom"]');
+  await host.click('[data-tk^="edit:"]');
+  await host.fill('[data-te="name"]', "寄回家的信");
+  await host.selectOption('[data-te="owner"]', aliceKit);
+  await host.click('[data-te-act="save"]');
+  await host.click('[data-tk^="post:"]');
+  await alice.waitForFunction(() => (OnlineGame.getView().packet?.quests || []).some(q => q.name === "寄回家的信"));
+  const q = (await alice.evaluate(() => OnlineGame.getView().packet.quests)).find(x => x.name === "寄回家的信");
+  assert.equal(q.category, "personal");
+  assert.equal(q.private, true);
+  await alice.click('[data-online="quests"]');
+  assert.match(await alice.locator("#online-bag").innerText(), /个人任务[\s\S]*寄回家的信[\s\S]*仅你可见/);
+  await bob.waitForTimeout(500);
+  const bobRaw = JSON.stringify(await bob.evaluate(() => OnlineGame.getView().packet?.quests || []));
+  assert.ok(!/寄回家的信/.test(bobRaw), "Bob 收不到别人的个人任务：" + bobRaw);
+  assert.match(await host.locator("#tr-panel, body").first().innerText(), /只有操控 .+ 的玩家可见/);
+  assert.deepEqual(f.errors, []);
+});
+
 test("联机跑团：主持人长休，玩家画面也弹结算（不带坚毅）；主持人那边看得到坚毅数值", { timeout: 120000 }, async t => {
   const f = await fixture(t); if (!f) return;
   const { host, alice } = f;

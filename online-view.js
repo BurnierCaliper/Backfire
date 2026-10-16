@@ -597,7 +597,7 @@
     const num = v => (typeof v === "number" && isFinite(v) ? Math.max(0, Math.floor(v)) : 0);
     const STATUS = ["posted", "active", "done", "failed"], STEP = ["done", "cur", "todo"];
     return list.slice(0, 40).filter(obj).map(q => ({
-      id: str(q.id, 40), name: str(q.name, 40), category: q.category === "main" ? "main" : "side",
+      id: str(q.id, 40), name: str(q.name, 40), category: q.category === "main" || q.category === "personal" ? q.category : "side", owner: str(q.owner, 20),
       status: STATUS.includes(q.status) ? q.status : "posted", goal: str(q.goal, 400), days: num(q.days),
       private: !!q.private, index: num(q.index), got: !!q.got, failWhy: str(q.failWhy, 120),
       reward: obj(q.reward) ? { xp: num(q.reward.xp), kuizhi: num(q.reward.kuizhi), items: arr(q.reward.items).slice(0, 20).map(x => str(x, 60)) } : { xp: 0, kuizhi: 0, items: [] },

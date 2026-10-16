@@ -480,9 +480,10 @@
     btns.push(`<button class="g-btn small" data-tk="up:${id}" title="任务日志里往前挪">↑</button><button class="g-btn small" data-tk="down:${id}" title="任务日志里往后挪">↓</button>`);
     const hiddenNodes = t.nodes.map((n, i) => (n.hidden ? i : -1)).filter(i => i >= 0);
     if (t.status !== "active") btns.push(`<button class="g-btn small" data-tk="del:${id}">删除</button>`);
-    const vis = t.visibility && t.visibility.mode === "players" ? `仅 ${esc(questPlayerNames(t.visibility.ids))} 可见` : "全队可见";
+    const vis = t.category === "personal" ? `只有操控 ${esc(t.owner ? trpgHeroLabel(t.owner) : "（没选角色）")} 的玩家可见`
+      : t.visibility && t.visibility.mode === "players" ? `仅 ${esc(questPlayerNames(t.visibility.ids))} 可见` : "全队可见";
     return `<div class="tr-up tk-card${t.status === "active" ? " on" : ""}">
-      <div class="tk-head"><b>${esc(t.name)}</b><span class="tk-cat${t.category === "main" ? " main" : ""}">${t.category === "main" ? "主线" : "支线"}</span><span class="tk-kind">${esc(TRPG_TASK_KINDS[t.kind])}</span>${st}<span class="tk-days">${t.days} 天</span><span class="tk-vis">${vis}</span></div>
+      <div class="tk-head"><b>${esc(t.name)}</b><span class="tk-cat${t.category === "main" ? " main" : t.category === "personal" ? " personal" : ""}">${TRPG_TASK_CATEGORY[t.category] || "支线"}</span><span class="tk-kind">${esc(TRPG_TASK_KINDS[t.kind])}</span>${st}<span class="tk-days">${t.days} 天</span><span class="tk-vis">${vis}</span></div>
       ${t.goal ? `<p class="tk-goal">${esc(t.goal)}</p>` : ""}
       ${t.gmNote ? `<p class="r-hint">主持人备注（玩家看不到）：${esc(t.gmNote)}</p>` : ""}
       ${t.status === "failed" && t.failWhy ? `<p class="r-hint">失败原因：${esc(t.failWhy)}</p>` : ""}
@@ -548,9 +549,11 @@
       <h4>编辑任务</h4>
       <div class="tr-row">名称 ${inp("name", t.name, 160)} 类型 <select data-te="kind" data-te-rerender="1">${options(Object.keys(TRPG_TASK_KINDS).map(k => [k, TRPG_TASK_KINDS[k]]), t.kind)}</select>
         天数 ${inp("days", t.days, 52, "number")}</div>
-      <div class="tr-row">分类 <select data-te="category">${options([["main", "主线"], ["side", "支线"]], t.category || "side")}</select>
+      <div class="tr-row">分类 <select data-te="category" data-te-rerender="1">${options([["main", "主线"], ["side", "支线"], ["personal", "个人"]], t.category || "side")}</select>
+        ${t.category === "personal" ? `属于角色 <select data-te="owner">${options([["", "（选一名角色）"]].concat(trpgHeroes().filter(h => !h.weaponOf).map(h => [h.kit, trpgHeroLabel(h.kit)])), t.owner || "")}</select>
+        <span class="r-hint">只有操控这名角色的玩家看得到（其他玩家连有这条任务都不知道）；经验只给这名角色，奎支和物品照样进队伍。</span></div>` : `
         可见 <select data-te="visibility.mode" data-te-rerender="1">${options([["party", "全队"], ["players", "指定玩家"]], (t.visibility || {}).mode || "party")}</select>
-        ${(t.visibility || {}).mode === "players" ? (questRoster().length ? questRoster().map(p => `<label class="tr-pick"><input type="checkbox" data-te-vis="${esc(p.id)}" ${(t.visibility.ids || []).includes(p.id) ? "checked" : ""}>${esc(p.name)}</label>`).join("") : '<span class="r-hint">现在没有联机玩家；开房后再勾选。</span>') : ""}</div>
+        ${(t.visibility || {}).mode === "players" ? (questRoster().length ? questRoster().map(p => `<label class="tr-pick"><input type="checkbox" data-te-vis="${esc(p.id)}" ${(t.visibility.ids || []).includes(p.id) ? "checked" : ""}>${esc(p.name)}</label>`).join("") : '<span class="r-hint">现在没有联机玩家；开房后再勾选。</span>') : ""}</div>`}
       <div class="tr-row">目标（玩家可见） <textarea data-te="goal" rows="2" style="width:100%">${esc(t.goal)}</textarea></div>
       <div class="tr-row">主持人备注（只有主持人看得到） ${inp("gmNote", t.gmNote, 420)}</div>
       <h4>奖励</h4>
@@ -574,13 +577,13 @@
     const list = trpgTasks();
     const order = { active: 0, posted: 1, draft: 2, done: 3, failed: 4 };
     const group = (cat, title) => {
-      const rows = list.filter(t => (t.category === "main" ? "main" : "side") === cat).sort((a, b) => order[a.status] - order[b.status]);
+      const rows = list.filter(t => (t.category || "side") === cat).sort((a, b) => order[a.status] - order[b.status]);
       return `<h3 class="tk-sec">${title}</h3>${rows.map(t => taskEdit && taskEdit.id === t.id ? taskEditorHtml(taskEdit) : taskCardHtml(t)).join("") || '<p class="r-hint">暂无。</p>'}`;
     };
     return `<p class="r-hint">任务日志：主持人在这里发布主线和支线任务。先建草稿，配置路线（每一站给玩家看的步骤、完成这一站的奖励、战斗站的敌人）和完成奖励，再「发布」；队伍「接下」后按站推进，可以同时进行好几条。
         联机玩家点「任务日志」就能看到：草稿、只指定给别人的任务、主持人备注、敌人配置、隐藏的站都看不到。每一站的奖励只发一次（回退再推进不重发，也不收回）。</p>
-      <div class="tr-row">新建 <select id="tk-cat">${options([["main", "主线"], ["side", "支线"]], newTaskCat)}</select> 任务：${Object.keys(TRPG_TASK_KINDS).map(k => `<button class="g-btn small" data-tk="new:${k}">${esc(TRPG_TASK_KINDS[k])}</button>`).join("")}</div>
-      ${group("main", "主线任务")}${group("side", "支线任务")}`;
+      <div class="tr-row">新建 <select id="tk-cat">${options([["main", "主线"], ["side", "支线"], ["personal", "个人"]], newTaskCat)}</select> 任务：${Object.keys(TRPG_TASK_KINDS).map(k => `<button class="g-btn small" data-tk="new:${k}">${esc(TRPG_TASK_KINDS[k])}</button>`).join("")}</div>
+      ${group("main", "主线任务")}${group("side", "支线任务")}${group("personal", "个人任务（只给那名角色的玩家看）")}`;
   };
   function teSet(path, v) {
     const keys = path.split(".");

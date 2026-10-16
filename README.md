@@ -368,6 +368,12 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **跑团任务日志：个人任务**（trpg-tasks.js · `category: "personal"` / `owner` / `trpgQuestVisible` / `trpgTaskXpKits` / `trpgHeroLabel`；online-game.js · `kitsOwnedBy`；online-view.js · `projectQuests`；online-ui.js；trpg-ui.js；online.css、game.css；tests/quest-log.test.js）
+  - 主持人新建任务时多一个分类「个人」，在编辑里选「属于角色」（新建时先挂在第一名角色身上）。
+  - **只有操控这名角色的玩家看得到**：房主按每个人操控的角色算好再发，别的玩家的包里根本没有这条任务（连有这条任务都不知道）；「指定玩家可见」对个人任务不起作用。主持人全都看得到。
+  - 玩家的任务日志多一栏「个人任务」，标签写「个人 · 角色名 · 仅你可见」，新任务提示写「（个人）」。
+  - **奖励**：每一站和完成时的经验只给这名角色；奎支、物品、改装件、图纸照样进队伍。
+  - 主持人的任务面板多一栏「个人任务」，卡片写着「只有操控某某的玩家可见」。
 - **roguelike 每日挑战**（issue #52；rogue-data.js · `ROGUE_CONFIG.daily`；rogue.js · `dailySeed` / `dailyParty` / `dailyFeatOffer` / `dailyRecord` / `dailyStats` / `featPickRates`；rogue-commands.js；rogue-ui.js · `RunFlow.startDaily`；screens.js；game.html；bestiary-ui.js；tests/daily-challenge.test.js）
   - 「本地玩法」里多一个「每日挑战」：种子是 `daily-年-月-日`（本机日期），所有人打同一局。按钮上写着今天的日期和队伍，点了直接出发，不进选人画面。
   - **随机队伍**由种子定，4 人，**不限搭配**：全是坦克、没有输出都可能，方便测极端情况和意料之外的组合。
