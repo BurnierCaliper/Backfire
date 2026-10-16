@@ -96,6 +96,7 @@ test("跑团模式：开团、买东西、休息、升级武器、后台改数�
   await page.click('[data-tab="rest"]');
   await page.click('[data-hours="8"]');
   await page.click("#tr-long-force");
+  await page.click('#rest-report [data-rr="close"]');   // 长休结算画面
   await page.click("#tr-bs");
   await page.fill("#bs-kz", "4321");
   await page.click("#bs-apply");
@@ -1750,5 +1751,26 @@ test("单局：角色资料里坚毅生命只写模糊说法，不写数字（�
   await page.waitForSelector("#hs-body .hs-stats");
   const cell = await page.evaluate(() => [...document.querySelectorAll("#hs-body .hs-stats > div")].find(d => /坚毅生命/.test(d.textContent)).querySelector("b").textContent);
   assert.match(cell, /^(精力充沛|还撑得住|疲惫|快撑不住了)$/);
+  assert.deepEqual(o.errors, []);
+});
+
+test("单局：休整（长休）后弹出结算画面——血量、补给、每人一句状态，不写坚毅", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await page.click("#t-new");
+  await page.click('.hero-pick[data-kit="kolt"]');
+  await page.click('.hero-pick[data-kit="helu"]');
+  await page.click("#party-go");
+  await page.waitForSelector("#scr-run:not([hidden])");
+  await page.evaluate(() => { RunFlow.current().stage = "camp"; RunFlow.refresh(); });
+  await page.click("#r-camp");
+  await page.waitForSelector("#rest-report:not([hidden])");
+  const text = await page.locator("#rest-report").innerText();
+  assert.match(text, /长休结束|没能好好休息/);
+  assert.match(text, /柯尔特[\s\S]*血量/);
+  assert.match(text, /「[^」]+」/, "每人一句状态");
+  assert.doesNotMatch(text, /坚毅/);
+  await page.click('#rest-report [data-rr="close"]');
+  await page.waitForSelector("#rest-report", { state: "hidden" });
   assert.deepEqual(o.errors, []);
 });

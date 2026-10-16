@@ -552,9 +552,29 @@
     if (own(packet, "rogue")) { const r = get(packet, "rogue"); out.rogue = obj(r) ? scrubHidden(clone(r)) : null; }
     // 任务日志：只留玩家该看的字段（主持人备注、敌人配置、隐藏站的内容在房主那边就去掉了，这里再按白名单过一遍）
     if (own(packet, "quests")) out.quests = projectQuests(get(packet, "quests"));
+    // 长休结算：不带坚毅（只带那一句 mood）；游戏时钟
+    if (own(packet, "rest")) out.rest = projectRest(get(packet, "rest"));
+    if (own(packet, "clock")) { const ck = get(packet, "clock"); out.clock = obj(ck) ? { day: Math.max(1, Math.floor(Number(ck.day) || 1)), clock: ((Math.floor(Number(ck.clock) || 0) % 1440) + 1440) % 1440 } : null; }
     // Resync is another envelope using these same explicit projectors, not a
     // path for forwarding an opaque nested packet or raw save snapshot.
     return out;
+  }
+  function projectRest(r) {
+    if (!obj(r)) return null;
+    const str = (v, n) => typeof v === "string" ? v.slice(0, n) : "";
+    const num = v => (typeof v === "number" && isFinite(v) ? Math.floor(v) : 0);
+    const pair = v => (Array.isArray(v) ? [num(v[0]), num(v[1])] : [0, 0]);
+    const t = v => (obj(v) ? { day: num(v.day), clock: num(v.clock) } : { day: 0, clock: 0 });
+    return {
+      id: str(r.id, 40), ok: !!r.ok, hours: num(r.hours), forced: !!r.forced, from: t(r.from), to: t(r.to),
+      water: num(r.water), food: num(r.food), exhaust: pair(r.exhaust), watch: str(r.watch, 40),
+      ambush: obj(r.ambush) ? { text: str(r.ambush.text, 120) } : null,
+      heroes: arr(r.heroes).slice(0, 12).filter(obj).map(h => ({
+        kit: str(h.kit, 40), name: str(h.name, 40), dead: !!h.dead, watch: !!h.watch,
+        hp: pair(h.hp), hpMax: num(h.hpMax), mood: str(h.mood, 80),
+        weapons: arr(h.weapons).slice(0, 4).filter(obj).map(w => ({ name: str(w.name, 40), dur: pair(w.dur), max: num(w.max) }))
+      }))
+    };
   }
   function projectQuests(list) {
     if (!Array.isArray(list)) return null;
@@ -598,7 +618,7 @@
     });
     return out;
   }
-  const api = { SCHEMA, projectPacket, projectQuests, projectSheets, projectBagDetail, projectUnit, projectState, projectTape, projectMessages, projectLogs, projectView, projectActionMenu, safeText: text, safeError };
+  const api = { SCHEMA, projectPacket, projectQuests, projectRest, projectSheets, projectBagDetail, projectUnit, projectState, projectTape, projectMessages, projectLogs, projectView, projectActionMenu, safeText: text, safeError };
   root.OnlineView = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof globalThis !== "undefined" ? globalThis : window);

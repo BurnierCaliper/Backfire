@@ -10,6 +10,7 @@
 
 const TRPG = {
   active: false,
+  lastRest: null,    // 最近一次长休的结算（ledger.js · restReport）
   taskBattle: null   // 正在打的任务战斗 { id, index }（trpg-tasks.js）
 };
 
@@ -211,6 +212,7 @@ function trpgShortRest(kits) {
 function trpgLongRest(plan) {
   const r = ledgerLongRest(plan || {}, []);
   if (typeof trpgTaskRestEscort === "function") trpgTaskRestEscort(r.notes);
+  if (r.report) TRPG.lastRest = r.report;   // 长休结算画面：主持人本机弹，联机玩家收到 rest 包（online-view.js · projectRest）
   return r.notes;
 }
 

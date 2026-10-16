@@ -607,15 +607,55 @@ function unitNameOf(kit) {
 }
 
 /** 长休。plan.watch：守夜者的 kit（角色或武器人），他这次不恢复 */
+/* ---------- 长休结算画面（issue #52）----------
+ * 休息前后各取一次只读快照，算出每人的变化。坚毅生命的数值只给主持人（shp 字段，联机投影 / 游戏版界面都不显示），
+ * 玩家只看到按比例抽的一句（mood，SHP_MOOD_LINES）。 */
+function restSnapshot() {
+  const heroes = (typeof partyHeroes === "function" ? partyHeroes() : []).filter(h => !(typeof isWeaponUnit === "function" && isWeaponUnit(h)));
+  const sum = (h, k) => (h.layers || []).reduce((n, l) => n + Math.max(0, Number(l[k]) || 0), 0);
+  const foods = FOOD_ORDER.reduce((n, id) => n + (typeof bagCount === "function" ? bagCount(id) : 0), 0);
+  return {
+    day: LEDGER.day, clock: LEDGER.clock, hours: Number(LEDGER.hours) || 0, water: ledgerWater(), food: foods,
+    heroes: heroes.map(h => ({
+      kit: h.kit, name: h.name, dead: !!h.dead, dying: !!(h.dying && !h.upOnShp),
+      hp: sum(h, "current"), hpMax: sum(h, "max"), shp: Number(h.shp) || 0, shpMax: Number(h.shpMax) || 0,
+      weapons: (h.linkedKits || []).map(k => ({ kit: k, name: unitNameOf(k), dur: weaponDur(k), max: weaponDurMax(k) }))
+    }))
+  };
+}
+function restReport(b, a, ctx) {
+  ctx = ctx || {};
+  const tier = (hrs) => (typeof exhaustTierFromHours === "function" ? exhaustTierFromHours(hrs) : 0);
+  const rnd = typeof Math.random === "function" ? Math.random : () => 0;
+  return {
+    id: "rest-" + Date.now().toString(36) + Math.floor(rnd() * 1e6).toString(36),
+    ok: !!ctx.ok, hours: ctx.hours || 0, forced: !!ctx.forced,
+    from: { day: b.day, clock: b.clock }, to: { day: a.day, clock: a.clock },
+    water: Math.max(0, b.water - a.water), food: Math.max(0, b.food - a.food),
+    exhaust: [tier(b.hours), tier(a.hours)],
+    watch: ctx.watch ? unitNameOf(ctx.watch) : "", ambush: ctx.ambush || null,
+    heroes: a.heroes.map(h => {
+      const o = b.heroes.find(x => x.kit === h.kit) || h;
+      return {
+        kit: h.kit, name: h.name, dead: h.dead, watch: ctx.watch === h.kit || (h.weapons || []).some(w => w.kit === ctx.watch),
+        hp: [o.hp, h.hp], hpMax: h.hpMax, shp: [o.shp, h.shp], shpMax: h.shpMax,
+        mood: h.dead ? "" : (typeof shpMoodLine === "function" ? shpMoodLine(h.shp, h.shpMax) : ""),
+        weapons: h.weapons.map(w => { const ow = (o.weapons || []).find(x => x.kit === w.kit) || w; return { name: w.name, dur: [ow.dur, w.dur], max: w.max }; })
+      };
+    })
+  };
+}
+
 function ledgerLongRest(plan, notes) {
   notes = notes || [];
   plan = plan || {};
   const hours = Math.max(8, Math.min(12, Number(plan.hours) || 8));
   const need = longRestNeeds(plan);
+  const before = restSnapshot();
   if (!need.ok && !plan.force) {
     notes.push(`补给不足，无法长休：${need.lack.join("，")}。只能消磨时间。`);
     ledgerAdvance(hours, notes);
-    return { ok: false, notes };
+    return { ok: false, notes, report: restReport(before, restSnapshot(), { ok: false, hours }) };
   }
   if (!plan.force) {
     setLedgerWater(ledgerWater() - need.water);
@@ -698,7 +738,7 @@ function ledgerLongRest(plan, notes) {
   if (newDay) LEDGER.day += days;
   notes.push(newDay ? `醒来：进入第 ${LEDGER.day} 天，${clockText(LEDGER.clock)}。` : `醒来：${clockText(LEDGER.clock)}。`);
   ledgerCapture();
-  return { ok: true, notes };
+  return { ok: true, notes, report: restReport(before, restSnapshot(), { ok: true, hours, forced: !!plan.force, watch: plan.watch || null }) };
 }
 
 /** 主持人：全员复原（不扣补给、不推进时间） */

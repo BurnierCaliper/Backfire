@@ -962,3 +962,28 @@ test("联机：任务日志——主持人新建主线、配每一站奖励和�
   }
   assert.deepEqual(f.errors, []);
 });
+
+test("联机跑团：主持人长休，玩家画面也弹结算（不带坚毅）；主持人那边看得到坚毅数值", { timeout: 120000 }, async t => {
+  const f = await fixture(t); if (!f) return;
+  const { host, alice } = f;
+  await host.evaluate(() => { OnlineGame.start(); });
+  await alice.waitForFunction(() => OnlineGame.getView().screen === "exploration");
+  await alice.waitForTimeout(300);
+  await host.click('[data-tab="rest"]');
+  await host.click("#tr-long-force");
+  await host.waitForSelector("#rest-report:not([hidden])");
+  assert.match(await host.locator("#rest-report").innerText(), /坚毅 .*（仅主持人）/);
+  await alice.waitForSelector("#rest-report:not([hidden])");
+  const text = await alice.locator("#rest-report").innerText();
+  assert.match(text, /长休结束/);
+  assert.match(text, /「[^」]+」/);
+  assert.doesNotMatch(text, /坚毅/);
+  if (process.env.BACKFIRE_SHOTS) {
+    await alice.screenshot({ path: path.join(process.env.BACKFIRE_SHOTS, "rest-player.png") });
+    await host.screenshot({ path: path.join(process.env.BACKFIRE_SHOTS, "rest-host.png") });
+  }
+  const raw = JSON.stringify(await alice.evaluate(() => OnlineGame.getView().packet.rest));
+  assert.ok(!/shp/.test(raw), raw);
+  assert.ok(await alice.evaluate(() => OnlineGame.getView().packet.clock && OnlineGame.getView().packet.clock.day >= 1), "游戏时钟发给玩家");
+  assert.deepEqual(f.errors, []);
+});

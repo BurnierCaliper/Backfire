@@ -14,6 +14,7 @@
   const C = ROGUE_CONFIG;
 
   let run = null;          // 当前这一局
+  let shownRest = null;    // 已经弹过的长休结算（rest-report.js）
   let lastNotes = [];      // 上一步发生了什么（显示在记录栏）
   let lastError = "";
   let restSel = { food: {}, sleep: {}, spit: {}, ammo: {} };   // 长休界面：每个角色选的食物 / 睡眠道具（没选的按默认）      // 上一步为什么没做成（显示在主面板顶上，免得按了像没反应）
@@ -42,6 +43,8 @@
     else save();
     render();
     if (online()) OnlineRogue.changed();
+    // 长休结算画面：刚长休完弹一次（玩家看的，坚毅只给一句话）
+    if (run && run.lastRest && run.lastRest.id !== shownRest && window.RestReport) { shownRest = run.lastRest.id; RestReport.show(run.lastRest, { gm: false }); }
   }
   function doAct(command) {
     let notes, error;
@@ -77,7 +80,8 @@
   const solo = { on: false, hero: null, partners: [], role2: null };
   // 长线养成：开局选 ROGUE_GROWTH.startParty 名角色
   const growth = { on: false };
-  const session = { get run() { return run; }, set run(value) { run = value; }, picked, solo, growth };
+  // 换一局（新开 / 读档）时，已经有的长休结算不重弹
+  const session = { get run() { return run; }, set run(value) { run = value; shownRest = value && value.lastRest ? value.lastRest.id : null; }, picked, solo, growth };
   const sessionCommand = (action, fields, context) => dispatch(Object.assign({ type: "run.session", action }, fields || {}), Object.assign({ session }, context || {}));
   const PARTY_TIP = "挑 2–4 名角色出发。每人都带着自己的专属武器人；角色永久死亡时，武器人也会一起离开。";
   const SOLO_TIP = `先点一名角色当主角，再挑 ${ROGUE_SOLO.partners} 名伙伴（战斗里用「支援」叫他们登场打协助攻击），最后选一个第二副职责。` +

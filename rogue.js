@@ -966,7 +966,7 @@ const Rogue = (function () {
         notes.push("打退了偷袭的敌人，总算可以睡下了。");
         // 偷袭前选好的吃什么、睡什么；打完补给变了不够就按默认再分一次
         const plan = ambushPlan;
-        doLongRest(run, notes, null, plan && canLongRest(run, plan) ? plan : null);
+        doLongRest(run, notes, null, plan && canLongRest(run, plan) ? plan : null, { text: "长休前被偷袭：打退了敌人才睡下。" });
       } else {
         notes.push("撤退：没能在这里休息，连夜离开。");
         passHours(run, NODE.battle.hours, notes);
@@ -1339,8 +1339,10 @@ const Rogue = (function () {
     if (typeof SkillText === "undefined" || !SkillText.armoryData) return [];
     return withParty(run, () => SkillText.armoryData()).out;
   }
-  function doLongRest(run, notes, watch, plan) {
+  function doLongRest(run, notes, watch, plan, ambush) {
     const r = withParty(run, () => ledgerLongRest(Object.assign(restChoice(plan), { hours: C.hours.longRest, watch: watch || null }), notes));
+    // 长休结算画面（rest-report.js）：玩家看的，坚毅只给一句模糊的话
+    if (r.out && r.out.report) run.lastRest = Object.assign(r.out.report, ambush ? { ambush } : {});
     const e = run.task && run.task.escort;
     if (e && !e.lost && e.kind === "vip" && e.cur != null) { e.cur = null; notes.push(`${e.name || "委托人"}也休息好了，血量回满。`); }
     notes.push(...r.notes);

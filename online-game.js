@@ -65,7 +65,10 @@
       roomCode: identity.roomCode, hostName: identity.name, paused: isPaused(), messages, publicLogs, manualPhase, offlineWait, systemNotice,
       mode, rogue: rogue() ? OnlineRogue.viewFor(id) : null, levelUps: levelUpsFor(id),
       // 任务日志（跑团）：房主按收件人挑好（草稿、没指定给他的不给），online-view.js 再按白名单投影
-      quests: !rogue() && typeof trpgQuestLog === "function" ? trpgQuestLog(id, id === identity.id) : null };
+      quests: !rogue() && typeof trpgQuestLog === "function" ? trpgQuestLog(id, id === identity.id) : null,
+      // 长休结算（跑团；单局的在 rogue.lastRest 里）和游戏时钟：online-view.js · projectRest / clock 白名单
+      rest: !rogue() && typeof TRPG !== "undefined" ? TRPG.lastRest || null : null,
+      clock: typeof LEDGER !== "undefined" ? { day: LEDGER.day, clock: LEDGER.clock } : null };
   }
   function sendProjected(id, packet) {
     const safe = OnlineView.projectPacket(packet, { recipientId: id, gmId: identity.id, itemCatalog: typeof ITEM_CATALOG !== "undefined" ? ITEM_CATALOG : {} });

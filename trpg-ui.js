@@ -78,7 +78,10 @@
     }
     save();
     render();
+    // 长休结算画面：主持人本机弹（主持人看得到坚毅数值），联机玩家那边由 online-ui.js 弹
+    if (TRPG.lastRest && TRPG.lastRest.id !== shownRest && window.RestReport) { shownRest = TRPG.lastRest.id; RestReport.show(TRPG.lastRest, { gm: true }); }
   }
+  let shownRest = null;
   /** 按记忆重新摆队伍（从战斗画面回来、换队员时） */
   function rebuild() {
     if (window.GAME && GAME.setupBattle) GAME.setupBattle(level());

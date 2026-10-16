@@ -4430,7 +4430,11 @@
     $("g-short-all").onclick = () => { panelCommit({ action: "shortRest", kits: null }); renderRestSheet(); };
     $("g-long-hours").onchange = renderRestSheet;
     $("g-long-force").onchange = renderRestSheet;
-    $("g-long-go").onclick = () => { panelCommit({ action: "longRest", plan: currentRestPlan() }); renderRestSheet(); };
+    $("g-long-go").onclick = () => {
+      const r = panelCommit({ action: "longRest", plan: currentRestPlan() });
+      renderRestSheet();
+      if (r && r.report && window.RestReport) RestReport.show(r.report, { gm: !(typeof shpHidden === "function" && shpHidden()) });
+    };
     $("g-restore-all").onclick = () => { panelCommit({ action: "restore" }); renderRestSheet(); };
     $("g-cheat").onclick = () => {
       dispatch({ type: "battle.panel", action: "cheat" }).notes.forEach(s => appendLog(s));

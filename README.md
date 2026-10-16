@@ -368,6 +368,27 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **长休结算画面**（issue #52 第一期；ledger.js · `restSnapshot` / `restReport`（`ledgerLongRest` 返回 `report`）；新文件 rest-report.js · `RestReport.html` / `RestReport.show`；rogue.js（`run.lastRest`）、trpg.js（`TRPG.lastRest`）、game.js（战斗画面的休整浮层）；online-game.js（包里加 `rest`、`clock`）；online-view.js · `projectRest`；online-rogue.js；online-ui.js；online.css、game.css；tests/rest-report.test.js、tests/ui.test.js、tests/online-session-ui.test.js）
+  - 长休完弹一个结算画面，写着：
+    - 时间从几点到几点（跨天写天数）、睡了几小时；
+    - 补给消耗（水、食物）、力竭变化；
+    - 每人一行：名字首字圆头像，血量和每把武器耐久的前后变化，再加一句按坚毅比例随机抽的话（#52 的四档文案）；
+    - 守夜的人标红，写「守夜 · 没有恢复」；
+    - 休息点长休前被偷袭的，写「长休前被偷袭：打退了敌人才睡下」；
+    - 补给不够时写「没能好好休息」。
+  - 坚毅：玩家版只有那一句话，跑团主持人本机多一行坚毅数值（标着「仅主持人」）。
+  - 哪里会弹：
+    - 单局的休息点长休、任务之间的「休整」；
+    - 跑团「时间与休息」的长休；
+    - 战斗画面里的休整浮层。
+  - 联机：
+    - 跑团是房主长休后，玩家画面也弹，包里的 `rest` 经过 `projectRest` 白名单，不带坚毅；
+    - 联机单局走单局画面的 `lastRest`，坚毅字段同样被去掉；
+    - 刚进房间不弹旧的。
+  - 游戏时钟（第几天、几点）现在也发给联机玩家了，给之后的日月动画用。
+  - 燃油、电能每场战斗开局都重置，不跨休息，所以结算里不列。
+  - 营地聊天阶段、日月动画是下一步。
+
 - **坚毅生命绝不向玩家显示数值**（手册规定；issue #52；app.js · `shpHidden` / `SHP_MOOD_LINES` / `shpMoodTier` / `shpMoodLine` / `shpMoodLabel`；sheet-ui.js、levelup.js、bestiary-ui.js、game.js、ledger.js、items.js · `shpLossText`、rogue-ui.js；tests/shp-hidden.test.js、tests/ui.test.js）
   - 游戏里（单局、单人模式、战斗）坚毅生命一律不写数字，只有跑团主持人看得到数值。联机玩家本来就收不到坚毅。
   - 这次补上的地方：

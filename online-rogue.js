@@ -483,6 +483,7 @@
         mine: mine.map(k => ({ kit: k, name: name(k), answer: l.needs[k] || "" })) })),
       lootLog: d.lootLog.slice(-5).map(x => x.text),
       choice, waitingLevel, shop, points, smith, parts, clinic, workshop,
+      lastRest: r.lastRest || null,   // 长休结算画面（坚毅字段在 online-view.js · scrubHidden 里去掉）
       log: (r.log || []).slice(-8).map(l => l.text)
     };
   }

@@ -15,7 +15,8 @@
     // 战斗画面（online-battle.js）：和单人 / 跑团同一套画面；skillOptions 是当前角色的技能栏，autoKey 防止重复自动取技能
     let battle = null, skillOptions = [], skillsFor = "", autoKey = "";
     let displayState = null, animating = false, messagesInitialized = false, seenMessages = new Set(), toastTimer;
-    let questSeen = null, questBoxOpen = false;   // 任务日志：上一包的摘要（算「任务更新」提示）、日志面板开着没
+    let questSeen = null, questBoxOpen = false;
+    let restSeen;   // 已经弹过的长休结算（第一次收到不弹，免得进房间就弹旧的）   // 任务日志：上一包的摘要（算「任务更新」提示）、日志面板开着没
     let historyRows = [], historyRoom = "", historyHasMore = true, historyLoading = false, historyGeneration = 0;
     // 默认的转发服务（docs/d3/relay.md 里部署的那一个）：大家都用它，就不用每次填；要换别的服务再展开「更换转发服务」
     const DEFAULT_RELAY = "https://backfire-relay.richardguu22.workers.dev";
@@ -589,6 +590,14 @@
       if (questBoxOpen && !bagBox.hidden) bagBox.innerHTML = questMarkup();   // 面板开着：跟着更新
       if (bagBox.hidden) questBoxOpen = false;
     }
+    /** 长休结算：房主那边长休完，玩家画面也弹（单局在 rogue.lastRest，跑团在 rest） */
+    function observeRest() {
+      const r = view.packet?.mode === "rogue" ? view.packet?.rogue?.lastRest : view.packet?.rest;
+      const id = r && r.id ? r.id : null;
+      if (restSeen === undefined) { restSeen = id; return; }
+      if (id && id !== restSeen && global.RestReport) global.RestReport.show(r, { gm: false });
+      restSeen = id;
+    }
     /* ---------- 大字 ---------- */
     const TITLE_PRESETS = [["援军来了", "hope"], ["他们来了", "danger"], ["小心！", "danger"], ["天亮了", "hope"]];
     function paintTitleForm() {
@@ -688,7 +697,7 @@
       if (historyRoom !== nextRoom) {
         historyRoom = nextRoom; historyRows = []; historyHasMore = true; historyLoading = false; historyGeneration++;
         seenMessages = new Set(); messagesInitialized = false; clearTimeout(toastTimer); toast.hidden = true;
-        questSeen = null; questBoxOpen = false;
+        questSeen = null; questBoxOpen = false; restSeen = undefined;
       }
       if (view.active) historyRows = mergeMessages([...historyRows, ...(view.messages || [])]);
       playTitle();
@@ -705,7 +714,7 @@
         html(dock, button(`${view.roomCode || "房间"} · ${paused() ? "重连中" : "消息与成员"}`, "openRoom", "", false) +
           (view.isHost && view.mode !== "rogue" && ["exploration", "ended"].includes(view.screen) ? button("角色分配", "openAssign", "", false) : ""), "dock");
         observeMessages();
-        if (!view.isHost) observeQuests();
+        if (!view.isHost) { observeQuests(); observeRest(); }
       }
       // 联机单局的房主：大厅里先要在单局画面选队伍，房间面板不挡着；队伍选好（有角色可分）时自动打开一次
       const rogueHost = view.active && view.isHost && view.mode === "rogue";
