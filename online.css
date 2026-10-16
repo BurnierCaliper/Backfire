@@ -471,3 +471,8 @@ body.online-player.ol-in-battle .ol-battle .sk.blocked .cost { color: #d9a07a; }
   body.online-player.ol-in-battle .ol-battle .g-hud .hint { position: absolute; top: 8px; right: 12px; width: 42%; max-height: 52px; overflow-y: auto; margin: 0; font-size: 12px; line-height: 1.45; text-align: right; }
   body.online-player.ol-in-battle .ol-battle .g-hud .party { margin-right: 44%; }
 }
+/* 游戏内确认框（代替原生 confirm）：比其他弹窗高一层，垂直居中 */
+.ol-confirm { z-index: 110; align-items: center; }
+.ol-confirm .ol-card { max-width: 420px; }
+.ol-confirm p { margin: 0; color: #e7dcc6; line-height: 1.6; }
+.ol-confirm-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px; }
