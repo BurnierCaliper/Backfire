@@ -368,6 +368,18 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **天气动效正式加入**（PR #53 作者做的 7 种；weather-fx.css（由 `art/weather-fx-draft.css` 转正）；weather-fx.js · `WeatherFx.sync` / `phaseStepName` / `layerClass`；game.js · `applyEnv`；game.html；tests/weather-fx.test.js）
+  - 战场里放一层 `.wfx-{天气}`，界面按 `#g-app` 的 `data-weather` 换色：
+    - 沙暴：一阵阵沙雾顺着风向卷过战场，面板上淡淡的横向雾带（风向读 `data-sand-dir`）；
+    - 雪天：大小、速度不一的雪花；
+    - 酸雨：界面偏酸绿，随机位置的涟漪；
+    - 雷鸣：界面深紫，随机一个区柔和闪光、云影掠过、远处闪电；
+    - 酷暑：界面珊瑚红，底部往上升的热浪；
+    - 微光：青粉渐变界面和呼吸光；
+    - 相位：玫瑰梅子色界面，向右漂的雾状波纹，振幅跟着相位阶段变（波谷 / 平衡 / 波峰，`data-phase-step`）。
+  - 叠加层不挡点击；鼠标悬停 / 聚焦的单位浮在动效上面。系统「减少动态效果」时停下。
+  - 酸雨涟漪、雷鸣闪光 / 闪电由 weather-fx.js 随机生成、播完自己删，换掉天气后计时链自己停；页面在后台时不生成。
+  - 草稿里「本地预览，不提交」的那段 game.js 代码挪进 weather-fx.js，game.js 只调一次 `WeatherFx.sync`。
 - **蓄能和高能分开；专长「铁壁」改名「以身作盾」**（issue #52；enemies.js · `hasHigh`；app.js · `statusLine`、`gainHighFromHits`、收发代理激光选目标、`spreadKeys`（传播）、激活的状态列表、狂瀑的条件和选目标；hud-icons.js · `unitBadges`；online-ui.js；unit-card.js；feats.js；tests/store-vs-high.test.js）
   - **有高能只看高能状态**：以前高能值 > 0 就算高能，蓄能单位（陨石开采机、用高能脉冲的玩家……）开场就显示高能图标，还会被狂瀑、收发代理的激光当成高能目标，传播也能把它的高能值复制出去。现在这些都只看高能状态；能量伤害涨高能值也只对高能状态生效。
   - **显示**：有高能状态写「高能 N」；没有高能状态、只是攒着高能值的写「蓄能 N」（徽章是蓄能图标带数字；蓄能结束后留下的高能值也这样写）。
@@ -747,7 +759,7 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 - **富集变种**（desert.js · `makeEnriched`、`desertLootMult`、`enrichedMaterials`、`desertEnrichedDrops`）：所有沙鱼开战时 10%（沙暴 25%）是富集个体——名字前加「富集」、名牌上有「富集」提示，装甲 ×1.5。打倒奎支 ×5，并按等级掉武器升级材料——**低级材料为主，不掉稀有晶体、赫心结晶**（作者定）：1–5 级金属 1–2；6–10 级金属 2，20% 再给精炼合金；11–15 级金属 2–3，35% 再给精炼合金；16 级起金属 3 + 精炼合金 1，10% 再给聚合材料。跑团模式、长线养成给实物；普通单局里武器升级不收实物，按物品表折成奎支。第 3 回合起每回合 30% 下潜逃走，逃了什么都不掉。
   - 测试 `tests/desert-creatures.test.js`（沙珊瑚、富集各补了用例）。
 
-- **夜晚的战场**（game.js · `applyEnv`；game.css · `.is-night`、`.night-vignette`）：时钟在夜晚（18:00–05:00）时，战场的区域底色压暗、偏蓝，四周加一圈暗角；名牌照常亮，场地颜色还看得出来。天气动效做过演示、暂不加入，记在 ROADMAP「天气动效」，草稿在 `art/weather-fx-draft.css`。
+- **夜晚的战场**（game.js · `applyEnv`；game.css · `.is-night`、`.night-vignette`）：时钟在夜晚（18:00–05:00）时，战场的区域底色压暗、偏蓝，四周加一圈暗角；名牌照常亮，场地颜色还看得出来。天气动效后来正式加入了（PR #53，见 weather-fx.css / weather-fx.js）。
 
 - **时间看得见：昼夜现在会改变敌人的行为**（ledger.js · `DAY_NIGHT`、`isNightClock`、`clockNow`、`clockAfter`；icons.js · `Icons.daynight`；rogue.js · `routeEta`；rogue-ui.js、routemap.js、game.js 顶栏）：
   - 单局顶栏常驻时钟：「第 3 天 · ☀ 16:30 白天」/「🌙 21:40 夜晚」（以前只写第几天）。

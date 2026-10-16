@@ -315,6 +315,8 @@
     const night = !!(env.clock && env.clock.night);
     $("g-app").classList.toggle("is-night", night);
     const fieldEl = document.querySelector(".g-zone") && document.querySelector(".g-zone").parentElement;
+    // 天气动效（weather-fx.js / weather-fx.css，PR #53）：战场叠加层 + 界面的 data-sand-dir / data-phase-step
+    if (window.WeatherFx) WeatherFx.sync({ field: fieldEl, app: $("g-app"), weather: env.weather, sandDir: state.sandDir, phaseStep: state.phaseStep });
     if (fieldEl) {
       let vg = fieldEl.querySelector(".night-vignette");
       if (night && !vg) { vg = el("div", "night-vignette"); fieldEl.appendChild(vg); }
