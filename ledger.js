@@ -81,6 +81,7 @@ const LEDGER = {
   weapons: {},         // 旧档留下的武器人伤势；现在武器人每场开战回满血，不再使用
   shortUsed: {},       // 角色 kit → 今天已用短休次数
   restOnce: {},        // 角色 kit → { 技能 key: 次数 }：「长休一次」的技能，长休才刷新
+  shortOnce: {},       // 角色 kit → { key: 次数 }：「每次短休 N 次」的专长（铁壁、挺身），这个人短休 / 长休时刷新
   career: null,        // 整局战场记录：{ battles: [每场摘要], kits: { kit: 累计数据 } }（careerRecordBattle）
   tasks: [],           // 跑团：主持人发布的任务（trpg-tasks.js）
   place: null,         // 跑团：队伍在角鳞星地图上的位置（world-data.js · WORLD_PLACES 的 id）
@@ -94,7 +95,7 @@ const LEDGER = {
     return JSON.parse(JSON.stringify({
       day: this.day, hours: this.hours, clock: this.clock, dur: this.dur,
       heroes: this.heroes, weapons: this.weapons, shortUsed: this.shortUsed,
-      restOnce: this.restOnce, career: this.career, tasks: this.tasks || [], place: this.place || null, placePos: this.placePos || null, spit: this.spit || {}, ammoOrder: this.ammoOrder || {}, workshop: this.workshop || null, water: ledgerWater()
+      restOnce: this.restOnce, shortOnce: this.shortOnce || {}, career: this.career, tasks: this.tasks || [], place: this.place || null, placePos: this.placePos || null, spit: this.spit || {}, ammoOrder: this.ammoOrder || {}, workshop: this.workshop || null, water: ledgerWater()
     }));
   },
   load(s) {
@@ -107,6 +108,7 @@ const LEDGER = {
     this.weapons = s.weapons || {};
     this.shortUsed = s.shortUsed || {};
     this.restOnce = s.restOnce || {};
+    this.shortOnce = s.shortOnce && typeof s.shortOnce === "object" ? s.shortOnce : {};
     this.career = s.career || null;
     this.tasks = Array.isArray(s.tasks) ? s.tasks : [];
     this.place = typeof s.place === "string" ? s.place : null;
@@ -179,6 +181,16 @@ function careerRecordBattle(outcome, grade, extra) {
 
 /* ===== 「长休一次」的技能 ===== */
 const REST_ONCE_KEYS = ["rally"];
+/** 「每次短休 N 次」：用掉一次（用完了返回 false）；shortOnceUsed 看用了几次 */
+function shortOnceUsed(kit, key) { return Number(((LEDGER.shortOnce || {})[kit] || {})[key]) || 0; }
+function useShortOnce(kit, key, limit) {
+  LEDGER.shortOnce = LEDGER.shortOnce || {};
+  const row = LEDGER.shortOnce[kit] = LEDGER.shortOnce[kit] || {};
+  const n = Number(row[key]) || 0;
+  if (n >= (limit || 1)) return false;
+  row[key] = n + 1;
+  return true;
+}
 /** 用一次「长休一次」的技能。用完了返回 false */
 function useRestOnce(kit, key, limit) {
   LEDGER.restOnce = LEDGER.restOnce || {};
@@ -496,6 +508,7 @@ function ledgerShortRest(kits, notes) {
     const before = totalHpOf(h);
     healHeroFlesh(h, heal);
     LEDGER.shortUsed[h.kit] = (Number(LEDGER.shortUsed[h.kit]) || 0) + 1;
+    if (LEDGER.shortOnce) delete LEDGER.shortOnce[h.kit];   // 「每次短休 N 次」的专长刷新
     notes.push(`${h.name} 短休恢复 ${totalHpOf(h) - before} 点（今日剩 ${shortRestLeft(h)} 次）。`);
     any = true;
   });
@@ -734,6 +747,7 @@ function ledgerLongRest(plan, notes) {
   const keep = (tab) => (watch && tab && tab[watch] != null ? { [watch]: tab[watch] } : {});
   LEDGER.shortUsed = keep(LEDGER.shortUsed);
   LEDGER.restOnce = keep(LEDGER.restOnce);
+  LEDGER.shortOnce = keep(LEDGER.shortOnce);   // 长休也刷新「每次短休 N 次」（守夜的人不刷新）
   // 伙夫（feats.js）：每个带伙夫的人让坚毅生命最少的一名角色多恢复 2 点
   if (typeof featPartyCount === "function" && typeof featExploreOk === "function" && featExploreOk()) {
     const alive = partyHeroes().filter(x => !x.dead && !isWeaponUnit(x));

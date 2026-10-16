@@ -1530,9 +1530,13 @@
 
   function promptBlock(job, attacker, target, helpers, walls) {
     walls = walls || [];
+    // 铁壁（feats.js）：选项带 extra.ironwall，回答时换成 "ironwall:单位"
+    const wallOk = () => (typeof featIronwallDeclarers === "function" ? featIronwallDeclarers(target) : []);
     if (hotseat()) return HotseatGame.requestAsk("block", `${job.opt && job.opt.flags && job.opt.flags.execution ? `【${job.opt.flags.execName || "死刑"} ${job.opt.flags.execHit}/${job.opt.flags.execHits}】` : ""}${attacker.name} 攻击 ${target.name} · 协助格挡`,
-      helpers.map(h => ({ helper: h.id, label: h.name, sub: `格挡成功率 ${finalBlockChance(h, attacker, target)}%` })),
-      () => eligibleBlockers(target, job), job).then(answer => answer.unitId);
+      helpers.map(h => ({ helper: h.id, label: h.name, sub: `格挡成功率 ${finalBlockChance(h, attacker, target)}%` }))
+        .concat(walls.map(h => ({ helper: h.id, label: `${h.name} 铁壁`, sub: "专长 · 必定挡住，击破由自己承担 · 每次短休一次", extra: { ironwall: true } }))),
+      () => { const list = eligibleBlockers(target, job); wallOk().forEach(w => { if (list.indexOf(w) < 0) list.push(w); }); return list; }, job)
+      .then(answer => (answer.unitId && answer.extra && answer.extra.ironwall ? "ironwall:" + answer.unitId : answer.unitId));
     const noBlock = () => showPreview(previewOf(() => finishBlock(null)), `${attacker.name} → ${target.name}（不格挡）`);
     const again = job.tried && job.tried.length;
     // 首领机制·死刑：标题写明是死刑的第几段（每一段都要单独挡）
@@ -1549,7 +1553,7 @@
         onHover: noBlock
       })).concat(walls.map(h => ({
         label: `${h.name} 铁壁`,
-        sub: "专长 · 这一击视为协助格挡成功（免伤，击破由自己承担、最少留 1）· 每场一次 · 不花附赠动作",
+        sub: "专长 · 这一击视为协助格挡成功（免伤，击破由自己承担、最少留 1）· 每次短休一次 · 不花附赠动作",
         value: "ironwall:" + h.id,
         onHover: noBlock
       }))),

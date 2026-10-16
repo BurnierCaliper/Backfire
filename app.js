@@ -3871,6 +3871,53 @@ function structureHitOpt(a, skillId) {
   };
 }
 
+/** 燕返的后续：丹生谷收回，绯秋换持丹生谷，鳴門出场（打单位和打配置物共用） */
+function tsubameFollowUp(a, lines) {
+  const owner = ownerOfWeapon(a, state.units);
+  lines.push(...returnWeapon(a));
+  if (owner) {
+    owner.resources.blade = "niu";
+    refreshHiakiAtk(owner);
+    // 鳴門耐久为 0 / 本场已倒下：不能被燕返带出来（以前照样出场）
+    const why = weaponSummonWhy(owner, "naruto");
+    const w = why ? null : spawnWeapon(owner, "naruto");
+    lines.push(w ? "持刀改为丹生谷，鳴門出场。" : why ? `持刀改为丹生谷；${why}。` : "鳴門已在场。");
+  }
+}
+
+/** 绯秋一家的刀技打配置物 / 危墙（行动点已经扣过）：返回日志行（只管 HIAKI_STRUCT_SKILLS 里的几招）。
+ *  普通攻击按刀势（拔刀 1atk+1 击破 / 居合 1.5atk，隔区先移过去 / 胁构 1atk+2 击破），属性随手里的刀（丹生谷火、鳴門冰）；
+ *  斩炎 / 寒风打完变回武器，燕返打完收回并换刀 */
+const HIAKI_STRUCT_SKILLS = ["hiaki_aa", "niu_slash", "naruto_wind", "niu_tsubame"];
+function hiakiStructureHit(a, id, token, tokZones) {
+  const atk = effectiveAtk(a, state.units) || 5;
+  const lines = [];
+  const hit = (element, mult, brk) => lines.push(...hitStructureCore(a, token, { element, dmg: Math.max(1, Math.floor(atk * mult)), brk }));
+  if (id === "hiaki_aa") {
+    const r = a.resources = a.resources || {};
+    const blade = heldHiakiBlade(a) || r.blade;
+    r.blade = blade;
+    refreshHiakiAtk(a);
+    const el = blade === "naruto" ? "ice" : "fire";
+    const st = r.stance || "draw";
+    const z = tokZones && tokZones.length === 1 ? Number(tokZones[0]) : null;
+    if (st === "iai" && z != null && !isNaN(z) && Number(a.zone) !== z) {
+      const from = Number(a.zone);
+      a.zone = z;
+      lines.push(`居合：先移动 1 距离到 ${z} 区。`);
+      applyAbyssFall(a, from, lines);
+    }
+    const atk2 = effectiveAtk(a, state.units) || 5;
+    const mult = st === "iai" ? 1.5 : 1, brk = st === "waki" ? 2 : st === "iai" ? 0 : 1;
+    lines.push(...hitStructureCore(a, token, { element: el, dmg: Math.max(1, Math.floor(atk2 * mult)), brk }));
+    return lines;
+  }
+  if (id === "niu_slash") { hit("fire", 1, 1); lines.push(...returnWeapon(a)); return lines; }
+  if (id === "naruto_wind") { hit("ice", 1, 1); lines.push(...returnWeapon(a)); return lines; }
+  if (id === "niu_tsubame") { hit("fire", 1, 1); tsubameFollowUp(a, lines); return lines; }
+  return lines;
+}
+
 /** 战斗画面的受击：给配置物 / 危墙也发一个「伤害弹字」，画面据此播前冲、受击变白和数字 */
 function popStructure(token, level, value, element, text) {
   if (typeof spawnPopup !== "function") return;
@@ -4940,6 +4987,7 @@ function recoverFromStun(u, notes) {
   // 击破预告：窗口里被打进过失衡就算成功（玩家回合打进的失衡在敌人回合开始就恢复了，回合结束时已不是失衡）
   if (u.instant && u.instant.omenArmed) u.instant.omenHit = true;
   u.stunned = false;
+  if (typeof featUnbowedReset === "function") featUnbowedReset(u);   // 决不后退：晕眩后重置
   u._imbalanceLock = false;
   u._bossMarked = false;
   u._bossRefill = false;
@@ -6109,6 +6157,7 @@ function forceRecallWeapons(owner) {
 /** 进入濒死时解除晕眩（倒地了就不再处于失衡状态） */
 function clearStunOnDown(u) {
   if (!u) return;
+  if (u.stunned && typeof featUnbowedReset === "function") featUnbowedReset(u);   // 决不后退：晕眩后重置
   u.stunned = false;
   if (u.statuses) u.statuses.unstable = false;
   u._imbalanceLock = false;
@@ -6427,8 +6476,7 @@ function performAssistBlock(helper, target, attacker, forced, atkRange) {
   }
   const freeCover = target && target.coverBy === helper.id;
   if (!freeCover && !spendBonus(helper, 1, "协助格挡")) return { ok: false, notes };
-  if (freeCover) notes.push(`${helper.name} 因${target.coverOnce ? "挺身" : "掩护"}免费格挡。`);
-  if (freeCover && target.coverOnce) { target.coverBy = null; target.coverOnce = false; }   // 挺身（feats.js）：只挡这一次
+  if (freeCover) notes.push(`${helper.name} 因掩护免费格挡。`);
   if (helper.kit === "yuito" && target && target.id !== helper.id) {
     setBond(helper, target);
     notes.push(`思念：对 ${target.name} 施加牵挂（同时只能有一名）。`);
@@ -6636,7 +6684,7 @@ function openBlockModal(job) {
   (typeof featIronwallDeclarers === "function" ? featIronwallDeclarers(target) : []).forEach(h => {
     const b = document.createElement("button");
     b.className = "btn primary";
-    b.textContent = `${h.name} 铁壁（必定挡住 · 每场一次）`;
+    b.textContent = `${h.name} 铁壁（必定挡住 · 每次短休一次）`;
     b.onclick = () => calcCommand("blockAnswer", { helper: "ironwall:" + h.id });
     box.appendChild(b);
   });
@@ -6689,6 +6737,9 @@ function finishBlockInner(helperId, forced) {
       appendLog(`${wall.name} 铁壁：这一击视为协助格挡成功。`);
       block = "assistOk";
       blockHelperId = wall.id;
+      addScore("block", SCORE_RULES.block, wall);   // 评分：和协助格挡成功一样（#52）
+      const bst = battleStat(wall);
+      if (bst) { bst.blocks = (bst.blocks || 0) + 1; bst.blockOk = (bst.blockOk || 0) + 1; }
     }
   } else if (helperId) {
     const helper = unitById(helperId);
@@ -6728,11 +6779,13 @@ function finishBlockInner(helperId, forced) {
     if (out && defBefore != null) out.defBefore = defBefore;
     if (out && out.res && !out.pending) formatHitLines(attacker, target, out, captured).forEach(s => appendLog(s));
     // 战场数据：格挡规避的伤害（协助格挡成功：这一击本来的伤害；空手格挡成功：少挨的那一半）
-    const saver = helperId ? battleStat(unitById(helperId)) : null;
+    // 铁壁的 helperId 是「ironwall:单位」：记到宣布的人身上
+    const saverUnit = blockHelperId ? unitById(blockHelperId) : helperId ? unitById(helperId) : null;
+    const saver = saverUnit ? battleStat(saverUnit) : null;
     if (saver && out && out.res) {
       const saved = block === "assistOk" ? Number(out.res.blockedRaw) || 0 : block === "bareOk" ? Math.round(Number(out.res.total) || 0) : 0;
       saver.avoided = (saver.avoided || 0) + Math.max(0, saved);
-      if (saved > 0) addScore("blockSave", Math.floor(saved * SCORE_RULES.blockSave), unitById(helperId));   // 评分：格挡减免的伤害
+      if (saved > 0) addScore("blockSave", Math.floor(saved * SCORE_RULES.blockSave), saverUnit);   // 评分：格挡减免的伤害
     }
   }
 }
@@ -6802,7 +6855,6 @@ function resetBattleFlags(u) {
   delete r.apGifts;
   delete r.whetDice; delete r.unstoppableNext; delete r.reviveGuard; delete r.alertGiven; delete r.attackSeq;
   r.chargeTurn = null; r.chargeUsed = null; r.blinkReady = null; r.blinkUsed = null;
-  u.coverOnce = false;
   if (u.kit === "hiaki" && !r.blade) r.blade = "niu";
   if (u.kit === "tou") r.shield = 0;
   if (!isWeaponUnit(u)) u.weaponHeld = true;
@@ -9718,6 +9770,8 @@ function dealBreak(unit, amount, element, notes, reason, opt) {
     notes.push(`${sink.name} 屹立不倒：免受击破${reason && reason !== "击破" ? "（" + reason + "）" : ""}。`);
     return;
   }
+  // 决不后退（feats.js）：这下击破要把架势打空时，有附赠动作就先 +2 架势（坚挺另算，在下面）
+  if (!((sink.statuses && sink.statuses.sturdy) || (sink.resources && sink.resources.divertGuard)) && typeof featUnbowedAuto === "function") featUnbowedAuto(sink, amount, notes);
   const before = Number(sink.def) || 0;
   const wasStunnedSink = !!sink.stunned;
   const wasDoppler = sink.self === "doppler";   // 被这一下打进失衡、多普勒随晕眩结束，这一下照样传出去
@@ -11050,6 +11104,7 @@ function runSkillInner(id, optRun) {
       paintSkillLog(`${a.name} 打不到：${lineBlocked(a.zone, tokZones[0]) || "隔着危墙 / 关着的门。"}`);
       return;
     }
+    if (id === "hiaki_aa" && !(heldHiakiBlade(a) || (a.resources || {}).blade)) { paintSkillLog("两把刀都已分出，空手不能用刀技。"); return; }
     // 打配置物 / 危墙也是一次行动，照常消耗行动点 / 附赠行动
     if (a.isPlayer && id !== "assist_block") {
       const cost = skillCost(id);
@@ -11059,6 +11114,13 @@ function runSkillInner(id, optRun) {
       if (!spendAp(a, 1, skillNameHint(id))) return;
     }
     if (touFar) { a.resources.shield -= 1; touShieldHeal(a); appendLog(`消耗 1 圣盾，射程变为距离 1。`); }
+    // 绯秋的刀技打配置物 / 危墙：照刀势和刀的属性算，打完照样收回 / 换刀（#52：以前走通用打法，只有物理 1atk、没有后续）
+    if (HIAKI_STRUCT_SKILLS.indexOf(id) >= 0) {
+      snapshot();
+      appendLog(hiakiStructureHit(a, id, token, tokZones).join("\n"));
+      renderAll();
+      return;
+    }
     if (id === "longge_aa") {
       // 手杖：1atk 冰 +1 击破，窥探 1；霰弹枪：耗 1 发，1.5atk 子弹属性 +1 击破
       snapshot();
@@ -12003,16 +12065,7 @@ function runSkillInner(id, optRun) {
     } else if (id === "niu_tsubame") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       hitOne(a, t, { element: "fire", mult: 1, baseBreak: 1, atk });
-      const owner = ownerOfWeapon(a, state.units);
-      lines.push(...returnWeapon(a));
-      if (owner) {
-        owner.resources.blade = "niu";
-        refreshHiakiAtk(owner);
-        // 鳴門耐久为 0 / 本场已倒下：不能被燕返带出来（以前照样出场）
-        const why = weaponSummonWhy(owner, "naruto");
-        const w = why ? null : spawnWeapon(owner, "naruto");
-        lines.push(w ? "持刀改为丹生谷，鳴門出场。" : why ? `持刀改为丹生谷；${why}。` : "鳴門已在场。");
-      }
+      tsubameFollowUp(a, lines);
     } else if (id === "naruto_fly") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       hitOne(a, t, { element: "ice", mult: 0.5, baseBreak: 1, atk });

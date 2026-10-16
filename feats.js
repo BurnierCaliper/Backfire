@@ -168,15 +168,26 @@ const FEATS = {
   },
   catalyze: { name: "催化", kind: "action", tier: 2, dabble: { role: "异常", n: 1, base: "role_activate", battle: 1 },
     text: "（异常·激活）每场 1 次，附赠：立刻触发目标身上的一种状态。" },
-  standin: { name: "挺身", kind: "action", tier: 2, dabble: { role: "护卫", n: 1, base: "role_cover", battle: 1 },
-    text: "（护卫·掩护）每场 1 次，附赠：本回合一名队友下一次被攻击时，你免费为他协助格挡一次（照常掷成功率）。",
-    skill: { name: "挺身", hint: "附赠 · 本回合免费为一名队友协助格挡一次", cost: { bonus: 1 }, uses: 1, side: "ally", range: { min: 0, max: 99 },
+  standin: { name: "挺身", kind: "action", tier: 2, dabble: { role: "护卫", n: 1, base: "role_cover", short: 1 },
+    text: "（护卫·掩护涉猎）每次短休 1 次，附赠：选择一名队友，本回合内他每次被单体攻击时，你都可以免费为他协助格挡（照常掷成功率）。",
+    skill: { name: "挺身", hint: "附赠 · 本回合内一名队友每次被单体攻击，你都免费为他协助格挡", cost: { bonus: 1 }, side: "ally", range: { min: 0, max: 99 },
       run(a, ctx) {
         const t = ctx.t;
         if (!t || !t.isPlayer || t.id === a.id) { ctx.lines.push("先选要保护的队友。"); return false; }
         t.coverBy = a.id;
-        t.coverOnce = true;
-        ctx.lines.push(`挺身：本回合 ${t.name} 下一次被攻击时，${a.name} 免费协助格挡一次。`);
+        ctx.lines.push(`挺身：本回合 ${t.name} 每次被单体攻击时，${a.name} 都可以免费协助格挡。`);
+      } } },
+  unbowed: { name: "决不后退", kind: "action", tier: 2,
+    text: "每场 1 次（晕眩后重置），附赠：为自己恢复 2 架势（不超过上限）。受到击破即将失衡时，若还有附赠动作且次数未用，自动发动。",
+    // 自动发动：engine.js · applyResultToUnit（攻击）和 app.js · dealBreak（其他击破）扣架势之前调 featUnbowedAuto
+    // 晕眩后重置：app.js · recoverFromStun / clearStunOnDown 调 featUnbowedReset
+    skill: { name: "决不后退", hint: "附赠 · 为自己恢复 2 架势（不超过上限）", cost: { bonus: 1 }, uses: 1,
+      why(a) { return (Number(a.def) || 0) >= (Number(a.defMax) || 0) ? "架势已经是满的" : null; },
+      run(a, ctx) {
+        const got = featUnbowedGain(a);
+        if (got <= 0) { ctx.lines.push("架势已经是满的。"); return false; }
+        a.def = (Number(a.def) || 0) + got;
+        ctx.lines.push(`决不后退：${a.name} 恢复 ${got} 架势（${a.def}/${a.defMax}）。`);
       } } },
   grapple: { name: "勾索", kind: "action", tier: 2, dabble: { role: "控场", n: 1, base: "role_pull", battle: 1 },
     text: "（控场·拉拽）每场 1 次，附赠：把一个目标从任意距离拉到你所在区域，对首领无效。",
@@ -202,7 +213,8 @@ const FEATS = {
 
   /* ===== 专长③（13 级） ===== */
   ironwall: { name: "铁壁", kind: "passive", tier: 3,
-    text: "每场 1 次：你或同区一名友方被攻击时（结算前）宣布，这一击视为协助格挡成功（免伤，架势照扣，至少留 1）。" },
+    text: "每次短休 1 次：你或同区友方被敌人的单体攻击打中、结算前，可以宣布「铁壁」。这一击视为协助格挡成功，必定挡住，目标完全免伤且不掉架势，这一击的击破改由你承担（架势至少留 1，不会因此失衡）。不消耗附赠动作。",
+    short: 1 },
   pickup: { name: "拉一把", kind: "action", tier: 3,
     text: "每场 1 次，行动点：对同区一名濒死友方使用一件医疗道具，他以该道具的治疗量起身，不扣坚毅生命。",
     skill: { name: "拉一把", hint: "行动点 · 用医疗道具把同区濒死的友方拉起来", cost: { ap: 1 }, uses: 1,
@@ -227,7 +239,8 @@ const FEATS = {
         ctx.lines.push(`拉一把：${a.name} 用 ${it.name} 把 ${t.name} 拉了起来，恢复 ${got}，不扣坚毅生命。`);
       } } },
   onemind: { name: "人器一心", kind: "passive", tier: 3,
-    text: "每场 1 次，武器生物化只消耗附赠动作；本场武器人变回武器不消耗行动点。" },
+    text: "每长休 1 次，武器生物化只消耗附赠动作；本次长休内武器人变回武器不消耗行动点。",
+    rest: 1 },
   rally: { name: "号召", kind: "passive", tier: 3,
     text: "每场开战时，你所在区域的我方（含自己）获得 等级÷2（向上取整）点护盾。",
     hooks: { battleStart(u, _, notes) {
@@ -319,10 +332,11 @@ Object.keys(FEATS).forEach(id => { FEATS[id].id = id; });
     const sid = FEAT_SKILL_PREFIX + id;
     const d = f.dabble;
     if (d && !f.skill) {
-      f.skill = { name: f.name, cost: null, uses: d.battle || 0, rest: d.rest || 0, delegate: true };
+      f.skill = { name: f.name, cost: null, uses: d.battle || 0, rest: d.rest || 0, short: d.short || 0, delegate: true };
     } else if (d && f.skill) {
       f.skill.uses = d.battle || f.skill.uses || 0;
       f.skill.rest = d.rest || 0;
+      f.skill.short = d.short || f.skill.short || 0;
     }
     if (!f.skill) return;
     if (typeof SKILL_TARGET_SIDE !== "undefined") {
@@ -441,6 +455,11 @@ function featSkillCost(skillId) {
   return Object.assign({}, f.skill.cost || { ap: 1 });
 }
 function featRestKey(f) { return "feat:" + f.id; }
+/** 「每次短休 N 次」用了几次（ledger.js · LEDGER.shortOnce，这个人短休 / 长休时刷新） */
+function featShortUsed(u, f) {
+  if (typeof shortOnceUsed !== "function" || !u) return 0;
+  return shortOnceUsed(u.kit, featRestKey(f));
+}
 function featRestUsed(u, f) {
   if (typeof LEDGER === "undefined" || !u) return 0;
   return Number(((LEDGER.restOnce || {})[u.kit] || {})[featRestKey(f)]) || 0;
@@ -450,6 +469,7 @@ function featUsesLeft(u, f) {
   if (featFull(u, f.id)) return Infinity;
   const k = Math.max(1, featCount(u, f.id));
   const used = Number((((u && u.resources) || {}).featUsed || {})[f.id]) || 0;
+  if (f.skill.short) return Math.max(0, f.skill.short * k - featShortUsed(u, f));
   if (f.skill.rest) {
     // 每长休 N 次，同一场最多 1 次
     return Math.max(0, Math.min(f.skill.rest * k - featRestUsed(u, f), 1 - used));
@@ -467,7 +487,7 @@ function featSkills(u) {
     const f = FEATS[id];
     const left = featUsesLeft(u, f);
     const full = featFull(u, id);
-    const usesText = left === Infinity ? "" : f.skill.rest ? ` · 本次长休剩 ${Math.max(0, f.skill.rest * Math.max(1, featCount(u, id)) - featRestUsed(u, f))} 次（每场最多 1 次）` : ` · 本场剩 ${left} 次`;
+    const usesText = left === Infinity ? "" : f.skill.short ? ` · 这次短休前剩 ${left} 次` : f.skill.rest ? ` · 本次长休剩 ${Math.max(0, f.skill.rest * Math.max(1, featCount(u, id)) - featRestUsed(u, f))} 次（每场最多 1 次）` : ` · 本场剩 ${left} 次`;
     let hint = f.skill.hint;
     let name = f.skill.name || f.name;
     if (f.dabble && (full || !hint)) {
@@ -482,7 +502,7 @@ function featSkillWhy(a, skillId) {
   const f = featOfSkill(skillId);
   if (!f) return null;
   if (featCount(a, f.id) <= 0) return "没有这项专长";
-  if (featUsesLeft(a, f) <= 0) return f.skill.rest ? (featRestUsed(a, f) >= f.skill.rest * Math.max(1, featCount(a, f.id)) ? "这次长休的次数已用完" : "这一场已经用过") : "本场次数已用完";
+  if (featUsesLeft(a, f) <= 0) return f.skill.short ? "短休前的次数已用完" : f.skill.rest ? (featRestUsed(a, f) >= f.skill.rest * Math.max(1, featCount(a, f.id)) ? "这次长休的次数已用完" : "这一场已经用过") : "本场次数已用完";
   const base = featDelegateBase(a, f);
   if (base && typeof SKILL_REQUIREMENT !== "undefined" && typeof SKILL_REQUIREMENT[base] === "function") {
     let why = null;
@@ -530,6 +550,7 @@ function featSpend(a, f) {
     a.resources.featUsed = Object.assign({}, a.resources.featUsed || {});
     a.resources.featUsed[f.id] = (Number(a.resources.featUsed[f.id]) || 0) + 1;
   }
+  if (f.skill.short && typeof useShortOnce === "function") useShortOnce(a.kit, featRestKey(f), f.skill.short * Math.max(1, featCount(a, f.id)));
   if (f.skill.rest && typeof useRestOnce === "function") useRestOnce(a.kit, featRestKey(f), f.skill.rest * Math.max(1, featCount(a, f.id)));
 }
 /** app.js · runSkillInner：这次是调用原技能的涉猎专长吗？是就记次数、打上削弱标记，返回原技能 id */
@@ -568,11 +589,20 @@ function featHealItems() {
   }).map(id => ({ id, name: ITEM_CATALOG[id].name, heal: Number(ITEM_CATALOG[id].heal), qty: bagCount(id) }));
 }
 
-/** 每场一次的被动（还魂、铁壁、人器一心）：用掉没有 */
+/** 被动的次数（还魂每场、铁壁每次短休、人器一心每长休）：还剩没有。次数周期看专长上的 short / rest */
 function featOnceLeft(u, id) {
-  return featHas(u, id) && !(((u.resources || {}).featUsed || {})[id] >= featCount(u, id));
+  if (!featHas(u, id)) return false;
+  const f = FEATS[id];
+  const k = featCount(u, id);
+  if (f.short) return featShortUsed(u, f) < f.short * k;
+  if (f.rest) return !(typeof LEDGER !== "undefined" && (Number(((LEDGER.restOnce || {})[u.kit] || {})[featRestKey(f)]) || 0) >= f.rest * k);
+  return !(((u.resources || {}).featUsed || {})[id] >= k);
 }
 function featUseOnce(u, id) {
+  const f = FEATS[id];
+  const k = Math.max(1, featCount(u, id));
+  if (f && f.short && typeof useShortOnce === "function") { useShortOnce(u.kit, featRestKey(f), f.short * k); return; }
+  if (f && f.rest && typeof useRestOnce === "function") { useRestOnce(u.kit, featRestKey(f), f.rest * k); return; }
   u.resources = u.resources || {};
   u.resources.featUsed = Object.assign({}, u.resources.featUsed || {});
   u.resources.featUsed[id] = (Number(u.resources.featUsed[id]) || 0) + 1;
@@ -589,6 +619,34 @@ function featReviveCheck(u, notes) {
   u.resources.reviveGuard = true;
   if (notes) notes.push(`${u.name} 还魂：保留 1 点生命，直到自己下回合开始前不受任何伤害和击破。`);
   return true;
+}
+
+/** 决不后退：能恢复多少架势（+2，不超过上限） */
+function featUnbowedGain(u) {
+  const def = Number(u && u.def) || 0, max = Number(u && u.defMax) || 0;
+  return Math.max(0, Math.min(FEAT_UNBOWED_DEF, max - def));
+}
+const FEAT_UNBOWED_DEF = 2;
+/** 决不后退·自动：spent 点击破马上要把 u 打进失衡时，还有附赠动作和次数就先 +2 架势。
+ *  只在真的能挡住这次失衡时发动（+2 之后还是会被打空就不浪费）。发动了返回 true（u.def 已经加好） */
+function featUnbowedAuto(u, spent, notes) {
+  if (!u || !u.isPlayer || u.dead || u.stunned || (u.dying && !u.upOnShp) || !featHas(u, "unbowed")) return false;
+  const def = Number(u.def) || 0;
+  spent = Number(spent) || 0;
+  if (def <= 0 || spent < def || (Number(u.bonus) || 0) < 1 || !featOnceLeft(u, "unbowed")) return false;
+  const got = featUnbowedGain(u);
+  if (def + got - spent <= 0) return false;
+  u.bonus -= 1;
+  if (typeof syncBladeTwin === "function") syncBladeTwin(u);
+  featUseOnce(u, "unbowed");
+  u.def = def + got;
+  if (notes) notes.push(`${u.name} 决不后退：消耗附赠动作，架势 +${got}（${def} → ${u.def}），没有失衡。`);
+  return true;
+}
+/** 晕眩结束（恢复 / 倒地清掉晕眩）后，决不后退的次数回来 */
+function featUnbowedReset(u) {
+  const used = u && u.resources && u.resources.featUsed;
+  if (used && used.unbowed) { u.resources.featUsed = Object.assign({}, used); delete u.resources.featUsed.unbowed; }
 }
 
 /** 铁壁：这一击（敌人打 target）可以宣布铁壁的人 */
