@@ -246,7 +246,7 @@ const Bestiary = (() => {
       body += sec("基础数值（Lv1）", `${layerBar(s.layers)}
         <div class="bx-nums">
           <div><small>atk</small><b>${s.atk}</b></div>
-          <div><small>坚毅生命</small><b>${s.shpMax != null ? s.shpMax : "—"}</b></div>
+          ${typeof shpHidden === "function" && shpHidden() ? "" : `<div><small>坚毅生命</small><b>${s.shpMax != null ? s.shpMax : "—"}</b></div>`}
           <div><small>架势</small><b>${s.defMax}</b></div>
           <div><small>协助格挡</small><b>${blk}</b></div>
         </div>

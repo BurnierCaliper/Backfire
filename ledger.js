@@ -689,7 +689,7 @@ function ledgerLongRest(plan, notes) {
       if (!low) break;
       const before = Number(low.shp) || 0;
       low.shp = Math.min(Number(low.shpMax) || 0, before + FEAT_CFG.cook);
-      notes.push(`伙夫：${low.name} 吃得好，坚毅生命多恢复 ${low.shp - before} 点。`);
+      notes.push(typeof shpHidden === "function" && shpHidden() ? `伙夫：${low.name} 吃得好，坚毅生命多恢复了一些。` : `伙夫：${low.name} 吃得好，坚毅生命多恢复 ${low.shp - before} 点。`);
     }
   }
   // 时钟照常往前走；过了 0 点才换天（长休本身已经刷新了短休次数）。单局按任务天数记日子，这里不换天

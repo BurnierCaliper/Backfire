@@ -3,8 +3,8 @@
 const ITEM_CATALOG = {
   medkit:     { name: "简易医疗包", hint: "治疗一名友方 1d4+6 内层生命", target: "ally", combat: true },
   clinic:     { name: "诊所医疗包", hint: "治疗一名友方 2d4+6 内层生命", target: "ally", combat: true },
-  stim:       { name: "强心注射剂", hint: "自身恢复 16 生命，失去 6 坚毅生命", target: "self", combat: true },
-  steroid:    { name: "强化注射剂", hint: "自身 ATK +3 至战斗结束，失去 6 坚毅生命", target: "self", combat: true },
+  stim:       { name: "强心注射剂", hint: "自身恢复 16 生命，消耗一些坚毅生命（不会致死）", target: "self", combat: true },
+  steroid:    { name: "强化注射剂", hint: "自身 ATK +3 至战斗结束，消耗一些坚毅生命（不会致死）", target: "self", combat: true },
   bomb_e:     { name: "简易电手榴弹", hint: "对一个区域全部单位造成 1d6+6 电击", target: "zone", combat: true },
   bomb_a:     { name: "简易酸液瓶", hint: "对一个区域全部单位造成 1d6+6 酸液", target: "zone", combat: true },
   shockbomb:  { name: "冲击炸弹", hint: "对一个区域全部单位造成 2 击破", target: "zone", combat: true }
@@ -222,6 +222,12 @@ function registerWeaponPartItems() {
 }
 registerWeaponPartItems();
 
+/** 注射剂扣坚毅：玩家只看到「消耗了坚毅」，主持人看到具体数值 */
+function shpLossText(lost) {
+  if (typeof shpHidden === "function" && shpHidden()) return "消耗了一些坚毅生命（不会致死）";
+  return `坚毅 −${lost}${lost < 6 ? "（自己扣坚毅的道具不会致死，至少留 1）" : ""}`;
+}
+
 function ensureBag() {
   if (!state.bag || typeof state.bag !== "object") state.bag = { items: [] };
   if (!Array.isArray(state.bag.items)) state.bag.items = [];
@@ -391,12 +397,12 @@ function useItemOn(actor, itemId, target, zone) {
   } else if (itemId === "stim") {
     const got = typeof healUnit === "function" ? healUnit(actor, 16) : 16;
     const lost = selfShpCost(actor, 6);
-    notes.push(`${actor.name} 使用强心注射剂：恢复 ${Math.floor(got || 0)} 生命，坚毅 −${lost}${lost < 6 ? "（自己扣坚毅的道具不会致死，至少留 1）" : ""}。`);
+    notes.push(`${actor.name} 使用强心注射剂：恢复 ${Math.floor(got || 0)} 生命，${shpLossText(lost)}。`);
   } else if (itemId === "steroid") {
     actor.atk = (Number(actor.atk) || 0) + 3;
     actor.itemAtkBonus = (Number(actor.itemAtkBonus) || 0) + 3;
     const lost = selfShpCost(actor, 6);
-    notes.push(`${actor.name} 使用强化注射剂：ATK +3 至战斗结束，坚毅 −${lost}${lost < 6 ? "（自己扣坚毅的道具不会致死，至少留 1）" : ""}。`);
+    notes.push(`${actor.name} 使用强化注射剂：ATK +3 至战斗结束，${shpLossText(lost)}。`);
   } else if (itemId === "bomb_e" || itemId === "bomb_a" || itemId === "shockbomb") {
     const z = zone != null ? Number(zone) : Number((target && target.zone) || actor.zone);
     const units = (typeof fieldUnits === "function" ? fieldUnits() : state.units).filter(u =>

@@ -4576,7 +4576,9 @@ function applyCombat(target, result, attacker) {
     if (raw > 0) {
       const n = Math.floor(raw * 0.2 * st);
       const got = healUnit(attacker, n, { selfBurn: true });
-      notes.push(`${attacker.name} 自焚×${st}：火焰伤害 +${10 * st}%，吸血 ${20 * st}% × ${Math.floor(raw)} = ${n}，回复 ${got}${attacker.upOnShp ? "（SHP）" : ""}`);
+      notes.push(attacker.upOnShp && shpHidden()
+        ? `${attacker.name} 自焚×${st}：火焰伤害 +${10 * st}%，吸血恢复了一些坚毅生命`
+        : `${attacker.name} 自焚×${st}：火焰伤害 +${10 * st}%，吸血 ${20 * st}% × ${Math.floor(raw)} = ${n}，回复 ${got}${attacker.upOnShp ? "（SHP）" : ""}`);
     }
   }
   // 晕眩后自我效果结束（所有自我效果；蓄能累积的高能值不清零）。攻击者被猛击反震打进失衡的，在 dealTo 结算完这一击后结束
@@ -5318,6 +5320,24 @@ function shpHidden() {
   if (typeof TRPG !== "undefined" && TRPG.active) return false;
   return typeof GAME_MODE !== "undefined" && !!GAME_MODE;
 }
+/* 坚毅对玩家只给模糊说法（issue #52，作者定）：按坚毅占上限的比例分四档（80% 以上 / 50–80% / 20–50% / 20% 以下），
+ * 每档 5 句随机抽一句（休息结算用）；角色资料这类常驻的地方用一个短词 */
+const SHP_MOOD_LINES = [
+  ["你休息得不错，醒来时神清气爽。", "一夜无梦，四肢重新充满了力气。", "晨光照在脸上，你觉得今天什么都能扛下来。", "你伸了个长长的懒腰，连骨头都轻快了。", "篝火的余温还在，你从没睡得这么踏实过。"],
+  ["睡得还行，只是肩膀还有点沉。", "你恢复了大半精神，但还没有回到最好的状态。", "醒来时有些迷糊，喝口水就好多了。", "夜里醒了几次，好在后半夜睡得安稳。", "身体还算听使唤，只是腿脚有点发酸。"],
+  ["你翻来覆去很久才睡着，醒来时眼皮依然很重。", "休息让你缓了口气，但疲惫像潮水一样还没退去。", "梦里全是昨天的战斗，你醒来时比入睡时更累。", "你勉强爬起来，每个动作都要比平时多用一分力。", "风声吵了一整夜，你觉得自己好像根本没睡着。"],
+  ["尽管你尝试休息了，身体里的疲惫却从来没有完全恢复。", "你几乎没有合眼。再这样下去，总有一刻会撑不住。", "你醒来时手还在发抖，好像有什么东西被一点一点耗尽了。", "你盯着熄灭的篝火发呆，连站起来都要下很大决心。", "胸口闷得发慌，休息只是让你暂时忘了自己有多累。"]
+];
+const SHP_MOOD_LABELS = ["精力充沛", "还撑得住", "疲惫", "快撑不住了"];
+function shpMoodTier(shp, max) {
+  const r = (Number(max) || 0) > 0 ? (Number(shp) || 0) / Number(max) : 1;
+  return r >= 0.8 ? 0 : r >= 0.5 ? 1 : r >= 0.2 ? 2 : 3;
+}
+function shpMoodLine(shp, max, rnd) {
+  const lines = SHP_MOOD_LINES[shpMoodTier(shp, max)];
+  return lines[Math.floor((typeof rnd === "function" ? rnd() : Math.random()) * lines.length) % lines.length];
+}
+function shpMoodLabel(shp, max) { return SHP_MOOD_LABELS[shpMoodTier(shp, max)]; }
 
 function selfBurnStacksOf(u) {
   return Math.max(1, Number(u && u.selfBurnStacks) || 1);

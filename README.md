@@ -368,6 +368,18 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **坚毅生命绝不向玩家显示数值**（手册规定；issue #52；app.js · `shpHidden` / `SHP_MOOD_LINES` / `shpMoodTier` / `shpMoodLine` / `shpMoodLabel`；sheet-ui.js、levelup.js、bestiary-ui.js、game.js、ledger.js、items.js · `shpLossText`、rogue-ui.js；tests/shp-hidden.test.js、tests/ui.test.js）
+  - 游戏里（单局、单人模式、战斗）坚毅生命一律不写数字，只有跑团主持人看得到数值。联机玩家本来就收不到坚毅。
+  - 这次补上的地方：
+    - 角色资料：只写一个短词——精力充沛（80% 以上）/ 还撑得住（50–80%）/ 疲惫（20–50%）/ 快撑不住了（20% 以下）；
+    - 升级提示不再列「坚毅生命上限」；角色图鉴不写坚毅；
+    - 技能预览的「坚毅 −X」改成「伤到坚毅」；
+    - 强心 / 强化注射剂、伙夫、自焚吸血这几处日志不写数字；
+    - 注射剂的物品说明改成「消耗一些坚毅生命」；
+    - 休息时食物、睡袋的说明不写「坚毅 +X」。
+  - #52 定的四档、每档 5 句的休息提示已经放进 `SHP_MOOD_LINES`，长休结算画面会用。
+  - 没改的：受伤时伤害数字照常显示（攻击结果），只是不写坚毅剩多少。
+
 - **单局：幕间选择，采矿场进入单局**（作者定；rogue-data.js · `ROGUE_CONFIG.altRegions`；rogue.js · `interludeOptions` / `nextAct(run, region)` / `region(run)` 读 `run.regionPick`；rogue-commands.js；rogue-ui.js 幕间画面、地图路线；online-rogue.js 幕间投票；tests/interlude.test.js、tests/ui.test.js、tests/online-rogue.test.js）
   - 打完一幕的首领，选下一幕去哪：
     - 第 2 幕：沙漠 / 第一采矿场；

@@ -1635,7 +1635,7 @@
     if (p.dmgHi > 0 && p.dis) h += `<span class="disadv">劣势</span>`;
     if (p.dmgHi > 0) h += `<span class="dmg e-${p.element}${p.dis ? " dis" : ""}">${window.Icons ? Icons.element(p.element) : ""}${p.dmgLo === p.dmgHi ? p.dmgHi : p.dmgLo + "–" + p.dmgHi}</span>`;
     if (p.healHi > 0) h += `<span class="heal">+${p.healHi}</span>`;
-    if (p.shpLoss > 0) h += `<span class="note">坚毅 −${p.shpLoss}</span>`;
+    if (p.shpLoss > 0) h += `<span class="note">${typeof shpHidden === "function" && shpHidden() ? "伤到坚毅" : `坚毅 −${p.shpLoss}`}</span>`;
     if (p.brHi > 0) h += `<span class="brk">击破 ${p.brLo === p.brHi ? p.brHi : p.brLo + "–" + p.brHi}</span>`;
     if (p.stunSure) h += `<span class="stun${p.ice ? " ice" : ""}">失衡${p.ice ? "·冰冻" : ""}</span>`;
     if (p.stunMaybe) h += `<span class="stun${p.ice ? " ice" : ""}">可能失衡</span>`;
@@ -3736,7 +3736,7 @@
       const ssel = document.createElement("select");
       const sleepOpt = (v, t) => { const o = document.createElement("option"); o.value = v; o.textContent = t; ssel.appendChild(o); };
       sleepOpt("", "不用睡眠道具");
-      sleepItemIds().forEach(id => sleepOpt(id, `睡 ${ITEM_CATALOG[id].name}（每小时坚毅 +${ITEM_CATALOG[id].sleep} · 有 ${bagCount(id)}）`));
+      sleepItemIds().forEach(id => sleepOpt(id, `睡 ${ITEM_CATALOG[id].name}（${typeof shpHidden === "function" && shpHidden() ? "睡得更好，多恢复坚毅" : `每小时坚毅 +${ITEM_CATALOG[id].sleep}`} · 有 ${bagCount(id)}）`));
       ssel.value = h.dead ? "" : sleepFor(currentRestPlan(), h.kit);
       ssel.onchange = () => { G.restSleep[h.kit] = ssel.value; renderRestSheet(); };
       ssel.disabled = h.dead;

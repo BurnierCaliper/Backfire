@@ -1737,3 +1737,18 @@ test("单局：幕间选择——第 1 幕打完可以改去第一采矿场", as
   assert.match(await page.textContent("#run-where"), /第一采矿场/);
   assert.deepEqual(o.errors, []);
 });
+
+test("单局：角色资料里坚毅生命只写模糊说法，不写数字（手册：坚毅对玩家保密）", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await page.click("#t-new");
+  await page.click('.hero-pick[data-kit="kolt"]');
+  await page.click('.hero-pick[data-kit="helu"]');
+  await page.click("#party-go");
+  await page.waitForSelector("#scr-run:not([hidden])");
+  await page.click('[data-sheet="kolt"]');
+  await page.waitForSelector("#hs-body .hs-stats");
+  const cell = await page.evaluate(() => [...document.querySelectorAll("#hs-body .hs-stats > div")].find(d => /坚毅生命/.test(d.textContent)).querySelector("b").textContent);
+  assert.match(cell, /^(精力充沛|还撑得住|疲惫|快撑不住了)$/);
+  assert.deepEqual(o.errors, []);
+});
