@@ -48,7 +48,7 @@ test("战斗画面：有天气就放叠加层、跟着天气换；不挡点击�
   page.on("dialog", d => (d.type() === "prompt" ? d.accept("天气测试团") : d.accept()));
   await page.goto(pathToFileURL(path.resolve(__dirname, "..", "game.html")).href);
   await page.evaluate(() => { window.__noLevelUpPopup = true; });
-  await page.click("#t-sandbox");
+  await page.click("#t-online"); await page.click("#t-sandbox");
   await page.click('[data-new="0"]');
   await page.waitForSelector("#scr-trpg:not([hidden])");
   await page.click("#tr-fight");

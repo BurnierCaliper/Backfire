@@ -1235,7 +1235,16 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
   color: var(--gold);
 }
 .t-sub { margin: 0 0 22px; font-size: 12px; letter-spacing: .18em; color: var(--muted); }
-.t-menu { display: flex; flex-direction: column; gap: 10px; }
+.t-menu, .t-list, .t-home { display: flex; flex-direction: column; gap: 10px; }
+.t-panel { display: flex; flex-direction: column; gap: 12px; }
+.t-home[hidden], .t-panel[hidden] { display: none; }
+.t-btn.t-big { padding: 22px 20px; }
+.t-btn.t-big b { font-size: 26px; }
+.t-panel-head { display: flex; align-items: center; gap: 12px; }
+.t-panel-head h2 { margin: 0; font-size: 20px; }
+.t-back { background: none; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); font: inherit; font-size: 13px; padding: 4px 10px; cursor: pointer; }
+.t-back:hover { color: var(--bone); border-color: var(--bone); }
+.t-back:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .t-btn {
   display: flex;
   flex-direction: column;

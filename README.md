@@ -368,6 +368,10 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **标题画面：拆成「本地玩法」「联机玩法」「图鉴」三个大按钮**（PR #54 合入；game.html、screens.js、game.css、skin.css）
+  - 本地玩法：继续、新的一局、单人模式、长线养成、训练场；联机玩法：跑团模式、联机开房、加入房间。子菜单有「← 返回」，Esc 也能返回。
+  - 去掉「跑团版 · 规则计算器」入口（计算器文件还在，只是菜单里不再进）。按钮 id 和网址参数（`?hotseat=1`、`?debug=1`）不变。
+  - 合进来时把这条分支后来加的画面测试（天气动效、长休测试里点「新的一局」的）也改成先进子菜单。
 - **修：技能打配置物 / 危墙时命中后效果全部丢失**（issue #52；app.js · `makeStructProxy` / `dealToStructure` / `structProxyFinish`、`runSkillInner` 的配置物分支、`unitById`、`dealTo`、`formatHitLines`、`popStatus`；tests/structure-hit.test.js、tests/issue52-feats.test.js）
   - 以前玩家的技能打配置物 / 危墙走一条通用打法：属性和倍率从技能说明里猜，打完直接结束，技能自己的分支整段跳过——命中后的资源（咖啡豆转液、纳米、电能……）、换刀 / 收回武器、技能自身的消耗（意式浓缩不扣咖啡液、川川不扣电能）全丢。
   - 现在打配置物**算命中**：换上一个「替身」目标，照常走技能自己的分支；`dealTo` 认出替身，用技能真实的属性、倍率、骰子、击破（含佩刀、专长加的击破）交给 `hitStructureCore`。

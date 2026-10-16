@@ -79,8 +79,29 @@ const Screens = (function () {
   // 单局流程（M1 实现）的入口。ready 为 false 时标题上的两个按钮是灰的。
   window.RunFlow = window.RunFlow || { ready: false, start() {}, resume() {} };
 
+  // 标题画面的两级菜单：home（本地玩法 / 联机玩法）→ 对应子菜单
+  let titleView = "home";
+  function showTitleView(view, focus = true) {
+    const from = titleView; titleView = view;
+    const home = $("t-home"); if (!home) return;
+    home.hidden = view !== "home";
+    document.querySelectorAll("#scr-title .t-panel").forEach(p => { p.hidden = p.dataset.view !== view; });
+    if (!focus) return;
+    const target = view === "home" ? $("t-" + from) : document.querySelector(`#t-panel-${view} .t-btn:not(:disabled)`);
+    if (target) target.focus();
+  }
+
   function boot() {
-    Screens.register("title", $("scr-title"), { onShow: refreshTitle });
+    Screens.register("title", $("scr-title"), { onShow() { showTitleView("home", false); refreshTitle(); } });
+    document.querySelectorAll("#scr-title [data-view]").forEach(b => { if (b.tagName === "BUTTON") b.onclick = () => showTitleView(b.dataset.view); });
+    document.querySelectorAll("#scr-title [data-back]").forEach(b => { b.onclick = () => showTitleView("home"); });
+    document.addEventListener("keydown", e => {
+      if (e.key !== "Escape" || e.defaultPrevented || titleView === "home") return;
+      const scr = $("scr-title"); if (!scr || scr.hidden) return;
+      if (document.querySelector("dialog[open]")) return;
+      if (e.target && e.target.matches && e.target.matches("input, textarea, select")) return;
+      e.preventDefault(); showTitleView("home");
+    });
     Screens.register("battle", $("g-app"), {
       // 隐藏时量不到尺寸，显示出来后按实际大小重新排一次战场
       onShow() {
