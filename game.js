@@ -315,6 +315,68 @@
     const night = !!(env.clock && env.clock.night);
     $("g-app").classList.toggle("is-night", night);
     const fieldEl = document.querySelector(".g-zone") && document.querySelector(".g-zone").parentElement;
+    if (fieldEl) {   // [本地预览，不提交] 天气动效草稿：有天气时在战场里放 .wfx-{天气}
+      let fx = fieldEl.querySelector(".wfx");
+      const want = state.weather && state.weather !== "none" ? "wfx wfx-" + state.weather : "";
+      if (want && !fx) { fx = el("div", want); fx.innerHTML = "<i></i><i></i>"; fieldEl.appendChild(fx); }
+      if (fx && fx.className !== want) { fx.remove(); fx = null; if (want) { fx = el("div", want); fx.innerHTML = "<i></i><i></i>"; fieldEl.appendChild(fx); } }
+      if (fx) fx.dataset.sandDir = state.sandDir || "";
+      {   // [本地预览] 相位阶段 → data-phase-step（trough/balance/peak），给相位动效换振幅
+        const ps = state.weather === "phase" ? ["trough", "balance", "peak", "balance"][((Number(state.phaseStep) || 0) % 4 + 4) % 4] : "";
+        const app = $("g-app");
+        if (ps) app.dataset.phaseStep = ps; else delete app.dataset.phaseStep;
+        if (fx) { if (ps) fx.dataset.phaseStep = ps; else delete fx.dataset.phaseStep; }
+      }
+      if (fx && fx.classList.contains("wfx-acid") && !window.__wfxAcidTimer && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        const spawn = () => {   // [本地预览] 酸雨涟漪：随机位置/大小/时长，结束即删
+          const host = document.querySelector(".wfx-acid");
+          if (!host) { window.__wfxAcidTimer = null; return; }
+          if (!document.hidden && host.childElementCount < 40) {
+            const r = document.createElement("b"), big = Math.random() < .25;
+            const sz = big ? 70 + Math.random() * 60 : 16 + Math.random() * 46;
+            r.style.cssText = `left:${(Math.random() * 100).toFixed(2)}%;top:${(Math.random() * 100).toFixed(2)}%;width:${sz | 0}px;height:${(sz * (.82 + Math.random() * .1)) | 0}px;--d:${(1.6 + Math.random() * 1.6 + sz / 120).toFixed(2)}s`;
+            r.addEventListener("animationend", () => r.remove()); host.appendChild(r);
+          }
+          window.__wfxAcidTimer = setTimeout(spawn, 60 + Math.random() * Math.random() * 420);
+        };
+        spawn();
+      }
+      if (!(fx && fx.classList.contains("wfx-thunder"))) window.__wfxThunderTimer = null;   // 离开雷鸣：旧链靠 gen 自停
+      if (fx && fx.classList.contains("wfx-thunder") && !window.__wfxThunderTimer && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        const R = window.__wfxThunderRand || Math.random;   // [本地预览] 截图可注入种子；正式随机仍是 Math.random
+        const zoneFlash = () => {   // 随机一个战场区域柔和闪光（单闪或轻微闪烁）
+          const host = document.querySelector(".wfx-thunder");
+          if (!host) return false;
+          const zs = [...host.parentElement.querySelectorAll(".g-zone")];
+          if (!document.hidden && zs.length) {
+            const z = zs[(R() * zs.length) | 0], hr = host.getBoundingClientRect(), r = z.getBoundingClientRect(), u = document.createElement("u");
+            if (R() < .4) u.className = "flick";
+            u.style.cssText = `left:${(r.left - hr.left) | 0}px;top:${(r.top - hr.top) | 0}px;width:${r.width | 0}px;height:${r.height | 0}px;--pk:${(.25 + R() * .05).toFixed(3)};--d:${(1.4 + R() * .6).toFixed(2)}s`;
+            u.addEventListener("animationend", () => u.remove()); host.appendChild(u);
+          }
+          return true;
+        };
+        const bolt = () => {   // 远处闪电：顶部一道细分叉的淡紫白线 + 光晕
+          const host = document.querySelector(".wfx-thunder");
+          if (!host) return false;
+          if (!document.hidden) {
+            const w = 60 + R() * 50, h = 50 + R() * 50; let x = w / 2, y = 0, d = `M${x | 0} 0`, br = "";
+            while (y < h) { x += (R() - .5) * 22; y += 6 + R() * 10; d += ` L${x | 0} ${y | 0}`;
+              if (!br && y > h * .3 && R() < .5) { const s2 = R() < .5 ? -1 : 1; br = `M${x | 0} ${y | 0} L${(x + s2 * (10 + R() * 14)) | 0} ${(y + 10 + R() * 12) | 0} L${(x + s2 * (16 + R() * 18)) | 0} ${(y + 22 + R() * 14) | 0}`; } }
+            const s = document.createElement("s");
+            s.innerHTML = `<svg width="${w | 0}" height="${h | 0}" viewBox="0 0 ${w | 0} ${h | 0}" fill="none" stroke="rgb(236,228,255)" stroke-width="1.4" stroke-linejoin="round"><path d="${d}"/><path d="${br}" stroke-width="1"/></svg>`;
+            s.style.cssText = `left:${(5 + R() * 85).toFixed(1)}%;--pk:${(.25 + R() * .15).toFixed(2)};--d:${(.9 + R() * .5).toFixed(2)}s`;
+            s.addEventListener("animationend", () => s.remove()); host.appendChild(s);
+          }
+          return true;
+        };
+        const gen = window.__wfxThunderGen = (window.__wfxThunderGen || 0) + 1;
+        const tick = (fn, lo, span, key) => { window[key] = setTimeout(() => { if (gen !== window.__wfxThunderGen) return; if (fn()) tick(fn, lo, span, key); else window[key] = null; }, lo + R() * span); };
+        tick(() => { const ok = zoneFlash(); if (!ok) window.__wfxThunderTimer = null; return ok; }, 6000, 8000, "__wfxThunderTimer");
+        tick(bolt, 3000, 7000, "__wfxBoltTimer");
+      }
+      $("g-app").dataset.sandDir = state.sandDir || "";
+    }
     if (fieldEl) {
       let vg = fieldEl.querySelector(".night-vignette");
       if (night && !vg) { vg = el("div", "night-vignette"); fieldEl.appendChild(vg); }
