@@ -73,6 +73,11 @@ const Screens = (function () {
     $("t-new").disabled = !RunFlow.ready;
     if ($("t-solo")) $("t-solo").disabled = !RunFlow.ready;
     if ($("t-growth")) $("t-growth").disabled = !RunFlow.ready;
+    if ($("t-daily")) {
+      $("t-daily").disabled = !RunFlow.ready;
+      // 今天的种子和队伍（rogue.js · dailySeed / dailyParty）
+      try { const seed = Rogue.dailySeed(); $("t-daily-sub").textContent = `${seed.slice(6)} · ${Rogue.dailyParty(seed).map(Rogue.heroName).join("、")} · 专长 4 选 1`; } catch (e) { /* 留默认说明 */ }
+    }
     $("t-new-sub").textContent = RunFlow.ready ? "选择 2–4 名角色出发" : "单局流程在下一步（M1）接入";
   }
 
@@ -113,6 +118,7 @@ const Screens = (function () {
     $("t-new").onclick = () => RunFlow.start();
     if ($("t-solo")) $("t-solo").onclick = () => RunFlow.start({ solo: true });
     if ($("t-growth")) $("t-growth").onclick = () => RunFlow.start({ growth: true });
+    if ($("t-daily")) $("t-daily").onclick = () => RunFlow.startDaily && RunFlow.startDaily();
     $("t-continue").onclick = () => RunFlow.resume();
     if ($("t-codex")) $("t-codex").onclick = () => { if (window.Bestiary) Bestiary.open({ mode: "hero", sub: "主菜单" }); };
     $("t-sandbox").onclick = () => {

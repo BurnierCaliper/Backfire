@@ -130,8 +130,9 @@ const RogueCommands = (function () {
       const options = { party: c.party.slice(), seed: c.seed };
       if (c.solo) { options.solo = true; options.partners = c.partners.slice(); options.role2 = c.role2; }
       else if (c.growth) options.growth = true;
+      else if (c.daily) options.daily = true;
       s.run = Rogue.newRun(options);
-      return { seed: s.run.seed, solo: s.run.solo, growth: !!s.run.growth };
+      return { seed: s.run.seed, solo: s.run.solo, growth: !!s.run.growth, daily: !!s.run.daily };
     },
     resume(_c, context) {
       const s = needSession(context), saved = SaveStore.loadRun();

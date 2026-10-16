@@ -301,6 +301,13 @@ const Bestiary = (() => {
     const t = String((e.lines || [])[0] || "");
     return t.length > 26 ? t.slice(0, 25) + "…" : t;
   }
+  /** 每日挑战的选取率（rogue.js · featPickRates，本机记下的局）：出现过才写 */
+  function pickRateNote(id) {
+    let r = null;
+    try { r = window.Rogue && Rogue.featPickRates ? Rogue.featPickRates()[id] : null; } catch (e) { r = null; }
+    if (!r || !r.shown) return "";
+    return `<section class="bx-sec"><div class="bx-sec-h"><span>每日挑战</span></div><p class="bx-note">本机记下的每日挑战里出现 ${r.shown} 次，被选 ${r.picked} 次（选取率 ${Math.round(r.rate * 100)}%）。</p></section>`;
+  }
   /** 专长详情：层级与起始等级、种类、次数、消耗、效果文字、涉猎来源、标签 */
   function renderFeatDetail(e) {
     const box = root.querySelector(".bx-detail");
@@ -314,6 +321,7 @@ const Bestiary = (() => {
         <div class="bx-chips">${chips.join("")}</div>
         <section class="bx-sec"><div class="bx-sec-h"><span>效果</span></div><ul class="bx-abil">${e.lines.map(a => `<li>${esc(a)}</li>`).join("")}</ul></section>
         ${e.dabbleFrom ? `<section class="bx-sec"><div class="bx-sec-h"><span>涉猎来源</span></div><p class="bx-note">${esc(e.dabbleFrom)}</p></section>` : ""}
+        ${pickRateNote(e.featId)}
         <p class="bx-note">${esc(e.level ? `${e.level} 级起可以选（选专长时可以选本级或更低级的）。` : "")}这是专长，不是同名的技能 / 配置物 / 效果。</p>
       </div>`;
   }

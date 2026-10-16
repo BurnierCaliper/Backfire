@@ -368,6 +368,12 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **roguelike 每日挑战**（issue #52；rogue-data.js · `ROGUE_CONFIG.daily`；rogue.js · `dailySeed` / `dailyParty` / `dailyFeatOffer` / `dailyRecord` / `dailyStats` / `featPickRates`；rogue-commands.js；rogue-ui.js · `RunFlow.startDaily`；screens.js；game.html；bestiary-ui.js；tests/daily-challenge.test.js）
+  - 「本地玩法」里多一个「每日挑战」：种子是 `daily-年-月-日`（本机日期），所有人打同一局。按钮上写着今天的日期和队伍，点了直接出发，不进选人画面。
+  - **随机队伍**由种子定，4 人：至少一名主职责是输出（直伤 / 击破），主职责尽量不重复（人不够时才放宽）。
+  - **专长 4 选 1**：每次选专长从能选的里按种子抽 4 个，读档、刷新、别人打同一天都一样；只能从这 4 个里选。
+  - **记录**：每次专长选择记下出现了哪 4 个、选了哪个；局结束（通关或失败）时把日期、种子、队伍、结果、专长选择存到本机（最多记 200 局）。专长图鉴的详情里显示本机每日挑战的选取率（被选 / 出现）。
+  - 不做局外的永久数值成长。每日规则修正（例如所有敌人自带高能）先没做；没打完就放弃的局不记。
 - **图鉴：第五本「专长」**（issue #52；codex.js · `codexFeatEntries` / `codexFeatUses` / `codexFeatCost`；bestiary-ui.js；tests/feat-codex.test.js）
   - 放在「角色」后面，直接读 feats.js · `FEATS`，文字和选专长时看到的一样；全部列出（不做解锁），探索专长也列出并带标签。
   - 分类：全部 / ①7级 / ②11级 / ③13级 / ④16级；卡片写「专长 · 被动 / 战斗动作 / 探索 / 涉猎」，和同名的技能、配置物、效果分得开（例：以身作盾 vs 川川的铁壁）。

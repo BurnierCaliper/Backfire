@@ -970,6 +970,19 @@
       sessionCommand("prepareParty", { solo: !!(opt && opt.solo), growth: !!(opt && opt.growth) });
       Screens.show("party");
     },
+    /** 每日挑战（#52）：今天的种子定队伍，直接出发（不进选人画面） */
+    startDaily() {
+      const saved = sessionCommand("savedStatus");
+      const ask = saved === "newer" ? "有一局更新版本的游戏存下的进度（这一版读不了）。开每日挑战会覆盖它，确定吗？"
+        : saved === "ok" ? "已有一局在进行中。开每日挑战会覆盖它，确定吗？" : "";
+      if (ask && !confirm(ask)) return false;
+      const seed = Rogue.dailySeed();
+      sessionCommand("newRun", { party: Rogue.dailyParty(seed), seed, daily: true });
+      lastNotes = [`每日挑战出发。今天的种子 ${seed}，队伍和专长选项大家都一样。`];
+      save();
+      Screens.show("run");
+      return true;
+    },
     /** 角鳞星地图（world-map.js）：这一幕的区域是当前位置，各幕按顺序连成路线 */
     mapOptions() {
       if (!run) return null;
@@ -978,7 +991,7 @@
       for (let a = 1; a <= total; a++) {
         route.push({ place: (run.regionPick && run.regionPick[a]) || C.regions[(a - 1) % C.regions.length], label: `第 ${a} 幕`, state: a < run.act ? "done" : a === run.act ? "now" : "next" });   // 幕间选过采矿场的照选的
       }
-      return { here: Rogue.region(run), sub: `${run.solo ? "单人模式" : "单局"} · 第 ${run.act} 幕 · ${Rogue.region(run)}`, party: run.party.map(h => Rogue.heroName(h.kit)), route };
+      return { here: Rogue.region(run), sub: `${run.solo ? "单人模式" : run.daily ? "每日挑战 " + run.daily.date : "单局"} · 第 ${run.act} 幕 · ${Rogue.region(run)}`, party: run.party.map(h => Rogue.heroName(h.kit)), route };
     },
     /* ---------- 联机单局（online-game.js / online-rogue.js 用） ---------- */
     current: () => run,
