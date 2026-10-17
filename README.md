@@ -368,6 +368,11 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **小队聊天能发多行和字符画**（`online-ui.js · chatEnter / artAttr`、`online-view.js · chatText`、`hotseat.js · chatMessage`、`online.css`）：
+  - 输入框改成多行：Enter 发送，Shift+Enter 换行，输入法选字时的 Enter 不算；粘贴的多行文字保留换行，输入框跟着内容长高。
+  - 多行消息保留第一行行首的空格，只去掉开头的空行和末尾空白；单行消息照旧去掉两头空白。
+  - 发给玩家的聊天正文保留换行和全角字符（`chatText` 的 `keepLines`，只有小队聊天打开，私信照旧）。以前换行会被删掉、全角空格被换成半角，字符画会散架。其余控制字符、零宽和双向控制字符照样去掉，敏感词照样按规范化后的文字过滤。
+  - 多行且带行首空格或全角空格的消息算字符画：不自动折行，字号按最长一行缩到聊天栏放得下（最大 14px）。主持人的探索记录栏最窄，18 个字宽的字符画也能完整显示。
 - **第二轮查 bug：跑团开场前先修的几条**（game.js · `packHero` / `applyCampaignToField` / `simulate`；hotseat-game.js · `ownedChoice`；online-view.js · `pickKeys` / `actionCommand` / `projectHud` / `chatText`；tests/bugfix-round2.test.js、tests/hotseat-bridge.test.js、tests/online-view.test.js）
   - **跑团专长会存下来了**（H3）：专长、兼修和没分配的专长点以前不进队伍记忆，下一场开打或读档就全丢。旧存档里已经丢掉的，按等级算该有几次专长、补回成没分配的专长点，再选一次就行。
   - **战斗预演不再动队伍档案**（H11）：以前格挡弹窗一打开就真扣武器耐久（悬停一次扣一次），点「挺身」预演就把短休次数用掉；现在预演完会把耐久、短休 / 长休次数、钱包、工坊都还原。

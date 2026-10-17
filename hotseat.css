@@ -61,6 +61,7 @@
 #hs-chat-log { max-height: 140px; overflow-y: auto; padding: 0; margin: 8px 0; list-style: none; user-select: text; }
 #hs-chat-log li { display: flex; align-items: baseline; gap: 10px; padding: 4px 0; overflow-wrap: anywhere; }
 #hs-chat-log b { flex-shrink: 0; max-width: 35%; color: var(--sk-mint, #39e6b4); }
+#hs-chat-log li span { white-space: pre-wrap; }   /* 小队聊天的多行消息在这里也按原样换行 */
 #hs-chat-form { display: flex; gap: 8px; }
 #hs-chat-text { flex: 1; width: 0; }
 .hs-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
