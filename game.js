@@ -357,8 +357,7 @@
       let tb = z.querySelector(".ztower");
       if (!tw.length) { if (tb) tb.remove(); return; }
       if (!tb) { tb = el("div", "ztower"); z.appendChild(tb); }
-      const when = (t) => t.left > 0 ? `${t.left} 回合后` : `这回合${t.phase === "player" ? "我方" : "敌人"}回合开始时`;
-      tb.innerHTML = tw.map(t => `<span class="${t.have < t.need ? "short" : "ok"}" title="${esc(`${t.by} 的${t.name}：${when(t)}落下${t.delayed ? "（首领失衡，会推迟一回合）" : ""}。至少 ${t.need} 人站在这个区里踩住${t.soak > 0 ? `，每人挨 ${t.soak}` : ""}；没人踩住${t.fail != null ? (t.fail > 0 ? `，我方全员各挨 ${t.fail}` : "，我方全员挨巨额伤害") : "，会触发严重惩罚"}。不能格挡。`)}">${esc(t.name)} ${t.left > 0 ? t.left : "!"} · ${t.have}/${t.need} 人</span>`).join("");
+      tb.innerHTML = UnitCard.towerHtml(tw);   // 「踩塔 · 还有 N 回合 · 1/1 人」（unit-card.js）
     });
     paintGaps();
   }
@@ -2114,7 +2113,8 @@
     if (s.flying) tokens.push("飞行");
     (s.status ? s.status.split(" · ") : []).forEach(t => { if (t && t !== "无状态") tokens.push(t); });
     (s.hung || []).forEach(n => tokens.push(n));
-    return UnitTip.html({ kind, kit: s.kit, ownerName: owner && owner.name, escort: s.escort }, tokens.filter(Boolean), { name: s.name, sub: `Lv${s.level} · ${s.zone} 区${s.iv && typeof ivText === "function" ? " · 个体值 " + ivText(s) : ""}` });
+    return UnitTip.html({ kind, kit: s.kit, ownerName: owner && owner.name, escort: s.escort }, tokens.filter(Boolean), { name: s.name, sub: `Lv${s.level} · ${s.zone} 区${s.iv && typeof ivText === "function" ? " · 个体值 " + ivText(s) : ""}`,
+      mechs: window.UnitCard && UnitCard.mechLines ? UnitCard.mechLines(s) : [] });   // 首领机制：还有几回合落下
   }
   function onCardHover(id, on) {
     // 悬停说明：任何时候都能看（选目标时也一样），离开就收起；触屏没有悬停

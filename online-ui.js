@@ -164,7 +164,9 @@
       statusTokens(u).forEach(t => { if (!tokens.includes(t)) tokens.push(t); });
       const owner = u.weaponOf ? (data.units || []).find(x => x.kit === u.weaponOf && !x.weaponOf) : null;
       const kind = u.isPlayer ? (u.escort ? "escort" : u.weaponOf || u.weaponUnit ? "weapon" : "hero") : "enemy";
-      return T.html({ kind, kit: u.kit, ownerName: owner && owner.name, escort: u.escort }, tokens.filter(Boolean), { name: u.name || u.id, sub: `Lv${u.level || 1} · ${u.zone} 区` });
+      // 首领机制的倒计时：主机投影好的 display.marks / casts（online-view.js），这里只拼文字
+      const mechs = global.UnitCard && global.UnitCard.mechLines ? global.UnitCard.mechLines({ marks: (u.display || {}).marks, casts: (u.display || {}).casts }) : [];
+      return T.html({ kind, kit: u.kit, ownerName: owner && owner.name, escort: u.escort }, tokens.filter(Boolean), { name: u.name || u.id, sub: `Lv${u.level || 1} · ${u.zone} 区`, mechs });
     }
     const hoverable = (t) => t && t.closest && t.closest("[data-unit-id], [data-prop-id]");
     stage.addEventListener("mouseover", event => {
