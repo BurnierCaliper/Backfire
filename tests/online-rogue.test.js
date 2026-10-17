@@ -302,3 +302,46 @@ test("联机单局：幕间选择是队伍投票——下一幕去原本的区�
   await alice.waitForFunction(() => OnlineGame.getView().packet?.rogue?.region === "第一采矿场");
   assert.deepEqual(f.errors, []);
 });
+
+test("联机单局：玩家打开武器面板（战斗外重摆队伍、单位 id 变了）后开战，仍能操作自己的角色", { timeout: 120000 }, async t => {
+  const f = await room(t); if (!f) return;
+  const { host, alice, bob, aliceId, hostId } = f;
+  await depart(f);
+  // 战斗外的查询会把队伍重摆上场（Rogue.withParty），id 全换
+  const idsBefore = await host.evaluate(() => state.units.filter(u => u.isPlayer).map(u => u.id).join());
+  assert.equal((await alice.evaluate(() => OnlineGame.sheetData())).type, "sheetData");
+  await host.waitForFunction(ids => state.units.filter(u => u.isPlayer).map(u => u.id).join() !== ids, idsBefore);
+  for (const page of [alice, bob]) await submit(page, { type: "rogue.vote", option: "task:main" });
+  await host.click('#run-body .r-go[data-which="main"]');
+  await host.waitForFunction(() => RunFlow.current().stage === "task");
+  await host.evaluate(() => { const r = RunFlow.current(); r.task.nodes[r.task.index] = { type: "battle", done: false }; RunFlow.refresh(); OnlineGame.touch(); });
+  await alice.waitForFunction(() => (OnlineGame.getView().packet?.rogue?.vote?.options || []).some(o => o.id === "fight"));
+  for (const page of [alice, bob]) await submit(page, { type: "rogue.vote", option: "fight" });
+  await host.evaluate(hostId => OnlineRogue.vote(hostId, "fight"), hostId);
+  await host.waitForFunction(() => Screens.is("battle") && state.units.some(u => !u.isPlayer));
+  // 会话里按单位 id 记的分配要跟上新战场
+  const held = await host.evaluate(() => { const a = HotseatGame.assignments(); return Object.fromEntries(Object.entries(a).map(([id, o]) => [state.units.find(u => u.id === id)?.kit || "STALE:" + id, o])); });
+  assert.equal(held.ruby, aliceId);
+  assert.ok(!Object.keys(held).some(k => k.startsWith("STALE:")), "分配里不能留旧 id");
+  await host.evaluate(() => { GAME.skip = true; GAME.instant = true; GAME.startOrEnd(); });
+  await host.waitForFunction(() => ["picking", "selecting"].includes(HotseatGame.getView().phase));
+  const ruby = await host.evaluate(() => state.units.find(u => u.kit === "ruby" && !u.weaponOf).id);
+  const ack = await submit(alice, { type: "orderPick", actor: ruby, index: 0 });
+  assert.equal(ack.ok, true, ack.error);
+  assert.deepEqual(f.errors, []);
+});
+
+test("联机单局：战斗外房主刷新，存档里残留的战斗状态不会弹出过期的结算面板", { timeout: 120000 }, async t => {
+  const f = await room(t); if (!f) return;
+  const { host } = f;
+  await depart(f);
+  // 模拟存档带着上一场战斗的状态：已开战、场上没敌人
+  await host.evaluate(() => { state.combatStarted = true; GAME.ended = false; OnlineGame.touch(); });
+  await host.reload(); await host.waitForFunction(() => !!window.OnlineGame);
+  await host.evaluate(async () => { GAME.skip = true; GAME.instant = true; await OnlineGame.resume(); });
+  await host.waitForFunction(() => !OnlineGame.isPaused() && !!RunFlow.current());
+  await host.waitForTimeout(800);
+  assert.equal(await host.evaluate(() => Screens.current()), "run");
+  assert.equal(await host.evaluate(() => document.getElementById("g-result").classList.contains("show")), false);
+  assert.deepEqual(f.errors, []);
+});
