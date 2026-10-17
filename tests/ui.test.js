@@ -1786,3 +1786,26 @@ test("单局：休整（长休）后弹出结算画面——血量、补给、�
   await page.waitForSelector("#rest-report", { state: "hidden" });
   assert.deepEqual(o.errors, []);
 });
+
+test("整局数据：「单回合最高爆发」一列，点数字打开详情（哪一场哪一回合、各技能伤害、吃到的增益），能返回", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page, errors } = o;
+  await page.evaluate(() => {
+    LEDGER.career = { battles: [{ no: 1, outcome: "win", turns: 3, grade: "A", score: 900, when: "第 1 天", teamDmg: 70, mvp: { name: "柯尔特", dmg: 70 }, rows: [] }],
+      kits: { kolt: { name: "柯尔特", kit: "kolt", battles: 1, dmg: 70, burst: { dmg: 55, turn: 2, battleNo: 1, battleName: "桥头伏击", when: "第 1 天",
+        skills: { 电钻: 40, "电钻 · 感电": 15 }, buffs: { "攻击者振奋：ATK +25%": 2, "属性克制（电 → 装甲 +25%）": 1 } } } } };
+    CareerLog.open();
+  });
+  await page.waitForSelector("#career-sheet.show .cl-burst-btn");
+  assert.equal((await page.textContent("#career-sheet .cl-burst-btn")).trim(), "55");
+  await page.click("#career-sheet .cl-burst-btn");
+  const body = await page.textContent("#cl-body");
+  assert.match(body, /单回合最高爆发\s*55/);
+  assert.match(body, /第 1 场「桥头伏击」的第 2 回合/);
+  assert.match(body, /电钻 · 感电\s*15\s*27\.3%/);
+  assert.match(body, /攻击者振奋：ATK \+25%\s*· 2 次命中/);
+  await page.click("#cl-body [data-cl-back]");
+  await page.waitForSelector("#career-sheet .cl-burst-btn");
+  assert.match(await page.evaluate(() => CareerLog.text()), /单回合最高爆发/);
+  assert.deepEqual(errors, []);
+});
