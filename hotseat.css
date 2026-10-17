@@ -93,3 +93,6 @@ body.hotseat-active :is(#g-undo, #tr-undo) { display: none !important; }
   body.hotseat-active .g-rank { top: calc(var(--hs-top-height, 56px) + 50px); }
   body.hotseat-active .banner { top: calc(var(--hs-top-height, 56px) + 52px); }
 }
+/* 战场点选的规则询问：不用回答的人只看到一条小提示，不挡画面、不拦点击 */
+#hs-reaction.hs-ask-mini { inset: auto 0 auto 0; top: calc(var(--hs-top-height, 56px) + 8px); background: none; padding: 0; pointer-events: none; overflow: visible; }
+.hs-ask-note { pointer-events: none; padding: 6px 14px; background: #24443bee; border: 2px solid var(--sk-mint, #39e6b4); color: #e7dcc6; font-size: 13px; box-shadow: 3px 3px #0008; }

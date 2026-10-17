@@ -293,3 +293,27 @@ test("TRPG GM keeps explicit data editing while ordinary players cannot edit oth
   assert.equal(other.atk, 72);
   assert.equal(f.view().order.find(row => row.actor === other.id).locked, false, "GM numeric edits do not invent an action-point spend");
 });
+
+test("battlefield-pick choices (Kolt blade swap): options carry the enemy target, ask is marked field, only the owner sees options", async () => {
+  const f = bridge(), [kolt] = f.units, { c } = f;
+  const foe = c.S.state.units.find(u => !u.isPlayer);
+  const pending = c.HotseatGame.ownedChoice(kolt, "更换刀头", [{ label: "不切换", value: { swap: false } },
+    { label: "切换并打", value: { swap: true, targetId: foe.id } }, { label: "只换刀头", value: { swap: true, targetId: null } }, { label: "幽灵", value: { swap: true, targetId: "no-such-unit" } }]);
+  c.HotseatGame.switchPlayer("p1");
+  const ask = f.view().ask;
+  assert.equal(ask.kind, "choice"); assert.equal(ask.field, true); assert.equal(ask.eligible, true);
+  assert.deepEqual(plain(ask.options.map(o => o.target || null)), [null, foe.id, null, null], "only real units become battlefield targets");
+  c.HotseatGame.switchPlayer("p2");
+  assert.equal(f.view().ask.field, true); assert.equal(f.view().ask.eligible, false); assert.deepEqual(plain(f.view().ask.options), []);
+  c.HotseatGame.switchPlayer("p1");
+  assert.equal(f.send("p1", { type: "answer", askId: ask.id, helper: kolt.id, extra: { index: 1 } }).ok, true);
+  assert.deepEqual(plain(await pending), { swap: true, targetId: foe.id });
+});
+
+test("plain owned choices without unit options stay non-field (opening blade keeps the button card)", () => {
+  const f = bridge(), [kolt] = f.units, { c } = f;
+  c.HotseatGame.ownedChoice(kolt, "初始刀头", [{ label: "电钻", value: "drill" }, { label: "酸液", value: "acid" }]);
+  c.HotseatGame.switchPlayer("p1");
+  assert.equal(f.view().ask.field, false);
+  assert.equal(f.view().ask.options.some(o => "target" in o), false);
+});

@@ -300,3 +300,13 @@ test("聚焦：层、属性序列、当前步数发给玩家（只认白名单�
   assert.doesNotMatch(JSON.stringify(out), /SECRET/);
   assert.equal(V.projectUnit(unit()).focuses, undefined);
 });
+
+test("field choice asks keep the field flag and unit targets for the owner only", () => {
+  const source = fixture(); source.view.ask = { id: "choice-3", kind: "choice", title: "更换刀头", deadline: null, field: true, eligible: true, waitingNames: ["甲"],
+    options: [{ helper: "u1", label: "不切换", extra: { index: 0 } }, { helper: "u1", label: "切换并打", target: "e1", extra: { index: 1 } }, { helper: "u2", label: "SECRET-OTHER-CHOICE", target: "e1", extra: { index: 2 } }] };
+  const out = V.projectPacket(source, player); noSecrets(out);
+  assert.equal(out.view.ask.field, true);
+  assert.deepEqual(out.view.ask.options, [{ helper: "u1", label: "不切换", extra: { index: 0 } }, { helper: "u1", label: "切换并打", target: "e1", extra: { index: 1 } }]);
+  const stranger = V.projectPacket(source, { recipientId: "p3", gmId: "host" });
+  assert.equal(stranger.view.ask.field, true); assert.deepEqual(stranger.view.ask.options, []);
+});

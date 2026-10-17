@@ -490,7 +490,7 @@
     const swap = get(view, "swap"); out.swap = obj(swap) ? identifiers(swap, {}, ["requestId", "from", "to", "recipient"]) : null;
     const ask = get(view, "ask"); out.ask = null;
     if (obj(ask)) {
-      const dto = identifiers(ask, copyFields(ask, {}, ["title"], ["deadline"], ["declined"]), ["id"]);
+      const dto = identifiers(ask, copyFields(ask, {}, ["title"], ["deadline"], ["declined", "field"]), ["id"]);
       enumField(ask, dto, "kind", ["choice", "block", "assist"]);
       if (get(ask, "deadline") === null) dto.deadline = null;
       dto.waitingNames = arr(get(ask, "waitingNames")).map(n => text(n, 60)).filter(n => n !== null);
@@ -499,7 +499,7 @@
       const owned = new Set([...(out.units || []), ...(out.heroes || []), ...(out.roster || [])].filter(u => u && (u.owner || u.operatorId) === context.recipientId).map(u => u.id || u.unitId));
       dto.options = arr(get(ask, "options")).flatMap(option => {
         if (!owned.has(get(option, "helper"))) return [];
-        const item = identifiers(option, copyFields(option, {}, ["label", "sub"]), ["helper"]);
+        const item = identifiers(option, copyFields(option, {}, ["label", "sub"]), ["helper", "target"]);
         if (own(option, "extra")) { const extra = choiceValue(get(option, "extra")); if (extra === undefined) return []; item.extra = extra; }
         return [item];
       });

@@ -1344,7 +1344,8 @@
         if (!foes.length) opts.push({ label: "切换刀头", sub: "同区没有可打的敌人", value: { swap: true, targetId: null } });
         else foes.forEach(u => opts.push({ label: `切换并打 ${u.name}`, sub: "近距离 0.5 ATK", value: { swap: true, targetId: u.id } }));
         let pick;
-        if (hotseat()) pick = await HotseatGame.ownedChoice(k, "更换刀头", opts);
+        // 联机：选项带上要追击的敌人，玩家端在战场上点亮起的敌人；按钮留「不切换」「只换刀头」
+        if (hotseat()) pick = await HotseatGame.ownedChoice(k, "更换刀头", foes.length ? opts.concat([{ label: "只换刀头", sub: "不追击", value: { swap: true, targetId: null } }]) : opts);
         else if (foes.length && allOnField(foes.map(u => u.id))) {
           // 在战场上点要追击的敌人；按钮：只换刀不打 / 不切换
           const got = await queueFieldPick(`<b>${esc(k.name)} 更换刀头</b>：点同区一名敌人切刀追击（近距离 0.5 ATK），或者不切换`,
