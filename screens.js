@@ -97,7 +97,11 @@ const Screens = (function () {
   }
 
   function boot() {
-    Screens.register("title", $("scr-title"), { onShow() { showTitleView("home", false); refreshTitle(); } });
+    Screens.register("title", $("scr-title"), { onShow() {
+      // 回到标题就不在跑团里了：不管从哪条路回来，都把跑团模式关掉（单局 / 每日挑战 / 训练场都从标题开，不能带着跑团规则；报告 H1）
+      if (typeof TRPG !== "undefined" && TRPG.active && !(window.HotseatGame && HotseatGame.isActive()) && window.TrpgFlow && TrpgFlow.leave) TrpgFlow.leave();
+      showTitleView("home", false); refreshTitle();
+    } });
     document.querySelectorAll("#scr-title [data-view]").forEach(b => { if (b.tagName === "BUTTON") b.onclick = () => showTitleView(b.dataset.view); });
     document.querySelectorAll("#scr-title [data-back]").forEach(b => { b.onclick = () => showTitleView("home"); });
     document.addEventListener("keydown", e => {
@@ -128,7 +132,11 @@ const Screens = (function () {
       } });
       Screens.show("battle");
     };
-    $("g-title").onclick = () => { if (!window.GAME || GAME.depth === 0) Screens.show("title"); };
+    $("g-title").onclick = () => {
+      // 跑团战斗：走跑团自己的离开流程（放弃没打完的战斗、存团、关掉跑团规则；报告 H1）
+      if (typeof TRPG !== "undefined" && TRPG.active && window.TrpgFlow && TrpgFlow.titleFromBattle) { TrpgFlow.titleFromBattle(); return; }
+      if (!window.GAME || GAME.depth === 0) Screens.show("title");
+    };
     Screens.show("title");
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);

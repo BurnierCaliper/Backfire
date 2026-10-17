@@ -170,6 +170,8 @@
       const plan = g.enemyPlan && g.enemyPlan.length ? g.enemyPlan : [{ id: "thug_knife", lv: cmd.level, zone: 2 }, { id: "thug_hammer", lv: cmd.level, zone: 2 }, { id: "bandit_boss", lv: cmd.level, zone: 2 }];
       plan.forEach(row => {
         const pack = typeof spawnEnemyGroup === "function" ? spawnEnemyGroup(row.id, Number(row.lv) || cmd.level, partyN, row.zone) : null;
+        // 任务节点里主持人定的富集与否（沙鱼，desert.js）
+        if (pack && typeof row.enriched === "boolean" && typeof desertSetEnriched === "function") pack.forEach(u => desertSetEnriched(u, row.enriched));
         if (pack && pack.length) { pack.forEach(u => state.units.push(u)); return; }
         const p = presets.find(x => x.id === row.id);
         if (!p || !p.build) return;

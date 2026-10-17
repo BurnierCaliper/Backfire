@@ -1131,3 +1131,21 @@ test("联机跑团：主持人长休，玩家画面也弹结算（不带坚毅�
   assert.ok(await alice.evaluate(() => OnlineGame.getView().packet.clock && OnlineGame.getView().packet.clock.day >= 1), "游戏时钟发给玩家");
   assert.deepEqual(f.errors, []);
 });
+
+test("联机：玩家点「离开房间」真的离开——刷新后不再自动回房，标题页留「回到房间」按钮，点了能回去", { timeout: 120000 }, async t => {
+  const f = await fixture(t); if (!f) return;
+  const { host, alice } = f;
+  const nav = alice.waitForEvent("load");
+  await alice.evaluate(() => OnlineGame.leave());
+  await nav; await alice.waitForFunction(() => !!window.OnlineGame && !!window.GAME);
+  await alice.waitForFunction(() => /上次的房间/.test(document.querySelector("#t-online").innerText));
+  await alice.click("#t-online");
+  await alice.waitForSelector("#ol-title-resume");
+  await alice.waitForTimeout(1500);   // 给自动回房留时间：不应该发生
+  assert.equal(await alice.evaluate(() => OnlineGame.getView().active), false, "没有被自动拉回房间");
+  await host.waitForFunction(() => OnlineGame.getView().players.some(p => p.name === "Alice" && !p.online));
+  // 想回去还能回去
+  await alice.click("#ol-title-resume");
+  await alice.waitForFunction(() => OnlineGame.getView().active);
+  assert.equal(await alice.evaluate(() => OnlineGame.savedInfo().left), false, "回房后不再标着离开");
+});

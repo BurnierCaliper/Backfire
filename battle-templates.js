@@ -7,7 +7,7 @@
  * 模板格式：
  *   { id, name, note, tier: "normal" | "elite" | "boss", board: 2 | 3 | "line4" | "square4" | "cross5",
  *     weather, playerZone, allyFaction（我方与哪个敌人阵营同阵营，"" = 只有自己）,
- *     enemies: [{ preset, level (null = 跟着战斗等级), zone, mechanics?: [首领机制配置] }],
+ *     enemies: [{ preset, level (null = 跟着战斗等级), zone, mechanics?: [首领机制配置], enriched?: 沙鱼富集与否（true / false，不写 = 开战时随机） }],
  *     fields: { 区号: { 和默认场地不同的字段 } },
  *     gaps: { "1-2": { type, hp (null = 按规则掷), open } },
  *     props: [{ kind, zone, level (null = 跟着战斗等级), faction }],
@@ -113,6 +113,9 @@ function battleTemplateNormalize(t) {
   const withIv = (row, e) => {
     const iv = e && e.iv && typeof e.iv === "object" ? { hp: ivOf(e.iv.hp), atk: ivOf(e.iv.atk) } : null;
     if (iv && (iv.hp != null || iv.atk != null)) row.iv = iv;
+    // 富集与否（沙鱼，desert.js）：编辑器里存 "on" / "off"，存档里是 true / false；别的敌人没有这一项
+    const enr = e && (e.enriched === true || e.enriched === "on") ? true : e && (e.enriched === false || e.enriched === "off") ? false : null;
+    if (enr !== null && typeof SAND_FISH_KITS !== "undefined" && SAND_FISH_KITS.includes(row.preset)) row.enriched = enr;
     return row;
   };
   const enemies = (Array.isArray(t.enemies) ? t.enemies : []).filter(e => e && typeof e.preset === "string" && (!presets || presets.includes(e.preset)))
@@ -252,6 +255,7 @@ function battleTemplateCapture(name) {
     const preset = u.kit === "ufo_body" ? "ufo_boss" : u.kit;
     if (!preset || (presets && !presets.includes(preset))) return;
     const row = { preset, level: Number(u.level) || 1, zone: Number(u.zone) || 2 };
+    if (u.enrichSet) row.enriched = !!u.enriched;   // 主持人定过富集与否的沙鱼照记；没定的开战时再随机
     const m = btMechanics(u.mechanics);
     if (m) row.mechanics = m;
     enemies.push(row);
@@ -306,12 +310,13 @@ function btOneEncounter(t) {
       if (e.level != null) row.level = e.level;
       if (e.iv) row.iv = btClone(e.iv);
       if (e.mechanics) row.mechanics = btClone(e.mechanics);
+      if (typeof e.enriched === "boolean") row.enriched = e.enriched;
       return row;
     }),
     fields: btClone(t.fields),
     features: []
   };
-  if (t.waves.length) enc.waves = t.waves.map(w => ({ turns: w.turns, enemies: w.enemies.map(e => Object.assign({ preset: e.preset, zone: e.zone, count: 1 }, e.level != null ? { level: e.level } : {}, e.iv ? { iv: btClone(e.iv) } : {})) }));
+  if (t.waves.length) enc.waves = t.waves.map(w => ({ turns: w.turns, enemies: w.enemies.map(e => Object.assign({ preset: e.preset, zone: e.zone, count: 1 }, e.level != null ? { level: e.level } : {}, e.iv ? { iv: btClone(e.iv) } : {}, typeof e.enriched === "boolean" ? { enriched: e.enriched } : {})) }));
   if (t.drops) enc.drops = btClone(t.drops);
   if (typeof t.board === "string") enc.board = t.board;
   Object.keys(t.gaps).forEach(k => {
@@ -341,7 +346,7 @@ function battleTemplateSummary(t) {
   if (t.tier !== "normal") bits.push(BATTLE_TEMPLATE_TIERS[t.tier]);
   if (W[t.weather]) bits.push(W[t.weather]);
   if (t.allyFaction) bits.push(`我方与${t.allyFaction}同阵营`);
-  const foes = t.enemies.map(e => `${btEnemyName(e.preset)} ${e.level != null ? "Lv" + e.level : "Lv随队"}（${e.zone} 区）${e.mechanics ? "·机制" : ""}`);
+  const foes = t.enemies.map(e => `${e.enriched === true ? "富集" : ""}${btEnemyName(e.preset)} ${e.level != null ? "Lv" + e.level : "Lv随队"}（${e.zone} 区）${e.mechanics ? "·机制" : ""}`);
   bits.push(foes.length ? foes.join("、") : "没有敌人");
   const extra = [];
   const nf = Object.keys(t.fields).length, ng = Object.keys(t.gaps).length;

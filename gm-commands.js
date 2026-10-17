@@ -67,7 +67,8 @@
   function patchUnit(u, p) {
     const numeric = ["hp", "shp", "shpMax", "def", "defMax", "ap", "apMax", "bonus", "bonusMax", "atk", "highEnergy"];
     const flags = ["stunned", "stun", "dying", "dead", "flying"];
-    keys(p, numeric.concat(flags, ["layers", "level", "zone", "statuses", "self", "iv"]), "单位补丁");
+    keys(p, numeric.concat(flags, ["layers", "level", "zone", "statuses", "self", "iv", "enriched"]), "单位补丁");
+    if (own(p, "enriched")) { bool(p.enriched, "富集"); if (typeof isSandFish !== "function" || !isSandFish(u)) fail("只有沙鱼能设富集"); }
     if (own(p, "iv")) { if (typeof ivEligible !== "function" || !ivEligible(u)) fail("只有杂兵、精英有个体值"); ivCheck(p.iv); }
     if (!Object.keys(p).length) fail("单位补丁为空");
     numeric.forEach(k => { if (own(p, k)) number(p[k], k, 0, Number.MAX_SAFE_INTEGER, ["ap", "apMax", "bonus", "bonusMax"].includes(k)); });
@@ -224,7 +225,7 @@
     if (!TYPES.includes(cmd.type)) fail("未知主持人指令");
     if (own(cmd, "silent")) bool(cmd.silent, "静默");
     const fields = {
-      spawnEnemy: ["enemyId", "level", "zone", "count", "iv"], removeUnit: ["actor", "mode"], editUnit: ["actor", "patch"],
+      spawnEnemy: ["enemyId", "level", "zone", "count", "iv", "enriched"], removeUnit: ["actor", "mode"], editUnit: ["actor", "patch"],
       addProp: ["kind", "zone", "level", "faction", "link"], editProp: ["id", "patch"], removeProp: ["id", "mode"],
       editGap: ["key", "patch"], setField: ["zone", "patch"], setWeather: ["weather", "sandDir", "phaseStep", "lock"],
       setEncounter: ["encounter", "zoneMode"], forceAttack: ["input"], setManual: ["actors", "enabled"],
@@ -234,7 +235,9 @@
     switch (type) {
       case "spawnEnemy":
         if (!enemyPresets().some(p => p.id === cmd.enemyId && p.id !== "blank_pc")) fail("未知敌人种类");
-        level(cmd.level); zone(cmd.zone); if (own(cmd, "count")) number(cmd.count, "生成数量", 1, 100, true); if (own(cmd, "iv")) ivCheck(cmd.iv); break;
+        level(cmd.level); zone(cmd.zone); if (own(cmd, "count")) number(cmd.count, "生成数量", 1, 100, true); if (own(cmd, "iv")) ivCheck(cmd.iv);
+        // 富集与否（沙鱼，desert.js）：true / false；不写 = 开战时照常随机
+        if (own(cmd, "enriched")) { bool(cmd.enriched, "富集"); if (typeof SAND_FISH_KITS === "undefined" || !SAND_FISH_KITS.includes(cmd.enemyId)) fail("只有沙鱼能设富集"); } break;
       case "removeUnit": enemy(cmd.actor); one(cmd.mode, ["remove", "kill"], "移出模式"); break;
       case "editUnit": patchUnit(unit(cmd.actor), cmd.patch); break;
       case "addProp": one(cmd.kind, PROP_KINDS, "配置物种类"); zone(cmd.zone); if (own(cmd, "level")) level(cmd.level); if (own(cmd, "faction")) one(cmd.faction, ["player", "enemy"], "阵营"); if (own(cmd, "link")) gapKeyCheck(cmd.link); break;
@@ -269,6 +272,8 @@
       setEnemyIV(u, { hp: pick("hp"), atk: pick("atk") });
     }
     if (own(p, "level")) { u.level = p.level; if (typeof applyLevelStats === "function") applyLevelStats(u); }
+    // 富集与否（desert.js）：装甲层 ×1.5 / 除回去，名字加 / 去「富集」；定了以后开战不再随机
+    if (own(p, "enriched") && typeof desertSetEnriched === "function") desertSetEnriched(u, p.enriched);
     if (p.dead === false) { dmRevive(u); u._removed = false; }
     ["shpMax", "defMax", "apMax", "bonusMax", "atk", "zone", "self", "highEnergy", "flying", "dying", "dead"].forEach(k => { if (own(p, k)) u[k] = p[k]; });
     // Combat reads personalAtk plus the currently held weapon, not the legacy
@@ -296,6 +301,7 @@
           const ids = [], eligible = state.combatStarted ? (Number(state.turnNo) || 1) + (state.combatPhase === "enemy" ? 1 : 0) : 1;
           for (let i = 0; i < (cmd.count || 1); i++) {
             const pack = spawnEnemyGroup(cmd.enemyId, cmd.level, Number(state.partySize) || 2, cmd.zone, cmd.iv);
+            if (own(cmd, "enriched") && typeof desertSetEnriched === "function") pack.forEach(u => desertSetEnriched(u, cmd.enriched));
             pack.forEach(u => { state.units.push(u); metadata.set(u.id, { eligibleEnemyRound: eligible }); ids.push(u.id); });
           }
           result = { ids, eligibleEnemyRound: eligible };

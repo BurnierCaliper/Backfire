@@ -1173,16 +1173,22 @@
     // 刷新 / 误关页面后：玩家自动回到上次的房间；失败就留在标题页，给一个显眼的「回到房间」按钮
     function addResumeButton() {
       const info = api.savedInfo?.(); const menu = document.querySelector("#scr-title .t-menu");
-      if (!info || !menu || document.getElementById("ol-title-resume")) return;
+      // 用 querySelector：game.html 给 getElementById 垫了一层，找不到的 id 会凭空造一个隐藏的 div，以前这里永远「已经有了」，按钮一直没出来
+      if (!info || !menu || document.querySelector("#ol-title-resume")) return;
       const b = document.createElement("button"); b.type = "button"; b.className = "t-btn ol-title-entry ol-title-resume"; b.id = "ol-title-resume";
       b.innerHTML = `<b>回到房间 ${esc(info.roomCode || "")}</b><small>${info.role === "host" ? "恢复你主持的房间" : `以「${esc(info.name)}」重新连上`}</small>`;
       b.onclick = async () => { entry = "join"; if (await call(() => api.resume())) { panelOpen = false; b.remove(); render(); } else { panelOpen = true; render(); } };
       menu.prepend(b); titleButtons.push(b);
+      // 这个按钮在「联机玩法」子页里，首页看不到：在首页的「联机玩法」上提示一句
+      const home = document.querySelector("#t-online small");
+      if (home && !home.dataset.olOrig) { home.dataset.olOrig = home.textContent; home.textContent = `上次的房间 ${info.roomCode || ""}：点进来可以回去`; }
+      b.addEventListener("click", () => { if (home && home.dataset.olOrig) { home.textContent = home.dataset.olOrig; delete home.dataset.olOrig; } });
     }
     async function autoResume() {
       if (autoResumeTried || destroyed) return; autoResumeTried = true;
       const info = api.savedInfo?.();
-      if (!info || info.role !== "player" || api.getView()?.active) { if (info) addResumeButton(); return; }
+      // 玩家自己点了「离开房间」的（info.left）不自动回去，只留按钮
+      if (!info || info.role !== "player" || info.left || api.getView()?.active) { if (info) addResumeButton(); return; }
       notice = `正在回到房间 ${info.roomCode}…`;
       try { const r = await api.resume(); if (r && r.ok === false) throw new Error(r.error || "恢复失败"); notice = ""; }
       catch (e) { notice = `没能自动回到房间：${e.message || e}`; addResumeButton(); toast.textContent = notice; toast.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { toast.hidden = true; }, 6000); }

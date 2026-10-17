@@ -540,8 +540,9 @@
       const tplRow = fight ? `<div class="tr-row">战斗模板 <select data-te-tpl="${i}">${options(tplOpts, n.template ? n.template.id : "")}</select>
           ${n.template ? `<span class="r-hint">${esc(battleTemplateSummary(n.template))}</span>` : ""}</div>` : "";
       const foes = !fight ? "" : n.template ? tplRow : tplRow + `<div class="tk-foes">${n.enemies.map((e, j) => `<div class="tr-row">
-            <select data-te="nodes.${i}.enemies.${j}.id">${options(presets, e.id)}</select>
+            <select data-te="nodes.${i}.enemies.${j}.id" data-te-rerender="1">${options(presets, e.id)}</select>
             等级 ${inp(`nodes.${i}.enemies.${j}.lv`, e.lv, 52, "number")} 区域 <select data-te="nodes.${i}.enemies.${j}.zone">${options([1, 2, 3, 4, 5].map(z => [z, z + " 区"]), e.zone)}</select>
+            ${typeof SAND_FISH_KITS !== "undefined" && SAND_FISH_KITS.includes(e.id) ? `富集 <select data-te="nodes.${i}.enemies.${j}.enriched">${options([["", "随机"], ["on", "富集"], ["off", "普通"]], e.enriched === true || e.enriched === "on" ? "on" : e.enriched === false || e.enriched === "off" ? "off" : "")}</select>` : ""}
             <button class="g-btn small" data-te-act="delEnemy:${i}:${j}">删</button></div>`).join("")}
           <div class="tr-row"><button class="g-btn small" data-te-act="addEnemy:${i}">＋ 敌人</button>
             天气 <select data-te="nodes.${i}.weather">${options(Object.keys(WX).map(k => [k, WX[k]]), n.weather)}</select>
@@ -1026,11 +1027,14 @@
     const lvTip = ' placeholder="随队" title="空着 = 跟着开战时的等级"';
     // 个体值（杂兵、精英）：血量 / ATK 水平 −10～10%，空着 = 开战时随机
     const ivTip = ' min="-10" max="10" step="1" placeholder="随机" title="个体值水平 −10～10（%），空着 = 开战时随机；首领不波动"';
+    // 富集与否（沙鱼才有）：随机 / 富集 / 普通
+    const enrSel = (path, e) => typeof SAND_FISH_KITS !== "undefined" && SAND_FISH_KITS.includes(e.preset)
+      ? ` 富集 <select data-bte="${path}.enriched">${options([["", "随机"], ["on", "富集"], ["off", "普通"]], e.enriched === true || e.enriched === "on" ? "on" : e.enriched === false || e.enriched === "off" ? "off" : "")}</select>` : "";
     const ivInp = (path, e) => `<span class="bt-iv">个体值 血量 ${inp(path + ".iv.hp", e.iv ? e.iv.hp : null, 54, "number", ivTip)}% ATK ${inp(path + ".iv.atk", e.iv ? e.iv.atk : null, 54, "number", ivTip)}%</span>`;
     const foes = t.enemies.map((e, j) => `<div class="tr-row">
-        <select data-bte="enemies.${j}.preset">${options(presets, e.preset)}</select>
+        <select data-bte="enemies.${j}.preset" data-bte-rerender="1">${options(presets, e.preset)}</select>
         等级 ${inp(`enemies.${j}.level`, e.level, 60, "number", lvTip)} 区域 ${zoneSel(`enemies.${j}.zone`, e.zone)}
-        ${ivInp(`enemies.${j}`, e)}
+        ${ivInp(`enemies.${j}`, e)}${enrSel(`enemies.${j}`, e)}
         ${e.mechanics ? `<span class="tk-chip">机制：${esc(e.mechanics.map(btMechName).join("、"))}<button class="g-btn small" data-bt-act="clearMech:${j}" title="去掉这个敌人身上的首领机制">×</button></span>` : ""}
         <button class="g-btn small" data-bt-act="delEnemy:${j}">删</button></div>`).join("");
     const fields = zones.map(z => {
@@ -1054,8 +1058,8 @@
     const waves = (t.waves || []).map((w, j) => `<div class="tk-wave">
         <div class="tr-row">第 ${j + 1} 波：开战后第 ${inp(`waves.${j}.turns`, w.turns, 50, "number", ' min="1"')} 回合开始时抵达（提前打光场上的敌人就下一回合到）
           <button class="g-btn small" data-bt-act="delWave:${j}">删这波</button></div>
-        ${(w.enemies || []).map((e, k) => `<div class="tr-row">　<select data-bte="waves.${j}.enemies.${k}.preset">${options(presets, e.preset)}</select>
-          等级 ${inp(`waves.${j}.enemies.${k}.level`, e.level, 60, "number", lvTip)} 进入 ${zoneSel(`waves.${j}.enemies.${k}.zone`, e.zone)} ${ivInp(`waves.${j}.enemies.${k}`, e)}
+        ${(w.enemies || []).map((e, k) => `<div class="tr-row">　<select data-bte="waves.${j}.enemies.${k}.preset" data-bte-rerender="1">${options(presets, e.preset)}</select>
+          等级 ${inp(`waves.${j}.enemies.${k}.level`, e.level, 60, "number", lvTip)} 进入 ${zoneSel(`waves.${j}.enemies.${k}.zone`, e.zone)} ${ivInp(`waves.${j}.enemies.${k}`, e)}${enrSel(`waves.${j}.enemies.${k}`, e)}
           <button class="g-btn small" data-bt-act="delWaveEnemy:${j}-${k}">删</button></div>`).join("")}
         <div class="tr-row">　<button class="g-btn small" data-bt-act="addWaveEnemy:${j}">＋ 援军敌人</button></div></div>`).join("");
     const others = (typeof battleTemplateList === "function" ? battleTemplateList() : []).filter(x => x.id !== t.id).map(x => [x.id, x.name]);
@@ -1494,6 +1498,25 @@
     render();
   }
 
+  /** 离开跑团模式（存好这个团、关掉跑团规则）。战斗没打完时不存：空位里留的是开战前那份（toBattle 开战前存过），
+   *  免得把打到一半的血量、用掉的道具当成团的进度（报告 H1） */
+  function leaveTrpg() {
+    if (!TRPG.active) return false;
+    const midBattle = window.GAME && state.combatStarted && !GAME.ended && Screens.is("battle");
+    if (slot >= 0 && !midBattle) save();
+    TRPG.active = false; TRPG.taskBattle = null; slot = -1; undoStack = [];
+    document.body.classList.remove("trpg");
+    return true;
+  }
+  /** 跑团战斗里点顶栏「标题」：和「回到探索环节」一样先放弃 / 收好这场战斗，再存团、离开跑团模式（报告 H1：以前直接回标题，
+   *  TRPG.active 没清，之后同一页开的单局 / 每日挑战 / 训练场都按跑团规则走，还会写进跑团空位） */
+  function requestTitleFromBattle() {
+    if (window.GAME && GAME.depth > 0) return false;
+    if (state.combatStarted && !GAME.ended && !confirm("战斗还没结束。回到标题会放弃这场战斗（不结算，回到开战前的状态），团的进度照常保存。确定吗？")) return false;
+    uiCommand("backFromBattle");
+    uiCommand("title");
+    return true;
+  }
   function requestBackFromBattle() {
     if (window.GAME && GAME.depth > 0) return;
     if (state.combatStarted && !GAME.ended && !confirm("战斗还没结束。直接回到探索环节会放弃这场战斗（不结算，回到开战前的状态）。确定吗？")) return;
@@ -1516,7 +1539,7 @@
     delete(c) { trpgClearSlot(c.index); if (c.index === slot) { slot = -1; TRPG.active = false; document.body.classList.remove("trpg"); } renderSlots(); },
     import(c) { if (!trpgValidSlot(c.data)) throw new Error("Invalid TRPG save"); trpgWriteSlot(c.index, c.data); if (c.index === slot) { slot = -1; TRPG.active = false; document.body.classList.remove("trpg"); } renderSlots(); },
     slots: openSlots,
-    title() { if (TRPG.active && slot >= 0) save(); TRPG.active = false; slot = -1; document.body.classList.remove("trpg"); Screens.show("title"); },
+    title() { leaveTrpg(); Screens.show("title"); },
     toBattle,
     backFromBattle,
     clearLog() { log = []; saveLog(); renderLog(); }
@@ -1600,7 +1623,7 @@
       refresh: () => mapOptions()
     };
   }
-  window.TrpgFlow = { mapOptions, enter: index => uiCommand("enter", { index }), openSlots: () => uiCommand("slots"), toBattle: () => uiCommand("toBattle"), backFromBattle: requestBackFromBattle,
+  window.TrpgFlow = { leave: leaveTrpg, titleFromBattle: requestTitleFromBattle, mapOptions, enter: index => uiCommand("enter", { index }), openSlots: () => uiCommand("slots"), toBattle: () => uiCommand("toBattle"), backFromBattle: requestBackFromBattle,
     refresh: render,
     onlineCheckpoint: () => JSON.parse(JSON.stringify({ slot, slotName, log, tab, commandLevel })),
     restoreOnline(saved) { slot = saved.slot; slotName = saved.slotName; log = saved.log || []; tab = saved.tab || "party"; commandLevel = saved.commandLevel || 1; TRPG.active = true; document.body.classList.add("trpg"); }

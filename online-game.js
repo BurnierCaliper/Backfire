@@ -50,8 +50,9 @@
       heroes: isHost() ? (rogue() ? rogueHeroes() : HotseatGame.getView().heroes) : remote?.view?.heroes || [], offlineWait: copy(isHost() ? offlineWait : remote?.offlineWait || null),
       manualPhase: isHost() ? manualPhase : !!remote?.manualPhase };
   }
+  let leftRoom = false;   // 玩家点了「离开房间」：之后（包括刷新时的 pagehide）不再覆盖存档里的 left 标记
   function save() {
-    if (!endpoint || !identity) return;
+    if (!endpoint || !identity || leftRoom) return;
     const data = { version: 1, credentials: endpoint.credentials(), identity, requestNo, savedAt: Date.now() };
     if (isHost()) Object.assign(data, { mode, levelUps: typeof LevelUp !== "undefined" ? LevelUp.save() : [], game: GAME.onlineCheckpoint(), hotseat: HotseatGame.checkpoint(pausedAt ?? Date.now()),
       trpg: rogue() ? null : TrpgFlow.onlineCheckpoint(), rogue: rogue() ? RunFlow.onlineCheckpoint() : null,
@@ -532,7 +533,7 @@
   root.OnlineGame = { PROTOCOL, BUILD, create, join, resume, submit, getView, isHost, isPaused, waitUntilReady, manualEnemyPhase, onActionSettled, flushGM, queueHostEdit, legacyAddedEnemies, reportError,
     takeAIResume() { const value = resumeAI; resumeAI = false; return value; },
     hasSaved: () => !!readSaved(),
-    savedInfo: () => { const s = readSaved(); return s ? { role: s.credentials?.role || "", roomCode: s.credentials?.roomCode || "", name: s.identity?.name || "" } : null; }, slots: () => trpgReadSlots().map((s, index) => ({ index, name: s?.name || "空白存档" })),
+    savedInfo: () => { const s = readSaved(); return s ? { role: s.credentials?.role || "", roomCode: s.credentials?.roomCode || "", name: s.identity?.name || "", left: !!s.left } : null; }, slots: () => trpgReadSlots().map((s, index) => ({ index, name: s?.name || "空白存档" })),
     assign(assignments) {
       if (!isHost()) error("只有主持人可以分配角色");
       if (rogue()) {
@@ -617,7 +618,13 @@
     subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     onPacket(fn) { packetListeners.add(fn); return () => packetListeners.delete(fn); },
     reconnect: () => endpoint?.reconnect(),
-    leave() { save(); endpoint?.close(); epoch++; active = false; location.reload(); }
+    // 玩家主动离开：存档标上 left，刷新后不再自动回房（以前照存照回，玩家点「离开房间」又被拉回去），标题页留「回到房间」按钮；
+    // 主持人「离开并保存」照旧（主持人本来就不自动回房）
+    leave() {
+      save();
+      if (!isHost()) { leftRoom = true; const s = readSaved(); if (s) { s.left = true; try { localStorage.setItem(KEY, JSON.stringify(s)); } catch (_) {} } }
+      endpoint?.close(); epoch++; active = false; location.reload();
+    }
   };
   const boot = () => { if (root.OnlineGMUI) OnlineGMUI.mount(root.OnlineGame); };
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();

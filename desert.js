@@ -76,8 +76,8 @@ function desertBattleStart(notes) {
       u.leaveIn = DESERT.bugLeave[0] + Math.floor(Math.random() * (DESERT.bugLeave[1] - DESERT.bugLeave[0] + 1));
     }
     if (u.kit === "sandfish_ambush") u.submerged = true;   // 伏咬沙鱼开场就在沙下
-    // 富集变种：每只沙漠生物 10%（沙暴 25%）
-    if (isSandFish(u) && !u.enriched && Math.random() < (state.weather === "sand" ? DESERT.enriched.sandChance : DESERT.enriched.chance)) makeEnriched(u);
+    // 富集变种：每只沙漠生物 10%（沙暴 25%）；主持人定过富集与否的（enrichSet）不再随机
+    if (isSandFish(u) && !u.enriched && !u.enrichSet && Math.random() < (state.weather === "sand" ? DESERT.enriched.sandChance : DESERT.enriched.chance)) makeEnriched(u);
   });
   if (sandFishes().length || desertPrey().length) {
     notes.push(night ? (state.weather === "sand" ? "漠汛的沙暴遮住了光：沙漠生物按夜晚行动。" : "夜晚：沙漠生物活跃起来。")
@@ -480,6 +480,28 @@ function makeEnriched(u) {
     l.max = Math.round(Number(l.max) * DESERT.enriched.armorMult);
     l.current = l.max;
   });
+  return u;
+}
+/** 变回普通个体（makeEnriched 的反向）：装甲层上限除回去、已受的伤按比例保留，去掉名字前的「富集」 */
+function unmakeEnriched(u) {
+  if (!u || !u.enriched) return u;
+  u.enriched = false;
+  u.name = String(u.name).replace(/^富集/, "");
+  (u.layers || []).forEach(l => {
+    if (l.type !== "armor") return;
+    const max = Math.max(1, Math.round(Number(l.max) / DESERT.enriched.armorMult));
+    l.current = Math.min(max, Math.round(Number(l.current) * max / Math.max(1, Number(l.max))));
+    l.max = max;
+  });
+  return u;
+}
+/** 主持人定富集与否（战斗模板、任务节点、联机主持人工具生成 / 修改单位）。
+ *  mode：true 富集、false 不富集、null / undefined 随机（开战时照常 10% / 沙暴 25%）。只对沙鱼有效，别的单位不动 */
+function desertSetEnriched(u, mode) {
+  if (!isSandFish(u)) return u;
+  if (mode === true) { makeEnriched(u); u.enrichSet = true; }
+  else if (mode === false) { unmakeEnriched(u); u.enriched = false; u.enrichSet = true; }
+  else delete u.enrichSet;
   return u;
 }
 /** 掉落的奎支倍率（app.js · settleEnemyKill） */

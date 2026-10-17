@@ -626,6 +626,8 @@ function spawnEncounterRows(rows, baseLevel, partySize) {
       if (row.bounty) makeBountyTarget(u, row.bounty);
       // 战斗模板（battle-templates.js）里预先挂好的首领机制
       if (Array.isArray(row.mechanics) && typeof addBossMechanic === "function") row.mechanics.forEach(m => addBossMechanic(u, JSON.parse(JSON.stringify(m))));
+      // 主持人定的富集与否（沙鱼，desert.js）；不写就开战时随机
+      if (typeof row.enriched === "boolean" && typeof desertSetEnriched === "function") desertSetEnriched(u, row.enriched);
       state.units.push(u);
       made.push(u);
     }

@@ -2647,8 +2647,9 @@
     const trpgXpLine = (rewards.trpgXp || []).length ? "战斗奖励经验：" + rewards.trpgXp.map(x => `${x.name} +${x.xp}`).join("、") + "。" : "";
     if (trpgXpLine) addLogPhase(trpgXpLine);
     const ups = rewards.ups;
-    // 跑团版的队伍档案只在战斗原型里结算；Roguelike 由单局流程自己记
-    if (!G.rogue) {
+    // 跑团版的队伍档案只在战斗原型里结算；Roguelike 由单局流程自己记。
+    // 训练场不结算也不存档（报告 H15：以前撤退 / 全员倒地照常扣耐久、写队伍记忆，跑团没退出时连跑团空位一起改坏）
+    if (!G.rogue && !trainingActive()) {
       const durNotes = systemCommand({ type: "battle.afterBattle" });
       if (typeof G.onBattleFinished === "function") {
         const g = state.battleGains || { xp: 0, kuizhi: 0 };
@@ -3504,7 +3505,10 @@
   }
 
   function rememberCampaign() { return dispatch({ type: "battle.rememberCampaign" }); }
+  // 训练场的场面是临时布置的（假人、指定等级的角色），不能写进队伍记忆 / 存档（报告 H15）
+  function trainingActive() { return typeof window !== "undefined" && !!(window.Training && window.Training.active); }
   function rememberCampaignRules() {
+    if (trainingActive()) return G.campaign;
     const party = state.units.filter(u => u.isPlayer && !isWeaponUnit(u)).map(packHero);
     // 换下场的队员也留着记忆（跑团模式换人后再换回来，等级、经验不丢）
     const prev = (G.campaign && G.campaign.party) || [];
