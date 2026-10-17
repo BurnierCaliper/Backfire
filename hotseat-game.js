@@ -23,6 +23,14 @@
   function refresh() { notify(); if (root.GAME && document.getElementById("g-party")) GAME.refresh(); }
   function hostOnly(id) { if (id !== gm()) fail("只有房主可以执行此操作"); }
   function canConfigure() { return !choice && !session?.snapshot().ask && (!state.combatStarted || !!(root.GAME && GAME.ended)); }
+  // 单局战斗外查询会把队伍重摆上场（rogue.js · withParty），单位 id 会变，而存档里的分配还是旧 id。
+  // 恢复时只保留还在场上的英雄，其余按职业沿用原来的操控者，否则 setAssignments 报「只能分配英雄角色」、房主恢复失败
+  function restorable(saved) {
+    const out = copy(saved || {}), list = heroes(), ids = new Set(list.map(u => u.id)), assignments = {};
+    for (const [id, owner] of Object.entries(out.assignments || {})) if (ids.has(id)) assignments[id] = owner;
+    for (const u of list) if (!assignments[u.id] && ownerByKit[u.kit] && config.players.some(p => p.id === ownerByKit[u.kit])) assignments[u.id] = ownerByKit[u.kit];
+    out.assignments = assignments; return out;
+  }
   function setupSession() {
     if (authority) authority.close();
     clients = new Map();
@@ -362,7 +370,7 @@
       askRemainingMs: snapshot.ask ? Math.max(0, snapshot.ask.deadline - now) : null, newRoundSpends, choiceNo, openingChoice: !!choice && !state.combatStarted }); },
     restoreOnline(saved) { network = enabled = true; configured = false; config = copy(saved.config); ownerByKit = copy(saved.ownerByKit); playerId = saved.playerId; newRoundSpends = saved.newRoundSpends || null; choiceNo = saved.choiceNo || 0;
       restoredAsk = saved.session?.ask ? { ...copy(saved.session.ask), remainingMs: saved.askRemainingMs ?? 20000 } : null;
-      setupSession(); configured = true; executing++; try { session.restore(saved.session); } finally { executing--; } authority.broadcast(); refresh(); },
+      setupSession(); configured = true; executing++; try { session.restore(restorable(saved.session)); } finally { executing--; } authority.broadcast(); refresh(); },
     onPacket(fn) { packetListeners.add(fn); return () => packetListeners.delete(fn); },
     reason, beginRound, system, requestAsk, ownedChoice,
     isHost: () => !active() || playerId === gm(), hasAsk: () => !!choice || !!session?.snapshot().ask,
