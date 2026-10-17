@@ -10110,7 +10110,15 @@ function crushOnce(a, t, auto) {
   if (!a || !t) return lines;
   const atk = effectiveAtk(a, state.units);
   a.zone = Number(t.zone);
-  hitOne2(a, t, { element: "physical", mult: 1.5, baseBreak: 3, atk, flags: { action: true } }, lines);
+  // 已经抓在目标身上（每回合自动再碾）：人就挂在它身上，打飞行目标不用再付「近程打飞行」的附赠行动。
+  // 以前照收，可抓住期间夕夏拿不到附赠行动 → 每回合 0 伤害、目标不死不失衡、永远松不开手
+  const out = hitOne2(a, t, { element: "physical", mult: 1.5, baseBreak: 3, atk, flags: auto ? { action: true, flyFree: true } : { action: true } }, lines);
+  if (!out || !out.res || out.res.ok === false) {
+    // 没碾到（附赠行动不够打飞行目标、目标打不到……）：抓不住，已经抓着的也松手，免得卡死
+    if (a.resources) a.resources.crushId = null;
+    lines.push(`${a.name} 没能碾到 ${t.name}，${auto ? "松开了手" : "没能抓住"}。`);
+    return lines;
+  }
   if (auto) addFuel(1, "狂怒碾压", lines);   // 启动引擎+：狂怒碾压每个使用的回合 +1 燃油
   const dead = t.dead || (t.isPlayer && t.dying);
   if (dead) {
