@@ -368,6 +368,11 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **联机玩家可以正常离开房间了**（online-game.js · `leave` / `save`；online-ui.js · `autoResume` / `addResumeButton`；tests/online-session-ui.test.js）
+  - 以前玩家点「离开房间」，页面刷新后「刷新自动回房」又把人拉回房间，等于离不开。现在玩家自己离开的会记一笔，刷新后不再自动回去；想回去可以在标题页「联机玩法」里点「回到房间」（首页的「联机玩法」按钮上会提示上次的房间码）。
+  - 顺手修了「回到房间」按钮一直不出来的问题：game.html 给 `getElementById` 垫了一层，找不到的 id 会造一个隐藏的空 div，按钮代码以为「已经有了」就不加了。主持人那边的「回到房间」也一样能看到了。
+  - 主持人「离开并保存」不变。
+
 - **主持人可以定沙鱼富集与否**（desert.js · `desertSetEnriched` / `unmakeEnriched`；gm-commands.js、online-gm-ui.js；battle-templates.js、trpg-tasks.js、trpg-ui.js；run.js、battle-commands.js；tests/desert-enrich-gm.test.js、tests/online-gm-ui.test.js）
   - 以前富集只能靠开战时随机（每只沙鱼 10%，沙暴 25%），主持人没法指定。现在三种：**随机**（照旧）/ **富集** / **普通**（不富集），只有三种沙鱼有这一项。
   - 能设的地方：
