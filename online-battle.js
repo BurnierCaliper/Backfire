@@ -163,8 +163,7 @@
         if (!tw.length) { if (tt) tt.remove(); }
         else {
           if (!tt) { tt = make("div", "ztower"); z.appendChild(tt); }
-          const when = (t) => t.left > 0 ? `${t.left} 回合后` : `这回合${t.phase === "player" ? "我方" : "敌人"}回合开始时`;
-          tt.innerHTML = tw.map(t => `<span class="${t.have < t.need ? "short" : "ok"}" title="${esc(`${t.by || ""} 的${t.name || ""}：${when(t)}落下${t.delayed ? "（首领失衡，会推迟一回合）" : ""}。至少 ${t.need} 人站在这个区里踩住${t.soak > 0 ? `，每人挨 ${t.soak}` : ""}；没人踩住${t.fail != null ? (t.fail > 0 ? `，我方全员各挨 ${t.fail}` : "，我方全员挨巨额伤害") : "，会触发严重惩罚"}。不能格挡。`)}">${esc(t.name || "")} ${t.left > 0 ? t.left : "!"} · ${t.have}/${t.need} 人</span>`).join("");
+          tt.innerHTML = UnitCard.towerHtml(tw);   // 「踩塔 · 还有 N 回合 · 1/1 人」（unit-card.js）
         }
         z.classList.toggle("is-move-target", !!(zoneOpts && zoneOpts.has(Number(z.dataset.num))));
         setPickBadge(z, zoneNo ? zoneNo.get(String(z.dataset.num)) : 0);
