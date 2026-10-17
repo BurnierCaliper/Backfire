@@ -14,6 +14,14 @@
     const clean = v.normalize("NFKC").replace(/[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2060-\u206f]/g, "");
     return sensitive.test(clean) ? null : clean.slice(0, limit);
   }
+  // 人打的字（小队聊天、私信）：拦后台 / 令牌这类技术字段，和明说的「坚毅生命」/ 单独成词的 SHP（坚毅数值绝不给玩家看）。
+  // 以前和规则数据用同一个过滤，带「坚毅」两个字、甚至 "this hp"（s h p）的整条消息都会消失（报告「中」）
+  const sensitiveTech = /后台|backstage|gm[_ -]?(?:secret|note|data)|private[_ -]?(?:note|history)|reconnect[_ -]?token|坚[\s\u200b-\u200f]*毅[\s\u200b-\u200f]*生命|毅[\s\u200b-\u200f]*生命|(?<![a-z])s[\s._-]*h[\s._-]*p(?![a-z])/i;
+  function chatText(v, limit) {
+    if (typeof v !== "string") return null;
+    const clean = v.normalize("NFKC").replace(/[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2060-\u206f]/g, "");
+    return sensitiveTech.test(clean) ? null : clean.slice(0, limit);
+  }
   function id(v) { return typeof v === "string" && /^[\w:./-]{1,160}$/.test(v) && !sensitive.test(v) && !["__proto__", "prototype", "constructor"].includes(v) ? v : null; }
   function number(v) { return typeof v === "number" && Number.isFinite(v) ? v : undefined; }
   function copyFields(src, dst, strings = [], numbers = [], booleans = []) {
@@ -181,7 +189,8 @@
       else if (number(v) !== undefined) dto[key] = Math.max(-999, Math.min(999, v));
       else if (hudEnums[key] && hudEnums[key].includes(v)) dto[key] = v;
       else if (key === "bondName") { const t = text(v, 40); if (t !== null) dto[key] = t; }
-      else if (key === "ammo") dto.ammo = arr(v).slice(0, 6).filter(obj).map(a => ({ c: get(a, "c") === "blue" ? "blue" : "red", seen: get(a, "seen") === true }));
+      // 龙哥的胶囊弹：没窥探到的那几发不发颜色（以前照发，所有玩家都能从包里看出弹序）
+      else if (key === "ammo") dto.ammo = arr(v).slice(0, 6).filter(obj).map(a => get(a, "seen") === true ? { c: get(a, "c") === "blue" ? "blue" : "red", seen: true } : { c: "unknown", seen: false });
     }
     return dto;
   }
@@ -287,7 +296,7 @@
       if (!obj(message)) return [];
       const from = id(get(message, "from")), to = id(get(message, "to"));
       if (!from || !to || !(from === gmId && (to === "all" || to === recipientId) || from === recipientId && to === gmId)) return [];
-      const body = text(get(message, "text"), 2000); if (body === null) return [];
+      const body = chatText(get(message, "text"), 2000); if (body === null) return [];
       const out = identifiers(message, { from, to, text: body }, ["id"]);
       copyFields(message, out, [], ["at"], []); out.private = to !== "all";
       return [out];
@@ -357,7 +366,12 @@
       return [out];
     });
   }
-  const pickKeys = new Set(["partner", "target", "target1", "target2", "ally", "dest", "prop", "layer", "status", "mode", "carry", "burn", "rangeMode", "carryMode", "blade", "again", "item", "index"]);
+  // 技能分步的 key（app.js · skillFlowSteps）：不在这里的分步，联机玩家收不到也答不了（报告 H13：川川电鞭 / 铁壁、取回武器、推人、
+  // Helumica 扫描后的互动 / 危墙倒向 / 干涉场……以前都缺）。新加分步 key 时要一起加进来（tests/online-view.test.js 会对照检查）
+  const pickKeys = new Set(["partner", "target", "target1", "target2", "ally", "dest", "prop", "layer", "status", "mode", "carry", "burn", "rangeMode", "carryMode", "blade", "again", "item", "index",
+    "act", "boost", "fall", "pull", "push", "shield", "sign", "swapTarget", "weapon",
+    // 询问选项的 extra：以身作盾（{ ironwall: true }）、龙哥手杖协助顺手治疗谁（{ mode: "cane", heal: 单位 }）
+    "ironwall", "heal"]);
   function choiceValue(value) {
     if (value === null || typeof value === "boolean" || number(value) !== undefined) return value;
     if (typeof value === "string") return text(value, 160) === value ? value : undefined;
@@ -378,6 +392,8 @@
     const out = identifiers(command, { type: get(command, "type") }, ["actor", "skill", "target", "item"]);
     for (const key of ["target", "dest"]) if (get(command, key) === null) out[key] = null;
     if (number(get(command, "dest")) !== undefined) out.dest = get(command, "dest");
+    // 维修工具包：dest 是要修的武器 kit（字符串）。以前只放行数字，玩家战斗中用不了维修工具包（报告「中」）
+    else if (typeof get(command, "dest") === "string" && /^[A-Za-z0-9_]{1,40}$/.test(get(command, "dest"))) out.dest = get(command, "dest");
     if (own(command, "picks")) {
       const picks = choiceValue(get(command, "picks")); if (!obj(picks)) return null; out.picks = picks;
     }
@@ -440,7 +456,7 @@
     out.chat = arr(get(view, "chat")).slice(-300).flatMap(m => {
       if (get(m, "secret")) return [];   // 主持人暗骰：只在房主本机
       const isTitle = !!get(m, "title");
-      const t = text(get(m, "text"), 500); if (t === null) return [];
+      const t = chatText(get(m, "text"), 500); if (t === null) return [];
       const dto = identifiers(m, copyFields(m, { text: t }, ["operatorName", "name"], ["at"], []), ["id", "operatorId"]);
       const roll = get(m, "roll");
       if (roll) { dto.roll = true; const tier = obj(roll) ? get(roll, "tier") : null; if (["crit", "extreme", "hard", "normal", "easy", "fail"].includes(tier)) dto.tier = tier; }
@@ -673,7 +689,7 @@
     });
     return out;
   }
-  const api = { SCHEMA, projectPacket, projectQuests, projectPurse, projectShop, projectClinic, projectRest, projectCamp, projectSheets, projectBagDetail, projectUnit, projectState, projectTape, projectMessages, projectLogs, projectView, projectActionMenu, safeText: text, safeError };
+  const api = { SCHEMA, pickKeys, projectHud, projectPacket, projectQuests, projectPurse, projectShop, projectClinic, projectRest, projectCamp, projectSheets, projectBagDetail, projectUnit, projectState, projectTape, projectMessages, projectLogs, projectView, projectActionMenu, safeText: text, safeError };
   root.OnlineView = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof globalThis !== "undefined" ? globalThis : window);

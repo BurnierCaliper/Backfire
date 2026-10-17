@@ -110,9 +110,11 @@ test("D3 display: player picks skills from the skill bar and targets on the fiel
   await page.keyboard.press("Escape");
   await page.waitForFunction(() => !document.querySelector(".unit-wrap.is-targetable"));
   // 结束行动：还有行动点没用时先确认（PR #40）
-  let asked = "";
-  page.once("dialog", d => { asked = d.message(); d.accept(); });
+  // 游戏内确认框（8c5cd5c 起不再用浏览器原生 confirm()）
   await page.click(".ol-battle .endturn");
+  await page.waitForSelector('[data-confirm="yes"]');
+  const asked = await page.evaluate(() => document.querySelector('[data-confirm="yes"]').closest(".ol-card").innerText);
+  await page.click('[data-confirm="yes"]');
   await page.waitForFunction(() => fixture.calls.some(c => c.kind === "submit" && c.args.type === "endTurn"));
   assert.match(asked, /确定结束行动/);
   assert.equal((await submits()).length, 4);

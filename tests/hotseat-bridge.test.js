@@ -195,6 +195,19 @@ test("owned opening choices accept only the owner and an exact offered JSON toke
   assert.equal(f.send("p1", cmd).ok, false, "a consumed opening choice cannot be applied twice");
 });
 
+test("owned choice for a unit missing from the order roster (downed) falls back to its assigned owner instead of hanging", async () => {
+  const f = bridge(), [unit] = f.units, { c } = f;
+  // 倒地起不来的单位不在顺序名单里：ownerOf 是 null（以前画面一算就抛错，整局卡死）
+  const ghost = { id: unit.id + "-downed", kit: unit.kit, name: unit.name };
+  const pending = c.HotseatGame.ownedChoice(ghost, "解开保险", [{ label: "手杖", value: "cane" }, { label: "霰弹枪", value: "gun" }]);
+  c.HotseatGame.switchPlayer("p1");
+  const ask = f.view().ask;
+  assert.ok(ask, "画面算得出来");
+  assert.equal(ask.eligible, true, "交给这名角色分配到的人");
+  assert.equal(f.send("p1", { type: "answer", askId: ask.id, helper: ghost.id, extra: { index: 1 } }).ok, true);
+  assert.equal(await pending, "gun");
+});
+
 test("last unfinished unit removal exposes a round transition and schedules the game coordinator", () => {
   const f = bridge(), [, last] = f.units, { c } = f;
   f.begin(); f.flush();

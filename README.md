@@ -368,6 +368,14 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **第二轮查 bug：跑团开场前先修的几条**（game.js · `packHero` / `applyCampaignToField` / `simulate`；hotseat-game.js · `ownedChoice`；online-view.js · `pickKeys` / `actionCommand` / `projectHud` / `chatText`；tests/bugfix-round2.test.js、tests/hotseat-bridge.test.js、tests/online-view.test.js）
+  - **跑团专长会存下来了**（H3）：专长、兼修和没分配的专长点以前不进队伍记忆，下一场开打或读档就全丢。旧存档里已经丢掉的，按等级算该有几次专长、补回成没分配的专长点，再选一次就行。
+  - **战斗预演不再动队伍档案**（H11）：以前格挡弹窗一打开就真扣武器耐久（悬停一次扣一次），点「挺身」预演就把短休次数用掉；现在预演完会把耐久、短休 / 长休次数、钱包、工坊都还原。
+  - **联机玩家的技能分步都能选了**（H13）：川川电鞭 / 铁壁、Helumica 扫描后的互动、取回武器、推人等十来个分步以前玩家那边收不到。
+  - **热座 / 联机不再卡死**（H14）：「本人分步选择」问的单位倒地起不来时，以前找不到该问谁、整局卡住；现在按武器归属问，再找不到就问主持人。
+  - **联机四条小毛病**：玩家看得到以身作盾和龙哥手杖的协助选项了；战斗中能用维修工具包了；龙哥没窥探到的子弹颜色不再发给玩家；聊天里带「坚毅」两个字或 "this hp" 的消息不再整条消失（明说「坚毅生命」、SHP 加数字仍会拦，坚毅数值照旧不给玩家看）。
+  - 其余没修的记在 [docs/bug-backlog.md](docs/bug-backlog.md)。**跑团当天别在同一页开单局 / 每日挑战 / 训练场**（H1 / H15 会改坏跑团存档），要开先刷新页面。
+
 - **跑团任务：剧情任务、奖励只按配置给**（trpg-tasks.js · `trpgTaskTemplate` / `trpgTaskTemplateRoute`；trpg-ui.js 任务编辑；tests/quest-log.test.js、tests/escort-tasks.test.js、tests/online-session-ui.test.js）
   - 跑团的任务更像剧情推进，不是接一单活。新建任务现在**只有标题和描述**：
     - **没有路线**：不填路线就是剧情任务，玩家只看到标题、描述（和配了的奖励），主持人在合适的时候「结算任务」或「判定失败」；要按站推进时再在编辑里加站，清剿 / 护送这些类型可以「按模板填路线」（单局模板的三站和天数）。

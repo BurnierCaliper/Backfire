@@ -423,8 +423,10 @@
 
   function simulate(thunk, diceMode) {
     const saved = saveState();
-    // 「长休一次」的职责技能（全队集结）次数记在队伍档案里，不在 state：预演完也要还原，不然悬停一下就用掉了
-    const restOnce = typeof LEDGER !== "undefined" ? JSON.stringify(LEDGER.restOnce || {}) : null;
+    // 队伍档案（LEDGER）里战斗中会动的东西不在 state 里：预演完也要还原，不然悬停一下就真的用掉了——
+    // 「长休一次」/「每次短休 N 次」的次数（全队集结、以身作盾、挺身……）、武器耐久（格挡弹窗的预演会扣）、伤势、钱包、积分（报告 H11）
+    const LEDGER_SIM_KEYS = ["restOnce", "shortOnce", "dur", "heroes", "shortUsed", "purse", "workshop"];
+    const ledgerSnap = typeof LEDGER !== "undefined" ? LEDGER_SIM_KEYS.map(k => [k, JSON.stringify(LEDGER[k] == null ? null : LEDGER[k])]) : null;
     const rnd = Math.random;
     const st = window.setTimeout;
     const outerTape = G.tape;
@@ -450,7 +452,7 @@
     G.sim = false;
     G.tape = outerTape;
     restoreState(saved);
-    if (restOnce != null && JSON.stringify(LEDGER.restOnce || {}) !== restOnce) LEDGER.restOnce = JSON.parse(restOnce);
+    if (ledgerSnap) ledgerSnap.forEach(([k, v]) => { if (JSON.stringify(LEDGER[k] == null ? null : LEDGER[k]) !== v) LEDGER[k] = JSON.parse(v); });
     return { before, after, tape, err };
   }
 
@@ -3493,6 +3495,10 @@
       attrPoints: Number(u.attrPoints) || 0,
       attrPicks: (u.attrPicks || []).slice(),
       cyberPlan: u.cyberPlan ? JSON.parse(JSON.stringify(u.cyberPlan)) : null,   // 义体改造方案（跑团诊所，trpg.js · trpgModifyHero）
+      // 专长（跑团 trpg.js · trpgPickFeat）：选好的、兼修的、还没分配的点（以前没存，下一场开打 / 读档就丢了）
+      feats: (u.feats || []).slice(),
+      featFull: (u.featFull || []).slice(),
+      featPoints: Number(u.featPoints) || 0,
       notes: u.levelNotes ? JSON.parse(JSON.stringify(u.levelNotes)) : null
     };
   }
@@ -3541,6 +3547,15 @@
       if (s.attrPoints != null) u.attrPoints = s.attrPoints;
       if (s.attrPicks) u.attrPicks = s.attrPicks.slice();
       if (s.notes) u.levelNotes = s.notes;
+      if (Array.isArray(s.feats)) u.feats = s.feats.slice();
+      if (Array.isArray(s.featFull)) u.featFull = s.featFull.slice();
+      if (s.featPoints != null) u.featPoints = Number(s.featPoints) || 0;
+      // 旧档：专长以前没存进记忆，丢了的按等级补回成「可选的专长点」（7 / 11 / 13 / 16 级各一项），让主持人重新选
+      if (typeof FEAT_LEVELS !== "undefined" && u.level) {
+        const should = FEAT_LEVELS.filter(L => L <= u.level).length;
+        const have = (u.feats || []).length + (Number(u.featPoints) || 0);
+        if (should > have) u.featPoints = (Number(u.featPoints) || 0) + should - have;
+      }
       if (s.cyberPlan) {
         // 义体改造：按方案重建血量层（applyLevelStats 只会重建已经有方案的单位，先摆一层肉体给它换）
         u.cyberPlan = JSON.parse(JSON.stringify(s.cyberPlan));

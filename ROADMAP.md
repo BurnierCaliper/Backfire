@@ -2,6 +2,7 @@
 
 给新加入的合作者看的：项目现在到哪了、怎么上手、接下来做什么。
 规则细节和每一次改动的记录在 [README.md](README.md)，暂时不做的想法在 [IDEAS.md](IDEAS.md)。
+已知还没修的 bug 在 [docs/bug-backlog.md](docs/bug-backlog.md)（第二轮查 bug 的报告，按高 / 中 / 低分好了）。
 
 ---
 
