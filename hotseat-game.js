@@ -28,8 +28,27 @@
   function restorable(saved) {
     const out = copy(saved || {}), list = heroes(), ids = new Set(list.map(u => u.id)), assignments = {};
     for (const [id, owner] of Object.entries(out.assignments || {})) if (ids.has(id)) assignments[id] = owner;
-    for (const u of list) if (!assignments[u.id] && ownerByKit[u.kit] && config.players.some(p => p.id === ownerByKit[u.kit])) assignments[u.id] = ownerByKit[u.kit];
+    const byKit = kitAssignments(); for (const u of list) if (!assignments[u.id] && byKit[u.id]) assignments[u.id] = byKit[u.id];
     out.assignments = assignments; return out;
+  }
+  // 场上按职业（kit）该归谁：和恢复存档时（restorable）用同一份 ownerByKit，两处结论一致
+  function kitAssignments() {
+    const out = {};
+    for (const u of heroes()) if (ownerByKit[u.kit] && config.players.some(p => p.id === ownerByKit[u.kit])) out[u.id] = ownerByKit[u.kit];
+    return out;
+  }
+  // 单局战斗外的查询 / 开战会重摆队伍（rogue.js · withParty → BattleSim.setup），单位 id 全换了，
+  // 会话里按 id 记的分配却还是旧的 → 玩家操作自己角色时被判「不是你的角色」。开战布好场后（还没开打）按 kit 重新对齐。
+  // 战斗外不要每次都对齐：发视图本身就会 withParty 重摆，对齐→广播→重摆会无限循环；战斗外的单局操作按 kit 判断，不看这份分配
+  function syncAssignments() {
+    if (!active() || !session) return false;
+    const snap = session.snapshot();
+    if (!["setup", "ended"].includes(snap.phase)) return false;
+    const want = kitAssignments(), held = snap.assignments || {};
+    const keys = o => Object.keys(o).sort().map(k => k + "=" + o[k]).join("|");
+    if (keys(want) === keys(held)) return false;
+    executing++; try { session.setAssignments(want); } finally { executing--; }
+    authority.broadcast(); refresh(); return true;
   }
   function setupSession() {
     if (authority) authority.close();
@@ -347,7 +366,7 @@
   if (root.addEventListener) root.addEventListener("error", event => {
     if (active() && event.error?.code === "HOTSEAT_REJECT") { notice = event.error.message; notify(); event.preventDefault(); }
   });
-  root.HotseatGame = { getView, getViewFor, configure, submit, isActive: active, isRequested: () => enabled && !state.solo, checkSpec, rollSpec,
+  root.HotseatGame = { getView, getViewFor, syncAssignments, assignments: () => (active() && session ? copy(session.snapshot().assignments || {}) : {}), configure, submit, isActive: active, isRequested: () => enabled && !state.solo, checkSpec, rollSpec,
     enableOnline(value) { network = true; enabled = true; if (!configured) playerId = value.players.find(p => p.gm).id; return configure(value); },
     isNetwork: () => network,
     receiveFrom(id, cmd) { return this.withOperator(id, () => submit(cmd)); },

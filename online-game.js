@@ -239,8 +239,13 @@
         HotseatGame.system({ type: "screen", action: "show", name: saved.screen || (rogue() ? "run" : "trpg") });
         // 单局战斗打到一半刷新：结算面板的「继续」重新接回单局
         if (rogue() && Screens.is("battle") && RunFlow.battleSpecLite()) GAME.resumeRogueBattle(RunFlow.battleSpecLite(), RunFlow.battleEnd);
+        // 单局在战斗外恢复：存档里可能还带着上一场战斗的状态（combatStarted / 已结束），
+        // 这时接着跑战斗流程会判「敌人全灭」，弹出过期的「胜利 · 第1回合结束」结算面板。战斗外不接战斗流程，面板也收起
+        const outOfBattle = rogue() && !Screens.is("battle");
+        if (outOfBattle) { const panel = root.document && document.getElementById("g-result"); if (panel) panel.classList.remove("show");
+          const reopen = root.document && document.getElementById("g-reopen"); if (reopen) reopen.classList.remove("show"); }
         restoring = false; await ready(); publish();
-        (saved.hotseat?.openingChoice && !state.combatStarted ? GAME.startOrEnd() : GAME.resumeOnline()).catch(reportError);
+        if (!outOfBattle) (saved.hotseat?.openingChoice && !state.combatStarted ? GAME.startOrEnd() : GAME.resumeOnline()).catch(reportError);
       } else { restoring = false; return join({ ...c, name: saved.identity.name, resumeToken: c.token }); }
     } finally { restoring = false; }
     return getView();
@@ -553,7 +558,7 @@
       const want = OnlineRogue.assignmentsFor(state.units.filter(u => u.isPlayer && !u.weaponOf));
       const view = HotseatGame.isActive() ? HotseatGame.getView() : null;
       const same = view && view.heroes.every(h => (want[h.id] || identity.id) === h.owner) && view.players.map(p => p.id).join("|") === roster().map(p => p.id).join("|");
-      if (same) return;
+      if (same) { if (OnlineRogue.inBattle()) HotseatGame.syncAssignments(); return; }
       try { setupOperators(want); } catch (e) { notice = e.message; }
     },
     /** 接管：玩家掉线时，房主把他的角色（连同武器人）接过来自己操作。战斗中也可以；
