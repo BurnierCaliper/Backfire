@@ -1079,6 +1079,8 @@ test("联机：跑团诊所——主持人开放诊所，玩家申请义体改�
   assert.equal(await bob.evaluate(k => (OnlineGame.getView().packet?.clinic?.heroes || []).some(h => h.kit === k), aKit), false, "Bob 看不到 Alice 角色的诊所信息");
   await alice.fill(`.ol-trpg-clinic [data-cyber-box="${aKit}"] [data-cy-layer="armor"]`, "2");
   await alice.click(`.ol-trpg-clinic [data-online="trpgCyber"][data-kit="${aKit}"]`);
+  // 游戏内确认框（8c5cd5c 起不再用浏览器原生 confirm()）
+  await alice.click('[data-confirm="yes"]');
   await host.waitForSelector("[data-cyd]");
   assert.match(await host.locator("#tr-panel").innerText(), /玩家的改造申请[\s\S]*400 奎支/);
   await alice.waitForFunction(() => /等主持人同意/.test(document.querySelector(".ol-trpg-clinic")?.innerText || ""));

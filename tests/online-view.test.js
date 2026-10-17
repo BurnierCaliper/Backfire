@@ -310,3 +310,44 @@ test("field choice asks keep the field flag and unit targets for the owner only"
   const stranger = V.projectPacket(source, { recipientId: "p3", gmId: "host" });
   assert.equal(stranger.view.ask.field, true); assert.deepEqual(stranger.view.ask.options, []);
 });
+
+test("H13：技能分步的每个 key 都在联机白名单里（不然联机玩家收不到、答不了那一步）", () => {
+  const fs = require("node:fs"), path = require("node:path");
+  const OV = require("../online-view.js");
+  const keys = new Set();
+  for (const file of ["app.js", "feats.js", "items.js"]) {
+    const src = fs.readFileSync(path.join(__dirname, "..", file), "utf8");
+    for (const m of src.matchAll(/key: "([A-Za-z0-9_]+)",[^}]{0,80}type: "(choice|unit|zone)"/g)) keys.add(m[1]);
+  }
+  assert.ok(keys.size >= 15, [...keys].join(","));
+  const missing = [...keys].filter(k => !OV.pickKeys.has(k));
+  assert.deepEqual(missing, [], "缺：" + missing.join("、"));
+  // 新加的 key 照样能投影出去
+  const menu = OV.projectActionMenu({ actor: "u1", skill: "chuan_whip", choices: { kind: "choice", key: "pull", title: "拉过去吗", options: [{ value: true, label: "拉" }, { value: false, label: "不拉" }] } });
+  assert.equal(menu.choices.key, "pull");
+  assert.equal(menu.choices.options.length, 2);
+});
+
+// 报告「中」联机四条：龙哥弹序、维修工具包、询问选项的 extra、聊天过滤
+test("Longge's unseen capsule rounds go out as unknown; only peeked rounds keep their color", () => {
+  const hud = V.projectHud({ kit: "longge", ammo: [{ c: "blue", seen: true }, { c: "red", seen: false }, { c: "blue" }] });
+  assert.deepEqual(hud.ammo, [{ c: "blue", seen: true }, { c: "unknown", seen: false }, { c: "unknown", seen: false }]);
+});
+
+test("repair kit command keeps its weapon-kit dest; unsafe string dests are still dropped", () => {
+  const cmd = { type: "useItem", actor: "u1", item: "repairkit", target: "u1", dest: "kolt" };
+  assert.deepEqual(V.projectActionMenu({ actor: "u1", command: cmd }).command, cmd);
+  assert.equal(V.projectActionMenu({ actor: "u1", command: { ...cmd, dest: "a b<script>" } }).command.dest, undefined);
+});
+
+test("ask options for 以身作盾 / 龙哥手杖 keep their ironwall / heal extras", () => {
+  const menu = V.projectActionMenu({ actor: "u1", choices: { kind: "choice", key: "mode", title: "协助", options: [
+    { value: { ironwall: true }, label: "以身作盾" }, { value: { mode: "cane", heal: "u2" }, label: "手杖协助" }] } });
+  assert.deepEqual(menu.choices.options.map(o => o.value), [{ ironwall: true }, { mode: "cane", heal: "u2" }]);
+});
+
+test("chat keeps ordinary words like 坚毅 / 'this hp', but still drops hidden-life numbers and backstage words", () => {
+  const msg = t => ({ from: "host", to: "p1", text: t });
+  const out = V.projectMessages([msg("他很坚毅!"), msg("this hp bar is low"), msg("push people"), msg("shp:30"), msg("s h p 3"), msg("坚毅生命还剩一半"), msg("看后台")], player);
+  assert.deepEqual(out.map(m => m.text), ["他很坚毅!", "this hp bar is low", "push people"]);
+});

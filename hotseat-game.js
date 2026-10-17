@@ -75,7 +75,7 @@
     }
     // field：有选项对应战场上的单位 → 回答的人在战场上点，不弹整屏卡片
     if (choice) base.ask = { id: choice.id, kind: "choice", title: choice.title, deadline: null, field: choice.options.some(o => !!o.target),
-      eligible: id === choice.owner, declined: false, waitingNames: [config.players.find(p => p.id === choice.owner).name],
+      eligible: id === choice.owner, declined: false, waitingNames: [(config.players.find(p => p.id === choice.owner) || {}).name || "主持人"],
       options: id === choice.owner ? choice.options : [] };
     return base;
   }
@@ -204,7 +204,9 @@
   }
   function ownedChoice(unit, title, options) {
     return new Promise(resolve => {
-      choice = { id: "choice-" + (++choiceNo), title, owner: session.ownerOf(unit.id),
+      // 问的单位倒地 / 不在顺序名单里时 ownerOf 是 null：交给按角色分配的人，再不行交给主持人（以前 owner 是 null，画面一算就出错，整局卡死）
+      const owner = session.ownerOf(unit.id) || ownerByKit[unit.weaponOf || unit.kit] || gm();
+      choice = { id: "choice-" + (++choiceNo), title, owner,
         options: options.map((o, index) => Object.assign({ helper: unit.id, label: o.label, sub: o.sub || "", extra: { index } }, choiceTarget(o) ? { target: choiceTarget(o) } : {})),
         finish: index => resolve(options[index].value) };
       authority.broadcast(); refresh();
