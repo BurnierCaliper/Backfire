@@ -126,7 +126,19 @@
     function renderAsk() {
       const ask = view.ask;
       reaction.hidden = !ask;
+      reaction.classList.remove("hs-ask-mini");
       if (!ask) { lastMarkup.ask = ""; return; }
+      // 战场点选的规则询问（柯尔特更换刀头、赫米卡环境扫描……）：
+      // 联机玩家端在战斗提示栏 / 战场上回答，不画整屏卡片；不用回答的人只看到一条小提示，不挡画面
+      if (ask.kind === "choice" && ask.field) {
+        const onlineField = typeof document !== "undefined" && document.body.classList.contains("online-player") && typeof window !== "undefined" && !!window.OnlineBattle;
+        if (ask.eligible && onlineField) { reaction.hidden = true; lastMarkup.ask = ""; return; }
+        if (!ask.eligible) {
+          reaction.classList.add("hs-ask-mini");
+          html(reaction, `<div class="hs-ask-note" role="status">${esc(ask.title || "选择")} · 等待 ${esc((ask.waitingNames || []).join("、") || "玩家")} 在战场上选择</div>`, "ask");
+          return;
+        }
+      }
       const options = ask.eligible && !ask.declined ? ask.options || [] : [];
       const waiting = (ask.waitingNames || []).join("、");
       const choice = ask.kind === "choice", canDecline = ask.allowDecline == null ? !choice : !!ask.allowDecline;

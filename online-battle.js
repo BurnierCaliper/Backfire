@@ -237,9 +237,9 @@
       if (m && ui.armed && m.kind !== "skill") {
         const extra = m.kind === "choice" ? (m.options || []).map((o, i) => `<button type="button" class="g-btn small" data-ob-opt="${i}"${o.disabled || ui.busy ? " disabled" : ""}>${esc(o.label)}</button>`).join("")
           : (m.options || []).map((o, i) => o.value == null ? `<button type="button" class="g-btn small" data-ob-opt="${i}"${ui.busy ? " disabled" : ""}>${esc(o.label)}</button>` : "").join("");
-        const what = m.kind === "unit" ? "点战场上亮起的单位" : m.kind === "zone" ? "点亮起的区域" : "选一项";
+        const what = ui.rule && m.kind === "unit" ? "点战场上亮起的单位，或者" : m.kind === "unit" ? "点战场上亮起的单位" : m.kind === "zone" ? "点亮起的区域" : "选一项";
         const empty = (m.kind === "unit" || m.kind === "zone") && !(m.options || []).some(o => o.value != null && !o.disabled) ? `<span style="color:var(--foe)">没有能选的${m.kind === "zone" ? "区域" : "目标"}</span>` : "";
-        hint = `<b>${esc(m.title || "")}</b>　${what}${empty ? "　" + empty : ""}　${extra}<button type="button" class="g-btn small" data-ob="cancel">取消（Esc）</button>`;
+        hint = `<b>${esc(m.title || "")}</b>　${what}${empty ? "　" + empty : ""}　${extra}${ui.rule ? "" : '<button type="button" class="g-btn small" data-ob="cancel">取消（Esc）</button>'}`;
       }
       const h = hud.querySelector(".hint");
       if (h.dataset.html !== hint) { h.innerHTML = hint; h.dataset.html = hint; }

@@ -887,6 +887,14 @@
       if (fieldEl && fieldEl.isConnected && fieldEl.scrollTop !== fieldTop) fieldEl.scrollTop = fieldTop;
     }
     const myUnits = () => (hs().units || []).filter(u => u.owner === own()).map(u => u.id);
+    /** 战场点选的规则询问（柯尔特更换刀头、赫米卡环境扫描……）：轮到自己回答时，敌人在战场上亮起、点它；其余选项放提示栏按钮 */
+    function fieldAsk() { const a = hs().ask; return view.screen === "battle" && a && a.kind === "choice" && a.field && a.eligible && !a.declined && (a.options || []).length ? a : null; }
+    async function answerField(index) {
+      const a = fieldAsk(), o = a && a.options[index]; if (!o || disabled()) return;
+      const command = { type: "answer", askId: a.id, helper: o.helper || null };
+      if (Object.prototype.hasOwnProperty.call(o, "extra")) command.extra = copy(o.extra);
+      await call(() => api.submit(command));
+    }
     const isMyTurn = () => view.screen === "battle" && hs().phase === "acting" && myUnits().includes(hs().currentUnitId);
     function battleUi() {
       const data = displayState || view.state || {}, cur = hs().currentUnitId, acting = view.screen === "battle" && hs().phase === "acting";
@@ -899,6 +907,12 @@
       else if (!mine.includes(cur)) hint = `等待 ${curUnit ? curUnit.name : "队友"}${curUnit && hs().units ? `（${playerName((hs().units.find(u => u.id === cur) || {}).owner)}）` : ""} 行动。`;
       else if (!choices) hint = "正在取技能…";
       else hint = `${curUnit ? curUnit.name : ""}　选择技能（1–9）。悬停技能看说明，空格结束行动。`;
+      const field = fieldAsk();
+      if (field) {
+        // 有对应单位的选项 → value 是单位 id（战场上亮起、编号）；其余 value 为空 → 提示栏按钮
+        const menuOf = { kind: "unit", title: field.title || "选择", options: field.options.map(o => ({ label: o.label + (o.sub ? `（${o.sub}）` : ""), value: o.target || null })) };
+        return { mine, current: cur, acting, menu: menuOf, skills: [], armed: "__field", rule: true, hint: field.title || "", busy: disabled() };
+      }
       return { mine, current: cur, acting, menu: choices, skills: skillsFor === cur && acting ? skillOptions : [],
         armed: request && request.skill || "", hint, busy: disabled() };
     }
@@ -906,8 +920,10 @@
       if (battle || !global.OnlineBattle) return battle;
       battle = global.OnlineBattle.create({
         onSkill: id => { if (!isMyTurn() || disabled()) return; menu({ actor: hs().currentUnitId, skill: id }); },
-        onOption: index => { if (!disabled()) choose(index); },
+        onOption: index => { if (disabled()) return; if (fieldAsk()) { answerField(index); return; } choose(index); },
         onUnit: id => {
+          const field = fieldAsk();
+          if (field) { const i = field.options.findIndex(o => o.target && String(o.target) === String(id)); if (i >= 0) answerField(i); return; }
           const m = currentMenu?.choices; if (!m || disabled() || !request?.skill) return;
           let i = (m.options || []).findIndex(o => !o.disabled && String(o.value) === String(id));
           if (i < 0 && m.kind === "zone") {   // 区域选择时点到区里的单位，算点那个区
@@ -921,7 +937,7 @@
           const i = (m.options || []).findIndex(o => !o.disabled && Number(o.value) === Number(z));
           if (i >= 0) choose(i);
         },
-        onCancel: () => { if (request?.skill && !disabled()) menu({ actor: request.actor }); },
+        onCancel: () => { if (fieldAsk()) return; if (request?.skill && !disabled()) menu({ actor: request.actor }); },
         onEnd: async () => { if (!isMyTurn() || disabled()) return; const actor = hs().currentUnitId; if (!(await endTurnOk(actor))) return; if (await call(() => api.submit({ type: "endTurn", actor }))) { request = currentMenu = null; } }
       });
       return battle;

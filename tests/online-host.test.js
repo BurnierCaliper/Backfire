@@ -122,3 +122,14 @@ test("message IDs remain unique beyond 300 retained messages in one millisecond 
   assert.equal(JSON.parse(recovered.c.localStorage.getItem("backfire-online-v1")).messageNo, 303);
   assert.deepEqual([...initial.errors, ...live.errors, ...recovered.errors], []);
 });
+
+test("offline owner of a battlefield-pick choice (Kolt blade swap) falls back to the first option after the wait", async () => {
+  const f = await fixture(); f.offlinePlayer();
+  const foe = f.state.units.find(u => !u.isPlayer);
+  let answer;
+  f.c.HotseatGame.ownedChoice(f.actor, "更换刀头", [{ label: "不切换", value: { swap: false } }, { label: "切换并打", value: { swap: true, targetId: foe && foe.id } }]).then(value => { answer = value; });
+  assert.equal(f.c.HotseatGame.getView().ask.field, !!foe);
+  f.tick(); f.time(59999); f.tick(); await delay(0); assert.equal(answer, undefined);
+  f.time(2); f.tick(); await delay(0); assert.deepEqual(plain(answer), { swap: false }); assert.equal(f.c.HotseatGame.hasAsk(), false);
+  assert.deepEqual(f.errors, []);
+});

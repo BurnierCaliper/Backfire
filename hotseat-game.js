@@ -73,7 +73,8 @@
         chooserName: ask.chooserName || null, isChooser: !!ask.isChooser, raised: ask.raised || null,
         hands: ask.chooser ? ask.hands.map(h => { const o = labelOf(h); return { helper: h.unitId, label: o.label, sub: o.sub || "", operatorName: h.operatorName, extra: copy(h.extra || {}) }; }) : [] };
     }
-    if (choice) base.ask = { id: choice.id, kind: "choice", title: choice.title, deadline: null,
+    // field：有选项对应战场上的单位 → 回答的人在战场上点，不弹整屏卡片
+    if (choice) base.ask = { id: choice.id, kind: "choice", title: choice.title, deadline: null, field: choice.options.some(o => !!o.target),
       eligible: id === choice.owner, declined: false, waitingNames: [config.players.find(p => p.id === choice.owner).name],
       options: id === choice.owner ? choice.options : [] };
     return base;
@@ -196,10 +197,15 @@
     });
   }
   let choiceNo = 0;
+  /** 选项对应战场上的哪个单位（value 是单位 id，或 { targetId }）：联机玩家端可以直接在战场上点它 */
+  function choiceTarget(o) {
+    const v = o && o.value, id = v && typeof v === "object" ? v.targetId : v;
+    return typeof id === "string" && ((typeof state !== "undefined" && state.units) || []).some(u => u.id === id) ? id : null;
+  }
   function ownedChoice(unit, title, options) {
     return new Promise(resolve => {
       choice = { id: "choice-" + (++choiceNo), title, owner: session.ownerOf(unit.id),
-        options: options.map((o, index) => ({ helper: unit.id, label: o.label, sub: o.sub || "", extra: { index } })),
+        options: options.map((o, index) => Object.assign({ helper: unit.id, label: o.label, sub: o.sub || "", extra: { index } }, choiceTarget(o) ? { target: choiceTarget(o) } : {})),
         finish: index => resolve(options[index].value) };
       authority.broadcast(); refresh();
     });
