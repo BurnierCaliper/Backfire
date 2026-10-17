@@ -368,6 +368,12 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **单局 / 训练场不会再改坏跑团存档**（screens.js；trpg-ui.js · `TrpgFlow.leave` / `TrpgFlow.titleFromBattle`；game.js · `trainingActive`；tests/save-leak.test.js）
+  - **跑团战斗里点顶栏「标题」**（报告 H1）：以前直接回标题，跑团模式没关，之后同一页开的单局 / 每日挑战 / 训练场都按跑团规则走（坚毅数值外露、经验全队平分、探索专长可选、单局里冒出「探索环节」按钮，点了会把单局档案写进跑团空位）。现在和「回到探索环节」一样：战斗没打完先问一句，放弃这场（回到开战前的状态），再存好团、关掉跑团模式回标题。
+  - **回到标题就离开跑团**：不管从哪条路回到标题，跑团模式都会关掉并存好团（战斗打到一半的不存，空位里留开战前那份）。联机房间不受影响。
+  - **训练场不结算**（报告 H15）：训练场里撤退 / 全员倒地以前照常扣耐久、写队伍记忆，跑团没退出时连跑团空位一起改坏（等级、奎支被训练场的临时布置覆盖）。现在训练场的战斗结束只显示结果，不动任何存档。
+  - 上一条里「跑团当天别在同一页开单局 / 每日挑战 / 训练场」的提醒可以不用管了。
+
 - **第二轮查 bug：跑团开场前先修的几条**（game.js · `packHero` / `applyCampaignToField` / `simulate`；hotseat-game.js · `ownedChoice`；online-view.js · `pickKeys` / `actionCommand` / `projectHud` / `chatText`；tests/bugfix-round2.test.js、tests/hotseat-bridge.test.js、tests/online-view.test.js）
   - **跑团专长会存下来了**（H3）：专长、兼修和没分配的专长点以前不进队伍记忆，下一场开打或读档就全丢。旧存档里已经丢掉的，按等级算该有几次专长、补回成没分配的专长点，再选一次就行。
   - **战斗预演不再动队伍档案**（H11）：以前格挡弹窗一打开就真扣武器耐久（悬停一次扣一次），点「挺身」预演就把短休次数用掉；现在预演完会把耐久、短休 / 长休次数、钱包、工坊都还原。

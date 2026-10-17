@@ -1494,6 +1494,25 @@
     render();
   }
 
+  /** 离开跑团模式（存好这个团、关掉跑团规则）。战斗没打完时不存：空位里留的是开战前那份（toBattle 开战前存过），
+   *  免得把打到一半的血量、用掉的道具当成团的进度（报告 H1） */
+  function leaveTrpg() {
+    if (!TRPG.active) return false;
+    const midBattle = window.GAME && state.combatStarted && !GAME.ended && Screens.is("battle");
+    if (slot >= 0 && !midBattle) save();
+    TRPG.active = false; TRPG.taskBattle = null; slot = -1; undoStack = [];
+    document.body.classList.remove("trpg");
+    return true;
+  }
+  /** 跑团战斗里点顶栏「标题」：和「回到探索环节」一样先放弃 / 收好这场战斗，再存团、离开跑团模式（报告 H1：以前直接回标题，
+   *  TRPG.active 没清，之后同一页开的单局 / 每日挑战 / 训练场都按跑团规则走，还会写进跑团空位） */
+  function requestTitleFromBattle() {
+    if (window.GAME && GAME.depth > 0) return false;
+    if (state.combatStarted && !GAME.ended && !confirm("战斗还没结束。回到标题会放弃这场战斗（不结算，回到开战前的状态），团的进度照常保存。确定吗？")) return false;
+    uiCommand("backFromBattle");
+    uiCommand("title");
+    return true;
+  }
   function requestBackFromBattle() {
     if (window.GAME && GAME.depth > 0) return;
     if (state.combatStarted && !GAME.ended && !confirm("战斗还没结束。直接回到探索环节会放弃这场战斗（不结算，回到开战前的状态）。确定吗？")) return;
@@ -1516,7 +1535,7 @@
     delete(c) { trpgClearSlot(c.index); if (c.index === slot) { slot = -1; TRPG.active = false; document.body.classList.remove("trpg"); } renderSlots(); },
     import(c) { if (!trpgValidSlot(c.data)) throw new Error("Invalid TRPG save"); trpgWriteSlot(c.index, c.data); if (c.index === slot) { slot = -1; TRPG.active = false; document.body.classList.remove("trpg"); } renderSlots(); },
     slots: openSlots,
-    title() { if (TRPG.active && slot >= 0) save(); TRPG.active = false; slot = -1; document.body.classList.remove("trpg"); Screens.show("title"); },
+    title() { leaveTrpg(); Screens.show("title"); },
     toBattle,
     backFromBattle,
     clearLog() { log = []; saveLog(); renderLog(); }
@@ -1600,7 +1619,7 @@
       refresh: () => mapOptions()
     };
   }
-  window.TrpgFlow = { mapOptions, enter: index => uiCommand("enter", { index }), openSlots: () => uiCommand("slots"), toBattle: () => uiCommand("toBattle"), backFromBattle: requestBackFromBattle,
+  window.TrpgFlow = { leave: leaveTrpg, titleFromBattle: requestTitleFromBattle, mapOptions, enter: index => uiCommand("enter", { index }), openSlots: () => uiCommand("slots"), toBattle: () => uiCommand("toBattle"), backFromBattle: requestBackFromBattle,
     refresh: render,
     onlineCheckpoint: () => JSON.parse(JSON.stringify({ slot, slotName, log, tab, commandLevel })),
     restoreOnline(saved) { slot = saved.slot; slotName = saved.slotName; log = saved.log || []; tab = saved.tab || "party"; commandLevel = saved.commandLevel || 1; TRPG.active = true; document.body.classList.add("trpg"); }
