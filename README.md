@@ -368,6 +368,14 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **主持人可以定沙鱼富集与否**（desert.js · `desertSetEnriched` / `unmakeEnriched`；gm-commands.js、online-gm-ui.js；battle-templates.js、trpg-tasks.js、trpg-ui.js；run.js、battle-commands.js；tests/desert-enrich-gm.test.js、tests/online-gm-ui.test.js）
+  - 以前富集只能靠开战时随机（每只沙鱼 10%，沙暴 25%），主持人没法指定。现在三种：**随机**（照旧）/ **富集** / **普通**（不富集），只有三种沙鱼有这一项。
+  - 能设的地方：
+    - **联机主持人工具**：「生成敌人」选沙鱼时多一个「富集」选项；「修改单位」里选在场的沙鱼，多一项「富集与否」，可以中途改。改成普通时装甲层上限除回去、已受的伤按比例保留，名字去掉「富集」。
+    - **战斗模板**：敌人和援军里的沙鱼都能选；「从战场记下来」时，主持人定过的照记。
+    - **任务节点**（不用模板、直接配敌人的那种）里的沙鱼也能选。
+  - 定过富集与否的沙鱼，开战时不再随机。
+
 - **单局 / 训练场不会再改坏跑团存档**（screens.js；trpg-ui.js · `TrpgFlow.leave` / `TrpgFlow.titleFromBattle`；game.js · `trainingActive`；tests/save-leak.test.js）
   - **跑团战斗里点顶栏「标题」**（报告 H1）：以前直接回标题，跑团模式没关，之后同一页开的单局 / 每日挑战 / 训练场都按跑团规则走（坚毅数值外露、经验全队平分、探索专长可选、单局里冒出「探索环节」按钮，点了会把单局档案写进跑团空位）。现在和「回到探索环节」一样：战斗没打完先问一句，放弃这场（回到开战前的状态），再存好团、关掉跑团模式回标题。
   - **回到标题就离开跑团**：不管从哪条路回到标题，跑团模式都会关掉并存好团（战斗打到一半的不存，空位里留开战前那份）。联机房间不受影响。

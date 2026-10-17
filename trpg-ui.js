@@ -540,8 +540,9 @@
       const tplRow = fight ? `<div class="tr-row">战斗模板 <select data-te-tpl="${i}">${options(tplOpts, n.template ? n.template.id : "")}</select>
           ${n.template ? `<span class="r-hint">${esc(battleTemplateSummary(n.template))}</span>` : ""}</div>` : "";
       const foes = !fight ? "" : n.template ? tplRow : tplRow + `<div class="tk-foes">${n.enemies.map((e, j) => `<div class="tr-row">
-            <select data-te="nodes.${i}.enemies.${j}.id">${options(presets, e.id)}</select>
+            <select data-te="nodes.${i}.enemies.${j}.id" data-te-rerender="1">${options(presets, e.id)}</select>
             等级 ${inp(`nodes.${i}.enemies.${j}.lv`, e.lv, 52, "number")} 区域 <select data-te="nodes.${i}.enemies.${j}.zone">${options([1, 2, 3, 4, 5].map(z => [z, z + " 区"]), e.zone)}</select>
+            ${typeof SAND_FISH_KITS !== "undefined" && SAND_FISH_KITS.includes(e.id) ? `富集 <select data-te="nodes.${i}.enemies.${j}.enriched">${options([["", "随机"], ["on", "富集"], ["off", "普通"]], e.enriched === true || e.enriched === "on" ? "on" : e.enriched === false || e.enriched === "off" ? "off" : "")}</select>` : ""}
             <button class="g-btn small" data-te-act="delEnemy:${i}:${j}">删</button></div>`).join("")}
           <div class="tr-row"><button class="g-btn small" data-te-act="addEnemy:${i}">＋ 敌人</button>
             天气 <select data-te="nodes.${i}.weather">${options(Object.keys(WX).map(k => [k, WX[k]]), n.weather)}</select>
@@ -1026,11 +1027,14 @@
     const lvTip = ' placeholder="随队" title="空着 = 跟着开战时的等级"';
     // 个体值（杂兵、精英）：血量 / ATK 水平 −10～10%，空着 = 开战时随机
     const ivTip = ' min="-10" max="10" step="1" placeholder="随机" title="个体值水平 −10～10（%），空着 = 开战时随机；首领不波动"';
+    // 富集与否（沙鱼才有）：随机 / 富集 / 普通
+    const enrSel = (path, e) => typeof SAND_FISH_KITS !== "undefined" && SAND_FISH_KITS.includes(e.preset)
+      ? ` 富集 <select data-bte="${path}.enriched">${options([["", "随机"], ["on", "富集"], ["off", "普通"]], e.enriched === true || e.enriched === "on" ? "on" : e.enriched === false || e.enriched === "off" ? "off" : "")}</select>` : "";
     const ivInp = (path, e) => `<span class="bt-iv">个体值 血量 ${inp(path + ".iv.hp", e.iv ? e.iv.hp : null, 54, "number", ivTip)}% ATK ${inp(path + ".iv.atk", e.iv ? e.iv.atk : null, 54, "number", ivTip)}%</span>`;
     const foes = t.enemies.map((e, j) => `<div class="tr-row">
-        <select data-bte="enemies.${j}.preset">${options(presets, e.preset)}</select>
+        <select data-bte="enemies.${j}.preset" data-bte-rerender="1">${options(presets, e.preset)}</select>
         等级 ${inp(`enemies.${j}.level`, e.level, 60, "number", lvTip)} 区域 ${zoneSel(`enemies.${j}.zone`, e.zone)}
-        ${ivInp(`enemies.${j}`, e)}
+        ${ivInp(`enemies.${j}`, e)}${enrSel(`enemies.${j}`, e)}
         ${e.mechanics ? `<span class="tk-chip">机制：${esc(e.mechanics.map(btMechName).join("、"))}<button class="g-btn small" data-bt-act="clearMech:${j}" title="去掉这个敌人身上的首领机制">×</button></span>` : ""}
         <button class="g-btn small" data-bt-act="delEnemy:${j}">删</button></div>`).join("");
     const fields = zones.map(z => {
@@ -1054,8 +1058,8 @@
     const waves = (t.waves || []).map((w, j) => `<div class="tk-wave">
         <div class="tr-row">第 ${j + 1} 波：开战后第 ${inp(`waves.${j}.turns`, w.turns, 50, "number", ' min="1"')} 回合开始时抵达（提前打光场上的敌人就下一回合到）
           <button class="g-btn small" data-bt-act="delWave:${j}">删这波</button></div>
-        ${(w.enemies || []).map((e, k) => `<div class="tr-row">　<select data-bte="waves.${j}.enemies.${k}.preset">${options(presets, e.preset)}</select>
-          等级 ${inp(`waves.${j}.enemies.${k}.level`, e.level, 60, "number", lvTip)} 进入 ${zoneSel(`waves.${j}.enemies.${k}.zone`, e.zone)} ${ivInp(`waves.${j}.enemies.${k}`, e)}
+        ${(w.enemies || []).map((e, k) => `<div class="tr-row">　<select data-bte="waves.${j}.enemies.${k}.preset" data-bte-rerender="1">${options(presets, e.preset)}</select>
+          等级 ${inp(`waves.${j}.enemies.${k}.level`, e.level, 60, "number", lvTip)} 进入 ${zoneSel(`waves.${j}.enemies.${k}.zone`, e.zone)} ${ivInp(`waves.${j}.enemies.${k}`, e)}${enrSel(`waves.${j}.enemies.${k}`, e)}
           <button class="g-btn small" data-bt-act="delWaveEnemy:${j}-${k}">删</button></div>`).join("")}
         <div class="tr-row">　<button class="g-btn small" data-bt-act="addWaveEnemy:${j}">＋ 援军敌人</button></div></div>`).join("");
     const others = (typeof battleTemplateList === "function" ? battleTemplateList() : []).filter(x => x.id !== t.id).map(x => [x.id, x.name]);
