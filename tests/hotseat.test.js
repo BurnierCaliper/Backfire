@@ -427,3 +427,14 @@ test("大字：只有主持人能发，最长 40 字、停留 2–15 秒；小�
   assert.deepEqual(JSON.parse(JSON.stringify(view.title)), { text: "他们来了", sub: "", seconds: 4, at: t2.at, id: t2.id, tone: "plain" });
   assert.equal(view.chat.at(-1).title, true);
 });
+
+test("战斗中（行动阶段）当前角色可以直接和自己的武器人换位，不用请求；和队友换要对方同意", () => {
+  const units = [hero("h", "hiaki"), hero("g", "ruby"), { ...hero("w1", "niu"), weaponOf: "hiaki" }];
+  const { s } = fixture({ units, assignments: { h: "a", g: "b" } });
+  s.beginRound(1); s.pick("a", "h", 0); s.pick("b", "g", 1); s.pick("a", "w1", 2); s.confirm("a"); s.confirm("b");
+  assert.equal(s.snapshot().phase, "acting"); assert.equal(s.snapshot().currentUnitId, "h");
+  assert.equal(s.move("a", "h", 2).status, "moved");
+  assert.deepEqual(s.snapshot().slots.map(x => x && x.unitId), ["w1", "g", "h"]);
+  assert.equal(s.snapshot().currentUnitId, "w1", "武器人换到前面就先轮到它");
+  assert.equal(s.move("a", "w1", 1).status, "pending", "和队友换要对方同意");
+});

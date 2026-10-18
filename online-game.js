@@ -485,6 +485,27 @@
     } catch (_) { /* 取不到就用通用名 */ }
     return { __move: "移动", __item: "使用道具", __stand: "起身" }[id] || "行动";
   }
+  /** 这一下的结算摘要（战场日志用）：按单位合计伤害 / 击破 / 治疗，和弹出的状态字（失衡、倒下、感电……）。
+   *  只用玩家画面上本来就看得到的那些弹字：落在坚毅生命上（起身 / 濒死 / 死亡）的伤害和治疗不写数字，online-view.js · projectLogs 再过一遍白名单 */
+  function hitSummary(tape) {
+    const rows = new Map();
+    (tape || []).forEach(ev => {
+      if (!ev || ev.type !== "pop" || !ev.unitId) return;
+      const u = state.units.find(x => x.id === ev.unitId), snap = (ev.snap || []).find(x => x && x.id === ev.unitId) || u;
+      if (!u) return;
+      const row = rows.get(u.id) || { name: u.name, dmg: 0, brk: 0, heal: 0, words: [], aliveBefore: !(snap && (snap.dead || snap._removed)) };
+      const hpVisible = snap && !snap.upOnShp && !snap.dying && !snap.dead;
+      const n = Math.floor(Number(ev.value) || 0);
+      if (ev.kind === "dmg" && hpVisible) row.dmg += n;
+      else if (ev.kind === "heal" && hpVisible) row.heal += n;
+      else if (ev.kind === "break") row.brk += n;
+      if (ev.text && !row.words.includes(ev.text)) row.words.push(String(ev.text));
+      if (ev.kind === "dmg" && ev.adv && !row.words.includes("克制")) row.words.push("克制");
+      rows.set(u.id, row);
+    });
+    rows.forEach((r, id) => { const u = state.units.find(x => x.id === id); if (r.aliveBefore && u && !u.isPlayer && u.dead && !r.words.includes("被打倒")) r.words.push("被打倒"); delete r.aliveBefore; });
+    return [...rows.values()].filter(r => r.dmg || r.brk || r.heal || r.words.length).slice(0, 12);
+  }
   function onActionSettled(cmd, result, tape, meta) {
     if (!isHost() || restoring) return;
     if (!meta.onlineError && result?.executed !== false) systemNotice = "";
@@ -496,7 +517,7 @@
       if (cmd.type?.startsWith("gm.")) publicLogs.push({ kind: "gm", summary: { "gm.editUnit": "主持人更新了单位数据", "gm.setWeather": "主持人更新了天气", "gm.addProp": "主持人添加了配置物" }[cmd.type] || "主持人调整了战场",
         action: cmd.type === "gm.spawnEnemy" ? "spawn" : cmd.type === "gm.removeUnit" ? cmd.mode : cmd.type === "gm.removeProp" ? (cmd.mode === "destroy" ? "propDestroy" : "propRemove") : cmd.type === "gm.setManual" ? (cmd.enabled ? "manualOn" : "manualOff") : "edit",
         unitName: cmd.type === "gm.spawnEnemy" ? enemyPresets().find(p => p.id === cmd.enemyId)?.name : meta.unitName, propName: meta.propName, zone: cmd.zone, level: cmd.level, at: Date.now() });
-      else if (actor) publicLogs.push({ kind: "action", actorName: actor.name, actionName: (meta.skillName && meta.skillName !== cmd.skill && meta.skillName !== cmd.type ? meta.skillName : actionLabel(cmd)), at: Date.now() });
+      else if (actor) publicLogs.push({ kind: "action", actorName: actor.name, actionName: (meta.skillName && meta.skillName !== cmd.skill && meta.skillName !== cmd.type ? meta.skillName : actionLabel(cmd)), hits: hitSummary(tape), turn: state.turnNo, at: Date.now() });
       else publicLogs.push({ kind: "phase", phase: state.combatPhase, turn: state.turnNo, at: Date.now() });
       publicLogs = publicLogs.slice(-100);
     }

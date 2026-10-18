@@ -360,3 +360,12 @@ test("player battlefield receives quicksand / coral / innate field flags (GM can
   assert.equal(out.state.fields[1].innate, true);
   assert.equal(out.state.fields[1].sinkSecret, undefined);
 });
+
+test("public battle log lists per-target results (damage / break / heal / popup words) but never numbers outside the whitelist", () => {
+  const logs = V.projectLogs([{ kind: "action", actorName: "红玉", actionName: "普通攻击", hits: [
+    { name: "狂徒", dmg: 12, brk: 2, heal: 0, words: ["失衡", "SECRET-WORD", "被打倒"] },
+    { name: "夕夏", dmg: 0, brk: 0, heal: 6, words: [] },
+    { name: "SHP 732911", dmg: 99, words: [] },
+    { name: "空", dmg: "12", brk: -3, words: [] }] }]);
+  assert.equal(logs[0].text, "红玉 · 普通攻击 → 狂徒：12 伤害，击破 2，失衡，被打倒；夕夏：治疗 6");
+});

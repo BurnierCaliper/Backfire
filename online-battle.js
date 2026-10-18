@@ -231,7 +231,7 @@
       const skills = (ui.skills || []);
       const costText = (id) => root.SkillText && SkillText.skillCostText ? SkillText.skillCostText(id) : "";
       hud.querySelector(".skills").innerHTML = skills.map((o, i) => {
-        const cost = costText(o.value);
+        const cost = o.cost || costText(o.value);   // 房主算好的消耗优先（online-actions.js · costLabel）
         // 灰掉的技能写明原因（行动点不足 / 没有能用的道具…），鼠标悬停和读屏都能看到
         const why = o.disabled ? (o.reason || "现在不能使用") : ui.busy ? "正在同步，请稍候" : "";
         return `<button type="button" class="sk${ui.armed === o.value ? " armed" : ""}${o.disabled ? " blocked" : ""}" data-ob-skill="${esc(o.value)}"${o.disabled || ui.busy ? " disabled" : ""}${why ? ` title="${esc(why)}"` : ""} aria-label="${esc(o.label + (why ? "：" + why : ""))}">

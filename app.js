@@ -127,6 +127,16 @@ function setWeather(kind, opts) {
   return null;
 }
 
+/** 我方单位普通移动的消耗（技能栏显示用；越过空隙要看去哪，在移动时另算）：
+ *  导体 / 探测模式不耗；站在酸液地面上离开要 1 行动点（荒原行者只要附赠）；其余 1 附赠行动 */
+function moveBaseCost(u) {
+  if (!u) return { bonus: 1 };
+  if (u.self === "conductor" || (u.kit === "ecmo" && u.resources && u.resources.probe)) return {};
+  const f = (state.fields || {})[u.zone] || {};
+  const wanderer = typeof featHas === "function" && featHas(u, "wanderer");
+  if (f.acid && !u.flying && !wanderer && !(typeof acidGroundWalker === "function" && acidGroundWalker(u))) return { ap: 1 };
+  return { bonus: 1 };
+}
 /** 这一区的场地现在能不能改成 kind（空 = 清除）：能返回 null，不能返回原因（深渊、损毁地面、固有场地、被锁定） */
 function fieldChangeWhy(zone, kind, opts) {
   opts = opts || {};

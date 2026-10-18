@@ -268,7 +268,7 @@
     for (const key of zoneKeys) { const zv = zoneViewOf(Number(key), state); if (zv) (out.zoneView = out.zoneView || {})[key] = zv; }
     return out;
   }
-  const popupWords = new Set(["无效", "失衡", "起身", "倒下", "刺入", "温和", "残忍", "登场支援！", "聚焦抹层", "灼烧", "感电", "腐蚀", "冻伤", "震荡", "共振", "高能", "虚弱", "振奋", "躲藏", "优势", "紧追", "熔融", "刺骨", "过载", "错位", "扩散", "折射", "红弹", "蓝弹", "导体", "霜结", "自焚", "溅射", "千钧", "蓄能", "多普勒", "爆燃", "破冰", "雷击", "蚀刻", "倒流", "惯性", "衍射", "穿刺", "猛击", "弱点特效", "超载", "中和"]);
+  const popupWords = new Set(["无效", "失衡", "起身", "倒下", "刺入", "温和", "残忍", "登场支援！", "聚焦抹层", "灼烧", "感电", "腐蚀", "冻伤", "震荡", "共振", "高能", "虚弱", "振奋", "躲藏", "优势", "紧追", "熔融", "刺骨", "过载", "错位", "扩散", "折射", "红弹", "蓝弹", "导体", "霜结", "自焚", "溅射", "千钧", "蓄能", "多普勒", "爆燃", "破冰", "雷击", "蚀刻", "倒流", "惯性", "衍射", "穿刺", "猛击", "弱点特效", "超载", "中和", "被打倒", "克制"]);
   function projectTape(tape, context = {}) {
     const units = arr(get(context.state, "units"));
     return arr(tape).slice(0, 256).flatMap(event => {
@@ -313,6 +313,19 @@
       if (out.kind === "action") {
         const actor = text(get(row, "actorName"), 60), action = text(get(row, "actionName"), 60);
         if (actor && action) out.text = actor + " · " + action;
+        // 结算摘要（online-game.js · hitSummary）：谁受了多少伤害 / 击破 / 治疗、弹出的状态字。只认数字和白名单里的弹字
+        const hits = arr(get(row, "hits")).slice(0, 12).flatMap(h => {
+          if (!obj(h)) return [];
+          const name = text(get(h, "name"), 60); if (!name) return [];
+          const parts = [];
+          const n = k => { const v = number(get(h, k)); return v !== undefined && v > 0 ? Math.floor(v) : 0; };
+          if (n("dmg")) parts.push(`${n("dmg")} 伤害`);
+          if (n("brk")) parts.push(`击破 ${n("brk")}`);
+          if (n("heal")) parts.push(`治疗 ${n("heal")}`);
+          arr(get(h, "words")).forEach(w => { if (popupWords.has(w) && !parts.includes(w)) parts.push(w); });
+          return parts.length ? [`${name}：${parts.join("，")}`] : [];
+        });
+        if (hits.length) out.text += " → " + hits.join("；");
       }
       if (out.kind === "phase") {
         enumField(row, out, "phase", ["player", "enemy", "exploration", "ended"]);
@@ -410,7 +423,7 @@
       if (pickKeys.has(get(choices, "key"))) dto.key = get(choices, "key");
       dto.options = arr(get(choices, "options")).slice(0, 200).flatMap(option => {
         const value = choiceValue(get(option, "value")); if (value === undefined) return [];
-        const item = copyFields(option, { value }, ["label", "sub"], [], ["disabled"]);
+        const item = copyFields(option, { value }, ["label", "sub", "cost"], [], ["disabled"]);
         if (get(option, "reason")) item.reason = safeError(get(option, "reason"));
         return [item];
       });

@@ -172,6 +172,8 @@ test("D3 game sessions: remote ownership, GM/private messages, round actions and
   const attackResult = await alice.evaluate(() => window.attackResult); assert.equal(attackResult?.ok, true, JSON.stringify(attackResult));
   const finalAttackSeq = await alice.evaluate(() => OnlineGame.getView().packet.seq);
   await bob.waitForFunction(seq => OnlineGame.getView().packet?.seq >= seq, finalAttackSeq);
+  // 战场日志写出打了谁、多少伤害（以前只有「瑞比 · 普通攻击」）
+  await bob.waitForFunction(() => (OnlineGame.getView().packet.publicLogs || []).some(r => /普通攻击 → .+：\d+ 伤害/.test(r.text)), null, { timeout: 10000 });
   measureAction(t, "4v3 ruby two-hit attack", f.wire.slice(attackStart));
   const menu = await alice.evaluate(actor => OnlineGame.actionMenu({ actor, skill: "__move" }), actor);
   assert.equal(menu.type, "actionOptions"); assert.ok(menu.choices.options.length > 0);
