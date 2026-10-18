@@ -5,7 +5,7 @@
   let adapter = {}, round = 0, manualAll = false;
   const metadata = new Map();
   const TYPES = ["spawnEnemy", "removeUnit", "editUnit", "addProp", "editProp", "removeProp", "editGap", "setField", "setWeather", "setEncounter", "forceAttack", "setManual", "enemyAct", "enemyEndTurn"].map(x => "gm." + x);
-  const PROP_KINDS = ["button", "lever", "battery", "boom", "acid", "scrap", "turret", "ironwall", "scrapwall", "dome"];
+  const PROP_KINDS = ["button", "lever", "battery", "boom", "acid", "scrap", "turret", "ironwall", "scrapwall", "dome", "coral_branch", "coral_tentacle"];   // 沙珊瑚枝 / 触须：和沙漠遭遇同一套（props.js · desert.js）
   const WEATHERS = ["none", "heat", "snow", "acid", "thunder", "glow", "sand", "phase"];
   const STATUS_NUM = ["burn"];
   const STATUS_BOOL = ["shock", "corr", "frostbite", "shockwave", "high", "reso", "unstable", "weak", "inspire", "sturdy", "advantage", "hide", "chase"];
@@ -96,7 +96,7 @@
     if (!Object.keys(p).length) fail("配置物补丁为空");
     if (own(p, "zone")) zone(p.zone);
     if (own(p, "level")) level(p.level);
-    if (own(p, "faction")) one(p.faction, ["player", "enemy"], "阵营");
+    if (own(p, "faction")) one(p.faction, ["player", "enemy", "neutral"], "阵营");
     if (own(p, "link")) gapKeyCheck(p.link);
     ["hp", "maxHp"].forEach(k => { if (own(p, k)) number(p[k], k); });
     if (own(p, "movable")) bool(p.movable, "可移动");
@@ -243,7 +243,7 @@
         if (own(cmd, "enriched")) { bool(cmd.enriched, "富集"); if (typeof SAND_FISH_KITS === "undefined" || !SAND_FISH_KITS.includes(cmd.enemyId)) fail("只有沙鱼能设富集"); } break;
       case "removeUnit": enemy(cmd.actor); one(cmd.mode, ["remove", "kill"], "移出模式"); break;
       case "editUnit": patchUnit(unit(cmd.actor), cmd.patch); break;
-      case "addProp": one(cmd.kind, PROP_KINDS, "配置物种类"); zone(cmd.zone); if (own(cmd, "level")) level(cmd.level); if (own(cmd, "faction")) one(cmd.faction, ["player", "enemy"], "阵营"); if (own(cmd, "link")) gapKeyCheck(cmd.link); break;
+      case "addProp": one(cmd.kind, PROP_KINDS, "配置物种类"); zone(cmd.zone); if (own(cmd, "level")) level(cmd.level); if (own(cmd, "faction")) one(cmd.faction, ["player", "enemy", "neutral"], "阵营"); if (own(cmd, "link")) gapKeyCheck(cmd.link); break;
       case "editProp": prop(cmd.id); patchProp(cmd.patch); break;
       case "removeProp": prop(cmd.id); one(cmd.mode, ["remove", "destroy"], "移除模式"); break;
       case "editGap": gapKeyCheck(cmd.key); patchGap(cmd.patch); break;

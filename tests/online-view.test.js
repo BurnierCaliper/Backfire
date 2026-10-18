@@ -369,3 +369,11 @@ test("public battle log lists per-target results (damage / break / heal / popup 
     { name: "空", dmg: "12", brk: -3, words: [] }] }]);
   assert.equal(logs[0].text, "红玉 · 普通攻击 → 狂徒：12 伤害，击破 2，失衡，被打倒；夕夏：治疗 6");
 });
+
+test("玩家看得到主持人放的沙珊瑚枝 / 触须（种类不被投影丢掉）", () => {
+  const source = fixture();
+  source.state.props.push({ id: "c1", name: "沙珊瑚枝", kind: "coral_branch", faction: "neutral", hp: 30, maxHp: 30, zone: 1 },
+    { id: "c2", name: "沙珊瑚触须", kind: "coral_tentacle", faction: "neutral", hp: 8, maxHp: 8, zone: 1 });
+  const out = V.projectPacket(source, player);
+  assert.deepEqual(out.state.props.filter(p => p.id[0] === "c").map(p => [p.kind, p.faction, p.hp]), [["coral_branch", "neutral", 30], ["coral_tentacle", "neutral", 8]]);
+});
