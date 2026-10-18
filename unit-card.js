@@ -10,6 +10,32 @@
   const sumMax = (s) => (s.layers || []).reduce((a, l) => a + l.max, 0);
   const LAYER_NAME = (function () { try { if (typeof LAYER !== "undefined") return LAYER; } catch (e) {} return { flesh: "肉体", armor: "装甲", shield: "护盾", sand: "沙尘", spirit: "星灵" }; })();
 
+  // 首领机制的倒计时文字（单位卡、悬停说明、踩塔牌子共用）
+  const when = (x) => x.left > 0 ? `${x.left} 回合后` : `这回合${x.phase === "player" ? "我方" : "敌人"}回合开始时`;
+  const markTip = (x) => x.type === "volley"
+    ? `${x.by} 的${x.name}：${when(x)}朝这个人开一枪（${x.shot || "atk"}、${x.brk != null ? x.brk : 2} 击破）${x.delayed ? "（首领失衡，会推迟一回合）" : ""}。每一枪都可以协助格挡——站在一起、留着附赠动作互相挡（现在同区还有 ${x.mates || 0} 个被瞄准的队友）。`
+    : x.type === "spread"
+    ? `${x.by} 的${x.name}：${when(x)}在这个人所在的区爆炸，${x.blast > 0 ? `每次对同区每个友方 ${x.blast}` : "每次波及同区每个友方"}，不能格挡。同一个区有几个标记就炸几次——现在这里有 ${x.stack} 个标记${x.stack > 1 ? `，每人会挨 ${x.stack} 次，快分开站` : "，没有和别人重叠"}。${x.delayed ? "（首领失衡，会推迟一回合）" : ""}`
+    : x.type === "share"
+    ? `${x.by} 的${x.name}：${when(x)}落下${x.delayed ? "（首领失衡，会推迟一回合）" : ""}。${x.pool > 0 ? `伤害池 ${x.pool}，` : ""}由这个人所在区的所有友方平均分担，不能格挡——大家聚过来一起扛（现在同区 ${x.group} 人${x.pool > 0 ? `，每人约 ${Math.ceil(x.pool / Math.max(1, x.group))}` : ""}）。`
+    : `${x.by} 的${x.name}：${when(x)}落下${x.delayed ? "（首领失衡，会推迟一回合）" : ""}。每一段都可以协助格挡。`;
+  const phaseText = (x) => `${Number(x.left) > 0 ? "到时" : "这回合"}在${x.phase === "player" ? "我方" : "敌人"}回合开始时落下`;
+  const castTip = (x) => `${x.name} → ${x.target || "（无目标）"}：${when(x)}落下`;
+  /** 首领机制还有几回合落下：「还有 2 回合」/ 到了就是「本回合落下」 */
+  function mechLeft(x) { const n = Math.max(0, Number(x && x.left) || 0); return n > 0 ? `还有 ${n} 回合` : "本回合落下"; }
+  /** 悬停说明里的「首领机制」几行：身上的标记 + 首领正在倒数的机制（unit-tip.js · html 的 head.mechs） */
+  function mechLines(s) {
+    return ((s && s.marks) || []).filter(x => x && x.type).map(x => `${x.name}（${mechLeft(x)}）：${markTip(x)}`)
+      .concat(((s && s.casts) || []).filter(x => x && x.type).map(x => `${x.name} → ${x.target || "（无目标）"}（${mechLeft(x)}）：${phaseText(x)}`));
+  }
+  /** 踩塔的牌子 / 说明（game.js 和 online-battle.js 共用） */
+  function towerTip(t) {
+    return `${t.by || ""} 的${t.name || ""}：${when(t)}落下${t.delayed ? "（首领失衡，会推迟一回合）" : ""}。至少 ${t.need} 人站在这个区里踩住${t.soak > 0 ? `，每人挨 ${t.soak}` : ""}；没人踩住${t.fail != null ? (t.fail > 0 ? `，我方全员各挨 ${t.fail}` : "，我方全员挨巨额伤害") : "，会触发严重惩罚"}。不能格挡。`;
+  }
+  function towerHtml(list) {
+    return (list || []).map(t => `<span class="${t.have < t.need ? "short" : "ok"}" title="${esc(towerTip(t))}">${esc(t.name || "")} · ${esc(mechLeft(t))} · ${t.have}/${t.need} 人</span>`).join("");
+  }
+
   function create(s) {
     const wrap = el("div", "unit-wrap");
     wrap.dataset.id = s.id;
@@ -153,17 +179,9 @@
     const isHigh = !!(s.status && /(^| )高能( |$)/.test(s.status));
     const highChip = icons ? "" : isHigh ? `<span class="chip">高能${s.highEnergy > 0 ? " " + s.highEnergy : ""}</span>`
       : s.highEnergy > 0 ? `<span class="chip">蓄能 ${s.highEnergy}</span>` : "";
-    // 首领机制（死刑 / 分担）的标记：被标记的人身上一个倒计时，首领身上写着标了谁
-    const when = (x) => x.left > 0 ? `${x.left} 回合后` : `这回合${x.phase === "player" ? "我方" : "敌人"}回合开始时`;
-    const markTip = (x) => x.type === "volley"
-      ? `${x.by} 的${x.name}：${when(x)}朝这个人开一枪（${x.shot || "atk"}、${x.brk != null ? x.brk : 2} 击破）${x.delayed ? "（首领失衡，会推迟一回合）" : ""}。每一枪都可以协助格挡——站在一起、留着附赠动作互相挡（现在同区还有 ${x.mates || 0} 个被瞄准的队友）。`
-      : x.type === "spread"
-      ? `${x.by} 的${x.name}：${when(x)}在这个人所在的区爆炸，${x.blast > 0 ? `每次对同区每个友方 ${x.blast}` : "每次波及同区每个友方"}，不能格挡。同一个区有几个标记就炸几次——现在这里有 ${x.stack} 个标记${x.stack > 1 ? `，每人会挨 ${x.stack} 次，快分开站` : "，没有和别人重叠"}。${x.delayed ? "（首领失衡，会推迟一回合）" : ""}`
-      : x.type === "share"
-      ? `${x.by} 的${x.name}：${when(x)}落下${x.delayed ? "（首领失衡，会推迟一回合）" : ""}。${x.pool > 0 ? `伤害池 ${x.pool}，` : ""}由这个人所在区的所有友方平均分担，不能格挡——大家聚过来一起扛（现在同区 ${x.group} 人${x.pool > 0 ? `，每人约 ${Math.ceil(x.pool / Math.max(1, x.group))}` : ""}）。`
-      : `${x.by} 的${x.name}：${when(x)}落下${x.delayed ? "（首领失衡，会推迟一回合）" : ""}。每一段都可以协助格挡。`;
-    const execChip = (s.marks || []).map(x => `<span class="chip mark-${x.type}" title="${esc(markTip(x))}">${esc(x.name)} ${x.left > 0 ? x.left : "!"}${x.type === "share" ? ` · ${x.group}人` : x.type === "spread" ? ` · ×${x.stack}` : ""}</span>`).join("") +
-      (s.casts || []).map(x => `<span class="chip cast-${x.type}" title="${esc(`${x.name} → ${x.target || "（无目标）"}：${when(x)}落下`)}">${esc(x.name)}→${esc(x.target || "?")} ${x.left > 0 ? x.left : "!"}</span>`).join("");
+    // 首领机制（死刑 / 分担 / 远离 / 齐射）的标记：被标记的人身上写「还有 N 回合」，首领身上写着标了谁、还有几回合落下
+    const execChip = (s.marks || []).map(x => `<span class="chip mech-chip mark-${x.type}" title="${esc(markTip(x))}">${esc(x.name)} · ${esc(mechLeft(x))}${x.type === "share" ? ` · ${x.group}人` : x.type === "spread" ? ` · ×${x.stack}` : ""}</span>`).join("") +
+      (s.casts || []).map(x => `<span class="chip mech-chip cast-${x.type}" title="${esc(castTip(x))}">${esc(x.name)}→${esc(x.target || "?")} · ${esc(mechLeft(x))}</span>`).join("");
     // 有图标的状态画成徽章（hud-icons.js），没有图标的（聚焦、掩护、首领阶段……）还是写字
     const badges = icons ? (s.badges || []) : [];
     const badgeKey = badges.map(b => b.key + ":" + b.stack).join("|");
@@ -200,7 +218,7 @@
     c.prev = s;
   }
 
-  const api = { create, update, sumCur, sumMax };
+  const api = { create, update, sumCur, sumMax, mechLeft, mechLines, towerTip, towerHtml };
   root.UnitCard = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof window !== "undefined" ? window : globalThis);

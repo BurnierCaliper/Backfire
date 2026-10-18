@@ -62,7 +62,7 @@
 .ol-unit .ol-gauge { margin: 6px 0 2px; min-height: 0; padding: 5px 8px; gap: 8px; }
 .ol-popup .hi-badge { margin-right: 3px; }
 /* 单位悬停说明（unit-tip.js）：图鉴描述 + 身上效果的文字 */
-.unit-tip { position: fixed; z-index: 85; display: none; pointer-events: none; max-height: calc(100vh - 16px); overflow: hidden;
+.unit-tip { position: fixed; z-index: 85; display: none; pointer-events: none; max-height: calc(100vh - 16px); overflow: hidden auto; overscroll-behavior: contain; scrollbar-width: thin;
   background: #2a231c; color: #f1e6cf; border: 2px solid #0d0b09; box-shadow: 4px 5px 0 rgba(0, 0, 0, .5);
   padding: 8px 12px 10px; font-size: 12.5px; line-height: 1.55; }
 .unit-tip.show { display: block; }
@@ -76,6 +76,14 @@
 .unit-tip .ut-h { margin-top: 8px; padding-top: 6px; border-top: 1px solid #4d4337; color: #c99a46; font-size: 12px; font-weight: 700; letter-spacing: .1em; }
 .unit-tip .ut-effects { list-style: none; padding: 0; display: grid; gap: 4px; }
 .unit-tip .ut-effects li { display: grid; grid-template-columns: auto 1fr; column-gap: 6px; align-items: start; }
+/* 内容多：加宽，效果排两栏；还放不下就在浮窗里滚动（unit-tip.js · show），底下贴一行提示 */
+.unit-tip.ut-wide .ut-effects { grid-template-columns: 1fr 1fr; column-gap: 14px; align-items: start; }
+.unit-tip.ut-wide .ut-effects li { align-content: start; }
+.unit-tip .ut-more { position: sticky; bottom: -10px; margin: 6px -12px -10px; padding: 4px 12px; background: #3a2f22; color: #ffd27a; font-size: 11.5px; text-align: center; border-top: 1px solid #4d4337; }
+.unit-tip .ut-mechs { list-style: none; padding: 0; display: grid; gap: 3px; }
+.unit-tip .ut-mechs li { color: #ffd9c9; }
+.unit-tip .ut-mechs li b { color: #ff8a7a; margin-right: 2px; }
+.unit-tip .ut-mech-h { margin-top: 6px; color: #ff8a7a; }
 .unit-tip .ut-effects li > svg { width: 18px; height: 18px; grid-row: span 2; margin-top: 1px; }
 .unit-tip .ut-effects li > b { font-weight: 700; }
 .unit-tip .ut-effects li > span { grid-column: 2; color: #d8ccb4; }

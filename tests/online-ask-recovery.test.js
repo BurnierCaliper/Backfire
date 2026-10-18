@@ -118,3 +118,19 @@ test("saving after a long host disconnection freezes the ask at its disconnect-t
   assert.equal((await pending).unitId, g.units[0].id);
   assert.deepEqual(g.errors, []);
 });
+
+test("host resume survives hero ids changed by an out-of-battle re-layout and keeps owners and weapon units", async () => {
+  const f = await fixture();
+  // 模拟单局 withParty：不经过命令直接把队伍重新摆上场，单位 id 全换了，分配里还是旧 id
+  f.c.BattleSim.setup({ party: ["ruby", "kolt"], enemies: [{ id: "thug_knife", lv: 1, zone: 2 }], seed: "ASK-RECOVERY-2" });
+  const state = f.c.S.state, kolt = state.units.find(u => u.kit === "kolt" && !u.weaponOf);
+  const saved = f.save();
+  assert.ok(Object.keys(saved.hotseat.session.assignments).some(id => !saved.game.state.units.some(u => u.id === id)), "fixture must hold stale ids");
+  const weapons = saved.game.state.units.filter(u => u.weaponOf).map(u => u.id).sort();
+  const g = await fixture({ now: 900000, saved });
+  assert.deepEqual(g.errors, []);
+  assert.deepEqual(g.c.S.state.units.filter(u => u.weaponOf).map(u => u.id).sort(), weapons);
+  const heroes = g.c.HotseatGame.getView().heroes;
+  assert.equal(heroes.find(h => h.id === kolt.id).owner, "p2");
+  assert.equal(g.c.HotseatGame.getView().assignments?.[kolt.id] ?? "p2", "p2");
+});

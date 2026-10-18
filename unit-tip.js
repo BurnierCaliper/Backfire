@@ -83,14 +83,17 @@
     return out;
   }
 
-  /** 浮窗内容。head：{ name, sub }（等级、区、阵营之类）；tokens：身上的效果词 */
+  /** 浮窗内容。head：{ name, sub, mechs }（等级、区、阵营之类；mechs：首领机制的倒计时说明，unit-card.js · mechLines）；tokens：身上的效果词 */
   function html(info, tokens, head) {
     const d = describe(info);
     const effs = (tokens || []).map(effect).filter(Boolean);
     const seen = new Set();
     const rows = effs.filter(e => { if (seen.has(e.name)) return false; seen.add(e.name); return true; });
+    const mechs = (head && Array.isArray(head.mechs) ? head.mechs : []).filter(x => typeof x === "string" && x);
     return `<div class="ut-top"><b>${esc(head && head.name || "")}</b>${head && head.sub ? `<span>${esc(head.sub)}</span>` : ""}</div>` +
       (d.kicker ? `<div class="ut-kicker">${esc(d.kicker)}</div>` : "") +
+      // 首领机制放在描述前面：还有几回合落下最要紧
+      (mechs.length ? `<div class="ut-h ut-mech-h">首领机制 · 倒计时</div><ul class="ut-mechs">${mechs.map(x => { const i = x.indexOf("："); return `<li>${i > 0 && i < 30 ? `<b>${esc(x.slice(0, i))}</b>${esc(x.slice(i))}` : esc(x)}</li>`; }).join("")}</ul>` : "") +
       (d.text ? `<p class="ut-desc">${esc(d.text)}</p>` : "") +
       (d.list.length ? `<ul class="ut-list">${d.list.map(x => { const i = x.indexOf("："); return `<li>${i > 0 && i < 18 ? `<b>${esc(x.slice(0, i))}</b>${esc(x.slice(i))}` : esc(x)}</li>`; }).join("")}</ul>` : "") +
       `<div class="ut-h">身上的效果</div>` +
@@ -101,7 +104,9 @@
   }
 
   // 浮窗本体（跟着单位卡出现，不挡鼠标）
-  let tipEl = null;
+  // 内容多（首领：行动方式 + 机制 + 一长串状态）时：先加宽排成两栏；还放不下就在浮窗里滚动——
+  // 浮窗不挡鼠标，所以鼠标停在这张卡上时滚轮翻的是浮窗（底下写着「滚轮翻看」），什么都不会被截掉
+  let tipEl = null, tipAnchor = null;
   function show(anchor, content) {
     if (typeof document === "undefined" || !anchor) return;
     if (!tipEl) {
@@ -109,12 +114,26 @@
       tipEl.className = "unit-tip";
       tipEl.setAttribute("role", "tooltip");
       document.body.appendChild(tipEl);
+      document.addEventListener("wheel", onWheel, { passive: false, capture: true });
     }
+    tipAnchor = anchor;
     tipEl.innerHTML = content;
+    tipEl.classList.remove("ut-wide", "ut-scroll");
     tipEl.classList.add("show");
+    tipEl.scrollTop = 0;
     const r = anchor.getBoundingClientRect();
-    const w = Math.min(340, window.innerWidth - 16);
+    const room = window.innerHeight - 16;
+    let w = Math.min(340, window.innerWidth - 16);
     tipEl.style.width = w + "px";
+    if (tipEl.scrollHeight > room && window.innerWidth >= 560) {
+      w = Math.min(680, window.innerWidth - 16);
+      tipEl.classList.add("ut-wide");
+      tipEl.style.width = w + "px";
+    }
+    if (tipEl.scrollHeight > tipEl.clientHeight + 1) {
+      tipEl.classList.add("ut-scroll");
+      tipEl.insertAdjacentHTML("beforeend", '<div class="ut-more">鼠标停在卡上，滚轮翻看其余内容</div>');
+    }
     // 先放在卡片右边，放不下放左边，再不行放上面
     let left = r.right + 10, top = r.top;
     if (left + w > window.innerWidth - 8) left = r.left - w - 10;
@@ -124,7 +143,15 @@
     tipEl.style.left = left + "px";
     tipEl.style.top = top + "px";
   }
-  function hide() { if (tipEl) tipEl.classList.remove("show"); }
+  function onWheel(e) {
+    if (!tipEl || !tipEl.classList.contains("show") || !tipEl.classList.contains("ut-scroll") || !tipAnchor || !tipAnchor.contains(e.target)) return;
+    const max = tipEl.scrollHeight - tipEl.clientHeight;
+    const next = Math.max(0, Math.min(max, tipEl.scrollTop + e.deltaY * (e.deltaMode === 1 ? 16 : 1)));
+    if (next === tipEl.scrollTop) return;   // 翻到头了：交还给区域 / 页面滚动
+    tipEl.scrollTop = next;
+    e.preventDefault(); e.stopPropagation();
+  }
+  function hide() { if (tipEl) tipEl.classList.remove("show"); tipAnchor = null; }
 
   const api = { describe, effect, html, show, hide, EXTRA };
   root.UnitTip = api;

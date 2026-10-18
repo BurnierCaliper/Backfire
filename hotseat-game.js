@@ -23,6 +23,33 @@
   function refresh() { notify(); if (root.GAME && document.getElementById("g-party")) GAME.refresh(); }
   function hostOnly(id) { if (id !== gm()) fail("只有房主可以执行此操作"); }
   function canConfigure() { return !choice && !session?.snapshot().ask && (!state.combatStarted || !!(root.GAME && GAME.ended)); }
+  // 单局战斗外查询会把队伍重摆上场（rogue.js · withParty），单位 id 会变，而存档里的分配还是旧 id。
+  // 恢复时只保留还在场上的英雄，其余按职业沿用原来的操控者，否则 setAssignments 报「只能分配英雄角色」、房主恢复失败
+  function restorable(saved) {
+    const out = copy(saved || {}), list = heroes(), ids = new Set(list.map(u => u.id)), assignments = {};
+    for (const [id, owner] of Object.entries(out.assignments || {})) if (ids.has(id)) assignments[id] = owner;
+    const byKit = kitAssignments(); for (const u of list) if (!assignments[u.id] && byKit[u.id]) assignments[u.id] = byKit[u.id];
+    out.assignments = assignments; return out;
+  }
+  // 场上按职业（kit）该归谁：和恢复存档时（restorable）用同一份 ownerByKit，两处结论一致
+  function kitAssignments() {
+    const out = {};
+    for (const u of heroes()) if (ownerByKit[u.kit] && config.players.some(p => p.id === ownerByKit[u.kit])) out[u.id] = ownerByKit[u.kit];
+    return out;
+  }
+  // 单局战斗外的查询 / 开战会重摆队伍（rogue.js · withParty → BattleSim.setup），单位 id 全换了，
+  // 会话里按 id 记的分配却还是旧的 → 玩家操作自己角色时被判「不是你的角色」。开战布好场后（还没开打）按 kit 重新对齐。
+  // 战斗外不要每次都对齐：发视图本身就会 withParty 重摆，对齐→广播→重摆会无限循环；战斗外的单局操作按 kit 判断，不看这份分配
+  function syncAssignments() {
+    if (!active() || !session) return false;
+    const snap = session.snapshot();
+    if (!["setup", "ended"].includes(snap.phase)) return false;
+    const want = kitAssignments(), held = snap.assignments || {};
+    const keys = o => Object.keys(o).sort().map(k => k + "=" + o[k]).join("|");
+    if (keys(want) === keys(held)) return false;
+    executing++; try { session.setAssignments(want); } finally { executing--; }
+    authority.broadcast(); refresh(); return true;
+  }
   function setupSession() {
     if (authority) authority.close();
     clients = new Map();
@@ -339,7 +366,7 @@
   if (root.addEventListener) root.addEventListener("error", event => {
     if (active() && event.error?.code === "HOTSEAT_REJECT") { notice = event.error.message; notify(); event.preventDefault(); }
   });
-  root.HotseatGame = { getView, getViewFor, configure, submit, isActive: active, isRequested: () => enabled && !state.solo, checkSpec, rollSpec,
+  root.HotseatGame = { getView, getViewFor, syncAssignments, assignments: () => (active() && session ? copy(session.snapshot().assignments || {}) : {}), configure, submit, isActive: active, isRequested: () => enabled && !state.solo, checkSpec, rollSpec,
     enableOnline(value) { network = true; enabled = true; if (!configured) playerId = value.players.find(p => p.gm).id; return configure(value); },
     isNetwork: () => network,
     receiveFrom(id, cmd) { return this.withOperator(id, () => submit(cmd)); },
@@ -362,7 +389,7 @@
       askRemainingMs: snapshot.ask ? Math.max(0, snapshot.ask.deadline - now) : null, newRoundSpends, choiceNo, openingChoice: !!choice && !state.combatStarted }); },
     restoreOnline(saved) { network = enabled = true; configured = false; config = copy(saved.config); ownerByKit = copy(saved.ownerByKit); playerId = saved.playerId; newRoundSpends = saved.newRoundSpends || null; choiceNo = saved.choiceNo || 0;
       restoredAsk = saved.session?.ask ? { ...copy(saved.session.ask), remainingMs: saved.askRemainingMs ?? 20000 } : null;
-      setupSession(); configured = true; executing++; try { session.restore(saved.session); } finally { executing--; } authority.broadcast(); refresh(); },
+      setupSession(); configured = true; executing++; try { session.restore(restorable(saved.session)); } finally { executing--; } authority.broadcast(); refresh(); },
     onPacket(fn) { packetListeners.add(fn); return () => packetListeners.delete(fn); },
     reason, beginRound, system, requestAsk, ownedChoice,
     isHost: () => !active() || playerId === gm(), hasAsk: () => !!choice || !!session?.snapshot().ask,
