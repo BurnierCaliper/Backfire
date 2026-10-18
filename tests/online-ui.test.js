@@ -467,3 +467,10 @@ test("D3 display: 行动结算后舞台不跳回最上面（玩家往下翻着�
   assert.ok(after > before - 200, `滚动位置保留（${before} → ${after}）`);
   assert.deepEqual(o.errors, []);
 });
+
+test("offline wait bar shows the remaining seconds before the absent player's turn is skipped", async t => {
+  const o = await open(t); if (!o) return; const { page } = o;
+  await player(page, { offlineWait: { name: "乙", deadline: Date.now() + 42000 } });
+  await page.waitForFunction(() => /乙 离线，等待其返回（还剩 4[12] 秒，到时间自动跳过）/.test(document.querySelector("#online-pause").textContent));
+  assert.deepEqual(o.errors, []);
+});

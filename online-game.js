@@ -59,11 +59,19 @@
       gm: GMCommands.snapshot(), screen: Screens.current(), started, seq, messageNo, messages, publicLogs, settledResult, systemNotice, offlineWait, requests: [...requests].slice(-200), requestHighWater: [...requestHighWater] });
     try { localStorage.setItem(KEY, JSON.stringify(data)); storageError = false; } catch (_) { storageError = true; }
   }
+  /** 倒计时换成本机的钟：房主发来「还剩多少毫秒」，按收到这一包的时刻算本机的截止时间（播动画的延迟不算进去） */
+  function localDeadlines(packet, at) {
+    const ask = packet && packet.view && packet.view.ask;
+    if (ask && Number.isFinite(ask.remainingMs)) ask.deadline = at + ask.remainingMs;
+    const wait = packet && packet.offlineWait;
+    if (wait && Number.isFinite(wait.remainingMs)) wait.deadline = at + wait.remainingMs;
+  }
   function readSaved() { try { const v = JSON.parse(localStorage.getItem(KEY)); return v?.version === 1 ? v : null; } catch (_) { return null; } }
   function rawPacket(id, type = "result", tape = [], result = null) {
     const view = HotseatGame.getViewFor(id); view.players = roster(); view.network = true;
     return { protocol: PROTOCOL, build: BUILD, type, seq, state, tape, result: result || settledResult, view, screen: liveScreen(),
-      roomCode: identity.roomCode, hostName: identity.name, paused: isPaused(), messages, publicLogs, manualPhase, offlineWait, systemNotice,
+      roomCode: identity.roomCode, hostName: identity.name, paused: isPaused(), messages, publicLogs, manualPhase, systemNotice,
+      offlineWait: offlineWait ? { ...offlineWait, remainingMs: Math.max(0, offlineWait.deadline - Date.now()) } : null,
       mode, rogue: rogue() ? OnlineRogue.viewFor(id) : null, levelUps: levelUpsFor(id),
       // 任务日志（跑团）：房主按收件人挑好（草稿、没指定给他的不给），online-view.js 再按白名单投影
       quests: !rogue() && typeof trpgQuestLog === "function" ? trpgQuestLog(id, id === identity.id, kitsOwnedBy(id)) : null,
@@ -406,6 +414,7 @@
     const currentEpoch = epoch;
     if (packet.type === "resync") { epoch++; animation = Promise.resolve(); awaitingResync = false; }
     const incomingEpoch = packet.type === "resync" ? epoch : currentEpoch;
+    localDeadlines(packet, Date.now());
     animation = animation.then(async () => {
       if (incomingEpoch !== epoch) return;
       for (const fn of packetListeners) { if (incomingEpoch !== epoch) return; await fn(copy(packet)); if (incomingEpoch !== epoch) return; }

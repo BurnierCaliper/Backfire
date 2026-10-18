@@ -258,7 +258,7 @@
     out.fields = {}; out.gaps = {};
     for (const key of zoneKeys) if (obj(get(get(state, "fields"), key))) {
       const field = get(get(state, "fields"), key);
-      out.fields[key] = selected(field, ["fire", "fireOn", "electric", "acid", "ice", "collapse", "energy", "energyVal", "harmonic", "heal", "highland", "abyss", "isolate", "collapseOn", "collapseLv", "ruinOn", "ruinHp", "ruinMax"]);
+      out.fields[key] = selected(field, ["fire", "fireOn", "electric", "acid", "ice", "quicksand", "coral", "innate", "collapse", "energy", "energyVal", "harmonic", "heal", "highland", "abyss", "isolate", "collapseOn", "collapseLv", "ruinOn", "ruinHp", "ruinMax"]);
       out.fields[key].fieldLocked = !!get(field, "fieldLock");
     }
     for (const key of gapKeys) if (obj(get(get(state, "gaps"), key))) {
@@ -506,7 +506,7 @@
     const swap = get(view, "swap"); out.swap = obj(swap) ? identifiers(swap, {}, ["requestId", "from", "to", "recipient"]) : null;
     const ask = get(view, "ask"); out.ask = null;
     if (obj(ask)) {
-      const dto = identifiers(ask, copyFields(ask, {}, ["title"], ["deadline"], ["declined", "field"]), ["id"]);
+      const dto = identifiers(ask, copyFields(ask, {}, ["title"], ["deadline", "remainingMs"], ["declined", "field"]), ["id"]);
       enumField(ask, dto, "kind", ["choice", "block", "assist"]);
       if (get(ask, "deadline") === null) dto.deadline = null;
       dto.waitingNames = arr(get(ask, "waitingNames")).map(n => text(n, 60)).filter(n => n !== null);
@@ -551,7 +551,7 @@
     }
     if (own(packet, "offlineWait")) {
       const wait = get(packet, "offlineWait");
-      out.offlineWait = obj(wait) ? identifiers(wait, copyFields(wait, {}, ["name"], ["deadline"], []), ["actor", "owner"]) : null;
+      out.offlineWait = obj(wait) ? identifiers(wait, copyFields(wait, {}, ["name"], ["deadline", "remainingMs"], []), ["actor", "owner"]) : null;
     }
     enumField(packet, out, "screen", ["lobby", "exploration", "battle", "ended"]);
     if (get(packet, "ok") === false || get(packet, "error") != null) out.error = safeError(get(packet, "error"));

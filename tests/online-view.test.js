@@ -351,3 +351,12 @@ test("chat keeps ordinary words like 坚毅 / 'this hp', but still drops hidden-
   const out = V.projectMessages([msg("他很坚毅!"), msg("this hp bar is low"), msg("push people"), msg("shp:30"), msg("s h p 3"), msg("坚毅生命还剩一半"), msg("看后台")], player);
   assert.deepEqual(out.map(m => m.text), ["他很坚毅!", "this hp bar is low", "push people"]);
 });
+
+test("player battlefield receives quicksand / coral / innate field flags (GM can set them; players used to never see them)", () => {
+  const source = fixture();
+  Object.assign(source.state.fields[1], { quicksand: true, innate: true, sinkSecret: "SECRET-SINK" });
+  const out = V.projectPacket(source, player);
+  assert.equal(out.state.fields[1].quicksand, true);
+  assert.equal(out.state.fields[1].innate, true);
+  assert.equal(out.state.fields[1].sinkSecret, undefined);
+});
