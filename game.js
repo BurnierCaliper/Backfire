@@ -583,7 +583,7 @@
       });
     });
     out.push({ id: "__item", name: "使用道具", hint: "从背包里选一件在战斗中使用。", cost: { bonus: 1 } });
-    out.push({ id: "__move", name: "移动", hint: "移动到另一个区域。离开有借机攻击敌人的区域会被追打。", cost: { bonus: 1 } });
+    out.push({ id: "__move", name: "移动", hint: "移动到另一个区域。离开有借机攻击敌人的区域会被追打。", cost: typeof moveBaseCost === "function" ? moveBaseCost(u) : { bonus: 1 } });
     return out;
   }
 

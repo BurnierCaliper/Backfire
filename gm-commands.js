@@ -111,9 +111,12 @@
     if (own(p, "lastFrom") && p.lastFrom !== null) zone(p.lastFrom);
   }
   function patchField(p) {
-    const template = emptyField(); keys(p, Object.keys(template), "场地补丁");
+    // innate：固有场地（app.js · markInnateEnvironment，技能改不掉）。不在 emptyField 里，单独放行（以前主持人开战后没法设 / 取消）
+    const template = emptyField(); keys(p, Object.keys(template).concat(["innate"]), "场地补丁");
+    if (own(p, "innate")) bool(p.innate, "固有场地");
     if (!Object.keys(p).length) fail("场地补丁为空");
     Object.entries(p).forEach(([k, v]) => {
+      if (k === "innate") return;
       if (k === "fieldLock") { if (v !== null && (typeof v !== "string" || v.length > 100)) fail("场地锁定标记非法"); }
       else if (typeof template[k] === "boolean") bool(v, k);
       else number(v, k, k === "collapseLv" ? 1 : 0);
@@ -339,6 +342,8 @@
           if (FIELD_EFFECT_KEYS.some(k => p[k] === true) || p.fire > 0) clearFieldEffects(f);
           Object.assign(f, p); if (p.fire > 0) f.fireOn = true; if (f.fireOn && !f.fire) f.fire = 1;
           if (!f.fireOn) f.fire = 0; f.ruinHp = Math.min(f.ruinHp, f.ruinMax);
+          // 固有场地只对有主场地的区有意义：清掉主场地时一起取消
+          if (!(f.fireOn || FIELD_EFFECT_KEYS.some(k => k !== "fireOn" && f[k]))) f.innate = false;
           state.fields[cmd.zone] = f; publicSummary = `主持人：调整了 ${cmd.zone} 区场地。`; break;
         }
         case "setWeather":

@@ -323,9 +323,11 @@ const EnemyAI = (function () {
       return null;
     }
     if (spec.special === "bigsand") {
+      // 场上的沙灵：沙灵阵营的全都算，大沙灵自己、活沙、尘躯这些精英也算（以前只数四足 / 人形沙灵，
+      // 大沙灵 + 两只精英沙灵时照样召唤）
       const sands = state.units.filter(x =>
-        !x.isPlayer && !x.dead && !x.hidden &&
-        (x.kit === "sand_beast" || x.kit === "sand_human"));
+        !x.isPlayer && !x.dead && !x.hidden && !x._removed && totalHp(x) > 0 &&
+        (typeof factionOf === "function" ? factionOf(x) === "沙灵" : (x.kit === "sand_beast" || x.kit === "sand_human" || x === u)));
       if (sands.length < 3 && has("en_bigsand_summon")) return "en_bigsand_summon";
       if (!preyInZone(prey, u.zone).length && has("en_bigsand_heal")) return "en_bigsand_heal";
       return null;

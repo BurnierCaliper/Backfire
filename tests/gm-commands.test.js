@@ -229,3 +229,19 @@ test("D3 GM: toggling manual control never refills spent budgets and applies to 
   f.send({ type: "gm.setManual", actors: "all", enabled: false });
   assert.equal(f.c.GMCommands.isManual(id), false); assert.equal(f.c.GMCommands.isManual(f.enemy), false);
 });
+
+test("GM 场地：开战后可以把一区设成 / 取消固有场地；固有场地技能改不掉；流沙、沙珊瑚台地也能设", () => {
+  const f = fixture(); f.c.startCombat();
+  f.send({ type: "gm.setField", zone: 1, patch: { acid: true, innate: true } });
+  assert.equal(f.s.fields[1].innate, true);
+  assert.match(String(f.c.fieldChangeWhy(1, "electric")), /固有场地/);
+  f.send({ type: "gm.setField", zone: 1, patch: { innate: false } });
+  assert.equal(f.c.fieldChangeWhy(1, "electric"), null, "取消固有后技能可以改");
+  f.send({ type: "gm.setField", zone: 2, patch: { quicksand: true } }); assert.equal(f.s.fields[2].quicksand, true);
+  f.send({ type: "gm.setField", zone: 2, patch: { coral: true } }); assert.equal(f.s.fields[2].coral, true); assert.equal(f.s.fields[2].quicksand, false);
+  // 清掉主场地：固有一起取消
+  f.send({ type: "gm.setField", zone: 1, patch: { acid: true, innate: true } });
+  f.send({ type: "gm.setField", zone: 1, patch: { acid: false } });
+  assert.equal(f.s.fields[1].innate, false);
+  unchanged(f, { type: "gm.setField", zone: 1, patch: { innate: "yes" } });
+});

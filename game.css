@@ -2325,3 +2325,9 @@ body:not([data-screen="battle"]) .g-rank { display: none !important; }
 .rr-moon { background: radial-gradient(circle at 35% 35%, #f4f1e6 40%, #c9c3b0 75%); box-shadow: 0 0 18px 4px rgba(220, 220, 255, .35); opacity: 0; }
 .rr-clock { position: absolute; left: 12px; bottom: 8px; font-family: var(--num, sans-serif); font-size: 22px; color: var(--bone); text-shadow: 0 1px 3px #000; }
 .tr-wallets { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 4px 0 6px; }
+/* 整局数据 · 单回合最高爆发（sheet-ui.js · CareerLog.burstHtml） */
+.cl-burst-btn { font: inherit; color: var(--gold, #d8b25a); background: none; border: 0; border-bottom: 1px dashed currentColor; padding: 0; cursor: pointer; }
+.cl-burst-btn:hover, .cl-burst-btn:focus-visible { color: #ffd56b; outline: none; }
+.cl-burst .cl-h b { color: #ffd56b; font-size: 1.2em; margin-left: 4px; }
+.cl-buffs { margin: 4px 0 8px; padding-left: 20px; line-height: 1.7; }
+.cl-buffs small { color: var(--muted); }

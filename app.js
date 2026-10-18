@@ -127,6 +127,16 @@ function setWeather(kind, opts) {
   return null;
 }
 
+/** 我方单位普通移动的消耗（技能栏显示用；越过空隙要看去哪，在移动时另算）：
+ *  导体 / 探测模式不耗；站在酸液地面上离开要 1 行动点（荒原行者只要附赠）；其余 1 附赠行动 */
+function moveBaseCost(u) {
+  if (!u) return { bonus: 1 };
+  if (u.self === "conductor" || (u.kit === "ecmo" && u.resources && u.resources.probe)) return {};
+  const f = (state.fields || {})[u.zone] || {};
+  const wanderer = typeof featHas === "function" && featHas(u, "wanderer");
+  if (f.acid && !u.flying && !wanderer && !(typeof acidGroundWalker === "function" && acidGroundWalker(u))) return { ap: 1 };
+  return { bonus: 1 };
+}
 /** 这一区的场地现在能不能改成 kind（空 = 清除）：能返回 null，不能返回原因（深渊、损毁地面、固有场地、被锁定） */
 function fieldChangeWhy(zone, kind, opts) {
   opts = opts || {};
@@ -640,7 +650,7 @@ function explodeHigh(unit, total, opt) {
     const envWho = envBoom ? envCreditUnit(opt.envBy) : null;
     if (envWho) {
       unit._lastHitBy = envWho.id;   // 击杀算环境的所有者
-      scoreEnvHit(unit, { total: lifeBefore, breakDealt: 0 }, envWho);
+      scoreEnvHit(unit, { total: lifeBefore, breakDealt: 0 }, envWho, 0, "爆炸");
       const over = Math.floor(unit.overkill * SCORE_RULES.overkill);
       if (over > 0) envCommit(() => addScore("env", over * SCORE_RULES.env, envWho));
     } else if (acc && acc.actorIsPlayer) addScore("overkill", Math.floor(unit.overkill * SCORE_RULES.overkill), unitById(acc.actorId));
@@ -774,7 +784,7 @@ function applyAbyssFall(unit, prevZone, notes) {
   // 环境分数：把敌人弄进深渊（损毁地面塌掉、被击退进去……）——记在场地所有者 / 这次行动的出手方身上
   if (!unit.isPlayer && loss > 0) {
     const who = envCreditUnit(f.by);
-    if (who) { unit._lastHitBy = who.id; scoreEnvHit(unit, { total: Math.min(loss, totalHp(unit)), breakDealt: 0 }, who); }
+    if (who) { unit._lastHitBy = who.id; scoreEnvHit(unit, { total: Math.min(loss, totalHp(unit)), breakDealt: 0 }, who, 0, "深渊"); }
   }
   applyTrueDamage(unit.layers, loss);
   if ((loss || 0) > 0) spawnFloater(unit, loss, "physical");
@@ -2487,6 +2497,48 @@ function battleStat(u) {
   s.name = u.name;
   return s;
 }
+/* ===== 单回合最高爆发：每个我方单位一回合（第 N 回合，含敌人回合里的协助 / 借机）里造成的伤害合计，
+ * 记下这一回合用了哪些技能（各打了多少）、命中时吃到哪些增益（几次命中）。
+ * 记在 battleStats[单位 id].burst（这场最高）/ burstCur（这一回合在累计）；整局最高并进 LEDGER.career（ledger.js）。 */
+// 引擎计算过程里算增益的行：加成百分比、ATK / 倍率加成、翻倍、蚀刻视为克制……（减益、合计、基础包这些不算）
+const BURST_BUFF_SKIP = /^(基础包|加算百分比合计|最终伤害包|攻击次数|本段倍率|愿你无恙|起身状态)/;
+function burstBuffs(u, res) {
+  const out = [];
+  ((res && res.log) || []).forEach(line => {
+    const s = String(line).replace(/^#\d+\s*/, "").replace(/。$/, "").trim();
+    if (!s || BURST_BUFF_SKIP.test(s) || /[−-]\d/.test(s)) return;
+    if (/^克制表/.test(s)) { const m = s.match(/克制表\s*(.+?)：\s*\+(\d+)%/); if (m && Number(m[2]) > 0) out.push(`属性克制（${m[1]} +${m[2]}%）`); return; }
+    if (/\+0(\.0+)?(%|\b)/.test(s) && !/\+[1-9]|\+0\.\d*[1-9]/.test(s)) return;   // +0% 这类没起作用的
+    if (/\+\d|×\s*[2-9]|翻倍|视为被该属性克制/.test(s)) out.push(s);
+  });
+  // 进引擎之前就加在 ATK 上的（引擎只看到结果）
+  if (u) {
+    if (Number(u.bondAtk) > 0) out.push(`思念：ATK +${Number(u.bondAtk)}`);
+    if (Number(u.duetAtk) > 0) out.push(`双重奏：ATK +${Number(u.duetAtk)}`);
+    if (u.resources && u.resources.mecha && u.resources.overdrive) out.push("机体强化：ATK ×1.2");
+    if (u.resources && u.resources.preparedActive) out.push("准备：第一击加骰");
+  }
+  return out;
+}
+function burstNote(st, u, n, label, res) {
+  n = Math.floor(Number(n) || 0);
+  if (!st || n <= 0) return;
+  const T = Number(state.turnNo) || 1;
+  let cur = st.burstCur;
+  if (!cur || cur.turn !== T) cur = st.burstCur = { turn: T, dmg: 0, skills: {}, buffs: {} };
+  cur.dmg += n;
+  const key = label || "其他";
+  cur.skills[key] = (cur.skills[key] || 0) + n;
+  burstBuffs(u, res).forEach(b => { cur.buffs[b] = (cur.buffs[b] || 0) + 1; });
+  if (!st.burst || cur.dmg > st.burst.dmg) st.burst = JSON.parse(JSON.stringify(cur));
+}
+/** 这一下记在哪个技能名下：协助 / 借机按反应算，否则是这次行动用的技能 */
+function burstLabel(flags) {
+  if (flags && flags.assist) return "协助攻击";
+  if (flags && (flags.opp || flags.opportunity)) return "借机攻击";
+  const acc = state.actionAcc;
+  return (acc && acc.actorIsPlayer && acc.skillName) || "其他";
+}
 /* ===== 战斗评分（像鬼泣那样，鼓励打得华丽） =====
  * 分值都在 SCORE_RULES；评价的分数线 = 固定线 × 0.65 + 基准分 × 倍数 × 0.35
  * （固定线：SCORE_GRADES 第一幕的线，之后每幕 +SCORE_ACT_STEP；基准分：scorePar，按这场的敌人算）。
@@ -2749,13 +2801,14 @@ function envCreditUnit(by) {
   return acc && acc.actorIsPlayer ? unitById(acc.actorId) || null : null;
 }
 /** 环境伤害打在敌人身上：伤害、击破的分 ×1.2 记成「环境」 */
-function scoreEnvHit(target, res, who, bonus) {
+function scoreEnvHit(target, res, who, bonus, label) {
   if (!target || target.isPlayer || !res) return null;
   const st = battleStat(who);
   if (!st) return null;
   const dmg = Math.floor(Number(res.total) || 0), brk = Number(res.breakDealt) || 0;
   envCommit(() => {
     st.dmg += dmg; st.brk += brk; st.env = (st.env || 0) + dmg;
+    burstNote(st, null, dmg, `环境 · ${label || "配置物 / 场地"}`, res);
     addScore("env", (dmg * SCORE_RULES.dmg + brk * SCORE_RULES.brk) * SCORE_RULES.env, who, bonus);
   });
   return who;
@@ -2945,13 +2998,14 @@ function trackHealBy(actor, fn) {
   }
 }
 
-function beginActionAcc(actor) {
+function beginActionAcc(actor, skillId) {
   state.actionSeq = (Number(state.actionSeq) || 0) + 1;   // 第几次行动（用来判断一个技能是不是真的出手了）
   state.actionAcc = {
     dmg: 0, brk: 0, hits: 0, calls: 0, targets: [],
     side: 0, sideBy: {},   // 连带伤害：感电、高压场地、灼烧、共振、聚焦抹层等
     actorIsPlayer: actor ? !!actor.isPlayer : null,
-    actorId: actor ? actor.id : null
+    actorId: actor ? actor.id : null,
+    skillName: actor && actor.isPlayer && skillId ? skillDisplayName(actor, skillId) : ""   // 单回合最高爆发：这一回合用了哪些技能
   };
   state.actionWallHit = {};
 }
@@ -2970,7 +3024,7 @@ function noteSideDamage(amount, label, unit, noScore) {
   if (acc.actorIsPlayer && !(unit && unit.isPlayer) && !noScore) {
     const who = unitById(acc.actorId);
     const st = battleStat(who);
-    if (st) { st.dmg += n; addScore("dmg", n * SCORE_RULES.dmg, who); }
+    if (st) { st.dmg += n; addScore("dmg", n * SCORE_RULES.dmg, who); burstNote(st, who, n, `${acc.skillName || "行动"} · ${key}`); }
   }
 }
 
@@ -3202,7 +3256,7 @@ function applyTypedDotIn(env, unit, amount, element, notes, label, opts) {
   if (PROC_DOT_FX[sdKey]) procFx(unit, PROC_DOT_FX[sdKey]);
   addStatusDmg(sdKey, res.total || 0);
   noteSideDamage(res.total || 0, STATUS_DMG_NAME[sdKey] || "其他", unit, !!env);
-  if (env) { if (scoreEnvHit(unit, res, envWho)) scoreWeatherHelp(null, unit, res, true); }
+  if (env) { if (scoreEnvHit(unit, res, envWho, 0, STATUS_DMG_NAME[sdKey] || "场地")) scoreWeatherHelp(null, unit, res, true); }
   else if (unit && !unit.isPlayer && state.actionAcc && state.actionAcc.actorIsPlayer) scoreWeatherHelp(null, unit, res, true);
   if (unit && unit.isPlayer) scoreWeatherHelp(null, unit, res, false);
   if (unit && unit.isPlayer) { const st = battleStat(unit); if (st) st.taken += Math.floor(Number(res.total) || 0) + Math.floor(Number(res.shpDealt) || 0); }
@@ -7936,11 +7990,12 @@ function dealTo(attacker, target, opt) {
     // 配置物打在敌人身上：环境分数（×1.2，记在触发 / 操控它的人身上）
     const envWho = attacker && attacker.envSrc && target && !target.isPlayer ? envCreditUnit(attacker) : null;
     if (attacker && attacker.envSrc) {
-      if (envWho && scoreEnvHit(target, res, envWho, scoreBonus)) scoreWeatherHelp(attacker, target, res, true);
+      if (envWho && scoreEnvHit(target, res, envWho, scoreBonus, attacker.name)) scoreWeatherHelp(attacker, target, res, true);
     } else if (attacker && target && attacker.isPlayer && !target.isPlayer) {
       const st = battleStat(attacker);
       if (st) {
         st.dmg += Math.floor(Number(res.total) || 0); st.brk += Number(res.breakDealt) || 0;
+        burstNote(st, attacker, res.total, burstLabel(opt.flags), res);
         addScore("dmg", Math.floor(Number(res.total) || 0) * SCORE_RULES.dmg, attacker, scoreBonus);
         addScore("brk", (Number(res.breakDealt) || 0) * SCORE_RULES.brk, attacker, scoreBonus);
         scoreWeatherHelp(attacker, target, res, true);
@@ -10065,7 +10120,15 @@ function crushOnce(a, t, auto) {
   if (!a || !t) return lines;
   const atk = effectiveAtk(a, state.units);
   a.zone = Number(t.zone);
-  hitOne2(a, t, { element: "physical", mult: 1.5, baseBreak: 3, atk, flags: { action: true } }, lines);
+  // 已经抓在目标身上（每回合自动再碾）：人就挂在它身上，打飞行目标不用再付「近程打飞行」的附赠行动。
+  // 以前照收，可抓住期间夕夏拿不到附赠行动 → 每回合 0 伤害、目标不死不失衡、永远松不开手
+  const out = hitOne2(a, t, { element: "physical", mult: 1.5, baseBreak: 3, atk, flags: auto ? { action: true, flyFree: true } : { action: true } }, lines);
+  if (!out || !out.res || out.res.ok === false) {
+    // 没碾到（附赠行动不够打飞行目标、目标打不到……）：抓不住，已经抓着的也松手，免得卡死
+    if (a.resources) a.resources.crushId = null;
+    lines.push(`${a.name} 没能碾到 ${t.name}，${auto ? "松开了手" : "没能抓住"}。`);
+    return lines;
+  }
   if (auto) addFuel(1, "狂怒碾压", lines);   // 启动引擎+：狂怒碾压每个使用的回合 +1 燃油
   const dead = t.dead || (t.isPlayer && t.dying);
   if (dead) {
@@ -11183,7 +11246,7 @@ function runSkillInner(id, optRun) {
     }
   }
   snapshot();
-  beginActionAcc(a);
+  beginActionAcc(a, id);
   if ((a.kit === "xia" || a.kit === "berniel" || a.weaponOf === "xia") && !/engine$|prep$|summon$|return$|cover$/.test(id)) {
     markXiaAttack(a);
   }

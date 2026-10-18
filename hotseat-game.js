@@ -93,7 +93,8 @@
       const sameExtra = (a, b) => JSON.stringify(a || {}) === JSON.stringify(b || {});
       const labelOf = h => (detail.options || []).find(o => o.helper === h.unitId && sameExtra(o.extra, h.extra)) ||
         (detail.options || []).find(o => o.helper === h.unitId) || { label: h.unitName, sub: "" };
-      base.ask = { id: ask.id, kind: ask.kind, title: detail.title || "协助询问", deadline: ask.deadline,
+      // remainingMs：发出这一包时还剩多少毫秒。联机玩家按收到的时刻用自己的钟算倒计时（deadline 是房主电脑的钟，两边不一定对得上）
+      base.ask = { id: ask.id, kind: ask.kind, title: detail.title || "协助询问", deadline: ask.deadline, remainingMs: Number(ask.deadline) > 0 ? Math.max(0, ask.deadline - Date.now()) : null,
         waitingNames: ask.waiting.map(p => p.operatorName), eligible: ask.eligible, declined: ask.declined,
         options: (detail.options || []).filter(o => ask.options.some(u => u.unitId === o.helper)),
         // 协助攻击举手：打出失衡的人（chooser）看得到谁举了手并从中选人；举手的人看得到自己举的是哪一个

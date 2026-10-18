@@ -862,7 +862,12 @@
       if (myAsk && view.screen !== "lobby") { panelOpen = false; suppliesOpen = false; }
       panel.hidden = !(panelOpen || view.active && view.screen === "lobby" && !rogueHost);
       pauseBar.hidden = !(view.active && !view.isHost && view.screen !== "lobby" && (paused() || view.offlineWait));
-      if (!pauseBar.hidden) pauseBar.textContent = paused() ? "⏸ 房间暂停：正在等待连接恢复，恢复后会自动继续。" : `⏳ ${view.offlineWait.name} 离线，等待其返回。`;
+      // 离线等待：显示还剩几秒（到时间自动跳过 / 结束他的行动）；截止时间已换成本机的钟（online-game.js · localDeadlines）
+      if (!pauseBar.hidden) {
+        const bar = paused() ? "⏸ 房间暂停：正在等待连接恢复，恢复后会自动继续。"
+          : `⏳ ${esc(view.offlineWait.name)} 离线，等待其返回${Number(view.offlineWait.deadline) > 0 ? `（<span role="timer" aria-live="off" data-ol-deadline="${Number(view.offlineWait.deadline)}"></span>，到时间自动跳过）` : ""}。`;
+        if (pauseBar.dataset.html !== bar) { pauseBar.innerHTML = bar; pauseBar.dataset.html = bar; if (global.OnlineBattle && global.OnlineBattle.tickCountdowns) global.OnlineBattle.tickCountdowns(pauseBar); }
+      }
       document.body.classList.toggle("ol-paused", !pauseBar.hidden);
       paintLevelUps();
       if (!panel.hidden) html(panel, view.active ? roomMarkup() : entryMarkup(), "panel");
@@ -913,7 +918,7 @@
       if (field) {
         // 有对应单位的选项 → value 是单位 id（战场上亮起、编号）；其余 value 为空 → 提示栏按钮
         const menuOf = { kind: "unit", title: field.title || "选择", options: field.options.map(o => ({ label: o.label + (o.sub ? `（${o.sub}）` : ""), value: o.target || null })) };
-        return { mine, current: cur, acting, menu: menuOf, skills: [], armed: "__field", rule: true, hint: field.title || "", busy: disabled() };
+        return { mine, current: cur, acting, menu: menuOf, skills: [], armed: "__field", rule: true, hint: field.title || "", busy: disabled(), deadline: Number(field.deadline) || 0 };
       }
       return { mine, current: cur, acting, menu: choices, skills: skillsFor === cur && acting ? skillOptions : [],
         armed: request && request.skill || "", hint, busy: disabled() };
@@ -1197,6 +1202,9 @@
       render();
     }
     if (typeof api.savedInfo === "function") setTimeout(autoResume, 0);
+    // 倒计时（询问、离线等待）每半秒刷新一次文字
+    const countdownTimer = setInterval(() => { if (global.OnlineBattle && global.OnlineBattle.tickCountdowns) global.OnlineBattle.tickCountdowns(document); }, 500);
+    unsubs.push(() => clearInterval(countdownTimer));
     if (typeof api.subscribe === "function") unsubs.push(api.subscribe(render));
     if (typeof api.onPacket === "function") unsubs.push(api.onPacket(playPacket));
     render();

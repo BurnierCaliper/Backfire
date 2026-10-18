@@ -59,11 +59,19 @@
       gm: GMCommands.snapshot(), screen: Screens.current(), started, seq, messageNo, messages, publicLogs, settledResult, systemNotice, offlineWait, requests: [...requests].slice(-200), requestHighWater: [...requestHighWater] });
     try { localStorage.setItem(KEY, JSON.stringify(data)); storageError = false; } catch (_) { storageError = true; }
   }
+  /** 倒计时换成本机的钟：房主发来「还剩多少毫秒」，按收到这一包的时刻算本机的截止时间（播动画的延迟不算进去） */
+  function localDeadlines(packet, at) {
+    const ask = packet && packet.view && packet.view.ask;
+    if (ask && Number.isFinite(ask.remainingMs)) ask.deadline = at + ask.remainingMs;
+    const wait = packet && packet.offlineWait;
+    if (wait && Number.isFinite(wait.remainingMs)) wait.deadline = at + wait.remainingMs;
+  }
   function readSaved() { try { const v = JSON.parse(localStorage.getItem(KEY)); return v?.version === 1 ? v : null; } catch (_) { return null; } }
   function rawPacket(id, type = "result", tape = [], result = null) {
     const view = HotseatGame.getViewFor(id); view.players = roster(); view.network = true;
     return { protocol: PROTOCOL, build: BUILD, type, seq, state, tape, result: result || settledResult, view, screen: liveScreen(),
-      roomCode: identity.roomCode, hostName: identity.name, paused: isPaused(), messages, publicLogs, manualPhase, offlineWait, systemNotice,
+      roomCode: identity.roomCode, hostName: identity.name, paused: isPaused(), messages, publicLogs, manualPhase, systemNotice,
+      offlineWait: offlineWait ? { ...offlineWait, remainingMs: Math.max(0, offlineWait.deadline - Date.now()) } : null,
       mode, rogue: rogue() ? OnlineRogue.viewFor(id) : null, levelUps: levelUpsFor(id),
       // 任务日志（跑团）：房主按收件人挑好（草稿、没指定给他的不给），online-view.js 再按白名单投影
       quests: !rogue() && typeof trpgQuestLog === "function" ? trpgQuestLog(id, id === identity.id, kitsOwnedBy(id)) : null,
@@ -406,6 +414,7 @@
     const currentEpoch = epoch;
     if (packet.type === "resync") { epoch++; animation = Promise.resolve(); awaitingResync = false; }
     const incomingEpoch = packet.type === "resync" ? epoch : currentEpoch;
+    localDeadlines(packet, Date.now());
     animation = animation.then(async () => {
       if (incomingEpoch !== epoch) return;
       for (const fn of packetListeners) { if (incomingEpoch !== epoch) return; await fn(copy(packet)); if (incomingEpoch !== epoch) return; }
@@ -476,6 +485,27 @@
     } catch (_) { /* 取不到就用通用名 */ }
     return { __move: "移动", __item: "使用道具", __stand: "起身" }[id] || "行动";
   }
+  /** 这一下的结算摘要（战场日志用）：按单位合计伤害 / 击破 / 治疗，和弹出的状态字（失衡、倒下、感电……）。
+   *  只用玩家画面上本来就看得到的那些弹字：落在坚毅生命上（起身 / 濒死 / 死亡）的伤害和治疗不写数字，online-view.js · projectLogs 再过一遍白名单 */
+  function hitSummary(tape) {
+    const rows = new Map();
+    (tape || []).forEach(ev => {
+      if (!ev || ev.type !== "pop" || !ev.unitId) return;
+      const u = state.units.find(x => x.id === ev.unitId), snap = (ev.snap || []).find(x => x && x.id === ev.unitId) || u;
+      if (!u) return;
+      const row = rows.get(u.id) || { name: u.name, dmg: 0, brk: 0, heal: 0, words: [], aliveBefore: !(snap && (snap.dead || snap._removed)) };
+      const hpVisible = snap && !snap.upOnShp && !snap.dying && !snap.dead;
+      const n = Math.floor(Number(ev.value) || 0);
+      if (ev.kind === "dmg" && hpVisible) row.dmg += n;
+      else if (ev.kind === "heal" && hpVisible) row.heal += n;
+      else if (ev.kind === "break") row.brk += n;
+      if (ev.text && !row.words.includes(ev.text)) row.words.push(String(ev.text));
+      if (ev.kind === "dmg" && ev.adv && !row.words.includes("克制")) row.words.push("克制");
+      rows.set(u.id, row);
+    });
+    rows.forEach((r, id) => { const u = state.units.find(x => x.id === id); if (r.aliveBefore && u && !u.isPlayer && u.dead && !r.words.includes("被打倒")) r.words.push("被打倒"); delete r.aliveBefore; });
+    return [...rows.values()].filter(r => r.dmg || r.brk || r.heal || r.words.length).slice(0, 12);
+  }
   function onActionSettled(cmd, result, tape, meta) {
     if (!isHost() || restoring) return;
     if (!meta.onlineError && result?.executed !== false) systemNotice = "";
@@ -487,7 +517,7 @@
       if (cmd.type?.startsWith("gm.")) publicLogs.push({ kind: "gm", summary: { "gm.editUnit": "主持人更新了单位数据", "gm.setWeather": "主持人更新了天气", "gm.addProp": "主持人添加了配置物" }[cmd.type] || "主持人调整了战场",
         action: cmd.type === "gm.spawnEnemy" ? "spawn" : cmd.type === "gm.removeUnit" ? cmd.mode : cmd.type === "gm.removeProp" ? (cmd.mode === "destroy" ? "propDestroy" : "propRemove") : cmd.type === "gm.setManual" ? (cmd.enabled ? "manualOn" : "manualOff") : "edit",
         unitName: cmd.type === "gm.spawnEnemy" ? enemyPresets().find(p => p.id === cmd.enemyId)?.name : meta.unitName, propName: meta.propName, zone: cmd.zone, level: cmd.level, at: Date.now() });
-      else if (actor) publicLogs.push({ kind: "action", actorName: actor.name, actionName: (meta.skillName && meta.skillName !== cmd.skill && meta.skillName !== cmd.type ? meta.skillName : actionLabel(cmd)), at: Date.now() });
+      else if (actor) publicLogs.push({ kind: "action", actorName: actor.name, actionName: (meta.skillName && meta.skillName !== cmd.skill && meta.skillName !== cmd.type ? meta.skillName : actionLabel(cmd)), hits: hitSummary(tape), turn: state.turnNo, at: Date.now() });
       else publicLogs.push({ kind: "phase", phase: state.combatPhase, turn: state.turnNo, at: Date.now() });
       publicLogs = publicLogs.slice(-100);
     }

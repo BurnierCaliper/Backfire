@@ -506,3 +506,16 @@ test("无界面模拟：敌人全灭时还在等格挡的那一击照样落下�
   assert.equal(S.blockQueue.length, 0);
   assert.ok(c.totalHp(k) < hp0, "这一击落下了");
 });
+
+test("大沙灵召唤：场上沙灵按沙灵阵营全数（含大沙灵自己和精英），满 3 只就不再召唤", () => {
+  const plan = (f) => { const b = f.E("bigsand"); f.S.combatPhase = "enemy"; b.ap = 1; b.bonus = 1; const p = f.c.EnemyAI.plan(b); return p && p.meta ? String(p.meta.skillName || "") : ""; };
+  // 大沙灵 + 两只普通沙灵 = 3：不召唤（以前只数普通沙灵，2 < 3 照样召唤）
+  let f = field([{ id: "bigsand", lv: 3, zone: 2 }, { id: "sand_beast", lv: 3, zone: 2 }, { id: "sand_human", lv: 3, zone: 2 }]);
+  assert.doesNotMatch(plan(f), /召唤/);
+  // 大沙灵 + 活沙 + 一只沙灵 = 3：精英也算
+  f = field([{ id: "bigsand", lv: 3, zone: 2 }, { id: "livesand", lv: 3, zone: 2 }, { id: "sand_beast", lv: 3, zone: 2 }]);
+  assert.doesNotMatch(plan(f), /召唤/);
+  // 大沙灵 + 一只沙灵 = 2：召唤
+  f = field([{ id: "bigsand", lv: 3, zone: 2 }, { id: "sand_beast", lv: 3, zone: 2 }]);
+  assert.match(plan(f), /召唤/);
+});

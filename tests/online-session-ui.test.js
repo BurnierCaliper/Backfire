@@ -172,6 +172,8 @@ test("D3 game sessions: remote ownership, GM/private messages, round actions and
   const attackResult = await alice.evaluate(() => window.attackResult); assert.equal(attackResult?.ok, true, JSON.stringify(attackResult));
   const finalAttackSeq = await alice.evaluate(() => OnlineGame.getView().packet.seq);
   await bob.waitForFunction(seq => OnlineGame.getView().packet?.seq >= seq, finalAttackSeq);
+  // 战场日志写出打了谁、多少伤害（以前只有「瑞比 · 普通攻击」）
+  await bob.waitForFunction(() => (OnlineGame.getView().packet.publicLogs || []).some(r => /普通攻击 → .+：\d+ 伤害/.test(r.text)), null, { timeout: 10000 });
   measureAction(t, "4v3 ruby two-hit attack", f.wire.slice(attackStart));
   const menu = await alice.evaluate(actor => OnlineGame.actionMenu({ actor, skill: "__move" }), actor);
   assert.equal(menu.type, "actionOptions"); assert.ok(menu.choices.options.length > 0);
@@ -1148,4 +1150,29 @@ test("联机：玩家点「离开房间」真的离开——刷新后不再自�
   await alice.click("#ol-title-resume");
   await alice.waitForFunction(() => OnlineGame.getView().active);
   assert.equal(await alice.evaluate(() => OnlineGame.savedInfo().left), false, "回房后不再标着离开");
+});
+
+test("联机倒计时按玩家自己的钟算：玩家电脑时间和房主差一小时，协助格挡询问照样显示 20 秒左右", { timeout: 120000 }, async t => {
+  const f = await fixture(t); if (!f) return;
+  const { host, alice, bob, aliceId, bobId } = f;
+  // Alice 的电脑快了一小时
+  await alice.evaluate(() => { const real = Date.now.bind(Date); Date.now = () => real() + 3600000; });
+  await host.evaluate(({ aliceId, bobId }) => {
+    OnlineGame.assign(Object.fromEntries(partyHeroes().filter(u => ["hiaki", "yuito"].includes(u.kit)).map(u => [u.id, u.kit === "hiaki" ? aliceId : bobId])));
+    OnlineGame.start(); TrpgFlow.toBattle(); GAME.skip = true; GAME.instant = true; GAME.startOrEnd();
+  }, { aliceId, bobId });
+  await host.waitForFunction(() => HotseatGame.getView().phase === "picking" && GAME.depth === 0);
+  const heroes = await host.evaluate(() => HotseatGame.getView().heroes);
+  for (const [index, hero] of heroes.entries()) assert.equal((await submit(hero.owner === aliceId ? alice : hero.owner === bobId ? bob : host, { type: "orderPick", actor: hero.id, index })).ok, true);
+  for (const page of [alice, bob, host]) assert.equal((await submit(page, { type: "orderConfirm" })).ok, true);
+  const attack = await host.evaluate(() => ({ type: "gm.forceAttack", input: {
+    dmAtk: state.units.find(u => !u.isPlayer).id, dmTgt: partyHeroes().find(u => u.kit === "ruby").id,
+    dmEle: "physical", dmMult: 0, dmFlat: 1, dmBrk: 0, dmSkipBlock: false
+  } }));
+  await host.evaluate(command => { OnlineGame.submit(command); }, attack);
+  await alice.waitForFunction(() => OnlineGame.getView().packet?.view?.ask?.eligible, null, { timeout: 5000 });
+  const left = await alice.evaluate(() => OnlineGame.getView().packet.view.ask.deadline - Date.now());
+  assert.ok(left > 15000 && left <= 20500, "按本机的钟还剩 " + left);
+  await alice.waitForFunction(() => /^(1\d|20) 秒$/.test(document.querySelector("#hs-countdown")?.textContent || ""));
+  assert.deepEqual(f.errors, []);
 });

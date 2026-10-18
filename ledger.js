@@ -155,6 +155,11 @@ function careerRecordBattle(outcome, grade, extra) {
     row.name = s.name;
     row.weaponOf = s.weaponOf || row.weaponOf || null;
     CAREER_KEYS.forEach(k => { row[k] = (Number(row[k]) || 0) + Math.round(Number(s[k]) || 0); });
+    // 单回合最高爆发（app.js · burstNote）：整局只留最高的那一回合，记下是哪一场
+    if (s.burst && Number(s.burst.dmg) > (row.burst ? Number(row.burst.dmg) || 0 : 0)) {
+      row.burst = { dmg: Math.round(Number(s.burst.dmg) || 0), turn: Number(s.burst.turn) || 1, battleNo: no, battleName: (extra && extra.name) || "",
+        when: typeof ledgerTimeText === "function" ? ledgerTimeText() : "", skills: Object.assign({}, s.burst.skills), buffs: Object.assign({}, s.burst.buffs) };
+    }
     teamDmg += Math.round(Number(s.dmg) || 0);
     if (!mvp || (Number(s.dmg) || 0) > mvp.dmg) mvp = { name: s.name, dmg: Math.round(Number(s.dmg) || 0) };
   });
