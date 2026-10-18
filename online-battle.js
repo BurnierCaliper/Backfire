@@ -41,7 +41,7 @@
   }
   function snapProp(p) {
     const max = Math.max(1, Number(p.maxHp) || Number(p.hp) || 1), cur = Math.max(0, Number(p.hp) || 0);
-    const name = ({ button: "按钮", lever: "拉杆", battery: "超充能电池", boom: "爆炸桶", acid: "酸液桶", scrap: "碎渣机炮", turret: "防卫自律炮台", ironwall: "铁壁", scrapwall: "废铁墙", dome: "防护罩" })[p.kind] || p.kind || "配置物";
+    const name = ({ button: "按钮", lever: "拉杆", battery: "超充能电池", boom: "爆炸桶", acid: "酸液桶", scrap: "碎渣机炮", turret: "防卫自律炮台", ironwall: "铁壁", scrapwall: "废铁墙", dome: "防护罩", coral_branch: "沙珊瑚枝", coral_tentacle: "沙珊瑚触须", death_statue: "死亡雕像" })[p.kind] || p.kind || "配置物";
     return {
       id: "prop:" + p.id, name: p.name || name, isPlayer: p.faction !== "enemy", isProp: true, isDevice: DEVICE.includes(p.kind),
       zone: Number(p.zone) || 1, level: p.level || 1, atk: 0,

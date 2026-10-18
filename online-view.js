@@ -198,7 +198,7 @@
     if (!obj(prop) || !id(get(prop, "id"))) return null;
     const out = identifiers(prop, {}, ["id"]);
     copyFields(prop, out, ["name"], ["zone", "level", "hp", "maxHp", "shield", "shieldMax"], ["destroyed"]);
-    enumField(prop, out, "kind", ["button", "lever", "battery", "boom", "acid", "scrap", "turret", "ironwall", "scrapwall", "dome"]);
+    enumField(prop, out, "kind", ["button", "lever", "battery", "boom", "acid", "scrap", "turret", "ironwall", "scrapwall", "dome", "coral_branch", "coral_tentacle", "death_statue"]);
     enumField(prop, out, "faction", ["player", "enemy", "neutral"]);
     return out;
   }

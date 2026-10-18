@@ -4,7 +4,9 @@
   const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const option = (value, label, selected) => `<option value="${esc(value)}"${selected ? " selected" : ""}>${esc(label)}</option>`;
   const present = u => !u.hidden && !u.dead && !u.fused && !u._removed;
-  const propNames = { button: "按钮", lever: "拉杆", battery: "超充能电池", boom: "爆炸桶", acid: "酸液桶", scrap: "碎渣机炮", turret: "防卫炮台", ironwall: "铁壁", scrapwall: "废铁墙", dome: "防护罩" };
+  const propNames = { button: "按钮", lever: "拉杆", battery: "超充能电池", boom: "爆炸桶", acid: "酸液桶", scrap: "碎渣机炮", turret: "防卫炮台", ironwall: "铁壁", scrapwall: "废铁墙", dome: "防护罩", coral_branch: "沙珊瑚枝", coral_tentacle: "沙珊瑚触须" };
+  const factionNames = { player: "玩家", enemy: "敌人", neutral: "中立" };
+  const isCoral = k => k === "coral_branch" || k === "coral_tentacle";   // 沙珊瑚是中立的（props.js · makeProp）
   const statusNames = { burn: "灼烧层数", shock: "感电", corr: "腐蚀", frostbite: "冻伤", shockwave: "冲击", high: "高能", reso: "共振", unstable: "不稳定", weak: "虚弱", inspire: "振奋", sturdy: "坚固", hide: "隐蔽", advantage: "优势", chase: "追猎" };
   const fieldNames = { "": "无主场地", fireOn: "火场", acid: "酸液", ice: "冰面", electric: "电场", energy: "能量", harmonic: "谐波", heal: "疗愈", quicksand: "流沙", coral: "沙珊瑚台地" };
   const weatherNames = { none: "常态", heat: "酷暑", snow: "雪天", acid: "酸雨", thunder: "雷鸣", glow: "微光", sand: "沙暴", phase: "相位" };
@@ -81,8 +83,8 @@
     }
     function propMarkup() {
       const p = selectedProp(); if (p) propId = p.id;
-      const edit = p ? `<h3>编辑配置物</h3>${select("ogm-prop", "配置物", (state().props || []).map(x => option(x.id, `${x.name} · ${x.zone} 区`, x.id === propId)).join(""))}<div class="ogm-grid">${select("ogm-prop-zone", "所在区", zoneOptions(p.zone))}${select("ogm-prop-faction", "阵营", options({ player: "玩家", enemy: "敌人" }, p.faction))}${number("ogm-prop-hp", "耐久", p.hp)}${number("ogm-prop-max", "耐久上限", p.maxHp)}${number("ogm-prop-edit-level", "等级", p.level || 1, 1, 25, 1)}${check("ogm-prop-movable", "可移动", !!p.movable)}${select("ogm-prop-link", "连接间隔", (zones().length === 3 ? ["1-2", "2-3"] : ["1-2"]).map(k => option(k, k + " 区", p.link === k)).join(""))}</div><div class="ogm-actions">${button("应用配置物修改", "edit-prop", 'class="ogm-primary"')}${button("移除配置物", "remove-prop")}${button("摧毁配置物", "destroy-prop", 'class="ogm-danger"')}</div>` : "";
-      return `<h3>添加配置物</h3><div class="ogm-grid">${select("ogm-prop-kind", "种类", options(propNames, propKind))}${select("ogm-prop-add-zone", "放置区域", zoneOptions(1))}${number("ogm-prop-level", "等级", 1, 1, "", 1)}${select("ogm-prop-add-faction", "阵营", options({ player: "玩家", enemy: "敌人" }, "player"))}</div>${button("添加配置物", "add-prop", 'class="ogm-primary"')}${edit}<p class="ogm-muted">移除不触发效果；摧毁会按正常规则引爆或释放场地效果。</p>`;
+      const edit = p ? `<h3>编辑配置物</h3>${select("ogm-prop", "配置物", (state().props || []).map(x => option(x.id, `${x.name} · ${x.zone} 区`, x.id === propId)).join(""))}<div class="ogm-grid">${select("ogm-prop-zone", "所在区", zoneOptions(p.zone))}${select("ogm-prop-faction", "阵营", options(factionNames, p.faction))}${number("ogm-prop-hp", "耐久", p.hp)}${number("ogm-prop-max", "耐久上限", p.maxHp)}${number("ogm-prop-edit-level", "等级", p.level || 1, 1, 25, 1)}${check("ogm-prop-movable", "可移动", !!p.movable)}${select("ogm-prop-link", "连接间隔", (zones().length === 3 ? ["1-2", "2-3"] : ["1-2"]).map(k => option(k, k + " 区", p.link === k)).join(""))}</div><div class="ogm-actions">${button("应用配置物修改", "edit-prop", 'class="ogm-primary"')}${button("移除配置物", "remove-prop")}${button("摧毁配置物", "destroy-prop", 'class="ogm-danger"')}</div>` : "";
+      return `<h3>添加配置物</h3><div class="ogm-grid">${select("ogm-prop-kind", "种类", options(propNames, propKind))}${select("ogm-prop-add-zone", "放置区域", zoneOptions(1))}${number("ogm-prop-level", "等级", 1, 1, "", 1)}${select("ogm-prop-add-faction", "阵营", options(factionNames, isCoral(propKind) ? "neutral" : "player"))}</div>${button("添加配置物", "add-prop", 'class="ogm-primary"')}${edit}<p class="ogm-muted">移除不触发效果；摧毁会按正常规则引爆或释放场地效果。</p>`;
     }
     function fieldMarkup() {
       const gapKeys = zones().length === 3 ? ["1-2", "2-3"] : ["1-2"]; if (!gapKeys.includes(gapKey)) gapKey = gapKeys[0];

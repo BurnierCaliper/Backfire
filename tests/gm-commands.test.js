@@ -245,3 +245,17 @@ test("GM 场地：开战后可以把一区设成 / 取消固有场地；固有�
   assert.equal(f.s.fields[1].innate, false);
   unchanged(f, { type: "gm.setField", zone: 1, patch: { innate: "yes" } });
 });
+
+test("联机主持人：可以放沙珊瑚枝 / 触须（中立、装甲生命和沙漠遭遇一致），算进 coralInZone，可移除", () => {
+  const f = fixture();
+  const id = f.send({ type: "gm.addProp", kind: "coral_branch", zone: 1, level: 3, faction: "neutral" }).id;
+  const p = f.s.props.find(x => x.id === id);
+  assert.equal(p.name, "沙珊瑚枝"); assert.equal(p.faction, "neutral"); assert.equal(p.maxHp, 30 + 4 * 2);
+  const t = f.send({ type: "gm.addProp", kind: "coral_tentacle", zone: 2, level: 1 }).id;
+  assert.equal(f.s.props.find(x => x.id === t).maxHp, 8);
+  f.send({ type: "gm.editProp", id, patch: { faction: "neutral", zone: 1 } });
+  f.c.startCombat();
+  assert.equal(f.c.coralInZone(1), true, "沙珊瑚枝让这一区算有会抓人的沙珊瑚");
+  f.send({ type: "gm.removeProp", id, mode: "remove" }); assert.equal(f.s.props.some(x => x.id === id), false);
+  unchanged(f, { type: "gm.addProp", kind: "coral_branch", zone: 1, faction: "weird" });
+});
