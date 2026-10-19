@@ -368,6 +368,12 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **夕夏狂怒碾压倍率调整、川川电击鞭改名、雪天冻土易伤修正**（app.js · `crushOnce`；skill-text.js、party.js；engine.js · `chartMod`）
+  - 狂怒碾压第一轮改为 0.75×atk 物理 + 2 击破；抓住后每回合自动再碾改为 1.5×atk + 1d8 + 3 击破。自动击杀仍返还 1 行动点与 1 附赠。
+  - 川川「电击鞭」改名为「电能鞭」（技能名、说明、日志、测试同步）。
+  - 冻土对冰属性的强制 25% 易伤现在明确独立于天气计算，雪天等天气修正不会覆盖或取消它。
+
+
 - **作者试玩反馈（10/19）：配置物打出的失衡、铁壁、多阵营的敌我、活沙**（app.js · `assistBreaker` / `queueAssistAttack` / `eligibleAssisters`、`opportunityStrike` / `triggerLeaveOpportunity`、`barrierGuards` / `barrierFoe` / `barrierFor` / `absorbBarrier` / `aoeShieldFor` / `flushAoePulse` / `dealTo`、`enemyAllyOf` / `autoEnemyBlockers`；mods.js · `bpLeaveOpportunity`；items.js · `useItemOn` / `useEffectItem`（投掷罐）；enemies.js · `livingSandAllies`、`en_king_hold`、`en_thug_opp` / `en_wolf_opp`；desert.js · `coralGasBurst`；bestiary.js；tests/multi-faction-bugs.test.js）
   - **配置物打出的失衡没进我方的协助攻击**：爆炸桶、电池爆炸、危墙倒塌、可燃气爆燃是用一个不在场上的「替身」打出去的，替身不算玩家，打出的敌人失衡被当成「敌人打敌人」，只找和它敌对的敌人来接——一般的战斗里没人能接，日志写「没有可发动协助攻击的敌人」（「有时」能接，是因为我方炮台、我方操控的碎渣机炮的替身标成了我方）。现在替身打出的失衡、和失衡者不敌对的单位打出的失衡（敌人被同伙的范围攻击误伤、我方误伤队友），都按失衡的一方算：敌人失衡由我方接（谁都能接，引爆的人也能接），我方失衡由敌人接。敌对阵营打出的失衡照旧由打的那一方接（沙鱼打失衡沙灵：沙鱼群起）。
   - **铁壁挡不了借机攻击**：借机攻击要等人走到隔壁才结算，以前按「被打的人现在站在哪一区」找铁壁，于是他离开的那一区的铁壁挡不到。现在借机攻击（狼队长、匕首狂徒、图纸「借机攻击单元」，以及主持人手动放的借机技能）按出手的那一区（离开的那一区）找屏障；每一下借机攻击算单独的一次攻击，铁壁各挨一下，不沿用、也不占用当前行动「已拦截」的记录。走进有铁壁的区不算（借机攻击发生在离开的那一区）。

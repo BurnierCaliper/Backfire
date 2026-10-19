@@ -10212,7 +10212,11 @@ function crushOnce(a, t, auto) {
   a.zone = Number(t.zone);
   // 已经抓在目标身上（每回合自动再碾）：人就挂在它身上，打飞行目标不用再付「近程打飞行」的附赠行动。
   // 以前照收，可抓住期间夕夏拿不到附赠行动 → 每回合 0 伤害、目标不死不失衡、永远松不开手
-  const out = hitOne2(a, t, { element: "physical", mult: 1.5, baseBreak: 3, atk, flags: auto ? { action: true, flyFree: true } : { action: true } }, lines);
+  // 第一轮 0.75×atk + 2 击破；抓住后每回合自动再碾改为 1.5×atk + 1d8 + 3 击破
+  const opt = auto
+    ? { element: "physical", mult: 1.5, dice: [1, 8], baseBreak: 3, atk, flags: { action: true, flyFree: true } }
+    : { element: "physical", mult: 0.75, baseBreak: 2, atk, flags: { action: true } };
+  const out = hitOne2(a, t, opt, lines);
   if (!out || !out.res || out.res.ok === false) {
     // 没碾到（附赠行动不够打飞行目标、目标打不到……）：抓不住，已经抓着的也松手，免得卡死
     if (a.resources) a.resources.crushId = null;
@@ -11837,7 +11841,7 @@ function runSkillInner(id, optRun) {
         a.resources.charge -= 1;
         const from = a.zone;
         a.zone = Number(t.zone);
-        lines.push(`电击鞭缠住 ${t.name}：消耗 1 电能，川川从 ${from} 区拉到 ${a.zone} 区。`);
+        lines.push(`电能鞭缠住 ${t.name}：消耗 1 电能，川川从 ${from} 区拉到 ${a.zone} 区。`);
         if (typeof afterMove === "function") afterMove(a, lines);
       }
       addCharge(1);

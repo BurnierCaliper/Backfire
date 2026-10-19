@@ -913,7 +913,7 @@ function skillList(unit) {
     add({ id: "xia_execute", name: "处决", hint: "引擎+目标晕眩 · 1d8+1.5atk 火焰 · 穿刺", minLv: 2 });
     add({ id: "xia_ram", name: "全速撞击", hint: "引擎 · 移动≤2 · 先震荡再 atk物理 · 每移1格+1击破", minLv: 3 });
     add({ id: "xia_selfburn", name: "引火烧身", hint: "需引擎 · 进入自焚，可选立刻移动 1 距离", minLv: 6, bare: true });
-    add({ id: "xia_crush", name: "狂怒碾压", hint: "同区 · 需引擎 · 1.5atk 物理 +3击破 · 未死未失衡则抓住敌人，每回合自动重复", minLv: 9 });
+    add({ id: "xia_crush", name: "狂怒碾压", hint: "同区 · 需引擎 · 0.75atk 物理 +2击破 · 抓住后每回合自动 1.5atk+1d8 +3击破", minLv: 9 });
     add({ id: "xia_summon", name: "唤出柏妮尔", hint: "武器生物化" });
   }
   if (unit.kit === "berniel") {
@@ -925,7 +925,7 @@ function skillList(unit) {
   }
   if (unit.kit === "chuan") {
     add({ id: "chuan_aa", name: "普通攻击", hint: "近距离 · 两次 atk/2+1d4 电击 共1击破 · 耗1电能变三次共2击破" });
-    add({ id: "chuan_whip", name: "电击鞭", hint: "距离1以内 · atk/2 能量 1击破 · +1电能 · 可耗1电能把自己拉到敌人区" });
+    add({ id: "chuan_whip", name: "电能鞭", hint: "距离1以内 · atk/2 能量 1击破 · +1电能 · 可耗1电能把自己拉到敌人区" });
     add({ id: "chuan_wall", name: "铁壁", hint: "耗1电能 · 同区挡伤盾 atk+1d6 装甲 · 电能≥3可多耗1加 atk 护盾", minLv: 2 });
     add({ id: "chuan_over", name: "电站超频", hint: "任意单位（可对自己）过载 · +2电能；已有≥3电能则改为 atk/2 护盾", minLv: 3 });
     add({ id: "chuan_pulse", name: "高能脉冲", hint: "对自身施加蓄能", minLv: 6 });
