@@ -416,9 +416,10 @@ function useItemOn(actor, itemId, target, zone) {
       markAoeZone(z, itemId === "shockbomb" ? null : { element: itemId === "bomb_e" ? "electric" : "acid", dmg: 9, attacker: actor });
     }
     units.forEach(u => {
-      // 被铁壁 / 废铁墙这类屏障保护的单位不受范围攻击（屏障在配置物那一轮挨打）
-      if (itemId === "shockbomb" && typeof aoeShieldFor === "function" && aoeShieldFor(u)) {
-        notes.push(`${u.name} 被${aoeShieldFor(u).name}护住，没受影响。`);
+      // 被铁壁 / 废铁墙这类屏障保护的单位不受范围攻击（屏障在配置物那一轮挨打）；屏障只挡敌方扔过来的（自己人扔的不挡，app.js · barrierFoe）
+      const shield = itemId === "shockbomb" && typeof aoeShieldFor === "function" ? aoeShieldFor(u, actor) : null;
+      if (shield) {
+        notes.push(`${u.name} 被${shield.name}护住，没受影响。`);
         return;
       }
       if (itemId === "shockbomb") {
@@ -531,7 +532,8 @@ function useEffectItem(actor, it, target, zone, notes) {
     const units = (state.units || []).filter(u => itemPresent(u) && Number(u.zone) === z && u.kit !== "ironwall" && (!it.alliesOnly || u.isPlayer));
     if (!units.length) notes.push(`${z} 区没有单位。`);
     units.forEach(u => {
-      if (!it.alliesOnly && typeof aoeShieldFor === "function" && aoeShieldFor(u)) { notes.push(`${u.name} 被${aoeShieldFor(u).name}护住，没受影响。`); return; }
+      const shield = !it.alliesOnly && typeof aoeShieldFor === "function" ? aoeShieldFor(u, actor) : null;   // 屏障只挡敌方扔过来的
+      if (shield) { notes.push(`${u.name} 被${shield.name}护住，没受影响。`); return; }
       itemApplyStatus(actor, u, it.key, notes);
     });
     return;
