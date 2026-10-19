@@ -2393,7 +2393,8 @@ const Rogue = (function () {
     if (all && !run.growthDaily.allDone) {
       run.growthDaily.allDone = true;
       bagAdd(G().fusionItem, 1);
-      notes.push(`三个每日挑战全部完成：额外获得 ${(ITEM_CATALOG[G().fusionItem]||{}).name || "赫心融合体"}×1。`);
+      state.kuizhi = (Number(state.kuizhi) || 0) + 1000;
+      notes.push(`三个每日挑战全部完成：额外获得 ${(ITEM_CATALOG[G().fusionItem]||{}).name || "赫心融合体"}×1 和 1000 奎支。`);
     }
   }
 function advanceDays(run, n) {
