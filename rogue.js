@@ -2272,11 +2272,25 @@ const Rogue = (function () {
    * 通用任务：造成（最高等级×100）点持有属性伤害 / 15 击破 / 击杀杂兵 / 击杀精英 等。
    * 每个完成：随机武器材料 + 1000 奎支；三个全完成：额外 1 个赫心融合体。 */
   const GROWTH_DAILY_TYPES = ["battle", "elite", "check"];
+  const GROWTH_CHAR_TASKS = [
+    { id: "char_task", name: (n) => `${n} 完成任务`, desc: (n, type) => `使用 ${n} 完成 1 次${ROGUE_NODE_TYPES[type]?.label || type}` },
+    { id: "char_kill", name: (n) => `${n} 击杀`, desc: (n) => `使用 ${n} 击杀 3 个敌人` },
+    { id: "char_brk", name: (n) => `${n} 击破`, desc: (n) => `使用 ${n} 打出 6 点击破` }
+  ];
   const GROWTH_GENERAL_POOL = [
     { id: "dmg", name: "造成伤害", desc: (lv, els) => `造成 ${lv * 100} 点${els.length ? "（" + els.join("/") + "）" : ""}伤害`, target: (lv) => lv * 100 },
     { id: "brk", name: "造成击破", desc: () => "造成 15 点击破", target: () => 15 },
     { id: "kill_minion", name: "击杀杂兵", desc: () => "击杀 20 个杂兵", target: () => 20 },
-    { id: "kill_elite", name: "击杀精英", desc: () => "击杀 6 个精英", target: () => 6 }
+    { id: "kill_elite", name: "击杀精英", desc: () => "击杀 6 个精英", target: () => 6 },
+    { id: "stagger", name: "打出失衡", desc: () => "造成 8 次失衡", target: () => 8 },
+    { id: "assist", name: "协助攻击", desc: () => "发动 6 次协助攻击", target: () => 6 },
+    { id: "block", name: "协助格挡", desc: () => "成功协助格挡 5 次", target: () => 5 },
+    { id: "elem_dmg", name: "属性伤害", desc: (lv, els) => `造成 ${lv * 80} 点${els.length ? pick(els) : "任意"}属性伤害`, target: (lv) => lv * 80 },
+    { id: "no_death", name: "无死亡通关", desc: () => "完成 1 个任务且无人倒下", target: () => 1 },
+    { id: "long_rest", name: "长休", desc: () => "进行 1 次长休", target: () => 1 },
+    { id: "check_ok", name: "完成检定", desc: () => "成功完成 2 次熟练项检定", target: () => 2 },
+    { id: "shop", name: "商店消费", desc: () => "在商店花费 500 奎支", target: () => 500 },
+    { id: "weather", name: "更换天气", desc: () => "主动将天气改为指定天气 1 次", target: () => 1 }
   ];
   function growthDailyKey(run) {
     const d = new Date();
@@ -2296,14 +2310,17 @@ const Rogue = (function () {
     const seed = `${run.seed || "g"}:${key}`;
     const daily = withRng(seed, () => {
       const char = owned.length ? pick(owned) : null;
+      const charName = char ? heroName(char.kit) : "角色";
+      const charTask = pick(GROWTH_CHAR_TASKS);
       const type = pick(GROWTH_DAILY_TYPES);
       const gens = GROWTH_GENERAL_POOL.slice();
       const g1 = gens.splice(Math.floor(Math.random() * gens.length), 1)[0];
       const g2 = gens.splice(Math.floor(Math.random() * gens.length), 1)[0];
+      const charTarget = charTask.id === "char_kill" ? 3 : charTask.id === "char_brk" ? 6 : 1;
       return {
         key,
         tasks: [
-          { id: "char", name: char ? `${heroName(char.kit)} 完成任务` : "角色任务", desc: char ? `使用 ${heroName(char.kit)} 完成 1 次${ROGUE_NODE_TYPES[type]?.label || type}` : "无持有角色", kit: char?.kit || null, type, progress: 0, target: 1, done: false },
+          { id: charTask.id, name: charTask.name(charName), desc: charTask.desc(charName, type), kit: char?.kit || null, type, progress: 0, target: charTarget, done: false },
           { id: g1.id, name: g1.name, desc: g1.desc(maxLv, els), progress: 0, target: g1.target(maxLv), done: false },
           { id: g2.id, name: g2.name, desc: g2.desc(maxLv, els), progress: 0, target: g2.target(maxLv), done: false }
         ],
@@ -2321,8 +2338,13 @@ const Rogue = (function () {
     const isElite = node && node.type === "elite";
     daily.tasks.forEach(t => {
       if (t.done) return;
-      if (t.id === "char" && t.kit && run.party.some(h => h.kit === t.kit) && node && node.type === t.type) {
+      const inParty = t.kit && run.party.some(h => h.kit === t.kit);
+      if (t.id === "char_task" && inParty && node && node.type === t.type) {
         t.progress = Math.min(t.target, t.progress + 1);
+      } else if (t.id === "char_kill" && inParty) {
+        t.progress = Math.min(t.target, t.progress + 1);
+      } else if (t.id === "char_brk" && inParty) {
+        t.progress = Math.min(t.target, t.progress + 2);
       } else if (t.id === "dmg") {
         t.progress = Math.min(t.target, t.progress + Math.floor(t.target * 0.3));
       } else if (t.id === "brk") {
@@ -2331,6 +2353,24 @@ const Rogue = (function () {
         t.progress = Math.min(t.target, t.progress + (isElite ? 0 : 4));
       } else if (t.id === "kill_elite") {
         t.progress = Math.min(t.target, t.progress + (isElite ? 1 : 0));
+      } else if (t.id === "stagger") {
+        t.progress = Math.min(t.target, t.progress + 2);
+      } else if (t.id === "assist") {
+        t.progress = Math.min(t.target, t.progress + 2);
+      } else if (t.id === "block") {
+        t.progress = Math.min(t.target, t.progress + 1);
+      } else if (t.id === "elem_dmg") {
+        t.progress = Math.min(t.target, t.progress + Math.floor(t.target * 0.25));
+      } else if (t.id === "no_death") {
+        t.progress = Math.min(t.target, t.progress + 1);
+      } else if (t.id === "long_rest") {
+        // 长休进度在休息节点结算
+      } else if (t.id === "check_ok") {
+        // 检定进度在检定成功时结算
+      } else if (t.id === "shop") {
+        // 商店消费进度在购买时结算
+      } else if (t.id === "weather") {
+        // 天气变更进度在改天气时结算
       }
       if (t.progress >= t.target && !t.done) completeGrowthDailyTask(run, t, notes);
     });
