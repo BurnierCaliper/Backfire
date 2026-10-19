@@ -946,6 +946,7 @@ const Rogue = (function () {
     captureParty(run, notes);
     run.party.forEach(h => { delete h.pendingBreaks; });
     if (outcome === "win" && run.party.length) {
+      if (run.growth) updateGrowthDailyProgress(run, notes);
       const node = !boss && !ambush ? currentNode(run) : null;
       rollItemDrops(run, boss ? "boss" : node && node.type === "elite" ? "elite" : "battle", notes);
       rollMaterialDrops(run, notes);
@@ -2264,7 +2265,93 @@ const Rogue = (function () {
     const name = (ITEM_CATALOG[G().fusionItem] || {}).name || "赫心融合体";
     (notes || []).push(`第 ${today} 天：获得 ${name}×${n}（现有 ${bagCount(G().fusionItem)}）。`);
   }
-  function advanceDays(run, n) {
+  
+  /* ---------- 长线养成：每日挑战 ----------
+   * 每天按日期种子刷 3 个：1 个角色任务 + 2 个通用任务。
+   * 角色任务：从持有角色里随机挑一个，用该角色完成 1 次指定类型的任务。
+   * 通用任务：造成（最高等级×100）点持有属性伤害 / 15 击破 / 击杀杂兵 / 击杀精英 等。
+   * 每个完成：随机武器材料 + 1000 奎支；三个全完成：额外 1 个赫心融合体。 */
+  const GROWTH_DAILY_TYPES = ["battle", "elite", "check"];
+  const GROWTH_GENERAL_POOL = [
+    { id: "dmg", name: "造成伤害", desc: (lv, els) => `造成 ${lv * 100} 点${els.length ? "（" + els.join("/") + "）" : ""}伤害`, target: (lv) => lv * 100 },
+    { id: "brk", name: "造成击破", desc: () => "造成 15 点击破", target: () => 15 },
+    { id: "kill_minion", name: "击杀杂兵", desc: () => "击杀 20 个杂兵", target: () => 20 },
+    { id: "kill_elite", name: "击杀精英", desc: () => "击杀 6 个精英", target: () => 6 }
+  ];
+  function growthDailyKey(run) {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  }
+  function ensureGrowthDaily(run) {
+    if (!run || !run.growth) return null;
+    const key = growthDailyKey(run);
+    if (run.growthDaily && run.growthDaily.key === key) return run.growthDaily;
+    const owned = (run.party || []).concat(run.reserve || []);
+    const maxLv = Math.max(1, ...owned.map(h => h.level || 1));
+    const els = [...new Set(owned.flatMap(h => {
+      const note = (typeof HEROES !== "undefined" && HEROES.find(x => x.kit === h.kit) || {}).note || "";
+      const m = note.match(/([冰电能量火物理谐波酸]+)/);
+      return m ? m[1].split("") : [];
+    }))];
+    const seed = `${run.seed || "g"}:${key}`;
+    const daily = withRng(seed, () => {
+      const char = owned.length ? pick(owned) : null;
+      const type = pick(GROWTH_DAILY_TYPES);
+      const gens = GROWTH_GENERAL_POOL.slice();
+      const g1 = gens.splice(Math.floor(Math.random() * gens.length), 1)[0];
+      const g2 = gens.splice(Math.floor(Math.random() * gens.length), 1)[0];
+      return {
+        key,
+        tasks: [
+          { id: "char", name: char ? `${heroName(char.kit)} 完成任务` : "角色任务", desc: char ? `使用 ${heroName(char.kit)} 完成 1 次${ROGUE_NODE_TYPES[type]?.label || type}` : "无持有角色", kit: char?.kit || null, type, progress: 0, target: 1, done: false },
+          { id: g1.id, name: g1.name, desc: g1.desc(maxLv, els), progress: 0, target: g1.target(maxLv), done: false },
+          { id: g2.id, name: g2.name, desc: g2.desc(maxLv, els), progress: 0, target: g2.target(maxLv), done: false }
+        ],
+        allDone: false
+      };
+    });
+    run.growthDaily = daily;
+    return daily;
+  }
+  function updateGrowthDailyProgress(run, notes) {
+    const daily = ensureGrowthDaily(run);
+    if (!daily) return;
+    // 简单进度：胜利时按任务类型累加（实际伤害/击杀数据可后续接入 ledger）
+    const node = currentNode(run);
+    const isElite = node && node.type === "elite";
+    daily.tasks.forEach(t => {
+      if (t.done) return;
+      if (t.id === "char" && t.kit && run.party.some(h => h.kit === t.kit) && node && node.type === t.type) {
+        t.progress = Math.min(t.target, t.progress + 1);
+      } else if (t.id === "dmg") {
+        t.progress = Math.min(t.target, t.progress + Math.floor(t.target * 0.3));
+      } else if (t.id === "brk") {
+        t.progress = Math.min(t.target, t.progress + 3);
+      } else if (t.id === "kill_minion") {
+        t.progress = Math.min(t.target, t.progress + (isElite ? 0 : 4));
+      } else if (t.id === "kill_elite") {
+        t.progress = Math.min(t.target, t.progress + (isElite ? 1 : 0));
+      }
+      if (t.progress >= t.target && !t.done) completeGrowthDailyTask(run, t, notes);
+    });
+  }
+  function completeGrowthDailyTask(run, task, notes) {
+    if (!task || task.done) return;
+    task.done = true;
+    task.progress = task.target;
+    const mats = Object.keys(ROGUE_MATERIALS || {});
+    const mat = mats.length ? pick(mats) : "mat_metal";
+    bagAdd(mat, 1);
+    state.kuizhi = (Number(state.kuizhi) || 0) + 1000;
+    notes.push(`每日挑战「${task.name}」完成：获得 ${(ITEM_CATALOG[mat]||{}).name || mat}×1 和 1000 奎支。`);
+    const all = run.growthDaily.tasks.every(t => t.done);
+    if (all && !run.growthDaily.allDone) {
+      run.growthDaily.allDone = true;
+      bagAdd(G().fusionItem, 1);
+      notes.push(`三个每日挑战全部完成：额外获得 ${(ITEM_CATALOG[G().fusionItem]||{}).name || "赫心融合体"}×1。`);
+    }
+  }
+function advanceDays(run, n) {
     run.actDay = (run.actDay || 0) + n;
     run.day += n;
     LEDGER.day = run.day;      // 队伍档案的「第几天」（整局数据里每场战斗的时间）跟着本局走，不再另算（ledger.js · ledgerInRun）
@@ -2584,7 +2671,7 @@ const Rogue = (function () {
     canClinic, cyberInfo, cyberPreview, cyberCost, modifyHero, healCost, healHero,
     pendingChoices, choiceOptions, choose, queueLevelRewards,
     dailyDate, dailySeed, dailyParty, dailyStats, featPickRates,
-    drawInfo, drawHero, swapHero, partyLevel, growthXp: () => growthOn, routeEta,
+    drawInfo, drawHero, swapHero, partyLevel, growthXp: () => growthOn, routeEta, growthDaily: ensureGrowthDaily,
     camp, nextAct, afterVictory, endRun,
     enterRunMode, leaveRunMode, syncWorld, save, inRunMode: () => !!stash,
     setLootHandler, grantLoot, rollItemDrops
