@@ -211,7 +211,15 @@
         c.wrap.classList.toggle("is-dim", !!targets && !targets.has(s.id) && s.id !== ui.current);
         setPickBadge(c.wrap, targetNo ? targetNo.get(s.id) : 0);
       });
-      cards.forEach((c, id) => { if (!seen.has(id)) { c.wrap.remove(); cards.delete(id); } });
+      cards.forEach((c, id) => {
+        if (seen.has(id)) return;
+        cards.delete(id);
+        // 被打倒的敌人：还在淡出就等淡完再拿掉，免得一下子消失（和 game.js · setView 一样）
+        if (c.wrap.classList.contains("dead") && c.wrap.isConnected) {
+          c.wrap.classList.remove("ko-held"); c.wrap.classList.add("gone");
+          setTimeout(() => c.wrap.remove(), 1800);
+        } else c.wrap.remove();
+      });
     }
 
     function paintHud(data, ui) {

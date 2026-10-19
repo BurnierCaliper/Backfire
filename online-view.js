@@ -290,10 +290,14 @@
       return [out];
     });
   }
-  /* 攻击演出（attack-fx.js · resolve 挑出来的招式）：只有两个单位 id、招式种类、属性和几个画法开关，没有任何数值 */
+  /* 攻击演出（attack-fx.js · resolve 挑出来的招式）：只有两个单位 id、招式种类、属性和几个画法开关，没有任何数值。
+   * 专属演出（attack-fx.js · SCRIPTS）再带上脚本名和几样现场数据：谁被刺入、伯妮尔 / EDC 的主人、推还是拉、打哪一区、隔几区；
+   * 以及协助攻击要推镜头、格挡火花画在哪、拉斯缪尔的能量罐（累积能量百分比——玩家自己的角色仪表上本来就看得到） */
   const FX_KINDS = ["slash", "thrust", "smash", "claw", "bite", "shot", "spread", "bolt", "beam", "zap", "shard", "lob", "flame", "wave", "explode", "support", "hex"];
   const FX_FLAGS = ["melee", "area", "heavy", "flash", "flurry", "shield", "needle", "fur", "roar", "drill", "cane", "fist", "stream", "glitch", "big", "sweep"];
   const FX_ELEMENTS = ["physical", "fire", "ice", "electric", "acid", "energy", "harmonic"];
+  const FX_SCRIPT = /^[a-z][a-z_]{1,31}$/;
+  const clampInt = (n, lo, hi) => Math.max(lo, Math.min(hi, Math.round(n)));
   function projectFx(fx) {
     if (!obj(fx)) return null;
     const actor = id(get(fx, "actor")), target = id(get(fx, "target")), move = get(fx, "move");
@@ -302,7 +306,28 @@
     FX_FLAGS.forEach(k => { if (get(move, k) === true) out[k] = true; });
     if (["katana", "knife", "rapier"].includes(get(move, "blade"))) out.blade = get(move, "blade");
     const hits = number(get(move, "hits")); if (hits !== undefined) out.hits = Math.max(1, Math.min(20, Math.floor(hits)));
-    return { actor, target, move: out };
+    const res = { actor, target, move: out };
+    const script = get(fx, "script"); if (typeof script === "string" && FX_SCRIPT.test(script)) res.script = script;
+    const d = get(fx, "data");
+    if (obj(d)) {
+      const data = {};
+      if (get(d, "ally") === true) data.ally = true;
+      const dist = number(get(d, "dist")); if (dist !== undefined) data.dist = clampInt(dist, 0, 8);
+      ["pierced", "owner"].forEach(k => { const v = id(get(d, k)); if (v) data[k] = v; });
+      if (["push", "pull"].includes(get(d, "dir"))) data.dir = get(d, "dir");
+      const zoneOf = number(get(d, "zoneOf")); if (zoneOf !== undefined) data.zoneOf = clampInt(zoneOf, 1, 9);
+      if (get(d, "twice") === true) data.twice = true;
+      if (Object.keys(data).length) res.data = data;
+    }
+    if (get(fx, "assist") === true) res.assist = true;
+    if (get(fx, "parried") === true) res.parried = true;
+    const blocker = id(get(fx, "blocker")); if (blocker) res.blocker = blocker;
+    const tank = get(fx, "tank");
+    if (obj(tank)) {
+      const tid = id(get(tank, "id")), from = number(get(tank, "from")), to = number(get(tank, "to")), ms = number(get(tank, "ms"));
+      if (tid && from !== undefined && to !== undefined) res.tank = { id: tid, from: clampInt(from, 0, 300), to: clampInt(to, 0, 300), ms: ms === undefined ? 900 : clampInt(ms, 200, 2000) };
+    }
+    return res;
   }
   function projectMessages(messages, context) {
     const { recipientId, gmId } = context;

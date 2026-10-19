@@ -157,6 +157,37 @@ test("D3 display: incoming tape plays snapshots in sequence and never mutates re
   assert.deepEqual(o.errors, []);
 });
 
+test("D3 display: 房主发来的专属演出照着播——协助攻击推镜头，敌人倒下先留着（带红叉）、这一下演完再淡出", async t => {
+  const o = await open(t); if (!o) return; const { page } = o; await player(page);
+  await page.addScriptTag({ path: path.resolve(__dirname, "..", "attack-fx.js") });
+  await page.evaluate(() => {
+    window.__seen = { focus: false, held: false, pre: 0, ko: 0 };
+    const L = AttackFx.script("laser"), pre = L.pre;
+    L.pre = function () { window.__seen.pre++; return pre.apply(this, arguments); };
+    const ko = AttackFx.ko; AttackFx.ko = function () { window.__seen.ko++; return ko.apply(this, arguments); };
+    new MutationObserver(() => {
+      if (document.querySelector(".ol-battle.assist-focus")) window.__seen.focus = true;
+      const c = document.querySelector('[data-unit-id="enemy"]');
+      if (c && c.classList.contains("dead") && c.classList.contains("ko-held") && getComputedStyle(c).opacity === "1") window.__seen.held = true;
+    }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ["class"] });
+    const packet = JSON.parse(JSON.stringify(fixture.view.packet)); packet.type = "result"; packet.displayOnly = true; packet.screen = "battle";
+    const dead = packet.state.units.map(u => u.id === "enemy" ? { ...u, dead: true, layers: [{ type: "flesh", current: 0, max: 35 }] } : u);
+    packet.tape = [{ type: "pop", unitId: "enemy", kind: "dmg", value: 30, main: true, element: "energy", snap: dead }];
+    packet.fx = { actor: "a", target: "enemy", move: { kind: "bolt", el: "energy" }, script: "laser", assist: true };
+    packet.state = { ...packet.state, units: dead };
+    fixture.playing = fixture.receive(packet);
+  });
+  await page.evaluate(() => fixture.playing);
+  await page.waitForTimeout(300);
+  assert.deepEqual(await page.evaluate(() => window.__seen), { focus: true, held: true, pre: 1, ko: 1 });
+  const after = await page.evaluate(() => {
+    const c = document.querySelector('[data-unit-id="enemy"]');
+    return { focus: !!document.querySelector(".ol-battle.assist-focus"), held: !!(c && c.classList.contains("ko-held")), anims: [...document.querySelectorAll(".ol-battle .g-field > *, .ol-battle .g-hud")].reduce((n, el) => n + el.getAnimations().length, 0) };
+  });
+  assert.deepEqual(after, { focus: false, held: false, anims: 0 }, "演完拉回原样、放开淡出");
+  assert.deepEqual(o.errors, []);
+});
+
 test("D3 display: a resync replaces an in-flight old snapshot and prevents its later frames from repainting", async t => {
   const o = await open(t); if (!o) return; const { page } = o; await player(page);
   await page.evaluate(() => {

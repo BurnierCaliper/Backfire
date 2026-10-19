@@ -117,7 +117,7 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
   padding: 18px 18px 12px;
   min-height: 0;
   overflow: hidden;
-  background: #d9d4cb;   /* 浅色水泥地（skin.css 叠噪点）；以前是冷灰 #e6e9ec */
+  background: #e6e9ec;
 }
 .g-field.z2 { grid-template-columns: minmax(0, 1fr) 28px minmax(0, 1fr); }
 .g-field.z3 { grid-template-columns: minmax(0, 1fr) 32px minmax(0, 1fr) 32px minmax(0, 1fr); padding: 12px 10px 8px; }
@@ -131,8 +131,8 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
 .g-zone {
   position: relative;
   min-height: 0;
-  border: 2px solid #cdc6ba;
-  background: #f2efe9;   /* 浅一号的水泥板：比地面亮，单位卡（白）照样跳出来 */
+  border: 1px solid #d3dae2;
+  background: #f5f6f8;
   display: flex;
   flex-direction: column;
   justify-content: space-evenly;
@@ -619,6 +619,13 @@ body.online-player #atk-fx { z-index: 91 !important; }
 .dmg-energy { color: #6fb6bc; } .dmg-physical { color: #d8955c; } .dmg-acid { color: #82b282; } .dmg-harmonic { color: #b48ccb; }
 
 .g-app.hitstop .g-field { filter: saturate(.72) contrast(1.06); }
+/* 镜头推近（协助攻击、碎渣重炮、狂瀑）：以目标为中心，战场四周压一圈暗角；战场外的界面在 game.js · zoomIn 里压暗 */
+.g-field::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  opacity: 0; transition: opacity .25s ease-out;
+  background: radial-gradient(ellipse at var(--focus-x, 50%) var(--focus-y, 50%), rgba(18, 15, 13, 0) 42%, rgba(18, 15, 13, .4) 100%);
+}
+.g-app.assist-focus .g-field::after, .ol-battle.assist-focus .g-field::after { opacity: 1; }
 .g-app.hitstop .unit-wrap.hit .unit { animation-duration: .48s; }
 .unit-wrap.hit .unit { animation: hitShake .24s linear; }
 @keyframes hitShake {
@@ -638,6 +645,30 @@ body.online-player #atk-fx { z-index: 91 !important; }
   42% { transform: translate(calc(var(--kx, 8px) * -.22), calc(var(--ky, 0px) * -.22)) rotate(calc(var(--kr, 2deg) * -.4)); }
   70% { transform: translate(calc(var(--kx, 8px) * .08), calc(var(--ky, 0px) * .08)); }
   100% { transform: translate(0, 0); }
+}
+/* 专属演出（attack-fx.js · SCRIPTS）临时挂在卡片上的样式：发抖（龙哥饮弹前）、被打飞（小朋友升龙拳 / 撼地拳）、变回武器消失（伯妮尔焰袭）。
+ * 用单独的 translate / rotate / scale：和出手的 transform（冲过去、后坐）叠在一起，互不抢 */
+.unit-wrap.fx-tremble { animation: fxTremble .6s linear; }
+@keyframes fxTremble {
+  0%, 100% { translate: 0 0; }
+  10% { translate: -2px 1px; } 20% { translate: 2px -1px; } 30% { translate: -3px 0; } 40% { translate: 3px 1px; }
+  50% { translate: -2px -1px; } 60% { translate: 3px 0; } 70% { translate: -3px 1px; } 80% { translate: 2px -1px; } 90% { translate: -1px 0; }
+}
+.unit-wrap.fx-knockfly { animation: fxKnockFly .7s cubic-bezier(.2, .8, .3, 1); z-index: 4; }
+@keyframes fxKnockFly {
+  0% { translate: 0 0; rotate: 0deg; }
+  28% { translate: calc(var(--kx, 8px) * 1.6) -56px; rotate: calc(var(--kr, 2deg) * -4); }
+  62% { translate: calc(var(--kx, 8px) * .4) 4px; rotate: var(--kr, 2deg); }
+  78% { translate: 0 -8px; rotate: 0deg; }
+  100% { translate: 0 0; rotate: 0deg; }
+}
+.unit-wrap.fx-vanish { animation: fxVanish .6s ease-out forwards; }
+@keyframes fxVanish {
+  0% { opacity: 1; scale: 1; }
+  45%, 100% { opacity: 0; scale: .45; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .unit-wrap.fx-tremble, .unit-wrap.fx-knockfly { animation: none; }
 }
 .unit-wrap .flash {
   position: absolute;
@@ -1638,6 +1669,10 @@ body.trpg .trpg-only { display: flex !important; }
 .unit-wrap.overkill .hpn b.neg { color: #d8342c; font-size: 1.15em; }
 /* 一记重击打死：先停一会儿，再慢慢淡出 */
 .unit-wrap.dead.dead-slow { transition: opacity 2.4s ease-in 1.4s; }
+/* 这一段攻击演出还没放完：被打倒的敌人先留在场上（带红叉），演完再按上面的节奏淡出（game.js · releaseKOs） */
+.unit-wrap.dead.ko-held, .unit-wrap.dead.dead-slow.ko-held { opacity: 1; transition: none; }
+/* 规则层已经把它从场上拿掉了：还没淡完的快点淡掉，再移除 */
+.unit-wrap.dead.gone, .unit-wrap.dead.dead-slow.gone { opacity: 0; transition: opacity .45s ease-in; }
 /* 高能自爆 */
 .stamp.boom {
   color: var(--energy, #36c3d6); font-size: 64px;
@@ -1645,7 +1680,15 @@ body.trpg .trpg-only { display: flex !important; }
   animation-duration: 1.5s;
 }
 .pop.boom { filter: drop-shadow(0 0 10px rgba(80, 220, 240, .85)); }
-.g-app.quake .g-field { animation: quake .55s cubic-bezier(.36, .07, .19, .97); }
+.g-app.quake .g-field, .ol-battle.quake .g-field { animation: quake .55s cubic-bezier(.36, .07, .19, .97); }
+/* 小震：连射、重击的余震（attack-fx.js 脚本里的 c.shake(小于 1)） */
+.g-app.quake-s .g-field, .ol-battle.quake-s .g-field { animation: quakeS .32s cubic-bezier(.36, .07, .19, .97); }
+@keyframes quakeS {
+  20%, 80% { transform: translate(2px, -1px); }
+  40%, 60% { transform: translate(-3px, 2px); }
+  50% { transform: translate(3px, -1px); }
+}
+@media (prefers-reduced-motion: reduce) { .g-app.quake-s .g-field, .ol-battle.quake-s .g-field { animation: none; } }
 @keyframes quake {
   10%, 90% { transform: translate(-2px, 1px); }
   20%, 80% { transform: translate(5px, -3px); }

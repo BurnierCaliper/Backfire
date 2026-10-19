@@ -28,6 +28,8 @@
     fast: false,
     ended: false,
     slow: 1,
+    koHold: 0,         // >0 表示正在演一段行动：被打倒的敌人先留在场上，演完再淡出（releaseKOs）
+    koHandles: [],     // 留着的击倒红叉
     actorId: null,
     arm: null,         // 当前选中的技能与目标选择状态
     skillTap: null,    // 触屏：不用选目标的技能点了一下、正在预演（再点同一个按钮才放出去）
@@ -698,7 +700,10 @@
       if (!c) c = createCard(s);
       if (p) {
         if (!p.stunned && s.stunned && !s.dead) beats.push({ kind: "stun", id, ice: s.iceNext });
-        if (!p.dead && s.dead) beats.push({ kind: "kill", id });
+        if (!p.dead && s.dead) {
+          beats.push({ kind: "kill", id });
+          if (G.koHold && !s.isPlayer) c.wrap.classList.add("ko-held");   // 这段演完再淡出（releaseKOs）
+        }
         if (!p.dying && s.dying && !s.dead) beats.push({ kind: "down", id });
         const healed = sumCur(s) - sumCur(p);
         const shieldOf = (x) => (x.layers || []).filter(l => l.type === "shield").reduce((a, l) => a + l.cur, 0);
@@ -709,7 +714,14 @@
       placeCard(c, s, animate);
     });
     cards.forEach((c, id) => {
-      if (!next.has(id)) { c.wrap.remove(); cards.delete(id); }
+      if (next.has(id)) return;
+      cards.delete(id);
+      // 被打倒的敌人：还在淡出（或这段演出还留着它）就等淡完再拿掉，免得一下子消失
+      if (c.wrap.classList.contains("dead") && !G.skip && c.wrap.isConnected) {
+        c.wrap.classList.remove("ko-held");
+        c.wrap.classList.add("gone");
+        realTimeout(() => c.wrap.remove(), 1800);
+      } else c.wrap.remove();
     });
     G.view = next;
     paintGaps();
@@ -912,14 +924,54 @@
     const u = unitById(o.attackerId);
     return u && u.kit === "captain_wolf" ? "ice" : "physical";
   }
-  /** 这一下用哪种攻击演出。pops：这次行动的弹字（打到谁、几段、什么属性）；cmd：玩家的技能指令。不演就返回 null */
+  /** 武器人 / EDC 这类：它的主人是谁（伯妮尔→夕夏、EDC→拉斯缪尔），给专属演出用 */
+  function ownerIdOf(id) {
+    const u = unitById(id);
+    if (!u || !u.weaponOf) return null;
+    const o = (state.units || []).find(x => x.kit === u.weaponOf && !isWeaponUnit(x));
+    return o ? o.id : null;
+  }
+  /** 场上有刺入（诺拉的针）的单位 */
+  function piercedId() {
+    try { const u = (state.units || []).find(x => !x.dead && typeof isPierced === "function" && isPierced(x)); return u ? u.id : null; }
+    catch (e) { return null; }
+  }
+  /** 拉斯缪尔现在的累积能量（能量罐示意图用）；场上没有拉斯缪尔返回 null */
+  function rasEnergy() {
+    const r = (state.units || []).find(u => u.kit === "ras" && !u.dead);
+    return r ? { id: r.id, pct: Math.max(0, Math.round(Number(r.resources && r.resources.energyPct) || 0)) } : null;
+  }
+  /** 拉斯缪尔的能量罐：他（或 EDC）这一下让累积能量变了，返回要画的 { id, from, to, ms }（水位从 from 走到 to），否则 null */
+  function rasTankOf(meta, cmd) {
+    const r0 = meta && meta._ras, r1 = r0 ? rasEnergy() : null;
+    if (!r0 || !r1 || r0.id !== r1.id || r0.pct === r1.pct) return null;
+    if (meta.actorId !== r0.id && ownerIdOf(meta.actorId) !== r0.id) return null;
+    return { id: r0.id, from: r0.pct, to: r1.pct, ms: cmd && cmd.skill === "edc_drain" ? 1100 : 900 };
+  }
+  /** 谁替目标挡下了这一下：玩家的协助格挡在 meta 里；敌人的自动协助格挡（队长·牛、巡逻车……）从记录里认名字 */
+  function blockerOf(meta, tape) {
+    if (meta.blockerId) return meta.blockerId;
+    const line = (tape || []).find(e => e.type === "log" && /自动协助格挡[^\n]*→ 成功/.test(e.text));
+    const m = line && /(?:^|\n)\s*(.+?) 自动协助格挡 /.exec(line.text);
+    const u = m && (state.units || []).find(x => !x.isPlayer && x.name === m[1].trim() && x.id !== meta.targetId);
+    return u ? u.id : null;
+  }
+  /** 这一下有没有被格挡下来（玩家的协助格挡、空手格挡，敌人的格挡都算） */
+  function parriedOf(meta, tape) {
+    return !!meta.blockerId || (tape || []).some(e => e.type === "log" && /格挡[^\n]*→ 成功/.test(e.text));
+  }
+  /** 这一下用哪种攻击演出。pops：这次行动的弹字（打到谁、几段、什么属性）；cmd：玩家的技能指令。不演就返回 null。
+   *  另外带上技能 id、专属演出的脚本名（attack-fx.js · SCRIPTS）和脚本要的现场数据（data） */
   function strikePlan(meta, pops, cmd) {
     if (!window.AttackFx || G.sim || !meta || !meta.actorId) return null;
     const actorId = meta.actorId;
     const dmgOf = (e) => e.kind === "dmg" && (Number(e.value) || 0) > 0 && e.unitId !== actorId;
     let mains = pops.filter(e => dmgOf(e) && e.main);
     if (!mains.length) mains = pops.filter(dmgOf);
-    const targetId = meta.targetId && meta.targetId !== actorId ? meta.targetId : (mains[0] && mains[0].unitId) || meta.targetId || null;
+    // 这次碰到的单位（伤害、击破、挂效果都算），按先后：乱打、电力夺取、声波这类一次打好几个的按它演
+    const targets = [];
+    pops.forEach(e => { if (e.unitId && e.unitId !== actorId && /^(dmg|break|status|fxword)$/.test(e.kind) && !targets.includes(e.unitId)) targets.push(e.unitId); });
+    const targetId = meta.targetId && meta.targetId !== actorId ? meta.targetId : (mains[0] && mains[0].unitId) || targets[0] || meta.targetId || null;
     if (!targetId) return null;
     const a = G.view.get(actorId), t = G.view.get(targetId);
     if (!a || (!t && String(targetId).indexOf("gap:") !== 0)) return null;
@@ -931,19 +983,56 @@
     const sys = meta._cmd || null;
     let skillId = cmd && cmd.type === "skill" ? cmd.skill : (meta.skillId || "");
     let mode = cmd && cmd.picks ? cmd.picks.mode : null;
-    if (!skillId && sys && sys.type === "assistAnswer" && a.kit) { skillId = a.kit + "_assist"; mode = sys.extra && sys.extra.mode; }
+    if (!skillId && sys && sys.type === "assistAnswer" && a.kit) {
+      // 协助攻击：瑞比机甲时是银翼
+      skillId = (a.kit === "ruby" && u && u.resources && u.resources.mecha ? "wing" : a.kit) + "_assist";
+      mode = sys.extra && sys.extra.mode;
+    }
     if (!skillId && a.isPlayer && a.kit && !a.isProp) skillId = a.kit + "_aa";   // 单人模式登场的伙伴：按它的普通攻击演
+    const ally = !!(t && !t.isGap && t.isPlayer === a.isPlayer);
     const move = AttackFx.resolve({
       kit: a.kit || (u && u.kit) || "", skillId, skillName: meta.fxName || meta.skillName || "", isPlayer: !!a.isPlayer,
       element, dist, dmg: mains.length > 0, touched: pops.some(e => e.unitId === targetId),
-      ally: !!(t && !t.isGap && t.isPlayer === a.isPlayer), targets: new Set(mains.map(e => e.unitId)).size,
+      ally, targets: new Set(mains.map(e => e.unitId)).size,
       hits: mains.length, mode, range: u && u.range, big: false
     });
-    if (!move || move.kind === "none") return null;
-    return { move, actorId, targetId, mains };
+    const script = AttackFx.scriptOf(skillId);
+    if ((!move || move.kind === "none") && !script) return null;
+    // 推 / 拉：目标最后落在离出手的人更近还是更远的区（哔哩哩磁力移动）
+    let dir = null;
+    const lastSnap = [...pops].reverse().find(e => e.snap);
+    if (lastSnap && t) {
+      const moved = (lastSnap.snap instanceof Map ? lastSnap.snap : toMap(lastSnap.snap)).get(targetId);
+      if (moved && Number(moved.zone) !== Number(t.zone)) {
+        try { dir = zoneDist(Number(a.zone), Number(moved.zone), state.zoneMode) < dist ? "pull" : "push"; } catch (e) {}
+      }
+    }
+    const zonePick = cmd && cmd.picks && (Number(cmd.picks.zone) || Number(cmd.picks.dest)) || null;
+    // twice：开技能时选了「再来一次」（灯耗圣盾二次盾突）
+    const data = { ally, dist, pierced: piercedId(), owner: ownerIdOf(actorId), dir, zoneOf: zonePick || (t ? Number(t.zone) : null), twice: !!(cmd && cmd.picks && cmd.picks.again === "yes") };
+    const plan = move && move.kind !== "none" ? move : { kind: "hex", el: element, melee: false };
+    return { move: plan, actorId, targetId, mains, targets, skillId, script, data };
   }
-  /** 出手：近身的冲过去（先往后一收再扑上去）、远程的往后一顿 + 蓄力 + 弹道；支援 / 挂效果拉一条线过去 */
+  /** 专属演出的「现场」：脚本（attack-fx.js · SCRIPTS）只通过它碰战场 */
+  function strikeCtx(st) {
+    return {
+      actor: st.actorId, target: st.targetId, mains: st.mains || [], targets: st.targets || [], move: st.move || {}, data: st.data || {},
+      rect: (id) => (typeof id === "number" ? zoneRectOf(id) : rectOf(id)),
+      zoneRect: (x) => zoneRectOf(typeof x === "number" ? x : zoneOfView(x)),
+      wait: (ms) => wait(ms),
+      dash: (id, to, o) => dashTo(id, to, o),
+      recoil: (id, to, px) => { const c = cards.get(id), a = rectOf(id); if (c && a && to) recoil(c, a, to, px); },
+      nudge: (id, dx, dy, ms) => nudgeCard(id, dx, dy, ms),
+      shake: (p) => shakeField(p),
+      cls: (id, name, ms) => flashClass(id, name, ms),
+      burst: (el, r, big) => { if (window.HitFx && r && !G.skip) HitFx.burst(el || "physical", { left: r.x - r.w / 2, top: r.y - r.h * .42, width: r.w, height: r.h }, { big: !!big }); },
+      owner: (id) => ownerIdOf(id)
+    };
+  }
+  /** 出手：有专属演出的照脚本演；没有的近身冲过去（先往后一收再扑上去）、远程后坐 + 蓄力 + 弹道；支援 / 挂效果拉一条线过去 */
   async function strikeIn(st) {
+    const scr = st.script && AttackFx.script(st.script);
+    if (scr && (scr.pre || scr.self)) { st.ctx = st.ctx || strikeCtx(st); await runScript(scr.pre || scr.self, st.ctx); return; }
     const a = rectOf(st.actorId), t = rectOf(st.targetId), c = cards.get(st.actorId), m = st.move;
     if (!a || !t) return;
     if (STRIKE_NO_HIT.has(m.kind)) {
@@ -966,8 +1055,11 @@
     await AttackFx.travel(a, t, m);
   }
   function zoneOfView(id) { const s = G.view.get(id); return s ? s.zone : 1; }
-  /** 主攻击的后几段：弹道招式再飞一发（散弹、范围的不用） */
-  async function strikeAgain(st, e) {
+  /** 主攻击的后几段：有专属演出的照脚本；没有的弹道招式再飞一发（散弹、范围的不用） */
+  async function strikeAgain(st, e, i) {
+    const scr = st.script && AttackFx.script(st.script);
+    if (scr && scr.again) { st.ctx = st.ctx || strikeCtx(st); await runScript(scr.again, st.ctx, e, i); return; }
+    if (scr && (scr.pre || scr.self)) return;   // 脚本只写了出手：后几段不再另飞弹道
     const m = st.move;
     if (m.melee || m.area || m.kind === "spread" || !window.AttackFx || AttackFx.KIND[m.kind] !== "shot") return;
     const a = rectOf(st.actorId), t = rectOf(e.unitId);
@@ -976,27 +1068,122 @@
     if (c) recoil(c, a, t, 5);
     await AttackFx.travel(a, t, m, { quick: true });
   }
-  /** 打中的形状：第 n 段（刀光左右交替） */
+  /** 打中的形状：第 n 段（刀光左右交替）；有专属演出的照脚本 */
   function strikeImpact(st, e, n, from, big) {
     if (!window.AttackFx || G.sim || G.skip) return;
+    const scr = st.script && AttackFx.script(st.script);
+    if (scr && scr.impact) { st.ctx = st.ctx || strikeCtx(st); try { scr.impact(st.ctx, e, n, !!big); } catch (err) { console.error("[attack-fx]", err); } return; }
     AttackFx.impact(rectOf(e.unitId), st.move, { n, from, big: !!big });
   }
+  /** 跑一段专属演出；画坏了只记一笔，不能卡住战斗 */
+  async function runScript(fn, ...args) {
+    try { return await fn(...args); } catch (err) { console.error("[attack-fx]", err); }
+  }
   /** 近身：往后一收、扑上去，打到之后再慢慢回原位（回位不等，伤害数字马上跳） */
-  async function dash(c, a, t, m) {
+  function dash(c, a, t, m) { return dashTo(c.id, t, { heavy: !!(m && m.heavy) }); }
+  /**
+   * 把一张卡冲向 t：o.reach 冲多远（999 = 一直冲到 t）· o.heavy 重的冲得远一点 · o.speed 时间倍率（小于 1 更快）·
+   * o.hold 到了之后停多久再回位 · o.keep 不回位（冲过去就消失的，例如伯妮尔变回武器）
+   */
+  async function dashTo(id, t, o) {
+    o = o || {};
+    const c = cards.get(id), a = rectOf(id);
+    if (!c || !a || !t) return;
     const dx = t.x - a.x, dy = t.y - a.y, d = Math.hypot(dx, dy) || 1, ux = dx / d, uy = dy / d;
-    const reach = Math.max(16, Math.min(d - Math.min(a.w, t.w) * .5, m.heavy ? 112 : 92));
+    const reach = o.reach >= 999 ? d : Math.max(16, Math.min(d - Math.min(a.w, t.w) * .5, o.reach || (o.heavy ? 112 : 92)));
+    const k = o.speed || 1;
     const token = String(Math.random());
     c.wrap.dataset.dash = token;
     c.wrap.classList.add("lunge");
     if (sp(90) > 0) {
-      c.wrap.style.transition = `transform ${sp(90)}ms cubic-bezier(.2, .7, .3, 1)`;
+      c.wrap.style.transition = `transform ${sp(90 * k)}ms cubic-bezier(.2, .7, .3, 1)`;
       c.wrap.style.transform = `translate(${(-ux * 12).toFixed(1)}px, ${(-uy * 12).toFixed(1)}px) rotate(${(-ux * 2.5).toFixed(1)}deg)`;
-      await wait(90);
+      await wait(90 * k);
     }
-    c.wrap.style.transition = `transform ${sp(100)}ms cubic-bezier(.55, 0, .9, .55)`;
+    c.wrap.style.transition = `transform ${sp(100 * k)}ms cubic-bezier(.55, 0, .9, .55)`;
     c.wrap.style.transform = `translate(${(ux * reach).toFixed(1)}px, ${(uy * reach).toFixed(1)}px) rotate(${(ux * 1.5).toFixed(1)}deg)`;
-    await wait(100);
-    settleBack(c, token, 130, 240);
+    await wait(100 * k);
+    // keep：冲过去就消失的（伯妮尔变回武器）——等它隐去了再悄悄回原位，万一卡片还在场上也不会卡在半路
+    if (!o.keep) settleBack(c, token, o.hold || 130, 240);
+    else settleBack(c, token, o.hold || 560, 0);
+  }
+  /** 一张卡往 (dx, dy) 挪一下再回来（夕夏处决往后退、维塔斯扯下往后拉） */
+  function nudgeCard(id, dx, dy, ms) {
+    const c = cards.get(id);
+    if (!c || G.skip) return;
+    const token = String(Math.random());
+    c.wrap.dataset.dash = token;
+    c.wrap.classList.add("lunge");
+    c.wrap.style.transition = `transform ${sp((ms || 240) * .4)}ms cubic-bezier(.2, .8, .3, 1)`;
+    c.wrap.style.transform = `translate(${dx}px, ${dy}px)`;
+    settleBack(c, token, (ms || 240) * .9, 260);
+  }
+  /** 画面震：power ≥ 1 大震，否则小震 */
+  function shakeField(power) {
+    if (G.sim || G.skip) return;
+    const app = $("g-app"), cls = power >= 1 ? "quake" : "quake-s";
+    app.classList.remove("quake", "quake-s"); void app.offsetWidth; app.classList.add(cls);
+    realTimeout(() => app.classList.remove(cls), power >= 1 ? 600 : 340);
+  }
+  /** 卡片上临时挂一个样式（发抖、被打飞、消失……），ms 后摘掉 */
+  function flashClass(id, name, ms) {
+    const c = cards.get(id);
+    if (!c || G.skip) return;
+    c.wrap.classList.remove(name); void c.wrap.offsetWidth; c.wrap.classList.add(name);
+    realTimeout(() => c.wrap.classList.remove(name), sp(ms || 500) + 40);
+  }
+  /** 镜头推近（协助攻击、碎渣重炮、狂瀑）：战场里的东西朝目标（id）放大一点（战场的框不动）、战场外的界面压暗；演完迅速拉回。
+   *  用 Web Animations 的 scale：不碰卡片自己的 transform（出手、震屏、换区移动照常） */
+  const ZOOM = 1.12;
+  let zoomAnims = [];
+  async function zoomIn(id) {
+    const f = $("g-field"), app = $("g-app");
+    let rect = rectOf(id);
+    if (!f || !app || !rect || G.sim || G.skip || G.instant || app.classList.contains("assist-focus")) return false;
+    if (await scrollToSee(app, rect)) rect = rectOf(id) || rect;   // 推镜头之前先让目标露出来
+    const fr = f.getBoundingClientRect();
+    f.style.setProperty("--focus-x", ((rect.x - fr.left) / Math.max(1, fr.width) * 100).toFixed(1) + "%");
+    f.style.setProperty("--focus-y", ((rect.y - fr.top) / Math.max(1, fr.height) * 100).toFixed(1) + "%");
+    app.classList.add("assist-focus");   // 暗角（game.css · .g-field::after）
+    const still = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (typeof f.animate !== "function") return true;
+    const ms = sp(300), ease = "cubic-bezier(.2, .8, .3, 1)";
+    if (!still) [...f.children].forEach(ch => {
+      const r = ch.getBoundingClientRect(), o = `${(rect.x - r.left).toFixed(1)}px ${(rect.y - r.top).toFixed(1)}px`;
+      zoomAnims.push(ch.animate([{ scale: "1", transformOrigin: o }, { scale: String(ZOOM), transformOrigin: o }], { duration: ms, easing: ease, fill: "forwards" }));
+    });
+    app.querySelectorAll(":scope > .g-top, :scope > .g-hud, :scope > .g-log, :scope > .pvbox").forEach(d => {
+      zoomAnims.push(d.animate([{ filter: "brightness(1) saturate(1)" }, { filter: "brightness(.5) saturate(.6)" }], { duration: ms, easing: "ease-out", fill: "forwards" }));
+    });
+    return true;
+  }
+  /** 手机：整页在滚、底下压着一块固定的操作栏——目标不在顶栏和操作栏之间看得见的那一段，就平滑滚过去，等停稳 */
+  async function scrollToSee(app, rect) {
+    if (app.scrollHeight <= app.clientHeight + 4) return false;
+    const top = document.querySelector(".g-top"), hud = document.querySelector(".g-hud");
+    const visTop = (top ? top.getBoundingClientRect().bottom : 0) + 8;
+    const visBot = Math.min(innerHeight, hud && getComputedStyle(hud).position === "fixed" ? hud.getBoundingClientRect().top : innerHeight) - 8;
+    const cardTop = rect.y - rect.h * .42, cardBot = cardTop + rect.h;
+    if (cardTop >= visTop && cardBot <= visBot) return false;
+    app.scrollTo({ top: app.scrollTop + (cardTop + cardBot) / 2 - (visTop + visBot) / 2, behavior: "smooth" });
+    let last = -1;
+    for (let i = 0; i < 40; i++) {   // 最多等 ~0.6 秒
+      await new Promise(r => requestAnimationFrame(r));
+      if (Math.abs(app.scrollTop - last) < .5 && i > 2) break;
+      last = app.scrollTop;
+    }
+    return true;
+  }
+  function zoomOut() {
+    const app = $("g-app");
+    if (app) app.classList.remove("assist-focus");
+    const list = zoomAnims; zoomAnims = [];
+    list.forEach(a => {
+      if (G.skip || G.instant) { a.cancel(); return; }
+      a.onfinish = () => a.cancel();
+      a.playbackRate = -1.6;   // 倒着放回去，比推近快
+      a.play();
+    });
   }
   /** 远程：往后一顿再回来（后坐力） */
   function recoil(c, a, t, px) {
@@ -1082,7 +1269,11 @@
       if (b.kind === "kill") {
         if (window.Sfx && !G.sim) Sfx.ui("ko");
         // 敌人倒下：卡上喷一个红叉（和路线图上走过的节点打红勾是一套），叉跟着卡一起淡掉
-        if (s && !s.isPlayer && !s.isProp && window.AttackFx && !G.sim && !G.skip) AttackFx.ko(rectOf(b.id), { hold: s.killBig ? 3200 : 1650 });
+        if (s && !s.isPlayer && !s.isProp && window.AttackFx && !G.sim && !G.skip) {
+          const track = () => rectOf(b.id);
+          if (G.koHold) { const h = AttackFx.ko(rectOf(b.id), { hold: "manual", track }); if (h) G.koHandles.push({ h, slow: !!s.killBig }); }
+          else AttackFx.ko(rectOf(b.id), { hold: s.killBig ? 3200 : 1650, track });
+        }
         stamp(b.id, s && s.isPlayer ? "倒下" : "击倒", "kill");
         longest = Math.max(longest, 520);
         if (s && s.isPlayer) fallen.push(s);
@@ -1096,6 +1287,13 @@
     });
     if (longest) await wait(longest);
     for (const s of fallen) await announceDeath(s);
+  }
+
+  /** 一段演出放完：留着的被打倒的敌人开始淡出，红叉跟着一起淡（卡片的淡出见 game.css · .unit-wrap.dead） */
+  function releaseKOs() {
+    document.querySelectorAll(".unit-wrap.ko-held").forEach(w => w.classList.remove("ko-held"));
+    G.koHandles.forEach(k => (k.slow ? k.h.release(2400, 1400) : k.h.release(1200, 500)));
+    G.koHandles = [];
   }
 
   /** 玩家角色阵亡时弹一个提示框，需要确认才继续。角色会留在场上变灰。 */
@@ -1206,13 +1404,14 @@
     const cmd = G.lastCmd; G.lastCmd = null;
     // 攻击演出（attack-fx.js）：按招式挑出手动作、弹道和打中的形状；挑不出来的照旧前冲一下
     let strike = !opps.length && !supportTape && meta.actorId ? strikePlan(meta, pops, cmd) : null;
-    // 没选单位目标的范围技能（一闪、音爆……）照样演；没打出伤害的只演支援 / 挂效果
-    if (strike && !lungeAtk && !STRIKE_NO_HIT.has(strike.move.kind) && !strike.mains.length) strike = null;
+    // 没选单位目标的范围技能（一闪、音爆……）照样演；没打出伤害的只演支援 / 挂效果，或者有专属演出的（乱打、超频……）
+    if (strike && !lungeAtk && !STRIKE_NO_HIT.has(strike.move.kind) && !strike.mains.length && !(strike.script && strike.targets.length)) strike = null;
     let strikeFrom = strike ? rectOf(strike.actorId) : null;
+    const scr = strike && strike.script ? AttackFx.script(strike.script) : null;
     if (window.Sfx && !G.sim) {
       const sk = cmd && cmd.type === "skill" ? cmd.skill : "";
       // 枪声：龙哥的霰弹枪，和所有按「开枪」演的招式（敌人的步枪、机枪、碎渣机炮……）
-      const gun = (/^longge_(aa|chill)$/.test(sk) && cmd.picks && cmd.picks.mode === "gun") || !!(strike && /^(shot|spread)$/.test(strike.move.kind));
+      const gun = (/^longge_(aa|chill)$/.test(sk) && cmd.picks && cmd.picks.mode === "gun") || !!(strike && !scr && /^(shot|spread)$/.test(strike.move.kind));
       if (/^hiaki_(sheath|summon)$|^(niu|naruto)_return$/.test(sk)) Sfx.ui("draw");           // 绯秋拔刀 / 收刀 / 分刀
       else if (/^(longge_safety|torque_swap)$/.test(sk)) Sfx.ui("mech");                    // 解开保险、换刀头
       if (gun) Sfx.ui("gun");
@@ -1221,19 +1420,35 @@
         if (a && t && Number(a.zone) === Number(t.zone)) Sfx.ui("swing");                     // 近战出手的破风声
       }
     }
+    // 不打人的技能（加油门、无人机、机体强化、转移注意……）：专属演出演在自己身上
+    if (!strike && cmd && cmd.type === "skill" && meta.actorId && window.AttackFx && !G.sim && !G.skip) {
+      const own = AttackFx.script(AttackFx.scriptOf(cmd.skill));
+      if (own && own.self) await runScript(own.self, strikeCtx({ actorId: meta.actorId, targetId: meta.targetId || meta.actorId, data: { owner: ownerIdOf(meta.actorId) } }));
+    }
+    // 镜头推近：所有协助攻击，和碎渣重炮、狂瀑这几招；其他界面压暗
+    const zoomed = !!(strike && !G.sim && ((meta._cmd && meta._cmd.type === "assistAnswer") || (scr && scr.zoom)));
+    if (zoomed) { await zoomIn(strike.targetId); await wait(300); strikeFrom = rectOf(strike.actorId); }
+    // 拉斯缪尔的能量罐：他（或 EDC）这一下让累积能量变了，就在他身边画出罐子，水位慢慢走到新的刻度
+    const tank = window.AttackFx && !G.sim && !G.skip ? rasTankOf(meta, cmd) : null;
+    if (tank) AttackFx.tank(rectOf(tank.id), tank.from, tank.to, { ms: tank.ms });
     const impacted = new Set();
     const motions = [];
     if (strike) motions.push(strikeIn(strike));
     else if (lungeAtk) motions.push(lunge(meta.actorId, meta.targetId));
-    if (meta.blockerId) motions.push(lunge(meta.blockerId, meta.actorId));
+    const blockerId = blockerOf(meta, tape);   // 协助格挡的人：冲上去挡
+    if (blockerId) motions.push(lunge(blockerId, meta.actorId));
     if (motions.length) await Promise.all(motions);
-    // 格挡成功：兵刃相接的一声「铛——」+ 火花（玩家的协助格挡、空手格挡，敌人的格挡都算）
-    const parried = !!meta.blockerId || tape.some(e => e.type === "log" && /格挡[^\n]*→ 成功/.test(e.text));
+    // 格挡成功：兵刃相接的一声「铛——」+ 两人连线的中点一把金色火花（玩家的协助格挡、空手格挡，敌人的格挡都算）
+    const parried = parriedOf(meta, tape);
     if (parried) {
       if (window.Sfx) Sfx.parry();
-      const pc = cards.get(meta.blockerId || meta.targetId);
+      const pc = cards.get(blockerId || meta.targetId);
       if (pc) { pc.wrap.classList.remove("parry"); void pc.wrap.offsetWidth; pc.wrap.classList.add("parry"); }
-      if (window.AttackFx && !G.sim) AttackFx.clash(rectOf(meta.blockerId || meta.targetId));
+      if (window.AttackFx && !G.sim) {
+        const b = rectOf(blockerId || meta.targetId), a = rectOf(meta.actorId);
+        // 协助格挡：火花在两人连线的中点；自己格挡（空手格挡、敌人格挡）：火花在格挡的人身上
+        if (blockerId && a && b) AttackFx.sparks({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }); else AttackFx.clash(b);
+      }
       await wait(90);
     }
     const firstHit = pops.find(e => e.kind === "dmg" && Number(e.value) > 0);
@@ -1260,11 +1475,21 @@
       }
       return false;
     };
+    // 银翼·收发代理：回合结束时无人机朝目标发激光——那几下能量伤害之前各补一束细青色激光
+    const droneLog = meta.phase ? tape.filter(x => x.type === "log" && /无人机激光射向/.test(x.text)).map(x => x.text).join("\n") : "";
+    const droneHost = droneLog ? (state.units || []).find(u => u.kit === "ruby" && u.resources && u.resources.drone && u.resources.mecha && !u.dead) : null;
+    let droneShots = 0;
+    const droneShot = (e) => !!(droneHost && droneShots < 6 && e.element === "energy" && (unitById(e.unitId) || {}).name && droneLog.indexOf("无人机激光射向 " + unitById(e.unitId).name) >= 0);
     // 连击中途就打出的失衡先记下，等整串伤害放完再统一盖「失衡」章、响失衡声（以前这种会被漏掉）
     const pendingStun = [];
     const shownWords = new Set();
     let advShook = false;   // 克制：一段演出只震一次
     const deferStun = (bs) => bs.forEach(b => { if (b.kind === "stun" && !pendingStun.some(x => x.id === b.id)) pendingStun.push(b); });
+    // 一闪、爆闪：刀光 / 强光之后所有人的伤害一下子结算，不一段段跳
+    const instant = !!(scr && scr.instant);
+    const heldBeats = [];
+    // 这一整段演完之前，被打倒的敌人卡片和红叉都先留在场上（releaseKOs）
+    G.koHold = (G.koHold || 0) + 1;
     try {
       for (let i = 0; i < pops.length; i++) {
         const e = pops[i];
@@ -1285,19 +1510,33 @@
           // 主攻击的第 2、3 段：弹道招式再飞一发（能量弹、电弧……），近身招式换个方向再来一刀
           const mainIdx = strike ? strike.mains.indexOf(e) : -1;
           const pre = impacted.has(e);   // 第一下在出手到位时已经受击过了
-          if (mainIdx > 0 && !pre) await strikeAgain(strike, e);
-          if (!pre) hit(e.unitId, e.element, big, e, mainIdx >= 0 ? strikeFrom : null);
+          // 绯秋粉落汤气这类：格挡成功后用另一把刀反击——打在出手的敌人身上，按挥砍演
+          const counter = parried && !!blockerId && e.unitId === meta.actorId;
+          const shot = droneShot(e);
+          if (shot && window.AttackFx && !G.sim && !G.skip) {
+            const own = AttackFx.script("wing_drone");
+            if (own) await runScript(own.pre, strikeCtx({ actorId: droneHost.id, targetId: e.unitId, data: { first: droneShots === 0 } }));
+          }
+          if (shot) droneShots++;
+          if (mainIdx > 0 && !pre && !instant) await strikeAgain(strike, e, mainIdx);
+          if (!pre) hit(e.unitId, e.element, big, e, mainIdx >= 0 ? strikeFrom : counter ? rectOf(blockerId) : shot ? rectOf(droneHost.id) : null);
           if (mainIdx >= 0 && !pre && !parried) { strikeImpact(strike, e, mainIdx, strikeFrom, big); impacted.add(e); }
+          if (counter && window.AttackFx && !G.sim && !G.skip) {
+            const bu = unitById(blockerId);
+            AttackFx.impact(rectOf(e.unitId), { kind: "slash", el: e.element || "physical", blade: bu && bu.kit === "hiaki" ? "katana" : "" }, { from: rectOf(blockerId) });
+          }
           // 顿帧：刀光 / 冲击星先亮一下，血条和数字再跟上（第一下、重击才顿，连段不拖慢）
-          if (mainIdx >= 0 && (pre || big) && !parried) await wait(big ? 110 : 70);
+          if (mainIdx >= 0 && (pre || big) && !parried && !(instant && mainIdx > 0)) await wait(big ? 110 : 70);
           if (e.adv && !advShook) { advShook = true; advShake(); }
           comboHit(e, v);
           popup(e.unitId, big ? v + "!" : String(v), "e-" + e.element + (big ? " big" : "") + (boom ? " boom" : ""),
             { icon: e.element, size: big ? Math.round(BIG_POP_SIZE * (0.8 + 0.35 * bh.ratio)) : boom ? 46 : 30,
               dur: boom ? 2.4 : big ? BIG_POP_DUR * (0.8 + 0.45 * bh.ratio) : 1.05 });
           if (boom) await wait(160);
+          deferStun(beatsBefore);
+          if (instant && mainIdx >= 0) { heldBeats.push(...beatsBefore.filter(b => b.kind !== "stun")); continue; }
           await wait(chain ? 30 : 45);
-          deferStun(beatsBefore); await playBeats(beatsBefore.filter(b => b.kind !== "stun"));
+          await playBeats(beatsBefore.filter(b => b.kind !== "stun"));
           await wait(chain ? 40 : 55);
         } else if (e.kind === "partner") {
           // 伙伴登场：亮相、停一下，再冲向目标
@@ -1351,6 +1590,8 @@
           await playBeats(beatsBefore.filter(b => b.kind !== "stun"));
           await wait(chain ? 380 : 520);
         } else if (e.kind === "break") {
+          // 只打击破的那一下（二次盾突……）：有专属演出的先演出手
+          if (scr && scr.brk && strike && !G.skip) { strike.ctx = strike.ctx || strikeCtx(strike); await runScript(scr.brk, strike.ctx, e); }
           popup(e.unitId, "击破 " + e.value, "brk", { below: true, dur: 1.05 });
           deferStun(beatsBefore); await playBeats(beatsBefore.filter(b => b.kind !== "stun"));
           await wait(chain ? 40 : 55);
@@ -1362,6 +1603,8 @@
           await wait(240);
         }
       }
+      if (heldBeats.length) await playBeats(heldBeats);
+      if (zoomed) zoomOut();
       const beats = setView(after, true);
       pendingStun.forEach(b => {
         const now = G.view.get(b.id);
@@ -1379,6 +1622,8 @@
     } finally {
       G.slow = 1;
       $("g-app").classList.remove("hitstop");
+      if (zoomed) zoomOut();
+      if (--G.koHold <= 0) { G.koHold = 0; releaseKOs(); }
       hideBanner(120);
     }
   }
@@ -1394,6 +1639,7 @@
     const pvLive = document.querySelector("#g-pvbox.live");   // 手机：浮在战场上的预演框（会挡住出手的人）
     if (pvLive) pvLive.classList.remove("live");
     if (thunk && typeof thunk === "object") meta._cmd = thunk;   // 演出按指令挑招式（协助攻击用哪把武器……）
+    meta._ras = rasEnergy();   // 拉斯缪尔的累积能量：演出时画能量罐从这里走到结算之后
     let result;
     try { result = typeof thunk === "function" ? thunk() : system ? systemCommand(thunk, context) : dispatch(thunk); if (result && result.meta) Object.assign(meta, result.meta); } catch (e) {
       if (window.OnlineGame?.isHost() && (system || e.code !== "HOTSEAT_REJECT")) { meta.onlineError = true; OnlineGame.reportError(e); }
@@ -1411,9 +1657,17 @@
     if (meta._cmd && meta._cmd.type === "battle.enemyAction" && meta.skillId) G.lastEnemyMove = { actorId: meta.actorId, skillId: meta.skillId, skillName: meta.skillName || "" };
     if (window.OnlineGame?.isHost()) {
       // 联机：把这一下的攻击演出（谁打谁、哪种招式）一起发给玩家，玩家画面照着播（online-ui.js · playPacket）
+      // 专属演出的脚本名和现场数据（谁被刺入、伯妮尔的主人、推还是拉……）、协助攻击的镜头推近、格挡火花、拉斯缪尔的能量罐也一起发
       try {
-        const st = (tape || []).some(e => e.type === "pop") && !(tape || []).some(e => e.type === "opp") ? strikePlan(meta, tape.filter(e => e.type === "pop"), G.lastCmd) : null;
-        meta.fx = st ? { actor: st.actorId, target: st.targetId, move: st.move } : null;
+        const pops = (tape || []).filter(e => e.type === "pop"), cmd = G.lastCmd;
+        const st = pops.length && !(tape || []).some(e => e.type === "opp") ? strikePlan(meta, pops, cmd) : null;
+        const own = !st && cmd && cmd.type === "skill" && meta.actorId && window.AttackFx ? AttackFx.scriptOf(cmd.skill) : null;
+        meta.fx = st ? {
+          actor: st.actorId, target: st.targetId, move: st.move, script: st.script || null, data: st.data || null,
+          assist: !!(meta._cmd && meta._cmd.type === "assistAnswer"), blocker: blockerOf(meta, tape), parried: parriedOf(meta, tape)
+        } : own && AttackFx.script(own).self ? { actor: meta.actorId, target: meta.actorId, move: { kind: "hex", el: "physical" }, script: own, data: { owner: ownerIdOf(meta.actorId) } } : null;
+        const tank = meta.fx ? rasTankOf(meta, cmd) : null;
+        if (tank) meta.fx.tank = tank;
       } catch (e) { meta.fx = null; }
       OnlineGame.onActionSettled(meta.onlineLegacy ? { type: "gm.legacy" } : thunk, result, tape, meta);
     }

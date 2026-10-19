@@ -110,6 +110,87 @@ test("联机：伤害弹字带上 main（玩家画面只在攻击动作本身那
   assert.deepEqual(tape.map(e => e.main === true), [true, false, false], "只有主攻击的伤害带 main");
 });
 
+test("专属演出：按技能 id 找脚本（《动画效果》里写到的技能）；没写的照通用招式演；怪名字查不到", () => {
+  const map = {
+    ruby_aa: "laser", ruby_assist: "laser", ras_aa: "laser", ras_assist: "laser", wing_assist: "wing_assist", xia_assist: "xia_assist",
+    chuan_aa: "slash", chuan_assist: "slash", hiaki_powder: "slash", tou_assist: "tou_aa", nora_assist: "nora_aa",
+    mochi_boom: "sonicBoom", ecmo_boom: "sonicBoom", nora_sonic: "sonicBoom", xia_crush: "bite", ecmo_focus: "bite",
+    berniel_ignite: "flameJet", berniel_dash: "flameJet", wing_relay: "ruby_relay", role_pull: "role_pull", kolt_cannon: "kolt_cannon"
+  };
+  for (const [skill, name] of Object.entries(map)) assert.equal(F.scriptOf(skill), name, skill);
+  for (const k of Object.keys(F.SCRIPT_OF)) assert.ok(F.script(F.scriptOf(k)), k + " 指向的脚本不存在");
+  assert.equal(F.scriptOf("hiaki_aa"), null, "没写专属演出的照通用招式");
+  for (const bad of ["__proto__", "constructor", "toString", "hasOwnProperty", "", null, undefined, 3]) {
+    assert.equal(F.scriptOf(bad), null, String(bad));
+    assert.equal(F.script(bad), null, String(bad));
+  }
+});
+
+test("专属演出的开关：一闪 / 爆闪一下子结算，碎渣重炮 / 狂瀑推镜头，不打人的技能演在自己身上", () => {
+  assert.equal(F.script("hiaki_flash").instant, true);
+  assert.equal(F.script("edc_flash").instant, true);
+  assert.equal(F.script("kolt_cannon").zoom, true);
+  assert.equal(F.script("ras_torrent").zoom, true);
+  for (const k of ["ruby_relay", "wing_boost", "xia_selfburn", "chuan_pulse", "torque_divert", "edc_siphon", "longge_drink"]) assert.equal(typeof F.script(k).self, "function", k);
+});
+
+test("每个专属演出都能在假的现场里跑完：脚本只碰 ctx 给的东西（拼错名字、少传参数会在这里报）", async () => {
+  const seen = [];
+  const rect = (id) => (id == null ? null : { x: 100 + String(id).length * 40, y: 120, w: 160, h: 96 });
+  const ctxOf = (name, data, el) => ({
+    actor: "a", target: "tt", targets: ["tt", "t2"],
+    mains: [{ unitId: "tt", element: el, kind: "dmg", main: true }, { unitId: "t2", element: el, kind: "dmg", main: true }],
+    move: { kind: "smash", el }, data,
+    rect, zoneRect: () => ({ x: 300, y: 200, w: 400, h: 300 }),
+    wait: async () => {}, dash: async (id) => { seen.push(name + ":dash:" + id); },
+    recoil: () => {}, nudge: () => {}, shake: () => {}, cls: (id, c) => { seen.push(name + ":" + c); }, burst: () => {}, owner: () => "o"
+  });
+  for (const name of new Set(Object.values(F.SCRIPT_OF))) {
+    const s = F.script(name);
+    for (const data of [{}, { ally: true, dist: 1, pierced: "tt", owner: "o", dir: "pull", zoneOf: 2, twice: true, first: true }, { dist: 0, pierced: "zz", dir: "push" }]) {
+      for (const el of ["fire", "ice", "acid", "electric", "physical"]) {
+        const c = ctxOf(name, data, el);
+        if (s.pre) await s.pre(c);
+        if (s.self) await s.self(c);
+        if (s.again) { await s.again(c, c.mains[1], 1); await s.again(c, c.mains[0], 2); }
+        if (s.impact) { s.impact(c, c.mains[0], 0, false); s.impact(c, c.mains[1], 1, true); }
+        if (s.brk) { await s.brk(c, { unitId: "tt", kind: "break", value: 1 }); await s.brk(c, { unitId: "tt", kind: "break", value: 1 }); }
+      }
+    }
+  }
+  assert.ok(seen.includes("berniel_flare:dash:o"), "伯妮尔焰袭：伯妮尔冲向夕夏、夕夏再冲向敌人");
+  // 灯盾击突进：选了二次盾突（twice）才在它的击破弹出来前再撞一次，而且只撞一次；没选不撞
+  for (const twice of [false, true]) {
+    const dashes = [];
+    const c = Object.assign(ctxOf("tou_bash", { twice }, "physical"), { dash: async (id) => { dashes.push(id); } });
+    await F.script("tou_bash").brk(c, { unitId: "tt", kind: "break", value: 1 });
+    await F.script("tou_bash").brk(c, { unitId: "tt", kind: "break", value: 1 });
+    assert.deepEqual(dashes, twice ? ["a"] : [], "二次盾突：" + twice);
+  }
+  assert.ok(seen.includes("berniel_flare:fx-vanish"), "伯妮尔冲到夕夏身上就消失");
+  assert.ok(seen.includes("longge_drink:fx-tremble"), "龙哥饮弹前发抖");
+  assert.ok(seen.includes("xiaoxiao_combo:fx-knockfly"), "小朋友全红 / 全蓝把敌人打飞");
+});
+
+test("联机：专属演出的脚本名和现场数据也按白名单发——只有 id、几个开关和夹在范围里的整数", () => {
+  const fx = (extra) => V.projectPacket({ type: "result", tape: [], fx: Object.assign({ actor: "u1", target: "u2", move: { kind: "smash", el: "fire" } }, extra) }, { recipientId: "p1", gmId: "host" }).fx;
+  assert.deepEqual(fx({
+    script: "xia_assist", data: { ally: true, dist: 12, pierced: "u3", owner: "u4", dir: "pull", zoneOf: 2, secret: "坚毅 9" },
+    assist: true, parried: true, blocker: "u5", tank: { id: "u6", from: 40, to: 412.6, ms: 99999, note: "x" }, extra: "SECRET"
+  }), {
+    actor: "u1", target: "u2", move: { kind: "smash", el: "fire" }, script: "xia_assist",
+    data: { ally: true, dist: 8, pierced: "u3", owner: "u4", dir: "pull", zoneOf: 2 }, assist: true, parried: true, blocker: "u5",
+    tank: { id: "u6", from: 40, to: 300, ms: 2000 }
+  });
+  assert.deepEqual(fx({ data: { twice: true } }).data, { twice: true }, "灯二次盾突的开关");
+  assert.equal(fx({ script: "Xia-Assist!" }).script, undefined, "脚本名只认小写字母和下划线");
+  assert.equal(fx({ script: "x".repeat(40) }).script, undefined);
+  assert.equal(fx({ data: { dir: "sideways", pierced: "坚毅", ally: "yes", owner: "__proto__" } }).data, undefined, "不认识的值丢掉");
+  assert.equal(fx({ tank: { id: "u6", from: "40", to: 10 } }).tank, undefined, "数字不是数字就不画罐子");
+  const loose = fx({ assist: "true", parried: 1, blocker: "坚毅" });
+  assert.equal(loose.assist, undefined); assert.equal(loose.parried, undefined); assert.equal(loose.blocker, undefined);
+});
+
 test("game.html 先载入 attack-fx.js 再载入 game.js（演出在 game.js 里用到它）", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "game.html"), "utf8");
   const a = html.indexOf('src="attack-fx.js"'), g = html.indexOf('src="game.js"'), o = html.indexOf('src="online-ui.js"');
