@@ -559,7 +559,7 @@ function coralGasBurst(p, element, attacker, notes) {
   const lv = Number(p.level) || 1;
   const r = takeDice(2, 6, lv);
   notes.push(`${p.name} 里的可燃气被点着了：${p.zone} 区爆燃，所有单位 ${r.text} 火焰 + 1 击破！`);
-  if (typeof markAoeZone === "function") markAoeZone(p.zone, { element: "fire", dmg: r.total, attacker, from: p.zone });
+  if (typeof markAoeZone === "function") markAoeZone(p.zone, { element: "fire", dmg: r.total, attacker, from: p.zone, env: true });
   (state.units || []).filter(u => !u.hidden && !u.dead && !u._removed && Number(u.zone) === Number(p.zone)).forEach(u => {
     const fake = unitOf("可燃气爆燃", lv, [{ type: "armor", hp: 1 }], 0, 0);
     fake.zone = p.zone;
