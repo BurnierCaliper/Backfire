@@ -2379,8 +2379,13 @@ const Rogue = (function () {
     if (!task || task.done) return;
     task.done = true;
     task.progress = task.target;
-    const mats = Object.keys(ROGUE_MATERIALS || {});
-    const mat = mats.length ? pick(mats) : "mat_metal";
+    // 材料概率：50% 金属 / 30% 精炼合金 / 14% 聚合材料 / 4% 稀有晶体 / 2% 赫心结晶
+    const roll = Math.random();
+    const mat = roll < 0.50 ? "mat_metal"
+      : roll < 0.80 ? "mat_alloy"
+      : roll < 0.94 ? "mat_polymer"
+      : roll < 0.98 ? "mat_crystal"
+      : "mat_heart";
     bagAdd(mat, 1);
     state.kuizhi = (Number(state.kuizhi) || 0) + 1000;
     notes.push(`每日挑战「${task.name}」完成：获得 ${(ITEM_CATALOG[mat]||{}).name || mat}×1 和 1000 奎支。`);
