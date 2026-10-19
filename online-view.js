@@ -284,10 +284,25 @@
       if (kind === "break" || kind === "highboom" || visibleHp && ["dmg", "heal"].includes(kind)) {
         const n = number(get(event, "value")); if (n !== undefined) out.value = n;
       }
+      if (kind === "dmg" && get(event, "main") === true) out.main = true;   // 攻击动作本身的伤害（玩家画面在这几段补攻击演出的打击形状）
       if (popupWords.has(get(event, "text"))) out.text = get(event, "text");
       if (snap.length) out.snap = snap.map(projectUnit).filter(Boolean);
       return [out];
     });
+  }
+  /* 攻击演出（attack-fx.js · resolve 挑出来的招式）：只有两个单位 id、招式种类、属性和几个画法开关，没有任何数值 */
+  const FX_KINDS = ["slash", "thrust", "smash", "claw", "bite", "shot", "spread", "bolt", "beam", "zap", "shard", "lob", "flame", "wave", "explode", "support", "hex"];
+  const FX_FLAGS = ["melee", "area", "heavy", "flash", "flurry", "shield", "needle", "fur", "roar", "drill", "cane", "fist", "stream", "glitch", "big", "sweep"];
+  const FX_ELEMENTS = ["physical", "fire", "ice", "electric", "acid", "energy", "harmonic"];
+  function projectFx(fx) {
+    if (!obj(fx)) return null;
+    const actor = id(get(fx, "actor")), target = id(get(fx, "target")), move = get(fx, "move");
+    if (!actor || !target || !obj(move) || !FX_KINDS.includes(get(move, "kind"))) return null;
+    const out = { kind: get(move, "kind"), el: FX_ELEMENTS.includes(get(move, "el")) ? get(move, "el") : "physical" };
+    FX_FLAGS.forEach(k => { if (get(move, k) === true) out[k] = true; });
+    if (["katana", "knife", "rapier"].includes(get(move, "blade"))) out.blade = get(move, "blade");
+    const hits = number(get(move, "hits")); if (hits !== undefined) out.hits = Math.max(1, Math.min(20, Math.floor(hits)));
+    return { actor, target, move: out };
   }
   function projectMessages(messages, context) {
     const { recipientId, gmId } = context;
@@ -570,6 +585,7 @@
     if (get(packet, "ok") === false || get(packet, "error") != null) out.error = safeError(get(packet, "error"));
     if (own(packet, "state")) out.state = projectState(get(packet, "state"), context);
     if (own(packet, "tape")) out.tape = projectTape(get(packet, "tape"), { state: get(packet, "state") || context.state });
+    if (own(packet, "fx")) out.fx = projectFx(get(packet, "fx"));
     if (own(packet, "view")) out.view = projectView(get(packet, "view"), context);
     if (own(packet, "result")) out.result = publicResult(get(packet, "result"));
     if (own(packet, "messages")) out.messages = projectMessages(get(packet, "messages"), context);
@@ -702,7 +718,7 @@
     });
     return out;
   }
-  const api = { SCHEMA, pickKeys, projectHud, projectPacket, projectQuests, projectPurse, projectShop, projectClinic, projectRest, projectCamp, projectSheets, projectBagDetail, projectUnit, projectState, projectTape, projectMessages, projectLogs, projectView, projectActionMenu, safeText: text, safeError };
+  const api = { SCHEMA, pickKeys, projectHud, projectPacket, projectQuests, projectPurse, projectShop, projectClinic, projectRest, projectCamp, projectSheets, projectBagDetail, projectUnit, projectState, projectTape, projectFx, projectMessages, projectLogs, projectView, projectActionMenu, safeText: text, safeError };
   root.OnlineView = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof globalThis !== "undefined" ? globalThis : window);

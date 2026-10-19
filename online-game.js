@@ -67,9 +67,10 @@
     if (wait && Number.isFinite(wait.remainingMs)) wait.deadline = at + wait.remainingMs;
   }
   function readSaved() { try { const v = JSON.parse(localStorage.getItem(KEY)); return v?.version === 1 ? v : null; } catch (_) { return null; } }
-  function rawPacket(id, type = "result", tape = [], result = null) {
+  function rawPacket(id, type = "result", tape = [], result = null, fx = null) {
     const view = HotseatGame.getViewFor(id); view.players = roster(); view.network = true;
     return { protocol: PROTOCOL, build: BUILD, type, seq, state, tape, result: result || settledResult, view, screen: liveScreen(),
+      fx,   // 这一下的攻击演出（谁打谁、哪种招式；game.js · strikePlan），玩家画面照着播出手和弹道
       roomCode: identity.roomCode, hostName: identity.name, paused: isPaused(), messages, publicLogs, manualPhase, systemNotice,
       offlineWait: offlineWait ? { ...offlineWait, remainingMs: Math.max(0, offlineWait.deadline - Date.now()) } : null,
       mode, rogue: rogue() ? OnlineRogue.viewFor(id) : null, levelUps: levelUpsFor(id),
@@ -91,12 +92,12 @@
     if (!recipientWires.has(id)) recipientWires.set(id, OnlineWire.create());
     return endpoint.send(recipientWires.get(id).pack(safe), id).catch(e => { if (status.connected) { notice = e.message; notify(); } });
   }
-  function publish(tape = [], result = null) {
+  function publish(tape = [], result = null, fx = null) {
     if (!isHost() || !HotseatGame.isActive()) return;
     if (manualResolve && GAME.ended) { const finish = manualResolve; manualResolve = null; manualPhase = false; finish(); }
     if ((!state.combatStarted || GAME.ended) && HotseatGame.getView().players.map(p => p.id).join("|") !== roster().map(p => p.id).join("|")) setupOperators();
     seq++;
-    for (const p of status.roster) if (p.role !== "host" && p.online) sendProjected(p.id, rawPacket(p.id, "result", tape, result));
+    for (const p of status.roster) if (p.role !== "host" && p.online) sendProjected(p.id, rawPacket(p.id, "result", tape, result, fx));
     save(); notify();
   }
   function resync(id) { if (isHost() && HotseatGame.isActive()) return sendProjected(id, rawPacket(id, "resync")); }
@@ -521,7 +522,7 @@
       else publicLogs.push({ kind: "phase", phase: state.combatPhase, turn: state.turnNo, at: Date.now() });
       publicLogs = publicLogs.slice(-100);
     }
-    publish(tape, result);
+    publish(tape, result, meta.fx || null);
   }
   function offlineTick() {
     if (!isHost() || isPaused() || !HotseatGame.isActive()) return;

@@ -117,7 +117,7 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
   padding: 18px 18px 12px;
   min-height: 0;
   overflow: hidden;
-  background: #e6e9ec;
+  background: #d9d4cb;   /* 浅色水泥地（skin.css 叠噪点）；以前是冷灰 #e6e9ec */
 }
 .g-field.z2 { grid-template-columns: minmax(0, 1fr) 28px minmax(0, 1fr); }
 .g-field.z3 { grid-template-columns: minmax(0, 1fr) 32px minmax(0, 1fr) 32px minmax(0, 1fr); padding: 12px 10px 8px; }
@@ -131,8 +131,8 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
 .g-zone {
   position: relative;
   min-height: 0;
-  border: 1px solid #d3dae2;
-  background: #f5f6f8;
+  border: 2px solid #cdc6ba;
+  background: #f2efe9;   /* 浅一号的水泥板：比地面亮，单位卡（白）照样跳出来 */
   display: flex;
   flex-direction: column;
   justify-content: space-evenly;
@@ -570,6 +570,10 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
 
 /* ---------- 演出层 ---------- */
 .g-fx { position: fixed; inset: 0; pointer-events: none; z-index: 30; }
+/* 叠放：单位卡 < 受击粒子（hit-fx.js）< 攻击演出（attack-fx.js：刀光、弹道）< 伤害数字（.g-fx）——
+ * 刀光不被火焰粒子盖住，数字永远在最上面看得清。联机玩家画面的战场是 z-index 40 的一层，两块画布都抬到它上面 */
+body:not(.online-player) #hit-fx { z-index: 28 !important; }
+body.online-player #atk-fx { z-index: 91 !important; }
 .pop {
   position: absolute;
   font-family: var(--num);
@@ -623,6 +627,16 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
   40% { transform: translate(6px, -2px); }
   60% { transform: translate(-4px, 1px); }
   80% { transform: translate(2px, 0); }
+  100% { transform: translate(0, 0); }
+}
+/* 有攻击方向的受击（game.js · hit 的 from）：顺着挨打的方向被打退一下、歪一点，再弹回来 */
+.unit-wrap.hit.knock .unit { animation: hitKnock .34s cubic-bezier(.2, .9, .3, 1); }
+.g-app.hitstop .unit-wrap.hit.knock .unit { animation-duration: .6s; }
+@keyframes hitKnock {
+  0% { transform: translate(0, 0); }
+  16% { transform: translate(var(--kx, 8px), var(--ky, 0px)) rotate(var(--kr, 2deg)); }
+  42% { transform: translate(calc(var(--kx, 8px) * -.22), calc(var(--ky, 0px) * -.22)) rotate(calc(var(--kr, 2deg) * -.4)); }
+  70% { transform: translate(calc(var(--kx, 8px) * .08), calc(var(--ky, 0px) * .08)); }
   100% { transform: translate(0, 0); }
 }
 .unit-wrap .flash {
@@ -801,6 +815,13 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
   justify-content: center;
 }
 .choice.show { display: flex; }
+/* 跟战场有关的问题（协助格挡 / 协助攻击）：问题框贴到底部、盖住技能栏，战场只压一点暗——
+ * 看得见是谁打谁（attack-fx.js 画的红色虚线）和闪白的预演血条 */
+.choice.dock {
+  align-items: flex-end;
+  padding-bottom: 14px;
+  background: linear-gradient(180deg, rgba(4, 3, 2, .05) 0%, rgba(4, 3, 2, .12) 48%, rgba(4, 3, 2, .82) 100%);
+}
 .choice-card {
   min-width: 600px;
   max-width: min(860px, 92vw);
@@ -896,7 +917,7 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
 .g-app.busy .skills { opacity: .55; }
 
 @media (prefers-reduced-motion: reduce) {
-  .unit-wrap.hit .unit { animation: none; }
+  .unit-wrap.hit .unit, .unit-wrap.hit.knock .unit { animation: none; }
   .pop, .pop.big { animation-name: popFade; }
   @keyframes popFade { 0% { opacity: 1; } 100% { opacity: 0; } }
   .seg .pv.sure, .seg .pv.maybe, .pip.pv, .unit-wrap.pv-stun::after { animation: none; }
