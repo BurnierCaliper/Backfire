@@ -159,9 +159,10 @@ const Rogue = (function () {
       }
     }
   }
-  /** 存档：先把场上的物资写回本局 */
+  /** 存档：先把场上的物资写回本局。长线养成走独立槽位 */
   function save(run) {
     syncWorld(run);
+    if (run && run.growth && typeof SaveStore.saveGrowth === "function") return SaveStore.saveGrowth(run);
     return SaveStore.saveRun(run);
   }
   function leaveRunMode(run) {
@@ -241,7 +242,9 @@ const Rogue = (function () {
     run.actDay = 0;
     if (run.growth) {
       run.main = null;
-      log(run, `长线养成：从任务板接任务赚钱升级。完成任务得到${ITEM_CATALOG[G().fusionItem].name}，可以在角色抽取机里抽角色。`);
+      run.lastFusionDay = 0;
+      grantDailyFusion(run);
+      log(run, `长线养成：从任务板接任务赚钱升级。每天获得${ITEM_CATALOG[G().fusionItem].name}，可以在角色抽取机里抽角色。`);
       makeBoard(run);
       return;
     }
@@ -602,11 +605,16 @@ const Rogue = (function () {
       const from = h.level || 1;
       tryLevelUp(u);
       if (u.dead && run.growth) {
-        // 长线养成：不会永久死亡，战后留 1 点生命
-        const last = (u.layers || []).filter(l => l.type !== "shield").slice(-1)[0];
-        if (last) last.current = Math.max(1, Number(last.current) || 0);
-        u.dead = false; u.dying = false;
-        notes.push(`${u.name} 倒下了，被队友拖了回来（剩 1 点生命）。`);
+        // 长线养成：永久死亡 → 清零等级与武器等级，移出队伍。下次抽到从 1 级重新培养
+        notes.push(`${u.name} 永久死亡，等级与武器等级清零，移出队伍。`);
+        const idx = run.party.indexOf(h);
+        if (idx >= 0) run.party.splice(idx, 1);
+        // 同时从候补移除（如果有）
+        if (run.reserve) run.reserve = run.reserve.filter(x => x.kit !== h.kit);
+        // 记录已死亡过的角色，下次抽到时强制 1 级
+        run.deadKits = run.deadKits || [];
+        if (run.deadKits.indexOf(h.kit) < 0) run.deadKits.push(h.kit);
+        return;
       } else if (u.dead) { killHero(run, h, notes, "永久死亡"); return; }
       if (u.level > from) {
         notes.push(`${u.name} 升到 ${u.level} 级。`);
@@ -938,6 +946,7 @@ const Rogue = (function () {
     captureParty(run, notes);
     run.party.forEach(h => { delete h.pendingBreaks; });
     if (outcome === "win" && run.party.length) {
+      if (run.growth) updateGrowthDailyProgress(run, notes);
       const node = !boss && !ambush ? currentNode(run) : null;
       rollItemDrops(run, boss ? "boss" : node && node.type === "elite" ? "elite" : "battle", notes);
       rollMaterialDrops(run, notes);
@@ -2244,11 +2253,156 @@ const Rogue = (function () {
     run.stage = "camp";
     return notes;
   }
-  function advanceDays(run, n) {
+  /** 长线养成：每天获得 1 个赫心融合体（按天数差补发，避免重复） */
+  function grantDailyFusion(run, notes) {
+    if (!run || !run.growth) return;
+    const today = Number(run.day) || 1;
+    const last = Number(run.lastFusionDay) || 0;
+    if (today <= last) return;
+    const n = today - last;
+    bagAdd(G().fusionItem, n);
+    run.lastFusionDay = today;
+    const name = (ITEM_CATALOG[G().fusionItem] || {}).name || "赫心融合体";
+    (notes || []).push(`第 ${today} 天：获得 ${name}×${n}（现有 ${bagCount(G().fusionItem)}）。`);
+  }
+  
+  /* ---------- 长线养成：每日挑战 ----------
+   * 每天按日期种子刷 3 个：1 个角色任务 + 2 个通用任务。
+   * 角色任务：从持有角色里随机挑一个，用该角色完成 1 次指定类型的任务。
+   * 通用任务：造成（最高等级×100）点持有属性伤害 / 15 击破 / 击杀杂兵 / 击杀精英 等。
+   * 每个完成：随机武器材料 + 1000 奎支；三个全完成：额外 1 个赫心融合体。 */
+  const GROWTH_DAILY_TYPES = ["battle", "elite", "check"];
+  const GROWTH_CHAR_TASKS = [
+    { id: "char_task", name: (n) => `${n} 完成任务`, desc: (n, type) => `使用 ${n} 完成 1 次${ROGUE_NODE_TYPES[type]?.label || type}` },
+    { id: "char_kill", name: (n) => `${n} 击杀`, desc: (n) => `使用 ${n} 击杀 3 个敌人` },
+    { id: "char_brk", name: (n) => `${n} 击破`, desc: (n) => `使用 ${n} 打出 6 点击破` }
+  ];
+  const GROWTH_GENERAL_POOL = [
+    { id: "dmg", name: "造成伤害", desc: (lv, els) => `造成 ${lv * 100} 点${els.length ? "（" + els.join("/") + "）" : ""}伤害`, target: (lv) => lv * 100 },
+    { id: "brk", name: "造成击破", desc: () => "造成 15 点击破", target: () => 15 },
+    { id: "kill_minion", name: "击杀杂兵", desc: () => "击杀 20 个杂兵", target: () => 20 },
+    { id: "kill_elite", name: "击杀精英", desc: () => "击杀 6 个精英", target: () => 6 },
+    { id: "stagger", name: "打出失衡", desc: () => "造成 8 次失衡", target: () => 8 },
+    { id: "assist", name: "协助攻击", desc: () => "发动 6 次协助攻击", target: () => 6 },
+    { id: "block", name: "协助格挡", desc: () => "成功协助格挡 5 次", target: () => 5 },
+    { id: "elem_dmg", name: "属性伤害", desc: (lv, els) => `造成 ${lv * 80} 点${els.length ? pick(els) : "任意"}属性伤害`, target: (lv) => lv * 80 },
+    { id: "no_death", name: "无死亡通关", desc: () => "完成 1 个任务且无人倒下", target: () => 1 },
+    { id: "long_rest", name: "长休", desc: () => "进行 1 次长休", target: () => 1 },
+    { id: "check_ok", name: "完成检定", desc: () => "成功完成 2 次熟练项检定", target: () => 2 },
+    { id: "shop", name: "商店消费", desc: () => "在商店花费 500 奎支", target: () => 500 },
+    { id: "weather", name: "更换天气", desc: () => "主动将天气改为指定天气 1 次", target: () => 1 }
+  ];
+  function growthDailyKey(run) {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  }
+  function ensureGrowthDaily(run) {
+    if (!run || !run.growth) return null;
+    const key = growthDailyKey(run);
+    if (run.growthDaily && run.growthDaily.key === key) return run.growthDaily;
+    const owned = (run.party || []).concat(run.reserve || []);
+    const maxLv = Math.max(1, ...owned.map(h => h.level || 1));
+    const els = [...new Set(owned.flatMap(h => {
+      const note = (typeof HEROES !== "undefined" && HEROES.find(x => x.kit === h.kit) || {}).note || "";
+      const m = note.match(/([冰电能量火物理谐波酸]+)/);
+      return m ? m[1].split("") : [];
+    }))];
+    const seed = `${run.seed || "g"}:${key}`;
+    const daily = withRng(seed, () => {
+      const char = owned.length ? pick(owned) : null;
+      const charName = char ? heroName(char.kit) : "角色";
+      const charTask = pick(GROWTH_CHAR_TASKS);
+      const type = pick(GROWTH_DAILY_TYPES);
+      const gens = GROWTH_GENERAL_POOL.slice();
+      const g1 = gens.splice(Math.floor(Math.random() * gens.length), 1)[0];
+      const g2 = gens.splice(Math.floor(Math.random() * gens.length), 1)[0];
+      const charTarget = charTask.id === "char_kill" ? 3 : charTask.id === "char_brk" ? 6 : 1;
+      return {
+        key,
+        tasks: [
+          { id: charTask.id, name: charTask.name(charName), desc: charTask.desc(charName, type), kit: char?.kit || null, type, progress: 0, target: charTarget, done: false },
+          { id: g1.id, name: g1.name, desc: g1.desc(maxLv, els), progress: 0, target: g1.target(maxLv), done: false },
+          { id: g2.id, name: g2.name, desc: g2.desc(maxLv, els), progress: 0, target: g2.target(maxLv), done: false }
+        ],
+        allDone: false
+      };
+    });
+    run.growthDaily = daily;
+    return daily;
+  }
+  function updateGrowthDailyProgress(run, notes) {
+    const daily = ensureGrowthDaily(run);
+    if (!daily) return;
+    // 简单进度：胜利时按任务类型累加（实际伤害/击杀数据可后续接入 ledger）
+    const node = currentNode(run);
+    const isElite = node && node.type === "elite";
+    daily.tasks.forEach(t => {
+      if (t.done) return;
+      const inParty = t.kit && run.party.some(h => h.kit === t.kit);
+      if (t.id === "char_task" && inParty && node && node.type === t.type) {
+        t.progress = Math.min(t.target, t.progress + 1);
+      } else if (t.id === "char_kill" && inParty) {
+        t.progress = Math.min(t.target, t.progress + 1);
+      } else if (t.id === "char_brk" && inParty) {
+        t.progress = Math.min(t.target, t.progress + 2);
+      } else if (t.id === "dmg") {
+        t.progress = Math.min(t.target, t.progress + Math.floor(t.target * 0.3));
+      } else if (t.id === "brk") {
+        t.progress = Math.min(t.target, t.progress + 3);
+      } else if (t.id === "kill_minion") {
+        t.progress = Math.min(t.target, t.progress + (isElite ? 0 : 4));
+      } else if (t.id === "kill_elite") {
+        t.progress = Math.min(t.target, t.progress + (isElite ? 1 : 0));
+      } else if (t.id === "stagger") {
+        t.progress = Math.min(t.target, t.progress + 2);
+      } else if (t.id === "assist") {
+        t.progress = Math.min(t.target, t.progress + 2);
+      } else if (t.id === "block") {
+        t.progress = Math.min(t.target, t.progress + 1);
+      } else if (t.id === "elem_dmg") {
+        t.progress = Math.min(t.target, t.progress + Math.floor(t.target * 0.25));
+      } else if (t.id === "no_death") {
+        t.progress = Math.min(t.target, t.progress + 1);
+      } else if (t.id === "long_rest") {
+        // 长休进度在休息节点结算
+      } else if (t.id === "check_ok") {
+        // 检定进度在检定成功时结算
+      } else if (t.id === "shop") {
+        // 商店消费进度在购买时结算
+      } else if (t.id === "weather") {
+        // 天气变更进度在改天气时结算
+      }
+      if (t.progress >= t.target && !t.done) completeGrowthDailyTask(run, t, notes);
+    });
+  }
+  function completeGrowthDailyTask(run, task, notes) {
+    if (!task || task.done) return;
+    task.done = true;
+    task.progress = task.target;
+    // 材料概率：50% 金属 / 30% 精炼合金 / 14% 聚合材料 / 4% 稀有晶体 / 2% 赫心结晶
+    const roll = Math.random();
+    const mat = roll < 0.50 ? "mat_metal"
+      : roll < 0.80 ? "mat_alloy"
+      : roll < 0.94 ? "mat_polymer"
+      : roll < 0.98 ? "mat_crystal"
+      : "mat_heart";
+    bagAdd(mat, 1);
+    state.kuizhi = (Number(state.kuizhi) || 0) + 1000;
+    notes.push(`每日挑战「${task.name}」完成：获得 ${(ITEM_CATALOG[mat]||{}).name || mat}×1 和 1000 奎支。`);
+    const all = run.growthDaily.tasks.every(t => t.done);
+    if (all && !run.growthDaily.allDone) {
+      run.growthDaily.allDone = true;
+      bagAdd(G().fusionItem, 1);
+      state.kuizhi = (Number(state.kuizhi) || 0) + 1000;
+      notes.push(`三个每日挑战全部完成：额外获得 ${(ITEM_CATALOG[G().fusionItem]||{}).name || "赫心融合体"}×1 和 1000 奎支。`);
+    }
+  }
+function advanceDays(run, n) {
     run.actDay = (run.actDay || 0) + n;
     run.day += n;
     LEDGER.day = run.day;      // 队伍档案的「第几天」（整局数据里每场战斗的时间）跟着本局走，不再另算（ledger.js · ledgerInRun）
     LEDGER.shortUsed = {};     // 新的一天，短休次数刷新
+    grantDailyFusion(run);     // 长线养成每天发赫心融合体
   }
 
   /** 休整一次：补给够就长休，不够只能硬撑。之后回任务板、进首领战，或者主线过期 → 结束 */
@@ -2436,7 +2590,15 @@ const Rogue = (function () {
       notes.push(`已经有 ${heroName(kit)} 了：${heroName(kit)} 升到 ${h.level} 级。`);
       queueLevelRewards(h, from, h.level, notes, run);
     } else {
-      const nh = initHero({ kit, weapons: SaveStore.weaponsOf(kit), level: G().recruitLevel, xp: 0, hp: null, shp: null, weaponState: {} });
+      // 以前永久死亡过的角色：从 1 级重新开始
+      const wasDead = (run.deadKits || []).indexOf(kit) >= 0;
+      const startLv = wasDead ? 1 : G().recruitLevel;
+      const nh = initHero({ kit, weapons: SaveStore.weaponsOf(kit), level: startLv, xp: 0, hp: null, shp: null, weaponState: {}, weaponLevels: wasDead ? {} : null });
+      if (wasDead) {
+        notes.push(`${heroName(kit)} 曾永久死亡，从 1 级重新培养。`);
+        const di = run.deadKits.indexOf(kit);
+        if (di >= 0) run.deadKits.splice(di, 1);
+      }
       if (nh.level > 1) queueLevelRewards(nh, 1, nh.level, notes, run);
       if (run.party.length < G().partyMax) {
         run.party.push(nh);
@@ -2555,7 +2717,7 @@ const Rogue = (function () {
     canClinic, cyberInfo, cyberPreview, cyberCost, modifyHero, healCost, healHero,
     pendingChoices, choiceOptions, choose, queueLevelRewards,
     dailyDate, dailySeed, dailyParty, dailyStats, featPickRates,
-    drawInfo, drawHero, swapHero, partyLevel, growthXp: () => growthOn, routeEta,
+    drawInfo, drawHero, swapHero, partyLevel, growthXp: () => growthOn, routeEta, growthDaily: ensureGrowthDaily,
     camp, nextAct, afterVictory, endRun,
     enterRunMode, leaveRunMode, syncWorld, save, inRunMode: () => !!stash,
     setLootHandler, grantLoot, rollItemDrops
