@@ -352,56 +352,7 @@ details.smith .sm-price, details.smith .sm-prog.ready { color: var(--sk-hazard);
 .g-top .g-btn[aria-pressed="true"] { border-color: var(--sk-hazard); }
 .g-btn.r-main { border-color: var(--sk-hazard) !important; }
 
-/* ---------- 战场：浅色水泥地 ----------
- * 战场还是浅色、看得清楚（单位卡、评分条照旧白底）；只换材质：地面是浅色水泥（细噪点 + 淡污渍），
- * 区是浅一号的水泥板，区名贴一条胶带，区号是淡淡的喷漆模板字；区与区之间按地形画——
- * 畅通是带黄色虚线的路面、危墙是砖、桥是木板、机关门是铁板。场地颜色、夜晚、天气的染色照旧盖在上面。 */
-:root {
-  --fld-noise: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .17  0 0 0 0 .15  0 0 0 0 .13  0 0 0 .1 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
-  --fld-stains: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='520' height='420'><filter id='b'><feGaussianBlur stdDeviation='26'/></filter><g filter='url(%23b)' fill='%232b2723' fill-opacity='.08'><ellipse cx='90' cy='70' rx='110' ry='48'/><ellipse cx='420' cy='320' rx='130' ry='70'/><ellipse cx='260' cy='200' rx='60' ry='40'/></g></svg>");
-}
-.g-field { background-image: var(--fld-noise), var(--fld-stains); }
-.g-field .g-zone { background-image: var(--fld-noise); }
-.g-field .g-zone::before { font-family: var(--sk-stencil); font-weight: 400; color: rgba(43, 39, 35, .08); }
-.g-field .g-zone.field-abyss::before, .g-app.is-night .g-field .g-zone::before { color: rgba(236, 224, 198, .09); }
-/* 区名：一条胶带贴在区的上沿 */
-.g-field .g-zone .zlabel {
-  left: 12px; top: -11px; z-index: 2;
-  padding: 1px 12px 2px;
-  font-weight: 800; font-size: 12px; letter-spacing: .08em; color: var(--sk-ink);
-  background: var(--sk-tape); transform: rotate(-2deg);
-  clip-path: polygon(2% 8%, 0 0, 100% 4%, 98% 40%, 100% 100%, 3% 94%, 0 55%);
-  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, .28));
-  pointer-events: none;
-}
-.g-field .g-zone:nth-of-type(even) .zlabel { transform: rotate(1.5deg); }
-.g-app.is-night .g-field .g-zone .zlabel, .g-field .g-zone.field-abyss .zlabel { color: var(--sk-ink); filter: drop-shadow(0 2px 2px rgba(0, 0, 0, .4)) brightness(.82); }
-/* 联机玩家画面的区会滚动（overflow），胶带往里收，不被裁掉 */
-.ol-battle .g-field .g-zone .zlabel { top: 4px; }
-/* 区与区之间 */
-.g-field .g-gap { font-weight: 700; color: #4d453c; }
-.g-field .g-gap .gap-lab { padding: 6px 1px; }
-.g-field .g-gap.gap-open {
-  background: repeating-linear-gradient(180deg, rgba(242, 194, 48, .8) 0 16px, transparent 16px 30px) center / 4px 100% no-repeat, #cec8bd;
-}
-.g-field .g-gap.horiz.gap-open {
-  background: repeating-linear-gradient(90deg, rgba(242, 194, 48, .8) 0 16px, transparent 16px 30px) center / 100% 4px no-repeat, #cec8bd;
-}
-.g-field .g-gap.gap-open .gap-lab { background: #cec8bd; color: #6b6156; }
-.g-field .g-gap.gap-wall { background: repeating-linear-gradient(0deg, #b9a48e 0 10px, #7e6b59 10px 12px); color: #2b2018; }
-.g-field .g-gap.horiz.gap-wall { background: repeating-linear-gradient(90deg, #b9a48e 0 10px, #7e6b59 10px 12px); }
-.g-field .g-gap.gap-wall .gap-lab { background: #b9a48e; }
-.g-field .g-gap.gap-bridge { background: repeating-linear-gradient(0deg, #dcc79e 0 10px, #9c825a 10px 12px); color: #4a3818; }
-.g-field .g-gap.horiz.gap-bridge { background: repeating-linear-gradient(90deg, #dcc79e 0 10px, #9c825a 10px 12px); }
-.g-field .g-gap.gap-bridge .gap-lab { background: #dcc79e; }
-.g-field .g-gap.gap-door { background: linear-gradient(90deg, #98a28f, #c4cbbb 50%, #98a28f); color: #26301f; }
-.g-field .g-gap.horiz.gap-door { background: linear-gradient(180deg, #98a28f, #c4cbbb 50%, #98a28f); }
-.g-field .g-gap.gap-door .gap-lab { background: #c4cbbb; }
-.g-field .g-gap.is-hover { background: #b8a48f; }
-/* 单位卡：像贴在地上的贴纸，一道硬投影（发光、失衡预告这些 filter 照旧盖过它） */
-.unit-wrap { filter: drop-shadow(3px 4px 0 rgba(11, 8, 6, .17)); }
-
-/* 战场（区域、单位卡、评分条）的配色保持浅色，看得清楚 */
+/* 战场（区域、单位卡、评分条）保持原来的白色配色，看得清楚；这里不动 */
 
 /* 预览牌 / 横幅 / 阶段大字 */
 .pvtag, .banner { background: rgba(11, 8, 6, .94); border: 2px solid var(--sk-ink); box-shadow: 3px 4px 0 rgba(0, 0, 0, .5); }

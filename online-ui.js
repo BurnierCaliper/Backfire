@@ -1140,24 +1140,50 @@
       const tape = packet.tape || [];
       if (!tape.length) return;
       animating = true; render();
+      const held = [];   // 这一段演完之前留在场上的被打倒的敌人（卡片 + 红叉），演完一起淡出
+      let zoomed = false;
       try {
-        // 攻击演出（attack-fx.js）：房主发来这一下谁打谁、哪种招式——先播出手和弹道，再一段段跳数字，
-        // 主攻击那几段补上打中的形状（刀光、冲击星……），敌人倒下喷一个红叉
+        // 攻击演出（attack-fx.js）：房主发来这一下谁打谁、哪种招式（有专属演出的再带脚本名和现场数据）——
+        // 先播出手和弹道，再一段段跳数字，主攻击那几段补上打中的形状（刀光、冲击星……），敌人倒下喷一个红叉
         const AF = global.AttackFx, fx = packet.fx && AF ? packet.fx : null;
         const cardFor = (uid) => (battle && battle.cardOf(uid)) || [...stage.querySelectorAll("[data-unit-id]")].find(node => node.dataset.unitId === uid);
         const rectOf = (node) => { if (!node || !node.isConnected) return null; const r = node.getBoundingClientRect(); return r.width ? { x: r.left + r.width / 2, y: r.top + r.height * .42, w: r.width, h: r.height } : null; };
+        const scr = fx && fx.script ? AF.script(fx.script) : null;
+        const ctx = scr ? onlineCtx(fx, tape, cardFor, rectOf) : null;
         let fxFrom = null, mainNo = 0;
-        if (fx && generation === playbackGeneration) { try { fxFrom = await strikeOnline(fx, cardFor, rectOf); } catch (_) { fxFrom = null; } }
+        if (fx && generation === playbackGeneration) {
+          // 协助攻击、碎渣重炮、狂瀑：镜头推近
+          if (fx.assist || (scr && scr.zoom)) { zoomed = zoomOnline(rectOf(cardFor(fx.target))); if (zoomed) await AF.after(300); }
+          // 拉斯缪尔的能量罐
+          if (fx.tank) { const tr = rectOf(cardFor(fx.tank.id)); if (tr) AF.tank(tr, fx.tank.from, fx.tank.to, { ms: fx.tank.ms }); }
+          try { fxFrom = await strikeOnline(fx, scr, ctx, cardFor, rectOf); } catch (_) { fxFrom = null; }
+          // 格挡成功：协助格挡的火花在两人连线的中点，自己格挡的在格挡的人身上
+          if (fx.parried) {
+            const b = rectOf(cardFor(fx.blocker || fx.target)), a = rectOf(cardFor(fx.actor));
+            if (fx.blocker && a && b) AF.sparks({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }); else if (b) AF.clash(b);
+          }
+        }
         const deadBefore = new Set(((displayState || {}).units || []).filter(u => u && u.dead).map(u => u.id));
         for (const event of tape) {
           if (destroyed || generation !== playbackGeneration) break;
           if (event.type !== "pop") continue;
+          const main = !!(fx && fxFrom && event.kind === "dmg" && event.main), n = main ? mainNo++ : -1;
+          // 主攻击的后几段：有专属演出的照脚本再来一下（再飞一发、再撞一次……）；一闪这类一下子全部结算的不用
+          if (main && n > 0 && scr && scr.again && !scr.instant) { try { await scr.again(ctx, event, n); } catch (_) { /* 画坏了不影响结算 */ } }
+          // 只打击破的那一下（二次盾突……）：有专属演出的先演出手
+          if (fxFrom && event.kind === "break" && scr && scr.brk) { try { await scr.brk(ctx, event); } catch (_) { /* 同上 */ } }
           if (Array.isArray(event.snap)) displayState = { ...(displayState || packet.state || {}), units: copy(event.snap) };
           paintStage();
           const card = cardFor(event.unitId);
           if (AF && card && event.kind === "dmg") {
             const u = ((displayState || {}).units || []).find(x => x && x.id === event.unitId);
-            if (u && u.dead && !u.isPlayer && !deadBefore.has(u.id)) { deadBefore.add(u.id); AF.ko(rectOf(card)); }
+            if (u && u.dead && !u.isPlayer && !deadBefore.has(u.id)) {
+              // 被打倒：这一段演完之前卡片和红叉都先留着（game.css · .unit-wrap.dead.ko-held）
+              deadBefore.add(u.id);
+              card.classList.add("ko-held");
+              const uid = u.id;
+              held.push({ id: uid, slow: !!(u.display && u.display.killBig), h: AF.ko(rectOf(card), { hold: "manual", track: () => rectOf(cardFor(uid)) }) });
+            }
           }
           if (event.kind === "proc") {
             // 效果生效：卡上对应的图标放大一下并发光，不弹字
@@ -1175,29 +1201,38 @@
             if (fk) global.HudIcons.procIn(card, fk);
             card.classList.add("ol-impact"); bubble.classList.add("ol-visible");
             if (global.HitFx && (event.kind === "dmg" || event.kind === "highboom")) global.HitFx.burst(event.element || "physical", card.getBoundingClientRect(), { big: event.kind === "highboom" });
-            if (fx && fxFrom && event.kind === "dmg" && event.main) AF.impact(rectOf(card), fx.move, { n: mainNo++, from: fxFrom });
+            if (main && !fx.parried) {
+              if (scr && scr.impact) { try { scr.impact(ctx, event, n, false); } catch (_) { /* 同上 */ } }
+              else AF.impact(rectOf(card), fx.move, { n, from: fxFrom });
+            }
           }
-          await new Promise(resolve => setTimeout(resolve, 180));
+          await new Promise(resolve => setTimeout(resolve, main && scr && scr.instant ? 40 : 180));
           if (card) { card.classList.remove("ol-impact"); card.querySelector(".ol-popup")?.classList.remove("ol-visible"); card.querySelector(".ol-pop-temp")?.remove(); }
         }
-      } finally { if (generation === playbackGeneration) { animating = false; displayState = packet.state || displayState; render(); } }
+      } finally {
+        if (zoomed) zoomOutOnline();
+        held.forEach(k => {
+          const c = battle && battle.cardOf(k.id);
+          if (c) c.classList.remove("ko-held");
+          if (k.h) (k.slow ? k.h.release(2400, 1400) : k.h.release(1200, 500));
+        });
+        if (generation === playbackGeneration) { animating = false; displayState = packet.state || displayState; render(); }
+      }
     }
-    /** 联机玩家：照房主发来的招式播出手——近身的冲过去（打到之后再回位）、远程的蓄力 + 弹道、支援 / 挂效果拉一条线；返回出手的人的位置 */
-    async function strikeOnline(fx, cardFor, rectOf) {
+    /** 联机玩家：照房主发来的招式播出手——有专属演出的照脚本演；没有的近身冲过去（打到之后再回位）、远程蓄力 + 弹道、支援 / 挂效果拉一条线；返回出手的人的位置 */
+    async function strikeOnline(fx, scr, ctx, cardFor, rectOf) {
       const AF = global.AttackFx, a = cardFor(fx.actor), t = cardFor(fx.target), m = fx.move;
       const ra = rectOf(a), rt = rectOf(t);
-      if (!ra || !rt || !m) return null;
+      if (!ra || !m) return null;
+      if (scr && (scr.pre || scr.self)) { try { await (scr.pre || scr.self)(ctx); } catch (_) { /* 画坏了不影响结算 */ } return rectOf(a) || ra; }
+      if (!rt) return null;
       if (m.kind === "support" || m.kind === "hex") {
         if (fx.actor !== fx.target) await AF.link(ra, rt, m);
         AF.impact(rt, m, { from: ra });
         return ra;
       }
       if (m.melee) {
-        const dx = rt.x - ra.x, dy = rt.y - ra.y, d = Math.hypot(dx, dy) || 1, reach = Math.max(16, Math.min(d - Math.min(ra.w, rt.w) * .5, m.heavy ? 112 : 92));
-        a.style.transition = "transform 100ms cubic-bezier(.55, 0, .9, .55)"; a.style.zIndex = "5";
-        a.style.transform = `translate(${(dx / d * reach).toFixed(1)}px, ${(dy / d * reach).toFixed(1)}px)`;
-        await new Promise(resolve => setTimeout(resolve, 100));
-        setTimeout(() => { a.style.transition = "transform 240ms cubic-bezier(.3, .8, .3, 1)"; a.style.transform = ""; setTimeout(() => { a.style.transition = ""; a.style.zIndex = ""; }, 260); }, 130);
+        await dashCard(a, ra, rt, { heavy: m.heavy });
         if (m.flash) AF.area(rt, ra, m);
         return ra;
       }
@@ -1205,6 +1240,99 @@
       if (m.area) AF.area(rt, ra, m);
       await AF.travel(ra, rt, m);
       return ra;
+    }
+    /** 把一张卡冲向 t（和 game.js · dashTo 一样：先往后一收再扑上去，打到之后回原位）。
+     *  o.reach 冲多远（999 = 一直冲到 t）· o.heavy 冲得远一点 · o.speed 时间倍率 · o.hold 到了停多久 · o.keep 冲过去就消失的（等它隐去再悄悄回位） */
+    async function dashCard(node, a, t, o) {
+      o = o || {};
+      if (!node || !a || !t) return;
+      const AF = global.AttackFx;
+      const dx = t.x - a.x, dy = t.y - a.y, d = Math.hypot(dx, dy) || 1, ux = dx / d, uy = dy / d;
+      const reach = o.reach >= 999 ? d : Math.max(16, Math.min(d - Math.min(a.w, t.w) * .5, o.reach || (o.heavy ? 112 : 92)));
+      const k = o.speed || 1, token = String(Math.random());
+      node.dataset.olDash = token; node.style.zIndex = "5";
+      node.style.transition = `transform ${90 * k}ms cubic-bezier(.2, .7, .3, 1)`;
+      node.style.transform = `translate(${(-ux * 12).toFixed(1)}px, ${(-uy * 12).toFixed(1)}px)`;
+      await AF.after(90 * k);
+      node.style.transition = `transform ${100 * k}ms cubic-bezier(.55, 0, .9, .55)`;
+      node.style.transform = `translate(${(ux * reach).toFixed(1)}px, ${(uy * reach).toFixed(1)}px)`;
+      await AF.after(100 * k);
+      settleCard(node, token, o.hold || (o.keep ? 560 : 130), o.keep ? 0 : 240);
+    }
+    /** 出手后回原位；中途这张卡又被别的动作接管就不管了 */
+    function settleCard(node, token, hold, back) {
+      setTimeout(() => {
+        if (node.dataset.olDash !== token) return;
+        node.style.transition = `transform ${back}ms cubic-bezier(.3, .8, .3, 1)`; node.style.transform = "";
+        setTimeout(() => { if (node.dataset.olDash !== token) return; node.style.transition = ""; node.style.zIndex = ""; delete node.dataset.olDash; }, back + 20);
+      }, hold);
+    }
+    /** 专属演出（attack-fx.js · SCRIPTS）的「现场」：和 game.js · strikeCtx 一样的几样东西，换成联机画面里的卡片 */
+    function onlineCtx(fx, tape, cardFor, rectOf) {
+      const AF = global.AttackFx;
+      const boxOf = (node) => { if (!node) return null; const r = node.getBoundingClientRect(); return r.width ? { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height } : null; };
+      const zoneRect = (x) => boxOf(typeof x === "number" ? battle && battle.el.querySelector(`.g-zone[data-num="${x}"]`) : cardFor(x)?.closest(".g-zone"));
+      const pops = tape.filter(e => e.type === "pop");
+      const targets = [];
+      pops.forEach(e => { if (e.unitId && e.unitId !== fx.actor && /^(dmg|break|status|fxword)$/.test(e.kind) && !targets.includes(e.unitId)) targets.push(e.unitId); });
+      const shakeEl = () => battle && battle.el;
+      return {
+        actor: fx.actor, target: fx.target, mains: pops.filter(e => e.kind === "dmg" && e.main), targets, move: fx.move || {}, data: fx.data || {},
+        rect: (id) => (typeof id === "number" ? zoneRect(id) : rectOf(cardFor(id))),
+        zoneRect,
+        wait: (ms) => AF.after(ms),
+        dash: (id, to, o) => { const n = cardFor(id); return dashCard(n, rectOf(n), to, o); },
+        recoil: (id, to, px) => {
+          const n = cardFor(id), a = rectOf(n); if (!n || !a || !to) return;
+          const dx = to.x - a.x, dy = to.y - a.y, d = Math.hypot(dx, dy) || 1, k = px || 8, token = String(Math.random());
+          n.dataset.olDash = token; n.style.transition = "transform 70ms ease-out";
+          n.style.transform = `translate(${(-dx / d * k).toFixed(1)}px, ${(-dy / d * k).toFixed(1)}px)`;
+          settleCard(n, token, 110, 220);
+        },
+        nudge: (id, dx, dy, ms) => {
+          const n = cardFor(id); if (!n) return;
+          const token = String(Math.random()); ms = ms || 240;
+          n.dataset.olDash = token; n.style.transition = `transform ${ms * .4}ms cubic-bezier(.2, .8, .3, 1)`;
+          n.style.transform = `translate(${dx}px, ${dy}px)`;
+          settleCard(n, token, ms * .9, 260);
+        },
+        shake: (p) => {
+          const w = shakeEl(); if (!w) return;
+          const c = p >= 1 ? "quake" : "quake-s";
+          w.classList.remove("quake", "quake-s"); void w.offsetWidth; w.classList.add(c);
+          setTimeout(() => w.classList.remove(c), p >= 1 ? 600 : 340);
+        },
+        cls: (id, name, ms) => {
+          const n = cardFor(id); if (!n) return;
+          n.classList.remove(name); void n.offsetWidth; n.classList.add(name);
+          setTimeout(() => n.classList.remove(name), (ms || 500) + 40);
+        },
+        burst: (el, r, big) => { if (global.HitFx && r) global.HitFx.burst(el || "physical", { left: r.x - r.w / 2, top: r.y - r.h * .42, width: r.w, height: r.h }, { big: !!big }); },
+        owner: () => (fx.data && fx.data.owner) || null
+      };
+    }
+    /** 镜头推近（协助攻击、碎渣重炮、狂瀑）：和单人画面一样——战场里的东西朝目标放大一点（战场的框不动）、底下的栏压暗，演完迅速拉回 */
+    let zoomAnims = [];
+    function zoomOnline(rect) {
+      const wrap = battle && battle.el, f = wrap && wrap.querySelector(".g-field");
+      if (!f || !rect || typeof f.animate !== "function" || wrap.classList.contains("assist-focus")) return false;
+      const fr = f.getBoundingClientRect();
+      f.style.setProperty("--focus-x", ((rect.x - fr.left) / Math.max(1, fr.width) * 100).toFixed(1) + "%");
+      f.style.setProperty("--focus-y", ((rect.y - fr.top) / Math.max(1, fr.height) * 100).toFixed(1) + "%");
+      wrap.classList.add("assist-focus");
+      const still = global.matchMedia && global.matchMedia("(prefers-reduced-motion: reduce)").matches, ease = "cubic-bezier(.2, .8, .3, 1)";
+      if (!still) [...f.children].forEach(ch => {
+        const r = ch.getBoundingClientRect(), o = `${(rect.x - r.left).toFixed(1)}px ${(rect.y - r.top).toFixed(1)}px`;
+        zoomAnims.push(ch.animate([{ scale: "1", transformOrigin: o }, { scale: "1.12", transformOrigin: o }], { duration: 300, easing: ease, fill: "forwards" }));
+      });
+      wrap.querySelectorAll(":scope > .g-hud").forEach(d => zoomAnims.push(d.animate([{ filter: "brightness(1) saturate(1)" }, { filter: "brightness(.5) saturate(.6)" }], { duration: 300, easing: "ease-out", fill: "forwards" })));
+      return true;
+    }
+    function zoomOutOnline() {
+      const wrap = battle && battle.el;
+      if (wrap) wrap.classList.remove("assist-focus");
+      const list = zoomAnims; zoomAnims = [];
+      list.forEach(a => { a.onfinish = () => a.cancel(); a.playbackRate = -1.6; a.play(); });
     }
     function addTitleButton(text, which) {
       const menu = document.querySelector("#scr-title .t-menu"); if (!menu) return;
