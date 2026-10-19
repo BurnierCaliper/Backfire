@@ -159,9 +159,10 @@ const Rogue = (function () {
       }
     }
   }
-  /** 存档：先把场上的物资写回本局 */
+  /** 存档：先把场上的物资写回本局。长线养成走独立槽位 */
   function save(run) {
     syncWorld(run);
+    if (run && run.growth && typeof SaveStore.saveGrowth === "function") return SaveStore.saveGrowth(run);
     return SaveStore.saveRun(run);
   }
   function leaveRunMode(run) {
@@ -241,7 +242,9 @@ const Rogue = (function () {
     run.actDay = 0;
     if (run.growth) {
       run.main = null;
-      log(run, `长线养成：从任务板接任务赚钱升级。完成任务得到${ITEM_CATALOG[G().fusionItem].name}，可以在角色抽取机里抽角色。`);
+      run.lastFusionDay = 0;
+      grantDailyFusion(run);
+      log(run, `长线养成：从任务板接任务赚钱升级。每天获得${ITEM_CATALOG[G().fusionItem].name}，可以在角色抽取机里抽角色。`);
       makeBoard(run);
       return;
     }
@@ -602,11 +605,16 @@ const Rogue = (function () {
       const from = h.level || 1;
       tryLevelUp(u);
       if (u.dead && run.growth) {
-        // 长线养成：不会永久死亡，战后留 1 点生命
-        const last = (u.layers || []).filter(l => l.type !== "shield").slice(-1)[0];
-        if (last) last.current = Math.max(1, Number(last.current) || 0);
-        u.dead = false; u.dying = false;
-        notes.push(`${u.name} 倒下了，被队友拖了回来（剩 1 点生命）。`);
+        // 长线养成：永久死亡 → 清零等级与武器等级，移出队伍。下次抽到从 1 级重新培养
+        notes.push(`${u.name} 永久死亡，等级与武器等级清零，移出队伍。`);
+        const idx = run.party.indexOf(h);
+        if (idx >= 0) run.party.splice(idx, 1);
+        // 同时从候补移除（如果有）
+        if (run.reserve) run.reserve = run.reserve.filter(x => x.kit !== h.kit);
+        // 记录已死亡过的角色，下次抽到时强制 1 级
+        run.deadKits = run.deadKits || [];
+        if (run.deadKits.indexOf(h.kit) < 0) run.deadKits.push(h.kit);
+        return;
       } else if (u.dead) { killHero(run, h, notes, "永久死亡"); return; }
       if (u.level > from) {
         notes.push(`${u.name} 升到 ${u.level} 级。`);
@@ -2244,11 +2252,24 @@ const Rogue = (function () {
     run.stage = "camp";
     return notes;
   }
+  /** 长线养成：每天获得 1 个赫心融合体（按天数差补发，避免重复） */
+  function grantDailyFusion(run, notes) {
+    if (!run || !run.growth) return;
+    const today = Number(run.day) || 1;
+    const last = Number(run.lastFusionDay) || 0;
+    if (today <= last) return;
+    const n = today - last;
+    bagAdd(G().fusionItem, n);
+    run.lastFusionDay = today;
+    const name = (ITEM_CATALOG[G().fusionItem] || {}).name || "赫心融合体";
+    (notes || []).push(`第 ${today} 天：获得 ${name}×${n}（现有 ${bagCount(G().fusionItem)}）。`);
+  }
   function advanceDays(run, n) {
     run.actDay = (run.actDay || 0) + n;
     run.day += n;
     LEDGER.day = run.day;      // 队伍档案的「第几天」（整局数据里每场战斗的时间）跟着本局走，不再另算（ledger.js · ledgerInRun）
     LEDGER.shortUsed = {};     // 新的一天，短休次数刷新
+    grantDailyFusion(run);     // 长线养成每天发赫心融合体
   }
 
   /** 休整一次：补给够就长休，不够只能硬撑。之后回任务板、进首领战，或者主线过期 → 结束 */
@@ -2436,7 +2457,15 @@ const Rogue = (function () {
       notes.push(`已经有 ${heroName(kit)} 了：${heroName(kit)} 升到 ${h.level} 级。`);
       queueLevelRewards(h, from, h.level, notes, run);
     } else {
-      const nh = initHero({ kit, weapons: SaveStore.weaponsOf(kit), level: G().recruitLevel, xp: 0, hp: null, shp: null, weaponState: {} });
+      // 以前永久死亡过的角色：从 1 级重新开始
+      const wasDead = (run.deadKits || []).indexOf(kit) >= 0;
+      const startLv = wasDead ? 1 : G().recruitLevel;
+      const nh = initHero({ kit, weapons: SaveStore.weaponsOf(kit), level: startLv, xp: 0, hp: null, shp: null, weaponState: {}, weaponLevels: wasDead ? {} : null });
+      if (wasDead) {
+        notes.push(`${heroName(kit)} 曾永久死亡，从 1 级重新培养。`);
+        const di = run.deadKits.indexOf(kit);
+        if (di >= 0) run.deadKits.splice(di, 1);
+      }
       if (nh.level > 1) queueLevelRewards(nh, 1, nh.level, notes, run);
       if (run.party.length < G().partyMax) {
         run.party.push(nh);

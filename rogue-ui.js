@@ -87,8 +87,8 @@
   const SOLO_TIP = `先点一名角色当主角，再挑 ${ROGUE_SOLO.partners} 名伙伴（战斗里用「支援」叫他们登场打协助攻击），最后选一个第二副职责。` +
     `单人模式：每回合 ${ROGUE_SOLO.apPerRound} 行动点，能给自己协助格挡、接自己打出的失衡；每场胜利额外 +${ROGUE_SOLO.battleXp} 经验，` +
     `每 ${ROGUE_SOLO.attrEvery} 级多一次六维属性，每 ${ROGUE_SOLO.role2Every} 级从第二副职责里多学一个技能。`;
-  const GROWTH_TIP = `挑 ${ROGUE_GROWTH.startParty} 名角色组成初始小队。没有期限和首领，接任务赚钱、升级、强化武器（经验和武器升级的材料照跑团模式）；` +
-    `每完成一个任务得到赫心融合体，在任务板旁的角色抽取机里抽角色：新角色入队，抽到已有的角色 +1 级。角色不会永久死亡。`;
+  const GROWTH_TIP = `挑 ${ROGUE_GROWTH.startParty} 名角色组成初始小队。独立存档，没有期限和首领。每天获得赫心融合体，在角色抽取机里抽角色。` +
+    `角色永久死亡后等级与武器等级清零并移出队伍，下次抽到从 1 级重新培养。`;
   function renderParty() {
     $("party-title").textContent = solo.on ? "单人模式 · 选择主角与伙伴" : growth.on ? "长线养成 · 选择初始小队" : "选择队伍";
     $("party-tip").textContent = solo.on ? SOLO_TIP : growth.on ? GROWTH_TIP : PARTY_TIP;
@@ -279,7 +279,7 @@
   function renderBoard() {
     if (run.growth) {
       return `<h2>任务板</h2>
-      <p class="r-hint">长线养成：没有主线和期限，任务随便接。敌人等级跟着队伍平均等级走；团灭只算任务失败，角色不会永久死亡。</p>
+      <p class="r-hint">长线养成：独立存档，没有主线和期限。每天获得赫心融合体。角色永久死亡后清零等级移出队伍，下次抽到从 1 级重新培养。</p>
       <div class="task-list">${(run.board || []).map((t, i) => taskCard(t, i)).join("")}</div>
       ${renderGrowth()}
       ${renderSmiths()}

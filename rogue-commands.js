@@ -95,8 +95,10 @@ const RogueCommands = (function () {
   };
   const sessions = {
     readSaved() { return SaveStore.loadRun(); },
+    readGrowth() { return typeof SaveStore.loadGrowth === "function" ? SaveStore.loadGrowth() : null; },
     // 存档的情况：none / ok / newer（更新版本的游戏存的，这一版读不了）/ broken。开新局前提醒会覆盖
     savedStatus() { return SaveStore.status("run"); },
+    growthStatus() { return typeof SaveStore.status === "function" ? SaveStore.status("growth") : "none"; },
     prepareParty(c, context) {
       const s = needSession(context);
       s.picked.length = 0;
@@ -135,7 +137,8 @@ const RogueCommands = (function () {
       return { seed: s.run.seed, solo: s.run.solo, growth: !!s.run.growth, daily: !!s.run.daily };
     },
     resume(_c, context) {
-      const s = needSession(context), saved = SaveStore.loadRun();
+      const s = needSession(context);
+      const saved = (_c && _c.growth && typeof SaveStore.loadGrowth === "function") ? SaveStore.loadGrowth() : SaveStore.loadRun();
       if (!saved) return { resumed: false };
       s.run = saved;
       Rogue.enterRunMode(s.run);
