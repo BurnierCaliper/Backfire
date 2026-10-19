@@ -1141,12 +1141,24 @@
       if (!tape.length) return;
       animating = true; render();
       try {
+        // 攻击演出（attack-fx.js）：房主发来这一下谁打谁、哪种招式——先播出手和弹道，再一段段跳数字，
+        // 主攻击那几段补上打中的形状（刀光、冲击星……），敌人倒下喷一个红叉
+        const AF = global.AttackFx, fx = packet.fx && AF ? packet.fx : null;
+        const cardFor = (uid) => (battle && battle.cardOf(uid)) || [...stage.querySelectorAll("[data-unit-id]")].find(node => node.dataset.unitId === uid);
+        const rectOf = (node) => { if (!node || !node.isConnected) return null; const r = node.getBoundingClientRect(); return r.width ? { x: r.left + r.width / 2, y: r.top + r.height * .42, w: r.width, h: r.height } : null; };
+        let fxFrom = null, mainNo = 0;
+        if (fx && generation === playbackGeneration) { try { fxFrom = await strikeOnline(fx, cardFor, rectOf); } catch (_) { fxFrom = null; } }
+        const deadBefore = new Set(((displayState || {}).units || []).filter(u => u && u.dead).map(u => u.id));
         for (const event of tape) {
           if (destroyed || generation !== playbackGeneration) break;
           if (event.type !== "pop") continue;
           if (Array.isArray(event.snap)) displayState = { ...(displayState || packet.state || {}), units: copy(event.snap) };
           paintStage();
-          const card = (battle && battle.cardOf(event.unitId)) || [...stage.querySelectorAll("[data-unit-id]")].find(node => node.dataset.unitId === event.unitId);
+          const card = cardFor(event.unitId);
+          if (AF && card && event.kind === "dmg") {
+            const u = ((displayState || {}).units || []).find(x => x && x.id === event.unitId);
+            if (u && u.dead && !u.isPlayer && !deadBefore.has(u.id)) { deadBefore.add(u.id); AF.ko(rectOf(card)); }
+          }
           if (event.kind === "proc") {
             // 效果生效：卡上对应的图标放大一下并发光，不弹字
             if (card) global.HudIcons?.procIn(card, event.fx);
@@ -1163,11 +1175,36 @@
             if (fk) global.HudIcons.procIn(card, fk);
             card.classList.add("ol-impact"); bubble.classList.add("ol-visible");
             if (global.HitFx && (event.kind === "dmg" || event.kind === "highboom")) global.HitFx.burst(event.element || "physical", card.getBoundingClientRect(), { big: event.kind === "highboom" });
+            if (fx && fxFrom && event.kind === "dmg" && event.main) AF.impact(rectOf(card), fx.move, { n: mainNo++, from: fxFrom });
           }
           await new Promise(resolve => setTimeout(resolve, 180));
           if (card) { card.classList.remove("ol-impact"); card.querySelector(".ol-popup")?.classList.remove("ol-visible"); card.querySelector(".ol-pop-temp")?.remove(); }
         }
       } finally { if (generation === playbackGeneration) { animating = false; displayState = packet.state || displayState; render(); } }
+    }
+    /** 联机玩家：照房主发来的招式播出手——近身的冲过去（打到之后再回位）、远程的蓄力 + 弹道、支援 / 挂效果拉一条线；返回出手的人的位置 */
+    async function strikeOnline(fx, cardFor, rectOf) {
+      const AF = global.AttackFx, a = cardFor(fx.actor), t = cardFor(fx.target), m = fx.move;
+      const ra = rectOf(a), rt = rectOf(t);
+      if (!ra || !rt || !m) return null;
+      if (m.kind === "support" || m.kind === "hex") {
+        if (fx.actor !== fx.target) await AF.link(ra, rt, m);
+        AF.impact(rt, m, { from: ra });
+        return ra;
+      }
+      if (m.melee) {
+        const dx = rt.x - ra.x, dy = rt.y - ra.y, d = Math.hypot(dx, dy) || 1, reach = Math.max(16, Math.min(d - Math.min(ra.w, rt.w) * .5, m.heavy ? 112 : 92));
+        a.style.transition = "transform 100ms cubic-bezier(.55, 0, .9, .55)"; a.style.zIndex = "5";
+        a.style.transform = `translate(${(dx / d * reach).toFixed(1)}px, ${(dy / d * reach).toFixed(1)}px)`;
+        await new Promise(resolve => setTimeout(resolve, 100));
+        setTimeout(() => { a.style.transition = "transform 240ms cubic-bezier(.3, .8, .3, 1)"; a.style.transform = ""; setTimeout(() => { a.style.transition = ""; a.style.zIndex = ""; }, 260); }, 130);
+        if (m.flash) AF.area(rt, ra, m);
+        return ra;
+      }
+      await AF.windup(ra, rt, m);
+      if (m.area) AF.area(rt, ra, m);
+      await AF.travel(ra, rt, m);
+      return ra;
     }
     function addTitleButton(text, which) {
       const menu = document.querySelector("#scr-title .t-menu"); if (!menu) return;

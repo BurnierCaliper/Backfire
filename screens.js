@@ -117,6 +117,10 @@ const Screens = (function () {
         window.dispatchEvent(new Event("resize"));
         // 开战前的大字：切到战斗画面之后再弹（同一刻新布置的战斗会自己弹，这里只补还没弹过的）
         setTimeout(() => { if (window.GAME && GAME.showPendingIntro) GAME.showPendingIntro(); }, 0);
+      },
+      // 离开战斗画面：瞄准线、敌人攻击指向和还在播的攻击演出一起收掉（别留在标题 / 任务板上）
+      onHide() {
+        if (window.AttackFx) { AttackFx.clearAim(); AttackFx.clearThreat(); AttackFx.skip(); }
       }
     });
     $("t-new").onclick = () => RunFlow.start();

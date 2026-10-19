@@ -487,7 +487,7 @@ const EnemyAI = (function () {
       if (sp && tgt) {
         return {
           thunk: () => { state.attackerId = u.id; state.targetId = tgt.id; runSkill("use_scrap:" + sp.id); },
-          meta: { actorId: "prop:" + sp.id, targetId: tgt.id, skillName: `${u.name} 操控碎渣机炮` }
+          meta: { actorId: "prop:" + sp.id, targetId: tgt.id, skillName: `${u.name} 操控碎渣机炮`, skillId: "use_scrap:" + sp.id }
         };
       }
     }
@@ -499,7 +499,7 @@ const EnemyAI = (function () {
       if (sidW) {
         return {
           thunk: () => { state.attackerId = u.id; state.targetId = "gap:" + wallKey; runSkill(sidW); },
-          meta: { actorId: u.id, targetId: "gap:" + wallKey, skillName: `攻击危墙（${wallKey.replace("-", "–")} 区之间）` }
+          meta: { actorId: u.id, targetId: "gap:" + wallKey, skillName: `攻击危墙（${wallKey.replace("-", "–")} 区之间）`, skillId: sidW }
         };
       }
     }
@@ -519,7 +519,7 @@ const EnemyAI = (function () {
         if (sid === "en_king_hold") u._aiHoldTurn = state.turnNo;
         if (u.tauntTo === target.id) u.tauntTo = null;
       },
-      meta: { actorId: u.id, targetId: target.id, skillName: enemyLabel(u, sid) },
+      meta: { actorId: u.id, targetId: target.id, skillName: enemyLabel(u, sid), skillId: sid },   // skillId：画面按招式挑攻击演出（attack-fx.js）
       ai: { kind: "attack", sid, target, picks }
     });
 
