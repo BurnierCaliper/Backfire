@@ -368,6 +368,9 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **流沙没顶（下陷 3 层）真的不能出手了**（app.js · `costBlockReason` / `runSkill`；game.js · `baseBlockReason`；hotseat-validation.js · `baseReason`；tests/quicksand-lock.test.js；docs/bug-backlog.md H5）
+  - 以前：`spendAp` / `spendBonus` 对没顶的单位返回 `false`，但 `runSkill` 不看返回值，没顶的单位（我方和敌人）照常出手，还一个点都不扣。
+  - 现在：技能消耗付不起（没顶，或行动点 / 附赠行动不够）时，在 `snapshot()` / `beginActionAcc` 之前就挡住，这次行动不结算、不改局面，日志写原因。技能按钮在画面和联机校验里提前灰掉（原因「陷在流沙里没顶，不能行动」）。不花点数的动作（起身等）照常可用；敌人 AI 本来就不给没顶的敌人规划行动。
 - **专长「拉一把」修好：医疗包能用了**（items.js · `ITEM_CATALOG` / `itemHealSpec` / `rollItemHeal`；ledger.js · `ledgerHealItem`；feats.js · `featHealItems`；tests/feat-pickup.test.js；docs/bug-backlog.md H4）
   - 以前：「拉一把」只认带数字 `heal` 的道具，但简易医疗包、诊所医疗包没有这个字段（治疗骰写死在使用道具的代码里），背包里有医疗包也永远「没有医疗道具」。
   - 现在：医疗包在 `ITEM_CATALOG` 里带结构化治疗骰（简易 1d4+6、诊所 2d4+6），战斗里用道具、休整用道具、「拉一把」都读这一处。「拉一把」起身时掷这件道具的治疗骰（和平时用一样），用掉一件，不扣坚毅生命；强心注射剂只能自己用，不算医疗道具。治疗量本身不变。

@@ -8,6 +8,7 @@
 
 ## 已修
 
+- [x] **H5** 流沙没顶（下陷 3 层）挡不住出手，还不扣行动点 —— `runSkill` 在 `snapshot()` 之前用 `costBlockReason` 挡住付不起消耗的行动；`baseBlockReason` / 联机 `baseReason` 提前灰掉按钮（tests/quicksand-lock.test.js）
 - [x] **H4** 专长「拉一把」永远用不了（医疗包没有 `heal` 字段）—— `ITEM_CATALOG` 的医疗包补上结构化治疗骰 `heal: { n, s, flat }`，用道具 / 休整用道具 / 拉一把都读这一处（`itemHealSpec` / `rollItemHeal`）；拉一把只认有 `heal` 的友方道具，强心注射剂不算（items.js、ledger.js、feats.js · `featHealItems`；tests/feat-pickup.test.js）
 - [x] **H1** 从跑团战斗点顶栏「标题」出来 `TRPG.active` 不清，之后同一页的单局 / 每日挑战 / 训练场按跑团规则走、写进跑团空位 —— 跑团战斗里点「标题」走跑团自己的离开流程（放弃没打完的战斗、存团、关跑团规则）；另外不管从哪条路回到标题都会关掉跑团模式（screens.js、trpg-ui.js · `TrpgFlow.leave` / `titleFromBattle`；tests/save-leak.test.js）
 - [x] **H15** 训练场里撤退 / 全员倒地照常结算并写存档 —— 训练场的战斗不结算耐久、不写队伍记忆 / 跑团空位（game.js · `trainingActive`；tests/save-leak.test.js）
@@ -26,7 +27,6 @@
 | # | 问题 | 位置 |
 |---|---|---|
 | H2 | 单局「休整」补给不够又没钱就卡死：「开始长休」禁用，「硬撑着过夜」没有入口 | `rogue-ui.js:939-954`、`rest-report.js:47`、`rogue.js:2259-2263` |
-| H5 | 流沙没顶（下陷 3 层）挡不住出手，还不扣行动点 | `app.js:11190-11198 / 11061-11077` |
 | H7 | 蚁型戒备兵种大酸液弹的主目标那一下常被射程判定吞掉 | `enemies.js:1026-1055`、`ai.js:412-421` |
 | H8 | 跑团模板「我方同阵营」的友军在敌人回合从不行动 | `ai.js:13-14 / 677-681` |
 | H9 | （回归 63b90d7）首领没攒满标记「立刻恢复」后，飞碟触灵本体的协助攻击打不到它 | `app.js:10476 / 7609` |

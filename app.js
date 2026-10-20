@@ -5223,6 +5223,15 @@ function skillNameHint(id) {
 function prepDieSides(u) {
   return upgradeDieSides(6, milestone((u && u.level) || 1, 5));
 }
+/** 付不起这笔消耗的原因（没顶 / 行动点不足 / 附赠行动不足）；付得起返回 ""。只查不扣，不写日志 */
+function costBlockReason(u, cost) {
+  if (!u || !cost) return "";
+  const ap = cost.ap || 0, bonus = cost.bonus || 0;
+  if ((ap || bonus) && sinkLocked(u)) return "陷在流沙里没顶，不能行动";
+  if (ap > (u.ap || 0)) return "行动点不足";
+  if (bonus > (u.bonus || 0)) return "附赠行动不足";
+  return "";
+}
 function spendAp(u, n, reason) {
   n = n || 1;
   if (!u) return true;
@@ -11193,7 +11202,7 @@ function runSkillInner(id, optRun) {
   // 敌人技能默认花 1 行动点；赤牙的霰弹枪 / 掩体 2 行动点、追猎 1 附赠（enemies.js · enemySkillCost）
   const enemyCost = !a.isPlayer && !reaction ? (typeof enemySkillCost === "function" ? enemySkillCost(a, id) : { ap: 1, bonus: 0 }) : null;
   if (enemyCost) {
-    if ((a.ap || 0) < enemyCost.ap || (a.bonus || 0) < enemyCost.bonus) {
+    if (sinkLocked(a) || (a.ap || 0) < enemyCost.ap || (a.bonus || 0) < enemyCost.bonus) {
       paintSkillLog(`${a.name} ${(a.ap || 0) < enemyCost.ap ? "行动点" : "附赠行动"}不足，无法使用该技能。`);
       return;
     }
@@ -11341,6 +11350,17 @@ function runSkillInner(id, optRun) {
     }
     hitStructure(a, token, structureHitOpt(a, id));
     return;
+    }
+  }
+  // 付不起消耗（流沙没顶 / 点数不够）：这次行动不结算，要在 snapshot / beginActionAcc 之前挡住，免得留下半截状态
+  {
+    const payCost = a.isPlayer && id !== "assist_block" ? skillCost(id) : enemyCost;
+    const why = costBlockReason(a, payCost);
+    if (why) {
+      paintSkillLog(why === "陷在流沙里没顶，不能行动"
+        ? `${a.name} 陷在流沙里没顶，无法${skillNameHint(id)}。`
+        : `${a.name} ${why}，无法使用该技能。`);
+      return;
     }
   }
   snapshot();

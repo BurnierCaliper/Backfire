@@ -74,6 +74,7 @@
     if (state.combatPhase !== "player") return "敌人回合";
     if (sk.id === "__stand") return standUpBlocked(actor);
     if (actor.stunned) return "失衡中，本回合无法行动";
+    if (((sk.cost.ap || 0) || (sk.cost.bonus || 0)) && typeof sinkLocked === "function" && sinkLocked(actor)) return "陷在流沙里没顶，不能行动";
     if ((sk.cost.ap || 0) > (actor.ap || 0)) return "行动点不足";
     if ((sk.cost.bonus || 0) > (actor.bonus || 0)) return "附赠行动不足";
     if (sk.id === "__move" && actor.noMove) return "本回合无法移动";
