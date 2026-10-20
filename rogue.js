@@ -1882,7 +1882,72 @@ const Rogue = (function () {
     notes.push(`配方芯片：学会了${it.name}的配方（${ROGUE_CHECKS.diffs[it.diff].name} · ${it.prof}）。`);
   }
 
+  /* ---------- 背包 / 工坊共用的读数（inventory.js）：只读，不改存档 ---------- */
+  /** 背包里现有的：{ 物品 id: 数量 } */
+  function bagCounts() {
+    const out = {};
+    ((ensureBag().items) || []).forEach(x => { const n = Number(x.qty) || 0; if (n > 0) out[x.id] = (out[x.id] || 0) + n; });
+    return out;
+  }
+  /** 一名角色身上装着的（改装件、图纸、义体）：给背包「武器与改装件」「义体」页用 */
+  function heroGear(run, h) {
+    const installed = [], blueprints = [];
+    (h.weapons || []).forEach(k => {
+      (typeof weaponPartRow === "function" ? weaponPartRow(h, k) : []).forEach((id, slot) => {
+        if (id) installed.push({ weapon: k, weaponName: heroName(k), slot, part: id, name: typeof weaponPartLabel === "function" ? weaponPartLabel(id) : id });
+      });
+      const bp = (run.installed || {})[k];
+      if (bp) blueprints.push({ weapon: k, weaponName: heroName(k), blueprint: bp, name: (blueprintById(bp) || {}).name || bp });
+    });
+    return { kit: h.kit, name: heroName(h.kit), installed, blueprints, cyber: h.cyber ? normPlan(h.cyber) : null };
+  }
+  /** 背包（分类、公用 / 个人）。opt.owned / opt.kits 见 inventory.js · buildInventory；单机不传 = 全部公用。
+   *  战斗中也能调（不重摆队伍） */
+  function inventory(run, opt) {
+    opt = opt || {};
+    const out = buildInventory(bagCounts(), { owned: opt.owned || null, kits: opt.kits || null, heroes: (run.party || []).map(h => heroGear(run, h)) });
+    out.water = ledgerWater();
+    return out;
+  }
+  /** 一张配方对一名角色的状态。opt.counts：能用的材料数量（联机传自己的 + 公用的；不传 = 整个背包）；opt.helper 打下手的人。
+   *  → recipeCheck 的结果 + { kit, kind, prof, diff, diffName, hours, known, bench, placeOk, reasons: [文字], odds }
+   *  craftable = 会这张配方 && 这里能做 && 材料够 && 有对应熟练项；只有 craftable 时 odds 才有（{ chance, base, adv, dis, helped, reroll, level, hours }），否则 null */
+  function recipeStatus(run, kit, itemId, opt) {
+    opt = opt || {};
+    const it = craftItem(itemId);
+    if (!it) return null;
+    const chk = recipeCheck(itemId, opt.counts || bagCounts());
+    const place = craftPlace(run), bench = CRAFT_RULES.benchKinds.includes(it.kind);
+    const known = knowsRecipe(run, itemId), placeOk = !!place && (place === "bench" || !bench);
+    const reasons = [];
+    if (!known) reasons.push("还不会这张配方");
+    if (!place) reasons.push("这里不能制作");
+    else if (!placeOk) reasons.push("要在工坊的工作台上做");
+    if (chk.missing.length) reasons.push("材料不够");
+    let odds = null;
+    if (known && placeOk && !chk.missing.length && kit) {
+      const o = craftOdds(run, kit, itemId, opt.helper || null);
+      if (!o) reasons.push("没有这名角色");
+      else if (!o.base) reasons.push(`没有「${it.prof}」熟练`);
+      else odds = { chance: o.chance, base: o.base, adv: o.adv, dis: o.dis, helped: o.helped, reroll: o.reroll, level: o.level, hours: o.hours };
+    }
+    return Object.assign(chk, { kit: kit || null, kind: it.kind, prof: it.prof, diff: it.diff, diffName: ROGUE_CHECKS.diffs[it.diff].name,
+      hours: CRAFT_RULES.hours[it.diff], known, bench, placeOk, craftable: !!odds, reasons, odds });
+  }
+  /** 配方簿：全部配方对一名角色的状态，能做的排前面（其余按配方表顺序）。opt 同 recipeStatus，另有 opt.kind 只要某一类、opt.onlyCraftable */
+  function recipeBook(run, kit, opt) {
+    opt = opt || {};
+    const counts = opt.counts || bagCounts();
+    let list = EFFECT_ITEMS.filter(it => CRAFT_RECIPES[it.id] && (!opt.kind || it.kind === opt.kind))
+      .map(it => recipeStatus(run, kit, it.id, Object.assign({}, opt, { counts })));
+    if (opt.onlyCraftable) list = list.filter(x => x.craftable);
+    return list.filter(x => x.craftable).concat(list.filter(x => !x.craftable));
+  }
+  /** 这种材料用在哪些配方上（背包里点材料 → 跳到工坊的配方） */
+  function materialUses(materialId) { return recipesUsing(materialId); }
+
   /* ---------- 工匠 ---------- */
+
   /** 升到某一级的报价（rogue-data.js · ROGUE_SMITH.recipe × 材料价 + 加工费，再按工匠的收费规则）。
    *  smithId 不给时按标准价算。返回 { cost, hours, mats, labor } 或 null（没有这一级） */
   function smithQuote(run, smithId, level) {
@@ -2722,7 +2787,7 @@ function advanceDays(run, n) {
     role2Options, soloBattleInfo,
     restPlan, restOptions, canLongRest, sheetData, armoryData, lowHpWarning, escortInfo, partOffers, buyPart, sellPart, canSellParts, partStock, partSellPrice, partInstallCost, installPart, removePart, restAtNode, leaveNode, canShortRestBefore, shortRestBeforeNode,
     ambushChance, watchOptions,
-    interludeOptions, campStatus: campStatusOf, buy, shopPoints, redeemList, redeem, craftPlace, craftList, craftOdds, craft, knowsRecipe, learnOptions, learnRecipe, rollRecipeChip, salvageList, salvage, setCraftHooks, setCraftJob, craftQueue, craftQueued,  canShop, shopItemName, shopStock, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
+    interludeOptions, campStatus: campStatusOf, buy, shopPoints, redeemList, redeem, craftPlace, craftList, craftOdds, craft, knowsRecipe, learnOptions, learnRecipe, rollRecipeChip, salvageList, salvage, setCraftHooks, setCraftJob, craftQueue, craftQueued, bagCounts, inventory, recipeStatus, recipeBook, materialUses,  canShop, shopItemName, shopStock, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
     presentSmiths, smithInfo, claimBlueprint, installBlueprint, blueprintById, weaponModsOf,
     smithQuote, introduceSmith,
     canClinic, cyberInfo, cyberPreview, cyberCost, modifyHero, healCost, healHero,

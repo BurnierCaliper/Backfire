@@ -467,6 +467,11 @@
       learn: Rogue.learnOptions(r),
       salvage: Rogue.salvageList().map(x => Object.assign(x, { have: mine.reduce((s, k) => s + (Number((d.owned[k] || {})[x.id]) || 0), 0) + free(r, x.id) })).filter(x => x.have > 0)
     } : null;
+    // 背包 / 配方簿（inventory.js · buildInventory；rogue.js · inventory / recipeBook）：数量只在房主这边算，
+    // 每人只拿到自己角色名下的 + 公用的；别人名下的东西不发。成功率只给材料够、能做的配方
+    const backpack = backpackFor(r, mine);
+    if (workshop) workshop.recipes = r.party.filter(h => mine.includes(h.kit)).map(h => ({ kit: h.kit, name: name(h.kit),
+      list: Rogue.recipeBook(r, h.kit, { counts: backpack.usable[h.kit] || backpack.sharedCounts }) }));
     const clinic = Rogue.canClinic(r) ? r.party.filter(h => mine.includes(h.kit)).map(h => ({ kit: h.kit, name: name(h.kit), cost: Rogue.healCost(r, h.kit), cyber: cyberOf(h.kit) })) : null;
     return {
       act: r.act, day: r.day, region: Rogue.region(r), daysLeft: Rogue.daysLeft(r), daysPerAct: C.daysPerAct, stage: r.stage,
@@ -482,10 +487,16 @@
         needs: living(r).filter(k => l.needs[k] === "need").map(name), passes: living(r).filter(k => l.needs[k] === "pass").map(name),
         mine: mine.map(k => ({ kit: k, name: name(k), answer: l.needs[k] || "" })) })),
       lootLog: d.lootLog.slice(-5).map(x => x.text),
-      choice, waitingLevel, shop, points, smith, parts, clinic, workshop,
+      choice, waitingLevel, shop, points, smith, parts, clinic, workshop, backpack,
       lastRest: r.lastRest || null,   // 长休结算画面（坚毅字段在 online-view.js · scrubHidden 里去掉）
       log: (r.log || []).slice(-8).map(l => l.text)
     };
+  }
+
+  /** 一名玩家的背包：自己操控的角色名下的 + 公用的（总数由房主按 state.bag − 所有人名下的算） */
+  function backpackFor(r, mine) {
+    const inv = Rogue.inventory(r, { owned: data(r).owned, kits: mine });
+    return { tabs: inv.tabs, shared: inv.shared, personal: inv.personal, usable: inv.usable, sharedCounts: inv.sharedCounts, water: inv.water };
   }
 
   /* ---------- 开局、分配角色 ---------- */
@@ -520,6 +531,6 @@
     get enabled() { return enabled; }, active, data, options, matchOption, isTeamCommand, vote, unvote, tryResolve, need, forceLoot,
     handle, checkHost, viewFor, onNewRun, setOwners, release, assignmentsFor, changed, ownerOf: kit => (run() ? ownerOf(run(), kit) : hostId),
     hostKits: () => (run() ? kitsOf(run(), hostId) : []), purse: kit => (run() ? Number(data(run()).purse[kit]) || 0 : 0),
-    available: (kit, id) => (run() ? available(run(), kit, id) : 0), blocker: () => (run() ? blocker(run()) : ""), inBattle
+    available: (kit, id) => (run() ? available(run(), kit, id) : 0), backpackFor: playerId => (run() ? backpackFor(run(), kitsOf(run(), playerId)) : null), blocker: () => (run() ? blocker(run()) : ""), inBattle
   };
 })(typeof window !== "undefined" ? window : globalThis);
