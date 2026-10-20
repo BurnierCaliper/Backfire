@@ -6,7 +6,8 @@
  *     cells[行][列]: { row, col, base, value, kind, kindId, baseKind, changed, reason },
  *     changed: [{ row, col }], notes: [文字] }
  *   opt: { envX（恶劣环境 / 末日倍率，默认 1）, field（{ ice: true } 冻土）, phaseStep（相位 0 波谷 / 1 / 2 波峰） }
- *   matchupForState(st, unitId) → 按战场现状（天气、恶劣环境、单位所在区的冻土、相位）算好的 matchupChart，附 opt 供界面切换
+ *   matchupForState(st, unitId) → 按战场现状（天气、恶劣环境、单位所在区的冻土、相位）算好的 matchupChart，附 { opt, unitId, unitName, zone }；
+ *     phaseStep 只在相位天气时有值，field 是 { ice: true } 或 null
  */
 const MATCHUP_WEATHER_NAME = { none: "常态", heat: "酷暑", snow: "雪天", acid: "酸雨", thunder: "雷鸣", glow: "微光", sand: "沙暴", phase: "相位" };
 const MATCHUP_ELEMENTS = ["fire", "acid", "electric", "ice", "energy", "physical", "harmonic"];
@@ -80,5 +81,5 @@ function matchupForState(st, unitId) {
   const envX = (st.apocalypse ? 2 : 1) * (u && u.harshEnv ? 2 : 1);
   const opt = { envX, phaseStep: weather === "phase" ? Number(st.phaseStep) || 0 : null };
   if (u && !exempt && !u.flying && zf.ice) opt.field = { ice: true };
-  return Object.assign(matchupChart(weather, opt), { opt, unitId: u ? u.id : null, zone: u ? u.zone : null });
+  return Object.assign(matchupChart(weather, opt), { opt, unitId: u ? u.id : null, unitName: u ? String(u.name || u.kit || u.id) : null, zone: u ? u.zone : null });
 }

@@ -83,15 +83,15 @@ test("恶劣环境 / 末日：整行天气修正翻倍；相位按阶段给说�
 
 test("matchupForState：按行动单位所在区的冻土、个人恶劣环境、隔离区；飞行不吃冻土；附 opt", () => {
   const st = { weather: "snow", phaseStep: 0, apocalypse: false, fields: { 1: { ice: true }, 2: { isolate: true } },
-    units: [{ id: "a", zone: 1 }, { id: "b", zone: 1, flying: true }, { id: "c", zone: 2 }, { id: "d", zone: 1, harshEnv: true }] };
+    units: [{ id: "a", name: "柯尔特", zone: 1 }, { id: "b", zone: 1, flying: true }, { id: "c", zone: 2 }, { id: "d", zone: 1, harshEnv: true }] };
   const run = id => J(vm.runInContext(`matchupForState(${JSON.stringify(st)}, ${JSON.stringify(id)})`, c));
   const a = run("a");
-  assert.deepEqual(a.opt.field, { ice: true }); assert.equal(cell(a, "ice", "flesh").value, 0.25); assert.equal(a.unitId, "a");
+  assert.deepEqual(a.opt.field, { ice: true }); assert.equal(cell(a, "ice", "flesh").value, 0.25); assert.equal(a.unitId, "a"); assert.equal(a.unitName, "柯尔特"); assert.equal(a.zone, 1); assert.deepEqual(a.field, { ice: true }); assert.equal(a.phaseStep, null);
   assert.equal(run("b").opt.field, undefined);
   assert.equal(run("c").weather, "none");
   assert.equal(run("d").envX, 2);
   const none = run(null);
-  assert.equal(none.opt.field, undefined); assert.equal(none.weather, "snow");
+  assert.equal(none.opt.field, undefined); assert.equal(none.weather, "snow"); assert.equal(none.unitName, null); assert.equal(none.field, null);
   assert.equal(c.Rogue.matchupChart("glow").weatherName, "微光");
 });
 
@@ -106,4 +106,25 @@ test("联机投影：packet.matchup 原样发给玩家（任何画面都带）�
   const src = require("fs").readFileSync(require("path").join(__dirname, "..", "online-game.js"), "utf8");
   assert.match(src, /matchup: matchupNow\(\), rogue:/, "每一包（探索 / 战斗）都带");
   assert.match(src, /matchup: isHost\(\) \? matchupNow\(\) : remote\?\.matchup/, "getView().matchup");
+});
+
+test("联机：房主算的 matchup 经投影后带 phaseStep、field.ice、unitId / unitName / zone，没有坚毅字段", () => {
+  const st = { weather: "phase", phaseStep: 2, fields: { 3: { ice: true } },
+    units: [{ id: "u7", name: "Helumica", zone: 3, shp: 5, shpMax: 9, upOnShp: true, layers: [{ type: "flesh", current: 1, max: 9 }] }] };
+  const m = J(vm.runInContext(`matchupForState(${JSON.stringify(st)}, "u7")`, c));
+  const out = V.projectPacket({ type: "result", matchup: m }, { recipientId: "p1", gmId: "host" }).matchup;
+  assert.equal(out.phaseStep, 2);
+  assert.deepEqual(out.field, { ice: true });
+  assert.deepEqual(out.opt, { envX: 1, phaseStep: 2, field: { ice: true } });
+  assert.deepEqual([out.unitId, out.unitName, out.zone], ["u7", "Helumica", 3]);
+  assert.ok(out.notes.some(n => /波峰/.test(n)) && out.notes.some(n => /冻土/.test(n)));
+  assert.ok(!/shp|坚毅/i.test(JSON.stringify(out)));
+});
+
+test("页面：game.html 在 engine.js 之后、app.js 之前载入 matchup.js；online-game.js 也在它之后", () => {
+  const html = require("fs").readFileSync(require("path").join(__dirname, "..", "game.html"), "utf8");
+  const at = f => html.indexOf(`<script src="${f}"></script>`);
+  assert.ok(at("matchup.js") > at("engine.js") && at("engine.js") >= 0);
+  assert.ok(at("matchup.js") < at("app.js"));
+  assert.ok(at("matchup.js") < at("online-game.js"));
 });
