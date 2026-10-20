@@ -368,6 +368,9 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **蚁型戒备兵种的大酸液弹：发射时主目标那一下不再被射程判定吞掉**（enemies.js · `antFireShell`；tests/h7-ant-shell.test.js；docs/bug-backlog.md H7）
+  - 以前：主目标那一下走普通攻击的射程判定，落点在自己所在的区、隔两个区、被协助攻击触发时都会被「打不到距离 N」吞掉，只剩波及。
+  - 现在：主目标那一下带 `flags: { action: true, anyRange: true }`，按标定落点打，不受射程限制（通用射程规则不变）。标定 / 波及 / 牵制重新标定照旧；AI 选区本来就不限距离，未改。
 - **流沙没顶（下陷 3 层）真的不能出手了**（app.js · `costBlockReason` / `runSkill`；game.js · `baseBlockReason`；hotseat-validation.js · `baseReason`；tests/quicksand-lock.test.js；docs/bug-backlog.md H5）
   - 以前：`spendAp` / `spendBonus` 对没顶的单位返回 `false`，但 `runSkill` 不看返回值，没顶的单位（我方和敌人）照常出手，还一个点都不扣。
   - 现在：技能消耗付不起（没顶，或行动点 / 附赠行动不够）时，在 `snapshot()` / `beginActionAcc` 之前就挡住，这次行动不结算、不改局面，日志写原因。技能按钮在画面和联机校验里提前灰掉（原因「陷在流沙里没顶，不能行动」）。不花点数的动作（起身等）照常可用；敌人 AI 本来就不给没顶的敌人规划行动。
