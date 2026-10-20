@@ -569,7 +569,12 @@ function applyLevelStatsBase(u) {
     return;
   }
   if (!u.attrs) return;
-  const d = derivedFromAttrs(u.attrs, u.level);
+  const d = Object.assign({}, derivedFromAttrs(u.attrs, u.level));
+  // 义体（cyberware.js）：扣固定生命上限 / 坚毅上限；没装义体（老存档）不变
+  if (u.cyberware && u.cyberware.length && typeof cyberwareHpCut === "function") {
+    d.hp = Math.max(1, d.hp - cyberwareHpCut(u));
+    d.shp = Math.max(1, d.shp - cyberwareShpCut(u));
+  }
   const flesh = (u.layers || []).find(l => l.type === "flesh");
   if (flesh && !u.cyberPlan) {
     const ratio = flesh.max ? flesh.current / flesh.max : 1;

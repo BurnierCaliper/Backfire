@@ -241,7 +241,8 @@ function trpgCyberPlan(p) {
 function trpgCyberInfo(kit) {
   const u = trpgHero(kit);
   if (!u) return null;
-  const fleshMax = trpgFleshMax(u), rate = cyberRateOf(u.attrs, u.level);
+  const fleshMax = trpgFleshMax(u) - (u.cyberware && u.cyberware.length && typeof cyberwareHpCut === "function" ? cyberwareHpCut(u) : 0);
+  const rate = u.cyberware && u.cyberware.length && typeof cyberwareLayerRateFor === "function" ? cyberwareLayerRateFor(u, fleshMax) : cyberRateOf(u.attrs, u.level);   // 和义体共用改造率
   return { kit, name: u.name, fleshMax, rate, limit: cyberConvertLimit(fleshMax, rate), current: trpgCyberPlan(u.cyberPlan), perHp: ROGUE_CLINIC.cyberPerHp };
 }
 /** 改造预览：{ error, cost, layers（从外到内） } —— 动了多少点肉体（加减都算），换成 / 换回星灵按被换的肉体点数算 */

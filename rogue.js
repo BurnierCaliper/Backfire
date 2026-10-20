@@ -510,7 +510,8 @@ const Rogue = (function () {
     u.level = h.level || 1;
     u.xp = h.xp || 0;
     u.attrPoints = 0;               // 属性点在单局里走升级选择，不用后台的可分配点
-    u.cyberPlan = h.cyber ? Object.assign({}, h.cyber) : null;   // 义体改造（growth.js 按方案重建血量层）
+    u.cyberPlan = h.cyber ? Object.assign({}, h.cyber) : null;
+    u.cyberware = (h.cyberware || []).map(x => Object.assign({}, typeof x === "string" ? { id: x } : x));   // 义体（cyberware.js）；老存档没有 = 空   // 义体改造（growth.js 按方案重建血量层）
     u.shpBonus = Number(h.shpBonus) || 0;   // 单人模式主角：坚毅生命上限 +15
     u.feats = (h.feats || []).slice();      // 专长（feats.js）
     u.featFull = (h.featFull || []).slice();   // 兼修升成完整版的涉猎专长
@@ -1483,7 +1484,8 @@ const Rogue = (function () {
     const u = spawnLiveCard(cardOf(kit), 1);
     applyHero(u, Object.assign({}, h, { cyber: null, hp: null }));
     const fleshMax = (u.layers.find(l => l.type === "flesh") || {}).max || 0;
-    const rate = cyberRateOf(u.attrs || h.attrs || (cardOf(kit) || {}).attrs, u.level);
+    let rate = cyberRateOf(u.attrs || h.attrs || (cardOf(kit) || {}).attrs, u.level);
+    if (u.cyberware.length && typeof cyberwareLayerRateFor === "function") rate = cyberwareLayerRateFor(u, fleshMax);   // 和义体共用改造率
     return { h, fleshMax, rate, limit: cyberConvertLimit(fleshMax, rate), current: normPlan(h.cyber) };
   }
   function normPlan(p) {
