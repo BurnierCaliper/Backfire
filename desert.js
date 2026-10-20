@@ -335,7 +335,21 @@ function sandFishPlan(u) {
     const d = (p) => zoneDist(Number(u.zone), Number(p.zone), state.zoneMode);
     const p = prey.sort((x, y) => d(x) - d(y) || totalHp(x) - totalHp(y))[0];
     const sid = FISH_MAIN_SKILL[u.kit];
-    if (sid) {
+    if (sid && d(p) > 0) {
+      // 猎物不在同区：先走过去（以前直接付行动点出手、原地咬空，夜晚每回合空过）。
+      // 杂兵走路花行动点、精英用附赠；付不起或路上有沙珊瑚就不走，改看别的行动
+      const rank = typeof enemyRankOf === "function" ? enemyRankOf(u) : "minion";
+      const canMove = !u.noMove && u.self !== "frost" && (rank === "minion" ? (u.ap || 0) >= 1 : (u.bonus || 0) >= 1);
+      const path = typeof zonePath === "function" ? zonePath(Number(u.zone), Number(p.zone)) : null;
+      const dest = path && path.length > 1 ? Number(path[1]) : null;
+      if (canMove && dest != null && !coralAvoid(u, dest)) {
+        return {
+          thunk: () => { state.attackerId = u.id; doMove(u, dest); },
+          meta: { actorId: u.id, skillName: `移动到 ${dest} 区` },
+          ai: { kind: "move", dest, target: p }
+        };
+      }
+    } else if (sid) {
       return {
         thunk: () => { state.attackerId = u.id; state.targetId = p.id; runSkill(sid); },
         meta: { actorId: u.id, targetId: p.id, skillName: `${u.name} 捕食 ${p.name}` },
