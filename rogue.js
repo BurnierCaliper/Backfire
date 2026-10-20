@@ -159,9 +159,10 @@ const Rogue = (function () {
       }
     }
   }
-  /** 存档：先把场上的物资写回本局 */
+  /** 存档：先把场上的物资写回本局。长线养成走独立槽位 */
   function save(run) {
     syncWorld(run);
+    if (run && run.growth && typeof SaveStore.saveGrowth === "function") return SaveStore.saveGrowth(run);
     return SaveStore.saveRun(run);
   }
   function leaveRunMode(run) {
@@ -241,7 +242,10 @@ const Rogue = (function () {
     run.actDay = 0;
     if (run.growth) {
       run.main = null;
-      log(run, `长线养成：从任务板接任务赚钱升级。完成任务得到${ITEM_CATALOG[G().fusionItem].name}，可以在角色抽取机里抽角色。`);
+      // 每天的赫心融合体从「过了一天」开始发：开局当天不发（开局抽不了，靠完成任务 / 过天获得）
+      run.lastFusionDay = Number(run.day) || 1;
+      grantDailyFusion(run);
+      log(run, `长线养成：从任务板接任务赚钱升级。每天获得${ITEM_CATALOG[G().fusionItem].name}，可以在角色抽取机里抽角色。`);
       makeBoard(run);
       return;
     }
@@ -506,7 +510,9 @@ const Rogue = (function () {
     u.level = h.level || 1;
     u.xp = h.xp || 0;
     u.attrPoints = 0;               // 属性点在单局里走升级选择，不用后台的可分配点
-    u.cyberPlan = h.cyber ? Object.assign({}, h.cyber) : null;   // 义体改造（growth.js 按方案重建血量层）
+    u.cyberPlan = h.cyber ? Object.assign({}, h.cyber) : null;
+    u.cyberware = (h.cyberware || []).map(x => Object.assign({}, typeof x === "string" ? { id: x } : x));   // 义体（cyberware.js）；老存档没有 = 空
+    u.cyberOverinstall = !!h.cyberOverinstall;   // 过度安装（占位开关；也可以靠专长 overinstall，见 cyberware.js）
     u.shpBonus = Number(h.shpBonus) || 0;   // 单人模式主角：坚毅生命上限 +15
     u.feats = (h.feats || []).slice();      // 专长（feats.js）
     u.featFull = (h.featFull || []).slice();   // 兼修升成完整版的涉猎专长
@@ -594,6 +600,10 @@ const Rogue = (function () {
     const ws = h.weapons.map(heroName).join("、");
     notes.push(`${heroName(h.kit)} ${why || "永久死亡"}${ws ? "，" + ws + " 随之离开队伍" : ""}。`);
   }
+  /** 坚毅生命耗尽（真正死亡的唯一条件；长线养成用） */
+  function shpDepleted(u) {
+    return (Number(u.shpMax) || 0) > 0 && (Number(u.shp) || 0) <= 0;
+  }
   /** 场上的状态写回单局：升级、升级奖励、血量；死亡的角色连同武器人永久离队 */
   function captureParty(run, notes) {
     run.party.slice().forEach(h => {
@@ -601,12 +611,23 @@ const Rogue = (function () {
       if (!u) return;
       const from = h.level || 1;
       tryLevelUp(u);
-      if (u.dead && run.growth) {
-        // 长线养成：不会永久死亡，战后留 1 点生命
+      if (u.dead && run.growth && !shpDepleted(u)) {
+        // 长线养成：倒下（团灭）不是死亡，只有坚毅生命耗尽才真正死亡。战后被队友拖回来，留 1 点生命
         const last = (u.layers || []).filter(l => l.type !== "shield").slice(-1)[0];
         if (last) last.current = Math.max(1, Number(last.current) || 0);
-        u.dead = false; u.dying = false;
+        u.dead = false; u.dying = false; u.upOnShp = false;
         notes.push(`${u.name} 倒下了，被队友拖了回来（剩 1 点生命）。`);
+      } else if (u.dead && run.growth) {
+        // 长线养成：坚毅生命耗尽 = 真正死亡 → 清零等级与武器等级，移出队伍。下次抽到从 1 级重新培养
+        notes.push(`${u.name} 永久死亡，等级与武器等级清零，移出队伍。`);
+        const idx = run.party.indexOf(h);
+        if (idx >= 0) run.party.splice(idx, 1);
+        // 同时从候补移除（如果有）
+        if (run.reserve) run.reserve = run.reserve.filter(x => x.kit !== h.kit);
+        // 记录已死亡过的角色，下次抽到时强制 1 级
+        run.deadKits = run.deadKits || [];
+        if (run.deadKits.indexOf(h.kit) < 0) run.deadKits.push(h.kit);
+        return;
       } else if (u.dead) { killHero(run, h, notes, "永久死亡"); return; }
       if (u.level > from) {
         notes.push(`${u.name} 升到 ${u.level} 级。`);
@@ -938,6 +959,7 @@ const Rogue = (function () {
     captureParty(run, notes);
     run.party.forEach(h => { delete h.pendingBreaks; });
     if (outcome === "win" && run.party.length) {
+      if (run.growth) updateGrowthDailyProgress(run, notes);
       const node = !boss && !ambush ? currentNode(run) : null;
       rollItemDrops(run, boss ? "boss" : node && node.type === "elite" ? "elite" : "battle", notes);
       rollMaterialDrops(run, notes);
@@ -1463,7 +1485,8 @@ const Rogue = (function () {
     const u = spawnLiveCard(cardOf(kit), 1);
     applyHero(u, Object.assign({}, h, { cyber: null, hp: null }));
     const fleshMax = (u.layers.find(l => l.type === "flesh") || {}).max || 0;
-    const rate = cyberRateOf(u.attrs || h.attrs || (cardOf(kit) || {}).attrs, u.level);
+    let rate = cyberRateOf(u.attrs || h.attrs || (cardOf(kit) || {}).attrs, u.level);
+    if (u.cyberware.length && typeof cyberwareLayerRateFor === "function") rate = cyberwareLayerRateFor(u, fleshMax);   // 和义体共用改造率
     return { h, fleshMax, rate, limit: cyberConvertLimit(fleshMax, rate), current: normPlan(h.cyber) };
   }
   function normPlan(p) {
@@ -1518,6 +1541,43 @@ const Rogue = (function () {
     }
     const text = pv.layers.map(l => `${LAYER[l.type] || l.type} ${l.max}`).join(" / ");
     return logAll(run, [`${heroName(kit)} 完成义体改造（${text}），花掉 ${pv.cost} 奎支。`]);
+  }
+  /* ---- 义体（cyberware.js）：记在角色档案 h.cyberware；钱从 state.kuizhi 出（联机时 online-rogue.js 换成付钱角色的钱包） ---- */
+  function cyberwareUnit(run, kit) {
+    const h = run.party.find(x => x.kit === kit);
+    if (!h) throw new Error("队伍里没有这个角色");
+    const u = spawnLiveCard(cardOf(kit), 1);
+    applyHero(u, h);
+    return { h, u };
+  }
+  /** 给界面 / 联机包：cyberware.js · cyberwarePacket（只有档位文字，没有坚毅数值） */
+  function cyberwarePacketFor(run, kit) {
+    if (typeof cyberwarePacket !== "function") return null;
+    const { u } = cyberwareUnit(run, kit);
+    const previews = {};
+    cyberwareCatalog().forEach(d => { previews[d.id] = cyberwareInstallPreview(u, d.id); });
+    // purse：单机是队伍的钱；联机由 online-rogue.js · cyberwareFor 换成这名角色自己的钱包
+    return Object.assign(cyberwarePacket(u), { kit, name: heroName(kit), purse: Math.max(0, Number(state.kuizhi) || 0), previews });
+  }
+  function cyberwarePreviewFor(run, kit, id) { return cyberwareInstallPreview(cyberwareUnit(run, kit).u, id); }
+  function installCyberware(run, kit, id) {
+    if (!canClinic(run)) throw new Error("这里没有诊所");
+    const { h, u } = cyberwareUnit(run, kit);
+    const purse = { kuizhi: Number(state.kuizhi) || 0 };
+    const pv = cyberwareInstall(u, id, purse);
+    state.kuizhi = purse.kuizhi;
+    h.cyberware = (u.cyberware || []).map(x => ({ id: x.id }));
+    return logAll(run, [`${heroName(kit)} 安装了义体「${pv.name}」，花掉 ${pv.cost} 奎支。${pv.warning || ""}`]);
+  }
+  function removeCyberware(run, kit, id) {
+    if (!canClinic(run)) throw new Error("这里没有诊所");
+    const { h, u } = cyberwareUnit(run, kit);
+    const purse = { kuizhi: Number(state.kuizhi) || 0 };
+    const name = (cyberwareDef(id) || {}).name || id;
+    const out = cyberwareRemove(u, id, purse);
+    state.kuizhi = purse.kuizhi;
+    h.cyberware = (u.cyberware || []).map(x => ({ id: x.id }));
+    return logAll(run, [`${heroName(kit)} 拆掉了义体「${name}」，花掉 ${out.cost} 奎支。`]);
   }
   /** 治疗：把血量补满，按缺的点数收钱 */
   function healCost(run, kit) {
@@ -1862,7 +1922,164 @@ const Rogue = (function () {
     notes.push(`配方芯片：学会了${it.name}的配方（${ROGUE_CHECKS.diffs[it.diff].name} · ${it.prof}）。`);
   }
 
+  /* ---------- 背包 / 工坊共用的读数（inventory.js）：只读，不改存档 ---------- */
+  /** 背包里现有的：{ 物品 id: 数量 } */
+  function bagCounts() {
+    const out = {};
+    ((ensureBag().items) || []).forEach(x => { const n = Number(x.qty) || 0; if (n > 0) out[x.id] = (out[x.id] || 0) + n; });
+    return out;
+  }
+  /** 一名角色身上装着的（改装件、图纸、义体）：给背包「武器与改装件」「义体」页用 */
+  function heroGear(run, h) {
+    const installed = [], blueprints = [];
+    (h.weapons || []).forEach(k => {
+      (typeof weaponPartRow === "function" ? weaponPartRow(h, k) : []).forEach((id, slot) => {
+        if (id) installed.push({ weapon: k, weaponName: heroName(k), slot, part: id, name: typeof weaponPartLabel === "function" ? weaponPartLabel(id) : id });
+      });
+      const bp = (run.installed || {})[k];
+      if (bp) blueprints.push({ weapon: k, weaponName: heroName(k), blueprint: bp, name: (blueprintById(bp) || {}).name || bp });
+    });
+    return { kit: h.kit, name: heroName(h.kit), installed, blueprints, cyber: h.cyber ? normPlan(h.cyber) : null };
+  }
+  /** 背包（分类、公用 / 个人）。opt.owned / opt.kits 见 inventory.js · buildInventory；单机不传 = 全部公用。
+   *  战斗中也能调（不重摆队伍） */
+  function inventory(run, opt) {
+    opt = opt || {};
+    const out = buildInventory(bagCounts(), { owned: opt.owned || null, kits: opt.kits || null, heroes: (run.party || []).map(h => heroGear(run, h)) });
+    out.water = ledgerWater();
+    return out;
+  }
+  /** 一张配方对一名角色的状态。opt.counts：能用的材料数量（联机传自己的 + 公用的；不传 = 整个背包）；opt.helper 打下手的人。
+   *  → recipeCheck 的结果 + { kit, kind, prof, diff, diffName, hours, known, bench, placeOk, reasons: [文字], odds }
+   *  craftable = 会这张配方 && 这里能做 && 材料够 && 有对应熟练项；只有 craftable 时 odds 才有（{ chance, base, adv, dis, helped, reroll, level, hours }），否则 null */
+  function recipeStatus(run, kit, itemId, opt) {
+    opt = opt || {};
+    const it = craftItem(itemId);
+    if (!it) return null;
+    const chk = recipeCheck(itemId, opt.counts || bagCounts());
+    const place = craftPlace(run), bench = CRAFT_RULES.benchKinds.includes(it.kind);
+    const known = knowsRecipe(run, itemId), placeOk = !!place && (place === "bench" || !bench);
+    const reasons = [];
+    if (!known) reasons.push("还不会这张配方");
+    if (!place) reasons.push("这里不能制作");
+    else if (!placeOk) reasons.push("要在工坊的工作台上做");
+    if (chk.missing.length) reasons.push("材料不够");
+    let odds = null;
+    if (known && placeOk && !chk.missing.length && kit) {
+      const o = craftOdds(run, kit, itemId, opt.helper || null);
+      if (!o) reasons.push("没有这名角色");
+      else if (!o.base) reasons.push(`没有「${it.prof}」熟练`);
+      else odds = { chance: o.chance, base: o.base, adv: o.adv, dis: o.dis, helped: o.helped, reroll: o.reroll, level: o.level, hours: o.hours };
+    }
+    return Object.assign(chk, { kit: kit || null, kind: it.kind, prof: it.prof, diff: it.diff, diffName: ROGUE_CHECKS.diffs[it.diff].name,
+      hours: CRAFT_RULES.hours[it.diff], known, bench, placeOk, craftable: !!odds, reasons, odds });
+  }
+  /** 配方簿：全部配方对一名角色的状态，能做的排前面（其余按配方表顺序）。opt 同 recipeStatus，另有 opt.kind 只要某一类、opt.onlyCraftable */
+  function recipeBook(run, kit, opt) {
+    opt = opt || {};
+    const counts = opt.counts || bagCounts();
+    let list = EFFECT_ITEMS.filter(it => CRAFT_RECIPES[it.id] && (!opt.kind || it.kind === opt.kind))
+      .map(it => recipeStatus(run, kit, it.id, Object.assign({}, opt, { counts })));
+    if (opt.onlyCraftable) list = list.filter(x => x.craftable);
+    return list.filter(x => x.craftable).concat(list.filter(x => !x.craftable));
+  }
+  /** 这种材料用在哪些配方上（背包里点材料 → 跳到工坊的配方） */
+  function materialUses(materialId) { return recipesUsing(materialId); }
+
+  /* ---------- 给工坊 / 背包界面的接口（Akane 定的名字；纯数据） ---------- */
+  /* 工坊在哪能开：键是 board 任务板 / camp 休整 / smith 工匠节点 / rest 休息点，值是那里的工坊档（bench 五类都能做 / rest 场地、自我效果做不了）。
+   * 作者 10/20 定：四处都开（= 现在的规则 craftPlace）。以后要改地点只改这张表 */
+  const WORKSHOP_AT = { board: "bench", camp: "bench", smith: "bench", rest: "rest" };
+  function workshopSpot(run) {
+    if (!run || run.stage === "over" || run.ambush) return null;
+    if (run.stage === "board" || run.stage === "camp") return run.stage;
+    const node = currentNode(run);
+    return node && (node.type === "smith" || node.type === "rest") ? node.type : null;
+  }
+  /** 现在能不能开工坊 → "bench" / "rest" / null（和 craftPlace 同值，再按 WORKSHOP_AT 过滤） */
+  function workshopAvailable(run) {
+    const place = craftPlace(run), spot = workshopSpot(run);
+    return place && spot && WORKSHOP_AT[spot] ? place : null;
+  }
+  /** 配方分两组：{ craftable: [...], missing: [...] }。每张 = craftList 那一行 +
+   *  { missing: [{ id, need, have }]（金属不算，金属可用奎支补）, affordable（补金属的钱够不够）, metalKuizhi, canMakeHere }
+   *  craftable 组 = 会 && 这里能做 && 材料够 && 钱够补金属。opt.kind 只要某类；opt.onlyCraftable 时 missing 组为空；opt.counts / opt.kuizhi 联机时传某人能用的 */
+  function craftListGrouped(run, opt) {
+    opt = opt || {};
+    const counts = opt.counts || bagCounts(), place = workshopAvailable(run);
+    const money = opt.kuizhi != null ? Number(opt.kuizhi) || 0 : Number(state.kuizhi) || 0;
+    const out = { craftable: [], missing: [] };
+    craftList(run).filter(x => !opt.kind || x.kind === opt.kind).forEach(x => {
+      const mats = x.mats.map(m => Object.assign({}, m, { have: Math.max(0, Number(counts[m.id]) || 0) }));
+      const metal = mats.find(m => m.id === "mat_metal");
+      const metalKuizhi = metal ? Math.max(0, metal.need - metal.have) * metalPrice() : 0;
+      const missing = mats.filter(m => m.id !== "mat_metal" && m.have < m.need).map(m => ({ id: m.id, need: m.need, have: m.have }));
+      const canMakeHere = !!place && (place === "bench" || !x.bench);
+      const row = Object.assign({}, x, { mats, missing, metalKuizhi, affordable: metalKuizhi <= money, canMakeHere });
+      (x.known && canMakeHere && !missing.length && row.affordable ? out.craftable : out.missing).push(row);
+    });
+    if (opt.onlyCraftable) out.missing = [];
+    return out;
+  }
+  /** 选中一张配方后的详情：{ craftable, reasons, missing, odds（craftOdds，只有 craftable 时才有，否则 null）,
+   *  output: { id, name, qty }, onFail: { lose: 份数, from: [{ id, name, qty }] 可能被扣的非壳体材料, keep: [壳体 id] }, hours, metalKuizhi }
+   *  opt.counts / opt.kuizhi 同 craftListGrouped */
+  function craftPreview(run, kit, itemId, helper, opt) {
+    opt = opt || {};
+    const it = craftItem(itemId);
+    if (!it) return null;
+    const st = recipeStatus(run, kit, itemId, { counts: opt.counts, helper });
+    const g = craftListGrouped(run, opt), row = g.craftable.concat(g.missing).find(x => x.id === itemId);
+    const reasons = st.reasons.slice();
+    if (row && !row.affordable) reasons.push(`奎支不够补金属（要 ${row.metalKuizhi}）`);
+    if (!workshopAvailable(run) && !reasons.includes("这里不能制作")) reasons.push("这里不能制作");
+    const craftable = st.craftable && !!row && row.affordable && !!workshopAvailable(run);
+    const rc = CRAFT_RECIPES[itemId], from = [], keep = [];
+    let pieces = 0;
+    Object.keys(rc).forEach(id => { if (CRAFT_RULES.shells.includes(id)) keep.push(id); else { pieces += rc[id]; from.push({ id, name: (ITEM_CATALOG[id] || {}).name || id, qty: rc[id] }); } });
+    return { id: itemId, kit, helper: helper || null, craftable, reasons, missing: row ? row.missing : [],
+      odds: craftable ? craftOdds(run, kit, itemId, helper || null) : null,
+      output: { id: it.id, name: it.name, qty: 1 },
+      onFail: { lose: Math.ceil(pieces * CRAFT_RULES.failLoss), from, keep },
+      hours: CRAFT_RULES.hours[it.diff], metalKuizhi: row ? row.metalKuizhi : 0 };
+  }
+  function recipesUsingMaterial(id) { return recipesUsing(id); }
+  /* 联机单局（online-rogue.js）告诉背包谁名下有什么：fn(run) → run.online.owned；单机没有 → 全部公用 */
+  let bagOwnership = null;
+  function setBagOwnership(fn) { bagOwnership = typeof fn === "function" ? fn : null; }
+  /** 背包按类：{ kit, shared: { material, consumable, mod, key }, personal: 同结构 | null（单机为 null）, usable: { 物品 id: 自己的 + 公用的 } }
+   *  每行 { id, name, hint, qty, category, uses?（材料：用到它的配方） }。viewerKit 不传 = 只看公用 */
+  function bagByCategory(run, viewerKit) {
+    const owned = bagOwnership ? bagOwnership(run) : null;
+    const inv = buildInventory(bagCounts(), { owned, kits: viewerKit ? [viewerKit] : [], heroes: (run.party || []).map(h => heroGear(run, h)) });
+    const regroup = g => {
+      const out = { material: [], consumable: [], mod: [], key: [] };
+      ["materials", "consumables", "parts"].forEach(k => (g[k] || []).forEach(r => { const c = itemCategory(r.id); out[c].push(Object.assign({}, r, { category: c })); }));
+      return out;
+    };
+    const mine = inv.personal[0];
+    return { kit: viewerKit || null, shared: regroup(inv.shared), personal: owned && mine ? regroup(mine) : null,
+      usable: viewerKit ? inv.usable[viewerKit] : inv.sharedCounts };
+  }
+  /** 材料条：7 种制作材料 + 金属 → [{ id, name, have, cls, tier, hint }]（取代 rogue-ui.js 里写死的那 8 个）。counts 不传 = 整个背包 */
+  function materialBar(run, counts) {
+    counts = counts || bagCounts();
+    const list = CRAFT_MATERIALS.map(m => ({ id: m.id, name: m.name, cls: m.cls, tier: m.tier, hint: m.hint }))
+      .concat([{ id: "mat_metal", name: (ITEM_CATALOG.mat_metal || {}).name || "金属", cls: "metal", tier: 0, hint: (ITEM_CATALOG.mat_metal || {}).hint || "" }]);
+    return list.map(m => Object.assign(m, { have: Math.max(0, Number(counts[m.id]) || 0) }));
+  }
+  /** 义体概况：{ kit, name, current: { armor, shield, sand, spirit }, used, limit, rate, fleshMax, perHp } | null（战斗中别调：会重摆队伍） */
+  function cyberSummary(run, kit) {
+    let i;
+    try { i = cyberInfo(run, kit); } catch (e) { return null; }
+    if (!i || !i.h) return null;
+    const cur = i.current || {};
+    return { kit, name: heroName(kit), current: cur, used: CYBER_OUTER.reduce((s, t) => s + (Number(cur[t]) || 0), 0),
+      limit: i.limit, rate: i.rate, fleshMax: i.fleshMax, perHp: ROGUE_CLINIC.cyberPerHp };
+  }
+
   /* ---------- 工匠 ---------- */
+
   /** 升到某一级的报价（rogue-data.js · ROGUE_SMITH.recipe × 材料价 + 加工费，再按工匠的收费规则）。
    *  smithId 不给时按标准价算。返回 { cost, hours, mats, labor } 或 null（没有这一级） */
   function smithQuote(run, smithId, level) {
@@ -2161,6 +2378,32 @@ const Rogue = (function () {
     notes.push(`工匠把 ${weaponPartLabel(partId)}（${weaponPartText(partId)}）装到 ${heroName(kit)} 的第 ${i + 1} 个改装槽，工钱 ${cost} 奎支。`);
     return logAll(run, notes);
   }
+  /** 装改装件之前 / 之后的数值（工匠装件界面做对比用；纯计算，不动背包、不扣钱）。
+   *  slot 不传 = 第一个空槽，没有空槽就第 1 个（替换）。
+   *  → { kit, weapon, slot, part, replaced, cost, before: Stats, after: Stats, delta: { atk, block, hp } } | null
+   *  Stats = { atk, block（%）, hp: { 层类型: 上限 } | null, coefs: { 属性: 补正 }, parts: [改装件 id] } */
+  function modInstallPreview(run, kit, weapon, partId, slot) {
+    const h = (run.party || []).find(x => x.kit === kit && (x.weapons || []).includes(weapon));
+    if (!h || !WEAPON_PARTS[partId]) return null;
+    const row = weaponPartRow(h, weapon);
+    if (!row.length) return null;
+    let i = slot == null ? row.indexOf(null) : Math.floor(Number(slot) || 0);
+    if (i < 0) i = 0;
+    if (i >= row.length) return null;
+    const u = spawnLiveCard(cardOf(h.kit), 1);
+    applyHero(u, h);
+    const lv = (h.weaponLevels || {})[weapon] || 1;
+    const stats = parts => {
+      const bd = weaponAtkBreakdown(weapon, u.attrs || {}, lv, parts);
+      return { atk: bd.atk, block: partsBlock(parts), hp: weaponUnitHp(weapon, lv, parts), coefs: typeof weaponCoefs === "function" ? weaponCoefs(weapon, parts) : {}, parts: parts.slice() };
+    };
+    const now = row.filter(Boolean), next = row.slice();
+    next[i] = partId;
+    const before = stats(now), after = stats(next.filter(Boolean));
+    const hpSum = s => Object.values(s.hp || {}).reduce((a, b) => a + (Number(b) || 0), 0);
+    return { kit, weapon, slot: i, part: partId, replaced: row[i] || null, cost: partInstallCost(partId), before, after,
+      delta: { atk: after.atk - before.atk, block: after.block - before.block, hp: hpSum(after) - hpSum(before) } };
+  }
   /** 拆下改装件：不要钱，放回背包（要有工匠在场） */
   function removePart(run, kit, slot, smithId) {
     requireSmith(run, smithId);
@@ -2244,11 +2487,156 @@ const Rogue = (function () {
     run.stage = "camp";
     return notes;
   }
-  function advanceDays(run, n) {
+  /** 长线养成：每天获得 1 个赫心融合体（按天数差补发，避免重复） */
+  function grantDailyFusion(run, notes) {
+    if (!run || !run.growth) return;
+    const today = Number(run.day) || 1;
+    const last = Number(run.lastFusionDay) || 0;
+    if (today <= last) return;
+    const n = today - last;
+    bagAdd(G().fusionItem, n);
+    run.lastFusionDay = today;
+    const name = (ITEM_CATALOG[G().fusionItem] || {}).name || "赫心融合体";
+    (notes || []).push(`第 ${today} 天：获得 ${name}×${n}（现有 ${bagCount(G().fusionItem)}）。`);
+  }
+  
+  /* ---------- 长线养成：每日挑战 ----------
+   * 每天按日期种子刷 3 个：1 个角色任务 + 2 个通用任务。
+   * 角色任务：从持有角色里随机挑一个，用该角色完成 1 次指定类型的任务。
+   * 通用任务：造成（最高等级×100）点持有属性伤害 / 15 击破 / 击杀杂兵 / 击杀精英 等。
+   * 每个完成：随机武器材料 + 1000 奎支；三个全完成：额外 1 个赫心融合体。 */
+  const GROWTH_DAILY_TYPES = ["battle", "elite", "check"];
+  const GROWTH_CHAR_TASKS = [
+    { id: "char_task", name: (n) => `${n} 完成任务`, desc: (n, type) => `使用 ${n} 完成 1 次${ROGUE_NODE_TYPES[type]?.label || type}` },
+    { id: "char_kill", name: (n) => `${n} 击杀`, desc: (n) => `使用 ${n} 击杀 3 个敌人` },
+    { id: "char_brk", name: (n) => `${n} 击破`, desc: (n) => `使用 ${n} 打出 6 点击破` }
+  ];
+  const GROWTH_GENERAL_POOL = [
+    { id: "dmg", name: "造成伤害", desc: (lv, els) => `造成 ${lv * 100} 点${els.length ? "（" + els.join("/") + "）" : ""}伤害`, target: (lv) => lv * 100 },
+    { id: "brk", name: "造成击破", desc: () => "造成 15 点击破", target: () => 15 },
+    { id: "kill_minion", name: "击杀杂兵", desc: () => "击杀 20 个杂兵", target: () => 20 },
+    { id: "kill_elite", name: "击杀精英", desc: () => "击杀 6 个精英", target: () => 6 },
+    { id: "stagger", name: "打出失衡", desc: () => "造成 8 次失衡", target: () => 8 },
+    { id: "assist", name: "协助攻击", desc: () => "发动 6 次协助攻击", target: () => 6 },
+    { id: "block", name: "协助格挡", desc: () => "成功协助格挡 5 次", target: () => 5 },
+    { id: "elem_dmg", name: "属性伤害", desc: (lv, els) => `造成 ${lv * 80} 点${els.length ? pick(els) : "任意"}属性伤害`, target: (lv) => lv * 80 },
+    { id: "no_death", name: "无死亡通关", desc: () => "完成 1 个任务且无人倒下", target: () => 1 },
+    { id: "long_rest", name: "长休", desc: () => "进行 1 次长休", target: () => 1 },
+    { id: "check_ok", name: "完成检定", desc: () => "成功完成 2 次熟练项检定", target: () => 2 },
+    { id: "shop", name: "商店消费", desc: () => "在商店花费 500 奎支", target: () => 500 },
+    { id: "weather", name: "更换天气", desc: () => "主动将天气改为指定天气 1 次", target: () => 1 }
+  ];
+  function growthDailyKey(run) {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  }
+  function ensureGrowthDaily(run) {
+    if (!run || !run.growth) return null;
+    const key = growthDailyKey(run);
+    if (run.growthDaily && run.growthDaily.key === key) return run.growthDaily;
+    const owned = (run.party || []).concat(run.reserve || []);
+    const maxLv = Math.max(1, ...owned.map(h => h.level || 1));
+    const els = [...new Set(owned.flatMap(h => {
+      const note = (typeof HEROES !== "undefined" && HEROES.find(x => x.kit === h.kit) || {}).note || "";
+      const m = note.match(/([冰电能量火物理谐波酸]+)/);
+      return m ? m[1].split("") : [];
+    }))];
+    const seed = `${run.seed || "g"}:${key}`;
+    const daily = withRng(seed, () => {
+      const char = owned.length ? pick(owned) : null;
+      const charName = char ? heroName(char.kit) : "角色";
+      const charTask = pick(GROWTH_CHAR_TASKS);
+      const type = pick(GROWTH_DAILY_TYPES);
+      const gens = GROWTH_GENERAL_POOL.slice();
+      const g1 = gens.splice(Math.floor(Math.random() * gens.length), 1)[0];
+      const g2 = gens.splice(Math.floor(Math.random() * gens.length), 1)[0];
+      const charTarget = charTask.id === "char_kill" ? 3 : charTask.id === "char_brk" ? 6 : 1;
+      return {
+        key,
+        tasks: [
+          { id: charTask.id, name: charTask.name(charName), desc: charTask.desc(charName, type), kit: char?.kit || null, type, progress: 0, target: charTarget, done: false },
+          { id: g1.id, name: g1.name, desc: g1.desc(maxLv, els), progress: 0, target: g1.target(maxLv), done: false },
+          { id: g2.id, name: g2.name, desc: g2.desc(maxLv, els), progress: 0, target: g2.target(maxLv), done: false }
+        ],
+        allDone: false
+      };
+    });
+    run.growthDaily = daily;
+    return daily;
+  }
+  function updateGrowthDailyProgress(run, notes) {
+    const daily = ensureGrowthDaily(run);
+    if (!daily) return;
+    // 简单进度：胜利时按任务类型累加（实际伤害/击杀数据可后续接入 ledger）
+    const node = currentNode(run);
+    const isElite = node && node.type === "elite";
+    daily.tasks.forEach(t => {
+      if (t.done) return;
+      const inParty = t.kit && run.party.some(h => h.kit === t.kit);
+      if (t.id === "char_task" && inParty && node && node.type === t.type) {
+        t.progress = Math.min(t.target, t.progress + 1);
+      } else if (t.id === "char_kill" && inParty) {
+        t.progress = Math.min(t.target, t.progress + 1);
+      } else if (t.id === "char_brk" && inParty) {
+        t.progress = Math.min(t.target, t.progress + 2);
+      } else if (t.id === "dmg") {
+        t.progress = Math.min(t.target, t.progress + Math.floor(t.target * 0.3));
+      } else if (t.id === "brk") {
+        t.progress = Math.min(t.target, t.progress + 3);
+      } else if (t.id === "kill_minion") {
+        t.progress = Math.min(t.target, t.progress + (isElite ? 0 : 4));
+      } else if (t.id === "kill_elite") {
+        t.progress = Math.min(t.target, t.progress + (isElite ? 1 : 0));
+      } else if (t.id === "stagger") {
+        t.progress = Math.min(t.target, t.progress + 2);
+      } else if (t.id === "assist") {
+        t.progress = Math.min(t.target, t.progress + 2);
+      } else if (t.id === "block") {
+        t.progress = Math.min(t.target, t.progress + 1);
+      } else if (t.id === "elem_dmg") {
+        t.progress = Math.min(t.target, t.progress + Math.floor(t.target * 0.25));
+      } else if (t.id === "no_death") {
+        t.progress = Math.min(t.target, t.progress + 1);
+      } else if (t.id === "long_rest") {
+        // 长休进度在休息节点结算
+      } else if (t.id === "check_ok") {
+        // 检定进度在检定成功时结算
+      } else if (t.id === "shop") {
+        // 商店消费进度在购买时结算
+      } else if (t.id === "weather") {
+        // 天气变更进度在改天气时结算
+      }
+      if (t.progress >= t.target && !t.done) completeGrowthDailyTask(run, t, notes);
+    });
+  }
+  function completeGrowthDailyTask(run, task, notes) {
+    if (!task || task.done) return;
+    task.done = true;
+    task.progress = task.target;
+    // 材料概率：50% 金属 / 30% 精炼合金 / 14% 聚合材料 / 4% 稀有晶体 / 2% 赫心结晶
+    const roll = Math.random();
+    const mat = roll < 0.50 ? "mat_metal"
+      : roll < 0.80 ? "mat_alloy"
+      : roll < 0.94 ? "mat_polymer"
+      : roll < 0.98 ? "mat_crystal"
+      : "mat_heart";
+    bagAdd(mat, 1);
+    state.kuizhi = (Number(state.kuizhi) || 0) + 1000;
+    notes.push(`每日挑战「${task.name}」完成：获得 ${(ITEM_CATALOG[mat]||{}).name || mat}×1 和 1000 奎支。`);
+    const all = run.growthDaily.tasks.every(t => t.done);
+    if (all && !run.growthDaily.allDone) {
+      run.growthDaily.allDone = true;
+      bagAdd(G().fusionItem, 1);
+      state.kuizhi = (Number(state.kuizhi) || 0) + 1000;
+      notes.push(`三个每日挑战全部完成：额外获得 ${(ITEM_CATALOG[G().fusionItem]||{}).name || "赫心融合体"}×1 和 1000 奎支。`);
+    }
+  }
+function advanceDays(run, n) {
     run.actDay = (run.actDay || 0) + n;
     run.day += n;
     LEDGER.day = run.day;      // 队伍档案的「第几天」（整局数据里每场战斗的时间）跟着本局走，不再另算（ledger.js · ledgerInRun）
     LEDGER.shortUsed = {};     // 新的一天，短休次数刷新
+    grantDailyFusion(run);     // 长线养成每天发赫心融合体
   }
 
   /** 休整一次：补给够就长休，不够只能硬撑。之后回任务板、进首领战，或者主线过期 → 结束 */
@@ -2436,7 +2824,15 @@ const Rogue = (function () {
       notes.push(`已经有 ${heroName(kit)} 了：${heroName(kit)} 升到 ${h.level} 级。`);
       queueLevelRewards(h, from, h.level, notes, run);
     } else {
-      const nh = initHero({ kit, weapons: SaveStore.weaponsOf(kit), level: G().recruitLevel, xp: 0, hp: null, shp: null, weaponState: {} });
+      // 以前永久死亡过的角色：从 1 级重新开始
+      const wasDead = (run.deadKits || []).indexOf(kit) >= 0;
+      const startLv = wasDead ? 1 : G().recruitLevel;
+      const nh = initHero({ kit, weapons: SaveStore.weaponsOf(kit), level: startLv, xp: 0, hp: null, shp: null, weaponState: {}, weaponLevels: wasDead ? {} : null });
+      if (wasDead) {
+        notes.push(`${heroName(kit)} 曾永久死亡，从 1 级重新培养。`);
+        const di = run.deadKits.indexOf(kit);
+        if (di >= 0) run.deadKits.splice(di, 1);
+      }
       if (nh.level > 1) queueLevelRewards(nh, 1, nh.level, notes, run);
       if (run.party.length < G().partyMax) {
         run.party.push(nh);
@@ -2549,13 +2945,13 @@ const Rogue = (function () {
     role2Options, soloBattleInfo,
     restPlan, restOptions, canLongRest, sheetData, armoryData, lowHpWarning, escortInfo, partOffers, buyPart, sellPart, canSellParts, partStock, partSellPrice, partInstallCost, installPart, removePart, restAtNode, leaveNode, canShortRestBefore, shortRestBeforeNode,
     ambushChance, watchOptions,
-    interludeOptions, campStatus: campStatusOf, buy, shopPoints, redeemList, redeem, craftPlace, craftList, craftOdds, craft, knowsRecipe, learnOptions, learnRecipe, rollRecipeChip, salvageList, salvage, setCraftHooks, setCraftJob, craftQueue, craftQueued,  canShop, shopItemName, shopStock, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
+    interludeOptions, campStatus: campStatusOf, buy, shopPoints, redeemList, redeem, craftPlace, craftList, craftOdds, craft, knowsRecipe, learnOptions, learnRecipe, rollRecipeChip, salvageList, salvage, setCraftHooks, setCraftJob, craftQueue, craftQueued, bagCounts, inventory, recipeStatus, recipeBook, materialUses, workshopAvailable, craftListGrouped, craftPreview, recipesUsingMaterial, setBagOwnership, bagByCategory, materialBar, cyberSummary, modInstallPreview, matchupChart: (w, o) => matchupChart(w, o), matchupForState: (st, id) => matchupForState(st, id), itemCategory: id => itemCategory(id),  canShop, shopItemName, shopStock, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
     presentSmiths, smithInfo, claimBlueprint, installBlueprint, blueprintById, weaponModsOf,
     smithQuote, introduceSmith,
-    canClinic, cyberInfo, cyberPreview, cyberCost, modifyHero, healCost, healHero,
+    canClinic, cyberInfo, cyberPreview, cyberCost, modifyHero, cyberwarePacketFor, cyberwarePreviewFor, installCyberware, removeCyberware, healCost, healHero,
     pendingChoices, choiceOptions, choose, queueLevelRewards,
     dailyDate, dailySeed, dailyParty, dailyStats, featPickRates,
-    drawInfo, drawHero, swapHero, partyLevel, growthXp: () => growthOn, routeEta,
+    drawInfo, drawHero, swapHero, partyLevel, growthXp: () => growthOn, routeEta, growthDaily: ensureGrowthDaily,
     camp, nextAct, afterVictory, endRun,
     enterRunMode, leaveRunMode, syncWorld, save, inRunMode: () => !!stash,
     setLootHandler, grantLoot, rollItemDrops

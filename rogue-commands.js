@@ -44,6 +44,8 @@ const RogueCommands = (function () {
     repairWeapon: (c, run) => Rogue.repairWeapon(run, c.kit),
     healHero: (c, run) => Rogue.healHero(run, c.kit),
     modifyHero: (c, run) => Rogue.modifyHero(run, c.kit, c.plan),
+    installCyberware: (c, run) => Rogue.installCyberware(run, c.kit, c.id),
+    removeCyberware: (c, run) => Rogue.removeCyberware(run, c.kit, c.id),
     attemptCheck: (c, run) => {
       const notes = Rogue.attemptCheck(run, c.kit, c.opt);
       const check = run.lastCheck;
@@ -67,6 +69,8 @@ const RogueCommands = (function () {
     checkOdds: (c, run) => Rogue.checkOdds(run, c.kit, c.opt),
     cyberInfo: (c, run) => Rogue.cyberInfo(run, c.kit),
     cyberPreview: (c, run) => Rogue.cyberPreview(run, c.kit, c.plan),
+    cyberware: (c, run) => Rogue.cyberwarePacketFor(run, c.kit),
+    cyberwarePreview: (c, run) => Rogue.cyberwarePreviewFor(run, c.kit, c.id),
     healCost: (c, run) => Rogue.healCost(run, c.kit),
     presentSmiths: (_c, run) => Rogue.presentSmiths(run),
     smithInfo: (c, run) => Rogue.smithInfo(run, c.smith),
@@ -95,8 +99,10 @@ const RogueCommands = (function () {
   };
   const sessions = {
     readSaved() { return SaveStore.loadRun(); },
+    readGrowth() { return typeof SaveStore.loadGrowth === "function" ? SaveStore.loadGrowth() : null; },
     // 存档的情况：none / ok / newer（更新版本的游戏存的，这一版读不了）/ broken。开新局前提醒会覆盖
     savedStatus() { return SaveStore.status("run"); },
+    growthStatus() { return typeof SaveStore.status === "function" ? SaveStore.status("growth") : "none"; },
     prepareParty(c, context) {
       const s = needSession(context);
       s.picked.length = 0;
@@ -135,7 +141,8 @@ const RogueCommands = (function () {
       return { seed: s.run.seed, solo: s.run.solo, growth: !!s.run.growth, daily: !!s.run.daily };
     },
     resume(_c, context) {
-      const s = needSession(context), saved = SaveStore.loadRun();
+      const s = needSession(context);
+      const saved = (_c && _c.growth && typeof SaveStore.loadGrowth === "function") ? SaveStore.loadGrowth() : SaveStore.loadRun();
       if (!saved) return { resumed: false };
       s.run = saved;
       Rogue.enterRunMode(s.run);
@@ -169,7 +176,8 @@ const RogueCommands = (function () {
       if (run.result && run.result.win) meta.stats.wins += 1;
       meta.stats.deaths += (run.fallen || []).length;
       SaveStore.saveMeta(meta);
-      SaveStore.clearRun();
+      if (run.growth && typeof SaveStore.clearGrowth === "function") SaveStore.clearGrowth();
+      else SaveStore.clearRun();
       return { counted: true };
     },
     startBattle(_c, context) {

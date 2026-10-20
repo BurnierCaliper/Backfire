@@ -43,8 +43,11 @@ test("经验照跑团模式：升级所需经验不打折，击杀经验全队�
 
 test("完成任务得到赫心融合体；回到任务板（不会进首领战）", () => {
   const { c, run, R, G } = fresh("G3");
+  assert.equal(fusion(c), 0, "开局当天不发每日融合体");
+  const day0 = run.day;
   finishQuickTask(run, R);
-  assert.equal(fusion(c), G.fusionPerTask);
+  // 任务报酬 fusionPerTask 个，另外任务花掉的每一天各发 1 个每日融合体（PR #73 的设计）
+  assert.equal(fusion(c), G.fusionPerTask + (run.day - day0));
   assert.equal(run.stage, "camp");
   R.camp(run);
   assert.equal(run.stage, "board");
@@ -143,4 +146,19 @@ test("自动打 40 步：不会结束、不会进首领战，队伍平均等级�
   assert.ok(!seen.has("boss"));
   assert.ok(run.tasksDone >= 1, `完成任务 ${run.tasksDone}`);
   assert.ok(run.party.length >= 2);
+});
+
+test("坚毅生命耗尽才真正死亡：移出队伍，再抽到从 1 级重新培养", () => {
+  const { c, run, R } = fresh("G8");
+  run.party[0].level = 5;
+  const kit = run.party[0].kit;
+  R.acceptTask(run, 0);
+  while (!R.battleSpec(run)) run.task.index++;
+  c.BattleSim.setup(R.battleSpec(run));
+  const u = c.S.state.units.find(x => x.isPlayer && x.kit === kit);
+  u.dead = true; u.shp = 0; (u.layers || []).forEach(l => { l.current = 0; });
+  R.finishBattle(run, "win");
+  assert.ok(!run.party.some(h => h.kit === kit));
+  assert.ok((run.deadKits || []).includes(kit));
+  assert.notEqual(run.stage, "over");
 });

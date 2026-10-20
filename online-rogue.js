@@ -24,9 +24,9 @@
   const copy = v => JSON.parse(JSON.stringify(v));
   const fail = text => { throw new Error(text); };
   // 个人行为：花自己的钱、动自己的东西（choose 是升级选择，不花钱）
-  const PERSONAL = ["buy", "redeem", "learnRecipe", "salvage", "setCraftJob", "buyPart", "sellPart", "installPart", "removePart", "upgradeWeapon", "repairWeapon", "healHero", "modifyHero"];
+  const PERSONAL = ["buy", "redeem", "learnRecipe", "salvage", "setCraftJob", "buyPart", "sellPart", "installPart", "removePart", "upgradeWeapon", "repairWeapon", "healHero", "modifyHero", "installCyberware", "removeCyberware"];
   // 玩家可以自己发的个人指令（其余的个人行为由房主代自己的角色做）
-  const REMOTE = ["buy", "redeem", "learnRecipe", "salvage", "setCraftJob", "buyPart", "sellPart", "installPart", "removePart", "upgradeWeapon", "repairWeapon", "healHero", "modifyHero", "choose"];
+  const REMOTE = ["buy", "redeem", "learnRecipe", "salvage", "setCraftJob", "buyPart", "sellPart", "installPart", "removePart", "upgradeWeapon", "repairWeapon", "healHero", "modifyHero", "installCyberware", "removeCyberware", "choose"];
   let enabled = false, resolving = false, hostId = "";
 
   const flow = () => root.RunFlow || null;
@@ -126,6 +126,7 @@
     }
     if ((c.action === "installPart" || c.action === "removePart" || c.action === "upgradeWeapon" || c.action === "repairWeapon") && heroOf(r, c.kit)?.kit !== payer) fail("只能动自己角色的武器");
     if ((c.action === "healHero" || c.action === "modifyHero") && c.kit !== payer) fail("只能给自己的角色治疗、改造");
+    if ((c.action === "installCyberware" || c.action === "removeCyberware") && (c.kit !== payer || typeof c.id !== "string")) fail("只能给自己的角色装、拆义体");
     if (c.action === "setCraftJob" && c.kit !== payer) fail("只能给自己的角色排活");
     if (c.action === "salvage" && available(r, payer, c.item) < 1) fail("这件东西不是你的");
   }
@@ -160,6 +161,8 @@
     pay: (r, kit, n) => { const d = data(r); d.purse[kit] = Math.max(0, (Number(d.purse[kit]) || 0) - n); },
     made: (r, kit, id) => { if (ownable(id)) addOwned(data(r), kit, id, 1); }
   });
+  // 背包按类分个人 / 公用（rogue.js · bagByCategory）：联机时按 run.online.owned
+  if (G_Rogue && Rogue.setBagOwnership) Rogue.setBagOwnership(r => (active() && r === run() ? data(r).owned : null));
   // 战斗里用道具：自己的 + 公用的；用掉的先从自己名下扣
   if (typeof setItemAccess === "function") setItemAccess((unit, id) => {
     if (!active()) return bagCount(id);
@@ -387,6 +390,13 @@
     if (ownerOf(r, kit) !== hostId) fail(`${name(kit)} 由 ${playerName(ownerOf(r, kit))} 操控，房主不能替他花钱或做选择`);
   }
 
+  /** 义体（packet.cyberware）：只给这名玩家操控的角色，诊所开着才发；数值由房主算，坚毅只有档位文字 */
+  function cyberwareFor(playerId) {
+    const r = run();
+    if (!r || !active() || !G_Rogue || !Rogue.cyberwarePacketFor || inBattle() || !Rogue.canClinic(r)) return null;
+    const heroes = kitsOf(r, playerId).map(k => { try { return Object.assign(Rogue.cyberwarePacketFor(r, k), { purse: Number(data(r).purse[k]) || 0 }); } catch (e) { return null; } }).filter(Boolean);
+    return heroes.length ? { heroes } : null;
+  }
   /* ---------- 给每个人看的数据（发送前还要经过 OnlineView.projectRogue） ---------- */
   // 单局的不少查询（restPlan、canShortRestBefore、sheetData……）会把队伍重新摆上场（rogue.js · withParty）：
   // 战斗中绝不能调，否则战场被清空。战斗中给每个人发开战前算好的那一份
@@ -452,6 +462,20 @@
       const have = mine.reduce((s, k) => s + (Number((d.owned[k] || {})[id]) || 0), 0) + (mine.length ? free(r, id) : 0);
       return { id: p.id, name: p.name, text: p.text, sell: p.sell, install: p.install, have: Math.min(have, p.qty) };
     }).filter(p => p.have > 0) : null;
+    // 工匠装改装件前后对比（rogue.js · modInstallPreview）：只给自己的角色、自己能用的件（自己名下的 + 公用的），房主算好再发
+    if (smith) {
+      const usable = (parts || []).filter(p => p.have > 0).map(p => p.id);
+      smith.installPreviews = r.party.filter(h => mine.includes(h.kit)).flatMap(h => (h.weapons || []).flatMap(w => {
+        const n = typeof weaponPartRow === "function" ? weaponPartRow(h, w).length : 0;
+        const out = [];
+        for (let slot = 0; slot < n; slot++) usable.forEach(part => {
+          const pv = Rogue.modInstallPreview(r, h.kit, w, part, slot);
+          if (pv) out.push({ kit: h.kit, weapon: w, weaponName: name(w), partName: typeof weaponPartLabel === "function" ? weaponPartLabel(part) : part,
+            slot: pv.slot, part, replaced: pv.replaced, cost: pv.cost, before: pv.before, after: pv.after, delta: pv.delta });
+        });
+        return out;
+      }));
+    }
     // 诊所：治疗；义体改造带上现在的方案和上限，玩家那边按同样的公式估价（真正扣多少以房主结算为准）
     const cyberOf = kit => { try { const i = Rogue.cyberInfo(r, kit); return { current: i.current, limit: i.limit, rate: i.rate, fleshMax: i.fleshMax, perHp: (typeof ROGUE_CLINIC !== "undefined" && ROGUE_CLINIC.cyberPerHp) || 0 }; } catch (e) { return null; } };
     // 工坊：大家排的活、自己的角色能做什么、能学的配方、能拆的东西
@@ -467,6 +491,23 @@
       learn: Rogue.learnOptions(r),
       salvage: Rogue.salvageList().map(x => Object.assign(x, { have: mine.reduce((s, k) => s + (Number((d.owned[k] || {})[x.id]) || 0), 0) + free(r, x.id) })).filter(x => x.have > 0)
     } : null;
+    // 背包 / 配方簿（inventory.js · buildInventory；rogue.js · inventory / recipeBook）：数量只在房主这边算，
+    // 每人只拿到自己角色名下的 + 公用的；别人名下的东西不发。成功率只给材料够、能做的配方
+    const backpack = backpackFor(r, mine);
+    if (workshop) workshop.recipes = r.party.filter(h => mine.includes(h.kit)).map(h => ({ kit: h.kit, name: name(h.kit),
+      list: Rogue.recipeBook(r, h.kit, { counts: backpack.usable[h.kit] || backpack.sharedCounts }) }));
+    // 给新工坊 / 背包界面（和房主界面同一套接口：rogue.js · workshopAvailable / craftListGrouped / craftPreview / bagByCategory / materialBar / cyberSummary）
+    const wkAt = Rogue.workshopAvailable(r);
+    const bag = mine.map(k => Rogue.bagByCategory(r, k));
+    const materialBar = Rogue.materialBar(r, backpack.sharedCounts);
+    const craft = wkAt ? mine.map(k => {
+      const counts = backpack.usable[k] || backpack.sharedCounts, kuizhi = Number(d.purse[k]) || 0;
+      const grouped = Rogue.craftListGrouped(r, { counts, kuizhi });
+      // 每张能做的配方：没人帮 + 每个可能打下手的队友各一份（成功率都由房主算，玩家端直接读）
+      const helpers = [null].concat(living(r).filter(x => x !== k));
+      return { kit: k, name: name(k), grouped, previews: grouped.craftable.flatMap(x => helpers.map(hp => Rogue.craftPreview(r, k, x.id, hp, { counts, kuizhi }))) };
+    }) : null;
+    const cyber = mine.map(k => Rogue.cyberSummary(r, k)).filter(Boolean);
     const clinic = Rogue.canClinic(r) ? r.party.filter(h => mine.includes(h.kit)).map(h => ({ kit: h.kit, name: name(h.kit), cost: Rogue.healCost(r, h.kit), cyber: cyberOf(h.kit) })) : null;
     return {
       act: r.act, day: r.day, region: Rogue.region(r), daysLeft: Rogue.daysLeft(r), daysPerAct: C.daysPerAct, stage: r.stage,
@@ -482,10 +523,16 @@
         needs: living(r).filter(k => l.needs[k] === "need").map(name), passes: living(r).filter(k => l.needs[k] === "pass").map(name),
         mine: mine.map(k => ({ kit: k, name: name(k), answer: l.needs[k] || "" })) })),
       lootLog: d.lootLog.slice(-5).map(x => x.text),
-      choice, waitingLevel, shop, points, smith, parts, clinic, workshop,
+      choice, waitingLevel, shop, points, smith, parts, clinic, workshop, backpack, workshopAvailable: wkAt, bag, materialBar, craft, cyber,
       lastRest: r.lastRest || null,   // 长休结算画面（坚毅字段在 online-view.js · scrubHidden 里去掉）
       log: (r.log || []).slice(-8).map(l => l.text)
     };
+  }
+
+  /** 一名玩家的背包：自己操控的角色名下的 + 公用的（总数由房主按 state.bag − 所有人名下的算） */
+  function backpackFor(r, mine) {
+    const inv = Rogue.inventory(r, { owned: data(r).owned, kits: mine });
+    return { tabs: inv.tabs, shared: inv.shared, personal: inv.personal, usable: inv.usable, sharedCounts: inv.sharedCounts, water: inv.water };
   }
 
   /* ---------- 开局、分配角色 ---------- */
@@ -516,10 +563,11 @@
   }
 
   root.OnlineRogue = {
+    cyberwareFor,
     enable(on, host) { enabled = !!on; hostId = host || hostId; if (G_SaveStore && SaveStore.useOnlineRunSlot) SaveStore.useOnlineRunSlot(!!on); },
     get enabled() { return enabled; }, active, data, options, matchOption, isTeamCommand, vote, unvote, tryResolve, need, forceLoot,
     handle, checkHost, viewFor, onNewRun, setOwners, release, assignmentsFor, changed, ownerOf: kit => (run() ? ownerOf(run(), kit) : hostId),
     hostKits: () => (run() ? kitsOf(run(), hostId) : []), purse: kit => (run() ? Number(data(run()).purse[kit]) || 0 : 0),
-    available: (kit, id) => (run() ? available(run(), kit, id) : 0), blocker: () => (run() ? blocker(run()) : ""), inBattle
+    available: (kit, id) => (run() ? available(run(), kit, id) : 0), backpackFor: playerId => (run() ? backpackFor(run(), kitsOf(run(), playerId)) : null), blocker: () => (run() ? blocker(run()) : ""), inBattle
   };
 })(typeof window !== "undefined" ? window : globalThis);

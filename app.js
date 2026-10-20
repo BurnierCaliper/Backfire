@@ -3042,11 +3042,53 @@ function barrierIn(zone, side) {
 function ironWallIn(zone) { return barrierIn(zone, "player"); }
 /** 单位属于哪一方的屏障保护（我方单位 / 防护罩 → 铁壁；敌方 → 废铁墙） */
 function barrierSideOf(u) { return u && (u.isPlayer || u.kit === "ironwall") ? "player" : "enemy"; }
+
+/* 屏障按阵营判断敌我（作者 10/19 试玩反馈：多阵营混战里铁壁 / 废铁墙挡错、被自己人的范围攻击波及）。
+ * 以前按「是不是玩家」一刀切：废铁墙护着同区所有敌人（包括和盗匪敌对的安保），范围攻击不管谁放的屏障都挨打。
+ * 现在：屏障只护自己那一伙（barrierGuards），只挡和那一伙敌对的单位打过来的攻击（barrierFoe，按 hostileTo）。 */
+/** 屏障护着的那一伙的代表（拿来按阵营判断）：铁壁 / 防护罩是我方；废铁墙是筑墙的人那一伙（回防命令记下 ownerKit）。
+ *  没记的（主持人放的、旧存档里的）照旧当成护着所有敌人、只挡我方 */
+function barrierOwner(p) {
+  if (BARRIER_SIDE[p && p.kind] === "player") return { isPlayer: true };
+  return { isPlayer: false, kit: (p && p.ownerKit) || null };
+}
+/** 屏障 p 护不护着单位 u：铁壁 / 防护罩护同区的我方单位；废铁墙护和筑墙的人一伙的敌人
+ *  （不护和它敌对的阵营、中立生物、立场和它不一样的友军） */
+function barrierGuards(p, u) {
+  if (!p || !u || u.kind || u.isStructure) return false;
+  if (BARRIER_SIDE[p.kind] === "player") return barrierSideOf(u) === "player";
+  if (u.isPlayer) return false;
+  if (!p.ownerKit) return true;
+  const owner = barrierOwner(p);
+  if (typeof isNeutralCreature === "function" && isNeutralCreature(u)) return false;
+  if (typeof playerAllied === "function" && playerAllied(u) !== playerAllied(owner)) return false;
+  return typeof hostileTo !== "function" || !hostileTo(owner, u);
+}
+/** 这一下是不是屏障 p 要挡的「敌方」攻击：打的人和屏障护着的那一伙敌对（hostileTo）。
+ *  我方自己的、友军的、多阵营里和被护的一伙不敌对的单位打过来的，屏障不管（不挡、也不挨打）。
+ *  不在场上的替身攻击者（配置物爆炸、危墙倒塌、小车残骸……）没有阵营：照旧算敌方，屏障照挡；
+ *  站在我方那边的替身（我方炮台、我方操控的碎渣机炮）对我方的屏障不算 */
+function barrierFoe(p, attacker) {
+  if (!p || !attacker) return true;
+  const owner = barrierOwner(p);
+  if (!(state.units || []).includes(attacker) || attacker.envSrc) return !(attacker.isPlayer && owner.isPlayer);
+  return typeof hostileTo !== "function" || hostileTo(attacker, owner);
+}
+/** zone 区里护着 target、这一下又是它要挡的敌方攻击的屏障（没有就是 null） */
+function barrierFor(target, attacker, zone) {
+  if (!target) return null;
+  const z = Number(zone != null ? zone : target.zone);
+  return (state.props || []).find(p => BARRIER_SIDE[p.kind] && Number(p.zone) === z && p.hp > 0 &&
+    barrierGuards(p, target) && barrierFoe(p, attacker)) || null;
+}
 /** 范围攻击：被同区屏障保护的单位完全不受范围攻击（伤害、击破都由屏障吃，一次行动只吃一下）。
- *  返回保护它的屏障；以后新加的盾牌类配置物写进 BARRIER_SIDE 就自动生效 */
-function aoeShieldFor(u) {
+ *  返回保护它的屏障（按阵营，见 barrierGuards）；以后新加的盾牌类配置物写进 BARRIER_SIDE 就自动生效。
+ *  by：放这次范围效果的单位（投掷罐的使用者……），给了就只算挡它的屏障（barrierFoe：自己人扔的不挡）；
+ *  不给（高能自爆的余波这类没有出手方的）只看护不护着 */
+function aoeShieldFor(u, by) {
   if (!u || u.kind) return null;
-  return barrierIn(u.zone, barrierSideOf(u)) || null;
+  return (state.props || []).find(p => BARRIER_SIDE[p.kind] && Number(p.zone) === Number(u.zone) && p.hp > 0 &&
+    barrierGuards(p, u) && (!by || barrierFoe(p, by))) || null;
 }
 
 function breakIronWall(p, notes) {
@@ -3132,7 +3174,10 @@ function hitBarrier(p, attacker, opt) {
 
 /** side：被保护的一方（player = 铁壁，enemy = 废铁墙） */
 function absorbIronWall(attacker, zone, opt, side) {
-  const p = barrierIn(zone, side || "player");
+  return absorbBarrier(barrierIn(zone, side || "player"), attacker, opt);
+}
+/** 屏障 p 替同区挨这一下（同一次行动只挨一下，其余同区伤害被挡住） */
+function absorbBarrier(p, attacker, opt) {
   if (!p) return null;
   state.actionWallHit = state.actionWallHit || {};
   if (state.actionWallHit[p.id]) {
@@ -3811,9 +3856,18 @@ function flushAoePulse() {
       if (!map[z].devicesDone) pulseDevicesInZone(Number(z), "受到范围伤害，视作被操作一次");
       if (!hits.length || map[z].propsDone) return;
       // 一次范围攻击里同区每个配置物只挨一下：取伤害最高的那一段
-      const hit = hits.reduce((a, b) => ((Number(b.dmg) || 0) > (Number(a.dmg) || 0) ? b : a));
+      const top = (list) => list.reduce((a, b) => ((Number(b.dmg) || 0) > (Number(a.dmg) || 0) ? b : a));
+      const strongest = top(hits);
       aoeHittableProps(z).forEach(p => {
         if (!(state.props || []).includes(p) || !(p.hp > 0)) return;   // 同一轮里已经被连锁炸掉
+        // 屏障只挨敌方的范围攻击（按阵营，见 barrierFoe）：我方 / 友军自己的、多阵营里和它护着的一伙不敌对的单位放的不算；
+        // 配置物爆炸这类环境伤害（env）照旧算
+        let hit = strongest;
+        if (BARRIER_SIDE[p.kind]) {
+          const foes = hits.filter(h => h.env || barrierFoe(p, h.attacker));
+          if (!foes.length) return;
+          hit = top(foes);
+        }
         const before = Number(p.hp) || 0;
         if (BARRIER_SIDE[p.kind]) { state.actionWallHit = state.actionWallHit || {}; state.actionWallHit[p.id] = true; }
         const notes = damageProp(p, { element: hit.element, dmg: Math.max(1, Math.floor(Number(hit.dmg) || 1)) }, hit.attacker);
@@ -4203,7 +4257,7 @@ function destroyProp(p, attacker) {
     const r = takeDice(1, 20, lv);
     const dmg = r.total;
     notes.push(`爆炸：同区 ${r.text} 火焰 + 2 击破。`);
-    markAoeZone(p.zone, { element: "fire", dmg, attacker, from: p.zone });   // 从桶所在的区炸开
+    markAoeZone(p.zone, { element: "fire", dmg, attacker, from: p.zone, env: true });   // 从桶所在的区炸开（环境伤害：屏障照样挨，不看是谁引爆的）
     state.units.filter(u => !u.hidden && !u.dead && Number(u.zone) === Number(p.zone)).forEach(u => {
       const fake = unitOf("爆炸桶", lv, [{ type: "armor", hp: 1 }], 0, 0);
       fake.zone = p.zone;
@@ -4222,7 +4276,7 @@ function destroyProp(p, attacker) {
     const r = takeDice(lv, 4, 0);
     const dmg = r.total;
     notes.push(`电池爆炸：同区所有单位（不分敌我）${r.text} 电击。`);
-    markAoeZone(p.zone, { element: "electric", dmg, attacker, from: p.zone });
+    markAoeZone(p.zone, { element: "electric", dmg, attacker, from: p.zone, env: true });
     state.units.filter(u => !u.hidden && !u.dead && Number(u.zone) === Number(p.zone)).forEach(u => {
       const fake = unitOf("电池", lv, [{ type: "armor", hp: 1 }], 0, 0);
       fake.zone = p.zone;
@@ -4244,16 +4298,28 @@ function triggerLeaveOpportunity(mover, fromZone, notes) {
       const n = addedDiceByLevel(u.level);
       notes.push(`${u.name} 对离开区域的 ${mover.name} 发动借机攻击。`);
       // 借机是近战：目标已经走到隔壁才结算，带上 atkRange 免得被当成高地远程（±25%）
-      dealTo(u, mover, { atk: 0, mult: 0, diceN: n, diceS: 6, element: "ice", baseBreak: 1, atkRange: "melee", flags: { action: true, opportunity: true, blockResolved: true } });
+      opportunityStrike(u, mover, fromZone, { atk: 0, mult: 0, diceN: n, diceS: 6, element: "ice", baseBreak: 1, atkRange: "melee", flags: { action: true, opportunity: true, blockResolved: true } });
       if (window.GAME && window.GAME.tape) window.GAME.tape.push({ type: "opp", attackerId: u.id, targetId: mover.id, name: u.name });
     }
     if (typeof bpLeaveOpportunity === "function") bpLeaveOpportunity(u, mover, notes);
     if (u.kit === "thug_knife" && mover.isPlayer) {
       notes.push(`${u.name} 对离开区域的 ${mover.name} 发动借机攻击。`);
-      dealTo(u, mover, { atk: effectiveAtk(u, state.units), mult: 1, diceN: 1, diceS: 8, element: "physical", baseBreak: 1, atkRange: "melee", flags: { action: true, opportunity: true, blockResolved: true } });
+      opportunityStrike(u, mover, fromZone, { atk: effectiveAtk(u, state.units), mult: 1, diceN: 1, diceS: 8, element: "physical", baseBreak: 1, atkRange: "melee", flags: { action: true, opportunity: true, blockResolved: true } });
       if (window.GAME && window.GAME.tape) window.GAME.tape.push({ type: "opp", attackerId: u.id, targetId: mover.id, name: u.name });
     }
   });
+}
+/** 一下借机攻击（作者 10/19：铁壁挡不了借机攻击是 bug）。
+ *  · 结算时走的人已经站到隔壁了，这一下是在他离开的那一区打的：替他挡的是那一区的铁壁 / 屏障（dealTo · wallZone）。
+ *  · 每一下借机攻击都是单独的一次攻击：屏障「已拦截本次行动」只看这一下，不沿用、也不占用当前行动的记录（和防卫炮台那一炮一样） */
+function opportunityStrike(attacker, mover, fromZone, opt) {
+  const wallBefore = state.actionWallHit;
+  state.actionWallHit = {};
+  try {
+    return dealTo(attacker, mover, Object.assign({ wallZone: Number(fromZone) }, opt));
+  } finally {
+    state.actionWallHit = wallBefore;
+  }
 }
 
 /** 离开冻土的检定：简单难度「运动」检定（手册第一章成功率表 ROGUE_CHECKS.chance：无熟练 50%，一级以上 100% 默认通过）。
@@ -6176,8 +6242,21 @@ function runSoloSupport(a, kit, target, lines) {
   appendLog(notes.join("\n"));
 }
 
+/** 这次失衡算谁打出来的（决定由哪一边接协助攻击）。
+ *  只有和失衡者敌对、真在场上的单位打出的失衡，才由打的那一方接（多阵营：沙鱼打失衡沙灵，沙鱼群起）。
+ *  配置物爆炸、危墙倒塌、炮台、碎渣机炮这类替身攻击者（不在场上），以及和失衡者不敌对的单位（敌人被同伙的范围攻击误伤、
+ *  我方误伤队友）都不算：按失衡的一方算——敌人失衡由我方接，我方失衡由敌人接（返回 null）。
+ *  以前爆炸桶的替身不是玩家，炸出的敌人失衡被当成「敌人打敌人」，只找和它敌对的敌人来接，我方接不了（作者 10/19 反馈） */
+function assistBreaker(breaker, broken) {
+  if (!breaker || !broken) return null;
+  if (!(state.units || []).includes(breaker) || breaker.envSrc) return null;
+  if (typeof hostileTo === "function" && !hostileTo(breaker, broken)) return null;
+  return breaker;
+}
+
 function eligibleAssisters(breaker, broken) {
   if (!broken || assistTargetGone(broken)) return [];
+  breaker = assistBreaker(breaker, broken);
   // 敌人那边出手：我方失衡，或者敌人把敌对阵营的敌人打失衡（异星生物 ↔ 安保）。
   // 只有和打出失衡的那一方是一伙、又和失衡的人敌对的敌人才协助
   if (broken.isPlayer || (breaker && !breaker.isPlayer)) {
@@ -6360,6 +6439,7 @@ function queueAssistAttack(breaker, broken) {
   if (broken._imbalanceLock) return;
   if (typeof preyBroken === "function" && preyBroken(breaker, broken)) return;   // 尘虫 / 管虫失衡：被沙鱼吞掉（desert.js）
   if (broken.isPlayer && typeof bpFirstBreakGuard === "function" && bpFirstBreakGuard(broken)) return;
+  breaker = assistBreaker(breaker, broken);
   const list = eligibleAssisters(breaker, broken);
   const side = broken.isPlayer || (breaker && !breaker.isPlayer) ? "敌人" : "玩家角色";
   if (!list.length) {
@@ -6483,14 +6563,26 @@ function finishAssist(helperId, extra) {
   presentAssistModal();
 }
 
-function autoEnemyBlockers(target) {
+/** 敌人替 target 自动格挡时，u 是不是它的自己人：同一伙（不敌对）、都不是中立生物、对我方的立场一样（都是 / 都不是友军）。
+ *  多阵营混战里按阵营判断（作者 10/19 反馈：敌人会错误地保护不该保护的单位）：
+ *  以前只看「不敌对」——中立生物（谁都不当它是敌人）、我方友军阵营挡着的别家单位都会被护着 */
+function enemyAllyOf(u, target) {
+  if (!u || !target || u.isPlayer || target.isPlayer) return false;
+  if (typeof isNeutralCreature === "function" && (isNeutralCreature(u) || isNeutralCreature(target))) return false;
+  if (typeof playerAllied === "function" && playerAllied(u) !== playerAllied(target)) return false;
+  return typeof hostileTo !== "function" || !hostileTo(u, target);
+}
+
+function autoEnemyBlockers(target, attacker) {
   if (!target || target.isPlayer || target.dead) return [];
   // 赤牙：受击时花 1 附赠为自己格挡（第九章，70%，见 party.js · FIXED_BLOCK）
   const self = target.kit === "chixia" && !target.stunned && (Number(target.bonus) || 0) >= 1 ? [target] : [];
   return self.concat(fieldUnits().filter(u => {
     if (u.isPlayer || u.id === target.id || u.stunned || u.dead || u.hidden || sinkLocked(u)) return false;
     if (Number(u.zone) !== Number(target.zone)) return false;
-    if (typeof hostileTo === "function" && hostileTo(u, target)) return false;   // 敌对阵营不替它挡
+    if (!enemyAllyOf(u, target)) return false;   // 只替自己人挡（敌对阵营、中立生物、立场不同的友军都不挡）
+    // 打过来的不是它的敌人（我方的友军阵营挡我方的攻击）：不出手
+    if (attacker && (state.units || []).includes(attacker) && typeof hostileTo === "function" && !hostileTo(u, attacker)) return false;
     if (u.kit === "captain_ox") return true;
     if (u.kit === "patrol_car" && !(u.resources && u.resources.blockUsedThisTurn)) return true;
     return false;
@@ -6499,7 +6591,7 @@ function autoEnemyBlockers(target) {
 
 /** 敌方的自动协助格挡：成功时目标免伤，击破由格挡者承担（最少留 1）；警卫队队长·牛成功后另外反击 1 击破（selfBreak） */
 function tryOxAutoBlock(attacker, target, atkRange) {
-  const oxes = autoEnemyBlockers(target);
+  const oxes = autoEnemyBlockers(target, attacker);
   if (!oxes.length) return null;
   for (let i = 0; i < oxes.length; i++) {
     const ox = oxes[i];
@@ -7387,10 +7479,14 @@ function armAtkFx(attacker, flags) {
   flags = flags || {};
   const fromHang = hungAtkFx(attacker);
   const fromBox = [];
-  ["combust","icebreak","bolt","etch","backflow","inertia","diffract"].forEach(id => {
-    const el = uiEl("fFx_" + id);
-    if (el && el.checked) fromBox.push(id);
-  });
+  // 游戏模式（game.html）不读计算器界面的词条勾选框：那些勾选只给手动计算用，
+  // 否则上次勾的「破冰」等会泄漏到技能攻击上（夕夏普攻、格挡反打等）
+  if (!(typeof GAME_MODE !== "undefined" && GAME_MODE)) {
+    ["combust","icebreak","bolt","etch","backflow","inertia","diffract"].forEach(id => {
+      const el = uiEl("fFx_" + id);
+      if (el && el.checked) fromBox.push(id);
+    });
+  }
   const list = [];
   fromHang.concat(fromBox).forEach(id => { if (list.indexOf(id) < 0 && ATKFX[id]) list.push(id); });
   flags.atkFx = list;
@@ -7701,15 +7797,13 @@ function dealTo(attacker, target, opt) {
       opt.flags.blockResolved = true;
     }
   }
-  let wallSide = !attacker || !target || !opt.flags || !opt.flags.action || opt.flags.diffract || opt.flags.locked ? null
-    : !attacker.isPlayer && (target.isPlayer || target.kit === "ironwall") ? "player"
-    : attacker.isPlayer && !target.isPlayer ? "enemy" : null;
-  // 范围攻击（不管谁放的、算不算行动）：被屏障保护的单位一律不受，屏障替它吃一下（同一次行动只吃一下）
-  if (!wallSide && target && opt.flags && opt.flags.aoe && !opt.flags.environment && !opt.flags.diffract && aoeShieldFor(target)) {
-    wallSide = barrierSideOf(target);
-  }
-  if (wallSide) {
-    const wallHit = absorbIronWall(attacker, target.zone, opt, wallSide);
+  // 屏障（铁壁 / 防护罩 / 废铁墙）：同区被它护着的单位挨敌方的攻击行动、或者范围攻击（算不算行动都一样）时，屏障替它吃一下（同一次行动只吃一下）。
+  // 谁护着谁、谁算敌方按阵营判断（barrierGuards / barrierFoe）：多阵营混战里敌人打敌对阵营的敌人、我方或友军自己的范围攻击，屏障都不管。
+  // wallZone：借机攻击在离开的那一区结算——走的人已经站到隔壁，替他挡的是他离开的那一区的屏障
+  const wallCase = attacker && target && opt.flags && !opt.flags.diffract && !opt.flags.locked &&
+    (opt.flags.action || (opt.flags.aoe && !opt.flags.environment));
+  if (wallCase) {
+    const wallHit = absorbBarrier(barrierFor(target, attacker, opt.wallZone), attacker, opt);
     if (wallHit) {
       (wallHit.notes || []).forEach(s => appendLog(s));
       return {
@@ -7740,7 +7834,7 @@ function dealTo(attacker, target, opt) {
         opt: JSON.parse(JSON.stringify({
         atk: opt.atk, mult: opt.mult, hitMults: opt.hitMults, flat: opt.flat, hits: opt.hits, baseHits: opt.baseHits, breakOnce: opt.breakOnce, element: opt.element,
         baseBreak: opt.baseBreak, diceN: opt.diceN, diceS: opt.diceS, diceB: opt.diceB, diceValue: opt.diceValue,
-        usePrep: opt.usePrep, atkRange: opt.atkRange, flags: Object.assign({}, opt.flags, { blockResolved: false })
+        usePrep: opt.usePrep, atkRange: opt.atkRange, wallZone: opt.wallZone, flags: Object.assign({}, opt.flags, { blockResolved: false })
       }))
       });
       presentBlockModal();
@@ -10122,7 +10216,11 @@ function crushOnce(a, t, auto) {
   a.zone = Number(t.zone);
   // 已经抓在目标身上（每回合自动再碾）：人就挂在它身上，打飞行目标不用再付「近程打飞行」的附赠行动。
   // 以前照收，可抓住期间夕夏拿不到附赠行动 → 每回合 0 伤害、目标不死不失衡、永远松不开手
-  const out = hitOne2(a, t, { element: "physical", mult: 1.5, baseBreak: 3, atk, flags: auto ? { action: true, flyFree: true } : { action: true } }, lines);
+  // 第一轮 0.75×atk + 2 击破；抓住后每回合自动再碾改为 1.5×atk + 1d8 + 3 击破
+  const opt = auto
+    ? { element: "physical", mult: 1.5, dice: [1, 8], baseBreak: 3, atk, flags: { action: true, flyFree: true } }
+    : { element: "physical", mult: 0.75, baseBreak: 2, atk, flags: { action: true } };
+  const out = hitOne2(a, t, opt, lines);
   if (!out || !out.res || out.res.ok === false) {
     // 没碾到（附赠行动不够打飞行目标、目标打不到……）：抓不住，已经抓着的也松手，免得卡死
     if (a.resources) a.resources.crushId = null;
@@ -11747,7 +11845,7 @@ function runSkillInner(id, optRun) {
         a.resources.charge -= 1;
         const from = a.zone;
         a.zone = Number(t.zone);
-        lines.push(`电击鞭缠住 ${t.name}：消耗 1 电能，川川从 ${from} 区拉到 ${a.zone} 区。`);
+        lines.push(`电能鞭缠住 ${t.name}：消耗 1 电能，川川从 ${from} 区拉到 ${a.zone} 区。`);
         if (typeof afterMove === "function") afterMove(a, lines);
       }
       addCharge(1);
@@ -11911,7 +12009,7 @@ function runSkillInner(id, optRun) {
       let tgt = sTok ? null : ((ref ? unitById(ref) : null) || t);
       if (!sTok && !tgt) { lines.push("先选目标。"); return paintSkillLog(lines.join("\n")); }
       // #44（夕夏定）：瞄准躲在敌方屏障（废铁墙……）后面的敌人，这一刀本来就会被屏障拦下——直接改砍屏障，走配置物的翻倍和摧毁返还
-      const shield = tgt && !tgt.isPlayer ? barrierIn(tgt.zone, "enemy") : null;
+      const shield = tgt && !tgt.isPlayer ? barrierFor(tgt, a) : null;
       if (shield) {
         lines.push(`${shield.name} 挡在 ${tgt.name} 前面，巨刃划空改砍 ${shield.name}。`);
         prop = shield; sTok = "prop:" + shield.id; tgt = null;

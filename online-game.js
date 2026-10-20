@@ -5,7 +5,7 @@
   const PROTOCOL = 1, BUILD = "backfire-d3-v1", KEY = "backfire-online-v1";
   const copy = v => JSON.parse(JSON.stringify(v));
   const listeners = new Set(), packetListeners = new Set(), pending = new Map(), requests = new Map(), requestHighWater = new Map();
-  const gmContext = Object.freeze({}), controls = new Set(["orderPick", "orderConfirm", "orderMove", "orderSwapAccept", "answer", "chat", "checkOpen", "checkRoll", "checkClose", "attrRequest", "attrDecide", "skillRoll", "showTitle", "purseTransfer", "shopBuy", "shopRedeem", "cyberRequest"]);
+  const gmContext = Object.freeze({}), controls = new Set(["orderPick", "orderConfirm", "orderMove", "orderSwapAccept", "answer", "chat", "checkOpen", "checkRoll", "checkClose", "attrRequest", "attrDecide", "skillRoll", "showTitle", "purseTransfer", "shopBuy", "shopRedeem", "cyberRequest", "cyberwareInstall", "cyberwareRemove"]);
   const messageContexts = new WeakMap();
   const recipientWires = new Map(), displayWire = OnlineWire.create();
   let endpoint = null, identity = null, status = { connected: false, paused: true, roster: [] }, active = false;
@@ -48,7 +48,19 @@
       packet: isHost() ? { state, view: HotseatGame.getView(), messages: messages.slice(-300), publicLogs: OnlineView.projectLogs(publicLogs), systemNotice } : remote,
       state: isHost() ? state : remote?.state, messages: isHost() ? messages.slice(-300) : remote?.messages || [],
       heroes: isHost() ? (rogue() ? rogueHeroes() : HotseatGame.getView().heroes) : remote?.view?.heroes || [], offlineWait: copy(isHost() ? offlineWait : remote?.offlineWait || null),
-      manualPhase: isHost() ? manualPhase : !!remote?.manualPhase };
+      manualPhase: isHost() ? manualPhase : !!remote?.manualPhase,
+      // 克制表（matchup.js）：房主按战场现状算，玩家读房主发来的（packet.matchup）
+      matchup: isHost() ? matchupNow() : remote?.matchup || null };
+  }
+  /** 克制表：当前天气 + 当前行动单位所在区的冻土 / 恶劣环境 + 相位（matchup.js · matchupForState）。不含坚毅 */
+  function matchupNow() {
+    // 顶层：只看环境（和以前一样，按房主当前行动单位所在区）；units：每个看得见的单位作为受击者各一份（选中谁就用谁的），不含血量、坚毅
+    try {
+      if (typeof matchupForState !== "function") return null;
+      const m = matchupForState(state, root.GAME && GAME.actorId, { defender: false });
+      if (typeof matchupUnitCharts === "function") m.units = matchupUnitCharts(state);
+      return m;
+    } catch (e) { return null; }
   }
   let leftRoom = false;   // 玩家点了「离开房间」：之后（包括刷新时的 pagehide）不再覆盖存档里的 left 标记
   function save() {
@@ -67,12 +79,17 @@
     if (wait && Number.isFinite(wait.remainingMs)) wait.deadline = at + wait.remainingMs;
   }
   function readSaved() { try { const v = JSON.parse(localStorage.getItem(KEY)); return v?.version === 1 ? v : null; } catch (_) { return null; } }
-  function rawPacket(id, type = "result", tape = [], result = null) {
+  function rawPacket(id, type = "result", tape = [], result = null, fx = null) {
     const view = HotseatGame.getViewFor(id); view.players = roster(); view.network = true;
     return { protocol: PROTOCOL, build: BUILD, type, seq, state, tape, result: result || settledResult, view, screen: liveScreen(),
+      fx,   // 这一下的攻击演出（谁打谁、哪种招式；game.js · strikePlan），玩家画面照着播出手和弹道
       roomCode: identity.roomCode, hostName: identity.name, paused: isPaused(), messages, publicLogs, manualPhase, systemNotice,
       offlineWait: offlineWait ? { ...offlineWait, remainingMs: Math.max(0, offlineWait.deadline - Date.now()) } : null,
-      mode, rogue: rogue() ? OnlineRogue.viewFor(id) : null, levelUps: levelUpsFor(id),
+      mode, matchup: matchupNow(), rogue: rogue() ? OnlineRogue.viewFor(id) : null, levelUps: levelUpsFor(id),
+      // 义体（单局诊所）：自己操控的角色的义体视图和诊所目录（online-rogue.js · cyberwareFor；online-view.js · projectCyberware 白名单 + scrubHidden）
+      // 跑团：诊所开着时同样的 { heroes:[{kit,name,purse,view,shop,previews}] }（trpg.js · trpgCyberwarePacket）
+      cyberware: rogue() ? (OnlineRogue.cyberwareFor ? OnlineRogue.cyberwareFor(id) : null)
+        : typeof trpgCyberwarePacket === "function" && typeof TRPG !== "undefined" && TRPG.active && TRPG.clinicOpen ? trpgCyberwareFor(id, id === identity.id) : null,
       // 任务日志（跑团）：房主按收件人挑好（草稿、没指定给他的不给），online-view.js 再按白名单投影
       quests: !rogue() && typeof trpgQuestLog === "function" ? trpgQuestLog(id, id === identity.id, kitsOwnedBy(id)) : null,
       // 跑团私人钱包：自己操控的角色看得到余额，队友只给名字（转账用）；主持人看全部（online-view.js · projectPurse）
@@ -91,12 +108,12 @@
     if (!recipientWires.has(id)) recipientWires.set(id, OnlineWire.create());
     return endpoint.send(recipientWires.get(id).pack(safe), id).catch(e => { if (status.connected) { notice = e.message; notify(); } });
   }
-  function publish(tape = [], result = null) {
+  function publish(tape = [], result = null, fx = null) {
     if (!isHost() || !HotseatGame.isActive()) return;
     if (manualResolve && GAME.ended) { const finish = manualResolve; manualResolve = null; manualPhase = false; finish(); }
     if ((!state.combatStarted || GAME.ended) && HotseatGame.getView().players.map(p => p.id).join("|") !== roster().map(p => p.id).join("|")) setupOperators();
     seq++;
-    for (const p of status.roster) if (p.role !== "host" && p.online) sendProjected(p.id, rawPacket(p.id, "result", tape, result));
+    for (const p of status.roster) if (p.role !== "host" && p.online) sendProjected(p.id, rawPacket(p.id, "result", tape, result, fx));
     save(); notify();
   }
   function resync(id) { if (isHost() && HotseatGame.isActive()) return sendProjected(id, rawPacket(id, "resync")); }
@@ -109,6 +126,11 @@
       return { kit, name: info.name, purse: trpgPurse(kit), cyber: { current: info.current, limit: info.limit, rate: info.rate, fleshMax: info.fleshMax, perHp: info.perHp },
         request: req ? { status: req.status, cost: req.cost, note: req.note } : null };
     }).filter(Boolean) };
+  }
+  function trpgCyberwareFor(id, isGM) {
+    const mine = isGM ? (typeof trpgHeroes === "function" ? trpgHeroes().map(h => h.kit) : []) : kitsOwnedBy(id);
+    const heroes = mine.map(kit => { try { return trpgCyberwarePacket(kit); } catch (e) { return null; } }).filter(Boolean);
+    return heroes.length ? { heroes } : null;
   }
   function purseFor(id, isGM) {
     const mine = isGM ? null : kitsOwnedBy(id);
@@ -521,7 +543,7 @@
       else publicLogs.push({ kind: "phase", phase: state.combatPhase, turn: state.turnNo, at: Date.now() });
       publicLogs = publicLogs.slice(-100);
     }
-    publish(tape, result);
+    publish(tape, result, meta.fx || null);
   }
   function offlineTick() {
     if (!isHost() || isPaused() || !HotseatGame.isActive()) return;

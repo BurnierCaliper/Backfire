@@ -41,7 +41,7 @@
   }
   function snapProp(p) {
     const max = Math.max(1, Number(p.maxHp) || Number(p.hp) || 1), cur = Math.max(0, Number(p.hp) || 0);
-    const name = ({ button: "按钮", lever: "拉杆", battery: "超充能电池", boom: "爆炸桶", acid: "酸液桶", scrap: "碎渣机炮", turret: "防卫自律炮台", ironwall: "铁壁", scrapwall: "废铁墙", dome: "防护罩" })[p.kind] || p.kind || "配置物";
+    const name = ({ button: "按钮", lever: "拉杆", battery: "超充能电池", boom: "爆炸桶", acid: "酸液桶", scrap: "碎渣机炮", turret: "防卫自律炮台", ironwall: "铁壁", scrapwall: "废铁墙", dome: "防护罩", coral_branch: "沙珊瑚枝", coral_tentacle: "沙珊瑚触须", death_statue: "死亡雕像" })[p.kind] || p.kind || "配置物";
     return {
       id: "prop:" + p.id, name: p.name || name, isPlayer: p.faction !== "enemy", isProp: true, isDevice: DEVICE.includes(p.kind),
       zone: Number(p.zone) || 1, level: p.level || 1, atk: 0,
@@ -211,7 +211,15 @@
         c.wrap.classList.toggle("is-dim", !!targets && !targets.has(s.id) && s.id !== ui.current);
         setPickBadge(c.wrap, targetNo ? targetNo.get(s.id) : 0);
       });
-      cards.forEach((c, id) => { if (!seen.has(id)) { c.wrap.remove(); cards.delete(id); } });
+      cards.forEach((c, id) => {
+        if (seen.has(id)) return;
+        cards.delete(id);
+        // 被打倒的敌人：还在淡出就等淡完再拿掉，免得一下子消失（和 game.js · setView 一样）
+        if (c.wrap.classList.contains("dead") && c.wrap.isConnected) {
+          c.wrap.classList.remove("ko-held"); c.wrap.classList.add("gone");
+          setTimeout(() => c.wrap.remove(), 1800);
+        } else c.wrap.remove();
+      });
     }
 
     function paintHud(data, ui) {
