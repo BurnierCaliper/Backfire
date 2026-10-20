@@ -368,6 +368,10 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **决一死战（三处修正）：所有攻击都只打得到灯、只数敌对单位、播撒者被牵制时能抵近喷洒**（app.js · `dealTo` / `touDuelVictim` / `touDuelEnemies`；enemies.js · `enemyZoneInRange` / `en_spread`；tests/duel-ranged.test.js、block-sheet / env-score / reduce-score / audit-P4-heroes / mine3-enemies / growth-mode 的夹具跟着调整）
+  - 只拦范围攻击：以前被决一死战牵制的敌人，只有范围攻击打不到灯以外的人；多目标的单体攻击、协助攻击、借机攻击仍能打到灯以外的人。现在不论哪种攻击，打灯以外的人一律打不出去（首领机制、环境伤害照旧不拦）。
+  - 数同区敌人：以前把同区的中立生物（尘虫、管虫）和友军也算进「敌人」，占了名额（同区有尘虫时唯一的敌人不被牵制，也不取最低骰），它们自己也会被牵制。现在只数和灯敌对（`hostileTo`）的单位。
+  - 播撒者：以前被决一死战 / 嘲讽牵制而牵制者就在同区时，喷洒是「远距离」、打不到距离 0 的区，每次空放。现在和电弧扫射一样：没有近身攻击的敌人被牵制时，喷洒抵近打自己所在的区，倍率 ×0.6。没被牵制时仍打不到同区。
 - **评分三处修正：高能自爆的溢出分 / 余波分有人拿、基准分不重复算飞碟触灵、基准分不算中立生物和友军**（app.js · `paintSkillLog` / `runSkill` / `scorePar`；tests/score-fixes.test.js）
   - 高能自爆溢出分 / 余波分：高能自爆在行动结束时才判（`flushHighBooms`），但技能收尾的 `paintSkillLog` 已经把行动记账（`state.actionAcc`）清了，溢出分和余波的连带伤害分没有归属、直接丢了。现在清之前先存到 `state._endedAcc`，最外层行动判自爆前恢复，判完照样清掉；这些分仍记给引发高能自爆的那一方。
   - 飞碟触灵基准分：以前本体的血量池也算进基准分，但它是五条腿血量的镜像（`syncUfoBody`），等于腿的血量算了两遍。现在本体只算击杀分（首领 300），血量由腿算。

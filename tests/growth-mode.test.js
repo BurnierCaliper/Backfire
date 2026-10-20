@@ -116,7 +116,7 @@ test("团灭只算任务失败，角色不会永久死亡", () => {
 });
 
 test("自动打 40 步：不会结束、不会进首领战，队伍平均等级决定敌人等级", () => {
-  const { c, run, R } = fresh("G7");
+  const { c, run, R } = fresh("G7b");   // 种子换过：决一死战拦下所有攻击后，带灯的队伍战况变了，原种子刚好全灭
   const { BattleSim } = c;
   const seen = new Set();
   for (let i = 0; i < 400 && run.tasksDone < 6; i++) {

@@ -545,7 +545,8 @@ test("燕返：耐久 0 的鳴門不能被带出来", () => {
 /* ---------- 灯 / 年糕 ---------- */
 
 test("圣盾对年糕生效（年糕在场时灯必然空手）；免疫或伤害为 0 时不扣圣盾", () => {
-  const { c, S } = setup(["tou", "kolt"], [{ id: "thug_knife", lv: 1, zone: 1 }]);
+  // 两个敌人：同区只有一个时被决一死战拦着，只打得到灯
+  const { c, S } = setup(["tou", "kolt"], [{ id: "thug_knife", lv: 1, zone: 1 }, { id: "thug_knife", lv: 1, zone: 1 }]);
   const tou = kit(S, "tou"), foe = foesOf(S)[0];
   ready(tou, 1); foe.zone = 1;
   const mochi = c.spawnWeapon(tou, "mochi"); mochi.zone = 1;
