@@ -707,13 +707,15 @@
   /** 义体（cyberware.js · cyberwarePacket）：白名单 + scrubHidden，坚毅只有档位文字 */
   function projectCyberware(c) {
     if (!obj(c)) return null;
+    // 多名角色：{ heroes: [cyberwarePacket…] }（online-rogue.js · cyberwareFor）
+    if (Array.isArray(c.heroes)) return { heroes: c.heroes.slice(0, 8).map(projectCyberware).filter(h => h && h.kit) };
     const str = (v, n) => typeof v === "string" ? v.slice(0, n) : "";
     const num = v => (typeof v === "number" && isFinite(v) ? v : 0);
     const BUR = ["none", "strain", "heavy"];
     const item = d => ({ id: str(d.id, 60), name: str(d.name, 60), tier: num(d.tier), kind: str(d.kind, 20), range: str(d.range, 10), element: str(d.element, 20),
       damageText: str(d.damageText, 40), break: num(d.break), hpCut: num(d.hpCut), conflict: d.conflict ? str(d.conflict, 30) : null, example: !!d.example });
     const v = obj(c.view) ? c.view : {};
-    const out = { kit: str(c.kit, 40), view: {
+    const out = { kit: str(c.kit, 40), name: str(c.name, 40), view: {
       rate: num(v.rate), cap: num(v.cap), cyberwareRate: num(v.cyberwareRate), layerRate: num(v.layerRate), remainingHp: num(v.remainingHp),
       overinstall: !!v.overinstall, canOverinstall: !!v.canOverinstall, burden: BUR.includes(v.burden) ? v.burden : "none", burdenText: str(v.burdenText, 80),
       installed: arr(v.installed).slice(0, 16).filter(obj).map(d => Object.assign(item(d), { usesLeft: num(d.usesLeft), removeCost: num(d.removeCost) })) },

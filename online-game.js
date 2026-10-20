@@ -86,6 +86,8 @@
       roomCode: identity.roomCode, hostName: identity.name, paused: isPaused(), messages, publicLogs, manualPhase, systemNotice,
       offlineWait: offlineWait ? { ...offlineWait, remainingMs: Math.max(0, offlineWait.deadline - Date.now()) } : null,
       mode, matchup: matchupNow(), rogue: rogue() ? OnlineRogue.viewFor(id) : null, levelUps: levelUpsFor(id),
+      // 义体（单局诊所）：自己操控的角色的义体视图和诊所目录（online-rogue.js · cyberwareFor；online-view.js · projectCyberware 白名单 + scrubHidden）
+      cyberware: rogue() && OnlineRogue.cyberwareFor ? OnlineRogue.cyberwareFor(id) : null,
       // 任务日志（跑团）：房主按收件人挑好（草稿、没指定给他的不给），online-view.js 再按白名单投影
       quests: !rogue() && typeof trpgQuestLog === "function" ? trpgQuestLog(id, id === identity.id, kitsOwnedBy(id)) : null,
       // 跑团私人钱包：自己操控的角色看得到余额，队友只给名字（转账用）；主持人看全部（online-view.js · projectPurse）

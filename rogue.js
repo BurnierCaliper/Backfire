@@ -1541,6 +1541,40 @@ const Rogue = (function () {
     const text = pv.layers.map(l => `${LAYER[l.type] || l.type} ${l.max}`).join(" / ");
     return logAll(run, [`${heroName(kit)} 完成义体改造（${text}），花掉 ${pv.cost} 奎支。`]);
   }
+  /* ---- 义体（cyberware.js）：记在角色档案 h.cyberware；钱从 state.kuizhi 出（联机时 online-rogue.js 换成付钱角色的钱包） ---- */
+  function cyberwareUnit(run, kit) {
+    const h = run.party.find(x => x.kit === kit);
+    if (!h) throw new Error("队伍里没有这个角色");
+    const u = spawnLiveCard(cardOf(kit), 1);
+    applyHero(u, h);
+    return { h, u };
+  }
+  /** 给界面 / 联机包：cyberware.js · cyberwarePacket（只有档位文字，没有坚毅数值） */
+  function cyberwarePacketFor(run, kit) {
+    if (typeof cyberwarePacket !== "function") return null;
+    const { u } = cyberwareUnit(run, kit);
+    return Object.assign(cyberwarePacket(u), { kit, name: heroName(kit) });
+  }
+  function cyberwarePreviewFor(run, kit, id) { return cyberwareInstallPreview(cyberwareUnit(run, kit).u, id); }
+  function installCyberware(run, kit, id) {
+    if (!canClinic(run)) throw new Error("这里没有诊所");
+    const { h, u } = cyberwareUnit(run, kit);
+    const purse = { kuizhi: Number(state.kuizhi) || 0 };
+    const pv = cyberwareInstall(u, id, purse);
+    state.kuizhi = purse.kuizhi;
+    h.cyberware = (u.cyberware || []).map(x => ({ id: x.id }));
+    return logAll(run, [`${heroName(kit)} 安装了义体「${pv.name}」，花掉 ${pv.cost} 奎支。${pv.warning || ""}`]);
+  }
+  function removeCyberware(run, kit, id) {
+    if (!canClinic(run)) throw new Error("这里没有诊所");
+    const { h, u } = cyberwareUnit(run, kit);
+    const purse = { kuizhi: Number(state.kuizhi) || 0 };
+    const name = (cyberwareDef(id) || {}).name || id;
+    const out = cyberwareRemove(u, id, purse);
+    state.kuizhi = purse.kuizhi;
+    h.cyberware = (u.cyberware || []).map(x => ({ id: x.id }));
+    return logAll(run, [`${heroName(kit)} 拆掉了义体「${name}」，花掉 ${out.cost} 奎支。`]);
+  }
   /** 治疗：把血量补满，按缺的点数收钱 */
   function healCost(run, kit) {
     const h = run.party.find(x => x.kit === kit);
@@ -2910,7 +2944,7 @@ function advanceDays(run, n) {
     interludeOptions, campStatus: campStatusOf, buy, shopPoints, redeemList, redeem, craftPlace, craftList, craftOdds, craft, knowsRecipe, learnOptions, learnRecipe, rollRecipeChip, salvageList, salvage, setCraftHooks, setCraftJob, craftQueue, craftQueued, bagCounts, inventory, recipeStatus, recipeBook, materialUses, workshopAvailable, craftListGrouped, craftPreview, recipesUsingMaterial, setBagOwnership, bagByCategory, materialBar, cyberSummary, modInstallPreview, matchupChart: (w, o) => matchupChart(w, o), matchupForState: (st, id) => matchupForState(st, id), itemCategory: id => itemCategory(id),  canShop, shopItemName, shopStock, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
     presentSmiths, smithInfo, claimBlueprint, installBlueprint, blueprintById, weaponModsOf,
     smithQuote, introduceSmith,
-    canClinic, cyberInfo, cyberPreview, cyberCost, modifyHero, healCost, healHero,
+    canClinic, cyberInfo, cyberPreview, cyberCost, modifyHero, cyberwarePacketFor, cyberwarePreviewFor, installCyberware, removeCyberware, healCost, healHero,
     pendingChoices, choiceOptions, choose, queueLevelRewards,
     dailyDate, dailySeed, dailyParty, dailyStats, featPickRates,
     drawInfo, drawHero, swapHero, partyLevel, growthXp: () => growthOn, routeEta, growthDaily: ensureGrowthDaily,
