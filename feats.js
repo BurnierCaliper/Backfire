@@ -130,7 +130,8 @@ const FEATS = {
       } } },
   versatile: { name: "多面手", kind: "explore", tier: 1, explore: true, repeatable: true,
     text: "（探索）三项熟练项各升一级（新学或升级），可以重复选。",
-    onTake: () => [{ type: "prof" }, { type: "prof" }, { type: "prof" }] },
+    // 三项要选三个不同的项目（group 相同的待选互相排除，见 rogue.js · choiceOptions）；已熟练的项可以选来升级。可重复选，每次选各一组
+    onTake: h => { const group = `versatile:${featCount(h, "versatile")}`; return [{ type: "prof", group }, { type: "prof", group }, { type: "prof", group }]; } },
   sharpeye: { name: "眼尖", kind: "explore", tier: 1, explore: true,
     text: "（探索）调查类检定有优势；会受伤的检定失败时你不受伤。",
     hooks: { check(h, perks, ctx) {
@@ -411,6 +412,22 @@ function featChoicesFor(h, level) {
     if (typeof f.requires === "function" && f.requires(h)) return false;
     return true;
   });
+}
+/** 跑团模式：这名角色每个没用的专长点是哪一级给的（升序，长度 = featPoints）。
+ *  记在 u.featPointLevels；旧档没记的按升级表补：已选专长占掉最低的几级，剩下的点从低到高对应剩下的级 */
+function featPointLevelsOf(u) {
+  if (!u) return [];
+  const n = Math.max(0, Number(u.featPoints) || 0);
+  const table = typeof FEAT_LEVELS !== "undefined" ? FEAT_LEVELS.slice().sort((a, b) => a - b) : [];
+  const lv = (Array.isArray(u.featPointLevels) ? u.featPointLevels : []).map(Number).filter(x => table.indexOf(x) >= 0).sort((a, b) => a - b).slice(0, n);
+  if (lv.length < n) {
+    const free = table.filter(L => L <= (Number(u.level) || 0)).slice((u.feats || []).length);
+    lv.forEach(L => { const i = free.indexOf(L); if (i >= 0) free.splice(i, 1); });
+    while (lv.length < n) lv.push(free.length ? free.shift() : (table[0] || 1));
+    lv.sort((a, b) => a - b);
+  }
+  u.featPointLevels = lv;
+  return lv;
 }
 /** 兼修能升级的：身上 1–3 层的涉猎专长，还没升过的 */
 function featFullOptions(h) {
@@ -724,8 +741,10 @@ function featAfterBlock(helper, attacker, target, extra) {
 /** 警戒：敌人走进有警戒的人所在的区（app.js · doMoveInner）。留着附赠动作就打它一下 */
 function featAlertOnEnter(unit, notes) {
   if (!unit || unit.isPlayer || unit.dead || state.combatPhase !== "enemy") return;
+  // 只对和自己敌对的单位触发（友军、中立生物不算）；同区每个有警戒的人各自出手，各自扣自己的附赠动作
   (state.units || []).filter(u => u.isPlayer && !u.dead && !u.dying && !u.stunned && !u.hidden &&
-    Number(u.zone) === Number(unit.zone) && featHas(u, "alert") && (Number(u.bonus) || 0) >= 1).slice(0, 1).forEach(u => {
+    Number(u.zone) === Number(unit.zone) && featHas(u, "alert") && (Number(u.bonus) || 0) >= 1 &&
+    (typeof hostileTo !== "function" || hostileTo(u, unit))).forEach(u => {
     if (unit.dead) return;
     u.bonus -= 1;
     notes.push(`${u.name} 警戒：消耗 1 附赠动作，对走进来的 ${unit.name} 出手。`);

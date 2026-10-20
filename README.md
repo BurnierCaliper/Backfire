@@ -368,6 +368,11 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **专长（二）三处修正：跑团专长点记来源等级、多面手三项熟练各不相同、警戒只打敌人且每人各自出手**（feats.js · `featPointLevelsOf` / `featAlertOnEnter` / 多面手 `onTake`；growth.js · `tryLevelUp`；trpg.js · `trpgPickFeat`；trpg-ui.js；rogue.js · `choiceOptions` / `choose`；game.js · `packHero` / `applyCampaignToField`；tests/feat-bugs-107.test.js；docs/bug-backlog.md）
+  - 跑团专长点：以前只存一个 `featPoints` 数字，选专长按角色当前等级判断，7 级给的点能拿去选 11 级以上的专长。现在每个没用的点记下是几级给的（`featPointLevels`，随队伍记忆存档），选专长按这一点的来源等级判断，满足条件时用最低的一点、高等级的点留着。旧档没有来源等级的点按升级表补：已选的专长占掉最低的几级，剩下的点从低到高对应剩下的级，点数不丢。
+  - 多面手：以前三次熟练是三个互不相干的待选，能连选同一项。现在三项属于同一组（`group`），选过的项在同组其余待选里不再出现；已经熟练的项照专长说明（「新学或升级」）仍可选来升一级。每次重复选多面手各算一组。
+  - 警戒：以前走进来的任何非玩家单位（包括友军、中立生物）都会触发，且同区只有第一个有警戒的人出手。现在只对 `hostileTo` 判定为敌对的单位触发，同区每个有警戒、有附赠的人各自出手、各扣自己的 1 个附赠动作。
+
 - **训练场四处修正：聚焦抹层不再把假人抹成 0/0、假人不做借机 / 协助攻击、「重新开始」重开这一场训练、假人架势真正无限（卡片写「架势 ∞」）**（training.js · `setupField` / `refillDummy` / `restart`；app.js · `opportunityStrike` / `eligibleAssisters` / `dealBreak` / `applyUnstable` / `convertUnstableInHv` / `dmForceStun` / `defText`；engine.js · 结算击破；items.js · `itemStun`；game.js · 顶栏「重新开始」、单位详情；tests/training-bugs-105.test.js）
   - 聚焦抹层：以前，抹层会把那一层写成 0/0 并封死（抹内层还会让假人归零），`refillDummy` 只做 `current = max`，0/0 补回来还是 0/0，训练打不下去。现在 `setupField` 记下假人原始的层（种类和最大值），补满时按它重建、去掉封死、清掉聚焦；层被抹掉 / 移走也算补满的条件，被抹掉的血照记进总伤害。
   - 反应攻击：以前 ai.js 只在假人自己的回合里跳过它，借机和协助走别的入口，假人照样出手。现在 `opportunityStrike` 不让假人出手，`eligibleAssisters` 不把假人算进协助名单。
