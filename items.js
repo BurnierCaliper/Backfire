@@ -543,6 +543,8 @@ function useEffectItem(actor, it, target, zone, notes) {
     const units = (state.units || []).filter(u => itemPresent(u) && Number(u.zone) === z && u.kit !== "ironwall" && (!it.alliesOnly || u.isPlayer));
     if (!units.length) notes.push(`${z} 区没有单位。`);
     units.forEach(u => {
+      // 下潜中的单位范围攻击打不到（effects.js · 下潜）；投掷罐不是谐波，也不例外
+      if (u.submerged) { notes.push(`${u.name} 下潜中，没有被波及。`); return; }
       const shield = !it.alliesOnly && typeof aoeShieldFor === "function" ? aoeShieldFor(u, actor) : null;   // 屏障只挡敌方扔过来的
       if (shield) { notes.push(`${u.name} 被${shield.name}护住，没受影响。`); return; }
       itemApplyStatus(actor, u, it.key, notes);

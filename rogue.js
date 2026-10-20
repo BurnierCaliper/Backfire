@@ -1059,7 +1059,7 @@ const Rogue = (function () {
   /** 打赢之后打倒的敌人掉制作材料（items.js · rollCraftMaterials）：合在一起记一行，进背包（材料是队伍公用的） */
   function rollMaterialDrops(run, notes) {
     if (typeof rollCraftMaterials !== "function") return;
-    const foes = (state.units || []).filter(u => u && !u.isPlayer && (u.dead || u._removed) && !u.summonedBy && u.kit !== "ironwall" && u.kit !== "ufo_leg" &&
+    const foes = (state.units || []).filter(u => u && !u.isPlayer && u.dead && !u.summonedBy && u.kit !== "ironwall" && u.kit !== "ufo_leg" &&
       !(typeof isNeutralCreature === "function" && isNeutralCreature(u)));
     if (!foes.length) return;
     const key = `${run.seed}:mats:${run.act}:${run.taskNo}:${run.task ? run.task.index : "b"}:${run.day}:${(run.matNo = (run.matNo || 0) + 1)}`;
