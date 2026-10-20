@@ -12,11 +12,11 @@ const read = f => fs.readFileSync(path.join(ROOT, f), "utf8");
 function setup(opt) {
   const c = H.load();
   if (opt && opt.noData) vm.runInContext("matchupChart = undefined; matchupForState = undefined; try { Rogue.matchupChart = undefined; Rogue.matchupForState = undefined; } catch (e) {}", c);
+  vm.runInContext(read("icons.js"), c, { filename: "icons.js" });
   vm.runInContext(read("matchup-ui.js"), c, { filename: "matchup-ui.js" });
   return c;
 }
 const cell = (html, i, j) => (html.match(new RegExp(`<td class="mu-cell[^"]*" data-mu-cell="${i}:${j}"[\\s\\S]*?</td>`)) || [""])[0];
-const rowPct = (html, id) => (html.match(new RegExp(`<th class="mu-row mu-e-${id}">[^<]*</th><td class="mu-pct[^"]*"[^>]*>[\\s\\S]*?</td>`)) || [""])[0];
 /** 战场：1 区冻土、2 区普通；甲在 1 区，乙在 2 区，飞在 1 区但飞行 */
 function battle(c, weather, extra) {
   vm.runInContext(`state.weather = ${JSON.stringify(weather)}; state.phaseStep = ${(extra && extra.phaseStep) || 0}; state.apocalypse = ${!!(extra && extra.apocalypse)};
@@ -43,7 +43,11 @@ test("常态（真数据）：7 × 5，火对肉体克制、对装甲被克制�
   assert.match(cell(html, 0, 2), /mu-neu/);
   assert.match(cell(html, 0, 1), /title="火 → 装甲：被克制 −25%"/);
   assert.doesNotMatch(html, /mu-cell[^"]*changed/);
-  assert.doesNotMatch(html, /mu-pct changed/);
+  assert.doesNotMatch(html, /mu-pct|整行增减伤/, "整行一栏去掉了");
+  assert.match(html, /<p class="mu-legend"><span class="mu-adv">克制<\/span><span class="mu-dis">被克制<\/span><span class="mu-neu">普通<\/span><\/p>/);
+  assert.match(html, /<th class="mu-row mu-e-fire"><svg class="eicon"[^>]*aria-label="火"/, "行头带属性图标");
+  assert.match(html, /<th class="mu-row mu-e-harmonic"><svg[\s\S]*?<span>谐波<\/span>/);
+  assert.doesNotMatch(html, /谐振/);
   assert.match(html, /天气 常态/);
   assert.doesNotMatch(html, /天气效果 ×|冻土（/);
 });
@@ -57,7 +61,8 @@ test("微光（真数据）：16 格反转高亮「原 → 现」带原因；能
   assert.equal((html.match(/mu-cell[^"]*changed/g) || []).length, 16);
   assert.match(cell(html, 0, 0), /<s>\+50%<\/s><span class="mu-arrow">→<\/span><b>−50%<\/b>/);
   assert.match(cell(html, 0, 0), /微光：克制关系反转（能量除外）/);
-  assert.match(rowPct(html, "energy"), /changed[\s\S]*<s>±0<\/s> → <b>\+25%<\/b>/);
+  assert.match(cell(html, 0, 0), /mu-dis/, "改过的格子照常按现在的克制关系上色");
+  assert.match(html, /微光伤害修正：能量 \+25%/, "整行增减伤写进 notes");
   assert.match(html, /微光：击破 −1/);
   assert.match(M.html(chart, { cell: [0, 0] }), /class="mu-detail"[\s\S]*被克制 −50%（原来 克制 \+50%）/);
 });
@@ -69,7 +74,7 @@ test("雪天 + 冻土跟着选中单位：甲（冻土区）有冻土；乙（�
   let html = M.html(M.localChart());
   assert.match(html, /冻土（甲 所在区域）/);
   assert.match(cell(html, 3, 0), /changed[\s\S]*冻土：冰易伤不受天气影响[\s\S]*\+25%/);
-  assert.match(rowPct(html, "fire"), /<b>−25%<\/b>/);
+  assert.match(html, /雪天伤害修正：火、酸 −25%；冰、物理 \+25%/);
   assert.match(html, /冻土：冰属性对这一区的目标固定易伤/);
   c.GAME.actorId = "b"; assert.doesNotMatch(M.html(M.localChart()), /冻土（/);
   c.GAME.actorId = "f"; assert.doesNotMatch(M.html(M.localChart()), /冻土（/, "飞行单位不吃冻土");
@@ -102,6 +107,25 @@ test("联机玩家：拿房主 matchup 的 opt，按自己选中单位的区改�
   assert.match(ol, /MatchupUI\.viewChart\(m, st, selectedActor \|\| \(mine \? cur : null\)\)/);
   assert.match(ol, /screen === "battle" && matchupOf\(\) \? button\("克制表", "matchup"\)/);
   assert.doesNotMatch(M.html(mine), /shp|坚毅/);
+});
+
+test("相位效果在 notes 里：数据写在 notes 或整行 pct 里都看得到，不重复", () => {
+  const c = setup(), M = c.MatchupUI;
+  const base = M.chartWith("phase", { phaseStep: 2 });
+  assert.equal(M.allNotes(base).filter(n => /相位/.test(n)).length, 1);
+  // 模拟 #81 之后的数据：相位 ±50% 进 rows[].pct，notes 里没有伤害那句
+  const moved = Object.assign({}, base, { notes: [], rows: base.rows.map(r => Object.assign({}, r, { pct: 0.5, pctReason: "相位波峰：伤害 +50%" })) });
+  assert.match(M.allNotes(moved).join("\n"), /相位伤害修正：火、酸、电、冰、能量、物理、谐波 \+50%/);
+  const both = Object.assign({}, moved, { notes: ["相位波峰：伤害 +50%，击破 +1"] });
+  assert.equal(M.allNotes(both).length, 1, "notes 已经写了就不再补");
+  assert.equal(M.allNotes(Object.assign({}, base, { rows: [{ id: "harmonic", name: "谐振", pct: 0.25, pctReason: "x" }], notes: [] }))[0], "相位伤害修正：谐波 +25%");
+});
+
+test("样式：没有格子边框、天气改过的格子不另上高亮色；窗口放大", () => {
+  const css = read("matchup.css");
+  assert.doesNotMatch(css, /outline|\.changed/);
+  assert.match(css, /\.mu-grid td \{[^}]*border: 0/);
+  assert.match(css, /\.mu-card \{ width: min\(1040px/);
 });
 
 test("样式：和工坊同一套浮层；悬停单位浮在天气之上的规则没动", () => {
