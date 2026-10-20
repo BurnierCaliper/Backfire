@@ -31,7 +31,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      # 联机转发的测试（tests/relay*.test.js）要 relay/ 下的 miniflare，不装的话 npm test 有十几个失败
+      - name: 装 relay 依赖
+        run: npm ci --prefix relay --no-audit --no-fund
       - uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ github.token }}   # 让它自己用 gh pr create 开 PR
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          claude_args: --allowedTools "Bash(npm test),Bash(node --test:*),Bash(node tools/playtest.js:*),Bash(git:*)"
+          claude_args: --allowedTools "Bash(npm test),Bash(node --test:*),Bash(node tools/playtest.js:*),Bash(git:*),Bash(gh pr create:*),Bash(gh pr view:*)"
