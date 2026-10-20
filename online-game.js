@@ -48,7 +48,13 @@
       packet: isHost() ? { state, view: HotseatGame.getView(), messages: messages.slice(-300), publicLogs: OnlineView.projectLogs(publicLogs), systemNotice } : remote,
       state: isHost() ? state : remote?.state, messages: isHost() ? messages.slice(-300) : remote?.messages || [],
       heroes: isHost() ? (rogue() ? rogueHeroes() : HotseatGame.getView().heroes) : remote?.view?.heroes || [], offlineWait: copy(isHost() ? offlineWait : remote?.offlineWait || null),
-      manualPhase: isHost() ? manualPhase : !!remote?.manualPhase };
+      manualPhase: isHost() ? manualPhase : !!remote?.manualPhase,
+      // 克制表（matchup.js）：房主按战场现状算，玩家读房主发来的（packet.matchup）
+      matchup: isHost() ? matchupNow() : remote?.matchup || null };
+  }
+  /** 克制表：当前天气 + 当前行动单位所在区的冻土 / 恶劣环境 + 相位（matchup.js · matchupForState）。不含坚毅 */
+  function matchupNow() {
+    try { return typeof matchupForState === "function" ? matchupForState(state, root.GAME && GAME.actorId) : null; } catch (e) { return null; }
   }
   let leftRoom = false;   // 玩家点了「离开房间」：之后（包括刷新时的 pagehide）不再覆盖存档里的 left 标记
   function save() {
@@ -73,7 +79,7 @@
       fx,   // 这一下的攻击演出（谁打谁、哪种招式；game.js · strikePlan），玩家画面照着播出手和弹道
       roomCode: identity.roomCode, hostName: identity.name, paused: isPaused(), messages, publicLogs, manualPhase, systemNotice,
       offlineWait: offlineWait ? { ...offlineWait, remainingMs: Math.max(0, offlineWait.deadline - Date.now()) } : null,
-      mode, rogue: rogue() ? OnlineRogue.viewFor(id) : null, levelUps: levelUpsFor(id),
+      mode, matchup: matchupNow(), rogue: rogue() ? OnlineRogue.viewFor(id) : null, levelUps: levelUpsFor(id),
       // 任务日志（跑团）：房主按收件人挑好（草稿、没指定给他的不给），online-view.js 再按白名单投影
       quests: !rogue() && typeof trpgQuestLog === "function" ? trpgQuestLog(id, id === identity.id, kitsOwnedBy(id)) : null,
       // 跑团私人钱包：自己操控的角色看得到余额，队友只给名字（转账用）；主持人看全部（online-view.js · projectPurse）
