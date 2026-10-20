@@ -368,6 +368,10 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **高能自爆、深渊 / 空隙坠落、流沙窒息弄死的敌人也走击杀结算**（app.js · `applyKnockdown`；tests/env-kill-settle.test.js；docs/bug-backlog.md H12）
+  - 以前：这几条路径只把敌人标成死亡并清场，不调用 `settleEnemyKill`，所以没有经验、奎支、击杀分、击杀数，亡命之王也不知道手下倒了。
+  - 现在：`applyKnockdown` 里敌人倒地时补调 `settleEnemyKill`（`_xpGiven` 保证每个敌人只结算一次）。击杀算谁沿用原规则：有 `_lastHitBy`（含环境所有者）算他，没有就按当前行动者，都没有只给经验 / 奎支、不记个人击杀；中立生物、友军照旧不给经验掉落。
+
 - **流沙没顶（下陷 3 层）真的不能出手了**（app.js · `costBlockReason` / `runSkill`；game.js · `baseBlockReason`；hotseat-validation.js · `baseReason`；tests/quicksand-lock.test.js；docs/bug-backlog.md H5）
   - 以前：`spendAp` / `spendBonus` 对没顶的单位返回 `false`，但 `runSkill` 不看返回值，没顶的单位（我方和敌人）照常出手，还一个点都不扣。
   - 现在：技能消耗付不起（没顶，或行动点 / 附赠行动不够）时，在 `snapshot()` / `beginActionAcc` 之前就挡住，这次行动不结算、不改局面，日志写原因。技能按钮在画面和联机校验里提前灰掉（原因「陷在流沙里没顶，不能行动」）。不花点数的动作（起身等）照常可用；敌人 AI 本来就不给没顶的敌人规划行动。
