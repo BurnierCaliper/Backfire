@@ -1341,7 +1341,8 @@
       const zoneRect = (x) => boxOf(typeof x === "number" ? battle && battle.el.querySelector(`.g-zone[data-num="${x}"]`) : cardFor(x)?.closest(".g-zone"));
       const pops = tape.filter(e => e.type === "pop");
       const targets = [];
-      pops.forEach(e => { if (e.unitId && e.unitId !== fx.actor && /^(dmg|break|status|fxword)$/.test(e.kind) && !targets.includes(e.unitId)) targets.push(e.unitId); });
+      // 爆炸（tag "boom"）炸到的不算这次出手的目标（和 game.js · strikePlan 一样）
+      pops.forEach(e => { if (e.unitId && e.unitId !== fx.actor && e.tag !== "boom" && /^(dmg|break|status|fxword)$/.test(e.kind) && !targets.includes(e.unitId)) targets.push(e.unitId); });
       const shakeEl = () => battle && battle.el;
       return {
         actor: fx.actor, target: fx.target, mains: pops.filter(e => e.kind === "dmg" && e.main), targets, move: fx.move || {}, data: fx.data || {},

@@ -965,12 +965,15 @@
   function strikePlan(meta, pops, cmd) {
     if (!window.AttackFx || G.sim || !meta || !meta.actorId) return null;
     const actorId = meta.actorId;
-    const dmgOf = (e) => e.kind === "dmg" && (Number(e.value) || 0) > 0 && e.unitId !== actorId;
+    // 爆炸（tag "boom"：高能自爆的余波、自爆小车死亡引爆）不是这次出手打的：不算目标、不补打击形状
+    // （以前协助攻击打死自爆小车，小车炸到的每个人都被当成协助攻击的目标再演一遍）
+    const ownHit = (e) => e.tag !== "boom";
+    const dmgOf = (e) => e.kind === "dmg" && (Number(e.value) || 0) > 0 && e.unitId !== actorId && ownHit(e);
     let mains = pops.filter(e => dmgOf(e) && e.main);
     if (!mains.length) mains = pops.filter(dmgOf);
     // 这次碰到的单位（伤害、击破、挂效果都算），按先后：乱打、电力夺取、声波这类一次打好几个的按它演
     const targets = [];
-    pops.forEach(e => { if (e.unitId && e.unitId !== actorId && /^(dmg|break|status|fxword)$/.test(e.kind) && !targets.includes(e.unitId)) targets.push(e.unitId); });
+    pops.forEach(e => { if (e.unitId && e.unitId !== actorId && ownHit(e) && /^(dmg|break|status|fxword)$/.test(e.kind) && !targets.includes(e.unitId)) targets.push(e.unitId); });
     const targetId = meta.targetId && meta.targetId !== actorId ? meta.targetId : (mains[0] && mains[0].unitId) || targets[0] || meta.targetId || null;
     if (!targetId) return null;
     const a = G.view.get(actorId), t = G.view.get(targetId);

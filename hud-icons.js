@@ -292,7 +292,16 @@
       case "kolt": {
         let scrap = 0;
         try { if (has("koltScrapTotal")) scrap = Number(root.koltScrapTotal(u)) || 0; } catch (e) {}
-        return { kit: "kolt", bit: r.bit === "acid" ? "acid" : "drill", full: sumLayers(u, "max") > 0 && sumLayers(u, "current") >= sumLayers(u, "max"), cut: plus(2) ? 45 : 25,
+        // 满血减伤亮不亮：和规则结算同一个判断（app.js · koltPrideCut：现有血量 ≥ 进入战斗时的上限、不在起身中、被动开着）；
+        // 规则没载入（单独用这个文件）时按进入战斗时的上限比，没记下就按现在的上限
+        let full = false;
+        try {
+          if (has("koltPrideCut")) full = Number(root.koltPrideCut(u)) > 0;
+          else { const mx = Number(u.prideMaxHp) || sumLayers(u, "max"); full = mx > 0 && !u.upOnShp && sumLayers(u, "current") >= mx; }
+        } catch (e) {}
+        let noPassive = false;
+        try { noPassive = has("passiveOn") && !root.passiveOn(u); } catch (e) {}
+        return { kit: "kolt", bit: r.bit === "acid" ? "acid" : "drill", full, cut: plus(2) ? 45 : 25, shp: !!u.upOnShp, noPassive,
           showScrap: (Number(u.level) || 1) >= 2, scrap: Math.max(0, scrap) };
       }
       case "helu": {
@@ -338,7 +347,7 @@
       ind(I.duel(s.duel), s.duel ? "决一死战生效" : "决一死战未生效", s.duel ? "glow-red" : "") +
       `<div class="ind"><span class="num">${s.taunt}</span><span>嘲讽剩余</span></div>`,
     kolt: s => ind(I.drill(s.bit === "drill"), "电钻 · 电", "big " + (s.bit === "drill" ? "" : "dim")) + ind(I.acid(s.bit === "acid"), "酸液炮 · 酸", "big " + (s.bit === "acid" ? "" : "dim")) +
-      ind(I.proud(s.full), s.full ? `满血减伤 ${s.cut}%` : "未满血", s.full ? "glow-amber" : "") +
+      ind(I.proud(s.full), s.full ? `满血减伤 ${s.cut}%` : s.noPassive ? "过度自信已放弃" : s.shp ? "起身中不减伤" : "未满血", s.full ? "glow-amber" : "") +
       (s.showScrap ? `<div class="ind${s.scrap > 0 ? "" : " dim"}">${I.scrap(s.scrap > 0)}<span>废料 <b class="num">${s.scrap}</b></span></div>` : ""),
     helu: s => ind(I.wave(s.focus > 0), "频谱分析", s.focus > 0 ? "" : "dim") +
       (s.need ? `<div class="ind"><span class="focus">${Array.from({ length: s.need }, (_, i) => `<i class="${i < s.focus ? "on" : ""}"></i>`).join("")}</span><span>聚焦 ${s.focus}/${s.need}</span></div>` : "") +

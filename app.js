@@ -4893,12 +4893,17 @@ function explodeBoomcar(target, notes) {
   const half = Math.floor((target.atk || 0) / 2);
   notes.push(`${target.name} 死亡引爆：同区 ${half} 能量 + 1 击破。`);
   markAoeZone(target.zone, { element: "energy", dmg: half, attacker: target });
-  // 同区不分敌我的范围伤害（不能协助格挡）
-  state.units.filter(u => !u.hidden && !u.dead && u.id !== target.id && Number(u.zone) === Number(target.zone)).forEach(u => {
-    const fake = unitOf("小车残骸", target.level, [{ type: "armor", hp: 1 }], 0, 0);
-    fake.zone = target.zone;
-    dealTo(fake, u, { atk: 0, mult: 0, flat: half, element: "energy", baseBreak: 1, flags: { action: true, aoe: true } });
-  });
+  // 同区不分敌我的范围伤害（不能协助格挡）。画面上和高能自爆的余波一样标成爆炸（数字放大、停久一点），
+  // 不算进打死它的那次攻击的演出（game.js · strikePlan 跳过这些弹字）
+  const prevTag = state.popTag;
+  state.popTag = "boom";
+  try {
+    state.units.filter(u => !u.hidden && !u.dead && u.id !== target.id && Number(u.zone) === Number(target.zone)).forEach(u => {
+      const fake = unitOf("小车残骸", target.level, [{ type: "armor", hp: 1 }], 0, 0);
+      fake.zone = target.zone;
+      dealTo(fake, u, { atk: 0, mult: 0, flat: half, element: "energy", baseBreak: 1, flags: { action: true, aoe: true } });
+    });
+  } finally { state.popTag = prevTag || null; }
 }
 
 function removeEnemyFromField(u, notes) {
@@ -5757,6 +5762,18 @@ function convertRasLight(pct, bonusRate) {
   if ((r.resources.energyPct || 0) < 100) r.resources.unstable = false;
   appendLog(`拉斯缪尔转化光能 +${gain}（${use}% × 血上限 ${hp}）→ 光能 ${r.resources.light}，累积 ${r.resources.energyPct}%`);
   return gain;
+}
+
+/** 柯尔特「过度自信」的满血减伤现在生不生效。dealTo 结算和角色仪表（hud-icons.js · gaugeState）用这同一个判断——
+ *  以前仪表自己按「现有血量 ≥ 现在的血量上限」算，上限被临时护盾 / 临时层抬高、被动被图纸关掉、起身中时，亮不亮和实际减不减对不上（作者 10/20 反馈）。
+ *  生效条件：被动开着、不在起身中（靠坚毅生命）、现有血量 ≥ 进入战斗时的血量上限（prideMaxHp；中途上场还没记下的按现在不含临时部分的上限）。
+ *  返回减伤比例：0 = 不生效，0.25，过度自信+ 0.45 */
+function koltPrideCut(u) {
+  if (!u || u.kit !== "kolt" || u.dead || u.upOnShp) return 0;
+  if (typeof passiveOn === "function" && !passiveOn(u)) return 0;
+  const mx = Number(u.prideMaxHp != null ? u.prideMaxHp : baseMaxHp(u)) || 0;
+  if (!(mx > 0) || totalCurHp(u) < mx) return 0;
+  return typeof passivePlus === "function" && passivePlus(u, 2) ? 0.45 : 0.25;
 }
 
 /** 柯尔特的废料：上一个被摧毁的敌人血量层 + 腐坏抛射记下的腐蚀伤害 + 扭矩「转移注意」失去的装甲。
@@ -7925,11 +7942,10 @@ function dealTo(attacker, target, opt) {
   }
   // 过度自信：现有血量 ≥ 进入战斗时的血量上限即减伤（并少受 1 击破）。战斗中上限被抬高也照原来的上限算，
   // 所以靠临时层、护盾把血量堆过原来的上限就会触发
-  if (target && target.kit === "kolt" && flags.action && !target.upOnShp && (typeof passiveOn !== "function" || passiveOn(target))) {
-    const cur = totalCurHp(target);
+  if (target && target.kit === "kolt" && flags.action) {
     if (target.prideMaxHp == null) target.prideMaxHp = baseMaxHp(target);   // 中途上场的：第一次挨打时记下
-    const mx = Number(target.prideMaxHp) || 0;
-    if (mx > 0 && cur >= mx) flags.prideReduce = typeof passivePlus === "function" && passivePlus(target, 2) ? 0.45 : true;   // 过度自信+：45%
+    const cut = koltPrideCut(target);   // 和角色仪表同一个判断
+    if (cut) flags.prideReduce = cut === 0.25 ? true : cut;   // 过度自信+：45%
   }
   if (attacker && (attacker.kit === "helu" || attacker.kit === "ecmo") && target && target.focuses && target.focuses.length) {
     flags.focusLayer = pickFocusLayer(target);
@@ -8115,8 +8131,12 @@ function dealTo(attacker, target, opt) {
       const maxHp = (target.layers || []).reduce((a, l) => a + (Number(l.max) || 0), 0);
       if ((res.intended || 0) >= maxHp * 0.5) target.killBig = true;
     }
-    // main：这一下是攻击动作本身的伤害（不是高压场地、感电这类连带伤害）。预览和总伤害计数按它定属性颜色
-    const mainHit = flags.action !== false && !flags.environment;
+    // main：这一下是攻击动作本身的伤害（不是高压场地、感电这类连带伤害）。预览和总伤害计数按它定属性颜色，
+    // 攻击演出按它补打击形状（game.js · strikePlan）。不在场上的替身打的（自爆小车的残骸、爆炸桶、危墙倒塌……）也是连带伤害——
+    // 以前算成主攻击，协助攻击打死自爆小车时，小车炸到的每个人身上都补一遍协助攻击的刀光（作者 10/20 反馈）。
+    // 我方操控的碎渣机炮（替身记着操控的人 creditTo）照旧算：那一炮就是这次行动本身
+    const standIn = !!attacker && (!!attacker.envSrc || !(state.units || []).includes(attacker));
+    const mainHit = flags.action !== false && !flags.environment && (!standIn || !!attacker.creditTo);
     // adv：玩家这一击触发了属性克制（预览写「克制」、血条变浅金；演出时画面震一下）
     const advHit = !!(res.advantage && attacker && attacker.isPlayer && mainHit);
     const disHit = !!(res.disadvantage && attacker && attacker.isPlayer && mainHit);   // 劣势：预览写「劣势」、伤害变灰

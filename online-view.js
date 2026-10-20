@@ -285,6 +285,7 @@
         const n = number(get(event, "value")); if (n !== undefined) out.value = n;
       }
       if (kind === "dmg" && get(event, "main") === true) out.main = true;   // 攻击动作本身的伤害（玩家画面在这几段补攻击演出的打击形状）
+      if (get(event, "tag") === "boom") out.tag = "boom";   // 爆炸（高能自爆余波、自爆小车死亡引爆）：不算这次出手打到的目标
       if (popupWords.has(get(event, "text"))) out.text = get(event, "text");
       if (snap.length) out.snap = snap.map(projectUnit).filter(Boolean);
       return [out];
