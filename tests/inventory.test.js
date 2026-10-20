@@ -264,3 +264,45 @@ test("modInstallPreview：装件前后的 atk / 格挡 / 武器人血量；不�
   assert.deepEqual(p.after.parts, [flat]);
   assert.equal(R.modInstallPreview(run, h.kit, w, "no_part"), null);
 });
+
+test("联机：工匠在场时 smith.installPreviews 只列自己角色的武器 × 槽 × 自己能用的件；别人名下的件、别人的角色都不发；过 OnlineView 后没有坚毅字段", () => {
+  const net = onlineSetup(); const { O, run, c, R } = net;
+  const V = require("../online-view");
+  run.smiths = ["trevor"];
+  assert.ok(R.presentSmiths(run).includes("trevor"));
+  const helu = run.party.find(h => h.kit === "helu"), kolt = run.party.find(h => h.kit === "kolt");
+  helu.weapons.forEach(w => { helu.weaponLevels[w] = 9; });
+  kolt.weapons.forEach(w => { kolt.weaponLevels[w] = 9; });
+  const ids = Object.keys(J(vm.runInContext("WEAPON_PARTS", c))).filter(id => !/^(S|A)$/.test(J(vm.runInContext("WEAPON_PARTS", c))[id].grade || "")).slice(0, 2);
+  const [mineP, theirsP] = ids;
+  c.S.state.bag.items = [{ id: "part_" + mineP, qty: 1 }, { id: "part_" + theirsP, qty: 1 }];
+  O.data(run).owned = { helu: { ["part_" + mineP]: 1 }, kolt: { ["part_" + theirsP]: 1 } };
+  O.viewFor("p2");   // 第一次会补上投票键、工匠货架缓存（原来就有的），之后再比
+  const before = JSON.stringify(run);
+  const v = J(O.viewFor("p2"));
+  assert.equal(JSON.stringify(run), before, "只算不改");
+  const pv = v.smith.installPreviews;
+  assert.ok(pv.length > 0);
+  assert.ok(pv.every(x => x.kit === "helu" && helu.weapons.includes(x.weapon)));
+  assert.ok(pv.every(x => x.part === mineP), "别人名下的件不出现");
+  const slots = helu.weapons.reduce((s, w) => s + vm.runInContext(`weaponPartRow(${JSON.stringify(J(helu))}, ${JSON.stringify(w)}).length`, c), 0);
+  assert.equal(pv.length, slots);
+  const one = pv[0];
+  for (const k of ["slot", "replaced", "cost", "before", "after", "delta", "weaponName", "partName"]) assert.ok(k in one, k);
+  assert.deepEqual(one.delta, J(R.modInstallPreview(run, "helu", one.weapon, mineP, one.slot)).delta);
+  // 房主那份只有 kolt 的
+  assert.ok(J(O.viewFor("host")).smith.installPreviews.every(x => x.kit === "kolt" && x.part === theirsP));
+  // 投影：坚毅字段去掉
+  const pk = V.projectPacket({ type: "view", mode: "rogue", rogue: Object.assign(v, { smith: Object.assign(v.smith, { installPreviews: pv.map(x => Object.assign({}, x, { before: Object.assign({ shp: 9, shpMax: 9 }, x.before) })) }) }) }, { recipientId: "p2", gmId: "host" });
+  const out = pk.rogue.smith.installPreviews;
+  assert.equal(out.length, pv.length);
+  assert.ok(!/"shp/.test(JSON.stringify(out)));
+  assert.equal(out[0].delta.atk, one.delta.atk);
+});
+
+test("联机：没有工匠时没有 installPreviews", () => {
+  const { O, run } = onlineSetup();
+  run.smiths = [];
+  const v = J(O.viewFor("p2"));
+  assert.equal(v.smith, null);
+});

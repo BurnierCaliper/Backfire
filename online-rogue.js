@@ -454,6 +454,20 @@
       const have = mine.reduce((s, k) => s + (Number((d.owned[k] || {})[id]) || 0), 0) + (mine.length ? free(r, id) : 0);
       return { id: p.id, name: p.name, text: p.text, sell: p.sell, install: p.install, have: Math.min(have, p.qty) };
     }).filter(p => p.have > 0) : null;
+    // 工匠装改装件前后对比（rogue.js · modInstallPreview）：只给自己的角色、自己能用的件（自己名下的 + 公用的），房主算好再发
+    if (smith) {
+      const usable = (parts || []).filter(p => p.have > 0).map(p => p.id);
+      smith.installPreviews = r.party.filter(h => mine.includes(h.kit)).flatMap(h => (h.weapons || []).flatMap(w => {
+        const n = typeof weaponPartRow === "function" ? weaponPartRow(h, w).length : 0;
+        const out = [];
+        for (let slot = 0; slot < n; slot++) usable.forEach(part => {
+          const pv = Rogue.modInstallPreview(r, h.kit, w, part, slot);
+          if (pv) out.push({ kit: h.kit, weapon: w, weaponName: name(w), partName: typeof weaponPartLabel === "function" ? weaponPartLabel(part) : part,
+            slot: pv.slot, part, replaced: pv.replaced, cost: pv.cost, before: pv.before, after: pv.after, delta: pv.delta });
+        });
+        return out;
+      }));
+    }
     // 诊所：治疗；义体改造带上现在的方案和上限，玩家那边按同样的公式估价（真正扣多少以房主结算为准）
     const cyberOf = kit => { try { const i = Rogue.cyberInfo(r, kit); return { current: i.current, limit: i.limit, rate: i.rate, fleshMax: i.fleshMax, perHp: (typeof ROGUE_CLINIC !== "undefined" && ROGUE_CLINIC.cyberPerHp) || 0 }; } catch (e) { return null; } };
     // 工坊：大家排的活、自己的角色能做什么、能学的配方、能拆的东西
