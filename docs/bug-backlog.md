@@ -84,10 +84,10 @@
 - [ ] （回归）行动结束才判的高能自爆溢出分 / 余波分没人拿
 - [ ] 飞碟触灵基准分多算 515
 - [ ] 基准分把中立生物、友军算进去（S 线虚高）
-- [ ] 训练场：聚焦抹层把假人抹成 0/0
-- [ ] 训练场：假人会借机 / 协助攻击
-- [ ] 训练场：顶栏「重新开始」把训练状态带进普通战斗
-- [ ] 训练场：「架势无限」不成立
+- [x] 训练场：聚焦抹层把假人抹成 0/0 —— 补满时按 setupField 记下的原始层重建、去掉封死和聚焦（training.js · refillDummy；tests/training-bugs-105.test.js）
+- [x] 训练场：假人会借机 / 协助攻击 —— opportunityStrike、eligibleAssisters 排除 trainingDummy（app.js）
+- [x] 训练场：顶栏「重新开始」把训练状态带进普通战斗 —— 训练场里点「重新开始」重开这一场训练（training.js · restart；game.js · g-restart）
+- [x] 训练场：「架势无限」不成立 —— 假人架势每次结算补满，击破、不稳、道具失衡、GM 失衡都排除假人，卡片写「架势 ∞」（app.js · defText 等；engine.js；items.js；game.js）
 
 ## 低（52 条）
 

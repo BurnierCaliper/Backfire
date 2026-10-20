@@ -2461,7 +2461,7 @@
     $("g-pvbox").classList.add("live");
     $("g-pvbox").innerHTML = `<h4>${esc(s.name)} · Lv${s.level}</h4>
       <div class="ln key">${esc(layers)}</div>
-      <div class="ln">架势 ${s.def}/${s.defMax} · ATK ${s.atk} · ${s.zone} 区</div>
+      <div class="ln">架势 ${defText(s)} · ATK ${s.atk} · ${s.zone} 区</div>
       <div class="ln">${esc(s.status || "无状态")}</div>
       ${s.res ? `<div class="ln">${esc(s.res)}</div>` : ""}
       ${intentHtml(id)}
@@ -5101,7 +5101,7 @@
       }
       WorldMap.open(o);
     };
-    $("g-restart").onclick = () => { if (G.depth === 0) setupBattle(Number($("g-level").value) || 1, G.lastEncounter || null); };
+    $("g-restart").onclick = () => { if (typeof Training !== "undefined" && Training.restart()) return; if (G.depth === 0) setupBattle(Number($("g-level").value) || 1, G.lastEncounter || null); };
     $("g-again").onclick = () => setupBattle(Number($("g-level").value) || 1, G.lastEncounter || null);
     $("g-retreat").onclick = askRetreat;
     $("g-undo").onclick = doUndo;

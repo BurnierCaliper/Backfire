@@ -525,7 +525,7 @@ function itemApplyStatus(actor, u, key, notes) {
 /** 闪光震撼弹：失衡晕眩。首领无效（itemUseError 已拦）；10 级起的精英按首领规则只推进 1 个晕眩标记（imbalanceLine 里记） */
 function itemStun(u, notes) {
   if (u.stunned) { notes.push(`${u.name} 已经在失衡中。`); return; }
-  if (u.noPosture) { notes.push(`${u.name} 没有架势，不会失衡。`); return; }
+  if (u.noPosture || u.trainingDummy) { notes.push(`${u.name} 没有架势，不会失衡。`); return; }
   u.stunned = true;
   notes.push(typeof imbalanceLine === "function" ? imbalanceLine(u) : `${u.name} 失衡。`);
   if (typeof endSelfOnStun === "function") endSelfOnStun(u, notes);
