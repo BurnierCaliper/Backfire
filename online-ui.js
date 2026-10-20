@@ -105,6 +105,14 @@
       if (event.target.closest('[data-title="go"]')) sendTitle();
     });
     titleBox.addEventListener("input", event => { const k = event.target.dataset.tf; if (k) titleForm[k] = event.target.value; });
+    stage.addEventListener("change", event => {
+      const sel = event.target.closest && event.target.closest("[data-ol-cmp]");
+      const r = view.packet?.rogue;
+      if (!sel || !r || !r.smith) return;
+      const [kit, slot] = sel.value.split(":");
+      const out = byId(sel.id + "-cmp");
+      if (out) out.innerHTML = partCompare(r, sel.dataset.olCmp, { kit, slot: Number(slot) });
+    });
     titleBox.addEventListener("change", event => { const k = event.target.dataset.tf; if (k) titleForm[k] = event.target.value; });
     titleBox.addEventListener("keydown", event => { event.stopPropagation(); if (event.key === "Escape") titleBox.hidden = true; if (event.key === "Enter" && event.target.tagName === "INPUT") sendTitle(); });
     document.addEventListener("click", onRollOpen);
@@ -426,6 +434,24 @@
     }
     /* ---------- 联机单局（online-rogue.js 在房主那里算好，按收件人发来） ---------- */
     const rogueAct = (text, cmd, off = false, primary = false) => button(text, "rogueAct", `data-cmd="${esc(JSON.stringify(cmd))}"`, disabled() || off, primary);
+    /** 装件前后对比：只算选中的那一个（房主算好的 smith.installPreviews） */
+    function partCompare(r, part, slot) {
+      if (!slot || !r.smith || !global.ModCompare) return "";
+      const list = r.smith.installPreviews || [];
+      const p = list.find(x => x.weapon === slot.kit && x.slot === slot.slot && (x.part === part || "part_" + x.part === part));
+      return p ? ModCompare.text(p) : "";
+    }
+    function openWorkshop(mat) {
+      if (!global.WorkshopUI || !global.WorkshopData) return;
+      const payerOf = () => (((view.packet?.rogue?.heroes) || []).find(h => h.mine) || {}).kit || null;
+      WorkshopUI.open(() => { const r = view.packet?.rogue; return r ? WorkshopData.viewWorkshopModel(r) : null; },
+        cmd => { if (disabled()) return; const c = ["learnRecipe", "salvage"].includes(cmd.action) ? Object.assign({ payer: payerOf() }, cmd) : cmd; call(() => api.submit({ type: "rogue.act", command: c })); },
+        { mat: mat || "" });
+    }
+    function openBackpack() {
+      if (!global.BackpackUI || !global.WorkshopData) return;
+      BackpackUI.open(() => { const r = view.packet?.rogue; return r ? WorkshopData.viewBackpackModel(r) : null; }, { openWorkshop: id => openWorkshop(id) });
+    }
     function rogueMarkup(r) {
       const mine = (r.heroes || []).filter(h => h.mine), payer = mine[0] ? mine[0].kit : null, purse = mine[0] ? mine[0].purse : 0;
       const stageName = { board: "任务板", task: "任务途中", camp: "回城休整", boss: "幕末首领", interlude: "幕间", victory: "四幕通关", over: "本局结束" }[r.stage] || "";
@@ -446,18 +472,13 @@
       const shop = r.shop && payer ? `<section class="ol-rogue-box" aria-label="商店"><h3>商店（你有 ${esc(purse)} 奎支）</h3><ul>${r.shop.map(row => `<li>${esc(row.name)} · ${esc(row.price)} 奎支${row.team ? " · 归队伍公用" : ""} ${rogueAct("买", { action: "buy", key: row.key, qty: 1, payer }, purse < row.price)}</li>`).join("")}</ul>${redeem}</section>` : "";
       const smith = r.smith && payer ? `<section class="ol-rogue-box" aria-label="工匠"><h3>${esc(r.smith.name)}（你有 ${esc(purse)} 奎支）</h3><ul>${r.smith.upgrades.map(o => `<li>${esc(o.name)} Lv${esc(o.level)} ${o.max ? "已满级" : rogueAct(`升到 ${o.level + 1} 级（${o.cost}）`, { action: "upgradeWeapon", kit: o.kit, smith: r.smith.id }, purse < o.cost)}</li>`).join("")}${r.smith.offers.map(o => `<li>改装件 ${esc(o.name)}<small>${esc(o.text)}</small> ${o.sold ? "已卖出" : rogueAct(`买（${o.price}）`, { action: "buyPart", smith: r.smith.id, index: o.index, payer }, purse < o.price)}</li>`).join("")}</ul></section>` : "";
       const slots = r.smith ? r.smith.slots || [] : [];
-      const parts = r.parts && r.parts.length && payer ? `<section class="ol-rogue-box" aria-label="改装件"><h3>你的改装件</h3><ul>${r.parts.map((p, i) => `<li>${esc(p.name)} ×${esc(p.have)}<small>${esc(p.text)}</small> ${rogueAct(`卖掉（${p.sell}）`, { action: "sellPart", part: p.id, payer })}${slots.length ? `<select id="ol-rp-${i}" aria-label="装到哪个槽">${slots.map(x => option(`${x.kit}:${x.slot}`, `${x.name} 槽 ${x.slot + 1}${x.cur ? "（现在：" + x.cur + "）" : ""}`, false)).join("")}</select>${button(`装上（${p.install}）`, "roguePartInstall", `data-part="${esc(p.id)}" data-select="ol-rp-${i}" data-smith="${esc(r.smith.id)}"`, disabled() || purse < p.install)}` : ""}</li>`).join("")}</ul></section>` : "";
+      const parts = r.parts && r.parts.length && payer ? `<section class="ol-rogue-box" aria-label="改装件"><h3>你的改装件</h3><ul>${r.parts.map((p, i) => `<li>${esc(p.name)} ×${esc(p.have)}<small>${esc(p.text)}</small> ${rogueAct(`卖掉（${p.sell}）`, { action: "sellPart", part: p.id, payer })}${slots.length ? `<select id="ol-rp-${i}" data-ol-cmp="${esc(p.id)}" aria-label="装到哪个槽">${slots.map(x => option(`${x.kit}:${x.slot}`, `${x.name} 槽 ${x.slot + 1}${x.cur ? "（现在：" + x.cur + "）" : ""}`, false)).join("")}</select>${button(`装上（${p.install}）`, "roguePartInstall", `data-part="${esc(p.id)}" data-select="ol-rp-${i}" data-smith="${esc(r.smith.id)}"`, disabled() || purse < p.install)}<span class="pt-cmp" id="ol-rp-${i}-cmp">${partCompare(r, p.id, slots[0])}</span>` : ""}</li>`).join("")}</ul></section>` : "";
       const filled = slots.filter(x => x.cur);
       const unmount = r.smith && filled.length ? `<section class="ol-rogue-box" aria-label="拆改装件"><h3>已装的改装件</h3><ul>${filled.map(x => `<li>${esc(x.name)} 槽 ${esc(x.slot + 1)}：${esc(x.cur)} ${rogueAct("拆下（不要钱）", { action: "removePart", kit: x.kit, slot: x.slot, smith: r.smith.id })}</li>`).join("")}</ul></section>` : "";
       const clinic = r.clinic && r.clinic.length ? `<section class="ol-rogue-box" aria-label="诊所"><h3>诊所（你有 ${esc(purse)} 奎支）</h3><ul>${r.clinic.map(c => `<li>${esc(c.name)} ${c.cost ? rogueAct(`治疗到满血（${c.cost}）`, { action: "healHero", kit: c.kit }, purse < c.cost) : "满血"}</li>${c.cyber ? cyberMarkup(c, purse) : ""}`).join("")}</ul></section>` : "";
       const wk = r.workshop;
-      const workshop = wk && payer ? `<section class="ol-rogue-box" aria-label="工坊"><h3>工坊（${wk.place === "bench" ? "工作台：五类都能做" : "休息点：场地、自我效果做不了"}）</h3>
-        <p class="ol-muted">每人给自己的角色排一样，房主按「开工」大家一起做，时间按最久的算。有对应熟练项的队友打下手给优势。补金属的钱从你自己的钱包出；做出来的东西归你。</p>
-        <ul>${(wk.queue || []).map(j => `<li>${esc(j.name)}：${esc(j.itemName)}${j.helperName ? `（${esc(j.helperName)} 打下手）` : ""} · ${esc(Math.round(j.chance * 100))}% · ${esc(j.hours)} 小时</li>`).join("") || "<li>还没有人排活。</li>"}</ul>
-        ${(wk.mine || []).map(m => `<div class="ol-attr-btns"><b>${esc(m.name)}</b><select id="ol-wk-item-${esc(m.kit)}" aria-label="做什么">${option("", "不做", false)}${m.options.map(o => option(o.id, `${o.name} · ${o.prof} · ${Math.round(o.chance * 100)}% · ${o.hours} 小时 · ${o.mats}`, (wk.queue || []).some(j => j.kit === m.kit && j.item === o.id))).join("")}</select><select id="ol-wk-help-${esc(m.kit)}" aria-label="谁打下手">${option("", "没人帮", false)}${wk.helpers.filter(x => x.kit !== m.kit).map(x => option(x.kit, x.name + " 打下手", (wk.queue || []).some(j => j.kit === m.kit && j.helper === x.kit))).join("")}</select>${button("排上", "rogueCraftJob", `data-kit="${esc(m.kit)}"`, disabled(), true)}</div>`).join("")}
-        ${(wk.learn || []).length ? `<h4>向${esc(wk.learn[0].smithName)}学配方（你有 ${esc(purse)} 奎支）</h4><ul>${wk.learn.map(l => `<li>${esc(l.name)} · ${esc(l.prof)} · ${esc(l.diffName)} ${rogueAct(`学（${l.price}）`, { action: "learnRecipe", item: l.item, smith: l.smith, payer }, purse < l.price)}</li>`).join("")}</ul>` : ""}
-        ${(wk.salvage || []).length ? `<h4>拆解（不花时间）</h4><ul>${wk.salvage.map(x => `<li>${esc(x.name)} ×${esc(x.have)} → ${esc(x.yield.map(y => `${y.name}×${y.qty}`).join("、"))} ${rogueAct("拆一件", { action: "salvage", item: x.id, payer })}</li>`).join("")}</ul>` : ""}
-      </section>` : "";
+      // 工坊 / 背包：按钮打开浮层（workshop-ui.js / backpack-ui.js，和房主同一套渲染器；数据是 viewFor 的 craft / bag / materialBar …）
+      const workshop = payer ? `<section class="ol-rogue-box ol-ws-entry" aria-label="工坊与背包"><div class="ol-attr-btns">${r.workshopAvailable && wk ? button("工坊", "rogueWorkshop", "", false, true) : ""}${button("背包", "rogueBackpack", "", false)}</div></section>` : "";
       const log = (r.log || []).length ? `<section class="ol-rogue-box" aria-label="最近发生"><h3>最近发生</h3><ul>${r.log.map(t => `<li>${esc(t)}</li>`).join("")}</ul></section>` : "";
       return head + over + choice + waits + loot + lootLog + vote + last + heroes + board + task + shop + smith + parts + unmount + clinic + workshop + log;
     }
@@ -841,6 +862,7 @@
       document.body.classList.toggle("ol-host-online", !!(view.active && view.isHost));
       document.body.classList.toggle("ol-in-battle", view.screen === "battle" || view.screen === "ended");
       dock.hidden = !view.active;
+      if (view.active && !view.isHost) { if (global.WorkshopUI) global.WorkshopUI.refresh(); if (global.BackpackUI) global.BackpackUI.refresh(); }
       document.body.classList.toggle("online-player", !!view.active && !view.isHost);
       if (view.active) {
         if (!animating) displayState = view.state || null;
@@ -1113,6 +1135,8 @@
           if (await call(() => api.submit({ type: "rogue.act", command: { action: "modifyHero", kit, plan } }))) delete cyberDraft[kit];
           break;
         }
+        case "rogueWorkshop": openWorkshop(); break;
+        case "rogueBackpack": openBackpack(); break;
         case "rogueCraftJob": {
           const kit = b.dataset.kit, item = byId("ol-wk-item-" + kit)?.value || null, helper = byId("ol-wk-help-" + kit)?.value || null;
           if (!disabled() && kit) await call(() => api.submit({ type: "rogue.act", command: { action: "setCraftJob", kit, item, helper } }));

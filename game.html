@@ -15,6 +15,8 @@
   <link rel="stylesheet" href="online.css" />
   <link rel="stylesheet" href="online-gm-ui.css" />
   <link rel="stylesheet" href="hud-icons.css" />
+  <link rel="stylesheet" href="workshop.css" />
+  <link rel="stylesheet" href="backpack.css" />
   <link rel="stylesheet" href="weather-fx.css" />
 </head>
 <body>
@@ -132,6 +134,7 @@
     <span class="g-round" id="g-round">第 1 回合</span>
     <span class="g-phase" id="g-phasel">我方行动</span>
     <button class="g-btn mobile-only" id="g-log-open" title="战斗记录">记录</button>
+    <button class="g-btn" id="g-backpack" title="背包（战斗中只读）">背包</button>
     <span class="g-weather" id="g-weather">天气 常态</span>
     <span class="g-clock" id="g-clock"></span>
     <label style="font-size:13px;color:var(--muted);display:flex;gap:6px;align-items:center">天气
@@ -912,6 +915,9 @@ window.GAME_MODE = true;
 <script src="screens.js"></script>
 <script src="training.js"></script>
 <script src="routemap.js"></script>
+<script src="workshop-data-adapter.js"></script>
+<script src="workshop-ui.js"></script>
+<script src="backpack-ui.js"></script>
 <script src="rogue-ui.js"></script>
 <script src="trpg-ui.js"></script>
 <script src="hotseat-game.js"></script>

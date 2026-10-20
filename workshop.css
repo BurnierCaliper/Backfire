@@ -1,0 +1,75 @@
+/* 工坊浮层（workshop-ui.js）。和升级弹窗（levelup-ui.js · .lvu-overlay）同一套：暗底遮罩 + 钢板卡片，配色走 skin.css 的 --sk-*。
+ * z-index 8500：在升级弹窗（9000）之下、所有画面之上；不碰战场 .wfx（6）/ 悬停单位（7）的层级。 */
+.ovl { position: fixed; inset: 0; z-index: 8500; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(8, 6, 4, .72); }
+.ovl[hidden] { display: none; }
+.ovl-card {
+  position: relative; isolation: isolate;
+  width: min(980px, 100%); max-height: calc(100vh - 32px); overflow: auto;
+  background: var(--sk-steel, #2a2520); color: var(--sk-canvas, #ece0c6);
+  border: 2px solid var(--sk-brass, #c99a46); box-shadow: 6px 6px #000a; padding: 14px 16px;
+  font-family: var(--ui);
+}
+.ovl-card h3 { margin: 0 0 6px; font-size: 15px; color: var(--sk-mint, #39e6b4); }
+.ws-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.ws-tape { background: var(--sk-hazard, #f2c230); color: var(--sk-ink, #0b0806); font-family: var(--sk-stencil); padding: 2px 10px; font-size: 18px; letter-spacing: 1px; transform: rotate(-1.5deg); }
+.ws-sub { color: var(--sk-muted, #a8977b); font-size: 12px; flex: 1; }
+.ws-close { height: 28px; }
+.ws-bar { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; background: var(--sk-oil-2, #1a1511); border: 1px solid var(--sk-edge, #4d4337); margin-bottom: 10px; }
+.ws-mat { padding: 2px 8px; border: 1px solid var(--sk-edge, #4d4337); font-size: 12px; cursor: pointer; white-space: nowrap; }
+.ws-mat b { font-family: var(--num); color: var(--sk-hazard, #f2c230); }
+.ws-mat.zero { opacity: .5; }
+.ws-mat.on { border-color: var(--sk-mint, #39e6b4); }
+.ws-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
+.ws-tabs { display: flex; flex-wrap: wrap; gap: 4px; flex: 1; }
+.ws-tab, .ws-hero, .bp-tab { height: 28px; padding: 0 10px; font-size: 13px; }
+.ws-tab[aria-pressed="true"], .ws-hero[aria-pressed="true"], .bp-tab[aria-pressed="true"] { border-color: var(--sk-hazard, #f2c230); color: var(--sk-hazard, #f2c230); }
+.ws-only { font-size: 13px; color: var(--sk-muted, #a8977b); display: flex; gap: 4px; align-items: center; }
+.ws-heroes { display: flex; gap: 4px; margin-bottom: 8px; }
+.ws-main, .bp-main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 12px; }
+.bp-main { grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); }
+.ws-col { min-width: 0; }
+.ws-list, .ws-mats, .ws-q, .bp-list, .bp-uses { list-style: none; margin: 0; padding: 0; }
+.ws-group { margin-bottom: 10px; }
+.ws-group > summary { cursor: pointer; color: var(--sk-muted, #a8977b); font-size: 14px; margin-bottom: 6px; }
+.ws-group h3 small, .ws-group summary small { font-family: var(--num); opacity: .7; margin-left: 4px; }
+.ws-recipe { display: flex; flex-direction: column; gap: 2px; padding: 6px 10px; margin-bottom: 4px; cursor: pointer; border: 1px solid var(--sk-edge, #4d4337); background: var(--sk-oil-2, #1a1511); }
+.ws-recipe small { font-size: 11px; color: var(--sk-muted, #a8977b); }
+.ws-recipe.ok { border-left: 4px solid var(--sk-mint, #39e6b4); background: linear-gradient(90deg, rgba(57, 230, 180, .12), transparent 60%), var(--sk-oil-2, #1a1511); }
+.ws-recipe.miss { opacity: .55; filter: grayscale(.6); padding: 4px 10px; }
+.ws-recipe.miss b { font-weight: 400; }
+.ws-recipe.sel { outline: 2px solid var(--sk-hazard, #f2c230); outline-offset: -2px; opacity: 1; filter: none; }
+.ws-recipe:hover { border-color: var(--sk-brass, #c99a46); }
+.ws-need { color: #e88a7c !important; }
+.ws-need.big { font-size: 14px; }
+.ws-empty { font-size: 12px; color: var(--sk-muted, #a8977b); padding: 4px 0; }
+.ws-filter { font-size: 12px; color: var(--sk-mint, #39e6b4); margin: 0 0 6px; }
+.ws-detail, .bp-detail { background: var(--sk-oil-2, #1a1511); border: 1px solid var(--sk-edge, #4d4337); padding: 10px 12px; align-self: start; }
+.ws-meta { margin: 0 0 8px; font-size: 12px; color: var(--sk-muted, #a8977b); }
+.ws-mats li { padding: 2px 0; font-size: 13px; }
+.ws-mats li b { font-family: var(--num); }
+.ws-mats li small { margin-left: 6px; color: var(--sk-muted, #a8977b); }
+.ws-mats li.bad { color: #f08a7a; }
+.ws-yes { color: var(--sk-mint, #39e6b4); font-style: normal; font-weight: 700; }
+.ws-no { color: var(--sk-blood, #d8322a); font-style: normal; font-weight: 700; }
+.ws-pay { color: var(--sk-hazard, #f2c230); font-style: normal; font-weight: 700; }
+.ws-who { display: grid; grid-template-columns: auto 1fr auto; grid-template-areas: "n o b" "h h b"; gap: 4px 8px; align-items: center; margin: 8px 0; padding-top: 8px; border-top: 1px dashed var(--sk-edge, #4d4337); }
+.ws-who > b { grid-area: n; } .ws-who select { grid-area: h; max-width: 100%; } .ws-odds { grid-area: o; font-size: 13px; } .ws-go { grid-area: b; }
+.ws-odds b { font-family: var(--num); color: var(--sk-hazard, #f2c230); font-size: 16px; }
+.ws-sec { margin-top: 12px; border-top: 1px solid var(--sk-edge, #4d4337); padding-top: 8px; }
+.ws-sec > summary { cursor: pointer; color: var(--sk-muted, #a8977b); }
+.ws-q li { padding: 3px 0; font-size: 13px; }
+.ovl-card .g-btn.small { height: 24px; padding: 0 8px; font-size: 12px; }
+/* 入口按钮 */
+.ws-open { border-color: var(--sk-hazard, #f2c230); }
+@media (max-width: 720px) { .ws-main, .bp-main { grid-template-columns: 1fr; } }
+
+/* 天气：面板 ::before 套一层天气色（和 weather-fx.css 的面板做法一样：isolation + z-index:-1，不挡点击、不盖文字）。
+ * 只对浮层卡片，不碰战场；悬停单位浮在天气之上的规则（weather-fx.css · .unit-wrap:hover z 7）不受影响 */
+[data-weather] .ovl-card::before { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; opacity: 0; }
+[data-weather="sand"] .ovl-card::before { opacity: 1; background: radial-gradient(120% 60% at 20% 30%, rgba(222, 176, 110, .18), transparent 70%), radial-gradient(90% 50% at 80% 80%, rgba(222, 176, 110, .12), transparent 70%); }
+[data-weather="acid"] .ovl-card::before { opacity: 1; background: repeating-linear-gradient(100deg, rgba(184, 224, 74, .07) 0 2px, transparent 2px 14px); }
+[data-weather="thunder"] .ovl-card::before { opacity: 1; background: linear-gradient(160deg, rgba(185, 162, 255, .14), transparent 55%); }
+[data-weather="heat"] .ovl-card::before { opacity: 1; background: linear-gradient(0deg, rgba(216, 86, 74, .18), transparent 60%); }
+[data-weather="snow"] .ovl-card::before { opacity: 1; background: radial-gradient(circle at 30% 20%, rgba(255, 255, 255, .10) 0 1px, transparent 2px) 0 0 / 22px 22px; }
+[data-weather="glow"] .ovl-card::before, [data-weather="phase"] .ovl-card::before { opacity: 1; background: linear-gradient(100deg, rgba(240, 112, 200, .14), transparent 60%); }
+.ws-note { font-size: 12px; color: var(--sk-mint, #39e6b4); margin: 0 0 8px; }
