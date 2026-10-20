@@ -514,6 +514,7 @@ function itemApplyStatus(actor, u, key, notes) {
     if (key === "chase") u.chasers = (u.chasers || []).filter(id => id !== actor.id).concat(actor.id);
     if (key === "high") u.highApplyTurn = state.turnNo;
     u.statuses[key] = true;
+    if (typeof markStatusOwner === "function" && actor && actor.isPlayer) markStatusOwner(u, key, actor.id);   // 击杀归属：谁挂的状态
     if (key === "shockwave" && typeof syncShockwave === "function") syncShockwave(u, notes);
     notes.push(`${u.name} 获得${EFFECT_STATUS_CN[key] || key}。`);
   }
