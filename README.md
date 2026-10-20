@@ -368,6 +368,22 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **「中」杂项六条 + 两个尾巴**（issue #125；tests/misc-six-125.test.js）
+  - **战斗中修武器两条路统一**：「使用道具」（`items.js · useRepairKit`）和「修理」命令（`ledger.js · ledgerRepair`）以前各算各的：道具那条修好耐久后不标「本场受损」（atk / 格挡加成照旧满值、还能唤出武器人），命令那条标了；命令那条也不会把倒地的武器人修起来。现在耐久都走 `ledgerRepair`（缺几点修几点、同样扣维修量、战斗中修好的武器这一场按受损算），倒地的武器人两条路都走 `useRepairKit`（恢复最大生命 25%）。
+  - **跑团工坊可以同时做**：`trpgCraft` 新增 `{ jobs: [...] }`，每人做一样、一起开工，时间只推进一次、按最久的那件算（`trpg.js · trpgCraft / trpgCraftOne`、`trpg-commands.js`）。以前每做一样推进一次，两件会多算时间。同一个人同时只能做一样。单局的 `Rogue.craft` 本来就是这样。
+  - **长休结算的「守夜 · 没有恢复」只标真的没恢复的人**（`ledger.js · restReport / ledgerLongRest`）：荒野向导守夜照常恢复、武器人守夜时主人本人恢复了，以前这两种也被标。
+  - **闪光震撼弹打 10 级起的精英**（`items.js · itemStun`）：没攒满晕眩标记时，失衡和其他来源一样立刻恢复（`bossQuickRecover`），以前会一直留在失衡里。
+  - **连续战斗换区域清场地结构**（`run.js · buildEncounterField`）：开新的一场时把所有间隔（危墙、空隙、桥梁、门）重置为空，以前上一场的会留下来。
+  - **强盗头子被打倒算亡命之王的「手下被打倒」**（`app.js · settleEnemyKill`）：README 写明手下 = 狂徒 / 强盗头子，以前只认狂徒。哗变判定仍只数狂徒。
+  - **震荡弹打不到下潜中的单位**（`items.js · useEffectItem`）：和投掷罐（#117）一样，下潜中的单位不被波及。
+  - **被嘲讽的播撒者规划抵近喷洒**（`ai.js · inSkillReach`）：#112 让喷洒在被牵制时能打同区，但 AI 判断「打得到」时没算这条，仍规划移动。现在被牵制且牵制者同区时规划喷洒。
+- **单局 / 联机单局五处修正：客制化图纸走个人钱包、守夜人安排随投票执行、第三采矿场悬赏、图鉴选取率、画面效果不再消耗战斗种子**（issue #124；online-rogue.js · `PERSONAL` / `REMOTE` / `checkItems` / `vote` / `tryResolve`；rogue-ui.js · `act`；run.js · `bountyCandidates` / `fxRandom`；bestiary-ui.js · `pickRateNote`；attack-fx.js、hit-fx.js、sfx.js、weather-fx.js、routemap.js、game.js、online-ui.js；tests/online-single-124.test.js、tests/bounty.test.js、tests/feat-pickrate-124.test.js、tests/fx-random-124.test.js）
+  - 联机单局装客制化图纸：`installBlueprint` 以前不在个人指令表里，扣钱读的是公账 `state.kuizhi`（联机时分完就是 0），所以永远「奎支不够」。现在和买卖、升级武器一样走付钱角色自己的钱包，只能给自己操控的角色的武器装，玩家本人可以直接发这条指令。
+  - 联机单局房主选的守夜人 / 食物 / 睡眠 / 吐息 / 弹药：以前投票只认选项自带的指令（`{ action, mode }`），房主在长休界面选的安排被丢掉，长休按默认结算。现在房主投「长休 / 休整」时把这些安排记在 `run.online.restPlan`，该选项胜出时一起交给规则执行；换票或别的选项胜出则不带。
+  - 第三采矿场悬赏：以前目标要占 2 枚代币以上，而这个区域的敌人都只占 1 枚，候选为空就退到「全部区域」抽，抽到别的区域的目标，随从又被迫从本区域按别的阵营抽，目标和随从互相敌对。现在悬赏目标只从本区域的敌人表里抽：优先 `BOUNTY_TARGET.minTokens`（2）枚以上的，没有就取本区域代币最多的（非首领、非成群）；随从按目标阵营（含盟友阵营）从本区域抽，不会混进敌对阵营。
+  - 图鉴专长详情的每日挑战选取率：以前读 `window.Rogue`，但 `Rogue` 是顶层 `const`，不在 `window` 上，永远不显示。现在直接读 `Rogue.featPickRates()`。
+  - 战斗种子随机数：`RNG.install` 把 `Math.random` 换成种子随机数，粒子、音效、骰子滚动动画、动画令牌也从里面取，骰子结果就会随动画停了多久、开没开特效而变。现在画面效果一律用独立的 `fxRandom()`（系统自带随机数），不碰战斗用的种子随机数；同一个种子、同样的操作，骰子一样。
+
 - **受击保护两处修正：猛击反震要过屹立不倒 / 坚挺 / 决不后退 / 背水一战；决不后退发动后不再按被击破结算**（issue #120；engine.js · `applyResultToUnit`；app.js · `dealBreak` / `dealTo`；tests/hit-protect-120.test.js）
   - 猛击反震：以前攻击者承受的原击破直接扣架势，屹立不倒、坚挺、决不后退都不看，背水一战起身的夏也照扣。现在反震走 `dealBreak`，和普通击破一样：屹立不倒免受，坚挺架势不低于 1，决不后退可消耗附赠动作先 +2 架势，打进失衡时写失衡、敌人排协助攻击；夏在背水一战起身期间不失去架势。晕眩后自我效果仍留到这一击结算完再结束（`dealBreak` 新增 `opt.keepSelf`），`dealTo` 里原先单独写失衡 / 排协助攻击的两处去掉，避免重复。
   - 决不后退 / 坚挺 / 背水一战挡住失衡：以前攻击结果里的「被击破」在引擎算出攻击时就定了，即使决不后退后来 +2 架势挡住了失衡，飞行单位仍被击落并吃 20% 最大生命的真伤，机甲照样解除、「打进失衡时」的效果照样触发。现在 `applyResultToUnit` 扣完架势后，若实际架势仍 > 0，就把结果的 `broke` / `knockdownHp` 清掉，击落真伤放到这之后才结算。

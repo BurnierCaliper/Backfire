@@ -24,9 +24,9 @@
   const copy = v => JSON.parse(JSON.stringify(v));
   const fail = text => { throw new Error(text); };
   // 个人行为：花自己的钱、动自己的东西（choose 是升级选择，不花钱）
-  const PERSONAL = ["buy", "redeem", "learnRecipe", "salvage", "setCraftJob", "buyPart", "sellPart", "installPart", "removePart", "upgradeWeapon", "repairWeapon", "healHero", "modifyHero", "installCyberware", "removeCyberware"];
+  const PERSONAL = ["buy", "redeem", "learnRecipe", "salvage", "setCraftJob", "buyPart", "sellPart", "installPart", "removePart", "upgradeWeapon", "installBlueprint", "repairWeapon", "healHero", "modifyHero", "installCyberware", "removeCyberware"];
   // 玩家可以自己发的个人指令（其余的个人行为由房主代自己的角色做）
-  const REMOTE = ["buy", "redeem", "learnRecipe", "salvage", "setCraftJob", "buyPart", "sellPart", "installPart", "removePart", "upgradeWeapon", "repairWeapon", "healHero", "modifyHero", "installCyberware", "removeCyberware", "choose"];
+  const REMOTE = ["buy", "redeem", "learnRecipe", "salvage", "setCraftJob", "buyPart", "sellPart", "installPart", "removePart", "upgradeWeapon", "installBlueprint", "repairWeapon", "healHero", "modifyHero", "installCyberware", "removeCyberware", "choose"];
   let enabled = false, resolving = false, hostId = "";
 
   const flow = () => root.RunFlow || null;
@@ -124,7 +124,7 @@
     if ((c.action === "installPart" || c.action === "sellPart") && typeof weaponPartItemId === "function") {
       if (available(r, payer, weaponPartItemId(c.part)) < 1) fail("这件改装件不是你的");
     }
-    if ((c.action === "installPart" || c.action === "removePart" || c.action === "upgradeWeapon" || c.action === "repairWeapon") && heroOf(r, c.kit)?.kit !== payer) fail("只能动自己角色的武器");
+    if ((c.action === "installPart" || c.action === "removePart" || c.action === "upgradeWeapon" || c.action === "installBlueprint" || c.action === "repairWeapon") && heroOf(r, c.kit)?.kit !== payer) fail("只能动自己角色的武器");
     if ((c.action === "healHero" || c.action === "modifyHero") && c.kit !== payer) fail("只能给自己的角色治疗、改造");
     if ((c.action === "installCyberware" || c.action === "removeCyberware") && (c.kit !== payer || typeof c.id !== "string")) fail("只能给自己的角色装、拆义体");
     if (c.action === "setCraftJob" && c.kit !== payer) fail("只能给自己的角色排活");
@@ -306,12 +306,21 @@
   function isTeamCommand(cmd) {
     return !!cmd && (cmd.fight || ["acceptTask", "chooseNode", "restAtNode", "shortRestBeforeNode", "camp", "attemptCheck", "skipCheck", "parley", "leaveNode", "nextAct", "afterVictory"].includes(cmd.action));
   }
-  function vote(playerId, optionId) {
+  /** 长休 / 休整时房主在界面上选的安排（守夜人、食物、睡眠、吐息、弹药）：随投票结果一起执行 */
+  const REST_PLAN_FIELDS = ["watch", "food", "sleep", "spit", "ammo"];
+  function vote(playerId, optionId, cmd) {
     const r = run();
     if (!r) fail("还没有开始单局");
     const v = currentVote(r);
-    if (!v.opts.some(o => o.id === optionId)) fail("这个选项已经失效");
+    const opt = v.opts.find(o => o.id === optionId);
+    if (!opt) fail("这个选项已经失效");
     v.ballots[playerId] = optionId;
+    // 只认房主的安排；换了票就不再带着上一次选项的安排
+    const d = data(r);
+    if (playerId === hostId) {
+      d.restPlan = (cmd && (opt.cmd.action === "camp" || opt.cmd.mode === "long"))
+        ? { optionId, fields: Object.fromEntries(REST_PLAN_FIELDS.filter(k => cmd[k] != null).map(k => [k, copy(cmd[k])])) } : null;
+    }
     changed();
     return { ok: true };
   }
@@ -334,8 +343,10 @@
     d.lastVote = { label: pick.label, text: `${pick.label}（${top} 票${best.length > 1 ? "，平票随机" : ""}）` };
     d.ballots = {}; d.voteKey = "";
     (r.log = r.log || []).push({ act: r.act, day: r.day, text: "队伍决定：" + d.lastVote.text });
+    const plan = d.restPlan && d.restPlan.optionId === pick.id ? d.restPlan.fields : null;
+    d.restPlan = null;
     resolving = true;
-    Promise.resolve().then(() => flow().perform(copy(pick.cmd))).catch(e => console.error(e)).finally(() => { resolving = false; changed(); });
+    Promise.resolve().then(() => flow().perform(Object.assign(copy(pick.cmd), plan ? copy(plan) : {}))).catch(e => console.error(e)).finally(() => { resolving = false; changed(); });
     return true;
   }
 

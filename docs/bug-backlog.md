@@ -28,16 +28,11 @@
 - [x] 中 · 龙哥没窥探到的子弹颜色发给所有玩家（现在发 `unknown`）
 - [x] 中 · 聊天敏感词过滤太宽（含「坚毅」两字、"this hp" 的整条消失；现在只拦「坚毅生命」、单独成词的 SHP 和后台 / 令牌字样）
 
-## 高（未修）
+## 高
 
-| # | 问题 | 位置 |
-|---|---|---|
-| H2 | 单局「休整」补给不够又没钱就卡死：「开始长休」禁用，「硬撑着过夜」没有入口 | `rogue-ui.js:939-954`、`rest-report.js:47`、`rogue.js:2259-2263` |
-| H9 | （回归 63b90d7）首领没攒满标记「立刻恢复」后，飞碟触灵本体的协助攻击打不到它 | `app.js:10476 / 7609` |
-| H10 | （回归 63b90d7）首领 / 10 级以上精英打出第 1 个标记时，「打进失衡时」的效果全不触发 | `app.js:4654 / 7844-7854` |
+全部修完（见上面「已修」）。
 
-
-## 中（未修，40 条）
+## 中（全部修完，2026-10-20）
 
 **专长（8）**
 - [x] 荒原行者「击落到你所在区域」从不生效 —— 引擎击破飞行单位时先把 `flying` 清掉，`featAfterHit` 永远看到 false；`dealTo` 结算前记下是否飞行并传入（app.js · `dealTo`、feats.js · `featAfterHit`；tests/feat-bugs-104.test.js）
@@ -50,30 +45,32 @@
 - [x] 兼修·鼓劲选「全部友方」只扣附赠不扣行动点 —— `skillCost` 也认 `feat_rouse` 分步（party.js、feats.js · `featDelegateBaseOf`；tests/feat-bugs-104.test.js）
 
 **单局 / 每日挑战（5）**
-- [ ] 图鉴专长详情永远不显示每日挑战选取率（`window.Rogue` 不存在）
-- [ ] 战斗种子随机数被画面效果消耗（骰子取决于停了多久 / 开没开特效）
-- [ ] 第三采矿场悬赏目标从别的区域抽、随从和目标互相敌对
-- [ ] 联机单局客制化图纸装不上（永远「奎支不够」）
-- [ ] 联机单局房主选的守夜人 / 长休安排被丢掉
+- [x] 图鉴专长详情永远不显示每日挑战选取率（`window.Rogue` 不存在）—— 改读顶层的 `Rogue.featPickRates()`（bestiary-ui.js · `pickRateNote`；tests/feat-pickrate-124.test.js）
+- [x] 战斗种子随机数被画面效果消耗（骰子取决于停了多久 / 开没开特效）—— 画面效果（粒子、音效、骰子滚动动画、动画令牌）改用独立的 `fxRandom()`，不碰种子随机数（run.js、attack-fx.js、hit-fx.js、sfx.js、weather-fx.js、routemap.js、game.js、online-ui.js；tests/fx-random-124.test.js）
+- [x] 第三采矿场悬赏目标从别的区域抽、随从和目标互相敌对 —— 目标只从本区域敌人表里抽（没有 2 代币以上的就取本区域代币最多的），随从跟着目标阵营（run.js · `bountyCandidates`；tests/bounty.test.js）
+- [x] 联机单局客制化图纸装不上（永远「奎支不够」）—— `installBlueprint` 加进个人指令，扣付钱角色自己的钱包（online-rogue.js；tests/online-single-124.test.js）
+- [x] 联机单局房主选的守夜人 / 长休安排被丢掉 —— 房主投长休 / 休整时记下安排，该选项胜出时一起执行（online-rogue.js · `vote` / `tryResolve`、rogue-ui.js · `act`；tests/online-single-124.test.js）
 
 **工坊 / 长休（5）**
-- [ ] 闪光震撼弹打 10 级起精英，没攒满标记的失衡不立刻恢复
+- [x] 闪光震撼弹打 10 级起精英，没攒满标记的失衡不立刻恢复 —— items.js · `itemStun` 排完协助攻击后走 `bossQuickRecover`；tests/misc-six-125.test.js
 - [x] 下潜逃走的沙鱼战后照样掉材料 —— rogue.js · `rollMaterialDrops` 和 bestiary.js 只认 `dead`，逃走的（只有 `_removed`）不掉、不记击杀；tests/desert-ai-117.test.js
 - [x] 投掷罐对下潜中的单位照样生效 —— items.js · `useEffectItem` 跳过下潜中的单位；tests/desert-ai-117.test.js
-- [ ] 跑团工坊不能同时做（每做一样推进一次时间）
-- [ ] 长休结算把回满了的人标成「守夜 · 没有恢复」
+- [x] 跑团工坊不能同时做（每做一样推进一次时间）—— trpg.js · `trpgCraft` 支持 `jobs`，一起开工、时间按最久的算（tests/misc-six-125.test.js）
+- [x] 长休结算把回满了的人标成「守夜 · 没有恢复」—— ledger.js · `restReport` 只标真的没恢复的人（荒野向导 / 武器人守夜不标）（tests/misc-six-125.test.js）
 
 **敌人 / 地形（7）**
 - [x] 沙鱼捕食隔区猎物时先付行动点、原地咬空（夜晚每回合空过） —— desert.js · `sandFishPlan` 猎物不同区时先规划移动；tests/desert-ai-117.test.js
 - [x] 精英没附赠时 AI 仍规划移动、整步空过 —— ai.js · `aiPlanBase` 付不起移动（`canPayMove`）就不规划移动；tests/desert-ai-117.test.js
 - [x] 播撒者被嘲讽 / 决一死战牵制时抵近射击不生效、每次空放 —— enemies.js · `enemyZoneInRange` / `en_spread`：被牵制且牵制者同区时喷洒抵近打自己所在的区，×0.6
 - [x] 决一死战数同区敌人时把中立生物和友军算进去 —— app.js · `touDuelEnemies` 只数 `hostileTo` 灯的单位
-- [ ] 连续战斗换区域时上一场的危墙 / 空隙留下来
+- [x] 连续战斗换区域时上一场的危墙 / 空隙留下来 —— run.js · `buildEncounterField` 重置所有间隔（tests/misc-six-125.test.js）
 - [x] 联机玩家战场里没有流沙 / 沙珊瑚台地 —— online-view.js 场地白名单补上，online-battle.js 画出来（2026-10-18）
-- [ ] 强盗头子被打倒不算「手下被打倒」
+- [x] 强盗头子被打倒不算「手下被打倒」—— app.js · `settleEnemyKill`，README 写明手下 = 狂徒 / 强盗头子（tests/misc-six-125.test.js）
 
 **战斗规则 / 技能 / 评分 / 训练场（15）**
-- [ ] 战斗中修武器两条路规则不一致
+- [x] 战斗中修武器两条路规则不一致 —— 耐久都走 `ledgerRepair`、倒地武器人都走 `useRepairKit`（items.js、ledger.js；tests/misc-six-125.test.js）
+- [x] （尾巴）震荡弹打得到下潜中的单位 —— items.js · `useEffectItem`（tests/misc-six-125.test.js）
+- [x] （尾巴）被嘲讽的播撒者 AI 规划移动而不是喷洒 —— ai.js · `inSkillReach` 认抵近（tests/misc-six-125.test.js）
 - [x] 盾击突进 / 全速撞击打屏障后的敌人，震荡却留在目标身上 —— app.js · `waveThenHit` 目标被屏障护着时不施加震荡；tests/skill-edges-119.test.js
 - [x] 巨刃划空改砍屏障能隔墙 —— app.js · `chuan_blade` 改砍屏障前判 `lineBlocked`，挡住就不出手、不耗电能；tests/skill-edges-119.test.js
 - [x] 收发代理锁定打不到的目标白扣纳米 —— app.js · 回合结束的无人机激光锁定前筛距离 ≤1 / 躲藏 / 下潜 / 友军 / 飞碟本体；tests/skill-edges-119.test.js
