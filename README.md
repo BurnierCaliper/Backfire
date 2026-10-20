@@ -368,6 +368,11 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **评分三处修正：高能自爆的溢出分 / 余波分有人拿、基准分不重复算飞碟触灵、基准分不算中立生物和友军**（app.js · `paintSkillLog` / `runSkill` / `scorePar`；tests/score-fixes.test.js）
+  - 高能自爆溢出分 / 余波分：高能自爆在行动结束时才判（`flushHighBooms`），但技能收尾的 `paintSkillLog` 已经把行动记账（`state.actionAcc`）清了，溢出分和余波的连带伤害分没有归属、直接丢了。现在清之前先存到 `state._endedAcc`，最外层行动判自爆前恢复，判完照样清掉；这些分仍记给引发高能自爆的那一方。
+  - 飞碟触灵基准分：以前本体的血量池也算进基准分，但它是五条腿血量的镜像（`syncUfoBody`），等于腿的血量算了两遍。现在本体只算击杀分（首领 300），血量由腿算。
+  - 基准分：以前所有非玩家单位都算。现在中立生物（`isNeutralCreature`）和「我方同阵营」的友军（`playerAllied`）不算——它们不是要打的敌人，会把 S 线抬虚高。
+
 - **专长（二）三处修正：跑团专长点记来源等级、多面手三项熟练各不相同、警戒只打敌人且每人各自出手**（feats.js · `featPointLevelsOf` / `featAlertOnEnter` / 多面手 `onTake`；growth.js · `tryLevelUp`；trpg.js · `trpgPickFeat`；trpg-ui.js；rogue.js · `choiceOptions` / `choose`；game.js · `packHero` / `applyCampaignToField`；tests/feat-bugs-107.test.js；docs/bug-backlog.md）
   - 跑团专长点：以前只存一个 `featPoints` 数字，选专长按角色当前等级判断，7 级给的点能拿去选 11 级以上的专长。现在每个没用的点记下是几级给的（`featPointLevels`，随队伍记忆存档），选专长按这一点的来源等级判断，满足条件时用最低的一点、高等级的点留着。旧档没有来源等级的点按升级表补：已选的专长占掉最低的几级，剩下的点从低到高对应剩下的级，点数不丢。
   - 多面手：以前三次熟练是三个互不相干的待选，能连选同一项。现在三项属于同一组（`group`），选过的项在同组其余待选里不再出现；已经熟练的项照专长说明（「新学或升级」）仍可选来升一级。每次重复选多面手各算一组。
