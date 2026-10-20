@@ -603,6 +603,7 @@
     if (sk.id === "__stand") return typeof standUpBlocked === "function" ? standUpBlocked(u) : null;
     if (sk.id === "__item" && typeof bagList === "function" && !bagList(u).some(x => x.combat)) return "没有能在战斗中使用的道具";   // 维修工具包也算（战斗中能用）
     if (u.stunned) return "失衡中，本回合无法行动";
+    if (typeof sinkLocked === "function" && ((sk.cost.ap || 0) || (sk.cost.bonus || 0)) && sinkLocked(u)) return "陷在流沙里没顶，不能行动";
     if ((sk.cost.ap || 0) > (u.ap || 0)) return "行动点不足";
     if ((sk.cost.bonus || 0) > (u.bonus || 0)) return "附赠行动不足";
     if (sk.id === "__move" && u.noMove) return "本回合无法移动";

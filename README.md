@@ -368,6 +368,9 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **流沙没顶（下陷 3 层）真的不能出手了**（app.js · `costBlockReason` / `runSkill`；game.js · `baseBlockReason`；hotseat-validation.js · `baseReason`；tests/quicksand-lock.test.js；docs/bug-backlog.md H5）
+  - 以前：`spendAp` / `spendBonus` 对没顶的单位返回 `false`，但 `runSkill` 不看返回值，没顶的单位（我方和敌人）照常出手，还一个点都不扣。
+  - 现在：技能消耗付不起（没顶，或行动点 / 附赠行动不够）时，在 `snapshot()` / `beginActionAcc` 之前就挡住，这次行动不结算、不改局面，日志写原因。技能按钮在画面和联机校验里提前灰掉（原因「陷在流沙里没顶，不能行动」）。不花点数的动作（起身等）照常可用；敌人 AI 本来就不给没顶的敌人规划行动。
 - **跑团模板「我方同阵营」的友军在敌人回合会行动了**（ai.js · `actors` / `actingOrder`；app.js · `settleEnemyKill`；tests/ally-acts.test.js；docs/bug-backlog.md H8）
   - 以前：敌人回合轮流行动的名单用的是 `foes()`，它把友军排除了（胜负判定需要这样），于是友军在敌人回合从不行动。
   - 现在：新增 `actors()`（敌人 + 友军，中立生物照旧不行动），`actingOrder()` 用它；友军按 AI 行动，目标由 `validPrey` 按 `hostileTo` 选（打和它敌对的单位，不打我方）。`foes()` 不变，胜负判定、「还剩几个敌人」照旧不算友军（只剩友军就判我方胜利）。友军打死的敌人和中立生物一样处理：没有经验、掉落、击杀分，只算战斗进度。
