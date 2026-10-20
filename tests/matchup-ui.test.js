@@ -74,7 +74,7 @@ test("雪天 + 冻土跟着选中单位：甲（冻土区）有冻土；乙（�
   battle(c, "snow");
   c.GAME = { actorId: "a" };
   let html = M.html(M.localChart());
-  assert.match(html, /冻土（甲 所在区域）/);
+  assert.match(html, /冻土 · 1区/);
   assert.match(cell(html, 3, 0), /changed[\s\S]*冻土：冰易伤不受天气影响[\s\S]*\+25%/);
   assert.match(html, /雪天伤害修正：火、酸 −25%；冰、物理 \+25%/);
   assert.match(html, /冻土：冰属性对这一区的目标固定易伤/);
@@ -101,7 +101,7 @@ test("联机玩家：拿房主 matchup 的 opt，按自己选中单位的区改�
   const view = { weather: "snow", fields: { 1: { ice: true }, 2: {} }, units: [{ id: "a", name: "甲", zone: 1 }, { id: "f", name: "飞", zone: 1, flying: true }] };
   const mine = M.viewChart(host, view, "a");
   assert.deepEqual(JSON.parse(JSON.stringify(mine.field)), { ice: true });
-  assert.match(M.html(mine), /冻土（甲 所在区域）/);
+  assert.match(M.html(mine), /冻土 · 1区/);
   assert.equal(M.viewChart(host, view, "f").field, null);
   assert.equal(M.viewChart(host, view, null), host, "没选单位就照用房主的");
   const ol = read("online-ui.js");
@@ -149,4 +149,62 @@ test("样式：和工坊同一套浮层；悬停单位浮在天气之上的规�
   assert.match(read("workshop.css"), /\[data-weather\] \.ovl-card::before/);
   assert.match(read("weather-fx.css"), /\.g-field \.unit-wrap:hover, \.g-field \.unit-wrap:focus-within, \.g-field \.unit-wrap\.is-hover \{ z-index: 7; \}/);
   assert.ok(read("game.html").includes("matchup.css"));
+});
+
+/* ---------- #83：选中单位作为受击者的个体表 ---------- */
+test("选中霜结单位 + 雪天：标题写单位名，霜结 −10% 进格子（原 → 现），原因在悬停/详情；冻土标区写进 notes", () => {
+  const c = setup(), M = c.MatchupUI;
+  battle(c, "snow");
+  vm.runInContext(`state.units[0].self = "frost"; state.fields[3] = Object.assign(emptyField(), { ice: true });`, c);
+  c.GAME = { actorId: "a" };
+  const ch = M.localChart();
+  M.state.cell = [0, 0];
+  const html = M.html(ch);
+  M.state.cell = null;
+  assert.match(html, /<span class="mu-who">甲 挨打时<\/span>/);
+  assert.match(html, /mu-ice">冻土 · 1区/);
+  assert.match(html, /<li>冻土：1区、3区<\/li>/);
+  assert.match(cell(html, 0, 0), /<s>\+50%<\/s>[\s\S]*<b>\+15%<\/b>/, "火 → 肉体：+50% 雪天 −25% 霜结 −10%");
+  assert.match(cell(html, 0, 0), /title="[^"]*雪天霜结/);
+  assert.match(html, /<p class="mu-detail">[\s\S]*雪天霜结/);
+  // 乙不是霜结：只有雪天 −25%
+  c.GAME = { actorId: "b" };
+  const hb = M.html(M.localChart());
+  assert.match(hb, /乙 挨打时/);
+  assert.match(cell(hb, 0, 0), /<b>\+25%<\/b>/);
+  assert.doesNotMatch(hb, /雪天霜结/);
+});
+
+test("选中熔融单位：冰行 ×2 算进「原 → 现」，multReason 在悬停/详情；物理打装甲强制 +50%", () => {
+  const c = setup(), M = c.MatchupUI;
+  battle(c, "none");
+  vm.runInContext(`state.units[1].instant = { melt: true };`, c);
+  c.GAME = { actorId: "b" };
+  const ch = M.localChart();
+  const ice = ch.rows.findIndex(r => r.id === "ice"), phys = ch.rows.findIndex(r => r.id === "physical");
+  const x = ch.cells[ice][0];
+  const want = M.pct((1 + x.value + ch.rows[ice].pct) * 2 - 1);
+  M.state.cell = [ice, 0];
+  const html = M.html(ch);
+  M.state.cell = null;
+  assert.ok(cell(html, ice, 0).includes(`<b>${want}</b>`), want);
+  assert.match(cell(html, ice, 0), /<s>[\s\S]*title=|title="[^"]*熔融：冰属性攻击伤害 ×2/);
+  assert.match(cell(html, ice, 0), /<s>/);
+  assert.match(html, /<p class="mu-detail">[\s\S]*熔融：冰属性攻击伤害 ×2/);
+  assert.match(cell(html, phys, 1), /<s>−25%<\/s>[\s\S]*<b>\+50%<\/b>/);
+});
+
+test("联机玩家：读 packet.matchup.units[选中单位]，没有才退回顶层表", () => {
+  const c = setup(), M = c.MatchupUI;
+  battle(c, "snow");
+  vm.runInContext(`state.units[0].self = "frost";`, c);
+  const m = vm.runInContext(`(() => { const m = matchupForState(state, null, { defender: false }); m.units = matchupUnitCharts(state); return JSON.parse(JSON.stringify(m)); })()`, c);
+  const st = { weather: "snow", fields: { 1: { ice: true } }, units: [{ id: "a", name: "甲", zone: 1 }, { id: "z", name: "无", zone: 2 }] };
+  const a = M.viewChart(m, st, "a");
+  assert.equal(a.defender, true);
+  assert.match(M.html(a), /甲 挨打时[\s\S]*雪天霜结/);
+  assert.match(M.html(a), /冻土：1区/);
+  // 不在 units 里的：退回顶层（重算冻土）；没选中：顶层
+  assert.ok(!M.viewChart(m, st, "z").defender);
+  assert.equal(M.viewChart(m, st, null), m);
 });

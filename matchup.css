@@ -29,3 +29,4 @@
 .mu-notes { margin: 12px 0 0; padding-left: 20px; font-size: 14px; color: var(--sk-muted, #a8977b); }
 .mu-notes li { margin: 3px 0; }
 .g-app > .mu-overlay { position: fixed; }
+.mu-who { font-weight: 700; font-size: 17px; margin: 0 10px 0 4px; color: var(--sk-paper, #f3ead8); }
