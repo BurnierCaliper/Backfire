@@ -14,7 +14,7 @@ const ROOT = path.resolve(__dirname, "..");
 // 与 game.html 的加载顺序一致（不含 game.js：它是战斗画面）
 const RULE_FILES = [
   "run.js", "engine.js", "party.js", "skill-text.js", "props.js", "enemies.js", "desert.js",
-  "growth.js", "feats.js", "items.js", "ledger.js", "commands.js", "app.js", "levelup.js", "escort.js", "boss-mechanics.js", "effects.js", "mods.js", "ai.js", "sim.js", "chain.js", "save.js", "trpg-data.js", "trpg.js", "world-data.js", "world-travel.js", "bestiary.js", "codex.js", "rogue-data.js", "battle-templates.js", "trpg-tasks.js", "trpg-merchants.js", "rogue.js",
+  "growth.js", "feats.js", "items.js", "inventory.js", "ledger.js", "commands.js", "app.js", "levelup.js", "escort.js", "boss-mechanics.js", "effects.js", "mods.js", "ai.js", "sim.js", "chain.js", "save.js", "trpg-data.js", "trpg.js", "world-data.js", "world-travel.js", "bestiary.js", "codex.js", "rogue-data.js", "battle-templates.js", "trpg-tasks.js", "trpg-merchants.js", "rogue.js",
   "battle-commands.js", "rogue-commands.js", "trpg-commands.js", "training.js"
 ];
 
