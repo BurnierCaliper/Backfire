@@ -52,7 +52,7 @@ const EnemyAI = (function () {
     // 射程表里没有的技能按单位卡上的射程判断，和 dealTo 一致（以前一律按 0–1：远距离的人形沙灵瞄准同区的人，每回合空放）
     const rg = u.range || "any";
     if (rg === "melee") return d === 0;
-    if (rg === "ranged") return d === 1;
+    if (rg === "ranged") return d === 1 || (d === 0 && typeof enemyForcedPointBlank === "function" && enemyForcedPointBlank(u, t));   // 被牵制的抵近喷洒（播撒者）
     return d <= 1;
   }
   function retargetLegal(u, sid, preferred, prey, forced) {
