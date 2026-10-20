@@ -306,6 +306,31 @@ function trpgCyberDecide(id, ok) {
   r.note = r.status === "done" ? "" : String(notes[0] || "").slice(0, 80);
   return notes;
 }
+/* ---------- 诊所：义体（cyberware.js）——和单局一样：装 / 拆从这名角色自己的钱包出；联机由房主结算 ---------- */
+/** 联机包 / 界面：{ kit, name, purse, view, shop, previews }（没有坚毅数值） */
+function trpgCyberwarePacket(kit) {
+  const u = trpgHero(kit);
+  if (!u || typeof cyberwarePacket !== "function") return null;
+  const previews = {};
+  cyberwareCatalog().forEach(d => { previews[d.id] = cyberwareInstallPreview(u, d.id); });
+  return Object.assign(cyberwarePacket(u), { kit, name: u.name, purse: trpgPurse(kit), previews });
+}
+function trpgCyberwareAct(kit, id, remove) {
+  if (!TRPG.clinicOpen) throw new Error("诊所现在没开");
+  const u = trpgHero(kit);
+  if (!u) throw new Error("没有这名角色");
+  let pv = null, cost = 0;
+  const name = (cyberwareDef(id) || {}).name || id;
+  const notes = trpgPayWith(kit, () => {
+    const purse = { kuizhi: Number(state.kuizhi) || 0 };
+    if (remove) cost = cyberwareRemove(u, id, purse).cost; else { pv = cyberwareInstall(u, id, purse); cost = pv.cost; }
+    state.kuizhi = purse.kuizhi;
+    return [remove ? `${u.name} 拆掉了义体「${name}」，花掉 ${cost} 奎支。` : `${u.name} 安装了义体「${name}」，花掉 ${cost} 奎支。${pv.warning || ""}`];
+  });
+  return notes;
+}
+function trpgCyberwareInstall(kit, id) { return trpgCyberwareAct(kit, id, false); }
+function trpgCyberwareRemove(kit, id) { return trpgCyberwareAct(kit, id, true); }
 function trpgAdjustWater(ml) {
   ml = Math.floor(Number(ml) || 0);
   if (!ml) return [];
