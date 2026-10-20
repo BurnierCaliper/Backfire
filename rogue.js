@@ -1948,7 +1948,7 @@ const Rogue = (function () {
 
   /* ---------- 给工坊 / 背包界面的接口（Akane 定的名字；纯数据） ---------- */
   /* 工坊在哪能开：键是 board 任务板 / camp 休整 / smith 工匠节点 / rest 休息点，值是那里的工坊档（bench 五类都能做 / rest 场地、自我效果做不了）。
-   * 默认 = 现在的规则（craftPlace）。作者若定「只在休整 / 休息点开」，删掉 board、smith 两行即可 */
+   * 作者 10/20 定：四处都开（= 现在的规则 craftPlace）。以后要改地点只改这张表 */
   const WORKSHOP_AT = { board: "bench", camp: "bench", smith: "bench", rest: "rest" };
   function workshopSpot(run) {
     if (!run || run.stage === "over" || run.ambush) return null;
@@ -2337,6 +2337,32 @@ const Rogue = (function () {
     h.weaponParts[kit] = row;
     notes.push(`工匠把 ${weaponPartLabel(partId)}（${weaponPartText(partId)}）装到 ${heroName(kit)} 的第 ${i + 1} 个改装槽，工钱 ${cost} 奎支。`);
     return logAll(run, notes);
+  }
+  /** 装改装件之前 / 之后的数值（工匠装件界面做对比用；纯计算，不动背包、不扣钱）。
+   *  slot 不传 = 第一个空槽，没有空槽就第 1 个（替换）。
+   *  → { kit, weapon, slot, part, replaced, cost, before: Stats, after: Stats, delta: { atk, block, hp } } | null
+   *  Stats = { atk, block（%）, hp: { 层类型: 上限 } | null, coefs: { 属性: 补正 }, parts: [改装件 id] } */
+  function modInstallPreview(run, kit, weapon, partId, slot) {
+    const h = (run.party || []).find(x => x.kit === kit && (x.weapons || []).includes(weapon));
+    if (!h || !WEAPON_PARTS[partId]) return null;
+    const row = weaponPartRow(h, weapon);
+    if (!row.length) return null;
+    let i = slot == null ? row.indexOf(null) : Math.floor(Number(slot) || 0);
+    if (i < 0) i = 0;
+    if (i >= row.length) return null;
+    const u = spawnLiveCard(cardOf(h.kit), 1);
+    applyHero(u, h);
+    const lv = (h.weaponLevels || {})[weapon] || 1;
+    const stats = parts => {
+      const bd = weaponAtkBreakdown(weapon, u.attrs || {}, lv, parts);
+      return { atk: bd.atk, block: partsBlock(parts), hp: weaponUnitHp(weapon, lv, parts), coefs: typeof weaponCoefs === "function" ? weaponCoefs(weapon, parts) : {}, parts: parts.slice() };
+    };
+    const now = row.filter(Boolean), next = row.slice();
+    next[i] = partId;
+    const before = stats(now), after = stats(next.filter(Boolean));
+    const hpSum = s => Object.values(s.hp || {}).reduce((a, b) => a + (Number(b) || 0), 0);
+    return { kit, weapon, slot: i, part: partId, replaced: row[i] || null, cost: partInstallCost(partId), before, after,
+      delta: { atk: after.atk - before.atk, block: after.block - before.block, hp: hpSum(after) - hpSum(before) } };
   }
   /** 拆下改装件：不要钱，放回背包（要有工匠在场） */
   function removePart(run, kit, slot, smithId) {
@@ -2879,7 +2905,7 @@ function advanceDays(run, n) {
     role2Options, soloBattleInfo,
     restPlan, restOptions, canLongRest, sheetData, armoryData, lowHpWarning, escortInfo, partOffers, buyPart, sellPart, canSellParts, partStock, partSellPrice, partInstallCost, installPart, removePart, restAtNode, leaveNode, canShortRestBefore, shortRestBeforeNode,
     ambushChance, watchOptions,
-    interludeOptions, campStatus: campStatusOf, buy, shopPoints, redeemList, redeem, craftPlace, craftList, craftOdds, craft, knowsRecipe, learnOptions, learnRecipe, rollRecipeChip, salvageList, salvage, setCraftHooks, setCraftJob, craftQueue, craftQueued, bagCounts, inventory, recipeStatus, recipeBook, materialUses, workshopAvailable, craftListGrouped, craftPreview, recipesUsingMaterial, setBagOwnership, bagByCategory, materialBar, cyberSummary, itemCategory: id => itemCategory(id),  canShop, shopItemName, shopStock, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
+    interludeOptions, campStatus: campStatusOf, buy, shopPoints, redeemList, redeem, craftPlace, craftList, craftOdds, craft, knowsRecipe, learnOptions, learnRecipe, rollRecipeChip, salvageList, salvage, setCraftHooks, setCraftJob, craftQueue, craftQueued, bagCounts, inventory, recipeStatus, recipeBook, materialUses, workshopAvailable, craftListGrouped, craftPreview, recipesUsingMaterial, setBagOwnership, bagByCategory, materialBar, cyberSummary, modInstallPreview, itemCategory: id => itemCategory(id),  canShop, shopItemName, shopStock, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
     presentSmiths, smithInfo, claimBlueprint, installBlueprint, blueprintById, weaponModsOf,
     smithQuote, introduceSmith,
     canClinic, cyberInfo, cyberPreview, cyberCost, modifyHero, healCost, healHero,

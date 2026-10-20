@@ -248,3 +248,19 @@ test("bagByCategory：单机 personal 为 null 全部公用；联机拆个人 / 
   assert.ok(v.craft[0].previews.every(p => p.craftable && p.odds));
   assert.deepEqual(v.cyber.map(x => x.kit), ["helu"]);
 });
+
+test("modInstallPreview：装件前后的 atk / 格挡 / 武器人血量；不动背包和武器", () => {
+  const { c, R, run } = setup();
+  const h = run.party.find(x => (x.weapons || []).length);
+  const w = h.weapons[0];
+  h.weaponLevels[w] = 9;   // 有改装槽
+  const parts = J(vm.runInContext("WEAPON_PARTS", c));
+  const flat = Object.keys(parts).find(id => vm.runInContext(`weaponPartFlatAtk(${JSON.stringify(id)})`, c) > 0);
+  const before = JSON.stringify(run);
+  const p = J(R.modInstallPreview(run, h.kit, w, flat));
+  assert.equal(JSON.stringify(run), before);
+  assert.ok(p && p.delta.atk > 0, JSON.stringify(p));
+  assert.equal(p.after.atk - p.before.atk, p.delta.atk);
+  assert.deepEqual(p.after.parts, [flat]);
+  assert.equal(R.modInstallPreview(run, h.kit, w, "no_part"), null);
+});
