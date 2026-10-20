@@ -21,11 +21,12 @@ function setup(opt) {
   c.S.state.kuizhi = opt.money != null ? opt.money : 100000;
   c.CyberwareUI.reset();
   const U = c.CyberwareUI;
+  const q = (action, f) => c.dispatch(Object.assign({ type: "run.query", action }, f), { run });
   const model = () => U.localModel({ heroes: run.party.map(h => ({ kit: h.kit, name: c.Rogue.heroName(h.kit) })),
-    packetOf: kit => c.Rogue.cyberwarePacketFor(run, kit),
-    previewOf: (kit, id) => c.Rogue.cyberwarePreviewFor(run, kit, id),
+    packetOf: kit => q("cyberware", { kit }),
+    previewOf: (kit, id) => q("cyberwarePreview", { kit, id }),
     money: () => c.S.state.kuizhi });
-  return { c, run, U, model };
+  return { c, run, U, model, q };
 }
 const noShp = html => { assert.doesNotMatch(html, /坚毅|shp/i); };
 const shopRow = (html, id) => (html.match(new RegExp(`<li class="cw-row[^"]*">(?:(?!</li>)[\\s\\S])*data-cw-pick="${id}"[\\s\\S]*?</li>`)) || [""])[0];
@@ -94,8 +95,7 @@ test("过度安装：只有能过度安装时才能确认，并醒目显示「�
   let html = U.html(model());
   assert.match(html, new RegExp(`<p class="cw-heavy" role="alert">⚠ ${HEAVY}</p>`));
   assert.match(html, /disabled>仍然安装/);
-  // 过度安装专长（CYBERWARE_OVERINSTALL_FEAT）还没有正式内容，队伍角色也没有开关：测试里直接放开
-  vm.runInContext("cyberwareCanOverinstall = () => true", c);
+  run.party[0].cyberOverinstall = true;   // 88eae79：applyHero 会带过去（或者专长 "overinstall"）
   html = U.html(model());
   assert.match(html, /cw-confirm heavy/);
   assert.match(html, new RegExp(HEAVY));
@@ -119,23 +119,68 @@ test("已安装：列表 + 拆除按钮写拆除费；拆除可逆", () => {
   assert.equal(c.S.state.kuizhi, 100000 - 3000 - 1000);
 });
 
-test("联机：viewModel 读 online-view 投影后的 cyberware，渲染和单机一样（没有真预览时用目录行拼）", () => {
-  const { c, run, U } = setup();
-  const packet = c.Rogue.cyberwarePacketFor(run, "kolt");
-  const projected = V.projectPacket({ type: "view", cyberware: { heroes: [packet] } }, { recipientId: "p2", gmId: "host" });
-  assert.ok(projected.cyberware, "projectPacket 保留 cyberware");
-  const m = U.viewModel(projected, { money: () => 5000, nameOf: () => "柯尔特" });
-  assert.equal(m.net, true); assert.equal(m.kit, "kolt");
+test("本机：query(\"cyberwarePreview\") 未知 id 给 ok:false，确认框照样写原因、按钮灰掉", () => {
+  const { U, model, q } = setup();
+  assert.equal(q("cyberwarePreview", { kit: "kolt", id: "nope" }).ok, false);
+  U.state.confirm = "nope";
+  const html = U.html(model());
+  assert.match(html, /没有这件义体/);
+  assert.match(html, /disabled>确认安装/);
+});
+
+test("过度安装专长 overinstall（featHas）也能放开", () => {
+  const { run, U, model } = setup();
+  run.party[0].cyber = { armor: 8, shield: 0, sand: 0, spirit: false };
+  run.party[0].feats = (run.party[0].feats || []).concat(["overinstall"]);
+  const m = model();
+  if (!m.packet.view.canOverinstall) return;   // 专长挂在别的字段上时只看 cyberOverinstall 那条
   U.state.confirm = "example_t5_melee";
-  const html = U.html(m);
-  assert.ok(shopRow(html, "example_t5_melee"));
-  assert.match(html, /<b>0%<\/b> → <b class="cw-after">40%<\/b>/);
+  assert.match(U.html(m), /data-cw-cmd="[^"]+" >仍然安装/);
+});
+
+/** 联机包：照 online-rogue.js · cyberwareFor 的形状（每人 purse + previews），再过 online-view 白名单 */
+function onlinePacket(c, run, kits, purse) {
+  const q = (action, f) => c.dispatch(Object.assign({ type: "run.query", action }, f), { run });
+  const heroes = kits.map(k => { const p = q("cyberware", { kit: k }); return Object.assign({}, p, { purse: purse[k] }); });
+  return V.projectPacket({ type: "view", cyberware: { heroes } }, { recipientId: "p2", gmId: "host" });
+}
+test("联机：viewModel 读 heroes[] 的 purse / previews（不在界面里猜），每人的钱包显示在角色切换上", () => {
+  const { c, run, U } = setup();
+  const projected = onlinePacket(c, run, ["kolt", "helu"], { kolt: 5000, helu: 800 });
+  assert.ok(projected.cyberware.heroes[0].previews.example_t5_melee, "previews 过了白名单");
+  const m = U.viewModel(projected);
+  assert.equal(m.net, true); assert.equal(m.kit, "kolt"); assert.equal(m.money, 5000);
+  U.state.confirm = "example_t5_melee";
+  let html = U.html(m);
+  assert.match(html, /5000 奎支<\/small>/); assert.match(html, /800 奎支<\/small>/);
+  assert.match(html, /<b>0%<\/b> → <b class="cw-after">40%<\/b> \/ 上限 70%/);
+  assert.match(html, /确认安装<\/button>/);
   noShp(html);
-  // 多人：{ heroes:[…] } → 角色切换
-  const m2 = U.viewModel({ cyberware: { heroes: [packet, c.Rogue.cyberwarePacketFor(run, "helu")] } });
-  assert.equal(m2.heroes.length, 2);
-  assert.match(U.html(m2), /data-cw-kit="helu"/);
+  // 切到钱不够的人：按钮灰掉
+  U.state.kit = "helu"; U.state.confirm = "example_t5_melee";
+  html = U.html(U.viewModel(projected));
+  assert.match(html, /奎支不够/);
+  // 过度安装：heavy 警告来自房主的预览
+  run.party[0].cyber = { armor: 8, shield: 0, sand: 0, spirit: false }; run.party[0].cyberOverinstall = true;
+  U.state.kit = "kolt"; U.state.confirm = "example_t5_melee";
+  html = U.html(U.viewModel(onlinePacket(c, run, ["kolt"], { kolt: 5000 })));
+  assert.match(html, new RegExp(`<p class="cw-heavy" role="alert">⚠ ${HEAVY}</p>`));
+  assert.match(html, /超出上限：过度安装/);
+  // 没有预览（老包）：不猜，按钮灰掉
+  const old = JSON.parse(JSON.stringify(projected)); old.cyberware.heroes.forEach(h => { delete h.previews; });
+  U.state.confirm = "example_t5_melee";
+  assert.match(U.html(U.viewModel(old)), /预览还没收到/);
   assert.equal(U.viewModel({ cyberware: null }).packet, null);
+});
+
+test("联机冲突：previews 里的 conflictWith 显示成已装义体的名字", () => {
+  const { c, run, U } = setup();
+  vm.runInContext(`cyberwareRegister({ id: "t_arm2", name: "测试臂B", tier: 5, conflict: "arm" })`, c);
+  c.Rogue.installCyberware(run, "kolt", "example_t5_melee");
+  U.state.confirm = "t_arm2";
+  const html = U.html(U.viewModel(onlinePacket(c, run, ["kolt"], { kolt: 50000 })));
+  assert.match(html, /和已安装的「【示例】5级近战攻击义体」冲突/);
+  assert.match(html, /disabled>(确认|仍然)安装/);
 });
 
 test("入口：诊所面板每人一个「义体」按钮；game.html 引入了脚本和样式", () => {

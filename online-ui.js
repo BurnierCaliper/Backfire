@@ -462,8 +462,7 @@
     function cyberwareSrc() { const p = view.packet; return p && p.cyberware && (p.cyberware.heroes || []).length ? p : null; }
     function openCyberware() {
       if (!global.CyberwareUI) return;
-      const purseOf = kit => { const h = ((view.packet?.rogue?.heroes) || []).find(x => x.kit === kit); return h ? h.purse : 0; };
-      CyberwareUI.open(() => { const src = cyberwareSrc(); return src ? CyberwareUI.viewModel(src, { money: purseOf }) : null; },
+      CyberwareUI.open(() => { const src = cyberwareSrc(); return src ? CyberwareUI.viewModel(src) : null; },   // 钱包 / 预览都在 packet.cyberware.heroes[] 里
         cmd => { if (disabled()) return; call(() => api.submit({ type: "rogue.act", command: cmd })); });
     }
     function openBackpack() {

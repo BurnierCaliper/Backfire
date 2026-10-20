@@ -423,8 +423,8 @@
   function cyberwareModel() {
     if (!run || !window.CyberwareUI || !Rogue.canClinic(run)) return null;
     return CyberwareUI.localModel({ heroes: run.party.map(h => ({ kit: h.kit, name: Rogue.heroName(h.kit) })),
-      packetOf: kit => Rogue.cyberwarePacketFor(run, kit),
-      previewOf: (kit, id) => { try { return Rogue.cyberwarePreviewFor(run, kit, id); } catch (e) { return null; } },
+      packetOf: kit => query("cyberware", { kit }),
+      previewOf: (kit, id) => { try { return query("cyberwarePreview", { kit, id }); } catch (e) { return null; } },
       money: () => money(), error: lastError, note: lastNotes[lastNotes.length - 1] || "" });
   }
   function openCyberware(kit) {

@@ -37,3 +37,4 @@
 .g-btn.cw-danger { border-color: var(--sk-blood, #d8322a); }
 .cw-none { font-size: 14px; padding: 10px 0; }
 .cw-open { border-color: var(--sk-mint, #39e6b4); }
+.ws-hero .cw-purse { margin-left: 6px; font-family: var(--num); color: var(--sk-hazard, #f2c230); font-size: 11px; }

@@ -1,5 +1,5 @@
 /* 诊所 · 义体（cyberware.js）浮层：外框和工坊 / 背包同一套（workshop.css · .ovl / .ovl-card / .ws-head），这里只放内容。
- * 数据只走一个适配层：CyberwareUI.localModel(...)（单机 / 房主，Rogue.cyberwarePacketFor = cyberwarePacket）
+ * 数据只走一个适配层：CyberwareUI.localModel(...)（单机 / 房主，query("cyberware") / query("cyberwarePreview")）
  *   和 CyberwareUI.viewModel(view, ...)（联机玩家，online-view.js · projectCyberware 之后的 view.cyberware）
  *   都变成同一个界面模型：{ heroes:[{kit,name}], kit, packet:{kit,view,shop}, money, net, preview?(id), error, note }
  * 红线：坚毅（shp）数值永远不出现；只显示 burdenText / warning。
@@ -24,7 +24,8 @@
     o = o || {};
     const heroes = o.heroes || [];
     const kit = heroes.some(h => h.kit === ui.kit) ? ui.kit : (heroes[0] || {}).kit || "";
-    return { heroes, kit, packet: kit && o.packetOf ? o.packetOf(kit) : null, money: num(o.money ? o.money(kit) : 0),
+    const packet = kit && o.packetOf ? o.packetOf(kit) : null;
+    return { heroes, kit, packet, money: num(packet && typeof packet.purse === "number" ? packet.purse : o.money ? o.money(kit) : 0),
       net: false, preview: o.previewOf ? id => o.previewOf(kit, id) : null, error: o.error || "", note: o.note || "" };
   }
   /** 联机玩家：读 online-view 投影后的 view.cyberware（单个 packet 或 { [kit]: packet } 都接） */
@@ -33,20 +34,19 @@
     const cw = view && view.cyberware;
     // Burnier 5edbb78：{ heroes:[{kit,name,view,shop}] }；也认单个 packet 或 { [kit]: packet }
     const packets = !cw ? [] : Array.isArray(cw.heroes) ? cw.heroes.filter(p => p && p.view) : cw.view ? [cw] : Object.keys(cw).map(k => cw[k]).filter(p => p && p.view);
-    const heroes = packets.map(p => ({ kit: p.kit, name: p.name || (o.nameOf && o.nameOf(p.kit)) || p.kit }));
+    const heroes = packets.map(p => ({ kit: p.kit, name: p.name || (o.nameOf && o.nameOf(p.kit)) || p.kit, purse: typeof p.purse === "number" ? p.purse : null }));
     const kit = heroes.some(h => h.kit === ui.kit) ? ui.kit : (heroes[0] || {}).kit || "";
-    return { heroes, kit, packet: packets.find(p => p.kit === kit) || null, money: num(o.money ? o.money(kit) : 0),
-      net: true, preview: null, error: o.error || "", note: o.note || "" };
+    const packet = packets.find(p => p.kit === kit) || null;
+    // 88eae79：每人自己的钱包 purse + 房主算好的 previews[id]（白名单 + scrubHidden）
+    return { heroes, kit, packet, money: num(packet && typeof packet.purse === "number" ? packet.purse : o.money ? o.money(kit) : 0),
+      net: true, preview: packet && packet.previews ? id => packet.previews[id] || null : null, error: o.error || "", note: o.note || "" };
   }
-  /** 确认步骤用的预览：有真预览（cyberwareInstallPreview）就用，没有就从目录行 + 当前视图拼一份同形状的 */
+  /** 确认步骤用的预览：只用房主 / 本机算好的 cyberwareInstallPreview（本机 query("cyberwarePreview")，联机 packet.previews[id]），不在界面里猜 */
   function previewFor(model, id) {
     const p = model.preview ? model.preview(id) : null;
     if (p) return p;
-    const v = (model.packet && model.packet.view) || {}, r = ((model.packet && model.packet.shop) || []).find(x => x.id === id);
-    if (!r) return { ok: false, error: "没有这件义体" };
-    const over = num(r.rateAfter) > num(v.cap) + 1e-9;
-    return { ok: !!r.canInstall, error: r.error || null, cost: num(r.price), name: r.name, tier: r.tier, rateBefore: num(v.rate), rateAfter: num(r.rateAfter),
-      cap: num(v.cap), overinstall: over, conflictWith: null, burden: over ? "heavy" : r.warning ? "strain" : "none", warning: r.warning || "" };
+    const r = ((model.packet && model.packet.shop) || []).find(x => x.id === id);
+    return { ok: false, error: r ? "预览还没收到，稍后再试" : "没有这件义体", name: r ? r.name : id, cost: r ? num(r.price) : 0 };
   }
 
   /* ---------- 渲染（纯函数） ---------- */
@@ -88,6 +88,7 @@
           <button type="button" class="g-btn r-main" data-cw-pick="${esc(r.id)}" ${no ? "disabled" : ""} ${no ? `title="${esc(no)}"` : ""}>安装</button></li>`;
       }).join("") || `<li class="ws-empty cw-none">${shop.length ? "目录里的义体都装上了。" : "暂无可安装的义体"}</li>`}</ul></section>`;
   }
+  const conflictName = (model, id) => ((((model.packet || {}).view || {}).installed || []).find(x => x.id === id) || {}).name || id;
   function confirmHtml(model) {
     if (!ui.confirm) return "";
     const p = previewFor(model, ui.confirm);
@@ -98,19 +99,19 @@
       ${heavy ? `<p class="cw-heavy" role="alert">⚠ ${esc(p.warning || HEAVY)}</p>` : p.warning ? `<p class="cw-strain">${esc(p.warning)}</p>` : ""}
       <ul class="cw-pv"><li>费用 <b>${esc(num(p.cost))}</b> 奎支（手里 ${esc(model.money)}）</li>
         <li>改造率 <b>${pc(p.rateBefore)}</b> → <b class="${heavy ? "cw-after over" : "cw-after"}">${pc(p.rateAfter)}</b> / 上限 ${pc(p.cap)}${heavy ? "（超出上限：过度安装）" : ""}</li>
-        ${p.conflictWith ? `<li class="ws-need">和已安装的义体冲突</li>` : ""}</ul>
+        ${p.conflictWith ? `<li class="ws-need">和已安装的「${esc(conflictName(model, p.conflictWith))}」冲突，不能同时安装</li>` : ""}</ul>
       ${!p.ok ? `<p class="ws-need big">${esc(p.error || "不能安装")}</p>` : model.money < num(p.cost) ? `<p class="ws-need big">奎支不够</p>` : ""}
       <div class="cw-actions"><button type="button" class="g-btn" data-cw-cancel>取消</button>
         <button type="button" class="g-btn r-main${heavy ? " cw-danger" : ""}" ${cmdAttr({ action: "installCyberware", kit: model.kit, id: ui.confirm })} ${blocked ? "disabled" : ""}>${heavy ? "仍然安装" : "确认安装"}</button></div>
     </div>`;
   }
   function html(model) {
-    const heroTabs = (model.heroes || []).length > 1 ? `<div class="ws-heroes" role="tablist" aria-label="给谁装">${model.heroes.map(h => `<button type="button" class="g-btn ws-hero" data-cw-kit="${esc(h.kit)}" aria-pressed="${model.kit === h.kit}">${esc(h.name)}</button>`).join("")}</div>` : "";
+    const heroTabs = (model.heroes || []).length > 1 ? `<div class="ws-heroes" role="tablist" aria-label="给谁装">${model.heroes.map(h => `<button type="button" class="g-btn ws-hero" data-cw-kit="${esc(h.kit)}" aria-pressed="${model.kit === h.kit}">${esc(h.name)}${h.purse != null ? `<small class="cw-purse">${esc(h.purse)} 奎支</small>` : ""}</button>`).join("")}</div>` : "";
     const body = model.packet && model.packet.view
       ? `${rateBar(model.packet.view)}${confirmHtml(model)}<div class="ws-main cw-main"><div class="ws-col">${installedHtml(model)}</div><div class="ws-col">${shopHtml(model)}</div></div>`
       : `<p class="ws-empty cw-none">暂无可安装的义体</p>`;
     return `<div class="ws-card ovl-card cw-card" role="dialog" aria-label="诊所 · 义体">
-      <header class="ws-head"><span class="ws-tape">诊所 · 义体</span><span class="ws-sub">手里有 ${esc(model.money)} 奎支 · 拆除完全可逆</span>
+      <header class="ws-head"><span class="ws-tape">诊所 · 义体</span><span class="ws-sub">${model.heroes && model.heroes.length > 1 ? esc((model.heroes.find(h => h.kit === model.kit) || {}).name || "") + " " : ""}手里有 ${esc(model.money)} 奎支 · 拆除完全可逆</span>
         <button type="button" class="g-btn ws-close" data-cw-close aria-label="关闭">关闭</button></header>
       ${model.error ? `<p class="r-warn r-error">没做成：${esc(model.error)}</p>` : model.note ? `<p class="ws-note">${esc(model.note)}</p>` : ""}
       ${heroTabs}${body}</div>`;

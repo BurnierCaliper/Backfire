@@ -23,7 +23,7 @@ const URL = pathToFileURL(path.resolve(__dirname, "..", "game.html")).href, OUT 
   await p.click("[data-cw-cmd]"); await p.waitForSelector(".cw-row.on");
   await p.screenshot({ path: `${OUT}/cyberware-installed-remove.png` });
   await p.click("[data-cw-close]");
-  await camp('run.party[0].cyber = { armor: 8, shield: 0, sand: 0, spirit: false }; cyberwareCanOverinstall = () => true;');
+  await camp('run.party[0].cyber = { armor: 8, shield: 0, sand: 0, spirit: false }; run.party[0].cyberOverinstall = true;');
   await p.click('[data-cw-pick="example_t5_melee"]');
   await p.screenshot({ path: `${OUT}/cyberware-overcap-warning.png` });
   console.log(errs.length ? errs : "no errors"); await b.close();
