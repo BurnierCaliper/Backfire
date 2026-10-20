@@ -58,14 +58,14 @@
 
 **工坊 / 长休（5）**
 - [ ] 闪光震撼弹打 10 级起精英，没攒满标记的失衡不立刻恢复
-- [ ] 下潜逃走的沙鱼战后照样掉材料
-- [ ] 投掷罐对下潜中的单位照样生效
+- [x] 下潜逃走的沙鱼战后照样掉材料 —— rogue.js · `rollMaterialDrops` 和 bestiary.js 只认 `dead`，逃走的（只有 `_removed`）不掉、不记击杀；tests/desert-ai-117.test.js
+- [x] 投掷罐对下潜中的单位照样生效 —— items.js · `useEffectItem` 跳过下潜中的单位；tests/desert-ai-117.test.js
 - [ ] 跑团工坊不能同时做（每做一样推进一次时间）
 - [ ] 长休结算把回满了的人标成「守夜 · 没有恢复」
 
 **敌人 / 地形（7）**
-- [ ] 沙鱼捕食隔区猎物时先付行动点、原地咬空（夜晚每回合空过）
-- [ ] 精英没附赠时 AI 仍规划移动、整步空过
+- [x] 沙鱼捕食隔区猎物时先付行动点、原地咬空（夜晚每回合空过） —— desert.js · `sandFishPlan` 猎物不同区时先规划移动；tests/desert-ai-117.test.js
+- [x] 精英没附赠时 AI 仍规划移动、整步空过 —— ai.js · `aiPlanBase` 付不起移动（`canPayMove`）就不规划移动；tests/desert-ai-117.test.js
 - [x] 播撒者被嘲讽 / 决一死战牵制时抵近射击不生效、每次空放 —— enemies.js · `enemyZoneInRange` / `en_spread`：被牵制且牵制者同区时喷洒抵近打自己所在的区，×0.6
 - [x] 决一死战数同区敌人时把中立生物和友军算进去 —— app.js · `touDuelEnemies` 只数 `hostileTo` 灯的单位
 - [ ] 连续战斗换区域时上一场的危墙 / 空隙留下来
