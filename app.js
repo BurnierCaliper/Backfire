@@ -5037,7 +5037,8 @@ function settleEnemyKill(target, notes) {
     }
   }
   // 手下被打倒：王下次行动改成回防命令（ai.js，KING_CFG.hold.cooldown 回合内最多一次）
-  if (isOutlawThugKit(target.kit)) {
+  // 手下 = 狂徒和强盗头子（README：回防命令）
+  if (isOutlawThugKit(target.kit) || target.kit === "bandit_boss") {
     const king = findKit("outlaw_king", state.units);
     if (king && !king.dead) { king.resources = king.resources || {}; king.resources.crewDown = true; }
   }

@@ -589,6 +589,8 @@ function buildEncounterField(spec) {
     Object.keys(state.gaps).forEach(k => { if (k !== "1-2" && k !== "2-3") delete state.gaps[k]; });
     ["1-2", "2-3"].forEach(k => { if (!state.gaps[k]) state.gaps[k] = emptyGap(); });
   }
+  // 换区域开新的一场：上一场的危墙 / 空隙 / 桥梁 / 门不带过来（遭遇自己的 gap 在 applyBattlefieldFeatures 里再摆）
+  if (state.gaps) Object.keys(state.gaps).forEach(k => { state.gaps[k] = emptyGap(); });
   if (spec.fields) {
     Object.keys(spec.fields).forEach(z => { if (state.fields[z]) Object.assign(state.fields[z], spec.fields[z]); });
   }
