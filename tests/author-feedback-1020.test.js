@@ -94,6 +94,21 @@ test("协助攻击打死自爆小车：小车的死亡引爆是爆炸（弹字�
   assert.ok(blast.every(p => !p.main), "引爆的伤害不是主攻击");
   assert.ok(blast.every(p => p.tag === "boom"), "引爆的弹字标成爆炸");
   assert.equal(S.popTag || null, null, "标记用完还原");
+  // 先是打死它的那一下，再炸（以前清场在弹字之前，引爆的弹字排在前面，画面上先炸、后挨打）
+  assert.ok(dmg.indexOf(onCar.find(p => p.main)) < dmg.indexOf(blast[0]), "打死小车的那一下排在引爆前面");
+  assert.ok(!car._holdBoom && !car._boomPending, "等着炸的标记清掉了");
+});
+
+test("自爆小车不是被一击打死的（持续伤害、别的爆炸）：照旧当场引爆", () => {
+  const { c, S, K } = setup(["kolt", "helu"], [{ id: "boomcar", lv: 3, zone: 1 }, { id: "thug_knife", lv: 1, zone: 1 }]);
+  const car = K("boomcar"), thug = K("thug_knife");
+  S.units.forEach(u => { u.zone = 1; });
+  thug.layers.forEach(l => { l.max = l.current = 300; });
+  car.layers.forEach(l => { l.current = 0; });
+  const t0 = c.totalHp(thug);
+  c.sweepDeadEnemies();
+  assert.equal(car._exploded, true);
+  assert.ok(c.totalHp(thug) < t0, "同区的狂徒挨了引爆");
 });
 
 test("我方操控的碎渣机炮那一炮照旧算这次行动的主攻击；爆炸桶的爆炸不算", () => {

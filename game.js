@@ -1569,6 +1569,15 @@
             fxWord(e.unitId, e.text, e.element, shownWords.size);
             await wait(110);
           }
+        } else if (e.kind === "carboom") {
+          // 自爆小车死亡引爆：在小车身上炸开（震屏 + 爆炸声 + 爆炸形状 + 「引爆」），炸到的人的数字跟在后面
+          const app = $("g-app");
+          app.classList.remove("quake"); void app.offsetWidth; app.classList.add("quake");
+          realTimeout(() => app.classList.remove("quake"), 700);
+          if (window.Sfx && !G.sim) Sfx.boom();
+          if (window.AttackFx && !G.sim && !G.skip) { const r = rectOf(e.unitId); if (r) AttackFx.impact(r, { kind: "explode", el: "energy", area: true }, {}); }
+          stamp(e.unitId, e.text || "引爆", "boom");
+          await wait(chain ? 220 : 320);
         } else if (e.kind === "highboom") {
           // 自爆前先预警：单位卡闪两下（薄荷色描边 + 高能液体发白），再炸
           const bc = cards.get(e.unitId);

@@ -4893,6 +4893,8 @@ function explodeBoomcar(target, notes) {
   const half = Math.floor((target.atk || 0) / 2);
   notes.push(`${target.name} 死亡引爆：同区 ${half} 能量 + 1 击破。`);
   markAoeZone(target.zone, { element: "energy", dmg: half, attacker: target });
+  // 画面：在小车身上炸开（震屏、爆炸声、爆炸形状、「引爆」字样；game.js / online-ui.js 的 carboom）
+  spawnPopup(target, { kind: "carboom", text: "引爆", element: "energy" });
   // 同区不分敌我的范围伤害（不能协助格挡）。画面上和高能自爆的余波一样标成爆炸（数字放大、停久一点），
   // 不算进打死它的那次攻击的演出（game.js · strikePlan 跳过这些弹字）
   const prevTag = state.popTag;
@@ -5010,7 +5012,8 @@ function sweepDeadEnemies() {
       notes.push(...absorbSandsInto(u));
       if (!isInnerDepleted(u) && !u.dead) return;
     }
-    if (u.kit === "boomcar") explodeBoomcar(u, notes);
+    // 自爆小车正在挨打死它的那一击（dealTo · holdBoom）：等那一下的弹字出来再炸
+    if (u.kit === "boomcar") { if (u._holdBoom) u._boomPending = true; else explodeBoomcar(u, notes); }
     if (u.kit === "ufo_body") {
       ufoAllLegs(u).forEach(leg => {
         if (leg && !leg._removed) {
@@ -8002,6 +8005,10 @@ function dealTo(attacker, target, opt) {
   if (target && !target.isPlayer) target._killBonus = scoreBonus;
   // 废物利用的来源：记下这一击之前敌人每层的血量，之后只认这一击真正打碎的层
   const layersBeforeHit = target && !target.isPlayer ? (target.layers || []).map(l => ({ type: l.type, cur: Number(l.current) || 0, max: Number(l.max) || 0, sealed: !!l.sealed })) : null;
+  // 自爆小车：这一击打死它时，死亡引爆等这一击的伤害弹字出来之后再炸（见函数末尾）——
+  // 以前先炸（清场在弹字之前），画面上先看到爆炸、小车倒下，打死它的那一下最后才落上去
+  const holdBoom = !!(target && target.kit === "boomcar" && !target._exploded);
+  if (holdBoom) target._holdBoom = true;
   const extra = applyCombat(target, res, attacker);
   // 这一击打死的敌人：本次行动后面的攻击还能打到它（全部算溢出）
   if (target && !target.isPlayer && target.dead && !wasDeadForGhost && state.actionKills && !state.actionKills.includes(target.id)) state.actionKills.push(target.id);
@@ -8155,6 +8162,10 @@ function dealTo(attacker, target, opt) {
       const helper = unitById(flags.blockHelperId);
       if (helper && helper.kit !== "bili") popBreak(helper, res.helperBreak, ele);   // 哔哩哩格挡不掉架势
     }
+  }
+  if (holdBoom) {
+    target._holdBoom = false;
+    if (target._boomPending) { target._boomPending = false; explodeBoomcar(target, extra); }   // 这一击被打死了：现在才炸
   }
   return { res, extra };
 }

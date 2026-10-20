@@ -288,6 +288,62 @@ test("敌人回合问协助格挡：问题框贴在底部、战场不压暗，�
   assert.deepEqual(o.errors, []);
 });
 
+test("协助攻击打死自爆小车：打击形状只落在小车身上，然后小车引爆（以前协助攻击的刀光挨个落到被炸到的队友身上）", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await page.click("#t-online"); await page.click("#t-sandbox");
+  await page.click('[data-new="0"]');
+  await page.waitForSelector("#scr-trpg:not([hidden])");
+  await page.evaluate(() => { GAME.enemyPlan = [{ id: "boomcar", lv: 3, zone: 2 }, { id: "thug_knife", lv: 1, zone: 2 }]; GAME.lastEncounter = null; });
+  await page.click("#tr-fight");
+  await page.waitForSelector("#g-start");
+  await page.keyboard.press("Space");
+  await page.waitForFunction(() => state.combatStarted && state.combatPhase === "player" && GAME.depth === 0, null, { timeout: 15000 });
+  const car = await page.evaluate(() => {
+    Math.random = () => 0.999;
+    const c = state.units.find(u => u.kit === "boomcar");
+    // 队友站到小车那一区（会被引爆炸到），瑞比是远程、留在 1 区；小车架势 1、血厚：瑞比一下打出失衡但打不死
+    partyHeroes().forEach(h => { h.zone = h.kit === "ruby" ? 1 : 2; });
+    c.def = 1; c.atk = Math.max(10, c.atk || 0);
+    c.layers.forEach(l => { l.max = Math.max(l.max, 60); l.current = 60; });
+    GAME.refresh();
+    // 记下每个打击形状画在哪张卡上（离落点最近的）
+    window.__hitOn = [];
+    const f = AttackFx.impact;
+    AttackFx.impact = function (at, move) {
+      let best = null, bd = 1e9;
+      document.querySelectorAll(".unit-wrap[data-id]").forEach(el => {
+        const r = el.getBoundingClientRect(), d = Math.hypot(r.left + r.width / 2 - at.x, r.top + r.height / 2 - at.y);
+        if (d < bd) { bd = d; best = el.dataset.id; }
+      });
+      window.__hitOn.push({ kind: move && move.kind, id: best });
+      return f.apply(this, arguments);
+    };
+    return c.id;
+  });
+  await selectHero(page, "ruby");
+  await page.keyboard.press("1");
+  await page.waitForFunction(() => GAME.arm && GAME.arm.mode === "unit");
+  await page.click(`.unit-wrap[data-id="${car}"]`);
+  await page.waitForFunction(() => !!document.querySelector("#g-choice.show") && /失衡/.test(document.querySelector("#g-choice.show h3").textContent), null, { timeout: 20000 });
+  // 协助攻击这一下要把小车打死：血压到 1
+  await page.evaluate(i => { const c = state.units.find(u => u.id === i); c.layers.forEach((l, k) => { l.current = k === c.layers.length - 1 ? 1 : 0; }); window.__hitOn = []; }, car);
+  await page.click("#g-choice.show .opts button >> nth=0");
+  for (let i = 0; i < 6; i++) {
+    await page.waitForTimeout(150);
+    const ask = await page.evaluate(() => { const c = document.querySelector("#g-choice.show"); return c ? c.querySelector("h3").textContent : ""; });
+    if (!/协助攻击|手杖/.test(ask) || /失衡/.test(ask)) break;
+    await page.click("#g-choice.show .opts button >> nth=0");
+  }
+  await page.waitForFunction(() => GAME.depth === 0 && !document.querySelector("#g-choice.show"), null, { timeout: 30000 });
+  const r = await page.evaluate(() => ({ hits: window.__hitOn, log: (state.logPages || []).flatMap(p => p.lines || []).map(l => l.text).join("\n") }));
+  assert.match(r.log, /自爆小车 死亡引爆/, "小车被协助攻击打死并引爆");
+  assert.ok(r.hits.length >= 2, "协助攻击的打击形状 + 引爆的爆炸：" + JSON.stringify(r.hits));
+  assert.ok(r.hits.every(h => h.id === car), "打击形状都落在小车身上：" + JSON.stringify(r.hits));
+  assert.equal(r.hits[r.hits.length - 1].kind, "explode", "最后是小车炸开");
+  assert.deepEqual(o.errors, []);
+});
+
 test("演出 2× 和点击跳过：攻击演出跟着加速 / 立刻收掉，不拖住战斗", async (t) => {
   const o = await open(t); if (!o) return;
   const { page } = o;

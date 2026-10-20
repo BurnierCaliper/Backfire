@@ -1267,7 +1267,9 @@
             if (fk && event.kind === "fxword") { bubble.insertAdjacentHTML("afterbegin", global.HudIcons.badge(fk)); global.HudIcons.proc(bubble.firstElementChild); }
             if (fk) global.HudIcons.procIn(card, fk);
             card.classList.add("ol-impact"); bubble.classList.add("ol-visible");
-            if (global.HitFx && (event.kind === "dmg" || event.kind === "highboom")) global.HitFx.burst(event.element || "physical", card.getBoundingClientRect(), { big: event.kind === "highboom" });
+            if (global.HitFx && (event.kind === "dmg" || event.kind === "highboom" || event.kind === "carboom")) global.HitFx.burst(event.element || "physical", card.getBoundingClientRect(), { big: event.kind !== "dmg" });
+            // 自爆小车死亡引爆：在小车身上炸开（和房主画面一样的爆炸形状）
+            if (event.kind === "carboom" && AF && AF.impact) { try { AF.impact(rectOf(card), { kind: "explode", el: "energy", area: true }, {}); } catch (_) { /* 画坏了不影响结算 */ } }
             if (main && !fx.parried) {
               if (scr && scr.impact) { try { scr.impact(ctx, event, n, false); } catch (_) { /* 同上 */ } }
               else AF.impact(rectOf(card), fx.move, { n, from: fxFrom });
