@@ -7479,10 +7479,14 @@ function armAtkFx(attacker, flags) {
   flags = flags || {};
   const fromHang = hungAtkFx(attacker);
   const fromBox = [];
-  ["combust","icebreak","bolt","etch","backflow","inertia","diffract"].forEach(id => {
-    const el = uiEl("fFx_" + id);
-    if (el && el.checked) fromBox.push(id);
-  });
+  // 游戏模式（game.html）不读计算器界面的词条勾选框：那些勾选只给手动计算用，
+  // 否则上次勾的「破冰」等会泄漏到技能攻击上（夕夏普攻、格挡反打等）
+  if (!(typeof GAME_MODE !== "undefined" && GAME_MODE)) {
+    ["combust","icebreak","bolt","etch","backflow","inertia","diffract"].forEach(id => {
+      const el = uiEl("fFx_" + id);
+      if (el && el.checked) fromBox.push(id);
+    });
+  }
   const list = [];
   fromHang.concat(fromBox).forEach(id => { if (list.indexOf(id) < 0 && ATKFX[id]) list.push(id); });
   flags.atkFx = list;
