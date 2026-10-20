@@ -441,6 +441,8 @@
       const p = list.find(x => x.weapon === slot.kit && x.slot === slot.slot && (x.part === part || "part_" + x.part === part));
       return p ? ModCompare.text(p) : "";
     }
+    /** 克制表：房主算好发来的 view.matchup（不含坚毅）；玩家端不自己算 */
+    const matchupOf = () => view.matchup || view.packet?.matchup || null;
     function openWorkshop(mat) {
       if (!global.WorkshopUI || !global.WorkshopData) return;
       // 学配方 / 拆解：从工坊里选中的那名角色出钱、拆他的东西（一个玩家操控多名角色时不能总用第一个）
@@ -534,7 +536,7 @@
       if (screen === "lobby" || !data) return '<div class="ol-wait"><h2>等待房间同步</h2><p>房主准备好后会更新这里。</p></div>';
       if (view.packet?.mode === "rogue" && view.packet.rogue && screen === "exploration") return rogueMarkup(view.packet.rogue);
       const units = (data.units || []).filter(u => !u.hidden), logs = view.packet?.publicLogs || [];
-      return `<header class="ol-stage-heading"><div><span class="ol-muted">${esc(view.roomCode)} · ${screen === "battle" ? `第 ${data.turnNo || 1} 回合` : screen === "ended" ? "遭遇结束" : "探索环节"}</span>${screen === "battle" && global.Chain && data.chainStatus ? `<div class="ol-chain">${global.Chain.barHtml(data.chainStatus)}</div>` : ""}<h1>${screen === "battle" ? "战场" : screen === "ended" ? "战斗结算" : "与队伍同行"}</h1><div class="ol-info-tools">${global.WorldMap ? button("地图", "map") : ""}${button("角色资料", "info", 'data-info="sheet"', pending)}${button("武器", "info", 'data-info="armory"', pending)}${button("背包", "info", 'data-info="bag"', pending)}${button("战绩", "info", 'data-info="record"', pending)}${suppliesButton()}${view.packet?.mode !== "rogue" ? button(`任务日志${questList().some(q => q.status === "active") ? ` · ${questList().filter(q => q.status === "active").length}` : ""}`, "quests") : ""}</div></div>${weatherMarkup(data)}</header>${screen === "ended" ? resultMarkup() : ""}${checksMarkup(screen === "battle")}${screen === "battle" || screen === "ended" ? (global.OnlineBattle && global.UnitCard ? '<div class="ol-battle-slot"></div>' : `<div class="ol-zones"${zoneGrid(data).style}>${zoneGrid(data).zones.map(z => `<section class="ol-zone"${z.style}><h2>${z.id} 区</h2>${fieldsMarkup(data, z.id)}${units.filter(u => Number(u.zone) === z.id).map(card).join("") || '<p class="ol-muted">空区域</p>'}${(data.props || []).filter(p => Number(p.zone) === z.id && !p.destroyed).map(p => `<article class="ol-prop" data-prop-id="${esc(p.id)}"><b>${esc(p.name || p.kind || "配置物")}</b>${p.hp != null ? `<span>耐久 ${esc(p.hp)}${p.maxHp == null ? "" : " / " + esc(p.maxHp)}</span>` : ""}</article>`).join("")}</section>`).join("")}</div>${gapsMarkup(data)}${screen === "ended" ? "" : actionsMarkup()}`) : `<p class="ol-muted ol-explore-hint">主持人正在管理探索与遭遇。右侧「小队」频道可以和大家聊天，「消息与成员」里可以私下回复主持人。</p><div class="ol-exploration-party">${units.filter(u => u.isPlayer && !u.weaponOf).map(card).join("")}</div>`}`;
+      return `<header class="ol-stage-heading"><div><span class="ol-muted">${esc(view.roomCode)} · ${screen === "battle" ? `第 ${data.turnNo || 1} 回合` : screen === "ended" ? "遭遇结束" : "探索环节"}</span>${screen === "battle" && global.Chain && data.chainStatus ? `<div class="ol-chain">${global.Chain.barHtml(data.chainStatus)}</div>` : ""}<h1>${screen === "battle" ? "战场" : screen === "ended" ? "战斗结算" : "与队伍同行"}</h1><div class="ol-info-tools">${global.WorldMap ? button("地图", "map") : ""}${screen === "battle" && matchupOf() ? button("克制表", "matchup") : ""}${button("角色资料", "info", 'data-info="sheet"', pending)}${button("武器", "info", 'data-info="armory"', pending)}${button("背包", "info", 'data-info="bag"', pending)}${button("战绩", "info", 'data-info="record"', pending)}${suppliesButton()}${view.packet?.mode !== "rogue" ? button(`任务日志${questList().some(q => q.status === "active") ? ` · ${questList().filter(q => q.status === "active").length}` : ""}`, "quests") : ""}</div></div>${weatherMarkup(data)}</header>${screen === "ended" ? resultMarkup() : ""}${checksMarkup(screen === "battle")}${screen === "battle" || screen === "ended" ? (global.OnlineBattle && global.UnitCard ? '<div class="ol-battle-slot"></div>' : `<div class="ol-zones"${zoneGrid(data).style}>${zoneGrid(data).zones.map(z => `<section class="ol-zone"${z.style}><h2>${z.id} 区</h2>${fieldsMarkup(data, z.id)}${units.filter(u => Number(u.zone) === z.id).map(card).join("") || '<p class="ol-muted">空区域</p>'}${(data.props || []).filter(p => Number(p.zone) === z.id && !p.destroyed).map(p => `<article class="ol-prop" data-prop-id="${esc(p.id)}"><b>${esc(p.name || p.kind || "配置物")}</b>${p.hp != null ? `<span>耐久 ${esc(p.hp)}${p.maxHp == null ? "" : " / " + esc(p.maxHp)}</span>` : ""}</article>`).join("")}</section>`).join("")}</div>${gapsMarkup(data)}${screen === "ended" ? "" : actionsMarkup()}`) : `<p class="ol-muted ol-explore-hint">主持人正在管理探索与遭遇。右侧「小队」频道可以和大家聊天，「消息与成员」里可以私下回复主持人。</p><div class="ol-exploration-party">${units.filter(u => u.isPlayer && !u.weaponOf).map(card).join("")}</div>`}`;
     }
     function observeMessages() {
       const rows = view.messages || [], incoming = rows.filter(m => !seenMessages.has(m.id) && m.from !== own());
@@ -867,6 +869,7 @@
         // 进战斗（或离开单局画面）：工坊、非战斗模式的背包收起来
         if (view.screen !== "exploration") { if (global.WorkshopUI) global.WorkshopUI.close(); if (global.BackpackUI && !global.BackpackUI.inBattleMode()) global.BackpackUI.close(); }
         if (global.WorkshopUI) global.WorkshopUI.refresh(); if (global.BackpackUI) global.BackpackUI.refresh();
+        if (global.MatchupUI) { if (!matchupOf()) global.MatchupUI.close(); else global.MatchupUI.refresh(); }
       }
       document.body.classList.toggle("online-player", !!view.active && !view.isHost);
       if (view.active) {
@@ -1141,6 +1144,7 @@
           break;
         }
         case "rogueWorkshop": openWorkshop(); break;
+        case "matchup": if (global.MatchupUI) global.MatchupUI.toggle(() => matchupOf()); break;
         case "rogueBackpack": openBackpack(); break;
         case "rogueCraftJob": {
           const kit = b.dataset.kit, item = byId("ol-wk-item-" + kit)?.value || null, helper = byId("ol-wk-help-" + kit)?.value || null;

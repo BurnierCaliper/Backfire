@@ -3380,6 +3380,7 @@
     G.actorId = id;
     refreshHud();
     idleBox();
+    if (window.MatchupUI) MatchupUI.refresh();   // 冻土跟着选中单位所在区域
   }
 
   function autoSelect(force) {
@@ -3867,6 +3868,7 @@
 
   function refreshAll() {
     if (G.depth === 0) setView(snapAll(), true);
+    if (window.MatchupUI) MatchupUI.refresh();   // 克制表开着：天气 / 选中单位（冻土）变了跟着变
     refreshHud();
     paintUndo();
     paintRank();
