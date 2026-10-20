@@ -54,7 +54,13 @@
   }
   /** 克制表：当前天气 + 当前行动单位所在区的冻土 / 恶劣环境 + 相位（matchup.js · matchupForState）。不含坚毅 */
   function matchupNow() {
-    try { return typeof matchupForState === "function" ? matchupForState(state, root.GAME && GAME.actorId) : null; } catch (e) { return null; }
+    // 顶层：只看环境（和以前一样，按房主当前行动单位所在区）；units：每个看得见的单位作为受击者各一份（选中谁就用谁的），不含血量、坚毅
+    try {
+      if (typeof matchupForState !== "function") return null;
+      const m = matchupForState(state, root.GAME && GAME.actorId, { defender: false });
+      if (typeof matchupUnitCharts === "function") m.units = matchupUnitCharts(state);
+      return m;
+    } catch (e) { return null; }
   }
   let leftRoom = false;   // 玩家点了「离开房间」：之后（包括刷新时的 pagehide）不再覆盖存档里的 left 标记
   function save() {
