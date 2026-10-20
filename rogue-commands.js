@@ -172,7 +172,8 @@ const RogueCommands = (function () {
       if (run.result && run.result.win) meta.stats.wins += 1;
       meta.stats.deaths += (run.fallen || []).length;
       SaveStore.saveMeta(meta);
-      SaveStore.clearRun();
+      if (run.growth && typeof SaveStore.clearGrowth === "function") SaveStore.clearGrowth();
+      else SaveStore.clearRun();
       return { counted: true };
     },
     startBattle(_c, context) {

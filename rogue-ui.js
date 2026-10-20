@@ -1030,6 +1030,12 @@
       if (!result.resumed) return;
       lastNotes = ["继续上次的进度。"];
       Screens.show("run");
+    },
+    resumeGrowth() {
+      const result = sessionCommand("resume", { growth: true });
+      if (!result.resumed) return;
+      lastNotes = ["继续长线养成的进度。"];
+      Screens.show("run");
     }
   };
 
