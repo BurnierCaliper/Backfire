@@ -368,6 +368,11 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **专长（一）四处修正：荒原行者击落到你所在区域、联机移动校验认荒原行者、以身作盾失衡中不能宣布、兼修·鼓劲选全部友方扣行动点**（feats.js · `featAfterHit` / `featIronwallDeclarers` / `featDelegateBaseOf`；app.js · `dealTo`；hotseat-validation.js · `checkMove`；party.js · `skillCost`；tests/feat-bugs-104.test.js；docs/bug-backlog.md「中 · 专长」四条）
+  - 荒原行者：以前，把飞行单位打进失衡时，引擎（`applyResultToUnit`）已经先把它击落、`flying` 变成 false，`featAfterHit` 再看 `target.flying` 永远是假，「击落到你所在区域」从不触发。现在 `dealTo` 在结算前记下目标是否飞行，传给 `featAfterHit`，打进失衡的飞行单位会被带到攻击者所在区域。
+  - 联机移动校验：以前热座 / 联机的 `checkMove` 要求离开酸液地面、越过空隙时必须有行动点，荒原行者没有行动点就走不了（`doMove` 其实只收附赠动作）。现在荒原行者跳过这两处行动点检查，只需要附赠动作，和 `doMove` 一致；联机的移动选项（online-actions.js）走同一套校验，随之修好。
+  - 以身作盾：以前失衡中的友方也在可宣布名单里（架势已空，「击破改由你承担」扣不到任何东西）。现在失衡中的人不能宣布。击破由宣布者承担、架势至少留 1 的结算本来就接着，补了回归测试。
+  - 兼修·鼓劲：以前 `skillCost` 只认分步 id 是 `role_sturdy`，兼修版的分步 id 是 `feat_rouse`，选「全部友方」只扣附赠。现在两者都认，兼修版选全部友方同样改收 1 行动点（一名友方仍是附赠）。未兼修的涉猎版没有「全部友方」这一步，不受影响。
 - **首领 / 精英「标记没攒满立刻恢复架势」的两个回归：打进失衡时的效果照常触发、飞碟触灵本体的协助攻击打得到**（app.js · `bossQuickRecover` / `brokeInto` / `dealTo` / `dealBreak` / `finishAssist`；tests/boss-quick-recover.test.js；docs/bug-backlog.md H9、H10；回归自 63b90d7）
   - 以前（H10）：首领 / 10 级起精英打出第 1 个标记时，`applyCombat` 里立刻恢复把 `stunned` 清掉了，后面读 `target.stunned` 判断「这一下打进了失衡」的效果全部不触发——过载爆炸、失衡分加成、冲阵 / 乘势 / 荒原行者、猫爪挥打、霜取、拆卸、叮咬……
   - 现在（H10）：立刻恢复时给目标记一个「这一击打进过失衡」的记号 `_brokeNow`，这些效果统一改读 `brokeInto(单位, 结算前是否失衡)`（结算后在失衡，或有这个记号都算）。记号在下一次 `dealTo` / `dealBreak` 开头清掉。没有逐个效果打补丁，也没有把立刻恢复挪后（同一次行动里后面的击破还要打在已经回满的架势上，才能接着攒第二个标记）。规则本身不变：失衡仍然立刻恢复，协助攻击照常排队。
