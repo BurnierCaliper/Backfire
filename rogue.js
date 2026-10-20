@@ -242,7 +242,8 @@ const Rogue = (function () {
     run.actDay = 0;
     if (run.growth) {
       run.main = null;
-      run.lastFusionDay = 0;
+      // 每天的赫心融合体从「过了一天」开始发：开局当天不发（开局抽不了，靠完成任务 / 过天获得）
+      run.lastFusionDay = Number(run.day) || 1;
       grantDailyFusion(run);
       log(run, `长线养成：从任务板接任务赚钱升级。每天获得${ITEM_CATALOG[G().fusionItem].name}，可以在角色抽取机里抽角色。`);
       makeBoard(run);
@@ -597,6 +598,10 @@ const Rogue = (function () {
     const ws = h.weapons.map(heroName).join("、");
     notes.push(`${heroName(h.kit)} ${why || "永久死亡"}${ws ? "，" + ws + " 随之离开队伍" : ""}。`);
   }
+  /** 坚毅生命耗尽（真正死亡的唯一条件；长线养成用） */
+  function shpDepleted(u) {
+    return (Number(u.shpMax) || 0) > 0 && (Number(u.shp) || 0) <= 0;
+  }
   /** 场上的状态写回单局：升级、升级奖励、血量；死亡的角色连同武器人永久离队 */
   function captureParty(run, notes) {
     run.party.slice().forEach(h => {
@@ -604,8 +609,14 @@ const Rogue = (function () {
       if (!u) return;
       const from = h.level || 1;
       tryLevelUp(u);
-      if (u.dead && run.growth) {
-        // 长线养成：永久死亡 → 清零等级与武器等级，移出队伍。下次抽到从 1 级重新培养
+      if (u.dead && run.growth && !shpDepleted(u)) {
+        // 长线养成：倒下（团灭）不是死亡，只有坚毅生命耗尽才真正死亡。战后被队友拖回来，留 1 点生命
+        const last = (u.layers || []).filter(l => l.type !== "shield").slice(-1)[0];
+        if (last) last.current = Math.max(1, Number(last.current) || 0);
+        u.dead = false; u.dying = false; u.upOnShp = false;
+        notes.push(`${u.name} 倒下了，被队友拖了回来（剩 1 点生命）。`);
+      } else if (u.dead && run.growth) {
+        // 长线养成：坚毅生命耗尽 = 真正死亡 → 清零等级与武器等级，移出队伍。下次抽到从 1 级重新培养
         notes.push(`${u.name} 永久死亡，等级与武器等级清零，移出队伍。`);
         const idx = run.party.indexOf(h);
         if (idx >= 0) run.party.splice(idx, 1);
