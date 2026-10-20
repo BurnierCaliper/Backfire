@@ -1037,7 +1037,8 @@ function antFireShell(a, aa, lines) {
   const duel = typeof touDuelVictim === "function" ? touDuelVictim(a) : null;
   const main = duel && victims.includes(duel) ? duel : victims[Math.floor(Math.random() * victims.length)];
   lines.push(`${a.name} 的大酸液弹在 ${zone} 区炸开，正中 ${main.name}。`);
-  aa(main, { element: "acid", mult: 2, baseBreak: 2 });
+  // 按标定落点打，不受普通攻击射程限制（落在自己区 / 隔两个区 / 协助触发都照打）
+  aa(main, { element: "acid", mult: 2, baseBreak: 2, flags: { action: true, anyRange: true } });
   victims.filter(u => u.id !== main.id).forEach(u => {
     aa(u, { element: "acid", mult: 0, flat: Number(a.level) || 1, diceN: 1, diceS: 6, baseBreak: 0, flags: { action: true, aoe: true } });
   });

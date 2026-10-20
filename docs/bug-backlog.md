@@ -8,6 +8,7 @@
 
 ## 已修
 
+- [x] **H7** 蚁型戒备兵种大酸液弹的主目标那一下常被射程判定吞掉 —— `antFireShell` 主目标那一下加 `flags.anyRange`，按标定落点打（tests/h7-ant-shell.test.js）
 - [x] **H12** 高能自爆、深渊 / 空隙坠落、流沙窒息弄死的敌人不走击杀结算 —— `applyKnockdown` 里敌人倒地时补调 `settleEnemyKill`（`_xpGiven` 保证只结算一次），经验、奎支、击杀数、亡命之王「手下被打倒」都正常（app.js · `applyKnockdown`；tests/env-kill-settle.test.js）
 - [x] **H5** 流沙没顶（下陷 3 层）挡不住出手，还不扣行动点 —— `runSkill` 在 `snapshot()` 之前用 `costBlockReason` 挡住付不起消耗的行动；`baseBlockReason` / 联机 `baseReason` 提前灰掉按钮（tests/quicksand-lock.test.js）
 - [x] **H8** 跑团模板「我方同阵营」的友军在敌人回合从不行动 —— ai.js 新增 `actors()`（敌人 + 友军，中立生物仍不行动），`actingOrder()` 改用它；`foes()` 不变（胜负判定、剩余敌人数照旧不含友军）；友军打死的敌人没有经验 / 掉落 / 击杀分（app.js · `settleEnemyKill`；tests/ally-acts.test.js）
@@ -29,7 +30,6 @@
 | # | 问题 | 位置 |
 |---|---|---|
 | H2 | 单局「休整」补给不够又没钱就卡死：「开始长休」禁用，「硬撑着过夜」没有入口 | `rogue-ui.js:939-954`、`rest-report.js:47`、`rogue.js:2259-2263` |
-| H7 | 蚁型戒备兵种大酸液弹的主目标那一下常被射程判定吞掉 | `enemies.js:1026-1055`、`ai.js:412-421` |
 | H9 | （回归 63b90d7）首领没攒满标记「立刻恢复」后，飞碟触灵本体的协助攻击打不到它 | `app.js:10476 / 7609` |
 | H10 | （回归 63b90d7）首领 / 10 级以上精英打出第 1 个标记时，「打进失衡时」的效果全不触发 | `app.js:4654 / 7844-7854` |
 
