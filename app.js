@@ -573,8 +573,7 @@ function checkHighBoom(unit, opt) {
   const val = highBoomValue(unit);
   // 陨石开采机被我方打死：高能值转给杀它的人，自己不自爆（还活着时蓄能撑爆照常自爆）
   if (val > 0 && hp <= 0 && unit.kit === "meteor_miner" && typeof minerDeathTransfer === "function") {
-    const acc = state.actionAcc;
-    const killer = unitById(unit._lastHitBy) || (acc && acc.actorIsPlayer ? unitById(acc.actorId) : null);
+    const killer = unitById(unit._lastHitBy);
     if (killer && killer.isPlayer && !killer.dead) {
       const notes = [];
       minerDeathTransfer(unit, killer, notes);
@@ -649,12 +648,13 @@ function explodeHigh(unit, total, opt) {
     const acc = state.actionAcc;
     const envWho = envBoom ? envCreditUnit(opt.envBy) : null;
     if (envWho) {
-      unit._lastHitBy = envWho.id;   // 击杀算环境的所有者
+      creditPlayerHit(unit, (envOwnerUnit(opt.envBy) || {}).id);   // 击杀算环境的所有者；没有所有者就算之前最后打过它的玩家
       scoreEnvHit(unit, { total: lifeBefore, breakDealt: 0 }, envWho, 0, "爆炸");
       const over = Math.floor(unit.overkill * SCORE_RULES.overkill);
       if (over > 0) envCommit(() => addScore("env", over * SCORE_RULES.env, envWho));
     } else if (acc && acc.actorIsPlayer) addScore("overkill", Math.floor(unit.overkill * SCORE_RULES.overkill), unitById(acc.actorId));
   }
+  const boomOwner = envBoom ? (envOwnerUnit(opt.envBy) || {}).id : statusOwnerId(unit, "high");   // 高能状态的所有者（要在清掉高能之前取）
   (unit.layers || []).forEach(l => { l.current = 0; });
   // 倒地统一结算（applyKnockdown）：力竭 3 即死，起身中的人坚毅生命扣光死亡（以前被炸回濒死、还能再起身）
   const downNotes = [];
@@ -689,7 +689,8 @@ function explodeHigh(unit, total, opt) {
       const maxB = (u.layers || []).reduce((a, l) => a + (Number(l.max) || 0), 0);
       // 先打标记再结算：演出里铭牌一变灰就走「慢慢消失」
       if (!u.isPlayer && aoe >= lifeB && aoe >= maxB * 0.5) u.killBig = true;
-      const hitIt = () => applyTypedDot(u, aoe, "energy", notes, `${u.name} 被高能余波击中 ${aoe}`);
+      // 余波打死的敌人算高能状态的所有者的击杀（不是引爆的那个人）；没有所有者就不改它们各自的最后一击
+      const hitIt = () => applyTypedDot(u, aoe, "energy", notes, `${u.name} 被高能余波击中 ${aoe}`, { by: boomOwner });
       if (envBoom) withEnvOwner(opt.envBy, hitIt); else hitIt();
       // 被余波炸死的敌人同样显示负血量，炸掉一半以上血量的慢慢消失
       if (!u.isPlayer && (u.dead || totalHp(u) <= 0)) {   // dead 要等稍后清场才标，这里看血量
@@ -784,7 +785,8 @@ function applyAbyssFall(unit, prevZone, notes) {
   // 环境分数：把敌人弄进深渊（损毁地面塌掉、被击退进去……）——记在场地所有者 / 这次行动的出手方身上
   if (!unit.isPlayer && loss > 0) {
     const who = envCreditUnit(f.by);
-    if (who) { unit._lastHitBy = who.id; scoreEnvHit(unit, { total: Math.min(loss, totalHp(unit)), breakDealt: 0 }, who, 0, "深渊"); }
+    creditPlayerHit(unit, (envOwnerUnit(f.by) || {}).id);   // 深渊：有所有者算所有者，没有就算之前最后打过它的玩家
+    if (who) { scoreEnvHit(unit, { total: Math.min(loss, totalHp(unit)), breakDealt: 0 }, who, 0, "深渊"); }
   }
   applyTrueDamage(unit.layers, loss);
   if ((loss || 0) > 0) spawnFloater(unit, loss, "physical");
@@ -2149,7 +2151,7 @@ function turnEnd() {
         dmg += r.total;
         parts.push(r.text);
       }
-      applyTypedDot(u, dmg * sm, "fire", notes, `${u.name} 灼烧${stacks}层分别掷骰 ${parts.join(" + ")} = ${dmg}${sm > 1 ? ` ×2（加倍计量）= ${dmg * sm}` : ""}`);
+      applyTypedDot(u, dmg * sm, "fire", notes, `${u.name} 灼烧${stacks}层分别掷骰 ${parts.join(" + ")} = ${dmg}${sm > 1 ? ` ×2（加倍计量）= ${dmg * sm}` : ""}`, { by: statusOwnerId(u, "burn") });
       let add = 1;
       if (weather === "heat") add += ex;
       if (weather === "snow") add = 0;
@@ -2164,7 +2166,7 @@ function turnEnd() {
       const armor = (u.layers || []).some(l => l.type === "armor" && l.current > 0);
       const d = statusDotDice("corr", u.level, weather, armor, ex);
       const r = takeDice(d.n, d.s, 0);
-      applyTypedDot(u, r.total * sm, "acid", notes, `${u.name} 腐蚀 ${r.text}${sm > 1 ? " ×2（加倍计量）" : ""}`);
+      applyTypedDot(u, r.total * sm, "acid", notes, `${u.name} 腐蚀 ${r.text}${sm > 1 ? " ×2（加倍计量）" : ""}`, { by: statusOwnerId(u, "corr") });
     }
     if (u.statuses.frostbite) {
       let br = weather === "snow" ? 2 * ex : 1;
@@ -2385,7 +2387,7 @@ function shockPulse(source) {
   );
   notes.push(`${source.name} 感电触发 ${r.text} → ${dmg}${sm > 1 ? "（加倍计量 ×2）" : ""} 电击（同区同阵营：${allies.map(u => u.name).join("、") || "无"}）`);
   allies.forEach(u => {
-    applyTypedDot(u, dmg, "electric", notes, `${u.name} 被感电波及`);
+    applyTypedDot(u, dmg, "electric", notes, `${u.name} 被感电波及`, { by: source.isPlayer ? null : statusOwnerId(source, "shock") });
     if (typeof popStatus === "function") { /* damage floater already from applyTypedDot */ }
   });
   source._shockBusy = false;
@@ -2799,6 +2801,35 @@ function envCreditUnit(by) {
   if (u && u.isPlayer) return u;
   const acc = state.actionAcc;
   return acc && acc.actorIsPlayer ? unitById(acc.actorId) || null : null;
+}
+/** 击杀归属用的环境所有者：只认真正的我方所有者 / 触发者，没有就是 null（不回落到当前行动者——
+ *  没有所有者的场地、天气、流沙，打死的算它之前最后一个伤害过它的玩家，不能记给碰巧在行动的人）。 */
+function envOwnerUnit(by) {
+  const id = envCreditId(by);
+  const u = id != null ? unitById(id) : null;
+  return u && u.isPlayer ? u : null;
+}
+/** 当前正在行动的我方单位 id（谁的行动都不在进行时是 null） */
+function actingPlayerId() {
+  const acc = state.actionAcc;
+  return acc && acc.actorIsPlayer ? acc.actorId : null;
+}
+/** 记下「最后一个伤害过这个敌人的玩家」：击杀归属只看它。uid 不是我方单位就不动 */
+function creditPlayerHit(target, uid) {
+  if (!target || target.isPlayer || uid == null) return;
+  const u = unitById(uid);
+  if (u && u.isPlayer) target._lastHitBy = u.id;
+}
+/** 持续状态（灼烧 / 腐蚀 / 高能……）的所有者：谁给敌人挂上的。回合结束的持续伤害、高能余波按它归属击杀 */
+function statusOwnerId(unit, key) {
+  const id = unit && unit._statusBy ? unit._statusBy[key] : null;
+  const u = id != null ? unitById(id) : null;
+  return u && u.isPlayer ? u.id : null;
+}
+function markStatusOwner(unit, key, uid) {
+  if (!unit || unit.isPlayer || uid == null) return;
+  unit._statusBy = unit._statusBy || {};
+  unit._statusBy[key] = uid;
 }
 /** 环境伤害打在敌人身上：伤害、击破的分 ×1.2 记成「环境」 */
 function scoreEnvHit(target, res, who, bonus, label) {
@@ -3286,7 +3317,13 @@ function applyTypedDotIn(env, unit, amount, element, notes, label, opts) {
   const byType = () => (unit.layers || []).reduce((m, l) => { m[l.type] = (m[l.type] || 0) + Math.max(0, Number(l.current) || 0); return m; }, {});
   const rotBefore = rotOwner ? byType() : null;
   const envWho = env && unit && !unit.isPlayer ? envCreditUnit(env.by) : null;
-  if (envWho) unit._lastHitBy = envWho.id;   // 场地打死的敌人：击杀算环境的所有者
+  // 击杀归属：场地有所有者算所有者；调用方显式给了出手方（状态持续伤害的所有者、高能状态的所有者）算他，
+  // 给的是 null 就不改最后一击；都没给，是玩家行动中顺带造成的就算行动的人
+  if (!unit.isPlayer) {
+    if (env) creditPlayerHit(unit, (envOwnerUnit(env.by) || {}).id);
+    else if ("by" in opts) creditPlayerHit(unit, opts.by);
+    else creditPlayerHit(unit, actingPlayerId());
+  }
   notes.push(...applyCombat(unit, res, null));
   if (rotOwner) {
     const after = byType();
@@ -4955,10 +4992,10 @@ function settleEnemyKill(target, notes) {
   }
   target.dead = true;
   target._xpGiven = true;
-  // 战场数据：最后一击是谁打的算谁；持续伤害在某人行动中打死的，算那个人
+  // 战场数据：击杀算最后一个伤害过它的玩家（_lastHitBy，各条死亡路径在造成伤害时记下）；
+  // 只被敌人 / 友军 / 中立生物打过的，不算任何玩家的击杀。不再回落到「当前行动者」（回合结束的死亡会记错人）
   {
-    const acc = state.actionAcc;
-    const killer = unitById(target._lastHitBy) || (acc && acc.actorIsPlayer ? unitById(acc.actorId) : null);
+    const killer = unitById(target._lastHitBy);
     const st = battleStat(killer);
     if (st) st.kills += 1;
     // 评分：敌人倒下就算（谁打的都算全队的分；能归到人的记在那个人身上）
@@ -5710,7 +5747,7 @@ function stripFocusLayer(target, layerType, lines) {
   else appendLog(msg);
   if (typeof spawnFloater === "function") spawnFloater(target, lost, "harmonic");
   if (typeof spawnPopup === "function") spawnPopup(target, { kind: "status", text: "聚焦抹层", element: "harmonic" });
-  if (wasInner) settleEnemyKill(target, lines || []);
+  if (wasInner) { creditPlayerHit(target, actingPlayerId()); settleEnemyKill(target, lines || []); }
   // 抹层同时露出结构弱点：2 击破（内层被抹、敌人已倒下就不用了）
   else if (!target.dead) {
     const notes = [];
@@ -7687,7 +7724,7 @@ function dealTo(attacker, target, opt) {
   if (target && target.isStructure) return dealToStructure(attacker, target, opt);   // 打配置物 / 危墙的替身（#52）
   // 战场数据：击杀在伤害结算里就会发生，所以先记下「最后一击是谁」
   if (attacker && target && attacker.isPlayer && !target.isPlayer && (state.units || []).includes(attacker)) target._lastHitBy = attacker.id;
-  else if (attacker && attacker.envSrc && target && !target.isPlayer) { const w = envCreditUnit(attacker); if (w) target._lastHitBy = w.id; }   // 配置物打死的：击杀算触发者
+  else if (attacker && attacker.envSrc && target && !target.isPlayer) creditPlayerHit(target, (envOwnerUnit(attacker) || {}).id);   // 配置物打死的：击杀算触发者
   if (!opt.flags.atkFx) armAtkFx(attacker, opt.flags);
   if (opt.flags.diffract) {
     opt.flags.blockResolved = true;
@@ -10054,6 +10091,7 @@ function knockdownByBreak(u, notes) {
   // 深渊上空被击落：再坠入深渊失去 10%（共 30%），并离开深渊（和攻击打空架势的击落一致）
   if (!u.dead) applyAbyssFall(u, null, notes);
   if (!u.isPlayer && isInnerDepleted(u)) {
+    creditPlayerHit(u, actingPlayerId());
     settleEnemyKill(u, notes);
     notes.push(`${u.name} 被击落摔死。`);
     notes.push(...sweepDeadEnemies());
@@ -10341,6 +10379,7 @@ function clearShift(u) {
 
 function popStatus(unit, key) {
   if (unit && unit.isStructure) return;   // 物体不吃状态（#52）
+  markStatusOwner(unit, key, actingPlayerId());   // 玩家行动中给敌人挂的状态：记下所有者
   if (key === "shockwave" && typeof syncShockwave === "function") syncShockwave(unit, null);
   const meta = STATUS_POP[key];
   if (meta) spawnPopup(unit, { kind: "status", text: meta.name, element: meta.element });

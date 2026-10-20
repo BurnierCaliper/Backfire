@@ -239,7 +239,7 @@ function bestiaryRecordBattle(outcome) {
     const lv = Number(u.level) || 1;
     e.minLv = e.minLv == null ? lv : Math.min(e.minLv, lv);
     e.maxLv = e.maxLv == null ? lv : Math.max(e.maxLv, lv);
-    if (u.dead || u._removed) e.kills += 1;
+    if (u.dead) e.kills += 1;   // 下潜逃走的（只有 _removed）不是击杀
     e.last = now;
     e.lastOutcome = outcome || null;
     d.kits[kit] = e;
