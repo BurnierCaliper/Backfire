@@ -254,7 +254,7 @@ function renderInspect() {
   const hp = (u.layers || []).map(l => `${LAYER[l.type] || l.type} ${round2(l.current)}/${l.max}`).join(" · ");
   box.innerHTML = `<div class="name">${escapeHtml(u.name)} · Lv${u.level} · ${u.zone}区</div>
     <div>${hp}</div>
-    <div>架势 ${u.def}/${u.defMax} · ATK ${effectiveAtk(u, state.units)}</div>
+    <div>架势 ${defText(u)} · ATK ${effectiveAtk(u, state.units)}</div>
     <div>${resourceText(u) || ""}</div>
     <div class="status-line">${escapeHtml(statusLine(u))}</div>`;
 }
@@ -884,7 +884,7 @@ function unitCard(u, pos) {
       return `<div class="bar-label"><span>${LAYER[l.type] || l.type}</span><span>${round2(l.current)}/${l.max}</span></div>
         <div class="bar"><span style="width:${pct}%;background:${LAYER_COLOR[l.type] || "#888"}"></span></div>`;
     }).join("")}
-      ${u.noPosture || u.kit === "ufo_leg" ? "" : `<div class="bar-label"><span>架势</span><span>${u.def}/${u.defMax}</span></div>
+      ${u.noPosture || u.kit === "ufo_leg" ? "" : `<div class="bar-label"><span>架势</span><span>${defText(u)}</span></div>
       <div class="bar def-bar"><span style="width:${Math.max(0, Math.min(100, (Number(u.def) / Math.max(1, Number(u.defMax))) * 100))}%"></span></div>`}
     </div>
     <div class="token-atk">ATK ${effectiveAtk(u, state.units)}</div>
@@ -3232,6 +3232,7 @@ function pulseHighVoltage(target, amount, hitNo, hitMax) {
 
 function convertUnstableInHv(u, notes) {
   if (!u || !u.statuses || !u.statuses.unstable) return;
+  if (u.trainingDummy) return;
   if (fieldExempt(u)) return;   // 保释：豁免场地
   const f = state.fields[u.zone] || {};
   if (!f.electric) return;
@@ -4313,6 +4314,7 @@ function triggerLeaveOpportunity(mover, fromZone, notes) {
  *  · 结算时走的人已经站到隔壁了，这一下是在他离开的那一区打的：替他挡的是那一区的铁壁 / 屏障（dealTo · wallZone）。
  *  · 每一下借机攻击都是单独的一次攻击：屏障「已拦截本次行动」只看这一下，不沿用、也不占用当前行动的记录（和防卫炮台那一炮一样） */
 function opportunityStrike(attacker, mover, fromZone, opt) {
+  if (attacker && attacker.trainingDummy) return null;   // 训练假人不做任何反应攻击
   const wallBefore = state.actionWallHit;
   state.actionWallHit = {};
   try {
@@ -6281,6 +6283,7 @@ function eligibleAssisters(breaker, broken) {
     const hostile = (x, y) => typeof hostileTo === "function" ? hostileTo(x, y) : !!x.isPlayer !== !!y.isPlayer;
     return fieldUnits().filter(u =>
       !u.isPlayer &&
+      !u.trainingDummy &&   // 训练假人不协助攻击（training.js）
       hostile(u, broken) &&
       (!breaker || breaker.isPlayer || u.id === breaker.id || !hostile(u, breaker)) &&
       !u.dead && !u.hidden && !u.stunned &&
@@ -9905,6 +9908,12 @@ function spawnFloater(unit, dmg, element) {
   spawnPopup(unit, { kind: "dmg", value: dmg, element: element });
 }
 
+/** 架势显示：训练假人（架势 ≥ DEF_INF_AT）写 ∞，其余照 当前/上限 */
+const DEF_INF_AT = 100000;
+function defText(u) {
+  return Math.max(Number(u.defMax) || 0, Number(u.def) || 0) >= DEF_INF_AT ? "∞" : `${u.def}/${u.defMax}`;
+}
+
 function isEffectivelyStunned(u) {
   if (!u) return false;
   if (u.stunned) return true;
@@ -9955,6 +9964,7 @@ function dealBreak(unit, amount, element, notes, reason, opt) {
   if (unit) unit._brokeNow = false;
   amount = Math.max(0, Math.floor(Number(amount) || 0));
   if (!unit || !amount) return;
+  if (unit.trainingDummy) return;   // 训练假人架势无限：吃不到任何击破
   opt = opt || {};
   if (/冻伤/.test(reason || "")) procFx(unit, "frost");
   notes = notes || [];
@@ -10049,6 +10059,7 @@ function knockdownByBreak(u, notes) {
 /** 挂上不稳：已经不稳的再挂一个 → 两个不稳转成晕眩（失衡）。返回 true = 现在是不稳状态 */
 function applyUnstable(u, notes) {
   if (!u) return false;
+  if (u.trainingDummy) return false;   // 训练假人：不会不稳 / 晕眩
   u.statuses = u.statuses || {};
   if (u.statuses.unstable) {
     u.statuses.unstable = false;
@@ -13743,6 +13754,7 @@ function dmFillDef(u) {
 }
 
 function dmForceStun(u) {
+  if (u.trainingDummy) return;   // 训练假人不会失衡
   u.def = 0;
   u.stunned = true;
 }

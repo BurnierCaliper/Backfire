@@ -1337,6 +1337,7 @@ function applyResultToUnit(target, result, attacker) {
     spent = 0;
     notes.push("背水一战：起身中不失去架势。");
   }
+  if (target.trainingDummy) spent = 0;   // 训练假人架势无限：不扣架势、不失衡
   if (target.raceTrait === "catFocus") spent = Math.min(spent, Math.max(0, 2 - (target.lostDefThisTurn || 0)));
   // 坚挺：架势不会被打到 1 以下（不倒战意给的，本回合有效）
   if (target.statuses && target.statuses.sturdy && (Number(target.def) || 0) >= 1 && spent > (Number(target.def) || 0) - 1) {

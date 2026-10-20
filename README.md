@@ -368,6 +368,11 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **训练场四处修正：聚焦抹层不再把假人抹成 0/0、假人不做借机 / 协助攻击、「重新开始」重开这一场训练、假人架势真正无限（卡片写「架势 ∞」）**（training.js · `setupField` / `refillDummy` / `restart`；app.js · `opportunityStrike` / `eligibleAssisters` / `dealBreak` / `applyUnstable` / `convertUnstableInHv` / `dmForceStun` / `defText`；engine.js · 结算击破；items.js · `itemStun`；game.js · 顶栏「重新开始」、单位详情；tests/training-bugs-105.test.js）
+  - 聚焦抹层：以前，抹层会把那一层写成 0/0 并封死（抹内层还会让假人归零），`refillDummy` 只做 `current = max`，0/0 补回来还是 0/0，训练打不下去。现在 `setupField` 记下假人原始的层（种类和最大值），补满时按它重建、去掉封死、清掉聚焦；层被抹掉 / 移走也算补满的条件，被抹掉的血照记进总伤害。
+  - 反应攻击：以前 ai.js 只在假人自己的回合里跳过它，借机和协助走别的入口，假人照样出手。现在 `opportunityStrike` 不让假人出手，`eligibleAssisters` 不把假人算进协助名单。
+  - 重新开始：以前顶栏「重新开始」只认普通战斗，在训练场里会开一场普通战斗，`Training.active` 等状态留在里面。现在训练场里点它就是重开这一场训练（`Training.restart()`，沿用角色、等级和布置，训练记录重置）；不在训练场时行为不变。离开训练场仍是重新载入页面。
+  - 架势无限：以前只是把假人架势设成 1e6，击破、清空架势、直接让目标失衡的效果仍能把它打下去或打进失衡，卡片和详情还写数字。现在击破结算（`resolveAttack` 的扣架势、`dealBreak`）、不稳转晕眩、闪光震撼弹、GM 强制失衡都排除训练假人，`refillDummy`（每次结算后的 `tick`）还会把架势补回满、清掉失衡；单位卡片、战场详情和检视栏都写「架势 ∞」（`defText`，架势 ≥ 10 万显示 ∞）。
 - **专长（一）四处修正：荒原行者击落到你所在区域、联机移动校验认荒原行者、以身作盾失衡中不能宣布、兼修·鼓劲选全部友方扣行动点**（feats.js · `featAfterHit` / `featIronwallDeclarers` / `featDelegateBaseOf`；app.js · `dealTo`；hotseat-validation.js · `checkMove`；party.js · `skillCost`；tests/feat-bugs-104.test.js；docs/bug-backlog.md「中 · 专长」四条）
   - 荒原行者：以前，把飞行单位打进失衡时，引擎（`applyResultToUnit`）已经先把它击落、`flying` 变成 false，`featAfterHit` 再看 `target.flying` 永远是假，「击落到你所在区域」从不触发。现在 `dealTo` 在结算前记下目标是否飞行，传给 `featAfterHit`，打进失衡的飞行单位会被带到攻击者所在区域。
   - 联机移动校验：以前热座 / 联机的 `checkMove` 要求离开酸液地面、越过空隙时必须有行动点，荒原行者没有行动点就走不了（`doMove` 其实只收附赠动作）。现在荒原行者跳过这两处行动点检查，只需要附赠动作，和 `doMove` 一致；联机的移动选项（online-actions.js）走同一套校验，随之修好。
