@@ -52,6 +52,17 @@ test("D3 GM UI: spawn and distinct remove/kill commands are explicit JSON with s
   assert.deepEqual(f.errors, []);
 });
 
+test("GM UI（作者 10/20）：「生成敌人」的等级默认填队伍平均等级（trpgPartyLevel），照样可以改", async t => {
+  const f = await fixture(t); if (!f) return; const { page } = f;
+  await page.evaluate(() => { window.trpgPartyLevel = () => 7; });   // 规则里的队伍平均等级（trpg-tasks.js）
+  await host(page);
+  assert.equal(await page.inputValue("#ogm-enemy-level"), "7", "默认填队伍平均等级");
+  await page.click('[data-action="spawn"]');
+  await page.fill("#ogm-enemy-level", "3"); await page.click('[data-action="spawn"]');
+  assert.deepEqual((await calls(page)).map(c => c.level), [7, 3], "不改就按队伍平均等级，改了按改的");
+  assert.deepEqual(f.errors, []);
+});
+
 test("D3 GM UI: manual action uses chosen target/flow and closes tools for real reaction dialogs", async t => {
   const f = await fixture(t); if (!f) return; const { page } = f; await host(page);
   assert.equal(await page.locator('[data-action="enemy-skill"]').isDisabled(), true);

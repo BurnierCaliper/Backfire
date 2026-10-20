@@ -182,10 +182,12 @@
     // 首领机制（死刑 / 分担 / 远离 / 齐射）的标记：被标记的人身上写「还有 N 回合」，首领身上写着标了谁、还有几回合落下
     const execChip = (s.marks || []).map(x => `<span class="chip mech-chip mark-${x.type}" title="${esc(markTip(x))}">${esc(x.name)} · ${esc(mechLeft(x))}${x.type === "share" ? ` · ${x.group}人` : x.type === "spread" ? ` · ×${x.stack}` : ""}</span>`).join("") +
       (s.casts || []).map(x => `<span class="chip mech-chip cast-${x.type}" title="${esc(castTip(x))}">${esc(x.name)}→${esc(x.target || "?")} · ${esc(mechLeft(x))}</span>`).join("");
-    // 有图标的状态画成徽章（hud-icons.js），没有图标的（聚焦、掩护、首领阶段……）还是写字
-    const badges = icons ? (s.badges || []) : [];
+    // 有图标的状态画成徽章（hud-icons.js），没有图标的（聚焦、掩护、首领阶段……）还是写字。
+    // 徽章只排一行（作者 10/20 定）：重要的排前面，放不下的收进「+N」（fitBadges）——以前一区单位多、效果多时，
+    // 卡片缩小、图标换成四五行，同区的卡要滚动才看得到。全部效果悬停（本机）/ 点卡片（联机详情面板）看
+    const badges = icons ? orderBadges(s.badges || []) : [];
     const badgeKey = badges.map(b => b.key + ":" + b.stack).join("|");
-    q(".u-status").innerHTML = execChip + highChip + (badges.length ? `<span class="hi-badges">${badges.map(b => HudIcons.badge(b.key, b.stack, b.title)).join("")}</span>` : "") + (s.status
+    q(".u-status").innerHTML = execChip + highChip + (badges.length ? `<span class="hi-badges hi-row">${badges.map(b => HudIcons.badge(b.key, b.stack, b.title)).join("")}<span class="hi-more" hidden></span></span>` : "") + (s.status
       ? s.status.split(" · ").filter(t => t && t !== "无状态" && !/^高能/.test(t) && !(icons && HudIcons.covered(t))).map(t => `<span class="chip">${esc(t)}</span>`).join("")
       : "");
     // 新挂上的、层数变了的徽章：生效一下（放大 + 发光）
@@ -195,6 +197,7 @@
       badges.forEach(b => { if (before[b.key] !== String(b.stack)) HudIcons.procIn(q(".u-status"), b.key); });
     }
     c.prevBadges = badgeKey;
+    if (badges.length) fitBadgesSoon(c.wrap);
     // 中立生物的迷你名牌：只挂几个小标签（失衡 / 摊平 / 已发现）
     if (s.neutral) q(".u-status").innerHTML = (s.neutralTags || []).map(t => `<span class="chip m-${esc(t.key)}">${esc(t.text)}</span>`).join("");
     // 有耐久条时，资源文字里的「耐久 N」就不重复写了
@@ -218,7 +221,47 @@
     c.prev = s;
   }
 
-  const api = { create, update, sumCur, sumMax, mechLeft, mechLines, towerTip, towerHtml };
+  /* ---------- 效果徽章只排一行（作者 10/20 定） ---------- */
+  /** 先放要紧的：晕眩标记、休眠 / 下潜 / 下陷、高能（蓄能）；其余照 hud-icons.js · unitBadges 的顺序 */
+  const BADGE_FIRST = { stunMark: 0, dormant: 1, submerged: 1, sink: 1, high: 2, store: 3 };
+  function orderBadges(list) {
+    return list.map((b, i) => ({ b, i, r: BADGE_FIRST[b.key] != null ? BADGE_FIRST[b.key] : 10 }))
+      .sort((x, y) => x.r - y.r || x.i - y.i).map(x => x.b);
+  }
+  /** 一行放不下的徽章收进「+N」（悬停「+N」看收起来的是哪些）。量的是真实宽度：卡片缩小（dense-1…3）、窗口变化之后要重新量——
+   *  game.js / online-battle.js 的 fitZones 量完区的疏密会再调一次。scope：卡片或整个战场 */
+  function fitBadges(scope) {
+    if (!scope || typeof scope.querySelectorAll !== "function") return;
+    scope.querySelectorAll(".hi-badges.hi-row").forEach(row => {
+      const items = [...row.children].filter(x => x.classList.contains("hi-badge"));
+      const more = [...row.children].find(x => x.classList.contains("hi-more"));
+      items.forEach(b => b.classList.remove("hi-off"));
+      if (more) { more.hidden = true; more.textContent = ""; more.removeAttribute("title"); }
+      // 右边留的内边距是给层数小圆标的（它伸出图标外面），不算可用宽度
+      const W = row.clientWidth - (typeof getComputedStyle === "function" ? parseFloat(getComputedStyle(row).paddingRight) || 0 : 0);
+      if (!(W > 0) || !items.length) return;
+      const right = (el) => el.offsetLeft + el.offsetWidth;
+      if (right(items[items.length - 1]) <= W + 0.5) return;
+      if (more) { more.hidden = false; more.textContent = "+" + items.length; }
+      const gap = parseFloat(typeof getComputedStyle === "function" ? getComputedStyle(row).columnGap : "") || 4;
+      const room = W - (more ? more.offsetWidth + gap : 0);
+      let keep = items.length;
+      while (keep > 0 && right(items[keep - 1]) > room + 0.5) keep--;
+      const off = items.slice(keep);
+      off.forEach(b => b.classList.add("hi-off"));
+      if (more) {
+        more.textContent = "+" + off.length;
+        more.title = "还有：" + off.map(b => b.getAttribute("title") || b.getAttribute("aria-label") || "").filter(Boolean).join("、");
+      }
+    });
+  }
+  function fitBadgesSoon(el) {
+    if (!el || el._fitBadges || typeof requestAnimationFrame !== "function") return;
+    el._fitBadges = true;
+    requestAnimationFrame(() => { el._fitBadges = false; fitBadges(el); });
+  }
+
+  const api = { create, update, sumCur, sumMax, mechLeft, mechLines, towerTip, towerHtml, fitBadges, orderBadges };
   root.UnitCard = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof window !== "undefined" ? window : globalThis);

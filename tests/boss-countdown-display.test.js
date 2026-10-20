@@ -114,6 +114,29 @@ async function checkTip(page, sel) {
   return t0;
 }
 
+/** 联机（作者 10/20 起）：悬停只出简短版——照样列出每个机制还有几回合；完整说明点一下单位在详情面板里看，内容多时面板自己滚动 */
+async function checkOnlineTip(page, sel) {
+  await page.hover(sel);
+  await page.waitForSelector(".unit-tip.show");
+  const t0 = await page.$eval(".unit-tip.show", t => ({ mechs: [...t.querySelectorAll(".ut-mechs li")].map(li => li.textContent), bottom: t.getBoundingClientRect().bottom, text: t.textContent }));
+  assert.ok(t0.mechs.length >= 4, "悬停说明列出首领的每个机制");
+  for (const name of ["死刑", "分担", "踩塔", "远离"]) assert.ok(t0.mechs.some(x => x.startsWith(name) && /还有 \d 回合/.test(x)), name + " 写出还有几回合");
+  assert.match(t0.text, /点一下单位看全部说明/);
+  assert.ok(t0.bottom <= 800, "浮窗不超出屏幕");
+  assert.doesNotMatch(t0.text, /坚毅生命/);
+  await page.click(sel);
+  await page.waitForSelector("#online-unit-detail:not([hidden])");
+  const p = await page.$eval("#online-unit-detail", t => ({ mechs: [...t.querySelectorAll(".ut-mechs li")].map(li => li.textContent), sh: t.scrollHeight, ch: t.clientHeight, bottom: t.getBoundingClientRect().bottom, text: t.textContent }));
+  assert.ok(p.mechs.length >= 4, "详情面板也列出每个机制");
+  assert.ok(p.sh > p.ch, "内容多：详情面板自己能滚动 " + JSON.stringify({ sh: p.sh, ch: p.ch }));
+  assert.ok(p.bottom <= 800, "面板不超出屏幕");
+  assert.doesNotMatch(p.text, /坚毅生命/);
+  await page.$eval("#online-unit-detail", t => { t.scrollTop = t.scrollHeight; });
+  const p1 = await page.$eval("#online-unit-detail", t => ({ top: t.scrollTop, max: t.scrollHeight - t.clientHeight }));
+  assert.ok(p1.top > 0 && Math.abs(p1.top - p1.max) <= 1, "能翻到面板最底下");
+  return p;
+}
+
 test("单机战斗画面（Roguelike 同一套）：卡片 / 首领 / 踩塔都写还有几回合；挤的区里也看得到；悬停说明放不下时能滚到底", { timeout: 60000 }, async t => {
   if (!browser) { t.skip("Playwright/browser unavailable"); return; }
   const origin = await site(t);
@@ -150,7 +173,7 @@ test("单机战斗画面（Roguelike 同一套）：卡片 / 首领 / 踩塔都�
   assert.deepEqual(errors, []);
 });
 
-test("联机单局玩家画面（1280×800）：首领倒计时、踩塔倒计时、悬停说明里的机制都看得到；内容多时能滚动；战场高度不变、页面不滚动", { timeout: 120000 }, async t => {
+test("联机单局玩家画面（1280×800）：首领倒计时、踩塔倒计时、悬停说明里的机制都看得到；完整说明点开详情面板、内容多时能滚动；战场高度不变、页面不滚动", { timeout: 120000 }, async t => {
   if (!browser) { t.skip("Playwright/browser unavailable"); return; }
   const { createLocalRelayServer } = require("../relay/local-server.cjs");
   const origin = await site(t);
@@ -213,12 +236,7 @@ test("联机单局玩家画面（1280×800）：首领倒计时、踩塔倒计�
   assert.ok(seen.pageScroll <= 1, "页面本身不滚动");
   assert.doesNotMatch(seen.text, /坚毅生命|777001/);
   if (process.env.SHOTS) await alice.screenshot({ path: path.join(process.env.SHOTS, "bug3-online-boss-countdown.png") });
-  await checkTip(alice, `.ol-battle [data-unit-id="${bossId}"] .unit`);
-  if (process.env.SHOTS) {
-    await alice.mouse.wheel(0, -5000); await alice.waitForTimeout(150);
-    await alice.screenshot({ path: path.join(process.env.SHOTS, "bug3-online-overflow-tip.png") });
-    await alice.mouse.wheel(0, 5000); await alice.waitForTimeout(150);
-    await alice.screenshot({ path: path.join(process.env.SHOTS, "bug3-online-overflow-tip-scrolled.png") });
-  }
+  await checkOnlineTip(alice, `.ol-battle [data-unit-id="${bossId}"] .unit`);
+  if (process.env.SHOTS) await alice.screenshot({ path: path.join(process.env.SHOTS, "bug3-online-detail-panel.png") });
   assert.deepEqual(errors, []);
 });

@@ -147,15 +147,17 @@
     const TIP_INSTANT = { melt: "熔融", sting: "刺骨", overload: "过载", shift: "错位", spread: "扩散", refract: "折射", iceNext: "冰冻+50%" };
     const TIP_SELF = { burn: "自焚", frost: "霜结", splash: "溅射", conductor: "导体", anchor: "千钧", store: "蓄能", doppler: "多普勒" };
     const TIP_ATK = { combust: "爆燃", icebreak: "破冰", bolt: "雷击", etch: "蚀刻", backflow: "倒流", inertia: "惯性", diffract: "衍射" };
-    function unitTip(node) {
+    function unitTip(node, opt) { return tipHtml(node.dataset.propId ? { propId: node.dataset.propId } : { unitId: node.dataset.unitId }, opt); }
+    /** ref：{ unitId } 或 { propId }；opt 传给 UnitTip.html（brief：悬停用的简短版） */
+    function tipHtml(ref, opt) {
       const T = global.UnitTip, data = displayState || view.state || {};
       if (!T) return "";
-      if (node.dataset.propId) {
-        const p = (data.props || []).find(x => String(x.id) === node.dataset.propId);
+      if (ref.propId) {
+        const p = (data.props || []).find(x => String(x.id) === String(ref.propId));
         if (!p) return "";
-        return T.html({ kind: "prop", propKind: p.kind }, [], { name: p.name || p.kind, sub: [p.hp != null ? `耐久 ${p.hp}${p.maxHp == null ? "" : "/" + p.maxHp}` : "", p.zone + " 区"].filter(Boolean).join(" · ") });
+        return T.html({ kind: "prop", propKind: p.kind }, [], { name: p.name || p.kind, sub: [p.hp != null ? `耐久 ${p.hp}${p.maxHp == null ? "" : "/" + p.maxHp}` : "", p.zone + " 区"].filter(Boolean).join(" · ") }, opt);
       }
-      const u = (data.units || []).find(x => x.id === node.dataset.unitId);
+      const u = (data.units || []).find(x => x.id === ref.unitId);
       if (!u) return "";
       const st = u.statuses || {}, tokens = [];
       if (u.dead) tokens.push(u.isPlayer ? "倒下" : "");
@@ -174,15 +176,43 @@
       const kind = u.isPlayer ? (u.escort ? "escort" : u.weaponOf || u.weaponUnit ? "weapon" : "hero") : "enemy";
       // 首领机制的倒计时：主机投影好的 display.marks / casts（online-view.js），这里只拼文字
       const mechs = global.UnitCard && global.UnitCard.mechLines ? global.UnitCard.mechLines({ marks: (u.display || {}).marks, casts: (u.display || {}).casts }) : [];
-      return T.html({ kind, kit: u.kit, ownerName: owner && owner.name, escort: u.escort }, tokens.filter(Boolean), { name: u.name || u.id, sub: `Lv${u.level || 1} · ${u.zone} 区`, mechs });
+      return T.html({ kind, kit: u.kit, ownerName: owner && owner.name, escort: u.escort }, tokens.filter(Boolean), { name: u.name || u.id, sub: `Lv${u.level || 1} · ${u.zone} 区`, mechs }, opt);
     }
     const hoverable = (t) => t && t.closest && t.closest("[data-unit-id], [data-prop-id]");
+    // 悬停只出简短版（名字、描述、效果名字），完整说明点一下单位在详情面板里看（作者 10/20 定：以前首领的说明占满整屏、盖住卡片）
     stage.addEventListener("mouseover", event => {
       const node = hoverable(event.target);
       if (!node || !global.UnitTip || (global.matchMedia && global.matchMedia("(hover: none)").matches)) return;
-      const h = unitTip(node);
+      if (!detailBox.hidden && detailRef && (detailRef.unitId || detailRef.propId) === (node.dataset.unitId || node.dataset.propId)) return;   // 详情已经开着
+      const h = unitTip(node, { brief: true, more: "点一下单位看全部说明" });
       if (h) global.UnitTip.show(node, h);
     });
+    /* 单位详情面板：不在选目标时点一下单位（手机上轻点）打开完整说明——桌面在右边，手机贴在底部；自带滚动条、不挡卡片，
+     * 跟着战场刷新；✕、Esc、再点同一个单位收起。手机没有悬停，以前根本看不到敌人说明 */
+    const detailBox = make("aside", "online-unit-detail", "ut-panel", { role: "dialog", "aria-label": "单位详情" });
+    detailBox.hidden = true;
+    let detailRef = null;
+    const refId = (r) => r ? r.unitId || ("prop:" + r.propId) : "";
+    function paintDetail() {
+      const inBattle = view.active && !view.isHost && (view.screen === "battle" || view.screen === "ended");
+      const body = detailRef && inBattle ? tipHtml(detailRef) : "";
+      if (!body) { closeDetail(); return; }
+      const h = `<button type="button" class="ut-close" data-ut-close aria-label="关闭单位详情">✕</button>${body}`;
+      if (detailBox.dataset.html !== h) { const top = detailBox.scrollTop; detailBox.innerHTML = h; detailBox.dataset.html = h; detailBox.scrollTop = top; }
+      detailBox.hidden = false;
+    }
+    function openDetail(id) {
+      const ref = String(id).indexOf("prop:") === 0 ? { propId: String(id).slice(5) } : { unitId: String(id) };
+      if (!detailBox.hidden && refId(detailRef) === refId(ref)) { closeDetail(); return; }   // 再点同一个：收起
+      detailRef = ref; detailBox.dataset.html = "";
+      global.UnitTip?.hide();
+      paintDetail();
+      if (!detailBox.hidden) detailBox.scrollTop = 0;
+    }
+    function closeDetail() { detailRef = null; detailBox.hidden = true; detailBox.dataset.html = ""; }
+    detailBox.addEventListener("click", event => { if (event.target.closest("[data-ut-close]")) closeDetail(); });
+    const onDetailKey = event => { if (event.key === "Escape" && !detailBox.hidden) closeDetail(); };
+    document.addEventListener("keydown", onDetailKey, true);
     stage.addEventListener("mouseout", event => {
       const node = hoverable(event.target);
       if (node && !node.contains(event.relatedTarget)) global.UnitTip?.hide();
@@ -937,6 +967,7 @@
       renderSide();
       mountHostChat();
       if (!stage.hidden) paintStage();
+      if (detailRef) paintDetail();
       paintSupplies();
       if (view.active && !view.isHost) scheduleAutoMenu();
     }
@@ -994,7 +1025,10 @@
         onUnit: id => {
           const field = fieldAsk();
           if (field) { const i = field.options.findIndex(o => o.target && String(o.target) === String(id)); if (i >= 0) answerField(i); return; }
-          const m = currentMenu?.choices; if (!m || disabled() || !request?.skill) return;
+          const m = currentMenu?.choices;
+          // 不是在选目标：点一下单位打开详情面板
+          if (!m || !request?.skill) { openDetail(id); return; }
+          if (disabled()) return;
           let i = (m.options || []).findIndex(o => !o.disabled && String(o.value) === String(id));
           if (i < 0 && m.kind === "zone") {   // 区域选择时点到区里的单位，算点那个区
             const u = ((displayState || view.state || {}).units || []).find(x => x.id === id);
@@ -1447,6 +1481,7 @@
       destroyed = true; if (battle) { battle.destroy(); battle = null; } playbackGeneration++; actionGeneration++; historyGeneration++; clearTimeout(toastTimer);
       document.removeEventListener("compositionstart", onCompStart, true); document.removeEventListener("compositionend", onCompEnd, true);
       document.removeEventListener("click", onRollOpen); document.removeEventListener("scroll", onListScroll, true); clearTimeout(titleTimer);
+      document.removeEventListener("keydown", onDetailKey, true);
       while (hostMounts.length) hostMounts.pop().remove(); document.body.classList.remove("ol-has-side", "ol-host-online", "ol-in-battle");
       for (const off of unsubs) if (typeof off === "function") off();
       for (const node of [...nodes, ...titleButtons]) node.remove();

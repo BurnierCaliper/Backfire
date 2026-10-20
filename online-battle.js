@@ -290,6 +290,8 @@
         LV.forEach(c => z.classList.remove(c));
         for (let i = 0; i < LV.length && overflowing(z); i++) { LV.forEach(c => z.classList.remove(c)); z.classList.add(LV[i]); }
       });
+      // 卡片宽度定下来了：效果徽章重新排成一行，放不下的收进「+N」（unit-card.js）
+      if (root.UnitCard && UnitCard.fitBadges) UnitCard.fitBadges(field);
     }
     if (typeof ResizeObserver === "function") { let fitQueued = false; new ResizeObserver(() => { if (fitQueued) return; fitQueued = true; requestAnimationFrame(() => { fitQueued = false; fitZones(); }); }).observe(field); }
 

@@ -777,6 +777,8 @@
         z.classList.add(LV[i]);
       }
     });
+    // 卡片宽度定下来了：效果徽章重新排成一行，放不下的收进「+N」（unit-card.js）
+    if (window.UnitCard && UnitCard.fitBadges) UnitCard.fitBadges($("g-field") || document);
   }
 
   /* ---------- 演出小件 ---------- */

@@ -368,7 +368,10 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
-- **作者试玩反馈（10/20）：柯尔特满血减伤的仪表、协助攻击打死自爆小车的演出**（app.js · `koltPrideCut` / `dealTo`（过度自信、`main` 弹字、`holdBoom`）/ `sweepDeadEnemies` / `explodeBoomcar`；hud-icons.js · `gaugeState`；game.js · `strikePlan`、`carboom` 演出；online-view.js · `projectTape`；online-ui.js · `onlineCtx`、`carboom`；tests/author-feedback-1020.test.js、tests/battle-fx-ui.test.js）
+- **作者试玩反馈（10/20）：联机敌人等级跟队伍、柯尔特满血减伤的仪表、自爆小车的演出、联机单位说明和效果图标**（app.js · `koltPrideCut` / `dealTo`（过度自信、`main` 弹字、`holdBoom`）/ `sweepDeadEnemies` / `explodeBoomcar`；hud-icons.js · `gaugeState`；game.js · `strikePlan`、`carboom` 演出、`fitZones`；online-view.js · `projectTape`；online-ui.js · `onlineCtx`、`carboom`、`tipHtml` / `openDetail`（详情面板）；online-gm-ui.js（生成敌人的等级）；trpg-ui.js · `onlineBattleLevel`；online-game.js · `setEncounter`；unit-tip.js · `html`（简短版）；unit-card.js · `orderBadges` / `fitBadges`；online-battle.js · `fitZones`；hud-icons.css；tests/author-feedback-1020.test.js、tests/battle-fx-ui.test.js、tests/unit-tip.test.js、tests/online-gm-ui.test.js、tests/online-session-ui.test.js）
+  - **联机：敌人等级跟着队伍等级**（作者定）：主持人「生成敌人」的等级框默认填队伍平均等级（trpg-tasks.js · `trpgPartyLevel`，四舍五入），照样能改；联机里用战斗模板 / 任务开战时，没写等级（「Lv随队」）的敌人（还有援军、配置物）按队伍平均等级，不再跟顶栏手选的等级（默认 Lv1）。本机跑团照旧按顶栏的等级。
+  - **联机：悬停只出简短说明，点一下单位看完整的**：以前首领这类说明很长，悬停浮窗占满整屏、盖住被悬停的卡，最后几行还被「回到…」按钮挡住；手机没有悬停，根本看不到敌人说明。现在悬停只写名字、行动方式、身上效果的名字（最多 8 个，多的写「+N」）和「点一下单位看全部说明」；不在选目标时点一下单位（手机上轻点）打开详情面板——桌面靠右、手机贴底，完整说明自带滚动条，跟着战场刷新，✕、Esc、再点同一个单位收起。选目标时点单位照旧是选目标。
+  - **单位卡上的效果图标只排一行**（本机和联机的战斗画面都是）：要紧的排前面（晕眩标记、休眠 / 下潜 / 下陷、高能），放不下的收进「+N」，悬停「+N」写着收起来的是哪些；区里挤（卡片缩小）时图标小一号。以前一区站七个敌人、每个十几个效果时，卡片缩到最小、图标换成四五行，同区的卡要滚动才看得到；现在一屏放得下，每张卡四个图标 +「+N」。
   - **柯尔特「过度自信」的仪表和实际生效对不上**：规则是「现有血量 ≥ 进入战斗时的血量上限」就减伤（起身中、被动被图纸放弃时不减），仪表却自己按「现有血量 ≥ 现在的上限」算——拿到临时护盾、临时层把上限抬高时，明明在减伤仪表却写「未满血」；被动被放弃时照样亮「满血减伤」。现在两边用同一个判断（`koltPrideCut`），被动放弃写「过度自信已放弃」，起身中写「起身中不减伤」。联机玩家看到的仪表是房主算好发过去的，同样对上。
   - **协助攻击打死自爆小车时播错演出**：小车的死亡引爆用不在场上的「残骸」替身打同区所有人，这些伤害被当成协助攻击本身（主攻击）的伤害，演出里协助攻击的刀光 / 弹道挨个落到被炸到的队友和敌人身上；而且清场（引爆）在打死它那一下的弹字之前，画面上先看到小车倒下、爆炸，最后才挨刀。现在：
     - 不在场上的替身（自爆小车残骸、爆炸桶、危墙倒塌……）打的不算主攻击；我方操控的碎渣机炮那一炮照旧算。

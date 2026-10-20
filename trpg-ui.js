@@ -676,13 +676,13 @@
           let cfg;
           try { cfg = trpgTaskPrepareBattle(id); } catch (e) { alert(e.message); return; }
           if (!lowHpOk()) { TRPG.taskBattle = null; return; }
-          if (cfg.template) { GAME.lastEncounter = battleTemplateToEncounter(cfg.template); return uiCommand("toBattle"); }
+          if (cfg.template) { GAME.lastEncounter = battleTemplateToEncounter(cfg.template); return uiCommand("toBattle", onlineBattleLevel()); }
           GAME.lastEncounter = null;
           GAME.enemyPlan = cfg.enemies;
           GAME.weather = cfg.weather;
           if (typeof cfg.zoneMode === "string") { GAME.board = cfg.zoneMode; GAME.zoneMode = BOARD_LAYOUTS[cfg.zoneMode].zones.length; }
           else { GAME.board = null; GAME.zoneMode = cfg.zoneMode; }
-          return uiCommand("toBattle");
+          return uiCommand("toBattle", onlineBattleLevel());
         }
       };
     });
@@ -1027,7 +1027,13 @@
     if (!lowHpOk()) return;
     TRPG.taskBattle = null;
     GAME.lastEncounter = battleTemplateToEncounter(t);
-    return uiCommand("toBattle");
+    return uiCommand("toBattle", onlineBattleLevel());
+  }
+  /** 联机：战斗模板 / 任务里写「Lv随队」的敌人按队伍平均等级（作者 10/20 定；trpg-tasks.js · trpgPartyLevel），
+   *  不再跟着顶栏手选的等级（默认 Lv1）。本机跑团照旧按顶栏的等级 */
+  function onlineBattleLevel() {
+    const online = window.OnlineGame && typeof OnlineGame.getView === "function" && (OnlineGame.getView() || {}).active;
+    return online && typeof trpgPartyLevel === "function" ? { level: trpgPartyLevel() } : undefined;
   }
   function btCardHtml(t) {
     const id = esc(t.id);

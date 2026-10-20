@@ -162,7 +162,7 @@
   function configureGM() {
     GMCommands.configure({ requireHost: ctx => { if (!isHost() || ctx !== gmContext) error("只有主持人可以执行此操作"); return true; },
       enemyEndTurn: () => { if (!manualResolve) error("当前不是主持人敌人行动阶段"); const finish = manualResolve; manualResolve = null; manualPhase = false; finish(); },
-      setEncounter: cmd => GAME.setupBattle(GAME.level, cmd.encounter) });
+      setEncounter: cmd => GAME.setupBattle((typeof trpgPartyLevel === "function" && trpgPartyLevel()) || GAME.level, cmd.encounter) });   // 「Lv随队」的敌人按队伍平均等级（作者 10/20 定）
   }
   function configureActions() {
     actionMenu = OnlineActions.create({ game: GAME, validation: HotseatValidation, inspect: HotseatValidation.inspect,

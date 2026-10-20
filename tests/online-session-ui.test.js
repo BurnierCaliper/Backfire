@@ -1176,3 +1176,76 @@ test("联机倒计时按玩家自己的钟算：玩家电脑时间和房主差�
   await alice.waitForFunction(() => /^(1\d|20) 秒$/.test(document.querySelector("#hs-countdown")?.textContent || ""));
   assert.deepEqual(f.errors, []);
 });
+
+test("联机（作者 10/20）：模板「Lv随队」按队伍平均等级；敌人卡效果只排一行（多的 +N）；悬停简短、点一下开详情面板（手机贴底）", { timeout: 150000 }, async t => {
+  const f = await fixture(t); if (!f) return;
+  const { host, alice, bob } = f;
+  await host.evaluate(() => { OnlineGame.start(); });
+  await alice.waitForFunction(() => OnlineGame.getView().screen === "exploration");
+  // 主持人后台改角色等级：队伍平均等级跟着变
+  const avg = await host.evaluate(() => {
+    const kits = partyHeroes().map(h => h.kit);
+    trpgBackstageApply({ heroes: Object.fromEntries(kits.map((k, i) => [k, { level: 3 + 2 * (i % 2) }])) });
+    return trpgPartyLevel();
+  });
+  assert.equal(avg, 4, "3 / 5 / 3 / 5 → 平均 4");
+  await host.evaluate(() => battleTemplateSave({ name: "随队", board: 2, playerZone: 1, enemies: [
+    { preset: "outlaw_king", zone: 2 }, { preset: "thug_knife", zone: 2 }, { preset: "thug_hammer", zone: 2 }, { preset: "thug_knife", zone: 2 },
+    { preset: "thug_hammer", zone: 2 }, { preset: "bandit_boss", zone: 2 }, { preset: "thug_knife", level: 2, zone: 2 }] }));
+  await host.click('#tr-tabs [data-tab="battles"]');
+  await host.click('[data-bt^="fight:"]');
+  await host.evaluate(() => { GAME.startOrEnd(); });
+  await host.waitForFunction(() => state.combatStarted && GAME.depth === 0);
+  const levels = await host.evaluate(() => state.units.filter(u => !u.isPlayer).map(u => u.level));
+  assert.equal(levels.filter(l => l === 4).length, 6, "没写等级（Lv随队）的按队伍平均等级：" + levels);
+  assert.ok(levels.includes(2), "写了等级的照写的");
+  // 敌人身上挂一堆效果，推给玩家
+  await host.evaluate(() => {
+    state.units.filter(u => !u.isPlayer).forEach(u => {
+      u.statuses = Object.assign(u.statuses || {}, { burn: 3, shock: true, corr: true, frostbite: true, shockwave: true, reso: true, unstable: true, weak: true });
+      u.instant = Object.assign(u.instant || {}, { melt: true, overload: true });
+    });
+  });
+  await host.evaluate(() => OnlineGame.submit({ type: "gm.setWeather", weather: "snow" }));
+  for (const p of [alice, bob]) await p.waitForFunction(() => ((OnlineGame.getView().packet?.state?.units || []).find(u => !u.isPlayer)?.statuses || {}).burn === 3, null, { timeout: 20000 });
+  for (const p of [alice, bob]) { const v = p.locator("button", { hasText: "查看战场" }).first(); if (await v.count()) await v.click(); }
+  await alice.waitForTimeout(500);
+  // 效果只排一行：放不下的收进「+N」，数字对得上
+  const rows = await alice.evaluate(() => [...document.querySelectorAll("#online-stage .ol-battle .unit.foe .hi-badges.hi-row")].map(r => {
+    const off = r.querySelectorAll(".hi-badge.hi-off").length, more = r.querySelector(".hi-more");
+    return { h: r.getBoundingClientRect().height, shown: r.querySelectorAll(".hi-badge:not(.hi-off)").length, off, more: more && !more.hidden ? more.textContent : "" };
+  }));
+  assert.equal(rows.length, 7);
+  rows.forEach(r => {
+    assert.ok(r.h < 32, "一行：" + JSON.stringify(r));
+    assert.ok(r.shown >= 3, "至少放得下三个：" + JSON.stringify(r));
+    assert.equal(r.more, r.off ? "+" + r.off : "", "「+N」就是收起来的个数：" + JSON.stringify(r));
+  });
+  assert.ok(rows.some(r => r.off > 0), "效果多的收进了 +N");
+  // 悬停：简短版
+  const king = await alice.evaluate(() => OnlineGame.getView().packet.state.units.find(u => u.kit === "outlaw_king").id);
+  await alice.hover(`#online-stage .ol-battle .unit-wrap[data-unit-id="${king}"]`);
+  await alice.waitForSelector(".unit-tip.show");
+  const tip = await alice.textContent(".unit-tip.show");
+  assert.match(tip, /点一下单位看全部说明/);
+  assert.doesNotMatch(tip, /每回合结束时/, "悬停不写效果的长说明");
+  // 点一下：右边打开详情面板，内容完整、能滚；Esc 收起
+  await alice.click(`#online-stage .ol-battle .unit-wrap[data-unit-id="${king}"]`);
+  await alice.waitForSelector("#online-unit-detail:not([hidden])");
+  const d = await alice.evaluate(() => { const p = document.getElementById("online-unit-detail"), r = p.getBoundingClientRect();
+    return { text: p.textContent, right: innerWidth - r.right, top: r.top, bottom: r.bottom, vh: innerHeight, scroll: p.scrollHeight > p.clientHeight, tipShown: !!document.querySelector(".unit-tip.show") }; });
+  assert.match(d.text, /亡命之王/); assert.match(d.text, /攻击命令/, "能力写全了"); assert.match(d.text, /每回合结束时/, "效果有说明");
+  assert.ok(d.right < 20 && d.bottom <= d.vh, "靠右、整个在屏幕里：" + JSON.stringify(d));
+  assert.equal(d.tipShown, false, "打开详情时悬停浮窗收起");
+  await alice.keyboard.press("Escape");
+  await alice.waitForSelector("#online-unit-detail", { state: "hidden" });
+  // 手机：轻点敌人，从底部弹出
+  const card = bob.locator(`#online-stage .ol-battle .unit-wrap[data-unit-id="${king}"]`);
+  await card.scrollIntoViewIfNeeded(); await card.click({ position: { x: 30, y: 16 } });
+  await bob.waitForSelector("#online-unit-detail:not([hidden])");
+  const m = await bob.evaluate(() => { const r = document.getElementById("online-unit-detail").getBoundingClientRect(); return { bottom: innerHeight - r.bottom, w: r.width, vw: innerWidth, h: r.height, vh: innerHeight }; });
+  assert.ok(Math.abs(m.bottom) < 2 && Math.abs(m.w - m.vw) < 2 && m.h <= m.vh * 0.63, "贴底、占满宽：" + JSON.stringify(m));
+  await bob.click("#online-unit-detail [data-ut-close]");
+  await bob.waitForSelector("#online-unit-detail", { state: "hidden" });
+  assert.deepEqual(f.errors, []);
+});

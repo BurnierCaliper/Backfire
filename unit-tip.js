@@ -83,24 +83,36 @@
     return out;
   }
 
-  /** 浮窗内容。head：{ name, sub, mechs }（等级、区、阵营之类；mechs：首领机制的倒计时说明，unit-card.js · mechLines）；tokens：身上的效果词 */
-  function html(info, tokens, head) {
+  /** 简短版最多列几个效果（多的写「+N」） */
+  const BRIEF_MAX = 8;
+  /** 浮窗内容。head：{ name, sub, mechs }（等级、区、阵营之类；mechs：首领机制的倒计时说明，unit-card.js · mechLines）；tokens：身上的效果词。
+   *  opt.brief：简短版（联机悬停用，作者 10/20 定）——不列能力，效果只写名字、最多 BRIEF_MAX 个；opt.more：末尾一行提示（「点一下看全部」） */
+  function html(info, tokens, head, opt) {
+    opt = opt || {};
     const d = describe(info);
     const effs = (tokens || []).map(effect).filter(Boolean);
     const seen = new Set();
     const rows = effs.filter(e => { if (seen.has(e.name)) return false; seen.add(e.name); return true; });
     const mechs = (head && Array.isArray(head.mechs) ? head.mechs : []).filter(x => typeof x === "string" && x);
-    return `<div class="ut-top"><b>${esc(head && head.name || "")}</b>${head && head.sub ? `<span>${esc(head.sub)}</span>` : ""}</div>` +
+    const iconOf = (e) => {
+      const k = root.HudIcons ? HudIcons.keyOf(e.name.replace(/[（(].*$/, "").replace(/\s*[×x]\s*\d+$/, "").replace(/\s+\d+(\/\d+)?$/, "").trim()) : null;
+      return k ? HudIcons.icon(k) : "";
+    };
+    const head0 = `<div class="ut-top"><b>${esc(head && head.name || "")}</b>${head && head.sub ? `<span>${esc(head.sub)}</span>` : ""}</div>` +
       (d.kicker ? `<div class="ut-kicker">${esc(d.kicker)}</div>` : "") +
       // 首领机制放在描述前面：还有几回合落下最要紧
       (mechs.length ? `<div class="ut-h ut-mech-h">首领机制 · 倒计时</div><ul class="ut-mechs">${mechs.map(x => { const i = x.indexOf("："); return `<li>${i > 0 && i < 30 ? `<b>${esc(x.slice(0, i))}</b>${esc(x.slice(i))}` : esc(x)}</li>`; }).join("")}</ul>` : "") +
-      (d.text ? `<p class="ut-desc">${esc(d.text)}</p>` : "") +
+      (d.text ? `<p class="ut-desc">${esc(d.text)}</p>` : "");
+    if (opt.brief) {
+      const shown = rows.slice(0, BRIEF_MAX), rest = rows.length - shown.length;
+      return head0 + `<div class="ut-h">身上的效果${rows.length ? " · " + rows.length : ""}</div>` +
+        (rows.length ? `<ul class="ut-chips">${shown.map(e => `<li>${iconOf(e)}<b>${esc(e.name)}</b></li>`).join("")}${rest > 0 ? `<li class="ut-chips-more">+${rest}</li>` : ""}</ul>` : `<p class="ut-none">没有效果</p>`) +
+        (opt.more ? `<div class="ut-open">${esc(opt.more)}</div>` : "");
+    }
+    return head0 +
       (d.list.length ? `<ul class="ut-list">${d.list.map(x => { const i = x.indexOf("："); return `<li>${i > 0 && i < 18 ? `<b>${esc(x.slice(0, i))}</b>${esc(x.slice(i))}` : esc(x)}</li>`; }).join("")}</ul>` : "") +
       `<div class="ut-h">身上的效果</div>` +
-      (rows.length ? `<ul class="ut-effects">${rows.map(e => {
-        const k = root.HudIcons ? HudIcons.keyOf(e.name.replace(/[（(].*$/, "").replace(/\s*[×x]\s*\d+$/, "").replace(/\s+\d+(\/\d+)?$/, "").trim()) : null;
-        return `<li>${k ? HudIcons.icon(k) : ""}<b>${esc(e.name)}</b>${e.text ? `<span>${esc(e.text)}</span>` : ""}</li>`;
-      }).join("")}</ul>` : `<p class="ut-none">没有效果</p>`);
+      (rows.length ? `<ul class="ut-effects">${rows.map(e => `<li>${iconOf(e)}<b>${esc(e.name)}</b>${e.text ? `<span>${esc(e.text)}</span>` : ""}</li>`).join("")}</ul>` : `<p class="ut-none">没有效果</p>`);
   }
 
   // 浮窗本体（跟着单位卡出现，不挡鼠标）
