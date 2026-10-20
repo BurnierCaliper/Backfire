@@ -368,6 +368,11 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **跑团模板「我方同阵营」的友军在敌人回合会行动了**（ai.js · `actors` / `actingOrder`；app.js · `settleEnemyKill`；tests/ally-acts.test.js；docs/bug-backlog.md H8）
+  - 以前：敌人回合轮流行动的名单用的是 `foes()`，它把友军排除了（胜负判定需要这样），于是友军在敌人回合从不行动。
+  - 现在：新增 `actors()`（敌人 + 友军，中立生物照旧不行动），`actingOrder()` 用它；友军按 AI 行动，目标由 `validPrey` 按 `hostileTo` 选（打和它敌对的单位，不打我方）。`foes()` 不变，胜负判定、「还剩几个敌人」照旧不算友军（只剩友军就判我方胜利）。友军打死的敌人和中立生物一样处理：没有经验、掉落、击杀分，只算战斗进度。
+  - 友军被谁打照旧：我方打不到友军，友军倒下没有奖励。
+
 - **专长「拉一把」修好：医疗包能用了**（items.js · `ITEM_CATALOG` / `itemHealSpec` / `rollItemHeal`；ledger.js · `ledgerHealItem`；feats.js · `featHealItems`；tests/feat-pickup.test.js；docs/bug-backlog.md H4）
   - 以前：「拉一把」只认带数字 `heal` 的道具，但简易医疗包、诊所医疗包没有这个字段（治疗骰写死在使用道具的代码里），背包里有医疗包也永远「没有医疗道具」。
   - 现在：医疗包在 `ITEM_CATALOG` 里带结构化治疗骰（简易 1d4+6、诊所 2d4+6），战斗里用道具、休整用道具、「拉一把」都读这一处。「拉一把」起身时掷这件道具的治疗骰（和平时用一样），用掉一件，不扣坚毅生命；强心注射剂只能自己用，不算医疗道具。治疗量本身不变。

@@ -676,10 +676,16 @@ const EnemyAI = (function () {
   /** 发号施令的敌人总是第一个行动：亡命之王的命令要用狂徒们这一回合的行动点（回防筑墙）、
    *  改狂徒们的目标（攻击命令），排在最后的话狂徒早就把行动点用完了。其余照「杂兵 → 精英 → 首领」 */
   const COMMANDERS = ["outlaw_king"];
+  /** 敌人回合要行动的单位：敌人 + 我方同阵营的友军（友军打和它敌对的单位，目标由 validPrey 按 hostileTo 选）。
+   *  foes() 照旧不含友军（胜负判定、「还剩几个敌人」用它）；中立生物不行动 */
+  function actors() {
+    return foes().concat(state.units.filter(u => !u.isPlayer && unitAlive(u) && u.kit !== "ironwall" &&
+      typeof playerAllied === "function" && playerAllied(u) && !(typeof isNeutralCreature === "function" && isNeutralCreature(u))));
+  }
   function actingOrder() {
     const r = { minion: 0, elite: 1, boss: 2 };
     const key = u => (COMMANDERS.includes(u.kit) ? -1 : (r[enemyRankOf(u)] || 0));
-    return foes().sort((a, b) => key(a) - key(b)).map(u => u.id);
+    return actors().sort((a, b) => key(a) - key(b)).map(u => u.id);
   }
 
   return {
@@ -691,6 +697,6 @@ const EnemyAI = (function () {
     target: aiTarget,
     step: aiStep,
     special: aiSpecial,
-    unitAlive, players, foes
+    unitAlive, players, foes, actors
   };
 })();
