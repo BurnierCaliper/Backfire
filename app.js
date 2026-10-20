@@ -6395,6 +6395,8 @@ function applyKnockdown(unit, notes, opt) {
     return "dying";
   }
   unit.dead = true;
+  // 敌人被环境 / 规则直接弄死（高能自爆、坠落、窒息）：补上击杀结算（经验、奎支、击杀数、手下被打倒），_xpGiven 保证只结算一次
+  if (!unit.isPlayer && typeof settleEnemyKill === "function") settleEnemyKill(unit, notes);
   if (unit.isPlayer) notes.push(`${unit.name} 最内层归零，武器人倒下。`);
   if (unit.isPlayer && isWeaponUnit(unit) && !unit.escort) onWeaponUnitDown(unit, notes);
   else if (opt.cause && !opt.lethal) notes.push(`${unit.name} ${opt.cause}致死（最内层归零）。`);
