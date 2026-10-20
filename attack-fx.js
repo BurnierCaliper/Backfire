@@ -18,6 +18,7 @@
  * 系统「减少动态效果」时：不飞弹道、不震，只留很短的一闪。 */
 (function (root) {
   "use strict";
+  const fxRand = () => (typeof fxRandom === "function" ? fxRandom() : Math.random());   // 画面效果的随机数：不动战斗用的种子随机数（run.js · fxRandom）
 
   /* ================= 1. 招式：按技能 / 敌人招式名 / 属性 / 距离挑一种演出 ================= */
   const ELEMENTS = ["fire", "acid", "electric", "ice", "energy", "physical", "harmonic"];
@@ -180,7 +181,7 @@
   let clock = () => 1;         // 时间倍率：1 正常、0.5 两倍速、0 跳过
   const reduced = () => !!(hasDom && root.matchMedia && root.matchMedia("(prefers-reduced-motion: reduce)").matches);
   const now = () => (root.performance && performance.now ? performance.now() : Date.now());
-  const rnd = (a, b) => a + Math.random() * (b - a);
+  const rnd = (a, b) => a + fxRand() * (b - a);
   const clamp01 = (k) => k < 0 ? 0 : k > 1 ? 1 : k;
   const lerp = (a, b, k) => a + (b - a) * k;
   const ease = {
@@ -416,14 +417,14 @@
   }
   /** 能量弹：一颗带尾巴的光球，走一条微弯的弧线，沿路掉几颗小星 */
   function comet(a, b, ms, move, c, hot) {
-    const dir = dirOf(a, b), bend = rnd(.08, .18) * dir.d * (Math.random() < .5 ? -1 : 1);
+    const dir = dirOf(a, b), bend = rnd(.08, .18) * dir.d * (fxRand() < .5 ? -1 : 1);
     const ctrl = { x: (a.x + b.x) / 2 - dir.y * bend, y: (a.y + b.y) / 2 + dir.x * bend };
     const at = (k) => { const u = 1 - k; return [u * u * a.x + 2 * u * k * ctrl.x + k * k * b.x, u * u * a.y + 2 * u * k * ctrl.y + k * k * b.y]; };
     const r = move.big || move.heavy ? 15 : 12;
     const sparks = [];
     add({ dur: ms, draw(k) {
       const e = k;
-      if (Math.random() < .6) { const p = at(e); sparks.push({ x: p[0] + rnd(-6, 6), y: p[1] + rnd(-6, 6), t: e, s: rnd(3, 5.5) }); }
+      if (fxRand() < .6) { const p = at(e); sparks.push({ x: p[0] + rnd(-6, 6), y: p[1] + rnd(-6, 6), t: e, s: rnd(3, 5.5) }); }
       for (const sp of sparks) {
         const age = (e - sp.t) * 3.5; if (age > 1) continue;
         const s = sp.s * (1 - age);
@@ -462,7 +463,7 @@
     const flakes = [];
     add({ dur: ms, draw(k) {
       const x = lerp(a.x, b.x, k), y = lerp(a.y, b.y, k);
-      if (Math.random() < .75) flakes.push({ x: x - dir.x * L * .5 + rnd(-5, 5), y: y - dir.y * L * .5 + rnd(-5, 5), t: k, s: rnd(2, 3.6) });
+      if (fxRand() < .75) flakes.push({ x: x - dir.x * L * .5 + rnd(-5, 5), y: y - dir.y * L * .5 + rnd(-5, 5), t: k, s: rnd(2, 3.6) });
       for (const f of flakes) {
         const age = (k - f.t) * 4; if (age > 1) continue;
         ctx.save(); ctx.translate(f.x, f.y); ctx.rotate(f.t * 20);
@@ -486,7 +487,7 @@
     const r = move.fur ? 13 : move.big ? 19 : 12;
     add({ dur: ms, draw(k) {
       const x = lerp(a.x, b.x, k), y = lerp(a.y, b.y, k) - 4 * H * k * (1 - k);
-      if (!move.fur && Math.random() < .4) drops.push({ x: x + rnd(-3, 3), y, t: k, r: rnd(2.6, 4.4) });
+      if (!move.fur && fxRand() < .4) drops.push({ x: x + rnd(-3, 3), y, t: k, r: rnd(2.6, 4.4) });
       for (const d of drops) {
         const age = (k - d.t) * 3; if (age > 1) continue;
         sticker(circlePath(d.x, d.y + age * age * 34, d.r * (1 - age * .6)), c, { ink: 1.8, shadow: false });
@@ -555,14 +556,14 @@
     let off = 0, t = 0;
     for (let i = 1; i < n; i++) {
       t += (1 / n) * rnd(.6, 1.4); if (t >= .97) break;
-      off = Math.max(-amp, Math.min(amp, off * .3 + rnd(-1, 1) * amp * (Math.random() < .25 ? 1.6 : .9)));
+      off = Math.max(-amp, Math.min(amp, off * .3 + rnd(-1, 1) * amp * (fxRand() < .25 ? 1.6 : .9)));
       pts.push([lerp(a.x, b.x, t) - dir.y * off, lerp(a.y, b.y, t) + dir.x * off]);
     }
     pts.push([b.x, b.y]);
     const out = [pts];
     if (depth > 0 && n > 3) {
       for (let f = 0; f < 2; f++) {
-        const k = 1 + Math.floor(Math.random() * (n - 2)), [sx, sy] = pts[k];
+        const k = 1 + Math.floor(fxRand() * (n - 2)), [sx, sy] = pts[k];
         const ang = dir.ang + (f ? 1 : -1) * rnd(.4, 1), len = rnd(22, 46);
         out.push(...boltPts({ x: sx, y: sy }, { x: sx + Math.cos(ang) * len, y: sy + Math.sin(ang) * len }, depth - 2, .7));
       }
@@ -948,7 +949,7 @@
   function hexFx(at, S, move, c) {
     const col = move.el && move.el !== "physical" ? c : PINK;
     const glitch = !!move.glitch;
-    const blocks = glitch ? Array.from({ length: 8 }, () => ({ x: rnd(-.7, .5) * S, y: rnd(-.5, .4) * S, w: rnd(8, 26), h: rnd(3, 8), c: Math.random() < .5 ? "#ff3b6e" : HOLO })) : null;
+    const blocks = glitch ? Array.from({ length: 8 }, () => ({ x: rnd(-.7, .5) * S, y: rnd(-.5, .4) * S, w: rnd(8, 26), h: rnd(3, 8), c: fxRand() < .5 ? "#ff3b6e" : HOLO })) : null;
     add({ dur: 560, draw(k) {
       const g = 1.7 - ease.out(clamp01(k / .42)) * .7, rot = (1 - ease.out(clamp01(k / .5))) * 1.6;
       const thin = 1 - ease.in(clamp01((k - .62) / .38));
@@ -963,7 +964,7 @@
       ctx.restore();
       if (k > .38) { const p = ease.back(clamp01((k - .38) / .2)) * thin; sticker(circlePath(at.x, at.y, 6 * p), col, { ink: 2.6, shadow: false }); }
       if (blocks && k < .72) {
-        for (const b of blocks) { if (Math.random() < .35) continue; ctx.fillStyle = b.c; ctx.fillRect(at.x + b.x + rnd(-4, 4), at.y + b.y, b.w, b.h); }
+        for (const b of blocks) { if (fxRand() < .35) continue; ctx.fillStyle = b.c; ctx.fillRect(at.x + b.x + rnd(-4, 4), at.y + b.y, b.w, b.h); }
       }
     } });
   }
@@ -1289,7 +1290,7 @@
   function codeRain(rect, ms) {
     if (!rect || !ensure()) return;
     ms = ms || 950;
-    const hex = () => Math.floor(Math.random() * 0xffff).toString(16).padStart(4, "0");
+    const hex = () => Math.floor(fxRand() * 0xffff).toString(16).padStart(4, "0");
     const lines = Array.from({ length: 6 }, (_, i) => [
       "> decrypt 0x" + hex() + hex(), "mov eax, 0x" + hex(), "patch sig " + hex() + ":" + hex(), "push " + hex() + " ; spread", "jmp 0x" + hex() + "  [ok]", "> diffuse --rate " + (20 + i * 7) + "%"
     ][i]);
@@ -1785,7 +1786,7 @@
       async pre(c) {
         const t = c.rect(c.target || (c.targets || [])[0]); if (!t) return;
         await c.dash(c.actor, t, { reach: 50 });
-        const ids = (c.targets || []).slice().sort(() => Math.random() - .5);
+        const ids = (c.targets || []).slice().sort(() => fxRand() - .5);
         for (const id of ids) { const r = c.rect(id); if (r) { flurry(r, COL[c.move.el] || COL.physical, HOT[c.move.el]); c.burst(c.move.el, r); } await c.wait(110); }
       },
       impact() {}

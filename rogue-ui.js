@@ -59,7 +59,7 @@
         if (OnlineRogue.isTeamCommand(command)) {
           const opt = OnlineRogue.matchOption(command);
           if (!opt) throw new Error("这一步现在不能选");
-          OnlineRogue.vote(myId(), opt.id);
+          OnlineRogue.vote(myId(), opt.id, command);
           lastError = ""; lastNotes = [`你投了「${opt.label}」。等大家都投完（或者按「按现在的票数决定」）。`];
           render();
           return;

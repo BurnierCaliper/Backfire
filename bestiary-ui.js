@@ -304,7 +304,8 @@ const Bestiary = (() => {
   /** 每日挑战的选取率（rogue.js · featPickRates，本机记下的局）：出现过才写 */
   function pickRateNote(id) {
     let r = null;
-    try { r = window.Rogue && Rogue.featPickRates ? Rogue.featPickRates()[id] : null; } catch (e) { r = null; }
+    // Rogue 是 rogue.js 顶层的 const，不挂在 window 上，所以不能写 window.Rogue
+    try { r = typeof Rogue !== "undefined" && Rogue.featPickRates ? Rogue.featPickRates()[id] : null; } catch (e) { r = null; }
     if (!r || !r.shown) return "";
     return `<section class="bx-sec"><div class="bx-sec-h"><span>每日挑战</span></div><p class="bx-note">本机记下的每日挑战里出现 ${r.shown} 次，被选 ${r.picked} 次（选取率 ${Math.round(r.rate * 100)}%）。</p></section>`;
   }
@@ -377,6 +378,6 @@ const Bestiary = (() => {
     root.classList.remove("show");
     document.body.classList.remove("bx-open");
   }
-  return { open, close, isOpen: () => !!(root && root.classList.contains("show")) };
+  return { open, close, pickRateNote, isOpen: () => !!(root && root.classList.contains("show")) };
 })();
 if (typeof window !== "undefined") window.Bestiary = Bestiary;

@@ -159,3 +159,28 @@ test("悬赏线索检定：用第三种熟练项成功也算找到线索；失�
   const next = s3.R.checkInfo(s3.run).options.map(o => o.prof);
   skipped.forEach(p => assert.ok(!next.includes(p), "绕过去的三种都不再出：" + p));
 });
+
+/* ---------- issue #124：第三采矿场悬赏 ---------- */
+const vm = require("node:vm");
+test("悬赏目标只从本区域的敌人表里抽（第三采矿场的敌人都只占 1 枚代币，以前落到全部区域去抽）", () => {
+  const c = H.load();
+  for (const region of ["第三采矿场", "第一采矿场", "第二采矿场", "外城区", "沙漠", "巨人城"]) {
+    const r = JSON.stringify(region);
+    assert.deepEqual(plain(vm.runInContext(`bountyCandidates(${r}).filter(k => ENEMY_INFO[k].regions.indexOf(${r}) < 0)`, c)), [], `${region} 的悬赏候选都在本区域`);
+    assert.ok(vm.runInContext(`bountyCandidates(${r}).length`, c) > 0);
+  }
+});
+
+test("第三采矿场悬赏战：随从和目标同一阵营（安保 / 异星生物不互相敌对）", () => {
+  const c = H.load();
+  const bad = plain(vm.runInContext(`(() => {
+    const bad = [];
+    for (const preset of bountyCandidates("第三采矿场")) for (let i = 0; i < 40; i++) {
+      const enc = rollBountyEncounter(preset, { region: "第三采矿场", tokens: 5, extraTokens: 1, hpMul: 1.5, atkMul: 1.5 });
+      const allow = alliesOf(ENEMY_INFO[preset].faction);
+      enc.enemies.forEach(e => { if (allow.indexOf(ENEMY_INFO[e.preset].faction) < 0) bad.push([preset, e.preset]); });
+    }
+    return bad;
+  })()`, c));
+  assert.deepEqual(bad, []);
+});

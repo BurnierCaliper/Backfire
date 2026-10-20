@@ -845,11 +845,11 @@
     // 在铭牌上沿排成左右两列、一行一行往上叠：不挡铭牌中间的伤害数字，也不压到隔壁的铭牌
     const side = n % 2 ? -1 : 1;
     const row = Math.floor((n - 1) / 2);
-    const tilt = side * (6 + Math.random() * 7);                  // 往外侧倾斜 6°–13°
+    const tilt = side * (6 + fxRandom() * 7);                  // 往外侧倾斜 6°–13°
     d.style.left = (p.x + side * p.r.width * 0.28) + "px";
     d.style.top = (p.r.top - 8 - row * 52) + "px";
     d.style.setProperty("--tilt", tilt.toFixed(1) + "deg");
-    d.style.setProperty("--dx", (side * (30 + Math.random() * 16)).toFixed(0) + "px");
+    d.style.setProperty("--dx", (side * (30 + fxRandom() * 16)).toFixed(0) + "px");
     // 单独一层，压在顶部的技能横幅之上（顶排敌人的字不会被横幅挡住）
     let layer = $("g-fxw");
     if (!layer) { layer = el("div", "g-fx g-fxw"); layer.id = "g-fxw"; document.body.appendChild(layer); }
@@ -1093,7 +1093,7 @@
     const dx = t.x - a.x, dy = t.y - a.y, d = Math.hypot(dx, dy) || 1, ux = dx / d, uy = dy / d;
     const reach = o.reach >= 999 ? d : Math.max(16, Math.min(d - Math.min(a.w, t.w) * .5, o.reach || (o.heavy ? 112 : 92)));
     const k = o.speed || 1;
-    const token = String(Math.random());
+    const token = String(fxRandom());
     c.wrap.dataset.dash = token;
     c.wrap.classList.add("lunge");
     if (sp(90) > 0) {
@@ -1112,7 +1112,7 @@
   function nudgeCard(id, dx, dy, ms) {
     const c = cards.get(id);
     if (!c || G.skip) return;
-    const token = String(Math.random());
+    const token = String(fxRandom());
     c.wrap.dataset.dash = token;
     c.wrap.classList.add("lunge");
     c.wrap.style.transition = `transform ${sp((ms || 240) * .4)}ms cubic-bezier(.2, .8, .3, 1)`;
@@ -1189,7 +1189,7 @@
   /** 远程：往后一顿再回来（后坐力） */
   function recoil(c, a, t, px) {
     const dx = t.x - a.x, dy = t.y - a.y, d = Math.hypot(dx, dy) || 1, k = px || 8;
-    const token = String(Math.random());
+    const token = String(fxRandom());
     c.wrap.dataset.dash = token;
     c.wrap.classList.add("lunge");
     c.wrap.style.transition = `transform ${sp(70)}ms ease-out`;
@@ -1726,7 +1726,7 @@
       $("g-check-rate").textContent = (spec.rateText || "成功率 " + spec.chance + "%") + (spec.note ? " · " + spec.note : "");
       $("g-check-hint").textContent = "检定中";
       if (window.Sfx && !G.sim) Sfx.ui("dice");   // 掷骰
-      num.textContent = String(1 + Math.floor(Math.random() * 100));
+      num.textContent = String(1 + Math.floor(fxRandom() * 100));
       num.className = "check-num";
       box.classList.add("show");
       let delay = 28;
@@ -1736,7 +1736,7 @@
         ticks++;
         if (G.skip && ticks > 4) delay = 400;
         if (delay < 220) {
-          num.textContent = String(1 + Math.floor(Math.random() * 100));
+          num.textContent = String(1 + Math.floor(fxRandom() * 100));
           delay = Math.min(240, delay * 1.22 + 6);
           realTimeout(step, delay);
           return;

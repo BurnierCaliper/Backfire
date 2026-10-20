@@ -118,21 +118,39 @@ function trpgCraftOdds(kit, itemId, diff, helper) {
   return { kit, item: it.id, name: u.name, prof: it.prof, diff, diffName: ROGUE_CHECKS.diffs[diff].name, level, base, chance: base ? chance : 0,
     adv, dis, reroll: !!perks.reroll, helped, hours: CRAFT_RULES.hours[diff] };
 }
-/** 制作一样：c = { kit, item, diff?, helper?, result: "roll"（程序掷）/ "ok" / "fail"（记下玩家掷的结果）}。材料要背包里有实物（金属也是） */
+/** 制作一样：c = { kit, item, diff?, helper?, result: "roll"（程序掷）/ "ok" / "fail"（记下玩家掷的结果）}。材料要背包里有实物（金属也是）。
+ *  同时做好几样：c = { jobs: [上面那种…] }，大家一起开工，时间只推进一次、按最久的那件算（设计文档：休息时大家同时各做各的） */
 function trpgCraft(c) {
   c = c || {};
+  if (Array.isArray(c.jobs)) {
+    const out = [], busy = new Set();
+    let hours = 0;
+    c.jobs.filter(Boolean).forEach(j => {
+      if (busy.has(j.kit)) { out.push(`${(trpgHeroes().find(h => h.kit === j.kit) || {}).name || j.kit} 同时只能做一样东西。`); return; }
+      busy.add(j.kit);
+      const r = trpgCraftOne(j);
+      out.push(...r.notes);
+      hours = Math.max(hours, r.hours);
+    });
+    return out.concat(trpgPassHours(hours));
+  }
+  const r = trpgCraftOne(c);
+  return r.notes.concat(trpgPassHours(r.hours));
+}
+/** 做一样但不推进时间：返回 { notes, hours }（没做成 hours 为 0） */
+function trpgCraftOne(c) {
   const it = craftItem(c.item);
-  if (!it) return ["没有这个配方。"];
-  if (!trpgKnowsRecipe(it.id)) return [`还不会做${it.name}（在工坊页教会配方）。`];
+  if (!it) return { notes: ["没有这个配方。"], hours: 0 };
+  if (!trpgKnowsRecipe(it.id)) return { notes: [`还不会做${it.name}（在工坊页教会配方）。`], hours: 0 };
   const o = trpgCraftOdds(c.kit, it.id, c.diff, c.helper);
-  if (!o) return ["没有这名角色。"];
+  if (!o) return { notes: ["没有这名角色。"], hours: 0 };
   const rc = CRAFT_RECIPES[it.id];
   const lack = Object.keys(rc).filter(id => bagCount(id) < rc[id]);
-  if (lack.length) return ["材料不够：" + lack.map(id => `${ITEM_CATALOG[id].name} 差 ${rc[id] - bagCount(id)}`).join("，") + "。"];
+  if (lack.length) return { notes: ["材料不够：" + lack.map(id => `${ITEM_CATALOG[id].name} 差 ${rc[id] - bagCount(id)}`).join("，") + "。"], hours: 0 };
   let ok, rollText = "";
   if (c.result === "ok" || c.result === "fail") ok = c.result === "ok";
   else {
-    if (!o.base) return [`${o.name} 没有「${it.prof}」熟练，做不了${o.diffName}的东西。`];
+    if (!o.base) return { notes: [`${o.name} 没有「${it.prof}」熟练，做不了${o.diffName}的东西。`], hours: 0 };
     const r = typeof Hotseat !== "undefined" ? Hotseat.rollCheck({ base: o.base, adv: o.adv, dis: o.dis, reroll: o.reroll }) : { ok: Math.random() < o.chance, rolls: [] };
     ok = r.ok;
     rollText = r.rolls.length ? `d100 ${r.rolls.map(x => x.roll == null ? x.label : (x.label ? x.label + " " : "") + x.roll).join("，")} → ` : "";
@@ -144,7 +162,7 @@ function trpgCraft(c) {
   const out = [`${o.name}${helperName} 制作${it.name}（${o.diffName} · 成功率 ${Math.round(o.chance * 1000) / 10}%）：${rollText}${ok ? "成功" : "失败"}。` +
     (ok ? `用掉 ${used}。` : `损失 ${used}，壳体留着。`)];
   if (ok) bagAdd(it.id, 1);
-  return out.concat(trpgPassHours(o.hours));
+  return { notes: out, hours: o.hours };
 }
 function trpgSalvage(itemId) {
   const y = salvageYield(itemId);

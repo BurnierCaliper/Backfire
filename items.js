@@ -358,15 +358,8 @@ function useRepairKit(actor, target, kit, notes) {
     notes.push(`${actor.name} 用维修工具包修好倒地的 ${row.name}：恢复 ${used} 点生命重新站起来，用掉 ${used} 点维修量（还剩 ${repairPoints()} 点）。`);
     return notes;
   }
-  if (row.need <= 0) { notes.push(`${row.name} 耐久已满。`); return notes; }
-  const before = row.dur;
-  const used = spendRepairPoints(row.need);
-  restoreDurability(row.kit, used);
-  // 修好的武器回到主人手里——除非它正以武器人在场（以前修在场的武器人会把主人也设成持械，两边同时拿着）
-  if (row.owner && row.owner.weaponHeld === false && !row.owner.dead && before <= 0 && typeof heldWeaponKit === "function" &&
-      !(typeof weaponOutOnField === "function" && weaponOutOnField(row.kit))) row.owner.weaponHeld = true;
-  notes.push(`${actor.name} 用维修工具包修 ${row.name}：耐久 ${before} → ${weaponDur(row.kit)}，用掉 ${used} 点维修量（还剩 ${repairPoints()} 点）。`);
-  return notes;
+  // 修耐久和「修理」面板命令走同一套（ledgerRepair）：同样的消耗和恢复量，战斗中修好的武器这一场仍按受损算
+  return ledgerRepair(row.kit, notes);
 }
 /** 道具自己扣坚毅生命（强心 / 强化注射剂）：不会致死，坚毅最少留 1。返回实际扣掉的量 */
 function selfShpCost(u, n) {
@@ -434,6 +427,8 @@ function useItemOn(actor, itemId, target, zone) {
         return;
       }
       if (itemId === "shockbomb") {
+        // 下潜中的单位范围攻击打不到（和投掷罐一样）：震荡弹直接走 dealBreak，没经过下潜判定
+        if (u.submerged) { notes.push(`${u.name} 下潜中，没有被波及。`); return; }
         if (typeof dealBreak === "function") dealBreak(u, 2, "physical", notes, spec.name);
       } else {
         const ele = itemId === "bomb_e" ? "electric" : "acid";
@@ -531,6 +526,7 @@ function itemStun(u, notes) {
   notes.push(typeof imbalanceLine === "function" ? imbalanceLine(u) : `${u.name} 失衡。`);
   if (typeof endSelfOnStun === "function") endSelfOnStun(u, notes);
   if (typeof queueAssistAttack === "function") queueAssistAttack(null, u);
+  if (typeof bossQuickRecover === "function") bossQuickRecover(u, notes);   // 10 级起精英标记没攒满：失衡立刻恢复，和其他来源一样
 }
 function useEffectItem(actor, it, target, zone, notes) {
   if (it.target === "zone") {

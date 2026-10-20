@@ -663,7 +663,7 @@ function restReport(b, a, ctx) {
     heroes: a.heroes.map(h => {
       const o = b.heroes.find(x => x.kit === h.kit) || h;
       return {
-        kit: h.kit, name: h.name, dead: h.dead, watch: ctx.watch === h.kit || (h.weapons || []).some(w => w.kit === ctx.watch),
+        kit: h.kit, name: h.name, dead: h.dead, watch: !!ctx.noRest && ctx.noRest === h.kit,   // 只标真的没恢复的人：荒野向导守夜照常恢复；武器人守夜，主人本人是恢复了的
         hp: [o.hp, h.hp], hpMax: h.hpMax, shp: [o.shp, h.shp], shpMax: h.shpMax,
         mood: h.dead ? "" : (typeof shpMoodLine === "function" ? shpMoodLine(h.shp, h.shpMax) : ""),
         weapons: h.weapons.map(w => { const ow = (o.weapons || []).find(x => x.kit === w.kit) || w; return { name: w.name, dur: [ow.dur, w.dur], max: w.max }; })
@@ -781,7 +781,7 @@ function ledgerLongRest(plan, notes) {
   if (newDay) LEDGER.day += days;
   notes.push(newDay ? `醒来：进入第 ${LEDGER.day} 天，${clockText(LEDGER.clock)}。` : `醒来：${clockText(LEDGER.clock)}。`);
   ledgerCapture();
-  return { ok: true, notes, report: restReport(before, restSnapshot(), { ok: true, hours, forced: !!plan.force, watch: plan.watch || null }) };
+  return { ok: true, notes, report: restReport(before, restSnapshot(), { ok: true, hours, forced: !!plan.force, watch: plan.watch || null, noRest: watch }) };
 }
 
 /** 主持人：全员复原（不扣补给、不推进时间） */
@@ -829,6 +829,11 @@ function repairPointsText() {
 function ledgerRepair(kit, notes) {
   notes = notes || [];
   if (repairPoints() < 1) { notes.push("没有维修工具包。"); return notes; }
+  // 战斗中倒地的武器人：和「使用道具」一样修好重新站起来（items.js · useRepairKit）
+  if (inBattleNow() && typeof repairTargets === "function") {
+    const row = repairTargets().find(r => r.kit === kit);
+    if (row && row.down) return useRepairKit({ name: "维修" }, null, kit, notes);
+  }
   const before = weaponDur(kit);
   const max = weaponDurMax(kit);
   if (before >= max) { notes.push(`${weaponName(kit)} 耐久已满。`); return notes; }
