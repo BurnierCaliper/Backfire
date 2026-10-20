@@ -50,11 +50,11 @@
 - [x] 兼修·鼓劲选「全部友方」只扣附赠不扣行动点 —— `skillCost` 也认 `feat_rouse` 分步（party.js、feats.js · `featDelegateBaseOf`；tests/feat-bugs-104.test.js）
 
 **单局 / 每日挑战（5）**
-- [ ] 图鉴专长详情永远不显示每日挑战选取率（`window.Rogue` 不存在）
-- [ ] 战斗种子随机数被画面效果消耗（骰子取决于停了多久 / 开没开特效）
-- [ ] 第三采矿场悬赏目标从别的区域抽、随从和目标互相敌对
-- [ ] 联机单局客制化图纸装不上（永远「奎支不够」）
-- [ ] 联机单局房主选的守夜人 / 长休安排被丢掉
+- [x] 图鉴专长详情永远不显示每日挑战选取率（`window.Rogue` 不存在）—— 改读顶层的 `Rogue.featPickRates()`（bestiary-ui.js · `pickRateNote`；tests/feat-pickrate-124.test.js）
+- [x] 战斗种子随机数被画面效果消耗（骰子取决于停了多久 / 开没开特效）—— 画面效果（粒子、音效、骰子滚动动画、动画令牌）改用独立的 `fxRandom()`，不碰种子随机数（run.js、attack-fx.js、hit-fx.js、sfx.js、weather-fx.js、routemap.js、game.js、online-ui.js；tests/fx-random-124.test.js）
+- [x] 第三采矿场悬赏目标从别的区域抽、随从和目标互相敌对 —— 目标只从本区域敌人表里抽（没有 2 代币以上的就取本区域代币最多的），随从跟着目标阵营（run.js · `bountyCandidates`；tests/bounty.test.js）
+- [x] 联机单局客制化图纸装不上（永远「奎支不够」）—— `installBlueprint` 加进个人指令，扣付钱角色自己的钱包（online-rogue.js；tests/online-single-124.test.js）
+- [x] 联机单局房主选的守夜人 / 长休安排被丢掉 —— 房主投长休 / 休整时记下安排，该选项胜出时一起执行（online-rogue.js · `vote` / `tryResolve`、rogue-ui.js · `act`；tests/online-single-124.test.js）
 
 **工坊 / 长休（5）**
 - [ ] 闪光震撼弹打 10 级起精英，没攒满标记的失衡不立刻恢复

@@ -1316,7 +1316,7 @@
       const AF = global.AttackFx;
       const dx = t.x - a.x, dy = t.y - a.y, d = Math.hypot(dx, dy) || 1, ux = dx / d, uy = dy / d;
       const reach = o.reach >= 999 ? d : Math.max(16, Math.min(d - Math.min(a.w, t.w) * .5, o.reach || (o.heavy ? 112 : 92)));
-      const k = o.speed || 1, token = String(Math.random());
+      const k = o.speed || 1, token = String(fxRandom());
       node.dataset.olDash = token; node.style.zIndex = "5";
       node.style.transition = `transform ${90 * k}ms cubic-bezier(.2, .7, .3, 1)`;
       node.style.transform = `translate(${(-ux * 12).toFixed(1)}px, ${(-uy * 12).toFixed(1)}px)`;
@@ -1351,14 +1351,14 @@
         dash: (id, to, o) => { const n = cardFor(id); return dashCard(n, rectOf(n), to, o); },
         recoil: (id, to, px) => {
           const n = cardFor(id), a = rectOf(n); if (!n || !a || !to) return;
-          const dx = to.x - a.x, dy = to.y - a.y, d = Math.hypot(dx, dy) || 1, k = px || 8, token = String(Math.random());
+          const dx = to.x - a.x, dy = to.y - a.y, d = Math.hypot(dx, dy) || 1, k = px || 8, token = String(fxRandom());
           n.dataset.olDash = token; n.style.transition = "transform 70ms ease-out";
           n.style.transform = `translate(${(-dx / d * k).toFixed(1)}px, ${(-dy / d * k).toFixed(1)}px)`;
           settleCard(n, token, 110, 220);
         },
         nudge: (id, dx, dy, ms) => {
           const n = cardFor(id); if (!n) return;
-          const token = String(Math.random()); ms = ms || 240;
+          const token = String(fxRandom()); ms = ms || 240;
           n.dataset.olDash = token; n.style.transition = `transform ${ms * .4}ms cubic-bezier(.2, .8, .3, 1)`;
           n.style.transform = `translate(${dx}px, ${dy}px)`;
           settleCard(n, token, ms * .9, 260);

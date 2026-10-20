@@ -44,6 +44,12 @@ function makeRng(seed) {
   return next;
 }
 
+/** 画面效果（粒子、音效、动画令牌、骰子滚动动画……）用的随机数。
+ *  RNG.install 会把 Math.random 换成战斗用的种子随机数，画面效果如果也从那里取，
+ *  骰子结果就会跟着动画停了多久、开没开特效变；所以画面效果一律用这个，永远是系统自带的随机数。 */
+const NATIVE_RANDOM = Math.random;
+function fxRandom() { return NATIVE_RANDOM(); }
+
 const RNG = {
   seed: null,
   fn: null,
@@ -433,11 +439,21 @@ function rollBountyEncounter(preset, opt) {
   enc.id = "bounty:" + enc.id;
   return enc;
 }
-/** 本区域可以当悬赏目标的精英（2 代币及以上、不是首领、不是成群的） */
+/** 悬赏目标的资格：至少占几枚代币（本区域没有这么大的敌人时，退而取本区域里代币最多的） */
+const BOUNTY_TARGET = { minTokens: 2 };
+/** 本区域可以当悬赏目标的精英（不是首领、不是成群的；优先 minTokens 枚代币及以上）。
+ *  只从本区域的敌人表里抽：第三采矿场的敌人都只占 1 枚代币，以前因此落到全部区域去抽，
+ *  抽到别的区域的目标，随从又和目标不是一个阵营 */
 function bountyCandidates(region) {
-  const ok = (k) => { const i = ENEMY_INFO[k]; return i && !i.boss && !i.pack && (i.tokens || 1) >= 2; };
-  const here = regionPool(region).filter(ok);
-  return here.length ? here : Object.keys(ENEMY_INFO).filter(ok);
+  const base = (k) => { const i = ENEMY_INFO[k]; return i && !i.boss && !i.pack; };
+  const here = regionPool(region).filter(base);
+  const big = here.filter(k => enemyTokens(k) >= BOUNTY_TARGET.minTokens);
+  if (big.length) return big;
+  if (here.length) {
+    const top = Math.max(...here.map(enemyTokens));
+    return here.filter(k => enemyTokens(k) === top);
+  }
+  return Object.keys(ENEMY_INFO).filter(k => base(k) && enemyTokens(k) >= BOUNTY_TARGET.minTokens);   // 区域没有敌人表（不应出现）
 }
 
 /** BOSS 遭遇：BOSS 本体不占代币，随从另给。手册写死了随从的 BOSS（ENEMY_INFO.escorts）照写的来，不抽代币。 */
