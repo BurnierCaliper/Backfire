@@ -495,7 +495,9 @@
     const craft = wkAt ? mine.map(k => {
       const counts = backpack.usable[k] || backpack.sharedCounts, kuizhi = Number(d.purse[k]) || 0;
       const grouped = Rogue.craftListGrouped(r, { counts, kuizhi });
-      return { kit: k, name: name(k), grouped, previews: grouped.craftable.map(x => Rogue.craftPreview(r, k, x.id, null, { counts, kuizhi })) };
+      // 每张能做的配方：没人帮 + 每个可能打下手的队友各一份（成功率都由房主算，玩家端直接读）
+      const helpers = [null].concat(living(r).filter(x => x !== k));
+      return { kit: k, name: name(k), grouped, previews: grouped.craftable.flatMap(x => helpers.map(hp => Rogue.craftPreview(r, k, x.id, hp, { counts, kuizhi }))) };
     }) : null;
     const cyber = mine.map(k => Rogue.cyberSummary(r, k)).filter(Boolean);
     const clinic = Rogue.canClinic(r) ? r.party.filter(h => mine.includes(h.kit)).map(h => ({ kit: h.kit, name: name(h.kit), cost: Rogue.healCost(r, h.kit), cyber: cyberOf(h.kit) })) : null;

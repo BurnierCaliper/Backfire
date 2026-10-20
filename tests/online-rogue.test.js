@@ -264,8 +264,8 @@ test("联机单局：工坊——各人给自己的角色排活，房主按「�
   assert.equal((await submit(bob, { type: "rogue.act", command: { action: "setCraftJob", kit: "yuito", item: "fx_calm" } })).ok, true);
   await host.waitForFunction(() => Rogue.craftQueue(RunFlow.current()).length === 2);
   const h0 = await host.evaluate(() => Rogue.hoursAwake());
-  await host.click("#r-craft > summary");
-  await host.click("#r-craft-run");
+  await host.click("#r-workshop");
+  await host.click('#ws-overlay [data-ws-cmd*="craftQueued"]');
   await host.waitForFunction(() => bagCount("fx_smoke") === 1 && bagCount("fx_calm") === 1);
   assert.equal(await host.evaluate(() => Rogue.hoursAwake()) - h0, 1, "同时做，时间按最久的算");
   const owned = await host.evaluate(() => OnlineRogue.data().owned);
