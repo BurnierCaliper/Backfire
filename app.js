@@ -2204,8 +2204,13 @@ function turnEnd() {
         addNano(10);
         notes.push(`收发代理：无人机提取纳米 +10 → ${u.resources.nano}`);
       } else if ((u.resources.nano || 0) >= 10) {
-        // 激光不能穿墙：隔着危墙 / 关着的门的敌人不算可选目标；一个都没有就什么都不干（不耗纳米）
-        const foes = fieldUnits().filter(x => !x.isPlayer && !x.dead && !x.hidden && !x.fused && !lineBlocked(u.zone, x.zone));
+        // 激光不能穿墙：隔着危墙 / 关着的门的敌人不算可选目标；一个都没有就什么都不干（不耗纳米）。
+        // 锁定前先判断够不够得着（和 dealTo 的判定一致：距离 ≤1、没躲藏、没下潜、不是友军 / 飞碟本体），
+        // 以前只看墙，锁到距离 2 / 躲藏 / 下潜的目标，激光打不出去纳米却照扣
+        const foes = fieldUnits().filter(x => !x.isPlayer && !x.dead && !x.hidden && !x.fused && !lineBlocked(u.zone, x.zone) &&
+          zoneDist(Number(u.zone), Number(x.zone), Number(state.zoneMode)) <= 1 &&
+          !(x.statuses && x.statuses.hide) && !x.submerged && x.kit !== "ufo_body" &&
+          !(typeof playerAllied === "function" && playerAllied(x)));
         const high = foes.filter(x => x.statuses && x.statuses.high);   // 蓄能单位不算高能目标
         const pool = high.length ? high : foes;
         const tgt = pool.slice().sort((x, y) => totalHp(x) - totalHp(y))[0];
@@ -8332,7 +8337,7 @@ function setHiakiStance(u, stance) {
       const el = u.resources.blade === "naruto" ? "ice" : "fire";
       marked.forEach(x => {
         x.barrageBy = null;
-        hitOne2(u, x, { element: el, mult: 0.5, baseBreak: 0, atk: effectiveAtk(u, state.units), atkRange: "any", usePrep: false, flags: { action: true, lob: true } }, notes);
+        hitOne2(u, x, { element: el, mult: 0.5, baseBreak: 0, atk: effectiveAtk(u, state.units), atkRange: "any", usePrep: false, flags: { action: true, lob: true, skillRange: true } }, notes);   // skillRange：无视距离（距离 2 也砍得到）
       });
       notes.unshift(`特盛乱打：进入居合，被乱打过的 ${marked.length} 个敌人各被瞬间砍一刀。`);
       appendLog(notes.join("\n"));
@@ -11495,6 +11500,11 @@ function runSkillInner(id, optRun) {
   const waveThenHit = (tgt, opt) => {
     tgt.statuses = tgt.statuses || {};
     const had = !!tgt.statuses.shockwave;
+    // 屏障护着的目标：这一击整个被屏障吃掉，不会碰到屏障后面的人，震荡也不挂（先挂再还原会让屏障挡下的一击留着震荡）
+    if (!had && barrierFor(tgt, a)) {
+      lines.push(`${tgt.name} 被屏障护着，震荡不生效。`);
+      return hitOne(a, tgt, opt);
+    }
     const snap = { def: tgt.def, defMax: tgt.defMax, cut: tgt._waveCut };
     if (!had) {
       tgt.statuses.shockwave = true;
@@ -12112,7 +12122,12 @@ function runSkillInner(id, optRun) {
       let tgt = sTok ? null : ((ref ? unitById(ref) : null) || t);
       if (!sTok && !tgt) { lines.push("先选目标。"); return paintSkillLog(lines.join("\n")); }
       // #44（夕夏定）：瞄准躲在敌方屏障（废铁墙……）后面的敌人，这一刀本来就会被屏障拦下——直接改砍屏障，走配置物的翻倍和摧毁返还
+      // 改砍屏障也要和别的攻击一样被危墙 / 关着的门挡住（以前先换成屏障再砍，隔墙也砍得到）：挡住就不出手、不耗电能
       const shield = tgt && !tgt.isPlayer ? barrierFor(tgt, a) : null;
+      if (shield && lineBlocked(a.zone, shield.zone)) {
+        lines.push(`巨刃划空打不到 ${tgt.name}：${lineBlocked(a.zone, shield.zone)}`);
+        return paintSkillLog(lines.join("\n"));
+      }
       if (shield) {
         lines.push(`${shield.name} 挡在 ${tgt.name} 前面，巨刃划空改砍 ${shield.name}。`);
         prop = shield; sTok = "prop:" + shield.id; tgt = null;
