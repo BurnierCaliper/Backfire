@@ -41,9 +41,13 @@ function matchupChart(weather, opt) {
   const field = opt.field && opt.field.ice ? { ice: true } : null;
   const phaseStep = opt.phaseStep == null ? null : Number(opt.phaseStep);
   const cols = MATCHUP_LAYERS.map(id => ({ id, name: LAYER[id] }));
+  // 相位波峰 / 波谷（engine.js · resolveAttack 里 weather === "phase" 的两段）：全属性 ±50% × envX，和克制、天气修正一起加算（不连乘）
+  const phasePct = weather === "phase" ? (phaseStep === 2 ? 0.5 * envX : phaseStep === 0 ? -0.5 * envX : 0) : 0;
+  const phaseReason = phasePct ? `${phaseStep === 2 ? "相位波峰" : "相位波谷"}：全属性 ${matchupPctText(phasePct)}` : "";
   const rows = MATCHUP_ELEMENTS.map(id => {
-    const pct = (weatherDamagePct(weather, id) || 0) * envX;
-    return { id, name: ELE[id], pct, pctBase: 0, pctReason: matchupRowReason(weather, id, pct) };
+    const wp = (weatherDamagePct(weather, id) || 0) * envX;
+    const pct = wp + phasePct;
+    return { id, name: ELE[id], pct, pctBase: 0, pctReason: [matchupRowReason(weather, id, wp), phaseReason].filter(Boolean).join("；") };
   });
   const changed = [];
   const cells = MATCHUP_ELEMENTS.map(el => MATCHUP_LAYERS.map(layer => {

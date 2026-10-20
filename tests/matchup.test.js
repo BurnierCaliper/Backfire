@@ -33,7 +33,7 @@ for (const w of WEATHERS) {
     const m = chart(w);
     assert.equal(m.weather, w);
     m.rows.forEach((r, i) => {
-      assert.equal(r.pct, wpct(w, r.id));
+      assert.equal(r.pct, wpct(w, r.id));   // 没传 phaseStep：相位不加整行修正
       assert.equal(!!r.pctReason, !!r.pct);
       m.cols.forEach((col, j) => {
         const x = m.cells[i][j];
@@ -127,4 +127,32 @@ test("页面：game.html 在 engine.js 之后、app.js 之前载入 matchup.js�
   assert.ok(at("matchup.js") > at("engine.js") && at("engine.js") >= 0);
   assert.ok(at("matchup.js") < at("app.js"));
   assert.ok(at("matchup.js") < at("online-game.js"));
+});
+
+test("相位：波谷全属性 −50%、波峰 +50%（恶劣环境 ×2），和天气修正加算进每行 pct；平稳期不变；notes 保留", () => {
+  const cases = [[0, 1, -0.5, /相位波谷：全属性 −50%/], [2, 1, 0.5, /相位波峰：全属性 \+50%/], [0, 2, -1, /相位波谷：全属性 −100%/], [2, 2, 1, /相位波峰：全属性 \+100%/]];
+  for (const [step, envX, v, re] of cases) {
+    const m = chart("phase", { phaseStep: step, envX });
+    m.rows.forEach(r => {
+      assert.equal(r.pct, v + wpct("phase", r.id) * envX);
+      assert.notEqual(r.pct, r.pctBase);
+      assert.match(r.pctReason, re);
+    });
+    assert.ok(m.notes.some(n => (step ? /波峰/ : /波谷/).test(n)));
+  }
+  const mid = chart("phase", { phaseStep: 1 });
+  assert.ok(mid.rows.every(r => r.pct === 0 && r.pctReason === ""));
+  assert.ok(mid.notes.some(n => /平稳/.test(n)));
+  assert.ok(chart("phase").rows.every(r => r.pct === 0));
+  // 只有相位天气才加：别的天气传了 phaseStep 也不加
+  assert.ok(chart("heat", { phaseStep: 2 }).rows.every(r => r.pct === wpct("heat", r.id)));
+});
+
+test("相位：和真实结算一致（resolveAttack 加算百分比合计里的相位那一项）", () => {
+  const H2 = require("./headless").load();
+  const go = step => vm.runInContext(`(() => { const t = { id: "t", name: "t", layers: [{ type: "flesh", current: 999, max: 999 }], def: 0, defMax: 0 };
+    return resolveAttack({ attacker: null, target: t, atk: 10, mult: 1, flat: 0, diceValue: 0, element: "ice", baseBreak: 0, hits: 1, flags: {}, weather: "phase", phaseStep: ${step}, zoneMode: 2, targetField: {}, attackerField: {} }).log.join("\\n"); })()`, H2);
+  assert.match(go(2), /相位波峰：伤害 \+50%/);
+  assert.match(go(0), /相位波谷：伤害 −50%/);
+  assert.doesNotMatch(go(1), /相位波/);
 });
