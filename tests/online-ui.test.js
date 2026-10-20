@@ -505,3 +505,49 @@ test("offline wait bar shows the remaining seconds before the absent player's tu
   await page.waitForFunction(() => /乙 离线，等待其返回（还剩 4[12] 秒，到时间自动跳过）/.test(document.querySelector("#online-pause").textContent));
   assert.deepEqual(o.errors, []);
 });
+
+/** 跑团诊所 · 义体的联机包（trpg.js · trpgCyberwarePacket 形状，过 online-view 白名单） */
+function trpgCyberwarePacket(installed, purse) {
+  const H = require("./headless"), V = require("../online-view");
+  const c = H.load();
+  c.BattleSim.setup({ party: ["kolt", "helu"], enemies: [{ id: "thug_knife", lv: 3, zone: 2 }], seed: "CWOUI" });
+  c.S.TRPG.active = true; c.S.TRPG.clinicOpen = true;
+  c.LEDGER.purse = { kolt: 50000, helu: 3 };
+  c.cyberwareLoadExamples();
+  if (installed) c.trpgCyberwareInstall("kolt", "example_t5_melee");
+  const p = JSON.parse(JSON.stringify(c.trpgCyberwarePacket("kolt")));
+  if (purse != null) p.purse = purse;
+  return V.projectPacket({ type: "result", cyberware: { heroes: [p] } }, { recipientId: "p1", gmId: "gm" }).cyberware;
+}
+test("跑团诊所 · 义体：物资弹窗里的入口打开浮层，提交 cyberwareInstall；新包到了重画钱包 / 已装；进战斗收起", async t => {
+  const o = await open(t); if (!o) return; const { page } = o;
+  for (const file of ["workshop.css", "cyberware.css"]) await page.addStyleTag({ path: path.resolve(__dirname, "..", file) });
+  await page.addScriptTag({ path: path.resolve(__dirname, "..", "cyberware-ui.js") });
+  const before = trpgCyberwarePacket(false), after = trpgCyberwarePacket(true);
+  await player(page, { screen: "exploration", mode: "trpg" });
+  await page.evaluate(cw => { fixture.view.packet.cyberware = cw; fixture.emit(); }, before);
+  assert.match(await page.locator('[data-online="supplies"]').innerText(), /🦾/);
+  await page.click('[data-online="supplies"]');
+  const entry = page.locator(".ol-trpg-cw");
+  assert.match(await entry.innerText(), /钱包 50000 奎支/);
+  if (process.env.CW_SHOTS) await page.screenshot({ path: path.resolve(__dirname, "..", "shots", "cyberware-trpg-entry.png") });
+  await page.click('[data-online="trpgCyberware"]');
+  await page.waitForSelector("#cw-overlay:not([hidden]) .cw-card");
+  assert.match(await page.locator("#cw-overlay").innerText(), /手里有 50000 奎支/);
+  await page.click('[data-cw-pick="example_t5_melee"]');
+  assert.match(await page.locator(".cw-confirm").innerText(), /0% → 40%/);
+  await page.click(".cw-confirm [data-cw-cmd]");
+  const sent = (await calls(page)).filter(c => c.kind === "submit").pop().args;
+  assert.deepEqual(sent, { type: "cyberwareInstall", kit: "kolt", id: "example_t5_melee" });
+  // 房主结算后的新包：浮层跟着重画
+  await page.evaluate(cw => { fixture.view.packet.cyberware = cw; fixture.emit(); }, after);
+  await page.waitForSelector("#cw-overlay .cw-row.on");
+  assert.match(await page.locator("#cw-overlay").innerText(), /手里有 47000 奎支/);
+  if (process.env.CW_SHOTS) await page.screenshot({ path: path.resolve(__dirname, "..", "shots", "cyberware-trpg-installed.png") });
+  await page.click("#cw-overlay .cw-row.on [data-cw-cmd]");
+  assert.deepEqual((await calls(page)).filter(c => c.kind === "submit").pop().args, { type: "cyberwareRemove", kit: "kolt", id: "example_t5_melee" });
+  // 进战斗：收起
+  await page.evaluate(() => fixture.set({ screen: "battle" }));
+  assert.equal(await page.locator("#cw-overlay").isHidden(), true);
+  assert.deepEqual(o.errors, []);
+});

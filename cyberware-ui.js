@@ -79,7 +79,9 @@
     const why = r => !r.canInstall ? (r.error || "现在不能安装") : model.money < num(r.price) ? "奎支不够" : "";
     return `<section class="ws-group cw-shop"><h3>可安装 <small>${rows.length}</small></h3>
       <ul class="ws-list">${rows.map(r => {
-        const no = why(r), heavy = r.warning === HEAVY;
+        const pv = model.preview ? model.preview(r.id) : null;   // 有预览就按 overinstall / burden 判断，不比对文字
+        const heavy = pv ? !!(pv.overinstall || pv.burden === "heavy") : num(r.rateAfter) > num(model.packet.view.cap) + 1e-9;
+        const no = why(r);
         return `<li class="cw-row${no ? " miss" : " ok"}${ui.confirm === r.id ? " sel" : ""}"><div class="cw-txt"><b>${esc(r.name)}</b>
           <small>${meta(r)}</small>${r.text ? `<span class="cw-desc">${esc(r.text)}</span>` : ""}
           <small>安装后改造率 <b class="cw-after${heavy ? " over" : ""}">${pc(r.rateAfter)}</b> / ${pc(model.packet.view.cap)}${r.warning && !no ? ` · <span class="${heavy ? "cw-heavy-tag" : ""}">${esc(r.warning)}</span>` : ""}</small>
