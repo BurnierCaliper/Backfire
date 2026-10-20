@@ -89,3 +89,63 @@ test("决一死战（#44 违规）：被决斗的敌人范围攻击只打得到�
   assert.equal(c.totalHp(kolt), k0, "柯尔特没被波及");
   assert.match(logs(), /决一死战：.*只打得到 灯/);
 });
+
+test("决一死战：单体攻击、借机攻击、协助攻击也只打得到灯，同区的其他人不被波及（不只是范围攻击）", () => {
+  const { c, st, tou, kolt, a } = field("thug_knife");
+  kolt.zone = 2;
+  assert.ok(c.touDuelVictim(a));
+  st.combatPhase = "enemy";
+  const k0 = c.totalHp(kolt);
+  const opt = (flags) => ({ element: "physical", mult: 1, diceN: 1, diceS: 6, baseBreak: 1, atkRange: "melee", flags: Object.assign({ action: true }, flags) });
+  const r1 = c.dealTo(a, kolt, opt({}));
+  const r2 = c.dealTo(a, kolt, opt({ opportunity: true, blockResolved: true }));
+  const r3 = c.dealTo(a, kolt, opt({ assist: true }));
+  [r1, r2, r3].forEach(r => assert.equal(r.res.ok, false, "打不出去"));
+  assert.equal(c.totalHp(kolt), k0, "柯尔特没挨打");
+  const t0 = c.totalHp(tou);
+  c.dealTo(a, tou, opt({}));
+  c.BattleSim.resolveQueues(noBlock);
+  assert.ok(c.totalHp(tou) < t0, "灯照样挨打");
+});
+
+test("决一死战：同区的中立生物和友军不算『敌人』——不占名额，自己也不被牵制", () => {
+  const c = H.load();
+  c.BattleSim.setup({ party: ["tou", "kolt"], seed: "DUELN", zoneMode: 2, enemies: [{ id: "thug_knife", lv: 5, zone: 2 }, { id: "dust_bug", lv: 3, zone: 2 }, { id: "thug_knife", lv: 5, zone: 2 }] });
+  c.startCombat();
+  const st = c.S.state;
+  const tou = c.findKit("tou", st.units);
+  const [k1, k2] = st.units.filter(u => u.kit === "thug_knife");
+  const bug = st.units.find(u => u.kit === "dust_bug");
+  tou.zone = 2; st.units.filter(u => !u.isPlayer).forEach(u => { u.zone = 2; });
+  k2.zone = 1;   // 同区只剩一只匕首 + 一只尘虫
+  assert.equal(c.touDuelVictim(k1), tou, "尘虫不算，匕首狂徒是唯一的敌人");
+  assert.equal(c.touDuelVictim(bug), null, "中立生物不被牵制");
+  assert.equal(c.shouldDiceMin(k1), true, "同区只有它一个敌人：伤害骰取最低");
+  // 友军：和我方同阵营
+  st.playerAllies = [c.factionOf(k1)];
+  assert.equal(c.touDuelVictim(k1), null, "友军不被牵制");
+});
+
+test("播撒者被决一死战 / 嘲讽牵制在同区：喷洒抵近打自己所在的区（×0.6），不再空放", () => {
+  const { c, st, tou, a, logs } = field("spreader");
+  assert.ok(c.touDuelVictim(a));
+  const hp0 = c.totalHp(tou);
+  st.combatPhase = "enemy"; c.refreshEnemyEconomy(a);
+  const p = c.EnemyAI.plan(a);
+  assert.match(p.meta.skillName, /喷洒/);
+  p.thunk(); c.BattleSim.resolveQueues(noBlock);
+  assert.ok(c.totalHp(tou) < hp0, "打到灯了");
+  assert.match(logs(), /喷洒抵近打自己所在的 2 区/);
+  assert.doesNotMatch(logs(), /打不到距离 0/);
+  // 嘲讽：灯走开，柯尔特在同区嘲讽它
+  const t = field("spreader");
+  t.tou.zone = 1; t.kolt.zone = 2; t.a.tauntTo = t.kolt.id;
+  const k0 = t.c.totalHp(t.kolt);
+  t.st.combatPhase = "enemy"; t.a.ap = 1; t.st.attackerId = t.a.id; t.st.targetId = t.kolt.id;
+  t.c.runSkill("en_spread"); t.c.BattleSim.resolveQueues(noBlock);
+  assert.ok(t.c.totalHp(t.kolt) < k0, "嘲讽下也打到了");
+  // 没被牵制时同区照旧打不到
+  const g = field("spreader");
+  g.tou.zone = 1;
+  assert.equal(g.c.enemyZoneInRange(g.a, "en_spread", 2), false);
+});

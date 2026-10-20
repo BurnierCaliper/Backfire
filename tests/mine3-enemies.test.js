@@ -81,7 +81,7 @@ test("警戒自动机：醒着时每回合电涌所有高能的敌人（不限�
   const f = field([{ id: "alarm_bot", lv: 5, zone: 1 }], { zoneMode: 3, party: ["kolt", "helu", "tou"] });
   const a = f.E("alarm_bot"), k = f.P("kolt"), h = f.P("helu"), t = f.P("tou");
   a.dormant = false;
-  k.zone = 3; h.zone = 3; t.zone = 1; [k, h, t].forEach(tank);
+  k.zone = 3; h.zone = 3; t.zone = 2; [k, h, t].forEach(tank);   // 灯不和自动机同区：不然自动机被决一死战拦着，只打得到灯
   k.statuses.high = true; h.statuses.high = false; t.statuses.high = false;
   const kd = k.def;
   f.S.combatPhase = "enemy"; f.c.refreshEnemyEconomy(a);

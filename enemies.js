@@ -713,7 +713,9 @@ function enemySkillCost(u, id) {
 function enemyZoneInRange(a, id, zone) {
   const d = zoneDist(a.zone, zone, state.zoneMode);
   const rg = ENEMY_SKILL_RANGE[id] || a.range || "any";
-  const ok = rg === "melee" ? d === 0 : rg === "ranged" ? d === 1 : d <= 1;
+  // 被牵制（决一死战 / 嘲讽）而牵制者就在同区、自己又没有近身攻击：远距离的区域技能可以抵近打自己所在的区
+  const pb = d === 0 && rg === "ranged" && enemyForcedPointBlank(a, enemyForcedTarget(a));
+  const ok = rg === "melee" ? d === 0 : rg === "ranged" ? (d === 1 || pb) : d <= 1;
   return ok && !(typeof lineBlocked === "function" && lineBlocked(a.zone, zone));
 }
 /** 某区还站着、能挨打的我方单位（倒地没起身的不算） */
@@ -1660,8 +1662,12 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
       lines.push(`${a.name} 的喷洒打不到距离 ${zoneDist(a.zone, z, state.zoneMode)} 的 ${z} 区。`);
       return true;
     }
+    // 被牵制而牵制者就在同区：抵近喷洒打自己所在的区，倍率 ×0.6（和电弧扫射一致）
+    const forced = enemyForcedTarget(a);
+    const pb = zoneDist(a.zone, z, state.zoneMode) === 0 && enemyForcedPointBlank(a, forced);
+    if (pb) lines.push(`${a.name} 被 ${forced.name} 牵制：喷洒抵近打自己所在的 ${z} 区（倍率 ×0.6）。`);
     standingPlayersIn(z).forEach(u => {
-      aa(u, { element: "acid", mult: 1, diceN: 1, diceS: (typeof leveledSides === "function" ? leveledSides(a.level, 6) : 6), baseBreak: 0,
+      aa(u, { element: "acid", mult: pb ? 0.6 : 1, diceN: 1, diceS: (typeof leveledSides === "function" ? leveledSides(a.level, 6) : 6), baseBreak: 0,
         flags: { action: true, aoe: true }, onConnect: { status: "corr" } });
     });
     return true;
