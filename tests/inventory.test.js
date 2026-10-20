@@ -165,3 +165,86 @@ test("联机：viewFor 带上 backpack，工坊里每个自己的角色一份配
   assert.equal(corr.missing.length, 0);
   assert.ok(v.workshop.recipes[0].list.filter(x => !x.craftable).every(x => x.odds === null));
 });
+
+/* ---------- Akane 定的接口 ---------- */
+test("workshopAvailable：默认和 craftPlace 一样（任务板 / 休整 / 工匠 = bench，休息点 = rest，战斗节点 null）", () => {
+  const { R, run } = setup();
+  assert.equal(R.workshopAvailable(run), "bench");
+  run.stage = "task"; run.task = { nodes: [{ type: "rest" }], index: 0 };
+  assert.equal(R.workshopAvailable(run), "rest");
+  run.task.nodes[0].type = "smith"; assert.equal(R.workshopAvailable(run), "bench");
+  run.task.nodes[0].type = "battle"; assert.equal(R.workshopAvailable(run), null);
+});
+
+test("craftListGrouped：能做 / 缺料两组；缺料只列差的 {id,need,have}；金属按奎支补，钱不够 affordable=false", () => {
+  const { c, R, run, give } = setup();
+  c.S.state.bag.items = [];
+  give("cm_scrap", 1); give("cm_chem", 2);
+  const g = J(R.craftListGrouped(run));
+  assert.equal(g.craftable.length + g.missing.length, 36);
+  assert.ok(g.craftable.some(x => x.id === "fx_corr"));
+  const burn = g.missing.find(x => x.id === "fx_burn");   // 废料1 燃气1 化工1
+  assert.deepEqual(burn.missing, [{ id: "cm_gas", need: 1, have: 0 }]);
+  assert.ok(g.missing.every(x => !("chance" in x) && !("odds" in x)));
+  assert.equal(J(R.craftListGrouped(run, { onlyCraftable: true })).missing.length, 0);
+  assert.ok(J(R.craftListGrouped(run, { kind: "self" })).missing.every(x => x.kind === "self"));
+  run.recipes = ["fx_s_burn"]; give("cm_spirit", 1); give("cm_gas", 2);
+  const poor = J(R.craftListGrouped(run, { kuizhi: 0 })).missing.find(x => x.id === "fx_s_burn");
+  assert.equal(poor.missing.length, 0); assert.equal(poor.affordable, false); assert.ok(poor.metalKuizhi > 0);
+  assert.ok(J(R.craftListGrouped(run, { kuizhi: 1e9 })).craftable.some(x => x.id === "fx_s_burn"));
+});
+
+test("craftPreview：缺料时 odds 为 null；能做时给成功率、产出、失败会丢几份", () => {
+  const { c, R, run, give } = setup();
+  c.S.state.bag.items = [];
+  const no = J(R.craftPreview(run, "kolt", "fx_corr"));
+  assert.equal(no.craftable, false); assert.equal(no.odds, null); assert.equal(no.missing.length, 2);
+  give("cm_scrap", 1); give("cm_chem", 2);
+  const yes = J(R.craftPreview(run, "kolt", "fx_corr"));
+  const base = R.craftOdds(run, "kolt", "fx_corr").base;
+  assert.equal(yes.craftable, !!base);
+  if (base) assert.equal(yes.odds.chance, R.craftOdds(run, "kolt", "fx_corr").chance);
+  assert.deepEqual(yes.output, { id: "fx_corr", name: c.ITEM_CATALOG.fx_corr.name, qty: 1 });
+  assert.equal(yes.onFail.lose, 1);   // 化工残液 2 份 × 0.5
+  assert.deepEqual(yes.onFail.keep, ["cm_scrap"]);
+});
+
+test("itemCategory / recipesUsingMaterial / materialBar / cyberSummary", () => {
+  const { c, R, run, give } = setup();
+  assert.equal(R.itemCategory("cm_chem"), "material");
+  assert.equal(R.itemCategory("medkit"), "consumable");
+  assert.equal(R.itemCategory(Object.keys(c.ITEM_CATALOG).find(id => c.ITEM_CATALOG[id].part)), "mod");
+  c.ITEM_CATALOG.__k = { name: "钥匙", key: true }; assert.equal(R.itemCategory("__k"), "key");
+  assert.deepEqual(J(R.recipesUsingMaterial("cm_gas")), J(R.materialUses("cm_gas")));
+  c.S.state.bag.items = []; give("cm_coil", 3);
+  const bar = J(R.materialBar(run));
+  assert.deepEqual(bar.map(m => m.id), ["cm_scrap", "cm_chem", "cm_gas", "cm_coil", "cm_cell", "cm_scale", "cm_spirit", "mat_metal"]);
+  assert.equal(bar.find(m => m.id === "cm_coil").have, 3);
+  const cy = J(R.cyberSummary(run, "kolt"));
+  assert.equal(cy.kit, "kolt"); assert.equal(cy.used, 0); assert.ok(cy.limit >= 0 && cy.fleshMax > 0);
+  assert.equal(R.cyberSummary(run, "nobody"), null);
+});
+
+test("bagByCategory：单机 personal 为 null 全部公用；联机拆个人 / 公用，别人名下的不出现", () => {
+  const { c, R, run } = setup();
+  c.S.state.bag.items = [{ id: "medkit", qty: 3 }, { id: "cm_scrap", qty: 2 }];
+  const solo = J(R.bagByCategory(run, "kolt"));
+  assert.equal(solo.personal, null);
+  assert.equal(solo.shared.consumable[0].qty, 3);
+  const net = onlineSetup(); const { O } = net;
+  net.c.S.state.bag.items = [{ id: "medkit", qty: 3 }, { id: "cm_scrap", qty: 2 }];
+  O.data(net.run).owned = { kolt: { medkit: 2 }, helu: { medkit: 1 } };
+  const b = J(net.R.bagByCategory(net.run, "helu"));
+  assert.deepEqual(b.personal.consumable.map(x => [x.id, x.qty]), [["medkit", 1]]);
+  assert.equal(b.shared.consumable.length, 0);
+  assert.deepEqual(b.shared.material.map(x => [x.id, x.qty]), [["cm_scrap", 2]]);
+  assert.equal(b.usable.medkit, 1);
+  const v = J(O.viewFor("p2"));
+  assert.equal(v.workshopAvailable, "bench");
+  assert.deepEqual(v.bag.map(x => x.kit), ["helu"]);
+  assert.ok(!JSON.stringify(v.bag).includes('"kolt"'));
+  assert.equal(v.materialBar.find(m => m.id === "cm_scrap").have, 2);
+  assert.deepEqual(v.craft.map(x => x.kit), ["helu"]);
+  assert.ok(v.craft[0].previews.every(p => p.craftable && p.odds));
+  assert.deepEqual(v.cyber.map(x => x.kit), ["helu"]);
+});

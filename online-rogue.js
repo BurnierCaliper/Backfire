@@ -160,6 +160,8 @@
     pay: (r, kit, n) => { const d = data(r); d.purse[kit] = Math.max(0, (Number(d.purse[kit]) || 0) - n); },
     made: (r, kit, id) => { if (ownable(id)) addOwned(data(r), kit, id, 1); }
   });
+  // 背包按类分个人 / 公用（rogue.js · bagByCategory）：联机时按 run.online.owned
+  if (G_Rogue && Rogue.setBagOwnership) Rogue.setBagOwnership(r => (active() && r === run() ? data(r).owned : null));
   // 战斗里用道具：自己的 + 公用的；用掉的先从自己名下扣
   if (typeof setItemAccess === "function") setItemAccess((unit, id) => {
     if (!active()) return bagCount(id);
@@ -472,6 +474,16 @@
     const backpack = backpackFor(r, mine);
     if (workshop) workshop.recipes = r.party.filter(h => mine.includes(h.kit)).map(h => ({ kit: h.kit, name: name(h.kit),
       list: Rogue.recipeBook(r, h.kit, { counts: backpack.usable[h.kit] || backpack.sharedCounts }) }));
+    // 给新工坊 / 背包界面（和房主界面同一套接口：rogue.js · workshopAvailable / craftListGrouped / craftPreview / bagByCategory / materialBar / cyberSummary）
+    const wkAt = Rogue.workshopAvailable(r);
+    const bag = mine.map(k => Rogue.bagByCategory(r, k));
+    const materialBar = Rogue.materialBar(r, backpack.sharedCounts);
+    const craft = wkAt ? mine.map(k => {
+      const counts = backpack.usable[k] || backpack.sharedCounts, kuizhi = Number(d.purse[k]) || 0;
+      const grouped = Rogue.craftListGrouped(r, { counts, kuizhi });
+      return { kit: k, name: name(k), grouped, previews: grouped.craftable.map(x => Rogue.craftPreview(r, k, x.id, null, { counts, kuizhi })) };
+    }) : null;
+    const cyber = mine.map(k => Rogue.cyberSummary(r, k)).filter(Boolean);
     const clinic = Rogue.canClinic(r) ? r.party.filter(h => mine.includes(h.kit)).map(h => ({ kit: h.kit, name: name(h.kit), cost: Rogue.healCost(r, h.kit), cyber: cyberOf(h.kit) })) : null;
     return {
       act: r.act, day: r.day, region: Rogue.region(r), daysLeft: Rogue.daysLeft(r), daysPerAct: C.daysPerAct, stage: r.stage,
@@ -487,7 +499,7 @@
         needs: living(r).filter(k => l.needs[k] === "need").map(name), passes: living(r).filter(k => l.needs[k] === "pass").map(name),
         mine: mine.map(k => ({ kit: k, name: name(k), answer: l.needs[k] || "" })) })),
       lootLog: d.lootLog.slice(-5).map(x => x.text),
-      choice, waitingLevel, shop, points, smith, parts, clinic, workshop, backpack,
+      choice, waitingLevel, shop, points, smith, parts, clinic, workshop, backpack, workshopAvailable: wkAt, bag, materialBar, craft, cyber,
       lastRest: r.lastRest || null,   // 长休结算画面（坚毅字段在 online-view.js · scrubHidden 里去掉）
       log: (r.log || []).slice(-8).map(l => l.text)
     };

@@ -1946,6 +1946,98 @@ const Rogue = (function () {
   /** 这种材料用在哪些配方上（背包里点材料 → 跳到工坊的配方） */
   function materialUses(materialId) { return recipesUsing(materialId); }
 
+  /* ---------- 给工坊 / 背包界面的接口（Akane 定的名字；纯数据） ---------- */
+  /* 工坊在哪能开：键是 board 任务板 / camp 休整 / smith 工匠节点 / rest 休息点，值是那里的工坊档（bench 五类都能做 / rest 场地、自我效果做不了）。
+   * 默认 = 现在的规则（craftPlace）。作者若定「只在休整 / 休息点开」，删掉 board、smith 两行即可 */
+  const WORKSHOP_AT = { board: "bench", camp: "bench", smith: "bench", rest: "rest" };
+  function workshopSpot(run) {
+    if (!run || run.stage === "over" || run.ambush) return null;
+    if (run.stage === "board" || run.stage === "camp") return run.stage;
+    const node = currentNode(run);
+    return node && (node.type === "smith" || node.type === "rest") ? node.type : null;
+  }
+  /** 现在能不能开工坊 → "bench" / "rest" / null（和 craftPlace 同值，再按 WORKSHOP_AT 过滤） */
+  function workshopAvailable(run) {
+    const place = craftPlace(run), spot = workshopSpot(run);
+    return place && spot && WORKSHOP_AT[spot] ? place : null;
+  }
+  /** 配方分两组：{ craftable: [...], missing: [...] }。每张 = craftList 那一行 +
+   *  { missing: [{ id, need, have }]（金属不算，金属可用奎支补）, affordable（补金属的钱够不够）, metalKuizhi, canMakeHere }
+   *  craftable 组 = 会 && 这里能做 && 材料够 && 钱够补金属。opt.kind 只要某类；opt.onlyCraftable 时 missing 组为空；opt.counts / opt.kuizhi 联机时传某人能用的 */
+  function craftListGrouped(run, opt) {
+    opt = opt || {};
+    const counts = opt.counts || bagCounts(), place = workshopAvailable(run);
+    const money = opt.kuizhi != null ? Number(opt.kuizhi) || 0 : Number(state.kuizhi) || 0;
+    const out = { craftable: [], missing: [] };
+    craftList(run).filter(x => !opt.kind || x.kind === opt.kind).forEach(x => {
+      const mats = x.mats.map(m => Object.assign({}, m, { have: Math.max(0, Number(counts[m.id]) || 0) }));
+      const metal = mats.find(m => m.id === "mat_metal");
+      const metalKuizhi = metal ? Math.max(0, metal.need - metal.have) * metalPrice() : 0;
+      const missing = mats.filter(m => m.id !== "mat_metal" && m.have < m.need).map(m => ({ id: m.id, need: m.need, have: m.have }));
+      const canMakeHere = !!place && (place === "bench" || !x.bench);
+      const row = Object.assign({}, x, { mats, missing, metalKuizhi, affordable: metalKuizhi <= money, canMakeHere });
+      (x.known && canMakeHere && !missing.length && row.affordable ? out.craftable : out.missing).push(row);
+    });
+    if (opt.onlyCraftable) out.missing = [];
+    return out;
+  }
+  /** 选中一张配方后的详情：{ craftable, reasons, missing, odds（craftOdds，只有 craftable 时才有，否则 null）,
+   *  output: { id, name, qty }, onFail: { lose: 份数, from: [{ id, name, qty }] 可能被扣的非壳体材料, keep: [壳体 id] }, hours, metalKuizhi }
+   *  opt.counts / opt.kuizhi 同 craftListGrouped */
+  function craftPreview(run, kit, itemId, helper, opt) {
+    opt = opt || {};
+    const it = craftItem(itemId);
+    if (!it) return null;
+    const st = recipeStatus(run, kit, itemId, { counts: opt.counts, helper });
+    const g = craftListGrouped(run, opt), row = g.craftable.concat(g.missing).find(x => x.id === itemId);
+    const reasons = st.reasons.slice();
+    if (row && !row.affordable) reasons.push(`奎支不够补金属（要 ${row.metalKuizhi}）`);
+    if (!workshopAvailable(run) && !reasons.includes("这里不能制作")) reasons.push("这里不能制作");
+    const craftable = st.craftable && !!row && row.affordable && !!workshopAvailable(run);
+    const rc = CRAFT_RECIPES[itemId], from = [], keep = [];
+    let pieces = 0;
+    Object.keys(rc).forEach(id => { if (CRAFT_RULES.shells.includes(id)) keep.push(id); else { pieces += rc[id]; from.push({ id, name: (ITEM_CATALOG[id] || {}).name || id, qty: rc[id] }); } });
+    return { id: itemId, kit, helper: helper || null, craftable, reasons, missing: row ? row.missing : [],
+      odds: craftable ? craftOdds(run, kit, itemId, helper || null) : null,
+      output: { id: it.id, name: it.name, qty: 1 },
+      onFail: { lose: Math.ceil(pieces * CRAFT_RULES.failLoss), from, keep },
+      hours: CRAFT_RULES.hours[it.diff], metalKuizhi: row ? row.metalKuizhi : 0 };
+  }
+  function recipesUsingMaterial(id) { return recipesUsing(id); }
+  /* 联机单局（online-rogue.js）告诉背包谁名下有什么：fn(run) → run.online.owned；单机没有 → 全部公用 */
+  let bagOwnership = null;
+  function setBagOwnership(fn) { bagOwnership = typeof fn === "function" ? fn : null; }
+  /** 背包按类：{ kit, shared: { material, consumable, mod, key }, personal: 同结构 | null（单机为 null）, usable: { 物品 id: 自己的 + 公用的 } }
+   *  每行 { id, name, hint, qty, category, uses?（材料：用到它的配方） }。viewerKit 不传 = 只看公用 */
+  function bagByCategory(run, viewerKit) {
+    const owned = bagOwnership ? bagOwnership(run) : null;
+    const inv = buildInventory(bagCounts(), { owned, kits: viewerKit ? [viewerKit] : [], heroes: (run.party || []).map(h => heroGear(run, h)) });
+    const regroup = g => {
+      const out = { material: [], consumable: [], mod: [], key: [] };
+      ["materials", "consumables", "parts"].forEach(k => (g[k] || []).forEach(r => { const c = itemCategory(r.id); out[c].push(Object.assign({}, r, { category: c })); }));
+      return out;
+    };
+    const mine = inv.personal[0];
+    return { kit: viewerKit || null, shared: regroup(inv.shared), personal: owned && mine ? regroup(mine) : null,
+      usable: viewerKit ? inv.usable[viewerKit] : inv.sharedCounts };
+  }
+  /** 材料条：7 种制作材料 + 金属 → [{ id, name, have, cls, tier, hint }]（取代 rogue-ui.js 里写死的那 8 个）。counts 不传 = 整个背包 */
+  function materialBar(run, counts) {
+    counts = counts || bagCounts();
+    const list = CRAFT_MATERIALS.map(m => ({ id: m.id, name: m.name, cls: m.cls, tier: m.tier, hint: m.hint }))
+      .concat([{ id: "mat_metal", name: (ITEM_CATALOG.mat_metal || {}).name || "金属", cls: "metal", tier: 0, hint: (ITEM_CATALOG.mat_metal || {}).hint || "" }]);
+    return list.map(m => Object.assign(m, { have: Math.max(0, Number(counts[m.id]) || 0) }));
+  }
+  /** 义体概况：{ kit, name, current: { armor, shield, sand, spirit }, used, limit, rate, fleshMax, perHp } | null（战斗中别调：会重摆队伍） */
+  function cyberSummary(run, kit) {
+    let i;
+    try { i = cyberInfo(run, kit); } catch (e) { return null; }
+    if (!i || !i.h) return null;
+    const cur = i.current || {};
+    return { kit, name: heroName(kit), current: cur, used: CYBER_OUTER.reduce((s, t) => s + (Number(cur[t]) || 0), 0),
+      limit: i.limit, rate: i.rate, fleshMax: i.fleshMax, perHp: ROGUE_CLINIC.cyberPerHp };
+  }
+
   /* ---------- 工匠 ---------- */
 
   /** 升到某一级的报价（rogue-data.js · ROGUE_SMITH.recipe × 材料价 + 加工费，再按工匠的收费规则）。
@@ -2787,7 +2879,7 @@ function advanceDays(run, n) {
     role2Options, soloBattleInfo,
     restPlan, restOptions, canLongRest, sheetData, armoryData, lowHpWarning, escortInfo, partOffers, buyPart, sellPart, canSellParts, partStock, partSellPrice, partInstallCost, installPart, removePart, restAtNode, leaveNode, canShortRestBefore, shortRestBeforeNode,
     ambushChance, watchOptions,
-    interludeOptions, campStatus: campStatusOf, buy, shopPoints, redeemList, redeem, craftPlace, craftList, craftOdds, craft, knowsRecipe, learnOptions, learnRecipe, rollRecipeChip, salvageList, salvage, setCraftHooks, setCraftJob, craftQueue, craftQueued, bagCounts, inventory, recipeStatus, recipeBook, materialUses,  canShop, shopItemName, shopStock, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
+    interludeOptions, campStatus: campStatusOf, buy, shopPoints, redeemList, redeem, craftPlace, craftList, craftOdds, craft, knowsRecipe, learnOptions, learnRecipe, rollRecipeChip, salvageList, salvage, setCraftHooks, setCraftJob, craftQueue, craftQueued, bagCounts, inventory, recipeStatus, recipeBook, materialUses, workshopAvailable, craftListGrouped, craftPreview, recipesUsingMaterial, setBagOwnership, bagByCategory, materialBar, cyberSummary, itemCategory: id => itemCategory(id),  canShop, shopItemName, shopStock, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
     presentSmiths, smithInfo, claimBlueprint, installBlueprint, blueprintById, weaponModsOf,
     smithQuote, introduceSmith,
     canClinic, cyberInfo, cyberPreview, cyberCost, modifyHero, healCost, healHero,

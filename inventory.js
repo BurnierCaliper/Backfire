@@ -102,3 +102,13 @@ function buildInventory(counts, opt) {
   });
   return { tabs: INVENTORY_TABS.map(t => Object.assign({}, t)), shared, personal, usable, sharedCounts };
 }
+
+/** Akane 要的分类名：material 材料 / consumable 消耗品 / mod 武器改装件、图纸 / key 关键物品（预留：物品表里标了 key: true 的）。不认识 → null */
+function itemCategory(id) {
+  const spec = (typeof ITEM_CATALOG !== "undefined" ? ITEM_CATALOG : {})[id];
+  if (!spec) return null;
+  if (spec.key) return "key";
+  const c = inventoryCategory(id);
+  return c === "materials" ? "material" : c === "parts" ? "mod" : "consumable";
+}
+const ITEM_CATEGORIES = ["material", "consumable", "mod", "key"];
