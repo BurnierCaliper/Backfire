@@ -398,3 +398,42 @@ test("跑团模式：7 级给专长点，主持人分配", () => {
   assert.equal(u.featPoints, 0);
   assert.deepEqual(plain(u.feats), ["wanderer"]);
 });
+
+test("硬骨头：受伤后重算属性不掉血；义体方案的内层不会被回满", () => {
+  const c = H.load();
+  c.BattleSim.setup({ party: ["kolt", "helu"], enemies: [{ id: "thug_knife", lv: 3, zone: 1 }], seed: "FC5b" });
+  const u = c.findKit("kolt", c.S.state.units);
+  u.level = 6;
+  u.feats = ["tough"];
+  c.applyLevelStats(u);
+  const flesh = u.layers.find(l => l.type === "flesh");
+  flesh.current -= 5;
+  const before = flesh.current;
+  for (let i = 0; i < 3; i++) c.applyLevelStats(u);
+  assert.equal(u.layers.find(l => l.type === "flesh").current, before, "肉体：重算不掉血");
+
+  u.cyberPlan = { armor: 4, shield: 3 };
+  c.applyLevelStats(u);
+  u.layers.forEach(l => { l.current = Math.max(1, l.current - 1); });   // 每层只掉 1（内层伤在硬骨头加的那几点里）
+  const snap = plain(u.layers).map(l => [l.type, l.current, l.max]);
+  for (let i = 0; i < 3; i++) c.applyLevelStats(u);
+  assert.deepEqual(plain(u.layers).map(l => [l.type, l.current, l.max]), snap, "义体：重算不回满也不掉血");
+});
+
+test("硬骨头：受伤时第一次拿到，当前生命也加上同样的量", () => {
+  const c = H.load();
+  c.BattleSim.setup({ party: ["kolt", "helu"], enemies: [{ id: "thug_knife", lv: 3, zone: 1 }], seed: "FC5c" });
+  const u = c.findKit("kolt", c.S.state.units);
+  u.level = 6;
+  c.applyLevelStats(u);
+  const flesh = u.layers.find(l => l.type === "flesh");
+  flesh.current -= 5;
+  const cur0 = flesh.current, max0 = flesh.max;
+  u.feats = ["tough"];
+  c.applyLevelStats(u);
+  const f = u.layers.find(l => l.type === "flesh");
+  assert.equal(f.max, max0 + 6);
+  assert.equal(f.current, cur0 + 6);
+  c.applyLevelStats(u);
+  assert.equal(u.layers.find(l => l.type === "flesh").current, cur0 + 6, "再重算不变");
+});

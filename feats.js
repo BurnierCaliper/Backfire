@@ -60,9 +60,12 @@ const FEATS = {
         const inner = (u.layers || []).filter(l => l.type !== "shield").slice(-1)[0];
         if (!inner) return;
         const add = Number(u.level) || 1;
-        const full = (Number(inner.current) || 0) >= (Number(inner.max) || 0);
+        // 上限加多少，当前值就同时加多少（不管满不满血）：第一次拿到专长、升级加成变大都一样。
+        // 上次重算加过的部分（growth.js · applyLevelStats 先拆掉再重算）照原样加回，受的伤不变
+        const carry = u._featHpCarry && u._featHpCarry.type === inner.type ? u._featHpCarry : null;
         inner.max = (Number(inner.max) || 0) + add;
-        if (full) inner.current = inner.max;
+        inner.current = Math.min(inner.max, (Number(inner.current) || 0) + Math.max(0, add - (carry ? carry.deficit : 0)));
+        inner.featHp = add;
       }
     } },
   whet: { name: "磨刀", kind: "action", tier: 1, dabble: { role: "直伤", n: 1, base: "xia_prep", battle: 1 },

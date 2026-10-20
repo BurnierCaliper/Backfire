@@ -517,9 +517,23 @@ function applyCyberLayers(u, fleshMax) {
 
 function applyLevelStats(u) {
   if (!u || !u.isPlayer || isWeaponUnit(u)) return;
+  // 先拆掉上次专长加在血量层上的上限（featHp，硬骨头），再按基础值重算：
+  // 否则基础重算会把加过的上限当成原上限——肉体按比例缩水（每算一次掉血），
+  // 义体方案的内层被截到基础上限后又被判成「满血」而回满
+  u._featHpCarry = null;
+  (u.layers || []).forEach(l => {
+    const b = Number(l.featHp) || 0;
+    if (!b) return;
+    const cur = Number(l.current) || 0;
+    u._featHpCarry = { type: l.type, deficit: Math.max(0, b - cur) };
+    l.max = Math.max(0, (Number(l.max) || 0) - b);
+    l.current = Math.max(0, cur - b);
+    delete l.featHp;
+  });
   applyLevelStatsBase(u);
   // 被动专长（feats.js · hooks.apply）：属性、等级算完以后再改；每次重算都从头来，所以不会叠加
   if (typeof featHook === "function") featHook(u, "apply");
+  delete u._featHpCarry;
 }
 function applyLevelStatsBase(u) {
   // 固定成长（每级固定加血）只给没有六项属性的老卡用；有属性的角色一律按属性公式算，
