@@ -6527,17 +6527,19 @@ function finishAssist(helperId, extra) {
   if (!job) return;
   const target = unitById(job.targetId);
   if (assistTargetGone(target)) {
+    if (target) target._bossAssistWindow = false;
     appendLog(`${target ? target.name : "目标"} 已经倒下，协助攻击取消。`);
     presentAssistModal();
     return;
   }
   if (!helperId) {
+    target._bossAssistWindow = false;
     appendLog("没有人发动协助攻击。");
     presentAssistModal();
     return;
   }
   const helper = unitById(helperId);
-  if (!helper || !target) { presentAssistModal(); return; }
+  if (!helper || !target) { if (target) target._bossAssistWindow = false; presentAssistModal(); return; }
   // 先确认这个人真能出手，再召回武器、回满架势（以前先回满架势再判，空手 / 濒死的人选上了白回架势、啥也没打）
   if (!eligibleAssisters(unitById(job.breakerId), target).some(u => u.id === helper.id)) {
     appendLog(`${helper.name} 现在不能发动协助攻击，请另选。`);
@@ -6575,7 +6577,7 @@ function finishAssist(helperId, extra) {
     ? (typeof enemyAssistSkillId === "function" ? enemyAssistSkillId(helper) : "en_aa")
     : assistSkillId(helper);
   state._assistBy = helper.id;      // 协助攻击期间（图纸「恶眼」的伤害加成看这个）
-  try { runSkill(sidSkill); } finally { state._assistBy = null; }
+  try { runSkill(sidSkill); } finally { state._assistBy = null; target._bossAssistWindow = false; }
   state.attackerId = prevAtk;
   state.targetId = prevT;
   if (typeof fishFrenzyContinue === "function") fishFrenzyContinue(job, helper, target);   // 沙鱼群起：下一只接着上
@@ -7671,6 +7673,7 @@ function applyAtkFxAfter(attacker, target, res, flags, extra, opt) {
 }
 
 function dealTo(attacker, target, opt) {
+  if (target) target._brokeNow = false;   // 新的一击：上一次「立刻恢复」留下的记号作废
   opt = opt || {};
   // 原始击破（后面会被目标一侧的效果改写，例如「加倍击破」翻倍）：导体额外那一下按它重新结算
   if (!("_origBaseBreak" in opt)) opt._origBaseBreak = opt.baseBreak;
@@ -7776,7 +7779,7 @@ function dealTo(attacker, target, opt) {
     const msg = "飞碟触灵本体不受范围效果波及。";
     return { res: { ok: false, total: 0, breakDealt: 0, log: [msg], perHit: [] }, extra: [msg] };
   }
-  if (target && target.kit === "ufo_body" && !(opt.flags.assist && target.stunned)) {
+  if (target && target.kit === "ufo_body" && !(opt.flags.assist && (target.stunned || target._bossAssistWindow))) {
     const msg = "飞碟触灵本体无法被通常手段攻击。只有本体失衡时的协助攻击可以打到它。";
     appendLog(msg);
     return { res: { ok: false, total: 0, breakDealt: 0, log: [msg], perHit: [] }, extra: [msg] };
@@ -8009,7 +8012,7 @@ function dealTo(attacker, target, opt) {
   const extra = applyCombat(target, res, attacker);
   // 这一击打死的敌人：本次行动后面的攻击还能打到它（全部算溢出）
   if (target && !target.isPlayer && target.dead && !wasDeadForGhost && state.actionKills && !state.actionKills.includes(target.id)) state.actionKills.push(target.id);
-  if (target && !target.isPlayer && scoreBonus > 0 && !wasStunnedForScore && target.stunned) target._staggerBonus = scoreBonus;
+  if (target && !target.isPlayer && scoreBonus > 0 && brokeInto(target, wasStunnedForScore)) target._staggerBonus = scoreBonus;
   if (target && !target.isPlayer) target._killBonus = 0;   // 只给这一击打死的用
   // 手册第四章补全的效果（effects.js）
   if (typeof afterDamageTaken === "function") {
@@ -8018,8 +8021,8 @@ function dealTo(attacker, target, opt) {
     });
   }
   if ((res.breakDealt || 0) > 0 && typeof onBreakTaken === "function") onBreakTaken(target, res.breakDealt, opt.element || res.element, extra, dopplerT);
-  if (!wasStunnedT && target.stunned && typeof onBroken === "function") onBroken(target, extra);
-  if (typeof featAfterHit === "function") featAfterHit(attacker, target, res, flags, extra, !wasStunnedT && !!target.stunned);   // 冲阵 / 乘势 / 荒原行者
+  if (brokeInto(target, wasStunnedT) && typeof onBroken === "function") onBroken(target, extra);
+  if (typeof featAfterHit === "function") featAfterHit(attacker, target, res, flags, extra, brokeInto(target, wasStunnedT));   // 冲阵 / 乘势 / 荒原行者
   if (flags.action && !isReaction && typeof afterAttackDealt === "function") afterAttackDealt(attacker, target, opt.element || res.element, res, opt, extra);
   // 猛击反震把攻击者自己打进失衡：这一击的霜结 / 溅射 / 导体照常结算完，再随晕眩结束自我效果
   if (attacker && attacker !== target && attacker.stunned && typeof endSelfOnStun === "function") endSelfOnStun(attacker, extra);
@@ -9948,6 +9951,7 @@ function smashableBreak(a, u, amount, element, notes, reason) {
 /** 不经过攻击的击破（状态、场地、技能直接给的击破……）。
  *  opt.by：造成这次击破的单位——打进失衡时它不能接自己的协助攻击（queueAssistAttack） */
 function dealBreak(unit, amount, element, notes, reason, opt) {
+  if (unit) unit._brokeNow = false;
   amount = Math.max(0, Math.floor(Number(amount) || 0));
   if (!unit || !amount) return;
   opt = opt || {};
@@ -10660,7 +10664,13 @@ function bossQuickRecover(u, notes) {
   if (!u.stunned || u.dead) return;
   const out = [];
   recoverFromStun(u, out);
+  u._brokeNow = true;           // 这一下确实打进了失衡：后面「打进失衡时」的效果读 brokeInto，不看已经清掉的 stunned
+  u._bossAssistWindow = true;   // 排上队的协助攻击还要打它（飞碟触灵本体平时不可直击，只有失衡时的协助攻击打得到）
   out.forEach(s => notes.push(s.replace("晕眩结束", "晕眩标记没攒满，失衡立刻结束")));
+}
+/** 这一击 / 这次击破把 u 打进了失衡吗：结算前不在失衡，结算后在失衡；或者首领 / 精英标记没攒满、立刻恢复了架势（bossQuickRecover） */
+function brokeInto(u, wasStunned) {
+  return !wasStunned && !!u && !u.dead && !!(u.stunned || u._brokeNow);
 }
 /** 兜底：没经过 imbalanceLine 的失衡（直接设成晕眩的那些）也记上标记 */
 function settleBossStuns(notes) {
@@ -12414,7 +12424,7 @@ function runSkillInner(id, optRun) {
       hitOne(a, t, { element: "acid", mult: 1, baseBreak: 1, atk, onConnect: { dest, reason: "被猫爪击退" } });
       const y = findKit("yuito", state.units);
       if (y) {
-        const gain = (!stun0 && t.stunned) ? 2 : 1;
+        const gain = brokeInto(t, stun0) ? 2 : 1;
         y.resources.bean = (Number(y.resources.bean) || 0) + gain;
         lines.push(`咖啡豆 +${gain}${gain > 1 ? "（打出失衡）" : ""} → ${y.resources.bean}`);
       }
@@ -12438,7 +12448,7 @@ function runSkillInner(id, optRun) {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       const stun0 = !!t.stunned;
       hitOne(a, t, { element: "ice", mult: 0, baseBreak: 3, atk, atkRange: "melee" });
-      if (!stun0 && t.stunned) {
+      if (brokeInto(t, stun0)) {
         const owner = ownerOfWeapon(a, state.units);
         lines.push(...returnWeapon(a));
         if (owner) {
@@ -12984,7 +12994,7 @@ function runSkillInner(id, optRun) {
         lines.push(`过度自信：${tgt.name} 被嘲讽，下次攻击必须打柯尔特。`);
       }
       // 卡面：这次攻击行动造成失衡才提升到 1.5×；本来就失衡的不算
-      const brokeNow = !stunnedBefore && !!tgt.stunned;
+      const brokeNow = brokeInto(tgt, stunnedBefore);
       const amount = Math.floor(atk * (brokeNow ? 1.5 : 1));
       const outer = (tgt.layers || []).find(l => (l.current || 0) > 0);
       if (outer) {
@@ -13061,7 +13071,7 @@ function runSkillInner(id, optRun) {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       const beforeStun = !!t.stunned;
       hitOne(a, t, { element: "physical", mult: 1, baseBreak: 1, atk });
-      if (!beforeStun && t.stunned) {
+      if (brokeInto(t, beforeStun)) {
         a.ap = (a.ap || 0) + 1;
         lines.push("叮咬造成失衡，返还 1 行动点。");
       }
