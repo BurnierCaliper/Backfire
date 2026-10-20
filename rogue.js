@@ -700,7 +700,9 @@ const Rogue = (function () {
     }
     if (p.type === "prof") {
       const have = heroProfs(h);
-      const opts = PROF_LIST.filter(n => (have[n] || 0) < PROF_MAX)
+      // 同一组（多面手的三项）已经选过的不能再选
+      const taken = p.group ? ((h.profGroups || {})[p.group] || []) : [];
+      const opts = PROF_LIST.filter(n => (have[n] || 0) < PROF_MAX && taken.indexOf(n) < 0)
         .map(n => ({ value: n, label: have[n] ? `${n} ${have[n]} → ${have[n] + 1} 级` : `${n}（新学）`, hint: profCategory(n) }));
       // 已有的排前面（升级），新学的按手册顺序
       return opts.filter(o => have[o.value]).concat(opts.filter(o => !have[o.value]));
@@ -764,6 +766,12 @@ const Rogue = (function () {
     } else if (p.type === "prof") {
       const have = heroProfs(h);
       have[value] = (have[value] || 0) + 1;
+      if (p.group) {
+        h.profGroups = Object.assign({}, h.profGroups);
+        h.profGroups[p.group] = (h.profGroups[p.group] || []).concat(value);
+        // 这一组选完了就清掉记录
+        if (!h.pending.some((q, i) => i !== index && q.group === p.group)) delete h.profGroups[p.group];
+      }
       notes.push(`${heroName(kit)} 熟练项「${value}」${have[value] > 1 ? "升到 " + have[value] + " 级" : "（新学，一级）"}。`);
     } else if (p.type === "feat") {
       if (run.daily) dailyNotePick(run, kit, value);   // 每日挑战：记下这次选了哪个（在加进 feats 之前，按出现的那一行找）

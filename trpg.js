@@ -439,11 +439,15 @@ function trpgPickFeat(kit, id, fullId) {
   const u = trpgHeroes().find(h => h.kit === kit);
   if (!u) return ["没有这个角色。"];
   if (!(Number(u.featPoints) > 0)) return [`${u.name} 没有可以分配的专长。`];
-  if (typeof featChoicesFor !== "function" || featChoicesFor(u, u.level).indexOf(id) < 0) return ["这项专长现在不能选。"];
+  // 每个专长点按自己的来源等级判断能选哪层；用满足条件的最低一点，高等级的点留着
+  const pts = featPointLevelsOf(u);
+  const at = typeof featChoicesFor !== "function" ? -1 : pts.findIndex(L => featChoicesFor(u, L).indexOf(id) >= 0);
+  if (at < 0) return ["这项专长现在不能选。"];
   const f = FEATS[id];
   if (id === "dualclass" && featFullOptions(u).indexOf(fullId) < 0) return ["兼修要选一张专长①–③的职责涉猎专长。"];
   u.feats = (u.feats || []).concat(id);
   if (id === "dualclass") u.featFull = (u.featFull || []).concat(fullId);
+  u.featPointLevels = pts.filter((_, i) => i !== at);
   u.featPoints -= 1;
   if (typeof applyLevelStats === "function") applyLevelStats(u);
   ledgerCapture();

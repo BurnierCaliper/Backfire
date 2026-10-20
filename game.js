@@ -3989,6 +3989,7 @@
       feats: (u.feats || []).slice(),
       featFull: (u.featFull || []).slice(),
       featPoints: Number(u.featPoints) || 0,
+      featPointLevels: (u.featPointLevels || []).slice(),   // 每个没用的专长点是几级给的
       notes: u.levelNotes ? JSON.parse(JSON.stringify(u.levelNotes)) : null
     };
   }
@@ -4049,6 +4050,9 @@
         const have = (u.feats || []).length + (Number(u.featPoints) || 0);
         if (should > have) u.featPoints = (Number(u.featPoints) || 0) + should - have;
       }
+      // 来源等级：新档直接读；旧档没有的按升级表补（feats.js · featPointLevelsOf），不丢点
+      if (Array.isArray(s.featPointLevels)) u.featPointLevels = s.featPointLevels.slice();
+      if (typeof featPointLevelsOf === "function") featPointLevelsOf(u);
       if (s.cyberPlan) {
         // 义体改造：按方案重建血量层（applyLevelStats 只会重建已经有方案的单位，先摆一层肉体给它换）
         u.cyberPlan = JSON.parse(JSON.stringify(s.cyberPlan));

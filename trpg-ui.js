@@ -182,7 +182,7 @@
           ${Object.keys(ATTR_NAMES).map(k => `<button class="g-btn small" data-attr="${esc(h.kit)}:${k}">${ATTR_NAMES[k]} ${(h.attrs || {})[k] || 0} +1</button>`).join("")}</div>`).join("");
       // 专长（feats.js）：有专长点的角色，选一项（兼修再选一张涉猎专长）
       const featRows = typeof featChoicesFor !== "function" ? "" : heroes().filter(h => Number(h.featPoints) > 0).map(h => {
-        const opts = featChoicesFor(h, h.level).map(id => `<option value="${esc(id)}">${esc(featLabel(id))} · ${esc(FEATS[id].text || "")}</option>`).join("");
+        const opts = featChoicesFor(h, Math.max(...featPointLevelsOf(h))).map(id => `<option value="${esc(id)}">${esc(featLabel(id))} · ${esc(FEATS[id].text || "")}</option>`).join("");
         const full = featFullOptions(h).map(id => `<option value="${esc(id)}">${esc(FEATS[id].name)}</option>`).join("");
         return `<div class="tr-row"><b>${esc(h.name)}</b> 有 ${h.featPoints} 项专长：
           <select data-feat-pick="${esc(h.kit)}" style="max-width:100%">${opts}</select>
