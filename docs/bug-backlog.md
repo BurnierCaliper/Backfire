@@ -43,10 +43,10 @@
 - [x] 荒原行者「击落到你所在区域」从不生效 —— 引擎击破飞行单位时先把 `flying` 清掉，`featAfterHit` 永远看到 false；`dealTo` 结算前记下是否飞行并传入（app.js · `dealTo`、feats.js · `featAfterHit`；tests/feat-bugs-104.test.js）
 - [x] 以身作盾失衡中也能宣布、不承担击破 —— 失衡中的人不再出现在可宣布名单（feats.js · `featIronwallDeclarers`）；击破由宣布者承担本来就生效，补了回归测试（tests/feat-bugs-104.test.js）
 - [x] 热座 / 联机的移动校验不认荒原行者 —— `checkMove` 对荒原行者不再要求行动点（酸液地面、空隙只要附赠），和 `doMove` 一致（hotseat-validation.js；tests/feat-bugs-104.test.js）
-- [ ] 跑团专长点不记来源等级（低等级那点能选高层）
+- [x] 跑团专长点不记来源等级（低等级那点能选高层）—— 每个点记 `featPointLevels`，选专长按来源等级判断；旧档按升级表补（feats.js · `featPointLevelsOf`、growth.js、trpg.js、game.js；tests/feat-bugs-107.test.js）
 - [x] 硬骨头受伤时每重算一次属性就掉血（义体反而回满）—— main #78（fix/hard-bone-recompute）
-- [ ] 多面手三次熟练能选同一项
-- [ ] 警戒对友军 / 中立生物也触发、同区多人只有一个出手
+- [x] 多面手三次熟练能选同一项 —— 三项同组、互相排除；已熟练的项照专长说明仍可升级（feats.js、rogue.js · `choiceOptions` / `choose`；tests/feat-bugs-107.test.js）
+- [x] 警戒对友军 / 中立生物也触发、同区多人只有一个出手 —— 只认 `hostileTo` 敌对，同区每个有警戒的人各自出手（feats.js · `featAlertOnEnter`；tests/feat-bugs-107.test.js）
 - [x] 兼修·鼓劲选「全部友方」只扣附赠不扣行动点 —— `skillCost` 也认 `feat_rouse` 分步（party.js、feats.js · `featDelegateBaseOf`；tests/feat-bugs-104.test.js）
 
 **单局 / 每日挑战（5）**

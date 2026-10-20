@@ -637,7 +637,11 @@ function tryLevelUp(u) {
     u.level += 1;
     if (u.level === 4 || u.level === 8 || u.level === 19) u.attrPoints = (u.attrPoints || 0) + 1;   // 19 级那点可以加在加过的同一项上
     // 专长（7 / 11 / 13 / 16 级）：跑团模式由主持人在队伍页分配（单局走升级选择，不读这个）
-    if (typeof FEAT_LEVELS !== "undefined" && FEAT_LEVELS.indexOf(u.level) >= 0) u.featPoints = (u.featPoints || 0) + 1;
+    if (typeof FEAT_LEVELS !== "undefined" && FEAT_LEVELS.indexOf(u.level) >= 0) {
+      if (typeof featPointLevelsOf === "function") featPointLevelsOf(u);   // 先把旧点的来源等级补齐，再记这一点
+      u.featPoints = (u.featPoints || 0) + 1;
+      u.featPointLevels = (u.featPointLevels || []).concat(u.level);   // 这一点是几级给的（选专长按它判断能选哪层）
+    }
     applyLevelStats(u);
     appendLog(`${u.name} 升到 ${u.level} 级。`);
     changed = true;
