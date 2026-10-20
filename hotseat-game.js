@@ -12,7 +12,7 @@
   const packetListeners = new Set();
   const listeners = new Set(), authorityContext = {}, actionTypes = new Set(["skill", "move", "standUp", "useItem"]);
   const automatic = new Set(["battle.supportInfo", "battle.checkSolo", "battle.rememberCampaign", "battle.loadCampaign"]);
-  const tableTypes = new Set(["checkOpen", "checkRoll", "checkClose", "attrRequest", "attrDecide", "skillRoll", "showTitle", "purseTransfer", "shopBuy", "shopRedeem", "cyberRequest"]);
+  const tableTypes = new Set(["checkOpen", "checkRoll", "checkClose", "attrRequest", "attrDecide", "skillRoll", "showTitle", "purseTransfer", "shopBuy", "shopRedeem", "cyberRequest", "cyberwareInstall", "cyberwareRemove"]);
   const orderTypes = new Set(["orderPick", "orderConfirm", "orderStart", "orderMove", "orderSwapAccept", "answer", "chat", ...tableTypes]);
   const copy = value => JSON.parse(JSON.stringify(value));
   const active = () => !!(enabled && configured && session && authority && !state.solo);
@@ -318,6 +318,29 @@
       if (out.error) fail(out.error);
       session.chat(sender, `🦾 申请给 ${own.name} 做义体改造（${out.request.cost} 奎支），等主持人同意`);
       return { request: out.request.id };
+    },
+    // 跑团诊所 · 义体（trpg.js · trpgCyberwareInstall / Remove）：只能给自己操控的角色装 / 拆，钱从这名角色的钱包出；主持人哪个都能动
+    cyberwareInstall: c => {
+      if (typeof trpgCyberwareInstall !== "function" || typeof TRPG === "undefined" || !TRPG.active) fail("只有跑团模式有诊所");
+      const kit = String(c.kit || ""), id = String(c.id || "");
+      const own = heroes().find(u => u.kit === kit);
+      if (!own || (sender !== gm() && session.ownerOf(own.id) !== sender)) fail("只能给自己的角色装、拆义体");
+      let notes;
+      try { notes = false ? trpgCyberwareRemove(kit, id) : trpgCyberwareInstall(kit, id); } catch (e) { fail(e.message); }
+      if (root.GAME && GAME.rememberCampaign) GAME.rememberCampaign();
+      session.chat(sender, "🦾 " + notes.join(" "));
+      return { notes };
+    },
+    cyberwareRemove: c => {
+      if (typeof trpgCyberwareInstall !== "function" || typeof TRPG === "undefined" || !TRPG.active) fail("只有跑团模式有诊所");
+      const kit = String(c.kit || ""), id = String(c.id || "");
+      const own = heroes().find(u => u.kit === kit);
+      if (!own || (sender !== gm() && session.ownerOf(own.id) !== sender)) fail("只能给自己的角色装、拆义体");
+      let notes;
+      try { notes = true ? trpgCyberwareRemove(kit, id) : trpgCyberwareInstall(kit, id); } catch (e) { fail(e.message); }
+      if (root.GAME && GAME.rememberCampaign) GAME.rememberCampaign();
+      session.chat(sender, "🦾 " + notes.join(" "));
+      return { notes };
     },
     shopRedeem: c => {
       if (typeof trpgMerchantRedeem !== "function" || typeof TRPG === "undefined" || !TRPG.active) fail("只有跑团模式有商人");

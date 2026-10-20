@@ -778,8 +778,27 @@
     }).join("");
     return `<p class="r-hint">义体改造规则和单局一样：可改的肉体点数 = 肉体上限 × 改造率；一个角色最多 3 种血量，最内层要留肉体或星灵；每动 1 点肉体 ${ROGUE_CLINIC.cyberPerHp} 奎支（加减都算，换成 / 换回星灵按被换的肉体点数算）。伤势照旧带着，缺的血先从外层扣。</p>
       <div class="tr-row"><label class="tr-pick"><input type="checkbox" id="tr-clinic-open" ${TRPG.clinicOpen ? "checked" : ""}>诊所向联机玩家开放（玩家可以给自己的角色申请改造，你同意后才生效）</label></div>
-      ${reqHtml}${payerHtml()}${rows}`;
+      ${cyberwareEntry()}${reqHtml}${payerHtml()}${rows}`;
   };
+  /* 诊所 · 义体（cyberware-ui.js；数据 trpg.js · trpgCyberwarePacket）：主持人看全部角色；联机时走 OnlineGame.submit，钱从那名角色的钱包出 */
+  function cyberwareEntry() {
+    if (!window.CyberwareUI || typeof trpgCyberwarePacket !== "function") return "";
+    return `<div class="tr-row"><button class="g-btn r-main cw-open" id="tr-cyberware">诊所 · 义体</button><span class="r-hint">装 / 拆义体（从那名角色的钱包出${TRPG.clinicOpen ? "" : "；诊所关着时不能装拆"}）</span></div>`;
+  }
+  function cyberwareModel() {
+    return CyberwareUI.localModel({ heroes: heroes().filter(h => !h.dead).map(h => ({ kit: h.kit, name: h.name })),
+      packetOf: kit => trpgCyberwarePacket(kit), previewOf: (kit, id) => { const p = trpgCyberwarePacket(kit); return p && p.previews[id] || null; } });
+  }
+  function openCyberware() {
+    CyberwareUI.open(cyberwareModel, async cmd => {
+      const type = cmd.action === "removeCyberware" ? "cyberwareRemove" : "cyberwareInstall";
+      try {
+        if (typeof OnlineGame !== "undefined" && OnlineGame.isHost && OnlineGame.isHost()) { const r = await OnlineGame.submit({ type, kit: cmd.kit, id: cmd.id }); if (r && r.ok === false) throw new Error(r.error); }
+        else (type === "cyberwareRemove" ? trpgCyberwareRemove : trpgCyberwareInstall)(cmd.kit, cmd.id);
+      } catch (e) { alert(e.message); }
+      render(); CyberwareUI.refresh();
+    });
+  }
   function bindClinic(P) {
     const box = (kit) => P.querySelector(`[data-cy-box="${kit}"]`);
     const planOf = (kit) => { const b = box(kit); const p = { spirit: !!(b.querySelector('[data-cy="spirit"]') || {}).checked }; CY_LAYERS.forEach(([k]) => { p[k] = Math.max(0, Math.floor(Number((b.querySelector(`[data-cy="${k}"]`) || {}).value) || 0)); }); return p; };
@@ -787,6 +806,7 @@
     P.querySelectorAll("[data-cy-go]").forEach(b => { b.onclick = () => { const k = b.dataset.cyGo; act(ruleCommand("modifyHero", { kit: k, plan: planOf(k) })); delete cyberForm[k]; }; });
     P.querySelectorAll("[data-cy-free]").forEach(b => { b.onclick = () => { const k = b.dataset.cyFree; act(ruleCommand("modifyHero", { kit: k, plan: planOf(k), free: true })); delete cyberForm[k]; }; });
     P.querySelectorAll("[data-cyd]").forEach(b => { b.onclick = () => { const [id, ok] = b.dataset.cyd.split(":"); act(ruleCommand("cyberDecide", { id, ok: ok === "1" })); }; });
+    const cwb = $("tr-cyberware"); if (cwb) cwb.onclick = () => openCyberware();
     const open = $("tr-clinic-open");
     if (open) open.onchange = () => act(ruleCommand("clinicOpen", { on: open.checked }));
   }

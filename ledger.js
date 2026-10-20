@@ -520,7 +520,8 @@ function ledgerShortRest(kits, notes) {
     const before = totalHpOf(h);
     healHeroFlesh(h, heal);
     LEDGER.shortUsed[h.kit] = (Number(LEDGER.shortUsed[h.kit]) || 0) + 1;
-    if (LEDGER.shortOnce) delete LEDGER.shortOnce[h.kit];   // 「每次短休 N 次」的专长刷新
+    if (LEDGER.shortOnce) delete LEDGER.shortOnce[h.kit];
+    if (typeof cyberwareShortRest === "function") cyberwareShortRest(h);   // 主动义体每次短休 1 次   // 「每次短休 N 次」的专长刷新
     notes.push(`${h.name} 短休恢复 ${totalHpOf(h) - before} 点（今日剩 ${shortRestLeft(h)} 次）。`);
     any = true;
   });
@@ -730,6 +731,8 @@ function ledgerLongRest(plan, notes) {
     const nm = (k) => (typeof ELE !== "undefined" && ELE[k]) || k;
     notes.push(`${unitNameOf(kit)} 的吐酸攻击属性：${nm(before)} → ${nm(e)}。`);
   });
+  // 义体：每天的坚毅消耗（装着 + 过度安装），最少留 1；长休算一天。先扣再恢复
+  if (typeof cyberwareDayTick === "function") partyHeroes().filter(h => !h.dead && h.cyberware && h.cyberware.length).forEach(h => { cyberwareDayTick(h); if (h.kit !== watch) cyberwareShortRest(h); });
   partyHeroes().filter(h => !h.dead).forEach(h => {
     if (h.kit === watch) { (h.linkedKits || []).forEach(k => { if (k !== watch) restoreDurability(k); }); return; }
     (h.layers || []).forEach(l => { l.current = l.max; });

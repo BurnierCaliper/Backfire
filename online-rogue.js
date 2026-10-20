@@ -24,9 +24,9 @@
   const copy = v => JSON.parse(JSON.stringify(v));
   const fail = text => { throw new Error(text); };
   // 个人行为：花自己的钱、动自己的东西（choose 是升级选择，不花钱）
-  const PERSONAL = ["buy", "redeem", "learnRecipe", "salvage", "setCraftJob", "buyPart", "sellPart", "installPart", "removePart", "upgradeWeapon", "repairWeapon", "healHero", "modifyHero"];
+  const PERSONAL = ["buy", "redeem", "learnRecipe", "salvage", "setCraftJob", "buyPart", "sellPart", "installPart", "removePart", "upgradeWeapon", "repairWeapon", "healHero", "modifyHero", "installCyberware", "removeCyberware"];
   // 玩家可以自己发的个人指令（其余的个人行为由房主代自己的角色做）
-  const REMOTE = ["buy", "redeem", "learnRecipe", "salvage", "setCraftJob", "buyPart", "sellPart", "installPart", "removePart", "upgradeWeapon", "repairWeapon", "healHero", "modifyHero", "choose"];
+  const REMOTE = ["buy", "redeem", "learnRecipe", "salvage", "setCraftJob", "buyPart", "sellPart", "installPart", "removePart", "upgradeWeapon", "repairWeapon", "healHero", "modifyHero", "installCyberware", "removeCyberware", "choose"];
   let enabled = false, resolving = false, hostId = "";
 
   const flow = () => root.RunFlow || null;
@@ -126,6 +126,7 @@
     }
     if ((c.action === "installPart" || c.action === "removePart" || c.action === "upgradeWeapon" || c.action === "repairWeapon") && heroOf(r, c.kit)?.kit !== payer) fail("只能动自己角色的武器");
     if ((c.action === "healHero" || c.action === "modifyHero") && c.kit !== payer) fail("只能给自己的角色治疗、改造");
+    if ((c.action === "installCyberware" || c.action === "removeCyberware") && (c.kit !== payer || typeof c.id !== "string")) fail("只能给自己的角色装、拆义体");
     if (c.action === "setCraftJob" && c.kit !== payer) fail("只能给自己的角色排活");
     if (c.action === "salvage" && available(r, payer, c.item) < 1) fail("这件东西不是你的");
   }
@@ -389,6 +390,13 @@
     if (ownerOf(r, kit) !== hostId) fail(`${name(kit)} 由 ${playerName(ownerOf(r, kit))} 操控，房主不能替他花钱或做选择`);
   }
 
+  /** 义体（packet.cyberware）：只给这名玩家操控的角色，诊所开着才发；数值由房主算，坚毅只有档位文字 */
+  function cyberwareFor(playerId) {
+    const r = run();
+    if (!r || !active() || !G_Rogue || !Rogue.cyberwarePacketFor || inBattle() || !Rogue.canClinic(r)) return null;
+    const heroes = kitsOf(r, playerId).map(k => { try { return Object.assign(Rogue.cyberwarePacketFor(r, k), { purse: Number(data(r).purse[k]) || 0 }); } catch (e) { return null; } }).filter(Boolean);
+    return heroes.length ? { heroes } : null;
+  }
   /* ---------- 给每个人看的数据（发送前还要经过 OnlineView.projectRogue） ---------- */
   // 单局的不少查询（restPlan、canShortRestBefore、sheetData……）会把队伍重新摆上场（rogue.js · withParty）：
   // 战斗中绝不能调，否则战场被清空。战斗中给每个人发开战前算好的那一份
@@ -555,6 +563,7 @@
   }
 
   root.OnlineRogue = {
+    cyberwareFor,
     enable(on, host) { enabled = !!on; hostId = host || hostId; if (G_SaveStore && SaveStore.useOnlineRunSlot) SaveStore.useOnlineRunSlot(!!on); },
     get enabled() { return enabled; }, active, data, options, matchOption, isTeamCommand, vote, unvote, tryResolve, need, forceLoot,
     handle, checkHost, viewFor, onNewRun, setOwners, release, assignmentsFor, changed, ownerOf: kit => (run() ? ownerOf(run(), kit) : hostId),
