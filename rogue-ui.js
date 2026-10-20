@@ -419,6 +419,18 @@
     if (window.BackpackUI) BackpackUI.open(backpackModel, { openWorkshop: id => openWorkshop(id) });
   }
 
+  /* ---------- 诊所 · 义体：按钮打开的浮层（cyberware-ui.js；数据 Rogue.cyberwareClinic = cyberware.js · cyberwarePacket） ---------- */
+  function cyberwareModel() {
+    if (!run || !window.CyberwareUI || !Rogue.canClinic(run)) return null;
+    return CyberwareUI.localModel({ heroes: run.party.map(h => ({ kit: h.kit, name: Rogue.heroName(h.kit) })),
+      packetOf: kit => Rogue.cyberwarePacketFor(run, kit),
+      previewOf: (kit, id) => { try { return Rogue.cyberwarePreviewFor(run, kit, id); } catch (e) { return null; } },
+      money: () => money(), error: lastError, note: lastNotes[lastNotes.length - 1] || "" });
+  }
+  function openCyberware(kit) {
+    if (window.CyberwareUI) CyberwareUI.open(cyberwareModel, cmd => act(cmd), { kit });
+  }
+
   /* ---------- 熟练项检定（事件内容占位） ---------- */
   const LV_TEXT = ["没有熟练", "一级熟练", "二级熟练", "三级熟练"];
   const pctText = (p) => `${Math.round(p * 1000) / 10}%`;
@@ -467,6 +479,7 @@
       return `<div class="cl-hero">
         <div class="cl-head"><b>${esc(v.name)}</b><span>${esc(layerText(v.layers))}</span></div>
         <button class="g-btn" data-heal="${esc(h.kit)}" ${heal ? "" : "disabled"}>${heal ? `治疗（${heal} 奎支）` : "不需要治疗"}</button>
+        ${window.CyberwareUI ? CyberwareUI.button(h.kit) : ""}
         <div class="cl-cyber">
           <div class="r-hint">义体改造：改造率 ${Math.round(info.rate * 100)}%，最多换掉 ${info.limit} 点肉体（共 ${info.fleshMax}）。
             换算 肉体 8 : 装甲 7 : 护盾 6 : 沙尘 6；也可以把剩下的肉体按 8 : 7 全部换成星灵。最多 3 种血量。</div>
@@ -763,6 +776,7 @@
     bind();
     if (window.WorkshopUI) WorkshopUI.refresh();
     if (window.BackpackUI) BackpackUI.refresh();
+    if (window.CyberwareUI) CyberwareUI.refresh();
     // 路线图比屏幕宽时（手机）：滚到当前这一列
     const sc = document.querySelector("#run-body .rm-scroll");
     if (sc && run.task && sc.scrollWidth > sc.clientWidth) {
@@ -891,6 +905,7 @@
     });
     body.querySelectorAll("[data-repair]").forEach(b => { b.onclick = () => act({ action: "repairWeapon", kit: b.dataset.repair }); });
     body.querySelectorAll("[data-heal]").forEach(b => { b.onclick = () => act({ action: "healHero", kit: b.dataset.heal }); });
+    body.querySelectorAll("[data-cw-open]").forEach(b => { b.onclick = () => openCyberware(b.dataset.cwOpen); });
     body.querySelectorAll("[data-cyber]").forEach(b => {
       const kit = b.dataset.cyber;
       b.onclick = () => act({ action: "modifyHero", kit, plan: readPlan(kit) });

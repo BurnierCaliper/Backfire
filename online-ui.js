@@ -458,6 +458,14 @@
         cmd => { if (disabled()) return; const c = ["learnRecipe", "salvage"].includes(cmd.action) ? Object.assign({ payer: payerOf() }, cmd) : cmd; call(() => api.submit({ type: "rogue.act", command: c })); },
         { mat: mat || "" });
     }
+    /* 诊所 · 义体（cyberware-ui.js）：读 online-view 投影后的 cyberware（packet 顶层或 packet.rogue 里都认） */
+    function cyberwareSrc() { const p = view.packet; return p && p.cyberware && (p.cyberware.heroes || []).length ? p : null; }
+    function openCyberware() {
+      if (!global.CyberwareUI) return;
+      const purseOf = kit => { const h = ((view.packet?.rogue?.heroes) || []).find(x => x.kit === kit); return h ? h.purse : 0; };
+      CyberwareUI.open(() => { const src = cyberwareSrc(); return src ? CyberwareUI.viewModel(src, { money: purseOf }) : null; },
+        cmd => { if (disabled()) return; call(() => api.submit({ type: "rogue.act", command: cmd })); });
+    }
     function openBackpack() {
       if (!global.BackpackUI || !global.WorkshopData) return;
       BackpackUI.open(() => { const r = view.packet?.rogue; return r ? WorkshopData.viewBackpackModel(r) : null; }, { openWorkshop: id => openWorkshop(id) });
@@ -486,11 +494,12 @@
       const filled = slots.filter(x => x.cur);
       const unmount = r.smith && filled.length ? `<section class="ol-rogue-box" aria-label="拆改装件"><h3>已装的改装件</h3><ul>${filled.map(x => `<li>${esc(x.name)} 槽 ${esc(x.slot + 1)}：${esc(x.cur)} ${rogueAct("拆下（不要钱）", { action: "removePart", kit: x.kit, slot: x.slot, smith: r.smith.id })}</li>`).join("")}</ul></section>` : "";
       const clinic = r.clinic && r.clinic.length ? `<section class="ol-rogue-box" aria-label="诊所"><h3>诊所（你有 ${esc(purse)} 奎支）</h3><ul>${r.clinic.map(c => `<li>${esc(c.name)} ${c.cost ? rogueAct(`治疗到满血（${c.cost}）`, { action: "healHero", kit: c.kit }, purse < c.cost) : "满血"}</li>${c.cyber ? cyberMarkup(c, purse) : ""}`).join("")}</ul></section>` : "";
+      const cwEntry = global.CyberwareUI && cyberwareSrc() ? `<section class="ol-rogue-box ol-cw-entry" aria-label="义体"><div class="ol-attr-btns">${button("诊所 · 义体", "rogueCyberware", "", false, true)}</div></section>` : "";
       const wk = r.workshop;
       // 工坊 / 背包：按钮打开浮层（workshop-ui.js / backpack-ui.js，和房主同一套渲染器；数据是 viewFor 的 craft / bag / materialBar …）
       const workshop = payer ? `<section class="ol-rogue-box ol-ws-entry" aria-label="工坊与背包"><div class="ol-attr-btns">${r.workshopAvailable && wk ? button("工坊", "rogueWorkshop", "", false, true) : ""}${button("背包", "rogueBackpack", "", false)}</div></section>` : "";
       const log = (r.log || []).length ? `<section class="ol-rogue-box" aria-label="最近发生"><h3>最近发生</h3><ul>${r.log.map(t => `<li>${esc(t)}</li>`).join("")}</ul></section>` : "";
-      return head + over + choice + waits + loot + lootLog + vote + last + heroes + board + task + shop + smith + parts + unmount + clinic + workshop + log;
+      return head + over + choice + waits + loot + lootLog + vote + last + heroes + board + task + shop + smith + parts + unmount + clinic + cwEntry + workshop + log;
     }
     /** 义体改造：和单机诊所一样填装甲 / 护盾 / 沙尘层的点数、要不要换成星灵；价格按房主发来的单价估 */
     const CYBER_LAYERS = [["armor", "装甲"], ["shield", "护盾"], ["sand", "沙尘"]];
@@ -1153,6 +1162,7 @@
         case "rogueWorkshop": openWorkshop(); break;
         case "matchup": if (global.MatchupUI) global.MatchupUI.toggle(() => matchupOf()); break;
         case "rogueBackpack": openBackpack(); break;
+        case "rogueCyberware": openCyberware(); break;
         case "rogueCraftJob": {
           const kit = b.dataset.kit, item = byId("ol-wk-item-" + kit)?.value || null, helper = byId("ol-wk-help-" + kit)?.value || null;
           if (!disabled() && kit) await call(() => api.submit({ type: "rogue.act", command: { action: "setCraftJob", kit, item, helper } }));

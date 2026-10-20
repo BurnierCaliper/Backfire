@@ -1826,3 +1826,26 @@ test("整局数据：「单回合最高爆发」一列，点数字打开详情�
   assert.match(await page.evaluate(() => CareerLog.text()), /单回合最高爆发/);
   assert.deepEqual(errors, []);
 });
+
+test("诊所 · 义体浮层：休整时打开、确认后安装、再拆掉（不漏坚毅数值）", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await page.evaluate(() => {
+    cyberwareLoadExamples();
+    const run = Rogue.newRun({ party: ["kolt", "helu"], seed: "CW-UI" });
+    run.stage = "camp"; state.kuizhi = 20000;
+    Rogue.save(run); RunFlow.resume();
+  });
+  await page.click('[data-cw-open="kolt"]');
+  await page.waitForSelector("#cw-overlay:not([hidden]) .cw-rate");
+  await page.click('[data-cw-pick="example_t5_melee"]');
+  await page.waitForSelector(".cw-confirm");
+  await page.click(".cw-confirm [data-cw-cmd]");
+  await page.waitForSelector(".cw-row.on");
+  assert.equal(await page.evaluate(() => state.kuizhi), 17000);
+  assert.doesNotMatch(await page.innerText("#cw-overlay"), /坚毅/);
+  await page.click(".cw-row.on [data-cw-cmd]");
+  await page.waitForSelector(".cw-installed .ws-empty");
+  assert.equal(await page.evaluate(() => state.kuizhi), 16000);
+  assert.deepEqual(o.errors, []);
+});
