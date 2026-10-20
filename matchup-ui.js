@@ -33,14 +33,17 @@
     const covered = (reasons.length && reasons.every(t => has(t))) || (c.weather === "phase" && notes.some(n => /相位/.test(n) && /伤害/.test(n)));
     const parts = Object.keys(groups).map(k => `${groups[k].join("、")} ${k}`);
     if (parts.length && !covered) notes.unshift(`${disp(c.weatherName || c.weather)}伤害修正：${parts.join("；")}${Number(c.envX) > 1 ? `（已含 ×${c.envX}）` : ""}`);
+    if (c.iceLabel && !has(c.iceLabel)) notes.push(c.iceLabel);
     return notes.map(disp);
   }
   /** 一格实际的增减伤：克制 + 整行天气修正（相位 ±50% 等在整行 pct 里）。changed 按「原（base + pctBase）」和「现（value + pct）」比，
    *  不能只看格子的 changed（相位波峰 / 波谷时格子本身没变，整行变了） */
   function eff(x, r) {
-    const before = (Number(x.base) || 0) + (Number(r && r.pctBase) || 0), now = (Number(x.value) || 0) + (Number(r && r.pct) || 0);
+    // 熔融的冰 ×2（row.mult）另外相乘：实际 = (1 + 克制 + 整行) × mult − 1
+    const mult = Number(r && r.mult) || 1;
+    const before = (Number(x.base) || 0) + (Number(r && r.pctBase) || 0), now = (1 + (Number(x.value) || 0) + (Number(r && r.pct) || 0)) * mult - 1;
     const changed = Math.abs(now - before) > 1e-9;
-    const reasons = [x.changed && x.reason, Number(r && r.pct) !== Number(r && r.pctBase) && r.pctReason].filter(Boolean);
+    const reasons = [x.changed && x.reason, Number(r && r.pct) !== Number(r && r.pctBase) && r.pctReason, mult !== 1 && (r.multReason || `伤害 ×${mult}`)].filter(Boolean);
     if (!changed && x.reason) reasons.push(x.reason);
     return { before, now, changed, reason: [...new Set(reasons)].join("；") };
   }
@@ -77,6 +80,9 @@
     if (!m) return null;
     st = st || {};
     const u = unitId ? (st.units || []).find(x => x && x.id === unitId) : null;
+    // #83：房主按每个看得见的单位各算一份（作为受击者，含个体效果）；有就直接用
+    const per = unitId && m.units && m.units[unitId];
+    if (per) return Object.assign({}, per, { iceZones: per.iceZones || m.iceZones, iceLabel: per.iceLabel || m.iceLabel, unitName: per.unitName || (u && u.name) || "" });
     const f = chartFn();
     if (!u || !f) return m;
     const zf = (st.fields || {})[u.zone] || {};
@@ -96,7 +102,7 @@
     const tags = [
       `<span class="mu-tag mu-weather">天气 ${esc(c.weatherName || c.weather)}${esc(phase)}</span>`,
       Number(c.envX) && Number(c.envX) !== 1 ? `<span class="mu-tag mu-env">天气效果 ×${esc(c.envX)}（恶劣环境 / 末日）</span>` : "",
-      c.field && c.field.ice ? `<span class="mu-tag mu-ice">冻土${c.unitName ? `（${esc(c.unitName)} 所在区域）` : ""}</span>` : ""
+      c.field && c.field.ice ? `<span class="mu-tag mu-ice">冻土${c.field.zone != null ? ` · ${esc(c.field.zone)}区` : c.zone != null ? ` · ${esc(c.zone)}区` : ""}</span>` : ""
     ].join("");
     const sel = view.cell;
     const head = `<tr><th class="mu-corner">属性 \\ 血量</th>${cols.map(k => `<th class="mu-col mu-l-${esc(k.id)}">${esc(k.name)}</th>`).join("")}</tr>`;
@@ -120,7 +126,7 @@
     const nl = allNotes(c);
     const notes = nl.length ? `<ul class="mu-notes">${nl.map(n => `<li>${esc(n)}</li>`).join("")}</ul>` : "";
     return `<div class="mu-card ovl-card" role="dialog" aria-label="克制表">
-      <header class="ws-head"><span class="ws-tape">克制表</span><span class="ws-sub">${tags}</span>
+      <header class="ws-head"><span class="ws-tape">克制表</span>${c.unitName ? `<span class="mu-who">${esc(disp(c.unitName))} 挨打时</span>` : ""}<span class="ws-sub">${tags}</span>
         <button type="button" class="g-btn ws-close" data-mu-close aria-label="关闭">关闭</button></header>
       <p class="mu-legend"><span class="mu-adv">克制</span><span class="mu-dis">被克制</span><span class="mu-neu">普通</span></p>
       <div class="mu-scroll"><table class="mu-grid">${head}${body}</table></div>
