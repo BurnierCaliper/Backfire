@@ -120,13 +120,9 @@
       grouped: kit => ((craft.find(c => c.kit === kit) || {}).grouped) || empty,
       preview: (kit, item, helper) => {
         const c = craft.find(x => x.kit === kit);
-        const p = c && (c.previews || []).find(x => x && x.id === item);
-        if (p) {
-          if (!helper || !p.odds || p.odds.adv) return Object.assign({}, p, { helper: helper || null });
-          // 打下手给优势：玩家端没有带帮手的预览，按同一公式估（真正结算以房主为准）
-          const base = p.odds.base, adv = 1 - (1 - base) * (1 - base);
-          return Object.assign({}, p, { helper, estimated: true, odds: Object.assign({}, p.odds, { adv: true, helped: true, chance: p.odds.reroll ? 1 - (1 - adv) * (1 - adv) : adv }) });
-        }
+        // 房主按「没人帮 / 每个队友打下手」各算了一份（online-rogue.js · viewFor craft[].previews），这里只读
+        const p = c && (c.previews || []).find(x => x && x.id === item && (x.helper || null) === (helper || null));
+        if (p) return p;
         const g = c ? c.grouped : empty, row = g.craftable.concat(g.missing).find(x => x.id === item);
         return row ? { id: item, kit, helper: null, craftable: false, reasons: [], missing: row.missing || [], odds: null, output: { id: item, name: row.name, qty: 1 }, hours: row.hours, metalKuizhi: row.metalKuizhi } : null;
       },
@@ -164,7 +160,14 @@
     };
   }
 
+  /** 联机玩家学配方 / 拆解时用哪名角色出钱：工坊里选中的那名（必须是自己的），否则第一个自己的 */
+  function payerKit(r, selKit) {
+    const mine = ((r && r.heroes) || []).filter(h => h.mine);
+    return (mine.find(h => h.kit === selKit) || mine[0] || {}).kit || null;
+  }
+
   root.WorkshopData = {
+    payerKit,
     workshopAvailable, itemCategory, recipesUsingMaterial, materialBar, craftListGrouped, craftPreview,
     bagByCategory, cyberSummary, modInstallPreview,
     hostWorkshopModel, viewWorkshopModel, hostBackpackModel, viewBackpackModel

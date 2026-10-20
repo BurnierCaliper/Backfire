@@ -85,6 +85,10 @@
 
   /* 战斗顶栏的「背包」（#g-backpack；旧的 #g-bag 是沙盒的编辑背包页，不动）（只读）：单局里读当前这局，别的模式读整个背包 */
   function battleModel() {
+    // 联机玩家：读房主发来的包（view.packet.rogue），不读本机浏览器里的背包
+    const OG = root.OnlineGame;
+    const v = OG && OG.getView ? OG.getView() || {} : {};
+    if (v.active && !v.isHost) { const r = v.packet && v.packet.rogue; return r ? WorkshopData.viewBackpackModel(r, { battle: true }) : null; }
     const run = root.RunFlow && typeof RunFlow.current === "function" ? RunFlow.current() : null;
     const kits = run && root.OnlineRogue && OnlineRogue.active && OnlineRogue.active() ? OnlineRogue.hostKits() : null;
     return WorkshopData.hostBackpackModel(run, { battle: true, kits });
@@ -93,5 +97,13 @@
     if (e.target.closest && e.target.closest("#g-backpack")) open(battleModel, { battle: true });
   });
 
-  root.BackpackUI = { html, open, close, refresh, isOpen, button, state: ui, rowsOf };
+  const inBattleMode = () => isOpen() && !!opts.battle;
+  /* 换画面就收起来（战斗里开的只读背包除外，它本来就在战斗画面里） */
+  if (typeof MutationObserver !== "undefined" && typeof document !== "undefined" && document.body) {
+    let last = document.body.dataset.screen;
+    new MutationObserver(() => { const now = document.body.dataset.screen; if (now !== last) { last = now; if (!inBattleMode()) close(); } })
+      .observe(document.body, { attributes: true, attributeFilter: ["data-screen"] });
+  }
+
+  root.BackpackUI = { html, open, close, refresh, isOpen, inBattleMode, button, state: ui, rowsOf, battleModel };
 })(typeof window !== "undefined" ? window : globalThis);

@@ -134,3 +134,62 @@ test("入口：工坊不再拼在页面底部；浮层在升级弹窗之下；�
   assert.match(wfx, /\.g-field \.unit-wrap:hover, \.g-field \.unit-wrap:focus-within, \.g-field \.unit-wrap\.is-hover \{ z-index: 7; \}/);
   assert.match(css, /\[data-weather\] \.ovl-card::before \{[^}]*z-index: -1; pointer-events: none/);
 });
+
+/* ---------- PR #80 评审修正 ---------- */
+function onlineSetup() {
+  const c = H.load(), R = c.Rogue, run = R.newRun({ party: ["kolt", "helu", "ruby"], seed: "WSON" });
+  c.S.state.kuizhi = 100000;
+  c.RunFlow = { current: () => run };
+  c.OnlineGame = { isHost: () => true, players: () => [{ id: "host", online: true }, { id: "p2", online: true }] };
+  ["online-rogue.js", "workshop-data-adapter.js", "workshop-ui.js", "backpack-ui.js"].forEach(f => vm.runInContext(read(f), c, { filename: f }));
+  const O = c.OnlineRogue; O.enable(true, "host"); O.setOwners({ helu: "p2", ruby: "p2" });
+  c.S.state.bag.items = [{ id: "cm_scrap", qty: 3 }, { id: "cm_coil", qty: 4 }, { id: "cm_chem", qty: 2 }, { id: "medkit", qty: 1 }];
+  O.data(run).owned = { helu: { medkit: 1 } };
+  c.WorkshopUI.reset();
+  return { c, R, run, O, r: JSON.parse(JSON.stringify(O.viewFor("p2"))) };
+}
+
+test("评审 1：联机学配方 / 拆解用工坊里选中的角色出钱（一个玩家多名角色）", () => {
+  const { c, r } = onlineSetup();
+  const D = c.WorkshopData;
+  assert.deepEqual(r.heroes.filter(h => h.mine).map(h => h.kit).sort(), ["helu", "ruby"]);
+  assert.equal(D.payerKit(r, "ruby"), "ruby");
+  assert.equal(D.payerKit(r, "helu"), "helu");
+  assert.equal(D.payerKit(r, "kolt"), r.heroes.find(h => h.mine).kit, "别人的角色不能当出钱的人");
+  assert.match(read("online-ui.js"), /WorkshopData\.payerKit\(view\.packet\?\.rogue, global\.WorkshopUI && global\.WorkshopUI\.state\.kit\)/);
+});
+
+test("评审 2：联机玩家在战斗里点背包，读房主发来的包，不读本机浏览器的背包", () => {
+  const { c, r } = onlineSetup();
+  c.S.state.bag.items = [{ id: "fx_burn", qty: 9 }];   // 玩家本机的背包（不该显示）
+  c.OnlineGame = { getView: () => ({ active: true, isHost: false, packet: { rogue: r } }) };
+  const m = c.BackpackUI.battleModel();
+  assert.equal(m.readOnly, true);
+  c.BackpackUI.state.tab = "consumable"; c.BackpackUI.state.sel = "";
+  const html = c.BackpackUI.html(m);
+  assert.match(html, /简易医疗包/);
+  assert.doesNotMatch(html, /燃烧瓶/);
+  assert.match(read("game.html"), /id="g-backpack"/);
+});
+
+test("评审 3：房主在 viewFor 里给每个打下手的选项都算好成功率，玩家端直接读、不再自己估", () => {
+  const { c, R, run, r } = onlineSetup();
+  const ruby = r.craft.find(x => x.kit === "ruby");
+  const item = ruby.grouped.craftable[0].id;
+  const helpers = ruby.previews.filter(p => p.id === item).map(p => p.helper);
+  assert.deepEqual(helpers.slice().sort(), [null, "helu", "kolt"].sort());
+  const m = c.WorkshopData.viewWorkshopModel(r);
+  for (const h of ["kolt", "helu", null]) {
+    const host = R.craftPreview(run, "ruby", item, h, {});
+    assert.equal(m.preview("ruby", item, h).odds.chance, host.odds.chance, `helper ${h}`);
+  }
+  assert.doesNotMatch(read("workshop-ui.js"), /（估）|estimated/);
+  assert.doesNotMatch(read("workshop-data-adapter.js"), /1 - \(1 - base\)/);
+});
+
+test("评审 4：换画面时收起工坊和非战斗模式的背包（body[data-screen] 变化 / 联机进战斗）", () => {
+  const ws = read("workshop-ui.js"), bp = read("backpack-ui.js"), ol = read("online-ui.js");
+  assert.match(ws, /attributeFilter: \["data-screen"\]/);
+  assert.match(bp, /if \(!inBattleMode\(\)\) close\(\)/);
+  assert.match(ol, /view\.screen !== "exploration"\) \{ if \(global\.WorkshopUI\) global\.WorkshopUI\.close\(\)/);
+});

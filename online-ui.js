@@ -443,7 +443,8 @@
     }
     function openWorkshop(mat) {
       if (!global.WorkshopUI || !global.WorkshopData) return;
-      const payerOf = () => (((view.packet?.rogue?.heroes) || []).find(h => h.mine) || {}).kit || null;
+      // 学配方 / 拆解：从工坊里选中的那名角色出钱、拆他的东西（一个玩家操控多名角色时不能总用第一个）
+      const payerOf = () => WorkshopData.payerKit(view.packet?.rogue, global.WorkshopUI && global.WorkshopUI.state.kit);
       WorkshopUI.open(() => { const r = view.packet?.rogue; return r ? WorkshopData.viewWorkshopModel(r) : null; },
         cmd => { if (disabled()) return; const c = ["learnRecipe", "salvage"].includes(cmd.action) ? Object.assign({ payer: payerOf() }, cmd) : cmd; call(() => api.submit({ type: "rogue.act", command: c })); },
         { mat: mat || "" });
@@ -862,7 +863,11 @@
       document.body.classList.toggle("ol-host-online", !!(view.active && view.isHost));
       document.body.classList.toggle("ol-in-battle", view.screen === "battle" || view.screen === "ended");
       dock.hidden = !view.active;
-      if (view.active && !view.isHost) { if (global.WorkshopUI) global.WorkshopUI.refresh(); if (global.BackpackUI) global.BackpackUI.refresh(); }
+      if (view.active && !view.isHost) {
+        // 进战斗（或离开单局画面）：工坊、非战斗模式的背包收起来
+        if (view.screen !== "exploration") { if (global.WorkshopUI) global.WorkshopUI.close(); if (global.BackpackUI && !global.BackpackUI.inBattleMode()) global.BackpackUI.close(); }
+        if (global.WorkshopUI) global.WorkshopUI.refresh(); if (global.BackpackUI) global.BackpackUI.refresh();
+      }
       document.body.classList.toggle("online-player", !!view.active && !view.isHost);
       if (view.active) {
         if (!animating) displayState = view.state || null;

@@ -93,7 +93,7 @@
       const why = can ? "" : (p.reasons || []).join("；") || "做不了";
       return `<div class="ws-who"><b>${esc(h.name)}</b>
         <select data-ws-helper="${esc(h.kit)}" aria-label="谁打下手"><option value="">没人帮</option>${helpers}</select>
-        <span class="ws-odds">${can ? `成功率 <b>${pct(o.chance)}</b>${o.adv ? " · 优势" : o.dis ? " · 劣势" : ""}${o.reroll ? " · 可重掷" : ""}${p.estimated ? "（估）" : ""}` : `<small>${esc(why)}</small>`}</span>
+        <span class="ws-odds">${can ? `成功率 <b>${pct(o.chance)}</b>${o.adv ? " · 优势" : o.dis ? " · 劣势" : ""}${o.reroll ? " · 可重掷" : ""}` : `<small>${esc(why)}</small>`}</span>
         <button type="button" class="g-btn r-main ws-go" ${cmdAttr(cmd)} ${can ? "" : "disabled"}>${model.net ? "排上" : "制作"}</button></div>`;
     }).join("");
     const p0 = model.preview(ui.kit, row.id, null) || {};
@@ -174,6 +174,13 @@
   /** 入口按钮（只在能开工坊的地方） */
   function button(place, id) {
     return place ? `<button type="button" class="g-btn ws-open" id="${esc(id || "r-workshop")}" title="${esc(PLACE_TEXT[place])}">工坊</button>` : "";
+  }
+
+  /* 换画面（例如进战斗）就收起来：Screens.show 会改 body[data-screen] */
+  if (typeof MutationObserver !== "undefined" && typeof document !== "undefined" && document.body) {
+    let last = document.body.dataset.screen;
+    new MutationObserver(() => { const now = document.body.dataset.screen; if (now !== last) { last = now; close(); } })
+      .observe(document.body, { attributes: true, attributeFilter: ["data-screen"] });
   }
 
   root.WorkshopUI = { html, open, close, refresh, isOpen, button, state: ui, reset: resetUi, needLine };

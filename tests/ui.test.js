@@ -1708,6 +1708,14 @@ test("单局：任务板上的工坊能制作道具", async (t) => {
   await page.click("#ws-overlay [data-ws-close]");
   await page.click("#r-backpack");
   await page.waitForSelector("#bp-overlay:not([hidden]) .bp-card");
+  // 换画面（例如进战斗）：工坊和非战斗模式的背包都收起来
+  await page.click("#bp-overlay [data-bp-close]");
+  await page.click("#r-workshop");
+  await page.waitForSelector("#ws-overlay:not([hidden])");
+  await page.evaluate(() => document.getElementById("r-backpack").click());
+  await page.waitForSelector("#bp-overlay:not([hidden])");
+  await page.evaluate(() => Screens.show("battle"));
+  await page.waitForFunction(() => document.getElementById("ws-overlay").hidden && document.getElementById("bp-overlay").hidden);
   assert.deepEqual(o.errors, []);
 });
 
