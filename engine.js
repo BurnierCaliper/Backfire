@@ -470,8 +470,9 @@ function chartMod(element, layerType, weather, field, acidRainCancelArmor, field
   if (weather === "glow" && element !== "energy") {
     v = -v;
   }
-  if (field && field.ice) {
-    if (element === "ice") v = 0.25 * (Number(fieldMult) || 1);
+  // 冻土：强制冰属性对目标易伤 25%（恶劣环境/末日可翻倍）。独立于天气，雪天等天气修正不会覆盖或取消这个强制易伤。
+  if (field && field.ice && element === "ice") {
+    v = 0.25 * (Number(fieldMult) || 1);
   }
   if (acidRainCancelArmor && layerType === "armor" && element !== "acid" && element !== "ice") {
     v += 0.25;

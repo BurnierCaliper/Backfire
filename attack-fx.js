@@ -1218,7 +1218,7 @@
     } });
     return after(ms);
   }
-  /** 鞭子：一道粗鞭甩出去抽到目标，再收回来（川川电击鞭：青绿色） */
+  /** 鞭子：一道粗鞭甩出去抽到目标，再收回来（川川电能鞭：青绿色） */
   function whip(a, b, color, ms) {
     if (!a || !b || reduced() || !ensure()) return Promise.resolve();
     ms = ms || 300;

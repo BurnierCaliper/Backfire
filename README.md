@@ -368,6 +368,10 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **夕夏狂怒碾压倍率调整、川川电击鞭改名、雪天冻土易伤修正**（app.js · `crushOnce`；skill-text.js、party.js；engine.js · `chartMod`）
+  - 狂怒碾压第一轮改为 0.75×atk 物理 + 2 击破；抓住后每回合自动再碾改为 1.5×atk + 1d8 + 3 击破。自动击杀仍返还 1 行动点与 1 附赠。
+  - 川川「电击鞭」改名为「电能鞭」（技能名、说明、日志、测试同步）。
+  - 冻土对冰属性的强制 25% 易伤现在明确独立于天气计算，雪天等天气修正不会覆盖或取消它。
 - **长线养成：独立存档、每天赫心融合体、永久死亡重置**（save.js、rogue.js、rogue-commands.js、rogue-ui.js、game.html）
   - 长线养成使用独立存档槽（`antlerscale-rogue-growth`），不和普通单局共用，也不提供多存档位。
   - 每天自动获得 1 个赫心融合体（按天数差补发）。
