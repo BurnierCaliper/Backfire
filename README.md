@@ -368,6 +368,11 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **决一死战（三处修正）：所有攻击都只打得到灯、只数敌对单位、播撒者被牵制时能抵近喷洒**（app.js · `dealTo` / `touDuelVictim` / `touDuelEnemies`；enemies.js · `enemyZoneInRange` / `en_spread`；tests/duel-ranged.test.js、block-sheet / env-score / reduce-score / audit-P4-heroes / mine3-enemies / growth-mode 的夹具跟着调整）
+  - 只拦范围攻击：以前被决一死战牵制的敌人，只有范围攻击打不到灯以外的人；多目标的单体攻击、协助攻击、借机攻击仍能打到灯以外的人。现在不论哪种攻击，打灯以外的人一律打不出去（首领机制、环境伤害照旧不拦）。
+  - 数同区敌人：以前把同区的中立生物（尘虫、管虫）和友军也算进「敌人」，占了名额（同区有尘虫时唯一的敌人不被牵制，也不取最低骰），它们自己也会被牵制。现在只数和灯敌对（`hostileTo`）的单位。
+  - 播撒者：以前被决一死战 / 嘲讽牵制而牵制者就在同区时，喷洒是「远距离」、打不到距离 0 的区，每次空放。现在和电弧扫射一样：没有近身攻击的敌人被牵制时，喷洒抵近打自己所在的区，倍率 ×0.6。没被牵制时仍打不到同区。
+
 - **专长（二）三处修正：跑团专长点记来源等级、多面手三项熟练各不相同、警戒只打敌人且每人各自出手**（feats.js · `featPointLevelsOf` / `featAlertOnEnter` / 多面手 `onTake`；growth.js · `tryLevelUp`；trpg.js · `trpgPickFeat`；trpg-ui.js；rogue.js · `choiceOptions` / `choose`；game.js · `packHero` / `applyCampaignToField`；tests/feat-bugs-107.test.js；docs/bug-backlog.md）
   - 跑团专长点：以前只存一个 `featPoints` 数字，选专长按角色当前等级判断，7 级给的点能拿去选 11 级以上的专长。现在每个没用的点记下是几级给的（`featPointLevels`，随队伍记忆存档），选专长按这一点的来源等级判断，满足条件时用最低的一点、高等级的点留着。旧档没有来源等级的点按升级表补：已选的专长占掉最低的几级，剩下的点从低到高对应剩下的级，点数不丢。
   - 多面手：以前三次熟练是三个互不相干的待选，能连选同一项。现在三项属于同一组（`group`），选过的项在同组其余待选里不再出现；已经熟练的项照专长说明（「新学或升级」）仍可选来升一级。每次重复选多面手各算一组。

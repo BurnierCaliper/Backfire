@@ -4564,9 +4564,8 @@ function touDuelVictim(u) {
   if (tou.dying && !tou.upOnShp) return null;
   if (typeof passiveOn === "function" && !passiveOn(tou)) return null;   // 放弃被动「决一死战」
   if (Number(u.zone) !== Number(tou.zone)) return null;
-  const enemies = (typeof fieldUnits === "function" ? fieldUnits() : state.units).filter(x =>
-    x && !x.isPlayer && !x.dead && !x.hidden && !x.fused && Number(x.zone) === Number(tou.zone)
-  );
+  // 只数和灯敌对的单位：中立生物、友军不算（自己也不会被牵制）
+  const enemies = touDuelEnemies();
   // 决一死战+：同区两名以下的敌人都必须攻击灯
   const cap = typeof passivePlus === "function" && passivePlus(tou, 1) ? 2 : 1;
   if (enemies.length < 1 || enemies.length > cap || !enemies.some(x => x.id === u.id)) return null;
@@ -4582,7 +4581,7 @@ function touDuelEnemies() {
   const tou = findKit("tou", state.units);
   if (!tou) return [];
   return (typeof fieldUnits === "function" ? fieldUnits() : state.units).filter(x =>
-    x && !x.isPlayer && !x.dead && !x.hidden && !x.fused && Number(x.zone) === Number(tou.zone));
+    x && !x.isPlayer && !x.dead && !x.hidden && !x.fused && Number(x.zone) === Number(tou.zone) && hostileTo(tou, x));
 }
 /** 圣盾荣耀+：消耗圣盾点时为自身恢复 2d10 生命 */
 function touShieldHeal(u) {
@@ -7792,9 +7791,10 @@ function dealTo(attacker, target, opt) {
   const assisting = !!opt.flags.assist || !!(attacker && state._assistBy && state._assistBy === attacker.id);
   // 危墙 / 关着的机关门挡住：先判，再进协助格挡（以前先弹格挡，格挡者花掉附赠、扣了耐久，这一击才被墙挡住）
   // lob：越墙的抛射（扭矩酸液炮蓄力、碎渣重炮的迫击炮）不被危墙 / 门挡住
-  // 决一死战（#44）：被决斗的敌人只能攻击灯——它的范围攻击（电弧扫射、榴弹……）也只打得到灯，同区的其他人不被波及。
+  // 决一死战（#44）：被决斗的敌人只能攻击灯——它的范围攻击（电弧扫射、榴弹……）也只打得到灯，同区的其他人不被波及；
+  // 多目标的单体攻击、协助攻击、借机攻击同理，一律只打得到灯。
   // 首领机制（死刑、齐射……）和环境伤害不算它的攻击行动，不拦
-  if (attacker && !attacker.isPlayer && target && target.isPlayer && opt.flags.action && opt.flags.aoe && !opt.flags.environment && !opt.flags.mechId && !opt.flags.execution &&
+  if (attacker && !attacker.isPlayer && target && target.isPlayer && opt.flags.action && !opt.flags.environment && !opt.flags.mechId && !opt.flags.execution &&
       typeof touDuelVictim === "function") {
     const duel = touDuelVictim(attacker);
     if (duel && target.id !== duel.id) {
