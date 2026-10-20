@@ -79,8 +79,8 @@
 - [ ] 收发代理锁定打不到的目标白扣纳米
 - [ ] 特盛乱打瞬斩写「无视距离」实际打不到距离 2
 - [x] 决一死战只拦范围攻击（多目标单体、协助、借机仍打灯以外的人） —— app.js · `dealTo` 去掉「仅范围攻击」的限制，所有攻击都只打得到灯
-- [ ] 猛击反震不看屹立不倒 / 坚挺 / 决不后退 / 背水一战
-- [ ] 决不后退发动后仍按被击破结算（机甲被击落、挨击落真伤）
+- [x] 猛击反震不看屹立不倒 / 坚挺 / 决不后退 / 背水一战 —— engine.js · `applyResultToUnit` 反震改走 `dealBreak`（夏背水一战起身时不扣）；`dealBreak` 加 `opt.keepSelf`（tests/hit-protect-120.test.js）
+- [x] 决不后退发动后仍按被击破结算（机甲被击落、挨击落真伤）—— `applyResultToUnit` 扣完架势后实际没失衡就清掉 `broke` / `knockdownHp`，击落真伤改在这之后结算（tests/hit-protect-120.test.js）
 - [x] （回归）行动结束才判的高能自爆溢出分 / 余波分没人拿 —— 技能收尾的 `paintSkillLog` 先把行动记账清了，`runSkill` 里 `flushHighBooms` 之前把它恢复回来（`state._endedAcc`），判完再清（app.js · paintSkillLog / runSkill；tests/score-fixes.test.js）
 - [x] 飞碟触灵基准分多算 515 —— 本体血量池是五条腿血量的镜像（syncUfoBody），腿已经算过，基准分里本体只算击杀分（app.js · scorePar；tests/score-fixes.test.js）。注：「515」是原 issue 的数字，我只在 1 级验证（多算 100 = 本体镜像血量）
 - [x] 基准分把中立生物、友军算进去（S 线虚高）—— scorePar 跳过 `isNeutralCreature` 和 `playerAllied` 的单位（app.js · scorePar；tests/score-fixes.test.js）

@@ -4785,7 +4785,6 @@ function applyCombat(target, result, attacker) {
   }
   notes.push(...sweepDeadEnemies());
   if (target.def <= 0 && result.broke && !target.noPosture && target.kit !== "ufo_leg") notes.push(imbalanceLine(target));
-  if (attacker && result.selfBreak && attacker.def <= 0) notes.push(imbalanceLine(attacker));
   // 圣盾：真的受到伤害才扣（免疫、被挡下、伤害为 0 时不扣）
   if (result.flags && result.flags.holyShield && ((Number(result.total) || 0) > 0 || (Number(result.shpDealt) || 0) > 0)) {
     const tou = shieldBearer(target) || findKit("tou", state.units);
@@ -4809,9 +4808,6 @@ function applyCombat(target, result, attacker) {
   if (target.dead && typeof clearPierce === "function" && isPierced(target)) clearPierce(null, notes, "（目标倒下）", target);
   if (target.def <= 0 && (result.broke || target.stunned) && !target.noPosture && target.kit !== "ufo_leg") {
     queueAssistAttack(attacker, target);
-  }
-  if (attacker && result.selfBreak && attacker.def <= 0) {
-    queueAssistAttack(target, attacker);
   }
   bossQuickRecover(target, notes);   // 首领 / 精英：标记没攒满的失衡，协助攻击排上队后立刻恢复架势
   if (attacker && attacker.self === "burn" && result.element === "fire") {
@@ -10062,7 +10058,7 @@ function dealBreak(unit, amount, element, notes, reason, opt) {
     notes.push(imbalanceLine(sink));
     // 飞行单位被击破：和攻击打空架势一样强制击落，扣 20% 最大生命（engine.js · resolveAttack 的击落）
     if (before > 0) knockdownByBreak(sink, notes);
-    if (typeof endSelfOnStun === "function") endSelfOnStun(sink, notes);
+    if (typeof endSelfOnStun === "function" && !opt.keepSelf) endSelfOnStun(sink, notes);   // keepSelf：猛击反震，留给 dealTo 结算完这一击再结束
     queueAssistAttack(opt.by || null, sink);
     if (brokeIntoStun && typeof onBroken === "function") onBroken(sink, notes);
   } else {
