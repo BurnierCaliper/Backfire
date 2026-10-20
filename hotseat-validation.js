@@ -176,10 +176,12 @@
     if (field.abyss && !actor.flying) fail("深渊只有飞行单位才能通过", "invalid_move");
     const why = zoneReachable(actor, dest, true);
     if (why) fail(why, "invalid_move");
-    if (field.acid && !actor.flying && (actor.ap || 0) < 1) fail("离开酸液地面需要行动点", "invalid_move");
+    // 荒原行者（feats.js）：离开酸液地面、越过空隙只要附赠动作（基础消耗已查过），不用行动点、不用检定——和 app.js · doMove 一致
+    const wanderer = typeof featHas === "function" && featHas(actor, "wanderer");
+    if (field.acid && !actor.flying && !wanderer && (actor.ap || 0) < 1) fail("离开酸液地面需要行动点", "invalid_move");
     // 空隙：地面单位花 1 行动点做运动检定才能越过（检定在执行时掷）
     const gap = (state.gaps || {})[gapKey(from, dest)];
-    if (gap && gap.type === "void" && !actor.flying && (actor.ap || 0) < 1) fail("越过空隙需要 1 行动点", "invalid_move");
+    if (gap && gap.type === "void" && !actor.flying && !wanderer && (actor.ap || 0) < 1) fail("越过空隙需要 1 行动点", "invalid_move");
   }
   function checkItem(actor, cmd) {
     const spec = typeof cmd.item === "string" && Object.hasOwn(ITEM_CATALOG, cmd.item) && ITEM_CATALOG[cmd.item];

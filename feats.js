@@ -446,6 +446,11 @@ function featDelegateBase(u, f) {
   if (featFull(u, f.id)) return f.dabble.base;
   return f.skill && f.skill.delegate ? f.dabble.base : null;
 }
+/** 专长技能 id（feat_xxx）背后的原职责技能 id；不是涉猎专长返回 null（party.js · skillCost 认分步里的 id 用） */
+function featDelegateBaseOf(skillId) {
+  const f = featOfSkill(skillId);
+  return f && f.dabble ? f.dabble.base : null;
+}
 function featActor() {
   return typeof state !== "undefined" && typeof unitById === "function" ? unitById(state.attackerId) : null;
 }
@@ -658,7 +663,7 @@ function featUnbowedReset(u) {
 /** 以身作盾（id 仍是 ironwall，旧存档照读）：这一击（敌人打 target）可以宣布的人 */
 function featIronwallDeclarers(target) {
   if (!target || !target.isPlayer || typeof state === "undefined") return [];
-  return (state.units || []).filter(u => u.isPlayer && !u.dead && !u.hidden && !(u.dying && !u.upOnShp) &&
+  return (state.units || []).filter(u => u.isPlayer && !u.dead && !u.hidden && !u.stunned && !(u.dying && !u.upOnShp) &&   // 失衡中不能宣布
     Number(u.zone) === Number(target.zone) && featOnceLeft(u, "ironwall"));
 }
 
@@ -688,12 +693,13 @@ function featArmAttack(attacker, target, opt) {
 }
 
 /** 一击打完（app.js · dealTo）：冲阵的不稳、乘势、荒原行者击落飞行 */
-function featAfterHit(attacker, target, res, flags, extra, stunnedNow) {
+function featAfterHit(attacker, target, res, flags, extra, stunnedNow, wasFlying) {
   if (!attacker || !attacker.isPlayer || !target || target.isPlayer || !stunnedNow || target.dead) return;
   if (featHas(attacker, "charge") && typeof applyUnstable === "function") {
     if (applyUnstable(target, extra)) extra.push(`冲阵：${target.name} 额外获得 1 层不稳。`);
   }
-  if (featHas(attacker, "wanderer") && target.flying && typeof canDisplace === "function") {
+  // 击破飞行单位时引擎已经把它击落（target.flying 已是 false），所以要看结算前的飞行状态 wasFlying
+  if (featHas(attacker, "wanderer") && (wasFlying || target.flying) && typeof canDisplace === "function") {
     target.flying = false;
     extra.push(`荒原行者：${target.name} 被击落。`);
     if (Number(target.zone) !== Number(attacker.zone) && canDisplace(target)) displaceTo(target, attacker.zone, extra, "被击落");

@@ -620,7 +620,9 @@ function skillCost(id) {
   // 不倒战意 15 级：选「全部友方」时改用行动点
   if (id === "role_sturdy") {
     const fl = typeof state !== "undefined" ? state.skillFlow : null;
-    if (fl && fl.id === "role_sturdy" && fl.picks && fl.picks.mode === "all") return { ap: 1 };
+    // 兼修·鼓劲（feats.js · rouse）是 feat_rouse 调用 role_sturdy，分步的 id 是 feat_rouse，选全部友方同样改收行动点
+    const isSturdy = fl && (fl.id === "role_sturdy" || (typeof featDelegateBaseOf === "function" && featDelegateBaseOf(fl.id) === "role_sturdy"));
+    if (isSturdy && fl.picks && fl.picks.mode === "all") return { ap: 1 };
     return { bonus: 1 };
   }
   const map = {

@@ -8001,6 +8001,7 @@ function dealTo(attacker, target, opt) {
   });
   res.flags = flags;
   const wasStunnedT = !!target.stunned;
+  const wasFlyingT = !!target.flying;   // 击破飞行单位时引擎会先把它击落（engine.js · applyResultToUnit），荒原行者要看结算前的飞行状态
   const dopplerT = target.self === "doppler";   // 被这一下打进失衡、多普勒随晕眩结束，这一下的击破照样传出去
   const shieldBeforeT = shieldSum(target);
   // 评分：这一击的加分倍率（克制等）。击杀、失衡在 applyCombat 里发生，先挂在目标身上给它们用
@@ -8022,7 +8023,7 @@ function dealTo(attacker, target, opt) {
   }
   if ((res.breakDealt || 0) > 0 && typeof onBreakTaken === "function") onBreakTaken(target, res.breakDealt, opt.element || res.element, extra, dopplerT);
   if (brokeInto(target, wasStunnedT) && typeof onBroken === "function") onBroken(target, extra);
-  if (typeof featAfterHit === "function") featAfterHit(attacker, target, res, flags, extra, brokeInto(target, wasStunnedT));   // 冲阵 / 乘势 / 荒原行者
+  if (typeof featAfterHit === "function") featAfterHit(attacker, target, res, flags, extra, brokeInto(target, wasStunnedT), wasFlyingT);   // 冲阵 / 乘势 / 荒原行者
   if (flags.action && !isReaction && typeof afterAttackDealt === "function") afterAttackDealt(attacker, target, opt.element || res.element, res, opt, extra);
   // 猛击反震把攻击者自己打进失衡：这一击的霜结 / 溅射 / 导体照常结算完，再随晕眩结束自我效果
   if (attacker && attacker !== target && attacker.stunned && typeof endSelfOnStun === "function") endSelfOnStun(attacker, extra);
