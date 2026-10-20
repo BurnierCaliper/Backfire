@@ -44,11 +44,12 @@
         ${h.dead ? "" : `<div class="rr-nums"><span>血量 ${esc(h.hp)}/${esc(h.hpMax)}</span>${(h.weapons || []).map(w => `<span class="rr-w">${esc(w.name)} 耐久 ${esc(w.dur)}/${esc(w.max)}</span>`).join("")}${gm && h.shpMax ? `<span class="rr-gm">坚毅 ${esc(h.shp)}/${esc(h.shpMax)}（仅主持人）</span>` : ""}</div>`}
       </li>`).join("");
     const btns = opt.host
-      ? `<button type="button" class="g-btn" data-rr="cancel">先不休息</button><button type="button" class="g-btn r-main" data-rr="start"${c.ok || opt.force ? "" : " disabled"}>开始长休</button>`
+      ? `<button type="button" class="g-btn" data-rr="cancel">先不休息</button><button type="button" class="g-btn r-main" data-rr="start">${c.ok || opt.force ? "开始长休" : "硬撑着过夜"}</button>`
       : `<span class="rr-line">等${opt.hostName ? esc(opt.hostName) : "主持人"}开始长休。可以在小队频道里聊聊。</span>`;
     return `<div class="rr-card rr-camp" role="document">
       <header><h2>营地</h2><span class="rr-time">${c.day ? `第 ${esc(c.day)} 天 ` : ""}${clock(c.clock)} · 距上次长休 ${esc(c.hoursAwake)} 小时 · ${esc(EX_SHORT[c.exhaust] || "")}</span></header>
       <p class="rr-line">长休需要：水 ${ok(c.water.need, c.water.have)} ml · 食物 ${ok(c.food.need, c.food.have)} 份${c.ok ? "" : ` · <span class="rr-bad">${esc((c.lack || []).join("，"))}</span>`}${opt.force ? " · 主持人安排的休息，不扣补给" : ""}</p>
+      ${c.ok || opt.force ? "" : '<p class="rr-line rr-bad">补给不足，只能硬撑着过夜：不回血，力竭继续累积，时间照样过。</p>'}
       <p class="rr-line">篝火噼啪作响。趁着还没睡下，大家可以说说话。</p>
       <ul class="rr-list">${heroes}</ul>
       <footer>${btns}</footer>
