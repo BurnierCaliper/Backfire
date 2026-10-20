@@ -368,6 +368,9 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **蚁型戒备兵种的大酸液弹：发射时主目标那一下不再被射程判定吞掉**（enemies.js · `antFireShell`；tests/h7-ant-shell.test.js；docs/bug-backlog.md H7）
+  - 以前：主目标那一下走普通攻击的射程判定，落点在自己所在的区、隔两个区、被协助攻击触发时都会被「打不到距离 N」吞掉，只剩波及。
+  - 现在：主目标那一下带 `flags: { action: true, anyRange: true }`，按标定落点打，不受射程限制（通用射程规则不变）。标定 / 波及 / 牵制重新标定照旧；AI 选区本来就不限距离，未改。
 - **高能自爆、深渊 / 空隙坠落、流沙窒息弄死的敌人也走击杀结算**（app.js · `applyKnockdown`；tests/env-kill-settle.test.js；docs/bug-backlog.md H12）
   - 以前：这几条路径只把敌人标成死亡并清场，不调用 `settleEnemyKill`，所以没有经验、奎支、击杀分、击杀数，亡命之王也不知道手下倒了。
   - 现在：`applyKnockdown` 里敌人倒地时补调 `settleEnemyKill`（`_xpGiven` 保证每个敌人只结算一次）。击杀算谁沿用原规则：有 `_lastHitBy`（含环境所有者）算他，没有就按当前行动者，都没有只给经验 / 奎支、不记个人击杀；中立生物、友军照旧不给经验掉落。
