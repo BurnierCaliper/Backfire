@@ -4939,6 +4939,15 @@ function settleEnemyKill(target, notes) {
     if (notes) notes.push(`友军 ${target.name} 倒下了。`);
     return;
   }
+  // 友军（跑团模板「同阵营」）在敌人回合打死的敌人：没有经验、掉落、击杀分（和中立生物一样，只算战斗进度）
+  if (!unitById(target._lastHitBy)) {
+    const acc = state.actionAcc, who = acc && acc.actorIsPlayer === false ? unitById(acc.actorId) : null;
+    if (who && typeof playerAllied === "function" && playerAllied(who)) {
+      target.dead = true; target._xpGiven = true;
+      if (notes) notes.push(`${target.name} 被友军 ${who.name} 打倒了。`);
+      return;
+    }
+  }
   target.dead = true;
   target._xpGiven = true;
   // 战场数据：最后一击是谁打的算谁；持续伤害在某人行动中打死的，算那个人
