@@ -81,9 +81,9 @@
 - [ ] 决一死战只拦范围攻击（多目标单体、协助、借机仍打灯以外的人）
 - [ ] 猛击反震不看屹立不倒 / 坚挺 / 决不后退 / 背水一战
 - [ ] 决不后退发动后仍按被击破结算（机甲被击落、挨击落真伤）
-- [ ] （回归）行动结束才判的高能自爆溢出分 / 余波分没人拿
-- [ ] 飞碟触灵基准分多算 515
-- [ ] 基准分把中立生物、友军算进去（S 线虚高）
+- [x] （回归）行动结束才判的高能自爆溢出分 / 余波分没人拿 —— 技能收尾的 `paintSkillLog` 先把行动记账清了，`runSkill` 里 `flushHighBooms` 之前把它恢复回来（`state._endedAcc`），判完再清（app.js · paintSkillLog / runSkill；tests/score-fixes.test.js）
+- [x] 飞碟触灵基准分多算 515 —— 本体血量池是五条腿血量的镜像（syncUfoBody），腿已经算过，基准分里本体只算击杀分（app.js · scorePar；tests/score-fixes.test.js）。注：「515」是原 issue 的数字，我只在 1 级验证（多算 100 = 本体镜像血量）
+- [x] 基准分把中立生物、友军算进去（S 线虚高）—— scorePar 跳过 `isNeutralCreature` 和 `playerAllied` 的单位（app.js · scorePar；tests/score-fixes.test.js）
 - [x] 训练场：聚焦抹层把假人抹成 0/0 —— 补满时按 setupField 记下的原始层重建、去掉封死和聚焦（training.js · refillDummy；tests/training-bugs-105.test.js）
 - [x] 训练场：假人会借机 / 协助攻击 —— opportunityStrike、eligibleAssisters 排除 trainingDummy（app.js）
 - [x] 训练场：顶栏「重新开始」把训练状态带进普通战斗 —— 训练场里点「重新开始」重开这一场训练（training.js · restart；game.js · g-restart）

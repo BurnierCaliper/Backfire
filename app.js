@@ -2839,13 +2839,17 @@ function resetBattleRecords() {
   state.lastBrokenLayer = null;   // 废物利用：每场重新记（上一场打碎的层不能拿来用）
   state.weaponFallen = {};        // 本场倒下过的武器（取回后 atk / 格挡加成减半）
 }
-/** 这场的基准分：把出现过的每个敌人（含中途召唤的）「打空血、击杀」的分加起来，按第一次见到时的数值算。
- *  击破、失衡不算进来：那是玩家打出来的漂亮操作，不当成默认该拿的分。 */
+/** 这场的基准分：把出现过的每个要打的敌人（含中途召唤的）「打空血、击杀」的分加起来，按第一次见到时的数值算。
+ *  击破、失衡不算进来：那是玩家打出来的漂亮操作，不当成默认该拿的分。
+ *  不算：中立生物、「我方同阵营」的友军（不是要打的敌人）；飞碟触灵本体的血量池是五条腿血量的镜像
+ *  （syncUfoBody），腿已经算过了，本体只算击杀分。 */
 function scorePar() {
   state.scoreSeen = state.scoreSeen || {};
   (state.units || []).forEach(u => {
     if (u.isPlayer || u.kit === "ironwall" || state.scoreSeen[u.id] != null) return;
-    const hp = (u.layers || []).reduce((a, l) => a + (Number(l.max) || 0), 0);
+    if (typeof isNeutralCreature === "function" && isNeutralCreature(u)) return;
+    if (typeof playerAllied === "function" && playerAllied(u)) return;
+    const hp = u.kit === "ufo_body" ? 0 : (u.layers || []).reduce((a, l) => a + (Number(l.max) || 0), 0);
     const rank = typeof enemyRankOf === "function" ? enemyRankOf(u) : "minion";
     state.scoreSeen[u.id] = hp * SCORE_RULES.dmg + (SCORE_RULES.kill[rank] || 0);
   });
@@ -10574,6 +10578,7 @@ function appendLog(text, kind) {
 
 function paintSkillLog(text) {
   const sum = actionAccLine();
+  if (state.actionAcc) state._endedAcc = state.actionAcc;   // 行动结束才判的高能自爆（flushHighBooms）还要靠它找记分归属
   state.actionAcc = null;
   appendLog(sum ? String(text || "") + (text ? "\n" : "") + sum : text);
 }
@@ -11138,6 +11143,7 @@ function runSkill(id, optRun) {
   let lines;
   try {
     lines = withLogSink(sink => { try {
+      if (!state._highDefer) state._endedAcc = null;
       state.aoePulse = {};            // 只算这一次行动的范围攻击
       state.actionKills = [];         // 这一次行动里打死的敌人（动作结束前还能吃到后面的攻击、算溢出）
       state.flyPaid = {};             // 这一次行动里已经为「近程打飞行」付过附赠行动的（攻击者 > 目标）
@@ -11158,7 +11164,12 @@ function runSkill(id, optRun) {
       }
       // 跃迁（feats.js）：这次花了行动点、真的打出了攻击
       if (a0 && typeof featAfterAction === "function") featAfterAction(a0, (Number(a0.ap) || 0) < apBefore);
-      if (!state._highDefer) flushHighBooms();
+      if (!state._highDefer) {
+        // 技能收尾（paintSkillLog）已经清掉了行动记账：高能自爆的溢出分 / 余波分仍记给引发它的这一方
+        if (!state.actionAcc && state._endedAcc) state.actionAcc = state._endedAcc;
+        state._endedAcc = null;
+        flushHighBooms();
+      }
       if (fuelGain && (Number(state.actionSeq) || 0) !== seqBefore) addFuel(1, "引擎运转");   // 真的出手了（开始了新的行动）才算
       const bossNotes = []; settleBossStuns(bossNotes); if (bossNotes.length) appendLog(bossNotes.join("\n"));
       applyFatigue(a0, id, scoreBefore);   // 招式疲劳：连续几个回合用同一招，这次行动的总得分打折
