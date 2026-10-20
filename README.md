@@ -368,6 +368,9 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **专长「拉一把」修好：医疗包能用了**（items.js · `ITEM_CATALOG` / `itemHealSpec` / `rollItemHeal`；ledger.js · `ledgerHealItem`；feats.js · `featHealItems`；tests/feat-pickup.test.js；docs/bug-backlog.md H4）
+  - 以前：「拉一把」只认带数字 `heal` 的道具，但简易医疗包、诊所医疗包没有这个字段（治疗骰写死在使用道具的代码里），背包里有医疗包也永远「没有医疗道具」。
+  - 现在：医疗包在 `ITEM_CATALOG` 里带结构化治疗骰（简易 1d4+6、诊所 2d4+6），战斗里用道具、休整用道具、「拉一把」都读这一处。「拉一把」起身时掷这件道具的治疗骰（和平时用一样），用掉一件，不扣坚毅生命；强心注射剂只能自己用，不算医疗道具。治疗量本身不变。
 - **夕夏狂怒碾压倍率调整、川川电击鞭改名、雪天冻土易伤修正**（app.js · `crushOnce`；skill-text.js、party.js；engine.js · `chartMod`）
   - 狂怒碾压第一轮改为 0.75×atk 物理 + 2 击破；抓住后每回合自动再碾改为 1.5×atk + 1d8 + 3 击破。自动击杀仍返还 1 行动点与 1 附赠。
   - 川川「电击鞭」改名为「电能鞭」（技能名、说明、日志、测试同步）。
