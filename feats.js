@@ -226,7 +226,7 @@ const FEATS = {
         const items = featHealItems();
         return [
           { key: "target", type: "unit", optional: false, label: "拉谁起来（同区濒死的友方）", units },
-          { key: "item", type: "choice", optional: false, label: "用哪件医疗道具", options: items.map(x => ({ value: x.id, label: `${x.name}（治疗 ${x.heal} · 有 ${x.qty}）` })) }
+          { key: "item", type: "choice", optional: false, label: "用哪件医疗道具", options: items.map(x => ({ value: x.id, label: `${x.name}（治疗 ${x.text} · 有 ${x.qty}）` })) }
         ];
       },
       why() { return featHealItems().length ? null : "背包里没有医疗道具"; },
@@ -238,7 +238,7 @@ const FEATS = {
         t.dying = false; t.upOnShp = false; t.dead = false;
         const inner = (t.layers || []).filter(l => l.type !== "shield").slice(-1)[0];
         if (inner && (Number(inner.current) || 0) <= 0) inner.current = 0;
-        const got = healUnit(t, it.heal);
+        const got = healUnit(t, rollItemHeal(it.id).total);   // 和平时用这件道具一样掷骰（items.js · rollItemHeal）
         ctx.lines.push(`拉一把：${a.name} 用 ${it.name} 把 ${t.name} 拉了起来，恢复 ${got}，不扣坚毅生命。`);
       } } },
   onemind: { name: "人器一心", kind: "passive", tier: 3,
@@ -583,13 +583,16 @@ function featLabel(id) {
 }
 
 /* ---------- 散在规则里的钩子（app.js / engine.js / rogue.js / ledger.js 调用） ---------- */
-/** 背包里能拿来「拉一把」的医疗道具：[{ id, name, heal, qty }] */
+/** 背包里能拿来「拉一把」的医疗道具：[{ id, name, text, qty }]（治疗骰读 items.js · itemHealSpec，text 如 1d4+6；强心注射剂只能自己用，不算） */
 function featHealItems() {
   if (typeof ITEM_CATALOG === "undefined" || typeof bagCount !== "function") return [];
   return Object.keys(ITEM_CATALOG).filter(id => {
     const it = ITEM_CATALOG[id];
-    return it && it.combat && Number(it.heal) > 0 && bagCount(id) > 0;
-  }).map(id => ({ id, name: ITEM_CATALOG[id].name, heal: Number(ITEM_CATALOG[id].heal), qty: bagCount(id) }));
+    return it && it.combat && it.target === "ally" && itemHealSpec(id) && bagCount(id) > 0;
+  }).map(id => {
+    const h = itemHealSpec(id);
+    return { id, name: ITEM_CATALOG[id].name, text: `${h.n}d${h.s}${h.flat ? "+" + h.flat : ""}`, qty: bagCount(id) };
+  });
 }
 
 /** 被动的次数（还魂每场、以身作盾每次短休、人器一心每长休）：还剩没有。次数周期看专长上的 short / rest */

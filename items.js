@@ -1,14 +1,26 @@
 /* 背包、掉落、道具使用。计算器和游戏共用。 */
 
 const ITEM_CATALOG = {
-  medkit:     { name: "简易医疗包", hint: "治疗一名友方 1d4+6 内层生命", target: "ally", combat: true },
-  clinic:     { name: "诊所医疗包", hint: "治疗一名友方 2d4+6 内层生命", target: "ally", combat: true },
+  // heal：治疗骰（n 个 s 面骰 + flat），用道具 / 休整用道具 / 专长「拉一把」都读这一处（itemHealSpec）
+  medkit:     { name: "简易医疗包", hint: "治疗一名友方 1d4+6 内层生命", target: "ally", combat: true, heal: { n: 1, s: 4, flat: 6 } },
+  clinic:     { name: "诊所医疗包", hint: "治疗一名友方 2d4+6 内层生命", target: "ally", combat: true, heal: { n: 2, s: 4, flat: 6 } },
   stim:       { name: "强心注射剂", hint: "自身恢复 16 生命，消耗一些坚毅生命（不会致死）", target: "self", combat: true },
   steroid:    { name: "强化注射剂", hint: "自身 ATK +3 至战斗结束，消耗一些坚毅生命（不会致死）", target: "self", combat: true },
   bomb_e:     { name: "简易电手榴弹", hint: "对一个区域全部单位造成 1d6+6 电击", target: "zone", combat: true },
   bomb_a:     { name: "简易酸液瓶", hint: "对一个区域全部单位造成 1d6+6 酸液", target: "zone", combat: true },
   shockbomb:  { name: "冲击炸弹", hint: "对一个区域全部单位造成 2 击破", target: "zone", combat: true }
 };
+
+/** 医疗道具的治疗骰；没有 heal 的（如只能自己用的强心注射剂）不算医疗道具，返回 null */
+function itemHealSpec(itemId) {
+  const h = ITEM_CATALOG[itemId] && ITEM_CATALOG[itemId].heal;
+  return h && Number(h.n) > 0 && Number(h.s) > 0 ? { n: Number(h.n), s: Number(h.s), flat: Number(h.flat) || 0 } : null;
+}
+/** 掷一件医疗道具的治疗骰 → { total, text }；不是医疗道具返回 null */
+function rollItemHeal(itemId) {
+  const h = itemHealSpec(itemId);
+  return h ? takeDice(h.n, h.s, h.flat) : null;
+}
 
 /* ===== 效果道具（作者 10/15 定稿，docs/workshop-design.md）=====
  * 游戏里现有的每一种效果对应一个道具，共 36 个。全部花附赠动作（game.js / battle-commands.js 的 __item）。
@@ -386,10 +398,9 @@ function useItemOn(actor, itemId, target, zone) {
     if (block) { notes.push(`${actor.name} 的${spec.name}影响不到 ${z} 区：${block}`); notes.unused = true; return notes; }
   }
   bagAdd(itemId, -1, notes);
-  if (itemId === "medkit" || itemId === "clinic") {
+  if (itemHealSpec(itemId)) {
     const t = target || actor;
-    const n = itemId === "clinic" ? 2 : 1;
-    const r = takeDice(n, 4, 6);
+    const r = rollItemHeal(itemId);
     // 和其他治疗一样从内往外补，可以治到外层（作者定）
     const got = typeof healUnit === "function" ? healUnit(t, r.total) : r.total;
     notes.push(`${actor.name} 对 ${t.name} 使用${spec.name}，掷出 ${r.text}，实际恢复 ${Math.floor(got || 0)}` +

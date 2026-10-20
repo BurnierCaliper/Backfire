@@ -850,8 +850,8 @@ function ledgerHealItem(itemId, kit, notes) {
   const h = heroByKit(kit);
   if (!h) return notes;
   if (bagCount(itemId) < 1) { notes.push("背包里没有这个物品。"); return notes; }
-  const n = itemId === "clinic" ? 2 : 1;
-  const r = takeDice(n, 4, 6);
+  const r = rollItemHeal(itemId);
+  if (!r) { notes.push("这件道具不能用来治疗。"); return notes; }
   bagAdd(itemId, -1);
   const before = totalHpOf(h);
   healHeroFlesh(h, r.total);   // 医疗包：和其他治疗一样从内往外补，可以治到外层（作者定）
