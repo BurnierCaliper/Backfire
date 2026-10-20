@@ -67,7 +67,7 @@ test("不能拿自己的钱装别人的角色；钱不够失败且不扣钱", ()
 
 test("online-game.js 把 cyberware 放进发给每个人的包", () => {
   const src = fs.readFileSync(path.join(ROOT, "online-game.js"), "utf8");
-  assert.match(src, /cyberware: rogue\(\) && OnlineRogue\.cyberwareFor \? OnlineRogue\.cyberwareFor\(id\) : null/);
+  assert.match(src, /cyberware: rogue\(\) \? \(OnlineRogue\.cyberwareFor \? OnlineRogue\.cyberwareFor\(id\) : null\)/);
 });
 
 /* ---------- Akane 的 4 处缺口 ---------- */
