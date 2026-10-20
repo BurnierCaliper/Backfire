@@ -1,0 +1,37 @@
+# Claude（GitHub 上的协作者）：在 issue / PR 里留言「@claude ……」就会被叫醒，按留言干活，改完开 PR。
+# 用的是仓库 Secret「CLAUDE_CODE_OAUTH_TOKEN」（在自己电脑上运行 claude setup-token 生成，算在自己的 Claude 订阅额度里）。
+# 只响应仓库主人 / 成员 / 协作者的留言，路人 @claude 不会花额度。项目规则见根目录 CLAUDE.md。
+name: Claude
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  issues:
+    types: [opened]
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+  actions: read
+jobs:
+  claude:
+    if: >-
+      (github.event_name == 'issues' && contains(github.event.issue.body, '@claude') &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association)) ||
+      (github.event_name != 'issues' && contains(github.event.comment.body, '@claude') &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: --allowedTools "Bash(npm test),Bash(node --test:*),Bash(node tools/playtest.js:*),Bash(git:*)"
