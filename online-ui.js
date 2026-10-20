@@ -442,7 +442,14 @@
       return p ? ModCompare.text(p) : "";
     }
     /** 克制表：房主算好发来的 view.matchup（不含坚毅）；玩家端不自己算 */
-    const matchupOf = () => view.matchup || view.packet?.matchup || null;
+    // 房主的 matchup 按他当前行动的单位算；玩家这边按自己选中的单位（选行动时的那个，没有就当前轮到的自己的单位）改冻土再算
+    const matchupOf = () => {
+      const m = view.matchup || view.packet?.matchup || null;
+      if (!m || !global.MatchupUI) return m;
+      const st = displayState || view.state || {}, cur = hs().currentUnitId;
+      const mine = (hs().units || []).some(u => u.id === cur && u.owner === own());
+      return global.MatchupUI.viewChart(m, st, selectedActor || (mine ? cur : null));
+    };
     function openWorkshop(mat) {
       if (!global.WorkshopUI || !global.WorkshopData) return;
       // 学配方 / 拆解：从工坊里选中的那名角色出钱、拆他的东西（一个玩家操控多名角色时不能总用第一个）
