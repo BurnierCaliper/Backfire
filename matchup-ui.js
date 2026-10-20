@@ -35,6 +35,15 @@
     if (parts.length && !covered) notes.unshift(`${disp(c.weatherName || c.weather)}伤害修正：${parts.join("；")}${Number(c.envX) > 1 ? `（已含 ×${c.envX}）` : ""}`);
     return notes.map(disp);
   }
+  /** 一格实际的增减伤：克制 + 整行天气修正（相位 ±50% 等在整行 pct 里）。changed 按「原（base + pctBase）」和「现（value + pct）」比，
+   *  不能只看格子的 changed（相位波峰 / 波谷时格子本身没变，整行变了） */
+  function eff(x, r) {
+    const before = (Number(x.base) || 0) + (Number(r && r.pctBase) || 0), now = (Number(x.value) || 0) + (Number(r && r.pct) || 0);
+    const changed = Math.abs(now - before) > 1e-9;
+    const reasons = [x.changed && x.reason, Number(r && r.pct) !== Number(r && r.pctBase) && r.pctReason].filter(Boolean);
+    if (!changed && x.reason) reasons.push(x.reason);
+    return { before, now, changed, reason: [...new Set(reasons)].join("；") };
+  }
   const KIND_TEXT = { adv: "克制", dis: "被克制", neu: "普通" };   // 和 matchup.js · MATCHUP_KIND_CN 一致；数据里带了 kind 就用数据的
 
   /** 取数据接口：matchupChart（matchup.js）或 Rogue.matchupChart；没有 → null */
@@ -95,16 +104,18 @@
       const cells = cols.map((k, j) => {
         const x = ((c.cells || [])[i] || [])[j] || {};
         const kind = x.kindId || "neu", on = sel && sel[0] === i && sel[1] === j;
-        const tip = `${disp(r.name)} → ${k.name}：${x.kind || KIND_TEXT[kind] || ""} ${pct(x.value)}${x.changed ? `（原 ${pct(x.base)}）` : ""}${x.reason ? " · " + x.reason : ""}`;
-        return `<td class="mu-cell mu-${esc(kind)}${x.changed ? " changed" : ""}${on ? " sel" : ""}" data-mu-cell="${i}:${j}" tabindex="0" title="${esc(tip)}">
-          ${x.changed ? `<s>${pct(x.base)}</s><span class="mu-arrow">→</span>` : ""}<b>${pct(x.value)}</b></td>`;
+        const e = eff(x, r);
+        const tip = `${disp(r.name)} → ${k.name}：${x.kind || KIND_TEXT[kind] || ""} ${pct(e.now)}${e.changed ? `（原 ${pct(e.before)}）` : ""}${e.reason ? " · " + e.reason : ""}`;
+        return `<td class="mu-cell mu-${esc(kind)}${e.changed ? " changed" : ""}${on ? " sel" : ""}" data-mu-cell="${i}:${j}" tabindex="0" title="${esc(tip)}">
+          ${e.changed ? `<s>${pct(e.before)}</s><span class="mu-arrow">→</span>` : ""}<b>${pct(e.now)}</b></td>`;
       }).join("");
       return `<tr><th class="mu-row mu-e-${esc(r.id)}">${elIcon(r.id)}<span>${esc(disp(r.name))}</span></th>${cells}</tr>`;
     }).join("");
     let detail = "";
     if (sel) {
       const r = rows[sel[0]], k = cols[sel[1]], x = ((c.cells || [])[sel[0]] || [])[sel[1]];
-      if (r && k && x) detail = `<p class="mu-detail"><b>${esc(disp(r.name))} → ${esc(k.name)}</b>：${esc(x.kind || KIND_TEXT[x.kindId] || "")} ${pct(x.value)}${x.changed ? `（原来 ${esc(x.baseKind || "")} ${pct(x.base)}）` : ""}${x.reason ? ` · ${esc(x.reason)}` : ""}</p>`;
+      const e = r && x ? eff(x, r) : null;
+      if (r && k && x) detail = `<p class="mu-detail"><b>${esc(disp(r.name))} → ${esc(k.name)}</b>：${esc(x.kind || KIND_TEXT[x.kindId] || "")} ${pct(e.now)}${e.changed ? `（原来 ${esc(x.baseKind || "")} ${pct(e.before)}）` : ""}${e.reason ? ` · ${esc(e.reason)}` : ""}</p>`;
     }
     const nl = allNotes(c);
     const notes = nl.length ? `<ul class="mu-notes">${nl.map(n => `<li>${esc(n)}</li>`).join("")}</ul>` : "";
@@ -165,5 +176,5 @@
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", syncButtons); else syncButtons();
   }
 
-  root.MatchupUI = { html, open, close, toggle, refresh, isOpen, available, localChart, chartWith, viewChart, allNotes, pct, state: ui, syncButtons };
+  root.MatchupUI = { html, open, close, toggle, refresh, isOpen, available, localChart, chartWith, viewChart, allNotes, eff, pct, state: ui, syncButtons };
 })(typeof window !== "undefined" ? window : globalThis);

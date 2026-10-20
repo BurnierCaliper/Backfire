@@ -58,7 +58,9 @@ test("微光（真数据）：16 格反转高亮「原 → 现」带原因；能
   const chart = M.localChart();
   assert.equal(chart.changed.length, 16);
   const html = M.html(chart);
-  assert.equal((html.match(/mu-cell[^"]*changed/g) || []).length, 16);
+  // 16 格克制反转 + 能量整行 +25% 的 5 格（按 base+pctBase 对 value+pct 比）
+  assert.equal((html.match(/mu-cell[^"]*changed/g) || []).length, 21);
+  assert.match(cell(html, 4, 0), /<s>±0<\/s><span class="mu-arrow">→<\/span><b>\+25%<\/b>/, "能量 → 肉体：整行 +25%");
   assert.match(cell(html, 0, 0), /<s>\+50%<\/s><span class="mu-arrow">→<\/span><b>−50%<\/b>/);
   assert.match(cell(html, 0, 0), /微光：克制关系反转（能量除外）/);
   assert.match(cell(html, 0, 0), /mu-dis/, "改过的格子照常按现在的克制关系上色");
@@ -107,6 +109,20 @@ test("联机玩家：拿房主 matchup 的 opt，按自己选中单位的区改�
   assert.match(ol, /MatchupUI\.viewChart\(m, st, selectedActor \|\| \(mine \? cur : null\)\)/);
   assert.match(ol, /screen === "battle" && matchupOf\(\) \? button\("克制表", "matchup"\)/);
   assert.doesNotMatch(M.html(mine), /shp|坚毅/);
+});
+
+test("相位波峰（#81 f084d7d：±50% 在整行 pct）：格子本身 changed=false 也显示「原 → 现」，原因在 notes", () => {
+  const c = setup(), M = c.MatchupUI;
+  const chart = M.chartWith("phase", { phaseStep: 2 });
+  assert.ok(chart.cells.flat().every(x => !x.changed), "数据层的格子没变");
+  const html = M.html(chart);
+  assert.equal((html.match(/mu-cell[^"]*changed/g) || []).length, 35);
+  assert.match(cell(html, 0, 0), /<s>\+50%<\/s><span class="mu-arrow">→<\/span><b>\+100%<\/b>/);
+  assert.match(cell(html, 0, 1), /title="[^"]*相位波峰：全属性 \+50%/);
+  assert.match(html, /<ul class="mu-notes">[\s\S]*相位波峰：伤害 \+50%，击破 \+1/);
+  assert.equal(M.allNotes(chart).filter(n => /相位/.test(n)).length, 1, "不重复");
+  // 平稳期没有修正
+  assert.doesNotMatch(M.html(M.chartWith("phase", { phaseStep: 1 })), /mu-cell[^"]*changed/);
 });
 
 test("相位效果在 notes 里：数据写在 notes 或整行 pct 里都看得到，不重复", () => {
