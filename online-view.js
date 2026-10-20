@@ -721,6 +721,16 @@
       installed: arr(v.installed).slice(0, 16).filter(obj).map(d => Object.assign(item(d), { usesLeft: num(d.usesLeft), removeCost: num(d.removeCost) })) },
       shop: arr(c.shop).slice(0, 64).filter(obj).map(d => Object.assign(item(d), { price: num(d.price), text: str(d.text, 300), installed: !!d.installed,
         canInstall: !!d.canInstall, error: d.error ? str(d.error, 80) : null, warning: str(d.warning, 80), rateAfter: num(d.rateAfter) })) };
+    out.purse = Math.max(0, Math.floor(num(c.purse)));
+    const pv = obj(c.previews) ? c.previews : {};
+    out.previews = {};
+    Object.keys(pv).slice(0, 64).forEach(k => {
+      const p = pv[k], key = str(k, 60);
+      if (!obj(p) || !key) return;
+      out.previews[key] = { ok: !!p.ok, error: p.error ? str(p.error, 80) : null, cost: num(p.cost), id: str(p.id, 60), name: str(p.name, 60), tier: num(p.tier),
+        rateBefore: num(p.rateBefore), rateAfter: num(p.rateAfter), cap: num(p.cap), overinstall: !!p.overinstall, hpCut: num(p.hpCut),
+        conflictWith: p.conflictWith ? str(p.conflictWith, 60) : null, burden: BUR.includes(p.burden) ? p.burden : "none", warning: str(p.warning, 80) };
+    });
     return scrubHidden(out);
   }
   function projectQuests(list) {

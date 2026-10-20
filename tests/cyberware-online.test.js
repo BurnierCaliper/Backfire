@@ -69,3 +69,44 @@ test("online-game.js 把 cyberware 放进发给每个人的包", () => {
   const src = fs.readFileSync(path.join(ROOT, "online-game.js"), "utf8");
   assert.match(src, /cyberware: rogue\(\) && OnlineRogue\.cyberwareFor \? OnlineRogue\.cyberwareFor\(id\) : null/);
 });
+
+/* ---------- Akane 的 4 处缺口 ---------- */
+test("缺口 1：角色档案的 cyberOverinstall / 专长 overinstall 传到单位上，canOverinstall 为真", () => {
+  const { R, run } = setup();
+  const h = run.party.find(x => x.kit === "helu");
+  assert.equal(R.cyberwarePacketFor(run, "helu").view.canOverinstall, false);
+  h.cyberOverinstall = true;
+  assert.equal(R.cyberwarePacketFor(run, "helu").view.canOverinstall, true);
+  h.cyberOverinstall = false; h.feats = (h.feats || []).concat("overinstall");   // 占位专长 id（专长内容未设计）
+  assert.equal(R.cyberwarePacketFor(run, "helu").view.canOverinstall, true);
+});
+
+test("缺口 2 / 3：每名角色带 previews（每件目录义体一份）和自己的 purse；白名单后没有坚毅", () => {
+  const { O, run, d } = setup();
+  run.party.forEach(h => { h.shp = 13; h.shpMax = 21; });
+  const pkt = V.projectPacket({ type: "result", cyberware: J(O.cyberwareFor("p2")) }, { recipientId: "p2", gmId: "host" });
+  const helu = pkt.cyberware.heroes.find(h => h.kit === "helu"), ruby = pkt.cyberware.heroes.find(h => h.kit === "ruby");
+  assert.equal(helu.purse, 50000); assert.equal(ruby.purse, 7);
+  assert.deepEqual(Object.keys(helu.previews), helu.shop.map(x => x.id));
+  const p = helu.previews.example_t5_melee;
+  for (const k of ["ok", "error", "cost", "rateBefore", "rateAfter", "cap", "overinstall", "conflictWith", "burden", "warning"]) assert.ok(k in p, k);
+  assert.equal(p.ok, true); assert.ok(p.cost > 0); assert.ok(p.rateAfter > p.rateBefore);
+  assert.doesNotMatch(JSON.stringify(pkt.cyberware), /shp|Shp|坚毅/);
+  // 房主误塞的字段也去掉
+  const raw = J(O.cyberwareFor("p2")); raw.heroes[0].previews.example_t5_melee.shp = 9;
+  assert.doesNotMatch(JSON.stringify(V.projectCyberware(raw)), /shp/);
+  d.purse.helu = 0;
+});
+
+test("缺口 4：run.query cyberware / cyberwarePreview（单机，钱是队伍的）", () => {
+  const { c, run } = setup();
+  c.OnlineRogue.enable(false);
+  c.S.state.kuizhi = 1234;
+  const q = (action, f) => J(c.Commands.dispatch(Object.assign({ type: "run.query", action }, f), { run }));
+  const pk = q("cyberware", { kit: "kolt" });
+  assert.equal(pk.kit, "kolt"); assert.equal(pk.purse, 1234);
+  assert.ok(pk.view && pk.shop && pk.previews.example_t5_melee);
+  const pv = q("cyberwarePreview", { kit: "kolt", id: "example_t5_melee" });
+  assert.equal(pv.id, "example_t5_melee"); assert.equal(typeof pv.warning, "string");
+  assert.equal(q("cyberwarePreview", { kit: "kolt", id: "nope" }).ok, false);
+});

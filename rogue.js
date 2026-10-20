@@ -511,7 +511,8 @@ const Rogue = (function () {
     u.xp = h.xp || 0;
     u.attrPoints = 0;               // 属性点在单局里走升级选择，不用后台的可分配点
     u.cyberPlan = h.cyber ? Object.assign({}, h.cyber) : null;
-    u.cyberware = (h.cyberware || []).map(x => Object.assign({}, typeof x === "string" ? { id: x } : x));   // 义体（cyberware.js）；老存档没有 = 空   // 义体改造（growth.js 按方案重建血量层）
+    u.cyberware = (h.cyberware || []).map(x => Object.assign({}, typeof x === "string" ? { id: x } : x));   // 义体（cyberware.js）；老存档没有 = 空
+    u.cyberOverinstall = !!h.cyberOverinstall;   // 过度安装（占位开关；也可以靠专长 overinstall，见 cyberware.js）
     u.shpBonus = Number(h.shpBonus) || 0;   // 单人模式主角：坚毅生命上限 +15
     u.feats = (h.feats || []).slice();      // 专长（feats.js）
     u.featFull = (h.featFull || []).slice();   // 兼修升成完整版的涉猎专长
@@ -1553,7 +1554,10 @@ const Rogue = (function () {
   function cyberwarePacketFor(run, kit) {
     if (typeof cyberwarePacket !== "function") return null;
     const { u } = cyberwareUnit(run, kit);
-    return Object.assign(cyberwarePacket(u), { kit, name: heroName(kit) });
+    const previews = {};
+    cyberwareCatalog().forEach(d => { previews[d.id] = cyberwareInstallPreview(u, d.id); });
+    // purse：单机是队伍的钱；联机由 online-rogue.js · cyberwareFor 换成这名角色自己的钱包
+    return Object.assign(cyberwarePacket(u), { kit, name: heroName(kit), purse: Math.max(0, Number(state.kuizhi) || 0), previews });
   }
   function cyberwarePreviewFor(run, kit, id) { return cyberwareInstallPreview(cyberwareUnit(run, kit).u, id); }
   function installCyberware(run, kit, id) {

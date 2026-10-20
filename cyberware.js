@@ -112,7 +112,8 @@ function cyberwareLayerRateFor(u, fleshMax) {
   return fleshMax > 0 ? Math.min(0.99, left / fleshMax) : 0;
 }
 function cyberwareCanOverinstall(u) {
-  return !!(u && (u.cyberOverinstall || (typeof featHas === "function" ? featHas(u, CYBERWARE_OVERINSTALL_FEAT) : (u.feats || []).indexOf(CYBERWARE_OVERINSTALL_FEAT) >= 0)));
+  // 专长还没设计：feats.js · featHas 只认 FEATS 里有的专长，所以占位 id 直接查 u.feats
+  return !!(u && (u.cyberOverinstall || (u.feats || []).indexOf(CYBERWARE_OVERINSTALL_FEAT) >= 0 || (typeof featHas === "function" && featHas(u, CYBERWARE_OVERINSTALL_FEAT))));
 }
 
 /* ---- 坚毅消耗（最少留 1）---- */

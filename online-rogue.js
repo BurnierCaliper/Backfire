@@ -394,7 +394,7 @@
   function cyberwareFor(playerId) {
     const r = run();
     if (!r || !active() || !G_Rogue || !Rogue.cyberwarePacketFor || inBattle() || !Rogue.canClinic(r)) return null;
-    const heroes = kitsOf(r, playerId).map(k => { try { return Rogue.cyberwarePacketFor(r, k); } catch (e) { return null; } }).filter(Boolean);
+    const heroes = kitsOf(r, playerId).map(k => { try { return Object.assign(Rogue.cyberwarePacketFor(r, k), { purse: Number(data(r).purse[k]) || 0 }); } catch (e) { return null; } }).filter(Boolean);
     return heroes.length ? { heroes } : null;
   }
   /* ---------- 给每个人看的数据（发送前还要经过 OnlineView.projectRogue） ---------- */
