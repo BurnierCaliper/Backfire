@@ -368,6 +368,13 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **击杀归属统一：敌人的死亡算最后一个伤害过它的玩家（含持续伤害、回合结束的场地、高能余波）**（app.js · `settleEnemyKill` / `checkHighBoom` / `applyTypedDotIn` / `explodeHigh` / `applyAbyssFall` / `dealTo` / `popStatus` / `envOwnerUnit` / `creditPlayerHit` / `statusOwnerId`，items.js；tests/kill-credit.test.js）
+  - 以前：击杀者先看 `_lastHitBy`，没有就回落到「当前行动者」。回合结束 / 开始的死亡（灼烧、腐蚀、流沙、深渊……）碰上别人正在行动，会误记给他；没有我方所有者的场地 / 深渊也会记给当时的行动者；高能余波打死的敌人不改归属，实际记给引爆的人。
+  - 现在：击杀数、击杀分、亡命之王「手下被打倒」、陨石开采机转移高能这些都只看 `_lastHitBy`，不再回落到当前行动者。`_lastHitBy` 在伤害发生时记下：直接攻击 = 出手的玩家；有所有者的场地 / 配置物 = 所有者 / 触发者；没有所有者的场地、流沙、深渊、天气 = 不改（仍是之前最后打过它的玩家）；玩家行动中顺带的伤害 = 行动的人。
+  - 持续状态记所有者（`unit._statusBy`，玩家行动中给敌人挂上状态时由 `popStatus` 记）：回合结束的灼烧 / 腐蚀 / 感电波及打死敌人，算挂状态的玩家，即使当时别人在行动。
+  - 高能自爆的余波打死的敌人，算该高能状态的所有者的击杀，不是引爆的人；高能没有所有者（自然高能）时余波不改归属。
+  - 只被敌人 / 友军 / 中立生物伤害过、从没被玩家伤害过的敌人，不算任何玩家的击杀（友军打死不给经验 / 掉落的规则不变）。
+
 - **决一死战（三处修正）：所有攻击都只打得到灯、只数敌对单位、播撒者被牵制时能抵近喷洒**（app.js · `dealTo` / `touDuelVictim` / `touDuelEnemies`；enemies.js · `enemyZoneInRange` / `en_spread`；tests/duel-ranged.test.js、block-sheet / env-score / reduce-score / audit-P4-heroes / mine3-enemies / growth-mode 的夹具跟着调整）
   - 只拦范围攻击：以前被决一死战牵制的敌人，只有范围攻击打不到灯以外的人；多目标的单体攻击、协助攻击、借机攻击仍能打到灯以外的人。现在不论哪种攻击，打灯以外的人一律打不出去（首领机制、环境伤害照旧不拦）。
   - 数同区敌人：以前把同区的中立生物（尘虫、管虫）和友军也算进「敌人」，占了名额（同区有尘虫时唯一的敌人不被牵制，也不取最低骰），它们自己也会被牵制。现在只数和灯敌对（`hostileTo`）的单位。
