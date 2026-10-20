@@ -372,6 +372,10 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
   - 狂怒碾压第一轮改为 0.75×atk 物理 + 2 击破；抓住后每回合自动再碾改为 1.5×atk + 1d8 + 3 击破。自动击杀仍返还 1 行动点与 1 附赠。
   - 川川「电击鞭」改名为「电能鞭」（技能名、说明、日志、测试同步）。
   - 冻土对冰属性的强制 25% 易伤现在明确独立于天气计算，雪天等天气修正不会覆盖或取消它。
+- **长线养成：独立存档、每天赫心融合体、永久死亡重置**（save.js、rogue.js、rogue-commands.js、rogue-ui.js、game.html）
+  - 长线养成使用独立存档槽（`antlerscale-rogue-growth`），不和普通单局共用，也不提供多存档位。
+  - 每天自动获得 1 个赫心融合体（按天数差补发）。
+  - 角色永久死亡后等级与武器等级清零并移出队伍；下次抽到该角色从 1 级重新培养。
 
 
 - **作者试玩反馈（10/19）：配置物打出的失衡、铁壁、多阵营的敌我、活沙**（app.js · `assistBreaker` / `queueAssistAttack` / `eligibleAssisters`、`opportunityStrike` / `triggerLeaveOpportunity`、`barrierGuards` / `barrierFoe` / `barrierFor` / `absorbBarrier` / `aoeShieldFor` / `flushAoePulse` / `dealTo`、`enemyAllyOf` / `autoEnemyBlockers`；mods.js · `bpLeaveOpportunity`；items.js · `useItemOn` / `useEffectItem`（投掷罐）；enemies.js · `livingSandAllies`、`en_king_hold`、`en_thug_opp` / `en_wolf_opp`；desert.js · `coralGasBurst`；bestiary.js；tests/multi-faction-bugs.test.js）

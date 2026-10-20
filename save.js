@@ -14,8 +14,8 @@
 const SaveStore = (function () {
   "use strict";
 
-  const KEYS = { run: "antlerscale-rogue-run", meta: "antlerscale-rogue-meta", onlineRun: "antlerscale-rogue-online-run" };
-  const CURRENT = { run: 2, meta: 1, onlineRun: 2 };
+  const KEYS = { run: "antlerscale-rogue-run", meta: "antlerscale-rogue-meta", onlineRun: "antlerscale-rogue-online-run", growth: "antlerscale-rogue-growth" };
+  const CURRENT = { run: 2, meta: 1, onlineRun: 2, growth: 1 };
   // 联机单局（房主一端）存在另一格，不覆盖单机进行中的那一局
   let runKind = "run";
   // MIGRATE.run[n] = (第 n 版的 data) => 第 n+1 版的 data
@@ -69,6 +69,7 @@ const SaveStore = (function () {
   /** 升级完的存档内容像不像样（JSON 合法但结构坏了的，比如 data 不是对象、队伍不是数组，也算坏档） */
   const SHAPE = {
     run: (d) => !!d && typeof d === "object" && !Array.isArray(d) && (d.party == null || Array.isArray(d.party)),
+    growth: (d) => !!d && typeof d === "object" && !Array.isArray(d) && (d.party == null || Array.isArray(d.party)),
     meta: (d) => !!d && typeof d === "object" && !Array.isArray(d) && (d.stats == null || typeof d.stats === "object")
   };
 
@@ -196,6 +197,8 @@ const SaveStore = (function () {
     read, write, clear, has, status,
     newRun, newMeta, killHero, weaponsOf,
     saveRun: (d) => write(runKind, d), loadRun: () => read(runKind), clearRun: () => clear(runKind),
+    // 长线养成独立存档：不和普通单局共用槽位
+    saveGrowth: (d) => write("growth", d), loadGrowth: () => read("growth"), clearGrowth: () => clear("growth"),
     useOnlineRunSlot(on) { runKind = on ? "onlineRun" : "run"; },
     saveMeta: (d) => write("meta", d), loadMeta: () => read("meta") || newMeta(),
     clone
