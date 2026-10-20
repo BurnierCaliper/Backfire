@@ -551,3 +551,33 @@ test("跑团诊所 · 义体：物资弹窗里的入口打开浮层，提交 cyb
   assert.equal(await page.locator("#cw-overlay").isHidden(), true);
   assert.deepEqual(o.errors, []);
 });
+
+test("联机玩家（body.online-player）：工坊 / 背包 / 克制表 / 诊所·义体四个 .ovl 浮层都看得见（online.css 不再把它们 display:none）", async t => {
+  const o = await open(t); if (!o) return; const { page } = o;
+  for (const file of ["workshop.css", "backpack.css", "matchup.css", "cyberware.css"]) await page.addStyleTag({ path: path.resolve(__dirname, "..", file) });
+  for (const file of ["workshop-ui.js", "backpack-ui.js", "matchup-ui.js", "cyberware-ui.js"]) await page.addScriptTag({ path: path.resolve(__dirname, "..", file) });
+  // 克制表的数据：照单机算一份（headless）再交给浏览器
+  const vm = require("node:vm"), fs = require("node:fs"), c = require("./headless").load();
+  vm.runInContext(fs.readFileSync(path.resolve(__dirname, "..", "matchup-ui.js"), "utf8"), c);
+  const chart = JSON.parse(JSON.stringify(c.MatchupUI.localChart()));
+  const cw = trpgCyberwarePacket(false);
+  await player(page, { screen: "exploration", mode: "trpg" });
+  assert.equal(await page.evaluate(() => document.body.classList.contains("online-player")), true);
+  const opened = {
+    ws: () => WorkshopUI.open(() => ({ place: "bench", heroes: [], mats: [], grouped: () => ({ craftable: [], missing: [] }), preview: () => ({}) }), () => {}),
+    bp: () => BackpackUI.open(() => ({ views: [], cyber: [], uses: () => [] })),
+    mu: chart => MatchupUI.open(() => chart),
+    cw: cw => CyberwareUI.open(() => CyberwareUI.viewModel({ cyberware: cw }), () => {})
+  };
+  for (const [id, arg] of [["ws", null], ["bp", null], ["mu", chart], ["cw", cw]]) {
+    await page.evaluate(([fn, arg]) => (new Function("arg", `return (${fn})(arg)`))(arg), [opened[id].toString(), arg]);
+    const sel = `#${id}-overlay`;
+    const st = await page.evaluate(sel => { const b = document.querySelector(sel); return b ? { display: getComputedStyle(b).display, parentIsBody: b.parentNode === document.body, hidden: b.hidden } : null; }, sel);
+    assert.ok(st, `${sel} 建出来了`);
+    assert.equal(st.hidden, false, `${sel} 打开了`);
+    assert.notEqual(st.display, "none", `${sel} 没被 online-player 规则藏起来`);
+    assert.equal(await page.isVisible(`${sel} .ovl-card`), true, `${sel} 卡片看得见`);
+    await page.evaluate(sel => { document.querySelector(sel).hidden = true; }, sel);
+  }
+  assert.deepEqual(o.errors, []);
+});
