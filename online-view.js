@@ -622,6 +622,8 @@
     if (own(packet, "levelUps")) out.levelUps = arr(get(packet, "levelUps")).slice(0, 10).filter(obj).map(ev => {
       const e = scrubHidden(clone(ev)); e.stats = arr(e.stats).filter(r => obj(r) && r.key !== "shp"); return e;
     });
+    // 克制表（matchup.js）：房主算好的公开规则数据（天气、克制表、说明文字），只去掉隐藏数值
+    if (own(packet, "matchup")) { const m = get(packet, "matchup"); out.matchup = obj(m) ? scrubHidden(clone(m)) : null; }
     if (own(packet, "rogue")) { const r = get(packet, "rogue"); out.rogue = obj(r) ? scrubHidden(clone(r)) : null; }
     // 任务日志：只留玩家该看的字段（主持人备注、敌人配置、隐藏站的内容在房主那边就去掉了，这里再按白名单过一遍）
     if (own(packet, "quests")) out.quests = projectQuests(get(packet, "quests"));
