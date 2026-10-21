@@ -198,7 +198,7 @@ body.ol-has-side .ol-toast { right: 344px; }
 .ol-check li { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
 .ol-check li > span { display: grid; }
 .ol-check .ol-ok { color: var(--sk-mint, #39e6b4); }
-.ol-check .ol-bad { color: #e06a4f; }
+.ol-check .ol-bad, .ol-trpg-smith .ol-bad, .ol-trpg-workshop .ol-bad { color: #e06a4f; }
 .ol-attr { margin: 8px 0; padding: 8px; border: 1px dashed var(--sk-brass, #c99a46); }
 .ol-attr p { margin: 0 0 6px; }
 .ol-attr-btns { display: flex; flex-wrap: wrap; gap: 6px; }

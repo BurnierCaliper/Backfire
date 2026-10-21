@@ -196,7 +196,7 @@ test("原型的浏览器脚本能通过语法检查，规则文件加载顺序�
   const fs = require("fs"), path = require("path"), vm = require("vm");
   const dir = path.join(__dirname, "..", "prototypes", "hd2d");
   const strip = (src) => src.replace(/^\s*import\s[^;]*?from\s+["'][^"']+["'];?\s*$/gm, "").replace(/^export\s+(default\s+)?/gm, "").replace(/^export\s*\{[^}]*\};?\s*$/gm, "");
-  ["hd2d-scene.js", "hd2d-world.js", "hd2d-weather.js"].forEach(f => {
+  ["hd2d-scene.js", "hd2d-world.js", "hd2d-weather.js", "hd2d-backdrop.js"].forEach(f => {
     assert.doesNotThrow(() => new vm.Script(strip(fs.readFileSync(path.join(dir, f), "utf8")), { filename: f }), f);
   });
   const html = fs.readFileSync(path.join(dir, "index.html"), "utf8");
@@ -206,8 +206,59 @@ test("原型的浏览器脚本能通过语法检查，规则文件加载顺序�
   // importmap 指向的本地 three.js 文件都在
   const base = path.join(__dirname, "..", "vendor", "three");
   ["three.module.min.js", "addons/controls/OrbitControls.js", "addons/postprocessing/BokehPass.js", "addons/postprocessing/UnrealBloomPass.js",
-    "addons/postprocessing/OutputPass.js", "addons/postprocessing/ShaderPass.js", "addons/postprocessing/RenderPass.js", "addons/postprocessing/EffectComposer.js"]
+    "addons/postprocessing/OutputPass.js", "addons/postprocessing/ShaderPass.js", "addons/postprocessing/RenderPass.js", "addons/postprocessing/EffectComposer.js", "addons/renderers/CSS2DRenderer.js"]
     .forEach(f => assert.ok(fs.existsSync(path.join(base, f)), f));
   const tags = [...html.matchAll(/<script src="\.\.\/\.\.\/([^"]+)"><\/script>/g)].map(m => m[1]);
   assert.equal(tags.join(), H.RULE_FILES.filter(f => fs.existsSync(path.join(__dirname, "..", f))).join());
+});
+
+/* ---------- 第一阶段打磨（issue #191）---------- */
+test("铭牌前后错开：同一拨单位不排成一条线，错开后仍不重叠、不出地台（上面的站位测试负责检查）", () => {
+  const st = setupCase({ opt: { zoneMode: 3 } }, 0);
+  st.units.forEach(u => { u.zone = 1; });
+  const out = L.build(st, {});
+  const mine = out.units.filter(u => u.side === "player");
+  assert.ok(mine.length >= 2);
+  assert.ok(L.CONFIG.unit.stagger > 0);
+  assert.ok(new Set(mine.map(u => u.z.toFixed(3))).size > 1, "铭牌没有前后错开");
+});
+
+test("竖起来的铭牌够大：站位宽度留够桌面宽度下 13px 的名字，高度装得进取景范围", () => {
+  const U = L.CONFIG.unit;
+  assert.ok(U.w >= 1.8, "铭牌横向要留够空");
+  assert.ok(U.plateH >= 1.5, "铭牌是竖着的，取景范围要算上它的高度");
+  const out = L.build(setupCase({ opt: { zoneMode: 3 } }, 4), {});
+  out.units.forEach(u => assert.ok(out.bounds.maxY >= u.groundY + u.plateH - 1e-9, "取景范围包得住铭牌"));
+});
+
+test("原型页面：垫片放在规则文件之前，页面自己的元素 id 不会被替身拦走（修 app.js init() 的 null 报错）", () => {
+  const fs = require("fs"), path = require("path");
+  const html = fs.readFileSync(path.join(__dirname, "..", "prototypes", "hd2d", "index.html"), "utf8");
+  const shim = html.indexOf("Document.prototype.getElementById"), rules = html.indexOf('<script src="../../run.js">');
+  assert.ok(shim > 0 && shim < rules, "垫片要在规则文件之前");
+  assert.ok(html.includes("window.GAME_MODE = true"), "和 game.html 一样打开 GAME_MODE（也让坚毅生命数值对玩家不可见）");
+  const own = new RegExp(/var OWN = \/(.*)\/;/.exec(html)[1]);
+  const ids = [...html.matchAll(/\$\("([^"]+)"\)/g)].map(m => m[1]).concat([...html.matchAll(/\sid="([^"]+)"/g)].map(m => m[1]));
+  ids.filter(id => id !== "spray").forEach(id => assert.ok(own.test(id), `页面元素 #${id} 会被垫片当成计算器元素`));
+  ["presetSelect", "zoneMode", "weather", "btnUndo"].forEach(id => assert.ok(!own.test(id), id + " 应该交给替身"));
+});
+
+test("危墙：矮而薄（尺寸在配置表 WALL 里），不会盖住铭牌", () => {
+  const fs = require("fs"), path = require("path");
+  const src = fs.readFileSync(path.join(__dirname, "..", "prototypes", "hd2d", "hd2d-world.js"), "utf8");
+  const w = /const WALL = \{([^}]*)\}/.exec(src);
+  assert.ok(w, "危墙尺寸在配置表 WALL 里");
+  const v = k => Number(new RegExp(k + ":\\s*([\\d.]+)").exec(w[1])[1]);
+  assert.ok(v("baseH") + 3 * v("varyH") <= L.CONFIG.unit.plateH * 0.9, "墙最高不超过铭牌高度");
+  assert.ok(v("maxThick") <= 0.6, "墙要薄");
+});
+
+test("手机顶栏：有精简文字和切换小按钮；铭牌 HTML 不碰 shp", () => {
+  const fs = require("fs"), path = require("path");
+  const dir = path.join(__dirname, "..", "prototypes", "hd2d");
+  const html = fs.readFileSync(path.join(dir, "index.html"), "utf8"), css = fs.readFileSync(path.join(dir, "hd2d.css"), "utf8");
+  assert.ok(html.includes('id="tb-compact"') && html.includes('id="demo-btn"'));
+  assert.ok(/@media \(max-width: 720px\)[\s\S]*#demo-select[^{]*\{[^}]*display: none/.test(css), "手机上下拉框收起来");
+  const scene = fs.readFileSync(path.join(dir, "hd2d-scene.js"), "utf8");
+  assert.ok(!/shp/i.test(scene.slice(scene.indexOf("function plateHtml"), scene.indexOf("function makePlate"))), "铭牌 HTML 不碰 shp");
 });

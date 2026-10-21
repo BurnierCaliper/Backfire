@@ -447,13 +447,14 @@
       const chooser = spec.chooser && operatorMap.has(spec.chooser) ? spec.chooser : null;
       ask = { id: "ask-" + (++sequence), kind: spec.kind, jobId: spec.jobId == null ? null : spec.jobId,
         targetId: spec.targetId || null, candidates, operators: owners, declined: [], chooser, hands: [],
-        deadline: now() + (Number.isFinite(spec.remainingMs) ? Math.max(0, Math.min(20000, spec.remainingMs)) : 20000) };
+        // untimed：同一台设备的热座没有倒计时（和单机一样等人回答），deadline 为 null 表示不限时
+        deadline: spec.untimed ? null : now() + (Number.isFinite(spec.remainingMs) ? Math.max(0, Math.min(20000, spec.remainingMs)) : 20000) };
       closedAsk = null; const result = askSummary();
       if (!candidates.length) closeAsk("unavailable", null, {}, null);
       emit("askOpened"); return clone(result);
     }
     function tick() {
-      if (ask && now() >= ask.deadline) {
+      if (ask && ask.deadline != null && now() >= ask.deadline) {
         // 到时间打出失衡的人还没选：有人举手就由最先举手的那位出手
         const first = (ask.hands || [])[0];
         if (first) { closeAsk("accepted", first.unitId, first.extra, first.operatorId); return emit("askAccepted"); }
@@ -562,7 +563,7 @@
       assertAction, finishUnit, markSpent, takeOver, transfer, transferState, openAsk, answer, tick, askFor, chat: chatMessage, endBattle, reset, checkpoint, restore,
       openCheck, rollCheck: rollCheckFor, closeCheck, requestAttr, decideAttr, skillRoll, showTitle,
       ownerOf: unitId => (rowFor(unitId) || {}).operatorId || null,
-      extendAsk(ms) { if (ask && Number.isFinite(ms) && ms > 0) { ask.deadline += ms; emit("askResumed"); } },
+      extendAsk(ms) { if (ask && ask.deadline != null && Number.isFinite(ms) && ms > 0) { ask.deadline += ms; emit("askResumed"); } },
       onChange(fn) { changes.add(fn); return () => changes.delete(fn); },
       onAskClosed(fn) { askClosures.add(fn); return () => askClosures.delete(fn); } };
   }

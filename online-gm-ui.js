@@ -12,6 +12,9 @@
   const weatherNames = { none: "常态", heat: "酷暑", snow: "雪天", acid: "酸雨", thunder: "雷鸣", glow: "微光", sand: "沙暴", phase: "相位" };
   const gapNames = { open: "畅通", bridge: "不稳桥梁", wall: "危墙", door: "机关门", void: "空隙" };
   const numericUnit = { hp: "最内层生命", shp: "坚毅生命（仅主持人）", shpMax: "坚毅生命上限", def: "架势", defMax: "架势上限", ap: "行动点", apMax: "行动点上限", bonus: "附赠行动", bonusMax: "附赠行动上限", atk: "个人 ATK", level: "等级", zone: "所在区", highEnergy: "高能层数" };
+  const instantNames = { melt: "熔融", sting: "刺骨", overload: "过载", shift: "错位", spread: "扩散", refract: "折射" };
+  const layerNames = () => typeof LAYER !== "undefined" ? LAYER : { flesh: "肉体", armor: "装甲", shield: "护盾", sand: "沙尘" };
+  const atkFxIds = () => typeof ATKFX !== "undefined" ? Object.keys(ATKFX).filter(k => ["combust", "icebreak", "bolt", "etch", "backflow", "inertia", "diffract"].includes(k)) : [];   // 同单机编辑器里的七种属性专属攻击效果
   const flagUnit = { stunned: "失衡", dying: "濒死", dead: "倒下", flying: "飞行" };
   const NO_TARGET = new Set("en_boom_fuse en_patrol_chase en_patrol_near en_gl en_gl_fire en_ant_shell en_ant_shell_fire en_riot_bottle en_riot_bottle_fireen_gas_ignite en_hunter_heat en_alarm_zap en_bigsand_summon en_bigsand_heal en_live_absorb en_giant_sand_pulse en_boat_arc en_king_hold en_king_exec en_thug_mutiny en_chi_cover ufo_stomp ufo_sweep ufo_prime ufo_boom en_agg2_overheat en_agg3_debris en_agg1_rush en_agg1_rush_prep ufo_summon".split(" "));
   function mount(bridge) {
@@ -72,7 +75,8 @@
     }
     function unitMarkup() {
       const u = selectedUnit(); if (!u) return "<p>场上没有单位。</p>"; unitId = u.id;
-      const names = Object.assign({}, numericUnit, flagUnit, { layers: "各层生命与上限", statuses: "添加 / 移除状态", latestElement: "最近元素", self: "自身状态" },
+      // 字段和单机的单位编辑器（app.js · renderEditor）一样：名称、血量层（含类型 / 加 / 删）、状态、即时效果、挂攻击效果、自我效果、最近元素
+      const names = Object.assign({ name: "名称" }, numericUnit, flagUnit, { layers: "各层生命与上限", statuses: "添加 / 移除状态", instant: "即时效果", atkFx: "挂下一击的攻击效果", latestElement: "最近元素", self: "自身状态" },
         typeof ivEligible === "function" && ivEligible(u) ? { iv: "个体值（血量 / ATK 水平）" } : {},
         typeof enemyRaceInfo === "function" && enemyRaceInfo(u) ? { race: "种族" } : {},
         isFishKit(u.kit) ? { enriched: "富集与否" } : {});
@@ -80,7 +84,10 @@
       if (unitField === "iv" && !names.iv) unitField = "hp";
       if (unitField === "enriched" && !names.enriched) unitField = "hp";
       let editor;
-      if (unitField === "layers") editor = (u.layers || []).map((l, i) => `<fieldset><legend>第 ${i + 1} 层 · ${esc(typeof LAYER !== "undefined" ? LAYER[l.type] || l.type : l.type)}</legend><div class="ogm-grid">${number("ogm-layer-hp-" + i, "当前生命", l.current)}${number("ogm-layer-max-" + i, "生命上限", l.max)}</div></fieldset>`).join("");
+      if (unitField === "layers") editor = (u.layers || []).map((l, i) => `<fieldset><legend>第 ${i + 1} 层 · ${esc(typeof LAYER !== "undefined" ? LAYER[l.type] || l.type : l.type)}</legend><div class="ogm-grid">${select("ogm-layer-type-" + i, "类型", options(layerNames(), l.type))}${number("ogm-layer-hp-" + i, "当前生命", l.current)}${number("ogm-layer-max-" + i, "生命上限", l.max)}</div>${(u.layers || []).length > 1 ? button("删掉这一层", "remove-layer", `data-index="${i}"`) : ""}</fieldset>`).join("") + button("加一层（10 / 10 肉体）", "add-layer");
+      else if (unitField === "name") editor = `<label>名称<input id="ogm-unit-name" type="text" maxlength="40" value="${esc(u.name)}" required></label>`;
+      else if (unitField === "instant") editor = `<div class="ogm-grid">${Object.entries(instantNames).map(([k, label]) => check("ogm-instant-" + k, label, !!(u.instant || {})[k])).join("")}</div>${button("结算中和", "neutralize")}`;
+      else if (unitField === "atkFx") editor = `<div class="ogm-grid">${atkFxIds().map(k => check("ogm-atkfx-" + k, esc(ATKFX[k].name), (u.resources?.nextAtkFx || []).includes(k))).join("")}</div><p class="ogm-muted">挂在下一击上，可与穿刺 / 猛击同挂。</p>`;
       else if (unitField === "statuses") editor = `<div class="ogm-grid">${select("ogm-status", "状态", options(statusNames, "burn"))}${number("ogm-status-value", "层数（0 移除；开关状态用 0 / 1）", 1, 0, "", 1)}</div>`;
       else if (unitField === "latestElement") editor = select("ogm-unit-value", "最近元素", options({ "": "无", physical: "物理", fire: "火", acid: "酸", electric: "电", ice: "冰", energy: "能量", harmonic: "谐波" }, u.statuses?.latestElement || ""));
       else if (unitField === "iv") editor = `<div class="ogm-grid">${number("ogm-iv-hp", "血量水平 %（−10～10）", (u.iv || {}).hp || 0, -10, 10, 1)}${number("ogm-iv-atk", "ATK 水平 %（−10～10）", (u.iv || {}).atk || 0, -10, 10, 1)}</div><p class="ogm-muted">按生成时的原始数值重算：血量上限 ×(1 + 血量%)（已受的伤按比例保留），ATK ×(1 + ATK%)。</p>`;
@@ -92,7 +99,8 @@
       else if (unitField === "self") editor = select("ogm-unit-value", "自身状态", options({ none: "无", burn: "焚身", frost: "霜结", splash: "溅射", conductor: "导体", anchor: "锚定", store: "储能", doppler: "多普勒" }, u.self));
       else if (Object.prototype.hasOwnProperty.call(flagUnit, unitField)) editor = check("ogm-unit-flag", esc(flagUnit[unitField]), !!u[unitField]);
       else editor = number("ogm-unit-value", esc(numericUnit[unitField]), unitField === "hp" ? (u.layers || []).at(-1)?.current || 0 : u[unitField] || 0, ["level", "zone"].includes(unitField) ? 1 : 0, unitField === "zone" ? zones().length : "", ["level", "zone", "ap", "apMax", "bonus", "bonusMax"].includes(unitField) ? 1 : "any");
-      return `<h3>修改单位</h3><div class="ogm-grid">${select("ogm-unit", "单位", unitOptions(units(), unitId))}${select("ogm-unit-field", "修改项目", options(names, unitField))}</div>${editor}${button("应用单位修改", "edit-unit", 'class="ogm-primary"')}<p class="ogm-muted">超过上限的当前数值会自动夹到上限。坚毅生命数值仅主持人可见。</p>`;
+      const unitTools = !u.isPlayer ? button("复制单位", "copy-unit") : "";
+      return `<h3>修改单位</h3><div class="ogm-grid">${select("ogm-unit", "单位", unitOptions(units(), unitId))}${select("ogm-unit-field", "修改项目", options(names, unitField))}</div>${editor}${button("应用单位修改", "edit-unit", 'class="ogm-primary"')}${button("回满架势", "full-def")}${unitTools}<p class="ogm-muted">超过上限的当前数值会自动夹到上限。坚毅生命数值仅主持人可见。</p>`;
     }
     function propMarkup() {
       const p = selectedProp(); if (p) propId = p.id;
@@ -179,7 +187,10 @@
         case "enemy-end": cmd = { type: "gm.enemyEndTurn" }; break;
         case "edit-unit": {
           if (!u) return; let patch;
-          if (unitField === "layers") patch = { layers: u.layers.map((l, i) => ({ current: num("ogm-layer-hp-" + i), max: num("ogm-layer-max-" + i) })) };
+          if (unitField === "layers") patch = { layers: u.layers.map((l, i) => ({ type: value("ogm-layer-type-" + i), current: num("ogm-layer-hp-" + i), max: num("ogm-layer-max-" + i) })) };
+          else if (unitField === "name") patch = { name: value("ogm-unit-name") };
+          else if (unitField === "instant") patch = { instant: Object.fromEntries(Object.keys(instantNames).map(k => [k, checked("ogm-instant-" + k)])) };
+          else if (unitField === "atkFx") patch = { atkFx: Object.fromEntries(atkFxIds().map(k => [k, checked("ogm-atkfx-" + k)])) };
           else if (unitField === "latestElement") patch = { statuses: { latestElement: value("ogm-unit-value") || null } };
           else if (unitField === "iv") patch = { iv: { hp: num("ogm-iv-hp"), atk: num("ogm-iv-atk") } };
           else if (unitField === "race") patch = { race: value("ogm-unit-value") };
@@ -188,6 +199,11 @@
           else patch = { [unitField]: Object.prototype.hasOwnProperty.call(flagUnit, unitField) ? checked("ogm-unit-flag") : unitField === "self" ? value("ogm-unit-value") : num("ogm-unit-value") };
           cmd = { type: "gm.editUnit", actor: u.id, patch }; break;
         }
+        case "add-layer": if (!u) return; cmd = { type: "gm.editUnit", actor: u.id, patch: { addLayer: true } }; break;
+        case "remove-layer": if (!u) return; cmd = { type: "gm.editUnit", actor: u.id, patch: { removeLayer: Number(b.dataset.index) } }; break;
+        case "neutralize": if (!u) return; cmd = { type: "gm.editUnit", actor: u.id, patch: { neutralize: true } }; break;
+        case "full-def": if (!u) return; cmd = { type: "gm.editUnit", actor: u.id, patch: { def: Number(u.defMax) || 0 } }; break;
+        case "copy-unit": if (!u) return; cmd = { type: "gm.copyUnit", actor: u.id }; break;
         case "add-prop": cmd = { type: "gm.addProp", kind: value("ogm-prop-kind"), zone: num("ogm-prop-add-zone"), level: num("ogm-prop-level"), faction: value("ogm-prop-add-faction") }; break;
         case "edit-prop": if (!p) return; cmd = { type: "gm.editProp", id: p.id, patch: { zone: num("ogm-prop-zone"), hp: num("ogm-prop-hp"), maxHp: num("ogm-prop-max"), level: num("ogm-prop-edit-level"), movable: checked("ogm-prop-movable"), faction: value("ogm-prop-faction"), link: value("ogm-prop-link") } }; break;
         case "remove-prop": case "destroy-prop": if (!p) return; cmd = { type: "gm.removeProp", id: p.id, mode: action === "destroy-prop" ? "destroy" : "remove" }; break;

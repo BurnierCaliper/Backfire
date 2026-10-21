@@ -625,6 +625,8 @@
     if (own(packet, "shop")) out.shop = projectShop(get(packet, "shop"));
     if (own(packet, "shopSell")) out.shopSell = projectShopSell(get(packet, "shopSell"));
     if (own(packet, "clinic")) out.clinic = projectClinic(get(packet, "clinic"));
+    if (own(packet, "smith")) out.smith = projectSmith(get(packet, "smith"));
+    if (own(packet, "workshop")) out.workshop = projectWorkshop(get(packet, "workshop"));
     if (own(packet, "cyberware")) out.cyberware = projectCyberware(get(packet, "cyberware"));
     // 长休结算：不带坚毅（只带那一句 mood）；游戏时钟
     if (own(packet, "rest")) out.rest = projectRest(get(packet, "rest"));
@@ -700,6 +702,30 @@
       last: obj(s.last) ? { seq: num(s.last.seq), kind: s.last.kind === "buyback" ? "buyback" : "sell", by: str(s.last.by, 40), ok: !!s.last.ok, total: num(s.last.total),
         payout: arr(s.last.payout).slice(0, 12).filter(obj).map(p => ({ to: str(p.to, 40), amount: typeof p.amount === "number" && isFinite(p.amount) ? Math.floor(p.amount) : 0 })), msg: str(s.last.msg, 200) } : null
     };
+  }
+  /** 跑团工匠（trpg.js · trpgSmithPacket）：{ heroes: [{ kit, name, purse, weapons: [{ kit, name, lv, next, max, canSelf, enough, fee, mats: [{ name, need, have }] }] }] }，只有公开数字 */
+  function projectSmith(s) {
+    if (!obj(s)) return null;
+    const str = (v, n) => typeof v === "string" ? v.slice(0, n) : "";
+    const num = v => (typeof v === "number" && isFinite(v) ? Math.max(0, Math.floor(v)) : 0);
+    return { heroes: arr(s.heroes).slice(0, 8).filter(obj).map(h => ({
+      kit: str(h.kit, 40), name: str(h.name, 40), purse: num(h.purse),
+      weapons: arr(h.weapons).slice(0, 8).filter(obj).map(w => ({ kit: str(w.kit, 40), name: str(w.name, 40), lv: num(w.lv), next: num(w.next), max: !!w.max, canSelf: !!w.canSelf,
+        enough: !!w.enough, fee: num(w.fee), mats: arr(w.mats).slice(0, 8).filter(obj).map(m => ({ name: str(m.name, 40), need: num(m.need), have: num(m.have) })) })).filter(w => w.kit)
+    })).filter(h => h.kit) };
+  }
+  /** 跑团工坊（trpg.js · trpgWorkshopPacket）：{ heroes: [{ kit, name, points, recipes: [...], salvage: [{ id, name, qty, yields }] }] } */
+  function projectWorkshop(w) {
+    if (!obj(w)) return null;
+    const str = (v, n) => typeof v === "string" ? v.slice(0, n) : "";
+    const num = v => (typeof v === "number" && isFinite(v) ? Math.max(0, v) : 0);
+    return { heroes: arr(w.heroes).slice(0, 8).filter(obj).map(h => ({
+      kit: str(h.kit, 40), name: str(h.name, 40), points: Math.floor(num(h.points)),
+      recipes: arr(h.recipes).slice(0, 80).filter(obj).map(r => ({ id: str(r.id, 60), name: str(r.name, 60), prof: str(r.prof, 20), diffName: str(r.diffName, 20), hours: Math.floor(num(r.hours)),
+        known: !!r.known, level: Math.floor(num(r.level)), chance: num(r.chance),
+        mats: arr(r.mats).slice(0, 12).filter(obj).map(m => ({ id: str(m.id, 60), name: str(m.name, 40), need: Math.floor(num(m.need)), have: Math.floor(num(m.have)) })) })).filter(r => r.id),
+      salvage: arr(h.salvage).slice(0, 100).filter(obj).map(x => ({ id: str(x.id, 60), name: str(x.name, 60), qty: Math.floor(num(x.qty)), yields: str(x.yields, 120) })).filter(x => x.id)
+    })).filter(h => h.kit) };
   }
   /** 跑团诊所：自己的角色的改造信息（肉体上限、可改上限、改造率、单价、现在的方案）和最近一条申请的状态 */
   function projectClinic(c) {
@@ -784,7 +810,7 @@
     });
     return out;
   }
-  const api = { SCHEMA, pickKeys, projectHud, projectPacket, projectQuests, projectPurse, projectShop, projectShopSell, projectClinic, projectCyberware, projectRest, projectCamp, projectSheets, projectBagDetail, projectUnit, projectState, projectTape, projectFx, projectMessages, projectLogs, projectView, projectActionMenu, safeText: text, safeError };
+  const api = { SCHEMA, pickKeys, projectHud, projectPacket, projectQuests, projectPurse, projectShop, projectShopSell, projectClinic, projectSmith, projectWorkshop, projectCyberware, projectRest, projectCamp, projectSheets, projectBagDetail, projectUnit, projectState, projectTape, projectFx, projectMessages, projectLogs, projectView, projectActionMenu, safeText: text, safeError };
   root.OnlineView = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof globalThis !== "undefined" ? globalThis : window);

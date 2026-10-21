@@ -21,6 +21,9 @@ const WORLD = {
   }
 };
 
+/** 危墙：一排水泥块。高度 / 厚度都按桌面宽度下好看的比例定，手机上同样的比例 */
+const WALL = { blocks: 6, baseH: 0.75, varyH: 0.12, thickRatio: 0.2, maxThick: 0.55 };
+
 /* ---------- 随机数 / 贴图 ---------- */
 export function rng(seed) {
   let a = (seed * 2654435761) >>> 0;
@@ -399,12 +402,13 @@ export function buildGap(gap, ctx) {
   } else if (gap.type === "wall") {
     const bm = mat("wallblk", 0x6f6a62, { map: tex("concrete") });
     const hz = mat("hazard", 0xffffff, { map: tex("hazard") });
-    const n = 6, bw = (W * 0.92) / n;
+    // 矮而薄的一道墙：高不过铭牌的一半，厚度只有缝宽的 1/5，竖屏下也盖不住铭牌
+    const n = WALL.blocks, bw = (W * 0.92) / n, thick = Math.min(L * WALL.thickRatio, WALL.maxThick);
     for (let i = 0; i < n; i++) {
-      const h = (1.5 + (((i * 5) % 4) * 0.25)) * (0.55 + ratio * 0.45);    // 越破越矮
-      const b = mesh(new THREE.BoxGeometry(Math.min(L * 0.7, 1.7), h, bw * 0.95), bm, 0, y + h / 2, -W * 0.46 + bw * (i + 0.5));
+      const h = (WALL.baseH + (((i * 5) % 4) * WALL.varyH)) * (0.55 + ratio * 0.45);    // 越破越矮
+      const b = mesh(new THREE.BoxGeometry(thick, h, bw * 0.95), bm, 0, y + h / 2, -W * 0.46 + bw * (i + 0.5));
       b.rotation.set(0, (((i * 3) % 5) - 2) * 0.02, (((i * 7) % 5) - 2) * 0.015); g.add(b);
-      g.add(mesh(new THREE.BoxGeometry(Math.min(L * 0.7, 1.7) + 0.02, 0.18, bw * 0.95), hz, 0, y + h - 0.12, -W * 0.46 + bw * (i + 0.5), false, true));
+      g.add(mesh(new THREE.BoxGeometry(thick + 0.02, 0.1, bw * 0.95), hz, 0, y + h - 0.07, -W * 0.46 + bw * (i + 0.5), false, true));
     }
   } else if (gap.type === "door") {
     const dm = mat("door", 0x56606a, { map: tex("metal"), metalness: 0.4, roughness: 0.6 });

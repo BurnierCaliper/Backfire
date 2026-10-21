@@ -656,8 +656,8 @@ function explodeHigh(unit, total, opt) {
       creditPlayerHit(unit, (envOwnerUnit(opt.envBy) || {}).id);   // 击杀算环境的所有者；没有所有者就算之前最后打过它的玩家
       scoreEnvHit(unit, { total: lifeBefore, breakDealt: 0 }, envWho, 0, "爆炸");
       const over = Math.floor(unit.overkill * SCORE_RULES.overkill);
-      if (over > 0) envCommit(() => addScore("env", over * SCORE_RULES.env, envWho));
-    } else if (acc && acc.actorIsPlayer) addScore("overkill", Math.floor(unit.overkill * SCORE_RULES.overkill), unitById(acc.actorId));
+      if (over > 0) envCommit(() => addScore("env", over * SCORE_RULES.env * scoreTargetMul(unit), envWho));
+    } else if (acc && acc.actorIsPlayer) addScore("overkill", Math.floor(unit.overkill * SCORE_RULES.overkill) * scoreTargetMul(unit), unitById(acc.actorId));
   }
   const boomOwner = envBoom ? (envOwnerUnit(opt.envBy) || {}).id : statusOwnerId(unit, "high");   // 高能状态的所有者（要在清掉高能之前取）
   (unit.layers || []).forEach(l => { l.current = 0; });
@@ -2573,8 +2573,13 @@ const SCORE_RULES = {
   ap: 10,          // 我方每用 1 点行动点
   apGiftShare: 0.5,   // 队友给的行动点（意式浓缩……）：用它的那次行动得的分，这个比例记在给行动点的人身上
   bonusAction: 5,  // 我方每用 1 次附赠行动
-  env: 1.2         // 环境分数：利用配置物或场地（环境）造成的伤害 / 击破 / 溢出，分数 ×1.2
+  env: 1.2,        // 环境分数：利用配置物或场地（环境）造成的伤害 / 击破 / 溢出，分数 ×1.2
+  neutralMul: 0.25 // 打中立生物（尘虫、管虫）：伤害 / 击破 / 失衡 / 溢出分（含环境分）只拿原来的这个比例（#187）；基准分不算它们
 };
+/** 打在这个单位身上的伤害 / 击破 / 失衡 / 溢出分的倍率：中立生物按 SCORE_RULES.neutralMul，其他 1 */
+function scoreTargetMul(u) {
+  return u && !u.isPlayer && typeof isNeutralCreature === "function" && isNeutralCreature(u) ? SCORE_RULES.neutralMul : 1;
+}
 // 招式疲劳（像大乱斗的同招衰减）：同一个角色连续几个回合用同一个技能，这次行动的总得分打折。
 // 下标 = 连续第几个回合（1 不扣），超出表的按最后一项封顶
 const SCORE_FATIGUE = [0, 0, 0.10, 0.25, 0.40];
@@ -2856,7 +2861,7 @@ function scoreEnvHit(target, res, who, bonus, label) {
   envCommit(() => {
     st.dmg += dmg; st.brk += brk; st.env = (st.env || 0) + dmg;
     burstNote(st, null, dmg, `环境 · ${label || "配置物 / 场地"}`, res);
-    addScore("env", (dmg * SCORE_RULES.dmg + brk * SCORE_RULES.brk) * SCORE_RULES.env, who, bonus);
+    addScore("env", (dmg * SCORE_RULES.dmg + brk * SCORE_RULES.brk) * SCORE_RULES.env * scoreTargetMul(target), who, bonus);
   });
   return who;
 }
@@ -2869,7 +2874,7 @@ function scoreWeatherHelp(attacker, target, res, ours) {
   const up = Math.floor(Number(res.weatherUp) || 0), down = Math.floor(Number(res.weatherDown) || 0);
   if (!target.isPlayer && ours && up > 0) envCommit(() => {
     st.weatherUp = (st.weatherUp || 0) + up;
-    addScore("env", up * SCORE_RULES.dmg, owner);
+    addScore("env", up * SCORE_RULES.dmg * scoreTargetMul(target), owner);
   });
   if (target.isPlayer && down > 0 && !(attacker && attacker.isPlayer)) envCommit(() => {
     st.weatherDown = (st.weatherDown || 0) + down;
@@ -3062,7 +3067,7 @@ function trackHealBy(actor, fn) {
       // 首领 / 精英没攒满标记的失衡会立刻恢复架势，这时按新记上的晕眩标记数算（一次行动打出两次也算两次）
       const n = marks.has(u.id) ? Math.max(0, (Number(u.stunMarks) || 0) - marks.get(u.id)) : (calm.has(u.id) && u.stunned ? 1 : 0);
       if (n > 0 && !u.dead) for (let i = 0; i < n; i++) {
-        addScore("stagger", SCORE_RULES.stagger, actor, Number(u._staggerBonus) || 0);
+        addScore("stagger", SCORE_RULES.stagger * scoreTargetMul(u), actor, Number(u._staggerBonus) || 0);
         const ss = battleStat(actor); if (ss) ss.staggers = (ss.staggers || 0) + 1;   // 战场数据：打出失衡
       }
       if (u._staggerBonus) u._staggerBonus = 0;
@@ -3096,7 +3101,7 @@ function noteSideDamage(amount, label, unit, noScore) {
   if (acc.actorIsPlayer && !(unit && unit.isPlayer) && !noScore) {
     const who = unitById(acc.actorId);
     const st = battleStat(who);
-    if (st) { st.dmg += n; addScore("dmg", n * SCORE_RULES.dmg, who); burstNote(st, who, n, `${acc.skillName || "行动"} · ${key}`); }
+    if (st) { st.dmg += n; addScore("dmg", n * SCORE_RULES.dmg * scoreTargetMul(unit), who); burstNote(st, who, n, `${acc.skillName || "行动"} · ${key}`); }
   }
 }
 
@@ -3229,15 +3234,16 @@ function hitBarrier(p, attacker, opt) {
   // 川川卡面：铁壁也受过载和雷鸣的反伤增益（只反敌人的攻击；配置物爆炸这类假攻击者不反）
   if (p.kind === "ironwall" && attacker && !attacker.isPlayer && !attacker.dead && (state.units || []).includes(attacker)) {
     const c = findKit("chuan", state.units);
+    const wallOwner = c;   // 铁壁是川川的配置物
     // 过载：装甲受到近距离攻击时，反伤 50% 这次受到的伤害（闪电）。先打在外层护盾上的不算
     if (c && c.instant && c.instant.overload && shieldNow <= 0 && dmg > 0 && Number(attacker.zone) === Number(p.zone)) {
       const back = Math.floor(dmg * 0.5);
-      if (back > 0) applyTypedDot(attacker, back, "electric", notes, `${p.name} 过载反伤 → ${attacker.name}`);
+      if (back > 0) applyTypedDot(attacker, back, "electric", notes, `${p.name} 过载反伤 → ${attacker.name}`, { by: wallOwner && wallOwner.id });   // 反伤算铁壁所有者（川川）的伤害（#187）
     }
     // 雷鸣：挡下攻击和成功的协助格挡一样，反伤 等级 × 1d4 闪电
     if (!attacker.dead && currentWeatherFor(dummy) === "thunder") {
       const r = takeDice(Math.max(1, Number(p.level) || 1), 4, 0);
-      applyTypedDot(attacker, r.total, "electric", notes, `雷鸣：${p.name} 挡下攻击反伤 ${r.text}`);
+      applyTypedDot(attacker, r.total, "electric", notes, `雷鸣：${p.name} 挡下攻击反伤 ${r.text}`, { by: wallOwner && wallOwner.id });
     }
   }
   if (p.hp <= 0) notes.push(...breakIronWall(p, []));
@@ -6803,7 +6809,7 @@ function performAssistBlock(helper, target, attacker, forced, atkRange) {
     // 雷鸣：成功的协助格挡可以额外造成 等级 × 1d4 闪电伤害的反伤
     if (attacker && !attacker.dead && currentWeatherFor(helper) === "thunder") {
       const r = takeDice(Math.max(1, Number(helper.level) || 1), 4, 0);
-      applyTypedDot(attacker, r.total, "electric", notes, `雷鸣：${helper.name} 格挡反伤 ${r.text}`);
+      applyTypedDot(attacker, r.total, "electric", notes, `雷鸣：${helper.name} 格挡反伤 ${r.text}`, { by: helper.id });   // 反伤算格挡者的伤害（#187）
     }
     if (helper.kit === "nora" && attacker) setPierce(helper, attacker, notes);
     if (helper.kit === "vitas") flipMood(noraOf(), notes, "维塔斯格挡成功");
@@ -8157,7 +8163,7 @@ function dealTo(attacker, target, opt) {
       // 哔哩哩格挡成功：自身不掉架势，把这一击原本的伤害 50% 以闪电反伤给进攻者
       if (attacker && !attacker.dead && !attacker.isProp) {
         const back = Math.floor((Number(res.blockedRaw) || 0) * 0.5);
-        if (back > 0) applyTypedDot(attacker, back, "electric", extra, `${bh.name} 格挡反伤 → ${attacker.name}`);
+        if (back > 0) applyTypedDot(attacker, back, "electric", extra, `${bh.name} 格挡反伤 → ${attacker.name}`, { by: bh.id });   // 反伤算格挡者的伤害（#187）
       }
     } else extra.push(...applyBlockBreakToHelper(flags.blockHelperId, res.helperBreak));
     if (typeof featAfterBlock === "function") featAfterBlock(bh, attacker, target, extra);   // 推搡（feats.js）：挡下后把攻击者推开
@@ -8218,8 +8224,8 @@ function dealTo(attacker, target, opt) {
         const brkReal = res.breakSpent != null ? Number(res.breakSpent) || 0 : Number(res.breakDealt) || 0;   // 战-M5：实际扣掉的架势
         st.dmg += Math.floor(Number(res.total) || 0); st.brk += brkReal;
         burstNote(st, attacker, res.total, burstLabel(opt.flags), res);
-        addScore("dmg", Math.floor(Number(res.total) || 0) * SCORE_RULES.dmg, attacker, scoreBonus);
-        addScore("brk", brkReal * SCORE_RULES.brk, attacker, scoreBonus);
+        addScore("dmg", Math.floor(Number(res.total) || 0) * SCORE_RULES.dmg * scoreTargetMul(target), attacker, scoreBonus);
+        addScore("brk", brkReal * SCORE_RULES.brk * scoreTargetMul(target), attacker, scoreBonus);
         scoreWeatherHelp(attacker, target, res, true);
       }
     }
@@ -8238,8 +8244,8 @@ function dealTo(attacker, target, opt) {
     if (target && !target.isPlayer && (target.dead || totalHp(target) <= 0) && (res.intended || 0) > 0) {
       const over = Math.max(0, (res.intended || 0) - (res.total || 0));
       if (over > 0) target.overkill = (Number(target.overkill) || 0) + over;
-      if (over > 0 && envWho) addScore("env", Math.floor(over * SCORE_RULES.overkill) * SCORE_RULES.env, envWho, scoreBonus);
-      else if (over > 0 && attacker && attacker.isPlayer && !attacker.envSrc) addScore("overkill", Math.floor(over * SCORE_RULES.overkill), attacker, scoreBonus);
+      if (over > 0 && envWho) addScore("env", Math.floor(over * SCORE_RULES.overkill) * SCORE_RULES.env * scoreTargetMul(target), envWho, scoreBonus);
+      else if (over > 0 && attacker && attacker.isPlayer && !attacker.envSrc) addScore("overkill", Math.floor(over * SCORE_RULES.overkill) * scoreTargetMul(target), attacker, scoreBonus);
       const maxHp = (target.layers || []).reduce((a, l) => a + (Number(l.max) || 0), 0);
       if ((res.intended || 0) >= maxHp * 0.5) target.killBig = true;
     }
@@ -9817,7 +9823,7 @@ function renderSkillFlow() {
   }
   const cancel = document.createElement("button");
   cancel.className = "btn small danger";
-  cancel.textContent = "取消技能";
+  cancel.textContent = "放弃（Esc）";
   cancel.onclick = () => calcCommand("skillCancel");
   opts.appendChild(cancel);
 }
@@ -13750,7 +13756,12 @@ function init() {
   if (em) em.addEventListener("click", e => { if (e.target === em) closeHidden("editorModal"); });
   uiEl("btnClosePlayer").onclick = closeModal;
   modal.addEventListener("click", (e) => { if (e.target === modal) closeModal(); });
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    closeModal();
+    // 分步选择中按 Esc = 放弃这个技能（还没结算，什么都不扣不改）；战斗界面（game.js）自己处理 Esc
+    if (state.skillFlow && !document.querySelector(".g-hud")) calcCommand("skillCancel");
+  });
   uiEl("btnLoadLive").onclick = () => calcCommand("loadLive");
   uiEl("attackerSel").addEventListener("change", () => renderSkills());
   uiEl("bladeSel").onchange = () => calcCommand("blade", { value: uiEl("bladeSel").value });

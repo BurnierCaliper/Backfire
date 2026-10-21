@@ -26,14 +26,15 @@
     pad: 0.9,             // 地台边缘留给装饰的一圈，单位不站进去
     holeRatio: 0.2,       // 深渊黑洞半径 = 地台边长 × 这个比例
     unit: {
-      w: 1.5,             // 铭牌占的宽
+      w: 1.9,             // 铭牌占的宽（竖起来的铭牌是 DOM，桌面宽度下约 90px，要给它留够横向的空）
       d: 0.9,             // 铭牌占的进深（站位格子的大小，不是画出来的厚度）
-      rowStep: 1.15,      // 前后两排的间距（地台放不下时压缩，最小 = d）
+      rowStep: 1.6,       // 前后两排的间距（地台放不下时压缩，最小 = d）
+      stagger: 0.28,      // 同一排里相邻的单位前后错开多少（隔一个往前挪一点；排距放不下时自动缩小）
       groupGap: 0.5,      // 敌我两拨之间多留的空
       flyLift: 1.25,      // 飞行单位浮起的高度
       sink: 0.55,         // 下潜单位沉下去的深度（铭牌只露半截）
-      plateW: 1.5,        // 铭牌画出来的宽
-      plateH: 1.1         // 铭牌画出来的高
+      plateW: 1.9,        // 铭牌画出来的宽
+      plateH: 1.7         // 铭牌画出来的高（取景时要把竖起来的铭牌也装进去）
     },
     maxDefPips: 12        // 架势菱形最多画几个（训练木桩之类的巨大架势不画满）
   };
@@ -128,8 +129,10 @@
     const extra = both ? U.groupGap : 0;
     const step = total > 1 ? Math.max(U.d, Math.min(U.rowStep, (usableD - extra) / (total - 1))) : 0;
     const out = [];
+    // 前后错开：隔一个往前（+z）挪一点，铭牌不排成一条线；排距小的时候少挪，保证不压到前后排。深渊区不挪（要贴着洞沿）
+    const stag = zone.hole > 0 ? 0 : (total > 1 ? Math.min(U.stagger, Math.max(0, (step - U.d) / 2)) : U.stagger);
     const put = (rows, zOf) => rows.forEach((row, r) => row.forEach((u, i) => {
-      out.push({ unit: u, x: (i - (row.length - 1) / 2) * U.w, z: zOf(r), row: r, col: i });
+      out.push({ unit: u, x: (i - (row.length - 1) / 2) * U.w, z: zOf(r) + (i % 2 ? stag : -stag), row: r, col: i });
     }));
     if (zone.hole > 0) {
       // 深渊：黑洞在地台中间，地面单位站在洞的两侧边沿上，敌方在后、我方在前

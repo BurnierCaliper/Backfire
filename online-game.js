@@ -5,7 +5,7 @@
   const PROTOCOL = 1, BUILD = "backfire-d3-v1", KEY = "backfire-online-v1";
   const copy = v => JSON.parse(JSON.stringify(v));
   const listeners = new Set(), packetListeners = new Set(), pending = new Map(), requests = new Map(), requestHighWater = new Map();
-  const gmContext = Object.freeze({}), controls = new Set(["orderPick", "orderConfirm", "orderMove", "orderSwapAccept", "answer", "chat", "checkOpen", "checkRoll", "checkClose", "attrRequest", "attrDecide", "skillRoll", "showTitle", "purseTransfer", "shopBuy", "shopRedeem", "cyberRequest", "cyberwareInstall", "cyberwareRemove", "shopSell", "shopBuyback"]);
+  const gmContext = Object.freeze({}), controls = new Set(["orderPick", "orderConfirm", "orderMove", "orderSwapAccept", "answer", "chat", "checkOpen", "checkRoll", "checkClose", "attrRequest", "attrDecide", "skillRoll", "showTitle", "purseTransfer", "shopBuy", "shopRedeem", "smithUpgrade", "workshopCraft", "workshopSalvage", "cyberRequest", "cyberwareInstall", "cyberwareRemove", "shopSell", "shopBuyback"]);
   const messageContexts = new WeakMap();
   const recipientWires = new Map(), displayWire = OnlineWire.create();
   let endpoint = null, identity = null, status = { connected: false, paused: true, roster: [] }, active = false;
@@ -100,6 +100,9 @@
       shopSell: !rogue() && typeof trpgShopSellView === "function" && typeof TRPG !== "undefined" && TRPG.active ? trpgShopSellFor(id, id === identity.id) : null,
       // 跑团诊所开放时：自己操控的角色的改造信息和申请状态（online-view.js · projectClinic）
       clinic: !rogue() && typeof trpgCyberInfo === "function" && typeof TRPG !== "undefined" && TRPG.active && TRPG.clinicOpen ? clinicFor(id, id === identity.id) : null,
+      // 跑团工匠 / 工坊（主持人开了才发）：自己操控的角色的武器升级价格、可制作的配方和能拆的东西（online-view.js · projectSmith / projectWorkshop 白名单）
+      smith: !rogue() && typeof trpgSmithPacket === "function" && typeof TRPG !== "undefined" && TRPG.active && TRPG.smithOpen ? trpgPacketsFor(id, id === identity.id, trpgSmithPacket) : null,
+      workshop: !rogue() && typeof trpgWorkshopPacket === "function" && typeof TRPG !== "undefined" && TRPG.active && TRPG.workshopOpen ? trpgPacketsFor(id, id === identity.id, trpgWorkshopPacket) : null,
       // 长休结算（跑团；单局的在 rogue.lastRest 里）和游戏时钟：online-view.js · projectRest / clock 白名单
       rest: !rogue() && typeof TRPG !== "undefined" ? TRPG.lastRest || null : null,
       camp: !rogue() && typeof TRPG !== "undefined" && TRPG.camp ? Object.assign({ force: TRPG.camp.force }, TRPG.camp.status) : null,
@@ -131,6 +134,12 @@
   }
   /** 跑团卖出视图：背包都是公用的；回购单只给自己角色卖的（主持人看全部） */
   function trpgShopSellFor(id, isGM) { return trpgShopSellView(isGM ? null : kitsOwnedBy(id)); }
+  /** 跑团工匠 / 工坊：{ heroes: [packetOf(kit)…] }，玩家只拿自己操控的角色，主持人看全部 */
+  function trpgPacketsFor(id, isGM, packetOf) {
+    const mine = isGM ? (typeof trpgHeroes === "function" ? trpgHeroes().filter(h => !h.dead).map(h => h.kit) : []) : kitsOwnedBy(id);
+    const heroes = mine.map(kit => { try { return packetOf(kit); } catch (e) { return null; } }).filter(Boolean);
+    return heroes.length ? { heroes } : null;
+  }
   function trpgCyberwareFor(id, isGM) {
     const mine = isGM ? (typeof trpgHeroes === "function" ? trpgHeroes().map(h => h.kit) : []) : kitsOwnedBy(id);
     const heroes = mine.map(kit => { try { return trpgCyberwarePacket(kit); } catch (e) { return null; } }).filter(Boolean);
