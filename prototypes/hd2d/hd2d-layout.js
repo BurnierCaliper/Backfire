@@ -215,6 +215,13 @@
   }
 
   /* ---------- 铭牌数据 ---------- */
+  /** 行动点 / 附赠动作（#238）：投影里的 ap / apMax / bonus / bonusMax（online-view.js · projectUnit 的白名单本来就有）。
+   *  配置物、装置、间隔、中立生物的卡片上本来就不画（game.css · .unit.prop / .unit.mini 的 .u-econ），这里给 null */
+  function econOf(u) {
+    if (u.isProp || u.isDevice || u.isGap || u.neutral) return null;
+    const pair = (cur, max) => ({ cur: Math.max(0, num(cur, 0)), max: Math.max(0, num(max, 0)) });
+    return { ap: pair(u.ap, u.apMax), bonus: pair(u.bonus, u.bonusMax) };
+  }
   /** 铭牌上要写的内容。只读白名单里的字段——坚毅生命（shp）不在其中。
    *  原型页交进来的是联机投影过的状态（online-view.js · projectState），和联机玩家拿到的一样；
    *  ATK 用主机算好的实际 ATK（投影里的 display.atk，联机单位卡也是这个数：online-battle.js · snapUnit），没有就用 atk */
@@ -235,14 +242,16 @@
     if (u.stunned) flags.push({ key: "stunned", label: "失衡" });
     if (u.dying) flags.push({ key: "dying", label: "濒死" });
     const shownAtk = u.display && typeof u.display.atk === "number" && Number.isFinite(u.display.atk) ? u.display.atk : num(u.atk, 0);
+    const econ = econOf(u);
     const plate = {
       id: u.id, name: String(u.name || "?"), level: num(u.level, 1), atk: shownAtk,
       side: u.isPlayer ? "player" : "foe",
       hp: { cur, max }, layers,
       def: { cur: Math.min(def, shown), max: shown, big: Math.max(defMax, def) > CONFIG.maxDefPips },
-      statuses, flags
+      econ, statuses, flags
     };
     plate.text = [plate.name, "Lv" + plate.level, "ATK " + plate.atk, cur + "/" + max]
+      .concat(econ ? ["行动点 " + econ.ap.cur + "/" + econ.ap.max, "附赠 " + econ.bonus.cur + "/" + econ.bonus.max] : [])
       .concat(statuses.map(s => s.label), flags.map(f => f.label));
     return plate;
   }
