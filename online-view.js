@@ -264,7 +264,8 @@
         const itemId = id(get(item, "id")), qty = number(get(item, "qty"));
         if (!itemId || qty === undefined || qty <= 0) return [];
         // 舞台包里的背包只带道具名（说明玩家端本地查目录）。道具 / 效果说明可以写明坚毅生命的消耗（固定的规则文字）；
-        // 绝不能给玩家看的只有玩家当前剩余的坚毅生命（shp / shpMax），那由 hiddenSheetKey / scrubHidden 挡。
+        // 绝不能给玩家看的是玩家当前剩余的坚毅生命（shp / shpMax）：舞台包里靠 projectUnit 的白名单挡（根本不复制这些键），
+        // 角色资料 / 单局这些整份转发的数据才靠 hiddenSheetKey / scrubHidden。
         const name = text(get(get(context.itemCatalog, itemId), "name"));
         return [{ id: itemId, name: name || itemId, qty }];
       });
