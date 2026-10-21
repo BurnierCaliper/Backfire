@@ -306,8 +306,11 @@ function bpLeaveOpportunity(u, mover, notes) {
   const card = kit && typeof livePartyCards === "function" ? livePartyCards().find(c => c.kit === kit) : null;
   const element = (card && card.suggest && card.suggest.element) || (u.suggest && u.suggest.element) || "physical";
   notes.push(`借机攻击单元：${u.name} 对离开区域的 ${mover.name} 自动开火。`);
-  dealTo(u, mover, { atk: effectiveAtk(u, state.units), mult: 1, diceN: 1, diceS: 6, element, baseBreak: 1,
-    flags: { action: true, opportunity: true, blockResolved: true } });
+  // 在离开的那一区（u 所在的区）结算：那一区的屏障照常挡（app.js · opportunityStrike）
+  const opt = { atk: effectiveAtk(u, state.units), mult: 1, diceN: 1, diceS: 6, element, baseBreak: 1,
+    flags: { action: true, opportunity: true, blockResolved: true } };
+  if (typeof opportunityStrike === "function") opportunityStrike(u, mover, u.zone, opt);
+  else dealTo(u, mover, opt);
 }
 
 /* ---------- 武器页（armory-ui.js）用：把图纸的 mod 换成「实际效果」一行行 ----------

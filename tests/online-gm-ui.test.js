@@ -110,3 +110,17 @@ test("D3 GM UI: Esc closes the tools panel whether focus is inside it or on the 
   await page.evaluate(() => component.destroy());
   assert.deepEqual(f.errors, []);
 });
+
+test("GM UI: sand fish spawn offers 富集 / 普通 / 随机; other enemies have no such option", async t => {
+  const f = await fixture(t); if (!f) return; const { page } = f;
+  await page.evaluate(() => { window.SAND_FISH_KITS = ["sandfish_drive"]; fixture.view.enemyCatalog.push({ id: "sandfish_drive", name: "赶潮沙鱼" }); });
+  await host(page);
+  assert.equal(await page.locator("#ogm-enemy-enrich").count(), 0, "狂徒没有富集选项");
+  await page.selectOption("#ogm-enemy-kind", "sandfish_drive");
+  await page.selectOption("#ogm-enemy-enrich", "on"); await page.click('[data-action="spawn"]');
+  await page.selectOption("#ogm-enemy-enrich", ""); await page.click('[data-action="spawn"]');
+  const spawns = (await calls(page)).filter(c => c.type === "gm.spawnEnemy");
+  assert.equal(spawns[0].enriched, true);
+  assert.equal("enriched" in spawns[1], false, "随机就不带这一项");
+  assert.deepEqual(f.errors, []);
+});

@@ -97,3 +97,10 @@ body.hotseat-active :is(#g-undo, #tr-undo) { display: none !important; }
 /* 战场点选的规则询问：不用回答的人只看到一条小提示，不挡画面、不拦点击 */
 #hs-reaction.hs-ask-mini { inset: auto 0 auto 0; top: calc(var(--hs-top-height, 56px) + 8px); background: none; padding: 0; pointer-events: none; overflow: visible; }
 .hs-ask-note { pointer-events: none; padding: 6px 14px; background: #24443bee; border: 2px solid var(--sk-mint, #39e6b4); color: #e7dcc6; font-size: 13px; box-shadow: 3px 3px #0008; }
+/* 查看战场：选行动顺序 / 回答询问时把卡片收起来（hotseat-ui.js · renderPeek），底部留「回到选择」 */
+body.hs-peeking .hs-overlay:not(.hs-ask-mini) { display: none !important; }
+.hs-peek-back { position: fixed; z-index: 98; left: 50%; bottom: 18px; transform: translateX(-50%); padding: 10px 18px; font: 600 15px/1.2 system-ui, sans-serif;
+  color: #15110d; background: var(--sk-gold, #d8b25a); border: 2px solid #15110d; border-radius: 999px; box-shadow: 0 6px 18px #000a; cursor: pointer; max-width: calc(100vw - 32px); }
+.hs-peek-back:hover, .hs-peek-back:focus-visible { background: #ffd56b; outline: 2px solid #fff; outline-offset: 2px; }
+.hs-peek-back[hidden] { display: none; }
+.hs-heading .hs-button[data-hs="peek"] { margin-left: auto; }

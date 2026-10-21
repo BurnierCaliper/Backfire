@@ -155,6 +155,11 @@ function careerRecordBattle(outcome, grade, extra) {
     row.name = s.name;
     row.weaponOf = s.weaponOf || row.weaponOf || null;
     CAREER_KEYS.forEach(k => { row[k] = (Number(row[k]) || 0) + Math.round(Number(s[k]) || 0); });
+    // 单回合最高爆发（app.js · burstNote）：整局只留最高的那一回合，记下是哪一场
+    if (s.burst && Number(s.burst.dmg) > (row.burst ? Number(row.burst.dmg) || 0 : 0)) {
+      row.burst = { dmg: Math.round(Number(s.burst.dmg) || 0), turn: Number(s.burst.turn) || 1, battleNo: no, battleName: (extra && extra.name) || "",
+        when: typeof ledgerTimeText === "function" ? ledgerTimeText() : "", skills: Object.assign({}, s.burst.skills), buffs: Object.assign({}, s.burst.buffs) };
+    }
     teamDmg += Math.round(Number(s.dmg) || 0);
     if (!mvp || (Number(s.dmg) || 0) > mvp.dmg) mvp = { name: s.name, dmg: Math.round(Number(s.dmg) || 0) };
   });
@@ -515,7 +520,8 @@ function ledgerShortRest(kits, notes) {
     const before = totalHpOf(h);
     healHeroFlesh(h, heal);
     LEDGER.shortUsed[h.kit] = (Number(LEDGER.shortUsed[h.kit]) || 0) + 1;
-    if (LEDGER.shortOnce) delete LEDGER.shortOnce[h.kit];   // 「每次短休 N 次」的专长刷新
+    if (LEDGER.shortOnce) delete LEDGER.shortOnce[h.kit];
+    if (typeof cyberwareShortRest === "function") cyberwareShortRest(h);   // 主动义体每次短休 1 次   // 「每次短休 N 次」的专长刷新
     notes.push(`${h.name} 短休恢复 ${totalHpOf(h) - before} 点（今日剩 ${shortRestLeft(h)} 次）。`);
     any = true;
   });
@@ -657,7 +663,7 @@ function restReport(b, a, ctx) {
     heroes: a.heroes.map(h => {
       const o = b.heroes.find(x => x.kit === h.kit) || h;
       return {
-        kit: h.kit, name: h.name, dead: h.dead, watch: ctx.watch === h.kit || (h.weapons || []).some(w => w.kit === ctx.watch),
+        kit: h.kit, name: h.name, dead: h.dead, watch: !!ctx.noRest && ctx.noRest === h.kit,   // 只标真的没恢复的人：荒野向导守夜照常恢复；武器人守夜，主人本人是恢复了的
         hp: [o.hp, h.hp], hpMax: h.hpMax, shp: [o.shp, h.shp], shpMax: h.shpMax,
         mood: h.dead ? "" : (typeof shpMoodLine === "function" ? shpMoodLine(h.shp, h.shpMax) : ""),
         weapons: h.weapons.map(w => { const ow = (o.weapons || []).find(x => x.kit === w.kit) || w; return { name: w.name, dur: [ow.dur, w.dur], max: w.max }; })
@@ -725,6 +731,8 @@ function ledgerLongRest(plan, notes) {
     const nm = (k) => (typeof ELE !== "undefined" && ELE[k]) || k;
     notes.push(`${unitNameOf(kit)} 的吐酸攻击属性：${nm(before)} → ${nm(e)}。`);
   });
+  // 义体：每天的坚毅消耗（装着 + 过度安装），最少留 1；长休算一天。先扣再恢复
+  if (typeof cyberwareDayTick === "function") partyHeroes().filter(h => !h.dead && h.cyberware && h.cyberware.length).forEach(h => { cyberwareDayTick(h); if (h.kit !== watch) cyberwareShortRest(h); });
   partyHeroes().filter(h => !h.dead).forEach(h => {
     if (h.kit === watch) { (h.linkedKits || []).forEach(k => { if (k !== watch) restoreDurability(k); }); return; }
     (h.layers || []).forEach(l => { l.current = l.max; });
@@ -773,7 +781,7 @@ function ledgerLongRest(plan, notes) {
   if (newDay) LEDGER.day += days;
   notes.push(newDay ? `醒来：进入第 ${LEDGER.day} 天，${clockText(LEDGER.clock)}。` : `醒来：${clockText(LEDGER.clock)}。`);
   ledgerCapture();
-  return { ok: true, notes, report: restReport(before, restSnapshot(), { ok: true, hours, forced: !!plan.force, watch: plan.watch || null }) };
+  return { ok: true, notes, report: restReport(before, restSnapshot(), { ok: true, hours, forced: !!plan.force, watch: plan.watch || null, noRest: watch }) };
 }
 
 /** 主持人：全员复原（不扣补给、不推进时间） */
@@ -821,6 +829,11 @@ function repairPointsText() {
 function ledgerRepair(kit, notes) {
   notes = notes || [];
   if (repairPoints() < 1) { notes.push("没有维修工具包。"); return notes; }
+  // 战斗中倒地的武器人：和「使用道具」一样修好重新站起来（items.js · useRepairKit）
+  if (inBattleNow() && typeof repairTargets === "function") {
+    const row = repairTargets().find(r => r.kit === kit);
+    if (row && row.down) return useRepairKit({ name: "维修" }, null, kit, notes);
+  }
   const before = weaponDur(kit);
   const max = weaponDurMax(kit);
   if (before >= max) { notes.push(`${weaponName(kit)} 耐久已满。`); return notes; }
@@ -842,8 +855,8 @@ function ledgerHealItem(itemId, kit, notes) {
   const h = heroByKit(kit);
   if (!h) return notes;
   if (bagCount(itemId) < 1) { notes.push("背包里没有这个物品。"); return notes; }
-  const n = itemId === "clinic" ? 2 : 1;
-  const r = takeDice(n, 4, 6);
+  const r = rollItemHeal(itemId);
+  if (!r) { notes.push("这件道具不能用来治疗。"); return notes; }
   bagAdd(itemId, -1);
   const before = totalHpOf(h);
   healHeroFlesh(h, r.total);   // 医疗包：和其他治疗一样从内往外补，可以治到外层（作者定）

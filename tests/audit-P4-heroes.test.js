@@ -545,7 +545,8 @@ test("燕返：耐久 0 的鳴門不能被带出来", () => {
 /* ---------- 灯 / 年糕 ---------- */
 
 test("圣盾对年糕生效（年糕在场时灯必然空手）；免疫或伤害为 0 时不扣圣盾", () => {
-  const { c, S } = setup(["tou", "kolt"], [{ id: "thug_knife", lv: 1, zone: 1 }]);
+  // 两个敌人：同区只有一个时被决一死战拦着，只打得到灯
+  const { c, S } = setup(["tou", "kolt"], [{ id: "thug_knife", lv: 1, zone: 1 }, { id: "thug_knife", lv: 1, zone: 1 }]);
   const tou = kit(S, "tou"), foe = foesOf(S)[0];
   ready(tou, 1); foe.zone = 1;
   const mochi = c.spawnWeapon(tou, "mochi"); mochi.zone = 1;
@@ -688,4 +689,30 @@ test("处决：对没晕眩的目标在扣点前拦下", () => {
   assert.match(c.skillTargetError(x, "xia_execute", foe) || "", /晕眩/);
   cmd(c, { actor: x.id, skill: "xia_execute", target: foe.id });
   assert.equal(x.ap, 5);
+});
+
+test("狂怒碾压抓住飞行目标：每回合自动碾压不再收「近程打飞行」的附赠行动（以前抓住期间拿不到附赠 → 每回合 0 伤害、永远松不开）", () => {
+  const { c, S } = setup(["xia", "kolt"], [{ id: "thug_knife", lv: 1, zone: 1 }]);
+  const x = kit(S, "xia"), foe = foesOf(S)[0];
+  x.zone = foe.zone = 1; fatten(foe, 300); foe.def = foe.defMax = 30; foe.flying = true;
+  x.resources.crushId = foe.id; x.bonus = 0;
+  c.beginRound([]);
+  assert.ok(c.totalHp(foe) < 300, "抓着的时候照常碾到");
+  assert.equal(x.resources.crushId, foe.id, "没死没失衡，继续抓着");
+});
+
+test("狂怒碾压没碾到（附赠不够打飞行目标）：不会抓住目标；已经抓着却碾不到的也松手，不会卡死", () => {
+  const { c, S } = setup(["xia", "kolt"], [{ id: "thug_knife", lv: 1, zone: 1 }]);
+  const x = kit(S, "xia"), foe = foesOf(S)[0];
+  x.zone = foe.zone = 1; fatten(foe, 300); foe.def = foe.defMax = 30; foe.flying = true;
+  x.bonus = 0;
+  const lines = c.crushOnce(x, foe, false);
+  assert.equal(c.totalHp(foe), 300);
+  assert.ok(!x.resources.crushId, "没碾到就抓不住");
+  assert.match(lines.join("\n"), /没能抓住/);
+  // 付得起附赠：照常抓住
+  x.bonus = 1;
+  c.crushOnce(x, foe, false);
+  assert.ok(c.totalHp(foe) < 300);
+  assert.equal(x.resources.crushId, foe.id);
 });

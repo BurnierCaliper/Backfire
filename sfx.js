@@ -22,6 +22,7 @@
  * 开关记在本机（localStorage「anterscale-sfx」），战斗顶栏「音效」按钮切换。 */
 (function () {
   "use strict";
+  const fxRand = () => (typeof fxRandom === "function" ? fxRandom() : Math.random());   // 画面效果的随机数：不动战斗用的种子随机数（run.js · fxRandom）
   const KEY = "anterscale-sfx";
   const ELEMENTS = ["physical", "fire", "ice", "electric", "acid", "energy", "harmonic"];
   let ctx = null, master = null, noiseBuf = null;
@@ -47,7 +48,7 @@
       master.connect(comp); comp.connect(ctx.destination);
       noiseBuf = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
       const d = noiseBuf.getChannelData(0);
-      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+      for (let i = 0; i < d.length; i++) d[i] = fxRand() * 2 - 1;
     } catch (e) { ctx = null; }
     return ctx;
   }
@@ -119,7 +120,7 @@
       if (!buf) return;
       const s = c.createBufferSource();
       s.buffer = buf;
-      const jitter = t.vary ? 1 + (Math.random() * 2 - 1) * t.vary : 1;
+      const jitter = t.vary ? 1 + (fxRand() * 2 - 1) * t.vary : 1;
       s.playbackRate.value = Math.max(0.25, Math.min(4, (Number(t.rate) || 1) * jitter * (opt.rateMul || 1)));
       const g = c.createGain();
       const vol = Math.max(0, Number(t.gain) || 0) * (opt.vol || 1);
@@ -151,7 +152,7 @@
     const ir = c.createBuffer(2, len, c.sampleRate);
     for (let ch = 0; ch < 2; ch++) {
       const d = ir.getChannelData(ch);
-      for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3);
+      for (let i = 0; i < len; i++) d[i] = (fxRand() * 2 - 1) * Math.pow(1 - i / len, 3);
     }
     reverbIr = ir;
     return ir;
@@ -255,7 +256,7 @@
     s.buffer = noiseBuf;
     s.loop = true;
     s.connect(out);
-    s.start(t, Math.random() * 0.5); s.stop(t + dur + 0.05);
+    s.start(t, fxRand() * 0.5); s.stop(t + dur + 0.05);
     return s;
   }
   function filter(type, freq, q, dest) {
@@ -280,8 +281,8 @@
       noise(t, 0.42, bp);
       osc("sine", t, 0.25, 110, 60, gainEnv(t, 0.02, 0.4 * v, 0.24));
       for (let i = 0; i < 7; i++) {
-        const tt = t + 0.03 + Math.random() * 0.34;
-        noise(tt, 0.012, filter("highpass", 2500, 0.8, gainEnv(tt, 0.001, (0.3 + Math.random() * 0.3) * v, 0.012)));
+        const tt = t + 0.03 + fxRand() * 0.34;
+        noise(tt, 0.012, filter("highpass", 2500, 0.8, gainEnv(tt, 0.001, (0.3 + fxRand() * 0.3) * v, 0.012)));
       }
     },
     ice(t, v) {
@@ -314,9 +315,9 @@
     acid(t, v) {
       noise(t, 0.4, filter("highpass", 3800, 0.6, gainEnv(t, 0.03, 0.4 * v, 0.38)));
       for (let i = 0; i < 6; i++) {
-        const tt = t + 0.02 + i * 0.055 + Math.random() * 0.03;
-        const f = 260 + Math.random() * 220;
-        osc("sine", tt, 0.05, f, f * 2.4, gainEnv(tt, 0.004, (0.25 + Math.random() * 0.15) * v, 0.05));
+        const tt = t + 0.02 + i * 0.055 + fxRand() * 0.03;
+        const f = 260 + fxRand() * 220;
+        osc("sine", tt, 0.05, f, f * 2.4, gainEnv(tt, 0.004, (0.25 + fxRand() * 0.15) * v, 0.05));
       }
       osc("sine", t, 0.18, 90, 70, gainEnv(t, 0.01, 0.2 * v, 0.18));
     },
@@ -355,7 +356,7 @@
     noise(t, 0.03, filter("highpass", 1800, 0.7, gainEnv(t, 0.001, 0.55 * v, 0.028)));
     osc("sine", t, 0.05, 220, 90, gainEnv(t, 0.002, 0.35 * v, 0.06));
     // 钢条的振动模式：1 : 2.76 : 5.40 : 8.93，再各加一条略微失谐的，互相拍出「嗡嗡」的金属光泽
-    const f0 = 1180 + Math.random() * 60;
+    const f0 = 1180 + fxRand() * 60;
     [[1, 0.42, 1.7], [2.76, 0.3, 1.1], [5.40, 0.2, 0.6], [8.93, 0.12, 0.32]].forEach(([r, a, d]) => {
       osc("sine", t, d, f0 * r, f0 * r, gainEnv(t, 0.001, a * 0.62 * v, d));
       osc("sine", t, d * 0.9, f0 * r * 1.006, f0 * r * 1.006, gainEnv(t, 0.001, a * 0.34 * v, d * 0.9));
@@ -480,7 +481,7 @@
       master = off.createGain(); master.gain.value = 0.55; master.connect(off.destination);
       noiseBuf = off.createBuffer(1, off.sampleRate, off.sampleRate);
       const d = noiseBuf.getChannelData(0);
-      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+      for (let i = 0; i < d.length; i++) d[i] = fxRand() * 2 - 1;
       const v = opt && opt.big ? 1.25 : 1;
       VOICES[VOICES[element] ? element : "physical"](0.005, v);
       if (opt && opt.big) osc("sine", 0.005, 0.3, 75, 38, gainEnv(0.005, 0.005, 0.5, 0.3));

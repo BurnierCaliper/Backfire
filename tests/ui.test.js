@@ -1693,12 +1693,29 @@ test("单局：任务板上的工坊能制作道具", async (t) => {
   await page.click("#party-go");
   await page.waitForSelector("#scr-run:not([hidden])");
   await page.evaluate(() => { bagAdd("cm_scrap", 1); bagAdd("cm_coil", 2); });
-  await page.waitForSelector("#r-craft");
-  await page.click("#r-craft > summary");
-  await page.selectOption('[data-craft-item="kolt"]', "fx_shock");
-  await page.click("#r-craft-go");
-  await page.waitForFunction(() => bagCount("fx_shock") === 1);
-  assert.match(await page.textContent("#run-log"), /电解液罐：成功/);
+  // 工坊是按钮打开的浮层，不再拼在页面底部
+  assert.equal(await page.$("#r-craft"), null);
+  await page.evaluate(() => RunFlow.refresh && RunFlow.refresh());
+  await page.click("#r-workshop");
+  await page.waitForSelector("#ws-overlay:not([hidden]) .ws-card");
+  await page.click('#ws-overlay [data-ws-pick="fx_shock"]');
+  // 缺材料的配方不给成功率
+  assert.doesNotMatch(await page.textContent('#ws-overlay [data-ws-pick="fx_burn"]'), /%/);
+  await page.click('#ws-overlay .ws-who .ws-go');
+  await page.waitForFunction(() => bagCount("fx_shock") === 1 || /电解液罐：失败/.test(document.getElementById("run-log").textContent));
+  assert.match(await page.textContent("#run-log"), /电解液罐：(成功|失败)/);
+  // 背包：材料页点材料 → 去工坊
+  await page.click("#ws-overlay [data-ws-close]");
+  await page.click("#r-backpack");
+  await page.waitForSelector("#bp-overlay:not([hidden]) .bp-card");
+  // 换画面（例如进战斗）：工坊和非战斗模式的背包都收起来
+  await page.click("#bp-overlay [data-bp-close]");
+  await page.click("#r-workshop");
+  await page.waitForSelector("#ws-overlay:not([hidden])");
+  await page.evaluate(() => document.getElementById("r-backpack").click());
+  await page.waitForSelector("#bp-overlay:not([hidden])");
+  await page.evaluate(() => Screens.show("battle"));
+  await page.waitForFunction(() => document.getElementById("ws-overlay").hidden && document.getElementById("bp-overlay").hidden);
   assert.deepEqual(o.errors, []);
 });
 
@@ -1784,5 +1801,51 @@ test("单局：休整（长休）后弹出结算画面——血量、补给、�
   assert.doesNotMatch(text, /坚毅/);
   await page.click('#rest-report [data-rr="close"]');
   await page.waitForSelector("#rest-report", { state: "hidden" });
+  assert.deepEqual(o.errors, []);
+});
+
+test("整局数据：「单回合最高爆发」一列，点数字打开详情（哪一场哪一回合、各技能伤害、吃到的增益），能返回", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page, errors } = o;
+  await page.evaluate(() => {
+    LEDGER.career = { battles: [{ no: 1, outcome: "win", turns: 3, grade: "A", score: 900, when: "第 1 天", teamDmg: 70, mvp: { name: "柯尔特", dmg: 70 }, rows: [] }],
+      kits: { kolt: { name: "柯尔特", kit: "kolt", battles: 1, dmg: 70, burst: { dmg: 55, turn: 2, battleNo: 1, battleName: "桥头伏击", when: "第 1 天",
+        skills: { 电钻: 40, "电钻 · 感电": 15 }, buffs: { "攻击者振奋：ATK +25%": 2, "属性克制（电 → 装甲 +25%）": 1 } } } } };
+    CareerLog.open();
+  });
+  await page.waitForSelector("#career-sheet.show .cl-burst-btn");
+  assert.equal((await page.textContent("#career-sheet .cl-burst-btn")).trim(), "55");
+  await page.click("#career-sheet .cl-burst-btn");
+  const body = await page.textContent("#cl-body");
+  assert.match(body, /单回合最高爆发\s*55/);
+  assert.match(body, /第 1 场「桥头伏击」的第 2 回合/);
+  assert.match(body, /电钻 · 感电\s*15\s*27\.3%/);
+  assert.match(body, /攻击者振奋：ATK \+25%\s*· 2 次命中/);
+  await page.click("#cl-body [data-cl-back]");
+  await page.waitForSelector("#career-sheet .cl-burst-btn");
+  assert.match(await page.evaluate(() => CareerLog.text()), /单回合最高爆发/);
+  assert.deepEqual(errors, []);
+});
+
+test("诊所 · 义体浮层：休整时打开、确认后安装、再拆掉（不漏坚毅数值）", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await page.evaluate(() => {
+    cyberwareLoadExamples();
+    const run = Rogue.newRun({ party: ["kolt", "helu"], seed: "CW-UI" });
+    run.stage = "camp"; state.kuizhi = 20000;
+    Rogue.save(run); RunFlow.resume();
+  });
+  await page.click('[data-cw-open="kolt"]');
+  await page.waitForSelector("#cw-overlay:not([hidden]) .cw-rate");
+  await page.click('[data-cw-pick="example_t5_melee"]');
+  await page.waitForSelector(".cw-confirm");
+  await page.click(".cw-confirm [data-cw-cmd]");
+  await page.waitForSelector(".cw-row.on");
+  assert.equal(await page.evaluate(() => state.kuizhi), 17000);
+  assert.doesNotMatch(await page.innerText("#cw-overlay"), /坚毅/);
+  await page.click(".cw-row.on [data-cw-cmd]");
+  await page.waitForSelector(".cw-installed .ws-empty");
+  assert.equal(await page.evaluate(() => state.kuizhi), 16000);
   assert.deepEqual(o.errors, []);
 });

@@ -200,7 +200,7 @@
     if (!obj(prop) || !id(get(prop, "id"))) return null;
     const out = identifiers(prop, {}, ["id"]);
     copyFields(prop, out, ["name"], ["zone", "level", "hp", "maxHp", "shield", "shieldMax"], ["destroyed"]);
-    enumField(prop, out, "kind", ["button", "lever", "battery", "boom", "acid", "scrap", "turret", "ironwall", "scrapwall", "dome"]);
+    enumField(prop, out, "kind", ["button", "lever", "battery", "boom", "acid", "scrap", "turret", "ironwall", "scrapwall", "dome", "coral_branch", "coral_tentacle", "death_statue"]);
     enumField(prop, out, "faction", ["player", "enemy", "neutral"]);
     return out;
   }
@@ -260,7 +260,7 @@
     out.fields = {}; out.gaps = {};
     for (const key of zoneKeys) if (obj(get(get(state, "fields"), key))) {
       const field = get(get(state, "fields"), key);
-      out.fields[key] = selected(field, ["fire", "fireOn", "electric", "acid", "ice", "collapse", "energy", "energyVal", "harmonic", "heal", "highland", "abyss", "isolate", "collapseOn", "collapseLv", "ruinOn", "ruinHp", "ruinMax"]);
+      out.fields[key] = selected(field, ["fire", "fireOn", "electric", "acid", "ice", "quicksand", "coral", "innate", "collapse", "energy", "energyVal", "harmonic", "heal", "highland", "abyss", "isolate", "collapseOn", "collapseLv", "ruinOn", "ruinHp", "ruinMax"]);
       out.fields[key].fieldLocked = !!get(field, "fieldLock");
     }
     for (const key of gapKeys) if (obj(get(get(state, "gaps"), key))) {
@@ -270,7 +270,7 @@
     for (const key of zoneKeys) { const zv = zoneViewOf(Number(key), state); if (zv) (out.zoneView = out.zoneView || {})[key] = zv; }
     return out;
   }
-  const popupWords = new Set(["无效", "失衡", "起身", "倒下", "刺入", "温和", "残忍", "登场支援！", "聚焦抹层", "灼烧", "感电", "腐蚀", "冻伤", "震荡", "共振", "高能", "虚弱", "振奋", "躲藏", "优势", "紧追", "熔融", "刺骨", "过载", "错位", "扩散", "折射", "红弹", "蓝弹", "导体", "霜结", "自焚", "溅射", "千钧", "蓄能", "多普勒", "爆燃", "破冰", "雷击", "蚀刻", "倒流", "惯性", "衍射", "穿刺", "猛击", "弱点特效", "超载", "中和"]);
+  const popupWords = new Set(["无效", "失衡", "起身", "倒下", "刺入", "温和", "残忍", "登场支援！", "聚焦抹层", "灼烧", "感电", "腐蚀", "冻伤", "震荡", "共振", "高能", "虚弱", "振奋", "躲藏", "优势", "紧追", "熔融", "刺骨", "过载", "错位", "扩散", "折射", "红弹", "蓝弹", "导体", "霜结", "自焚", "溅射", "千钧", "蓄能", "多普勒", "爆燃", "破冰", "雷击", "蚀刻", "倒流", "惯性", "衍射", "穿刺", "猛击", "弱点特效", "超载", "中和", "被打倒", "克制"]);
   function projectTape(tape, context = {}) {
     const units = arr(get(context.state, "units"));
     return arr(tape).slice(0, 256).flatMap(event => {
@@ -286,10 +286,50 @@
       if (kind === "break" || kind === "highboom" || visibleHp && ["dmg", "heal"].includes(kind)) {
         const n = number(get(event, "value")); if (n !== undefined) out.value = n;
       }
+      if (kind === "dmg" && get(event, "main") === true) out.main = true;   // 攻击动作本身的伤害（玩家画面在这几段补攻击演出的打击形状）
       if (popupWords.has(get(event, "text"))) out.text = get(event, "text");
       if (snap.length) out.snap = snap.map(projectUnit).filter(Boolean);
       return [out];
     });
+  }
+  /* 攻击演出（attack-fx.js · resolve 挑出来的招式）：只有两个单位 id、招式种类、属性和几个画法开关，没有任何数值。
+   * 专属演出（attack-fx.js · SCRIPTS）再带上脚本名和几样现场数据：谁被刺入、伯妮尔 / EDC 的主人、推还是拉、打哪一区、隔几区；
+   * 以及协助攻击要推镜头、格挡火花画在哪、拉斯缪尔的能量罐（累积能量百分比——玩家自己的角色仪表上本来就看得到） */
+  const FX_KINDS = ["slash", "thrust", "smash", "claw", "bite", "shot", "spread", "bolt", "beam", "zap", "shard", "lob", "flame", "wave", "explode", "support", "hex"];
+  const FX_FLAGS = ["melee", "area", "heavy", "flash", "flurry", "shield", "needle", "fur", "roar", "drill", "cane", "fist", "stream", "glitch", "big", "sweep"];
+  const FX_ELEMENTS = ["physical", "fire", "ice", "electric", "acid", "energy", "harmonic"];
+  const FX_SCRIPT = /^[a-z][a-z_]{1,31}$/;
+  const clampInt = (n, lo, hi) => Math.max(lo, Math.min(hi, Math.round(n)));
+  function projectFx(fx) {
+    if (!obj(fx)) return null;
+    const actor = id(get(fx, "actor")), target = id(get(fx, "target")), move = get(fx, "move");
+    if (!actor || !target || !obj(move) || !FX_KINDS.includes(get(move, "kind"))) return null;
+    const out = { kind: get(move, "kind"), el: FX_ELEMENTS.includes(get(move, "el")) ? get(move, "el") : "physical" };
+    FX_FLAGS.forEach(k => { if (get(move, k) === true) out[k] = true; });
+    if (["katana", "knife", "rapier"].includes(get(move, "blade"))) out.blade = get(move, "blade");
+    const hits = number(get(move, "hits")); if (hits !== undefined) out.hits = Math.max(1, Math.min(20, Math.floor(hits)));
+    const res = { actor, target, move: out };
+    const script = get(fx, "script"); if (typeof script === "string" && FX_SCRIPT.test(script)) res.script = script;
+    const d = get(fx, "data");
+    if (obj(d)) {
+      const data = {};
+      if (get(d, "ally") === true) data.ally = true;
+      const dist = number(get(d, "dist")); if (dist !== undefined) data.dist = clampInt(dist, 0, 8);
+      ["pierced", "owner"].forEach(k => { const v = id(get(d, k)); if (v) data[k] = v; });
+      if (["push", "pull"].includes(get(d, "dir"))) data.dir = get(d, "dir");
+      const zoneOf = number(get(d, "zoneOf")); if (zoneOf !== undefined) data.zoneOf = clampInt(zoneOf, 1, 9);
+      if (get(d, "twice") === true) data.twice = true;
+      if (Object.keys(data).length) res.data = data;
+    }
+    if (get(fx, "assist") === true) res.assist = true;
+    if (get(fx, "parried") === true) res.parried = true;
+    const blocker = id(get(fx, "blocker")); if (blocker) res.blocker = blocker;
+    const tank = get(fx, "tank");
+    if (obj(tank)) {
+      const tid = id(get(tank, "id")), from = number(get(tank, "from")), to = number(get(tank, "to")), ms = number(get(tank, "ms"));
+      if (tid && from !== undefined && to !== undefined) res.tank = { id: tid, from: clampInt(from, 0, 300), to: clampInt(to, 0, 300), ms: ms === undefined ? 900 : clampInt(ms, 200, 2000) };
+    }
+    return res;
   }
   function projectMessages(messages, context) {
     const { recipientId, gmId } = context;
@@ -315,6 +355,19 @@
       if (out.kind === "action") {
         const actor = text(get(row, "actorName"), 60), action = text(get(row, "actionName"), 60);
         if (actor && action) out.text = actor + " · " + action;
+        // 结算摘要（online-game.js · hitSummary）：谁受了多少伤害 / 击破 / 治疗、弹出的状态字。只认数字和白名单里的弹字
+        const hits = arr(get(row, "hits")).slice(0, 12).flatMap(h => {
+          if (!obj(h)) return [];
+          const name = text(get(h, "name"), 60); if (!name) return [];
+          const parts = [];
+          const n = k => { const v = number(get(h, k)); return v !== undefined && v > 0 ? Math.floor(v) : 0; };
+          if (n("dmg")) parts.push(`${n("dmg")} 伤害`);
+          if (n("brk")) parts.push(`击破 ${n("brk")}`);
+          if (n("heal")) parts.push(`治疗 ${n("heal")}`);
+          arr(get(h, "words")).forEach(w => { if (popupWords.has(w) && !parts.includes(w)) parts.push(w); });
+          return parts.length ? [`${name}：${parts.join("，")}`] : [];
+        });
+        if (hits.length) out.text += " → " + hits.join("；");
       }
       if (out.kind === "phase") {
         enumField(row, out, "phase", ["player", "enemy", "exploration", "ended"]);
@@ -412,7 +465,7 @@
       if (pickKeys.has(get(choices, "key"))) dto.key = get(choices, "key");
       dto.options = arr(get(choices, "options")).slice(0, 200).flatMap(option => {
         const value = choiceValue(get(option, "value")); if (value === undefined) return [];
-        const item = copyFields(option, { value }, ["label", "sub"], [], ["disabled"]);
+        const item = copyFields(option, { value }, ["label", "sub", "cost"], [], ["disabled"]);
         if (get(option, "reason")) item.reason = safeError(get(option, "reason"));
         return [item];
       });
@@ -508,7 +561,7 @@
     const swap = get(view, "swap"); out.swap = obj(swap) ? identifiers(swap, {}, ["requestId", "from", "to", "recipient"]) : null;
     const ask = get(view, "ask"); out.ask = null;
     if (obj(ask)) {
-      const dto = identifiers(ask, copyFields(ask, {}, ["title"], ["deadline"], ["declined", "field"]), ["id"]);
+      const dto = identifiers(ask, copyFields(ask, {}, ["title"], ["deadline", "remainingMs"], ["declined", "field"]), ["id"]);
       enumField(ask, dto, "kind", ["choice", "block", "assist"]);
       if (get(ask, "deadline") === null) dto.deadline = null;
       dto.waitingNames = arr(get(ask, "waitingNames")).map(n => text(n, 60)).filter(n => n !== null);
@@ -553,12 +606,13 @@
     }
     if (own(packet, "offlineWait")) {
       const wait = get(packet, "offlineWait");
-      out.offlineWait = obj(wait) ? identifiers(wait, copyFields(wait, {}, ["name"], ["deadline"], []), ["actor", "owner"]) : null;
+      out.offlineWait = obj(wait) ? identifiers(wait, copyFields(wait, {}, ["name"], ["deadline", "remainingMs"], []), ["actor", "owner"]) : null;
     }
     enumField(packet, out, "screen", ["lobby", "exploration", "battle", "ended"]);
     if (get(packet, "ok") === false || get(packet, "error") != null) out.error = safeError(get(packet, "error"));
     if (own(packet, "state")) out.state = projectState(get(packet, "state"), context);
     if (own(packet, "tape")) out.tape = projectTape(get(packet, "tape"), { state: get(packet, "state") || context.state });
+    if (own(packet, "fx")) out.fx = projectFx(get(packet, "fx"));
     if (own(packet, "view")) out.view = projectView(get(packet, "view"), context);
     if (own(packet, "result")) out.result = publicResult(get(packet, "result"));
     if (own(packet, "messages")) out.messages = projectMessages(get(packet, "messages"), context);
@@ -570,12 +624,15 @@
     if (own(packet, "levelUps")) out.levelUps = arr(get(packet, "levelUps")).slice(0, 10).filter(obj).map(ev => {
       const e = scrubHidden(clone(ev)); e.stats = arr(e.stats).filter(r => obj(r) && r.key !== "shp"); return e;
     });
+    // 克制表（matchup.js）：房主算好的公开规则数据（天气、克制表、说明文字），只去掉隐藏数值
+    if (own(packet, "matchup")) { const m = get(packet, "matchup"); out.matchup = obj(m) ? scrubHidden(clone(m)) : null; }
     if (own(packet, "rogue")) { const r = get(packet, "rogue"); out.rogue = obj(r) ? scrubHidden(clone(r)) : null; }
     // 任务日志：只留玩家该看的字段（主持人备注、敌人配置、隐藏站的内容在房主那边就去掉了，这里再按白名单过一遍）
     if (own(packet, "quests")) out.quests = projectQuests(get(packet, "quests"));
     if (own(packet, "purse")) out.purse = projectPurse(get(packet, "purse"));
     if (own(packet, "shop")) out.shop = projectShop(get(packet, "shop"));
     if (own(packet, "clinic")) out.clinic = projectClinic(get(packet, "clinic"));
+    if (own(packet, "cyberware")) out.cyberware = projectCyberware(get(packet, "cyberware"));
     // 长休结算：不带坚毅（只带那一句 mood）；游戏时钟
     if (own(packet, "rest")) out.rest = projectRest(get(packet, "rest"));
     if (own(packet, "camp")) out.camp = projectCamp(get(packet, "camp"));
@@ -649,6 +706,35 @@
       request: obj(h.request) ? { status: ["pending", "done", "denied"].includes(h.request.status) ? h.request.status : "pending", cost: Math.floor(num(h.request.cost)), note: str(h.request.note, 80) } : null
     })).filter(h => h.kit && h.cyber) };
   }
+  /** 义体（cyberware.js · cyberwarePacket）：白名单 + scrubHidden，坚毅只有档位文字 */
+  function projectCyberware(c) {
+    if (!obj(c)) return null;
+    // 多名角色：{ heroes: [cyberwarePacket…] }（online-rogue.js · cyberwareFor）
+    if (Array.isArray(c.heroes)) return { heroes: c.heroes.slice(0, 8).map(projectCyberware).filter(h => h && h.kit) };
+    const str = (v, n) => typeof v === "string" ? v.slice(0, n) : "";
+    const num = v => (typeof v === "number" && isFinite(v) ? v : 0);
+    const BUR = ["none", "strain", "heavy"];
+    const item = d => ({ id: str(d.id, 60), name: str(d.name, 60), tier: num(d.tier), kind: str(d.kind, 20), range: str(d.range, 10), element: str(d.element, 20),
+      damageText: str(d.damageText, 40), break: num(d.break), hpCut: num(d.hpCut), conflict: d.conflict ? str(d.conflict, 30) : null, example: !!d.example });
+    const v = obj(c.view) ? c.view : {};
+    const out = { kit: str(c.kit, 40), name: str(c.name, 40), view: {
+      rate: num(v.rate), cap: num(v.cap), cyberwareRate: num(v.cyberwareRate), layerRate: num(v.layerRate), remainingHp: num(v.remainingHp),
+      overinstall: !!v.overinstall, canOverinstall: !!v.canOverinstall, burden: BUR.includes(v.burden) ? v.burden : "none", burdenText: str(v.burdenText, 80),
+      installed: arr(v.installed).slice(0, 16).filter(obj).map(d => Object.assign(item(d), { usesLeft: num(d.usesLeft), removeCost: num(d.removeCost) })) },
+      shop: arr(c.shop).slice(0, 64).filter(obj).map(d => Object.assign(item(d), { price: num(d.price), text: str(d.text, 300), installed: !!d.installed,
+        canInstall: !!d.canInstall, error: d.error ? str(d.error, 80) : null, warning: str(d.warning, 80), rateAfter: num(d.rateAfter) })) };
+    out.purse = Math.max(0, Math.floor(num(c.purse)));
+    const pv = obj(c.previews) ? c.previews : {};
+    out.previews = {};
+    Object.keys(pv).slice(0, 64).forEach(k => {
+      const p = pv[k], key = str(k, 60);
+      if (!obj(p) || !key) return;
+      out.previews[key] = { ok: !!p.ok, error: p.error ? str(p.error, 80) : null, cost: num(p.cost), id: str(p.id, 60), name: str(p.name, 60), tier: num(p.tier),
+        rateBefore: num(p.rateBefore), rateAfter: num(p.rateAfter), cap: num(p.cap), overinstall: !!p.overinstall, hpCut: num(p.hpCut),
+        conflictWith: p.conflictWith ? str(p.conflictWith, 60) : null, burden: BUR.includes(p.burden) ? p.burden : "none", warning: str(p.warning, 80) };
+    });
+    return scrubHidden(out);
+  }
   function projectQuests(list) {
     if (!Array.isArray(list)) return null;
     const str = (v, n) => typeof v === "string" ? v.slice(0, n) : "";
@@ -691,7 +777,7 @@
     });
     return out;
   }
-  const api = { SCHEMA, pickKeys, projectHud, projectPacket, projectQuests, projectPurse, projectShop, projectClinic, projectRest, projectCamp, projectSheets, projectBagDetail, projectUnit, projectState, projectTape, projectMessages, projectLogs, projectView, projectActionMenu, safeText: text, safeError };
+  const api = { SCHEMA, pickKeys, projectHud, projectPacket, projectQuests, projectPurse, projectShop, projectClinic, projectCyberware, projectRest, projectCamp, projectSheets, projectBagDetail, projectUnit, projectState, projectTape, projectFx, projectMessages, projectLogs, projectView, projectActionMenu, safeText: text, safeError };
   root.OnlineView = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof globalThis !== "undefined" ? globalThis : window);

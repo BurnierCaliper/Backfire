@@ -1,0 +1,16 @@
+# Antlerscale: Backfire · 给 Claude 的项目规则
+
+纯前端游戏（浏览器直接打开 `game.html`），规则计算在 `app.js` / `engine.js`，战斗画面在 `game.js`，联机在 `online-*.js` / `hotseat*.js`。上手说明见 `ROADMAP.md`，规则细节和每次改动的记录见 `README.md`。
+
+## 改代码时必须做到
+- **每一处规则改动**：在 `README.md` 的「## 规则改动记录」**最上面**加一条（写清楚改了什么、以前怎样、现在怎样，括号里列出改了哪些文件 / 函数和测试），并补测试。
+- **数值放配置**：常量放在对应的配置表里（例如 `rogue-data.js`、文件顶部的 `const XXX = {...}`），不要写死在逻辑里。
+- **测试**：推送前跑 `npm test`，必须 0 失败。新测试要先在没修的代码上失败、修完通过。`tests/headless.js` 可以无界面加载整套规则；浏览器测试没装 Playwright 时会自动跳过。
+- **坚毅生命（shp）的具体数值绝不给玩家看**：这是手册规定的游戏逻辑。联机发给玩家的数据都要经过 `online-view.js` 的白名单。
+- 代码注释、提交信息、README 都用中文，风格照周围的代码。
+- 修 `docs/bug-backlog.md` 里的条目时，修完把那一条打勾并写上改了什么。
+
+## 分工
+- 任务会由 issue 派过来（通常是 `docs/bug-backlog.md` 里的一条）。只做 issue 里写的那一件事，不顺手改别的；拿不准规则时在 issue 里提问，不要猜。
+- 每个任务开一个 PR（推送分支后用 `gh pr create --base main` 自己开；开不了就在 issue 里贴出比较链接），PR 标题写「修复 #issue号：……」，说明里写：改了什么、为什么、加了哪些测试、`npm test` 的结果，最后一行写 `Closes #issue号`。
+- 合并由仓库主人决定，不要自己合并。

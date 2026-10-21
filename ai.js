@@ -52,7 +52,7 @@ const EnemyAI = (function () {
     // 射程表里没有的技能按单位卡上的射程判断，和 dealTo 一致（以前一律按 0–1：远距离的人形沙灵瞄准同区的人，每回合空放）
     const rg = u.range || "any";
     if (rg === "melee") return d === 0;
-    if (rg === "ranged") return d === 1;
+    if (rg === "ranged") return d === 1 || (d === 0 && typeof enemyForcedPointBlank === "function" && enemyForcedPointBlank(u, t));   // 被牵制的抵近喷洒（播撒者）
     return d <= 1;
   }
   function retargetLegal(u, sid, preferred, prey, forced) {
@@ -323,9 +323,11 @@ const EnemyAI = (function () {
       return null;
     }
     if (spec.special === "bigsand") {
+      // 场上的沙灵：沙灵阵营的全都算，大沙灵自己、活沙、尘躯这些精英也算（以前只数四足 / 人形沙灵，
+      // 大沙灵 + 两只精英沙灵时照样召唤）
       const sands = state.units.filter(x =>
-        !x.isPlayer && !x.dead && !x.hidden &&
-        (x.kit === "sand_beast" || x.kit === "sand_human"));
+        !x.isPlayer && !x.dead && !x.hidden && !x._removed && totalHp(x) > 0 &&
+        (typeof factionOf === "function" ? factionOf(x) === "沙灵" : (x.kit === "sand_beast" || x.kit === "sand_human" || x === u)));
       if (sands.length < 3 && has("en_bigsand_summon")) return "en_bigsand_summon";
       if (!preyInZone(prey, u.zone).length && has("en_bigsand_heal")) return "en_bigsand_heal";
       return null;
@@ -485,7 +487,7 @@ const EnemyAI = (function () {
       if (sp && tgt) {
         return {
           thunk: () => { state.attackerId = u.id; state.targetId = tgt.id; runSkill("use_scrap:" + sp.id); },
-          meta: { actorId: "prop:" + sp.id, targetId: tgt.id, skillName: `${u.name} 操控碎渣机炮` }
+          meta: { actorId: "prop:" + sp.id, targetId: tgt.id, skillName: `${u.name} 操控碎渣机炮`, skillId: "use_scrap:" + sp.id }
         };
       }
     }
@@ -497,7 +499,7 @@ const EnemyAI = (function () {
       if (sidW) {
         return {
           thunk: () => { state.attackerId = u.id; state.targetId = "gap:" + wallKey; runSkill(sidW); },
-          meta: { actorId: u.id, targetId: "gap:" + wallKey, skillName: `攻击危墙（${wallKey.replace("-", "–")} 区之间）` }
+          meta: { actorId: u.id, targetId: "gap:" + wallKey, skillName: `攻击危墙（${wallKey.replace("-", "–")} 区之间）`, skillId: sidW }
         };
       }
     }
@@ -517,7 +519,7 @@ const EnemyAI = (function () {
         if (sid === "en_king_hold") u._aiHoldTurn = state.turnNo;
         if (u.tauntTo === target.id) u.tauntTo = null;
       },
-      meta: { actorId: u.id, targetId: target.id, skillName: enemyLabel(u, sid) },
+      meta: { actorId: u.id, targetId: target.id, skillName: enemyLabel(u, sid), skillId: sid },   // skillId：画面按招式挑攻击演出（attack-fx.js）
       ai: { kind: "attack", sid, target, picks }
     });
 
@@ -539,6 +541,8 @@ const EnemyAI = (function () {
 
     // 沙漠生物的习性：夜晚 / 沙暴不走进有沙珊瑚的区（desert.js · coralAvoid）
     if (step != null && typeof coralAvoid === "function" && coralAvoid(u, step)) step = null;
+    // 付不起移动（精英 / 首领没有附赠行动、杂兵没有行动点）就不规划移动，改看付得起的行动（原地能打就打，打不到就不出手）
+    if (step != null && !canPayMove(u)) step = null;
     let sid = aiSpecial(u, spec, target, prey, has, list);
     if (sid && !["en_agg3_debris", "en_agg1_rush", "en_agg1_rush_prep", "en_king_hold", "en_king_exec", "en_bigsand_summon", "en_bigsand_heal", "ufo_prime", "ufo_boom", "ufo_stomp", "ufo_sweep", "en_agg2_overheat", "en_gl", "en_gl_fire", "en_ant_shell", "en_ant_shell_fire", "en_gas_ignite", "en_alarm_zap", "en_giant_sand_pulse"].includes(sid)) {
       const rt = retargetLegal(u, sid, target, prey, pick.forced);
@@ -674,10 +678,16 @@ const EnemyAI = (function () {
   /** 发号施令的敌人总是第一个行动：亡命之王的命令要用狂徒们这一回合的行动点（回防筑墙）、
    *  改狂徒们的目标（攻击命令），排在最后的话狂徒早就把行动点用完了。其余照「杂兵 → 精英 → 首领」 */
   const COMMANDERS = ["outlaw_king"];
+  /** 敌人回合要行动的单位：敌人 + 我方同阵营的友军（友军打和它敌对的单位，目标由 validPrey 按 hostileTo 选）。
+   *  foes() 照旧不含友军（胜负判定、「还剩几个敌人」用它）；中立生物不行动 */
+  function actors() {
+    return foes().concat(state.units.filter(u => !u.isPlayer && unitAlive(u) && u.kit !== "ironwall" &&
+      typeof playerAllied === "function" && playerAllied(u) && !(typeof isNeutralCreature === "function" && isNeutralCreature(u))));
+  }
   function actingOrder() {
     const r = { minion: 0, elite: 1, boss: 2 };
     const key = u => (COMMANDERS.includes(u.kit) ? -1 : (r[enemyRankOf(u)] || 0));
-    return foes().sort((a, b) => key(a) - key(b)).map(u => u.id);
+    return actors().sort((a, b) => key(a) - key(b)).map(u => u.id);
   }
 
   return {
@@ -689,6 +699,6 @@ const EnemyAI = (function () {
     target: aiTarget,
     step: aiStep,
     special: aiSpecial,
-    unitAlive, players, foes
+    unitAlive, players, foes, actors
   };
 })();

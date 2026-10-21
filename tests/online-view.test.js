@@ -362,3 +362,29 @@ test("chat keeps ordinary words like 坚毅 / 'this hp', but still drops hidden-
   const out = V.projectMessages([msg("他很坚毅!"), msg("this hp bar is low"), msg("push people"), msg("shp:30"), msg("s h p 3"), msg("坚毅生命还剩一半"), msg("看后台")], player);
   assert.deepEqual(out.map(m => m.text), ["他很坚毅!", "this hp bar is low", "push people"]);
 });
+
+test("player battlefield receives quicksand / coral / innate field flags (GM can set them; players used to never see them)", () => {
+  const source = fixture();
+  Object.assign(source.state.fields[1], { quicksand: true, innate: true, sinkSecret: "SECRET-SINK" });
+  const out = V.projectPacket(source, player);
+  assert.equal(out.state.fields[1].quicksand, true);
+  assert.equal(out.state.fields[1].innate, true);
+  assert.equal(out.state.fields[1].sinkSecret, undefined);
+});
+
+test("public battle log lists per-target results (damage / break / heal / popup words) but never numbers outside the whitelist", () => {
+  const logs = V.projectLogs([{ kind: "action", actorName: "红玉", actionName: "普通攻击", hits: [
+    { name: "狂徒", dmg: 12, brk: 2, heal: 0, words: ["失衡", "SECRET-WORD", "被打倒"] },
+    { name: "夕夏", dmg: 0, brk: 0, heal: 6, words: [] },
+    { name: "SHP 732911", dmg: 99, words: [] },
+    { name: "空", dmg: "12", brk: -3, words: [] }] }]);
+  assert.equal(logs[0].text, "红玉 · 普通攻击 → 狂徒：12 伤害，击破 2，失衡，被打倒；夕夏：治疗 6");
+});
+
+test("玩家看得到主持人放的沙珊瑚枝 / 触须（种类不被投影丢掉）", () => {
+  const source = fixture();
+  source.state.props.push({ id: "c1", name: "沙珊瑚枝", kind: "coral_branch", faction: "neutral", hp: 30, maxHp: 30, zone: 1 },
+    { id: "c2", name: "沙珊瑚触须", kind: "coral_tentacle", faction: "neutral", hp: 8, maxHp: 8, zone: 1 });
+  const out = V.projectPacket(source, player);
+  assert.deepEqual(out.state.props.filter(p => p.id[0] === "c").map(p => [p.kind, p.faction, p.hp]), [["coral_branch", "neutral", 30], ["coral_tentacle", "neutral", 8]]);
+});

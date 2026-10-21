@@ -6,7 +6,7 @@ const H = require("./headless");
 
 function field(party) {
   const c = H.load();
-  c.BattleSim.setup({ party: party || ["ruby", "kolt", "hiaki", "tou"], enemies: [{ id: "thug_knife", lv: 1, zone: 1 }] });
+  c.BattleSim.setup({ party: party || ["ruby", "kolt", "hiaki", "tou"], enemies: [{ id: "thug_knife", lv: 1, zone: 1 }, { id: "thug_knife", lv: 1, zone: 1 }] });   // 两个敌人：同区只有一个时被决一死战拦着，只打得到灯
   c.startCombat();
   return { c, st: c.S.state };
 }

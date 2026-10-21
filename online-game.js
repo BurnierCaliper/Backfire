@@ -5,7 +5,7 @@
   const PROTOCOL = 1, BUILD = "backfire-d3-v1", KEY = "backfire-online-v1";
   const copy = v => JSON.parse(JSON.stringify(v));
   const listeners = new Set(), packetListeners = new Set(), pending = new Map(), requests = new Map(), requestHighWater = new Map();
-  const gmContext = Object.freeze({}), controls = new Set(["orderPick", "orderConfirm", "orderMove", "orderSwapAccept", "answer", "chat", "checkOpen", "checkRoll", "checkClose", "attrRequest", "attrDecide", "skillRoll", "showTitle", "purseTransfer", "shopBuy", "shopRedeem", "cyberRequest"]);
+  const gmContext = Object.freeze({}), controls = new Set(["orderPick", "orderConfirm", "orderMove", "orderSwapAccept", "answer", "chat", "checkOpen", "checkRoll", "checkClose", "attrRequest", "attrDecide", "skillRoll", "showTitle", "purseTransfer", "shopBuy", "shopRedeem", "cyberRequest", "cyberwareInstall", "cyberwareRemove"]);
   const messageContexts = new WeakMap();
   const recipientWires = new Map(), displayWire = OnlineWire.create();
   let endpoint = null, identity = null, status = { connected: false, paused: true, roster: [] }, active = false;
@@ -48,22 +48,48 @@
       packet: isHost() ? { state, view: HotseatGame.getView(), messages: messages.slice(-300), publicLogs: OnlineView.projectLogs(publicLogs), systemNotice } : remote,
       state: isHost() ? state : remote?.state, messages: isHost() ? messages.slice(-300) : remote?.messages || [],
       heroes: isHost() ? (rogue() ? rogueHeroes() : HotseatGame.getView().heroes) : remote?.view?.heroes || [], offlineWait: copy(isHost() ? offlineWait : remote?.offlineWait || null),
-      manualPhase: isHost() ? manualPhase : !!remote?.manualPhase };
+      manualPhase: isHost() ? manualPhase : !!remote?.manualPhase,
+      // 克制表（matchup.js）：房主按战场现状算，玩家读房主发来的（packet.matchup）
+      matchup: isHost() ? matchupNow() : remote?.matchup || null };
   }
+  /** 克制表：当前天气 + 当前行动单位所在区的冻土 / 恶劣环境 + 相位（matchup.js · matchupForState）。不含坚毅 */
+  function matchupNow() {
+    // 顶层：只看环境（和以前一样，按房主当前行动单位所在区）；units：每个看得见的单位作为受击者各一份（选中谁就用谁的），不含血量、坚毅
+    try {
+      if (typeof matchupForState !== "function") return null;
+      const m = matchupForState(state, root.GAME && GAME.actorId, { defender: false });
+      if (typeof matchupUnitCharts === "function") m.units = matchupUnitCharts(state);
+      return m;
+    } catch (e) { return null; }
+  }
+  let leftRoom = false;   // 玩家点了「离开房间」：之后（包括刷新时的 pagehide）不再覆盖存档里的 left 标记
   function save() {
-    if (!endpoint || !identity) return;
+    if (!endpoint || !identity || leftRoom) return;
     const data = { version: 1, credentials: endpoint.credentials(), identity, requestNo, savedAt: Date.now() };
     if (isHost()) Object.assign(data, { mode, levelUps: typeof LevelUp !== "undefined" ? LevelUp.save() : [], game: GAME.onlineCheckpoint(), hotseat: HotseatGame.checkpoint(pausedAt ?? Date.now()),
       trpg: rogue() ? null : TrpgFlow.onlineCheckpoint(), rogue: rogue() ? RunFlow.onlineCheckpoint() : null,
       gm: GMCommands.snapshot(), screen: Screens.current(), started, seq, messageNo, messages, publicLogs, settledResult, systemNotice, offlineWait, requests: [...requests].slice(-200), requestHighWater: [...requestHighWater] });
     try { localStorage.setItem(KEY, JSON.stringify(data)); storageError = false; } catch (_) { storageError = true; }
   }
+  /** 倒计时换成本机的钟：房主发来「还剩多少毫秒」，按收到这一包的时刻算本机的截止时间（播动画的延迟不算进去） */
+  function localDeadlines(packet, at) {
+    const ask = packet && packet.view && packet.view.ask;
+    if (ask && Number.isFinite(ask.remainingMs)) ask.deadline = at + ask.remainingMs;
+    const wait = packet && packet.offlineWait;
+    if (wait && Number.isFinite(wait.remainingMs)) wait.deadline = at + wait.remainingMs;
+  }
   function readSaved() { try { const v = JSON.parse(localStorage.getItem(KEY)); return v?.version === 1 ? v : null; } catch (_) { return null; } }
-  function rawPacket(id, type = "result", tape = [], result = null) {
+  function rawPacket(id, type = "result", tape = [], result = null, fx = null) {
     const view = HotseatGame.getViewFor(id); view.players = roster(); view.network = true;
     return { protocol: PROTOCOL, build: BUILD, type, seq, state, tape, result: result || settledResult, view, screen: liveScreen(),
-      roomCode: identity.roomCode, hostName: identity.name, paused: isPaused(), messages, publicLogs, manualPhase, offlineWait, systemNotice,
-      mode, rogue: rogue() ? OnlineRogue.viewFor(id) : null, levelUps: levelUpsFor(id),
+      fx,   // 这一下的攻击演出（谁打谁、哪种招式；game.js · strikePlan），玩家画面照着播出手和弹道
+      roomCode: identity.roomCode, hostName: identity.name, paused: isPaused(), messages, publicLogs, manualPhase, systemNotice,
+      offlineWait: offlineWait ? { ...offlineWait, remainingMs: Math.max(0, offlineWait.deadline - Date.now()) } : null,
+      mode, matchup: matchupNow(), rogue: rogue() ? OnlineRogue.viewFor(id) : null, levelUps: levelUpsFor(id),
+      // 义体（单局诊所）：自己操控的角色的义体视图和诊所目录（online-rogue.js · cyberwareFor；online-view.js · projectCyberware 白名单 + scrubHidden）
+      // 跑团：诊所开着时同样的 { heroes:[{kit,name,purse,view,shop,previews}] }（trpg.js · trpgCyberwarePacket）
+      cyberware: rogue() ? (OnlineRogue.cyberwareFor ? OnlineRogue.cyberwareFor(id) : null)
+        : typeof trpgCyberwarePacket === "function" && typeof TRPG !== "undefined" && TRPG.active && TRPG.clinicOpen ? trpgCyberwareFor(id, id === identity.id) : null,
       // 任务日志（跑团）：房主按收件人挑好（草稿、没指定给他的不给），online-view.js 再按白名单投影
       quests: !rogue() && typeof trpgQuestLog === "function" ? trpgQuestLog(id, id === identity.id, kitsOwnedBy(id)) : null,
       // 跑团私人钱包：自己操控的角色看得到余额，队友只给名字（转账用）；主持人看全部（online-view.js · projectPurse）
@@ -82,12 +108,12 @@
     if (!recipientWires.has(id)) recipientWires.set(id, OnlineWire.create());
     return endpoint.send(recipientWires.get(id).pack(safe), id).catch(e => { if (status.connected) { notice = e.message; notify(); } });
   }
-  function publish(tape = [], result = null) {
+  function publish(tape = [], result = null, fx = null) {
     if (!isHost() || !HotseatGame.isActive()) return;
     if (manualResolve && GAME.ended) { const finish = manualResolve; manualResolve = null; manualPhase = false; finish(); }
     if ((!state.combatStarted || GAME.ended) && HotseatGame.getView().players.map(p => p.id).join("|") !== roster().map(p => p.id).join("|")) setupOperators();
     seq++;
-    for (const p of status.roster) if (p.role !== "host" && p.online) sendProjected(p.id, rawPacket(p.id, "result", tape, result));
+    for (const p of status.roster) if (p.role !== "host" && p.online) sendProjected(p.id, rawPacket(p.id, "result", tape, result, fx));
     save(); notify();
   }
   function resync(id) { if (isHost() && HotseatGame.isActive()) return sendProjected(id, rawPacket(id, "resync")); }
@@ -100,6 +126,11 @@
       return { kit, name: info.name, purse: trpgPurse(kit), cyber: { current: info.current, limit: info.limit, rate: info.rate, fleshMax: info.fleshMax, perHp: info.perHp },
         request: req ? { status: req.status, cost: req.cost, note: req.note } : null };
     }).filter(Boolean) };
+  }
+  function trpgCyberwareFor(id, isGM) {
+    const mine = isGM ? (typeof trpgHeroes === "function" ? trpgHeroes().map(h => h.kit) : []) : kitsOwnedBy(id);
+    const heroes = mine.map(kit => { try { return trpgCyberwarePacket(kit); } catch (e) { return null; } }).filter(Boolean);
+    return heroes.length ? { heroes } : null;
   }
   function purseFor(id, isGM) {
     const mine = isGM ? null : kitsOwnedBy(id);
@@ -238,8 +269,13 @@
         HotseatGame.system({ type: "screen", action: "show", name: saved.screen || (rogue() ? "run" : "trpg") });
         // 单局战斗打到一半刷新：结算面板的「继续」重新接回单局
         if (rogue() && Screens.is("battle") && RunFlow.battleSpecLite()) GAME.resumeRogueBattle(RunFlow.battleSpecLite(), RunFlow.battleEnd);
+        // 单局在战斗外恢复：存档里可能还带着上一场战斗的状态（combatStarted / 已结束），
+        // 这时接着跑战斗流程会判「敌人全灭」，弹出过期的「胜利 · 第1回合结束」结算面板。战斗外不接战斗流程，面板也收起
+        const outOfBattle = rogue() && !Screens.is("battle");
+        if (outOfBattle) { const panel = root.document && document.getElementById("g-result"); if (panel) panel.classList.remove("show");
+          const reopen = root.document && document.getElementById("g-reopen"); if (reopen) reopen.classList.remove("show"); }
         restoring = false; await ready(); publish();
-        (saved.hotseat?.openingChoice && !state.combatStarted ? GAME.startOrEnd() : GAME.resumeOnline()).catch(reportError);
+        if (!outOfBattle) (saved.hotseat?.openingChoice && !state.combatStarted ? GAME.startOrEnd() : GAME.resumeOnline()).catch(reportError);
       } else { restoring = false; return join({ ...c, name: saved.identity.name, resumeToken: c.token }); }
     } finally { restoring = false; }
     return getView();
@@ -400,6 +436,7 @@
     const currentEpoch = epoch;
     if (packet.type === "resync") { epoch++; animation = Promise.resolve(); awaitingResync = false; }
     const incomingEpoch = packet.type === "resync" ? epoch : currentEpoch;
+    localDeadlines(packet, Date.now());
     animation = animation.then(async () => {
       if (incomingEpoch !== epoch) return;
       for (const fn of packetListeners) { if (incomingEpoch !== epoch) return; await fn(copy(packet)); if (incomingEpoch !== epoch) return; }
@@ -470,6 +507,27 @@
     } catch (_) { /* 取不到就用通用名 */ }
     return { __move: "移动", __item: "使用道具", __stand: "起身" }[id] || "行动";
   }
+  /** 这一下的结算摘要（战场日志用）：按单位合计伤害 / 击破 / 治疗，和弹出的状态字（失衡、倒下、感电……）。
+   *  只用玩家画面上本来就看得到的那些弹字：落在坚毅生命上（起身 / 濒死 / 死亡）的伤害和治疗不写数字，online-view.js · projectLogs 再过一遍白名单 */
+  function hitSummary(tape) {
+    const rows = new Map();
+    (tape || []).forEach(ev => {
+      if (!ev || ev.type !== "pop" || !ev.unitId) return;
+      const u = state.units.find(x => x.id === ev.unitId), snap = (ev.snap || []).find(x => x && x.id === ev.unitId) || u;
+      if (!u) return;
+      const row = rows.get(u.id) || { name: u.name, dmg: 0, brk: 0, heal: 0, words: [], aliveBefore: !(snap && (snap.dead || snap._removed)) };
+      const hpVisible = snap && !snap.upOnShp && !snap.dying && !snap.dead;
+      const n = Math.floor(Number(ev.value) || 0);
+      if (ev.kind === "dmg" && hpVisible) row.dmg += n;
+      else if (ev.kind === "heal" && hpVisible) row.heal += n;
+      else if (ev.kind === "break") row.brk += n;
+      if (ev.text && !row.words.includes(ev.text)) row.words.push(String(ev.text));
+      if (ev.kind === "dmg" && ev.adv && !row.words.includes("克制")) row.words.push("克制");
+      rows.set(u.id, row);
+    });
+    rows.forEach((r, id) => { const u = state.units.find(x => x.id === id); if (r.aliveBefore && u && !u.isPlayer && u.dead && !r.words.includes("被打倒")) r.words.push("被打倒"); delete r.aliveBefore; });
+    return [...rows.values()].filter(r => r.dmg || r.brk || r.heal || r.words.length).slice(0, 12);
+  }
   function onActionSettled(cmd, result, tape, meta) {
     if (!isHost() || restoring) return;
     if (!meta.onlineError && result?.executed !== false) systemNotice = "";
@@ -481,11 +539,11 @@
       if (cmd.type?.startsWith("gm.")) publicLogs.push({ kind: "gm", summary: { "gm.editUnit": "主持人更新了单位数据", "gm.setWeather": "主持人更新了天气", "gm.addProp": "主持人添加了配置物" }[cmd.type] || "主持人调整了战场",
         action: cmd.type === "gm.spawnEnemy" ? "spawn" : cmd.type === "gm.removeUnit" ? cmd.mode : cmd.type === "gm.removeProp" ? (cmd.mode === "destroy" ? "propDestroy" : "propRemove") : cmd.type === "gm.setManual" ? (cmd.enabled ? "manualOn" : "manualOff") : "edit",
         unitName: cmd.type === "gm.spawnEnemy" ? enemyPresets().find(p => p.id === cmd.enemyId)?.name : meta.unitName, propName: meta.propName, zone: cmd.zone, level: cmd.level, at: Date.now() });
-      else if (actor) publicLogs.push({ kind: "action", actorName: actor.name, actionName: (meta.skillName && meta.skillName !== cmd.skill && meta.skillName !== cmd.type ? meta.skillName : actionLabel(cmd)), at: Date.now() });
+      else if (actor) publicLogs.push({ kind: "action", actorName: actor.name, actionName: (meta.skillName && meta.skillName !== cmd.skill && meta.skillName !== cmd.type ? meta.skillName : actionLabel(cmd)), hits: hitSummary(tape), turn: state.turnNo, at: Date.now() });
       else publicLogs.push({ kind: "phase", phase: state.combatPhase, turn: state.turnNo, at: Date.now() });
       publicLogs = publicLogs.slice(-100);
     }
-    publish(tape, result);
+    publish(tape, result, meta.fx || null);
   }
   function offlineTick() {
     if (!isHost() || isPaused() || !HotseatGame.isActive()) return;
@@ -532,7 +590,7 @@
   root.OnlineGame = { PROTOCOL, BUILD, create, join, resume, submit, getView, isHost, isPaused, waitUntilReady, manualEnemyPhase, onActionSettled, flushGM, queueHostEdit, legacyAddedEnemies, reportError,
     takeAIResume() { const value = resumeAI; resumeAI = false; return value; },
     hasSaved: () => !!readSaved(),
-    savedInfo: () => { const s = readSaved(); return s ? { role: s.credentials?.role || "", roomCode: s.credentials?.roomCode || "", name: s.identity?.name || "" } : null; }, slots: () => trpgReadSlots().map((s, index) => ({ index, name: s?.name || "空白存档" })),
+    savedInfo: () => { const s = readSaved(); return s ? { role: s.credentials?.role || "", roomCode: s.credentials?.roomCode || "", name: s.identity?.name || "", left: !!s.left } : null; }, slots: () => trpgReadSlots().map((s, index) => ({ index, name: s?.name || "空白存档" })),
     assign(assignments) {
       if (!isHost()) error("只有主持人可以分配角色");
       if (rogue()) {
@@ -552,7 +610,7 @@
       const want = OnlineRogue.assignmentsFor(state.units.filter(u => u.isPlayer && !u.weaponOf));
       const view = HotseatGame.isActive() ? HotseatGame.getView() : null;
       const same = view && view.heroes.every(h => (want[h.id] || identity.id) === h.owner) && view.players.map(p => p.id).join("|") === roster().map(p => p.id).join("|");
-      if (same) return;
+      if (same) { if (OnlineRogue.inBattle()) HotseatGame.syncAssignments(); return; }
       try { setupOperators(want); } catch (e) { notice = e.message; }
     },
     /** 接管：玩家掉线时，房主把他的角色（连同武器人）接过来自己操作。战斗中也可以；
@@ -617,7 +675,13 @@
     subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     onPacket(fn) { packetListeners.add(fn); return () => packetListeners.delete(fn); },
     reconnect: () => endpoint?.reconnect(),
-    leave() { save(); endpoint?.close(); epoch++; active = false; location.reload(); }
+    // 玩家主动离开：存档标上 left，刷新后不再自动回房（以前照存照回，玩家点「离开房间」又被拉回去），标题页留「回到房间」按钮；
+    // 主持人「离开并保存」照旧（主持人本来就不自动回房）
+    leave() {
+      save();
+      if (!isHost()) { leftRoom = true; const s = readSaved(); if (s) { s.left = true; try { localStorage.setItem(KEY, JSON.stringify(s)); } catch (_) {} } }
+      endpoint?.close(); epoch++; active = false; location.reload();
+    }
   };
   const boot = () => { if (root.OnlineGMUI) OnlineGMUI.mount(root.OnlineGame); };
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();

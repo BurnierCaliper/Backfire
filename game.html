@@ -15,6 +15,10 @@
   <link rel="stylesheet" href="online.css" />
   <link rel="stylesheet" href="online-gm-ui.css" />
   <link rel="stylesheet" href="hud-icons.css" />
+  <link rel="stylesheet" href="workshop.css" />
+  <link rel="stylesheet" href="backpack.css" />
+  <link rel="stylesheet" href="matchup.css" />
+  <link rel="stylesheet" href="cyberware.css" />
   <link rel="stylesheet" href="weather-fx.css" />
 </head>
 <body>
@@ -45,7 +49,7 @@
         <button class="t-btn" id="t-new"><b>新的一局</b><small id="t-new-sub"></small></button>
         <button class="t-btn" id="t-daily"><b>每日挑战</b><small id="t-daily-sub">今天的固定种子：随机队伍、专长 4 选 1，大家打同一局</small></button>
         <button class="t-btn" id="t-solo"><b>单人模式</b><small>一名主角 + 三名伙伴支援：每回合 2 行动点，能给自己协助格挡 / 协助攻击</small></button>
-        <button class="t-btn" id="t-growth"><b>长线养成</b><small>测试用：两名角色起步，没有期限，接任务赚钱升级；完成任务拿赫心融合体抽角色</small></button>
+        <button class="t-btn" id="t-growth"><b>长线养成</b><small id="t-growth-sub">独立存档 · 不影响普通单局</small></button>
         <button class="t-btn" id="t-training"><b>训练场</b><small>单人对训练假人手动打 8 回合，记每回合伤害，和自动搜出来的输出循环对照</small></button>
       </div>
     </div>
@@ -81,6 +85,7 @@
     <span class="run-supplies" id="run-supplies"></span>
     <span class="spacer"></span>
     <button class="g-btn" id="run-map" title="角鳞星地图：看看现在在哪、各幕要去哪">地图</button>
+    <button class="g-btn" id="r-matchup" title="属性 × 血量层的克制表（常态天气）" hidden>克制表</button>
     <button class="g-btn" id="run-bestiary" title="图鉴：敌人、配置物和所有效果">图鉴</button>
     <button class="g-btn" id="run-title" title="进度已自动保存">存档并回到标题</button>
   </header>
@@ -132,6 +137,8 @@
     <span class="g-round" id="g-round">第 1 回合</span>
     <span class="g-phase" id="g-phasel">我方行动</span>
     <button class="g-btn mobile-only" id="g-log-open" title="战斗记录">记录</button>
+    <button class="g-btn" id="g-backpack" title="背包（战斗中只读）">背包</button>
+    <button class="g-btn" id="g-matchup" title="属性 × 血量层的克制表（随时能看，不打断回合）" hidden>克制表</button>
     <span class="g-weather" id="g-weather">天气 常态</span>
     <span class="g-clock" id="g-clock"></span>
     <label style="font-size:13px;color:var(--muted);display:flex;gap:6px;align-items:center">天气
@@ -863,6 +870,9 @@ window.GAME_MODE = true;
 <script src="growth.js"></script>
 <script src="feats.js"></script>
 <script src="items.js"></script>
+<script src="inventory.js"></script>
+<script src="matchup.js"></script>
+<script src="cyberware.js"></script>
 <script src="ledger.js"></script>
 <script src="commands.js"></script>
 <script src="app.js"></script>
@@ -896,6 +906,7 @@ window.GAME_MODE = true;
 <script src="sfx-samples.js"></script>
 <script src="sfx.js"></script>
 <script src="hit-fx.js"></script>
+<script src="attack-fx.js"></script>
 <script src="icons.js"></script>
 <script src="hud-icons.js"></script>
 <script src="unit-tip.js"></script>
@@ -910,6 +921,11 @@ window.GAME_MODE = true;
 <script src="screens.js"></script>
 <script src="training.js"></script>
 <script src="routemap.js"></script>
+<script src="workshop-data-adapter.js"></script>
+<script src="workshop-ui.js"></script>
+<script src="backpack-ui.js"></script>
+<script src="matchup-ui.js"></script>
+<script src="cyberware-ui.js"></script>
 <script src="rogue-ui.js"></script>
 <script src="trpg-ui.js"></script>
 <script src="hotseat-game.js"></script>

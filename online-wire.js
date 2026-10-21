@@ -120,13 +120,51 @@
     }
     return 0;
   }
+  // 克制表（packet.matchup）：units[id] 只发和顶层表不同的部分（diffNode），整张表没变就不发（matchupUnchanged）
+  const plain = v => object(v) && !Array.isArray(v);
+  function diffNode(base, value) {
+    const set = {}, sub = {}, unset = [];
+    for (const key of Object.keys(value)) {
+      if (own(base, key) && equal(base[key], value[key])) continue;
+      if (own(base, key) && plain(base[key]) && plain(value[key])) sub[key] = diffNode(base[key], value[key]);
+      else set[key] = value[key];
+    }
+    for (const key of Object.keys(base)) if (!own(value, key)) unset.push(key);
+    const out = {};
+    if (Object.keys(set).length) out.set = set;
+    if (Object.keys(sub).length) out.sub = sub;
+    if (unset.length) out.unset = unset;
+    return out;
+  }
+  function applyNode(base, node) {
+    if (!plain(base) || !plain(node)) fail("invalid matchup diff");
+    const out = clone(base);
+    if (own(node, "unset")) { if (!Array.isArray(node.unset)) fail("invalid matchup diff"); for (const key of node.unset) delete out[key]; }
+    if (own(node, "set")) { if (!plain(node.set)) fail("invalid matchup diff"); for (const key of Object.keys(node.set)) out[key] = clone(node.set[key]); }
+    if (own(node, "sub")) { if (!plain(node.sub)) fail("invalid matchup diff"); for (const key of Object.keys(node.sub)) out[key] = applyNode(own(out, key) ? out[key] : {}, node.sub[key]); }
+    return out;
+  }
+  function packMatchup(m) {
+    if (!plain(m) || !plain(m.units)) return m;
+    const { units, ...top } = m, out = { ...top, unitsDiff: {} };
+    for (const id of Object.keys(units)) out.unitsDiff[id] = plain(units[id]) ? diffNode(top, units[id]) : { value: units[id] };
+    return out;
+  }
+  function unpackMatchup(m) {
+    if (!plain(m) || !own(m, "unitsDiff")) return m;
+    if (own(m, "units") || !plain(m.unitsDiff)) fail("invalid matchup diff");
+    const { unitsDiff, ...top } = m, units = {};
+    for (const id of Object.keys(unitsDiff)) units[id] = own(unitsDiff[id], "value") ? unitsDiff[id].value : applyNode(top, unitsDiff[id]);
+    return { ...top, units };
+  }
   function create() {
     let encoded = {}, decoded = {}, hasEncoded = false, hasDecoded = false;
-    function reset() { encoded = {}; decoded = {}; hasEncoded = hasDecoded = false; }
+    let sentMatchup = null, hasSentMatchup = false, gotMatchup = null, hasGotMatchup = false;
+    function reset() { encoded = {}; decoded = {}; hasEncoded = hasDecoded = false; sentMatchup = gotMatchup = null; hasSentMatchup = hasGotMatchup = false; }
     function pack(input) {
       const packet = packetData(input);
       if (!["result", "resync"].includes(packet.type)) return packet;
-      if (own(packet, "wireFormat") || own(packet, "historyFull") || own(packet, "historyLengths")) fail("packet is already packed");
+      if (own(packet, "wireFormat") || own(packet, "historyFull") || own(packet, "historyLengths") || own(packet, "matchupUnchanged")) fail("packet is already packed");
       let full = !hasEncoded || packet.type === "resync";
       const lengths = {}, deltas = {}, next = { ...encoded };
       for (const key of histories) if (own(packet, key)) {
@@ -139,6 +177,14 @@
       const result = { ...packet, wireFormat: FORMAT, historyFull: full, historyLengths: lengths };
       for (const key of histories) if (own(packet, key)) result[key] = full ? packet[key] : deltas[key];
       if (own(packet, "tape")) result.tape = packTape(packet.tape);
+      let nextMatchup = sentMatchup, nextHasMatchup = hasSentMatchup;
+      if (own(packet, "matchup")) {
+        const json = JSON.stringify(packet.matchup);
+        if (hasSentMatchup && packet.type !== "resync" && json === sentMatchup) { delete result.matchup; result.matchupUnchanged = true; }
+        else result.matchup = packMatchup(packet.matchup);
+        nextMatchup = json; nextHasMatchup = true;
+      }
+      sentMatchup = nextMatchup; hasSentMatchup = nextHasMatchup;
       // Commit only after every field was checked and encoded successfully.
       encoded = full ? Object.fromEntries(histories.filter(key => own(packet, key)).map(key => [key, next[key]])) : next;
       hasEncoded = true; return result;
@@ -163,8 +209,14 @@
         result[key] = length ? clone(rows.slice(-length)) : []; next[key] = clone(result[key]);
       }
       if (own(packet, "tape")) result.tape = unpackTape(packet.tape);
+      let nextGot = gotMatchup, nextHasGot = hasGotMatchup;
+      if (own(packet, "matchupUnchanged")) {
+        if (packet.matchupUnchanged !== true || own(packet, "matchup") || !packed) fail("invalid matchup metadata");
+        if (!hasGotMatchup || packet.type === "resync") fail("matchup omission requires a baseline");
+        result.matchup = clone(gotMatchup); delete result.matchupUnchanged;
+      } else if (own(packet, "matchup")) { result.matchup = unpackMatchup(packet.matchup); nextGot = clone(result.matchup); nextHasGot = true; }
       delete result.wireFormat; delete result.historyFull; delete result.historyLengths;
-      decoded = next; hasDecoded = true; return result;
+      decoded = next; hasDecoded = true; gotMatchup = nextGot; hasGotMatchup = nextHasGot; return result;
     }
     return { pack, unpack, reset };
   }

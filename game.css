@@ -482,7 +482,9 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
   white-space: nowrap;
 }
 .chip.new { background: rgba(255, 255, 255, .3); }
-.u-res { font-size: 11px; color: var(--ink-soft); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.u-res { font-size: 11px; color: var(--ink-soft); margin-top: 4px; overflow-wrap: anywhere; }
+/* 首领机制的倒计时（「死刑→某某 · 还有 2 回合」）比较长：窄卡片上允许折行，不撑出卡外 */
+.chip.mech-chip { white-space: normal; overflow-wrap: anywhere; }
 
 /* 状态外观 */
 .unit-wrap.stunned .unit { filter: grayscale(.55) brightness(.85); }
@@ -568,6 +570,10 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
 
 /* ---------- 演出层 ---------- */
 .g-fx { position: fixed; inset: 0; pointer-events: none; z-index: 30; }
+/* 叠放：单位卡 < 受击粒子（hit-fx.js）< 攻击演出（attack-fx.js：刀光、弹道）< 伤害数字（.g-fx）——
+ * 刀光不被火焰粒子盖住，数字永远在最上面看得清。联机玩家画面的战场是 z-index 40 的一层，两块画布都抬到它上面 */
+body:not(.online-player) #hit-fx { z-index: 28 !important; }
+body.online-player #atk-fx { z-index: 91 !important; }
 .pop {
   position: absolute;
   font-family: var(--num);
@@ -613,6 +619,13 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
 .dmg-energy { color: #6fb6bc; } .dmg-physical { color: #d8955c; } .dmg-acid { color: #82b282; } .dmg-harmonic { color: #b48ccb; }
 
 .g-app.hitstop .g-field { filter: saturate(.72) contrast(1.06); }
+/* 镜头推近（协助攻击、碎渣重炮、狂瀑）：以目标为中心，战场四周压一圈暗角；战场外的界面在 game.js · zoomIn 里压暗 */
+.g-field::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  opacity: 0; transition: opacity .25s ease-out;
+  background: radial-gradient(ellipse at var(--focus-x, 50%) var(--focus-y, 50%), rgba(18, 15, 13, 0) 42%, rgba(18, 15, 13, .4) 100%);
+}
+.g-app.assist-focus .g-field::after, .ol-battle.assist-focus .g-field::after { opacity: 1; }
 .g-app.hitstop .unit-wrap.hit .unit { animation-duration: .48s; }
 .unit-wrap.hit .unit { animation: hitShake .24s linear; }
 @keyframes hitShake {
@@ -622,6 +635,40 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
   60% { transform: translate(-4px, 1px); }
   80% { transform: translate(2px, 0); }
   100% { transform: translate(0, 0); }
+}
+/* 有攻击方向的受击（game.js · hit 的 from）：顺着挨打的方向被打退一下、歪一点，再弹回来 */
+.unit-wrap.hit.knock .unit { animation: hitKnock .34s cubic-bezier(.2, .9, .3, 1); }
+.g-app.hitstop .unit-wrap.hit.knock .unit { animation-duration: .6s; }
+@keyframes hitKnock {
+  0% { transform: translate(0, 0); }
+  16% { transform: translate(var(--kx, 8px), var(--ky, 0px)) rotate(var(--kr, 2deg)); }
+  42% { transform: translate(calc(var(--kx, 8px) * -.22), calc(var(--ky, 0px) * -.22)) rotate(calc(var(--kr, 2deg) * -.4)); }
+  70% { transform: translate(calc(var(--kx, 8px) * .08), calc(var(--ky, 0px) * .08)); }
+  100% { transform: translate(0, 0); }
+}
+/* 专属演出（attack-fx.js · SCRIPTS）临时挂在卡片上的样式：发抖（龙哥饮弹前）、被打飞（小朋友升龙拳 / 撼地拳）、变回武器消失（伯妮尔焰袭）。
+ * 用单独的 translate / rotate / scale：和出手的 transform（冲过去、后坐）叠在一起，互不抢 */
+.unit-wrap.fx-tremble { animation: fxTremble .6s linear; }
+@keyframes fxTremble {
+  0%, 100% { translate: 0 0; }
+  10% { translate: -2px 1px; } 20% { translate: 2px -1px; } 30% { translate: -3px 0; } 40% { translate: 3px 1px; }
+  50% { translate: -2px -1px; } 60% { translate: 3px 0; } 70% { translate: -3px 1px; } 80% { translate: 2px -1px; } 90% { translate: -1px 0; }
+}
+.unit-wrap.fx-knockfly { animation: fxKnockFly .7s cubic-bezier(.2, .8, .3, 1); z-index: 4; }
+@keyframes fxKnockFly {
+  0% { translate: 0 0; rotate: 0deg; }
+  28% { translate: calc(var(--kx, 8px) * 1.6) -56px; rotate: calc(var(--kr, 2deg) * -4); }
+  62% { translate: calc(var(--kx, 8px) * .4) 4px; rotate: var(--kr, 2deg); }
+  78% { translate: 0 -8px; rotate: 0deg; }
+  100% { translate: 0 0; rotate: 0deg; }
+}
+.unit-wrap.fx-vanish { animation: fxVanish .6s ease-out forwards; }
+@keyframes fxVanish {
+  0% { opacity: 1; scale: 1; }
+  45%, 100% { opacity: 0; scale: .45; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .unit-wrap.fx-tremble, .unit-wrap.fx-knockfly { animation: none; }
 }
 .unit-wrap .flash {
   position: absolute;
@@ -799,6 +846,13 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
   justify-content: center;
 }
 .choice.show { display: flex; }
+/* 跟战场有关的问题（协助格挡 / 协助攻击）：问题框贴到底部、盖住技能栏，战场只压一点暗——
+ * 看得见是谁打谁（attack-fx.js 画的红色虚线）和闪白的预演血条 */
+.choice.dock {
+  align-items: flex-end;
+  padding-bottom: 14px;
+  background: linear-gradient(180deg, rgba(4, 3, 2, .05) 0%, rgba(4, 3, 2, .12) 48%, rgba(4, 3, 2, .82) 100%);
+}
 .choice-card {
   min-width: 600px;
   max-width: min(860px, 92vw);
@@ -894,7 +948,7 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
 .g-app.busy .skills { opacity: .55; }
 
 @media (prefers-reduced-motion: reduce) {
-  .unit-wrap.hit .unit { animation: none; }
+  .unit-wrap.hit .unit, .unit-wrap.hit.knock .unit { animation: none; }
   .pop, .pop.big { animation-name: popFade; }
   @keyframes popFade { 0% { opacity: 1; } 100% { opacity: 0; } }
   .seg .pv.sure, .seg .pv.maybe, .pip.pv, .unit-wrap.pv-stun::after { animation: none; }
@@ -921,7 +975,10 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
 .g-zone.dense-3 { gap: 4px; padding-top: 22px; justify-content: flex-start; overflow-y: auto; }
 .g-zone.dense-3 .grp { gap: 5px; }
 .g-zone.dense-3 .unit { width: 136px; padding: 5px 7px 4px 10px; }
-.g-zone.dense-3 .u-atk, .g-zone.dense-3 .shpn, .g-zone.dense-3 .u-status { display: none !important; }
+.g-zone.dense-3 .u-atk, .g-zone.dense-3 .shpn { display: none !important; }
+/* 最挤的一级也不藏状态 / 首领机制倒计时：字号缩小，放不下就在区里滚动（以前整行藏掉，玩家看不到还有几回合落下） */
+.g-zone.dense-3 .u-status { gap: 2px; }
+.g-zone.dense-3 .chip { font-size: 9.5px; line-height: 13px; padding: 0 3px; }
 .g-zone.dense-3 .u-res { font-size: 10px; margin-top: 2px; line-height: 1.25; }
 .g-zone.dense-3 .u-name { font-size: 12px; }
 .g-zone.dense-3 .u-head { margin-bottom: 3px; }
@@ -1612,6 +1669,10 @@ body.trpg .trpg-only { display: flex !important; }
 .unit-wrap.overkill .hpn b.neg { color: #d8342c; font-size: 1.15em; }
 /* 一记重击打死：先停一会儿，再慢慢淡出 */
 .unit-wrap.dead.dead-slow { transition: opacity 2.4s ease-in 1.4s; }
+/* 这一段攻击演出还没放完：被打倒的敌人先留在场上（带红叉），演完再按上面的节奏淡出（game.js · releaseKOs） */
+.unit-wrap.dead.ko-held, .unit-wrap.dead.dead-slow.ko-held { opacity: 1; transition: none; }
+/* 规则层已经把它从场上拿掉了：还没淡完的快点淡掉，再移除 */
+.unit-wrap.dead.gone, .unit-wrap.dead.dead-slow.gone { opacity: 0; transition: opacity .45s ease-in; }
 /* 高能自爆 */
 .stamp.boom {
   color: var(--energy, #36c3d6); font-size: 64px;
@@ -1619,7 +1680,15 @@ body.trpg .trpg-only { display: flex !important; }
   animation-duration: 1.5s;
 }
 .pop.boom { filter: drop-shadow(0 0 10px rgba(80, 220, 240, .85)); }
-.g-app.quake .g-field { animation: quake .55s cubic-bezier(.36, .07, .19, .97); }
+.g-app.quake .g-field, .ol-battle.quake .g-field { animation: quake .55s cubic-bezier(.36, .07, .19, .97); }
+/* 小震：连射、重击的余震（attack-fx.js 脚本里的 c.shake(小于 1)） */
+.g-app.quake-s .g-field, .ol-battle.quake-s .g-field { animation: quakeS .32s cubic-bezier(.36, .07, .19, .97); }
+@keyframes quakeS {
+  20%, 80% { transform: translate(2px, -1px); }
+  40%, 60% { transform: translate(-3px, 2px); }
+  50% { transform: translate(3px, -1px); }
+}
+@media (prefers-reduced-motion: reduce) { .g-app.quake-s .g-field, .ol-battle.quake-s .g-field { animation: none; } }
 @keyframes quake {
   10%, 90% { transform: translate(-2px, 1px); }
   20%, 80% { transform: translate(5px, -3px); }
@@ -2217,8 +2286,8 @@ body:not([data-screen="battle"]) .g-rank { display: none !important; }
 .g-zone.tower.tower-short { box-shadow: inset 0 0 0 5px #d62f2f, inset 0 0 40px rgba(214, 47, 47, .15); }
 .g-zone.tower.tower-ready { animation: towerPulse .9s ease-in-out infinite alternate; }
 @keyframes towerPulse { from { filter: none; } to { filter: drop-shadow(0 0 10px rgba(31, 168, 154, .8)); } }
-.ztower { position: absolute; top: 8px; right: 10px; z-index: 3; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; pointer-events: auto; }
-.ztower span { padding: 2px 8px; font-size: 12px; font-weight: 800; color: #fff; background: #1fa89a; white-space: nowrap; }
+.ztower { position: absolute; top: 8px; right: 10px; z-index: 3; max-width: calc(100% - 20px); display: flex; flex-direction: column; align-items: flex-end; gap: 3px; pointer-events: auto; }
+.ztower span { padding: 2px 8px; font-size: 12px; font-weight: 800; color: #fff; background: #1fa89a; text-align: right; overflow-wrap: anywhere; }
 .ztower span.short { background: #d62f2f; }
 @media (prefers-reduced-motion: reduce) { .g-zone.tower.tower-ready { animation: none; } }
 .chip.cast-share { background: #1b1f24; color: #ffc233; font-weight: 800; }
@@ -2320,3 +2389,9 @@ body:not([data-screen="battle"]) .g-rank { display: none !important; }
 .rr-moon { background: radial-gradient(circle at 35% 35%, #f4f1e6 40%, #c9c3b0 75%); box-shadow: 0 0 18px 4px rgba(220, 220, 255, .35); opacity: 0; }
 .rr-clock { position: absolute; left: 12px; bottom: 8px; font-family: var(--num, sans-serif); font-size: 22px; color: var(--bone); text-shadow: 0 1px 3px #000; }
 .tr-wallets { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 4px 0 6px; }
+/* 整局数据 · 单回合最高爆发（sheet-ui.js · CareerLog.burstHtml） */
+.cl-burst-btn { font: inherit; color: var(--gold, #d8b25a); background: none; border: 0; border-bottom: 1px dashed currentColor; padding: 0; cursor: pointer; }
+.cl-burst-btn:hover, .cl-burst-btn:focus-visible { color: #ffd56b; outline: none; }
+.cl-burst .cl-h b { color: #ffd56b; font-size: 1.2em; margin-left: 4px; }
+.cl-buffs { margin: 4px 0 8px; padding-left: 20px; line-height: 1.7; }
+.cl-buffs small { color: var(--muted); }

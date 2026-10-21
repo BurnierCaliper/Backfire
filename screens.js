@@ -65,6 +65,7 @@ const Screens = (function () {
 
   function refreshTitle() {
     const run = typeof SaveStore !== "undefined" ? dispatch({ type: "run.session", action: "readSaved" }) : null;
+    const growth = typeof SaveStore !== "undefined" ? dispatch({ type: "run.session", action: "readGrowth" }) : null;
     // 更新版本的游戏存的档：这一版读不了，但不能说成「没有」（开新局前也会提醒会覆盖）
     const newer = !run && typeof SaveStore !== "undefined" && dispatch({ type: "run.session", action: "savedStatus" }) === "newer";
     const cont = $("t-continue");
@@ -72,7 +73,11 @@ const Screens = (function () {
     $("t-continue-sub").textContent = run ? runSummary(run) : newer ? "有一局更新版本的游戏存下的进度，这一版读不了" : "没有进行中的一局";
     $("t-new").disabled = !RunFlow.ready;
     if ($("t-solo")) $("t-solo").disabled = !RunFlow.ready;
-    if ($("t-growth")) $("t-growth").disabled = !RunFlow.ready;
+    if ($("t-growth")) {
+      $("t-growth").disabled = !RunFlow.ready;
+      const sub = $("t-growth-sub");
+      if (sub) sub.textContent = growth ? runSummary(growth) : "独立存档 · 每天获得赫心融合体 · 角色永久死亡后从 1 级重新培养";
+    }
     if ($("t-daily")) {
       $("t-daily").disabled = !RunFlow.ready;
       // 今天的种子和队伍（rogue.js · dailySeed / dailyParty）
@@ -97,7 +102,11 @@ const Screens = (function () {
   }
 
   function boot() {
-    Screens.register("title", $("scr-title"), { onShow() { showTitleView("home", false); refreshTitle(); } });
+    Screens.register("title", $("scr-title"), { onShow() {
+      // 回到标题就不在跑团里了：不管从哪条路回来，都把跑团模式关掉（单局 / 每日挑战 / 训练场都从标题开，不能带着跑团规则；报告 H1）
+      if (typeof TRPG !== "undefined" && TRPG.active && !(window.HotseatGame && HotseatGame.isActive()) && window.TrpgFlow && TrpgFlow.leave) TrpgFlow.leave();
+      showTitleView("home", false); refreshTitle();
+    } });
     document.querySelectorAll("#scr-title [data-view]").forEach(b => { if (b.tagName === "BUTTON") b.onclick = () => showTitleView(b.dataset.view); });
     document.querySelectorAll("#scr-title [data-back]").forEach(b => { b.onclick = () => showTitleView("home"); });
     document.addEventListener("keydown", e => {
@@ -113,11 +122,19 @@ const Screens = (function () {
         window.dispatchEvent(new Event("resize"));
         // 开战前的大字：切到战斗画面之后再弹（同一刻新布置的战斗会自己弹，这里只补还没弹过的）
         setTimeout(() => { if (window.GAME && GAME.showPendingIntro) GAME.showPendingIntro(); }, 0);
+      },
+      // 离开战斗画面：瞄准线、敌人攻击指向和还在播的攻击演出一起收掉（别留在标题 / 任务板上）
+      onHide() {
+        if (window.AttackFx) { AttackFx.clearAim(); AttackFx.clearThreat(); AttackFx.skip(); }
       }
     });
     $("t-new").onclick = () => RunFlow.start();
     if ($("t-solo")) $("t-solo").onclick = () => RunFlow.start({ solo: true });
-    if ($("t-growth")) $("t-growth").onclick = () => RunFlow.start({ growth: true });
+    if ($("t-growth")) $("t-growth").onclick = () => {
+      const growth = typeof SaveStore !== "undefined" ? dispatch({ type: "run.session", action: "readGrowth" }) : null;
+      if (growth && RunFlow.resumeGrowth) RunFlow.resumeGrowth();
+      else RunFlow.start({ growth: true });
+    };
     if ($("t-daily")) $("t-daily").onclick = () => RunFlow.startDaily && RunFlow.startDaily();
     $("t-continue").onclick = () => RunFlow.resume();
     if ($("t-codex")) $("t-codex").onclick = () => { if (window.Bestiary) Bestiary.open({ mode: "hero", sub: "主菜单" }); };
@@ -128,7 +145,11 @@ const Screens = (function () {
       } });
       Screens.show("battle");
     };
-    $("g-title").onclick = () => { if (!window.GAME || GAME.depth === 0) Screens.show("title"); };
+    $("g-title").onclick = () => {
+      // 跑团战斗：走跑团自己的离开流程（放弃没打完的战斗、存团、关掉跑团规则；报告 H1）
+      if (typeof TRPG !== "undefined" && TRPG.active && window.TrpgFlow && TrpgFlow.titleFromBattle) { TrpgFlow.titleFromBattle(); return; }
+      if (!window.GAME || GAME.depth === 0) Screens.show("title");
+    };
     Screens.show("title");
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);

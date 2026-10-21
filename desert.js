@@ -76,8 +76,8 @@ function desertBattleStart(notes) {
       u.leaveIn = DESERT.bugLeave[0] + Math.floor(Math.random() * (DESERT.bugLeave[1] - DESERT.bugLeave[0] + 1));
     }
     if (u.kit === "sandfish_ambush") u.submerged = true;   // 伏咬沙鱼开场就在沙下
-    // 富集变种：每只沙漠生物 10%（沙暴 25%）
-    if (isSandFish(u) && !u.enriched && Math.random() < (state.weather === "sand" ? DESERT.enriched.sandChance : DESERT.enriched.chance)) makeEnriched(u);
+    // 富集变种：每只沙漠生物 10%（沙暴 25%）；主持人定过富集与否的（enrichSet）不再随机
+    if (isSandFish(u) && !u.enriched && !u.enrichSet && Math.random() < (state.weather === "sand" ? DESERT.enriched.sandChance : DESERT.enriched.chance)) makeEnriched(u);
   });
   if (sandFishes().length || desertPrey().length) {
     notes.push(night ? (state.weather === "sand" ? "漠汛的沙暴遮住了光：沙漠生物按夜晚行动。" : "夜晚：沙漠生物活跃起来。")
@@ -335,7 +335,21 @@ function sandFishPlan(u) {
     const d = (p) => zoneDist(Number(u.zone), Number(p.zone), state.zoneMode);
     const p = prey.sort((x, y) => d(x) - d(y) || totalHp(x) - totalHp(y))[0];
     const sid = FISH_MAIN_SKILL[u.kit];
-    if (sid) {
+    if (sid && d(p) > 0) {
+      // 猎物不在同区：先走过去（以前直接付行动点出手、原地咬空，夜晚每回合空过）。
+      // 杂兵走路花行动点、精英用附赠；付不起或路上有沙珊瑚就不走，改看别的行动
+      const rank = typeof enemyRankOf === "function" ? enemyRankOf(u) : "minion";
+      const canMove = !u.noMove && u.self !== "frost" && (rank === "minion" ? (u.ap || 0) >= 1 : (u.bonus || 0) >= 1);
+      const path = typeof zonePath === "function" ? zonePath(Number(u.zone), Number(p.zone)) : null;
+      const dest = path && path.length > 1 ? Number(path[1]) : null;
+      if (canMove && dest != null && !coralAvoid(u, dest)) {
+        return {
+          thunk: () => { state.attackerId = u.id; doMove(u, dest); },
+          meta: { actorId: u.id, skillName: `移动到 ${dest} 区` },
+          ai: { kind: "move", dest, target: p }
+        };
+      }
+    } else if (sid) {
       return {
         thunk: () => { state.attackerId = u.id; state.targetId = p.id; runSkill(sid); },
         meta: { actorId: u.id, targetId: p.id, skillName: `${u.name} 捕食 ${p.name}` },
@@ -482,6 +496,28 @@ function makeEnriched(u) {
   });
   return u;
 }
+/** 变回普通个体（makeEnriched 的反向）：装甲层上限除回去、已受的伤按比例保留，去掉名字前的「富集」 */
+function unmakeEnriched(u) {
+  if (!u || !u.enriched) return u;
+  u.enriched = false;
+  u.name = String(u.name).replace(/^富集/, "");
+  (u.layers || []).forEach(l => {
+    if (l.type !== "armor") return;
+    const max = Math.max(1, Math.round(Number(l.max) / DESERT.enriched.armorMult));
+    l.current = Math.min(max, Math.round(Number(l.current) * max / Math.max(1, Number(l.max))));
+    l.max = max;
+  });
+  return u;
+}
+/** 主持人定富集与否（战斗模板、任务节点、联机主持人工具生成 / 修改单位）。
+ *  mode：true 富集、false 不富集、null / undefined 随机（开战时照常 10% / 沙暴 25%）。只对沙鱼有效，别的单位不动 */
+function desertSetEnriched(u, mode) {
+  if (!isSandFish(u)) return u;
+  if (mode === true) { makeEnriched(u); u.enrichSet = true; }
+  else if (mode === false) { unmakeEnriched(u); u.enriched = false; u.enrichSet = true; }
+  else delete u.enrichSet;
+  return u;
+}
 /** 掉落的奎支倍率（app.js · settleEnemyKill） */
 function desertLootMult(u) { return u && u.enriched ? DESERT.enriched.kuizhiMult : 1; }
 /** 沙漠生物掉的武器升级材料：低级材料为主，不掉高级材料（稀有晶体、赫心结晶）。按等级 [{ id, qty }]
@@ -537,7 +573,7 @@ function coralGasBurst(p, element, attacker, notes) {
   const lv = Number(p.level) || 1;
   const r = takeDice(2, 6, lv);
   notes.push(`${p.name} 里的可燃气被点着了：${p.zone} 区爆燃，所有单位 ${r.text} 火焰 + 1 击破！`);
-  if (typeof markAoeZone === "function") markAoeZone(p.zone, { element: "fire", dmg: r.total, attacker, from: p.zone });
+  if (typeof markAoeZone === "function") markAoeZone(p.zone, { element: "fire", dmg: r.total, attacker, from: p.zone, env: true });
   (state.units || []).filter(u => !u.hidden && !u.dead && !u._removed && Number(u.zone) === Number(p.zone)).forEach(u => {
     const fake = unitOf("可燃气爆燃", lv, [{ type: "armor", hp: 1 }], 0, 0);
     fake.zone = p.zone;

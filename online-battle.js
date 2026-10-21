@@ -41,7 +41,7 @@
   }
   function snapProp(p) {
     const max = Math.max(1, Number(p.maxHp) || Number(p.hp) || 1), cur = Math.max(0, Number(p.hp) || 0);
-    const name = ({ button: "按钮", lever: "拉杆", battery: "超充能电池", boom: "爆炸桶", acid: "酸液桶", scrap: "碎渣机炮", turret: "防卫自律炮台", ironwall: "铁壁", scrapwall: "废铁墙", dome: "防护罩" })[p.kind] || p.kind || "配置物";
+    const name = ({ button: "按钮", lever: "拉杆", battery: "超充能电池", boom: "爆炸桶", acid: "酸液桶", scrap: "碎渣机炮", turret: "防卫自律炮台", ironwall: "铁壁", scrapwall: "废铁墙", dome: "防护罩", coral_branch: "沙珊瑚枝", coral_tentacle: "沙珊瑚触须", death_statue: "死亡雕像" })[p.kind] || p.kind || "配置物";
     return {
       id: "prop:" + p.id, name: p.name || name, isPlayer: p.faction !== "enemy", isProp: true, isDevice: DEVICE.includes(p.kind),
       zone: Number(p.zone) || 1, level: p.level || 1, atk: 0,
@@ -57,7 +57,7 @@
     if (f.abyss) return "field-abyss";
     if (f.collapseOn) return "field-collapse";
     if (f.fireOn || Number(f.fire) > 0) return "field-fire";
-    for (const k of ["electric", "ice", "acid", "energy", "harmonic"]) if (f[k]) return "field-" + k;
+    for (const k of ["electric", "ice", "acid", "energy", "harmonic", "quicksand", "coral"]) if (f[k]) return "field-" + k;
     return "";
   }
   function fieldText(f) {
@@ -66,14 +66,23 @@
     if (f.fireOn || Number(f.fire) > 0) a.push("火场 " + (Number(f.fire) || 1));
     if (f.collapseOn) a.push(`塌陷 ${Number(f.collapse) || 0} / 5`);
     if (f.ruinOn) a.push(`损毁地面 ${Number(f.ruinHp) || 0} / ${Number(f.ruinMax) || 0}`);
-    const names = { electric: "高压", acid: "酸液", ice: "冻土", harmonic: "干涉", heal: "治愈", highland: "高地", abyss: "深渊", isolate: "隔离" };
+    const names = { electric: "高压", acid: "酸液", ice: "冻土", quicksand: "流沙", coral: "沙珊瑚台地", harmonic: "干涉", heal: "治愈", highland: "高地", abyss: "深渊", isolate: "隔离" };
     Object.keys(names).forEach(k => { if (f[k]) a.push(names[k]); });
     if (f.energy) a.push("能量场 " + (Number(f.energyVal) || 0));
     if (f.fieldLocked || f.fieldLock) a.push("锁定");
+    if (f.innate) a.push("固有");
     return a.join(" · ");
   }
   const gapName = (t) => ({ open: "畅通", wall: "危墙", bridge: "不稳桥梁", door: "机关门", void: "空隙" })[t] || "间隔";
 
+  /** 倒计时文字：还剩 N 秒（截止时间是本机的钟，online-game.js · localDeadlines） */
+  function tickCountdowns(rootEl) {
+    (rootEl || document).querySelectorAll("[data-ol-deadline]").forEach(n => {
+      const s = Math.max(0, Math.ceil((Number(n.dataset.olDeadline) - Date.now()) / 1000));
+      const t = `还剩 ${s} 秒`;
+      if (n.textContent !== t) n.textContent = t;
+    });
+  }
   function create(cb) {
     cb = cb || {};
     const el = make("div", "ol-battle");
@@ -163,8 +172,7 @@
         if (!tw.length) { if (tt) tt.remove(); }
         else {
           if (!tt) { tt = make("div", "ztower"); z.appendChild(tt); }
-          const when = (t) => t.left > 0 ? `${t.left} 回合后` : `这回合${t.phase === "player" ? "我方" : "敌人"}回合开始时`;
-          tt.innerHTML = tw.map(t => `<span class="${t.have < t.need ? "short" : "ok"}" title="${esc(`${t.by || ""} 的${t.name || ""}：${when(t)}落下${t.delayed ? "（首领失衡，会推迟一回合）" : ""}。至少 ${t.need} 人站在这个区里踩住${t.soak > 0 ? `，每人挨 ${t.soak}` : ""}；没人踩住${t.fail != null ? (t.fail > 0 ? `，我方全员各挨 ${t.fail}` : "，我方全员挨巨额伤害") : "，会触发严重惩罚"}。不能格挡。`)}">${esc(t.name || "")} ${t.left > 0 ? t.left : "!"} · ${t.have}/${t.need} 人</span>`).join("");
+          tt.innerHTML = UnitCard.towerHtml(tw);   // 「踩塔 · 还有 N 回合 · 1/1 人」（unit-card.js）
         }
         z.classList.toggle("is-move-target", !!(zoneOpts && zoneOpts.has(Number(z.dataset.num))));
         setPickBadge(z, zoneNo ? zoneNo.get(String(z.dataset.num)) : 0);
@@ -203,7 +211,15 @@
         c.wrap.classList.toggle("is-dim", !!targets && !targets.has(s.id) && s.id !== ui.current);
         setPickBadge(c.wrap, targetNo ? targetNo.get(s.id) : 0);
       });
-      cards.forEach((c, id) => { if (!seen.has(id)) { c.wrap.remove(); cards.delete(id); } });
+      cards.forEach((c, id) => {
+        if (seen.has(id)) return;
+        cards.delete(id);
+        // 被打倒的敌人：还在淡出就等淡完再拿掉，免得一下子消失（和 game.js · setView 一样）
+        if (c.wrap.classList.contains("dead") && c.wrap.isConnected) {
+          c.wrap.classList.remove("ko-held"); c.wrap.classList.add("gone");
+          setTimeout(() => c.wrap.remove(), 1800);
+        } else c.wrap.remove();
+      });
     }
 
     function paintHud(data, ui) {
@@ -223,7 +239,7 @@
       const skills = (ui.skills || []);
       const costText = (id) => root.SkillText && SkillText.skillCostText ? SkillText.skillCostText(id) : "";
       hud.querySelector(".skills").innerHTML = skills.map((o, i) => {
-        const cost = costText(o.value);
+        const cost = o.cost || costText(o.value);   // 房主算好的消耗优先（online-actions.js · costLabel）
         // 灰掉的技能写明原因（行动点不足 / 没有能用的道具…），鼠标悬停和读屏都能看到
         const why = o.disabled ? (o.reason || "现在不能使用") : ui.busy ? "正在同步，请稍候" : "";
         return `<button type="button" class="sk${ui.armed === o.value ? " armed" : ""}${o.disabled ? " blocked" : ""}" data-ob-skill="${esc(o.value)}"${o.disabled || ui.busy ? " disabled" : ""}${why ? ` title="${esc(why)}"` : ""} aria-label="${esc(o.label + (why ? "：" + why : ""))}">
@@ -241,8 +257,10 @@
         const empty = (m.kind === "unit" || m.kind === "zone") && !(m.options || []).some(o => o.value != null && !o.disabled) ? `<span style="color:var(--foe)">没有能选的${m.kind === "zone" ? "区域" : "目标"}</span>` : "";
         hint = `<b>${esc(m.title || "")}</b>　${what}${empty ? "　" + empty : ""}　${extra}${ui.rule ? "" : '<button type="button" class="g-btn small" data-ob="cancel">取消（Esc）</button>'}`;
       }
+      // 限时的询问（战场点选的规则询问）：倒计时，online-ui.js 每半秒刷新 data-ol-deadline 的文字
+      if (Number(ui.deadline) > 0) hint += `　<span class="ol-countdown" role="timer" aria-live="off" data-ol-deadline="${Number(ui.deadline)}"></span>`;
       const h = hud.querySelector(".hint");
-      if (h.dataset.html !== hint) { h.innerHTML = hint; h.dataset.html = hint; }
+      if (h.dataset.html !== hint) { h.innerHTML = hint; h.dataset.html = hint; tickCountdowns(h); }
     }
 
     function update(data, ui) {
@@ -337,7 +355,7 @@
     return { el, update, cardOf, destroy };
   }
 
-  const api = { create, snapUnit, snapProp };
+  const api = { create, snapUnit, snapProp, tickCountdowns };
   root.OnlineBattle = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof window !== "undefined" ? window : globalThis);

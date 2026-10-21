@@ -59,7 +59,7 @@
         if (OnlineRogue.isTeamCommand(command)) {
           const opt = OnlineRogue.matchOption(command);
           if (!opt) throw new Error("这一步现在不能选");
-          OnlineRogue.vote(myId(), opt.id);
+          OnlineRogue.vote(myId(), opt.id, command);
           lastError = ""; lastNotes = [`你投了「${opt.label}」。等大家都投完（或者按「按现在的票数决定」）。`];
           render();
           return;
@@ -87,8 +87,8 @@
   const SOLO_TIP = `先点一名角色当主角，再挑 ${ROGUE_SOLO.partners} 名伙伴（战斗里用「支援」叫他们登场打协助攻击），最后选一个第二副职责。` +
     `单人模式：每回合 ${ROGUE_SOLO.apPerRound} 行动点，能给自己协助格挡、接自己打出的失衡；每场胜利额外 +${ROGUE_SOLO.battleXp} 经验，` +
     `每 ${ROGUE_SOLO.attrEvery} 级多一次六维属性，每 ${ROGUE_SOLO.role2Every} 级从第二副职责里多学一个技能。`;
-  const GROWTH_TIP = `挑 ${ROGUE_GROWTH.startParty} 名角色组成初始小队。没有期限和首领，接任务赚钱、升级、强化武器（经验和武器升级的材料照跑团模式）；` +
-    `每完成一个任务得到赫心融合体，在任务板旁的角色抽取机里抽角色：新角色入队，抽到已有的角色 +1 级。角色不会永久死亡。`;
+  const GROWTH_TIP = `挑 ${ROGUE_GROWTH.startParty} 名角色组成初始小队。独立存档，没有期限和首领。每天获得赫心融合体，在角色抽取机里抽角色。` +
+    `角色永久死亡后等级与武器等级清零并移出队伍，下次抽到从 1 级重新培养。`;
   function renderParty() {
     $("party-title").textContent = solo.on ? "单人模式 · 选择主角与伙伴" : growth.on ? "长线养成 · 选择初始小队" : "选择队伍";
     $("party-tip").textContent = solo.on ? SOLO_TIP : growth.on ? GROWTH_TIP : PARTY_TIP;
@@ -176,7 +176,11 @@
       `<span>水 <b>${s.water}</b> ml</span><span title="${esc(foodTip)}">食物 <b>${s.foodTotal}</b></span>` +
       (online() ? `<span title="每名角色的钱各算各的">奎支 ${run.party.map(h => `${esc(Rogue.heroName(h.kit))} <b>${OnlineRogue.purse(h.kit)}</b>`).join(" · ")}</span>` : `<span>奎支 <b>${s.kuizhi}</b></span>`) +
       `<span class="${tier ? "warn" : ""}">距上次长休 <b>${hrs}</b> 小时${tier ? " · " + EXHAUST[tier] : ""}</span>` +
-      `<button class="g-btn small" data-career="1" title="本局每个角色的输出占比和团队贡献">整局数据</button>`;
+      `<button class="g-btn small" data-career="1" title="本局每个角色的输出占比和团队贡献">整局数据</button>` +
+      (run.stage !== "over" && window.WorkshopUI && window.WorkshopData ? WorkshopUI.button(WorkshopData.workshopAvailable(run)) : "") +
+      (run.stage !== "over" && window.BackpackUI ? BackpackUI.button() : "");
+    const wsb = $("r-workshop"); if (wsb) wsb.onclick = () => openWorkshop();
+    const bpb = $("r-backpack"); if (bpb) bpb.onclick = () => openBackpack();
     $("run-party").innerHTML = run.party.map(h => {
       const v = query("heroView", { kit: h.kit });
       return `<div class="rhero">
@@ -269,27 +273,28 @@
     }).join("");
     const bench = run.party.length > 1
       ? `<p class="r-hint">队伍里的人也可以先换到候补：${run.party.map(p => `<button class="g-btn small" data-swap-out-only="${esc(p.kit)}">${esc(Rogue.heroName(p.kit))} 下场</button>`).join(" ")}</p>` : "";
+    const daily = typeof Rogue.growthDaily === "function" ? Rogue.growthDaily(run) : null;
+    const dailyHtml = daily ? `<h3>每日挑战</h3><div class="shop">${daily.tasks.map(t => `<div class="shop-row"><span class="s-name">${esc(t.name)}<small>${esc(t.desc)}</small></span><span class="s-have">${t.progress}/${t.target}</span><span class="s-price">${t.done ? "已完成" : ""}</span></div>`).join("")}</div><p class="r-hint">每个完成：随机材料 + 1000 奎支；三个全完成：额外 1 个${esc(fusion)} 和 1000 奎支。</p>` : "";
     return `<h2>角色抽取机</h2>
       <p class="r-hint">投入 ${d.cost} 个${esc(fusion)}抽一名角色（每名角色机会相同）：新角色加入队伍（满 ${ROGUE_GROWTH.partyMax} 人进候补），抽到已有的角色 +1 级（${ROGUE_GROWTH.maxLevel} 级封顶）。手里有 <b>${d.fusion}</b> 个。</p>
       <p class="r-hint">已有：${esc(owned)}</p>
       <button class="g-btn r-main" id="r-draw" ${d.canDraw ? "" : "disabled"}>${d.canDraw ? "抽一次" : esc(d.why)}</button>
+      ${dailyHtml}
       ${reserve ? `<h3>候补</h3><div class="shop">${reserve}</div>` : ""}
       ${bench}`;
   }
   function renderBoard() {
     if (run.growth) {
       return `<h2>任务板</h2>
-      <p class="r-hint">长线养成：没有主线和期限，任务随便接。敌人等级跟着队伍平均等级走；团灭只算任务失败，角色不会永久死亡。</p>
+      <p class="r-hint">长线养成：独立存档，没有主线和期限。每天获得赫心融合体。角色永久死亡后清零等级移出队伍，下次抽到从 1 级重新培养。</p>
       <div class="task-list">${(run.board || []).map((t, i) => taskCard(t, i)).join("")}</div>
       ${renderGrowth()}
-      ${renderSmiths()}
-      ${craftPanel()}`;
+      ${renderSmiths()}`;
     }
     return `<h2>任务板</h2>
       <p class="r-hint">主线开幕就已接下，要在本幕天数用完之前完成，否则本局结束。本幕的天数用完时迎战首领；主线完成后剩下的日子可以继续做支线。支线只写了大致目标、时间、报酬和补给，天数够才能接。</p>
       <div class="task-list">${run.main && !run.main.done ? taskCard(run.main, "main") : ""}${(run.board || []).map((t, i) => taskCard(t, i)).join("")}</div>
-      ${renderSmiths()}
-      ${craftPanel()}`;
+      ${renderSmiths()}`;
   }
 
   /* ---------- 任务节点 ---------- */
@@ -372,8 +377,7 @@
             <small>${wakeHtml(C.hours.longRest)} · ${plan.ok ? `消耗 ${plan.water} ml 水、${esc(food)}` : "补给不足：" + esc(plan.lack.join("，"))} · 血量回满、耐久回满、武器人痊愈、清空力竭</small></button>
           <button class="g-btn" id="r-short">短休 ${C.hours.shortRest} 小时<small>${wakeHtml(C.hours.shortRest, "休息到")} · 不消耗补给 · 每人回复 等级×2+体质 · 一天两次</small></button>
           <button class="g-btn" id="r-rest-skip">不休息，直接离开<small>获得 ${C.restSkipKuizhi} 奎支 · 不花时间</small></button>
-        </div>
-        ${craftPanel()}`;
+        </div>`;
     },
     shop: () => `<p>路边有个摊子。手里有 ${money()} 奎支。</p>
         ${shopList()}
@@ -387,7 +391,6 @@
         ${installRows(id)}
         ${partRows(id)}
         ${repairRows()}
-        ${craftPanel()}
         <button class="g-btn r-main" id="r-leave">离开</button>`;
     },
     clinic: () => `<p>一家小诊所。手里有 ${money()} 奎支。</p>
@@ -396,55 +399,37 @@
     check: () => checkPanel()
   };
 
-  /* ---------- 工坊：制作道具、学配方（rogue.js · craft / learnRecipe）。联机同步留到工坊第 5 步 ---------- */
-  let craftOpen = false;
-  function craftPanel() {
-    if (typeof CRAFT_RECIPES === "undefined") return "";
-    const place = query("craftPlace");
-    if (!place) return "";
-    const list = query("craftList");
-    const learn = query("learnOptions");
-    const here = list.filter(r => r.known && (place === "bench" || !r.bench));
-    const heroes = run.party.filter(h => !h.dead);
-    const matIds = ["cm_scrap", "cm_chem", "cm_gas", "cm_coil", "cm_cell", "cm_scale", "cm_spirit", "mat_metal"];
-    const stock = matIds.map(id => `${esc((ITEM_CATALOG[id] || {}).name || id)} ${bagCountOf(id)}`).join(" · ");
-    const net = online(), mineKits = net ? OnlineRogue.hostKits() : null;
-    const queue = net ? query("craftQueue") : [];
-    const rows = heroes.filter(h => !net || mineKits.includes(h.kit)).map(h => {
-      const opts = here.map(r => {
-        const o = query("craftOdds", { kit: h.kit, item: r.id });
-        return o && o.base ? `<option value="${esc(r.id)}">${esc(r.name)} · ${esc(r.prof)}${esc(r.diffName)} · ${pctText(o.chance)} · ${r.hours} 小时</option>` : "";
-      }).join("");
-      const helpers = heroes.filter(x => x.kit !== h.kit).map(x => `<option value="${esc(x.kit)}">${esc(Rogue.heroName(x.kit))} 打下手</option>`).join("");
-      return `<div class="shop-row"><b>${esc(Rogue.heroName(h.kit))}</b>
-        <select data-craft-item="${esc(h.kit)}"><option value="">不做</option>${opts}</select>
-        <select data-craft-help="${esc(h.kit)}"><option value="">没人帮</option>${helpers}</select></div>`;
-    }).join("");
-    const recipeRows = list.map(r => {
-      const mats = r.mats.map(m => `${esc(m.name)} ${m.have}/${m.need}`).join("、");
-      const lo = learn.find(x => x.item === r.id);
-      const tail = r.known ? (place === "rest" && r.bench ? "要工作台" : "会做")
-        : lo ? `<button class="g-btn" data-learn="${esc(r.id)}" data-smith="${esc(lo.smith)}" ${money() < lo.price ? "disabled" : ""}>向${esc(lo.smithName)}学 · ${lo.price} 奎支</button>` : "还不会";
-      return `<li>${esc(r.name)} · ${esc(r.prof)} · ${esc(r.diffName)} · ${r.hours} 小时 · ${mats}${r.metalKuizhi ? `（缺的金属按 ${r.metalKuizhi} 奎支补）` : ""} · ${tail}</li>`;
-    }).join("");
-    return `<details class="r-craft" id="r-craft" ${craftOpen ? "open" : ""}><summary>工坊：制作道具（${place === "bench" ? "工作台：五类都能做" : "休息点：场地、自我效果做不了"}）</summary>
-      <p class="r-hint">每人同时做一样，时间按最久的那个人算，计入力竭。成功率照熟练项检定表；有对应熟练项的队友可以打下手给优势，但他这段时间不能做自己的。失败时材料丢一半（向上取整），废料和金属留着。</p>
-      <p class="r-hint">材料：${stock}</p>
-      ${net ? `<p class="r-hint">联机：每人给自己的角色排一样（玩家在自己的画面上排），房主按「开工」大家一起做。补金属的钱从做的人自己的钱包出。</p>
-        <ul class="r-recipes">${queue.map(j => `<li>${esc(j.name)}：${esc(j.itemName)}${j.helperName ? `（${esc(j.helperName)} 打下手）` : ""} · ${pctText(j.chance)} · ${j.hours} 小时</li>`).join("") || "<li>还没有人排活。</li>"}</ul>` : ""}
-      ${here.length ? rows + (net ? `<button class="g-btn" id="r-craft-queue">排上我的角色</button><button class="g-btn r-main" id="r-craft-run" ${queue.length ? "" : "disabled"}>开工</button>`
-        : `<button class="g-btn r-main" id="r-craft-go">开工</button>`) : `<p class="r-hint">这里没有会做的配方。</p>`}
-      <details><summary>全部配方</summary><ul class="r-recipes">${recipeRows}</ul></details>
-      ${salvageRows()}
-    </details>`;
+  /* ---------- 工坊 / 背包：按钮打开的浮层（workshop-ui.js、backpack-ui.js；数据见 workshop-data-adapter.js） ---------- */
+  function workshopModel() {
+    if (!run || !window.WorkshopData) return null;
+    const net = online();
+    const m = WorkshopData.hostWorkshopModel(run, { net, kits: net ? OnlineRogue.hostKits() : null,
+      money: kit => (net ? OnlineRogue.purse(kit) : Rogue.supplies().kuizhi) });
+    return Object.assign(m, { error: lastError, note: lastNotes[lastNotes.length - 1] || "" });
   }
-  function salvageRows() {
-    const list = query("salvageList");
-    if (!list.length) return "";
-    return `<details><summary>拆解（不花时间）</summary><ul class="r-recipes">${list.map(x =>
-      `<li>${esc(x.name)} ×${x.qty} → ${x.yield.map(y => `${esc(y.name)}×${y.qty}`).join("、")} <button class="g-btn" data-salvage="${esc(x.id)}">拆一件</button></li>`).join("")}</ul></details>`;
+  function openWorkshop(mat) {
+    if (!window.WorkshopUI) return;
+    WorkshopUI.open(workshopModel, cmd => act(cmd), { mat: mat || "" });
   }
-  function bagCountOf(id) { return typeof bagCount === "function" ? bagCount(id) : 0; }
+  function backpackModel() {
+    if (!run || !window.WorkshopData) return null;
+    return WorkshopData.hostBackpackModel(run, { kits: online() ? OnlineRogue.hostKits() : null });
+  }
+  function openBackpack() {
+    if (window.BackpackUI) BackpackUI.open(backpackModel, { openWorkshop: id => openWorkshop(id) });
+  }
+
+  /* ---------- 诊所 · 义体：按钮打开的浮层（cyberware-ui.js；数据 Rogue.cyberwareClinic = cyberware.js · cyberwarePacket） ---------- */
+  function cyberwareModel() {
+    if (!run || !window.CyberwareUI || !Rogue.canClinic(run)) return null;
+    return CyberwareUI.localModel({ heroes: run.party.map(h => ({ kit: h.kit, name: Rogue.heroName(h.kit) })),
+      packetOf: kit => query("cyberware", { kit }),
+      previewOf: (kit, id) => { try { return query("cyberwarePreview", { kit, id }); } catch (e) { return null; } },
+      money: () => money(), error: lastError, note: lastNotes[lastNotes.length - 1] || "" });
+  }
+  function openCyberware(kit) {
+    if (window.CyberwareUI) CyberwareUI.open(cyberwareModel, cmd => act(cmd), { kit });
+  }
 
   /* ---------- 熟练项检定（事件内容占位） ---------- */
   const LV_TEXT = ["没有熟练", "一级熟练", "二级熟练", "三级熟练"];
@@ -494,6 +479,7 @@
       return `<div class="cl-hero">
         <div class="cl-head"><b>${esc(v.name)}</b><span>${esc(layerText(v.layers))}</span></div>
         <button class="g-btn" data-heal="${esc(h.kit)}" ${heal ? "" : "disabled"}>${heal ? `治疗（${heal} 奎支）` : "不需要治疗"}</button>
+        ${window.CyberwareUI ? CyberwareUI.button(h.kit) : ""}
         <div class="cl-cyber">
           <div class="r-hint">义体改造：改造率 ${Math.round(info.rate * 100)}%，最多换掉 ${info.limit} 点肉体（共 ${info.fleshMax}）。
             换算 肉体 8 : 装甲 7 : 护盾 6 : 沙尘 6；也可以把剩下的肉体按 8 : 7 全部换成星灵。最多 3 种血量。</div>
@@ -615,23 +601,41 @@
         <button class="g-btn" data-part-buy="${i}" data-smith="${esc(smithId)}" ${o.sold || k < o.price ? "disabled" : ""}>${o.sold ? "已买" : "买"}</button></div>`).join("");
     return rows ? `<p class="r-hint">改装件（随机进货，C 级 / B 级）：</p><div class="shop">${rows}</div>` : "";
   }
+  /** 改装件装前 → 装后：ATK、格挡率、武器人血量、补正（只显示有变化的） */
+  function modCompareHtml(hero, weapon, partId, slot) {
+    const p = window.WorkshopData ? WorkshopData.modInstallPreview(run, hero, weapon, weaponPartIdOf(partId), slot) : null;
+    return modCompareText(p);
+  }
+  const weaponPartIdOf = id => String(id || "").replace(/^part_/, "");
+  function modCompareText(p) {
+    if (!p) return "";
+    const arrow = (label, a, b, unit) => a === b ? "" : `<span class="${b > a ? "up" : "down"}">${label} ${a}${unit || ""} → ${b}${unit || ""}</span>`;
+    const coefs = Object.keys(Object.assign({}, p.before.coefs, p.after.coefs)).map(a => arrow(`${(typeof WEAPON_PART_ATTR_CN !== "undefined" && WEAPON_PART_ATTR_CN[a]) || a}补正`,
+      Number(p.before.coefs[a]) || 0, Number(p.after.coefs[a]) || 0)).filter(Boolean);
+    const parts = [arrow("ATK", p.before.atk, p.after.atk), arrow("格挡率", p.before.block, p.after.block, "%"),
+      p.delta && p.delta.hp ? `<span class="${p.delta.hp > 0 ? "up" : "down"}">武器人血量 ${p.delta.hp > 0 ? "+" : ""}${p.delta.hp}</span>` : ""].concat(coefs).filter(Boolean);
+    return `装上后：${parts.join(" · ") || "数值不变"}${p.replaced ? `（换下 ${esc(typeof weaponPartLabel === "function" ? weaponPartLabel(p.replaced) : p.replaced)}）` : ""}`;
+  }
+  window.ModCompare = { text: modCompareText };
   function partRows(smithId) {
     if (typeof ROGUE_PARTS === "undefined") return "";
     const k = money();
     const P = ROGUE_PARTS;
     const stock = query("partStock");
-    const weapons = run.party.flatMap(h => query("heroView", { kit: h.kit }).weapons);
-    const targets = weapons.flatMap(w => (w.parts || []).map((p, i) => ({ v: `${w.kit}:${i}`, t: `${w.name} 槽${i + 1}${p ? `（换下 ${p.name}）` : "（空）"}` })));
+    const weapons = run.party.flatMap(h => query("heroView", { kit: h.kit }).weapons.map(w => Object.assign({ hero: h.kit }, w)));
+    const targets = weapons.flatMap(w => (w.parts || []).map((p, i) => ({ v: `${w.kit}:${i}`, hero: w.hero, kit: w.kit, slot: i, t: `${w.name} 槽${i + 1}${p ? `（换下 ${p.name}）` : "（空）"}` })));
     // 还没有改装槽的武器也列出来（灰掉，写明几级开放），免得只看到一个选项不知道其他武器去哪了
     const locked = weapons.filter(w => !(w.parts || []).length)
       .map(w => `<option disabled>${esc(w.name)} · Lv${w.level || 1}（${WEAPON_PART_SLOT_LEVELS[0]} 级开放改装槽）</option>`).join("");
-    const opts = targets.map(x => `<option value="${esc(x.v)}">${esc(x.t)}</option>`).join("") + locked;
+    const opts = targets.map(x => `<option value="${esc(x.v)}" data-hero="${esc(x.hero)}">${esc(x.t)}</option>`).join("") + locked;
+    // 装前 / 装后对比：只算当前选中的那个槽（rogue.js · modInstallPreview）
+    const cmp = (partId) => smithId && targets.length ? `<span class="pt-cmp" data-pt-cmp="${esc(partId)}">${modCompareHtml(targets[0].hero, targets[0].kit, partId, targets[0].slot)}</span>` : "";
     const bag = stock.map(x => `<div class="shop-row${smithId && targets.length ? " pt-row" : ""}">
         <span class="s-name">${esc(x.name)}<small>${esc(x.text)}</small></span>
         <span class="s-have">有 ${x.qty}</span><span class="s-price">卖 ${x.sell}</span>
         <button class="g-btn" data-part-sell="${esc(x.id)}">卖掉</button>
         ${smithId && targets.length ? `<select data-part-to="${esc(x.id)}">${opts}</select>
-          <button class="g-btn" data-part-install="${esc(x.id)}" data-smith="${esc(smithId)}" ${k < x.install ? "disabled" : ""}>装上（${x.install}）</button>` : ""}</div>`).join("");
+          <button class="g-btn" data-part-install="${esc(x.id)}" data-smith="${esc(smithId)}" ${k < x.install ? "disabled" : ""}>装上（${x.install}）</button>${cmp(x.id)}` : ""}</div>`).join("");
     const fitted = smithId ? weapons.flatMap(w => (w.parts || []).map((p, i) => p ? `<div class="shop-row">
         <span class="s-name">${esc(w.name)} 槽${i + 1}：${esc(p.name)}<small>${esc(p.text)}</small></span>
         <span class="s-have"></span><span class="s-price">免费</span>
@@ -728,7 +732,6 @@
             : `长休需要 ${plan.water} ml 水、${esc(food)}。补给不足（` + esc(plan.lack.join("，")) + "），只能硬撑着过夜：不回血，力竭继续累积。"}</p>
           ${shopping}
           ${clinic}
-          ${craftPanel()}
           ${restPlanner()}
           <button class="g-btn r-main" id="r-camp">休整<small>${wakeHtml(C.hours.longRest)} · ${plan.ok ? `消耗 ${plan.water} ml 水、${esc(food)}` : "补给不足：不回血"}</small></button>`;
       }
@@ -771,6 +774,9 @@
     const recent = lastNotes.length ? lastNotes : (run.log || []).slice(-6).map(l => l.text);
     $("run-log").innerHTML = recent.map(t => `<li>${esc(t)}</li>`).join("");
     bind();
+    if (window.WorkshopUI) WorkshopUI.refresh();
+    if (window.BackpackUI) BackpackUI.refresh();
+    if (window.CyberwareUI) CyberwareUI.refresh();
     // 路线图比屏幕宽时（手机）：滚到当前这一列
     const sc = document.querySelector("#run-body .rm-scroll");
     if (sc && run.task && sc.scrollWidth > sc.clientWidth) {
@@ -872,27 +878,6 @@
       };
     });
     body.querySelectorAll("[data-buy]").forEach(b => { b.onclick = () => { if (window.Sfx) Sfx.ui("coin"); act({ action: "buy", key: b.dataset.buy, qty: 1 }); }; });
-    const cp = $("r-craft");
-    if (cp) cp.addEventListener("toggle", () => { craftOpen = cp.open; });
-    body.querySelectorAll("[data-salvage]").forEach(b => { b.onclick = () => act({ action: "salvage", item: b.dataset.salvage }); });
-    body.querySelectorAll("[data-learn]").forEach(b => { b.onclick = () => act({ action: "learnRecipe", item: b.dataset.learn, smith: b.dataset.smith }); });
-    on("r-craft-go", () => {
-      const jobs = [];
-      body.querySelectorAll("[data-craft-item]").forEach(sel => {
-        if (!sel.value) return;
-        const help = body.querySelector(`[data-craft-help="${sel.dataset.craftItem}"]`);
-        jobs.push({ kit: sel.dataset.craftItem, item: sel.value, helper: (help && help.value) || null });
-      });
-      if (!jobs.length) { lastError = "先给至少一个人选要做的东西"; render(); return; }
-      act({ action: "craft", jobs });
-    });
-    on("r-craft-queue", () => {
-      body.querySelectorAll("[data-craft-item]").forEach(sel => {
-        const help = body.querySelector(`[data-craft-help="${sel.dataset.craftItem}"]`);
-        act({ action: "setCraftJob", kit: sel.dataset.craftItem, item: sel.value || null, helper: (help && help.value) || null });
-      });
-    });
-    on("r-craft-run", () => act({ action: "craftQueued" }));
     body.querySelectorAll("[data-redeem]").forEach(b => { b.onclick = () => { if (window.Sfx) Sfx.ui("coin"); act({ action: "redeem", item: b.dataset.redeem }); }; });
     body.querySelectorAll("[data-upgrade]").forEach(b => { b.onclick = () => act({ action: "upgradeWeapon", kit: b.dataset.upgrade, smith: b.dataset.smith }); });
     body.querySelectorAll("[data-intro]").forEach(b => { b.onclick = () => act({ action: "introduceSmith", smith: b.dataset.intro }); });
@@ -900,6 +885,14 @@
     body.querySelectorAll("[data-install]").forEach(b => { b.onclick = () => act({ action: "installBlueprint", blueprint: b.dataset.install, kit: b.dataset.kit, smith: b.dataset.smith }); });
     body.querySelectorAll("[data-part-buy]").forEach(b => { b.onclick = () => { if (window.Sfx) Sfx.ui("coin"); act({ action: "buyPart", smith: b.dataset.smith, index: Number(b.dataset.partBuy) }); }; });
     body.querySelectorAll("[data-part-sell]").forEach(b => { b.onclick = () => act({ action: "sellPart", part: b.dataset.partSell }); });
+    body.querySelectorAll("[data-part-to]").forEach(sel => {
+      sel.onchange = () => {
+        const out = body.querySelector(`[data-pt-cmp="${sel.dataset.partTo}"]`), o = sel.selectedOptions[0];
+        if (!out || !o || !o.dataset.hero) return;
+        const [kit, slot] = sel.value.split(":");
+        out.innerHTML = modCompareHtml(o.dataset.hero, kit, sel.dataset.partTo, Number(slot));
+      };
+    });
     body.querySelectorAll("[data-part-install]").forEach(b => {
       b.onclick = () => {
         const sel = body.querySelector(`[data-part-to="${b.dataset.partInstall}"]`);
@@ -912,6 +905,7 @@
     });
     body.querySelectorAll("[data-repair]").forEach(b => { b.onclick = () => act({ action: "repairWeapon", kit: b.dataset.repair }); });
     body.querySelectorAll("[data-heal]").forEach(b => { b.onclick = () => act({ action: "healHero", kit: b.dataset.heal }); });
+    body.querySelectorAll("[data-cw-open]").forEach(b => { b.onclick = () => openCyberware(b.dataset.cwOpen); });
     body.querySelectorAll("[data-cyber]").forEach(b => {
       const kit = b.dataset.cyber;
       b.onclick = () => act({ action: "modifyHero", kit, plan: readPlan(kit) });
@@ -1026,6 +1020,12 @@
       const result = sessionCommand("resume");
       if (!result.resumed) return;
       lastNotes = ["继续上次的进度。"];
+      Screens.show("run");
+    },
+    resumeGrowth() {
+      const result = sessionCommand("resume", { growth: true });
+      if (!result.resumed) return;
+      lastNotes = ["继续长线养成的进度。"];
       Screens.show("run");
     }
   };

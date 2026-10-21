@@ -18,7 +18,8 @@ const RouteMap = (() => {
     let s = (h >>> 0) % 233280;
     return () => (s = (s * 9301 + 49297) % 233280) / 233280;
   }
-  let rnd = Math.random;
+  const fxRand = () => (typeof fxRandom === "function" ? fxRandom() : Math.random());   // 画面效果的随机数：不动战斗用的种子随机数（run.js · fxRandom）
+  let rnd = fxRand;
   const rr = (a, b) => a + rnd() * (b - a);
 
   /* ---------- 图标（和 art/style-guide.html 同一套线稿） ---------- */

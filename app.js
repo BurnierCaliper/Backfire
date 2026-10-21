@@ -127,6 +127,16 @@ function setWeather(kind, opts) {
   return null;
 }
 
+/** 我方单位普通移动的消耗（技能栏显示用；越过空隙要看去哪，在移动时另算）：
+ *  导体 / 探测模式不耗；站在酸液地面上离开要 1 行动点（荒原行者只要附赠）；其余 1 附赠行动 */
+function moveBaseCost(u) {
+  if (!u) return { bonus: 1 };
+  if (u.self === "conductor" || (u.kit === "ecmo" && u.resources && u.resources.probe)) return {};
+  const f = (state.fields || {})[u.zone] || {};
+  const wanderer = typeof featHas === "function" && featHas(u, "wanderer");
+  if (f.acid && !u.flying && !wanderer && !(typeof acidGroundWalker === "function" && acidGroundWalker(u))) return { ap: 1 };
+  return { bonus: 1 };
+}
 /** 这一区的场地现在能不能改成 kind（空 = 清除）：能返回 null，不能返回原因（深渊、损毁地面、固有场地、被锁定） */
 function fieldChangeWhy(zone, kind, opts) {
   opts = opts || {};
@@ -244,7 +254,7 @@ function renderInspect() {
   const hp = (u.layers || []).map(l => `${LAYER[l.type] || l.type} ${round2(l.current)}/${l.max}`).join(" · ");
   box.innerHTML = `<div class="name">${escapeHtml(u.name)} · Lv${u.level} · ${u.zone}区</div>
     <div>${hp}</div>
-    <div>架势 ${u.def}/${u.defMax} · ATK ${effectiveAtk(u, state.units)}</div>
+    <div>架势 ${defText(u)} · ATK ${effectiveAtk(u, state.units)}</div>
     <div>${resourceText(u) || ""}</div>
     <div class="status-line">${escapeHtml(statusLine(u))}</div>`;
 }
@@ -563,8 +573,7 @@ function checkHighBoom(unit, opt) {
   const val = highBoomValue(unit);
   // 陨石开采机被我方打死：高能值转给杀它的人，自己不自爆（还活着时蓄能撑爆照常自爆）
   if (val > 0 && hp <= 0 && unit.kit === "meteor_miner" && typeof minerDeathTransfer === "function") {
-    const acc = state.actionAcc;
-    const killer = unitById(unit._lastHitBy) || (acc && acc.actorIsPlayer ? unitById(acc.actorId) : null);
+    const killer = unitById(unit._lastHitBy);
     if (killer && killer.isPlayer && !killer.dead) {
       const notes = [];
       minerDeathTransfer(unit, killer, notes);
@@ -639,12 +648,13 @@ function explodeHigh(unit, total, opt) {
     const acc = state.actionAcc;
     const envWho = envBoom ? envCreditUnit(opt.envBy) : null;
     if (envWho) {
-      unit._lastHitBy = envWho.id;   // 击杀算环境的所有者
-      scoreEnvHit(unit, { total: lifeBefore, breakDealt: 0 }, envWho);
+      creditPlayerHit(unit, (envOwnerUnit(opt.envBy) || {}).id);   // 击杀算环境的所有者；没有所有者就算之前最后打过它的玩家
+      scoreEnvHit(unit, { total: lifeBefore, breakDealt: 0 }, envWho, 0, "爆炸");
       const over = Math.floor(unit.overkill * SCORE_RULES.overkill);
       if (over > 0) envCommit(() => addScore("env", over * SCORE_RULES.env, envWho));
     } else if (acc && acc.actorIsPlayer) addScore("overkill", Math.floor(unit.overkill * SCORE_RULES.overkill), unitById(acc.actorId));
   }
+  const boomOwner = envBoom ? (envOwnerUnit(opt.envBy) || {}).id : statusOwnerId(unit, "high");   // 高能状态的所有者（要在清掉高能之前取）
   (unit.layers || []).forEach(l => { l.current = 0; });
   // 倒地统一结算（applyKnockdown）：力竭 3 即死，起身中的人坚毅生命扣光死亡（以前被炸回濒死、还能再起身）
   const downNotes = [];
@@ -679,7 +689,8 @@ function explodeHigh(unit, total, opt) {
       const maxB = (u.layers || []).reduce((a, l) => a + (Number(l.max) || 0), 0);
       // 先打标记再结算：演出里铭牌一变灰就走「慢慢消失」
       if (!u.isPlayer && aoe >= lifeB && aoe >= maxB * 0.5) u.killBig = true;
-      const hitIt = () => applyTypedDot(u, aoe, "energy", notes, `${u.name} 被高能余波击中 ${aoe}`);
+      // 余波打死的敌人算高能状态的所有者的击杀（不是引爆的那个人）；没有所有者就不改它们各自的最后一击
+      const hitIt = () => applyTypedDot(u, aoe, "energy", notes, `${u.name} 被高能余波击中 ${aoe}`, { by: boomOwner });
       if (envBoom) withEnvOwner(opt.envBy, hitIt); else hitIt();
       // 被余波炸死的敌人同样显示负血量，炸掉一半以上血量的慢慢消失
       if (!u.isPlayer && (u.dead || totalHp(u) <= 0)) {   // dead 要等稍后清场才标，这里看血量
@@ -774,7 +785,8 @@ function applyAbyssFall(unit, prevZone, notes) {
   // 环境分数：把敌人弄进深渊（损毁地面塌掉、被击退进去……）——记在场地所有者 / 这次行动的出手方身上
   if (!unit.isPlayer && loss > 0) {
     const who = envCreditUnit(f.by);
-    if (who) { unit._lastHitBy = who.id; scoreEnvHit(unit, { total: Math.min(loss, totalHp(unit)), breakDealt: 0 }, who); }
+    creditPlayerHit(unit, (envOwnerUnit(f.by) || {}).id);   // 深渊：有所有者算所有者，没有就算之前最后打过它的玩家
+    if (who) { scoreEnvHit(unit, { total: Math.min(loss, totalHp(unit)), breakDealt: 0 }, who, 0, "深渊"); }
   }
   applyTrueDamage(unit.layers, loss);
   if ((loss || 0) > 0) spawnFloater(unit, loss, "physical");
@@ -874,7 +886,7 @@ function unitCard(u, pos) {
       return `<div class="bar-label"><span>${LAYER[l.type] || l.type}</span><span>${round2(l.current)}/${l.max}</span></div>
         <div class="bar"><span style="width:${pct}%;background:${LAYER_COLOR[l.type] || "#888"}"></span></div>`;
     }).join("")}
-      ${u.noPosture || u.kit === "ufo_leg" ? "" : `<div class="bar-label"><span>架势</span><span>${u.def}/${u.defMax}</span></div>
+      ${u.noPosture || u.kit === "ufo_leg" ? "" : `<div class="bar-label"><span>架势</span><span>${defText(u)}</span></div>
       <div class="bar def-bar"><span style="width:${Math.max(0, Math.min(100, (Number(u.def) / Math.max(1, Number(u.defMax))) * 100))}%"></span></div>`}
     </div>
     <div class="token-atk">ATK ${effectiveAtk(u, state.units)}</div>
@@ -2139,7 +2151,7 @@ function turnEnd() {
         dmg += r.total;
         parts.push(r.text);
       }
-      applyTypedDot(u, dmg * sm, "fire", notes, `${u.name} 灼烧${stacks}层分别掷骰 ${parts.join(" + ")} = ${dmg}${sm > 1 ? ` ×2（加倍计量）= ${dmg * sm}` : ""}`);
+      applyTypedDot(u, dmg * sm, "fire", notes, `${u.name} 灼烧${stacks}层分别掷骰 ${parts.join(" + ")} = ${dmg}${sm > 1 ? ` ×2（加倍计量）= ${dmg * sm}` : ""}`, { by: statusOwnerId(u, "burn") });
       let add = 1;
       if (weather === "heat") add += ex;
       if (weather === "snow") add = 0;
@@ -2154,7 +2166,7 @@ function turnEnd() {
       const armor = (u.layers || []).some(l => l.type === "armor" && l.current > 0);
       const d = statusDotDice("corr", u.level, weather, armor, ex);
       const r = takeDice(d.n, d.s, 0);
-      applyTypedDot(u, r.total * sm, "acid", notes, `${u.name} 腐蚀 ${r.text}${sm > 1 ? " ×2（加倍计量）" : ""}`);
+      applyTypedDot(u, r.total * sm, "acid", notes, `${u.name} 腐蚀 ${r.text}${sm > 1 ? " ×2（加倍计量）" : ""}`, { by: statusOwnerId(u, "corr") });
     }
     if (u.statuses.frostbite) {
       let br = weather === "snow" ? 2 * ex : 1;
@@ -2192,8 +2204,13 @@ function turnEnd() {
         addNano(10);
         notes.push(`收发代理：无人机提取纳米 +10 → ${u.resources.nano}`);
       } else if ((u.resources.nano || 0) >= 10) {
-        // 激光不能穿墙：隔着危墙 / 关着的门的敌人不算可选目标；一个都没有就什么都不干（不耗纳米）
-        const foes = fieldUnits().filter(x => !x.isPlayer && !x.dead && !x.hidden && !x.fused && !lineBlocked(u.zone, x.zone));
+        // 激光不能穿墙：隔着危墙 / 关着的门的敌人不算可选目标；一个都没有就什么都不干（不耗纳米）。
+        // 锁定前先判断够不够得着（和 dealTo 的判定一致：距离 ≤1、没躲藏、没下潜、不是友军 / 飞碟本体），
+        // 以前只看墙，锁到距离 2 / 躲藏 / 下潜的目标，激光打不出去纳米却照扣
+        const foes = fieldUnits().filter(x => !x.isPlayer && !x.dead && !x.hidden && !x.fused && !lineBlocked(u.zone, x.zone) &&
+          zoneDist(Number(u.zone), Number(x.zone), Number(state.zoneMode)) <= 1 &&
+          !(x.statuses && x.statuses.hide) && !x.submerged && x.kit !== "ufo_body" &&
+          !(typeof playerAllied === "function" && playerAllied(x)));
         const high = foes.filter(x => x.statuses && x.statuses.high);   // 蓄能单位不算高能目标
         const pool = high.length ? high : foes;
         const tgt = pool.slice().sort((x, y) => totalHp(x) - totalHp(y))[0];
@@ -2375,7 +2392,7 @@ function shockPulse(source) {
   );
   notes.push(`${source.name} 感电触发 ${r.text} → ${dmg}${sm > 1 ? "（加倍计量 ×2）" : ""} 电击（同区同阵营：${allies.map(u => u.name).join("、") || "无"}）`);
   allies.forEach(u => {
-    applyTypedDot(u, dmg, "electric", notes, `${u.name} 被感电波及`);
+    applyTypedDot(u, dmg, "electric", notes, `${u.name} 被感电波及`, { by: source.isPlayer ? null : statusOwnerId(source, "shock") });
     if (typeof popStatus === "function") { /* damage floater already from applyTypedDot */ }
   });
   source._shockBusy = false;
@@ -2486,6 +2503,48 @@ function battleStat(u) {
     assists: 0, blocks: 0, blockOk: 0, avoided: 0, staggers: 0, reduced: 0 });
   s.name = u.name;
   return s;
+}
+/* ===== 单回合最高爆发：每个我方单位一回合（第 N 回合，含敌人回合里的协助 / 借机）里造成的伤害合计，
+ * 记下这一回合用了哪些技能（各打了多少）、命中时吃到哪些增益（几次命中）。
+ * 记在 battleStats[单位 id].burst（这场最高）/ burstCur（这一回合在累计）；整局最高并进 LEDGER.career（ledger.js）。 */
+// 引擎计算过程里算增益的行：加成百分比、ATK / 倍率加成、翻倍、蚀刻视为克制……（减益、合计、基础包这些不算）
+const BURST_BUFF_SKIP = /^(基础包|加算百分比合计|最终伤害包|攻击次数|本段倍率|愿你无恙|起身状态)/;
+function burstBuffs(u, res) {
+  const out = [];
+  ((res && res.log) || []).forEach(line => {
+    const s = String(line).replace(/^#\d+\s*/, "").replace(/。$/, "").trim();
+    if (!s || BURST_BUFF_SKIP.test(s) || /[−-]\d/.test(s)) return;
+    if (/^克制表/.test(s)) { const m = s.match(/克制表\s*(.+?)：\s*\+(\d+)%/); if (m && Number(m[2]) > 0) out.push(`属性克制（${m[1]} +${m[2]}%）`); return; }
+    if (/\+0(\.0+)?(%|\b)/.test(s) && !/\+[1-9]|\+0\.\d*[1-9]/.test(s)) return;   // +0% 这类没起作用的
+    if (/\+\d|×\s*[2-9]|翻倍|视为被该属性克制/.test(s)) out.push(s);
+  });
+  // 进引擎之前就加在 ATK 上的（引擎只看到结果）
+  if (u) {
+    if (Number(u.bondAtk) > 0) out.push(`思念：ATK +${Number(u.bondAtk)}`);
+    if (Number(u.duetAtk) > 0) out.push(`双重奏：ATK +${Number(u.duetAtk)}`);
+    if (u.resources && u.resources.mecha && u.resources.overdrive) out.push("机体强化：ATK ×1.2");
+    if (u.resources && u.resources.preparedActive) out.push("准备：第一击加骰");
+  }
+  return out;
+}
+function burstNote(st, u, n, label, res) {
+  n = Math.floor(Number(n) || 0);
+  if (!st || n <= 0) return;
+  const T = Number(state.turnNo) || 1;
+  let cur = st.burstCur;
+  if (!cur || cur.turn !== T) cur = st.burstCur = { turn: T, dmg: 0, skills: {}, buffs: {} };
+  cur.dmg += n;
+  const key = label || "其他";
+  cur.skills[key] = (cur.skills[key] || 0) + n;
+  burstBuffs(u, res).forEach(b => { cur.buffs[b] = (cur.buffs[b] || 0) + 1; });
+  if (!st.burst || cur.dmg > st.burst.dmg) st.burst = JSON.parse(JSON.stringify(cur));
+}
+/** 这一下记在哪个技能名下：协助 / 借机按反应算，否则是这次行动用的技能 */
+function burstLabel(flags) {
+  if (flags && flags.assist) return "协助攻击";
+  if (flags && (flags.opp || flags.opportunity)) return "借机攻击";
+  const acc = state.actionAcc;
+  return (acc && acc.actorIsPlayer && acc.skillName) || "其他";
 }
 /* ===== 战斗评分（像鬼泣那样，鼓励打得华丽） =====
  * 分值都在 SCORE_RULES；评价的分数线 = 固定线 × 0.65 + 基准分 × 倍数 × 0.35
@@ -2748,14 +2807,44 @@ function envCreditUnit(by) {
   const acc = state.actionAcc;
   return acc && acc.actorIsPlayer ? unitById(acc.actorId) || null : null;
 }
+/** 击杀归属用的环境所有者：只认真正的我方所有者 / 触发者，没有就是 null（不回落到当前行动者——
+ *  没有所有者的场地、天气、流沙，打死的算它之前最后一个伤害过它的玩家，不能记给碰巧在行动的人）。 */
+function envOwnerUnit(by) {
+  const id = envCreditId(by);
+  const u = id != null ? unitById(id) : null;
+  return u && u.isPlayer ? u : null;
+}
+/** 当前正在行动的我方单位 id（谁的行动都不在进行时是 null） */
+function actingPlayerId() {
+  const acc = state.actionAcc;
+  return acc && acc.actorIsPlayer ? acc.actorId : null;
+}
+/** 记下「最后一个伤害过这个敌人的玩家」：击杀归属只看它。uid 不是我方单位就不动 */
+function creditPlayerHit(target, uid) {
+  if (!target || target.isPlayer || uid == null) return;
+  const u = unitById(uid);
+  if (u && u.isPlayer) target._lastHitBy = u.id;
+}
+/** 持续状态（灼烧 / 腐蚀 / 高能……）的所有者：谁给敌人挂上的。回合结束的持续伤害、高能余波按它归属击杀 */
+function statusOwnerId(unit, key) {
+  const id = unit && unit._statusBy ? unit._statusBy[key] : null;
+  const u = id != null ? unitById(id) : null;
+  return u && u.isPlayer ? u.id : null;
+}
+function markStatusOwner(unit, key, uid) {
+  if (!unit || unit.isPlayer || uid == null) return;
+  unit._statusBy = unit._statusBy || {};
+  unit._statusBy[key] = uid;
+}
 /** 环境伤害打在敌人身上：伤害、击破的分 ×1.2 记成「环境」 */
-function scoreEnvHit(target, res, who, bonus) {
+function scoreEnvHit(target, res, who, bonus, label) {
   if (!target || target.isPlayer || !res) return null;
   const st = battleStat(who);
   if (!st) return null;
   const dmg = Math.floor(Number(res.total) || 0), brk = Number(res.breakDealt) || 0;
   envCommit(() => {
     st.dmg += dmg; st.brk += brk; st.env = (st.env || 0) + dmg;
+    burstNote(st, null, dmg, `环境 · ${label || "配置物 / 场地"}`, res);
     addScore("env", (dmg * SCORE_RULES.dmg + brk * SCORE_RULES.brk) * SCORE_RULES.env, who, bonus);
   });
   return who;
@@ -2786,13 +2875,17 @@ function resetBattleRecords() {
   state.lastBrokenLayer = null;   // 废物利用：每场重新记（上一场打碎的层不能拿来用）
   state.weaponFallen = {};        // 本场倒下过的武器（取回后 atk / 格挡加成减半）
 }
-/** 这场的基准分：把出现过的每个敌人（含中途召唤的）「打空血、击杀」的分加起来，按第一次见到时的数值算。
- *  击破、失衡不算进来：那是玩家打出来的漂亮操作，不当成默认该拿的分。 */
+/** 这场的基准分：把出现过的每个要打的敌人（含中途召唤的）「打空血、击杀」的分加起来，按第一次见到时的数值算。
+ *  击破、失衡不算进来：那是玩家打出来的漂亮操作，不当成默认该拿的分。
+ *  不算：中立生物、「我方同阵营」的友军（不是要打的敌人）；飞碟触灵本体的血量池是五条腿血量的镜像
+ *  （syncUfoBody），腿已经算过了，本体只算击杀分。 */
 function scorePar() {
   state.scoreSeen = state.scoreSeen || {};
   (state.units || []).forEach(u => {
     if (u.isPlayer || u.kit === "ironwall" || state.scoreSeen[u.id] != null) return;
-    const hp = (u.layers || []).reduce((a, l) => a + (Number(l.max) || 0), 0);
+    if (typeof isNeutralCreature === "function" && isNeutralCreature(u)) return;
+    if (typeof playerAllied === "function" && playerAllied(u)) return;
+    const hp = u.kit === "ufo_body" ? 0 : (u.layers || []).reduce((a, l) => a + (Number(l.max) || 0), 0);
     const rank = typeof enemyRankOf === "function" ? enemyRankOf(u) : "minion";
     state.scoreSeen[u.id] = hp * SCORE_RULES.dmg + (SCORE_RULES.kill[rank] || 0);
   });
@@ -2945,13 +3038,14 @@ function trackHealBy(actor, fn) {
   }
 }
 
-function beginActionAcc(actor) {
+function beginActionAcc(actor, skillId) {
   state.actionSeq = (Number(state.actionSeq) || 0) + 1;   // 第几次行动（用来判断一个技能是不是真的出手了）
   state.actionAcc = {
     dmg: 0, brk: 0, hits: 0, calls: 0, targets: [],
     side: 0, sideBy: {},   // 连带伤害：感电、高压场地、灼烧、共振、聚焦抹层等
     actorIsPlayer: actor ? !!actor.isPlayer : null,
-    actorId: actor ? actor.id : null
+    actorId: actor ? actor.id : null,
+    skillName: actor && actor.isPlayer && skillId ? skillDisplayName(actor, skillId) : ""   // 单回合最高爆发：这一回合用了哪些技能
   };
   state.actionWallHit = {};
 }
@@ -2970,7 +3064,7 @@ function noteSideDamage(amount, label, unit, noScore) {
   if (acc.actorIsPlayer && !(unit && unit.isPlayer) && !noScore) {
     const who = unitById(acc.actorId);
     const st = battleStat(who);
-    if (st) { st.dmg += n; addScore("dmg", n * SCORE_RULES.dmg, who); }
+    if (st) { st.dmg += n; addScore("dmg", n * SCORE_RULES.dmg, who); burstNote(st, who, n, `${acc.skillName || "行动"} · ${key}`); }
   }
 }
 
@@ -2988,11 +3082,53 @@ function barrierIn(zone, side) {
 function ironWallIn(zone) { return barrierIn(zone, "player"); }
 /** 单位属于哪一方的屏障保护（我方单位 / 防护罩 → 铁壁；敌方 → 废铁墙） */
 function barrierSideOf(u) { return u && (u.isPlayer || u.kit === "ironwall") ? "player" : "enemy"; }
+
+/* 屏障按阵营判断敌我（作者 10/19 试玩反馈：多阵营混战里铁壁 / 废铁墙挡错、被自己人的范围攻击波及）。
+ * 以前按「是不是玩家」一刀切：废铁墙护着同区所有敌人（包括和盗匪敌对的安保），范围攻击不管谁放的屏障都挨打。
+ * 现在：屏障只护自己那一伙（barrierGuards），只挡和那一伙敌对的单位打过来的攻击（barrierFoe，按 hostileTo）。 */
+/** 屏障护着的那一伙的代表（拿来按阵营判断）：铁壁 / 防护罩是我方；废铁墙是筑墙的人那一伙（回防命令记下 ownerKit）。
+ *  没记的（主持人放的、旧存档里的）照旧当成护着所有敌人、只挡我方 */
+function barrierOwner(p) {
+  if (BARRIER_SIDE[p && p.kind] === "player") return { isPlayer: true };
+  return { isPlayer: false, kit: (p && p.ownerKit) || null };
+}
+/** 屏障 p 护不护着单位 u：铁壁 / 防护罩护同区的我方单位；废铁墙护和筑墙的人一伙的敌人
+ *  （不护和它敌对的阵营、中立生物、立场和它不一样的友军） */
+function barrierGuards(p, u) {
+  if (!p || !u || u.kind || u.isStructure) return false;
+  if (BARRIER_SIDE[p.kind] === "player") return barrierSideOf(u) === "player";
+  if (u.isPlayer) return false;
+  if (!p.ownerKit) return true;
+  const owner = barrierOwner(p);
+  if (typeof isNeutralCreature === "function" && isNeutralCreature(u)) return false;
+  if (typeof playerAllied === "function" && playerAllied(u) !== playerAllied(owner)) return false;
+  return typeof hostileTo !== "function" || !hostileTo(owner, u);
+}
+/** 这一下是不是屏障 p 要挡的「敌方」攻击：打的人和屏障护着的那一伙敌对（hostileTo）。
+ *  我方自己的、友军的、多阵营里和被护的一伙不敌对的单位打过来的，屏障不管（不挡、也不挨打）。
+ *  不在场上的替身攻击者（配置物爆炸、危墙倒塌、小车残骸……）没有阵营：照旧算敌方，屏障照挡；
+ *  站在我方那边的替身（我方炮台、我方操控的碎渣机炮）对我方的屏障不算 */
+function barrierFoe(p, attacker) {
+  if (!p || !attacker) return true;
+  const owner = barrierOwner(p);
+  if (!(state.units || []).includes(attacker) || attacker.envSrc) return !(attacker.isPlayer && owner.isPlayer);
+  return typeof hostileTo !== "function" || hostileTo(attacker, owner);
+}
+/** zone 区里护着 target、这一下又是它要挡的敌方攻击的屏障（没有就是 null） */
+function barrierFor(target, attacker, zone) {
+  if (!target) return null;
+  const z = Number(zone != null ? zone : target.zone);
+  return (state.props || []).find(p => BARRIER_SIDE[p.kind] && Number(p.zone) === z && p.hp > 0 &&
+    barrierGuards(p, target) && barrierFoe(p, attacker)) || null;
+}
 /** 范围攻击：被同区屏障保护的单位完全不受范围攻击（伤害、击破都由屏障吃，一次行动只吃一下）。
- *  返回保护它的屏障；以后新加的盾牌类配置物写进 BARRIER_SIDE 就自动生效 */
-function aoeShieldFor(u) {
+ *  返回保护它的屏障（按阵营，见 barrierGuards）；以后新加的盾牌类配置物写进 BARRIER_SIDE 就自动生效。
+ *  by：放这次范围效果的单位（投掷罐的使用者……），给了就只算挡它的屏障（barrierFoe：自己人扔的不挡）；
+ *  不给（高能自爆的余波这类没有出手方的）只看护不护着 */
+function aoeShieldFor(u, by) {
   if (!u || u.kind) return null;
-  return barrierIn(u.zone, barrierSideOf(u)) || null;
+  return (state.props || []).find(p => BARRIER_SIDE[p.kind] && Number(p.zone) === Number(u.zone) && p.hp > 0 &&
+    barrierGuards(p, u) && (!by || barrierFoe(p, by))) || null;
 }
 
 function breakIronWall(p, notes) {
@@ -3078,7 +3214,10 @@ function hitBarrier(p, attacker, opt) {
 
 /** side：被保护的一方（player = 铁壁，enemy = 废铁墙） */
 function absorbIronWall(attacker, zone, opt, side) {
-  const p = barrierIn(zone, side || "player");
+  return absorbBarrier(barrierIn(zone, side || "player"), attacker, opt);
+}
+/** 屏障 p 替同区挨这一下（同一次行动只挨一下，其余同区伤害被挡住） */
+function absorbBarrier(p, attacker, opt) {
   if (!p) return null;
   state.actionWallHit = state.actionWallHit || {};
   if (state.actionWallHit[p.id]) {
@@ -3133,6 +3272,7 @@ function pulseHighVoltage(target, amount, hitNo, hitMax) {
 
 function convertUnstableInHv(u, notes) {
   if (!u || !u.statuses || !u.statuses.unstable) return;
+  if (u.trainingDummy) return;
   if (fieldExempt(u)) return;   // 保释：豁免场地
   const f = state.fields[u.zone] || {};
   if (!f.electric) return;
@@ -3182,7 +3322,13 @@ function applyTypedDotIn(env, unit, amount, element, notes, label, opts) {
   const byType = () => (unit.layers || []).reduce((m, l) => { m[l.type] = (m[l.type] || 0) + Math.max(0, Number(l.current) || 0); return m; }, {});
   const rotBefore = rotOwner ? byType() : null;
   const envWho = env && unit && !unit.isPlayer ? envCreditUnit(env.by) : null;
-  if (envWho) unit._lastHitBy = envWho.id;   // 场地打死的敌人：击杀算环境的所有者
+  // 击杀归属：场地有所有者算所有者；调用方显式给了出手方（状态持续伤害的所有者、高能状态的所有者）算他，
+  // 给的是 null 就不改最后一击；都没给，是玩家行动中顺带造成的就算行动的人
+  if (!unit.isPlayer) {
+    if (env) creditPlayerHit(unit, (envOwnerUnit(env.by) || {}).id);
+    else if ("by" in opts) creditPlayerHit(unit, opts.by);
+    else creditPlayerHit(unit, actingPlayerId());
+  }
   notes.push(...applyCombat(unit, res, null));
   if (rotOwner) {
     const after = byType();
@@ -3202,7 +3348,7 @@ function applyTypedDotIn(env, unit, amount, element, notes, label, opts) {
   if (PROC_DOT_FX[sdKey]) procFx(unit, PROC_DOT_FX[sdKey]);
   addStatusDmg(sdKey, res.total || 0);
   noteSideDamage(res.total || 0, STATUS_DMG_NAME[sdKey] || "其他", unit, !!env);
-  if (env) { if (scoreEnvHit(unit, res, envWho)) scoreWeatherHelp(null, unit, res, true); }
+  if (env) { if (scoreEnvHit(unit, res, envWho, 0, STATUS_DMG_NAME[sdKey] || "场地")) scoreWeatherHelp(null, unit, res, true); }
   else if (unit && !unit.isPlayer && state.actionAcc && state.actionAcc.actorIsPlayer) scoreWeatherHelp(null, unit, res, true);
   if (unit && unit.isPlayer) scoreWeatherHelp(null, unit, res, false);
   if (unit && unit.isPlayer) { const st = battleStat(unit); if (st) st.taken += Math.floor(Number(res.total) || 0) + Math.floor(Number(res.shpDealt) || 0); }
@@ -3757,9 +3903,18 @@ function flushAoePulse() {
       if (!map[z].devicesDone) pulseDevicesInZone(Number(z), "受到范围伤害，视作被操作一次");
       if (!hits.length || map[z].propsDone) return;
       // 一次范围攻击里同区每个配置物只挨一下：取伤害最高的那一段
-      const hit = hits.reduce((a, b) => ((Number(b.dmg) || 0) > (Number(a.dmg) || 0) ? b : a));
+      const top = (list) => list.reduce((a, b) => ((Number(b.dmg) || 0) > (Number(a.dmg) || 0) ? b : a));
+      const strongest = top(hits);
       aoeHittableProps(z).forEach(p => {
         if (!(state.props || []).includes(p) || !(p.hp > 0)) return;   // 同一轮里已经被连锁炸掉
+        // 屏障只挨敌方的范围攻击（按阵营，见 barrierFoe）：我方 / 友军自己的、多阵营里和它护着的一伙不敌对的单位放的不算；
+        // 配置物爆炸这类环境伤害（env）照旧算
+        let hit = strongest;
+        if (BARRIER_SIDE[p.kind]) {
+          const foes = hits.filter(h => h.env || barrierFoe(p, h.attacker));
+          if (!foes.length) return;
+          hit = top(foes);
+        }
         const before = Number(p.hp) || 0;
         if (BARRIER_SIDE[p.kind]) { state.actionWallHit = state.actionWallHit || {}; state.actionWallHit[p.id] = true; }
         const notes = damageProp(p, { element: hit.element, dmg: Math.max(1, Math.floor(Number(hit.dmg) || 1)) }, hit.attacker);
@@ -4149,7 +4304,7 @@ function destroyProp(p, attacker) {
     const r = takeDice(1, 20, lv);
     const dmg = r.total;
     notes.push(`爆炸：同区 ${r.text} 火焰 + 2 击破。`);
-    markAoeZone(p.zone, { element: "fire", dmg, attacker, from: p.zone });   // 从桶所在的区炸开
+    markAoeZone(p.zone, { element: "fire", dmg, attacker, from: p.zone, env: true });   // 从桶所在的区炸开（环境伤害：屏障照样挨，不看是谁引爆的）
     state.units.filter(u => !u.hidden && !u.dead && Number(u.zone) === Number(p.zone)).forEach(u => {
       const fake = unitOf("爆炸桶", lv, [{ type: "armor", hp: 1 }], 0, 0);
       fake.zone = p.zone;
@@ -4168,7 +4323,7 @@ function destroyProp(p, attacker) {
     const r = takeDice(lv, 4, 0);
     const dmg = r.total;
     notes.push(`电池爆炸：同区所有单位（不分敌我）${r.text} 电击。`);
-    markAoeZone(p.zone, { element: "electric", dmg, attacker, from: p.zone });
+    markAoeZone(p.zone, { element: "electric", dmg, attacker, from: p.zone, env: true });
     state.units.filter(u => !u.hidden && !u.dead && Number(u.zone) === Number(p.zone)).forEach(u => {
       const fake = unitOf("电池", lv, [{ type: "armor", hp: 1 }], 0, 0);
       fake.zone = p.zone;
@@ -4190,16 +4345,29 @@ function triggerLeaveOpportunity(mover, fromZone, notes) {
       const n = addedDiceByLevel(u.level);
       notes.push(`${u.name} 对离开区域的 ${mover.name} 发动借机攻击。`);
       // 借机是近战：目标已经走到隔壁才结算，带上 atkRange 免得被当成高地远程（±25%）
-      dealTo(u, mover, { atk: 0, mult: 0, diceN: n, diceS: 6, element: "ice", baseBreak: 1, atkRange: "melee", flags: { action: true, opportunity: true, blockResolved: true } });
+      opportunityStrike(u, mover, fromZone, { atk: 0, mult: 0, diceN: n, diceS: 6, element: "ice", baseBreak: 1, atkRange: "melee", flags: { action: true, opportunity: true, blockResolved: true } });
       if (window.GAME && window.GAME.tape) window.GAME.tape.push({ type: "opp", attackerId: u.id, targetId: mover.id, name: u.name });
     }
     if (typeof bpLeaveOpportunity === "function") bpLeaveOpportunity(u, mover, notes);
     if (u.kit === "thug_knife" && mover.isPlayer) {
       notes.push(`${u.name} 对离开区域的 ${mover.name} 发动借机攻击。`);
-      dealTo(u, mover, { atk: effectiveAtk(u, state.units), mult: 1, diceN: 1, diceS: 8, element: "physical", baseBreak: 1, atkRange: "melee", flags: { action: true, opportunity: true, blockResolved: true } });
+      opportunityStrike(u, mover, fromZone, { atk: effectiveAtk(u, state.units), mult: 1, diceN: 1, diceS: 8, element: "physical", baseBreak: 1, atkRange: "melee", flags: { action: true, opportunity: true, blockResolved: true } });
       if (window.GAME && window.GAME.tape) window.GAME.tape.push({ type: "opp", attackerId: u.id, targetId: mover.id, name: u.name });
     }
   });
+}
+/** 一下借机攻击（作者 10/19：铁壁挡不了借机攻击是 bug）。
+ *  · 结算时走的人已经站到隔壁了，这一下是在他离开的那一区打的：替他挡的是那一区的铁壁 / 屏障（dealTo · wallZone）。
+ *  · 每一下借机攻击都是单独的一次攻击：屏障「已拦截本次行动」只看这一下，不沿用、也不占用当前行动的记录（和防卫炮台那一炮一样） */
+function opportunityStrike(attacker, mover, fromZone, opt) {
+  if (attacker && attacker.trainingDummy) return null;   // 训练假人不做任何反应攻击
+  const wallBefore = state.actionWallHit;
+  state.actionWallHit = {};
+  try {
+    return dealTo(attacker, mover, Object.assign({ wallZone: Number(fromZone) }, opt));
+  } finally {
+    state.actionWallHit = wallBefore;
+  }
 }
 
 /** 离开冻土的检定：简单难度「运动」检定（手册第一章成功率表 ROGUE_CHECKS.chance：无熟练 50%，一级以上 100% 默认通过）。
@@ -4442,9 +4610,8 @@ function touDuelVictim(u) {
   if (tou.dying && !tou.upOnShp) return null;
   if (typeof passiveOn === "function" && !passiveOn(tou)) return null;   // 放弃被动「决一死战」
   if (Number(u.zone) !== Number(tou.zone)) return null;
-  const enemies = (typeof fieldUnits === "function" ? fieldUnits() : state.units).filter(x =>
-    x && !x.isPlayer && !x.dead && !x.hidden && !x.fused && Number(x.zone) === Number(tou.zone)
-  );
+  // 只数和灯敌对的单位：中立生物、友军不算（自己也不会被牵制）
+  const enemies = touDuelEnemies();
   // 决一死战+：同区两名以下的敌人都必须攻击灯
   const cap = typeof passivePlus === "function" && passivePlus(tou, 1) ? 2 : 1;
   if (enemies.length < 1 || enemies.length > cap || !enemies.some(x => x.id === u.id)) return null;
@@ -4460,7 +4627,7 @@ function touDuelEnemies() {
   const tou = findKit("tou", state.units);
   if (!tou) return [];
   return (typeof fieldUnits === "function" ? fieldUnits() : state.units).filter(x =>
-    x && !x.isPlayer && !x.dead && !x.hidden && !x.fused && Number(x.zone) === Number(tou.zone));
+    x && !x.isPlayer && !x.dead && !x.hidden && !x.fused && Number(x.zone) === Number(tou.zone) && hostileTo(tou, x));
 }
 /** 圣盾荣耀+：消耗圣盾点时为自身恢复 2d10 生命 */
 function touShieldHeal(u) {
@@ -4623,7 +4790,6 @@ function applyCombat(target, result, attacker) {
   }
   notes.push(...sweepDeadEnemies());
   if (target.def <= 0 && result.broke && !target.noPosture && target.kit !== "ufo_leg") notes.push(imbalanceLine(target));
-  if (attacker && result.selfBreak && attacker.def <= 0) notes.push(imbalanceLine(attacker));
   // 圣盾：真的受到伤害才扣（免疫、被挡下、伤害为 0 时不扣）
   if (result.flags && result.flags.holyShield && ((Number(result.total) || 0) > 0 || (Number(result.shpDealt) || 0) > 0)) {
     const tou = shieldBearer(target) || findKit("tou", state.units);
@@ -4647,9 +4813,6 @@ function applyCombat(target, result, attacker) {
   if (target.dead && typeof clearPierce === "function" && isPierced(target)) clearPierce(null, notes, "（目标倒下）", target);
   if (target.def <= 0 && (result.broke || target.stunned) && !target.noPosture && target.kit !== "ufo_leg") {
     queueAssistAttack(attacker, target);
-  }
-  if (attacker && result.selfBreak && attacker.def <= 0) {
-    queueAssistAttack(target, attacker);
   }
   bossQuickRecover(target, notes);   // 首领 / 精英：标记没攒满的失衡，协助攻击排上队后立刻恢复架势
   if (attacker && attacker.self === "burn" && result.element === "fire") {
@@ -4819,12 +4982,21 @@ function settleEnemyKill(target, notes) {
     if (notes) notes.push(`友军 ${target.name} 倒下了。`);
     return;
   }
+  // 友军（跑团模板「同阵营」）在敌人回合打死的敌人：没有经验、掉落、击杀分（和中立生物一样，只算战斗进度）
+  if (!unitById(target._lastHitBy)) {
+    const acc = state.actionAcc, who = acc && acc.actorIsPlayer === false ? unitById(acc.actorId) : null;
+    if (who && typeof playerAllied === "function" && playerAllied(who)) {
+      target.dead = true; target._xpGiven = true;
+      if (notes) notes.push(`${target.name} 被友军 ${who.name} 打倒了。`);
+      return;
+    }
+  }
   target.dead = true;
   target._xpGiven = true;
-  // 战场数据：最后一击是谁打的算谁；持续伤害在某人行动中打死的，算那个人
+  // 战场数据：击杀算最后一个伤害过它的玩家（_lastHitBy，各条死亡路径在造成伤害时记下）；
+  // 只被敌人 / 友军 / 中立生物打过的，不算任何玩家的击杀。不再回落到「当前行动者」（回合结束的死亡会记错人）
   {
-    const acc = state.actionAcc;
-    const killer = unitById(target._lastHitBy) || (acc && acc.actorIsPlayer ? unitById(acc.actorId) : null);
+    const killer = unitById(target._lastHitBy);
     const st = battleStat(killer);
     if (st) st.kills += 1;
     // 评分：敌人倒下就算（谁打的都算全队的分；能归到人的记在那个人身上）
@@ -4865,7 +5037,8 @@ function settleEnemyKill(target, notes) {
     }
   }
   // 手下被打倒：王下次行动改成回防命令（ai.js，KING_CFG.hold.cooldown 回合内最多一次）
-  if (isOutlawThugKit(target.kit)) {
+  // 手下 = 狂徒和强盗头子（README：回防命令）
+  if (isOutlawThugKit(target.kit) || target.kit === "bandit_boss") {
     const king = findKit("outlaw_king", state.units);
     if (king && !king.dead) { king.resources = king.resources || {}; king.resources.crewDown = true; }
   }
@@ -5102,6 +5275,15 @@ function skillNameHint(id) {
 /** 「准备」的骰子：1 级 1d6，5 级 1d8，10 级 1d10，15 级 1d12 */
 function prepDieSides(u) {
   return upgradeDieSides(6, milestone((u && u.level) || 1, 5));
+}
+/** 付不起这笔消耗的原因（没顶 / 行动点不足 / 附赠行动不足）；付得起返回 ""。只查不扣，不写日志 */
+function costBlockReason(u, cost) {
+  if (!u || !cost) return "";
+  const ap = cost.ap || 0, bonus = cost.bonus || 0;
+  if ((ap || bonus) && sinkLocked(u)) return "陷在流沙里没顶，不能行动";
+  if (ap > (u.ap || 0)) return "行动点不足";
+  if (bonus > (u.bonus || 0)) return "附赠行动不足";
+  return "";
 }
 function spendAp(u, n, reason) {
   n = n || 1;
@@ -5567,7 +5749,7 @@ function stripFocusLayer(target, layerType, lines) {
   else appendLog(msg);
   if (typeof spawnFloater === "function") spawnFloater(target, lost, "harmonic");
   if (typeof spawnPopup === "function") spawnPopup(target, { kind: "status", text: "聚焦抹层", element: "harmonic" });
-  if (wasInner) settleEnemyKill(target, lines || []);
+  if (wasInner) { creditPlayerHit(target, actingPlayerId()); settleEnemyKill(target, lines || []); }
   // 抹层同时露出结构弱点：2 击破（内层被抹、敌人已倒下就不用了）
   else if (!target.dead) {
     const notes = [];
@@ -6122,14 +6304,28 @@ function runSoloSupport(a, kit, target, lines) {
   appendLog(notes.join("\n"));
 }
 
+/** 这次失衡算谁打出来的（决定由哪一边接协助攻击）。
+ *  只有和失衡者敌对、真在场上的单位打出的失衡，才由打的那一方接（多阵营：沙鱼打失衡沙灵，沙鱼群起）。
+ *  配置物爆炸、危墙倒塌、炮台、碎渣机炮这类替身攻击者（不在场上），以及和失衡者不敌对的单位（敌人被同伙的范围攻击误伤、
+ *  我方误伤队友）都不算：按失衡的一方算——敌人失衡由我方接，我方失衡由敌人接（返回 null）。
+ *  以前爆炸桶的替身不是玩家，炸出的敌人失衡被当成「敌人打敌人」，只找和它敌对的敌人来接，我方接不了（作者 10/19 反馈） */
+function assistBreaker(breaker, broken) {
+  if (!breaker || !broken) return null;
+  if (!(state.units || []).includes(breaker) || breaker.envSrc) return null;
+  if (typeof hostileTo === "function" && !hostileTo(breaker, broken)) return null;
+  return breaker;
+}
+
 function eligibleAssisters(breaker, broken) {
   if (!broken || assistTargetGone(broken)) return [];
+  breaker = assistBreaker(breaker, broken);
   // 敌人那边出手：我方失衡，或者敌人把敌对阵营的敌人打失衡（异星生物 ↔ 安保）。
   // 只有和打出失衡的那一方是一伙、又和失衡的人敌对的敌人才协助
   if (broken.isPlayer || (breaker && !breaker.isPlayer)) {
     const hostile = (x, y) => typeof hostileTo === "function" ? hostileTo(x, y) : !!x.isPlayer !== !!y.isPlayer;
     return fieldUnits().filter(u =>
       !u.isPlayer &&
+      !u.trainingDummy &&   // 训练假人不协助攻击（training.js）
       hostile(u, broken) &&
       (!breaker || breaker.isPlayer || u.id === breaker.id || !hostile(u, breaker)) &&
       !u.dead && !u.hidden && !u.stunned &&
@@ -6244,6 +6440,8 @@ function applyKnockdown(unit, notes, opt) {
     return "dying";
   }
   unit.dead = true;
+  // 敌人被环境 / 规则直接弄死（高能自爆、坠落、窒息）：补上击杀结算（经验、奎支、击杀数、手下被打倒），_xpGiven 保证只结算一次
+  if (!unit.isPlayer && typeof settleEnemyKill === "function") settleEnemyKill(unit, notes);
   if (unit.isPlayer) notes.push(`${unit.name} 最内层归零，武器人倒下。`);
   if (unit.isPlayer && isWeaponUnit(unit) && !unit.escort) onWeaponUnitDown(unit, notes);
   else if (opt.cause && !opt.lethal) notes.push(`${unit.name} ${opt.cause}致死（最内层归零）。`);
@@ -6306,6 +6504,7 @@ function queueAssistAttack(breaker, broken) {
   if (broken._imbalanceLock) return;
   if (typeof preyBroken === "function" && preyBroken(breaker, broken)) return;   // 尘虫 / 管虫失衡：被沙鱼吞掉（desert.js）
   if (broken.isPlayer && typeof bpFirstBreakGuard === "function" && bpFirstBreakGuard(broken)) return;
+  breaker = assistBreaker(breaker, broken);
   const list = eligibleAssisters(breaker, broken);
   const side = broken.isPlayer || (breaker && !breaker.isPlayer) ? "敌人" : "玩家角色";
   if (!list.length) {
@@ -6373,17 +6572,19 @@ function finishAssist(helperId, extra) {
   if (!job) return;
   const target = unitById(job.targetId);
   if (assistTargetGone(target)) {
+    if (target) target._bossAssistWindow = false;
     appendLog(`${target ? target.name : "目标"} 已经倒下，协助攻击取消。`);
     presentAssistModal();
     return;
   }
   if (!helperId) {
+    target._bossAssistWindow = false;
     appendLog("没有人发动协助攻击。");
     presentAssistModal();
     return;
   }
   const helper = unitById(helperId);
-  if (!helper || !target) { presentAssistModal(); return; }
+  if (!helper || !target) { if (target) target._bossAssistWindow = false; presentAssistModal(); return; }
   // 先确认这个人真能出手，再召回武器、回满架势（以前先回满架势再判，空手 / 濒死的人选上了白回架势、啥也没打）
   if (!eligibleAssisters(unitById(job.breakerId), target).some(u => u.id === helper.id)) {
     appendLog(`${helper.name} 现在不能发动协助攻击，请另选。`);
@@ -6421,7 +6622,7 @@ function finishAssist(helperId, extra) {
     ? (typeof enemyAssistSkillId === "function" ? enemyAssistSkillId(helper) : "en_aa")
     : assistSkillId(helper);
   state._assistBy = helper.id;      // 协助攻击期间（图纸「恶眼」的伤害加成看这个）
-  try { runSkill(sidSkill); } finally { state._assistBy = null; }
+  try { runSkill(sidSkill); } finally { state._assistBy = null; target._bossAssistWindow = false; }
   state.attackerId = prevAtk;
   state.targetId = prevT;
   if (typeof fishFrenzyContinue === "function") fishFrenzyContinue(job, helper, target);   // 沙鱼群起：下一只接着上
@@ -6429,14 +6630,26 @@ function finishAssist(helperId, extra) {
   presentAssistModal();
 }
 
-function autoEnemyBlockers(target) {
+/** 敌人替 target 自动格挡时，u 是不是它的自己人：同一伙（不敌对）、都不是中立生物、对我方的立场一样（都是 / 都不是友军）。
+ *  多阵营混战里按阵营判断（作者 10/19 反馈：敌人会错误地保护不该保护的单位）：
+ *  以前只看「不敌对」——中立生物（谁都不当它是敌人）、我方友军阵营挡着的别家单位都会被护着 */
+function enemyAllyOf(u, target) {
+  if (!u || !target || u.isPlayer || target.isPlayer) return false;
+  if (typeof isNeutralCreature === "function" && (isNeutralCreature(u) || isNeutralCreature(target))) return false;
+  if (typeof playerAllied === "function" && playerAllied(u) !== playerAllied(target)) return false;
+  return typeof hostileTo !== "function" || !hostileTo(u, target);
+}
+
+function autoEnemyBlockers(target, attacker) {
   if (!target || target.isPlayer || target.dead) return [];
   // 赤牙：受击时花 1 附赠为自己格挡（第九章，70%，见 party.js · FIXED_BLOCK）
   const self = target.kit === "chixia" && !target.stunned && (Number(target.bonus) || 0) >= 1 ? [target] : [];
   return self.concat(fieldUnits().filter(u => {
     if (u.isPlayer || u.id === target.id || u.stunned || u.dead || u.hidden || sinkLocked(u)) return false;
     if (Number(u.zone) !== Number(target.zone)) return false;
-    if (typeof hostileTo === "function" && hostileTo(u, target)) return false;   // 敌对阵营不替它挡
+    if (!enemyAllyOf(u, target)) return false;   // 只替自己人挡（敌对阵营、中立生物、立场不同的友军都不挡）
+    // 打过来的不是它的敌人（我方的友军阵营挡我方的攻击）：不出手
+    if (attacker && (state.units || []).includes(attacker) && typeof hostileTo === "function" && !hostileTo(u, attacker)) return false;
     if (u.kit === "captain_ox") return true;
     if (u.kit === "patrol_car" && !(u.resources && u.resources.blockUsedThisTurn)) return true;
     return false;
@@ -6445,7 +6658,7 @@ function autoEnemyBlockers(target) {
 
 /** 敌方的自动协助格挡：成功时目标免伤，击破由格挡者承担（最少留 1）；警卫队队长·牛成功后另外反击 1 击破（selfBreak） */
 function tryOxAutoBlock(attacker, target, atkRange) {
-  const oxes = autoEnemyBlockers(target);
+  const oxes = autoEnemyBlockers(target, attacker);
   if (!oxes.length) return null;
   for (let i = 0; i < oxes.length; i++) {
     const ox = oxes[i];
@@ -7333,10 +7546,14 @@ function armAtkFx(attacker, flags) {
   flags = flags || {};
   const fromHang = hungAtkFx(attacker);
   const fromBox = [];
-  ["combust","icebreak","bolt","etch","backflow","inertia","diffract"].forEach(id => {
-    const el = uiEl("fFx_" + id);
-    if (el && el.checked) fromBox.push(id);
-  });
+  // 游戏模式（game.html）不读计算器界面的词条勾选框：那些勾选只给手动计算用，
+  // 否则上次勾的「破冰」等会泄漏到技能攻击上（夕夏普攻、格挡反打等）
+  if (!(typeof GAME_MODE !== "undefined" && GAME_MODE)) {
+    ["combust","icebreak","bolt","etch","backflow","inertia","diffract"].forEach(id => {
+      const el = uiEl("fFx_" + id);
+      if (el && el.checked) fromBox.push(id);
+    });
+  }
   const list = [];
   fromHang.concat(fromBox).forEach(id => { if (list.indexOf(id) < 0 && ATKFX[id]) list.push(id); });
   flags.atkFx = list;
@@ -7501,6 +7718,7 @@ function applyAtkFxAfter(attacker, target, res, flags, extra, opt) {
 }
 
 function dealTo(attacker, target, opt) {
+  if (target) target._brokeNow = false;   // 新的一击：上一次「立刻恢复」留下的记号作废
   opt = opt || {};
   // 原始击破（后面会被目标一侧的效果改写，例如「加倍击破」翻倍）：导体额外那一下按它重新结算
   if (!("_origBaseBreak" in opt)) opt._origBaseBreak = opt.baseBreak;
@@ -7508,7 +7726,7 @@ function dealTo(attacker, target, opt) {
   if (target && target.isStructure) return dealToStructure(attacker, target, opt);   // 打配置物 / 危墙的替身（#52）
   // 战场数据：击杀在伤害结算里就会发生，所以先记下「最后一击是谁」
   if (attacker && target && attacker.isPlayer && !target.isPlayer && (state.units || []).includes(attacker)) target._lastHitBy = attacker.id;
-  else if (attacker && attacker.envSrc && target && !target.isPlayer) { const w = envCreditUnit(attacker); if (w) target._lastHitBy = w.id; }   // 配置物打死的：击杀算触发者
+  else if (attacker && attacker.envSrc && target && !target.isPlayer) creditPlayerHit(target, (envOwnerUnit(attacker) || {}).id);   // 配置物打死的：击杀算触发者
   if (!opt.flags.atkFx) armAtkFx(attacker, opt.flags);
   if (opt.flags.diffract) {
     opt.flags.blockResolved = true;
@@ -7606,7 +7824,7 @@ function dealTo(attacker, target, opt) {
     const msg = "飞碟触灵本体不受范围效果波及。";
     return { res: { ok: false, total: 0, breakDealt: 0, log: [msg], perHit: [] }, extra: [msg] };
   }
-  if (target && target.kit === "ufo_body" && !(opt.flags.assist && target.stunned)) {
+  if (target && target.kit === "ufo_body" && !(opt.flags.assist && (target.stunned || target._bossAssistWindow))) {
     const msg = "飞碟触灵本体无法被通常手段攻击。只有本体失衡时的协助攻击可以打到它。";
     appendLog(msg);
     return { res: { ok: false, total: 0, breakDealt: 0, log: [msg], perHit: [] }, extra: [msg] };
@@ -7616,9 +7834,10 @@ function dealTo(attacker, target, opt) {
   const assisting = !!opt.flags.assist || !!(attacker && state._assistBy && state._assistBy === attacker.id);
   // 危墙 / 关着的机关门挡住：先判，再进协助格挡（以前先弹格挡，格挡者花掉附赠、扣了耐久，这一击才被墙挡住）
   // lob：越墙的抛射（扭矩酸液炮蓄力、碎渣重炮的迫击炮）不被危墙 / 门挡住
-  // 决一死战（#44）：被决斗的敌人只能攻击灯——它的范围攻击（电弧扫射、榴弹……）也只打得到灯，同区的其他人不被波及。
+  // 决一死战（#44）：被决斗的敌人只能攻击灯——它的范围攻击（电弧扫射、榴弹……）也只打得到灯，同区的其他人不被波及；
+  // 多目标的单体攻击、协助攻击、借机攻击同理，一律只打得到灯。
   // 首领机制（死刑、齐射……）和环境伤害不算它的攻击行动，不拦
-  if (attacker && !attacker.isPlayer && target && target.isPlayer && opt.flags.action && opt.flags.aoe && !opt.flags.environment && !opt.flags.mechId && !opt.flags.execution &&
+  if (attacker && !attacker.isPlayer && target && target.isPlayer && opt.flags.action && !opt.flags.environment && !opt.flags.mechId && !opt.flags.execution &&
       typeof touDuelVictim === "function") {
     const duel = touDuelVictim(attacker);
     if (duel && target.id !== duel.id) {
@@ -7647,15 +7866,13 @@ function dealTo(attacker, target, opt) {
       opt.flags.blockResolved = true;
     }
   }
-  let wallSide = !attacker || !target || !opt.flags || !opt.flags.action || opt.flags.diffract || opt.flags.locked ? null
-    : !attacker.isPlayer && (target.isPlayer || target.kit === "ironwall") ? "player"
-    : attacker.isPlayer && !target.isPlayer ? "enemy" : null;
-  // 范围攻击（不管谁放的、算不算行动）：被屏障保护的单位一律不受，屏障替它吃一下（同一次行动只吃一下）
-  if (!wallSide && target && opt.flags && opt.flags.aoe && !opt.flags.environment && !opt.flags.diffract && aoeShieldFor(target)) {
-    wallSide = barrierSideOf(target);
-  }
-  if (wallSide) {
-    const wallHit = absorbIronWall(attacker, target.zone, opt, wallSide);
+  // 屏障（铁壁 / 防护罩 / 废铁墙）：同区被它护着的单位挨敌方的攻击行动、或者范围攻击（算不算行动都一样）时，屏障替它吃一下（同一次行动只吃一下）。
+  // 谁护着谁、谁算敌方按阵营判断（barrierGuards / barrierFoe）：多阵营混战里敌人打敌对阵营的敌人、我方或友军自己的范围攻击，屏障都不管。
+  // wallZone：借机攻击在离开的那一区结算——走的人已经站到隔壁，替他挡的是他离开的那一区的屏障
+  const wallCase = attacker && target && opt.flags && !opt.flags.diffract && !opt.flags.locked &&
+    (opt.flags.action || (opt.flags.aoe && !opt.flags.environment));
+  if (wallCase) {
+    const wallHit = absorbBarrier(barrierFor(target, attacker, opt.wallZone), attacker, opt);
     if (wallHit) {
       (wallHit.notes || []).forEach(s => appendLog(s));
       return {
@@ -7686,7 +7903,7 @@ function dealTo(attacker, target, opt) {
         opt: JSON.parse(JSON.stringify({
         atk: opt.atk, mult: opt.mult, hitMults: opt.hitMults, flat: opt.flat, hits: opt.hits, baseHits: opt.baseHits, breakOnce: opt.breakOnce, element: opt.element,
         baseBreak: opt.baseBreak, diceN: opt.diceN, diceS: opt.diceS, diceB: opt.diceB, diceValue: opt.diceValue,
-        usePrep: opt.usePrep, atkRange: opt.atkRange, flags: Object.assign({}, opt.flags, { blockResolved: false })
+        usePrep: opt.usePrep, atkRange: opt.atkRange, wallZone: opt.wallZone, flags: Object.assign({}, opt.flags, { blockResolved: false })
       }))
       });
       presentBlockModal();
@@ -7830,6 +8047,7 @@ function dealTo(attacker, target, opt) {
   });
   res.flags = flags;
   const wasStunnedT = !!target.stunned;
+  const wasFlyingT = !!target.flying;   // 击破飞行单位时引擎会先把它击落（engine.js · applyResultToUnit），荒原行者要看结算前的飞行状态
   const dopplerT = target.self === "doppler";   // 被这一下打进失衡、多普勒随晕眩结束，这一下的击破照样传出去
   const shieldBeforeT = shieldSum(target);
   // 评分：这一击的加分倍率（克制等）。击杀、失衡在 applyCombat 里发生，先挂在目标身上给它们用
@@ -7841,7 +8059,7 @@ function dealTo(attacker, target, opt) {
   const extra = applyCombat(target, res, attacker);
   // 这一击打死的敌人：本次行动后面的攻击还能打到它（全部算溢出）
   if (target && !target.isPlayer && target.dead && !wasDeadForGhost && state.actionKills && !state.actionKills.includes(target.id)) state.actionKills.push(target.id);
-  if (target && !target.isPlayer && scoreBonus > 0 && !wasStunnedForScore && target.stunned) target._staggerBonus = scoreBonus;
+  if (target && !target.isPlayer && scoreBonus > 0 && brokeInto(target, wasStunnedForScore)) target._staggerBonus = scoreBonus;
   if (target && !target.isPlayer) target._killBonus = 0;   // 只给这一击打死的用
   // 手册第四章补全的效果（effects.js）
   if (typeof afterDamageTaken === "function") {
@@ -7850,8 +8068,8 @@ function dealTo(attacker, target, opt) {
     });
   }
   if ((res.breakDealt || 0) > 0 && typeof onBreakTaken === "function") onBreakTaken(target, res.breakDealt, opt.element || res.element, extra, dopplerT);
-  if (!wasStunnedT && target.stunned && typeof onBroken === "function") onBroken(target, extra);
-  if (typeof featAfterHit === "function") featAfterHit(attacker, target, res, flags, extra, !wasStunnedT && !!target.stunned);   // 冲阵 / 乘势 / 荒原行者
+  if (brokeInto(target, wasStunnedT) && typeof onBroken === "function") onBroken(target, extra);
+  if (typeof featAfterHit === "function") featAfterHit(attacker, target, res, flags, extra, brokeInto(target, wasStunnedT), wasFlyingT);   // 冲阵 / 乘势 / 荒原行者
   if (flags.action && !isReaction && typeof afterAttackDealt === "function") afterAttackDealt(attacker, target, opt.element || res.element, res, opt, extra);
   // 猛击反震把攻击者自己打进失衡：这一击的霜结 / 溅射 / 导体照常结算完，再随晕眩结束自我效果
   if (attacker && attacker !== target && attacker.stunned && typeof endSelfOnStun === "function") endSelfOnStun(attacker, extra);
@@ -7936,11 +8154,12 @@ function dealTo(attacker, target, opt) {
     // 配置物打在敌人身上：环境分数（×1.2，记在触发 / 操控它的人身上）
     const envWho = attacker && attacker.envSrc && target && !target.isPlayer ? envCreditUnit(attacker) : null;
     if (attacker && attacker.envSrc) {
-      if (envWho && scoreEnvHit(target, res, envWho, scoreBonus)) scoreWeatherHelp(attacker, target, res, true);
+      if (envWho && scoreEnvHit(target, res, envWho, scoreBonus, attacker.name)) scoreWeatherHelp(attacker, target, res, true);
     } else if (attacker && target && attacker.isPlayer && !target.isPlayer) {
       const st = battleStat(attacker);
       if (st) {
         st.dmg += Math.floor(Number(res.total) || 0); st.brk += Number(res.breakDealt) || 0;
+        burstNote(st, attacker, res.total, burstLabel(opt.flags), res);
         addScore("dmg", Math.floor(Number(res.total) || 0) * SCORE_RULES.dmg, attacker, scoreBonus);
         addScore("brk", (Number(res.breakDealt) || 0) * SCORE_RULES.brk, attacker, scoreBonus);
         scoreWeatherHelp(attacker, target, res, true);
@@ -8115,7 +8334,7 @@ function setHiakiStance(u, stance) {
       const el = u.resources.blade === "naruto" ? "ice" : "fire";
       marked.forEach(x => {
         x.barrageBy = null;
-        hitOne2(u, x, { element: el, mult: 0.5, baseBreak: 0, atk: effectiveAtk(u, state.units), atkRange: "any", usePrep: false, flags: { action: true, lob: true } }, notes);
+        hitOne2(u, x, { element: el, mult: 0.5, baseBreak: 0, atk: effectiveAtk(u, state.units), atkRange: "any", usePrep: false, flags: { action: true, lob: true, skillRange: true } }, notes);   // skillRange：无视距离（距离 2 也砍得到）
       });
       notes.unshift(`特盛乱打：进入居合，被乱打过的 ${marked.length} 个敌人各被瞬间砍一刀。`);
       appendLog(notes.join("\n"));
@@ -9732,6 +9951,12 @@ function spawnFloater(unit, dmg, element) {
   spawnPopup(unit, { kind: "dmg", value: dmg, element: element });
 }
 
+/** 架势显示：训练假人（架势 ≥ DEF_INF_AT）写 ∞，其余照 当前/上限 */
+const DEF_INF_AT = 100000;
+function defText(u) {
+  return Math.max(Number(u.defMax) || 0, Number(u.def) || 0) >= DEF_INF_AT ? "∞" : `${u.def}/${u.defMax}`;
+}
+
 function isEffectivelyStunned(u) {
   if (!u) return false;
   if (u.stunned) return true;
@@ -9779,8 +10004,10 @@ function smashableBreak(a, u, amount, element, notes, reason) {
 /** 不经过攻击的击破（状态、场地、技能直接给的击破……）。
  *  opt.by：造成这次击破的单位——打进失衡时它不能接自己的协助攻击（queueAssistAttack） */
 function dealBreak(unit, amount, element, notes, reason, opt) {
+  if (unit) unit._brokeNow = false;
   amount = Math.max(0, Math.floor(Number(amount) || 0));
   if (!unit || !amount) return;
+  if (unit.trainingDummy) return;   // 训练假人架势无限：吃不到任何击破
   opt = opt || {};
   if (/冻伤/.test(reason || "")) procFx(unit, "frost");
   notes = notes || [];
@@ -9837,7 +10064,7 @@ function dealBreak(unit, amount, element, notes, reason, opt) {
     notes.push(imbalanceLine(sink));
     // 飞行单位被击破：和攻击打空架势一样强制击落，扣 20% 最大生命（engine.js · resolveAttack 的击落）
     if (before > 0) knockdownByBreak(sink, notes);
-    if (typeof endSelfOnStun === "function") endSelfOnStun(sink, notes);
+    if (typeof endSelfOnStun === "function" && !opt.keepSelf) endSelfOnStun(sink, notes);   // keepSelf：猛击反震，留给 dealTo 结算完这一击再结束
     queueAssistAttack(opt.by || null, sink);
     if (brokeIntoStun && typeof onBroken === "function") onBroken(sink, notes);
   } else {
@@ -9866,6 +10093,7 @@ function knockdownByBreak(u, notes) {
   // 深渊上空被击落：再坠入深渊失去 10%（共 30%），并离开深渊（和攻击打空架势的击落一致）
   if (!u.dead) applyAbyssFall(u, null, notes);
   if (!u.isPlayer && isInnerDepleted(u)) {
+    creditPlayerHit(u, actingPlayerId());
     settleEnemyKill(u, notes);
     notes.push(`${u.name} 被击落摔死。`);
     notes.push(...sweepDeadEnemies());
@@ -9875,6 +10103,7 @@ function knockdownByBreak(u, notes) {
 /** 挂上不稳：已经不稳的再挂一个 → 两个不稳转成晕眩（失衡）。返回 true = 现在是不稳状态 */
 function applyUnstable(u, notes) {
   if (!u) return false;
+  if (u.trainingDummy) return false;   // 训练假人：不会不稳 / 晕眩
   u.statuses = u.statuses || {};
   if (u.statuses.unstable) {
     u.statuses.unstable = false;
@@ -10065,7 +10294,19 @@ function crushOnce(a, t, auto) {
   if (!a || !t) return lines;
   const atk = effectiveAtk(a, state.units);
   a.zone = Number(t.zone);
-  hitOne2(a, t, { element: "physical", mult: 1.5, baseBreak: 3, atk, flags: { action: true } }, lines);
+  // 已经抓在目标身上（每回合自动再碾）：人就挂在它身上，打飞行目标不用再付「近程打飞行」的附赠行动。
+  // 以前照收，可抓住期间夕夏拿不到附赠行动 → 每回合 0 伤害、目标不死不失衡、永远松不开手
+  // 第一轮 0.75×atk + 2 击破；抓住后每回合自动再碾改为 1.5×atk + 1d8 + 3 击破
+  const opt = auto
+    ? { element: "physical", mult: 1.5, dice: [1, 8], baseBreak: 3, atk, flags: { action: true, flyFree: true } }
+    : { element: "physical", mult: 0.75, baseBreak: 2, atk, flags: { action: true } };
+  const out = hitOne2(a, t, opt, lines);
+  if (!out || !out.res || out.res.ok === false) {
+    // 没碾到（附赠行动不够打飞行目标、目标打不到……）：抓不住，已经抓着的也松手，免得卡死
+    if (a.resources) a.resources.crushId = null;
+    lines.push(`${a.name} 没能碾到 ${t.name}，${auto ? "松开了手" : "没能抓住"}。`);
+    return lines;
+  }
   if (auto) addFuel(1, "狂怒碾压", lines);   // 启动引擎+：狂怒碾压每个使用的回合 +1 燃油
   const dead = t.dead || (t.isPlayer && t.dying);
   if (dead) {
@@ -10140,6 +10381,7 @@ function clearShift(u) {
 
 function popStatus(unit, key) {
   if (unit && unit.isStructure) return;   // 物体不吃状态（#52）
+  markStatusOwner(unit, key, actingPlayerId());   // 玩家行动中给敌人挂的状态：记下所有者
   if (key === "shockwave" && typeof syncShockwave === "function") syncShockwave(unit, null);
   const meta = STATUS_POP[key];
   if (meta) spawnPopup(unit, { kind: "status", text: meta.name, element: meta.element });
@@ -10377,6 +10619,7 @@ function appendLog(text, kind) {
 
 function paintSkillLog(text) {
   const sum = actionAccLine();
+  if (state.actionAcc) state._endedAcc = state.actionAcc;   // 行动结束才判的高能自爆（flushHighBooms）还要靠它找记分归属
   state.actionAcc = null;
   appendLog(sum ? String(text || "") + (text ? "\n" : "") + sum : text);
 }
@@ -10479,7 +10722,13 @@ function bossQuickRecover(u, notes) {
   if (!u.stunned || u.dead) return;
   const out = [];
   recoverFromStun(u, out);
+  u._brokeNow = true;           // 这一下确实打进了失衡：后面「打进失衡时」的效果读 brokeInto，不看已经清掉的 stunned
+  u._bossAssistWindow = true;   // 排上队的协助攻击还要打它（飞碟触灵本体平时不可直击，只有失衡时的协助攻击打得到）
   out.forEach(s => notes.push(s.replace("晕眩结束", "晕眩标记没攒满，失衡立刻结束")));
+}
+/** 这一击 / 这次击破把 u 打进了失衡吗：结算前不在失衡，结算后在失衡；或者首领 / 精英标记没攒满、立刻恢复了架势（bossQuickRecover） */
+function brokeInto(u, wasStunned) {
+  return !wasStunned && !!u && !u.dead && !!(u.stunned || u._brokeNow);
 }
 /** 兜底：没经过 imbalanceLine 的失衡（直接设成晕眩的那些）也记上标记 */
 function settleBossStuns(notes) {
@@ -10935,6 +11184,7 @@ function runSkill(id, optRun) {
   let lines;
   try {
     lines = withLogSink(sink => { try {
+      if (!state._highDefer) state._endedAcc = null;
       state.aoePulse = {};            // 只算这一次行动的范围攻击
       state.actionKills = [];         // 这一次行动里打死的敌人（动作结束前还能吃到后面的攻击、算溢出）
       state.flyPaid = {};             // 这一次行动里已经为「近程打飞行」付过附赠行动的（攻击者 > 目标）
@@ -10955,7 +11205,12 @@ function runSkill(id, optRun) {
       }
       // 跃迁（feats.js）：这次花了行动点、真的打出了攻击
       if (a0 && typeof featAfterAction === "function") featAfterAction(a0, (Number(a0.ap) || 0) < apBefore);
-      if (!state._highDefer) flushHighBooms();
+      if (!state._highDefer) {
+        // 技能收尾（paintSkillLog）已经清掉了行动记账：高能自爆的溢出分 / 余波分仍记给引发它的这一方
+        if (!state.actionAcc && state._endedAcc) state.actionAcc = state._endedAcc;
+        state._endedAcc = null;
+        flushHighBooms();
+      }
       if (fuelGain && (Number(state.actionSeq) || 0) !== seqBefore) addFuel(1, "引擎运转");   // 真的出手了（开始了新的行动）才算
       const bossNotes = []; settleBossStuns(bossNotes); if (bossNotes.length) appendLog(bossNotes.join("\n"));
       applyFatigue(a0, id, scoreBefore);   // 招式疲劳：连续几个回合用同一招，这次行动的总得分打折
@@ -11032,7 +11287,7 @@ function runSkillInner(id, optRun) {
   // 敌人技能默认花 1 行动点；赤牙的霰弹枪 / 掩体 2 行动点、追猎 1 附赠（enemies.js · enemySkillCost）
   const enemyCost = !a.isPlayer && !reaction ? (typeof enemySkillCost === "function" ? enemySkillCost(a, id) : { ap: 1, bonus: 0 }) : null;
   if (enemyCost) {
-    if ((a.ap || 0) < enemyCost.ap || (a.bonus || 0) < enemyCost.bonus) {
+    if (sinkLocked(a) || (a.ap || 0) < enemyCost.ap || (a.bonus || 0) < enemyCost.bonus) {
       paintSkillLog(`${a.name} ${(a.ap || 0) < enemyCost.ap ? "行动点" : "附赠行动"}不足，无法使用该技能。`);
       return;
     }
@@ -11182,8 +11437,19 @@ function runSkillInner(id, optRun) {
     return;
     }
   }
+  // 付不起消耗（流沙没顶 / 点数不够）：这次行动不结算，要在 snapshot / beginActionAcc 之前挡住，免得留下半截状态
+  {
+    const payCost = a.isPlayer && id !== "assist_block" ? skillCost(id) : enemyCost;
+    const why = costBlockReason(a, payCost);
+    if (why) {
+      paintSkillLog(why === "陷在流沙里没顶，不能行动"
+        ? `${a.name} 陷在流沙里没顶，无法${skillNameHint(id)}。`
+        : `${a.name} ${why}，无法使用该技能。`);
+      return;
+    }
+  }
   snapshot();
-  beginActionAcc(a);
+  beginActionAcc(a, id);
   if ((a.kit === "xia" || a.kit === "berniel" || a.weaponOf === "xia") && !/engine$|prep$|summon$|return$|cover$/.test(id)) {
     markXiaAttack(a);
   }
@@ -11231,6 +11497,11 @@ function runSkillInner(id, optRun) {
   const waveThenHit = (tgt, opt) => {
     tgt.statuses = tgt.statuses || {};
     const had = !!tgt.statuses.shockwave;
+    // 屏障护着的目标：这一击整个被屏障吃掉，不会碰到屏障后面的人，震荡也不挂（先挂再还原会让屏障挡下的一击留着震荡）
+    if (!had && barrierFor(tgt, a)) {
+      lines.push(`${tgt.name} 被屏障护着，震荡不生效。`);
+      return hitOne(a, tgt, opt);
+    }
     const snap = { def: tgt.def, defMax: tgt.defMax, cut: tgt._waveCut };
     if (!had) {
       tgt.statuses.shockwave = true;
@@ -11684,7 +11955,7 @@ function runSkillInner(id, optRun) {
         a.resources.charge -= 1;
         const from = a.zone;
         a.zone = Number(t.zone);
-        lines.push(`电击鞭缠住 ${t.name}：消耗 1 电能，川川从 ${from} 区拉到 ${a.zone} 区。`);
+        lines.push(`电能鞭缠住 ${t.name}：消耗 1 电能，川川从 ${from} 区拉到 ${a.zone} 区。`);
         if (typeof afterMove === "function") afterMove(a, lines);
       }
       addCharge(1);
@@ -11848,7 +12119,12 @@ function runSkillInner(id, optRun) {
       let tgt = sTok ? null : ((ref ? unitById(ref) : null) || t);
       if (!sTok && !tgt) { lines.push("先选目标。"); return paintSkillLog(lines.join("\n")); }
       // #44（夕夏定）：瞄准躲在敌方屏障（废铁墙……）后面的敌人，这一刀本来就会被屏障拦下——直接改砍屏障，走配置物的翻倍和摧毁返还
-      const shield = tgt && !tgt.isPlayer ? barrierIn(tgt.zone, "enemy") : null;
+      // 改砍屏障也要和别的攻击一样被危墙 / 关着的门挡住（以前先换成屏障再砍，隔墙也砍得到）：挡住就不出手、不耗电能
+      const shield = tgt && !tgt.isPlayer ? barrierFor(tgt, a) : null;
+      if (shield && lineBlocked(a.zone, shield.zone)) {
+        lines.push(`巨刃划空打不到 ${tgt.name}：${lineBlocked(a.zone, shield.zone)}`);
+        return paintSkillLog(lines.join("\n"));
+      }
       if (shield) {
         lines.push(`${shield.name} 挡在 ${tgt.name} 前面，巨刃划空改砍 ${shield.name}。`);
         prop = shield; sTok = "prop:" + shield.id; tgt = null;
@@ -12222,7 +12498,7 @@ function runSkillInner(id, optRun) {
       hitOne(a, t, { element: "acid", mult: 1, baseBreak: 1, atk, onConnect: { dest, reason: "被猫爪击退" } });
       const y = findKit("yuito", state.units);
       if (y) {
-        const gain = (!stun0 && t.stunned) ? 2 : 1;
+        const gain = brokeInto(t, stun0) ? 2 : 1;
         y.resources.bean = (Number(y.resources.bean) || 0) + gain;
         lines.push(`咖啡豆 +${gain}${gain > 1 ? "（打出失衡）" : ""} → ${y.resources.bean}`);
       }
@@ -12246,7 +12522,7 @@ function runSkillInner(id, optRun) {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       const stun0 = !!t.stunned;
       hitOne(a, t, { element: "ice", mult: 0, baseBreak: 3, atk, atkRange: "melee" });
-      if (!stun0 && t.stunned) {
+      if (brokeInto(t, stun0)) {
         const owner = ownerOfWeapon(a, state.units);
         lines.push(...returnWeapon(a));
         if (owner) {
@@ -12792,7 +13068,7 @@ function runSkillInner(id, optRun) {
         lines.push(`过度自信：${tgt.name} 被嘲讽，下次攻击必须打柯尔特。`);
       }
       // 卡面：这次攻击行动造成失衡才提升到 1.5×；本来就失衡的不算
-      const brokeNow = !stunnedBefore && !!tgt.stunned;
+      const brokeNow = brokeInto(tgt, stunnedBefore);
       const amount = Math.floor(atk * (brokeNow ? 1.5 : 1));
       const outer = (tgt.layers || []).find(l => (l.current || 0) > 0);
       if (outer) {
@@ -12869,7 +13145,7 @@ function runSkillInner(id, optRun) {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       const beforeStun = !!t.stunned;
       hitOne(a, t, { element: "physical", mult: 1, baseBreak: 1, atk });
-      if (!beforeStun && t.stunned) {
+      if (brokeInto(t, beforeStun)) {
         a.ap = (a.ap || 0) + 1;
         lines.push("叮咬造成失衡，返还 1 行动点。");
       }
@@ -13540,6 +13816,7 @@ function dmFillDef(u) {
 }
 
 function dmForceStun(u) {
+  if (u.trainingDummy) return;   // 训练假人不会失衡
   u.def = 0;
   u.stunned = true;
 }

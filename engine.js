@@ -470,8 +470,9 @@ function chartMod(element, layerType, weather, field, acidRainCancelArmor, field
   if (weather === "glow" && element !== "energy") {
     v = -v;
   }
-  if (field && field.ice) {
-    if (element === "ice") v = 0.25 * (Number(fieldMult) || 1);
+  // 冻土：强制冰属性对目标易伤 25%（恶劣环境/末日可翻倍）。独立于天气，雪天等天气修正不会覆盖或取消这个强制易伤。
+  if (field && field.ice && element === "ice") {
+    v = 0.25 * (Number(fieldMult) || 1);
   }
   if (acidRainCancelArmor && layerType === "armor" && element !== "acid" && element !== "ice") {
     v += 0.25;
@@ -1326,16 +1327,12 @@ function applyResultToUnit(target, result, attacker) {
   const notes = [];
   if (!result.ok) return notes;
   target.layers = clone(result.layersAfter);
-  if (result.knockdownHp) {
-    const d = applyTrueDamage(target.layers, result.knockdownHp);
-    notes.push(`击落真伤 ${d}`);
-    target.flying = false;
-  }
   let spent = result.breakDealt;
   if (target.kit === "xia" && target.upOnShp && (typeof passiveOn !== "function" || passiveOn(target))) {
     spent = 0;
     notes.push("背水一战：起身中不失去架势。");
   }
+  if (target.trainingDummy) spent = 0;   // 训练假人架势无限：不扣架势、不失衡
   if (target.raceTrait === "catFocus") spent = Math.min(spent, Math.max(0, 2 - (target.lostDefThisTurn || 0)));
   // 坚挺：架势不会被打到 1 以下（不倒战意给的，本回合有效）
   if (target.statuses && target.statuses.sturdy && (Number(target.def) || 0) >= 1 && spent > (Number(target.def) || 0) - 1) {
@@ -1346,6 +1343,16 @@ function applyResultToUnit(target, result, attacker) {
   if (spent > 0 && typeof featUnbowedAuto === "function") featUnbowedAuto(target, spent, notes);
   target.lostDefThisTurn = (target.lostDefThisTurn || 0) + spent;
   const defBeforeHit = Math.max(0, Number(target.def) || 0);
+  // 决不后退 / 坚挺 / 背水一战挡下了这一击的失衡：不算被击破——机甲不解除、飞行单位不被击落（不吃击落真伤）
+  if (result.broke && defBeforeHit - spent > 0) {
+    result.broke = false;
+    result.knockdownHp = 0;
+  }
+  if (result.knockdownHp) {
+    const d = applyTrueDamage(target.layers, result.knockdownHp);
+    notes.push(`击落真伤 ${d}`);
+    target.flying = false;
+  }
   const wasStunned = !!target.stunned;
   target.def = Math.max(0, (Number(target.def) || 0) - spent);
   if (spent > 0 && typeof registerZoneBreak === "function" && target.kit !== "ufo_leg" && !target.noPosture) {
@@ -1391,9 +1398,17 @@ function applyResultToUnit(target, result, attacker) {
   }
   if (result.total > 0) target.gotHitThisTurn = true;
   if (result.selfBreak && attacker) {
-    attacker.def = Math.max(0, (Number(attacker.def) || 0) - result.selfBreak);
-    notes.push(`猛击反震：攻击者架势 −${result.selfBreak}`);
-    if (attacker.def <= 0) attacker.stunned = true;
+    if (attacker.kit === "xia" && attacker.upOnShp && (typeof passiveOn !== "function" || passiveOn(attacker))) {
+      notes.push("背水一战：起身中不失去架势（猛击反震无效）。");
+    } else if (typeof dealBreak === "function") {
+      // 反震和普通击破一样：屹立不倒 / 坚挺 / 决不后退照算，打进失衡时写失衡、敌人排协助攻击。
+      // keepSelf：晕眩后的自我效果留到 dealTo 把这一击结算完再结束
+      dealBreak(attacker, result.selfBreak, "none", notes, "猛击反震", { by: target, keepSelf: true });
+    } else {
+      attacker.def = Math.max(0, (Number(attacker.def) || 0) - result.selfBreak);
+      notes.push(`猛击反震：攻击者架势 −${result.selfBreak}`);
+      if (attacker.def <= 0) attacker.stunned = true;
+    }
   }
   // 自焚吸血只在 app.js · applyCombat 里结算一次（以前这里也治一次，吸血翻倍）
   return notes;

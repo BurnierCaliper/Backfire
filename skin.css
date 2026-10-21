@@ -358,7 +358,35 @@ details.smith .sm-price, details.smith .sm-prog.ready { color: var(--sk-hazard);
 .pvtag, .banner { background: rgba(11, 8, 6, .94); border: 2px solid var(--sk-ink); box-shadow: 3px 4px 0 rgba(0, 0, 0, .5); }
 .pvtag .dmg { font-family: var(--sk-stencil); font-weight: 400; }
 .banner { font-family: var(--sk-name); font-weight: 700; font-size: 16px; }
-.phase-card { font-family: var(--sk-tag); font-weight: 800; font-size: 56px; letter-spacing: .2em; }
+/* 回合大字：一条喷漆色带从左边刷进来、停一下、再往右刷走（我方黄、敌方红），底下淌两道漆 */
+.phase-card {
+  margin: 0 auto; width: fit-content; max-width: calc(100% - 32px);
+  padding: 4px 40px 9px 46px;
+  font-family: var(--sk-tag); font-weight: 800; font-size: 50px; letter-spacing: .16em; line-height: 1.1;
+  color: var(--sk-ink); text-shadow: none; isolation: isolate;
+  rotate: -2.5deg;
+  animation: phaseSpray 1.05s cubic-bezier(.2, .8, .3, 1) forwards;
+}
+.phase-card::before {
+  content: ""; position: absolute; inset: 0; z-index: -1;
+  background: var(--pc, var(--sk-hazard)); filter: url(#sk-spray);
+  clip-path: polygon(1% 14%, 8% 2%, 55% 7%, 99% 0, 97% 52%, 100% 93%, 66% 100%, 28% 93%, 2% 100%, 0 52%);
+}
+.phase-card::after {
+  content: ""; position: absolute; z-index: -1; left: 18%; top: 88%; width: 7px; height: 18px; border-radius: 0 0 4px 4px;
+  background: var(--pc, var(--sk-hazard));
+  box-shadow: 52px -4px 0 -1px var(--pc, var(--sk-hazard)), 132px 3px 0 0 var(--pc, var(--sk-hazard));
+}
+.phase-card.player { --pc: var(--sk-hazard); color: var(--sk-ink); }
+.phase-card.enemy { --pc: var(--sk-blood); color: var(--sk-canvas); }
+@keyframes phaseSpray {
+  0% { opacity: 0; clip-path: inset(-30% 100% -60% 0); translate: -40px 0; }
+  16% { opacity: 1; clip-path: inset(-30% 0 -60% 0); translate: 0 0; }
+  80% { opacity: 1; clip-path: inset(-30% 0 -60% 0); translate: 8px 0; }
+  100% { opacity: 0; clip-path: inset(-30% 0 -60% 100%); translate: 46px 0; }
+}
+@keyframes phaseFade { 0%, 100% { opacity: 0; } 15%, 80% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .phase-card { animation: phaseFade 1s ease-out forwards; } }
 .stamp { font-family: var(--sk-tag); font-weight: 800; }
 .pop { font-family: var(--sk-stencil); font-weight: 400; }
 
@@ -452,6 +480,7 @@ details.smith .sm-price, details.smith .sm-prog.ready { color: var(--sk-hazard);
 .grade-badge b { font-family: var(--sk-stencil); font-style: normal; font-weight: 400; }
 
 @media (max-width: 820px) {
+  .phase-card { font-size: 30px; padding: 3px 22px 6px 26px; letter-spacing: .12em; }
   .g-top { background: var(--sk-oil); }
   .g-hud { background: var(--sk-oil); background-image: var(--sk-noise); box-shadow: 0 -6px 18px rgba(0, 0, 0, .45); }
   .g-hud::before { display: none; }

@@ -173,10 +173,11 @@
 (function (root) {
   "use strict";
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  const COLS = [["battles", "出场"], ["dmg", "造成伤害"], ["share", "输出占比"], ["brk", "击破"], ["staggers", "打出失衡"], ["kills", "击杀"],
+  const COLS = [["battles", "出场"], ["dmg", "造成伤害"], ["share", "输出占比"], ["burstDmg", "单回合最高爆发"], ["brk", "击破"], ["staggers", "打出失衡"], ["kills", "击杀"],
     ["assists", "协助攻击"], ["blocks", "协助格挡"], ["avoided", "格挡规避伤害"], ["reduced", "减伤减免"], ["taken", "承受伤害"], ["takenShare", "承伤占比"], ["heal", "治疗 / 护盾"], ["score", "得分"]];
   const OUT = { win: "胜利", lose: "战败", retreat: "撤退" };
   let box = null, merge = false;   // merge：角色和自己的武器人并成一行看
+  let shown = [], detail = -1;     // 表里现在这些行（点「单回合最高爆发」按下标找）；detail ≥ 0 时显示那一行的爆发详情
   const n = (v) => Math.round(Number(v) || 0);
   const SUM_KEYS = ["dmg", "brk", "staggers", "kills", "assists", "blocks", "blockOk", "avoided", "reduced", "taken", "heal", "score"];
   /** 武器人那一行加进主人那一行（出场次数按主人算），名字写「龙哥＋小朋友」；占比重新算 */
@@ -186,6 +187,8 @@
       const host = r.sub ? out[out.length - 1] : null;
       if (!host) { out.push(Object.assign({}, r, { sub: false, parts: [r.name] })); return; }
       SUM_KEYS.forEach(k => { host[k] = n(host[k]) + n(r[k]); });
+      // 单回合最高爆发不相加（不是同一回合），取两者里高的那个，并写明是谁打的
+      if (r.burst && n(r.burst.dmg) > n(host.burst && host.burst.dmg)) { host.burst = Object.assign({ who: r.name }, r.burst); host.burstDmg = n(r.burst.dmg); }
       host.parts.push(r.name);
     });
     out.forEach(r => { r.name = r.parts.join("＋"); });
@@ -210,16 +213,38 @@
     kits.filter(w => w.weaponOf && !heroes.some(h => h.kit === w.weaponOf)).forEach(w => out.push(Object.assign({ sub: true }, w)));
     const dmg = out.reduce((a, r) => a + n(r.dmg), 0), taken = out.reduce((a, r) => a + n(r.taken), 0);
     out.forEach(r => {
+      r.burstDmg = n(r.burst && r.burst.dmg);
       r.share = dmg > 0 ? n(r.dmg) / dmg * 100 : 0;
       r.takenShare = taken > 0 ? n(r.taken) / taken * 100 : 0;
     });
     return out;
+  }
+  /** 单回合最高爆发的详情：哪一场第几回合、每个技能打了多少、命中时吃到的增益 */
+  function burstHtml(r) {
+    const b = r && r.burst;
+    if (!b) return `<p class="sheet-empty">没有记录。</p><button class="g-btn small" data-cl-back="1">← 返回整局数据</button>`;
+    const total = n(b.dmg) || 1;
+    const skills = Object.keys(b.skills || {}).map(k => [k, n(b.skills[k])]).sort((x, y) => y[1] - x[1]);
+    const buffs = Object.keys(b.buffs || {}).map(k => [k, n(b.buffs[k])]).sort((x, y) => y[1] - x[1]);
+    return `<div class="cl-burst">
+      <button class="g-btn small" data-cl-back="1">← 返回整局数据</button>
+      <h5 class="cl-h">${esc(r.name)} · 单回合最高爆发 <b>${n(b.dmg)}</b></h5>
+      <p class="stats-note">第 ${n(b.battleNo)} 场${b.battleName ? `「${esc(b.battleName)}」` : ""}的第 ${n(b.turn)} 回合${b.when ? ` · ${esc(b.when)}` : ""}${b.who ? ` · ${esc(b.who)}打出` : ""}。含这一回合敌人行动时打出的协助 / 借机攻击，和自己行动引发的连带伤害。</p>
+      <h5 class="cl-h">用了哪些技能</h5>
+      <div class="stats-scroll"><table class="stats-table"><thead><tr><th>技能</th><th>伤害</th><th>占比</th></tr></thead>
+        <tbody>${skills.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${v}</td><td>${(v / total * 100).toFixed(1)}%</td></tr>`).join("")}</tbody></table></div>
+      <h5 class="cl-h">吃到的增益</h5>
+      ${buffs.length ? `<ul class="cl-buffs">${buffs.map(([k, v]) => `<li>${esc(k)}${v > 1 ? `<small> · ${v} 次命中</small>` : ""}</li>`).join("")}</ul>` : `<p class="sheet-empty">这一回合没有吃到增益，全靠硬实力。</p>`}
+    </div>`;
   }
   function html() {
     const c = typeof careerData === "function" ? careerData() : { battles: [], kits: {} };
     const battles = c.battles || [];
     if (!battles.length) return `<p class="sheet-empty">这一局还没有打过仗。打完一场战斗后，这里会累计每个角色的输出和团队贡献。</p>`;
     const rows = shownRows(c);
+    shown = rows;
+    if (detail >= 0 && rows[detail]) return burstHtml(rows[detail]);
+    detail = -1;
     const tot = {};
     ["dmg", "brk", "staggers", "kills", "assists", "blocks", "blockOk", "avoided", "reduced", "taken", "heal", "score"].forEach(k => { tot[k] = rows.reduce((a, r) => a + n(r[k]), 0); });
     const cnt = (o) => battles.filter(b => b.outcome === o).length;
@@ -238,11 +263,11 @@
       <div class="stats-scroll"><table class="stats-table">
         <thead><tr><th>角色</th>${COLS.map(([, t]) => `<th>${t}</th>`).join("")}</tr></thead>
         <tbody>${rows.map(r => `<tr class="${r.sub ? "sub" : ""}"><td>${r.sub ? "└ " : ""}${esc(r.name)}${r.sub ? "<small>武器人</small>" : ""}</td>
-          ${COLS.map(([k]) => `<td class="${!r.sub || k !== "battles" ? (best[k] > 0 && Number(r[k]) === best[k] ? "top" : "") : ""}">${r.sub && k === "battles" ? "—" : cell(r, k)}</td>`).join("")}</tr>`).join("")}</tbody>
+          ${COLS.map(([k]) => `<td class="${!r.sub || k !== "battles" ? (best[k] > 0 && Number(r[k]) === best[k] ? "top" : "") : ""}">${r.sub && k === "battles" ? "—" : k === "burstDmg" && r.burst ? `<button class="cl-burst-btn" data-burst-i="${rows.indexOf(r)}" title="看这一回合用了哪些技能、吃到哪些增益">${cell(r, k)}</button>` : cell(r, k)}</td>`).join("")}</tr>`).join("")}</tbody>
       </table></div>
       <h5 class="cl-h">每场战斗</h5>
       <div class="stats-scroll"><table class="stats-table cl-hist"><thead><tr><th>场次</th><th>时间</th><th>结果</th><th>回合</th><th>评价</th><th>全队伤害</th><th>输出最高</th></tr></thead><tbody>${hist}</tbody></table></div>
-      <p class="stats-note">从这一局（跑团：这个存档空位）的第一场战斗开始累计，跟着存档走；新开一局 / 重新开团时清空。输出占比按造成伤害算，承伤占比按承受伤害算。武器人分出去单独打的数据记在武器人那一行。</p>`;
+      <p class="stats-note">单回合最高爆发：一回合里（含敌人行动时的协助 / 借机攻击）造成的伤害合计，取整局最高的那一回合，点数字看用了哪些技能、吃到哪些增益。从这一局（跑团：这个存档空位）的第一场战斗开始累计，跟着存档走；新开一局 / 重新开团时清空。输出占比按造成伤害算，承伤占比按承受伤害算。武器人分出去单独打的数据记在武器人那一行。</p>`;
   }
   function text() {
     const c = typeof careerData === "function" ? careerData() : { battles: [], kits: {} };
@@ -252,6 +277,7 @@
   }
   function open() {
     if (root.Sfx) Sfx.ui("open");
+    detail = -1;
     if (!box) {
       box = document.createElement("div");
       box.className = "sheet cl-sheet";
@@ -261,7 +287,10 @@
       document.body.appendChild(box);
       box.addEventListener("click", (e) => {
         if (e.target === box || e.target.id === "cl-close") box.classList.remove("show");
-        if (e.target.id === "cl-merge") { merge = !merge; paint(); }
+        if (e.target.id === "cl-merge") { merge = !merge; detail = -1; paint(); }
+        const bi = e.target.closest && e.target.closest("[data-burst-i]");
+        if (bi) { detail = Number(bi.dataset.burstI); paint(); }
+        if (e.target.closest && e.target.closest("[data-cl-back]")) { detail = -1; paint(); }
         if (e.target.id === "cl-copy") { try { navigator.clipboard.writeText(text()); e.target.textContent = "已复制"; } catch (err) { /* 浏览器不让复制就算了 */ } }
       });
     }
@@ -281,5 +310,5 @@
       open();
     }, true);
   }
-  root.CareerLog = { open, html, text, mergeRows, setMerge: (v) => { merge = !!v; } };
+  root.CareerLog = { open, html, text, mergeRows, burstHtml, setMerge: (v) => { merge = !!v; } };
 })(window);
