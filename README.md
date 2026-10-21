@@ -368,6 +368,8 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **敌人种族被动加一个只给平衡模拟工具用的总开关 `RACE_PERK.off`（默认 0 = 开，游戏行为不变）**（issue #232 新敌人批量平衡模拟；enemies.js · `RACE_PERK.off`、`enemyRacePerk`，`raceBonusExtra` / `raceBonusChoice` 改读 `enemyRacePerk`；工具 tools/enemy-balance.js、报告 docs/balance/new-enemies-1021.md；测试：tests/enemy-race-perks.test.js 加两条、新增 tests/enemy-balance.test.js）
+  - **以前**：敌人的种族被动一直生效，没有办法关掉，测不出「被动开 / 关」的差别。**现在**：照 `ENEMY_IV.off` 的写法加了 `RACE_PERK.off`；> 0 时敌人的种族被动（热耐性、独狼、迅袭、威压、环境适应、千里马、追猎本能、易怒蛮牛、吐酸 / 鳞片、灵巧 / 注意力涣散、迎难直上）全部不生效，种族本身和随机种族的六维换算照旧。游戏里从来不改它（默认 0）；只有 tools/enemy-balance.js 在「种族被动关」那一组里改成 1。
 - **战斗状态带上「所在区域」和「光影（白天 / 傍晚 / 夜晚）」：默认跟着地图和时钟，主持人可以在战场配置里改；联机白名单放行**（主人要求，issue #229，来源是 HD-2D 原型 #204 的「联机数据」；新增 daylight.js（`DAY_LIGHT` / `lightAt` / `isNight`）；world-data.js · `BATTLE_REGIONS` / `battleRegionName` / `battleLookStart` / `battleLookSync` / `battleLookSet`；ledger.js · `isNightClock` / `clockLight` / `dayPeriod`；party-cards.js · `isNight` / `dayPeriod`；rest-report.js · `skyPos`；sim.js · `BattleSim.setup`；battle-commands.js · `battle.setup`、`battle.panel` 的 `setRegion` / `setLight`；online-view.js · `projectState`；online-game.js · `rawPacket`、战场配置的公开记录；game.html、game.js · `renderLookSelects` / `setLook` / `renderFieldSheet`；prototypes/hd2d/index.html、hd2d-layout.js、README.md；tests/headless.js 的 `RULE_FILES`；docs/d3/privacy.md；测试：新增 tests/region-light.test.js，改 tests/hd2d-layout.test.js、tests/online-player-ui.test.js）
   - **以前**：战斗状态里没有「这场战斗在哪个区域」「是白天还是夜里」，联机玩家收到的战斗状态里也没有，HD-2D 原型只能用页面选的区域、演示写死的光影。正式游戏里没有一份区域名列表（只有原型的 `REGIONS`）。几点算夜晚写了三份：ledger.js 的 `DAY_NIGHT`（规则：沙漠生物等）、party-cards.js · `isNight`（联机玩家画面的夜晚色调）、rest-report.js（长休动画的日月），靠一条正则测试提醒「改了要同时改」。
   - **现在**：
