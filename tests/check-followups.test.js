@@ -51,8 +51,14 @@ test("检定申请超过 20 条：先丢最旧的已处理记录，待处理的�
   const reqs = s.snapshot().table.checkReqs;
   assert.equal(reqs.length, 20);
   assert.ok(reqs.some(r => r.note === "最早的" && r.status === "pending"), "最早的待处理申请还在");
-  const restored = Hotseat.create({ operators: OPS, gmId: "gm", mode: "trpg", assignments: {}, isHero, getUnits: () => units, canStand: () => true, table: plain(s.snapshot().table) });
-  assert.ok(restored.snapshot().table.checkReqs.some(r => r.note === "最早的"));
+  // 存档恢复（cleanTable）：手工造一份超过 20 条、最旧一条待处理的 table，恢复时也要修剪且不丢待处理的
+  const table = plain(s.snapshot().table), pending = table.checkReqs.find(r => r.status === "pending"), done = table.checkReqs.find(r => r.status !== "pending");
+  table.checkReqs = [pending, ...Array.from({ length: 24 }, (_, i) => ({ ...done, id: "old" + i }))];
+  const restored = Hotseat.create({ operators: OPS, gmId: "gm", mode: "trpg", assignments: {}, isHero, getUnits: () => units, canStand: () => true, table });
+  const back = restored.snapshot().table.checkReqs;
+  assert.equal(back.length, 20, "恢复时也修剪到 20 条");
+  assert.ok(back.some(r => r.note === "最早的" && r.status === "pending"), "恢复时最旧的待处理申请不丢");
+  assert.equal(back.filter(r => r.status !== "pending").length, 19);
 });
 
 test("不在场角色：重新配置时，记在（新）主持人名下的不当作玩家分配保留（prevOwners[kit] === nextGm 分支）", () => {

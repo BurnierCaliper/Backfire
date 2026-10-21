@@ -641,6 +641,18 @@ test("联机：按钮掷 d100 / 主持人暗骰；主持人发起检定、玩家
   assert.ok(!/暗骰/.test(await alice.evaluate(() => JSON.stringify(OnlineGame.getView()))), "玩家收不到暗骰");
   // 检定：主持人在「检定」页发起
   await host.click('#tr-tabs [data-tab="checks"]');
+  // 暗骰检定发起失败：「暗骰」勾选留着（不然再点一次就成了公开检定，结果漏给玩家）；成功后才取消勾选
+  await host.check("#ck-secret");
+  await host.evaluate(() => { const real = OnlineGame.submit; OnlineGame.submit = async () => { OnlineGame.submit = real; return { ok: false, error: "测试：发起失败" }; }; });
+  await host.click("#ck-open");
+  await host.waitForFunction(() => !!document.getElementById("ck-secret"));
+  await host.waitForTimeout(200);
+  assert.equal(await host.evaluate(() => (HotseatGame.getView().checks || []).length), 0, "失败的那次没有建出检定");
+  assert.equal(await host.isChecked("#ck-secret"), true, "发起失败后暗骰仍勾着");
+  await host.click("#ck-open");
+  await host.waitForFunction(() => (HotseatGame.getView().checks || []).some(c => c.secret));
+  await host.waitForFunction(() => document.getElementById("ck-secret") && !document.getElementById("ck-secret").checked);
+  await host.evaluate(() => { for (const c of HotseatGame.getView().checks || []) if (c.status !== "closed") OnlineGame.submit({ type: "checkClose", checkId: c.id }); });
   await host.selectOption("#ck-prof", "侦察");
   await host.selectOption("#ck-diff", "easy");
   await host.fill("#ck-note", "看看门后有什么");

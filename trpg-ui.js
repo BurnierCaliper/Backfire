@@ -979,10 +979,12 @@
     $("wk-pts-sub").onclick = () => act(ruleCommand("adjustPoints", { amount: -n(), why: "主持人" }));
   }
   /** 联机时走房间（玩家马上看到）；本机热座直接交给热座会话 */
-  async function checkSubmit(cmd) {
+  /** onOk：确认成功后才做的事（比如发起检定后清空说明、取消「暗骰」勾选；失败时表单原样留着，再点一次还是暗骰） */
+  async function checkSubmit(cmd, onOk) {
     const net = window.OnlineGame && OnlineGame.isHost && OnlineGame.isHost();
     const ack = net ? await OnlineGame.submit(cmd) : HotseatGame.submit(cmd);
     if (ack && ack.ok === false) alert(ack.error);
+    else if (onOk) onOk();
     render();
   }
   function bindChecks(P) {
@@ -1002,7 +1004,7 @@
       const pool = online() && checkForm.secret ? (state.units || []).filter(u => !u._removed && !u.weaponOf) : heroes();
       const ids = pool.map(h => h.id).filter(id => checkForm.units.includes(id));
       if (!ids.length) { alert("至少选一名角色"); return; }
-      if (online()) { const secret = !!checkForm.secret; checkForm.note = ""; checkForm.secret = false; return checkSubmit({ type: "checkOpen", prof: checkForm.prof, diff: checkForm.diff, unitIds: ids, note: $("ck-note").value, secret }); }
+      if (online()) return checkSubmit({ type: "checkOpen", prof: checkForm.prof, diff: checkForm.diff, unitIds: ids, note: $("ck-note").value, secret: !!checkForm.secret }, () => { checkForm.note = ""; checkForm.secret = false; });
       const spec = checkPreview(ids); if (!spec) return;
       spec.note = $("ck-note").value; checkForm.note = "";
       localChecks.push(Object.assign(spec, { id: "check-" + Date.now(), status: "open", at: Date.now(), targets: spec.targets.map(t => Object.assign(t, { result: null })) }));
