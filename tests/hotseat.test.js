@@ -447,3 +447,38 @@ test("战斗中（行动阶段）当前角色可以直接和自己的武器人�
   assert.equal(s.snapshot().currentUnitId, "w1", "武器人换到前面就先轮到它");
   assert.equal(s.move("a", "w1", 1).status, "pending", "和队友换要对方同意");
 });
+
+test("转交角色（#165）：选顺序阶段可转，武器人跟着转，顺序格子不变；转给主持人 = 收回", () => {
+  const f = fixture({ units: [hero("ruby", "ruby"), hero("hiaki", "hiaki"), { ...hero("niu", "niu"), weaponOf: "hiaki" }] }), s = f.s;
+  s.beginRound(1); s.pick("b", "hiaki", 0); s.pick("b", "niu", 1); s.pick("a", "ruby", 2); s.confirm("b");
+  assert.deepEqual(s.snapshot().confirmed, ["b"]);
+  assert.deepEqual(s.transferState(), { ok: true, reason: "" });
+  s.transfer("gm", "hiaki", "gm");
+  assert.deepEqual(s.snapshot().roster.filter(r => r.unitId !== "ruby").map(r => [r.unitId, r.operatorId]), [["hiaki", "gm"], ["niu", "gm"]]);
+  assert.deepEqual(s.snapshot().slots.map(r => r && r.unitId), ["hiaki", "niu", "ruby"]);
+  assert.throws(() => s.pick("b", "hiaki", 0), /不是你的/);
+  s.transfer("gm", "hiaki", "a");
+  assert.equal(s.snapshot().roster.find(r => r.unitId === "niu").operatorId, "a");
+  assert.throws(() => s.transfer("a", "hiaki", "b"), /只有房主/);
+  assert.throws(() => s.transfer("gm", "hiaki", "a"), /本来就/);
+  assert.throws(() => s.transfer("gm", "niu", "b"), /只能转交英雄/);
+});
+
+test("转交角色（#165）：行动做到一半、协助询问没回答、敌人行动中都拒绝并写明原因；两个单位之间可以转", () => {
+  const f = fixture(), s = f.s; force(f);
+  assert.equal(s.transferState().ok, true);
+  s.markSpent([{ unitId: s.snapshot().currentUnitId, ap: 1 }]);
+  assert.match(s.transferState().reason, /正在行动/);
+  assert.throws(() => s.transfer("gm", "xia", "a"), /正在行动/);
+  const first = s.snapshot().currentUnitId, owner = s.snapshot().roster.find(r => r.unitId === first).operatorId;
+  s.finishUnit(owner, first);
+  assert.equal(s.transferState().ok, true);
+  s.transfer("gm", "xia", "a"); assert.equal(s.snapshot().roster.find(r => r.unitId === "xia").operatorId, "a");
+  const ask = s.openAsk({ kind: "assist", candidates: ["xia"] });
+  assert.match(s.transferState().reason, /协助询问/);
+  assert.throws(() => s.transfer("gm", "xia", "b"), /协助询问/);
+  s.answer("a", ask.id, { unitId: null });
+  for (let guard = 0; s.snapshot().currentUnitId && guard < 5; guard++) { const id = s.snapshot().currentUnitId; s.finishUnit(s.snapshot().roster.find(r => r.unitId === id).operatorId, id); }
+  assert.equal(s.snapshot().phase, "enemy");
+  assert.match(s.transferState().reason, /敌人行动/);
+});

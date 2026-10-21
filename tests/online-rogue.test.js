@@ -345,3 +345,13 @@ test("联机单局：战斗外房主刷新，存档里残留的战斗状态不�
   assert.equal(await host.evaluate(() => document.getElementById("g-result").classList.contains("show")), false);
   assert.deepEqual(f.errors, []);
 });
+
+test("联机单局：开局后座位固定，主持人也不能转交角色（#165，PRD-online Q12）", { timeout: 120000 }, async t => {
+  const f = await room(t); if (!f) return;
+  await depart(f);
+  const gate = await f.host.evaluate(() => OnlineGame.transferState());
+  assert.equal(gate.ok, false); assert.match(gate.reason, /座位固定/);
+  const err = await f.host.evaluate(() => { try { OnlineGame.transfer("x", "y"); return ""; } catch (e) { return e.message; } });
+  assert.match(err, /座位固定/);
+  assert.deepEqual(f.errors, []);
+});
