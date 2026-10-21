@@ -61,6 +61,7 @@
     // 掷骰：选角色、选熟练项，掷一颗 d100（点数越低越好）
     const rollBox = make("section", "online-roll", "ol-overlay ol-bag ol-roll", { role: "dialog", "aria-label": "掷骰" });
     rollBox.hidden = true;
+    let checkReq = null;   // 申请检定（check-request-ui.js）：玩家申请 / 主持人批准的浮层，下面 mount
     const rollForm = { unit: "", prof: "", note: "", secret: false };
     // 大字：主持人发，所有人画面中间出现（像 Minecraft 的 /title）
     const titleShow = make("div", "online-title", "ol-title-show", { "aria-live": "assertive" });
@@ -1022,6 +1023,7 @@
       mountHostChat();
       if (!stage.hidden) paintStage();
       paintSupplies();
+      if (checkReq) checkReq.sync();
       if (view.active && !view.isHost) scheduleAutoMenu();
     }
     /** 舞台：文字部分照旧拼 HTML；战斗画面是常驻的一块（单位卡有动画，不能每次重建），每次画完再挂回占位处 */
@@ -1527,11 +1529,14 @@
     // 倒计时（询问、离线等待）每半秒刷新一次文字
     const countdownTimer = setInterval(() => { if (global.OnlineBattle && global.OnlineBattle.tickCountdowns) global.OnlineBattle.tickCountdowns(document); }, 500);
     unsubs.push(() => clearInterval(countdownTimer));
+    // 申请检定：规则在 hotseat.js · requestCheck / decideCheck；角色是自己操控的（可以好几名），主持人看全队
+    if (global.CheckRequestUI) checkReq = global.CheckRequestUI.mount({ api, view: () => view, own, call, profLevel, playerName,
+      units: () => view.isHost ? ((displayState || view.state || {}).units || []).filter(u => u.isPlayer && !u.weaponOf && u.kit) : rollUnits() });
     if (typeof api.subscribe === "function") unsubs.push(api.subscribe(render));
     if (typeof api.onPacket === "function") unsubs.push(api.onPacket(playPacket));
     render();
     const instance = { render, open(which = "join") { entry = which; panelOpen = true; render(); }, destroy() {
-      destroyed = true; if (battle) { battle.destroy(); battle = null; } playbackGeneration++; actionGeneration++; historyGeneration++; clearTimeout(toastTimer);
+      destroyed = true; if (checkReq) { checkReq.destroy(); checkReq = null; } if (battle) { battle.destroy(); battle = null; } playbackGeneration++; actionGeneration++; historyGeneration++; clearTimeout(toastTimer);
       document.removeEventListener("compositionstart", onCompStart, true); document.removeEventListener("compositionend", onCompEnd, true);
       document.removeEventListener("click", onRollOpen); document.removeEventListener("scroll", onListScroll, true); clearTimeout(titleTimer);
       while (hostMounts.length) hostMounts.pop().remove(); document.body.classList.remove("ol-has-side", "ol-host-online", "ol-in-battle");
