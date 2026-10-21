@@ -515,6 +515,10 @@ function smokeTexture() {
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
 }
 
+/** 区域场景的美术（#242，hd2d-scene-art.js 登记的美术包）：天边的远景、中景、矿坑由美术包画；three.js 和这里的小工具打包成 KIT 交过去。没加载就当没有 */
+const ART = window.HD2DSceneArt || { band: () => null, backdrop: () => null };
+const KIT = { THREE, BACKDROP, NOISE_GLSL, rng, flatGeometry, smokeTexture, bandTexture, put, box, cyl, headframe, chimney, conveyor, silos, heap, shed, cliff, dune, pillar, mesa, wreck };
+
 /**
  * 建一圈远景。kind = city / mine / desert / skynet / wasteland（night 是 city 的旧名字）；bounds 是战场范围；
  * camera 是布局算好的默认镜头（hd2d-layout.js 的 fitView），用来算「画面上沿那条视线」有多高；
@@ -572,9 +576,8 @@ export function buildBackdrop(kind, bounds, themeName, camera, colors) {
   const backTop = topY(skyZ);
   const bandH = Math.max(1.2, backTop * BACKDROP.bandH);
   const nearC = hazeOf(0.55), farC = hazeOf(0.82), wallC = hazeOf(0.92);
-  const bandTex = keep(bandTexture(kind === "skynet" ? "desert" : kind, {
-    far: "#" + farC.getHexString(), near: "#" + nearC.getHexString(), wall: "#" + wallC.getHexString(), lit: night ? 1 : dusk ? 0.5 : 0
-  }, seed * 97 + 11));
+  const bandColors = { far: "#" + farC.getHexString(), near: "#" + nearC.getHexString(), wall: "#" + wallC.getHexString(), lit: night ? 1 : dusk ? 0.5 : 0 };
+  const bandTex = keep(ART.band(KIT, kind, bandColors, seed * 97 + 11) || bandTexture(kind === "skynet" ? "desert" : kind, bandColors, seed * 97 + 11));
   const bandLen = x1 - x0;
   bandTex.repeat.set(Math.max(1, Math.round(bandLen / (bandH * 8))), 1);
   const bandM = keep(new THREE.MeshBasicMaterial({ map: bandTex, transparent: true, alphaTest: 0.02, fog: false, side: THREE.DoubleSide, color: night ? new THREE.Color(1.5, 1.5, 1.5) : 0xffffff, toneMapped: !night }));
@@ -649,7 +652,11 @@ export function buildBackdrop(kind, bounds, themeName, camera, colors) {
   const mats = (k) => layers[k < 0.34 ? 0 : k < 0.67 ? 1 : 2];
   const depthAt = (a) => M3.near + a * (M3.far - M3.near);
 
-  if (kind === "mine") {
+  // 区域场景（#242）：中景、矿坑、战场周围的装饰、环境动画由美术包摆（env 是这里算好的位置、材质和小工具）；没登记的照旧
+  const art = ART.backdrop(KIT, kind, { group, anims, keep, std, mats, spot, place, depthAt, topY, cx, cz, hx, hz, skyZ, x0, x1, bandH, r, theme: themeName, T, hazeOf, fog, sky, cam, storm, blinker, smoke });
+  if (art) {
+    // 美术包已经摆好了
+  } else if (kind === "mine") {
     // 主角：左后方的矿井架；右后方一对冒烟的烟囱；中间一条传送带通到料仓；再撒些筒仓、矿渣堆、小厂房
     let s = spot(-0.55, depthAt(0.45));
     const hf = headframe(mats(s.k), s.hmax * 0.92); place(hf, s, 0.15); blinker(s.x, -0.3 + s.hmax * 0.92 * 1.1, s.z, 0.2);
@@ -712,7 +719,7 @@ export function buildBackdrop(kind, bounds, themeName, camera, colors) {
   }
 
   // 采矿场 / 夜晚：天边一串远处的炉火 / 灯（泛光会抓到）
-  if (kind === "mine" || night) {
+  if (!art && (kind === "mine" || night)) {
     const glowM = keep(new THREE.MeshBasicMaterial({ color: new THREE.Color(night ? 0xffb35a : 0xff7a2a).multiplyScalar(2.4), toneMapped: false, fog: false }));
     const geo = keep(new THREE.SphereGeometry(0.2, 6, 5));
     for (let i = 0; i < 12; i++) {
@@ -727,6 +734,7 @@ export function buildBackdrop(kind, bounds, themeName, camera, colors) {
   const uOf = (x, a, b) => Math.max(0, Math.min(1, (x - a) / (b - a)));
   return {
     group,
+    groundEdge: art && Number.isFinite(art.groundEdge) ? art.groundEdge : null,   // 地台外面那片地到哪为止（后面是矿坑，#242）；null = 一直铺到天幕
     /** light = { flash, x }：雷击的闪光（0–1）和位置；乌云跟着 t 慢慢飘（减少动态效果时 t 停住） */
     update(t, dt, light) {
       anims.forEach(fn => fn(t, dt));

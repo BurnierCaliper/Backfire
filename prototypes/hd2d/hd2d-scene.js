@@ -37,6 +37,8 @@ import { createWeather, weatherPlan, fogRange as fogRangeOf, fogColor } from "./
 const L = window.HD2DLayout;
 /** 三段镜头（hd2d-camera.js，普通脚本，紧跟着布局加载）：每一段的俯角、视野、距离、景深、过渡都在它的 CAMERA 里 */
 const C = window.HD2DCamera;
+/** 区域场景的美术（#242，hd2d-scene-art.js）：场景自己的光照 / 调色（矿内、矿底压暗；矿底不分白天黑夜）。没加载就照旧按光影主题 */
+const ART = window.HD2DSceneArt || { lighting: () => null };
 
 /* ---------- 配置 ---------- */
 const CAM = {
@@ -292,8 +294,10 @@ export function createHd2dScene(container, options) {
   const ringGeo = new THREE.PlaneGeometry(2 * RING.radius, 2 * RING.radius);
 
   /* ---------- 主题 / 天气 ---------- */
+  /** 这一场用的光影主题：场景有自己的光照（#242）就是改过的那一套（setBattle 里算好放在 state.lit），不然是光影主题本来的 */
+  const themeNow = () => state.lit || THEMES[state.meta.theme] || THEMES.day;
   function applyTheme() {
-    const T = THEMES[state.meta.theme] || THEMES.day;
+    const T = themeNow();
     state.themeName = state.meta.theme;
     if (scene.background && scene.background.dispose) scene.background.dispose();
     // 天幕以外露出来的地方（转到很偏时）；雷鸣时和天幕一样换成风暴色、没有星星；沙暴时和天幕一样蒙上沙色、没有星星
@@ -326,7 +330,7 @@ export function createHd2dScene(container, options) {
     return tint && tint.sky > 0 ? { color: fogColorOf(T, tint).getHex(), sky: tint.sky, haze: tint.haze, veil: tint.veil, sun: tint.sun } : null;
   }
   function applyFog() {
-    const T = THEMES[state.themeName] || THEMES.day;
+    const T = themeNow();
     const color = fogColorOf(T, weather.tint);
     scene.fog = new THREE.Fog(color, 1, 2);
     fogRange(state.cur ? state.cur.fogShift : 0);
@@ -495,6 +499,10 @@ export function createHd2dScene(container, options) {
   }
   function setBattle(layout, meta) {
     state.layout = layout; state.meta = Object.assign({ weather: "none", theme: "day" }, meta || {});
+    // 场景的光照（#242）：换成场景自己的那一套；矿底这种不分白天黑夜的，按它定的光影主题画（地台亮边、远景剪影、飘浮物都跟着）
+    const lit = ART.lighting(THEMES, state.meta.theme, layout.ground);
+    state.lit = lit ? lit.T : null;
+    if (lit) state.meta.theme = lit.name;
     state.actorId = state.meta.actorId != null ? state.meta.actorId : state.actorId;
     const newBoard = !state.bounds || JSON.stringify(layout.bounds) !== JSON.stringify(state.bounds) || state.boardSig !== boardSig(layout);
     if (newBoard && state.boardSig) state.zone = null;   // 换了棋盘：选中的区回到当前行动单位所在的区（开场时用外面给的 camera.zone）
@@ -530,7 +538,7 @@ export function createHd2dScene(container, options) {
   /** plan = 天气要建的东西（weatherPlan）：雷鸣时远景换成风暴色的天、画乌云，天边接上压暗了的雾色；
    *  沙暴时整片远景蒙上沙色（dust，天边也接上沙黄的雾色，#240）；skyline = 楼群的高度倍数 */
   function syncBackdrop(layout, kind, plan, skyline) {
-    const c = layout.camera, storm = !!plan.storm, T = THEMES[state.meta.theme] || THEMES.day, dust = dustOf(T, plan.tint);
+    const c = layout.camera, storm = !!plan.storm, T = themeNow(), dust = dustOf(T, plan.tint);   // themeNow：场景有自己的光照（state.lit，#242）就用它
     const sig = [kind, skyline || 1, state.meta.theme, storm ? "storm" : "", dust ? ["dust", dust.color, dust.sky, dust.haze, dust.veil, dust.sun].join(",") : "",
       Object.values(layout.bounds).map(v => Math.round(v)).join(","), c ? [c.dist, c.pos.y, c.pos.z].map(v => Math.round(v)).join(",") : ""].join("|");
     if (sig === state.backdropSig) return;
@@ -715,11 +723,13 @@ export function createHd2dScene(container, options) {
     const b = state.bounds, cx = (b.minX + b.maxX) / 2, cz = (b.minZ + b.maxZ) / 2;
     const r = Math.hypot(b.maxX - b.minX, b.maxZ - b.minZ) / 2 + 3;
     sun.target.position.set(cx, 0, cz); rim.target.position.set(cx, 0, cz);
-    const T = THEMES[state.meta.theme] || THEMES.day;
+    const T = themeNow();
     sun.position.set(cx + T.sunPos[0], T.sunPos[1] + r * 0.4, cz + T.sunPos[2]);
     rim.position.set(cx + T.rimPos[0], T.rimPos[1], cz + T.rimPos[2]);
     const c = sun.shadow.camera; c.left = -r; c.right = r; c.top = r; c.bottom = -r; c.near = 1; c.far = 90; c.updateProjectionMatrix();
-    ground.position.x = cx; ground.position.z = cz;
+    // 地台外面那片地：矿坑的场景（#242）铺到坑边为止（远景给的 groundEdge），后面是往下的坑
+    const edge = state.backdrop && state.backdrop.groundEdge;
+    ground.position.x = cx; ground.position.z = edge != null ? edge + BACKDROP.ground.size / 2 : cz;
   }
   function clampPan() {
     if (!state.bounds) return;
@@ -817,7 +827,7 @@ export function createHd2dScene(container, options) {
     const fl = weather.flash, strike = weather.strike;
     if (state.backdrop && state.backdrop.update) state.backdrop.update(animT, adt, { flash: fl, x: strike ? strike.x : 0 });   // 乌云飘、打雷时被照亮
     // 雷击：全屏闪白，灯光 / 曝光 / 泛光瞬间推亮；乌云下面平时的灯光压暗一点
-    const T = THEMES[state.themeName] || THEMES.day, dim = weather.storm ? FLASH.dim : 1;
+    const T = themeNow(), dim = weather.storm ? FLASH.dim : 1;
     hemi.intensity = T.hemi * dim + fl * FLASH.hemi; sun.intensity = T.sunI * dim + fl * FLASH.sun;
     renderer.toneMappingExposure = T.exposure * (1 + fl * FLASH.exposure);
     bloom.strength = T.bloom[0] + fl * FLASH.bloom;
