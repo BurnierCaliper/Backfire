@@ -368,6 +368,16 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **分阶段的首领 / 精英：战斗里的悬停说明只写当前阶段的能力**（主人要求，Closes #205；bestiary.js · `BESTIARY_STAGES` / `bestiaryStageOf`；unit-tip.js · `stageAbilities` / `describe` / `html`；game.js · `snapUnit` / `unitTipHtml`；online-view.js · `displayOf`；online-ui.js · `unitTip`；hud-icons.css · `.ut-stage`；测试 `tests/boss-stage-tip.test.js`）
+  - **以前**：鼠标停在多阶段的敌人上，悬停说明把图鉴里所有阶段的能力全列出来（沙灵聚合体一次 7 行），一大堆字堆在一起不好读。**现在**：只列当前阶段的能力和各阶段共有的那几行，能力上面一行写「当前阶段：二阶段 · 还有其他阶段」；别的阶段的能力不列、不剧透。首领机制的倒计时照旧显示在最前面。
+  - **哪些算分阶段**（配置在 `BESTIARY_STAGES`）：
+    - 沙灵聚合体（首领，`resources.phase`）：一阶段（沙爪 / 砂岩、沙尘爆裂、狂暴连打）→ 外层沙壳打穿进二阶段（机械臂、电能炮）→ 装甲击破进三阶段（逃离、吸引碎片、肉体操控；吸满两次碎片回到二阶段）。
+    - 飞碟触灵（首领，本体 + 五条机械足）：按还活着的机械足，4–5 条踩踏、2–3 条激光扫射、剩 1 条准备自爆。「毁掉一只机械足击破 1」「十级后召唤看守」「协助」每个阶段都列。悬停在机械足上看到的和本体一样。
+    - 活沙（精英）：活沙（每回合一次 atk、被杀死时吸收）→ 吸收沙灵 / 沙鱼后变成巨型活沙（穿刺、流沙漩涡、三回合内没死就打全场）。「可以对自己协助」两个形态都列。
+    - 这次没算作阶段、照旧全列：亡命之王（被挟持、强盗头子继位是状态）、赤牙（霰弹预热）、沙鱼（白天 / 夜晚）、高压巡逻艇（飞行 / 坠机）等。
+  - **怎么判断当前阶段**：每个阶段认一个只有这一阶段才有的招式，`enemySkillList` 现在给出哪个就是哪个阶段。换阶段的门槛只写在规则里一处，不再抄一遍。判断不出来时（例如本体已经倒下）照旧全列。
+  - **联机**：玩家端没有规则，阶段编号由房主算好。`online-view.js` 的白名单在单位的 `display` 里多放一个 `stage`，只放行 1–9 的整数，不发血量门槛之类的数值，**坚毅生命照旧不发**。演出用的画面快照（tape）身上没有规则状态，用快照里（`snapUnit`）已经算好的阶段，演出中也不会退回一阶段。玩家端 `online-ui.js` 拿这个编号调同一个 `UnitTip.html`，看到的和单机一样。
+  - **图鉴不变**：图鉴照旧列全部阶段的能力（`BESTIARY_TEXT` 没改）。
 - **敌人种族（二）：种族被动在敌人身上生效**（issue #161，设计见 `docs/enemy-race.md` 第 4、7 节；enemies.js · `RACE_PERK` / `RACE_PERKS` / `racePerk` / `raceDefendMods` / `raceAtkAdjust` / `raceCheckPerks` / `raceFieldDamage` / `raceFirstBreak` / `raceAfterMove` / `raceBonusExtra` / `raceBreakCap` / `raceAttackMods` / `raceAfterHurt` / `raceSkills` / `raceRunSkill` / `raceBonusChoice`，engine.js · `resolveAttack` / `applyResultToUnit`，party.js · `effectiveAtk`，matchup.js · `matchupDefenderRow`，app.js · `dealTo` / `applyCombat` / `refreshEnemyEconomy` / `doMoveInner` / `voidCrossOdds` / `iceLeaveCheck` / 场地结算，ai.js · `aiPlanBase`，bestiary.js、bestiary-ui.js、game.js、unit-card.js、unit-tip.js、online-battle.js；测试 `tests/enemy-race-perks.test.js`、`tests/audit-P6-terrain.test.js`）
   - **以前**：敌人有种族但只是一个标签（和六维换算），种族被动不起作用。**现在**：按 `u.race` 通用生效（不看具体兵种，镇压部队等固定兽人兵种同样吃到）；数值全放 `RACE_PERK`，开关和说明放 `RACE_PERKS`。
   - **人类·迎难直上**：敌人的检定（越过空隙、离开冻土）失败时重掷一次，成功率 50% → 75%（和角色共用 `voidCrossOdds` / `iceLeaveCheck` 里的重掷；没有种族或别的种族的敌人仍是 50%）。
