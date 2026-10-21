@@ -368,6 +368,14 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **联机跑团「申请检定」界面**（规则在 #193 · `checkRequest` / `checkDecide`；新文件 `check-request-ui.js`）
+  - **以前**：玩家只能在掷骰窗口里点一个「申请检定」，看不到申请有没有被处理；主持人要切到「检定」页才看得到申请，战斗中看不到。**现在**：
+  - **玩家**：标题工具栏「申请检定」（有待处理的显示「· 等待 N」）→ 浮层：选自己操控的哪名角色（可以好几名）、熟练项（带熟练等级）、想做什么 → 提交。下面列「我的申请」：等主持人（可撤回；同一角色有一条在等时不能再提）/ 已同意（难度、成功率、成功或失败、d100 点数）/ 主持人没有同意 / 已撤回；还有队友最近的检定结果。
+  - **主持人**：有待处理的申请时左下角出现「检定申请 · N」（探索、战斗都在）→ 浮层：每条选难度（选项里写这名角色的成功率）「批准并掷骰」/「拒绝」，下面列最近处理的。原来「检定」页的列表和暗骰勾选（#193）照旧。
+  - 只用 `view.checkRequests` / `view.checks`（online-view.js 白名单），不画任何坚毅生命数值；浮层带 `.ovl`，按钮 44px，390px 不横向溢出。联机单局不出现。
+  - 单机热座（同一台设备）没有这条入口：大家看同一块屏幕，主持人直接在「检定」页发起即可。
+  - 新测试 `tests/check-request-ui.test.js`。
+
 - **联机跑团：主持人暗骰检定、玩家主动发起检定、战斗模板「Lv随队」**（策划定；hotseat.js · `openCheck` / `rollCheckFor` / `requestCheck` / `decideCheck` / `tableNote`；hotseat-game.js · `checkSpec` / `checkRequest` / `checkDecide`；online-view.js · `checks` / `checkRequests` 白名单；online-game.js；battle-templates.js · `btPartyLevel` / `btOneEncounter`；trpg-ui.js、online-ui.js 只加了最小入口；测试 tests/trpg-online-rules.test.js）
   - **暗骰**：以前只有小队频道的 🎲 能暗骰，而且只能选英雄；主持人「检定」页发起的检定没有暗骰，结果玩家都看得到。现在检定页可勾「暗骰」（`checkOpen` 带 `secret: true`，只有主持人能用）：目标可以是任何在场单位（敌人等没有角色卡的按没有熟练算），只有主持人能掷；检定本身、结果和频道里的记录都标 `secret`，`online-view.js` 不发给玩家。
   - **主动发起检定**（照属性点申请）：玩家给自己的角色提 `{ type: "checkRequest", unitId, prof, note }` → 主持人 `{ type: "checkDecide", requestId, decision: "approve", diff }` 定难度同意，房主随即按角色卡建检定并权威掷骰（结果进小队频道、所有人可见）；`decision: "reject"` 不同意，`"cancel"` 申请人或主持人撤回。同一角色同时只能有一条待处理。玩家视图多了 `checkRequests: [{ id, unitId, unitName, operatorId, prof, note, status, checkId? }]`。
