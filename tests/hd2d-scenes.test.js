@@ -24,7 +24,11 @@ const packs = () => { mine(); return art(); };
 const DONE = [
   { region: "第一采矿场", scene: "rim", key: "mine1_rim", must: ["pitWall", "rimLip", "rail", "liftShaft", "lift", "pitLight", "farRim"] },
   { region: "第一采矿场", scene: "mid", key: "mine1_mid", must: ["pitWall", "berm", "cone", "rockWall", "foreRock", "liftShaft", "lift", "pitLight"] },
-  { region: "第一采矿场", scene: "floor", key: "mine1_floor", must: ["pitFloorWall", "pipes", "vent", "lantern", "floorRock", "foreRock"] }
+  { region: "第一采矿场", scene: "floor", key: "mine1_floor", must: ["pitFloorWall", "pipes", "vent", "lantern", "floorRock", "foreRock"] },
+  // 第二采矿场：第一采矿场的变体，加喷火的管道、橙红发光的岩石
+  { region: "第二采矿场", scene: "rim", key: "mine2_rim", must: ["pitWall", "rimLip", "rail", "liftShaft", "lift", "pitLight", "farRim", "firePipe", "fire", "glowRock"] },
+  { region: "第二采矿场", scene: "mid", key: "mine2_mid", must: ["pitWall", "berm", "cone", "rockWall", "foreRock", "liftShaft", "lift", "pitLight", "firePipe", "fire", "glowRock"] },
+  { region: "第二采矿场", scene: "floor", key: "mine2_floor", must: ["pitFloorWall", "pipes", "vent", "lantern", "floorRock", "foreRock", "firePipe", "fire", "glowRock"] }
 ];
 const PARTY = ["kolt", "helu", "ruby", "yuito"];
 const DESKTOP = { width: 1440, height: 900, top: 46, bottom: 160 };   // 桌面 1440×900：顶栏 + 展开的技能栏
@@ -319,6 +323,28 @@ test("矿内（#242 截图验收）：近处一面不规则的岩壁，中间一
   } finally { P.restore(); }
 });
 
+test("第二采矿场是第一采矿场的变体（#242）：三个场景一一对上，色调更红（岩石、地面、雾都更偏红），地台上有几块带发光裂纹的石头，远景有喷火的管道和橙红发光的岩石", () => {
+  const A = packs(), M = mine(), themes = sceneThemes();
+  const red = (c) => { const n = A.hexOf(c); return ((n >> 16) & 255) / Math.max(1, (n >> 8) & 255); };   // 红 / 绿：越大越红
+  const avg = (list) => list.reduce((s, c) => s + red(c), 0) / list.length;
+  assert.ok(avg(M.PALETTE.mine2.rock) > avg(M.PALETTE.mine1.rock) + 0.15 && avg(M.PALETTE.mine2.wall) > avg(M.PALETTE.mine1.wall) + 0.1, "岩石更红");
+  ["rim", "mid", "floor"].forEach(s => {
+    const a = L.GROUNDS[L.groundOf("第一采矿场", s)], b = L.GROUNDS[L.groundOf("第二采矿场", s)], tag = s;
+    assert.equal(b.tex, a.tex, tag + "：同一种地面，只是换了颜色");
+    assert.ok(red(b.ground) > red(a.ground) && red(b.tint) > red(a.tint), tag + "：地面更红");
+    assert.ok(Number.isFinite(b.glow) && b.decals.ember > 0, tag + "：矿渣里带余火");
+    const k1 = A.of(L.groundOf("第一采矿场", s)), k2 = A.of(L.groundOf("第二采矿场", s));
+    assert.ok(k2.art.decor.glow > 0 && k2.art.backdrop.fire && k2.art.backdrop.glow && k2.art.ambient.includes("fire"), tag + "：发光岩石、喷火管道");
+    ["day", "dusk", "night"].forEach(name => assert.ok(red(A.lighting(themes, name, k2.key).T.fog) > red(A.lighting(themes, name, k1.key).T.fog), `${tag} ${name}：雾更红`));
+  });
+  // 地台上真的摆得出几块发光的石头（直排三区，每个场景合起来至少一块）
+  const S = H.load().BattleSim;
+  ["rim", "mid", "floor"].forEach(s => {
+    const key = L.groundOf("第二采矿场", s), layout = layoutOf(BOARDS.line3(S), { region: "第二采矿场", scene: s });
+    assert.ok(layout.zones.filter(z => z.ground).some(z => M.zonePlan(z, key).some(p => p.kind === "glow")), s + "：地台上有发光的石头");
+  });
+});
+
 /* ---------- 2. 装饰不压住站位 / 铭牌 ---------- */
 test("装饰不压住站位（#242）：地台上的装饰只摆在左右两条边带（脚下最多站到站位区的边，再让开脚下那一圈）和左右矮一截的台子上，在外轮廓里面；各种棋盘、每个区挤满人时，装饰的底面都碰不到任何人脚下那一圈", async (t) => {
   const P = await protoEnv(t);
@@ -464,7 +490,7 @@ function run(bd, secs, reduced, t0) {
   let t = t0 || 0;
   for (let f = 0; f < secs * 30; f++) { if (!reduced) t += 1 / 30; bd.update(t, reduced ? 0 : 1 / 30); }
 }
-test("环境动画（#242）：每个场景配置里列的环境动画都在（矿车、罐笼时不时上下，停多久、走多快按 AMBIENT 的配置；坑壁上的灯偶尔暗一下，间隔按配置）；减少动态效果时都停住（矿车、罐笼不动，灯一直亮着）", async (t) => {
+test("环境动画（#242）：每个场景配置里列的环境动画都在（运载电梯时不时上下，停多久、走多快按 AMBIENT 的配置；坑壁上的灯偶尔暗一下、矿底排气口喷气、第二采矿场的管道喷火，间隔按配置）；减少动态效果时都停住（电梯不动，灯一直亮着，不喷气不喷火）", async (t) => {
   const P = await protoEnv(t);
   if (!P) return;
   const { B, A } = P, M = mine();
@@ -482,7 +508,7 @@ test("环境动画（#242）：每个场景配置里列的环境动画都在（�
       const where = () => movers.map(o => o.position.toArray().join(","));
       const p0 = where();
       run(bd, 30, true, 5);
-      assert.deepEqual(where(), p0, d.key + "：减少动态效果时矿车、罐笼停在原地");
+      assert.deepEqual(where(), p0, d.key + "：减少动态效果时运载电梯停在原地");
       blinks.forEach(o => assert.equal(o.visible, true, d.key + "：减少动态效果时灯一直亮着"));
       // 正常：跑 3 分钟
       const seen = new Map(movers.map(o => [o, new Set()]));

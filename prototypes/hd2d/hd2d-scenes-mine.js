@@ -12,6 +12,9 @@
  *   矿内 mid：大矿坑里大约一半深的地方，站在坑壁半腰的运输道上，光压得更暗。运输道的边一排挡车土埂（几个路锥），后面往下还是坑；
  *            近处一面不规则的岩壁（低多边形的崖面，左右两大块一直伸出画面），中间一个大开口：透过开口看得到远处巨大矿坑的内部——
  *            对面的坑壁很远、很暗（和矿外同一种台阶坑壁，往上出了画面），越往下越黑，坑底漆黑；一部运载电梯在开口里上下；前景左右两角几块大石头
+ *   矿底 floor：更黑，白天黑夜几乎没区别（光照 fixed），全靠提灯（战场两盏矿灯 + 坑壁上两盏，克制）。战场后面是坑底的岩壁，
+ *            脚下两道横管、几根竖管顺着坑壁往上、阀门，横管上的排气口时不时喷气；坑壁脚下几块大石头；地台上石头和一截截管子
+ *   第二采矿场：三个场景都是第一采矿场的变体——色调更红（PALETTE.mine2），时不时喷火的金属管道（FIRE），橙红发光的岩石（GLOWROCK、地台上带发光裂纹的石头）
  *
  * 地台上的装饰只摆在左右两条边带和左右矮一截的台子上（站位区以外，见 hd2d-scene-art.js · zoneSpots），不压住站位、铭牌；
  * 战场周围的东西都在战场范围外面（后面先让开灯）。只读布局给的地台 / 战场范围，不碰单位数据（没有坚毅生命）。
@@ -26,7 +29,12 @@
   /** 各采矿场的色调：rock 坑壁 / 石头的几层颜色（一级级台阶轮着用）、wall 坑里近处的岩壁 / 大石头（暗一点）、dark 坑底的黑（带一点雾的颜色）、
    *  metal 钢架 / 栏杆 / 管道、lamp 工作灯 / 提灯、cone 路锥、steam 管道喷的气 */
   const PALETTE = {
-    mine1: { rock: [0xc39363, 0xa9784c, 0xd2a571, 0x9b6c45, 0xb88654], wall: [0x6e5843, 0x5c4836, 0x7a634c, 0x524032], dark: 0x0d0b0a, metal: 0x5d4636, lamp: 0xffc46e, cone: 0xe8742a, steam: 0x9a9088 }
+    mine1: { rock: [0xc39363, 0xa9784c, 0xd2a571, 0x9b6c45, 0xb88654], wall: [0x6e5843, 0x5c4836, 0x7a634c, 0x524032], dark: 0x0d0b0a, metal: 0x5d4636, lamp: 0xffc46e, cone: 0xe8742a, steam: 0x9a9088 },
+    /* 第二采矿场：更红（赭红的岩层、暗红褐的岩壁、坑底的黑带一点红）；glow 发光岩石的橙红、glowBase 它的底色（烧黑的壳）、fire 喷火的芯 / 外焰 */
+    mine2: {
+      rock: [0xb8664a, 0x9c5038, 0xc77a5a, 0x8a4230, 0xab5c40], wall: [0x5e382a, 0x4c2c20, 0x6c4030, 0x42261c], dark: 0x120706, metal: 0x4e3a32, lamp: 0xffa860, cone: 0xe8742a,
+      steam: 0x8a7470, glow: 0xff4a14, glowBase: 0x3a1408, fire: [0xffd27a, 0xff6a24]
+    }
   };
   /** 大矿坑（矿外 rim、矿内 mid 共用一种对面坑壁）：一级级台阶往下（平面上像半个碗：正中最远，往画面两边弯过来），越往下越黑，到底漆黑一片
    *   rim       坑边（矿内是运输道的边）在灯后面再往后多远（地台外面那片地铺到这里为止）
@@ -74,8 +82,23 @@
       vents: 4, lanterns: { n: 2, y: 1.9, power: 5, dist: 6.5, halo: 1.5, pool: [2.6, 0.55] }, rocks: { n: 9, size: [0.35, 0.85] }
     }
   };
-  /** 会发光的东西有多亮（自发光 > 1 才会被泛光抓到）：rock 地台上 / 坑里带发光裂纹的石头 */
-  const GLOW = { rock: 1.6 };
+  /** 会发光的东西有多亮（自发光 > 1 才会被泛光抓到）：rock 地台上带发光裂纹的石头；backdrop 远景里的发光岩石（乘一个 0.6–1.1 的随机数） */
+  const GLOW = { rock: 1.6, backdrop: 1.5 };
+  /** 第二采矿场：喷火的管道摆在哪、几根（时不时喷火的频率在 AMBIENT.fire）
+   *   rim     坑边（栏杆后面、灯前面）几根立管：横着在战场半宽的几成处（u）、多高（h）
+   *   mid     运输道的边后面、开口两边各一根（贴着岩壁的边，火在开口里窜上去）
+   *   floor   矿底上面那道横管上几个喷火口
+   *  发光岩石（橙红）：rim 坑边几块 + 坑里暗处几处、mid 开口两边的岩壁上几块 + 坑里几处、floor 坑壁脚下 / 坑壁上几块；size 大小 */
+  const FIRE = {
+    rim: { u: [-0.62, 0.55], h: 1.5 },
+    mid: { h: 1.3 },
+    floor: { n: 2 }
+  };
+  const GLOWROCK = {
+    rim: { edge: 6, pit: 10, size: [0.18, 0.34], pitSize: [0.25, 0.5] },
+    mid: { edge: 6, pit: 8, size: [0.3, 0.6], pitSize: [0.25, 0.5] },
+    floor: { edge: 5, wall: 5, size: [0.25, 0.55] }
+  };
   /** 环境动画的频率（秒）。减少动态效果时都停住：电梯停在原地，灯不闪
    *   lift    运载电梯：每次停多久、走多慢（每秒走全程的几成：全程要二三十秒）、停在哪几处（0 = 最上面，1 = 这边坑沿挡住的地方再往下，看不见了）
    *   blink   坑壁上的灯：隔多久暗一下、每次暗多久 */
@@ -83,7 +106,9 @@
     lift: { wait: [3, 8], speed: [0.03, 0.055], stops: [0, 0.3, 0.62, 1] },
     blink: { every: [1.2, 4.5], dur: [0.08, 0.3] },
     /* steam   矿底管道的排气口：隔多久喷一阵、每阵多久；一阵冒几团气、往上飘多高、一团从多大长到多大、多不透明（减少动态效果时不喷） */
-    steam: { every: [2.5, 7], dur: [1.4, 2.4], puffs: 6, rise: 1.5, size: [0.25, 1.1], opacity: 0.5 }
+    steam: { every: [2.5, 7], dur: [1.4, 2.4], puffs: 6, rise: 1.5, size: [0.25, 1.1], opacity: 0.5 },
+    /* fire    第二采矿场喷火的管道：隔多久喷一阵、每阵多久；火焰几团、窜多高、根部 / 顶上一团多大、多亮；平时管口一点小火苗多大（减少动态效果时只剩小火苗） */
+    fire: { every: [3, 8], dur: [0.9, 1.8], flames: 7, height: [1.2, 2], size: [0.55, 0.22], opacity: 0.9, pilot: 0.22 }
   };
   /** 每个场景（键 = 地面主题）：
    *   palette / depth（rim 矿外、mid 矿内）/ pit（PIT 的哪一套）
@@ -127,6 +152,47 @@
           set: { dofFar: 0.012 }, grade: { vignette: 0.55 }
         }
       }
+    },
+    /* 第二采矿场：第一采矿场三个场景的变体——色调更红（PALETTE.mine2，雾 / 天 / 环境光往赭红靠，调色的色温偏红），
+     * 地台上几成石头带发光的裂纹（decor.glow），远景加喷火的管道（fire：FIRE 的哪一套）、橙红发光的岩石（glow：GLOWROCK 的哪一套） */
+    mine2_rim: {
+      palette: "mine2", depth: "rim", pit: "rim",
+      decor: { band: 3, ledge: 2, size: [0.1, 0.17], tone: "rock", glow: 0.35 },
+      backdrop: { lights: 10, blink: 0.45, lifts: [-0.48, 0.34], rail: true, farRim: true, fire: "rim", glow: "rim" },
+      ambient: ["lift", "blink", "fire"],
+      light: {
+        all: {
+          tint: { fog: [0xa24a2c, 0.3], sky: [0xb0502e, 0.25], hemiGround: [0x8a3420, 0.4], sun: [0xffb08a, 0.2] },
+          grade: { temp: [1.09, 0.97, 0.88] }
+        }
+      }
+    },
+    mine2_mid: {
+      palette: "mine2", depth: "mid", pit: "mid",
+      decor: { band: 3, ledge: 2, size: [0.1, 0.17], tone: "wall", glow: 0.35 },
+      backdrop: { lights: 12, blink: 0.5, lifts: [0.12], berm: true, walls: "mid", fore: "mid", fire: "mid", glow: "mid" },
+      ambient: ["lift", "blink", "fire"],
+      light: {
+        all: {
+          scale: { hemi: 0.55, sunI: 0.42, rimI: 0.75, exposure: 0.9, lamp: 1.8 },
+          tint: { fog: [0x2a1209, 0.62], sky: [0x2e140a, 0.6], ground: [0x2e1a12, 0.25], hemiSky: [0xa07860, 0.35], hemiGround: [0x24100a, 0.5], sun: [0xffc8a0, 0.3] },
+          set: { dofFar: 0.011 }, grade: { vignette: 0.48, temp: [1.1, 0.96, 0.88] }
+        }
+      }
+    },
+    mine2_floor: {
+      palette: "mine2", depth: "floor",
+      decor: { band: 3, ledge: 2, size: [0.12, 0.2], tone: "wall", pipes: 0.4, glow: 0.3 },
+      backdrop: { floor: "floor", fore: "mid", fire: "floor", glow: "floor" },
+      ambient: ["steam", "fire"],
+      light: {
+        fixed: "dusk",
+        all: {
+          scale: { hemi: 0.36, sunI: 0.15, rimI: 0.45, exposure: 0.95, lamp: 3.6 },
+          tint: { fog: [0x180805, 0.85], sky: [0x140705, 0.9], hemiSky: [0x6a4a3c, 0.55], hemiGround: [0x100503, 0.7], sun: [0xffb080, 0.35], rim: [0xff9a60, 0.5] },
+          set: { dofFar: 0.012 }, grade: { vignette: 0.55, temp: [1.1, 0.96, 0.88] }
+        }
+      }
     }
   };
   /** 地面主题（并进布局的 GROUNDS，写法同 hd2d-layout.js 的 GROUNDS）：顶面 / 侧面贴图是这里画的（art 开头），backdrop 指回这一套 */
@@ -145,11 +211,28 @@
       tex: "artPitFloor", tint: 0xffffff, side: "artBenchSide", sideTint: 0x8a7c70, decals: { gravel: 2, slag: 2, crack: 2, puddle: 1 },
       pebbles: 18, pebble: 0x4e4440, rock: 0x3e3530, decor: "art", ground: 0x2c241f, backdrop: "mine1_floor",
       lamps: { kind: "hanging", color: 0xffb35c, day: 2, dusk: 2, night: 2 }
+    },
+    // 第二采矿场：同样的三套贴图乘上偏红的颜色（tint / sideTint），矿渣里带余火（ember 贴花，glow 是它发的光）
+    mine2_rim: {   // 第二采矿场 · 矿外：赭红的砂岩地，带余火的矿渣；一盏矿灯
+      tex: "artSandstone", tint: 0xf2b8a0, side: "artSandstoneSide", sideTint: 0xe8a088, glow: 0xff5a1e, decals: { crack: 2, ember: 2, artSandDrift: 2 },
+      pebbles: 14, pebble: 0x9a5a40, rock: 0x8a4a34, decor: "art", ground: 0x8e4e36, backdrop: "mine2_rim",
+      lamps: { kind: "hanging", color: 0xffb060, day: 1, dusk: 1, night: 1 }
+    },
+    mine2_mid: {   // 第二采矿场 · 矿内：暗红的运输道，带余火的矿渣；矿灯傍晚以后两盏
+      tex: "artHaulRoad", tint: 0xeab8a4, side: "artBenchSide", sideTint: 0xd8988a, glow: 0xff5a1e, decals: { gravel: 2, ember: 2, slag: 2, crack: 1 },
+      pebbles: 22, pebble: 0x6a4436, rock: 0x543226, decor: "art", ground: 0x4e2c22, backdrop: "mine2_mid",
+      lamps: { kind: "hanging", color: 0xffb060, day: 1, dusk: 2, night: 2 }
+    },
+    mine2_floor: {   // 第二采矿场 · 矿底：暗红的岩盘，到处是带余火的矿渣；两盏提灯（不分白天黑夜）
+      tex: "artPitFloor", tint: 0xf0bcaa, side: "artBenchSide", sideTint: 0x8c6052, glow: 0xff5a1e, decals: { ember: 3, slag: 2, crack: 2 },
+      pebbles: 18, pebble: 0x4e3430, rock: 0x3e2620, decor: "art", ground: 0x2e1a14, backdrop: "mine2_floor",
+      lamps: { kind: "hanging", color: 0xffa860, day: 2, dusk: 2, night: 2 }
     }
   };
   /** 区域 → 场景 id（world-data.js · BATTLE_SCENES）→ 地面主题 */
   const SCENES = {
-    "第一采矿场": { rim: "mine1_rim", mid: "mine1_mid", floor: "mine1_floor" }
+    "第一采矿场": { rim: "mine1_rim", mid: "mine1_mid", floor: "mine1_floor" },
+    "第二采矿场": { rim: "mine2_rim", mid: "mine2_mid", floor: "mine2_floor" }
   };
 
   /* ---------- 小工具 ---------- */
@@ -347,9 +430,11 @@
     const D = art.decor, R = A.rand(z.id * 977 + seedOf(key)), spots = A.zoneSpots(z, D.size[0]);
     const band = A.pick(spots.filter(s => s.on === "band"), D.band, R, 1.4);
     const ledge = A.pick(spots.filter(s => s.on === "ledge"), D.ledge, R, 0.8);
-    // kind：rock 石头；pipe 一截管子（矿底）；glow 带发光裂纹的石头（第二采矿场）——各占几成按 decor.pipes / decor.glow
-    const kindOf = () => (D.glow && R() < D.glow ? "glow" : D.pipes && R() < D.pipes ? "pipe" : D.kind || "rock");
-    return band.concat(ledge).map(s => ({ kind: kindOf(), x: s.x, z: s.z, y: s.y, size: Math.min(A.span(R, D.size), s.r), on: s.on }));
+    // kind：rock 石头；pipe 一截管子（矿底）；glow 带发光裂纹的石头（第二采矿场）——每块地台上各占几成按 decor.glow / decor.pipes
+    // （发光的至少一块；挑出来的点本来就是打乱过的，前面几个当发光的、再几个当管子）
+    const all = band.concat(ledge), nGlow = D.glow ? Math.max(1, Math.round(all.length * D.glow)) : 0, nPipe = D.pipes ? Math.round(all.length * D.pipes) : 0;
+    const kindOf = (i) => (i < nGlow ? "glow" : i < nGlow + nPipe ? "pipe" : D.kind || "rock");
+    return all.map((s, i) => ({ kind: kindOf(i), x: s.x, z: s.z, y: s.y, size: Math.min(A.span(R, D.size), s.r), on: s.on }));
   }
   /** 挂钩：地台上的装饰（hd2d-world.js · buildZone 交过来；地台本体、贴花、小石子已经画好了）。
    *  管子顺着边带（沿 z）躺着，两头一圈法兰，有的上面一个阀门轮；整个在装饰的半径里（四个角离中心不到 size） */
@@ -532,10 +617,17 @@
     const wall = pitWall(kit, env, Q, P, R, d, shafts);
     env.group.add(wall.mesh);
     rimLip(kit, env, P, R, d.rimZ);
-    if (BD.rail) railing(kit, env, P, R, b, d.rimZ, null);
+    if (BD.rail) railing(kit, env, P, R, b, d.rimZ);
     pitLights(kit, env, wall, art, P, R, shafts);
     shafts.forEach((x, i) => lift(kit, env, wall, P, R, x, i));
     if (BD.farRim) farRim(kit, env, wall, P, R, shafts);
+    // 第二采矿场：坑边（栏杆后面、灯前面）几根喷火的立管；坑边几块、坑里暗处几处橙红发光的岩石
+    if (BD.fire) { const FI = FIRE[BD.fire], tex = env.keep(kit.smokeTexture()); FI.u.forEach((u, i) => firePipe(kit, env, P, R, d.cx + u * (env.hx + 1), d.rimZ + 0.75, FI.h, i, tex)); }
+    if (BD.glow) {
+      const G = GLOWROCK[BD.glow], list = [];
+      for (let i = 0; i < G.edge; i++) { const s = A.span(R, G.size); list.push({ x: d.cx + (R() * 2 - 1) * (env.hx + 6), y: L.CONFIG.groundY + s * 0.15, z: d.rimZ + (R() - 0.5) * 0.3, s, fog: true }); }
+      glowRocks(kit, env, P, R, list.concat(pitGlows(wall, R, G.pit, G.pitSize, d.halfW)));
+    }
     return d.rimZ;
   }
 
@@ -554,22 +646,16 @@
       env.group.add(tag(m, "rimLip"));
     });
   }
-  /** 坑边的栏杆：一根根柱子 + 上下两道横杆（锈铁），吊架那一段空出来 */
-  function railing(kit, env, P, R, b, rimZ, skip) {
+  /** 坑边的栏杆：一根根柱子 + 上下两道横杆（锈铁），横着比战场两边各宽出 9 */
+  function railing(kit, env, P, R, b, rimZ) {
     const THREE = kit.THREE, mat = env.keep(new THREE.MeshStandardMaterial({ color: P.metal, roughness: 0.7, metalness: 0.4, flatShading: true }));
     const z = rimZ + 0.4, y0 = L.CONFIG.groundY, from = b.minX - 9, to = b.maxX + 9, posts = [];
-    let run = null;
-    const runs = [];
-    for (let x = from; x <= to; x += 1.35) {
-      if (skip && Math.abs(x - skip) < 1.6) { if (run) { runs.push(run); run = null; } continue; }
-      posts.push(x);
-      if (!run) run = [x, x]; else run[1] = x;
-    }
-    if (run) runs.push(run);
+    for (let x = from; x <= to; x += 1.35) posts.push(x);
     const g = new THREE.Group(), pm = new THREE.InstancedMesh(new THREE.BoxGeometry(0.06, 0.6, 0.06), mat, posts.length), o = new THREE.Object3D();
     posts.forEach((x, i) => { o.position.set(x, y0 + 0.3, z + (R() - 0.5) * 0.06); o.rotation.set((R() - 0.5) * 0.12, 0, (R() - 0.5) * 0.12); o.updateMatrix(); pm.setMatrixAt(i, o.matrix); });
     g.add(pm);
-    runs.forEach(([a, c]) => [0.55, 0.3].forEach(h => g.add(kit.put(new THREE.Mesh(new THREE.BoxGeometry(c - a, 0.035, 0.035), mat), (a + c) / 2, y0 + h, z))));
+    const a = posts[0], c = posts[posts.length - 1];
+    [0.55, 0.3].forEach(h => g.add(kit.put(new THREE.Mesh(new THREE.BoxGeometry(c - a, 0.035, 0.035), mat), (a + c) / 2, y0 + h, z)));
     env.group.add(tag(g, "rail"));
   }
 
@@ -685,6 +771,19 @@
     const cz = env.cam && env.cam.pos ? env.cam.pos.z : env.cz + 45, open = W ? W.half(L.CONFIG.groundY, true) * (cz - d.zFar) / Math.max(1, cz - W.z) : null;
     pitLights(kit, env, wall, art, P, R, shafts, open ? open * 0.9 : null);
     shafts.forEach((x, i) => lift(kit, env, wall, P, R, x, i));
+    // 第二采矿场：开口两边贴着岩壁各一根喷火的立管（火在开口里窜上去）；开口两边的岩壁上几块、坑里暗处几处橙红发光的岩石
+    if (BD.fire && W) {
+      const FI = FIRE[BD.fire], tex = env.keep(kit.smokeTexture()), gY = L.CONFIG.groundY;
+      [-1, 1].forEach((s, i) => firePipe(kit, env, P, R, d.cx + s * (W.half(gY, s > 0) - 0.5), W.z + 0.6, FI.h, i, tex));
+    }
+    if (BD.glow && W) {
+      const G = GLOWROCK[BD.glow], gY = L.CONFIG.groundY, list = [];
+      for (let i = 0; i < G.edge; i++) {
+        const s = A.span(R, G.size), side = i % 2 ? 1 : -1, y = gY + 0.3 + R() * (env.topY(W.z) - gY) * 0.7;
+        list.push({ x: d.cx + side * (W.half(y, side > 0) + s * 0.4 + R() * 3), y, z: W.z - s * 0.3, s, fog: true });
+      }
+      glowRocks(kit, env, P, R, list.concat(pitGlows(wall, R, G.pit, G.pitSize, open ? open * 0.9 : d.halfW)));
+    }
     return d.rimZ;
   }
 
@@ -751,6 +850,7 @@
       env.group.add(tag(g, "vent"));
       i++;
     }
+    return out;
   }
   /** 坑壁上挂的提灯（克制，就 F.lanterns.n 盏）：铁支架伸出来，吊一盏带罩子的灯 + 光晕 + 一个点光源（照亮附近的坑壁和管道），火苗轻轻晃（减少动态效果时不晃） */
   function lanterns(kit, env, P, R, F, spots) {
@@ -789,8 +889,28 @@
     });
     env.group.add(tag(face, "pitFloorWall"));
     const pipes = pipeRuns(kit, env, P, R, F, zAt);
-    steamVents(kit, env, P, R, F, pipes);
+    const vents = steamVents(kit, env, P, R, F, pipes);
     lanterns(kit, env, P, R, F, spots);
+    // 第二采矿场：上面那道横管上几个喷火口（让开竖管、排气口、提灯）；坑壁脚下、坑壁上几块橙红发光的岩石
+    if (art.backdrop.fire) {
+      const FI = FIRE[art.backdrop.fire], run = pipes.run, tex = env.keep(kit.smokeTexture()), used = pipes.risers.concat(vents, spots.map(s => s.x)), soot = env.keep(new THREE.MeshStandardMaterial({ color: 0x1a1210, roughness: 0.8, flatShading: true }));
+      for (let i = 0, tries = 0; i < FI.n && tries < 80; tries++) {
+        const x = run.x0 + 2 + R() * (run.x1 - run.x0 - 4);
+        if (used.some(q => Math.abs(q - x) < 1.6)) continue;
+        used.push(x);
+        const g = new THREE.Group(), y = run.y + run.r;
+        g.add(kit.put(new THREE.Mesh(new THREE.CylinderGeometry(run.r * 0.7, run.r * 0.55, 0.22, 8), soot), x, y + 0.11, run.z));
+        g.add(fireJet(kit, env, P, R, x, y + 0.22, run.z, i, tex));
+        env.group.add(tag(g, "firePipe"));
+        i++;
+      }
+    }
+    if (art.backdrop.glow) {
+      const G = GLOWROCK[art.backdrop.glow], list = [];
+      for (let i = 0; i < G.edge; i++) { const x = cx + (R() * 2 - 1) * (env.hx + 4), s = A.span(R, G.size); list.push({ x, y: gY + s * 0.2, z: zAt(x) + 0.25, s, fog: true }); }
+      for (let i = 0; i < G.wall; i++) { const x = cx + (R() * 2 - 1) * (env.hx + 6), s = A.span(R, G.size); list.push({ x, y: gY + 1.6 + R() * (yTop - gY - 3), z: zAt(x) - 0.1, s, fog: true }); }
+      glowRocks(kit, env, P, R, list);
+    }
     // 坑壁脚下的大石头（在管道前面一点，不过灯）
     const RK = F.rocks;
     for (let i = 0; i < RK.n; i++) {
@@ -803,8 +923,68 @@
     if (art.backdrop.fore) foreRocks(kit, env, P, R, b, FORE[art.backdrop.fore]);
   }
 
+  /* ---------- 远景：第二采矿场的喷火管道、发光岩石 ---------- */
+  /** 管口的火（AMBIENT.fire）：平时一点小火苗；时不时一阵火从管口窜上去（几团加色混合的火，下面黄、上面橙，越往上越小越淡），烧一阵就熄；
+   *  减少动态效果时只剩小火苗（不喷、不晃）。返回 Group（userData.ambient.puffs = 那几团火） */
+  function fireJet(kit, env, P, R, x, y, z, i, tex) {
+    const THREE = kit.THREE, S = AMBIENT.fire, g = new THREE.Group();
+    const mk = (color, op) => env.keep(new THREE.SpriteMaterial({ map: tex, color, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false, opacity: op }));
+    const pilot = new THREE.Sprite(mk(new THREE.Color(P.fire[1]).multiplyScalar(1.6), 0.85));
+    pilot.position.set(x, y + 0.05, z); pilot.scale.setScalar(S.pilot); g.add(pilot);
+    const flames = [];
+    for (let k = 0; k < S.flames; k++) {
+      const f = new THREE.Sprite(mk(new THREE.Color(k < S.flames / 2 ? P.fire[0] : P.fire[1]).multiplyScalar(2), 0));
+      f.visible = false; f.position.set(x, y, z); f.scale.setScalar(S.size[1]); g.add(f); flames.push(f);
+    }
+    const H = A.span(R, S.height), beat = A.beat(A.rand(i * 389 + 71), S.every, S.dur, 1 + R() * S.every[1]), ph = R() * 6;
+    g.userData.ambient = { kind: "fire", beat, puffs: flames };
+    env.anims.push((t, dt) => {
+      const p = dt > 0 ? beat.step(dt) : -1, k1 = p < 0 ? 0 : smooth(0, 0.15, p) * (1 - smooth(0.7, 1, p));   // 窜上去 → 烧一阵 → 熄
+      flames.forEach((f, k) => {
+        f.visible = k1 > 0.01;
+        if (!f.visible) return;
+        const q = k / (S.flames - 1), w = 0.85 + 0.3 * Math.sin(t * 23 + k * 1.7 + ph);
+        f.position.set(x + Math.sin(t * 9 + k) * 0.05 * q, y + 0.08 + q * H * k1, z);
+        f.scale.setScalar((S.size[0] + (S.size[1] - S.size[0]) * q) * w * (0.4 + 0.6 * k1));
+        f.material.opacity = S.opacity * k1 * (1 - q * 0.5);
+      });
+      pilot.scale.setScalar(S.pilot * (dt > 0 ? 0.85 + 0.25 * Math.sin(t * 17 + ph) : 1));
+    });
+    return tag(g, "fire");
+  }
+  /** 一根喷火的立管：锈铁的管子（下面一圈法兰）、烧黑的管口，管口的火见 fireJet */
+  function firePipe(kit, env, P, R, x, z, h, i, tex) {
+    const THREE = kit.THREE, gY = L.CONFIG.groundY, r = 0.1, g = new THREE.Group();
+    const metal = env.keep(new THREE.MeshStandardMaterial({ color: P.metal, roughness: 0.5, metalness: 0.55, flatShading: true }));
+    const soot = env.keep(new THREE.MeshStandardMaterial({ color: 0x1a1210, roughness: 0.8, metalness: 0.3, flatShading: true }));
+    g.add(kit.put(new THREE.Mesh(new THREE.CylinderGeometry(r, r * 1.15, h, 10), metal), x, gY + h / 2, z));
+    g.add(kit.put(new THREE.Mesh(new THREE.CylinderGeometry(r * 1.5, r * 1.5, 0.08, 10), soot), x, gY + 0.25, z));
+    g.add(kit.put(new THREE.Mesh(new THREE.CylinderGeometry(r * 1.3, r * 0.95, 0.14, 10), soot), x, gY + h + 0.07, z));
+    g.add(fireJet(kit, env, P, R, x, gY + h + 0.14, z, i, tex));
+    env.group.add(tag(g, "firePipe"));
+  }
+  /** 橙红发光的岩石（烧黑的壳 + 整块发橙红的光，泛光会抓到）：list = [{ x, y, z, s, fog }] */
+  function glowRocks(kit, env, P, R, list) {
+    const THREE = kit.THREE;
+    list.forEach(q => {
+      const m = new THREE.Mesh(rockGeo(kit, q.s, R, 0.8), env.keep(new THREE.MeshStandardMaterial({ color: P.glowBase, emissive: P.glow, emissiveIntensity: GLOW.backdrop * (0.6 + R() * 0.5), roughness: 0.9, flatShading: true, fog: !!q.fog })));
+      m.position.set(q.x, q.y, q.z); m.rotation.set(R() * 3, R() * 3, R() * 3);
+      env.group.add(tag(m, "glowRock"));
+    });
+  }
+  /** 坑里暗处的发光岩石：落在看得到的那一截里、已经开始变黑的台阶边上（像坑底透上来的熔岩光），横着在 xr 里 */
+  function pitGlows(wall, R, n, size, xr) {
+    const d = wall.d, Q = wall.Q, out = [];
+    const kA = Math.ceil((d.top - d.ref + (d.ref - d.yOcc) * 0.35) / Q.step), kB = Math.max(kA + 1, Math.floor((d.top - d.yOcc) / Q.step));
+    for (let i = 0; i < n; i++) {
+      const x = d.cx + (R() * 2 - 1) * xr, e = wall.edgeAt(kA + Math.floor(R() * (kB - kA + 1)), x), s = A.span(R, size);
+      out.push({ x, y: e.y + s * 0.3, z: e.z + s * 0.4, s, fog: false });
+    }
+    return out;
+  }
+
   /* ---------- 挂钩：远景 ---------- */
-  /** 天边画的远景：矿外用以前采矿场的那条（远处的厂区 + 坑壁），在对面坑沿后面露出来；矿内被对面的坑壁整个挡住，用以前的 */
+  /** 天边画的远景：矿外用以前采矿场的那条（远处的厂区 + 坑壁），在对面坑沿后面露出来（低镜头时）；矿内 / 矿底被坑壁整个挡住，用以前的 */
   function band(kit, colors, seed, a) {
     return a.art.depth === "rim" ? kit.bandTexture("mine", colors, seed) : null;
   }
