@@ -19,6 +19,8 @@
   const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
   const sumCur = (s) => (s.layers || []).reduce((a, l) => a + l.cur, 0);
   const sumMax = (s) => (s.layers || []).reduce((a, l) => a + l.max, 0);
+  // 卡片上写的名字、等级、ATK（unit-card.js · headOf：和载具合并的驾驶员按车写）
+  const headOf = (s) => (window.UnitCard && UnitCard.headOf ? UnitCard.headOf(s) : s);
 
   const G = {
     tape: null,        // 正在记录的事件
@@ -133,9 +135,14 @@
     } catch (e) {}
     try { if (u.isPlayer) res = resourceText(u); } catch (e) {}
     try { atk = effectiveAtk(u, state.units); } catch (e) {}
+    // 载具（vehicle.js）：和车合并的驾驶员画成车的卡片——卡片上的名字、外观、等级、ATK 按车（unit-card.js · headOf），状态行写乘员 n / 4 和驾驶员是谁。
+    // name 等字段照旧是驾驶员自己的（队伍栏、日志、联机都认它）
+    let veh = null;
+    try { veh = typeof vehicleCardOf === "function" ? vehicleCardOf(u) : null; } catch (e) {}
     return {
       id: u.id,
       name: u.name,
+      vehicle: veh,
       level: u.level || 1,
       isPlayer: !!u.isPlayer,
       kit: u.kit || "",
@@ -172,6 +179,8 @@
       badges: unitBadgesOf(u),
       res,
       iv: u.iv ? { hp: Number(u.iv.hp) || 0, atk: Number(u.iv.atk) || 0 } : null,   // 个体值（杂兵、精英）
+      race: typeof raceText === "function" ? raceText(u) : "",   // 种族（敌人）："红皮人" / "兽人·牛"
+      racePerks: typeof racePerkLines === "function" && u.race ? racePerkLines(u) : [],   // 生效的种族被动（enemies.js · RACE_PERKS），悬停里写出来
       intents: (() => { try { return typeof enemyIntents === "function" ? enemyIntents(u) : []; } catch (e) { return []; } })(),   // 名牌上的行动提示（连击……）
       atk: Math.round(Number(atk) || 0),
       weapon: !!u.weaponOf,
@@ -179,6 +188,8 @@
       // 首领机制（boss-mechanics.js）：身上的死刑标记 / 首领正在倒数的死刑
       marks: typeof bossMarksOn === "function" ? bossMarksOn(u) : [],
       casts: typeof bossCastsBy === "function" ? bossCastsBy(u) : [],
+      // 分阶段的首领 / 精英现在在第几阶段（bestiary.js）：悬停说明只列这一阶段的能力；联机玩家那边由 online-view.js 发同一个编号
+      stage: (() => { try { return typeof bestiaryStageOf === "function" ? bestiaryStageOf(u) : 0; } catch (e) { return 0; } })(),
       // 中立生物（desert.js）：迷你名牌；夜晚下潜的不画名牌，折进区角的「沙下动静」
       neutral: typeof isNeutralCreature === "function" && isNeutralCreature(u),
       submerged: !!u.submerged,
@@ -264,10 +275,11 @@
       layers: (Number(p.shieldMax) > 0 ? [{ type: "shield", max: Number(p.shieldMax), cur: Math.max(0, Number(p.shield) || 0) }] : [])
         .concat([{ type: "armor", max: max, cur: cur }]),
       def: 0, defMax: 0, ap: 0, apMax: 0, bonus: 0, bonusMax: 0,
-      status: (typeof propKindName === "function" ? propKindName(p.kind) : p.kind) + (p.kind === "door" ? "" : ""),
-      res: p.kind === "battery" || p.kind === "turret" ? (p.faction === "enemy" ? "敌方" : "我方") : "",
+      status: (typeof propKindName === "function" ? propKindName(p.kind) : p.kind) + (p.kind === "door" ? "" : "") + (p.isVehicle && typeof vehicleSeatText === "function" ? " · " + vehicleSeatText(p) : ""),
+      res: p.kind === "battery" || p.kind === "turret" || p.isVehicle ? (p.faction === "enemy" ? "敌方" : "我方") : "",
       highEnergy: 0, flying: false, stunned: false, dying: false, dead: cur <= 0 && p.kind !== "button" && p.kind !== "lever",
-      hidden: false
+      // 有驾驶员的车：只画和驾驶员合并后的那张车的卡片（snapUnit），配置物卡片藏起来（vehicle.js）
+      hidden: typeof vehiclePropHidden === "function" && vehiclePropHidden(p)
     };
   }
   /** 区域之间的危墙 / 不稳桥梁：可以被攻击，快照和配置物一样（画在两区之间的竖条上，不单独出铭牌） */
@@ -291,7 +303,7 @@
   }
   function targetName(id) {
     const s = G.view.get(id);
-    if (s) return s.name;
+    if (s) return headOf(s).name;
     const u = unitById(id);
     return u ? u.name : "";
   }
@@ -352,17 +364,9 @@
         ).join("");
       }
     });
-    // 踩塔：区域边框 + 角上一块牌子「踩塔 N · 1/1 人」（人数不够时变红）
-    document.querySelectorAll(".g-zone").forEach(z => {
-      const tw = (env.zones[z.dataset.num] || {}).towers || [];
-      z.classList.toggle("tower", tw.length > 0);
-      z.classList.toggle("tower-ready", tw.some(t => t.left <= 0));
-      z.classList.toggle("tower-short", tw.some(t => t.have < t.need));
-      let tb = z.querySelector(".ztower");
-      if (!tw.length) { if (tb) tb.remove(); return; }
-      if (!tb) { tb = el("div", "ztower"); z.appendChild(tb); }
-      tb.innerHTML = UnitCard.towerHtml(tw);   // 「踩塔 · 还有 N 回合 · 1/1 人」（unit-card.js）
-    });
+    // 踩塔：区名旁边一个塔的图标（数字 = 还有几回合，旁边写几人 / 要几人）+ 地面上的一圈（unit-card.js，联机玩家画面同一套）
+    // 只画本机的战场（联机玩家的战场由 online-battle.js 自己画，窗口缩放时这里不去动它）
+    document.querySelectorAll("#g-field .g-zone").forEach(z => UnitCard.paintTowers(z, (env.zones[z.dataset.num] || {}).towers || [], { sim: G.sim }));
     paintGaps();
   }
   const toMap = (arr) => new Map(arr.map(s => [s.id, s]));
@@ -515,7 +519,7 @@
       // 资源前后的文字（快照里的 res）：卡片数值牌和预览框写「资源：之前 → 之后」；配置物的 res 是阵营
       p.resBefore = bs.res || "";
       p.resAfter = s2.res || "";
-      p.name = bs.name;
+      p.name = headOf(bs).name;
       p.isProp = !!bs.isProp;
       // 属性颜色按攻击动作本身那一下：高压场地这类连带伤害会先弹出来，不能拿第一个
       const dmgPops = hi.tape.filter(e => e.type === "pop" && e.unitId === id && e.kind === "dmg" && Number(e.value) > 0);
@@ -586,6 +590,10 @@
         cost: { ap: 1 }
       });
     });
+    // 同区有车：上车、把对方的人拉下车（vehicle.js；坐在车上的人用 skillList 里的车上招式）
+    if (typeof vehicleGroundSkills === "function") vehicleGroundSkills(u).forEach(s => {
+      out.push({ id: s.id, name: s.name, hint: s.hint, cost: vehicleSkillCost(s.id) });
+    });
     out.push({ id: "__item", name: "使用道具", hint: "从背包里选一件在战斗中使用。", cost: { bonus: 1 } });
     out.push({ id: "__move", name: "移动", hint: "移动到另一个区域。离开有借机攻击敌人的区域会被追打。", cost: typeof moveBaseCost === "function" ? moveBaseCost(u) : { bonus: 1 } });
     return out;
@@ -607,6 +615,7 @@
     if ((sk.cost.ap || 0) > (u.ap || 0)) return "行动点不足";
     if ((sk.cost.bonus || 0) > (u.bonus || 0)) return "附赠行动不足";
     if (sk.id === "__move" && u.noMove) return "本回合无法移动";
+    if (sk.id === "__move" && u.vehId && !u.vehMerged) return "在车里，不能自己移动（驾驶员开车，或者先下车）";
     if (String(sk.id).indexOf("use_scrap:") === 0 && typeof scrapTargets === "function") {
       const p = (state.props || []).find(x => "use_scrap:" + x.id === sk.id);
       if (p && typeof scrapReady === "function" && !scrapReady(p)) return "碎渣机炮这一回合已经发射过了";
@@ -727,8 +736,14 @@
     G.view = next;
     paintGaps();
     paintSandStir(snaps);
+    paintMechBar(snaps);
     fitZones();
     return beats;
+  }
+
+  /** 战场正上方的首领机制横幅（unit-card.js · paintBanner）：和援军倒计时摞在一起，有机制时战场顶上留出它的高度 */
+  function paintMechBar(snaps) {
+    if (window.UnitCard && UnitCard.paintBanner) UnitCard.paintBanner($("g-field"), snaps);
   }
 
   /** 夜晚下潜的中立生物（尘虫迁徙）：每个区角上一块「沙下动静 ×N」，点开看每只的状态；谐波选目标时点列表里的那一只 */
@@ -2399,7 +2414,7 @@
         if (window.OnlineGame?.isHost() && GMCommands.isManual(unitById(uid))) continue;
         for (let n = 0; n < 5; n++) {
           const u = unitById(uid);
-          if (!u || !unitAlive(u) || u.stunned || (u.ap || 0) <= 0) {
+          if (!u || !(unitAlive(u) || (typeof vehicleRiderActs === "function" && vehicleRiderActs(u))) || u.stunned || (u.ap || 0) <= 0) {
             if (uid === id && n === 0) steps.push(u && u.stunned ? "失衡中，这回合动不了" : "这回合不会行动");
             break;
           }
@@ -2458,10 +2473,11 @@
     const s = G.view.get(id);
     if (!s) return;
     const layers = s.layers.map(l => `${LAYER[l.type] || l.type} ${l.cur}/${l.max}`).reverse().join("　");
+    const head = headOf(s);
     $("g-pvbox").classList.add("live");
-    $("g-pvbox").innerHTML = `<h4>${esc(s.name)} · Lv${s.level}</h4>
+    $("g-pvbox").innerHTML = `<h4>${esc(head.name)} · Lv${head.level}</h4>
       <div class="ln key">${esc(layers)}</div>
-      <div class="ln">架势 ${defText(s)} · ATK ${s.atk} · ${s.zone} 区</div>
+      <div class="ln">架势 ${defText(s)} · ATK ${head.atk} · ${s.zone} 区</div>
       <div class="ln">${esc(s.status || "无状态")}</div>
       ${s.res ? `<div class="ln">${esc(s.res)}</div>` : ""}
       ${intentHtml(id)}
@@ -2512,10 +2528,12 @@
         reject: () => { unmarkTargets(); showPickBar(null); resolve(null); }
       });
       markTargets(new Set([...map.keys()].filter(id => !map.get(id).invalid)));
-      showPickBar(buttons);
+      showPickBar(buttons, canGiveUp());
       refreshHud();
     });
   }
+  /** 还没打出去的选择（技能分步 / 选目标）才给「放弃」按钮；结算队列里的点选另有自己的按钮 */
+  function canGiveUp() { return !!(G.arm && G.arm.actorId) && !(choiceResolve && choiceResolve.field); }
   /** 结算队列里（换刀头、协助攻击附带的扫描）在战场上点选：选完之前别的操作都锁住，和弹窗一样 */
   async function queueFieldPick(hint, cands, labelFn, buttons) {
     setHint(hint);
@@ -2524,8 +2542,9 @@
     finally { choiceResolve = null; G.arm = null; unmarkTargets(); clearPreview(); setHint(defaultHint()); refreshHud(); }
   }
   /** 选目标时的额外按钮条（在提示栏下面） */
-  function showPickBar(buttons) {
+  function showPickBar(buttons, giveUp) {
     let bar = $("g-pick-bar");
+    if (giveUp) buttons = (buttons || []).concat([{ label: "放弃（Esc）", giveUp: true }]);
     if (!buttons || !buttons.length) { if (bar) { bar.classList.remove("show"); bar.innerHTML = ""; } return; }
     if (!bar) {
       bar = el("div", "g-pick-bar");
@@ -2536,7 +2555,9 @@
     bar.innerHTML = "";
     buttons.forEach(b => {
       const x = el("button", "g-btn", `${esc(b.label)}${b.sub ? `<small>${esc(b.sub)}</small>` : ""}`);
-      x.onclick = (e) => { e.stopPropagation(); if (G.arm && G.arm.mode === "unit") G.arm.resolve({ button: b.value }); };
+      // 放弃：和 Esc / 右键一样，还没打出去，什么都没扣没改
+      if (b.giveUp) { x.classList.add("danger"); x.onclick = (e) => { e.stopPropagation(); disarm(); }; }
+      else x.onclick = (e) => { e.stopPropagation(); if (G.arm && G.arm.mode === "unit") G.arm.resolve({ button: b.value }); };
       bar.appendChild(x);
     });
     bar.classList.add("show");
@@ -2554,9 +2575,10 @@
         tapZone: null,
         zones: new Set(zones),
         previewFn,
-        resolve: (z) => { unmarkTargets(); clearPreview(); G.arm.mode = null; resolve(z); },
-        reject: () => { unmarkTargets(); resolve(null); }
+        resolve: (z) => { unmarkTargets(); clearPreview(); showPickBar(null); G.arm.mode = null; resolve(z); },
+        reject: () => { unmarkTargets(); showPickBar(null); resolve(null); }
       });
+      showPickBar(null, canGiveUp());
       document.querySelectorAll(".g-zone").forEach(z => z.classList.toggle("is-move-target", zones.includes(Number(z.dataset.num))));
       refreshHud();
     });
@@ -2576,9 +2598,11 @@
     if (s.isProp) {
       const p = (state.props || []).find(x => "prop:" + x.id === id);
       const hp = s.isDevice ? "" : `耐久 ${sumCur(s)}/${sumMax(s)}`;
-      return UnitTip.html({ kind: "prop", propKind: p && p.kind }, [], { name: s.name, sub: [hp, s.res, s.zone + " 区"].filter(Boolean).join(" · ") });
+      return UnitTip.html({ kind: "prop", propKind: p && p.kind }, [], { name: s.name, sub: [hp, s.res, s.zone + " 区"].filter(Boolean).join(" · "),
+        rows: p && p.isVehicle && typeof vehicleRosterLines === "function" ? vehicleRosterLines(p) : null, rowsTitle: p && p.isVehicle ? vehicleSeatText(p) : "" });
     }
     const u = unitById(id);
+    const vc = s.vehicle;   // 载具（vehicle.js）：和车合并的驾驶员按车写——配置物图鉴里车的说明，加上乘员名单
     const owner = u && u.weaponOf ? state.units.find(x => x.kit === u.weaponOf && !isWeaponUnit(x)) : null;
     const kind = s.isPlayer ? (s.escort ? "escort" : s.weaponUnit ? "weapon" : "hero") : "enemy";
     const tokens = [];
@@ -2587,10 +2611,15 @@
     if (s.upOnShp) tokens.push("起身");
     if (s.stunned && !s.dead) tokens.push("失衡");
     if (s.flying) tokens.push("飞行");
-    (s.status ? s.status.split(" · ") : []).forEach(t => { if (t && t !== "无状态") tokens.push(t); });
+    // 乘员和驾驶员写在下面的乘员名单里，不当成身上的效果
+    (s.status ? s.status.split(" · ") : []).forEach(t => { if (t && t !== "无状态" && !(vc && (t === vc.seatText || /^驾驶员：/.test(t)))) tokens.push(t); });
     (s.hung || []).forEach(n => tokens.push(n));
-    return UnitTip.html({ kind, kit: s.kit, ownerName: owner && owner.name, escort: s.escort }, tokens.filter(Boolean), { name: s.name, sub: `Lv${s.level} · ${s.zone} 区${s.iv && typeof ivText === "function" ? " · 个体值 " + ivText(s) : ""}`,
-      mechs: window.UnitCard && UnitCard.mechLines ? UnitCard.mechLines(s) : [] });   // 首领机制：还有几回合落下
+    const info = vc ? { kind: "prop", propKind: vc.kind } : { kind, kit: s.kit, ownerName: owner && owner.name, escort: s.escort, stage: s.stage };
+    const head = headOf(s);
+    return UnitTip.html(info, tokens.filter(Boolean), { name: head.name, sub: `Lv${head.level} · ${s.zone} 区${vc ? " · " + (s.isPlayer ? "我方" : "敌方") : ""}${head.race ? " · " + head.race : ""}${head.iv && typeof ivText === "function" ? " · 个体值 " + ivText(head) : ""}`,
+      mechs: window.UnitCard && UnitCard.mechLines ? UnitCard.mechLines(s) : [],   // 首领机制：还有几回合落下
+      rows: vc ? vc.roster : null, rowsTitle: vc ? vc.seatText : "",
+      perks: vc ? [] : (s.racePerks || []) });                                       // 种族被动（画成车时不写驾驶员的）
   }
   function onCardHover(id, on) {
     const fieldPick = !!(choiceResolve && choiceResolve.field);   // 结算队列里在战场上点选（那时动作还没结束，G.depth > 0）
@@ -2703,6 +2732,7 @@
         ? (() => { const d = zoneDist(actor.zone, fake.zone, state.zoneMode); return d >= ov.min && d <= ov.max; })()
         : (typeof inSkillRange !== "function" || inSkillRange(actor, fake, hint, state.zoneMode));
       (state.props || []).forEach(p => {
+        if (p.isVehicle && typeof vehiclePilot === "function" && vehiclePilot(p)) return;   // 有驾驶员的车和驾驶员是一个单位，打驾驶员
         const fake = { id: "prop:" + p.id, name: p.name, zone: p.zone, isPlayer: p.faction !== "enemy" };
         if (inRange(fake)) all.push(fake);
       });
@@ -2892,7 +2922,7 @@
         if (window.OnlineGame?.isHost() && (GMCommands.isManual(unitById(id)) || !GMCommands.enemyMayAct(unitById(id)))) break;
         if (window.OnlineGame?.isHost()) await OnlineGame.waitUntilReady();
         const u = unitById(id);
-        if (!u || !unitAlive(u) || u.stunned || (u.ap || 0) <= 0) break;
+        if (!u || !(unitAlive(u) || (typeof vehicleRiderActs === "function" && vehicleRiderActs(u))) || u.stunned || (u.ap || 0) <= 0) break;
         const sig = `${u.ap}|${u.bonus}|${u.zone}`;
         const actKey = `act:${state.turnNo}:${id}:${n}`;
         const tape = await perform({ type: "battle.enemyAction", actor: id, step: n, seed: actKey }, {}, true);
@@ -3396,12 +3426,14 @@
 
   function refreshTop() {
     // 连续战斗第几场、援军倒计时（chain.js）
-    // 浮在战场正上方（顶栏已经很挤）；战场重画时挂回去
+    // 浮在战场正上方（顶栏已经很挤），和首领机制横幅摞在同一摞里（unit-card.js · topStack），上下排开不打架；战场重画时挂回去
     let ch = document.getElementById("g-chain");
     const field = $("g-field");
+    const top = field && window.UnitCard && UnitCard.topStack ? UnitCard.topStack(field) : field;
     if (!ch && field) { ch = document.createElement("div"); ch.id = "g-chain"; ch.className = "g-chain"; ch.hidden = true; }
-    if (ch && field && ch.parentNode !== field) field.appendChild(ch);
+    if (ch && top && ch.parentNode !== top) top.insertBefore(ch, top.firstChild);
     if (ch && typeof Chain !== "undefined") { const h = Chain.barHtml(Chain.status()); ch.hidden = !h; if (ch.innerHTML !== h) ch.innerHTML = h; }
+    if (field && window.UnitCard && UnitCard.fitTop) UnitCard.fitTop(field);   // 援军那一行变了：留给横幅的高度跟着变
     $("g-round").textContent = state.combatStarted ? `第 ${state.turnNo || 1} 回合` : "准备中";
     const ph = $("g-phasel");
     ph.textContent = !state.combatStarted ? "等待开始" : (state.combatPhase === "enemy" ? "敌人行动" : "我方行动");
@@ -3972,6 +4004,7 @@
       resources: (function () {
         const r = u.resources || {};
         const keep = {};
+        // 瑞比的储备能源（nanoReserve，补充能源压缩出来的）不跨战斗，不放进来（#219）
         ["nano", "bean", "liquid", "power"].forEach(k => { if (r[k] != null) keep[k] = r[k]; });
         if (r.blade) keep.blade = r.blade;
         return keep;
@@ -4508,10 +4541,37 @@
     refreshAll();
   }
 
+  /** 战场配置：所在区域 / 场景 / 光影（只是画面）。第一项是「跟着地图 / 跟着时钟（当前：……）」，选了别的就用选的（world-data.js · battleLookSet）；
+   *  场景的选项是当前区域的场景（world-data.js · BATTLE_SCENES），区域换了跟着变 */
+  function renderLookSelects() {
+    if (!$("g-cfg-region") || typeof battleLookSet !== "function") return;
+    const auto = battleRegionName(state.regionMap), now = clockLight(clockNow());
+    $("g-cfg-region").innerHTML = `<option value="">跟着地图（当前：${esc(auto || "没有")}）</option>` +
+      BATTLE_REGIONS.map(r => `<option value="${esc(r)}">${esc(r)}</option>`).join("");
+    $("g-cfg-region").value = state.regionPick || "";
+    if ($("g-cfg-scene")) {
+      const region = state.region, here = battleSceneName(region, battleSceneAuto(region));
+      $("g-cfg-scene").innerHTML = `<option value="">跟着地图（当前：${esc(here || "没有")}）</option>` +
+        battleScenes(region).map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join("");
+      $("g-cfg-scene").value = battleSceneId(region, state.scenePick) || "";
+    }
+    $("g-cfg-light").innerHTML = `<option value="">跟着时钟（当前：${esc(DayLight.NAMES[now])}）</option>` +
+      DayLight.LIGHTS.map(l => `<option value="${l}">${esc(DayLight.NAMES[l])}</option>`).join("");
+    $("g-cfg-light").value = state.lightPick || "";
+  }
+  const LOOK_PICK = { setRegion: "regionPick", setScene: "scenePick", setLight: "lightPick" };
+  // 选了就留着选的（联机播动画时这一改会排到播完再执行）；改好了就重画一遍（换了区域，场景的选项跟着变）；
+  // 被拒绝了（热座里不是主持人等）才换回现在的
+  function setLook(action, value) {
+    try { dispatch({ type: "battle.panel", action, value }); } catch (e) { flashHint(e.message); renderLookSelects(); return; }
+    if ((state[LOOK_PICK[action]] || "") === value) renderLookSelects();
+  }
+
   function renderFieldSheet() {
     $("g-cfg-zones").value = state.board ? String(state.board.id) : String(state.zoneMode || 2);
     $("g-cfg-ps").value = String(state.partySize || 4);
     $("g-cfg-weather").value = state.weather || "none";
+    renderLookSelects();
     const elist = $("g-enemy-list");
     elist.innerHTML = "";
     const foesNow = state.units.filter(u => !u.isPlayer && !u.hidden && u.kit !== "ufo_leg");
@@ -5073,6 +5133,9 @@
       setView(snapAll(), false);
       refreshAll();
     };
+    if ($("g-cfg-region")) $("g-cfg-region").onchange = () => setLook("setRegion", $("g-cfg-region").value);
+    if ($("g-cfg-scene")) $("g-cfg-scene").onchange = () => setLook("setScene", $("g-cfg-scene").value);
+    if ($("g-cfg-light")) $("g-cfg-light").onchange = () => setLook("setLight", $("g-cfg-light").value);
     $("g-prop-add").onclick = () => {
       const kind = $("g-prop-kind").value;
       const zone = Number($("g-prop-zone").value) || 1;

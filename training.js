@@ -84,7 +84,11 @@
       if (o.fields[z]) setZoneField(z, o.fields[z]);
       if (o.high[z]) S.fields[z].highland = true;
     });
-    const spawn = spawnEnemyGroup;
+    // 战-M4：假人和精英牛都不带个体值（和 BattleSim.setup 一样关掉），同等级的布置完全一样
+    const spawn = (...args) => {
+      ENEMY_IV.off++;
+      try { return spawnEnemyGroup(...args); } finally { ENEMY_IV.off--; }
+    };
     const dummy = spawn("thug_knife", level, 1, 2)[0];
     dummy.name = DUMMY_NAME;
     const ox = spawn("captain_ox", level, 4, 2)[0];

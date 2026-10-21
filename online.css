@@ -52,6 +52,7 @@
 .ol-stage { position: fixed; z-index: 40; inset: var(--hs-top-height, 0px) 0 0; overflow-y: auto; padding: 20px 24px 95px; background: var(--sk-oil, #110e0b); }
 .ol-stage-heading { margin-bottom: 20px; }
 .ol-stage-heading strong { color: var(--sk-mint, #39e6b4); }
+.ol-field { padding: 6px 8px; background: #393723; color: #e6dbb0; font-size: 12px; }   /* online-battle.js 的战场也带 ol-field */
 .ol-weather { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border: 1px solid currentColor; color: #e6cf8b; background: #332b19; }
 .ol-weather-icon { font-size: 32px; line-height: 1; }
 .ol-weather small { display: block; margin-top: 3px; }
@@ -70,11 +71,6 @@
 .ol-xp { color: #edc17d; }
 .ol-result { border-color: #c99a46; }
 .ol-result-grade { font-size: 24px; color: #f2c230; font-weight: 700; }
-.ol-zones { display: grid; grid-template-columns: repeat(var(--ol-cols, 3), minmax(0, 1fr)); gap: 16px; align-items: start; }
-.ol-zone { grid-column: var(--ol-col, auto); grid-row: var(--ol-row, auto); min-width: 0; padding: 12px; background: #1a1511; border: 1px solid #4d4337; }
-.ol-zone > h2 { color: var(--sk-brass, #c99a46); padding-bottom: 8px; border-bottom: 1px solid #4d4337; }
-.ol-field { padding: 6px 8px; background: #393723; color: #e6dbb0; font-size: 12px; }
-.ol-gaps { display: flex; flex-wrap: wrap; gap: 8px 20px; padding: 10px 0; color: var(--sk-muted, #a8977b); }
 .ol-unit { position: relative; background: #2a2520; border: 1px solid #655947; padding: 12px; margin: 12px 0; overflow-wrap: anywhere; }
 .ol-unit header { gap: 4px; }
 .ol-unit h3 { margin: 0; }
@@ -93,10 +89,6 @@
 .ol-unit > button { width: 100%; margin-top: 10px; }
 .ol-popup { position: absolute; pointer-events: none; top: 20%; left: 50%; transform: translate(-50%, 8px); opacity: 0; font-size: 24px; font-weight: 800; color: #fff2cf; text-shadow: 0 2px 3px #000; }
 .ol-popup.ol-visible { opacity: 1; transform: translate(-50%, -8px); transition: transform .18s ease-out; }
-.ol-prop { display: grid; gap: 3px; padding: 8px; border: 1px dashed #655947; margin-top: 8px; }
-.ol-prop span { color: var(--sk-muted, #a8977b); font-size: 12px; }
-.ol-actions { margin: 18px 0; padding: 16px; background: #2a2520; border: 1px solid #c99a46; }
-.ol-actions > button { margin: 8px 8px 0 0; }
 .ol-action-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin: 12px 0; }
 .ol-action-options button { width: 100%; }
 .ol-action-options small { display: block; color: #cbb99a; padding: 4px; }
@@ -110,7 +102,7 @@
  * calculator dialogs live outside the original screen roots; hiding individual
  * screen IDs leaves those dialogs in the outer document and its scroll range. */
 body.online-player { overflow: hidden; }
-body.online-player > :not(.ol-ui):not(.hs-ui):not(.hs-sheet):not(.ar-sheet):not(.wm):not(#sk-tip):not(.sk-tip):not(.unit-tip):not(.rr-overlay):not(.ovl) { display: none !important; }
+body.online-player > :not(.ol-ui):not(.hs-ui):not(.hs-sheet):not(.ar-sheet):not(.wm):not(#sk-tip):not(.sk-tip):not(.unit-tip):not(.mech-tip):not(.rr-overlay):not(.ovl) { display: none !important; }
 /* 玩家看自己的角色资料 / 武器页：压在联机舞台上面 */
 body.online-player .hs-sheet, body.online-player .ar-sheet { z-index: 95; }
 /* 玩家右侧栏：战斗（记录）/ 小队 两个频道 */
@@ -125,7 +117,17 @@ body.ol-has-side .hs-overlay { right: 330px; }
 .ol-tab { flex: 1; position: relative; min-height: 40px; font: inherit; font-weight: 800; font-size: 15px; color: #cbb99a; background: transparent; border: 0; cursor: pointer; }
 .ol-tab.on { color: #0b0806; background: var(--sk-hazard, #f2c230); }
 .ol-tab:focus-visible { outline: 2px solid var(--sk-mint, #39e6b4); outline-offset: -2px; }
-.ol-badge { display: inline-block; min-width: 18px; margin-left: 6px; padding: 0 5px; font-size: 11px; line-height: 18px; border-radius: 9px; color: #fff; background: #d8413a; }
+/* 未读红点（#207）：「消息与成员」按钮右上角、「大厅交流」标题旁、「小队」标签同一个样式——红底白字、白色描边，超过 9 条写「9+」 */
+.ol-dot { box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px; padding: 0 5px; border: 2px solid #fff; border-radius: 10px; color: #fff; background: #e0362c; font-size: 11px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; vertical-align: middle; box-shadow: 0 1px 3px #000a; pointer-events: none; }
+.ol-badge { margin-left: 6px; }   /* 跟在文字后面的红点（「小队」标签、「大厅交流」标题） */
+/* 出现的那一下轻轻弹一下：按钮、标题上的由 online-ui.js 在红点从没有到有时加 .ol-dot-pop；「小队」标签上的一直带着，显示出来时播一次 */
+.ol-dot-pop { animation: ol-dot-pop .36s ease-out; }
+@keyframes ol-dot-pop { 0% { transform: scale(.3); } 60% { transform: scale(1.18); } 100% { transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { .ol-dot-pop { animation: none; } }
+/* 「消息与成员」按钮：红点压在按钮右上角；旁边的「角色分配」让开一点，红点不压到它 */
+.ol-dock [data-online="openRoom"] { position: relative; }
+.ol-dock [data-online="openRoom"] .ol-dot { position: absolute; z-index: 1; top: -8px; right: -8px; }
+.ol-dock .ol-button + .ol-button { margin-left: 10px; }
 .ol-side-log, .ol-side-chat { flex: 1; min-height: 0; margin: 0; padding: 10px 14px 10px 30px; overflow-y: auto; color: #e9dcc0; font-size: 14px; line-height: 1.55; }
 .ol-side-chat { list-style: none; padding-left: 14px; }
 .ol-side[data-tab="log"] .ol-side-chat, .ol-side[data-tab="log"] .ol-side-form { display: none; }
@@ -156,22 +158,14 @@ body.ol-has-side .ol-toast { right: 344px; }
 /* 角色资料 / 武器 / 背包 按钮与背包 */
 .ol-info-tools { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .ol-bag { z-index: 95; }
-.ol-bag-list { list-style: none; margin: 10px 0; padding: 0; display: grid; gap: 8px; }
-.ol-bag-list li { padding: 8px 10px; background: #231c16; border: 1px solid #4d4337; }
-.ol-bag-list li > div { display: flex; justify-content: space-between; gap: 10px; }
-.ol-bag-list li p { margin: 4px 0 0; color: #cbb99a; font-size: 13px; }
 @keyframes ol-impact { 50% { background: #64543c; transform: translateX(2px); } }
 @media (max-width: 650px) {
   .ol-overlay { padding: 10px 8px 24px; }
   .ol-card { padding: 18px 12px; margin-top: 0; }
   .ol-card footer > button { flex: 1 1 140px; }
   .ol-stage { padding: 16px 10px 90px; }
-  .ol-zones { grid-template-columns: 1fr; gap: 14px; }
-  .ol-zone { grid-column: auto; grid-row: auto; padding: 10px; }
-  .ol-zone > h2 { font-size: 20px; }
   .ol-unit { margin: 10px 0; }
   .ol-action-options { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-  .ol-actions { padding: 12px; }
   .ol-dock { right: 8px; bottom: calc(8px + env(safe-area-inset-bottom)); }
   .ol-exploration-party { grid-template-columns: 1fr; }
   /* 手机：右侧栏改成贴在底部的一条，高度 38% */
@@ -198,7 +192,7 @@ body.ol-has-side .ol-toast { right: 344px; }
 .ol-check li { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
 .ol-check li > span { display: grid; }
 .ol-check .ol-ok { color: var(--sk-mint, #39e6b4); }
-.ol-check .ol-bad { color: #e06a4f; }
+.ol-check .ol-bad, .ol-trpg-smith .ol-bad, .ol-trpg-workshop .ol-bad { color: #e06a4f; }
 .ol-attr { margin: 8px 0; padding: 8px; border: 1px dashed var(--sk-brass, #c99a46); }
 .ol-attr p { margin: 0 0 6px; }
 .ol-attr-btns { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -317,13 +311,13 @@ body.ol-has-side .ol-toast { right: 344px; }
 .ol-shop-price s { opacity: .6; }
 .ol-shop-rows input[type="number"] { width: 64px; }
 .ol-shop-redeem { display: flex; flex-wrap: wrap; gap: 6px; }
-/* 物资弹窗（钱包 / 商店 / 诊所 / 公共物资）与舞台顶上的提示 */
+/* 钱包与商店弹窗（钱包 / 商店 / 工匠 / 工坊 / 诊所）与舞台顶上的提示 */
 .ol-supplies-card { width: min(720px, 100%); display: flex; flex-direction: column; gap: 14px; }
 .ol-supplies-card > section { margin: 0; }
 .ol-button[data-alert="1"] { border-color: var(--sk-amber, #e7b13c); box-shadow: 0 0 0 2px #e7b13c66; }
 /* 玩家的地图（world-map.js 挂在 body 下）不能被「隐藏遗留面板」的规则一起藏掉 */
 body.online-player > .wm { z-index: 200; }
-/* 协助 / 格挡询问压在房间面板、物资弹窗、浮动按钮之上（倒计时到了会自动放弃，不能被挡住） */
+/* 协助 / 格挡询问压在房间面板、钱包与商店弹窗、浮动按钮之上（背包浮层 .ovl 更高，有询问时由 online-ui.js 收起）（倒计时到了会自动放弃，不能被挡住） */
 #hs-reaction { z-index: 97; }
 /* 房间暂停横幅：固定在顶栏下方 */
 .ol-pause-bar { position: fixed; z-index: 80; left: 0; right: 0; top: var(--hs-top-height, 0px); padding: 8px 16px; background: #5a1f17; color: #ffe2d6; font-weight: 700; text-align: center; border-bottom: 2px solid #a8432f; }
@@ -342,6 +336,9 @@ body.online-player .ol-dock .ol-button { min-height: 36px; padding: 6px 12px; }
   .ol-stage-heading .ol-info-tools { gap: 6px; }
   .ol-stage-heading .ol-info-tools .ol-button { padding: 6px 8px; min-height: 34px; }
   body.online-player .ol-dock .ol-button { font-size: 12px; padding: 4px 8px; min-height: 30px; max-width: 46vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* 「消息与成员」：省略号挪到按钮里的文字上，按钮本身不裁切，右上角的红点才露得出来（#207） */
+  body.online-player .ol-dock [data-online="openRoom"] { overflow: visible; }
+  body.online-player .ol-dock .ol-dock-label { display: block; overflow: hidden; text-overflow: ellipsis; }
 }
 @media (max-width: 760px) {
   body.online-player #hs-bar .hs-tag { display: none; }
@@ -403,6 +400,7 @@ body.online-player.ol-in-battle .ol-battle .sk.blocked .cost { color: #d9a07a; }
 @media (max-height: 820px) and (min-width: 821px) {
   body.online-player.ol-in-battle .ol-battle .g-field { padding: 8px 10px 6px; }
   body.online-player.ol-in-battle .ol-battle .g-field .g-zone { padding-top: 20px; }
+  body.online-player.ol-in-battle .ol-battle .g-field .g-zone.tower { padding-top: 38px; }   /* 区名旁边有踩塔的图标（unit-card.js · paintTowers） */
 }
 /* 窄屏：技能栏固定在屏幕下方；战斗记录 / 小队沿用 #58 的默认收起底栏（online-ui.js phoneSide） */
 @media (max-width: 820px) {
@@ -482,3 +480,58 @@ body.online-player.ol-in-battle .ol-battle .sk.blocked .cost { color: #d9a07a; }
 .ol-confirm .ol-card { max-width: 420px; }
 .ol-confirm p { margin: 0; color: #e7dcc6; line-height: 1.6; }
 .ol-confirm-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px; }
+
+/* 主持人的街头废土皮肤（skin.css 的 .ol-skin）：舞台底色、.g-btn 按钮、队伍卡 .rhero 和主持人一样；
+   按钮保留 44px 触屏高度。弹窗（.ol-overlay / .ovl）照旧。 */
+.ol-stage.ol-skin { background-color: var(--sk-concrete, #2a2622); }
+.ol-ui .g-btn.ol-button { min-height: 44px; height: auto; }
+.ol-clock { margin: 4px 0 8px; padding: 6px 10px; background: rgba(0, 0, 0, .25); font-size: 13px; color: var(--sk-muted, #a8977b); }
+.ol-clock b { color: var(--sk-canvas, #ece0c6); font-family: var(--num, inherit); }
+.ol-clock .warn { color: var(--foe, #e0604a); }
+.ol-party { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; margin-top: 12px; align-items: start; } /* 卡片按内容高度对齐：自己那格多了属性点申请区，同一行别的卡不被拉高 */
+/* 自己的卡 + 属性点申请区同占一格，申请区贴在卡片下面 */
+.ol-party-cell { display: flex; flex-direction: column; min-width: 0; }
+.ol-party-cell .ol-attr { margin: 6px 0 0; }
+.ol-party-cell > .ol-muted { margin: 4px 0 0; font-size: 12px; }
+.ol-party .rhero.mine { border-left-color: var(--sk-mint, #39e6b4); }
+.ol-party .rhero.focus { outline: 2px solid var(--sk-hazard, #f2c230); outline-offset: -2px; }
+.ol-party .rh-top { flex-wrap: wrap; gap: 4px; align-items: center; }
+.ol-party .rh-owner { color: var(--sk-muted, #a8977b); font-size: 12px; margin: -2px 0 4px; }
+/* 夜晚色调：和 game.css 的 .g-app.is-night 同样的压暗偏蓝 + 四周暗角（按 packet.clock，18:00–05:00） */
+.ol-stage.is-night .g-zone { box-shadow: inset 0 0 0 9999px rgba(14, 22, 52, .55); border-color: #3c4566; }
+.ol-stage.is-night .g-zone .zlabel { color: #c8d2f0; }
+/* 战场四周暗角：和主持人一样只在战场上（game.js 只给战场挂 .night-vignette）；探索时只有时钟变夜色 */
+.ol-stage.is-night .g-field { position: relative; }
+.ol-stage.is-night .g-field::after { content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 5;
+  background: radial-gradient(ellipse at 50% 40%, transparent 55%, rgba(5, 8, 20, .55) 100%); }
+.ol-stage.is-night .ol-clock { background: rgba(14, 22, 52, .55); }
+/* 窄屏：标题下的工具按钮（角色资料…任务日志）排成格子、自动换行，不再横滑被截掉；保持 44px 触屏高度（探索和战斗都一样） */
+@media (max-width: 760px) {
+  body.online-player .ol-stage-heading .ol-info-tools { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 6px; overflow: visible; max-width: 100%; }
+  body.online-player .ol-stage-heading .ol-info-tools .g-btn.ol-button { min-height: 44px; min-width: 0; padding: 4px 6px; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: none; }
+}
+/* 申请检定（check-request-ui.js）：玩家浮层 / 主持人待处理列表；手机上按钮 44px、整行排开 */
+.crq-card { max-width: 560px; width: 100%; }
+.crq-form { display: grid; gap: 8px; }
+.crq-form label { display: grid; gap: 4px; }
+.crq-form select, .crq-form input, .crq select { min-height: 44px; font: inherit; }
+.crq-btn { min-height: 44px; }
+.crq-list { list-style: none; padding: 0; margin: 6px 0 12px; display: grid; gap: 6px; }
+.crq-row { display: grid; gap: 6px; padding: 8px 10px; background: #2a2520; border-left: 4px solid #655947; overflow-wrap: anywhere; }
+.crq-row.crq-pending { border-left-color: var(--sk-hazard, #f2c230); }
+.crq-row.crq-approved { border-left-color: var(--sk-mint, #39e6b4); }
+.crq-row.crq-rejected, .crq-row.crq-cancelled { opacity: .75; }
+.crq-state { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.crq-state label { display: inline-flex; align-items: center; gap: 6px; }
+.crq-chip { padding: 2px 8px; border: 1px solid #655947; font-size: 12px; }
+.crq-res .ol-ok { color: var(--sk-mint, #39e6b4); } .crq-res .ol-bad { color: #ff8a70; }
+.crq-pill { position: fixed; inset: auto auto 12px 12px; z-index: 95; min-height: 44px; } /* 不带 .ovl：workshop.css 的 .ovl 是整屏遮罩 */
+@media (max-width: 760px) { .crq-state > .crq-btn { flex: 1 1 40%; } .crq-state label { flex: 1 1 100%; } .crq-state label select { flex: 1; } }
+
+/* 手机：战场框至少占可视高度的一半（技能栏 / 聊天栏之外的空间都给战场），桌面布局不变 */
+@media (max-width: 820px) {
+  body.online-player.ol-in-battle .ol-battle .g-field { min-height: 50vh; min-height: 50dvh; }
+  body.online-player.ol-in-battle .ol-battle { overflow-y: auto; }
+}
+/* 联机里选行动顺序 / 询问的弹层：背景不透明，盖住底下战斗画面的字 */
+body.ol-has-side .hs-overlay:not(.hs-ask-mini), body.online-player .hs-overlay:not(.hs-ask-mini) { background: #0b0806; }

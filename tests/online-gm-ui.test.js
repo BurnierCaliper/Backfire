@@ -73,7 +73,8 @@ test("D3 GM UI: unit forms escape names, preserve typing across updates, and sub
   assert.equal(await page.inputValue("#ogm-unit-value"), "7"); await page.click('[data-action="edit-unit"]');
   assert.deepEqual((await calls(page))[0], { type: "gm.editUnit", actor: "hero", patch: { shp: 7 }, silent: false });
   await page.selectOption("#ogm-unit-field", "layers"); await page.fill("#ogm-layer-hp-0", "9"); await page.fill("#ogm-layer-max-0", "25"); await page.click('[data-action="edit-unit"]');
-  assert.deepEqual((await calls(page))[1].patch, { layers: [{ current: 9, max: 25 }] });
+  // #186：编辑器统一成单机那套后，血量层带上类型（可以改层类型）
+  assert.deepEqual((await calls(page))[1].patch, { layers: [{ type: "flesh", current: 9, max: 25 }] });
   assert.deepEqual(f.errors, []);
 });
 

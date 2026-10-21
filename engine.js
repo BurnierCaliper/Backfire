@@ -354,7 +354,6 @@ const SKILL_RANGE = {
   kolt_rot: { min: 1, max: 1 },      // 腐坏抛射：1 距离的敌人
   kolt_mod: { min: 0, max: 1 },      // 「非法」改装：1 距离以内任意单位
   xia_crush: { min: 0, max: 0 },
-  kolt_aa: { min: 0, max: 1 },
   // 更换刀头的追击射程取决于换上去的新刀头（电钻近距离 / 酸液炮远距离），
   // 所以外层放到 0–1，具体由技能内部按新刀头判定
   kolt_swap: { min: 0, max: 0 },   // 更换刀头的切刀攻击总是打同区
@@ -419,6 +418,8 @@ const SKILL_RANGE_BY_STATE = {
   hiaki_aa: (a) => ((a && a.resources && a.resources.stance) === "iai" ? { min: 0, max: 1 } : { min: 0, max: 0 }),
   // 诺拉普攻：没有刺入时是「距离 1 的敌人」；有刺入时针尖把两人连在一起，刺入目标在同区也能打（刺入超过距离 1 会自己断）
   // 碎渣重炮：酸液炮（迫击炮，越墙）距离 1-2；电钻（机枪，选区域）距离 0-1
+  // 柯尔特普攻：电钻只打同区，酸液炮只打距离 1（战-M1：以前固定 0–1，电钻打距离 1 会先扣点再拒绝）
+  kolt_aa: (a) => ((a && a.resources && a.resources.bit) === "acid" ? { min: 1, max: 1 } : { min: 0, max: 0 }),
   kolt_cannon: (a) => ((a && a.resources && a.resources.bit) === "acid" ? { min: 1, max: 2 } : { min: 0, max: 1 }),
   nora_aa: (a) => (typeof piercedTargets === "function" && a && piercedTargets(a).length ? { min: 0, max: 1 } : { min: 1, max: 1 })
 };
@@ -907,6 +908,10 @@ function resolveAttack(ctx) {
     if (element === "energy" && t.kit && typeof heroProfile === "function" && (heroProfile(t.kit) || {}).race === "兽人-蜥蜴" && t.isPlayer && !t.weaponOf) {
       pct += 0.25; hAdd("鳞片（兽人-蜥蜴）：能量受伤 +25%。");
     }
+    // 敌人的种族被动（enemies.js · RACE_PERKS）：热耐性、鳞片，和克制表加算
+    if (typeof raceDefendMods === "function") raceDefendMods(t, element).forEach(m => { pct += m.value; hAdd(m.reason); });
+    // 攻击者一侧：注意力涣散（连续打同一个目标伤害 −25%）
+    if (isAttack && typeof raceAttackMods === "function") raceAttackMods(a, t).forEach(m => { pct += m.value; hAdd(m.reason); });
     // 蓄能：能量、谐波、电攻击造成的伤害提高「高能值占血量上限的百分比」
     // （手册正文没写电，作者确认是手册漏写，电也加）
     if (a && a.self === "store" && (element === "energy" || element === "harmonic" || element === "electric")) {
@@ -1048,6 +1053,7 @@ function resolveAttack(ctx) {
         br += 1; hAdd("熔融沙尘：击破 +1。");
       }
       if (meltIceHit) br += 1;
+      if (h === 0 && isAttack && Number(ctx.firstBreak) > 0) { br += Number(ctx.firstBreak); hAdd(`迅袭：整场第一个行动的第一击，击破 +${Number(ctx.firstBreak)}。`); }
       if (flags.smash) {
         selfBreak += br;
         br *= 2;
@@ -1135,7 +1141,7 @@ function resolveAttack(ctx) {
     if (t.instant && t.instant.sting) pierColdRetrig = true;
   }
 
-  if (t.self === "cat" && totalBreak > 2) {
+  if ((t.self === "cat" || (typeof raceBreakCap === "function" && raceBreakCap(t) != null)) && totalBreak > 2) {
     add("兽人猫·灵巧：一回合失去架势不超过 2。已在应用阶段封顶。");
   }
 
@@ -1333,7 +1339,9 @@ function applyResultToUnit(target, result, attacker) {
     notes.push("背水一战：起身中不失去架势。");
   }
   if (target.trainingDummy) spent = 0;   // 训练假人架势无限：不扣架势、不失衡
-  if (target.raceTrait === "catFocus") spent = Math.min(spent, Math.max(0, 2 - (target.lostDefThisTurn || 0)));
+  // 灵巧（兽人·猫）：一回合最多失去 2 架势。敌人的种族被动（enemies.js · raceBreakCap）和原来的 raceTrait 共用这一行
+  const dexCap = target.raceTrait === "catFocus" ? 2 : (typeof raceBreakCap === "function" ? raceBreakCap(target) : null);
+  if (dexCap != null) spent = Math.min(spent, Math.max(0, dexCap - (target.lostDefThisTurn || 0)));
   // 坚挺：架势不会被打到 1 以下（不倒战意给的，本回合有效）
   if (target.statuses && target.statuses.sturdy && (Number(target.def) || 0) >= 1 && spent > (Number(target.def) || 0) - 1) {
     spent = Math.max(0, (Number(target.def) || 0) - 1);
@@ -1354,6 +1362,8 @@ function applyResultToUnit(target, result, attacker) {
     target.flying = false;
   }
   const wasStunned = !!target.stunned;
+  // 战-M5：击破分 / 击破统计按实际扣掉的架势算（假人、背水一战、猫的灵巧、坚挺、已失衡都会让它比名义击破小）
+  result.breakSpent = Math.max(0, Math.min(spent, defBeforeHit));
   target.def = Math.max(0, (Number(target.def) || 0) - spent);
   if (spent > 0 && typeof registerZoneBreak === "function" && target.kit !== "ufo_leg" && !target.noPosture) {
     notes.push(...registerZoneBreak(target.zone, spent));
@@ -1629,6 +1639,17 @@ function ufoLegStats(lv) {
   };
 }
 
+/** 外城区镇压部队的数值（docs/suppression-force.md 第 1 节）：shield / flesh = [1 级血量, 每级增量]；
+ *  def = 1 级架势（杂兵每 10 级 +1，精英照警卫队队长每 5 级 +1）；atk = 1 级 atk（已经是比参照模板减 1 之后的数；
+ *  杂兵每级 +1，精英的成长项照队长，写在 enemyPresets 里） */
+const RIOT_STATS = {
+  baton:   { shield: [8, 2],   flesh: [12, 4], def: 4, atk: 3 },
+  rifle:   { shield: [6, 2],   flesh: [6, 2],  def: 3, atk: 4 },
+  molotov: { shield: [5, 2],   flesh: [5, 2],  def: 3, atk: 3 },
+  flamer:  { shield: [16, 6],  flesh: [26, 7], def: 5, atk: 5 },   // 牛队长 atk 6 + 2/5 级 → 5 + 2/5 级
+  captain: { shield: [15, 6],  flesh: [20, 5], def: 4, atk: 7 }    // 狼队长 atk 8 + … → 7 + …
+};
+
 function enemyPresets() {
   return [
     { id: "guard_sword", name: "机器人看守（剑）", build(lv, p) {
@@ -1751,6 +1772,42 @@ function enemyPresets() {
         { type: "shield", hp: scaleHp(12 + (lv - 1) * 5 + milestone(lv, 2) * 5, p) },
         { type: "flesh", hp: scaleHp(14 + (lv - 1) * 2, p) }
       ], 4, 7 + milestone(lv, 2) + milestone(lv, 5), { kit: "captain_lizard", range: "ranged", dice: [1, 6], element: "acid", baseBreak: 2 });
+    }},
+    // —— 外城区镇压部队（docs/suppression-force.md）：外层护盾、内层肉体，武器全是火；atk 比参照模板低 1 ——
+    // 警棍盾：总血量同狂徒（锤），atk 4 → 3
+    { id: "riot_baton", name: "镇压队员·警棍盾", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(RIOT_STATS.baton.shield[0] + (lv - 1) * RIOT_STATS.baton.shield[1], p) },
+        { type: "flesh", hp: scaleHp(RIOT_STATS.baton.flesh[0] + (lv - 1) * RIOT_STATS.baton.flesh[1], p) }
+      ], RIOT_STATS.baton.def + milestone(lv, 10), RIOT_STATS.baton.atk + (lv - 1), { kit: "riot_baton", range: "melee", dice: [1, 4], element: "fire", baseBreak: 2 });
+    }},
+    // 燃烧步枪：总血量同机器人看守（枪），atk 5 → 4
+    { id: "riot_rifle", name: "镇压队员·燃烧步枪", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(RIOT_STATS.rifle.shield[0] + (lv - 1) * RIOT_STATS.rifle.shield[1], p) },
+        { type: "flesh", hp: scaleHp(RIOT_STATS.rifle.flesh[0] + (lv - 1) * RIOT_STATS.rifle.flesh[1], p) }
+      ], RIOT_STATS.rifle.def + milestone(lv, 10), RIOT_STATS.rifle.atk + (lv - 1), { kit: "riot_rifle", range: "ranged", dice: [1, 4], element: "fire" });
+    }},
+    // 燃烧瓶投手：比步枪兵更脆；燃烧瓶是范围攻击，没有伤害骰
+    { id: "riot_molotov", name: "燃烧瓶投手", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(RIOT_STATS.molotov.shield[0] + (lv - 1) * RIOT_STATS.molotov.shield[1], p) },
+        { type: "flesh", hp: scaleHp(RIOT_STATS.molotov.flesh[0] + (lv - 1) * RIOT_STATS.molotov.flesh[1], p) }
+      ], RIOT_STATS.molotov.def + milestone(lv, 10), RIOT_STATS.molotov.atk + (lv - 1), { kit: "riot_molotov", range: "ranged", dice: [0, 0], element: "fire", baseBreak: 0 });
+    }},
+    // 火焰喷射兵：照警卫队队长（牛）的写法（架势、atk 成长），血量层换成护盾 + 肉体，atk 每级 −1；喷火没有伤害骰
+    { id: "riot_flamer", name: "火焰喷射兵", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(RIOT_STATS.flamer.shield[0] + (lv - 1) * RIOT_STATS.flamer.shield[1], p) },
+        { type: "flesh", hp: scaleHp(RIOT_STATS.flamer.flesh[0] + (lv - 1) * RIOT_STATS.flamer.flesh[1], p) }
+      ], RIOT_STATS.flamer.def + milestone(lv, 5), RIOT_STATS.flamer.atk + milestone(lv, 5) * 2, { kit: "riot_flamer", range: "melee", dice: [0, 0], element: "fire" });
+    }},
+    // 镇压小队长：照警卫队队长（狼）的写法（架势、atk 成长），血量层是护盾 + 肉体，atk 每级 −1
+    { id: "riot_captain", name: "镇压小队长", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(RIOT_STATS.captain.shield[0] + (lv - 1) * RIOT_STATS.captain.shield[1], p) },
+        { type: "flesh", hp: scaleHp(RIOT_STATS.captain.flesh[0] + (lv - 1) * RIOT_STATS.captain.flesh[1], p) }
+      ], RIOT_STATS.captain.def + milestone(lv, 5), RIOT_STATS.captain.atk + milestone(lv, 2) + milestone(lv, 5) * 2, { kit: "riot_captain", range: "any", dice: [1, 6], element: "fire" });
     }},
     // 第一采矿场精英（暂定数值，按狼队长的总血量 / 架势 / atk 拆成护盾、装甲、肉体三层）
     { id: "ant_guard", name: "蚁型特殊戒备兵种", build(lv, p) {

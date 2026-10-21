@@ -56,8 +56,9 @@
     </div>`;
   }
 
-  /* ---------- 日月动画：太阳、月亮在同一条弧线上交替，位置照游戏时钟（白天 05:00–18:00）---------- */
-  const DAY_START = 5 * 60, DAY_END = 18 * 60;
+  /* ---------- 日月动画：太阳、月亮在同一条弧线上交替，位置照游戏时钟（白天 05:00–18:00）----------
+   * 太阳在规则上的白天出来：和 ledger.js · isNightClock 同一张表（daylight.js 的 DAY_LIGHT：白天开始 → 傍晚开始） */
+  const dayLight = () => root.DayLight || (typeof require === "function" ? require("./daylight") : null);
   const SKY = [[0, [11, 16, 38]], [4.5, [26, 31, 61]], [5.5, [224, 144, 90]], [7, [106, 167, 216]], [16.5, [106, 167, 216]], [18, [217, 116, 74]], [19, [42, 35, 80]], [24, [11, 16, 38]]];
   function skyColor(min) {
     const h = (((min % 1440) + 1440) % 1440) / 60;
@@ -72,7 +73,8 @@
   /** 某个时刻太阳 / 月亮在弧线上的位置：{ body: sun / moon, x, y }（百分比） */
   function skyPos(min) {
     const m = ((min % 1440) + 1440) % 1440;
-    const day = m >= DAY_START && m < DAY_END;
+    const T = dayLight().DAY_LIGHT, DAY_START = T.day, DAY_END = T.dusk;
+    const day = !dayLight().isNight(m);
     const t = day ? (m - DAY_START) / (DAY_END - DAY_START) : ((m - DAY_END + 1440) % 1440) / (1440 - (DAY_END - DAY_START));
     return { body: day ? "sun" : "moon", x: 8 + t * 84, y: 78 - Math.sin(Math.PI * t) * 62 };
   }

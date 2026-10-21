@@ -92,7 +92,8 @@ test("每个模式都有武器页入口", () => {
   assert.match(html, /<script src="armory-ui\.js"><\/script>/);
   assert.match(html, /href="armory\.css"/);
   assert.match(read("game.js"), /arm\.dataset\.armory/);                 // 战斗（所有模式共用）
-  assert.match(read("trpg-ui.js"), /data-armory="\$\{esc\(h\.kit\)\}"/);  // 跑团
+  assert.match(read("trpg-ui.js"), /PartyCards\.heroCardHtml\(.*buttons: true/);  // 跑团（队伍卡在 party-cards.js，和联机玩家共用）
+  assert.match(read("party-cards.js"), /data-armory="\$\{esc\(d\.kit\)\}"/);
   assert.match(read("rogue-ui.js"), /data-armory-src="run"/);              // 单局 / 单人
   assert.match(read("rogue-ui.js"), /Armory\.register\("run"/);
 });

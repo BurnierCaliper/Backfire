@@ -850,10 +850,12 @@ const Rogue = (function () {
   }
 
   /* ---------- 战斗 ---------- */
-  /** 当前节点 / 首领的战斗配置（给 BattleSim.setup 或战斗画面用）。单局的敌人有个体值（iv: true，enemies.js） */
+  /** 当前节点 / 首领的战斗配置（给 BattleSim.setup 或战斗画面用）。单局的敌人有个体值（iv: true，enemies.js）；
+   *  场景（只是画面）每场在这一幕区域的场景里随机抽一个：按这场战斗的种子（sceneSeed，world-data.js · battleLookStart），同一场读档、重开都一样 */
   function battleSpec(run) {
     const spec = battleSpecOf(run);
     if (spec && spec.iv === undefined) spec.iv = true;
+    if (spec && spec.sceneSeed === undefined) spec.sceneSeed = spec.seed + ":scene";
     return spec;
   }
   function battleSpecOf(run) {

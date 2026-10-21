@@ -91,6 +91,11 @@
     if (casts.length) d.casts = casts;
     const intents = arr(call("enemyIntents", unit)).slice(0, 4).map(x => text(x, 12)).filter(Boolean);
     if (intents.length) d.intents = intents;
+    // 分阶段的首领 / 精英现在在第几阶段：玩家端悬停说明只列这一阶段的能力。规则单位现算（bestiary.js · bestiaryStageOf）；
+    // 演出用的画面快照（game.js · snapUnit）身上没有 resources、现算不出来，用快照里已经算好的 stage。
+    // 只发阶段编号（1、2、3……），换阶段的血量门槛之类的规则数值不发
+    const stage = number(get(unit, "stage")) ?? number(call("bestiaryStageOf", unit));
+    if (Number.isInteger(stage) && stage >= 1 && stage <= 9) d.stage = stage;
     if (!get(unit, "isPlayer") && (get(unit, "dead") || get(unit, "_removed"))) {
       const ok = number(get(unit, "overkill")); if (ok > 0) d.overkill = Math.round(ok);
       if (get(unit, "killBig") === true) d.killBig = true;
@@ -110,7 +115,8 @@
     if (towers.length) v.towers = towers;
     return Object.keys(v).length ? v : null;
   }
-  const resourceNumbers = ["nano", "bean", "liquid", "durability", "shield", "tauntLeft", "charge", "energyPct", "light", "lockLeft", "smashUsed", "phase", "debrisCount"];
+  // nanoReserve：瑞比的储备能源（#219，不是坚毅数值，公开）
+  const resourceNumbers = ["nano", "nanoReserve", "bean", "liquid", "durability", "shield", "tauntLeft", "charge", "energyPct", "light", "lockLeft", "smashUsed", "phase", "debrisCount"];
   const resourceFlags = ["mecha", "engine", "prepared", "preparedActive", "preparedPending", "smashNext", "smashOnce", "niuOut", "narutoOut", "forceCruelNext", "scanned", "unstable", "forceCharge", "forceOverheat"];
   const statusKeys = ["burn", "shock", "corr", "frostbite", "shockwave", "high", "reso", "unstable", "weak", "inspire", "hide", "advantage", "chase", "sturdy"];
   function projectUnit(unit) {
@@ -120,8 +126,8 @@
     if (get(unit, "fused") || get(unit, "_removed")) out.hidden = true;
     // 带着高能被打死的敌人：高能自爆演完之前先不算死（和本机画面一样，卡片等自爆后才淡出）
     if (out.dead && !out.isPlayer && (number(call("highBoomValue", unit)) || 0) > 0) { out.dead = false; out.hidden = false; }
-    // 首领 / 10 级起精英：要攒几个晕眩标记才晕眩（玩家那边画「晕眩标记 n/2」徽章；他们自己算不出敌人的级别规则）
-    try { if (!get(unit, "isPlayer") && typeof root.isBossUnit === "function" && root.isBossUnit(unit)) out.stunMax = 2; } catch (e) {}
+    // 首领 / 10 级起精英 / 和载具合并的驾驶员（敌我都算）：要攒几个晕眩标记才晕眩（玩家那边画「晕眩标记 n/2」徽章；他们自己算不出敌人的级别规则）
+    try { if (typeof root.isBossUnit === "function" && root.isBossUnit(unit)) out.stunMax = 2; } catch (e) {}
     // 属性（升级加点要看）：六项数值和曾经加过的项
     const attrs = get(unit, "attrs");
     if (obj(attrs)) { out.attrs = {}; for (const k of ["str", "con", "dex", "wil", "int", "sta"]) { const v = number(get(attrs, k)); if (v !== undefined) out.attrs[k] = v; } }
@@ -137,6 +143,9 @@
     // 个体值（杂兵、精英）：血量 / ATK 水平（百分比，公开）
     const iv = get(unit, "iv");
     if (obj(iv)) { const h = number(get(iv, "hp")), a = number(get(iv, "atk")); if (h !== undefined && a !== undefined) out.iv = { hp: h, atk: a }; }
+    // 种族（敌人，公开）：{ race, branch }，只放行文本
+    const race = get(unit, "race");
+    if (obj(race) && typeof get(race, "race") === "string") { out.race = { race: String(get(race, "race")).slice(0, 12) }; if (typeof get(race, "branch") === "string" && get(race, "branch")) out.race.branch = String(get(race, "branch")).slice(0, 12); }
     out.statuses = selected(get(unit, "statuses"), statusKeys);
     out.instant = selected(get(unit, "instant"), ["melt", "sting", "overload", "shift", "spread", "refract", "iceNext"]);
     const r = get(unit, "resources"); out.resources = copyFields(r, {}, [], resourceNumbers, resourceFlags);
@@ -175,6 +184,16 @@
     if (obj(r) && get(unit, "isPlayer") && root.HudIcons) { let hud = null; try { hud = root.HudIcons.gaugeState(unit); } catch (e) {} const dto = projectHud(hud); if (dto) out.hud = dto; }
     // status/res 不直接转发：上面 displayOf 一段一段过滤后放进 display
     const display = displayOf(unit); if (display) out.display = display;
+    // 载具（vehicle.js）：和车合并的驾驶员画成车的卡片——名字、等级、ATK 按车，写乘员 n / 4、驾驶员是谁（只有名字，不含坚毅数值）。
+    // name 照旧是驾驶员自己的名字（队伍栏用），卡片上的名字看 vehicle.name。演出里每一下的快照（game.js · snapUnit）已经带着 vehicle，照同一份白名单转
+    const vc = call("vehicleCardOf", unit) || get(unit, "vehicle");
+    if (obj(vc)) {
+      const v = {}; enumField(vc, v, "kind", vehicleKinds);
+      copyFields(vc, v, ["name", "seatText", "pilot"], ["level", "atk"], []);
+      const roster = arr(get(vc, "roster")).slice(0, 8).map(t => text(t, 60)).filter(Boolean);
+      if (roster.length) v.roster = roster;
+      if (v.kind && v.name) out.vehicle = v;
+    }
     return out;
   }
   /** 角色仪表的数据：只放数字、开关和几个固定取值的字段（gaugeState 的输出） */
@@ -196,12 +215,22 @@
     }
     return dto;
   }
+  const vehicleKinds = ["fortress"];   // 载具配置物的种类（vehicle.js · VEHICLES 的键）
   function projectProp(prop) {
     if (!obj(prop) || !id(get(prop, "id"))) return null;
     const out = identifiers(prop, {}, ["id"]);
     copyFields(prop, out, ["name"], ["zone", "level", "hp", "maxHp", "shield", "shieldMax"], ["destroyed"]);
-    enumField(prop, out, "kind", ["button", "lever", "battery", "boom", "acid", "scrap", "turret", "ironwall", "scrapwall", "dome", "coral_branch", "coral_tentacle", "death_statue"]);
+    enumField(prop, out, "kind", ["button", "lever", "battery", "boom", "acid", "scrap", "turret", "ironwall", "scrapwall", "dome", "coral_branch", "coral_tentacle", "death_statue"].concat(vehicleKinds));
     enumField(prop, out, "faction", ["player", "enemy", "neutral"]);
+    // 载具（vehicle.js）：乘员 n / 4，悬停列出谁在车里、谁是驾驶员（只有名字，不含任何坚毅数值）
+    if (get(prop, "isVehicle") === true) {
+      out.isVehicle = true;
+      const seat = text(call("vehicleSeatText", prop), 20); if (seat) out.seatText = seat;
+      const roster = arr(call("vehicleRosterLines", prop)).slice(0, 8).map(t => text(t, 60)).filter(Boolean);
+      if (roster.length) out.roster = roster;
+      // 有驾驶员：和本机画面一样只画合并后的那张车的卡片（驾驶员那边的 vehicle），配置物卡片藏起来
+      if (call("vehiclePropHidden", prop) === true) out.hidden = true;
+    }
     return out;
   }
   function projectState(state, context = {}) {
@@ -212,6 +241,14 @@
     out.weatherLocked = !!get(state, "weatherLock");
     enumField(state, out, "combatPhase", ["player", "enemy"]);
     enumField(state, out, "weather", ["none", "heat", "snow", "acid", "thunder", "glow", "sand", "phase"]);
+    // 这场战斗在哪个区域、光影（白天 / 傍晚 / 夜晚）：只是画面的标签（HD-2D 战场的地面、远景、天空、灯）。
+    // 区域只放行主机配置表认得的名字（world-data.js · battleRegionName；地图地点 id 换成区域名），光影只放行三个值（daylight.js · LIGHTS）；
+    // 认不得的、主机没有配置表的，一律不发。主持人选过的 / 跟着地图、时钟的，房主发包前已经算好写在 state 里（world-data.js · battleLookSync）
+    const region = text(call("battleRegionName", get(state, "region")), 12); if (region) out.region = region;
+    enumField(state, out, "light", ["day", "dusk", "night"]);
+    // 场景（区域里的哪个地方：采矿场的矿外 / 矿内 / 矿底……，#239）：只放行当前区域认得的场景 id（world-data.js · battleSceneId），
+    // 别的区域的、乱写的、主机没有配置表的一律不发；没有区域就没有场景。主持人选的、单局抽场景的数（scenePick / sceneRoll）是房主自己的，不发
+    const scene = region ? id(call("battleSceneId", region, get(state, "scene"))) : null; if (scene) out.scene = scene;
     out.units = arr(get(state, "units")).slice(0, 200).map(projectUnit).filter(Boolean);
     // 连续战斗第几场 / 共几场、援军还有几回合到哪个区（chain.js · status 的格式）
     const chain = get(state, "chain"), waves = arr(get(state, "waves")).filter(w => obj(w) && !get(w, "done"));
@@ -528,6 +565,7 @@
     // 主持人发起的检定：熟练项、难度、每个人的成功率和掷出的点数（都是公开的）
     out.checks = arr(get(view, "checks")).slice(-20).flatMap(c => {
       if (!obj(c) || !id(get(c, "id"))) return [];
+      if (get(c, "secret")) return [];   // 主持人暗骰检定：检定本身和结果都只在房主本机
       const dto = identifiers(c, copyFields(c, {}, ["prof", "diffName", "note"], ["at"], []), ["id"]);
       enumField(c, dto, "status", ["open", "done", "closed"]);
       dto.targets = arr(get(c, "targets")).slice(0, 12).flatMap(t => {
@@ -544,6 +582,13 @@
       const dto = identifiers(r, copyFields(r, {}, ["unitName"], ["at"], []), ["id", "unitId", "operatorId"]);
       enumField(r, dto, "status", ["pending", "approved", "rejected", "cancelled"]);
       dto.attrs = arr(get(r, "attrs")).filter(a => ["str", "con", "dex", "wil", "int", "sta"].includes(a)).slice(0, 4);
+      return [dto];
+    });
+    // 玩家主动发起的检定申请（hotseat.js · requestCheck）：熟练项、说明、状态，同意后对应的检定 id
+    out.checkRequests = arr(get(view, "checkRequests")).slice(-20).flatMap(r => {
+      if (!obj(r) || !id(get(r, "id"))) return [];
+      const dto = identifiers(r, copyFields(r, {}, ["unitName", "prof", "note"], ["at"], []), ["id", "unitId", "operatorId", "checkId"]);
+      enumField(r, dto, "status", ["pending", "approved", "rejected", "cancelled"]);
       return [dto];
     });
     out.messages = projectMessages(get(view, "messages"), context);
@@ -622,14 +667,28 @@
     if (own(packet, "shop")) out.shop = projectShop(get(packet, "shop"));
     if (own(packet, "shopSell")) out.shopSell = projectShopSell(get(packet, "shopSell"));
     if (own(packet, "clinic")) out.clinic = projectClinic(get(packet, "clinic"));
+    if (own(packet, "smith")) out.smith = projectSmith(get(packet, "smith"));
+    if (own(packet, "workshop")) out.workshop = projectWorkshop(get(packet, "workshop"));
     if (own(packet, "cyberware")) out.cyberware = projectCyberware(get(packet, "cyberware"));
     // 长休结算：不带坚毅（只带那一句 mood）；游戏时钟
     if (own(packet, "rest")) out.rest = projectRest(get(packet, "rest"));
     if (own(packet, "camp")) out.camp = projectCamp(get(packet, "camp"));
-    if (own(packet, "clock")) { const ck = get(packet, "clock"); out.clock = obj(ck) ? { day: Math.max(1, Math.floor(Number(ck.day) || 1)), clock: ((Math.floor(Number(ck.clock) || 0) % 1440) + 1440) % 1440 } : null; }
+    if (own(packet, "clock")) { const ck = get(packet, "clock"); out.clock = obj(ck) ? { day: Math.max(1, Math.floor(Number(ck.day) || 1)), clock: ((Math.floor(Number(ck.clock) || 0) % 1440) + 1440) % 1440, hours: Math.max(0, Math.round((Number(ck.hours) || 0) * 60) / 60) } : null; }
+    if (own(packet, "party")) out.party = projectParty(get(packet, "party"));
     // Resync is another envelope using these same explicit projectors, not a
     // path for forwarding an opaque nested packet or raw save snapshot.
     return out;
+  }
+  /** 跑团探索的队伍卡（party-cards.js · heroDto）：白名单，坚毅生命（shp / shpMax）不在里面，房主那份就算带了也丢掉 */
+  function projectParty(list) {
+    if (!Array.isArray(list)) return null;
+    const str = (v, k) => typeof v === "string" ? text(v, k) || "" : "";
+    const num = v => (typeof v === "number" && isFinite(v) ? Math.round(v) : 0);
+    return list.slice(0, 12).filter(obj).map(h => ({ id: str(h.id, 60), kit: str(h.kit, 40), name: str(h.name, 40), level: num(h.level) || 1,
+      dead: !!h.dead, dying: !!h.dying, upOnShp: !!h.upOnShp, hp: num(h.hp), hpMax: num(h.hpMax), atk: num(h.atk), def: num(h.def), defMax: num(h.defMax),
+      block: typeof h.block === "number" && isFinite(h.block) ? Math.round(h.block) : null, xp: num(h.xp), xpNext: num(h.xpNext),
+      attrPoints: num(h.attrPoints), featPoints: num(h.featPoints), feats: arr(h.feats).slice(0, 20).map(f => str(f, 30)).filter(Boolean),
+      weapons: arr(h.weapons).slice(0, 6).filter(obj).map(w => ({ kit: str(w.kit, 40), name: str(w.name, 40), level: num(w.level) || 1, bond: num(w.bond), dur: num(w.dur), max: num(w.max) })) }));
   }
   /** 营地（长休前）：全队状态和补给，坚毅只留短词 mood */
   function projectCamp(c) {
@@ -697,6 +756,30 @@
       last: obj(s.last) ? { seq: num(s.last.seq), kind: s.last.kind === "buyback" ? "buyback" : "sell", by: str(s.last.by, 40), ok: !!s.last.ok, total: num(s.last.total),
         payout: arr(s.last.payout).slice(0, 12).filter(obj).map(p => ({ to: str(p.to, 40), amount: typeof p.amount === "number" && isFinite(p.amount) ? Math.floor(p.amount) : 0 })), msg: str(s.last.msg, 200) } : null
     };
+  }
+  /** 跑团工匠（trpg.js · trpgSmithPacket）：{ heroes: [{ kit, name, purse, weapons: [{ kit, name, lv, next, max, canSelf, enough, fee, mats: [{ name, need, have }] }] }] }，只有公开数字 */
+  function projectSmith(s) {
+    if (!obj(s)) return null;
+    const str = (v, n) => typeof v === "string" ? v.slice(0, n) : "";
+    const num = v => (typeof v === "number" && isFinite(v) ? Math.max(0, Math.floor(v)) : 0);
+    return { heroes: arr(s.heroes).slice(0, 8).filter(obj).map(h => ({
+      kit: str(h.kit, 40), name: str(h.name, 40), purse: num(h.purse),
+      weapons: arr(h.weapons).slice(0, 8).filter(obj).map(w => ({ kit: str(w.kit, 40), name: str(w.name, 40), lv: num(w.lv), next: num(w.next), max: !!w.max, canSelf: !!w.canSelf,
+        enough: !!w.enough, fee: num(w.fee), mats: arr(w.mats).slice(0, 8).filter(obj).map(m => ({ name: str(m.name, 40), need: num(m.need), have: num(m.have) })) })).filter(w => w.kit)
+    })).filter(h => h.kit) };
+  }
+  /** 跑团工坊（trpg.js · trpgWorkshopPacket）：{ heroes: [{ kit, name, points, recipes: [...], salvage: [{ id, name, qty, yields }] }] } */
+  function projectWorkshop(w) {
+    if (!obj(w)) return null;
+    const str = (v, n) => typeof v === "string" ? v.slice(0, n) : "";
+    const num = v => (typeof v === "number" && isFinite(v) ? Math.max(0, v) : 0);
+    return { heroes: arr(w.heroes).slice(0, 8).filter(obj).map(h => ({
+      kit: str(h.kit, 40), name: str(h.name, 40), points: Math.floor(num(h.points)),
+      recipes: arr(h.recipes).slice(0, 80).filter(obj).map(r => ({ id: str(r.id, 60), name: str(r.name, 60), prof: str(r.prof, 20), diffName: str(r.diffName, 20), hours: Math.floor(num(r.hours)),
+        known: !!r.known, level: Math.floor(num(r.level)), chance: num(r.chance),
+        mats: arr(r.mats).slice(0, 12).filter(obj).map(m => ({ id: str(m.id, 60), name: str(m.name, 40), need: Math.floor(num(m.need)), have: Math.floor(num(m.have)) })) })).filter(r => r.id),
+      salvage: arr(h.salvage).slice(0, 100).filter(obj).map(x => ({ id: str(x.id, 60), name: str(x.name, 60), qty: Math.floor(num(x.qty)), yields: str(x.yields, 120) })).filter(x => x.id)
+    })).filter(h => h.kit) };
   }
   /** 跑团诊所：自己的角色的改造信息（肉体上限、可改上限、改造率、单价、现在的方案）和最近一条申请的状态 */
   function projectClinic(c) {
@@ -781,7 +864,7 @@
     });
     return out;
   }
-  const api = { SCHEMA, pickKeys, projectHud, projectPacket, projectQuests, projectPurse, projectShop, projectShopSell, projectClinic, projectCyberware, projectRest, projectCamp, projectSheets, projectBagDetail, projectUnit, projectState, projectTape, projectFx, projectMessages, projectLogs, projectView, projectActionMenu, safeText: text, safeError };
+  const api = { SCHEMA, pickKeys, projectHud, projectPacket, projectQuests, projectPurse, projectShop, projectShopSell, projectClinic, projectSmith, projectWorkshop, projectCyberware, projectRest, projectCamp, projectParty, projectSheets, projectBagDetail, projectUnit, projectState, projectTape, projectFx, projectMessages, projectLogs, projectView, projectActionMenu, safeText: text, safeError };
   root.OnlineView = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof globalThis !== "undefined" ? globalThis : window);

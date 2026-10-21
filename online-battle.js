@@ -22,8 +22,13 @@
   function snapUnit(u) {
     const d = u.display || {};
     const layers = (u.layers || []).map(l => ({ type: l.type || "flesh", cur: Math.max(0, Math.round(Number(l.current) || 0)), max: Math.max(0, Number(l.max) || 0) }));
+    // 载具：和车合并的驾驶员画成车的卡片（主机 online-view.js 发来 vehicle）：卡片上的名字、等级、ATK 由 unit-card.js · headOf 按车写，和本机画面一样；
+    // name 照旧是驾驶员自己的（队伍栏用）
+    const vc = u.vehicle && typeof u.vehicle === "object" ? u.vehicle : null;
+    const vehicle = vc ? { kind: vc.kind || "", name: vc.name || "", level: Number(vc.level) || 1, atk: Math.round(Number(vc.atk) || 0), seatText: vc.seatText || "", pilot: vc.pilot || "",
+      roster: Array.isArray(vc.roster) ? vc.roster.filter(x => typeof x === "string").slice(0, 8) : [] } : null;
     return {
-      id: u.id, name: u.name || u.id, level: u.level || 1, isPlayer: !!u.isPlayer, kit: u.kit || "", zone: Number(u.zone) || 1,
+      id: u.id, name: u.name || u.id, vehicle, level: u.level || 1, isPlayer: !!u.isPlayer, kit: u.kit || "", zone: Number(u.zone) || 1,
       hidden: !!u.hidden, dead: !!u.dead, weaponUnit: !!(u.weaponOf || u.weaponUnit), dying: !!u.dying, upOnShp: !!u.upOnShp,
       stunned: !!u.stunned, iceNext: !!(u.instant && u.instant.iceNext),
       def: Math.max(0, Number(u.def) || 0), defMax: Math.max(0, Number(u.defMax) || 0), layers, shp: 0, shpMax: 0,
@@ -36,20 +41,29 @@
       overkill: Number(d.overkill) || 0, killBig: !!d.killBig,
       intents: Array.isArray(d.intents) ? d.intents.filter(x => typeof x === "string").slice(0, 4) : [],
       iv: u.iv ? { hp: Number(u.iv.hp) || 0, atk: Number(u.iv.atk) || 0 } : null,
+      race: u.race && u.race.race ? (u.race.branch ? u.race.race + "·" + u.race.branch : u.race.race) : "",
+      racePerks: typeof racePerkLinesFor === "function" && u.race && u.race.race ? racePerkLinesFor(u.race.branch ? u.race.race + "·" + u.race.branch : u.race.race) : [],
       badges: root.HudIcons ? HudIcons.unitBadges(u, u.marks) : []
     };
   }
   function snapProp(p) {
     const max = Math.max(1, Number(p.maxHp) || Number(p.hp) || 1), cur = Math.max(0, Number(p.hp) || 0);
-    const name = ({ button: "按钮", lever: "拉杆", battery: "超充能电池", boom: "爆炸桶", acid: "酸液桶", scrap: "碎渣机炮", turret: "防卫自律炮台", ironwall: "铁壁", scrapwall: "废铁墙", dome: "防护罩", coral_branch: "沙珊瑚枝", coral_tentacle: "沙珊瑚触须", death_statue: "死亡雕像" })[p.kind] || p.kind || "配置物";
+    const name = ({ button: "按钮", lever: "拉杆", battery: "超充能电池", boom: "爆炸桶", acid: "酸液桶", scrap: "碎渣机炮", turret: "防卫自律炮台", ironwall: "铁壁", scrapwall: "废铁墙", dome: "防护罩", coral_branch: "沙珊瑚枝", coral_tentacle: "沙珊瑚触须", death_statue: "死亡雕像", fortress: "移动堡垒" })[p.kind] || p.kind || "配置物";
     return {
+      roster: p.roster || null,   // 载具的乘员名单（悬停显示）
       id: "prop:" + p.id, name: p.name || name, isPlayer: p.faction !== "enemy", isProp: true, isDevice: DEVICE.includes(p.kind),
       zone: Number(p.zone) || 1, level: p.level || 1, atk: 0,
       // 铁壁的外层护盾（川川多耗电能加的）画在装甲外面
       layers: (Number(p.shieldMax) > 0 ? [{ type: "shield", max: Number(p.shieldMax), cur: Math.max(0, Number(p.shield) || 0) }] : []).concat([{ type: "armor", max, cur }]),
-      def: 0, defMax: 0, ap: 0, apMax: 0, bonus: 0, bonusMax: 0, status: name, res: p.kind === "battery" || p.kind === "turret" ? (p.faction === "enemy" ? "敌方" : "我方") : "",
-      highEnergy: 0, flying: false, stunned: false, dying: false, dead: !!p.destroyed || (cur <= 0 && !DEVICE.includes(p.kind)), hidden: false, marks: [], casts: [], hung: [], badges: []
+      def: 0, defMax: 0, ap: 0, apMax: 0, bonus: 0, bonusMax: 0, status: name + (p.seatText ? " · " + p.seatText : ""), res: p.kind === "battery" || p.kind === "turret" || p.isVehicle ? (p.faction === "enemy" ? "敌方" : "我方") : "",
+      highEnergy: 0, flying: false, stunned: false, dying: false, dead: !!p.destroyed || (cur <= 0 && !DEVICE.includes(p.kind)), hidden: !!p.hidden, marks: [], casts: [], hung: [], badges: []
     };
+  }
+  /** 战场上要画的卡片：藏起来的单位（炮手、下潜……）和藏起来的配置物（有驾驶员的车：只画合并后的那张车的卡片）都不画 */
+  function cardSnaps(data) {
+    data = data || {};
+    return (data.units || []).filter(u => !u.hidden).map(snapUnit)
+      .concat((data.props || []).filter(p => !p.destroyed && !p.hidden).map(snapProp));
   }
   /** 区域的颜色和文字（和 app.js · fieldThemeClass / fieldTags 同样的判断；这里只看主机发来的展示字段，不碰规则） */
   function fieldClass(f) {
@@ -83,13 +97,17 @@
       if (n.textContent !== t) n.textContent = t;
     });
   }
+  /** 触屏设备（没有悬停、主要指针是手指）：提示不写「悬停 / 空格」，结束行动按钮不显示快捷键 */
+  function isTouch() {
+    try { return !!(root.matchMedia && (root.matchMedia("(hover: none)").matches || root.matchMedia("(pointer: coarse)").matches)); } catch (e) { return false; }
+  }
   function create(cb) {
     cb = cb || {};
     const el = make("div", "ol-battle");
     const field = make("main", "g-field ol-field");
     const hud = make("footer", "g-hud ol-hud");
     hud.innerHTML = `<div class="party"></div><div class="hud-row"><div class="hi-gauge" aria-label="角色仪表"></div><div class="skills"></div>
-      <div class="hud-side"><button class="endturn" type="button" data-ob="end">结束行动<small>空格</small></button></div></div><div class="hint"></div>`;
+      <div class="hud-side"><button class="endturn" type="button" data-ob="end">结束行动${isTouch() ? "" : "<small>空格</small>"}</button></div></div><div class="hint"></div>`;
     el.append(field, hud);
     const cards = new Map();
     let layoutKey = "", last = { ui: {} };
@@ -163,17 +181,8 @@
           if (!tb) { tb = make("div", "zthreat"); z.appendChild(tb); }
           tb.innerHTML = th.map(t => `<span class="${t.ready ? "rd" : ""}">${esc(t.label)}${t.from ? `<i>${esc(t.from)}</i>` : ""}</span>`).join("");
         }
-        // 踩塔：区域边框 + 角上的牌子
-        const tw = zv.towers || [];
-        z.classList.toggle("tower", tw.length > 0);
-        z.classList.toggle("tower-ready", tw.some(t => t.left <= 0));
-        z.classList.toggle("tower-short", tw.some(t => t.have < t.need));
-        let tt = z.querySelector(".ztower");
-        if (!tw.length) { if (tt) tt.remove(); }
-        else {
-          if (!tt) { tt = make("div", "ztower"); z.appendChild(tt); }
-          tt.innerHTML = UnitCard.towerHtml(tw);   // 「踩塔 · 还有 N 回合 · 1/1 人」（unit-card.js）
-        }
+        // 踩塔：区名旁边的图标 + 地面上的一圈（unit-card.js，和本地战斗画面同一套）
+        if (root.UnitCard && UnitCard.paintTowers) UnitCard.paintTowers(z, zv.towers || []);
         z.classList.toggle("is-move-target", !!(zoneOpts && zoneOpts.has(Number(z.dataset.num))));
         setPickBadge(z, zoneNo ? zoneNo.get(String(z.dataset.num)) : 0);
       });
@@ -185,11 +194,11 @@
       });
     }
 
-    function paintCards(data, ui) {
+    let lastTargetKey = "";
+    function paintCards(data, ui, unitSnaps) {
       const kit = root.UnitCard;
       if (!kit) return;
-      const snaps = (data.units || []).filter(u => !u.hidden).map(snapUnit)
-        .concat((data.props || []).filter(p => !p.destroyed).map(snapProp));
+      const snaps = unitSnaps ? unitSnaps.concat((data.props || []).filter(p => !p.destroyed && !p.hidden).map(snapProp)) : cardSnaps(data);
       const seen = new Set();
       const targetNo = pickNumbers(ui, "unit");
       const targets = targetNo ? new Set(targetNo.keys()) : null;
@@ -204,6 +213,7 @@
           cards.set(s.id, c);
         }
         try { kit.update(c, s, {}); } catch (e) { /* 少字段的快照画不全也不要卡住整个画面 */ }
+        if (s.roster) c.wrap.title = s.roster.join("；");   // 载具：悬停列出乘员和驾驶员（合并后车的卡片在 online-ui.js · unitTip 的说明里列）
         const grp = field.querySelector(`.g-zone[data-num="${s.zone}"] .grp.${s.isProp ? "prop" : s.isPlayer ? "player" : "enemy"}`) || field.querySelector(".g-zone .grp");
         if (grp && c.wrap.parentElement !== grp) grp.appendChild(c.wrap);
         c.wrap.classList.toggle("is-actor", !!ui.current && s.id === ui.current && !!ui.acting);
@@ -220,6 +230,14 @@
           setTimeout(() => c.wrap.remove(), 1800);
         } else c.wrap.remove();
       });
+      // 轮到选目标：战场框在手机上装不下所有区，目标集合一变就把第一个目标所在的区滚进视野
+      const key = targets ? [...targets].sort().join(",") : "";
+      if (key && key !== lastTargetKey) {
+        const first = snaps.find(s => targets.has(s.id)), c = first && cards.get(first.id);
+        const zone = c && c.wrap.closest(".g-zone");
+        if (zone && field.scrollHeight > field.clientHeight + 1) field.scrollTop += zone.getBoundingClientRect().top - field.getBoundingClientRect().top - 4;
+      }
+      lastTargetKey = key;
     }
 
     function paintHud(data, ui) {
@@ -269,7 +287,10 @@
       if (root.HeroSheet && HeroSheet.hideTip && (ui.armed || ui.busy)) HeroSheet.hideTip();
       layout(data);
       paintZones(data, ui);
-      paintCards(data, ui);
+      const units = (data.units || []).filter(u => !u.hidden).map(snapUnit);
+      paintCards(data, ui, units);
+      // 战场正上方的首领机制横幅（unit-card.js · paintBanner，和本地战斗画面同一套）
+      if (root.UnitCard && UnitCard.paintBanner) UnitCard.paintBanner(field, units);
       paintHud(data, ui);
       fitZones();
     }
@@ -355,7 +376,7 @@
     return { el, update, cardOf, destroy };
   }
 
-  const api = { create, snapUnit, snapProp, tickCountdowns };
+  const api = { create, snapUnit, snapProp, cardSnaps, tickCountdowns, isTouch };
   root.OnlineBattle = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof window !== "undefined" ? window : globalThis);

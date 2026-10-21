@@ -99,7 +99,7 @@ test("多单位流程允许最终选项为友方，不能误套普通攻击敌�
   const w = f.c.spawnWeapon(f.a, "torque"); w.level = 2; w.ap = 2; w.bonus = 2; f.enemy.zone = 1;
   f.session.reconcile();   // 召唤出的武器人插在本人前面，立刻轮到它
   assert.equal(f.session.snapshot().currentUnitId, w.id);
-  const command = { type: "skill", actor: w.id, skill: "torque_strip", target: f.b.id, picks: { target: f.enemy.id, ally: f.b.id } };
+  const command = { type: "skill", actor: w.id, skill: "torque_strip", target: f.b.id, picks: { target: f.enemy.id, mode: "ally", ally: f.b.id } };
   assert.equal(f.validate(command), true);
 });
 
@@ -189,4 +189,43 @@ test("按钮级 reason 只做当前单位/资源 gate，不要求尚未选择的
   assert.equal(r(f.a, { id: "ruby_aa", cost: {} }, f.session, "a", {}), null);
   f.a.ap = 0; assert.match(r(f.a, "ruby_aa", f.session, "a", {}), /行动点/);
   assert.match(r(f.b, "hiaki_aa", f.session, "b", {}), /轮到/);
+});
+
+test("移动校验和单机 moveBaseCost 一致：导体不要附赠，酸液地面离开只要 1 行动点（#176）", () => {
+  const f = fixture();
+  f.a.bonus = 0; f.a.self = "conductor";
+  assert.equal(f.validate({ type: "move", actor: f.a.id, dest: 2 }), true);
+  f.a.self = null;
+  untouched(f, { type: "move", actor: f.a.id, dest: 2 }, /附赠/);
+  f.s.fields[1] = Object.assign({}, f.s.fields[1], { acid: true }); f.a.ap = 2;
+  assert.equal(f.validate({ type: "move", actor: f.a.id, dest: 2 }), true);
+  f.a.ap = 0; f.a.bonus = 1;
+  untouched(f, { type: "move", actor: f.a.id, dest: 2 }, /行动点/);
+});
+
+test("越过空隙只要 1 行动点、不要附赠，和单机一致（#176）", () => {
+  const f = fixture();
+  f.s.gaps = Object.assign({}, f.s.gaps, { [f.c.gapKey(1, 2)]: { type: "void" } });
+  f.a.zone = 1; f.a.bonus = 0; f.a.ap = 1;
+  assert.equal(f.validate({ type: "move", actor: f.a.id, dest: 2 }), true);
+  f.a.ap = 0; f.a.bonus = 1;
+  untouched(f, { type: "move", actor: f.a.id, dest: 2 }, /行动点/);
+});
+
+test("深渊按目的区判断：不能走进去，站在里面可以走出来（#176）", () => {
+  const f = fixture();
+  f.a.zone = 1; f.s.fields[2] = Object.assign({}, f.s.fields[2], { abyss: true });
+  untouched(f, { type: "move", actor: f.a.id, dest: 2 }, /深渊/);
+  f.a.zone = 2; f.s.fields[1] = Object.assign({}, f.s.fields[1], { abyss: false });
+  assert.equal(f.validate({ type: "move", actor: f.a.id, dest: 1 }), true);
+});
+
+test("被沙珊瑚缠住、流沙下陷 2 层以上：校验就拒绝并写出原因（#176）", () => {
+  const f = fixture();
+  f.a.zone = 1; f.a.entangled = { name: "沙珊瑚" };
+  untouched(f, { type: "move", actor: f.a.id, dest: 2 }, /缠住了/);
+  f.a.entangled = null;
+  f.a.sink = 2; f.s.fields[1] = Object.assign({}, f.s.fields[1], { quicksand: true });
+  assert.ok(f.c.sinkStuck(f.a), "测试没造出流沙下陷");
+  untouched(f, { type: "move", actor: f.a.id, dest: 2 }, /下陷 2 层/);
 });
