@@ -94,7 +94,7 @@
 
 ### 高（1）
 
-- [ ] **H-1 跑团诊所装的义体不进队伍记忆，下一场开战或读档就丢，钱照扣**
+- [x] **H-1 跑团诊所装的义体不进队伍记忆，下一场开战或读档就丢，钱照扣**（已修 issue #134：`packHero` 存 `cyberware` / `cyberOverinstall`，`applyCampaignToField` 读回并重算血量层 / 坚毅上限；tests/cyberware-campaign-memory.test.js）
   - 位置：`game.js` · `packHero`（约 3961）/ `applyCampaignToField`（约 4028）；写入端 `trpg.js` · `trpgCyberwareAct` / `trpgCyberwareInstall`。
   - 复现：跑团开诊所给某角色装义体 → `GAME.rememberCampaign()` 后重摆队伍，或存档读档 → `u.cyberware` 为空，血量 / 坚毅上限变回没装的样子。
   - 应该：义体（和 `cyberOverinstall`）跟着队伍记忆走，和 `cyberPlan` 一样；实际：丢失，钱不退。单局存在 `h.cyberware`（rogue.js:514、1577）所以没事。
@@ -102,7 +102,7 @@
 
 ### 中（10）
 
-- [ ] **M-1 `tools/playtest.js` 的 ARENA 模式一开跑就抛错（上一轮报的「不能用」）**：位置 `tools/playtest.js:405-406`（先 `run.stage = "task"` 再 `R.acceptTask(run, "main")`）、`rogue.js:438`（`acceptTask` 要求 `stage === "board"`）。复现 `ARENA=1:5:1 node tools/playtest.js`。应该能连打 battle / elite / boss 出胜率；实际第一场接任务就抛「现在不在任务板前，不能接任务」。修法：接任务前把 `run.stage` 设成 `"board"`。`BOSSTEST` / `ARENA` 没有任何测试。确认方式：读代码判断（核对了两处源码，没能运行）。
+- [x] **M-1 `tools/playtest.js` 的 ARENA 模式一开跑就抛错（上一轮报的「不能用」）**（已修 issue #134：接任务前 `run.stage` 设成 `"board"`；tests/playtest-arena.test.js）：位置 `tools/playtest.js:405-406`（先 `run.stage = "task"` 再 `R.acceptTask(run, "main")`）、`rogue.js:438`（`acceptTask` 要求 `stage === "board"`）。复现 `ARENA=1:5:1 node tools/playtest.js`。应该能连打 battle / elite / boss 出胜率；实际第一场接任务就抛「现在不在任务板前，不能接任务」。修法：接任务前把 `run.stage` 设成 `"board"`。`BOSSTEST` / `ARENA` 没有任何测试。确认方式：读代码判断（核对了两处源码，没能运行）。
 - [ ] **M-2 乘势会误伤中立生物和友军**：给「同区其他架势 = 1 的敌人」各 1 点击破，没按 `hostileTo` 筛。位置 `feats.js:725` · `featAfterHit`，用的 `app.js:5085` · `visibleEnemies`（只看 `!u.isPlayer`）。复现：乘势角色把敌人 A 打进失衡，同区有架势 1 的 `dust_bug` 或友军 `guard_sword`。应该只对敌对生效。读代码判断。
 - [ ] **M-3 长线养成「每日任务」有 4 种永远完成不了**：`long_rest` / `check_ok` / `shop` / `weather` 注释写着在休息 / 检定 / 购买 / 改天气时结算，但全仓库没有这些写入；其余项是每场固定增量（击杀 20 杂兵每场 +4、「无死亡通关」打赢就 +1 不看倒地），和说明不符。抽到那四项则「三个全完成」奖励拿不到。位置 `rogue.js:2522` `GROWTH_GENERAL_POOL`、`2575` `updateGrowthDailyProgress`、`2620` `completeGrowthDailyTask`（还用裸 `Math.random()` 掷材料，没走 `withRng`，`2625`）。读代码判断。
 - [ ] **M-4 每日挑战记录的「队伍」在有人阵亡后不对，全灭时是空数组**：`dailyRecord` 存 `run.party.map(h => h.kit)`，阵亡者已被 `SaveStore.killHero` 移到 `run.fallen`。位置 `rogue.js:2780` · `dailyRecord`，调用点 `2722` · `endRun`（团灭走 `captureParty`、力竭走 `exhaustDeath`）。应取 `party` + `fallen` 或开局记下。读代码判断。

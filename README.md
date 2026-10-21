@@ -368,6 +368,9 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **跑团诊所装的义体跟着队伍记忆走；`tools/playtest.js` 的 ARENA 能跑了**（issue #134，backlog 第三轮 H-1 / M-1；tests/cyberware-campaign-memory.test.js、tests/playtest-arena.test.js）
+  - **义体不再丢**：以前 `packHero` 只存 `cyberPlan`，没存 `u.cyberware` 和 `u.cyberOverinstall`，`applyCampaignToField` 也不读，所以下一场开战或读档后义体没了、血量 / 坚毅上限变回没装的样子，钱却已经扣了。现在两项都随队伍记忆（以及存档槽）往返；读回来后先放回义体再走 `applyLevelStats`，按义体重算血量层和坚毅上限，和刚装好时一致。旧档没有这两项就当没装（`game.js · packHero / applyCampaignToField`）。
+  - **ARENA 模式**：以前先设 `run.stage = "task"` 再 `acceptTask`，而 `acceptTask` 要求在任务板前，一开跑就抛「现在不在任务板前，不能接任务」。现在接任务前把 stage 设成 `"board"`（`tools/playtest.js`）。测试用子进程跑 `ARENA=1:5:1`，断言退出码 0 并有三种战斗的战报。
 - **「中」杂项六条 + 两个尾巴**（issue #125；tests/misc-six-125.test.js）
   - **战斗中修武器两条路统一**：「使用道具」（`items.js · useRepairKit`）和「修理」命令（`ledger.js · ledgerRepair`）以前各算各的：道具那条修好耐久后不标「本场受损」（atk / 格挡加成照旧满值、还能唤出武器人），命令那条标了；命令那条也不会把倒地的武器人修起来。现在耐久都走 `ledgerRepair`（缺几点修几点、同样扣维修量、战斗中修好的武器这一场按受损算），倒地的武器人两条路都走 `useRepairKit`（恢复最大生命 25%）。
   - **跑团工坊可以同时做**：`trpgCraft` 新增 `{ jobs: [...] }`，每人做一样、一起开工，时间只推进一次、按最久的那件算（`trpg.js · trpgCraft / trpgCraftOne`、`trpg-commands.js`）。以前每做一样推进一次，两件会多算时间。同一个人同时只能做一样。单局的 `Rogue.craft` 本来就是这样。
