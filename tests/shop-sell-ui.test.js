@@ -22,8 +22,6 @@ const VIEW = {
     { id: "grenade", name: "破片手雷", qty: 2, unitPrice: 20, owner: "kolt", ok: true, reason: "" },
     { id: "vest", name: "防弹背心", qty: 1, unitPrice: 0, owner: "kolt", ok: false, reason: "已装备" },
     { id: "trinket", name: "怪石头", qty: 1, unitPrice: 0, owner: "helu", ok: false, reason: "无标准价" },
-    { id: "map_outer", name: "外城区地图", qty: 1, unitPrice: 0, owner: "shared", ok: false, reason: "地图与票券" },
-    { id: "ticket_dome", name: "穹顶门票", qty: 1, unitPrice: 0, owner: "kolt", ok: false, reason: "地图与票券" },
     { id: "part_x", name: "改装件 · 重枪管", qty: 1, unitPrice: 0, owner: "kolt", ok: false, reason: "改装件" },
     { id: "ration", name: "压缩口粮", qty: 4, unitPrice: 5, owner: "helu", ok: true, reason: "" }
   ],
@@ -45,9 +43,8 @@ test("卖出页：按 公用 / 每位英雄 分组，单价、合计、置灰原
   const pos = ["公用", "柯尔特", "赫鲁", "可买回"].map(s => h.indexOf(`<h4>${s}`));
   assert.ok(pos.every(p => p >= 0), "四个分组标题都在");
   assert.deepEqual(pos.slice().sort((a, b) => a - b), pos, "公用在最前，英雄按队伍顺序，可买回最后");
-  for (const r of ["任务道具", "图纸", "已装备", "无标准价", "改装件", "地图与票券"]) assert.match(h, new RegExp(`ss-why">${r}`));
-  assert.equal((h.match(/class="ss-row off"/g) || []).length, 7);
-  assert.match(h, /&quot;id&quot;:&quot;ticket_dome&quot;[^>]*disabled/, "地图与票券 和其他原因一样置灰、不能点");
+  for (const r of ["任务道具", "图纸", "已装备", "无标准价", "改装件"]) assert.match(h, new RegExp(`ss-why">${r}`));
+  assert.equal((h.match(/class="ss-row off"/g) || []).length, 5);
   // 能卖的行：单价 15，数量 1，合计 15；指令带 owner 和出手的英雄
   assert.match(h, /<b>医疗包<\/b>[\s\S]*?ss-unit"><small>单价<\/small><b>15<\/b>[\s\S]*?ss-total"><small>共<\/small><b>15<\/b>/);
   assert.match(h, /data-ss-cmd="\{&quot;action&quot;:&quot;sellItem&quot;,&quot;kit&quot;:&quot;kolt&quot;,&quot;id&quot;:&quot;medkit&quot;,&quot;qty&quot;:1,&quot;owner&quot;:&quot;shared&quot;\}"/);
@@ -141,7 +138,7 @@ test("单机单局（真规则）：休整时商店的 买 / 卖，卖出 / 买�
     window.__noLevelUpPopup = true;
     const run = Rogue.newRun({ party: ["kolt", "helu"], seed: "SELL-UI" });
     run.stage = "camp"; state.kuizhi = 500;
-    state.bag = { items: [{ id: "medkit", qty: 3 }, { id: "bp_trevor_bigkill", qty: 1 }] };
+    state.bag = { items: [{ id: "medkit", qty: 3 }, { id: "bp_trevor_bigkill", qty: 1 }, { id: "map_outer", qty: 1 }, { id: "map_desert", qty: 1 }, { id: "ticket_dome", qty: 1 }] };
     Rogue.save(run); RunFlow.resume();
   });
   const host = page.locator('[data-ss-host="run"]');
@@ -154,6 +151,13 @@ test("单机单局（真规则）：休整时商店的 买 / 卖，卖出 / 买�
   const med = page.locator('.ss-row[data-ss-row="shared|medkit"]');
   assert.match(await med.locator(".ss-unit").innerText(), /300/, "医疗包手册价 600 → 300");
   assert.match(await page.locator('.ss-row[data-ss-row="shared|bp_trevor_bigkill"]').innerText(), /图纸/);
+  // 真规则（PR #138 · shopSellCheck）：地图 map_* 和 ticket_dome 是「地图与票券」，和别的原因一样置灰、不能卖
+  for (const id of ["map_outer", "map_desert", "ticket_dome"]) {
+    const row = page.locator(`.ss-row[data-ss-row="shared|${id}"]`);
+    assert.equal(await row.getAttribute("class"), "ss-row off", id);
+    assert.match(await row.locator(".ss-why").innerText(), /^地图与票券$/);
+    assert.equal(await row.locator("[data-ss-cmd]").isDisabled(), true);
+  }
   await med.locator(".ss-inc").click();
   assert.match(await med.locator(".ss-total").innerText(), /600/);
   if (SHOTS) await page.screenshot({ path: path.join(SHOTS, "shop-sell-local.png") });
@@ -176,6 +180,27 @@ test("单机单局（真规则）：休整时商店的 买 / 卖，卖出 / 买�
   await page.waitForFunction(() => /没做成：.*奎支不够/.test(document.querySelector(".ss-toast").textContent));
   assert.deepEqual(errors, []);
 });
+
+/* ---------- 结果提示：packet.*.shopSell.last，每个 seq 只弹一次 ---------- */
+const toastOf = page => page.evaluate(() => { const t = document.querySelector(".ol-toast"); return t && !t.hidden ? t.textContent : ""; });
+const hideToast = page => page.evaluate(() => { document.querySelector(".ol-toast").hidden = true; });
+async function lastFlow(page, setLast) {
+  // 第一次收到的包已经带着旧的 last：不重播（「开张了」那句不算）
+  assert.doesNotMatch(await toastOf(page), /旧的/);
+  await hideToast(page);
+  await setLast({ seq: 8, kind: "sell", by: "kolt", ok: true, total: 40, payout: [{ to: "kolt", amount: 40 }], msg: "柯尔特 卖掉 破片手雷 ×2，得 40 奎支。" });
+  assert.equal(await toastOf(page), "💰 柯尔特 卖掉 破片手雷 ×2，得 40 奎支。 → 柯尔特 +40");
+  await hideToast(page);
+  await setLast({ seq: 8, kind: "sell", by: "kolt", ok: true, total: 40, payout: [{ to: "kolt", amount: 40 }], msg: "柯尔特 卖掉 破片手雷 ×2，得 40 奎支。" });
+  assert.equal(await toastOf(page), "", "同一个 seq 的后续包不再弹");
+  await setLast({ seq: 9, kind: "buyback", by: "kolt", ok: false, total: 0, payout: [], msg: "奎支不够（要 10，现有 0）" });
+  assert.equal(await toastOf(page), "没做成：奎支不够（要 10，现有 0）");
+  await hideToast(page);
+  await setLast(null);   // 离开商店
+  assert.equal(await toastOf(page), "");
+  await setLast({ seq: 10, kind: "buyback", by: "kolt", ok: true, total: 10, payout: [{ to: "kolt", amount: -10 }], msg: "柯尔特 买回 水壶 ×1，花掉 10 奎支。" });
+  assert.match(await toastOf(page), /买回 水壶[\s\S]*柯尔特 -10/, "重新进店后的新 seq 照常弹");
+}
 
 /* 联机玩家：照 online-ui.test.js 的最小桩子 */
 async function online(t, width = 1280, height = 800) {
@@ -213,12 +238,11 @@ test("跑团联机玩家：物资里的商店有 买 / 卖，卖 / 买回发 sho
   await page.locator('.ss-row[data-ss-row="kolt|grenade"] .ss-inc').click();
   assert.match(await page.locator('.ss-row[data-ss-row="kolt|grenade"] .ss-total').innerText(), /40/);
   if (SHOTS) await page.screenshot({ path: path.join(SHOTS, "shop-sell-trpg-online.png") });
-  await page.evaluate(() => { fixture.reply = { ok: true, total: 40, payout: [{ to: "kolt", amount: 40 }], msg: "卖出 破片手雷 ×2" }; });
   await page.locator('.ss-row[data-ss-row="kolt|grenade"] [data-ss-cmd]').click();
   await page.waitForFunction(() => fixture.calls.length > 0);
   assert.deepEqual(await page.evaluate(() => fixture.calls.pop()), { type: "shopSell", kit: "kolt", id: "grenade", qty: 2, owner: "kolt" });
-  await page.waitForSelector(".ol-toast:not([hidden])");
-  assert.match(await page.locator(".ol-toast").innerText(), /柯尔特 \+40/);
+  // submit 的回执不弹提示；房主算好的 last 到了才弹
+  assert.doesNotMatch(await page.locator(".ol-toast").innerText(), /柯尔特 \+40/);
   await page.locator('.ss-buyback [data-ss-cmd]').click();
   await page.waitForFunction(() => fixture.calls.length > 0);
   assert.deepEqual(await page.evaluate(() => fixture.calls.pop()), { type: "shopBuyback", kit: "kolt", token: "bb1" });
@@ -265,5 +289,23 @@ test("联机单局玩家：商店区块的 买 / 卖，指令走 rogue.act sellI
     assert.equal(await noOverflow(page), true);
     await page.screenshot({ path: path.join(SHOTS, "shop-sell-rogue-390.png") });
   }
+  assert.deepEqual(errors, []);
+});
+
+test("跑团联机玩家：packet.shopSell.last 弹「钱进谁的钱包」，每个 seq 只弹一次；失败弹「没做成」", async t => {
+  const o = await online(t); if (!o) return; const { page, errors } = o;
+  const old = { seq: 7, kind: "sell", by: "kolt", ok: true, total: 15, payout: [{ to: "party", amount: 15 }], msg: "旧的" };
+  await page.evaluate(p => { fixture.view.packet = Object.assign(fixture.view.packet, p); fixture.emit(); }, { shop: SHOP, shopSell: Object.assign(own(VIEW), { last: old }), purse: PURSE, mode: "trpg" });
+  await lastFlow(page, last => page.evaluate(([l, v]) => { fixture.view.packet.shopSell = Object.assign({}, v, { last: l }); fixture.emit(); }, [last, own(VIEW)]));
+  assert.deepEqual(errors, []);
+});
+
+test("联机单局玩家：packet.rogue.shopSell.last 同样按 seq 只弹一次", async t => {
+  const o = await online(t); if (!o) return; const { page, errors } = o;
+  const rogue = { stage: "camp", act: 1, region: "荒原", day: 3, daysLeft: 4, daysPerAct: 7, supplies: { water: 1000, food: 3, hours: 5 },
+    heroes: [{ kit: "kolt", name: "柯尔特", mine: true, level: 2, hp: 30, hpMax: 30, xp: 0, purse: 120, ownerName: "甲", weapons: [] }],
+    shop: [{ key: "medkit", name: "医疗包", price: 30, team: true }], shopSell: Object.assign(own(VIEW), { last: { seq: 7, kind: "sell", by: "kolt", ok: true, total: 1, payout: [], msg: "旧的" } }), vote: { options: [] } };
+  await page.evaluate(r => { fixture.view.mode = "rogue"; fixture.view.packet = Object.assign(fixture.view.packet, { mode: "rogue", rogue: r }); fixture.emit(); }, rogue);
+  await lastFlow(page, last => page.evaluate(l => { const r = fixture.view.packet.rogue; r.shopSell = Object.assign({}, r.shopSell, { last: l }); fixture.emit(); }, last));
   assert.deepEqual(errors, []);
 });

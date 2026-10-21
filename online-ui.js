@@ -511,16 +511,23 @@
       const trpg = view.mode !== "rogue" && view.packet?.mode !== "rogue";
       const msg = !trpg ? { type: "rogue.act", command: cmd }
         : cmd.action === "sellItem" ? { type: "shopSell", kit: cmd.kit, id: cmd.id, qty: cmd.qty, owner: cmd.owner } : { type: "shopBuyback", kit: cmd.kit, token: cmd.token };
-      let got = null;
-      if (await call(async () => (got = await api.submit(msg)))) {
-        if (global.Sfx) Sfx.ui("coin");
-        const res = got && (got.payout ? got : got.result && got.result.payout ? got.result : null);
-        if (res) {
-          const heroes = (view.packet?.rogue?.heroes || view.packet?.purse?.heroes || []);
-          toast.textContent = ShopSellUI.toastText(res, k => k === "party" ? "队伍公账" : (heroes.find(h => h.kit === k) || {}).name || k);
-          toast.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { toast.hidden = true; }, 4500);
-        }
-      }
+      // 提示不看这次 submit 的回执：房主算好的结果放在包里的 shopSell.last（只有卖的人看得到），observeSellLast 按 seq 只弹一次
+      if (await call(() => api.submit(msg)) && global.Sfx) Sfx.ui("coin");
+    }
+    /** 卖 / 买回的结果：packet.rogue.shopSell.last（单局）或 packet.shopSell.last（跑团）= {seq,kind,by,ok,total,payout,msg}；
+     * 每个 seq 只弹一次（之后的包还带着同一个 last 不再弹）；离开商店 last 变 null 时忘掉记录（seq 不会重复） */
+    let sellSeen = null, sellHadView = false;
+    function observeSellLast() {
+      const sv = (view.packet?.mode === "rogue" ? view.packet?.rogue?.shopSell : view.packet?.shopSell) || null, last = sv ? sv.last || null : null;
+      const appeared = !!sv && !sellHadView;   // 刚进店 / 刚连上：包里已经带着的旧结果不重播
+      sellHadView = !!sv;
+      if (!last) { sellSeen = null; return; }
+      if (appeared || !global.ShopSellUI) { sellSeen = last.seq; return; }
+      if (sellSeen !== null && last.seq <= sellSeen) return;
+      sellSeen = last.seq;
+      const heroes = view.packet?.rogue?.heroes || view.packet?.purse?.heroes || [];
+      toast.textContent = ShopSellUI.toastText(last, k => k === "party" ? "队伍公账" : (heroes.find(h => h.kit === k) || {}).name || k);
+      toast.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { toast.hidden = true; }, 4500);
     }
     function rogueMarkup(r) {
       const mine = (r.heroes || []).filter(h => h.mine), payer = mine[0] ? mine[0].kit : null, purse = mine[0] ? mine[0].purse : 0;
@@ -950,7 +957,7 @@
         html(dock, button(`${view.roomCode || "房间"} · ${paused() ? "重连中" : "消息与成员"}${privUnread && !view.isHost ? ` · ${privUnread} 条新消息` : ""}`, "openRoom", privUnread && !view.isHost ? 'data-alert="1"' : "", false) +
           (view.isHost && view.mode !== "rogue" && ["exploration", "ended"].includes(view.screen) ? button("角色分配", "openAssign", "", false) : ""), "dock");
         observeMessages();
-        if (!view.isHost) { observeQuests(); observeCamp(); observeRest(); observeShop(); }
+        if (!view.isHost) { observeQuests(); observeCamp(); observeRest(); observeShop(); observeSellLast(); }
       }
       // 联机单局的房主：大厅里先要在单局画面选队伍，房间面板不挡着；队伍选好（有角色可分）时自动打开一次
       const rogueHost = view.active && view.isHost && view.mode === "rogue";
