@@ -148,10 +148,6 @@ body.ol-has-side .ol-toast { right: 344px; }
 /* 角色资料 / 武器 / 背包 按钮与背包 */
 .ol-info-tools { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .ol-bag { z-index: 95; }
-.ol-bag-list { list-style: none; margin: 10px 0; padding: 0; display: grid; gap: 8px; }
-.ol-bag-list li { padding: 8px 10px; background: #231c16; border: 1px solid #4d4337; }
-.ol-bag-list li > div { display: flex; justify-content: space-between; gap: 10px; }
-.ol-bag-list li p { margin: 4px 0 0; color: #cbb99a; font-size: 13px; }
 @keyframes ol-impact { 50% { background: #64543c; transform: translateX(2px); } }
 @media (max-width: 650px) {
   .ol-overlay { padding: 10px 8px 24px; }
@@ -305,13 +301,13 @@ body.ol-has-side .ol-toast { right: 344px; }
 .ol-shop-price s { opacity: .6; }
 .ol-shop-rows input[type="number"] { width: 64px; }
 .ol-shop-redeem { display: flex; flex-wrap: wrap; gap: 6px; }
-/* 物资弹窗（钱包 / 商店 / 诊所 / 公共物资）与舞台顶上的提示 */
+/* 钱包与商店弹窗（钱包 / 商店 / 工匠 / 工坊 / 诊所）与舞台顶上的提示 */
 .ol-supplies-card { width: min(720px, 100%); display: flex; flex-direction: column; gap: 14px; }
 .ol-supplies-card > section { margin: 0; }
 .ol-button[data-alert="1"] { border-color: var(--sk-amber, #e7b13c); box-shadow: 0 0 0 2px #e7b13c66; }
 /* 玩家的地图（world-map.js 挂在 body 下）不能被「隐藏遗留面板」的规则一起藏掉 */
 body.online-player > .wm { z-index: 200; }
-/* 协助 / 格挡询问压在房间面板、物资弹窗、浮动按钮之上（倒计时到了会自动放弃，不能被挡住） */
+/* 协助 / 格挡询问压在房间面板、钱包与商店弹窗、浮动按钮之上（背包浮层 .ovl 更高，有询问时由 online-ui.js 收起）（倒计时到了会自动放弃，不能被挡住） */
 #hs-reaction { z-index: 97; }
 /* 房间暂停横幅：固定在顶栏下方 */
 .ol-pause-bar { position: fixed; z-index: 80; left: 0; right: 0; top: var(--hs-top-height, 0px); padding: 8px 16px; background: #5a1f17; color: #ffe2d6; font-weight: 700; text-align: center; border-bottom: 2px solid #a8432f; }

@@ -61,16 +61,33 @@ async function open(t, mobile = false) {
 async function player(page, patch = {}) { await page.evaluate(patch => fixture.set({ active: true, isHost: false, identity: { id: "p1" }, screen: "battle", ...patch }), patch); }
 const calls = page => page.evaluate(() => fixture.calls);
 const shot = async (page, name) => { if (SHOTS) await page.screenshot({ path: path.join(SHOTS, name), fullPage: false }); };
+// 坚毅生命的真实字段是 shp / shpMax（online-view.js · hiddenSheetKey）：设成不会和别的数字撞上的值
 async function withBag(page, screen = "exploration") {
   await player(page, { screen });
   await page.evaluate(() => {
     fixture.view.state.kuizhi = 520;
-    fixture.view.state.units[0].grit = 7; fixture.view.state.units[0].gritMax = 9;
+    for (const u of fixture.view.state.units) { u.shp = 4321; u.shpMax = 9876; }
     fixture.view.state.bag = { water: 1200, items: [{ id: "medkit", qty: 3 }, { id: "bomb_e", qty: 2 }, { id: "cm_scrap", qty: 4 }] };
     fixture.emit();
   });
 }
-const noGrit = async page => assert.doesNotMatch(await page.evaluate(() => document.body.innerText), /坚毅生命\s*[:：]?\s*\d|gritMax|"grit"/);
+const noGrit = async page => {
+  for (const sel of ["#bp-overlay", "#online-supplies"]) {
+    const txt = await page.evaluate(s => (document.querySelector(s) || {}).innerText || "", sel);
+    assert.doesNotMatch(txt, /4321|9876|坚毅生命\s*[:：]?\s*\d/, `${sel} 不显示坚毅生命数值`);
+  }
+};
+const sub = page => page.locator("#bp-overlay .ws-sub").innerText();
+const bagOpen = page => page.evaluate(() => { const b = document.getElementById("bp-overlay"); return !!b && !b.hidden; });
+
+test("道具目录：任何道具说明都不带坚毅生命的数字（背包在本地查说明，不经过 online-view.js 过滤）", () => {
+  const vm = require("node:vm"), fs = require("node:fs");
+  const ctx = {}; vm.createContext(ctx);
+  vm.runInContext(fs.readFileSync(path.resolve(__dirname, "..", "items.js"), "utf8") + "\n;this.__C = ITEM_CATALOG;", ctx);
+  const hints = Object.entries(ctx.__C).filter(([, v]) => v && v.hint);
+  assert.ok(hints.length > 5);
+  for (const [id, v] of hints) assert.doesNotMatch(v.hint, /坚毅[^，。；]{0,6}\d/, id);
+});
 
 for (const mobile of [false, true]) {
   test(`跑团玩家（${mobile ? "390" : "桌面"}）：「背包」打开共用背包浮层，按类分好；「钱包与商店」只有钱和花钱的地方`, async t => {
@@ -90,6 +107,8 @@ for (const mobile of [false, true]) {
     const bp = page.locator("#bp-overlay");
     await bp.waitFor();
     assert.equal(await bp.evaluate(el => el.classList.contains("ovl")), true);
+    assert.equal(await sub(page), "BACKPACK", "探索中可看可选");
+    assert.equal(await page.evaluate(() => document.activeElement && document.activeElement.hasAttribute("data-bp-close")), true, "焦点在「关闭」");
     assert.match(await bp.innerText(), /废料\s*×\s*4/, "打开就停在有东西的第一个标签（材料）");
     if (mobile) for (const b of await page.locator("#bp-overlay .bp-tab, #bp-overlay .g-btn").all()) assert.ok((await b.boundingBox()).height >= 44, "背包标签 / 关闭 44px");
     await page.click('#bp-overlay [data-bp-tab="consumable"]');
@@ -101,34 +120,64 @@ for (const mobile of [false, true]) {
     await noGrit(page);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await shot(page, `after-bag-${tag}.png`);
-    // 房主加了医疗包：开着的浮层跟着更新
-    await page.evaluate(() => { fixture.view.state.bag.items[0].qty = 5; fixture.emit(); window.BackpackUI.refresh(); });
+    // 房主改了包：只靠收包后的 render，开着的浮层就是这一包（不手动 refresh）
+    await page.evaluate(() => { fixture.view.state.bag.items[0].qty = 5; fixture.emit(); });
     assert.match(await bp.innerText(), /简易医疗包\s*×\s*5/);
+    await page.evaluate(() => { fixture.view.state.bag.items[0].qty = 6; fixture.emit(); });
+    assert.match(await bp.innerText(), /简易医疗包\s*×\s*6/, "每一包都跟上，不慢一包");
+    // Esc 关
+    await page.keyboard.press("Escape");
+    assert.equal(await bagOpen(page), false);
     assert.deepEqual(o.errors, []);
   });
 }
 
-test("跑团玩家：战斗中背包只读、不收起、不挂到被隐藏的 #g-app 上", async t => {
+test("跑团玩家：战斗中背包只读；换画面不收起；轮到我回应协助 / 格挡时收起，不挡住询问", async t => {
   const o = await open(t, true); if (!o) return; const { page } = o; await withBag(page, "battle");
   await page.locator('[data-online="info"][data-info="bag"]').first().click();
   await page.locator("#bp-overlay").waitFor();
-  assert.equal(await page.evaluate(() => document.getElementById("bp-overlay").parentNode === document.body), true);
-  assert.equal(await page.evaluate(() => window.BackpackUI.inBattleMode()), true, "换画面不自动收起");
-  assert.equal(await page.locator("#bp-overlay [data-bp-workshop]").count(), 0, "只读：没有去工坊");
+  assert.equal(await page.evaluate(() => document.getElementById("bp-overlay").parentNode === document.body), true, "挂在 body 上（玩家页隐藏了 #g-app）");
+  assert.equal(await sub(page), "只读（战斗中）");
   await noGrit(page); await shot(page, "after-bag-battle-390.png");
+  // 换画面（战斗 → 结算）：浮层还在
+  await page.evaluate(() => { document.body.dataset.screen = "ended"; fixture.set({ screen: "ended" }); });
+  await page.waitForTimeout(50);
+  assert.equal(await bagOpen(page), true, "换画面不自动收起");
+  // 不轮到我的询问：不收
+  await page.evaluate(() => { fixture.set({ screen: "battle" }); fixture.view.packet.view.ask = { id: "ask-0", kind: "block", deadline: Date.now() + 20000, waitingNames: ["乙"], eligible: false, options: [] }; fixture.emit(); });
+  assert.equal(await bagOpen(page), true);
+  // 轮到我：收起
+  await page.evaluate(() => { fixture.view.packet.view.ask = { id: "ask-1", kind: "block", deadline: Date.now() + 20000, eligible: true, options: [{ helper: "a", label: "红玉格挡" }] }; fixture.emit(); });
+  assert.equal(await bagOpen(page), false, "询问来了，背包浮层收起");
   assert.deepEqual(o.errors, []);
 });
 
-test("联机单局玩家：背包只在标题栏一个入口，正文不再有重复的「背包」按钮", async t => {
-  const o = await open(t, true); if (!o) return; const { page } = o; await player(page, { screen: "exploration" });
-  const rogue = { stage: "camp", act: 1, region: "荒原", day: 3, daysLeft: 4, daysPerAct: 7, supplies: { water: 1000, food: 3, hours: 5 }, workshopAvailable: true,
-    heroes: [{ kit: "kolt", name: "柯尔特", mine: true, level: 2, hp: 30, hpMax: 30, xp: 0, purse: 120, ownerName: "甲", weapons: [] }], items: { medkit: 2 }, vote: { options: [] } };
-  await page.evaluate(r => { fixture.view.mode = "rogue"; fixture.view.packet = Object.assign(fixture.view.packet, { mode: "rogue", rogue: r }); fixture.emit(); }, rogue);
-  assert.equal(await page.locator('[data-online="rogueBackpack"]').count(), 0);
-  assert.ok(await page.locator('[data-online="info"][data-info="bag"]').count() >= 1);
-  assert.match(await page.locator('[data-online="supplies"]').innerText(), /钱包与商店/);
+test("跑团玩家：离开房间后背包浮层收起，不留在标题画面上", async t => {
+  const o = await open(t, true); if (!o) return; const { page } = o; await withBag(page);
   await page.locator('[data-online="info"][data-info="bag"]').first().click();
   await page.locator("#bp-overlay").waitFor();
+  await page.evaluate(() => fixture.set({ active: false }));
+  assert.equal(await bagOpen(page), false);
+  assert.deepEqual(o.errors, []);
+});
+
+test("联机单局玩家：背包只在标题栏一个入口；没有「钱包与商店」按钮（钱和商店都在正文）；探索 → 战斗变只读", async t => {
+  const o = await open(t, true); if (!o) return; const { page } = o; await player(page, { screen: "exploration" });
+  const rogue = { stage: "camp", act: 1, region: "荒原", day: 3, daysLeft: 4, daysPerAct: 7, supplies: { water: 1000, food: 3, hours: 5 }, workshopAvailable: { kits: ["kolt"] },
+    heroes: [{ kit: "kolt", name: "柯尔特", mine: true, level: 2, hp: 30, hpMax: 30, xp: 0, purse: 120, ownerName: "甲", weapons: [] }],
+    bag: [{ kit: "kolt", shared: { material: [{ id: "cm_scrap", name: "废料", qty: 2, hint: "" }], consumable: [], mod: [], key: [] }, personal: null }],
+    cyber: [{ kit: "kolt", name: "柯尔特" }], vote: { options: [] } };
+  await page.evaluate(r => { fixture.view.mode = "rogue"; fixture.view.packet = Object.assign(fixture.view.packet, { mode: "rogue", rogue: r }); fixture.emit(); }, rogue);
+  assert.equal(await page.locator('[data-online="rogueBackpack"]').count(), 0);
+  assert.equal(await page.locator('[data-online="supplies"]').count(), 0, "单局不显示「钱包与商店」");
+  await page.locator('[data-online="info"][data-info="bag"]').first().click();
+  await page.locator("#bp-overlay").waitFor();
+  assert.equal(await sub(page), "BACKPACK");
   await noGrit(page); await shot(page, "after-bag-rogue-390.png");
+  await page.evaluate(() => fixture.set({ screen: "battle" }));
+  assert.equal(await bagOpen(page), true);
+  assert.equal(await sub(page), "只读（战斗中）");
+  assert.equal(await page.locator("#bp-overlay [data-bp-workshop]").count(), 0, "战斗中没有「去工坊」");
+  assert.equal(await page.locator('#bp-overlay [data-bp-tab="cyber"] small').innerText(), "0", "战斗中不给义体方案（和房主一致）");
   assert.deepEqual(o.errors, []);
 });

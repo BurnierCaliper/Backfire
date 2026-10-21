@@ -542,7 +542,8 @@ test("联机：玩家能看角色资料 / 武器 / 背包；小队聊天全程�
   await shot(alice, "5-player-bag");
   const bagText = await alice.locator("#bp-overlay").innerText();
   assert.match(bagText, /简易医疗包/); assert.match(bagText, /×\s*2/); assert.match(bagText, /1d4\+6/);
-  await alice.evaluate(() => BackpackUI.close());
+  await alice.click("#bp-overlay [data-bp-close]");
+  await alice.waitForSelector("#bp-overlay", { state: "hidden" });
   // 战斗中：右侧栏变成「战斗 / 小队」，默认战斗频道，也能切到小队聊天
   await host.evaluate(() => { TrpgFlow.toBattle(); GAME.skip = true; GAME.instant = true; GAME.startOrEnd(); });
   await alice.waitForFunction(() => OnlineGame.getView().screen === "battle");

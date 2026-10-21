@@ -50,9 +50,9 @@
     const side = make("aside", "online-side", "ol-side", { "aria-label": "战斗记录与小队聊天" });
     side.innerHTML = `<nav class="ol-side-tabs" role="tablist"><button type="button" role="tab" data-side="log" class="ol-tab"></button><button type="button" role="tab" data-side="chat" class="ol-tab">小队<span class="ol-badge" hidden></span></button><button type="button" class="ol-side-fold" data-side-fold hidden>展开 ▴</button></nav><ol class="ol-side-log" aria-live="polite"></ol><ol class="ol-side-chat" aria-live="polite"></ol><form class="ol-side-form" id="ol-side-form"><label class="ol-sr-only" for="ol-side-text">小队消息</label><button type="button" class="ol-button ol-dice" data-roll-open="1" title="选一个熟练项掷 d100">🎲 掷骰</button><textarea id="ol-side-text" rows="1" maxlength="500" autocomplete="off" enterkeyhint="send" title="Enter 发送，Shift+Enter 换行" placeholder="和队友说点什么…"></textarea><button type="submit" class="ol-button ol-primary">发送</button></form>`;
     side.hidden = true;
-    const bagBox = make("section", "online-bag", "ol-overlay ol-bag", { role: "dialog", "aria-label": "背包" });
+    const bagBox = make("section", "online-bag", "ol-overlay ol-bag", { role: "dialog", "aria-label": "战绩与任务" });
     bagBox.hidden = true;
-    // 物资（钱包 / 商店 / 诊所 / 队伍公共物资）：收进弹窗，不再压在舞台内容上面把战场、检定挤下去
+    // 钱包与商店（原「物资」：钱包 / 商店 / 工匠 / 工坊 / 诊所；道具在「背包」）：收进弹窗，不再压在舞台内容上面把战场、检定挤下去
     const suppliesBox = make("section", "online-supplies", "ol-overlay ol-bag ol-supplies-box", { role: "dialog", "aria-label": "钱包与商店" });
     suppliesBox.hidden = true;
     let suppliesOpen = false, privUnread = 0, autoResumeTried = false;
@@ -367,6 +367,8 @@
     }
     /** 舞台顶上的「钱包与商店」按钮（以前叫「物资」）：商店 / 工匠 / 工坊 / 诊所开着时带提示 */
     function suppliesButton() {
+      // 联机单局：钱包、商店、工匠、诊所、工坊都在正文和队伍卡上，这个弹窗读的是跑团字段（单局里只剩临时公账，一般是 0）→ 不显示
+      if (view.packet?.mode === "rogue") return "";
       const tags = [view.packet?.shop ? "🛒" : "", view.packet?.smith?.heroes?.length ? "🔨" : "", view.packet?.workshop?.heroes?.length ? "⚙" : "",view.packet?.clinic?.heroes?.length || view.packet?.cyberware?.heroes?.length ? "🦾" : ""].filter(Boolean).join("");
       return button(`钱包与商店${tags ? " · " + tags : ""}`, "supplies", (tags ? 'data-alert="1" ' : "") + 'title="钱包、商店、工匠、工坊、诊所（道具在「背包」）"');
     }
@@ -505,16 +507,17 @@
         <div class="ol-attr-btns">${button("打开诊所 · 义体", "trpgCyberware", "", disabled(), true)}</div></section>`;
     }
     /** 「背包」：队伍的全部道具，用和房主同一个背包浮层（backpack-ui.js）。单局用单局的数据（含各人名下的）；
-     *  跑团用舞台上的 state.bag（online-view.js 白名单：只有 id / 数量 / 水），名字和说明查道具目录；战斗中只读 */
+     *  跑团用舞台上的 state.bag（online-view.js · projectState 白名单：道具 id / name / qty，外加 water），
+     *  说明（hint）在本地查道具目录（和房主 bagDetail 同一套）；战斗中只读 */
     function trpgBagModel() {
-      const bag = (displayState || view.state || {}).bag || {}, inBattle = view.screen !== "exploration";
+      // 背包不参与动画：直接读最新的包（view.state），不读 displayState——render() 里 refresh 在 displayState 赋值之前，读它会慢一包
+      const bag = (view.state || {}).bag || {}, inBattle = view.screen !== "exploration";
       const catOf = id => (global.WorkshopData && global.WorkshopData.itemCategory(id)) || "consumable";
       const shared = { material: [], consumable: [], mod: [], key: [] };
       (bag.items || []).filter(x => x && Number(x.qty) > 0).forEach(x => {
         const c = typeof ITEM_CATALOG !== "undefined" ? ITEM_CATALOG[x.id] : null;
-        const bp = !c && typeof blueprintSpec === "function" ? blueprintSpec(x.id) : null;
-        const k = shared[catOf(x.id)] ? catOf(x.id) : "consumable";
-        shared[k].push({ id: x.id, name: x.name || (c && c.name) || (bp && "图纸·" + bp.name) || x.id, qty: Number(x.qty), hint: (c && c.hint) || (bp && bp.text) || "", category: k });
+        const k = shared[catOf(x.id)] ? catOf(x.id) : "consumable";   // 图纸已登记进 ITEM_CATALOG（rogue-data.js），按目录分到「改装件」
+        shared[k].push({ id: x.id, name: x.name || (c && c.name) || x.id, qty: Number(x.qty), hint: (c && c.hint) || "", category: k });
       });
       return { readOnly: inBattle, inBattle, workshop: null, views: [{ name: "队伍", shared, personal: null }], cyber: [],
         uses: global.WorkshopData ? global.WorkshopData.recipesUsingMaterial : () => [],
@@ -523,9 +526,14 @@
     function openBag() {
       if (!global.BackpackUI) return;
       if (view.packet?.mode === "rogue" && view.packet.rogue) return openBackpack();
+      bagOpened = true;
       BackpackUI.open(() => view.active ? trpgBagModel() : null, { keep: true });
     }
+    /** 只收自己（玩家端）打开的背包，不碰房主那边的背包浮层 */
+    let bagOpened = false;
+    function closeMyBag() { if (bagOpened && global.BackpackUI && global.BackpackUI.isOpen()) global.BackpackUI.close(); if (!(global.BackpackUI && global.BackpackUI.isOpen())) bagOpened = false; }
     function openBackpack() {
+      bagOpened = true;
       if (!global.BackpackUI || !global.WorkshopData) return;
       BackpackUI.open(() => { const r = view.packet?.rogue; return r ? WorkshopData.viewBackpackModel(r, { battle: view.screen !== "exploration" }) : null; }, { openWorkshop: id => openWorkshop(id), keep: true });
     }
@@ -601,7 +609,7 @@
       const cwEntry = global.CyberwareUI && cyberwareSrc() ? `<section class="ol-rogue-box ol-cw-entry" aria-label="义体"><div class="ol-attr-btns">${button("诊所 · 义体", "rogueCyberware", "", false, true)}</div></section>` : "";
       const wk = r.workshop;
       // 工坊：按钮打开浮层（背包在标题工具栏「背包」）（workshop-ui.js / backpack-ui.js，和房主同一套渲染器；数据是 viewFor 的 craft / bag / materialBar …）
-      const workshop = payer && r.workshopAvailable && wk ? `<section class="ol-rogue-box ol-ws-entry" aria-label="工坊"><div class="ol-attr-btns">${r.workshopAvailable && wk ? button("工坊", "rogueWorkshop", "", false, true) : ""}</div></section>` : "";
+      const workshop = payer && r.workshopAvailable && wk ? `<section class="ol-rogue-box ol-ws-entry" aria-label="工坊"><div class="ol-attr-btns">${button("工坊", "rogueWorkshop", "", false, true)}</div></section>` : "";
       const log = (r.log || []).length ? `<section class="ol-rogue-box" aria-label="最近发生"><h3>最近发生</h3><ul>${r.log.map(t => `<li>${esc(t)}</li>`).join("")}</ul></section>` : "";
       return head + over + choice + waits + loot + lootLog + vote + last + heroes + board + task + shop + smith + parts + unmount + clinic + cwEntry + workshop + log;
     }
@@ -1051,9 +1059,11 @@
       if (rogueHost && lastScreen === "lobby" && view.screen !== "lobby") panelOpen = false;   // 开始了：收起房间面板
       lastScreen = view.screen;
       rogueHeroesSeen = heroCount > 0;
-      // 有协助 / 格挡询问轮到我回应：先收起房间面板和物资弹窗，别把询问挡住（倒计时到了会自动放弃）
+      // 有协助 / 格挡询问轮到我回应：先收起房间面板、钱包与商店弹窗、背包浮层（.ovl 8500 会盖住询问），别把询问挡住（倒计时到了会自动放弃）
       const myAsk = view.active && !view.isHost && hs().ask && hs().ask.eligible && !hs().ask.declined;
-      if (myAsk && view.screen !== "lobby") { panelOpen = false; suppliesOpen = false; }
+      if (myAsk && view.screen !== "lobby") { panelOpen = false; suppliesOpen = false; closeMyBag(); }
+      // 离开房间 / 被移出 / 变成房主：玩家打开的背包浮层（keep: true 不会自己收）收起来
+      if (!(view.active && !view.isHost)) closeMyBag();
       panel.hidden = !(panelOpen || view.active && view.screen === "lobby" && !rogueHost);
       pauseBar.hidden = !(view.active && !view.isHost && view.screen !== "lobby" && (paused() || view.offlineWait));
       // 离线等待：显示还剩几秒（到时间自动跳过 / 结束他的行动）；截止时间已换成本机的钟（online-game.js · localDeadlines）
@@ -1324,7 +1334,6 @@
         }
         case "rogueWorkshop": openWorkshop(); break;
         case "matchup": if (global.MatchupUI) global.MatchupUI.toggle(() => matchupOf()); break;
-        case "rogueBackpack": openBackpack(); break;
         case "rogueCyberware": case "trpgCyberware": openCyberware(); break;
         case "rogueCraftJob": {
           const kit = b.dataset.kit, item = byId("ol-wk-item-" + kit)?.value || null, helper = byId("ol-wk-help-" + kit)?.value || null;
@@ -1590,7 +1599,7 @@
     if (typeof api.onPacket === "function") unsubs.push(api.onPacket(playPacket));
     render();
     const instance = { render, open(which = "join") { entry = which; panelOpen = true; render(); }, destroy() {
-      destroyed = true; if (checkReq) { checkReq.destroy(); checkReq = null; } if (battle) { battle.destroy(); battle = null; } playbackGeneration++; actionGeneration++; historyGeneration++; clearTimeout(toastTimer);
+      destroyed = true; closeMyBag(); if (checkReq) { checkReq.destroy(); checkReq = null; } if (battle) { battle.destroy(); battle = null; } playbackGeneration++; actionGeneration++; historyGeneration++; clearTimeout(toastTimer);
       document.removeEventListener("compositionstart", onCompStart, true); document.removeEventListener("compositionend", onCompEnd, true);
       document.removeEventListener("click", onRollOpen); document.removeEventListener("scroll", onListScroll, true); clearTimeout(titleTimer);
       while (hostMounts.length) hostMounts.pop().remove(); document.body.classList.remove("ol-has-side", "ol-host-online", "ol-in-battle");
