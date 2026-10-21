@@ -125,12 +125,12 @@
 - [x] **L-5 【已修 #149：新增 `ROGUE_CONFIG.eliteOverCap`（默认 1），精英战可超过本幕上限】精英战的 +1 级加成常被本幕等级上限吞掉**：`rogue.js:76-81` · `enemyLevel`，`min(b, round(a+(b-a)*t) + bonus)`，`actDay≥6` 后精英与普通战同级；`ROGUE_CONFIG.eliteLevelBonus` 注释写「精英比同时期普通战斗高几级」。可能是有意封顶。读代码判断。
 - [x] **L-6 【已修 #149：`finishBattle` 校验 `run.stage` 和当前节点】`finishBattle` 没有阶段保护**：`acceptTask` / `camp` / `restAtNode` / `afterVictory` 都校验 `run.stage`，只有 `rogue.js:931` · `finishBattle`（及 `rogue-commands.js` 的 `actions.finishBattle`）没有。任务板上调用会在 `advanceNode` 的 `run.task.hunt` 抛 TypeError，非战斗节点调用会把节点「打完」并推进。UI 重复触发才会遇到。读代码判断。
 - [x] **L-7 【已修 #149：新增 `canShortRestAtNode`，按钮灰掉写原因，`restAtNode` 也拒绝】休息点「短休」在没人有次数时仍可点，白白过一站**：`rogue.js:1445` · `restAtNode`，按钮 `rogue-ui.js:378`。`ledgerShortRest` 只写「次数已用完」，`advanceNode` 照走。应灰掉或提示。读代码判断。
-- [ ] **L-8 休息点遭遇战（被偷袭）打赢后不计这场战斗的时间**：撤退 / 败北会 `passHours(NODE.battle.hours)`，打赢只走 `doLongRest`。`rogue.js:931` 起 `finishBattle` 的 ambush 分支。可能是有意并进长休。读代码判断。
+- [x] **L-8 休息点遭遇战（被偷袭）打赢后不计这场战斗的时间**：撤退 / 败北会 `passHours(NODE.battle.hours)`，打赢只走 `doLongRest`。`rogue.js:931` 起 `finishBattle` 的 ambush 分支。可能是有意并进长休。读代码判断。**已定：不改（作者 10/21 确认）。**
 
 **工坊 / 长休**
-- [ ] **L-9 死亡角色能制作，也能给别人打下手**：`trpg.js:105-121` · `trpgCraftOdds` 用 `trpgHeroes()`（含死人）；长休、钱包平分、专长计数都只认活人。主持人手动操作，可能有意放宽。读代码判断。
+- [x] **L-9 死亡角色能制作，也能给别人打下手**：`trpg.js:105-121` · `trpgCraftOdds` 用 `trpgHeroes()`（含死人）；长休、钱包平分、专长计数都只认活人。主持人手动操作，可能有意放宽。读代码判断。**已修（#164，作者定禁掉）：死亡角色不能制作也不能打下手，工坊页打下手人选不列死人；复活后照常。**
 - [x] **L-10 对死亡角色用医疗包，道具白扣**：`ledger.js:853-866` · `ledgerHealItem`，先 `bagAdd(-1)` 再 `healHeroFlesh`（对死人直接 return），日志「实际恢复 0」。应提示「已死亡」且不扣。读代码判断。**已修（#150）：先判断死亡，提示「已死亡」，不扣道具。**
-- [ ] **L-11 长休不恢复死亡角色的武器耐久，README 写「全部武器耐久回满」**：`ledger.js:736` 只在 `!h.dead` 里 `restoreDurability`；`ledgerAfterBattle`（402）照样给死人武器每场 −1。可能有意，README 没写。读代码判断。
+- [x] **L-11 长休不恢复死亡角色的武器耐久，README 写「全部武器耐久回满」**：`ledger.js:736` 只在 `!h.dead` 里 `restoreDurability`；`ledgerAfterBattle`（402）照样给死人武器每场 −1。可能有意，README 没写。读代码判断。**已修（#164，作者定）：战后结算跳过死亡角色的武器，不扣也不恢复；README 补了说明。**
 - [x] **L-12 守夜日志文字和实际不符**：`ledger.js:760` 写「除守夜者外，武器耐久回满」，实际守夜的是角色时他自己的武器照样回满（737），只有武器人守夜那把才不回。读代码判断。**已修（#150）：角色守夜写「全部武器耐久回满」，武器人守夜才写「除守夜的那把武器外」。**
 - [x] **L-13 README「休整」一节过时（#150 已改：过 0 点刷新短休、白天睡 8 小时不换天、维修按点数；「战斗里维修包不会混进去」那句改成维修工具包战斗中也能用）**：README.md:236-237 附近——「每满 24 小时刷新短休次数」实际过 0 点刷新；「长休后进入下一天」实际白天睡 8 小时不换天；「维修工具包 +10 耐久」实际按点数修；「战斗里使用道具……维修包不会混进去」实际 `repair_kit` 带 `combat:true`。读文档与代码判断。
 - [x] **L-14 医疗包 hint 说「治疗内层生命」，实际会溢到外层（#150 已修：hint 改成「从内层往外补，可以治到外层」）**：`items.js:5-6` 的 hint vs `healUnit` 注释「可以治到外层（作者定）」。读代码判断。

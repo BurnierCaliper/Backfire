@@ -105,12 +105,13 @@ function trpgProfLevel(u, prof) {
 function trpgCraftOdds(kit, itemId, diff, helper) {
   const it = craftItem(itemId), u = trpgHeroes().find(h => h.kit === kit);
   if (!it || !u) return null;
+  if (u.dead) return null;   // 死亡角色不能制作（主持人复活后才能做）
   diff = ROGUE_CHECKS.diffs[diff] ? diff : it.diff;
   const level = trpgProfLevel(u, it.prof);
   const hp = (u.layers || []).reduce((a, l) => a + (Number(l.current) || 0), 0), max = (u.layers || []).reduce((a, l) => a + (Number(l.max) || 0), 0);
   const perks = checkPerksFor(u.kit, it.prof, hp * 2 < max);
   const hu = helper && helper !== kit ? trpgHeroes().find(h => h.kit === helper) : null;
-  const helped = !!(hu && trpgProfLevel(hu, it.prof) > 0);
+  const helped = !!(hu && !hu.dead &&trpgProfLevel(hu, it.prof) > 0);
   const adv = !!perks.adv || helped, dis = !!perks.dis && !adv;
   const base = ROGUE_CHECKS.chance[level][["easy", "normal", "hard", "extreme"].indexOf(diff)] || 0;
   let chance = adv ? 1 - (1 - base) * (1 - base) : dis ? base * base : base;
@@ -148,7 +149,12 @@ function trpgCraftOne(c) {
   if (!it) return { notes: ["没有这个配方。"], hours: 0 };
   if (!trpgKnowsRecipe(it.id)) return { notes: [`还不会做${it.name}（在工坊页教会配方）。`], hours: 0 };
   const o = trpgCraftOdds(c.kit, it.id, c.diff, c.helper);
-  if (!o) return { notes: ["没有这名角色。"], hours: 0 };
+  if (!o) {
+    const d = trpgHero(c.kit);
+    return { notes: [d && d.dead ? `${d.name} 已死亡，不能制作。` : "没有这名角色。"], hours: 0 };
+  }
+  const hd = c.helper ? trpgHero(c.helper) : null;
+  if (hd && hd.dead) return { notes: [`${hd.name} 已死亡，不能打下手。`], hours: 0 };
   const rc = CRAFT_RECIPES[it.id];
   const lack = Object.keys(rc).filter(id => bagCount(id) < rc[id]);
   if (lack.length) return { notes: ["材料不够：" + lack.map(id => `${ITEM_CATALOG[id].name} 差 ${rc[id] - bagCount(id)}`).join("，") + "。"], hours: 0 };

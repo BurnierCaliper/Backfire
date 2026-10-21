@@ -24,7 +24,7 @@
     const NAME_KEY = "backfire.online.name";
     const savedName = (() => { try { return localStorage.getItem(NAME_KEY) || ""; } catch (e) { return ""; } })();
     let partyDraft = null;   // 主持人正在勾的队员（还没点「按勾选换队员」）
-    let form = { url: "", name: savedName, roomCode: "", slot: "0", campaignName: "", mode: "trpg", to: "all", text: "", chatText: "" }, assignments = {};
+    let form = { url: "", name: savedName, roomCode: "", slot: "0", campaignName: "", mode: "trpg", to: "all", text: "", chatText: "" }, assignments = {}, transferDraft = {};
     const unsubs = [], nodes = [], titleButtons = [], lastMarkup = {};
     const byId = id => document.getElementById(id);
     const own = () => view.identity && view.identity.id;
@@ -229,7 +229,14 @@
       // 联机跑团：主持人在大厅 / 探索时直接勾选队员（单机的「队伍」页被房间面板挡着）
       const choices = mayAssign && view.mode !== "rogue" && api.partyChoices ? api.partyChoices() : [];
       const partyPicker = choices.length ? `<section class="ol-party-pick" aria-label="队员"><h3>队员</h3><p class="ol-muted">勾选这次跑团的角色。换人后，留下来的角色还是原来的人操控，新加入的先归主持人。</p><div class="ol-party-list">${choices.map(c => `<label class="ol-check"><input type="checkbox" data-party-kit="${esc(c.kit)}"${(partyDraft ? partyDraft.includes(c.kit) : c.on) ? " checked" : ""}> ${esc(c.name)}</label>`).join("")}</div>${button("按勾选换队员", "setParty", "", disabled())}</section>` : "";
-      return `<section><h3>房间成员</h3><ul class="ol-roster">${players().map(p => `<li><span><b>${esc(p.name)}</b>${p.gm ? ' <small>主持人</small>' : ""}</span><span class="${p.online ? "ol-online" : "ol-muted"}">${p.online ? "在线" : "离线"}</span><small>${esc(heroes.filter(h => h.owner === p.id).map(h => h.name).join("、") || (p.gm ? "未分配角色由主持人操作" : "等待分配角色"))}</small>${view.isHost && !p.gm ? seatTools(p) : ""}</li>`).join("")}</ul>${mayAssign ? `<h3 id="ol-assign-head">角色分配</h3><div class="ol-assignments">${heroes.map(h => `<label><span>${esc(h.name)}</span><select data-assign="${esc(h.id)}" aria-label="${esc(h.name)}的玩家">${players().map(p => option(p.id, p.name + (p.gm ? " · 主持人" : ""), (assignments[h.id] || h.owner) === p.id)).join("")}</select></label>`).join("")}</div>${button("保存角色分配", "assign", "", disabled() || !heroes.length)}` : view.isHost && view.screen === "battle" ? '<p class="ol-muted">战斗中不能改角色分配；玩家掉线可以先「接管」，打完回到探索再重新分配。</p>' : ""}</section>${partyPicker}`;
+      return `<section><h3>房间成员</h3><ul class="ol-roster">${players().map(p => `<li><span><b>${esc(p.name)}</b>${p.gm ? ' <small>主持人</small>' : ""}</span><span class="${p.online ? "ol-online" : "ol-muted"}">${p.online ? "在线" : "离线"}</span><small>${esc(heroes.filter(h => h.owner === p.id).map(h => h.name).join("、") || (p.gm ? "未分配角色由主持人操作" : "等待分配角色"))}</small>${view.isHost && !p.gm ? seatTools(p) : ""}</li>`).join("")}</ul>${mayAssign ? `<h3 id="ol-assign-head">角色分配</h3><div class="ol-assignments">${heroes.map(h => `<label><span>${esc(h.name)}</span><select data-assign="${esc(h.id)}" aria-label="${esc(h.name)}的玩家">${players().map(p => option(p.id, p.name + (p.gm ? " · 主持人" : ""), (assignments[h.id] || h.owner) === p.id)).join("")}</select></label>`).join("")}</div>${button("保存角色分配", "assign", "", disabled() || !heroes.length)}` : view.isHost && view.screen === "battle" ? transferMarkup(heroes) : ""}</section>${partyPicker}`;
+    }
+    /** 战斗中转交角色（只在两个单位的回合之间；不满足时按钮灰掉并写明原因；联机单局不能转交） */
+    function transferMarkup(heroes) {
+      if (view.mode === "rogue" || typeof api.transfer !== "function") return '<p class="ol-muted">联机单局开局后座位固定，不能转交；玩家掉线可以先「接管」。</p>';
+      const gate = typeof api.transferState === "function" ? api.transferState() : { ok: false, reason: "这个版本不支持转交" };
+      const rows = heroes.map(h => { const to = transferDraft[h.id] || own(); return `<label><span>${esc(h.name)}</span><select data-transfer="${esc(h.id)}" aria-label="${esc(h.name)}转交给"${gate.ok ? "" : " disabled"}>${players().map(p => option(p.id, p.name + (p.gm ? " · 主持人（收回）" : ""), to === p.id)).join("")}</select>${button("转交", "transfer", `data-hero="${esc(h.id)}"`, !gate.ok || pending)}</label>`; }).join("");
+      return `<h3>战斗中转交角色</h3><p class="ol-muted">只能在两个单位的回合之间转交，武器人跟着角色一起转；每名玩家最多操控一名角色；玩家掉线可以先「接管」。</p>${gate.ok ? "" : `<p class="ol-muted" role="status" data-transfer-reason>现在不能转交：${esc(gate.reason)}</p>`}<div class="ol-assignments">${rows}</div>`;
     }
     /** 主持人对玩家座位的操作：掉线时「接管」他的角色（战斗中也行）；「释放座位」让丢了恢复令牌的人能用同一个昵称重新加入 */
     function seatTools(p) {
@@ -1171,6 +1178,7 @@
       const key = event.target.dataset.field; if (key && Object.hasOwn(form, key)) form[key] = event.target.value; }
     function change(event) {
       input(event); if (event.target.dataset.field === "mode") render(); if (event.target.dataset.assign) assignments[event.target.dataset.assign] = event.target.value;
+      if (event.target.dataset.transfer) transferDraft[event.target.dataset.transfer] = event.target.value;
       if (event.target.dataset.partyKit) partyDraft = [...document.querySelectorAll("[data-party-kit]")].filter(x => x.checked).map(x => x.dataset.partyKit);
     }
     async function click(event) {
@@ -1206,6 +1214,7 @@
         }
         case "openAssign": panelOpen = true; render(); document.getElementById("ol-assign-head")?.scrollIntoView({ block: "start" }); break;
         case "assign": await call(() => api.assign(Object.fromEntries((view.heroes || []).map(h => [h.id, assignments[h.id] || h.owner || own()])))); assignments = {}; break;
+        case "transfer": if (typeof api.transfer === "function") { const hero = b.dataset.hero; await call(() => api.transfer(hero, transferDraft[hero] || own())); transferDraft = {}; } break;
         case "takeOver": if (typeof api.takeOver === "function") await call(() => api.takeOver(b.dataset.player)); break;
         case "releaseSeat":
           if (typeof api.releaseSeat !== "function") break;

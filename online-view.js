@@ -347,7 +347,7 @@
   function projectLogs(logs) {
     // Only host-created semantic events are accepted. Never accept generic
     // text/notes/logPages or a caller-supplied "public:true" escape hatch.
-    const templates = { action: "单位执行了行动", phase: "战斗阶段变化", gm: "主持人调整了战场", round: "回合开始", victory: "战斗胜利", defeat: "战斗结束", retreat: "队伍撤退", gmUpdate: "主持人调整了战场", spawn: "有单位加入战场", remove: "有单位离开战场" };
+    const templates = { action: "单位执行了行动", phase: "战斗阶段变化", gm: "主持人调整了战场", round: "回合开始", victory: "战斗胜利", defeat: "战斗结束", retreat: "队伍撤退", gmUpdate: "主持人调整了战场", spawn: "有单位加入战场", remove: "有单位离开战场", transfer: "主持人转交了角色" };
     return arr(logs).slice(-100).flatMap(row => {
       if (!obj(row) || get(row, "silent") === true || !Object.hasOwn(templates, get(row, "kind"))) return [];
       const out = identifiers(row, { kind: get(row, "kind"), text: templates[get(row, "kind")] }, ["id", "actorId"]);
@@ -369,6 +369,10 @@
           return parts.length ? [`${name}：${parts.join("，")}`] : [];
         });
         if (hits.length) out.text += " → " + hits.join("；");
+      }
+      if (out.kind === "transfer") {
+        const hero = text(get(row, "heroName"), 60), to = text(get(row, "toName"), 60);
+        out.text = get(row, "toGM") === true ? `主持人收回了 ${hero || "一名角色"}` : `主持人把 ${hero || "一名角色"} 交给 ${to || "一名玩家"} 操作`;
       }
       if (out.kind === "phase") {
         enumField(row, out, "phase", ["player", "enemy", "exploration", "ended"]);

@@ -975,7 +975,7 @@
         <div class="tr-row">谁做 ${sel('id="wk-kit"', hs.map(h => [h.kit, h.name]), craftForm.kit)}
           做什么 ${sel('id="wk-item"', items.map(r => [r.id, `${r.name}${trpgKnowsRecipe(r.id) ? "" : "（还不会）"}`]), craftForm.item)}
           难度 ${sel('id="wk-diff"', diffs, craftForm.diff)}
-          打下手 ${sel('id="wk-helper"', [["", "没人帮"]].concat(hs.filter(h => h.kit !== craftForm.kit).map(h => [h.kit, h.name])), craftForm.helper)}</div>
+          打下手 ${sel('id="wk-helper"', [["", "没人帮"]].concat(hs.filter(h => h.kit !== craftForm.kit && !h.dead).map(h => [h.kit, h.name])), craftForm.helper)}</div>
         <div class="r-hint">${esc(it.prof)} · 材料：${mats}${o ? ` · ${["没有熟练", "一级熟练", "二级熟练", "三级熟练"][o.level]} · 成功率 ${pct(o.chance)}${o.adv ? " · 优势" : o.dis ? " · 劣势" : ""}${o.reroll ? " · 失败可重掷" : ""} · ${o.hours} 小时` : ""}</div>
         <div class="tr-row">${known ? `<button class="g-btn" data-craft="roll" ${o && o.base ? "" : "disabled"}>掷骰制作</button>
           <button class="g-btn small" data-craft="ok">记成功（玩家掷的）</button><button class="g-btn small" data-craft="fail">记失败（玩家掷的）</button>` : '<span class="r-hint">还不会这张配方：在下面教会。</span>'}</div>
