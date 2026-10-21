@@ -15,6 +15,10 @@
  *   矿底 floor：更黑，白天黑夜几乎没区别（光照 fixed），全靠提灯（战场两盏矿灯 + 坑壁上两盏，克制）。战场后面是坑底的岩壁，
  *            脚下两道横管、几根竖管顺着坑壁往上、阀门，横管上的排气口时不时喷气；坑壁脚下几块大石头；地台上石头和一截截管子
  *   第二采矿场：三个场景都是第一采矿场的变体——色调更红（PALETTE.mine2），时不时喷火的金属管道（FIRE），橙红发光的岩石（GLOWROCK、地台上带发光裂纹的石头）
+ *   第三采矿场（PIT3 / METEOR / CRYSTAL）：坑浅，只有矿外 / 矿底。
+ *     矿外 rim3：站在浅坑边上，看得到坑底一直铺到远处（越远越暗、越小），对面几级台阶的坑壁很小；坑底偏右半截埋着巨大的陨石
+ *     矿底 floor3：战场后面不远是陨石砸出来的坑，巨大的陨石半截埋在坑里、几乎占满画面上半截；后面远处一级级的坑壁；光照不分白天黑夜
+ *     陨石：近似圆、月球的灰、一个个月球坑，发紫光（亮的坑底、光晕、紫色点光源）；地台上、坑里、坑沿上到处是紫色晶簇；几处时不时跳紫色电弧
  *
  * 地台上的装饰只摆在左右两条边带和左右矮一截的台子上（站位区以外，见 hd2d-scene-art.js · zoneSpots），不压住站位、铭牌；
  * 战场周围的东西都在战场范围外面（后面先让开灯）。只读布局给的地台 / 战场范围，不碰单位数据（没有坚毅生命）。
@@ -1488,8 +1492,7 @@
     // 坑沿上、战场两边后面（横着在战场外面）：整丛都在坑沿后面（灯后面）
     for (let i = 0; i < CR.lip; i++) { const x = env.cx + (R() * 2 - 1) * (env.hx + 6), s = Math.min(1.1, sz({ x, y: gY, z: d.rimZ }) * 0.7); lip.push({ x, y: gY, z: d.rimZ - 0.2 - s * 0.95, s }); }
     for (let i = 0; i < CR.side; i++) { const sd = i % 2 ? 1 : -1, s = 0.5 + R() * 0.6; side.push({ x: env.cx + sd * (env.hx + 1.6 + R() * 5), y: gY, z: d.rimZ - 0.2 - s * 0.95 - R() * 0.6, s }); }
-    const tips = crystalField(kit, env, P, R, pit, "crystal");
-    crystalField(kit, env, P, R, lip.concat(side), "crystal");
+    const tips = crystalField(kit, env, P, R, pit, "crystal").concat(crystalField(kit, env, P, R, lip.concat(side), "crystal"));   // 电弧也从坑沿上的晶簇跳到陨石上
     if (art.backdrop.fore) foreRocks(kit, env, P, R, b, FORE[art.backdrop.fore]);
     const tex = env.keep(kit.smokeTexture()), pickArc = arcPicker(tips, anchors, d.pxAt);
     for (let i = 0; i < (art.backdrop.arcs || 0); i++) arcEmitter(kit, env, P, i, pickArc, d.pxAt, tex);
