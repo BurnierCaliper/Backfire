@@ -19,6 +19,7 @@ const packs = () => { city(); return art(); };
 /** 做好了的场景（区域、场景 id、地面主题），远景里一定有的东西（userData.art） */
 const DONE = [
   { region: "外城区", scene: "street", key: "outer_street", must: ["shack", "house", "pipe", "cliff"] },
+  { region: "巨人城", scene: "city", key: "giant_road", must: ["curb", "sidewalk", "tower", "glassTower", "adScreen"] },
   { region: "下水道", scene: "tunnel", key: "sewer_tunnel", must: ["tunnelWall", "tunnelRib", "rivet", "lightRing", "lampPool", "wallLamp", "wallPipe", "outfall"] }
 ];
 const PARTY = ["kolt", "helu", "ruby", "yuito"];
@@ -233,10 +234,12 @@ test("装饰不压住铭牌（#241）：远景、中景、近景里，地台上�
         root.add(bd.group);
         root.updateMatrixWorld(true);
         const b = layout.bounds, lampZ = b.minZ - L.CONFIG.lamps.back;
-        // 战场后沿后面的点挡不到任何人：镜头（远 / 中 / 近景都在后沿前面）到每个人脚下那条线上的点都在后沿前面。
-        // 下水道的拱顶往头顶弯过来（#241 截图验收），按「沿视线的深度」算会比后排的人近，但它在后沿后面、画面上沿外面，挡不到人
+        // 战场后沿后面、战场左右外面的点挡不到任何人：镜头（远 / 中 / 近景都在后沿前面、左右在战场范围里）到每个人脚下那条线上的点，
+        // 都在后沿前面、战场左右范围里。下水道的拱顶往头顶弯过来（#241 截图验收）、巨人城两边的高楼冲出画面，按「沿视线的深度」或屏幕上的外框算
+        // 会比人近 / 盖住铭牌，但它们在后沿后面 / 战场左右外面，挡不到人（铭牌是网页上的一层，永远在 3D 画面上面）
+        const inside = (p) => p.z >= b.minZ - 1e-6 && p.x >= b.minX - 1e-6 && p.x <= b.maxX + 1e-6;
         const things = artOf(root).filter(o => !o.obj.parent || !o.obj.parent.userData.art)
-          .map(o => ({ what: o.what, pts: pointsOf(THREE, o.obj).filter(p => p.z >= b.minZ - 1e-6) })).filter(th => th.pts.length);
+          .map(o => ({ what: o.what, pts: pointsOf(THREE, o.obj).filter(inside) })).filter(th => th.pts.length);
         artOf(bd.group).forEach(({ obj, what }) => {
           const box = new THREE.Box3().setFromObject(obj);
           layout.zones.forEach(z => {
@@ -247,7 +250,7 @@ test("装饰不压住铭牌（#241）：远景、中景、近景里，地台上�
           assert.ok(behind || aside || before, `${d.key} ${bdx.id}：远景里的 ${what} 没让开灯 / 战场（z ${box.min.z.toFixed(2)}…${box.max.z.toFixed(2)}，灯在 ${lampZ.toFixed(2)}）`);
         });
         for (const lens of lenses(layout)) {
-          assert.ok(lens.cam.pos.z >= b.minZ, `${d.key} ${bdx.id} ${lens.tag}：镜头在战场后沿前面`);
+          assert.ok(lens.cam.pos.z >= b.minZ && lens.cam.pos.x >= b.minX && lens.cam.pos.x <= b.maxX, `${d.key} ${bdx.id} ${lens.tag}：镜头在战场后沿前面、左右在战场范围里`);
           things.forEach(th => {
             const s = screenOf(lens.cam, th.pts);
             layout.units.forEach(u => {
@@ -266,7 +269,47 @@ test("装饰不压住铭牌（#241）：远景、中景、近景里，地台上�
   } finally { P.restore(); }
 });
 
-/* ---------- 3. 下水道 ---------- */
+/* ---------- 3. 巨人城 ---------- */
+test("巨人城（#241）：战场在马路上（沥青、车道线、路沿、人行道）；两边一栋挨一栋的楼比默认镜头的画面上沿高得多（冲出画面），马路尽头一排玻璃楼；广告屏隔几秒换画面，减少动态效果时不换；蓝色调，夜里灯更亮", async (t) => {
+  const P = await protoEnv(t);
+  if (!P) return;
+  const { B, A } = P;
+  try {
+    const S = H.load().BattleSim, d = DONE.find(x => x.scene === "city");
+    for (const id of Object.keys(BOARDS)) {
+      const layout = layoutOf(BOARDS[id](S), d, "night"), b = layout.bounds, bd = backdropOf(B, layout, "night");
+      let road = null;
+      const side = { "-1": 0, "1": 0 }, ads = [];
+      bd.group.traverse(o => {
+        if (o.userData.road === "asphalt") road = o;
+        if (o.userData.art === "adScreen") ads.push(o);
+        if (o.userData.art !== "tower") return;
+        const box = new P.THREE.Box3().setFromObject(o), x = (box.min.x + box.max.x) / 2, zc = (box.min.z + box.max.z) / 2;
+        side[x < (b.minX + b.maxX) / 2 ? "-1" : "1"]++;
+        assert.ok(box.max.y > L.frameTop(layout.camera, zc) * 2, `${id}：两边的楼冲出画面（高 ${box.max.y.toFixed(1)}，画面上沿 ${L.frameTop(layout.camera, zc).toFixed(1)}）`);
+      });
+      assert.ok(side["-1"] >= 2 && side["1"] >= 2, `${id}：马路两边都有高楼（${side["-1"]} / ${side["1"]}）`);
+      assert.ok(road && road.position.y > L.CONFIG.groundY && road.position.y < 0, `${id}：战场在马路上（马路铺在地面上、比地台低）`);
+      const g = new P.THREE.Box3().setFromObject(road);
+      assert.ok(g.min.x < b.minX && g.max.x > b.maxX && g.min.z < b.minZ && g.max.z > b.maxZ, `${id}：马路比战场宽、从战场后面一直铺到前面`);
+      assert.ok(ads.length >= 3, `${id}：楼上挂着广告屏（${ads.length}）`);
+      const before = ads.map(a => a.material);
+      for (let i = 0; i < 100; i++) bd.update(i * 0.1, 0);
+      assert.deepEqual(ads.map(a => a.material), before, `${id}：减少动态效果时广告屏不换`);
+      for (let i = 0; i < 100; i++) bd.update(i * 0.1, 0.1);
+      assert.ok(ads.some((a, i) => a.material !== before[i]), `${id}：广告屏隔几秒换一张画面`);
+      bd.dispose();
+    }
+    const TH = { day: { hemi: 0.9, sunI: 2.7, rimI: 0.55, exposure: 1, lamp: 0.25, fog: 0xd6b985, ground: 0x6e5b42, hemiSky: 0xfff1d8, hemiGround: 0x735c40, sun: 0xfff0d2, rim: 0xfff0c8, sky: ["#f6e3b4", "#ecc98c", "#dcac6a", "#c29a66"], grade: { temp: [1, 1, 1] } } };
+    TH.night = Object.assign({}, TH.day, { hemi: 0.6, sunI: 1.25, lamp: 1.5 });
+    const day = A.lighting(TH, "day", "giant_road").T, night = A.lighting(TH, "night", "giant_road").T, rgb = (c) => [(c >> 16) & 255, (c >> 8) & 255, c & 255];
+    [day.fog, day.hemiSky].forEach(c => { const [r, , bl] = rgb(c); assert.ok(bl > r - 40, "蓝色调：雾、天光往蓝靠了"); });
+    assert.ok(day.grade.temp[2] > day.grade.temp[0], "调色偏冷蓝");
+    assert.ok(night.lamp > TH.night.lamp && night.hemi > TH.night.hemi, "夜里灯火通明：灯更亮、环境光更亮");
+  } finally { P.restore(); }
+});
+
+/* ---------- 4. 下水道 ---------- */
 test("下水道（#241）：在巨大圆管的里面——管壁从灯后面往后往上弯，最高处比默认镜头的画面上沿高、在天幕前面（看不到天）；地上铺满污水，贴图在流，减少动态效果时不流；光照不分白天黑夜，比外城区暗", async (t) => {
   const P = await protoEnv(t);
   if (!P) return;
