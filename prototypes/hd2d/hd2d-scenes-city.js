@@ -4,7 +4,8 @@
  * 怎么接进画面见 hd2d-scene-art.js（#242 的登记处）：这里不 import three.js，three.js 和画贴图 / 拼几何体的小工具由挂钩那边打包成 kit 传进来。
  *
  *   外城区 street：黄沙上的贫民窟。地面是黄沙（车辙、脚印、零碎的垃圾），地台侧面是一块块拼起来的瓦楞铁皮；
- *                  地台上零星的油桶、旧轮胎；战场后面、左右两边一圈矮房子和铁皮棚屋（不挡战场）
+ *                  地台上零星的油桶、旧轮胎；战场后面、左右两边一圈矮房子和铁皮棚屋（不挡战场）；
+ *                  再远处横穿整个画面的大管道（架在支架上、一道道法兰、几盏红灯），最后面一道沙岩悬崖（左右两边的更高，像峡谷）
  *
  * 地台上的装饰只摆在左右两条边带和左右矮一截的台子上（站位区以外，见 hd2d-scene-art.js · zoneSpots），不压住站位、铭牌；
  * 战场周围的东西都在战场范围外面（后面先让开灯，hd2d-scene-art.js · around）。只读布局给的地台 / 战场范围，不碰单位数据（没有坚毅生命）。
@@ -32,7 +33,7 @@
    *   shack / house   铁皮棚屋 / 矮房子的宽、高、深的范围（世界单位）；house = 几成是矮房子（其余是铁皮棚屋） */
   const SLUM = {
     margin: { back: 0.5, side: 0.9 },
-    rows: [{ gap: 0, step: 1.7, jitter: 0.25 }, { gap: 2.0, step: 2.0, jitter: 0.3 }, { gap: 4.2, step: 2.3, jitter: 0.3 }],
+    rows: [{ gap: 0, step: 1.7, jitter: 0.25 }, { gap: 2.0, step: 2.0, jitter: 0.3 }],
     reach: 8,
     side: [{ gap: 0, step: 1.8 }, { gap: 2.1, step: 2.1 }],
     shack: { w: [1.0, 1.5], h: [0.75, 1.05], d: [0.8, 1.1] },
@@ -42,6 +43,17 @@
   /** 一间棚屋 / 矮房子的样子（× 这一间的宽 / 进深 / 高）：roof 屋顶比墙宽多少、深多少，lean 屋顶往门那边挪多少，eave 中心离门前那条线至少多远
    *  （= 屋顶伸出去的那一截：roof.d / 2 + lean，再留一点），door / win 门洞、窗洞的宽高 */
   const HUT = { roof: { w: 1.14, d: 1.3 }, lean: 0.06, eave: 0.75, tilt: { shack: 0.16, house: 0.05 }, door: [0.26, 0.62], win: [0.18, 0.2] };
+  /** 贫民窟后面、再远处（都在天幕前面，离天幕 sky 远；高度 × 那里「画面上沿那条视线」能放多高 hmax）：
+   *   pipes   横穿整个画面的大管道（几根）：sky 离天幕多远、r 半径（× hmax，至少 min）、y 管中心多高（× hmax，至少 2.4 个半径：支架露得出来）、
+   *           k 远近（0–1，越远越偏雾色）；
+   *           每隔 flange 一道法兰、每隔 legs 一副支架；warn 几盏一闪一闪的红灯
+   *   cliff   沙岩悬崖：一段段（宽 w）一层层沙岩叠起来（layers 层，越往上越往里收 inset），高 h（× hmax），离天幕 sky、厚 d；
+   *           wings 左右两边的高多少倍（像夹着这片贫民窟的峡谷），reach 往战场左右各铺出去多宽 */
+  const FAR = {
+    pipes: [{ sky: 3.4, r: 0.13, min: 0.5, y: 0.36, k: 0.55 }, { sky: 2.5, r: 0.085, min: 0.34, y: 0.22, k: 0.7 }],
+    flange: 2.6, legs: 4.4, warn: 3,
+    cliff: { sky: 1.25, d: 1.1, w: [2.4, 4.6], h: [0.5, 0.82], layers: [3, 5], inset: 0.08, wings: 1.3, reach: 26 }
+  };
   /** 每个场景（键 = 地面主题）：
    *   palette   PALETTE 的哪一套
    *   decor     地台上的装饰：band 左右边带上几个、ledge 台子上几个、size 半径范围、kinds 摆什么（barrel 油桶、tire 旧轮胎），轮着挑
@@ -51,7 +63,7 @@
     outer_street: {
       palette: "street",
       decor: { band: 3, ledge: 2, size: [0.16, 0.22], kinds: ["barrel", "barrel", "tire"] },
-      backdrop: { slum: true, band: "desert" },
+      backdrop: { slum: true, pipes: true, cliffs: true, band: "desert" },
       light: { all: { tint: { fog: [0xd8b47a, 0.25], hemiGround: [0xb08850, 0.35] } } }
     }
   };
@@ -274,6 +286,49 @@
     });
   }
 
+  /** 横穿整个画面的大管道（FAR.pipes）：一根根架在支架（两条腿 + 托住管子的横梁）上，每隔一段一道法兰；
+   *  前面那根上几盏红灯一闪一闪（减少动态效果时一直亮着）。法兰、支架是实例网格 */
+  function bigPipes(kit, env, R) {
+    const THREE = kit.THREE, F = FAR, y0 = L.CONFIG.groundY, from = env.cx - env.hx - F.cliff.reach, to = env.cx + env.hx + F.cliff.reach, len = to - from;
+    const o = new THREE.Object3D();
+    F.pipes.forEach((p, i) => {
+      const z = env.skyZ + p.sky, hm = Math.max(1, env.topY(z) * 0.84), r = Math.max(p.min, hm * p.r), y = y0 + Math.max(hm * p.y, r * 2.4), M = env.mats(p.k), g = new THREE.Group();
+      g.add(kit.put(new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 14, 1, true), M.body), (from + to) / 2, y, z));
+      g.children[0].rotation.z = Math.PI / 2;
+      const nF = Math.floor(len / F.flange), fl = new THREE.InstancedMesh(new THREE.CylinderGeometry(r * 1.12, r * 1.12, r * 0.22, 14), M.dark, nF);
+      for (let k = 0; k < nF; k++) { o.position.set(from + (k + 0.5) * F.flange, y, z); o.rotation.set(0, 0, Math.PI / 2); o.updateMatrix(); fl.setMatrixAt(k, o.matrix); }
+      const nL = Math.floor(len / F.legs), legH = y - r * 0.9 - y0;
+      const legs = new THREE.InstancedMesh(new THREE.BoxGeometry(r * 0.22, legH, r * 0.22), M.dark, nL * 2);
+      const beams = new THREE.InstancedMesh(new THREE.BoxGeometry(r * 0.3, r * 0.25, r * 2.4), M.dark, nL);
+      for (let k = 0; k < nL; k++) {
+        const x = from + (k + 0.5) * F.legs + (R() - 0.5) * 0.6;
+        [-1, 1].forEach((s, j) => { o.position.set(x, y0 + legH / 2, z + s * r * 0.9); o.rotation.set(s * 0.12, 0, 0); o.updateMatrix(); legs.setMatrixAt(k * 2 + j, o.matrix); });
+        o.position.set(x, y - r * 0.95, z); o.rotation.set(0, 0, 0); o.updateMatrix(); beams.setMatrixAt(k, o.matrix);
+      }
+      g.add(fl, legs, beams);
+      env.group.add(tag(g, "pipe"));
+      if (i === 0) for (let k = 0; k < F.warn; k++) env.blinker(env.cx + (k / Math.max(1, F.warn - 1) - 0.5) * env.hx * 1.6 + (R() - 0.5), y + r + 0.12, z, R());
+    });
+  }
+  /** 沙岩悬崖（FAR.cliff）：一段段、一层层沙岩（沙色 / 岩色轮着，越往上越往里收），顶上高低错落；战场左右两边外面的更高，像夹着这片贫民窟的峡谷。
+   *  用远景最远那层的材质（偏雾色） */
+  function sandCliffs(kit, env, R) {
+    const C = FAR.cliff, z = env.skyZ + C.sky, hm = Math.max(1, env.topY(z) * 0.84), M = env.mats(1), g = new kit.THREE.Group();
+    const from = env.cx - env.hx - C.reach, to = env.cx + env.hx + C.reach;
+    for (let x = from; x < to;) {
+      const w = A.span(R, C.w), wing = Math.abs(x + w / 2 - env.cx) > env.hx + 2 ? C.wings : 1;
+      const h = hm * A.span(R, C.h) * wing, n = Math.round(A.span(R, C.layers));
+      let y = L.CONFIG.groundY;
+      for (let i = 0; i < n; i++) {
+        const hh = h / n * (0.75 + R() * 0.5), k = 1 - i * C.inset;
+        g.add(kit.box(i % 2 ? M.rock : M.sand, w * k, hh, C.d * k, x + w / 2, y + hh / 2, z + (R() - 0.5) * 0.2));
+        y += hh;
+      }
+      x += w * (0.85 + R() * 0.2);
+    }
+    env.group.add(tag(g, "cliff"));
+  }
+
   /* ---------- 挂钩：远景 ---------- */
   /** 天边画的远景：先借现成的（沙漠的桌山：远处的沙岩悬崖） */
   function band(kit, colors, seed, a) {
@@ -282,7 +337,10 @@
   /** 中景、战场周围的装饰、环境动画（hd2d-backdrop.js · buildBackdrop 交过来）：返回 { groundEdge }（地台外面那片地一直铺到天幕 = 不给） */
   function backdrop(kit, env, a) {
     const art = a.art, P = PALETTE[art.palette], b = boundsOf(env), seed = seedOf(a.key) + Math.round(env.hx * 10) + Math.round(env.hz * 7);
+    const R = A.rand(seed + 17);
     if (art.backdrop.slum) slumScene(kit, env, art, P, b, seed);
+    if (art.backdrop.pipes) bigPipes(kit, env, R);
+    if (art.backdrop.cliffs) sandCliffs(kit, env, R);
     return {};
   }
 
