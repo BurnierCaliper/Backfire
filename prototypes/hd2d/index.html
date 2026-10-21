@@ -21,7 +21,6 @@
 </svg>
 
 <div id="stage"></div>
-<div id="vignette"></div>
 
 <header id="topbar">
   <span class="brand">BACKFIRE · HD-2D</span>
@@ -32,6 +31,7 @@
     <span class="compact" id="tb-compact"></span>
   </div>
   <select id="demo-select" aria-label="切换演示战场"></select>
+  <select id="region-select" aria-label="切换区域（地面、远景、灯跟着变）" title="这场战斗在哪个区域：地面、远景、灯跟着变（也可以在网址后面加 ?region=沙漠）"></select>
   <button class="toggle" id="demo-btn" aria-label="切换演示战场">换场</button>
 </header>
 
@@ -58,11 +58,15 @@
 <div id="toast"></div>
 <div id="loading">载入战场……</div>
 
-<div id="calc-core" hidden></div>
+<div id="calc-core" hidden>
+  <!-- 旧计算器的元素：app.js 的 syncBladeSel 会逐个改 bladeSel 的 options，替身 div 没有 options 会报错，所以这个照 game.html 放真的下拉框 -->
+  <select id="bladeSel"><option value="niu">丹生谷（火）</option><option value="naruto">鳴門（冰）</option></select>
+</div>
 <script>
-/* 垫片（照 game.html 的做法）：app.js 在有页面时会自己跑 init()，去找旧计算器的 presetSelect、zoneMode 等一大批元素，
- * 这个原型页面里没有，找不到就会报 Cannot set properties of null。这里让「不认识的 id」拿到一个藏起来的替身，
- * 原型自己的元素（下面这些前缀）照实返回，不被替身骗过。也不让计算器读写它自己的存档。不改 app.js。 */
+/* 垫片（照 game.html 的做法）：app.js 在有页面时会自己跑 init()，去找旧计算器的 presetSelect、zoneMode、partySize 等一大批元素，
+ * 这个原型页面里没有，找不到就会报 Cannot set properties of null。这里让「不认识的 id」拿到一个藏起来的替身（div），
+ * 原型自己的元素（OWN 里逐个列出的 id，整个匹配，不按前缀——以前按前缀，partySize 被 party 拦下拿到 null）照实返回，
+ * 不被替身骗过。也不让计算器读写它自己的存档。不改 app.js。 */
 window.GAME_MODE = true;
 (function () {
   var add = window.addEventListener.bind(window);
@@ -75,7 +79,7 @@ window.GAME_MODE = true;
   Storage.prototype.getItem = function (k) { return calcKey(String(k)) ? null : gi.call(this, k); };
   Storage.prototype.setItem = function (k, v) { if (calcKey(String(k))) return; return si.call(this, k, v); };
   var byId = Document.prototype.getElementById;
-  var OWN = /^(stage|vignette|topbar|tb-|demo-|party|log|dock|skills|toast|loading|calc-core)/;
+  var OWN = /^(?:stage|topbar|tb-turn|tb-weather|tb-map|tb-compact|demo-select|region-select|demo-btn|party|party-toggle|party-list|logdrawer|log-toggle|log-body|dock|dock-toggle|dock-who|dock-hint|skills|toast|loading|calc-core)$/;
   Document.prototype.getElementById = function (id) {
     var e = byId.call(this, id);
     if (e || OWN.test(String(id))) return e;
@@ -166,9 +170,10 @@ function hurt(st, kit, frac) {
 }
 const unit = (st, kit) => st.units.find(x => x.kit === kit);
 
+/* region：这场战斗默认在哪个区域（游戏里的区域名，hd2d-layout.js 的 REGIONS）。默认地台的地面、远景、灯都跟着它；顶栏的区域下拉框 / ?region= 可以换 */
 const DEMOS = [
   {
-    id: "mine", name: "第一采矿场 · 三区直排 · 晴天", short: "第一采矿场", theme: "dusk", backdrop: "mine",
+    id: "mine", name: "三区直排 · 晴天", region: "第一采矿场", theme: "dusk",
     make() {
       const st = BattleSim.setup({
         party: PARTY, zoneMode: 3, seed: "hd2d-mine",
@@ -185,7 +190,7 @@ const DEMOS = [
     }
   },
   {
-    id: "desert", name: "沙漠 · 2×2 · 沙暴", short: "沙漠", theme: "day", backdrop: "desert",
+    id: "desert", name: "2×2 · 沙暴", region: "沙漠", theme: "day",
     make() {
       const st = BattleSim.setup({
         party: PARTY, board: "square4", weather: "sand", seed: "hd2d-desert",
@@ -203,7 +208,7 @@ const DEMOS = [
     }
   },
   {
-    id: "cross", name: "十字五区 · 夜晚 · 雷鸣", short: "十字五区", theme: "night", backdrop: "night",
+    id: "cross", name: "十字五区 · 夜晚 · 雷鸣", region: "外城区", theme: "night",
     make() {
       const st = BattleSim.setup({
         party: PARTY, board: "cross5", weather: "thunder", seed: "hd2d-cross",
@@ -225,16 +230,21 @@ const DEMOS = [
 
 /* ---------- 状态 ---------- */
 let sc = null, demo = null, st = null, actorId = null;
+/** 区域：顶栏下拉框 / 网址的 ?region= 选的（区域名、地图地点 id，或者认不得的名字 = 看兜底的样子）；null = 按演示默认的 */
+let regionPick = null;
+const regionNow = () => (regionPick != null ? regionPick : demo.region);
 const weatherText = (w) => (!w || w === "none") ? "晴天" : (typeof weatherName === "function" ? weatherName(w) : w);
 
+/** 排战场：铭牌是固定像素大小的 DOM，所以把真实的画面大小和上下被面板盖住的像素交给布局，它按同一个镜头算站位；
+ *  区域（地面、远景、灯）和光影主题（灯白天 / 夜里几盏）也交给布局 */
 function build() {
-  if (!st) return null;
-  return L.build(st, { portrait: !!(sc && sc.portrait) });
+  if (!st || !sc) return null;
+  return L.build(st, { portrait: !!sc.portrait, view: sc.view(), region: regionNow(), theme: demo.theme });
 }
 function repaint(resetView) {
   const layout = build();
   if (!layout) return;
-  sc.setBattle(layout, { weather: st.weather, theme: demo.theme, backdrop: demo.backdrop, actorId });
+  sc.setBattle(layout, { weather: st.weather, theme: demo.theme, actorId });
   if (resetView) sc.refit();
   renderUI(layout);
 }
@@ -242,12 +252,13 @@ function repaint(resetView) {
 /* ---------- 界面 ---------- */
 function players() { return st.units.filter(u => u.isPlayer && !u.hidden && !u.dead && !u.weaponOf); }
 function renderUI(layout) {
+  const place = layout.region || "未知区域";
   $("tb-turn").textContent = st.turnNo || 1;
   $("tb-weather").textContent = weatherText(st.weather);
-  $("tb-map").textContent = demo.name;
+  $("tb-map").textContent = place + " · " + demo.name;
   // 手机上的精简顶栏：R1 · 晴 · 第一采矿场
   const wt = weatherText(st.weather);
-  $("tb-compact").textContent = "R" + (st.turnNo || 1) + " · " + wt.replace(/天$/, "") + " · " + demo.short;
+  $("tb-compact").textContent = "R" + (st.turnNo || 1) + " · " + wt.replace(/天$/, "") + " · " + place;
   // 队伍栏：只用铭牌数据（没有坚毅生命）
   const plates = {};
   layout.units.forEach(u => { plates[u.id] = u.plate; });
@@ -304,13 +315,13 @@ function wirePanel(panelId, btnId, labelOn, labelOff, startOpen) {
   b.addEventListener("click", () => set(p.classList.contains("collapsed")));
   set(startOpen);
 }
-/** 取景时让开顶栏和底部技能栏 */
+/** 取景时让开顶栏和底部技能栏；让开的大小变了，铭牌的站位也跟着重排 */
 function reinset(refit) {
   if (!sc) return;
   const top = $("topbar").offsetHeight;
   const bottom = $("dock").offsetHeight;
   sc.setInsets({ top: top + 6, bottom: bottom + 4 });
-  if (refit) sc.refit();
+  repaint(refit);
 }
 
 /* ---------- 启动 ---------- */
@@ -320,22 +331,39 @@ function loadDemo(id) {
   const p = players();
   actorId = p.length ? p[0].id : null;
   $("demo-select").value = demo.id;
+  syncRegion();
   repaint(true);
+}
+/** 区域下拉框：「按演示」（显示演示默认的区域）、配置表里的每个区域、「认不得的区域」（看兜底的样子）。网址跟着改，截图时复制网址就能回到同一个画面 */
+const UNKNOWN = "?";
+function syncRegion() {
+  const sel = $("region-select");
+  sel.options[0].textContent = "区域：按演示（" + demo.region + "）";
+  sel.value = regionPick == null ? "" : L.regionName(regionPick) || UNKNOWN;
+  const q = new URLSearchParams(location.search);
+  q.set("demo", demo.id);
+  if (regionPick == null) q.delete("region"); else q.set("region", regionPick);
+  try { history.replaceState(null, "", location.pathname + "?" + q.toString()); } catch (e) { /* 打不开 history（例如本地文件）就算了 */ }
 }
 function boot() {
   const phone = window.matchMedia("(max-width: 720px)").matches;
   wirePanel("dock", "dock-toggle", "技能 ▼", "技能 ▲", !phone);
   wirePanel("party", "party-toggle", "队伍 ◀", "队伍 ▶", !phone);
   wirePanel("logdrawer", "log-toggle", "日志 ▶", "日志 ◀", false);
-  $("demo-select").innerHTML = DEMOS.map(d => `<option value="${d.id}">${esc(d.name)}</option>`).join("");
+  $("demo-select").innerHTML = DEMOS.map(d => `<option value="${d.id}">${esc(d.region + " · " + d.name)}</option>`).join("");
   $("demo-select").addEventListener("change", e => loadDemo(e.target.value));
   $("demo-btn").addEventListener("click", () => loadDemo(DEMOS[(DEMOS.indexOf(demo) + 1) % DEMOS.length].id));   // 手机：小按钮轮流切
+  $("region-select").innerHTML = `<option value="">区域：按演示</option>` + Object.keys(L.REGIONS).map(n => `<option value="${esc(n)}">区域：${esc(n)}</option>`).join("") +
+    `<option value="${UNKNOWN}">区域：认不得（兜底）</option>`;
+  $("region-select").addEventListener("change", e => { regionPick = e.target.value || null; syncRegion(); repaint(true); });
+  const params = new URLSearchParams(location.search);
+  regionPick = params.get("region") || null;      // ?region=沙漠 / ?region=mine_1（地图地点 id 也认）
   sc = createHd2dScene($("stage"), {
-    onPortraitChange() { if (st) { repaint(true); } }
+    onPortraitChange() { if (sc && st) repaint(true); },
+    onViewChange() { if (sc && st) reinset(true); }      // 窗口大小变了：按新画面重排铭牌、镜头回到默认
   });
   reinset(false);
-  window.addEventListener("resize", () => reinset(false));
-  loadDemo(new URLSearchParams(location.search).get("demo") || DEMOS[0].id);
+  loadDemo(params.get("demo") || DEMOS[0].id);
   $("loading").classList.add("done");
   window.HD2D = { sc, DEMOS, L, get state() { return st; } };   // 方便在控制台里看
 }
