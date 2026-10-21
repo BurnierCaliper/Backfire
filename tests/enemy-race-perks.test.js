@@ -211,32 +211,40 @@ test("威压（猫类人·虎）：附赠，对近距一人威吓，敌人 50% �
   assert.notEqual(p2 && p2.meta.skillId, "race_awe");
 });
 
-test("环境适应（鼠类人·鼠）：场地伤害减半（酸液地面、火场、高压场地）；其他种族不变", () => {
+test("环境适应（鼠类人·鼠）：每次场地伤害、冻土击破 50% 概率完全免疫（酸液地面、火场、高压场地、冻土）；其他种族不变", () => {
   const { c, S, foe } = setup("thug_hammer", "鼠类人·鼠");
-  assert.equal(perk(c, "RACE_PERK").fieldCut, 0.5);
-  c.Math.random = () => 0.999;   // 骰子掷最大
-  const lose = (fn) => { heal(foe); const h0 = c.totalHp(foe); fn(); return h0 - c.totalHp(foe); };
+  assert.equal(perk(c, "RACE_PERK").fieldImmune, 0.5);
+  // 掷 0.4（< 50%）→ 免疫；掷 0.6 → 照常受伤（骰子也掷 0.6，伤害相同）
+  const lose = (roll, fn) => { heal(foe); c.Math.random = () => roll; const h0 = c.totalHp(foe); fn(); return h0 - c.totalHp(foe); };
   S.fields[foe.zone] = Object.assign(S.fields[foe.zone] || {}, { acid: true });
-  const acid = (race) => { c.setEnemyRace(foe, race); return lose(() => c.tickAcidFieldFor(foe, "none", [])); };
-  const human = acid("人类"), mouse = acid("鼠类人·鼠");
-  assert.ok(human >= 2);
-  assert.equal(mouse, Math.ceil(human / 2));
-  assert.equal(acid("鼠类人·兔"), human, "兔没有");
+  const acid = (race, roll) => { c.setEnemyRace(foe, race); return lose(roll, () => c.tickAcidFieldFor(foe, "none", [])); };
+  const human = acid("人类", 0.6);
+  assert.ok(human >= 1);
+  assert.equal(acid("鼠类人·鼠", 0.4), 0, "掷中：免疫");
+  assert.equal(acid("鼠类人·鼠", 0.6), human, "没掷中：照常受伤");
+  assert.ok(acid("鼠类人·兔", 0.4) > 0, "兔没有：掷 0.4 也照常受伤");
+  assert.equal(acid("鼠类人·兔", 0.6), human);
   // 火场
   delete S.fields[foe.zone].acid;
-  S.fields[foe.zone].fire = 2; S.fields[foe.zone].fireOn = true;
-  const fire = (race) => { c.setEnemyRace(foe, race); return lose(() => c.tickFireField(foe.zone, [])); };
-  const fh = (S.fields[foe.zone].fire = 2, fire("人类"));
-  S.fields[foe.zone].fire = 2;
-  const fm = fire("鼠类人·鼠");
-  assert.ok(fh >= 2);
-  assert.ok(fm < fh && fm >= Math.floor(fh / 2), `火场减半：${fh} → ${fm}`);
+  const fire = (race, roll) => { c.setEnemyRace(foe, race); S.fields[foe.zone].fire = 2; S.fields[foe.zone].fireOn = true; return lose(roll, () => c.tickFireField(foe.zone, [])); };
+  const fh = fire("人类", 0.6);
+  assert.ok(fh >= 1);
+  assert.equal(fire("鼠类人·鼠", 0.4), 0);
+  assert.equal(fire("鼠类人·鼠", 0.6), fh);
   // 高压场地
   S.fields[foe.zone] = { electric: true };
-  const hv = (race) => { c.setEnemyRace(foe, race); return lose(() => c.pulseHighVoltage(foe, 10, 1, 1)); };
-  const hh = hv("人类"), hm = hv("鼠类人·鼠");
-  assert.ok(hh >= 2);
-  assert.equal(hm, Math.ceil(hh / 2));
+  const hv = (race, roll) => { c.setEnemyRace(foe, race); return lose(roll, () => c.pulseHighVoltage(foe, 10, 1, 1)); };
+  const hh = hv("人类", 0.6);
+  assert.ok(hh >= 1);
+  assert.equal(hv("鼠类人·鼠", 0.4), 0);
+  assert.equal(hv("鼠类人·鼠", 0.6), hh);
+  // 冻土：进入时的冰击破
+  S.fields[foe.zone] = { ice: true };
+  const ice = (race, roll) => { c.setEnemyRace(foe, race); foe.def = foe.defMax; c.Math.random = () => roll; c.enterFrozenGround(foe, []); return foe.defMax - foe.def; };
+  const ih = ice("人类", 0.6);
+  assert.ok(ih >= 1);
+  assert.equal(ice("鼠类人·鼠", 0.4), 0);
+  assert.equal(ice("鼠类人·鼠", 0.6), ih);
 });
 
 test("千里马（牛类人·马）：第一回合 +1 附赠，之后没有；不稳照样清掉；其他种族没有", () => {

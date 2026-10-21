@@ -269,7 +269,10 @@ test("评分：基准分只算敌人的血量和击杀分，击破、失衡不�
   st.scoreAct = null;
   st.units.filter(u => !u.isPlayer).forEach(u => { u.level = 10; });
   assert.equal(c.scoreAct(), 3);
+  // 战-L2：同一场里记住见过的最高等级；重新开战（resetBattleRecords）才重算
   st.units.filter(u => !u.isPlayer).forEach(u => { u.level = 2; });
+  assert.equal(c.scoreAct(), 3);
+  c.resetBattleRecords();
   assert.equal(c.scoreAct(), 1);
 });
 

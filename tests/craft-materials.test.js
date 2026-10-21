@@ -13,10 +13,10 @@ test("7 种制作材料登记在物品表里：队伍公用、不是战斗道具
   mats.forEach(m => { const s = c.ITEM_CATALOG[m.id]; assert.ok(s && s.supply && !s.combat, m.id); });
 });
 
-test("掉落表按敌人登记：45 个敌人都有表；机械掉废料 / 线圈，酸火系掉化工残液，沙漠生物掉沙鱼鳞，星灵掉星灵组织", () => {
+test("掉落表按敌人登记：50 个敌人都有表；机械掉废料 / 线圈，酸火系掉化工残液，沙漠生物掉沙鱼鳞，星灵掉星灵组织", () => {
   const c = H.load();
   const ids = c.enemyPresets().map(p => p.id).filter(id => id !== "blank_pc");
-  assert.equal(ids.length, 45);
+  assert.equal(ids.length, 50);
   const T = vm.runInContext("ENEMY_DROPS", c), A = vm.runInContext("ENEMY_DROP_ALIAS", c);
   ids.forEach(id => assert.ok(T[A[id] || id], id));
   const has = (id, m) => c.enemyDropTable(id).some(d => d.id === m);

@@ -375,7 +375,7 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
   - **犬类人·狼·独狼**：`effectiveAtk` 里加减：同区没有队友 atk + 等级÷2（向下取整），有两名及以上队友 atk − 等级÷2，一名不变。队友 = 同区、同阵营（或互为召唤关系）的友方单位，召唤的小兵算，配置物、死亡 / 离场的、中立生物不算。
   - **猫类人·豹·迅袭**：每次移动回 1 架势（不超上限、失衡时不回）；整场第一个行动里的第一击 +1 击破（`resolveAttack` 的 `firstBreak`，只加在多段攻击的第一段；先移动过、或者第一个行动是协助 / 借机这类反应的不算）。
   - **猫类人·虎·威压**：附赠技能 `race_awe`，对同区一人威吓，敌人一律 50% 成功，成功施加不稳；AI 只对同区还没不稳的人用。
-  - **鼠类人·鼠·环境适应**：酸液地面、火场、高压场地的伤害减半（向上取整，至少 1）；冻土的击破只有 1 点，不能再分，不减；能量场累积的是场地高能不是伤害，不减。
+  - **鼠类人·鼠·环境适应**（作者 10/21 定）：每次受到酸液地面、火场、高压场地的伤害，或者冻土的冰击破（进入冻土、离开冻土检定失败），各掷一次，50% 概率完全免疫（`RACE_PERK.fieldImmune`）；能量场累积的是场地高能不是伤害，不算。
   - **牛类人·马·千里马**：敌人回合开始时第一次（`startEnemyPhase`）+1 附赠；不稳照样把它清掉。
   - **兽人·狼·追猎本能**：附赠技能 `race_hunt`，对一个敌人施加紧追（和柯尔特共用 `chase` / `chasers` / `chaseFollow`）。
   - **兽人·牛·易怒蛮牛**：血量低于 50% 时受到任何伤害（攻击、状态、场地都算，0 伤不算）：失去附赠（当前的，和下个敌人回合的）、移到相邻的另一个区、对新所在区的随机一个目标造成 1 击破。
@@ -386,6 +386,29 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
   - **显示**：战斗铭牌悬停、单位浮窗（新增「种族被动」一节）、图鉴（固定种族写被动，随机种族写见过的种族的被动）、联机单位快照。
   - **顺手修**：`tools/playtest.js` 休息点短休不看今天还有没有次数（`canShortRestAtNode`），战斗改动改变了战役走向后撞上这个老问题，`tests/balance-tools.test.js` 的固定种子战役跑到一半报错；现在没次数就不短休。
   - **测试**：`tests/enemy-race-perks.test.js` 每个被动一个用例（迎难直上、热耐性、扑灭、独狼、迅袭回架势 / 第一击击破、威压、环境适应、千里马、追猎本能、易怒蛮牛、吐酸、鳞片、灵巧、注意力涣散、熊、通用性、显示）；`tests/audit-P6-terrain.test.js` 的空隙用例改成：没有种族的敌人 50%，人类种族的敌人 75%。
+- **外城区镇压部队：五个兵种入库**（issue #160，设计见 [docs/suppression-force.md](docs/suppression-force.md) 第 1、2 节；移动堡垒不在这次里）。以前没有这支部队；现在新增阵营「镇压队」和五个兵种，只在外城区出现（engine.js · `RIOT_STATS` / `enemyPresets`，growth.js · `ENEMY_RANK`，enemies.js · `RIOT_CFG` / `runEnemyActionInner` / `ZONE_THREATS` / `enemySkillList` / `ENEMY_SKILL_RANGE` / `HOSTILE_PAIRS`，app.js · `runOnConnect` / `dealTo` / `startEnemyPhase`，effects.js · `onBroken`，ai.js · `AI_SPEC` / `aiSpecial` / `aiTargetBase`，run.js · `ENEMY_INFO` / `ALLIED_FACTIONS` / `FACTION_MIX_CHANCE` / `encounterFactions`，bestiary.js · `BESTIARY_TEXT`；测试 tests/riot-force.test.js，tests/three-way.test.js 的友军名单加上镇压队）。
+  - **数值**（外层护盾、内层肉体，武器全是火；ATK 已比参照模板低 1）：镇压队员·警棍盾（杂兵 1 代币，兽人·牛）护盾 8 +2 / 肉体 12 +4 / 架势 4 / ATK 3 +1；镇压队员·燃烧步枪（杂兵 1，兽人·熊）6 +2 / 6 +2 / 3 / 4 +1；燃烧瓶投手（杂兵 1，兽人·蜥蜴）5 +2 / 5 +2 / 3 / 3 +1；火焰喷射兵（精英 2，兽人·熊）16 +6 / 26 +7，架势、ATK 成长照警卫队队长（牛），ATK 每级少 1；镇压小队长（精英 2，兽人·狼）15 +6 / 20 +5，架势、ATK 成长照警卫队队长（狼），ATK 每级少 1。杂兵架势每 10 级 +1；精英架势每 5 级 +1，10 级起照现有精英规则 ×60%。血量按队伍人数 `scaleHp`。
+  - **招式**：警棍盾——火焰警棍 atk + 1d4 火、2 击破、打中熔融；被动「防暴盾」：自己的护盾层还有血时，同区友军受到的远程攻击 −25%（用 `flags.drPct` 和其他百分比加算，多面盾不叠加）；协助冲到目标所在区普通攻击一次（带熔融）。燃烧步枪——燃烧弹 atk + 1d4 火、1 击破，打中后 `triggerOneStatus(t, src, "burn")` 激活灼烧（目标没有灼烧就不触发，也不会顺手激活别的状态）；协助远距 0.5×atk 火，同样激活。燃烧瓶投手——先标定区（`bottleZone / bottlePending / bottleReady`，区域预警「燃烧瓶标定 / 燃烧瓶待发」），下个敌人回合落地：那一区的敌对单位 0.5×atk 火、灼烧 1（已经是火场灼烧 2），然后那一区变火场；抛射越过危墙和关着的门；不能协助（`enemyMayAssist`）。火焰喷射兵——单体 3 段 0.3×atk 火；目标有灼烧时每段各 1 击破，没有时 3 段共 1 击破；每一段各掷 15% 灼烧 1（`runOnConnect` 新增 `burnEach`）；被动「燃料罐」：被打进失衡时同区所有单位（不分敌我）0.5×atk 火，那一区变火场（`onBroken → riotFuelBurst`）；协助冲进目标所在区喷火一次。镇压小队长——火焰手枪 atk + 1d6 火、1 击破、灼烧 1，远近皆可；协助远距 1×atk 火、灼烧 1；被动「指挥」只改 AI：他活着在场时，所有镇压队单位优先挑还没有灼烧的敌人（都有灼烧则照旧）。`runOnConnect` 另新增 `instant`（打中施加熔融这类即时效果）和 `activate`。
+  - **AI**：警棍盾、喷火兵近战主动贴近；步枪、投手远程主动远离；小队长远近皆可（不主动移动，够不着时走一步）。投手的标定 → 落地由 AI 自己跑完（照榴弹的流程）。
+  - **阵营和遭遇**：新阵营「镇压队」，只在外城区；和安保、警卫队是一伙（`ALLIED_FACTIONS` 加进第三个阵营，友军判断随之包含镇压队），和盗匪互相敌对（`HOSTILE_PAIRS`）。以前同伙阵营想混就混；现在新增配置表 `FACTION_MIX_CHANCE = { "镇压队": 0.15 }`，抽遭遇时用 `encounterFactions`：抽到镇压队只有 15% 混入安保 + 警卫队，抽到安保 / 警卫队时镇压队也只有 15% 加进来；没写在表里的阵营（安保 + 警卫队、盗匪）行为不变。外城区三方混战（`THREE_WAY`）保持原样，镇压队不进去。五个兵种的固定种族写在 `ENEMY_INFO.race`（与 #159 约定的格式），只写配置，种族被动另外实装；图鉴写了种族、招式和被动。
+  - **按文档字面做的几处，拿不准的在 PR 里问过**：投手落地只炸敌对的单位（文档写「那一区所有单位」，现按榴弹一样只炸敌对，`RIOT_CFG.bottle.friendlyFire` 可改）；防暴盾的「同区友军」包含警棍盾自己；精英的架势按「照队长写法」每 5 级 +1（文档第 1 节开头「每 10 级 +1」是写杂兵的狂徒写法）。
+  - **材料掉落**（items.js · `ENEMY_DROPS`，合并 main 后补）：警棍盾 废料 0.2 / 化工残液 0.1 / 电芯 0.08；燃烧步枪 化工残液 0.2 / 燃气浓缩物 0.08 / 废料 0.1；燃烧瓶投手 化工残液 0.25 / 燃气浓缩物 0.1；火焰喷射兵 燃气浓缩物 1.0 / 化工残液 0.65 / 电芯 0.3；镇压小队长 化工残液 0.65 / 燃气浓缩物 0.4 / 电芯 0.4 / 废料 0.3（期望份数，照掉落表的杂兵 / 精英区间）。种族由图鉴的种族栏显示，能力说明里不再重复写（tests/craft-materials.test.js 的敌人总数 45 → 50）。
+  - **作者确认（10/21）**：投手落地只炸敌对单位、防暴盾也算警棍盾自己，都按现在的做法。
+- **联机：移动校验和单机对齐 + 手机战斗画面三处**（issue #176，backlog「第三轮排查：联机 · 补查」；hotseat-validation.js · `descriptor` / `voidMoveCost` / `assertBase` / `checkMove`，online-battle.js · `isTouch` / `paintCards`，online-ui.js · `battleUi`，online.css；测试 tests/hotseat-validation.test.js、tests/feat-bugs-104.test.js、tests/online-ui.test.js）
+  - **移动消耗**：以前联机校验把移动写死成「1 附赠」，导体 / 探测模式用光附赠就被拦，酸液地面离开要附赠和行动点都有，越过空隙还要 1 附赠。现在用单机同一个 `moveBaseCost`：导体 / 探测模式 0，离开酸液地面只要 1 行动点，其余 1 附赠；越过空隙只要 1 行动点（荒原行者仍是 1 附赠）。没有荒原行者的角色在酸液地面行动点为 0 时，「移动」按钮直接灰掉并写原因。
+  - **深渊方向**：以前拦的是「从深渊走出」、放行「走进深渊」。现在和单机一样按目的区判断：地面单位不能走进深渊，站在里面的可以走出来。
+  - **缠绕 / 流沙**：被沙珊瑚缠住、流沙下陷 2 层以上，校验阶段就拒绝，原因（和单机日志同一句）回给玩家，不再「指令成功但单位没动」。
+  - **手机画面**（≤820px）：玩家战场框至少 50% 可视高度；轮到选目标时，战场自动滚到第一个目标所在的区（目标集合变化时才滚）；桌面布局不变。触屏设备（`hover: none` 或 `pointer: coarse`）提示改成「选择技能。点技能看说明。」，结束行动按钮不显示「空格」。选行动顺序 / 询问的弹层背景改为不透明，不再透出底下的字。
+
+- **补查修复：战斗规则 / 评分 / 训练场 7 条**（issue #175，backlog 战-M1 ~ M5、战-L1、战-L2）
+  - **战-M1 柯尔特普攻射程**：以前 `SKILL_RANGE.kolt_aa` 固定 0–1，电钻（只打同区）选得到距离 1 的敌人，行动点扣完才拒绝还记行动分。现在射程随刀头变：电钻 0–0、酸液炮 1–1，射程预检就拦下，不扣点不记分。（engine.js · `SKILL_RANGE_BY_STATE.kolt_aa`）
+  - **战-M2 燃烧瓶灼烧记所有者**：以前灼烧不记所有者，烧死的敌人算上一个打它的人。现在按 #114「持续伤害算状态所有者」算使用者。（items.js · `itemApplyStatus`）
+  - **战-M3 道具伤害记归属**：以前冰锥弹等即时效果道具打死敌人，击杀算上一个打过的人。现在用效果道具期间记使用者（`state._itemUserId`，`actingPlayerId` 回落到它），道具造成的伤害和挂的状态都算使用者，和手榴弹一致。（items.js · `useItemOn`，app.js · `actingPlayerId`）
+  - **战-M4 训练假人无个体值**：以前假人和精英牛带 ±10% 个体值，各角色同等级布置不同。现在生成时关掉个体值（`ENEMY_IV.off++`），同等级完全一样。（training.js · `setupField`）
+  - **战-M5 击破按实际扣掉的架势算**：以前击破分 / 击破数按名义击破，假人、背水一战、坚挺、已失衡的敌人都照加。现在按实际扣掉的架势（`result.breakSpent`）；对已失衡的敌人每一击不再加击破分（作者确认：实际扣多少算多少）。（engine.js · `applyResultToUnit`，app.js · `dealTo`）
+  - **战-L1 友军 / 飞行预检**：以前攻击友军、近战打飞行目标附赠不够，行动点先扣了才拒绝，还记行动分。现在在技能预检里拒绝，不扣点不记分。（app.js · `skillTargetError`）
+  - **战-L2 评分幕数**：以前按场上现存敌人的最高等级算，死掉的敌人移出后分数线变低。现在记下见过的最高等级（`state.scoreActLv`），开战重置。（app.js · `scoreAct` / `resetBattleRecords`）
+  - 测试：tests/combat-recheck-175.test.js（7 条，先在旧代码上失败）；tests/structures.test.js 的幕数断言改成「同一场记住最高等级，重新开战才重算」。
 
 - **敌人种族（一）：种族数据、随机 / 固定分配、六维换算、显示、主持人指定**（issue #159，设计见 `docs/enemy-race.md`；enemies.js · `ENEMY_RACES` / `applyEnemyRace` / `setEnemyRace` / `raceDelta`，run.js · `ENEMY_INFO` / `ENEMY_RACE_TABLES`，party.js · `blockChanceRaw`，gm-commands.js、battle-commands.js、battle-templates.js、trpg-commands.js、sim.js、bestiary.js、unit-card.js、online-view.js 等；测试 `tests/enemy-race.test.js`）。种族的**被动**不在这一条里（另开 issue），这里只把种族挂到敌人身上、换算六维、显示出来。
   - **以前**：敌人没有种族。**现在**：有机体的敌人生成时有种族，记在单位上 `u.race = { race, branch }`；生成的入口和个体值一样（`applyEnemyIV(u, iv, race)` 里先 `applyEnemyRace` 再个体值：`spawnEnemyGroup`、`spawnEncounterRows`、战斗命令加敌人、跑团「加敌人」、主持人生成敌人、`BattleSim.setup`）。

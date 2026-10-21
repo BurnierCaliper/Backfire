@@ -1965,8 +1965,9 @@ function tickFireField(z, notes) {
       parts.push(r.text);
     }
     const x = envMult(u);
-    const cut = typeof raceFieldDamage === "function" ? raceFieldDamage(u, dmg * x) : dmg * x;   // 环境适应（鼠类人·鼠）：场地伤害减半
-    applyTypedDot(u, cut, "fire", notes, `${u.name} 火场${stacks}层 ${parts.join(" + ")} = ${dmg}${x > 1 ? ` ×${x}（场地效果${x > 2 ? "×4" : "翻倍"}）= ${dmg * x}` : ""}${cut !== dmg * x ? `，环境适应减半 = ${cut}` : ""}`);
+    const cut = typeof raceFieldDamage === "function" ? raceFieldDamage(u, dmg * x) : dmg * x;   // 环境适应（鼠类人·鼠）：50% 概率免疫
+    if (cut <= 0 && dmg * x > 0) { notes.push(`${u.name} 火场${stacks}层：环境适应，免疫这次场地伤害。`); return; }
+    applyTypedDot(u, cut, "fire", notes, `${u.name} 火场${stacks}层 ${parts.join(" + ")} = ${dmg}${x > 1 ? ` ×${x}（场地效果${x > 2 ? "×4" : "翻倍"}）= ${dmg * x}` : ""}`);
   }));
   // 酷暑让火场层数再 +1：看的是这一区的天气（隔离区不受天气影响）；末日把这 +1 也翻倍
   const heat = zoneWeather(z) === "heat";
@@ -1988,8 +1989,9 @@ function tickAcidFieldFor(u, weather, notes) {
   const d = statusDotDice("acidfield", u.level, weather);
   const r = takeDice(d.n, d.s, 0);
   const x = envMult(u);
-  const cut = typeof raceFieldDamage === "function" ? raceFieldDamage(u, r.total * x) : r.total * x;   // 环境适应（鼠类人·鼠）：场地伤害减半
-  withEnvOwner((state.fields[u.zone] || {}).by, () => applyTypedDot(u, cut, "acid", notes, `${u.name} 酸液地面 ${r.text}${x > 1 ? ` ×${x}（场地效果${x > 2 ? "×4" : "翻倍"}）` : ""}${cut !== r.total * x ? `，环境适应减半 = ${cut}` : ""}`));
+  const cut = typeof raceFieldDamage === "function" ? raceFieldDamage(u, r.total * x) : r.total * x;   // 环境适应（鼠类人·鼠）：50% 概率免疫
+  if (cut <= 0 && r.total * x > 0) { notes.push(`${u.name} 酸液地面：环境适应，免疫这次场地伤害。`); return; }
+  withEnvOwner((state.fields[u.zone] || {}).by, () => applyTypedDot(u, cut, "acid", notes, `${u.name} 酸液地面 ${r.text}${x > 1 ? ` ×${x}（场地效果${x > 2 ? "×4" : "翻倍"}）` : ""}`));
 }
 function tickHealFieldFor(u, weather, notes) {
   if (fieldExempt(u)) return;
@@ -2083,6 +2085,10 @@ function startEnemyPhase() {
       if (u.kit === "mecha_gl" && u.resources && u.resources.glPending && u.resources.glZone && !u.resources.glReady) {
         u.resources.glReady = true;
         notes.push(`${u.name} 榴弹已就绪，可对 ${u.resources.glZone} 区发射。`);
+      }
+      if (u.kit === "riot_molotov" && u.resources && u.resources.bottlePending && u.resources.bottleZone && !u.resources.bottleReady) {
+        u.resources.bottleReady = true;
+        notes.push(`${u.name} 燃烧瓶已就绪，可对 ${u.resources.bottleZone} 区投出。`);
       }
       if (u.kit === "ant_guard" && u.resources && u.resources.shellPending && u.resources.shellZone && !u.resources.shellReady) {
         u.resources.shellReady = true;
@@ -2834,7 +2840,8 @@ function envOwnerUnit(by) {
 /** 当前正在行动的我方单位 id（谁的行动都不在进行时是 null） */
 function actingPlayerId() {
   const acc = state.actionAcc;
-  return acc && acc.actorIsPlayer ? acc.actorId : null;
+  if (acc && acc.actorIsPlayer) return acc.actorId;
+  return state._itemUserId != null ? state._itemUserId : null;   // 战-M3：使用道具不开 actionAcc，道具的即时伤害 / 状态按使用者算
 }
 /** 记下「最后一个伤害过这个敌人的玩家」：击杀归属只看它。uid 不是我方单位就不动 */
 function creditPlayerHit(target, uid) {
@@ -2888,6 +2895,7 @@ function resetBattleRecords() {
   state.skillStreak = {};
   state.battleScore = { total: 0, parts: {} };
   state.scoreSeen = {};
+  state.scoreActLv = 0;
   state.battleGains = { xp: 0, kuizhi: 0 };
   state.lastBrokenLayer = null;   // 废物利用：每场重新记（上一场打碎的层不能拿来用）
   state.weaponFallen = {};        // 本场倒下过的武器（取回后 atk / 格挡加成减半）
@@ -2913,8 +2921,9 @@ function scoreAct() {
   if (Number(state.scoreAct) > 0) return Number(state.scoreAct);
   const ranges = (typeof ROGUE_CONFIG !== "undefined" && ROGUE_CONFIG.actLevels) || [[1, 4], [5, 8], [9, 12], [12, 15]];
   const foes = (state.units || []).filter(u => !u.isPlayer && u.kit !== "ironwall");
-  if (!foes.length) return 1;
-  const lv = Math.max(...foes.map(u => Number(u.level) || 1));
+  if (!foes.length && !(Number(state.scoreActLv) > 0)) return 1;
+  // 战-L2：记下见过的最高等级，死掉的敌人被移出场后分数线不会变低
+  const lv = state.scoreActLv = Math.max(Number(state.scoreActLv) || 0, ...foes.map(u => Number(u.level) || 1));
   for (let i = 0; i < ranges.length; i++) if (lv <= ranges[i][1]) return i + 1;
   return ranges.length + Math.ceil((lv - ranges[ranges.length - 1][1]) / 5);   // 额外幕：每 5 级一幕
 }
@@ -3299,7 +3308,8 @@ function pulseHighVoltage(target, amount, hitNo, hitMax) {
   let dmg = r.total;
   const ex = envMult(target);
   dmg *= ex;   // 恶劣环境 / 末日：场地效果翻倍（两个叠加 ×4）
-  if (typeof raceFieldDamage === "function") dmg = raceFieldDamage(target, dmg);   // 环境适应（鼠类人·鼠）：场地伤害减半
+  if (typeof raceFieldDamage === "function") dmg = raceFieldDamage(target, dmg);   // 环境适应（鼠类人·鼠）：50% 概率免疫
+  if (!(dmg > 0)) { notes.push(`${target.name} 高压场地：环境适应，免疫这次场地伤害。`); return notes; }
   target._hvBusy = true;
   const tag = (hitMax > 1) ? `第${hitNo}/${hitMax}击 ` : "";
   withEnvOwner(f.by, () => applyTypedDot(target, dmg, "electric", notes, `${target.name} 高压场地${tag}${r.text}${ex > 1 ? "×" + ex : ""}`));
@@ -4569,8 +4579,11 @@ function doMoveInner(unit, dest, moveOpt) {
     const chk = iceLeaveCheck(unit);
     if (!chk.ok) {
       const br = iceFieldBreak(unit);
-      dealBreak(unit, br, "ice", notes, "冻土离开失败");
-      notes.push(`离开冻土：${chk.text}，失败：留在 ${from} 区并受 ${br} 冰击破。`);
+      if (typeof raceFieldImmune === "function" && raceFieldImmune(unit)) notes.push(`离开冻土：${chk.text}，失败：留在 ${from} 区；环境适应，免疫这次冰击破。`);   // 鼠类人·鼠：50% 概率免疫
+      else {
+        dealBreak(unit, br, "ice", notes, "冻土离开失败");
+        notes.push(`离开冻土：${chk.text}，失败：留在 ${from} 区并受 ${br} 冰击破。`);
+      }
       paintSkillLog(notes.join("\n"));
       renderAll();
       return;
@@ -4610,6 +4623,7 @@ function enterFrozenGround(unit, notes) {
   const toF = state.fields[unit.zone] || emptyField();
   if (!toF.ice || fieldExempt(unit)) return;
   if (typeof featHas === "function" && featHas(unit, "wanderer")) return;   // 荒原行者：进入冻土不受击破
+  if (typeof raceFieldImmune === "function" && raceFieldImmune(unit)) { notes.push(`${unit.name} 进入冻土：环境适应，免疫这次冰击破。`); return; }   // 鼠类人·鼠：50% 概率免疫
   const br = iceFieldBreak(unit);
   notes.push(`${unit.name} 进入冻土：冰击破 ${br}。`);
   dealBreak(unit, br, "ice", notes, "进入冻土");
@@ -7479,6 +7493,8 @@ function attackConnected(res, flags) {
   return b !== "assistOk" && b !== "bareOk";
 }
 
+/** 身上的灼烧层数 */
+function burnStackCount(u) { return Math.max(0, Math.floor(Number(u && u.statuses && u.statuses.burn) || 0)); }
 function runOnConnect(attacker, target, spec, res) {
   const notes = [];
   if (!spec || !target) return notes;
@@ -7505,6 +7521,21 @@ function runOnConnect(attacker, target, spec, res) {
       const after = Number(target.statuses && target.statuses.burn) || 0;
       if (after > before) notes.push(`${target.name} 灼烧 +${after - before} → ${after} 层。`);
     }
+  }
+  if (spec.burnEach) {
+    // 多段攻击每一段各掷一次（火焰喷射兵）：成功一次灼烧 +1
+    const segs = ((res && res.perHit) || []).length || 1;
+    let got = 0;
+    for (let i = 0; i < segs; i++) if (Math.random() < spec.burnEach && typeof grantBurn === "function") { grantBurn(target, 1, notes); got++; }
+    if (got) notes.push(`${target.name} 灼烧 +${got} → ${Number(target.statuses && target.statuses.burn) || 0} 层（${segs} 段各 ${Math.round(spec.burnEach * 100)}%）。`);
+  }
+  if (spec.instant && typeof applyInstantEffect === "function") {
+    applyInstantEffect(target, spec.instant, notes);
+    notes.push(`${target.name} 被施加${INSTANT_NAME[spec.instant] || spec.instant}。`);
+  }
+  if (spec.activate === "burn" && burnStackCount(target) > 0) {
+    // 激活灼烧：目标没有灼烧就不触发（triggerOneStatus 没有灼烧时会改激活别的状态，这里先挡掉）
+    notes.push(...triggerOneStatus(target, attacker, "burn"));
   }
   if (spec.dest != null) {
     const dest = Number(spec.dest);
@@ -7962,6 +7993,14 @@ function dealTo(attacker, target, opt) {
     const dr = mechChargeDr(target);
     if (dr > 0) { flags.drPct = (Number(flags.drPct) || 0) + dr; flags.drWhy = "蓄满能量"; }
   }
+  // 防暴盾（镇压队员·警棍盾）：同区有护盾还没打空的警棍盾，友军受到的远程攻击 −25%，和其他百分比加算（enemies.js · riotShieldDr）
+  if (target && !target.isPlayer && flags.action !== false && !flags.environment && typeof riotShieldDr === "function") {
+    const sdr = riotShieldDr(target, attacker, opt);
+    if (sdr > 0) {
+      flags.drPct = (Number(flags.drPct) || 0) + sdr;
+      flags.drWhy = flags.drWhy ? flags.drWhy + "、防暴盾" : "防暴盾";
+    }
+  }
   // 挂在「下一击」上的猛击 / 穿刺 / 弱点特效只作用于真正的攻击行动，
   // 不作用于这一击派生出来的环境伤害（雷击转移、爆燃溢出、反弹……），也不会被它们提前用掉
   const realAttack = flags.action !== false && !flags.environment;
@@ -8206,10 +8245,11 @@ function dealTo(attacker, target, opt) {
     } else if (attacker && target && attacker.isPlayer && !target.isPlayer) {
       const st = battleStat(attacker);
       if (st) {
-        st.dmg += Math.floor(Number(res.total) || 0); st.brk += Number(res.breakDealt) || 0;
+        const brkReal = res.breakSpent != null ? Number(res.breakSpent) || 0 : Number(res.breakDealt) || 0;   // 战-M5：实际扣掉的架势
+        st.dmg += Math.floor(Number(res.total) || 0); st.brk += brkReal;
         burstNote(st, attacker, res.total, burstLabel(opt.flags), res);
         addScore("dmg", Math.floor(Number(res.total) || 0) * SCORE_RULES.dmg, attacker, scoreBonus);
-        addScore("brk", (Number(res.breakDealt) || 0) * SCORE_RULES.brk, attacker, scoreBonus);
+        addScore("brk", brkReal * SCORE_RULES.brk, attacker, scoreBonus);
         scoreWeatherHelp(attacker, target, res, true);
       }
     }
@@ -9310,12 +9350,12 @@ function skillFlowSteps(id, actor, picks) {
       }
     ];
   }
-  if (id === "en_gl" || id === "en_ant_shell") {
+  if (id === "en_gl" || id === "en_ant_shell" || id === "en_riot_bottle") {
     return [{
       key: "dest",
       type: "zone",
       optional: false,
-      label: id === "en_gl" ? "榴弹落点区域" : "大酸液弹落点区域",
+      label: id === "en_gl" ? "榴弹落点区域" : id === "en_riot_bottle" ? "燃烧瓶落点区域" : "大酸液弹落点区域",
       zones
     }];
   }
@@ -11114,6 +11154,20 @@ function skillTargetError(a, id, t) {
     if (!tgt || sandPullTargets(a).indexOf(tgt) < 0) return "要选距离 1 以内陷在流沙里的友方";
   }
   if (id === "role_renew" && t && !t.isPlayer) return "续命只能对友方使用";
+  // 战-L1：攻击友军 / 近战打飞行目标附赠不够，以前都是 dealTo 里才拒绝，行动点早扣了还记行动分；这里在扣点前拦下
+  if (a.isPlayer && t && t.id && !t.isPlayer && !isStructureToken(t.id) && !(typeof featOfSkill === "function" && featOfSkill(id))) {
+    let sk = null;
+    try { sk = (skillList(a) || []).find(s => s.id === id); } catch (e) {}
+    const hint = sk ? (sk.hint || "") + " " + (sk.name || "") : "";
+    const side = (typeof SKILL_TARGET_SIDE !== "undefined" && SKILL_TARGET_SIDE[id]) ||
+      (/任意单位|拉到|磁力/.test(hint) ? "any" : /友方|队友/.test(hint) ? "ally" : "enemy");
+    if (side === "enemy" && sk && typeof playerAllied === "function" && playerAllied(t)) return `${t.name} 是友军，不会被我方攻击`;
+    const rg = skillRangeFor(a, id) || (typeof parseSkillRange === "function" ? parseSkillRange(hint) : null);
+    if (side === "enemy" && sk && rg && rg.max === 0 && !/所有|全部|范围|每名/.test(hint) &&
+        t.flying && !a.flying && Number(t.zone) === Number(a.zone) && !(typeof featHas === "function" && featHas(a, "wanderer")) &&
+        !["longge_aa", "longge_chill", "longge_heat", "longge_spit", "xiaoxiao_punch", "xiaoxiao_combo"].includes(id) &&
+        (Number(a.bonus) || 0) < (skillCost(id).bonus || 0) + 1) return `${t.name} 在飞行，近程攻击需要额外 1 附赠行动`;
+  }
   // 职责技能：分步里选的对象不合法就在扣点之前拦下
   if (/^role_(spread|shelter|boost|gold|double_dot|buffer|sturdy|halve|omen)$/.test(id)) {
     const why = roleTargetError(a, id, t);
