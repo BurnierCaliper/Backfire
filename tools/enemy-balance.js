@@ -1,0 +1,377 @@
+// 新敌人批量平衡模拟（issue #232）：外城区镇压部队的兵种对照、移动堡垒、敌人种族被动。
+// 只测量、不改任何敌人 / 角色的数值；固定种子，同一份代码重跑结果相同。
+//
+//   node tools/enemy-balance.js                       五组全跑，每格 100 场 → docs/balance/new-enemies-1021.{md,json}
+//   node tools/enemy-balance.js --samples 20 --groups template,fortress --out docs/balance/try --workers 2
+//
+// 每场的布置照 R1 单场矩阵（tools/score-by-act.js · one）：R1 的 10 名角色里随机 2–4 人、外城区所在的第 1 幕、
+// 我方等级 = 敌人等级、升级选主属性 / 第一个合法选项、满状态、不用道具、BASIC 打法、30 回合上限。
+// 遭遇走单局的 battleSpec（个体值打开、随机种族照抽、任务天气 / 战场配置物照抽），只在「抽遭遇」那一步换成要测的敌人。
+// 同一格的几个对照组（镇压队 ↔ 模板、有 ↔ 没有堡垒、被动开 ↔ 关、亡命之王的各种族……）用同一批种子：
+// 队伍、等级、区制、站位、天气、配置物完全一样，只差要比的那一处。
+"use strict";
+const fs = require("node:fs");
+const path = require("node:path");
+const vm = require("node:vm");
+const cp = require("node:child_process");
+const { Worker, isMainThread, parentPort } = require("node:worker_threads");
+const H = require("../tests/headless");
+const B = require("./balance-common");
+
+const CONFIG = {
+  version: "enemy-balance-v1",
+  seedPrefix: "EB1021",
+  samples: 100,            // 每格场数（参照 R1 每格 100）
+  sizes: [2, 3, 4],
+  act: 1,                  // 外城区 = 第 1 幕（rogue-data.js · ROGUE_CONFIG.regions[0]）：普通战 1–4 级、精英战 +1、首领 4 级
+  maxRounds: 30,           // 同 R1 单场
+  flagPp: 10,              // 胜率差到这么多个百分点就列进「差距大的格子」
+  workers: 2,
+  out: "docs/balance/new-enemies-1021"
+};
+const GROUPS = ["template", "fortress", "race", "king", "heat"];
+
+// 1. 兵种对照：镇压队兵种 ↔ 设计时的参照模板（docs/suppression-force.md 第 1 节），同一场里只换敌人。
+//    杂兵 4 只 = 普通战的 4 枚代币；精英 2 只 = 4 枚代币、精英战等级。不带移动堡垒（只比兵种本身）
+const PAIRS = [
+  { id: "baton", label: "警棍盾 ↔ 狂徒（锤）", kind: "battle", count: 4, riot: "riot_baton", ref: "thug_hammer" },
+  { id: "rifle", label: "燃烧步枪 ↔ 机器人看守（枪）", kind: "battle", count: 4, riot: "riot_rifle", ref: "guard_gun" },
+  { id: "flamer", label: "火焰喷射兵 ↔ 警卫队队长（牛）", kind: "elite", count: 2, riot: "riot_flamer", ref: "captain_ox" },
+  { id: "captain", label: "镇压小队长 ↔ 警卫队队长（狼）", kind: "elite", count: 2, riot: "riot_captain", ref: "captain_wolf" },
+  { id: "molotov", label: "燃烧瓶投手 ↔ 燃烧步枪（投手没有模板）", kind: "battle", count: 4, riot: "riot_molotov", ref: "riot_rifle" }
+];
+// 3. 种族被动：警卫队队长按种类各一组（两只同种队长 = 4 枚代币，精英战等级）
+const CAPTAINS = ["captain_wolf", "captain_ox", "captain_lizard"];
+// 亡命之王抽得到的所有种族（盗匪的随机表：人类、红皮人、类人四个大支的每个小分支）
+const KING_RACES = ["人类", "红皮人", "犬类人·狼", "犬类人·狐", "犬类人·犬", "猫类人·豹", "猫类人·虎", "猫类人·猫", "鼠类人·鼠", "鼠类人·兔", "牛类人·牛", "牛类人·马", "牛类人·羊"];
+const NAMES = {
+  riot_baton: "警棍盾", riot_rifle: "燃烧步枪", riot_molotov: "燃烧瓶投手", riot_flamer: "火焰喷射兵", riot_captain: "镇压小队长",
+  thug_hammer: "狂徒（锤）", thug_knife: "狂徒（匕首）", bandit_boss: "强盗头子", outlaw_king: "亡命之王", guard_gun: "机器人看守（枪）",
+  guard_sword: "机器人看守（剑）", patrol_car: "巡逻车", boomcar: "自爆车", swarm: "空投蜂群",
+  captain_ox: "警卫队队长（牛）", captain_wolf: "警卫队队长（狼）", captain_lizard: "警卫队队长（蜥蜴）",
+  fortress: "移动堡垒（车载武器）", fortress_blast: "移动堡垒（殉爆）", dot: "持续伤害 / 场地（灼烧、火场等，不分来源）", env: "其他环境伤害", friendly: "我方误伤"
+};
+
+/* ---------- 一场 ---------- */
+/** 规则环境里装上计数（只读：不改任何结算，只在原函数前后记数） */
+function instrument(c) {
+  const S = c.S, m = { kits: {}, taken: 0, downs: 0, deaths: 0, rounds: 0, heroRounds: 0, burnHeroRounds: 0, burnRounds: 0, cover: 0, blast: 0, steal: 0, pulled: 0 };
+  const now = { dot: null, blast: 0, key: null };
+  const wrap = (name, fn) => { const orig = c[name]; if (typeof orig !== "function") throw new Error("missing rule function " + name); c[name] = (...args) => fn(orig, args); };
+  const kitOf = u => u.vehId ? "fortress" : (u.kit || u.name || "?");
+  const bucket = key => m.kits[key] || (m.kits[key] = { dmg: 0, dot: 0, brk: 0, downs: 0 });
+  // 持续伤害（灼烧……）记在挂状态的人名下
+  wrap("applyTypedDot", (orig, args) => { const prev = now.dot; now.dot = { by: args[5] && args[5].by }; try { return orig(...args); } finally { now.dot = prev; } });
+  // 落在我方身上的每一下：按出手的敌人兵种记伤害（含坚毅生命）、击破
+  wrap("applyCombat", (orig, args) => {
+    const [t, res, a] = args;
+    let key = null;
+    if (t && t.isPlayer && res && !res.pending) {
+      // 规则只给我方挂的状态记了来源（app.js · statusOwnerId），敌人挂在我方身上的灼烧不知道是谁的：统一记成 dot
+      const owner = !a && now.dot && now.dot.by != null ? S.state.units.find(u => u.id === now.dot.by) : null;
+      key = now.blast ? "fortress_blast" : a ? (a.isPlayer ? "friendly" : kitOf(a)) : owner && !owner.isPlayer ? kitOf(owner) : now.dot ? "dot" : "env";
+      const k = bucket(key), dmg = Math.floor(Number(res.total) || 0) + Math.floor(Number(res.shpDealt) || 0);
+      if (!a && now.dot && !now.blast) k.dot += dmg; else k.dmg += dmg;
+      k.brk += (Number(res.breakSpent != null ? res.breakSpent : res.breakDealt) || 0) + (Number(res.helperBreak) || 0);
+      m.taken += dmg;
+    }
+    const prev = now.key; now.key = key || now.key;
+    try { return orig(...args); } finally { now.key = prev; }
+  });
+  wrap("applyKnockdown", (orig, args) => {
+    const u = args[0], hero = u && u.isPlayer && !c.isWeaponUnit(u), down0 = hero && !!u.dying, dead0 = hero && !!u.dead;
+    const out = orig(...args);
+    if (hero && !down0 && u.dying) { m.downs++; if (now.key) bucket(now.key).downs++; }
+    if (hero && !dead0 && u.dead) m.deaths++;
+    return out;
+  });
+  // 每回合敌人行动完：数一数我方角色身上有没有灼烧
+  wrap("endEnemyTurn", (orig, args) => {
+    const hs = S.state.units.filter(u => u.isPlayer && !c.isWeaponUnit(u) && !u.dead && !u.hidden);
+    const burning = hs.filter(u => (Number(u.statuses && u.statuses.burn) || 0) > 0).length;
+    m.rounds++; m.heroRounds += hs.length; m.burnHeroRounds += burning; if (burning) m.burnRounds++;
+    return orig(...args);
+  });
+  // 移动堡垒：代挡、殉爆、我方上车（抢车）、我方拉人下车
+  wrap("vehicleGuard", (orig, args) => { const r = orig(...args); if (r) m.cover++; return r; });
+  wrap("vehicleDestroy", (orig, args) => { if (args[0] && !args[0]._destroyed) m.blast++; now.blast++; try { return orig(...args); } finally { now.blast--; } });
+  wrap("vehicleBoard", (orig, args) => { if (args[0] && args[0].isPlayer) m.steal++; return orig(...args); });
+  wrap("vehiclePull", (orig, args) => { const occ = args[2], on = occ && occ.vehId; const out = orig(...args); if (args[0] && args[0].isPlayer && on && !occ.vehId) m.pulled++; return out; });
+  return m;
+}
+
+/** 照 R1 单场矩阵布置队伍和战斗配置：battleSpec 之后把队伍升到敌人等级、选好升级、满状态 */
+function prepare(c, job) {
+  const R = c.Rogue, r = B.rng(job.seed + ":setup");
+  c.S.RNG.install(job.seed + ":setup");
+  const run = R.newRun({ party: B.partyFor(job.seed, job.size), seed: job.seed });
+  run.act = CONFIG.act;
+  if (job.kind === "boss") { run.actDay = 8; run.stage = "boss"; }
+  else { run.actDay = 0; R.makeBoard(run); R.acceptTask(run, "main"); run.actDay = Math.floor(r() * 8); run.task.nodes[run.task.index] = { type: job.kind, done: false }; }
+  const spec = R.battleSpec(run);
+  if (!spec) throw new Error("Missing battle specification");
+  const level = spec.level;
+  run.party.forEach(h => { const from = h.level || 1; h.level = level; h.xp = 0; h.hp = null; h.shp = null; R.queueLevelRewards(h, from, level, [], run); Object.keys(h.weaponLevels || {}).forEach(k => { h.weaponLevels[k] = Math.max(1, Math.min(10, Math.round(level * .6))); }); });
+  B.chooseLevels(R, run, []);
+  run.party.forEach(h => { h.hp = null; h.shp = null; h.weaponState = {}; });
+  c.S.LEDGER.dur = {}; c.S.LEDGER.weapons = {}; c.S.LEDGER.heroes = {}; c.S.LEDGER.hours = 0;
+  return { run, spec, level };
+}
+
+function runJob(job) {
+  const row = { group: job.group, cell: job.cell, variant: job.variant, kind: job.kind, size: job.size, index: job.index, seed: job.seed, outcome: "error" };
+  try {
+    const c = H.load(), get = expr => vm.runInContext(expr, c);
+    // 抽遭遇的那一步换成要测的敌人（battleSpec 照常在 withRng 里调用它，所以同一种子的区制、站位、天气、配置物一样）
+    if (job.enemies || job.faction) {
+      const orig = c.rollEncounter;
+      c.rollEncounter = opt => job.enemies
+        ? c.finishEncounter({ name: "对照", region: opt.region, faction: null, tier: job.kind === "elite" ? "elite" : "normal", tokens: 4, mixed: false, enemies: B.clone(job.enemies), vehicles: [] }, opt)
+        : orig(Object.assign({}, opt, { faction: job.faction }));
+    }
+    if (job.fortress != null) get("VEHICLES").fortress.appear = job.fortress;   // 必定有 1 / 必定没有 0（掷骰次数不变，两组抽到的遭遇一样）
+    if (job.raceOff) get("RACE_PERK").off = 1;
+    const m = instrument(c);
+    const { spec, level } = prepare(c, job);
+    if (job.weather) spec.encounter.weather = job.weather;
+    if (job.kingRace) spec.encounter.enemies.find(e => e.preset === "outlaw_king").race = job.kingRace;
+    c.BattleSim.setup(spec);
+    const S = c.S.state, foes = S.units.filter(u => !u.isPlayer && !u.hidden);
+    const car = c.vehicleProps()[0] || null;
+    Object.assign(row, { level, party: S.units.filter(u => u.isPlayer && !c.isWeaponUnit(u)).map(u => u.kit), weather: S.weather, zoneMode: S.zoneMode,
+      enemies: foes.map(u => u.kit), races: foes.filter(u => u.race).map(u => u.kit + ":" + c.raceLabel(u.race)), vehicle: !!car, vehicleArmor: car ? car.maxHp : 0 });
+    const res = c.BattleSim.run({ maxRounds: CONFIG.maxRounds });
+    row.outcome = res.winner === "player" ? "win" : res.winner === "enemy" ? "lose" : res.winner === "timeout" ? "timeout" : "error";
+    const left = car ? (c.vehicleProps().find(p => p.id === car.id) || null) : null;
+    Object.assign(row, { rounds: res.rounds, taken: m.taken, downs: m.downs, deaths: m.deaths, roundsSeen: m.rounds, heroRounds: m.heroRounds, burnHeroRounds: m.burnHeroRounds, burnRounds: m.burnRounds,
+      kits: m.kits, cover: m.cover, blast: m.blast, steal: m.steal, pulled: m.pulled, vehicleLeft: car ? (left ? c.vehicleArmor(left).cur : 0) : 0 });
+    if (c.__errors.length) throw new Error(`Rule console.error: ${c.__errors.join(" | ")}`);
+  } catch (e) { row.outcome = "error"; row.error = e.stack || String(e); }
+  return B.clone(row);
+}
+
+/* ---------- 抽样计划 ---------- */
+function plan(opt = {}) {
+  const n = opt.samples || CONFIG.samples, want = new Set(opt.groups || GROUPS), sizes = opt.sizes || CONFIG.sizes, jobs = [];
+  const add = (group, cell, variant, kind, size, i, extra) => jobs.push(Object.assign({ group, cell, variant, kind, size, index: i, seed: `${CONFIG.seedPrefix}:${group}:${cell}:${size}:${String(i).padStart(3, "0")}` }, extra));
+  for (const size of sizes) for (let i = 0; i < n; i++) {
+    if (want.has("template")) PAIRS.forEach(p => ["riot", "ref"].forEach(v => add("template", p.id, v, p.kind, size, i, { enemies: [{ preset: p[v], count: p.count }] })));
+    if (want.has("fortress")) ["battle", "elite"].forEach(kind => ["with", "without"].forEach(v => add("fortress", kind, v, kind, size, i, { faction: "镇压队", fortress: v === "with" ? 1 : 0 })));
+    if (want.has("race")) {
+      ["on", "off"].forEach(v => add("race", "bandit", v, "battle", size, i, { faction: "盗匪", raceOff: v === "off" }));
+      CAPTAINS.forEach(k => ["on", "off"].forEach(v => add("race", k, v, "elite", size, i, { enemies: [{ preset: k, count: 2 }], raceOff: v === "off" })));
+      ["on", "off"].forEach(v => add("race", "outlaw_king", v, "boss", size, i, { raceOff: v === "off" }));
+    }
+    if (want.has("king")) KING_RACES.forEach(race => add("king", "outlaw_king", race, "boss", size, i, { kingRace: race }));
+    if (want.has("heat")) ["none", "heat"].forEach(w => add("heat", "riot", w, "battle", size, i, { faction: "镇压队", weather: w }));
+  }
+  return jobs;
+}
+
+if (!isMainThread) parentPort.on("message", msg => parentPort.postMessage({ i: msg.i, row: runJob(msg.job) }));
+async function runJobs(jobs, workers = 1, onRow) {
+  const rows = Array(jobs.length);
+  if (workers <= 1) { jobs.forEach((j, i) => { rows[i] = runJob(j); if (onRow) onRow(rows[i], i); }); return rows; }
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(workers, jobs.length) }, () => new Promise((resolve, reject) => {
+    const w = new Worker(__filename);
+    const send = () => { if (next >= jobs.length) { w.terminate().then(resolve, reject); return; } const i = next++; w.postMessage({ i, job: jobs[i] }); };
+    w.on("message", ({ i, row }) => { rows[i] = row; if (onRow) onRow(row, i); send(); });
+    w.on("error", reject);
+    send();
+  })));
+  return rows;
+}
+
+/* ---------- 汇总 ---------- */
+function summarize(rows) {
+  const s = B.summarize(rows), ok = rows.filter(r => r.outcome !== "error"), n = ok.length;
+  const avg = f => n ? ok.reduce((a, r) => a + (Number(f(r)) || 0), 0) / n : null;
+  const sum = f => ok.reduce((a, r) => a + (Number(f(r)) || 0), 0);
+  const kits = {};
+  ok.forEach(r => Object.keys(r.kits || {}).forEach(k => { const x = kits[k] || (kits[k] = { dmg: 0, dot: 0, brk: 0, downs: 0 }); Object.keys(x).forEach(f => { x[f] += Number(r.kits[k][f]) || 0; }); }));
+  Object.keys(kits).forEach(k => Object.keys(kits[k]).forEach(f => { kits[k][f] = n ? kits[k][f] / n : 0; }));
+  const cars = ok.filter(r => r.vehicle), cn = cars.length;
+  const levels = [...new Set(ok.map(r => r.level))].sort((a, b) => a - b);
+  return {
+    n: rows.length, outcomes: s.outcomes, winRate: s.winRate, ci: s.winRate95, levels,
+    rounds: avg(r => r.rounds), taken: avg(r => r.taken), downs: avg(r => r.downs), deaths: avg(r => r.deaths),
+    burnShare: sum(r => r.heroRounds) ? sum(r => r.burnHeroRounds) / sum(r => r.heroRounds) : null,
+    burnRoundShare: sum(r => r.roundsSeen) ? sum(r => r.burnRounds) / sum(r => r.roundsSeen) : null,
+    kits,
+    vehicle: { battles: cn, cover: cn ? cars.reduce((a, r) => a + r.cover, 0) / cn : null, blastRate: cn ? cars.filter(r => r.blast > 0).length / cn : null,
+      steal: cn ? cars.reduce((a, r) => a + r.steal + r.pulled, 0) / cn : null, stealBattles: cars.filter(r => r.steal + r.pulled > 0).length,
+      dmg: cn ? cars.reduce((a, r) => a + ((r.kits.fortress || {}).dmg || 0) + ((r.kits.fortress || {}).dot || 0), 0) / cn : null,
+      blastDmg: cn ? cars.reduce((a, r) => a + ((r.kits.fortress_blast || {}).dmg || 0), 0) / cn : null,
+      absorbed: cn ? cars.reduce((a, r) => a + (r.vehicleArmor - r.vehicleLeft), 0) / cn : null }
+  };
+}
+/** rows → { "group|cell|variant|size": 汇总 }，size 写 all 是三种人数合在一起 */
+function summarizeAll(rows) {
+  const out = {}, keys = new Set();
+  rows.forEach(r => { keys.add([r.group, r.cell, r.variant, r.size].join("|")); keys.add([r.group, r.cell, r.variant, "all"].join("|")); });
+  keys.forEach(k => { const [g, c, v, s] = k.split("|"); out[k] = summarize(rows.filter(r => r.group === g && r.cell === c && r.variant === v && (s === "all" || String(r.size) === s))); });
+  return out;
+}
+
+/* ---------- 报告 ---------- */
+const pct = x => x == null ? "—" : (x * 100).toFixed(1) + "%";
+const ci = s => s && s.ci ? `${(s.ci[0] * 100).toFixed(0)}–${(s.ci[1] * 100).toFixed(0)}%` : "—";
+const f1 = x => x == null ? "—" : Number(x).toFixed(1);
+const pp = (a, b) => a == null || b == null ? null : (a - b) * 100;
+const ppText = d => d == null ? "—" : (d > 0 ? "+" : d < 0 ? "−" : "±") + Math.abs(d).toFixed(1);
+const wlt = s => `${s.outcomes.win}/${s.outcomes.lose}/${s.outcomes.timeout}${s.outcomes.error ? `（异常 ${s.outcomes.error}）` : ""}`;
+const winCell = s => s ? `${pct(s.winRate)}（${ci(s)}）` : "—";
+const lv = s => s && s.levels.length ? (s.levels.length > 1 ? `${s.levels[0]}–${s.levels[s.levels.length - 1]}` : String(s.levels[0])) : "—";
+const kitName = k => NAMES[k] || k;
+const kitLine = (s, only) => Object.keys(s.kits).filter(k => !only || only.includes(k)).sort((a, b) => (s.kits[b].dmg + s.kits[b].dot) - (s.kits[a].dmg + s.kits[a].dot))
+  .map(k => `${kitName(k)} ${f1(s.kits[k].dmg)}${s.kits[k].dot >= 0.05 ? `+${f1(s.kits[k].dot)}` : ""} / ${f1(s.kits[k].brk)}${s.kits[k].downs >= 0.05 ? ` / 倒 ${f1(s.kits[k].downs)}` : ""}`).join("；") || "—";
+
+function compareTable(l, S, group, cell, a, b, labels, sizes, extra) {
+  l.push(`|人数|敌人等级|${labels[0]} 胜率（95%）|${labels[1]} 胜率（95%）|差（百分点）|胜/败/超时|平均回合|我方承伤|倒地|灼烧人·回合|${extra ? extra.head : ""}`);
+  l.push(`|---:|---|---|---|---:|---|---|---|---|---|${extra ? extra.sep : ""}`);
+  for (const size of sizes.concat("all")) {
+    const x = S[[group, cell, a, size].join("|")], y = S[[group, cell, b, size].join("|")];
+    if (!x || !y) continue;
+    l.push(`|${size === "all" ? "合计" : size}|${lv(x)}|${winCell(x)}|${winCell(y)}|${ppText(pp(x.winRate, y.winRate))}|${wlt(x)} ↔ ${wlt(y)}|${f1(x.rounds)} ↔ ${f1(y.rounds)}|${f1(x.taken)} ↔ ${f1(y.taken)}|${f1(x.downs)} ↔ ${f1(y.downs)}|${pct(x.burnShare)} ↔ ${pct(y.burnShare)}|${extra ? extra.row(x, y) : ""}`);
+  }
+}
+function flags(S, sizes) {
+  const out = [];
+  const check = (group, cell, a, b, label) => sizes.concat("all").forEach(size => {
+    const x = S[[group, cell, a, size].join("|")], y = S[[group, cell, b, size].join("|")];
+    const d = x && y ? pp(x.winRate, y.winRate) : null;
+    if (d != null && Math.abs(d) >= CONFIG.flagPp) out.push({ group, cell, size, label, a, b, diff: d, x: x.winRate, y: y.winRate });
+  });
+  PAIRS.forEach(p => check("template", p.id, "riot", "ref", p.label));
+  ["battle", "elite"].forEach(k => check("fortress", k, "with", "without", `镇压队遭遇（${k === "elite" ? "精英战" : "普通战"}）：有堡垒 ↔ 没有`));
+  ["bandit"].concat(CAPTAINS, ["outlaw_king"]).forEach(k => check("race", k, "on", "off", `${k === "bandit" ? "盗匪遭遇" : kitName(k)}：种族被动开 ↔ 关`));
+  check("heat", "riot", "heat", "none", "镇压队遭遇：酷暑 ↔ 无天气");
+  return out;
+}
+
+function markdown(report) {
+  const S = report.summary, sizes = report.options.sizes, has = g => report.options.groups.includes(g), l = [];
+  const P = report.provenance;
+  l.push("# 新敌人批量平衡模拟（外城区镇压部队 · 移动堡垒 · 敌人种族被动）", "",
+    "只测量，不改任何数值。下面的表由 `tools/enemy-balance.js` 生成，重跑会覆盖到「手写分析」标记为止，标记之后的手写内容保留。", "",
+    `- 版本：提交 \`${P.commit || "未知"}\`${P.dirty ? "（生成时工作区有未提交改动，见 json 的 sourceHash）" : ""}；规则源码 SHA256 \`${P.sourceHash.slice(0, 16)}…\`；Node ${P.node}；工具 ${CONFIG.version}`,
+    `- 命令：\`${P.command}\``,
+    `- 样本：每格（一种人数 × 一个对照组）**${report.options.samples} 场**，人数 ${sizes.join(" / ")}；共 ${report.rows} 场，异常 ${report.errors} 场，超时 ${report.timeouts} 场（超时算进分母，不算胜）。`,
+    `- 种子：\`${CONFIG.seedPrefix}:组:格:人数:序号\`（序号 000–${String(report.options.samples - 1).padStart(3, "0")}）。同一格的对照组共用种子：队伍、等级、区制、站位、天气、配置物完全一样，只差要比的那一处。`,
+    "- 布置：照 R1 单场矩阵（`tools/score-by-act.js · one`）——R1 的 10 名角色里按种子随机 2–4 人；外城区 = 第 1 幕，普通战敌人 1–4 级（按任务天数）、精英战 +1、首领 4 级；我方等级 = 敌人等级，升级选主属性 / 第一个合法选项，武器等级 = 等级 × 0.6；满状态、不用道具；我方 BASIC 打法（打得到就普攻血最少的，打不到就走一格），敌人用游戏里的 AI；30 回合上限。",
+    "- 遭遇：走单局的 `battleSpec`（个体值 ±10% 打开、随机种族照抽、任务天气 / 战场配置物照抽），只在「抽遭遇」那一步换成要测的敌人。",
+    "- 胜率是 BASIC 自动打法的胜率，**不是真人胜率**；看的是两组之间的差。区间是 Wilson 95%。", "",
+    "列的意思：「我方承伤」= 一场里我方所有单位受到的伤害合计（含坚毅生命、持续伤害）；「倒地」= 一场里我方角色倒地次数；「灼烧人·回合」= 每回合敌人行动完时我方在场角色身上挂着灼烧的比例。",
+    "兵种伤害写成「直接伤害 + 持续伤害（灼烧等，记在挂状态的人名下）/ 击破 / 倒（打倒地的次数）」，都是每场平均、只算打在我方身上的。", "");
+
+  if (has("template")) {
+    l.push("## 1. 兵种对照模板", "", "镇压队兵种和设计时的参照模板，同一批种子各打一组：杂兵 4 只（普通战等级）、精英 2 只（精英战等级），不带移动堡垒。设计目标：ATK 比模板低 1、火打肉体 +50% 补回来，应该和模板差不多；**差 10 个百分点以上**的列在最后一节。", "");
+    PAIRS.forEach(p => {
+      l.push(`### ${p.label}（${p.count} 只 × ${p.kind === "elite" ? "精英战" : "普通战"}）`, "");
+      compareTable(l, S, "template", p.id, "riot", "ref", [NAMES[p.riot], NAMES[p.ref]], sizes);
+      const x = S[`template|${p.id}|riot|all`], y = S[`template|${p.id}|ref|all`];
+      if (x && y) l.push("", `兵种伤害（合计，每场）：${NAMES[p.riot]}：${kitLine(x)}。${NAMES[p.ref]}：${kitLine(y)}。`);
+      l.push("");
+    });
+  }
+  if (has("fortress")) {
+    l.push("## 2. 镇压部队的遭遇：必定有 ↔ 必定没有移动堡垒", "", "按 `run.js · rollEncounter` 正常抽外城区的镇压队遭遇（阵营定为镇压队，含 15% 和安保 / 警卫队混编；普通战 4 枚代币、精英战 5 枚），只把移动堡垒的出现概率改成 1 / 0（掷骰次数不变，所以两组抽到的敌人一样）。混编抽到的遭遇里没有镇压队员时没有驾驶员，车不会上场，「实际带车」一列是真正有车的场数。", "");
+    ["battle", "elite"].forEach(kind => {
+      l.push(`### ${kind === "elite" ? "精英战（5 枚代币，精英战等级）" : "普通战（4 枚代币）"}`, "");
+      compareTable(l, S, "fortress", kind, "with", "without", ["有堡垒", "没有堡垒"], sizes, {
+        head: "实际带车|代挡 / 场|殉爆率|抢车 / 场|堡垒伤害 / 场（车载 + 殉爆）|堡垒装甲承伤 / 场|", sep: "---|---|---|---|---|---|",
+        row: x => `${x.vehicle.battles}/${x.n}|${f1(x.vehicle.cover)}|${pct(x.vehicle.blastRate)}|${f1(x.vehicle.steal)}|${f1(x.vehicle.dmg)} + ${f1(x.vehicle.blastDmg)}|${f1(x.vehicle.absorbed)}|`
+      });
+      const x = S[`fortress|${kind}|with|all`], y = S[`fortress|${kind}|without|all`];
+      if (x && y) l.push("", `兵种伤害（合计，每场）——有堡垒：${kitLine(x)}。没有堡垒：${kitLine(y)}。`);
+      l.push("");
+    });
+    l.push("BASIC 打法不会上车、不会拉人，所以「抢车」一定是 0：这一列只说明我方没有用这条解法，不说明抢车难不难。", "");
+  }
+  if (has("race")) {
+    l.push("## 3. 种族被动：开 ↔ 关", "", "同一批遭遇，`RACE_PERK.off`（只给工具用的开关，默认 0 = 开）打开 / 关上各打一组。关上只关被动（热耐性、独狼、易怒蛮牛、吐酸……），种族本身和随机种族的六维换算照旧。", "");
+    [["bandit", "盗匪遭遇（普通战，按 rollEncounter 抽：狂徒两种、强盗头子，随机种族）"], ...CAPTAINS.map(k => [k, `${NAMES[k]} × 2（精英战）`]), ["outlaw_king", "亡命之王（首领战，带三名固定随从和两波援军，全是随机种族）"]].forEach(([cell, title]) => {
+      l.push(`### ${title}`, "");
+      compareTable(l, S, "race", cell, "on", "off", ["被动开", "被动关"], sizes);
+      const x = S[`race|${cell}|on|all`], y = S[`race|${cell}|off|all`];
+      if (x && y) l.push("", `兵种伤害（合计，每场）——开：${kitLine(x)}。关：${kitLine(y)}。`);
+      l.push("");
+    });
+  }
+  if (has("king")) {
+    l.push("## 3b. 亡命之王抽到各种族时的胜率", "", "首领战（4 级），把亡命之王的种族写死成下面每一种，其余（随从、援军的种族，个体值，战场）照常；同一批种子，所以各种族之间只差王的种族。种族被动开着（游戏里的样子）。", "");
+    l.push(`|王的种族|${sizes.map(s => `${s} 人 胜率（95%）`).join("|")}|合计 胜率（95%）|合计 胜/败/超时|平均回合|我方承伤|倒地|亡命之王伤害 / 击破|`);
+    l.push(`|---|${sizes.map(() => "---").join("|")}|---|---|---|---|---|---|`);
+    KING_RACES.forEach(race => {
+      const all = S[`king|outlaw_king|${race}|all`];
+      if (!all) return;
+      const k = all.kits.outlaw_king || { dmg: 0, dot: 0, brk: 0 };
+      l.push(`|${race}|${sizes.map(s => winCell(S[`king|outlaw_king|${race}|${s}`])).join("|")}|${winCell(all)}|${wlt(all)}|${f1(all.rounds)}|${f1(all.taken)}|${f1(all.downs)}|${f1(k.dmg + k.dot)} / ${f1(k.brk)}|`);
+    });
+    l.push("");
+  }
+  if (has("heat")) {
+    l.push("## 4. （可选）酷暑下的镇压部队", "", "镇压队遭遇（普通战，移动堡垒照常 30%），天气写死成「酷暑」↔「无天气」。**注意：赤牙部队天气里的「灼烧加倍」现在规则里没有实装**（只写在图鉴的说明里，`effects.js` / `app.js` 的灼烧结算没有这一条），所以这里只测了酷暑本身（火 +25%、灼烧每回合多叠 1 层）。", "");
+    compareTable(l, S, "heat", "riot", "heat", "none", ["酷暑", "无天气"], sizes);
+    const x = S["heat|riot|heat|all"], y = S["heat|riot|none|all"];
+    if (x && y) l.push("", `兵种伤害（合计，每场）——酷暑：${kitLine(x)}。无天气：${kitLine(y)}。`);
+    l.push("");
+  }
+  l.push("## 差距大的格子（自动列出，|差| ≥ " + CONFIG.flagPp + " 个百分点）", "");
+  if (!report.flags.length) l.push("没有。", "");
+  else {
+    l.push("|对照|人数|差（百分点）|胜率|", "|---|---:|---:|---|");
+    report.flags.forEach(f => l.push(`|${f.label}|${f.size === "all" ? "合计" : f.size}|${ppText(f.diff)}|${pct(f.x)} ↔ ${pct(f.y)}|`));
+    l.push("");
+  }
+  return l.join("\n");
+}
+
+/* ---------- 命令行 ---------- */
+const MARK = "<!-- 手写分析：重跑工具时，这一行以下的内容保留 -->";
+function provenance(argv) {
+  const files = [...H.RULE_FILES, "tests/headless.js", "tools/balance-common.js", "tools/enemy-balance.js"];
+  const sourceHashes = Object.fromEntries(files.map(f => [f, B.hash(B.normalizeSource(fs.readFileSync(path.join(H.ROOT, f), "utf8")))]));
+  let commit = null, dirty = null;
+  try { commit = cp.execFileSync("git", ["rev-parse", "HEAD"], { cwd: H.ROOT, encoding: "utf8" }).trim(); dirty = !!cp.execFileSync("git", ["status", "--porcelain", "--untracked-files=no"], { cwd: H.ROOT, encoding: "utf8" }).trim(); } catch (_) { /* 没有 git：看 sourceHash */ }
+  return { commit, dirty, sourceHash: B.hash(sourceHashes), sourceHashes, node: process.version, command: ["node", "tools/enemy-balance.js", ...argv].join(" "), strategy: B.STRATEGIES.matrix.version };
+}
+function parseArgs(argv) {
+  const out = {}, allowed = ["samples", "groups", "out", "workers", "sizes"];
+  for (let i = 0; i < argv.length; i++) {
+    const key = argv[i];
+    if (!key.startsWith("--") || !allowed.includes(key.slice(2))) throw new Error("Unknown argument: " + key);
+    const v = argv[++i];
+    if (v == null || v.startsWith("--")) throw new Error("Missing value for " + key);
+    out[key.slice(2)] = v;
+  }
+  const groups = out.groups ? out.groups.split(",") : GROUPS;
+  if (groups.some(g => !GROUPS.includes(g))) throw new Error("Unknown group: " + groups.join(","));
+  const sizes = out.sizes ? out.sizes.split(",").map(Number) : CONFIG.sizes;
+  if (sizes.some(s => ![2, 3, 4].includes(s))) throw new Error("Sizes must be 2, 3, 4");
+  return { samples: out.samples ? B.positiveInt(out.samples, "samples") : CONFIG.samples, groups, sizes, workers: out.workers ? B.positiveInt(out.workers, "workers") : CONFIG.workers, out: out.out || CONFIG.out };
+}
+function outPath(file) {
+  const root = path.resolve(H.ROOT, "docs/balance"), resolved = path.resolve(H.ROOT, file);
+  if (!resolved.startsWith(root + path.sep)) throw new Error("Reports must be inside docs/balance/");
+  fs.mkdirSync(path.dirname(resolved), { recursive: true });
+  return resolved;
+}
+async function main(argv = process.argv.slice(2)) {
+  const opt = parseArgs(argv), file = outPath(opt.out), meta = provenance(argv), jobs = plan(opt);
+  let done = 0;
+  const rows = await runJobs(jobs, opt.workers, () => { if (++done % 200 === 0 || done === jobs.length) console.error(`Completed ${done}/${jobs.length}`); });
+  const summary = summarizeAll(rows);
+  const report = { schema: "backfire-enemy-balance-v1", generatedAt: new Date().toISOString(), config: CONFIG, options: { samples: opt.samples, groups: opt.groups, sizes: opt.sizes }, provenance: meta,
+    rows: rows.length, errors: rows.filter(r => r.outcome === "error").length, timeouts: rows.filter(r => r.outcome === "timeout").length, summary, flags: flags(summary, opt.sizes),
+    errorSamples: rows.filter(r => r.outcome === "error").slice(0, 5).map(r => ({ seed: r.seed, group: r.group, cell: r.cell, variant: r.variant, error: r.error })) };
+  fs.writeFileSync(file + ".json", JSON.stringify(report, null, 1) + "\n");
+  const old = fs.existsSync(file + ".md") ? fs.readFileSync(file + ".md", "utf8") : "";
+  const tail = old.includes(MARK) ? old.slice(old.indexOf(MARK)) : MARK + "\n";
+  fs.writeFileSync(file + ".md", markdown(report) + "\n" + tail);
+  console.log(`${report.errors ? "ERRORS" : "OK"}: ${file}.md（${rows.length} 场，异常 ${report.errors}）`);
+  return report.errors ? 1 : 0;
+}
+if (isMainThread && require.main === module) main().then(code => { process.exitCode = code; }).catch(e => { console.error(e.stack || String(e)); process.exitCode = 1; });
+module.exports = { CONFIG, GROUPS, PAIRS, CAPTAINS, KING_RACES, plan, runJob, runJobs, summarize, summarizeAll, flags, markdown, parseArgs, main };
