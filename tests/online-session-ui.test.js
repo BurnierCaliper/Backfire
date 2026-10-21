@@ -139,7 +139,10 @@ test("D3 game sessions: remote ownership, GM/private messages, round actions and
   assert.equal((await submit(alice, { type: "gmReply", text: "ALICE_REPLY_D3" })).ok, true);
   await host.waitForFunction(() => OnlineGame.getView().messages.some(m => m.text === "ALICE_REPLY_D3"));
   assert.ok(!(await bob.evaluate(() => JSON.stringify(OnlineGame.getView()))).includes("ALICE_REPLY_D3"));
-  await host.evaluate(() => { OnlineGame.start(); TrpgFlow.toBattle(); GAME.skip = true; GAME.instant = true; GAME.startOrEnd(); });
+  // 先长休一次（issue #216）：之后每个玩家包都带着长休结算 rest（4 人约 1 KB），下面 4v3 连击的流量照样要 ≤ 50 KiB
+  await host.evaluate(() => { OnlineGame.start(); trpgLongRest({ hours: 8, force: true }); OnlineGame.touch(); });
+  for (const page of [alice, bob]) await page.waitForFunction(() => !!OnlineGame.getView().packet?.rest?.id);
+  await host.evaluate(() => { TrpgFlow.toBattle(); GAME.skip = true; GAME.instant = true; GAME.startOrEnd(); });
   try { await host.waitForFunction(() => HotseatGame.getView().phase === "picking" && GAME.depth === 0, null, { timeout: 20000 }); }
   catch (error) { throw new Error(error.message + " " + JSON.stringify(await host.evaluate(() => ({ depth: GAME.depth, phase: HotseatGame.getView().phase, ask: HotseatGame.getView().ask, started: state.combatStarted, combatPhase: state.combatPhase, notice: OnlineGame.getView().notice }))) + " errors=" + JSON.stringify(f.errors)); }
   const heroes = await host.evaluate(() => HotseatGame.getView().heroes);
@@ -175,6 +178,10 @@ test("D3 game sessions: remote ownership, GM/private messages, round actions and
   // 战场日志写出打了谁、多少伤害（以前只有「瑞比 · 普通攻击」）
   await bob.waitForFunction(() => (OnlineGame.getView().packet.publicLogs || []).some(r => /普通攻击 → .+：\d+ 伤害/.test(r.text)), null, { timeout: 10000 });
   measureAction(t, "4v3 ruby two-hit attack", f.wire.slice(attackStart));
+  // 长休结算没变：战斗包不再整份带 rest，只带 restUnchanged（玩家端用上一次收到的那份）
+  const attackPackets = logicalPackets(f.wire.slice(attackStart)).filter(row => row.packet.type === "result");
+  assert.ok(attackPackets.every(row => !("rest" in row.packet) && row.packet.restUnchanged === true), "长休过一次以后，战斗包不再重发长休结算");
+  assert.equal(await alice.evaluate(() => typeof OnlineGame.getView().packet.rest?.id), "string", "玩家端照样拿得到这份结算");
   const menu = await alice.evaluate(actor => OnlineGame.actionMenu({ actor, skill: "__move" }), actor);
   assert.equal(menu.type, "actionOptions"); assert.ok(menu.choices.options.length > 0);
   const dest = menu.choices.options[0].value;
@@ -1148,6 +1155,17 @@ test("联机跑团：主持人长休，玩家画面也弹结算（不带坚毅�
   const raw = JSON.stringify(await alice.evaluate(() => OnlineGame.getView().packet.rest));
   assert.ok(!/shp/.test(raw), raw);
   assert.ok(await alice.evaluate(() => OnlineGame.getView().packet.clock && OnlineGame.getView().packet.clock.day >= 1), "游戏时钟发给玩家");
+  // 结算没变（issue #216）：之后的包只带 restUnchanged，玩家端还原成同一份，结算画面不会再弹一次
+  await alice.click('#rest-report [data-rr="close"]');
+  await alice.evaluate(() => { window.restPlays = 0; const play = RestReport.play; RestReport.play = (...args) => { window.restPlays++; return play(...args); }; });
+  const restId = await alice.evaluate(() => OnlineGame.getView().packet.rest.id), seq = await alice.evaluate(() => OnlineGame.getView().packet.seq), from = f.wire.length;
+  await host.evaluate(() => { OnlineGame.touch(); OnlineGame.touch(); });
+  await alice.waitForFunction(s => OnlineGame.getView().packet.seq >= s + 2, seq);
+  const later = logicalPackets(f.wire.slice(from).filter(row => row.page === 1)).filter(row => row.packet.type === "result");
+  assert.ok(later.length >= 2 && later.every(row => !("rest" in row.packet) && row.packet.restUnchanged === true), JSON.stringify(later.map(row => Object.keys(row.packet))));
+  assert.equal(await alice.evaluate(() => OnlineGame.getView().packet.rest.id), restId);
+  assert.equal(await alice.evaluate(() => window.restPlays), 0, "同一份结算不再弹");
+  assert.equal(await alice.locator("#rest-report").isHidden(), true);
   assert.deepEqual(f.errors, []);
 });
 
