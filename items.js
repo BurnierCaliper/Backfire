@@ -103,13 +103,13 @@ EFFECT_ITEMS.forEach(it => {
  * 结构材料（金属 → 赫心结晶）照旧只用于武器升级；道具制作另用这 7 种。队伍公用（supply：联机时不按需求分配，直接进公用背包）。
  *   cls：chem 化学 / elec 电子 / bio 生物；tier：1 常见、2 精制；price 参考价（黑市按 CRAFT_BLACK_MARKET 倍出售） */
 const CRAFT_MATERIALS = [
-  { id: "cm_scrap",  name: "废料",       price: 100, cls: "shell", tier: 0, hint: "道具的壳体。外城区看守、暴徒等机械与人形敌人常掉；拆解道具也能拿回" },
-  { id: "cm_chem",   name: "化工残液",   price: 200, cls: "chem",  tier: 1, hint: "化学 · 常见。采矿场的倾倒机、矿卫，自爆小车与各路队长常掉" },
-  { id: "cm_gas",    name: "燃气浓缩物", price: 600, cls: "chem",  tier: 2, hint: "化学 · 精制。采矿场的集气者、撒布机、蚁卫等精英多掉，法外之王必掉" },
-  { id: "cm_coil",   name: "废线圈",     price: 200, cls: "elec",  tier: 1, hint: "电子 · 常见。外城区看守、巡逻车、浮标常掉，巡逻艇、UFO 掉得更多" },
-  { id: "cm_cell",   name: "电芯",       price: 600, cls: "elec",  tier: 2, hint: "电子 · 精制。巡逻艇、巨人、守望鸦等精英多掉，杂兵偶尔也有" },
-  { id: "cm_scale",  name: "沙鱼鳞",     price: 200, cls: "bio",   tier: 1, hint: "生物 · 常见。沙漠的沙兽、沙鱼、大沙 / 活沙常掉，穴鸦、尘虫偶尔掉" },
-  { id: "cm_spirit", name: "星灵组织",   price: 600, cls: "bio",   tier: 2, hint: "生物 · 精制。陨星采矿场的衍蛛、弦蚣，机甲、守望鸦多掉，沙聚合体必掉" }
+  { id: "cm_scrap",  name: "废料",       price: 100, cls: "shell", tier: 0, hint: "道具的壳体。外城区机器人看守、狂徒等机械与人形敌人常掉；拆解道具也能拿回" },
+  { id: "cm_chem",   name: "化工残液",   price: 200, cls: "chem",  tier: 1, hint: "化学 · 常见。采矿场的投料无人机、矿场看守机器人，自爆小车与各路警卫队队长常掉" },
+  { id: "cm_gas",    name: "燃气浓缩物", price: 600, cls: "chem",  tier: 2, hint: "化学 · 精制。采矿场的燃气收集机、播撒者、蚁型特殊戒备兵种等精英多掉，亡命之王必掉" },
+  { id: "cm_coil",   name: "废线圈",     price: 200, cls: "elec",  tier: 1, hint: "电子 · 常见。外城区机器人看守、安保巡逻车、巡检浮标常掉，高压巡逻艇、飞碟触灵掉得更多" },
+  { id: "cm_cell",   name: "电芯",       price: 600, cls: "elec",  tier: 2, hint: "电子 · 精制。高压巡逻艇、巨人、观测鸦等精英多掉，杂兵偶尔也有" },
+  { id: "cm_scale",  name: "沙鱼鳞",     price: 200, cls: "bio",   tier: 1, hint: "生物 · 常见。沙漠的沙灵、沙鱼、大沙灵 / 活沙常掉，穴鸦、尘虫偶尔掉" },
+  { id: "cm_spirit", name: "星灵组织",   price: 600, cls: "bio",   tier: 2, hint: "生物 · 精制。第三采矿场的陨体衍蛛、陨体弦蚣，机甲触灵、观测鸦多掉，沙灵聚合体必掉" }
 ];
 const CRAFT_BLACK_MARKET = 3;   // 道具材料普通商店不卖，黑市按参考价的几倍卖
 CRAFT_MATERIALS.forEach(m => { ITEM_CATALOG[m.id] = { name: m.name, hint: m.hint, combat: false, supply: true, material: "craft" }; });
@@ -174,7 +174,7 @@ const ENEMY_DROPS = {
   sandfish_drive:  { cm_scale: 0.35, cm_scrap: 0.1 },
   sandfish_ambush: { cm_scale: 0.35, cm_scrap: 0.1 },
   dust_bug:  { cm_scale: 0.1 },                                          // 中立生物：小概率
-  tube_worm: { cm_chem: 0.08, cm_scale: 0.05 },
+  tube_worm: { cm_chem: 0.06, cm_scale: 0.04 },
   // —— 古代造物（沙漠）：沙漠里的电芯来源 ——
   watchcrow: { cm_cell: 0.65, cm_spirit: 0.65, cm_coil: 0.5 },
   // —— 首领（首领池） ——
