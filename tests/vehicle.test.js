@@ -739,6 +739,18 @@ test("驾驶员：附赠冲撞——移动一个区带着整辆车，然后撞�
   assert.equal(f.c.skillList(b).some(s => s.id === "veh_ram" || s.id === "veh_cover"), false, "炮手没有冲撞 / 掩体");
 });
 
+test("车上的人只能用车的武器：种族的附赠技能（追猎本能、吐酸……）上车后也不能用，下车后恢复", () => {
+  const f = field([{ id: "riot_captain", lv: 5, zone: 2 }, { id: "riot_molotov", lv: 5, zone: 2 }]);
+  const cap = f.E("riot_captain"), mol = f.E("riot_molotov");
+  assert.ok(f.c.enemySkillList(cap).some(s => s.id === "race_hunt"), "上车前：狼兽人有追猎本能");
+  assert.ok(f.c.enemySkillList(mol).some(s => s.id === "race_spit"), "上车前：蜥蜴兽人有吐酸");
+  const p = car(f, 2); f.c.vehicleBoard(cap, p); f.c.vehicleBoard(mol, p);
+  eq(f.c.enemySkillList(cap).map(s => s.id), ["veh_fire", "veh_burn", "veh_cover", "veh_ram", "veh_leave"]);
+  eq(f.c.enemySkillList(mol).map(s => s.id), ["veh_fire", "veh_burn", "veh_leave"]);
+  f.c.vehicleLeave(mol);
+  assert.ok(f.c.enemySkillList(mol).some(s => s.id === "race_spit"), "下车后：吐酸回来了");
+});
+
 test("车上的人只能用车的武器：技能表只有车上的招式；炮手不能自己移动", () => {
   const f = riotField(2, 2);
   const [a, b] = riots(f);

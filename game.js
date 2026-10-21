@@ -180,6 +180,7 @@
       res,
       iv: u.iv ? { hp: Number(u.iv.hp) || 0, atk: Number(u.iv.atk) || 0 } : null,   // 个体值（杂兵、精英）
       race: typeof raceText === "function" ? raceText(u) : "",   // 种族（敌人）："红皮人" / "兽人·牛"
+      racePerks: typeof racePerkLines === "function" && u.race ? racePerkLines(u) : [],   // 生效的种族被动（enemies.js · RACE_PERKS），悬停里写出来
       intents: (() => { try { return typeof enemyIntents === "function" ? enemyIntents(u) : []; } catch (e) { return []; } })(),   // 名牌上的行动提示（连击……）
       atk: Math.round(Number(atk) || 0),
       weapon: !!u.weaponOf,
@@ -187,6 +188,8 @@
       // 首领机制（boss-mechanics.js）：身上的死刑标记 / 首领正在倒数的死刑
       marks: typeof bossMarksOn === "function" ? bossMarksOn(u) : [],
       casts: typeof bossCastsBy === "function" ? bossCastsBy(u) : [],
+      // 分阶段的首领 / 精英现在在第几阶段（bestiary.js）：悬停说明只列这一阶段的能力；联机玩家那边由 online-view.js 发同一个编号
+      stage: (() => { try { return typeof bestiaryStageOf === "function" ? bestiaryStageOf(u) : 0; } catch (e) { return 0; } })(),
       // 中立生物（desert.js）：迷你名牌；夜晚下潜的不画名牌，折进区角的「沙下动静」
       neutral: typeof isNeutralCreature === "function" && isNeutralCreature(u),
       submerged: !!u.submerged,
@@ -2613,11 +2616,12 @@
     // 乘员和驾驶员写在下面的乘员名单里，不当成身上的效果
     (s.status ? s.status.split(" · ") : []).forEach(t => { if (t && t !== "无状态" && !(vc && (t === vc.seatText || /^驾驶员：/.test(t)))) tokens.push(t); });
     (s.hung || []).forEach(n => tokens.push(n));
-    const info = vc ? { kind: "prop", propKind: vc.kind } : { kind, kit: s.kit, ownerName: owner && owner.name, escort: s.escort };
+    const info = vc ? { kind: "prop", propKind: vc.kind } : { kind, kit: s.kit, ownerName: owner && owner.name, escort: s.escort, stage: s.stage };
     const head = headOf(s);
     return UnitTip.html(info, tokens.filter(Boolean), { name: head.name, sub: `Lv${head.level} · ${s.zone} 区${vc ? " · " + (s.isPlayer ? "我方" : "敌方") : ""}${head.race ? " · " + head.race : ""}${head.iv && typeof ivText === "function" ? " · 个体值 " + ivText(head) : ""}`,
       mechs: window.UnitCard && UnitCard.mechLines ? UnitCard.mechLines(s) : [],   // 首领机制：还有几回合落下
-      rows: vc ? vc.roster : null, rowsTitle: vc ? vc.seatText : "" });
+      rows: vc ? vc.roster : null, rowsTitle: vc ? vc.seatText : "",
+      perks: vc ? [] : (s.racePerks || []) });                                       // 种族被动（画成车时不写驾驶员的）
   }
   function onCardHover(id, on) {
     const fieldPick = !!(choiceResolve && choiceResolve.field);   // 结算队列里在战场上点选（那时动作还没结束，G.depth > 0）
