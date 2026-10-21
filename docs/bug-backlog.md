@@ -86,9 +86,67 @@
 - [x] 训练场：顶栏「重新开始」把训练状态带进普通战斗 —— 训练场里点「重新开始」重开这一场训练（training.js · restart；game.js · g-restart）
 - [x] 训练场：「架势无限」不成立 —— 假人架势每次结算补满，击破、不稳、道具失衡、GM 失衡都排除假人，卡片写「架势 ∞」（app.js · defText 等；engine.js；items.js；game.js）
 
-## 低（52 条）
+## 第三轮排查：单机（2026-10）
 
-见报告各方向 `findings.md`：专长 6、单局 4、工坊 7、敌人 7、战斗 / 评分 / 联机 / 训练场 27，另 `tools/playtest.js` 的 ARENA 模式不能用。多是日志 / 说明文字和实际不一致、边角情况。
+范围：专长、单局 / 每日挑战、工坊 / 长休、敌人 / 地形、战斗规则 / 评分 / 训练场（issue #130；联机另查）。已在上面「已修」「中」列过的不重复。
+**说明：本轮排查环境不允许运行 `node`（含 `node --test`），所以下面每一条都是「读代码判断」，没有一条用测试复现。** 复现步骤是推演出来的，没跑过；修之前请先写一个在现有代码上失败的测试。
+条目格式：问题 / 位置 / 复现 / 应该 vs 实际 / 确认方式。
+
+### 高（1）
+
+- [ ] **H-1 跑团诊所装的义体不进队伍记忆，下一场开战或读档就丢，钱照扣**
+  - 位置：`game.js` · `packHero`（约 3961）/ `applyCampaignToField`（约 4028）；写入端 `trpg.js` · `trpgCyberwareAct` / `trpgCyberwareInstall`。
+  - 复现：跑团开诊所给某角色装义体 → `GAME.rememberCampaign()` 后重摆队伍，或存档读档 → `u.cyberware` 为空，血量 / 坚毅上限变回没装的样子。
+  - 应该：义体（和 `cyberOverinstall`）跟着队伍记忆走，和 `cyberPlan` 一样；实际：丢失，钱不退。单局存在 `h.cyberware`（rogue.js:514、1577）所以没事。
+  - 确认方式：读代码判断（`game.js` 里 grep 不到 `cyberware`）；`tests/cyberware-trpg.test.js` 没有持久化往返测试。
+
+### 中（10）
+
+- [ ] **M-1 `tools/playtest.js` 的 ARENA 模式一开跑就抛错（上一轮报的「不能用」）**：位置 `tools/playtest.js:405-406`（先 `run.stage = "task"` 再 `R.acceptTask(run, "main")`）、`rogue.js:438`（`acceptTask` 要求 `stage === "board"`）。复现 `ARENA=1:5:1 node tools/playtest.js`。应该能连打 battle / elite / boss 出胜率；实际第一场接任务就抛「现在不在任务板前，不能接任务」。修法：接任务前把 `run.stage` 设成 `"board"`。`BOSSTEST` / `ARENA` 没有任何测试。确认方式：读代码判断（核对了两处源码，没能运行）。
+- [ ] **M-2 乘势会误伤中立生物和友军**：给「同区其他架势 = 1 的敌人」各 1 点击破，没按 `hostileTo` 筛。位置 `feats.js:725` · `featAfterHit`，用的 `app.js:5085` · `visibleEnemies`（只看 `!u.isPlayer`）。复现：乘势角色把敌人 A 打进失衡，同区有架势 1 的 `dust_bug` 或友军 `guard_sword`。应该只对敌对生效。读代码判断。
+- [ ] **M-3 长线养成「每日任务」有 4 种永远完成不了**：`long_rest` / `check_ok` / `shop` / `weather` 注释写着在休息 / 检定 / 购买 / 改天气时结算，但全仓库没有这些写入；其余项是每场固定增量（击杀 20 杂兵每场 +4、「无死亡通关」打赢就 +1 不看倒地），和说明不符。抽到那四项则「三个全完成」奖励拿不到。位置 `rogue.js:2522` `GROWTH_GENERAL_POOL`、`2575` `updateGrowthDailyProgress`、`2620` `completeGrowthDailyTask`（还用裸 `Math.random()` 掷材料，没走 `withRng`，`2625`）。读代码判断。
+- [ ] **M-4 每日挑战记录的「队伍」在有人阵亡后不对，全灭时是空数组**：`dailyRecord` 存 `run.party.map(h => h.kit)`，阵亡者已被 `SaveStore.killHero` 移到 `run.fallen`。位置 `rogue.js:2780` · `dailyRecord`，调用点 `2722` · `endRun`（团灭走 `captureParty`、力竭走 `exhaustDeath`）。应取 `party` + `fallen` 或开局记下。读代码判断。
+- [ ] **M-5 飞碟触灵 10 级起被动召唤的看守不记 `summonedBy`**：自爆炸不到它们，材料掉落过滤（`rogue.js:1062` 用 `!u.summonedBy`）也不一致（技能版 `ufo_summon` 有记）。位置 `app.js:1779-1790` · `beginRound`；对照 `enemies.js:1953`、`2302-2309` · `detonateUfo`。README 1464 写「自爆也炸它召唤的看守」。可参照 `tests/audit-P5-enemies.test.js:432`。读代码判断。
+- [ ] **M-6 AI 的「后撤」和「接近」不看危墙 / 关着的门，被拦下后整回合不出手**：`doMove` 被 `canCross` 拦下不扣行动点、`sig` 不变，`enemyPhase` 直接 break。A：dist=1 的远程敌人被贴脸会选相邻无我方单位的区后撤，不查是否隔墙；B：目标挑选（`lowest` / `topAtk` / `nearest`）不看墙，近战敌人朝墙那边的人移动被拦。位置 `ai.js` · `aiStep`（约 286-293）/ `aiPlanBase`（`if (step != null) return move(step)`）。`tests/ai-positioning.test.js:37` 用三区所以没覆盖。应像 `firingStep` 用 `walkableNeighbors` 筛。复现：两区制 `gaps["1-2"]` 设 wall，`guard_gun` 在 1 区、我方 `[1,1]`，`EnemyAI.plan` 返回移到 2 区，执行后 zone / ap 都不变。读代码判断。
+- [ ] **M-7 沙鱼夜间 / 饥饿「追猎」隔着墙 / 关门 / 深渊的猎物，整回合被走不通的移动占掉**：`sandFishPlan` 的 `zonePath` 不看间隔，只查 `coralAvoid` 和付不付得起。猎物在墙那边时每回合都返回「移动」，沙鱼从不攻击眼前的玩家。位置 `desert.js` · `sandFishPlan`。应用 `walkableNeighbors` 同款判断。读代码判断。
+- [ ] **M-8 护送人物「委托人」把中立生物、友军、下潜单位算成「敌人」**：`escort.js` · `escortAct` 的 `foes` 只排除 `isPlayer/dead/hidden/_removed/ironwall/untargetable`。同区只有一只尘虫也会「躲开」；还击按血量最低挑，沙漠里几乎总选尘虫（desert.js 文件头写「谁都不会主动打它们」），也会选打不到的下潜 / 距离 2 / 友军。应用 `hostileTo` 口径并筛打得到的。读代码判断。
+- [ ] **M-9 跑团工坊同时开工时，打下手的人还能同时做自己的东西**：`trpg.js:123-135` · `trpgCraft` 的 `busy` 只登记 `j.kit` 不登记 `j.helper`；同一个人给两件打下手也不拦。对照 `docs/workshop-design.md` 第 5 节和单局 `rogue.js:1756-1763`（已拦「已经在忙了」）。读代码判断。
+- [ ] **M-10 跑团补给不够只能硬撑时，护送 VIP 仍被治满血**：`trpg.js:394-398` · `trpgLongRest` 无条件调 `trpgTaskRestEscort`（`trpg-tasks.js:367`），长休 `ok:false`（队员没恢复）时 VIP 仍清伤、日志写「血量回满」。单局只在长休成功时才走。应 `r.report.ok` 为假时不治。读代码判断。
+
+### 低（21）
+
+**专长**
+- [ ] **L-1 主持人「全员复原」不刷新 `LEDGER.shortOnce`**（以身作盾、挺身等「每次短休 N 次」的专长）：`ledger.js:788-803` · `ledgerRestoreAll` 清了 `shortUsed` / `restOnce` 漏了 `shortOnce`；对照长休 `765`、短休 `523`；入口 `trpg-commands.js:17`、`battle-commands.js:201`。读代码判断。
+- [ ] **L-2 兼修后的勾索仍拉不动首领**：兼修改走原技能「拉拽」（`app.js:12852` · `displaceTo` 无首领限制），但 `feats.js:539-555` · `featSkillTargetWhy` 最后仍调勾索自己的 `targetWhy`（`feats.js:199`）拦首领。战地包扎同理，影响很小。读代码判断。
+- [ ] **L-3 涉猎专长在技能栏的说明沿用原技能文字，次数 / 加强与实际不符**：`feats.js:516-523` · `featSkills` 取 `roleSkillDef(...).hint`（`party.js:1050-1100`、`app.js:7164`）。震慑写「每场两三次」实际 1 次；续时 / 硬撑 / 看破写两次实际 1 次；加固 15 级「可自选血量种类」、鼓劲 15 级加强都被 `_dabbleNerf` 关掉但仍显示。读代码判断。
+- [ ] **L-4 跑团「找工匠升级」不打八折**（巧手匠人说明与 README 写商店和工匠都 8 折）：`trpg.js:511` · `trpgUpgradeWeapon` 的 `smith` 模式直接用 `info.labor` 或主持人填的费用，界面默认值也是原价（`trpg-ui.js:295-307`）。可能是有意让主持人定。读代码判断。
+
+**单局**
+- [ ] **L-5 精英战的 +1 级加成常被本幕等级上限吞掉**：`rogue.js:76-81` · `enemyLevel`，`min(b, round(a+(b-a)*t) + bonus)`，`actDay≥6` 后精英与普通战同级；`ROGUE_CONFIG.eliteLevelBonus` 注释写「精英比同时期普通战斗高几级」。可能是有意封顶。读代码判断。
+- [ ] **L-6 `finishBattle` 没有阶段保护**：`acceptTask` / `camp` / `restAtNode` / `afterVictory` 都校验 `run.stage`，只有 `rogue.js:931` · `finishBattle`（及 `rogue-commands.js` 的 `actions.finishBattle`）没有。任务板上调用会在 `advanceNode` 的 `run.task.hunt` 抛 TypeError，非战斗节点调用会把节点「打完」并推进。UI 重复触发才会遇到。读代码判断。
+- [ ] **L-7 休息点「短休」在没人有次数时仍可点，白白过一站**：`rogue.js:1445` · `restAtNode`，按钮 `rogue-ui.js:378`。`ledgerShortRest` 只写「次数已用完」，`advanceNode` 照走。应灰掉或提示。读代码判断。
+- [ ] **L-8 休息点遭遇战（被偷袭）打赢后不计这场战斗的时间**：撤退 / 败北会 `passHours(NODE.battle.hours)`，打赢只走 `doLongRest`。`rogue.js:931` 起 `finishBattle` 的 ambush 分支。可能是有意并进长休。读代码判断。
+
+**工坊 / 长休**
+- [ ] **L-9 死亡角色能制作，也能给别人打下手**：`trpg.js:105-121` · `trpgCraftOdds` 用 `trpgHeroes()`（含死人）；长休、钱包平分、专长计数都只认活人。主持人手动操作，可能有意放宽。读代码判断。
+- [ ] **L-10 对死亡角色用医疗包，道具白扣**：`ledger.js:853-866` · `ledgerHealItem`，先 `bagAdd(-1)` 再 `healHeroFlesh`（对死人直接 return），日志「实际恢复 0」。应提示「已死亡」且不扣。读代码判断。
+- [ ] **L-11 长休不恢复死亡角色的武器耐久，README 写「全部武器耐久回满」**：`ledger.js:736` 只在 `!h.dead` 里 `restoreDurability`；`ledgerAfterBattle`（402）照样给死人武器每场 −1。可能有意，README 没写。读代码判断。
+- [ ] **L-12 守夜日志文字和实际不符**：`ledger.js:760` 写「除守夜者外，武器耐久回满」，实际守夜的是角色时他自己的武器照样回满（737），只有武器人守夜那把才不回。读代码判断。
+- [ ] **L-13 README「休整」一节过时**：README.md:236-237 附近——「每满 24 小时刷新短休次数」实际过 0 点刷新；「长休后进入下一天」实际白天睡 8 小时不换天；「维修工具包 +10 耐久」实际按点数修；「战斗里使用道具……维修包不会混进去」实际 `repair_kit` 带 `combat:true`。读文档与代码判断。
+- [ ] **L-14 医疗包 hint 说「治疗内层生命」，实际会溢到外层**：`items.js:5-6` 的 hint vs `healUnit` 注释「可以治到外层（作者定）」。读代码判断。
+- [ ] **L-15 强心注射剂对「起身中」的人恢复 0 却照扣坚毅 6，日志不提示**：`items.js:398-402`；`healUnit` 对 `upOnShp` 直接返回 0（`engine.js:1426`），`selfShpCost` 仍扣。医疗包分支有说明，这里没有。读代码判断。
+- [ ] **L-16 跑团里不花钱的操作选了「由谁付」，日志仍写「由 X 付，钱包剩 N」**：`trpg-commands.js:64` · `PAYABLE` 含 `repair` / `craft` / `teachRecipe`，`trpgPayWith` 末尾无条件追加。钱不会错，文字误导。读代码判断。
+
+**敌人 / 地形**
+- [ ] **L-17 高压巡逻艇电弧扫射的「感电」可能落在没被打到的人身上**：`enemies.js` · `en_boat_arc` 的 `hit = allPlayers().filter(距离1)` 不排除死亡 / 倒地 / 隔墙，`pick` 直接上 `shock`；`ai.js`（`special === "boat"`）也只看 `zdist === 1`。读代码判断。
+- [ ] **L-18 赤牙「引火」直接写 `statuses.burn`，绕过 `grantBurn`**：`enemies.js:1785-1789` · `en_chi_ignite`，自焚（`self === "burn"`）免疫失效；预热版名单也不排除死亡 / 倒地。赤牙目前没接 AI（README 128），只在主持人手动时出现。读代码判断。
+- [ ] **L-19 图鉴 / 单位卡写固定骰，实际每 5 级升档**：`engine.js` · `unitOf` 的 `suggest.dice` vs `enemies.js` 用 `leveledSides` 的 `en_buoy` / `en_dump` / `en_swarm` / `en_crow` / `en_boat_arc` / `en_spread` / `en_watch` / `en_dust_grind` / `en_dust_lift`，牛队长冲撞、狼队长借机骰数随 `addedDiceByLevel` 增加；`bestiaryStats` 读 `suggest.dice` 不随等级。README 1578 只提蜂群。例：15 级浮标图鉴写 1d4 实际 1d8。读代码判断。
+- [ ] **L-20 AI 把「离开酸液地面 / 越过空隙」当附赠移动规划，实际扣行动点**：`ai.js` · `canPayMove`（精英 / 首领只看 `bonus >= 1`）vs `app.js` · `doMoveInner`（酸液非行走者 / `overVoid` 走 `spendAp`）。1 行动点 + 1 附赠的精英站在酸液上会把唯一行动点花在移动上。规则本身没问题，是 AI 没算这笔代价。读代码判断。
+- [ ] **L-21 已 `_removed` 但没 `dead` 的单位仍在范围效果名单里**：`desert.js:142`（尘虫迁走）、`205` / `214`（沙鱼下潜逃走）不像 `removeEnemyFromField` 那样清出 `state.units`；`fieldUnits()` / `visibleEnemies()` / 爆炸桶、电池、危墙倒塌的 `filter(!hidden && !dead)` 都不滤 `_removed`，范围效果仍波及并在日志出现名字。影响小，未验证打死后是否结算经验。读代码判断。
+
+### 战斗规则 / 技能 / 评分 / 训练场
+
+这个方向的排查没能运行任何代码，除上面的 ARENA（M-1）外没有读出可以确认的条目；评分、技能说明、训练场需要下一轮在能跑 `node` 的环境里补查。
 
 ## 需要作者确认（四十多条）
 
@@ -101,3 +159,25 @@
 - 首领第 1 个标记的协助窗口是否按失衡处理
 - 技能里的移动只结算深渊
 - 三方混战的分边
+
+第三轮（单机，2026-10，都是读代码判断）：
+- 任务奎支报酬按完成时人数算（`rogue.js:458` · `completeTask`），水和物资按接任务时人数发，中途死人报酬少 1/n
+- 守夜者不恢复，但全队力竭小时数（`LEDGER.hours`，`ledger.js:759-761`）被清零，守夜者的力竭也清零；README 守夜段没提力竭
+- 单局 `run.day` 与 `LEDGER.clock` 各走各的（`rogue.js:2642` · `advanceDays`），短休次数两处都刷新
+- 长线养成每日任务按真实日期换题，跨 0 点进度清零（`rogue.js:2537` · `growthDailyKey`），同「每日挑战用本机日期」
+- 每日挑战统计只在打完 / 全灭时写（`rogue.js:2722`），中途放弃不计，选取率有幸存者偏差
+- 专长选项缓存键是「角色:已有专长数」（`rogue.js:2753` · `dailyFeatOffer`），同时欠两项专长时共用一组选项；正常 UI 流程碰不到
+- 眼尖 / 舌灿莲花的优势直接盖掉劣势（`feats.js:139`、`215` 写 `adv = true; dis = false`），`party.js:590` 约定「优劣相抵」
+- 拾荒者额外战利品固定按「普通战斗」档掷、不掷材料（`rogue.js:976-978`），精英 / 首领战是否沿用那一档
+- 跃迁 / 推搡 / 勾索的位移走 `displaceTo`，不触发离开区域的借机（`app.js:4340`）
+- 荒野向导「旅行时间 −1/3」只接了单局 `travelHours`（`rogue.js:493`），跑团路线估时（`world-travel.js`）没接
+- 涉猎专长「每场 2 次以上 → 每场 1 次」的归类是否符合 `feats.js` 文件头的次数规则
+- 维修工具包修好的武器人同一场再倒下不再扣 −2（`items.js:344-359` · `useRepairKit` 没清 `_durCounted`），README「被击败 −2」是每场一次还是每次倒下？
+- 「全员复原」（`ledger.js:788-803`）除回满外还复活死人、清短休 / 长休一次技能，但不刷新 `shortOnce`、力竭时数、义体短休次数，范围是否有意
+- 后台改「距上次长休」不触发 80 小时力竭致死，小数被取整（`trpg.js` · `trpgBackstageApply` 的 `edit.hours`）
+- 短休次数上限读 `u.note` 里的「熊」不读种族资料（`ledger.js:69` · `shortRestCap`），以后只写 `HERO_PROFILES` 会漏
+- 榴弹机甲喷火协助 `en_gl_assist` 没有 `aoe` 标记，每人单独一击、可被协助格挡、同区打不到；图鉴写「对目标所在区 atk/2」
+- 亡命之王「处死命令」擒拿（50%）不看这一击是否打中（`en_king_kill`），`en_dump` / `en_watch` / `en_giant_sand_vortex` 已改成打中才上
+- 危墙倒塌（`destroyGap` 传 `flags.environment`）打得到下潜单位，爆炸桶 / 电池打不到（`app.js:7774`）；README 1035 没写危墙倒塌
+- 赤牙「剿灭」的「可立刻免费移动一次」只写在日志里没给移动（赤牙手动操作）
+- `en_bigsand_summon` 召唤的沙灵不记 `summonedBy`，战后材料掉落会计入；飞碟技能召唤的看守不掉（`rogue.js:1062`）
