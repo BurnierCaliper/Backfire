@@ -275,7 +275,8 @@
         try { if (has("noraMood")) mood = root.noraMood(u) === "cruel" ? "cruel" : "gentle"; } catch (e) {}
         return { kit: "nora", mood, pierce, lock: plus(2) };
       }
-      case "ruby": return { kit: "ruby", nano: Math.max(0, Math.min(100, Number(r.nano) || 0)), mecha: !!r.mecha,
+      // 储备能源（补充能源压缩出来的，#219）没有上限，不夹到 100
+      case "ruby": return { kit: "ruby", nano: Math.max(0, Math.min(100, Number(r.nano) || 0)), reserve: Math.max(0, Number(r.nanoReserve) || 0), mecha: !!r.mecha,
         // 收发代理（9 级）解锁后才显示无人机图标；放出来之前是暗的
         showDrone: (Number(u.level) || 1) >= 9, drone: !!r.drone, boost: !!r.overdrive };
       case "yuito": {
@@ -319,8 +320,9 @@
     nora: s => ind(I.gentle(s.mood === "gentle"), "温和", "big " + (s.mood === "gentle" ? "glow-mint" : "dim")) + ind(I.cruel(s.mood === "cruel"), "残忍", "big " + (s.mood === "cruel" ? "glow-pink" : "dim")) +
       (s.lock ? ind(svg(`<rect x="10" y="18" width="20" height="15" rx="2" fill="${C("brass")}"/><path d="M14 18v-5a6 6 0 0 1 12 0v5" stroke="${C("brass")}" stroke-width="3" fill="none"/>`), "不再随机") : "") +
       ind(I.needle(), s.pierce ? "刺入" + (s.pierce > 1 ? " ×" + s.pierce : "") : "没有刺入", s.pierce ? "" : "dim"),
-    ruby: s => `<div class="ind">${seg(Math.round(s.nano / 10), 10, s.nano >= 20 ? C("cyan") : "#d9644f", 8, 26)}<span>纳米 <b class="num">${s.nano}</b>/100</span></div>` +
-      ind(I.wing(s.mecha), s.mecha ? `机甲模式 · 每回合 −${s.boost ? 40 : 20}` : s.nano >= 20 ? "可进入机甲" : "能源不足", "big " + (s.mecha ? "glow-cyan" : "")) +
+    // 纳米不够时自动用储备能源：够不够看「纳米 + 储备」；有储备时在纳米下面写「储备 n」
+    ruby: s => `<div class="ind">${seg(Math.round(s.nano / 10), 10, s.nano + (s.reserve || 0) >= 20 ? C("cyan") : "#d9644f", 8, 26)}<span>纳米 <b class="num">${s.nano}</b>/100</span>${s.reserve > 0 ? `<span>储备 <b class="num">${s.reserve}</b></span>` : ""}</div>` +
+      ind(I.wing(s.mecha), s.mecha ? `机甲模式 · 每回合 −${s.boost ? 40 : 20}` : s.nano + (s.reserve || 0) >= 20 ? "可进入机甲" : "能源不足", "big " + (s.mecha ? "glow-cyan" : "")) +
       (s.showDrone ? ind(I.drone(s.drone, s.mecha), !s.drone ? "无人机未放出" : s.mecha ? `无人机 · 激光 ×${s.boost ? 3 : 2}` : "无人机 · 每回合 +10 纳米",
         s.drone ? (s.mecha ? "glow-red" : "glow-cyan") : "dim") : ""),
     yuito: s => `<div class="ind"><div class="pips">${s.bean ? Array.from({ length: Math.min(8, s.bean) }, () => I.bean(true)).join("") : I.bean(false)}</div><span>咖啡豆 ${s.bean}</span></div>` +
