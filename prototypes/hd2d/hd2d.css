@@ -33,6 +33,56 @@ body { position: fixed; inset: 0; user-select: none; }
   scale: var(--wfx-rs, 1) calc(var(--wfx-rs, 1) * var(--wfx-sq, 1));
   translate: calc((var(--wfx-rs, 1) - 1) * 50%) calc((var(--wfx-rs, 1) * var(--wfx-sq, 1) - 1) * 50%);
 }
+/* 沙暴的 2D 沙雾（#251，主人试玩反馈 · 三续：「还不够明显——要有旧画面那种翻滚的大团沙雾」）。
+ * 旧画面（game.html）的沙雾画在浅灰的战场上，一团团棕黄一眼就看得出；原型里画在沙黄的 3D 画面上，和沙地、沙暴的雾几乎一个颜色，就看不见了。
+ * 下面全是原型自己的（weather-fx.css 一行没改，正式画面不受影响）；颜色、浓淡、大小、多快都由 hd2d-wfx.js 按 WFX.sand 写在行内的变量里：
+ *   .wfx-sand（正式画面那两层一阵阵卷过去的大沙雾）：画法照旧，颜色换成更深、更浑的棕灰（行内的 --sand / --sand2 / --peak 盖过 weather-fx.css 的）
+ *   .hd2d-sand（原型自己的一层，在 .wfx-sand 底下、铭牌底下）：
+ *     .veil  整层蒙一层浑的沙色（远景最浑）
+ *     .deep  远处更浓：画面上沿（最远的地方）压一层厚的，往下变淡（3D 的雾、远景蒙的沙色在那里接上）
+ *     .puff  一团团沙雾：三个错开的软椭圆叠成一团（--c0 / --c1 两种色调交替，.alt 另一种形状），顺着风（data-sand-dir，和 .wfx-sand 一样：
+ *            E 往右 / W 往左 / S 往下 / N 往上）从上风那边整团在画面外飘到下风那边整团出画面，两头淡入淡出；风朝镜头吹（S）时越飘越大（--s0 → --s1）。
+ *            --u = 停住时离上风那条边几成（减少动态效果时就停在那里）；--zoom = 三段镜头放大多少（越近越大，近景从眼前飘过） */
+.hd2d-sand { position: absolute; inset: 0; overflow: hidden; pointer-events: none; --dx: 1; --dy: 0; }
+.hd2d-sand[data-sand-dir="W"] { --dx: -1; --dy: 0; }
+.hd2d-sand[data-sand-dir="S"] { --dx: 0; --dy: 1; }
+.hd2d-sand[data-sand-dir="N"] { --dx: 0; --dy: -1; }
+.hd2d-sand > i { position: absolute; display: block; }
+.hd2d-sand > .veil { inset: 0; background: rgb(var(--veil-c)); opacity: var(--veil, 0); transition: opacity var(--wfx-t, .5s) ease-in-out; }
+.hd2d-sand > .deep { inset: 0; opacity: var(--deep, 0); transition: opacity var(--wfx-t, .5s) ease-in-out;
+  background: linear-gradient(180deg, rgb(var(--deep-c)) 0%, rgba(var(--deep-c), var(--deep-mid)) var(--deep-at), rgba(var(--deep-c), 0) var(--deep-to)); }
+.hd2d-sand > .puff {
+  --c: var(--c0); left: var(--x); top: var(--y); width: var(--w); height: var(--h);
+  translate: -50% -50%; scale: var(--zoom, 1); opacity: 0; will-change: transform, opacity;
+  background:
+    radial-gradient(closest-side at 50% 58%, rgb(var(--c)), rgba(var(--c), .72) 40%, rgba(var(--c), .3) 70%, rgba(var(--c), 0)),
+    radial-gradient(closest-side at 30% 44%, rgba(var(--c), .8), rgba(var(--c), .3) 62%, rgba(var(--c), 0)),
+    radial-gradient(closest-side at 70% 40%, rgba(var(--c), .75), rgba(var(--c), .28) 62%, rgba(var(--c), 0));
+  animation: hd2d-puff var(--t, 12s) linear var(--dl, 0s) infinite;
+  transition: scale var(--wfx-t, .5s) ease-in-out;
+}
+.hd2d-sand > .puff.t1 { --c: var(--c1); }
+.hd2d-sand > .puff.alt {
+  background:
+    radial-gradient(closest-side at 50% 54%, rgb(var(--c)), rgba(var(--c), .72) 40%, rgba(var(--c), .3) 70%, rgba(var(--c), 0)),
+    radial-gradient(closest-side at 66% 46%, rgba(var(--c), .8), rgba(var(--c), .3) 62%, rgba(var(--c), 0)),
+    radial-gradient(closest-side at 28% 60%, rgba(var(--c), .7), rgba(var(--c), .26) 62%, rgba(var(--c), 0));
+}
+/* 飘一趟：偏移 = 离上风那条边的距离（--u × 画面）+ 半团（translate 的 % 对着团自己的宽高），乘上风向（--dx / --dy） */
+@keyframes hd2d-puff {
+  0% { transform: translate(calc(var(--dx) * (var(--u) * -100vw - 50%)), calc(var(--dy) * (var(--u) * -100vh - 50%))) scale(var(--s0, 1)); opacity: 0; }
+  12%, 88% { opacity: var(--o); }
+  100% { transform: translate(calc(var(--dx) * ((1 - var(--u)) * 100vw + 50%)), calc(var(--dy) * ((1 - var(--u)) * 100vh + 50%))) scale(var(--s1, 1)); opacity: 0; }
+}
+/* 减少动态效果（.still = 场景的 motion 关了；媒体查询 = 系统设置，马上生效）：沙雾不飘，停在各自的位置上照样蒙着；
+ * 正式画面那两层大沙雾也停住，浓淡用行内的 --still（weather-fx.css 停住时只留 0.15，看不出是沙暴） */
+.hd2d-wfx.still .hd2d-sand > .puff { animation: none; opacity: var(--o); }
+.hd2d-wfx.still .wfx-sand i { animation: none; transform: none; opacity: var(--still, .15); }
+@media (prefers-reduced-motion: reduce) {
+  .hd2d-sand > .puff { animation: none; opacity: var(--o); transition: none; }
+  .hd2d-sand > .veil, .hd2d-sand > .deep { transition: none; }
+  .hd2d-wfx .wfx-sand i { opacity: var(--still, .15); }
+}
 
 /* ---------- 铭牌（DOM，由 CSS2DRenderer 摆在 3D 位置上，细杆的底贴着脚下）----------
  * 紧凑版：名字一行，状态小圆点 + 分层血条 + 架势一行；等级、ATK、血量数字、状态文字悬停 / 选中时从头顶展开。
