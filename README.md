@@ -368,6 +368,13 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **第三轮 · 单机低级 L-17 ~ L-21（敌人 / 地形）**（issue #153；enemies.js · `en_boat_arc` / `en_chi_ignite` / 其余范围技能名单，ai.js · `canPayMove`，app.js · `fieldUnits` / `visibleEnemies` / 引爆桶、电池、小车残骸、酸液 / 冻土 / 流沙等同区名单，bestiary.js · `BESTIARY_DICE_SCALE` / `bestiaryStats`，bestiary-ui.js；测试 tests/enemy-terrain-153.test.js）
+  - **L-17**：以前电弧扫射的「感电」从整份名单里挑人，可能落在死亡 / 倒地 / 隔着危墙没被打到的人身上；现在只对站着的人出手，感电只在这一击真正打中的人里挑（被牵制时仍先给牵制者）。
+  - **L-18**：以前赤牙「引火」直接写 `statuses.burn`（`Math.max(1, …)`），自焚免疫失效，预热版（同区全体）还包括死亡 / 倒地的人；现在走 `grantBurn`（自焚免疫，灼烧层数 +1），预热版只点站着的人。
+  - **L-19**：图鉴「伤害骰」是 1 级基础骰，实际浮标 / 倾倒无人机 / 蜂群 / 乌鸦 / 高压巡逻艇 / 喷洒机 / 观测鸦 / 尘体每 5 级升一档，牛队长冲撞、狼队长借机骰数每 5 级 +1；现在图鉴数值旁注明「基础骰，每 5 级升一档 / 骰数每 5 级 +1」（没有改成按等级现算，和图鉴里 bestiary.js 文字描述「骰子每 5 级升一档」的风格一致）。
+  - **L-20**：以前 AI 把「离开酸液地面 / 越过空隙」当附赠移动规划，实际 `doMoveInner` 扣的是行动点（荒原行者才是附赠）。现在 `canPayMove(u, dest)` 按实际消耗判断：这两种移动要有行动点，精英 / 首领还要多留 1 点行动点出手（1 行动点 + 1 附赠的精英站在酸液上不再把唯一的行动点花在移动上）。
+  - **L-21**：以前尘虫迁走、沙鱼下潜逃走只打 `_removed`，没有 `dead`，`fieldUnits()` / `visibleEnemies()`、爆炸桶 / 电池 / 小车残骸的同区伤害、酸液 / 冻土 / 流沙等场地名单还把它们算进去；现在这些名单都排除 `_removed`。逃走的仍不算被击杀（不掉材料、不记击杀，和 #117 一致）。
+
 - **第三轮 · 单机低级 L-1 ~ L-7：全员复原刷新短休专长、兼修勾索拉首领、涉猎说明按实际写、工匠八折、精英等级、finishBattle 阶段保护、休息点短休灰掉**（issue #149；ledger.js · `ledgerRestoreAll`，feats.js · `featSkillTargetWhy` / `featSkills`，trpg.js · `trpgSmithFee` / `trpgUpgradeWeapon`，trpg-ui.js，rogue.js · `enemyLevel` / `battleSpec` / `finishBattle` / `restAtNode` / `canShortRestAtNode`，rogue-data.js · `eliteOverCap`，rogue-ui.js，rogue-commands.js；测试 `tests/third-round-solo-l.test.js`；L-8 按 issue 要求先不动）
   - **L-1**：主持人「全员复原」以前清了 `shortUsed` / `restOnce` 漏了 `shortOnce`，以身作盾、挺身等「每次短休 N 次」的次数不刷新；现在一并清空。
   - **L-2**：兼修后的勾索 / 战地包扎走原技能，以前最后还调专长自己的 `targetWhy`，把首领拦下；现在走原技能就只看原技能的目标判断（拉拽没有首领限制）。没兼修的勾索仍然拉不动首领。

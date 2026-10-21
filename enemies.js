@@ -1150,7 +1150,7 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
     // 手册：atk+1d6 范围能量 +2 击破，同区不分敌我。范围攻击不能协助格挡；自爆本身就是它的毁灭，不再触发死亡引爆
     const dmgOpt = { element: "energy", mult: 1, diceN: 1, diceS: 6, baseBreak: 2, flags: { action: true, aoe: true } };
     a._exploded = true;
-    state.units.filter(u => !u.hidden && !u.dead && Number(u.zone) === Number(a.zone) && u.id !== a.id).forEach(u => aa(u, dmgOpt));
+    state.units.filter(u => !u.hidden && !u.dead && !u._removed && Number(u.zone) === Number(a.zone) && u.id !== a.id).forEach(u => aa(u, dmgOpt));
     if (typeof markAoeZone === "function") markAoeZone(a.zone, { element: "energy", dmg: (Number(a.atk) || 0) + 3, attacker: a });
     a.layers.forEach(l => { l.current = 0; });
     lines.push(`${a.name} 自爆后损毁。`);
@@ -1642,11 +1642,14 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
     const pb = !!(forced && Number(forced.zone) === Number(a.zone));
     const hit = pb ? standingPlayersIn(a.zone) : allPlayers().filter(u => zoneDist(a.zone, u.zone, state.zoneMode) === 1);
     if (pb) lines.push(`${a.name} 被 ${forced.name} 牵制：电弧扫射抵近打自己所在的 ${a.zone} 区（倍率 ×0.6）。`);
+    const landed = [];   // 这一击真正打中的人（死亡 / 倒地 / 隔着危墙没打到的不算）
     hit.forEach(u => {
-      aa(u, { element: "electric", mult: pb ? 0.6 : 1, diceN: 1, diceS: (typeof leveledSides === "function" ? leveledSides(a.level, 6) : 6), baseBreak: 1, flags: { action: true, aoe: true } });
+      if (u.dead || (typeof isDownProtected === "function" && isDownProtected(u))) return;
+      const out = aa(u, { element: "electric", mult: pb ? 0.6 : 1, diceN: 1, diceS: (typeof leveledSides === "function" ? leveledSides(a.level, 6) : 6), baseBreak: 1, flags: { action: true, aoe: true } });
+      if (enemyHitLanded(out)) landed.push(u);
     });
-    // 手册：可对一人施加感电。挑一个还没有感电的目标（被牵制时先给牵制者）。
-    const pick = (pb && hit.includes(forced) ? forced : null) || hit.find(u => !(u.statuses && u.statuses.shock)) || hit[0];
+    // 手册：可对一人施加感电。只从打中的人里挑一个还没有感电的目标（被牵制时先给牵制者）。
+    const pick = (pb && landed.includes(forced) ? forced : null) || landed.find(u => !(u.statuses && u.statuses.shock)) || landed[0];
     if (pick) {
       pick.statuses = pick.statuses || {};
       pick.statuses.shock = true;
@@ -1783,11 +1786,11 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
   if (id === "en_chi_ignite") {
     if (!needT()) return true;
     const primed = a.resources && a.resources.primed;
-    const list = primed ? allPlayers().filter(u => Number(u.zone) === Number(t.zone)) : [t];
+    const list = primed ? standingPlayersIn(t.zone) : [t];
     list.forEach(u => {
-      u.statuses.burn = Math.max(1, u.statuses.burn || 0);
-      if (typeof popStatus === "function") popStatus(u, "burn");
-      lines.push(`${u.name} 灼烧。`);
+      const had = u.statuses && u.statuses.burn;
+      grantBurn(u, 1, lines);   // 自焚免疫等照常生效
+      if (u.statuses && u.statuses.burn !== had) lines.push(`${u.name} 灼烧。`);
     });
     return true;
   }
@@ -2304,7 +2307,7 @@ function detonateUfo(body) {
   const dmg = 3 * (body.atk || 0);
   // 手册「对所有角色」，作者定：它自己召唤的机器人看守也一起炸
   const legIds = ufoLivingLegs(body).map(u => u.id);
-  (state.units || []).filter(u => !u.hidden && !u.dead && u.id !== body.id &&
+  (state.units || []).filter(u => !u.hidden && !u.dead && !u._removed && u.id !== body.id &&
     (u.isPlayer || (u.summonedBy && (u.summonedBy === body.id || legIds.includes(u.summonedBy))))).forEach(u => {
     const fake = unitOf("飞碟自爆", body.level, [{ type: "armor", hp: 1 }], 0, 0);
     fake.zone = u.zone;

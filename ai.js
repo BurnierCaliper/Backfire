@@ -157,11 +157,22 @@ const EnemyAI = (function () {
     if (!opts.length) return null;
     return opts.sort((a, b) => zdist(a, goal) - zdist(b, goal) || a - b)[0];
   }
-  /** 这一步移动付不付得起：杂兵用行动点，精英 / 首领只能用附赠行动；被禁足 / 霜结不能动 */
-  function canPayMove(u) {
+  /** 这一步移动付不付得起，按 app.js · doMoveInner 实际结算的消耗算：
+   *  离开酸液地面 / 越过空隙（给出 dest 且隔着空隙）扣 1 行动点（荒原行者改扣附赠）；导体 / 探测模式不耗；
+   *  其余杂兵用行动点，精英 / 首领用附赠行动。被禁足 / 霜结不能动 */
+  function canPayMove(u, dest) {
     if (!u || u.noMove || u.self === "frost") return false;
     if (AI_SPEC[u.kit] && AI_SPEC[u.kit].fixed) return false;   // 不会主动移动（矿场警戒自动机）
+    const wanderer = typeof featHas === "function" && featHas(u, "wanderer");
+    const fromF = (state.fields && state.fields[u.zone]) || {};
+    const overVoid = dest != null && !u.flying && typeof getGap === "function" && getGap(u.zone, dest).type === "void";
+    const leaveAcid = !!fromF.acid && !u.flying;
+    if (wanderer && (overVoid || leaveAcid)) return (u.bonus || 0) >= 1;
     const rank = typeof enemyRankOf === "function" ? enemyRankOf(u) : "minion";
+    // 这两种移动要花行动点：杂兵照常 1 点够；精英 / 首领的计划是「附赠移动 + 行动点出手」，花掉最后 1 点就没法出手了，要留 1 点
+    const apMove = overVoid || (leaveAcid && !(typeof acidGroundWalker === "function" && acidGroundWalker(u)));
+    if (apMove) return (u.ap || 0) >= (rank === "minion" ? 1 : 2);
+    if (u.self === "conductor" || (u.kit === "ecmo" && u.resources && u.resources.probe)) return true;
     return rank === "minion" ? (u.ap || 0) >= 1 : (u.bonus || 0) >= 1;
   }
   /** 能正常走过去的相邻区（不隔危墙 / 关着的门；地面单位不走空隙、不进深渊） */
@@ -545,7 +556,7 @@ const EnemyAI = (function () {
     // 沙漠生物的习性：夜晚 / 沙暴不走进有沙珊瑚的区（desert.js · coralAvoid）
     if (step != null && typeof coralAvoid === "function" && coralAvoid(u, step)) step = null;
     // 付不起移动（精英 / 首领没有附赠行动、杂兵没有行动点）就不规划移动，改看付得起的行动（原地能打就打，打不到就不出手）
-    if (step != null && !canPayMove(u)) step = null;
+    if (step != null && !canPayMove(u, step)) step = null;
     let sid = aiSpecial(u, spec, target, prey, has, list);
     if (sid && !["en_agg3_debris", "en_agg1_rush", "en_agg1_rush_prep", "en_king_hold", "en_king_exec", "en_bigsand_summon", "en_bigsand_heal", "ufo_prime", "ufo_boom", "ufo_stomp", "ufo_sweep", "en_agg2_overheat", "en_gl", "en_gl_fire", "en_ant_shell", "en_ant_shell_fire", "en_gas_ignite", "en_alarm_zap", "en_giant_sand_pulse"].includes(sid)) {
       const rt = retargetLegal(u, sid, target, prey, pick.forced);
