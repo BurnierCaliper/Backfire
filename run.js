@@ -252,6 +252,12 @@ const ENEMY_INFO = {
   captain_wolf:   { faction: "警卫队", regions: ["巨人城", "外城区"], tokens: 2 },
   captain_ox:     { faction: "警卫队", regions: ["巨人城", "外城区"], tokens: 2 },
   captain_lizard: { faction: "警卫队", regions: ["巨人城", "外城区"], tokens: 2 },
+  // —— 镇压队（外城区；赤牙麾下的火属性部队，固定种族，docs/suppression-force.md）——
+  riot_baton:    { faction: "镇压队", regions: ["外城区"], tokens: 1, race: "兽人·牛" },
+  riot_rifle:    { faction: "镇压队", regions: ["外城区"], tokens: 1, race: "兽人·熊" },
+  riot_molotov:  { faction: "镇压队", regions: ["外城区"], tokens: 1, race: "兽人·蜥蜴" },
+  riot_flamer:   { faction: "镇压队", regions: ["外城区"], tokens: 2, race: "兽人·熊" },
+  riot_captain:  { faction: "镇压队", regions: ["外城区"], tokens: 2, race: "兽人·狼" },
   // —— 盗匪 ——
   thug_knife:  { faction: "盗匪", regions: ["外城区"], tokens: 1 },
   thug_hammer: { faction: "盗匪", regions: ["外城区"], tokens: 1 },
@@ -287,11 +293,26 @@ const ENEMY_INFO = {
   watchcrow: { faction: "古代造物", regions: ["沙漠"], tokens: 2 }
 };
 
-/** 可以同场混编的阵营（安保与警卫队是一套体系的两个分支） */
-const ALLIED_FACTIONS = [["安保", "警卫队"]];
+/** 是一伙的阵营（安保、警卫队是一套体系的两个分支；镇压队是赤牙的部队，和它们是一伙）。
+ *  「一伙」只管不互相敌对、友军判断；遭遇里能不能同场混编另看 FACTION_MIX_CHANCE */
+const ALLIED_FACTIONS = [["安保", "警卫队", "镇压队"]];
+/** 同场混编概率：写在这里的阵营不是想混就混——抽遭遇时它和同伙阵营只有这么大的概率混编，
+ *  其余时候各打各的（抽到镇压队就只出镇压队；抽到安保 / 警卫队时，镇压队也只有这个概率加进来）。
+ *  没写的阵营照旧想混就混（安保 + 警卫队） */
+const FACTION_MIX_CHANCE = { "镇压队": 0.15 };
 function alliesOf(faction) {
   const g = ALLIED_FACTIONS.find(a => a.indexOf(faction) >= 0);
   return g ? g.slice() : [faction];
+}
+/** 抽遭遇时这个阵营可以同场出现的阵营：alliesOf 去掉没掷中混编概率的阵营，每次调用各掷一次。
+ *  抽到的是受限阵营（镇压队）：整个同伙（安保 + 警卫队）一起混进来或一起不来；
+ *  抽到的是同伙：受限阵营各自掷一次决定加不加进来 */
+function encounterFactions(faction) {
+  const all = alliesOf(faction);
+  const loose = all.filter(f => FACTION_MIX_CHANCE[f] != null);
+  if (!loose.length) return all;
+  if (loose.includes(faction)) return Math.random() < FACTION_MIX_CHANCE[faction] ? all : [faction];
+  return all.filter(f => !loose.includes(f) || Math.random() < FACTION_MIX_CHANCE[f]);
 }
 
 function enemyInfo(preset) { return ENEMY_INFO[preset] || null; }
@@ -398,7 +419,7 @@ function rollEncounter(opt) {
   if (!mixed) {
     const fs = opt.faction ? [opt.faction] : regionFactions(region);
     faction = pickOne(fs);
-    const allow = alliesOf(faction);
+    const allow = encounterFactions(faction);
     pool = pool.filter(k => allow.indexOf(ENEMY_INFO[k].faction) >= 0);
   }
   if (!pool.length) pool = regionPool(poolRegion);
@@ -463,7 +484,7 @@ function rollBossEncounter(bossPreset, opt) {
   const region = opt.region || (info && info.regions[0]) || "外城区";
   const tokens = opt.tokens != null ? Number(opt.tokens) : 2;
   const enemies = [{ preset: bossPreset, zone: 2 }];
-  const allow = info ? alliesOf(info.faction) : null;
+  const allow = info ? encounterFactions(info.faction) : null;
   let pool = regionPool(region).filter(k => !allow || allow.indexOf(ENEMY_INFO[k].faction) >= 0);
   if (info && info.escorts) info.escorts.forEach(k => enemies.push({ preset: k, zone: 2 }));
   let left = info && info.escorts ? 0 : tokens;

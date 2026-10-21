@@ -1629,6 +1629,17 @@ function ufoLegStats(lv) {
   };
 }
 
+/** 外城区镇压部队的数值（docs/suppression-force.md 第 1 节）：shield / flesh = [1 级血量, 每级增量]；
+ *  def = 1 级架势（杂兵每 10 级 +1，精英照警卫队队长每 5 级 +1）；atk = 1 级 atk（已经是比参照模板减 1 之后的数；
+ *  杂兵每级 +1，精英的成长项照队长，写在 enemyPresets 里） */
+const RIOT_STATS = {
+  baton:   { shield: [8, 2],   flesh: [12, 4], def: 4, atk: 3 },
+  rifle:   { shield: [6, 2],   flesh: [6, 2],  def: 3, atk: 4 },
+  molotov: { shield: [5, 2],   flesh: [5, 2],  def: 3, atk: 3 },
+  flamer:  { shield: [16, 6],  flesh: [26, 7], def: 5, atk: 5 },   // 牛队长 atk 6 + 2/5 级 → 5 + 2/5 级
+  captain: { shield: [15, 6],  flesh: [20, 5], def: 4, atk: 7 }    // 狼队长 atk 8 + … → 7 + …
+};
+
 function enemyPresets() {
   return [
     { id: "guard_sword", name: "机器人看守（剑）", build(lv, p) {
@@ -1751,6 +1762,42 @@ function enemyPresets() {
         { type: "shield", hp: scaleHp(12 + (lv - 1) * 5 + milestone(lv, 2) * 5, p) },
         { type: "flesh", hp: scaleHp(14 + (lv - 1) * 2, p) }
       ], 4, 7 + milestone(lv, 2) + milestone(lv, 5), { kit: "captain_lizard", range: "ranged", dice: [1, 6], element: "acid", baseBreak: 2 });
+    }},
+    // —— 外城区镇压部队（docs/suppression-force.md）：外层护盾、内层肉体，武器全是火；atk 比参照模板低 1 ——
+    // 警棍盾：总血量同狂徒（锤），atk 4 → 3
+    { id: "riot_baton", name: "镇压队员·警棍盾", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(RIOT_STATS.baton.shield[0] + (lv - 1) * RIOT_STATS.baton.shield[1], p) },
+        { type: "flesh", hp: scaleHp(RIOT_STATS.baton.flesh[0] + (lv - 1) * RIOT_STATS.baton.flesh[1], p) }
+      ], RIOT_STATS.baton.def + milestone(lv, 10), RIOT_STATS.baton.atk + (lv - 1), { kit: "riot_baton", range: "melee", dice: [1, 4], element: "fire", baseBreak: 2 });
+    }},
+    // 燃烧步枪：总血量同机器人看守（枪），atk 5 → 4
+    { id: "riot_rifle", name: "镇压队员·燃烧步枪", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(RIOT_STATS.rifle.shield[0] + (lv - 1) * RIOT_STATS.rifle.shield[1], p) },
+        { type: "flesh", hp: scaleHp(RIOT_STATS.rifle.flesh[0] + (lv - 1) * RIOT_STATS.rifle.flesh[1], p) }
+      ], RIOT_STATS.rifle.def + milestone(lv, 10), RIOT_STATS.rifle.atk + (lv - 1), { kit: "riot_rifle", range: "ranged", dice: [1, 4], element: "fire" });
+    }},
+    // 燃烧瓶投手：比步枪兵更脆；燃烧瓶是范围攻击，没有伤害骰
+    { id: "riot_molotov", name: "燃烧瓶投手", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(RIOT_STATS.molotov.shield[0] + (lv - 1) * RIOT_STATS.molotov.shield[1], p) },
+        { type: "flesh", hp: scaleHp(RIOT_STATS.molotov.flesh[0] + (lv - 1) * RIOT_STATS.molotov.flesh[1], p) }
+      ], RIOT_STATS.molotov.def + milestone(lv, 10), RIOT_STATS.molotov.atk + (lv - 1), { kit: "riot_molotov", range: "ranged", dice: [0, 0], element: "fire", baseBreak: 0 });
+    }},
+    // 火焰喷射兵：照警卫队队长（牛）的写法（架势、atk 成长），血量层换成护盾 + 肉体，atk 每级 −1；喷火没有伤害骰
+    { id: "riot_flamer", name: "火焰喷射兵", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(RIOT_STATS.flamer.shield[0] + (lv - 1) * RIOT_STATS.flamer.shield[1], p) },
+        { type: "flesh", hp: scaleHp(RIOT_STATS.flamer.flesh[0] + (lv - 1) * RIOT_STATS.flamer.flesh[1], p) }
+      ], RIOT_STATS.flamer.def + milestone(lv, 5), RIOT_STATS.flamer.atk + milestone(lv, 5) * 2, { kit: "riot_flamer", range: "melee", dice: [0, 0], element: "fire" });
+    }},
+    // 镇压小队长：照警卫队队长（狼）的写法（架势、atk 成长），血量层是护盾 + 肉体，atk 每级 −1
+    { id: "riot_captain", name: "镇压小队长", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(RIOT_STATS.captain.shield[0] + (lv - 1) * RIOT_STATS.captain.shield[1], p) },
+        { type: "flesh", hp: scaleHp(RIOT_STATS.captain.flesh[0] + (lv - 1) * RIOT_STATS.captain.flesh[1], p) }
+      ], RIOT_STATS.captain.def + milestone(lv, 5), RIOT_STATS.captain.atk + milestone(lv, 2) + milestone(lv, 5) * 2, { kit: "riot_captain", range: "any", dice: [1, 6], element: "fire" });
     }},
     // 第一采矿场精英（暂定数值，按狼队长的总血量 / 架势 / atk 拆成护盾、装甲、肉体三层）
     { id: "ant_guard", name: "蚁型特殊戒备兵种", build(lv, p) {
