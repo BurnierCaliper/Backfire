@@ -641,6 +641,21 @@
       if (offlineWait && offlineWait.owner === playerId) offlineWait = null;
       publish(); return { ok: true };
     },
+    /** 战斗中能不能转交角色：{ ok, reason }。只有联机跑团的主持人，且只在两个单位的回合之间 */
+    transferState() {
+      if (!isHost()) return { ok: false, reason: "只有主持人可以转交角色" };
+      if (rogue()) return { ok: false, reason: "联机单局开局后座位固定，不能转交" };
+      if (!HotseatGame.isActive() || !state.combatStarted || GAME.ended) return { ok: false, reason: "只在战斗中转交；探索时用「角色分配」" };
+      return HotseatGame.transferState();
+    },
+    /** 战斗中转交：主持人把角色（连同武器人）交给某名玩家；toId 为主持人自己 = 收回。成功后写一行公开记录 */
+    transfer(heroId, toId) {
+      const gate = root.OnlineGame.transferState();
+      if (!gate.ok) error(gate.reason);
+      const ack = HotseatGame.transferHero(heroId, toId);
+      publicLogs.push({ kind: "transfer", heroName: ack.heroName, toName: ack.toName, toGM: toId === identity.id, turn: state.turnNo, at: Date.now() }); publicLogs = publicLogs.slice(-100);
+      publish(); return { ok: true };
+    },
     /** 释放座位：转发服务丢掉这名玩家的恢复令牌（昵称和名额可以重新用），他的角色回到房主 */
     async releaseSeat(playerId) {
       if (!isHost()) error("只有主持人可以释放座位");
