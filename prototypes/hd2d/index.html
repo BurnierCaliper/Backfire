@@ -473,7 +473,7 @@ function reinset(refit) {
 function syncCamera(info) {
   camInfo = info;
   CAMS.CAMERA.order.forEach(t => { const b = $("cam-" + t); b.classList.toggle("on", info.tier === t); b.setAttribute("aria-pressed", String(info.tier === t)); });
-  $("cam-zone").textContent = info.tag || "";
+  $("cam-zone").textContent = (info.tag || "") + (info.close != null ? " · 特写 " + info.closeName : "");   // 近景里双击单位的特写（#237）
   const nav = info.tier !== "far";
   [["zone-prev", info.prev, "◀ " + info.prevTag], ["zone-next", info.next, info.nextTag + " ▶"]].forEach(([id, zone, text]) => {
     const b = $(id);

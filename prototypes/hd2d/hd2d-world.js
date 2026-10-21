@@ -34,7 +34,13 @@ const WORLD = {
   /** 各光影主题下地台亮边的颜色（和场景的轮廓光同色） */
   rimColor: { day: 0xfff0c8, dusk: 0xffb090, night: 0x8fb8ff },
   /** 灯：路灯 / 矿灯的点光源有多亮、照多远（场景再按光影主题乘 THEMES.lamp）。几盏、放哪在 hd2d-layout.js（GROUNDS 的 lamps、CONFIG.lamps） */
-  lamp: { street: { power: 10, dist: 9 }, hanging: { power: 8, dist: 7 } }
+  lamp: { street: { power: 10, dist: 9 }, hanging: { power: 8, dist: 7 } },
+  /** 高地（#237：主人要「真的高出一截」，高多少在 hd2d-layout.js 的 CONFIG.highRise）：上面照常是这块地台（厚 baseH），
+   *  下面垫一块岩层底座（高出来的那一截），侧面露出一层层岩石。底座比地台往外多出 out，看得出一级落差；tint 岩层的颜色（暗一点，和地台分得开）；
+   *  steps 台阶几级、每级深多少（台阶放在哪条边由布局定：outline.stairs，挨着别的区的边不放） */
+  high: { out: 0.16, tint: 0xa8957e, steps: 3, stepD: 0.42 },
+  /** 不规则地台的外缘（形状在 hd2d-layout.js 的 CONFIG.outline）：底座往外多出多少；矮一截的台子顶面暗多少；碎块的颜色暗多少 */
+  edge: { skirt: 0.2, ledgeDark: 0.86, chunkDark: 0.8 }
 };
 /** 贴花：每块地台上铺几块由地面主题定（hd2d-layout.js 的 GROUNDS[].decals；有场地效果的地台和兜底用 GROUNDS.concrete 的）。
  *  tex 贴图、size 边长范围（世界单位）、rough / metal 材质；glow = 拿地面主题的 glow 色当自发光（乘这个倍数）；square = 只转 90° 的倍数 */
@@ -522,13 +528,40 @@ function glowMap(look, name, repeat) {
   return { emissiveMap: e, emissive: look.glow, emissiveIntensity: WORLD.glow };
 }
 
-function zoneBody(z, look) {
+/* ---------- 不规则的外轮廓（#237，形状由布局算：hd2d-layout.js · outlineOf）---------- */
+/** 地台的外轮廓（局部 x / z，相对区中心）：布局给的不规则多边形；没给（旧的布局、测试里手写的区）就是以前的正方形 */
+function outlinePts(z) {
   const hw = z.w / 2, hd = z.d / 2;
+  return z.outline && z.outline.pts && z.outline.pts.length >= 3 ? z.outline.pts : [{ x: -hw, z: -hd }, { x: hw, z: -hd }, { x: hw, z: hd }, { x: -hw, z: hd }];
+}
+/** 局部 x / z 的折点 → THREE.Shape（挤出以后转 −90°，形状的 y 就是 −z）；hole = 中间挖一个圆洞（深渊） */
+function shapeOf(pts, hole, inner) {
   const s = new THREE.Shape();
-  s.moveTo(-hw, -hd); s.lineTo(hw, -hd); s.lineTo(hw, hd); s.lineTo(-hw, hd); s.closePath();
-  if (z.hole > 0) { const p = new THREE.Path(); p.absarc(0, 0, z.hole, 0, Math.PI * 2, true); s.holes.push(p); }
-  const geo = new THREE.ExtrudeGeometry(s, { depth: z.h, bevelEnabled: false, curveSegments: 28 });
-  geo.rotateX(-Math.PI / 2);   // 挤出方向 +z → +y，顶面正好在 y = h
+  pts.forEach((p, i) => (i ? s.lineTo(p.x, -p.z) : s.moveTo(p.x, -p.z)));
+  s.closePath();
+  if (hole > 0) { const p = new THREE.Path(); p.absarc(0, 0, hole, 0, Math.PI * 2, true); s.holes.push(p); }
+  if (inner) { const p = new THREE.Path(); inner.forEach((q, i) => (i ? p.lineTo(q.x, -q.z) : p.moveTo(q.x, -q.z))); p.closePath(); s.holes.push(p); }
+  return s;
+}
+/** 把一个形状挤成从 y0 到 y1 的一块（挤出方向 +z → +y） */
+function prism(shape, y0, y1) {
+  const geo = new THREE.ExtrudeGeometry(shape, { depth: Math.max(0.01, y1 - y0), bevelEnabled: false, curveSegments: 28 });
+  geo.rotateX(-Math.PI / 2);
+  if (y0) geo.translate(0, y0, 0);
+  return geo;
+}
+/** 摆在地台外缘的东西（废铁、石块、桶、晶簇、珊瑚……）落在缺口上就往中心挪，直到离轮廓的边至少 rad */
+function onTop(pts, x, zz, rad) {
+  for (let i = 0; i < 60 && L.outlineDist(pts, x, zz) < rad; i++) {
+    const d = Math.hypot(x, zz) || 1;
+    x -= (x / d) * 0.05; zz -= (zz / d) * 0.05;
+  }
+  return [x, zz];
+}
+
+/** 地台本体：顶面 + 侧面挤出来的一块（外轮廓是布局给的不规则多边形）。高地下面再垫一块岩层底座（#237）。直接加进 g：
+ *  第一个带两种材质（顶面、侧面）的就是地台本体（测试按这个找），底座在它后面 */
+function addBody(g, z, look) {
   const style = look || TOP_STYLE[z.kind] || TOP_STYLE.concrete;
   const t = tex(style.tex);
   t.repeat.set(WORLD.texRepeat, WORLD.texRepeat);
@@ -547,29 +580,84 @@ function zoneBody(z, look) {
     top = mat("top-" + style.tex, style.tint, { map: t });
     side = mat("side-" + style.side, style.sideTint || 0xffffff, { map: st, roughness: sd.rough, metalness: sd.metal });
   }
-  const m = new THREE.Mesh(geo, [top, side]);
-  m.castShadow = true; m.receiveShadow = true;
-  return m;
+  const pts = outlinePts(z), base = L.CONFIG.baseH, high = !!z.highland && z.h > base + 1e-6;
+  const m = new THREE.Mesh(prism(shapeOf(pts, z.hole), high ? z.h - base : 0, z.h), [top, side]);
+  m.castShadow = true; m.receiveShadow = true; m.userData.part = "body";
+  g.add(m);
+  // 高地：下面垫一块岩层底座（高出来的那一截），比上面的地台往外多出一点，侧面露出一层层岩石，和普通区之间的落差一眼看得出
+  const H = WORLD.high, rock = high ? rockMat() : null;
+  if (high) {
+    const ped = new THREE.Mesh(prism(shapeOf(L.offsetOutline(pts, -H.out), z.hole), 0, z.h - base), [rock, rock]);
+    ped.castShadow = true; ped.receiveShadow = true; ped.userData.part = "pedestal";
+    g.add(ped);
+  }
+  // 侧面高低错落：贴着外沿几块矮一截的台子（高地的贴着岩层底座，用岩石）
+  const O = z.outline || {};
+  (O.ledges || []).forEach(l => {
+    const lm = high ? [rock, rock] : [mat("ledge-" + top.uuid, new THREE.Color(top.color).multiplyScalar(WORLD.edge.ledgeDark).getHex(), { map: top.map }), side];
+    const m2 = new THREE.Mesh(prism(shapeOf(l.pts), 0, z.h * l.h), lm);
+    m2.castShadow = true; m2.receiveShadow = true; m2.userData.part = "ledge";
+    g.add(m2);
+  });
+  // 碎块：散在地台脚下的地上（地台外面那一大片地的高度 CONFIG.groundY）
+  if ((O.chunks || []).length) {
+    const cm = high ? rock : mat("chunk-" + side.uuid, new THREE.Color(side.color).multiplyScalar(WORLD.edge.chunkDark).getHex(), { map: side.map, roughness: 0.95 });
+    O.chunks.forEach(c => {
+      const k = mesh(new THREE.DodecahedronGeometry(c.size, 0), cm, c.x, L.CONFIG.groundY + c.size * 0.45, c.z);
+      k.rotation.set(c.rot, c.rot * 1.7, c.rot * 0.6); k.scale.y = 0.7; k.userData.part = "chunk";
+      g.add(k);
+    });
+  }
+  return pts;
+}
+/** 高地底座的岩层（侧面一层层的岩石，比地台暗一点） */
+function rockMat() {
+  const t = tex("strata");
+  t.repeat.set(WORLD.sideRepeat, WORLD.sideRepeat);
+  return mat("highland-rock", WORLD.high.tint, { map: t, roughness: 1 });
 }
 
-/** 地台上沿一圈细亮边：主光 / 轮廓光照到边角的那一道高光（颜色跟着光影主题） */
+/** 地台上沿一圈细亮边：主光 / 轮廓光照到边角的那一道高光（颜色跟着光影主题）。跟着不规则的外轮廓走一圈（往里 T.w 宽的一条） */
 function addTrim(g, z, theme) {
-  const T = WORLD.trim, y = z.h + T.h / 2 - 0.01;
+  const T = WORLD.trim, pts = outlinePts(z);
   const rimC = WORLD.rimColor[theme] || WORLD.rimColor.day;
   const m = mat("trim-" + (theme || "day"), 0xd9d2c4, { emissive: rimC, emissiveIntensity: T.emissive, roughness: 0.45 });
-  const hw = z.w / 2, hd = z.d / 2;
-  g.add(mesh(new THREE.BoxGeometry(z.w, T.h, T.w), m, 0, y, hd - T.w / 2, false, true));     // 前沿（朝镜头，最显眼）
-  g.add(mesh(new THREE.BoxGeometry(z.w, T.h, T.w), m, 0, y, -hd + T.w / 2, false, true));
-  g.add(mesh(new THREE.BoxGeometry(T.w, T.h, z.d), m, -hw + T.w / 2, y, 0, false, true));
-  g.add(mesh(new THREE.BoxGeometry(T.w, T.h, z.d), m, hw - T.w / 2, y, 0, false, true));
+  const ring = new THREE.Mesh(prism(shapeOf(pts, 0, L.offsetOutline(pts, T.w)), z.h - 0.01, z.h - 0.01 + T.h), m);
+  ring.castShadow = false; ring.receiveShadow = true; ring.userData.part = "trim";
+  g.add(ring);
+}
+/** 底座：地台脚下一圈暗色的底（跟着外轮廓，往外多出 WORLD.edge.skirt；高地的跟着岩层底座） */
+function addSkirt(g, z) {
+  const pts = outlinePts(z), out = WORLD.edge.skirt + (z.highland && z.h > L.CONFIG.baseH + 1e-6 ? WORLD.high.out : 0);
+  const m = new THREE.Mesh(prism(shapeOf(L.offsetOutline(pts, -out)), -0.3, 0), mat("skirt", 0x2a2622));
+  m.castShadow = false; m.receiveShadow = true; m.userData.part = "skirt";
+  g.add(m);
+}
+/** 高地的台阶：从地上一级级爬到顶面（放在布局给的那条边 outline.stairs 的正中，那一段轮廓是平直的）；地面主题的台阶用同一张顶面贴图，颜色暗一点 */
+function addStairs(g, z, look) {
+  const side = z.outline ? z.outline.stairs : "front";
+  if (!side) return;
+  const H = WORLD.high, n = H.steps, hw = z.w / 2, hd = z.d / 2;
+  const sm = look ? mat("ground-step-" + z.ground, new THREE.Color(look.tint).multiplyScalar(0.8).getHex(), { map: tex(look.tex) }) : mat("step", 0x5d574f, { map: tex("concrete") });
+  const across = side === "front" || side === "back" ? z.w : z.d, wide = across * 0.5;
+  const nx = side === "right" ? 1 : side === "left" ? -1 : 0, nz = side === "front" ? 1 : side === "back" ? -1 : 0;
+  const ex = nx * hw, ez = nz * hd;   // 那条边的正中
+  for (let i = 0; i < n; i++) {
+    const h = z.h * (i + 1) / (n + 1), depth = (n - i) * H.stepD;
+    const box = nx ? new THREE.BoxGeometry(depth, h, wide * (1 - i * 0.08)) : new THREE.BoxGeometry(wide * (1 - i * 0.08), h, depth);
+    const s = mesh(box, sm, ex + nx * depth / 2, h / 2, ez + nz * depth / 2);
+    s.userData.part = "stairs";
+    g.add(s);
+  }
 }
 
 /** 地面细节：贴花（油渍 / 裂缝 / 碎石……，地面主题各有各的），加一把小石子。避开黑洞，酸液池上不铺 */
 function addGroundDetail(g, z, r, look) {
   const sandy = look ? look.decor === "sand" : z.kind === "quicksand" || z.kind === "coral";
   const pool = z.kind === "acid" ? { hw: (z.w - 1.6) / 2, hd: (z.d - 1.6) / 2 } : null;
+  const pts = outlinePts(z);
   const ok = (x, zz, rad) => {
-    if (Math.abs(x) > z.w / 2 - rad - 0.15 || Math.abs(zz) > z.d / 2 - rad - 0.15) return false;
+    if (L.outlineDist(pts, x, zz) < rad + 0.15) return false;           // 不伸出不规则的外轮廓（正方形时就是以前的离边 rad + 0.15）
     if (z.hole > 0 && Math.hypot(x, zz) < z.hole + rad + 0.2) return false;
     if (pool && Math.abs(x) < pool.hw + rad && Math.abs(zz) < pool.hd + rad) return false;
     return true;
@@ -623,14 +711,10 @@ export function buildZone(z, ctx) {
   const g = new THREE.Group();
   g.position.set(z.cx, 0, z.cz);
   const r = rng(z.id * 97 + 13), look = lookOf(z);
-  g.add(zoneBody(z, look));
-  g.add(mesh(new THREE.BoxGeometry(z.w + 0.4, 0.3, z.d + 0.4), mat("skirt", 0x2a2622), 0, -0.15, 0, false, true));   // 底座
+  addBody(g, z, look);
+  addSkirt(g, z);
   addTrim(g, z, ctx.theme);
-  if (z.highland) {                                                    // 高地：前沿两级台阶（地面主题的台阶用同一张顶面贴图，颜色暗一点）
-    const sm = look ? mat("ground-step-" + z.ground, new THREE.Color(look.tint).multiplyScalar(0.8).getHex(), { map: tex(look.tex) }) : mat("step", 0x5d574f, { map: tex("concrete") });
-    g.add(mesh(new THREE.BoxGeometry(z.w * 0.5, z.h * 0.34, 0.9), sm, 0, z.h * 0.17, z.d / 2 + 0.45));
-    g.add(mesh(new THREE.BoxGeometry(z.w * 0.4, z.h * 0.68, 0.6), sm, 0, z.h * 0.34, z.d / 2 + 0.2));
-  }
+  if (z.highland) addStairs(g, z, look);                                // 高地：一级级的台阶从地上爬上去
   addGroundDetail(g, z, r, look);
   const fx = new Set(z.effects);
   if (fx.has("abyss")) addAbyss(g, z, ctx);
@@ -717,8 +801,12 @@ function addAcid(g, z, ctx, r) {
   fxLight(g, ctx, WORLD.colors.acid, 7, z.h + 1.3, 0, 0);
 }
 
+/** 摆在地台中间的圆（流沙的沙涡、能量 / 谐波 / 治疗的光圈）：按比例算的半径，不规则的外轮廓缺得深时再缩一点，不悬在缺口上 */
+function fitRadius(z, R) {
+  return Math.min(R, L.outlineDist(outlinePts(z), 0, 0) - 0.12);
+}
 function addQuicksand(g, z, ctx) {
-  const R = Math.min(z.w, z.d) * 0.42;
+  const R = fitRadius(z, Math.min(z.w, z.d) * 0.42);
   const pivot = new THREE.Group(); pivot.position.y = z.h + 0.03;
   const disc = new THREE.Mesh(new THREE.CircleGeometry(R, 40), new THREE.MeshStandardMaterial({ map: tex("spiral"), roughness: 1 }));
   disc.rotation.x = -Math.PI / 2; disc.receiveShadow = true;
@@ -728,12 +816,13 @@ function addQuicksand(g, z, ctx) {
 
 function addCoral(g, z, r) {
   const cm = [mat("coral1", WORLD.colors.coral1, { emissive: 0x401018 }), mat("coral2", WORLD.colors.coral2, { emissive: 0x401a08 })];
-  const spots = [[-1, -1], [1, -1], [-1, 0.2], [1, 0.4]];
+  const spots = [[-1, -1], [1, -1], [-1, 0.2], [1, 0.4]], pts = outlinePts(z);
   spots.forEach(([sx, sz], i) => {
     const n = 3 + Math.floor(r() * 3);
     for (let k = 0; k < n; k++) {
       const h = 0.5 + r() * 0.9;
-      const c = mesh(new THREE.CylinderGeometry(0.04, 0.13, h, 5), cm[(i + k) % 2], sx * (z.w / 2 - 0.45) + (r() - 0.5) * 0.4, z.h + h / 2 - 0.05, sz * (z.d / 2 - 0.5) + (r() - 0.5) * 0.4);
+      const [cx, cz] = onTop(pts, sx * (z.w / 2 - 0.45) + (r() - 0.5) * 0.4, sz * (z.d / 2 - 0.5) + (r() - 0.5) * 0.4, 0.2);
+      const c = mesh(new THREE.CylinderGeometry(0.04, 0.13, h, 5), cm[(i + k) % 2], cx, z.h + h / 2 - 0.05, cz);
       c.rotation.set((r() - 0.5) * 0.5, 0, (r() - 0.5) * 0.5);
       g.add(c);
       const tip = mesh(new THREE.SphereGeometry(0.1, 6, 5), cm[(i + k) % 2], c.position.x, c.position.y + h / 2, c.position.z);
@@ -758,10 +847,12 @@ function addFire(g, z, ctx, r) {
 function addIce(g, z, r) {
   const sheet = new THREE.Mesh(new THREE.PlaneGeometry(z.w - 1.2, z.d - 1.2), new THREE.MeshStandardMaterial({ color: WORLD.colors.ice, transparent: true, opacity: 0.35, roughness: 0.1, metalness: 0.2 }));
   sheet.rotation.x = -Math.PI / 2; sheet.position.y = z.h + 0.02; g.add(sheet);
+  const pts = outlinePts(z);
   for (let i = 0; i < 6; i++) {
     const h = 0.5 + r() * 0.8;
+    const [x, zz] = onTop(pts, (r() < 0.5 ? -1 : 1) * (z.w / 2 - 0.5 - r() * 0.2), (r() - 0.6) * (z.d - 1.2), 0.3);
     const c = mesh(new THREE.OctahedronGeometry(0.28, 0), new THREE.MeshStandardMaterial({ color: WORLD.colors.ice, emissive: 0x2a6a8a, emissiveIntensity: 0.8, transparent: true, opacity: 0.85, flatShading: true, roughness: 0.15 }),
-      (r() < 0.5 ? -1 : 1) * (z.w / 2 - 0.5 - r() * 0.2), z.h + h / 2, (r() - 0.6) * (z.d - 1.2));
+      x, z.h + h / 2, zz);
     c.scale.set(1, h / 0.28, 1); g.add(c);
   }
 }
@@ -797,7 +888,7 @@ function addElectric(g, z, ctx) {
 
 function addRing(g, z, kind, ctx) {
   const color = WORLD.colors[kind];
-  const R = Math.min(z.w, z.d) * 0.46;
+  const R = fitRadius(z, Math.min(z.w, z.d) * 0.46);
   const ring = new THREE.Mesh(new THREE.RingGeometry(R - 0.12, R, 48), glow(color, 1.8, { side: THREE.DoubleSide, transparent: true }));
   ring.rotation.x = -Math.PI / 2; ring.position.y = z.h + 0.05; g.add(ring);
   ctx.anim.push((time) => { ring.material.opacity = 0.55 + 0.35 * Math.sin(time * 2.2); });
@@ -813,7 +904,7 @@ function fxLight(g, ctx, color, dist, y, x, zz) {
 /* ---------- 装饰：废铁、管道、碎石、晶簇。只放在地台外缘一圈（pad 以外），不挡铭牌。
  * 地台上不再放路灯：灯立在战场外缘的地上（buildLamps），整场 0–2 盏 ---------- */
 function decorate(g, z, r, look) {
-  const hw = z.w / 2, hd = z.d / 2, y = z.h;
+  const hw = z.w / 2, hd = z.d / 2, y = z.h, pts = outlinePts(z);
   const sandy = look ? look.decor === "sand" : z.kind === "quicksand" || z.kind === "coral";
   const clean = !!look && look.decor === "clean";
   const C = WORLD.colors;
@@ -821,13 +912,15 @@ function decorate(g, z, r, look) {
   // 以前每块地台在这里摆 1–2 盏路灯，照样抽掉当时用掉的随机数：有场地效果的地台上其余装饰还在原来的位置
   if (!sandy) { r(); if (r() < 0.35) r(); }
 
-  // 管道：沿后沿一根，两头弯下去
+  // 管道：沿后沿一根，两头弯下去（后沿有缺口就整根往里挪，不悬在缺口上）
   if (!sandy && z.kind !== "abyss" ? true : r() < 0.4) {
     const len = z.w - 1.8, pm = mat("pipe", C.metal, { roughness: 0.6, metalness: 0.4 });
-    const pipe = mesh(new THREE.CylinderGeometry(0.14, 0.14, len, 8), pm, 0, y + 0.42, -hd + 0.4);
+    let pz = -hd + 0.4;
+    for (let i = 0; i < 30 && [-0.5, -0.25, 0, 0.25, 0.5].some(k => L.outlineDist(pts, k * len, pz) < 0.22); i++) pz += 0.05;
+    const pipe = mesh(new THREE.CylinderGeometry(0.14, 0.14, len, 8), pm, 0, y + 0.42, pz);
     pipe.rotation.z = Math.PI / 2; g.add(pipe);
-    [-1, 1].forEach(s => g.add(mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.42, 8), pm, s * (len / 2), y + 0.21, -hd + 0.4)));
-    [-0.3, 0.3].forEach(k => g.add(mesh(new THREE.TorusGeometry(0.16, 0.035, 5, 10), mat("band", C.rust), k * len, y + 0.42, -hd + 0.4)));
+    [-1, 1].forEach(s => g.add(mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.42, 8), pm, s * (len / 2), y + 0.21, pz)));
+    [-0.3, 0.3].forEach(k => g.add(mesh(new THREE.TorusGeometry(0.16, 0.035, 5, 10), mat("band", C.rust), k * len, y + 0.42, pz)));
   }
 
   // 废铁堆：贴着左右边（沙地、干净的设施里不放）
@@ -837,12 +930,16 @@ function decorate(g, z, r, look) {
     const n = 3 + Math.floor(r() * 3);
     for (let k = 0; k < n; k++) {
       const s = 0.2 + r() * 0.3;
-      const b = mesh(new THREE.BoxGeometry(s * 1.6, s, s * 1.2), mat("scrap" + (k % 2), k % 2 ? C.rust : C.metal), sx * (hw - 0.4) + (r() - 0.5) * 0.3, y + s / 2 + (k > 1 ? s * 0.8 : 0), zz + (r() - 0.5) * 0.7);
+      const [bx, bz] = onTop(pts, sx * (hw - 0.4) + (r() - 0.5) * 0.3, zz + (r() - 0.5) * 0.7, s);
+      const b = mesh(new THREE.BoxGeometry(s * 1.6, s, s * 1.2), mat("scrap" + (k % 2), k % 2 ? C.rust : C.metal), bx, y + s / 2 + (k > 1 ? s * 0.8 : 0), bz);
       b.rotation.set(r() * 0.4, r() * 3, r() * 0.4); g.add(b);
     }
   }
   if (z.kind === "acid") {                                           // 酸液桶
-    for (let i = 0; i < 2; i++) g.add(mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.5, 8), mat("barrel", 0x5a7a2a, { roughness: 0.6 }), (i ? 1 : -1) * (hw - 0.5), y + 0.25, hd - 0.45 - i * 0.5));
+    for (let i = 0; i < 2; i++) {
+      const [bx, bz] = onTop(pts, (i ? 1 : -1) * (hw - 0.5), hd - 0.45 - i * 0.5, 0.3);
+      g.add(mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.5, 8), mat("barrel", 0x5a7a2a, { roughness: 0.6 }), bx, y + 0.25, bz));
+    }
   }
 
   // 碎石 / 沙地的岩石（干净的设施里不放；颜色跟着地面主题）
@@ -850,9 +947,10 @@ function decorate(g, z, r, look) {
   const rockColor = look && look.rock != null ? look.rock : sandy ? C.tan : C.concrete;
   for (let i = 0; i < rocks; i++) {
     const edge = r();
-    const x = edge < 0.5 ? (r() < 0.5 ? -1 : 1) * (hw - 0.3 - r() * 0.3) : (r() * 2 - 1) * (hw - 0.6);
-    const zz = edge < 0.5 ? (r() * 2 - 1) * (hd - 0.6) : (r() < 0.5 ? -1 : 1) * (hd - 0.3 - r() * 0.3);
+    const x0 = edge < 0.5 ? (r() < 0.5 ? -1 : 1) * (hw - 0.3 - r() * 0.3) : (r() * 2 - 1) * (hw - 0.6);
+    const z0 = edge < 0.5 ? (r() * 2 - 1) * (hd - 0.6) : (r() < 0.5 ? -1 : 1) * (hd - 0.3 - r() * 0.3);
     const s = (sandy ? 0.25 : 0.14) + r() * (sandy ? 0.3 : 0.16);
+    const [x, zz] = onTop(pts, x0, z0, s);
     const rock = mesh(new THREE.DodecahedronGeometry(s, 0), mat(sandy ? "rock-s" : "rock", rockColor), x, y + s * 0.6, zz);
     rock.rotation.set(r() * 3, r() * 3, r() * 3); rock.scale.y = 0.7; g.add(rock);
   }
@@ -862,9 +960,9 @@ function decorate(g, z, r, look) {
 /** 晶簇（第三采矿场）：地台左右边上几丛从地里戳出来的小晶体，自己发一点冷光（泛光会抓到） */
 function addCrystals(g, z, r, look) {
   const m = glow(look.glow, WORLD.glow, { color: 0x2a2440, transparent: true, opacity: 0.92 });
-  const geo = new THREE.OctahedronGeometry(0.12, 0);
+  const geo = new THREE.OctahedronGeometry(0.12, 0), pts = outlinePts(z);
   for (let i = 0; i < look.crystals; i++) {
-    const x = (i % 2 ? 1 : -1) * (z.w / 2 - 0.45), zz = (r() - 0.5) * (z.d - 1.6);
+    const [x, zz] = onTop(pts, (i % 2 ? 1 : -1) * (z.w / 2 - 0.45), (r() - 0.5) * (z.d - 1.6), 0.4);
     for (let k = 0; k < 3; k++) {
       const h = 0.25 + r() * 0.35;
       const c = mesh(geo, m, x + (r() - 0.5) * 0.3, z.h + h * 0.45, zz + (r() - 0.5) * 0.3, false, false);
@@ -938,6 +1036,9 @@ export function buildGap(gap, ctx) {
   const L = gap.length, W = gap.width;
   const y = gap.topY, C = WORLD.colors;
   const ratio = gap.maxHp > 0 ? Math.max(0, Math.min(1, gap.hp / gap.maxHp)) : 1;
+  // 两头的地台多高（#237：高地真的高出一截，桥从普通区斜着搭上高地）；局部 x 从 −L/2（y0 那头）走到 L/2（y1 那头）
+  const y0 = Number.isFinite(gap.y0) ? gap.y0 : y, y1 = Number.isFinite(gap.y1) ? gap.y1 : y;
+  const yAt = (x) => y0 + (y1 - y0) * (x / L + 0.5), slope = Math.atan2(y1 - y0, L);
 
   if (gap.type === "bridge") {
     const bw = W * 0.34;
@@ -946,13 +1047,15 @@ export function buildGap(gap, ctx) {
     const planks = [];
     for (let i = 0; i < n; i++) {
       if (ratio < 1 && ((i * 7 + 3) % 10) / 10 > 0.35 + ratio * 0.65) continue;     // 桥受损：缺几块板
-      const p = mesh(new THREE.BoxGeometry(step * 0.86, 0.08, bw), wood, -L / 2 + step * (i + 0.5), y - 0.06 - Math.sin(((i + 0.5) / n) * Math.PI) * -0.05, 0);
-      p.rotation.y = (((i * 13) % 7) - 3) * 0.012; g.add(p); planks.push(p);
+      const px = -L / 2 + step * (i + 0.5);
+      const p = mesh(new THREE.BoxGeometry(step * 0.86 / Math.cos(slope), 0.08, bw), wood, px, yAt(px) - 0.06 - Math.sin(((i + 0.5) / n) * Math.PI) * -0.05, 0);
+      p.rotation.set(0, (((i * 13) % 7) - 3) * 0.012, slope); g.add(p); planks.push(p);
     }
     [-1, 1].forEach(s => {
-      const rope = mesh(new THREE.CylinderGeometry(0.03, 0.03, L + 0.7, 5), mat("rope", 0x2a2118), 0, y + 0.55, s * (bw / 2 + 0.06));
-      rope.rotation.z = Math.PI / 2; g.add(rope);
-      [-1, 1].forEach(e => g.add(mesh(new THREE.CylinderGeometry(0.05, 0.06, 0.62, 5), mat("post", 0x4a3a28), e * (L / 2 + 0.3), y + 0.28, s * (bw / 2 + 0.06))));
+      // 护栏的绳子从一头的柱子拉到另一头（两头不一样高就斜着拉）
+      const rope = mesh(new THREE.CylinderGeometry(0.03, 0.03, Math.hypot(L + 0.7, y1 - y0), 5), mat("rope", 0x2a2118), 0, (y0 + y1) / 2 + 0.55, s * (bw / 2 + 0.06));
+      rope.rotation.z = Math.PI / 2 + slope; g.add(rope);
+      [-1, 1].forEach(e => g.add(mesh(new THREE.CylinderGeometry(0.05, 0.06, 0.62, 5), mat("post", 0x4a3a28), e * (L / 2 + 0.3), (e < 0 ? y0 : y1) + 0.28, s * (bw / 2 + 0.06))));
     });
     const base = planks.map(p => p.position.y);
     ctx.anim.push((time) => planks.forEach((p, i) => { p.position.y = base[i] + Math.sin(time * 1.6 + i * 0.7) * 0.012; }));   // 不稳：轻轻晃
@@ -978,7 +1081,10 @@ export function buildGap(gap, ctx) {
   } else if (gap.type === "void") {
     const pit = new THREE.Mesh(new THREE.BoxGeometry(L, 0.1, W * 0.98), new THREE.MeshBasicMaterial({ color: 0x030206 }));
     pit.position.y = -0.6; g.add(pit);
-    [-1, 1].forEach(s => g.add(new THREE.Mesh(new THREE.BoxGeometry(L, 0.05, 0.08), new THREE.MeshBasicMaterial({ color: new THREE.Color(C.warn).multiplyScalar(2), toneMapped: false })).translateZ(s * W * 0.49).translateY(y + 0.02)));
+    [-1, 1].forEach(s => {
+      const line = new THREE.Mesh(new THREE.BoxGeometry(Math.hypot(L, y1 - y0), 0.05, 0.08), new THREE.MeshBasicMaterial({ color: new THREE.Color(C.warn).multiplyScalar(2), toneMapped: false }));
+      line.position.set(0, (y0 + y1) / 2 + 0.02, s * W * 0.49); line.rotation.z = slope; g.add(line);
+    });
   } else {
     // 畅通：一条低矮的碎石路面
     g.add(mesh(new THREE.BoxGeometry(L + 0.4, 0.14, W * 0.6), mat("road", 0x58524a, { map: tex("concrete") }), 0, 0.07, 0, false, true));
