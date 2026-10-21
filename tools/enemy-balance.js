@@ -23,7 +23,8 @@ const CONFIG = {
   seedPrefix: "EB1021",
   samples: 100,            // 每格场数（参照 R1 每格 100）
   sizes: [2, 3, 4],
-  act: 1,                  // 外城区 = 第 1 幕（rogue-data.js · ROGUE_CONFIG.regions[0]）：普通战 1–4 级、精英战 +1、首领 4 级
+  act: 1,                  // 外城区 = 第 1 幕（rogue-data.js · ROGUE_CONFIG.regions[0]）：普通战 1–4 级、精英战 +1、首领 4 级；
+                           // 额外幕照表轮回，第 5 幕又是外城区（16–20 级）：--act 5，种子前缀加 -A5
   maxRounds: 30,           // 同 R1 单场
   flagPp: 10,              // 胜率差到这么多个百分点就列进「差距大的格子」
   workers: 2,
@@ -105,7 +106,7 @@ function prepare(c, job) {
   const R = c.Rogue, r = B.rng(job.seed + ":setup");
   c.S.RNG.install(job.seed + ":setup");
   const run = R.newRun({ party: B.partyFor(job.seed, job.size), seed: job.seed });
-  run.act = CONFIG.act;
+  run.act = job.act || CONFIG.act;
   if (job.kind === "boss") { run.actDay = 8; run.stage = "boss"; }
   else { run.actDay = 0; R.makeBoard(run); R.acceptTask(run, "main"); run.actDay = Math.floor(r() * 8); run.task.nodes[run.task.index] = { type: job.kind, done: false }; }
   const spec = R.battleSpec(run);
@@ -151,9 +152,11 @@ function runJob(job) {
 }
 
 /* ---------- 抽样计划 ---------- */
+const seedPrefix = act => act === CONFIG.act ? CONFIG.seedPrefix : `${CONFIG.seedPrefix}-A${act}`;
 function plan(opt = {}) {
   const n = opt.samples || CONFIG.samples, want = new Set(opt.groups || GROUPS), sizes = opt.sizes || CONFIG.sizes, jobs = [];
-  const add = (group, cell, variant, kind, size, i, extra) => jobs.push(Object.assign({ group, cell, variant, kind, size, index: i, seed: `${CONFIG.seedPrefix}:${group}:${cell}:${size}:${String(i).padStart(3, "0")}` }, extra));
+  const act = opt.act || CONFIG.act, prefix = seedPrefix(act);
+  const add = (group, cell, variant, kind, size, i, extra) => jobs.push(Object.assign({ group, cell, variant, kind, act, size, index: i, seed: `${prefix}:${group}:${cell}:${size}:${String(i).padStart(3, "0")}` }, extra));
   for (const size of sizes) for (let i = 0; i < n; i++) {
     if (want.has("template")) PAIRS.forEach(p => ["riot", "ref"].forEach(v => add("template", p.id, v, p.kind, size, i, { enemies: [{ preset: p[v], count: p.count }] })));
     if (want.has("fortress")) ["battle", "elite"].forEach(kind => ["with", "without"].forEach(v => add("fortress", kind, v, kind, size, i, { faction: "镇压队", fortress: v === "with" ? 1 : 0 })));
@@ -251,15 +254,15 @@ function flags(S, sizes) {
 }
 
 function markdown(report) {
-  const S = report.summary, sizes = report.options.sizes, has = g => report.options.groups.includes(g), l = [];
+  const S = report.summary, sizes = report.options.sizes, has = g => report.options.groups.includes(g), l = [], act = report.options.act || CONFIG.act;
   const P = report.provenance;
-  l.push("# 新敌人批量平衡模拟（外城区镇压部队 · 移动堡垒 · 敌人种族被动）", "",
+  l.push(`# 新敌人批量平衡模拟（外城区镇压部队 · 移动堡垒 · 敌人种族被动）${act !== CONFIG.act ? `· 第 ${act} 幕` : ""}`, "",
     "只测量，不改任何数值。下面的表由 `tools/enemy-balance.js` 生成，重跑会覆盖到「手写分析」标记为止，标记之后的手写内容保留。", "",
     `- 版本：提交 \`${P.commit || "未知"}\`${P.dirty ? "（生成时工作区有未提交改动，见 json 的 sourceHash）" : ""}；规则源码 SHA256 \`${P.sourceHash.slice(0, 16)}…\`；Node ${P.node}；工具 ${CONFIG.version}`,
     `- 命令：\`${P.command}\``,
     `- 样本：每格（一种人数 × 一个对照组）**${report.options.samples} 场**，人数 ${sizes.join(" / ")}；共 ${report.rows} 场，异常 ${report.errors} 场，超时 ${report.timeouts} 场（超时算进分母，不算胜）。`,
-    `- 种子：\`${CONFIG.seedPrefix}:组:格:人数:序号\`（序号 000–${String(report.options.samples - 1).padStart(3, "0")}）。同一格的对照组共用种子：队伍、等级、区制、站位、天气、配置物完全一样，只差要比的那一处。`,
-    "- 布置：照 R1 单场矩阵（`tools/score-by-act.js · one`）——R1 的 10 名角色里按种子随机 2–4 人；外城区 = 第 1 幕，普通战敌人 1–4 级（按任务天数）、精英战 +1、首领 4 级；我方等级 = 敌人等级，升级选主属性 / 第一个合法选项，武器等级 = 等级 × 0.6；满状态、不用道具；我方 BASIC 打法（打得到就普攻血最少的，打不到就走一格），敌人用游戏里的 AI；30 回合上限。",
+    `- 种子：\`${seedPrefix(act)}:组:格:人数:序号\`（序号 000–${String(report.options.samples - 1).padStart(3, "0")}）。同一格的对照组共用种子：队伍、等级、区制、站位、天气、配置物完全一样，只差要比的那一处。`,
+    `- 布置：照 R1 单场矩阵（\`tools/score-by-act.js · one\`）——R1 的 10 名角色里按种子随机 2–4 人；外城区 = **第 ${act} 幕**，敌人等级按这一幕的任务天数取、精英战 +1、首领 = 本幕上限（每格的范围见「敌人等级」一列）；我方等级 = 敌人等级，升级选主属性 / 第一个合法选项，武器等级 = 等级 × 0.6（最高 10）；满状态、不用道具；我方 BASIC 打法（打得到就普攻血最少的，打不到就走一格），敌人用游戏里的 AI；30 回合上限。`,
     "- 遭遇：走单局的 `battleSpec`（个体值 ±10% 打开、随机种族照抽、任务天气 / 战场配置物照抽），只在「抽遭遇」那一步换成要测的敌人。",
     "- 胜率是 BASIC 自动打法的胜率，**不是真人胜率**；看的是两组之间的差。区间是 Wilson 95%。", "",
     "列的意思：「我方承伤」= 一场里我方所有单位受到的伤害合计（含坚毅生命、持续伤害）；「倒地」= 一场里我方角色倒地次数；「灼烧人·回合」= 每回合敌人行动完时我方在场角色身上挂着灼烧的比例。",
@@ -300,7 +303,7 @@ function markdown(report) {
     });
   }
   if (has("king")) {
-    l.push("## 3b. 亡命之王抽到各种族时的胜率", "", "首领战（4 级），把亡命之王的种族写死成下面每一种，其余（随从、援军的种族，个体值，战场）照常；同一批种子，所以各种族之间只差王的种族。种族被动开着（游戏里的样子）。", "");
+    l.push("## 3b. 亡命之王抽到各种族时的胜率", "", "首领战（本幕上限等级），把亡命之王的种族写死成下面每一种，其余（随从、援军的种族，个体值，战场）照常；同一批种子，所以各种族之间只差王的种族。种族被动开着（游戏里的样子）。", "");
     l.push(`|王的种族|${sizes.map(s => `${s} 人 胜率（95%）`).join("|")}|合计 胜率（95%）|合计 胜/败/超时|平均回合|我方承伤|倒地|亡命之王伤害 / 击破|`);
     l.push(`|---|${sizes.map(() => "---").join("|")}|---|---|---|---|---|---|`);
     KING_RACES.forEach(race => {
@@ -338,7 +341,7 @@ function provenance(argv) {
   return { commit, dirty, sourceHash: B.hash(sourceHashes), sourceHashes, node: process.version, command: ["node", "tools/enemy-balance.js", ...argv].join(" "), strategy: B.STRATEGIES.matrix.version };
 }
 function parseArgs(argv) {
-  const out = {}, allowed = ["samples", "groups", "out", "workers", "sizes"];
+  const out = {}, allowed = ["samples", "groups", "out", "workers", "sizes", "act"];
   for (let i = 0; i < argv.length; i++) {
     const key = argv[i];
     if (!key.startsWith("--") || !allowed.includes(key.slice(2))) throw new Error("Unknown argument: " + key);
@@ -350,7 +353,12 @@ function parseArgs(argv) {
   if (groups.some(g => !GROUPS.includes(g))) throw new Error("Unknown group: " + groups.join(","));
   const sizes = out.sizes ? out.sizes.split(",").map(Number) : CONFIG.sizes;
   if (sizes.some(s => ![2, 3, 4].includes(s))) throw new Error("Sizes must be 2, 3, 4");
-  return { samples: out.samples ? B.positiveInt(out.samples, "samples") : CONFIG.samples, groups, sizes, workers: out.workers ? B.positiveInt(out.workers, "workers") : CONFIG.workers, out: out.out || CONFIG.out };
+  const act = out.act ? B.positiveInt(out.act, "act") : CONFIG.act;
+  if (act !== CONFIG.act) {
+    const C = H.load().S.ROGUE_CONFIG, total = C.acts + (C.extraActs || 0);
+    if (act > total || C.regions[(act - 1) % C.regions.length] !== "外城区") throw new Error(`Act ${act} is not an 外城区 act`);
+  }
+  return { samples: out.samples ? B.positiveInt(out.samples, "samples") : CONFIG.samples, groups, sizes, act, workers: out.workers ? B.positiveInt(out.workers, "workers") : CONFIG.workers, out: out.out || CONFIG.out };
 }
 function outPath(file) {
   const root = path.resolve(H.ROOT, "docs/balance"), resolved = path.resolve(H.ROOT, file);
@@ -363,7 +371,7 @@ async function main(argv = process.argv.slice(2)) {
   let done = 0;
   const rows = await runJobs(jobs, opt.workers, () => { if (++done % 200 === 0 || done === jobs.length) console.error(`Completed ${done}/${jobs.length}`); });
   const summary = summarizeAll(rows);
-  const report = { schema: "backfire-enemy-balance-v1", generatedAt: new Date().toISOString(), config: CONFIG, options: { samples: opt.samples, groups: opt.groups, sizes: opt.sizes }, provenance: meta,
+  const report = { schema: "backfire-enemy-balance-v1", generatedAt: new Date().toISOString(), config: CONFIG, options: { samples: opt.samples, groups: opt.groups, sizes: opt.sizes, act: opt.act }, provenance: meta,
     rows: rows.length, errors: rows.filter(r => r.outcome === "error").length, timeouts: rows.filter(r => r.outcome === "timeout").length, summary, flags: flags(summary, opt.sizes),
     errorSamples: rows.filter(r => r.outcome === "error").slice(0, 5).map(r => ({ seed: r.seed, group: r.group, cell: r.cell, variant: r.variant, error: r.error })) };
   fs.writeFileSync(file + ".json", JSON.stringify(report, null, 1) + "\n");
