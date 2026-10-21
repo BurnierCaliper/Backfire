@@ -17,3 +17,5 @@
 /* 工匠装件：装前 / 装后对比（rogue-ui.js · partRows） */
 .pt-cmp { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
 .pt-cmp .up { color: var(--heal, #8fe39a); } .pt-cmp .down { color: #f08a7a; }
+/* 窄屏（手机 390px）：标签和关闭按钮保留 44px 触屏高度 */
+@media (max-width: 520px) { .bp-overlay .bp-tab, .bp-overlay .g-btn { min-height: 44px; } }

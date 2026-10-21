@@ -535,13 +535,14 @@ test("联机：玩家能看角色资料 / 武器 / 背包；小队聊天全程�
   await alice.waitForSelector("#armory-sheet.show");
   await alice.keyboard.press("Escape").catch(() => {});
   await alice.evaluate(() => document.getElementById("armory-sheet").classList.remove("show"));
-  // 背包：名字、数量、说明
+  // 背包：共用背包浮层（backpack-ui.js），名字、数量、说明
   await alice.click('[data-online="info"][data-info="bag"]');
-  await alice.waitForSelector("#online-bag:not([hidden])");
+  await alice.waitForSelector("#bp-overlay:not([hidden])");
+  await alice.click('#bp-overlay [data-bp-tab="consumable"]');
   await shot(alice, "5-player-bag");
-  const bagText = await alice.locator("#online-bag").innerText();
-  assert.match(bagText, /简易医疗包/); assert.match(bagText, /× 2/); assert.match(bagText, /1d4\+6/);
-  await alice.click('#online-bag [data-bag="close"]');
+  const bagText = await alice.locator("#bp-overlay").innerText();
+  assert.match(bagText, /简易医疗包/); assert.match(bagText, /×\s*2/); assert.match(bagText, /1d4\+6/);
+  await alice.evaluate(() => BackpackUI.close());
   // 战斗中：右侧栏变成「战斗 / 小队」，默认战斗频道，也能切到小队聊天
   await host.evaluate(() => { TrpgFlow.toBattle(); GAME.skip = true; GAME.instant = true; GAME.startOrEnd(); });
   await alice.waitForFunction(() => OnlineGame.getView().screen === "battle");
@@ -1025,7 +1026,7 @@ test("联机：跑团私人钱包——玩家看得到自己的余额、看不�
   await alice.waitForFunction(k => (OnlineGame.getView().packet?.purse?.heroes || []).some(h => h.kit === k && h.amount === 1000), aKit);
   const seen = await alice.evaluate(() => OnlineGame.getView().packet.purse.heroes);
   assert.ok(seen.every(h => h.mine || h.amount == null), "看不到队友的余额：" + JSON.stringify(seen));
-  await alice.click('[data-online="supplies"]');   // 钱包收在「物资」弹窗里
+  await alice.click('[data-online="supplies"]');   // 钱包收在「钱包与商店」弹窗里
   await alice.waitForSelector(".ol-purse");
   await alice.selectOption("#ol-purse-to", bKit);
   await alice.fill("#ol-purse-n", "300");
@@ -1060,7 +1061,7 @@ test("联机：跑团商人——主持人设置商品和折扣、开店，玩�
   await host.fill('[data-me-stock="medkit"]', "1");
   await host.click('[data-me-act="save"]');
   await host.click('[data-mc^="open:"]');
-  // 玩家：「物资」按钮亮起提示，点开就是商店（不再压在舞台上）
+  // 玩家：「钱包与商店」按钮亮起提示，点开就是商店（不再压在舞台上）
   for (const page of [alice, bob]) { await page.waitForSelector('[data-online="supplies"][data-alert="1"]'); await page.click('[data-online="supplies"]'); await page.waitForSelector(".ol-shop"); }
   const shopText = await alice.locator(".ol-shop").innerText();
   assert.match(shopText, /老周杂货[\s\S]*8 折[\s\S]*码头边的小摊[\s\S]*简易医疗包[\s\S]*480 奎支 · 剩 1/);

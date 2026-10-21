@@ -36,7 +36,7 @@
     return `<div class="bp-card ovl-card" role="dialog" aria-label="背包">
       <header class="ws-head"><span class="ws-tape">背包</span><span class="ws-sub">${model.readOnly ? "只读（战斗中）" : "BACKPACK"}</span>
         <button type="button" class="g-btn ws-close" data-bp-close aria-label="关闭">关闭</button></header>
-      <div class="ws-tabs bp-tabs" role="tablist">${tabs}</div>
+      ${model.note ? `<p class="r-hint bp-note">${esc(model.note)}</p>` : ""}<div class="ws-tabs bp-tabs" role="tablist">${tabs}</div>
       <div class="bp-main"><div class="bp-col">${body}</div>${det ? `<div class="bp-col bp-detail">${det}</div>` : ""}</div>
     </div>`;
   }
@@ -70,11 +70,18 @@
     (document.getElementById("g-app") && opts.battle ? document.getElementById("g-app") : document.body).appendChild(box);
     return box;
   }
-  /** model() 取最新数据；opt.openWorkshop(materialId) 点「去工坊」；opt.battle 战斗中（只读） */
+  /** model() 取最新数据；opt.openWorkshop(materialId) 点「去工坊」；opt.battle 战斗中（只读）；
+   *  opt.keep：换画面也不自动收起（联机玩家：探索 / 战斗都能开，挂在 body 上；只读由 model.readOnly 决定）。model.note：标签上方一行说明 */
   function open(model, opt) {
     opts = opt || {};
     if (box && box.parentNode && !!opts.battle !== (box.parentNode.id === "g-app")) { box.remove(); box = null; }
     getModel = model;
+    // 打开时当前标签是空的，就跳到第一个有东西的标签（不用先点一下才看到道具）
+    const m = typeof model === "function" ? model() : null;
+    if (m && !rowsOf(m, ui.tab).length && !(ui.tab === "cyber" && (m.cyber || []).length)) {
+      const hit = TABS.find(([k]) => k === "cyber" ? (m.cyber || []).length : rowsOf(m, k).length);
+      if (hit) { ui.tab = hit[0]; ui.sel = ""; }
+    }
     ensureBox().hidden = false;
     refresh();
   }
@@ -97,7 +104,7 @@
     if (e.target.closest && e.target.closest("#g-backpack")) open(battleModel, { battle: true });
   });
 
-  const inBattleMode = () => isOpen() && !!opts.battle;
+  const inBattleMode = () => isOpen() && !!(opts.battle || opts.keep);
   /* 换画面就收起来（战斗里开的只读背包除外，它本来就在战斗画面里） */
   if (typeof MutationObserver !== "undefined" && typeof document !== "undefined" && document.body) {
     let last = document.body.dataset.screen;
