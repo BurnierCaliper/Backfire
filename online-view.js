@@ -531,6 +531,7 @@
     // 主持人发起的检定：熟练项、难度、每个人的成功率和掷出的点数（都是公开的）
     out.checks = arr(get(view, "checks")).slice(-20).flatMap(c => {
       if (!obj(c) || !id(get(c, "id"))) return [];
+      if (get(c, "secret")) return [];   // 主持人暗骰检定：检定本身和结果都只在房主本机
       const dto = identifiers(c, copyFields(c, {}, ["prof", "diffName", "note"], ["at"], []), ["id"]);
       enumField(c, dto, "status", ["open", "done", "closed"]);
       dto.targets = arr(get(c, "targets")).slice(0, 12).flatMap(t => {
@@ -547,6 +548,13 @@
       const dto = identifiers(r, copyFields(r, {}, ["unitName"], ["at"], []), ["id", "unitId", "operatorId"]);
       enumField(r, dto, "status", ["pending", "approved", "rejected", "cancelled"]);
       dto.attrs = arr(get(r, "attrs")).filter(a => ["str", "con", "dex", "wil", "int", "sta"].includes(a)).slice(0, 4);
+      return [dto];
+    });
+    // 玩家主动发起的检定申请（hotseat.js · requestCheck）：熟练项、说明、状态，同意后对应的检定 id
+    out.checkRequests = arr(get(view, "checkRequests")).slice(-20).flatMap(r => {
+      if (!obj(r) || !id(get(r, "id"))) return [];
+      const dto = identifiers(r, copyFields(r, {}, ["unitName", "prof", "note"], ["at"], []), ["id", "unitId", "operatorId", "checkId"]);
+      enumField(r, dto, "status", ["pending", "approved", "rejected", "cancelled"]);
       return [dto];
     });
     out.messages = projectMessages(get(view, "messages"), context);
