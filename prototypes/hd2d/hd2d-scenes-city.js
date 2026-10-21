@@ -25,8 +25,31 @@
       wall: [0xbf9f74, 0xa88c6a, 0xcaa97c, 0x9e8566],
       roof: [0x6a5644, 0x7c7066, 0x5c4a3c, 0x8a6248],
       dark: 0x1e1712, barrel: [0x3f6a8a, 0x9a3a2a, 0xc8962e, 0x5a6a4a], tire: 0x24201c
+    },
+    tunnel: {
+      barrel: [0x4a5a3a, 0x6a4a32, 0x3c4a4a], tire: 0x1c1e1a, pipe: 0x4a3c30, wheel: 0x8a3a26
     }
   };
+  /** 下水道 tunnel：在一根巨大的圆管里面。只画后面那半边（像剖开的模型，镜头从剖开的那边看进去）：管底就是地面，
+   *  管壁从灯后面 gap 处开始往后、往上弯，弯过竖直一点（arc 弧度），比画面上沿高得多，看不到天（再往头顶弯过来就挡到镜头了，不画）。
+   *   r          管子的半径（世界单位；还要让弯到竖直的那一截在天幕前面，放不下就小一点）
+   *   seg / rows 横着几段、沿弧几段；wall 管壁混凝土的颜色（一段段轮着）
+   *   joint      每隔 every 一道接缝（宽 w，颜色 × dark）
+   *   stain      水位线：离地 h 以下颜色 × dark、往 tint（泡过污水的绿褐）靠
+   *   lamps      管壁上 n 盏灯：离地 h，照亮的那一圈 reach（亮度烘进管壁的顶点颜色，最亮 × (1 + gain)），blink 盏会闪（AMBIENT.flicker）
+   *   pipes      沿管壁横着走的管子 / 电缆：离地 h、半径 r、颜色
+   *   water      地上的污水：比地面高 y，贴图往左流 speed（每秒走多少世界单位），颜色 */
+  const TUNNEL = {
+    r: 8.6, gap: 0.6, arc: 1.85, seg: 96, rows: 24,
+    wall: [0x5c665c, 0x535d55, 0x646c63],
+    joint: { every: 4.2, w: 0.35, dark: 0.5 },
+    stain: { h: 1.2, dark: 0.62, tint: 0x3a4628 },
+    lamps: { n: 6, h: 2.7, reach: 2.8, gain: 1.8, color: 0xe4f0a8, blink: 1 },
+    pipes: [{ h: 1.6, r: 0.17, color: 0x4a3a2e }, { h: 2.05, r: 0.08, color: 0x2a3032 }, { h: 3.6, r: 0.26, color: 0x50463a }],
+    water: { y: 0.04, speed: 0.35, color: 0x5a6440 }
+  };
+  /** 环境动画的频率（秒）：flicker 管壁上会闪的灯隔多久闪一下、每次暗多久。减少动态效果时灯一直亮着、污水不流 */
+  const AMBIENT = { flicker: { every: [1.5, 5], dur: [0.06, 0.25] } };
   /** 战场周围的贫民窟（hd2d-scene-art.js · around 给的范围外面，margin 是再让开多少）：
    *   rows     后面几排：每排离「后面最近到哪」再往后 gap，横着每隔 step（± jitter 成）一间，往左右各伸出战场半宽 + reach
    *   side     左右两边各几列：每列离「左右最近到哪」再往外 gap，从后面一直排到战场前后的正中（不排到前面，不挡人）
@@ -74,6 +97,20 @@
         dusk: { tint: { fog: [0xd0905a, 0.12] } },
         night: { tint: { hemiGround: [0x3a2c20, 0.3] }, scale: { lamp: 1.15 } }
       }
+    },
+    sewer_tunnel: {
+      palette: "tunnel",
+      decor: { band: 3, ledge: 2, size: [0.15, 0.2], kinds: ["valve", "barrel", "tire"] },
+      backdrop: { tunnel: true, band: null },
+      // 管子里：不分白天黑夜（按夜晚画、光照固定），天是黑的（反正被管壁挡住）；环境光、主光压暗，偏一点污水的黄绿，灯更亮；调色更闷、暗角更重
+      light: {
+        fixed: "night",
+        all: {
+          set: { sky: ["#141a15", "#0e130f", "#090c0a", "#050706"], fog: 0x10170f, ground: 0x2a312a, hemiSky: 0x8fa08a, hemiGround: 0x1e241a, sun: 0xd8e8b0, rim: 0xb8d0a0 },
+          scale: { hemi: 0.8, sunI: 0.55, rimI: 0.6, lamp: 1.3 },
+          grade: { temp: [0.97, 1.02, 0.93], sat: 0.92, contrast: 1.14, vignette: 0.55 }
+        }
+      }
     }
   };
   /** 地面主题（并进布局的 GROUNDS，写法同 hd2d-layout.js 的 GROUNDS）：顶面 / 侧面贴图是这里画的（art 开头），backdrop 指回这一套 */
@@ -82,11 +119,17 @@
       tex: "artSlumSand", tint: 0xffffff, side: "artSlumSheet", decals: { ripple: 3, gravel: 2, oil: 1 },
       pebbles: 12, pebble: 0xa08058, rock: 0x8c7052, decor: "sand", ground: 0xc29a62, backdrop: "outer_street",
       lamps: { kind: "street", color: 0xffc98a, day: 1, dusk: 2, night: 2 }
+    },
+    sewer_tunnel: {   // 下水道：湿的混凝土板（青苔、污渍），侧面泡过水的混凝土；积水贴花；地台外面是污水（远景铺的）；两盏吊灯
+      tex: "artSewerSlab", tint: 0xffffff, rough: 0.5, side: "artSewerSide", decals: { puddle: 3, crack: 2 },
+      pebbles: 6, pebble: 0x4c5248, rock: 0x464c42, decor: "art", ground: 0x2a312a, backdrop: "sewer_tunnel",
+      lamps: { kind: "hanging", color: 0xe4f0a8, day: 2, dusk: 2, night: 2 }
     }
   };
   /** 区域 → 场景 id（world-data.js · BATTLE_SCENES）→ 地面主题 */
   const SCENES = {
-    "外城区": { street: "outer_street" }
+    "外城区": { street: "outer_street" },
+    "下水道": { tunnel: "sewer_tunnel" }
   };
 
   /* ---------- 小工具 ---------- */
@@ -183,7 +226,46 @@
       for (let k = 0; k < 4; k++) kit.gravel(g, r, r() * s, r() * s, 5 + r() * 6, 6 + Math.floor(r() * 6));
     }),
     /** 地台侧面（外城区）：拼起来的瓦楞铁皮 */
-    artSlumSheet: paint("artSlumSheet", 128, (g, s, r) => drawSheet(g, s, r, ["#8c6a4e", "#7c7e7a", "#9c5c3c", "#6c8482", "#a58e66", "#84563e"]))
+    artSlumSheet: paint("artSlumSheet", 128, (g, s, r) => drawSheet(g, s, r, ["#8c6a4e", "#7c7e7a", "#9c5c3c", "#6c8482", "#a58e66", "#84563e"])),
+    /** 湿的混凝土板（下水道）：一块块方板（颜色深浅不一、接缝发黑），湿的地方更深、反一点光，接缝和角落长青苔，零星的污渍和裂缝 */
+    artSewerSlab: paint("artSewerSlab", 256, (g, s, r, kit) => {
+      const n = 4, w = s / n;
+      for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+        const v = 92 + Math.floor(r() * 22);
+        g.fillStyle = `rgb(${v - 6},${v},${v - 8})`; g.fillRect(i * w, j * w, w, w);
+      }
+      for (let k = 0; k < 9; k++) {   // 湿的一片片（更深）
+        const x = r() * s, y = r() * s, rad = 16 + r() * 40, grd = g.createRadialGradient(x, y, 0, x, y, rad);
+        grd.addColorStop(0, "rgba(30,38,30,.45)"); grd.addColorStop(1, "rgba(30,38,30,0)");
+        g.fillStyle = grd; g.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+      }
+      kit.speckle(g, s, r, 2400, "rgba(200,210,190,.12)", "rgba(20,26,18,.25)");
+      g.fillStyle = "rgba(14,18,12,.75)";   // 接缝
+      for (let i = 0; i <= n; i++) { g.fillRect(i * w - 2, 0, 4, s); g.fillRect(0, i * w - 2, s, 4); }
+      g.fillStyle = "rgba(70,96,40,.45)";   // 接缝里的青苔
+      for (let k = 0; k < 60; k++) { const i = Math.floor(r() * (n + 1)), t = r() * s, horiz = r() < 0.5; g.fillRect(horiz ? t : i * w - 3, horiz ? i * w - 3 : t, 3 + r() * 6, 3 + r() * 6); }
+      g.strokeStyle = "rgba(16,20,14,.55)";
+      for (let k = 0; k < 4; k++) kit.crack(g, r, r() * s, r() * s, 5 + Math.floor(r() * 6), 1.2, 1);
+      for (let k = 0; k < 5; k++) { g.fillStyle = "rgba(60,48,26,.3)"; g.beginPath(); g.ellipse(r() * s, r() * s, 6 + r() * 14, 4 + r() * 8, r() * 3, 0, 7); g.fill(); }   // 污渍
+    }),
+    /** 地台侧面（下水道）：泡过水的混凝土——横着几道水位线（下面更深更绿），往下流的水渍、青苔，零星露出的砖 */
+    artSewerSide: paint("artSewerSide", 128, (g, s, r, kit) => {
+      const grd = g.createLinearGradient(0, 0, 0, s);
+      grd.addColorStop(0, "#6c7468"); grd.addColorStop(0.55, "#59625a"); grd.addColorStop(1, "#3a4636");
+      g.fillStyle = grd; g.fillRect(0, 0, s, s);
+      kit.speckle(g, s, r, 900, "rgba(210,220,200,.1)", "rgba(16,22,14,.25)");
+      [0.58, 0.72, 0.86].forEach((k, i) => { g.fillStyle = `rgba(40,52,26,${0.25 + i * 0.1})`; g.fillRect(0, s * k, s, 2 + i); });   // 水位线
+      for (let k = 0; k < 10; k++) {   // 往下流的水渍
+        const x = r() * s, len = s * (0.2 + r() * 0.5), y = r() * s * 0.4, w = 2 + r() * 4, gg = g.createLinearGradient(0, y, 0, y + len);
+        gg.addColorStop(0, "rgba(24,30,20,.45)"); gg.addColorStop(1, "rgba(24,30,20,0)");
+        g.fillStyle = gg; g.fillRect(x, y, w, len);
+      }
+      g.fillStyle = "rgba(80,110,46,.5)";   // 青苔（下半截多）
+      for (let k = 0; k < 50; k++) { const y = s * (0.6 + Math.pow(r(), 0.6) * 0.4); g.fillRect(r() * s, y, 2 + r() * 5, 2 + r() * 4); }
+      g.strokeStyle = "rgba(20,24,18,.35)"; g.lineWidth = 1;   // 露出的砖
+      const bx = r() * s * 0.6, by = s * (0.15 + r() * 0.25);
+      for (let y = 0; y < 3; y++) for (let x = 0; x < 3; x++) g.strokeRect(bx + x * 14 + (y % 2) * 7, by + y * 8, 14, 8);
+    })
   };
   /** 贴花（写法同 hd2d-world.js 的 DECALS）：这一版都用 hd2d-world.js 里现成的（沙纹、碎石、油渍） */
   const DECALS = {};
@@ -218,11 +300,22 @@
     m.rotation.x = Math.PI / 2;
     return m;
   }
+  /** 一个阀门（半径 rad 以内）：地上冒出来一截管子（底下一圈法兰），顶上一个红色的手轮 */
+  function valve(kit, rad, P) {
+    const THREE = kit.THREE, g = new THREE.Group(), h = rad * 2.4, pr = rad * 0.3;
+    const pm = kit.mat("art-valve-pipe", P.pipe, { roughness: 0.7, metalness: 0.4 }), wm = kit.mat("art-valve-wheel", P.wheel, { roughness: 0.6, metalness: 0.3 });
+    g.add(kit.mesh(new THREE.CylinderGeometry(pr * 1.7, pr * 1.7, rad * 0.16, 10), pm, 0, rad * 0.08, 0));
+    g.add(kit.mesh(new THREE.CylinderGeometry(pr, pr, h, 8), pm, 0, h / 2, 0));
+    const wheel = kit.mesh(new THREE.TorusGeometry(rad * 0.68, rad * 0.08, 5, 14), wm, 0, h + rad * 0.05, 0);
+    wheel.rotation.x = Math.PI / 2; g.add(wheel);
+    [0, Math.PI / 2].forEach(a => { const sp = kit.mesh(new THREE.BoxGeometry(rad * 1.36, rad * 0.06, rad * 0.07), wm, 0, h + rad * 0.05, 0); sp.rotation.y = a; g.add(sp); });
+    return g;
+  }
   /** 挂钩：地台上的装饰（hd2d-world.js · buildZone 交过来；地台本体、贴花、小石子已经画好了） */
   function zone(kit, g, z, ctx, r, look, a) {
     const P = PALETTE[a.art.palette], R = A.rand(z.id * 131 + seedOf(a.key));
     zonePlan(z, a.key).forEach(d => {
-      const o = d.kind === "tire" ? tire(kit, d.size, P.tire) : barrel(kit, d.size * 0.8, P.barrel[Math.floor(R() * P.barrel.length)]);
+      const o = d.kind === "tire" ? tire(kit, d.size, P.tire) : d.kind === "valve" ? valve(kit, d.size, P) : barrel(kit, d.size * 0.8, P.barrel[Math.floor(R() * P.barrel.length)]);
       o.position.set(d.x, d.y, d.z); o.rotation.y = R() * Math.PI * 2;
       o.userData.art = d.kind; o.userData.size = d.size;
       g.add(o);
@@ -344,8 +437,147 @@
     env.group.add(tag(g, "cliff"));
   }
 
+  /* ---------- 远景：下水道（巨大圆管的里面）---------- */
+  /**
+   * 管壁的形状（纯函数，测试用同一份）：管子的轴沿 x，管底在地面上、从 zw（最后一排地台后沿 → 灯 → 再往后 TUNNEL.gap）开始往后往上弯。
+   * 半径放不下 TUNNEL.r 就小一点（弯到竖直的那一截要在天幕前面）。
+   * 返回 { r, yc, zc（轴）, zw, y0（地面）, point(φ) / at(离地多高) → { y, z, ny, nz }（管壁上的点、朝管子中心的方向）}
+   */
+  function tunnelShape(env) {
+    const T = TUNNEL, y0 = L.CONFIG.groundY, zw = env.cz - env.hz - L.CONFIG.lamps.back - T.gap;
+    const r = Math.max(3, Math.min(T.r, zw - env.skyZ - 0.8)), yc = y0 + r, zc = zw;
+    const point = (phi) => ({ y: yc - r * Math.cos(phi), z: zc - r * Math.sin(phi), ny: Math.cos(phi), nz: Math.sin(phi) });
+    const at = (h) => point(Math.acos(Math.max(-1, Math.min(1, (r - h) / r))));
+    return { r, yc, zc, zw, y0, point, at };
+  }
+  /** 管壁上的灯在哪（战场左右再往外一点，等距排开，贴着管壁往里 0.12） */
+  function tunnelLamps(env, S) {
+    const T = TUNNEL.lamps, p = S.at(T.h), span = env.hx + 10, out = [];
+    for (let i = 0; i < T.n; i++) out.push({ x: env.cx - span + 2 * span * (i + 0.5) / T.n, y: p.y + p.ny * 0.12, z: p.z + p.nz * 0.12 });
+    return out;
+  }
+  /** 一片沿着管壁的网格（x 从 xa 到 xb 分 nx 段、沿弧从 0 到 arc 分 rows 段；往管子中心挪 lift）：顶点颜色 color(x, 点, 离地多高) */
+  function wallSheet(kit, S, xa, xb, nx, arc, rows, lift, color) {
+    const THREE = kit.THREE, pos = [], col = [], idx = [], w = nx + 1;
+    for (let j = 0; j <= rows; j++) {
+      const p = S.point(arc * j / rows);
+      for (let i = 0; i <= nx; i++) {
+        const x = xa + (xb - xa) * i / nx, c = color(x, p, p.y - S.y0);
+        pos.push(x, p.y + p.ny * lift, p.z + p.nz * lift); col.push(c.r, c.g, c.b);
+      }
+    }
+    for (let j = 0; j < rows; j++) for (let i = 0; i < nx; i++) { const a = j * w + i; idx.push(a, a + w, a + 1, a + 1, a + w, a + w + 1); }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+    geo.setIndex(idx); geo.computeVertexNormals();
+    return geo;
+  }
+  /** 管壁：混凝土一段段（颜色轮着），水位线以下更暗更绿；每隔一段一道接缝（略凸出来的一圈暗色的环）；
+   *  灯照亮的那一圈另外叠一层（加色混合，不受场景光照影响：管子里就靠这几盏灯） */
+  function tunnelWall(kit, env, S, lamps) {
+    const THREE = kit.THREE, T = TUNNEL, J = T.joint, c = new THREE.Color(), stain = new THREE.Color(T.stain.tint);
+    const base = (x, p, h) => {
+      const k = Math.floor((x - env.cx) / J.every);
+      c.set(T.wall[((k % T.wall.length) + T.wall.length) % T.wall.length]);
+      if (h < T.stain.h) { const f = 1 - h / T.stain.h; c.lerp(stain, 0.5 * f).multiplyScalar(1 - (1 - T.stain.dark) * f); }
+      return c;
+    };
+    const geo = wallSheet(kit, S, env.x0, env.x1, T.seg, T.arc, T.rows, 0, base);
+    env.group.add(tag(new THREE.Mesh(geo, env.keep(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0, side: THREE.DoubleSide, fog: false, emissive: 0x070a07 }))), "tunnelWall"));
+    // 接缝：每道一条窄窄的环，贴着管壁往里一点
+    const ribs = new THREE.Group(), ribM = env.keep(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, side: THREE.DoubleSide, fog: false }));
+    for (let x = env.cx - Math.floor((env.cx - env.x0) / J.every) * J.every; x <= env.x1; x += J.every) {
+      ribs.add(new THREE.Mesh(wallSheet(kit, S, x - J.w / 2, x + J.w / 2, 1, T.arc, T.rows, 0.04, (xx, p, h) => base(xx, p, h).multiplyScalar(J.dark)), ribM));
+    }
+    env.group.add(tag(ribs, "tunnelRib"));
+    // 灯照亮的那一圈
+    const lc = new THREE.Color(T.lamps.color), R2 = T.lamps.reach * T.lamps.reach;
+    const glow = (x, p) => {
+      let lit = 0;
+      lamps.forEach(l => { lit += Math.exp(-((x - l.x) ** 2 + (p.y - l.y) ** 2 + (p.z - l.z) ** 2) / R2); });
+      return c.copy(lc).multiplyScalar(Math.min(1, lit) * T.lamps.gain * 0.18);
+    };
+    const pool = new THREE.Mesh(wallSheet(kit, S, env.x0, env.x1, T.seg * 2, T.arc * 0.55, T.rows, 0.06, glow), env.keep(new THREE.MeshBasicMaterial({
+      vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false, toneMapped: false
+    })));
+    env.group.add(tag(pool, "lampPool"));
+  }
+  /** 管壁上的灯：一个暗色的灯罩 + 发光的灯泡 + 一团柔光；有几盏时不时闪一下（AMBIENT.flicker；减少动态效果时一直亮着） */
+  function wallLamps(kit, env, lamps) {
+    const THREE = kit.THREE, T = TUNNEL.lamps, cfg = AMBIENT.flicker;
+    const house = env.keep(new THREE.MeshStandardMaterial({ color: 0x2a2e2a, roughness: 0.7, metalness: 0.4, fog: false }));
+    const bulb = env.keep(new THREE.MeshBasicMaterial({ color: new THREE.Color(T.color).multiplyScalar(2.6), toneMapped: false, fog: false }));
+    const glowTex = farTex(kit, env, 64, (g, s) => {
+      const grd = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+      grd.addColorStop(0, "rgba(255,255,255,.9)"); grd.addColorStop(0.35, "rgba(255,255,255,.3)"); grd.addColorStop(1, "rgba(255,255,255,0)");
+      g.fillStyle = grd; g.fillRect(0, 0, s, s);
+    }, 5);
+    lamps.forEach((l, i) => {
+      const g = new THREE.Group();
+      g.add(kit.put(new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.18, 0.2), house), l.x, l.y + 0.1, l.z));
+      const b = kit.put(new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 6), bulb), l.x, l.y - 0.02, l.z + 0.04);
+      const sm = env.keep(new THREE.SpriteMaterial({ map: glowTex, color: T.color, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false, opacity: 0.55 }));
+      const sp = new THREE.Sprite(sm); sp.position.set(l.x, l.y, l.z + 0.1); sp.scale.setScalar(1.6);
+      g.add(b, sp);
+      env.group.add(tag(g, "wallLamp"));
+      if (i < T.blink) {
+        const beat = A.beat(A.rand(i * 59 + 7), cfg.every, cfg.dur);
+        g.userData.ambient = { kind: "flicker", beat };
+        env.anims.push((t, dt) => { const on = dt === 0 || beat.step(dt) < 0; b.visible = on; sm.opacity = on ? 0.55 : 0.08; });
+      }
+    });
+  }
+  /** 沿管壁横着走的管子 / 电缆（TUNNEL.pipes），每隔 3 一个卡箍 */
+  function wallPipes(kit, env, S) {
+    const THREE = kit.THREE, len = env.x1 - env.x0, o = new THREE.Object3D();
+    TUNNEL.pipes.forEach(p => {
+      const w = S.at(p.h), y = w.y + w.ny * (p.r + 0.05), z = w.z + w.nz * (p.r + 0.05), m = env.keep(new THREE.MeshStandardMaterial({ color: p.color, roughness: 0.6, metalness: 0.45, flatShading: true, fog: false }));
+      const g = new THREE.Group(), pipe = kit.put(new THREE.Mesh(new THREE.CylinderGeometry(p.r, p.r, len, 10, 1, true), m), (env.x0 + env.x1) / 2, y, z);
+      pipe.rotation.z = Math.PI / 2; g.add(pipe);
+      const n = Math.floor(len / 3), clips = new THREE.InstancedMesh(new THREE.CylinderGeometry(p.r * 1.25, p.r * 1.25, 0.08, 10), m, n);
+      for (let k = 0; k < n; k++) { o.position.set(env.x0 + (k + 0.5) * 3, y, z); o.rotation.set(0, 0, Math.PI / 2); o.updateMatrix(); clips.setMatrixAt(k, o.matrix); }
+      g.add(clips);
+      env.group.add(tag(g, "wallPipe"));
+    });
+  }
+  /** 地上的污水：一大片铺满管底（地台从水里冒出来），浑浊的黄绿、一道道水纹和浮沫，贴图慢慢往左流（减少动态效果时不流）。
+   *  平铺在地面上、比地台低，不算「装饰」（不打 userData.art，userData.flow 标出来） */
+  function sewage(kit, env, S, seed) {
+    const THREE = kit.THREE, W = TUNNEL.water, z0 = S.zw, z1 = env.cz + env.hz + 30, tile = 6;
+    const tex = farTex(kit, env, 256, (g, s, r) => {
+      g.fillStyle = hex(W.color); g.fillRect(0, 0, s, s);
+      for (let k = 0; k < 14; k++) {   // 深浅不一的几片（左右上下都接得上）
+        const x = r() * s, y = r() * s, rad = 20 + r() * 50, dark = r() < 0.6, grd = g.createRadialGradient(x, y, 0, x, y, rad);
+        grd.addColorStop(0, dark ? "rgba(30,34,18,.35)" : "rgba(120,124,70,.25)"); grd.addColorStop(1, "rgba(0,0,0,0)");
+        [-s, 0, s].forEach(dx => [-s, 0, s].forEach(dy => { g.fillStyle = grd; g.save(); g.translate(dx, dy); g.fillRect(x - rad, y - rad, rad * 2, rad * 2); g.restore(); }));
+      }
+      for (let k = 0; k < 70; k++) {   // 顺着流向的水纹（横着的细长条）
+        const x = r() * s, y = r() * s, w = 14 + r() * 40;
+        g.fillStyle = r() < 0.5 ? "rgba(190,196,140,.18)" : "rgba(20,24,12,.2)";
+        [0, -s].forEach(dx => g.fillRect(x + dx, y, w, 1 + r() * 1.5));
+      }
+      for (let k = 0; k < 40; k++) { g.fillStyle = "rgba(210,214,170,.35)"; g.fillRect(r() * s, r() * s, 1 + r() * 3, 1 + r() * 2); }   // 浮沫
+    }, seed);
+    tex.magFilter = THREE.LinearFilter; tex.repeat.set((env.x1 - env.x0) / tile, (z1 - z0) / tile);
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(env.x1 - env.x0, z1 - z0), env.keep(new THREE.MeshStandardMaterial({ map: tex, roughness: 0.16, metalness: 0.3, fog: true })));
+    m.rotation.x = -Math.PI / 2; m.position.set((env.x0 + env.x1) / 2, S.y0 + W.y, (z0 + z1) / 2);
+    m.receiveShadow = true; m.userData.flow = "sewage";
+    env.group.add(m);
+    env.anims.push((t, dt) => { if (dt > 0) tex.offset.x = (tex.offset.x + W.speed * dt / tile) % 1; });
+    return m;
+  }
+  /** 下水道：巨大圆管的后半边（管壁、接缝、灯照亮的那一圈）、管壁上的灯和管子、地上的污水 */
+  function tunnelScene(kit, env, seed) {
+    const S = tunnelShape(env), lamps = tunnelLamps(env, S);
+    tunnelWall(kit, env, S, lamps);
+    wallLamps(kit, env, lamps);
+    wallPipes(kit, env, S);
+    sewage(kit, env, S, seed);
+  }
+
   /* ---------- 挂钩：远景 ---------- */
-  /** 天边画的远景：先借现成的（沙漠的桌山：远处的沙岩悬崖） */
+  /** 天边画的远景：外城区先借现成的（沙漠的桌山：远处的沙岩悬崖）；下水道没有（被管壁挡住，用以前的那条也看不到） */
   function band(kit, colors, seed, a) {
     return a.art.backdrop.band ? kit.bandTexture(a.art.backdrop.band, colors, seed) : null;
   }
@@ -356,10 +588,11 @@
     if (art.backdrop.slum) slumScene(kit, env, art, P, b, seed);
     if (art.backdrop.pipes) bigPipes(kit, env, R);
     if (art.backdrop.cliffs) sandCliffs(kit, env, R);
+    if (art.backdrop.tunnel) tunnelScene(kit, env, seed);
     return {};
   }
 
   const pack = { name: "city", scenes: SCENES, grounds: GROUNDS, art: ART, textures: TEXTURES, decals: DECALS, zone, band, backdrop };
   A.add(pack);
-  return Object.assign({ PALETTE, SLUM, zonePlan, slumPlan, seedOf }, pack);
+  return Object.assign({ PALETTE, SLUM, HUT, FAR, TUNNEL, AMBIENT, zonePlan, slumPlan, tunnelShape, seedOf }, pack);
 });

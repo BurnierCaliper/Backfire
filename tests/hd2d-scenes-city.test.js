@@ -18,7 +18,8 @@ const packs = () => { city(); return art(); };
 
 /** 做好了的场景（区域、场景 id、地面主题），远景里一定有的东西（userData.art） */
 const DONE = [
-  { region: "外城区", scene: "street", key: "outer_street", must: ["shack", "house", "pipe", "cliff"] }
+  { region: "外城区", scene: "street", key: "outer_street", must: ["shack", "house", "pipe", "cliff"] },
+  { region: "下水道", scene: "tunnel", key: "sewer_tunnel", must: ["tunnelWall", "tunnelRib", "lampPool", "wallLamp", "wallPipe"] }
 ];
 const PARTY = ["kolt", "helu", "ruby", "yuito"];
 const DESKTOP = { width: 1440, height: 900, top: 46, bottom: 160 };
@@ -114,13 +115,14 @@ function screenOf(cam, pts) {
   });
   return { x0, x1, y0, y1, near };
 }
+/** 一个装饰在世界里的点：网格按真的顶点（下水道的管壁是一大片弯的网格，外框的角根本不在管壁上，不能拿外框算），实例网格按外框的八个角 */
 function pointsOf(THREE, obj) {
   const out = [], v = new THREE.Vector3();
   obj.updateMatrixWorld(true);
   obj.traverse(o => {
-    if (!o.isMesh) return;
+    if (!o.isMesh && !o.isSprite) return;
     const pos = o.geometry.attributes.position;
-    if (o.isInstancedMesh || pos.count > 600) {
+    if (o.isInstancedMesh || o.isSprite) {
       const b = new THREE.Box3().setFromObject(o);
       [b.min.x, b.max.x].forEach(x => [b.min.y, b.max.y].forEach(y => [b.min.z, b.max.z].forEach(z => out.push({ x, y, z }))));
     } else for (let i = 0; i < pos.count; i++) { v.fromBufferAttribute(pos, i).applyMatrix4(o.matrixWorld); out.push({ x: v.x, y: v.y, z: v.z }); }
@@ -257,6 +259,44 @@ test("装饰不压住铭牌（#241）：远景、中景、近景里，地台上�
       }
     }
     assert.ok(checked > 50, `比过的「装饰在某人前面」只有 ${checked} 次`);
+  } finally { P.restore(); }
+});
+
+/* ---------- 3. 下水道 ---------- */
+test("下水道（#241）：在巨大圆管的里面——管壁从灯后面往后往上弯，最高处比默认镜头的画面上沿高、在天幕前面（看不到天）；地上铺满污水，贴图在流，减少动态效果时不流；光照不分白天黑夜，比外城区暗", async (t) => {
+  const P = await protoEnv(t);
+  if (!P) return;
+  const { B, A } = P;
+  const K = city();
+  try {
+    const S = H.load().BattleSim, d = DONE.find(x => x.scene === "tunnel");
+    for (const id of Object.keys(BOARDS)) {
+      const layout = layoutOf(BOARDS[id](S), d, "day"), b = layout.bounds, cz = (b.minZ + b.maxZ) / 2, hz = (b.maxZ - b.minZ) / 2;
+      const env = { cx: (b.minX + b.maxX) / 2, cz, hx: (b.maxX - b.minX) / 2, hz, skyZ: cz - hz - 11 };   // 和 hd2d-backdrop.js 一样（BACKDROP.skyGap = 11）
+      const sh = K.tunnelShape(env), top = sh.point(Math.PI / 2);
+      assert.ok(sh.zw < b.minZ - L.CONFIG.lamps.back, `${id}：管壁在灯后面`);
+      assert.ok(top.z > env.skyZ + 0.7, `${id}：管壁弯到竖直的地方还在天边那条远景前面`);
+      assert.ok(top.y > L.frameTop(layout.camera, top.z) + 1, `${id}：管壁比默认镜头的画面上沿高（看不到天）`);
+      const bd = backdropOf(B, layout, "night");
+      let water = null;
+      bd.group.traverse(o => { if (o.userData.flow === "sewage") water = o; });
+      assert.ok(water, `${id}：地上有污水`);
+      water.updateMatrixWorld(true);
+      assert.ok(water.position.y < 0 && water.position.y > L.CONFIG.groundY, `${id}：污水在地面上、比地台低`);
+      const tex = water.material.map, x0 = tex.offset.x;
+      bd.update(1, 0);
+      assert.equal(tex.offset.x, x0, `${id}：减少动态效果时污水不流`);
+      bd.update(1.5, 0.5);
+      assert.notEqual(tex.offset.x, x0, `${id}：污水在流`);
+      bd.dispose();
+    }
+    const TH = { day: { hemi: 0.9, sunI: 2.7, rimI: 0.55, exposure: 1, lamp: 0.25, fog: 0xd6b985, ground: 0x6e5b42, hemiSky: 0xfff1d8, hemiGround: 0x735c40, sun: 0xfff0d2, rim: 0xfff0c8, sky: ["#f6e3b4", "#ecc98c", "#dcac6a", "#c29a66"], grade: {} } };
+    TH.dusk = Object.assign({}, TH.day, { hemi: 0.8, sunI: 3.0 }); TH.night = Object.assign({}, TH.day, { hemi: 0.6, sunI: 1.25, lamp: 1.5 });
+    const lit = ["day", "dusk", "night"].map(n => A.lighting(TH, n, "sewer_tunnel"));
+    lit.forEach(l => assert.deepEqual(l.T, lit[0].T, "下水道不分白天黑夜"));
+    const street = A.lighting(TH, "day", "outer_street").T;
+    assert.ok(lit[0].T.hemi < street.hemi && lit[0].T.sunI < street.sunI, "下水道比外城区（白天）暗");
+    assert.ok(A.luma(lit[0].T.fog) < 0.15 && A.luma(lit[0].T.sky[0]) < 0.15, "管子里的雾、天都是暗的");
   } finally { P.restore(); }
 });
 
