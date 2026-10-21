@@ -48,8 +48,61 @@
       direction: "to bottom right",
       fallback: "#a8977b",
       glyph: `<circle cx="24" cy="15" r="7"/><path d="M10 42 C10 31 16 26 24 26 C32 26 38 31 38 42"/>`
+    },
+    /* 技能栏（照正式战斗画面 game.html / game.js 的技能栏）：
+     *   summon   唤出 / 收回武器人（game.js · isSummonSkill）和武器人倒下后的「取回武器」：单独做成大按钮，放在「结束回合」旁边，不进普通技能按钮；
+     *            两个都有时先放取回武器（同 game.js）
+     *   tints    普通技能按钮按顺序轮流用的颜色（以前原型的做法：黄、薄荷、米白、粉）
+     *   max      最多摆几个按钮
+     *   kinds    右上角的角标：攻击（打伤害 / 击破的）还是技能（功能性的：加状态、治疗、移动、换架势……）；图标画法同头像（白边 + 墨线）
+     * 技能的属性、攻击还是技能，从技能的提示文字（party.js · skillList 的 hint）里读，照 engine.js · parseSkillRange 的做法：
+     *   按「·」分段，有 atk 又写了属性 / 伤害 / 击破、或者写着「N 击破」的那一段算打伤害（攻击）；属性先看打伤害的那段里的属性字，
+     *   再看挂上的效果名（图鉴 codex.js · CODEX_EFFECTS 里带属性的：感电、熔融、过载、雪天……），再看提示里随便哪个属性字；都没有 = 无属性。
+     *   读不准的在下面的例外表里写明，优先于文字：kind（攻击 / 技能）、element（属性，null = 无属性）、byState（属性跟着刀 / 引擎变，读投影里的单位） */
+    skill: {
+      summon: [/_summon$/, /_return$/, /^weapon_retrieve$/],
+      first: "weapon_retrieve",
+      tints: ["hazard", "mint", "canvas", "pink"],
+      max: 12,
+      kinds: {
+        attack: { name: "攻击", glyph: `<path d="M13 35 L37 11"/><path d="M33 9 L39 9 L39 15"/><path d="M9 29 L19 39"/><path class="bold" d="M7 41 L12 36"/>` },   // 一把剑
+        skill: { name: "技能", glyph: `<circle cx="24" cy="24" r="13" class="bold" stroke-dasharray="5.1 5.1"/><circle cx="24" cy="24" r="8.5"/><circle class="solid" cx="24" cy="24" r="2.6"/>` }   // 齿轮
+      },
+      words: { "火焰": "fire", "火": "fire", "冰冻": "ice", "冰": "ice", "电击": "electric", "电": "electric", "酸液": "acid", "酸": "acid", "能量": "energy", "物理": "physical", "谐波": "harmonic" },
+      notWords: ["电能"],   // 川川的电能是资源，不是电属性
+      kind: {
+        role_halve: "attack",      // 折戟：造成当前架势一半的击破
+        yuito_extract: "attack",   // 酸萃：敌人吃同样骰数的酸
+        torque_boost: "attack",    // 强化输出（酸液炮）：下回合对整区酸液 AOE
+        wing_relay: "skill",       // 银翼 · 收发代理：放无人机，之后每回合自己打
+        hiaki_powder: "skill",     // 粉落汤气：架势，格挡成功才反击
+        longge_drink: "skill",     // 饮弹：枪口对准自己
+        longge_shuffle: "skill"    // 洗牌：重排子弹，顺带的一枪不算主要的
+      },
+      element: {
+        sand_pull: null,           // 拉出流沙：「流沙」是场地名，不是属性
+        role_spread: null,         // 传播：提示里举例的「灼烧」不是它的属性
+        wing_boost: null           // 银翼 · 机体强化：「溅射倍率」是普攻的溅射，不是酸属性的溅射效果
+      },
+      byState: {
+        // 绯秋：按手里的刀（投影里的 resources.blade：丹生谷 = 火、鳴門 = 冰）；粉落汤气用另一把反击
+        hiaki_aa: (u) => bladeEl(u, false), hiaki_flash: (u) => bladeEl(u, false), hiaki_barrage: (u) => bladeEl(u, false), hiaki_powder: (u) => bladeEl(u, true),
+        // 夕夏：引擎发动时普通攻击变成火焰（投影里的 resources.engine）
+        xia_aa: (u) => (u && u.resources && u.resources.engine ? "fire" : "physical")
+      },
+      // 唤出 / 收回武器人的图标（照 game.js · summonIcon：一把刀被圆形箭头环绕；唤出 = 顺时针、刀上冒出生命的火花，收回 = 逆时针）
+      summonIcon: (back) => `<svg class="sm-ic" viewBox="0 0 40 40" aria-hidden="true"><path d="M20 4a16 16 0 1 1-14.3 8.8" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/>` +
+        (back ? `<path d="M3 6v7.5h7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>`
+              : `<path d="M20 4l-5-3M20 4l-4 4" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/>`) +
+        `<path d="M13 27 25 15l2.2 2.2L15.2 29.2z" fill="currentColor"/><path d="M11 25l6 6M10.5 30.5l2.5-2.5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>` +
+        (back ? "" : `<path d="M28 9l1.2 2.6 2.6 1.2-2.6 1.2L28 16.6l-1.2-2.6-2.6-1.2 2.6-1.2z" fill="currentColor"/>`) + `</svg>`
     }
   };
+  /** 绯秋手里那把刀的属性（other = 另一把）：投影里的 resources.blade（niu 丹生谷 = 火，naruto 鳴門 = 冰；没写就是丹生谷，同 hud-icons.js） */
+  function bladeEl(u, other) {
+    const naruto = !!(u && u.resources && u.resources.blade === "naruto");
+    return naruto !== !!other ? "ice" : "fire";
+  }
 
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
@@ -148,13 +201,104 @@
     const from = main ? UI.elements[main] : UI.avatar.fallback, to = sub ? UI.elements[sub] : from;
     return { role, main, sub, from, to, glyph: role ? UI.roles[role] : UI.avatar.glyph, background: `linear-gradient(${UI.avatar.direction}, ${from}, ${to})` };
   }
-  /** 贴纸风的图标：一层白边、上面一层墨线（同一个图案画两遍） */
-  const stickerSvg = (glyph, cls) => `<svg class="${cls}" viewBox="0 0 48 48" aria-hidden="true"><g class="rim">${glyph}</g><g class="ink">${glyph}</g></svg>`;
+  /** 贴纸风的图标：一层白边、上面一层墨线（同一个图案画两遍）；样式在 hd2d.css 的 .stk */
+  const stickerSvg = (glyph, cls) => `<svg class="stk ${cls}" viewBox="0 0 48 48" aria-hidden="true"><g class="rim">${glyph}</g><g class="ink">${glyph}</g></svg>`;
   function avatarHtml(av) {
     const els = [av.main, av.sub !== av.main ? av.sub : null].filter(Boolean).map(e => UI.elementNames[e]);
     const tip = (av.role ? "主职责 " + av.role : "职责未知") + (els.length ? " · " + els.join(" / ") : "");
     return `<span class="face av" style="background:${av.background}" title="${esc(tip)}" role="img" aria-label="${esc(tip)}">${stickerSvg(av.glyph, "av-ic")}</span>`;
   }
 
-  return { UI, esc, econText, econHtml, effectsOf, effectsHtml, heroLooks, avatarOf, avatarHtml, stickerSvg };
+  /* ---------- 技能栏 ---------- */
+  const isSummon = (id) => UI.skill.summon.some(re => re.test(String(id || "")));
+  /** 提示文字按「·」分段（「/」不拆：0.3/0.3/0.4atk、atk/2 是一个数）；川川的「电能」这类不是属性的先抹掉 */
+  function segsOf(text) {
+    let s = String(text || "");
+    UI.skill.notWords.forEach(w => { s = s.split(w).join("□".repeat(w.length)); });
+    return s.split(/[·。；]/).map(x => x.trim()).filter(Boolean);
+  }
+  const wordRe = () => new RegExp(Object.keys(UI.skill.words).sort((a, b) => b.length - a.length).join("|"), "g");
+  /** 这一段是不是打伤害：有 atk、又写了属性 / 伤害 / 击破；或者写着「N 击破」（无属性击破、3 冰击破……） */
+  const dmgSeg = (seg) => (/atk/i.test(seg) && (wordRe().test(seg) || /伤害|击破/.test(seg))) || /\d+\s*(?:无属性|[火冰电酸]|能量|物理|谐波)?\s*击破/.test(seg);
+  /** 一段文字里第一个出现的属性字 → 属性 */
+  function firstWord(text) {
+    const m = wordRe().exec(String(text || ""));
+    return m ? UI.skill.words[m[0]] : null;
+  }
+  /** 攻击还是技能：先看例外表，再看提示里有没有打伤害的那一段 */
+  function skillKind(row) {
+    const id = row && row.id;
+    if (id && Object.prototype.hasOwnProperty.call(UI.skill.kind, id)) return UI.skill.kind[id];
+    return segsOf(row && row.hint).some(dmgSeg) ? "attack" : "skill";
+  }
+  /**
+   * 技能的属性（fire / ice / … 或者 null = 无属性）。unit = 投影过的单位（属性跟着刀 / 引擎变的那几个读它）；
+   * effects = 图鉴里带属性的效果 [[名字, 属性]]（codex.js · CODEX_EFFECTS），没有就跳过这一步
+   */
+  function skillElement(row, unit, effects) {
+    const id = row && row.id, S = UI.skill;
+    if (id && S.byState[id]) return S.byState[id](unit);
+    if (id && Object.prototype.hasOwnProperty.call(S.element, id)) return S.element[id];
+    const segs = segsOf(row && row.hint), text = segs.join(" · ");
+    // 打伤害的那一段：先看 atk 后面紧跟的属性字（「+20%能量 → 1atk 电」打的是电），没有再看这一段里第一个
+    for (const seg of segs) if (dmgSeg(seg)) { const at = seg.search(/atk/i), e = (at >= 0 && firstWord(seg.slice(at))) || firstWord(seg); if (e) return e; }
+    let best = null;
+    (effects || []).forEach(([name, el]) => { const at = text.indexOf(name); if (at >= 0 && UI.elements[el] && (!best || at < best.at)) best = { at, el }; });
+    if (best) return best.el;
+    return firstWord(text);
+  }
+  /** 消耗：「行动 1」「附赠 1」「不耗行动」（同 game.js 的技能按钮） */
+  function costParts(cost) {
+    const c = cost || {}, out = [];
+    if (c.ap) out.push({ k: "ap", t: "行动 " + c.ap });
+    if (c.bonus) out.push({ k: "bn", t: "附赠 " + c.bonus });
+    return out;
+  }
+  const costText = (cost) => costParts(cost).map(p => p.t).join(" · ") || "不耗行动";
+  /** 一个按钮要的东西 */
+  function buttonOf(row, unit, effects, i) {
+    const kind = skillKind(row), element = skillElement(row, unit, effects);
+    return {
+      id: String(row.id || ""), name: String(row.name || "?"), hint: String(row.hint || ""), text: String(row.text || row.hint || ""),
+      cost: { ap: Number((row.cost || {}).ap) || 0, bonus: Number((row.cost || {}).bonus) || 0 },
+      kind, kindName: UI.skill.kinds[kind].name, element, elementName: element ? UI.elementNames[element] : "无属性",
+      tint: UI.skill.tints[i % UI.skill.tints.length]
+    };
+  }
+  /**
+   * 技能栏：rows = 这个人的技能 [{ id, name, hint, text, cost: { ap, bonus } }]（原型的占位：房主本机规则里的技能表，同以前），
+   * unit = 投影过的单位，opts.effects = 图鉴里带属性的效果。返回 { skills: 普通技能按钮, summon: 唤出 / 收回武器人的大按钮（没有就是 null） }。
+   * 唤出 / 收回武器人、取回武器都不进普通技能按钮
+   */
+  function skillBar(rows, unit, opts) {
+    const list = (rows || []).filter(r => r && r.id);
+    const summonRow = list.find(r => r.id === UI.skill.first) || list.find(r => isSummon(r.id)) || null;
+    const skills = list.filter(r => !isSummon(r.id)).slice(0, UI.skill.max).map((r, i) => buttonOf(r, unit, opts && opts.effects, i));
+    const summon = summonRow ? Object.assign(buttonOf(summonRow, unit, opts && opts.effects, 0), { back: /_return$/.test(summonRow.id) || summonRow.id === UI.skill.first }) : null;
+    return { skills, summon };
+  }
+  /** 属性角标：icons.js 的七种属性贴纸图标（Icons.element），颜色 = 属性色；无属性画一个灰圈 */
+  function elementBadge(b, icons) {
+    const tip = b.element ? b.elementName + "属性" : "无属性";
+    const color = b.element ? UI.elements[b.element] : UI.avatar.fallback;
+    const svg = b.element && icons && typeof icons.element === "function" ? icons.element(b.element)
+      : `<svg class="eicon" viewBox="0 0 48 48" aria-hidden="true"><g class="o"><circle cx="24" cy="24" r="12"/></g><g class="c"><circle cx="24" cy="24" r="12"/></g></svg>`;
+    return `<span class="sk-el${b.element ? "" : " none"}" style="color:${color}" title="${esc(tip)}">${svg}</span>`;
+  }
+  /** 攻击 / 技能角标：贴纸风的小图标（剑 / 齿轮） */
+  const kindBadge = (b) => `<span class="sk-kind" title="${esc(b.kindName)}">${stickerSvg(UI.skill.kinds[b.kind].glyph, "sk-k-ic")}</span>`;
+  /** 普通技能按钮（照 game.js 的 .sk：名字一行、消耗一行）：左上角属性、右上角攻击 / 技能；按顺序轮流换颜色；悬停写名字、消耗、说明 */
+  function skillHtml(b, icons) {
+    const cost = costParts(b.cost).map(p => `<span class="${p.k}">${esc(p.t)}</span>`).join(" ") || "不耗行动";
+    const tip = `${b.name}（${costText(b.cost)} · ${b.elementName} · ${b.kindName}）\n${b.text}`;
+    return `<button class="sk t-${b.tint} k-${b.kind}" data-skill="${esc(b.id)}" title="${esc(tip)}" aria-label="${esc(`${b.name}：${b.elementName}${b.kindName}，${costText(b.cost)}`)}">` +
+      `${elementBadge(b, icons)}${kindBadge(b)}<span class="nm">${esc(b.name)}</span><span class="cost">${cost}</span></button>`;
+  }
+  /** 唤出 / 收回武器人的大按钮里面那几样（照 game.js · #g-summon：图标、名字、消耗）；颜色（--el）由页面按这个人的主属性给 */
+  const summonInner = (b) => `${UI.skill.summonIcon(b.back)}<span class="sm-nm">${esc(b.name)}</span><small>${esc(costText(b.cost))}</small>`;
+
+  return {
+    UI, esc, econText, econHtml, effectsOf, effectsHtml, heroLooks, avatarOf, avatarHtml, stickerSvg,
+    isSummon, skillKind, skillElement, costText, skillBar, skillHtml, summonInner
+  };
 });

@@ -235,5 +235,142 @@ test("头像：每个主职责一个图标（职责用 growth.js · ROLE_LIST）
   assert.ok(/UIX\.avatarHtml\(UIX\.avatarOf\(LOOKS\[u\.kit\]/.test(mod) && /UIX\.heroLooks\(typeof livePartyCards === "function" \? livePartyCards\(\) : \[\], typeof ELE_BY_CN/.test(mod), "头像按 kit 查角色卡上的职责和属性");
   assert.ok(!/class="face">\$\{esc\(p\.name\.slice\(0, 1\)\)\}/.test(mod), "不再是名字第一个字的圆圈");
   const css = read("hd2d.css");
-  assert.ok(/\.av-ic \.rim \* \{[^}]*stroke: var\(--canvas\)/.test(css) && /\.av-ic \.ink \* \{[^}]*stroke: var\(--ink\)/.test(css), "白边 + 墨线");
+  assert.ok(/\.stk \.rim \* \{[^}]*stroke: var\(--canvas\)/.test(css) && /\.stk \.ink \* \{[^}]*stroke: var\(--ink\)/.test(css), "白边 + 墨线");
+  assert.ok(/class="stk av-ic"/.test(U.avatarHtml(U.avatarOf(null))), "头像图标用贴纸风的画法");
+});
+
+/* ---------- 4 / 5. 技能按钮照旧画面；唤出武器人单独做大按钮 ---------- */
+/** 规则环境里一个单位的技能（和原型页 renderSkills 一样：skillList + skillCost + SkillText 的说明） */
+function rowsOf(ctx, u) {
+  return plain(ctx.skillList(u).map(s => ({ id: s.id, name: s.name, hint: s.hint, text: ctx.SkillText.skillText(s.id) || s.hint, cost: ctx.skillCost(s.id) || {} })));
+}
+const effectWords = (ctx) => plain(vm.runInContext("CODEX_EFFECTS", ctx)).filter(e => e.element).map(e => [e.name, e.element]);
+test("技能按钮：每个都有两个角标——左上角属性（icons.js 的属性图标，无属性是灰圈）、右上角攻击还是技能；按顺序轮流换颜色；悬停写名字、消耗、说明；属性 / 攻击-技能读得对", () => {
+  const U = ui(); require("../icons.js"); const IC = globalThis.Icons;
+  const d = demo("mine"), pv = d.pv(), CE = effectWords(d.ctx);
+  const of = (kit) => d.st.units.find(u => u.kit === kit), view = (kit) => pv.units.find(u => u.id === of(kit).id);
+  for (const kit of PARTY) {
+    const bar = U.skillBar(rowsOf(d.ctx, of(kit)), view(kit), { effects: CE });
+    assert.ok(bar.skills.length >= 2, kit + "：有技能按钮");
+    bar.skills.forEach((b, i) => {
+      assert.ok(b.element === null || U.UI.elements[b.element], `${kit} ${b.id}：属性认得`);
+      assert.ok(["attack", "skill"].includes(b.kind), `${kit} ${b.id}：攻击还是技能`);
+      assert.equal(b.tint, U.UI.skill.tints[i % U.UI.skill.tints.length], "按顺序轮流换颜色");
+      const html = U.skillHtml(b, IC);
+      assert.equal((html.match(/class="sk-el/g) || []).length, 1, b.id + "：一个属性角标");
+      assert.equal((html.match(/class="sk-kind"/g) || []).length, 1, b.id + "：一个攻击 / 技能角标");
+      assert.ok(html.startsWith(`<button class="sk t-${b.tint} k-${b.kind}"`), b.id + "：按钮样式照 game.js 的 .sk");
+      if (b.element) assert.ok(html.includes(IC.element(b.element)) && html.includes(`style="color:${U.UI.elements[b.element]}"`), b.id + "：用 icons.js 的属性图标、属性色");
+      else assert.ok(/class="sk-el none"/.test(html) && html.includes('title="无属性"'), b.id + "：无属性是灰圈");
+      assert.ok(html.includes(`title="${U.UI.skill.kinds[b.kind].name}"`) && html.includes(U.stickerSvg(U.UI.skill.kinds[b.kind].glyph, "sk-k-ic")), b.id + "：攻击是剑、技能是齿轮");
+      assert.ok(html.includes(U.esc(b.name)) && html.includes(U.esc(b.text.split("\n")[0])), b.id + "：悬停写着说明");
+      assert.ok(/<span class="cost">/.test(html), b.id + "：消耗一行（行动 / 附赠 / 不耗行动）");
+      noShp(html, b.id);
+    });
+  }
+  // 读得对：几个有代表性的（提示文字 → 属性 / 攻击还是技能；例外表；跟着刀 / 引擎变的读投影里的单位）
+  const pick = (id, hint) => ({ id, name: id, hint });
+  const cases = [
+    ["ruby_aa", "距离1 · 两次 0.5atk 能量 · 共 1 击破", "energy", "attack"],
+    ["ruby_trigger", "距离1以内 · 施加高能", "energy", "skill"],
+    ["ruby_short", "距离1以内 · 施加感电", "electric", "skill"],
+    ["yuito_aa", "距离1 · 1atk 冰 +1击破 · 豆→液", "ice", "attack"],
+    ["kolt_aa", "同区 · 0.3/0.3/0.4atk 三次电 · 共2击破", "electric", "attack"],
+    ["helu_aa", "远距离 · 1atk 谐波 +1击破 · 有聚焦则打聚焦层", "harmonic", "attack"],
+    ["naruto_frost", "同区 · 3 冰击破 · 打出失衡则收回，绯秋换鳴門胁构", "ice", "attack"],
+    ["ras_flee", "移动1 → +20%能量 → 原区一名敌人 1atk 电（远距离）· 不触发借机攻击。不稳则移动不限", "electric", "attack"],
+    ["chuan_wall", "耗1电能 · 同区挡伤盾 atk+1d6 装甲 · 电能≥3可多耗1加 atk 护盾", null, "skill"],
+    ["chuan_whip", "距离1以内 · atk/2 能量 1击破 · +1电能 · 可耗1电能把自己拉到敌人区", "energy", "attack"],
+    ["latte_ice", "天气变为雪天", "ice", "skill"],
+    ["xia_prep", "附赠 · 下回合伤害骰 +1d6（每5级提高骰子）· 对复数攻击只生效一次", null, "skill"],
+    ["role_breakwave", "附赠 · 同区架势=1（15级≤2）的敌人各 1 无属性击破", null, "attack"],
+    ["role_halve", "行动点 · 造成当前架势一半击破 · 每场一次", null, "attack"],
+    ["wing_boost", "不耗行动 · 每回合纳米多耗 20 · atk +20% · 普攻溅射倍率 +0.1 · 无人机攻击次数 +1", null, "skill"]
+  ];
+  cases.forEach(([id, hint, el, kind]) => {
+    assert.equal(U.skillElement(pick(id, hint), null, CE), el, id + " 的属性");
+    assert.equal(U.skillKind(pick(id, hint)), kind, id + "：攻击还是技能");
+  });
+  const blade = (b) => ({ resources: { blade: b } }), engine = (on) => ({ resources: { engine: on } });
+  assert.equal(U.skillElement(pick("hiaki_aa", "按刀势：拔刀 1atk+1击破"), blade("niu"), CE), "fire", "绯秋拿丹生谷：火");
+  assert.equal(U.skillElement(pick("hiaki_aa", "按刀势：拔刀 1atk+1击破"), blade("naruto"), CE), "ice", "绯秋拿鳴門：冰");
+  assert.equal(U.skillElement(pick("hiaki_powder", "…另一把刀反击"), blade("niu"), CE), "ice", "粉落汤气用另一把");
+  assert.equal(U.skillElement(pick("xia_aa", "近战 1d4+atk 物理 2击破 · 引擎时火焰 3击破"), engine(false), CE), "physical");
+  assert.equal(U.skillElement(pick("xia_aa", "近战 1d4+atk 物理 2击破 · 引擎时火焰 3击破"), engine(true), CE), "fire", "夕夏引擎发动：火焰");
+  // 例外表里写的都是游戏里真有的技能（party.js 的 skillList / roleSkillDef 里有）；跟着刀 / 引擎变的读的字段在投影的白名单里（resources.blade / engine）
+  const partySrc = fs.readFileSync(path.join(__dirname, "..", "party.js"), "utf8");
+  [].concat(Object.keys(U.UI.skill.kind), Object.keys(U.UI.skill.element), Object.keys(U.UI.skill.byState)).forEach(id => assert.ok(partySrc.includes(`id: "${id}"`), id + " 是游戏里的技能"));
+  const ov = fs.readFileSync(path.join(__dirname, "..", "online-view.js"), "utf8");
+  assert.ok(/enumField\(r, out\.resources, "blade", \["niu", "naruto"\]\)/.test(ov) && /resourceFlags = \[[^\]]*"engine"/.test(ov), "刀、引擎在投影的白名单里");
+  // CSS：按钮照 game.js 的 .sk（铁板 + 墨线框），四种颜色，两个角
+  const css = read("hd2d.css");
+  assert.ok(/\.sk \{[^}]*border: 2px solid var\(--ink\)[^}]*border-left: 6px solid var\(--tint\)/.test(css), "按钮：墨线框 + 按技能换颜色的色条");
+  U.UI.skill.tints.forEach(t => assert.ok(new RegExp(`\\.sk\\.t-${t} \\{ --tint:`).test(css), t + " 颜色有样式"));
+  assert.ok(/\.sk \.sk-el \{[^}]*left: \d+px; top: \d+px/.test(css) && /\.sk \.sk-kind \{[^}]*right: -\d+px; top: -\d+px/.test(css), "属性在左上角、攻击 / 技能在右上角");
+  assert.ok(/\.eicon \.o \* \{/.test(css), "属性图标的白边（照 game.css 的 .eicon）");
+});
+
+test("唤出武器人（唤出 / 收回 / 取回武器）单独做成大按钮，和「结束回合」放在一起、同一种样式，不在普通技能按钮里；原型的调试按钮收在一边", () => {
+  const U = ui();
+  const d = demo("mine"), pv = d.pv(), CE = effectWords(d.ctx);
+  for (const kit of PARTY) {
+    for (const lv of [1, 99]) {
+      const u = Object.assign({}, d.st.units.find(x => x.kit === kit), { level: lv });
+      const rows = rowsOf(d.ctx, u), bar = U.skillBar(rows, pv.units.find(x => x.kit === kit), { effects: CE });
+      const summon = rows.find(r => /_summon$/.test(r.id));
+      assert.ok(summon, `${kit} Lv${lv}：技能表里有唤出武器人`);
+      assert.equal(bar.summon && bar.summon.id, summon.id, `${kit} Lv${lv}：唤出武器人是大按钮`);
+      assert.equal(bar.summon.back, false);
+      assert.ok(!bar.skills.some(b => U.isSummon(b.id)), `${kit} Lv${lv}：普通技能按钮里没有唤出 / 收回武器人`);
+      assert.equal(bar.skills.length, Math.min(U.UI.skill.max, rows.length - 1), "别的技能都在");
+      assert.ok(/唤出/.test(U.summonInner(bar.summon)) && U.summonInner(bar.summon).includes(U.UI.skill.summonIcon(false)), "大按钮：图标 + 名字 + 消耗（照 game.js · #g-summon）");
+    }
+  }
+  // 武器人倒下以后是「取回武器」（先放它，同 game.js）；武器人自己的「收回为武器」也是大按钮
+  const both = U.skillBar([{ id: "ruby_aa", name: "普通攻击", hint: "" }, { id: "ruby_summon", name: "唤出明特", hint: "" }, { id: "weapon_retrieve", name: "取回武器", hint: "" }], null);
+  assert.equal(both.summon.id, "weapon_retrieve"); assert.equal(both.summon.back, true);
+  assert.deepEqual(both.skills.map(b => b.id), ["ruby_aa"]);
+  const mint = U.skillBar([{ id: "mint_steal", name: "电力夺取", hint: "" }, { id: "mint_return", name: "收回为武器", hint: "需与瑞比同区" }], null);
+  assert.equal(mint.summon.id, "mint_return"); assert.equal(mint.summon.back, true);
+  assert.equal(U.skillBar([{ id: "x_aa", name: "打", hint: "" }], null).summon, null, "没有武器人就没有大按钮");
+  // 页面：#summon-btn 和 #end-turn 在同一块（.hud-side）、同一种样式（.bigbtn）；普通技能按钮在 #skills；调试按钮在 .dbg 里
+  const page = read("index.html");
+  const dock = page.slice(page.indexOf('<footer id="dock"'), page.indexOf("</footer>"));
+  const side = dock.slice(dock.indexOf('<div class="hud-side">'), dock.indexOf("</div>", dock.indexOf('<div class="hud-side">')));
+  assert.ok(/id="summon-btn"/.test(side) && /id="end-turn"/.test(side), "唤出武器人和结束回合在同一块");
+  assert.ok(/class="bigbtn sumbtn" id="summon-btn"/.test(side) && /class="bigbtn endbtn" id="end-turn"/.test(side), "同一种大按钮样式");
+  assert.ok(dock.indexOf('<div id="skills"></div>') > 0 && dock.indexOf('<div id="skills"></div>') < dock.indexOf('<div class="hud-side">'), "普通技能在左、两个大按钮在右（照 game.html 的 .hud-row）");
+  const dbg = dock.slice(dock.indexOf('<div class="dbg"'), dock.indexOf("</div>", dock.indexOf('<div class="dbg"')));
+  ["demo-strike", "fx-speed", "push-toggle", "fx-skip"].forEach(id => assert.ok(dbg.includes(`id="${id}"`), id + " 收在原型调试那一块"));
+  assert.ok(!/class="btn alt" id="demo-strike"/.test(page), "演示出招不再是大喷漆按钮");
+  const mod = /<script type="module">([\s\S]*?)<\/script>/.exec(page)[1];
+  const render = mod.slice(mod.indexOf("function renderSkills"), mod.indexOf("\n}", mod.indexOf("function renderSkills")));
+  assert.ok(/UIX\.skillBar\(rows, v,/.test(render) && /\$\("skills"\)\.innerHTML = bar\.skills\.map\(b => UIX\.skillHtml\(b, window\.Icons\)\)/.test(render), "普通技能按钮只画 bar.skills");
+  assert.ok(/\$\("summon-btn"\)/.test(render) && /UIX\.summonInner\(s\)/.test(render) && /--el/.test(render), "唤出武器人画在大按钮上，颜色跟着主属性");
+  assert.ok(/pv\.units\.find\(x => x\.id === actorId\)/.test(render), "属性跟着刀 / 引擎变的读投影里的单位");
+  const css = read("hd2d.css");
+  assert.ok(/\.bigbtn::before \{[^}]*filter: url\(#spray\)/.test(css) && /\.endbtn \{[^}]*--el: var\(--hazard\)/.test(css), "喷漆大按钮（照 skin.css 的 .summonbtn / .endturn）");
+  assert.ok(/#dock\.collapsed \.hud-row \{ display: none; \}/.test(css), "收起技能栏时整行收起");
+});
+
+/* ---------- 6. 坚毅生命的数值绝不显示 ---------- */
+test("坚毅生命（shp）：三个演示战场里铭牌、行动点、队伍栏的效果和头像、技能按钮、唤出武器人按钮都没有；hd2d-ui.js 的代码里不读 shp", () => {
+  const U = ui(), icons = HI(); require("../icons.js");
+  for (const id of Object.keys(DEMOS)) {
+    const d = demo(id), pv = d.pv(), CE = effectWords(d.ctx);
+    noShp(pv, id + " 的投影");
+    const out = L.build(pv, { view: DESKTOP, region: pv.region, theme: pv.light });
+    const looks = U.heroLooks(plain(d.ctx.livePartyCards()), plain(vm.runInContext("ELE_BY_CN", d.ctx)));
+    let html = "";
+    out.units.forEach(u => { html += U.econHtml(u.plate.econ, false) + U.econHtml(u.plate.econ, true) + JSON.stringify(u.plate); });
+    pv.units.filter(u => u.isPlayer).forEach(u => {
+      html += U.effectsHtml(U.effectsOf(u, icons), icons) + U.avatarHtml(U.avatarOf(looks[u.kit] || null));
+      const raw = d.st.units.find(x => x.id === u.id), bar = U.skillBar(rowsOf(d.ctx, raw), u, { effects: CE });
+      html += bar.skills.map(b => U.skillHtml(b, globalThis.Icons)).join("") + (bar.summon ? U.summonInner(bar.summon) : "");
+    });
+    noShp(html, id + " 的界面");
+  }
+  // 代码里（去掉注释）不出现 shp
+  const code = read("hd2d-ui.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  assert.ok(!/shp|坚毅/i.test(code), "hd2d-ui.js 不读坚毅生命");
 });

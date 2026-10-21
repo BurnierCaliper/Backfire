@@ -59,13 +59,23 @@
     <button class="toggle" id="dock-toggle" aria-expanded="false">技能 ▲</button>
     <span class="who" id="dock-who"></span>
     <span class="grow"></span>
-    <span class="hint" id="dock-hint" title="「演示出招」：房主用规则结算一次普通攻击，画面只按联机玩家收到的包播放">原型：演示出招按联机包播放</span>
-    <button class="toggle fxc" id="fx-speed" title="演出速度（AttackFx.setClock 的倍率）">演出 1×</button>
-    <button class="toggle fxc" id="push-toggle" aria-pressed="true" title="出手时镜头稍微推向攻击者和目标（远景 / 中景），播完回到原来的镜头；系统开了「减少动态效果」时不推">推镜头 开</button>
-    <button class="toggle fxc" id="fx-skip" disabled title="跳过正在播的演出（Esc）">跳过</button>
-    <button class="btn alt" id="demo-strike" title="房主用规则结算一次普通攻击（当前行动的人；够不着就换我方别人），投影成联机玩家收到的包，再按包播攻击演出和伤害数字">演示出招</button>
+    <!-- 原型的调试按钮（#230：演示出招、演出速度、推镜头、跳过）：收在这一小块里，不和技能按钮混在一起 -->
+    <div class="dbg" role="group" aria-label="原型调试" title="原型调试：「演示出招」是房主用规则结算一次普通攻击，画面只按联机玩家收到的包播放">
+      <span class="dbg-l">原型</span>
+      <button class="toggle fxc" id="demo-strike" title="房主用规则结算一次普通攻击（当前行动的人；够不着就换我方别人），投影成联机玩家收到的包，再按包播攻击演出和伤害数字">演示出招</button>
+      <button class="toggle fxc" id="fx-speed" title="演出速度（AttackFx.setClock 的倍率）">演出 1×</button>
+      <button class="toggle fxc" id="push-toggle" aria-pressed="true" title="出手时镜头稍微推向攻击者和目标（远景 / 中景），播完回到原来的镜头；系统开了「减少动态效果」时不推">推镜头 开</button>
+      <button class="toggle fxc" id="fx-skip" disabled title="跳过正在播的演出（Esc）">跳过</button>
+    </div>
   </div>
-  <div id="skills"></div>
+  <!-- 技能栏（照正式战斗画面 game.html 的 .hud-row）：左边普通技能按钮，右边「唤出武器人」和「结束回合」两个大按钮放在一起、同一种喷漆样式 -->
+  <div class="hud-row" id="dock-bar">
+    <div id="skills"></div>
+    <div class="hud-side">
+      <button class="bigbtn sumbtn" id="summon-btn" hidden></button>
+      <button class="bigbtn endbtn" id="end-turn" title="原型：结束回合还没接规则">结束回合<small>原型占位</small></button>
+    </div>
+  </div>
 </footer>
 
 <!-- 中景 / 近景：换到相邻的区（键盘左右键也行） -->
@@ -96,7 +106,7 @@ window.GAME_MODE = true;
   Storage.prototype.getItem = function (k) { return calcKey(String(k)) ? null : gi.call(this, k); };
   Storage.prototype.setItem = function (k, v) { if (calcKey(String(k))) return; return si.call(this, k, v); };
   var byId = Document.prototype.getElementById;
-  var OWN = /^(?:stage|topbar|tb-turn|tb-weather|tb-map|tb-compact|cam-bar|cam-far|cam-mid|cam-near|cam-zone|demo-select|region-select|demo-btn|party|party-toggle|party-list|logdrawer|log-toggle|log-body|dock|dock-toggle|dock-who|dock-hint|demo-strike|fx-speed|fx-skip|push-toggle|hd2d-pop|hd2d-shade|skills|zone-prev|zone-next|toast|loading|calc-core)$/;
+  var OWN = /^(?:stage|topbar|tb-turn|tb-weather|tb-map|tb-compact|cam-bar|cam-far|cam-mid|cam-near|cam-zone|demo-select|region-select|demo-btn|party|party-toggle|party-list|logdrawer|log-toggle|log-body|dock|dock-toggle|dock-who|dock-bar|demo-strike|fx-speed|fx-skip|push-toggle|hd2d-pop|hd2d-shade|skills|summon-btn|end-turn|zone-prev|zone-next|toast|loading|calc-core)$/;
   Document.prototype.getElementById = function (id) {
     var e = byId.call(this, id);
     if (e || OWN.test(String(id))) return e;
@@ -333,17 +343,34 @@ function setActor(id) {
   document.querySelectorAll(".pm").forEach(el => el.classList.toggle("on", el.dataset.id === id));
   renderSkills();
 }
+/** 图鉴里带属性的效果（codex.js · CODEX_EFFECTS：感电 = 电、熔融 = 火、雪天 = 冰……）：技能按钮的属性角标，挂效果的技能看它挂的是什么 */
+const EFFECT_ELEMENTS = typeof CODEX_EFFECTS !== "undefined" ? CODEX_EFFECTS.filter(e => e && e.element).map(e => [e.name, e.element]) : [];
 function renderSkills() {
-  const v = pv && pv.units.find(x => x.id === actorId);   // 名字、等级：投影里的
+  const v = pv && pv.units.find(x => x.id === actorId);   // 名字、等级、手里的刀 / 引擎（技能属性跟着变的那几个）：投影里的
   $("dock-who").innerHTML = v ? `${esc(v.name)}<small>Lv${v.level} · 行动中</small>` : "";
   // 技能名：原型的占位，用规则里的技能表（房主本机）。联机时玩家的技能菜单由房主按 online-view.js · projectActionMenu 另发，第二阶段接出招时再换
   const u = st.units.find(x => x.id === actorId);
   let list = [];
   try { list = typeof skillList === "function" && u ? skillList(u) : []; } catch (e) { list = []; }
-  if (!list.length) list = [{ name: "普通攻击", hint: "（原型占位）" }, { name: "移动", hint: "（原型占位）" }, { name: "防御", hint: "（原型占位）" }];
-  const colors = ["", "mint", "alt", "pink"];
-  $("skills").innerHTML = list.slice(0, 12).map((s, i) => `<button class="btn ${colors[i % colors.length]}" title="${esc(s.hint || "")}">${esc(s.name)}</button>`).join("");
-  $("skills").querySelectorAll(".btn").forEach(b => b.addEventListener("click", () => toast("技能按钮还是摆设：点右边的「演示出招」，看规则结算的一次普通攻击")));
+  if (!list.length) list = [{ id: "__aa", name: "普通攻击", hint: "1atk 物理（原型占位）", cost: { ap: 1 } }, { id: "__move", name: "移动", hint: "（原型占位）", cost: { bonus: 1 } }];
+  const rows = list.map(s => ({ id: s.id, name: s.name, hint: s.hint, text: (window.SkillText && SkillText.skillText(s.id)) || s.hint,
+    cost: (typeof skillCost === "function" && s.id && skillCost(s.id)) || s.cost || {} }));
+  // 技能按钮照正式画面的样子（hd2d-ui.js · skillBar / skillHtml）：左上角属性、右上角攻击 / 技能，按顺序轮流换颜色；唤出武器人不在这里面
+  const bar = UIX.skillBar(rows, v, { effects: EFFECT_ELEMENTS });
+  $("skills").innerHTML = bar.skills.map(b => UIX.skillHtml(b, window.Icons)).join("");
+  $("skills").querySelectorAll(".sk").forEach(b => b.addEventListener("click", () => toast("技能按钮还是摆设：点技能栏上面「原型」那一块的「演示出招」，看规则结算的一次普通攻击")));
+  // 唤出 / 收回武器人：单独的大按钮，和「结束回合」放在一起、同一种喷漆样式（照 game.js · #g-summon），颜色跟着这个人（武器人跟着主人）的主属性
+  const sb = $("summon-btn"), s = bar.summon;
+  sb.hidden = !s;
+  if (s) {
+    const look = LOOKS[(v && (v.weaponOf || v.kit)) || ""], el = look && look.main;
+    sb.style.setProperty("--el", el ? UIX.UI.elements[el] : "var(--hazard)");
+    sb.classList.toggle("back", !!s.back);
+    sb.dataset.skill = s.id;
+    sb.innerHTML = UIX.summonInner(s);
+    sb.title = `${s.name}（${UIX.costText(s.cost)}）\n${s.text}`;
+    sb.setAttribute("aria-label", `${s.name}，${UIX.costText(s.cost)}`);
+  }
 }
 /** 日志：联机玩家看的是房主发的公开日志（online-view.js · projectLogs 的白名单，不是规则的原始日志）。
  *  publicLogs 是房主这边开场的（原型没有）；packetLogs 是「演示出招」收到的包里投影好的公开日志（packet.publicLogs） */
@@ -522,6 +549,9 @@ function boot() {
   $("zone-prev").addEventListener("click", () => sc.stepZone(-1));
   $("zone-next").addEventListener("click", () => sc.stepZone(1));
   $("demo-strike").addEventListener("click", demoStrike);
+  // 唤出武器人、结束回合：样子照正式画面，规则还没接（和技能按钮一样是摆设）
+  $("summon-btn").addEventListener("click", () => toast("唤出 / 收回武器人还没接规则（原型）"));
+  $("end-turn").addEventListener("click", () => toast("结束回合还没接规则（原型）"));
   // 演出开关：速度（1× / 2×）、推镜头（?push=0 关，开场时读）、跳过
   $("fx-speed").addEventListener("click", () => { const S = HD2DFx.FX.speeds; speed = S[(S.indexOf(speed) + 1) % S.length]; syncFxControls(); });
   $("push-toggle").addEventListener("click", () => { pushOn = !pushOn; syncFxControls(); syncUrl(); });
