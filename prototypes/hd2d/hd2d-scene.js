@@ -2,14 +2,14 @@
  *
  * 把 hd2d-layout.js 排好的战场画出来：地台 / 间隔 / 装饰（hd2d-world.js）、天幕 / 远景剪影 / 废土地面（hd2d-backdrop.js）、
  * 铭牌（CSS2DRenderer：DOM 立在 3D 位置上，始终正面朝向镜头）、天气和飘浮物（hd2d-weather.js），
- * 加上镜头、灯光（主光 + 轮廓光）、雾和后期（景深 + 泛光 + 热浪 + 调色：色温 / 暗角 / 胶片颗粒）。
+ * 加上镜头、灯光（主光 + 轮廓光）、雾和后期（景深 + 泛光 + 热浪 + 调色：色温 / 暗角 / 胶片颗粒 / 雷击闪白），打雷时镜头轻微抖一下。
  *
  *   const sc = createHd2dScene(container, { onPortraitChange(p) {...}, onViewChange() {...} });
  *   sc.setBattle(layout, { weather: "sand", theme: "dusk", backdrop: "desert", actorId });
  *     // layout = HD2DLayout.build(state, { portrait: sc.portrait, view: sc.view() })；默认镜头就用 layout.camera
  *   sc.setInsets({ top, bottom });   // 上下被界面盖住的像素（布局取景时让开），改了以后外面重排一次
  *   sc.dispose();
- * 系统开了「减少动态效果」（prefers-reduced-motion）时，待机动画、飘浮物、天气粒子、闪电、胶片颗粒都停住。
+ * 系统开了「减少动态效果」（prefers-reduced-motion）时，待机动画、飘浮物、天气粒子、乌云、胶片颗粒都停住；雷照打，但闪光减弱、只闪一下，镜头不抖。
  * 页面只在 index.html 里被 import；不改正式游戏的任何文件。 */
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
@@ -21,8 +21,8 @@ import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { CSS2DRenderer, CSS2DObject } from "three/addons/renderers/CSS2DRenderer.js";
 import { buildZone, buildGap, disposeTree, rng } from "./hd2d-world.js";
-import { buildBackdrop, buildGround, skyTexture } from "./hd2d-backdrop.js";
-import { createWeather } from "./hd2d-weather.js";
+import { buildBackdrop, buildGround, skyTexture, BACKDROP } from "./hd2d-backdrop.js";
+import { createWeather, weatherPlan } from "./hd2d-weather.js";
 
 /** 布局（hd2d-layout.js，普通脚本，比这个模块先加载）：镜头和铭牌尺寸跟布局用同一份配置 */
 const L = window.HD2DLayout;
@@ -48,6 +48,9 @@ const SHADOW = { core: 0.42, coreOpacity: 0.78, soft: 1.05, softOpacity: 0.42 };
 const FLICKER = { wait: [3, 11], dur: [0.18, 0.55], low: 0.12 };
 /** 雾：从镜头到战场后沿开始起雾，再往后 depth 远基本全进雾（天幕的底边在这一段里，地面和天边连成一片） */
 const FOG = { depth: 30 };
+/** 雷击（天气给的闪光 0–1，减少动态效果时天气那边已经减弱过）：全屏往白色推多少（white；color 是显示用的 sRGB 颜色）、
+ *  灯光 / 曝光 / 泛光推亮多少；乌云下面平时的灯光压暗到几成（dim）。间隔、连闪、抖动幅度在 hd2d-weather.js 的 STORM */
+const FLASH = { white: 0.42, color: [0.92, 0.95, 1.0], hemi: 3.2, sun: 2.5, exposure: 0.35, bloom: 0.5, dim: 0.8 };
 const LAYER_COLOR = { flesh: "#d8574a", armor: "#9aa7b3", shield: "#4fb8ff", sand: "#d1a85a", spirit: "#c07cf0" };
 const STATUS_COLOR = { burn: "#ff5b2e", shock: "#ffd32e", corr: "#9be03a", frostbite: "#7ccfe8", shockwave: "#ff9a3c", high: "#ff4fa3", reso: "#c07cf0", unstable: "#c07cf0", weak: "#a8977b", inspire: "#39e6b4", sturdy: "#ffc93c", hide: "#6b7a8a", advantage: "#f2c230", chase: "#ff7a2e" };
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -94,17 +97,17 @@ const HeatShader = {
 };
 
 /* 调色（放在 OutputPass 后面，读到的已经是色调映射、sRGB 编码过的颜色）：
- * 色温 → 饱和度 → 对比度 → 暗部 / 亮部偏色 → 暗角（主要在四个角）→ 胶片颗粒 */
+ * 色温 → 饱和度 → 对比度 → 暗部 / 亮部偏色 → 暗角（主要在四个角）→ 雷击闪白（整个画面往白色推）→ 胶片颗粒 */
 const GradeShader = {
   uniforms: {
     tDiffuse: { value: null }, time: { value: 0 }, res: { value: new THREE.Vector2(1, 1) },
     temp: { value: new THREE.Vector3(1, 1, 1) }, sat: { value: 1 }, contrast: { value: 1 },
     shadow: { value: new THREE.Vector3(0, 0, 0) }, high: { value: new THREE.Vector3(1, 1, 1) },
-    vignette: { value: 0.3 }, grain: { value: 0.03 }
+    vignette: { value: 0.3 }, grain: { value: 0.03 }, flash: { value: 0 }, flashColor: { value: new THREE.Vector3(1, 1, 1) }
   },
   vertexShader: "varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }",
   fragmentShader: `uniform sampler2D tDiffuse; uniform float time; uniform vec2 res; uniform vec3 temp; uniform float sat; uniform float contrast;
-    uniform vec3 shadow; uniform vec3 high; uniform float vignette; uniform float grain; varying vec2 vUv;
+    uniform vec3 shadow; uniform vec3 high; uniform float vignette; uniform float grain; uniform float flash; uniform vec3 flashColor; varying vec2 vUv;
     float hash(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
     void main(){
       vec3 c = texture2D(tDiffuse, vUv).rgb * temp;
@@ -116,6 +119,7 @@ const GradeShader = {
       c *= mix(vec3(1.0), high, smoothstep(0.45, 1.0, l));
       float v = smoothstep(0.38, 0.82, length((vUv - 0.5) * vec2(1.0, 1.1)));
       c *= 1.0 - vignette * v;
+      c = mix(c, flashColor, flash);
       float n = hash(floor(vUv * res) + floor(fract(time * 0.37) * 97.0) * 1.37) - 0.5;
       c += n * grain * (1.0 - 0.5 * l);
       gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
@@ -222,6 +226,7 @@ export function createHd2dScene(container, options) {
   const heatPass = new ShaderPass(HeatShader);
   heatPass.enabled = false;
   const grade = new ShaderPass(GradeShader);
+  grade.uniforms.flashColor.value.set(...FLASH.color);
   composer.addPass(new RenderPass(scene, camera));
   composer.addPass(bokeh); composer.addPass(bloom); composer.addPass(heatPass);
   composer.addPass(new OutputPass());
@@ -235,6 +240,7 @@ export function createHd2dScene(container, options) {
   const weather = createWeather(scene, { bounds: { minX: -10, maxX: 10, minZ: -10, maxZ: 10 } });
   const clock = new THREE.Clock();
   let animT = 0, raf = 0, disposed = false;   // animT：动画用的时间，减少动态效果时停住
+  const shakeR = new THREE.Vector3(), shakeU = new THREE.Vector3(), shakeV = new THREE.Vector3();   // 打雷时镜头抖动用
 
   // 系统的「减少动态效果」：开着就让待机动画、飘浮物、颗粒都停住（CSS 那边铭牌浮动也停）
   const motionQuery = window.matchMedia ? window.matchMedia("(prefers-reduced-motion: reduce)") : null;
@@ -258,7 +264,9 @@ export function createHd2dScene(container, options) {
     const T = THEMES[state.meta.theme] || THEMES.day;
     state.themeName = state.meta.theme;
     if (scene.background && scene.background.dispose) scene.background.dispose();
-    scene.background = skyTexture(T.sky, state.themeName === "night");   // 天幕以外露出来的地方（转到很偏时）
+    // 天幕以外露出来的地方（转到很偏时）；雷鸣时和天幕一样换成风暴色、没有星星
+    const storm = weather.storm;
+    scene.background = skyTexture(storm ? BACKDROP.storm.sky[state.themeName] || T.sky : T.sky, state.themeName === "night" && !storm);
     hemi.color.set(T.hemiSky); hemi.groundColor.set(T.hemiGround);
     sun.color.set(T.sun); rim.color.set(T.rim); rim.intensity = T.rimI;
     ground.material.color.set(T.ground);
@@ -271,11 +279,16 @@ export function createHd2dScene(container, options) {
     labels.domElement.style.setProperty("--rim", T.rimCss);
     applyFog();
   }
+  /** 雾色：光影主题的雾，往这个天气想要的雾色靠 */
+  function fogColorOf(T, tint) {
+    const color = new THREE.Color(T.fog);
+    if (tint && tint.fog != null) color.lerp(new THREE.Color(tint.fog), 0.6);
+    return color;
+  }
   function applyFog() {
     const T = THEMES[state.themeName] || THEMES.day;
     const tint = weather.tint;
-    const color = new THREE.Color(T.fog);
-    if (tint && tint.fog != null) color.lerp(new THREE.Color(tint.fog), 0.6);
+    const color = fogColorOf(T, tint);
     const b = state.bounds;
     const back = state.fit + (b ? (b.maxZ - b.minZ) / 2 * Math.cos(THREE.MathUtils.degToRad(L.CONFIG.camera.elevation)) : 8);   // 镜头到战场后沿的大致距离
     const near = back * (tint ? tint.near : 1), far = (back + FOG.depth) * (tint ? tint.far : 1);
@@ -410,8 +423,10 @@ export function createHd2dScene(container, options) {
     }
     state.boardSig = boardSig(layout);
     state.bounds = layout.bounds;
-    syncBackdrop(layout, state.meta.backdrop || backdropOf(state.meta.theme));
-    weather.setBounds(layout.bounds);
+    const plan = weatherPlan(state.meta.weather || "none", state.meta.theme);   // 雷鸣：远景要画乌云
+    syncBackdrop(layout, state.meta.backdrop || backdropOf(state.meta.theme), plan);
+    // 天气：闪电从默认镜头的画面上沿外面劈下来；远处的雷劈在哪问远景
+    weather.setBounds(layout.bounds, { camera: layout.camera, farPoint: state.backdrop.farPoint });
     weather.set(state.meta.weather || "none", state.meta.theme);
     syncPlates();
     applyTheme();
@@ -420,14 +435,15 @@ export function createHd2dScene(container, options) {
   }
   /** 远景按场景变：没指定就按光影主题猜 */
   const backdropOf = (theme) => theme === "night" ? "night" : theme === "dusk" ? "mine" : "wasteland";
-  function syncBackdrop(layout, kind) {
-    const c = layout.camera;
-    const sig = [kind, state.meta.theme, Object.values(layout.bounds).map(v => Math.round(v)).join(","), c ? [c.dist, c.pos.y, c.pos.z].map(v => Math.round(v)).join(",") : ""].join("|");
+  /** plan = 天气要建的东西（weatherPlan）：雷鸣时远景换成风暴色的天、画乌云，天边接上压暗了的雾色 */
+  function syncBackdrop(layout, kind, plan) {
+    const c = layout.camera, storm = !!plan.storm;
+    const sig = [kind, state.meta.theme, storm ? "storm" : "", Object.values(layout.bounds).map(v => Math.round(v)).join(","), c ? [c.dist, c.pos.y, c.pos.z].map(v => Math.round(v)).join(",") : ""].join("|");
     if (sig === state.backdropSig) return;
     state.backdropSig = sig;
     if (state.backdrop) { scene.remove(state.backdrop.group); state.backdrop.dispose(); }
     const T = THEMES[state.meta.theme] || THEMES.day;
-    state.backdrop = buildBackdrop(kind, layout.bounds, state.meta.theme, c, { sky: T.sky, fog: T.fog });
+    state.backdrop = buildBackdrop(kind, layout.bounds, state.meta.theme, c, { sky: T.sky, fog: storm ? fogColorOf(T, plan.tint).getHex() : T.fog, storm });
     scene.add(state.backdrop.group);
   }
   const boardSig = (l) => l.zones.map(z => [z.id, Math.round(z.cx * 10), Math.round(z.cz * 10)].join(",")).join(";");
@@ -530,14 +546,16 @@ export function createHd2dScene(container, options) {
     const moving = state.motion, adt = moving ? dt : 0;   // 减少动态效果：动画时间停住
     animT += adt;
     if (state.ctx) state.ctx.anim.forEach(fn => fn(animT, adt));
-    if (state.backdrop && state.backdrop.update) state.backdrop.update(animT, adt);
-    weather.update(adt, animT);
-    // 雷闪：把灯光瞬间推亮（减少动态效果时不闪）
-    const T = THEMES[state.themeName] || THEMES.day;
-    const fl = moving ? weather.flash : 0;
-    hemi.intensity = T.hemi + fl * 3.2; sun.intensity = T.sunI + fl * 2.5;
-    renderer.toneMappingExposure = T.exposure * (1 + fl * 0.35);
-    bloom.strength = T.bloom[0] + fl * 0.5;
+    // 天气：粒子按动画时间走；雷击按真实时间走（减少动态效果时照打，由天气减弱闪光、不给抖动）
+    weather.update(adt, animT, { dt, reduced: !moving });
+    const fl = weather.flash, strike = weather.strike;
+    if (state.backdrop && state.backdrop.update) state.backdrop.update(animT, adt, { flash: fl, x: strike ? strike.x : 0 });   // 乌云飘、打雷时被照亮
+    // 雷击：全屏闪白，灯光 / 曝光 / 泛光瞬间推亮；乌云下面平时的灯光压暗一点
+    const T = THEMES[state.themeName] || THEMES.day, dim = weather.storm ? FLASH.dim : 1;
+    hemi.intensity = T.hemi * dim + fl * FLASH.hemi; sun.intensity = T.sunI * dim + fl * FLASH.sun;
+    renderer.toneMappingExposure = T.exposure * (1 + fl * FLASH.exposure);
+    bloom.strength = T.bloom[0] + fl * FLASH.bloom;
+    grade.uniforms.flash.value = fl * FLASH.white;
     heatPass.enabled = weather.heat > 0;
     heatPass.uniforms.time.value = animT;
     grade.uniforms.time.value = animT;
@@ -560,8 +578,19 @@ export function createHd2dScene(container, options) {
     clampPan();
     controls.update();
     bokeh.uniforms.focus.value = focus;   // 焦点在战场中间
+    // 打雷那一下镜头轻微抖动：天气给的像素换成焦点处的世界长度，沿镜头的左右 / 上下挪。
+    // 只挪这一帧的渲染（铭牌跟着一起抖），渲染完挪回去，OrbitControls 看不到
+    const sh = weather.shake, shaking = sh.x !== 0 || sh.y !== 0;
+    if (shaking) {
+      const px = 2 * focus * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / Math.max(1, container.clientHeight);
+      camera.updateMatrixWorld();
+      shakeR.setFromMatrixColumn(camera.matrixWorld, 0); shakeU.setFromMatrixColumn(camera.matrixWorld, 1);
+      shakeV.copy(shakeR).multiplyScalar(sh.x * px).addScaledVector(shakeU, sh.y * px);
+      camera.position.add(shakeV); camera.updateMatrixWorld();
+    }
     composer.render(dt);
     labels.render(scene, camera);
+    if (shaking) { camera.position.sub(shakeV); camera.updateMatrixWorld(); }
   }
 
   const ro = new ResizeObserver(resize);

@@ -9,9 +9,11 @@
  *        夜晚 night：亮着窗的楼群、水塔、天线（红灯）；天幕上有星星
  *        其余 wasteland：碎石岩丘
  * 剪影越远越接近天边的雾色（空气透视），景深再稍微糊一点（远处的糊上限在场景的 THEMES.dofFar）。
+ * 雷鸣（storm）时天幕换成压暗的风暴色、画上慢慢翻滚的厚云（星星被盖住），中景上方再挂一层半透明的低云；
+ * 打雷时云从里面亮起来，离雷近的那一片更亮。远处的雷劈在哪由这里给（farPoint：低云前面；天幕、低云都是弧，两边离得近，要按弧算）。
  *
- *   const bd = buildBackdrop("mine", bounds, "dusk", layout.camera, { sky: [...4 色], fog: 0xRRGGBB });
- *   scene.add(bd.group); 每帧 bd.update(t, dt)；bd.dispose();
+ *   const bd = buildBackdrop("mine", bounds, "dusk", layout.camera, { sky: [...4 色], fog: 0xRRGGBB, storm });
+ *   scene.add(bd.group); 每帧 bd.update(t, dt, { flash, x })（flash / x = 雷击的闪光和位置）；bd.farPoint(r)；bd.dispose();
  * 剪影和天幕不吃场景雾（雾会把它们全抹成一个色），颜色自己按远近调。 */
 import * as THREE from "three";
 import { rng } from "./hd2d-world.js";
@@ -37,6 +39,23 @@ const BACKDROP = {
     day: { body: 0x7a6248, rock: 0x8a6a4c, sand: 0xc89c62, dark: 0x5a4636 },
     dusk: { body: 0x2c1f28, rock: 0x3d2a2c, sand: 0x6a4436, dark: 0x1e1519 },
     night: { body: 0x0b0f18, rock: 0x121824, sand: 0x1a2030, dark: 0x06080e }
+  },
+  /* 雷鸣的乌云 */
+  storm: {
+    sky: {   // 天幕四色（地平线 → 画面上沿），都比平时暗
+      day: ["#8b8a84", "#6c6f78", "#525866", "#3a4050"],
+      dusk: ["#a86650", "#6e4a5a", "#45384e", "#262036"],
+      night: ["#363244", "#232535", "#151824", "#07080e"]
+    },
+    cloud: {   // 云的暗面 / 底下被地面（夜晚是城市的灯）照到的亮面
+      day: [0x3a3f4a, 0x8f8e88], dusk: [0x2a2232, 0x9a5e62], night: [0x0e1119, 0x463e4c]
+    },
+    flash: 0xd8e2ff,          // 雷光把云照亮的颜色
+    cover: 0.7,               // 天幕上的云盖得多满（0–1；0.5 大约盖住六成天，0.7 大约八成）
+    speed: [0.003, 0.006],    // 天幕上远 / 近两层云往右飘的速度（每秒走过多少圈弧：很慢）
+    scale: [26, 47],          // 天幕上远 / 近两层云的疏密（沿弧一圈有几团）
+    low: { inset: 5.5, arc: 0.42, base: 0.25, opacity: 0.6, speed: 0.011, scale: 30 },   // 中景上方的低云：离天幕多远、左右绕多宽（× π）、下沿在画面上沿视线的几成高、多不透明、飘多快、多密
+    strike: { arc: 0.5, inset: 6 }   // 远处的雷劈在哪：左右最多偏多少（弧度）、离天幕多远（比低云近一点：劈在低云前面、中景的楼 / 山之间，整道看得见）
   }
 };
 const D2R = Math.PI / 180;
@@ -101,12 +120,18 @@ export function buildGround() {
 }
 
 /* ---------- 天幕 ---------- */
-/** 天幕的形状：绕着战场中心的半个椭圆筒（开口朝镜头），u 沿着弧，v 沿着高 */
+/** 着色器里共用的噪声：hash / 值噪声 / 分形噪声（云用） */
+const NOISE_GLSL = `float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+      float noise(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+        return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y); }
+      float fbm(vec2 p){ float v = 0.0, a = 0.5; for (int i = 0; i < 5; i++){ v += a * noise(p); p = p * 2.03 + vec2(17.1, 9.3); a *= 0.5; } return v; }`;
+
+/** 天幕的形状：绕着战场中心的半个椭圆筒（开口朝镜头），u 沿着弧，v 沿着高。y0 / y1 可以是数，也可以按进深 z 给（低云的上下沿跟着画面上沿视线走） */
 function arcGeometry(cx, cz, rx, rz, arc, y0, y1, seg) {
   const pos = [], uv = [], idx = [];
   for (let i = 0; i <= seg; i++) {
     const th = -arc + (2 * arc * i) / seg, x = cx + Math.sin(th) * rx, z = cz - Math.cos(th) * rz;
-    pos.push(x, y0, z, x, y1, z); uv.push(i / seg, 0, i / seg, 1);
+    pos.push(x, typeof y0 === "function" ? y0(z) : y0, z, x, typeof y1 === "function" ? y1(z) : y1, z); uv.push(i / seg, 0, i / seg, 1);
     if (i < seg) { const a = i * 2; idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); }
   }
   const g = new THREE.BufferGeometry();
@@ -116,8 +141,10 @@ function arcGeometry(cx, cz, rx, rz, arc, y0, y1, seg) {
   return g;
 }
 
-/** 天空：按「默认镜头在这里看得到多高」把四个颜色铺开（地平线 → 画面上沿），傍晚加一团夕阳光晕和几条被照亮的云，夜晚加星星 */
+/** 天空：按「默认镜头在这里看得到多高」把四个颜色铺开（地平线 → 画面上沿），傍晚加一团夕阳光晕和几条被照亮的云，夜晚加星星；
+ *  雷鸣（opts.storm）时画上两层慢慢飘的厚云，打雷时云从里面亮起来（time / flash / flashU 每帧由 update 设） */
 function skyMaterial(colors, opts) {
+  const ST = BACKDROP.storm;
   return new THREE.ShaderMaterial({
     side: THREE.DoubleSide, fog: false, depthWrite: true,
     uniforms: {
@@ -127,17 +154,21 @@ function skyMaterial(colors, opts) {
       camY: { value: opts.camY }, camZ: { value: opts.camZ }, slope: { value: opts.slope }, base: { value: -0.35 },
       haze: { value: new THREE.Color(opts.fog) },
       sun: { value: new THREE.Vector3(opts.sun[0], opts.sun[1], opts.sun[2]) }, sunColor: { value: new THREE.Color(opts.sunColor) },
-      stars: { value: opts.stars ? 1 : 0 }, clouds: { value: opts.clouds || 0 }, cloudColor: { value: new THREE.Color(opts.cloudColor || 0xffffff) }
+      stars: { value: opts.stars ? 1 : 0 }, clouds: { value: opts.clouds || 0 }, cloudColor: { value: new THREE.Color(opts.cloudColor || 0xffffff) },
+      storm: { value: opts.storm ? 1 : 0 }, time: { value: 0 }, cover: { value: ST.cover },
+      speed: { value: new THREE.Vector2(...ST.speed) }, scale: { value: new THREE.Vector2(...ST.scale) },
+      cloudDark: { value: new THREE.Color(opts.cloudDark || 0x333333) }, cloudLit: { value: new THREE.Color(opts.cloudLit || 0x888888) },
+      flashColor: { value: new THREE.Color(ST.flash) }, flash: { value: 0 }, flashU: { value: 0.5 }
     },
     vertexShader: `varying vec3 vW; varying vec2 vUv;
       void main(){ vUv = uv; vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`,
     fragmentShader: `uniform vec3 c0; uniform vec3 c1; uniform vec3 c2; uniform vec3 c3; uniform vec4 stops;
       uniform float camY; uniform float camZ; uniform float slope; uniform float base; uniform vec3 haze;
       uniform vec3 sun; uniform vec3 sunColor; uniform float stars; uniform float clouds; uniform vec3 cloudColor;
+      uniform float storm; uniform float time; uniform float cover; uniform vec2 speed; uniform vec2 scale;
+      uniform vec3 cloudDark; uniform vec3 cloudLit; uniform vec3 flashColor; uniform float flash; uniform float flashU;
       varying vec3 vW; varying vec2 vUv;
-      float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-      float noise(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
-        return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y); }
+      ${NOISE_GLSL}
       void main(){
         float hv = max(1.5, camY - (camZ - vW.z) * slope);       // 默认镜头在这里看得到的天幕高度
         float s = (vW.y - base) / hv;
@@ -159,9 +190,48 @@ function skyMaterial(colors, opts) {
           float h = hash(g);
           col += vec3(0.85, 0.9, 1.0) * step(0.9965, h) * smoothstep(0.35, 0.8, s) * (0.5 + 0.5 * hash(g + 3.1));
         }
+        // 乌云（雷鸣）：远近两层厚云往右慢慢飘、慢慢翻滚，贴地平线的一截薄、往上越厚；底下被地面 / 城市的光照到一点。
+        // 打雷时云从里面亮起来：云厚的地方更亮，离雷近的那一片最亮
+        if (storm > 0.0) {
+          float n1 = fbm(vec2((vUv.x - time * speed.x) * scale.x, s * 2.6 + time * 0.012));
+          float n2 = fbm(vec2((vUv.x - time * speed.y) * scale.y, s * 4.4 + 3.7 - time * 0.008));
+          float lo = 0.58 - cover * 0.38;   // 分形噪声大约是 0.48 ± 0.12：cover 越大，盖住的越多
+          float dens = clamp(smoothstep(lo, lo + 0.22, n1) * 0.85 + smoothstep(lo + 0.05, lo + 0.25, n2) * 0.5, 0.0, 1.0) * smoothstep(-0.05, 0.3, s);
+          vec3 cc = mix(cloudLit, cloudDark, clamp(smoothstep(0.0, 0.8, s) * 0.75 + smoothstep(0.5, 0.75, n1) * 0.35, 0.0, 1.0));
+          col = mix(col, cc, dens);
+          float fu = (vUv.x - flashU) * 7.0, glow = exp(-fu * fu);
+          col += flashColor * flash * (0.12 + 0.88 * dens) * (0.25 + 0.75 * glow);
+        }
         // 贴地的一截融进雾里（和远处的地面接上）
         col = mix(haze, col, smoothstep(-0.02, 0.1, s));
         gl_FragColor = vec4(col, 1.0);
+      }`
+  });
+}
+
+/** 雷鸣时中景上方的低云：一条弧形的带子（v 从下沿到画面外面），云的噪声慢慢往右飘；下沿软、坑坑洼洼，两头淡出；打雷时被照亮 */
+function lowCloudMaterial(opts) {
+  return new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: false,
+    uniforms: {
+      time: { value: 0 }, speed: { value: opts.speed }, scale: { value: opts.scale }, opacity: { value: opts.opacity },
+      cloudDark: { value: new THREE.Color(opts.dark) }, cloudLit: { value: new THREE.Color(opts.lit) },
+      flashColor: { value: new THREE.Color(opts.flashColor) }, flash: { value: 0 }, flashU: { value: 0.5 }
+    },
+    vertexShader: "varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }",
+    fragmentShader: `uniform float time; uniform float speed; uniform float scale; uniform float opacity; uniform vec3 cloudDark; uniform vec3 cloudLit;
+      uniform vec3 flashColor; uniform float flash; uniform float flashU; varying vec2 vUv;
+      ${NOISE_GLSL}
+      void main(){
+        float n = fbm(vec2((vUv.x - time * speed) * scale, vUv.y * 2.4 + time * 0.02));
+        float n2 = fbm(vec2((vUv.x - time * speed * 1.5) * scale * 2.1, vUv.y * 4.5 + 5.3));
+        float edge = smoothstep(0.0, 0.22, vUv.y + (n2 - 0.5) * 0.35);                 // 下沿：软的、坑坑洼洼
+        float ends = smoothstep(0.0, 0.15, vUv.x) * (1.0 - smoothstep(0.85, 1.0, vUv.x));   // 两头淡出
+        float d = smoothstep(0.36, 0.62, n * 0.75 + n2 * 0.35) * edge * ends;
+        vec3 col = mix(cloudLit, cloudDark, smoothstep(0.0, 0.7, vUv.y));
+        float fu = (vUv.x - flashU) * 4.0;
+        col += flashColor * flash * (0.3 + 0.7 * exp(-fu * fu));
+        gl_FragColor = vec4(col, d * opacity);
       }`
   });
 }
@@ -379,7 +449,8 @@ function smokeTexture() {
 
 /**
  * 建一圈远景。bounds 是战场范围；camera 是布局算好的默认镜头（hd2d-layout.js 的 fitView），用来算「画面上沿那条视线」有多高；
- * colors = { sky: [地平线 → 天顶 4 个颜色], fog }。返回 { group, update(t, dt), dispose }。
+ * colors = { sky: [地平线 → 天顶 4 个颜色], fog, storm }（storm = 雷鸣：天空换成 BACKDROP.storm 的风暴色、加乌云和低云）。
+ * 返回 { group, update(t, dt, { flash, x }), farPoint(r), dispose }。
  */
 export function buildBackdrop(kind, bounds, themeName, camera, colors) {
   colors = colors || {};
@@ -387,6 +458,7 @@ export function buildBackdrop(kind, bounds, themeName, camera, colors) {
   const own = [];     // 自己建的材质 / 贴图 / 几何，dispose 时清
   const keep = (x) => { own.push(x); return x; };
   const night = themeName === "night", dusk = themeName === "dusk";
+  const storm = !!colors.storm, ST = BACKDROP.storm, cloud = ST.cloud[themeName] || ST.cloud.day;
   const group = new THREE.Group();
   const anims = [];
   const r = rng(kind.length * 31 + Math.round((bounds.maxX - bounds.minX) * 7) + Math.round((bounds.maxZ - bounds.minZ) * 3));
@@ -396,21 +468,31 @@ export function buildBackdrop(kind, bounds, themeName, camera, colors) {
   const slope = Math.tan((cam.elevation - cam.fov / 2) * D2R);   // 天空的着色器里用同一条视线
   /** 默认镜头的画面上沿那条视线，在 z 处离地多高（这么高以内的东西整个都在画面里） */
   const topY = (z) => L.frameTop(cam, z);
-  const sky = colors.sky || ["#e8d8b8", "#d8c8a8", "#b8b0a0", "#8a8a90"];
+  const sky = storm ? (ST.sky[themeName] || ST.sky.day) : (colors.sky || ["#e8d8b8", "#d8c8a8", "#b8b0a0", "#8a8a90"]);
   const fog = new THREE.Color(colors.fog != null ? colors.fog : 0x888888);
   const hazeOf = (k) => new THREE.Color(sky[0]).lerp(fog, 0.5).lerp(new THREE.Color(T.body), 1 - k);   // k 越大越靠近天边的雾色
 
-  /* 1. 天幕 */
+  /* 1. 天幕（雷鸣时：风暴色 + 乌云，星星和亮云不画，夕阳只透出一点） */
   const rz = hz + BACKDROP.skyGap, rx = hx + BACKDROP.sideGap, arc = BACKDROP.skyArc * Math.PI;
   const skyM = keep(skyMaterial(sky, {
     camY: cam.pos.y, camZ: cam.pos.z, slope, fog,
     sun: dusk ? [0.3, 0.12, 0.09] : night ? [0.22, 0.9, 0.05] : [0.28, 0.75, 0.16],
-    sunColor: dusk ? 0xff9a50 : night ? 0x30405a : 0x6a5530, stars: night,
-    clouds: dusk ? 0.55 : themeName === "day" ? 0.25 : 0, cloudColor: dusk ? 0xffb090 : 0xf4e2bc
+    sunColor: new THREE.Color(dusk ? 0xff9a50 : night ? 0x30405a : 0x6a5530).multiplyScalar(storm ? 0.35 : 1), stars: night && !storm,
+    clouds: storm ? 0 : dusk ? 0.55 : themeName === "day" ? 0.25 : 0, cloudColor: dusk ? 0xffb090 : 0xf4e2bc,
+    storm, cloudDark: cloud[0], cloudLit: cloud[1]
   }));
   const skyMesh = new THREE.Mesh(keep(arcGeometry(cx, cz, rx, rz, arc, -0.6, BACKDROP.skyH, 72)), skyM);
   skyMesh.renderOrder = -1;
   group.add(skyMesh);
+  /* 1b. 雷鸣：中景上方再挂一层半透明的低云（离天幕 low.inset，下沿按画面上沿视线定，上沿伸出画面），比天幕上的云飘得快一点 */
+  const LW = ST.low, low = storm ? { rx: rx - LW.inset, rz: rz - LW.inset, arc: LW.arc * Math.PI } : null;
+  if (low) {
+    low.mat = keep(lowCloudMaterial({ speed: LW.speed, scale: LW.scale, opacity: LW.opacity, dark: cloud[0], lit: cloud[1], flashColor: ST.flash }));
+    const m = new THREE.Mesh(keep(arcGeometry(cx, cz, low.rx, low.rz, low.arc, (z) => topY(z) * LW.base, (z) => topY(z) + 1.5, 64)), low.mat);
+    m.renderOrder = -0.5;   // 比战场上的半透明东西、远处的闪电（在它前面）先画
+    m.frustumCulled = false; m.userData.cloud = true;
+    group.add(m);
+  }
 
   /* 2. 天边画出来的远景：一条弧形带子，贴在天幕前面一点 */
   const backTop = topY(cz - rz);
@@ -421,6 +503,7 @@ export function buildBackdrop(kind, bounds, themeName, camera, colors) {
   bandTex.repeat.set(Math.max(1, Math.round(bandLen / (bandH * 8))), 1);
   const bandM = keep(new THREE.MeshBasicMaterial({ map: bandTex, transparent: true, alphaTest: 0.02, fog: false, side: THREE.DoubleSide, color: night ? new THREE.Color(1.5, 1.5, 1.5) : 0xffffff, toneMapped: !night }));
   const band = new THREE.Mesh(keep(arcGeometry(cx, cz, rx - 0.7, rz - 0.7, arc * 0.98, -0.4, bandH, 72)), bandM);
+  band.renderOrder = -0.7;   // 半透明的东西里最先画（它最远）：低云、远处的闪电、烟都在它前面
   group.add(band);
 
   /* 3. 中景几何体 */
@@ -539,9 +622,23 @@ export function buildBackdrop(kind, bounds, themeName, camera, colors) {
     }
   }
 
+  /** 世界 x 在一条弧上对应的 u（0–1，打雷时照亮云用） */
+  const uOf = (x, r, a) => (Math.asin(Math.max(-1, Math.min(1, (x - cx) / r))) + a) / (2 * a);
   return {
     group,
-    update(t, dt) { anims.forEach(fn => fn(t, dt)); },
+    /** light = { flash, x }：雷击的闪光（0–1）和位置；乌云跟着 t 慢慢飘（减少动态效果时 t 停住） */
+    update(t, dt, light) {
+      anims.forEach(fn => fn(t, dt));
+      if (!storm) return;
+      const f = (light && light.flash) || 0, x = (light && light.x) || 0, u = skyM.uniforms;
+      u.time.value = t; u.flash.value = f; u.flashU.value = uOf(x, rx, arc);
+      if (low) { const lu = low.mat.uniforms; lu.time.value = t; lu.flash.value = f; lu.flashU.value = uOf(x, low.rx, low.arc); }
+    },
+    /** 远处的雷劈在哪：r ∈ [−1, 1] 从左到右；在低云前面一点（天幕、低云都是绕着战场的弧，两边离得近，所以也按弧算） */
+    farPoint(r) {
+      const S = ST.strike, th = Math.max(-1, Math.min(1, r)) * S.arc;
+      return { x: cx + Math.sin(th) * (rx - S.inset), z: cz - Math.cos(th) * (rz - S.inset) };
+    },
     dispose() {
       group.traverse(o => { if (o.geometry) o.geometry.dispose(); });
       own.forEach(m => { if (m.map && m.map.dispose) m.map.dispose(); if (m.dispose) m.dispose(); });

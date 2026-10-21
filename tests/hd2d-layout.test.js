@@ -452,7 +452,7 @@ test("原型页面：照页面的顺序跑垫片 → 规则文件，app.js 的 i
   assert.ok(noSel.errors.some(e => /options/.test(e)), "替身 div 没有 options");
 });
 
-test("减少动态效果：场景跟着系统设置停住待机动画（铭牌浮动、闪烁、冒泡、光圈旋转、飘浮物、颗粒、闪电）", () => {
+test("减少动态效果：场景跟着系统设置停住待机动画（铭牌浮动、闪烁、冒泡、光圈旋转、飘浮物、颗粒）；雷击不抖镜头、闪光减弱", () => {
   const fs = require("fs"), path = require("path");
   const dir = path.join(__dirname, "..", "prototypes", "hd2d");
   const scene = fs.readFileSync(path.join(dir, "hd2d-scene.js"), "utf8"), css = fs.readFileSync(path.join(dir, "hd2d.css"), "utf8");
@@ -460,29 +460,49 @@ test("减少动态效果：场景跟着系统设置停住待机动画（铭牌�
   assert.ok(/prefers-reduced-motion: reduce/.test(scene) && /addEventListener\("change"/.test(scene), "场景听系统的「减少动态效果」，中途切换也跟着变");
   assert.ok(/const moving = state\.motion, adt = moving \? dt : 0/.test(scene) && /animT \+= adt/.test(scene), "动画时间只在允许动的时候走（地台动画、远景、天气、颗粒、光圈都按 animT）");
   assert.ok(/if \(state\.motion\)/.test(scene), "路灯只在允许动的时候闪");
-  assert.ok(/const fl = moving \? weather\.flash : 0/.test(scene) && /dt === 0/.test(weather), "减少动态效果时不打闪电");
+  // 雷击按真实时间走（减少动态效果时照样打），要不要减弱交给天气（闪光打折、不给抖动，行为见下面雷击的测试）
+  assert.ok(/weather\.update\(adt, animT, \{ dt, reduced: !moving \}\)/.test(scene) && /opts\.reduced/.test(weather), "减少动态效果时雷击照打，但由天气减弱闪光、不抖镜头");
   assert.ok(/@media \(prefers-reduced-motion: reduce\)\s*\{[^}]*\.pl-bob[^}]*animation: none/.test(css) && /\.still \.pl-bob/.test(css), "铭牌的浮动停掉");
 });
 
 /* 场景里的积木（地台 / 间隔 / 远景 / 天气）只建 three.js 的物体，不碰 WebGL：在 Node 里用 vendor 的真 three.js 建一遍、跑几帧动画。
- * canvas 程序纹理用一个什么都接受的假 2D 画布代替（这里只查会不会报错，画得好不好看要在浏览器里看） */
-test("场景的积木在 Node 里用真的 three.js 建得出来：各种地台、间隔、远景、天气和飘浮物，动画跑几帧（含「减少动态效果」的停住）不报错", async (t) => {
+ * canvas 程序纹理用一个什么都接受的假 2D 画布代替（这里只查会不会报错、建出来什么，画得好不好看要在浏览器里看）。
+ * protoEnv(t)：把 "three" 指到 vendor 的 three.js，临时放上假的 document / window，import 原型的几个模块；用完 restore() */
+let protoHooked = false;
+async function protoEnv(t) {
   const mod = require("node:module"), path = require("path"), { pathToFileURL } = require("url");
-  if (typeof mod.register !== "function") { t.skip("这个 Node 版本没有 module.register"); return; }
+  if (typeof mod.register !== "function") { t.skip("这个 Node 版本没有 module.register"); return null; }
   const threeUrl = pathToFileURL(path.join(__dirname, "..", "vendor", "three", "three.module.min.js")).href;
-  mod.register("data:text/javascript," + encodeURIComponent(`export async function resolve(s, c, n) {
-    if (s === "three") return { url: ${JSON.stringify(threeUrl)}, format: "module", shortCircuit: true };
-    const r = await n(s, c);
-    return /\\/(prototypes\\/hd2d|vendor\\/three)\\//.test(r.url) ? Object.assign({}, r, { format: "module" }) : r;
-  }`));
+  if (!protoHooked) {
+    protoHooked = true;
+    mod.register("data:text/javascript," + encodeURIComponent(`export async function resolve(s, c, n) {
+      if (s === "three") return { url: ${JSON.stringify(threeUrl)}, format: "module", shortCircuit: true };
+      const r = await n(s, c);
+      return /\\/(prototypes\\/hd2d|vendor\\/three)\\//.test(r.url) ? Object.assign({}, r, { format: "module" }) : r;
+    }`));
+  }
   const any = () => new Proxy(function () {}, { get: (o, k) => (k === Symbol.toPrimitive ? () => 0 : any()), set: () => true, apply: () => any() });
   const keep = { document: globalThis.document, window: globalThis.window };
+  const restore = () => {
+    globalThis.document = keep.document; globalThis.window = keep.window;
+    if (keep.document === undefined) delete globalThis.document;
+    if (keep.window === undefined) delete globalThis.window;
+  };
   globalThis.document = { createElement: () => ({ width: 0, height: 0, style: {}, getContext: () => any() }) };
   globalThis.window = { HD2DLayout: L };
   try {
     const dir = path.join(__dirname, "..", "prototypes", "hd2d"), url = (f) => pathToFileURL(path.join(dir, f)).href;
     const THREE = await import(threeUrl);
     const W = await import(url("hd2d-world.js")), B = await import(url("hd2d-backdrop.js")), WX = await import(url("hd2d-weather.js"));
+    return { THREE, W, B, WX, restore };
+  } catch (e) { restore(); throw e; }
+}
+
+test("场景的积木在 Node 里用真的 three.js 建得出来：各种地台、间隔、远景、天气和飘浮物，动画跑几帧（含「减少动态效果」的停住）不报错", async (t) => {
+  const P = await protoEnv(t);
+  if (!P) return;
+  const { THREE, W, B, WX } = P;
+  try {
     const scene = new THREE.Scene();
     const kinds = ["concrete", "abyss", "acid", "quicksand", "coral", "highland", "fire", "ice", "electric", "energy", "harmonic", "heal"];
     for (const theme of ["day", "dusk", "night"]) {
@@ -498,9 +518,9 @@ test("场景的积木在 Node 里用真的 three.js 建得出来：各种地台�
       ctx.lamps.forEach(l => assert.ok(l.bulb && l.bulbColor && l.wait > 0 && l.flick === 0, "路灯带着闪烁要用的数据"));
     }
     const st = DEMO_SETUPS.mine(H.load().BattleSim), out = L.build(st, { view: DESKTOP });
-    for (const [kind, theme] of [["mine", "dusk"], ["desert", "day"], ["night", "night"], ["wasteland", "day"]]) {
-      const bd = B.buildBackdrop(kind, out.bounds, theme, out.camera, { sky: ["#ffc47c", "#f28a5a", "#b9587a", "#4b3368"], fog: 0xc98a72 });
-      bd.update(1.2, 0.016); bd.update(1.2, 0);
+    for (const [kind, theme, storm] of [["mine", "dusk"], ["desert", "day"], ["night", "night"], ["wasteland", "day"], ["night", "night", true], ["mine", "dusk", true], ["desert", "day", true]]) {
+      const bd = B.buildBackdrop(kind, out.bounds, theme, out.camera, { sky: ["#ffc47c", "#f28a5a", "#b9587a", "#4b3368"], fog: 0xc98a72, storm });
+      bd.update(1.2, 0.016); bd.update(1.2, 0); bd.update(1.3, 0.016, { flash: 0.8, x: 2 });
       const box = new THREE.Box3();
       let objects = 0;
       bd.group.children.forEach(o => {
@@ -521,11 +541,7 @@ test("场景的积木在 Node 里用真的 three.js 建得出来：各种地台�
     }
     assert.ok(Object.keys(WX.AMBIENT).length >= 8 && WX.AMBIENT.clear.dusk, "各种天气都有自己的飘浮物，晴天按光影主题");
     fx.dispose(); W.disposeTree(scene);
-  } finally {
-    globalThis.document = keep.document; globalThis.window = keep.window;
-    if (keep.document === undefined) delete globalThis.document;
-    if (keep.window === undefined) delete globalThis.window;
-  }
+  } finally { P.restore(); }
 });
 
 test("铭牌：紧凑版只放名字 + 状态小圆点 + 血条 + 架势，ATK / 血量数字 / 状态文字悬停、选中时才展开；尺寸和布局用同一份配置", () => {
@@ -538,4 +554,162 @@ test("铭牌：紧凑版只放名字 + 状态小圆点 + 血条 + 架势，ATK /
   assert.ok(!/ATK/.test(card) && /ATK/.test(more) && /pl-chips/.test(more), "ATK、状态文字在展开的详情里");
   assert.ok(/\.hd2d-plate\.hover \.pl-more, \.hd2d-plate\.sel \.pl-more \{ display: block; \}/.test(css), "悬停 / 选中时展开");
   assert.ok(/--pw/.test(scene) && /plateSize/.test(scene) && /width: var\(--pw\); height: var\(--ph\)/.test(css), "卡片的宽高用布局的 CONFIG.plate");
+});
+
+/* ---------- 雷鸣不下雨（#202 第二轮截图验收后主人的要求）：雷鸣只有乌云 + 随机雷击，酸雨照旧下雨 ---------- */
+/** 雨：雨丝（lines），或者往下落得飞快的粒子（雪每秒只落 1.3，不算） */
+const isRain = (c) => !!c && (c.kind === "lines" || (Array.isArray(c.vel) && c.vel[1] < -3));
+/** 场景里有几组「雨」：雨丝（LineSegments），或者一半以上的点每秒往下落 3 个单位以上的粒子（按真的顶点位置量） */
+function rainIn(scene, fx) {
+  fx.update(1 / 60, 1, { dt: 1 / 60 });
+  const before = new Map();
+  scene.traverse(o => { if ((o.isPoints || o.isLineSegments) && o.geometry.attributes.position) before.set(o, Float32Array.from(o.geometry.attributes.position.array)); });
+  fx.update(1 / 60, 1.05, { dt: 1 / 60 });
+  let n = 0;
+  before.forEach((a, o) => {
+    const b = o.geometry.attributes.position.array, dy = [];
+    for (let i = 1; i < a.length; i += 3) dy.push((b[i] - a[i]) / 0.05);
+    dy.sort((p, q) => p - q);
+    if (o.isLineSegments || dy[dy.length >> 1] < -3) n++;
+  });
+  return n;
+}
+/** 固定种子的随机数：雷击的间隔、位置每次跑都一样 */
+function seeded(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let x = Math.imul(a ^ (a >>> 15), a | 1);
+    x ^= x + Math.imul(x ^ (x >>> 7), x | 61);
+    return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const STORM_BOUNDS = { minX: -13.4, maxX: 13.4, minZ: -13.4, maxZ: 13.4 };
+/** 跑 secs 秒雷鸣（每帧 1/60，reduced = 减少动态效果：动画时间停住、真实时间照走），记下每道雷：什么时候打下来、劈在哪、之后每帧的闪光、最大的抖动（像素） */
+function runStorm(WX, scene, secs, reduced) {
+  const fx = WX.createWeather(scene, { bounds: STORM_BOUNDS, random: seeded(7) });
+  fx.set("thunder", "night");
+  const dt = 1 / 60, list = [];
+  let t = 0, cur = null, n = 0;
+  for (let f = 0; f < secs * 60; f++) {
+    t += dt;
+    fx.update(reduced ? 0 : dt, reduced ? 0 : t, { dt, reduced });
+    const s = fx.strike;
+    if (s && s.n !== n) { n = s.n; cur = { at: t, edge: s.edge, x: s.x, z: s.z, flash: [], shake: 0 }; list.push(cur); }
+    if (cur) { cur.flash.push(fx.flash); cur.shake = Math.max(cur.shake, Math.hypot(fx.shake.x, fx.shake.y)); }
+  }
+  fx.dispose();
+  return list;
+}
+
+test("雷鸣不下雨（主人要求）：真的 three.js 场景里雷鸣建不出雨丝，酸雨照旧下雨；天气配置表里雷鸣没有雨粒子，只有乌云 + 随机雷击", async (t) => {
+  const P = await protoEnv(t);
+  if (!P) return;
+  const { THREE, WX } = P;
+  try {
+    const scene = new THREE.Scene();
+    const fx = WX.createWeather(scene, { bounds: STORM_BOUNDS });
+    fx.set("thunder", "night");
+    assert.equal(rainIn(scene, fx), 0, "雷鸣的场景里有雨丝 / 往下落的雨");
+    fx.set("acid", "night");
+    assert.ok(rainIn(scene, fx) >= 1, "酸雨的场景里没有雨丝");
+    fx.dispose();
+    assert.equal(scene.children.length, 0, "天气拿掉后场景里不留东西");
+    // 配置表：雷鸣不生成天气粒子（main = null），飘浮物也不是雨；打开的是乌云 + 雷击（storm）。酸雨还是雨丝、不打雷
+    const thunder = WX.weatherPlan("thunder", "night"), acid = WX.weatherPlan("acid", "night");
+    assert.equal(thunder.main, null, "雷鸣不生成天气粒子（雨丝）");
+    assert.ok(!isRain(WX.WEATHER.thunder) && !isRain(thunder.ambient), "雷鸣的配置里没有雨（飘浮物也不往下落）");
+    assert.ok(thunder.storm && WX.WEATHER.thunder.storm && thunder.tint, "雷鸣：乌云 + 雷击，雾压暗");
+    assert.ok(acid.main === WX.WEATHER.acid && isRain(acid.main) && !acid.storm, "酸雨照旧下雨，不打雷");
+    ["none", "sand", "snow", "heat", "glow", "phase"].forEach(w => {
+      const p = WX.weatherPlan(w, "day");
+      assert.ok(!p.storm && !isRain(p.main) && p.ambient, w + "：不打雷、不下雨，有飘浮物");
+    });
+  } finally { P.restore(); }
+});
+
+test("雷击：间隔随机、落在配置的范围里，远处和战场边缘都会劈；每道雷全屏闪白 + 镜头轻微抖一下（边缘的比远处的重），一秒内退干净；减少动态效果时照打，但不抖镜头、闪光减弱、只闪一下", async (t) => {
+  const P = await protoEnv(t);
+  if (!P) return;
+  const { THREE, WX } = P;
+  try {
+    const S = WX.STORM;
+    assert.ok(S.interval[0] > 0 && S.interval[1] > S.interval[0] && S.first[1] >= S.first[0] && S.first[0] > 0, "间隔（闪光频率）是配置里的一个范围");
+    assert.ok(S.shake.edge > S.shake.far && S.shake.far > 0 && S.shake.dur > 0, "抖动幅度、时长在配置里");
+    assert.ok(S.reduced.flash > 0 && S.reduced.flash < 1, "减少动态效果时闪光减弱多少在配置里");
+    const scene = new THREE.Scene(), secs = 150, frame = 1 / 60 + 1e-6, b = STORM_BOUNDS;
+    for (const reduced of [false, true]) {
+      const list = runStorm(WX, scene, secs, reduced), tag = reduced ? "减少动态效果：" : "";
+      assert.ok(list.length >= Math.floor(secs / S.interval[1]), tag + `${secs} 秒只打了 ${list.length} 道雷`);
+      assert.ok(list[0].at >= S.first[0] - frame && list[0].at <= S.first[1] + frame, tag + `第一道雷在 ${list[0].at.toFixed(2)} 秒，不在 first 的范围里`);
+      const gaps = list.slice(1).map((s, i) => s.at - list[i].at);
+      gaps.forEach(g => assert.ok(g >= S.interval[0] - frame && g <= S.interval[1] + frame, tag + `两道雷隔了 ${g.toFixed(2)} 秒，不在 ${S.interval} 里`));
+      assert.ok(new Set(gaps.map(g => Math.round(g * 4))).size >= 4, tag + "间隔是随机的，不是固定节拍");
+      assert.ok(list.some(s => s.edge) && list.some(s => !s.edge), tag + "有劈在战场边缘的，也有劈在远处的");
+      list.forEach(s => assert.ok(s.edge ? s.z < b.minZ && s.z > b.minZ - 4 && s.x > b.minX && s.x < b.maxX : s.z < b.minZ - 4, tag + `雷劈的位置不对（${s.edge ? "边缘" : "远处"}：${s.x.toFixed(1)}, ${s.z.toFixed(1)}）`));
+      list.slice(0, -1).forEach(s => assert.ok(s.flash[60] < 0.02, tag + `闪光一秒后还有 ${s.flash[60]}（要短促）`));
+      const peak = (s) => Math.max(...s.flash);
+      if (!reduced) {
+        list.forEach(s => assert.ok(peak(s) >= 0.6 && peak(s) <= 1 + 1e-9, `闪白的亮度 ${peak(s)}`));
+        list.forEach(s => assert.ok(s.shake > 0.5 && s.shake <= (s.edge ? S.shake.edge : S.shake.far) + 1e-9, `镜头抖了 ${s.shake.toFixed(2)}px（要轻微）`));
+        const edgeMin = Math.min(...list.filter(s => s.edge).map(s => s.shake)), farMax = Math.max(...list.filter(s => !s.edge).map(s => s.shake));
+        assert.ok(edgeMin > farMax, "战场边缘的雷比远处的抖得重");
+        assert.ok(list.some(s => s.flash.some((v, i) => i > 0 && v > s.flash[i - 1] + 0.05)), "一道雷里连闪几下");
+      } else {
+        list.forEach(s => {
+          assert.equal(s.shake, 0, "减少动态效果：不抖镜头");
+          assert.ok(peak(s) > 0 && peak(s) <= S.reduced.flash + 1e-9, `减少动态效果：闪光减弱（${peak(s)}）`);
+          s.flash.forEach((v, i) => assert.ok(i === 0 || v <= s.flash[i - 1] + 1e-9, "减少动态效果：只闪一下，不连闪"));
+        });
+      }
+    }
+    // 画面这边：闪白、推亮灯光的强度在 FLASH 配置里；抖动只在渲染这一下挪镜头，渲染完挪回去（OrbitControls 不受影响）
+    const fs = require("fs"), path = require("path");
+    const src = fs.readFileSync(path.join(__dirname, "..", "prototypes", "hd2d", "hd2d-scene.js"), "utf8");
+    assert.ok(/const FLASH = \{/.test(src) && /grade\.uniforms\.flash\.value = fl \* FLASH\.white/.test(src) && /uniform float flash;/.test(src), "全屏闪白在调色后期里，强度在 FLASH 配置里");
+    assert.ok(/weather\.shake/.test(src) && /camera\.position\.add\(shakeV\)/.test(src) && /camera\.position\.sub\(shakeV\)/.test(src), "镜头抖动只挪渲染这一下");
+  } finally { P.restore(); }
+});
+
+test("乌云：雷鸣时远景的天幕压暗、盖上慢慢飘的厚云（星星被盖住），中景上方再挂一层低云；打雷时云被照亮；远处的雷劈在低云前面、画面里", async (t) => {
+  const P = await protoEnv(t);
+  if (!P) return;
+  const { B, WX } = P;
+  try {
+    const out = L.build(DEMO_SETUPS.cross(H.load().BattleSim), { view: DESKTOP }), cam = out.camera, b = out.bounds;
+    const night = { sky: ["#2f4673", "#1d2d52", "#101b38", "#060b1a"], fog: 0x1b2742 };
+    const calm = B.buildBackdrop("night", b, "night", cam, night);
+    const storm = B.buildBackdrop("night", b, "night", cam, Object.assign({ storm: true }, night));
+    const skyOf = (bd) => bd.group.children.find(o => o.material && o.material.uniforms && o.material.uniforms.c0).material.uniforms;
+    const su = skyOf(storm), cu = skyOf(calm);
+    const lum = (c) => 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+    assert.ok(su.storm.value === 1 && cu.storm.value === 0, "雷鸣的天幕画乌云，平时不画");
+    assert.ok(su.stars.value === 0 && cu.stars.value === 1, "乌云把星星盖住");
+    ["c0", "c1", "c2", "c3"].forEach(k => assert.ok(lum(su[k].value) < lum(cu[k].value), "天空压暗：" + k));
+    const low = storm.group.children.filter(o => o.userData.cloud);
+    assert.ok(low.length >= 1 && !calm.group.children.some(o => o.userData.cloud), "雷鸣时中景上方挂着低云，平时没有");
+    // 云慢慢飘：跟着动画时间走（减少动态效果时场景传进来的时间停住，云也停住）
+    storm.update(10, 0.016, { flash: 0, x: 0 });
+    assert.ok(su.time.value === 10 && low.every(o => o.material.uniforms.time.value === 10), "云跟着动画时间飘");
+    // 打雷：天幕和低云都被照亮，亮的地方跟着雷走；雷过去就暗回去
+    storm.update(10, 0.016, { flash: 0.8, x: 6 });
+    const u6 = su.flashU.value;
+    assert.ok(su.flash.value > 0.5 && low.every(o => o.material.uniforms.flash.value > 0.5), "打雷时云被照亮");
+    storm.update(10, 0.016, { flash: 0.8, x: -6 });
+    assert.ok(su.flashU.value < u6, "云亮的地方跟着雷走");
+    storm.update(10, 0.016, { flash: 0, x: 0 });
+    assert.ok(su.flash.value === 0 && low.every(o => o.material.uniforms.flash.value === 0));
+    // 远处的雷：劈在低云前面（天幕、低云都是一圈弧，两边离得近；劈在后面会被挡住），比战场边缘的雷远，横着在画面里
+    const S = B.BACKDROP, cx = (b.minX + b.maxX) / 2, cz = (b.minZ + b.maxZ) / 2;
+    const rx = (b.maxX - b.minX) / 2 + S.sideGap, rz = (b.maxZ - b.minZ) / 2 + S.skyGap, lx = rx - S.storm.low.inset, lz = rz - S.storm.low.inset;
+    const arcZ = (x, ax, az) => { const k = (x - cx) / ax; return cz - az * Math.sqrt(Math.max(0, 1 - k * k)); };
+    [-1, -0.5, 0, 0.5, 1].forEach(r => {
+      const p = storm.farPoint(r), skyZ = arcZ(p.x, rx, rz), lowZ = arcZ(p.x, lx, lz);
+      assert.ok(p.z > skyZ + 0.05 && p.z > lowZ + 0.05, `远处的雷 r=${r} 在天幕 / 低云后面（z=${p.z.toFixed(2)}，天幕 ${skyZ.toFixed(2)}，低云 ${lowZ.toFixed(2)}）`);
+      assert.ok(p.z < b.minZ - WX.STORM.edgeDepth[1], `远处的雷 r=${r} 不比战场边缘的远（z=${p.z.toFixed(2)}）`);
+      const s = L.project(cam, { x: p.x, y: 0, z: p.z });
+      assert.ok(s.x > 0 && s.x < DESKTOP.width, `远处的雷 r=${r} 在画面外（x=${s.x.toFixed(0)}）`);
+    });
+    calm.dispose(); storm.dispose();
+  } finally { P.restore(); }
 });
