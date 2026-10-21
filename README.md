@@ -368,6 +368,11 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **过载反伤打死的敌人算过载者的击杀**（主人 10/21 定，Closes #203；effects.js · `afterDamageTaken`；测试 tests/issue-203.test.js）
+  - 以前：单位带过载、装甲血量被近距离攻击时反伤 50% 闪电，`applyTypedDot(攻击者, …)` 不传 `by`，按 #114 原规则「算行动中的人 / 不改最后一击」。反伤多半发生在敌人回合，所以反伤打死的敌人没人拿击杀，或算成之前打过它的别的玩家（#187 改格挡反伤时这一处没改）。
+  - 现在：过载者是玩家时传 `{ by: 过载者.id }`，和 #187 的格挡反伤一样，反伤算过载者造成的伤害，打死算过载者的击杀；这个敌人之前被别的玩家打过也算过载者。
+  - 不变：过载者不是玩家（敌人带过载反伤玩家、敌人之间的反伤）照旧，不传 `by`。反伤的触发条件和数值（装甲受近距离攻击、50%、闪电）没动。
+  - 测试：玩家带过载被近战打、反伤打死攻击者 → 击杀算这名玩家；那个敌人之前被柯尔特打过 → 仍算过载者（这两条在旧代码上失败）；过载者不是玩家照旧（敌人带过载照样反伤玩家；敌人之间的反伤打死敌人，照旧算之前最后打过它的玩家）。
 - **联机跑团「申请检定」界面**（规则在 #193 · `checkRequest` / `checkDecide`；新文件 `check-request-ui.js`）
   - **以前**：玩家只能在掷骰窗口里点一个「申请检定」，看不到申请有没有被处理；主持人要切到「检定」页才看得到申请，战斗中看不到。**现在**：
   - **玩家**：标题工具栏「申请检定」（有待处理的显示「· 等待 N」）→ 浮层：选自己操控的哪名角色（可以好几名）、熟练项（带熟练等级）、想做什么 → 提交。下面列「我的申请」：等主持人（可撤回；同一角色有一条在等时不能再提）/ 已同意（难度、成功率、成功或失败、d100 点数）/ 主持人没有同意 / 已撤回；还有队友最近的检定结果。
@@ -390,7 +395,7 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 - **打中立生物的得分降到 1/4；格挡反伤打死的敌人算格挡者的击杀**（主人 10/21 定，Closes #187；app.js · `SCORE_RULES.neutralMul` / `scoreTargetMul` / `applyCombat` / `scoreEnvHit` / `scoreWeatherHelp` / `trackHealBy` / `noteSideDamage` / `explodeHigh` / 铁壁挡攻击 / `performAssistBlock`；测试 tests/issue-187.test.js）
   - 中立生物（尘虫、管虫）：以前打它的伤害分、击破分、失衡分、溢出分（含环境分、天气加成）和打普通敌人一样满额，一只尘虫可以白送 50 分失衡分。现在这些分都只拿原来的 1/4（`SCORE_RULES.neutralMul = 0.25`，向下取整）。基准分照旧不算中立生物，击杀分 / 经验 / 掉落规则不变。
   - 格挡反伤：以前雷鸣下成功的协助格挡反伤、哔哩哩格挡反伤、铁壁的过载 / 雷鸣反伤都是 `applyTypedDot(attacker, …)` 不传 `by`，又发生在敌人回合，所以反伤打死的敌人没人拿击杀（或算成之前打过它的别人）。现在这几处都传 `{ by: 格挡者 }`，按 #114 的击杀归属，反伤算格挡者造成的伤害，打死算他的击杀（铁壁算川川）。
-  - 没改：`effects.js` 的过载反伤是「被近战打时」触发、不是格挡，仍按 #114 原规则（没传 `by`，算行动中的人 / 不改最后一击）。
+  - 没改：`effects.js` 的过载反伤是「被近战打时」触发、不是格挡，仍按 #114 原规则（没传 `by`，算行动中的人 / 不改最后一击）。**（#203 主人定「算」，已改：过载者是玩家时算过载者的击杀，见上面「过载反伤打死的敌人算过载者的击杀」）**
 - **#157 补查「需要作者确认」四条的决定**（Closes #186；hotseat.js · `openAsk` / `tick` / `extendAsk`；hotseat-game.js · `requestAsk` / `checkpoint` / `trpgOwnKit` / `smithUpgrade` / `workshopCraft` / `workshopSalvage`；trpg.js · `TRPG.smithOpen` / `workshopOpen` / `trpgSmithPacket` / `trpgSmithUpgrade` / `trpgWorkshopPacket` / `trpgWorkshopCraft` / `trpgWorkshopSalvage`；trpg-commands.js · `smithOpen` / `workshopOpen`；trpg-ui.js；online-game.js · `rawPacket` / `trpgPacketsFor`；online-view.js · `projectSmith` / `projectWorkshop`；online-ui.js；gm-commands.js · `patchUnit` / `edit` / `gm.copyUnit`；online-gm-ui.js；测试 `hotseat-bridge.test.js`、`trpg-online-smith-workshop.test.js`、`gm-unit-editor-parity.test.js`）
   - **主持人危险按钮的二次确认 / 撤销**：主人定「不用」，**不做**。没有改代码，backlog 里标成「已定：不做」。
   - **联机玩家端的武器升级 / 工坊 / 商人入口**：
