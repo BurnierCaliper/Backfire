@@ -283,3 +283,32 @@ body { position: fixed; inset: 0; user-select: none; }
   #skills .btn { font-size: 14px; padding: 6px 12px 7px; }
 }
 @media (prefers-reduced-motion: reduce) { #dock, #logdrawer { transition: none; } }
+
+/* ---------- 伤害数字（#230）：纸片风——粗墨线描边 + 属性色，像一张贴纸拍上去（歪一点、往下错开一点的墨色投影）。
+ * 位置、字号、颜色、时长都由 hd2d-fx.js 的 FX 算好写在行内变量里（--c 颜色、--ink 描边、--tilt 歪几度、--rise 往上飘、--life 总时长） */
+#hd2d-pop { position: fixed; inset: 0; z-index: 95; pointer-events: none; overflow: hidden; }
+.hd2d-num {
+  position: absolute; white-space: nowrap; line-height: 1.15; font-weight: 900; letter-spacing: .02em; color: var(--c);
+  -webkit-text-stroke: var(--ink) var(--ink-c); paint-order: stroke fill; text-shadow: 2px 3px 0 rgba(11, 8, 6, .3);
+  transform: translate(-50%, -50%) rotate(var(--tilt)); opacity: 0;
+  animation: hd2d-num var(--life) linear forwards;
+}
+/* 大伤害（暴击）：数字后面加 !!，垫一张米白的贴纸底、粗墨边 */
+.hd2d-num.k-big { background: var(--paper); border: calc(var(--ink) * .6) solid var(--ink-c); border-radius: .2em; padding: 0 .22em; box-shadow: 2px 3px 0 rgba(11, 8, 6, .35); }
+/* 击破：黑底的胶带标签 */
+.hd2d-num.k-brk { background: var(--ink-c); border-radius: 2px; padding: 0 .22em; text-shadow: none; -webkit-text-stroke: 0; }
+/* 格挡：全息青，斜一点 */
+.hd2d-num.k-block { font-style: italic; }
+.hd2d-num.k-word { font-weight: 800; }
+@keyframes hd2d-num {
+  0% { opacity: 0; transform: translate(-50%, -50%) rotate(var(--tilt)) scale(.4); }
+  10% { opacity: 1; transform: translate(-50%, -50%) rotate(var(--tilt)) scale(1.15); }
+  16% { opacity: 1; transform: translate(-50%, -50%) rotate(var(--tilt)) scale(1); }
+  75% { opacity: 1; transform: translate(-50%, -50%) rotate(var(--tilt)) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, calc(-50% - var(--rise))) rotate(var(--tilt)) scale(1); }
+}
+/* 减少动态效果：不弹不飘，出现、停住、淡掉 */
+@media (prefers-reduced-motion: reduce) {
+  .hd2d-num { animation-name: hd2d-num-still; }
+  @keyframes hd2d-num-still { 0% { opacity: 0; } 4% { opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; } }
+}

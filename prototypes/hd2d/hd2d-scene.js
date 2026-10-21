@@ -849,6 +849,17 @@ export function createHd2dScene(container, options) {
     },
     select, setTier, setZone, stepZone, cameraInfo,
     stepTier(dir) { setTier(C.stepTier(state.tier, dir)); },
+    /** 攻击演出的适配器（hd2d-fx.js · adapter）问的：这一刻的镜头、一块铭牌现在在哪（抬多高、是不是近景放大的那张）、一个区的地台 */
+    lensNow() {
+      return { pos: camera.position.clone(), target: controls.target.clone(), fov: camera.fov, width: Math.max(1, container.clientWidth), height: Math.max(1, container.clientHeight) };
+    },
+    plateOf(id) {
+      const p = state.plates.get(id);
+      if (!p || !p.u) return null;
+      const g = p.group.position;
+      return { x: g.x, y: g.y, z: g.z, lift: p.lift, big: p.big, zone: p.u.zone };
+    },
+    zoneOf(id) { return state.layout ? state.layout.zones.find(z => z.id === Number(id)) || null : null; },
     dispose() {
       disposed = true; cancelAnimationFrame(raf); ro.disconnect(); container.removeEventListener("wheel", onWheel);
       state.plates.forEach(disposePlate); clearWorld(); weather.dispose();
