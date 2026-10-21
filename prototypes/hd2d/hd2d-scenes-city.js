@@ -9,6 +9,9 @@
  *   巨人城 city：  战场在一条往远处伸的大马路上（沥青、车道虚线、两边的实线、路沿、人行道），镜头顺着马路往里看；
  *                  两边一栋挨一栋非常非常大的玻璃楼（比画面上沿高好几倍，冲出画面），马路尽头再一排玻璃巨幕楼；楼上挂着会换画面的广告屏，
  *                  楼角竖着蓝色的灯带；地台顶面是干净的沥青、侧面是路沿石，地台上是隔离桩、小花坛；整体蓝色调，夜里窗亮、灯火通明
+ *   天网设施 facility：混凝土、水泥的硬核设施。地台是浇筑的混凝土板（模板缝、螺栓孔），侧面混凝土墙、底下一道黄黑警示带；地台上是防撞墩、警示桩、油桶；
+ *                  场地是一块块混凝土，战场四周一圈黄黑警示线；后面一排掩体（射击孔）、一道预制混凝土墙（墙脚警示带、墙头蛇腹铁丝网），墙后几座混凝土大楼；
+ *                  左右两边铁丝网围栏（顶上斜伸出去几道带刺铁丝）；墙边两座探照灯塔；调色是冷冷的灰、压饱和度
  *   下水道 tunnel：巨大圆管的里面（只画后半边，像剖开的模型）：管壁从灯后面往后往上弯过竖直再弯成拱顶，比画面上沿高，看不到天（天幕也收起来）；
  *                  一段段混凝土、水位线、接缝和铆钉、一圈圈的灯带，管壁上几盏灯（照亮的那一片另外叠一层）、沿壁的管子；
  *                  地上铺满污水（贴图在流，上面一层更快的亮纹、灯的倒影），地台是湿的混凝土板；光照不分白天黑夜、昏暗；
@@ -37,7 +40,27 @@
       barrel: [0x4a5a3a, 0x6a4a32, 0x3c4a4a], tire: 0x1c1e1a, pipe: 0x4a3c30, wheel: 0x8a3a26
     },
     // 巨人城：post 隔离桩的银灰、ring 桩上那圈发光的蓝；planter 花坛的白水泥、leaf 灌木
-    city: { post: 0xc4ccd8, ring: 0x5fd8ff, planter: 0xdde3ea, leaf: [0x4f9a68, 0x3f8a74] }
+    city: { post: 0xc4ccd8, ring: 0x5fd8ff, planter: 0xdde3ea, leaf: [0x4f9a68, 0x3f8a74] },
+    // 天网设施：concrete 混凝土、barrel 油桶（警示黄 / 军绿）、tire 用不上（同上一套的写法，留着兜底）
+    bunker: { concrete: 0xa4a49c, barrel: [0xe0b018, 0x55603e, 0xd8a414], tire: 0x222222 }
+  };
+  /** 天网设施 facility：混凝土、水泥的硬核军事设施。战场是一片浇筑的混凝土场地（模板缝、对拉螺栓孔），四周刷着黄黑警示线；
+   *  后面一排混凝土掩体（射击孔）、再后面一道预制混凝土墙（墙脚刷黄黑警示带、墙头一卷卷蛇腹铁丝网），墙后几座混凝土大楼；
+   *  左右两边是铁丝网围栏（铁丝网 + 顶上斜伸出去的几道带刺铁丝）；墙边两座探照灯塔（夜里很亮）。
+   *   yard    场地：混凝土地面一块块（tile 世界单位一块），警示线离战场边 at、宽 w
+   *   bunker  掩体：离「后面最近到哪」再往后 gap，几座（n）、宽 w / 高 h / 进深 d，射击孔离地 slit 高
+   *   wall    墙：在掩体后面再往后 gap，高 = 那里画面上沿高度 × h（至少 min），每块预制板宽 panel、厚 d；警示带高 band；
+   *           往战场左右各铺出去 reach；wire 墙头的蛇腹铁丝网（每圈半径 r、圈和圈隔 step）
+   *   fence   左右的铁丝网围栏：离「左右最近到哪」再往外 gap，高 h，每隔 post 一根桩，顶上 strands 道带刺铁丝（往外斜伸出去 lean）
+   *   block   墙后的混凝土大楼：几座、宽 / 高（× 那里画面上沿高度）、离天幕 sky
+   *   flood   探照灯塔：几座（横向位置 × 战场半宽）、高（× 画面上沿高度）、灯的颜色、白天 / 傍晚 / 夜晚多亮 */
+  const BUNKER = {
+    yard: { tile: 4, hazard: { at: 0.6, w: 0.32 } },
+    bunker: { gap: 0.7, n: 3, w: [2.8, 3.8], h: 1.25, d: 2.2, slit: 0.75 },
+    wall: { gap: 0.9, h: 0.34, min: 2.4, panel: 2.4, d: 0.5, band: 0.45, reach: 24, wire: { r: 0.24, step: 0.16 } },
+    fence: { gap: 1.4, h: 2.3, post: 2.6, strands: 3, lean: 0.35 },
+    block: { n: 5, w: [5, 9], h: [0.65, 0.95], sky: 2.2 },
+    flood: { at: [-0.75, 0.75], h: 0.62, color: 0xeaf4ff, bright: { day: 1.2, dusk: 2.2, night: 3 } }
   };
   /** 巨人城 city：战场在一条往远处伸的大马路上（镜头顺着马路往里看），两边是非常非常大的高楼（比画面上沿高好几倍，冲出画面），
    *  马路尽头再一排更多的玻璃巨幕楼，幕墙上挂着广告屏。整体蓝色调，先进、干净。
@@ -155,9 +178,10 @@
   };
   /** 每个场景（键 = 地面主题）：
    *   palette   PALETTE 的哪一套
-   *   decor     地台上的装饰：band 左右边带上几个、ledge 台子上几个、size 半径范围、kinds 摆什么（barrel 油桶、tire 旧轮胎、valve 阀门），轮着挑
+   *   decor     地台上的装饰：band 左右边带上几个、ledge 台子上几个、size 半径范围、kinds 摆什么（barrel 油桶、tire 旧轮胎、valve 阀门、
+   *             bollard 发光的隔离桩、planter 小花坛、jersey 混凝土防撞墩、post 黄黑警示桩；PROPS），轮着挑
    *   backdrop  远景：slum 战场周围的贫民窟（SLUM）、pipes 远处的大管道 / cliffs 沙岩悬崖（FAR）、tunnel 下水道的圆管（TUNNEL）、
-   *             city 巨人城的马路、两边的高楼、马路尽头的玻璃巨幕楼（CITY）、
+   *             city 巨人城的马路、两边的高楼、马路尽头的玻璃巨幕楼（CITY）、bunker 天网设施的场地、掩体、墙、铁丝网（BUNKER）、
    *             band 天边画的远景用哪种（bandTexture 的 kind；null = 用以前的）
    *   light     光照 / 调色（写法见 hd2d-scene-art.js · lighting）
    *   weather   室内的场景里天气怎么画（SHELTER；不写 = 照旧） */
@@ -184,6 +208,17 @@
         day: { tint: { sky: [0x9cc4ee, 0.38] } },
         dusk: { tint: { sky: [0x6a7ad8, 0.22], sun: [0xc8b8ff, 0.2] } },
         night: { tint: { sky: [0x14285a, 0.3], hemiSky: [0x5a8adf, 0.3] }, scale: { lamp: 1.5, hemi: 1.25, exposure: 1.08 } }
+      }
+    },
+    skynet_yard: {
+      palette: "bunker",
+      decor: { band: 3, ledge: 2, size: [0.15, 0.2], kinds: ["barrel", "jersey", "post"] },
+      backdrop: { bunker: true, band: "desert" },
+      // 冷冷的灰：雾、天光往水泥灰靠，饱和度压低、对比拉高（硬核）；夜里探照灯、路灯更亮
+      light: {
+        all: { tint: { fog: [0xa4a8a6, 0.4], hemiSky: [0xe0e6ea, 0.3], hemiGround: [0x5c5e5a, 0.45], sun: [0xf4f6f8, 0.3] }, grade: { temp: [0.98, 1.0, 1.02], sat: 0.8, contrast: 1.12 } },
+        day: { tint: { sky: [0xc0c8cc, 0.3] } },
+        night: { scale: { lamp: 1.4 } }
       }
     },
     sewer_tunnel: {
@@ -215,6 +250,11 @@
       pebbles: 0, pebble: 0x5a6270, rock: 0x5a6270, decor: "clean", ground: 0x262c36, backdrop: "giant_road",
       lamps: { kind: "street", color: 0xd8ecff, day: 1, dusk: 2, night: 2 }
     },
+    skynet_yard: {  // 天网设施：浇筑的混凝土板（模板缝、对拉螺栓孔），侧面是混凝土墙、底下一道黄黑警示带；地台外面是混凝土场地（远景铺的）；冷白的灯
+      tex: "artBunkerSlab", tint: 0xffffff, rough: 0.92, side: "artBunkerWall", decals: { crack: 2, oil: 1 },
+      pebbles: 4, pebble: 0x8a8a84, rock: 0x7a7a74, decor: "clean", ground: 0x7a7870, backdrop: "skynet_yard",
+      lamps: { kind: "street", color: 0xe8f4ff, day: 1, dusk: 2, night: 2 }
+    },
     sewer_tunnel: {   // 下水道：湿的混凝土板（青苔、污渍），侧面泡过水的混凝土；积水贴花；地台外面是污水（远景铺的）；两盏吊灯
       tex: "artSewerSlab", tint: 0xffffff, rough: 0.5, side: "artSewerSide", decals: { puddle: 3, crack: 2 },
       pebbles: 6, pebble: 0x4c5248, rock: 0x464c42, decor: "art", ground: 0x2a312a, backdrop: "sewer_tunnel",
@@ -225,6 +265,7 @@
   const SCENES = {
     "外城区": { street: "outer_street" },
     "巨人城": { city: "giant_road" },
+    "天网设施": { facility: "skynet_yard" },
     "下水道": { tunnel: "sewer_tunnel" }
   };
 
@@ -277,6 +318,35 @@
       for (let y = 4; y < s; y += s / 4) g.fillRect(x + 3, y, 2, 2);                // 铆钉
       x += w;
     }
+  }
+  /** 黄黑警示条纹：在 (x, y, w, h) 里画 45° 的斜条（每条宽 k 像素），左右接得上 */
+  function drawHazard(g, x, y, w, h, k) {
+    g.save(); g.beginPath(); g.rect(x, y, w, h); g.clip();
+    g.fillStyle = "#1c1c1a"; g.fillRect(x, y, w, h);
+    g.fillStyle = "#f0c218";
+    for (let i = -h; i < w + h; i += k * 2) { g.beginPath(); g.moveTo(x + i, y + h); g.lineTo(x + i + k, y + h); g.lineTo(x + i + k + h, y); g.lineTo(x + i + h, y); g.fill(); }
+    g.restore();
+  }
+  /** 浇筑的混凝土（天网设施）：灰色的底、深浅不一的几片，模板缝（一块块），每块上一排排对拉螺栓孔，零星的水渍、修补的痕迹 */
+  function drawConcrete(g, s, r, kit, n) {
+    g.fillStyle = "#a4a49c"; g.fillRect(0, 0, s, s);
+    for (let k = 0; k < 10; k++) {
+      const x = r() * s, y = r() * s, rad = 16 + r() * 40, grd = g.createRadialGradient(x, y, 0, x, y, rad), c = r() < 0.5 ? "190,190,182" : "120,120,114";
+      grd.addColorStop(0, `rgba(${c},.35)`); grd.addColorStop(1, `rgba(${c},0)`);
+      g.fillStyle = grd; g.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+    }
+    if (kit) kit.speckle(g, s, r, s * 10, "rgba(235,235,228,.14)", "rgba(40,40,36,.18)");
+    const w = s / n;
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+      g.fillStyle = `rgba(${r() < 0.5 ? "255,255,250" : "30,30,28"},${0.03 + r() * 0.05})`; g.fillRect(i * w, j * w, w, w);   // 每块深浅不一
+      for (let a = 0; a < 2; a++) for (let b = 0; b < 2; b++) {   // 对拉螺栓孔
+        const hx = i * w + w * (0.28 + a * 0.44), hy = j * w + w * (0.28 + b * 0.44);
+        g.fillStyle = "rgba(40,40,36,.7)"; g.beginPath(); g.arc(hx, hy, Math.max(1.5, w * 0.035), 0, 7); g.fill();
+        g.fillStyle = "rgba(230,230,222,.35)"; g.fillRect(hx - 1, hy + Math.max(1.5, w * 0.035), 2, 1);
+      }
+    }
+    g.fillStyle = "rgba(40,40,36,.55)";   // 模板缝
+    for (let i = 0; i <= n; i++) { g.fillRect(i * w - 1, 0, 2, s); g.fillRect(0, i * w - 1, s, 2); }
   }
   const TEXTURES = {
     /** 黄沙地（外城区）：黄沙底、深浅不一的几片，风吹的沙纹，一道车辙（左右首尾相接）、一串脚印，零碎的垃圾（锈铁片、瓶盖、压扁的纸箱）和碎石 */
@@ -350,6 +420,19 @@
       g.fillStyle = "rgba(95,216,255,.55)"; g.fillRect(0, s * 0.3 + 3, s, 1.5);
       const grd = g.createLinearGradient(0, s * 0.75, 0, s); grd.addColorStop(0, "rgba(16,22,32,0)"); grd.addColorStop(1, "rgba(16,22,32,.35)");
       g.fillStyle = grd; g.fillRect(0, s * 0.75, s, s * 0.25);
+    }),
+    /** 浇筑的混凝土板（天网设施）：两块 × 两块，模板缝、对拉螺栓孔，几道裂缝、一片油渍 */
+    artBunkerSlab: paint("artBunkerSlab", 256, (g, s, r, kit) => {
+      drawConcrete(g, s, r, kit, 2);
+      g.strokeStyle = "rgba(50,50,46,.5)";
+      for (let k = 0; k < 3; k++) kit.crack(g, r, r() * s, r() * s, 5 + Math.floor(r() * 5), 1.1, 1);
+      g.fillStyle = "rgba(40,36,30,.18)"; g.beginPath(); g.ellipse(s * 0.7, s * 0.3, 22, 12, 0.4, 0, 7); g.fill();
+    }),
+    /** 地台侧面（天网设施）：混凝土墙（一块块、螺栓孔），最底下一道黄黑警示带（侧面的贴图从地台底往上铺，底边就是贴图的下沿） */
+    artBunkerWall: paint("artBunkerWall", 128, (g, s, r, kit) => {
+      drawConcrete(g, s, r, kit, 2);
+      drawHazard(g, 0, s * 0.86, s, s * 0.14, 9);
+      g.fillStyle = "rgba(20,20,18,.5)"; g.fillRect(0, s * 0.86 - 2, s, 2);
     }),
     /** 湿的混凝土板（下水道）：一块块方板（颜色深浅不一、接缝发黑），湿的地方更深、反一点光，接缝和角落长青苔，零星的污渍和裂缝 */
     artSewerSlab: paint("artSewerSlab", 256, (g, s, r, kit) => {
@@ -452,13 +535,32 @@
     bush.scale.y = 0.7; g.add(bush);
     return g;
   }
+  /** 天网设施的小东西用的黄黑警示条纹贴图 */
+  const hazardTex = (kit) => kit.canvasTex("art-hazard", 64, (g, s) => drawHazard(g, 0, 0, s, s, 8));
+  /** 一小段混凝土防撞墩（半径 rad 以内，天网设施）：底宽顶窄的两截，上面一道黄黑警示带 */
+  function jersey(kit, rad, P) {
+    const THREE = kit.THREE, g = new THREE.Group(), len = rad * 1.8, h = rad * 1.05, m = kit.mat("art-jersey", P.concrete, { roughness: 0.95 });
+    g.add(kit.mesh(new THREE.BoxGeometry(rad * 0.75, h * 0.35, len), m, 0, h * 0.175, 0));
+    g.add(kit.mesh(new THREE.BoxGeometry(rad * 0.4, h * 0.65, len), m, 0, h * 0.675, 0));
+    g.add(kit.mesh(new THREE.BoxGeometry(rad * 0.42, h * 0.16, len * 1.004), kit.mat("art-hazard", 0xffffff, { map: hazardTex(kit), roughness: 0.8 }), 0, h * 0.75, 0));
+    return g;
+  }
+  /** 一根黄黑条纹的警示桩（半径 rad 以内，天网设施），底下一块混凝土墩；比油桶矮（近景里不挡后面的人的脚下） */
+  function hazardPost(kit, rad, P) {
+    const THREE = kit.THREE, g = new THREE.Group(), h = rad * 1.7, pr = rad * 0.3;
+    g.add(kit.mesh(new THREE.BoxGeometry(pr * 3, rad * 0.14, pr * 3), kit.mat("art-jersey", P.concrete, { roughness: 0.95 }), 0, rad * 0.07, 0));
+    g.add(kit.mesh(new THREE.CylinderGeometry(pr, pr, h, 10), kit.mat("art-hazard", 0xffffff, { map: hazardTex(kit), roughness: 0.8 }), 0, h / 2 + rad * 0.14, 0));
+    return g;
+  }
   /** 地台上的各种装饰：kind → 做一个（半径 s，颜色从这一套的 PALETTE 里挑） */
   const PROPS = {
     barrel: (kit, s, P, R) => barrel(kit, s * 0.8, P.barrel[Math.floor(R() * P.barrel.length)]),
     tire: (kit, s, P) => tire(kit, s, P.tire),
     valve: (kit, s, P) => valve(kit, s, P),
     bollard: (kit, s, P) => bollard(kit, s, P),
-    planter: (kit, s, P, R) => planter(kit, s, P, R)
+    planter: (kit, s, P, R) => planter(kit, s, P, R),
+    jersey: (kit, s, P) => jersey(kit, s, P),
+    post: (kit, s, P) => hazardPost(kit, s, P)
   };
   /** 挂钩：地台上的装饰（hd2d-world.js · buildZone 交过来；地台本体、贴花、小石子已经画好了） */
   function zone(kit, g, z, ctx, r, look, a) {
@@ -729,6 +831,114 @@
       env.group.add(tag(glassTower(kit, env, M, t, A.rand(seed + 131 + ad * 7 + Math.round(t.x * 3))), "glassTower"));
       x += w + A.span(R, C.back.gap);
     }
+  }
+
+  /* ---------- 远景：天网设施（混凝土场地、警示线、掩体、墙和铁丝网、围栏、探照灯塔、墙后的混凝土大楼）---------- */
+  /** 一条平铺在地上的黄黑警示线（长 len、宽 w，沿 x 或沿 z），贴图按长度铺 */
+  function hazardStrip(kit, env, tex, len, w, x, z, alongZ) {
+    const THREE = kit.THREE, t = env.keep(tex.clone());
+    t.needsUpdate = true; t.repeat.set(alongZ ? 1 : len / w, alongZ ? len / w : 1);
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(alongZ ? w : len, alongZ ? len : w), env.keep(new THREE.MeshStandardMaterial({ map: t, roughness: 0.85 })));
+    m.rotation.x = -Math.PI / 2; m.position.set(x, L.CONFIG.groundY + 0.018, z); m.userData.yard = "hazard";
+    env.group.add(m);
+    return m;
+  }
+  /** 天网设施：混凝土场地 + 战场四周的警示线（平铺，不算「装饰」）；后面一排掩体、一道墙（墙脚警示带、墙头蛇腹铁丝网）、墙后的混凝土大楼；
+   *  左右的铁丝网围栏；墙边的探照灯塔（顶上一盏红灯） */
+  function bunkerScene(kit, env, seed) {
+    const THREE = kit.THREE, BK = BUNKER, y0 = L.CONFIG.groundY, R = A.rand(seed + 71), b = boundsOf(env), at = A.around(b, { back: BK.bunker.gap, side: BK.fence.gap }), th = env.theme;
+    const concTex = farTex(kit, env, 128, (g, s, r) => drawConcrete(g, s, r, null, 2), seed + 3);
+    const hazTex = farTex(kit, env, 64, (g, s) => drawHazard(g, 0, 0, s, s, 8), seed + 4);
+    const M = {
+      conc: env.keep(new THREE.MeshStandardMaterial({ map: concTex, roughness: 0.95, flatShading: true })),
+      far: env.keep(new THREE.MeshStandardMaterial({ map: concTex, color: 0x9a9c98, roughness: 0.95, flatShading: true, fog: false })),
+      dark: env.keep(new THREE.MeshStandardMaterial({ color: 0x5c5e5a, roughness: 0.95, flatShading: true })),
+      slit: env.keep(new THREE.MeshBasicMaterial({ color: 0x0c0d0c })),
+      win: env.keep(new THREE.MeshBasicMaterial({ color: th === "night" ? new THREE.Color(0xffd9a0).multiplyScalar(1.4) : th === "dusk" ? new THREE.Color(0xffd9a0).multiplyScalar(0.8) : new THREE.Color(0x16181a), toneMapped: false, fog: false })),
+      haz: env.keep(new THREE.MeshStandardMaterial({ map: hazTex, roughness: 0.8 })),
+      wire: env.keep(new THREE.MeshStandardMaterial({ color: 0x9aa0a4, roughness: 0.4, metalness: 0.8 }))
+    };
+    const W = BK.wall, x0 = env.cx - env.hx - W.reach, x1 = env.cx + env.hx + W.reach, len = x1 - x0;
+    const zBunker = at.back - BK.bunker.d / 2, zWall = at.back - BK.bunker.d - W.gap - W.d / 2, zFront = env.cz + env.hz + 40;
+    // 场地：一块块混凝土，从墙脚一直铺到镜头后面
+    const yt = farTex(kit, env, 128, (g, s, r) => drawConcrete(g, s, r, null, 1), seed + 5);
+    yt.repeat.set(len / BK.yard.tile, (zFront - zWall) / BK.yard.tile);
+    const yard = new THREE.Mesh(new THREE.PlaneGeometry(len, zFront - zWall), env.keep(new THREE.MeshStandardMaterial({ map: yt, color: 0xb4b4ac, roughness: 0.95 })));
+    yard.rotation.x = -Math.PI / 2; yard.position.set((x0 + x1) / 2, y0 + 0.012, (zWall + zFront) / 2); yard.receiveShadow = true; yard.userData.yard = "concrete";
+    env.group.add(yard);
+    // 战场四周的黄黑警示线
+    const HZ = BK.yard.hazard, e = HZ.at + HZ.w / 2, wx = b.maxX - b.minX + 2 * e + HZ.w, wz = b.maxZ - b.minZ + 2 * e - HZ.w;
+    [b.minZ - e, b.maxZ + e].forEach(z => hazardStrip(kit, env, hazTex, wx, HZ.w, env.cx, z, false));
+    [b.minX - e, b.maxX + e].forEach(x => hazardStrip(kit, env, hazTex, wz, HZ.w, x, env.cz, true));
+    // 掩体：一排低矮的混凝土盒子（射击孔、顶上一块厚板、前面两个角刷警示条纹）
+    for (let i = 0; i < BK.bunker.n; i++) {
+      const w = A.span(R, BK.bunker.w), h = BK.bunker.h, d = BK.bunker.d, x = env.cx + ((i + 0.5) / BK.bunker.n * 2 - 1) * env.hx * 0.8 + (R() - 0.5) * 1.2, g = new THREE.Group();
+      g.add(kit.put(new THREE.Mesh(boxUV(new THREE.BoxGeometry(w, h, d), w, h, d, 2), M.conc), x, y0 + h / 2, zBunker));
+      g.add(kit.box(M.dark, w + 0.3, 0.2, d + 0.3, x, y0 + h + 0.1, zBunker));
+      g.add(kit.box(M.slit, w * 0.55, 0.16, 0.06, x, y0 + BK.bunker.slit, zBunker + d / 2 + 0.01));
+      [-1, 1].forEach(s => g.add(kit.box(M.haz, 0.14, h, 0.14, x + s * (w / 2 - 0.05), y0 + h / 2, zBunker + d / 2 - 0.05)));
+      env.group.add(tag(g, "bunker"));
+    }
+    // 墙：一块块预制板（实例网格），墙脚一道黄黑警示带
+    const H = Math.max(W.min, env.topY(zWall) * W.h), nP = Math.ceil(len / W.panel), wall = new THREE.Group(), o = new THREE.Object3D();
+    const panels = new THREE.InstancedMesh(boxUV(new THREE.BoxGeometry(W.panel - 0.05, H, W.d), W.panel - 0.05, H, W.d, 2), M.conc, nP);
+    for (let k = 0; k < nP; k++) { o.position.set(x0 + (k + 0.5) * W.panel, y0 + H / 2, zWall); o.rotation.set(0, 0, 0); o.updateMatrix(); panels.setMatrixAt(k, o.matrix); }
+    wall.add(panels);
+    const bt = env.keep(hazTex.clone()); bt.needsUpdate = true; bt.repeat.set(len / W.band, 1);
+    wall.add(kit.put(new THREE.Mesh(new THREE.PlaneGeometry(len, W.band), env.keep(new THREE.MeshStandardMaterial({ map: bt, roughness: 0.85 }))), (x0 + x1) / 2, y0 + 0.3 + W.band / 2, zWall + W.d / 2 + 0.01));
+    env.group.add(tag(wall, "wall"));
+    // 墙头的蛇腹铁丝网：一圈圈铁丝（实例网格），圈和圈错开一点角度
+    const WR = W.wire, nW = Math.floor(len / WR.step), coil = new THREE.InstancedMesh(new THREE.TorusGeometry(WR.r, 0.014, 3, 14), M.wire, nW);
+    for (let k = 0; k < nW; k++) { o.position.set(x0 + (k + 0.5) * WR.step, y0 + H + WR.r * 0.9, zWall); o.rotation.set(0, Math.PI / 2 + (k % 2 ? 0.25 : -0.25), 0); o.updateMatrix(); coil.setMatrixAt(k, o.matrix); }
+    env.group.add(tag(coil, "razorWire"));
+    // 左右的铁丝网围栏：桩、铁丝网（透明的菱形网格）、顶上往外斜伸出去的几道带刺铁丝
+    const F = BK.fence, fz0 = zWall + W.d / 2, fz1 = env.cz + env.hz + 1, flen = fz1 - fz0;
+    const meshTex = farTex(kit, env, 64, (g, s) => {
+      g.clearRect(0, 0, s, s); g.strokeStyle = "rgba(200,206,210,1)"; g.lineWidth = 2;
+      for (let k = -s; k <= s; k += 16) { g.beginPath(); g.moveTo(k, 0); g.lineTo(k + s, s); g.stroke(); g.beginPath(); g.moveTo(k + s, 0); g.lineTo(k, s); g.stroke(); }
+    }, seed + 6);
+    meshTex.repeat.set(flen / 0.6, F.h / 0.6);
+    const meshM = env.keep(new THREE.MeshStandardMaterial({ map: meshTex, transparent: true, alphaTest: 0.3, side: THREE.DoubleSide, metalness: 0.6, roughness: 0.5, color: 0xb8bcc0 }));
+    [-1, 1].forEach(sx => {
+      const x = env.cx + sx * at.sideX, g = new THREE.Group(), nPost = Math.floor(flen / F.post) + 1;
+      const posts = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.05, 0.05, F.h + 0.4, 6), M.wire, nPost);
+      for (let k = 0; k < nPost; k++) { o.position.set(x, y0 + (F.h + 0.4) / 2, fz0 + k * F.post); o.rotation.set(0, 0, sx * -0.12); o.updateMatrix(); posts.setMatrixAt(k, o.matrix); }
+      g.add(posts);
+      const net = kit.put(new THREE.Mesh(new THREE.PlaneGeometry(flen, F.h), meshM), x, y0 + F.h / 2, (fz0 + fz1) / 2);
+      net.rotation.y = Math.PI / 2; g.add(net);
+      for (let k = 0; k < F.strands; k++) {
+        const s = kit.put(new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, flen, 4), M.wire), x + sx * F.lean * (k + 1) / F.strands, y0 + F.h + 0.12 * (k + 1), (fz0 + fz1) / 2);
+        s.rotation.x = Math.PI / 2; g.add(s);
+      }
+      env.group.add(tag(g, "fence"));
+    });
+    // 墙后的混凝土大楼：方方正正的大块头，几道窄窄的窗带（夜里亮）
+    for (let i = 0; i < BK.block.n; i++) {
+      const w = A.span(R, BK.block.w), d = 3, z = env.skyZ + BK.block.sky + d / 2, h = env.topY(z) * A.span(R, BK.block.h), x = env.cx + ((i + 0.5) / BK.block.n * 2 - 1) * (env.hx + 8) + (R() - 0.5) * 2, g = new THREE.Group();
+      g.add(kit.put(new THREE.Mesh(boxUV(new THREE.BoxGeometry(w, h, d), w, h, d, 3), M.far), x, y0 + h / 2, z));
+      for (let k = 1; k <= 3; k++) g.add(kit.box(M.win, w * 0.8, 0.12, 0.05, x, y0 + h * (0.25 + k * 0.17), z + d / 2 + 0.01));
+      env.group.add(tag(g, "block"));
+    }
+    // 探照灯塔：墙后一根灯杆、横担上两盏灯（自己发光 + 一团光晕），顶上一盏红灯一闪一闪
+    const FL = BK.flood, k = FL.bright[th] || FL.bright.day, head = env.keep(new THREE.MeshBasicMaterial({ color: new THREE.Color(FL.color).multiplyScalar(k), toneMapped: false, fog: false }));
+    const glowTex = farTex(kit, env, 64, (g, s) => {
+      const grd = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+      grd.addColorStop(0, "rgba(255,255,255,.9)"); grd.addColorStop(0.3, "rgba(255,255,255,.3)"); grd.addColorStop(1, "rgba(255,255,255,0)");
+      g.fillStyle = grd; g.fillRect(0, 0, s, s);
+    }, seed + 8);
+    FL.at.forEach(u => {
+      const x = env.cx + u * env.hx, z = zWall - W.d / 2 - 0.6, h = Math.max(H + 1.5, env.topY(z) * FL.h), g = new THREE.Group();
+      g.add(kit.cyl(M.dark, 0.12, 0.16, h, x, y0 + h / 2, z, 8));
+      g.add(kit.box(M.dark, 1.6, 0.12, 0.12, x, y0 + h - 0.2, z));
+      [-0.55, 0.55].forEach(dx => {
+        g.add(kit.box(M.dark, 0.5, 0.36, 0.3, x + dx, y0 + h, z));
+        g.add(kit.box(head, 0.42, 0.28, 0.02, x + dx, y0 + h, z + 0.16));
+        const sp = new THREE.Sprite(env.keep(new THREE.SpriteMaterial({ map: glowTex, color: FL.color, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false, opacity: th === "day" ? 0.35 : 0.8 })));
+        sp.position.set(x + dx, y0 + h, z + 0.3); sp.scale.setScalar(th === "day" ? 1.2 : 2.4); g.add(sp);
+      });
+      env.group.add(tag(g, "floodlight"));
+      env.blinker(x, y0 + h + 0.4, z, R());
+    });
   }
 
   /* ---------- 远景：下水道（巨大圆管的里面）---------- */
@@ -1038,11 +1248,12 @@
     if (art.backdrop.pipes) bigPipes(kit, env, R);
     if (art.backdrop.cliffs) sandCliffs(kit, env, R);
     if (art.backdrop.city) cityScene(kit, env, seed);
+    if (art.backdrop.bunker) bunkerScene(kit, env, seed);
     if (art.backdrop.tunnel) tunnelScene(kit, env, art, seed);
     return {};
   }
 
   const pack = { name: "city", scenes: SCENES, grounds: GROUNDS, art: ART, textures: TEXTURES, decals: DECALS, zone, band, backdrop };
   A.add(pack);
-  return Object.assign({ PALETTE, SLUM, HUT, FAR, CITY, TUNNEL, AMBIENT, SHELTER, zonePlan, slumPlan, tunnelShape, seedOf }, pack);
+  return Object.assign({ PALETTE, SLUM, HUT, FAR, CITY, BUNKER, TUNNEL, AMBIENT, SHELTER, PROPS, zonePlan, slumPlan, tunnelShape, seedOf }, pack);
 });

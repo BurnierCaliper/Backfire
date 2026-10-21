@@ -20,6 +20,7 @@ const packs = () => { city(); return art(); };
 const DONE = [
   { region: "外城区", scene: "street", key: "outer_street", must: ["shack", "house", "pipe", "cliff"] },
   { region: "巨人城", scene: "city", key: "giant_road", must: ["curb", "sidewalk", "tower", "glassTower", "adScreen"] },
+  { region: "天网设施", scene: "facility", key: "skynet_yard", must: ["bunker", "wall", "razorWire", "fence", "floodlight", "block"] },
   { region: "下水道", scene: "tunnel", key: "sewer_tunnel", must: ["tunnelWall", "tunnelRib", "rivet", "lightRing", "lampPool", "wallLamp", "wallPipe", "outfall"] }
 ];
 const PARTY = ["kolt", "helu", "ruby", "yuito"];
@@ -309,7 +310,44 @@ test("巨人城（#241）：战场在马路上（沥青、车道线、路沿、�
   } finally { P.restore(); }
 });
 
-/* ---------- 4. 下水道 ---------- */
+/* ---------- 4. 天网设施 ---------- */
+test("天网设施（#241）：混凝土场地，战场四周一圈黄黑警示线（平铺、在战场外面）；后面一排掩体、一道墙，墙头一卷蛇腹铁丝网；左右两边铁丝网围栏；探照灯夜里更亮；调色压饱和度（硬核）", async (t) => {
+  const P = await protoEnv(t);
+  if (!P) return;
+  const { B, A, THREE } = P;
+  try {
+    const S = H.load().BattleSim, d = DONE.find(x => x.scene === "facility");
+    for (const id of Object.keys(BOARDS)) {
+      const layout = layoutOf(BOARDS[id](S), d, "night"), b = layout.bounds, bright = {};
+      for (const theme of ["day", "night"]) {
+        const bd = backdropOf(B, layout, theme), strips = [], fences = [];
+        let wall = null, wire = null, flood = null;
+        bd.group.traverse(o => {
+          if (o.userData.yard === "hazard") strips.push(new THREE.Box3().setFromObject(o));
+          if (o.userData.art === "fence") fences.push(new THREE.Box3().setFromObject(o));
+          if (o.userData.art === "wall") wall = new THREE.Box3().setFromObject(o);
+          if (o.userData.art === "razorWire") wire = new THREE.Box3().setFromObject(o);
+          if (o.userData.art === "floodlight" && !flood) o.traverse(m => { if (m.isMesh && m.material.isMeshBasicMaterial && !flood) flood = m.material.color.r; });
+        });
+        assert.equal(strips.length, 4, `${id}：战场四周四条警示线`);
+        strips.forEach(s => {
+          assert.ok(s.max.y - s.min.y < 0.01, `${id}：警示线平铺在地上`);
+          const out = s.max.z < b.minZ || s.min.z > b.maxZ || s.max.x < b.minX || s.min.x > b.maxX;
+          assert.ok(out, `${id}：警示线在战场外面`);
+        });
+        assert.ok(wall && wire && wire.min.y >= wall.max.y - 0.3 && wire.max.z <= wall.max.z + 0.3, `${id}：墙头一卷铁丝网`);
+        assert.ok(fences.length === 2 && fences.some(f => f.max.x < b.minX) && fences.some(f => f.min.x > b.maxX), `${id}：左右两边各一道铁丝网围栏`);
+        bright[theme] = flood;
+        bd.dispose();
+      }
+      assert.ok(bright.night > bright.day, `${id}：探照灯夜里更亮`);
+    }
+    const T = A.lighting({ day: { fog: 0xd6b985, hemiSky: 0xfff1d8, hemiGround: 0x735c40, sun: 0xfff0d2, sky: ["#f6e3b4"], grade: { sat: 1 } } }, "day", "skynet_yard").T;
+    assert.ok(T.grade.sat < 0.9 && T.grade.contrast > 1, "调色：压饱和度、拉对比（硬核）");
+  } finally { P.restore(); }
+});
+
+/* ---------- 5. 下水道 ---------- */
 test("下水道（#241）：在巨大圆管的里面——管壁从灯后面往后往上弯，最高处比默认镜头的画面上沿高、在天幕前面（看不到天）；地上铺满污水，贴图在流，减少动态效果时不流；光照不分白天黑夜，比外城区暗", async (t) => {
   const P = await protoEnv(t);
   if (!P) return;
