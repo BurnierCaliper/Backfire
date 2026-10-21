@@ -456,7 +456,7 @@
    *   opts.view      { width, height, top, bottom }：画面大小和上下被界面盖住的像素（场景传真实的；不给按桌面 / 手机的默认值）
    *   opts.region    这场战斗在哪个区域（游戏里的区域名或地图地点 id）：没有场地效果的地台按它换地面（zone.ground），灯按它摆；认不得 / 不给 = 以前的样子
    *   opts.scene     区域里的哪个场景（投影里的 pv.scene，SCENES 的 id）：地面主题按「区域 + 场景」挑（现在每个场景都还是所属区域的样子）；认不得 / 不给 = 区域的
-   *   opts.theme    光影主题 day / dusk / night（灯的盏数看白天还是夜晚；不给按白天）
+   *   opts.theme     光影主题 day / dusk / night（灯的盏数看白天还是夜晚；不给按白天）
    */
   function build(state, opts) {
     opts = opts || {};
