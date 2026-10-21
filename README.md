@@ -368,6 +368,12 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **分步选择的技能：真正打出去之前随时能放弃，界面补上明显的「放弃（Esc）」按钮**（issue #188；game.js · `showPickBar` / `canGiveUp` / `pickUnit` / `pickZone`，app.js · `renderSkillFlow` 与 Esc 键；测试 `tests/skillflow-giveup.test.js`）。
+  - **核对结果**：战斗界面（单机、热座、联机玩家端共用 game.js）的分步选择一直是在本地把每一步的选择攒进 `picks`，最后一步选完才发**一条**技能指令，中途不扣行动点 / 附赠 / 资源、不换刀头、不改架势和标记、不记行动分；联机玩家端因此没有会残留在房主那边的 `skillFlow`。拆装部件的刀头也是在结算（`runSkill`）里才换，不是分步中途换的。计算器面板的分步（`beginSkillFlow`）放弃走 `cancelSkillFlow`，也不碰别的状态。
+  - **以前**：选目标 / 选区域时只有「右键 / 点空白处取消」的文字提示，没有按钮；计算器面板按 Esc 不会放弃分步。**现在**：战场上点选目标、选区域的每一步，提示栏旁边都有「放弃（Esc）」按钮（Esc、右键照旧）；计算器面板的按钮改名「放弃（Esc）」，Esc 也能放弃。
+  - **不变**：结算开始后照旧不能撤回；单机「撤销」按钮不受影响；结算队列里的点选（换刀头追击、扫描）有自己的按钮，不加放弃。
+  - **测试**：所有角色的所有分步技能「开始 → 放弃」后整个 state（除战斗记录）和开始前一样；拆装部件走一步后放弃，刀头、行动点、附赠、收回状态都不变。
+
 - **敌人种族（一）：种族数据、随机 / 固定分配、六维换算、显示、主持人指定**（issue #159，设计见 `docs/enemy-race.md`；enemies.js · `ENEMY_RACES` / `applyEnemyRace` / `setEnemyRace` / `raceDelta`，run.js · `ENEMY_INFO` / `ENEMY_RACE_TABLES`，party.js · `blockChanceRaw`，gm-commands.js、battle-commands.js、battle-templates.js、trpg-commands.js、sim.js、bestiary.js、unit-card.js、online-view.js 等；测试 `tests/enemy-race.test.js`）。种族的**被动**不在这一条里（另开 issue），这里只把种族挂到敌人身上、换算六维、显示出来。
   - **以前**：敌人没有种族。**现在**：有机体的敌人生成时有种族，记在单位上 `u.race = { race, branch }`；生成的入口和个体值一样（`applyEnemyIV(u, iv, race)` 里先 `applyEnemyRace` 再个体值：`spawnEnemyGroup`、`spawnEncounterRows`、战斗命令加敌人、跑团「加敌人」、主持人生成敌人、`BattleSim.setup`）。
   - **种族配置**：`ENEMY_RACES` 是种族 / 小分支的六维修正表（人类、红皮人、犬 / 猫 / 鼠 / 牛类人及其小分支、兽人五支；牛类人三个小分支的修正各不相同）；每个敌人的种族写在 `run.js · ENEMY_INFO`（格式见下）。
