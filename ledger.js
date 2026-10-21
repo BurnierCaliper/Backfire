@@ -757,7 +757,9 @@ function ledgerLongRest(plan, notes) {
   });
   const keepW = watch && LEDGER.weapons && LEDGER.weapons[watch];
   LEDGER.weapons = keepW ? { [watch]: keepW } : {};
-  notes.push(watch ? "除守夜者外，武器耐久回满，武器人伤势痊愈。" : "全部武器耐久回满，武器人伤势痊愈。");
+  // 守夜的是角色时他的武器照样回满；只有武器人守夜，那把武器才不回
+  const watchIsWeapon = !!watch && partyHeroes().some(x => x.kit === watch && isWeaponUnit(x));
+  notes.push(watchIsWeapon ? "除守夜的那把武器外，武器耐久回满，武器人伤势痊愈。" :"全部武器耐久回满，武器人伤势痊愈。");
   LEDGER.hours = 0;
   const keep = (tab) => (watch && tab && tab[watch] != null ? { [watch]: tab[watch] } : {});
   LEDGER.shortUsed = keep(LEDGER.shortUsed);
@@ -857,6 +859,7 @@ function ledgerHealItem(itemId, kit, notes) {
   if (bagCount(itemId) < 1) { notes.push("背包里没有这个物品。"); return notes; }
   const r = rollItemHeal(itemId);
   if (!r) { notes.push("这件道具不能用来治疗。"); return notes; }
+  if (h.dead) { notes.push(`${h.name} 已死亡，不能治疗。`); return notes; }   // 不扣道具
   bagAdd(itemId, -1);
   const before = totalHpOf(h);
   healHeroFlesh(h, r.total);   // 医疗包：和其他治疗一样从内往外补，可以治到外层（作者定）

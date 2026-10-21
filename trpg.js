@@ -239,11 +239,13 @@ function trpgPayWith(payer, fn) {
   if (!payer || payer === TRPG_PARTY_PURSE) return fn();
   if (!trpgHeroes().some(h => h.kit === payer)) return ["没有这名角色。"];
   const pool = Number(state.kuizhi) || 0;
-  state.kuizhi = trpgPurse(payer);
+  const start = trpgPurse(payer);
+  state.kuizhi = start;
   try {
     const out = fn();
     trpgPurseSet(payer, state.kuizhi);
-    if (Array.isArray(out)) out.push(`（由 ${trpgPurseName(payer)} 付，钱包剩 ${trpgPurse(payer)}）`);
+    // 没花钱（维修 / 制作 / 教配方这类不收钱的操作，或者操作失败）就不写「由谁付」
+    if (Array.isArray(out) && trpgPurse(payer) !== start) out.push(`（由 ${trpgPurseName(payer)} 付，钱包剩 ${trpgPurse(payer)}）`);
     return out;
   } finally { state.kuizhi = pool; }
 }

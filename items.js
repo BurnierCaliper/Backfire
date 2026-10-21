@@ -2,8 +2,8 @@
 
 const ITEM_CATALOG = {
   // heal：治疗骰（n 个 s 面骰 + flat），用道具 / 休整用道具 / 专长「拉一把」都读这一处（itemHealSpec）
-  medkit:     { name: "简易医疗包", hint: "治疗一名友方 1d4+6 内层生命", target: "ally", combat: true, heal: { n: 1, s: 4, flat: 6 } },
-  clinic:     { name: "诊所医疗包", hint: "治疗一名友方 2d4+6 内层生命", target: "ally", combat: true, heal: { n: 2, s: 4, flat: 6 } },
+  medkit:     { name: "简易医疗包", hint: "治疗一名友方 1d4+6 生命（从内层往外补，可以治到外层）", target: "ally", combat: true, heal: { n: 1, s: 4, flat: 6 } },
+  clinic:     { name: "诊所医疗包", hint: "治疗一名友方 2d4+6 生命（从内层往外补，可以治到外层）", target: "ally", combat: true, heal: { n: 2, s: 4, flat: 6 } },
   stim:       { name: "强心注射剂", hint: "自身恢复 16 生命，消耗一些坚毅生命（不会致死）", target: "self", combat: true },
   steroid:    { name: "强化注射剂", hint: "自身 ATK +3 至战斗结束，消耗一些坚毅生命（不会致死）", target: "self", combat: true },
   bomb_e:     { name: "简易电手榴弹", hint: "对一个区域全部单位造成 1d6+6 电击", target: "zone", combat: true },
@@ -390,6 +390,8 @@ function useItemOn(actor, itemId, target, zone) {
     const block = lineBlocked(actor.zone, z);
     if (block) { notes.push(`${actor.name} 的${spec.name}影响不到 ${z} 区：${block}`); notes.unused = true; return notes; }
   }
+  // 强心注射剂靠治疗恢复生命：起身中（靠坚毅生命战斗）治疗不起作用，不让用，也不扣坚毅和道具
+  if (itemId === "stim" && actor.upOnShp) { notes.push(`${actor.name} 起身中，强心注射剂的治疗不起作用，没有使用。`); notes.unused = true; return notes; }
   bagAdd(itemId, -1, notes);
   if (itemHealSpec(itemId)) {
     const t = target || actor;
