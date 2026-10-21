@@ -39,7 +39,8 @@
    *   seg / rows 横着几段、沿弧几段；wall 管壁混凝土的颜色（一段段轮着）
    *   joint      每隔 every 一道接缝（宽 w，颜色 × dark）
    *   stain      水位线：离地 h 以下颜色 × dark、往 tint（泡过污水的绿褐）靠
-   *   lamps      管壁上 n 盏灯：离地 h，照亮的那一圈 reach（亮度烘进管壁的顶点颜色，最亮 × (1 + gain)），blink 盏会闪（AMBIENT.flicker）
+   *   lamps      管壁上 n 盏灯：离地 h；照亮的那一圈 reach 大，另外叠一层加色的网格（最亮加 gain × 0.18 的灯色，不受场景光照影响）；
+   *              前 blink 盏会闪（AMBIENT.flicker）
    *   pipes      沿管壁横着走的管子 / 电缆：离地 h、半径 r、颜色
    *   water      地上的污水：比地面高 y，贴图往左流 speed（每秒走多少世界单位），颜色 */
   const TUNNEL = {
@@ -87,8 +88,9 @@
   };
   /** 每个场景（键 = 地面主题）：
    *   palette   PALETTE 的哪一套
-   *   decor     地台上的装饰：band 左右边带上几个、ledge 台子上几个、size 半径范围、kinds 摆什么（barrel 油桶、tire 旧轮胎），轮着挑
-   *   backdrop  远景：slum 战场周围的贫民窟（SLUM）、band 天边画的远景用哪种（bandTexture 的 kind）
+   *   decor     地台上的装饰：band 左右边带上几个、ledge 台子上几个、size 半径范围、kinds 摆什么（barrel 油桶、tire 旧轮胎、valve 阀门），轮着挑
+   *   backdrop  远景：slum 战场周围的贫民窟（SLUM）、pipes 远处的大管道 / cliffs 沙岩悬崖（FAR）、tunnel 下水道的圆管（TUNNEL）、
+   *             band 天边画的远景用哪种（bandTexture 的 kind；null = 用以前的）
    *   light     光照 / 调色（写法见 hd2d-scene-art.js · lighting） */
   const ART = {
     outer_street: {
