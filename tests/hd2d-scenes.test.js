@@ -22,7 +22,7 @@ const packs = () => { mine(); return art(); };
 
 /** 做好了的场景（区域、场景 id），和每个场景远景里一定有的东西（userData.art） */
 const DONE = [
-  { region: "第一采矿场", scene: "rim", key: "mine1_rim", must: ["pitWall", "rimLip", "rail", "gantry", "cage", "skipTrack", "skip", "pitLight", "farRim"] },
+  { region: "第一采矿场", scene: "rim", key: "mine1_rim", must: ["pitWall", "rimLip", "rail", "liftShaft", "lift", "pitLight", "farRim"] },
   { region: "第一采矿场", scene: "mid", key: "mine1_mid", must: ["pitWall", "berm", "cone", "rockWall", "foreRock", "skipTrack", "skip", "pitLight"] }
 ];
 const PARTY = ["kolt", "helu", "ruby", "yuito"];
@@ -230,6 +230,45 @@ test("真的 three.js 里每个场景建出自己的一套（#242）：默认地
         bd.dispose();
       }
     }
+  } finally { P.restore(); }
+});
+
+test("矿外是往下陷的大矿坑（#242 截图验收）：对面坑壁离坑边至少 12（按镜头摆），天幕挪到坑后面不挡住坑；默认镜头里对面坑沿在画面里（顶栏下面），坑壁越往下越黑，这边坑沿挡住之前已经漆黑；运载电梯沿竖直的轨道上下", async (t) => {
+  const P = await protoEnv(t);
+  if (!P) return;
+  const { THREE, B } = P, M = mine();
+  try {
+    const S = H.load().BattleSim, d = DONE.find(x => x.scene === "rim"), Q = M.PIT.rim;
+    for (const bdx of boardsFor(S).filter(x => !x.id.includes("挤"))) {
+      const layout = layoutOf(bdx.st, d), cam = layout.camera, b = layout.bounds, tag = `${bdx.id}`;
+      const dims = M.pitDims(Q, b, cam);
+      assert.ok(dims.D >= 12 - 1e-9, `${tag}：对面坑壁离坑边只有 ${dims.D.toFixed(1)}`);
+      const top = L.project(cam, { x: dims.cx, y: dims.top, z: dims.zFar });
+      assert.ok(top.y > DESKTOP.top + 10 && top.y < L.project(cam, { x: dims.cx, y: L.CONFIG.groundY, z: dims.rimZ }).y, `${tag}：对面坑沿在画面里（屏幕 y ${top.y.toFixed(0)}）`);
+      const bd = backdropOf(B, layout, "dusk");
+      const sky = bd.group.children.find(o => o.userData.layer === "sky");
+      sky.geometry.computeBoundingBox();
+      assert.ok(sky.geometry.boundingBox.max.z < dims.zFar - 4, `${tag}：天幕（z ${sky.geometry.boundingBox.max.z.toFixed(1)}）在对面坑沿（${dims.zFar.toFixed(1)}）后面`);
+      assert.equal(bd.groundEdge, dims.rimZ, `${tag}：地台外面那片地铺到坑边为止`);
+      // 坑壁的颜色：对面坑沿那一级亮（不黑），这边坑沿挡住的地方往上一点已经漆黑；越往下越暗
+      const wall = artOf(bd.group).find(o => o.what === "pitWall").obj, pos = wall.geometry.attributes.position, col = wall.geometry.attributes.color;
+      const lumaAt = (y0, y1) => { let s = 0, n = 0; for (let i = 0; i < pos.count; i++) { const y = pos.getY(i), x = pos.getX(i); if (y <= y0 && y >= y1 && Math.abs(x - dims.cx) < dims.halfW) { s += 0.2126 * col.getX(i) + 0.7152 * col.getY(i) + 0.0722 * col.getZ(i); n++; } } return s / Math.max(1, n); };
+      const upper = lumaAt(dims.top - 0.05, dims.top - 1.2), lower = lumaAt(dims.yOcc + 1.2, dims.yOcc);
+      assert.ok(upper > 0.08, `${tag}：坑沿那一级不该是黑的（${upper.toFixed(3)}）`);
+      assert.ok(lower < 0.012 && lower < upper * 0.1, `${tag}：挡住之前已经漆黑（${lower.toFixed(4)}）`);
+      // 运载电梯：轨道是竖的（x 不变），罐笼的停靠点从对面坑沿一直到挡住的地方下面
+      const lifts = artOf(bd.group).filter(o => o.what === "lift");
+      assert.ok(lifts.length >= 1 && lifts.length <= 2, `${tag}：一两部运载电梯`);
+      lifts.forEach(({ obj }) => {
+        const a = obj.userData.ambient, x0 = obj.position.x;
+        assert.ok(a.y0 > dims.top - 0.5 && a.y1 < dims.yOcc, `${tag}：电梯从坑沿（${a.y0.toFixed(1)}）下到看不见的地方（${a.y1.toFixed(1)}）`);
+        for (let s = 0; s < 60; s++) bd.update(s, 1);
+        assert.equal(obj.position.x, x0, `${tag}：电梯沿竖直的轨道走`);
+      });
+      bd.dispose();
+    }
+    // 接线：天幕挪多远问美术包（hd2d-backdrop.js 一行挂钩）
+    assert.match(code(read("hd2d-backdrop.js")), /const rz = hz \+ \(\(ART\.skyGap && ART\.skyGap\(kind, bounds, cam\)\) \|\| BACKDROP\.skyGap\)/);
   } finally { P.restore(); }
 });
 
