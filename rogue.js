@@ -1148,6 +1148,7 @@ const Rogue = (function () {
     const node = currentNode(run);
     if (!node || ["shop", "smith", "clinic"].indexOf(node.type) < 0) throw new Error("这里没有可以离开的节点");
     const notes = [];
+    delete run.shopSell;   // 离店：回购单清空
     passHours(run, NODE[node.type].hours, notes);
     if (run.stage !== "over") advanceNode(run, notes);
     return logAll(run, notes);
@@ -1699,6 +1700,78 @@ const Rogue = (function () {
     b.points -= it.points;
     bagAdd(itemId, 1);
     return logAll(run, [`用 ${it.points} 积分兑换 ${it.name}（剩 ${b.points} 积分）。`]);
+  }
+
+  /* ---------- 卖东西 / 回购（shop-sell.js）：单机钱进 state.kuizhi；联机由 online-rogue.js 装 setSellHooks 管归属和钱包 ---------- */
+  let sellHooks = null;
+  function setSellHooks(h) { sellHooks = h && typeof h === "object" ? h : null; }
+  const sellH = run => (sellHooks && sellHooks.applies(run) ? sellHooks : null);
+  function sellBook(run) { return shopBuybackBook(run, "shopSell", shopPlace(run)); }
+  /** 卖出视图 { items, buyback }。opt.kits：看的人操控的角色（联机：只给这些角色的个人物品和他们卖的回购单；不传 = 全部） */
+  function shopSellView(run, opt) {
+    if (!canShop(run)) return null;
+    opt = opt || {};
+    const H = sellH(run), book = sellBook(run), counts = bagCounts();
+    const kits = Array.isArray(opt.kits) ? opt.kits : null;
+    const items = [];
+    Object.keys(counts).filter(shopSellListable).forEach(id => {
+      const shared = H ? H.free(run, id) : counts[id];
+      if (shared > 0) items.push(shopSellRow(id, shared, "shared"));
+    });
+    if (H) (kits || H.living(run)).forEach(k => Object.keys(counts).filter(shopSellListable).forEach(id => {
+      const n = Math.min(H.owned(run, k, id), counts[id]);
+      if (n > 0) items.push(shopSellRow(id, n, k));
+    }));
+    const see = who => !kits || kits.includes(who) || (!H && who === "party");
+    const buyback = book.list.filter(r => see(r.seller)).map(shopBuybackPublic);
+    const last = book.last && see(book.last.by) ? shopSellLastFor(book, null) : null;
+    return { items, buyback, last };
+  }
+  /** 卖：{ kit 卖的人, id, qty, owner: "shared" | 角色 kit } → { ok, total, payout: [{ to, amount }], msg } */
+  function sellItem(run, o) {
+    o = o || {};
+    if (!canShop(run)) throw new Error("这里没有商店");
+    const H = sellH(run), id = String(o.id || ""), owner = o.owner == null ? "shared" : String(o.owner);
+    const seller = H ? String(o.kit || "") : (o.kit ? String(o.kit) : "party");
+    if (H && !H.living(run).includes(seller)) throw new Error("要指定由哪名角色卖");
+    if (owner !== "shared" && (!H || owner !== seller)) throw new Error(H ? "只能卖自己名下的或公用的东西" : "单机的东西都是公用的");
+    const chk = shopSellCheck(id);
+    if (!chk.ok) throw new Error(`不能卖：${chk.reason}`);
+    const have = !H ? bagCount(id) : owner === "shared" ? H.free(run, id) : Math.min(H.owned(run, owner, id), bagCount(id));
+    const n = shopSellQty(o.qty, have);
+    const total = shopSellPrice(id) * n;
+    let payout;
+    if (H && owner !== "shared") { H.take(run, owner, id, n); bagAdd(id, -n); payout = [{ to: seller, amount: total }]; H.credit(run, seller, total); }
+    else if (H) {
+      bagAdd(id, -n);
+      // 联机没有队伍公账：平分给还活着的角色，零头给卖的人
+      const ks = H.living(run), each = Math.floor(total / ks.length), rest = total - each * ks.length;
+      payout = ks.map(k => ({ to: k, amount: each + (k === seller ? rest : 0) })).filter(p => p.amount > 0);
+      payout.forEach(p => H.credit(run, p.to, p.amount));
+    } else { bagAdd(id, -n); state.kuizhi = (Number(state.kuizhi) || 0) + total; payout = [{ to: "party", amount: total }]; }
+    shopBuybackAdd(sellBook(run), { id, qty: n, price: total, owner, seller });
+    const msg = `${H ? heroName(seller) + " " : ""}卖掉 ${shopSellName(id)} ×${n}，得 ${total} 奎支${H && owner === "shared" && payout.length > 1 ? "（公用的东西，钱平分给全队）" : ""}。`;
+    logAll(run, [msg]);
+    return shopSellResult(run, "shopSell", sellBook(run), { ok: true, total, payout, msg }, "sell", seller);
+  }
+  /** 回购：{ kit, token } → 卖的人按卖出价付钱，东西回到原来的归属 */
+  function buybackItem(run, o) {
+    o = o || {};
+    if (!canShop(run)) throw new Error("这里没有商店");
+    const H = sellH(run), book = sellBook(run);
+    const i = book.list.findIndex(r => r.token === o.token);
+    if (i < 0) throw new Error("回购单里没有这件");
+    const r = book.list[i], payer = H ? String(o.kit || "") : "party";
+    if (H && r.seller !== payer) throw new Error("只有卖掉它的人能买回来");
+    const bal = H ? H.balance(run, payer) : Number(state.kuizhi) || 0;
+    if (bal < r.price) throw new Error(`奎支不够（要 ${r.price}，现有 ${bal}）`);
+    if (H) H.credit(run, payer, -r.price); else state.kuizhi = bal - r.price;
+    bagAdd(r.id, r.qty);
+    if (H && r.owner !== "shared") H.give(run, r.owner, r.id, r.qty);
+    book.list.splice(i, 1);
+    const msg = `${H ? heroName(payer) + " " : ""}买回 ${r.name} ×${r.qty}，花掉 ${r.price} 奎支。`;
+    logAll(run, [msg]);
+    return shopSellResult(run, "shopSell", book, { ok: true, total: r.price, payout: [{ to: payer, amount: -r.price }], msg }, "buyback", payer);
   }
 
   /* ---------- 制作（items.js · CRAFT_RECIPES / CRAFT_RULES；rogue-data.js · ROGUE_CRAFT）---------- */
@@ -2977,7 +3050,7 @@ function advanceDays(run, n) {
     role2Options, soloBattleInfo,
     restPlan, restOptions, canLongRest, sheetData, armoryData, lowHpWarning, escortInfo, partOffers, buyPart, sellPart, canSellParts, partStock, partSellPrice, partInstallCost, installPart, removePart, restAtNode, leaveNode, canShortRestBefore, canShortRestAtNode, shortRestBeforeNode,
     ambushChance, watchOptions,
-    interludeOptions, campStatus: campStatusOf, buy, shopPoints, redeemList, redeem, craftPlace, craftList, craftOdds, craft, knowsRecipe, learnOptions, learnRecipe, rollRecipeChip, salvageList, salvage, setCraftHooks, setCraftJob, craftQueue, craftQueued, bagCounts, inventory, recipeStatus, recipeBook, materialUses, workshopAvailable, craftListGrouped, craftPreview, recipesUsingMaterial, setBagOwnership, bagByCategory, materialBar, cyberSummary, modInstallPreview, matchupChart: (w, o) => matchupChart(w, o), matchupForState: (st, id) => matchupForState(st, id), itemCategory: id => itemCategory(id),  canShop, shopItemName, shopStock, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
+    interludeOptions, campStatus: campStatusOf, buy, setSellHooks, shopSellView, sellItem, buybackItem, shopPoints, redeemList, redeem, craftPlace, craftList, craftOdds, craft, knowsRecipe, learnOptions, learnRecipe, rollRecipeChip, salvageList, salvage, setCraftHooks, setCraftJob, craftQueue, craftQueued, bagCounts, inventory, recipeStatus, recipeBook, materialUses, workshopAvailable, craftListGrouped, craftPreview, recipesUsingMaterial, setBagOwnership, bagByCategory, materialBar, cyberSummary, modInstallPreview, matchupChart: (w, o) => matchupChart(w, o), matchupForState: (st, id) => matchupForState(st, id), itemCategory: id => itemCategory(id),  canShop, shopItemName, shopStock, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
     presentSmiths, smithInfo, claimBlueprint, installBlueprint, blueprintById, weaponModsOf,
     smithQuote, introduceSmith,
     canClinic, cyberInfo, cyberPreview, cyberCost, modifyHero, cyberwarePacketFor, cyberwarePreviewFor, installCyberware, removeCyberware, healCost, healHero,

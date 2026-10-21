@@ -26,7 +26,9 @@
   // 个人行为：花自己的钱、动自己的东西（choose 是升级选择，不花钱）
   const PERSONAL = ["buy", "redeem", "learnRecipe", "salvage", "setCraftJob", "buyPart", "sellPart", "installPart", "removePart", "upgradeWeapon", "installBlueprint", "repairWeapon", "healHero", "modifyHero", "installCyberware", "removeCyberware"];
   // 玩家可以自己发的个人指令（其余的个人行为由房主代自己的角色做）
-  const REMOTE = ["buy", "redeem", "learnRecipe", "salvage", "setCraftJob", "buyPart", "sellPart", "installPart", "removePart", "upgradeWeapon", "installBlueprint", "repairWeapon", "healHero", "modifyHero", "installCyberware", "removeCyberware", "choose"];
+  const REMOTE = ["buy", "redeem", "learnRecipe", "salvage", "setCraftJob", "buyPart", "sellPart", "installPart", "removePart", "upgradeWeapon", "installBlueprint", "repairWeapon", "healHero", "modifyHero", "installCyberware", "removeCyberware", "sellItem", "buybackItem", "choose"];
+  // 卖东西 / 回购（rogue.js · sellItem / buybackItem）：钱和归属由 setSellHooks 直接记进各人钱包，不走 PERSONAL 那套换钱包
+  const SELL = ["sellItem", "buybackItem"];
   let enabled = false, resolving = false, hostId = "";
 
   const flow = () => root.RunFlow || null;
@@ -129,6 +131,8 @@
     if ((c.action === "installPart" || c.action === "removePart" || c.action === "upgradeWeapon" || c.action === "installBlueprint" || c.action === "repairWeapon") && heroOf(r, c.kit)?.kit !== payer) fail("只能动自己角色的武器");
     if ((c.action === "healHero" || c.action === "modifyHero") && c.kit !== payer) fail("只能给自己的角色治疗、改造");
     if ((c.action === "installCyberware" || c.action === "removeCyberware") && (c.kit !== payer || typeof c.id !== "string")) fail("只能给自己的角色装、拆义体");
+    if (SELL.includes(c.action) && c.kit !== payer) fail("只能用自己的角色卖、回购");
+    if (c.action === "sellItem" && c.owner != null && c.owner !== "shared" && c.owner !== payer) fail("只能卖自己名下的或公用的东西");
     if (c.action === "setCraftJob" && c.kit !== payer) fail("只能给自己的角色排活");
     if (c.action === "salvage" && available(r, payer, c.item) < 1) fail("这件东西不是你的");
   }
@@ -162,6 +166,17 @@
     balance: (r, kit) => Number(data(r).purse[kit]) || 0,
     pay: (r, kit, n) => { const d = data(r); d.purse[kit] = Math.max(0, (Number(d.purse[kit]) || 0) - n); },
     made: (r, kit, id) => { if (ownable(id)) addOwned(data(r), kit, id, 1); }
+  });
+  // 卖东西：个人物品的钱进自己的钱包；公用的平分给活着的角色（零头给卖的人）；回购从卖的人的钱包扣
+  if (G_Rogue && Rogue.setSellHooks) Rogue.setSellHooks({
+    applies: r => active() && r === run(),
+    living: r => living(r),
+    free: (r, id) => free(r, id),
+    owned: (r, kit, id) => Number((data(r).owned[kit] || {})[id]) || 0,
+    take: (r, kit, id, n) => addOwned(data(r), kit, id, -n),
+    give: (r, kit, id, n) => { if (living(r).includes(kit)) addOwned(data(r), kit, id, n); },
+    balance: (r, kit) => Number(data(r).purse[kit]) || 0,
+    credit: (r, kit, n) => { const d = data(r); d.purse[kit] = Math.max(0, (Number(d.purse[kit]) || 0) + n); }
   });
   // 背包按类分个人 / 公用（rogue.js · bagByCategory）：联机时按 run.online.owned
   if (G_Rogue && Rogue.setBagOwnership) Rogue.setBagOwnership(r => (active() && r === run() ? data(r).owned : null));
@@ -397,7 +412,7 @@
   }
   /** 房主在单局界面上做个人行为：只能动房主自己操控的角色 */
   function checkHost(c) {
-    if (!active() || !PERSONAL.includes(c.action) && c.action !== "choose") return;
+    if (!active() || !PERSONAL.includes(c.action) && !SELL.includes(c.action) && c.action !== "choose") return;
     const r = run(), kit = c.action === "choose" ? c.kit : payerOf(r, c);
     // 操控者掉线时，房主可以替他选升级（不然只能等他回来）
     if (c.action === "choose" && !onlineIds().includes(ownerOf(r, kit))) return;
@@ -462,6 +477,8 @@
     // 个人能做的事：商店、工匠、诊所
     const shop = Rogue.canShop(r) ? Rogue.shopStock(r).map(row => ({ key: row.key, name: Rogue.shopItemName(row), price: row.price, team: !row.give.item || !ownable(row.give.item) })) : null;
     // 商店积分：各人自己的（记在自己操控的角色名下）
+    // 卖出 / 回购（shop-sell.js 形状）：只有自己操控的角色名下的 + 公用的，回购单只有自己角色卖的
+    const shopSell = shop && mine.length ? Rogue.shopSellView(r, { kits: mine }) : null;
     const pointsOf = kit => { r._pointsPayer = kit; try { return Rogue.shopPoints(r); } finally { delete r._pointsPayer; } };
     const points = shop && mine[0] ? Object.assign(pointsOf(mine[0]), { redeem: Rogue.redeemList() }) : null;
     const smithId = (Rogue.presentSmiths(r) || [])[0] || null;
@@ -537,7 +554,7 @@
         needs: living(r).filter(k => l.needs[k] === "need").map(name), passes: living(r).filter(k => l.needs[k] === "pass").map(name),
         mine: mine.map(k => ({ kit: k, name: name(k), answer: l.needs[k] || "" })) })),
       lootLog: d.lootLog.slice(-5).map(x => x.text),
-      choice, waitingLevel, shop, points, smith, parts, clinic, workshop, backpack, workshopAvailable: wkAt, bag, materialBar, craft, cyber,
+      choice, waitingLevel, shop, shopSell, points, smith, parts, clinic, workshop, backpack, workshopAvailable: wkAt, bag, materialBar, craft, cyber,
       lastRest: r.lastRest || null,   // 长休结算画面（坚毅字段在 online-view.js · scrubHidden 里去掉）
       log: (r.log || []).slice(-8).map(l => l.text)
     };

@@ -1,0 +1,34 @@
+/* 商店 · 卖（shop-sell-ui.js）：买 / 卖页签、按归属分组、数量步进、单价 / 合计、置灰原因、可买回 */
+.ss-tabs { display: flex; gap: 4px; margin: 0 0 10px; }
+.ss-tab { min-width: 64px; font-family: var(--sk-body, sans-serif); font-weight: 900; }
+.ss-tab.on { background: var(--sk-hazard, #f2c230); color: var(--sk-ink, #0b0806); border-color: var(--sk-hazard, #f2c230); }
+.ss-panel { font-weight: 700; }
+.ss-hint, .ss-note { margin: 0 0 8px; font-size: 12px; color: var(--sk-muted, #a8977b); }
+.ss-group { margin: 0 0 12px; }
+.ss-group h4 { margin: 0 0 6px; font-weight: 900; font-size: 14px; color: var(--sk-canvas, #ece0c6); }
+.ss-group h4 small { font-weight: 700; color: var(--sk-muted, #a8977b); font-size: 11px; margin-left: 6px; }
+.ss-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.ss-row { display: grid; grid-template-columns: minmax(0, 1fr) 52px auto 56px auto; gap: 8px; align-items: center; padding: 6px 10px;
+  background: var(--sk-oil-2, #1a1511); border: 1px solid var(--sk-edge, #4d4337); border-left: 4px solid var(--sk-brass, #c99a46); }
+.ss-row.off { opacity: .55; border-left-color: var(--sk-edge, #4d4337); }
+.ss-row.ss-bb { grid-template-columns: minmax(0, 1fr) 56px auto; border-left-color: var(--sk-mint, #39e6b4); }
+.ss-name { min-width: 0; }
+.ss-name b { display: block; overflow-wrap: anywhere; }
+.ss-name small, .ss-unit small, .ss-total small { display: block; font-size: 11px; color: var(--sk-muted, #a8977b); font-weight: 700; }
+.ss-why { color: #f08a7a; }
+.ss-unit, .ss-total { text-align: right; font-family: var(--num, inherit); }
+.ss-total b { color: var(--sk-hazard, #f2c230); }
+.ss-step { display: inline-flex; align-items: center; gap: 4px; }
+.ss-step .g-btn { min-width: 28px; min-height: 28px; padding: 0 6px; }
+.ss-n { min-width: 22px; text-align: center; }
+.ss-empty { color: var(--sk-muted, #a8977b); }
+@media (max-width: 520px) {
+  .ss-row { grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "n n n" "u s t" ". . b"; row-gap: 4px; }
+  .ss-row .ss-name { grid-area: n; } .ss-row .ss-unit { grid-area: u; text-align: left; } .ss-row .ss-step { grid-area: s; }
+  .ss-row .ss-total { grid-area: t; } .ss-row .ss-sell { grid-area: b; }
+  .ss-row.ss-bb { grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: none; }
+  .ss-row.ss-bb > * { grid-area: auto; }
+}
+.ss-toast { position: fixed; z-index: 9000; right: 16px; top: 16px; max-width: min(400px, calc(100vw - 32px)); padding: 12px 14px; font-weight: 900;
+  background: var(--sk-oil, #110e0b); color: var(--sk-canvas, #ece0c6); border: 2px solid var(--sk-hazard, #f2c230); box-shadow: 4px 4px #0008; pointer-events: none; }
+.ss-toast[hidden] { display: none; }

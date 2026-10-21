@@ -243,6 +243,9 @@ test("联机跑团主持人：大厅里勾选队员换人；探索时顶栏有�
   await page.evaluate(() => {
     OnlineGame.partyChoices = () => [{ kit: "ruby", name: "瑞比", on: true }, { kit: "hiaki", name: "绯秋", on: true }, { kit: "kolt", name: "柯尔特", on: false }];
     OnlineGame.setParty = kits => { fixture.calls.push({ kind: "setParty", args: kits }); return { ok: true }; };
+    window.__transferGate = { ok: false, reason: "瑞比 正在行动，行动完（或结束回合）才能转交" };
+    OnlineGame.transferState = () => window.__transferGate;
+    OnlineGame.transfer = (hero, to) => { fixture.calls.push({ kind: "transfer", args: [hero, to] }); return { ok: true }; };
     fixture.set({ active: true, isHost: true, identity: { id: "gm" }, screen: "lobby" });
   });
   await page.waitForSelector("[data-party-kit=kolt]");
@@ -256,8 +259,14 @@ test("联机跑团主持人：大厅里勾选队员换人；探索时顶栏有�
   await page.evaluate(() => fixture.set({ screen: "battle" }));
   assert.equal(await page.locator('[data-online="openAssign"]').count(), 0);
   // 面板还开着（刚才点开的）：战斗中只写说明，没有分配下拉框
-  assert.match(await page.locator("#online-panel").innerText(), /战斗中不能改角色分配/);
+  assert.match(await page.locator("#online-panel").innerText(), /战斗中转交角色/);
   assert.equal(await page.locator("[data-assign]").count(), 0);
+  // 不在两个单位的回合之间：按钮灰掉，原因写在旁边；回合之间：可以点，转给选中的人
+  assert.match(await page.locator("[data-transfer-reason]").innerText(), /正在行动/);
+  assert.equal(await page.locator('[data-online="transfer"]').first().isDisabled(), true);
+  await page.evaluate(() => { window.__transferGate = { ok: true, reason: "" }; fixture.set({ screen: "battle" }); });
+  await page.waitForSelector('[data-online="transfer"]:not([disabled])');
+  assert.equal(await page.locator("[data-transfer-reason]").count(), 0);
   assert.deepEqual(o.errors, []);
 });
 
