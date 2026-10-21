@@ -368,6 +368,10 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **打中立生物的得分降到 1/4；格挡反伤打死的敌人算格挡者的击杀**（主人 10/21 定，Closes #187；app.js · `SCORE_RULES.neutralMul` / `scoreTargetMul` / `applyCombat` / `scoreEnvHit` / `scoreWeatherHelp` / `trackHealBy` / `noteSideDamage` / `explodeHigh` / 铁壁挡攻击 / `performAssistBlock`；测试 tests/issue-187.test.js）
+  - 中立生物（尘虫、管虫）：以前打它的伤害分、击破分、失衡分、溢出分（含环境分、天气加成）和打普通敌人一样满额，一只尘虫可以白送 50 分失衡分。现在这些分都只拿原来的 1/4（`SCORE_RULES.neutralMul = 0.25`，向下取整）。基准分照旧不算中立生物，击杀分 / 经验 / 掉落规则不变。
+  - 格挡反伤：以前雷鸣下成功的协助格挡反伤、哔哩哩格挡反伤、铁壁的过载 / 雷鸣反伤都是 `applyTypedDot(attacker, …)` 不传 `by`，又发生在敌人回合，所以反伤打死的敌人没人拿击杀（或算成之前打过它的别人）。现在这几处都传 `{ by: 格挡者 }`，按 #114 的击杀归属，反伤算格挡者造成的伤害，打死算他的击杀（铁壁算川川）。
+  - 没改：`effects.js` 的过载反伤是「被近战打时」触发、不是格挡，仍按 #114 原规则（没传 `by`，算行动中的人 / 不改最后一击）。
 - **#157 补查「需要作者确认」四条的决定**（Closes #186；hotseat.js · `openAsk` / `tick` / `extendAsk`；hotseat-game.js · `requestAsk` / `checkpoint` / `trpgOwnKit` / `smithUpgrade` / `workshopCraft` / `workshopSalvage`；trpg.js · `TRPG.smithOpen` / `workshopOpen` / `trpgSmithPacket` / `trpgSmithUpgrade` / `trpgWorkshopPacket` / `trpgWorkshopCraft` / `trpgWorkshopSalvage`；trpg-commands.js · `smithOpen` / `workshopOpen`；trpg-ui.js；online-game.js · `rawPacket` / `trpgPacketsFor`；online-view.js · `projectSmith` / `projectWorkshop`；online-ui.js；gm-commands.js · `patchUnit` / `edit` / `gm.copyUnit`；online-gm-ui.js；测试 `hotseat-bridge.test.js`、`trpg-online-smith-workshop.test.js`、`gm-unit-editor-parity.test.js`）
   - **主持人危险按钮的二次确认 / 撤销**：主人定「不用」，**不做**。没有改代码，backlog 里标成「已定：不做」。
   - **联机玩家端的武器升级 / 工坊 / 商人入口**：
