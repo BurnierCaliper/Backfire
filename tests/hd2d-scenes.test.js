@@ -23,7 +23,7 @@ const packs = () => { mine(); return art(); };
 /** 做好了的场景（区域、场景 id），和每个场景远景里一定有的东西（userData.art） */
 const DONE = [
   { region: "第一采矿场", scene: "rim", key: "mine1_rim", must: ["pitWall", "rimLip", "rail", "liftShaft", "lift", "pitLight", "farRim"] },
-  { region: "第一采矿场", scene: "mid", key: "mine1_mid", must: ["pitWall", "berm", "cone", "rockWall", "foreRock", "skipTrack", "skip", "pitLight"] }
+  { region: "第一采矿场", scene: "mid", key: "mine1_mid", must: ["pitWall", "berm", "cone", "rockWall", "foreRock", "liftShaft", "lift", "pitLight"] }
 ];
 const PARTY = ["kolt", "helu", "ruby", "yuito"];
 const DESKTOP = { width: 1440, height: 900, top: 46, bottom: 160 };   // 桌面 1440×900：顶栏 + 展开的技能栏
@@ -122,16 +122,16 @@ function lenses(layout) {
   zones.forEach(z => ["mid", "near"].forEach(tier => { const p = C.pose(layout, tier, z); out.push({ tag: (tier === "mid" ? "中景 " : "近景 ") + z + " 区", cam: p.cam, plates: p.plates }); }));
   return out;
 }
-/** 一串点投到屏幕上：外框和离镜头最近的深度 */
+/** 一串点投到屏幕上：外框、离镜头最近的深度、最靠前的 z（整个都在某人后面的东西，挡不到他：镜头在前上方，看他脚下的视线只经过他前面） */
 function screenOf(cam, pts) {
-  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, near = Infinity;
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, near = Infinity, maxZ = -Infinity;
   pts.forEach(p => {
     const s = L.project(cam, p);
-    near = Math.min(near, s.depth);
+    near = Math.min(near, s.depth); maxZ = Math.max(maxZ, p.z);
     if (s.depth <= 0) return;
     x0 = Math.min(x0, s.x); x1 = Math.max(x1, s.x); y0 = Math.min(y0, s.y); y1 = Math.max(y1, s.y);
   });
-  return { x0, x1, y0, y1, near };
+  return { x0, x1, y0, y1, near, maxZ };
 }
 /** 一个装饰拆成一块块（屏幕上一块块地比）：普通网格按真的顶点（转过的石头、斜着的坑壁，外框比本身大一圈，不能拿外框算），
  *  实例网格每个实例按它自己的外框八个角。返回 [点的列表] */
@@ -272,6 +272,52 @@ test("矿外是往下陷的大矿坑（#242 截图验收）：对面坑壁离坑
   } finally { P.restore(); }
 });
 
+/** 从布局的默认镜头往屏幕上的一点（像素）打一条线，先碰到远景里的什么（userData.art；碰不到 = null） */
+function hitAt(THREE, layout, root, px, py) {
+  const c = layout.camera, cam = new THREE.PerspectiveCamera(c.fov, c.aspect, 0.5, 400);
+  cam.position.set(c.pos.x, c.pos.y, c.pos.z); cam.lookAt(c.target.x, c.target.y, c.target.z); cam.updateMatrixWorld(true);
+  const ray = new THREE.Raycaster();
+  ray.setFromCamera(new THREE.Vector2(px / c.width * 2 - 1, 1 - py / c.height * 2), cam);
+  for (const h of ray.intersectObject(root, true)) {
+    for (let o = h.object; o; o = o.parent) if (o.userData && o.userData.art) return { what: o.userData.art, point: h.point };
+  }
+  return null;
+}
+test("矿内（#242 截图验收）：近处一面不规则的岩壁，中间一个大开口——从默认镜头看，画面左右两边是近处的岩壁，开口里看到的是很远的对面坑壁（离运输道的边至少 14），坑底漆黑；岩壁在灯后面、伸出画面上沿", async (t) => {
+  const P = await protoEnv(t);
+  if (!P) return;
+  const { THREE, B } = P, M = mine();
+  try {
+    const S = H.load().BattleSim, d = DONE.find(x => x.scene === "mid");
+    for (const bdx of boardsFor(S).filter(x => !x.id.includes("挤"))) {
+      const layout = layoutOf(bdx.st, d), b = layout.bounds, tag = bdx.id, bd = backdropOf(B, layout, "dusk");
+      bd.group.updateMatrixWorld(true);
+      const dims = M.pitDims(M.PIT.mid, b, layout.camera);
+      assert.ok(dims.D >= 14 - 1e-9, `${tag}：对面坑壁离运输道的边只有 ${dims.D.toFixed(1)}`);
+      // 运输道的边在屏幕上的高度（地台后沿那条线）；往上到顶栏下面是远景
+      const edgeY = L.project(layout.camera, { x: dims.cx, y: L.CONFIG.groundY, z: dims.rimZ }).y, topY = DESKTOP.top + 8;
+      const ys = [0.15, 0.5, 0.85].map(k => edgeY - 6 - (edgeY - 6 - topY) * k);
+      ys.forEach(py => {
+        const mid = hitAt(THREE, layout, bd.group, layout.camera.width / 2, py);
+        assert.ok(mid && ["pitWall", "lift", "liftShaft", "pitLight"].includes(mid.what), `${tag}：开口正中（屏幕 y ${py.toFixed(0)}）看到的是 ${mid && mid.what}，不是对面的坑壁`);
+        assert.ok(mid.point.z < dims.rimZ - 12, `${tag}：开口里看到的东西很远（z ${mid.point.z.toFixed(1)}，运输道的边 ${dims.rimZ.toFixed(1)}）`);
+        [12, layout.camera.width - 12].forEach(px => {
+          const side = hitAt(THREE, layout, bd.group, px, py);
+          assert.ok(side && side.what === "rockWall", `${tag}：画面边上（x ${px}, y ${py.toFixed(0)}）是 ${side && side.what}，不是近处的岩壁`);
+        });
+      });
+      // 开口里最下面（运输道的边、挡车土埂再往上一点）是漆黑的坑底：碰到的那一面颜色很暗
+      const low = hitAt(THREE, layout, bd.group, layout.camera.width / 2 + 3, edgeY - 22);
+      assert.ok(low && low.what === "pitWall", `${tag}：开口最下面看到的是 ${low && low.what}，不是坑壁`);
+      const wall = artOf(bd.group).find(o => o.what === "pitWall").obj, pos = wall.geometry.attributes.position, cl = wall.geometry.attributes.color;
+      let s = 0, n = 0;
+      for (let i = 0; i < pos.count; i++) if (Math.abs(pos.getY(i) - low.point.y) < 0.6 && Math.abs(pos.getX(i) - low.point.x) < 2) { s += 0.2126 * cl.getX(i) + 0.7152 * cl.getY(i) + 0.0722 * cl.getZ(i); n++; }
+      assert.ok(n > 0 && s / n < 0.02, `${tag}：坑底不够黑（${(s / Math.max(1, n)).toFixed(3)}）`);
+      bd.dispose();
+    }
+  } finally { P.restore(); }
+});
+
 /* ---------- 2. 装饰不压住站位 / 铭牌 ---------- */
 test("装饰不压住站位（#242）：地台上的装饰只摆在左右两条边带（脚下最多站到站位区的边，再让开脚下那一圈）和左右矮一截的台子上，在外轮廓里面；各种棋盘、每个区挤满人时，装饰的底面都碰不到任何人脚下那一圈", async (t) => {
   const P = await protoEnv(t);
@@ -343,7 +389,7 @@ test("装饰不压住铭牌（#242）：远景、中景、近景（每个有人�
             const s = screenOf(lens.cam, th.pts);
             layout.units.forEach(u => {
               const ud = L.project(lens.cam, { x: u.x, y: u.groundY, z: u.z }).depth, q = lens.plates[u.id];
-              if (!q || !q.rect || s.near >= ud - 0.05) return;   // 在他后面（铭牌是 DOM，盖在后面的东西上面）
+              if (!q || !q.rect || s.near >= ud - 0.05 || s.maxZ < u.z - 0.1) return;   // 在他后面（铭牌是 DOM，盖在后面的东西上面）
               checked++;
               assert.ok(!hits(s, footBox(lens.cam, u)), `${d.key} ${bdx.id} ${lens.tag}：${th.what} 挡住了 ${u.plate.name} 的脚下`);
               assert.ok(!hits(s, cardOf(q.rect)), `${d.key} ${bdx.id} ${lens.tag}：${th.what} 压住了 ${u.plate.name} 的铭牌`);
