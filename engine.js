@@ -354,7 +354,6 @@ const SKILL_RANGE = {
   kolt_rot: { min: 1, max: 1 },      // 腐坏抛射：1 距离的敌人
   kolt_mod: { min: 0, max: 1 },      // 「非法」改装：1 距离以内任意单位
   xia_crush: { min: 0, max: 0 },
-  kolt_aa: { min: 0, max: 1 },
   // 更换刀头的追击射程取决于换上去的新刀头（电钻近距离 / 酸液炮远距离），
   // 所以外层放到 0–1，具体由技能内部按新刀头判定
   kolt_swap: { min: 0, max: 0 },   // 更换刀头的切刀攻击总是打同区
@@ -419,6 +418,8 @@ const SKILL_RANGE_BY_STATE = {
   hiaki_aa: (a) => ((a && a.resources && a.resources.stance) === "iai" ? { min: 0, max: 1 } : { min: 0, max: 0 }),
   // 诺拉普攻：没有刺入时是「距离 1 的敌人」；有刺入时针尖把两人连在一起，刺入目标在同区也能打（刺入超过距离 1 会自己断）
   // 碎渣重炮：酸液炮（迫击炮，越墙）距离 1-2；电钻（机枪，选区域）距离 0-1
+  // 柯尔特普攻：电钻只打同区，酸液炮只打距离 1（战-M1：以前固定 0–1，电钻打距离 1 会先扣点再拒绝）
+  kolt_aa: (a) => ((a && a.resources && a.resources.bit) === "acid" ? { min: 1, max: 1 } : { min: 0, max: 0 }),
   kolt_cannon: (a) => ((a && a.resources && a.resources.bit) === "acid" ? { min: 1, max: 2 } : { min: 0, max: 1 }),
   nora_aa: (a) => (typeof piercedTargets === "function" && a && piercedTargets(a).length ? { min: 0, max: 1 } : { min: 1, max: 1 })
 };
@@ -1354,6 +1355,8 @@ function applyResultToUnit(target, result, attacker) {
     target.flying = false;
   }
   const wasStunned = !!target.stunned;
+  // 战-M5：击破分 / 击破统计按实际扣掉的架势算（假人、背水一战、猫的灵巧、坚挺、已失衡都会让它比名义击破小）
+  result.breakSpent = Math.max(0, Math.min(spent, defBeforeHit));
   target.def = Math.max(0, (Number(target.def) || 0) - spent);
   if (spent > 0 && typeof registerZoneBreak === "function" && target.kit !== "ufo_leg" && !target.noPosture) {
     notes.push(...registerZoneBreak(target.zone, spent));

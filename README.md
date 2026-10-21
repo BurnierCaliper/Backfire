@@ -376,6 +376,22 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
   - **按文档字面做的几处，拿不准的在 PR 里问过**：投手落地只炸敌对的单位（文档写「那一区所有单位」，现按榴弹一样只炸敌对，`RIOT_CFG.bottle.friendlyFire` 可改）；防暴盾的「同区友军」包含警棍盾自己；精英的架势按「照队长写法」每 5 级 +1（文档第 1 节开头「每 10 级 +1」是写杂兵的狂徒写法）。
   - **材料掉落**（items.js · `ENEMY_DROPS`，合并 main 后补）：警棍盾 废料 0.2 / 化工残液 0.1 / 电芯 0.08；燃烧步枪 化工残液 0.2 / 燃气浓缩物 0.08 / 废料 0.1；燃烧瓶投手 化工残液 0.25 / 燃气浓缩物 0.1；火焰喷射兵 燃气浓缩物 1.0 / 化工残液 0.65 / 电芯 0.3；镇压小队长 化工残液 0.65 / 燃气浓缩物 0.4 / 电芯 0.4 / 废料 0.3（期望份数，照掉落表的杂兵 / 精英区间）。种族由图鉴的种族栏显示，能力说明里不再重复写（tests/craft-materials.test.js 的敌人总数 45 → 50）。
   - **作者确认（10/21）**：投手落地只炸敌对单位、防暴盾也算警棍盾自己，都按现在的做法。
+- **联机：移动校验和单机对齐 + 手机战斗画面三处**（issue #176，backlog「第三轮排查：联机 · 补查」；hotseat-validation.js · `descriptor` / `voidMoveCost` / `assertBase` / `checkMove`，online-battle.js · `isTouch` / `paintCards`，online-ui.js · `battleUi`，online.css；测试 tests/hotseat-validation.test.js、tests/feat-bugs-104.test.js、tests/online-ui.test.js）
+  - **移动消耗**：以前联机校验把移动写死成「1 附赠」，导体 / 探测模式用光附赠就被拦，酸液地面离开要附赠和行动点都有，越过空隙还要 1 附赠。现在用单机同一个 `moveBaseCost`：导体 / 探测模式 0，离开酸液地面只要 1 行动点，其余 1 附赠；越过空隙只要 1 行动点（荒原行者仍是 1 附赠）。没有荒原行者的角色在酸液地面行动点为 0 时，「移动」按钮直接灰掉并写原因。
+  - **深渊方向**：以前拦的是「从深渊走出」、放行「走进深渊」。现在和单机一样按目的区判断：地面单位不能走进深渊，站在里面的可以走出来。
+  - **缠绕 / 流沙**：被沙珊瑚缠住、流沙下陷 2 层以上，校验阶段就拒绝，原因（和单机日志同一句）回给玩家，不再「指令成功但单位没动」。
+  - **手机画面**（≤820px）：玩家战场框至少 50% 可视高度；轮到选目标时，战场自动滚到第一个目标所在的区（目标集合变化时才滚）；桌面布局不变。触屏设备（`hover: none` 或 `pointer: coarse`）提示改成「选择技能。点技能看说明。」，结束行动按钮不显示「空格」。选行动顺序 / 询问的弹层背景改为不透明，不再透出底下的字。
+
+- **补查修复：战斗规则 / 评分 / 训练场 7 条**（issue #175，backlog 战-M1 ~ M5、战-L1、战-L2）
+  - **战-M1 柯尔特普攻射程**：以前 `SKILL_RANGE.kolt_aa` 固定 0–1，电钻（只打同区）选得到距离 1 的敌人，行动点扣完才拒绝还记行动分。现在射程随刀头变：电钻 0–0、酸液炮 1–1，射程预检就拦下，不扣点不记分。（engine.js · `SKILL_RANGE_BY_STATE.kolt_aa`）
+  - **战-M2 燃烧瓶灼烧记所有者**：以前灼烧不记所有者，烧死的敌人算上一个打它的人。现在按 #114「持续伤害算状态所有者」算使用者。（items.js · `itemApplyStatus`）
+  - **战-M3 道具伤害记归属**：以前冰锥弹等即时效果道具打死敌人，击杀算上一个打过的人。现在用效果道具期间记使用者（`state._itemUserId`，`actingPlayerId` 回落到它），道具造成的伤害和挂的状态都算使用者，和手榴弹一致。（items.js · `useItemOn`，app.js · `actingPlayerId`）
+  - **战-M4 训练假人无个体值**：以前假人和精英牛带 ±10% 个体值，各角色同等级布置不同。现在生成时关掉个体值（`ENEMY_IV.off++`），同等级完全一样。（training.js · `setupField`）
+  - **战-M5 击破按实际扣掉的架势算**：以前击破分 / 击破数按名义击破，假人、背水一战、坚挺、已失衡的敌人都照加。现在按实际扣掉的架势（`result.breakSpent`）；对已失衡的敌人每一击不再加击破分（作者确认：实际扣多少算多少）。（engine.js · `applyResultToUnit`，app.js · `dealTo`）
+  - **战-L1 友军 / 飞行预检**：以前攻击友军、近战打飞行目标附赠不够，行动点先扣了才拒绝，还记行动分。现在在技能预检里拒绝，不扣点不记分。（app.js · `skillTargetError`）
+  - **战-L2 评分幕数**：以前按场上现存敌人的最高等级算，死掉的敌人移出后分数线变低。现在记下见过的最高等级（`state.scoreActLv`），开战重置。（app.js · `scoreAct` / `resetBattleRecords`）
+  - 测试：tests/combat-recheck-175.test.js（7 条，先在旧代码上失败）；tests/structures.test.js 的幕数断言改成「同一场记住最高等级，重新开战才重算」。
+
 - **敌人种族（一）：种族数据、随机 / 固定分配、六维换算、显示、主持人指定**（issue #159，设计见 `docs/enemy-race.md`；enemies.js · `ENEMY_RACES` / `applyEnemyRace` / `setEnemyRace` / `raceDelta`，run.js · `ENEMY_INFO` / `ENEMY_RACE_TABLES`，party.js · `blockChanceRaw`，gm-commands.js、battle-commands.js、battle-templates.js、trpg-commands.js、sim.js、bestiary.js、unit-card.js、online-view.js 等；测试 `tests/enemy-race.test.js`）。种族的**被动**不在这一条里（另开 issue），这里只把种族挂到敌人身上、换算六维、显示出来。
   - **以前**：敌人没有种族。**现在**：有机体的敌人生成时有种族，记在单位上 `u.race = { race, branch }`；生成的入口和个体值一样（`applyEnemyIV(u, iv, race)` 里先 `applyEnemyRace` 再个体值：`spawnEnemyGroup`、`spawnEncounterRows`、战斗命令加敌人、跑团「加敌人」、主持人生成敌人、`BattleSim.setup`）。
   - **种族配置**：`ENEMY_RACES` 是种族 / 小分支的六维修正表（人类、红皮人、犬 / 猫 / 鼠 / 牛类人及其小分支、兽人五支；牛类人三个小分支的修正各不相同）；每个敌人的种族写在 `run.js · ENEMY_INFO`（格式见下）。

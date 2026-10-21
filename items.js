@@ -452,7 +452,10 @@ function useItemOn(actor, itemId, target, zone) {
     const why = itemUseError(actor, itemId, target, zone);
     if (why) { notes.push(why); notes.unused = true; return notes; }   // 没用掉：不扣附赠动作（battle-commands.js）
     bagAdd(itemId, -1, notes);
-    useEffectItem(actor, spec.effect, target, zone, notes);
+    // 战-M3：道具造成的伤害 / 挂的状态也记使用者（击杀归属 #114），和手榴弹一致
+    const prevUser = state._itemUserId;
+    state._itemUserId = actor && actor.isPlayer ? actor.id : null;
+    try { useEffectItem(actor, spec.effect, target, zone, notes); } finally { state._itemUserId = prevUser; }
     return notes;
   }
   // 投掷类道具（手榴弹、酸液瓶、冲击炸弹）：危墙 / 关着的门倒塌 / 打开之前影响不到对面，扔过去没用，道具不用掉
@@ -572,6 +575,7 @@ function itemApplyStatus(actor, u, key, notes) {
   u.statuses = u.statuses || {};
   if (key === "burn") {
     if (typeof grantBurn === "function") grantBurn(u, 1, notes);
+    if (typeof markStatusOwner === "function" && actor && actor.isPlayer) markStatusOwner(u, "burn", actor.id);   // 战-M2：击杀归属，灼烧算挂它的人
     if (u.self !== "burn") notes.push(`${u.name} 灼烧 → ${u.statuses.burn} 层。`);
   } else if (key === "unstable") {
     if (typeof applyUnstable === "function" && applyUnstable(u, notes)) {

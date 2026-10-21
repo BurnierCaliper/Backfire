@@ -608,3 +608,25 @@ test("任务提示 · 一个包里有多条变动合成一句；任务更新不�
   assert.equal(await page.locator("#online-bag .ol-quest-card").count(), 0);
   assert.deepEqual(o.errors, []);
 });
+
+test("#176 手机 390px：战场框占半屏、触屏提示、选序弹层不透字", async t => {
+  const o = await open(t, true); if (!o) return; const { page } = o; await player(page);
+  await page.waitForSelector('.ol-battle [data-ob-skill="ruby_aa"]');
+  const vh = await page.evaluate(() => innerHeight);
+  const h = await page.locator(".ol-battle .g-field").evaluate(e => e.getBoundingClientRect().height);
+  assert.ok(h >= vh * 0.45, `战场框高 ${h}px，应至少约半屏（${vh}px）`);
+  const hint = await page.locator(".ol-battle .hint").innerText();
+  assert.doesNotMatch(hint, /悬停|空格/);
+  assert.match(hint, /点技能看说明/);
+  assert.equal(await page.locator(".ol-battle .endturn small").count(), 0);
+  const bg = await page.evaluate(() => { const d = document.createElement("section"); d.className = "hs-ui hs-overlay"; document.body.append(d); const c = getComputedStyle(d).backgroundColor; d.remove(); return c; });
+  assert.equal(bg, "rgb(11, 8, 6)", "弹层背景要不透明");
+  assert.deepEqual(o.errors, []);
+});
+
+test("#176 桌面宽度：保留悬停 / 空格提示", async t => {
+  const o = await open(t, false); if (!o) return; const { page } = o; await player(page);
+  await page.waitForSelector('.ol-battle [data-ob-skill="ruby_aa"]');
+  assert.match(await page.locator(".ol-battle .hint").innerText(), /悬停技能看说明/);
+  assert.equal(await page.locator(".ol-battle .endturn small").count(), 1);
+});
