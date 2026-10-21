@@ -944,7 +944,7 @@ function skillList(unit) {
     add({ id: "chuan_reclaim", name: "回收护盾", hint: "附赠 · 清除一名友方的护盾，得到 2 电能，并触发磁场护盾" });
   }
   if (unit.kit === "ruby" && !(unit.resources && unit.resources.mecha) && typeof passivePlus === "function" && passivePlus(unit, 1)) {
-    add({ id: "ruby_refuel", name: "补充能源", hint: "附赠 · 获得 10 点纳米能源", bare: true });
+    add({ id: "ruby_refuel", name: "补充能源", hint: "附赠 · 纳米 +10，或把全部纳米压缩成储备能源（没有上限，纳米不够时自动用）", bare: true });
   }
   if (unit.kit === "bili") {
     add({ id: "bili_beam", name: "电光束", hint: "任意距离 · 1atk 电击 · 感电" });
@@ -960,7 +960,7 @@ function skillList(unit) {
     add({ id: "kolt_chase", name: "紧追", hint: "附赠 · 对一个敌人施加紧追：它移动时柯尔特自动跟上", bare: true });
     add({ id: "kolt_scrap", name: "废物利用", hint: "获得上一个被摧毁的敌人血量层等量的对应血量（最多生命上限50%）· 另领腐坏抛射的记录", minLv: 2 });
     add({ id: "kolt_rot", name: "腐坏抛射", hint: "需酸液炮 · 距离1 · 施加腐蚀（不造成伤害，仍会嘲讽）· 腐蚀伤害记给下一次废物利用", minLv: 3 });
-    add({ id: "kolt_mod", name: "「非法」改装", hint: "需电钻 · 1距离以内任意单位施加过载", minLv: 6 });
+    add({ id: "kolt_mod", name: "「非法」改装", hint: "需电钻 · 1距离以内任意单位施加过载 · 废料达到上限时，可再耗等量废料让我方目标 +1 行动点（可超上限）", minLv: 6 });
     add({ id: "kolt_cannon", name: "碎渣重炮", hint: bit === "acid"
       ? "耗全部废料 · 距离1-2 · 越墙迫击炮：废料量的酸 +2击破，同区其他敌人 1/3 溅射 · 主目标掉血超过上限 25% 再 +2击破"
       : "耗全部废料 · 选距离1以内一个区域 · 废料分成每颗（扭矩atk/3+1d10）电击的子弹，随机打该区敌人 · 每2颗1击破", minLv: 9 });
@@ -970,7 +970,7 @@ function skillList(unit) {
     const bit = koltBit();
     add({ id: "torque_boost", name: "强化输出", hint: bit === "acid" ? "任意区域蓄力（越墙），下回合开始对该区酸液AOE" : "移动1后选一名敌人 · 1d4+1 次 0.5atk 电 · 共2击破" });
     add({ id: "torque_swap", name: "拆装部件", hint: "更换刀头，再打对应距离 1atk +1击破，强制收回" });
-    add({ id: "torque_strip", name: "拆卸模式", hint: "需电钻 · 同区 2击破，外层血量转给同区友方", minLv: 2 });
+    add({ id: "torque_strip", name: "拆卸模式", hint: "需电钻 · 同区 2击破，外层血量转给同区友方，或变成废料（不受上限）", minLv: 2 });
     add({ id: "torque_divert", name: "转移注意", hint: "全场被嘲讽的单位改打扭矩 · 自保：受伤 −25%、架势不低于1 · 下回合开始变回武器，失去的装甲记为废料", minLv: 4 });
     add({ id: "torque_return", name: "收回为武器", hint: "需与柯尔特同区" });
   }
@@ -1176,7 +1176,7 @@ function baseEffectiveAtk(unit, units) {
 function resourceText(unit) {
   if (!unit || !unit.kit) return "";
   const r = unit.resources || {};
-  if (unit.kit === "ruby") return `纳米 ${r.nano || 0}/100${r.mecha ? " · 机甲中" : ""}${r.overdrive ? " · 机体强化" : ""}${r.drone ? (r.mecha ? " · 无人机（激光）" : " · 无人机") : ""}${r.preparedActive ? " · 准备生效" : (r.preparedPending || r.prepared) ? " · 已准备" : ""}`;
+  if (unit.kit === "ruby") return `纳米 ${r.nano || 0}/100${Number(r.nanoReserve) > 0 ? " · 储备 " + r.nanoReserve : ""}${r.mecha ? " · 机甲中" : ""}${r.overdrive ? " · 机体强化" : ""}${r.drone ? (r.mecha ? " · 无人机（激光）" : " · 无人机") : ""}${r.preparedActive ? " · 准备生效" : (r.preparedPending || r.prepared) ? " · 已准备" : ""}`;
   if (unit.kit === "mint") return `耐久 ${r.durability != null ? r.durability : "—"}`;
   if (unit.kit === "yuito") {
     const bond = r.bondName ? ` · 牵挂 ${r.bondName}` : " · 无牵挂";

@@ -751,6 +751,23 @@ test("车上的人只能用车的武器：种族的附赠技能（追猎本能�
   assert.ok(f.c.enemySkillList(mol).some(s => s.id === "race_spit"), "下车后：吐酸回来了");
 });
 
+test("驾驶员是牛兽人（警棍盾）：易怒蛮牛照样触发，整辆车连炮手一起冲到别的区，再撞一个人 1 击破（作者 10/21 定）", () => {
+  const f = riotField(2, 2);
+  const [a, b] = riots(f);
+  assert.equal(a.kit, "riot_baton");
+  const p = car(f, 2); f.c.vehicleBoard(a, p); f.c.vehicleBoard(b, p);
+  a.layers.forEach(l => { l.current = Math.floor(l.max * 0.3); });   // 合并后的血量（含车的装甲）低于一半
+  const k = f.P("kolt"), h = f.P("helu"); k.zone = 1; h.zone = 1;
+  const d0 = k.def + h.def, notes = [];
+  f.c.raceAfterHurt(a, { total: 5 }, null, notes);
+  assert.equal(a.zone, 1, "驾驶员冲到另一个区");
+  assert.equal(p.zone, 1, "车跟着驾驶员走");
+  assert.equal(b.zone, 1, "炮手也在车里一起过去");
+  assert.equal(a.vehId, p.id, "冲完还在车上");
+  assert.equal(d0 - (k.def + h.def), 1, "撞到新所在区的一个人，1 击破");
+  assert.match(notes.join("\n"), /易怒蛮牛/);
+});
+
 test("车上的人只能用车的武器：技能表只有车上的招式；炮手不能自己移动", () => {
   const f = riotField(2, 2);
   const [a, b] = riots(f);
@@ -826,6 +843,111 @@ test("遭遇：镇压队的遭遇有 30% 带一台移动堡垒，别的阵营没
     const e = c.rollEncounter({ region: "外城区", zoneMode: 2, faction: "盗匪", mixed: false });
     eq(JSON.parse(JSON.stringify(e.vehicles)), [], "盗匪的遭遇没有车");
   }
+});
+
+/* ---------- 车占代币（VEHICLES.fortress.tokens：只给平衡模拟工具用，issue #235） ---------- */
+/** 遭遇里的敌人占几枚代币（成组的整组记一次；三区制的站位把一组拆成一只一行，按只数折回去） */
+function tokensOf(c, e) {
+  const n = {};
+  e.enemies.forEach(r => { n[r.preset] = (n[r.preset] || 0) + Math.max(1, Number(r.count) || 1); });
+  return Object.keys(n).reduce((s, k) => {
+    const g = (c.enemyInfo(k) || {}).group;
+    return s + c.enemyTokens(k) * Math.ceil(n[k] / (Array.isArray(g) ? g[1] : Number(g) || 1));
+  }, 0);
+}
+/** 一只一个的兵种名单（排好序），比较两场遭遇差了哪几只 */
+const units = e => e.enemies.flatMap(r => Array(Math.max(1, Number(r.count) || 1)).fill(r.preset)).sort();
+const minus = (a, b) => { const left = b.slice(); return a.filter(k => { const i = left.indexOf(k); if (i < 0) return true; left.splice(i, 1); return false; }); };
+
+test("车占代币：默认 0 = 不占，带车的遭遇照常抽满代币；抽出来的遭遇和不走「车占代币」这一步时一模一样，也不多掷骰（游戏行为不变）", () => {
+  const a = H.load(), b = H.load();
+  assert.equal(get(a, "VEHICLES").fortress.tokens, 0, "默认不占代币");
+  b.vehiclePayTokens = undefined;   // 对照：finishEncounter 不走「车占代币」这一步（加开关以前的样子）
+  a.Math.random = a.makeRng("VEH-TOK0"); b.Math.random = b.makeRng("VEH-TOK0");
+  let cars = 0;
+  for (let i = 0; i < 600; i++) {
+    const opt = { region: "外城区", faction: "镇压队" };   // 区制、混编都照常随机
+    const x = a.rollEncounter(opt), y = b.rollEncounter(opt);
+    eq(x, y, "同一种子抽出来的遭遇一样");
+    if (!x.vehicles.length) continue;
+    cars++;
+    assert.equal(tokensOf(a, x), x.tokens, "带车的遭遇照常抽满代币");
+    assert.equal(x.vehicles[0].tokens, undefined, "不占代币时车上不记退了几枚");
+  }
+  assert.ok(cars > 120, `带车的遭遇 ${cars} 场`);
+  assert.equal(a.Math.random.draws(), b.Math.random.draws(), "不多掷骰");
+});
+
+test("车占代币：开关改成 1 时，带车的遭遇少 1 枚代币的敌人（镇压队至少留一个当驾驶员）；区制、站位、带不带车不变，不带车的遭遇原样", () => {
+  const a = H.load(), b = H.load();
+  get(b, "VEHICLES").fortress.tokens = 1;
+  const faction = k => (b.enemyInfo(k) || {}).faction;
+  let cars = 0, swaps = 0;
+  for (let i = 0; i < 600; i++) {
+    // 每场两边从同一个种子开始（带车时退掉精英要补抽，会多掷一次骰）
+    a.Math.random = a.makeRng("VEH-TOK1:" + i); b.Math.random = b.makeRng("VEH-TOK1:" + i);
+    const opt = { region: "外城区", faction: "镇压队" };
+    const x = a.rollEncounter(opt), y = b.rollEncounter(opt);
+    eq([y.zoneMode, y.layout, y.weather, y.tokens, y.vehicles.length], [x.zoneMode, x.layout, x.weather, x.tokens, x.vehicles.length], "区制、站位、天气、代币预算、带不带车都一样");
+    if (!x.vehicles.length) { eq(y, x, "不带车的遭遇原样"); continue; }
+    cars++;
+    assert.equal(tokensOf(b, y), tokensOf(a, x) - 1, `带车的遭遇少 1 枚代币的敌人：${units(x)} → ${units(y)}`);
+    assert.equal(y.vehicles[0].tokens, 1, "车上记着占了 1 枚");
+    assert.ok(y.enemies.some(r => faction(r.preset) === "镇压队"), "至少留一个镇压队员当驾驶员");
+    const gone = minus(units(x), units(y)), added = minus(units(y), units(x));
+    assert.equal(new Set(gone).size, 1, `只退掉一次抽到的（一只或一组）：${gone}`);
+    if (added.length) {
+      swaps++;
+      assert.ok(b.enemyTokens(gone[0]) >= 2, `只有退掉 2 枚代币以上的才补抽：${gone} → ${added}`);
+    }
+  }
+  assert.ok(cars > 120 && swaps > 10, `带车 ${cars} 场，其中退精英补抽 ${swaps} 场`);
+});
+
+test("车占代币：退的是最后抽到的那个（三区制把站位打乱了也认得出）；最后一个镇压队员不退；退掉精英时补抽 1 枚，和一开始就少抽 1 枚代币的分布一样", () => {
+  const c = H.load();
+  const V = get(c, "VEHICLES").fortress;
+  V.tokens = 1; V.appear = 1;
+  const riot = ["riot_baton", "riot_rifle", "riot_molotov", "riot_flamer", "riot_captain"];
+  const roll = (presets, zoneMode, pool) => c.finishEncounter({ region: "外城区", enemies: presets.map(p => ({ preset: p, count: 1 })) }, { zoneMode }, pool || riot);
+  c.Math.random = c.makeRng("VEH-PAY");
+  // 最后抽到的是 1 枚代币的杂兵：退掉它（三区制站位打乱、拆开以后也一样）
+  for (const zm of [2, 3]) for (let i = 0; i < 30; i++) {
+    const e = roll(["riot_rifle", "riot_flamer", "riot_baton", "riot_molotov"], zm);
+    eq(units(e), ["riot_baton", "riot_flamer", "riot_rifle"], `${zm} 区制：退掉最后抽到的燃烧瓶投手`);
+    eq(e.vehicles, [{ kind: "fortress", tokens: 1 }]);
+  }
+  // 最后抽到的是 2 枚代币的精英：退掉它，从同一个池子补抽 1 枚
+  const seen = new Set();
+  for (let i = 0; i < 60; i++) {
+    const e = roll(["riot_flamer", "riot_captain"], 2 + (i % 2));
+    const u = units(e);
+    assert.equal(u.length, 2); assert.ok(u.includes("riot_flamer") && !u.includes("riot_captain"), String(u));
+    const add = u.find(k => k !== "riot_flamer");
+    assert.ok(["riot_baton", "riot_rifle", "riot_molotov"].includes(add), add);
+    seen.add(add);
+    assert.ok(e.enemies.every(r => [1, 2, 3].includes(Number(r.zone))), "补抽的那只也有站位（站在退掉的那只的区）");
+  }
+  assert.equal(seen.size, 3, "补抽的是池子里 1 枚代币的三种之一");
+  // 最后抽到的是唯一的镇压队员：留着当驾驶员，往前退
+  const mixed = ["guard_gun", "guard_sword", "patrol_car", "boomcar"].concat(riot);
+  const e3 = roll(["guard_gun", "guard_sword", "patrol_car", "riot_baton"], 2, mixed);
+  eq(units(e3), ["guard_gun", "guard_sword", "riot_baton"]);
+  // 只有驾驶员一个人：退不出来，车照样来，记下实际退了 0 枚
+  const e4 = roll(["riot_captain"], 2);
+  eq([units(e4), e4.vehicles], [["riot_captain"], [{ kind: "fortress", tokens: 0 }]]);
+  // 分布：4 枚代币抽完再退 1 枚，和一开始就抽 3 枚一样——带精英的比例理论上都是 64%（先抽到精英 2/5，或先杂兵再精英 3/5 × 2/5）
+  c.Math.random = c.makeRng("VEH-PAY-DIST");
+  const N = 4000;
+  let paid = 0, direct = 0;
+  const elite = rows => rows.some(r => c.enemyTokens(r.preset) === 2);
+  for (let i = 0; i < N; i++) {
+    const rows = c.pickByTokens(riot, 4), spec = { region: "外城区", enemies: rows, vehicles: [{ kind: "fortress" }] };
+    c.vehiclePayTokens(spec, rows.slice(), riot);
+    if (elite(spec.enemies)) paid++;
+    if (elite(c.pickByTokens(riot, 3))) direct++;
+  }
+  assert.ok(Math.abs(paid / N - 0.64) < 0.025 && Math.abs(direct / N - 0.64) < 0.025, `退 1 枚 ${(paid / N * 100).toFixed(1)}%，直接抽 3 枚 ${(direct / N * 100).toFixed(1)}%`);
 });
 
 /* ---------- AI ---------- */

@@ -1,0 +1,4493 @@
+{
+ "schema": "backfire-enemy-balance-v1",
+ "generatedAt": "2026-10-21T15:16:52.772Z",
+ "config": {
+  "version": "enemy-balance-v1",
+  "seedPrefix": "EB1021",
+  "samples": 100,
+  "sizes": [
+   2,
+   3,
+   4
+  ],
+  "act": 1,
+  "maxRounds": 30,
+  "flagPp": 10,
+  "workers": 2,
+  "out": "docs/balance/new-enemies-1021"
+ },
+ "options": {
+  "samples": 100,
+  "groups": [
+   "fortress"
+  ],
+  "sizes": [
+   2,
+   3,
+   4
+  ],
+  "act": 1
+ },
+ "provenance": {
+  "commit": "c50179e15e0b8a900c8bfbea78926fc691eea87d",
+  "dirty": false,
+  "sourceHash": "6c0e5f47654b93a500e9dff70141c0288ff3c3d5a363696e015c1ce9a07eaff4",
+  "sourceHashes": {
+   "run.js": "d4f1bfdfcbf517a25cb361a9a32ce4e06fb87759a2014eb4a703654fa88d38e8",
+   "engine.js": "304485e3ce411dea356b9672c88894e95cc4280eb95d5578dd01766b8fdbdf8e",
+   "party.js": "da5ce4814491ae487ba83228469f41433a296ac26695cbfaecc8d588b6a49d08",
+   "skill-text.js": "d2de3685f3522cf95bc51055eee1abef1bb6495cb1f90099b4260eb1a95935bc",
+   "props.js": "0eae3610e58f192ca9ce52d76829da7e229d77329fecc3b13ea3a117f789bc7e",
+   "enemies.js": "fca01feb7d515193c1ad5fcd179dcfb22697c074a1e517b42545016331867567",
+   "vehicle.js": "3e92ef72463a4b7124dc9c6a39123f49fb31080647395cd619385f2b23006ecd",
+   "desert.js": "ef768e46720d5983ae2497502f2d3d90de2da53db6caf466034a49ae1bd759d1",
+   "growth.js": "46e40012d986be163de00c1d60626ec402c5a96bbc65860d1284e77084b9fb5c",
+   "feats.js": "9ba1e3cb8eb060534e6817063fbe6c75f357150c051f0e761ac9c6bd49f539fc",
+   "items.js": "b91aab061e4749ccafa61733c9a7e37684dfa9476300193e940e38b303628499",
+   "inventory.js": "2b25f5ae784ea81eefb068ab1eb6e944eedc97f5963df42eb79fc149f93b9198",
+   "shop-sell.js": "93b41613a9f49d9bbaff2dc496d73be40b12986849afd4e113e7720e0fac00b0",
+   "matchup.js": "b51e9b89552427bf934059bc79fa924423019c0b88d573eded1e061b56503678",
+   "cyberware.js": "03ec5a44d90b74284700cd6bc002cd2bbf471174f01abb8c9ac2ce713f280371",
+   "daylight.js": "29dbe4af93e005a6ea054e038a77d484a8a105b5051406d719e57341bc2cbd8a",
+   "ledger.js": "b3d66463b032dd460e2cf0600065c9044ee9e5e512cb0aefc1b525f37ef5b1d6",
+   "commands.js": "52ad1866d61543d92f8b7f8fa681d73902d7f0f23c316e583948700df4c54d98",
+   "app.js": "edd267196eef43d578d859ff8cd4da84d3ff8b14f5d8a62f629cbe8d8a6c47da",
+   "levelup.js": "f4e21c9fbd441e361a711777c5bf0e823a0eb159a7d2e6c3d1958df34784bc5e",
+   "escort.js": "dfdf69f6d3524ee10232968216c609152ee517fa379fdd6ed1718be5a6d10bc3",
+   "boss-mechanics.js": "03e6bd37dc44644406d56100a6c5164bed7a3a7a60460d0a6d20e26d7755060a",
+   "effects.js": "fb20877275f8504f3b525f67aa3b3a5fafd725888d155b4ec9c5ecfdb0e1dffd",
+   "mods.js": "ab87259f12a4331aeb49d8c5648401c5846342b16da078320894bb709edf9f35",
+   "ai.js": "a8bf8f8c30b68682776f2eae34c3604162bd04a38e789c8245c3a677570d03d7",
+   "sim.js": "8002e98d138a959ca133defd32dbb22bc4661c113f7c95316aa179cfa0012d8d",
+   "chain.js": "e7f37170cc3d5aa5701d38986f0238dbe94e993e3b6d2905bb08b088073fdb4e",
+   "save.js": "2df0e9649b5255f89d96905258b32d42cc5313dfcce07ef97c585f7994893227",
+   "trpg-data.js": "79e4ddfb96c780a56fdd17208ed8f70be40246542236991df4331291def3e494",
+   "trpg.js": "a742cf74732f8c553590f937a7f0c289d194fc84dda2feb23d76193b81a733e5",
+   "world-data.js": "2adcce9ab2067cc3831acdd9530436ce5c07abe4ece78aae5daa32d5ea35618b",
+   "world-travel.js": "c9558b0d40c7c5d10f36cee95632c51b91a00599b8acc658ecaf747c3334e2ab",
+   "bestiary.js": "b36b834c064d7d23882d4339a4cd57981dad155cf9ca36bb4a6a2fd1c2c760b7",
+   "codex.js": "0857b2850231674c536cf3bd2c593dcb25ed9f480c7d779b3f33758ec28e8c7b",
+   "rogue-data.js": "44859569fe5f2c3dba1556bca50485cad0e133d338312beddccddd1ac85a798d",
+   "battle-templates.js": "e050f306e3d12760583cb9f1bd0ac8ba383053a24e83db3ae879ad9e9a5d073c",
+   "trpg-tasks.js": "1c0ba7f3f198c746e61c20ed77523b3c0300ebc8d68e0ad2794fd6265e72be7a",
+   "trpg-merchants.js": "93e3764914bd076c44c151a4648f52ebff7b6f977094c9bfd4d3e2577c202d63",
+   "rogue.js": "bf705bb3d354ac446a5d2a559c6f7912f05147ae702bd70ec903522f988ba1bc",
+   "battle-commands.js": "63351a690a456998765e64fba9c21e32a4df21065066883ea44e25989660b6e6",
+   "rogue-commands.js": "52d0b32d17b65cccf3a2b897c288f6823bc541c5ce92bc75b5c3ebb9c6c925c5",
+   "trpg-commands.js": "236e2ccd1537fb1cdb4cfb3e1bfecb05e54335c6a7f82c5ffc9ce7763b980771",
+   "training.js": "4b055ebcb6ee8f09d38387401f071ee7259186eeec0cd3fd27f72e8af645188f",
+   "tests/headless.js": "68ff0c4d14ff0ca2332e8dd911de8deb6c0908111e0ed067c761fe7c36ea47d4",
+   "tools/balance-common.js": "c4dcfd3f8acf49592b440ac1ed25b4019cf9246455ea60a5db898370e950d484",
+   "tools/enemy-balance.js": "76736c9a82b52b3de3c6a564f20ed34e0bd62442747aada4decda51df59c7600"
+  },
+  "node": "v22.23.3",
+  "command": "node tools/enemy-balance.js --groups fortress --samples 100 --workers 2 --out docs/balance/fortress-token-1021",
+  "strategy": "basic-r1-v1"
+ },
+ "rows": 1800,
+ "errors": 0,
+ "timeouts": 33,
+ "summary": {
+  "fortress|battle|with|2": {
+   "n": 100,
+   "outcomes": {
+    "win": 15,
+    "lose": 85,
+    "retreat": 0,
+    "timeout": 0,
+    "error": 0
+   },
+   "winRate": 0.15,
+   "ci": [
+    0.09305985283656631,
+    0.23283559590832364
+   ],
+   "levels": [
+    2,
+    3,
+    4
+   ],
+   "rounds": 3.74,
+   "taken": 108.19,
+   "downs": 1.76,
+   "deaths": 0,
+   "tokens": 4.08,
+   "foes": 3.27,
+   "burnShare": 0.6742857142857143,
+   "burnRoundShare": 0.7700729927007299,
+   "kits": {
+    "fortress": {
+     "dmg": 48.22,
+     "dot": 0,
+     "brk": 2.91,
+     "downs": 0.78
+    },
+    "riot_rifle": {
+     "dmg": 1.88,
+     "dot": 0,
+     "brk": 0.21,
+     "downs": 0.03
+    },
+    "dot": {
+     "dmg": 0,
+     "dot": 34.76,
+     "brk": 0,
+     "downs": 0.63
+    },
+    "riot_flamer": {
+     "dmg": 4.09,
+     "dot": 0,
+     "brk": 1.92,
+     "downs": 0.07
+    },
+    "riot_molotov": {
+     "dmg": 0.22,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0
+    },
+    "riot_baton": {
+     "dmg": 4.87,
+     "dot": 0,
+     "brk": 0.94,
+     "downs": 0.09
+    },
+    "captain_wolf": {
+     "dmg": 1.37,
+     "dot": 0,
+     "brk": 0.11,
+     "downs": 0.02
+    },
+    "fortress_blast": {
+     "dmg": 2.75,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.02
+    },
+    "guard_sword": {
+     "dmg": 0.85,
+     "dot": 0,
+     "brk": 0.11,
+     "downs": 0
+    },
+    "小车残骸": {
+     "dmg": 0.3,
+     "dot": 0,
+     "brk": 0.05,
+     "downs": 0
+    },
+    "captain_lizard": {
+     "dmg": 1.38,
+     "dot": 0,
+     "brk": 0.24,
+     "downs": 0.01
+    },
+    "guard_gun": {
+     "dmg": 0.65,
+     "dot": 0,
+     "brk": 0.07,
+     "downs": 0
+    },
+    "swarm": {
+     "dmg": 1.12,
+     "dot": 0,
+     "brk": 0.09,
+     "downs": 0.05
+    },
+    "captain_ox": {
+     "dmg": 0.82,
+     "dot": 0,
+     "brk": 0.21,
+     "downs": 0
+    },
+    "riot_captain": {
+     "dmg": 2.58,
+     "dot": 0,
+     "brk": 0.19,
+     "downs": 0.03
+    },
+    "patrol_car": {
+     "dmg": 0.85,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.01
+    },
+    "酸液桶": {
+     "dmg": 0.08,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0
+    },
+    "crow": {
+     "dmg": 1.3,
+     "dot": 0,
+     "brk": 0.18,
+     "downs": 0.02
+    },
+    "thug_hammer": {
+     "dmg": 0.1,
+     "dot": 0,
+     "brk": 0.02,
+     "downs": 0
+    }
+   },
+   "vehicle": {
+    "battles": 91,
+    "paid": 0,
+    "cover": 1.0879120879120878,
+    "blastRate": 0.15384615384615385,
+    "steal": 0,
+    "stealBattles": 0,
+    "dmg": 52.989010989010985,
+    "blastDmg": 3.021978021978022,
+    "absorbed": 30.47252747252747
+   }
+  },
+  "fortress|battle|with|all": {
+   "n": 300,
+   "outcomes": {
+    "win": 87,
+    "lose": 208,
+    "retreat": 0,
+    "timeout": 5,
+    "error": 0
+   },
+   "winRate": 0.29,
+   "ci": [
+    0.24156454610318367,
+    0.3437455018111255
+   ],
+   "levels": [
+    2,
+    3,
+    4
+   ],
+   "rounds": 5.54,
+   "taken": 174.09333333333333,
+   "downs": 2.41,
+   "deaths": 0,
+   "tokens": 4.056666666666667,
+   "foes": 3.2533333333333334,
+   "burnShare": 0.5273146960759169,
+   "burnRoundShare": 0.7254038179148311,
+   "kits": {
+    "fortress": {
+     "dmg": 54.663333333333334,
+     "dot": 0,
+     "brk": 2.38,
+     "downs": 0.7266666666666667
+    },
+    "riot_rifle": {
+     "dmg": 3.033333333333333,
+     "dot": 0,
+     "brk": 0.34,
+     "downs": 0.04
+    },
+    "dot": {
+     "dmg": 0,
+     "dot": 84.74,
+     "brk": 0,
+     "downs": 1.23
+    },
+    "riot_flamer": {
+     "dmg": 4.976666666666667,
+     "dot": 0,
+     "brk": 2.533333333333333,
+     "downs": 0.06
+    },
+    "riot_molotov": {
+     "dmg": 0.4,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.0033333333333333335
+    },
+    "riot_baton": {
+     "dmg": 6.8,
+     "dot": 0,
+     "brk": 1.5133333333333334,
+     "downs": 0.08333333333333333
+    },
+    "captain_wolf": {
+     "dmg": 1.5566666666666666,
+     "dot": 0,
+     "brk": 0.15,
+     "downs": 0.03
+    },
+    "fortress_blast": {
+     "dmg": 7.773333333333333,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.1
+    },
+    "guard_sword": {
+     "dmg": 0.38333333333333336,
+     "dot": 0,
+     "brk": 0.05,
+     "downs": 0.0033333333333333335
+    },
+    "小车残骸": {
+     "dmg": 0.22,
+     "dot": 0,
+     "brk": 0.04,
+     "downs": 0
+    },
+    "captain_lizard": {
+     "dmg": 0.7166666666666667,
+     "dot": 0,
+     "brk": 0.12666666666666668,
+     "downs": 0.0033333333333333335
+    },
+    "guard_gun": {
+     "dmg": 0.39,
+     "dot": 0,
+     "brk": 0.05,
+     "downs": 0
+    },
+    "swarm": {
+     "dmg": 1.1133333333333333,
+     "dot": 0,
+     "brk": 0.09,
+     "downs": 0.04
+    },
+    "captain_ox": {
+     "dmg": 0.9533333333333334,
+     "dot": 0,
+     "brk": 0.31666666666666665,
+     "downs": 0.006666666666666667
+    },
+    "riot_captain": {
+     "dmg": 3.9566666666666666,
+     "dot": 0,
+     "brk": 0.4066666666666667,
+     "downs": 0.043333333333333335
+    },
+    "patrol_car": {
+     "dmg": 0.6166666666666667,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.01
+    },
+    "酸液桶": {
+     "dmg": 0.05333333333333334,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0
+    },
+    "crow": {
+     "dmg": 0.43333333333333335,
+     "dot": 0,
+     "brk": 0.06,
+     "downs": 0.006666666666666667
+    },
+    "thug_hammer": {
+     "dmg": 0.03333333333333333,
+     "dot": 0,
+     "brk": 0.013333333333333334,
+     "downs": 0
+    },
+    "爆炸桶": {
+     "dmg": 0.9933333333333333,
+     "dot": 0,
+     "brk": 0.08666666666666667,
+     "downs": 0.013333333333333334
+    },
+    "boomcar": {
+     "dmg": 0.056666666666666664,
+     "dot": 0,
+     "brk": 0.013333333333333334,
+     "downs": 0.006666666666666667
+    },
+    "bandit_boss": {
+     "dmg": 0.10666666666666667,
+     "dot": 0,
+     "brk": 0.016666666666666666,
+     "downs": 0.0033333333333333335
+    },
+    "危墙": {
+     "dmg": 0.12333333333333334,
+     "dot": 0,
+     "brk": 0.023333333333333334,
+     "downs": 0
+    }
+   },
+   "vehicle": {
+    "battles": 284,
+    "paid": 0,
+    "cover": 2.0140845070422535,
+    "blastRate": 0.3732394366197183,
+    "steal": 0,
+    "stealBattles": 0,
+    "dmg": 57.74295774647887,
+    "blastDmg": 8.211267605633802,
+    "absorbed": 79.6056338028169
+   }
+  },
+  "fortress|battle|token|2": {
+   "n": 100,
+   "outcomes": {
+    "win": 26,
+    "lose": 74,
+    "retreat": 0,
+    "timeout": 0,
+    "error": 0
+   },
+   "winRate": 0.26,
+   "ci": [
+    0.18404698464748132,
+    0.3537098944918718
+   ],
+   "levels": [
+    2,
+    3,
+    4
+   ],
+   "rounds": 4.06,
+   "taken": 103.98,
+   "downs": 1.72,
+   "deaths": 0,
+   "tokens": 3.17,
+   "foes": 2.64,
+   "burnShare": 0.6535162950257289,
+   "burnRoundShare": 0.738562091503268,
+   "kits": {
+    "fortress": {
+     "dmg": 44.11,
+     "dot": 0,
+     "brk": 2.74,
+     "downs": 0.77
+    },
+    "dot": {
+     "dmg": 0,
+     "dot": 39.83,
+     "brk": 0,
+     "downs": 0.62
+    },
+    "fortress_blast": {
+     "dmg": 3.39,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.07
+    },
+    "riot_flamer": {
+     "dmg": 3.11,
+     "dot": 0,
+     "brk": 1.29,
+     "downs": 0.05
+    },
+    "riot_baton": {
+     "dmg": 3.14,
+     "dot": 0,
+     "brk": 0.59,
+     "downs": 0.06
+    },
+    "小车残骸": {
+     "dmg": 0.34,
+     "dot": 0,
+     "brk": 0.05,
+     "downs": 0
+    },
+    "riot_captain": {
+     "dmg": 2.42,
+     "dot": 0,
+     "brk": 0.17,
+     "downs": 0.05
+    },
+    "captain_lizard": {
+     "dmg": 0.59,
+     "dot": 0,
+     "brk": 0.09,
+     "downs": 0
+    },
+    "guard_gun": {
+     "dmg": 0.48,
+     "dot": 0,
+     "brk": 0.06,
+     "downs": 0
+    },
+    "swarm": {
+     "dmg": 0.99,
+     "dot": 0,
+     "brk": 0.08,
+     "downs": 0.04
+    },
+    "captain_ox": {
+     "dmg": 0.82,
+     "dot": 0,
+     "brk": 0.21,
+     "downs": 0
+    },
+    "patrol_car": {
+     "dmg": 0.59,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0
+    },
+    "riot_rifle": {
+     "dmg": 1.16,
+     "dot": 0,
+     "brk": 0.15,
+     "downs": 0.02
+    },
+    "guard_sword": {
+     "dmg": 0.39,
+     "dot": 0,
+     "brk": 0.05,
+     "downs": 0
+    },
+    "酸液桶": {
+     "dmg": 0.24,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0
+    },
+    "riot_molotov": {
+     "dmg": 0.16,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0
+    },
+    "captain_wolf": {
+     "dmg": 0.82,
+     "dot": 0,
+     "brk": 0.07,
+     "downs": 0.02
+    },
+    "crow": {
+     "dmg": 1.3,
+     "dot": 0,
+     "brk": 0.18,
+     "downs": 0.02
+    },
+    "thug_hammer": {
+     "dmg": 0.1,
+     "dot": 0,
+     "brk": 0.02,
+     "downs": 0
+    }
+   },
+   "vehicle": {
+    "battles": 91,
+    "paid": 1,
+    "cover": 1.065934065934066,
+    "blastRate": 0.25274725274725274,
+    "steal": 0,
+    "stealBattles": 0,
+    "dmg": 48.472527472527474,
+    "blastDmg": 3.7252747252747254,
+    "absorbed": 38.05494505494506
+   }
+  },
+  "fortress|battle|token|all": {
+   "n": 300,
+   "outcomes": {
+    "win": 148,
+    "lose": 147,
+    "retreat": 0,
+    "timeout": 5,
+    "error": 0
+   },
+   "winRate": 0.49333333333333335,
+   "ci": [
+    0.43720207035328285,
+    0.5496331692630444
+   ],
+   "levels": [
+    2,
+    3,
+    4
+   ],
+   "rounds": 5.576666666666667,
+   "taken": 149.59,
+   "downs": 2.14,
+   "deaths": 0,
+   "tokens": 3.11,
+   "foes": 2.58,
+   "burnShare": 0.49695276790248855,
+   "burnRoundShare": 0.7006554989075018,
+   "kits": {
+    "fortress": {
+     "dmg": 43.53333333333333,
+     "dot": 0,
+     "brk": 1.9166666666666667,
+     "downs": 0.5433333333333333
+    },
+    "dot": {
+     "dmg": 0,
+     "dot": 76.88666666666667,
+     "brk": 0,
+     "downs": 1.1633333333333333
+    },
+    "fortress_blast": {
+     "dmg": 9.05,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.14666666666666667
+    },
+    "riot_flamer": {
+     "dmg": 3.2933333333333334,
+     "dot": 0,
+     "brk": 1.6166666666666667,
+     "downs": 0.043333333333333335
+    },
+    "riot_baton": {
+     "dmg": 5.84,
+     "dot": 0,
+     "brk": 1.3033333333333332,
+     "downs": 0.07333333333333333
+    },
+    "小车残骸": {
+     "dmg": 0.28,
+     "dot": 0,
+     "brk": 0.05,
+     "downs": 0
+    },
+    "riot_captain": {
+     "dmg": 3.83,
+     "dot": 0,
+     "brk": 0.35333333333333333,
+     "downs": 0.05
+    },
+    "captain_lizard": {
+     "dmg": 0.27,
+     "dot": 0,
+     "brk": 0.05,
+     "downs": 0
+    },
+    "guard_gun": {
+     "dmg": 0.3233333333333333,
+     "dot": 0,
+     "brk": 0.03666666666666667,
+     "downs": 0
+    },
+    "swarm": {
+     "dmg": 1.0633333333333332,
+     "dot": 0,
+     "brk": 0.09333333333333334,
+     "downs": 0.03666666666666667
+    },
+    "captain_ox": {
+     "dmg": 0.68,
+     "dot": 0,
+     "brk": 0.23666666666666666,
+     "downs": 0.0033333333333333335
+    },
+    "patrol_car": {
+     "dmg": 0.47,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.0033333333333333335
+    },
+    "riot_rifle": {
+     "dmg": 1.4066666666666667,
+     "dot": 0,
+     "brk": 0.16,
+     "downs": 0.02666666666666667
+    },
+    "guard_sword": {
+     "dmg": 0.27666666666666667,
+     "dot": 0,
+     "brk": 0.02666666666666667,
+     "downs": 0
+    },
+    "酸液桶": {
+     "dmg": 0.10666666666666667,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0
+    },
+    "riot_molotov": {
+     "dmg": 0.26666666666666666,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.006666666666666667
+    },
+    "captain_wolf": {
+     "dmg": 1.0833333333333333,
+     "dot": 0,
+     "brk": 0.10666666666666667,
+     "downs": 0.02
+    },
+    "crow": {
+     "dmg": 0.43333333333333335,
+     "dot": 0,
+     "brk": 0.06,
+     "downs": 0.006666666666666667
+    },
+    "thug_hammer": {
+     "dmg": 0.03333333333333333,
+     "dot": 0,
+     "brk": 0.006666666666666667,
+     "downs": 0
+    },
+    "爆炸桶": {
+     "dmg": 0.26666666666666666,
+     "dot": 0,
+     "brk": 0.02666666666666667,
+     "downs": 0.013333333333333334
+    },
+    "bandit_boss": {
+     "dmg": 0.07333333333333333,
+     "dot": 0,
+     "brk": 0.01,
+     "downs": 0.0033333333333333335
+    },
+    "危墙": {
+     "dmg": 0.12333333333333334,
+     "dot": 0,
+     "brk": 0.023333333333333334,
+     "downs": 0
+    }
+   },
+   "vehicle": {
+    "battles": 284,
+    "paid": 1,
+    "cover": 2.066901408450704,
+    "blastRate": 0.4859154929577465,
+    "steal": 0,
+    "stealBattles": 0,
+    "dmg": 45.985915492957744,
+    "blastDmg": 9.559859154929578,
+    "absorbed": 89.67957746478874
+   }
+  },
+  "fortress|battle|without|2": {
+   "n": 100,
+   "outcomes": {
+    "win": 62,
+    "lose": 38,
+    "retreat": 0,
+    "timeout": 0,
+    "error": 0
+   },
+   "winRate": 0.62,
+   "ci": [
+    0.5220975529551107,
+    0.7090240074752127
+   ],
+   "levels": [
+    2,
+    3,
+    4
+   ],
+   "rounds": 4.91,
+   "taken": 81.79,
+   "downs": 1.2,
+   "deaths": 0,
+   "tokens": 4.08,
+   "foes": 3.27,
+   "burnShare": 0.40397350993377484,
+   "burnRoundShare": 0.5549872122762148,
+   "kits": {
+    "riot_rifle": {
+     "dmg": 8.15,
+     "dot": 0,
+     "brk": 0.8,
+     "downs": 0.06
+    },
+    "riot_flamer": {
+     "dmg": 9.99,
+     "dot": 0,
+     "brk": 3.67,
+     "downs": 0.18
+    },
+    "dot": {
+     "dmg": 0,
+     "dot": 29.27,
+     "brk": 0,
+     "downs": 0.54
+    },
+    "riot_baton": {
+     "dmg": 13.36,
+     "dot": 0,
+     "brk": 2.66,
+     "downs": 0.16
+    },
+    "captain_wolf": {
+     "dmg": 1.36,
+     "dot": 0,
+     "brk": 0.13,
+     "downs": 0.03
+    },
+    "riot_captain": {
+     "dmg": 11.12,
+     "dot": 0,
+     "brk": 0.78,
+     "downs": 0.13
+    },
+    "guard_sword": {
+     "dmg": 1.33,
+     "dot": 0,
+     "brk": 0.21,
+     "downs": 0.01
+    },
+    "riot_molotov": {
+     "dmg": 0.63,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0
+    },
+    "小车残骸": {
+     "dmg": 0.3,
+     "dot": 0,
+     "brk": 0.05,
+     "downs": 0
+    },
+    "captain_lizard": {
+     "dmg": 1.29,
+     "dot": 0,
+     "brk": 0.27,
+     "downs": 0
+    },
+    "guard_gun": {
+     "dmg": 0.52,
+     "dot": 0,
+     "brk": 0.08,
+     "downs": 0
+    },
+    "swarm": {
+     "dmg": 1.27,
+     "dot": 0,
+     "brk": 0.1,
+     "downs": 0.04
+    },
+    "captain_ox": {
+     "dmg": 0.82,
+     "dot": 0,
+     "brk": 0.21,
+     "downs": 0
+    },
+    "patrol_car": {
+     "dmg": 0.98,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.03
+    },
+    "crow": {
+     "dmg": 1.3,
+     "dot": 0,
+     "brk": 0.18,
+     "downs": 0.02
+    },
+    "thug_hammer": {
+     "dmg": 0.1,
+     "dot": 0,
+     "brk": 0.02,
+     "downs": 0
+    }
+   },
+   "vehicle": {
+    "battles": 0,
+    "paid": null,
+    "cover": null,
+    "blastRate": null,
+    "steal": null,
+    "stealBattles": 0,
+    "dmg": null,
+    "blastDmg": null,
+    "absorbed": null
+   }
+  },
+  "fortress|battle|without|all": {
+   "n": 300,
+   "outcomes": {
+    "win": 253,
+    "lose": 47,
+    "retreat": 0,
+    "timeout": 0,
+    "error": 0
+   },
+   "winRate": 0.8433333333333334,
+   "ci": [
+    0.7978919765479306,
+    0.8800931832112144
+   ],
+   "levels": [
+    2,
+    3,
+    4
+   ],
+   "rounds": 4.803333333333334,
+   "taken": 72.41666666666667,
+   "downs": 0.98,
+   "deaths": 0,
+   "tokens": 4.056666666666667,
+   "foes": 3.2533333333333334,
+   "burnShare": 0.2631103074141049,
+   "burnRoundShare": 0.558282208588957,
+   "kits": {
+    "riot_rifle": {
+     "dmg": 6.983333333333333,
+     "dot": 0,
+     "brk": 0.6733333333333333,
+     "downs": 0.04
+    },
+    "riot_flamer": {
+     "dmg": 7.95,
+     "dot": 0,
+     "brk": 2.8733333333333335,
+     "downs": 0.1
+    },
+    "dot": {
+     "dmg": 0,
+     "dot": 30.05666666666667,
+     "brk": 0,
+     "downs": 0.55
+    },
+    "riot_baton": {
+     "dmg": 9.356666666666667,
+     "dot": 0,
+     "brk": 2.263333333333333,
+     "downs": 0.09666666666666666
+    },
+    "captain_wolf": {
+     "dmg": 1.4266666666666667,
+     "dot": 0,
+     "brk": 0.14666666666666667,
+     "downs": 0.023333333333333334
+    },
+    "riot_captain": {
+     "dmg": 9.96,
+     "dot": 0,
+     "brk": 0.8366666666666667,
+     "downs": 0.09
+    },
+    "guard_sword": {
+     "dmg": 0.6933333333333334,
+     "dot": 0,
+     "brk": 0.1,
+     "downs": 0.006666666666666667
+    },
+    "riot_molotov": {
+     "dmg": 0.6733333333333333,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.0033333333333333335
+    },
+    "小车残骸": {
+     "dmg": 0.27,
+     "dot": 0,
+     "brk": 0.05,
+     "downs": 0
+    },
+    "captain_lizard": {
+     "dmg": 0.7966666666666666,
+     "dot": 0,
+     "brk": 0.15,
+     "downs": 0
+    },
+    "guard_gun": {
+     "dmg": 0.4,
+     "dot": 0,
+     "brk": 0.06333333333333334,
+     "downs": 0
+    },
+    "swarm": {
+     "dmg": 1.2066666666666668,
+     "dot": 0,
+     "brk": 0.11666666666666667,
+     "downs": 0.03333333333333333
+    },
+    "captain_ox": {
+     "dmg": 0.9666666666666667,
+     "dot": 0,
+     "brk": 0.31,
+     "downs": 0.006666666666666667
+    },
+    "patrol_car": {
+     "dmg": 0.5366666666666666,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.016666666666666666
+    },
+    "crow": {
+     "dmg": 0.43333333333333335,
+     "dot": 0,
+     "brk": 0.06,
+     "downs": 0.006666666666666667
+    },
+    "thug_hammer": {
+     "dmg": 0.11,
+     "dot": 0,
+     "brk": 0.02,
+     "downs": 0
+    },
+    "危墙": {
+     "dmg": 0.4166666666666667,
+     "dot": 0,
+     "brk": 0.12,
+     "downs": 0
+    },
+    "爆炸桶": {
+     "dmg": 0.10666666666666667,
+     "dot": 0,
+     "brk": 0.013333333333333334,
+     "downs": 0.0033333333333333335
+    },
+    "boomcar": {
+     "dmg": 0.056666666666666664,
+     "dot": 0,
+     "brk": 0.013333333333333334,
+     "downs": 0.0033333333333333335
+    },
+    "bandit_boss": {
+     "dmg": 0.016666666666666666,
+     "dot": 0,
+     "brk": 0.006666666666666667,
+     "downs": 0
+    }
+   },
+   "vehicle": {
+    "battles": 0,
+    "paid": null,
+    "cover": null,
+    "blastRate": null,
+    "steal": null,
+    "stealBattles": 0,
+    "dmg": null,
+    "blastDmg": null,
+    "absorbed": null
+   }
+  },
+  "fortress|elite|with|2": {
+   "n": 100,
+   "outcomes": {
+    "win": 4,
+    "lose": 93,
+    "retreat": 0,
+    "timeout": 3,
+    "error": 0
+   },
+   "winRate": 0.04,
+   "ci": [
+    0.01566330399154762,
+    0.0983707143588792
+   ],
+   "levels": [
+    3,
+    4,
+    5
+   ],
+   "rounds": 4.13,
+   "taken": 124.51,
+   "downs": 1.85,
+   "deaths": 0,
+   "tokens": 5,
+   "foes": 4.11,
+   "burnShare": 0.4278523489932886,
+   "burnRoundShare": 0.5047923322683706,
+   "kits": {
+    "riot_baton": {
+     "dmg": 9.18,
+     "dot": 0,
+     "brk": 1.38,
+     "downs": 0.1
+    },
+    "fortress": {
+     "dmg": 56.68,
+     "dot": 0,
+     "brk": 3.62,
+     "downs": 0.8
+    },
+    "riot_flamer": {
+     "dmg": 6.25,
+     "dot": 0,
+     "brk": 2.46,
+     "downs": 0.14
+    },
+    "dot": {
+     "dmg": 0,
+     "dot": 26.78,
+     "brk": 0,
+     "downs": 0.54
+    },
+    "guard_gun": {
+     "dmg": 0.5,
+     "dot": 0,
+     "brk": 0.05,
+     "downs": 0
+    },
+    "riot_captain": {
+     "dmg": 6,
+     "dot": 0,
+     "brk": 0.37,
+     "downs": 0.05
+    },
+    "fortress_blast": {
+     "dmg": 1.59,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.01
+    },
+    "riot_rifle": {
+     "dmg": 5.1,
+     "dot": 0,
+     "brk": 0.43,
+     "downs": 0.03
+    },
+    "captain_wolf": {
+     "dmg": 2.72,
+     "dot": 0,
+     "brk": 0.14,
+     "downs": 0.01
+    },
+    "crow": {
+     "dmg": 4.4,
+     "dot": 0,
+     "brk": 0.27,
+     "downs": 0.05
+    },
+    "guard_sword": {
+     "dmg": 1.47,
+     "dot": 0,
+     "brk": 0.14,
+     "downs": 0.01
+    },
+    "patrol_car": {
+     "dmg": 1.17,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.01
+    },
+    "captain_ox": {
+     "dmg": 1.28,
+     "dot": 0,
+     "brk": 0.3,
+     "downs": 0.03
+    },
+    "小车残骸": {
+     "dmg": 0.24,
+     "dot": 0,
+     "brk": 0.05,
+     "downs": 0.01
+    },
+    "captain_lizard": {
+     "dmg": 0.45,
+     "dot": 0,
+     "brk": 0.06,
+     "downs": 0
+    },
+    "boomcar": {
+     "dmg": 0.28,
+     "dot": 0,
+     "brk": 0.04,
+     "downs": 0.02
+    },
+    "riot_molotov": {
+     "dmg": 0.08,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0
+    },
+    "swarm": {
+     "dmg": 0.34,
+     "dot": 0,
+     "brk": 0.05,
+     "downs": 0.04
+    }
+   },
+   "vehicle": {
+    "battles": 94,
+    "paid": 0,
+    "cover": 1.2234042553191489,
+    "blastRate": 0.11702127659574468,
+    "steal": 0,
+    "stealBattles": 0,
+    "dmg": 60.297872340425535,
+    "blastDmg": 1.6914893617021276,
+    "absorbed": 25.97872340425532
+   }
+  },
+  "fortress|elite|with|all": {
+   "n": 300,
+   "outcomes": {
+    "win": 50,
+    "lose": 240,
+    "retreat": 0,
+    "timeout": 10,
+    "error": 0
+   },
+   "winRate": 0.16666666666666666,
+   "ci": [
+    0.1287653312036807,
+    0.21299664961268325
+   ],
+   "levels": [
+    3,
+    4,
+    5
+   ],
+   "rounds": 5.726666666666667,
+   "taken": 203.14666666666668,
+   "downs": 2.3466666666666667,
+   "deaths": 0,
+   "tokens": 5,
+   "foes": 3.9966666666666666,
+   "burnShare": 0.4346210995542348,
+   "burnRoundShare": 0.6071932299012694,
+   "kits": {
+    "riot_baton": {
+     "dmg": 10.996666666666666,
+     "dot": 0,
+     "brk": 2.1666666666666665,
+     "downs": 0.10666666666666667
+    },
+    "fortress": {
+     "dmg": 69.45333333333333,
+     "dot": 0,
+     "brk": 3.0633333333333335,
+     "downs": 0.7933333333333333
+    },
+    "riot_flamer": {
+     "dmg": 8.026666666666667,
+     "dot": 0,
+     "brk": 3.256666666666667,
+     "downs": 0.11
+    },
+    "dot": {
+     "dmg": 0,
+     "dot": 83.38666666666667,
+     "brk": 0,
+     "downs": 0.9966666666666667
+    },
+    "guard_gun": {
+     "dmg": 0.31,
+     "dot": 0,
+     "brk": 0.03666666666666667,
+     "downs": 0
+    },
+    "riot_captain": {
+     "dmg": 7.09,
+     "dot": 0,
+     "brk": 0.5666666666666667,
+     "downs": 0.056666666666666664
+    },
+    "fortress_blast": {
+     "dmg": 6.676666666666667,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.08
+    },
+    "riot_rifle": {
+     "dmg": 3.533333333333333,
+     "dot": 0,
+     "brk": 0.3433333333333333,
+     "downs": 0.02
+    },
+    "captain_wolf": {
+     "dmg": 3.3966666666666665,
+     "dot": 0,
+     "brk": 0.23666666666666666,
+     "downs": 0.02
+    },
+    "crow": {
+     "dmg": 2.0533333333333332,
+     "dot": 0,
+     "brk": 0.13666666666666666,
+     "downs": 0.02
+    },
+    "guard_sword": {
+     "dmg": 0.6933333333333334,
+     "dot": 0,
+     "brk": 0.07666666666666666,
+     "downs": 0.0033333333333333335
+    },
+    "patrol_car": {
+     "dmg": 1.2166666666666666,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.02
+    },
+    "captain_ox": {
+     "dmg": 2.1566666666666667,
+     "dot": 0,
+     "brk": 0.44666666666666666,
+     "downs": 0.023333333333333334
+    },
+    "小车残骸": {
+     "dmg": 0.21333333333333335,
+     "dot": 0,
+     "brk": 0.04,
+     "downs": 0.0033333333333333335
+    },
+    "captain_lizard": {
+     "dmg": 0.5433333333333333,
+     "dot": 0,
+     "brk": 0.08666666666666667,
+     "downs": 0
+    },
+    "boomcar": {
+     "dmg": 0.6533333333333333,
+     "dot": 0,
+     "brk": 0.08666666666666667,
+     "downs": 0.013333333333333334
+    },
+    "riot_molotov": {
+     "dmg": 0.59,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.013333333333333334
+    },
+    "swarm": {
+     "dmg": 0.6266666666666667,
+     "dot": 0,
+     "brk": 0.07333333333333333,
+     "downs": 0.03333333333333333
+    },
+    "爆炸桶": {
+     "dmg": 0.58,
+     "dot": 0,
+     "brk": 0.08,
+     "downs": 0.02
+    },
+    "bandit_boss": {
+     "dmg": 0.30666666666666664,
+     "dot": 0,
+     "brk": 0.06,
+     "downs": 0.01
+    },
+    "危墙": {
+     "dmg": 0.14666666666666667,
+     "dot": 0,
+     "brk": 0.04,
+     "downs": 0
+    },
+    "thug_hammer": {
+     "dmg": 0.04,
+     "dot": 0,
+     "brk": 0.006666666666666667,
+     "downs": 0
+    },
+    "酸液桶": {
+     "dmg": 0.03,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0
+    },
+    "电池": {
+     "dmg": 0.4266666666666667,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.0033333333333333335
+    }
+   },
+   "vehicle": {
+    "battles": 281,
+    "paid": 0,
+    "cover": 2.213523131672598,
+    "blastRate": 0.34519572953736655,
+    "steal": 0,
+    "stealBattles": 0,
+    "dmg": 74.14946619217082,
+    "blastDmg": 7.128113879003559,
+    "absorbed": 79.94306049822065
+   }
+  },
+  "fortress|elite|token|2": {
+   "n": 100,
+   "outcomes": {
+    "win": 7,
+    "lose": 90,
+    "retreat": 0,
+    "timeout": 3,
+    "error": 0
+   },
+   "winRate": 0.07,
+   "ci": [
+    0.03431926106727268,
+    0.137495147390735
+   ],
+   "levels": [
+    3,
+    4,
+    5
+   ],
+   "rounds": 4.76,
+   "taken": 135.73,
+   "downs": 1.83,
+   "deaths": 0,
+   "tokens": 4.06,
+   "foes": 3.4,
+   "burnShare": 0.4739803094233474,
+   "burnRoundShare": 0.5664893617021277,
+   "kits": {
+    "riot_baton": {
+     "dmg": 7.79,
+     "dot": 0,
+     "brk": 1.31,
+     "downs": 0.11
+    },
+    "fortress": {
+     "dmg": 59.15,
+     "dot": 0,
+     "brk": 3.69,
+     "downs": 0.95
+    },
+    "dot": {
+     "dmg": 0,
+     "dot": 42.65,
+     "brk": 0,
+     "downs": 0.48
+    },
+    "fortress_blast": {
+     "dmg": 2.13,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.01
+    },
+    "riot_captain": {
+     "dmg": 3.21,
+     "dot": 0,
+     "brk": 0.24,
+     "downs": 0.03
+    },
+    "riot_flamer": {
+     "dmg": 5.19,
+     "dot": 0,
+     "brk": 2.07,
+     "downs": 0.07
+    },
+    "guard_gun": {
+     "dmg": 0.11,
+     "dot": 0,
+     "brk": 0.03,
+     "downs": 0
+    },
+    "swarm": {
+     "dmg": 0.47,
+     "dot": 0,
+     "brk": 0.05,
+     "downs": 0.04
+    },
+    "captain_wolf": {
+     "dmg": 3.52,
+     "dot": 0,
+     "brk": 0.18,
+     "downs": 0.01
+    },
+    "riot_rifle": {
+     "dmg": 3.24,
+     "dot": 0,
+     "brk": 0.31,
+     "downs": 0.03
+    },
+    "crow": {
+     "dmg": 3.79,
+     "dot": 0,
+     "brk": 0.24,
+     "downs": 0.04
+    },
+    "guard_sword": {
+     "dmg": 1.59,
+     "dot": 0,
+     "brk": 0.13,
+     "downs": 0.01
+    },
+    "patrol_car": {
+     "dmg": 0.73,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.01
+    },
+    "captain_ox": {
+     "dmg": 1.17,
+     "dot": 0,
+     "brk": 0.32,
+     "downs": 0.02
+    },
+    "小车残骸": {
+     "dmg": 0.21,
+     "dot": 0,
+     "brk": 0.04,
+     "downs": 0
+    },
+    "captain_lizard": {
+     "dmg": 0.62,
+     "dot": 0,
+     "brk": 0.07,
+     "downs": 0.01
+    },
+    "riot_molotov": {
+     "dmg": 0.16,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.01
+    }
+   },
+   "vehicle": {
+    "battles": 94,
+    "paid": 1,
+    "cover": 1.2553191489361701,
+    "blastRate": 0.1702127659574468,
+    "steal": 0,
+    "stealBattles": 0,
+    "dmg": 62.92553191489362,
+    "blastDmg": 2.265957446808511,
+    "absorbed": 34
+   }
+  },
+  "fortress|elite|token|all": {
+   "n": 300,
+   "outcomes": {
+    "win": 100,
+    "lose": 189,
+    "retreat": 0,
+    "timeout": 11,
+    "error": 0
+   },
+   "winRate": 0.3333333333333333,
+   "ci": [
+    0.2823934472922627,
+    0.38848754311591926
+   ],
+   "levels": [
+    3,
+    4,
+    5
+   ],
+   "rounds": 5.976666666666667,
+   "taken": 185.9,
+   "downs": 2.1633333333333336,
+   "deaths": 0,
+   "tokens": 4.0633333333333335,
+   "foes": 3.316666666666667,
+   "burnShare": 0.40781213671239247,
+   "burnRoundShare": 0.5867381111855325,
+   "kits": {
+    "riot_baton": {
+     "dmg": 9.603333333333333,
+     "dot": 0,
+     "brk": 1.9533333333333334,
+     "downs": 0.10666666666666667
+    },
+    "fortress": {
+     "dmg": 58.876666666666665,
+     "dot": 0,
+     "brk": 2.703333333333333,
+     "downs": 0.76
+    },
+    "dot": {
+     "dmg": 0,
+     "dot": 84.31333333333333,
+     "brk": 0,
+     "downs": 0.9233333333333333
+    },
+    "fortress_blast": {
+     "dmg": 8.043333333333333,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.09666666666666666
+    },
+    "riot_captain": {
+     "dmg": 3.8566666666666665,
+     "dot": 0,
+     "brk": 0.4066666666666667,
+     "downs": 0.02666666666666667
+    },
+    "riot_flamer": {
+     "dmg": 5.906666666666666,
+     "dot": 0,
+     "brk": 2.4366666666666665,
+     "downs": 0.07
+    },
+    "guard_gun": {
+     "dmg": 0.14666666666666667,
+     "dot": 0,
+     "brk": 0.02666666666666667,
+     "downs": 0
+    },
+    "swarm": {
+     "dmg": 0.7733333333333333,
+     "dot": 0,
+     "brk": 0.07666666666666666,
+     "downs": 0.04
+    },
+    "captain_wolf": {
+     "dmg": 3.3233333333333333,
+     "dot": 0,
+     "brk": 0.23,
+     "downs": 0.02
+    },
+    "riot_rifle": {
+     "dmg": 2.57,
+     "dot": 0,
+     "brk": 0.25,
+     "downs": 0.02666666666666667
+    },
+    "crow": {
+     "dmg": 1.85,
+     "dot": 0,
+     "brk": 0.12666666666666668,
+     "downs": 0.016666666666666666
+    },
+    "guard_sword": {
+     "dmg": 0.6366666666666667,
+     "dot": 0,
+     "brk": 0.06,
+     "downs": 0.0033333333333333335
+    },
+    "patrol_car": {
+     "dmg": 0.83,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.006666666666666667
+    },
+    "captain_ox": {
+     "dmg": 2.2333333333333334,
+     "dot": 0,
+     "brk": 0.4666666666666667,
+     "downs": 0.023333333333333334
+    },
+    "小车残骸": {
+     "dmg": 0.15666666666666668,
+     "dot": 0,
+     "brk": 0.03,
+     "downs": 0
+    },
+    "captain_lizard": {
+     "dmg": 0.6,
+     "dot": 0,
+     "brk": 0.09,
+     "downs": 0.0033333333333333335
+    },
+    "riot_molotov": {
+     "dmg": 0.19333333333333333,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.0033333333333333335
+    },
+    "boomcar": {
+     "dmg": 0.5533333333333333,
+     "dot": 0,
+     "brk": 0.07333333333333333,
+     "downs": 0.0033333333333333335
+    },
+    "爆炸桶": {
+     "dmg": 0.9766666666666667,
+     "dot": 0,
+     "brk": 0.09333333333333334,
+     "downs": 0.02666666666666667
+    },
+    "危墙": {
+     "dmg": 0.16666666666666666,
+     "dot": 0,
+     "brk": 0.02,
+     "downs": 0
+    },
+    "酸液桶": {
+     "dmg": 0.09,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0
+    },
+    "bandit_boss": {
+     "dmg": 0.2,
+     "dot": 0,
+     "brk": 0.04666666666666667,
+     "downs": 0.006666666666666667
+    }
+   },
+   "vehicle": {
+    "battles": 281,
+    "paid": 1,
+    "cover": 2.078291814946619,
+    "blastRate": 0.4377224199288256,
+    "steal": 0,
+    "stealBattles": 0,
+    "dmg": 62.8576512455516,
+    "blastDmg": 8.587188612099645,
+    "absorbed": 89.96797153024912
+   }
+  },
+  "fortress|elite|without|2": {
+   "n": 100,
+   "outcomes": {
+    "win": 29,
+    "lose": 71,
+    "retreat": 0,
+    "timeout": 0,
+    "error": 0
+   },
+   "winRate": 0.29,
+   "ci": [
+    0.2101483574912227,
+    0.3853889117557111
+   ],
+   "levels": [
+    3,
+    4,
+    5
+   ],
+   "rounds": 4.88,
+   "taken": 121.67,
+   "downs": 1.69,
+   "deaths": 0,
+   "tokens": 5,
+   "foes": 4.11,
+   "burnShare": 0.36486486486486486,
+   "burnRoundShare": 0.5051546391752577,
+   "kits": {
+    "riot_captain": {
+     "dmg": 19.68,
+     "dot": 0,
+     "brk": 1.24,
+     "downs": 0.3
+    },
+    "riot_flamer": {
+     "dmg": 13.67,
+     "dot": 0,
+     "brk": 4.01,
+     "downs": 0.15
+    },
+    "dot": {
+     "dmg": 0,
+     "dot": 29.54,
+     "brk": 0,
+     "downs": 0.54
+    },
+    "危墙": {
+     "dmg": 0.3,
+     "dot": 0,
+     "brk": 0.11,
+     "downs": 0
+    },
+    "riot_baton": {
+     "dmg": 27.23,
+     "dot": 0,
+     "brk": 4.83,
+     "downs": 0.37
+    },
+    "guard_gun": {
+     "dmg": 0.41,
+     "dot": 0,
+     "brk": 0.04,
+     "downs": 0
+    },
+    "swarm": {
+     "dmg": 1.18,
+     "dot": 0,
+     "brk": 0.09,
+     "downs": 0.03
+    },
+    "thug_hammer": {
+     "dmg": 0.36,
+     "dot": 0,
+     "brk": 0.08,
+     "downs": 0.01
+    },
+    "riot_rifle": {
+     "dmg": 11.72,
+     "dot": 0,
+     "brk": 1.09,
+     "downs": 0.14
+    },
+    "captain_wolf": {
+     "dmg": 5.76,
+     "dot": 0,
+     "brk": 0.28,
+     "downs": 0.04
+    },
+    "riot_molotov": {
+     "dmg": 0.38,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0
+    },
+    "crow": {
+     "dmg": 5.77,
+     "dot": 0,
+     "brk": 0.36,
+     "downs": 0.06
+    },
+    "guard_sword": {
+     "dmg": 2.85,
+     "dot": 0,
+     "brk": 0.31,
+     "downs": 0.02
+    },
+    "patrol_car": {
+     "dmg": 0.7,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.01
+    },
+    "captain_ox": {
+     "dmg": 1.05,
+     "dot": 0,
+     "brk": 0.28,
+     "downs": 0.02
+    },
+    "小车残骸": {
+     "dmg": 0.26,
+     "dot": 0,
+     "brk": 0.05,
+     "downs": 0
+    },
+    "captain_lizard": {
+     "dmg": 0.33,
+     "dot": 0,
+     "brk": 0.06,
+     "downs": 0
+    },
+    "boomcar": {
+     "dmg": 0.48,
+     "dot": 0,
+     "brk": 0.04,
+     "downs": 0
+    }
+   },
+   "vehicle": {
+    "battles": 0,
+    "paid": null,
+    "cover": null,
+    "blastRate": null,
+    "steal": null,
+    "stealBattles": 0,
+    "dmg": null,
+    "blastDmg": null,
+    "absorbed": null
+   }
+  },
+  "fortress|elite|without|all": {
+   "n": 300,
+   "outcomes": {
+    "win": 176,
+    "lose": 122,
+    "retreat": 0,
+    "timeout": 2,
+    "error": 0
+   },
+   "winRate": 0.5866666666666667,
+   "ci": [
+    0.5301906151568371,
+    0.6409512698309082
+   ],
+   "levels": [
+    3,
+    4,
+    5
+   ],
+   "rounds": 5.8966666666666665,
+   "taken": 126.63666666666667,
+   "downs": 1.5,
+   "deaths": 0,
+   "tokens": 5,
+   "foes": 3.9966666666666666,
+   "burnShare": 0.27437258687258687,
+   "burnRoundShare": 0.537780803267529,
+   "kits": {
+    "riot_captain": {
+     "dmg": 17.73,
+     "dot": 0,
+     "brk": 1.4366666666666668,
+     "downs": 0.18666666666666668
+    },
+    "riot_flamer": {
+     "dmg": 14.18,
+     "dot": 0,
+     "brk": 4.43,
+     "downs": 0.10333333333333333
+    },
+    "dot": {
+     "dmg": 0,
+     "dot": 47.63666666666666,
+     "brk": 0,
+     "downs": 0.75
+    },
+    "危墙": {
+     "dmg": 0.9733333333333334,
+     "dot": 0,
+     "brk": 0.26,
+     "downs": 0
+    },
+    "riot_baton": {
+     "dmg": 20.003333333333334,
+     "dot": 0,
+     "brk": 4.233333333333333,
+     "downs": 0.22
+    },
+    "guard_gun": {
+     "dmg": 0.27666666666666667,
+     "dot": 0,
+     "brk": 0.03666666666666667,
+     "downs": 0
+    },
+    "swarm": {
+     "dmg": 1.0066666666666666,
+     "dot": 0,
+     "brk": 0.09333333333333334,
+     "downs": 0.03666666666666667
+    },
+    "thug_hammer": {
+     "dmg": 0.15333333333333332,
+     "dot": 0,
+     "brk": 0.03333333333333333,
+     "downs": 0.0033333333333333335
+    },
+    "riot_rifle": {
+     "dmg": 9.063333333333333,
+     "dot": 0,
+     "brk": 0.9233333333333333,
+     "downs": 0.08
+    },
+    "captain_wolf": {
+     "dmg": 5.163333333333333,
+     "dot": 0,
+     "brk": 0.4033333333333333,
+     "downs": 0.04
+    },
+    "riot_molotov": {
+     "dmg": 0.87,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0
+    },
+    "crow": {
+     "dmg": 2.51,
+     "dot": 0,
+     "brk": 0.16666666666666666,
+     "downs": 0.023333333333333334
+    },
+    "guard_sword": {
+     "dmg": 1.1,
+     "dot": 0,
+     "brk": 0.12666666666666668,
+     "downs": 0.006666666666666667
+    },
+    "patrol_car": {
+     "dmg": 1.3933333333333333,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.013333333333333334
+    },
+    "captain_ox": {
+     "dmg": 2.57,
+     "dot": 0,
+     "brk": 0.52,
+     "downs": 0.023333333333333334
+    },
+    "小车残骸": {
+     "dmg": 0.20666666666666667,
+     "dot": 0,
+     "brk": 0.04,
+     "downs": 0
+    },
+    "captain_lizard": {
+     "dmg": 0.5033333333333333,
+     "dot": 0,
+     "brk": 0.08666666666666667,
+     "downs": 0
+    },
+    "boomcar": {
+     "dmg": 0.7333333333333333,
+     "dot": 0,
+     "brk": 0.08666666666666667,
+     "downs": 0
+    },
+    "爆炸桶": {
+     "dmg": 0.25,
+     "dot": 0,
+     "brk": 0.03333333333333333,
+     "downs": 0.006666666666666667
+    },
+    "bandit_boss": {
+     "dmg": 0.25333333333333335,
+     "dot": 0,
+     "brk": 0.06,
+     "downs": 0.006666666666666667
+    },
+    "酸液桶": {
+     "dmg": 0.06,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0
+    }
+   },
+   "vehicle": {
+    "battles": 0,
+    "paid": null,
+    "cover": null,
+    "blastRate": null,
+    "steal": null,
+    "stealBattles": 0,
+    "dmg": null,
+    "blastDmg": null,
+    "absorbed": null
+   }
+  },
+  "fortress|battle|with|3": {
+   "n": 100,
+   "outcomes": {
+    "win": 37,
+    "lose": 59,
+    "retreat": 0,
+    "timeout": 4,
+    "error": 0
+   },
+   "winRate": 0.37,
+   "ci": [
+    0.2818236053432453,
+    0.46779470419057084
+   ],
+   "levels": [
+    2,
+    3,
+    4
+   ],
+   "rounds": 6.22,
+   "taken": 163.14,
+   "downs": 2.29,
+   "deaths": 0,
+   "tokens": 4.02,
+   "foes": 3.32,
+   "burnShare": 0.44460028050490885,
+   "burnRoundShare": 0.6360153256704981,
+   "kits": {
+    "fortress": {
+     "dmg": 49.26,
+     "dot": 0,
+     "brk": 2.04,
+     "downs": 0.62
+    },
+    "riot_flamer": {
+     "dmg": 5.8,
+     "dot": 0,
+     "brk": 2.4,
+     "downs": 0.05
+    },
+    "dot": {
+     "dmg": 0,
+     "dot": 75.48,
+     "brk": 0,
+     "downs": 1.16
+    },
+    "fortress_blast": {
+     "dmg": 8.5,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.11
+    },
+    "riot_captain": {
+     "dmg": 4.46,
+     "dot": 0,
+     "brk": 0.39,
+     "downs": 0.05
+    },
+    "riot_rifle": {
+     "dmg": 4.27,
+     "dot": 0,
+     "brk": 0.48,
+     "downs": 0.06
+    },
+    "riot_baton": {
+     "dmg": 7.48,
+     "dot": 0,
+     "brk": 1.56,
+     "downs": 0.07
+    },
+    "riot_molotov": {
+     "dmg": 0.43,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.01
+    },
+    "小车残骸": {
+     "dmg": 0.26,
+     "dot": 0,
+     "brk": 0.05,
+     "downs": 0
+    },
+    "captain_wolf": {
+     "dmg": 1.61,
+     "dot": 0,
+     "brk": 0.15,
+     "downs": 0.04
+    },
+    "爆炸桶": {
+     "dmg": 1.37,
+     "dot": 0,
+     "brk": 0.12,
+     "downs": 0.01
+    },
+    "guard_gun": {
+     "dmg": 0.35,
+     "dot": 0,
+     "brk": 0.05,
+     "downs": 0
+    },
+    "swarm": {
+     "dmg": 1.69,
+     "dot": 0,
+     "brk": 0.15,
+     "downs": 0.06
+    },
+    "captain_ox": {
+     "dmg": 0.41,
+     "dot": 0,
+     "brk": 0.12,
+     "downs": 0.01
+    },
+    "patrol_car": {
+     "dmg": 1,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.02
+    },
+    "captain_lizard": {
+     "dmg": 0.55,
+     "dot": 0,
+     "brk": 0.08,
+     "downs": 0
+    },
+    "guard_sword": {
+     "dmg": 0.05,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0
+    },
+    "boomcar": {
+     "dmg": 0.17,
+     "dot": 0,
+     "brk": 0.04,
+     "downs": 0.02
+    }
+   },
+   "vehicle": {
+    "battles": 96,
+    "paid": 0,
+    "cover": 2.1145833333333335,
+    "blastRate": 0.4479166666666667,
+    "steal": 0,
+    "stealBattles": 0,
+    "dmg": 51.3125,
+    "blastDmg": 8.854166666666666,
+    "absorbed": 75.45833333333333
+   }
+  },
+  "fortress|battle|token|3": {
+   "n": 100,
+   "outcomes": {
+    "win": 57,
+    "lose": 39,
+    "retreat": 0,
+    "timeout": 4,
+    "error": 0
+   },
+   "winRate": 0.57,
+   "ci": [
+    0.47215389549212305,
+    0.6626670147588988
+   ],
+   "levels": [
+    2,
+    3,
+    4
+   ],
+   "rounds": 5.83,
+   "taken": 129.05,
+   "downs": 1.97,
+   "deaths": 0,
+   "tokens": 3.06,
+   "foes": 2.68,
+   "burnShare": 0.43928035982008995,
+   "burnRoundShare": 0.6169772256728778,
+   "kits": {
+    "fortress": {
+     "dmg": 39.24,
+     "dot": 0,
+     "brk": 1.53,
+     "downs": 0.43
+    },
+    "dot": {
+     "dmg": 0,
+     "dot": 58.99,
+     "brk": 0,
+     "downs": 1.06
+    },
+    "fortress_blast": {
+     "dmg": 10.72,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.19
+    },
+    "riot_flamer": {
+     "dmg": 3.32,
+     "dot": 0,
+     "brk": 1.48,
+     "downs": 0.04
+    },
+    "riot_baton": {
+     "dmg": 7.34,
+     "dot": 0,
+     "brk": 1.45,
+     "downs": 0.09
+    },
+    "riot_rifle": {
+     "dmg": 1.83,
+     "dot": 0,
+     "brk": 0.17,
+     "downs": 0.03
+    },
+    "patrol_car": {
+     "dmg": 0.82,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.01
+    },
+    "小车残骸": {
+     "dmg": 0.46,
+     "dot": 0,
+     "brk": 0.09,
+     "downs": 0
+    },
+    "captain_wolf": {
+     "dmg": 0.74,
+     "dot": 0,
+     "brk": 0.06,
+     "downs": 0.01
+    },
+    "riot_captain": {
+     "dmg": 2.53,
+     "dot": 0,
+     "brk": 0.22,
+     "downs": 0.04
+    },
+    "guard_gun": {
+     "dmg": 0.41,
+     "dot": 0,
+     "brk": 0.04,
+     "downs": 0
+    },
+    "riot_molotov": {
+     "dmg": 0.32,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.01
+    },
+    "swarm": {
+     "dmg": 2.01,
+     "dot": 0,
+     "brk": 0.15,
+     "downs": 0.06
+    },
+    "guard_sword": {
+     "dmg": 0.32,
+     "dot": 0,
+     "brk": 0.02,
+     "downs": 0
+    },
+    "captain_ox": {
+     "dmg": 0,
+     "dot": 0,
+     "brk": 0.02,
+     "downs": 0
+    }
+   },
+   "vehicle": {
+    "battles": 96,
+    "paid": 1,
+    "cover": 1.9270833333333333,
+    "blastRate": 0.53125,
+    "steal": 0,
+    "stealBattles": 0,
+    "dmg": 40.875,
+    "blastDmg": 11.166666666666666,
+    "absorbed": 80.20833333333333
+   }
+  },
+  "fortress|battle|without|3": {
+   "n": 100,
+   "outcomes": {
+    "win": 97,
+    "lose": 3,
+    "retreat": 0,
+    "timeout": 0,
+    "error": 0
+   },
+   "winRate": 0.97,
+   "ci": [
+    0.9154806357094724,
+    0.9897454759759611
+   ],
+   "levels": [
+    2,
+    3,
+    4
+   ],
+   "rounds": 4.33,
+   "taken": 60.5,
+   "downs": 0.75,
+   "deaths": 0,
+   "tokens": 4.02,
+   "foes": 3.32,
+   "burnShare": 0.23839009287925697,
+   "burnRoundShare": 0.5135135135135135,
+   "kits": {
+    "riot_rifle": {
+     "dmg": 7.05,
+     "dot": 0,
+     "brk": 0.61,
+     "downs": 0.03
+    },
+    "riot_flamer": {
+     "dmg": 7.23,
+     "dot": 0,
+     "brk": 2.22,
+     "downs": 0.03
+    },
+    "dot": {
+     "dmg": 0,
+     "dot": 21.71,
+     "brk": 0,
+     "downs": 0.45
+    },
+    "riot_baton": {
+     "dmg": 8.75,
+     "dot": 0,
+     "brk": 2.02,
+     "downs": 0.08
+    },
+    "riot_captain": {
+     "dmg": 7.8,
+     "dot": 0,
+     "brk": 0.66,
+     "downs": 0.08
+    },
+    "riot_molotov": {
+     "dmg": 0.9,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.01
+    },
+    "危墙": {
+     "dmg": 0.75,
+     "dot": 0,
+     "brk": 0.21,
+     "downs": 0
+    },
+    "小车残骸": {
+     "dmg": 0.29,
+     "dot": 0,
+     "brk": 0.05,
+     "downs": 0
+    },
+    "captain_wolf": {
+     "dmg": 1.23,
+     "dot": 0,
+     "brk": 0.12,
+     "downs": 0.01
+    },
+    "guard_gun": {
+     "dmg": 0.31,
+     "dot": 0,
+     "brk": 0.06,
+     "downs": 0
+    },
+    "爆炸桶": {
+     "dmg": 0.18,
+     "dot": 0,
+     "brk": 0.02,
+     "downs": 0
+    },
+    "swarm": {
+     "dmg": 2.1,
+     "dot": 0,
+     "brk": 0.17,
+     "downs": 0.03
+    },
+    "guard_sword": {
+     "dmg": 0.14,
+     "dot": 0,
+     "brk": 0.01,
+     "downs": 0
+    },
+    "captain_ox": {
+     "dmg": 0.38,
+     "dot": 0,
+     "brk": 0.1,
+     "downs": 0
+    },
+    "patrol_car": {
+     "dmg": 0.63,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.02
+    },
+    "captain_lizard": {
+     "dmg": 0.88,
+     "dot": 0,
+     "brk": 0.12,
+     "downs": 0
+    },
+    "boomcar": {
+     "dmg": 0.17,
+     "dot": 0,
+     "brk": 0.04,
+     "downs": 0.01
+    }
+   },
+   "vehicle": {
+    "battles": 0,
+    "paid": null,
+    "cover": null,
+    "blastRate": null,
+    "steal": null,
+    "stealBattles": 0,
+    "dmg": null,
+    "blastDmg": null,
+    "absorbed": null
+   }
+  },
+  "fortress|elite|with|3": {
+   "n": 100,
+   "outcomes": {
+    "win": 21,
+    "lose": 76,
+    "retreat": 0,
+    "timeout": 3,
+    "error": 0
+   },
+   "winRate": 0.21,
+   "ci": [
+    0.141656540619153,
+    0.29979968834089865
+   ],
+   "levels": [
+    3,
+    4,
+    5
+   ],
+   "rounds": 5.64,
+   "taken": 191.08,
+   "downs": 2.28,
+   "deaths": 0,
+   "tokens": 5,
+   "foes": 3.97,
+   "burnShare": 0.4557877813504823,
+   "burnRoundShare": 0.6206896551724138,
+   "kits": {
+    "riot_baton": {
+     "dmg": 9.81,
+     "dot": 0,
+     "brk": 2.09,
+     "downs": 0.12
+    },
+    "fortress": {
+     "dmg": 65.4,
+     "dot": 0,
+     "brk": 2.9,
+     "downs": 0.67
+    },
+    "dot": {
+     "dmg": 0,
+     "dot": 74.65,
+     "brk": 0,
+     "downs": 0.95
+    },
+    "riot_flamer": {
+     "dmg": 8.56,
+     "dot": 0,
+     "brk": 2.74,
+     "downs": 0.11
+    },
+    "小车残骸": {
+     "dmg": 0.09,
+     "dot": 0,
+     "brk": 0.02,
+     "downs": 0
+    },
+    "captain_wolf": {
+     "dmg": 3.17,
+     "dot": 0,
+     "brk": 0.2,
+     "downs": 0.03
+    },
+    "fortress_blast": {
+     "dmg": 6.37,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.12
+    },
+    "riot_rifle": {
+     "dmg": 2.87,
+     "dot": 0,
+     "brk": 0.33,
+     "downs": 0.02
+    },
+    "riot_captain": {
+     "dmg": 9.06,
+     "dot": 0,
+     "brk": 0.73,
+     "downs": 0.08
+    },
+    "swarm": {
+     "dmg": 1.35,
+     "dot": 0,
+     "brk": 0.13,
+     "downs": 0.06
+    },
+    "captain_lizard": {
+     "dmg": 0.72,
+     "dot": 0,
+     "brk": 0.1,
+     "downs": 0
+    },
+    "patrol_car": {
+     "dmg": 1.52,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.03
+    },
+    "captain_ox": {
+     "dmg": 3.49,
+     "dot": 0,
+     "brk": 0.72,
+     "downs": 0.02
+    },
+    "boomcar": {
+     "dmg": 1.58,
+     "dot": 0,
+     "brk": 0.2,
+     "downs": 0.02
+    },
+    "riot_molotov": {
+     "dmg": 0.77,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.03
+    },
+    "guard_sword": {
+     "dmg": 0.37,
+     "dot": 0,
+     "brk": 0.04,
+     "downs": 0
+    },
+    "guard_gun": {
+     "dmg": 0.43,
+     "dot": 0,
+     "brk": 0.06,
+     "downs": 0
+    },
+    "爆炸桶": {
+     "dmg": 0.28,
+     "dot": 0,
+     "brk": 0.04,
+     "downs": 0.01
+    },
+    "bandit_boss": {
+     "dmg": 0.08,
+     "dot": 0,
+     "brk": 0.02,
+     "downs": 0.01
+    },
+    "危墙": {
+     "dmg": 0.3,
+     "dot": 0,
+     "brk": 0.04,
+     "downs": 0
+    },
+    "thug_hammer": {
+     "dmg": 0.12,
+     "dot": 0,
+     "brk": 0.02,
+     "downs": 0
+    },
+    "酸液桶": {
+     "dmg": 0.09,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0
+    }
+   },
+   "vehicle": {
+    "battles": 95,
+    "paid": 0,
+    "cover": 2.094736842105263,
+    "blastRate": 0.42105263157894735,
+    "steal": 0,
+    "stealBattles": 0,
+    "dmg": 68.84210526315789,
+    "blastDmg": 6.705263157894737,
+    "absorbed": 76.5578947368421
+   }
+  },
+  "fortress|elite|token|3": {
+   "n": 100,
+   "outcomes": {
+    "win": 44,
+    "lose": 53,
+    "retreat": 0,
+    "timeout": 3,
+    "error": 0
+   },
+   "winRate": 0.44,
+   "ci": [
+    0.346720266301608,
+    0.5377189534832302
+   ],
+   "levels": [
+    3,
+    4,
+    5
+   ],
+   "rounds": 5.81,
+   "taken": 173.24,
+   "downs": 2.11,
+   "deaths": 0,
+   "tokens": 4.05,
+   "foes": 3.29,
+   "burnShare": 0.41781874039938555,
+   "burnRoundShare": 0.6091476091476091,
+   "kits": {
+    "riot_baton": {
+     "dmg": 10.03,
+     "dot": 0,
+     "brk": 2.02,
+     "downs": 0.12
+    },
+    "fortress": {
+     "dmg": 54.63,
+     "dot": 0,
+     "brk": 2.3,
+     "downs": 0.54
+    },
+    "riot_rifle": {
+     "dmg": 2.55,
+     "dot": 0,
+     "brk": 0.22,
+     "downs": 0.03
+    },
+    "dot": {
+     "dmg": 0,
+     "dot": 71.91,
+     "brk": 0,
+     "downs": 0.98
+    },
+    "riot_flamer": {
+     "dmg": 6.25,
+     "dot": 0,
+     "brk": 2.5,
+     "downs": 0.08
+    },
+    "captain_wolf": {
+     "dmg": 3.23,
+     "dot": 0,
+     "brk": 0.22,
+     "downs": 0.04
+    },
+    "fortress_blast": {
+     "dmg": 9.48,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.14
+    },
+    "riot_captain": {
+     "dmg": 5.39,
+     "dot": 0,
+     "brk": 0.47,
+     "downs": 0.04
+    },
+    "swarm": {
+     "dmg": 1.23,
+     "dot": 0,
+     "brk": 0.12,
+     "downs": 0.07
+    },
+    "captain_lizard": {
+     "dmg": 0.72,
+     "dot": 0,
+     "brk": 0.1,
+     "downs": 0
+    },
+    "patrol_car": {
+     "dmg": 0.8,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.01
+    },
+    "captain_ox": {
+     "dmg": 3.86,
+     "dot": 0,
+     "brk": 0.76,
+     "downs": 0.03
+    },
+    "boomcar": {
+     "dmg": 1.58,
+     "dot": 0,
+     "brk": 0.2,
+     "downs": 0.01
+    },
+    "riot_molotov": {
+     "dmg": 0.12,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0
+    },
+    "小车残骸": {
+     "dmg": 0.02,
+     "dot": 0,
+     "brk": 0.01,
+     "downs": 0
+    },
+    "guard_gun": {
+     "dmg": 0.33,
+     "dot": 0,
+     "brk": 0.05,
+     "downs": 0
+    },
+    "爆炸桶": {
+     "dmg": 0.4,
+     "dot": 0,
+     "brk": 0.04,
+     "downs": 0.02
+    },
+    "危墙": {
+     "dmg": 0.5,
+     "dot": 0,
+     "brk": 0.06,
+     "downs": 0
+    },
+    "guard_sword": {
+     "dmg": 0.12,
+     "dot": 0,
+     "brk": 0.01,
+     "downs": 0
+    },
+    "酸液桶": {
+     "dmg": 0.09,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0
+    }
+   },
+   "vehicle": {
+    "battles": 95,
+    "paid": 1,
+    "cover": 2.263157894736842,
+    "blastRate": 0.5578947368421052,
+    "steal": 0,
+    "stealBattles": 0,
+    "dmg": 57.50526315789474,
+    "blastDmg": 9.978947368421053,
+    "absorbed": 87.66315789473684
+   }
+  },
+  "fortress|elite|without|3": {
+   "n": 100,
+   "outcomes": {
+    "win": 64,
+    "lose": 36,
+    "retreat": 0,
+    "timeout": 0,
+    "error": 0
+   },
+   "winRate": 0.64,
+   "ci": [
+    0.5423540245160874,
+    0.7272877959859567
+   ],
+   "levels": [
+    3,
+    4,
+    5
+   ],
+   "rounds": 5.66,
+   "taken": 122.25,
+   "downs": 1.45,
+   "deaths": 0,
+   "tokens": 5,
+   "foes": 3.97,
+   "burnShare": 0.32116788321167883,
+   "burnRoundShare": 0.5901287553648069,
+   "kits": {
+    "riot_baton": {
+     "dmg": 12.53,
+     "dot": 0,
+     "brk": 3.02,
+     "downs": 0.15
+    },
+    "riot_rifle": {
+     "dmg": 8.84,
+     "dot": 0,
+     "brk": 0.8,
+     "downs": 0.07
+    },
+    "riot_flamer": {
+     "dmg": 15.62,
+     "dot": 0,
+     "brk": 4.71,
+     "downs": 0.13
+    },
+    "dot": {
+     "dmg": 0,
+     "dot": 47.8,
+     "brk": 0,
+     "downs": 0.74
+    },
+    "riot_captain": {
+     "dmg": 19.2,
+     "dot": 0,
+     "brk": 1.49,
+     "downs": 0.19
+    },
+    "小车残骸": {
+     "dmg": 0.09,
+     "dot": 0,
+     "brk": 0.02,
+     "downs": 0
+    },
+    "captain_wolf": {
+     "dmg": 4.71,
+     "dot": 0,
+     "brk": 0.3,
+     "downs": 0.05
+    },
+    "swarm": {
+     "dmg": 1.65,
+     "dot": 0,
+     "brk": 0.15,
+     "downs": 0.08
+    },
+    "captain_lizard": {
+     "dmg": 0.72,
+     "dot": 0,
+     "brk": 0.1,
+     "downs": 0
+    },
+    "patrol_car": {
+     "dmg": 1.51,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.01
+    },
+    "riot_molotov": {
+     "dmg": 1.06,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0
+    },
+    "captain_ox": {
+     "dmg": 4.41,
+     "dot": 0,
+     "brk": 0.87,
+     "downs": 0.02
+    },
+    "boomcar": {
+     "dmg": 1.65,
+     "dot": 0,
+     "brk": 0.2,
+     "downs": 0
+    },
+    "危墙": {
+     "dmg": 1.34,
+     "dot": 0,
+     "brk": 0.28,
+     "downs": 0
+    },
+    "guard_sword": {
+     "dmg": 0.23,
+     "dot": 0,
+     "brk": 0.03,
+     "downs": 0
+    },
+    "guard_gun": {
+     "dmg": 0.42,
+     "dot": 0,
+     "brk": 0.07,
+     "downs": 0
+    },
+    "爆炸桶": {
+     "dmg": 0.33,
+     "dot": 0,
+     "brk": 0.04,
+     "downs": 0.01
+    },
+    "bandit_boss": {
+     "dmg": 0.04,
+     "dot": 0,
+     "brk": 0.01,
+     "downs": 0
+    },
+    "thug_hammer": {
+     "dmg": 0.1,
+     "dot": 0,
+     "brk": 0.02,
+     "downs": 0
+    }
+   },
+   "vehicle": {
+    "battles": 0,
+    "paid": null,
+    "cover": null,
+    "blastRate": null,
+    "steal": null,
+    "stealBattles": 0,
+    "dmg": null,
+    "blastDmg": null,
+    "absorbed": null
+   }
+  },
+  "fortress|battle|with|4": {
+   "n": 100,
+   "outcomes": {
+    "win": 35,
+    "lose": 64,
+    "retreat": 0,
+    "timeout": 1,
+    "error": 0
+   },
+   "winRate": 0.35,
+   "ci": [
+    0.26364248243097527,
+    0.44745556703112027
+   ],
+   "levels": [
+    2,
+    3,
+    4
+   ],
+   "rounds": 6.66,
+   "taken": 250.95,
+   "downs": 3.18,
+   "deaths": 0,
+   "tokens": 4.07,
+   "foes": 3.17,
+   "burnShare": 0.5482546201232033,
+   "burnRoundShare": 0.7862190812720848,
+   "kits": {
+    "fortress": {
+     "dmg": 66.51,
+     "dot": 0,
+     "brk": 2.19,
+     "downs": 0.78
+    },
+    "dot": {
+     "dmg": 0,
+     "dot": 143.98,
+     "brk": 0,
+     "downs": 1.9
+    },
+    "fortress_blast": {
+     "dmg": 12.07,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.17
+    },
+    "riot_flamer": {
+     "dmg": 5.04,
+     "dot": 0,
+     "brk": 3.28,
+     "downs": 0.06
+    },
+    "riot_rifle": {
+     "dmg": 2.95,
+     "dot": 0,
+     "brk": 0.33,
+     "downs": 0.03
+    },
+    "riot_captain": {
+     "dmg": 4.83,
+     "dot": 0,
+     "brk": 0.64,
+     "downs": 0.05
+    },
+    "riot_baton": {
+     "dmg": 8.05,
+     "dot": 0,
+     "brk": 2.04,
+     "downs": 0.09
+    },
+    "爆炸桶": {
+     "dmg": 1.61,
+     "dot": 0,
+     "brk": 0.14,
+     "downs": 0.03
+    },
+    "riot_molotov": {
+     "dmg": 0.55,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0
+    },
+    "swarm": {
+     "dmg": 0.53,
+     "dot": 0,
+     "brk": 0.03,
+     "downs": 0.01
+    },
+    "bandit_boss": {
+     "dmg": 0.32,
+     "dot": 0,
+     "brk": 0.05,
+     "downs": 0.01
+    },
+    "thug_hammer": {
+     "dmg": 0,
+     "dot": 0,
+     "brk": 0.02,
+     "downs": 0
+    },
+    "危墙": {
+     "dmg": 0.37,
+     "dot": 0,
+     "brk": 0.07,
+     "downs": 0
+    },
+    "captain_ox": {
+     "dmg": 1.63,
+     "dot": 0,
+     "brk": 0.62,
+     "downs": 0.01
+    },
+    "小车残骸": {
+     "dmg": 0.1,
+     "dot": 0,
+     "brk": 0.02,
+     "downs": 0
+    },
+    "captain_wolf": {
+     "dmg": 1.69,
+     "dot": 0,
+     "brk": 0.19,
+     "downs": 0.03
+    },
+    "guard_sword": {
+     "dmg": 0.25,
+     "dot": 0,
+     "brk": 0.04,
+     "downs": 0.01
+    },
+    "captain_lizard": {
+     "dmg": 0.22,
+     "dot": 0,
+     "brk": 0.06,
+     "downs": 0
+    },
+    "酸液桶": {
+     "dmg": 0.08,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0
+    },
+    "guard_gun": {
+     "dmg": 0.17,
+     "dot": 0,
+     "brk": 0.03,
+     "downs": 0
+    }
+   },
+   "vehicle": {
+    "battles": 97,
+    "paid": 0,
+    "cover": 2.783505154639175,
+    "blastRate": 0.5051546391752577,
+    "steal": 0,
+    "stealBattles": 0,
+    "dmg": 68.56701030927834,
+    "blastDmg": 12.443298969072165,
+    "absorbed": 129.8041237113402
+   }
+  },
+  "fortress|battle|token|4": {
+   "n": 100,
+   "outcomes": {
+    "win": 65,
+    "lose": 34,
+    "retreat": 0,
+    "timeout": 1,
+    "error": 0
+   },
+   "winRate": 0.65,
+   "ci": [
+    0.5525444329688796,
+    0.7363575175690247
+   ],
+   "levels": [
+    2,
+    3,
+    4
+   ],
+   "rounds": 6.84,
+   "taken": 215.74,
+   "downs": 2.73,
+   "deaths": 0,
+   "tokens": 3.1,
+   "foes": 2.42,
+   "burnShare": 0.48985650667986147,
+   "burnRoundShare": 0.75,
+   "kits": {
+    "fortress": {
+     "dmg": 47.25,
+     "dot": 0,
+     "brk": 1.48,
+     "downs": 0.43
+    },
+    "dot": {
+     "dmg": 0,
+     "dot": 131.84,
+     "brk": 0,
+     "downs": 1.81
+    },
+    "fortress_blast": {
+     "dmg": 13.04,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.18
+    },
+    "riot_captain": {
+     "dmg": 6.54,
+     "dot": 0,
+     "brk": 0.67,
+     "downs": 0.06
+    },
+    "riot_rifle": {
+     "dmg": 1.23,
+     "dot": 0,
+     "brk": 0.16,
+     "downs": 0.03
+    },
+    "riot_baton": {
+     "dmg": 7.04,
+     "dot": 0,
+     "brk": 1.87,
+     "downs": 0.07
+    },
+    "riot_flamer": {
+     "dmg": 3.45,
+     "dot": 0,
+     "brk": 2.08,
+     "downs": 0.04
+    },
+    "riot_molotov": {
+     "dmg": 0.32,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.01
+    },
+    "爆炸桶": {
+     "dmg": 0.8,
+     "dot": 0,
+     "brk": 0.08,
+     "downs": 0.04
+    },
+    "swarm": {
+     "dmg": 0.19,
+     "dot": 0,
+     "brk": 0.05,
+     "downs": 0.01
+    },
+    "bandit_boss": {
+     "dmg": 0.22,
+     "dot": 0,
+     "brk": 0.03,
+     "downs": 0.01
+    },
+    "危墙": {
+     "dmg": 0.37,
+     "dot": 0,
+     "brk": 0.07,
+     "downs": 0
+    },
+    "小车残骸": {
+     "dmg": 0.04,
+     "dot": 0,
+     "brk": 0.01,
+     "downs": 0
+    },
+    "captain_wolf": {
+     "dmg": 1.69,
+     "dot": 0,
+     "brk": 0.19,
+     "downs": 0.03
+    },
+    "captain_ox": {
+     "dmg": 1.22,
+     "dot": 0,
+     "brk": 0.48,
+     "downs": 0.01
+    },
+    "guard_sword": {
+     "dmg": 0.12,
+     "dot": 0,
+     "brk": 0.01,
+     "downs": 0
+    },
+    "captain_lizard": {
+     "dmg": 0.22,
+     "dot": 0,
+     "brk": 0.06,
+     "downs": 0
+    },
+    "酸液桶": {
+     "dmg": 0.08,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0
+    },
+    "guard_gun": {
+     "dmg": 0.08,
+     "dot": 0,
+     "brk": 0.01,
+     "downs": 0
+    }
+   },
+   "vehicle": {
+    "battles": 97,
+    "paid": 1,
+    "cover": 3.1443298969072164,
+    "blastRate": 0.6597938144329897,
+    "steal": 0,
+    "stealBattles": 0,
+    "dmg": 48.71134020618557,
+    "blastDmg": 13.443298969072165,
+    "absorbed": 147.48453608247422
+   }
+  },
+  "fortress|battle|without|4": {
+   "n": 100,
+   "outcomes": {
+    "win": 94,
+    "lose": 6,
+    "retreat": 0,
+    "timeout": 0,
+    "error": 0
+   },
+   "winRate": 0.94,
+   "ci": [
+    0.8752318455410406,
+    0.9722138760368118
+   ],
+   "levels": [
+    2,
+    3,
+    4
+   ],
+   "rounds": 5.17,
+   "taken": 74.96,
+   "downs": 0.99,
+   "deaths": 0,
+   "tokens": 4.07,
+   "foes": 3.17,
+   "burnShare": 0.21141781681304894,
+   "burnRoundShare": 0.5971223021582733,
+   "kits": {
+    "riot_captain": {
+     "dmg": 10.96,
+     "dot": 0,
+     "brk": 1.07,
+     "downs": 0.06
+    },
+    "riot_flamer": {
+     "dmg": 6.63,
+     "dot": 0,
+     "brk": 2.73,
+     "downs": 0.09
+    },
+    "dot": {
+     "dmg": 0,
+     "dot": 39.19,
+     "brk": 0,
+     "downs": 0.66
+    },
+    "riot_rifle": {
+     "dmg": 5.75,
+     "dot": 0,
+     "brk": 0.61,
+     "downs": 0.03
+    },
+    "riot_molotov": {
+     "dmg": 0.49,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0
+    },
+    "riot_baton": {
+     "dmg": 5.96,
+     "dot": 0,
+     "brk": 2.11,
+     "downs": 0.05
+    },
+    "爆炸桶": {
+     "dmg": 0.14,
+     "dot": 0,
+     "brk": 0.02,
+     "downs": 0.01
+    },
+    "swarm": {
+     "dmg": 0.25,
+     "dot": 0,
+     "brk": 0.08,
+     "downs": 0.03
+    },
+    "guard_sword": {
+     "dmg": 0.61,
+     "dot": 0,
+     "brk": 0.08,
+     "downs": 0.01
+    },
+    "bandit_boss": {
+     "dmg": 0.05,
+     "dot": 0,
+     "brk": 0.02,
+     "downs": 0
+    },
+    "thug_hammer": {
+     "dmg": 0.23,
+     "dot": 0,
+     "brk": 0.04,
+     "downs": 0
+    },
+    "危墙": {
+     "dmg": 0.5,
+     "dot": 0,
+     "brk": 0.15,
+     "downs": 0
+    },
+    "captain_ox": {
+     "dmg": 1.7,
+     "dot": 0,
+     "brk": 0.62,
+     "downs": 0.02
+    },
+    "小车残骸": {
+     "dmg": 0.22,
+     "dot": 0,
+     "brk": 0.05,
+     "downs": 0
+    },
+    "captain_wolf": {
+     "dmg": 1.69,
+     "dot": 0,
+     "brk": 0.19,
+     "downs": 0.03
+    },
+    "guard_gun": {
+     "dmg": 0.37,
+     "dot": 0,
+     "brk": 0.05,
+     "downs": 0
+    },
+    "captain_lizard": {
+     "dmg": 0.22,
+     "dot": 0,
+     "brk": 0.06,
+     "downs": 0
+    }
+   },
+   "vehicle": {
+    "battles": 0,
+    "paid": null,
+    "cover": null,
+    "blastRate": null,
+    "steal": null,
+    "stealBattles": 0,
+    "dmg": null,
+    "blastDmg": null,
+    "absorbed": null
+   }
+  },
+  "fortress|elite|with|4": {
+   "n": 100,
+   "outcomes": {
+    "win": 25,
+    "lose": 71,
+    "retreat": 0,
+    "timeout": 4,
+    "error": 0
+   },
+   "winRate": 0.25,
+   "ci": [
+    0.17545211362287672,
+    0.34304463548061603
+   ],
+   "levels": [
+    3,
+    4,
+    5
+   ],
+   "rounds": 7.41,
+   "taken": 293.85,
+   "downs": 2.91,
+   "deaths": 0,
+   "tokens": 5,
+   "foes": 3.91,
+   "burnShare": 0.4244767970882621,
+   "burnRoundShare": 0.6474258970358814,
+   "kits": {
+    "riot_flamer": {
+     "dmg": 9.27,
+     "dot": 0,
+     "brk": 4.57,
+     "downs": 0.08
+    },
+    "fortress": {
+     "dmg": 86.28,
+     "dot": 0,
+     "brk": 2.67,
+     "downs": 0.91
+    },
+    "dot": {
+     "dmg": 0,
+     "dot": 148.73,
+     "brk": 0,
+     "downs": 1.5
+    },
+    "fortress_blast": {
+     "dmg": 12.07,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.11
+    },
+    "riot_captain": {
+     "dmg": 6.21,
+     "dot": 0,
+     "brk": 0.6,
+     "downs": 0.04
+    },
+    "riot_baton": {
+     "dmg": 14,
+     "dot": 0,
+     "brk": 3.03,
+     "downs": 0.1
+    },
+    "riot_rifle": {
+     "dmg": 2.63,
+     "dot": 0,
+     "brk": 0.27,
+     "downs": 0.01
+    },
+    "guard_sword": {
+     "dmg": 0.24,
+     "dot": 0,
+     "brk": 0.05,
+     "downs": 0
+    },
+    "captain_ox": {
+     "dmg": 1.7,
+     "dot": 0,
+     "brk": 0.32,
+     "downs": 0.02
+    },
+    "patrol_car": {
+     "dmg": 0.96,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.02
+    },
+    "captain_lizard": {
+     "dmg": 0.46,
+     "dot": 0,
+     "brk": 0.1,
+     "downs": 0
+    },
+    "bandit_boss": {
+     "dmg": 0.84,
+     "dot": 0,
+     "brk": 0.16,
+     "downs": 0.02
+    },
+    "爆炸桶": {
+     "dmg": 1.46,
+     "dot": 0,
+     "brk": 0.2,
+     "downs": 0.05
+    },
+    "电池": {
+     "dmg": 1.28,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.01
+    },
+    "swarm": {
+     "dmg": 0.19,
+     "dot": 0,
+     "brk": 0.04,
+     "downs": 0
+    },
+    "boomcar": {
+     "dmg": 0.1,
+     "dot": 0,
+     "brk": 0.02,
+     "downs": 0
+    },
+    "小车残骸": {
+     "dmg": 0.31,
+     "dot": 0,
+     "brk": 0.05,
+     "downs": 0
+    },
+    "captain_wolf": {
+     "dmg": 4.3,
+     "dot": 0,
+     "brk": 0.37,
+     "downs": 0.02
+    },
+    "riot_molotov": {
+     "dmg": 0.92,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.01
+    },
+    "危墙": {
+     "dmg": 0.14,
+     "dot": 0,
+     "brk": 0.08,
+     "downs": 0
+    },
+    "crow": {
+     "dmg": 1.76,
+     "dot": 0,
+     "brk": 0.14,
+     "downs": 0.01
+    }
+   },
+   "vehicle": {
+    "battles": 92,
+    "paid": 0,
+    "cover": 3.347826086956522,
+    "blastRate": 0.5,
+    "steal": 0,
+    "stealBattles": 0,
+    "dmg": 93.78260869565217,
+    "blastDmg": 13.119565217391305,
+    "absorbed": 138.57608695652175
+   }
+  },
+  "fortress|elite|token|4": {
+   "n": 100,
+   "outcomes": {
+    "win": 49,
+    "lose": 46,
+    "retreat": 0,
+    "timeout": 5,
+    "error": 0
+   },
+   "winRate": 0.49,
+   "ci": [
+    0.3942199893044113,
+    0.5865198806597283
+   ],
+   "levels": [
+    3,
+    4,
+    5
+   ],
+   "rounds": 7.36,
+   "taken": 248.73,
+   "downs": 2.55,
+   "deaths": 0,
+   "tokens": 4.08,
+   "foes": 3.26,
+   "burnShare": 0.38155594405594406,
+   "burnRoundShare": 0.5817610062893082,
+   "kits": {
+    "riot_flamer": {
+     "dmg": 6.28,
+     "dot": 0,
+     "brk": 2.74,
+     "downs": 0.06
+    },
+    "fortress": {
+     "dmg": 62.85,
+     "dot": 0,
+     "brk": 2.12,
+     "downs": 0.79
+    },
+    "dot": {
+     "dmg": 0,
+     "dot": 138.38,
+     "brk": 0,
+     "downs": 1.31
+    },
+    "fortress_blast": {
+     "dmg": 12.52,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.14
+    },
+    "riot_captain": {
+     "dmg": 2.97,
+     "dot": 0,
+     "brk": 0.51,
+     "downs": 0.01
+    },
+    "riot_rifle": {
+     "dmg": 1.92,
+     "dot": 0,
+     "brk": 0.22,
+     "downs": 0.02
+    },
+    "riot_baton": {
+     "dmg": 10.99,
+     "dot": 0,
+     "brk": 2.53,
+     "downs": 0.09
+    },
+    "captain_ox": {
+     "dmg": 1.67,
+     "dot": 0,
+     "brk": 0.32,
+     "downs": 0.02
+    },
+    "patrol_car": {
+     "dmg": 0.96,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0
+    },
+    "captain_lizard": {
+     "dmg": 0.46,
+     "dot": 0,
+     "brk": 0.1,
+     "downs": 0
+    },
+    "bandit_boss": {
+     "dmg": 0.6,
+     "dot": 0,
+     "brk": 0.14,
+     "downs": 0.02
+    },
+    "爆炸桶": {
+     "dmg": 2.53,
+     "dot": 0,
+     "brk": 0.24,
+     "downs": 0.06
+    },
+    "guard_sword": {
+     "dmg": 0.2,
+     "dot": 0,
+     "brk": 0.04,
+     "downs": 0
+    },
+    "swarm": {
+     "dmg": 0.62,
+     "dot": 0,
+     "brk": 0.06,
+     "downs": 0.01
+    },
+    "boomcar": {
+     "dmg": 0.08,
+     "dot": 0,
+     "brk": 0.02,
+     "downs": 0
+    },
+    "captain_wolf": {
+     "dmg": 3.22,
+     "dot": 0,
+     "brk": 0.29,
+     "downs": 0.01
+    },
+    "酸液桶": {
+     "dmg": 0.18,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0
+    },
+    "小车残骸": {
+     "dmg": 0.24,
+     "dot": 0,
+     "brk": 0.04,
+     "downs": 0
+    },
+    "riot_molotov": {
+     "dmg": 0.3,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0
+    },
+    "crow": {
+     "dmg": 1.76,
+     "dot": 0,
+     "brk": 0.14,
+     "downs": 0.01
+    }
+   },
+   "vehicle": {
+    "battles": 92,
+    "paid": 1,
+    "cover": 2.7282608695652173,
+    "blastRate": 0.5869565217391305,
+    "steal": 0,
+    "stealBattles": 0,
+    "dmg": 68.31521739130434,
+    "blastDmg": 13.608695652173912,
+    "absorbed": 149.5326086956522
+   }
+  },
+  "fortress|elite|without|4": {
+   "n": 100,
+   "outcomes": {
+    "win": 83,
+    "lose": 15,
+    "retreat": 0,
+    "timeout": 2,
+    "error": 0
+   },
+   "winRate": 0.83,
+   "ci": [
+    0.7445199523239887,
+    0.8910643388594006
+   ],
+   "levels": [
+    3,
+    4,
+    5
+   ],
+   "rounds": 7.15,
+   "taken": 135.99,
+   "downs": 1.36,
+   "deaths": 0,
+   "tokens": 5,
+   "foes": 3.91,
+   "burnShare": 0.21695071395670198,
+   "burnRoundShare": 0.5186991869918699,
+   "kits": {
+    "riot_flamer": {
+     "dmg": 13.25,
+     "dot": 0,
+     "brk": 4.57,
+     "downs": 0.03
+    },
+    "riot_captain": {
+     "dmg": 14.31,
+     "dot": 0,
+     "brk": 1.58,
+     "downs": 0.07
+    },
+    "dot": {
+     "dmg": 0,
+     "dot": 65.57,
+     "brk": 0,
+     "downs": 0.97
+    },
+    "riot_rifle": {
+     "dmg": 6.63,
+     "dot": 0,
+     "brk": 0.88,
+     "downs": 0.03
+    },
+    "riot_baton": {
+     "dmg": 20.25,
+     "dot": 0,
+     "brk": 4.85,
+     "downs": 0.14
+    },
+    "危墙": {
+     "dmg": 1.28,
+     "dot": 0,
+     "brk": 0.39,
+     "downs": 0
+    },
+    "guard_sword": {
+     "dmg": 0.22,
+     "dot": 0,
+     "brk": 0.04,
+     "downs": 0
+    },
+    "captain_ox": {
+     "dmg": 2.25,
+     "dot": 0,
+     "brk": 0.41,
+     "downs": 0.03
+    },
+    "patrol_car": {
+     "dmg": 1.97,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0.02
+    },
+    "captain_lizard": {
+     "dmg": 0.46,
+     "dot": 0,
+     "brk": 0.1,
+     "downs": 0
+    },
+    "bandit_boss": {
+     "dmg": 0.72,
+     "dot": 0,
+     "brk": 0.17,
+     "downs": 0.02
+    },
+    "riot_molotov": {
+     "dmg": 1.17,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0
+    },
+    "swarm": {
+     "dmg": 0.19,
+     "dot": 0,
+     "brk": 0.04,
+     "downs": 0
+    },
+    "boomcar": {
+     "dmg": 0.07,
+     "dot": 0,
+     "brk": 0.02,
+     "downs": 0
+    },
+    "小车残骸": {
+     "dmg": 0.27,
+     "dot": 0,
+     "brk": 0.05,
+     "downs": 0
+    },
+    "captain_wolf": {
+     "dmg": 5.02,
+     "dot": 0,
+     "brk": 0.63,
+     "downs": 0.03
+    },
+    "爆炸桶": {
+     "dmg": 0.42,
+     "dot": 0,
+     "brk": 0.06,
+     "downs": 0.01
+    },
+    "酸液桶": {
+     "dmg": 0.18,
+     "dot": 0,
+     "brk": 0,
+     "downs": 0
+    },
+    "crow": {
+     "dmg": 1.76,
+     "dot": 0,
+     "brk": 0.14,
+     "downs": 0.01
+    }
+   },
+   "vehicle": {
+    "battles": 0,
+    "paid": null,
+    "cover": null,
+    "blastRate": null,
+    "steal": null,
+    "stealBattles": 0,
+    "dmg": null,
+    "blastDmg": null,
+    "absorbed": null
+   }
+  }
+ },
+ "fortress": {
+  "appear": 0.3,
+  "cells": {
+   "battle|2": {
+    "n": 100,
+    "tokenVsWith": {
+     "mean": 0.11,
+     "ci": [
+      0.03172527351733906,
+      0.18827472648266094
+     ]
+    },
+    "withoutVsWith": {
+     "mean": 0.47,
+     "ci": [
+      0.36048338895070403,
+      0.579516611049296
+     ]
+    },
+    "withoutVsToken": {
+     "mean": 0.36,
+     "ci": [
+      0.25025333037226893,
+      0.46974666962773104
+     ]
+    },
+    "now": {
+     "mean": 0.4790000000000002,
+     "ci": [
+      0.4057551322106577,
+      0.5522448677893427
+     ]
+    },
+    "token": {
+     "mean": 0.5120000000000005,
+     "ci": [
+      0.4338354015863721,
+      0.5901645984136288
+     ]
+    },
+    "gain": {
+     "mean": 0.032999999999999995,
+     "ci": [
+      0.00951758205520175,
+      0.05648241794479824
+     ]
+    }
+   },
+   "battle|3": {
+    "n": 100,
+    "tokenVsWith": {
+     "mean": 0.2,
+     "ci": [
+      0.10349804435086843,
+      0.2965019556491316
+     ]
+    },
+    "withoutVsWith": {
+     "mean": 0.6,
+     "ci": [
+      0.5034980443508683,
+      0.6965019556491316
+     ]
+    },
+    "withoutVsToken": {
+     "mean": 0.4,
+     "ci": [
+      0.3034980443508684,
+      0.49650195564913163
+     ]
+    },
+    "now": {
+     "mean": 0.790000000000001,
+     "ci": [
+      0.7506525183450999,
+      0.8293474816549021
+     ]
+    },
+    "token": {
+     "mean": 0.8500000000000009,
+     "ci": [
+      0.8089157728045869,
+      0.8910842271954148
+     ]
+    },
+    "gain": {
+     "mean": 0.059999999999999984,
+     "ci": [
+      0.031049413305260475,
+      0.08895058669473949
+     ]
+    }
+   },
+   "battle|4": {
+    "n": 100,
+    "tokenVsWith": {
+     "mean": 0.3,
+     "ci": [
+      0.1939209815202401,
+      0.4060790184797599
+     ]
+    },
+    "withoutVsWith": {
+     "mean": 0.59,
+     "ci": [
+      0.4931168104810085,
+      0.6868831895189914
+     ]
+    },
+    "withoutVsToken": {
+     "mean": 0.29,
+     "ci": [
+      0.19231907622890437,
+      0.3876809237710956
+     ]
+    },
+    "now": {
+     "mean": 0.7630000000000008,
+     "ci": [
+      0.7159992379042089,
+      0.8100007620957926
+     ]
+    },
+    "token": {
+     "mean": 0.8530000000000004,
+     "ci": [
+      0.8063472675877307,
+      0.8996527324122702
+     ]
+    },
+    "gain": {
+     "mean": 0.09,
+     "ci": [
+      0.05817629445607198,
+      0.12182370554392802
+     ]
+    }
+   },
+   "battle|all": {
+    "n": 300,
+    "tokenVsWith": {
+     "mean": 0.20333333333333334,
+     "ci": [
+      0.1483483665139979,
+      0.25831830015266877
+     ]
+    },
+    "withoutVsWith": {
+     "mean": 0.5533333333333333,
+     "ci": [
+      0.49474723154833405,
+      0.6119194351183327
+     ]
+    },
+    "withoutVsToken": {
+     "mean": 0.35,
+     "ci": [
+      0.29137614276386203,
+      0.4086238572361379
+     ]
+    },
+    "now": {
+     "mean": 0.6773333333333318,
+     "ci": [
+      0.6418222402999685,
+      0.7128444263666951
+     ]
+    },
+    "token": {
+     "mean": 0.7383333333333326,
+     "ci": [
+      0.7005191557429478,
+      0.7761475109237175
+     ]
+    },
+    "gain": {
+     "mean": 0.061000000000000075,
+     "ci": [
+      0.04450450995419951,
+      0.07749549004580064
+     ]
+    }
+   },
+   "elite|2": {
+    "n": 100,
+    "tokenVsWith": {
+     "mean": 0.03,
+     "ci": [
+      -0.0036029176947176694,
+      0.06360291769471767
+     ]
+    },
+    "withoutVsWith": {
+     "mean": 0.25,
+     "ci": [
+      0.1602696122948447,
+      0.3397303877051553
+     ]
+    },
+    "withoutVsToken": {
+     "mean": 0.22,
+     "ci": [
+      0.1252018698308704,
+      0.3147981301691296
+     ]
+    },
+    "now": {
+     "mean": 0.21499999999999989,
+     "ci": [
+      0.14905454524134198,
+      0.2809454547586578
+     ]
+    },
+    "token": {
+     "mean": 0.22399999999999992,
+     "ci": [
+      0.15719257591370794,
+      0.2908074240862919
+     ]
+    },
+    "gain": {
+     "mean": 0.009,
+     "ci": [
+      -0.0010808753084152987,
+      0.019080875308415297
+     ]
+    }
+   },
+   "elite|3": {
+    "n": 100,
+    "tokenVsWith": {
+     "mean": 0.23,
+     "ci": [
+      0.13408284896593997,
+      0.32591715103406005
+     ]
+    },
+    "withoutVsWith": {
+     "mean": 0.43,
+     "ci": [
+      0.3248209842634375,
+      0.5351790157365626
+     ]
+    },
+    "withoutVsToken": {
+     "mean": 0.2,
+     "ci": [
+      0.08856913985729707,
+      0.31143086014270294
+     ]
+    },
+    "now": {
+     "mean": 0.5110000000000002,
+     "ci": [
+      0.43440926665133694,
+      0.5875907333486635
+     ]
+    },
+    "token": {
+     "mean": 0.5800000000000002,
+     "ci": [
+      0.49926067122600754,
+      0.6607393287739928
+     ]
+    },
+    "gain": {
+     "mean": 0.06899999999999998,
+     "ci": [
+      0.04022485468978198,
+      0.09777514531021797
+     ]
+    }
+   },
+   "elite|4": {
+    "n": 100,
+    "tokenVsWith": {
+     "mean": 0.24,
+     "ci": [
+      0.14301673485313016,
+      0.3369832651468698
+     ]
+    },
+    "withoutVsWith": {
+     "mean": 0.58,
+     "ci": [
+      0.47886459995245234,
+      0.6811354000475476
+     ]
+    },
+    "withoutVsToken": {
+     "mean": 0.34,
+     "ci": [
+      0.22780566816775194,
+      0.4521943318322481
+     ]
+    },
+    "now": {
+     "mean": 0.6560000000000005,
+     "ci": [
+      0.5938129936673041,
+      0.7181870063326968
+     ]
+    },
+    "token": {
+     "mean": 0.7280000000000005,
+     "ci": [
+      0.6639829950932051,
+      0.7920170049067959
+     ]
+    },
+    "gain": {
+     "mean": 0.07199999999999998,
+     "ci": [
+      0.04290502045593904,
+      0.10109497954406092
+     ]
+    }
+   },
+   "elite|all": {
+    "n": 300,
+    "tokenVsWith": {
+     "mean": 0.16666666666666666,
+     "ci": [
+      0.11872598773799706,
+      0.21460734559533626
+     ]
+    },
+    "withoutVsWith": {
+     "mean": 0.42,
+     "ci": [
+      0.36107375874551173,
+      0.47892624125448824
+     ]
+    },
+    "withoutVsToken": {
+     "mean": 0.25333333333333335,
+     "ci": [
+      0.1916840695736039,
+      0.3149825970930628
+     ]
+    },
+    "now": {
+     "mean": 0.4606666666666671,
+     "ci": [
+      0.41609164988637437,
+      0.5052416834469599
+     ]
+    },
+    "token": {
+     "mean": 0.5106666666666666,
+     "ci": [
+      0.4633467441269238,
+      0.5579865892064094
+     ]
+    },
+    "gain": {
+     "mean": 0.050000000000000044,
+     "ci": [
+      0.03561779632139916,
+      0.06438220367860094
+     ]
+    }
+   }
+  }
+ },
+ "flags": [
+  {
+   "group": "fortress",
+   "cell": "battle",
+   "size": 2,
+   "label": "镇压队遭遇（普通战）：有车（不占代币）↔ 没车",
+   "a": "with",
+   "b": "without",
+   "diff": -47,
+   "x": 0.15,
+   "y": 0.62
+  },
+  {
+   "group": "fortress",
+   "cell": "battle",
+   "size": 3,
+   "label": "镇压队遭遇（普通战）：有车（不占代币）↔ 没车",
+   "a": "with",
+   "b": "without",
+   "diff": -60,
+   "x": 0.37,
+   "y": 0.97
+  },
+  {
+   "group": "fortress",
+   "cell": "battle",
+   "size": 4,
+   "label": "镇压队遭遇（普通战）：有车（不占代币）↔ 没车",
+   "a": "with",
+   "b": "without",
+   "diff": -59,
+   "x": 0.35,
+   "y": 0.94
+  },
+  {
+   "group": "fortress",
+   "cell": "battle",
+   "size": "all",
+   "label": "镇压队遭遇（普通战）：有车（不占代币）↔ 没车",
+   "a": "with",
+   "b": "without",
+   "diff": -55.33333333333334,
+   "x": 0.29,
+   "y": 0.8433333333333334
+  },
+  {
+   "group": "fortress",
+   "cell": "battle",
+   "size": 2,
+   "label": "镇压队遭遇（普通战）：有车（占 1 枚代币）↔ 没车",
+   "a": "token",
+   "b": "without",
+   "diff": -36,
+   "x": 0.26,
+   "y": 0.62
+  },
+  {
+   "group": "fortress",
+   "cell": "battle",
+   "size": 3,
+   "label": "镇压队遭遇（普通战）：有车（占 1 枚代币）↔ 没车",
+   "a": "token",
+   "b": "without",
+   "diff": -40,
+   "x": 0.57,
+   "y": 0.97
+  },
+  {
+   "group": "fortress",
+   "cell": "battle",
+   "size": 4,
+   "label": "镇压队遭遇（普通战）：有车（占 1 枚代币）↔ 没车",
+   "a": "token",
+   "b": "without",
+   "diff": -28.999999999999993,
+   "x": 0.65,
+   "y": 0.94
+  },
+  {
+   "group": "fortress",
+   "cell": "battle",
+   "size": "all",
+   "label": "镇压队遭遇（普通战）：有车（占 1 枚代币）↔ 没车",
+   "a": "token",
+   "b": "without",
+   "diff": -35,
+   "x": 0.49333333333333335,
+   "y": 0.8433333333333334
+  },
+  {
+   "group": "fortress",
+   "cell": "battle",
+   "size": 2,
+   "label": "镇压队遭遇（普通战）：有车占 1 枚代币 ↔ 不占",
+   "a": "token",
+   "b": "with",
+   "diff": 11.000000000000002,
+   "x": 0.26,
+   "y": 0.15
+  },
+  {
+   "group": "fortress",
+   "cell": "battle",
+   "size": 3,
+   "label": "镇压队遭遇（普通战）：有车占 1 枚代币 ↔ 不占",
+   "a": "token",
+   "b": "with",
+   "diff": 19.999999999999996,
+   "x": 0.57,
+   "y": 0.37
+  },
+  {
+   "group": "fortress",
+   "cell": "battle",
+   "size": 4,
+   "label": "镇压队遭遇（普通战）：有车占 1 枚代币 ↔ 不占",
+   "a": "token",
+   "b": "with",
+   "diff": 30.000000000000004,
+   "x": 0.65,
+   "y": 0.35
+  },
+  {
+   "group": "fortress",
+   "cell": "battle",
+   "size": "all",
+   "label": "镇压队遭遇（普通战）：有车占 1 枚代币 ↔ 不占",
+   "a": "token",
+   "b": "with",
+   "diff": 20.333333333333336,
+   "x": 0.49333333333333335,
+   "y": 0.29
+  },
+  {
+   "group": "fortress",
+   "cell": "elite",
+   "size": 2,
+   "label": "镇压队遭遇（精英战）：有车（不占代币）↔ 没车",
+   "a": "with",
+   "b": "without",
+   "diff": -24.999999999999996,
+   "x": 0.04,
+   "y": 0.29
+  },
+  {
+   "group": "fortress",
+   "cell": "elite",
+   "size": 3,
+   "label": "镇压队遭遇（精英战）：有车（不占代币）↔ 没车",
+   "a": "with",
+   "b": "without",
+   "diff": -43.00000000000001,
+   "x": 0.21,
+   "y": 0.64
+  },
+  {
+   "group": "fortress",
+   "cell": "elite",
+   "size": 4,
+   "label": "镇压队遭遇（精英战）：有车（不占代币）↔ 没车",
+   "a": "with",
+   "b": "without",
+   "diff": -57.99999999999999,
+   "x": 0.25,
+   "y": 0.83
+  },
+  {
+   "group": "fortress",
+   "cell": "elite",
+   "size": "all",
+   "label": "镇压队遭遇（精英战）：有车（不占代币）↔ 没车",
+   "a": "with",
+   "b": "without",
+   "diff": -42.00000000000001,
+   "x": 0.16666666666666666,
+   "y": 0.5866666666666667
+  },
+  {
+   "group": "fortress",
+   "cell": "elite",
+   "size": 2,
+   "label": "镇压队遭遇（精英战）：有车（占 1 枚代币）↔ 没车",
+   "a": "token",
+   "b": "without",
+   "diff": -21.999999999999996,
+   "x": 0.07,
+   "y": 0.29
+  },
+  {
+   "group": "fortress",
+   "cell": "elite",
+   "size": 3,
+   "label": "镇压队遭遇（精英战）：有车（占 1 枚代币）↔ 没车",
+   "a": "token",
+   "b": "without",
+   "diff": -20,
+   "x": 0.44,
+   "y": 0.64
+  },
+  {
+   "group": "fortress",
+   "cell": "elite",
+   "size": 4,
+   "label": "镇压队遭遇（精英战）：有车（占 1 枚代币）↔ 没车",
+   "a": "token",
+   "b": "without",
+   "diff": -34,
+   "x": 0.49,
+   "y": 0.83
+  },
+  {
+   "group": "fortress",
+   "cell": "elite",
+   "size": "all",
+   "label": "镇压队遭遇（精英战）：有车（占 1 枚代币）↔ 没车",
+   "a": "token",
+   "b": "without",
+   "diff": -25.333333333333336,
+   "x": 0.3333333333333333,
+   "y": 0.5866666666666667
+  },
+  {
+   "group": "fortress",
+   "cell": "elite",
+   "size": 3,
+   "label": "镇压队遭遇（精英战）：有车占 1 枚代币 ↔ 不占",
+   "a": "token",
+   "b": "with",
+   "diff": 23,
+   "x": 0.44,
+   "y": 0.21
+  },
+  {
+   "group": "fortress",
+   "cell": "elite",
+   "size": 4,
+   "label": "镇压队遭遇（精英战）：有车占 1 枚代币 ↔ 不占",
+   "a": "token",
+   "b": "with",
+   "diff": 24,
+   "x": 0.49,
+   "y": 0.25
+  },
+  {
+   "group": "fortress",
+   "cell": "elite",
+   "size": "all",
+   "label": "镇压队遭遇（精英战）：有车占 1 枚代币 ↔ 不占",
+   "a": "token",
+   "b": "with",
+   "diff": 16.666666666666664,
+   "x": 0.3333333333333333,
+   "y": 0.16666666666666666
+  }
+ ],
+ "errorSamples": []
+}

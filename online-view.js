@@ -115,7 +115,8 @@
     if (towers.length) v.towers = towers;
     return Object.keys(v).length ? v : null;
   }
-  const resourceNumbers = ["nano", "bean", "liquid", "durability", "shield", "tauntLeft", "charge", "energyPct", "light", "lockLeft", "smashUsed", "phase", "debrisCount"];
+  // nanoReserve：瑞比的储备能源（#219，不是坚毅数值，公开）
+  const resourceNumbers = ["nano", "nanoReserve", "bean", "liquid", "durability", "shield", "tauntLeft", "charge", "energyPct", "light", "lockLeft", "smashUsed", "phase", "debrisCount"];
   const resourceFlags = ["mecha", "engine", "prepared", "preparedActive", "preparedPending", "smashNext", "smashOnce", "niuOut", "narutoOut", "forceCruelNext", "scanned", "unstable", "forceCharge", "forceOverheat"];
   const statusKeys = ["burn", "shock", "corr", "frostbite", "shockwave", "high", "reso", "unstable", "weak", "inspire", "hide", "advantage", "chase", "sturdy"];
   function projectUnit(unit) {
@@ -240,6 +241,14 @@
     out.weatherLocked = !!get(state, "weatherLock");
     enumField(state, out, "combatPhase", ["player", "enemy"]);
     enumField(state, out, "weather", ["none", "heat", "snow", "acid", "thunder", "glow", "sand", "phase"]);
+    // 这场战斗在哪个区域、光影（白天 / 傍晚 / 夜晚）：只是画面的标签（HD-2D 战场的地面、远景、天空、灯）。
+    // 区域只放行主机配置表认得的名字（world-data.js · battleRegionName；地图地点 id 换成区域名），光影只放行三个值（daylight.js · LIGHTS）；
+    // 认不得的、主机没有配置表的，一律不发。主持人选过的 / 跟着地图、时钟的，房主发包前已经算好写在 state 里（world-data.js · battleLookSync）
+    const region = text(call("battleRegionName", get(state, "region")), 12); if (region) out.region = region;
+    enumField(state, out, "light", ["day", "dusk", "night"]);
+    // 场景（区域里的哪个地方：采矿场的矿外 / 矿内 / 矿底……，#239）：只放行当前区域认得的场景 id（world-data.js · battleSceneId），
+    // 别的区域的、乱写的、主机没有配置表的一律不发；没有区域就没有场景。主持人选的、单局抽场景的数（scenePick / sceneRoll）是房主自己的，不发
+    const scene = region ? id(call("battleSceneId", region, get(state, "scene"))) : null; if (scene) out.scene = scene;
     out.units = arr(get(state, "units")).slice(0, 200).map(projectUnit).filter(Boolean);
     // 连续战斗第几场 / 共几场、援军还有几回合到哪个区（chain.js · status 的格式）
     const chain = get(state, "chain"), waves = arr(get(state, "waves")).filter(w => obj(w) && !get(w, "done"));

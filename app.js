@@ -2230,7 +2230,7 @@ function turnEnd() {
       if (!u.resources.mecha) {
         addNano(10);
         notes.push(`收发代理：无人机提取纳米 +10 → ${u.resources.nano}`);
-      } else if ((u.resources.nano || 0) >= 10) {
+      } else if (nanoAvailable(u) >= 10) {   // 纳米不够的差额从储备能源扣（#219）
         // 激光不能穿墙：隔着危墙 / 关着的门的敌人不算可选目标；一个都没有就什么都不干（不耗纳米）。
         // 锁定前先判断够不够得着（和 dealTo 的判定一致：距离 ≤1、没躲藏、没下潜、不是友军 / 飞碟本体），
         // 以前只看墙，锁到距离 2 / 躲藏 / 下潜的目标，激光打不出去纳米却照扣
@@ -2242,21 +2242,22 @@ function turnEnd() {
         const pool = high.length ? high : foes;
         const tgt = pool.slice().sort((x, y) => totalHp(x) - totalHp(y))[0];
         if (tgt) {
-          u.resources.nano -= 10;
-          notes.push(`银翼·收发代理：无人机激光射向 ${tgt.name}（纳米 −10 → ${u.resources.nano}）。`);
+          const paid = spendNano(10, { ruby: u });
+          notes.push(`银翼·收发代理：无人机激光射向 ${tgt.name}（${nanoSpentText(u, paid)}）。`);
           const shots = 2 + (u.resources.overdrive ? 1 : 0);   // 机体强化：无人机攻击次数 +1
           for (let i = 0; i < shots && !tgt.dead; i++) {
             // 每一发照普通命中的格式写进回合结束的日志（hitOne2 现在会写出伤害行）
             hitOne2(u, tgt, { element: "energy", mult: 0.2, diceN: 1, diceS: 12, baseBreak: 0, atk: effectiveAtk(u, state.units), atkRange: "any", usePrep: false, flags: { action: true } }, notes);
           }
         } else notes.push("银翼·收发代理：没有打得到的敌人，无人机这回合什么都不干。");
-      } else notes.push("银翼·收发代理：纳米不足 10，无人机这回合没有发射。");
+      } else notes.push(`银翼·收发代理：纳米${nanoReserveOf(u) ? "（含储备能源）" : ""}不足 10，无人机这回合没有发射。`);
     }
     if (u.kit === "ruby" && u.resources && u.resources.mecha) {
       const cost = 20 + (u.resources.overdrive ? 20 : 0);   // 机体强化：每回合多耗 20
-      u.resources.nano = Math.max(0, (u.resources.nano || 0) - cost);
-      notes.push(`${u.name} 机甲维持：纳米 −${cost} → ${u.resources.nano}`);
-      if (u.resources.nano <= 0) notes.push(...exitMecha(u, "纳米耗尽，机甲结束"));
+      // 纳米不够的差额从储备能源扣；两边都扣光才因为纳米耗尽退出机甲（#219）
+      const paid = spendNano(cost, { ruby: u, partial: true });
+      notes.push(`${u.name} 机甲维持：${paid.reserve ? nanoSpentText(u, paid) : `纳米 −${cost} → ${u.resources.nano}`}`);
+      if (nanoAvailable(u) <= 0) notes.push(...exitMecha(u, "纳米耗尽，机甲结束"));
     }
     // 年糕咬住记了 noMoveUntil：持续到下一个敌人回合结束；其余禁足到这一回合结束
     if (u.noMove && !(Number(u.noMoveUntil) > Number(state.turnNo))) {
@@ -2970,6 +2971,7 @@ function settleBattleRewards(outcome) {
   if (!["win", "lose", "retreat"].includes(outcome)) throw new Error("未知的战斗结局：" + outcome);
   state.battleScore = state.battleScore || { total: 0, parts: {} };
   const bs = state.battleScore;
+  clearNanoReserve();   // 瑞比的储备能源战斗结束清零（#219）；连续战斗换区域不走这里，还是同一场
   if (bs.rewardSettlement) return {
     outcome: bs.rewardSettlement.outcome, grade: bs.rewardSettlement.grade,
     finishBonus: null, xpBonus: 0, totalXpBonus: bs.rewardSettlement.xpBonus,
@@ -5895,20 +5897,68 @@ function convertRasLight(pct, bonusRate) {
   return gain;
 }
 
-/** 柯尔特的废料：上一个被摧毁的敌人血量层 + 腐坏抛射记下的腐蚀伤害 + 扭矩「转移注意」失去的装甲。
- *  废物利用领走它们；碎渣重炮把它们全部装填打出去 */
+/* 柯尔特的废料（koltScrapCap / koltScrapTotal / koltScrapSpend）：
+ *   capPct     废料上限 = 柯尔特生命上限 × capPct。敌人血量层来的废料按它封顶（和废物利用一样）；
+ *              「非法」改装要废料合计达到它，才能消耗等量的废料给我方目标行动点
+ *   modAp      「非法」改装消耗废料给目标的行动点（可以超过行动点上限）
+ *   spendOrder 「非法」改装扣废料的顺序：layer 敌人血量层（按封顶后的数）→ rot 腐坏抛射 → divert 扭矩转移注意 → strip 扭矩拆卸模式 */
+const KOLT_SCRAP = { capPct: 0.5, modAp: 1, spendOrder: ["layer", "rot", "divert", "strip"] };
+/** 废料上限：柯尔特生命上限的一半（KOLT_SCRAP.capPct）；没有柯尔特时不封顶 */
+function koltScrapCap(k) {
+  return k && typeof baseMaxHp === "function" ? Math.floor(baseMaxHp(k) * KOLT_SCRAP.capPct) : Infinity;
+}
+/** 柯尔特的废料：上一个被摧毁的敌人血量层 + 腐坏抛射记下的腐蚀伤害 + 扭矩「转移注意」失去的装甲 + 扭矩「拆卸模式」变成废料的外层血量。
+ *  废物利用领走它们；碎渣重炮把它们全部装填打出去；「非法」改装达到上限时扣掉一部分（koltScrapSpend） */
 function koltScrapTotal(k) {
   k = k || findKit("kolt", state.units);
   const r = (k && k.resources) || {};
-  // 敌人失去血量层得来的废料：不超过柯尔特生命上限的一半（和废物利用的封顶一样）
-  const cap = k && typeof baseMaxHp === "function" ? Math.floor(baseMaxHp(k) * 0.5) : Infinity;
-  const last = state.lastBrokenLayer ? Math.min(cap, Math.floor(Number(state.lastBrokenLayer.lost) || 0)) : 0;
-  const rot = Object.keys(r.rotStore || {}).reduce((s, t) => s + Math.floor(Number(r.rotStore[t]) || 0), 0);
-  return Math.max(0, last + rot + Math.floor(Number(r.divertArmor) || 0));
+  // 敌人失去血量层得来的废料：不超过废料上限（和废物利用的封顶一样）；其余几种单独计算，不受上限
+  const last = state.lastBrokenLayer ? Math.min(koltScrapCap(k), Math.floor(Number(state.lastBrokenLayer.lost) || 0)) : 0;
+  const sum = store => Object.keys(store || {}).reduce((s, t) => s + Math.floor(Number(store[t]) || 0), 0);
+  return Math.max(0, last + sum(r.rotStore) + Math.floor(Number(r.divertArmor) || 0) + sum(r.stripStore));
 }
 function koltScrapClear(k) {
   state.lastBrokenLayer = null;
-  if (k && k.resources) { k.resources.rotStore = {}; k.resources.divertArmor = 0; }
+  if (k && k.resources) { k.resources.rotStore = {}; k.resources.divertArmor = 0; k.resources.stripStore = {}; }
+}
+/** 「非法」改装：废料（所有来源合计）达到上限了没有 */
+function koltScrapFull(k) {
+  const cap = koltScrapCap(k);
+  return cap > 0 && cap !== Infinity && koltScrapTotal(k) >= cap;
+}
+/** 「非法」改装：从柯尔特的废料里扣掉 n 点，按 KOLT_SCRAP.spendOrder 的顺序扣；扣完的来源清零，没扣完的留着。
+ *  腐坏抛射、拆卸模式各自记着几种血量，按记录的先后依次扣。返回实际扣掉的量 */
+function koltScrapSpend(k, n) {
+  const r = (k && k.resources) || {};
+  const want = Math.max(0, Math.floor(Number(n) || 0));
+  let left = want;
+  const fromStore = store => Object.keys(store || {}).forEach(t => {
+    if (left <= 0) return;
+    const have = Math.max(0, Math.floor(Number(store[t]) || 0)), use = Math.min(left, have);
+    left -= use;
+    if (use >= have) delete store[t];
+    else store[t] = have - use;
+  });
+  const take = {
+    // 敌人血量层：按封顶后的数算；扣不完的记回那一层，下次废物利用照样能领剩下的
+    layer: () => {
+      const rec = state.lastBrokenLayer;
+      if (!rec) return;
+      const have = Math.min(koltScrapCap(k), Math.max(0, Math.floor(Number(rec.lost) || 0))), use = Math.min(left, have);
+      left -= use;
+      if (use >= have) state.lastBrokenLayer = null;
+      else rec.lost = have - use;
+    },
+    rot: () => fromStore(r.rotStore),
+    divert: () => {
+      const have = Math.max(0, Math.floor(Number(r.divertArmor) || 0)), use = Math.min(left, have);
+      left -= use;
+      r.divertArmor = have - use;
+    },
+    strip: () => fromStore(r.stripStore)
+  };
+  KOLT_SCRAP.spendOrder.forEach(src => { if (left > 0 && take[src]) take[src](); });
+  return want - left;
 }
 /** 扭矩「转移注意」结束：失去的装甲记为废料（下次废物利用额外获得等量装甲） */
 function endTorqueGuard(w, notes) {
@@ -7184,11 +7234,11 @@ function resetBattleFlags(u) {
   if (u.kit === "xia") { r.engine = false; r.fuel = 0; }
   if (u.kit === "yuito") r.bean = Math.max(1, Number(r.bean) || 0);
   if (u.kit === "ruby" && r.nano == null) r.nano = 40;
-  if (u.kit === "kolt") { r.bit = r.bit || "drill"; r.rotStore = {}; r.divertArmor = 0; }
+  if (u.kit === "kolt") { r.bit = r.bit || "drill"; r.rotStore = {}; r.divertArmor = 0; r.stripStore = {}; }
   if (u.kit === "torque") { r.divertGuard = false; r.divertArmor0 = 0; }
   if (u.kit === "ecmo") { r.probe = false; r.probeZones = []; }
   if (u.kit === "ras") r.siphon = false;
-  if (u.kit === "ruby") { r.drone = false; r.overdrive = false; }
+  if (u.kit === "ruby") { r.drone = false; r.overdrive = false; delete r.nanoReserve; }   // 储备能源不跨战斗（#219）；纳米照旧
   if (u.kit === "hiaki") r.powder = false;
   if (u.kit === "niu") r.standby = false;
   if (u.kit === "ras") { r.energyPct = 0; r.light = 0; r.unstable = false; }
@@ -8433,6 +8483,54 @@ function addNano(n) {
   ruby.resources.nano = Math.max(0, Math.min(100, (ruby.resources.nano || 0) + n));
 }
 
+/* 瑞比「补充能源」（纳米科技+，作者 10/21 定，#219）：附赠动作二选一——纳米 +nano，或者把全部纳米按 compressRate（储备 / 纳米，1:1）
+ * 压缩成储备能源、纳米归 0。储备能源记在 resources.nanoReserve：没有上限，纳米不够时自动补差额（spendNano），
+ * 只在这一场战斗里有（战斗结束 / 开战清零；连续战斗换区域还是同一场）。没有储备时不留这个键（显示只在有储备时写「储备 n」） */
+const RUBY_REFUEL = { nano: 10, compressRate: 1 };
+function nanoReserveOf(ruby) { return Math.max(0, Number(ruby && ruby.resources && ruby.resources.nanoReserve) || 0); }
+/** 瑞比能用的纳米能源：纳米 + 储备能源（花纳米的门槛都按这个算） */
+function nanoAvailable(ruby) {
+  ruby = ruby || findKit("ruby", state.units);
+  return ruby ? Math.max(0, Number(ruby.resources && ruby.resources.nano) || 0) + nanoReserveOf(ruby) : 0;
+}
+/** 花纳米能源：先扣纳米，纳米不够的差额从储备能源里扣。
+ *  纳米 + 储备不够 n 时不扣、返回 null；opt.partial（机甲维持）有多少扣多少，两边都扣到 0 为止。
+ *  返回这次从纳米、储备各扣了多少 { nano, reserve } */
+function spendNano(n, opt) {
+  opt = opt || {};
+  const ruby = opt.ruby || findKit("ruby", state.units);
+  if (!ruby) return null;
+  const r = ruby.resources = ruby.resources || {};
+  const need = Math.max(0, Number(n) || 0);
+  const nano = Math.max(0, Number(r.nano) || 0), reserve = nanoReserveOf(ruby);
+  if (nano + reserve < need && !opt.partial) return null;
+  const fromNano = Math.min(nano, need), fromReserve = Math.min(reserve, need - fromNano);
+  r.nano = nano - fromNano;
+  if (reserve - fromReserve > 0) r.nanoReserve = reserve - fromReserve;
+  else delete r.nanoReserve;
+  return { nano: fromNano, reserve: fromReserve };
+}
+/** 日志里的扣除：「纳米 −5 → 0，储备能源 −15 → 35」（没动储备就只写纳米） */
+function nanoSpentText(ruby, paid) {
+  const r = (ruby && ruby.resources) || {};
+  return `纳米 −${paid ? paid.nano : 0} → ${Number(r.nano) || 0}` + (paid && paid.reserve ? `，储备能源 −${paid.reserve} → ${nanoReserveOf(ruby)}` : "");
+}
+/** 压缩 n 点纳米换得多少储备能源 */
+function nanoCompressGain(n) { return Math.floor(Math.max(0, Number(n) || 0) * RUBY_REFUEL.compressRate); }
+/** 补充能源·压缩：全部纳米按比例转进储备能源，纳米归 0 */
+function compressNano(ruby, lines) {
+  const r = ruby.resources = ruby.resources || {};
+  const nano = Math.max(0, Number(r.nano) || 0);
+  const add = nanoCompressGain(nano);
+  r.nano = 0;
+  if (add > 0) r.nanoReserve = nanoReserveOf(ruby) + add;
+  lines.push(`补充能源·压缩：纳米 ${nano} → 0，储备能源 +${add} → ${nanoReserveOf(ruby)}。`);
+}
+/** 战斗结束：储备能源清零（不跨战斗保留；纳米照旧） */
+function clearNanoReserve() {
+  (state.units || []).forEach(u => { if (u && u.resources && "nanoReserve" in u.resources) delete u.resources.nanoReserve; });
+}
+
 function beanToLiquid() {
   const y = findKit("yuito", state.units);
   if (!y || !y.resources) return false;
@@ -8668,7 +8766,7 @@ function enterMecha() {
   const notes = [];
   if (!ruby) return ["场上没有瑞比。"];
   if (!(typeof passiveOnKit !== "function" || passiveOnKit("ruby"))) return ["瑞比放弃了被动「银翼」，无法进入机甲。"];
-  if ((ruby.resources.nano || 0) <= 0) return ["纳米能源不足，无法进入机甲。"];
+  if (nanoAvailable(ruby) <= 0) return ["纳米能源不足，无法进入机甲。"];   // 纳米 + 储备能源（#219）
   if (!mint || mint.hidden) {
     const spawned = spawnWeapon(ruby, "mint");
     if (!spawned) return ["需要明特在场且与瑞比同区。先唤出明特。"];
@@ -9155,6 +9253,21 @@ function skillFlowSteps(id, actor, picks) {
     for (let z = 1; z <= maxZ; z++) if (zoneDist(actor.zone, z, state.zoneMode) <= 1 && !lineBlocked(actor.zone, z) && visibleEnemies(z).length) zones.push(z);
     return [{ key: "dest", type: "zone", optional: false, label: "机枪扫射哪个区域（距离 1 以内）", zones }];
   }
+  if (id === "kolt_mod") {
+    // 「非法」改装：废料（所有来源合计）达到上限时，先选目标；目标是我方单位再选只施加过载，还是再消耗等于上限的废料让它 +1 行动点。
+    // 废料没到上限就没有分步（照常直接选目标）；目标是敌人也没有后一项
+    const k = findKit("kolt", state.units) || actor;
+    if (!koltScrapFull(k)) return [];
+    const steps = [{ key: "target", type: "unit", optional: false, label: "施加过载的目标（1 距离以内任意单位，含自己）",
+      units: fieldUnits().filter(u => !u.fused && zoneDist(actor.zone, u.zone, maxZ) <= 1) }];
+    const tgt = picks.target ? unitById(picks.target) : null;
+    if (tgt && tgt.isPlayer) {
+      const cap = koltScrapCap(k), ap = KOLT_SCRAP.modAp;
+      steps.push({ key: "mode", type: "choice", optional: false, label: `废料已达到上限（${koltScrapTotal(k)} / ${cap}）：要不要消耗 ${cap} 废料，让 ${tgt.name} 获得 ${ap} 行动点`,
+        options: [{ value: "overload", label: "只施加过载" }, { value: "ap", label: `过载 + 消耗 ${cap} 废料：${tgt.name} 行动点 +${ap}（可以超过上限）` }] });
+    }
+    return steps;
+  }
   if (id === "torque_boost") {
     const bit = ((findKit("kolt", state.units) || {}).resources || {}).bit || "drill";
     if (bit === "acid") {
@@ -9173,12 +9286,20 @@ function skillFlowSteps(id, actor, picks) {
     return steps;
   }
   if (id === "torque_strip") {
-    return [
+    // 拆下的外层血量：转移给一名同区友方，或者变成柯尔特的废料（单独计算、不受上限）；选废料就不用选接收的友方
+    const steps = [
       { key: "target", type: "unit", optional: false, label: "拆卸目标（同区敌人）",
-        units: fieldUnits().filter(u => !u.isPlayer && !u.dead && Number(u.zone) === Number(actor.zone)) },
-      { key: "ally", type: "unit", optional: false, label: "接收外层血量的同区友方",
-        units: fieldUnits().filter(u => u.isPlayer && !u.dead && Number(u.zone) === Number(actor.zone)) }
+        units: fieldUnits().filter(u => !u.isPlayer && !u.dead && Number(u.zone) === Number(actor.zone)) }
     ];
+    if (findKit("kolt", state.units)) {
+      steps.push({ key: "mode", type: "choice", optional: false, label: "拆下的外层血量怎么处理",
+        options: [{ value: "ally", label: "转移给一名同区友方" }, { value: "scrap", label: "变成柯尔特的废料（单独计算，不受上限）" }] });
+    }
+    if (picks.mode !== "scrap") {
+      steps.push({ key: "ally", type: "unit", optional: false, label: "接收外层血量的同区友方",
+        units: fieldUnits().filter(u => u.isPlayer && !u.dead && Number(u.zone) === Number(actor.zone)) });
+    }
+    return steps;
   }
   if (id === "helu_scan") {
     const zones = [];
@@ -9353,6 +9474,14 @@ function skillFlowSteps(id, actor, picks) {
     // 15 级：缓冲可以自选给哪一种血量（选完再选目标）
     return [{ key: "layer", type: "choice", optional: false, label: "缓冲给哪一种血量",
       options: ["shield", "armor", "flesh", "sand", "spirit"].map(k => ({ value: k, label: LAYER[k] })) }];
+  }
+  if (id === "ruby_refuel") {
+    // 补充能源（#219）：纳米 +10，或者把全部纳米压缩成储备能源。纳米是 0 时没有东西可以压缩：不问，直接 +10
+    const nano = Math.max(0, Number(actor.resources && actor.resources.nano) || 0), reserve = nanoReserveOf(actor);
+    if (nano <= 0) return [];
+    return [{ key: "mode", type: "choice", optional: false, label: `补充能源：纳米 +${RUBY_REFUEL.nano}，或者把全部纳米压缩成储备能源`,
+      options: [{ value: "nano", label: `纳米 +${RUBY_REFUEL.nano}（现在 ${nano}）` },
+        { value: "compress", label: `压缩：纳米 ${nano} → 0，储备能源 ${reserve} → ${reserve + nanoCompressGain(nano)}` }] }];
   }
   if (id === "ruby_trigger" || id === "ruby_short" || id === "wing_aa" || id === "mint_steal") {
     const units = (typeof fieldUnits === "function" ? fieldUnits() : state.units).filter(u =>
@@ -10900,7 +11029,7 @@ const SKILL_REQUIREMENT = {
   niu_standby:    (a) => res(a).standby ? "已经在待命" : null,
   ruby_relay:     () => (findKit("ruby", state.units) || {}).resources && findKit("ruby", state.units).resources.drone ? "已经有小型无人机" : null,
   wing_relay:     () => (findKit("ruby", state.units) || {}).resources && findKit("ruby", state.units).resources.drone ? "已经有小型无人机" : null,
-  mint_repair:    () => (((findKit("ruby", state.units) || {}).resources || {}).nano || 0) >= 20 ? null : "纳米能源不足 20",
+  mint_repair:    () => nanoAvailable() >= 20 ? null : "纳米能源不足 20",   // 纳米 + 储备能源（#219）
   wing_boost:     (a) => res(a).overdrive ? "机体强化已经生效" : null,
   yuito_cold:     (a) => (res(a).liquid || 0) >= 1 ? null : "没有咖啡液",
   yuito_duet:     (a) => (res(a).liquid || 0) >= 2 ? null : "咖啡液不足 2",
@@ -10926,8 +11055,9 @@ const SKILL_REQUIREMENT = {
     : !res(a).scanned ? "沙暴中再用要先做一次环境扫描才能调转风向"
     : state.weatherLock ? `天气被「${state.weatherLock}」锁定，无法调转风向` : null,
   torque_strip:   (a) => ((findKit("kolt", state.units) || {}).resources || {}).bit === "acid" ? "拆卸模式需要电钻模式" : null,
-  // 废物利用：要有「还没利用过的被摧毁的敌人血量层」或腐坏抛射攒下的记录才能用（同一层不能反复利用）
-  kolt_scrap:     (a) => state.lastBrokenLayer || (Number(res(a).divertArmor) || 0) > 0 || Object.keys(res(a).rotStore || {}).some(k => (Number(res(a).rotStore[k]) || 0) > 0)
+  // 废物利用：要有「还没利用过的被摧毁的敌人血量层」或腐坏抛射 / 转移注意 / 拆卸模式攒下的废料才能用（同一层不能反复利用）
+  kolt_scrap:     (a) => state.lastBrokenLayer || (Number(res(a).divertArmor) || 0) > 0 ||
+    [res(a).rotStore, res(a).stripStore].some(s => Object.keys(s || {}).some(k => (Number(s[k]) || 0) > 0))
     ? null : "还没有可以利用的残骸（被摧毁的敌人血量层，或腐坏抛射留下的记录）",
   kolt_rot:       (a) => ((findKit("kolt", state.units) || a).resources || {}).bit !== "acid" ? "腐坏抛射需要酸液炮模式" : null,
   kolt_mod:       (a) => ((findKit("kolt", state.units) || a).resources || {}).bit === "acid" ? "「非法」改装需要电钻模式" : null,
@@ -11277,6 +11407,13 @@ function skillTargetError(a, id, t) {
     if (zoneDist(a.zone, tgt.zone, state.zoneMode) > (far ? 1 : 0)) return "目标超出本次射程";
   }
   const flp = (state.skillFlow && state.skillFlow.picks) || {};
+  // 「非法」改装选了「过载 + 消耗废料」：要废料达到上限、目标是我方单位（分步里才有这一项），不然在扣行动点之前拦下
+  if (id === "kolt_mod" && flp.mode === "ap") {
+    const k = findKit("kolt", state.units) || a;
+    const tgt = flp.target ? unitById(flp.target) : t;
+    if (!tgt || !tgt.isPlayer) return "只有目标是我方单位时才能消耗废料给行动点";
+    if (!koltScrapFull(k)) return `废料还没达到上限（${koltScrapTotal(k)} / ${koltScrapCap(k)}），不能消耗废料给行动点`;
+  }
   // 巨刃划空打配置物 / 危墙：要在 1 距离以内，不能打自己这边的铁壁 / 防护罩（以前能打自己的铁壁）
   if (id === "chuan_blade") {
     const ref = flp.target || state.targetId;
@@ -11286,6 +11423,8 @@ function skillTargetError(a, id, t) {
       return p && BARRIER_SIDE[p.kind] === "player" ? `不能打自己这边的${p.name}` : "这个目标不在 1 距离以内";
     }
   }
+  // 补充能源选了压缩：没有纳米可以压缩就不白花附赠动作（纳米是 0 时分步里本来就不给这个选项）
+  if (id === "ruby_refuel" && flp.mode === "compress" && !(Number(res(a).nano) > 0)) return "没有纳米能源可以压缩";
   // 回收护盾：目标身上要有能回收的护盾（电池的机械护盾、当作最内层的护盾不算），不白花附赠动作
   if (id === "chuan_reclaim" && t && t.id && t.isPlayer &&
       !(t.layers || []).some(l => l.type === "shield" && !l.batteryShield && !l.inner && (Number(l.current) || 0) > 0)) return `${t.name} 身上没有能回收的护盾`;
@@ -12367,8 +12506,13 @@ function runSkillInner(id, optRun) {
       t.magnetShield = true;
       lines.push(...triggerMagnetShield(t));
     } else if (id === "ruby_refuel") {
-      addNano(10);
-      lines.push(`补充能源：纳米 +10 → ${a.resources.nano}。`);
+      // 补充能源（#219）：二选一，分步里选的 mode——"compress" 压缩成储备能源，其余（没选）纳米 +10
+      const fl = state.skillFlow;
+      if (fl && fl.picks && fl.picks.mode === "compress") compressNano(a, lines);
+      else {
+        addNano(RUBY_REFUEL.nano);
+        lines.push(`补充能源：纳米 +${RUBY_REFUEL.nano} → ${a.resources.nano}。`);
+      }
     } else if (id === "chuan_over") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       applyInstantEffect(t, "overload", lines);
@@ -12609,11 +12753,13 @@ function runSkillInner(id, optRun) {
       a.atk = effectiveAtk(a, state.units);
       lines.push("机体强化：每回合消耗的纳米能源 +20，atk +20%，普通攻击溅射倍率 +0.1。");
     } else if (id === "mint_repair") {
-      // 机体修复：消耗 20 纳米，自身恢复 50% 生命上限，+1 架势
-      addNano(-20);
+      // 机体修复：消耗 20 纳米（纳米不够的差额从储备能源扣，#219），自身恢复 50% 生命上限，+1 架势
+      const ruby = findKit("ruby", state.units);
+      const paid = spendNano(20, { ruby, partial: true });   // 门槛（SKILL_REQUIREMENT）已经查过够 20
       const got = healUnit(a, Math.floor(totalMaxHp(a) * 0.5));
       a.def = Math.min(a.defMax || a.def, (Number(a.def) || 0) + 1);
-      lines.push(`机体修复：消耗 20 纳米，恢复 ${got} 生命，架势 +1。纳米 → ${(findKit("ruby", state.units) || {}).resources ? findKit("ruby", state.units).resources.nano : "—"}`);
+      const left = !ruby || !ruby.resources ? "纳米 → —" : paid && paid.reserve ? nanoSpentText(ruby, paid) : "纳米 → " + ruby.resources.nano;
+      lines.push(`机体修复：消耗 20 纳米，恢复 ${got} 生命，架势 +1。${left}`);
     } else if (id === "yuito_cold") {
       // 冷萃：1 咖啡液。距离 ≤1 的区变冻土，那一区的敌人 0.5atk 冰 +1 击破，友方 +1 架势
       const fl = state.skillFlow;
@@ -13064,7 +13210,7 @@ function runSkillInner(id, optRun) {
       // 获得上一个被摧毁的敌人血量层等量的对应血量，最多为柯尔特生命上限的 50%（腐坏抛射的记录不算在内）
       if (!rec) lines.push("本场还没有被摧毁的敌人血量层。");
       else {
-        const cap = Math.floor(baseMaxHp(a) * 0.5);
+        const cap = koltScrapCap(a);
         const amt = Math.min(Math.floor(Number(rec.lost) || 0), cap);
         grant(rec.type, amt, "废物利用");
         if ((Number(rec.lost) || 0) > cap) lines.push(`（那一层有 ${Math.floor(rec.lost)}，按生命上限一半封顶为 ${cap}）`);
@@ -13079,6 +13225,10 @@ function runSkillInner(id, optRun) {
         grant("armor", Math.floor(Number(a.resources.divertArmor)), "扭矩回收");
         a.resources.divertArmor = 0;
       }
+      // 扭矩「拆卸模式」变成废料的外层血量：按被拆下的那一层的种类领取（不受 50% 限制），然后清空
+      const strip = (a.resources && a.resources.stripStore) || {};
+      Object.keys(strip).forEach(type => grant(type, Math.floor(Number(strip[type]) || 0), "拆卸回收"));
+      if (a.resources) a.resources.stripStore = {};
       // 废物利用给自己回的血 / 加的层也算治疗（一般的治疗只统计给其他友方的）
       const gain = totalHp(a) - hp0;
       const st = gain > 0 ? battleStat(a) : null;
@@ -13101,10 +13251,19 @@ function runSkillInner(id, optRun) {
         lines.push(`过度自信：${t.name} 被嘲讽，下次攻击必须打柯尔特。`);
       }
     } else if (id === "kolt_mod") {
-      // 「非法」改装：电钻模式，对 1 距离内任意单位施加过载
-      if (!needT()) return paintSkillLog(lines.join("\n"));
-      applyInstantEffect(t, "overload", lines);
-      lines.push(`「非法」改装：${t.name} 过载。`);
+      // 「非法」改装：电钻模式，对 1 距离内任意单位施加过载。
+      // 废料达到上限、目标是我方单位时，分步里可以选再消耗等于上限的废料，让目标 +1 行动点（skillTargetError 已经查过能不能选）
+      const fl = state.skillFlow;
+      const tgt = fl && fl.picks && fl.picks.target ? unitById(fl.picks.target) : t;
+      if (!tgt) { lines.push("先在「技能目标」里选对象。"); return paintSkillLog(lines.join("\n")); }
+      applyInstantEffect(tgt, "overload", lines);
+      lines.push(`「非法」改装：${tgt.name} 过载。`);
+      const k = findKit("kolt", state.units) || a;
+      if (fl && fl.picks && fl.picks.mode === "ap" && tgt.isPlayer && koltScrapFull(k)) {
+        const cost = koltScrapSpend(k, koltScrapCap(k));
+        lines.push(`「非法」改装：消耗 ${cost} 废料（还剩 ${koltScrapTotal(k)}）。`);
+        grantAllyAp(a, tgt, KOLT_SCRAP.modAp, lines);   // 满了也加（可以超过上限）；用它打出的分数一半记给柯尔特，和意式浓缩一样
+      }
     } else if (id === "kolt_cannon") {
       // 碎渣重炮：把全部废料装填进武器。电钻 → 机枪：选距离 1 以内的一个区域，每颗子弹（扭矩atk/3 + 1d10）电击、
       // 各自独立掷骰，打那一区的随机敌人；最后不够一颗的废料也打成一发；每 2 颗 1 击破。每颗都算单体攻击（吃过度自信的嘲讽）。
@@ -13208,14 +13367,16 @@ function runSkillInner(id, optRun) {
     } else if (id === "torque_strip") {
       const fl = state.skillFlow;
       const tgt = (fl && fl.picks.target) ? unitById(fl.picks.target) : t;
+      // 分步里选了「变成废料」：拆下的外层血量记给柯尔特，不用选接收的友方（没选的旧命令照旧给友方）
+      const kolt = findKit("kolt", state.units);
+      const toScrap = !!(fl && fl.picks.mode === "scrap" && kolt);
       const ally = (fl && fl.picks.ally) ? unitById(fl.picks.ally) : null;
-      if (!tgt || !ally) { lines.push("先选拆卸目标和接收友方。"); return paintSkillLog(lines.join("\n")); }
+      if (!tgt || (!ally && !toScrap)) { lines.push("先选拆卸目标和接收友方。"); return paintSkillLog(lines.join("\n")); }
       const stunnedBefore = !!tgt.stunned;
       dealBreak(tgt, 2, "electric", lines, "拆卸");
       // 拆卸是对一个敌人的单体攻击：照样触发柯尔特「过度自信」的嘲讽（击破不走 dealTo，要单独加）
-      const koltT = findKit("kolt", state.units);
-      if (!tgt.isPlayer && !tgt.dead && (typeof passiveOn !== "function" || passiveOn(koltT || a))) {
-        tgt.tauntTo = (koltT || a).id;
+      if (!tgt.isPlayer && !tgt.dead && (typeof passiveOn !== "function" || passiveOn(kolt || a))) {
+        tgt.tauntTo = (kolt || a).id;
         lines.push(`过度自信：${tgt.name} 被嘲讽，下次攻击必须打柯尔特。`);
       }
       // 卡面：这次攻击行动造成失衡才提升到 1.5×；本来就失衡的不算
@@ -13225,8 +13386,16 @@ function runSkillInner(id, optRun) {
       if (outer) {
         const take = Math.min(amount, outer.current);
         outer.current -= take;
-        addTempLayer(ally, outer.type, take);
-        lines.push(`拆卸转移 ${take} 点${LAYER[outer.type] || outer.type}给 ${ally.name}。`);
+        if (toScrap) {
+          // 单独计算、不受上限（和腐坏抛射、转移注意一样）：按那一层的种类记下，废物利用领对应血量，碎渣重炮一起装填
+          kolt.resources = kolt.resources || {};
+          const store = kolt.resources.stripStore = kolt.resources.stripStore || {};
+          if (take > 0) store[outer.type] = (Number(store[outer.type]) || 0) + take;
+          lines.push(`拆卸转移 ${take} 点${LAYER[outer.type] || outer.type}，变成柯尔特的废料（现在共 ${koltScrapTotal(kolt)}）。`);
+        } else {
+          addTempLayer(ally, outer.type, take);
+          lines.push(`拆卸转移 ${take} 点${LAYER[outer.type] || outer.type}给 ${ally.name}。`);
+        }
         // 抽空了最内层：敌人照常被击杀（以前直接改血量不走击杀结算，0 血还能继续行动）
         if (!tgt.isPlayer && !tgt.dead && isInnerDepleted(tgt)) {
           tgt._lastHitBy = a.id;

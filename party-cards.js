@@ -2,19 +2,21 @@
  *   PartyCards.heroDto(h, { gm })   房主这边：从单位拼出卡片要的数据。gm:false 时不带坚毅生命（联机发给玩家的就是这份）
  *   PartyCards.heroCardHtml(d, opt)  画一张卡：opt.gm 才画「坚毅」一行；opt.buttons 画「资料 / 武器」按钮；opt.owner / mine / focus 是联机玩家用的
  *   PartyCards.clockHtml(c)          「第 N 天 08:00 上午 · 距上次长休 X 小时」+ 力竭提示；c = { day, clock, hours }
- *   PartyCards.isNight(min)          和 ledger.js · isNightClock 一样：18:00–05:00 是夜晚 */
+ *   PartyCards.isNight(min)          和 ledger.js · isNightClock 同一张表（daylight.js 的 DAY_LIGHT）：18:00–05:00 是夜晚（傍晚也算） */
 (function (root) {
   "use strict";
   const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
   const n = v => (typeof v === "number" && isFinite(v) ? v : Number(v) || 0);
   const g = name => (typeof root[name] === "function" ? root[name] : null);
   const norm = m => ((Math.floor(n(m)) % 1440) + 1440) % 1440;
+  // 几点算夜晚、时段的深夜 / 傍晚 / 夜晚分界：和规则同一张表（玩家端不加载规则文件，所以直接读 daylight.js，不经过 ledger.js）
+  const dayLight = () => root.DayLight || (typeof require === "function" ? require("./daylight") : null);
+  const isNight = m => dayLight().isNight(m);
   const clockText = m => { m = norm(m); return String(Math.floor(m / 60)).padStart(2, "0") + ":" + String(m % 60).padStart(2, "0"); };
-  const dayPeriod = m => { const h = Math.floor(norm(m) / 60); return h < 5 ? "深夜" : h < 8 ? "清晨" : h < 12 ? "上午" : h < 14 ? "中午" : h < 18 ? "下午" : h < 20 ? "傍晚" : "夜晚"; };
+  const dayPeriod = m => { m = norm(m); const h = Math.floor(m / 60), T = dayLight().DAY_LIGHT; return m < T.day ? "深夜" : h < 8 ? "清晨" : h < 12 ? "上午" : h < 14 ? "中午" : m < T.dusk ? "下午" : m < T.night ? "傍晚" : "夜晚"; };
   const durationText = hours => { const t = Math.round(n(hours) * 60), h = Math.floor(t / 60), m = t % 60; return m ? (h ? `${h} 小时 ${m} 分` : `${m} 分钟`) : `${h} 小时`; };
   const exhaustTier = h => (h >= 80 ? 4 : h >= 60 ? 3 : h >= 40 ? 2 : h >= 20 ? 1 : 0);
   const EXHAUST = ["精神正常", "力竭（无法用坚毅生命起身）", "力竭 2（atk −3，def −1）", "力竭 3（被击倒立刻死亡）", "力竭致死"];
-  const isNight = m => { m = norm(m); return m >= 18 * 60 || m < 5 * 60; };
 
   function clockHtml(c) {
     c = c || {};

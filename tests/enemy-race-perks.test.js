@@ -503,3 +503,38 @@ test("显示：被动写在悬停 / 图鉴 / 联机数据里；没有被动的�
   assert.deepEqual(c2.racePerkLines(f2).length, 1);
   assert.ok(S2);
 });
+
+test("RACE_PERK.off（只给平衡模拟工具用，issue #232）：默认 0 = 被动照常生效；打开后敌人的种族被动全部不生效，种族和六维换算照旧；关回 0 恢复", () => {
+  const { c, S, foe, kolt } = setup("thug_hammer", "红皮人");
+  const RP = perk(c, "RACE_PERK");
+  assert.equal(RP.off, 0, "默认是开");
+  const fire = () => { heal(foe); return dealt(hit(c, kolt, foe, { element: "fire", flat: 100 })); };
+  const on = fire();
+  assert.ok(c.enemyRacePerk(foe) && c.raceSkills(foe).length, "默认：热耐性、扑灭都在");
+  RP.off = 1;
+  assert.equal(c.enemyRacePerk(foe), null);
+  assert.equal(fire(), on + 25, "关掉：热耐性不减火伤");
+  assert.deepEqual(plain(c.raceSkills(foe)), [], "关掉：种族附赠技能也没有");
+  assert.equal(c.raceLabel(foe.race), "红皮人", "种族本身还在");
+  assert.ok(foe.raceDelta && foe.raceDelta.atk > 0, "随机种族的六维换算照旧");
+  c.setEnemyRace(foe, "犬类人·狼");
+  assert.equal(c.raceAtkAdjust(foe, S.units), 0, "关掉：独狼不加减 atk");
+  RP.off = 0;
+  assert.notEqual(c.raceAtkAdjust(foe, S.units), 0, "关回来：独狼照常");
+  c.setEnemyRace(foe, "红皮人");
+  assert.equal(fire(), on, "关回来：热耐性照常");
+});
+
+test("RACE_PERK.off：整场对打，默认和显式写 0 结果完全一样（游戏行为不变）；打开时易怒蛮牛不再触发", () => {
+  const battle = (off) => {
+    const c = H.load();
+    if (off != null) perk(c, "RACE_PERK").off = off;
+    c.BattleSim.setup({ party: ["kolt", "helu"], enemies: [{ id: "captain_ox", lv: 5, zone: 2 }], seed: "PERK-OFF" });
+    const r = c.BattleSim.run({ maxRounds: 20 });
+    return { r: plain(r), log: logText(c.S.state) };
+  };
+  const def = battle(null), zero = battle(0), off = battle(1);
+  assert.deepEqual(zero, def, "显式写 0 = 默认");
+  assert.match(def.log, /易怒蛮牛/, "默认：牛队长掉到半血以下挨打会失控");
+  assert.doesNotMatch(off.log, /易怒蛮牛/, "关掉：不再失控");
+});
