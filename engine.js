@@ -908,6 +908,10 @@ function resolveAttack(ctx) {
     if (element === "energy" && t.kit && typeof heroProfile === "function" && (heroProfile(t.kit) || {}).race === "兽人-蜥蜴" && t.isPlayer && !t.weaponOf) {
       pct += 0.25; hAdd("鳞片（兽人-蜥蜴）：能量受伤 +25%。");
     }
+    // 敌人的种族被动（enemies.js · RACE_PERKS）：热耐性、鳞片，和克制表加算
+    if (typeof raceDefendMods === "function") raceDefendMods(t, element).forEach(m => { pct += m.value; hAdd(m.reason); });
+    // 攻击者一侧：注意力涣散（连续打同一个目标伤害 −25%）
+    if (isAttack && typeof raceAttackMods === "function") raceAttackMods(a, t).forEach(m => { pct += m.value; hAdd(m.reason); });
     // 蓄能：能量、谐波、电攻击造成的伤害提高「高能值占血量上限的百分比」
     // （手册正文没写电，作者确认是手册漏写，电也加）
     if (a && a.self === "store" && (element === "energy" || element === "harmonic" || element === "electric")) {
@@ -1049,6 +1053,7 @@ function resolveAttack(ctx) {
         br += 1; hAdd("熔融沙尘：击破 +1。");
       }
       if (meltIceHit) br += 1;
+      if (h === 0 && isAttack && Number(ctx.firstBreak) > 0) { br += Number(ctx.firstBreak); hAdd(`迅袭：整场第一个行动的第一击，击破 +${Number(ctx.firstBreak)}。`); }
       if (flags.smash) {
         selfBreak += br;
         br *= 2;
@@ -1136,7 +1141,7 @@ function resolveAttack(ctx) {
     if (t.instant && t.instant.sting) pierColdRetrig = true;
   }
 
-  if (t.self === "cat" && totalBreak > 2) {
+  if ((t.self === "cat" || (typeof raceBreakCap === "function" && raceBreakCap(t) != null)) && totalBreak > 2) {
     add("兽人猫·灵巧：一回合失去架势不超过 2。已在应用阶段封顶。");
   }
 
@@ -1334,7 +1339,9 @@ function applyResultToUnit(target, result, attacker) {
     notes.push("背水一战：起身中不失去架势。");
   }
   if (target.trainingDummy) spent = 0;   // 训练假人架势无限：不扣架势、不失衡
-  if (target.raceTrait === "catFocus") spent = Math.min(spent, Math.max(0, 2 - (target.lostDefThisTurn || 0)));
+  // 灵巧（兽人·猫）：一回合最多失去 2 架势。敌人的种族被动（enemies.js · raceBreakCap）和原来的 raceTrait 共用这一行
+  const dexCap = target.raceTrait === "catFocus" ? 2 : (typeof raceBreakCap === "function" ? raceBreakCap(target) : null);
+  if (dexCap != null) spent = Math.min(spent, Math.max(0, dexCap - (target.lostDefThisTurn || 0)));
   // 坚挺：架势不会被打到 1 以下（不倒战意给的，本回合有效）
   if (target.statuses && target.statuses.sturdy && (Number(target.def) || 0) >= 1 && spent > (Number(target.def) || 0) - 1) {
     spent = Math.max(0, (Number(target.def) || 0) - 1);

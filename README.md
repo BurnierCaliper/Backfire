@@ -368,6 +368,25 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **敌人种族（二）：种族被动在敌人身上生效**（issue #161，设计见 `docs/enemy-race.md` 第 4、7 节；enemies.js · `RACE_PERK` / `RACE_PERKS` / `racePerk` / `raceDefendMods` / `raceAtkAdjust` / `raceCheckPerks` / `raceFieldDamage` / `raceFirstBreak` / `raceAfterMove` / `raceBonusExtra` / `raceBreakCap` / `raceAttackMods` / `raceAfterHurt` / `raceSkills` / `raceRunSkill` / `raceBonusChoice`，engine.js · `resolveAttack` / `applyResultToUnit`，party.js · `effectiveAtk`，matchup.js · `matchupDefenderRow`，app.js · `dealTo` / `applyCombat` / `refreshEnemyEconomy` / `doMoveInner` / `voidCrossOdds` / `iceLeaveCheck` / 场地结算，ai.js · `aiPlanBase`，bestiary.js、bestiary-ui.js、game.js、unit-card.js、unit-tip.js、online-battle.js；测试 `tests/enemy-race-perks.test.js`、`tests/audit-P6-terrain.test.js`）
+  - **以前**：敌人有种族但只是一个标签（和六维换算），种族被动不起作用。**现在**：按 `u.race` 通用生效（不看具体兵种，镇压部队等固定兽人兵种同样吃到）；数值全放 `RACE_PERK`，开关和说明放 `RACE_PERKS`。
+  - **人类·迎难直上**：敌人的检定（越过空隙、离开冻土）失败时重掷一次，成功率 50% → 75%（和角色共用 `voidCrossOdds` / `iceLeaveCheck` 里的重掷；没有种族或别的种族的敌人仍是 50%）。
+  - **红皮人·热耐性**：受火伤 −25%，和克制表加算；AI 在身上有灼烧时用附赠（`race_snuff`）扑灭全部灼烧。
+  - **犬类人·狼·独狼**：`effectiveAtk` 里加减：同区没有队友 atk + 等级÷2（向下取整），有两名及以上队友 atk − 等级÷2，一名不变。队友 = 同区、同阵营（或互为召唤关系）的友方单位，召唤的小兵算，配置物、死亡 / 离场的、中立生物不算。
+  - **猫类人·豹·迅袭**：每次移动回 1 架势（不超上限、失衡时不回）；整场第一个行动里的第一击 +1 击破（`resolveAttack` 的 `firstBreak`，只加在多段攻击的第一段；先移动过、或者第一个行动是协助 / 借机这类反应的不算）。
+  - **猫类人·虎·威压**：附赠技能 `race_awe`，对同区一人威吓，敌人一律 50% 成功，成功施加不稳；AI 只对同区还没不稳的人用。
+  - **鼠类人·鼠·环境适应**（作者 10/21 定）：每次受到酸液地面、火场、高压场地的伤害，或者冻土的冰击破（进入冻土、离开冻土检定失败），各掷一次，50% 概率完全免疫（`RACE_PERK.fieldImmune`）；能量场累积的是场地高能不是伤害，不算。
+  - **牛类人·马·千里马**：敌人回合开始时第一次（`startEnemyPhase`）+1 附赠；不稳照样把它清掉。
+  - **兽人·狼·追猎本能**：附赠技能 `race_hunt`，对一个敌人施加紧追（和柯尔特共用 `chase` / `chasers` / `chaseFollow`）。
+  - **兽人·牛·易怒蛮牛**：血量低于 50% 时受到任何伤害（攻击、状态、场地都算，0 伤不算）：失去附赠（当前的，和下个敌人回合的）、移到相邻的另一个区、对新所在区的随机一个目标造成 1 击破。
+  - **兽人·蜥蜴**：吐酸（附赠技能 `race_spit`，同区 1×atk 酸、0 击破，每场一次）；鳞片（受能量伤害 +25%）。角色龙哥的鳞片和敌人共用 `RACE_PERK.energyUp`。
+  - **兽人·猫**：灵巧（一回合最多失去 2 架势，和原来的 `raceTrait: "catFocus"` 共用 `applyResultToUnit` 里同一行）；注意力涣散（不止一个目标可选时，连续超过 1 回合打同一个目标，伤害 −25%，和别的百分比加算）。
+  - **兽人·熊**：重装操作、嗜睡战斗里不生效，只写在资料里。
+  - **附赠技能怎么用**：扑灭、追猎本能、威压、吐酸都花 1 附赠；杂兵本来没有附赠（只有千里马的第一回合有），精英 / 首领的移动也花附赠，所以它们只在不用移动、直接出手时才用，免得抢了移动的附赠。
+  - **显示**：战斗铭牌悬停、单位浮窗（新增「种族被动」一节）、图鉴（固定种族写被动，随机种族写见过的种族的被动）、联机单位快照。
+  - **顺手修**：`tools/playtest.js` 休息点短休不看今天还有没有次数（`canShortRestAtNode`），战斗改动改变了战役走向后撞上这个老问题，`tests/balance-tools.test.js` 的固定种子战役跑到一半报错；现在没次数就不短休。
+  - **和移动堡垒（#199）一起**：坐在车上的敌人只能用车的武器，种族的附赠技能（追猎本能、吐酸、威压、扑灭）上车后也不出现在技能表里，下车后恢复（enemies.js · `enemySkillList`；测试 `tests/vehicle.test.js`「种族的附赠技能上车后也不能用」）。
+  - **测试**：`tests/enemy-race-perks.test.js` 每个被动一个用例（迎难直上、热耐性、扑灭、独狼、迅袭回架势 / 第一击击破、威压、环境适应、千里马、追猎本能、易怒蛮牛、吐酸、鳞片、灵巧、注意力涣散、熊、通用性、显示）；`tests/audit-P6-terrain.test.js` 的空隙用例改成：没有种族的敌人 50%，人类种族的敌人 75%。
 - **移动堡垒：可以上下车的载具配置物**（issue #162，设计见 [docs/suppression-force.md](docs/suppression-force.md) 第 3 节）。以前没有载具；现在新增通用的「载具配置物」，第一台车是镇压部队的移动堡垒。**通用载具写在新文件 vehicle.js**：`VEHICLES` 一张表一台车（座位数、数值公式、代挡概率、各招式的倍率、阵营、出现概率），`VEHICLE_RULES` 是所有载具共用的规则（上车 / 拉人的花费与检定、敌人拉人成功率）；以后加别的载具照 `fortress` 补一项即可（props.js · `makeProp` 认到载具表里的种类就交给 `makeVehicleProp`）。
   - **数值**（按队伍人数 `scaleHp`，纯装甲没有护盾）：装甲 42 + 11×(等级−1) + 2×⌊等级/5⌋；架势 5、每 10 级 +1；两个晕眩标记；ATK 7 + (等级−1)；开炮骰 1d6 起每 5 级升一档（`upgradeDieSides(6, dieStep(lv, 5))`）。1 / 5 / 10 / 15 / 20 / 25 级（2 人队）装甲 42 / 88 / 145 / 202 / 259 / 316，和文档表一致。
   - **出现**：配置物，不占代币。镇压队的遭遇 30% 带一台，一场最多一台（run.js · `finishEncounter` 掷骰写进 `spec.vehicles`，`buildEncounter` 开战时摆上场）；**开战时一定有一个敌人坐在车上当驾驶员**：从这场遭遇的镇压队里随机挑一个，车停在他所在的区（vehicle.js · `vehicleEncounterSetup`）。

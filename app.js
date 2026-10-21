@@ -1661,11 +1661,20 @@ function refreshEnemyEconomy(u, notes) {
     }
     if (!u.flying && w > 0) bonus += 1;
   }
+  // 种族被动（enemies.js）：千里马第一回合 +1 附赠（在不稳之前加，不稳照样把它清掉）。
+  // 只在真正的敌人回合开始（startEnemyPhase 传了 notes）才算一个回合；生成时的初始化不算
+  if (notes && typeof raceBonusExtra === "function") bonus += raceBonusExtra(u);
   // 不稳：敌人一样失去附赠动作，触发一次后消失
   if (u.statuses && u.statuses.unstable) {
     bonus = 0;
     u.statuses.unstable = false;
     if (notes) notes.push(`${u.name} 不稳：这回合失去附赠动作。`);
+  }
+  // 易怒蛮牛发作后这回合没有附赠
+  if (u.raceNoBonus) {
+    u.raceNoBonus = false;
+    bonus = 0;
+    if (notes) notes.push(`${u.name} 易怒蛮牛：这回合失去附赠动作。`);
   }
   if (loseAp) ap = 0;
   u.ap = Math.max(0, ap);
@@ -1958,7 +1967,9 @@ function tickFireField(z, notes) {
       parts.push(r.text);
     }
     const x = envMult(u);
-    applyTypedDot(u, dmg * x, "fire", notes, `${u.name} 火场${stacks}层 ${parts.join(" + ")} = ${dmg}${x > 1 ? ` ×${x}（场地效果${x > 2 ? "×4" : "翻倍"}）= ${dmg * x}` : ""}`);
+    const cut = typeof raceFieldDamage === "function" ? raceFieldDamage(u, dmg * x) : dmg * x;   // 环境适应（鼠类人·鼠）：50% 概率免疫
+    if (cut <= 0 && dmg * x > 0) { notes.push(`${u.name} 火场${stacks}层：环境适应，免疫这次场地伤害。`); return; }
+    applyTypedDot(u, cut, "fire", notes, `${u.name} 火场${stacks}层 ${parts.join(" + ")} = ${dmg}${x > 1 ? ` ×${x}（场地效果${x > 2 ? "×4" : "翻倍"}）= ${dmg * x}` : ""}`);
   }));
   // 酷暑让火场层数再 +1：看的是这一区的天气（隔离区不受天气影响）；末日把这 +1 也翻倍
   const heat = zoneWeather(z) === "heat";
@@ -1980,7 +1991,9 @@ function tickAcidFieldFor(u, weather, notes) {
   const d = statusDotDice("acidfield", u.level, weather);
   const r = takeDice(d.n, d.s, 0);
   const x = envMult(u);
-  withEnvOwner((state.fields[u.zone] || {}).by, () => applyTypedDot(u, r.total * x, "acid", notes, `${u.name} 酸液地面 ${r.text}${x > 1 ? ` ×${x}（场地效果${x > 2 ? "×4" : "翻倍"}）` : ""}`));
+  const cut = typeof raceFieldDamage === "function" ? raceFieldDamage(u, r.total * x) : r.total * x;   // 环境适应（鼠类人·鼠）：50% 概率免疫
+  if (cut <= 0 && r.total * x > 0) { notes.push(`${u.name} 酸液地面：环境适应，免疫这次场地伤害。`); return; }
+  withEnvOwner((state.fields[u.zone] || {}).by, () => applyTypedDot(u, cut, "acid", notes, `${u.name} 酸液地面 ${r.text}${x > 1 ? ` ×${x}（场地效果${x > 2 ? "×4" : "翻倍"}）` : ""}`));
 }
 function tickHealFieldFor(u, weather, notes) {
   if (fieldExempt(u)) return;
@@ -3305,6 +3318,8 @@ function pulseHighVoltage(target, amount, hitNo, hitMax) {
   let dmg = r.total;
   const ex = envMult(target);
   dmg *= ex;   // 恶劣环境 / 末日：场地效果翻倍（两个叠加 ×4）
+  if (typeof raceFieldDamage === "function") dmg = raceFieldDamage(target, dmg);   // 环境适应（鼠类人·鼠）：50% 概率免疫
+  if (!(dmg > 0)) { notes.push(`${target.name} 高压场地：环境适应，免疫这次场地伤害。`); return notes; }
   target._hvBusy = true;
   const tag = (hitMax > 1) ? `第${hitNo}/${hitMax}击 ` : "";
   withEnvOwner(f.by, () => applyTypedDot(target, dmg, "electric", notes, `${target.name} 高压场地${tag}${r.text}${ex > 1 ? "×" + ex : ""}`));
@@ -3707,7 +3722,8 @@ function voidCrossOdds(u) {
   const table = typeof ROGUE_CHECKS !== "undefined" ? ROGUE_CHECKS.chance : [[0.5, 0, 0, 0], [1, 0.5, 0.25, 0.125], [1, 1, 0.5, 0.25], [1, 1, 0.75, 0.5]];
   const base = (table[level] || [])[VOID_CROSS.diff] || 0;
   const hpLow = mine && totalHp(u) * 2 < totalMaxHp(u);
-  const perks = mine && typeof checkPerksFor === "function" ? checkPerksFor(u.kit, VOID_CROSS.prof, hpLow) : {};
+  const perks = mine && typeof checkPerksFor === "function" ? checkPerksFor(u.kit, VOID_CROSS.prof, hpLow)
+    : (!mine && typeof raceCheckPerks === "function" ? raceCheckPerks(u) : {});   // 敌人：种族被动（人类·迎难直上）
   let p = perks.adv ? 1 - (1 - base) * (1 - base) : perks.dis ? base * base : base;
   if (perks.reroll) p = 1 - (1 - p) * (1 - p);
   return { mine, level, base, chance: p, perks };
@@ -4423,7 +4439,8 @@ function iceLeaveCheck(u) {
   const lvText = ["没有熟练", "一级熟练", "二级熟练", "三级熟练"][level] || "";
   if (base >= 1) return { ok: true, text: `简单「运动」检定（${lvText}，默认通过）` };
   const hpLow = totalHp(u) * 2 < totalMaxHp(u);
-  const perks = u.isPlayer && typeof checkPerksFor === "function" ? checkPerksFor(u.kit, "运动", hpLow) : {};
+  const perks = u.isPlayer && typeof checkPerksFor === "function" ? checkPerksFor(u.kit, "运动", hpLow)
+    : (!u.isPlayer && typeof raceCheckPerks === "function" ? raceCheckPerks(u) : {});
   const roll = () => Math.random() < base;
   const once = () => perks.adv ? (roll() || roll()) : perks.dis ? (roll() && roll()) : roll();
   let ok = once();
@@ -4580,8 +4597,11 @@ function doMoveInner(unit, dest, moveOpt) {
     const chk = iceLeaveCheck(unit);
     if (!chk.ok) {
       const br = iceFieldBreak(unit);
-      dealBreak(unit, br, "ice", notes, "冻土离开失败");
-      notes.push(`离开冻土：${chk.text}，失败：留在 ${from} 区并受 ${br} 冰击破。`);
+      if (typeof raceFieldImmune === "function" && raceFieldImmune(unit)) notes.push(`离开冻土：${chk.text}，失败：留在 ${from} 区；环境适应，免疫这次冰击破。`);   // 鼠类人·鼠：50% 概率免疫
+      else {
+        dealBreak(unit, br, "ice", notes, "冻土离开失败");
+        notes.push(`离开冻土：${chk.text}，失败：留在 ${from} 区并受 ${br} 冰击破。`);
+      }
       paintSkillLog(notes.join("\n"));
       renderAll();
       return;
@@ -4600,6 +4620,7 @@ function doMoveInner(unit, dest, moveOpt) {
   enterFrozenGround(unit, notes);
   applyAbyssFall(unit, from, notes);
   if (typeof afterMove === "function") afterMove(unit, notes);
+  if (typeof raceAfterMove === "function") raceAfterMove(unit, notes);   // 迅袭（enemies.js）：移动回 1 架势
   if (typeof featAlertOnEnter === "function") featAlertOnEnter(unit, notes);   // 警戒（feats.js）：敌人走进来挨一下
   chaseFollow(unit, notes);
   notes.unshift(`${unit.name}：${from} 区 → ${unit.zone} 区${moveOpt.free ? "（技能内移动，不耗附赠）" : ""}`);
@@ -4620,6 +4641,7 @@ function enterFrozenGround(unit, notes) {
   const toF = state.fields[unit.zone] || emptyField();
   if (!toF.ice || fieldExempt(unit)) return;
   if (typeof featHas === "function" && featHas(unit, "wanderer")) return;   // 荒原行者：进入冻土不受击破
+  if (typeof raceFieldImmune === "function" && raceFieldImmune(unit)) { notes.push(`${unit.name} 进入冻土：环境适应，免疫这次冰击破。`); return; }   // 鼠类人·鼠：50% 概率免疫
   const br = iceFieldBreak(unit);
   notes.push(`${unit.name} 进入冻土：冰击破 ${br}。`);
   dealBreak(unit, br, "ice", notes, "进入冻土");
@@ -4880,6 +4902,7 @@ function applyCombat(target, result, attacker) {
   if (typeof endSelfOnStun === "function") endSelfOnStun(target, notes);
   // 死刑：被标记的人倒下了 → 立刻转标
   if (typeof bossMechSync === "function") bossMechSync(notes);
+  if (typeof raceAfterHurt === "function") raceAfterHurt(target, result, attacker, notes);   // 易怒蛮牛（enemies.js）
   return notes;
 }
 
@@ -8121,6 +8144,8 @@ function dealTo(attacker, target, opt) {
     diceValue,
     firstHitBonus: prepBonus,
     firstHitNote: prepNote,
+    // 迅袭（猫类人·豹）：整场第一个行动里的第一击 +击破；反应（协助、借机）和环境伤害不算
+    firstBreak: flags.action && !isReaction && !flags.environment && typeof raceFirstBreak === "function" ? raceFirstBreak(attacker) : 0,
     element: opt.element || "physical",
     baseBreak: br,
     hits: opt.hits || 1,
@@ -8141,6 +8166,11 @@ function dealTo(attacker, target, opt) {
     atkRange: opt.atkRange || "any"
   });
   res.flags = flags;
+  // 种族被动（enemies.js）：这一击算出手了——迅袭的「第一个行动」用掉；注意力涣散记下这回合打的是谁
+  if (attacker && flags.action && !isReaction && !flags.environment && res.ok !== false) {
+    if (typeof raceMarkActed === "function") raceMarkActed(attacker);
+    if (typeof raceNoteAttack === "function") raceNoteAttack(attacker, target);
+  }
   const wasStunnedT = !!target.stunned;
   const wasFlyingT = !!target.flying;   // 击破飞行单位时引擎会先把它击落（engine.js · applyResultToUnit），荒原行者要看结算前的飞行状态
   const dopplerT = target.self === "doppler";   // 被这一下打进失衡、多普勒随晕眩结束，这一下的击破照样传出去

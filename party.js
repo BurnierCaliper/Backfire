@@ -1141,6 +1141,7 @@ function effectiveAtk(unit, units) {
   if (unit.kit === "kolt" && (unit.resources || {}).bit === "acid" && typeof passivePlus === "function" && passivePlus(unit, 1)) base += 5;
   if (unit.bondAtk) base += Number(unit.bondAtk) || 0;
   if (unit.duetAtk) base += Number(unit.duetAtk) || 0;   // 双重奏：溢出的治疗，下回合开始失去
+  if (unit.race && typeof raceAtkAdjust === "function") base += raceAtkAdjust(unit, units);   // 种族被动·独狼（enemies.js）
   if (unit.resources && unit.resources.mecha && unit.resources.overdrive) base *= 1.2;   // 银翼·机体强化
   // 陨体衍蛛：除自己之外，场上每有一只活着的陨体衍蛛，atk +25%
   if (unit.kit === "meteor_spider") {

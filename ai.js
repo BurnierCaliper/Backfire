@@ -541,12 +541,12 @@ const EnemyAI = (function () {
       }
     }
 
-    const move = (dest) => ({
+    const moveBase = (dest) => ({
       thunk: () => { state.attackerId = u.id; doMove(u, dest); },
       meta: { actorId: u.id, skillName: `移动到 ${dest} 区` },
       ai: { kind: "move", dest: Number(dest), target }
     });
-    const attack = (sid, picks) => ({
+    const attackBase = (sid, picks) => ({
       thunk: () => {
         state.attackerId = u.id;
         state.targetId = target.id;
@@ -559,6 +559,20 @@ const EnemyAI = (function () {
       meta: { actorId: u.id, targetId: target.id, skillName: enemyLabel(u, sid), skillId: sid },   // skillId：画面按招式挑攻击演出（attack-fx.js）
       ai: { kind: "attack", sid, target, picks }
     });
+
+    // 种族附赠（扑灭灼烧、追猎本能、威压、吐酸；enemies.js · raceBonusChoice）：真的要出手 / 移动时，先用一个。
+    // 精英 / 首领的移动也花附赠，所以它们只在不用移动、直接出手时才用，免得抢了移动的附赠；强制目标时不用
+    const withRace = (plan, step) => {
+      const rb = typeof raceBonusChoice === "function" && !pick.forced ? raceBonusChoice(u, prey, step) : null;
+      if (!rb) return plan;
+      return {
+        thunk: () => { state.attackerId = u.id; state.targetId = rb.target ? rb.target.id : null; runSkill(rb.id); },
+        meta: { actorId: u.id, targetId: rb.target ? rb.target.id : null, skillName: enemyLabel(u, rb.id), skillId: rb.id },
+        ai: { kind: "race", sid: rb.id, target: rb.target }
+      };
+    };
+    const move = (dest) => withRace(moveBase(dest), dest);
+    const attack = (sid, picks) => withRace(attackBase(sid, picks), null);
 
     // 强制目标（嘲讽 / 决一死战）时不后撤，直接想办法打到人；决一死战里根本不能移动
     const duelLocked = typeof touDuelVictim === "function" && !!touDuelVictim(u);

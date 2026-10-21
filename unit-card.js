@@ -69,7 +69,9 @@
     const q = (sel) => c.unit.querySelector(sel);
     const head = headOf(s);
     q(".u-name").textContent = head.name;
-    q(".u-name").title = head.race ? `${head.name} · ${head.race}` : "";
+    // 种族被动（enemies.js · RACE_PERKS）：画成车的驾驶员不写
+    const perks = s.vehicle ? [] : (s.racePerks || []);
+    q(".u-name").title = head.race ? [`${head.name} · ${head.race}`].concat(perks).join("\n") : "";
     if (c.intents) {
       const list = Array.isArray(s.intents) ? s.intents : [];
       const key = list.join("|");
@@ -83,7 +85,8 @@
     // 个体值（杂兵、精英）：铭牌上停一下就能看到血量 / ATK 水平
     const ivSign = (n) => (n > 0 ? "+" : n < 0 ? "−" : "±") + Math.abs(n) + "%";
     // 种族（敌人）：和个体值一起放在等级的悬停里，例如「红皮人 · 个体值：血量 +3% · ATK −2%」
-    q(".u-lv").title = [head.race, head.iv ? `个体值：血量 ${ivSign(head.iv.hp)} · ATK ${ivSign(head.iv.atk)}` : ""].filter(Boolean).join(" · ");
+    q(".u-lv").title = [head.race, head.iv ? `个体值：血量 ${ivSign(head.iv.hp)} · ATK ${ivSign(head.iv.atk)}` : ""].filter(Boolean).join(" · ") +
+      (perks.length ? "\n" + perks.join("\n") : "");   // 种族被动：每条一行
     c.unit.dataset.race = head.race;
     c.unit.dataset.iv = head.iv ? `${head.iv.hp},${head.iv.atk}` : "";
     // 载具（vehicle.js）：和车合并的驾驶员画成车的卡片（外观见 game.css · .unit.vehicle）；下车 / 换人后变回原样

@@ -180,6 +180,7 @@
       res,
       iv: u.iv ? { hp: Number(u.iv.hp) || 0, atk: Number(u.iv.atk) || 0 } : null,   // 个体值（杂兵、精英）
       race: typeof raceText === "function" ? raceText(u) : "",   // 种族（敌人）："红皮人" / "兽人·牛"
+      racePerks: typeof racePerkLines === "function" && u.race ? racePerkLines(u) : [],   // 生效的种族被动（enemies.js · RACE_PERKS），悬停里写出来
       intents: (() => { try { return typeof enemyIntents === "function" ? enemyIntents(u) : []; } catch (e) { return []; } })(),   // 名牌上的行动提示（连击……）
       atk: Math.round(Number(atk) || 0),
       weapon: !!u.weaponOf,
@@ -2617,7 +2618,8 @@
     const head = headOf(s);
     return UnitTip.html(info, tokens.filter(Boolean), { name: head.name, sub: `Lv${head.level} · ${s.zone} 区${vc ? " · " + (s.isPlayer ? "我方" : "敌方") : ""}${head.race ? " · " + head.race : ""}${head.iv && typeof ivText === "function" ? " · 个体值 " + ivText(head) : ""}`,
       mechs: window.UnitCard && UnitCard.mechLines ? UnitCard.mechLines(s) : [],   // 首领机制：还有几回合落下
-      rows: vc ? vc.roster : null, rowsTitle: vc ? vc.seatText : "" });
+      rows: vc ? vc.roster : null, rowsTitle: vc ? vc.seatText : "",
+      perks: vc ? [] : (s.racePerks || []) });                                       // 种族被动（画成车时不写驾驶员的）
   }
   function onCardHover(id, on) {
     const fieldPick = !!(choiceResolve && choiceResolve.field);   // 结算队列里在战场上点选（那时动作还没结束，G.depth > 0）
