@@ -17,46 +17,111 @@
 html, body { margin: 0; height: 100%; overflow: hidden; background: #111; color: var(--canvas); font: 14px/1.4 var(--ui-sans); -webkit-tap-highlight-color: transparent; }
 body { position: fixed; inset: 0; user-select: none; }
 
-/* ---------- 战场：占满屏幕 ---------- */
+/* ---------- 战场：占满屏幕（暗角、颗粒、色温在 three.js 的调色后期里做，不盖住铭牌）---------- */
 #stage { position: fixed; inset: 0; z-index: 0; }
 .hd2d-canvas { display: block; width: 100%; height: 100%; touch-action: none; outline: none; }
-#vignette { position: fixed; inset: 0; z-index: 1; pointer-events: none; box-shadow: inset 0 0 160px rgba(0, 0, 0, .55); }
 
-/* ---------- 铭牌（DOM，由 CSS2DRenderer 摆在 3D 位置上，下边缘贴着脚下）---------- */
-.hd2d-labels { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 1; }
-.hd2d-plate { position: absolute; pointer-events: none; transition: opacity .2s; }
-.hd2d-plate .pl-in { transform-origin: 50% 100%; position: relative; }
+/* ---------- 铭牌（DOM，由 CSS2DRenderer 摆在 3D 位置上，细杆的底贴着脚下）----------
+ * 紧凑版：名字一行，状态小圆点 + 分层血条 + 架势一行；等级、ATK、血量数字、状态文字悬停 / 选中时从头顶展开。
+ * 宽高 --pw / --ph 由场景按 hd2d-layout.js 的 CONFIG.plate 设好——布局按同一个尺寸算铭牌在屏幕上的矩形，保证不互相盖住。
+ * 后排被抬高时，铭牌下面一根细杆（.pl-post，高度 = 抬高的像素）连到脚下。 */
+.hd2d-labels { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 1; --pw: 120px; --ph: 40px; --rim: rgba(255, 236, 200, .6); }
+.hd2d-plate { position: absolute; pointer-events: none; display: flex; flex-direction: column; align-items: center; width: var(--pw); transition: opacity .2s; --side: var(--mint); }
+.hd2d-plate.foe { --side: var(--blood); }
+.hd2d-plate .pl-in { transform-origin: 50% 100%; position: relative; width: var(--pw); }
+.pl-bob { position: relative; animation: pl-float var(--bob-t, 3.6s) ease-in-out var(--bob-d, 0s) infinite; }
+@keyframes pl-float { 0%, 100% { transform: translateY(2px); } 50% { transform: translateY(-2px); } }   /* 幅度 = CONFIG.plate.bob */
+.pl-post { flex: none; width: 2px; height: 0; background: linear-gradient(180deg, var(--side), rgba(0, 0, 0, .1)); box-shadow: 1px 0 0 rgba(0, 0, 0, .5); }
+.hd2d-plate:not(.lifted) .pl-post { display: none; }
 .pl-card {
-  min-width: 92px; max-width: 128px; padding: 3px 6px 4px; font: 900 13px/1.25 var(--ui-sans); color: var(--canvas);
-  background: rgba(23, 18, 14, .93); border: 2px solid var(--mint); border-radius: 4px; box-shadow: 2px 3px 0 rgba(0, 0, 0, .55);
+  position: relative; box-sizing: border-box; width: var(--pw); height: var(--ph); padding: 3px 5px 4px;
+  display: flex; flex-direction: column; justify-content: space-between; pointer-events: auto; cursor: pointer; outline: none;
+  font: 900 13px/16px var(--ui-sans); color: var(--canvas);
+  background: linear-gradient(180deg, rgba(255, 255, 255, .09), rgba(255, 255, 255, 0) 42%), rgba(23, 18, 14, .93);
+  border: 2px solid var(--side); border-top-color: color-mix(in srgb, var(--side) 62%, #fff); border-radius: 4px;
+  /* 轮廓光：主光从左上方来，上沿和左沿亮一道（颜色跟着光影主题，--rim） */
+  box-shadow: inset 0 1px 0 var(--rim), inset 1px 0 0 rgba(255, 255, 255, .08), 2px 3px 0 rgba(0, 0, 0, .55);
+  transition: border-color .15s, box-shadow .15s;
 }
-.pl-card.foe { border-color: var(--blood); }
-.pl-top { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; white-space: nowrap; }
-.pl-name { overflow: hidden; text-overflow: ellipsis; text-shadow: 1px 1px 0 var(--ink); }
-.pl-lv { flex: none; font-size: 10px; color: var(--brass); }
-.pl-bar { position: relative; display: flex; height: 11px; margin-top: 2px; background: #050403; border: 1px solid var(--ink); }
-.pl-bar i { display: block; height: 100%; border-right: 1px solid rgba(0, 0, 0, .6); }
-.pl-bar span { position: absolute; inset: 0; display: grid; place-items: center; font: 900 9px/1 var(--ui-sans); text-shadow: 0 0 2px #000, 1px 1px 0 #000; }
-.pl-low { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 3px; min-height: 11px; }
-.pl-def { display: flex; gap: 2px; flex-wrap: wrap; }
-.pl-def b { width: 8px; height: 8px; transform: rotate(45deg); border: 1.5px solid #6a5a3a; box-sizing: border-box; margin: 1px 2px; }
+.pl-name { display: block; height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 1px 1px 0 var(--ink); }
+.pl-mid { display: flex; align-items: center; gap: 4px; height: 11px; }
+.pl-dots { display: flex; gap: 2px; flex: none; }
+.pl-dots i { display: block; width: 6px; height: 6px; border-radius: 50%; box-shadow: 0 0 0 1px var(--ink); }
+.pl-bar { position: relative; display: flex; flex: 1; min-width: 0; height: 9px; background: #050403; border: 1px solid var(--ink); box-sizing: content-box; }
+.pl-bar i { display: block; height: 100%; border-right: 1px solid rgba(0, 0, 0, .6); box-sizing: border-box; }
+.pl-def { display: flex; gap: 1px; flex: none; align-items: center; }
+.pl-def b { display: block; width: 7px; height: 7px; transform: rotate(45deg) scale(.82); border: 1.5px solid #6a5a3a; box-sizing: border-box; }
 .pl-def b.on { background: var(--hazard); border-color: var(--hazard); }
-.pl-big { font-size: 10px; color: var(--hazard); }
-.pl-atk { font-size: 10px; color: #ffc93c; white-space: nowrap; }
-/* 状态徽章浮在铭牌头顶，不占铭牌的高度（前后排的铭牌才不会互相盖住） */
-.pl-chips { position: absolute; left: 0; right: 0; bottom: 100%; display: flex; justify-content: center; gap: 2px; margin-bottom: 2px; }
-.pl-chips em { font: 900 10px/1 var(--ui-sans); font-style: normal; padding: 2px 4px; color: var(--ink); border-radius: 2px; white-space: nowrap; }
-.pl-chips em.more { background: #a8977b; }
-/* 当前行动：铭牌描金边 + 头顶一个跳动的大箭头 */
-.hd2d-plate.actor .pl-card { border-color: var(--hazard); box-shadow: 0 0 0 2px var(--ink), 0 0 14px 3px rgba(242, 194, 48, .75); }
-.pl-arrow { display: none; position: absolute; left: 50%; bottom: calc(100% + 16px); margin-left: -13px; width: 0; height: 0;
-  border-left: 13px solid transparent; border-right: 13px solid transparent; border-top: 18px solid var(--hazard);
-  filter: drop-shadow(0 0 5px rgba(242, 194, 48, .95)) drop-shadow(2px 2px 0 var(--ink)); animation: pl-bob .9s ease-in-out infinite; }
-.hd2d-plate.actor .pl-arrow { display: block; }
-.hd2d-plate.actor .pl-chips { margin-bottom: 4px; }
-@keyframes pl-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
-.hd2d-plate.sub .pl-in { clip-path: inset(0 0 45% 0); }          /* 下潜：只露上半截 */
+.pl-def .n { font-size: 10px; line-height: 10px; color: var(--hazard); white-space: nowrap; }
+/* 当前行动：描金边、发光，名字左边一个金色小箭头（在铭牌框里，不伸到别的铭牌上） */
+.pl-mark { display: none; position: absolute; left: -2px; top: 6px; width: 0; height: 0; border-top: 5px solid transparent; border-bottom: 5px solid transparent; border-left: 7px solid var(--hazard);
+  filter: drop-shadow(1px 1px 0 var(--ink)); animation: pl-nudge 1s ease-in-out infinite; }
+@keyframes pl-nudge { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(2px); } }
+.hd2d-plate.actor .pl-mark { display: block; }
+.hd2d-plate.actor .pl-name { padding-left: 7px; }
+.hd2d-plate.actor .pl-card { border-color: var(--hazard); box-shadow: inset 0 1px 0 var(--rim), 0 0 0 1px var(--ink), 0 0 12px 2px rgba(242, 194, 48, .7); }
+/* 悬停：边框提亮；选中：白边 + 光晕。两种都把详细信息从头顶展开（叠在别的铭牌上面，这时是在看这一个） */
+.hd2d-plate.hover .pl-card, .pl-card:focus-visible { border-color: #fff1cc; box-shadow: inset 0 1px 0 var(--rim), 0 0 0 1px var(--ink), 0 0 10px 2px rgba(255, 241, 204, .55); }
+.hd2d-plate.sel .pl-card { border-color: #fff; box-shadow: inset 0 1px 0 var(--rim), 0 0 0 2px var(--ink), 0 0 16px 4px rgba(255, 255, 255, .55); }
+.hd2d-plate.hover, .hd2d-plate.sel { opacity: 1 !important; }
+.pl-more {
+  display: none; position: absolute; left: 50%; bottom: calc(100% + 5px); transform: translateX(-50%); pointer-events: none;
+  padding: 4px 7px 5px; white-space: nowrap; text-align: center; font: 900 11px/1.35 var(--ui-sans); color: var(--canvas);
+  background: rgba(17, 14, 11, .96); border: 2px solid var(--ink); border-radius: 3px; box-shadow: inset 0 1px 0 var(--rim), 2px 3px 0 rgba(0, 0, 0, .55);
+}
+.hd2d-plate.hover .pl-more, .hd2d-plate.sel .pl-more { display: block; }
+.pl-stats { display: flex; gap: 8px; justify-content: center; }
+.pl-stats b { color: var(--brass); }
+.pl-stats span:nth-child(2) { color: #ffc93c; }
+.pl-chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 3px; margin-top: 4px; max-width: 220px; }
+.pl-chips em { font: 900 11px/1 var(--ui-sans); font-style: normal; padding: 2px 5px; color: var(--ink); border-radius: 2px; }
+/* 下潜：半透明，下半截蒙一层沙色（血条照样看得见） */
+.hd2d-plate.sub .pl-card::after { content: ""; position: absolute; inset: 45% 0 0; background: linear-gradient(rgba(209, 168, 90, 0), rgba(209, 168, 90, .38)); pointer-events: none; }
 .hd2d-plate.dying .pl-card { filter: saturate(.6) brightness(.85); }
+/* 近景：选中的区的铭牌换成放大的那张（宽高 --bw / --bh = CONFIG.plate.big，布局按这个尺寸算站位，保证不互相盖住）：
+ * 名字 + 等级、分层血条 + 血量数字、架势菱形 + 数字 + ATK、状态文字（最多 PLATE.bigChips 个，多的写 +n）。坚毅生命照旧没有 */
+.hd2d-plate.big { width: var(--bw); }
+.hd2d-plate.big .pl-in { width: var(--bw); }
+.hd2d-plate.big .pl-card { display: none; }
+.pl-big {
+  display: none; position: relative; box-sizing: border-box; width: var(--bw); height: var(--bh); padding: 5px 8px 6px;
+  flex-direction: column; justify-content: space-between; pointer-events: auto; cursor: pointer; outline: none;
+  font: 900 16px/18px var(--ui-sans); color: var(--canvas);
+  background: linear-gradient(180deg, rgba(255, 255, 255, .1), rgba(255, 255, 255, 0) 40%), rgba(23, 18, 14, .94);
+  border: 2px solid var(--side); border-top-color: color-mix(in srgb, var(--side) 62%, #fff); border-radius: 5px;
+  box-shadow: inset 0 1px 0 var(--rim), inset 1px 0 0 rgba(255, 255, 255, .08), 3px 4px 0 rgba(0, 0, 0, .55);
+  transition: border-color .15s, box-shadow .15s;
+}
+.hd2d-plate.big .pl-big { display: flex; }
+.hd2d-plate.big .pl-more, .hd2d-plate.big.hover .pl-more, .hd2d-plate.big.sel .pl-more { display: none; }   /* 放大的那张已经全写出来了 */
+.pl-r1 { display: flex; align-items: baseline; gap: 6px; height: 18px; }
+.pl-nm { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 1px 1px 0 var(--ink); }
+.pl-lv { flex: none; font-size: 12px; color: var(--brass); }
+.pl-r2 { display: flex; align-items: center; gap: 6px; height: 14px; }
+.pl-r2 .pl-bar { height: 10px; }
+.pl-hp { flex: none; font-size: 12px; line-height: 14px; text-shadow: 1px 1px 0 var(--ink); }
+.pl-r3 { display: flex; align-items: center; gap: 6px; height: 14px; font-size: 12px; line-height: 14px; }
+.pl-r3 .pl-def b { width: 9px; height: 9px; }
+.pl-r3 .pl-def .n { font-size: 12px; line-height: 14px; }
+.pl-dn { color: var(--muted); white-space: nowrap; }
+.pl-atk { margin-left: auto; color: #ffc93c; white-space: nowrap; }
+.pl-r4 { display: flex; gap: 3px; height: 15px; overflow: hidden; }
+.pl-r4 em { flex: none; font: 900 11px/1 var(--ui-sans); font-style: normal; padding: 2px 5px; color: var(--ink); border-radius: 2px; white-space: nowrap; }
+.pl-r4 .pl-x { background: var(--edge); color: var(--canvas); }
+.pl-none { font-size: 11px; line-height: 15px; color: var(--muted); }
+.hd2d-plate.actor .pl-big { border-color: var(--hazard); box-shadow: inset 0 1px 0 var(--rim), 0 0 0 1px var(--ink), 0 0 14px 3px rgba(242, 194, 48, .7); }
+.hd2d-plate.actor .pl-big .pl-mark { top: 9px; }
+.hd2d-plate.actor .pl-big .pl-r1 { padding-left: 8px; }
+.hd2d-plate.hover .pl-big, .pl-big:focus-visible { border-color: #fff1cc; box-shadow: inset 0 1px 0 var(--rim), 0 0 0 1px var(--ink), 0 0 10px 2px rgba(255, 241, 204, .55); }
+.hd2d-plate.sel .pl-big { border-color: #fff; box-shadow: inset 0 1px 0 var(--rim), 0 0 0 2px var(--ink), 0 0 16px 4px rgba(255, 255, 255, .55); }
+.hd2d-plate.sub .pl-big::after { content: ""; position: absolute; inset: 55% 0 0; background: linear-gradient(rgba(209, 168, 90, 0), rgba(209, 168, 90, .34)); pointer-events: none; }
+.hd2d-plate.dying .pl-big { filter: saturate(.6) brightness(.85); }
+/* 近景里别的区的铭牌：变淡（透明度在场景里乘 PLATE.dim），再糊一点（铭牌是 DOM，后期的景深糊不到它）；悬停 / 选中时照常看得清 */
+.hd2d-plate.dim .pl-in { filter: blur(1.6px) saturate(.75); }
+.hd2d-plate.dim.hover .pl-in, .hd2d-plate.dim.sel .pl-in { filter: none; }
+/* 减少动态效果：铭牌不浮动、小箭头不动（场景那边其它动画也停） */
+.hd2d-labels.still .pl-bob, .hd2d-labels.still .pl-mark { animation: none; }
+@media (prefers-reduced-motion: reduce) { .pl-bob, .pl-mark { animation: none; } }
 
 /* ---------- 零件 ---------- */
 .panel {
@@ -108,10 +173,34 @@ body { position: fixed; inset: 0; user-select: none; }
 #topbar .map { font-weight: 900; color: var(--canvas); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #topbar .sep { color: var(--edge); }
 #topbar .compact, #demo-btn { display: none; }
-#demo-select {
+#demo-select, #region-select {
   max-width: 46vw; font: 900 13px var(--ui-sans); color: var(--ink); background: var(--canvas);
   border: 2px solid var(--ink); padding: 3px 6px; box-shadow: 2px 3px 0 rgba(0, 0, 0, .5);
 }
+#region-select { max-width: 22vw; background: #d8cdb4; }   /* 区域（地面 / 远景 / 灯）：截图比对用 */
+
+/* ---------- 镜头：顶栏里的远 / 中 / 近三段按钮 + 选中的区；中景 / 近景时屏幕两边的换区箭头 ---------- */
+#topbar .cam { display: flex; align-items: center; gap: 4px; flex: none; }
+#topbar .cam-l { font: 900 12px/1 var(--ui-sans); color: var(--muted); margin-right: 2px; }
+.cam-b {
+  cursor: pointer; width: 30px; height: 26px; padding: 0; font: 900 14px/1 var(--ui-sans); color: var(--canvas);
+  background: var(--oil-2); border: 2px solid var(--ink); box-shadow: 2px 2px 0 rgba(0, 0, 0, .5);
+}
+.cam-b:hover { background: var(--steel-hi); }
+.cam-b.on { background: var(--hazard); color: var(--ink); }
+.cam-b:active { transform: translate(1px, 1px); }
+.cam-b:focus-visible { outline: 2px solid var(--canvas); outline-offset: 1px; }
+#topbar .cam-z { min-width: 4em; margin-left: 4px; font: 900 12px/1 var(--ui-sans); color: var(--canvas); white-space: nowrap; }
+.zone-nav {
+  position: fixed; z-index: 4; top: 50%; transform: translateY(-50%); cursor: pointer; padding: 10px 12px;
+  font: 900 14px/1 var(--ui-sans); color: var(--canvas); white-space: nowrap;
+  background: rgba(17, 14, 11, .78); border: 2px solid var(--ink); box-shadow: 3px 4px 0 rgba(0, 0, 0, .45);
+}
+.zone-nav.prev { left: 10px; border-left: 4px solid var(--hazard); }
+.zone-nav.next { right: 10px; border-right: 4px solid var(--hazard); }
+.zone-nav:hover { background: rgba(43, 39, 35, .92); }
+.zone-nav:active { transform: translateY(-50%) translate(1px, 1px); }
+.zone-nav[hidden] { display: none; }
 
 /* ---------- 底部技能栏 ---------- */
 #dock {
@@ -174,11 +263,20 @@ body { position: fixed; inset: 0; user-select: none; }
 @media (max-width: 720px) {
   :root { --topbar-h: 36px; }
   #topbar { gap: 8px; padding: 0 8px; font-size: 12px; }
-  #topbar .brand, #topbar .sep.hide-sm, #topbar .info > .tape, #topbar .info > .map, #demo-select { display: none; }
+  #topbar .brand, #topbar .sep.hide-sm, #topbar .info > .tape, #topbar .info > .map, #demo-select, #region-select { display: none; }
   #topbar .info { flex: 1; min-width: 0; }
   #topbar .compact { display: block; font-weight: 900; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #demo-btn { display: block; flex: none; }
-  .pl-card { min-width: 80px; max-width: 108px; font-size: 12px; padding: 2px 5px 3px; }
+  .pl-card { font-size: 12px; line-height: 15px; padding: 2px 4px 3px; }   /* 宽高 --pw / --ph 用 CONFIG.plate 的手机尺寸 */
+  .pl-name { height: 15px; }
+  .pl-mid { height: 9px; }
+  .pl-bar { height: 7px; }
+  .pl-big { font-size: 14px; line-height: 16px; padding: 4px 6px 5px; }   /* 宽高 --bw / --bh 用 CONFIG.plate.big 的手机尺寸 */
+  .pl-r1 { height: 16px; }
+  .pl-r2 .pl-bar { height: 8px; }
+  #topbar .cam-l, #topbar .cam-z { display: none; }
+  .cam-b { width: 26px; height: 24px; font-size: 13px; }
+  .zone-nav { padding: 8px 9px; font-size: 12px; }
   #dock { width: 100vw; padding: 8px 8px 10px; }
   #dock .who { font-size: 14px; }
   #skills { gap: 10px 10px; }

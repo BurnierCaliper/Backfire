@@ -5897,20 +5897,68 @@ function convertRasLight(pct, bonusRate) {
   return gain;
 }
 
-/** 柯尔特的废料：上一个被摧毁的敌人血量层 + 腐坏抛射记下的腐蚀伤害 + 扭矩「转移注意」失去的装甲。
- *  废物利用领走它们；碎渣重炮把它们全部装填打出去 */
+/* 柯尔特的废料（koltScrapCap / koltScrapTotal / koltScrapSpend）：
+ *   capPct     废料上限 = 柯尔特生命上限 × capPct。敌人血量层来的废料按它封顶（和废物利用一样）；
+ *              「非法」改装要废料合计达到它，才能消耗等量的废料给我方目标行动点
+ *   modAp      「非法」改装消耗废料给目标的行动点（可以超过行动点上限）
+ *   spendOrder 「非法」改装扣废料的顺序：layer 敌人血量层（按封顶后的数）→ rot 腐坏抛射 → divert 扭矩转移注意 → strip 扭矩拆卸模式 */
+const KOLT_SCRAP = { capPct: 0.5, modAp: 1, spendOrder: ["layer", "rot", "divert", "strip"] };
+/** 废料上限：柯尔特生命上限的一半（KOLT_SCRAP.capPct）；没有柯尔特时不封顶 */
+function koltScrapCap(k) {
+  return k && typeof baseMaxHp === "function" ? Math.floor(baseMaxHp(k) * KOLT_SCRAP.capPct) : Infinity;
+}
+/** 柯尔特的废料：上一个被摧毁的敌人血量层 + 腐坏抛射记下的腐蚀伤害 + 扭矩「转移注意」失去的装甲 + 扭矩「拆卸模式」变成废料的外层血量。
+ *  废物利用领走它们；碎渣重炮把它们全部装填打出去；「非法」改装达到上限时扣掉一部分（koltScrapSpend） */
 function koltScrapTotal(k) {
   k = k || findKit("kolt", state.units);
   const r = (k && k.resources) || {};
-  // 敌人失去血量层得来的废料：不超过柯尔特生命上限的一半（和废物利用的封顶一样）
-  const cap = k && typeof baseMaxHp === "function" ? Math.floor(baseMaxHp(k) * 0.5) : Infinity;
-  const last = state.lastBrokenLayer ? Math.min(cap, Math.floor(Number(state.lastBrokenLayer.lost) || 0)) : 0;
-  const rot = Object.keys(r.rotStore || {}).reduce((s, t) => s + Math.floor(Number(r.rotStore[t]) || 0), 0);
-  return Math.max(0, last + rot + Math.floor(Number(r.divertArmor) || 0));
+  // 敌人失去血量层得来的废料：不超过废料上限（和废物利用的封顶一样）；其余几种单独计算，不受上限
+  const last = state.lastBrokenLayer ? Math.min(koltScrapCap(k), Math.floor(Number(state.lastBrokenLayer.lost) || 0)) : 0;
+  const sum = store => Object.keys(store || {}).reduce((s, t) => s + Math.floor(Number(store[t]) || 0), 0);
+  return Math.max(0, last + sum(r.rotStore) + Math.floor(Number(r.divertArmor) || 0) + sum(r.stripStore));
 }
 function koltScrapClear(k) {
   state.lastBrokenLayer = null;
-  if (k && k.resources) { k.resources.rotStore = {}; k.resources.divertArmor = 0; }
+  if (k && k.resources) { k.resources.rotStore = {}; k.resources.divertArmor = 0; k.resources.stripStore = {}; }
+}
+/** 「非法」改装：废料（所有来源合计）达到上限了没有 */
+function koltScrapFull(k) {
+  const cap = koltScrapCap(k);
+  return cap > 0 && cap !== Infinity && koltScrapTotal(k) >= cap;
+}
+/** 「非法」改装：从柯尔特的废料里扣掉 n 点，按 KOLT_SCRAP.spendOrder 的顺序扣；扣完的来源清零，没扣完的留着。
+ *  腐坏抛射、拆卸模式各自记着几种血量，按记录的先后依次扣。返回实际扣掉的量 */
+function koltScrapSpend(k, n) {
+  const r = (k && k.resources) || {};
+  const want = Math.max(0, Math.floor(Number(n) || 0));
+  let left = want;
+  const fromStore = store => Object.keys(store || {}).forEach(t => {
+    if (left <= 0) return;
+    const have = Math.max(0, Math.floor(Number(store[t]) || 0)), use = Math.min(left, have);
+    left -= use;
+    if (use >= have) delete store[t];
+    else store[t] = have - use;
+  });
+  const take = {
+    // 敌人血量层：按封顶后的数算；扣不完的记回那一层，下次废物利用照样能领剩下的
+    layer: () => {
+      const rec = state.lastBrokenLayer;
+      if (!rec) return;
+      const have = Math.min(koltScrapCap(k), Math.max(0, Math.floor(Number(rec.lost) || 0))), use = Math.min(left, have);
+      left -= use;
+      if (use >= have) state.lastBrokenLayer = null;
+      else rec.lost = have - use;
+    },
+    rot: () => fromStore(r.rotStore),
+    divert: () => {
+      const have = Math.max(0, Math.floor(Number(r.divertArmor) || 0)), use = Math.min(left, have);
+      left -= use;
+      r.divertArmor = have - use;
+    },
+    strip: () => fromStore(r.stripStore)
+  };
+  KOLT_SCRAP.spendOrder.forEach(src => { if (left > 0 && take[src]) take[src](); });
+  return want - left;
 }
 /** 扭矩「转移注意」结束：失去的装甲记为废料（下次废物利用额外获得等量装甲） */
 function endTorqueGuard(w, notes) {
@@ -7186,7 +7234,7 @@ function resetBattleFlags(u) {
   if (u.kit === "xia") { r.engine = false; r.fuel = 0; }
   if (u.kit === "yuito") r.bean = Math.max(1, Number(r.bean) || 0);
   if (u.kit === "ruby" && r.nano == null) r.nano = 40;
-  if (u.kit === "kolt") { r.bit = r.bit || "drill"; r.rotStore = {}; r.divertArmor = 0; }
+  if (u.kit === "kolt") { r.bit = r.bit || "drill"; r.rotStore = {}; r.divertArmor = 0; r.stripStore = {}; }
   if (u.kit === "torque") { r.divertGuard = false; r.divertArmor0 = 0; }
   if (u.kit === "ecmo") { r.probe = false; r.probeZones = []; }
   if (u.kit === "ras") r.siphon = false;
@@ -9205,6 +9253,21 @@ function skillFlowSteps(id, actor, picks) {
     for (let z = 1; z <= maxZ; z++) if (zoneDist(actor.zone, z, state.zoneMode) <= 1 && !lineBlocked(actor.zone, z) && visibleEnemies(z).length) zones.push(z);
     return [{ key: "dest", type: "zone", optional: false, label: "机枪扫射哪个区域（距离 1 以内）", zones }];
   }
+  if (id === "kolt_mod") {
+    // 「非法」改装：废料（所有来源合计）达到上限时，先选目标；目标是我方单位再选只施加过载，还是再消耗等于上限的废料让它 +1 行动点。
+    // 废料没到上限就没有分步（照常直接选目标）；目标是敌人也没有后一项
+    const k = findKit("kolt", state.units) || actor;
+    if (!koltScrapFull(k)) return [];
+    const steps = [{ key: "target", type: "unit", optional: false, label: "施加过载的目标（1 距离以内任意单位，含自己）",
+      units: fieldUnits().filter(u => !u.fused && zoneDist(actor.zone, u.zone, maxZ) <= 1) }];
+    const tgt = picks.target ? unitById(picks.target) : null;
+    if (tgt && tgt.isPlayer) {
+      const cap = koltScrapCap(k), ap = KOLT_SCRAP.modAp;
+      steps.push({ key: "mode", type: "choice", optional: false, label: `废料已达到上限（${koltScrapTotal(k)} / ${cap}）：要不要消耗 ${cap} 废料，让 ${tgt.name} 获得 ${ap} 行动点`,
+        options: [{ value: "overload", label: "只施加过载" }, { value: "ap", label: `过载 + 消耗 ${cap} 废料：${tgt.name} 行动点 +${ap}（可以超过上限）` }] });
+    }
+    return steps;
+  }
   if (id === "torque_boost") {
     const bit = ((findKit("kolt", state.units) || {}).resources || {}).bit || "drill";
     if (bit === "acid") {
@@ -9223,12 +9286,20 @@ function skillFlowSteps(id, actor, picks) {
     return steps;
   }
   if (id === "torque_strip") {
-    return [
+    // 拆下的外层血量：转移给一名同区友方，或者变成柯尔特的废料（单独计算、不受上限）；选废料就不用选接收的友方
+    const steps = [
       { key: "target", type: "unit", optional: false, label: "拆卸目标（同区敌人）",
-        units: fieldUnits().filter(u => !u.isPlayer && !u.dead && Number(u.zone) === Number(actor.zone)) },
-      { key: "ally", type: "unit", optional: false, label: "接收外层血量的同区友方",
-        units: fieldUnits().filter(u => u.isPlayer && !u.dead && Number(u.zone) === Number(actor.zone)) }
+        units: fieldUnits().filter(u => !u.isPlayer && !u.dead && Number(u.zone) === Number(actor.zone)) }
     ];
+    if (findKit("kolt", state.units)) {
+      steps.push({ key: "mode", type: "choice", optional: false, label: "拆下的外层血量怎么处理",
+        options: [{ value: "ally", label: "转移给一名同区友方" }, { value: "scrap", label: "变成柯尔特的废料（单独计算，不受上限）" }] });
+    }
+    if (picks.mode !== "scrap") {
+      steps.push({ key: "ally", type: "unit", optional: false, label: "接收外层血量的同区友方",
+        units: fieldUnits().filter(u => u.isPlayer && !u.dead && Number(u.zone) === Number(actor.zone)) });
+    }
+    return steps;
   }
   if (id === "helu_scan") {
     const zones = [];
@@ -10984,8 +11055,9 @@ const SKILL_REQUIREMENT = {
     : !res(a).scanned ? "沙暴中再用要先做一次环境扫描才能调转风向"
     : state.weatherLock ? `天气被「${state.weatherLock}」锁定，无法调转风向` : null,
   torque_strip:   (a) => ((findKit("kolt", state.units) || {}).resources || {}).bit === "acid" ? "拆卸模式需要电钻模式" : null,
-  // 废物利用：要有「还没利用过的被摧毁的敌人血量层」或腐坏抛射攒下的记录才能用（同一层不能反复利用）
-  kolt_scrap:     (a) => state.lastBrokenLayer || (Number(res(a).divertArmor) || 0) > 0 || Object.keys(res(a).rotStore || {}).some(k => (Number(res(a).rotStore[k]) || 0) > 0)
+  // 废物利用：要有「还没利用过的被摧毁的敌人血量层」或腐坏抛射 / 转移注意 / 拆卸模式攒下的废料才能用（同一层不能反复利用）
+  kolt_scrap:     (a) => state.lastBrokenLayer || (Number(res(a).divertArmor) || 0) > 0 ||
+    [res(a).rotStore, res(a).stripStore].some(s => Object.keys(s || {}).some(k => (Number(s[k]) || 0) > 0))
     ? null : "还没有可以利用的残骸（被摧毁的敌人血量层，或腐坏抛射留下的记录）",
   kolt_rot:       (a) => ((findKit("kolt", state.units) || a).resources || {}).bit !== "acid" ? "腐坏抛射需要酸液炮模式" : null,
   kolt_mod:       (a) => ((findKit("kolt", state.units) || a).resources || {}).bit === "acid" ? "「非法」改装需要电钻模式" : null,
@@ -11335,6 +11407,13 @@ function skillTargetError(a, id, t) {
     if (zoneDist(a.zone, tgt.zone, state.zoneMode) > (far ? 1 : 0)) return "目标超出本次射程";
   }
   const flp = (state.skillFlow && state.skillFlow.picks) || {};
+  // 「非法」改装选了「过载 + 消耗废料」：要废料达到上限、目标是我方单位（分步里才有这一项），不然在扣行动点之前拦下
+  if (id === "kolt_mod" && flp.mode === "ap") {
+    const k = findKit("kolt", state.units) || a;
+    const tgt = flp.target ? unitById(flp.target) : t;
+    if (!tgt || !tgt.isPlayer) return "只有目标是我方单位时才能消耗废料给行动点";
+    if (!koltScrapFull(k)) return `废料还没达到上限（${koltScrapTotal(k)} / ${koltScrapCap(k)}），不能消耗废料给行动点`;
+  }
   // 巨刃划空打配置物 / 危墙：要在 1 距离以内，不能打自己这边的铁壁 / 防护罩（以前能打自己的铁壁）
   if (id === "chuan_blade") {
     const ref = flp.target || state.targetId;
@@ -13131,7 +13210,7 @@ function runSkillInner(id, optRun) {
       // 获得上一个被摧毁的敌人血量层等量的对应血量，最多为柯尔特生命上限的 50%（腐坏抛射的记录不算在内）
       if (!rec) lines.push("本场还没有被摧毁的敌人血量层。");
       else {
-        const cap = Math.floor(baseMaxHp(a) * 0.5);
+        const cap = koltScrapCap(a);
         const amt = Math.min(Math.floor(Number(rec.lost) || 0), cap);
         grant(rec.type, amt, "废物利用");
         if ((Number(rec.lost) || 0) > cap) lines.push(`（那一层有 ${Math.floor(rec.lost)}，按生命上限一半封顶为 ${cap}）`);
@@ -13146,6 +13225,10 @@ function runSkillInner(id, optRun) {
         grant("armor", Math.floor(Number(a.resources.divertArmor)), "扭矩回收");
         a.resources.divertArmor = 0;
       }
+      // 扭矩「拆卸模式」变成废料的外层血量：按被拆下的那一层的种类领取（不受 50% 限制），然后清空
+      const strip = (a.resources && a.resources.stripStore) || {};
+      Object.keys(strip).forEach(type => grant(type, Math.floor(Number(strip[type]) || 0), "拆卸回收"));
+      if (a.resources) a.resources.stripStore = {};
       // 废物利用给自己回的血 / 加的层也算治疗（一般的治疗只统计给其他友方的）
       const gain = totalHp(a) - hp0;
       const st = gain > 0 ? battleStat(a) : null;
@@ -13168,10 +13251,19 @@ function runSkillInner(id, optRun) {
         lines.push(`过度自信：${t.name} 被嘲讽，下次攻击必须打柯尔特。`);
       }
     } else if (id === "kolt_mod") {
-      // 「非法」改装：电钻模式，对 1 距离内任意单位施加过载
-      if (!needT()) return paintSkillLog(lines.join("\n"));
-      applyInstantEffect(t, "overload", lines);
-      lines.push(`「非法」改装：${t.name} 过载。`);
+      // 「非法」改装：电钻模式，对 1 距离内任意单位施加过载。
+      // 废料达到上限、目标是我方单位时，分步里可以选再消耗等于上限的废料，让目标 +1 行动点（skillTargetError 已经查过能不能选）
+      const fl = state.skillFlow;
+      const tgt = fl && fl.picks && fl.picks.target ? unitById(fl.picks.target) : t;
+      if (!tgt) { lines.push("先在「技能目标」里选对象。"); return paintSkillLog(lines.join("\n")); }
+      applyInstantEffect(tgt, "overload", lines);
+      lines.push(`「非法」改装：${tgt.name} 过载。`);
+      const k = findKit("kolt", state.units) || a;
+      if (fl && fl.picks && fl.picks.mode === "ap" && tgt.isPlayer && koltScrapFull(k)) {
+        const cost = koltScrapSpend(k, koltScrapCap(k));
+        lines.push(`「非法」改装：消耗 ${cost} 废料（还剩 ${koltScrapTotal(k)}）。`);
+        grantAllyAp(a, tgt, KOLT_SCRAP.modAp, lines);   // 满了也加（可以超过上限）；用它打出的分数一半记给柯尔特，和意式浓缩一样
+      }
     } else if (id === "kolt_cannon") {
       // 碎渣重炮：把全部废料装填进武器。电钻 → 机枪：选距离 1 以内的一个区域，每颗子弹（扭矩atk/3 + 1d10）电击、
       // 各自独立掷骰，打那一区的随机敌人；最后不够一颗的废料也打成一发；每 2 颗 1 击破。每颗都算单体攻击（吃过度自信的嘲讽）。
@@ -13275,14 +13367,16 @@ function runSkillInner(id, optRun) {
     } else if (id === "torque_strip") {
       const fl = state.skillFlow;
       const tgt = (fl && fl.picks.target) ? unitById(fl.picks.target) : t;
+      // 分步里选了「变成废料」：拆下的外层血量记给柯尔特，不用选接收的友方（没选的旧命令照旧给友方）
+      const kolt = findKit("kolt", state.units);
+      const toScrap = !!(fl && fl.picks.mode === "scrap" && kolt);
       const ally = (fl && fl.picks.ally) ? unitById(fl.picks.ally) : null;
-      if (!tgt || !ally) { lines.push("先选拆卸目标和接收友方。"); return paintSkillLog(lines.join("\n")); }
+      if (!tgt || (!ally && !toScrap)) { lines.push("先选拆卸目标和接收友方。"); return paintSkillLog(lines.join("\n")); }
       const stunnedBefore = !!tgt.stunned;
       dealBreak(tgt, 2, "electric", lines, "拆卸");
       // 拆卸是对一个敌人的单体攻击：照样触发柯尔特「过度自信」的嘲讽（击破不走 dealTo，要单独加）
-      const koltT = findKit("kolt", state.units);
-      if (!tgt.isPlayer && !tgt.dead && (typeof passiveOn !== "function" || passiveOn(koltT || a))) {
-        tgt.tauntTo = (koltT || a).id;
+      if (!tgt.isPlayer && !tgt.dead && (typeof passiveOn !== "function" || passiveOn(kolt || a))) {
+        tgt.tauntTo = (kolt || a).id;
         lines.push(`过度自信：${tgt.name} 被嘲讽，下次攻击必须打柯尔特。`);
       }
       // 卡面：这次攻击行动造成失衡才提升到 1.5×；本来就失衡的不算
@@ -13292,8 +13386,16 @@ function runSkillInner(id, optRun) {
       if (outer) {
         const take = Math.min(amount, outer.current);
         outer.current -= take;
-        addTempLayer(ally, outer.type, take);
-        lines.push(`拆卸转移 ${take} 点${LAYER[outer.type] || outer.type}给 ${ally.name}。`);
+        if (toScrap) {
+          // 单独计算、不受上限（和腐坏抛射、转移注意一样）：按那一层的种类记下，废物利用领对应血量，碎渣重炮一起装填
+          kolt.resources = kolt.resources || {};
+          const store = kolt.resources.stripStore = kolt.resources.stripStore || {};
+          if (take > 0) store[outer.type] = (Number(store[outer.type]) || 0) + take;
+          lines.push(`拆卸转移 ${take} 点${LAYER[outer.type] || outer.type}，变成柯尔特的废料（现在共 ${koltScrapTotal(kolt)}）。`);
+        } else {
+          addTempLayer(ally, outer.type, take);
+          lines.push(`拆卸转移 ${take} 点${LAYER[outer.type] || outer.type}给 ${ally.name}。`);
+        }
         // 抽空了最内层：敌人照常被击杀（以前直接改血量不走击杀结算，0 血还能继续行动）
         if (!tgt.isPlayer && !tgt.dead && isInnerDepleted(tgt)) {
           tgt._lastHitBy = a.id;
