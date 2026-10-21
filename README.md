@@ -368,6 +368,7 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **联机跑团：长休结算只在变了的时候发，长休过一次以后战斗包不再整份重发**（issue #216，来源是 #213 的审查）。以前：跑团长休过一次后 `TRPG.lastRest` 一直留着（trpg.js · `trpgLongRest`），online-game.js · `rawPacket` 每个玩家包都带 `rest`，经 online-view.js · `projectRest` 投影后整份发出（默认 4 人队约 1 KB/包，mood 那句中文每字 3 字节）；online-wire.js 的增量编码只管消息、公开记录、演出快照和克制表，`rest` 每包整份重发，战斗包也一样。4v3 瑞比连击每名玩家要收 3 个结算包，合计多出约 3 KB，而 #213 修完后这一招离 50 KiB 只剩约 2.2 KB，长休过一次就会超。现在：online-wire.js 对 `rest` 做和克制表（`matchupUnchanged`）一样的处理——和上一包一样就不发，只带 `restUnchanged: true`，玩家端用上一次收到的那份还原；又长休了（内容变了）或重同步，一律整份发；`rest` 是 null（还没长休）时照发 null（比标记还短）；没有基准的 `restUnchanged` 拒绝解码，逼出重同步。玩家端解码后的 `packet.rest` 和以前一模一样，所以 online-ui.js · `observeRest` 不用改：它不会看到 `rest` 中途变成 null，同一份结算不会再弹一次。长休规则和投影白名单（坚毅照样不发）都没变。改了 online-wire.js · `create`（`pack` / `unpack` / `reset`）、docs/d3/privacy.md、docs/d3/verification.md；测试：新增 tests/online-wire-rest.test.js（往返、null、重同步、没有基准 / 坏标记、真实 4 人长休结算之后每包只多一个标记），tests/online-coordinator.test.js（玩家端每包都还原成同一份、缺号先要重同步），tests/online-session-ui.test.js（浏览器：D3 预算测试先长休一次再测 4v3 连击，战斗包不带 `rest`；长休结算弹过以后再来两包不会再弹）。
 - **#193 / #196 审查补充**（hotseat.js · `decideCheck` / `trimReqs`；trpg-ui.js；ROADMAP.md；测试 tests/check-followups.test.js）
   - 主持人同意检定申请时，建检定和掷骰要么都成功，要么都撤回：掷骰出错会撤掉刚建的检定和频道记录，申请仍是待处理，不再留下「已同意但检定还开着」的半截状态。
   - 主持人不同意、申请被撤回时，小队频道写一行说明，玩家知道申请为什么没了。
