@@ -105,6 +105,17 @@ test("private messages require explicit allowed routing and do not carry nested 
   assert.deepEqual(out, [{ from: "host", to: "p1", text: "你看见一道门", private: true }]);
 });
 
+test("小队聊天：正文保留换行和全角空格（字符画才能对齐），敏感词和其他控制字符照样过滤", () => {
+  const art = "　　龍龍\n龍奶奶龍\n　爪　爪";
+  const out = V.projectView({ chat: [
+    { id: "chat-1", operatorId: "p1", name: "甲", text: art, at: 1 },
+    { id: "chat-2", operatorId: "p1", name: "甲", text: "第一行\r\n第二行\u200b\u202e\u0007", at: 2 },
+    { id: "chat-3", operatorId: "p1", name: "甲", text: "　\nＳ\nＨ\nＰ 732911", at: 3 },
+    { id: "chat-4", operatorId: "p1", name: "甲", text: "坚\n毅\n生命", at: 4 },
+    { id: "chat-5", operatorId: "p1", name: "甲", text: "坚\n毅", at: 5 }] }, player);
+  assert.deepEqual(out.chat.map(m => m.text), [art, "第一行\n第二行", "坚\n毅"]);
+});
+
 test("recipient filtering precedes the live 300-message window and cannot be displaced by other private traffic", () => {
   const messages = [{ id: "mine", from: "host", to: "p1", text: "保留给我的线索", at: 1 },
     ...Array.from({ length: 299 }, (_, i) => ({ id: "other" + i, from: "host", to: "p2", text: "OTHER_PRIVATE_" + i, at: i + 2 }))];

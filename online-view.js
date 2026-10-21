@@ -17,10 +17,12 @@
   // 人打的字（小队聊天、私信）：拦后台 / 令牌这类技术字段，和明说的「坚毅生命」/ 单独成词的 SHP（坚毅数值绝不给玩家看）。
   // 以前和规则数据用同一个过滤，带「坚毅」两个字、甚至 "this hp"（s h p）的整条消息都会消失（报告「中」）
   const sensitiveTech = /后台|backstage|gm[_ -]?(?:secret|note|data)|private[_ -]?(?:note|history)|reconnect[_ -]?token|坚[\s\u200b-\u200f]*毅[\s\u200b-\u200f]*生命|毅[\s\u200b-\u200f]*生命|(?<![a-z])s[\s._-]*h[\s._-]*p(?![a-z])/i;
-  function chatText(v, limit) {
+  /** keepLines（小队聊天）：保留换行和全角字符（字符画靠全角空格对齐），其余控制字符、零宽和双向控制字符照样去掉；敏感词照样按规范化后的文字判断 */
+  function chatText(v, limit, keepLines = false) {
     if (typeof v !== "string") return null;
     const clean = v.normalize("NFKC").replace(/[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2060-\u206f]/g, "");
-    return sensitiveTech.test(clean) ? null : clean.slice(0, limit);
+    if (sensitiveTech.test(clean)) return null;
+    return keepLines ? v.replace(/\r\n?/g, "\n").replace(/[\u0000-\u0009\u000b-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2060-\u206f]/g, "").slice(0, limit) : clean.slice(0, limit);
   }
   function id(v) { return typeof v === "string" && /^[\w:./-]{1,160}$/.test(v) && !sensitive.test(v) && !["__proto__", "prototype", "constructor"].includes(v) ? v : null; }
   function number(v) { return typeof v === "number" && Number.isFinite(v) ? v : undefined; }
@@ -509,7 +511,7 @@
     out.chat = arr(get(view, "chat")).slice(-300).flatMap(m => {
       if (get(m, "secret")) return [];   // 主持人暗骰：只在房主本机
       const isTitle = !!get(m, "title");
-      const t = chatText(get(m, "text"), 500); if (t === null) return [];
+      const t = chatText(get(m, "text"), 500, true); if (t === null) return [];
       const dto = identifiers(m, copyFields(m, { text: t }, ["operatorName", "name"], ["at"], []), ["id", "operatorId"]);
       const roll = get(m, "roll");
       if (roll) { dto.roll = true; const tier = obj(roll) ? get(roll, "tier") : null; if (["crit", "extreme", "hard", "normal", "easy", "fail"].includes(tier)) dto.tier = tier; }

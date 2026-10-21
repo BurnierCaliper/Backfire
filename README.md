@@ -368,6 +368,12 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **小队聊天能发多行和字符画**（`online-ui.js · chatEnter / artAttr`、`online-view.js · chatText`、`hotseat.js · chatMessage`、`online.css`）：
+  - 输入框改成多行：Enter 发送，Shift+Enter 换行，输入法选字时的 Enter 不算；粘贴的多行文字保留换行，输入框跟着内容长高。
+  - 多行消息保留第一行行首的空格，只去掉开头的空行和末尾空白；单行消息照旧去掉两头空白。
+  - 发给玩家的聊天正文保留换行和全角字符（`chatText` 的 `keepLines`，只有小队聊天打开，私信照旧）。以前换行会被删掉、全角空格被换成半角，字符画会散架。其余控制字符、零宽和双向控制字符照样去掉，敏感词照样按规范化后的文字过滤。
+  - 多行且带行首空格或全角空格的消息算字符画：不自动折行，字号按最长一行缩到聊天栏放得下（最大 14px）。主持人的探索记录栏最窄，18 个字宽的字符画也能完整显示。
+
 - **「中」杂项六条 + 两个尾巴**（issue #125；tests/misc-six-125.test.js）
   - **战斗中修武器两条路统一**：「使用道具」（`items.js · useRepairKit`）和「修理」命令（`ledger.js · ledgerRepair`）以前各算各的：道具那条修好耐久后不标「本场受损」（atk / 格挡加成照旧满值、还能唤出武器人），命令那条标了；命令那条也不会把倒地的武器人修起来。现在耐久都走 `ledgerRepair`（缺几点修几点、同样扣维修量、战斗中修好的武器这一场按受损算），倒地的武器人两条路都走 `useRepairKit`（恢复最大生命 25%）。
   - **跑团工坊可以同时做**：`trpgCraft` 新增 `{ jobs: [...] }`，每人做一样、一起开工，时间只推进一次、按最久的那件算（`trpg.js · trpgCraft / trpgCraftOne`、`trpg-commands.js`）。以前每做一样推进一次，两件会多算时间。同一个人同时只能做一样。单局的 `Rogue.craft` 本来就是这样。

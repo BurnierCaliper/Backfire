@@ -488,7 +488,10 @@
       const op = operator(id);
       // 小队聊天在大厅、探索和战斗中都开放
       if (typeof text !== "string" || !text.trim()) fail("chat_empty", "消息不能为空");
-      const row = { id: "chat-" + (++sequence), operatorId: id, operatorName: op.name, text: text.trim().slice(0, 500), at: now() };
+      // 多行消息（比如字符画）保留第一行行首的空格，只去掉开头的空行和末尾空白；单行照旧去掉两头空白
+      const body = text.replace(/\r\n?/g, "\n");
+      const clean = body.includes("\n") ? body.replace(/^\s*\n/, "").trimEnd() : body.trim();
+      const row = { id: "chat-" + (++sequence), operatorId: id, operatorName: op.name, text: clean.slice(0, 500), at: now() };
       chat.push(row);
       if (chat.length > CHAT_KEEP) chat.splice(0, chat.length - CHAT_KEEP);
       return emit("chat");
