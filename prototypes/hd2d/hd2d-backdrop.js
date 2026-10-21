@@ -2,17 +2,19 @@
  *
  * 镜头俯角 30°、视角只有 22°，画面最上沿也是往下看的——真正的天空根本进不了画面。所以在战场后面立一圈「天幕」
  * （像舞台的天幕布，绕到两侧），按镜头真正看得到的那一截画天空渐变；天幕前面两层剪影：
- *   1. 天边一圈画出来的远景（canvas 画在一条弧形带子上）：远处的厂区 / 桌山 / 城市
+ *   1. 天边一圈画出来的远景（canvas 画在一条弧形带子上）：远处的厂区（后面一道矿坑的台阶状坑壁）/ 桌山 / 城市
  *   2. 中景几何体：大小按「画面上沿那条视线在那里有多高」来定，整个轮廓都在画面里，不会只露半截
- *        采矿场 mine：矿井架（A 字架 + 天轮）、烟囱（冒烟、顶上红灯一闪一闪）、传送带通到料仓、筒仓、矿渣堆
- *        沙漠 desert：沙丘、风蚀岩柱、带岩层的桌山、半埋在沙里的船骨
- *        夜晚 night：亮着窗的楼群、水塔、天线（红灯）；天幕上有星星
+ *        采矿场 mine：两侧台阶状的岩壁（露天矿坑的坑壁）、矿井架（A 字架 + 天轮）、烟囱（冒烟、顶上红灯一闪一闪）、传送带通到料仓、筒仓、矿渣堆
+ *        沙漠 desert：沙丘、风蚀岩柱、带岩层的桌山、半埋在沙里的船骨；天网设施 skynet：同样的沙漠，加一座孤零零的天网塔
+ *        城市 city（以前叫 night，还认）：楼群（夜里亮着窗、傍晚亮一些、白天窗是暗的；skyline = 楼的高度倍数）、水塔、天线（红灯）
  *        其余 wasteland：碎石岩丘
+ *      用哪种由这场战斗所在的区域定（hd2d-layout.js 的 GROUNDS[].backdrop：沙漠 → 沙丘，采矿场 → 岩壁，城市 → 楼群）；
+ *      区域认不得时场景照旧按光影主题挑。夜晚天幕上有星星
  * 剪影越远越接近天边的雾色（空气透视），景深再稍微糊一点（远处的糊上限在场景的 THEMES.dofFar）。
  * 雷鸣（storm）时天幕换成压暗的风暴色、画上慢慢翻滚的厚云（星星被盖住），中景上方再挂一层半透明的低云；
  * 打雷时云从里面亮起来，离雷近的那一片更亮。远处的雷劈在哪由这里给（farPoint：低云前面；天幕、低云都是弧，两边离得近，要按弧算）。
  *
- *   const bd = buildBackdrop("mine", bounds, "dusk", layout.camera, { sky: [...4 色], fog: 0xRRGGBB, storm });
+ *   const bd = buildBackdrop("mine", bounds, "dusk", layout.camera, { sky: [...4 色], fog: 0xRRGGBB, storm, skyline });
  *   scene.add(bd.group); 每帧 bd.update(t, dt, { flash, x })（flash / x = 雷击的闪光和位置）；bd.farPoint(r)；bd.dispose();
  * 剪影和天幕不吃场景雾（雾会把它们全抹成一个色），颜色自己按远近调。 */
 import * as THREE from "three";
@@ -30,7 +32,10 @@ const BACKDROP = {
   stops: [0, 0.3, 0.66, 1.08],   // 天空四个颜色在「默认镜头看得到的那截天幕」里的位置（0 = 地平线，1 = 画面上沿）
   bandH: 0.52,        // 天边画出来的那圈远景，高度占看得到的天幕的比例
   mid: { near: 2.6, far: 9.2, fill: 0.84, side: 9, sideMaxH: 6 },   // 中景剪影：离战场后沿 near–far；最高 = 画面上沿视线高度 × fill（两侧的再不超过 sideMaxH）；两侧最多离战场边 side
-  count: { mine: 14, desert: 12, night: 22, wasteland: 12 },
+  count: { mine: 14, desert: 12, city: 22, wasteland: 12 },
+  cliff: { benches: 4, width: 9, fill: 0.85 },        // 采矿场两侧的岩壁：几级台阶、多宽、多高（× 两侧剪影的高度上限）
+  skynet: { u: -0.12, depth: 0.5, h: 0.86, glow: 0x4fd8ff },   // 天网塔：横向位置（−1…1）、远近（0–1）、多高（× 高度上限）、顶上灯带的颜色
+  windows: { night: 0.38, dusk: 0.2, day: 0.15 },     // 楼群的窗：夜里 / 傍晚有几成亮着；白天有几成反着天光
   smoke: { puffs: 7, rise: 0.55, life: 5.5 },        // 烟囱的烟：每根几团、往上飘多快、一团飘多久
   blink: 1.3,         // 红灯闪的周期（秒）
   groundRepeat: 26,
@@ -108,14 +113,14 @@ function groundTexture() {
   return t;
 }
 
-/** 废土地面：地台下面一大片暗地，像把地台摆在场景里（远处藏在天幕后面） */
+/** 废土地面：地台下面一大片暗地，像把地台摆在场景里（远处藏在天幕后面）。颜色由场景按光影主题 / 区域的地面主题设 */
 export function buildGround() {
   const tex = groundTexture();
   const m = new THREE.Mesh(
     new THREE.CircleGeometry(150, 56),
     new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 1, map: tex, flatShading: true })
   );
-  m.rotation.x = -Math.PI / 2; m.position.y = -0.32; m.receiveShadow = true;
+  m.rotation.x = -Math.PI / 2; m.position.y = L.CONFIG.groundY; m.receiveShadow = true;
   return m;
 }
 
@@ -258,8 +263,9 @@ function bandTexture(kind, colors, seed) {
       for (let px = 0; px <= W; px += 16) g.lineTo(px, H - (layer ? 18 : 28) - Math.sin(px * 0.004 + layer * 2) * 10 - Math.sin(px * 0.013) * 6);
       g.lineTo(W, H); g.fill();
     });
-  } else if (kind === "night") {
-    // 城市天际线：高低错落的楼，亮着零星的窗
+  } else if (kind === "city") {
+    // 城市天际线：高低错落的楼，亮着零星的窗（colors.lit：夜里 1、傍晚一半、白天不亮）
+    const lit = colors.lit || 0;
     [far, near].forEach((col, layer) => {
       let x = 0;
       while (x < W) {
@@ -267,12 +273,25 @@ function bandTexture(kind, colors, seed) {
         rect(x, w, h, col);
         if (r() < 0.25) rect(x + w * 0.4, 3, h + 18 + r() * 20, col);            // 天线
         for (let wy = H - h + 8; wy < H - 6; wy += 9) for (let wx = x + 4; wx < x + w - 5; wx += 8) {
-          if (r() < (layer ? 0.22 : 0.12)) { g.fillStyle = r() < 0.7 ? "rgba(255,206,120,.95)" : "rgba(150,210,255,.9)"; g.fillRect(wx, wy, 3, 4); }
+          if (r() < (layer ? 0.22 : 0.12) * lit) { g.fillStyle = r() < 0.7 ? "rgba(255,206,120,.95)" : "rgba(150,210,255,.9)"; g.fillRect(wx, wy, 3, 4); }
         }
         x += w + r() * 14;
       }
     });
   } else if (kind === "mine") {
+    // 最远的一层：露天矿坑台阶状的坑壁（岩壁），一级级平台，平台的边上一道暗线
+    if (colors.wall) {
+      g.fillStyle = colors.wall; g.beginPath(); g.moveTo(0, H);
+      let x = 0, y = H * (0.42 + r() * 0.1);
+      while (x < W) {
+        g.lineTo(x, y); x += 60 + r() * 140; g.lineTo(x, y);
+        y = Math.max(H * 0.3, Math.min(H * 0.58, y + (r() < 0.5 ? -1 : 1) * (8 + r() * 14)));
+        x += 6; g.lineTo(x, y);
+      }
+      g.lineTo(W, H); g.fill();
+      g.strokeStyle = "rgba(0,0,0,.14)"; g.lineWidth = 2;
+      for (let k = 1; k <= 3; k++) { g.beginPath(); g.moveTo(0, H * (0.55 + k * 0.1)); g.lineTo(W, H * (0.55 + k * 0.1)); g.stroke(); }
+    }
     // 远处的厂区：烟囱、矿井架、冷却塔、管廊、料仓，两层
     [far, near].forEach((col, layer) => {
       g.fillStyle = col; g.strokeStyle = col;
@@ -341,6 +360,7 @@ function headframe(M, h) {
   });
   g.add(box(M.body, h * 0.36, h * 0.17, h * 0.22, h * 0.42, h * 0.085, 0));   // 绞车房
   g.add(box(M.body, h * 0.36, h * 0.03, h * 0.24, h * 0.42, h * 0.18, 0));
+  g.userData.kind = "headframe";
   return g;
 }
 /** 烟囱：上细下粗，两道箍，顶上一盏红灯（返回 { group, top }，烟从 top 冒出来） */
@@ -381,10 +401,36 @@ function shed(M, w, h) {
   const roof = box(M.dark, w * 1.05, h * 0.12, w * 0.66, 0, h + h * 0.04, 0); roof.rotation.z = 0.08; g.add(roof);
   return g;
 }
+/** 露天矿坑的岩壁：几级往后退、往上高的台阶，每级顶上参差不齐，一层岩一层土；w = 宽、h = 最高 */
+function cliff(M, w, h, benches, rand) {
+  const g = new THREE.Group(), step = h / benches;
+  for (let i = 0; i < benches; i++) {
+    const segs = 4 + Math.floor(rand() * 3), sw = w / segs;
+    for (let k = 0; k < segs; k++) {
+      const hh = step * (i + 1) * (0.86 + rand() * 0.22);
+      g.add(box(i % 2 ? M.sand : M.rock, sw * (1.02 + rand() * 0.1), hh, step * 1.5, -w / 2 + sw * (k + 0.5), hh / 2, -i * step * 1.25));
+    }
+  }
+  g.userData.kind = "cliff";
+  return g;
+}
 /** 沙丘：顺滑的长条（光滑着色，迎光面亮、背光面暗，一看就是沙丘不是土堆） */
 function dune(M, s) {
   const m = new THREE.Mesh(new THREE.SphereGeometry(1, 28, 12, 0, Math.PI * 2, 0, Math.PI / 2), M.sandSmooth);
-  m.scale.set(s * 2.4, s * 0.5, s); return m;
+  m.scale.set(s * 2.4, s * 0.5, s); m.userData.kind = "dune"; return m;
+}
+/** 天网塔：沙漠里孤零零的一座细高的塔（下粗上细，腰上两道箍），顶上一圈圆盘平台、一圈发青光的灯带和一根天线；h = 总高 */
+function skynetTower(M, h, glowMat) {
+  const g = new THREE.Group(), r = Math.max(0.35, h * 0.045);
+  g.add(cyl(M.body, r * 0.7, r * 1.25, h * 0.86, 0, h * 0.43, 0, 10));
+  [0.35, 0.62].forEach(k => g.add(cyl(M.dark, r * 1.35, r * 1.35, h * 0.02, 0, h * k, 0, 12)));
+  g.add(cyl(M.body, r * 2.6, r * 1.5, h * 0.06, 0, h * 0.88, 0, 14));
+  g.add(cyl(M.dark, r * 2.7, r * 2.7, h * 0.012, 0, h * 0.915, 0, 14));
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(r * 2.62, r * 0.09, 4, 28), glowMat);
+  ring.rotation.x = Math.PI / 2; ring.position.y = h * 0.9; g.add(ring);
+  g.add(box(M.dark, r * 0.18, h * 0.1, r * 0.18, 0, h * 0.97, 0));
+  g.userData.kind = "skynet";
+  return g;
 }
 /** 风蚀岩柱：一节节上粗下细，顶上一块大的 */
 function pillar(M, h, r) {
@@ -415,12 +461,14 @@ function wreck(M, len) {
   g.add(box(M.dark, len * 0.9, len * 0.025, len * 0.025, len * 0.4, len * 0.01, 0));   // 龙骨
   return g;
 }
-function windowTexture(seed) {
+/** 楼的窗：lit = 夜里 / 傍晚有几成亮着（黑墙 + 黄 / 青的亮窗）；day = 白天（浅色的墙、暗窗，lit 成反着天光） */
+function windowTexture(seed, lit, day) {
   const c = document.createElement("canvas"); c.width = 64; c.height = 128;
   const g = c.getContext("2d"), r = rng(seed);
-  g.fillStyle = "#07090e"; g.fillRect(0, 0, 64, 128);
+  g.fillStyle = day ? "#cfc8bc" : "#07090e"; g.fillRect(0, 0, 64, 128);
   for (let y = 6; y < 124; y += 9) for (let x = 6; x < 58; x += 9) {
-    if (r() < 0.38) { g.fillStyle = r() < 0.7 ? "#ffd27a" : "#9fd8ff"; g.fillRect(x, y, 5, 5); }
+    if (day) { g.fillStyle = r() < lit ? "#8fa4b4" : "#3c4048"; g.fillRect(x, y, 5, 5); }
+    else if (r() < lit) { g.fillStyle = r() < 0.7 ? "#ffd27a" : "#9fd8ff"; g.fillRect(x, y, 5, 5); }
   }
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.magFilter = THREE.NearestFilter; return t;
 }
@@ -428,6 +476,7 @@ function tower(M, w, h, d, win) {
   const g = new THREE.Group();
   g.add(put(new THREE.Mesh(new THREE.BoxGeometry(w, h, d), win), 0, h / 2, 0));
   g.add(box(M.body, w * 0.5, Math.min(0.8, h * 0.08), d * 0.5, 0, h + 0.4, 0));
+  g.userData.kind = "tower";
   return g;
 }
 function waterTower(M, h) {
@@ -448,9 +497,10 @@ function smokeTexture() {
 }
 
 /**
- * 建一圈远景。bounds 是战场范围；camera 是布局算好的默认镜头（hd2d-layout.js 的 fitView），用来算「画面上沿那条视线」有多高；
- * colors = { sky: [地平线 → 天顶 4 个颜色], fog, storm }（storm = 雷鸣：天空换成 BACKDROP.storm 的风暴色、加乌云和低云）。
- * 返回 { group, update(t, dt, { flash, x }), farPoint(r), dispose }。
+ * 建一圈远景。kind = city / mine / desert / skynet / wasteland（night 是 city 的旧名字）；bounds 是战场范围；
+ * camera 是布局算好的默认镜头（hd2d-layout.js 的 fitView），用来算「画面上沿那条视线」有多高；
+ * colors = { sky: [地平线 → 天顶 4 个颜色], fog, storm, skyline }（storm = 雷鸣：天空换成 BACKDROP.storm 的风暴色、加乌云和低云；
+ * skyline = 楼群的高度倍数，外城区矮、巨人城高）。返回 { group, update(t, dt, { flash, x }), farPoint(r), dispose }。
  */
 export function buildBackdrop(kind, bounds, themeName, camera, colors) {
   colors = colors || {};
@@ -461,7 +511,9 @@ export function buildBackdrop(kind, bounds, themeName, camera, colors) {
   const storm = !!colors.storm, ST = BACKDROP.storm, cloud = ST.cloud[themeName] || ST.cloud.day;
   const group = new THREE.Group();
   const anims = [];
-  const r = rng(kind.length * 31 + Math.round((bounds.maxX - bounds.minX) * 7) + Math.round((bounds.maxZ - bounds.minZ) * 3));
+  const seed = kind.length;   // 随机种子按传进来的名字算（night 改叫 city 以后，认不得区域时的夜景还是原来那一套）
+  if (kind === "night") kind = "city";
+  const r = rng(seed * 31 + Math.round((bounds.maxX - bounds.minX) * 7) + Math.round((bounds.maxZ - bounds.minZ) * 3));
   const cx = (bounds.minX + bounds.maxX) / 2, cz = (bounds.minZ + bounds.maxZ) / 2;
   const hx = (bounds.maxX - bounds.minX) / 2, hz = (bounds.maxZ - bounds.minZ) / 2;
   const cam = camera || { pos: { y: 25, z: cz + 45 }, elevation: 30, fov: 22 };
@@ -497,8 +549,10 @@ export function buildBackdrop(kind, bounds, themeName, camera, colors) {
   /* 2. 天边画出来的远景：一条弧形带子，贴在天幕前面一点 */
   const backTop = topY(cz - rz);
   const bandH = Math.max(1.2, backTop * BACKDROP.bandH);
-  const nearC = hazeOf(0.55), farC = hazeOf(0.82);
-  const bandTex = keep(bandTexture(kind, { far: "#" + farC.getHexString(), near: "#" + nearC.getHexString() }, kind.length * 97 + 11));
+  const nearC = hazeOf(0.55), farC = hazeOf(0.82), wallC = hazeOf(0.92);
+  const bandTex = keep(bandTexture(kind === "skynet" ? "desert" : kind, {
+    far: "#" + farC.getHexString(), near: "#" + nearC.getHexString(), wall: "#" + wallC.getHexString(), lit: night ? 1 : dusk ? 0.5 : 0
+  }, seed * 97 + 11));
   const bandLen = ((rx + rz) / 2) * 2 * arc;
   bandTex.repeat.set(Math.max(1, Math.round(bandLen / (bandH * 8))), 1);
   const bandM = keep(new THREE.MeshBasicMaterial({ map: bandTex, transparent: true, alphaTest: 0.02, fog: false, side: THREE.DoubleSide, color: night ? new THREE.Color(1.5, 1.5, 1.5) : 0xffffff, toneMapped: !night }));
@@ -509,9 +563,10 @@ export function buildBackdrop(kind, bounds, themeName, camera, colors) {
   /* 3. 中景几何体 */
   const std = (color, opt) => keep(new THREE.MeshStandardMaterial(Object.assign({ color, roughness: 1, flatShading: true, fog: false }, opt || {})));
   /** 一层的材质：远一点的偏向雾色，再带一点自发光（像被雾里的光照着） */
+  const mixOf = (c, k) => new THREE.Color(c).lerp(hazeOf(1), k * 0.55);
+  const emOf = (k) => hazeOf(1).multiplyScalar(0.18 + k * 0.35);
   const layerMats = (k) => {
-    const mix = (c) => new THREE.Color(c).lerp(hazeOf(1), k * 0.55);
-    const em = hazeOf(1).multiplyScalar(0.18 + k * 0.35);
+    const mix = (c) => mixOf(c, k), em = emOf(k);
     return {
       body: std(mix(T.body), { emissive: em }), dark: std(mix(T.dark), { emissive: em }),
       rock: std(mix(T.rock), { emissive: em }), sand: std(mix(T.sand), { emissive: em }),
@@ -522,7 +577,16 @@ export function buildBackdrop(kind, bounds, themeName, camera, colors) {
   const lamp = keep(new THREE.MeshBasicMaterial({ color: new THREE.Color(0xff4a2a).multiplyScalar(2.6), toneMapped: false, fog: false }));
   const smokeTex = keep(smokeTexture());
   const smokeColor = dusk ? 0x7a6470 : night ? 0x2a3040 : 0x9a8a78;
-  const windows = night ? [1, 2, 3].map(s => { const t = keep(windowTexture(s * 17)); return keep(new THREE.MeshBasicMaterial({ map: t, color: new THREE.Color(1.5, 1.5, 1.5), toneMapped: false, fog: false })); }) : null;
+  /** 楼的窗（三种排法）：夜里 / 傍晚是黑墙 + 亮窗（自己发光，泛光会抓到；不分远近）；白天是浅墙暗窗，按远近偏向雾色，跟别的剪影一样 */
+  const W8 = BACKDROP.windows;
+  const winTex = kind === "city" ? [1, 2, 3].map(s => keep(windowTexture(s * 17, night ? W8.night : dusk ? W8.dusk : W8.day, !night && !dusk))) : null;
+  const winLit = winTex && (night || dusk) ? winTex.map(t => keep(new THREE.MeshBasicMaterial({ map: t, color: new THREE.Color(1.5, 1.5, 1.5).multiplyScalar(night ? 1 : 0.8), toneMapped: false, fog: false }))) : null;
+  const winDay = {};
+  const windowMat = (k, i) => {
+    if (winLit) return winLit[i];
+    const lv = k < 0.34 ? 0 : k < 0.67 ? 0.5 : 1, key = lv + ":" + i;   // 和 mats(k) 一样分三层
+    return winDay[key] || (winDay[key] = std(mixOf(T.body, lv), { map: winTex[i], emissive: emOf(lv) }));
+  };
 
   /** 一盏一闪一闪的红灯（减少动态效果时一直亮着） */
   const blinker = (x, y, z, phase) => {
@@ -580,7 +644,13 @@ export function buildBackdrop(kind, bounds, themeName, camera, colors) {
       else if (pick < 0.75) place(shed(mats(sp.k), 1.6 + r() * 2.2, Math.min(sp.hmax * 0.35, 0.9 + r() * 1.4)), sp);
       else place(silos(mats(sp.k), Math.min(sp.hmax * 0.5, 2.5 + r() * 2), 1 + Math.floor(r() * 2)), sp);
     }
-  } else if (kind === "desert") {
+    // 两侧台阶状的岩壁（露天矿坑的坑壁），斜着朝向战场；最后才摆，上面那些厂房的位置不变
+    const CL = BACKDROP.cliff;
+    [-1, 1].forEach(sd => {
+      const s2 = spot(sd, depthAt(0.3), true);
+      place(cliff(mats(s2.k), CL.width, s2.hmax * CL.fill, CL.benches, r), s2, -sd * 0.75);
+    });
+  } else if (kind === "desert" || kind === "skynet") {
     // 两侧和后面的大沙丘；后方一座带岩层的桌山、几根风蚀岩柱；左边半埋的船骨
     [-1, 1].forEach(sd => {
       const s = spot(sd, depthAt(0.15), true); place(dune(mats(s.k), Math.min(s.hmax * 0.9, 3.5 + r() * 1.5)), s, sd * 0.4);
@@ -593,12 +663,19 @@ export function buildBackdrop(kind, bounds, themeName, camera, colors) {
       if (r() < 0.65) place(dune(mats(sp.k), Math.min(sp.hmax * 0.6, 1.6 + r() * 2.4)), sp, r() * 3);
       else place(pillar(mats(sp.k), Math.min(sp.hmax * 0.6, 2 + r() * 2), 0.4 + r() * 0.4), sp);
     }
-  } else if (kind === "night") {
-    // 楼群（亮窗）：高楼可以冲出画面上沿（城市就该这样）；水塔、带红灯的天线
-    for (let i = 0; i < BACKDROP.count.night; i++) {
+    if (kind === "skynet") {
+      // 天网设施：沙漠里孤零零的天网塔，顶上一圈青光（和地台的发光接缝同色）、天线上一盏红灯
+      const SK = BACKDROP.skynet, s2 = spot(SK.u, depthAt(SK.depth)), h = s2.hmax * SK.h;
+      const ringM = keep(new THREE.MeshBasicMaterial({ color: new THREE.Color(SK.glow).multiplyScalar(2.2), toneMapped: false, fog: false }));
+      place(skynetTower(mats(s2.k), h, ringM), s2, 0); blinker(s2.x, -0.3 + h * 1.02, s2.z, 0.3);
+    }
+  } else if (kind === "city") {
+    // 楼群：高楼可以冲出画面上沿（城市就该这样）；水塔、带红灯的天线。楼的高低按区域（colors.skyline：外城区矮、巨人城高）
+    const tall = colors.skyline || 1;
+    for (let i = 0; i < BACKDROP.count.city; i++) {
       const side = r() < 0.3, sp = spot(r() * 2 - 1, depthAt(r()), side);
-      const h = sp.hmax * (0.5 + r() * 0.75);
-      place(tower(mats(sp.k), 1.6 + r() * 2.4, h, 1.6 + r() * 2, windows[Math.floor(r() * windows.length)]), sp, 0);
+      const h = sp.hmax * (0.5 + r() * 0.75) * tall;
+      place(tower(mats(sp.k), 1.6 + r() * 2.4, h, 1.6 + r() * 2, windowMat(sp.k, Math.floor(r() * winTex.length))), sp, 0);
       if (r() < 0.3) blinker(sp.x, -0.3 + h + 1.1, sp.z, r());
     }
     let s = spot(-0.3, depthAt(0.3)); place(waterTower(mats(s.k), s.hmax * 0.6), s, 0);

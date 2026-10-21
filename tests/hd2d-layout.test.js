@@ -512,9 +512,16 @@ test("场景的积木在 Node 里用真的 three.js 建得出来：各种地台�
         scene.add(W.buildZone({ id: i + 1, cx: i * 10, cz: 0, w: 7.2, d: 7.2, h: high ? 1.6 : 0.8, topY: high ? 1.6 : 0.8, kind: fk.kind, effects: fk.effects, highland: high, hole: k === "abyss" ? 1.44 : 0 }, ctx));
       });
       ["bridge", "wall", "door", "void", "open"].forEach((type, i) => scene.add(W.buildGap({ key: "1-2", a: 1, b: 2, type, open: i % 2 === 0, hp: 5, maxHp: 10, x: 0, z: 0, axis: i % 2 ? "z" : "x", length: 2.6, width: 7.2, topY: 0.8 }, ctx)));
+      // 各区域的默认地台（含垫高的高地）
+      Object.keys(L.GROUNDS).forEach((key, i) => [false, true].forEach(high => {
+        const h = high ? 1.6 : 0.8;
+        scene.add(W.buildZone({ id: 40 + i * 2 + (high ? 1 : 0), cx: i * 10, cz: 12, w: 7.2, d: 7.2, h, topY: h, kind: high ? "highland" : "concrete", effects: high ? ["highland"] : [], highland: high, hole: 0, ground: key === L.GROUND_DEFAULT ? null : key }, ctx));
+      }));
+      assert.equal(ctx.lamps.length, 0, "地台上不再放路灯（灯在战场外缘，见下面「路灯」的测试）");
+      scene.add(W.buildLamps([{ x: -8, z: -6, kind: "street", color: 0xffd9a0, dir: 1 }, { x: 8, z: -6, kind: "hanging", color: 0xffc06a, dir: -1 }], ctx));
       for (let f = 0; f < 6; f++) ctx.anim.forEach(fn => fn(f * 0.37, 0.016));
       ctx.anim.forEach(fn => fn(1, 0));
-      assert.ok(ctx.anim.length >= 6 && ctx.lamps.length > 0, "有待机动画、有路灯");
+      assert.ok(ctx.anim.length >= 6 && ctx.lamps.length === 2, "有待机动画、有灯");
       ctx.lamps.forEach(l => assert.ok(l.bulb && l.bulbColor && l.wait > 0 && l.flick === 0, "路灯带着闪烁要用的数据"));
     }
     const st = DEMO_SETUPS.mine(H.load().BattleSim), out = L.build(st, { view: DESKTOP });
@@ -712,4 +719,230 @@ test("乌云：雷鸣时远景的天幕压暗、盖上慢慢飘的厚云（星�
     });
     calm.dispose(); storm.dispose();
   } finally { P.restore(); }
+});
+
+/* ---------- 路灯大幅减少、默认地台跟着地图换材质（#202 截图验收后主人的反馈）---------- */
+/** 游戏里现成的区域名：rogue-data.js 的 regions（单局各幕）+ altRegions（幕间改走的采矿场）；world-data.js 的区域 → 地图地点 id */
+function gameRegions() {
+  const ctx = H.load(), C = ctx.S.ROGUE_CONFIG;
+  return { names: [...new Set(C.regions.concat(Object.values(C.altRegions || {})))], places: require("vm").runInContext("WORLD_REGION_PLACE", ctx) };
+}
+const MINES = ["第一采矿场", "第二采矿场", "第三采矿场"];
+const LIGHTS = ["day", "dusk", "night"];
+
+test("区域 → 地面主题：游戏里的每个区域各有一套地面、互不相同；地图地点 id 和别名对到同一套；认不得的区域兜底成以前的水泥地", () => {
+  const { names, places } = gameRegions();
+  assert.ok(names.length >= 7 && names.includes("外城区") && MINES.every(n => names.includes(n)), "区域名取自 rogue-data.js：" + names);
+  const keys = names.map(n => L.groundOf(n));
+  keys.forEach((k, i) => {
+    assert.ok(L.GROUNDS[k], names[i] + "：配置表里有这套地面");
+    assert.notEqual(k, L.GROUND_DEFAULT, names[i] + "：不该落到兜底");
+    assert.equal(L.regionName(names[i]), names[i]);
+  });
+  assert.equal(new Set(keys).size, names.length, "不同区域选出不同的地面主题：" + keys);
+  // 同一个地方的别名：地图地点 id（跑团 LEDGER.place、联机跑团 view.map.place 发的是它）、天网塔 = 天网设施
+  Object.entries(places).forEach(([name, id]) => {
+    assert.equal(L.groundOf(id), L.groundOf(name), `${id} 和 ${name} 是同一个地方`);
+    assert.equal(L.regionName(id), L.regionName(name));
+  });
+  MINES.forEach((n, i) => assert.equal(L.regionName("mine_" + (i + 1)), n));
+  // 认不得的（没给、空的、还没有地面主题的地点、乱写的）：兜底，就是以前的水泥砖 + 油渍
+  [undefined, null, "", "月球", "极北禁区", 42, {}].forEach(x => {
+    assert.equal(L.groundOf(x), L.GROUND_DEFAULT, "认不得的区域兜底：" + String(x));
+    assert.equal(L.regionName(x), null);
+  });
+  const D = L.GROUNDS[L.GROUND_DEFAULT];
+  assert.ok(D.tex === "concrete" && D.side === "brick" && D.decals.oil > 0 && D.decals.crack > 0 && D.ground == null, "兜底 = 以前的水泥砖 + 油渍 / 裂缝，大片地面照旧");
+  // 每套地面看得出不同：顶面贴图 / 颜色、侧面、贴花、地台外的大片地面
+  const all = Object.keys(L.GROUNDS);
+  const sig = (k) => { const g = L.GROUNDS[k]; return [g.tex, g.tint, g.side, g.sideTint, JSON.stringify(g.decals), g.ground].join("|"); };
+  assert.equal(new Set(all.map(sig)).size, all.length, "有两套地面长得一样");
+  all.filter(k => k !== L.GROUND_DEFAULT).forEach(k => assert.ok(Number.isInteger(L.GROUNDS[k].ground) && L.GROUNDS[k].tex !== D.tex, k + "：自己的顶面贴图、地台外大片地面的颜色"));
+  // 主人给的大致对应
+  const G = (n) => L.GROUNDS[L.groundOf(n)];
+  assert.ok(G("外城区").side === "sheet" && G("外城区").decals.crack > 0, "外城区：开裂沥青 / 水泥、铁皮侧面");
+  assert.ok(G("沙漠").side === "strata" && G("沙漠").decals.ripple > 0, "沙漠：沙地 + 沙纹、岩层侧面");
+  MINES.forEach(n => assert.ok(G(n).side === "strata" && G(n).decals.slag > 0 && G(n).decals.gravel > 0, n + "：碎石 + 矿渣、岩层侧面"));
+  assert.ok(G("第三采矿场").glow && !G("第一采矿场").glow, "三采带一点能量矿的冷光");
+  assert.ok(G("巨人城").metal > 0 && G("巨人城").decals.grate > 0, "巨人城：金属地板 / 格栅");
+  assert.ok(G("天网设施").glow && G("天网设施").metal > 0 && G("天网设施").decor === "clean", "天网设施：干净的金属面板 + 发光接缝");
+  assert.ok(L.regionName("下水道") === "下水道" && G("下水道").decals.puddle > 0, "下水道（游戏里还没有这张图，先放在表里）：湿水泥 + 积水");
+});
+
+test("默认地台（没有场地效果的，或者只是垫高的高地）跟着区域换地面；有场地效果的（酸液、电、冰、流沙、珊瑚、深渊……）照旧；不给区域 / 认不得的区域和以前一样", () => {
+  const st = setupCase({ opt: { board: "cross5" } }, 1);
+  st.fields[1].acid = true; st.fields[2].highland = true; st.fields[4].electric = true; st.fields[5].highland = true; st.fields[5].fire = 2;
+  const base = L.build(st, { view: DESKTOP });
+  assert.ok(base.region === null && base.ground === L.GROUND_DEFAULT, "不给区域：兜底");
+  base.zones.forEach(z => assert.equal(z.ground, null, "不给区域：地台照旧"));
+  const { names } = gameRegions();
+  names.concat(["下水道", "mine_2", "天网塔"]).forEach(region => {
+    const out = L.build(st, { view: DESKTOP, region }), key = L.groundOf(region);
+    assert.ok(out.region === L.regionName(region) && out.ground === key, region);
+    out.zones.forEach((z, i) => {
+      const b = base.zones[i];
+      assert.ok(z.kind === b.kind && z.h === b.h && z.effects.join() === b.effects.join(), "地台的样子（kind）、高度不随区域变");
+      const plain = z.effects.every(e => e === "highland");
+      assert.equal(z.ground, plain ? key : null, `${region} ${z.id} 区（${z.effects.join("+") || "默认"}）`);
+    });
+    assert.equal(out.zones.filter(z => z.ground).map(z => z.id).join(), "2,3", region + "：只垫高的 2 区、默认的 3 区换了地面");
+  });
+  // 每一种场地效果，单独放或者和高地叠在一起：都不受区域影响
+  const s = setupCase({ opt: { zoneMode: 2 } }, 1);
+  L.KIND_ORDER.filter(k => k !== "highland").forEach(k => [{ [k]: true }, { [k]: true, highland: true }].forEach(f => {
+    s.fields[1] = Object.assign({}, f);
+    ["沙漠", "巨人城", "第三采矿场", "下水道"].forEach(region => {
+      const z = L.build(s, { region }).zones[0];
+      assert.ok(z.effects.includes(k) && z.ground === null, `${k}${f.highland ? " + 高地" : ""} 在 ${region}：有场地效果，不换地面`);
+    });
+  }));
+  // 认不得的区域：和不给区域一样
+  const odd = L.build(st, { view: DESKTOP, region: "月球" });
+  assert.ok(odd.region === null && odd.ground === L.GROUND_DEFAULT);
+  odd.zones.forEach(z => assert.equal(z.ground, null));
+});
+
+test("路灯：整场最多 CONFIG.lamps.max 盏（每张地图放几盏、放什么在 GROUNDS 的 lamps），放在战场后沿外面、不在地台上，默认镜头里看得见；沙漠 / 采矿场没有路灯", () => {
+  const max = L.CONFIG.lamps.max;
+  assert.ok(max >= 1 && max <= 2, "整场最多 1–2 盏");
+  const { names } = gameRegions(), regions = names.concat(["下水道", "月球", null]);
+  for (const c of CASES) {
+    const st = setupCase(c);
+    for (const region of regions) for (const theme of LIGHTS) {
+      const out = L.build(st, { view: DESKTOP, region, theme }), tag = `${c.name} ${region} ${theme}`;
+      const plan = L.lampPlan(out.ground, theme);
+      assert.ok(Array.isArray(out.lamps) && out.lamps.length === plan.count && out.lamps.length <= max, tag + `：${out.lamps && out.lamps.length} 盏`);
+      out.lamps.forEach(l => {
+        assert.equal(l.kind, plan.kind);
+        out.zones.forEach(z => assert.ok(Math.abs(l.x - z.cx) > z.w / 2 + 0.3 || Math.abs(l.z - z.cz) > z.d / 2 + 0.3, `${tag}：灯放在 ${z.id} 区的地台上了`));
+        assert.ok(l.z < out.bounds.minZ && l.z > out.bounds.minZ - 3, `${tag}：灯在战场后沿外面（z=${l.z.toFixed(2)}）`);
+        const h = L.CONFIG.lamps.h[l.kind];
+        assert.ok(h > 1, "灯的高度在配置里");
+        [0, h].forEach(y => {
+          const s = screenOf(out.camera, { x: l.x, y: L.CONFIG.groundY + y, z: l.z });
+          assert.ok(s.x >= 0 && s.x <= DESKTOP.width && s.y >= DESKTOP.top && s.y <= DESKTOP.height - DESKTOP.bottom, `${tag}：灯（${y ? "灯头" : "灯杆底"}）不在画面里（${s.x.toFixed(0)}, ${s.y.toFixed(0)}）`);
+        });
+      });
+    }
+  }
+  // 沙漠、采矿场默认不放路灯：沙漠什么灯都没有，采矿场最多一盏小矿灯（吊灯）
+  const st = setupCase({ opt: { zoneMode: 3 } });
+  for (const theme of LIGHTS) {
+    assert.equal(L.build(st, { region: "沙漠", theme }).lamps.length, 0, "沙漠没有灯：" + theme);
+    MINES.forEach(n => {
+      const ls = L.build(st, { region: n, theme }).lamps;
+      assert.ok(ls.length <= 1 && ls.every(l => l.kind === "hanging"), `${n}：没有路灯，最多一盏矿灯（${theme}）`);
+    });
+  }
+  // 本来就该有灯的地方：外城区 / 巨人城 / 天网设施 / 下水道，夜里有灯
+  ["外城区", "巨人城", "天网设施", "下水道"].forEach(n => assert.ok(L.build(st, { region: n, theme: "night" }).lamps.length >= 1, n + "夜里有灯"));
+});
+
+test("真的 three.js 里：默认地台的顶面 / 侧面 / 贴花按区域换，有场地效果的地台和不给区域时是同一套材质和贴花；认不得的区域就是以前的水泥地", async (t) => {
+  const P = await protoEnv(t);
+  if (!P) return;
+  const { W } = P;
+  try {
+    const st = setupCase({ opt: { board: "cross5" } }, 1);
+    st.fields[1].acid = true; st.fields[2].highland = true; st.fields[4].electric = true; st.fields[5].ice = true;
+    /** 建一遍整个战场的地台，记下每块的顶面 / 侧面材质和贴花的贴图 */
+    const looks = (region) => {
+      const out = L.build(st, { view: DESKTOP, region, theme: "dusk" }), ctx = { anim: [], lamps: [], fxLights: 0, theme: "dusk" };
+      return out.zones.map(z => {
+        const g = W.buildZone(z, ctx), body = g.children.find(o => o.isMesh && Array.isArray(o.material));
+        const decals = new Set();
+        g.traverse(o => { if (o.isMesh && o.geometry.type === "PlaneGeometry" && o.material.transparent && o.material.map) decals.add(o.material.map); });
+        W.disposeTree(g);
+        return { z, top: body.material[0], side: body.material[1], decals };
+      });
+    };
+    const same = (a, b) => a.top === b.top && a.side === b.side && a.decals.size === b.decals.size && [...a.decals].every(x => b.decals.has(x));
+    const none = looks(null);
+    assert.ok(none.filter(x => !x.z.effects.length).every(x => x.decals.size > 0), "默认地台上铺着贴花");
+    looks("月球").forEach((x, i) => assert.ok(same(x, none[i]), `认不得的区域：${x.z.id} 区和以前一样`));
+    const { names } = gameRegions(), tops = new Set();
+    names.concat(["下水道"]).forEach(region => {
+      looks(region).forEach((x, i) => {
+        if (!x.z.ground) { assert.ok(same(x, none[i]), `${region}：有场地效果的 ${x.z.id} 区（${x.z.kind}）不该变`); return; }
+        assert.ok(x.top !== none[i].top && x.top.map !== none[i].top.map && x.side !== none[i].side, `${region}：${x.z.id} 区的顶面、侧面跟着区域换了`);
+        assert.ok([...x.decals].some(d => !none[i].decals.has(d)) || x.decals.size === 0, `${region}：${x.z.id} 区的贴花跟着区域换了`);
+        tops.add(x.top);
+      });
+    });
+    assert.ok(tops.size >= names.length, "不同区域的默认地台顶面不一样");
+  } finally { P.restore(); }
+});
+
+test("真的 three.js 里：地台和间隔上不再放路灯，整场的灯就是布局给的那 0–2 盏；沙漠没有灯，采矿场只有矿灯", async (t) => {
+  const P = await protoEnv(t);
+  if (!P) return;
+  const { W } = P;
+  try {
+    const { names } = gameRegions();
+    for (const c of CASES) {
+      const st = setupCase(c);
+      for (const region of names.concat(["下水道", null])) for (const theme of ["day", "night"]) {
+        const out = L.build(st, { view: DESKTOP, region, theme }), ctx = { anim: [], lamps: [], fxLights: 0, theme }, tag = `${c.name} ${region} ${theme}`;
+        const built = out.zones.map(z => W.buildZone(z, ctx)).concat(out.gaps.map(g => W.buildGap(g, ctx)));
+        assert.equal(ctx.lamps.length, 0, tag + "：地台 / 间隔上不该有路灯");
+        built.push(W.buildLamps(out.lamps, ctx));
+        assert.ok(ctx.lamps.length === out.lamps.length && ctx.lamps.length <= L.CONFIG.lamps.max, tag);
+        if (region === "沙漠") assert.equal(ctx.lamps.length, 0, tag);
+        if (MINES.includes(region)) assert.ok(ctx.lamps.every(l => l.kind === "hanging"), tag + "：采矿场只有矿灯");
+        ctx.lamps.forEach(l => assert.ok(l.light && l.bulb && l.bulbColor && l.wait > 0 && l.flick === 0, tag + "：灯会发光、带着闪烁要用的数据"));
+        built.forEach(o => W.disposeTree(o));
+      }
+    }
+  } finally { P.restore(); }
+});
+
+test("远景跟着区域：沙漠 → 沙丘、采矿场 → 岩壁（矿井架 / 烟囱还在）、城市 → 楼群（白天 / 傍晚 / 夜晚都建得出来）、天网设施 → 沙丘里的高塔；场景按布局给的区域挑远景、地面颜色和灯", async (t) => {
+  const P = await protoEnv(t);
+  if (!P) return;
+  const { B, THREE } = P;
+  try {
+    const G = (n) => L.GROUNDS[L.groundOf(n)];
+    assert.equal(G("沙漠").backdrop, "desert");
+    MINES.forEach(n => assert.equal(G(n).backdrop, "mine", n));
+    ["外城区", "巨人城", "下水道"].forEach(n => assert.equal(G(n).backdrop, "city", n));
+    assert.equal(G("天网设施").backdrop, "skynet");
+    assert.equal(L.GROUNDS[L.GROUND_DEFAULT].backdrop, null, "认不得的区域：远景照旧按光影主题挑");
+    const out = L.build(DEMO_SETUPS.cross(H.load().BattleSim), { view: DESKTOP });
+    const count = (bd, kind) => { let n = 0; bd.group.traverse(o => { if (o.userData && o.userData.kind === kind) n++; }); return n; };
+    const colors = { sky: ["#ffc47c", "#f28a5a", "#b9587a", "#4b3368"], fog: 0xc98a72 };
+    for (const theme of LIGHTS) for (const storm of [false, true]) {
+      const opt = Object.assign({ storm }, colors), tag = theme + (storm ? " 雷鸣" : "");
+      const make = (kind, extra) => { const bd = B.buildBackdrop(kind, out.bounds, theme, out.camera, Object.assign({}, opt, extra)); bd.update(1, 0.016, { flash: 0.5, x: 0 }); return bd; };
+      const city = make("city"), mine = make("mine"), desert = make("desert"), sky = make("skynet");
+      assert.ok(count(city, "tower") >= 8, tag + "：城市远景是楼群");
+      assert.ok(count(mine, "cliff") >= 2 && count(mine, "headframe") === 1, tag + "：采矿场远景有岩壁，矿井架还在");
+      assert.ok(count(desert, "dune") >= 2, tag + "：沙漠远景有沙丘");
+      assert.ok(count(sky, "skynet") === 1 && count(sky, "dune") >= 2, tag + "：天网设施是沙丘里的一座高塔");
+      [city, mine, desert, sky].forEach(bd => bd.dispose());
+    }
+    // 楼群的高低按区域（外城区是矮房子，巨人城是高楼）
+    const tallest = (skyline) => {
+      const bd = B.buildBackdrop("city", out.bounds, "day", out.camera, Object.assign({ skyline }, colors));
+      let h = 0; bd.group.traverse(o => { if (o.userData.kind === "tower") h = Math.max(h, new THREE.Box3().setFromObject(o).max.y); });
+      bd.dispose(); return h;
+    };
+    assert.ok(G("巨人城").skyline > G("外城区").skyline && tallest(G("巨人城").skyline) > tallest(G("外城区").skyline) * 1.2, "巨人城的楼比外城区的高");
+    // 场景：远景、地台外大片地面的颜色按布局给的地面主题（layout.ground），灯按布局摆
+    const fs = require("fs"), path = require("path");
+    const scene = fs.readFileSync(path.join(__dirname, "..", "prototypes", "hd2d", "hd2d-scene.js"), "utf8");
+    assert.ok(/L\.GROUNDS\[[^\]]*\.ground\]/.test(scene) && /buildLamps\(layout\.lamps/.test(scene), "场景照布局给的地面主题挑远景 / 地面颜色，灯照布局摆");
+  } finally { P.restore(); }
+});
+
+test("原型页：顶栏可以切换区域（下拉框，或者网址加 ?region=沙漠），三个演示默认分别是采矿场 / 沙漠 / 外城区；布局拿到的就是页面选的区域", () => {
+  const fs = require("fs"), path = require("path");
+  const html = fs.readFileSync(path.join(__dirname, "..", "prototypes", "hd2d", "index.html"), "utf8");
+  assert.ok(html.includes('id="region-select"'), "顶栏有区域下拉框");
+  assert.ok(/\.get\("region"\)/.test(html), "网址参数 ?region=");
+  assert.ok(/Object\.keys\(L\.REGIONS\)/.test(html), "下拉框列的是配置表里的区域名");
+  Object.entries({ mine: "第一采矿场", desert: "沙漠", cross: "外城区" }).forEach(([id, region]) =>
+    assert.ok(new RegExp(`id: "${id}",[^\\n]*region: "${region}"`).test(html), `演示 ${id} 默认在 ${region}`));
+  assert.ok(/L\.build\(st, \{[^}]*region:[^}]*theme:/.test(html), "布局拿到页面选的区域和光影主题（灯的数量看白天 / 夜晚）");
+  const css = fs.readFileSync(path.join(__dirname, "..", "prototypes", "hd2d", "hd2d.css"), "utf8");
+  assert.ok(/@media \(max-width: 720px\)[\s\S]*#region-select[^{]*\{[^}]*display: none/.test(css), "手机上收起区域下拉框（这一轮不专门调手机，别弄坏）");
 });

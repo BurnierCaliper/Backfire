@@ -10,6 +10,7 @@
  *   out.units   [{ id, zone, x, y, z, flying, submerged, lift, rect, plate … }]
  *   out.bounds  { minX, maxX, minZ, maxZ, maxY }
  *   out.camera  { target, dist, pos, fov, elevation, aspect, width, height }   // 场景照这个摆默认镜头
+ *   out.region / out.ground / out.lamps   // 这场战斗在哪个区域（opts.region）、地面主题（GROUNDS 的键）、灯摆在哪（战场外缘，0–2 盏）
  *
  * 坐标：x 向右，y 向上，z 朝镜头（镜头在 +z 一侧看过来）。我方站在 +z（前排），敌方站在 −z（后排）。
  * 铭牌是固定像素大小的 DOM，所以站位按屏幕算：用和场景同一套透视镜头（fitView）把脚下的点投到屏幕上，
@@ -53,11 +54,87 @@
     camera: { fov: 22, elevation: 30, margin: 0.97, targetY: 0.6 },
     view: { width: 1440, height: 900, top: 46, bottom: 160 },        // 桌面：顶栏 + 展开的技能栏
     phoneView: { width: 390, height: 844, top: 42, bottom: 56 },     // 手机竖屏：面板默认收起
-    maxDefPips: 12        // 架势菱形最多画几个（训练木桩之类的巨大架势不画满）
+    maxDefPips: 12,       // 架势菱形最多画几个（训练木桩之类的巨大架势不画满）
+    groundY: -0.32,       // 地台外面那一大片地的高度（hd2d-backdrop.js 的地面；灯立在上面）
+    /* 灯（路灯 / 矿灯）：整场最多 max 盏，不放在地台上，放在最后面那排地台的后角再往外 out、往后 back（世界单位）；
+     * h = 各种灯的灯头离地多高（hd2d-world.js 照这个立灯杆）。每张地图放几盏、放什么在下面 GROUNDS 的 lamps */
+    lamps: { max: 2, out: 0.9, back: 1.1, h: { street: 2.6, hanging: 2.0 } }
   };
 
   /** 地台样子的优先级：靠前的盖过靠后的 */
   const KIND_ORDER = ["abyss", "acid", "quicksand", "coral", "highland", "fire", "ice", "electric", "energy", "harmonic", "heal"];
+
+  /* ---------- 地面主题：这场战斗在哪个区域 → 默认地台长什么样、地台外面的地、远景、灯 ----------
+   * 只管「没有场地效果的地台」（只是垫高的高地也算）。酸液、电、冰、流沙、珊瑚、深渊……有场地效果的照旧用自己的样子
+   * （hd2d-world.js 的 TOP_STYLE），不看区域。认不得的区域（或者没给）用 concrete：就是以前的水泥砖 + 油渍，远景照旧按光影主题挑。
+   * 每一套：
+   *   tex / tint / rough / metal   顶面贴图（hd2d-world.js 的 TEX 里画）、乘上去的颜色、粗糙度、金属感（不写用默认）
+   *   side / sideTint   侧面：brick 砖墙、sheet 瓦楞铁皮、strata 岩层、steel 铆钢板、panelSide 金属面板
+   *   glow              会发光的那一点的颜色（天网设施：顶面和侧面的接缝；采矿场：矿渣里的余火、晶矿）；不写 = 不发光
+   *   decals            贴花各几块：oil 油渍、crack 裂缝、gravel 碎石、ripple 沙纹、patch 沥青补丁、slag 矿渣、ember 带余火的矿渣、
+   *                     crystal 晶矿、grate 格栅、puddle 积水
+   *   pebbles / pebble / rock   零散小石子几颗（不写用 hd2d-world.js 的 WORLD.pebbles）和颜色；地台边上石块的颜色
+   *   decor             地台边上的装饰：scrap 废铁堆 + 管道、sand 沙地（不放废铁、石块大一点）、clean 干净（不放废铁、石块）；crystals 晶簇几丛
+   *   ground            地台外面那一大片地的颜色（白天的；傍晚 / 夜晚场景按光影主题压暗）；null = 照旧用光影主题的颜色
+   *   backdrop          远景：city 楼群（skyline = 楼的高度倍数）、desert 沙丘 / 桌山、mine 岩壁 + 矿井架 / 烟囱、skynet 沙丘里的天网塔
+   *   lamps             灯：kind（street 路灯 / hanging 矿灯、吊灯）、color，白天 / 傍晚 / 夜晚各几盏；不写 = 一盏都不放 */
+  const GROUNDS = {
+    concrete: {   // 兜底（以前的样子）
+      tex: "concrete", tint: 0xffffff, side: "brick", decals: { oil: 3, crack: 3, gravel: 4 }, decor: "scrap", ground: null, backdrop: null,
+      lamps: { kind: "street", color: 0xffd9a0, day: 1, dusk: 1, night: 2 }
+    },
+    outer: {      // 外城区：开裂的沥青 / 水泥、补丁、褪色的标线，侧面瓦楞铁皮
+      tex: "asphalt", tint: 0xffffff, side: "sheet", sideTint: 0xe0d6cc, decals: { crack: 4, patch: 2, oil: 2, gravel: 2 },
+      pebble: 0x7c766e, rock: 0x6f6a63, decor: "scrap", ground: 0x58524b, backdrop: "city", skyline: 0.7,
+      lamps: { kind: "street", color: 0xffc98a, day: 1, dusk: 2, night: 2 }
+    },
+    desert: {     // 沙漠：沙地 + 风吹出来的沙纹，侧面岩层；不放灯
+      tex: "dune", tint: 0xffffff, side: "strata", sideTint: 0xf0cf98, decals: { ripple: 4, gravel: 2 },
+      pebbles: 16, pebble: 0xb8996a, rock: 0xb89a68, decor: "sand", ground: 0xa58357, backdrop: "desert"
+    },
+    mine1: {      // 第一采矿场（露天矿坑）：碎石 + 矿渣、车辙，侧面岩层；一盏矿灯
+      tex: "gravel", tint: 0xffffff, side: "strata", sideTint: 0xc8b6a0, decals: { slag: 3, gravel: 3, crack: 2 },
+      pebble: 0x857565, rock: 0x6f6152, decor: "scrap", ground: 0x655446, backdrop: "mine",
+      lamps: { kind: "hanging", color: 0xffc46e, day: 1, dusk: 1, night: 1 }
+    },
+    mine2: {      // 第二采矿场（熔岩）：偏暗偏红的碎石，矿渣里带一点余火
+      tex: "gravel", tint: 0xd8c0b0, side: "strata", sideTint: 0xa88a7c, glow: 0xff5a1e, decals: { ember: 2, slag: 2, gravel: 3 },
+      pebble: 0x6c584e, rock: 0x584640, decor: "scrap", ground: 0x4d3c35, backdrop: "mine",
+      lamps: { kind: "hanging", color: 0xffb060, day: 1, dusk: 1, night: 1 }
+    },
+    mine3: {      // 第三采矿场（晶矿）：偏冷的碎石，零星几块发冷光的能量矿
+      tex: "gravel", tint: 0xc6c8d8, side: "strata", sideTint: 0xaaa8c0, glow: 0x8f7dff, decals: { crystal: 3, slag: 1, gravel: 3 }, crystals: 2,
+      pebble: 0x787888, rock: 0x625f70, decor: "scrap", ground: 0x4c4a57, backdrop: "mine",
+      lamps: { kind: "hanging", color: 0xc8d6ff, day: 1, dusk: 1, night: 1 }
+    },
+    giant: {      // 巨人城：花纹钢板地面、格栅，侧面铆钢板
+      tex: "plate", tint: 0xffffff, rough: 0.55, metal: 0.3, side: "steel", decals: { grate: 2, oil: 2 },
+      pebble: 0x606268, rock: 0x5a6068, decor: "scrap", ground: 0x45484e, backdrop: "city", skyline: 1.25,
+      lamps: { kind: "street", color: 0xffe2b8, day: 1, dusk: 2, night: 2 }
+    },
+    skynet: {     // 天网设施：干净的金属面板 + 发光的接缝，地台外面是沙漠
+      tex: "panel", tint: 0xffffff, rough: 0.38, metal: 0.4, side: "panelSide", glow: 0x4fd8ff, decals: {},
+      pebbles: 0, decor: "clean", ground: 0x9a845e, backdrop: "skynet",
+      lamps: { kind: "street", color: 0xd6f4ff, day: 1, dusk: 2, night: 2 }
+    },
+    sewer: {      // 下水道：湿水泥、积水反光，侧面泛潮的砖墙；吊灯
+      tex: "wet", tint: 0xffffff, rough: 0.42, side: "brick", sideTint: 0x93a091, decals: { puddle: 4, crack: 2, gravel: 1 },
+      pebble: 0x5d635b, rock: 0x565a50, decor: "scrap", ground: 0x343b36, backdrop: "city", skyline: 0.85,
+      lamps: { kind: "hanging", color: 0xe2eea0, day: 1, dusk: 1, night: 2 }
+    }
+  };
+  const GROUND_DEFAULT = "concrete";
+  /** 区域名 → 地面主题。区域名用游戏里现成的：rogue-data.js 的 regions（单局各幕）/ altRegions（幕间改走的采矿场），也是遭遇的 region */
+  const REGIONS = {
+    "外城区": "outer", "沙漠": "desert", "巨人城": "giant", "天网设施": "skynet",
+    "第一采矿场": "mine1", "第二采矿场": "mine2", "第三采矿场": "mine3",
+    "下水道": "sewer"     // 游戏里还没有这张图（ROADMAP 里的「下水道」），先放在这里，名字定了再对上
+  };
+  /** 同一个地方的别名 → 区域名：world-data.js 的地图地点 id（跑团 LEDGER.place、联机跑团 view.map.place 发的是它）、天网塔 */
+  const REGION_ALIAS = {
+    "天网塔": "天网设施", outer_city: "外城区", desert: "沙漠", giant_city: "巨人城", skynet: "天网设施",
+    mine_1: "第一采矿场", mine_2: "第二采矿场", mine_3: "第三采矿场"
+  };
 
   /** 状态徽章：statuses 里的键 → 铭牌上的字（敌我通用）。数值型的（灼烧层数）带上层数 */
   const STATUS_LABELS = {
@@ -98,6 +175,38 @@
     };
     const effects = KIND_ORDER.filter(k => on[k]);
     return { kind: effects[0] || "concrete", effects };
+  }
+
+  /* ---------- 地面主题 / 灯 ---------- */
+  const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+  /** 游戏里的区域名、地图地点 id → 区域名（认不得的返回 null） */
+  function regionName(x) {
+    if (typeof x !== "string") return null;
+    const s = x.trim();
+    return own(REGIONS, s) ? s : own(REGION_ALIAS, s) ? REGION_ALIAS[s] : null;
+  }
+  /** 区域 → 地面主题（GROUNDS 的键）；认不得的用兜底 GROUND_DEFAULT */
+  function groundOf(x) {
+    const name = regionName(x);
+    return name ? REGIONS[name] : GROUND_DEFAULT;
+  }
+  /** 这场战斗放几盏灯、什么灯：看地面主题和光影主题（day / dusk / night），不超过 CONFIG.lamps.max */
+  function lampPlan(ground, theme) {
+    const p = (GROUNDS[ground] || GROUNDS[GROUND_DEFAULT]).lamps;
+    if (!p) return { kind: null, color: null, count: 0 };
+    return { kind: p.kind, color: p.color, count: clamp(Math.round(num(p[theme], num(p.day, 0))), 0, CONFIG.lamps.max) };
+  }
+  /** 灯摆在哪：最后面那排地台的两个后角再往外、往后一点（在战场外缘的地上，不在地台上，也不在两块地台之间的缝里）。
+   *  一盏放右后角（主光从左上方来，右边补一点光），两盏左右各一；dir = 灯臂往哪边伸（朝战场里面） */
+  function lampSpots(zones, plan) {
+    if (!plan.count || !zones.length) return [];
+    const C = CONFIG.lamps;
+    const back = Math.min(...zones.map(z => z.cz - z.d / 2));
+    const row = zones.filter(z => z.cz - z.d / 2 < back + 1e-6);
+    const left = row.reduce((a, z) => (z.cx - z.w / 2 < a.cx - a.w / 2 ? z : a));
+    const right = row.reduce((a, z) => (z.cx + z.w / 2 > a.cx + a.w / 2 ? z : a));
+    const spots = [{ x: right.cx + right.w / 2 + C.out, dir: -1 }, { x: left.cx - left.w / 2 - C.out, dir: 1 }];
+    return spots.slice(0, plan.count).map((s, i) => ({ x: s.x, z: back - C.back, dir: s.dir, kind: plan.kind, color: plan.color, seed: i }));
   }
 
   /* ---------- 铭牌数据 ---------- */
@@ -309,6 +418,8 @@
    * 排出整个战场。
    *   opts.portrait  竖屏（手机）：整块棋盘转 90°，直排沿进深（前后）排开，我方在最前面
    *   opts.view      { width, height, top, bottom }：画面大小和上下被界面盖住的像素（场景传真实的；不给按桌面 / 手机的默认值）
+   *   opts.region    这场战斗在哪个区域（游戏里的区域名或地图地点 id）：没有场地效果的地台按它换地面（zone.ground），灯按它摆；认不得 / 不给 = 以前的样子
+   *   opts.theme     光影主题 day / dusk / night（灯的盏数看白天还是夜晚；不给按白天）
    */
   function build(state, opts) {
     opts = opts || {};
@@ -317,6 +428,7 @@
     const S = CONFIG.zoneSize, pitch = S + CONFIG.zoneGap;
     const xs = board.zones.map(z => z.x), ys = board.zones.map(z => z.y);
     const midX = (Math.min(...xs) + Math.max(...xs)) / 2, midY = (Math.min(...ys) + Math.max(...ys)) / 2;
+    const region = regionName(opts.region), ground = groundOf(opts.region);
 
     const zones = board.zones.map(bz => {
       const fk = fieldKinds((state.fields || {})[bz.id]);
@@ -327,7 +439,9 @@
       return {
         id: bz.id, gx: bz.x, gy: bz.y, cx, cz, w: S, d: S, h, topY: h,
         kind: fk.kind, effects: fk.effects, highland: high,
-        hole: fk.effects.includes("abyss") ? S * CONFIG.holeRatio : 0
+        hole: fk.effects.includes("abyss") ? S * CONFIG.holeRatio : 0,
+        // 地面主题：只给没有场地效果的地台（只是垫高的高地也算）；兜底时不给，照旧画以前的样子
+        ground: ground !== GROUND_DEFAULT && fk.effects.every(e => e === "highland") ? ground : null
       };
     });
     const zoneById = {};
@@ -390,11 +504,12 @@
       });
     });
     liftRows(units, camera, size);
-    return { portrait, boardId: board.id, zones, gaps, units, bounds: b, camera, view, plateSize: size };
+    const lamps = lampSpots(zones, lampPlan(ground, opts.theme || "day"));
+    return { portrait, boardId: board.id, zones, gaps, units, bounds: b, camera, view, plateSize: size, region, ground, lamps };
   }
 
   return {
-    CONFIG, KIND_ORDER, STATUS_LABELS, build, boardOf, fieldKinds, plateData, arrangeUnits, gapKeyOf,
-    fitView, project, plateScale, plateRect, plateSize, frameTop
+    CONFIG, KIND_ORDER, STATUS_LABELS, GROUNDS, GROUND_DEFAULT, REGIONS, REGION_ALIAS, build, boardOf, fieldKinds, plateData, arrangeUnits, gapKeyOf,
+    fitView, project, plateScale, plateRect, plateSize, frameTop, regionName, groundOf, lampPlan
   };
 });

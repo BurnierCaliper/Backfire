@@ -5,8 +5,10 @@
  * 加上镜头、灯光（主光 + 轮廓光）、雾和后期（景深 + 泛光 + 热浪 + 调色：色温 / 暗角 / 胶片颗粒 / 雷击闪白），打雷时镜头轻微抖一下。
  *
  *   const sc = createHd2dScene(container, { onPortraitChange(p) {...}, onViewChange() {...} });
- *   sc.setBattle(layout, { weather: "sand", theme: "dusk", backdrop: "desert", actorId });
- *     // layout = HD2DLayout.build(state, { portrait: sc.portrait, view: sc.view() })；默认镜头就用 layout.camera
+ *   sc.setBattle(layout, { weather: "sand", theme: "dusk", actorId });
+ *     // layout = HD2DLayout.build(state, { portrait: sc.portrait, view: sc.view(), region: "沙漠", theme: "dusk" })；默认镜头就用 layout.camera。
+ *     // 这场战斗所在的区域定了地面主题（layout.ground）：远景、地台外大片地面的颜色、灯（layout.lamps）都跟着它；
+ *     // meta.backdrop 可以硬指定远景，区域认不得时按光影主题猜
  *   sc.setInsets({ top, bottom });   // 上下被界面盖住的像素（布局取景时让开），改了以后外面重排一次
  *   sc.dispose();
  * 系统开了「减少动态效果」（prefers-reduced-motion）时，待机动画、飘浮物、天气粒子、乌云、胶片颗粒都停住；雷照打，但闪光减弱、只闪一下，镜头不抖。
@@ -20,7 +22,7 @@ import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js"
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { CSS2DRenderer, CSS2DObject } from "three/addons/renderers/CSS2DRenderer.js";
-import { buildZone, buildGap, disposeTree, rng } from "./hd2d-world.js";
+import { buildZone, buildGap, buildLamps, disposeTree, rng } from "./hd2d-world.js";
 import { buildBackdrop, buildGround, skyTexture, BACKDROP } from "./hd2d-backdrop.js";
 import { createWeather, weatherPlan } from "./hd2d-weather.js";
 
@@ -44,7 +46,7 @@ const PLATE = { fadeRange: 14, fadeMin: 0.72, maxDots: 4, maxPips: 6 };
 const RING = { radius: 1.05, spin: 0.45, pulse: 0.05 };
 /** 脚下的接触阴影：一小块很实的核心 + 一圈软的 */
 const SHADOW = { core: 0.42, coreOpacity: 0.78, soft: 1.05, softOpacity: 0.42 };
-/** 路灯偶尔闪一下：隔 wait 秒（随机）闪 dur 秒 */
+/** 灯（战场外缘的路灯 / 矿灯）偶尔闪一下：隔 wait 秒（随机）闪 dur 秒 */
 const FLICKER = { wait: [3, 11], dur: [0.18, 0.55], low: 0.12 };
 /** 雾：从镜头到战场后沿开始起雾，再往后 depth 远基本全进雾（天幕的底边在这一段里，地面和天边连成一片） */
 const FOG = { depth: 30 };
@@ -269,7 +271,7 @@ export function createHd2dScene(container, options) {
     scene.background = skyTexture(storm ? BACKDROP.storm.sky[state.themeName] || T.sky : T.sky, state.themeName === "night" && !storm);
     hemi.color.set(T.hemiSky); hemi.groundColor.set(T.hemiGround);
     sun.color.set(T.sun); rim.color.set(T.rim); rim.intensity = T.rimI;
-    ground.material.color.set(T.ground);
+    ground.material.color.copy(groundColor(T));
     renderer.toneMappingExposure = T.exposure;
     bloom.strength = T.bloom[0]; bloom.radius = T.bloom[1]; bloom.threshold = T.bloom[2];
     bokeh.uniforms.maxblurFar.value = T.dofFar;
@@ -278,6 +280,14 @@ export function createHd2dScene(container, options) {
     u.shadow.value.set(...G.shadow); u.high.value.set(...G.high); u.vignette.value = G.vignette; u.grain.value = G.grain;
     labels.domElement.style.setProperty("--rim", T.rimCss);
     applyFog();
+  }
+  /** 地台外面那一大片地：区域的地面主题有自己的颜色（白天的），傍晚 / 夜晚照以前光影主题的地面比白天暗多少来压暗；
+   *  认不得的区域照旧用光影主题的颜色（THEMES.ground） */
+  function groundColor(T) {
+    const look = state.layout && L.GROUNDS[state.layout.ground];
+    if (!look || look.ground == null) return new THREE.Color(T.ground);
+    const day = new THREE.Color(THEMES.day.ground), now = new THREE.Color(T.ground);
+    return new THREE.Color(look.ground).multiply(new THREE.Color(now.r / day.r, now.g / day.g, now.b / day.b));
   }
   /** 雾色：光影主题的雾，往这个天气想要的雾色靠 */
   function fogColorOf(T, tint) {
@@ -293,7 +303,7 @@ export function createHd2dScene(container, options) {
     const back = state.fit + (b ? (b.maxZ - b.minZ) / 2 * Math.cos(THREE.MathUtils.degToRad(L.CONFIG.camera.elevation)) : 8);   // 镜头到战场后沿的大致距离
     const near = back * (tint ? tint.near : 1), far = (back + FOG.depth) * (tint ? tint.far : 1);
     scene.fog = new THREE.Fog(color, near, far);
-    ground.material.color.set(T.ground).lerp(color, 0.12);
+    ground.material.color.copy(groundColor(T)).lerp(color, 0.12);
   }
 
   /* ---------- 铭牌（DOM，竖立，正面朝镜头）---------- */
@@ -418,13 +428,15 @@ export function createHd2dScene(container, options) {
       const root = new THREE.Group();
       layout.zones.forEach(z => root.add(buildZone(z, state.ctx)));
       layout.gaps.forEach(g => root.add(buildGap(g, state.ctx)));
+      root.add(buildLamps(layout.lamps, state.ctx));   // 灯：战场外缘 0–2 盏（地台上不放）
       scene.add(root); state.world = root;
       state.worldSig = worldSig(layout);
     }
     state.boardSig = boardSig(layout);
     state.bounds = layout.bounds;
     const plan = weatherPlan(state.meta.weather || "none", state.meta.theme);   // 雷鸣：远景要画乌云
-    syncBackdrop(layout, state.meta.backdrop || backdropOf(state.meta.theme), plan);
+    const look = L.GROUNDS[layout.ground] || {};   // 远景跟着区域（沙漠 → 沙丘，采矿场 → 岩壁，城市 → 楼群）
+    syncBackdrop(layout, state.meta.backdrop || look.backdrop || backdropOf(state.meta.theme), plan, look.skyline);
     // 天气：闪电从默认镜头的画面上沿外面劈下来；远处的雷劈在哪问远景
     weather.setBounds(layout.bounds, { camera: layout.camera, farPoint: state.backdrop.farPoint });
     weather.set(state.meta.weather || "none", state.meta.theme);
@@ -433,21 +445,22 @@ export function createHd2dScene(container, options) {
     fitShadow();
     fitCamera(newBoard || state.wantFit);
   }
-  /** 远景按场景变：没指定就按光影主题猜 */
+  /** 区域认不得（布局给的地面主题没有远景）也没指定时，按光影主题猜 */
   const backdropOf = (theme) => theme === "night" ? "night" : theme === "dusk" ? "mine" : "wasteland";
-  /** plan = 天气要建的东西（weatherPlan）：雷鸣时远景换成风暴色的天、画乌云，天边接上压暗了的雾色 */
-  function syncBackdrop(layout, kind, plan) {
+  /** plan = 天气要建的东西（weatherPlan）：雷鸣时远景换成风暴色的天、画乌云，天边接上压暗了的雾色；skyline = 楼群的高度倍数 */
+  function syncBackdrop(layout, kind, plan, skyline) {
     const c = layout.camera, storm = !!plan.storm;
-    const sig = [kind, state.meta.theme, storm ? "storm" : "", Object.values(layout.bounds).map(v => Math.round(v)).join(","), c ? [c.dist, c.pos.y, c.pos.z].map(v => Math.round(v)).join(",") : ""].join("|");
+    const sig = [kind, skyline || 1, state.meta.theme, storm ? "storm" : "", Object.values(layout.bounds).map(v => Math.round(v)).join(","), c ? [c.dist, c.pos.y, c.pos.z].map(v => Math.round(v)).join(",") : ""].join("|");
     if (sig === state.backdropSig) return;
     state.backdropSig = sig;
     if (state.backdrop) { scene.remove(state.backdrop.group); state.backdrop.dispose(); }
     const T = THEMES[state.meta.theme] || THEMES.day;
-    state.backdrop = buildBackdrop(kind, layout.bounds, state.meta.theme, c, { sky: T.sky, fog: storm ? fogColorOf(T, plan.tint).getHex() : T.fog, storm });
+    state.backdrop = buildBackdrop(kind, layout.bounds, state.meta.theme, c, { sky: T.sky, fog: storm ? fogColorOf(T, plan.tint).getHex() : T.fog, storm, skyline });
     scene.add(state.backdrop.group);
   }
   const boardSig = (l) => l.zones.map(z => [z.id, Math.round(z.cx * 10), Math.round(z.cz * 10)].join(",")).join(";");
-  const worldSig = (l) => boardSig(l) + "|" + (state.meta.theme || "") + "|" + l.zones.map(z => z.kind + z.effects.join("+") + z.h).join(";") + "|" + l.gaps.map(g => [g.key, g.type, g.open, g.maxHp ? Math.ceil((g.hp / g.maxHp) * 4) : 4].join(",")).join(";");
+  const worldSig = (l) => boardSig(l) + "|" + (state.meta.theme || "") + "|" + l.zones.map(z => z.kind + z.effects.join("+") + z.h + (z.ground || "")).join(";") + "|" + l.gaps.map(g => [g.key, g.type, g.open, g.maxHp ? Math.ceil((g.hp / g.maxHp) * 4) : 4].join(",")).join(";") +
+    "|" + (l.lamps || []).map(p => [p.kind, Math.round(p.x * 10), Math.round(p.z * 10), p.color].join(",")).join(";");
 
   /* ---------- 镜头 ---------- */
   /** 现在的画面：给布局取景 / 算铭牌在屏幕上的位置用 */

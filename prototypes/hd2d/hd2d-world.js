@@ -1,23 +1,29 @@
-/* Antlerscale: Backfire · HD-2D 战场原型 · 沙盘地台、间隔、装饰
+/* Antlerscale: Backfire · HD-2D 战场原型 · 沙盘地台、间隔、装饰、灯
  *
  * 全部用几何体拼出来，贴图是 canvas 画的程序纹理，没有图片文件。
- * 输入是 hd2d-layout.js 算出来的 zones / gaps；这里只管把它们变成 three.js 的物体。
+ * 输入是 hd2d-layout.js 算出来的 zones / gaps / lamps；这里只管把它们变成 three.js 的物体。
  *
  *   const ctx = { anim: [], lamps: [], theme: "dusk" };
  *   const group = buildZone(zone, ctx);     // 每帧调 ctx.anim 里的函数：fn(t, dt)（减少动态效果时 t 停住、dt = 0）
  *   const group = buildGap(gap, ctx);
- * 路灯放进 ctx.lamps（{ light, bulb, bulbColor, base, wait, flick, seed }），由场景每帧管亮度和偶尔的闪烁。
+ *   const group = buildLamps(layout.lamps, ctx);   // 战场外缘的 0–2 盏灯（地台上不再放路灯）
+ * 默认地台（zone.ground 有值）照布局给的地面主题画（hd2d-layout.js 的 GROUNDS：沥青、沙地、碎石、钢板……）；
+ * 有场地效果的地台和兜底的照旧按 TOP_STYLE。
+ * 灯放进 ctx.lamps（{ kind, light, bulb, bulbColor, base, wait, flick, seed }），由场景每帧管亮度和偶尔的闪烁。
  */
 import * as THREE from "three";
 
+/** 布局（hd2d-layout.js，普通脚本，比这个模块先加载）：地面主题、灯的尺寸、地面的高度都用它的配置 */
+const L = window.HD2DLayout;
+
 /* ---------- 配置 ---------- */
 const WORLD = {
-  maxLamps: 5,              // 带点光源的路灯最多几盏（再多的只摆灯具、不发光，省显卡）
+  maxLamps: 5,              // 带点光源的灯最多几盏（布局那边整场最多 CONFIG.lamps.max 盏，这里只是保险）
   maxFxLights: 3,           // 酸液 / 火 / 电的点光源最多几盏
   texRepeat: 0.28,          // 地台顶面贴图：每个单位长度铺多少（0.28 ≈ 每 3.6 格一块）
   sideRepeat: 0.5,          // 地台侧面贴图：每 2 个单位一块（砖 / 铁皮 / 岩层）
-  decals: { oil: 3, crack: 3, gravel: 4 },   // 每块地台上的油渍 / 裂缝 / 碎石贴花各几块
-  pebbles: 26,              // 每块地台上零散的小石子
+  glow: 1.6,                // 地面主题里会发光的接缝 / 余火 / 晶矿的亮度（自发光 > 1 才会被泛光抓到）
+  pebbles: 26,              // 每块地台上零散的小石子（地面主题可以另给 pebbles）
   trim: { w: 0.07, h: 0.05, emissive: 0.32 },   // 地台上沿的一圈亮边（轮廓光）
   acidBubbles: 11,          // 酸液里同时冒的泡
   colors: {
@@ -26,8 +32,26 @@ const WORLD = {
     coral1: 0xff7a8a, coral2: 0xff9a5a, hazard: 0xf2c230, warn: 0xff3b2e, abyss: 0x9a5cff
   },
   /** 各光影主题下地台亮边的颜色（和场景的轮廓光同色） */
-  rimColor: { day: 0xfff0c8, dusk: 0xffb090, night: 0x8fb8ff }
+  rimColor: { day: 0xfff0c8, dusk: 0xffb090, night: 0x8fb8ff },
+  /** 灯：路灯 / 矿灯的点光源有多亮、照多远（场景再按光影主题乘 THEMES.lamp）。几盏、放哪在 hd2d-layout.js（GROUNDS 的 lamps、CONFIG.lamps） */
+  lamp: { street: { power: 10, dist: 9 }, hanging: { power: 8, dist: 7 } }
 };
+/** 贴花：每块地台上铺几块由地面主题定（hd2d-layout.js 的 GROUNDS[].decals；有场地效果的地台和兜底用 GROUNDS.concrete 的）。
+ *  tex 贴图、size 边长范围（世界单位）、rough / metal 材质；glow = 拿地面主题的 glow 色当自发光（乘这个倍数）；square = 只转 90° 的倍数 */
+const DECALS = {
+  oil: { tex: "decalOil", size: [0.8, 1.6], rough: 0.28 },
+  crack: { tex: "decalCrack", size: [1.0, 1.9] },
+  gravel: { tex: "decalGravel", size: [0.7, 1.3] },
+  ripple: { tex: "decalRipple", size: [1.2, 2.2] },
+  patch: { tex: "decalPatch", size: [1.0, 1.8] },
+  slag: { tex: "decalSlag", size: [0.7, 1.3] },
+  ember: { tex: "decalEmber", size: [0.7, 1.2], glow: 0.9 },
+  crystal: { tex: "decalCrystal", size: [0.6, 1.0], glow: 1.2 },
+  grate: { tex: "decalGrate", size: [0.9, 1.2], rough: 0.5, metal: 0.5, square: true },
+  puddle: { tex: "decalPuddle", size: [1.0, 1.9], rough: 0.05, metal: 0.35 }
+};
+/** 侧面材质的粗糙度 / 金属感（不在表里的：粗糙、不是金属） */
+const SIDE = { sheet: { rough: 0.55, metal: 0.35 }, steel: { rough: 0.5, metal: 0.45 }, panelSide: { rough: 0.4, metal: 0.35 } };
 
 /** 危墙：一排水泥块。高度 / 厚度都按桌面宽度下好看的比例定，手机上同样的比例 */
 const WALL = { blocks: 6, baseH: 0.75, varyH: 0.12, thickRatio: 0.2, maxThick: 0.55 };
@@ -98,6 +122,27 @@ function gravel(g, r, cx, cy, rad, n) {
     g.fillStyle = "rgba(0,0,0,.45)"; g.fillRect(x + 1, y + 1, s, s);
     g.fillStyle = r() < 0.5 ? "rgba(190,180,165,.95)" : "rgba(140,130,118,.95)"; g.fillRect(x, y, s, s);
   }
+}
+/** 一撮矿渣：黑褐色、棱角分明的小块，带一点玻璃光；hot = 中间烧得发红（余火，当自发光贴图时只有红的那点亮） */
+function slagChunks(g, r, s, hot) {
+  for (let i = 0; i < 14; i++) {
+    const a = r() * 7, d = Math.sqrt(r()) * s * 0.32, cx = s / 2 + Math.cos(a) * d, cy = s / 2 + Math.sin(a) * d, rad = 3 + r() * 7;
+    g.beginPath();
+    for (let k = 0; k < 5; k++) { const t = (k / 5) * Math.PI * 2 + r() * 0.5, rr = rad * (0.6 + r() * 0.5); g.lineTo(cx + Math.cos(t) * rr, cy + Math.sin(t) * rr); }
+    g.closePath();
+    g.fillStyle = r() < 0.5 ? "rgba(30,26,24,.95)" : "rgba(48,40,35,.95)"; g.fill();
+    if (hot && r() < 0.6) {
+      const grd = g.createRadialGradient(cx, cy, 0, cx, cy, rad * 0.75);
+      grd.addColorStop(0, "rgba(255,176,90,.95)"); grd.addColorStop(0.5, "rgba(228,72,20,.7)"); grd.addColorStop(1, "rgba(120,20,0,0)");
+      g.fillStyle = grd; g.fill();
+    }
+    g.fillStyle = "rgba(196,190,184,.55)"; g.fillRect(cx - rad * 0.3, cy - rad * 0.4, 1.5, 1.5);   // 玻璃光
+  }
+}
+/** 天网设施的面板接缝（顶面贴图和它的发光贴图共用一份，对得上）：[x0, y0, x1, y1]，按 0–1 */
+const PANEL_SEAMS = [[0, 0, 1, 0], [0, 0.5, 1, 0.5], [0, 0.25, 0.5, 0.25], [0.5, 0.75, 1, 0.75], [0, 0, 0, 1], [0.5, 0, 0.5, 1], [0.25, 0, 0.25, 0.5], [0.75, 0.5, 0.75, 1]];
+function seams(g, s, w) {
+  PANEL_SEAMS.forEach(([x0, y0, x1, y1]) => { g.lineWidth = w; g.beginPath(); g.moveTo(x0 * s, y0 * s); g.lineTo(x1 * s, y1 * s); g.stroke(); });
 }
 
 const TEX = {
@@ -185,6 +230,166 @@ const TEX = {
     g.strokeStyle = "rgba(0,0,0,.35)";
     for (let k = 0; k < 4; k++) crack(g, r, r() * s, r() * s, 5, 1, 0);
   }),
+  /* ---- 各区域的默认地台（hd2d-layout.js 的 GROUNDS）：顶面 ---- */
+  /** 沥青（外城区）：深灰底、骨料的亮点、一片片龟裂、灌过缝的黑亮长裂缝、颜色深浅不一的补丁、褪色的白色虚线 */
+  asphalt: () => canvasTex("asphalt", 256, (g, s, r) => {
+    g.fillStyle = "#4e4a46"; g.fillRect(0, 0, s, s);
+    for (let i = 0; i < 12; i++) {   // 大块的深浅（晒褪色的、油浸过的）
+      g.fillStyle = r() < 0.5 ? `rgba(255,248,236,${0.03 + r() * 0.04})` : `rgba(10,8,6,${0.05 + r() * 0.07})`;
+      g.beginPath(); g.ellipse(r() * s, r() * s, 24 + r() * 50, 16 + r() * 34, r() * 3, 0, 7); g.fill();
+    }
+    speckle(g, s, r, 3400, "rgba(222,216,206,.16)", "rgba(0,0,0,.24)");   // 骨料
+    for (let k = 0; k < 2; k++) {   // 补丁：新旧不一的两块，边上一圈灌缝
+      const x = r() * s * 0.65, y = r() * s * 0.65, w = 40 + r() * 50, h = 30 + r() * 40;
+      g.fillStyle = k ? "rgba(26,24,23,.5)" : "rgba(120,114,106,.3)"; g.fillRect(x, y, w, h);
+      g.strokeStyle = "rgba(8,7,6,.7)"; g.lineWidth = 2; g.strokeRect(x, y, w, h);
+    }
+    g.fillStyle = "rgba(232,226,210,.26)";   // 褪色的白色虚线
+    for (let x = 6; x < s; x += 46) g.fillRect(x, s * 0.36, 28, 5);
+    g.strokeStyle = "rgba(0,0,0,.55)";       // 龟裂
+    for (let k = 0; k < 9; k++) crack(g, r, r() * s, r() * s, 6 + Math.floor(r() * 8), 1.3, 2);
+    g.strokeStyle = "rgba(6,5,5,.75)";       // 灌过缝的长裂缝
+    for (let k = 0; k < 2; k++) crack(g, r, r() * s, r() * s, 14 + Math.floor(r() * 8), 3, 0);
+    for (let k = 0; k < 3; k++) gravel(g, r, r() * s, r() * s, 6 + r() * 8, 8 + Math.floor(r() * 10));
+  }),
+  /** 沙地（沙漠）：浅浅的大块明暗，一道道被风吹出来的细沙纹（暗的谷 + 紧贴的亮脊；横着首尾相接，铺开看不出接缝） */
+  dune: () => canvasTex("dune", 256, (g, s, r) => {
+    g.fillStyle = "#d0aa6c"; g.fillRect(0, 0, s, s);
+    for (let i = 0; i < 10; i++) {
+      g.fillStyle = r() < 0.5 ? `rgba(255,240,205,${0.05 + r() * 0.06})` : `rgba(140,96,44,${0.05 + r() * 0.06})`;
+      g.beginPath(); g.ellipse(r() * s, r() * s, 30 + r() * 60, 20 + r() * 40, r() * 3, 0, 7); g.fill();
+    }
+    speckle(g, s, r, 1400, "rgba(255,244,214,.30)", "rgba(120,80,30,.22)");
+    for (let k = 0; k < 16; k++) {
+      const y0 = (k + 0.5) * s / 16 + (r() - 0.5) * 4, amp = 2 + r() * 3, ph = r() * 6;
+      const f1 = (Math.PI * 2 * (2 + Math.floor(r() * 3))) / s, f2 = (Math.PI * 2 * (5 + Math.floor(r() * 4))) / s;
+      [["rgba(130,88,38,.30)", 0], ["rgba(255,236,190,.30)", 1.6]].forEach(([c, dy]) => {
+        g.strokeStyle = c; g.lineWidth = 1.4; g.beginPath();
+        for (let x = 0; x <= s; x += 4) g.lineTo(x, y0 + dy + Math.sin(x * f1 + ph) * amp + Math.sin(x * f2 + k) * 1.2);
+        g.stroke();
+      });
+    }
+  }),
+  /** 碎石地（采矿场）：压实的土、密密麻麻的碎石（亮面 + 影子）、一道车辙、零星的黑矿渣 */
+  gravel: () => canvasTex("gravel", 256, (g, s, r) => {
+    g.fillStyle = "#6c5e50"; g.fillRect(0, 0, s, s);
+    for (let i = 0; i < 14; i++) {
+      g.fillStyle = r() < 0.5 ? `rgba(255,240,220,${0.03 + r() * 0.05})` : `rgba(20,14,10,${0.05 + r() * 0.08})`;
+      g.beginPath(); g.ellipse(r() * s, r() * s, 20 + r() * 50, 14 + r() * 30, r() * 3, 0, 7); g.fill();
+    }
+    speckle(g, s, r, 2200, "rgba(255,240,220,.10)", "rgba(0,0,0,.20)");
+    const ty = s * (0.25 + r() * 0.4);      // 车辙：两道平行的暗带，里面一格格的胎纹
+    [0, 34].forEach(off => {
+      g.fillStyle = "rgba(20,14,10,.22)"; g.fillRect(0, ty + off, s, 14);
+      g.fillStyle = "rgba(0,0,0,.16)"; for (let x = 0; x < s; x += 8) g.fillRect(x, ty + off + 2, 4, 10);
+    });
+    for (let i = 0; i < 700; i++) {         // 碎石
+      const x = r() * s, y = r() * s, w = 1.5 + r() * 3.5, h = 1.2 + r() * 2.5, v = 118 + Math.floor(r() * 70);
+      g.fillStyle = "rgba(0,0,0,.35)"; g.fillRect(x + 1, y + 1, w, h);
+      g.fillStyle = `rgb(${v + 12},${v + 4},${v - 8})`; g.fillRect(x, y, w, h);
+    }
+    for (let i = 0; i < 40; i++) {          // 矿渣
+      const x = r() * s, y = r() * s, w = 2 + r() * 4;
+      g.fillStyle = "rgba(24,20,18,.9)"; g.fillRect(x, y, w, w * 0.8);
+      g.fillStyle = "rgba(160,150,140,.5)"; g.fillRect(x, y, 1, 1);
+    }
+  }),
+  /** 花纹钢板（巨人城）：四块大钢板拼起来（深浅不一）、斜着的防滑花纹、接缝和四角的铆钉，零星的锈和擦痕 */
+  plate: () => canvasTex("plate", 256, (g, s, r) => {
+    g.fillStyle = "#70737a"; g.fillRect(0, 0, s, s);
+    const p = s / 2;
+    for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) {
+      const x = i * p, y = j * p;
+      g.fillStyle = (i + j) % 2 ? "rgba(255,255,255,.05)" : "rgba(0,0,0,.07)"; g.fillRect(x, y, p, p);
+      for (let row = 0, yy = y + 7; yy < y + p - 5; yy += 9, row++) {
+        for (let col = 0, xx = x + 7 + (row % 2) * 5; xx < x + p - 6; xx += 10, col++) {
+          g.save(); g.translate(xx, yy); g.rotate((row + col) % 2 ? 0.7 : -0.7);
+          g.fillStyle = "rgba(214,218,226,.2)"; g.fillRect(-3, -1, 6, 2);
+          g.fillStyle = "rgba(0,0,0,.2)"; g.fillRect(-3, 1, 6, 1);
+          g.restore();
+        }
+      }
+      g.fillStyle = "#a6a9b0";   // 四角的铆钉
+      [[6, 6], [p - 6, 6], [6, p - 6], [p - 6, p - 6]].forEach(([dx, dy]) => { g.beginPath(); g.arc(x + dx, y + dy, 2.5, 0, 7); g.fill(); });
+    }
+    g.strokeStyle = "rgba(0,0,0,.6)"; g.lineWidth = 3;    // 接缝 + 亮边
+    g.strokeRect(1.5, 1.5, s - 3, s - 3); g.beginPath(); g.moveTo(p, 0); g.lineTo(p, s); g.moveTo(0, p); g.lineTo(s, p); g.stroke();
+    g.strokeStyle = "rgba(255,255,255,.1)"; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(p + 2.5, 0); g.lineTo(p + 2.5, s); g.moveTo(0, p + 2.5); g.lineTo(s, p + 2.5); g.stroke();
+    for (let k = 0; k < 7; k++) {              // 锈：沿接缝的几团
+      const onX = r() < 0.5, x = onX ? r() * s : p + (r() - 0.5) * 8, y = onX ? p + (r() - 0.5) * 8 : r() * s;
+      g.fillStyle = `rgba(140,72,34,${0.12 + r() * 0.16})`; g.beginPath(); g.ellipse(x, y, 6 + r() * 14, 3 + r() * 6, r() * 3, 0, 7); g.fill();
+    }
+    g.strokeStyle = "rgba(230,232,236,.12)"; g.lineWidth = 1;   // 擦痕
+    for (let k = 0; k < 10; k++) { const x = r() * s, y = r() * s, a = r() * 3, l = 10 + r() * 30; g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l); g.stroke(); }
+    speckle(g, s, r, 900, "rgba(255,255,255,.06)", "rgba(0,0,0,.14)");
+  }),
+  /** 金属面板（天网设施）：干净的浅灰面板，每块左上亮一点；细接缝（发光的那层在 panelGlow，接缝的位置共用 PANEL_SEAMS）、几块检修板和指示灯 */
+  panel: () => canvasTex("panel", 256, (g, s, r) => {
+    g.fillStyle = "#a0a7b0"; g.fillRect(0, 0, s, s);
+    for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
+      const grd = g.createLinearGradient(i * s / 4, j * s / 4, (i + 1) * s / 4, (j + 1) * s / 4);
+      grd.addColorStop(0, "rgba(255,255,255,.07)"); grd.addColorStop(1, "rgba(0,0,0,.07)");
+      g.fillStyle = grd; g.fillRect(i * s / 4, j * s / 4, s / 4, s / 4);
+    }
+    speckle(g, s, r, 500, "rgba(255,255,255,.05)", "rgba(0,0,0,.08)");
+    g.strokeStyle = "rgba(36,42,52,.85)"; seams(g, s, 3);
+    for (let k = 0; k < 3; k++) {              // 检修板：小方块 + 四颗螺丝 + 一个指示灯
+      const x = 18 + r() * (s - 60), y = 18 + r() * (s - 60), w = 22 + r() * 14;
+      g.strokeStyle = "rgba(40,46,56,.55)"; g.lineWidth = 1.5; g.strokeRect(x, y, w, w * 0.7);
+      g.fillStyle = "rgba(40,46,56,.6)"; [[2, 2], [w - 4, 2], [2, w * 0.7 - 4], [w - 4, w * 0.7 - 4]].forEach(([dx, dy]) => g.fillRect(x + dx, y + dy, 2, 2));
+      g.fillStyle = "#3a8fb0"; g.fillRect(x + w / 2 - 2, y + w * 0.35 - 2, 4, 4);
+    }
+  }),
+  /** panel 的自发光贴图：黑底，接缝是白线（乘上地面主题的 glow 色），比 panel 上画的缝细一点，亮在缝的正中 */
+  panelGlow: () => canvasTex("panelGlow", 256, (g, s) => {
+    g.fillStyle = "#000"; g.fillRect(0, 0, s, s);
+    g.strokeStyle = "#fff"; seams(g, s, 1.6);
+  }),
+  /** 湿水泥（下水道）：发暗发绿的水泥、一圈圈水渍、青苔点点、板缝和几道裂缝 */
+  wet: () => canvasTex("wet", 256, (g, s, r) => {
+    g.fillStyle = "#4e544c"; g.fillRect(0, 0, s, s);
+    for (let i = 0; i < 16; i++) {   // 水渍：深色的大块，边缘一圈更深
+      g.fillStyle = `rgba(14,20,18,${0.08 + r() * 0.1})`; g.strokeStyle = "rgba(10,14,12,.18)"; g.lineWidth = 1.5;
+      g.beginPath(); g.ellipse(r() * s, r() * s, 18 + r() * 44, 12 + r() * 30, r() * 3, 0, 7); g.fill(); g.stroke();
+    }
+    speckle(g, s, r, 2200, "rgba(220,230,215,.08)", "rgba(0,0,0,.22)");
+    g.fillStyle = "rgba(84,116,62,.38)";   // 青苔
+    for (let i = 0; i < 240; i++) g.fillRect(r() * s, r() * s, 1 + r() * 2, 1 + r() * 2);
+    g.strokeStyle = "rgba(0,0,0,.5)"; g.lineWidth = 3;   // 板缝
+    g.strokeRect(1.5, 1.5, s - 3, s - 3); g.beginPath(); g.moveTo(0, s / 2); g.lineTo(s, s / 2); g.stroke();
+    g.strokeStyle = "rgba(0,0,0,.45)";
+    for (let k = 0; k < 4; k++) crack(g, r, r() * s, r() * s, 8 + Math.floor(r() * 6), 1.2, 1);
+  }),
+  /* ---- 各区域的默认地台：侧面 ---- */
+  /** 侧面：铆钢板（巨人城）——四块钢板、横竖接缝、一排排铆钉，锈水从铆钉往下流 */
+  steel: () => canvasTex("steel", 128, (g, s, r) => {
+    g.fillStyle = "#575c63"; g.fillRect(0, 0, s, s);
+    for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) { g.fillStyle = (i + j) % 2 ? "rgba(255,255,255,.05)" : "rgba(0,0,0,.08)"; g.fillRect(i * s / 2, j * s / 2, s / 2, s / 2); }
+    for (let k = 0; k < 6; k++) {
+      const x = r() * s, y0 = r() < 0.5 ? 6 : s / 2 + 6, h = 16 + r() * 36, grd = g.createLinearGradient(0, y0, 0, y0 + h);
+      grd.addColorStop(0, "rgba(140,70,30,.55)"); grd.addColorStop(1, "rgba(140,70,30,0)");
+      g.fillStyle = grd; g.fillRect(x, y0, 2 + r() * 4, h);
+    }
+    g.fillStyle = "rgba(0,0,0,.5)"; g.fillRect(0, s / 2 - 1, s, 2); g.fillRect(s / 2 - 1, 0, 2, s); g.fillRect(0, 0, s, 1);
+    g.fillStyle = "rgba(255,255,255,.12)"; g.fillRect(0, s / 2 + 1, s, 1);
+    [5, s / 2 - 5, s / 2 + 5, s - 5].forEach(y => { for (let x = 6; x < s; x += 12) { g.fillStyle = "rgba(0,0,0,.4)"; g.fillRect(x + 1, y + 1, 2, 2); g.fillStyle = "#9da2aa"; g.fillRect(x, y, 2, 2); } });
+    speckle(g, s, r, 300, "rgba(255,255,255,.07)", "rgba(0,0,0,.18)");
+  }),
+  /** 侧面：金属面板（天网设施）——竖着的接缝、两道发光的横槽（发光的那层在 panelSideGlow）、底下的通风百叶 */
+  panelSide: () => canvasTex("panelSide", 128, (g, s) => {
+    const grd = g.createLinearGradient(0, 0, 0, s); grd.addColorStop(0, "#8d949d"); grd.addColorStop(1, "#727982");
+    g.fillStyle = grd; g.fillRect(0, 0, s, s);
+    g.fillStyle = "rgba(30,36,44,.7)";
+    for (let x = 0; x < s; x += 32) g.fillRect(x, 0, 2, s);
+    [0.35, 0.85].forEach(k => g.fillRect(0, s * k - 2, s, 4));
+    g.fillStyle = "rgba(30,36,44,.45)";
+    for (let y = s * 0.52; y < s * 0.72; y += 5) for (let x = 6; x < s; x += 32) g.fillRect(x, y, 20, 2);
+  }),
+  panelSideGlow: () => canvasTex("panelSideGlow", 128, (g, s) => {
+    g.fillStyle = "#000"; g.fillRect(0, 0, s, s);
+    g.fillStyle = "#fff"; [0.35, 0.85].forEach(k => g.fillRect(0, s * k - 1, s, 2));
+  }),
   hazard: () => canvasTex("hazard", 64, (g, s) => {
     g.fillStyle = "#f2c230"; g.fillRect(0, 0, s, s);
     g.fillStyle = "#1a1511";
@@ -216,7 +421,54 @@ const TEX = {
   decalRipple: () => canvasTex("decal-ripple", 128, (g, s, r) => {
     g.strokeStyle = "rgba(120,80,30,.35)"; g.lineWidth = 2;
     for (let k = 0; k < 5; k++) { g.beginPath(); for (let x = 8; x <= s - 8; x += 6) g.lineTo(x, 30 + k * 16 + Math.sin(x * 0.1 + k) * 4); g.stroke(); }
-  }, { clamp: true })
+  }, { clamp: true }),
+  /** 沥青补丁（外城区）：一块颜色更深的不规则补丁，边上一圈灌缝 */
+  decalPatch: () => canvasTex("decal-patch", 128, (g, s, r) => {
+    g.beginPath();
+    for (let i = 0; i < 7; i++) { const a = (i / 7) * Math.PI * 2 + r() * 0.3, rad = s * (0.3 + r() * 0.1); g.lineTo(s / 2 + Math.cos(a) * rad * 1.15, s / 2 + Math.sin(a) * rad * 0.8); }
+    g.closePath();
+    g.fillStyle = "rgba(30,28,27,.7)"; g.fill();
+    g.strokeStyle = "rgba(8,7,6,.85)"; g.lineWidth = 3; g.stroke();
+    g.save(); g.clip(); speckle(g, s, r, 500, "rgba(210,204,194,.14)", "rgba(0,0,0,.2)"); g.restore();
+  }, { clamp: true }),
+  /** 矿渣（采矿场）；ember = 带余火的（第二采矿场，当自发光贴图时只有烧红的那点亮） */
+  decalSlag: () => canvasTex("decal-slag", 128, (g, s, r) => slagChunks(g, r, s, false), { clamp: true }),
+  decalEmber: () => canvasTex("decal-ember", 128, (g, s, r) => slagChunks(g, r, s, true), { clamp: true, smooth: true }),
+  /** 晶矿（第三采矿场）：几根从地里戳出来的晶体（紫 / 青）、亮边，周围一圈淡光；当自发光贴图用，发冷光 */
+  decalCrystal: () => canvasTex("decal-crystal", 128, (g, s, r) => {
+    const halo = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s * 0.45);
+    halo.addColorStop(0, "rgba(150,140,255,.22)"); halo.addColorStop(1, "rgba(150,140,255,0)");
+    g.fillStyle = halo; g.fillRect(0, 0, s, s);
+    for (let i = 0; i < 7; i++) {
+      const a = r() * 7, d = Math.sqrt(r()) * s * 0.24, len = 8 + r() * 16, w = 3 + r() * 4;
+      g.save(); g.translate(s / 2 + Math.cos(a) * d, s / 2 + Math.sin(a) * d); g.rotate(r() * Math.PI * 2);
+      g.beginPath(); g.moveTo(-w, 0); g.lineTo(0, -len); g.lineTo(w, 0); g.lineTo(0, len * 0.3); g.closePath();
+      g.fillStyle = r() < 0.5 ? "rgba(150,130,255,.92)" : "rgba(120,210,255,.92)"; g.fill();
+      g.strokeStyle = "rgba(236,240,255,.95)"; g.lineWidth = 1; g.stroke();
+      g.restore();
+    }
+  }, { clamp: true, smooth: true }),
+  /** 格栅（巨人城）：方形的铁格栅，栅条之间黑洞洞的，外面一圈框 */
+  decalGrate: () => canvasTex("decal-grate", 128, (g, s) => {
+    const m = s * 0.12, w = s - 2 * m;
+    g.fillStyle = "rgba(10,10,12,.92)"; g.fillRect(m, m, w, w);
+    g.fillStyle = "rgba(120,124,130,.95)"; for (let x = m; x <= s - m; x += 9) g.fillRect(x, m, 3, w);
+    g.fillStyle = "rgba(90,94,100,.95)"; g.fillRect(m, s / 2 - 1.5, w, 3);
+    g.strokeStyle = "rgba(150,154,160,.95)"; g.lineWidth = 4; g.strokeRect(m, m, w, w);
+    g.strokeStyle = "rgba(0,0,0,.6)"; g.lineWidth = 1; g.strokeRect(m + 3, m + 3, w - 6, w - 6);
+  }, { clamp: true }),
+  /** 积水（下水道）：一摊不规则的水，外面一圈湿痕，水面上一道亮的倒影；材质很光滑，灯和天光照上去有反光 */
+  decalPuddle: () => canvasTex("decal-puddle", 128, (g, s, r) => {
+    const blob = (k, col) => {
+      g.beginPath();
+      for (let i = 0; i < 12; i++) { const a = (i / 12) * Math.PI * 2, rr = s * k * (0.75 + r() * 0.3); g.lineTo(s / 2 + Math.cos(a) * rr * 1.2, s / 2 + Math.sin(a) * rr * 0.8); }
+      g.closePath(); g.fillStyle = col; g.fill();
+    };
+    blob(0.42, "rgba(20,26,24,.45)");
+    blob(0.34, "rgba(40,52,58,.9)");
+    g.strokeStyle = "rgba(170,190,200,.35)"; g.lineWidth = 1.5;
+    g.beginPath(); g.ellipse(s / 2 - 8, s / 2 - 6, s * 0.16, s * 0.05, -0.2, 0, 7); g.stroke();
+  }, { clamp: true, smooth: true })
 };
 const tex = (name) => TEX[name]();
 
@@ -243,7 +495,8 @@ function mesh(geo, material, x, y, z, cast = true, recv = true) {
 }
 
 /* ---------- 地台 ---------- */
-/** 顶面贴图；side 是侧面材质：砖（水泥地）、铁皮（酸液 / 电 / 能量这些铁板地）、岩层（高地、沙地、深渊、冰） */
+/** 有场地效果的地台（和不知道在哪个区域时的默认地台）：顶面贴图；side 是侧面材质：砖（水泥地）、铁皮（酸液 / 电 / 能量这些铁板地）、
+ *  岩层（高地、沙地、深渊、冰）。知道区域时，默认地台换成 hd2d-layout.js 的 GROUNDS 那一套（zone.ground） */
 const TOP_STYLE = {
   concrete: { tex: "concrete", tint: 0xffffff, side: "brick" },
   acid: { tex: "metal", tint: 0xd8e0d0, side: "sheet" },
@@ -259,20 +512,41 @@ const TOP_STYLE = {
   heal: { tex: "concrete", tint: 0xd8f0d0, side: "brick" }
 };
 
-function zoneBody(z) {
+/** 这块地台用哪套地面主题（布局只给没有场地效果的地台 zone.ground；认不得的区域 / 有场地效果的是 null） */
+const lookOf = (z) => (z.ground && L.GROUNDS[z.ground]) || null;
+/** 地面主题里会发光的那层：贴图名 + "Glow" 有画的（天网设施的接缝）就当自发光贴图，颜色 = 主题的 glow */
+function glowMap(look, name, repeat) {
+  if (!look.glow || !TEX[name + "Glow"]) return {};
+  const e = tex(name + "Glow");
+  e.repeat.set(repeat, repeat);
+  return { emissiveMap: e, emissive: look.glow, emissiveIntensity: WORLD.glow };
+}
+
+function zoneBody(z, look) {
   const hw = z.w / 2, hd = z.d / 2;
   const s = new THREE.Shape();
   s.moveTo(-hw, -hd); s.lineTo(hw, -hd); s.lineTo(hw, hd); s.lineTo(-hw, hd); s.closePath();
   if (z.hole > 0) { const p = new THREE.Path(); p.absarc(0, 0, z.hole, 0, Math.PI * 2, true); s.holes.push(p); }
   const geo = new THREE.ExtrudeGeometry(s, { depth: z.h, bevelEnabled: false, curveSegments: 28 });
   geo.rotateX(-Math.PI / 2);   // 挤出方向 +z → +y，顶面正好在 y = h
-  const style = TOP_STYLE[z.kind] || TOP_STYLE.concrete;
+  const style = look || TOP_STYLE[z.kind] || TOP_STYLE.concrete;
   const t = tex(style.tex);
   t.repeat.set(WORLD.texRepeat, WORLD.texRepeat);
-  const top = mat("top-" + style.tex, style.tint, { map: t });
   const st = tex(style.side);
   st.repeat.set(WORLD.sideRepeat, WORLD.sideRepeat);
-  const side = mat("side-" + style.side, style.sideTint || 0xffffff, { map: st, roughness: style.side === "sheet" ? 0.55 : 0.95, metalness: style.side === "sheet" ? 0.35 : 0 });
+  const sd = SIDE[style.side] || { rough: 0.95, metal: 0 };
+  let top, side;
+  if (look) {
+    // 地面主题：材质按主题缓存（同一张贴图不同主题的颜色 / 发光不一样）
+    const surf = { map: t };
+    if (look.rough != null) surf.roughness = look.rough;
+    if (look.metal != null) surf.metalness = look.metal;
+    top = mat("ground-top-" + z.ground, look.tint, Object.assign(surf, glowMap(look, style.tex, WORLD.texRepeat)));
+    side = mat("ground-side-" + z.ground, look.sideTint || 0xffffff, Object.assign({ map: st, roughness: sd.rough, metalness: sd.metal }, glowMap(look, style.side, WORLD.sideRepeat)));
+  } else {
+    top = mat("top-" + style.tex, style.tint, { map: t });
+    side = mat("side-" + style.side, style.sideTint || 0xffffff, { map: st, roughness: sd.rough, metalness: sd.metal });
+  }
   const m = new THREE.Mesh(geo, [top, side]);
   m.castShadow = true; m.receiveShadow = true;
   return m;
@@ -290,9 +564,9 @@ function addTrim(g, z, theme) {
   g.add(mesh(new THREE.BoxGeometry(T.w, T.h, z.d), m, hw - T.w / 2, y, 0, false, true));
 }
 
-/** 地面细节：油渍 / 裂缝 / 碎石贴花，加一把小石子。避开黑洞，酸液池上不铺 */
-function addGroundDetail(g, z, r) {
-  const sandy = z.kind === "quicksand" || z.kind === "coral";
+/** 地面细节：贴花（油渍 / 裂缝 / 碎石……，地面主题各有各的），加一把小石子。避开黑洞，酸液池上不铺 */
+function addGroundDetail(g, z, r, look) {
+  const sandy = look ? look.decor === "sand" : z.kind === "quicksand" || z.kind === "coral";
   const pool = z.kind === "acid" ? { hw: (z.w - 1.6) / 2, hd: (z.d - 1.6) / 2 } : null;
   const ok = (x, zz, rad) => {
     if (Math.abs(x) > z.w / 2 - rad - 0.15 || Math.abs(zz) > z.d / 2 - rad - 0.15) return false;
@@ -300,30 +574,40 @@ function addGroundDetail(g, z, r) {
     if (pool && Math.abs(x) < pool.hw + rad && Math.abs(zz) < pool.hd + rad) return false;
     return true;
   };
-  const place = (kind, n, size) => {
-    const tx = tex(kind);
-    const m = new THREE.MeshStandardMaterial({ map: tx, transparent: true, depthWrite: false, roughness: kind === "decalOil" ? 0.28 : 0.95, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+  let layer = 0;   // 每块贴花抬高一点点，叠在一起时不打架
+  const place = (kind, n) => {
+    const P = DECALS[kind];
+    if (!P || !(n > 0)) return;
+    const tx = tex(P.tex);
+    const opt = { map: tx, transparent: true, depthWrite: false, roughness: P.rough != null ? P.rough : 0.95, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 };
+    if (P.metal) opt.metalness = P.metal;
+    if (P.glow && look && look.glow) Object.assign(opt, { emissiveMap: tx, emissive: look.glow, emissiveIntensity: WORLD.glow * P.glow });   // 余火 / 晶矿自己发光
+    const m = new THREE.MeshStandardMaterial(opt);
+    const size = P.size;
     for (let i = 0, tries = 0; i < n && tries < n * 8; tries++) {
       const s = size[0] + r() * (size[1] - size[0]), x = (r() * 2 - 1) * z.w / 2, zz = (r() * 2 - 1) * z.d / 2;
       if (!ok(x, zz, s / 2)) continue;
       const d = new THREE.Mesh(new THREE.PlaneGeometry(s, s), m);
-      d.rotation.set(-Math.PI / 2, 0, r() * Math.PI * 2);
-      d.position.set(x, z.h + 0.006 + i * 0.001, zz); d.receiveShadow = true; d.renderOrder = 1;
+      d.rotation.set(-Math.PI / 2, 0, P.square ? Math.floor(r() * 4) * Math.PI / 2 : r() * Math.PI * 2);
+      d.position.set(x, z.h + 0.006 + (layer++) * 0.001, zz); d.receiveShadow = true; d.renderOrder = 1;
       g.add(d); i++;
     }
   };
-  const D = WORLD.decals;
-  if (sandy) place("decalRipple", D.oil + D.crack, [1.2, 2.2]);
+  if (look) Object.keys(look.decals || {}).forEach(k => place(k, look.decals[k]));
   else {
-    place("decalOil", D.oil, [0.8, 1.6]);
-    place("decalCrack", D.crack, [1.0, 1.9]);
+    const D = L.GROUNDS[L.GROUND_DEFAULT].decals;   // 有场地效果的地台、兜底：以前的油渍 / 裂缝 / 碎石（沙地是沙纹）
+    if (sandy) place("ripple", D.oil + D.crack);
+    else { place("oil", D.oil); place("crack", D.crack); }
+    place("gravel", D.gravel);
   }
-  place("decalGravel", D.gravel, [0.7, 1.3]);
   // 小石子：一个 InstancedMesh
-  const stones = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(0.06, 0), mat(sandy ? "pebble-s" : "pebble", sandy ? 0xb8996a : 0x8a8378), WORLD.pebbles);
+  const count = look && look.pebbles != null ? look.pebbles : WORLD.pebbles;
+  if (!count) return;
+  const pc = look && look.pebble != null ? look.pebble : sandy ? 0xb8996a : 0x8a8378;
+  const stones = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(0.06, 0), mat(sandy ? "pebble-s" : "pebble", pc), count);
   const o = new THREE.Object3D();
   let n = 0;
-  for (let tries = 0; n < WORLD.pebbles && tries < WORLD.pebbles * 6; tries++) {
+  for (let tries = 0; n < count && tries < count * 6; tries++) {
     const x = (r() * 2 - 1) * (z.w / 2 - 0.25), zz = (r() * 2 - 1) * (z.d / 2 - 0.25);
     if (!ok(x, zz, 0.08)) continue;
     const k = 0.6 + r() * 1.3;
@@ -334,19 +618,20 @@ function addGroundDetail(g, z, r) {
   g.add(stones);
 }
 
-/** 一块地台（含场地效果和装饰）。位置已经放到 (cx, 0, cz) */
+/** 一块地台（含场地效果和装饰）。位置已经放到 (cx, 0, cz)。zone.ground 有值时（没有场地效果、知道在哪个区域）照那套地面主题画 */
 export function buildZone(z, ctx) {
   const g = new THREE.Group();
   g.position.set(z.cx, 0, z.cz);
-  const r = rng(z.id * 97 + 13);
-  g.add(zoneBody(z));
+  const r = rng(z.id * 97 + 13), look = lookOf(z);
+  g.add(zoneBody(z, look));
   g.add(mesh(new THREE.BoxGeometry(z.w + 0.4, 0.3, z.d + 0.4), mat("skirt", 0x2a2622), 0, -0.15, 0, false, true));   // 底座
   addTrim(g, z, ctx.theme);
-  if (z.highland) {                                                    // 高地：前沿两级台阶
-    g.add(mesh(new THREE.BoxGeometry(z.w * 0.5, z.h * 0.34, 0.9), mat("step", 0x5d574f, { map: tex("concrete") }), 0, z.h * 0.17, z.d / 2 + 0.45));
-    g.add(mesh(new THREE.BoxGeometry(z.w * 0.4, z.h * 0.68, 0.6), mat("step", 0x5d574f, { map: tex("concrete") }), 0, z.h * 0.34, z.d / 2 + 0.2));
+  if (z.highland) {                                                    // 高地：前沿两级台阶（地面主题的台阶用同一张顶面贴图，颜色暗一点）
+    const sm = look ? mat("ground-step-" + z.ground, new THREE.Color(look.tint).multiplyScalar(0.8).getHex(), { map: tex(look.tex) }) : mat("step", 0x5d574f, { map: tex("concrete") });
+    g.add(mesh(new THREE.BoxGeometry(z.w * 0.5, z.h * 0.34, 0.9), sm, 0, z.h * 0.17, z.d / 2 + 0.45));
+    g.add(mesh(new THREE.BoxGeometry(z.w * 0.4, z.h * 0.68, 0.6), sm, 0, z.h * 0.34, z.d / 2 + 0.2));
   }
-  addGroundDetail(g, z, r);
+  addGroundDetail(g, z, r, look);
   const fx = new Set(z.effects);
   if (fx.has("abyss")) addAbyss(g, z, ctx);
   if (fx.has("acid")) addAcid(g, z, ctx, r);
@@ -356,7 +641,7 @@ export function buildZone(z, ctx) {
   if (fx.has("ice")) addIce(g, z, r);
   if (fx.has("electric")) addElectric(g, z, ctx);
   ["energy", "harmonic", "heal"].forEach(k => { if (fx.has(k)) addRing(g, z, k, ctx); });
-  decorate(g, z, r, ctx);
+  decorate(g, z, r, look);
   return g;
 }
 
@@ -525,15 +810,16 @@ function fxLight(g, ctx, color, dist, y, x, zz) {
   l.position.set(x, y, zz); g.add(l);
 }
 
-/* ---------- 装饰：废铁、管道、碎石、路灯。只放在地台外缘一圈（pad 以外），不挡铭牌 ---------- */
-function decorate(g, z, r, ctx) {
+/* ---------- 装饰：废铁、管道、碎石、晶簇。只放在地台外缘一圈（pad 以外），不挡铭牌。
+ * 地台上不再放路灯：灯立在战场外缘的地上（buildLamps），整场 0–2 盏 ---------- */
+function decorate(g, z, r, look) {
   const hw = z.w / 2, hd = z.d / 2, y = z.h;
-  const sandy = z.kind === "quicksand" || z.kind === "coral";
+  const sandy = look ? look.decor === "sand" : z.kind === "quicksand" || z.kind === "coral";
+  const clean = !!look && look.decor === "clean";
   const C = WORLD.colors;
-  const lampAt = (sx, sz, color) => addLamp(g, z, sx * (hw - 0.42), sz * (hd - 0.42), color, ctx);
 
-  if (!sandy) lampAt(r() < 0.5 ? -1 : 1, -1, z.kind === "acid" ? 0xb8ff80 : z.kind === "abyss" ? 0xff6a5a : 0xffd9a0);
-  if (!sandy && r() < 0.35) lampAt(r() < 0.5 ? -1 : 1, 1, 0xffd9a0);
+  // 以前每块地台在这里摆 1–2 盏路灯，照样抽掉当时用掉的随机数：有场地效果的地台上其余装饰还在原来的位置
+  if (!sandy) { r(); if (r() < 0.35) r(); }
 
   // 管道：沿后沿一根，两头弯下去
   if (!sandy && z.kind !== "abyss" ? true : r() < 0.4) {
@@ -544,8 +830,8 @@ function decorate(g, z, r, ctx) {
     [-0.3, 0.3].forEach(k => g.add(mesh(new THREE.TorusGeometry(0.16, 0.035, 5, 10), mat("band", C.rust), k * len, y + 0.42, -hd + 0.4)));
   }
 
-  // 废铁堆：贴着左右边
-  const heaps = sandy ? 0 : 2;
+  // 废铁堆：贴着左右边（沙地、干净的设施里不放）
+  const heaps = sandy || clean ? 0 : 2;
   for (let i = 0; i < heaps; i++) {
     const sx = i ? 1 : -1, zz = (r() - 0.2) * (hd - 1);
     const n = 3 + Math.floor(r() * 3);
@@ -559,35 +845,87 @@ function decorate(g, z, r, ctx) {
     for (let i = 0; i < 2; i++) g.add(mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.5, 8), mat("barrel", 0x5a7a2a, { roughness: 0.6 }), (i ? 1 : -1) * (hw - 0.5), y + 0.25, hd - 0.45 - i * 0.5));
   }
 
-  // 碎石 / 沙地的岩石
-  const rocks = sandy ? 7 : 6;
+  // 碎石 / 沙地的岩石（干净的设施里不放；颜色跟着地面主题）
+  const rocks = clean ? 0 : sandy ? 7 : 6;
+  const rockColor = look && look.rock != null ? look.rock : sandy ? C.tan : C.concrete;
   for (let i = 0; i < rocks; i++) {
     const edge = r();
     const x = edge < 0.5 ? (r() < 0.5 ? -1 : 1) * (hw - 0.3 - r() * 0.3) : (r() * 2 - 1) * (hw - 0.6);
     const zz = edge < 0.5 ? (r() * 2 - 1) * (hd - 0.6) : (r() < 0.5 ? -1 : 1) * (hd - 0.3 - r() * 0.3);
     const s = (sandy ? 0.25 : 0.14) + r() * (sandy ? 0.3 : 0.16);
-    const rock = mesh(new THREE.DodecahedronGeometry(s, 0), mat(sandy ? "rock-s" : "rock", sandy ? C.tan : C.concrete), x, y + s * 0.6, zz);
+    const rock = mesh(new THREE.DodecahedronGeometry(s, 0), mat(sandy ? "rock-s" : "rock", rockColor), x, y + s * 0.6, zz);
     rock.rotation.set(r() * 3, r() * 3, r() * 3); rock.scale.y = 0.7; g.add(rock);
+  }
+  if (look && look.crystals) addCrystals(g, z, r, look);
+}
+
+/** 晶簇（第三采矿场）：地台左右边上几丛从地里戳出来的小晶体，自己发一点冷光（泛光会抓到） */
+function addCrystals(g, z, r, look) {
+  const m = glow(look.glow, WORLD.glow, { color: 0x2a2440, transparent: true, opacity: 0.92 });
+  const geo = new THREE.OctahedronGeometry(0.12, 0);
+  for (let i = 0; i < look.crystals; i++) {
+    const x = (i % 2 ? 1 : -1) * (z.w / 2 - 0.45), zz = (r() - 0.5) * (z.d - 1.6);
+    for (let k = 0; k < 3; k++) {
+      const h = 0.25 + r() * 0.35;
+      const c = mesh(geo, m, x + (r() - 0.5) * 0.3, z.h + h * 0.45, zz + (r() - 0.5) * 0.3, false, false);
+      c.scale.set(1, h / 0.12, 1); c.rotation.set((r() - 0.5) * 0.6, r() * 3, (r() - 0.5) * 0.6);
+      g.add(c);
+    }
   }
 }
 
-function addLamp(g, z, x, zz, color, ctx) {
-  const y = z.h;
+/* ---------- 灯：立在战场外缘的地上（不在地台上），整场 0–2 盏。几盏、放哪、什么灯由 hd2d-layout.js 定（GROUNDS 的 lamps、CONFIG.lamps） ---------- */
+/** list = layout.lamps：[{ x, z, dir, kind: "street" 路灯 / "hanging" 矿灯（吊灯）, color, seed }]；dir = 灯臂往哪边伸（朝战场里面） */
+export function buildLamps(list, ctx) {
+  const g = new THREE.Group();
+  (list || []).forEach(l => (l.kind === "hanging" ? hangingLamp : streetLamp)(g, l, ctx));
+  return g;
+}
+/** 路灯：细高的灯杆、底座，顶上一根横臂朝战场里面伸，灯头朝下 */
+function streetLamp(g, l, ctx) {
+  const y0 = L.CONFIG.groundY, H = L.CONFIG.lamps.h.street, s = l.dir || 1;
   const pm = mat("lamp-pole", 0x3b3a38, { roughness: 0.5, metalness: 0.5 });
-  g.add(mesh(new THREE.CylinderGeometry(0.06, 0.09, 2.5, 6), pm, x, y + 1.25, zz));
-  g.add(mesh(new THREE.BoxGeometry(0.5, 0.06, 0.06), pm, x + (x > 0 ? -0.2 : 0.2), y + 2.5, zz));
-  const hx = x + (x > 0 ? -0.42 : 0.42);
-  g.add(mesh(new THREE.BoxGeometry(0.28, 0.1, 0.2), pm, hx, y + 2.46, zz));
+  g.add(mesh(new THREE.CylinderGeometry(0.07, 0.11, H, 6), pm, l.x, y0 + H / 2, l.z));
+  g.add(mesh(new THREE.CylinderGeometry(0.17, 0.21, 0.18, 6), pm, l.x, y0 + 0.09, l.z));
+  g.add(mesh(new THREE.BoxGeometry(0.62, 0.06, 0.06), pm, l.x + s * 0.28, y0 + H, l.z));
+  const hx = l.x + s * 0.54;
+  g.add(mesh(new THREE.BoxGeometry(0.3, 0.1, 0.22), pm, hx, y0 + H - 0.04, l.z));
+  addBulb(g, l, ctx, hx, y0 + H - 0.12, WORLD.lamp.street);
+}
+/** 矿灯 / 吊灯：矮一点的木架子（立柱 + 横梁 + 斜撑），横梁头上用链子吊一盏带铁笼的灯 */
+function hangingLamp(g, l, ctx) {
+  const y0 = L.CONFIG.groundY, H = L.CONFIG.lamps.h.hanging, s = l.dir || 1;
+  const wood = mat("lamp-post", 0x4a3a2a, { roughness: 0.9 }), iron = mat("lamp-pole", 0x3b3a38, { roughness: 0.5, metalness: 0.5 });
+  g.add(mesh(new THREE.BoxGeometry(0.13, H + 0.3, 0.13), wood, l.x, y0 + (H + 0.3) / 2, l.z));
+  g.add(mesh(new THREE.BoxGeometry(0.72, 0.1, 0.1), wood, l.x + s * 0.3, y0 + H + 0.22, l.z));
+  const brace = mesh(new THREE.BoxGeometry(0.06, 0.42, 0.06), wood, l.x + s * 0.14, y0 + H + 0.05, l.z);
+  brace.rotation.z = -s * 0.8; g.add(brace);
+  const hx = l.x + s * 0.56, cy = y0 + H - 0.2;
+  g.add(mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.34, 4), iron, hx, y0 + H + 0.03, l.z, false, false));   // 链子
+  g.add(mesh(new THREE.CylinderGeometry(0.06, 0.13, 0.06, 8), iron, hx, cy + 0.17, l.z, false, false));          // 灯罩
+  [0.13, -0.13].forEach(dy => {                                                                                  // 铁笼：上下两个圈 + 四根竖条
+    const ring = mesh(new THREE.TorusGeometry(0.1, 0.012, 4, 10), iron, hx, cy + dy, l.z, false, false);
+    ring.rotation.x = Math.PI / 2; g.add(ring);
+  });
+  for (let k = 0; k < 4; k++) {
+    const a = (k / 4) * Math.PI * 2;
+    g.add(mesh(new THREE.BoxGeometry(0.015, 0.26, 0.015), iron, hx + Math.cos(a) * 0.1, cy, l.z + Math.sin(a) * 0.1, false, false));
+  }
+  addBulb(g, l, ctx, hx, cy, WORLD.lamp.hanging);
+}
+/** 灯泡（自己发光，泛光会抓到）+ 点光源；放进 ctx.lamps，场景每帧管亮度和偶尔的闪烁 */
+function addBulb(g, l, ctx, x, y, P) {
+  const color = l.color != null ? l.color : 0xffd9a0;
   const bulbColor = new THREE.Color(color).multiplyScalar(2.4);
-  const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 6), new THREE.MeshBasicMaterial({ color: bulbColor.clone(), toneMapped: false }));
-  bulb.position.set(hx, y + 2.38, zz); g.add(bulb);
+  const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 6), new THREE.MeshBasicMaterial({ color: bulbColor.clone(), toneMapped: false }));
+  bulb.position.set(x, y, l.z); g.add(bulb);
   // 闪烁的节奏每盏灯不一样（第一次闪在 1–9 秒之后）
-  const seed = ctx.lamps.length * 1.7 + z.id;
-  const lamp = { light: null, bulb, bulbColor, base: 0, wait: 1 + ((seed * 7.31) % 8), flick: 0, seed };
+  const seed = ctx.lamps.length * 1.7 + (l.seed || 0) * 3.1 + 0.5;
+  const lamp = { kind: l.kind, light: null, bulb, bulbColor, base: 0, wait: 1 + ((seed * 7.31) % 8), flick: 0, seed };
   if (ctx.lamps.length < WORLD.maxLamps) {
-    const l = new THREE.PointLight(color, 10, 9, 2);
-    l.position.set(hx, y + 2.2, zz); g.add(l);
-    lamp.light = l; lamp.base = 10;
+    const p = new THREE.PointLight(color, P.power, P.dist, 2);
+    p.position.set(x, y - 0.15, l.z); g.add(p);
+    lamp.light = p; lamp.base = P.power;
   }
   ctx.lamps.push(lamp);
 }
