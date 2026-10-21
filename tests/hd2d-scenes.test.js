@@ -23,7 +23,8 @@ const packs = () => { mine(); return art(); };
 /** 做好了的场景（区域、场景 id），和每个场景远景里一定有的东西（userData.art） */
 const DONE = [
   { region: "第一采矿场", scene: "rim", key: "mine1_rim", must: ["pitWall", "rimLip", "rail", "liftShaft", "lift", "pitLight", "farRim"] },
-  { region: "第一采矿场", scene: "mid", key: "mine1_mid", must: ["pitWall", "berm", "cone", "rockWall", "foreRock", "liftShaft", "lift", "pitLight"] }
+  { region: "第一采矿场", scene: "mid", key: "mine1_mid", must: ["pitWall", "berm", "cone", "rockWall", "foreRock", "liftShaft", "lift", "pitLight"] },
+  { region: "第一采矿场", scene: "floor", key: "mine1_floor", must: ["pitFloorWall", "pipes", "vent", "lantern", "floorRock", "foreRock"] }
 ];
 const PARTY = ["kolt", "helu", "ruby", "yuito"];
 const DESKTOP = { width: 1440, height: 900, top: 46, bottom: 160 };   // 桌面 1440×900：顶栏 + 展开的技能栏
@@ -424,6 +425,22 @@ test("光照 / 调色（#242）：每个场景有自己的一套（hd2d-scene-ar
       assert.ok(b.lamp >= a.lamp, `${tag}：矿内的灯不比矿外弱`);
     });
   });
+  // 矿底：白天黑夜几乎没区别（三个光影主题出来的是同一套），比矿内还暗，全靠提灯（灯的倍数最大）；提灯克制：战场上最多两盏，坑壁上最多两盏
+  ["第一采矿场", "第二采矿场"].forEach(r => {
+    const fl = done(r, "floor"), mid = done(r, "mid");
+    if (!fl) return;
+    const lit = ["day", "dusk", "night"].map(name => A.lighting(themes, name, fl.key));
+    assert.ok(lit.every(l => l.fixed && l.name === lit[0].name), r + "：矿底不分白天黑夜");
+    lit.forEach(l => assert.deepEqual(l.T, lit[0].T, r + "：矿底的光照不随时间变"));
+    if (mid) ["day", "dusk", "night"].forEach(name => {
+      const m = A.lighting(themes, name, mid.key).T, f = lit[0].T;
+      ["hemi", "sunI"].forEach(k => assert.ok(f[k] < m[k], `${r} ${name}：矿底的 ${k} ${f[k]} 不比矿内 ${m[k]} 暗`));
+      assert.ok(f.lamp >= m.lamp, `${r} ${name}：矿底的灯不比矿内弱`);
+    });
+    ["day", "dusk", "night"].forEach(name => assert.ok(L.lampPlan(fl.key, name).count <= 2, r + "：战场上的提灯最多两盏"));
+    const F = mine().FLOOR[A.of(fl.key).art.backdrop.floor];
+    assert.ok(F.lanterns.n <= 2, r + "：坑壁上的提灯最多两盏");
+  });
   // 改的是一份拷贝，光影主题本身不变
   const before = JSON.stringify(themes);
   DONE.forEach(d => A.lighting(themes, "night", d.key));
@@ -482,7 +499,18 @@ test("环境动画（#242）：每个场景配置里列的环境动画都在（�
         assert.ok(bt.n >= 30, `${d.key}：灯 3 分钟只闪了 ${bt.n} 下`);
         bt.gaps.forEach(gap => assert.ok(gap >= cfg.every[0] - 0.05 && gap <= cfg.every[1] + 0.05, `${d.key}：灯隔了 ${gap.toFixed(2)} 秒才闪，不在配置的 ${cfg.every} 里`));
       });
-      assert.ok(off > 0, d.key + "：灯真的暗过");
+      if (blinks.length) assert.ok(off > 0, d.key + "：灯真的暗过");
+      // 一阵一阵的（矿底管道喷气）：3 分钟喷了好多阵，间隔、每阵多久按配置；喷的时候看得到气，减少动态效果时一团都看不到
+      amb.filter(o => o.userData.ambient.puffs).forEach(o => {
+        const a = o.userData.ambient, cfg = M.AMBIENT[a.kind];
+        assert.ok(a.beat.n >= 15, `${d.key}：${a.kind} 3 分钟只来了 ${a.beat.n} 阵`);
+        a.beat.gaps.forEach(gap => assert.ok(gap >= cfg.every[0] - 0.05 && gap <= cfg.every[1] + 0.05, `${d.key}：${a.kind} 隔了 ${gap.toFixed(2)} 秒，不在配置的 ${cfg.every} 里`));
+        let seen = 0;
+        for (let f = 0; f < 30 * 20; f++) { bd.update(200 + f / 30, 1 / 30); seen += a.puffs.filter(p => p.visible).length; }
+        assert.ok(seen > 0, `${d.key}：${a.kind} 喷的时候看得到`);
+        run(bd, 10, true, 300);
+        assert.equal(a.puffs.filter(p => p.visible).length, 0, `${d.key}：减少动态效果时 ${a.kind} 不喷`);
+      });
       bd.dispose();
     }
   } finally { P.restore(); }

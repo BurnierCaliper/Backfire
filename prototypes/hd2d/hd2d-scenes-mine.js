@@ -24,9 +24,9 @@
 
   /* ---------- 配置 ---------- */
   /** 各采矿场的色调：rock 坑壁 / 石头的几层颜色（一级级台阶轮着用）、wall 坑里近处的岩壁 / 大石头（暗一点）、dark 坑底的黑（带一点雾的颜色）、
-   *  metal 钢架 / 栏杆、lamp 工作灯、cone 路锥 */
+   *  metal 钢架 / 栏杆 / 管道、lamp 工作灯 / 提灯、cone 路锥、steam 管道喷的气 */
   const PALETTE = {
-    mine1: { rock: [0xc39363, 0xa9784c, 0xd2a571, 0x9b6c45, 0xb88654], wall: [0x6e5843, 0x5c4836, 0x7a634c, 0x524032], dark: 0x0d0b0a, metal: 0x5d4636, lamp: 0xffc46e, cone: 0xe8742a }
+    mine1: { rock: [0xc39363, 0xa9784c, 0xd2a571, 0x9b6c45, 0xb88654], wall: [0x6e5843, 0x5c4836, 0x7a634c, 0x524032], dark: 0x0d0b0a, metal: 0x5d4636, lamp: 0xffc46e, cone: 0xe8742a, steam: 0x9a9088 }
   };
   /** 大矿坑（矿外 rim、矿内 mid 共用一种对面坑壁）：一级级台阶往下（平面上像半个碗：正中最远，往画面两边弯过来），越往下越黑，到底漆黑一片
    *   rim       坑边（矿内是运输道的边）在灯后面再往后多远（地台外面那片地铺到这里为止）
@@ -61,12 +61,29 @@
    *  横着在战场左、右两边的 span 那一截（× 战场半宽，中间空出来），镜头前面框住画面的两个下角；矮，挡不到最前排的脚下 */
   const BERM = { size: [0.28, 0.5], spacing: [0.55, 0.9], cones: 5 };
   const FORE = { mid: { n: 4, size: [0.5, 0.9], span: [0.45, 0.95], front: [0.7, 2.6], squash: 0.62 } };
+  /** 矿底（坑底的岩石、金属管道、喷气、提灯）：
+   *   wall      战场后面的坑壁（低多边形崖面）：在灯后面再往后 z，往左右铺 reach，往下 below、伸出画面上沿 above；两头往前弯一点（bend，围起来，不过灯）
+   *   pipes     坑壁脚下两道横管（离地 y、粗细 r、离坑壁 out、横着比战场宽出 span）、几根竖管顺着坑壁往上（risers）、法兰隔多远（flange）、几个阀门（valves）
+   *   vents     横管上几个排气口（时不时喷气，频率在 AMBIENT.steam）
+   *   lanterns  坑壁上挂几盏提灯（克制：加上战场的两盏矿灯一共四盏）：点光源多亮、照多远，光晕多大；坑壁上提灯附近亮一圈（pool：半径、亮多少）
+   *   rocks     坑壁脚下几块大石头、多大 */
+  const FLOOR = {
+    floor: {
+      wall: { z: 3.4, reach: 14, below: 1, above: 3, cell: 0.8, bump: 0.9, thick: 1.4, bend: 2.4 },
+      pipes: { y: [0.42, 1.02], r: [0.2, 0.11], out: 0.75, span: 6, risers: 4, flange: 2.6, valves: 3 },
+      vents: 4, lanterns: { n: 2, y: 1.9, power: 5, dist: 6.5, halo: 1.5, pool: [2.6, 0.55] }, rocks: { n: 9, size: [0.35, 0.85] }
+    }
+  };
+  /** 会发光的东西有多亮（自发光 > 1 才会被泛光抓到）：rock 地台上 / 坑里带发光裂纹的石头 */
+  const GLOW = { rock: 1.6 };
   /** 环境动画的频率（秒）。减少动态效果时都停住：电梯停在原地，灯不闪
    *   lift    运载电梯：每次停多久、走多慢（每秒走全程的几成：全程要二三十秒）、停在哪几处（0 = 最上面，1 = 这边坑沿挡住的地方再往下，看不见了）
    *   blink   坑壁上的灯：隔多久暗一下、每次暗多久 */
   const AMBIENT = {
     lift: { wait: [3, 8], speed: [0.03, 0.055], stops: [0, 0.3, 0.62, 1] },
-    blink: { every: [1.2, 4.5], dur: [0.08, 0.3] }
+    blink: { every: [1.2, 4.5], dur: [0.08, 0.3] },
+    /* steam   矿底管道的排气口：隔多久喷一阵、每阵多久；一阵冒几团气、往上飘多高、一团从多大长到多大、多不透明（减少动态效果时不喷） */
+    steam: { every: [2.5, 7], dur: [1.4, 2.4], puffs: 6, rise: 1.5, size: [0.25, 1.1], opacity: 0.5 }
   };
   /** 每个场景（键 = 地面主题）：
    *   palette / depth（rim 矿外、mid 矿内）/ pit（PIT 的哪一套）
@@ -95,6 +112,21 @@
           set: { dofFar: 0.011 }, grade: { vignette: 0.48 }
         }
       }
+    },
+    mine1_floor: {
+      palette: "mine1", depth: "floor",
+      decor: { band: 3, ledge: 2, size: [0.12, 0.2], tone: "wall", pipes: 0.45 },
+      backdrop: { floor: "floor", fore: "mid" },
+      ambient: ["steam"],
+      // 矿底：白天黑夜几乎没区别（fixed：都按傍晚那一套画，再压得很暗），全靠提灯——灯 × 3，环境光、主光都压到很低，雾和天是坑底的黑
+      light: {
+        fixed: "dusk",
+        all: {
+          scale: { hemi: 0.36, sunI: 0.15, rimI: 0.45, exposure: 0.95, lamp: 3.6 },
+          tint: { fog: [0x120d0a, 0.85], sky: [0x100b08, 0.9], hemiSky: [0x5a4c40, 0.55], hemiGround: [0x0a0705, 0.7], sun: [0xffc890, 0.35], rim: [0xffb070, 0.5] },
+          set: { dofFar: 0.012 }, grade: { vignette: 0.55 }
+        }
+      }
     }
   };
   /** 地面主题（并进布局的 GROUNDS，写法同 hd2d-layout.js 的 GROUNDS）：顶面 / 侧面贴图是这里画的（art 开头），backdrop 指回这一套 */
@@ -108,11 +140,16 @@
       tex: "artHaulRoad", tint: 0xffffff, side: "artBenchSide", decals: { gravel: 3, slag: 2, crack: 2 },
       pebbles: 22, pebble: 0x7a6856, rock: 0x5c4a3a, decor: "art", ground: 0x5e4c3c, backdrop: "mine1_mid",
       lamps: { kind: "hanging", color: 0xffc46e, day: 1, dusk: 2, night: 2 }
+    },
+    mine1_floor: {   // 第一采矿场 · 矿底：暗色的岩盘（碎裂的石板、缝里的黑泥、潮湿的地方），侧面暗的爆破断面；地台外面是黑褐的地；两盏提灯（不分白天黑夜）
+      tex: "artPitFloor", tint: 0xffffff, side: "artBenchSide", sideTint: 0x8a7c70, decals: { gravel: 2, slag: 2, crack: 2, puddle: 1 },
+      pebbles: 18, pebble: 0x4e4440, rock: 0x3e3530, decor: "art", ground: 0x2c241f, backdrop: "mine1_floor",
+      lamps: { kind: "hanging", color: 0xffb35c, day: 2, dusk: 2, night: 2 }
     }
   };
   /** 区域 → 场景 id（world-data.js · BATTLE_SCENES）→ 地面主题 */
   const SCENES = {
-    "第一采矿场": { rim: "mine1_rim", mid: "mine1_mid" }
+    "第一采矿场": { rim: "mine1_rim", mid: "mine1_mid", floor: "mine1_floor" }
   };
 
   /* ---------- 小工具 ---------- */
@@ -247,6 +284,43 @@
       g.strokeStyle = "rgba(10,6,2,.45)";
       for (let k = 0; k < 4; k++) kit.crack(g, r, r() * s, r() * s, 5, 1, 0);
     }),
+    /** 矿底的地：暗色的岩盘——一块块碎裂的石板（四边形，深浅不一，接缝在贴图边上首尾相接），缝里积着黑泥，几摊潮湿发暗的地方，零星的碎矿渣和亮一点的碎石 */
+    artPitFloor: paint("artPitFloor", 256, (g, s, r, kit) => {
+      g.fillStyle = "#3b322b"; g.fillRect(0, 0, s, s);
+      const n = 5, cell = s / n, ox = [], oy = [];
+      for (let i = 0; i < n; i++) { ox.push([]); oy.push([]); for (let j = 0; j < n; j++) { ox[i].push((r() - 0.5) * cell * 0.55); oy[i].push((r() - 0.5) * cell * 0.55); } }
+      const pt = (i, j) => [i * cell + ox[i % n][j % n], j * cell + oy[i % n][j % n]];   // 角点的偏移按 i % n、j % n 取：首尾相接
+      const tones = ["#3f362f", "#352d27", "#463c34", "#2f2823", "#40372f"];
+      for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+        const q = [pt(i, j), pt(i + 1, j), pt(i + 1, j + 1), pt(i, j + 1)], col = tones[Math.floor(r() * tones.length)];
+        [[0, 0], [-s, 0], [0, -s], [-s, -s]].forEach(([dx, dy]) => {   // 跨过边的那一截绕回来画
+          g.beginPath(); q.forEach(([x, y], k) => (k ? g.lineTo(x + dx, y + dy) : g.moveTo(x + dx, y + dy))); g.closePath();
+          g.fillStyle = col; g.fill();
+          g.strokeStyle = "rgba(12,8,5,.75)"; g.lineWidth = 3; g.stroke();
+          g.strokeStyle = "rgba(255,230,200,.06)"; g.lineWidth = 1; g.stroke();
+        });
+      }
+      for (let i = 0; i < 7; i++) {   // 潮湿发暗的地方
+        const x = r() * s, y = r() * s, rad = 14 + r() * 30, grd = g.createRadialGradient(x, y, 0, x, y, rad);
+        grd.addColorStop(0, "rgba(8,6,4,.38)"); grd.addColorStop(1, "rgba(8,6,4,0)");
+        g.fillStyle = grd; g.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+      }
+      kit.speckle(g, s, r, 2400, "rgba(255,236,210,.07)", "rgba(0,0,0,.25)");
+      g.strokeStyle = "rgba(6,4,2,.6)";
+      for (let k = 0; k < 5; k++) kit.crack(g, r, r() * s, r() * s, 5 + Math.floor(r() * 5), 1.1, 1);
+      for (let k = 0; k < 4; k++) kit.gravel(g, r, r() * s, r() * s, 5 + r() * 8, 8 + Math.floor(r() * 8));
+    }),
+    /** 发光的裂纹（自发光贴图，第二采矿场的石头）：黑底上一道道会分叉的亮橙色裂纹，几处烧得发亮的小点；当 emissiveMap 用，只有裂纹亮 */
+    artLavaVein: paint("artLavaVein", 128, (g, s, r, kit) => {
+      g.fillStyle = "#000"; g.fillRect(0, 0, s, s);
+      g.strokeStyle = "rgba(255,150,60,.95)";
+      for (let k = 0; k < 7; k++) kit.crack(g, r, r() * s, r() * s, 6 + Math.floor(r() * 6), 1.6 + r() * 1.4, 2);
+      for (let k = 0; k < 6; k++) {
+        const x = r() * s, y = r() * s, rad = 3 + r() * 6, grd = g.createRadialGradient(x, y, 0, x, y, rad);
+        grd.addColorStop(0, "rgba(255,210,120,1)"); grd.addColorStop(1, "rgba(255,90,20,0)");
+        g.fillStyle = grd; g.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+      }
+    }),
     /** 贴花：一摊被风吹积的浮沙（浅色、软边，几道细沙纹） */
     artSandDrift: paint("artSandDrift", 128, (g, s, r, kit) => {
       const grd = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s * 0.46);
@@ -273,15 +347,34 @@
     const D = art.decor, R = A.rand(z.id * 977 + seedOf(key)), spots = A.zoneSpots(z, D.size[0]);
     const band = A.pick(spots.filter(s => s.on === "band"), D.band, R, 1.4);
     const ledge = A.pick(spots.filter(s => s.on === "ledge"), D.ledge, R, 0.8);
-    return band.concat(ledge).map(s => ({ kind: D.kind || "rock", x: s.x, z: s.z, y: s.y, size: Math.min(A.span(R, D.size), s.r), on: s.on }));
+    // kind：rock 石头；pipe 一截管子（矿底）；glow 带发光裂纹的石头（第二采矿场）——各占几成按 decor.pipes / decor.glow
+    const kindOf = () => (D.glow && R() < D.glow ? "glow" : D.pipes && R() < D.pipes ? "pipe" : D.kind || "rock");
+    return band.concat(ledge).map(s => ({ kind: kindOf(), x: s.x, z: s.z, y: s.y, size: Math.min(A.span(R, D.size), s.r), on: s.on }));
   }
-  /** 挂钩：地台上的装饰（hd2d-world.js · buildZone 交过来；地台本体、贴花、小石子已经画好了） */
+  /** 挂钩：地台上的装饰（hd2d-world.js · buildZone 交过来；地台本体、贴花、小石子已经画好了）。
+   *  管子顺着边带（沿 z）躺着，两头一圈法兰，有的上面一个阀门轮；整个在装饰的半径里（四个角离中心不到 size） */
   function zone(kit, g, z, ctx, r, look, a) {
-    const art = a.art, P = PALETTE[art.palette], R = A.rand(z.id * 131 + seedOf(a.key)), tones = P[art.decor.tone] || P.rock;
+    const art = a.art, P = PALETTE[art.palette], R = A.rand(z.id * 131 + seedOf(a.key)), tones = P[art.decor.tone] || P.rock, THREE = kit.THREE;
     zonePlan(z, a.key).forEach(d => {
       const col = tones[Math.floor(R() * tones.length)];
-      const m = kit.mesh(rockGeo(kit, d.size, R, 0.62), kit.mat("art-rock-" + art.palette, col, { roughness: 1 }), d.x, d.y + d.size * 0.32, d.z);
-      m.rotation.y = R() * Math.PI * 2;
+      let m;
+      if (d.kind === "pipe") {
+        const rr = d.size * 0.26, len = d.size * 1.7, metal = kit.mat("art-pipe-" + art.palette, P.metal, { roughness: 0.5, metalness: 0.55 });
+        m = new THREE.Group();
+        m.add(kit.mesh(new THREE.CylinderGeometry(rr, rr, len, 10), metal));
+        [-1, 1].forEach(s => m.add(kit.mesh(new THREE.CylinderGeometry(rr * 1.4, rr * 1.4, 0.05, 10), metal, 0, s * (len / 2 - 0.03), 0)));
+        m.rotation.x = Math.PI / 2;
+        if (R() < 0.5) { const w = kit.mesh(new THREE.TorusGeometry(rr * 0.9, rr * 0.18, 4, 10), metal, 0, 0, -rr * 1.5); m.add(w); }
+        const holder = new THREE.Group();
+        holder.add(m); holder.position.set(d.x, d.y + rr, d.z); holder.rotation.y = (R() - 0.5) * 0.4;
+        m = holder;
+      } else if (d.kind === "glow") {
+        m = kit.mesh(rockGeo(kit, d.size, R, 0.62), kit.mat("art-glowrock-" + art.palette, col, { roughness: 0.9, emissive: P.glow, emissiveIntensity: GLOW.rock, emissiveMap: kit.tex("artLavaVein") }), d.x, d.y + d.size * 0.32, d.z);
+        m.rotation.y = R() * Math.PI * 2;
+      } else {
+        m = kit.mesh(rockGeo(kit, d.size, R, 0.62), kit.mat("art-rock-" + art.palette, col, { roughness: 1 }), d.x, d.y + d.size * 0.32, d.z);
+        m.rotation.y = R() * Math.PI * 2;
+      }
       m.userData.art = d.kind; m.userData.size = d.size;
       g.add(m);
     });
@@ -515,7 +608,10 @@
     const THREE = kit.THREE, cell = o.cell, nx = Math.ceil((o.x1 - o.x0) / cell), ny = Math.ceil((o.y1 - o.y0) / cell), V = [];
     for (let i = 0; i <= nx; i++) {
       V.push([]);
-      for (let j = 0; j <= ny; j++) V[i].push([o.x0 + i * cell + (R() - 0.5) * cell * 0.7, o.y0 + j * cell + (R() - 0.5) * cell * 0.7, o.z - R() * o.bump]);
+      for (let j = 0; j <= ny; j++) {
+        const x = o.x0 + i * cell + (R() - 0.5) * cell * 0.7;
+        V[i].push([x, o.y0 + j * cell + (R() - 0.5) * cell * 0.7, (o.zAt ? o.zAt(x) : o.z) - R() * o.bump]);   // zAt：崖面平面上弯一点（矿底两头往前围）
+      }
     }
     const at = (i, j) => [o.x0 + (i + 0.5) * cell, o.y0 + (j + 0.5) * cell];
     const inCell = (i, j) => i >= 0 && j >= 0 && i < nx && j < ny && o.inside(...at(i, j));
@@ -592,6 +688,121 @@
     return d.rimZ;
   }
 
+  /* ---------- 远景：矿底 ---------- */
+  /** 坑壁脚下的管道：两道横管（法兰、支架），几根竖管顺着坑壁往上（出画面），几个阀门轮。返回 { run: 上面那道横管 { y, z, r, x0, x1 }, risers: [x] } */
+  function pipeRuns(kit, env, P, R, F, zAt) {
+    const THREE = kit.THREE, PP = F.pipes, gY = L.CONFIG.groundY, cx = env.cx, x0 = cx - env.hx - PP.span, x1 = cx + env.hx + PP.span;
+    const mat = env.keep(new THREE.MeshStandardMaterial({ color: P.metal, roughness: 0.5, metalness: 0.55, flatShading: true }));
+    const dark = env.keep(new THREE.MeshStandardMaterial({ color: new THREE.Color(P.metal).multiplyScalar(0.55), roughness: 0.6, metalness: 0.5, flatShading: true }));
+    const g = new THREE.Group(), zw = zAt(cx), runs = [];
+    PP.y.forEach((h, i) => {
+      const r = PP.r[i], y = gY + h, z = zw + PP.out - i * 0.25;
+      const pipe = kit.put(new THREE.Mesh(new THREE.CylinderGeometry(r, r, x1 - x0, 12), mat), (x0 + x1) / 2, y, z); pipe.rotation.z = Math.PI / 2; g.add(pipe);
+      for (let x = x0 + 0.6; x < x1; x += PP.flange) { const f = kit.put(new THREE.Mesh(new THREE.CylinderGeometry(r * 1.35, r * 1.35, 0.07, 12), dark), x, y, z); f.rotation.z = Math.PI / 2; g.add(f); }
+      for (let x = x0 + 1.4; x < x1; x += 3.1) g.add(kit.put(new THREE.Mesh(new THREE.BoxGeometry(0.14, y - gY, r * 1.6), dark), x, (y + gY) / 2, z));   // 支架
+      runs.push({ y, z, r, x0, x1 });
+    });
+    const top = runs[runs.length - 1], risers = [], yUp = env.topY(top.z) + 3;
+    for (let i = 0; i < PP.risers; i++) {
+      const x = cx + ((i + 0.5) / PP.risers - 0.5) * 2 * (env.hx + 2) + (R() - 0.5) * 1.6, r = top.r * 0.9;
+      g.add(kit.put(new THREE.Mesh(new THREE.CylinderGeometry(r, r, yUp - top.y, 10), mat), x, (yUp + top.y) / 2, top.z - 0.05));
+      g.add(kit.put(new THREE.Mesh(new THREE.SphereGeometry(r * 1.3, 10, 8), dark), x, top.y, top.z - 0.05));   // 接头
+      for (let y = top.y + 1.2; y < yUp; y += 1.6 + R()) { const f = kit.put(new THREE.Mesh(new THREE.CylinderGeometry(r * 1.35, r * 1.35, 0.06, 10), dark), x, y, top.z - 0.05); g.add(f); }
+      risers.push(x);
+    }
+    const low = runs[0];
+    for (let i = 0; i < PP.valves; i++) {   // 阀门：下面那道横管上，短的阀杆 + 正对镜头的手轮
+      const x = x0 + 3 + R() * (x1 - x0 - 6);
+      g.add(kit.put(new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.3, 6), dark), x, low.y + low.r + 0.12, low.z));
+      g.add(kit.put(new THREE.Mesh(new THREE.TorusGeometry(0.15, 0.025, 4, 12), mat), x, low.y + low.r + 0.28, low.z + 0.02));
+    }
+    env.group.add(tag(g, "pipes"));
+    return { run: top, risers };
+  }
+  /** 横管上的排气口：一截短管 + 帽子；时不时喷一阵气（AMBIENT.steam：一阵冒几团，越飘越高越大越淡；减少动态效果时不喷） */
+  function steamVents(kit, env, P, R, F, pipes) {
+    const THREE = kit.THREE, S = AMBIENT.steam, run = pipes.run, tex = env.keep(kit.smokeTexture()), out = [];
+    const metal = env.keep(new THREE.MeshStandardMaterial({ color: P.metal, roughness: 0.5, metalness: 0.55, flatShading: true }));
+    for (let i = 0, tries = 0; i < F.vents && tries < 60; tries++) {
+      const x = run.x0 + 2 + R() * (run.x1 - run.x0 - 4);
+      if (pipes.risers.some(q => Math.abs(q - x) < 1.2) || out.some(q => Math.abs(q - x) < 3)) continue;
+      out.push(x);
+      const g = new THREE.Group(), y = run.y + run.r;
+      g.add(kit.put(new THREE.Mesh(new THREE.CylinderGeometry(run.r * 0.55, run.r * 0.55, 0.26, 8), metal), x, y + 0.13, run.z));
+      g.add(kit.put(new THREE.Mesh(new THREE.CylinderGeometry(run.r * 0.8, run.r * 0.6, 0.06, 8), metal), x, y + 0.28, run.z));
+      const puffs = [];
+      for (let k = 0; k < S.puffs; k++) {
+        const m = env.keep(new THREE.SpriteMaterial({ map: tex, color: P.steam, transparent: true, depthWrite: false, opacity: 0 }));
+        const sp = new THREE.Sprite(m); sp.visible = false; sp.position.set(x, y + 0.32, run.z + 0.05); sp.scale.setScalar(S.size[0]); g.add(sp); puffs.push(sp);
+      }
+      const beat = A.beat(A.rand(i * 211 + 17), S.every, S.dur, 0.5 + R() * S.every[1]), drift = (R() - 0.5) * 0.6;
+      g.userData.ambient = { kind: "steam", beat, puffs };
+      env.anims.push((t, dt) => {
+        const p = dt > 0 ? beat.step(dt) : -1;
+        puffs.forEach((sp, k) => {
+          const q = p < 0 ? -1 : (p - (k / S.puffs) * 0.6) / 0.4;
+          sp.visible = q >= 0 && q <= 1;
+          if (!sp.visible) return;
+          sp.position.set(x + drift * q, y + 0.32 + q * S.rise, run.z + 0.05);
+          sp.scale.setScalar(S.size[0] + (S.size[1] - S.size[0]) * q);
+          sp.material.opacity = S.opacity * Math.sin(Math.PI * q);
+        });
+      });
+      env.group.add(tag(g, "vent"));
+      i++;
+    }
+  }
+  /** 坑壁上挂的提灯（克制，就 F.lanterns.n 盏）：铁支架伸出来，吊一盏带罩子的灯 + 光晕 + 一个点光源（照亮附近的坑壁和管道），火苗轻轻晃（减少动态效果时不晃） */
+  function lanterns(kit, env, P, R, F, spots) {
+    const THREE = kit.THREE, LN = F.lanterns, tex = env.keep(kit.smokeTexture());
+    const iron = env.keep(new THREE.MeshStandardMaterial({ color: 0x2e2824, roughness: 0.6, metalness: 0.5, flatShading: true }));
+    const glow = env.keep(new THREE.MeshBasicMaterial({ color: new THREE.Color(P.lamp).multiplyScalar(2.4), toneMapped: false }));
+    spots.forEach((s, i) => {
+      const g = new THREE.Group();
+      g.add(kit.put(new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.5), iron), s.x, s.y + 0.3, s.z - 0.25));   // 支架
+      g.add(kit.put(new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.16, 4), iron), s.x, s.y + 0.21, s.z));
+      g.add(kit.put(new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.1, 0.06, 8), iron), s.x, s.y + 0.12, s.z));   // 罩子
+      g.add(kit.put(new THREE.Mesh(new THREE.SphereGeometry(0.065, 8, 6), glow), s.x, s.y, s.z));
+      const halo = new THREE.Sprite(env.keep(new THREE.SpriteMaterial({ map: tex, color: P.lamp, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.35 })));
+      halo.position.set(s.x, s.y, s.z + 0.05); halo.scale.setScalar(LN.halo); g.add(halo);
+      const light = new THREE.PointLight(P.lamp, LN.power, LN.dist, 2);
+      light.position.set(s.x, s.y - 0.05, s.z + 0.15); g.add(light);
+      const ph = R() * 6;
+      env.anims.push((t, dt) => { light.intensity = LN.power * (dt > 0 ? 0.9 + 0.1 * Math.sin(t * 11 + ph) * Math.sin(t * 6.7 + ph * 2) : 1); });
+      env.group.add(tag(g, "lantern"));
+    });
+  }
+  /** 矿底：战场后面是坑底的岩壁（一直伸出画面上沿，两头往前围一点），脚下两道横管、几根竖管顺着坑壁往上、阀门；横管上的排气口时不时喷气；
+   *  坑壁上挂两盏提灯（附近的崖面亮一圈）；坑壁脚下几块大石头；前景左右两角几块大石头。地台外面的地一直铺到坑壁脚下（不返回 groundEdge） */
+  function floorScene(kit, env, art, P, R, b) {
+    const THREE = kit.THREE, F = FLOOR[art.backdrop.floor], W = F.wall, gY = L.CONFIG.groundY, lampZ = b.minZ - L.CONFIG.lamps.back, cx = env.cx;
+    const z0 = lampZ - W.z, bendFrom = env.hx + F.pipes.span;
+    const zAt = (x) => z0 + W.bend * smooth(bendFrom, env.hx + W.reach, Math.abs(x - cx));
+    const LN = F.lanterns, spots = [];
+    for (let i = 0; i < LN.n; i++) { const x = cx + (LN.n > 1 ? (i / (LN.n - 1) - 0.5) * 2 : 0) * env.hx * 0.55 + (R() - 0.5); spots.push({ x, y: gY + LN.y, z: zAt(x) + 0.55 }); }
+    const yTop = env.topY(z0) + W.above;
+    const face = rockFace(kit, env, R, {
+      x0: cx - env.hx - W.reach, x1: cx + env.hx + W.reach, y0: gY - W.below, y1: yTop, zAt, cell: W.cell, bump: W.bump, thick: W.thick, fog: true,
+      inside: () => true, tones: P.wall,
+      // 坑底暗：整面压一点；提灯附近亮一圈（灯光照到的地方）
+      shade: (x, y) => 0.55 + LN.pool[1] * Math.max(0, ...spots.map(s => Math.exp(-((x - s.x) ** 2 + (y - s.y) ** 2) / (LN.pool[0] ** 2))))
+    });
+    env.group.add(tag(face, "pitFloorWall"));
+    const pipes = pipeRuns(kit, env, P, R, F, zAt);
+    steamVents(kit, env, P, R, F, pipes);
+    lanterns(kit, env, P, R, F, spots);
+    // 坑壁脚下的大石头（在管道前面一点，不过灯）
+    const RK = F.rocks;
+    for (let i = 0; i < RK.n; i++) {
+      const x = cx + (R() * 2 - 1) * (env.hx + W.reach - 3), z = zAt(x) + F.pipes.out + 0.5 + R() * 0.5, s = Math.min(A.span(R, RK.size), lampZ - 0.35 - z);
+      if (s < 0.2) continue;
+      const m = new THREE.Mesh(rockGeo(kit, s, R, 0.75), env.keep(new THREE.MeshStandardMaterial({ color: P.wall[i % P.wall.length], roughness: 1, flatShading: true })));
+      m.position.set(x, gY + s * 0.3, z); m.rotation.y = R() * 3;
+      env.group.add(tag(m, "floorRock"));
+    }
+    if (art.backdrop.fore) foreRocks(kit, env, P, R, b, FORE[art.backdrop.fore]);
+  }
+
   /* ---------- 挂钩：远景 ---------- */
   /** 天边画的远景：矿外用以前采矿场的那条（远处的厂区 + 坑壁），在对面坑沿后面露出来；矿内被对面的坑壁整个挡住，用以前的 */
   function band(kit, colors, seed, a) {
@@ -602,6 +813,7 @@
     const art = a.art, P = PALETTE[art.palette], b = boundsOf(env), R = A.rand(seedOf(a.key) + Math.round(env.hx * 10) + Math.round(env.hz * 7));
     if (art.depth === "rim") return { groundEdge: rimScene(kit, env, art, P, R, b) };
     if (art.depth === "mid") return { groundEdge: midScene(kit, env, art, P, R, b) };
+    if (art.depth === "floor") floorScene(kit, env, art, P, R, b);
     return {};
   }
   /** 天幕挪到多远（hd2d-backdrop.js 建天幕前问）：大矿坑的天幕在对面坑壁后面 PIT.sky；别的场景照旧（null） */
@@ -611,5 +823,5 @@
 
   const pack = { name: "mine", scenes: SCENES, grounds: GROUNDS, art: ART, textures: TEXTURES, decals: DECALS, zone, band, backdrop, skyGap };
   A.add(pack);
-  return Object.assign({ PALETTE, PIT, LIFT, WALLS, BERM, FORE, AMBIENT, zonePlan, seedOf, pitDims }, pack);
+  return Object.assign({ PALETTE, PIT, LIFT, WALLS, BERM, FORE, FLOOR, GLOW, AMBIENT, zonePlan, seedOf, pitDims }, pack);
 });
