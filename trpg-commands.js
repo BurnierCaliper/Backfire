@@ -23,6 +23,8 @@ const TrpgCommands = (() => {
     purseTransfer: c => trpgPurseTransfer(c.from, c.to, c.amount),
     modifyHero: c => trpgModifyHero(c.kit, c.plan, !!c.free),
     clinicOpen: c => { TRPG.clinicOpen = !!c.on; return [TRPG.clinicOpen ? "诊所开门了：联机玩家可以申请义体改造。" : "诊所关门了。"]; },
+    smithOpen: c => { TRPG.smithOpen = !!c.on; return [TRPG.smithOpen ? "工匠开门了：联机玩家可以给自己的武器升级（加工费从自己的钱包出）。" : "工匠收摊了。"]; },
+    workshopOpen: c => { TRPG.workshopOpen = !!c.on; return [TRPG.workshopOpen ? "工坊开门了：联机玩家可以制作、拆解。" : "工坊关门了。"]; },
     cyberDecide: c => trpgCyberDecide(c.id, !!c.ok),
     merchantCreate: c => trpgMerchantCreate(c.name),
     merchantSave: c => trpgMerchantSave(c.merchant),

@@ -368,6 +368,17 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **#157 补查「需要作者确认」四条的决定**（Closes #186；hotseat.js · `openAsk` / `tick` / `extendAsk`；hotseat-game.js · `requestAsk` / `checkpoint` / `trpgOwnKit` / `smithUpgrade` / `workshopCraft` / `workshopSalvage`；trpg.js · `TRPG.smithOpen` / `workshopOpen` / `trpgSmithPacket` / `trpgSmithUpgrade` / `trpgWorkshopPacket` / `trpgWorkshopCraft` / `trpgWorkshopSalvage`；trpg-commands.js · `smithOpen` / `workshopOpen`；trpg-ui.js；online-game.js · `rawPacket` / `trpgPacketsFor`；online-view.js · `projectSmith` / `projectWorkshop`；online-ui.js；gm-commands.js · `patchUnit` / `edit` / `gm.copyUnit`；online-gm-ui.js；测试 `hotseat-bridge.test.js`、`trpg-online-smith-workshop.test.js`、`gm-unit-editor-parity.test.js`）
+  - **主持人危险按钮的二次确认 / 撤销**：主人定「不用」，**不做**。没有改代码，backlog 里标成「已定：不做」。
+  - **联机玩家端的武器升级 / 工坊 / 商人入口**：
+    - 联机单局：商店（买 / 卖 / 积分兑换）、工匠（武器升级 / 改装件）、工坊（制作 / 拆解 / 学配方）、背包的入口本来就有（`online-rogue.js · viewFor`、`online-ui.js` 的单局面板），**不缺**，只补了一条测试把这件事钉住。
+    - 联机跑团：商人（`shopBuy` / `shopSell` / `shopBuyback`）本来就有；**缺的是武器升级和工坊**，以前只有主持人面板能操作。现在主持人在「武器升级」页、「工坊」页各有一个「向联机玩家开放」开关（`TRPG.smithOpen` / `workshopOpen`，默认关，和诊所的 `clinicOpen` 一样不进存档），开了玩家在「物资」里就能看到入口。
+    - 武器升级：玩家只能升自己角色的武器；≤ 4 级可以「在工作站自己升」（只耗队伍背包里的材料），5 级以上「找工匠升」（材料 + 参考加工费 `trpgSmithFee`，带巧手匠人打八折），**加工费从这名角色自己的钱包出**（`trpgPayWith`），钱包不够 / 材料不够 / 工匠没开都失败且不扣任何东西。主持人面板里自己填费用、免费直升的做法不变。
+    - 工坊：玩家只能让自己的角色制作，由程序掷骰（难度按配方，可选一名队友打下手），推进游戏时间，失败损失材料，规则同主持人面板；会的配方才能做；拆解不花时间不花钱。**学配方仍由主持人教会**（`trpgTeachRecipe`），跑团里没有玩家自己学配方的规则，玩家端只显示「还不会（找主持人教会）」。
+    - 都由房主结算（hotseat-game.js 的 `smithUpgrade` / `workshopCraft` / `workshopSalvage`，只认自己操控的角色，主持人哪个都行），结果写进小队频道。发给玩家的数据只有材料数量、价格、成功率这类公开数字，经 `online-view.js · projectSmith / projectWorkshop` 白名单，**没有坚毅生命**。
+  - **热座（同一台设备）的协助询问 20 秒倒计时**：以前热座和联机一样，协助 / 格挡询问 20 秒没人点就当作不协助；现在热座**不限时**，和单机一样等人回答（`openAsk` 的 `untimed`，`deadline` 为 `null`，`tick` / `extendAsk` / `checkpoint` 都跳过空的截止时间）。联机的 20 秒不变，**掉线玩家的超时兜底（`online-game.js · offlineTick`）没有动**。
+  - **联机主持人的单位编辑器统一成单机那套**：以前联机面板只能改数值、状态、层生命；现在字段和单机编辑器（`app.js · renderEditor`）一样：名称、即时效果（熔融 / 刺骨 / 过载 / 错位 / 扩散 / 折射）、挂下一击的七种属性专属攻击效果、加 / 删血量层、改层类型、结算中和、回满架势、复制单位（只能复制敌人，多部件的飞碟不行）；切换自我效果时同步焚身层数、改感电震荡时同步（和单机 `CalcCommands` 一致）。校验沿用单机的取值范围（等级 1–25、名称 1–40 字、即时效果 / 攻击效果 / 层类型只能是单机能选的那些），新增的保护：删层至少留一层、一次最多 6 层。联机面板原有的额外字段（坚毅生命、行动点、个体值、富集）保留。没有搬的：「存进卡组」（单机计算器的角色卡库，联机没有）。
+
 - **每个敌人独立的制作材料掉落表**（PR #172，Closes #170；items.js · `ENEMY_DROPS` / `ENEMY_DROP_ALIAS` / `enemyDropTable` / `rollEnemyDrops` / `enemyDropExpected` / `enemyDropFoes`；rogue.js · `rollMaterialDrops`；app.js · `settleBattleRewards` / `trpgEnemyMaterials` / `mergeBattleDrops`；bestiary.js · `bestiaryEntries().drops`；online-view.js · `projectDrops`；测试 tests/craft-materials.test.js）
   - 以前：按敌人属性 / 层归类（`craftClassesOf`），再按杂兵 / 精英 / 首领三档套 `CRAFT_DROPS` 的统一比例（`rollCraftMaterials`）；只有单局会掉，中立生物（尘虫、管虫）和飞碟机械足不掉。
   - 现在：`items.js · ENEMY_DROPS` 给 45 种敌人每个一张表（键为 kit），值是**期望数量**：小于 1 是掉 1 份的概率；大于等于 1 时整数部分保底、小数部分再掷一次。数字都在这张表里。

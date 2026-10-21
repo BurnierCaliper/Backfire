@@ -340,16 +340,54 @@
         <label><input type="number" id="ol-purse-n" data-purse="n" min="1" max="${esc(Math.max(1, Number((mine.find(h => h.kit === purseDraft.from) || mine[0]).amount) || 0))}" step="1" placeholder="数额" value="${esc(purseDraft.n)}" aria-label="转多少奎支"> 奎支</label>${button("转过去", "purseTransfer", "", disabled())}</div>
         <p class="ol-muted">任务的奎支报酬自动平分进各人钱包，个人任务的只进你自己的。转账会写进小队频道。</p></section>`;
     }
+    /** 跑团工匠（主持人开了才有，房主算好的 view.packet.smith）：给自己的武器升级，加工费从这名角色的钱包出 */
+    function trpgSmithMarkup() {
+      const heroes = view.packet?.smith?.heroes || [];
+      if (view.mode === "rogue" || !heroes.length) return "";
+      const rows = heroes.map(h => `<li><b>${esc(h.name)}</b> <span class="ol-muted">钱包 ${esc(h.purse)} 奎支</span><ul>${h.weapons.map(w => {
+        if (w.max) return `<li>${esc(w.name)} Lv${esc(w.lv)} · 已满级</li>`;
+        const mats = w.mats.map(m => `<span class="${m.have >= m.need ? "" : "ol-bad"}">${esc(m.name)} ${esc(m.have)}/${esc(m.need)}</span>`).join("、");
+        const data = `data-kit="${esc(h.kit)}" data-weapon="${esc(w.kit)}"`;
+        return `<li>${esc(w.name)} Lv${esc(w.lv)} → ${esc(w.next)} <small>材料：${mats}</small>
+          ${w.canSelf ? button("在工作站自己升（只耗材料）", "smithUpgrade", `${data} data-mode="self"`, disabled() || !w.enough) : ""}
+          ${button(`找工匠升（${w.fee} 奎支）`, "smithUpgrade", `${data} data-mode="smith"`, disabled() || !w.enough || h.purse < w.fee, !w.canSelf)}</li>`;
+      }).join("") || '<li class="ol-muted">没有可升级的武器</li>'}</ul></li>`).join("");
+      return `<section class="ol-rogue-box ol-trpg-smith" aria-label="武器升级"><h3>🔨 武器升级（工匠开着）</h3><ul>${rows}</ul>
+        <p class="ol-muted">材料从队伍背包出；加工费用参考价，从这名角色自己的钱包出。</p></section>`;
+    }
+    /** 跑团工坊（主持人开了才有）：制作已会的配方（程序掷骰，队友可打下手）、拆解背包里的东西；学配方由主持人教会 */
+    const workshopDraft = { kit: "", helper: "" };
+    function trpgWorkshopMarkup() {
+      const heroes = view.packet?.workshop?.heroes || [];
+      if (view.mode === "rogue" || !heroes.length) return "";
+      if (!heroes.some(h => h.kit === workshopDraft.kit)) workshopDraft.kit = heroes[0].kit;
+      const hero = heroes.find(h => h.kit === workshopDraft.kit);
+      const others = (view.packet?.purse?.heroes || []).filter(h => h.kit !== hero.kit);
+      if (!others.some(h => h.kit === workshopDraft.helper)) workshopDraft.helper = "";
+      const recipes = hero.recipes.map(r => {
+        const mats = r.mats.map(m => `<span class="${m.have >= m.need ? "" : "ol-bad"}">${esc(m.name)} ${esc(m.have)}/${esc(m.need)}</span>`).join(" + ");
+        const can = r.known && r.chance > 0 && r.mats.every(m => m.have >= m.need);
+        return `<li><b>${esc(r.name)}</b> <small>${esc(r.prof)} · ${esc(r.diffName)} · ${esc(r.hours)} 小时 · ${mats}${r.known ? ` · 成功率 ${esc(r.chance)}%` : ""}</small>
+          ${r.known ? button("制作", "workshopCraft", `data-item="${esc(r.id)}"`, disabled() || !can) : '<span class="ol-muted">还不会（找主持人教会）</span>'}</li>`;
+      }).join("");
+      const salvage = hero.salvage.map(x => `<li>${esc(x.name)} ×${esc(x.qty)} → ${esc(x.yields)} ${button("拆一件", "workshopSalvage", `data-item="${esc(x.id)}"`, disabled())}</li>`).join("");
+      return `<section class="ol-rogue-box ol-trpg-workshop" aria-label="工坊"><h3>⚙ 工坊（开着）</h3>
+        <p><label>谁做 <select data-workshop="kit">${heroes.map(h => option(h.kit, h.name, h.kit === hero.kit)).join("")}</select></label>
+        <label>打下手 <select data-workshop="helper">${[["", "没人帮"]].concat(others.map(h => [h.kit, h.name])).map(([k, n]) => option(k, n, k === workshopDraft.helper)).join("")}</select></label></p>
+        <h4>制作</h4><ul>${recipes || '<li class="ol-muted">没有配方</li>'}</ul>
+        <h4>拆解（不花时间）</h4><ul>${salvage || '<li class="ol-muted">背包里没有能拆的东西</li>'}</ul>
+        <p class="ol-muted">制作由程序掷骰，会推进游戏时间；失败会损失一部分材料。学新配方要主持人教会。</p></section>`;
+    }
     function suppliesMarkup(data) {
       const bag = data.bag || {}, items = (bag.items || []).filter(item => item.qty > 0);
-      return `${shopMarkup()}${trpgCyberwareMarkup()}${trpgClinicMarkup()}${purseMarkup()}<section class="ol-supplies" aria-label="队伍公共物资"><h3>队伍公共物资</h3><div class="ol-points"><span>${view.packet?.purse ? "队伍公账" : "奎支"} ${esc(data.kuizhi ?? 0)}</span><span>水 ${esc(bag.water ?? 0)} ml</span></div><ul>${items.map(item => `<li>${esc(item.name || item.id)} × ${esc(item.qty)}</li>`).join("") || '<li class="ol-muted">背包为空</li>'}</ul></section>`;
+      return `${shopMarkup()}${trpgSmithMarkup()}${trpgWorkshopMarkup()}${trpgCyberwareMarkup()}${trpgClinicMarkup()}${purseMarkup()}<section class="ol-supplies" aria-label="队伍公共物资"><h3>队伍公共物资</h3><div class="ol-points"><span>${view.packet?.purse ? "队伍公账" : "奎支"} ${esc(data.kuizhi ?? 0)}</span><span>水 ${esc(bag.water ?? 0)} ml</span></div><ul>${items.map(item => `<li>${esc(item.name || item.id)} × ${esc(item.qty)}</li>`).join("") || '<li class="ol-muted">背包为空</li>'}</ul></section>`;
     }
     function suppliesCard(data) {
       return `<div class="ol-card ol-supplies-card"><header><h2>物资</h2>${button("关闭", "suppliesClose")}</header>${suppliesMarkup(data)}</div>`;
     }
     /** 舞台顶上的「物资」按钮：商店 / 诊所开着时带提示 */
     function suppliesButton() {
-      const tags = [view.packet?.shop ? "🛒" : "", view.packet?.clinic?.heroes?.length || view.packet?.cyberware?.heroes?.length ? "🦾" : ""].filter(Boolean).join("");
+      const tags = [view.packet?.shop ? "🛒" : "", view.packet?.smith?.heroes?.length ? "🔨" : "", view.packet?.workshop?.heroes?.length ? "⚙" : "",view.packet?.clinic?.heroes?.length || view.packet?.cyberware?.heroes?.length ? "🦾" : ""].filter(Boolean).join("");
       return button(`物资${tags ? " · " + tags : ""}`, "supplies", tags ? 'data-alert="1"' : "");
     }
     function paintSupplies() {
@@ -1172,6 +1210,7 @@
     function input(event) {
       const box = event.target.closest && event.target.closest("[data-cyber-box]");
       if (box) { cyberDraft[box.dataset.cyberBox] = cyberPlanOf(box.dataset.cyberBox); return; }
+      if (event.target.dataset.workshop) { workshopDraft[event.target.dataset.workshop] = event.target.value; if (event.type === "change") { lastMarkup.supplies = ""; render(); paintSupplies(); } return; }
       if (event.target.dataset.purse) { purseDraft[event.target.dataset.purse] = event.target.value; return; }
       if (event.target.dataset.shopQty) { shopDraft.qty[event.target.dataset.shopQty] = event.target.value; return; }
       if (event.target.hasAttribute && event.target.hasAttribute("data-shop-payer")) { shopDraft.payer = event.target.value; if (event.type === "change") render(); return; }
@@ -1234,6 +1273,9 @@
         case "checkRoll": if (!disabled()) await call(() => api.submit({ type: "checkRoll", checkId: b.dataset.check, unitId: b.dataset.unit })); break;
         case "attrRequest": if (!disabled()) await call(() => api.submit({ type: "attrRequest", unitId: b.dataset.unit, attr: b.dataset.attr })); break;
         case "shopBuy": if (!disabled()) { if (global.Sfx) Sfx.ui("coin"); await call(() => api.submit({ type: "shopBuy", merchant: view.packet?.shop?.id, key: b.dataset.key, qty: Math.max(1, Number(shopDraft.qty[b.dataset.key]) || 1), payer: shopDraft.payer })); } break;
+        case "smithUpgrade": if (!disabled()) await call(() => api.submit({ type: "smithUpgrade", kit: b.dataset.kit, weapon: b.dataset.weapon, mode: b.dataset.mode })); break;
+        case "workshopCraft": if (!disabled()) await call(() => api.submit({ type: "workshopCraft", kit: workshopDraft.kit, item: b.dataset.item, helper: workshopDraft.helper || null })); break;
+        case "workshopSalvage": if (!disabled()) await call(() => api.submit({ type: "workshopSalvage", kit: workshopDraft.kit, item: b.dataset.item })); break;
         case "shopRedeem": if (!disabled()) await call(() => api.submit({ type: "shopRedeem", merchant: view.packet?.shop?.id, item: b.dataset.item })); break;
         case "purseTransfer": if (!disabled()) await call(() => api.submit({ type: "purseTransfer", from: byId("ol-purse-from")?.value, to: byId("ol-purse-to")?.value, amount: Number(byId("ol-purse-n")?.value) || 0 })); break;
         case "rogueVote": if (!disabled()) await call(() => api.submit({ type: "rogue.vote", option: b.dataset.option })); break;

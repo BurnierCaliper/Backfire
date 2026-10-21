@@ -4,12 +4,14 @@
   "use strict";
   let adapter = {}, round = 0, manualAll = false;
   const metadata = new Map();
-  const TYPES = ["spawnEnemy", "removeUnit", "editUnit", "addProp", "editProp", "removeProp", "editGap", "setField", "setWeather", "setEncounter", "forceAttack", "setManual", "enemyAct", "enemyEndTurn"].map(x => "gm." + x);
+  const TYPES = ["spawnEnemy", "removeUnit", "editUnit", "copyUnit", "addProp", "editProp", "removeProp", "editGap", "setField", "setWeather", "setEncounter", "forceAttack", "setManual", "enemyAct", "enemyEndTurn"].map(x => "gm." + x);
   const PROP_KINDS = ["button", "lever", "battery", "boom", "acid", "scrap", "turret", "ironwall", "scrapwall", "dome", "coral_branch", "coral_tentacle"];   // 沙珊瑚枝 / 触须：和沙漠遭遇同一套（props.js · desert.js）
   const WEATHERS = ["none", "heat", "snow", "acid", "thunder", "glow", "sand", "phase"];
   const STATUS_NUM = ["burn"];
   const STATUS_BOOL = ["shock", "corr", "frostbite", "shockwave", "high", "reso", "unstable", "weak", "inspire", "sturdy", "advantage", "hide", "chase"];
   const NO_TARGET = new Set("en_boom_fuse en_patrol_chase en_patrol_near en_gl en_gl_fire en_ant_shell en_ant_shell_fire en_gas_ignite en_hunter_heat en_alarm_zap en_bigsand_summon en_bigsand_heal en_live_absorb en_giant_sand_pulse en_boat_arc en_king_hold en_king_exec en_thug_mutiny en_chi_cover ufo_stomp ufo_sweep ufo_prime ufo_boom en_agg2_overheat en_agg3_debris en_agg1_rush en_agg1_rush_prep ufo_summon".split(" "));
+  const INSTANTS = ["melt", "sting", "overload", "shift", "spread", "refract"];   // 即时效果（trpg-commands.js · CalcCommands 同一份）
+  const UNIT_NAME_MAX = 40, MAX_LAYERS = 6;
   const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
   const copy = x => JSON.parse(JSON.stringify(x));
   const present = u => !!u && !u.dead && !u.hidden && !u.fused && !u._removed;
@@ -67,7 +69,22 @@
   function patchUnit(u, p) {
     const numeric = ["hp", "shp", "shpMax", "def", "defMax", "ap", "apMax", "bonus", "bonusMax", "atk", "highEnergy"];
     const flags = ["stunned", "stun", "dying", "dead", "flying"];
-    keys(p, numeric.concat(flags, ["layers", "level", "zone", "statuses", "self", "iv", "enriched"]), "单位补丁");
+    // 和单机的单位编辑器（app.js · renderEditor）一样的字段：名称、即时效果、挂下一击的属性专属攻击效果、加 / 删血量层、血量层类型、结算中和
+    keys(p, numeric.concat(flags, ["layers", "level", "zone", "statuses", "self", "iv", "enriched", "name", "instant", "atkFx", "addLayer", "removeLayer", "neutralize"]), "单位补丁");
+    if (own(p, "name")) { if (typeof p.name !== "string" || !p.name.trim() || p.name.length > UNIT_NAME_MAX) fail(`名称要 1–${UNIT_NAME_MAX} 个字`); }
+    if (own(p, "instant")) { keys(p.instant, INSTANTS, "即时效果"); Object.values(p.instant).forEach(v => bool(v, "即时效果")); if (!Object.keys(p.instant).length) fail("即时效果补丁为空"); }
+    if (own(p, "atkFx")) {
+      object(p.atkFx, "攻击效果"); if (!Object.keys(p.atkFx).length) fail("攻击效果补丁为空");
+      Object.entries(p.atkFx).forEach(([k, v]) => { if (typeof ATKFX === "undefined" || !own(ATKFX, k)) fail("未知的攻击效果"); bool(v, "攻击效果"); });
+    }
+    if (own(p, "addLayer")) { if (p.addLayer !== true) fail("加层只能写 true"); if ((u.layers || []).length >= MAX_LAYERS) fail(`最多 ${MAX_LAYERS} 层血量`); }
+    if (own(p, "removeLayer")) {
+      number(p.removeLayer, "要删的层", 0, MAX_LAYERS, true);
+      if (!(u.layers || [])[p.removeLayer]) fail("没有这一层");
+      if ((u.layers || []).length <= 1) fail("至少要留一层血量");
+      if (own(p, "layers") || own(p, "hp") || own(p, "addLayer")) fail("删层不能和其他血量修改一起提交");
+    }
+    if (own(p, "neutralize")) { if (p.neutralize !== true) fail("结算中和只能写 true"); if (typeof applyNeutralize !== "function") fail("这个版本没有中和规则"); }
     if (own(p, "enriched")) { bool(p.enriched, "富集"); if (typeof isSandFish !== "function" || !isSandFish(u)) fail("只有沙鱼能设富集"); }
     if (own(p, "iv")) { if (typeof ivEligible !== "function" || !ivEligible(u)) fail("只有杂兵、精英有个体值"); ivCheck(p.iv); }
     if (!Object.keys(p).length) fail("单位补丁为空");
@@ -79,7 +96,11 @@
     if (own(p, "self")) one(p.self, ["none", "burn", "frost", "splash", "conductor", "anchor", "store", "doppler"], "自身状态");
     if (own(p, "layers")) {
       if (!Array.isArray(p.layers) || p.layers.length !== (u.layers || []).length) fail("层数必须与单位一致");
-      p.layers.forEach(l => { keys(l, ["current", "max"], "血量层"); if (!Object.keys(l).length) fail("血量层为空"); Object.keys(l).forEach(k => number(l[k], "血量层 " + k)); });
+      p.layers.forEach(l => {
+        keys(l, ["current", "max", "type"], "血量层"); if (!Object.keys(l).length) fail("血量层为空");
+        if (own(l, "type")) one(l.type, Object.keys(LAYER), "血量层类型");
+        Object.keys(l).filter(k => k !== "type").forEach(k => number(l[k], "血量层 " + k));
+      });
     }
     if (own(p, "hp") && own(p, "layers")) fail("hp 与 layers 不能同时提交");
     if (own(p, "statuses")) {
@@ -228,7 +249,7 @@
     if (!TYPES.includes(cmd.type)) fail("未知主持人指令");
     if (own(cmd, "silent")) bool(cmd.silent, "静默");
     const fields = {
-      spawnEnemy: ["enemyId", "level", "zone", "count", "iv", "enriched"], removeUnit: ["actor", "mode"], editUnit: ["actor", "patch"],
+      spawnEnemy: ["enemyId", "level", "zone", "count", "iv", "enriched"], removeUnit: ["actor", "mode"], editUnit: ["actor", "patch"], copyUnit: ["actor"],
       addProp: ["kind", "zone", "level", "faction", "link"], editProp: ["id", "patch"], removeProp: ["id", "mode"],
       editGap: ["key", "patch"], setField: ["zone", "patch"], setWeather: ["weather", "sandDir", "phaseStep", "lock"],
       setEncounter: ["encounter", "zoneMode"], forceAttack: ["input"], setManual: ["actors", "enabled"],
@@ -243,6 +264,7 @@
         if (own(cmd, "enriched")) { bool(cmd.enriched, "富集"); if (typeof SAND_FISH_KITS === "undefined" || !SAND_FISH_KITS.includes(cmd.enemyId)) fail("只有沙鱼能设富集"); } break;
       case "removeUnit": enemy(cmd.actor); one(cmd.mode, ["remove", "kill"], "移出模式"); break;
       case "editUnit": patchUnit(unit(cmd.actor), cmd.patch); break;
+      case "copyUnit": { const u = enemy(cmd.actor); if (/^ufo_/.test(u.kit || "") || u.linkedIds) fail("多部件的敌人不能复制"); break; }
       case "addProp": one(cmd.kind, PROP_KINDS, "配置物种类"); zone(cmd.zone); if (own(cmd, "level")) level(cmd.level); if (own(cmd, "faction")) one(cmd.faction, ["player", "enemy", "neutral"], "阵营"); if (own(cmd, "link")) gapKeyCheck(cmd.link); break;
       case "editProp": prop(cmd.id); patchProp(cmd.patch); break;
       case "removeProp": prop(cmd.id); one(cmd.mode, ["remove", "destroy"], "移除模式"); break;
@@ -282,6 +304,18 @@
     // Combat reads personalAtk plus the currently held weapon, not the legacy
     // cached atk field. A GM's ATK edit changes that base, keeping weapon rules.
     if (own(p, "atk")) u.personalAtk = p.atk;
+    if (own(p, "name")) u.name = p.name.trim();
+    // 加 / 删血量层：和单机一样（新层是 10/10 的肉体层）
+    if (own(p, "addLayer")) u.layers.push({ type: "flesh", current: 10, max: 10 });
+    if (own(p, "removeLayer")) u.layers.splice(p.removeLayer, 1);
+    if (own(p, "instant")) { u.instant = Object.assign({}, u.instant, p.instant); }
+    if (own(p, "atkFx")) {
+      u.resources = u.resources || {};
+      let cur = hungAtkFx(u);
+      Object.entries(p.atkFx).forEach(([k, on]) => { if (on && !cur.includes(k)) cur.push(k); if (!on) cur = cur.filter(x => x !== k); });
+      u.resources.nextAtkFx = cur;
+    }
+    if (p.layers) p.layers.forEach((l, i) => { if (own(l, "type")) u.layers[i].type = l.type; });
     if (p.layers) p.layers.forEach((l, i) => dmApplyLayer(u, i, own(l, "current") ? l.current : Math.min(u.layers[i].current, own(l, "max") ? l.max : u.layers[i].max), own(l, "max") ? l.max : null));
     // hp is an explicit shorthand for the innermost layer; layers edits every layer.
     if (own(p, "hp") && u.layers.length) dmApplyLayer(u, u.layers.length - 1, p.hp, null);
@@ -289,7 +323,9 @@
       const maxKey = k + "Max";
       if (own(p, k) || own(p, maxKey)) u[k] = Math.min(own(p, k) ? p[k] : Math.max(0, Number(u[k]) || 0), Math.max(0, Number(u[maxKey]) || 0));
     });
-    if (p.statuses) u.statuses = Object.assign({}, u.statuses, p.statuses);
+    if (own(p, "self")) u.selfBurnStacks = p.self === "burn" ? Math.max(1, Number(u.selfBurnStacks) || 1) : 0;   // 同单机的「自我效果」
+    if (p.statuses) { u.statuses = Object.assign({}, u.statuses, p.statuses); if (own(p.statuses, "shockwave") && typeof syncShockwave === "function") syncShockwave(u, null); }
+    if (own(p, "neutralize")) notes.push(...applyNeutralize(u));
     const stun = own(p, "stunned") ? p.stunned : p.stun;
     if (stun === true) dmForceStun(u); else if (stun === false) { u.stunned = false; u._imbalanceLock = false; }
     if (!u.isPlayer && (u.dead || isInnerDepleted(u))) kill(u, notes);
@@ -322,6 +358,13 @@
           break;
         }
         case "editUnit": { const u = unit(cmd.actor); edit(u, cmd.patch, notes); publicSummary = `主持人：调整了 ${u.name} 的数据。`; break; }
+        case "copyUnit": {
+          // 和单机的「复制单位」一样：原样复制一份，名字加「 复制」；新单位从下一个允许的敌方回合起行动（同生成敌人）
+          const u = enemy(cmd.actor), made = copy(u);
+          made.id = uid(); made.name = u.name + " 复制"; state.units.push(made);
+          metadata.set(made.id, { eligibleEnemyRound: state.combatStarted ? (Number(state.turnNo) || 1) + (state.combatPhase === "enemy" ? 1 : 0) : 1 });
+          result = { id: made.id }; publicSummary = `主持人：复制了 ${u.name}。`; break;
+        }
         case "addProp": {
           const p = makeProp(cmd.kind, cmd.zone, cmd.level || 1); if (cmd.faction) p.faction = cmd.faction; if (cmd.link) p.link = cmd.link;
           state.props.push(p); if (p.kind === "battery") syncBatteryShields(); result.id = p.id; publicSummary = `主持人：在 ${p.zone} 区加入 ${p.name}。`; break;
