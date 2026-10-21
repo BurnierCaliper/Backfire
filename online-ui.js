@@ -652,7 +652,9 @@
       const focus = mineKits.includes(focusKit) ? focusKit : mineKits[0];
       return `<section class="tr-party ol-party" aria-label="队伍">${party.map(h => {
         const owner = ownerOf(h), mine = owner === own();
-        return PC.heroCardHtml(h, { gm: false, buttons: mine ? "online" : false, owner: owner ? playerName(owner) : "", mine, focusable: mine && mineKits.length > 1, focus: mine && h.kit === focus });
+        // 自己的角色卡下面接属性点申请（attrMarkup 要 view.units 里的 attrs / attrPicks，队伍卡数据里没有）
+        const u = mine ? units.find(x => x.id === h.id) : null;
+        return PC.heroCardHtml(h, { gm: false, buttons: mine ? "online" : false, owner: owner ? playerName(owner) : "", mine, focusable: mine && mineKits.length > 1, focus: mine && h.kit === focus }) + (u ? attrMarkup(u) : "");
       }).join("")}</section>`;
     }
     function observeMessages() {

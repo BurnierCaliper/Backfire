@@ -572,6 +572,8 @@ test("联机：主持人用战斗模板开战，玩家一进战斗就看到摆�
   const shot = async (page, name) => { if (process.env.BACKFIRE_SHOTS) await page.screenshot({ path: path.join(process.env.BACKFIRE_SHOTS, name + ".png") }); };
   await host.evaluate(() => { OnlineGame.start(); });
   await alice.waitForFunction(() => OnlineGame.getView().screen === "exploration");
+  await alice.waitForFunction(() => Array.isArray(OnlineGame.getView().packet?.party) && OnlineGame.getView().packet.party.length > 0);
+  const partyFrom = f.wire.length;
   await host.evaluate(() => battleTemplateSave({ name: "桥头伏击", board: 3, weather: "snow", playerZone: 1,
     enemies: [{ preset: "thug_knife", level: 2, zone: 3 }, { preset: "thug_hammer", level: 2, zone: 2 }],
     fields: { 2: { acid: true } }, gaps: { "2-3": { type: "wall", hp: 30 } }, props: [{ kind: "boom", zone: 2, faction: "enemy" }] }));
@@ -582,6 +584,10 @@ test("联机：主持人用战斗模板开战，玩家一进战斗就看到摆�
   await alice.waitForFunction(() => (OnlineGame.getView().packet?.state?.units || []).filter(u => !u.isPlayer).length === 2);
   const seen = await alice.evaluate(() => { const s = OnlineGame.getView().packet.state; return { zoneMode: s.zoneMode, weather: s.weather, foes: s.units.filter(u => !u.isPlayer).map(u => u.zone).sort(), props: (s.props || []).length, wall: (s.gaps || {})["2-3"]?.type, started: !!s.combatStarted }; });
   assert.deepEqual(seen, { zoneMode: 3, weather: "snow", foes: [2, 3], props: 1, wall: "wall", started: false });
+  // 战斗里的包不带队伍卡（探索时带，见上面）：玩家战斗画面不画它，带上只是白占流量
+  const battlePackets = logicalPackets(f.wire.slice(partyFrom)).filter(r => r.packet.screen === "battle");
+  assert.ok(battlePackets.length > 0);
+  assert.ok(battlePackets.every(r => r.packet.party == null), "战斗包不该带 party");
   await shot(alice, "tpl-2-player-battle"); await shot(host, "tpl-3-host-battle");
   assert.deepEqual(f.errors, []);
 });
