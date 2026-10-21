@@ -702,7 +702,9 @@
       items: arr(s.items).slice(0, 300).filter(obj).map(r => ({ id: str(r.id, 60), name: str(r.name, 60), qty: num(r.qty), unitPrice: r.unitPrice == null ? null : num(r.unitPrice),
         owner: str(r.owner, 40), ok: !!r.ok, reason: str(r.reason, 20) })).filter(r => r.id),
       buyback: arr(s.buyback).slice(0, 100).filter(obj).map(r => ({ token: str(r.token, 20), id: str(r.id, 60), name: str(r.name, 60), qty: num(r.qty), price: num(r.price),
-        owner: str(r.owner, 40), seller: str(r.seller, 40) })).filter(r => r.token)
+        owner: str(r.owner, 40), seller: str(r.seller, 40) })).filter(r => r.token),
+      last: obj(s.last) ? { seq: num(s.last.seq), kind: s.last.kind === "buyback" ? "buyback" : "sell", by: str(s.last.by, 40), ok: !!s.last.ok, total: num(s.last.total),
+        payout: arr(s.last.payout).slice(0, 12).filter(obj).map(p => ({ to: str(p.to, 40), amount: typeof p.amount === "number" && isFinite(p.amount) ? Math.floor(p.amount) : 0 })), msg: str(s.last.msg, 200) } : null
     };
   }
   /** 跑团诊所：自己的角色的改造信息（肉体上限、可改上限、改造率、单价、现在的方案）和最近一条申请的状态 */

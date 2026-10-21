@@ -43,6 +43,29 @@ test("shopSellCheck：任务道具 / 图纸 / 已装备 / 无标准价；改装�
   assert.deepEqual(J(c.shopSellCheck("medkit")), { ok: true, reason: "" });
 });
 
+test("地图与票券不能卖：map_* / ticket_* / 手册「地图与票券」整组", () => {
+  const { c, R, run } = solo();
+  const group = vm.runInContext(`HANDBOOK_SHOP.filter(r => r.group === "地图与票券").map(r => r.give.item)`, c);
+  assert.ok(group.includes("map_desert") && group.includes("ticket_dome"));
+  for (const id of group) assert.deepEqual(J(c.shopSellCheck(id)), { ok: false, reason: "地图与票券" }, id);
+  c.ITEM_CATALOG.map_new = { name: "新地图", price: 1000 };       // 新加的 map_ 也一并拦下
+  c.ITEM_CATALOG.ticket_x = { name: "新票", price: 1000 };
+  assert.equal(c.shopSellCheck("map_new").reason, "地图与票券");
+  assert.equal(c.shopSellCheck("ticket_x").reason, "地图与票券");
+  assert.equal(c.shopSellCheck("rope").ok, true);                  // 同表其他组照常
+  c.bagAdd("ticket_dome", 1); c.bagAdd("map_desert", 1);
+  const v = J(R.shopSellView(run));
+  assert.equal(v.items.find(x => x.id === "ticket_dome").reason, "地图与票券");
+  assert.throws(() => R.sellItem(run, { id: "map_desert" }), /地图与票券/);
+  assert.equal(c.bagCount("map_desert"), 1);
+});
+test("跑团也拦地图与票券", () => {
+  const { c, m } = trpg();
+  c.bagAdd("ticket_dome", 1); c.trpgMerchantOpen(m.id);
+  assert.throws(() => c.trpgShopSell("kolt", "ticket_dome", 1), /地图与票券/);
+  assert.equal(c.S.state.kuizhi, 0);
+});
+
 /* ---------- 单机单局 ---------- */
 test("单机：run.query shopSell 列出背包（改装件不列），卖的钱进 state.kuizhi", () => {
   const { c, run } = solo();
@@ -184,4 +207,34 @@ test("跑团联机接线：shopSell / shopBuyback 消息、packet.shopSell 投�
   const pkt = V.projectPacket({ type: "result", shopSell: J(c.trpgShopSellView()) }, { recipientId: "p1", gmId: "host" });
   assert.deepEqual(pkt.shopSell.items, [{ id: "food_can", name: c.ITEM_CATALOG.food_can.name, qty: 1, unitPrice: 250, owner: "shared", ok: true, reason: "" }]);
   assert.doesNotMatch(JSON.stringify(pkt), /shp/);
+});
+
+test("结果编号 seq：每个结果递增、两笔一模一样的也不同；离店后接着编号；视图 last 带 seq", () => {
+  const { c, R, run } = solo();
+  c.bagAdd("medkit", 3);
+  const a1 = R.sellItem(run, { id: "medkit" }), a2 = R.sellItem(run, { id: "medkit" });
+  assert.equal(a1.total, a2.total); assert.equal(a2.seq, a1.seq + 1);
+  const v = J(R.shopSellView(run));
+  assert.equal(v.last.seq, a2.seq); assert.equal(v.last.kind, "sell");
+  const b = R.buybackItem(run, { token: v.buyback[0].token });
+  assert.equal(b.seq, a2.seq + 1); assert.equal(J(R.shopSellView(run)).last.kind, "buyback");
+  run.taskNo = (run.taskNo || 0) + 1;      // 换地方：回购单清空，编号不归零
+  assert.equal(J(R.shopSellView(run)).last, null);
+  assert.ok(R.sellItem(run, { id: "medkit" }).seq > b.seq);
+});
+test("seq：联机 last 只给卖的人那边；跑团同样递增、关店后接着编号、投影保留", () => {
+  const { c, O, d } = online();
+  c.bagAdd("fx_burn", 2);
+  O.handle("host", { type: "rogue.act", command: { action: "sellItem", kit: "kolt", id: "fx_burn", owner: "shared" } });
+  assert.equal(O.viewFor("p2").shopSell.last, null);
+  assert.equal(O.viewFor("host").shopSell.last.seq, 1);
+  const t = trpg();
+  t.c.bagAdd("medkit", 2); t.c.trpgMerchantOpen(t.m.id);
+  const s1 = t.c.trpgShopSell("kolt", "medkit", 1), s2 = t.c.trpgShopSell("kolt", "medkit", 1);
+  assert.equal(s2.seq, s1.seq + 1);
+  const pkt = V.projectPacket({ type: "result", shopSell: J(t.c.trpgShopSellView(["kolt"])) }, { recipientId: "p1", gmId: "host" });
+  assert.equal(pkt.shopSell.last.seq, s2.seq);
+  assert.equal(J(t.c.trpgShopSellView(["helu"])).last, null);
+  t.c.trpgMerchantOpen(null); t.c.bagAdd("medkit", 1); t.c.trpgMerchantOpen(t.m.id);
+  assert.ok(t.c.trpgShopSell("kolt", "medkit", 1).seq > s2.seq);
 });
