@@ -188,8 +188,9 @@
   }
   /**
    * 摆数字：numbers = cues().numbers（或其中这一段的），rectOf(id) = 铭牌现在的屏幕矩形（适配器的），view = { width, height, top, bottom }（上下被界面盖住的像素）。
-   * 先放在铭牌头顶正中，同一块铭牌上的第二个、第三个左右错开；和已经放好的压到了就往上叠，顶到顶栏了再往旁边挪。
-   * 每个数字占的范围连「往上飘」的那一截一起算，所以飘起来也不压住。返回 [{ ...数字, x, y（中心）, w, h, size 字号, ink 描边, tilt 歪几度 }]
+   * 先放在铭牌头顶正中，同一块铭牌上的第二个、第三个左右错开；和已经放好的压到了就往上叠，顶到顶栏了换旁边一列（右、左、再右……）从铭牌头顶重新叠。
+   * 每个数字占的范围连「往上飘」的那一截一起算，所以飘起来也不压住；实在放不下（画面挤满了）就不弹这一个，宁可少一个也不压住。
+   * 返回 [{ ...数字, x, y（中心）, w, h, size 字号, ink 描边, tilt 歪几度, box 占的范围 }]
    */
   function placeNumbers(numbers, rectOf, view) {
     const N = FX.num, out = [], used = new Map();
@@ -204,19 +205,21 @@
       const k = used.get(n.unitId) || 0;
       used.set(n.unitId, k + 1);
       const side = k === 0 ? 0 : (k % 2 ? 1 : -1) * Math.ceil(k / 2);
-      let cx = clamp(r.x + side * N.spread * r.w, w / 2, W - w / 2);
+      const cx = r.x + side * N.spread * r.w;
       const place = (x, bottom) => ({ x0: x - w / 2, x1: x + w / 2, y0: bottom - h - N.rise, y1: bottom });
-      let b = place(cx, r.top - N.lift);
-      for (let guard = 0; guard < 80; guard++) {
-        const p = out.find(q => hits(b, q.box));
-        if (!p) break;
-        const up = place(cx, p.box.y0 - N.gap - 0.01);
-        if (up.y0 >= top) { b = up; continue; }
-        // 顶到顶栏：回到铭牌头顶的高度，往右边（再不行左边）挪开
-        cx = p.box.x1 + N.gap + w / 2 + 0.01;
-        if (cx + w / 2 > W) cx = Math.max(w / 2, p.box.x0 - N.gap - w / 2 - 0.01);
-        b = place(cx, Math.max(top + h + N.rise, b.y1));
+      const start = Math.max(r.top - N.lift, top + h + N.rise);     // 铭牌贴着顶栏时，数字压在铭牌上也不顶进顶栏
+      let b = null;
+      for (let c = 0; c < 40 && !b; c++) {
+        const off = c === 0 ? 0 : (c % 2 ? 1 : -1) * Math.ceil(c / 2);
+        const x = clamp(cx + off * (w + N.gap), w / 2, W - w / 2);
+        let cand = place(x, start);
+        for (let g = 0; g < 60 && cand.y0 >= top; g++) {
+          const p = out.find(q => hits(cand, q.box));
+          if (!p) { b = cand; break; }
+          cand = place(x, p.box.y0 - N.gap - 0.01);
+        }
       }
+      if (!b) return;
       out.push(Object.assign({}, n, { x: (b.x0 + b.x1) / 2, y: b.y1 - h / 2, w, h, size, ink, tilt: N.tilt[i % N.tilt.length], box: b }));
     });
     return out;

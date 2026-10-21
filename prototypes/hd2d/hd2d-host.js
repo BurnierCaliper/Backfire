@@ -24,10 +24,11 @@
     try { return JSON.parse(JSON.stringify(state.units)); } catch (e) { return null; }
   }
 
-  /** 挑谁打谁：先看当前行动的人，再看我方别的人；用他的普通攻击（_aa），够得着的敌人里按距离、顺序排，pick 轮流换目标 */
+  /** 挑谁打谁：先看当前行动的人，再看我方别的人；用他的普通攻击（_aa），够得着的敌人里按距离、顺序排，pick 轮流换目标。
+   *  规则不让选的不挑：下潜中、躲藏中的（app.js 的攻击结算会拒掉：「不能被选作攻击目标」） */
   function pickStrike(env, actorId, pick) {
     const G = env.G, state = env.state;
-    const foes = state.units.filter(u => !u.isPlayer && alive(u) && !u.untargetable);
+    const foes = state.units.filter(u => !u.isPlayer && alive(u) && !u.untargetable && !u.submerged && !(u.statuses && u.statuses.hide));
     if (!foes.length) return null;
     const mine = state.units.filter(u => u.isPlayer && alive(u) && !u.dying && !u.stunned && !u.weaponOf);
     const order = mine.filter(u => u.id === actorId).concat(mine.filter(u => u.id !== actorId));
@@ -70,9 +71,10 @@
   function strike(env, opts) {
     opts = opts || {};
     const G = env.G, state = env.state;
+    // 先开战（和 BattleSim.run 一样）：开场效果结算完再挑目标（例：伏咬沙鱼开场就潜进沙里，选不了）
+    if (!state.combatStarted && typeof G.startCombat === "function") G.startCombat();
     const plan = pickStrike(env, opts.actorId, opts.pick);
     if (!plan) return null;
-    if (!state.combatStarted && typeof G.startCombat === "function") G.startCombat();
     const u = plan.actor, cost = (typeof G.skillCost === "function" && G.skillCost(plan.skill.id)) || {};
     // 演示：行动点不够就补上（只为了能反复按着看），别的全照规则
     if ((u.ap || 0) < (cost.ap || 0)) u.ap = cost.ap || 0;
