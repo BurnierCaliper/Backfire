@@ -3,7 +3,8 @@
  * 远景 / 中景 / 近景看单个区域，玩家自己切（屏幕上的三段按钮、滚轮、键盘 1 / 2 / 3）：
  *   远景 far   就是布局的默认镜头（hd2d-layout.js 的 fitView）：整个战场的沙盘全貌，一个数都不改
  *   中景 mid   镜头拉近、俯角放低一点：框住选中的区，再把每个相连的区各框进来一截（share），跟着当前行动单位 / 选中的区
- *   近景 near  只框选中的那一个区（连同放大的铭牌），俯角更低、接近平视；景深焦点落在这个区，别的区糊掉（左右两边的另按横向距离糊）
+ *   近景 near  只框选中的那一个区（连同放大的铭牌），俯角再低一点（24°，看得清整个区和放大的铭牌；#237 以前是 14°，接近平视、主人嫌低）；
+ *              景深焦点落在这个区，别的区糊掉（左右两边的另按横向距离糊）
  * 这里算每一段的镜头摆在哪、朝哪、视野多大、景深焦点和糊的程度、雾跟着挪多少，以及这一段里每块铭牌抬多高（近景放大的铭牌也两两不压住）；
  * 还有段与段之间的过渡（位置、朝向、视野、焦点、景深参数一起插值，缓动）、近景里左右换相邻的区、滚轮一次跳一段。数值都在 CAMERA 里。
  * 不碰 three.js 和 DOM：Node 里 require 来测（tests/hd2d-layout.test.js），浏览器里是全局的 HD2DCamera（在 hd2d-layout.js 之后加载）。
@@ -41,16 +42,17 @@
       tilt: [22, 46], clip: 1,                                  // 以前 hd2d-scene.js 的 CAM.minElev / maxElev
       dof: { aperture: 0.0018, maxblur: 0.014, far: 1, lateral: 0, pad: 0 }   // 以前 hd2d-scene.js 的 DOF
     },
+    /* 俯角：远（布局的 30°）> 中 > 近。#237 主人试玩：近景 14° 太低，抬到 24°；中景跟着从 22° 抬到 27° */
     mid: {
       label: "中", name: "中景",
-      elevation: 22, fov: 24, margin: 0.92, share: 0.5, dist: { near: 1.6, far: 0.8 },
-      tilt: [14, 34], clip: 1.5, maxLift: 160,
+      elevation: 27, fov: 24, margin: 0.92, share: 0.5, dist: { near: 1.6, far: 0.8 },
+      tilt: [18, 38], clip: 1.5, maxLift: 160,
       dof: { aperture: 0.0016, maxblur: 0.014, far: 1.2, lateral: 0, pad: 0 }
     },
     near: {
       label: "近", name: "近景",
-      elevation: 14, fov: 28, margin: 0.94, pad: 0.25,
-      tilt: [8, 24], clip: 2.5, maxLift: 240, big: true, dim: true,
+      elevation: 24, fov: 28, margin: 0.94, pad: 0.25,
+      tilt: [16, 34], clip: 2.5, maxLift: 240, big: true, dim: true,
       dof: { aperture: 0.0009, maxblur: 0.016, far: 1.5, lateral: 3, pad: 0.4 }
     },
     /* 段与段之间的过渡：时长（秒，0.4–0.6）、缓动（EASE 里的名字）。减少动态效果时不插值，直接切过去 */

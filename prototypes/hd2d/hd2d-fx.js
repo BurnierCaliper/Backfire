@@ -20,8 +20,10 @@
   /* ---------- 配置（数值都在这里，逻辑里不写死）----------
    *   anchorY     给 attack-fx 的矩形，y 取卡片高的几成处（和 game.js / online-ui.js 一样：刀光、弹字都落在 42% 处）
    *   num.size    各种数字的基准字号（像素；远景桌面铭牌 120px 宽时是 1 倍）：dmg 普通伤害、big 大伤害（暴击，规则的 bigHitInfo 判定，数字后面加 !!）、
-   *               brk 击破、heal 治疗、block 格挡、word 状态字（灼烧、无效……投影白名单里的弹字）
-   *   num.scale   字号按「铭牌在屏幕上的宽 ÷ 基准铭牌宽」缩放，夹在这个范围里（近景放大的铭牌上数字大，远景小）
+   *               brk 击破、heal 治疗、block 格挡、word 状态字（灼烧、无效……投影白名单里的弹字）。
+   *               #237 主人试玩：伤害、击破数字小，都放大到以前的 1.5 倍（以前 dmg 22 / big 32 / brk 15 / heal 20 / block 18 / word 13）
+   *   num.scale   字号按「铭牌在屏幕上的宽 ÷ 基准铭牌宽」缩放，夹在这个范围里（近景放大的铭牌上数字大，远景小）；
+   *               下限从 0.78 抬到 0.9：远景后排的铭牌缩得小，数字也一眼看得清
    *   num.ink     墨线描边粗细 = 字号 × ink；num.pad 贴纸底（大伤害 / 击破）四周多出来的边（× 字号）
    *   num.glyph   估算字宽（× 字号）：数字、汉字、别的；num.lineH 行高
    *   num.lift    数字底边离铭牌上沿多高；num.gap 两个数字之间至少留的空；num.rise 消失前往上飘多少（排位置时也让出这么多，飘起来也不压住）
@@ -31,7 +33,7 @@
    *   num.colors  属性色（和 attack-fx.js 的 COL 一样，测试核对）、击破 / 治疗 / 格挡 / 墨线 / 贴纸底的颜色
    *   timing      每一段打中之间隔多久、击倒的红叉晚多久（毫秒，跟着演出倍率走）
    *   paper       纸片感（打中的那一下）：attack-fx 的画布按镜头俯角在竖直方向压扁一点（一张贴纸立在沙盘上、被斜着看：压扁 = cos(俯角)，
-   *               远景 30° ≈ 0.87、中景 22° ≈ 0.93、近景 14° ≈ 0.97，不小于 squash.min），脚下地台上投一道淡影子（地上的椭圆：
+   *               远景 30° ≈ 0.87、中景 27° ≈ 0.89、近景 24° ≈ 0.91，不小于 squash.min），脚下地台上投一道淡影子（地上的椭圆：
    *               宽 = 贴纸大小 × shadow.w，高 = 宽 × sin(俯角) × shadow.flat，越平视越扁；透明度 opacity，显示 dur 毫秒，跟着演出倍率）。
    *               贴纸大小和 attack-fx.js 的 sizeOf 一样（铭牌屏幕宽 × size.k，夹在 min–max：近景铭牌大，贴纸跟着大；远景小）。on = 开关（网址 ?paper=0 关）
    *   push        出手时镜头稍微推一下（tiers 里的段：远景 / 中景；近景已经够近不推）：看的那一点往攻击者和目标中间挪 toward，距离乘 dist；
@@ -41,8 +43,8 @@
   const FX = {
     anchorY: 0.42,
     num: {
-      size: { dmg: 22, big: 32, brk: 15, heal: 20, block: 18, word: 13 },
-      scale: { min: 0.78, max: 1.6 },
+      size: { dmg: 33, big: 48, brk: 23, heal: 30, block: 27, word: 20 },
+      scale: { min: 0.9, max: 1.6 },
       ink: 0.16, pad: 0.22,
       glyph: { digit: 0.62, cjk: 1.0, other: 0.6 }, lineH: 1.15,
       lift: 6, gap: 4, rise: 8,
@@ -202,13 +204,14 @@
   /**
    * 摆数字：numbers = cues().numbers（或其中这一段的），rectOf(id) = 铭牌现在的屏幕矩形（适配器的），view = { width, height, top, bottom }（上下被界面盖住的像素）。
    * 先放在铭牌头顶正中，同一块铭牌上的第二个、第三个左右错开；和已经放好的压到了就往上叠，顶到顶栏了换旁边一列（右、左、再右……）从铭牌头顶重新叠。
+   * 每一列往上都放不下（铭牌贴着顶栏、头顶挤满了：近景俯角抬高、数字放大以后会这样）再从铭牌头顶往下找空（盖在铭牌上一会儿），不进技能栏。
    * 每个数字占的范围连「往上飘」的那一截一起算，所以飘起来也不压住；实在放不下（画面挤满了）就不弹这一个，宁可少一个也不压住。
    * 返回 [{ ...数字, x, y（中心）, w, h, size 字号, ink 描边, tilt 歪几度, box 占的范围 }]
    */
   function placeNumbers(numbers, rectOf, view) {
     const N = FX.num, out = [], used = new Map();
     view = view || {};
-    const W = view.width || Infinity, Hh = view.height || Infinity, top = (view.top || 0) + 2;
+    const W = view.width || Infinity, Hh = view.height || Infinity, top = (view.top || 0) + 2, floor = Hh - (view.bottom || 0) - 2;
     const hits = (a, b) => a.x0 < b.x1 + N.gap && b.x0 < a.x1 + N.gap && a.y0 < b.y1 + N.gap && b.y0 < a.y1 + N.gap;
     (numbers || []).forEach((n, i) => {
       const r = rectOf(n.unitId);
@@ -221,15 +224,24 @@
       const cx = r.x + side * N.spread * r.w;
       const place = (x, bottom) => ({ x0: x - w / 2, x1: x + w / 2, y0: bottom - h - N.rise, y1: bottom });
       const start = Math.max(r.top - N.lift, top + h + N.rise);     // 铭牌贴着顶栏时，数字压在铭牌上也不顶进顶栏
+      const colX = (c) => clamp(cx + (c === 0 ? 0 : (c % 2 ? 1 : -1) * Math.ceil(c / 2)) * (w + N.gap), w / 2, W - w / 2);
       let b = null;
-      for (let c = 0; c < 40 && !b; c++) {
-        const off = c === 0 ? 0 : (c % 2 ? 1 : -1) * Math.ceil(c / 2);
-        const x = clamp(cx + off * (w + N.gap), w / 2, W - w / 2);
+      for (let c = 0; c < 40 && !b; c++) {          // 往上叠
+        const x = colX(c);
         let cand = place(x, start);
         for (let g = 0; g < 60 && cand.y0 >= top; g++) {
           const p = out.find(q => hits(cand, q.box));
           if (!p) { b = cand; break; }
           cand = place(x, p.box.y0 - N.gap - 0.01);
+        }
+      }
+      for (let c = 0; c < 40 && !b; c++) {          // 往上都放不下：往下找空（不进技能栏）
+        const x = colX(c);
+        let cand = place(x, start);
+        for (let g = 0; g < 60 && cand.y1 <= floor; g++) {
+          const p = out.find(q => hits(cand, q.box));
+          if (!p) { b = cand; break; }
+          cand = place(x, p.box.y1 + N.gap + 0.01 + h + N.rise);
         }
       }
       if (!b) return;

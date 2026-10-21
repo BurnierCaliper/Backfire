@@ -1024,7 +1024,7 @@ function minDofFar() {
 
 test("三段镜头：远景就是默认镜头（框住整个战场）；中景框住选中的区 + 相连的区、比远景近、俯角低；近景只框选中的那一个区、比中景近、俯角更低（各种棋盘、每个区，桌面 1440×900）", () => {
   const CAMS = cams(), C = CAMS.CAMERA;
-  assert.ok(C.mid.elevation < L.CONFIG.camera.elevation && C.near.elevation < C.mid.elevation && C.near.elevation <= 18, "俯角：远 > 中 > 近（近景接近平视）");
+  assert.ok(C.mid.elevation < L.CONFIG.camera.elevation && C.near.elevation < C.mid.elevation, "俯角：远 > 中 > 近（近景抬到 22–28°，见 tests/hd2d-camera-terrain.test.js，#237）");
   for (const c of CASES) {
     const out = L.build(setupCase(c, 4), { view: DESKTOP });
     for (const z of out.zones) {
