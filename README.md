@@ -368,6 +368,16 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **补查修复：战斗规则 / 评分 / 训练场 7 条**（issue #175，backlog 战-M1 ~ M5、战-L1、战-L2）
+  - **战-M1 柯尔特普攻射程**：以前 `SKILL_RANGE.kolt_aa` 固定 0–1，电钻（只打同区）选得到距离 1 的敌人，行动点扣完才拒绝还记行动分。现在射程随刀头变：电钻 0–0、酸液炮 1–1，射程预检就拦下，不扣点不记分。（engine.js · `SKILL_RANGE_BY_STATE.kolt_aa`）
+  - **战-M2 燃烧瓶灼烧记所有者**：以前灼烧不记所有者，烧死的敌人算上一个打它的人。现在按 #114「持续伤害算状态所有者」算使用者。（items.js · `itemApplyStatus`）
+  - **战-M3 道具伤害记归属**：以前冰锥弹等即时效果道具打死敌人，击杀算上一个打过的人。现在用效果道具期间记使用者（`state._itemUserId`，`actingPlayerId` 回落到它），道具造成的伤害和挂的状态都算使用者，和手榴弹一致。（items.js · `useItemOn`，app.js · `actingPlayerId`）
+  - **战-M4 训练假人无个体值**：以前假人和精英牛带 ±10% 个体值，各角色同等级布置不同。现在生成时关掉个体值（`ENEMY_IV.off++`），同等级完全一样。（training.js · `setupField`）
+  - **战-M5 击破按实际扣掉的架势算**：以前击破分 / 击破数按名义击破，假人、背水一战、坚挺、已失衡的敌人都照加。现在按实际扣掉的架势（`result.breakSpent`）；对已失衡的敌人每一击不再加击破分（作者确认：实际扣多少算多少）。（engine.js · `applyResultToUnit`，app.js · `dealTo`）
+  - **战-L1 友军 / 飞行预检**：以前攻击友军、近战打飞行目标附赠不够，行动点先扣了才拒绝，还记行动分。现在在技能预检里拒绝，不扣点不记分。（app.js · `skillTargetError`）
+  - **战-L2 评分幕数**：以前按场上现存敌人的最高等级算，死掉的敌人移出后分数线变低。现在记下见过的最高等级（`state.scoreActLv`），开战重置。（app.js · `scoreAct` / `resetBattleRecords`）
+  - 测试：tests/combat-recheck-175.test.js（7 条，先在旧代码上失败）；tests/structures.test.js 的幕数断言改成「同一场记住最高等级，重新开战才重算」。
+
 - **敌人种族（一）：种族数据、随机 / 固定分配、六维换算、显示、主持人指定**（issue #159，设计见 `docs/enemy-race.md`；enemies.js · `ENEMY_RACES` / `applyEnemyRace` / `setEnemyRace` / `raceDelta`，run.js · `ENEMY_INFO` / `ENEMY_RACE_TABLES`，party.js · `blockChanceRaw`，gm-commands.js、battle-commands.js、battle-templates.js、trpg-commands.js、sim.js、bestiary.js、unit-card.js、online-view.js 等；测试 `tests/enemy-race.test.js`）。种族的**被动**不在这一条里（另开 issue），这里只把种族挂到敌人身上、换算六维、显示出来。
   - **以前**：敌人没有种族。**现在**：有机体的敌人生成时有种族，记在单位上 `u.race = { race, branch }`；生成的入口和个体值一样（`applyEnemyIV(u, iv, race)` 里先 `applyEnemyRace` 再个体值：`spawnEnemyGroup`、`spawnEncounterRows`、战斗命令加敌人、跑团「加敌人」、主持人生成敌人、`BattleSim.setup`）。
   - **种族配置**：`ENEMY_RACES` 是种族 / 小分支的六维修正表（人类、红皮人、犬 / 猫 / 鼠 / 牛类人及其小分支、兽人五支；牛类人三个小分支的修正各不相同）；每个敌人的种族写在 `run.js · ENEMY_INFO`（格式见下）。
