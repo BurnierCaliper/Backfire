@@ -19,7 +19,9 @@ const packs = () => { city(); return art(); };
 /** 做好了的场景（区域、场景 id、地面主题），远景里一定有的东西（userData.art） */
 const DONE = [
   { region: "外城区", scene: "street", key: "outer_street", must: ["shack", "house", "pipe", "cliff"] },
-  { region: "下水道", scene: "tunnel", key: "sewer_tunnel", must: ["tunnelWall", "tunnelRib", "lampPool", "wallLamp", "wallPipe", "outfall"] }
+  { region: "巨人城", scene: "city", key: "giant_road", must: ["curb", "sidewalk", "tower", "glassTower", "adScreen"] },
+  { region: "天网设施", scene: "facility", key: "skynet_yard", must: ["bunker", "wall", "razorWire", "fence", "floodlight", "block"] },
+  { region: "下水道", scene: "tunnel", key: "sewer_tunnel", must: ["tunnelWall", "tunnelRib", "rivet", "lightRing", "lampPool", "wallLamp", "wallPipe", "outfall"] }
 ];
 const PARTY = ["kolt", "helu", "ruby", "yuito"];
 const DESKTOP = { width: 1440, height: 900, top: 46, bottom: 160 };
@@ -232,8 +234,13 @@ test("装饰不压住铭牌（#241）：远景、中景、近景里，地台上�
         const bd = backdropOf(B, layout, "dusk");
         root.add(bd.group);
         root.updateMatrixWorld(true);
-        const things = artOf(root).filter(o => !o.obj.parent || !o.obj.parent.userData.art).map(o => ({ what: o.what, pts: pointsOf(THREE, o.obj) }));
         const b = layout.bounds, lampZ = b.minZ - L.CONFIG.lamps.back;
+        // 战场后沿后面、战场左右外面的点挡不到任何人：镜头（远 / 中 / 近景都在后沿前面、左右在战场范围里）到每个人脚下那条线上的点，
+        // 都在后沿前面、战场左右范围里。下水道的拱顶往头顶弯过来（#241 截图验收）、巨人城两边的高楼冲出画面，按「沿视线的深度」或屏幕上的外框算
+        // 会比人近 / 盖住铭牌，但它们在后沿后面 / 战场左右外面，挡不到人（铭牌是网页上的一层，永远在 3D 画面上面）
+        const inside = (p) => p.z >= b.minZ - 1e-6 && p.x >= b.minX - 1e-6 && p.x <= b.maxX + 1e-6;
+        const things = artOf(root).filter(o => !o.obj.parent || !o.obj.parent.userData.art)
+          .map(o => ({ what: o.what, pts: pointsOf(THREE, o.obj).filter(inside) })).filter(th => th.pts.length);
         artOf(bd.group).forEach(({ obj, what }) => {
           const box = new THREE.Box3().setFromObject(obj);
           layout.zones.forEach(z => {
@@ -244,6 +251,7 @@ test("装饰不压住铭牌（#241）：远景、中景、近景里，地台上�
           assert.ok(behind || aside || before, `${d.key} ${bdx.id}：远景里的 ${what} 没让开灯 / 战场（z ${box.min.z.toFixed(2)}…${box.max.z.toFixed(2)}，灯在 ${lampZ.toFixed(2)}）`);
         });
         for (const lens of lenses(layout)) {
+          assert.ok(lens.cam.pos.z >= b.minZ && lens.cam.pos.x >= b.minX && lens.cam.pos.x <= b.maxX, `${d.key} ${bdx.id} ${lens.tag}：镜头在战场后沿前面、左右在战场范围里`);
           things.forEach(th => {
             const s = screenOf(lens.cam, th.pts);
             layout.units.forEach(u => {
@@ -262,7 +270,84 @@ test("装饰不压住铭牌（#241）：远景、中景、近景里，地台上�
   } finally { P.restore(); }
 });
 
-/* ---------- 3. 下水道 ---------- */
+/* ---------- 3. 巨人城 ---------- */
+test("巨人城（#241）：战场在马路上（沥青、车道线、路沿、人行道）；两边一栋挨一栋的楼比默认镜头的画面上沿高得多（冲出画面），马路尽头一排玻璃楼；广告屏隔几秒换画面，减少动态效果时不换；蓝色调，夜里灯更亮", async (t) => {
+  const P = await protoEnv(t);
+  if (!P) return;
+  const { B, A } = P;
+  try {
+    const S = H.load().BattleSim, d = DONE.find(x => x.scene === "city");
+    for (const id of Object.keys(BOARDS)) {
+      const layout = layoutOf(BOARDS[id](S), d, "night"), b = layout.bounds, bd = backdropOf(B, layout, "night");
+      let road = null;
+      const side = { "-1": 0, "1": 0 }, ads = [];
+      bd.group.traverse(o => {
+        if (o.userData.road === "asphalt") road = o;
+        if (o.userData.art === "adScreen") ads.push(o);
+        if (o.userData.art !== "tower") return;
+        const box = new P.THREE.Box3().setFromObject(o), x = (box.min.x + box.max.x) / 2, zc = (box.min.z + box.max.z) / 2;
+        side[x < (b.minX + b.maxX) / 2 ? "-1" : "1"]++;
+        assert.ok(box.max.y > L.frameTop(layout.camera, zc) * 2, `${id}：两边的楼冲出画面（高 ${box.max.y.toFixed(1)}，画面上沿 ${L.frameTop(layout.camera, zc).toFixed(1)}）`);
+      });
+      assert.ok(side["-1"] >= 2 && side["1"] >= 2, `${id}：马路两边都有高楼（${side["-1"]} / ${side["1"]}）`);
+      assert.ok(road && road.position.y > L.CONFIG.groundY && road.position.y < 0, `${id}：战场在马路上（马路铺在地面上、比地台低）`);
+      const g = new P.THREE.Box3().setFromObject(road);
+      assert.ok(g.min.x < b.minX && g.max.x > b.maxX && g.min.z < b.minZ && g.max.z > b.maxZ, `${id}：马路比战场宽、从战场后面一直铺到前面`);
+      assert.ok(ads.length >= 3, `${id}：楼上挂着广告屏（${ads.length}）`);
+      const before = ads.map(a => a.material);
+      for (let i = 0; i < 100; i++) bd.update(i * 0.1, 0);
+      assert.deepEqual(ads.map(a => a.material), before, `${id}：减少动态效果时广告屏不换`);
+      for (let i = 0; i < 100; i++) bd.update(i * 0.1, 0.1);
+      assert.ok(ads.some((a, i) => a.material !== before[i]), `${id}：广告屏隔几秒换一张画面`);
+      bd.dispose();
+    }
+    const TH = { day: { hemi: 0.9, sunI: 2.7, rimI: 0.55, exposure: 1, lamp: 0.25, fog: 0xd6b985, ground: 0x6e5b42, hemiSky: 0xfff1d8, hemiGround: 0x735c40, sun: 0xfff0d2, rim: 0xfff0c8, sky: ["#f6e3b4", "#ecc98c", "#dcac6a", "#c29a66"], grade: { temp: [1, 1, 1] } } };
+    TH.night = Object.assign({}, TH.day, { hemi: 0.6, sunI: 1.25, lamp: 1.5 });
+    const day = A.lighting(TH, "day", "giant_road").T, night = A.lighting(TH, "night", "giant_road").T, rgb = (c) => [(c >> 16) & 255, (c >> 8) & 255, c & 255];
+    [day.fog, day.hemiSky].forEach(c => { const [r, , bl] = rgb(c); assert.ok(bl > r - 40, "蓝色调：雾、天光往蓝靠了"); });
+    assert.ok(day.grade.temp[2] > day.grade.temp[0], "调色偏冷蓝");
+    assert.ok(night.lamp > TH.night.lamp && night.hemi > TH.night.hemi, "夜里灯火通明：灯更亮、环境光更亮");
+  } finally { P.restore(); }
+});
+
+/* ---------- 4. 天网设施 ---------- */
+test("天网设施（#241）：混凝土场地，战场四周一圈黄黑警示线（平铺、在战场外面）；后面一排掩体、一道墙，墙头一卷蛇腹铁丝网；左右两边铁丝网围栏；探照灯夜里更亮；调色压饱和度（硬核）", async (t) => {
+  const P = await protoEnv(t);
+  if (!P) return;
+  const { B, A, THREE } = P;
+  try {
+    const S = H.load().BattleSim, d = DONE.find(x => x.scene === "facility");
+    for (const id of Object.keys(BOARDS)) {
+      const layout = layoutOf(BOARDS[id](S), d, "night"), b = layout.bounds, bright = {};
+      for (const theme of ["day", "night"]) {
+        const bd = backdropOf(B, layout, theme), strips = [], fences = [];
+        let wall = null, wire = null, flood = null;
+        bd.group.traverse(o => {
+          if (o.userData.yard === "hazard") strips.push(new THREE.Box3().setFromObject(o));
+          if (o.userData.art === "fence") fences.push(new THREE.Box3().setFromObject(o));
+          if (o.userData.art === "wall") wall = new THREE.Box3().setFromObject(o);
+          if (o.userData.art === "razorWire") wire = new THREE.Box3().setFromObject(o);
+          if (o.userData.art === "floodlight" && !flood) o.traverse(m => { if (m.isMesh && m.material.isMeshBasicMaterial && !flood) flood = m.material.color.r; });
+        });
+        assert.equal(strips.length, 4, `${id}：战场四周四条警示线`);
+        strips.forEach(s => {
+          assert.ok(s.max.y - s.min.y < 0.01, `${id}：警示线平铺在地上`);
+          const out = s.max.z < b.minZ || s.min.z > b.maxZ || s.max.x < b.minX || s.min.x > b.maxX;
+          assert.ok(out, `${id}：警示线在战场外面`);
+        });
+        assert.ok(wall && wire && wire.min.y >= wall.max.y - 0.3 && wire.max.z <= wall.max.z + 0.3, `${id}：墙头一卷铁丝网`);
+        assert.ok(fences.length === 2 && fences.some(f => f.max.x < b.minX) && fences.some(f => f.min.x > b.maxX), `${id}：左右两边各一道铁丝网围栏`);
+        bright[theme] = flood;
+        bd.dispose();
+      }
+      assert.ok(bright.night > bright.day, `${id}：探照灯夜里更亮`);
+    }
+    const T = A.lighting({ day: { fog: 0xd6b985, hemiSky: 0xfff1d8, hemiGround: 0x735c40, sun: 0xfff0d2, sky: ["#f6e3b4"], grade: { sat: 1 } } }, "day", "skynet_yard").T;
+    assert.ok(T.grade.sat < 0.9 && T.grade.contrast > 1, "调色：压饱和度、拉对比（硬核）");
+  } finally { P.restore(); }
+});
+
+/* ---------- 5. 下水道 ---------- */
 test("下水道（#241）：在巨大圆管的里面——管壁从灯后面往后往上弯，最高处比默认镜头的画面上沿高、在天幕前面（看不到天）；地上铺满污水，贴图在流，减少动态效果时不流；光照不分白天黑夜，比外城区暗", async (t) => {
   const P = await protoEnv(t);
   if (!P) return;
@@ -277,17 +362,30 @@ test("下水道（#241）：在巨大圆管的里面——管壁从灯后面往�
       assert.ok(sh.zw < b.minZ - L.CONFIG.lamps.back, `${id}：管壁在灯后面`);
       assert.ok(top.z > env.skyZ + 0.7, `${id}：管壁弯到竖直的地方还在天边那条远景前面`);
       assert.ok(top.y > L.frameTop(layout.camera, top.z) + 1, `${id}：管壁比默认镜头的画面上沿高（看不到天）`);
+      // 截图验收（主人：「几乎看不出在巨大圆形管道里面」）：管壁过了竖直再往头顶弯成拱顶，灯带一圈圈从管底亮到拱顶；天幕、天边的远景收起来
+      assert.ok(K.TUNNEL.arc > Math.PI / 2 + 0.5 && K.TUNNEL.arc < Math.PI - 0.3, `${id}：管壁弯过竖直成拱顶（又不弯到镜头看到管壁外面）`);
       const bd = backdropOf(B, layout, "night");
-      let water = null;
-      bd.group.traverse(o => { if (o.userData.flow === "sewage") water = o; });
+      bd.group.children.filter(o => o.userData.layer === "sky" || o.userData.layer === "band").forEach(o => assert.equal(o.visible, false, `${id}：管子里看不到 ${o.userData.layer}`));
+      let rings = 0;
+      bd.group.traverse(o => { if (o.userData.art === "lightRing") rings = o.children.length; });
+      assert.ok(rings >= 3, `${id}：管壁上一圈圈的灯带（${rings}）`);
+      const flow = {};
+      bd.group.traverse(o => { if (o.userData.flow) flow[o.userData.flow] = o; });
+      const water = flow.sewage;
       assert.ok(water, `${id}：地上有污水`);
+      assert.ok(flow.streak && flow.shine, `${id}：水面上有流动的亮纹、灯的倒影`);
       water.updateMatrixWorld(true);
       assert.ok(water.position.y < 0 && water.position.y > L.CONFIG.groundY, `${id}：污水在地面上、比地台低`);
-      const tex = water.material.map, x0 = tex.offset.x;
+      const tex = water.material.map, x0 = tex.offset.x, s0 = flow.streak.material.map.offset.x, h0 = flow.shine.material.map.offset.x;
       bd.update(1, 0);
       assert.equal(tex.offset.x, x0, `${id}：减少动态效果时污水不流`);
+      assert.equal(flow.streak.material.map.offset.x, s0, `${id}：减少动态效果时亮纹不流`);
+      assert.equal(flow.shine.material.map.offset.x, h0, `${id}：减少动态效果时倒影不晃`);
       bd.update(1.5, 0.5);
       assert.notEqual(tex.offset.x, x0, `${id}：污水在流`);
+      const dw = tex.offset.x - x0, ds = flow.streak.material.map.offset.x - s0;
+      assert.ok(ds / flow.streak.material.map.repeat.x > dw / tex.repeat.x * 1.5, `${id}：亮纹比污水流得快（两层流速不同；贴图走的 ÷ 重复次数 = 世界里走的 ÷ 平面宽）`);
+      assert.notEqual(flow.shine.material.map.offset.x, h0, `${id}：倒影在晃`);
       bd.dispose();
     }
     const TH = { day: { hemi: 0.9, sunI: 2.7, rimI: 0.55, exposure: 1, lamp: 0.25, fog: 0xd6b985, ground: 0x6e5b42, hemiSky: 0xfff1d8, hemiGround: 0x735c40, sun: 0xfff0d2, rim: 0xfff0c8, sky: ["#f6e3b4", "#ecc98c", "#dcac6a", "#c29a66"], grade: {} } };
@@ -297,6 +395,58 @@ test("下水道（#241）：在巨大圆管的里面——管壁从灯后面往�
     const street = A.lighting(TH, "day", "outer_street").T;
     assert.ok(lit[0].T.hemi < street.hemi && lit[0].T.sunI < street.sunI, "下水道比外城区（白天）暗");
     assert.ok(A.luma(lit[0].T.fog) < 0.15 && A.luma(lit[0].T.sky[0]) < 0.15, "管子里的雾、天都是暗的");
+  } finally { P.restore(); }
+});
+
+test("下水道里不显示天上来的天气（#241 截图验收）：雷鸣不画乌云、不劈闪电、不闪白，只让管子里的灯闪一下；雨、雪、沙暴不画，2D 层不叠；酷暑只留 3D 的热浪；别的场景、微光 / 相位照旧", async (t) => {
+  const A = packs(), WX = require("../prototypes/hd2d/hd2d-wfx.js");
+  const W = (w) => A.weather("sewer_tunnel", w);
+  assert.deepEqual(W("thunder"), { fx: "none", wfx: "none", flicker: true }, "雷鸣：3D、2D 都不画，灯闪一下");
+  ["acid", "snow", "sand"].forEach(w => assert.deepEqual(W(w), { fx: "none", wfx: "none", flicker: false }, w + "：天上来的，不画"));
+  assert.deepEqual(W("heat"), { fx: "heat", wfx: "none", flicker: false }, "酷暑：留 3D 的热浪，不要 2D 那层暖光");
+  ["glow", "phase", "none", undefined].forEach(w => assert.deepEqual(W(w), { fx: w || "none", wfx: w || "none", flicker: false }, String(w) + "：照旧"));
+  ["thunder", "acid", "snow", "sand", "heat"].forEach(w => {
+    assert.deepEqual(A.weather("outer_street", w), { fx: w, wfx: w, flicker: false }, "外城区的 " + w + " 照旧");
+    assert.equal(WX.plan({ weather: W(w).wfx, theme: "night", tier: "far" }).weather, "none", "下水道的 2D 层不叠 " + w);
+  });
+  // 接线：3D 天气、远景按它（hd2d-scene.js）；2D 层 sync 时先问它（hd2d-wfx.js · indoor，按布局的地面主题）
+  const scene = fs.readFileSync(path.join(DIR, "hd2d-scene.js"), "utf8"), wsrc = fs.readFileSync(path.join(DIR, "hd2d-wfx.js"), "utf8");
+  assert.match(scene, /const fx = ART\.weather\(layout\.ground, state\.meta\.weather \|\| "none"\)\.fx;/, "场景按地面主题换 3D 的天气");
+  assert.match(scene, /weatherPlan\(fx, state\.meta\.theme\)/, "远景的乌云按换过的天气");
+  assert.match(scene, /weather\.set\(fx, state\.meta\.theme\)/, "天气粒子、雷击按换过的天气");
+  assert.match(wsrc, /const p = plan\(indoor\(s, layout\)\)/, "2D 层按换过的天气");
+  const had = Object.prototype.hasOwnProperty.call(globalThis, "HD2DSceneArt"), keep = globalThis.HD2DSceneArt;
+  globalThis.HD2DSceneArt = A;
+  try {
+    assert.equal(WX.indoor({ weather: "thunder", theme: "night" }, { ground: "sewer_tunnel" }).weather, "none", "下水道：2D 层不叠雷鸣");
+    assert.equal(WX.indoor({ weather: "thunder", layout: { ground: "outer_street" } }).weather, "thunder", "外城区照旧");
+    assert.equal(WX.indoor({ weather: "glow", layout: { ground: "sewer_tunnel" } }).weather, "glow", "下水道的微光照旧");
+  } finally { if (had) globalThis.HD2DSceneArt = keep; else delete globalThis.HD2DSceneArt; }
+  // 雷鸣时管子里的灯跟着闪一下（真 three.js）：远景拿到的是规则上的天气；减少动态效果时不闪
+  const P = await protoEnv(t);
+  if (!P) return;
+  try {
+    const S = H.load().BattleSim, d = DONE.find(x => x.scene === "tunnel"), layout = layoutOf(BOARDS.line3(S), d, "night");
+    const build = (w) => P.B.buildBackdrop("sewer_tunnel", layout.bounds, "night", layout.camera, Object.assign({}, THEMES.night, { weather: w }));
+    const calm = build("none");
+    assert.equal(calm.group.userData.thunder, undefined, "不打雷时灯不跟着闪");
+    calm.dispose();
+    const bd = build("thunder"), beat = bd.group.userData.thunder;
+    assert.ok(beat, "打雷时管子里的灯跟着闪");
+    let ring = null, pool = null;
+    bd.group.traverse(o => { if (o.userData.art === "lightRing") ring = o.children[0].material; if (o.userData.art === "lampPool") pool = o.material; });
+    const full = ring.color.r;
+    for (let i = 0; i < 300; i++) bd.update(i * 0.05, 0);
+    assert.equal(beat.n, 0, "减少动态效果时不闪");
+    assert.equal(ring.color.r, full, "减少动态效果时灯一直亮着");
+    let darkest = 1, t0 = 0;
+    for (let i = 0; i < 600; i++) { bd.update(t0 += 0.05, 0.05); darkest = Math.min(darkest, pool.color.r); }
+    assert.ok(beat.n >= 2, `30 秒里外面打了几次雷（${beat.n}）`);
+    assert.ok(darkest < 0.5, `打雷时灯暗下去过（最暗 ${darkest}）`);
+    for (let i = 0; i < 40 && beat.active; i++) bd.update(t0 += 0.05, 0.05);
+    bd.update(t0 += 0.01, 0.01);
+    if (!beat.active) assert.ok(Math.abs(ring.color.r - full) < 1e-9 && pool.color.r === 1, "闪完灯恢复原样");
+    bd.dispose();
   } finally { P.restore(); }
 });
 

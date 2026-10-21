@@ -524,7 +524,8 @@ const KIT = { THREE, BACKDROP, NOISE_GLSL, rng, flatGeometry, smokeTexture, band
  * camera 是布局算好的默认镜头（hd2d-layout.js 的 fitView），用来算「画面上沿那条视线」有多高；
  * colors = { sky: [地平线 → 天顶 4 个颜色], fog, storm, skyline, dust }（storm = 雷鸣：天空换成 BACKDROP.storm 的风暴色、加乌云和低云；
  * skyline = 楼群的高度倍数，外城区矮、巨人城高；dust = 沙暴的沙尘 { color, sky, haze, veil, sun }：天幕往 color 靠 sky、贴地融进雾里的那一截高 haze、
- * 中景剪影至少往雾色靠 veil、太阳的光晕剩 sun 成，见 hd2d-weather.js 的 WEATHER.sand）。返回 { group, update(t, dt, { flash, x }), farPoint(r), dispose }。
+ * 中景剪影至少往雾色靠 veil、太阳的光晕剩 sun 成，见 hd2d-weather.js 的 WEATHER.sand；weather = 规则上的天气，原样交给区域场景的美术包，#241）。
+ * 返回 { group, update(t, dt, { flash, x }), farPoint(r), dispose }。
  */
 export function buildBackdrop(kind, bounds, themeName, camera, colors) {
   colors = colors || {};
@@ -550,8 +551,8 @@ export function buildBackdrop(kind, bounds, themeName, camera, colors) {
   const hazeOf = (k) => new THREE.Color(sky[0]).lerp(fog, 0.5).lerp(new THREE.Color(T.body), 1 - k);   // k 越大越靠近天边的雾色
 
   /* 1. 天幕（雷鸣时：风暴色 + 乌云，星星和亮云不画，夕阳只透出一点；沙暴时：沙色、贴地的雾更高，星星和亮云也看不见）：
-   *    一块平的布景板，立在战场后沿再往后 skyGap，往左右各伸出去 wide */
-  const rz = hz + BACKDROP.skyGap, skyZ = cz - rz, x0 = cx - hx - BACKDROP.wide, x1 = cx + hx + BACKDROP.wide;
+   *    一块平的布景板，立在战场后沿再往后 skyGap（区域场景的美术包可以挪远：矿坑在天幕前面，#242），往左右各伸出去 wide */
+  const rz = hz + ((ART.skyGap && ART.skyGap(kind, bounds, cam)) || BACKDROP.skyGap), skyZ = cz - rz, x0 = cx - hx - BACKDROP.wide, x1 = cx + hx + BACKDROP.wide;
   const skyM = keep(skyMaterial(sky, {
     camY: cam.pos.y, camZ: cam.pos.z, slope, fog, haze: dust ? dust.haze : 0,
     sun: dusk ? [0.3, 0.12, 0.09] : night ? [0.22, 0.9, 0.05] : [0.28, 0.75, 0.16],
@@ -653,7 +654,7 @@ export function buildBackdrop(kind, bounds, themeName, camera, colors) {
   const depthAt = (a) => M3.near + a * (M3.far - M3.near);
 
   // 区域场景（#242）：中景、矿坑、战场周围的装饰、环境动画由美术包摆（env 是这里算好的位置、材质和小工具）；没登记的照旧
-  const art = ART.backdrop(KIT, kind, { group, anims, keep, std, mats, spot, place, depthAt, topY, cx, cz, hx, hz, skyZ, x0, x1, bandH, r, theme: themeName, T, hazeOf, fog, sky, cam, storm, blinker, smoke });
+  const art = ART.backdrop(KIT, kind, { group, anims, keep, std, mats, spot, place, depthAt, topY, cx, cz, hx, hz, skyZ, x0, x1, bandH, r, theme: themeName, T, hazeOf, fog, sky, cam, storm, blinker, smoke, weather: colors.weather || "none" });
   if (art) {
     // 美术包已经摆好了
   } else if (kind === "mine") {
