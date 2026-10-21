@@ -380,7 +380,8 @@
       const give = `<div class="tr-row">随机生成 <button class="g-btn small" data-part-rand="C">C 级 +1</button><button class="g-btn small" data-part-rand="B">B 级 +1</button></div>
         <div class="tr-row">给予改装件 <select id="tr-part-give">${partOpts(p => `<option value="${esc(weaponPartItemId(p))}">${esc(weaponPartLabel(p))} · ${esc(weaponPartText(p))}</option>`)}</select>
           <button class="g-btn small" id="tr-part-give-btn">放进背包 +1</button></div>`;
-      return `<p class="r-hint">手册：升级武器需要找到工作站；${U.selfMaxLevel} 级以上无法靠自己升级，要找专门的武器工匠（材料 + 加工费，不同工匠的费用要求不一样，按剧情改费用）。材料在商店「材料」里买，或在背包里给予。</p>${rows}
+      const openBox = `<div class="tr-row"><label class="tr-pick"><input type="checkbox" id="tr-smith-open" ${TRPG.smithOpen ? "checked" : ""}>工匠向联机玩家开放（玩家可以给自己的武器升级：材料 + 参考加工费，费用从这名角色的钱包出）</label></div>`;
+      return openBox + `<p class="r-hint">手册：升级武器需要找到工作站；${U.selfMaxLevel} 级以上无法靠自己升级，要找专门的武器工匠（材料 + 加工费，不同工匠的费用要求不一样，按剧情改费用）。材料在商店「材料」里买，或在背包里给予。</p>${rows}
         <h3>改装槽 <button class="g-btn small" data-armory="${esc((heroes()[0] || {}).kit || "")}">打开武器工坊</button></h3>
         <p class="r-hint">武器等级 + 羁绊到 ${WEAPON_PART_SLOT_LEVELS.join(" 级、")} 级各开放 1 个改装槽（羁绊在「后台」里改，只解锁奖励、不提高数值）。改装件修改武器的属性补正系数；装上从背包拿走，拆下放回背包。</p>
         ${give}${slotRows}
@@ -968,7 +969,8 @@
     }).join("");
     const redeem = EFFECT_ITEMS.filter(x => x.points > 0).map(x =>
       `<button class="g-btn small" data-redeem="${esc(x.id)}" ${pts.points < x.points ? "disabled" : ""}>${esc(x.name)} · ${x.points} 积分</button>`).join("");
-    return payerHtml() + `<p class="r-hint">规则见设计文档第 5 节：简单、普通 1 小时，困难 2，极难 3（会推进时间）；失败时非壳体材料丢一半（向上取整），废料、金属留着；有对应熟练项的队友打下手给优势。
+    const openBox = `<div class="tr-row"><label class="tr-pick"><input type="checkbox" id="tr-workshop-open" ${TRPG.workshopOpen ? "checked" : ""}>工坊向联机玩家开放（玩家可以自己制作已会的配方、拆解背包里的东西；学配方仍由你在下面教会）</label></div>`;
+    return openBox + payerHtml() + `<p class="r-hint">规则见设计文档第 5 节：简单、普通 1 小时，困难 2，极难 3（会推进时间）；失败时非壳体材料丢一半（向上取整），废料、金属留着；有对应熟练项的队友打下手给优势。
         城里、工匠处的工坊五类都能做；野外休息点只能做投掷罐、弹针、增益 / 减益（主持人按剧情判断）。材料在「商店 · 制作材料（黑市）」里买或给予。</p>
       <h3>制作</h3>
       <div class="tr-up">
@@ -988,6 +990,7 @@
       <h3>拆解（不花时间）</h3>${salv || '<p class="r-hint">背包里没有能拆的东西。</p>'}`;
   };
   function bindWorkshop(P) {
+    const wo = $("tr-workshop-open"); if (wo) wo.onchange = () => act(ruleCommand("workshopOpen", { on: wo.checked }));
     const k = $("wk-kit"); if (!k) return;
     k.onchange = () => { craftForm.kit = k.value; render(); };
     $("wk-item").onchange = () => { craftForm.item = $("wk-item").value; craftForm.diff = ""; render(); };
@@ -1406,6 +1409,7 @@
       };
     });
     P.querySelectorAll("[data-bp-rm]").forEach(b => { b.onclick = () => { const [owner, kit] = b.dataset.bpRm.split(":"); act(ruleCommand("removeBlueprint", { owner, kit })); }; });
+    const so = $("tr-smith-open"); if (so) so.onchange = () => act(ruleCommand("smithOpen", { on: so.checked }));
     P.querySelectorAll("[data-up]").forEach(b => {
       b.onclick = () => {
         const [owner, kit, mode] = b.dataset.up.split(":");

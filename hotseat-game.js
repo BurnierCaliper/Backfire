@@ -12,7 +12,7 @@
   const packetListeners = new Set();
   const listeners = new Set(), authorityContext = {}, actionTypes = new Set(["skill", "move", "standUp", "useItem"]);
   const automatic = new Set(["battle.supportInfo", "battle.checkSolo", "battle.rememberCampaign", "battle.loadCampaign"]);
-  const tableTypes = new Set(["checkOpen", "checkRoll", "checkClose", "attrRequest", "attrDecide", "skillRoll", "showTitle", "purseTransfer", "shopBuy", "shopRedeem", "cyberRequest", "cyberwareInstall", "cyberwareRemove", "shopSell", "shopBuyback"]);
+  const tableTypes = new Set(["checkOpen", "checkRoll", "checkClose", "attrRequest", "attrDecide", "skillRoll", "showTitle", "purseTransfer", "shopBuy", "shopRedeem", "smithUpgrade", "workshopCraft", "workshopSalvage", "cyberRequest", "cyberwareInstall", "cyberwareRemove", "shopSell", "shopBuyback"]);
   const orderTypes = new Set(["orderPick", "orderConfirm", "orderStart", "orderMove", "orderSwapAccept", "answer", "chat", ...tableTypes]);
   const copy = value => JSON.parse(JSON.stringify(value));
   const active = () => !!(enabled && configured && session && authority && !state.solo);
@@ -214,7 +214,7 @@
       const breaker = kind === "assist" && network && job.breakerId ? state.units.find(u => u.id === job.breakerId) : null;
       const breakerKit = breaker && breaker.isPlayer ? (breaker.weaponOf || breaker.kit) : null;
       const chooser = breakerKit ? ownerByKit[breakerKit] || gm() : null;
-      const reopened = session.openAsk({ kind, jobId: job.seq || null, targetId: job.targetId || null, candidates: eligible().map(u => u.id), chooser,
+      const reopened = session.openAsk({ kind, jobId: job.seq || null, targetId: job.targetId || null, candidates: eligible().map(u => u.id), chooser, untimed: !network,
         ...(sameAsk ? { remainingMs: previous.remainingMs } : {}) });
       if (sameAsk) {
         const waiting = new Set(previous.waiting.map(p => p.operatorId));
@@ -279,6 +279,14 @@
     if ((u.attrPicks || []).length >= 1 && (u.attrPicks || []).includes(c.attr)) fail("8 级的属性点不能加在曾经加过的同一项上");
     return u;
   }
+  /** 跑团工匠 / 工坊的消息：必须是跑团模式；玩家只能用自己操控的角色（主持人哪个都行），返回角色 kit */
+  function trpgOwnKit(rawKit, deny) {
+    if (typeof TRPG === "undefined" || !TRPG.active || typeof trpgSmithUpgrade !== "function") fail("只有跑团模式有工匠和工坊");
+    const kit = String(rawKit || "");
+    const own = heroes().find(u => u.kit === kit);
+    if (!own || (sender !== gm() && session.ownerOf(own.id) !== sender)) fail(deny);
+    return kit;
+  }
   const orderHandlers = {
     orderPick: c => session.pick(sender, c.actor, c.index), orderConfirm: () => session.confirm(sender),
     orderStart: () => session.forceStart(sender), orderMove: c => session.move(sender, c.actor, c.index),
@@ -340,6 +348,31 @@
       try { notes = true ? trpgCyberwareRemove(kit, id) : trpgCyberwareInstall(kit, id); } catch (e) { fail(e.message); }
       if (root.GAME && GAME.rememberCampaign) GAME.rememberCampaign();
       session.chat(sender, "🦾 " + notes.join(" "));
+      return { notes };
+    },
+    // 跑团工匠 / 工坊（trpg.js · trpgSmithUpgrade / trpgWorkshopCraft / trpgWorkshopSalvage）：主持人开了才能用；只能动自己操控的角色，加工费从这名角色的钱包出；主持人哪个都能动
+    smithUpgrade: c => {
+      const kit = trpgOwnKit(c.kit, "只能给自己的角色升级武器");
+      let notes;
+      try { notes = trpgSmithUpgrade(kit, String(c.weapon || ""), String(c.mode || "")); } catch (e) { fail(e.message); }
+      if (root.GAME && GAME.rememberCampaign) GAME.rememberCampaign();
+      session.chat(sender, "🔨 " + notes.join(" "));
+      return { notes };
+    },
+    workshopCraft: c => {
+      const kit = trpgOwnKit(c.kit, "只能让自己的角色制作");
+      let notes;
+      try { notes = trpgWorkshopCraft(kit, String(c.item || ""), c.helper ? String(c.helper) : null); } catch (e) { fail(e.message); }
+      if (root.GAME && GAME.rememberCampaign) GAME.rememberCampaign();
+      session.chat(sender, "⚙ " + notes.join(" "));
+      return { notes };
+    },
+    workshopSalvage: c => {
+      const kit = trpgOwnKit(c.kit, "只能让自己的角色拆解");
+      let notes;
+      try { notes = trpgWorkshopSalvage(kit, String(c.item || "")); } catch (e) { fail(e.message); }
+      if (root.GAME && GAME.rememberCampaign) GAME.rememberCampaign();
+      session.chat(sender, "⚙ " + notes.join(" "));
       return { notes };
     },
     // 跑团卖东西 / 回购（shop-sell.js）：要有开着的店；玩家只能以自己操控的角色卖（钱进队伍公账）、回购（从自己钱包付）；主持人哪个都能
@@ -451,7 +484,7 @@
       return { ok: true, heroName: hero.name, toName: config.players.find(p => p.id === toId).name };
     },
     checkpoint(now = Date.now()) { if (!active()) return null; const snapshot = session.checkpoint(); return copy({ config, ownerByKit, playerId, session: snapshot,
-      askRemainingMs: snapshot.ask ? Math.max(0, snapshot.ask.deadline - now) : null, newRoundSpends, choiceNo, openingChoice: !!choice && !state.combatStarted }); },
+      askRemainingMs: snapshot.ask && snapshot.ask.deadline != null ? Math.max(0, snapshot.ask.deadline - now) : null, newRoundSpends, choiceNo, openingChoice: !!choice && !state.combatStarted }); },
     restoreOnline(saved) { network = enabled = true; configured = false; config = copy(saved.config); ownerByKit = copy(saved.ownerByKit); playerId = saved.playerId; newRoundSpends = saved.newRoundSpends || null; choiceNo = saved.choiceNo || 0;
       restoredAsk = saved.session?.ask ? { ...copy(saved.session.ask), remainingMs: saved.askRemainingMs ?? 20000 } : null;
       setupSession(); configured = true; executing++; try { session.restore(restorable(saved.session)); } finally { executing--; } authority.broadcast(); refresh(); },
