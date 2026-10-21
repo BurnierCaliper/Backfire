@@ -22,8 +22,8 @@ const VEHICLES = {
     faction: "镇压队",                         // 敌方只有这个阵营的单位能上车；空车替它代挡
     seats: 4,
     appear: 0.3,                               // 这个阵营的遭遇里出现的概率，一场最多一台
-    tokens: 0,                                 // 占几枚代币：0 = 不占（规则：车加在抽满代币的遭遇上）。只给平衡模拟工具用（照 RACE_PERK.off 的写法；
-                                               //   tools/enemy-balance.js 改成 1 测「车占 1 枚代币」），游戏里不碰；> 0 时带车的遭遇退掉这么多代币的敌人（vehiclePayTokens）
+    tokens: 1,                                 // 占几枚代币（作者 10/21 定占 1 枚）：带车的遭遇少抽这么多代币的敌人（vehiclePayTokens）；
+                                               //   0 = 不占（旧规则：车加在抽满代币的遭遇上，tools/enemy-balance.js 的「有车 · 不占代币」组改回 0 对照）
     armor: { base: 42, perLevel: 11, per5: 2 },    // 纯装甲 = base + perLevel×(等级−1) + per5×⌊等级/5⌋，按队伍人数 scaleHp
     def: { base: 5, every: 10 },               // 架势 = base + ⌊等级/every⌋
     stunMarks: 2,                              // 晕眩标记（BOSS_STUN_MARKS，和首领一样）
@@ -568,7 +568,7 @@ function vehicleRollEncounter(spec) {
   });
   return out;
 }
-/** 车占代币（VEHICLES.*.tokens > 0，只给平衡模拟工具用；默认 0 时什么都不做、不掷骰）：带车的遭遇从敌人里退掉这么多代币。
+/** 车占代币（VEHICLES.*.tokens：移动堡垒占 1 枚，作者 10/21 定；填 0 时什么都不做、不掷骰）：带车的遭遇从敌人里退掉这么多代币。
  *  picks = 抽到的先后（finishEncounter 排站位之前记下的：三区制的站位会把敌人拆成一只一行再打乱）。从最后抽到的往前退，
  *  这台车的阵营至少留一个人（开局要有驾驶员，vehicleEncounterSetup）；退掉的是 2 枚代币的精英、多退了的，
  *  从同一个池子补抽回去（pool = rollEncounter 抽敌人用的池子；没给就用这场遭遇里有的阵营）——和一开始就少抽这么多代币一样。

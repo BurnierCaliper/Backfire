@@ -588,7 +588,7 @@ function finishEncounter(spec, opt, pool) {
   // 载具（vehicle.js）：镇压部队的遭遇有概率带一台移动堡垒，一场最多一台；开战时由 buildEncounter 摆上场，并安排驾驶员
   if (spec.vehicles === undefined && typeof vehicleRollEncounter === "function") {
     spec.vehicles = vehicleRollEncounter(spec);
-    // 车占代币（VEHICLES.*.tokens，只给平衡模拟工具用；默认 0 = 不占，这一步什么都不做）：带车的遭遇退掉这么多代币的敌人
+    // 车占代币（VEHICLES.*.tokens：移动堡垒占 1 枚，作者 10/21 定；填 0 = 不占，这一步什么都不做）：带车的遭遇退掉这么多代币的敌人
     if (typeof vehiclePayTokens === "function") vehiclePayTokens(spec, picks, pool);
   }
   // 有沙鱼的沙漠遭遇：配上尘虫 / 管虫（中立生物，不占代币，desert.js · DESERT.spawn）
