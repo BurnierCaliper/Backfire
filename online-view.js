@@ -690,7 +690,19 @@
     return { id: str(s.id, 40), name: str(s.name, 30), note: str(s.note, 200), discount: num(s.discount),
       rows: arr(s.rows).slice(0, 200).filter(obj).map(r => ({ key: str(r.key, 40), name: str(r.name, 60), hint: str(r.hint, 160), group: str(r.group, 30),
         base: num(r.base), price: num(r.price), stock: r.stock == null ? null : num(r.stock) })).filter(r => r.key),
-      points: pts };
+      points: pts, sell: projectShopSell(s.sell) };
+  }
+  /** 商店 · 卖（shopSellView）：能卖的东西（归属、单价、能不能卖和原因）和可买回列表；只留这些字段 */
+  function projectShopSell(v) {
+    if (!obj(v)) return null;
+    const str = (x, n) => typeof x === "string" ? x.slice(0, n) : typeof x === "number" ? String(x) : "";
+    const num = x => (typeof x === "number" && isFinite(x) ? Math.max(0, Math.floor(x)) : 0);
+    return {
+      items: arr(v.items).slice(0, 200).filter(obj).map(r => ({ id: str(r.id, 60), name: str(r.name, 60), qty: num(r.qty), unitPrice: num(r.unitPrice),
+        owner: str(r.owner, 40) || "shared", ok: r.ok !== false, reason: str(r.reason, 40) })).filter(r => r.id),
+      buyback: arr(v.buyback).slice(0, 60).filter(obj).map(b => ({ token: str(b.token, 60), id: str(b.id, 60), name: str(b.name, 60), qty: num(b.qty), price: num(b.price),
+        owner: str(b.owner, 40) || "shared", seller: str(b.seller, 40) })).filter(b => b.token)
+    };
   }
   /** 跑团诊所：自己的角色的改造信息（肉体上限、可改上限、改造率、单价、现在的方案）和最近一条申请的状态 */
   function projectClinic(c) {

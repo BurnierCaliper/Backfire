@@ -312,11 +312,12 @@
           <input type="number" min="1" step="1" value="${esc(n)}" data-shop-qty="${esc(r.key)}" aria-label="买几份">${button(out ? "卖完了" : "买", "shopBuy", `data-key="${esc(r.key)}"`, disabled() || out || !shopDraft.payer || wallet < r.price * n)}</li>`;
       }).join("")}</ul>`).join("");
       const pts = s.points ? `<h4>积分兑换（队伍商店积分 ${esc(s.points.have)}）</h4><div class="ol-shop-redeem">${s.points.rows.map(x => button(`${x.name} · ${x.points} 积分`, "shopRedeem", `data-item="${esc(x.item)}"`, disabled() || s.points.have < x.points)).join("") || '<span class="ol-muted">这里没有能兑换的东西。</span>'}</div>` : "";
+      const buyHtml = `${mine.length ? `<label>由谁付 <select data-shop-payer>${mine.map(h => option(h.kit, `${h.name}（${h.amount} 奎支）`, h.kit === shopDraft.payer)).join("")}</select></label>` : '<p class="ol-muted">你还没有操控的角色，不能买东西。</p>'}
+        ${rows || '<p class="ol-muted">这家店还没有商品。</p>'}${pts}
+        <p class="ol-muted">买到的东西进队伍背包；买东西照常攒商店积分。主持人关店后这里就收起来。</p>`;
       return `<section class="ol-shop" aria-label="商店"><header><h3>🛒 ${esc(s.name)}</h3>${s.discount ? `<span class="ol-q-tag ol-q-main">${esc(Number.isInteger(z) ? z : z.toFixed(1))} 折</span>` : ""}</header>
         ${s.note ? `<p class="ol-muted">${esc(s.note)}</p>` : ""}
-        ${mine.length ? `<label>由谁付 <select data-shop-payer>${mine.map(h => option(h.kit, `${h.name}（${h.amount} 奎支）`, h.kit === shopDraft.payer)).join("")}</select></label>` : '<p class="ol-muted">你还没有操控的角色，不能买东西。</p>'}
-        ${rows || '<p class="ol-muted">这家店还没有商品。</p>'}${pts}
-        <p class="ol-muted">买到的东西进队伍背包；买东西照常攒商店积分。主持人关店后这里就收起来。</p></section>`;
+        ${sellTabs("trpg", s.sell || null, buyHtml, () => sellModelTrpg(s))}</section>`;
     }
     function purseMarkup() {
       const p = view.packet?.purse;
@@ -484,6 +485,43 @@
       if (!global.BackpackUI || !global.WorkshopData) return;
       BackpackUI.open(() => { const r = view.packet?.rogue; return r ? WorkshopData.viewBackpackModel(r) : null; }, { openWorkshop: id => openWorkshop(id) });
     }
+    /* ---------- 商店 · 买 / 卖页签（shop-sell-ui.js）：视图是房主算好的，这里只画；离开商店（包里没有卖出视图）就回到「买」 ---------- */
+    const arrOf = v => Array.isArray(v) ? v : Array.isArray(v?.rows) ? v.rows : [];
+    /** 联机单局：packet.rogue.shopSell（也认 rogue.shop.sell / packet.shop.sell）：只有自己的英雄和公用 */
+    const rogueSellView = r => r?.shopSell || r?.shop?.sell || view.packet?.shop?.sell || null;
+    function sellModelRogue(r, payer) {
+      const heroes = (r.heroes || []).filter(h => !h.dead).map(h => ({ kit: h.kit, name: h.name, purse: h.mine ? h.purse : null, mine: h.mine }));
+      return ShopSellUI.model(rogueSellView(r), { key: "rogue", heroes, mine: k => heroes.some(h => h.kit === k && h.mine), actor: payer,
+        money: k => (heroes.find(h => h.kit === k) || {}).purse ?? null, disabled: disabled() });
+    }
+    function sellModelTrpg(s) {
+      const heroes = ((view.packet?.purse || {}).heroes || []).map(h => ({ kit: h.kit, name: h.name, purse: h.mine ? h.amount ?? null : null, mine: h.mine }));
+      return ShopSellUI.model(s.sell, { key: "trpg", heroes, mine: k => heroes.some(h => h.kit === k && h.mine), actor: shopDraft.payer,
+        money: k => (heroes.find(h => h.kit === k) || {}).purse ?? null, disabled: disabled() });
+    }
+    function sellTabs(key, sellView, buyHtml, modelFn) {
+      if (!global.ShopSellUI) return buyHtml;
+      ShopSellUI.sync(key, !!sellView);
+      const sell = ShopSellUI.tabOf(key) === "sell";
+      return `<div class="ss-host" data-ss-host="${esc(key)}">${ShopSellUI.tabsHtml(key, { sellOff: !sellView })}${sell ? ShopSellUI.html(modelFn()) : buyHtml}</div>`;
+    }
+    /** 卖 / 买回：单局走 rogue.act；跑团是 shopSell / shopBuyback 消息。结果带 payout 时提示钱进了谁的钱包 */
+    async function sellSubmit(cmd) {
+      if (disabled()) return;
+      const trpg = view.mode !== "rogue" && view.packet?.mode !== "rogue";
+      const msg = !trpg ? { type: "rogue.act", command: cmd }
+        : cmd.action === "sellItem" ? { type: "shopSell", kit: cmd.kit, id: cmd.id, qty: cmd.qty, owner: cmd.owner } : { type: "shopBuyback", kit: cmd.kit, token: cmd.token };
+      let got = null;
+      if (await call(async () => (got = await api.submit(msg)))) {
+        if (global.Sfx) Sfx.ui("coin");
+        const res = got && (got.payout ? got : got.result && got.result.payout ? got.result : null);
+        if (res) {
+          const heroes = (view.packet?.rogue?.heroes || view.packet?.purse?.heroes || []);
+          toast.textContent = ShopSellUI.toastText(res, k => k === "party" ? "队伍公账" : (heroes.find(h => h.kit === k) || {}).name || k);
+          toast.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { toast.hidden = true; }, 4500);
+        }
+      }
+    }
     function rogueMarkup(r) {
       const mine = (r.heroes || []).filter(h => h.mine), payer = mine[0] ? mine[0].kit : null, purse = mine[0] ? mine[0].purse : 0;
       const stageName = { board: "任务板", task: "任务途中", camp: "回城休整", boss: "幕末首领", interlude: "幕间", victory: "四幕通关", over: "本局结束" }[r.stage] || "";
@@ -501,7 +539,8 @@
       const task = r.task ? `<section class="ol-rogue-box" aria-label="任务"><h3>${esc(r.task.name)}</h3><p class="ol-muted">${esc(r.task.goal)}</p><ol class="ol-rogue-route">${r.task.nodes.map(n => `<li class="${n.current ? "ol-open" : n.done ? "ol-muted" : ""}">${esc(n.label)}${n.done ? " ✓" : n.current ? " ←" : ""}</li>`).join("")}</ol></section>` : "";
       const pts = r.points;
       const redeem = pts && pts.redeem && pts.redeem.length ? `<h4>积分兑换（你有 ${esc(pts.points)} 积分，再花 ${esc(pts.next)} 奎支得 1 分）</h4><ul>${pts.redeem.map(it => `<li>${esc(it.name)} · ${esc(it.points)} 积分 ${rogueAct("兑换", { action: "redeem", item: it.id, payer }, pts.points < it.points)}</li>`).join("")}</ul>` : "";
-      const shop = r.shop && payer ? `<section class="ol-rogue-box" aria-label="商店"><h3>商店（你有 ${esc(purse)} 奎支）</h3><ul>${r.shop.map(row => `<li>${esc(row.name)} · ${esc(row.price)} 奎支${row.team ? " · 归队伍公用" : ""} ${rogueAct("买", { action: "buy", key: row.key, qty: 1, payer }, purse < row.price)}</li>`).join("")}</ul>${redeem}</section>` : "";
+      const buyList = r.shop ? `<ul>${arrOf(r.shop).map(row => `<li>${esc(row.name)} · ${esc(row.price)} 奎支${row.team ? " · 归队伍公用" : ""} ${rogueAct("买", { action: "buy", key: row.key, qty: 1, payer }, purse < row.price)}</li>`).join("")}</ul>${redeem}` : "";
+      const shop = r.shop && payer ? `<section class="ol-rogue-box" aria-label="商店"><h3>商店（你有 ${esc(purse)} 奎支）</h3>${sellTabs("rogue", rogueSellView(r), buyList, () => sellModelRogue(r, payer))}</section>` : "";
       const smith = r.smith && payer ? `<section class="ol-rogue-box" aria-label="工匠"><h3>${esc(r.smith.name)}（你有 ${esc(purse)} 奎支）</h3><ul>${r.smith.upgrades.map(o => `<li>${esc(o.name)} Lv${esc(o.level)} ${o.max ? "已满级" : rogueAct(`升到 ${o.level + 1} 级（${o.cost}）`, { action: "upgradeWeapon", kit: o.kit, smith: r.smith.id }, purse < o.cost)}</li>`).join("")}${r.smith.offers.map(o => `<li>改装件 ${esc(o.name)}<small>${esc(o.text)}</small> ${o.sold ? "已卖出" : rogueAct(`买（${o.price}）`, { action: "buyPart", smith: r.smith.id, index: o.index, payer }, purse < o.price)}</li>`).join("")}</ul></section>` : "";
       const slots = r.smith ? r.smith.slots || [] : [];
       const parts = r.parts && r.parts.length && payer ? `<section class="ol-rogue-box" aria-label="改装件"><h3>你的改装件</h3><ul>${r.parts.map((p, i) => `<li>${esc(p.name)} ×${esc(p.have)}<small>${esc(p.text)}</small> ${rogueAct(`卖掉（${p.sell}）`, { action: "sellPart", part: p.id, payer })}${slots.length ? `<select id="ol-rp-${i}" data-ol-cmp="${esc(p.id)}" aria-label="装到哪个槽">${slots.map(x => option(`${x.kit}:${x.slot}`, `${x.name} 槽 ${x.slot + 1}${x.cur ? "（现在：" + x.cur + "）" : ""}`, false)).join("")}</select>${button(`装上（${p.install}）`, "roguePartInstall", `data-part="${esc(p.id)}" data-select="ol-rp-${i}" data-smith="${esc(r.smith.id)}"`, disabled() || purse < p.install)}<span class="pt-cmp" id="ol-rp-${i}-cmp">${partCompare(r, p.id, slots[0])}</span>` : ""}</li>`).join("")}</ul></section>` : "";
@@ -1103,6 +1142,10 @@
       if (event.target.dataset.partyKit) partyDraft = [...document.querySelectorAll("[data-party-kit]")].filter(x => x.checked).map(x => x.dataset.partyKit);
     }
     async function click(event) {
+      if (global.ShopSellUI && event.target.closest?.("[data-ss-host]")) {
+        let cmd = null;
+        if (ShopSellUI.handle(event, c => { cmd = c; }, () => { lastMarkup.supplies = ""; render(); paintSupplies(); })) { if (cmd) await sellSubmit(cmd); return; }
+      }
       const b = event.target.closest("[data-online]"); if (!b || b.disabled) return;
       switch (b.dataset.online) {
         case "createTab": entry = "create"; render(); break;

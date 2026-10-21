@@ -5,7 +5,7 @@
   const PROTOCOL = 1, BUILD = "backfire-d3-v1", KEY = "backfire-online-v1";
   const copy = v => JSON.parse(JSON.stringify(v));
   const listeners = new Set(), packetListeners = new Set(), pending = new Map(), requests = new Map(), requestHighWater = new Map();
-  const gmContext = Object.freeze({}), controls = new Set(["orderPick", "orderConfirm", "orderMove", "orderSwapAccept", "answer", "chat", "checkOpen", "checkRoll", "checkClose", "attrRequest", "attrDecide", "skillRoll", "showTitle", "purseTransfer", "shopBuy", "shopRedeem", "cyberRequest", "cyberwareInstall", "cyberwareRemove"]);
+  const gmContext = Object.freeze({}), controls = new Set(["orderPick", "orderConfirm", "orderMove", "orderSwapAccept", "answer", "chat", "checkOpen", "checkRoll", "checkClose", "attrRequest", "attrDecide", "skillRoll", "showTitle", "purseTransfer", "shopBuy", "shopRedeem", "shopSell", "shopBuyback", "cyberRequest", "cyberwareInstall", "cyberwareRemove"]);
   const messageContexts = new WeakMap();
   const recipientWires = new Map(), displayWire = OnlineWire.create();
   let endpoint = null, identity = null, status = { connected: false, paused: true, roster: [] }, active = false;
@@ -79,6 +79,11 @@
     if (wait && Number.isFinite(wait.remainingMs)) wait.deadline = at + wait.remainingMs;
   }
   function readSaved() { try { const v = JSON.parse(localStorage.getItem(KEY)); return v?.version === 1 ? v : null; } catch (_) { return null; } }
+  /** 跑团商人 + 卖出视图（trpgShopSellFor 还没有时不带；online-view.js · projectShopSell 白名单） */
+  function withSell(shop, id) {
+    if (!shop || shop.sell || typeof trpgShopSellFor !== "function") return shop;
+    return Object.assign({}, shop, { sell: trpgShopSellFor(id, id === identity.id) });
+  }
   function rawPacket(id, type = "result", tape = [], result = null, fx = null) {
     const view = HotseatGame.getViewFor(id); view.players = roster(); view.network = true;
     return { protocol: PROTOCOL, build: BUILD, type, seq, state, tape, result: result || settledResult, view, screen: liveScreen(),
@@ -95,7 +100,7 @@
       // 跑团私人钱包：自己操控的角色看得到余额，队友只给名字（转账用）；主持人看全部（online-view.js · projectPurse）
       purse: !rogue() && typeof trpgPurse === "function" && typeof TRPG !== "undefined" && TRPG.active ? purseFor(id, id === identity.id) : null,
       // 跑团商人：主持人开着的那家店（trpg-merchants.js · trpgMerchantView；online-view.js · projectShop 白名单）
-      shop: !rogue() && typeof trpgMerchantView === "function" && typeof TRPG !== "undefined" && TRPG.active ? trpgMerchantView() : null,
+      shop: !rogue() && typeof trpgMerchantView === "function" && typeof TRPG !== "undefined" && TRPG.active ? withSell(trpgMerchantView(), id) : null,
       // 跑团诊所开放时：自己操控的角色的改造信息和申请状态（online-view.js · projectClinic）
       clinic: !rogue() && typeof trpgCyberInfo === "function" && typeof TRPG !== "undefined" && TRPG.active && TRPG.clinicOpen ? clinicFor(id, id === identity.id) : null,
       // 长休结算（跑团；单局的在 rogue.lastRest 里）和游戏时钟：online-view.js · projectRest / clock 白名单
