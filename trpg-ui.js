@@ -979,10 +979,12 @@
     $("wk-pts-sub").onclick = () => act(ruleCommand("adjustPoints", { amount: -n(), why: "主持人" }));
   }
   /** 联机时走房间（玩家马上看到）；本机热座直接交给热座会话 */
-  async function checkSubmit(cmd) {
+  /** onOk：确认成功后才做的事（比如发起检定后清空说明、取消「暗骰」勾选；失败时表单原样留着，再点一次还是暗骰） */
+  async function checkSubmit(cmd, onOk) {
     const net = window.OnlineGame && OnlineGame.isHost && OnlineGame.isHost();
     const ack = net ? await OnlineGame.submit(cmd) : HotseatGame.submit(cmd);
     if (ack && ack.ok === false) alert(ack.error);
+    else if (onOk) onOk();
     render();
   }
   function bindChecks(P) {
@@ -1002,7 +1004,7 @@
       const pool = online() && checkForm.secret ? (state.units || []).filter(u => !u._removed && !u.weaponOf) : heroes();
       const ids = pool.map(h => h.id).filter(id => checkForm.units.includes(id));
       if (!ids.length) { alert("至少选一名角色"); return; }
-      if (online()) { checkForm.note = ""; return checkSubmit({ type: "checkOpen", prof: checkForm.prof, diff: checkForm.diff, unitIds: ids, note: $("ck-note").value, secret: !!checkForm.secret }); }
+      if (online()) return checkSubmit({ type: "checkOpen", prof: checkForm.prof, diff: checkForm.diff, unitIds: ids, note: $("ck-note").value, secret: !!checkForm.secret }, () => { checkForm.note = ""; checkForm.secret = false; });
       const spec = checkPreview(ids); if (!spec) return;
       spec.note = $("ck-note").value; checkForm.note = "";
       localChecks.push(Object.assign(spec, { id: "check-" + Date.now(), status: "open", at: Date.now(), targets: spec.targets.map(t => Object.assign(t, { result: null })) }));
@@ -1024,7 +1026,6 @@
       render();
     }; });
   }
-  /** 联机时玩家申请的属性点：主持人同意才真正加上 */
   /** 玩家主动申请的检定：主持人按上面选的难度同意（房主掷骰）或不同意 */
   function checkRequestsHtml() {
     if (!online()) return "";
@@ -1033,6 +1034,7 @@
     return `<h3>玩家申请的检定</h3>${list.map(r => `<div class="tr-row"><b>${esc(r.unitName)}</b> 想做「${esc(r.prof)}」检定${r.note ? "（" + esc(r.note) + "）" : ""}
         <button class="g-btn small" data-ck-req="approve:${esc(r.id)}">按所选难度同意并掷骰</button><button class="g-btn small" data-ck-req="reject:${esc(r.id)}">不同意</button></div>`).join("")}`;
   }
+  /** 联机时玩家申请的属性点：主持人同意才真正加上 */
   function attrRequestsHtml() {
     if (!online()) return "";
     const list = (HotseatGame.getView().attrRequests || []).filter(r => r.status === "pending");

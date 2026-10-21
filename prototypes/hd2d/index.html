@@ -21,7 +21,6 @@
 </svg>
 
 <div id="stage"></div>
-<div id="vignette"></div>
 
 <header id="topbar">
   <span class="brand">BACKFIRE · HD-2D</span>
@@ -31,7 +30,16 @@
     <span class="map" id="tb-map"></span>
     <span class="compact" id="tb-compact"></span>
   </div>
+  <!-- 三段镜头：每个人自己的视角（不写进战斗状态，不同步给别人） -->
+  <div class="cam" id="cam-bar" role="group" aria-label="镜头：远景 / 中景 / 近景">
+    <span class="cam-l">镜头</span>
+    <button class="cam-b on" id="cam-far" aria-pressed="true" title="远景：整个战场（键盘 1，滚轮往后滚）">远</button>
+    <button class="cam-b" id="cam-mid" aria-pressed="false" title="中景：选中的区和相连的区（键盘 2）">中</button>
+    <button class="cam-b" id="cam-near" aria-pressed="false" title="近景：只看选中的那一个区，铭牌放大（键盘 3，滚轮往前滚）">近</button>
+    <span class="cam-z" id="cam-zone" title="选中的区：点地台或者铭牌换；中景 / 近景里左右键换相邻的区"></span>
+  </div>
   <select id="demo-select" aria-label="切换演示战场"></select>
+  <select id="region-select" aria-label="切换区域（地面、远景、灯跟着变）" title="这场战斗在哪个区域：地面、远景、灯跟着变（也可以在网址后面加 ?region=沙漠）"></select>
   <button class="toggle" id="demo-btn" aria-label="切换演示战场">换场</button>
 </header>
 
@@ -55,14 +63,22 @@
   <div id="skills"></div>
 </footer>
 
+<!-- 中景 / 近景：换到相邻的区（键盘左右键也行） -->
+<button class="zone-nav prev" id="zone-prev" hidden aria-label="看前一个区（←）"></button>
+<button class="zone-nav next" id="zone-next" hidden aria-label="看后一个区（→）"></button>
+
 <div id="toast"></div>
 <div id="loading">载入战场……</div>
 
-<div id="calc-core" hidden></div>
+<div id="calc-core" hidden>
+  <!-- 旧计算器的元素：app.js 的 syncBladeSel 会逐个改 bladeSel 的 options，替身 div 没有 options 会报错，所以这个照 game.html 放真的下拉框 -->
+  <select id="bladeSel"><option value="niu">丹生谷（火）</option><option value="naruto">鳴門（冰）</option></select>
+</div>
 <script>
-/* 垫片（照 game.html 的做法）：app.js 在有页面时会自己跑 init()，去找旧计算器的 presetSelect、zoneMode 等一大批元素，
- * 这个原型页面里没有，找不到就会报 Cannot set properties of null。这里让「不认识的 id」拿到一个藏起来的替身，
- * 原型自己的元素（下面这些前缀）照实返回，不被替身骗过。也不让计算器读写它自己的存档。不改 app.js。 */
+/* 垫片（照 game.html 的做法）：app.js 在有页面时会自己跑 init()，去找旧计算器的 presetSelect、zoneMode、partySize 等一大批元素，
+ * 这个原型页面里没有，找不到就会报 Cannot set properties of null。这里让「不认识的 id」拿到一个藏起来的替身（div），
+ * 原型自己的元素（OWN 里逐个列出的 id，整个匹配，不按前缀——以前按前缀，partySize 被 party 拦下拿到 null）照实返回，
+ * 不被替身骗过。也不让计算器读写它自己的存档。不改 app.js。 */
 window.GAME_MODE = true;
 (function () {
   var add = window.addEventListener.bind(window);
@@ -75,7 +91,7 @@ window.GAME_MODE = true;
   Storage.prototype.getItem = function (k) { return calcKey(String(k)) ? null : gi.call(this, k); };
   Storage.prototype.setItem = function (k, v) { if (calcKey(String(k))) return; return si.call(this, k, v); };
   var byId = Document.prototype.getElementById;
-  var OWN = /^(stage|vignette|topbar|tb-|demo-|party|log|dock|skills|toast|loading|calc-core)/;
+  var OWN = /^(?:stage|topbar|tb-turn|tb-weather|tb-map|tb-compact|cam-bar|cam-far|cam-mid|cam-near|cam-zone|demo-select|region-select|demo-btn|party|party-toggle|party-list|logdrawer|log-toggle|log-body|dock|dock-toggle|dock-who|dock-hint|skills|zone-prev|zone-next|toast|loading|calc-core)$/;
   Document.prototype.getElementById = function (id) {
     var e = byId.call(this, id);
     if (e || OWN.test(String(id))) return e;
@@ -132,6 +148,8 @@ window.GAME_MODE = true;
 <script src="../../rogue-commands.js"></script>
 <script src="../../trpg-commands.js"></script>
 <script src="../../training.js"></script>
+<!-- 联机的展示白名单：画面只用它投影过的状态（projectState），和联机玩家拿到的一样 -->
+<script src="../../online-view.js"></script>
 <script>
 /* 规则文件在浏览器里加载，会带着「去写正式页面元素」的界面函数（renderAll、renderZones……）。
  * 这个原型只拿规则算数据，页面上没有那些元素，所以把 render 开头的界面函数换成空的。
@@ -148,10 +166,12 @@ window.GAME_MODE = true;
 })();
 </script>
 <script src="hd2d-layout.js"></script>
+<script src="hd2d-camera.js"></script>
 <script type="module">
 import { createHd2dScene } from "./hd2d-scene.js";
 
 const L = window.HD2DLayout;
+const CAMS = window.HD2DCamera;
 const $ = (id) => document.getElementById(id);
 
 /* ---------- 演示战场（用真规则 BattleSim.setup 生成，再补上场地 / 间隔 / 状态） ---------- */
@@ -166,9 +186,10 @@ function hurt(st, kit, frac) {
 }
 const unit = (st, kit) => st.units.find(x => x.kit === kit);
 
+/* region：这场战斗默认在哪个区域（游戏里的区域名，hd2d-layout.js 的 REGIONS）。默认地台的地面、远景、灯都跟着它；顶栏的区域下拉框 / ?region= 可以换 */
 const DEMOS = [
   {
-    id: "mine", name: "第一采矿场 · 三区直排 · 晴天", short: "第一采矿场", theme: "dusk", backdrop: "mine",
+    id: "mine", name: "三区直排 · 晴天", region: "第一采矿场", theme: "dusk",
     make() {
       const st = BattleSim.setup({
         party: PARTY, zoneMode: 3, seed: "hd2d-mine",
@@ -185,7 +206,7 @@ const DEMOS = [
     }
   },
   {
-    id: "desert", name: "沙漠 · 2×2 · 沙暴", short: "沙漠", theme: "day", backdrop: "desert",
+    id: "desert", name: "2×2 · 沙暴", region: "沙漠", theme: "day",
     make() {
       const st = BattleSim.setup({
         party: PARTY, board: "square4", weather: "sand", seed: "hd2d-desert",
@@ -203,7 +224,7 @@ const DEMOS = [
     }
   },
   {
-    id: "cross", name: "十字五区 · 夜晚 · 雷鸣", short: "十字五区", theme: "night", backdrop: "night",
+    id: "cross", name: "十字五区 · 夜晚 · 雷鸣", region: "外城区", theme: "night",
     make() {
       const st = BattleSim.setup({
         party: PARTY, board: "cross5", weather: "thunder", seed: "hd2d-cross",
@@ -223,31 +244,44 @@ const DEMOS = [
   }
 ];
 
-/* ---------- 状态 ---------- */
-let sc = null, demo = null, st = null, actorId = null;
+/* ---------- 状态 ----------
+ * st = 房主那边的完整战斗状态（规则用）；pv = 联机玩家拿到的那一份：st 过一遍 online-view.js 的白名单（projectState）。
+ * 画面（布局、场景、顶栏、队伍栏）只用 pv：和联机玩家看到的一模一样，没有坚毅生命、没有藏起来的单位 */
+let sc = null, demo = null, st = null, pv = null, actorId = null, camInfo = null;
+function project() {
+  pv = OnlineView.projectState(st, { itemCatalog: typeof ITEM_CATALOG !== "undefined" ? ITEM_CATALOG : {} });
+  return pv;
+}
+/** 区域：顶栏下拉框 / 网址的 ?region= 选的（区域名、地图地点 id，或者认不得的名字 = 看兜底的样子）；null = 按演示默认的。
+ *  联机玩家拿到的战斗状态（projectState）里没有区域名（要加进白名单的字段见 README「联机数据」），所以原型先用页面选的兜底，不从房主的原始 state 读 */
+let regionPick = null;
+const regionNow = () => (regionPick != null ? regionPick : demo.region);
 const weatherText = (w) => (!w || w === "none") ? "晴天" : (typeof weatherName === "function" ? weatherName(w) : w);
 
+/** 排战场：铭牌是固定像素大小的 DOM，所以把真实的画面大小和上下被面板盖住的像素交给布局，它按同一个镜头算站位；
+ *  区域（地面、远景、灯）和光影主题（灯白天 / 夜里几盏）也交给布局。交给布局的是投影过的状态 */
 function build() {
-  if (!st) return null;
-  return L.build(st, { portrait: !!(sc && sc.portrait) });
+  if (!st || !sc) return null;
+  return L.build(project(), { portrait: !!sc.portrait, view: sc.view(), region: regionNow(), theme: demo.theme });
 }
 function repaint(resetView) {
   const layout = build();
   if (!layout) return;
-  sc.setBattle(layout, { weather: st.weather, theme: demo.theme, backdrop: demo.backdrop, actorId });
+  sc.setBattle(layout, { weather: pv.weather, theme: demo.theme, actorId });
   if (resetView) sc.refit();
   renderUI(layout);
 }
 
 /* ---------- 界面 ---------- */
-function players() { return st.units.filter(u => u.isPlayer && !u.hidden && !u.dead && !u.weaponOf); }
+function players() { return (pv ? pv.units : []).filter(u => u.isPlayer && !u.hidden && !u.dead && !u.weaponOf); }
 function renderUI(layout) {
-  $("tb-turn").textContent = st.turnNo || 1;
-  $("tb-weather").textContent = weatherText(st.weather);
-  $("tb-map").textContent = demo.name;
+  const place = layout.region || "未知区域";
+  $("tb-turn").textContent = pv.turnNo || 1;
+  $("tb-weather").textContent = weatherText(pv.weather);
+  $("tb-map").textContent = place + " · " + demo.name;
   // 手机上的精简顶栏：R1 · 晴 · 第一采矿场
-  const wt = weatherText(st.weather);
-  $("tb-compact").textContent = "R" + (st.turnNo || 1) + " · " + wt.replace(/天$/, "") + " · " + demo.short;
+  const wt = weatherText(pv.weather);
+  $("tb-compact").textContent = "R" + (pv.turnNo || 1) + " · " + wt.replace(/天$/, "") + " · " + place;
   // 队伍栏：只用铭牌数据（没有坚毅生命）
   const plates = {};
   layout.units.forEach(u => { plates[u.id] = u.plate; });
@@ -271,8 +305,10 @@ function setActor(id) {
   renderSkills();
 }
 function renderSkills() {
+  const v = pv && pv.units.find(x => x.id === actorId);   // 名字、等级：投影里的
+  $("dock-who").innerHTML = v ? `${esc(v.name)}<small>Lv${v.level} · 行动中</small>` : "";
+  // 技能名：原型的占位，用规则里的技能表（房主本机）。联机时玩家的技能菜单由房主按 online-view.js · projectActionMenu 另发，第二阶段接出招时再换
   const u = st.units.find(x => x.id === actorId);
-  $("dock-who").innerHTML = u ? `${esc(u.name)}<small>Lv${u.level} · 行动中</small>` : "";
   let list = [];
   try { list = typeof skillList === "function" && u ? skillList(u) : []; } catch (e) { list = []; }
   if (!list.length) list = [{ name: "普通攻击", hint: "（原型占位）" }, { name: "移动", hint: "（原型占位）" }, { name: "防御", hint: "（原型占位）" }];
@@ -280,11 +316,13 @@ function renderSkills() {
   $("skills").innerHTML = list.slice(0, 12).map((s, i) => `<button class="btn ${colors[i % colors.length]}" title="${esc(s.hint || "")}">${esc(s.name)}</button>`).join("");
   $("skills").querySelectorAll(".btn").forEach(b => b.addEventListener("click", () => toast("第一阶段：技能按钮只是摆设，不会真的出招")));
 }
+/** 日志：联机玩家看的是房主发的公开日志（online-view.js · projectLogs 的白名单，不是规则的原始日志）。
+ *  原型还没接出招，没有公开日志（publicLogs 是空的），第二阶段接真实战斗时由出招往里填 */
+const publicLogs = [];
 function renderLog() {
-  const page = (st.logPages && st.logPages[0]) || { lines: [] };
-  const lines = (page.lines || []).map(l => (typeof l === "string" ? l : l.text)).filter(Boolean);
+  const lines = OnlineView.projectLogs(publicLogs).map(l => l.text).filter(Boolean);
   $("log-body").innerHTML = (lines.length ? lines : ["（战斗还没开始，日志是空的）"]).map(t => `<p>${esc(t)}</p>`).join("") +
-    `<p class="dim">—— 原型：这里显示规则生成的日志，第二阶段才会接真实战斗。</p>`;
+    `<p class="dim">—— 原型：这里显示联机玩家看得到的公开日志，第二阶段才会接真实战斗。</p>`;
 }
 let toastTimer = 0;
 function toast(msg) {
@@ -304,40 +342,94 @@ function wirePanel(panelId, btnId, labelOn, labelOff, startOpen) {
   b.addEventListener("click", () => set(p.classList.contains("collapsed")));
   set(startOpen);
 }
-/** 取景时让开顶栏和底部技能栏 */
+/** 取景时让开顶栏和底部技能栏；让开的大小变了，铭牌的站位也跟着重排 */
 function reinset(refit) {
   if (!sc) return;
   const top = $("topbar").offsetHeight;
   const bottom = $("dock").offsetHeight;
   sc.setInsets({ top: top + 6, bottom: bottom + 4 });
-  if (refit) sc.refit();
+  repaint(refit);
+}
+
+/* ---------- 镜头（远景 / 中景 / 近景看单个区域）----------
+ * 每个人自己的视角：只动这边的画面，不写进战斗状态（st / pv），也不发给别人。按钮、键盘 1 / 2 / 3、滚轮（场景里）切；
+ * 点地台或者铭牌选区（场景里）；中景 / 近景里左右键、屏幕两边的箭头换到相邻的区 */
+function syncCamera(info) {
+  camInfo = info;
+  CAMS.CAMERA.order.forEach(t => { const b = $("cam-" + t); b.classList.toggle("on", info.tier === t); b.setAttribute("aria-pressed", String(info.tier === t)); });
+  $("cam-zone").textContent = info.tag || "";
+  const nav = info.tier !== "far";
+  [["zone-prev", info.prev, "◀ " + info.prevTag], ["zone-next", info.next, info.nextTag + " ▶"]].forEach(([id, zone, text]) => {
+    const b = $(id);
+    b.hidden = !nav || zone == null;
+    b.textContent = text;
+  });
+  syncUrl();
+}
+function onKey(e) {
+  if (!sc || e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
+  const t = e.target, tag = t && t.tagName;
+  if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA" || (t && t.isContentEditable)) return;
+  const K = CAMS.CAMERA.keys, tier = CAMS.CAMERA.order.find(x => K[x] === e.key);
+  if (tier) { e.preventDefault(); sc.setTier(tier); return; }
+  if ((e.key === K.prev || e.key === K.next) && sc.tier !== "far") { e.preventDefault(); sc.stepZone(e.key === K.prev ? -1 : 1); }
 }
 
 /* ---------- 启动 ---------- */
 function loadDemo(id) {
   demo = DEMOS.find(d => d.id === id) || DEMOS[0];
   st = demo.make();
+  project();
   const p = players();
   actorId = p.length ? p[0].id : null;
   $("demo-select").value = demo.id;
+  syncRegion();
   repaint(true);
+}
+/** 区域下拉框：「按演示」（显示演示默认的区域）、配置表里的每个区域、「认不得的区域」（看兜底的样子）。网址跟着改，截图时复制网址就能回到同一个画面 */
+const UNKNOWN = "?";
+function syncRegion() {
+  const sel = $("region-select");
+  sel.options[0].textContent = "区域：按演示（" + demo.region + "）";
+  sel.value = regionPick == null ? "" : L.regionName(regionPick) || UNKNOWN;
+  syncUrl();
+}
+/** 网址：演示战场、区域、镜头（?cam=mid / near）和看的那个区（?zone=3）。复制网址就能回到同一个画面（截图用） */
+function syncUrl() {
+  if (!demo) return;
+  const q = new URLSearchParams(location.search);
+  q.set("demo", demo.id);
+  if (regionPick == null) q.delete("region"); else q.set("region", regionPick);
+  if (camInfo && camInfo.tier !== "far") { q.set("cam", camInfo.tier); q.set("zone", camInfo.zone); } else { q.delete("cam"); q.delete("zone"); }
+  try { history.replaceState(null, "", location.pathname + "?" + q.toString()); } catch (e) { /* 打不开 history（例如本地文件）就算了 */ }
 }
 function boot() {
   const phone = window.matchMedia("(max-width: 720px)").matches;
   wirePanel("dock", "dock-toggle", "技能 ▼", "技能 ▲", !phone);
   wirePanel("party", "party-toggle", "队伍 ◀", "队伍 ▶", !phone);
   wirePanel("logdrawer", "log-toggle", "日志 ▶", "日志 ◀", false);
-  $("demo-select").innerHTML = DEMOS.map(d => `<option value="${d.id}">${esc(d.name)}</option>`).join("");
+  $("demo-select").innerHTML = DEMOS.map(d => `<option value="${d.id}">${esc(d.region + " · " + d.name)}</option>`).join("");
   $("demo-select").addEventListener("change", e => loadDemo(e.target.value));
   $("demo-btn").addEventListener("click", () => loadDemo(DEMOS[(DEMOS.indexOf(demo) + 1) % DEMOS.length].id));   // 手机：小按钮轮流切
+  $("region-select").innerHTML = `<option value="">区域：按演示</option>` + Object.keys(L.REGIONS).map(n => `<option value="${esc(n)}">区域：${esc(n)}</option>`).join("") +
+    `<option value="${UNKNOWN}">区域：认不得（兜底）</option>`;
+  $("region-select").addEventListener("change", e => { regionPick = e.target.value || null; syncRegion(); repaint(true); });
+  const params = new URLSearchParams(location.search);
+  regionPick = params.get("region") || null;      // ?region=沙漠 / ?region=mine_1（地图地点 id 也认）
   sc = createHd2dScene($("stage"), {
-    onPortraitChange() { if (st) { repaint(true); } }
+    camera: { tier: params.get("cam"), zone: params.get("zone") },   // ?cam=near&zone=3：开场就是近景看 3 区
+    onCameraChange: syncCamera,
+    onPortraitChange() { if (sc && st) repaint(true); },
+    onViewChange() { if (sc && st) reinset(true); }      // 窗口大小变了：按新画面重排铭牌、镜头回到这一段的位置
   });
+  CAMS.CAMERA.order.forEach(t => $("cam-" + t).addEventListener("click", () => sc.setTier(t)));
+  $("zone-prev").addEventListener("click", () => sc.stepZone(-1));
+  $("zone-next").addEventListener("click", () => sc.stepZone(1));
+  window.addEventListener("keydown", onKey);
   reinset(false);
-  window.addEventListener("resize", () => reinset(false));
-  loadDemo(new URLSearchParams(location.search).get("demo") || DEMOS[0].id);
+  loadDemo(params.get("demo") || DEMOS[0].id);
   $("loading").classList.add("done");
-  window.HD2D = { sc, DEMOS, L, get state() { return st; } };   // 方便在控制台里看
+  window.HD2D = { sc, DEMOS, L, CAMS, get state() { return st; }, get view() { return pv; } };   // 方便在控制台里看（state 是房主的完整状态，view 是画面用的投影）
 }
 try { boot(); } catch (e) {
   $("loading").classList.add("done");

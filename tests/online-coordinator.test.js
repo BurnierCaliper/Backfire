@@ -81,3 +81,21 @@ test("connection loss rejects relay-acknowledged RPC waits and a late menu canno
   await flush();
   assert.equal(f.sent.filter(p => p.type === "actionOptions").length, 1, "a command/menu is never automatically replayed");
 });
+
+test("长休结算（issue #216）没变时线上不重发，玩家端每一包的 packet.rest 照样是那一份：结算画面按 id 判断，不会因为变成 null 再弹一次", async () => {
+  const f = await client(), rest = { id: "rest-1", ok: true, hours: 8, heroes: [{ kit: "ruby", name: "瑞比", mood: "睡得不错" }] }, seen = [];
+  const shown = () => JSON.parse(JSON.stringify(f.api.getView().packet.rest));   // 协调层跑在 vm 里，取出来转成本地对象再比
+  f.api.onPacket(packet => { seen.push(packet.rest && packet.rest.id); });
+  const send = (seq, type = "result") => { const wire = f.host.pack({ ...f.packet(seq, type), rest }); f.receive(wire, "host"); return wire; };
+  send(1, "resync"); await flush();
+  const later = [send(2), send(3), send(4)]; await flush();
+  assert.ok(later.every(wire => !("rest" in wire) && wire.restUnchanged === true), "同一份结算只在第一包整份发");
+  assert.deepEqual(seen, ["rest-1", "rest-1", "rest-1", "rest-1"]);
+  assert.deepEqual(shown(), rest);
+  // 中间掉了一包：先按缺号要重同步，不拿旧基准硬解；重同步整份发
+  f.host.pack({ ...f.packet(5), rest }); send(6); await flush();
+  assert.equal(f.sent.at(-1).type, "resync"); assert.equal(f.api.getView().packet.seq, 4);
+  const sync = send(6, "resync"); await flush();
+  assert.deepEqual(sync.rest, rest); assert.deepEqual(shown(), rest);
+  assert.deepEqual(seen, ["rest-1", "rest-1", "rest-1", "rest-1", "rest-1"]);
+});

@@ -368,6 +368,65 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **柯尔特「「非法」改装」可以消耗废料给 1 行动点；扭矩「拆卸模式」可以把转移量变成废料**（issue #218，作者 10/21 定；app.js · `KOLT_SCRAP` / `koltScrapCap` / `koltScrapTotal` / `koltScrapClear` / `koltScrapFull` / `koltScrapSpend` / `skillFlowSteps`（`kolt_mod`、`torque_strip`）/ `skillTargetError` / `runSkillInner`（`kolt_mod`、`torque_strip`、`kolt_scrap`）/ `SKILL_REQUIREMENT.kolt_scrap` / `resetBattleFlags`，skill-text.js 的卡面、party.js 的提示；测试 `tests/issue-218.test.js`，`tests/hotseat-validation.test.js`）
+  - **「非法」改装**：以前只能对 1 距离内任意单位施加过载。现在废料（所有来源合计，`koltScrapTotal`）达到上限（柯尔特生命上限的一半）、目标是我方单位时，分步里多一项「过载 + 消耗 N 废料：行动点 +1」：扣掉等于上限的废料，目标照样过载，行动点 +1（满了也加，可以超过上限；和意式浓缩一样记成队友给的行动点，用它打出的分数一半记给柯尔特）。废料没到上限、或者目标是敌人时没有这一项，施加过载照旧；硬塞进命令也会在扣行动点之前被拦下。废料到上限时，选目标改成分步的第一步（同样是 1 距离以内任意单位，含自己）；没到上限还是照旧直接选目标。
+  - **扣废料的顺序**（`KOLT_SCRAP.spendOrder`）：敌人血量层（`state.lastBrokenLayer`，按封顶后的数算）→ 腐坏抛射 → 扭矩转移注意 → 拆卸模式。只扣上限那么多，扣完的来源清零，没扣完的留着（腐坏抛射、拆卸模式各自记着几种血量，按记录的先后依次扣）。
+  - **拆卸模式**：以前转移量只能给一名同区友方。现在选完拆卸目标后多一步：「转移给一名同区友方」（照旧，接着选友方），或者「变成柯尔特的废料」（不用选友方）。变成的废料按被拆下的那一层的种类记在柯尔特身上（`resources.stripStore`），单独计算、不受上限（和腐坏抛射、转移注意一样）：算进 `koltScrapTotal`，碎渣重炮装填时一起打出去（被 `koltScrapClear` 清掉），废物利用按种类领取对应血量（肉体 / 星灵回血，其余加临时血量层；不受 50% 限制），「非法」改装扣废料时排在最后。每场开战清空。
+  - **数值放配置表**：`KOLT_SCRAP = { capPct: 0.5, modAp: 1, spendOrder: ["layer", "rot", "divert", "strip"] }`；废料上限、废物利用的封顶都改读 `koltScrapCap`（数值不变）。
+  - **联机**：分步的 key 用现有的 `target` / `mode` / `ally`（`online-view.js · pickKeys` 里已经有），玩家端照常一步步选，房主的动作菜单和权威校验按同一套分步检查。拆卸模式的废料不单独下发，只算进柯尔特仪表 / 资源行里的「废料」合计（`projectHud` 本来就按白名单下发这个数字），不含任何坚毅数值。
+  - **测试**：`tests/issue-218.test.js`（配置表；达到上限 / 差 1 点没达到；各来源合计达到上限也算；敌方目标没有这个选项；扣废料的顺序和剩余；行动点超过上限、对自己用；拆卸模式的分步、选废料不受上限、被碎渣重炮 / 废物利用用到、每场清空；联机动作菜单、权威校验、仪表上的废料合计）。`tests/hotseat-validation.test.js` 里拆卸模式的命令补上新加的那一步 `mode: "ally"`。
+- **联机跑团：长休结算只在变了的时候发，长休过一次以后战斗包不再整份重发**（issue #216，来源是 #213 的审查）。以前：跑团长休过一次后 `TRPG.lastRest` 一直留着（trpg.js · `trpgLongRest`），online-game.js · `rawPacket` 每个玩家包都带 `rest`，经 online-view.js · `projectRest` 投影后整份发出（默认 4 人队约 1 KB/包，mood 那句中文每字 3 字节）；online-wire.js 的增量编码只管消息、公开记录、演出快照和克制表，`rest` 每包整份重发，战斗包也一样。4v3 瑞比连击每名玩家要收 3 个结算包，合计多出约 3 KB，而 #213 修完后这一招离 50 KiB 只剩约 2.2 KB，长休过一次就会超。现在：online-wire.js 对 `rest` 做和克制表（`matchupUnchanged`）一样的处理——和上一包一样就不发，只带 `restUnchanged: true`，玩家端用上一次收到的那份还原；又长休了（内容变了）或重同步，一律整份发；`rest` 是 null（还没长休）时照发 null（比标记还短）；没有基准的 `restUnchanged` 拒绝解码，逼出重同步。玩家端解码后的 `packet.rest` 和以前一模一样，所以 online-ui.js · `observeRest` 不用改：它不会看到 `rest` 中途变成 null，同一份结算不会再弹一次。长休规则和投影白名单（坚毅照样不发）都没变。改了 online-wire.js · `create`（`pack` / `unpack` / `reset`）、docs/d3/privacy.md、docs/d3/verification.md；测试：新增 tests/online-wire-rest.test.js（往返、null、重同步、没有基准 / 坏标记、真实 4 人长休结算之后每包只多一个标记），tests/online-coordinator.test.js（玩家端每包都还原成同一份、缺号先要重同步），tests/online-session-ui.test.js（浏览器：D3 预算测试先长休一次再测 4v3 连击，战斗包不带 `rest`；长休结算弹过以后再来两包不会再弹）。
+- **首领机制提示改成 FF14 式：头顶的图标 + 战场正上方的倒计时横幅 + 点名瞬间弹一下、响一声**（主人定的方向，issue #206；unit-card.js · `MECH_ICON` / `mechIcon` / `mechTip` / `mechIconsHtml` / `towerMarkHtml` / `paintTowers` / `topStack` / `paintBanner` / `fitTop` / `bannerItems` / `MECH_ALERT` / `mechFresh` / `alertNew` / `bindTips`，sfx.js · `MARKER_PING` / `Sfx.marker`，game.js · `applyEnv` / `setView` / `paintMechBar` / `refreshTop`，online-battle.js · `paintZones` / `update`，game.css、online.css；测试 tests/boss-mech-icons.test.js、tests/boss-countdown-display.test.js）
+  - **只改显示**：机制的规则、结算和图鉴里的说明都没动。联机发给玩家的数据也没加字段——`online-view.js` 本来就发机制类型、点名对象、还有几回合（`display.marks` / `display.casts` / `zoneView.towers`），不含坚毅生命。
+  - **以前**：铭牌的状态行里写「死刑 · 还有 2 回合」「死刑→柯尔特 · 还有 2 回合」这样的色块，被点名的人铭牌内圈画红 / 黄 / 紫 / 橙框；踩塔是区域的青色粗框 + 右上角的文字牌子。
+  - **现在**：
+    - 被点名的人铭牌**上方**浮一个贴纸图标，形状一眼分得清（不只靠颜色）：死刑 = 红色破碎的盾，分担 = 橙黄色四个箭头往中间汇聚，远离 = 紫色圆圈加四个往外的箭头，齐射 = 粉色三颗扇形排开的子弹，踩塔 = 青色的塔；画法照 art/style-guide.html 的贴纸 + 粗墨线（内联 SVG）。角上的大号数字是「还有 N 回合」的 N，本回合落下写「!」并轻轻脉动（系统开了「减少动态效果」就不动，改成静止的光晕）。同时被几种机制点名就横向排开；这一排卡上面留出图标的高度，不压到上一排。铭牌上不再写机制名字、不画彩色边框。
+    - 首领头上：它正在读条的每个机制一个同样形状的图标（深底 + 机制色描边，和点名的图标区分开）。
+    - 踩塔：图标放在那个区的区名旁边，旁边写「几人 / 要几人」（人数不够标红）；地面上画一圈（人数不够时变成红色虚线）；不放在单位头上。
+    - 鼠标停在图标上（触屏点一下；点图标不会选中这个单位，点别处收起）弹出说明：机制名字（首领读条的带上点名对象）、还有几回合、什么时候落下、会发生什么（原来 `markTip` / `castTip` / `towerTip` 的文字）、怎么应对（新写在 `MECH_ICON` 里，末尾都加一句「落下那一刻首领要是失衡，会推迟一回合」）。单位本身的悬停说明照旧列出首领机制。
+    - 战场正上方中间：红字白描边的横幅，每个首领正在读条的机制一条（「死刑 → 柯尔特 · 2 回合」「踩塔 · 3 区 · 1 回合」「远离 → 全员 · 4 回合」），剩余回合少的在上面，最后一回合的那条放大、闪；结算掉、取消、首领倒下以后那一条就消失。援军倒计时（chain.js）和它摞在同一个容器里（援军在上），写法一样是「· N 回合」；有横幅时战场顶上留出它的高度，不挡区名和卡。
+    - 联机玩家的战斗画面（online-battle.js）用同一套函数，看到的一样。触屏点一下图标以后浏览器会补发 mouseout，触屏时不再把它当成鼠标离开（以前刚弹出的说明马上又收起）；联机玩家画面的说明框（挂在 body 下的 `.mech-tip`）加进 online.css 的显示白名单（以前一直被藏着）。
+    - **点名瞬间**（追加，主人已同意）：首领机制新点名到一个人（头顶的图标第一次出现）时，图标从头顶「啪」地弹出来（缩放 + 回弹，一圈机制色的光往外散），同时一声很短的提示音（`Sfx.marker`：两声「叮」先低后高，正弦波 + 一点泛音、再低通，不刺耳；几个人同一刻被点名只响一声）。区名旁边新标出来的塔也一样；首领头上的读条不弹。
+      - 只在新出现那一下：倒计时减少、刷新画面、悬停都不再弹 / 再响；第一次画（读档、刚连进来）时已经有的点名不弹。换人点名、拿掉再出现、落下以后马上重新点名（倒计时一下子往上跳 2 回合以上；首领失衡 / 被挟持推迟一回合只 +1，不算）算新的一次。
+      - 音效关着（顶栏「音效 关」）不响；系统开了「减少动态效果」就不弹，声音照音效开关走；预演时不算。
+      - 单机和联机玩家画面都有；联机只拿玩家收到的投影（`display.marks` / `zoneView.towers`）和上一次画的比，不看玩家看不到的数据。
+      - 数值都在配置里：弹出动画的时长、关键帧（缩放 / 位移 / 不透明度）、光圈大小、算重新点名的跳数在 unit-card.js 顶部的 `MECH_ALERT`；提示音的音高、长短、音量、低通、限流在 sfx.js 的 `MARKER_PING`。动画用 Web Animations 播，卡片挪区、联机画面整块重新挂上去都不会重播。
+  - **「最后一回合」怎么算**：落下之前我方只剩这一回合能应对——敌人回合开始时落下的（现在的首领都是）看「本回合落下」，我方回合开始时落下的（主持人后台能设）看「还有 1 回合」。
+  - 原来的 `UnitCard.towerHtml`（踩塔文字牌子）换成 `towerMarkHtml`；`tests/boss-countdown-display.test.js` 按新的显示方式更新断言（单机、联机、悬停说明、挤的区都还在测），新增最后一回合脉动 / 减少动态效果、触屏点图标两个浏览器测试。点名瞬间：`tests/boss-mech-icons.test.js` 新增 5 条（只认新出现的点名；弹出 + 提示音、静音、减少动态效果、预演；区名旁的塔；规则 → 联机投影 → 玩家端；`Sfx.marker` 的音高长短和静音），`tests/boss-countdown-display.test.js` 新增单机、联机玩家画面两个浏览器测试。
+- **#193 / #196 审查补充**（hotseat.js · `decideCheck` / `trimReqs`；trpg-ui.js；ROADMAP.md；测试 tests/check-followups.test.js）
+  - 主持人同意检定申请时，建检定和掷骰要么都成功，要么都撤回：掷骰出错会撤掉刚建的检定和频道记录，申请仍是待处理，不再留下「已同意但检定还开着」的半截状态。
+  - 主持人不同意、申请被撤回时，小队频道写一行说明，玩家知道申请为什么没了。
+  - 检定申请超过 20 条时先丢最旧的已处理记录，待处理的申请不会被挤掉。
+  - 检定页的「暗骰」勾选：以前发起后一直勾着，下次容易误发暗骰；现在**发起成功后**才自动取消（`trpg-ui.js · checkSubmit` 的 onOk），发起失败时保持勾选，避免再点一次变成公开检定、把结果漏给玩家。
+  - ROADMAP 里「合作单局每人一名角色」的规则说明改成跑团可以一人多角色。
+- **联机玩家「物资」→「钱包与商店」，「背包」改用共用背包浮层，道具只列一处**（设计师反馈「物资和背包分不清、东西列了两遍」；online-ui.js · `suppliesMarkup` / `suppliesButton` / `trpgBagModel` / `openBag` / `openBackpack` / `closeMyBag` / `render` / `rogueMarkup` / `openInfo`，backpack-ui.js · `open` / `refresh` / `inBattleMode` / `html`，workshop-data-adapter.js · `viewBackpackModel`，backpack.css，online.css；测试：新增 tests/online-bag-ui.test.js，改 tests/online-ui.test.js、tests/online-session-ui.test.js、tests/shop-sell-ui.test.js）
+  - **以前**：跑团玩家的「物资」弹窗既有商店 / 工匠 / 工坊 / 诊所 / 钱包，又在底下列一遍「队伍公共物资」（奎支、水、道具 × 数量）；「背包」按钮又向房主要一份文字清单；联机单局标题栏有「背包」，正文「工坊与背包」里又有一个「背包」。
+  - **钱包与商店**（跑团，原「物资」，`data-online="supplies"` 不变）= 钱和花钱的地方：公账 / 奎支、自己的钱包、商店、工匠、工坊、诊所 · 义体，顶上一行说明「队伍的道具在「背包」里看」，不再列道具。**联机单局不显示这个按钮**：单局的钱包、商店、工匠、诊所、工坊都在正文和队伍卡上，而 `state.kuizhi` 在单局只是马上平分清零的临时公账。
+  - **背包**：标题栏「背包」打开和房主同一个背包浮层（`.ovl`），按 材料 / 消耗品 / 改装件 / 义体 / 关键道具 分类、带道具说明；顶上一行写水量和「用道具在自己的行动里选「使用道具」，钱在「钱包与商店」」。跑团读最新的 `view.state.bag`（online-view.js · projectState 白名单：道具 `id / name / qty`，外加 `water`），说明在本地查道具目录（和房主 bagDetail 同一套），每收一包浮层就是这一包；战斗中只读。联机单局沿用 `WorkshopData.viewBackpackModel`，战斗中只读、不给义体方案（和房主 hostBackpackModel 一致）；去掉正文里重复的「背包」按钮（工坊入口保留）。
+  - **不挡事**：轮到我回应协助 / 格挡询问时背包浮层自动收起（`.ovl` 会盖住询问，倒计时到了会自动放弃）；离开房间 / 被移出 / 销毁时收起；只收玩家自己打开的，不碰房主的背包。
+  - **backpack-ui.js**：`model.note` 一行说明；`opts.keep` 换画面不自动收起、挂在 body 上（玩家页隐藏了 #g-app）；打开时当前标签为空就跳到第一个有东西的标签（模型只算一次）；打开时焦点放「关闭」、重画后焦点留在原按钮，Esc 能关；≤760px 或触屏时标签 / 按钮 / 可点的材料行 44px。不显示任何坚毅生命数值（测试用 `shp / shpMax` 设特殊值核对，另查道具目录说明里不带坚毅数字）。
+- **#194 补丁：战斗包不带队伍卡；玩家探索画面的属性点申请按钮回来了**（online-game.js · `rawPacket`；online-ui.js · `partyMarkup` / `attrMarkup`；party-cards.js · `heroCardHtml`；online.css · `.ol-party` / `.ol-party-cell`；测试 tests/online-player-ui.test.js、tests/online-session-ui.test.js）
+  - **战斗包**：#194 给每个结算包都整份带上 `party`（队伍卡，约 1.2 KB），但玩家战斗画面根本不画队伍卡，4v3 瑞比连击一次结算的总流量从 49,049 涨到 52,763 字节，超过 50 KiB 上限。现在 `online-game.js` 只在不是战斗画面时发 `party`（探索 / 结算照旧带），上限不变。
+  - **属性点**：#194 把玩家探索画面的队伍卡换成和主持人共用的 `party-cards.js` 后，属性点申请按钮（`attrMarkup`）没再画出来，联机玩家没法分配属性点。现在自己的角色卡下面接回申请 / 等确认 / 撤回；卡片和申请区包在同一个 `.ol-party-cell` 里（`.ol-party` 是网格，分开放会单独占一格、在宽屏上排到卡片右边）。
+  - **提示文字**：玩家队伍卡上的「有 N 点属性点可分配」不再带「（队伍页）」（玩家没有队伍页）；主持人卡照旧。
+
+- **联机：「消息与成员」按钮右上角的未读红点**（主人要求，issue #207；online-ui.js · `paintDock` / `paintPanel` / `observeMessages` / `observeLobbyChat` / `lobbyChatInView` / `seeLobbyChat` / `lobbyChatMarkup` / `renderSide` / `paintHost` / `render`，online.css · `.ol-dot` / `.ol-dot-pop`；测试 `tests/online-ui.test.js` 的五条 #207）
+  - **以前**：只有玩家有私信未读数，写在按钮文字后面（「· N 条新消息」，加一圈黄框），房主收到玩家的回复没有提示；「大厅交流」来了新消息没有任何提醒。大厅里玩家 / 跑团房主的房间面板一直开着，这时来的私信也被算成未读，开局后按钮上留一个过期的数；未读数要等下一次重画才显示。
+  - **现在**：按钮右上角一个红点（红底白字、白色描边，带条数，超过 9 条写「9+」），按钮文字只留「房间码 · 消息与成员」。亮起的情况：大厅交流里别人发的新消息（只在大厅阶段，自己发的不算）；别人发来的新私信（房主收到玩家的回复也算，自己发的不算）。房主和玩家、联机跑团和联机单局都一样。
+  - **什么时候算看到**：房间面板开着（包括大厅里一直开着的）就算看到私信。大厅交流要露出来才算——列表最下面（新消息在那）在屏幕里；面板开着但大厅交流在下面看不到时，「大厅交流」标题旁也有同样的红点，往下翻到看得见，标题和按钮上的红点一起消失。
+  - 开局后同一份聊天在「小队」频道里，有那边的红点，不再算到这个按钮上。「小队」标签原来的未读数改成同一个红点样式（也是超过 9 写 9+，以前是 99+）。
+  - 红点出现的那一下轻轻弹一下，条数变多不再弹；系统开了「减少动态效果」就不动。
+  - 手机上玩家的按钮在顶栏右侧，以前整个按钮 `overflow: hidden` 做省略号，红点会被裁掉；现在省略号只作用在按钮里的文字上。房主那边按钮旁的「角色分配」让开 10px，红点不压到它。
+- **分阶段的首领 / 精英：战斗里的悬停说明只写当前阶段的能力**（主人要求，Closes #205；bestiary.js · `BESTIARY_STAGES` / `bestiaryStageOf`；unit-tip.js · `stageAbilities` / `describe` / `html`；game.js · `snapUnit` / `unitTipHtml`；online-view.js · `displayOf`；online-ui.js · `unitTip`；hud-icons.css · `.ut-stage`；测试 `tests/boss-stage-tip.test.js`）
+  - **以前**：鼠标停在多阶段的敌人上，悬停说明把图鉴里所有阶段的能力全列出来（沙灵聚合体一次 7 行），一大堆字堆在一起不好读。**现在**：只列当前阶段的能力和各阶段共有的那几行，能力上面一行写「当前阶段：二阶段 · 还有其他阶段」；别的阶段的能力不列、不剧透。首领机制的倒计时照旧显示在最前面。
+  - **哪些算分阶段**（配置在 `BESTIARY_STAGES`）：
+    - 沙灵聚合体（首领，`resources.phase`）：一阶段（沙爪 / 砂岩、沙尘爆裂、狂暴连打）→ 外层沙壳打穿进二阶段（机械臂、电能炮）→ 装甲击破进三阶段（逃离、吸引碎片、肉体操控；吸满两次碎片回到二阶段）。
+    - 飞碟触灵（首领，本体 + 五条机械足）：按还活着的机械足，4–5 条踩踏、2–3 条激光扫射、剩 1 条准备自爆。「毁掉一只机械足击破 1」「十级后召唤看守」「协助」每个阶段都列。悬停在机械足上看到的和本体一样。
+    - 活沙（精英）：活沙（每回合一次 atk、被杀死时吸收）→ 吸收沙灵 / 沙鱼后变成巨型活沙（穿刺、流沙漩涡、三回合内没死就打全场）。「可以对自己协助」两个形态都列。
+    - 这次没算作阶段、照旧全列：亡命之王（被挟持、强盗头子继位是状态）、赤牙（霰弹预热）、沙鱼（白天 / 夜晚）、高压巡逻艇（飞行 / 坠机）等。
+  - **怎么判断当前阶段**：每个阶段认一个只有这一阶段才有的招式，`enemySkillList` 现在给出哪个就是哪个阶段。换阶段的门槛只写在规则里一处，不再抄一遍。判断不出来时（例如本体已经倒下）照旧全列。
+  - **联机**：玩家端没有规则，阶段编号由房主算好。`online-view.js` 的白名单在单位的 `display` 里多放一个 `stage`，只放行 1–9 的整数，不发血量门槛之类的数值，**坚毅生命照旧不发**。演出用的画面快照（tape）身上没有规则状态，用快照里（`snapUnit`）已经算好的阶段，演出中也不会退回一阶段。玩家端 `online-ui.js` 拿这个编号调同一个 `UnitTip.html`，看到的和单机一样。
+  - **图鉴不变**：图鉴照旧列全部阶段的能力（`BESTIARY_TEXT` 没改）。
 - **敌人种族（二）：种族被动在敌人身上生效**（issue #161，设计见 `docs/enemy-race.md` 第 4、7 节；enemies.js · `RACE_PERK` / `RACE_PERKS` / `racePerk` / `raceDefendMods` / `raceAtkAdjust` / `raceCheckPerks` / `raceFieldDamage` / `raceFirstBreak` / `raceAfterMove` / `raceBonusExtra` / `raceBreakCap` / `raceAttackMods` / `raceAfterHurt` / `raceSkills` / `raceRunSkill` / `raceBonusChoice`，engine.js · `resolveAttack` / `applyResultToUnit`，party.js · `effectiveAtk`，matchup.js · `matchupDefenderRow`，app.js · `dealTo` / `applyCombat` / `refreshEnemyEconomy` / `doMoveInner` / `voidCrossOdds` / `iceLeaveCheck` / 场地结算，ai.js · `aiPlanBase`，bestiary.js、bestiary-ui.js、game.js、unit-card.js、unit-tip.js、online-battle.js；测试 `tests/enemy-race-perks.test.js`、`tests/audit-P6-terrain.test.js`）
   - **以前**：敌人有种族但只是一个标签（和六维换算），种族被动不起作用。**现在**：按 `u.race` 通用生效（不看具体兵种，镇压部队等固定兽人兵种同样吃到）；数值全放 `RACE_PERK`，开关和说明放 `RACE_PERKS`。
   - **人类·迎难直上**：敌人的检定（越过空隙、离开冻土）失败时重掷一次，成功率 50% → 75%（和角色共用 `voidCrossOdds` / `iceLeaveCheck` 里的重掷；没有种族或别的种族的敌人仍是 50%）。
@@ -433,6 +492,7 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
   - **暗骰**：以前只有小队频道的 🎲 能暗骰，而且只能选英雄；主持人「检定」页发起的检定没有暗骰，结果玩家都看得到。现在检定页可勾「暗骰」（`checkOpen` 带 `secret: true`，只有主持人能用）：目标可以是任何在场单位（敌人等没有角色卡的按没有熟练算），只有主持人能掷；检定本身、结果和频道里的记录都标 `secret`，`online-view.js` 不发给玩家。
   - **主动发起检定**（照属性点申请）：玩家给自己的角色提 `{ type: "checkRequest", unitId, prof, note }` → 主持人 `{ type: "checkDecide", requestId, decision: "approve", diff }` 定难度同意，房主随即按角色卡建检定并权威掷骰（结果进小队频道、所有人可见）；`decision: "reject"` 不同意，`"cancel"` 申请人或主持人撤回。同一角色同时只能有一条待处理。玩家视图多了 `checkRequests: [{ id, unitId, unitName, operatorId, prof, note, status, checkId? }]`。
   - **Lv随队**：以前模板里等级空着的敌人 / 配置物跟着开战时主持人选的战斗等级（默认 1 级）。现在跑团里开战时按队伍等级 `trpgPartyLevel()`（在队英雄等级平均，四舍五入，至少 1；和任务敌人默认等级、手册报酬用的是同一个数）。跑团外照旧跟着战斗等级。
+  - 补充：「随队」的等级在开战建遭遇（`battleTemplateToEncounter`）的那一刻按当时的队伍等级算好写进遭遇，之后战斗中有人升级不会改变已经上场敌人的等级。
   - 坚毅生命照旧不进玩家的包。
 - **分步选择的技能：真正打出去之前随时能放弃，界面补上明显的「放弃（Esc）」按钮**（issue #188；game.js · `showPickBar` / `canGiveUp` / `pickUnit` / `pickZone`，app.js · `renderSkillFlow` 与 Esc 键；测试 `tests/skillflow-giveup.test.js`）。
   - **核对结果**：战斗界面（单机、热座、联机玩家端共用 game.js）的分步选择一直是在本地把每一步的选择攒进 `picks`，最后一步选完才发**一条**技能指令，中途不扣行动点 / 附赠 / 资源、不换刀头、不改架势和标记、不记行动分；联机玩家端因此没有会残留在房主那边的 `skillFlow`。拆装部件的刀头也是在结算（`runSkill`）里才换，不是分步中途换的。计算器面板的分步（`beginSkillFlow`）放弃走 `cancelSkillFlow`，也不碰别的状态。

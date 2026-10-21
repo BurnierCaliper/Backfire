@@ -99,7 +99,7 @@ test("多单位流程允许最终选项为友方，不能误套普通攻击敌�
   const w = f.c.spawnWeapon(f.a, "torque"); w.level = 2; w.ap = 2; w.bonus = 2; f.enemy.zone = 1;
   f.session.reconcile();   // 召唤出的武器人插在本人前面，立刻轮到它
   assert.equal(f.session.snapshot().currentUnitId, w.id);
-  const command = { type: "skill", actor: w.id, skill: "torque_strip", target: f.b.id, picks: { target: f.enemy.id, ally: f.b.id } };
+  const command = { type: "skill", actor: w.id, skill: "torque_strip", target: f.b.id, picks: { target: f.enemy.id, mode: "ally", ally: f.b.id } };
   assert.equal(f.validate(command), true);
 });
 

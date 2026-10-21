@@ -71,6 +71,9 @@
 .unit-tip .ut-top span, .unit-tip .ut-kicker { color: #b3a487; font-size: 12px; }
 .unit-tip .ut-kicker { letter-spacing: .06em; }
 .unit-tip .ut-desc { margin: 4px 0 0; }
+/* 分阶段的首领 / 精英：现在是哪个阶段（能力只列这一阶段的） */
+.unit-tip .ut-stage { margin: 4px 0 0; color: #b3a487; font-size: 12px; }
+.unit-tip .ut-stage b { color: #ffd27a; font-weight: 700; }
 .unit-tip ul { margin: 4px 0 0; padding-left: 16px; }
 .unit-tip .ut-list li { color: #d8ccb4; }
 .unit-tip .ut-h { margin-top: 8px; padding-top: 6px; border-top: 1px solid #4d4337; color: #c99a46; font-size: 12px; font-weight: 700; letter-spacing: .1em; }
