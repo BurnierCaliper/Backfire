@@ -368,6 +368,11 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **#194 补丁：战斗包不带队伍卡；玩家探索画面的属性点申请按钮回来了**（online-game.js · `rawPacket`；online-ui.js · `partyMarkup` / `attrMarkup`；party-cards.js · `heroCardHtml`；online.css · `.ol-party` / `.ol-party-cell`；测试 tests/online-player-ui.test.js、tests/online-session-ui.test.js）
+  - **战斗包**：#194 给每个结算包都整份带上 `party`（队伍卡，约 1.2 KB），但玩家战斗画面根本不画队伍卡，4v3 瑞比连击一次结算的总流量从 49,049 涨到 52,763 字节，超过 50 KiB 上限。现在 `online-game.js` 只在不是战斗画面时发 `party`（探索 / 结算照旧带），上限不变。
+  - **属性点**：#194 把玩家探索画面的队伍卡换成和主持人共用的 `party-cards.js` 后，属性点申请按钮（`attrMarkup`）没再画出来，联机玩家没法分配属性点。现在自己的角色卡下面接回申请 / 等确认 / 撤回；卡片和申请区包在同一个 `.ol-party-cell` 里（`.ol-party` 是网格，分开放会单独占一格、在宽屏上排到卡片右边）。
+  - **提示文字**：玩家队伍卡上的「有 N 点属性点可分配」不再带「（队伍页）」（玩家没有队伍页）；主持人卡照旧。
+
 - **联机：「消息与成员」按钮右上角的未读红点**（主人要求，issue #207；online-ui.js · `paintDock` / `paintPanel` / `observeMessages` / `observeLobbyChat` / `lobbyChatInView` / `seeLobbyChat` / `lobbyChatMarkup` / `renderSide` / `paintHost` / `render`，online.css · `.ol-dot` / `.ol-dot-pop`；测试 `tests/online-ui.test.js` 的五条 #207）
   - **以前**：只有玩家有私信未读数，写在按钮文字后面（「· N 条新消息」，加一圈黄框），房主收到玩家的回复没有提示；「大厅交流」来了新消息没有任何提醒。大厅里玩家 / 跑团房主的房间面板一直开着，这时来的私信也被算成未读，开局后按钮上留一个过期的数；未读数要等下一次重画才显示。
   - **现在**：按钮右上角一个红点（红底白字、白色描边，带条数，超过 9 条写「9+」），按钮文字只留「房间码 · 消息与成员」。亮起的情况：大厅交流里别人发的新消息（只在大厅阶段，自己发的不算）；别人发来的新私信（房主收到玩家的回复也算，自己发的不算）。房主和玩家、联机跑团和联机单局都一样。

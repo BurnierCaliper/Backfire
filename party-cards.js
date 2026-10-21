@@ -57,7 +57,7 @@
         <div class="rh-row">协助格挡 <span>${d.block != null ? esc(d.block) + "%" : "—"}</span></div>
         ${opt.gm && d.shp != null ? `<div class="rh-row">坚毅 <span>${esc(d.shp)}/${esc(d.shpMax)}</span></div>` : ""}
         <div class="rh-row">经验 <span>${esc(d.xp)}/${d.xpNext ? esc(d.xpNext) : "满"}</span></div>
-        ${d.attrPoints > 0 ? `<div class="rh-w tr-attn">有 ${esc(d.attrPoints)} 点属性点可分配（队伍页）</div>` : ""}
+        ${d.attrPoints > 0 ? `<div class="rh-w tr-attn">有 ${esc(d.attrPoints)} 点属性点可分配${opt.gm ? "（队伍页）" : ""}</div>` : ""}
         ${d.featPoints > 0 ? `<div class="rh-w tr-attn">有 ${esc(d.featPoints)} 项专长可选（队伍页）</div>` : ""}
         ${(d.feats || []).length ? `<div class="rh-w">专长：${esc(d.feats.join("、"))}</div>` : ""}
         ${weapons}
