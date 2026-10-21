@@ -19,7 +19,7 @@ const packs = () => { city(); return art(); };
 /** 做好了的场景（区域、场景 id、地面主题），远景里一定有的东西（userData.art） */
 const DONE = [
   { region: "外城区", scene: "street", key: "outer_street", must: ["shack", "house", "pipe", "cliff"] },
-  { region: "下水道", scene: "tunnel", key: "sewer_tunnel", must: ["tunnelWall", "tunnelRib", "lampPool", "wallLamp", "wallPipe", "outfall"] }
+  { region: "下水道", scene: "tunnel", key: "sewer_tunnel", must: ["tunnelWall", "tunnelRib", "rivet", "lightRing", "lampPool", "wallLamp", "wallPipe", "outfall"] }
 ];
 const PARTY = ["kolt", "helu", "ruby", "yuito"];
 const DESKTOP = { width: 1440, height: 900, top: 46, bottom: 160 };
@@ -232,8 +232,11 @@ test("装饰不压住铭牌（#241）：远景、中景、近景里，地台上�
         const bd = backdropOf(B, layout, "dusk");
         root.add(bd.group);
         root.updateMatrixWorld(true);
-        const things = artOf(root).filter(o => !o.obj.parent || !o.obj.parent.userData.art).map(o => ({ what: o.what, pts: pointsOf(THREE, o.obj) }));
         const b = layout.bounds, lampZ = b.minZ - L.CONFIG.lamps.back;
+        // 战场后沿后面的点挡不到任何人：镜头（远 / 中 / 近景都在后沿前面）到每个人脚下那条线上的点都在后沿前面。
+        // 下水道的拱顶往头顶弯过来（#241 截图验收），按「沿视线的深度」算会比后排的人近，但它在后沿后面、画面上沿外面，挡不到人
+        const things = artOf(root).filter(o => !o.obj.parent || !o.obj.parent.userData.art)
+          .map(o => ({ what: o.what, pts: pointsOf(THREE, o.obj).filter(p => p.z >= b.minZ - 1e-6) })).filter(th => th.pts.length);
         artOf(bd.group).forEach(({ obj, what }) => {
           const box = new THREE.Box3().setFromObject(obj);
           layout.zones.forEach(z => {
@@ -244,6 +247,7 @@ test("装饰不压住铭牌（#241）：远景、中景、近景里，地台上�
           assert.ok(behind || aside || before, `${d.key} ${bdx.id}：远景里的 ${what} 没让开灯 / 战场（z ${box.min.z.toFixed(2)}…${box.max.z.toFixed(2)}，灯在 ${lampZ.toFixed(2)}）`);
         });
         for (const lens of lenses(layout)) {
+          assert.ok(lens.cam.pos.z >= b.minZ, `${d.key} ${bdx.id} ${lens.tag}：镜头在战场后沿前面`);
           things.forEach(th => {
             const s = screenOf(lens.cam, th.pts);
             layout.units.forEach(u => {
@@ -277,17 +281,30 @@ test("下水道（#241）：在巨大圆管的里面——管壁从灯后面往�
       assert.ok(sh.zw < b.minZ - L.CONFIG.lamps.back, `${id}：管壁在灯后面`);
       assert.ok(top.z > env.skyZ + 0.7, `${id}：管壁弯到竖直的地方还在天边那条远景前面`);
       assert.ok(top.y > L.frameTop(layout.camera, top.z) + 1, `${id}：管壁比默认镜头的画面上沿高（看不到天）`);
+      // 截图验收（主人：「几乎看不出在巨大圆形管道里面」）：管壁过了竖直再往头顶弯成拱顶，灯带一圈圈从管底亮到拱顶；天幕、天边的远景收起来
+      assert.ok(K.TUNNEL.arc > Math.PI / 2 + 0.5 && K.TUNNEL.arc < Math.PI - 0.3, `${id}：管壁弯过竖直成拱顶（又不弯到镜头看到管壁外面）`);
       const bd = backdropOf(B, layout, "night");
-      let water = null;
-      bd.group.traverse(o => { if (o.userData.flow === "sewage") water = o; });
+      bd.group.children.filter(o => o.userData.layer === "sky" || o.userData.layer === "band").forEach(o => assert.equal(o.visible, false, `${id}：管子里看不到 ${o.userData.layer}`));
+      let rings = 0;
+      bd.group.traverse(o => { if (o.userData.art === "lightRing") rings = o.children.length; });
+      assert.ok(rings >= 3, `${id}：管壁上一圈圈的灯带（${rings}）`);
+      const flow = {};
+      bd.group.traverse(o => { if (o.userData.flow) flow[o.userData.flow] = o; });
+      const water = flow.sewage;
       assert.ok(water, `${id}：地上有污水`);
+      assert.ok(flow.streak && flow.shine, `${id}：水面上有流动的亮纹、灯的倒影`);
       water.updateMatrixWorld(true);
       assert.ok(water.position.y < 0 && water.position.y > L.CONFIG.groundY, `${id}：污水在地面上、比地台低`);
-      const tex = water.material.map, x0 = tex.offset.x;
+      const tex = water.material.map, x0 = tex.offset.x, s0 = flow.streak.material.map.offset.x, h0 = flow.shine.material.map.offset.x;
       bd.update(1, 0);
       assert.equal(tex.offset.x, x0, `${id}：减少动态效果时污水不流`);
+      assert.equal(flow.streak.material.map.offset.x, s0, `${id}：减少动态效果时亮纹不流`);
+      assert.equal(flow.shine.material.map.offset.x, h0, `${id}：减少动态效果时倒影不晃`);
       bd.update(1.5, 0.5);
       assert.notEqual(tex.offset.x, x0, `${id}：污水在流`);
+      const dw = tex.offset.x - x0, ds = flow.streak.material.map.offset.x - s0;
+      assert.ok(ds / flow.streak.material.map.repeat.x > dw / tex.repeat.x * 1.5, `${id}：亮纹比污水流得快（两层流速不同；贴图走的 ÷ 重复次数 = 世界里走的 ÷ 平面宽）`);
+      assert.notEqual(flow.shine.material.map.offset.x, h0, `${id}：倒影在晃`);
       bd.dispose();
     }
     const TH = { day: { hemi: 0.9, sunI: 2.7, rimI: 0.55, exposure: 1, lamp: 0.25, fog: 0xd6b985, ground: 0x6e5b42, hemiSky: 0xfff1d8, hemiGround: 0x735c40, sun: 0xfff0d2, rim: 0xfff0c8, sky: ["#f6e3b4", "#ecc98c", "#dcac6a", "#c29a66"], grade: {} } };

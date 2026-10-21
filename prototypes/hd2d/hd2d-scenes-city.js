@@ -34,23 +34,33 @@
     }
   };
   /** 下水道 tunnel：在一根巨大的圆管里面。只画后面那半边（像剖开的模型，镜头从剖开的那边看进去）：管底就是地面，
-   *  管壁从灯后面 gap 处开始往后、往上弯，弯过竖直一点（arc 弧度），比画面上沿高得多，看不到天（再往头顶弯过来就挡到镜头了，不画）。
+   *  管壁从灯后面 gap 处开始往后、往上弯，过了竖直再往头顶弯过来成拱顶（arc 弧度），比画面上沿高得多，看不到天；天幕和天边那条远景也收起来。
+   *  （默认镜头俯角 30°、视角 22°：管壁在画面里只露出离地两三到六的那一截，近景几乎只看得到地面。所以「弧形」靠这一截上的灯带、接缝、铆钉和水面的倒影看出来；
+   *   拱顶在镜头往上转时才看得到。拱顶弯到 arc 为止：再往前弯，镜头就看到管壁的外面了）
    *   r          管子的半径（世界单位；还要让弯到竖直的那一截在天幕前面，放不下就小一点）
-   *   seg / rows 横着几段、沿弧几段；wall 管壁混凝土的颜色（一段段轮着）
-   *   joint      每隔 every 一道接缝（宽 w，颜色 × dark）
+   *   seg / rows 横着几段、沿弧几段；wall 管壁混凝土的颜色（一段段轮着）；glow 管壁自己发的一点光（昏暗里也看得出形状）
+   *   joint      每隔 every 一道接缝（宽 w，颜色 × dark）；rivet 接缝两边各一排铆钉（沿弧每隔 step 一颗，半径 r、颜色）
+   *   rings      灯带：每隔 each 道接缝，接缝上一圈沿着管壁的灯带（宽 w，颜色 × gain，泛光会抓到）；照亮两边的管壁（spread 以内，最亮加 level 的灯色）
    *   stain      水位线：离地 h 以下颜色 × dark、往 tint（泡过污水的绿褐）靠
    *   lamps      管壁上 n 盏灯：离地 h；照亮的那一圈 reach 大，另外叠一层加色的网格（最亮加 gain × 0.18 的灯色，不受场景光照影响）；
    *              前 blink 盏会闪（AMBIENT.flicker）
    *   pipes      沿管壁横着走的管子 / 电缆：离地 h、半径 r、颜色
-   *   water      地上的污水：比地面高 y，贴图往左流 speed（每秒走多少世界单位），颜色 */
+   *   water      地上的污水：比地面高 y，贴图往左流 speed（每秒走多少世界单位），颜色；
+   *              streak 水面上一道道顺着流向的亮纹（另一层，比污水快 fast 倍：两层流速不同，看得出在流）；
+   *              shine 灯带、壁灯在水面上的倒影：一条条往前伸 len、宽 w 的亮纹（亮度 level，贴图晃动着往左流 speed） */
   const TUNNEL = {
-    r: 8.6, gap: 0.6, arc: 1.85, seg: 96, rows: 24,
-    wall: [0x5c665c, 0x535d55, 0x646c63],
-    joint: { every: 4.2, w: 0.35, dark: 0.5 },
+    r: 8.6, gap: 0.6, arc: 2.55, seg: 96, rows: 34,
+    wall: [0x6c776c, 0x637066, 0x737d72], glow: 0x10160f,
+    joint: { every: 4.2, w: 0.35, dark: 0.55, rivet: { step: 0.5, r: 0.055, color: 0xa4ac98 } },
+    rings: { each: 2, w: 0.16, color: 0xd8f0a8, gain: 2.4, spread: 1.5, level: 0.2 },
     stain: { h: 1.2, dark: 0.62, tint: 0x3a4628 },
-    lamps: { n: 6, h: 2.7, reach: 2.8, gain: 1.8, color: 0xe4f0a8, blink: 1 },
+    lamps: { n: 6, h: 2.7, reach: 3.4, gain: 2.2, color: 0xe4f0a8, blink: 1 },
     pipes: [{ h: 1.6, r: 0.17, color: 0x4a3a2e }, { h: 2.05, r: 0.08, color: 0x2a3032 }, { h: 3.6, r: 0.26, color: 0x50463a }],
-    water: { y: 0.04, speed: 0.35, color: 0x5a6440 },
+    water: {
+      y: 0.04, speed: 0.35, color: 0x5f6a44,
+      streak: { fast: 2.2, opacity: 0.55 },
+      shine: { len: 6.5, w: 0.9, level: 0.5, speed: 0.6 }
+    },
     // 排污口：管壁上伸出来一截横着的管子（u 横向位置 × 战场半宽，离地 h，半径 r），污水从管口往下流进地上的污水里（fall 每秒往下走多少）
     outfall: { u: 0.55, h: 1.7, r: 0.55, fall: 1.2, color: 0x6a7048 }
   };
@@ -109,13 +119,14 @@
       palette: "tunnel",
       decor: { band: 3, ledge: 2, size: [0.15, 0.2], kinds: ["valve", "barrel", "tire"] },
       backdrop: { tunnel: true, band: null },
-      // 管子里：不分白天黑夜（按夜晚画、光照固定），天是黑的（反正被管壁挡住）；环境光、主光压暗，偏一点污水的黄绿，灯更亮；调色更闷、暗角更重
+      // 管子里：不分白天黑夜（按夜晚画、光照固定），天是黑的（反正被管壁挡住）；环境光、主光压暗，偏一点污水的黄绿，灯更亮；调色更闷、暗角更重。
+      // 截图验收（主人：「远景、近景都太暗」）：环境光、主光比上一版亮一点，暗角轻一点（整体还是昏暗，结构靠灯带、铆钉、倒影看清）
       light: {
         fixed: "night",
         all: {
-          set: { sky: ["#141a15", "#0e130f", "#090c0a", "#050706"], fog: 0x10170f, ground: 0x2a312a, hemiSky: 0x8fa08a, hemiGround: 0x1e241a, sun: 0xd8e8b0, rim: 0xb8d0a0 },
-          scale: { hemi: 0.8, sunI: 0.55, rimI: 0.6, lamp: 1.3 },
-          grade: { temp: [0.97, 1.02, 0.93], sat: 0.92, contrast: 1.14, vignette: 0.55 }
+          set: { sky: ["#141a15", "#0e130f", "#090c0a", "#050706"], fog: 0x121a11, ground: 0x2e362e, hemiSky: 0x9fb09a, hemiGround: 0x283022, sun: 0xd8e8b0, rim: 0xb8d0a0 },
+          scale: { hemi: 1.1, sunI: 0.72, rimI: 0.75, lamp: 1.4 },
+          grade: { temp: [0.97, 1.02, 0.93], sat: 0.94, contrast: 1.1, vignette: 0.42 }
         }
       }
     }
@@ -480,9 +491,20 @@
     geo.setIndex(idx); geo.computeVertexNormals();
     return geo;
   }
-  /** 管壁：混凝土一段段（颜色轮着），水位线以下更暗更绿；每隔一段一道接缝（略凸出来的一圈暗色的环）；
-   *  灯照亮的那一圈另外叠一层（加色混合，不受场景光照影响：管子里就靠这几盏灯） */
-  function tunnelWall(kit, env, S, lamps) {
+  /** 接缝在哪（x，从战场中间往两边每隔 joint.every 一道）；哪几道上有灯带（每隔 rings.each 道，正中那道有） */
+  function tunnelJoints(env) {
+    const J = TUNNEL.joint, xs = [], rings = [];
+    for (let k = -Math.floor((env.cx - env.x0) / J.every); env.cx + k * J.every <= env.x1; k++) {
+      const x = env.cx + k * J.every;
+      xs.push(x);
+      if (((k % TUNNEL.rings.each) + TUNNEL.rings.each) % TUNNEL.rings.each === 0) rings.push(x);
+    }
+    return { xs, rings };
+  }
+  /** 管壁：混凝土一段段（颜色轮着），水位线以下更暗更绿；每隔一段一道接缝（略凸出来的一圈暗色的环），接缝两边各一排铆钉；
+   *  隔几道接缝一圈灯带（从管底沿着管壁一直亮到拱顶：管壁的弧形就看这一圈圈的环）；
+   *  灯带、壁灯照亮的那一片另外叠一层（加色混合，不受场景光照影响：管子里就靠这些灯） */
+  function tunnelWall(kit, env, S, lamps, joints) {
     const THREE = kit.THREE, T = TUNNEL, J = T.joint, c = new THREE.Color(), stain = new THREE.Color(T.stain.tint);
     const base = (x, p, h) => {
       const k = Math.floor((x - env.cx) / J.every);
@@ -491,21 +513,35 @@
       return c;
     };
     const geo = wallSheet(kit, S, env.x0, env.x1, T.seg, T.arc, T.rows, 0, base);
-    env.group.add(tag(new THREE.Mesh(geo, env.keep(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0, side: THREE.DoubleSide, fog: false, emissive: 0x070a07 }))), "tunnelWall"));
-    // 接缝：每道一条窄窄的环，贴着管壁往里一点
+    env.group.add(tag(new THREE.Mesh(geo, env.keep(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.88, metalness: 0.04, side: THREE.DoubleSide, fog: false, emissive: T.glow }))), "tunnelWall"));
+    // 接缝：每道一条窄窄的环，贴着管壁往里一点；两边各一排铆钉（实例网格）
     const ribs = new THREE.Group(), ribM = env.keep(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, side: THREE.DoubleSide, fog: false }));
-    for (let x = env.cx - Math.floor((env.cx - env.x0) / J.every) * J.every; x <= env.x1; x += J.every) {
-      ribs.add(new THREE.Mesh(wallSheet(kit, S, x - J.w / 2, x + J.w / 2, 1, T.arc, T.rows, 0.04, (xx, p, h) => base(xx, p, h).multiplyScalar(J.dark)), ribM));
-    }
+    joints.xs.forEach(x => ribs.add(new THREE.Mesh(wallSheet(kit, S, x - J.w / 2, x + J.w / 2, 1, T.arc, T.rows, 0.04, (xx, p, h) => base(xx, p, h).multiplyScalar(J.dark)), ribM)));
     env.group.add(tag(ribs, "tunnelRib"));
-    // 灯照亮的那一圈
-    const lc = new THREE.Color(T.lamps.color), R2 = T.lamps.reach * T.lamps.reach;
+    const RV = J.rivet, per = Math.floor(T.arc * S.r / RV.step), o = new THREE.Object3D();
+    const rivets = new THREE.InstancedMesh(new THREE.SphereGeometry(RV.r, 6, 4), env.keep(new THREE.MeshStandardMaterial({ color: RV.color, roughness: 0.45, metalness: 0.6, fog: false, emissive: T.glow })), joints.xs.length * 2 * per);
+    let n = 0;
+    joints.xs.forEach(x => [-1, 1].forEach(s => {
+      for (let i = 0; i < per; i++) {
+        const p = S.point((i + 0.5) * RV.step / S.r);
+        o.position.set(x + s * J.w * 0.32, p.y + p.ny * 0.06, p.z + p.nz * 0.06); o.updateMatrix(); rivets.setMatrixAt(n++, o.matrix);
+      }
+    }));
+    env.group.add(tag(rivets, "rivet"));
+    // 灯带：接缝上一圈细细的亮带（自己发光，泛光会抓到）
+    const RG = T.rings, ringM = env.keep(new THREE.MeshBasicMaterial({ color: new THREE.Color(RG.color).multiplyScalar(RG.gain), toneMapped: false, fog: false, side: THREE.DoubleSide }));
+    const rings = new THREE.Group();
+    joints.rings.forEach(x => rings.add(new THREE.Mesh(wallSheet(kit, S, x - RG.w / 2, x + RG.w / 2, 1, T.arc, T.rows, 0.075, () => c.setRGB(1, 1, 1)), ringM)));
+    env.group.add(tag(rings, "lightRing"));
+    // 灯带、壁灯照亮的那一片
+    const lc = new THREE.Color(T.lamps.color), rc = new THREE.Color(RG.color), add = new THREE.Color(), R2 = T.lamps.reach * T.lamps.reach, S2 = RG.spread * RG.spread;
     const glow = (x, p) => {
-      let lit = 0;
+      let lit = 0, band = 0;
       lamps.forEach(l => { lit += Math.exp(-((x - l.x) ** 2 + (p.y - l.y) ** 2 + (p.z - l.z) ** 2) / R2); });
-      return c.copy(lc).multiplyScalar(Math.min(1, lit) * T.lamps.gain * 0.18);
+      joints.rings.forEach(rx => { band += Math.exp(-((x - rx) ** 2) / S2); });
+      return c.copy(lc).multiplyScalar(Math.min(1, lit) * T.lamps.gain * 0.18).add(add.copy(rc).multiplyScalar(Math.min(1, band) * RG.level));
     };
-    const pool = new THREE.Mesh(wallSheet(kit, S, env.x0, env.x1, T.seg * 2, T.arc * 0.55, T.rows, 0.06, glow), env.keep(new THREE.MeshBasicMaterial({
+    const pool = new THREE.Mesh(wallSheet(kit, S, env.x0, env.x1, T.seg * 3, T.arc, T.rows, 0.06, glow), env.keep(new THREE.MeshBasicMaterial({
       vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false, toneMapped: false
     })));
     env.group.add(tag(pool, "lampPool"));
@@ -567,11 +603,72 @@
       for (let k = 0; k < 40; k++) { g.fillStyle = "rgba(210,214,170,.35)"; g.fillRect(r() * s, r() * s, 1 + r() * 3, 1 + r() * 2); }   // 浮沫
     }, seed);
     tex.magFilter = THREE.LinearFilter; tex.repeat.set((env.x1 - env.x0) / tile, (z1 - z0) / tile);
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(env.x1 - env.x0, z1 - z0), env.keep(new THREE.MeshStandardMaterial({ map: tex, roughness: 0.16, metalness: 0.3, fog: true })));
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(env.x1 - env.x0, z1 - z0), env.keep(new THREE.MeshStandardMaterial({ map: tex, roughness: 0.12, metalness: 0.35, fog: true, emissive: TUNNEL.glow })));
     m.rotation.x = -Math.PI / 2; m.position.set((env.x0 + env.x1) / 2, S.y0 + W.y, (z0 + z1) / 2);
     m.receiveShadow = true; m.userData.flow = "sewage";
     env.group.add(m);
-    env.anims.push((t, dt) => { if (dt > 0) tex.offset.x = (tex.offset.x + W.speed * dt / tile) % 1; });
+    // 水面上一道道顺着流向的亮纹：另一层（透明），比污水流得快——两层流速不同，一眼看得出水在往一边流
+    const st = farTex(kit, env, 128, (g, s, r) => {
+      for (let k = 0; k < 46; k++) {
+        const x = r() * s, y = r() * s, w = 10 + r() * 34, a = 0.25 + r() * 0.5;
+        [0, -s].forEach(dx => {
+          g.fillStyle = `rgba(214,222,170,${a})`; g.fillRect(x + dx, y, w, 1);
+          g.fillStyle = `rgba(214,222,170,${a * 0.4})`; g.fillRect(x + dx + w * 0.2, y + 1, w * 0.6, 1);
+        });
+      }
+    }, seed + 37);
+    st.magFilter = THREE.LinearFilter; st.repeat.set((env.x1 - env.x0) / (tile * 0.7), (z1 - z0) / (tile * 0.7));
+    const sm = new THREE.Mesh(new THREE.PlaneGeometry(env.x1 - env.x0, z1 - z0), env.keep(new THREE.MeshBasicMaterial({ map: st, transparent: true, opacity: W.streak.opacity, depthWrite: false, fog: true })));
+    sm.rotation.x = -Math.PI / 2; sm.position.set((env.x0 + env.x1) / 2, S.y0 + W.y + 0.008, (z0 + z1) / 2);
+    sm.userData.flow = "streak";
+    env.group.add(sm);
+    env.anims.push((t, dt) => {
+      if (!(dt > 0)) return;
+      tex.offset.x = (tex.offset.x + W.speed * dt / tile) % 1;
+      st.offset.x = (st.offset.x + W.speed * W.streak.fast * dt / (tile * 0.7)) % 1;
+    });
+    return m;
+  }
+  /** 灯带、壁灯在水面上的倒影（TUNNEL.water.shine）：每个 x 一条从管底往前伸的亮纹（中间亮、两边和前头淡掉，加色混合），
+   *  贴图是一道道横着的碎光，晃动着往左流（减少动态效果时不动）。平铺在水面上，不算「装饰」（userData.flow） */
+  function shine(kit, env, S, xs, seed) {
+    const THREE = kit.THREE, W = TUNNEL.water, SH = W.shine, y = S.y0 + W.y + 0.016;
+    const tex = farTex(kit, env, 128, (g, s, r) => {
+      for (let k = 0; k < 70; k++) {
+        const x = r() * s, yy = r() * s, w = 4 + r() * 22, a = 0.3 + r() * 0.7;
+        g.fillStyle = `rgba(255,255,255,${a})`;
+        [0, -s].forEach(dx => g.fillRect(x + dx, yy, w, 1 + r() * 2));
+      }
+    }, seed + 41);
+    tex.magFilter = THREE.LinearFilter;
+    const pos = [], col = [], uv = [], idx = [];
+    xs.forEach(x => {
+      const b = pos.length / 3;
+      // 横着三列（两边 0、中间 1）× 往前五行（越往前越淡）
+      for (let j = 0; j <= 4; j++) {
+        const z = S.zw + 0.15 + SH.len * j / 4, f = Math.pow(1 - j / 4, 1.4);
+        [-1, 0, 1].forEach(sx => {
+          pos.push(x + sx * SH.w / 2, y, z); uv.push((x + sx * SH.w / 2) / 2, z / 2);
+          const v = sx === 0 ? f : 0; col.push(v, v, v);
+        });
+      }
+      for (let j = 0; j < 4; j++) for (let i = 0; i < 2; i++) { const a = b + j * 3 + i; idx.push(a, a + 3, a + 1, a + 1, a + 3, a + 4); }
+    });
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+    geo.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+    geo.setIndex(idx);
+    const m = new THREE.Mesh(geo, env.keep(new THREE.MeshBasicMaterial({
+      map: tex, vertexColors: true, color: new THREE.Color(TUNNEL.lamps.color).multiplyScalar(SH.level), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, toneMapped: false
+    })));
+    m.userData.flow = "shine";
+    env.group.add(m);
+    env.anims.push((t, dt) => {
+      if (!(dt > 0)) return;
+      tex.offset.x = (tex.offset.x + SH.speed * dt / 2) % 1;
+      tex.offset.y = Math.sin(t * 1.7) * 0.04;
+    });
     return m;
   }
   /** 排污口（TUNNEL.outfall）：管壁上伸出来一截横着的管子（管口里面是黑的），一股污水从管口往下流进地上的污水里（贴图往下走），
@@ -621,14 +718,17 @@
       const k = 1 + Math.sin(t * 3.1) * 0.08; foam.scale.set(k, k, 1);
     });
   }
-  /** 下水道：巨大圆管的后半边（管壁、接缝、灯照亮的那一圈）、管壁上的灯和管子、排污口、地上的污水 */
+  /** 下水道：巨大圆管的后半边（管壁、接缝和铆钉、灯带、拱顶、灯照亮的那一片）、管壁上的灯和管子、排污口、地上的污水和倒影。
+   *  管子里看不到天：天幕和天边那条远景收起来（没有天光、太阳的光晕、星星、乌云） */
   function tunnelScene(kit, env, seed) {
-    const S = tunnelShape(env), lamps = tunnelLamps(env, S);
-    tunnelWall(kit, env, S, lamps);
+    const S = tunnelShape(env), lamps = tunnelLamps(env, S), joints = tunnelJoints(env);
+    env.group.children.forEach(o => { if (o.userData.layer === "sky" || o.userData.layer === "band") o.visible = false; });
+    tunnelWall(kit, env, S, lamps, joints);
     wallLamps(kit, env, lamps);
     wallPipes(kit, env, S);
     outfall(kit, env, S, seed);
     sewage(kit, env, S, seed);
+    shine(kit, env, S, joints.rings.concat(lamps.map(l => l.x)), seed);
   }
 
   /* ---------- 挂钩：远景 ---------- */
