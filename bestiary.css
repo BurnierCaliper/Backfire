@@ -175,3 +175,10 @@ body.bx-open { overflow: hidden; }
 .bx-lvpick { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 10px; }
 .bx-lvpick > span { font-size: 12px; font-weight: 700; color: var(--bx-muted); margin-right: 4px; }
 .bx-lvpick .bx-tab { padding: 3px 10px; font-size: 13px; }
+
+/* 可能掉落（bestiary-ui.js · dropsSection） */
+.bx-drops { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 5px; }
+.bx-drop { display: flex; align-items: center; gap: 8px; padding: 5px 10px; font-size: 13px; color: #d8ccb2; background: rgba(236, 224, 198, .05); }
+.bx-drop b { color: var(--bx-paper); }
+.bx-drop.t2 b { color: var(--bx-holo); }
+.bx-drop-p { margin-left: auto; color: var(--bx-muted); font-size: 12px; }

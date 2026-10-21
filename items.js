@@ -103,48 +103,113 @@ EFFECT_ITEMS.forEach(it => {
  * 结构材料（金属 → 赫心结晶）照旧只用于武器升级；道具制作另用这 7 种。队伍公用（supply：联机时不按需求分配，直接进公用背包）。
  *   cls：chem 化学 / elec 电子 / bio 生物；tier：1 常见、2 精制；price 参考价（黑市按 CRAFT_BLACK_MARKET 倍出售） */
 const CRAFT_MATERIALS = [
-  { id: "cm_scrap",  name: "废料",       price: 100, cls: "shell", tier: 0, hint: "道具的壳体。机械敌人掉落；拆解道具也能拿回" },
-  { id: "cm_chem",   name: "化工残液",   price: 200, cls: "chem",  tier: 1, hint: "化学 · 常见。酸 / 火系敌人掉落" },
-  { id: "cm_gas",    name: "燃气浓缩物", price: 600, cls: "chem",  tier: 2, hint: "化学 · 精制。精英、首领，第二采矿场的燃气机械掉落" },
-  { id: "cm_coil",   name: "废线圈",     price: 200, cls: "elec",  tier: 1, hint: "电子 · 常见。电 / 能量系机械掉落" },
-  { id: "cm_cell",   name: "电芯",       price: 600, cls: "elec",  tier: 2, hint: "电子 · 精制。精英、首领，第三采矿场、巨人城机械掉落" },
-  { id: "cm_scale",  name: "沙鱼鳞",     price: 200, cls: "bio",   tier: 1, hint: "生物 · 常见。带沙尘层的沙漠生物掉落" },
-  { id: "cm_spirit", name: "星灵组织",   price: 600, cls: "bio",   tier: 2, hint: "生物 · 精制。带星灵层的敌人（触灵、陨体衍蛛、弦蚣……）掉落" }
+  { id: "cm_scrap",  name: "废料",       price: 100, cls: "shell", tier: 0, hint: "道具的壳体。外城区机器人看守、狂徒等机械与人形敌人常掉；拆解道具也能拿回" },
+  { id: "cm_chem",   name: "化工残液",   price: 200, cls: "chem",  tier: 1, hint: "化学 · 常见。采矿场的投料无人机、矿场看守机器人，自爆小车与各路警卫队队长常掉" },
+  { id: "cm_gas",    name: "燃气浓缩物", price: 600, cls: "chem",  tier: 2, hint: "化学 · 精制。采矿场的燃气收集机、播撒者、蚁型特殊戒备兵种等精英多掉，亡命之王必掉" },
+  { id: "cm_coil",   name: "废线圈",     price: 200, cls: "elec",  tier: 1, hint: "电子 · 常见。外城区机器人看守、安保巡逻车、巡检浮标常掉，高压巡逻艇、飞碟触灵掉得更多" },
+  { id: "cm_cell",   name: "电芯",       price: 600, cls: "elec",  tier: 2, hint: "电子 · 精制。高压巡逻艇、巨人、观测鸦等精英多掉，杂兵偶尔也有" },
+  { id: "cm_scale",  name: "沙鱼鳞",     price: 200, cls: "bio",   tier: 1, hint: "生物 · 常见。沙漠的沙灵、沙鱼、大沙灵 / 活沙常掉，穴鸦、尘虫偶尔掉" },
+  { id: "cm_spirit", name: "星灵组织",   price: 600, cls: "bio",   tier: 2, hint: "生物 · 精制。第三采矿场的陨体衍蛛、陨体弦蚣，机甲触灵、观测鸦多掉，沙灵聚合体必掉" }
 ];
 const CRAFT_BLACK_MARKET = 3;   // 道具材料普通商店不卖，黑市按参考价的几倍卖
-/* 打倒一个敌人掉多少材料：按档次。common / refined 是每个材料类别各掷一次的概率（≥1 表示保底这么多份）；scrap 是废料 [最少, 最多]（有装甲 / 护盾的机械才掉） */
-const CRAFT_DROPS = {
-  minion: { common: 0.4, refined: 0.03, scrap: [0, 1] },
-  elite:  { common: 1,   refined: 0.4,  scrap: [1, 2] },
-  boss:   { common: 2,   refined: 1,    scrap: [2, 3] }
-};
 CRAFT_MATERIALS.forEach(m => { ITEM_CATALOG[m.id] = { name: m.name, hint: m.hint, combat: false, supply: true, material: "craft" }; });
-/** 这个敌人属于哪些材料类别：酸 / 火 → 化学；电 / 能量 → 电子；沙尘层 → 生物（沙鱼鳞）；星灵层 → 生物（星灵组织）；装甲 / 护盾 → 机械（废料） */
-function craftClassesOf(u) {
-  const el = String((u.suggest && u.suggest.element) || u.element || "physical");
-  const types = (u.layers || []).map(l => l.type);
-  return {
-    chem: el === "acid" || el === "fire",
-    elec: el === "electric" || el === "energy",
-    sand: types.includes("sand"),
-    spirit: types.includes("spirit"),
-    mech: types.includes("armor") || types.includes("shield")
-  };
+
+/* ===== 敌人掉落表（制作材料）：每个敌人登记自己能掉什么 —— 改掉落只改这一处 =====
+ *   键是敌人 kit（单位上的 u.kit）；值是 { 材料 id: 期望份数 }。
+ *   期望份数 p < 1：有 p 的概率掉 1 份；p ≥ 1：保底 floor(p) 份，小数部分再掷一次多 1 份。
+ *   主题：机械掉废料 / 线圈 / 电芯，酸火系掉化工残液 / 燃气浓缩物，沙漠生物掉沙鱼鳞，星灵 / 异星生物掉星灵组织。
+ *   稀有度：常见料（废料、化工残液、废线圈、沙鱼鳞）杂兵 0.1–0.35；精制料（燃气浓缩物、电芯、星灵组织）杂兵 0.03–0.15；
+ *   精英明显更高（合计 1.5–2.5 份）；首领有保底。目标：4 个杂兵一场期望 1–3 份。
+ *   不在表里的 kit 不掉（召唤物另外排除，见 rogue.js · rollMaterialDrops / app.js · trpgEnemyMaterials）。 */
+const ENEMY_DROPS = {
+  // —— 天网安保（外城区 / 巨人城）：机械 + 电子 ——
+  guard_sword:  { cm_scrap: 0.25, cm_coil: 0.25, cm_cell: 0.05 },
+  guard_gun:    { cm_coil: 0.25, cm_scrap: 0.15, cm_cell: 0.08 },
+  patrol_car:   { cm_coil: 0.25, cm_scrap: 0.2, cm_cell: 0.06 },
+  boomcar:      { cm_scrap: 0.2, cm_chem: 0.2, cm_gas: 0.06 },          // 炸药车
+  buoy:         { cm_coil: 0.25, cm_scrap: 0.15, cm_cell: 0.08 },
+  swarm:        { cm_scrap: 0.2, cm_coil: 0.15 },                       // 三只一组
+  patrolboat:   { cm_coil: 0.9, cm_cell: 0.8, cm_scrap: 0.4 },
+  // —— 第一采矿场：用酸的安保 ——
+  dumpdrone:    { cm_chem: 0.3, cm_scrap: 0.2, cm_gas: 0.04 },
+  mine_guard:   { cm_chem: 0.25, cm_scrap: 0.25, cm_gas: 0.04 },
+  spreader:     { cm_chem: 1.05, cm_gas: 0.5, cm_scrap: 0.4 },
+  ant_guard:    { cm_chem: 1.05, cm_gas: 0.5, cm_cell: 0.25 },
+  // —— 第二采矿场：用火的燃气机械（燃气浓缩物的主要来源） ——
+  mine_overseer: { cm_chem: 0.25, cm_gas: 0.12, cm_scrap: 0.1 },
+  flint_sweeper: { cm_gas: 0.15, cm_chem: 0.2, cm_scrap: 0.15 },
+  gas_collector: { cm_gas: 1.15, cm_chem: 0.65, cm_scrap: 0.4 },
+  ant_hunter:    { cm_gas: 0.65, cm_chem: 0.8, cm_cell: 0.25 },
+  // —— 第三采矿场：能量机械（电芯）+ 异星生物（星灵组织） ——
+  alarm_bot:        { cm_coil: 0.25, cm_cell: 0.12, cm_scrap: 0.15 },
+  meteor_miner:     { cm_cell: 0.12, cm_spirit: 0.08, cm_scrap: 0.2 },
+  meteor_spider:    { cm_spirit: 0.15, cm_coil: 0.12 },                 // 两只一组
+  meteor_centipede: { cm_spirit: 0.15, cm_cell: 0.08, cm_coil: 0.1 },
+  // —— 警卫队（有机体 + 装备） ——
+  captain_wolf:   { cm_chem: 0.65, cm_cell: 0.4, cm_scrap: 0.5 },        // 冷凝罐 → 化工残液
+  captain_ox:     { cm_chem: 0.65, cm_cell: 0.4, cm_scrap: 0.5 },
+  captain_lizard: { cm_chem: 0.8, cm_scale: 0.5, cm_gas: 0.25 },
+  // —— 盗匪（外城区）：搜身拿到的破烂 ——
+  thug_knife:  { cm_scrap: 0.2, cm_chem: 0.08 },
+  thug_hammer: { cm_scrap: 0.2, cm_coil: 0.08 },
+  bandit_boss: { cm_chem: 0.8, cm_gas: 0.4, cm_cell: 0.2, cm_scrap: 0.4 },
+  outlaw_king: { cm_chem: 2, cm_gas: 1, cm_cell: 1, cm_scrap: 1 },
+  // —— 沙灵（沙漠） ——
+  sand_beast:     { cm_scale: 0.3, cm_spirit: 0.03 },
+  sand_human:     { cm_scale: 0.3, cm_spirit: 0.03 },
+  bigsand:        { cm_scale: 1.15, cm_spirit: 0.3 },
+  livesand:       { cm_scale: 1.15, cm_spirit: 0.3 },
+  dustbody:       { cm_scale: 1.05, cm_chem: 0.4, cm_scrap: 0.4 },
+  sand_aggregate: { cm_scale: 3, cm_spirit: 1, cm_scrap: 1 },
+  // —— 触灵（天网设施 / 巨人城）：机械 + 星灵 ——
+  mecha_mg: { cm_scrap: 0.8, cm_spirit: 0.65, cm_cell: 0.4 },
+  mecha_gl: { cm_scrap: 0.65, cm_spirit: 0.65, cm_gas: 0.45 },
+  ufo_body: { cm_cell: 2, cm_coil: 2, cm_spirit: 1, cm_scrap: 1 },
+  ufo_leg:  {},                                                          // 飞碟的部件，算在本体里
+  // —— 巨人城 ——
+  giant: { cm_scrap: 0.8, cm_cell: 0.65, cm_spirit: 0.3 },
+  // —— 野生 / 沙漠生物 ——
+  crow:            { cm_scale: 0.18, cm_chem: 0.08 },                    // 4–6 只一群
+  sandfish_lead:   { cm_scale: 1.3, cm_scrap: 0.4, cm_spirit: 0.25 },
+  sandfish_drive:  { cm_scale: 0.35, cm_scrap: 0.1 },
+  sandfish_ambush: { cm_scale: 0.35, cm_scrap: 0.1 },
+  dust_bug:  { cm_scale: 0.1 },                                          // 中立生物：小概率
+  tube_worm: { cm_chem: 0.06, cm_scale: 0.04 },
+  // —— 古代造物（沙漠）：沙漠里的电芯来源 ——
+  watchcrow: { cm_cell: 0.65, cm_spirit: 0.65, cm_coil: 0.5 },
+  // —— 首领（首领池） ——
+  chixia: { cm_scale: 2, cm_gas: 1, cm_cell: 1, cm_chem: 1 }
+};
+/** 预设 id 和场上单位 kit 不一样的（飞碟 Boss 组生成的是 ufo_body） */
+const ENEMY_DROP_ALIAS = { ufo_boss: "ufo_body" };
+/** 一个敌人的掉落表 → [{ id, name, chance }]（chance = 期望份数）；不认识的 → [] */
+function enemyDropTable(kit) {
+  const t = ENEMY_DROPS[ENEMY_DROP_ALIAS[kit] || kit] || {};
+  return Object.keys(t).filter(id => t[id] > 0).map(id => ({ id, name: (ITEM_CATALOG[id] || {}).name || id, chance: t[id] }));
 }
-/** 掷一个敌人的材料掉落 → [{ id, qty }]（用调用方装好的随机数） */
-function rollCraftMaterials(u) {
-  if (!u || u.isPlayer) return [];
-  const rank = typeof enemyRankOf === "function" ? enemyRankOf(u) : "minion";
-  const D = CRAFT_DROPS[rank] || CRAFT_DROPS.minion;
-  const c = craftClassesOf(u), out = {};
-  const add = (id, n) => { if (n > 0) out[id] = (out[id] || 0) + n; };
-  const roll = (p) => p >= 1 ? Math.floor(p) : (Math.random() < p ? 1 : 0);
-  if (c.mech) add("cm_scrap", D.scrap[0] + Math.floor(Math.random() * (D.scrap[1] - D.scrap[0] + 1)));
-  if (c.chem) { add("cm_chem", roll(D.common)); add("cm_gas", roll(D.refined)); }
-  if (c.elec) { add("cm_coil", roll(D.common)); add("cm_cell", roll(D.refined)); }
-  if (c.sand) add("cm_scale", roll(D.common));
-  if (c.spirit) add("cm_spirit", roll(Math.max(D.refined, D.common * 0.5)));
-  return Object.keys(out).map(id => ({ id, qty: out[id] }));
+/** 一组敌人掉的材料 → [{ id, qty }]（按材料表顺序）。enemies：kit 字符串或单位（u.kit）；rng：() => [0,1)，不传用 Math.random（单局外面包了 withRng） */
+function rollEnemyDrops(enemies, rng) {
+  const r = typeof rng === "function" ? rng : Math.random;
+  const total = {};
+  (enemies || []).forEach(e => {
+    const kit = typeof e === "string" ? e : e && !e.isPlayer ? e.kit : null;
+    if (!kit) return;
+    enemyDropTable(kit).forEach(d => {
+      const n = Math.floor(d.chance) + (r() < d.chance - Math.floor(d.chance) ? 1 : 0);
+      if (n > 0) total[d.id] = (total[d.id] || 0) + n;
+    });
+  });
+  return CRAFT_MATERIALS.map(m => m.id).filter(id => total[id]).map(id => ({ id, qty: total[id] }));
+}
+/** 战后算掉落的敌人：打倒的（dead）、不是召唤物 / 铁壁 */
+function enemyDropFoes(units) {
+  return (units || []).filter(u => u && !u.isPlayer && u.dead && !u.summonedBy && u.kit !== "ironwall");
+}
+/** 期望份数（不掷骰）：{ 材料 id: 期望 }，给模拟 / 测试用 */
+function enemyDropExpected(enemies) {
+  const out = {};
+  (enemies || []).forEach(e => enemyDropTable(typeof e === "string" ? e : e && e.kit).forEach(d => { out[d.id] = (out[d.id] || 0) + d.chance; }));
+  return out;
 }
 
 /* ===== 制作配方（docs/workshop-design.md 第 3、5 节）=====

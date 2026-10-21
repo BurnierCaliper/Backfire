@@ -148,6 +148,7 @@ const Bestiary = (() => {
           const i = a.indexOf("：");
           return `<li>${i > 0 && i < 18 ? `<b>${esc(a.slice(0, i))}</b>${esc(a.slice(i))}` : esc(a)}</li>`;
         }).join("")}</ul></section>` : ""}
+        ${dropsSection(e)}
         <section class="bx-sec"><div class="bx-sec-h"><span>遭遇记录</span></div>
           <dl class="bx-facts">
             <dt>遭遇</dt><dd>${rec.met || 0} 场</dd>
@@ -177,6 +178,31 @@ const Bestiary = (() => {
         </div>
         <p class="bx-note">按 ${party} 人队、Lv${lv} 计算（和战斗里一样）。${esc(e.rankNote)}</p>
       </div>` : `<p class="bx-note">这个敌人的数值没法单独计算。</p>`;
+  }
+
+  /* ---------- 掉落（items.js · ENEMY_DROPS → bestiary.js 的 e.drops）---------- */
+  const TIER_NAME = { 0: "基础", 1: "常见", 2: "精制" };
+  function matTier(id) {
+    const m = typeof CRAFT_MATERIALS !== "undefined" ? CRAFT_MATERIALS.find(x => x.id === id) : null;
+    return m ? m.tier : null;
+  }
+  const pct = (x) => `${Math.round(x * 100)}%`;
+  /** 一条掉落的文字：p < 1 → 「35% 掉 1 份」；p ≥ 1 → 「保底 2 份」（+「30% 再多 1 份」） */
+  function dropChanceText(chance) {
+    const n = Math.floor(chance), f = Math.round((chance - n) * 1000) / 1000;
+    if (n < 1) return `${pct(f)} 掉 1 份`;
+    return `保底 ${n} 份${f > 0 ? `，${pct(f)} 再多 1 份` : ""}`;
+  }
+  /** 详情里的「可能掉落」一节（没登记掉落的敌人写「不掉制作材料」） */
+  function dropsSection(e) {
+    const drops = (e && e.drops) || [];
+    const body = drops.length
+      ? `<ul class="bx-drops">${drops.map(d => {
+          const t = matTier(d.id);
+          return `<li class="bx-drop t${t == null ? "" : t}"><b>${esc(d.name)}</b>${t != null ? `<span class="bx-chip dim">${TIER_NAME[t] || ""}</span>` : ""}<span class="bx-drop-p">${esc(dropChanceText(d.chance))}</span></li>`;
+        }).join("")}</ul><p class="bx-note">打赢后，被打倒的敌人各自掷一次；材料进队伍公用背包。</p>`
+      : `<p class="bx-note">不掉制作材料。</p>`;
+    return `<section class="bx-sec bx-drops-sec"><div class="bx-sec-h"><span>可能掉落</span></div>${body}</section>`;
   }
 
   /* ---------- 配置物 / 效果图鉴 ---------- */
@@ -379,6 +405,6 @@ const Bestiary = (() => {
     root.classList.remove("show");
     document.body.classList.remove("bx-open");
   }
-  return { open, close, pickRateNote, isOpen: () => !!(root && root.classList.contains("show")) };
+  return { open, close, pickRateNote, dropsSection, dropChanceText, isOpen: () => !!(root && root.classList.contains("show")) };
 })();
 if (typeof window !== "undefined") window.Bestiary = Bestiary;

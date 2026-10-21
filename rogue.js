@@ -1062,19 +1062,17 @@ const Rogue = (function () {
     bagAdd(id, qty);
     notes.push(`${source ? source + "：" : ""}获得 ${ITEM_CATALOG[id].name} ×${qty}。`);
   }
-  /** 打赢之后打倒的敌人掉制作材料（items.js · rollCraftMaterials）：合在一起记一行，进背包（材料是队伍公用的） */
+  /** 打赢之后打倒的敌人掉制作材料（items.js · ENEMY_DROPS / rollEnemyDrops，按敌人登记）：合在一起记一行，进背包（材料是队伍公用的）。
+   *  中立生物（尘虫、管虫）也按表小概率掉；召唤物、铁壁、飞碟机械足不掉；逃走的（没 dead）不掉 */
   function rollMaterialDrops(run, notes) {
-    if (typeof rollCraftMaterials !== "function") return;
-    const foes = (state.units || []).filter(u => u && !u.isPlayer && u.dead && !u.summonedBy && u.kit !== "ironwall" && u.kit !== "ufo_leg" &&
-      !(typeof isNeutralCreature === "function" && isNeutralCreature(u)));
+    if (typeof rollEnemyDrops !== "function") return;
+    const foes = enemyDropFoes(state.units);
     if (!foes.length) return;
     const key = `${run.seed}:mats:${run.act}:${run.taskNo}:${run.task ? run.task.index : "b"}:${run.day}:${(run.matNo = (run.matNo || 0) + 1)}`;
-    const total = {};
-    withRng(key, () => foes.forEach(u => rollCraftMaterials(u).forEach(m => { total[m.id] = (total[m.id] || 0) + m.qty; })));
-    const ids = Object.keys(total);
-    if (!ids.length) return;
-    ids.forEach(id => grantLoot(run, id, total[id], [], "材料"));
-    notes.push(`材料：${ids.map(id => `${ITEM_CATALOG[id].name} ×${total[id]}`).join("、")}。`);
+    const got = withRng(key, () => rollEnemyDrops(foes));
+    if (!got.length) return;
+    got.forEach(m => grantLoot(run, m.id, m.qty, [], "材料"));
+    notes.push(`材料：${got.map(m => `${ITEM_CATALOG[m.id].name} ×${m.qty}`).join("、")}。`);
   }
   /** 打赢之后掉的道具（rogue-data.js · ROGUE_CONFIG.itemDrops）：kind = battle / elite / boss */
   function rollItemDrops(run, kind, notes) {
