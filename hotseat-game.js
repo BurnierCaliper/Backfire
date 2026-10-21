@@ -12,7 +12,7 @@
   const packetListeners = new Set();
   const listeners = new Set(), authorityContext = {}, actionTypes = new Set(["skill", "move", "standUp", "useItem"]);
   const automatic = new Set(["battle.supportInfo", "battle.checkSolo", "battle.rememberCampaign", "battle.loadCampaign"]);
-  const tableTypes = new Set(["checkOpen", "checkRoll", "checkClose", "attrRequest", "attrDecide", "skillRoll", "showTitle", "purseTransfer", "shopBuy", "shopRedeem", "cyberRequest", "cyberwareInstall", "cyberwareRemove", "shopSell", "shopBuyback"]);
+  const tableTypes = new Set(["checkOpen", "checkRoll", "checkClose", "attrRequest", "attrDecide", "checkRequest", "checkDecide", "skillRoll", "showTitle", "purseTransfer", "shopBuy", "shopRedeem", "cyberRequest", "cyberwareInstall", "cyberwareRemove", "shopSell", "shopBuyback"]);
   const orderTypes = new Set(["orderPick", "orderConfirm", "orderStart", "orderMove", "orderSwapAccept", "answer", "chat", ...tableTypes]);
   const copy = value => JSON.parse(JSON.stringify(value));
   const active = () => !!(enabled && configured && session && authority && !state.solo);
@@ -116,7 +116,7 @@
       order: (s?.slots || []).map(r => r && ({ actor: r.unitId, name: r.unitName, owner: r.operatorId, locked: r.spent, done: r.completed, current: r.unitId === s.currentUnitId })),
       confirmed: s?.confirmed || [], swap: s?.pendingSwaps?.length ? { requestId: s.pendingSwaps[0].id, from: s.pendingSwaps[0].actor, to: s.pendingSwaps[0].target, recipient: s.pendingSwaps[0].responder } : null,
       ask: s?.ask || null, chat: (s?.chat || []).map(r => ({ id: r.id, operatorId: r.operatorId, name: r.operatorName, text: r.text, at: r.at, roll: r.roll ? (typeof r.roll === "object" ? { tier: r.roll.tier || null } : true) : false, tier: r.roll && r.roll.tier || null, secret: !!r.secret, title: !!r.title })),
-      title: s?.table?.title ? copy(s.table.title) : null, checks: copy(s?.table?.checks || []), attrRequests: copy(s?.table?.attrs || []),
+      title: s?.table?.title ? copy(s.table.title) : null, checks: copy(s?.table?.checks || []), attrRequests: copy(s?.table?.attrs || []), checkRequests: copy(s?.table?.checkReqs || []),
       // 跑团地图：主持人在地图上标的队伍位置（玩家只能看，不能改）
       map: typeof LEDGER !== "undefined" && LEDGER ? { place: LEDGER.place || null, x: LEDGER.placePos ? LEDGER.placePos.x : null, y: LEDGER.placePos ? LEDGER.placePos.y : null } : null,
       canConfigure: !network && canConfigure() && (!configured || id === gm()), canDisable: !network && canConfigure() && (!configured || id === gm()) };
@@ -247,15 +247,17 @@
     if (!K || typeof c.prof !== "string" || !diffs.includes(c.diff) || !Array.isArray(c.unitIds) || !c.unitIds.length) fail("检定需要熟练项、难度和至少一名角色");
     const prof = profName(c.prof);
     if (!PROF_LIST.includes(prof)) fail("没有这个熟练项");
+    // 暗骰检定（secret）：主持人可以给任何在场单位掷（敌人、中立、NPC）；没有角色卡的按没有熟练算
+    const pool = c.secret ? (state.units || []).filter(u => u && !u._removed && !u.weaponOf) : heroes();
     const targets = c.unitIds.map(id => {
-      const u = heroes().find(h => h.id === id); if (!u) fail("没有这名角色");
+      const u = pool.find(h => h.id === id); if (!u) fail("没有这名角色");
       const p = heroProfile(u.kit), level = Math.min(PROF_MAX, Number(((p && p.profs) || {})[prof] || ((p && p.profs) || {})[c.prof]) || 0);
       const hp = (u.layers || []).reduce((a, l) => a + (Number(l.current) || 0), 0), max = (u.layers || []).reduce((a, l) => a + (Number(l.max) || 0), 0);
       const perks = checkPerksFor(u.kit, prof, hp * 2 < max);
       const base = K.chance[level][diffs.indexOf(c.diff)] || 0;
       return { unitId: u.id, name: u.name, base, adv: perks.adv, dis: perks.dis, reroll: perks.reroll, level, perkText: perks.text };
     });
-    return { prof, diff: c.diff, diffName: K.diffs[c.diff].name, note: typeof c.note === "string" ? c.note : "", targets };
+    return { prof, diff: c.diff, diffName: K.diffs[c.diff].name, note: typeof c.note === "string" ? c.note : "", targets, secret: !!c.secret };
   }
   /** 按钮掷骰：这名角色这项熟练的等级、种族优劣势、各档成功线（手册成功率表 × 100） */
   function rollSpec(c) {
@@ -288,6 +290,13 @@
     checkClose: c => session.closeCheck(sender, c.checkId),
     attrRequest: c => { const u = attrUnit(c); return session.requestAttr(sender, u.id, c.attr, u.name); },
     attrDecide: c => session.decideAttr(sender, c.requestId, c.decision),
+    // 主动发起检定：玩家提（checkRequest），主持人定难度同意（checkDecide）后房主掷骰
+    checkRequest: c => { const u = heroes().find(h => h.id === c.unitId); if (!u) fail("没有这名角色"); const prof = profName(String(c.prof || "")); if (!PROF_LIST.includes(prof)) fail("没有这个熟练项"); return session.requestCheck(sender, u.id, prof, typeof c.note === "string" ? c.note : "", u.name); },
+    checkDecide: c => {
+      if (c.decision !== "approve") return session.decideCheck(sender, c.requestId, c.decision);
+      const req = (session.snapshot().table.checkReqs || []).find(r => r.id === c.requestId); if (!req) fail("没有这条检定申请");
+      return session.decideCheck(sender, c.requestId, "approve", checkSpec({ prof: req.prof, diff: c.diff, unitIds: [req.unitId], note: req.note }));
+    },
     skillRoll: c => session.skillRoll(sender, rollSpec(c), !!c.secret),
     showTitle: c => session.showTitle(sender, c),
     // 跑团私人钱包（trpg.js）：玩家只能从自己角色的钱包转出；主持人哪个钱包都能动。转完写进小队频道，大家看得到

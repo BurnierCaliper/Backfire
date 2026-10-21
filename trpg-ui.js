@@ -796,6 +796,8 @@
         <div class="tr-row">熟练项 <select id="ck-prof">${profOpts}</select> 难度 <select id="ck-diff">${diffOpts}</select>
           说明 <input id="ck-note" value="${esc(checkForm.note)}" placeholder="比如：撬开仓库的锁" style="width:240px"></div>
         <div class="tr-picks">${who}</div>
+        ${online() ? `<div class="tr-row"><label><input type="checkbox" id="ck-secret"${checkForm.secret ? " checked" : ""}> 暗骰（检定和结果只有主持人看得到，可以选敌人等任何单位）</label></div>${checkForm.secret ? `<div class="tr-picks">${(state.units || []).filter(u => !u.isPlayer && !u.dead && !u._removed && !u.weaponOf).map(u => `<label class="tr-pick"><input type="checkbox" data-ck-unit="${esc(u.id)}"${checkForm.units.includes(u.id) ? " checked" : ""}>${esc(u.name)}</label>`).join("")}</div>` : ""}` : ""}
+        ${checkRequestsHtml()}
         <div class="tr-row"><button class="g-btn" id="ck-open">发起检定</button></div>
       </div>
       ${cards || '<p class="r-hint">还没有检定。</p>'}`;
@@ -1016,10 +1018,16 @@
     P.querySelectorAll("[data-ck-unit]").forEach(el => { el.onchange = () => {
       const id = el.dataset.ckUnit; checkForm.units = checkForm.units.filter(x => x !== id); if (el.checked) checkForm.units.push(id);
     }; });
+    const sec = $("ck-secret"); if (sec) sec.onchange = () => { checkForm.secret = sec.checked; render(); };
+    P.querySelectorAll("[data-ck-req]").forEach(b => { b.onclick = () => {
+      const [decision, requestId] = b.dataset.ckReq.split(":");
+      checkSubmit(decision === "approve" ? { type: "checkDecide", requestId, decision, diff: checkForm.diff } : { type: "checkDecide", requestId, decision });
+    }; });
     $("ck-open").onclick = () => {
-      const ids = heroes().map(h => h.id).filter(id => checkForm.units.includes(id));
+      const pool = online() && checkForm.secret ? (state.units || []).filter(u => !u._removed && !u.weaponOf) : heroes();
+      const ids = pool.map(h => h.id).filter(id => checkForm.units.includes(id));
       if (!ids.length) { alert("至少选一名角色"); return; }
-      if (online()) { checkForm.note = ""; return checkSubmit({ type: "checkOpen", prof: checkForm.prof, diff: checkForm.diff, unitIds: ids, note: $("ck-note").value }); }
+      if (online()) { checkForm.note = ""; return checkSubmit({ type: "checkOpen", prof: checkForm.prof, diff: checkForm.diff, unitIds: ids, note: $("ck-note").value, secret: !!checkForm.secret }); }
       const spec = checkPreview(ids); if (!spec) return;
       spec.note = $("ck-note").value; checkForm.note = "";
       localChecks.push(Object.assign(spec, { id: "check-" + Date.now(), status: "open", at: Date.now(), targets: spec.targets.map(t => Object.assign(t, { result: null })) }));
@@ -1042,6 +1050,14 @@
     }; });
   }
   /** 联机时玩家申请的属性点：主持人同意才真正加上 */
+  /** 玩家主动申请的检定：主持人按上面选的难度同意（房主掷骰）或不同意 */
+  function checkRequestsHtml() {
+    if (!online()) return "";
+    const list = (HotseatGame.getView().checkRequests || []).filter(r => r.status === "pending");
+    if (!list.length) return "";
+    return `<h3>玩家申请的检定</h3>${list.map(r => `<div class="tr-row"><b>${esc(r.unitName)}</b> 想做「${esc(r.prof)}」检定${r.note ? "（" + esc(r.note) + "）" : ""}
+        <button class="g-btn small" data-ck-req="approve:${esc(r.id)}">按所选难度同意并掷骰</button><button class="g-btn small" data-ck-req="reject:${esc(r.id)}">不同意</button></div>`).join("")}`;
+  }
   function attrRequestsHtml() {
     if (!online()) return "";
     const list = (HotseatGame.getView().attrRequests || []).filter(r => r.status === "pending");

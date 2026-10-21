@@ -120,6 +120,7 @@
     rollBox.addEventListener("click", event => {
       if (event.target === rollBox || event.target.closest('[data-roll="close"]')) { rollBox.hidden = true; return; }
       if (event.target.closest('[data-roll="go"]')) doRoll();
+      if (event.target.closest('[data-roll="ask"]')) askCheck();
     });
     rollBox.addEventListener("change", event => {
       const t = event.target;
@@ -913,7 +914,7 @@
       const profOpts = Object.keys(groups).map(g => `<optgroup label="${esc(g)}">${groups[g].map(p => { const lv = u ? profLevel(u.kit, p) : 0; return option(p, `${p}${lv ? "（" + LV[lv] + "）" : ""}`, p === rollForm.prof); }).join("")}</optgroup>`).join("");
       const level = u ? profLevel(u.kit, rollForm.prof) : 0;
       const perks = u && typeof checkPerksFor === "function" ? checkPerksFor(u.kit, rollForm.prof, false) : {};
-      rollBox.innerHTML = `<div class="ol-card"><header><h2>掷骰 · d100</h2><button type="button" class="ol-button" data-roll="close">关闭</button></header>${units.length ? `<label>角色<select id="ol-roll-unit">${units.map(x => option(x.id, x.name, x.id === rollForm.unit)).join("")}</select></label><label>熟练项<select id="ol-roll-prof">${profOpts}</select></label><p class="ol-roll-lines"><b>${esc(LV[level])}</b>　点数越低越好：${esc(rollLines(level))}${perks.adv ? "（种族优势：掷两颗取低）" : perks.dis ? "（种族劣势：掷两颗取高）" : ""}</p><label>说明（可不填）<input id="ol-roll-note" maxlength="80" value="${esc(rollForm.note)}" placeholder="比如：撬开仓库的锁"></label>${view.isHost ? `<label class="ol-check-line"><input type="checkbox" id="ol-roll-secret"${rollForm.secret ? " checked" : ""}> 暗骰（结果只有主持人看得到）</label>` : ""}<footer><button type="button" class="ol-button ol-primary" data-roll="go"${disabled() ? " disabled" : ""}>掷 d100</button></footer>` : '<p class="ol-muted">还没有分配到你的角色。</p>'}</div>`;
+      rollBox.innerHTML = `<div class="ol-card"><header><h2>掷骰 · d100</h2><button type="button" class="ol-button" data-roll="close">关闭</button></header>${units.length ? `<label>角色<select id="ol-roll-unit">${units.map(x => option(x.id, x.name, x.id === rollForm.unit)).join("")}</select></label><label>熟练项<select id="ol-roll-prof">${profOpts}</select></label><p class="ol-roll-lines"><b>${esc(LV[level])}</b>　点数越低越好：${esc(rollLines(level))}${perks.adv ? "（种族优势：掷两颗取低）" : perks.dis ? "（种族劣势：掷两颗取高）" : ""}</p><label>说明（可不填）<input id="ol-roll-note" maxlength="80" value="${esc(rollForm.note)}" placeholder="比如：撬开仓库的锁"></label>${view.isHost ? `<label class="ol-check-line"><input type="checkbox" id="ol-roll-secret"${rollForm.secret ? " checked" : ""}> 暗骰（结果只有主持人看得到）</label>` : ""}<footer>${view.isHost ? "" : `<button type="button" class="ol-button" data-roll="ask"${disabled() ? " disabled" : ""} title="请主持人定难度，同意后由房主掷骰，结果大家都看得到">申请检定</button>`}<button type="button" class="ol-button ol-primary" data-roll="go"${disabled() ? " disabled" : ""}>掷 d100</button></footer>` : '<p class="ol-muted">还没有分配到你的角色。</p>'}</div>`;
     }
     /** 游戏内确认：返回 Promise<boolean>。同时只开一个，新的会把旧的当作取消 */
     function askConfirm(title, text, okLabel = "确定", cancelLabel = "取消") {
@@ -933,6 +934,11 @@
       const cmd = { type: "skillRoll", unitId: rollForm.unit, prof: rollForm.prof, note: rollForm.note.trim() };
       if (view.isHost && rollForm.secret) cmd.secret = true;
       if (await call(() => api.submit(cmd))) { rollForm.note = ""; rollBox.hidden = true; }
+    }
+    /** 主动发起检定（规则层 hotseat.js · requestCheck）：主持人定难度同意后房主掷骰 */
+    async function askCheck() {
+      if (!rollForm.unit || !rollForm.prof || disabled()) return;
+      if (await call(() => api.submit({ type: "checkRequest", unitId: rollForm.unit, prof: rollForm.prof, note: rollForm.note.trim() }))) { rollForm.note = ""; rollBox.hidden = true; }
     }
     /** 最近 10 场战绩：每场的结果、评价、掉落，和每个人的数据 */
     function recordMarkup(list) {

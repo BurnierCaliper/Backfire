@@ -368,6 +368,12 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **联机跑团：主持人暗骰检定、玩家主动发起检定、战斗模板「Lv随队」**（策划定；hotseat.js · `openCheck` / `rollCheckFor` / `requestCheck` / `decideCheck` / `tableNote`；hotseat-game.js · `checkSpec` / `checkRequest` / `checkDecide`；online-view.js · `checks` / `checkRequests` 白名单；online-game.js；battle-templates.js · `btPartyLevel` / `btOneEncounter`；trpg-ui.js、online-ui.js 只加了最小入口；测试 tests/trpg-online-rules.test.js）
+  - **暗骰**：以前只有小队频道的 🎲 能暗骰，而且只能选英雄；主持人「检定」页发起的检定没有暗骰，结果玩家都看得到。现在检定页可勾「暗骰」（`checkOpen` 带 `secret: true`，只有主持人能用）：目标可以是任何在场单位（敌人等没有角色卡的按没有熟练算），只有主持人能掷；检定本身、结果和频道里的记录都标 `secret`，`online-view.js` 不发给玩家。
+  - **主动发起检定**（照属性点申请）：玩家给自己的角色提 `{ type: "checkRequest", unitId, prof, note }` → 主持人 `{ type: "checkDecide", requestId, decision: "approve", diff }` 定难度同意，房主随即按角色卡建检定并权威掷骰（结果进小队频道、所有人可见）；`decision: "reject"` 不同意，`"cancel"` 申请人或主持人撤回。同一角色同时只能有一条待处理。玩家视图多了 `checkRequests: [{ id, unitId, unitName, operatorId, prof, note, status, checkId? }]`。
+  - **Lv随队**：以前模板里等级空着的敌人 / 配置物跟着开战时主持人选的战斗等级（默认 1 级）。现在跑团里开战时按队伍等级 `trpgPartyLevel()`（在队英雄等级平均，四舍五入，至少 1；和任务敌人默认等级、手册报酬用的是同一个数）。跑团外照旧跟着战斗等级。
+  - 坚毅生命照旧不进玩家的包。
+
 - **敌人种族（一）：种族数据、随机 / 固定分配、六维换算、显示、主持人指定**（issue #159，设计见 `docs/enemy-race.md`；enemies.js · `ENEMY_RACES` / `applyEnemyRace` / `setEnemyRace` / `raceDelta`，run.js · `ENEMY_INFO` / `ENEMY_RACE_TABLES`，party.js · `blockChanceRaw`，gm-commands.js、battle-commands.js、battle-templates.js、trpg-commands.js、sim.js、bestiary.js、unit-card.js、online-view.js 等；测试 `tests/enemy-race.test.js`）。种族的**被动**不在这一条里（另开 issue），这里只把种族挂到敌人身上、换算六维、显示出来。
   - **以前**：敌人没有种族。**现在**：有机体的敌人生成时有种族，记在单位上 `u.race = { race, branch }`；生成的入口和个体值一样（`applyEnemyIV(u, iv, race)` 里先 `applyEnemyRace` 再个体值：`spawnEnemyGroup`、`spawnEncounterRows`、战斗命令加敌人、跑团「加敌人」、主持人生成敌人、`BattleSim.setup`）。
   - **种族配置**：`ENEMY_RACES` 是种族 / 小分支的六维修正表（人类、红皮人、犬 / 猫 / 鼠 / 牛类人及其小分支、兽人五支；牛类人三个小分支的修正各不相同）；每个敌人的种族写在 `run.js · ENEMY_INFO`（格式见下）。
