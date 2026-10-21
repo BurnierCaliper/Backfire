@@ -1,5 +1,5 @@
 // HD-2D 原型页面（prototypes/hd2d/index.html）在 Node 里的「假网页」：
-// 照页面的顺序跑垫片 → 规则文件 → 界面函数的空壳 → hd2d-layout.js，用来确认 app.js 的 init() 在原型页面里不报错。
+// 照页面的顺序跑垫片 → 规则文件 → online-view.js → 界面函数的空壳 → hd2d-layout.js → hd2d-camera.js，用来确认 app.js 的 init() 在原型页面里不报错。
 //
 //   const page = require("./hd2d-fake-page").load();
 //   page.errors     // 加载过程中抛出的错误 / console.error
@@ -12,7 +12,6 @@
 const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
-const H = require("./headless");
 
 const ROOT = path.resolve(__dirname, "..");
 const PAGE = path.join(ROOT, "prototypes", "hd2d", "index.html");
@@ -172,7 +171,8 @@ function memoryStorageClass() {
   return Storage;
 }
 
-/** 照 index.html 的顺序加载：垫片 → 规则文件 → 界面函数的空壳 → hd2d-layout.js。opt.html 可以换一份页面（测试旧垫片用） */
+/** 照 index.html 里普通脚本的顺序加载：垫片 → 规则文件 → online-view.js（联机的展示白名单）→ 界面函数的空壳 → hd2d-layout.js → hd2d-camera.js
+ *  （type="module" 的页面主脚本、importmap 不跑，它们要 three.js / WebGL）。opt.html 可以换一份页面（测试旧垫片用） */
 function load(opt) {
   const html = (opt && opt.html) || fs.readFileSync(PAGE, "utf8");
   const dom = makeDom(html);
@@ -209,15 +209,15 @@ function load(opt) {
     try { new vm.Script(src, { filename }).runInContext(ctx); }
     catch (e) { errors.push(filename + ": " + (e && e.stack ? e.stack.split("\n").slice(0, 3).join(" | ") : e)); }
   };
-  const inline = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]);
-  const shim = inline.find(s => s.includes("Document.prototype.getElementById"));
-  const stubs = inline.find(s => s.includes("render[A-Z]"));
-  run(shim, "index.html（垫片）");
-  H.RULE_FILES.forEach(f => {
-    if (fs.existsSync(path.join(ROOT, f))) run(fs.readFileSync(path.join(ROOT, f), "utf8"), f);
-  });
-  run(stubs, "index.html（界面函数空壳）");
-  run(fs.readFileSync(path.join(ROOT, "prototypes", "hd2d", "hd2d-layout.js"), "utf8"), "hd2d-layout.js");
+  // 页面里的普通脚本（<script> 和 <script src="…">），照出现的顺序跑；src 按页面所在的目录找
+  const dir = path.dirname(PAGE);
+  for (const m of html.matchAll(/<script(?:\s+src="([^"]+)")?>([\s\S]*?)<\/script>/g)) {
+    const [, src, body] = m;
+    if (!src) { run(body, body.includes("Document.prototype.getElementById") ? "index.html（垫片）" : body.includes("render[A-Z]") ? "index.html（界面函数空壳）" : "index.html"); continue; }
+    const file = path.resolve(dir, src);
+    if (fs.existsSync(file)) run(fs.readFileSync(file, "utf8"), path.relative(ROOT, file));
+    else errors.push("页面加载的脚本不存在：" + src);
+  }
   // 顶层 const 不挂在 window 上（同 headless.js），页面主脚本用到的这个取出来
   try { ctx.BattleSim = vm.runInContext("BattleSim", ctx); } catch (e) { errors.push("BattleSim 没加载：" + e.message); }
   return { ctx, errors, listeners, document: dom.document };

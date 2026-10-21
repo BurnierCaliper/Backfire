@@ -78,6 +78,47 @@ body { position: fixed; inset: 0; user-select: none; }
 /* 下潜：半透明，下半截蒙一层沙色（血条照样看得见） */
 .hd2d-plate.sub .pl-card::after { content: ""; position: absolute; inset: 45% 0 0; background: linear-gradient(rgba(209, 168, 90, 0), rgba(209, 168, 90, .38)); pointer-events: none; }
 .hd2d-plate.dying .pl-card { filter: saturate(.6) brightness(.85); }
+/* 近景：选中的区的铭牌换成放大的那张（宽高 --bw / --bh = CONFIG.plate.big，布局按这个尺寸算站位，保证不互相盖住）：
+ * 名字 + 等级、分层血条 + 血量数字、架势菱形 + 数字 + ATK、状态文字（最多 PLATE.bigChips 个，多的写 +n）。坚毅生命照旧没有 */
+.hd2d-plate.big { width: var(--bw); }
+.hd2d-plate.big .pl-in { width: var(--bw); }
+.hd2d-plate.big .pl-card { display: none; }
+.pl-big {
+  display: none; position: relative; box-sizing: border-box; width: var(--bw); height: var(--bh); padding: 5px 8px 6px;
+  flex-direction: column; justify-content: space-between; pointer-events: auto; cursor: pointer; outline: none;
+  font: 900 16px/18px var(--ui-sans); color: var(--canvas);
+  background: linear-gradient(180deg, rgba(255, 255, 255, .1), rgba(255, 255, 255, 0) 40%), rgba(23, 18, 14, .94);
+  border: 2px solid var(--side); border-top-color: color-mix(in srgb, var(--side) 62%, #fff); border-radius: 5px;
+  box-shadow: inset 0 1px 0 var(--rim), inset 1px 0 0 rgba(255, 255, 255, .08), 3px 4px 0 rgba(0, 0, 0, .55);
+  transition: border-color .15s, box-shadow .15s;
+}
+.hd2d-plate.big .pl-big { display: flex; }
+.hd2d-plate.big .pl-more, .hd2d-plate.big.hover .pl-more, .hd2d-plate.big.sel .pl-more { display: none; }   /* 放大的那张已经全写出来了 */
+.pl-r1 { display: flex; align-items: baseline; gap: 6px; height: 18px; }
+.pl-nm { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 1px 1px 0 var(--ink); }
+.pl-lv { flex: none; font-size: 12px; color: var(--brass); }
+.pl-r2 { display: flex; align-items: center; gap: 6px; height: 14px; }
+.pl-r2 .pl-bar { height: 10px; }
+.pl-hp { flex: none; font-size: 12px; line-height: 14px; text-shadow: 1px 1px 0 var(--ink); }
+.pl-r3 { display: flex; align-items: center; gap: 6px; height: 14px; font-size: 12px; line-height: 14px; }
+.pl-r3 .pl-def b { width: 9px; height: 9px; }
+.pl-r3 .pl-def .n { font-size: 12px; line-height: 14px; }
+.pl-dn { color: var(--muted); white-space: nowrap; }
+.pl-atk { margin-left: auto; color: #ffc93c; white-space: nowrap; }
+.pl-r4 { display: flex; gap: 3px; height: 15px; overflow: hidden; }
+.pl-r4 em { flex: none; font: 900 11px/1 var(--ui-sans); font-style: normal; padding: 2px 5px; color: var(--ink); border-radius: 2px; white-space: nowrap; }
+.pl-r4 .pl-x { background: var(--edge); color: var(--canvas); }
+.pl-none { font-size: 11px; line-height: 15px; color: var(--muted); }
+.hd2d-plate.actor .pl-big { border-color: var(--hazard); box-shadow: inset 0 1px 0 var(--rim), 0 0 0 1px var(--ink), 0 0 14px 3px rgba(242, 194, 48, .7); }
+.hd2d-plate.actor .pl-big .pl-mark { top: 9px; }
+.hd2d-plate.actor .pl-big .pl-r1 { padding-left: 8px; }
+.hd2d-plate.hover .pl-big, .pl-big:focus-visible { border-color: #fff1cc; box-shadow: inset 0 1px 0 var(--rim), 0 0 0 1px var(--ink), 0 0 10px 2px rgba(255, 241, 204, .55); }
+.hd2d-plate.sel .pl-big { border-color: #fff; box-shadow: inset 0 1px 0 var(--rim), 0 0 0 2px var(--ink), 0 0 16px 4px rgba(255, 255, 255, .55); }
+.hd2d-plate.sub .pl-big::after { content: ""; position: absolute; inset: 55% 0 0; background: linear-gradient(rgba(209, 168, 90, 0), rgba(209, 168, 90, .34)); pointer-events: none; }
+.hd2d-plate.dying .pl-big { filter: saturate(.6) brightness(.85); }
+/* 近景里别的区的铭牌：变淡（透明度在场景里乘 PLATE.dim），再糊一点（铭牌是 DOM，后期的景深糊不到它）；悬停 / 选中时照常看得清 */
+.hd2d-plate.dim .pl-in { filter: blur(1.6px) saturate(.75); }
+.hd2d-plate.dim.hover .pl-in, .hd2d-plate.dim.sel .pl-in { filter: none; }
 /* 减少动态效果：铭牌不浮动、小箭头不动（场景那边其它动画也停） */
 .hd2d-labels.still .pl-bob, .hd2d-labels.still .pl-mark { animation: none; }
 @media (prefers-reduced-motion: reduce) { .pl-bob, .pl-mark { animation: none; } }
@@ -137,6 +178,29 @@ body { position: fixed; inset: 0; user-select: none; }
   border: 2px solid var(--ink); padding: 3px 6px; box-shadow: 2px 3px 0 rgba(0, 0, 0, .5);
 }
 #region-select { max-width: 22vw; background: #d8cdb4; }   /* 区域（地面 / 远景 / 灯）：截图比对用 */
+
+/* ---------- 镜头：顶栏里的远 / 中 / 近三段按钮 + 选中的区；中景 / 近景时屏幕两边的换区箭头 ---------- */
+#topbar .cam { display: flex; align-items: center; gap: 4px; flex: none; }
+#topbar .cam-l { font: 900 12px/1 var(--ui-sans); color: var(--muted); margin-right: 2px; }
+.cam-b {
+  cursor: pointer; width: 30px; height: 26px; padding: 0; font: 900 14px/1 var(--ui-sans); color: var(--canvas);
+  background: var(--oil-2); border: 2px solid var(--ink); box-shadow: 2px 2px 0 rgba(0, 0, 0, .5);
+}
+.cam-b:hover { background: var(--steel-hi); }
+.cam-b.on { background: var(--hazard); color: var(--ink); }
+.cam-b:active { transform: translate(1px, 1px); }
+.cam-b:focus-visible { outline: 2px solid var(--canvas); outline-offset: 1px; }
+#topbar .cam-z { min-width: 4em; margin-left: 4px; font: 900 12px/1 var(--ui-sans); color: var(--canvas); white-space: nowrap; }
+.zone-nav {
+  position: fixed; z-index: 4; top: 50%; transform: translateY(-50%); cursor: pointer; padding: 10px 12px;
+  font: 900 14px/1 var(--ui-sans); color: var(--canvas); white-space: nowrap;
+  background: rgba(17, 14, 11, .78); border: 2px solid var(--ink); box-shadow: 3px 4px 0 rgba(0, 0, 0, .45);
+}
+.zone-nav.prev { left: 10px; border-left: 4px solid var(--hazard); }
+.zone-nav.next { right: 10px; border-right: 4px solid var(--hazard); }
+.zone-nav:hover { background: rgba(43, 39, 35, .92); }
+.zone-nav:active { transform: translateY(-50%) translate(1px, 1px); }
+.zone-nav[hidden] { display: none; }
 
 /* ---------- 底部技能栏 ---------- */
 #dock {
@@ -207,6 +271,12 @@ body { position: fixed; inset: 0; user-select: none; }
   .pl-name { height: 15px; }
   .pl-mid { height: 9px; }
   .pl-bar { height: 7px; }
+  .pl-big { font-size: 14px; line-height: 16px; padding: 4px 6px 5px; }   /* 宽高 --bw / --bh 用 CONFIG.plate.big 的手机尺寸 */
+  .pl-r1 { height: 16px; }
+  .pl-r2 .pl-bar { height: 8px; }
+  #topbar .cam-l, #topbar .cam-z { display: none; }
+  .cam-b { width: 26px; height: 24px; font-size: 13px; }
+  .zone-nav { padding: 8px 9px; font-size: 12px; }
   #dock { width: 100vw; padding: 8px 8px 10px; }
   #dock .who { font-size: 14px; }
   #skills { gap: 10px 10px; }

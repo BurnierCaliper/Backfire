@@ -9,8 +9,9 @@
  *   out.gaps    [{ key, a, b, type, open, x, z, axis, length, width … }]
  *   out.units   [{ id, zone, x, y, z, flying, submerged, lift, rect, plate … }]
  *   out.bounds  { minX, maxX, minZ, maxZ, maxY }
- *   out.camera  { target, dist, pos, fov, elevation, aspect, width, height }   // 场景照这个摆默认镜头
+ *   out.camera  { target, dist, pos, fov, elevation, aspect, width, height }   // 场景照这个摆默认镜头（= 远景；中景 / 近景在 hd2d-camera.js）
  *   out.region / out.ground / out.lamps   // 这场战斗在哪个区域（opts.region）、地面主题（GROUNDS 的键）、灯摆在哪（战场外缘，0–2 盏）
+ * state 用联机投影过的（online-view.js · projectState，和联机玩家拿到的一样）；房主的完整 state 也排得出来，结果一样。
  *
  * 坐标：x 向右，y 向上，z 朝镜头（镜头在 +z 一侧看过来）。我方站在 +z（前排），敌方站在 −z（后排）。
  * 铭牌是固定像素大小的 DOM，所以站位按屏幕算：用和场景同一套透视镜头（fitView）把脚下的点投到屏幕上，
@@ -45,9 +46,11 @@
     plate: {
       w: 120, h: 40,                  // 桌面：名字一行 + 血条 / 架势一行（13px 的字，8 个汉字的名字放得下）
       phoneW: 100, phoneH: 36, phoneMax: 720,   // 窗口宽度 ≤ phoneMax 时用手机尺寸
+      // 近景放大的铭牌（hd2d-camera.js 的近景）：名字 + 等级、血条 + 血量数字、架势 + ATK、状态文字四行
+      big: { w: 200, h: 84, phoneW: 156, phoneH: 74 },
       gapX: 8, gapY: 6,               // 两块铭牌之间至少留的空（像素）
       bob: 2,                         // 待机时上下浮动的幅度（像素）：算矩形时上下各让出这么多
-      maxLift: 140,                   // 后排最多抬高多少像素（再高就和脚下的点脱节了）
+      maxLift: 140,                   // 后排最多抬高多少像素（再高就和脚下的点脱节了）；中景 / 近景另有上限（hd2d-camera.js）
       scaleExp: 0.85, minScale: 0.74, maxScale: 1.15   // 按离镜头远近缩放：(焦距 / 距离)^scaleExp，夹在这个范围里
     },
     /* 默认镜头：场景（hd2d-scene.js）也用这一份 */
@@ -210,7 +213,9 @@
   }
 
   /* ---------- 铭牌数据 ---------- */
-  /** 铭牌上要写的内容。只读白名单里的字段——坚毅生命（shp）不在其中 */
+  /** 铭牌上要写的内容。只读白名单里的字段——坚毅生命（shp）不在其中。
+   *  原型页交进来的是联机投影过的状态（online-view.js · projectState），和联机玩家拿到的一样；
+   *  ATK 用主机算好的实际 ATK（投影里的 display.atk，联机单位卡也是这个数：online-battle.js · snapUnit），没有就用 atk */
   function plateData(u) {
     const layers = (u.layers || []).map(l => ({ type: String(l.type), cur: Math.max(0, num(l.current, 0)), max: Math.max(0, num(l.max, 0)) }));
     const cur = layers.reduce((a, l) => a + l.cur, 0), max = layers.reduce((a, l) => a + l.max, 0);
@@ -227,8 +232,9 @@
     const flags = [];
     if (u.stunned) flags.push({ key: "stunned", label: "失衡" });
     if (u.dying) flags.push({ key: "dying", label: "濒死" });
+    const shownAtk = u.display && typeof u.display.atk === "number" && Number.isFinite(u.display.atk) ? u.display.atk : num(u.atk, 0);
     const plate = {
-      id: u.id, name: String(u.name || "?"), level: num(u.level, 1), atk: num(u.atk, 0),
+      id: u.id, name: String(u.name || "?"), level: num(u.level, 1), atk: shownAtk,
       side: u.isPlayer ? "player" : "foe",
       hp: { cur, max }, layers,
       def: { cur: Math.min(def, shown), max: shown, big: Math.max(defMax, def) > CONFIG.maxDefPips },
@@ -240,14 +246,17 @@
   }
 
   /* ---------- 镜头（和 hd2d-scene.js 用同一套：透视、俯角 elevation、正对 −z 方向）---------- */
-  /** 镜头摆在 target 后上方 dist 远处，朝 target 看 */
-  function camAt(target, dist, aspect) {
-    const C = CONFIG.camera, e = C.elevation * D2R, se = Math.sin(e), ce = Math.cos(e);
+  /** 镜头摆在 target 后上方 dist 远处，朝 target 看。lens = { elevation, fov }（度）不给就用默认镜头的（CONFIG.camera）；
+   *  中景 / 近景（hd2d-camera.js）用自己的俯角和视野 */
+  function camAt(target, dist, aspect, lens) {
+    const C = CONFIG.camera;
+    const elevation = lens && Number.isFinite(lens.elevation) ? lens.elevation : C.elevation, fov = lens && Number.isFinite(lens.fov) ? lens.fov : C.fov;
+    const e = elevation * D2R, se = Math.sin(e), ce = Math.cos(e);
     return {
       target: { x: target.x, y: target.y, z: target.z }, dist,
       pos: { x: target.x, y: target.y + se * dist, z: target.z + ce * dist },
       right: { x: 1, y: 0, z: 0 }, up: { x: 0, y: ce, z: -se }, back: { x: 0, y: se, z: ce },
-      fov: C.fov, elevation: C.elevation, aspect, tanHalf: Math.tan(C.fov * D2R / 2)
+      fov, elevation, aspect, tanHalf: Math.tan(fov * D2R / 2)
     };
   }
   /** 世界坐标 → NDC（−1…1，y 向上）；depth 是沿视线到镜头的距离 */
@@ -303,10 +312,10 @@
   function frameTop(cam, z) {
     return cam.pos.y - (cam.pos.z - z) * Math.tan((cam.elevation - cam.fov / 2) * D2R);
   }
-  /** 铭牌的像素尺寸（桌面 / 手机） */
-  function plateSize(view) {
-    const P = CONFIG.plate;
-    return view.width <= P.phoneMax ? { w: P.phoneW, h: P.phoneH } : { w: P.w, h: P.h };
+  /** 铭牌的像素尺寸（桌面 / 手机）；big = 近景放大的那种 */
+  function plateSize(view, big) {
+    const P = CONFIG.plate, S = big ? P.big : P;
+    return view.width <= P.phoneMax ? { w: S.phoneW, h: S.phoneH } : { w: S.w, h: S.h };
   }
   /** 一块铭牌在屏幕上的矩形（像素，y 向下）：底边中点在脚下的点往上 lift 像素，大小按远近缩放，上下各让出浮动的幅度 */
   function plateRect(cam, size, anchor, lift) {
@@ -378,10 +387,11 @@
 
   /**
    * 后排抬高：从屏幕上最靠下（离镜头最近）的一排开始放，后面每一排如果和已经放好的铭牌在屏幕上叠到，
-   * 就整排往上抬，直到让开 gapY（最多抬 maxLift）。每个单位写上 lift（像素）和 rect（屏幕矩形）。
+   * 就整排往上抬，直到让开 gapY（最多抬 maxLift）。不改传进来的单位，返回 Map（单位 id → { lift 像素, rect 屏幕矩形 }）。
+   * sizeOf(u) = 这个单位的铭牌像素尺寸（近景里选中那个区的铭牌是放大的）；默认镜头和中景 / 近景（hd2d-camera.js）都用这一个
    */
-  function liftRows(units, cam, size) {
-    const P = CONFIG.plate;
+  function liftPlates(units, cam, sizeOf, maxLift) {
+    const P = CONFIG.plate, cap = Number.isFinite(maxLift) ? maxLift : P.maxLift;
     const rows = new Map();
     units.forEach(u => {
       const key = u.zone + ":" + u.row;
@@ -391,26 +401,32 @@
     const anchor = (u) => ({ x: u.x, y: u.y, z: u.z });
     const list = [...rows.values()].map(items => ({ items, foot: items.reduce((a, u) => a + project(cam, anchor(u)).y, 0) / items.length }));
     list.sort((a, b) => b.foot - a.foot);
-    const placed = [];
+    const placed = [], out = new Map();
     const hits = (r, p) => r.x0 < p.x1 && p.x0 < r.x1 && r.y0 < p.y1 + P.gapY && p.y0 < r.y1 + P.gapY;
     list.forEach(row => {
       let lift = 0;
       for (let guard = 0; guard < 40; guard++) {
         let need = 0;
         row.items.forEach(u => {
-          const r = plateRect(cam, size, anchor(u), lift);
+          const r = plateRect(cam, sizeOf(u), anchor(u), lift);
           placed.forEach(p => { if (hits(r, p)) need = Math.max(need, r.y1 - (p.y0 - P.gapY)); });
         });
         if (need <= 0.01) break;
-        lift = Math.min(P.maxLift, lift + need);
-        if (lift >= P.maxLift) break;
+        lift = Math.min(cap, lift + need);
+        if (lift >= cap) break;
       }
       row.items.forEach(u => {
-        u.lift = Math.round(lift * 10) / 10;
-        u.rect = plateRect(cam, size, anchor(u), u.lift);
-        placed.push(u.rect);
+        const l = Math.round(lift * 10) / 10, rect = plateRect(cam, sizeOf(u), anchor(u), l);
+        out.set(u.id, { lift: l, rect });
+        placed.push(rect);
       });
     });
+    return out;
+  }
+  /** 默认镜头下的后排抬高：每个单位写上 lift 和 rect */
+  function liftRows(units, cam, size) {
+    const out = liftPlates(units, cam, () => size);
+    units.forEach(u => { const r = out.get(u.id); u.lift = r.lift; u.rect = r.rect; });
   }
 
   /* ---------- 总入口 ---------- */
@@ -510,6 +526,6 @@
 
   return {
     CONFIG, KIND_ORDER, STATUS_LABELS, GROUNDS, GROUND_DEFAULT, REGIONS, REGION_ALIAS, build, boardOf, fieldKinds, plateData, arrangeUnits, gapKeyOf,
-    fitView, project, plateScale, plateRect, plateSize, frameTop, regionName, groundOf, lampPlan
+    fitView, camAt, toNdc, project, plateScale, plateRect, plateSize, liftPlates, frameTop, regionName, groundOf, lampPlan
   };
 });

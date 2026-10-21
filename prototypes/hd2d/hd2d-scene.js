@@ -10,8 +10,12 @@
  *     // 这场战斗所在的区域定了地面主题（layout.ground）：远景、地台外大片地面的颜色、灯（layout.lamps）都跟着它；
  *     // meta.backdrop 可以硬指定远景，区域认不得时按光影主题猜
  *   sc.setInsets({ top, bottom });   // 上下被界面盖住的像素（布局取景时让开），改了以后外面重排一次
+ *   sc.setTier("near") / sc.stepTier(±1) / sc.setZone(区号) / sc.stepZone(±1)   // 三段镜头（远景 / 中景 / 近景看单个区域，hd2d-camera.js）
+ *   createHd2dScene(container, { camera: { tier, zone }, onCameraChange(info) {...} })   // 开场的镜头；镜头一变就告诉外面（换按钮、网址）
  *   sc.dispose();
- * 系统开了「减少动态效果」（prefers-reduced-motion）时，待机动画、飘浮物、天气粒子、乌云、胶片颗粒都停住；雷照打，但闪光减弱、只闪一下，镜头不抖。
+ * 镜头是这个玩家自己的视角：滚轮在三段之间跳、点地台 / 铭牌选区，都只动这边的画面，不写进战斗状态，也不同步给别人。
+ * 系统开了「减少动态效果」（prefers-reduced-motion）时，待机动画、飘浮物、天气粒子、乌云、胶片颗粒都停住；雷照打，但闪光减弱、只闪一下，镜头不抖；
+ * 换镜头不插值，直接切过去。
  * 页面只在 index.html 里被 import；不改正式游戏的任何文件。 */
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
@@ -28,20 +32,24 @@ import { createWeather, weatherPlan } from "./hd2d-weather.js";
 
 /** 布局（hd2d-layout.js，普通脚本，比这个模块先加载）：镜头和铭牌尺寸跟布局用同一份配置 */
 const L = window.HD2DLayout;
+/** 三段镜头（hd2d-camera.js，普通脚本，紧跟着布局加载）：每一段的俯角、视野、距离、景深、过渡都在它的 CAMERA 里 */
+const C = window.HD2DCamera;
 
 /* ---------- 配置 ---------- */
 const CAM = {
-  fov: L.CONFIG.camera.fov,   // 视角窄一点，像看沙盘模型（取景算法在 hd2d-layout.js 的 fitView）
-  minElev: 22, maxElev: 46,   // 鼠标拖动能转到的俯角范围（默认俯角 L.CONFIG.camera.elevation）
-  maxAzimuth: 0.5,            // 左右最多转多少弧度
-  near: 1, far: 220,
-  zoomIn: 0.5, zoomOut: 1.12, // 相对「刚好装下整个战场」的距离
+  fov: L.CONFIG.camera.fov,   // 视角窄一点，像看沙盘模型（取景算法在 hd2d-layout.js 的 fitView）；中景 / 近景的视野在 C.CAMERA
+  maxAzimuth: 0.5,            // 左右最多转多少弧度（拖动能转到的俯角范围每一段不同：C.CAMERA[段].tilt）
+  near: 1, far: 220,          // 近裁剪面每一段不同（C.CAMERA[段].clip）；滚轮不再缩放，在三段之间跳
   panPad: 3                   // 平移时目标点最多离战场边缘多远
 };
-/* 景深：焦点在战场中间，离焦点差 1 个单位约糊 aperture 这么多；近处最多糊 maxblur，远处最多糊各主题的 dofFar（远景剪影只稍微出焦） */
-const DOF = { aperture: 0.0018, maxblur: 0.014 };
-/** 铭牌（DOM）：远的淡一点；状态小圆点 / 架势菱形最多画几个（多的写成数字）。大小和缩放公式在 L.CONFIG.plate */
-const PLATE = { fadeRange: 14, fadeMin: 0.72, maxDots: 4, maxPips: 6 };
+/* 景深：焦点在镜头看的那一点（远景是战场中间，中景 / 近景是选中的区），离焦点差 1 个单位约糊 aperture 这么多；
+ * 比焦点近的最多糊 maxblur，比焦点远的最多糊各主题的 dofFar × 这一段的 far（远景剪影只稍微出焦）；
+ * 近景另按横着离开焦点区多远再糊一层（lateral，左右相邻的区和焦点区差不多远，光按深度糊不掉）。数值在 C.CAMERA[段].dof */
+/** 铭牌（DOM）：远的淡一点；状态小圆点 / 架势菱形最多画几个（多的写成数字）；近景放大的铭牌最多写几个状态、画几个架势菱形；
+ *  近景里别的区的铭牌乘多少透明度（再糊一点，CSS 的 .dim）。大小和缩放公式在 L.CONFIG.plate */
+const PLATE = { fadeRange: 14, fadeMin: 0.72, maxDots: 4, maxPips: 6, bigChips: 3, bigPips: 6, dim: 0.5 };
+/** 选中的区：地台顶面靠边一圈细框（inset = 离地台边多远、width 多宽），慢慢一明一暗（减少动态效果时不闪）；颜色 × glow 亮到泛光抓得到 */
+const FOCUS = { inset: 0.28, width: 0.09, color: 0xf2c230, glow: 1.5, opacity: 0.55, pulse: 0.15, speed: 2.2 };
 /** 当前行动的光圈：慢慢转；选中的单位脚下一圈白圈 */
 const RING = { radius: 1.05, spin: 0.45, pulse: 0.05 };
 /** 脚下的接触阴影：一小块很实的核心 + 一圈软的 */
@@ -198,18 +206,18 @@ export function createHd2dScene(container, options) {
 
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true; controls.dampingFactor = 0.09;
-  controls.rotateSpeed = 0.45; controls.zoomSpeed = 0.8; controls.panSpeed = 0.8;
+  controls.rotateSpeed = 0.45; controls.panSpeed = 0.8;
+  controls.enableZoom = false;               // 滚轮不缩放：在远景 / 中景 / 近景三段之间跳（下面的 wheel）
   controls.screenSpacePanning = false;       // 平移沿着地面走
-  controls.minPolarAngle = THREE.MathUtils.degToRad(90 - CAM.maxElev);
-  controls.maxPolarAngle = THREE.MathUtils.degToRad(90 - CAM.minElev);
   controls.minAzimuthAngle = -CAM.maxAzimuth; controls.maxAzimuthAngle = CAM.maxAzimuth;
-  controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };   // 手机：单指转、双指缩放 / 平移
+  controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };   // 手机：单指转、双指平移（不缩放）
 
   // 后期：渲染 → 景深 → 泛光 → 热浪 → 输出（色调映射 + sRGB）→ 调色
   const composer = new EffectComposer(renderer);
-  const bokeh = new BokehPass(scene, camera, { focus: 40, aperture: DOF.aperture, maxblur: DOF.maxblur });
+  const DOF0 = C.CAMERA.far.dof;
+  const bokeh = new BokehPass(scene, camera, { focus: 40, aperture: DOF0.aperture, maxblur: DOF0.maxblur });
   // 远处单独夹一个上限：远景剪影只稍微出焦，轮廓认得出来（近处、战场照旧）
-  bokeh.uniforms.maxblurFar = { value: DOF.maxblur };
+  bokeh.uniforms.maxblurFar = { value: DOF0.maxblur };
   const bokehSrc = bokeh.materialBokeh.fragmentShader;
   const blurLine = "vec2 dofblur = vec2 ( clamp( factor * aperture, -maxblur, maxblur ) );";
   if (bokehSrc.includes(blurLine)) {
@@ -217,6 +225,20 @@ export function createHd2dScene(container, options) {
       .replace(blurLine, "vec2 dofblur = vec2 ( clamp( factor * aperture, -maxblurFar, maxblur ) );");
     bokeh.materialBokeh.needsUpdate = true;
   }
+  // 近景：焦点区左右两边、和它差不多远的东西（相邻的区）光按深度糊不掉——按横着离开焦点区多远（镜头空间的横坐标，离焦点区中心 focusX 超过 focusHalf 的部分），
+  // 再当作多差 lateral 倍那么多深度去糊（C.CAMERA[段].dof.lateral；远景 / 中景是 0，和以前一样）。JS 里同一个算法：hd2d-camera.js · blurAt
+  bokeh.uniforms.lateral = { value: 0 }; bokeh.uniforms.focusX = { value: 0 }; bokeh.uniforms.focusHalf = { value: 1 };
+  bokeh.uniforms.tanHalf = { value: Math.tan(THREE.MathUtils.degToRad(CAM.fov / 2)) };
+  const factorLine = "float factor = ( focus + viewZ );";
+  const bokehSrc2 = bokeh.materialBokeh.fragmentShader;
+  if (bokehSrc2.includes("uniform float maxblurFar;") && bokehSrc2.includes(factorLine)) {
+    bokeh.materialBokeh.fragmentShader = bokehSrc2
+      .replace("uniform float maxblurFar;", "uniform float maxblurFar;\n\t\tuniform float lateral;\n\t\tuniform float focusX;\n\t\tuniform float focusHalf;\n\t\tuniform float tanHalf;")
+      .replace(factorLine, factorLine + "\n\t\t\tfloat latBlur = max( 0.0, abs( ( vUv.x * 2.0 - 1.0 ) * ( - viewZ ) * tanHalf * aspect - focusX ) - focusHalf ) * lateral;" +
+        "\n\t\t\tfactor += factor >= 0.0 ? latBlur : - latBlur;");
+    bokeh.materialBokeh.needsUpdate = true;
+  }
+  const focusV = new THREE.Vector3();
   // BokehPass 用深度材质把整个场景重画一遍量距离；屏幕背景是张贴图，不该进深度图，这一遍先摘掉
   const bokehRender = bokeh.render.bind(bokeh);
   bokeh.render = function (...args) {
@@ -234,10 +256,14 @@ export function createHd2dScene(container, options) {
   composer.addPass(new OutputPass());
   composer.addPass(grade);
 
+  // 镜头（每个玩家自己的）：tier 远 / 中 / 近、zone 选中的区（null = 跟着当前行动单位）、pose 这一段的镜头（hd2d-camera.js · pose）、
+  // cur 这一帧实际用的（过渡中是插值出来的）、tween 正在过渡
+  const start = options.camera || {};
   const state = {
     portrait: false, layout: null, meta: { weather: "none", theme: "day" }, insets: { top: 0, bottom: 0 },
     world: null, backdrop: null, backdropSig: "", plates: new Map(), ctx: null, fit: 20, bounds: null, themeName: "day",
-    actorId: null, selectedId: null, wantFit: true, motion: true
+    actorId: null, selectedId: null, wantFit: true, motion: true,
+    tier: C.tierName(start.tier), zone: start.zone != null && start.zone !== "" ? Number(start.zone) : null, pose: null, cur: null, tween: null
   };
   const weather = createWeather(scene, { bounds: { minX: -10, maxX: 10, minZ: -10, maxZ: 10 } });
   const clock = new THREE.Clock();
@@ -297,31 +323,50 @@ export function createHd2dScene(container, options) {
   }
   function applyFog() {
     const T = THEMES[state.themeName] || THEMES.day;
-    const tint = weather.tint;
-    const color = fogColorOf(T, tint);
-    const b = state.bounds;
-    const back = state.fit + (b ? (b.maxZ - b.minZ) / 2 * Math.cos(THREE.MathUtils.degToRad(L.CONFIG.camera.elevation)) : 8);   // 镜头到战场后沿的大致距离
-    const near = back * (tint ? tint.near : 1), far = (back + FOG.depth) * (tint ? tint.far : 1);
-    scene.fog = new THREE.Fog(color, near, far);
+    const color = fogColorOf(T, weather.tint);
+    scene.fog = new THREE.Fog(color, 1, 2);
+    fogRange(state.cur ? state.cur.fogShift : 0);
     ground.material.color.copy(groundColor(T)).lerp(color, 0.12);
+  }
+  /** 雾从哪开始、到哪全进雾：默认镜头到战场后沿的大致距离起雾；中景 / 近景镜头推近了，起雾的地方跟着挪近 shift（hd2d-camera.js · pose 的 fogShift；远景是 0） */
+  function fogRange(shift) {
+    if (!scene.fog) return;
+    const tint = weather.tint, b = state.bounds;
+    const back = Math.max(0, state.fit + (b ? (b.maxZ - b.minZ) / 2 * Math.cos(THREE.MathUtils.degToRad(L.CONFIG.camera.elevation)) : 8) + (shift || 0));   // 镜头到战场后沿的大致距离
+    scene.fog.near = back * (tint ? tint.near : 1); scene.fog.far = (back + FOG.depth) * (tint ? tint.far : 1);
   }
 
   /* ---------- 铭牌（DOM，竖立，正面朝镜头）---------- */
-  /** 铭牌的 HTML。只读 plate（layout 给的白名单数据），没有坚毅生命。
-   *  平时只有名字 + 状态小圆点 + 分层血条 + 架势；等级、ATK、血量数字、状态文字在悬停 / 选中时从头顶展开 */
+  /** 铭牌的 HTML。只读 plate（layout 给的白名单数据，原型页交进来的是联机投影过的状态），没有坚毅生命。
+   *  平时只有名字 + 状态小圆点 + 分层血条 + 架势；等级、ATK、血量数字、状态文字在悬停 / 选中时从头顶展开。
+   *  近景里选中的区的铭牌换成放大的那张（.pl-big，CSS 的 .big）：名字 + 等级、血条 + 血量数字、架势 + ATK、状态文字，一眼都看得到 */
   function plateHtml(p) {
     const total = Math.max(1, p.hp.max);
     const segs = p.layers.slice().reverse().map(l =>     // 数组 0 是最外层，画在最右
       `<i style="width:${100 * l.max / total}%;background:linear-gradient(90deg,${LAYER_COLOR[l.type] || "#d8574a"} ${l.max ? 100 * l.cur / l.max : 0}%,#2a2520 0)"></i>`).join("");
-    let def = "";
-    if (p.def.big || p.def.max > PLATE.maxPips) def = `<span class="n">◆${p.def.cur}${p.def.big ? "+" : "/" + p.def.max}</span>`;
-    else for (let i = 0; i < p.def.max; i++) def += `<b class="${i < p.def.cur ? "on" : ""}"></b>`;
+    // 架势菱形：超过 n 个时紧凑版写成数字（text），放大版旁边本来就写着数字，就不画了
+    const pips = (n, text) => {
+      if (p.def.big || p.def.max > n) return text ? `<span class="n">◆${p.def.cur}${p.def.big ? "+" : "/" + p.def.max}</span>` : "";
+      let s = "";
+      for (let i = 0; i < p.def.max; i++) s += `<b class="${i < p.def.cur ? "on" : ""}"></b>`;
+      return s;
+    };
+    const def = pips(PLATE.maxPips, true);
     const chips = p.statuses.map(s => ({ key: s.key, label: s.label })).concat(p.flags.map(f => ({ key: f.key, label: f.label })));
     const colorOf = (k) => k === "dying" ? "#d8322a" : k === "stunned" ? "#ff9a3c" : (STATUS_COLOR[k] || "#a8977b");
     const dots = chips.slice(0, PLATE.maxDots).map(c => `<i style="background:${colorOf(c.key)}"></i>`).join("");
     const more = chips.map(c => `<em style="background:${colorOf(c.key)}">${esc(c.label)}</em>`).join("");
-    return `<div class="pl-more" role="tooltip"><div class="pl-stats"><b>Lv${p.level}</b><span>ATK ${p.atk}</span><span>血量 ${p.hp.cur}/${p.hp.max}</span><span>架势 ${p.def.cur}/${p.def.max}${p.def.big ? "+" : ""}</span></div>${more ? `<div class="pl-chips">${more}</div>` : ""}</div>
-      <div class="pl-card" tabindex="0" role="button" aria-label="${esc(p.name)}"><span class="pl-mark" aria-hidden="true"></span><span class="pl-name">${esc(p.name)}</span>
+    const tags = chips.length
+      ? chips.slice(0, PLATE.bigChips).map(c => `<em style="background:${colorOf(c.key)}">${esc(c.label)}</em>`).join("") + (chips.length > PLATE.bigChips ? `<em class="pl-x">+${chips.length - PLATE.bigChips}</em>` : "")
+      : `<span class="pl-none">无状态</span>`;
+    const defText = `架势 ${p.def.cur}/${p.def.max}${p.def.big ? "+" : ""}`;
+    return `<div class="pl-more" role="tooltip"><div class="pl-stats"><b>Lv${p.level}</b><span>ATK ${p.atk}</span><span>血量 ${p.hp.cur}/${p.hp.max}</span><span>${defText}</span></div>${more ? `<div class="pl-chips">${more}</div>` : ""}</div>
+      <div class="pl-big" data-hit tabindex="0" role="button" aria-label="${esc(p.name)}"><span class="pl-mark" aria-hidden="true"></span>
+      <div class="pl-r1"><span class="pl-nm">${esc(p.name)}</span><span class="pl-lv">Lv${p.level}</span></div>
+      <div class="pl-r2"><div class="pl-bar">${segs}</div><span class="pl-hp">${p.hp.cur}/${p.hp.max}</span></div>
+      <div class="pl-r3"><span class="pl-def">${pips(PLATE.bigPips, false)}</span><span class="pl-dn">${defText}</span><span class="pl-atk">ATK ${p.atk}</span></div>
+      <div class="pl-r4">${tags}</div></div>
+      <div class="pl-card" data-hit tabindex="0" role="button" aria-label="${esc(p.name)}"><span class="pl-mark" aria-hidden="true"></span><span class="pl-name">${esc(p.name)}</span>
       <div class="pl-mid">${dots ? `<span class="pl-dots">${dots}</span>` : ""}<div class="pl-bar">${segs}</div><span class="pl-def">${def}</span></div></div>`;
   }
 
@@ -350,18 +395,27 @@ export function createHd2dScene(container, options) {
     const group = new THREE.Group();
     group.add(label);
     scene.add(group, core, soft, ripple, ring, pick);
-    const p = { id: u.id, el, inner: el.firstChild, bob: el.firstChild.firstChild, post: el.lastChild, label, core, soft, ripple, ring, pick, group, key: "", sc: 0, hover: false };
-    // 悬停高亮、点击选中（只是画面，不接规则）；滚轮照样交给镜头。只有卡片接鼠标（铭牌其余部分、细杆都不拦）
-    const onCard = (e) => e.target && e.target.classList && e.target.classList.contains("pl-card");
+    const p = { id: u.id, el, inner: el.firstChild, bob: el.firstChild.firstChild, post: el.lastChild, label, core, soft, ripple, ring, pick, group, key: "", sc: 0, hover: false,
+      lift: 0, liftFrom: 0, liftTo: 0, liftSet: false, big: false, dim: false };
+    // 悬停高亮、点击选中（只是画面，不接规则；顺便选中这个单位所在的区，近景看的就是它）。只有卡片接鼠标（铭牌其余部分、细杆都不拦）；
+    // 滚轮冒泡到外面的容器，照样在三段镜头之间跳
+    const onCard = (e) => e.target && e.target.hasAttribute && e.target.hasAttribute("data-hit");
     el.addEventListener("pointerenter", (e) => { if (onCard(e)) setHover(p, true); }, true);
     el.addEventListener("pointerleave", (e) => { if (onCard(e)) setHover(p, false); }, true);
-    el.addEventListener("click", (e) => { if (!e.target.closest(".pl-card")) return; e.stopPropagation(); select(state.selectedId === p.id ? null : p.id); });
+    el.addEventListener("click", (e) => { if (!e.target.closest("[data-hit]")) return; e.stopPropagation(); select(state.selectedId === p.id ? null : p.id); });
     el.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(state.selectedId === p.id ? null : p.id); }
       else if (e.key === "Escape") select(null);
     });
-    el.addEventListener("wheel", (e) => { e.preventDefault(); renderer.domElement.dispatchEvent(new WheelEvent("wheel", e)); }, { passive: false });
     return p;
+  }
+  /** 后排抬高（像素）：铭牌下面那根细杆的长度；换镜头时从上一段的高度插值到这一段的 */
+  function setLift(p, lift) {
+    lift = Math.max(0, lift || 0);
+    if (p.liftSet && Math.abs(lift - p.lift) < 0.05) return;
+    p.lift = lift; p.liftSet = true;
+    p.post.style.height = lift.toFixed(1) + "px";
+    p.el.classList.toggle("lifted", lift > 0.5);
   }
   function disposePlate(p) {
     scene.remove(p.group, p.core, p.soft, p.ripple, p.ring, p.pick);
@@ -370,12 +424,19 @@ export function createHd2dScene(container, options) {
     p.ripple.geometry.dispose(); p.ripple.material.dispose();
   }
   function setHover(p, on) { p.hover = on; markPlates(); }
-  function select(id) { state.selectedId = id; markPlates(); }
+  /** 选中一个单位（再点一下取消）；同时选中它所在的区（中景 / 近景跟过去） */
+  function select(id) {
+    state.selectedId = id; markPlates();
+    const u = id != null && state.layout ? state.layout.units.find(x => x.id === id) : null;
+    if (u && u.zone !== state.zone) setZone(u.zone);
+  }
   function syncPlates() {
     const live = new Set();
-    const size = state.layout.plateSize || L.plateSize(view());
+    const size = state.layout.plateSize || L.plateSize(view()), big = L.plateSize(state.layout.view || view(), true);
     labels.domElement.style.setProperty("--pw", size.w + "px");
     labels.domElement.style.setProperty("--ph", size.h + "px");
+    labels.domElement.style.setProperty("--bw", big.w + "px");   // 近景放大的铭牌（L.CONFIG.plate.big）
+    labels.domElement.style.setProperty("--bh", big.h + "px");
     state.layout.units.forEach(u => {
       live.add(u.id);
       let p = state.plates.get(u.id);
@@ -384,7 +445,7 @@ export function createHd2dScene(container, options) {
       if (key !== p.key) { p.key = key; p.bob.innerHTML = plateHtml(u.plate); }
       p.u = u;
       p.group.position.set(u.x, u.y, u.z);
-      p.post.style.height = Math.max(0, u.lift || 0) + "px";   // 后排抬高：铭牌下面一根细杆连到脚下
+      if (!p.liftSet) setLift(p, u.lift);   // 后排抬高：铭牌下面一根细杆连到脚下（每一段镜头的抬高在 goTo 里换）
       const g = u.groundY;
       p.core.position.set(u.x, g + 0.02, u.z); p.soft.position.set(u.x, g + 0.015, u.z);
       p.ripple.position.set(u.x, g + 0.03, u.z);
@@ -394,7 +455,6 @@ export function createHd2dScene(container, options) {
       p.core.material.opacity = SHADOW.coreOpacity * air; p.soft.material.opacity = SHADOW.softOpacity * (u.flying ? 0.7 : air);
       p.core.scale.setScalar(SHADOW.core * (u.flying ? 0.8 : 1)); p.soft.scale.set(SHADOW.soft * 1.15, SHADOW.soft, 1);
       p.el.classList.toggle("foe", u.side === "foe");
-      p.el.classList.toggle("lifted", (u.lift || 0) > 0.5);
       p.el.classList.toggle("sub", u.submerged);
       p.el.classList.toggle("dying", u.plate.flags.some(f => f.key === "dying"));
     });
@@ -402,14 +462,18 @@ export function createHd2dScene(container, options) {
     if (state.selectedId != null && !state.plates.has(state.selectedId)) state.selectedId = null;
     markPlates();
   }
-  /** 当前行动 / 选中 / 悬停：铭牌加样式，脚下的光圈开关；悬停 / 选中的铭牌叠在最上面（CSS2DRenderer 按 renderOrder 先排） */
+  /** 当前行动 / 选中 / 悬停：铭牌加样式，脚下的光圈开关；悬停 / 选中的铭牌叠在最上面（CSS2DRenderer 按 renderOrder 先排）。
+   *  近景：选中的区的铭牌放大（.big），别的区的变淡、糊掉（.dim）——按这一段镜头（state.pose.plates）定 */
   function markPlates() {
     state.plates.forEach(p => {
       const actor = p.id === state.actorId, sel = p.id === state.selectedId;
+      const q = state.pose && state.pose.plates[p.id];
+      p.big = !!(q && q.big); p.dim = !!(q && q.dim);
       p.el.classList.toggle("actor", actor); p.ring.visible = actor;
       p.el.classList.toggle("sel", sel); p.el.classList.toggle("hover", p.hover);
+      p.el.classList.toggle("big", p.big); p.el.classList.toggle("dim", p.dim);
       p.pick.visible = sel || p.hover; p.pick.material.opacity = sel ? 0.9 : 0.45;
-      p.label.renderOrder = p.hover ? 2 : sel ? 1 : 0;
+      p.label.renderOrder = p.hover ? 3 : sel ? 2 : p.big ? 1 : 0;
     });
   }
 
@@ -422,11 +486,12 @@ export function createHd2dScene(container, options) {
     state.layout = layout; state.meta = Object.assign({ weather: "none", theme: "day" }, meta || {});
     state.actorId = state.meta.actorId != null ? state.meta.actorId : state.actorId;
     const newBoard = !state.bounds || JSON.stringify(layout.bounds) !== JSON.stringify(state.bounds) || state.boardSig !== boardSig(layout);
+    if (newBoard && state.boardSig) state.zone = null;   // 换了棋盘：选中的区回到当前行动单位所在的区（开场时用外面给的 camera.zone）
     if (newBoard || state.worldSig !== worldSig(layout)) {
       clearWorld();
       state.ctx = { anim: [], lamps: [], fxLights: 0, theme: state.meta.theme };
       const root = new THREE.Group();
-      layout.zones.forEach(z => root.add(buildZone(z, state.ctx)));
+      layout.zones.forEach(z => { const g = buildZone(z, state.ctx); g.userData.zoneId = z.id; root.add(g); });   // 点地台选区时按 zoneId 认
       layout.gaps.forEach(g => root.add(buildGap(g, state.ctx)));
       root.add(buildLamps(layout.lamps, state.ctx));   // 灯：战场外缘 0–2 盏（地台上不放）
       scene.add(root); state.world = root;
@@ -467,24 +532,137 @@ export function createHd2dScene(container, options) {
   function view() {
     return { width: Math.max(1, container.clientWidth), height: Math.max(1, container.clientHeight), top: state.insets.top, bottom: state.insets.bottom };
   }
-  /** 默认镜头直接用布局算好的（hd2d-layout.js 的 fitView，和铭牌的站位是同一个镜头）。reset = 把玩家转过的视角放回去 */
+  /** 远景直接用布局算好的默认镜头（hd2d-layout.js 的 fitView，和铭牌的站位是同一个镜头），中景 / 近景按 hd2d-camera.js 算。
+   *  reset = 把玩家转过的视角放回这一段的镜头（直接切过去）；不 reset 就只换这一段的铭牌抬高，镜头不动 */
   function fitCamera(reset) {
     const c = state.layout && state.layout.camera;
     if (!c) return;
     state.fit = c.dist;
-    state.fitTarget = new THREE.Vector3(c.target.x, c.target.y, c.target.z);
-    controls.minDistance = c.dist * CAM.zoomIn; controls.maxDistance = c.dist * CAM.zoomOut;
-    if (reset) {
-      camera.position.set(c.pos.x, c.pos.y, c.pos.z);
-      controls.target.copy(state.fitTarget);
-      camera.lookAt(controls.target);
-      controls.update();
-    }
-    state.wantFit = false;
     camera.far = Math.max(CAM.far, c.dist * 7); camera.updateProjectionMatrix();
     bokeh.uniforms.farClip.value = camera.far;
+    goTo(state.tier, state.zone, reset || !state.cur ? { snap: true } : { keep: true });
+    state.wantFit = false;
     applyFog();
   }
+
+  /* ---------- 三段镜头（远景 / 中景 / 近景看单个区域）---------- */
+  const now = () => performance.now() / 1000;
+  /** 换到 tier 段、看 zone 区：算这一段的镜头（hd2d-camera.js · pose），从现在的镜头平滑过渡过去（减少动态效果 / snap：直接切过去）。
+   *  铭牌放大 / 变淡马上换，抬高跟着镜头一起插值。keep = 镜头不动，只换铭牌（同一块棋盘重排了一次） */
+  function goTo(tier, zone, opts) {
+    opts = opts || {};
+    if (!state.layout) return;
+    if (opts.keep && state.tween) opts = {};   // 正在过渡：改成过渡到新算的这一段
+    const to = C.pose(state.layout, tier, zone, { actorId: state.actorId });
+    state.tier = to.tier; state.zone = to.zone; state.pose = to;
+    state.plates.forEach((p, id) => { const q = to.plates[id]; p.liftFrom = p.lift; p.liftTo = q ? q.lift : 0; });
+    markPlates();
+    placeFocus();
+    if (opts.keep) {
+      state.plates.forEach(p => setLift(p, p.liftTo));
+    } else {
+      // 起点 = 镜头现在实际在哪（玩家可能拖动过、可能正在过渡），景深 / 雾 / 裁剪面接着上一次的
+      const from = C.poseFrom(camera.position, controls.target, camera.fov, state.cur || to);
+      const tw = C.tween(from, to, { reduced: !!opts.snap || !state.motion });
+      if (tw.duration > 0) {
+        state.tween = Object.assign(tw, { t0: now() });
+        controls.enabled = false;      // 过渡中不接拖动
+        openLimits();
+      } else {
+        state.tween = null;
+        applyPose(C.at(tw, 0));
+        arrive();
+      }
+    }
+    notify();
+  }
+  /** 把镜头摆成 p（位置、朝向、视野、近裁剪面；景深和雾每帧按 state.cur 设） */
+  function applyPose(p) {
+    state.cur = p;
+    if (Math.abs(camera.fov - p.fov) > 1e-4 || Math.abs(camera.near - p.clip) > 1e-4) { camera.fov = p.fov; camera.near = p.clip; camera.updateProjectionMatrix(); }
+    controls.target.set(p.target.x, p.target.y, p.target.z);
+    camera.position.set(p.pos.x, p.pos.y, p.pos.z);
+    camera.lookAt(controls.target);
+  }
+  /** 到了：铭牌抬高到位，拖动的范围换成这一段的（俯角 C.CAMERA[段].tilt；距离固定，滚轮不缩放），把拖动交还给玩家 */
+  function arrive() {
+    const p = state.pose, T = C.CAMERA[p.tier];
+    state.plates.forEach(pl => setLift(pl, pl.liftTo));
+    controls.minDistance = controls.maxDistance = p.dist;
+    controls.minPolarAngle = THREE.MathUtils.degToRad(90 - T.tilt[1]);
+    controls.maxPolarAngle = THREE.MathUtils.degToRad(90 - T.tilt[0]);
+    controls.enabled = true;
+  }
+  /** 过渡中镜头由插值摆，先放开 OrbitControls 的限制（不然它会把镜头夹回上一段的范围） */
+  function openLimits() {
+    controls.minDistance = 0; controls.maxDistance = Infinity;
+    controls.minPolarAngle = 0; controls.maxPolarAngle = Math.PI;
+  }
+  function setTier(tier) { goTo(C.tierName(tier), state.zone); }
+  /** 选中一个区：远景里只挪选区的框；中景 / 近景镜头跟过去 */
+  function setZone(id) {
+    if (!state.layout || !state.layout.zones.some(z => z.id === Number(id))) return;
+    if (state.tier === "far" && state.pose) {
+      state.zone = Number(id);
+      state.pose = C.pose(state.layout, "far", state.zone, { actorId: state.actorId });
+      placeFocus(); notify();
+      return;
+    }
+    goTo(state.tier, Number(id));
+  }
+  /** 换到相邻的区（左右键 / 屏幕箭头；顺序见 hd2d-camera.js · zoneOrder） */
+  function stepZone(dir) {
+    if (!state.layout) return;
+    const n = C.neighborZone(state.layout, state.zone, dir);
+    if (n != null) setZone(n);
+  }
+  /** 给外面的：现在是哪一段、看哪个区、左右是哪个区（到头是 null） */
+  function cameraInfo() {
+    const l = state.layout;
+    if (!l) return { tier: state.tier, zone: state.zone, zones: [], tag: "", prev: null, next: null };
+    const prev = C.neighborZone(l, state.zone, -1), next = C.neighborZone(l, state.zone, 1);
+    return {
+      tier: state.tier, name: C.CAMERA[state.tier].name, zone: state.zone, zones: state.pose ? state.pose.zones.slice() : [], tag: C.zoneTag(l, state.zone),
+      prev, next, prevTag: prev != null ? C.zoneTag(l, prev) : "", nextTag: next != null ? C.zoneTag(l, next) : ""
+    };
+  }
+  function notify() { if (options.onCameraChange) options.onCameraChange(cameraInfo()); }
+
+  /** 选中的区：地台顶面靠边一圈细框 */
+  let focusRing = null, focusSize = 0;
+  function placeFocus() {
+    const z = state.layout && state.layout.zones.find(q => q.id === state.zone);
+    if (!z) { if (focusRing) focusRing.visible = false; return; }
+    const size = Math.max(z.w, z.d) - 2 * FOCUS.inset;
+    if (!focusRing || Math.abs(size - focusSize) > 1e-6) {
+      const a = size / 2, b = a - FOCUS.width, shape = new THREE.Shape(), hole = new THREE.Path();
+      shape.moveTo(-a, -a); shape.lineTo(a, -a); shape.lineTo(a, a); shape.lineTo(-a, a); shape.closePath();
+      hole.moveTo(-b, -b); hole.lineTo(-b, b); hole.lineTo(b, b); hole.lineTo(b, -b); hole.closePath();
+      shape.holes.push(hole);
+      if (focusRing) { focusRing.geometry.dispose(); focusRing.geometry = new THREE.ShapeGeometry(shape); }
+      else {
+        focusRing = new THREE.Mesh(new THREE.ShapeGeometry(shape), new THREE.MeshBasicMaterial({
+          color: new THREE.Color(FOCUS.color).multiplyScalar(FOCUS.glow), transparent: true, opacity: FOCUS.opacity, depthWrite: false, toneMapped: false,
+          polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3
+        }));
+        focusRing.rotation.x = -Math.PI / 2; focusRing.renderOrder = 2;
+        scene.add(focusRing);
+      }
+      focusSize = size;
+    }
+    focusRing.position.set(z.cx, z.topY + 0.025, z.cz);
+    focusRing.visible = true;
+  }
+
+  // 滚轮：在远景 / 中景 / 近景之间跳，一次滚动只跳一段（往前滚拉近）。铭牌上滚也一样（冒泡到这里）
+  let wheelState = null;
+  const onWheel = (e) => {
+    e.preventDefault();
+    const r = C.wheelStep(wheelState, C.wheelPixels(e), now());
+    wheelState = r.state;
+    if (r.step) setTier(C.stepTier(state.tier, r.step));
+  };
+  container.addEventListener("wheel", onWheel, { passive: false });
   function fitShadow() {
     const b = state.bounds, cx = (b.minX + b.maxX) / 2, cz = (b.minZ + b.maxZ) / 2;
     const r = Math.hypot(b.maxX - b.minX, b.maxZ - b.minZ) / 2 + 3;
@@ -528,9 +706,30 @@ export function createHd2dScene(container, options) {
   let downAt = null;
   renderer.domElement.addEventListener("pointerdown", (e) => { downAt = { x: e.clientX, y: e.clientY }; });
   renderer.domElement.addEventListener("pointerup", (e) => {
-    if (downAt && Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) < 5 && state.selectedId != null) select(null);
+    const click = downAt && Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) < 5;
     downAt = null;
+    if (!click) return;
+    // 点到地台（左键）：选中这个区，中景 / 近景跟过去（选中的单位不在这个区就取消）；点到空地：取消选中的单位
+    const zid = e.button === 0 ? zoneAt(e) : null;
+    if (zid != null) {
+      const sel = state.selectedId != null && state.layout ? state.layout.units.find(u => u.id === state.selectedId) : null;
+      if (sel && sel.zone !== zid) { state.selectedId = null; markPlates(); }
+      setZone(zid);
+    } else if (state.selectedId != null) select(null);
   });
+  /** 鼠标下面是哪个区的地台（地台上的装饰、贴花也算；间隔、空地不算） */
+  const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+  function zoneAt(e) {
+    if (!state.world) return null;
+    const r = renderer.domElement.getBoundingClientRect();
+    ndc.set((e.clientX - r.left) / Math.max(1, r.width) * 2 - 1, -((e.clientY - r.top) / Math.max(1, r.height)) * 2 + 1);
+    ray.setFromCamera(ndc, camera);
+    const zones = state.world.children.filter(o => o.userData.zoneId != null);
+    for (const h of ray.intersectObjects(zones, true)) {
+      for (let o = h.object; o; o = o.parent) if (o.userData.zoneId != null) return o.userData.zoneId;
+    }
+    return null;
+  }
 
   const lampRand = rng(901);
   function updateLamps(T, dt) {
@@ -573,7 +772,18 @@ export function createHd2dScene(container, options) {
     heatPass.uniforms.time.value = animT;
     grade.uniforms.time.value = animT;
     updateLamps(T, dt);
-    // 铭牌：DOM 自己就正对镜头；这里管飞行的上下浮动、影子跟着缩放、行动光圈旋转，以及按远近缩放 / 变淡
+    // 镜头：过渡中按时间插值（位置、朝向、视野、焦点、景深、雾一起走，铭牌的抬高也跟着）；到了以后交还给 OrbitControls（小幅转动 / 平移）
+    if (state.tween) {
+      controls.update();                   // 拖动留下的惯性在过渡期间衰减掉（不然到了以后镜头还会自己漂一下）；镜头马上被插值盖掉
+      const p = C.at(state.tween, now() - state.tween.t0);
+      applyPose(p);
+      state.plates.forEach(pl => setLift(pl, pl.liftFrom + (pl.liftTo - pl.liftFrom) * p.k));
+      if (p.k >= 1) { state.tween = null; arrive(); }
+    } else {
+      clampPan();
+      controls.update();
+    }
+    // 铭牌：DOM 自己就正对镜头；这里管飞行的上下浮动、影子跟着缩放、行动光圈旋转，以及按远近缩放 / 变淡（近景里别的区再淡一截）
     const focus = camera.position.distanceTo(controls.target);
     state.plates.forEach(p => {
       const u = p.u;
@@ -585,12 +795,24 @@ export function createHd2dScene(container, options) {
       const d = camera.position.distanceTo(p.group.position);
       const sc = L.plateScale({ pos: camera.position, dist: focus }, p.group.position);
       if (Math.abs(sc - p.sc) > 0.004) { p.sc = sc; p.inner.style.transform = "scale(" + sc.toFixed(3) + ")"; }
-      const op = 1 - (1 - PLATE.fadeMin) * THREE.MathUtils.clamp((d - focus) / PLATE.fadeRange, 0, 1);
+      const op = (1 - (1 - PLATE.fadeMin) * THREE.MathUtils.clamp((d - focus) / PLATE.fadeRange, 0, 1)) * (p.dim ? PLATE.dim : 1);
       p.el.style.opacity = u.submerged ? Math.min(op, 0.82).toFixed(2) : op.toFixed(2);
     });
-    clampPan();
-    controls.update();
-    bokeh.uniforms.focus.value = focus;   // 焦点在战场中间
+    // 景深：焦点 = 镜头到它看的那一点 + 这一段的 shift（远景是战场中间，中景 / 近景对准选中的区）；糊多少按这一段的（C.CAMERA[段].dof）
+    const cur = state.cur, D = cur ? cur.dof : DOF0;
+    bokeh.uniforms.focus.value = focus + (cur ? cur.dof.shift : 0);
+    bokeh.uniforms.aperture.value = D.aperture; bokeh.uniforms.maxblur.value = D.maxblur;
+    bokeh.uniforms.maxblurFar.value = T.dofFar * D.far;
+    // 近景：焦点区左右两边再按横着离开多远糊一层——焦点区中心换到镜头空间的横坐标
+    bokeh.uniforms.lateral.value = D.lateral || 0;
+    if (D.lateral > 0) {
+      camera.updateMatrixWorld();
+      focusV.set(D.cx, D.cy, D.cz).applyMatrix4(camera.matrixWorldInverse);
+      bokeh.uniforms.focusX.value = focusV.x; bokeh.uniforms.focusHalf.value = D.half;
+      bokeh.uniforms.tanHalf.value = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+    }
+    fogRange(cur ? cur.fogShift : 0);
+    if (focusRing && focusRing.visible) focusRing.material.opacity = FOCUS.opacity + (moving ? Math.sin(animT * FOCUS.speed) * FOCUS.pulse : 0);
     // 打雷那一下镜头轻微抖动：天气给的像素换成焦点处的世界长度，沿镜头的左右 / 上下挪。
     // 只挪这一帧的渲染（铭牌跟着一起抖），渲染完挪回去，OrbitControls 看不到
     const sh = weather.shake, shaking = sh.x !== 0 || sh.y !== 0;
@@ -614,15 +836,24 @@ export function createHd2dScene(container, options) {
   return {
     get portrait() { return state.portrait; },
     get motion() { return state.motion; },
+    get tier() { return state.tier; },
+    get zone() { return state.zone; },
     setBattle, resize, view, renderer, camera, controls, scene,
     setInsets(ins) { state.insets = { top: ins.top || 0, bottom: ins.bottom || 0 }; },
     refit() { state.wantFit = true; fitCamera(true); },
-    setActor(id) { state.actorId = id; markPlates(); },
-    select,
+    /** 换当前行动单位：中景 / 近景跟到他所在的区 */
+    setActor(id) {
+      state.actorId = id; markPlates();
+      const u = state.layout ? state.layout.units.find(x => x.id === id) : null;
+      if (u && u.zone !== state.zone) setZone(u.zone);
+    },
+    select, setTier, setZone, stepZone, cameraInfo,
+    stepTier(dir) { setTier(C.stepTier(state.tier, dir)); },
     dispose() {
-      disposed = true; cancelAnimationFrame(raf); ro.disconnect();
+      disposed = true; cancelAnimationFrame(raf); ro.disconnect(); container.removeEventListener("wheel", onWheel);
       state.plates.forEach(disposePlate); clearWorld(); weather.dispose();
       if (state.backdrop) { scene.remove(state.backdrop.group); state.backdrop.dispose(); }
+      if (focusRing) { scene.remove(focusRing); focusRing.geometry.dispose(); focusRing.material.dispose(); }
       Object.values(tex).forEach(t => t.dispose()); shadowGeo.dispose(); ringGeo.dispose();
       labels.domElement.remove();
       composer.dispose(); controls.dispose(); renderer.dispose(); renderer.domElement.remove();

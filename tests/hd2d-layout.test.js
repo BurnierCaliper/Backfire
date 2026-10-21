@@ -208,8 +208,9 @@ test("原型的浏览器脚本能通过语法检查，规则文件加载顺序�
   ["three.module.min.js", "addons/controls/OrbitControls.js", "addons/postprocessing/BokehPass.js", "addons/postprocessing/UnrealBloomPass.js",
     "addons/postprocessing/OutputPass.js", "addons/postprocessing/ShaderPass.js", "addons/postprocessing/RenderPass.js", "addons/postprocessing/EffectComposer.js", "addons/renderers/CSS2DRenderer.js"]
     .forEach(f => assert.ok(fs.existsSync(path.join(base, f)), f));
+  // 规则文件（和 headless 一个顺序），后面接联机的展示白名单 online-view.js（#204：画面只用它投影过的状态）
   const tags = [...html.matchAll(/<script src="\.\.\/\.\.\/([^"]+)"><\/script>/g)].map(m => m[1]);
-  assert.equal(tags.join(), H.RULE_FILES.filter(f => fs.existsSync(path.join(__dirname, "..", f))).join());
+  assert.equal(tags.join(), H.RULE_FILES.filter(f => fs.existsSync(path.join(__dirname, "..", f))).concat(["online-view.js"]).join());
 });
 
 /* ---------- 第一阶段打磨（issue #191）---------- */
@@ -942,7 +943,310 @@ test("原型页：顶栏可以切换区域（下拉框，或者网址加 ?region
   assert.ok(/Object\.keys\(L\.REGIONS\)/.test(html), "下拉框列的是配置表里的区域名");
   Object.entries({ mine: "第一采矿场", desert: "沙漠", cross: "外城区" }).forEach(([id, region]) =>
     assert.ok(new RegExp(`id: "${id}",[^\\n]*region: "${region}"`).test(html), `演示 ${id} 默认在 ${region}`));
-  assert.ok(/L\.build\(st, \{[^}]*region:[^}]*theme:/.test(html), "布局拿到页面选的区域和光影主题（灯的数量看白天 / 夜晚）");
+  // 交给布局的是联机投影过的状态（#204：project() = OnlineView.projectState(st)）
+  assert.ok(/L\.build\(project\(\), \{[^}]*region:[^}]*theme:/.test(html), "布局拿到页面选的区域和光影主题（灯的数量看白天 / 夜晚）");
   const css = fs.readFileSync(path.join(__dirname, "..", "prototypes", "hd2d", "hd2d.css"), "utf8");
   assert.ok(/@media \(max-width: 720px\)[\s\S]*#region-select[^{]*\{[^}]*display: none/.test(css), "手机上收起区域下拉框（这一轮不专门调手机，别弄坏）");
+});
+
+/* ---------- 第二阶段 · 一（issue #204）：三段镜头（远景 / 中景 / 近景看单个区域）+ 只用联机玩家拿得到的数据来画 ---------- */
+const OV = require("../online-view.js");
+/** 在规则环境里投影（和原型页一样：online-view.js 和规则文件在同一个页面里，主机的展示函数 statusLine / effectiveAtk 拿得到） */
+function projectIn(ctx, st) {
+  const fs = require("fs"), path = require("path"), vm = require("vm");
+  if (!ctx.OnlineView) vm.runInContext(fs.readFileSync(path.join(__dirname, "..", "online-view.js"), "utf8"), ctx, { filename: "online-view.js" });
+  return ctx.OnlineView.projectState(st, { itemCatalog: ctx.ITEM_CATALOG || {} });
+}
+const plain = (v) => JSON.parse(JSON.stringify(v));
+
+test("联机数据：原型页先用 OnlineView.projectState 投影再交给布局；投影后排出来的布局和用房主完整 state 排的一样（只差投影本来就做的名字规范化、ATK 用主机算好的实际值），投影和布局里都没有坚毅生命", () => {
+  const fs = require("fs"), path = require("path");
+  const SHP = 7771, SHP_MAX = 7772;
+  for (const id of Object.keys(DEMO_SETUPS)) {
+    const ctx = H.load();
+    const raw = DEMO_SETUPS[id](ctx.BattleSim);
+    raw.units.forEach(u => { u.shp = SHP; u.shpMax = SHP_MAX; u.baseShp = SHP; });
+    raw.units[1].hidden = true;                    // 藏起来的单位：两边都不画
+    raw.units[0].bondAtk = 3;                      // 牵挂的 ATK 加成：实际 ATK（effectiveAtk）比 atk 多 3
+    const pv = projectIn(ctx, raw);
+    // 投影里没有坚毅生命（upOnShp 是给玩家看的「起身」开关，只有 true / false，不是数值）
+    const wire = JSON.stringify(pv).replace(/"upOnShp":(true|false)/g, "");
+    assert.ok(!/shp/i.test(wire) && !wire.includes(String(SHP)) && !wire.includes(String(SHP_MAX)), id + "：投影里有坚毅生命");
+    assert.equal(pv.region, undefined, "投影的战斗状态里还没有区域名（要加进白名单的字段见 README「联机数据」）；加了以后原型页改成读投影里的");
+    for (const region of [undefined, "沙漠"]) for (const portrait of [false, true]) {
+      const opts = { view: DESKTOP, region, theme: "dusk", portrait };
+      const a = L.build(raw, opts), b = L.build(pv, opts), tag = `${id} ${region || "不给区域"}${portrait ? " 竖屏" : ""}`;
+      const json = JSON.stringify(b);
+      assert.ok(!/shp/i.test(json) && !json.includes(String(SHP)) && !json.includes(String(SHP_MAX)), tag + "：布局里有坚毅生命");
+      // 地台、间隔、灯、镜头、范围一模一样
+      ["zones", "gaps", "lamps", "camera", "bounds", "region", "ground", "plateSize"].forEach(k => assert.deepEqual(plain(b[k]), plain(a[k]), tag + "：" + k + " 不一样"));
+      // 单位：站位、抬高、屏幕矩形、铭牌一样；名字是投影规范化过的（全角括号 → 半角：OnlineView.safeText），ATK 是主机算好的实际 ATK（display.atk，联机单位卡也用它）
+      assert.deepEqual(b.units.map(u => u.id), a.units.map(u => u.id), tag + "：画出来的单位不一样");
+      assert.ok(!b.units.some(u => u.id === raw.units[1].id), "藏起来的单位不画");
+      a.units.forEach((ua, i) => {
+        const pu = pv.units.find(x => x.id === ua.id), want = plain(ua);
+        want.plate.name = OV.safeText(ua.plate.name);
+        want.plate.atk = pu.display && Number.isFinite(pu.display.atk) ? pu.display.atk : ua.plate.atk;
+        want.plate.text = [want.plate.name, ua.plate.text[1], "ATK " + want.plate.atk].concat(ua.plate.text.slice(3));
+        assert.deepEqual(plain(b.units[i]), want, `${tag}：${ua.plate.name} 不一样`);
+      });
+      const bonded = (l) => l.units.find(u => u.id === raw.units[0].id).plate.atk;
+      assert.equal(bonded(b), raw.units[0].atk + 3, tag + "：联机铭牌的 ATK 是主机算好的实际 ATK（和联机单位卡一样，含牵挂的 +3）");
+    }
+  }
+  // 原型页：加载 online-view.js，画面用的是投影（project() = OnlineView.projectState(st)）；布局、顶栏、队伍栏、日志都不直接读房主的 st
+  const html = fs.readFileSync(path.join(__dirname, "..", "prototypes", "hd2d", "index.html"), "utf8");
+  const mod = /<script type="module">([\s\S]*?)<\/script>/.exec(html)[1];
+  assert.ok(html.indexOf('<script src="../../online-view.js"></script>') > html.indexOf('<script src="../../training.js"></script>'), "规则文件之后加载 online-view.js");
+  assert.ok(/pv = OnlineView\.projectState\(st,/.test(mod) && /L\.build\(project\(\),/.test(mod), "先投影再交给布局");
+  assert.ok(!/L\.build\(st\b/.test(mod) && !/weather: st\.weather/.test(mod) && !/st\.turnNo/.test(mod) && !/st\.logPages/.test(mod), "画面不绕开白名单读房主的原始 state");
+  assert.ok(/OnlineView\.projectLogs\(/.test(mod), "日志也走白名单（projectLogs）");
+});
+
+/* 三段镜头的纯函数（hd2d-camera.js）：在 Node 里按布局算，和场景用的是同一套。每条测试里各自 require（缺这个文件时只是这几条失败，别的照跑） */
+const cams = () => require("../prototypes/hd2d/hd2d-camera.js");
+const usableAt = (s, v) => s.x >= -0.5 && s.x <= v.width + 0.5 && s.y >= v.top - 0.5 && s.y <= v.height - v.bottom + 0.5;
+const cornersOf = (z) => { const out = []; [z.cx - z.w / 2, z.cx + z.w / 2].forEach(x => [0, z.topY].forEach(y => [z.cz - z.d / 2, z.cz + z.d / 2].forEach(zz => out.push({ x, y, z: zz })))); return out; };
+/** 这个区整块（地台顶面四个角 + 地面四个角）都在顶栏和技能栏之间：用测试里自己写的投影量 */
+const framedIn = (pose, z, v) => cornersOf(z).every(p => usableAt(screenOf(pose.cam, p), v));
+const centerIn = (pose, z, v) => usableAt(screenOf(pose.cam, { x: z.cx, y: z.topY, z: z.cz }), v);
+/** 光影主题里远处糊的上限（hd2d-scene.js 的 THEMES[].dofFar），取最小的那个（最不糊的情况） */
+function minDofFar() {
+  const fs = require("fs"), path = require("path");
+  const src = fs.readFileSync(path.join(__dirname, "..", "prototypes", "hd2d", "hd2d-scene.js"), "utf8");
+  return Math.min(...[...src.matchAll(/dofFar: ([\d.]+)/g)].map(m => Number(m[1])));
+}
+
+test("三段镜头：远景就是默认镜头（框住整个战场）；中景框住选中的区 + 相连的区、比远景近、俯角低；近景只框选中的那一个区、比中景近、俯角更低（各种棋盘、每个区，桌面 1440×900）", () => {
+  const CAMS = cams(), C = CAMS.CAMERA;
+  assert.ok(C.mid.elevation < L.CONFIG.camera.elevation && C.near.elevation < C.mid.elevation && C.near.elevation <= 18, "俯角：远 > 中 > 近（近景接近平视）");
+  for (const c of CASES) {
+    const out = L.build(setupCase(c, 4), { view: DESKTOP });
+    for (const z of out.zones) {
+      const tag = `${c.name} ${z.id} 区`;
+      const far = CAMS.pose(out, "far", z.id), mid = CAMS.pose(out, "mid", z.id), near = CAMS.pose(out, "near", z.id);
+      // 远景：布局的默认镜头，一个数都不改；整个战场都在画面里
+      assert.ok(far.cam === out.camera && far.dist === out.camera.dist && far.elevation === L.CONFIG.camera.elevation && far.fov === L.CONFIG.camera.fov, tag + "：远景不是默认镜头");
+      assert.deepEqual(plain(far.zones), plain(out.zones.map(q => q.id)));
+      out.zones.forEach(q => assert.ok(framedIn(far, q, DESKTOP), `${tag}：远景没框住 ${q.id} 区`));
+      assert.ok(far.dof.shift === 0 && far.fogShift === 0 && far.dof.aperture === C.far.dof.aperture && far.dof.lateral === 0, tag + "：远景的景深 / 雾和以前一样");
+      // 中景：选中的区整块在画面里，相连的区都露出中心（框住 2–3 个相邻的区）；比远景近、俯角低
+      const links = CAMS.linkedZones(out, z.id);
+      assert.deepEqual(plain(mid.zones), plain([z.id].concat(links)), tag + "：中景框住的区");
+      assert.ok(framedIn(mid, z, DESKTOP), tag + "：中景没框住选中的区");
+      links.forEach(id => assert.ok(centerIn(mid, out.zones.find(q => q.id === id), DESKTOP), `${tag}：中景里相连的 ${id} 区看不到`));
+      assert.ok(mid.dist < far.dist * 0.85 && mid.elevation === C.mid.elevation && mid.fov === C.mid.fov, `${tag}：中景要比远景近（${mid.dist.toFixed(1)} / ${far.dist.toFixed(1)}）`);
+      // 近景：只框选中的那一个区，它几乎占满画面宽；同一排左右的区不在画面里；比中景近、俯角更低
+      assert.deepEqual(plain(near.zones), [z.id]);
+      assert.ok(framedIn(near, z, DESKTOP), tag + "：近景没框住选中的区");
+      const xs = cornersOf(z).map(p => screenOf(near.cam, p).x);
+      assert.ok(Math.max(...xs) - Math.min(...xs) >= DESKTOP.width * 0.6, `${tag}：近景里选中的区只占画面宽的 ${((Math.max(...xs) - Math.min(...xs)) / DESKTOP.width * 100).toFixed(0)}%`);
+      out.zones.filter(q => q.id !== z.id && Math.abs(q.cz - z.cz) < 1e-6).forEach(q => assert.ok(!centerIn(near, q, DESKTOP), `${tag}：近景里看得到同一排的 ${q.id} 区`));
+      assert.ok(near.dist < mid.dist / 1.5 && near.elevation === C.near.elevation && near.fov === C.near.fov, `${tag}：近景要比中景近（${near.dist.toFixed(1)} / ${mid.dist.toFixed(1)}）`);
+      // 景深：近景的焦点落在选中的区（中心不糊、整块只糊一点），画面里露出来的别的区（哪怕只露一个角，包括同一排左右的）都糊掉
+      const dofFar = minDofFar(), blur = (p) => CAMS.blurAt(near, p, dofFar);
+      assert.ok(blur({ x: z.cx, y: z.topY, z: z.cz }) < 1e-3, tag + "：近景的焦点不在选中的区");
+      cornersOf(z).forEach(p => assert.ok(blur(p) <= 0.0045, `${tag}：选中的区自己糊得太厉害（${blur(p).toFixed(4)}）`));
+      out.zones.filter(q => q.id !== z.id).forEach(q => {
+        const seen = cornersOf(q).concat([{ x: q.cx, y: q.topY, z: q.cz }]).filter(p => usableAt(screenOf(near.cam, p), DESKTOP));
+        seen.forEach(p => assert.ok(blur(p) >= 0.004, `${tag}：近景里 ${q.id} 区露出来的地方没糊掉（${blur(p).toFixed(4)}）`));
+      });
+      // 中景、远景不按横向糊（框住的相邻区要看得清）
+      assert.equal(mid.dof.lateral, 0);
+    }
+  }
+  // 场景改 BokehShader 的那两行（远处单独的上限、近景的横向糊）在 vendor 的 three.js 里真的有，改得上
+  const fs = require("fs"), path = require("path");
+  const shader = fs.readFileSync(path.join(__dirname, "..", "vendor", "three", "addons", "shaders", "BokehShader.js"), "utf8");
+  const scene = fs.readFileSync(path.join(__dirname, "..", "prototypes", "hd2d", "hd2d-scene.js"), "utf8");
+  ["float factor = ( focus + viewZ );", "vec2 dofblur = vec2 ( clamp( factor * aperture, -maxblur, maxblur ) );", "uniform float maxblur;"].forEach(s => {
+    assert.ok(shader.includes(s), "BokehShader 里找不到：" + s);
+    assert.ok(scene.includes(JSON.stringify(s).slice(1, -1)), "场景没改这一行：" + s);
+  });
+  assert.ok(/uniform float lateral;\\n\\t\\tuniform float focusX;\\n\\t\\tuniform float focusHalf;\\n\\t\\tuniform float tanHalf;/.test(scene) && /factor \+= factor >= 0\.0 \? latBlur : - latBlur;/.test(scene), "近景横向糊：声明 uniform、按方向加到 factor 上（和 blurAt 同一个算法）");
+});
+
+test("近景：选中的区的铭牌放大（CONFIG.plate.big），别的区的变淡；放大的铭牌两两不重叠、都在顶栏和技能栏之间（三个演示战场每个有人的区、同区挤 6 / 8 人）；中景的铭牌也不重叠", () => {
+  const CAMS = cams(), P = L.CONFIG.plate;
+  assert.ok(P.big.w >= P.w * 1.5 && P.big.h >= P.h * 2, "放大的铭牌明显比紧凑的大（四行：名字、血条、架势 + ATK、状态）");
+  /** 一块铭牌在屏幕上的矩形（独立投影）：这一段的抬高、放大的用 big 尺寸 */
+  const boxOf = (out, pose, u) => {
+    const s = screenOf(pose.cam, u), q = pose.plates[u.id];
+    const k = Math.min(P.maxScale, Math.max(P.minScale, Math.pow(pose.cam.dist / s.dist, P.scaleExp)));
+    const size = q.big ? L.plateSize(out.view, true) : out.plateSize;
+    return { x0: s.x - size.w * k / 2, x1: s.x + size.w * k / 2, y0: s.y - q.lift - size.h * k - P.bob, y1: s.y - q.lift + P.bob };
+  };
+  const check = (out, tag) => {
+    out.zones.filter(z => out.units.some(u => u.zone === z.id)).forEach(z => {
+      for (const tier of ["mid", "near"]) {
+        const pose = CAMS.pose(out, tier, z.id), t = `${tag} ${tier} ${z.id} 区`;
+        out.units.forEach(u => {
+          const q = pose.plates[u.id], b = boxOf(out, pose, u);
+          assert.equal(q.big, tier === "near" && u.zone === z.id, t + "：放大的应该正好是近景里选中的区的铭牌");
+          assert.equal(q.dim, tier === "near" && u.zone !== z.id, t + "：近景里别的区的铭牌变淡");
+          ["x0", "x1", "y0", "y1"].forEach(k => assert.ok(Math.abs(b[k] - q.rect[k]) < 0.5, `${t}：${u.plate.name} 的 ${k}（独立投影 ${b[k].toFixed(1)} / 镜头给的 ${q.rect[k].toFixed(1)}）`));
+          if (u.zone === z.id) assert.ok(b.x0 >= 0 && b.x1 <= DESKTOP.width && b.y0 >= DESKTOP.top && b.y1 <= DESKTOP.height - DESKTOP.bottom, `${t}：${u.plate.name} 的铭牌出了画面 / 被顶栏、技能栏挡住`);
+        });
+        const list = out.units, bad = [];
+        for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) if (boxesOverlap(boxOf(out, pose, list[i]), boxOf(out, pose, list[j]))) bad.push(list[i].plate.name + " × " + list[j].plate.name);
+        assert.deepEqual(bad, [], t + "：铭牌互相压住");
+      }
+    });
+  };
+  Object.keys(DEMO_SETUPS).forEach(id => check(L.build(DEMO_SETUPS[id](H.load().BattleSim), { view: DESKTOP }), id));
+  for (const c of CASES) for (const n of [2, 4]) check(L.build(crowded(c.opt, n).st, { view: DESKTOP }), `${c.name} 同区 ${4 + n} 人`);
+});
+
+test("近景换相邻的区：左右键 / 屏幕箭头按「后排到前排、同一排从左到右」走，到头就停，每个区都走得到；不认得的区、没给区时看当前行动单位所在的区", () => {
+  const CAMS = cams();
+  const order = (opt, portrait) => plain(CAMS.zoneOrder(L.build(setupCase({ opt }, 2), { view: DESKTOP, portrait })));
+  assert.deepEqual(order({ zoneMode: 3 }), [1, 2, 3], "直排：1 → 2 → 3");
+  assert.deepEqual(order({ board: "line4" }), [1, 2, 3, 4]);
+  assert.deepEqual(order({ board: "square4" }), [1, 2, 3, 4], "2×2：后排 1 → 2，前排 3 → 4");
+  assert.deepEqual(order({ board: "cross5" }), [1, 2, 3, 4, 5], "十字：后 1，中间一排 2 → 3 → 4，前 5");
+  for (const c of CASES) for (const portrait of [false, true]) {
+    const out = L.build(setupCase(c, 2), { view: DESKTOP, portrait }), ids = plain(CAMS.zoneOrder(out));
+    assert.deepEqual(ids.slice().sort(), plain(out.zones.map(z => z.id)).sort(), c.name + "：每个区都在顺序里");
+    // 从第一个一直按右键：每个区走一遍，到头停住；左键倒着走回来
+    let at = ids[0];
+    const seen = [at];
+    for (let n; (n = CAMS.neighborZone(out, at, 1)) != null;) { seen.push(n); at = n; }
+    assert.deepEqual(seen, ids, c.name + "：右键走一遍");
+    assert.equal(CAMS.neighborZone(out, ids[ids.length - 1], 1), null, "最后一个区再按右键：不动");
+    assert.equal(CAMS.neighborZone(out, ids[0], -1), null, "第一个区再按左键：不动");
+    assert.equal(CAMS.neighborZone(out, ids[1], -1), ids[0]);
+  }
+  // 选中的区：给的认得就用，不然看当前行动单位所在的区，再不然是我方第一个人的区
+  const out = L.build(DEMO_SETUPS.cross(H.load().BattleSim), { view: DESKTOP });
+  const foe = out.units.find(u => u.side === "foe"), me = out.units.find(u => u.side === "player");
+  assert.equal(CAMS.focusZone(out, 2, foe.id), 2);
+  assert.equal(CAMS.focusZone(out, 9, foe.id), foe.zone, "认不得的区：看当前行动单位所在的区");
+  assert.equal(CAMS.focusZone(out, null, null), me.zone);
+  assert.equal(CAMS.pose(out, "near", null, { actorId: foe.id }).zone, foe.zone);
+  assert.equal(CAMS.zoneTag(out, 4), "4 区 · 酸液", "镜头条上写区号和场地");
+});
+
+test("镜头过渡：0.4–0.6 秒、进出都慢的缓动，位置 / 朝向 / 视野 / 焦点 / 景深 / 雾一起插值，不瞬移也不晃；减少动态效果时不插值，第 0 帧就是终点", () => {
+  const CAMS = cams(), T = CAMS.CAMERA.transition, ease = CAMS.EASE[T.ease];
+  assert.ok(T.duration >= 0.4 && T.duration <= 0.6, "过渡时长 " + T.duration);
+  assert.ok(typeof ease === "function" && ease(0) === 0 && Math.abs(ease(1) - 1) < 1e-12, "缓动从 0 走到 1");
+  for (let i = 1; i <= 200; i++) assert.ok(ease(i / 200) >= ease((i - 1) / 200) - 1e-12, "缓动不往回走（不晃）");
+  assert.ok(ease(0.05) < 0.02 && 1 - ease(0.95) < 0.02, "起步和停下都慢（没有突变）");
+  const out = L.build(DEMO_SETUPS.mine(H.load().BattleSim), { view: DESKTOP });
+  const far = CAMS.pose(out, "far", 1), mid = CAMS.pose(out, "mid", 1), near = CAMS.pose(out, "near", 2);
+  const keys = (p) => ({ dist: p.dist, elevation: p.elevation, fov: p.fov, tx: p.target.x, ty: p.target.y, tz: p.target.z, px: p.pos.x, py: p.pos.y, pz: p.pos.z,
+    aperture: p.dof.aperture, maxblur: p.dof.maxblur, far: p.dof.far, shift: p.dof.shift, fog: p.fogShift, clip: p.clip });
+  for (const [a, b] of [[far, near], [near, mid], [mid, far]]) {
+    const tw = CAMS.tween(a, b, {}), ka = keys(a), kb = keys(b);
+    assert.equal(tw.duration, T.duration);
+    const start = keys(CAMS.at(tw, 0)), end = keys(CAMS.at(tw, tw.duration)), half = keys(CAMS.at(tw, tw.duration / 2));
+    Object.keys(ka).forEach(k => {
+      assert.ok(Math.abs(start[k] - ka[k]) < 1e-9, `${a.tier} → ${b.tier}：第 0 帧的 ${k} 应该还在起点（不瞬移）`);
+      assert.ok(Math.abs(end[k] - kb[k]) < 1e-9, `${a.tier} → ${b.tier}：最后 ${k} 到终点`);
+      assert.ok(half[k] >= Math.min(ka[k], kb[k]) - 1e-9 && half[k] <= Math.max(ka[k], kb[k]) + 1e-9, `${a.tier} → ${b.tier}：中途的 ${k} 在两头之间`);
+    });
+    // 每一帧（1/60 秒）只走一小步：最快的时候一帧也不超过全程的一成（0.5 秒走完，缓动最陡的地方大约一帧 5%）
+    let prev = keys(CAMS.at(tw, 0));
+    for (let t = 1 / 60; t <= tw.duration + 1e-9; t += 1 / 60) {
+      const cur = keys(CAMS.at(tw, t));
+      Object.keys(ka).forEach(k => { const span = Math.abs(kb[k] - ka[k]); if (span > 1e-6) assert.ok(Math.abs(cur[k] - prev[k]) <= span * 0.1 + 1e-9, `${a.tier} → ${b.tier}：${k} 一帧走了 ${(Math.abs(cur[k] - prev[k]) / span * 100).toFixed(1)}%`); });
+      prev = cur;
+    }
+    // 镜头的位置始终在 target 后上方 dist 远、俯角 elevation（朝向跟着插值，不是直线穿过地台）
+    const p = CAMS.at(tw, tw.duration * 0.3), pos = CAMS.posOf(p.target, p.dist, p.elevation, p.azimuth);
+    assert.ok(Math.hypot(pos.x - p.pos.x, pos.y - p.pos.y, pos.z - p.pos.z) < 1e-9);
+    // 减少动态效果：不插值，直接切过去
+    const r = CAMS.tween(a, b, { reduced: true });
+    assert.equal(r.duration, 0, "减少动态效果：过渡时长 0");
+    [0, 0.1, 1].forEach(t => assert.deepEqual(keys(CAMS.at(r, t)), kb, `减少动态效果：第 ${t} 秒就是终点`));
+    assert.equal(CAMS.at(r, 0).k, 1);
+  }
+  // 从玩家拖动过的镜头出发：起点就是镜头现在的样子（位置、俯角、方位），景深接着上一段的
+  const dragged = CAMS.poseFrom({ x: far.pos.x + 6, y: far.pos.y, z: far.pos.z - 2 }, far.target, far.fov, far);
+  assert.ok(Math.abs(dragged.azimuth) > 0.05 && dragged.dof === far.dof);
+  const s = CAMS.at(CAMS.tween(dragged, near, {}), 0);
+  assert.ok(Math.hypot(s.pos.x - dragged.pos.x, s.pos.y - dragged.pos.y, s.pos.z - dragged.pos.z) < 1e-6, "从拖动过的位置平滑出发");
+  assert.equal(CAMS.at(CAMS.tween(dragged, near, {}), T.duration).azimuth, 0, "到了以后正对战场");
+});
+
+test("滚轮在三段之间跳：一次滚动只跳一段（停顿超过 idle 秒才算下一次，触控板一点一点的也攒够了再跳），往前滚拉近、往后滚拉远，到头就停；按行 / 按页的 deltaY 换成像素", () => {
+  const CAMS = cams(), W = CAMS.CAMERA.wheel;
+  let s = null, r;
+  r = CAMS.wheelStep(s, -100, 10); assert.equal(r.step, 1, "往前滚一下：拉近一段"); s = r.state;
+  r = CAMS.wheelStep(s, -100, 10.05); assert.equal(r.step, 0, "同一次滚动里的后几下不再跳"); s = r.state;
+  r = CAMS.wheelStep(s, -100, 10.1); assert.equal(r.step, 0); s = r.state;
+  r = CAMS.wheelStep(s, 100, 10.1 + W.idle + 0.01); assert.equal(r.step, -1, "停顿一下再往后滚：拉远一段"); s = r.state;
+  // 触控板：一下只给几个像素，攒够 step 才跳，而且整段惯性只跳一次
+  s = null; let fired = 0;
+  for (let i = 0; i < 90; i++) { r = CAMS.wheelStep(s, -3, 20 + i * 0.016); s = r.state; if (r.step) fired++; }
+  assert.equal(fired, 1, "一段连续的滚动只跳一段");
+  r = CAMS.wheelStep(null, -(W.step - 1), 30); assert.equal(r.step, 0, "滚得太少不跳");
+  // 段：远 → 中 → 近，到头停住
+  assert.equal(CAMS.stepTier("far", 1), "mid"); assert.equal(CAMS.stepTier("mid", 1), "near"); assert.equal(CAMS.stepTier("near", 1), "near");
+  assert.equal(CAMS.stepTier("near", -1), "mid"); assert.equal(CAMS.stepTier("far", -1), "far"); assert.equal(CAMS.tierName("?"), "far");
+  assert.equal(CAMS.wheelPixels({ deltaY: 3, deltaMode: 1 }), 3 * W.line);
+  assert.equal(CAMS.wheelPixels({ deltaY: -1, deltaMode: 2 }), -W.page);
+  assert.equal(CAMS.wheelPixels({ deltaY: -53, deltaMode: 0 }), -53);
+});
+
+test("镜头参数都在配置表（hd2d-camera.js 的 CAMERA）；场景照它切（按钮 / 1·2·3 / 滚轮 / 点地台或铭牌选区 / 近景左右键 + 屏幕箭头），镜头是每个人自己的、不写进战斗状态，算镜头不改布局", () => {
+  const fs = require("fs"), path = require("path");
+  const dir = path.join(__dirname, "..", "prototypes", "hd2d");
+  const CAMS = cams(), C = CAMS.CAMERA;
+  assert.deepEqual(plain(C.order), ["far", "mid", "near"]);
+  ["mid", "near"].forEach(t => ["elevation", "fov", "margin", "clip", "maxLift"].forEach(k => assert.ok(Number.isFinite(C[t][k]), `${t}.${k} 在配置表里`)));
+  C.order.forEach(t => {
+    assert.ok(Array.isArray(C[t].tilt) && C[t].tilt[0] < C[t].tilt[1], t + "：拖动的俯角范围在配置表里");
+    ["aperture", "maxblur", "far"].forEach(k => assert.ok(Number.isFinite(C[t].dof[k]), `${t}：景深 ${k} 在配置表里`));
+  });
+  assert.ok(C.far.tilt[0] <= L.CONFIG.camera.elevation && L.CONFIG.camera.elevation <= C.far.tilt[1] && C.near.tilt[0] <= C.near.elevation && C.near.elevation <= C.near.tilt[1], "每一段的俯角在自己的拖动范围里（到了以后 OrbitControls 不会把镜头夹走）");
+  assert.ok(C.mid.share > 0 && C.mid.dist.near > 1 && C.mid.dist.far < 1 && C.near.big && C.near.dim, "中景框进来多少、远近范围；近景放大 / 变淡");
+  assert.ok(Number.isFinite(C.transition.duration) && CAMS.EASE[C.transition.ease], "过渡时长、缓动在配置表里");
+  // 算镜头是纯函数：不改布局（布局是用联机投影过的状态排的，镜头也不写回去）
+  const out = L.build(DEMO_SETUPS.desert(H.load().BattleSim), { view: DESKTOP }), before = JSON.stringify(out);
+  C.order.forEach(t => out.zones.forEach(z => CAMS.pose(out, t, z.id)));
+  assert.equal(JSON.stringify(out), before, "算镜头改了布局");
+  const camSrc = fs.readFileSync(path.join(dir, "hd2d-camera.js"), "utf8");
+  assert.ok(!/document|window\.|THREE|OnlineView|localStorage|\.send\(/.test(camSrc.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "")), "镜头模块不碰 DOM / three.js / 联机");
+  // 场景：滚轮不缩放、在三段之间跳；点地台选区；按 CAMERA 插值、减少动态效果时直接切
+  const scene = fs.readFileSync(path.join(dir, "hd2d-scene.js"), "utf8");
+  assert.ok(/controls\.enableZoom = false/.test(scene) && /C\.wheelStep\(/.test(scene) && /C\.stepTier\(/.test(scene), "滚轮在三段之间跳");
+  assert.ok(/C\.pose\(/.test(scene) && /C\.tween\(from, to, \{ reduced: !!opts\.snap \|\| !state\.motion \}\)/.test(scene) && /C\.at\(state\.tween/.test(scene), "按 hd2d-camera.js 的镜头插值；减少动态效果时不插值");
+  assert.ok(/userData\.zoneId = z\.id/.test(scene) && /ray\.intersectObjects\(/.test(scene) && /setZone\(zid\)/.test(scene), "点地台选中这个区");
+  assert.ok(/select\(id\)[\s\S]{0,200}setZone\(u\.zone\)/.test(scene), "点铭牌也选中它所在的区");
+  assert.ok(!/DOF = \{|minElev|zoomIn/.test(scene), "景深 / 俯角范围不再写在场景里");
+  // 页面：三段按钮、1 / 2 / 3、左右键、屏幕两边的箭头；网址记住镜头（截图用）；不写进战斗状态
+  const html = fs.readFileSync(path.join(dir, "index.html"), "utf8"), mod = /<script type="module">([\s\S]*?)<\/script>/.exec(html)[1];
+  ["cam-far", "cam-mid", "cam-near", "cam-zone", "zone-prev", "zone-next"].forEach(id => assert.ok(html.includes(`id="${id}"`), "页面上有 #" + id));
+  assert.ok(/CAMERA\.keys/.test(mod) && /sc\.setTier\(/.test(mod) && /sc\.stepZone\(/.test(mod) && /addEventListener\("keydown"/.test(mod), "键盘 1 / 2 / 3、左右键");
+  assert.ok(/q\.set\("cam"/.test(mod) && /params\.get\("cam"\)/.test(mod), "网址记住镜头（?cam=near&zone=3）");
+  assert.ok(!/\b(st|pv)\.(tier|cam|camera|zone|focus)\s*=/.test(mod) && !/publicLogs\.push/.test(mod), "镜头不写进战斗状态");
+  // 样式：放大的铭牌按 --bw / --bh，别的区的变淡糊掉
+  const css = fs.readFileSync(path.join(dir, "hd2d.css"), "utf8");
+  assert.ok(/\.pl-big \{[^}]*width: var\(--bw\); height: var\(--bh\)/.test(css) && /\.hd2d-plate\.big \.pl-big \{ display: flex; \}/.test(css) && /\.hd2d-plate\.dim \.pl-in \{ filter: blur/.test(css));
+  assert.ok(/--bw/.test(scene) && /plateSize\(state\.layout\.view \|\| view\(\), true\)/.test(scene), "放大铭牌的尺寸和布局用同一份配置");
+  // 放大的铭牌：名字 + 等级、血条 + 血量数字、架势、ATK、状态文字；不碰 shp
+  const plate = scene.slice(scene.indexOf("function plateHtml"), scene.indexOf("function makePlate")), big = plate.slice(plate.indexOf('class="pl-big"'), plate.indexOf('class="pl-card"'));
+  ["pl-nm", "${esc(p.name)}", "pl-lv", "Lv${p.level}", "pl-bar", "${segs}", "pl-hp", "${p.hp.cur}/${p.hp.max}", "pl-def", "pl-dn", "${defText}", "ATK ${p.atk}", "pl-r4", "${tags}"].forEach(k => assert.ok(big.includes(k), "放大的铭牌上有 " + k));
+  assert.ok(/const defText = `架势 /.test(plate) && /const tags = chips\.length/.test(plate), "架势写成文字，状态写成文字标签");
+  assert.ok(!/shp/i.test(plate), "铭牌 HTML 不碰 shp");
+});
+
+test("原型页面（假网页）：加载 online-view.js、hd2d-camera.js 不报错；页面环境里投影过的演示战场排得出布局和三段镜头", () => {
+  const P = require("./hd2d-fake-page");
+  const page = P.load();
+  assert.deepEqual(page.errors, [], "加载时报错");
+  assert.ok(page.ctx.OnlineView && typeof page.ctx.OnlineView.projectState === "function", "页面里有 OnlineView");
+  assert.ok(page.ctx.HD2DCamera && page.ctx.HD2DCamera.CAMERA, "页面里有 HD2DCamera");
+  Object.keys(DEMO_SETUPS).forEach(id => {
+    const st = DEMO_SETUPS[id](page.ctx.BattleSim);
+    st.units.forEach(u => { u.shp = 7771; });
+    const pv = page.ctx.OnlineView.projectState(st, {});
+    const out = page.ctx.HD2DLayout.build(pv, { view: DESKTOP, region: "沙漠", theme: "night" });
+    assert.ok(out.units.length >= 8, id);
+    const near = page.ctx.HD2DCamera.pose(out, "near", null, { actorId: out.units[0].id });
+    assert.equal(near.zone, out.units[0].zone);
+    assert.ok(!JSON.stringify(near.plates).includes("7771") && !/shp/i.test(JSON.stringify(out)), id + "：没有 shp");
+  });
+  assert.deepEqual(page.errors, [], "跑演示战场时报错");
 });
