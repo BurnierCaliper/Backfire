@@ -312,3 +312,14 @@ body { position: fixed; inset: 0; user-select: none; }
   .hd2d-num { animation-name: hd2d-num-still; }
   @keyframes hd2d-num-still { 0% { opacity: 0; } 4% { opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; } }
 }
+/* 纸片感的淡影子（#230 第二步）：打中的那一下，贴纸投在地台上的一道椭圆影子（压在攻击演出底下、界面面板底下）。大小、透明度、时长由 hd2d-fx.js · paperOf 算好 */
+#hd2d-shade { position: fixed; inset: 0; z-index: 2; pointer-events: none; overflow: hidden; }
+.hd2d-shadow {
+  position: absolute; transform: translate(-50%, -50%); border-radius: 50%; opacity: 0;
+  background: radial-gradient(closest-side, rgba(11, 8, 6, .9), rgba(11, 8, 6, .45) 55%, rgba(11, 8, 6, 0));
+  animation: hd2d-shadow var(--life) ease-out forwards;
+}
+@keyframes hd2d-shadow { 0% { opacity: 0; } 12% { opacity: var(--o); } 60% { opacity: var(--o); } 100% { opacity: 0; } }
+/* 页面上的演出开关：演出速度、跳过、推镜头 */
+#dock .fxc { padding: 4px 8px; font-size: 12px; }
+#dock .fxc[aria-pressed="false"] { opacity: .6; }

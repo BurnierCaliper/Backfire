@@ -29,7 +29,15 @@
    *   num.tilt    贴纸歪一点（度，按顺序轮流取）
    *   num.dur     弹出 / 停住 / 淡出各多少毫秒（跟着演出倍率走）
    *   num.colors  属性色（和 attack-fx.js 的 COL 一样，测试核对）、击破 / 治疗 / 格挡 / 墨线 / 贴纸底的颜色
-   *   timing      每一段打中之间隔多久、击倒的红叉晚多久（毫秒，跟着演出倍率走） */
+   *   timing      每一段打中之间隔多久、击倒的红叉晚多久（毫秒，跟着演出倍率走）
+   *   paper       纸片感（打中的那一下）：attack-fx 的画布按镜头俯角在竖直方向压扁一点（一张贴纸立在沙盘上、被斜着看：压扁 = cos(俯角)，
+   *               远景 30° ≈ 0.87、中景 22° ≈ 0.93、近景 14° ≈ 0.97，不小于 squash.min），脚下地台上投一道淡影子（地上的椭圆：
+   *               宽 = 贴纸大小 × shadow.w，高 = 宽 × sin(俯角) × shadow.flat，越平视越扁；透明度 opacity，显示 dur 毫秒，跟着演出倍率）。
+   *               贴纸大小和 attack-fx.js 的 sizeOf 一样（铭牌屏幕宽 × size.k，夹在 min–max：近景铭牌大，贴纸跟着大；远景小）。on = 开关（网址 ?paper=0 关）
+   *   push        出手时镜头稍微推一下（tiers 里的段：远景 / 中景；近景已经够近不推）：看的那一点往攻击者和目标中间挪 toward，距离乘 dist；
+   *               推过去攻击者或目标的铭牌出了画面就少推一点，退 steps 次还不行就不推。in / out = 推过去、拉回来各多少秒（跟着演出倍率），ease 缓动；
+   *               on = 开关（页面上的「推镜头」按钮、网址 ?push=0）；减少动态效果、跳过时不推
+   *   speeds      页面上「演出 n×」按钮轮流切的速度（演出倍率 = 1 / 速度，交给 AttackFx.setClock） */
   const FX = {
     anchorY: 0.42,
     num: {
@@ -46,7 +54,10 @@
         brk: "#e8edf2", heal: "#39e6b4", block: "#3fe0ff", ink: "#0b0806", paper: "#fff4dc"
       }
     },
-    timing: { hitGap: 170, koDelay: 120 }
+    timing: { hitGap: 170, koDelay: 120 },
+    paper: { on: true, squash: { min: 0.8 }, size: { k: 0.5, min: 36, max: 110 }, shadow: { w: 2.2, flat: 1, opacity: 0.3, dur: 460 } },
+    push: { on: true, tiers: ["far", "mid"], toward: 0.35, dist: 0.86, steps: 4, in: 0.28, out: 0.42, ease: "inOutCubic" },
+    speeds: [1, 2]
   };
 
   const D2R = Math.PI / 180;
@@ -110,7 +121,9 @@
     const last = new Map();
     const shift = (r) => {
       const o = src.offset ? src.offset() : null;
-      return o && (o.left || o.top) ? box(r.left + (o.left || 0), r.top + (o.top || 0), r.w, r.h, (r.y - r.top) / r.h) : r;
+      if (!o || !(o.left || o.top)) return r;
+      const s = box(r.left + (o.left || 0), r.top + (o.top || 0), r.w, r.h, (r.y - r.top) / r.h);
+      return r.foot != null ? Object.assign(s, { scale: r.scale, foot: r.foot + (o.top || 0) }) : s;
     };
     const unit = (id) => {
       const p = src.plate(id);
@@ -233,5 +246,53 @@
     return C[n.el] || C.physical;
   }
 
-  return { FX, lens, rectOf, zoneRect, adapter, cues, placeNumbers, textWidth, sizeOf, colorOf };
+  /* ---------- 纸片感：压扁 + 地台上的淡影子 ---------- */
+  /** 镜头的俯角（弧度）：视线往下斜多少 */
+  const elevationOf = (ln) => Math.asin(clamp(ln.back.y, -1, 1));
+  /**
+   * 打中那一下的纸片感（ln = 这一刻的镜头，rect = 目标铭牌的矩形，适配器给的，带 foot 脚下的点）：
+   * { squash 竖直方向乘多少, origin 压扁的中心（打中的那一点）, size 贴纸大小, shadow { x, y 中心（脚下、地台上）, w, h, opacity } }。关掉（FX.paper.on）= null
+   */
+  function paperOf(ln, rect) {
+    const P = FX.paper;
+    if (!P.on || !ln || !rect) return null;
+    const e = elevationOf(ln);
+    const squash = clamp(Math.cos(e), P.squash.min, 1);
+    const size = clamp(rect.w * P.size.k, P.size.min, P.size.max);
+    const w = size * P.shadow.w, h = w * Math.max(0.05, Math.sin(e)) * P.shadow.flat;
+    const foot = rect.foot != null ? rect.foot : rect.top + rect.h;
+    return { squash, origin: { x: rect.x, y: rect.y }, size, shadow: { x: rect.x, y: foot, w, h, opacity: P.shadow.opacity } };
+  }
+
+  /* ---------- 出手时镜头稍微推一下 ---------- */
+  /** 镜头的位置：在 t 后上方 dist 远，俯角 elevation（度）、方位 azimuth（弧度）——和 hd2d-camera.js · posOf 同一个公式 */
+  function posOf(t, dist, elevation, azimuth) {
+    const e = elevation * D2R, a = azimuth || 0, ce = Math.cos(e);
+    return { x: t.x + dist * ce * Math.sin(a), y: t.y + dist * Math.sin(e), z: t.z + dist * ce * Math.cos(a) };
+  }
+  /**
+   * 推一下以后的镜头。pose = 这一刻的镜头（hd2d-camera.js 的 pose / poseFrom：tier、target、dist、elevation、azimuth、fov）；a / b = 攻击者、目标脚下的点。
+   * opts：enabled（页面上的开关）、reduced（减少动态效果）、view（画面大小和上下被盖住的像素）、plates（[{ x, y, z, lift, size }]：攻击者和目标的铭牌，推过去也要在画面里）。
+   * 不推（关了、减少动态效果、近景、推不进画面）= null；镜头的段、选中的区不变
+   */
+  function pushPose(pose, a, b, opts) {
+    opts = opts || {};
+    const P = FX.push;
+    if (!P.on || opts.enabled === false || opts.reduced || !pose || !a || !b || !P.tiers.includes(pose.tier)) return null;
+    const mid = { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 }, v = opts.view;
+    const fits = (p) => !v || !opts.plates || opts.plates.every(q => {
+      const r = rectOf(lens({ pos: p.pos, target: p.target, fov: p.fov, width: v.width, height: v.height }), q, q.size);
+      return r && r.left >= 0 && r.right <= v.width && r.top >= (v.top || 0) && r.bottom <= v.height - (v.bottom || 0);
+    });
+    for (let i = 0; i < P.steps; i++) {
+      const k = 1 - i / P.steps;
+      const t = { x: pose.target.x + (mid.x - pose.target.x) * P.toward * k, y: pose.target.y, z: pose.target.z + (mid.z - pose.target.z) * P.toward * k };
+      const dist = pose.dist * (1 - (1 - P.dist) * k);
+      const p = Object.assign({}, pose, { target: t, dist, pos: posOf(t, dist, pose.elevation, pose.azimuth), k: 1 });
+      if (fits(p)) return p;
+    }
+    return null;
+  }
+
+  return { FX, lens, rectOf, zoneRect, adapter, cues, placeNumbers, textWidth, sizeOf, colorOf, paperOf, pushPose, posOf };
 });

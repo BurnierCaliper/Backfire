@@ -58,7 +58,10 @@
     <button class="toggle" id="dock-toggle" aria-expanded="false">技能 ▲</button>
     <span class="who" id="dock-who"></span>
     <span class="grow"></span>
-    <span class="hint" id="dock-hint">原型：「演示出招」用规则结算一次普通攻击，画面只按联机玩家收到的包播放</span>
+    <span class="hint" id="dock-hint" title="「演示出招」：房主用规则结算一次普通攻击，画面只按联机玩家收到的包播放">原型：演示出招按联机包播放</span>
+    <button class="toggle fxc" id="fx-speed" title="演出速度（AttackFx.setClock 的倍率）">演出 1×</button>
+    <button class="toggle fxc" id="push-toggle" aria-pressed="true" title="出手时镜头稍微推向攻击者和目标（远景 / 中景），播完回到原来的镜头；系统开了「减少动态效果」时不推">推镜头 开</button>
+    <button class="toggle fxc" id="fx-skip" disabled title="跳过正在播的演出（Esc）">跳过</button>
     <button class="btn alt" id="demo-strike" title="房主用规则结算一次普通攻击（当前行动的人；够不着就换我方别人），投影成联机玩家收到的包，再按包播攻击演出和伤害数字">演示出招</button>
   </div>
   <div id="skills"></div>
@@ -92,7 +95,7 @@ window.GAME_MODE = true;
   Storage.prototype.getItem = function (k) { return calcKey(String(k)) ? null : gi.call(this, k); };
   Storage.prototype.setItem = function (k, v) { if (calcKey(String(k))) return; return si.call(this, k, v); };
   var byId = Document.prototype.getElementById;
-  var OWN = /^(?:stage|topbar|tb-turn|tb-weather|tb-map|tb-compact|cam-bar|cam-far|cam-mid|cam-near|cam-zone|demo-select|region-select|demo-btn|party|party-toggle|party-list|logdrawer|log-toggle|log-body|dock|dock-toggle|dock-who|dock-hint|demo-strike|hd2d-pop|skills|zone-prev|zone-next|toast|loading|calc-core)$/;
+  var OWN = /^(?:stage|topbar|tb-turn|tb-weather|tb-map|tb-compact|cam-bar|cam-far|cam-mid|cam-near|cam-zone|demo-select|region-select|demo-btn|party|party-toggle|party-list|logdrawer|log-toggle|log-body|dock|dock-toggle|dock-who|dock-hint|demo-strike|fx-speed|fx-skip|push-toggle|hd2d-pop|hd2d-shade|skills|zone-prev|zone-next|toast|loading|calc-core)$/;
   Document.prototype.getElementById = function (id) {
     var e = byId.call(this, id);
     if (e || OWN.test(String(id))) return e;
@@ -350,6 +353,31 @@ let striking = false, strikeN = 0;
 function fxAdapter() {
   return HD2DFx.adapter({ lens: () => sc.lensNow(), plate: (id) => sc.plateOf(id), zone: (id) => sc.zoneOf(id), size: (big) => L.plateSize(sc.view(), big) });
 }
+/* 演出速度：HD2DFx.FX.speeds 里轮流切（1×、2×），倍率 = 1 / 速度，交给 AttackFx.setClock（HD2DPlay.setClock 一起设）；跳过 = 正在播的立刻结束 */
+let speed = HD2DFx.FX.speeds[0];
+HD2DPlay.setClock(() => 1 / speed);
+/** 出手时镜头稍微推一下（hd2d-fx.js · pushPose：远景 / 中景，攻击者和目标的铭牌推过去也在画面里），播完拉回原来的镜头。
+ *  页面上的「推镜头」关了、系统开了「减少动态效果」（sc.motion 为 false）时不推 */
+let pushOn = true;
+function fxCamera() {
+  return {
+    push(actorId, targetId, secs) {
+      const v = sc.view(), a = sc.plateOf(actorId), b = sc.plateOf(targetId);
+      const plates = [a, b].filter(Boolean).map(q => Object.assign({ size: L.plateSize(v, !!q.big) }, q));
+      const p = HD2DFx.pushPose(sc.poseNow(), a, b, { enabled: pushOn, reduced: !sc.motion, view: v, plates });
+      if (!p) return false;
+      sc.posePush(p, secs);
+      return true;
+    },
+    release(secs) { sc.poseRelease(secs); }
+  };
+}
+function syncFxControls() {
+  $("fx-speed").textContent = "演出 " + speed + "×";
+  $("push-toggle").textContent = "推镜头 " + (pushOn ? "开" : "关");
+  $("push-toggle").setAttribute("aria-pressed", String(pushOn));
+  $("fx-skip").disabled = !striking;
+}
 /** 画面换成包里的那一份（packet.state：房主投影好发来的），和联机玩家一样 */
 function showPacket(packet) {
   pv = packet.state;
@@ -366,12 +394,13 @@ async function demoStrike() {
   if (!packet) { toast("我方谁都够不着敌人（或者敌人都倒下了）"); return; }
   strikeN++;
   packetLogs = packetLogs.concat(packet.publicLogs || []);
-  striking = true; $("demo-strike").disabled = true;
+  striking = true; $("demo-strike").disabled = true; syncFxControls();
   try {
     await HD2DPlay.play(packet, fxAdapter(), {
-      before, bigHit: typeof bigHitInfo === "function" ? bigHitInfo : null, view: () => sc.view(), onImpact: () => showPacket(packet)
+      before, bigHit: typeof bigHitInfo === "function" ? bigHitInfo : null, view: () => sc.view(), onImpact: () => showPacket(packet),
+      camera: fxCamera(), lens: () => sc.lensNow()
     });
-  } catch (e) { console.error(e); } finally { striking = false; $("demo-strike").disabled = false; }
+  } catch (e) { console.error(e); } finally { striking = false; $("demo-strike").disabled = false; syncFxControls(); }
 }
 let toastTimer = 0;
 function toast(msg) {
@@ -417,6 +446,7 @@ function syncCamera(info) {
 }
 function onKey(e) {
   if (!sc || e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
+  if (e.key === "Escape" && striking) { e.preventDefault(); HD2DPlay.skip(); return; }   // 跳过正在播的演出
   const t = e.target, tag = t && t.tagName;
   if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA" || (t && t.isContentEditable)) return;
   const K = CAMS.CAMERA.keys, tier = CAMS.CAMERA.order.find(x => K[x] === e.key);
@@ -452,6 +482,7 @@ function syncUrl() {
   q.set("demo", demo.id);
   if (regionPick == null) q.delete("region"); else q.set("region", regionPick);
   if (camInfo && camInfo.tier !== "far") { q.set("cam", camInfo.tier); q.set("zone", camInfo.zone); } else { q.delete("cam"); q.delete("zone"); }
+  if (pushOn) q.delete("push"); else q.set("push", "0");
   try { history.replaceState(null, "", location.pathname + "?" + q.toString()); } catch (e) { /* 打不开 history（例如本地文件）就算了 */ }
 }
 function boot() {
@@ -468,6 +499,8 @@ function boot() {
   $("region-select").addEventListener("change", e => { regionPick = e.target.value || null; battleLookStart({ region: pageRegion(), light: demo.theme }); syncRegion(); repaint(true); });
   const params = new URLSearchParams(location.search);
   regionPick = params.get("region") || null;      // ?region=沙漠 / ?region=mine_1（地图地点 id 也认）
+  pushOn = params.get("push") !== "0";            // ?push=0：出手时不推镜头
+  if (params.get("paper") === "0") HD2DFx.FX.paper.on = false;   // ?paper=0：打中时不压扁、不投影子（对比用）
   sc = createHd2dScene($("stage"), {
     camera: { tier: params.get("cam"), zone: params.get("zone") },   // ?cam=near&zone=3：开场就是近景看 3 区
     onCameraChange: syncCamera,
@@ -478,6 +511,11 @@ function boot() {
   $("zone-prev").addEventListener("click", () => sc.stepZone(-1));
   $("zone-next").addEventListener("click", () => sc.stepZone(1));
   $("demo-strike").addEventListener("click", demoStrike);
+  // 演出开关：速度（1× / 2×）、推镜头（?push=0 关，开场时读）、跳过
+  $("fx-speed").addEventListener("click", () => { const S = HD2DFx.FX.speeds; speed = S[(S.indexOf(speed) + 1) % S.length]; syncFxControls(); });
+  $("push-toggle").addEventListener("click", () => { pushOn = !pushOn; syncFxControls(); syncUrl(); });
+  $("fx-skip").addEventListener("click", () => HD2DPlay.skip());
+  syncFxControls();
   window.addEventListener("keydown", onKey);
   reinset(false);
   loadDemo(params.get("demo") || DEMOS[0].id);

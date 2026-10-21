@@ -286,3 +286,141 @@ test("原型页：「演示出招」按钮、加载 attack-fx / hit-fx / hd2d-fx
   assert.ok(!/"shp(?:Max)?"\s*:|7771/.test(JSON.stringify(packet)), "没有坚毅生命的数值");
   assert.deepEqual(page.errors, [], "出招时报错");
 });
+
+/* ---------- 第二步：纸片感、推镜头、演出速度 / 跳过 ---------- */
+test("纸片感：打中时按镜头俯角在竖直方向压扁（远景压得最多、近景几乎不压，不小于下限），脚下地台上投一道淡影子（落在地台上、越平视越扁）；贴纸跟着铭牌在屏幕上的宽（近景大远景小）；能关", () => {
+  const F = fxm(), P = F.FX.paper;
+  const d = demo("mine"), pv = d.pv();
+  const seen = {};
+  ["far", "mid", "near"].forEach(tier => {
+    const R = rig(pv, tier, 2), u = R.layout.units.find(x => x.zone === 2), r = R.ad.rectOf(u.id);
+    const ln = F.lens({ pos: R.pose.pos, target: R.pose.target, fov: R.pose.fov, width: DESKTOP.width, height: DESKTOP.height });
+    const p = F.paperOf(ln, r);
+    assert.ok(p, tier);
+    near(p.squash, Math.max(P.squash.min, Math.cos(R.pose.elevation * Math.PI / 180)), tier + "：压扁 = cos(俯角)");
+    assert.ok(p.squash >= P.squash.min && p.squash <= 1, tier + "：压扁夹在范围里");
+    near(p.origin.x, r.x, tier + "：以打中的那一点为中心"); near(p.origin.y, r.y, tier);
+    near(p.shadow.y, r.foot, tier + "：影子在铭牌脚下");
+    assert.ok(p.shadow.y >= r.bottom - 1e-6, tier + "：影子在卡片下面");
+    const z = R.ad.zoneRectOf(2);
+    assert.ok(p.shadow.x > z.left && p.shadow.x < z.right && p.shadow.y > z.top && p.shadow.y < z.bottom, tier + "：影子落在地台上");
+    assert.ok(p.shadow.opacity > 0 && p.shadow.opacity <= 0.5, tier + "：淡影子");
+    near(p.size, Math.max(P.size.min, Math.min(P.size.max, r.w * P.size.k)), tier + "：贴纸大小跟着铭牌宽（attack-fx · sizeOf 同一套）");
+    seen[tier] = p;
+  });
+  assert.ok(seen.far.squash < seen.mid.squash && seen.mid.squash < seen.near.squash, "远景俯角大压得多，近景接近平视几乎不压");
+  assert.ok(seen.far.shadow.h / seen.far.shadow.w > seen.near.shadow.h / seen.near.shadow.w, "越平视影子越扁");
+  assert.ok(seen.near.size > seen.far.size, "近景的贴纸比远景大");
+  P.on = false;
+  try { assert.equal(F.paperOf(F.lens({ pos: { x: 0, y: 10, z: 10 }, target: { x: 0, y: 0, z: 0 }, fov: 22, width: 1440, height: 900 }), { x: 1, y: 1, w: 120, h: 40, top: 0, foot: 50 }), null, "关掉：不压扁、不投影子"); }
+  finally { P.on = true; }
+  // 播放：只改 attack-fx 画布的 CSS 变换（不改它的画法），播完 / 跳过都复原
+  const play = fs.readFileSync(path.join(DIR, "hd2d-play.js"), "utf8");
+  assert.ok(/querySelector\("canvas\.atkfx"\)/.test(play) && /scaleY\(/.test(play) && /finally \{[\s\S]*unpaper\(\);/.test(play), "压扁的是 attack-fx 的画布（CSS），播完 / 跳过复原");
+});
+
+test("出手时镜头稍微推一下：远景 / 中景推向攻击者和目标中间（距离变近、看的点挪过去），推过去两块铭牌都还在画面里；近景、关掉、减少动态效果时不推；场景推完拉回原来的镜头，玩家中途换镜头就不拉", () => {
+  const F = fxm(), Ho = host(), P = F.FX.push;
+  Object.keys(DEMOS).forEach(id => {
+    const d = demo(id), before = d.pv();
+    const packet = Ho.strike(d.env, { actorId: before.units.find(u => u.isPlayer).id });
+    const layout = L.build(before, { view: DESKTOP });
+    const A = layout.units.find(u => u.id === packet.fx.actor), B = layout.units.find(u => u.id === packet.fx.target);
+    let pushedSome = 0;
+    ["far", "mid"].forEach(tier => {
+      const R = rig(before, tier, A.zone);
+      const plate = (u) => ({ x: u.x, y: u.y, z: u.z, lift: R.pose.plates[u.id].lift, big: R.pose.plates[u.id].big, size: L.plateSize(layout.view, R.pose.plates[u.id].big) });
+      const a = plate(A), b = plate(B), opts = { view: DESKTOP, plates: [a, b] };
+      const p = F.pushPose(R.pose, a, b, opts);
+      if (!p) return;
+      pushedSome++;
+      const mid = { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 }, gap = (t) => Math.hypot(t.x - mid.x, t.z - mid.z);
+      assert.ok(p.dist < R.pose.dist && p.dist >= R.pose.dist * P.dist - 1e-9, `${id} · ${tier}：推近了，但不超过配置`);
+      assert.ok(gap(p.target) < gap(R.pose.target) || gap(R.pose.target) < 1e-6, `${id} · ${tier}：看的点往攻击者和目标中间挪`);
+      assert.equal(p.tier, tier); assert.equal(p.zone, R.pose.zone, "段、选中的区不变");
+      const ln = F.lens({ pos: p.pos, target: p.target, fov: p.fov, width: DESKTOP.width, height: DESKTOP.height });
+      [a, b].forEach(q => assert.ok(inside(F.rectOf(ln, q, q.size), DESKTOP), `${id} · ${tier}：推过去铭牌还在画面里`));
+      assert.equal(F.pushPose(R.pose, a, b, Object.assign({ reduced: true }, opts)), null, "减少动态效果：不推");
+      assert.equal(F.pushPose(R.pose, a, b, Object.assign({ enabled: false }, opts)), null, "页面上关了：不推");
+    });
+    assert.ok(pushedSome >= 1, id + "：远景 / 中景至少推得动一段");
+    const R = rig(before, "near", A.zone), a = { x: A.x, y: A.y, z: A.z }, b = { x: B.x, y: B.y, z: B.z };
+    assert.equal(F.pushPose(R.pose, a, b, {}), null, id + "：近景不推");
+  });
+  // 场景：推镜头的过渡不被重排打断、推到了不交还拖动，拉回到推之前的位置；玩家自己换镜头就不再拉回
+  const scene = fs.readFileSync(path.join(DIR, "hd2d-scene.js"), "utf8");
+  assert.ok(/posePush\(p, secs\) \{/.test(scene) && /poseRelease\(secs\) \{/.test(scene) && /poseNow\(\) \{/.test(scene), "场景给推 / 拉回的接口");
+  assert.ok(/if \(!state\.pushBack\) state\.pushBack =/.test(scene) && /to: back/.test(scene), "拉回到推之前的位置（玩家原来的镜头）");
+  assert.ok(/opts\.keep && state\.tween && !state\.tween\.push/.test(scene) && /if \(!opts\.keep\) state\.pushBack = null/.test(scene), "重排不打断推镜头；玩家换镜头就不拉回");
+  assert.ok(/if \(!pushed\) arrive\(\)/.test(scene), "推着的时候不交还拖动");
+  const html = fs.readFileSync(path.join(DIR, "index.html"), "utf8"), mod = /<script type="module">([\s\S]*?)<\/script>/.exec(html)[1];
+  assert.ok(/HD2DFx\.pushPose\(sc\.poseNow\(\), a, b, \{ enabled: pushOn, reduced: !sc\.motion,/.test(mod), "页面：开关和「减少动态效果」交给 pushPose");
+  assert.ok(html.includes('id="push-toggle"') && /params\.get\("push"\) !== "0"/.test(mod), "页面上能关（按钮、?push=0）");
+});
+
+test("演出速度跟着 AttackFx.setClock、跳过立刻结束：假网页里真的跑 hd2d-play.js（attack-fx / hit-fx 换成记录器）", async () => {
+  const F = fxm();
+  const page = require("./hd2d-fake-page").load();
+  assert.deepEqual(page.errors, []);
+  const ctx = page.ctx, realAF = ctx.AttackFx;
+  const st = DEMOS.mine(ctx.BattleSim);
+  const before = ctx.OnlineView.projectState(st, {});
+  const packet = ctx.HD2DHost.strike({ G: ctx, state: st, BattleSim: ctx.BattleSim, OnlineView: ctx.OnlineView, AttackFx: realAF }, { actorId: before.units.find(u => u.isPlayer).id });
+  assert.ok(packet && packet.fx);
+  let calls = [], hang = false;
+  const rec = {
+    windup: () => { calls.push("windup"); return hang ? new Promise(() => {}) : Promise.resolve(); },
+    travel: () => { calls.push("travel"); return Promise.resolve(); },
+    after: () => { calls.push("after"); return Promise.resolve(); },
+    impact: () => calls.push("impact"), area: () => calls.push("area"), ko: () => calls.push("ko"), clash: () => calls.push("clash"),
+    skip: () => calls.push("skip"), setClock: (fn) => { rec.clock = fn; }
+  };
+  ctx.AttackFx = rec;
+  ctx.HitFx = { burst: () => calls.push("burst"), clear: () => calls.push("hit-clear") };
+  const rect = { x: 300, y: 300, w: 120, h: 40, left: 240, top: 283, width: 120, height: 40, right: 360, bottom: 323, foot: 330 };
+  const ad = { rectOf: () => rect, zoneRectOf: () => null, track: () => () => rect, remember() {} };
+  const cam = { pushes: [], releases: [], push(a, t, secs) { this.pushes.push(secs); return true; }, release(secs) { this.releases.push(secs); } };
+  const numbers = () => page.document.body.childNodes.filter(n => n.id === "hd2d-pop").flatMap(n => n.childNodes);
+  const lensNow = () => ({ pos: { x: 0, y: 12, z: 20 }, target: { x: 0, y: 0, z: 0 }, fov: 22, width: 1440, height: 900 });
+  const run = () => { let hits = 0; return { opts: { before, view: () => DESKTOP, onImpact: () => { hits++; }, camera: cam, lens: lensNow }, hits: () => hits }; };
+  // 2× 速度（倍率 0.5）：同时交给 AttackFx.setClock；数字停留、推 / 拉镜头的时长都减半
+  ctx.HD2DPlay.setClock(() => 0.5);
+  assert.equal(rec.clock(), 0.5, "倍率交给了 AttackFx.setClock");
+  let r = run();
+  await ctx.HD2DPlay.play(packet, ad, r.opts);
+  assert.deepEqual(calls.filter(c => ["windup", "travel", "impact"].includes(c)).slice(0, 3), ["windup", "travel", "impact"], "出手 → 弹道 → 打中");
+  assert.ok(calls.includes("burst"), "受击粒子");
+  assert.equal(r.hits(), 1, "打中的那一刻画面换成包里的 state（只换一次）");
+  const N = F.FX.num, life = (N.dur.pop + N.dur.hold + N.dur.out) * 0.5;
+  const nums = numbers();
+  assert.ok(nums.length >= 2 && nums.every(n => n.style.cssText.includes(`--life:${life}ms`)), "数字停留的时长跟着倍率");
+  assert.ok(!nums.some(n => /7771/.test(n.textContent)), "没有坚毅生命");
+  assert.deepEqual(cam.pushes, [F.FX.push.in * 0.5], "推镜头跟着倍率");
+  assert.deepEqual(cam.releases, [F.FX.push.out * 0.5], "播完拉回");
+  // 跳过：卡在出手那一下，按跳过立刻结束——attack-fx / hit-fx 清掉，数字拿掉，画面照样换成包里的 state，镜头直接回去（0 秒）
+  ctx.HD2DPlay.setClock(() => 1);
+  calls = []; hang = true; cam.pushes = []; cam.releases = [];
+  r = run();
+  const pending = ctx.HD2DPlay.play(packet, ad, r.opts);
+  assert.equal(ctx.HD2DPlay.busy, true);
+  ctx.HD2DPlay.skip();
+  await pending;
+  assert.ok(calls.includes("skip") && calls.includes("hit-clear"), "attack-fx / hit-fx 清掉了");
+  assert.ok(!calls.includes("impact") && !calls.includes("travel"), "跳过以后不再往下演");
+  assert.equal(r.hits(), 1, "跳过也把画面换成包里的 state");
+  assert.deepEqual(cam.releases, [0], "镜头直接回去");
+  assert.equal(numbers().length, 0, "数字都拿掉了");
+  assert.equal(ctx.HD2DPlay.busy, false);
+  // 倍率 0（跳过演出）：不出手、不推镜头、不弹数字、不放粒子，马上结束
+  ctx.HD2DPlay.setClock(() => 0);
+  calls = []; hang = false; cam.pushes = [];
+  r = run();
+  await ctx.HD2DPlay.play(packet, ad, r.opts);
+  assert.ok(!calls.includes("windup") && !calls.includes("burst") && cam.pushes.length === 0 && numbers().length === 0, "倍率 0：什么都不演");
+  assert.equal(r.hits(), 1, "画面照样换成包里的 state");
+  // 页面：速度按钮、跳过按钮 / Esc 接上
+  const html = fs.readFileSync(path.join(DIR, "index.html"), "utf8"), mod = /<script type="module">([\s\S]*?)<\/script>/.exec(html)[1];
+  assert.ok(html.includes('id="fx-speed"') && html.includes('id="fx-skip"') && /HD2DPlay\.setClock\(\(\) => 1 \/ speed\)/.test(mod) && /HD2DFx\.FX\.speeds/.test(mod), "演出速度按钮（倍率交给 HD2DPlay / AttackFx.setClock）");
+  assert.ok(/addEventListener\("click", \(\) => HD2DPlay\.skip\(\)\)/.test(mod) && /e\.key === "Escape" && striking/.test(mod), "跳过按钮、Esc");
+  assert.deepEqual(page.errors, []);
+});
