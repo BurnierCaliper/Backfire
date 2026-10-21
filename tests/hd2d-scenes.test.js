@@ -238,37 +238,58 @@ test("真的 three.js 里每个场景建出自己的一套（#242）：默认地
   } finally { P.restore(); }
 });
 
-test("矿外是往下陷的大矿坑（#242 截图验收）：对面坑壁离坑边至少 12（按镜头摆），天幕挪到坑后面不挡住坑；默认镜头里对面坑沿在画面里（顶栏下面），坑壁越往下越黑，这边坑沿挡住之前已经漆黑；运载电梯沿竖直的轨道上下", async (t) => {
+test("矿外是往下陷的大矿坑（#242 截图验收 · 第二次：对面坑壁太近、太高、太亮）：对面坑壁推得很远（离坑边 ≥ 镜头到坑边的九成），对面坑沿就在顶栏下面一点；从默认镜头看，顶栏到这边坑沿之间一大半是漆黑的坑，上沿亮；坑壁上零星的灯、一两部运载电梯在黑处看得见（够大），沿竖直的轨道上下、一直看得见；天幕在坑后面", async (t) => {
   const P = await protoEnv(t);
   if (!P) return;
   const { THREE, B } = P, M = mine();
   try {
-    const S = H.load().BattleSim, d = DONE.find(x => x.scene === "rim"), Q = M.PIT.rim;
-    for (const bdx of boardsFor(S).filter(x => !x.id.includes("挤"))) {
-      const layout = layoutOf(bdx.st, d), cam = layout.camera, b = layout.bounds, tag = `${bdx.id}`;
-      const dims = M.pitDims(Q, b, cam);
-      assert.ok(dims.D >= 12 - 1e-9, `${tag}：对面坑壁离坑边只有 ${dims.D.toFixed(1)}`);
-      const top = L.project(cam, { x: dims.cx, y: dims.top, z: dims.zFar });
-      assert.ok(top.y > DESKTOP.top + 10 && top.y < L.project(cam, { x: dims.cx, y: L.CONFIG.groundY, z: dims.rimZ }).y, `${tag}：对面坑沿在画面里（屏幕 y ${top.y.toFixed(0)}）`);
+    const S = H.load().BattleSim, Q = M.PIT.rim, lumaOf = (c) => 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+    for (const d of DONE.filter(x => x.scene === "rim")) for (const bdx of boardsFor(S).filter(x => !x.id.includes("挤"))) {
+      const layout = layoutOf(bdx.st, d), cam = layout.camera, b = layout.bounds, tag = `${d.key} ${bdx.id}`;
+      const dims = M.pitDims(Q, b, cam), usable = DESKTOP.height - DESKTOP.top - DESKTOP.bottom;
+      assert.ok(dims.D >= (cam.pos.z - dims.rimZ) * 0.9 && dims.D >= 36, `${tag}：对面坑壁离坑边只有 ${dims.D.toFixed(1)}（镜头到坑边 ${(cam.pos.z - dims.rimZ).toFixed(1)}）`);
+      const farY = L.project(cam, { x: dims.cx, y: dims.top, z: dims.zFar }).y, nearY = L.project(cam, { x: dims.cx, y: L.CONFIG.groundY, z: dims.rimZ }).y;
+      assert.ok(farY > DESKTOP.top + 10 && farY < DESKTOP.top + usable * 0.12, `${tag}：对面坑沿在顶栏下面一点（屏幕 y ${farY.toFixed(0)}）`);
       const bd = backdropOf(B, layout, "dusk");
+      bd.group.updateMatrixWorld(true);
       const sky = bd.group.children.find(o => o.userData.layer === "sky");
       sky.geometry.computeBoundingBox();
       assert.ok(sky.geometry.boundingBox.max.z < dims.zFar - 4, `${tag}：天幕（z ${sky.geometry.boundingBox.max.z.toFixed(1)}）在对面坑沿（${dims.zFar.toFixed(1)}）后面`);
       assert.equal(bd.groundEdge, dims.rimZ, `${tag}：地台外面那片地铺到坑边为止`);
-      // 坑壁的颜色：对面坑沿那一级亮（不黑），这边坑沿挡住的地方往上一点已经漆黑；越往下越暗
-      const wall = artOf(bd.group).find(o => o.what === "pitWall").obj, pos = wall.geometry.attributes.position, col = wall.geometry.attributes.color;
-      const lumaAt = (y0, y1) => { let s = 0, n = 0; for (let i = 0; i < pos.count; i++) { const y = pos.getY(i), x = pos.getX(i); if (y <= y0 && y >= y1 && Math.abs(x - dims.cx) < dims.halfW) { s += 0.2126 * col.getX(i) + 0.7152 * col.getY(i) + 0.0722 * col.getZ(i); n++; } } return s / Math.max(1, n); };
-      const upper = lumaAt(dims.top - 0.05, dims.top - 1.2), lower = lumaAt(dims.yOcc + 1.2, dims.yOcc);
-      assert.ok(upper > 0.08, `${tag}：坑沿那一级不该是黑的（${upper.toFixed(3)}）`);
-      assert.ok(lower < 0.012 && lower < upper * 0.1, `${tag}：挡住之前已经漆黑（${lower.toFixed(4)}）`);
-      // 运载电梯：轨道是竖的（x 不变），罐笼的停靠点从对面坑沿一直到挡住的地方下面
+      // 从默认镜头往顶栏到坑边之间打一排排射线：碰到的坑壁那一面有多亮。上沿亮；顶栏到坑边之间一大半是漆黑的
+      const wall = artOf(bd.group).find(o => o.what === "pitWall").obj, col = wall.geometry.attributes.color, c = new THREE.Color();
+      const shade = (h) => { c.setRGB(col.getX(h.face.a), col.getY(h.face.a), col.getZ(h.face.a)); return lumaOf(c); };
+      const rayAt = (px, py) => {
+        const cm = new THREE.PerspectiveCamera(cam.fov, cam.aspect, 0.5, 400);
+        cm.position.set(cam.pos.x, cam.pos.y, cam.pos.z); cm.lookAt(cam.target.x, cam.target.y, cam.target.z); cm.updateMatrixWorld(true);
+        const ray = new THREE.Raycaster(); ray.setFromCamera(new THREE.Vector2(px / cam.width * 2 - 1, 1 - py / cam.height * 2), cm);
+        return ray.intersectObject(wall, false)[0] || null;
+      };
+      const rim = rayAt(cam.width / 2, farY + 3);
+      assert.ok(rim && shade(rim) > 0.06,`${tag}：对面坑沿那一级不该是黑的（${rim && shade(rim).toFixed(3)}）`);
+      let dark = 0, all = 0;
+      for (let py = DESKTOP.top + 2; py < nearY - 2; py += 4) [0.3, 0.5, 0.7].forEach(u => { const h = rayAt(cam.width * u, py); all++; if (h && h.point.y < dims.top && shade(h) < 0.015) dark++; });
+      assert.ok(dark / all >= 0.55, `${tag}：顶栏到坑边之间只有 ${(dark / all * 100).toFixed(0)}% 是漆黑的坑`);
+      // 坑壁上零星的灯：在黑处、在画面里、够大（屏幕上至少 3 像素宽）
+      const lights = artOf(bd.group).filter(o => o.what === "pitLight");
+      assert.ok(lights.length >= 6, `${tag}：坑壁上只有 ${lights.length} 盏灯`);
+      lights.forEach(({ obj }) => {
+        const p = obj.getWorldPosition(new THREE.Vector3()), s = L.project(cam, p), r = obj.geometry.parameters.radius;
+        assert.ok(s.y > farY && s.y < nearY && s.x > 0 && s.x < cam.width, `${tag}：灯在画面里的坑壁上（${s.x.toFixed(0)}, ${s.y.toFixed(0)}）`);
+        assert.ok(L.project(cam, { x: p.x + r, y: p.y, z: p.z }).x - s.x >= 1.5, `${tag}：灯太小，远景里看不见`);
+      });
+      // 运载电梯：一两部，罐笼在屏幕上至少 12 像素高；从对面坑沿开到黑处，最低也还在坑边上面（一直看得见）；沿竖直的轨道走；轨道边上一串小信号灯
       const lifts = artOf(bd.group).filter(o => o.what === "lift");
       assert.ok(lifts.length >= 1 && lifts.length <= 2, `${tag}：一两部运载电梯`);
       lifts.forEach(({ obj }) => {
-        const a = obj.userData.ambient, x0 = obj.position.x;
-        assert.ok(a.y0 > dims.top - 0.5 && a.y1 < dims.yOcc, `${tag}：电梯从坑沿（${a.y0.toFixed(1)}）下到看不见的地方（${a.y1.toFixed(1)}）`);
+        const a = obj.userData.ambient, x0 = obj.position.x, box = obj.children[0].geometry.parameters, z = obj.position.z;
+        const hpx = L.project(cam, { x: x0, y: a.y1, z }).y - L.project(cam, { x: x0, y: a.y1 + box.height, z }).y;
+        assert.ok(hpx >= 12, `${tag}：罐笼在远景里只有 ${hpx.toFixed(1)} 像素高`);
+        assert.ok(a.y0 > dims.top - 1 && a.y1 > dims.yOcc && L.project(cam, { x: x0, y: a.y1 - box.height / 2, z }).y < nearY - 4, `${tag}：电梯从坑沿（${a.y0.toFixed(1)}）开到看得见的黑处（${a.y1.toFixed(1)}，挡住的地方 ${dims.yOcc.toFixed(1)}）`);
         for (let s = 0; s < 60; s++) bd.update(s, 1);
         assert.equal(obj.position.x, x0, `${tag}：电梯沿竖直的轨道走`);
+        const dots = obj.parent.children.find(o => o.isInstancedMesh && o.geometry.type === "SphereGeometry");
+        assert.ok(dots && dots.count >= 3, `${tag}：轨道边上一串小信号灯`);
       });
       bd.dispose();
     }

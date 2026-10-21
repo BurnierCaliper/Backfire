@@ -6,9 +6,9 @@
  * 怎么接进画面见 hd2d-scene-art.js（登记处）：这里不 import three.js，three.js 和画贴图 / 拼几何体的小工具由挂钩那边打包成 kit 传进来。
  *
  *   矿外 rim：站在矿坑边上的砂岩地上。战场后面是一个往下陷的巨大坑口——地台外面那片地铺到坑边为止（远景给 groundEdge），坑边一排碎石和栏杆；
- *            坑的对面崖壁在很远处（按镜头摆：画面上沿刚好露出对面的坑沿），一级级台阶往下、平面上像半个碗（两边弯过来），
- *            越往下越黑，到这边坑沿挡住的地方之前就漆黑一片；坑壁上零星几盏灯（偶尔闪一下），两部运载电梯（亮着灯的小方块）
- *            沿着竖直的轨道慢慢上下；对面坑沿上远远的矿井架、筒仓、烟囱。天幕挪到坑后面（skyGap），不挡住坑
+ *            坑的对面崖壁推得很远（离坑边 ≈ 镜头到坑边的距离），又远又小：对面坑沿落在顶栏下面一点，上沿亮、被雾吞掉一半，往下很快暗到全黑，
+ *            战场后面大半个画面是往下陷的黑；坑壁上零星几盏灯（偶尔闪一下），两部运载电梯（亮着灯的小方块，外面一圈光晕）
+ *            沿着竖直的轨道（黑处微微亮着、隔一段一盏小信号灯）慢慢上下；对面坑沿上远远的矿井架、筒仓、烟囱。天幕挪到坑后面（skyGap），不挡住坑
  *   矿内 mid：大矿坑里大约一半深的地方，站在坑壁半腰的运输道上，光压得更暗。运输道的边一排挡车土埂（几个路锥），后面往下还是坑；
  *            近处一面不规则的岩壁（低多边形的崖面，左右两大块一直伸出画面），中间一个大开口：透过开口看得到远处巨大矿坑的内部——
  *            对面的坑壁很远、很暗（和矿外同一种台阶坑壁，往上出了画面），越往下越黑，坑底漆黑；一部运载电梯在开口里上下；前景左右两角几块大石头
@@ -38,27 +38,37 @@
   };
   /** 大矿坑（矿外 rim、矿内 mid 共用一种对面坑壁）：一级级台阶往下（平面上像半个碗：正中最远，往画面两边弯过来），越往下越黑，到底漆黑一片
    *   rim       坑边（矿内是运输道的边）在灯后面再往后多远（地台外面那片地铺到这里为止）
-   *   rise      对面坑壁最上面那级比我们这层高多少（矿外 −2.5：对面坑沿低一点，坑壁可以摆得更远、画面上沿还露得出坑沿；矿内是坑壁的上半截，出了画面）
-   *   view      对面坑壁摆多远：远景镜头的画面上沿正好落在对面坑壁上比我们这层高 view 的地方（小棋盘的镜头近、低，坑壁就跟着近）；far 夹住（离坑边最近 / 最远）
+   *   对面坑壁摆多远、多高，两种摆法：
+   *     矿外（写了 reach）：推得很远——离坑边 = 镜头到坑边的水平距离 × reach（far 夹住）；对面坑沿落在画面上「顶栏往下 rimAt」处
+   *       （× 顶栏和技能栏之间那一块的高度），坑沿多高按镜头倒算（比我们这层低得多：远了、小了，画面里大半是往下陷的黑）；
+   *       没有镜头时坑沿比我们这层高 rise
+   *     矿内：rise 对面坑壁最上面那级比我们这层高多少（坑壁的上半截，出了画面）；view 远景镜头的画面上沿正好落在对面坑壁上比我们这层高 view 的地方，far 夹住
    *   curve / wide   往两边弯过来多少（× 坑壁离坑边的距离）、弯到哪为止（× 画面在坑壁那里的半宽）；gap 台阶最近到坑边前多远
-   *   step / run / benches   每级台阶多高、往前伸多少、一共几级（坑壁陡，看起来深）
+   *   step / run / benches   每级台阶多高、往前伸多少、一共几级（坑壁陡，看起来深）；riser 立面比台面暗多少（矿外远，横条纹淡一点）
    *   seg / jitter           横着分几段、每段的台阶边随机歪多少
    *   dark      从哪开始变黑、到哪全黑：按「画面里看得到的最上面 → 这边坑沿挡住的地方」那一截的比例（每块棋盘看得到多深不一样，都在挡住之前就漆黑一片）
-   *   dim       整面坑壁的亮度（矿内暗）；haze 最上面往远处的雾色靠多少（越往下越少）、hazeDark 雾色先往坑底的黑靠多少（坑里的雾是暗的）
+   *   dim       整面坑壁的亮度（矿内暗）；haze 最上面往远处的雾色靠多少（越往下越少，到 hazeTo 那里没了；不写 = 到开始变黑的地方）、
+   *             hazeDark 雾色先往坑底的黑靠多少（坑里的雾是暗的）
    *   bottom    最后一级一直往下到多深；sky 天幕在对面坑壁后面多远（天幕挪到坑后面，不挡住坑）；land 对面坑沿往后那片地往雾色靠多少
-   *   shaft     电梯井：那一段台阶不往前伸，竖着切下去（半宽、过渡多宽），电梯的轨道贴着它 */
+   *   shaft     电梯井：那一段台阶不往前伸，竖着切下去（半宽、过渡多宽），电梯的轨道贴着它
+   *   lights    坑壁上的灯撒在看得到的那一截的哪一段（比例，同 dark），横着撒多宽（lightSpan × 画面在坑壁那里的半宽）；
+   *   px        远处的东西按屏幕上多大来定尺寸（矿外推远了，不放大就看不见）：
+   *             { light 灯的半径, lift 罐笼多高, far 对面坑沿上的矿井架多高 }（像素，桌面 900 高的画面）；liftLow 电梯最低开到看得到的那一截的哪里（比例，从挡住的地方往上算） */
   const PIT = {
     rim: {
-      rim: 1.4, rise: -2.5, view: 0.5, far: [12, 40], curve: 0.42, wide: 1.15, gap: 1.5, step: 1, run: 0.3, benches: 44, seg: 96, jitter: 0.07,
-      dark: [0.12, 0.68], dim: 1, haze: 0.5, hazeDark: 0, bottom: -70, sky: 14, land: 0.6, shaft: [0.6, 1.1]
+      rim: 1.4, reach: 1.15, rimAt: 0.06, rise: -10, far: [36, 110], curve: 0.2, wide: 1.2, gap: 1.5, step: 1.2, run: 0.35, benches: 48, riser: 0.82, seg: 96, jitter: 0.07,
+      dark: [0.03, 0.17], dim: 1, haze: 0.55, hazeTo: 0.17, hazeDark: 0, bottom: -110, sky: 30, land: 0.82, shaft: [0.6, 1.1],
+      lights: [0.24, 0.94], lightSpan: 0.88, px: { light: 2.4, lift: 17, far: 44 }, liftLow: 0.14
     },
     mid: {
       rim: 1.4, rise: 14, view: 1.5, far: [18, 44], curve: 0.35, wide: 1.15, gap: 1.5, step: 1.1, run: 0.32, benches: 52, seg: 96, jitter: 0.07,
       dark: [0.08, 0.55], dim: 0.62, haze: 0.4, hazeDark: 0.55, bottom: -70, sky: 4, land: 0.6, shaft: [0.6, 1.1]
     }
   };
-  /** 运载电梯：两根竖轨的间距（半个）、轨道粗细、一格横撑多高；罐笼的宽 / 高 / 深、亮着的窗多高；轨道从坑沿往上伸多少、往下伸到挡住的地方再往下多少 */
-  const LIFT = { gauge: 0.2, rail: 0.05, tie: 0.55, car: [0.46, 0.4, 0.34], window: 0.16, above: 0.3, below: 5 };
+  /** 运载电梯：两根竖轨的间距（半个）、轨道粗细、一格横撑多高；罐笼的宽 / 高 / 深、亮着的窗多高；轨道从坑沿往上伸多少、往下伸到挡住的地方再往下多少。
+   *  矿外（对面坑壁很远，按 PIT.px.lift 放大）：黑处的轨道也微微亮着（railGlow：灯色的几成），隔 lampEvery 一盏小信号灯（看得出一条竖的轨道），
+   *  罐笼外面一圈光晕（halo：× 罐笼宽、多不透明） */
+  const LIFT = { gauge: 0.2, rail: 0.05, tie: 0.55, car: [0.46, 0.4, 0.34], window: 0.16, above: 0.3, below: 5, railGlow: 0.22, lampEvery: 2.2, halo: [3.2, 0.45] };
   /** 矿内：近处那面不规则的岩壁（低多边形的崖面，正对镜头），中间一个大开口。
    *   z        崖面在运输道的边再往后多远；reach 往战场左右再外面铺多远（伸出画面）；below / above 从我们这层往下多深、画面上沿再往上多高
    *   gap      开口的半宽（× 战场半宽，我们这层的高度）；lean 到画面上沿时收成几成（上面窄一点，像一个洞口）；jag 开口的边随机进出多少
@@ -467,23 +477,42 @@
 
   /* ---------- 远景：大矿坑（矿外）---------- */
   /**
-   * 矿坑摆在哪（纯函数，天幕挪多远也用它）：坑边（这边）在灯后面再往后 Q.rim；对面坑壁按镜头摆——远景镜头的画面上沿正好落在对面坑壁上
-   * 比我们这层高 Q.view 的地方，夹在 Q.far 里。返回 { rimZ 坑边, zFar 对面坑壁（正中，最上面那级的边）, D 两边隔多远, top 对面坑壁最上面那级多高,
+   * 矿坑摆在哪（纯函数，天幕挪多远也用它）：坑边（这边）在灯后面再往后 Q.rim；对面坑壁按镜头摆（两种摆法见 PIT）。
+   * 返回 { rimZ 坑边, zFar 对面坑壁（正中，最上面那级的边）, D 两边隔多远, top 对面坑壁最上面那级多高,
    *   ref 画面里看得到的最上面（变黑从这里往下算）, cx, halfW 画面在对面坑壁那里的半宽, W 坑壁弯到哪,
-   *   yOcc 从镜头看过来，这边的坑沿把对面坑壁挡到多深（再往下看不见）, sky 天幕离战场后沿多远 }
+   *   yOcc 从镜头看过来，这边的坑沿把对面坑壁挡到多深（再往下看不见）, sky 天幕离战场后沿多远, px 对面坑壁那里一个像素多大 }
    */
   function pitDims(Q, b, cam) {
-    const gY = L.CONFIG.groundY, rimZ = b.minZ - L.CONFIG.lamps.back - Q.rim, top = gY + Q.rise, cx = (b.minX + b.maxX) / 2;
+    const gY = L.CONFIG.groundY, rimZ = b.minZ - L.CONFIG.lamps.back - Q.rim, cx = (b.minX + b.maxX) / 2;
     const ok = !!(cam && cam.pos && Number.isFinite(cam.elevation) && Number.isFinite(cam.fov));
     const tan = ok ? Math.tan((cam.elevation - cam.fov / 2) * D2R) : 0;
-    const D = clamp(tan > 1e-3 ? rimZ - (cam.pos.z - (cam.pos.y - (gY + Q.view)) / tan) : Q.far[1], Q.far[0], Q.far[1]), zFar = rimZ - D;
+    let D, top;
+    if (Q.reach) {   // 矿外：推得很远，对面坑沿落在顶栏下面一点（坑沿多高按镜头倒算）
+      D = clamp(ok ? (cam.pos.z - rimZ) * Q.reach : Q.far[1], Q.far[0], Q.far[1]);
+      top = ok ? rowHeight(cam, rimZ - D, Q.rimAt) : gY + Q.rise;
+    } else {
+      D = clamp(tan > 1e-3 ? rimZ - (cam.pos.z - (cam.pos.y - (gY + Q.view)) / tan) : Q.far[1], Q.far[0], Q.far[1]);
+      top = gY + Q.rise;
+    }
+    const zFar = rimZ - D;
     let halfW = (b.maxX - b.minX) / 2 + D * 0.4;
     if (ok && cam.right && cam.tanHalf && cam.aspect) {
       const p = L.toNdc(cam, { x: cx, y: top, z: zFar }), q = L.toNdc(cam, { x: cx + 1, y: top, z: zFar });
       if (q.x - p.x > 1e-6) halfW = 1 / (q.x - p.x);
     }
     const ref = Math.min(top, ok ? cam.pos.y - (cam.pos.z - zFar) * tan : gY + Q.view), occ = ok && cam.pos.z > rimZ + 1 ? gY - D * (cam.pos.y - gY) / (cam.pos.z - rimZ) : ref - 12;
-    return { rimZ, zFar, D, top, ref, cx, halfW, W: halfW * Q.wide, yOcc: Math.min(occ, ref - 2), sky: b.minZ - zFar + Q.sky };
+    // 对面坑壁那里一个像素多大（世界单位；按桌面 900 高的画面算，手机竖屏视角一样、像素数差不多）：推远了的灯、电梯按屏幕上多大放大
+    const depth = ok ? Math.hypot(cam.pos.y - top, cam.pos.z - zFar) : D + 45, px = 2 * depth * Math.tan((ok ? cam.fov : 22) * D2R / 2) / 900;
+    // 进深 z 处这边坑沿挡到多高（碗的两边近，挡得浅）：比它低的看不见
+    const occAt = (z) => (ok && cam.pos.z > rimZ + 1 ? gY - (rimZ - z) * (cam.pos.y - gY) / (cam.pos.z - rimZ) : -Infinity);
+    return { rimZ, zFar, D, top, ref, cx, halfW, W: halfW * Q.wide, yOcc: Math.min(occ, ref - 2), sky: b.minZ - zFar + Q.sky, px, occAt };
+  }
+  /** 画面上「顶栏往下 frac」（× 顶栏和技能栏之间那一块的高度）那一行的视线，在进深 z 处多高（镜头正对 −z，和布局的镜头同一种） */
+  function rowHeight(cam, z, frac) {
+    const H = cam.height || 1, v = cam.view || {}, t = (v.top || 0) / H, bt = (v.bottom || 0) / H;
+    const yN = 1 - 2 * (t + frac * (1 - t - bt)), e = cam.elevation * D2R, th = Math.tan(cam.fov * D2R / 2) * yN;
+    const dy = -Math.sin(e) + Math.cos(e) * th, dz = -Math.cos(e) - Math.sin(e) * th;   // 视线：往前 + 往上 th
+    return cam.pos.y + (z - cam.pos.z) / dz * dy;
   }
   /**
    * 对面的坑壁：一级级台阶往下（第 k 级的台面在 top − k × step，台阶边在 zFar + 弯过来的那一点 + k × run，越往下越靠近这边，最近到坑边前 gap），
@@ -507,9 +536,10 @@
     const mist = new THREE.Color(P.dark), haze = env.hazeOf(1).lerp(mist, Q.hazeDark || 0);
     const d0 = d.ref - (d.ref - d.yOcc) * Q.dark[0], d1 = d.ref - (d.ref - d.yOcc) * Q.dark[1];
     const darkAt = (y) => smooth(0, 1, (d0 - y) / Math.max(1e-3, d0 - d1));
-    const hazeAt = (y) => Q.haze * (1 - smooth(0, 1, (d.ref - y) / Math.max(1e-3, d.ref - d0)));
+    const h0 = Q.hazeTo != null ? d.ref - (d.ref - d.yOcc) * Q.hazeTo : d0;   // 雾到哪没了（矿外：和变黑一起收，上沿被雾吞掉一半、往下没进黑里）
+    const hazeAt = (y) => Q.haze * (1 - smooth(0, 1, (d.ref - y) / Math.max(1e-3, d.ref - h0)));
     const colorOf = (k, lit, v) => {   // 立面按它下半截的高度算黑不黑（一整面同一个颜色）
-      const y = d.top - (k + (lit ? 0 : 0.6)) * Q.step, c = new THREE.Color(P.rock[k % P.rock.length]).multiplyScalar((lit ? 1.06 : 0.7) * v * Q.dim);
+      const y = d.top - (k + (lit ? 0 : 0.6)) * Q.step, c = new THREE.Color(P.rock[k % P.rock.length]).multiplyScalar((lit ? 1.06 : Q.riser || 0.7) * v * Q.dim);
       return c.lerp(haze, hazeAt(y)).lerp(mist, darkAt(y));
     };
     const pos = [], col = [];
@@ -536,20 +566,22 @@
     };
     return { mesh, d, Q, n, edgeAt, faceAt: (x) => Math.min(zMax, d.zFar + bowl(x)), darkAt, landAt };
   }
-  /** 坑壁上零星的灯：落在看得到的那一截台阶边上（对面坑沿往下、这边坑沿挡住之前，大多在暗处），横着在画面里，让开电梯井；
-   *  一部分偶尔暗一下（AMBIENT.blink；减少动态效果时一直亮着） */
+  /** 坑壁上零星的灯：落在看得到的那一截台阶边上（Q.lights 那一段：对面坑沿往下、这边坑沿挡住之前，大多在暗处），横着在画面里，让开电梯井；
+   *  推远了的（矿外）按屏幕上多大放大。一部分偶尔暗一下（AMBIENT.blink；减少动态效果时一直亮着） */
   function pitLights(kit, env, wall, art, P, R, shafts, xr) {
-    const THREE = kit.THREE, d = wall.d, Q = wall.Q, BD = art.backdrop, cfg = AMBIENT.blink;
+    const THREE = kit.THREE, d = wall.d, Q = wall.Q, BD = art.backdrop, cfg = AMBIENT.blink, rad = Math.max(0.075, Q.px ? d.px * Q.px.light : 0);
     const mat = env.keep(new THREE.MeshBasicMaterial({ color: new THREE.Color(P.lamp).multiplyScalar(2.6), toneMapped: false, fog: false }));
-    const geo = new THREE.SphereGeometry(0.075, 6, 5), span = xr || d.halfW * 1.05;   // xr：横着只撒在这么宽里（矿内只在开口里看得到）
-    const k0 = Math.max(1, Math.ceil((d.top - d.ref + (d.ref - d.yOcc) * 0.1) / Q.step)), k1 = Math.max(k0 + 1, Math.floor((d.top - d.yOcc - 0.4) / Q.step));
+    const geo = new THREE.SphereGeometry(rad, 6, 5), span = xr || d.halfW * (Q.lightSpan || 1.05);   // xr：横着只撒在这么宽里（矿内只在开口里看得到）
+    const [f0, f1] = Q.lights || [0.1, 1], kOf = (f) => (d.top - d.ref + (d.ref - d.yOcc) * f) / Q.step;
+    const k0 = Math.max(1, Math.ceil(kOf(f0))), k1 = Math.max(k0 + 1, Math.floor(kOf(f1) - 0.4 / Q.step));
     for (let i = 0, tries = 0; i < BD.lights && tries < BD.lights * 20; tries++) {
       const x = d.cx + (R() * 2 - 1) * span;
       if (shafts.some(s => Math.abs(x - s) < Q.shaft[0] + Q.shaft[1] + 0.3)) continue;
       const k = k0 + Math.floor(R() * (k1 - k0 + 1)), e = wall.edgeAt(k, x);
-      const m = tag(kit.put(new THREE.Mesh(geo, mat), x, e.y + 0.07, e.z + 0.06), "pitLight");
+      if (e.y < d.occAt(e.z) + rad * 3) continue;   // 被这边的坑沿挡住了（碗的两边近，挡得浅）
+      const m = tag(kit.put(new THREE.Mesh(geo, mat), x, e.y + rad, e.z + rad * 0.8), "pitLight");
       env.group.add(m);
-      if (R() < BD.blink) {
+      if ((i * 0.618034 + 0.3) % 1 < BD.blink) {   // 几成会闪：按序号均匀挑（不靠运气，少几盏灯也照样有几盏会闪）
         const beat = A.beat(A.rand(i * 59 + 3), cfg.every, cfg.dur);
         m.userData.ambient = { kind: "blink", beat };
         env.anims.push((t, dt) => { if (dt === 0) { m.visible = true; return; } m.visible = beat.step(dt) < 0; });
@@ -558,35 +590,56 @@
     }
   }
   /** 运载电梯：贴着对面坑壁竖着切下去的那一道（电梯井），两根竖轨 + 一格格横撑，从坑沿一直下到这边坑沿挡住的地方再往下；
-   *  亮着灯的小方块（罐笼）沿着轨道慢慢上下（AMBIENT.lift：停一阵、挑另一个停靠点、慢慢开过去；最下面那处在挡住的地方下面，开下去就看不见了）。
-   *  轨道越往下越黑（实例颜色），罐笼的外壳跟着暗下去，亮着的窗一直亮着。x = 电梯井在哪 */
+   *  亮着灯的小方块（罐笼）沿着轨道慢慢上下（AMBIENT.lift：停一阵、挑另一个停靠点、慢慢开过去）。
+   *  矿内：轨道越往下越黑（实例颜色），最下面那处在挡住的地方下面，开下去就看不见了。
+   *  矿外（对面坑壁推得很远，Q.px）：整个按屏幕上多大放大；黑处的轨道微微亮着、隔一段一盏小信号灯（看得出一条竖的轨道），
+   *  罐笼外面一圈光晕，最低开到看得到的黑处（Q.liftLow），一直看得见。罐笼的外壳跟着暗下去，亮着的窗一直亮着。x = 电梯井在哪 */
   function lift(kit, env, wall, P, R, x, i) {
-    const THREE = kit.THREE, d = wall.d, z = wall.faceAt(x) + 0.12, yTop = d.top + LIFT.above, yBot = d.yOcc - LIFT.below;
-    const nT = Math.ceil((yTop - yBot) / LIFT.tie), metal = new THREE.Color(P.metal), dark = new THREE.Color(P.dark), c = new THREE.Color();
-    const mat = env.keep(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6, metalness: 0.4, flatShading: true, fog: false }));
-    const rails = new THREE.InstancedMesh(new THREE.BoxGeometry(LIFT.rail, LIFT.tie, LIFT.rail), mat, nT * 2);
-    const ties = new THREE.InstancedMesh(new THREE.BoxGeometry(LIFT.gauge * 2 + LIFT.rail * 2, LIFT.rail * 0.8, LIFT.rail), mat, nT);
+    const THREE = kit.THREE, d = wall.d, Q = wall.Q, far = !!Q.px, k = far ? Math.max(1, d.px * Q.px.lift / LIFT.car[1]) : 1;
+    const gauge = LIFT.gauge * k, rail = LIFT.rail * k, tie = LIFT.tie * k;
+    const z = wall.faceAt(x) + 0.12 * k, yTop = d.top + LIFT.above * k, yBot = d.yOcc - LIFT.below;
+    const yo = Math.max(d.yOcc, d.occAt(z));   // 电梯井那里这边坑沿挡到多高
+    const nT = Math.ceil((yTop - yBot) / tie), metal = new THREE.Color(P.metal), dark = new THREE.Color(P.dark), c = new THREE.Color();
+    const low = far ? new THREE.Color(P.lamp).multiplyScalar(LIFT.railGlow) : dark;   // 黑处的轨道：矿外微微亮着，矿内跟着暗下去
+    const mat = env.keep(far ? new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false }) : new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6, metalness: 0.4, flatShading: true, fog: false }));
+    const rails = new THREE.InstancedMesh(new THREE.BoxGeometry(rail, tie, rail), mat, nT * 2);
+    const ties = new THREE.InstancedMesh(new THREE.BoxGeometry(gauge * 2 + rail * 2, rail * 0.8, rail), mat, nT);
     const o = new THREE.Object3D();
     for (let j = 0; j < nT; j++) {
-      const y = yTop - (j + 0.5) * LIFT.tie;
-      c.copy(metal).lerp(dark, wall.darkAt(y));
-      [-1, 1].forEach((s, h) => { o.position.set(x + s * LIFT.gauge, y, z); o.updateMatrix(); rails.setMatrixAt(j * 2 + h, o.matrix); rails.setColorAt(j * 2 + h, c); });
-      o.position.set(x, y + LIFT.tie / 2, z - 0.02); o.updateMatrix(); ties.setMatrixAt(j, o.matrix); ties.setColorAt(j, c);
+      const y = yTop - (j + 0.5) * tie;
+      c.copy(metal).lerp(low, wall.darkAt(y));
+      [-1, 1].forEach((s, h) => { o.position.set(x + s * gauge, y, z); o.updateMatrix(); rails.setMatrixAt(j * 2 + h, o.matrix); rails.setColorAt(j * 2 + h, c); });
+      o.position.set(x, y + tie / 2, z - 0.02 * k); o.updateMatrix(); ties.setMatrixAt(j, o.matrix); ties.setColorAt(j, c);
     }
     const g = new THREE.Group();
     g.add(rails, ties);
-    // 罐笼：外壳 + 正面一条亮着的窗 + 顶上一盏小灯
-    const [cw, ch, cd] = LIFT.car, shell = env.keep(new THREE.MeshStandardMaterial({ color: P.metal, roughness: 0.6, metalness: 0.4, flatShading: true, fog: false }));
     const glow = env.keep(new THREE.MeshBasicMaterial({ color: new THREE.Color(P.lamp).multiplyScalar(2.2), toneMapped: false, fog: false }));
+    if (far) {   // 矿外：轨道边上隔一段一盏小信号灯
+      const lampM = env.keep(new THREE.MeshBasicMaterial({ color: new THREE.Color(P.lamp).multiplyScalar(1.3), toneMapped: false, fog: false }));
+      const ys = [], step = Math.min(LIFT.lampEvery * k, (d.top - yo) / 4);   // 看得到的那一截短（小棋盘）也至少三四盏
+      for (let y = yTop - step * 0.5; y > yo; y -= step) ys.push(y);
+      const dots = new THREE.InstancedMesh(new THREE.SphereGeometry(d.px * 1.1, 5, 4), lampM, Math.max(1, ys.length));
+      ys.forEach((y, j) => { o.position.set(x + gauge + rail * 2, y, z + rail); o.updateMatrix(); dots.setMatrixAt(j, o.matrix); });
+      dots.count = ys.length;
+      g.add(dots);
+    }
+    // 罐笼：外壳 + 正面一条亮着的窗 + 顶上一盏小灯（矿外再加一圈光晕）
+    const [cw, ch, cd] = LIFT.car.map(v => v * k), shell = env.keep(new THREE.MeshStandardMaterial({ color: P.metal, roughness: 0.6, metalness: 0.4, flatShading: true, fog: false }));
     const car = new THREE.Group();
     car.add(new THREE.Mesh(new THREE.BoxGeometry(cw, ch, cd), shell));
-    car.add(kit.put(new THREE.Mesh(new THREE.BoxGeometry(cw * 0.8, LIFT.window, 0.02), glow), 0, ch * 0.12, cd / 2 + 0.01));
-    car.add(kit.put(new THREE.Mesh(new THREE.SphereGeometry(0.04, 6, 5), glow), 0, ch / 2 + 0.04, cd * 0.2));
+    car.add(kit.put(new THREE.Mesh(new THREE.BoxGeometry(cw * 0.8, LIFT.window * k, 0.02 * k), glow), 0, ch * 0.12, cd / 2 + 0.01 * k));
+    car.add(kit.put(new THREE.Mesh(new THREE.SphereGeometry(0.04 * k, 6, 5), glow), 0, ch / 2 + 0.04 * k, cd * 0.2));
+    if (far) {
+      const halo = new THREE.Sprite(env.keep(new THREE.SpriteMaterial({ map: env.keep(kit.smokeTexture()), color: P.lamp, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: LIFT.halo[1], fog: false })));
+      halo.scale.setScalar(cw * LIFT.halo[0]); halo.position.z = cd / 2 + 0.05 * k;
+      car.add(halo);
+    }
     const cfg = AMBIENT.lift, mv = A.mover(A.rand(i * 733 + 29), cfg, cfg.stops[Math.floor(R() * cfg.stops.length)]);
-    const y0 = Math.min(d.top - 0.05 + ch / 2, d.ref + 3), y1 = d.yOcc - 1.5;   // 最上面：对面坑沿（矿外）/ 画面上沿外面（矿内）
+    const y0 = Math.min(d.top - 0.05 + ch / 2, d.ref + 3);   // 最上面：对面坑沿（矿外）/ 画面上沿外面（矿内）
+    const y1 = far && Q.liftLow != null ? yo + (d.top - yo) * Q.liftLow + ch / 2 : d.yOcc - 1.5;   // 最下面：矿外在看得到的黑处，矿内在挡住的地方下面
     const place = () => {
       const y = y0 + (y1 - y0) * mv.s;
-      car.position.set(x, y, z + cd / 2 + 0.06);
+      car.position.set(x, y, z + cd / 2 + 0.06 * k);
       shell.color.copy(metal).lerp(dark, wall.darkAt(y) * 0.85);
     };
     place();
@@ -595,20 +648,20 @@
     env.group.add(tag(g, "liftShaft"));
     env.anims.push((t, dt) => { if (dt > 0) { mv.step(dt); place(); } });
   }
-  /** 对面坑沿上远远的东西：电梯井口的矿井架、几座筒仓 / 小厂房、一根冒烟的烟囱（远景剪影的材质：远的偏向雾色） */
+  /** 对面坑沿上远远的东西：电梯井口的矿井架、几座筒仓 / 小厂房、一根冒烟的烟囱（远景剪影的材质：远的偏向雾色）；推远了的（矿外）按屏幕上多大放大 */
   function farRim(kit, env, wall, P, R, shafts) {
-    const d = wall.d, M = env.mats(1);
-    const at = (x, back) => { const z = wall.edgeAt(0, x).z - back; return { x, y: wall.landAt(z) - 0.02, z }; };
+    const d = wall.d, Q = wall.Q, M = env.mats(1), k = Q.px ? Math.max(1, d.px * Q.px.far / 1.3) : 1;
+    const at = (x, back) => { const z = wall.edgeAt(0, x).z - back * k; return { x, y: wall.landAt(z) - 0.02 * k, z }; };
     const add = (o, p, what) => { o.position.set(p.x, p.y, p.z); env.group.add(tag(o, what)); return o; };
-    shafts.forEach(x => add(kit.headframe(M, 1.3), at(x + 0.3, 0.5), "farHeadframe"));
+    shafts.forEach(x => add(kit.headframe(M, 1.3 * k), at(x + 0.3 * k, 0.5), "farHeadframe"));
     [[-0.85, "silos"], [-0.25, "shed"], [0.12, "silos"], [0.68, "shed"]].forEach(([u, what]) => {
-      const x = d.cx + u * d.halfW + (R() - 0.5) * 2;
-      add(what === "silos" ? kit.silos(M, 0.9 + R() * 0.5, 2 + Math.floor(R() * 2)) : kit.shed(M, 1.1 + R() * 0.8, 0.5 + R() * 0.3), at(x, 0.9 + R() * 0.6), "farRim");
+      const x = d.cx + u * d.halfW + (R() - 0.5) * 2 * k;
+      add(what === "silos" ? kit.silos(M, (0.9 + R() * 0.5) * k, 2 + Math.floor(R() * 2)) : kit.shed(M, (1.1 + R() * 0.8) * k, (0.5 + R() * 0.3) * k), at(x, 0.9 + R() * 0.6), "farRim");
     });
-    const p = at(d.cx + 0.5 * d.halfW, 1.2), ch = kit.chimney(M, 1.9, 0.16);
+    const p = at(d.cx + 0.5 * d.halfW, 1.2), ch = kit.chimney(M, 1.9 * k, 0.16 * k);
     add(ch.group, p, "farRim");
-    env.smoke(p.x, p.y + ch.top, p.z, 0.35);
-    env.blinker(p.x, p.y + ch.top + 0.12, p.z, 0.4);
+    env.smoke(p.x, p.y + ch.top, p.z, 0.35 * k);
+    env.blinker(p.x, p.y + ch.top + 0.12 * k, p.z, 0.4);
   }
   /** 矿外：战场后面往下陷的大矿坑。返回 groundEdge（坑边：地台外面那片地铺到这里为止） */
   function rimScene(kit, env, art, P, R, b) {
@@ -624,9 +677,9 @@
     // 第二采矿场：坑边（栏杆后面、灯前面）几根喷火的立管；坑边几块、坑里暗处几处橙红发光的岩石
     if (BD.fire) { const FI = FIRE[BD.fire], tex = env.keep(kit.smokeTexture()); FI.u.forEach((u, i) => firePipe(kit, env, P, R, d.cx + u * (env.hx + 1), d.rimZ + 0.75, FI.h, i, tex)); }
     if (BD.glow) {
-      const G = GLOWROCK[BD.glow], list = [];
+      const G = GLOWROCK[BD.glow], list = [], k = Math.max(1, d.px * Q.px.light / 0.075);   // 坑里的发光岩石跟着坑壁的灯一起放大
       for (let i = 0; i < G.edge; i++) { const s = A.span(R, G.size); list.push({ x: d.cx + (R() * 2 - 1) * (env.hx + 6), y: L.CONFIG.groundY + s * 0.15, z: d.rimZ + (R() - 0.5) * 0.3, s, fog: true }); }
-      glowRocks(kit, env, P, R, list.concat(pitGlows(wall, R, G.pit, G.pitSize, d.halfW)));
+      glowRocks(kit, env, P, R, list.concat(pitGlows(wall, R, G.pit, G.pitSize.map(v => v * k), d.halfW)));
     }
     return d.rimZ;
   }
