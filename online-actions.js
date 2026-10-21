@@ -6,6 +6,13 @@
   const plain = v => !!v && typeof v === "object" && !Array.isArray(v);
   const has = (o, key) => Object.prototype.hasOwnProperty.call(o, key);
   const present = u => !!u && !u.dead && !u.hidden && !u.fused && !u._removed;
+  function costLabel(c) {
+    c = c || {};
+    const parts = [];
+    if (c.ap) parts.push(c.ap > 1 ? `${c.ap} 行动点` : "行动点");
+    if (c.bonus) parts.push(c.bonus > 1 ? `${c.bonus} 附赠动作` : "附赠动作");
+    return parts.length ? parts.join(" + ") : "不消耗行动";
+  }
   function create(options) {
     const { game, validation, inspect, assertAction, getState } = options || {};
     if (!game || !validation || typeof validation.validateBattle !== "function" || typeof validation.reason !== "function" ||
@@ -54,7 +61,8 @@
             if (Object.keys(request.picks || {}).length || request.target != null || request.item != null || request.dest != null) fail("请先选择技能");
             return emit({ kind: "skill", title: "选择行动", options: skills.map(sk => {
               const reason = validation.reason(actor(), sk.id, session, sender, game);
-              return { value: sk.id, label: sk.name || sk.id, ...(reason ? { disabled: true, reason } : {}) };
+              // cost：房主按这名角色现在的情况算好的消耗（移动 / 道具用附赠、导体移动不耗……）。以前玩家端只按技能 id 查，移动、道具都写成「行动点」
+              return { value: sk.id, label: sk.name || sk.id, cost: costLabel(sk.cost), ...(reason ? { disabled: true, reason } : {}) };
             }) });
           }
           const sk = skills.find(s => s.id === request.skill);

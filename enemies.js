@@ -528,10 +528,14 @@ function enemySkillList(u) {
   return common.concat(list);
 }
 
+/** 活沙被杀死时吸收的：四足 / 人形 / 大沙灵，以及沙漠生物阵营（沙鱼，作者 10/19 定）。
+ *  中立生物（尘虫、管虫）不算；只吸收还在场上、活着的（逃走 / 被移出战场的、刚被打死还没清出场的不算） */
+const LIVESAND_FEED_KITS = ["sand_beast", "sand_human", "bigsand"];
+const LIVESAND_FEED_FACTIONS = ["沙漠生物"];
 function livingSandAllies(exceptId) {
   return (state.units || []).filter(u =>
-    !u.hidden && !u.dead && u.id !== exceptId &&
-    (u.kit === "sand_beast" || u.kit === "sand_human" || u.kit === "bigsand")
+    !u.hidden && !u.dead && !u._removed && !u.fused && u.id !== exceptId && totalHp(u) > 0 &&
+    (LIVESAND_FEED_KITS.indexOf(u.kit) >= 0 || LIVESAND_FEED_FACTIONS.indexOf(factionOf(u)) >= 0)
   );
 }
 
@@ -540,7 +544,7 @@ function absorbSandsInto(livesand) {
   if (!livesand || livesand._sandAbsorbed) return notes;
   const sands = livingSandAllies(livesand.id);
   if (!sands.length) {
-    notes.push(`${livesand.name} 死亡，场上没有可吸收的沙灵。`);
+    notes.push(`${livesand.name} 死亡，场上没有可吸收的沙灵或沙漠生物。`);
     return notes;
   }
   livesand._sandAbsorbed = true;
@@ -709,7 +713,9 @@ function enemySkillCost(u, id) {
 function enemyZoneInRange(a, id, zone) {
   const d = zoneDist(a.zone, zone, state.zoneMode);
   const rg = ENEMY_SKILL_RANGE[id] || a.range || "any";
-  const ok = rg === "melee" ? d === 0 : rg === "ranged" ? d === 1 : d <= 1;
+  // 被牵制（决一死战 / 嘲讽）而牵制者就在同区、自己又没有近身攻击：远距离的区域技能可以抵近打自己所在的区
+  const pb = d === 0 && rg === "ranged" && enemyForcedPointBlank(a, enemyForcedTarget(a));
+  const ok = rg === "melee" ? d === 0 : rg === "ranged" ? (d === 1 || pb) : d <= 1;
   return ok && !(typeof lineBlocked === "function" && lineBlocked(a.zone, zone));
 }
 /** 某区还站着、能挨打的我方单位（倒地没起身的不算） */
@@ -1033,7 +1039,8 @@ function antFireShell(a, aa, lines) {
   const duel = typeof touDuelVictim === "function" ? touDuelVictim(a) : null;
   const main = duel && victims.includes(duel) ? duel : victims[Math.floor(Math.random() * victims.length)];
   lines.push(`${a.name} 的大酸液弹在 ${zone} 区炸开，正中 ${main.name}。`);
-  aa(main, { element: "acid", mult: 2, baseBreak: 2 });
+  // 按标定落点打，不受普通攻击射程限制（落在自己区 / 隔两个区 / 协助触发都照打）
+  aa(main, { element: "acid", mult: 2, baseBreak: 2, flags: { action: true, anyRange: true } });
   victims.filter(u => u.id !== main.id).forEach(u => {
     aa(u, { element: "acid", mult: 0, flat: Number(a.level) || 1, diceN: 1, diceS: 6, baseBreak: 0, flags: { action: true, aoe: true } });
   });
@@ -1122,8 +1129,9 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
     if (id === "en_thug_knife") stepTowardZone(a, t.zone);
     // 借机攻击是反应，不受射程限制；协助攻击照手册「近距」（射程表），距离 1 打不到
     const opp = id === "en_thug_opp";
+    // 借机攻击在它自己（被离开的）那一区结算：那一区的铁壁照挡（app.js · dealTo 的 wallZone）
     aa(t, { element: "physical", mult: 1, diceN: id === "en_thug_knife" ? 1 : 0, diceS: 8, baseBreak: 1,
-            flags: opp ? { action: true, opportunity: true } : undefined });
+            wallZone: opp ? a.zone : undefined, flags: opp ? { action: true, opportunity: true } : undefined });
     return true;
   }
   if (id === "en_thug_hammer") {
@@ -1491,7 +1499,7 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
   if (id === "en_wolf_opp") {
     if (!needT()) return true;
     const n = addedDiceByLevel(a.level);
-    aa(t, { element: "ice", mult: 0, diceN: n, diceS: 6, baseBreak: 1, flags: { action: true, opportunity: true } });
+    aa(t, { element: "ice", mult: 0, diceN: n, diceS: 6, baseBreak: 1, wallZone: a.zone, flags: { action: true, opportunity: true } });   // 在它那一区结算，那一区的铁壁照挡
     return true;
   }
   if (id === "en_ox") {
@@ -1654,8 +1662,12 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
       lines.push(`${a.name} 的喷洒打不到距离 ${zoneDist(a.zone, z, state.zoneMode)} 的 ${z} 区。`);
       return true;
     }
+    // 被牵制而牵制者就在同区：抵近喷洒打自己所在的区，倍率 ×0.6（和电弧扫射一致）
+    const forced = enemyForcedTarget(a);
+    const pb = zoneDist(a.zone, z, state.zoneMode) === 0 && enemyForcedPointBlank(a, forced);
+    if (pb) lines.push(`${a.name} 被 ${forced.name} 牵制：喷洒抵近打自己所在的 ${z} 区（倍率 ×0.6）。`);
     standingPlayersIn(z).forEach(u => {
-      aa(u, { element: "acid", mult: 1, diceN: 1, diceS: (typeof leveledSides === "function" ? leveledSides(a.level, 6) : 6), baseBreak: 0,
+      aa(u, { element: "acid", mult: pb ? 0.6 : 1, diceN: 1, diceS: (typeof leveledSides === "function" ? leveledSides(a.level, 6) : 6), baseBreak: 0,
         flags: { action: true, aoe: true }, onConnect: { status: "corr" } });
     });
     return true;
@@ -1722,6 +1734,7 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
       state.props = (state.props || []).filter(p => !(p.kind === "scrapwall" && Number(p.zone) === Number(a.zone)));
       const wall = makeProp("scrapwall", a.zone, a.level);
       wall.hp = wall.maxHp = hp;
+      wall.ownerKit = a.kit;   // 墙护着王这一伙（按阵营判断，app.js · barrierGuards）：三方混战里不护和盗匪敌对的安保 / 警卫队
       state.props.push(wall);
       lines.push(`${n} 名狂徒回防到 ${a.zone} 区${spent ? `（${spent} 名还没行动的各花掉 1 行动点）` : ""}，筑起废铁墙：装甲 ${hp}（${r.text} × ${n}）。` +
         `同区敌人挨我方攻击行动时只打墙一次，撑到下一个敌人回合开始。`);

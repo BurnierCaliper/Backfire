@@ -197,3 +197,18 @@ test("联机展示：主机把本地卡片的状态行、资源、实际 atk、�
   if (snap) assert.match(snap.status, /掩护/);
   assert.doesNotMatch(JSON.stringify(out), /坚毅|shp/i);
 });
+
+test("skill menu carries the host's real cost per option: move / item cost a bonus action, conductor moves free, leaving acid costs an action point", () => {
+  const f = fixture();
+  const cost = id => f.menu().choices.options.find(o => o.value === id).cost;
+  assert.equal(cost("__move"), "附赠动作");
+  assert.equal(cost("__item"), "附赠动作");
+  assert.equal(cost("ruby_aa"), "行动点");
+  f.actor.self = "conductor";
+  assert.equal(cost("__move"), "不消耗行动");
+  f.actor.self = "none"; f.state.fields[f.actor.zone].acid = true;
+  assert.equal(cost("__move"), "行动点");
+  // 投影后玩家收到的也带着
+  const projected = f.c.OnlineView.projectActionMenu(f.menu());
+  assert.equal(projected.choices.options.find(o => o.value === "__item").cost, "附赠动作");
+});

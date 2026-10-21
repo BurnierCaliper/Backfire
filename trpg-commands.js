@@ -39,7 +39,7 @@ const TrpgCommands = (() => {
     teachRecipe: c => trpgTeachRecipe(c.item, c.on),
     adjustPoints: c => trpgAdjustPoints(c.amount, c.why),
     redeem: c => trpgRedeem(c.item),
-    craft: c => trpgCraft({ kit: c.kit, item: c.item, diff: c.diff, helper: c.helper, result: c.result }),
+    craft: c => trpgCraft(Array.isArray(c.jobs) ? { jobs: c.jobs } : { kit: c.kit, item: c.item, diff: c.diff, helper: c.helper, result: c.result }),
     salvage: c => trpgSalvage(c.item),
     taskCreate: c => trpgTaskCreate(c.kind, c.category),
     taskSave: c => trpgTaskSave(c.task),

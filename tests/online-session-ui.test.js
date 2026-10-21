@@ -172,6 +172,8 @@ test("D3 game sessions: remote ownership, GM/private messages, round actions and
   const attackResult = await alice.evaluate(() => window.attackResult); assert.equal(attackResult?.ok, true, JSON.stringify(attackResult));
   const finalAttackSeq = await alice.evaluate(() => OnlineGame.getView().packet.seq);
   await bob.waitForFunction(seq => OnlineGame.getView().packet?.seq >= seq, finalAttackSeq);
+  // 战场日志写出打了谁、多少伤害（以前只有「瑞比 · 普通攻击」）
+  await bob.waitForFunction(() => (OnlineGame.getView().packet.publicLogs || []).some(r => /普通攻击 → .+：\d+ 伤害/.test(r.text)), null, { timeout: 10000 });
   measureAction(t, "4v3 ruby two-hit attack", f.wire.slice(attackStart));
   const menu = await alice.evaluate(actor => OnlineGame.actionMenu({ actor, skill: "__move" }), actor);
   assert.equal(menu.type, "actionOptions"); assert.ok(menu.choices.options.length > 0);
@@ -476,11 +478,28 @@ test("联机：玩家能看角色资料 / 武器 / 背包；小队聊天全程�
   // 主持人：探索记录栏有「探索 / 小队」频道，也能直接回
   await host.locator('.tr-log [data-host-tab="chat"]').click();
   assert.match(await host.locator(".tr-log .ol-host-chat").innerText(), /我们先去黑市/);
-  await host.fill(".tr-log .ol-host-chat input", "好的路上小心");
+  await host.fill(".tr-log .ol-host-chat textarea", "好的路上小心");
   await host.click(".tr-log .ol-host-chat button[type=submit]");
   try { await host.waitForFunction(() => HotseatGame.getView().chat.some(m => m.text === "好的路上小心"), null, { timeout: 5000 }); }
-  catch (e) { throw new Error("主持人消息没发出去：" + JSON.stringify(await host.evaluate(() => ({ notice: OnlineGame.getView().notice, input: document.querySelector(".tr-log .ol-host-chat input").value, chat: HotseatGame.getView().chat })))); }
+  catch (e) { throw new Error("主持人消息没发出去：" + JSON.stringify(await host.evaluate(() => ({ notice: OnlineGame.getView().notice, input: document.querySelector(".tr-log .ol-host-chat textarea").value, chat: HotseatGame.getView().chat })))); }
   await alice.waitForFunction(() => /好的路上小心/.test(document.querySelector("#online-side .ol-side-chat").textContent));
+  // 多行：Shift+Enter 只换行不发送，Enter 发送
+  await alice.click("#ol-side-text");
+  await alice.keyboard.type("第一行"); await alice.keyboard.press("Shift+Enter"); await alice.keyboard.type("第二行");
+  assert.equal(await alice.inputValue("#ol-side-text"), "第一行\n第二行", "Shift+Enter 只换行");
+  await alice.keyboard.press("Enter");
+  await host.waitForFunction(() => HotseatGame.getView().chat.some(m => m.text === "第一行\n第二行"));
+  // 字符画：换行和全角空格原样到对方，不折行，字号缩到聊天栏放得下（主持人探索记录栏最窄）
+  const art = ["　　龍龍龍", "龍".repeat(18), "　爪　　爪"].join("\n");
+  await alice.fill("#ol-side-text", art); await alice.press("#ol-side-text", "Enter");
+  const artShape = (page, sel) => page.waitForFunction(([sel, t]) => {
+    const p = [...document.querySelectorAll(sel)].find(x => x.textContent === t);
+    return p && { art: p.classList.contains("ol-art"), lines: Math.round(p.clientHeight / parseFloat(getComputedStyle(p).lineHeight)), fits: p.scrollWidth <= p.clientWidth };
+  }, [sel, art], { timeout: 5000 }).then(h => h.jsonValue());
+  await bob.click('#online-side [data-side="chat"]');   // Bob 是手机宽度，聊天栏默认收起：点「小队」展开再量
+  assert.deepEqual(await artShape(bob, "#online-side .ol-side-chat p"), { art: true, lines: 3, fits: true });
+  assert.deepEqual(await artShape(host, ".tr-log .ol-host-chat p"), { art: true, lines: 3, fits: true });
+  assert.equal(await alice.inputValue("#ol-side-text"), "", "发出去后清空输入框");
   // 输入法拼字中：别人发消息时，输入框不被换掉，拼到一半的内容还在
   await bob.click("#ol-side-text");
   await bob.evaluate(() => { window.__inp = document.getElementById("ol-side-text"); window.__inp.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true })); window.__inp.value = "wo m"; });
@@ -1129,5 +1148,48 @@ test("联机跑团：主持人长休，玩家画面也弹结算（不带坚毅�
   const raw = JSON.stringify(await alice.evaluate(() => OnlineGame.getView().packet.rest));
   assert.ok(!/shp/.test(raw), raw);
   assert.ok(await alice.evaluate(() => OnlineGame.getView().packet.clock && OnlineGame.getView().packet.clock.day >= 1), "游戏时钟发给玩家");
+  assert.deepEqual(f.errors, []);
+});
+
+test("联机：玩家点「离开房间」真的离开——刷新后不再自动回房，标题页留「回到房间」按钮，点了能回去", { timeout: 120000 }, async t => {
+  const f = await fixture(t); if (!f) return;
+  const { host, alice } = f;
+  const nav = alice.waitForEvent("load");
+  await alice.evaluate(() => OnlineGame.leave());
+  await nav; await alice.waitForFunction(() => !!window.OnlineGame && !!window.GAME);
+  await alice.waitForFunction(() => /上次的房间/.test(document.querySelector("#t-online").innerText));
+  await alice.click("#t-online");
+  await alice.waitForSelector("#ol-title-resume");
+  await alice.waitForTimeout(1500);   // 给自动回房留时间：不应该发生
+  assert.equal(await alice.evaluate(() => OnlineGame.getView().active), false, "没有被自动拉回房间");
+  await host.waitForFunction(() => OnlineGame.getView().players.some(p => p.name === "Alice" && !p.online));
+  // 想回去还能回去
+  await alice.click("#ol-title-resume");
+  await alice.waitForFunction(() => OnlineGame.getView().active);
+  assert.equal(await alice.evaluate(() => OnlineGame.savedInfo().left), false, "回房后不再标着离开");
+});
+
+test("联机倒计时按玩家自己的钟算：玩家电脑时间和房主差一小时，协助格挡询问照样显示 20 秒左右", { timeout: 120000 }, async t => {
+  const f = await fixture(t); if (!f) return;
+  const { host, alice, bob, aliceId, bobId } = f;
+  // Alice 的电脑快了一小时
+  await alice.evaluate(() => { const real = Date.now.bind(Date); Date.now = () => real() + 3600000; });
+  await host.evaluate(({ aliceId, bobId }) => {
+    OnlineGame.assign(Object.fromEntries(partyHeroes().filter(u => ["hiaki", "yuito"].includes(u.kit)).map(u => [u.id, u.kit === "hiaki" ? aliceId : bobId])));
+    OnlineGame.start(); TrpgFlow.toBattle(); GAME.skip = true; GAME.instant = true; GAME.startOrEnd();
+  }, { aliceId, bobId });
+  await host.waitForFunction(() => HotseatGame.getView().phase === "picking" && GAME.depth === 0);
+  const heroes = await host.evaluate(() => HotseatGame.getView().heroes);
+  for (const [index, hero] of heroes.entries()) assert.equal((await submit(hero.owner === aliceId ? alice : hero.owner === bobId ? bob : host, { type: "orderPick", actor: hero.id, index })).ok, true);
+  for (const page of [alice, bob, host]) assert.equal((await submit(page, { type: "orderConfirm" })).ok, true);
+  const attack = await host.evaluate(() => ({ type: "gm.forceAttack", input: {
+    dmAtk: state.units.find(u => !u.isPlayer).id, dmTgt: partyHeroes().find(u => u.kit === "ruby").id,
+    dmEle: "physical", dmMult: 0, dmFlat: 1, dmBrk: 0, dmSkipBlock: false
+  } }));
+  await host.evaluate(command => { OnlineGame.submit(command); }, attack);
+  await alice.waitForFunction(() => OnlineGame.getView().packet?.view?.ask?.eligible, null, { timeout: 5000 });
+  const left = await alice.evaluate(() => OnlineGame.getView().packet.view.ask.deadline - Date.now());
+  assert.ok(left > 15000 && left <= 20500, "按本机的钟还剩 " + left);
+  await alice.waitForFunction(() => /^(1\d|20) 秒$/.test(document.querySelector("#hs-countdown")?.textContent || ""));
   assert.deepEqual(f.errors, []);
 });

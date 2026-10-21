@@ -1,14 +1,26 @@
 /* 背包、掉落、道具使用。计算器和游戏共用。 */
 
 const ITEM_CATALOG = {
-  medkit:     { name: "简易医疗包", hint: "治疗一名友方 1d4+6 内层生命", target: "ally", combat: true },
-  clinic:     { name: "诊所医疗包", hint: "治疗一名友方 2d4+6 内层生命", target: "ally", combat: true },
+  // heal：治疗骰（n 个 s 面骰 + flat），用道具 / 休整用道具 / 专长「拉一把」都读这一处（itemHealSpec）
+  medkit:     { name: "简易医疗包", hint: "治疗一名友方 1d4+6 内层生命", target: "ally", combat: true, heal: { n: 1, s: 4, flat: 6 } },
+  clinic:     { name: "诊所医疗包", hint: "治疗一名友方 2d4+6 内层生命", target: "ally", combat: true, heal: { n: 2, s: 4, flat: 6 } },
   stim:       { name: "强心注射剂", hint: "自身恢复 16 生命，消耗一些坚毅生命（不会致死）", target: "self", combat: true },
   steroid:    { name: "强化注射剂", hint: "自身 ATK +3 至战斗结束，消耗一些坚毅生命（不会致死）", target: "self", combat: true },
   bomb_e:     { name: "简易电手榴弹", hint: "对一个区域全部单位造成 1d6+6 电击", target: "zone", combat: true },
   bomb_a:     { name: "简易酸液瓶", hint: "对一个区域全部单位造成 1d6+6 酸液", target: "zone", combat: true },
   shockbomb:  { name: "冲击炸弹", hint: "对一个区域全部单位造成 2 击破", target: "zone", combat: true }
 };
+
+/** 医疗道具的治疗骰；没有 heal 的（如只能自己用的强心注射剂）不算医疗道具，返回 null */
+function itemHealSpec(itemId) {
+  const h = ITEM_CATALOG[itemId] && ITEM_CATALOG[itemId].heal;
+  return h && Number(h.n) > 0 && Number(h.s) > 0 ? { n: Number(h.n), s: Number(h.s), flat: Number(h.flat) || 0 } : null;
+}
+/** 掷一件医疗道具的治疗骰 → { total, text }；不是医疗道具返回 null */
+function rollItemHeal(itemId) {
+  const h = itemHealSpec(itemId);
+  return h ? takeDice(h.n, h.s, h.flat) : null;
+}
 
 /* ===== 效果道具（作者 10/15 定稿，docs/workshop-design.md）=====
  * 游戏里现有的每一种效果对应一个道具，共 36 个。全部花附赠动作（game.js / battle-commands.js 的 __item）。
@@ -346,15 +358,8 @@ function useRepairKit(actor, target, kit, notes) {
     notes.push(`${actor.name} 用维修工具包修好倒地的 ${row.name}：恢复 ${used} 点生命重新站起来，用掉 ${used} 点维修量（还剩 ${repairPoints()} 点）。`);
     return notes;
   }
-  if (row.need <= 0) { notes.push(`${row.name} 耐久已满。`); return notes; }
-  const before = row.dur;
-  const used = spendRepairPoints(row.need);
-  restoreDurability(row.kit, used);
-  // 修好的武器回到主人手里——除非它正以武器人在场（以前修在场的武器人会把主人也设成持械，两边同时拿着）
-  if (row.owner && row.owner.weaponHeld === false && !row.owner.dead && before <= 0 && typeof heldWeaponKit === "function" &&
-      !(typeof weaponOutOnField === "function" && weaponOutOnField(row.kit))) row.owner.weaponHeld = true;
-  notes.push(`${actor.name} 用维修工具包修 ${row.name}：耐久 ${before} → ${weaponDur(row.kit)}，用掉 ${used} 点维修量（还剩 ${repairPoints()} 点）。`);
-  return notes;
+  // 修耐久和「修理」面板命令走同一套（ledgerRepair）：同样的消耗和恢复量，战斗中修好的武器这一场仍按受损算
+  return ledgerRepair(row.kit, notes);
 }
 /** 道具自己扣坚毅生命（强心 / 强化注射剂）：不会致死，坚毅最少留 1。返回实际扣掉的量 */
 function selfShpCost(u, n) {
@@ -386,10 +391,9 @@ function useItemOn(actor, itemId, target, zone) {
     if (block) { notes.push(`${actor.name} 的${spec.name}影响不到 ${z} 区：${block}`); notes.unused = true; return notes; }
   }
   bagAdd(itemId, -1, notes);
-  if (itemId === "medkit" || itemId === "clinic") {
+  if (itemHealSpec(itemId)) {
     const t = target || actor;
-    const n = itemId === "clinic" ? 2 : 1;
-    const r = takeDice(n, 4, 6);
+    const r = rollItemHeal(itemId);
     // 和其他治疗一样从内往外补，可以治到外层（作者定）
     const got = typeof healUnit === "function" ? healUnit(t, r.total) : r.total;
     notes.push(`${actor.name} 对 ${t.name} 使用${spec.name}，掷出 ${r.text}，实际恢复 ${Math.floor(got || 0)}` +
@@ -416,12 +420,15 @@ function useItemOn(actor, itemId, target, zone) {
       markAoeZone(z, itemId === "shockbomb" ? null : { element: itemId === "bomb_e" ? "electric" : "acid", dmg: 9, attacker: actor });
     }
     units.forEach(u => {
-      // 被铁壁 / 废铁墙这类屏障保护的单位不受范围攻击（屏障在配置物那一轮挨打）
-      if (itemId === "shockbomb" && typeof aoeShieldFor === "function" && aoeShieldFor(u)) {
-        notes.push(`${u.name} 被${aoeShieldFor(u).name}护住，没受影响。`);
+      // 被铁壁 / 废铁墙这类屏障保护的单位不受范围攻击（屏障在配置物那一轮挨打）；屏障只挡敌方扔过来的（自己人扔的不挡，app.js · barrierFoe）
+      const shield = itemId === "shockbomb" && typeof aoeShieldFor === "function" ? aoeShieldFor(u, actor) : null;
+      if (shield) {
+        notes.push(`${u.name} 被${shield.name}护住，没受影响。`);
         return;
       }
       if (itemId === "shockbomb") {
+        // 下潜中的单位范围攻击打不到（和投掷罐一样）：震荡弹直接走 dealBreak，没经过下潜判定
+        if (u.submerged) { notes.push(`${u.name} 下潜中，没有被波及。`); return; }
         if (typeof dealBreak === "function") dealBreak(u, 2, "physical", notes, spec.name);
       } else {
         const ele = itemId === "bomb_e" ? "electric" : "acid";
@@ -502,6 +509,7 @@ function itemApplyStatus(actor, u, key, notes) {
     if (key === "chase") u.chasers = (u.chasers || []).filter(id => id !== actor.id).concat(actor.id);
     if (key === "high") u.highApplyTurn = state.turnNo;
     u.statuses[key] = true;
+    if (typeof markStatusOwner === "function" && actor && actor.isPlayer) markStatusOwner(u, key, actor.id);   // 击杀归属：谁挂的状态
     if (key === "shockwave" && typeof syncShockwave === "function") syncShockwave(u, notes);
     notes.push(`${u.name} 获得${EFFECT_STATUS_CN[key] || key}。`);
   }
@@ -513,11 +521,12 @@ function itemApplyStatus(actor, u, key, notes) {
 /** 闪光震撼弹：失衡晕眩。首领无效（itemUseError 已拦）；10 级起的精英按首领规则只推进 1 个晕眩标记（imbalanceLine 里记） */
 function itemStun(u, notes) {
   if (u.stunned) { notes.push(`${u.name} 已经在失衡中。`); return; }
-  if (u.noPosture) { notes.push(`${u.name} 没有架势，不会失衡。`); return; }
+  if (u.noPosture || u.trainingDummy) { notes.push(`${u.name} 没有架势，不会失衡。`); return; }
   u.stunned = true;
   notes.push(typeof imbalanceLine === "function" ? imbalanceLine(u) : `${u.name} 失衡。`);
   if (typeof endSelfOnStun === "function") endSelfOnStun(u, notes);
   if (typeof queueAssistAttack === "function") queueAssistAttack(null, u);
+  if (typeof bossQuickRecover === "function") bossQuickRecover(u, notes);   // 10 级起精英标记没攒满：失衡立刻恢复，和其他来源一样
 }
 function useEffectItem(actor, it, target, zone, notes) {
   if (it.target === "zone") {
@@ -531,7 +540,10 @@ function useEffectItem(actor, it, target, zone, notes) {
     const units = (state.units || []).filter(u => itemPresent(u) && Number(u.zone) === z && u.kit !== "ironwall" && (!it.alliesOnly || u.isPlayer));
     if (!units.length) notes.push(`${z} 区没有单位。`);
     units.forEach(u => {
-      if (!it.alliesOnly && typeof aoeShieldFor === "function" && aoeShieldFor(u)) { notes.push(`${u.name} 被${aoeShieldFor(u).name}护住，没受影响。`); return; }
+      // 下潜中的单位范围攻击打不到（effects.js · 下潜）；投掷罐不是谐波，也不例外
+      if (u.submerged) { notes.push(`${u.name} 下潜中，没有被波及。`); return; }
+      const shield = !it.alliesOnly && typeof aoeShieldFor === "function" ? aoeShieldFor(u, actor) : null;   // 屏障只挡敌方扔过来的
+      if (shield) { notes.push(`${u.name} 被${shield.name}护住，没受影响。`); return; }
       itemApplyStatus(actor, u, it.key, notes);
     });
     return;

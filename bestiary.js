@@ -134,12 +134,12 @@ const BESTIARY_TEXT = {
     "协助：狙击 1×atk + 目标血量上限 10% 的火，穿刺 + 爆燃"] },
   bigsand: { move: "近距离", abilities: [
     "沙击：atk + 1d4 物理，1 击破",
-    "场上沙灵不足三只时，召唤四足或人形沙灵 1d4 只",
+    "场上沙灵（含大沙灵自己和其他精英沙灵）不足三只时，召唤四足或人形沙灵 1d4 只",
     "同区没有敌人时，治疗血量最低的沙灵 2d4",
     "协助：任意距离 1.5×atk"] },
   livesand: { move: "不移动，远近皆可", abilities: [
     "每回合一次 atk 物理",
-    "被杀死时吸收场上所有活着的沙灵，获得它们的全部血量和 atk（每吸收一只 def +1），变成巨型活沙",
+    "被杀死时吸收场上所有活着的沙灵和沙漠生物（沙鱼），获得它们的全部血量和 atk（每吸收一只 def +1），变成巨型活沙",
     "巨型活沙：近距沙子穿刺至多两个目标各 atk 物理 1 击破；远距流沙漩涡，区内全员 atk 物理 2 击破并失去行动",
     "巨型活沙三回合内没被打死：每回合对所有区域的所有单位打一次 atk 物理",
     "可以对自己协助：对被击破单位所在区打一次 atk 物理"] },
@@ -239,7 +239,7 @@ function bestiaryRecordBattle(outcome) {
     const lv = Number(u.level) || 1;
     e.minLv = e.minLv == null ? lv : Math.min(e.minLv, lv);
     e.maxLv = e.maxLv == null ? lv : Math.max(e.maxLv, lv);
-    if (u.dead || u._removed) e.kills += 1;
+    if (u.dead) e.kills += 1;   // 下潜逃走的（只有 _removed）不是击杀
     e.last = now;
     e.lastOutcome = outcome || null;
     d.kits[kit] = e;

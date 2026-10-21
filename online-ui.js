@@ -47,7 +47,7 @@
     toast.hidden = true;
     // 玩家右侧栏：「战斗 / 记录」和「小队」两个频道。输入框只建一次，收到新消息只更新列表，不会打断输入
     const side = make("aside", "online-side", "ol-side", { "aria-label": "战斗记录与小队聊天" });
-    side.innerHTML = `<nav class="ol-side-tabs" role="tablist"><button type="button" role="tab" data-side="log" class="ol-tab"></button><button type="button" role="tab" data-side="chat" class="ol-tab">小队<span class="ol-badge" hidden></span></button><button type="button" class="ol-side-fold" data-side-fold hidden>展开 ▴</button></nav><ol class="ol-side-log" aria-live="polite"></ol><ol class="ol-side-chat" aria-live="polite"></ol><form class="ol-side-form" id="ol-side-form"><label class="ol-sr-only" for="ol-side-text">小队消息</label><button type="button" class="ol-button ol-dice" data-roll-open="1" title="选一个熟练项掷 d100">🎲 掷骰</button><input id="ol-side-text" maxlength="500" autocomplete="off" placeholder="和队友说点什么…"><button type="submit" class="ol-button ol-primary">发送</button></form>`;
+    side.innerHTML = `<nav class="ol-side-tabs" role="tablist"><button type="button" role="tab" data-side="log" class="ol-tab"></button><button type="button" role="tab" data-side="chat" class="ol-tab">小队<span class="ol-badge" hidden></span></button><button type="button" class="ol-side-fold" data-side-fold hidden>展开 ▴</button></nav><ol class="ol-side-log" aria-live="polite"></ol><ol class="ol-side-chat" aria-live="polite"></ol><form class="ol-side-form" id="ol-side-form"><label class="ol-sr-only" for="ol-side-text">小队消息</label><button type="button" class="ol-button ol-dice" data-roll-open="1" title="选一个熟练项掷 d100">🎲 掷骰</button><textarea id="ol-side-text" rows="1" maxlength="500" autocomplete="off" enterkeyhint="send" title="Enter 发送，Shift+Enter 换行" placeholder="和队友说点什么…"></textarea><button type="submit" class="ol-button ol-primary">发送</button></form>`;
     side.hidden = true;
     const bagBox = make("section", "online-bag", "ol-overlay ol-bag", { role: "dialog", "aria-label": "背包" });
     bagBox.hidden = true;
@@ -90,7 +90,8 @@
       sideTab[view.screen === "battle" || view.screen === "ended" ? "battle" : "other"] = tab.dataset.side; renderSide(true);
       if (tab.dataset.side === "chat") side.querySelector("#ol-side-text")?.focus({ preventScroll: true });
     });
-    side.addEventListener("keydown", event => event.stopPropagation());
+    side.addEventListener("keydown", event => { event.stopPropagation(); chatEnter(event); });
+    side.addEventListener("input", event => fitChatBox(event.target));
     side.addEventListener("submit", event => { event.preventDefault(); sendSideChat(); });
     bagBox.addEventListener("click", event => { if (event.target === bagBox || event.target.closest('[data-bag="close"]')) bagBox.hidden = true; });
     const onRollOpen = event => {
@@ -105,6 +106,14 @@
       if (event.target.closest('[data-title="go"]')) sendTitle();
     });
     titleBox.addEventListener("input", event => { const k = event.target.dataset.tf; if (k) titleForm[k] = event.target.value; });
+    stage.addEventListener("change", event => {
+      const sel = event.target.closest && event.target.closest("[data-ol-cmp]");
+      const r = view.packet?.rogue;
+      if (!sel || !r || !r.smith) return;
+      const [kit, slot] = sel.value.split(":");
+      const out = byId(sel.id + "-cmp");
+      if (out) out.innerHTML = partCompare(r, sel.dataset.olCmp, { kit, slot: Number(slot) });
+    });
     titleBox.addEventListener("change", event => { const k = event.target.dataset.tf; if (k) titleForm[k] = event.target.value; });
     titleBox.addEventListener("keydown", event => { event.stopPropagation(); if (event.key === "Escape") titleBox.hidden = true; if (event.key === "Enter" && event.target.tagName === "INPUT") sendTitle(); });
     document.addEventListener("click", onRollOpen);
@@ -164,7 +173,9 @@
       statusTokens(u).forEach(t => { if (!tokens.includes(t)) tokens.push(t); });
       const owner = u.weaponOf ? (data.units || []).find(x => x.kit === u.weaponOf && !x.weaponOf) : null;
       const kind = u.isPlayer ? (u.escort ? "escort" : u.weaponOf || u.weaponUnit ? "weapon" : "hero") : "enemy";
-      return T.html({ kind, kit: u.kit, ownerName: owner && owner.name, escort: u.escort }, tokens.filter(Boolean), { name: u.name || u.id, sub: `Lv${u.level || 1} · ${u.zone} 区` });
+      // 首领机制的倒计时：主机投影好的 display.marks / casts（online-view.js），这里只拼文字
+      const mechs = global.UnitCard && global.UnitCard.mechLines ? global.UnitCard.mechLines({ marks: (u.display || {}).marks, casts: (u.display || {}).casts }) : [];
+      return T.html({ kind, kit: u.kit, ownerName: owner && owner.name, escort: u.escort }, tokens.filter(Boolean), { name: u.name || u.id, sub: `Lv${u.level || 1} · ${u.zone} 区`, mechs });
     }
     const hoverable = (t) => t && t.closest && t.closest("[data-unit-id], [data-prop-id]");
     stage.addEventListener("mouseover", event => {
@@ -256,7 +267,7 @@
       return `<div class="ol-card"><header><div><span class="ol-muted">${starting ? "大厅" : "联机房间"}</span><div class="ol-code-row"><h2 class="ol-code">${esc(view.roomCode)}</h2>${view.roomCode ? button("复制房间码", "copyCode") : ""}</div></div>${canClose ? button("收起", "close") : ""}</header><p class="ol-connection" role="status">${esc(paused() ? view.status?.connected ? "房主离线，等待恢复" : "连接中断，正在重连" : "已连接")}</p>${rosterMarkup()}${starting ? `<footer>${view.isHost ? button(view.mode === "rogue" ? "开始" : "开始跑团", "start", "", disabled() || !players().some(p => !p.gm && p.online), true) + (view.mode === "rogue" && !(view.heroes || []).length ? '<p class="ol-muted">先在单局画面选好队伍、点「出发」，这里才能把角色分给大家。</p>' : "") : '<p class="ol-muted">等待房主分配角色并开始。</p>'}</footer>` : ""}${starting ? lobbyChatMarkup() : ""}${messagesMarkup()}<footer>${button("重新连接", "reconnect", "", pending)}${button(view.isHost ? "离开并保存" : "离开房间", "leave", "", pending)}</footer><p class="ol-notice" role="status">${esc(notice || view.notice || view.packet?.systemNotice || (view.storageError ? "本机保存失败，请保持页面打开并检查存储空间。" : ""))}</p></div>`;
     }
     function lobbyChatMarkup() {
-      return `<section class="ol-messages"><h3>大厅交流</h3><ol aria-live="polite" data-keep-scroll="lobby">${(hs().chat || []).map(m => `<li><b>${esc(m.name || m.operatorName || "玩家")}</b><p>${esc(m.text)}</p></li>`).join("") || '<li class="ol-muted">在这里与所有人商量准备事项。</li>'}</ol><form id="ol-lobby-chat"><label class="ol-sr-only" for="ol-lobby-text">大厅聊天</label><input id="ol-lobby-text" data-field="chatText" maxlength="500" value="${esc(form.chatText)}" placeholder="所有人都能看到…"><button class="ol-button" type="submit"${disabled() ? " disabled" : ""}>发送到大厅</button></form></section>`;
+      return `<section class="ol-messages"><h3>大厅交流</h3><ol aria-live="polite" data-keep-scroll="lobby">${(hs().chat || []).map(m => `<li><b>${esc(m.name || m.operatorName || "玩家")}</b><p${artAttr(m.text)}>${esc(m.text)}</p></li>`).join("") || '<li class="ol-muted">在这里与所有人商量准备事项。</li>'}</ol><form id="ol-lobby-chat"><label class="ol-sr-only" for="ol-lobby-text">大厅聊天</label><input id="ol-lobby-text" data-field="chatText" maxlength="500" value="${esc(form.chatText)}" placeholder="所有人都能看到…"><button class="ol-button" type="submit"${disabled() ? " disabled" : ""}>发送到大厅</button></form></section>`;
     }
     function fieldsMarkup(data, zone) {
       const field = data.fields?.[zone] || {}, parts = [];
@@ -323,14 +334,14 @@
     }
     function suppliesMarkup(data) {
       const bag = data.bag || {}, items = (bag.items || []).filter(item => item.qty > 0);
-      return `${shopMarkup()}${trpgClinicMarkup()}${purseMarkup()}<section class="ol-supplies" aria-label="队伍公共物资"><h3>队伍公共物资</h3><div class="ol-points"><span>${view.packet?.purse ? "队伍公账" : "奎支"} ${esc(data.kuizhi ?? 0)}</span><span>水 ${esc(bag.water ?? 0)} ml</span></div><ul>${items.map(item => `<li>${esc(item.name || item.id)} × ${esc(item.qty)}</li>`).join("") || '<li class="ol-muted">背包为空</li>'}</ul></section>`;
+      return `${shopMarkup()}${trpgCyberwareMarkup()}${trpgClinicMarkup()}${purseMarkup()}<section class="ol-supplies" aria-label="队伍公共物资"><h3>队伍公共物资</h3><div class="ol-points"><span>${view.packet?.purse ? "队伍公账" : "奎支"} ${esc(data.kuizhi ?? 0)}</span><span>水 ${esc(bag.water ?? 0)} ml</span></div><ul>${items.map(item => `<li>${esc(item.name || item.id)} × ${esc(item.qty)}</li>`).join("") || '<li class="ol-muted">背包为空</li>'}</ul></section>`;
     }
     function suppliesCard(data) {
       return `<div class="ol-card ol-supplies-card"><header><h2>物资</h2>${button("关闭", "suppliesClose")}</header>${suppliesMarkup(data)}</div>`;
     }
     /** 舞台顶上的「物资」按钮：商店 / 诊所开着时带提示 */
     function suppliesButton() {
-      const tags = [view.packet?.shop ? "🛒" : "", view.packet?.clinic?.heroes?.length ? "🦾" : ""].filter(Boolean).join("");
+      const tags = [view.packet?.shop ? "🛒" : "", view.packet?.clinic?.heroes?.length || view.packet?.cyberware?.heroes?.length ? "🦾" : ""].filter(Boolean).join("");
       return button(`物资${tags ? " · " + tags : ""}`, "supplies", tags ? 'data-alert="1"' : "");
     }
     function paintSupplies() {
@@ -424,6 +435,56 @@
     }
     /* ---------- 联机单局（online-rogue.js 在房主那里算好，按收件人发来） ---------- */
     const rogueAct = (text, cmd, off = false, primary = false) => button(text, "rogueAct", `data-cmd="${esc(JSON.stringify(cmd))}"`, disabled() || off, primary);
+    /** 装件前后对比：只算选中的那一个（房主算好的 smith.installPreviews） */
+    function partCompare(r, part, slot) {
+      if (!slot || !r.smith || !global.ModCompare) return "";
+      const list = r.smith.installPreviews || [];
+      const p = list.find(x => x.weapon === slot.kit && x.slot === slot.slot && (x.part === part || "part_" + x.part === part));
+      return p ? ModCompare.text(p) : "";
+    }
+    /** 克制表：房主算好发来的 view.matchup（不含坚毅）；玩家端不自己算 */
+    // 房主的 matchup 按他当前行动的单位算；玩家这边按自己选中的单位（选行动时的那个，没有就当前轮到的自己的单位）改冻土再算
+    const matchupOf = () => {
+      const m = view.matchup || view.packet?.matchup || null;
+      if (!m || !global.MatchupUI) return m;
+      const st = displayState || view.state || {}, cur = hs().currentUnitId;
+      const mine = (hs().units || []).some(u => u.id === cur && u.owner === own());
+      return global.MatchupUI.viewChart(m, st, selectedActor || (mine ? cur : null));
+    };
+    function openWorkshop(mat) {
+      if (!global.WorkshopUI || !global.WorkshopData) return;
+      // 学配方 / 拆解：从工坊里选中的那名角色出钱、拆他的东西（一个玩家操控多名角色时不能总用第一个）
+      const payerOf = () => WorkshopData.payerKit(view.packet?.rogue, global.WorkshopUI && global.WorkshopUI.state.kit);
+      WorkshopUI.open(() => { const r = view.packet?.rogue; return r ? WorkshopData.viewWorkshopModel(r) : null; },
+        cmd => { if (disabled()) return; const c = ["learnRecipe", "salvage"].includes(cmd.action) ? Object.assign({ payer: payerOf() }, cmd) : cmd; call(() => api.submit({ type: "rogue.act", command: c })); },
+        { mat: mat || "" });
+    }
+    /* 诊所 · 义体（cyberware-ui.js）：读 online-view 投影后的 packet.cyberware = { heroes:[{kit,name,purse,view,shop,previews}] }
+     * 单局：指令走 rogue.act（install/removeCyberware）；跑团（诊所开着时）：cyberwareInstall / cyberwareRemove，从这名角色的钱包出，不用主持人同意 */
+    function cyberwareSrc() { const p = view.packet; return p && p.cyberware && (p.cyberware.heroes || []).length ? p : null; }
+    function cyberwareCommand(cmd) {
+      if (view.mode === "rogue") return { type: "rogue.act", command: cmd };
+      return { type: cmd.action === "removeCyberware" ? "cyberwareRemove" : "cyberwareInstall", kit: cmd.kit, id: cmd.id };
+    }
+    function openCyberware() {
+      if (!global.CyberwareUI) return;
+      CyberwareUI.open(() => { const src = cyberwareSrc(); return src ? CyberwareUI.viewModel(src) : null; },   // 每次重画都读最新的包：钱包 / 预览 / 已装列表
+        cmd => { if (disabled()) return; call(() => api.submit(cyberwareCommand(cmd))); });
+    }
+    /** 跑团诊所开着时的入口（和下面旧的血量层改造申请并列） */
+    function trpgCyberwareMarkup() {
+      const src = view.mode !== "rogue" && global.CyberwareUI ? cyberwareSrc() : null;
+      if (!src) return "";
+      const hs = src.cyberware.heroes;
+      return `<section class="ol-rogue-box ol-cw-entry ol-trpg-cw" aria-label="诊所 · 义体"><h3>🦾 诊所：义体</h3>
+        <p class="ol-muted">${hs.map(h => `${esc(h.name)} 的钱包 ${esc(h.purse)} 奎支 · 改造率 ${esc(h.view.rate)}% / ${esc(h.view.cap)}%`).join("<br>")}</p>
+        <p class="ol-muted">装 / 拆从这名角色自己的钱包出，不用主持人同意；结果会发到小队频道。</p>
+        <div class="ol-attr-btns">${button("打开诊所 · 义体", "trpgCyberware", "", disabled(), true)}</div></section>`;
+    }
+    function openBackpack() {
+      if (!global.BackpackUI || !global.WorkshopData) return;
+      BackpackUI.open(() => { const r = view.packet?.rogue; return r ? WorkshopData.viewBackpackModel(r) : null; }, { openWorkshop: id => openWorkshop(id) });
+    }
     function rogueMarkup(r) {
       const mine = (r.heroes || []).filter(h => h.mine), payer = mine[0] ? mine[0].kit : null, purse = mine[0] ? mine[0].purse : 0;
       const stageName = { board: "任务板", task: "任务途中", camp: "回城休整", boss: "幕末首领", interlude: "幕间", victory: "四幕通关", over: "本局结束" }[r.stage] || "";
@@ -444,20 +505,16 @@
       const shop = r.shop && payer ? `<section class="ol-rogue-box" aria-label="商店"><h3>商店（你有 ${esc(purse)} 奎支）</h3><ul>${r.shop.map(row => `<li>${esc(row.name)} · ${esc(row.price)} 奎支${row.team ? " · 归队伍公用" : ""} ${rogueAct("买", { action: "buy", key: row.key, qty: 1, payer }, purse < row.price)}</li>`).join("")}</ul>${redeem}</section>` : "";
       const smith = r.smith && payer ? `<section class="ol-rogue-box" aria-label="工匠"><h3>${esc(r.smith.name)}（你有 ${esc(purse)} 奎支）</h3><ul>${r.smith.upgrades.map(o => `<li>${esc(o.name)} Lv${esc(o.level)} ${o.max ? "已满级" : rogueAct(`升到 ${o.level + 1} 级（${o.cost}）`, { action: "upgradeWeapon", kit: o.kit, smith: r.smith.id }, purse < o.cost)}</li>`).join("")}${r.smith.offers.map(o => `<li>改装件 ${esc(o.name)}<small>${esc(o.text)}</small> ${o.sold ? "已卖出" : rogueAct(`买（${o.price}）`, { action: "buyPart", smith: r.smith.id, index: o.index, payer }, purse < o.price)}</li>`).join("")}</ul></section>` : "";
       const slots = r.smith ? r.smith.slots || [] : [];
-      const parts = r.parts && r.parts.length && payer ? `<section class="ol-rogue-box" aria-label="改装件"><h3>你的改装件</h3><ul>${r.parts.map((p, i) => `<li>${esc(p.name)} ×${esc(p.have)}<small>${esc(p.text)}</small> ${rogueAct(`卖掉（${p.sell}）`, { action: "sellPart", part: p.id, payer })}${slots.length ? `<select id="ol-rp-${i}" aria-label="装到哪个槽">${slots.map(x => option(`${x.kit}:${x.slot}`, `${x.name} 槽 ${x.slot + 1}${x.cur ? "（现在：" + x.cur + "）" : ""}`, false)).join("")}</select>${button(`装上（${p.install}）`, "roguePartInstall", `data-part="${esc(p.id)}" data-select="ol-rp-${i}" data-smith="${esc(r.smith.id)}"`, disabled() || purse < p.install)}` : ""}</li>`).join("")}</ul></section>` : "";
+      const parts = r.parts && r.parts.length && payer ? `<section class="ol-rogue-box" aria-label="改装件"><h3>你的改装件</h3><ul>${r.parts.map((p, i) => `<li>${esc(p.name)} ×${esc(p.have)}<small>${esc(p.text)}</small> ${rogueAct(`卖掉（${p.sell}）`, { action: "sellPart", part: p.id, payer })}${slots.length ? `<select id="ol-rp-${i}" data-ol-cmp="${esc(p.id)}" aria-label="装到哪个槽">${slots.map(x => option(`${x.kit}:${x.slot}`, `${x.name} 槽 ${x.slot + 1}${x.cur ? "（现在：" + x.cur + "）" : ""}`, false)).join("")}</select>${button(`装上（${p.install}）`, "roguePartInstall", `data-part="${esc(p.id)}" data-select="ol-rp-${i}" data-smith="${esc(r.smith.id)}"`, disabled() || purse < p.install)}<span class="pt-cmp" id="ol-rp-${i}-cmp">${partCompare(r, p.id, slots[0])}</span>` : ""}</li>`).join("")}</ul></section>` : "";
       const filled = slots.filter(x => x.cur);
       const unmount = r.smith && filled.length ? `<section class="ol-rogue-box" aria-label="拆改装件"><h3>已装的改装件</h3><ul>${filled.map(x => `<li>${esc(x.name)} 槽 ${esc(x.slot + 1)}：${esc(x.cur)} ${rogueAct("拆下（不要钱）", { action: "removePart", kit: x.kit, slot: x.slot, smith: r.smith.id })}</li>`).join("")}</ul></section>` : "";
       const clinic = r.clinic && r.clinic.length ? `<section class="ol-rogue-box" aria-label="诊所"><h3>诊所（你有 ${esc(purse)} 奎支）</h3><ul>${r.clinic.map(c => `<li>${esc(c.name)} ${c.cost ? rogueAct(`治疗到满血（${c.cost}）`, { action: "healHero", kit: c.kit }, purse < c.cost) : "满血"}</li>${c.cyber ? cyberMarkup(c, purse) : ""}`).join("")}</ul></section>` : "";
+      const cwEntry = global.CyberwareUI && cyberwareSrc() ? `<section class="ol-rogue-box ol-cw-entry" aria-label="义体"><div class="ol-attr-btns">${button("诊所 · 义体", "rogueCyberware", "", false, true)}</div></section>` : "";
       const wk = r.workshop;
-      const workshop = wk && payer ? `<section class="ol-rogue-box" aria-label="工坊"><h3>工坊（${wk.place === "bench" ? "工作台：五类都能做" : "休息点：场地、自我效果做不了"}）</h3>
-        <p class="ol-muted">每人给自己的角色排一样，房主按「开工」大家一起做，时间按最久的算。有对应熟练项的队友打下手给优势。补金属的钱从你自己的钱包出；做出来的东西归你。</p>
-        <ul>${(wk.queue || []).map(j => `<li>${esc(j.name)}：${esc(j.itemName)}${j.helperName ? `（${esc(j.helperName)} 打下手）` : ""} · ${esc(Math.round(j.chance * 100))}% · ${esc(j.hours)} 小时</li>`).join("") || "<li>还没有人排活。</li>"}</ul>
-        ${(wk.mine || []).map(m => `<div class="ol-attr-btns"><b>${esc(m.name)}</b><select id="ol-wk-item-${esc(m.kit)}" aria-label="做什么">${option("", "不做", false)}${m.options.map(o => option(o.id, `${o.name} · ${o.prof} · ${Math.round(o.chance * 100)}% · ${o.hours} 小时 · ${o.mats}`, (wk.queue || []).some(j => j.kit === m.kit && j.item === o.id))).join("")}</select><select id="ol-wk-help-${esc(m.kit)}" aria-label="谁打下手">${option("", "没人帮", false)}${wk.helpers.filter(x => x.kit !== m.kit).map(x => option(x.kit, x.name + " 打下手", (wk.queue || []).some(j => j.kit === m.kit && j.helper === x.kit))).join("")}</select>${button("排上", "rogueCraftJob", `data-kit="${esc(m.kit)}"`, disabled(), true)}</div>`).join("")}
-        ${(wk.learn || []).length ? `<h4>向${esc(wk.learn[0].smithName)}学配方（你有 ${esc(purse)} 奎支）</h4><ul>${wk.learn.map(l => `<li>${esc(l.name)} · ${esc(l.prof)} · ${esc(l.diffName)} ${rogueAct(`学（${l.price}）`, { action: "learnRecipe", item: l.item, smith: l.smith, payer }, purse < l.price)}</li>`).join("")}</ul>` : ""}
-        ${(wk.salvage || []).length ? `<h4>拆解（不花时间）</h4><ul>${wk.salvage.map(x => `<li>${esc(x.name)} ×${esc(x.have)} → ${esc(x.yield.map(y => `${y.name}×${y.qty}`).join("、"))} ${rogueAct("拆一件", { action: "salvage", item: x.id, payer })}</li>`).join("")}</ul>` : ""}
-      </section>` : "";
+      // 工坊 / 背包：按钮打开浮层（workshop-ui.js / backpack-ui.js，和房主同一套渲染器；数据是 viewFor 的 craft / bag / materialBar …）
+      const workshop = payer ? `<section class="ol-rogue-box ol-ws-entry" aria-label="工坊与背包"><div class="ol-attr-btns">${r.workshopAvailable && wk ? button("工坊", "rogueWorkshop", "", false, true) : ""}${button("背包", "rogueBackpack", "", false)}</div></section>` : "";
       const log = (r.log || []).length ? `<section class="ol-rogue-box" aria-label="最近发生"><h3>最近发生</h3><ul>${r.log.map(t => `<li>${esc(t)}</li>`).join("")}</ul></section>` : "";
-      return head + over + choice + waits + loot + lootLog + vote + last + heroes + board + task + shop + smith + parts + unmount + clinic + workshop + log;
+      return head + over + choice + waits + loot + lootLog + vote + last + heroes + board + task + shop + smith + parts + unmount + clinic + cwEntry + workshop + log;
     }
     /** 义体改造：和单机诊所一样填装甲 / 护盾 / 沙尘层的点数、要不要换成星灵；价格按房主发来的单价估 */
     const CYBER_LAYERS = [["armor", "装甲"], ["shield", "护盾"], ["sand", "沙尘"]];
@@ -510,7 +567,7 @@
       if (screen === "lobby" || !data) return '<div class="ol-wait"><h2>等待房间同步</h2><p>房主准备好后会更新这里。</p></div>';
       if (view.packet?.mode === "rogue" && view.packet.rogue && screen === "exploration") return rogueMarkup(view.packet.rogue);
       const units = (data.units || []).filter(u => !u.hidden), logs = view.packet?.publicLogs || [];
-      return `<header class="ol-stage-heading"><div><span class="ol-muted">${esc(view.roomCode)} · ${screen === "battle" ? `第 ${data.turnNo || 1} 回合` : screen === "ended" ? "遭遇结束" : "探索环节"}</span>${screen === "battle" && global.Chain && data.chainStatus ? `<div class="ol-chain">${global.Chain.barHtml(data.chainStatus)}</div>` : ""}<h1>${screen === "battle" ? "战场" : screen === "ended" ? "战斗结算" : "与队伍同行"}</h1><div class="ol-info-tools">${global.WorldMap ? button("地图", "map") : ""}${button("角色资料", "info", 'data-info="sheet"', pending)}${button("武器", "info", 'data-info="armory"', pending)}${button("背包", "info", 'data-info="bag"', pending)}${button("战绩", "info", 'data-info="record"', pending)}${suppliesButton()}${view.packet?.mode !== "rogue" ? button(`任务日志${questList().some(q => q.status === "active") ? ` · ${questList().filter(q => q.status === "active").length}` : ""}`, "quests") : ""}</div></div>${weatherMarkup(data)}</header>${screen === "ended" ? resultMarkup() : ""}${checksMarkup(screen === "battle")}${screen === "battle" || screen === "ended" ? (global.OnlineBattle && global.UnitCard ? '<div class="ol-battle-slot"></div>' : `<div class="ol-zones"${zoneGrid(data).style}>${zoneGrid(data).zones.map(z => `<section class="ol-zone"${z.style}><h2>${z.id} 区</h2>${fieldsMarkup(data, z.id)}${units.filter(u => Number(u.zone) === z.id).map(card).join("") || '<p class="ol-muted">空区域</p>'}${(data.props || []).filter(p => Number(p.zone) === z.id && !p.destroyed).map(p => `<article class="ol-prop" data-prop-id="${esc(p.id)}"><b>${esc(p.name || p.kind || "配置物")}</b>${p.hp != null ? `<span>耐久 ${esc(p.hp)}${p.maxHp == null ? "" : " / " + esc(p.maxHp)}</span>` : ""}</article>`).join("")}</section>`).join("")}</div>${gapsMarkup(data)}${screen === "ended" ? "" : actionsMarkup()}`) : `<p class="ol-muted ol-explore-hint">主持人正在管理探索与遭遇。右侧「小队」频道可以和大家聊天，「消息与成员」里可以私下回复主持人。</p><div class="ol-exploration-party">${units.filter(u => u.isPlayer && !u.weaponOf).map(card).join("")}</div>`}`;
+      return `<header class="ol-stage-heading"><div><span class="ol-muted">${esc(view.roomCode)} · ${screen === "battle" ? `第 ${data.turnNo || 1} 回合` : screen === "ended" ? "遭遇结束" : "探索环节"}</span>${screen === "battle" && global.Chain && data.chainStatus ? `<div class="ol-chain">${global.Chain.barHtml(data.chainStatus)}</div>` : ""}<h1>${screen === "battle" ? "战场" : screen === "ended" ? "战斗结算" : "与队伍同行"}</h1><div class="ol-info-tools">${global.WorldMap ? button("地图", "map") : ""}${screen === "battle" && matchupOf() ? button("克制表", "matchup") : ""}${button("角色资料", "info", 'data-info="sheet"', pending)}${button("武器", "info", 'data-info="armory"', pending)}${button("背包", "info", 'data-info="bag"', pending)}${button("战绩", "info", 'data-info="record"', pending)}${suppliesButton()}${view.packet?.mode !== "rogue" ? button(`任务日志${questList().some(q => q.status === "active") ? ` · ${questList().filter(q => q.status === "active").length}` : ""}`, "quests") : ""}</div></div>${weatherMarkup(data)}</header>${screen === "ended" ? resultMarkup() : ""}${checksMarkup(screen === "battle")}${screen === "battle" || screen === "ended" ? (global.OnlineBattle && global.UnitCard ? '<div class="ol-battle-slot"></div>' : `<div class="ol-zones"${zoneGrid(data).style}>${zoneGrid(data).zones.map(z => `<section class="ol-zone"${z.style}><h2>${z.id} 区</h2>${fieldsMarkup(data, z.id)}${units.filter(u => Number(u.zone) === z.id).map(card).join("") || '<p class="ol-muted">空区域</p>'}${(data.props || []).filter(p => Number(p.zone) === z.id && !p.destroyed).map(p => `<article class="ol-prop" data-prop-id="${esc(p.id)}"><b>${esc(p.name || p.kind || "配置物")}</b>${p.hp != null ? `<span>耐久 ${esc(p.hp)}${p.maxHp == null ? "" : " / " + esc(p.maxHp)}</span>` : ""}</article>`).join("")}</section>`).join("")}</div>${gapsMarkup(data)}${screen === "ended" ? "" : actionsMarkup()}`) : `<p class="ol-muted ol-explore-hint">主持人正在管理探索与遭遇。右侧「小队」频道可以和大家聊天，「消息与成员」里可以私下回复主持人。</p><div class="ol-exploration-party">${units.filter(u => u.isPlayer && !u.weaponOf).map(card).join("")}</div>`}`;
     }
     function observeMessages() {
       const rows = view.messages || [], incoming = rows.filter(m => !seenMessages.has(m.id) && m.from !== own());
@@ -527,7 +584,7 @@
     const chatRows = () => (hs().chat || []).filter(m => m && typeof m.text === "string");
     const clock = at => { if (!at) return ""; const d = new Date(at); return isNaN(d) ? "" : `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
     function chatListMarkup(rows) {
-      return rows.map(m => `<li class="${m.operatorId && m.operatorId === own() ? "ol-mine" : ""}${m.roll ? " ol-roll" : ""}${m.tier ? " ol-tier-" + m.tier : ""}${m.secret ? " ol-secret" : ""}${m.title ? " ol-title-row" : ""}"><div><b>${esc(m.name || m.operatorName || playerName(m.operatorId))}</b><small>${esc(clock(m.at))}</small></div><p>${esc(m.text)}</p></li>`).join("") || '<li class="ol-muted">还没有人说话。消息所有人都能看到，并一直保留在记录里。</li>';
+      return rows.map(m => `<li class="${m.operatorId && m.operatorId === own() ? "ol-mine" : ""}${m.roll ? " ol-roll" : ""}${m.tier ? " ol-tier-" + m.tier : ""}${m.secret ? " ol-secret" : ""}${m.title ? " ol-title-row" : ""}"><div><b>${esc(m.name || m.operatorName || playerName(m.operatorId))}</b><small>${esc(clock(m.at))}</small></div><p${artAttr(m.text)}>${esc(m.text)}</p></li>`).join("") || '<li class="ol-muted">还没有人说话。消息所有人都能看到，并一直保留在记录里。</li>';
     }
     /** 更新列表（只换列表内容，不碰输入框）；原来在底部就继续贴底 */
     function fillList(list, markup) {
@@ -563,14 +620,33 @@
       if (force || sideKeys.chat !== chatMarkup) { sideKeys.chat = chatMarkup; fillList(side.querySelector(".ol-side-chat"), chatMarkup); }
       side.querySelector(".ol-side-form button[type=submit]").disabled = chatSending || paused();
     }
+    /** 聊天框：Enter 发送，Shift+Enter 换行；输入法选字时按的 Enter 不算 */
+    function chatEnter(event) {
+      if (event.key !== "Enter" || event.shiftKey || event.isComposing || event.keyCode === 229 || event.target.tagName !== "TEXTAREA") return;
+      event.preventDefault();
+      event.target.form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    }
+    /** 聊天框跟着内容长高，最多 160px，再多就在框里滚动 */
+    function fitChatBox(box) {
+      if (box?.tagName !== "TEXTAREA") return;
+      box.style.height = "auto"; box.style.height = Math.min(box.scrollHeight + 2, 160) + "px";
+    }
+    /** 多行字符画（有行首空格或全角空格）：不自动折行，CSS 按最长一行的字宽（--cols，全角算 1）缩小字号；普通消息不加 */
+    function artAttr(t) {
+      if (typeof t !== "string" || !t.includes("\n") || !/(?:^|\n)[ \t　]|　/.test(t)) return "";
+      const wide = /[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]/;
+      const cols = Math.max(...t.split("\n").map(line => Array.from(line).reduce((w, ch) => w + (wide.test(ch) || ch.codePointAt(0) > 0xffff ? 1 : 0.55), 0)));
+      return ` class="ol-art" style="--cols:${Math.ceil(cols) + 0.5}"`;
+    }
     async function sendChatText(input, button) {
-      const text = input.value.trim();
-      if (!text || chatSending || paused()) return;
+      // 原样发给房主，由房主统一整理空白（多行消息要保留第一行行首的空格）
+      const text = input.value;
+      if (!text.trim() || chatSending || paused()) return;
       chatSending = true; if (button) button.disabled = true;
       try {
         const result = await api.submit({ type: "chat", text });
         if (result?.ok === false) { notice = result.error || "消息没有发出去"; render(); }
-        else input.value = "";
+        else { input.value = ""; fitChatBox(input); }
       } catch (error) { notice = error.message || "消息没有发出去"; render(); }
       finally { chatSending = false; if (button) button.disabled = paused(); }
     }
@@ -587,12 +663,13 @@
           const nav = document.createElement("nav"); nav.className = "ol-host-tabs"; nav.setAttribute("role", "tablist");
           nav.innerHTML = `<button type="button" role="tab" data-host-tab="log" class="ol-tab">${label}</button><button type="button" role="tab" data-host-tab="chat" class="ol-tab">小队<span class="ol-badge" hidden></span></button>`;
           const box = document.createElement("div"); box.className = "ol-host-chat";
-          box.innerHTML = `<ol class="ol-side-chat" aria-live="polite"></ol><form class="ol-side-form"><button type="button" class="ol-button ol-dice" data-roll-open="1" title="选角色和熟练项掷 d100（可以暗骰）">🎲</button><button type="button" class="ol-button ol-dice" data-title-open="1" title="在所有玩家画面中间打出大字（比如「援军来了」）">📢</button><input maxlength="500" autocomplete="off" aria-label="小队消息" placeholder="说点什么…"><button type="submit" class="ol-button ol-primary">发送</button></form>`;
+          box.innerHTML = `<ol class="ol-side-chat" aria-live="polite"></ol><form class="ol-side-form"><button type="button" class="ol-button ol-dice" data-roll-open="1" title="选角色和熟练项掷 d100（可以暗骰）">🎲</button><button type="button" class="ol-button ol-dice" data-title-open="1" title="在所有玩家画面中间打出大字（比如「援军来了」）">📢</button><textarea rows="1" maxlength="500" autocomplete="off" enterkeyhint="send" aria-label="小队消息" title="Enter 发送，Shift+Enter 换行" placeholder="说点什么…"></textarea><button type="submit" class="ol-button ol-primary">发送</button></form>`;
           root.prepend(nav); root.appendChild(box);
           const m = { root, nav, box, tab: def, key: "", seen: null, unread: 0, remove() { nav.remove(); box.remove(); root.classList.remove("ol-chat-mode"); } };
-          nav.addEventListener("click", e => { const b = e.target.closest("[data-host-tab]"); if (!b) return; m.tab = b.dataset.hostTab; paintHost(m, true); if (m.tab === "chat") box.querySelector("input").focus({ preventScroll: true }); });
-          box.addEventListener("keydown", e => e.stopPropagation());
-          box.addEventListener("submit", e => { e.preventDefault(); sendChatText(box.querySelector("input"), box.querySelector("button[type=submit]")); });
+          nav.addEventListener("click", e => { const b = e.target.closest("[data-host-tab]"); if (!b) return; m.tab = b.dataset.hostTab; paintHost(m, true); if (m.tab === "chat") box.querySelector("textarea").focus({ preventScroll: true }); });
+          box.addEventListener("keydown", e => { e.stopPropagation(); chatEnter(e); });
+          box.addEventListener("input", e => fitChatBox(e.target));
+          box.addEventListener("submit", e => { e.preventDefault(); sendChatText(box.querySelector("textarea"), box.querySelector("button[type=submit]")); });
           hostMounts.push(m);
         }
       }
@@ -839,6 +916,15 @@
       document.body.classList.toggle("ol-host-online", !!(view.active && view.isHost));
       document.body.classList.toggle("ol-in-battle", view.screen === "battle" || view.screen === "ended");
       dock.hidden = !view.active;
+      if (view.active && !view.isHost) {
+        // 进战斗（或离开单局画面）：工坊、非战斗模式的背包收起来
+        if (view.screen !== "exploration") { if (global.WorkshopUI) global.WorkshopUI.close(); if (global.BackpackUI && !global.BackpackUI.inBattleMode()) global.BackpackUI.close(); }
+        if (global.WorkshopUI) global.WorkshopUI.refresh(); if (global.BackpackUI) global.BackpackUI.refresh();
+        // 诊所 · 义体：离开探索就收起；否则按新包重画（钱包、预览、已装列表）；包里没有 cyberware 了（离开诊所）refresh 会自己关
+        if (view.screen !== "exploration" && global.CyberwareUI) global.CyberwareUI.close();
+        if (global.CyberwareUI) global.CyberwareUI.refresh();
+        if (global.MatchupUI) { if (!matchupOf()) global.MatchupUI.close(); else global.MatchupUI.refresh(); }
+      }
       document.body.classList.toggle("online-player", !!view.active && !view.isHost);
       if (view.active) {
         if (!animating) displayState = view.state || null;
@@ -860,7 +946,12 @@
       if (myAsk && view.screen !== "lobby") { panelOpen = false; suppliesOpen = false; }
       panel.hidden = !(panelOpen || view.active && view.screen === "lobby" && !rogueHost);
       pauseBar.hidden = !(view.active && !view.isHost && view.screen !== "lobby" && (paused() || view.offlineWait));
-      if (!pauseBar.hidden) pauseBar.textContent = paused() ? "⏸ 房间暂停：正在等待连接恢复，恢复后会自动继续。" : `⏳ ${view.offlineWait.name} 离线，等待其返回。`;
+      // 离线等待：显示还剩几秒（到时间自动跳过 / 结束他的行动）；截止时间已换成本机的钟（online-game.js · localDeadlines）
+      if (!pauseBar.hidden) {
+        const bar = paused() ? "⏸ 房间暂停：正在等待连接恢复，恢复后会自动继续。"
+          : `⏳ ${esc(view.offlineWait.name)} 离线，等待其返回${Number(view.offlineWait.deadline) > 0 ? `（<span role="timer" aria-live="off" data-ol-deadline="${Number(view.offlineWait.deadline)}"></span>，到时间自动跳过）` : ""}。`;
+        if (pauseBar.dataset.html !== bar) { pauseBar.innerHTML = bar; pauseBar.dataset.html = bar; if (global.OnlineBattle && global.OnlineBattle.tickCountdowns) global.OnlineBattle.tickCountdowns(pauseBar); }
+      }
       document.body.classList.toggle("ol-paused", !pauseBar.hidden);
       paintLevelUps();
       if (!panel.hidden) html(panel, view.active ? roomMarkup() : entryMarkup(), "panel");
@@ -911,7 +1002,7 @@
       if (field) {
         // 有对应单位的选项 → value 是单位 id（战场上亮起、编号）；其余 value 为空 → 提示栏按钮
         const menuOf = { kind: "unit", title: field.title || "选择", options: field.options.map(o => ({ label: o.label + (o.sub ? `（${o.sub}）` : ""), value: o.target || null })) };
-        return { mine, current: cur, acting, menu: menuOf, skills: [], armed: "__field", rule: true, hint: field.title || "", busy: disabled() };
+        return { mine, current: cur, acting, menu: menuOf, skills: [], armed: "__field", rule: true, hint: field.title || "", busy: disabled(), deadline: Number(field.deadline) || 0 };
       }
       return { mine, current: cur, acting, menu: choices, skills: skillsFor === cur && acting ? skillOptions : [],
         armed: request && request.skill || "", hint, busy: disabled() };
@@ -1106,6 +1197,10 @@
           if (await call(() => api.submit({ type: "rogue.act", command: { action: "modifyHero", kit, plan } }))) delete cyberDraft[kit];
           break;
         }
+        case "rogueWorkshop": openWorkshop(); break;
+        case "matchup": if (global.MatchupUI) global.MatchupUI.toggle(() => matchupOf()); break;
+        case "rogueBackpack": openBackpack(); break;
+        case "rogueCyberware": case "trpgCyberware": openCyberware(); break;
         case "rogueCraftJob": {
           const kit = b.dataset.kit, item = byId("ol-wk-item-" + kit)?.value || null, helper = byId("ol-wk-help-" + kit)?.value || null;
           if (!disabled() && kit) await call(() => api.submit({ type: "rogue.act", command: { action: "setCraftJob", kit, item, helper } }));
@@ -1133,13 +1228,51 @@
       const tape = packet.tape || [];
       if (!tape.length) return;
       animating = true; render();
+      const held = [];   // 这一段演完之前留在场上的被打倒的敌人（卡片 + 红叉），演完一起淡出
+      let zoomed = false;
       try {
+        // 攻击演出（attack-fx.js）：房主发来这一下谁打谁、哪种招式（有专属演出的再带脚本名和现场数据）——
+        // 先播出手和弹道，再一段段跳数字，主攻击那几段补上打中的形状（刀光、冲击星……），敌人倒下喷一个红叉
+        const AF = global.AttackFx, fx = packet.fx && AF ? packet.fx : null;
+        const cardFor = (uid) => (battle && battle.cardOf(uid)) || [...stage.querySelectorAll("[data-unit-id]")].find(node => node.dataset.unitId === uid);
+        const rectOf = (node) => { if (!node || !node.isConnected) return null; const r = node.getBoundingClientRect(); return r.width ? { x: r.left + r.width / 2, y: r.top + r.height * .42, w: r.width, h: r.height } : null; };
+        const scr = fx && fx.script ? AF.script(fx.script) : null;
+        const ctx = scr ? onlineCtx(fx, tape, cardFor, rectOf) : null;
+        let fxFrom = null, mainNo = 0;
+        if (fx && generation === playbackGeneration) {
+          // 协助攻击、碎渣重炮、狂瀑：镜头推近
+          if (fx.assist || (scr && scr.zoom)) { zoomed = zoomOnline(rectOf(cardFor(fx.target))); if (zoomed) await AF.after(300); }
+          // 拉斯缪尔的能量罐
+          if (fx.tank) { const tr = rectOf(cardFor(fx.tank.id)); if (tr) AF.tank(tr, fx.tank.from, fx.tank.to, { ms: fx.tank.ms }); }
+          try { fxFrom = await strikeOnline(fx, scr, ctx, cardFor, rectOf); } catch (_) { fxFrom = null; }
+          // 格挡成功：协助格挡的火花在两人连线的中点，自己格挡的在格挡的人身上
+          if (fx.parried) {
+            const b = rectOf(cardFor(fx.blocker || fx.target)), a = rectOf(cardFor(fx.actor));
+            if (fx.blocker && a && b) AF.sparks({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }); else if (b) AF.clash(b);
+          }
+        }
+        const deadBefore = new Set(((displayState || {}).units || []).filter(u => u && u.dead).map(u => u.id));
         for (const event of tape) {
           if (destroyed || generation !== playbackGeneration) break;
           if (event.type !== "pop") continue;
+          const main = !!(fx && fxFrom && event.kind === "dmg" && event.main), n = main ? mainNo++ : -1;
+          // 主攻击的后几段：有专属演出的照脚本再来一下（再飞一发、再撞一次……）；一闪这类一下子全部结算的不用
+          if (main && n > 0 && scr && scr.again && !scr.instant) { try { await scr.again(ctx, event, n); } catch (_) { /* 画坏了不影响结算 */ } }
+          // 只打击破的那一下（二次盾突……）：有专属演出的先演出手
+          if (fxFrom && event.kind === "break" && scr && scr.brk) { try { await scr.brk(ctx, event); } catch (_) { /* 同上 */ } }
           if (Array.isArray(event.snap)) displayState = { ...(displayState || packet.state || {}), units: copy(event.snap) };
           paintStage();
-          const card = (battle && battle.cardOf(event.unitId)) || [...stage.querySelectorAll("[data-unit-id]")].find(node => node.dataset.unitId === event.unitId);
+          const card = cardFor(event.unitId);
+          if (AF && card && event.kind === "dmg") {
+            const u = ((displayState || {}).units || []).find(x => x && x.id === event.unitId);
+            if (u && u.dead && !u.isPlayer && !deadBefore.has(u.id)) {
+              // 被打倒：这一段演完之前卡片和红叉都先留着（game.css · .unit-wrap.dead.ko-held）
+              deadBefore.add(u.id);
+              card.classList.add("ko-held");
+              const uid = u.id;
+              held.push({ id: uid, slow: !!(u.display && u.display.killBig), h: AF.ko(rectOf(card), { hold: "manual", track: () => rectOf(cardFor(uid)) }) });
+            }
+          }
           if (event.kind === "proc") {
             // 效果生效：卡上对应的图标放大一下并发光，不弹字
             if (card) global.HudIcons?.procIn(card, event.fx);
@@ -1156,11 +1289,138 @@
             if (fk) global.HudIcons.procIn(card, fk);
             card.classList.add("ol-impact"); bubble.classList.add("ol-visible");
             if (global.HitFx && (event.kind === "dmg" || event.kind === "highboom")) global.HitFx.burst(event.element || "physical", card.getBoundingClientRect(), { big: event.kind === "highboom" });
+            if (main && !fx.parried) {
+              if (scr && scr.impact) { try { scr.impact(ctx, event, n, false); } catch (_) { /* 同上 */ } }
+              else AF.impact(rectOf(card), fx.move, { n, from: fxFrom });
+            }
           }
-          await new Promise(resolve => setTimeout(resolve, 180));
+          await new Promise(resolve => setTimeout(resolve, main && scr && scr.instant ? 40 : 180));
           if (card) { card.classList.remove("ol-impact"); card.querySelector(".ol-popup")?.classList.remove("ol-visible"); card.querySelector(".ol-pop-temp")?.remove(); }
         }
-      } finally { if (generation === playbackGeneration) { animating = false; displayState = packet.state || displayState; render(); } }
+      } finally {
+        if (zoomed) zoomOutOnline();
+        held.forEach(k => {
+          const c = battle && battle.cardOf(k.id);
+          if (c) c.classList.remove("ko-held");
+          if (k.h) (k.slow ? k.h.release(2400, 1400) : k.h.release(1200, 500));
+        });
+        if (generation === playbackGeneration) { animating = false; displayState = packet.state || displayState; render(); }
+      }
+    }
+    /** 联机玩家：照房主发来的招式播出手——有专属演出的照脚本演；没有的近身冲过去（打到之后再回位）、远程蓄力 + 弹道、支援 / 挂效果拉一条线；返回出手的人的位置 */
+    async function strikeOnline(fx, scr, ctx, cardFor, rectOf) {
+      const AF = global.AttackFx, a = cardFor(fx.actor), t = cardFor(fx.target), m = fx.move;
+      const ra = rectOf(a), rt = rectOf(t);
+      if (!ra || !m) return null;
+      if (scr && (scr.pre || scr.self)) { try { await (scr.pre || scr.self)(ctx); } catch (_) { /* 画坏了不影响结算 */ } return rectOf(a) || ra; }
+      if (!rt) return null;
+      if (m.kind === "support" || m.kind === "hex") {
+        if (fx.actor !== fx.target) await AF.link(ra, rt, m);
+        AF.impact(rt, m, { from: ra });
+        return ra;
+      }
+      if (m.melee) {
+        await dashCard(a, ra, rt, { heavy: m.heavy });
+        if (m.flash) AF.area(rt, ra, m);
+        return ra;
+      }
+      await AF.windup(ra, rt, m);
+      if (m.area) AF.area(rt, ra, m);
+      await AF.travel(ra, rt, m);
+      return ra;
+    }
+    /** 把一张卡冲向 t（和 game.js · dashTo 一样：先往后一收再扑上去，打到之后回原位）。
+     *  o.reach 冲多远（999 = 一直冲到 t）· o.heavy 冲得远一点 · o.speed 时间倍率 · o.hold 到了停多久 · o.keep 冲过去就消失的（等它隐去再悄悄回位） */
+    async function dashCard(node, a, t, o) {
+      o = o || {};
+      if (!node || !a || !t) return;
+      const AF = global.AttackFx;
+      const dx = t.x - a.x, dy = t.y - a.y, d = Math.hypot(dx, dy) || 1, ux = dx / d, uy = dy / d;
+      const reach = o.reach >= 999 ? d : Math.max(16, Math.min(d - Math.min(a.w, t.w) * .5, o.reach || (o.heavy ? 112 : 92)));
+      const k = o.speed || 1, token = String(fxRandom());
+      node.dataset.olDash = token; node.style.zIndex = "5";
+      node.style.transition = `transform ${90 * k}ms cubic-bezier(.2, .7, .3, 1)`;
+      node.style.transform = `translate(${(-ux * 12).toFixed(1)}px, ${(-uy * 12).toFixed(1)}px)`;
+      await AF.after(90 * k);
+      node.style.transition = `transform ${100 * k}ms cubic-bezier(.55, 0, .9, .55)`;
+      node.style.transform = `translate(${(ux * reach).toFixed(1)}px, ${(uy * reach).toFixed(1)}px)`;
+      await AF.after(100 * k);
+      settleCard(node, token, o.hold || (o.keep ? 560 : 130), o.keep ? 0 : 240);
+    }
+    /** 出手后回原位；中途这张卡又被别的动作接管就不管了 */
+    function settleCard(node, token, hold, back) {
+      setTimeout(() => {
+        if (node.dataset.olDash !== token) return;
+        node.style.transition = `transform ${back}ms cubic-bezier(.3, .8, .3, 1)`; node.style.transform = "";
+        setTimeout(() => { if (node.dataset.olDash !== token) return; node.style.transition = ""; node.style.zIndex = ""; delete node.dataset.olDash; }, back + 20);
+      }, hold);
+    }
+    /** 专属演出（attack-fx.js · SCRIPTS）的「现场」：和 game.js · strikeCtx 一样的几样东西，换成联机画面里的卡片 */
+    function onlineCtx(fx, tape, cardFor, rectOf) {
+      const AF = global.AttackFx;
+      const boxOf = (node) => { if (!node) return null; const r = node.getBoundingClientRect(); return r.width ? { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height } : null; };
+      const zoneRect = (x) => boxOf(typeof x === "number" ? battle && battle.el.querySelector(`.g-zone[data-num="${x}"]`) : cardFor(x)?.closest(".g-zone"));
+      const pops = tape.filter(e => e.type === "pop");
+      const targets = [];
+      pops.forEach(e => { if (e.unitId && e.unitId !== fx.actor && /^(dmg|break|status|fxword)$/.test(e.kind) && !targets.includes(e.unitId)) targets.push(e.unitId); });
+      const shakeEl = () => battle && battle.el;
+      return {
+        actor: fx.actor, target: fx.target, mains: pops.filter(e => e.kind === "dmg" && e.main), targets, move: fx.move || {}, data: fx.data || {},
+        rect: (id) => (typeof id === "number" ? zoneRect(id) : rectOf(cardFor(id))),
+        zoneRect,
+        wait: (ms) => AF.after(ms),
+        dash: (id, to, o) => { const n = cardFor(id); return dashCard(n, rectOf(n), to, o); },
+        recoil: (id, to, px) => {
+          const n = cardFor(id), a = rectOf(n); if (!n || !a || !to) return;
+          const dx = to.x - a.x, dy = to.y - a.y, d = Math.hypot(dx, dy) || 1, k = px || 8, token = String(fxRandom());
+          n.dataset.olDash = token; n.style.transition = "transform 70ms ease-out";
+          n.style.transform = `translate(${(-dx / d * k).toFixed(1)}px, ${(-dy / d * k).toFixed(1)}px)`;
+          settleCard(n, token, 110, 220);
+        },
+        nudge: (id, dx, dy, ms) => {
+          const n = cardFor(id); if (!n) return;
+          const token = String(fxRandom()); ms = ms || 240;
+          n.dataset.olDash = token; n.style.transition = `transform ${ms * .4}ms cubic-bezier(.2, .8, .3, 1)`;
+          n.style.transform = `translate(${dx}px, ${dy}px)`;
+          settleCard(n, token, ms * .9, 260);
+        },
+        shake: (p) => {
+          const w = shakeEl(); if (!w) return;
+          const c = p >= 1 ? "quake" : "quake-s";
+          w.classList.remove("quake", "quake-s"); void w.offsetWidth; w.classList.add(c);
+          setTimeout(() => w.classList.remove(c), p >= 1 ? 600 : 340);
+        },
+        cls: (id, name, ms) => {
+          const n = cardFor(id); if (!n) return;
+          n.classList.remove(name); void n.offsetWidth; n.classList.add(name);
+          setTimeout(() => n.classList.remove(name), (ms || 500) + 40);
+        },
+        burst: (el, r, big) => { if (global.HitFx && r) global.HitFx.burst(el || "physical", { left: r.x - r.w / 2, top: r.y - r.h * .42, width: r.w, height: r.h }, { big: !!big }); },
+        owner: () => (fx.data && fx.data.owner) || null
+      };
+    }
+    /** 镜头推近（协助攻击、碎渣重炮、狂瀑）：和单人画面一样——战场里的东西朝目标放大一点（战场的框不动）、底下的栏压暗，演完迅速拉回 */
+    let zoomAnims = [];
+    function zoomOnline(rect) {
+      const wrap = battle && battle.el, f = wrap && wrap.querySelector(".g-field");
+      if (!f || !rect || typeof f.animate !== "function" || wrap.classList.contains("assist-focus")) return false;
+      const fr = f.getBoundingClientRect();
+      f.style.setProperty("--focus-x", ((rect.x - fr.left) / Math.max(1, fr.width) * 100).toFixed(1) + "%");
+      f.style.setProperty("--focus-y", ((rect.y - fr.top) / Math.max(1, fr.height) * 100).toFixed(1) + "%");
+      wrap.classList.add("assist-focus");
+      const still = global.matchMedia && global.matchMedia("(prefers-reduced-motion: reduce)").matches, ease = "cubic-bezier(.2, .8, .3, 1)";
+      if (!still) [...f.children].forEach(ch => {
+        const r = ch.getBoundingClientRect(), o = `${(rect.x - r.left).toFixed(1)}px ${(rect.y - r.top).toFixed(1)}px`;
+        zoomAnims.push(ch.animate([{ scale: "1", transformOrigin: o }, { scale: "1.12", transformOrigin: o }], { duration: 300, easing: ease, fill: "forwards" }));
+      });
+      wrap.querySelectorAll(":scope > .g-hud").forEach(d => zoomAnims.push(d.animate([{ filter: "brightness(1) saturate(1)" }, { filter: "brightness(.5) saturate(.6)" }], { duration: 300, easing: "ease-out", fill: "forwards" })));
+      return true;
+    }
+    function zoomOutOnline() {
+      const wrap = battle && battle.el;
+      if (wrap) wrap.classList.remove("assist-focus");
+      const list = zoomAnims; zoomAnims = [];
+      list.forEach(a => { a.onfinish = () => a.cancel(); a.playbackRate = -1.6; a.play(); });
     }
     function addTitleButton(text, which) {
       const menu = document.querySelector("#scr-title .t-menu"); if (!menu) return;
@@ -1173,22 +1433,31 @@
     // 刷新 / 误关页面后：玩家自动回到上次的房间；失败就留在标题页，给一个显眼的「回到房间」按钮
     function addResumeButton() {
       const info = api.savedInfo?.(); const menu = document.querySelector("#scr-title .t-menu");
-      if (!info || !menu || document.getElementById("ol-title-resume")) return;
+      // 用 querySelector：game.html 给 getElementById 垫了一层，找不到的 id 会凭空造一个隐藏的 div，以前这里永远「已经有了」，按钮一直没出来
+      if (!info || !menu || document.querySelector("#ol-title-resume")) return;
       const b = document.createElement("button"); b.type = "button"; b.className = "t-btn ol-title-entry ol-title-resume"; b.id = "ol-title-resume";
       b.innerHTML = `<b>回到房间 ${esc(info.roomCode || "")}</b><small>${info.role === "host" ? "恢复你主持的房间" : `以「${esc(info.name)}」重新连上`}</small>`;
       b.onclick = async () => { entry = "join"; if (await call(() => api.resume())) { panelOpen = false; b.remove(); render(); } else { panelOpen = true; render(); } };
       menu.prepend(b); titleButtons.push(b);
+      // 这个按钮在「联机玩法」子页里，首页看不到：在首页的「联机玩法」上提示一句
+      const home = document.querySelector("#t-online small");
+      if (home && !home.dataset.olOrig) { home.dataset.olOrig = home.textContent; home.textContent = `上次的房间 ${info.roomCode || ""}：点进来可以回去`; }
+      b.addEventListener("click", () => { if (home && home.dataset.olOrig) { home.textContent = home.dataset.olOrig; delete home.dataset.olOrig; } });
     }
     async function autoResume() {
       if (autoResumeTried || destroyed) return; autoResumeTried = true;
       const info = api.savedInfo?.();
-      if (!info || info.role !== "player" || api.getView()?.active) { if (info) addResumeButton(); return; }
+      // 玩家自己点了「离开房间」的（info.left）不自动回去，只留按钮
+      if (!info || info.role !== "player" || info.left || api.getView()?.active) { if (info) addResumeButton(); return; }
       notice = `正在回到房间 ${info.roomCode}…`;
       try { const r = await api.resume(); if (r && r.ok === false) throw new Error(r.error || "恢复失败"); notice = ""; }
       catch (e) { notice = `没能自动回到房间：${e.message || e}`; addResumeButton(); toast.textContent = notice; toast.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { toast.hidden = true; }, 6000); }
       render();
     }
     if (typeof api.savedInfo === "function") setTimeout(autoResume, 0);
+    // 倒计时（询问、离线等待）每半秒刷新一次文字
+    const countdownTimer = setInterval(() => { if (global.OnlineBattle && global.OnlineBattle.tickCountdowns) global.OnlineBattle.tickCountdowns(document); }, 500);
+    unsubs.push(() => clearInterval(countdownTimer));
     if (typeof api.subscribe === "function") unsubs.push(api.subscribe(render));
     if (typeof api.onPacket === "function") unsubs.push(api.onPacket(playPacket));
     render();

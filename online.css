@@ -109,7 +109,7 @@
  * calculator dialogs live outside the original screen roots; hiding individual
  * screen IDs leaves those dialogs in the outer document and its scroll range. */
 body.online-player { overflow: hidden; }
-body.online-player > :not(.ol-ui):not(.hs-ui):not(.hs-sheet):not(.ar-sheet):not(.wm):not(#sk-tip):not(.sk-tip):not(.unit-tip):not(.rr-overlay) { display: none !important; }
+body.online-player > :not(.ol-ui):not(.hs-ui):not(.hs-sheet):not(.ar-sheet):not(.wm):not(#sk-tip):not(.sk-tip):not(.unit-tip):not(.rr-overlay):not(.ovl) { display: none !important; }
 /* 玩家看自己的角色资料 / 武器页：压在联机舞台上面 */
 body.online-player .hs-sheet, body.online-player .ar-sheet { z-index: 95; }
 /* 玩家右侧栏：战斗（记录）/ 小队 两个频道 */
@@ -135,9 +135,14 @@ body.ol-has-side .hs-overlay { right: 330px; }
 .ol-side-chat li b { color: var(--sk-hazard, #f2c230); }
 .ol-side-chat li small { color: #8f8068; font-size: 11px; }
 .ol-side-chat li p { margin: 2px 0 0; overflow-wrap: anywhere; white-space: pre-wrap; }
-.ol-side-form { display: flex; gap: 6px; flex: none; padding: 10px; border-top: 1px solid #4d4337; }
-.ol-side-form input, .ol-side-form label { flex: 1; min-width: 0; }
-.ol-side-form input { width: 100%; box-sizing: border-box; min-height: 38px; padding: 6px 9px; font: inherit; color: #f3e7cf; background: #0f0c09; border: 1px solid #6b5d4b; }
+/* 多行字符画（online-ui.js 的 artAttr）：不自动折行；字号按最长一行（--cols 个全角字）缩到消息框放得下，最大 14px；半角字符用等宽字体对齐 */
+li:has(> p.ol-art) { container-type: inline-size; }
+.ol-side-chat li p.ol-art, .ol-messages li p.ol-art { white-space: pre; overflow-x: auto; font-family: ui-monospace, Consolas, "PingFang SC", "Microsoft YaHei", monospace; font-size: min(14px, 100cqi / var(--cols, 18)); }
+.ol-side-form { display: flex; align-items: flex-end; gap: 6px; flex: none; padding: 10px; border-top: 1px solid #4d4337; }
+.ol-side-form input, .ol-side-form textarea, .ol-side-form label { flex: 1; min-width: 0; }
+.ol-side-form input, .ol-side-form textarea { width: 100%; box-sizing: border-box; min-height: 38px; padding: 6px 9px; font: inherit; color: #f3e7cf; background: #0f0c09; border: 1px solid #6b5d4b; }
+/* 聊天框能换行（Enter 发送，Shift+Enter 换行），跟着内容长高（fitChatBox），最多 160px */
+.ol-side-form textarea { display: block; min-height: 44px; max-height: 160px; padding: 11px 9px; line-height: 20px; resize: none; overflow-y: auto; }
 /* 主持人：战斗记录 / 探索记录加「小队」频道 */
 .ol-host-chat { display: none; }
 .ol-chat-mode > :not(.ol-host-tabs):not(.ol-host-chat) { display: none !important; }

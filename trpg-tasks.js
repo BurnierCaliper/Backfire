@@ -70,7 +70,13 @@ function trpgTaskNormalizeNode(n) {
     title: tStr(n.title, 120), hidden: !!n.hidden,
     reward: { xp: tNum(n.reward && n.reward.xp, 0, 0), kuizhi: tNum(n.reward && n.reward.kuizhi, 0, 0) },
     enemies: fight ? (Array.isArray(n.enemies) ? n.enemies : []).filter(e => e && (!presets.length || presets.includes(e.id)))
-      .slice(0, 12).map(e => ({ id: e.id, lv: tNum(e.lv, 1, 1, 30), zone: tNum(e.zone, 2, 1, 9) })) : [],
+      .slice(0, 12).map(e => {
+        const row = { id: e.id, lv: tNum(e.lv, 1, 1, 30), zone: tNum(e.zone, 2, 1, 9) };
+        // 富集与否（沙鱼，desert.js）：编辑器里是 "on" / "off"，存成 true / false；不写 = 开战时随机
+        const enr = e.enriched === true || e.enriched === "on" ? true : e.enriched === false || e.enriched === "off" ? false : null;
+        if (enr !== null && typeof SAND_FISH_KITS !== "undefined" && SAND_FISH_KITS.includes(e.id)) row.enriched = enr;
+        return row;
+      }) : [],
     weather: fight && TRPG_WEATHERS.includes(n.weather) ? n.weather : "none",
     // 选了战斗模板（battle-templates.js）就按模板摆战场；存的是一份拷贝，模板以后改了、删了都不影响这个任务
     template: fight && n.template && typeof n.template === "object" && typeof battleTemplateNormalize === "function" ? battleTemplateNormalize(n.template) : null,
