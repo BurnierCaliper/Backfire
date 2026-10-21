@@ -12,7 +12,7 @@
  *   hd2d-world.js     texture(名字, kit)（顶面 / 侧面 / 贴花的贴图）、decal(名字)（贴花）、zone(kit, g, 区, ctx, r, look)
  *                     （地台上的装饰和环境动画；接管了就不画以前的废铁 / 管道 / 石块）
  *   hd2d-backdrop.js  band(kit, kind, colors, seed)（天边画的远景）、backdrop(kit, kind, env)（中景、矿坑、战场周围的装饰、环境动画；
- *                     返回 { groundEdge }：地台外面那片地到哪为止，后面是坑）
+ *                     返回 { groundEdge }：地台外面那片地到哪为止，后面是坑）、skyGap(kind, bounds, cam)（天幕挪到多远：矿坑在天幕前面）
  *   hd2d-scene.js     lighting(THEMES, 光影主题, 地面主题)（场景自己的光照 / 调色：矿内、矿底压暗；矿底不分白天黑夜，返回固定的一套）
  * 美术包不 import three.js：three.js 和画贴图 / 拼几何体的小工具由挂钩那边打包成 kit 传进来，所以 Node 里可以直接 require 来测配置和摆放
  * （tests/hd2d-scenes.test.js）。画的都是几何体 + canvas 程序贴图，没有图片文件；只读布局给的地台 / 战场范围，不碰单位数据（没有坚毅生命）。
@@ -84,6 +84,11 @@
     const a = of(kind);
     if (!a || typeof a.pack.backdrop !== "function") return null;
     return a.pack.backdrop(kit, env, a) || {};
+  }
+  /** 天幕离战场后沿多远：矿坑往后很深（对面坑壁在一二十个单位外），天幕要挪到坑后面，不然把坑挡住。美术包没给 = null（用以前的） */
+  function skyGap(kind, bounds, cam) {
+    const a = of(kind), v = a && typeof a.pack.skyGap === "function" ? a.pack.skyGap(bounds, cam, a) : null;
+    return Number.isFinite(v) && v > 0 ? v : null;
   }
 
   /* ---------- 光照 / 调色 ----------
@@ -264,7 +269,7 @@
   }
 
   return {
-    SPOT, add, of, list, texture, decal, zone, band, backdrop, lighting, applyLight,
+    SPOT, add, of, list, texture, decal, zone, band, backdrop, skyGap, lighting, applyLight,
     mixHex, mixCss, css, luma, scaleHex, hexOf, rand, span, beat, mover, zoneSpots, pick, outlineOf, around
   };
 });

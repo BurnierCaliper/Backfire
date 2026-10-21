@@ -22,8 +22,13 @@ const packs = () => { mine(); return art(); };
 
 /** 做好了的场景（区域、场景 id），和每个场景远景里一定有的东西（userData.art） */
 const DONE = [
-  { region: "第一采矿场", scene: "rim", key: "mine1_rim", must: ["pitWall", "rimLip", "rail", "gantry", "cage", "skipTrack", "skip", "pitLight", "farRim"] },
-  { region: "第一采矿场", scene: "mid", key: "mine1_mid", must: ["pitWall", "berm", "cone", "rockWall", "foreRock", "skipTrack", "skip", "pitLight"] }
+  { region: "第一采矿场", scene: "rim", key: "mine1_rim", must: ["pitWall", "rimLip", "rail", "liftShaft", "lift", "pitLight", "farRim"] },
+  { region: "第一采矿场", scene: "mid", key: "mine1_mid", must: ["pitWall", "berm", "cone", "rockWall", "foreRock", "liftShaft", "lift", "pitLight"] },
+  { region: "第一采矿场", scene: "floor", key: "mine1_floor", must: ["pitFloorWall", "pipes", "vent", "lantern", "floorRock", "foreRock"] },
+  // 第二采矿场：第一采矿场的变体，加喷火的管道、橙红发光的岩石
+  { region: "第二采矿场", scene: "rim", key: "mine2_rim", must: ["pitWall", "rimLip", "rail", "liftShaft", "lift", "pitLight", "farRim", "firePipe", "fire", "glowRock"] },
+  { region: "第二采矿场", scene: "mid", key: "mine2_mid", must: ["pitWall", "berm", "cone", "rockWall", "foreRock", "liftShaft", "lift", "pitLight", "firePipe", "fire", "glowRock"] },
+  { region: "第二采矿场", scene: "floor", key: "mine2_floor", must: ["pitFloorWall", "pipes", "vent", "lantern", "floorRock", "foreRock", "firePipe", "fire", "glowRock"] }
 ];
 const PARTY = ["kolt", "helu", "ruby", "yuito"];
 const DESKTOP = { width: 1440, height: 900, top: 46, bottom: 160 };   // 桌面 1440×900：顶栏 + 展开的技能栏
@@ -122,16 +127,16 @@ function lenses(layout) {
   zones.forEach(z => ["mid", "near"].forEach(tier => { const p = C.pose(layout, tier, z); out.push({ tag: (tier === "mid" ? "中景 " : "近景 ") + z + " 区", cam: p.cam, plates: p.plates }); }));
   return out;
 }
-/** 一串点投到屏幕上：外框和离镜头最近的深度 */
+/** 一串点投到屏幕上：外框、离镜头最近的深度、最靠前的 z（整个都在某人后面的东西，挡不到他：镜头在前上方，看他脚下的视线只经过他前面） */
 function screenOf(cam, pts) {
-  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, near = Infinity;
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, near = Infinity, maxZ = -Infinity;
   pts.forEach(p => {
     const s = L.project(cam, p);
-    near = Math.min(near, s.depth);
+    near = Math.min(near, s.depth); maxZ = Math.max(maxZ, p.z);
     if (s.depth <= 0) return;
     x0 = Math.min(x0, s.x); x1 = Math.max(x1, s.x); y0 = Math.min(y0, s.y); y1 = Math.max(y1, s.y);
   });
-  return { x0, x1, y0, y1, near };
+  return { x0, x1, y0, y1, near, maxZ };
 }
 /** 一个装饰拆成一块块（屏幕上一块块地比）：普通网格按真的顶点（转过的石头、斜着的坑壁，外框比本身大一圈，不能拿外框算），
  *  实例网格每个实例按它自己的外框八个角。返回 [点的列表] */
@@ -233,6 +238,113 @@ test("真的 three.js 里每个场景建出自己的一套（#242）：默认地
   } finally { P.restore(); }
 });
 
+test("矿外是往下陷的大矿坑（#242 截图验收）：对面坑壁离坑边至少 12（按镜头摆），天幕挪到坑后面不挡住坑；默认镜头里对面坑沿在画面里（顶栏下面），坑壁越往下越黑，这边坑沿挡住之前已经漆黑；运载电梯沿竖直的轨道上下", async (t) => {
+  const P = await protoEnv(t);
+  if (!P) return;
+  const { THREE, B } = P, M = mine();
+  try {
+    const S = H.load().BattleSim, d = DONE.find(x => x.scene === "rim"), Q = M.PIT.rim;
+    for (const bdx of boardsFor(S).filter(x => !x.id.includes("挤"))) {
+      const layout = layoutOf(bdx.st, d), cam = layout.camera, b = layout.bounds, tag = `${bdx.id}`;
+      const dims = M.pitDims(Q, b, cam);
+      assert.ok(dims.D >= 12 - 1e-9, `${tag}：对面坑壁离坑边只有 ${dims.D.toFixed(1)}`);
+      const top = L.project(cam, { x: dims.cx, y: dims.top, z: dims.zFar });
+      assert.ok(top.y > DESKTOP.top + 10 && top.y < L.project(cam, { x: dims.cx, y: L.CONFIG.groundY, z: dims.rimZ }).y, `${tag}：对面坑沿在画面里（屏幕 y ${top.y.toFixed(0)}）`);
+      const bd = backdropOf(B, layout, "dusk");
+      const sky = bd.group.children.find(o => o.userData.layer === "sky");
+      sky.geometry.computeBoundingBox();
+      assert.ok(sky.geometry.boundingBox.max.z < dims.zFar - 4, `${tag}：天幕（z ${sky.geometry.boundingBox.max.z.toFixed(1)}）在对面坑沿（${dims.zFar.toFixed(1)}）后面`);
+      assert.equal(bd.groundEdge, dims.rimZ, `${tag}：地台外面那片地铺到坑边为止`);
+      // 坑壁的颜色：对面坑沿那一级亮（不黑），这边坑沿挡住的地方往上一点已经漆黑；越往下越暗
+      const wall = artOf(bd.group).find(o => o.what === "pitWall").obj, pos = wall.geometry.attributes.position, col = wall.geometry.attributes.color;
+      const lumaAt = (y0, y1) => { let s = 0, n = 0; for (let i = 0; i < pos.count; i++) { const y = pos.getY(i), x = pos.getX(i); if (y <= y0 && y >= y1 && Math.abs(x - dims.cx) < dims.halfW) { s += 0.2126 * col.getX(i) + 0.7152 * col.getY(i) + 0.0722 * col.getZ(i); n++; } } return s / Math.max(1, n); };
+      const upper = lumaAt(dims.top - 0.05, dims.top - 1.2), lower = lumaAt(dims.yOcc + 1.2, dims.yOcc);
+      assert.ok(upper > 0.08, `${tag}：坑沿那一级不该是黑的（${upper.toFixed(3)}）`);
+      assert.ok(lower < 0.012 && lower < upper * 0.1, `${tag}：挡住之前已经漆黑（${lower.toFixed(4)}）`);
+      // 运载电梯：轨道是竖的（x 不变），罐笼的停靠点从对面坑沿一直到挡住的地方下面
+      const lifts = artOf(bd.group).filter(o => o.what === "lift");
+      assert.ok(lifts.length >= 1 && lifts.length <= 2, `${tag}：一两部运载电梯`);
+      lifts.forEach(({ obj }) => {
+        const a = obj.userData.ambient, x0 = obj.position.x;
+        assert.ok(a.y0 > dims.top - 0.5 && a.y1 < dims.yOcc, `${tag}：电梯从坑沿（${a.y0.toFixed(1)}）下到看不见的地方（${a.y1.toFixed(1)}）`);
+        for (let s = 0; s < 60; s++) bd.update(s, 1);
+        assert.equal(obj.position.x, x0, `${tag}：电梯沿竖直的轨道走`);
+      });
+      bd.dispose();
+    }
+    // 接线：天幕挪多远问美术包（hd2d-backdrop.js 一行挂钩）
+    assert.match(code(read("hd2d-backdrop.js")), /const rz = hz \+ \(\(ART\.skyGap && ART\.skyGap\(kind, bounds, cam\)\) \|\| BACKDROP\.skyGap\)/);
+  } finally { P.restore(); }
+});
+
+/** 从布局的默认镜头往屏幕上的一点（像素）打一条线，先碰到远景里的什么（userData.art；碰不到 = null） */
+function hitAt(THREE, layout, root, px, py) {
+  const c = layout.camera, cam = new THREE.PerspectiveCamera(c.fov, c.aspect, 0.5, 400);
+  cam.position.set(c.pos.x, c.pos.y, c.pos.z); cam.lookAt(c.target.x, c.target.y, c.target.z); cam.updateMatrixWorld(true);
+  const ray = new THREE.Raycaster();
+  ray.setFromCamera(new THREE.Vector2(px / c.width * 2 - 1, 1 - py / c.height * 2), cam);
+  for (const h of ray.intersectObject(root, true)) {
+    for (let o = h.object; o; o = o.parent) if (o.userData && o.userData.art) return { what: o.userData.art, point: h.point };
+  }
+  return null;
+}
+test("矿内（#242 截图验收）：近处一面不规则的岩壁，中间一个大开口——从默认镜头看，画面左右两边是近处的岩壁，开口里看到的是很远的对面坑壁（离运输道的边至少 14），坑底漆黑；岩壁在灯后面、伸出画面上沿", async (t) => {
+  const P = await protoEnv(t);
+  if (!P) return;
+  const { THREE, B } = P, M = mine();
+  try {
+    const S = H.load().BattleSim, d = DONE.find(x => x.scene === "mid");
+    for (const bdx of boardsFor(S).filter(x => !x.id.includes("挤"))) {
+      const layout = layoutOf(bdx.st, d), b = layout.bounds, tag = bdx.id, bd = backdropOf(B, layout, "dusk");
+      bd.group.updateMatrixWorld(true);
+      const dims = M.pitDims(M.PIT.mid, b, layout.camera);
+      assert.ok(dims.D >= 14 - 1e-9, `${tag}：对面坑壁离运输道的边只有 ${dims.D.toFixed(1)}`);
+      // 运输道的边在屏幕上的高度（地台后沿那条线）；往上到顶栏下面是远景
+      const edgeY = L.project(layout.camera, { x: dims.cx, y: L.CONFIG.groundY, z: dims.rimZ }).y, topY = DESKTOP.top + 8;
+      const ys = [0.15, 0.5, 0.85].map(k => edgeY - 6 - (edgeY - 6 - topY) * k);
+      ys.forEach(py => {
+        const mid = hitAt(THREE, layout, bd.group, layout.camera.width / 2, py);
+        assert.ok(mid && ["pitWall", "lift", "liftShaft", "pitLight"].includes(mid.what), `${tag}：开口正中（屏幕 y ${py.toFixed(0)}）看到的是 ${mid && mid.what}，不是对面的坑壁`);
+        assert.ok(mid.point.z < dims.rimZ - 12, `${tag}：开口里看到的东西很远（z ${mid.point.z.toFixed(1)}，运输道的边 ${dims.rimZ.toFixed(1)}）`);
+        [12, layout.camera.width - 12].forEach(px => {
+          const side = hitAt(THREE, layout, bd.group, px, py);
+          assert.ok(side && side.what === "rockWall", `${tag}：画面边上（x ${px}, y ${py.toFixed(0)}）是 ${side && side.what}，不是近处的岩壁`);
+        });
+      });
+      // 开口里最下面（运输道的边、挡车土埂再往上一点）是漆黑的坑底：碰到的那一面颜色很暗
+      const low = hitAt(THREE, layout, bd.group, layout.camera.width / 2 + 3, edgeY - 22);
+      assert.ok(low && low.what === "pitWall", `${tag}：开口最下面看到的是 ${low && low.what}，不是坑壁`);
+      const wall = artOf(bd.group).find(o => o.what === "pitWall").obj, pos = wall.geometry.attributes.position, cl = wall.geometry.attributes.color;
+      let s = 0, n = 0;
+      for (let i = 0; i < pos.count; i++) if (Math.abs(pos.getY(i) - low.point.y) < 0.6 && Math.abs(pos.getX(i) - low.point.x) < 2) { s += 0.2126 * cl.getX(i) + 0.7152 * cl.getY(i) + 0.0722 * cl.getZ(i); n++; }
+      assert.ok(n > 0 && s / n < 0.02, `${tag}：坑底不够黑（${(s / Math.max(1, n)).toFixed(3)}）`);
+      bd.dispose();
+    }
+  } finally { P.restore(); }
+});
+
+test("第二采矿场是第一采矿场的变体（#242）：三个场景一一对上，色调更红（岩石、地面、雾都更偏红），地台上有几块带发光裂纹的石头，远景有喷火的管道和橙红发光的岩石", () => {
+  const A = packs(), M = mine(), themes = sceneThemes();
+  const red = (c) => { const n = A.hexOf(c); return ((n >> 16) & 255) / Math.max(1, (n >> 8) & 255); };   // 红 / 绿：越大越红
+  const avg = (list) => list.reduce((s, c) => s + red(c), 0) / list.length;
+  assert.ok(avg(M.PALETTE.mine2.rock) > avg(M.PALETTE.mine1.rock) + 0.15 && avg(M.PALETTE.mine2.wall) > avg(M.PALETTE.mine1.wall) + 0.1, "岩石更红");
+  ["rim", "mid", "floor"].forEach(s => {
+    const a = L.GROUNDS[L.groundOf("第一采矿场", s)], b = L.GROUNDS[L.groundOf("第二采矿场", s)], tag = s;
+    assert.equal(b.tex, a.tex, tag + "：同一种地面，只是换了颜色");
+    assert.ok(red(b.ground) > red(a.ground) && red(b.tint) > red(a.tint), tag + "：地面更红");
+    assert.ok(Number.isFinite(b.glow) && b.decals.ember > 0, tag + "：矿渣里带余火");
+    const k1 = A.of(L.groundOf("第一采矿场", s)), k2 = A.of(L.groundOf("第二采矿场", s));
+    assert.ok(k2.art.decor.glow > 0 && k2.art.backdrop.fire && k2.art.backdrop.glow && k2.art.ambient.includes("fire"), tag + "：发光岩石、喷火管道");
+    ["day", "dusk", "night"].forEach(name => assert.ok(red(A.lighting(themes, name, k2.key).T.fog) > red(A.lighting(themes, name, k1.key).T.fog), `${tag} ${name}：雾更红`));
+  });
+  // 地台上真的摆得出几块发光的石头（直排三区，每个场景合起来至少一块）
+  const S = H.load().BattleSim;
+  ["rim", "mid", "floor"].forEach(s => {
+    const key = L.groundOf("第二采矿场", s), layout = layoutOf(BOARDS.line3(S), { region: "第二采矿场", scene: s });
+    assert.ok(layout.zones.filter(z => z.ground).some(z => M.zonePlan(z, key).some(p => p.kind === "glow")), s + "：地台上有发光的石头");
+  });
+});
+
 /* ---------- 2. 装饰不压住站位 / 铭牌 ---------- */
 test("装饰不压住站位（#242）：地台上的装饰只摆在左右两条边带（脚下最多站到站位区的边，再让开脚下那一圈）和左右矮一截的台子上，在外轮廓里面；各种棋盘、每个区挤满人时，装饰的底面都碰不到任何人脚下那一圈", async (t) => {
   const P = await protoEnv(t);
@@ -304,7 +416,7 @@ test("装饰不压住铭牌（#242）：远景、中景、近景（每个有人�
             const s = screenOf(lens.cam, th.pts);
             layout.units.forEach(u => {
               const ud = L.project(lens.cam, { x: u.x, y: u.groundY, z: u.z }).depth, q = lens.plates[u.id];
-              if (!q || !q.rect || s.near >= ud - 0.05) return;   // 在他后面（铭牌是 DOM，盖在后面的东西上面）
+              if (!q || !q.rect || s.near >= ud - 0.05 || s.maxZ < u.z - 0.1) return;   // 在他后面（铭牌是 DOM，盖在后面的东西上面）
               checked++;
               assert.ok(!hits(s, footBox(lens.cam, u)), `${d.key} ${bdx.id} ${lens.tag}：${th.what} 挡住了 ${u.plate.name} 的脚下`);
               assert.ok(!hits(s, cardOf(q.rect)), `${d.key} ${bdx.id} ${lens.tag}：${th.what} 压住了 ${u.plate.name} 的铭牌`);
@@ -339,6 +451,22 @@ test("光照 / 调色（#242）：每个场景有自己的一套（hd2d-scene-ar
       assert.ok(b.lamp >= a.lamp, `${tag}：矿内的灯不比矿外弱`);
     });
   });
+  // 矿底：白天黑夜几乎没区别（三个光影主题出来的是同一套），比矿内还暗，全靠提灯（灯的倍数最大）；提灯克制：战场上最多两盏，坑壁上最多两盏
+  ["第一采矿场", "第二采矿场"].forEach(r => {
+    const fl = done(r, "floor"), mid = done(r, "mid");
+    if (!fl) return;
+    const lit = ["day", "dusk", "night"].map(name => A.lighting(themes, name, fl.key));
+    assert.ok(lit.every(l => l.fixed && l.name === lit[0].name), r + "：矿底不分白天黑夜");
+    lit.forEach(l => assert.deepEqual(l.T, lit[0].T, r + "：矿底的光照不随时间变"));
+    if (mid) ["day", "dusk", "night"].forEach(name => {
+      const m = A.lighting(themes, name, mid.key).T, f = lit[0].T;
+      ["hemi", "sunI"].forEach(k => assert.ok(f[k] < m[k], `${r} ${name}：矿底的 ${k} ${f[k]} 不比矿内 ${m[k]} 暗`));
+      assert.ok(f.lamp >= m.lamp, `${r} ${name}：矿底的灯不比矿内弱`);
+    });
+    ["day", "dusk", "night"].forEach(name => assert.ok(L.lampPlan(fl.key, name).count <= 2, r + "：战场上的提灯最多两盏"));
+    const F = mine().FLOOR[A.of(fl.key).art.backdrop.floor];
+    assert.ok(F.lanterns.n <= 2, r + "：坑壁上的提灯最多两盏");
+  });
   // 改的是一份拷贝，光影主题本身不变
   const before = JSON.stringify(themes);
   DONE.forEach(d => A.lighting(themes, "night", d.key));
@@ -362,7 +490,7 @@ function run(bd, secs, reduced, t0) {
   let t = t0 || 0;
   for (let f = 0; f < secs * 30; f++) { if (!reduced) t += 1 / 30; bd.update(t, reduced ? 0 : 1 / 30); }
 }
-test("环境动画（#242）：每个场景配置里列的环境动画都在（矿车、罐笼时不时上下，停多久、走多快按 AMBIENT 的配置；坑壁上的灯偶尔暗一下，间隔按配置）；减少动态效果时都停住（矿车、罐笼不动，灯一直亮着）", async (t) => {
+test("环境动画（#242）：每个场景配置里列的环境动画都在（运载电梯时不时上下，停多久、走多快按 AMBIENT 的配置；坑壁上的灯偶尔暗一下、矿底排气口喷气、第二采矿场的管道喷火，间隔按配置）；减少动态效果时都停住（电梯不动，灯一直亮着，不喷气不喷火）", async (t) => {
   const P = await protoEnv(t);
   if (!P) return;
   const { B, A } = P, M = mine();
@@ -380,7 +508,7 @@ test("环境动画（#242）：每个场景配置里列的环境动画都在（�
       const where = () => movers.map(o => o.position.toArray().join(","));
       const p0 = where();
       run(bd, 30, true, 5);
-      assert.deepEqual(where(), p0, d.key + "：减少动态效果时矿车、罐笼停在原地");
+      assert.deepEqual(where(), p0, d.key + "：减少动态效果时运载电梯停在原地");
       blinks.forEach(o => assert.equal(o.visible, true, d.key + "：减少动态效果时灯一直亮着"));
       // 正常：跑 3 分钟
       const seen = new Map(movers.map(o => [o, new Set()]));
@@ -397,7 +525,18 @@ test("环境动画（#242）：每个场景配置里列的环境动画都在（�
         assert.ok(bt.n >= 30, `${d.key}：灯 3 分钟只闪了 ${bt.n} 下`);
         bt.gaps.forEach(gap => assert.ok(gap >= cfg.every[0] - 0.05 && gap <= cfg.every[1] + 0.05, `${d.key}：灯隔了 ${gap.toFixed(2)} 秒才闪，不在配置的 ${cfg.every} 里`));
       });
-      assert.ok(off > 0, d.key + "：灯真的暗过");
+      if (blinks.length) assert.ok(off > 0, d.key + "：灯真的暗过");
+      // 一阵一阵的（矿底管道喷气）：3 分钟喷了好多阵，间隔、每阵多久按配置；喷的时候看得到气，减少动态效果时一团都看不到
+      amb.filter(o => o.userData.ambient.puffs).forEach(o => {
+        const a = o.userData.ambient, cfg = M.AMBIENT[a.kind];
+        assert.ok(a.beat.n >= 15, `${d.key}：${a.kind} 3 分钟只来了 ${a.beat.n} 阵`);
+        a.beat.gaps.forEach(gap => assert.ok(gap >= cfg.every[0] - 0.05 && gap <= cfg.every[1] + 0.05, `${d.key}：${a.kind} 隔了 ${gap.toFixed(2)} 秒，不在配置的 ${cfg.every} 里`));
+        let seen = 0;
+        for (let f = 0; f < 30 * 20; f++) { bd.update(200 + f / 30, 1 / 30); seen += a.puffs.filter(p => p.visible).length; }
+        assert.ok(seen > 0, `${d.key}：${a.kind} 喷的时候看得到`);
+        run(bd, 10, true, 300);
+        assert.equal(a.puffs.filter(p => p.visible).length, 0, `${d.key}：减少动态效果时 ${a.kind} 不喷`);
+      });
       bd.dispose();
     }
   } finally { P.restore(); }

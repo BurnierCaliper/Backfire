@@ -550,8 +550,8 @@ export function buildBackdrop(kind, bounds, themeName, camera, colors) {
   const hazeOf = (k) => new THREE.Color(sky[0]).lerp(fog, 0.5).lerp(new THREE.Color(T.body), 1 - k);   // k 越大越靠近天边的雾色
 
   /* 1. 天幕（雷鸣时：风暴色 + 乌云，星星和亮云不画，夕阳只透出一点；沙暴时：沙色、贴地的雾更高，星星和亮云也看不见）：
-   *    一块平的布景板，立在战场后沿再往后 skyGap，往左右各伸出去 wide */
-  const rz = hz + BACKDROP.skyGap, skyZ = cz - rz, x0 = cx - hx - BACKDROP.wide, x1 = cx + hx + BACKDROP.wide;
+   *    一块平的布景板，立在战场后沿再往后 skyGap（区域场景的美术包可以挪远：矿坑在天幕前面，#242），往左右各伸出去 wide */
+  const rz = hz + ((ART.skyGap && ART.skyGap(kind, bounds, cam)) || BACKDROP.skyGap), skyZ = cz - rz, x0 = cx - hx - BACKDROP.wide, x1 = cx + hx + BACKDROP.wide;
   const skyM = keep(skyMaterial(sky, {
     camY: cam.pos.y, camZ: cam.pos.z, slope, fog, haze: dust ? dust.haze : 0,
     sun: dusk ? [0.3, 0.12, 0.09] : night ? [0.22, 0.9, 0.05] : [0.28, 0.75, 0.16],
