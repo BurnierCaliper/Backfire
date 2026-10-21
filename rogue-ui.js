@@ -795,7 +795,7 @@
       : kits.length ? `<p class="r-hint">你操控 ${esc(Rogue.heroName(kits[0]))}，手里 ${OnlineRogue.purse(kits[0])} 奎支。</p>` : `<p class="r-hint">你没有操控角色：不能花钱，只能投票。</p>`;
     const vote = v.vote.options.length ? `<div class="r-vote"><b>队伍投票</b>（${v.vote.voted}/${v.vote.voters} 人已投${v.vote.blocked ? " · " + esc(v.vote.blocked) : ""}）：点下面的按钮就是投票。
         <ul>${v.vote.options.filter(o => o.voters.length).map(o => `<li>${esc(o.label)}：${esc(o.voters.join("、"))}</li>`).join("") || "<li>还没有人投票</li>"}</ul>
-        <button class="g-btn" id="r-force-vote" ${v.vote.voted ? "" : "disabled"}>按现在的票数决定</button></div>` : "";
+        <button class="g-btn" id="r-force-vote" ${v.vote.voted ? "" : "disabled"}>${v.vote.voted ? "按现在的票数决定" : "还没有人投票"}</button></div>` : "";
     const loot = v.loot.map(l => `<div class="r-vote"><b>战利品</b> ${esc(l.name)} ×${l.qty}（${esc(l.source)}）
         需求：${esc(l.needs.join("、") || "无")} · 放弃：${esc(l.passes.join("、") || "无")}
         <div class="r-choices">${l.mine.map(m => m.answer ? `<span>${esc(m.name)}：${m.answer === "need" ? "需求" : "放弃"}</span>`

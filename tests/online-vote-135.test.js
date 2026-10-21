@@ -38,3 +38,21 @@ test("投票画面：需要投票的人数不含旁观者，旁观者自己看�
   assert.equal(host.voters, 2); assert.equal(host.spectator, false);
   assert.equal(spec.voters, 2); assert.equal(spec.spectator, true);
 });
+
+test("房主把角色全分给别人、自己是旁观者：不算票，但照样能按现在的票数决定", async () => {
+  const { O, run, performed } = setup("OL135-HOSTSPEC");
+  O.setOwners({ torque: "p2", helu: "p2", ruby: "p2" });
+  const opt = O.options(run)[0];
+  assert.throws(() => O.vote("host", opt.id), /没有分到角色/, "房主自己是旁观者，不能投票");
+  assert.throws(() => O.handle("host", { type: "rogue.force", what: "vote" }), /没有人投票/, "没人投票时强制结算被拒绝");
+  O.vote("p2", opt.id);
+  assert.doesNotThrow(() => O.handle("host", { type: "rogue.force", what: "vote" }), "房主强制结算成功");
+  await new Promise(r => setTimeout(r, 10));
+  assert.equal(performed.length, 1);
+});
+
+test("房主的「按现在的票数决定」没人投票时写明原因并灰掉", () => {
+  const src = fs.readFileSync(path.join(ROOT, "rogue-ui.js"), "utf8");
+  assert.ok(src.includes('v.vote.voted ? "按现在的票数决定" : "还没有人投票"'));
+  assert.ok(src.includes('id="r-force-vote" ${v.vote.voted ? "" : "disabled"}'));
+});
