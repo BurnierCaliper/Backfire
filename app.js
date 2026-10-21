@@ -2975,7 +2975,7 @@ function settleBattleRewards(outcome) {
     if (trpgXp.length) appendLog(`战斗奖励经验（队伍最高 ${top} 级 × 20 / ${n} 人）：每人 +${add}。`);
   }
   const ups = [];
-  const drops = outcome === "win" ? giveBattleDrops() : null;
+  const drops = outcome === "win" ? mergeBattleDrops(giveBattleDrops(), trpgEnemyMaterials()) : null;
   bs.rewardSettlement = { outcome, grade, xpBonus, ups, drops, trpgXp };
   state.units.filter(u => u.isPlayer && !isWeaponUnit(u)).forEach(u => {
     const from = u.level;
@@ -3007,6 +3007,25 @@ function giveBattleDrops() {
   const out = { kuizhi: d.kuizhi, items: d.items.map(x => ({ id: x.id, name: (ITEM_CATALOG[x.id] || {}).name || x.id, qty: x.qty })) };
   appendLog("战斗掉落：" + battleDropsText(out) + "，已放进背包。");
   return out;
+}
+/** 跑团：打赢后打倒的敌人按掉落表（items.js · ENEMY_DROPS）掉制作材料，进队伍公用背包。单局另由 rogue.js · rollMaterialDrops 掉，这里不重复 */
+function trpgEnemyMaterials() {
+  if (typeof TRPG === "undefined" || !TRPG.active || typeof rollEnemyDrops !== "function") return null;
+  if (typeof Rogue !== "undefined" && Rogue.inRunMode && Rogue.inRunMode()) return null;
+  const got = rollEnemyDrops(enemyDropFoes(state.units));
+  if (!got.length) return null;
+  got.forEach(m => bagAdd(m.id, m.qty));
+  const out = { kuizhi: 0, items: got.map(m => ({ id: m.id, name: (ITEM_CATALOG[m.id] || {}).name || m.id, qty: m.qty })) };
+  appendLog("敌人掉落的材料：" + battleDropsText(out) + "，已放进队伍背包。");
+  return out;
+}
+/** 主持人配的掉落 + 敌人掉的材料 合成一份结算（同一件合并数量） */
+function mergeBattleDrops(a, b) {
+  if (!a) return b || null;
+  if (!b) return a;
+  const items = a.items.map(x => Object.assign({}, x));
+  b.items.forEach(x => { const r = items.find(y => y.id === x.id); if (r) r.qty += x.qty; else items.push(Object.assign({}, x)); });
+  return { kuizhi: (a.kuizhi || 0) + (b.kuizhi || 0), items };
 }
 function battleDropsText(d) {
   if (!d) return "无";

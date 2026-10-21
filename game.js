@@ -172,6 +172,7 @@
       badges: unitBadgesOf(u),
       res,
       iv: u.iv ? { hp: Number(u.iv.hp) || 0, atk: Number(u.iv.atk) || 0 } : null,   // 个体值（杂兵、精英）
+      race: typeof raceText === "function" ? raceText(u) : "",   // 种族（敌人）："红皮人" / "兽人·牛"
       intents: (() => { try { return typeof enemyIntents === "function" ? enemyIntents(u) : []; } catch (e) { return []; } })(),   // 名牌上的行动提示（连击……）
       atk: Math.round(Number(atk) || 0),
       weapon: !!u.weaponOf,
@@ -2589,7 +2590,7 @@
     if (s.flying) tokens.push("飞行");
     (s.status ? s.status.split(" · ") : []).forEach(t => { if (t && t !== "无状态") tokens.push(t); });
     (s.hung || []).forEach(n => tokens.push(n));
-    return UnitTip.html({ kind, kit: s.kit, ownerName: owner && owner.name, escort: s.escort }, tokens.filter(Boolean), { name: s.name, sub: `Lv${s.level} · ${s.zone} 区${s.iv && typeof ivText === "function" ? " · 个体值 " + ivText(s) : ""}`,
+    return UnitTip.html({ kind, kit: s.kit, ownerName: owner && owner.name, escort: s.escort }, tokens.filter(Boolean), { name: s.name, sub: `Lv${s.level} · ${s.zone} 区${s.race ? " · " + s.race : ""}${s.iv && typeof ivText === "function" ? " · 个体值 " + ivText(s) : ""}`,
       mechs: window.UnitCard && UnitCard.mechLines ? UnitCard.mechLines(s) : [] });   // 首领机制：还有几回合落下
   }
   function onCardHover(id, on) {

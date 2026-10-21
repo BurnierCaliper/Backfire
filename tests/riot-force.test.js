@@ -102,7 +102,8 @@ test("登记：杂兵 / 精英、代币、阵营、区域和固定种族都写�
     assert.deepEqual([i.faction, i.regions.join(), i.tokens, i.race], ["镇压队", "外城区", want[k][1], want[k][2]], k);
     const bt = get(c, "BESTIARY_TEXT")[k];
     assert.ok(bt && bt.abilities.length, `${k} 图鉴`);
-    assert.ok(bt.abilities[0].includes(want[k][2]), `${k} 图鉴写了种族`);
+    // 种族由图鉴的种族栏显示（bestiary.js · bestiaryRaceText，#159），不写进能力说明，免得重复
+    assert.ok(String(get(c, "bestiaryRaceText")(k)).includes(want[k][2]), `${k} 图鉴写了种族`);
   });
 });
 

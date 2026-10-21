@@ -110,3 +110,30 @@ test("L-7 休息点短休：没人有次数时按钮灰掉写原因，点了也�
   assert.throws(() => R.restAtNode(run, "short"), /短休次数/);
   assert.equal(run.task.index, 0, "没过站");
 });
+
+test("L-9 死亡角色不能制作，也不能给别人打下手；复活后照常", () => {
+  const { c, helu } = battle(null, "L9");
+  c.bagAdd("cm_scrap", 2); c.bagAdd("cm_cell", 1); c.bagAdd("cm_coil", 1);
+  c.trpgTeachRecipe("fx_overload", true);
+  helu.dead = true;
+  assert.equal(c.trpgCraftOdds("kolt", "fx_overload", null, "helu").helped, false, "死人打下手不给优势");
+  assert.match(c.trpgCraft({ kit: "kolt", item: "fx_overload", helper: "helu", result: "ok" })[0], /已死亡，不能打下手/);
+  assert.equal(c.bagCount("fx_overload"), 0, "没做成，材料不扣");
+  assert.equal(c.trpgCraftOdds("helu", "fx_overload"), null);
+  assert.match(c.trpgCraft({ kit: "helu", item: "fx_overload", result: "ok" })[0], /已死亡，不能制作/);
+  assert.equal(c.bagCount("fx_overload"), 0);
+  helu.dead = false;
+  assert.equal(c.trpgCraftOdds("kolt", "fx_overload", null, "helu").helped, true, "复活后可以打下手");
+  c.trpgCraft({ kit: "kolt", item: "fx_overload", helper: "helu", result: "ok" });
+  assert.equal(c.bagCount("fx_overload"), 1);
+});
+
+test("L-11 战后结算跳过死亡角色的武器耐久，活人的照扣", () => {
+  const { c, kolt, helu } = battle(null, "L11");
+  const kw = kolt.linkedKits[0], hw = helu.linkedKits[0];
+  const k0 = c.weaponDur(kw), h0 = c.weaponDur(hw);
+  helu.dead = true;
+  c.ledgerAfterBattle([]);
+  assert.equal(c.weaponDur(kw), k0 - 1);
+  assert.equal(c.weaponDur(hw), h0, "死亡角色的武器不扣");
+});

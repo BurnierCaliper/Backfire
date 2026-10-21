@@ -2389,7 +2389,8 @@ function setEnemyIV(u, iv) {
   return u;
 }
 /** 生成时调用：iv 里写了的项照写，没写的随机（off 时整体不动、也不记 iv）。首领不波动 */
-function applyEnemyIV(u, iv) {
+function applyEnemyIV(u, iv, race) {
+  applyEnemyRace(u, race);   // 先种族、再个体值（个体值按套完种族之后的数值算）
   if (!ivEligible(u) || u.iv) return u;
   const fixed = iv && (ivClamp(iv.hp) != null || ivClamp(iv.atk) != null);
   if (ENEMY_IV.off > 0 && !fixed) return u;
@@ -2403,7 +2404,140 @@ function ivText(u) {
   return `血量 ${f(u.iv.hp)} · ATK ${f(u.iv.atk)}`;
 }
 
-function spawnEnemyGroup(id, lv, partyN, zone, iv) {
+/* ===== 敌人种族（docs/enemy-race.md） =====
+ * 有机体的敌人有种族，记在 u.race = { race, branch }（branch 可空）。
+ * 每个敌人的种族写在 run.js · ENEMY_INFO 上（格式见那里的注释）：固定写 race: "兽人·牛"，随机写 races: [{ race, w }] 权重表。
+ * 随机种族且 ENEMY_INFO 上有 raceAttrs: true 的敌人，再按种族的六维修正换算数值（和个体值一样，生成时算一次）：
+ *   体质只加在最内层的肉体；力量改 atk / personalAtk；耐力改架势；敏捷只改本来会格挡的敌人（u.raceBlock）。
+ * u.raceDelta 记着加了多少，改种族时先减掉再加（按原始数值重算）。
+ * ENEMY_IV.off > 0（BattleSim.setup 默认）时随机种族一律当人类（人类对敌人没有数值变化）；固定种族、主持人指定的种族不受影响 */
+const ENEMY_RACES = {
+  "人类":   { mods: { wil: 1, int: 1 } },
+  "红皮人": { mods: { str: 1, con: 1, dex: -1 } },
+  "犬类人": { mods: { con: 1, dex: 1 }, branches: ["狼", "狐", "犬"] },
+  "猫类人": { mods: { dex: 1, int: 1, con: -1 }, branches: ["豹", "虎", "猫"] },
+  "鼠类人": { mods: { dex: 1, int: 1, con: -1, sta: -1 }, branches: ["鼠", "兔"] },
+  // 牛类人的三个小分支六维修正各不相同（分支的修正盖过大支的）
+  "牛类人": { mods: {}, branches: ["牛", "马", "羊"], branchMods: {
+    "牛": { str: 2, sta: 1 }, "马": { str: 1, dex: 1, sta: 1 }, "羊": { str: 1, wil: 1, int: 1 } } },
+  // 兽人五支的六维修正完全一样
+  "兽人":   { mods: { con: 1, sta: 1, int: 1 }, branches: ["狼", "牛", "蜥蜴", "猫", "熊"] }
+};
+/** 「类人」是四个大支的统称（主持人指定 / 权重表里可以只写「类人」，大支各占一份） */
+const ENEMY_RACE_GROUPS = { "类人": ["犬类人", "猫类人", "鼠类人", "牛类人"] };
+/** 不在 ENEMY_INFO 里（不进随机遭遇）的敌人的种族 */
+const ENEMY_RACE_EXTRA = { chixia: { race: "犬类人·狼" } };   // 赤牙：手册第九章「狼类人」
+
+/** "兽人·牛" / { race, branch } → { race, branch? }；认不得的返回 null */
+function raceParse(x) {
+  if (!x) return null;
+  let race, branch;
+  if (typeof x === "string") { const i = x.indexOf("·"); race = i < 0 ? x : x.slice(0, i); branch = i < 0 ? "" : x.slice(i + 1); }
+  else if (typeof x === "object") { race = x.race; branch = x.branch || ""; }
+  race = String(race || "").trim(); branch = String(branch || "").trim();
+  if (!race) return null;
+  if (ENEMY_RACE_GROUPS[race]) return branch ? null : { race };
+  const def = ENEMY_RACES[race];
+  if (!def) return null;
+  if (branch && !(def.branches || []).includes(branch)) return null;
+  return branch ? { race, branch } : { race };
+}
+function raceLabel(r) {
+  return r && r.race ? (r.branch ? r.race + "·" + r.branch : r.race) : "";
+}
+const _pickOne = (list) => list[Math.floor(Math.random() * list.length)];
+/** 把 { race }（可能是「类人」或没写小分支的大支）补成具体的 { race, branch? } */
+function raceResolve(spec) {
+  let race = spec.race, branch = spec.branch;
+  if (ENEMY_RACE_GROUPS[race]) race = _pickOne(ENEMY_RACE_GROUPS[race]);
+  const def = ENEMY_RACES[race];
+  if (!branch && def.branches) branch = _pickOne(def.branches);
+  return branch ? { race, branch } : { race };
+}
+/** 从权重表抽一个（先按权重选条目，再把大支补成小分支） */
+function raceRoll(table) {
+  const rows = (table || []).filter(r => Number(r.w) > 0 && raceParse(r.race));
+  if (!rows.length) return { race: "人类" };
+  let n = Math.random() * rows.reduce((s, r) => s + Number(r.w), 0), pick = rows[rows.length - 1];
+  for (const r of rows) { n -= Number(r.w); if (n < 0) { pick = r; break; } }
+  return raceResolve(raceParse(pick.race));
+}
+/** 这个敌人的种族配置：{ fixed, attrs } / { table, attrs } 或 null（无种族） */
+function enemyRaceInfo(u) {
+  if (!u || u.isPlayer || !u.kit) return null;
+  const info = (typeof ENEMY_INFO !== "undefined" && ENEMY_INFO[u.kit]) || ENEMY_RACE_EXTRA[u.kit];
+  if (!info) return null;
+  if (info.race) return { fixed: info.race, attrs: false };
+  if (Array.isArray(info.races) && info.races.length) return { table: info.races, attrs: !!info.raceAttrs };
+  return null;
+}
+/** 种族的六维修正（小分支的修正盖过大支） */
+function raceMods(r) {
+  const def = r && ENEMY_RACES[r.race];
+  if (!def) return {};
+  return (r.branch && def.branchMods && def.branchMods[r.branch]) || def.mods || {};
+}
+/** 「全 5 + 修正」比「全 5」多出来的数值（growth.js · derivedFromAttrs 的差值）。blocks：这个敌人会格挡 */
+function raceDelta(r, level, blocks) {
+  const mods = raceMods(r), base = { str: 5, con: 5, dex: 5, wil: 5, int: 5, sta: 5 }, plus = Object.assign({}, base);
+  Object.keys(mods).forEach(k => { plus[k] += mods[k]; });
+  const a = derivedFromAttrs(base, level), b = derivedFromAttrs(plus, level);
+  return {
+    hp: b.hp - a.hp, atk: b.personalAtk - a.personalAtk, def: b.def - a.def,
+    block: blocks ? bareBlockFromDex(plus.dex) - bareBlockFromDex(5) : 0
+  };
+}
+function _raceAdd(u, d, sign) {
+  const last = u.layers ? u.layers.length - 1 : -1;
+  if (last >= 0 && d.hp) {
+    const l = u.layers[last], oldMax = Number(l.max) || 0, cur = Number(l.current) || 0;
+    l.max = Math.max(1, oldMax + sign * d.hp);
+    l.current = cur >= oldMax ? l.max : Math.max(0, Math.min(l.max, cur + sign * d.hp));
+    if (u.ivBase && u.ivBase.max && u.ivBase.max[last] != null) u.ivBase.max[last] = Math.max(1, u.ivBase.max[last] + sign * d.hp);
+  }
+  if (d.atk) {
+    u.atk = (Number(u.atk) || 0) + sign * d.atk;
+    if (u.personalAtk != null) u.personalAtk = (Number(u.personalAtk) || 0) + sign * d.atk;
+    if (u.ivBase) { u.ivBase.atk += sign * d.atk; if (u.ivBase.personalAtk != null) u.ivBase.personalAtk += sign * d.atk; }
+  }
+  if (d.def) { u.defMax = Math.max(0, (Number(u.defMax) || 0) + sign * d.def); u.def = Math.max(0, Math.min(u.defMax, (Number(u.def) || 0) + sign * d.def)); }
+  if (d.block) u.raceBlock = (u.raceBlock || 0) + sign * d.block;
+}
+/** 定种族（生成 / 主持人改）：先减掉旧种族加的数值，再按新种族加。个体值已经有了的，按新的原始数值重算。
+ *  attrs：要不要套六维，不写就看 ENEMY_INFO.raceAttrs */
+function setEnemyRace(u, race, attrs) {
+  const r = raceParse(race);
+  if (!u || !r) return u;
+  const res = raceResolve(r);
+  if (u.raceDelta) { _raceAdd(u, u.raceDelta, -1); delete u.raceDelta; }
+  if (!u.raceBlock) delete u.raceBlock;
+  u.race = res;
+  const info = enemyRaceInfo(u);
+  if (attrs === undefined) attrs = !!(info && info.attrs);
+  if (attrs) {
+    const blocks = typeof blockChanceRaw === "function" && blockChanceRaw(u) != null;
+    const d = raceDelta(res, u.level, blocks);
+    _raceAdd(u, d, 1);
+    u.raceDelta = d;
+  }
+  if (u.iv && ivEligible(u)) setEnemyIV(u, u.iv);
+  return u;
+}
+/** 生成时调用：race 写了（字符串 / { race, branch }）照写，没写的按 ENEMY_INFO 的配置：固定的照固定，随机的抽。
+ *  ENEMY_IV.off > 0 时随机种族当人类（不抽、不动数值） */
+function applyEnemyRace(u, race) {
+  if (!u || u.race) return u;
+  const info = enemyRaceInfo(u);
+  if (!info) return u;
+  if (race && raceParse(race)) return setEnemyRace(u, race);
+  if (info.fixed) return setEnemyRace(u, info.fixed, false);
+  if (ENEMY_IV.off > 0) { u.race = { race: "人类" }; return u; }
+  return setEnemyRace(u, raceRoll(info.table));
+}
+/** 画面用：「红皮人」「兽人·牛」；没有种族是空串 */
+function raceText(u) { return u && u.race ? raceLabel(u.race) : ""; }
+
+function spawnEnemyGroup(id, lv, partyN, zone, iv, race) {
   const z = zone != null ? Number(zone) : null;
   if (id === "ufo_boss" && typeof spawnUfoBoss === "function") {
     const pack = spawnUfoBoss(lv);
@@ -2415,7 +2549,7 @@ function spawnEnemyGroup(id, lv, partyN, zone, iv) {
   }
   const p = enemyPresets().find(x => x.id === id);
   if (!p || !p.build) return [];
-  const u = applyEnemyIV(p.build(lv, partyN), iv);
+  const u = applyEnemyIV(p.build(lv, partyN), iv, race);
   if (z) u.zone = Math.min(z, Number(state.zoneMode) || z);
   if (typeof refreshEnemyEconomy === "function") refreshEnemyEconomy(u);
   return [u];

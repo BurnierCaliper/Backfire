@@ -153,6 +153,33 @@ test("公开记录：移动写去向、道具写名字和对象、起身写清�
   assert.ok(!/shp|坚毅/i.test(JSON.stringify(projected)));
 });
 
+test("转交角色（#165）：回合之间主持人把角色转给玩家，双方立刻换手，写一行公开记录；每人最多一个角色，收回给主持人", async () => {
+  const f = await fixture(); start(f);
+  const { OnlineGame, HotseatGame } = f.c, ruby = f.state.units.find(u => u.kit === "ruby" && u.isPlayer && !u.weaponOf);
+  const owners = () => Object.fromEntries(HotseatGame.getView().heroes.map(h => [h.id, h.owner]));
+  assert.deepEqual(plain(OnlineGame.transferState()), { ok: true, reason: "" });
+  assert.throws(() => OnlineGame.transfer(ruby.id, "p2"), /最多操控一名角色/);   // 柯尔特还在 p2 手里：沿用每人一个角色的限制
+  OnlineGame.transfer(f.actor.id, "host");   // 收回给主持人
+  assert.equal(owners()[f.actor.id], "host");
+  assert.throws(() => HotseatGame.assertActionFrom("p2", f.actor.id), /不是你的/);
+  OnlineGame.transfer(ruby.id, "p2");
+  assert.equal(owners()[ruby.id], "p2"); assert.equal(owners()[f.actor.id], "host");
+  const logs = OnlineGame.getView().packet.publicLogs.filter(r => r.kind === "transfer");
+  assert.deepEqual(logs.map(r => [r.heroName, r.toName, !!r.toGM]), [[f.actor.name, "主持人", true], [ruby.name, "玩家", false]]);
+  assert.deepEqual(f.errors, []);
+});
+
+test("转交角色（#165）：分步选择没回答时拒绝并写明原因；公开记录文案走白名单、不带坚毅数值", async () => {
+  const f = await fixture(); start(f);
+  const { OnlineGame, HotseatGame } = f.c;
+  HotseatGame.ownedChoice(f.actor, "选一个", [{ label: "甲", value: 1 }, { label: "乙", value: 2 }]);   // 分步选择在等人回答
+  assert.match(OnlineGame.transferState().reason, /分步选择/);
+  assert.throws(() => OnlineGame.transfer(f.actor.id, "host"), /分步选择/);
+  const out = require("../online-view.js").projectLogs([{ kind: "transfer", heroName: "柯尔特", toName: "Bob", toGM: false, shp: 9 }, { kind: "transfer", heroName: "柯尔特", toGM: true }]);
+  assert.deepEqual(out.map(r => r.text), ["主持人把 柯尔特 交给 Bob 操作", "主持人收回了 柯尔特"]);
+  assert.ok(!/shp|坚毅/i.test(JSON.stringify(out)));
+});
+
 test("offlineTick：掉线玩家的选择询问选项为空时不抛错，也不挡住掉线玩家回合超时", async () => {
   const f = await fixture(); start(f); f.offlinePlayer();
   const real = f.c.HotseatGame.getViewFor;

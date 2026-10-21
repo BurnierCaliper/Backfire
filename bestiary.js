@@ -121,26 +121,21 @@ const BESTIARY_TEXT = {
   captain_lizard: { move: "远距离", abilities: ["酸弹：atk + 1d6 酸，2 击破", "协助：远距 2×atk 酸"] },
   // —— 外城区镇压部队（赤牙麾下，武器全是火；固定种族，种族被动另行实装）——
   riot_baton: { move: "近距离，主动贴近", abilities: [
-    "种族：兽人·牛",
     "火焰警棍：近距 atk + 1d4 火，2 击破，打中施加熔融",
     "防暴盾（被动）：自己的护盾层还有血时，同区友军受到的远程攻击伤害 −25%（和其他百分比加算）",
     "协助：冲到目标所在区，普通攻击一次（同样带熔融）"] },
   riot_rifle: { move: "远距离，主动远离", abilities: [
-    "种族：兽人·熊",
     "燃烧弹：远距 atk + 1d4 火，1 击破，打中后激活目标的灼烧（目标没有灼烧就不触发）",
     "协助：远距 0.5×atk 火，同样激活灼烧"] },
   riot_molotov: { move: "远距离（抛射），主动远离", abilities: [
-    "种族：兽人·蜥蜴",
     "燃烧瓶：先标定一个区（画面上有预警），下个敌人回合落地——那一区的单位 0.5×atk 火、灼烧 1（那一区已经是火场则灼烧 2），然后那一区变成火场",
     "抛射：越过危墙和关着的门；标定之后有一回合可以离开那个区",
     "不能协助"] },
   riot_flamer: { move: "近距离，主动贴近", abilities: [
-    "种族：兽人·熊",
     "喷火：近距单体 3 段，每段 0.3×atk 火；目标有灼烧时每段各 1 击破，没有时 3 段共 1 击破；每段命中各有 15% 概率施加灼烧 1",
     "燃料罐（被动）：被打进失衡时罐子破裂，同区所有单位（不分敌我）0.5×atk 火，那一区变成火场",
     "协助：冲进目标所在区，喷火一次"] },
   riot_captain: { move: "远近皆可", abilities: [
-    "种族：兽人·狼",
     "火焰手枪：远近皆可，atk + 1d6 火，1 击破，打中施加灼烧 1",
     "指挥（被动，只影响 AI）：他在场时，所有镇压队单位优先攻击还没有灼烧的敌人",
     "协助：远距 1×atk 火，同样施加灼烧 1"] },
@@ -265,6 +260,9 @@ function bestiaryRecordBattle(outcome) {
     e.minLv = e.minLv == null ? lv : Math.min(e.minLv, lv);
     e.maxLv = e.maxLv == null ? lv : Math.max(e.maxLv, lv);
     if (u.dead) e.kills += 1;   // 下潜逃走的（只有 _removed）不是击杀
+    // 种族（enemies.js）：随机种族的敌人记下见过哪些
+    const rl = typeof raceText === "function" ? raceText(u) : "";
+    if (rl) { e.races = Array.isArray(e.races) ? e.races : []; if (!e.races.includes(rl)) e.races.push(rl); }
     e.last = now;
     e.lastOutcome = outcome || null;
     d.kits[kit] = e;
@@ -316,7 +314,21 @@ function bestiaryStats(kit, level, partySize) {
   };
 }
 
-/** 图鉴的整张表：[{ kit, name, rank, faction, regions, seen, rec, text }]（按 杂兵 → 精英 → 首领 排） */
+/** 图鉴里的种族说明：固定的写种族，随机的写「随机：人类 / 红皮人 / 类人」（权重表里的大支，类人四支合并）；没有种族是空串 */
+function bestiaryRaceText(kit) {
+  const info = (typeof ENEMY_INFO !== "undefined" && ENEMY_INFO[kit]) || (typeof ENEMY_RACE_EXTRA !== "undefined" && ENEMY_RACE_EXTRA[kit]) || null;
+  if (!info) return "";
+  if (info.race) return info.race;
+  if (!Array.isArray(info.races) || !info.races.length) return "";
+  const names = [];
+  info.races.forEach(r => {
+    const big = String(r.race).split("·")[0];
+    const n = typeof ENEMY_RACE_GROUPS !== "undefined" && Object.keys(ENEMY_RACE_GROUPS).some(g => ENEMY_RACE_GROUPS[g].includes(big)) ? "类人" : big;
+    if (!names.includes(n)) names.push(n);
+  });
+  return "随机：" + names.join(" / ");
+}
+/** 图鉴的整张表：[{ kit, name, rank, faction, regions, seen, rec, text, race }]（按 杂兵 → 精英 → 首领 排） */
 function bestiaryEntries() {
   const d = bestiaryLoad();
   const order = { minion: 0, elite: 1, boss: 2 };
@@ -329,7 +341,10 @@ function bestiaryEntries() {
         kit: p.id, name: bestiaryName(p.id), rank, rankName: BESTIARY_RANK_NAME[rank] || rank,
         faction: info.faction || (BESTIARY_TEXT[p.id] || {}).faction || "", regions: info.regions || (BESTIARY_TEXT[p.id] || {}).regions || [],
         seen: !!d.kits[p.id], rec: d.kits[p.id] || null,
-        text: BESTIARY_TEXT[p.id] || null, rankNote: BESTIARY_RANK_NOTE[rank] || ""
+        race: bestiaryRaceText(p.id), racesSeen: d.kits[p.id] && Array.isArray(d.kits[p.id].races) ? d.kits[p.id].races.slice() : [],
+        text: BESTIARY_TEXT[p.id] || null, rankNote: BESTIARY_RANK_NOTE[rank] || "",
+        // 可能掉的制作材料（items.js · enemyDropTable）：[{ id, name, chance 期望份数 }]，图鉴详情「可能掉落」一节显示（bestiary-ui.js · dropsSection）
+        drops: typeof enemyDropTable === "function" ? enemyDropTable(p.id) : []
       };
     });
   return list.sort((a, b) => (order[a.rank] - order[b.rank]) || 0);

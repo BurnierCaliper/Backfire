@@ -5,7 +5,7 @@
   const PROTOCOL = 1, BUILD = "backfire-d3-v1", KEY = "backfire-online-v1";
   const copy = v => JSON.parse(JSON.stringify(v));
   const listeners = new Set(), packetListeners = new Set(), pending = new Map(), requests = new Map(), requestHighWater = new Map();
-  const gmContext = Object.freeze({}), controls = new Set(["orderPick", "orderConfirm", "orderMove", "orderSwapAccept", "answer", "chat", "checkOpen", "checkRoll", "checkClose", "attrRequest", "attrDecide", "skillRoll", "showTitle", "purseTransfer", "shopBuy", "shopRedeem", "cyberRequest", "cyberwareInstall", "cyberwareRemove"]);
+  const gmContext = Object.freeze({}), controls = new Set(["orderPick", "orderConfirm", "orderMove", "orderSwapAccept", "answer", "chat", "checkOpen", "checkRoll", "checkClose", "attrRequest", "attrDecide", "skillRoll", "showTitle", "purseTransfer", "shopBuy", "shopRedeem", "cyberRequest", "cyberwareInstall", "cyberwareRemove", "shopSell", "shopBuyback"]);
   const messageContexts = new WeakMap();
   const recipientWires = new Map(), displayWire = OnlineWire.create();
   let endpoint = null, identity = null, status = { connected: false, paused: true, roster: [] }, active = false;
@@ -96,6 +96,8 @@
       purse: !rogue() && typeof trpgPurse === "function" && typeof TRPG !== "undefined" && TRPG.active ? purseFor(id, id === identity.id) : null,
       // 跑团商人：主持人开着的那家店（trpg-merchants.js · trpgMerchantView；online-view.js · projectShop 白名单）
       shop: !rogue() && typeof trpgMerchantView === "function" && typeof TRPG !== "undefined" && TRPG.active ? trpgMerchantView() : null,
+      // 跑团卖东西 / 回购（shop-sell.js · trpgShopSellView；online-view.js · projectShopSell 白名单）
+      shopSell: !rogue() && typeof trpgShopSellView === "function" && typeof TRPG !== "undefined" && TRPG.active ? trpgShopSellFor(id, id === identity.id) : null,
       // 跑团诊所开放时：自己操控的角色的改造信息和申请状态（online-view.js · projectClinic）
       clinic: !rogue() && typeof trpgCyberInfo === "function" && typeof TRPG !== "undefined" && TRPG.active && TRPG.clinicOpen ? clinicFor(id, id === identity.id) : null,
       // 长休结算（跑团；单局的在 rogue.lastRest 里）和游戏时钟：online-view.js · projectRest / clock 白名单
@@ -127,6 +129,8 @@
         request: req ? { status: req.status, cost: req.cost, note: req.note } : null };
     }).filter(Boolean) };
   }
+  /** 跑团卖出视图：背包都是公用的；回购单只给自己角色卖的（主持人看全部） */
+  function trpgShopSellFor(id, isGM) { return trpgShopSellView(isGM ? null : kitsOwnedBy(id)); }
   function trpgCyberwareFor(id, isGM) {
     const mine = isGM ? (typeof trpgHeroes === "function" ? trpgHeroes().map(h => h.kit) : []) : kitsOwnedBy(id);
     const heroes = mine.map(kit => { try { return trpgCyberwarePacket(kit); } catch (e) { return null; } }).filter(Boolean);
@@ -639,6 +643,21 @@
       const ack = HotseatGame.takeOver(playerId);
       if (!ack.ok) error(ack.error);
       if (offlineWait && offlineWait.owner === playerId) offlineWait = null;
+      publish(); return { ok: true };
+    },
+    /** 战斗中能不能转交角色：{ ok, reason }。只有联机跑团的主持人，且只在两个单位的回合之间 */
+    transferState() {
+      if (!isHost()) return { ok: false, reason: "只有主持人可以转交角色" };
+      if (rogue()) return { ok: false, reason: "联机单局开局后座位固定，不能转交" };
+      if (!HotseatGame.isActive() || !state.combatStarted || GAME.ended) return { ok: false, reason: "只在战斗中转交；探索时用「角色分配」" };
+      return HotseatGame.transferState();
+    },
+    /** 战斗中转交：主持人把角色（连同武器人）交给某名玩家；toId 为主持人自己 = 收回。成功后写一行公开记录 */
+    transfer(heroId, toId) {
+      const gate = root.OnlineGame.transferState();
+      if (!gate.ok) error(gate.reason);
+      const ack = HotseatGame.transferHero(heroId, toId);
+      publicLogs.push({ kind: "transfer", heroName: ack.heroName, toName: ack.toName, toGM: toId === identity.id, turn: state.turnNo, at: Date.now() }); publicLogs = publicLogs.slice(-100);
       publish(); return { ok: true };
     },
     /** 释放座位：转发服务丢掉这名玩家的恢复令牌（昵称和名额可以重新用），他的角色回到房主 */
