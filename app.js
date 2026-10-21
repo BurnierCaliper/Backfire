@@ -2073,6 +2073,10 @@ function startEnemyPhase() {
         u.resources.glReady = true;
         notes.push(`${u.name} 榴弹已就绪，可对 ${u.resources.glZone} 区发射。`);
       }
+      if (u.kit === "riot_molotov" && u.resources && u.resources.bottlePending && u.resources.bottleZone && !u.resources.bottleReady) {
+        u.resources.bottleReady = true;
+        notes.push(`${u.name} 燃烧瓶已就绪，可对 ${u.resources.bottleZone} 区投出。`);
+      }
       if (u.kit === "ant_guard" && u.resources && u.resources.shellPending && u.resources.shellZone && !u.resources.shellReady) {
         u.resources.shellReady = true;
         notes.push(`${u.name} 大酸液弹已就绪，可对 ${u.resources.shellZone} 区发射。`);
@@ -7466,6 +7470,8 @@ function attackConnected(res, flags) {
   return b !== "assistOk" && b !== "bareOk";
 }
 
+/** 身上的灼烧层数 */
+function burnStackCount(u) { return Math.max(0, Math.floor(Number(u && u.statuses && u.statuses.burn) || 0)); }
 function runOnConnect(attacker, target, spec, res) {
   const notes = [];
   if (!spec || !target) return notes;
@@ -7492,6 +7498,21 @@ function runOnConnect(attacker, target, spec, res) {
       const after = Number(target.statuses && target.statuses.burn) || 0;
       if (after > before) notes.push(`${target.name} 灼烧 +${after - before} → ${after} 层。`);
     }
+  }
+  if (spec.burnEach) {
+    // 多段攻击每一段各掷一次（火焰喷射兵）：成功一次灼烧 +1
+    const segs = ((res && res.perHit) || []).length || 1;
+    let got = 0;
+    for (let i = 0; i < segs; i++) if (Math.random() < spec.burnEach && typeof grantBurn === "function") { grantBurn(target, 1, notes); got++; }
+    if (got) notes.push(`${target.name} 灼烧 +${got} → ${Number(target.statuses && target.statuses.burn) || 0} 层（${segs} 段各 ${Math.round(spec.burnEach * 100)}%）。`);
+  }
+  if (spec.instant && typeof applyInstantEffect === "function") {
+    applyInstantEffect(target, spec.instant, notes);
+    notes.push(`${target.name} 被施加${INSTANT_NAME[spec.instant] || spec.instant}。`);
+  }
+  if (spec.activate === "burn" && burnStackCount(target) > 0) {
+    // 激活灼烧：目标没有灼烧就不触发（triggerOneStatus 没有灼烧时会改激活别的状态，这里先挡掉）
+    notes.push(...triggerOneStatus(target, attacker, "burn"));
   }
   if (spec.dest != null) {
     const dest = Number(spec.dest);
@@ -7948,6 +7969,14 @@ function dealTo(attacker, target, opt) {
   if (target && !target.isPlayer && typeof mechChargeDr === "function") {
     const dr = mechChargeDr(target);
     if (dr > 0) { flags.drPct = (Number(flags.drPct) || 0) + dr; flags.drWhy = "蓄满能量"; }
+  }
+  // 防暴盾（镇压队员·警棍盾）：同区有护盾还没打空的警棍盾，友军受到的远程攻击 −25%，和其他百分比加算（enemies.js · riotShieldDr）
+  if (target && !target.isPlayer && flags.action !== false && !flags.environment && typeof riotShieldDr === "function") {
+    const sdr = riotShieldDr(target, attacker, opt);
+    if (sdr > 0) {
+      flags.drPct = (Number(flags.drPct) || 0) + sdr;
+      flags.drWhy = flags.drWhy ? flags.drWhy + "、防暴盾" : "防暴盾";
+    }
   }
   // 挂在「下一击」上的猛击 / 穿刺 / 弱点特效只作用于真正的攻击行动，
   // 不作用于这一击派生出来的环境伤害（雷击转移、爆燃溢出、反弹……），也不会被它们提前用掉
@@ -9291,12 +9320,12 @@ function skillFlowSteps(id, actor, picks) {
       }
     ];
   }
-  if (id === "en_gl" || id === "en_ant_shell") {
+  if (id === "en_gl" || id === "en_ant_shell" || id === "en_riot_bottle") {
     return [{
       key: "dest",
       type: "zone",
       optional: false,
-      label: id === "en_gl" ? "榴弹落点区域" : "大酸液弹落点区域",
+      label: id === "en_gl" ? "榴弹落点区域" : id === "en_riot_bottle" ? "燃烧瓶落点区域" : "大酸液弹落点区域",
       zones
     }];
   }
