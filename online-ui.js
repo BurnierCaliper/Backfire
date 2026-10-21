@@ -1054,7 +1054,7 @@
       else if (!acting) hint = view.packet?.manualPhase || view.manualPhase ? "主持人正在操控敌人。" : hs().phase === "enemy" ? "敌人行动中。" : "等待开始。";
       else if (!mine.includes(cur)) hint = `等待 ${curUnit ? curUnit.name : "队友"}${curUnit && hs().units ? `（${playerName((hs().units.find(u => u.id === cur) || {}).owner)}）` : ""} 行动。`;
       else if (!choices) hint = "正在取技能…";
-      else hint = `${curUnit ? curUnit.name : ""}　选择技能（1–9）。悬停技能看说明，空格结束行动。`;
+      else hint = `${curUnit ? curUnit.name : ""}　${global.OnlineBattle && global.OnlineBattle.isTouch && global.OnlineBattle.isTouch() ? "选择技能。点技能看说明。" : "选择技能（1–9）。悬停技能看说明，空格结束行动。"}`;
       const field = fieldAsk();
       if (field) {
         // 有对应单位的选项 → value 是单位 id（战场上亮起、编号）；其余 value 为空 → 提示栏按钮

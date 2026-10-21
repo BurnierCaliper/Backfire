@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Antlerscale: Backfire · HD-2D 战场原型</title>
+<link rel="stylesheet" href="../../fonts/fonts.css">
+<link rel="stylesheet" href="hd2d.css">
+<script type="importmap">{"imports":{"three":"../../vendor/three/three.module.min.js","three/addons/":"../../vendor/three/addons/"}}</script>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <!-- 喷漆：边缘被噪点打毛（同 art/style-guide.html） -->
+    <filter id="spray" x="-10%" y="-20%" width="120%" height="140%">
+      <feTurbulence type="fractalNoise" baseFrequency=".9" numOctaves="2" seed="4" result="n"/>
+      <feDisplacementMap in="SourceGraphic" in2="n" scale="7" xChannelSelector="R" yChannelSelector="G" result="d"/>
+      <feGaussianBlur in="d" stdDeviation=".6"/>
+    </filter>
+  </defs>
+</svg>
+
+<div id="stage"></div>
+<div id="vignette"></div>
+
+<header id="topbar">
+  <span class="brand">BACKFIRE · HD-2D</span>
+  <div class="info">
+    <span class="tape hz">回合 <b id="tb-turn">1</b></span>
+    <span class="tape">天气 <b id="tb-weather">—</b></span>
+    <span class="map" id="tb-map"></span>
+  </div>
+  <select id="demo-select" aria-label="切换演示战场"></select>
+</header>
+
+<aside id="party" class="panel collapsed">
+  <div class="head"><button class="toggle" id="party-toggle" aria-expanded="false">队伍</button><span class="tape">我方队伍</span></div>
+  <div class="list" id="party-list"></div>
+</aside>
+
+<aside id="logdrawer" class="panel collapsed">
+  <div class="head"><button class="toggle" id="log-toggle" aria-expanded="false">日志</button><span class="tape pk">战斗日志</span></div>
+  <div class="body" id="log-body"></div>
+</aside>
+
+<footer id="dock" class="panel collapsed">
+  <div class="row">
+    <button class="toggle" id="dock-toggle" aria-expanded="false">技能 ▲</button>
+    <span class="who" id="dock-who"></span>
+    <span class="grow"></span>
+    <span class="hint" id="dock-hint">原型：点技能不会真的出招</span>
+  </div>
+  <div id="skills"></div>
+</footer>
+
+<div id="toast"></div>
+<div id="loading">载入战场……</div>
+
+<!-- 规则文件：与 game.html / tests/headless.js 的 RULE_FILES 同一个顺序（不含 game.js 这个战斗画面） -->
+<script src="../../run.js"></script>
+<script src="../../engine.js"></script>
+<script src="../../party.js"></script>
+<script src="../../skill-text.js"></script>
+<script src="../../props.js"></script>
+<script src="../../enemies.js"></script>
+<script src="../../desert.js"></script>
+<script src="../../growth.js"></script>
+<script src="../../feats.js"></script>
+<script src="../../items.js"></script>
+<script src="../../inventory.js"></script>
+<script src="../../shop-sell.js"></script>
+<script src="../../matchup.js"></script>
+<script src="../../cyberware.js"></script>
+<script src="../../ledger.js"></script>
+<script src="../../commands.js"></script>
+<script src="../../app.js"></script>
+<script src="../../levelup.js"></script>
+<script src="../../escort.js"></script>
+<script src="../../boss-mechanics.js"></script>
+<script src="../../effects.js"></script>
+<script src="../../mods.js"></script>
+<script src="../../ai.js"></script>
+<script src="../../sim.js"></script>
+<script src="../../chain.js"></script>
+<script src="../../save.js"></script>
+<script src="../../trpg-data.js"></script>
+<script src="../../trpg.js"></script>
+<script src="../../world-data.js"></script>
+<script src="../../world-travel.js"></script>
+<script src="../../bestiary.js"></script>
+<script src="../../codex.js"></script>
+<script src="../../rogue-data.js"></script>
+<script src="../../battle-templates.js"></script>
+<script src="../../trpg-tasks.js"></script>
+<script src="../../trpg-merchants.js"></script>
+<script src="../../rogue.js"></script>
+<script src="../../battle-commands.js"></script>
+<script src="../../rogue-commands.js"></script>
+<script src="../../trpg-commands.js"></script>
+<script src="../../training.js"></script>
+<script>
+/* 规则文件在浏览器里加载，会带着「去写正式页面元素」的界面函数（renderAll、renderZones……）。
+ * 这个原型只拿规则算数据，页面上没有那些元素，所以把 render 开头的界面函数换成空的。
+ * 规则函数本身一个都不动；没有页面时它们本来就是这样被跳过的（app.js 的 HAS_DOM）。 */
+(function () {
+  Object.keys(window).forEach(function (k) {
+    if (/^render[A-Z]/.test(k) && typeof window[k] === "function") window[k] = function () {};
+  });
+  window.addEventListener("error", function (e) {
+    var t = document.getElementById("toast");
+    t.textContent = "出错了：" + (e.message || e.error) + (e.filename ? "\n" + e.filename.split("/").pop() + ":" + e.lineno : "");
+    t.classList.add("show");
+  });
+})();
+</script>
+<script src="hd2d-layout.js"></script>
+<script type="module">
+import { createHd2dScene } from "./hd2d-scene.js";
+
+const L = window.HD2DLayout;
+const $ = (id) => document.getElementById(id);
+
+/* ---------- 演示战场（用真规则 BattleSim.setup 生成，再补上场地 / 间隔 / 状态） ---------- */
+const PARTY = ["kolt", "helu", "ruby", "yuito"];
+const gap = (type, hp, open) => ({ type, hp: hp || 0, maxHp: hp || 0, open: open !== false, lastFrom: null });
+/** 把某个单位的血削掉一部分（从最外层开始扣），让血条有高低 */
+function hurt(st, kit, frac) {
+  const u = st.units.find(x => x.kit === kit && !x.dead);
+  if (!u) return;
+  let left = Math.round(u.layers.reduce((a, l) => a + l.max, 0) * frac);
+  for (let i = 0; i < u.layers.length && left > 0; i++) { const d = Math.min(left, u.layers[i].current); u.layers[i].current -= d; left -= d; }
+}
+const unit = (st, kit) => st.units.find(x => x.kit === kit);
+
+const DEMOS = [
+  {
+    id: "mine", name: "第一采矿场 · 三区直排 · 晴天", theme: "dusk",
+    make() {
+      const st = BattleSim.setup({
+        party: PARTY, zoneMode: 3, seed: "hd2d-mine",
+        enemies: [{ id: "guard_sword", lv: 2, zone: 3 }, { id: "guard_gun", lv: 2, zone: 3 }, { id: "thug_hammer", lv: 2, zone: 2 }, { id: "boomcar", lv: 2, zone: 2 }]
+      });
+      st.fields[2].acid = true;
+      st.fields[3].highland = true;
+      st.gaps["1-2"] = gap("bridge", 12);
+      st.gaps["2-3"] = gap("wall", 20, false);
+      st.gaps["1-2"].hp = 8;
+      hurt(st, "kolt", 0.3); hurt(st, "guard_sword", 0.4); hurt(st, "thug_hammer", 0.2);
+      unit(st, "kolt").statuses.burn = 2; unit(st, "guard_gun").statuses.shock = true; unit(st, "ruby").def -= 1;
+      return st;
+    }
+  },
+  {
+    id: "desert", name: "沙漠 · 2×2 · 沙暴", theme: "day",
+    make() {
+      const st = BattleSim.setup({
+        party: PARTY, board: "square4", weather: "sand", seed: "hd2d-desert",
+        enemies: [{ id: "sandfish_ambush", lv: 2, zone: 1 }, { id: "sandfish_lead", lv: 2, zone: 2 }, { id: "sand_beast", lv: 2, zone: 4 }, { id: "sand_human", lv: 2, zone: 4 }]
+      });
+      st.fields[1].quicksand = true;
+      st.fields[4].coral = true;
+      st.gaps["1-3"] = gap("void");
+      st.gaps["2-4"] = gap("bridge", 10);
+      const shark = unit(st, "sandfish_ambush");
+      if (shark) shark.submerged = true;          // 沙鱼潜在流沙下面，只露半截
+      hurt(st, "sand_beast", 0.35); hurt(st, "ruby", 0.25);
+      unit(st, "sand_human").statuses.corr = true; unit(st, "helu").statuses.inspire = true;
+      return st;
+    }
+  },
+  {
+    id: "cross", name: "十字五区 · 夜晚 · 雷鸣", theme: "night",
+    make() {
+      const st = BattleSim.setup({
+        party: PARTY, board: "cross5", weather: "thunder", seed: "hd2d-cross",
+        enemies: [{ id: "crow", lv: 2, zone: 1 }, { id: "buoy", lv: 2, zone: 1 }, { id: "thug_hammer", lv: 2, zone: 3 }, { id: "guard_gun", lv: 2, zone: 4 }]
+      });
+      st.fields[1].abyss = true;
+      st.fields[2].highland = true;
+      st.fields[3].electric = true;
+      st.fields[4].acid = true;
+      st.gaps["1-3"] = gap("void");
+      st.gaps["2-3"] = gap("door", 0, false);
+      st.gaps["3-4"] = gap("bridge", 12);
+      hurt(st, "buoy", 0.3); hurt(st, "thug_hammer", 0.15); hurt(st, "yuito", 0.4);
+      unit(st, "buoy").statuses.shock = true; unit(st, "guard_gun").stunned = true;
+      return st;
+    }
+  }
+];
+
+/* ---------- 状态 ---------- */
+let sc = null, demo = null, st = null, actorId = null;
+const weatherText = (w) => (!w || w === "none") ? "晴天" : (typeof weatherName === "function" ? weatherName(w) : w);
+
+function build() {
+  if (!st) return null;
+  return L.build(st, { portrait: !!(sc && sc.portrait) });
+}
+function repaint(resetView) {
+  const layout = build();
+  if (!layout) return;
+  sc.setBattle(layout, { weather: st.weather, theme: demo.theme, actorId });
+  if (resetView) sc.refit();
+  renderUI(layout);
+}
+
+/* ---------- 界面 ---------- */
+function players() { return st.units.filter(u => u.isPlayer && !u.hidden && !u.dead && !u.weaponOf); }
+function renderUI(layout) {
+  $("tb-turn").textContent = st.turnNo || 1;
+  $("tb-weather").textContent = weatherText(st.weather);
+  $("tb-map").textContent = demo.name;
+  // 队伍栏：只用铭牌数据（没有坚毅生命）
+  const plates = {};
+  layout.units.forEach(u => { plates[u.id] = u.plate; });
+  $("party-list").innerHTML = players().map(u => {
+    const p = plates[u.id]; if (!p) return "";
+    const segs = p.layers.slice().reverse().map(l => `<i style="width:${p.hp.max ? 100 * l.max / p.hp.max : 0}%;background:linear-gradient(90deg,${LAYER[l.type] || "#d8574a"} ${l.max ? 100 * l.cur / l.max : 0}%,#2a2520 0)"></i>`).join("");
+    return `<div class="pm ${u.id === actorId ? "on" : ""}" data-id="${u.id}"><span class="face">${esc(p.name.slice(0, 1))}</span>
+      <div class="meta"><div class="nm">${esc(p.name)} <span class="lv">Lv${p.level}</span></div><div class="bar">${segs}</div></div></div>`;
+  }).join("");
+  document.querySelectorAll(".pm").forEach(el => el.addEventListener("click", () => setActor(el.dataset.id)));
+  renderSkills();
+  renderLog();
+}
+const LAYER = { flesh: "#d8574a", armor: "#9aa7b3", shield: "#4fb8ff", sand: "#d1a85a", spirit: "#c07cf0" };
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function setActor(id) {
+  actorId = id;
+  sc.setActor(id);
+  document.querySelectorAll(".pm").forEach(el => el.classList.toggle("on", el.dataset.id === id));
+  renderSkills();
+}
+function renderSkills() {
+  const u = st.units.find(x => x.id === actorId);
+  $("dock-who").innerHTML = u ? `${esc(u.name)}<small>Lv${u.level} · 行动中</small>` : "";
+  let list = [];
+  try { list = typeof skillList === "function" && u ? skillList(u) : []; } catch (e) { list = []; }
+  if (!list.length) list = [{ name: "普通攻击", hint: "（原型占位）" }, { name: "移动", hint: "（原型占位）" }, { name: "防御", hint: "（原型占位）" }];
+  const colors = ["", "mint", "alt", "pink"];
+  $("skills").innerHTML = list.slice(0, 12).map((s, i) => `<button class="btn ${colors[i % colors.length]}" title="${esc(s.hint || "")}">${esc(s.name)}</button>`).join("");
+  $("skills").querySelectorAll(".btn").forEach(b => b.addEventListener("click", () => toast("第一阶段：技能按钮只是摆设，不会真的出招")));
+}
+function renderLog() {
+  const page = (st.logPages && st.logPages[0]) || { lines: [] };
+  const lines = (page.lines || []).map(l => (typeof l === "string" ? l : l.text)).filter(Boolean);
+  $("log-body").innerHTML = (lines.length ? lines : ["（战斗还没开始，日志是空的）"]).map(t => `<p>${esc(t)}</p>`).join("") +
+    `<p class="dim">—— 原型：这里显示规则生成的日志，第二阶段才会接真实战斗。</p>`;
+}
+let toastTimer = 0;
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.style.background = "var(--steel)"; t.classList.add("show");
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("show"), 1800);
+}
+
+/* 面板收起 / 展开 */
+function wirePanel(panelId, btnId, labelOn, labelOff, startOpen) {
+  const p = $(panelId), b = $(btnId);
+  const set = (open) => {
+    p.classList.toggle("collapsed", !open);
+    b.setAttribute("aria-expanded", String(open));
+    if (labelOn) b.textContent = open ? labelOn : labelOff;
+    if (panelId === "dock") reinset(true);
+  };
+  b.addEventListener("click", () => set(p.classList.contains("collapsed")));
+  set(startOpen);
+}
+/** 取景时让开顶栏和底部技能栏 */
+function reinset(refit) {
+  if (!sc) return;
+  const top = $("topbar").offsetHeight;
+  const bottom = $("dock").offsetHeight;
+  sc.setInsets({ top: top + 6, bottom: bottom + 4 });
+  if (refit) sc.refit();
+}
+
+/* ---------- 启动 ---------- */
+function loadDemo(id) {
+  demo = DEMOS.find(d => d.id === id) || DEMOS[0];
+  st = demo.make();
+  const p = players();
+  actorId = p.length ? p[0].id : null;
+  $("demo-select").value = demo.id;
+  repaint(true);
+}
+function boot() {
+  const phone = window.matchMedia("(max-width: 720px)").matches;
+  wirePanel("dock", "dock-toggle", "技能 ▼", "技能 ▲", !phone);
+  wirePanel("party", "party-toggle", "队伍 ◀", "队伍 ▶", !phone);
+  wirePanel("logdrawer", "log-toggle", "日志 ▶", "日志 ◀", false);
+  $("demo-select").innerHTML = DEMOS.map(d => `<option value="${d.id}">${esc(d.name)}</option>`).join("");
+  $("demo-select").addEventListener("change", e => loadDemo(e.target.value));
+  sc = createHd2dScene($("stage"), {
+    onPortraitChange() { if (st) { repaint(true); } }
+  });
+  reinset(false);
+  window.addEventListener("resize", () => reinset(false));
+  loadDemo(new URLSearchParams(location.search).get("demo") || DEMOS[0].id);
+  $("loading").classList.add("done");
+  window.HD2D = { sc, DEMOS, L, get state() { return st; } };   // 方便在控制台里看
+}
+try { boot(); } catch (e) {
+  $("loading").classList.add("done");
+  const t = $("toast"); t.textContent = "原型启动失败：" + e.message; t.classList.add("show");
+  console.error(e);
+}
+</script>
+</body>
+</html>
