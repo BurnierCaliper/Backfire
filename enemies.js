@@ -279,7 +279,12 @@ function forcedZonePick(a, zone, lines) {
   return Number(f.zone);
 }
 
+/** 敌人能用的技能：本体的 + 种族的附赠技能（无法行动的敌人，例如被挟持的亡命之王，一个都没有） */
 function enemySkillList(u) {
+  const base = enemySkillListBase(u);
+  return base.length ? base.concat(raceSkills(u)) : base;
+}
+function enemySkillListBase(u) {
   if (!u || u.isPlayer) return [];
   const common = [
     { id: "en_approach", label: "移向目标" },
@@ -706,7 +711,7 @@ const ENEMY_SKILL_COST = {
   en_chi_hunt: { ap: 0, bonus: 1 }
 };
 function enemySkillCost(u, id) {
-  return ENEMY_SKILL_COST[id] || { ap: 1, bonus: 0 };
+  return ENEMY_SKILL_COST[id] || RACE_SKILL_COST[id] || { ap: 1, bonus: 0 };
 }
 
 /** 区域范围技能（喷洒、流沙漩涡……）能不能打到 zone：按技能射程，隔着危墙 / 关着的门打不到 */
@@ -1060,6 +1065,7 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
 
   const skillRange = ENEMY_SKILL_RANGE[id] || a.range || "any";
   const aa = (target, opt) => hitOne(a, target, Object.assign({ atk, atkRange: skillRange }, opt));
+  if (raceRunSkill(id, a, t, hitOne, lines, needT, atk)) return true;   // 种族附赠（扑灭、追猎本能、威压、吐酸）
 
   // 赤牙：自己再出手就离开掩体（掩体撑过我方回合，到她下一次出手为止）；霰弹枪的 −40% 协助格挡只算那一枪
   if (a.kit === "chixia") {
@@ -2382,6 +2388,271 @@ function applyEnemyRace(u, race) {
 }
 /** 画面用：「红皮人」「兽人·牛」；没有种族是空串 */
 function raceText(u) { return u && u.race ? raceLabel(u.race) : ""; }
+
+/* ===== 种族被动（docs/enemy-race.md 第 4 节） =====
+ * 照搬角色的种族特长 / 缺陷，按 u.race 通用生效（不看具体兵种）；角色也走同一份（racePerkKey 把 "兽人-蜥蜴" 这样的写法归一成 "兽人·蜥蜴"）。
+ * 数值放 RACE_PERK，各被动的开关和说明放 RACE_PERKS。 */
+const RACE_PERK = {
+  fireCut: 0.25,          // 红皮人·热耐性：受火伤 −25%（和克制表加算）
+  energyUp: 0.25,         // 兽人·蜥蜴·鳞片：受能量伤害 +25%
+  loneWolfDiv: 2,         // 犬类人·狼·独狼：atk ± 等级 ÷ 2（向下取整）
+  loneWolfMates: 2,       // 区里有这么多名及以上队友就是减
+  swiftRecover: 1,        // 猫类人·豹·迅袭：每次移动回的架势
+  swiftBreak: 1,          // 猫类人·豹·迅袭：整场第一个行动的第一击 +击破
+  aweChance: 0.5,         // 猫类人·虎·威压：敌人的威吓检定成功率
+  fieldCut: 0.5,          // 鼠类人·鼠·环境适应：场地伤害 ×
+  firstBonus: 1,          // 牛类人·马·千里马：第一回合 +附赠
+  rageHpPct: 0.5,         // 兽人·牛·易怒蛮牛：血量低于这个比例时受伤会失控
+  rageBreak: 1,           // 兽人·牛·易怒蛮牛：冲撞的击破
+  spitMult: 1,            // 兽人·蜥蜴·吐酸：倍率
+  breakCap: 2,            // 兽人·猫·灵巧：一回合最多失去的架势
+  distractTurns: 1,       // 兽人·猫·注意力涣散：连续打同一个目标超过这么多回合
+  distractCut: 0.25       // 兽人·猫·注意力涣散：伤害 −
+};
+const RACE_PERKS = {
+  "人类":      { reroll: true, text: "迎难直上：检定失败时重掷一次" },
+  "红皮人":    { fireCut: true, snuff: true, text: "热耐性：受火伤 −25%；附赠扑灭身上的灼烧" },
+  "犬类人·狼": { loneWolf: true, text: "独狼：同区没有队友时 atk + 等级÷2，有两名及以上队友时 atk − 等级÷2" },
+  "猫类人·豹": { swift: true, text: "迅袭：每次移动回 1 架势；整场第一个行动的第一击 +1 击破" },
+  "猫类人·虎": { awe: true, text: "威压：附赠，对近距一人威吓（50% 成功），成功施加不稳" },
+  "鼠类人·鼠": { fieldCut: true, text: "环境适应：场地伤害减半" },
+  "牛类人·马": { firstBonus: true, text: "千里马：第一回合 +1 附赠" },
+  "兽人·狼":   { hunt: true, text: "追猎本能：附赠，对一个敌人施加紧追" },
+  "兽人·牛":   { rage: true, text: "易怒蛮牛（缺陷）：血量低于 50% 时受到任何伤害，会失去附赠、冲到另一个区、对随机一个目标造成 1 击破" },
+  "兽人·蜥蜴": { spit: true, energyUp: true, text: "吐酸：附赠，近距 1×atk 酸，每场一次；鳞片（缺陷）：受能量伤害 +25%" },
+  "兽人·猫":   { breakCap: true, distract: true, text: "灵巧：一回合最多失去 2 架势；注意力涣散（缺陷）：不止一个目标可选时，连续超过 1 回合打同一个目标，伤害 −25%" },
+  "兽人·熊":   { text: "重装操作、嗜睡（战斗里不生效，只记在资料里）" }
+};
+/** 种族的归一写法："兽人·蜥蜴"。敌人看 u.race；角色看 HERO_PROFILES（"兽人-蜥蜴"，武器人不算） */
+function racePerkKey(u) {
+  if (!u) return "";
+  if (u.race && u.race.race) return raceLabel(u.race);
+  if (u.isPlayer && !u.weaponOf && u.kit && typeof heroProfile === "function") {
+    const r = (heroProfile(u.kit) || {}).race;
+    return r ? String(r).replace("-", "·") : "";
+  }
+  return "";
+}
+/** 这个单位的种族被动配置（没有就是 null）。大支的被动写在大支名下（人类、红皮人），小分支写 "大支·小分支" */
+function racePerk(u) {
+  const k = racePerkKey(u);
+  return RACE_PERKS[k] || RACE_PERKS[k.split("·")[0]] || null;
+}
+/** 画面用：这个种族的被动说明，一行一条 */
+function racePerkLinesFor(label) {
+  const k = String(label || "").trim();
+  const p = RACE_PERKS[k] || RACE_PERKS[k.split("·")[0]];
+  return p && p.text ? [p.text] : [];
+}
+function racePerkLines(u) { return racePerkLinesFor(racePerkKey(u)); }
+
+/** 敌人的种族被动配置（只认 u.race；角色走各自的实现） */
+function enemyRacePerk(u) { return u && u.race ? racePerk(u) : null; }
+
+/** 种族对「受到某属性伤害」的百分比修正：[{ value, reason }]（engine.js · resolveAttack 和 matchup.js 的克制表共用）。
+ *  角色的鳞片还是走 engine / matchup 里原来那一行，这里只管 u.race 的敌人，数值同一份 RACE_PERK */
+function raceDefendMods(u, el) {
+  const out = [];
+  const p = enemyRacePerk(u);
+  if (!p) return out;
+  if (p.fireCut && el === "fire") out.push({ value: -RACE_PERK.fireCut, reason: `热耐性（${racePerkKey(u)}）：火焰受伤 −${Math.round(RACE_PERK.fireCut * 100)}%。` });
+  if (p.energyUp && el === "energy") out.push({ value: RACE_PERK.energyUp, reason: `鳞片（${racePerkKey(u)}）：能量受伤 +${Math.round(RACE_PERK.energyUp * 100)}%。` });
+  return out;
+}
+
+/** 是不是同一边的友方单位：同阵营，或者是它召唤的 / 召唤它的；配置物、中立生物不算 */
+function raceMateOf(u, x) {
+  if (!u || !x || x === u || x.dead || x.hidden || x._removed || x.fused || x.kind || x.isProp || x.isStructure || x.kit === "ironwall") return false;
+  if (!!x.isPlayer !== !!u.isPlayer) return false;
+  if (typeof isNeutralCreature === "function" && isNeutralCreature(x)) return false;
+  if (x.summonedBy === u.id || u.summonedBy === x.id) return true;
+  return factionOf(x) === factionOf(u);
+}
+/** 同区的队友数（独狼） */
+function raceMateCount(u, units) {
+  return (units || state.units || []).filter(x => Number(x.zone) === Number(u.zone) && raceMateOf(u, x)).length;
+}
+/** 独狼：effectiveAtk（party.js）加上这个数。没有队友 +，两名及以上 −，一名不变 */
+function raceAtkAdjust(u, units) {
+  const p = enemyRacePerk(u);
+  if (!p || !p.loneWolf) return 0;
+  const n = raceMateCount(u, units), d = Math.floor((Number(u.level) || 1) / RACE_PERK.loneWolfDiv);
+  return n === 0 ? d : n >= RACE_PERK.loneWolfMates ? -d : 0;
+}
+
+/** 种族给检定带来的：{ reroll }（迎难直上）。角色的检定走 party.js · checkPerksFor，敌人走这里 */
+function raceCheckPerks(u) {
+  const p = u && !u.isPlayer ? enemyRacePerk(u) : null;
+  return { adv: false, dis: false, reroll: !!(p && p.reroll), softFail: false, text: p && p.reroll ? p.text : "" };
+}
+
+/** 场地伤害经过种族（环境适应）：返回实际受到的伤害（减半向上取整，至少 1） */
+function raceFieldDamage(u, dmg) {
+  const p = enemyRacePerk(u);
+  if (!p || !p.fieldCut || !(dmg > 0)) return dmg;
+  return Math.max(1, Math.ceil(dmg * RACE_PERK.fieldCut));
+}
+
+/** 迅袭「整场第一个行动」：做过任何行动（移动、攻击、种族附赠）就记下 */
+function raceMarkActed(u) { if (u && u.race) u.raceActed = true; }
+/** 迅袭：整场第一个行动里，第一击 +击破（dealTo 传给 resolveAttack 的 firstBreak） */
+function raceFirstBreak(u) {
+  const p = enemyRacePerk(u);
+  return p && p.swift && !u.raceActed ? RACE_PERK.swiftBreak : 0;
+}
+/** 迅袭：每次移动回架势。doMove 成功之后调用 */
+function raceAfterMove(u, notes) {
+  const p = enemyRacePerk(u);
+  if (!p || !p.swift) return;
+  raceMarkActed(u);
+  if (u.dead || u.noPosture || u.stunned) return;
+  const max = Number(u.defMax) || 0, cur = Number(u.def) || 0;
+  if (cur >= max) return;
+  u.def = Math.min(max, cur + RACE_PERK.swiftRecover);
+  if (notes) notes.push(`迅袭：${u.name} 移动回 ${RACE_PERK.swiftRecover} 架势 → ${u.def}。`);
+}
+
+/** 千里马：第一回合 +附赠（refreshEnemyEconomy 调用，返回要加的数量）。顺便数这个敌人经历了几个自己的回合 */
+function raceBonusExtra(u) {
+  if (!u || !u.race) return 0;
+  u.raceRounds = (u.raceRounds || 0) + 1;
+  const p = racePerk(u);
+  return p && p.firstBonus && u.raceRounds === 1 ? RACE_PERK.firstBonus : 0;
+}
+
+/** 灵巧：一回合最多失去的架势（没有就是 null）。engine.js · applyResultToUnit 读 */
+function raceBreakCap(u) {
+  const p = enemyRacePerk(u);
+  return p && p.breakCap ? RACE_PERK.breakCap : null;
+}
+
+/** 注意力涣散：这次攻击打 t 是不是「连续超过 N 回合打同一个目标」（不止一个目标可选才算）。只读，不记录 */
+function raceDistracted(a, t) {
+  const p = enemyRacePerk(a);
+  if (!p || !p.distract || !t || t === a) return false;
+  const rec = a.raceFocus;
+  if (!rec || rec.id !== t.id) return false;
+  const now = Number(state.turnNo) || 0;
+  const streak = rec.round === now ? rec.streak : (rec.round === now - 1 ? rec.streak + 1 : 1);
+  if (streak <= RACE_PERK.distractTurns) return false;
+  return hostilesOf(a).filter(x => !x.kind && !x.isProp && !x.dying).length > 1;
+}
+/** 攻击者一侧的种族修正：[{ value, reason }]（注意力涣散） */
+function raceAttackMods(a, t) {
+  return raceDistracted(a, t) ? [{ value: -RACE_PERK.distractCut, reason: `注意力涣散（${racePerkKey(a)}）：连续打同一个目标，伤害 −${Math.round(RACE_PERK.distractCut * 100)}%。` }] : [];
+}
+/** 记下这次攻击打了谁（dealTo 结算后调用；同一回合打几次只算一回合） */
+function raceNoteAttack(a, t) {
+  const p = enemyRacePerk(a);
+  if (!p || !p.distract || !t || t === a || t.kind) return;
+  const now = Number(state.turnNo) || 0, rec = a.raceFocus;
+  if (rec && rec.id === t.id) {
+    if (rec.round === now - 1) a.raceFocus = { id: t.id, round: now, streak: rec.streak + 1 };
+    else if (rec.round !== now) a.raceFocus = { id: t.id, round: now, streak: 1 };
+  } else a.raceFocus = { id: t.id, round: now, streak: 1 };
+}
+
+/** 易怒蛮牛：血量低于一半时受到任何伤害 → 失去附赠、冲到另一个区、对随机一个目标造成击破。applyCombat 末尾调用 */
+function raceAfterHurt(target, result, attacker, notes) {
+  const p = enemyRacePerk(target);
+  if (!p || !p.rage || target.dead || target._rageBusy || target.hidden) return;
+  if (!((Number(result && result.total) || 0) > 0 || (Number(result && result.shpDealt) || 0) > 0)) return;
+  const max = totalMaxHp(target);
+  if (!(max > 0) || totalHp(target) >= max * RACE_PERK.rageHpPct) return;
+  target._rageBusy = true;
+  try {
+    notes.push(`易怒蛮牛：${target.name} 血量低于 ${Math.round(RACE_PERK.rageHpPct * 100)}%，受伤后失控！`);
+    target.bonus = 0;
+    target.raceNoBonus = true;   // 下个敌人回合的附赠也没了（refreshEnemyEconomy 读）
+    const from = Number(target.zone);
+    const ns = zoneNeighbors(from).slice();
+    for (let i = ns.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [ns[i], ns[j]] = [ns[j], ns[i]]; }
+    for (const z of ns) {
+      doMove(target, z, { free: true, forced: true });
+      if (Number(target.zone) !== from) break;
+    }
+    if (Number(target.zone) === from) notes.push(`${target.name} 没有路可冲，原地发狂。`);
+    const pool = hostilesOf(target).filter(x => Number(x.zone) === Number(target.zone) && !x.kind && !x.isProp && !(typeof isDownProtected === "function" && isDownProtected(x)));
+    if (pool.length) {
+      const v = pool[Math.floor(Math.random() * pool.length)];
+      notes.push(`${target.name} 不受控地冲撞 ${v.name}。`);
+      dealBreak(v, RACE_PERK.rageBreak, "physical", notes, "易怒蛮牛冲撞", { by: target });
+    } else notes.push(`${target.name} 冲进 ${target.zone} 区，没有撞到人。`);
+  } finally { target._rageBusy = false; }
+}
+
+/** 种族带来的附赠技能（enemySkillList 追加）。只有敌人有：角色有自己的技能 */
+const RACE_SKILL_COST = { race_snuff: { ap: 0, bonus: 1 }, race_hunt: { ap: 0, bonus: 1 }, race_awe: { ap: 0, bonus: 1 }, race_spit: { ap: 0, bonus: 1 } };
+function raceSkills(u) {
+  const p = u && !u.isPlayer ? enemyRacePerk(u) : null;
+  if (!p) return [];
+  const out = [];
+  if (p.snuff) out.push({ id: "race_snuff", label: "热耐性：扑灭灼烧（附赠）" });
+  if (p.hunt) out.push({ id: "race_hunt", label: "追猎本能：紧追（附赠）" });
+  if (p.awe) out.push({ id: "race_awe", label: "威压：近距威吓（附赠，50% 施加不稳）" });
+  if (p.spit) out.push({ id: "race_spit", label: "吐酸：近距 1×atk 酸（附赠，每场一次）" });
+  return out;
+}
+/** 种族技能的执行（runEnemyActionInner 开头调用，不是种族技能返回 false） */
+function raceRunSkill(id, a, t, hitOne, lines, needT, atk) {
+  if (!RACE_SKILL_COST[id]) return false;
+  raceMarkActed(a);
+  a.resources = a.resources || {};
+  if (id === "race_snuff") {
+    const n = Math.floor(Number(a.statuses && a.statuses.burn) || 0);
+    if (a.statuses) a.statuses.burn = 0;
+    lines.push(n > 0 ? `热耐性：${a.name} 扑灭了身上的 ${n} 层灼烧。` : `${a.name} 身上没有灼烧。`);
+    return true;
+  }
+  if (!needT()) return true;
+  if (id === "race_hunt") {
+    t.statuses = t.statuses || {};
+    t.statuses.chase = true;
+    t.chasers = (t.chasers || []).filter(x => x !== a.id).concat(a.id);   // 目标移动时跟过去的是它（chaseFollow 读 chasers）
+    if (typeof popStatus === "function") popStatus(t, "chase");
+    lines.push(`追猎本能：${t.name} 被 ${a.name} 紧追，它移动时 ${a.name} 会跟过去。`);
+    return true;
+  }
+  if (Number(a.zone) !== Number(t.zone)) { lines.push(`${t.name} 不在同一区，打不到。`); return true; }
+  if (id === "race_awe") {
+    const ok = Math.random() < RACE_PERK.aweChance;
+    lines.push(`威压：${a.name} 威吓 ${t.name}（${Math.round(RACE_PERK.aweChance * 100)}%）→ ${ok ? "成功" : "失败"}`);
+    if (ok) {
+      const notes = [];
+      applyUnstable(t, notes);
+      if (typeof popStatus === "function") popStatus(t, "unstable");
+      lines.push(...notes, `${t.name} 不稳。`);
+    }
+    return true;
+  }
+  if (id === "race_spit") {
+    if (a.resources.spitUsed) { lines.push("吐酸：本场战斗已用。"); return true; }
+    a.resources.spitUsed = true;
+    hitOne(a, t, { element: "acid", mult: RACE_PERK.spitMult, baseBreak: 0, atk, atkRange: "melee" });
+    lines.push("吐酸：本场战斗已用。");
+    return true;
+  }
+  return false;
+}
+/** AI：这一步要不要先用一个种族附赠。返回 { id, target } 或 null。
+ *  精英 / 首领的移动也花附赠，所以只在不用移动（step == null）时才用；杂兵的附赠（千里马给的）不影响移动 */
+function raceBonusChoice(u, prey, step) {
+  if (!u || u.isPlayer || !u.race || (u.bonus || 0) < 1) return null;
+  const rank = typeof enemyRankOf === "function" ? enemyRankOf(u) : "minion";
+  if (rank !== "minion" && step != null) return null;
+  const p = racePerk(u);
+  if (!p) return null;
+  const mine = (id) => (enemySkillList(u) || []).some(s => s.id === id);
+  const near = (prey || []).filter(x => !x.kind && Number(x.zone) === Number(u.zone));
+  if (p.snuff && mine("race_snuff") && Number(u.statuses && u.statuses.burn) > 0) return { id: "race_snuff", target: null };
+  if (p.spit && mine("race_spit") && !(u.resources && u.resources.spitUsed) && near.length) return { id: "race_spit", target: near.slice().sort((a, b) => totalHp(a) - totalHp(b))[0] };
+  if (p.awe && mine("race_awe")) { const c = near.filter(x => !(x.statuses && x.statuses.unstable)); if (c.length) return { id: "race_awe", target: c[0] }; }
+  if (p.hunt && mine("race_hunt")) {
+    const c = (prey || []).filter(x => !x.kind && !(x.statuses && x.statuses.chase && (x.chasers || []).includes(u.id)));
+    if (c.length) return { id: "race_hunt", target: c[0] };
+  }
+  return null;
+}
 
 function spawnEnemyGroup(id, lv, partyN, zone, iv, race) {
   const z = zone != null ? Number(zone) : null;

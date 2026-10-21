@@ -308,6 +308,15 @@ function bestiaryRaceText(kit) {
   });
   return "随机：" + names.join(" / ");
 }
+/** 图鉴里的种族被动：固定种族写那个种族的被动；随机种族写见过的种族的被动（"红皮人：热耐性……"）；没有被动是空数组 */
+function bestiaryRacePerks(kit, seen) {
+  if (typeof racePerkLinesFor !== "function") return [];
+  const info = (typeof ENEMY_INFO !== "undefined" && ENEMY_INFO[kit]) || (typeof ENEMY_RACE_EXTRA !== "undefined" && ENEMY_RACE_EXTRA[kit]) || null;
+  if (info && info.race) return racePerkLinesFor(info.race);
+  const out = [];
+  (Array.isArray(seen) ? seen : []).forEach(r => racePerkLinesFor(r).forEach(t => out.push(`${r}：${t}`)));
+  return out;
+}
 /** 图鉴的整张表：[{ kit, name, rank, faction, regions, seen, rec, text, race }]（按 杂兵 → 精英 → 首领 排） */
 function bestiaryEntries() {
   const d = bestiaryLoad();
@@ -322,6 +331,7 @@ function bestiaryEntries() {
         faction: info.faction || (BESTIARY_TEXT[p.id] || {}).faction || "", regions: info.regions || (BESTIARY_TEXT[p.id] || {}).regions || [],
         seen: !!d.kits[p.id], rec: d.kits[p.id] || null,
         race: bestiaryRaceText(p.id), racesSeen: d.kits[p.id] && Array.isArray(d.kits[p.id].races) ? d.kits[p.id].races.slice() : [],
+        racePerks: bestiaryRacePerks(p.id, d.kits[p.id] && d.kits[p.id].races),
         text: BESTIARY_TEXT[p.id] || null, rankNote: BESTIARY_RANK_NOTE[rank] || "",
         // 可能掉的制作材料（items.js · enemyDropTable）：[{ id, name, chance 期望份数 }]，图鉴详情「可能掉落」一节显示（bestiary-ui.js · dropsSection）
         drops: typeof enemyDropTable === "function" ? enemyDropTable(p.id) : []

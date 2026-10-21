@@ -90,10 +90,12 @@
     const seen = new Set();
     const rows = effs.filter(e => { if (seen.has(e.name)) return false; seen.add(e.name); return true; });
     const mechs = (head && Array.isArray(head.mechs) ? head.mechs : []).filter(x => typeof x === "string" && x);
+    const perks = (head && Array.isArray(head.perks) ? head.perks : []).filter(x => typeof x === "string" && x);   // 种族被动（enemies.js · RACE_PERKS）
     return `<div class="ut-top"><b>${esc(head && head.name || "")}</b>${head && head.sub ? `<span>${esc(head.sub)}</span>` : ""}</div>` +
       (d.kicker ? `<div class="ut-kicker">${esc(d.kicker)}</div>` : "") +
       // 首领机制放在描述前面：还有几回合落下最要紧
       (mechs.length ? `<div class="ut-h ut-mech-h">首领机制 · 倒计时</div><ul class="ut-mechs">${mechs.map(x => { const i = x.indexOf("："); return `<li>${i > 0 && i < 30 ? `<b>${esc(x.slice(0, i))}</b>${esc(x.slice(i))}` : esc(x)}</li>`; }).join("")}</ul>` : "") +
+      (perks.length ? `<div class="ut-h">种族被动</div><ul class="ut-list">${perks.map(x => { const i = x.indexOf("："); return `<li>${i > 0 && i < 18 ? `<b>${esc(x.slice(0, i))}</b>${esc(x.slice(i))}` : esc(x)}</li>`; }).join("")}</ul>` : "") +
       (d.text ? `<p class="ut-desc">${esc(d.text)}</p>` : "") +
       (d.list.length ? `<ul class="ut-list">${d.list.map(x => { const i = x.indexOf("："); return `<li>${i > 0 && i < 18 ? `<b>${esc(x.slice(0, i))}</b>${esc(x.slice(i))}` : esc(x)}</li>`; }).join("")}</ul>` : "") +
       `<div class="ut-h">身上的效果</div>` +

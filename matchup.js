@@ -56,6 +56,7 @@ function matchupDefenderRow(u, el, weather, envX, fieldT) {
   }
   if (u.self === "splash" && (el === "acid" || el === "fire")) add(-0.25, "溅射：酸 / 火受伤 −25%");
   if (el === "energy" && u.kit && u.isPlayer && !u.weaponOf && typeof heroProfile === "function" && (heroProfile(u.kit) || {}).race === "兽人-蜥蜴") add(0.25, "鳞片（兽人-蜥蜴）：能量受伤 +25%");
+  if (typeof raceDefendMods === "function") raceDefendMods(u, el).forEach(m => add(m.value, m.reason.replace(/。$/, "")));   // 敌人的种族被动：热耐性、鳞片
   if (u.self === "store" && el === "harmonic") add(0.25, "蓄能：谐波受伤 +25%");
   (u.etchMarks || []).forEach(m => { if (m && m.element === el) { const v = Number(m.pct) || 0.1; add(v, `蚀刻残留：${ELE[el]} +${Math.round(v * 100)}%，并视为被克制`); } });
   if (r.rallyDr && !(u.stunned || u.dying)) add(-0.15, "全队集结（坦克）：全属性减伤 −15%");
