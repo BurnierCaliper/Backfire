@@ -530,7 +530,8 @@
   function sellModel() {
     const heroes = run.party.filter(h => !h.dead).map(h => ({ kit: h.kit, name: Rogue.heroName(h.kit), purse: online() ? OnlineRogue.purse(h.kit) : null }));
     const mine = online() ? (k => OnlineRogue.hostKits().includes(k)) : null;
-    return ShopSellUI.model(sellView(), { key: "run", heroes, mine, actor: online() ? hostPayer() : (heroes[0] || {}).kit,
+    // 单机：东西都是公用的，钱进奎支（卖的人记成 "party"）
+    return ShopSellUI.model(sellView(), { key: "run", heroes, mine, actor: online() ? hostPayer() : "party", canAct: online() ? null : () => true,
       money: k => online() ? OnlineRogue.purse(k) : money() });
   }
   function shopTabs() {

@@ -1,7 +1,7 @@
 /* 商店 · 卖东西（买 / 卖 页签里的「卖」）：单机单局、联机单局、跑团（主持人 / 联机玩家）共用一套界面。
  * 规则在别处（rogue.js · shopSellView / sellItem / buybackItem；trpg · trpgShopSellFor）：这里只画房主 / 本机算好的视图，不自己算价钱。
- * 视图 shopSellView：{ items:[{id,name,qty,unitPrice,owner,ok,reason}], buyback:[{token,id,name,qty,price,owner,seller}] }
- *   owner 是 "shared"（公用）或某位英雄的 kit；ok=false 的行置灰并写明原因（任务道具 / 图纸 / 已装备 / 无标准价）。
+ * 视图 shopSellView（单机 run.query shopSell；联机单局 packet.rogue.shopSell；跑团 packet.shopSell / trpgShopSellView）：{ items:[{id,name,qty,unitPrice,owner,ok,reason}], buyback:[{token,id,name,qty,price,owner,seller}] }
+ *   owner 是 "shared"（公用）或某位英雄的 kit；ok=false 的行置灰并写明原因（任务道具 / 图纸 / 已装备 / 无标准价 / 改装件；改装件照旧走 sellPart）。
  * 按钮发出的指令：{ action:"sellItem", kit, id, qty, owner } / { action:"buybackItem", kit, token }，交给调用方的 onCmd。
  * 结果 {ok,total,payout:[{to,amount}],msg}：toastText() 写一句「钱进了谁的钱包」（to = kit 或 "party"）。 */
 (function (root) {

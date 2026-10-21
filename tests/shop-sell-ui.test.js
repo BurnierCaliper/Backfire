@@ -1,6 +1,6 @@
 // 商店 · 卖（shop-sell-ui.js）：买 / 卖页签、按归属分组、数量步进、单价合计、置灰原因、可买回、提示钱进谁的钱包；
 // 单机单局（rogue-ui.js）、联机单局 / 跑团玩家（online-ui.js）、视图白名单（online-view.js）。
-// 规则函数（shopSellView / Rogue.sellItem / buybackItem / trpgShopSellFor）由另一条分支写，这里一律打桩。
+// 单机单局用真规则（PR #138 · rogue.js / shop-sell.js）；联机玩家那边只有显示，包是手写的。
 // 截图：SHOP_SHOTS=1 时写 shots/shop-sell-*.png（1280×800）。
 "use strict";
 const test = require("node:test");
@@ -22,6 +22,9 @@ const VIEW = {
     { id: "grenade", name: "破片手雷", qty: 2, unitPrice: 20, owner: "kolt", ok: true, reason: "" },
     { id: "vest", name: "防弹背心", qty: 1, unitPrice: 0, owner: "kolt", ok: false, reason: "已装备" },
     { id: "trinket", name: "怪石头", qty: 1, unitPrice: 0, owner: "helu", ok: false, reason: "无标准价" },
+    { id: "map_outer", name: "外城区地图", qty: 1, unitPrice: 0, owner: "shared", ok: false, reason: "地图与票券" },
+    { id: "ticket_dome", name: "穹顶门票", qty: 1, unitPrice: 0, owner: "kolt", ok: false, reason: "地图与票券" },
+    { id: "part_x", name: "改装件 · 重枪管", qty: 1, unitPrice: 0, owner: "kolt", ok: false, reason: "改装件" },
     { id: "ration", name: "压缩口粮", qty: 4, unitPrice: 5, owner: "helu", ok: true, reason: "" }
   ],
   buyback: [{ token: "bb1", id: "water_can", name: "水壶", qty: 1, price: 10, owner: "shared", seller: "kolt" }]
@@ -42,8 +45,9 @@ test("卖出页：按 公用 / 每位英雄 分组，单价、合计、置灰原
   const pos = ["公用", "柯尔特", "赫鲁", "可买回"].map(s => h.indexOf(`<h4>${s}`));
   assert.ok(pos.every(p => p >= 0), "四个分组标题都在");
   assert.deepEqual(pos.slice().sort((a, b) => a - b), pos, "公用在最前，英雄按队伍顺序，可买回最后");
-  for (const r of ["任务道具", "图纸", "已装备", "无标准价"]) assert.match(h, new RegExp(`ss-why">${r}`));
-  assert.equal((h.match(/class="ss-row off"/g) || []).length, 4);
+  for (const r of ["任务道具", "图纸", "已装备", "无标准价", "改装件", "地图与票券"]) assert.match(h, new RegExp(`ss-why">${r}`));
+  assert.equal((h.match(/class="ss-row off"/g) || []).length, 7);
+  assert.match(h, /&quot;id&quot;:&quot;ticket_dome&quot;[^>]*disabled/, "地图与票券 和其他原因一样置灰、不能点");
   // 能卖的行：单价 15，数量 1，合计 15；指令带 owner 和出手的英雄
   assert.match(h, /<b>医疗包<\/b>[\s\S]*?ss-unit"><small>单价<\/small><b>15<\/b>[\s\S]*?ss-total"><small>共<\/small><b>15<\/b>/);
   assert.match(h, /data-ss-cmd="\{&quot;action&quot;:&quot;sellItem&quot;,&quot;kit&quot;:&quot;kolt&quot;,&quot;id&quot;:&quot;medkit&quot;,&quot;qty&quot;:1,&quot;owner&quot;:&quot;shared&quot;\}"/);
@@ -98,13 +102,13 @@ test("提示：钱进了谁的钱包（kit / party），失败时写原因", () 
   assert.equal(U.toastText({ ok: false, msg: "已装备" }), "没做成：已装备");
 });
 
-test("online-view：shop.sell 只留白名单字段；没有 sell 时为 null", () => {
-  const dirty = { id: "m1", name: "店", rows: [], sell: { items: VIEW.items.map(r => Object.assign({ shp: 99, secret: "x" }, r)), buyback: VIEW.buyback.map(b => Object.assign({ hidden: 1 }, b)) } };
-  const out = V.projectPacket({ type: "result", shop: dirty }, { recipientId: "p1", gmId: "gm" }).shop;
-  assert.deepEqual(out.sell.items[0], VIEW.items[0]);
-  assert.deepEqual(Object.keys(out.sell.items[0]).sort(), ["id", "name", "ok", "owner", "qty", "reason", "unitPrice"]);
-  assert.deepEqual(out.sell.buyback[0], VIEW.buyback[0]);
-  assert.equal(V.projectPacket({ type: "result", shop: { id: "m1", rows: [] } }, { recipientId: "p1", gmId: "gm" }).shop.sell, null);
+test("online-view：packet.shopSell（PR #138 · projectShopSell）只留界面要的字段", () => {
+  const dirty = { items: VIEW.items.map(r => Object.assign({ shp: 99, secret: "x" }, r)), buyback: VIEW.buyback.map(b => Object.assign({ hidden: 1 }, b)) };
+  const out = V.projectPacket({ type: "result", shopSell: dirty }, { recipientId: "p1", gmId: "gm" }).shopSell;
+  assert.deepEqual(out.items[0], VIEW.items[0]);
+  assert.deepEqual(out.buyback[0], VIEW.buyback[0]);
+  const U = loadUi();
+  assert.match(U.html(U.model(out, { heroes: HEROES })), /医疗包/);
 });
 
 test("game.html 引入 shop-sell-ui.js / shop-sell.css；联机允许 shopSell / shopBuyback 消息", () => {
@@ -130,51 +134,46 @@ async function newPage(t, width = 1280, height = 800) {
 }
 const noOverflow = page => page.evaluate(() => [...document.querySelectorAll(".ss-row")].filter(r => r.offsetParent).every(r => r.scrollWidth <= r.clientWidth + 1 && r.getBoundingClientRect().right <= window.innerWidth + 1));
 
-test("单机单局：商店节点的 买 / 卖 页签，卖出调 Rogue.sellItem，买回调 Rogue.buybackItem，提示钱进谁的钱包", async t => {
+test("单机单局（真规则）：休整时商店的 买 / 卖，卖出 / 买回走 run sellItem / buybackItem，提示钱进队伍；失败显示原因", async t => {
   const o = await newPage(t); if (!o) return; const { page, errors } = o;
   await page.goto(pathToFileURL(path.join(ROOT, "game.html")).href);
-  await page.evaluate(view => {
+  await page.evaluate(() => {
     window.__noLevelUpPopup = true;
-    window.__sold = []; window.__view = JSON.parse(JSON.stringify(view));
     const run = Rogue.newRun({ party: ["kolt", "helu"], seed: "SELL-UI" });
     run.stage = "camp"; state.kuizhi = 500;
-    // 规则还没合进来：查询 shopSell 和两个动作打桩
-    const real = window.dispatch;
-    window.dispatch = (cmd, ctx) => cmd && cmd.type === "run.query" && cmd.action === "shopSell" ? window.__view : real(cmd, ctx);
-    Rogue.sellItem = arg => { __sold.push(["sell", arg]); const r = __view.items.find(x => x.id === arg.id && x.owner === arg.owner); r.qty -= arg.qty;
-      __view.buyback.push({ token: "t" + __sold.length, id: r.id, name: r.name, qty: arg.qty, price: r.unitPrice * arg.qty, owner: r.owner, seller: arg.kit });
-      const to = r.owner === "shared" ? "kolt" : r.owner; return { ok: true, total: r.unitPrice * arg.qty, payout: [{ to, amount: r.unitPrice * arg.qty }], msg: `卖出 ${r.name} ×${arg.qty}` }; };
-    Rogue.buybackItem = arg => { __sold.push(["buyback", arg]); __view.buyback = __view.buyback.filter(b => b.token !== arg.token); return { ok: true, total: -10, payout: [{ to: arg.kit, amount: -10 }], msg: "买回 水壶" }; };
+    state.bag = { items: [{ id: "medkit", qty: 3 }, { id: "bp_trevor_bigkill", qty: 1 }] };
     Rogue.save(run); RunFlow.resume();
-  }, VIEW);
+  });
   const host = page.locator('[data-ss-host="run"]');
   await host.waitFor();
-  assert.match(await host.locator(".ss-tabs").innerText(), /买[\s\S]*卖/);
   assert.ok(await host.locator("[data-buy]").count() > 0, "默认是「买」");
   if (SHOTS) await page.screenshot({ path: path.join(SHOTS, "shop-sell-buy-tab.png") });
   await host.locator('[data-ss-tab="sell"]').click();
   await page.waitForSelector(".ss-panel");
   assert.equal(await page.locator("[data-ss-host=run] [data-buy]").count(), 0);
-  assert.equal(await page.locator(".ss-group h4").first().innerText().then(s => s.startsWith("公用")), true);
-  await page.locator('.ss-row[data-ss-row="shared|medkit"] .ss-inc').click();
-  assert.match(await page.locator('.ss-row[data-ss-row="shared|medkit"] .ss-total').innerText(), /30/);
-  await page.locator('.ss-row[data-ss-row="shared|medkit"] [data-ss-cmd]').scrollIntoViewIfNeeded();
-  if (SHOTS) await page.locator(".ss-panel").screenshot({ path: path.join(SHOTS, "shop-sell-local-panel.png") });
+  const med = page.locator('.ss-row[data-ss-row="shared|medkit"]');
+  assert.match(await med.locator(".ss-unit").innerText(), /300/, "医疗包手册价 600 → 300");
+  assert.match(await page.locator('.ss-row[data-ss-row="shared|bp_trevor_bigkill"]').innerText(), /图纸/);
+  await med.locator(".ss-inc").click();
+  assert.match(await med.locator(".ss-total").innerText(), /600/);
   if (SHOTS) await page.screenshot({ path: path.join(SHOTS, "shop-sell-local.png") });
-  await page.locator('.ss-row[data-ss-row="shared|medkit"] [data-ss-cmd]').click();
-  assert.deepEqual(await page.evaluate(() => __sold[0]), ["sell", { kit: "kolt", id: "medkit", qty: 2, owner: "shared" }]);
+  await med.locator("[data-ss-cmd]").click();
   await page.waitForSelector(".ss-toast:not([hidden])");
-  assert.equal(await page.locator(".ss-toast").innerText(), "💰 卖出 医疗包 ×2 → 柯尔特 +30");
-  assert.equal(await page.locator(".ss-buyback .ss-row").count(), 2);
+  assert.match(await page.locator(".ss-toast").innerText(), /队伍 \+600/);
+  assert.equal(await page.evaluate(() => state.kuizhi), 1100);
   assert.equal(await page.locator(".ss-tab.on").innerText(), "卖", "卖完还停在「卖」页签");
-  if (SHOTS) await page.screenshot({ path: path.join(SHOTS, "shop-sell-local-toast.png") });
-  await page.locator('.ss-buyback [data-ss-cmd*="bb1"]').click();
-  assert.deepEqual(await page.evaluate(() => __sold[1]), ["buyback", { kit: "kolt", token: "bb1" }]);
   assert.equal(await page.locator(".ss-buyback .ss-row").count(), 1);
-  // 离开商店（规则清掉卖出视图）：回到「买」
-  await page.evaluate(() => { window.__view = null; });
-  await page.locator('[data-ss-host="run"] [data-ss-tab="buy"]').click();
-  assert.equal(await page.locator('[data-ss-host="run"] [data-ss-tab="sell"]').isDisabled(), true);
+  if (SHOTS) await page.screenshot({ path: path.join(SHOTS, "shop-sell-local-toast.png") });
+  await page.locator(".ss-buyback [data-ss-cmd]").click();
+  assert.equal(await page.evaluate(() => state.kuizhi), 500);
+  assert.equal(await page.locator(".ss-buyback").count(), 0);
+  // 钱不够买回：规则抛错 → 提示原因（按钮置灰前先让钱不够）
+  await med.locator("[data-ss-cmd]").click();
+  await page.evaluate(() => { state.kuizhi = 0; });
+  await page.locator('[data-ss-step="1"]').first().click();   // 重画
+  assert.equal(await page.locator(".ss-buyback [data-ss-cmd]").isDisabled(), true);
+  await page.evaluate(() => { state.kuizhi = 0; const b = document.querySelector(".ss-buyback [data-ss-cmd]"); b.disabled = false; b.click(); });
+  await page.waitForFunction(() => /没做成：.*奎支不够/.test(document.querySelector(".ss-toast").textContent));
   assert.deepEqual(errors, []);
 });
 
@@ -202,7 +201,7 @@ const own = v => ({ items: v.items.filter(r => r.owner !== "helu"), buyback: v.b
 
 test("跑团联机玩家：物资里的商店有 买 / 卖，卖 / 买回发 shopSell / shopBuyback，新包重画，收摊后回到「买」；390px 不溢出", async t => {
   const o = await online(t); if (!o) return; const { page, errors } = o;
-  await page.evaluate(p => { fixture.view.packet = Object.assign(fixture.view.packet, p); fixture.emit(); }, { shop: Object.assign({}, SHOP, { sell: own(VIEW) }), purse: PURSE, mode: "trpg" });
+  await page.evaluate(p => { fixture.view.packet = Object.assign(fixture.view.packet, p); fixture.emit(); }, { shop: SHOP, shopSell: own(VIEW), purse: PURSE, mode: "trpg" });
   await page.click('[data-online="supplies"]');
   const host = page.locator('[data-ss-host="trpg"]');
   await host.waitFor();
@@ -224,14 +223,14 @@ test("跑团联机玩家：物资里的商店有 买 / 卖，卖 / 买回发 sho
   await page.waitForFunction(() => fixture.calls.length > 0);
   assert.deepEqual(await page.evaluate(() => fixture.calls.pop()), { type: "shopBuyback", kit: "kolt", token: "bb1" });
   // 新包：可买回清空 → 重画
-  await page.evaluate(v => { fixture.view.packet.shop = Object.assign({}, fixture.view.packet.shop, { sell: Object.assign({}, v, { buyback: [] }) }); fixture.emit(); }, own(VIEW));
+  await page.evaluate(v => { fixture.view.packet.shopSell = Object.assign({}, v, { buyback: [] }); fixture.emit(); }, own(VIEW));
   await page.waitForFunction(() => !document.querySelector(".ss-buyback"));
   // 390px
   await page.setViewportSize({ width: 390, height: 844 });
   assert.equal(await noOverflow(page), true, "390px 下每行不溢出");
   if (SHOTS) { await page.setViewportSize({ width: 1280, height: 800 }); }
   // 收摊：包里没有 shop 了 → 商店收起；再开张默认「买」
-  await page.evaluate(() => { fixture.view.packet.shop = null; fixture.emit(); });
+  await page.evaluate(() => { fixture.view.packet.shop = null; fixture.view.packet.shopSell = null; fixture.emit(); });
   await page.evaluate(s => { fixture.view.packet.shop = s; fixture.emit(); }, SHOP);
   await page.waitForSelector('[data-ss-host="trpg"] .ss-tab.on[data-ss-tab="buy"]');
   assert.equal(await page.locator('[data-ss-host="trpg"] [data-ss-tab="sell"]').isDisabled(), true);
