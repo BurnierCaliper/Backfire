@@ -368,6 +368,12 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **联机玩家「物资」→「钱包与商店」，「背包」改用共用背包浮层，道具只列一处**（设计师反馈「物资和背包分不清、东西列了两遍」；online-ui.js · `suppliesMarkup` / `suppliesButton` / `trpgBagModel` / `openBag` / `openBackpack` / `closeMyBag` / `render` / `rogueMarkup` / `openInfo`，backpack-ui.js · `open` / `refresh` / `inBattleMode` / `html`，workshop-data-adapter.js · `viewBackpackModel`，backpack.css，online.css；测试：新增 tests/online-bag-ui.test.js，改 tests/online-ui.test.js、tests/online-session-ui.test.js、tests/shop-sell-ui.test.js）
+  - **以前**：跑团玩家的「物资」弹窗既有商店 / 工匠 / 工坊 / 诊所 / 钱包，又在底下列一遍「队伍公共物资」（奎支、水、道具 × 数量）；「背包」按钮又向房主要一份文字清单；联机单局标题栏有「背包」，正文「工坊与背包」里又有一个「背包」。
+  - **钱包与商店**（跑团，原「物资」，`data-online="supplies"` 不变）= 钱和花钱的地方：公账 / 奎支、自己的钱包、商店、工匠、工坊、诊所 · 义体，顶上一行说明「队伍的道具在「背包」里看」，不再列道具。**联机单局不显示这个按钮**：单局的钱包、商店、工匠、诊所、工坊都在正文和队伍卡上，而 `state.kuizhi` 在单局只是马上平分清零的临时公账。
+  - **背包**：标题栏「背包」打开和房主同一个背包浮层（`.ovl`），按 材料 / 消耗品 / 改装件 / 义体 / 关键道具 分类、带道具说明；顶上一行写水量和「用道具在自己的行动里选「使用道具」，钱在「钱包与商店」」。跑团读最新的 `view.state.bag`（online-view.js · projectState 白名单：道具 `id / name / qty`，外加 `water`），说明在本地查道具目录（和房主 bagDetail 同一套），每收一包浮层就是这一包；战斗中只读。联机单局沿用 `WorkshopData.viewBackpackModel`，战斗中只读、不给义体方案（和房主 hostBackpackModel 一致）；去掉正文里重复的「背包」按钮（工坊入口保留）。
+  - **不挡事**：轮到我回应协助 / 格挡询问时背包浮层自动收起（`.ovl` 会盖住询问，倒计时到了会自动放弃）；离开房间 / 被移出 / 销毁时收起；只收玩家自己打开的，不碰房主的背包。
+  - **backpack-ui.js**：`model.note` 一行说明；`opts.keep` 换画面不自动收起、挂在 body 上（玩家页隐藏了 #g-app）；打开时当前标签为空就跳到第一个有东西的标签（模型只算一次）；打开时焦点放「关闭」、重画后焦点留在原按钮，Esc 能关；≤760px 或触屏时标签 / 按钮 / 可点的材料行 44px。不显示任何坚毅生命数值（测试用 `shp / shpMax` 设特殊值核对，另查道具目录说明里不带坚毅数字）。
 - **#194 补丁：战斗包不带队伍卡；玩家探索画面的属性点申请按钮回来了**（online-game.js · `rawPacket`；online-ui.js · `partyMarkup` / `attrMarkup`；party-cards.js · `heroCardHtml`；online.css · `.ol-party` / `.ol-party-cell`；测试 tests/online-player-ui.test.js、tests/online-session-ui.test.js）
   - **战斗包**：#194 给每个结算包都整份带上 `party`（队伍卡，约 1.2 KB），但玩家战斗画面根本不画队伍卡，4v3 瑞比连击一次结算的总流量从 49,049 涨到 52,763 字节，超过 50 KiB 上限。现在 `online-game.js` 只在不是战斗画面时发 `party`（探索 / 结算照旧带），上限不变。
   - **属性点**：#194 把玩家探索画面的队伍卡换成和主持人共用的 `party-cards.js` 后，属性点申请按钮（`attrMarkup`）没再画出来，联机玩家没法分配属性点。现在自己的角色卡下面接回申请 / 等确认 / 撤回；卡片和申请区包在同一个 `.ol-party-cell` 里（`.ol-party` 是网格，分开放会单独占一格、在宽屏上排到卡片右边）。
