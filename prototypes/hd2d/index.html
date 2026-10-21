@@ -121,6 +121,7 @@ window.GAME_MODE = true;
 <script src="../../shop-sell.js"></script>
 <script src="../../matchup.js"></script>
 <script src="../../cyberware.js"></script>
+<script src="../../daylight.js"></script>
 <script src="../../ledger.js"></script>
 <script src="../../commands.js"></script>
 <script src="../../app.js"></script>
@@ -186,13 +187,16 @@ function hurt(st, kit, frac) {
 }
 const unit = (st, kit) => st.units.find(x => x.kit === kit);
 
-/* region：这场战斗默认在哪个区域（游戏里的区域名，hd2d-layout.js 的 REGIONS）。默认地台的地面、远景、灯都跟着它；顶栏的区域下拉框 / ?region= 可以换 */
+/* region：这场战斗默认在哪个区域（游戏里的区域名，hd2d-layout.js 的 REGIONS）。默认地台的地面、远景、灯都跟着它；顶栏的区域下拉框 / ?region= 可以换。
+ * theme：光影主题（白天 / 傍晚 / 夜晚）。
+ * 两个都当成「布置战场」写进战斗状态（BattleSim.setup 的 region / light，和战斗原型的遭遇一样：world-data.js · battleLookStart），
+ * 画面读投影里的 pv.region / pv.light（online-view.js 的白名单放行），和联机玩家拿到的一样 */
 const DEMOS = [
   {
     id: "mine", name: "三区直排 · 晴天", region: "第一采矿场", theme: "dusk",
-    make() {
+    make(region) {
       const st = BattleSim.setup({
-        party: PARTY, zoneMode: 3, seed: "hd2d-mine",
+        party: PARTY, zoneMode: 3, seed: "hd2d-mine", region, light: this.theme,
         enemies: [{ id: "guard_sword", lv: 2, zone: 3 }, { id: "guard_gun", lv: 2, zone: 3 }, { id: "thug_hammer", lv: 2, zone: 2 }, { id: "boomcar", lv: 2, zone: 2 }]
       });
       st.fields[2].acid = true;
@@ -207,9 +211,9 @@ const DEMOS = [
   },
   {
     id: "desert", name: "2×2 · 沙暴", region: "沙漠", theme: "day",
-    make() {
+    make(region) {
       const st = BattleSim.setup({
-        party: PARTY, board: "square4", weather: "sand", seed: "hd2d-desert",
+        party: PARTY, board: "square4", weather: "sand", seed: "hd2d-desert", region, light: this.theme,
         enemies: [{ id: "sandfish_ambush", lv: 2, zone: 1 }, { id: "sandfish_lead", lv: 2, zone: 2 }, { id: "sand_beast", lv: 2, zone: 4 }, { id: "sand_human", lv: 2, zone: 4 }]
       });
       st.fields[1].quicksand = true;
@@ -225,9 +229,9 @@ const DEMOS = [
   },
   {
     id: "cross", name: "十字五区 · 夜晚 · 雷鸣", region: "外城区", theme: "night",
-    make() {
+    make(region) {
       const st = BattleSim.setup({
-        party: PARTY, board: "cross5", weather: "thunder", seed: "hd2d-cross",
+        party: PARTY, board: "cross5", weather: "thunder", seed: "hd2d-cross", region, light: this.theme,
         enemies: [{ id: "crow", lv: 2, zone: 1 }, { id: "buoy", lv: 2, zone: 1 }, { id: "thug_hammer", lv: 2, zone: 3 }, { id: "guard_gun", lv: 2, zone: 4 }]
       });
       st.fields[1].abyss = true;
@@ -252,22 +256,26 @@ function project() {
   pv = OnlineView.projectState(st, { itemCatalog: typeof ITEM_CATALOG !== "undefined" ? ITEM_CATALOG : {} });
   return pv;
 }
-/** 区域：顶栏下拉框 / 网址的 ?region= 选的（区域名、地图地点 id，或者认不得的名字 = 看兜底的样子）；null = 按演示默认的。
- *  联机玩家拿到的战斗状态（projectState）里没有区域名（要加进白名单的字段见 README「联机数据」），所以原型先用页面选的兜底，不从房主的原始 state 读 */
+/** 区域：页面选的 = 顶栏下拉框 / 网址的 ?region= 选的（区域名、地图地点 id，或者认不得的名字 = 看兜底的样子）；null = 按演示默认的。
+ *  页面选的当成这场战斗原型的区域写进战斗状态（BattleSim.setup / battleLookStart 的 region），
+ *  画面读投影里的 pv.region（主机认得的区域名才发）；投影里没有（认不得的名字）再用页面选的兜底。不从房主的原始 state 读 */
 let regionPick = null;
-const regionNow = () => (regionPick != null ? regionPick : demo.region);
+const pageRegion = () => (regionPick != null ? regionPick : demo.region);
+const regionNow = () => (pv && pv.region) || pageRegion();
+/** 光影主题：投影里的 pv.light（演示定的写进了战斗状态：BattleSim.setup 的 light）；没有再用演示的 */
+const themeNow = () => (pv && pv.light) || demo.theme;
 const weatherText = (w) => (!w || w === "none") ? "晴天" : (typeof weatherName === "function" ? weatherName(w) : w);
 
 /** 排战场：铭牌是固定像素大小的 DOM，所以把真实的画面大小和上下被面板盖住的像素交给布局，它按同一个镜头算站位；
- *  区域（地面、远景、灯）和光影主题（灯白天 / 夜里几盏）也交给布局。交给布局的是投影过的状态 */
+ *  区域（地面、远景、灯）和光影主题（灯白天 / 夜里几盏）也交给布局。交给布局的是投影过的状态（先投影，区域、光影再读投影里的） */
 function build() {
   if (!st || !sc) return null;
-  return L.build(project(), { portrait: !!sc.portrait, view: sc.view(), region: regionNow(), theme: demo.theme });
+  return L.build(project(), { portrait: !!sc.portrait, view: sc.view(), region: regionNow(), theme: themeNow() });
 }
 function repaint(resetView) {
   const layout = build();
   if (!layout) return;
-  sc.setBattle(layout, { weather: pv.weather, theme: demo.theme, actorId });
+  sc.setBattle(layout, { weather: pv.weather, theme: themeNow(), actorId });
   if (resetView) sc.refit();
   renderUI(layout);
 }
@@ -378,7 +386,7 @@ function onKey(e) {
 /* ---------- 启动 ---------- */
 function loadDemo(id) {
   demo = DEMOS.find(d => d.id === id) || DEMOS[0];
-  st = demo.make();
+  st = demo.make(pageRegion());
   project();
   const p = players();
   actorId = p.length ? p[0].id : null;
@@ -413,7 +421,8 @@ function boot() {
   $("demo-btn").addEventListener("click", () => loadDemo(DEMOS[(DEMOS.indexOf(demo) + 1) % DEMOS.length].id));   // 手机：小按钮轮流切
   $("region-select").innerHTML = `<option value="">区域：按演示</option>` + Object.keys(L.REGIONS).map(n => `<option value="${esc(n)}">区域：${esc(n)}</option>`).join("") +
     `<option value="${UNKNOWN}">区域：认不得（兜底）</option>`;
-  $("region-select").addEventListener("change", e => { regionPick = e.target.value || null; syncRegion(); repaint(true); });
+  // 换区域：和开战时一样写进战斗状态（battleLookStart），画面再读投影里的
+  $("region-select").addEventListener("change", e => { regionPick = e.target.value || null; battleLookStart({ region: pageRegion(), light: demo.theme }); syncRegion(); repaint(true); });
   const params = new URLSearchParams(location.search);
   regionPick = params.get("region") || null;      // ?region=沙漠 / ?region=mine_1（地图地点 id 也认）
   sc = createHd2dScene($("stage"), {

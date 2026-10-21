@@ -373,21 +373,22 @@ test("后排抬高：前后排叠到时整排往上抬（同一排抬得一样�
 
 /* 三个演示战场：和 index.html 的 DEMOS 一样的布置 */
 const gapOf = (type, hp, open) => ({ type, hp: hp || 0, maxHp: hp || 0, open: open !== false, lastFrom: null });
+/* 和 index.html 的演示一样，区域、光影当成布置战场写进战斗状态（BattleSim.setup 的 region / light，#229） */
 const DEMO_SETUPS = {
   mine(S) {
-    const st = S.setup({ party: PARTY, zoneMode: 3, seed: "hd2d-mine", enemies: [{ id: "guard_sword", lv: 2, zone: 3 }, { id: "guard_gun", lv: 2, zone: 3 }, { id: "thug_hammer", lv: 2, zone: 2 }, { id: "boomcar", lv: 2, zone: 2 }] });
+    const st = S.setup({ party: PARTY, zoneMode: 3, seed: "hd2d-mine", region: "第一采矿场", light: "dusk", enemies: [{ id: "guard_sword", lv: 2, zone: 3 }, { id: "guard_gun", lv: 2, zone: 3 }, { id: "thug_hammer", lv: 2, zone: 2 }, { id: "boomcar", lv: 2, zone: 2 }] });
     st.fields[2].acid = true; st.fields[3].highland = true; st.gaps["1-2"] = gapOf("bridge", 12); st.gaps["2-3"] = gapOf("wall", 20, false);
     st.units.find(u => u.kit === "kolt").statuses.burn = 2; st.units.find(u => u.kit === "guard_gun").statuses.shock = true;
     return st;
   },
   desert(S) {
-    const st = S.setup({ party: PARTY, board: "square4", weather: "sand", seed: "hd2d-desert", enemies: [{ id: "sandfish_ambush", lv: 2, zone: 1 }, { id: "sandfish_lead", lv: 2, zone: 2 }, { id: "sand_beast", lv: 2, zone: 4 }, { id: "sand_human", lv: 2, zone: 4 }] });
+    const st = S.setup({ party: PARTY, board: "square4", weather: "sand", seed: "hd2d-desert", region: "沙漠", light: "day", enemies: [{ id: "sandfish_ambush", lv: 2, zone: 1 }, { id: "sandfish_lead", lv: 2, zone: 2 }, { id: "sand_beast", lv: 2, zone: 4 }, { id: "sand_human", lv: 2, zone: 4 }] });
     st.fields[1].quicksand = true; st.fields[4].coral = true; st.gaps["1-3"] = gapOf("void"); st.gaps["2-4"] = gapOf("bridge", 10);
     const shark = st.units.find(u => u.kit === "sandfish_ambush"); if (shark) shark.submerged = true;
     return st;
   },
   cross(S) {
-    const st = S.setup({ party: PARTY, board: "cross5", weather: "thunder", seed: "hd2d-cross", enemies: [{ id: "crow", lv: 2, zone: 1 }, { id: "buoy", lv: 2, zone: 1 }, { id: "thug_hammer", lv: 2, zone: 3 }, { id: "guard_gun", lv: 2, zone: 4 }] });
+    const st = S.setup({ party: PARTY, board: "cross5", weather: "thunder", seed: "hd2d-cross", region: "外城区", light: "night", enemies: [{ id: "crow", lv: 2, zone: 1 }, { id: "buoy", lv: 2, zone: 1 }, { id: "thug_hammer", lv: 2, zone: 3 }, { id: "guard_gun", lv: 2, zone: 4 }] });
     st.fields[1].abyss = true; st.fields[2].highland = true; st.fields[3].electric = true; st.fields[4].acid = true;
     st.gaps["1-3"] = gapOf("void"); st.gaps["2-3"] = gapOf("door", 0, false); st.gaps["3-4"] = gapOf("bridge", 12);
     st.units.find(u => u.kit === "guard_gun").stunned = true;
@@ -972,7 +973,10 @@ test("联机数据：原型页先用 OnlineView.projectState 投影再交给布�
     // 投影里没有坚毅生命（upOnShp 是给玩家看的「起身」开关，只有 true / false，不是数值）
     const wire = JSON.stringify(pv).replace(/"upOnShp":(true|false)/g, "");
     assert.ok(!/shp/i.test(wire) && !wire.includes(String(SHP)) && !wire.includes(String(SHP_MAX)), id + "：投影里有坚毅生命");
-    assert.equal(pv.region, undefined, "投影的战斗状态里还没有区域名（要加进白名单的字段见 README「联机数据」）；加了以后原型页改成读投影里的");
+    // 区域名、光影进了白名单（#229）：投影里有，原型页读的就是它们（pv.region / pv.light）
+    const want = { mine: ["第一采矿场", "dusk"], desert: ["沙漠", "day"], cross: ["外城区", "night"] }[id];
+    assert.deepEqual([pv.region, pv.light], want, id + "：投影的战斗状态里有区域名和光影");
+    assert.equal(L.regionName(pv.region), pv.region, "投影里的区域名原型的表认得");
     for (const region of [undefined, "沙漠"]) for (const portrait of [false, true]) {
       const opts = { view: DESKTOP, region, theme: "dusk", portrait };
       const a = L.build(raw, opts), b = L.build(pv, opts), tag = `${id} ${region || "不给区域"}${portrait ? " 竖屏" : ""}`;
