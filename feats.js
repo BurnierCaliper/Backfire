@@ -130,7 +130,8 @@ const FEATS = {
       } } },
   versatile: { name: "多面手", kind: "explore", tier: 1, explore: true, repeatable: true,
     text: "（探索）三项熟练项各升一级（新学或升级），可以重复选。",
-    onTake: () => [{ type: "prof" }, { type: "prof" }, { type: "prof" }] },
+    // 三项要选三个不同的项目（group 相同的待选互相排除，见 rogue.js · choiceOptions）；已熟练的项可以选来升级。可重复选，每次选各一组
+    onTake: h => { const group = `versatile:${featCount(h, "versatile")}`; return [{ type: "prof", group }, { type: "prof", group }, { type: "prof", group }]; } },
   sharpeye: { name: "眼尖", kind: "explore", tier: 1, explore: true,
     text: "（探索）调查类检定有优势；会受伤的检定失败时你不受伤。",
     hooks: { check(h, perks, ctx) {
@@ -226,7 +227,7 @@ const FEATS = {
         const items = featHealItems();
         return [
           { key: "target", type: "unit", optional: false, label: "拉谁起来（同区濒死的友方）", units },
-          { key: "item", type: "choice", optional: false, label: "用哪件医疗道具", options: items.map(x => ({ value: x.id, label: `${x.name}（治疗 ${x.heal} · 有 ${x.qty}）` })) }
+          { key: "item", type: "choice", optional: false, label: "用哪件医疗道具", options: items.map(x => ({ value: x.id, label: `${x.name}（治疗 ${x.text} · 有 ${x.qty}）` })) }
         ];
       },
       why() { return featHealItems().length ? null : "背包里没有医疗道具"; },
@@ -238,7 +239,7 @@ const FEATS = {
         t.dying = false; t.upOnShp = false; t.dead = false;
         const inner = (t.layers || []).filter(l => l.type !== "shield").slice(-1)[0];
         if (inner && (Number(inner.current) || 0) <= 0) inner.current = 0;
-        const got = healUnit(t, it.heal);
+        const got = healUnit(t, rollItemHeal(it.id).total);   // 和平时用这件道具一样掷骰（items.js · rollItemHeal）
         ctx.lines.push(`拉一把：${a.name} 用 ${it.name} 把 ${t.name} 拉了起来，恢复 ${got}，不扣坚毅生命。`);
       } } },
   onemind: { name: "人器一心", kind: "passive", tier: 3,
@@ -412,6 +413,22 @@ function featChoicesFor(h, level) {
     return true;
   });
 }
+/** 跑团模式：这名角色每个没用的专长点是哪一级给的（升序，长度 = featPoints）。
+ *  记在 u.featPointLevels；旧档没记的按升级表补：已选专长占掉最低的几级，剩下的点从低到高对应剩下的级 */
+function featPointLevelsOf(u) {
+  if (!u) return [];
+  const n = Math.max(0, Number(u.featPoints) || 0);
+  const table = typeof FEAT_LEVELS !== "undefined" ? FEAT_LEVELS.slice().sort((a, b) => a - b) : [];
+  const lv = (Array.isArray(u.featPointLevels) ? u.featPointLevels : []).map(Number).filter(x => table.indexOf(x) >= 0).sort((a, b) => a - b).slice(0, n);
+  if (lv.length < n) {
+    const free = table.filter(L => L <= (Number(u.level) || 0)).slice((u.feats || []).length);
+    lv.forEach(L => { const i = free.indexOf(L); if (i >= 0) free.splice(i, 1); });
+    while (lv.length < n) lv.push(free.length ? free.shift() : (table[0] || 1));
+    lv.sort((a, b) => a - b);
+  }
+  u.featPointLevels = lv;
+  return lv;
+}
 /** 兼修能升级的：身上 1–3 层的涉猎专长，还没升过的 */
 function featFullOptions(h) {
   const full = (h && h.featFull) || [];
@@ -445,6 +462,11 @@ function featDelegateBase(u, f) {
   if (!f || !f.dabble) return null;
   if (featFull(u, f.id)) return f.dabble.base;
   return f.skill && f.skill.delegate ? f.dabble.base : null;
+}
+/** 专长技能 id（feat_xxx）背后的原职责技能 id；不是涉猎专长返回 null（party.js · skillCost 认分步里的 id 用） */
+function featDelegateBaseOf(skillId) {
+  const f = featOfSkill(skillId);
+  return f && f.dabble ? f.dabble.base : null;
 }
 function featActor() {
   return typeof state !== "undefined" && typeof unitById === "function" ? unitById(state.attackerId) : null;
@@ -494,8 +516,9 @@ function featSkills(u) {
     let hint = f.skill.hint;
     let name = f.skill.name || f.name;
     if (f.dabble && (full || !hint)) {
-      const def = typeof roleSkillDef === "function" ? roleSkillDef(f.dabble.role, f.dabble.n, u) : null;
-      hint = def ? def.hint : f.text;
+      // 涉猎版（没兼修）不吃原技能的等级加强（_dabbleNerf），次数也按专长自己的来：按 1 级取说明，去掉原技能写的「每场 N 次」，由后面的 usesText 补实际次数
+      const def = typeof roleSkillDef === "function" ? roleSkillDef(f.dabble.role, f.dabble.n, full ? u : Object.assign({}, u, { level: 1 })) : null;
+      hint = def ? (full ? def.hint : def.hint.replace(/每场[一二两三四\d]+次[，,]?/, "").replace(/(\s·\s*)+$/, "").replace(/·\s*·/g, "·")) : f.text;
       if (full && def) name = `${f.name}（${def.name}·完整）`;
     }
     return { id: FEAT_SKILL_PREFIX + id, name, hint: `专长 · ${hint || f.text || ""}${usesText}`, bare: true, feat: true };
@@ -529,6 +552,8 @@ function featSkillTargetWhy(a, skillId, t, picks) {
     if (side === "ally" && t.id === a.id) return "要选其他友方";
     if (side === "enemy" && t.isPlayer) return "只能对敌人使用";
   }
+  // 兼修后走原技能：目标判断只看原技能（勾索自己的「拉不动首领」不再拦；原技能「拉拽」没有首领限制）
+  if (base) return null;
   return typeof f.skill.targetWhy === "function" ? (f.skill.targetWhy(a, t, picks || {}) || null) : null;
 }
 /** 涉猎（没兼修）调用原技能时，原技能里按等级解锁的加强（15 级缓冲选血量种类、全体坚挺……）不算 */
@@ -583,13 +608,16 @@ function featLabel(id) {
 }
 
 /* ---------- 散在规则里的钩子（app.js / engine.js / rogue.js / ledger.js 调用） ---------- */
-/** 背包里能拿来「拉一把」的医疗道具：[{ id, name, heal, qty }] */
+/** 背包里能拿来「拉一把」的医疗道具：[{ id, name, text, qty }]（治疗骰读 items.js · itemHealSpec，text 如 1d4+6；强心注射剂只能自己用，不算） */
 function featHealItems() {
   if (typeof ITEM_CATALOG === "undefined" || typeof bagCount !== "function") return [];
   return Object.keys(ITEM_CATALOG).filter(id => {
     const it = ITEM_CATALOG[id];
-    return it && it.combat && Number(it.heal) > 0 && bagCount(id) > 0;
-  }).map(id => ({ id, name: ITEM_CATALOG[id].name, heal: Number(ITEM_CATALOG[id].heal), qty: bagCount(id) }));
+    return it && it.combat && it.target === "ally" && itemHealSpec(id) && bagCount(id) > 0;
+  }).map(id => {
+    const h = itemHealSpec(id);
+    return { id, name: ITEM_CATALOG[id].name, text: `${h.n}d${h.s}${h.flat ? "+" + h.flat : ""}`, qty: bagCount(id) };
+  });
 }
 
 /** 被动的次数（还魂每场、以身作盾每次短休、人器一心每长休）：还剩没有。次数周期看专长上的 short / rest */
@@ -655,7 +683,7 @@ function featUnbowedReset(u) {
 /** 以身作盾（id 仍是 ironwall，旧存档照读）：这一击（敌人打 target）可以宣布的人 */
 function featIronwallDeclarers(target) {
   if (!target || !target.isPlayer || typeof state === "undefined") return [];
-  return (state.units || []).filter(u => u.isPlayer && !u.dead && !u.hidden && !(u.dying && !u.upOnShp) &&
+  return (state.units || []).filter(u => u.isPlayer && !u.dead && !u.hidden && !u.stunned && !(u.dying && !u.upOnShp) &&   // 失衡中不能宣布
     Number(u.zone) === Number(target.zone) && featOnceLeft(u, "ironwall"));
 }
 
@@ -685,18 +713,21 @@ function featArmAttack(attacker, target, opt) {
 }
 
 /** 一击打完（app.js · dealTo）：冲阵的不稳、乘势、荒原行者击落飞行 */
-function featAfterHit(attacker, target, res, flags, extra, stunnedNow) {
+function featAfterHit(attacker, target, res, flags, extra, stunnedNow, wasFlying) {
   if (!attacker || !attacker.isPlayer || !target || target.isPlayer || !stunnedNow || target.dead) return;
   if (featHas(attacker, "charge") && typeof applyUnstable === "function") {
     if (applyUnstable(target, extra)) extra.push(`冲阵：${target.name} 额外获得 1 层不稳。`);
   }
-  if (featHas(attacker, "wanderer") && target.flying && typeof canDisplace === "function") {
+  // 击破飞行单位时引擎已经把它击落（target.flying 已是 false），所以要看结算前的飞行状态 wasFlying
+  if (featHas(attacker, "wanderer") && (wasFlying || target.flying) && typeof canDisplace === "function") {
     target.flying = false;
     extra.push(`荒原行者：${target.name} 被击落。`);
     if (Number(target.zone) !== Number(attacker.zone) && canDisplace(target)) displaceTo(target, attacker.zone, extra, "被击落");
   }
   if (featHas(attacker, "momentum") && !(flags && flags.momentum)) {
-    const others = visibleEnemies(target.zone).filter(u => u.id !== target.id && !u.dead && !u.fused && !u.stunned && Number(u.def) === 1);
+    // 只对和攻击者敌对的单位生效（中立生物、友军不算；visibleEnemies 只看 !isPlayer，不够）
+    const others = visibleEnemies(target.zone).filter(u => u.id !== target.id && !u.dead && !u.fused && !u.stunned && Number(u.def) === 1 &&
+      (typeof hostileTo !== "function" || hostileTo(attacker, u)));
     others.forEach(u => dealBreak(u, 1, "none", extra, "乘势", { by: attacker }));
     if (others.length) extra.push(`乘势：${others.map(u => u.name).join("、")} 各受 1 点无属性击破。`);
   }
@@ -715,8 +746,10 @@ function featAfterBlock(helper, attacker, target, extra) {
 /** 警戒：敌人走进有警戒的人所在的区（app.js · doMoveInner）。留着附赠动作就打它一下 */
 function featAlertOnEnter(unit, notes) {
   if (!unit || unit.isPlayer || unit.dead || state.combatPhase !== "enemy") return;
+  // 只对和自己敌对的单位触发（友军、中立生物不算）；同区每个有警戒的人各自出手，各自扣自己的附赠动作
   (state.units || []).filter(u => u.isPlayer && !u.dead && !u.dying && !u.stunned && !u.hidden &&
-    Number(u.zone) === Number(unit.zone) && featHas(u, "alert") && (Number(u.bonus) || 0) >= 1).slice(0, 1).forEach(u => {
+    Number(u.zone) === Number(unit.zone) && featHas(u, "alert") && (Number(u.bonus) || 0) >= 1 &&
+    (typeof hostileTo !== "function" || hostileTo(u, unit))).forEach(u => {
     if (unit.dead) return;
     u.bonus -= 1;
     notes.push(`${u.name} 警戒：消耗 1 附赠动作，对走进来的 ${unit.name} 出手。`);

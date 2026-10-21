@@ -14,11 +14,12 @@
  * 系统设置了「减少动态效果」时粒子数量减到很少、不画闪电。 */
 (function (root) {
   "use strict";
+  const fxRand = () => (typeof fxRandom === "function" ? fxRandom() : Math.random());   // 画面效果的随机数：不动战斗用的种子随机数（run.js · fxRandom）
   const MAX = 900;
   let canvas = null, ctx = null, parts = [], arcs = [], rings = [], raf = 0, last = 0, dpr = 1;
   const reduced = () => !!(root.matchMedia && root.matchMedia("(prefers-reduced-motion: reduce)").matches);
-  const rnd = (a, b) => a + Math.random() * (b - a);
-  const pick = arr => arr[Math.floor(Math.random() * arr.length)];
+  const rnd = (a, b) => a + fxRand() * (b - a);
+  const pick = arr => arr[Math.floor(fxRand() * arr.length)];
 
   function ensure() {
     if (canvas && canvas.isConnected) return true;
@@ -51,7 +52,7 @@
     pts.push([bx, by]);
     const out = [pts];
     if (depth > 0) {
-      const k = 2 + Math.floor(Math.random() * 3), [sx, sy] = pts[k];
+      const k = 2 + Math.floor(fxRand() * 3), [sx, sy] = pts[k];
       out.push(...bolt(sx, sy, sx + rnd(-40, 40), sy + rnd(-30, 30), spread * 0.6, depth - 1));
     }
     return out;

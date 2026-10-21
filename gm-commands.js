@@ -9,7 +9,7 @@
   const WEATHERS = ["none", "heat", "snow", "acid", "thunder", "glow", "sand", "phase"];
   const STATUS_NUM = ["burn"];
   const STATUS_BOOL = ["shock", "corr", "frostbite", "shockwave", "high", "reso", "unstable", "weak", "inspire", "sturdy", "advantage", "hide", "chase"];
-  const NO_TARGET = new Set("en_boom_fuse en_patrol_chase en_patrol_near en_gl en_gl_fire en_ant_shell en_ant_shell_fire en_gas_ignite en_hunter_heat en_alarm_zap en_bigsand_summon en_bigsand_heal en_live_absorb en_giant_sand_pulse en_boat_arc en_king_hold en_king_exec en_thug_mutiny en_chi_cover ufo_stomp ufo_sweep ufo_prime ufo_boom en_agg2_overheat en_agg3_debris en_agg1_rush en_agg1_rush_prep ufo_summon".split(" "));
+  const NO_TARGET = new Set("en_boom_fuse en_patrol_chase en_patrol_near en_gl en_gl_fire en_ant_shell en_ant_shell_fire en_riot_bottle en_riot_bottle_fireen_gas_ignite en_hunter_heat en_alarm_zap en_bigsand_summon en_bigsand_heal en_live_absorb en_giant_sand_pulse en_boat_arc en_king_hold en_king_exec en_thug_mutiny en_chi_cover ufo_stomp ufo_sweep ufo_prime ufo_boom en_agg2_overheat en_agg3_debris en_agg1_rush en_agg1_rush_prep ufo_summon".split(" "));
   const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
   const copy = x => JSON.parse(JSON.stringify(x));
   const present = u => !!u && !u.dead && !u.hidden && !u.fused && !u._removed;
@@ -25,6 +25,11 @@
     if (!iv || typeof iv !== "object" || Array.isArray(iv)) fail("个体值必须是 { hp, atk }");
     keys(iv, ["hp", "atk"], "个体值");
     ["hp", "atk"].forEach(k => { if (own(iv, k) && iv[k] !== null) number(iv[k], "个体值 " + k, -10, 10, true); });
+  }
+  /** 种族："红皮人" / "类人" / "兽人·牛"（大支·小分支）；只有有种族的敌人能指定 */
+  function raceCheck(r, u) {
+    if (typeof r !== "string" || typeof raceParse !== "function" || !raceParse(r)) fail("未知的种族");
+    if (u && (typeof enemyRaceInfo !== "function" || !enemyRaceInfo(u))) fail("这个敌人没有种族");
   }
   function bool(x, label) { if (typeof x !== "boolean") fail(label + "必须是布尔值"); }
   function one(x, values, label) { if (!values.includes(x)) fail("未知的" + label); }
@@ -67,7 +72,8 @@
   function patchUnit(u, p) {
     const numeric = ["hp", "shp", "shpMax", "def", "defMax", "ap", "apMax", "bonus", "bonusMax", "atk", "highEnergy"];
     const flags = ["stunned", "stun", "dying", "dead", "flying"];
-    keys(p, numeric.concat(flags, ["layers", "level", "zone", "statuses", "self", "iv", "enriched"]), "单位补丁");
+    keys(p, numeric.concat(flags, ["layers", "level", "zone", "statuses", "self", "iv", "race", "enriched"]), "单位补丁");
+    if (own(p, "race")) raceCheck(p.race, u);
     if (own(p, "enriched")) { bool(p.enriched, "富集"); if (typeof isSandFish !== "function" || !isSandFish(u)) fail("只有沙鱼能设富集"); }
     if (own(p, "iv")) { if (typeof ivEligible !== "function" || !ivEligible(u)) fail("只有杂兵、精英有个体值"); ivCheck(p.iv); }
     if (!Object.keys(p).length) fail("单位补丁为空");
@@ -228,7 +234,7 @@
     if (!TYPES.includes(cmd.type)) fail("未知主持人指令");
     if (own(cmd, "silent")) bool(cmd.silent, "静默");
     const fields = {
-      spawnEnemy: ["enemyId", "level", "zone", "count", "iv", "enriched"], removeUnit: ["actor", "mode"], editUnit: ["actor", "patch"],
+      spawnEnemy: ["enemyId", "level", "zone", "count", "iv", "race", "enriched"], removeUnit: ["actor", "mode"], editUnit: ["actor", "patch"],
       addProp: ["kind", "zone", "level", "faction", "link"], editProp: ["id", "patch"], removeProp: ["id", "mode"],
       editGap: ["key", "patch"], setField: ["zone", "patch"], setWeather: ["weather", "sandDir", "phaseStep", "lock"],
       setEncounter: ["encounter", "zoneMode"], forceAttack: ["input"], setManual: ["actors", "enabled"],
@@ -239,6 +245,7 @@
       case "spawnEnemy":
         if (!enemyPresets().some(p => p.id === cmd.enemyId && p.id !== "blank_pc")) fail("未知敌人种类");
         level(cmd.level); zone(cmd.zone); if (own(cmd, "count")) number(cmd.count, "生成数量", 1, 100, true); if (own(cmd, "iv")) ivCheck(cmd.iv);
+        if (own(cmd, "race") && cmd.race !== null && cmd.race !== "") raceCheck(cmd.race);
         // 富集与否（沙鱼，desert.js）：true / false；不写 = 开战时照常随机
         if (own(cmd, "enriched")) { bool(cmd.enriched, "富集"); if (typeof SAND_FISH_KITS === "undefined" || !SAND_FISH_KITS.includes(cmd.enemyId)) fail("只有沙鱼能设富集"); } break;
       case "removeUnit": enemy(cmd.actor); one(cmd.mode, ["remove", "kill"], "移出模式"); break;
@@ -274,6 +281,8 @@
       const cur = u.iv || { hp: 0, atk: 0 }, pick = k => (p.iv[k] === null || p.iv[k] === undefined ? cur[k] : p.iv[k]);
       setEnemyIV(u, { hp: pick("hp"), atk: pick("atk") });
     }
+    // 种族：按原始数值重算六维（先减掉旧种族加的、再加新的），个体值跟着重算
+    if (own(p, "race")) setEnemyRace(u, p.race);
     if (own(p, "level")) { u.level = p.level; if (typeof applyLevelStats === "function") applyLevelStats(u); }
     // 富集与否（desert.js）：装甲层 ×1.5 / 除回去，名字加 / 去「富集」；定了以后开战不再随机
     if (own(p, "enriched") && typeof desertSetEnriched === "function") desertSetEnriched(u, p.enriched);
@@ -303,7 +312,7 @@
         case "spawnEnemy": {
           const ids = [], eligible = state.combatStarted ? (Number(state.turnNo) || 1) + (state.combatPhase === "enemy" ? 1 : 0) : 1;
           for (let i = 0; i < (cmd.count || 1); i++) {
-            const pack = spawnEnemyGroup(cmd.enemyId, cmd.level, Number(state.partySize) || 2, cmd.zone, cmd.iv);
+            const pack = spawnEnemyGroup(cmd.enemyId, cmd.level, Number(state.partySize) || 2, cmd.zone, cmd.iv, cmd.race);
             if (own(cmd, "enriched") && typeof desertSetEnriched === "function") pack.forEach(u => desertSetEnriched(u, cmd.enriched));
             pack.forEach(u => { state.units.push(u); metadata.set(u.id, { eligibleEnemyRound: eligible }); ids.push(u.id); });
           }

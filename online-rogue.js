@@ -1,7 +1,7 @@
 /* 联机单局（Roguelike）：规则只在房主一端跑（rogue.js / rogue-ui.js），这里管联机才有的几件事。
  *
  *   · 队伍一起决定：任务板接哪个任务、路线走哪一站、迎战 / 休息 / 离开 / 检定谁去……
- *     每个在线的人投一票（房主也是一票）。人齐了按多数决定，平票在最多票的里面随机；房主可以「按现在的票数决定」。
+ *     每个在线、名下有角色的人投一票（房主也是一票；没分到角色的旁观者不算票，也不用等）。人齐了按多数决定，平票在最多票的里面随机；房主可以「按现在的票数决定」。
  *     有人还没选完升级时先不结算（升级会影响接下来的战斗）。
  *   · 钱各算各的：每名角色一个钱包。任务报酬、敌人掉的奎支、检定奖励……进账一律平分给还活着的角色
  *     （分不尽的零头从队伍靠前的角色起每人多 1）。买东西、升级武器、治疗……都从做这件事的角色的钱包里扣。
@@ -24,9 +24,11 @@
   const copy = v => JSON.parse(JSON.stringify(v));
   const fail = text => { throw new Error(text); };
   // 个人行为：花自己的钱、动自己的东西（choose 是升级选择，不花钱）
-  const PERSONAL = ["buy", "redeem", "learnRecipe", "salvage", "setCraftJob", "buyPart", "sellPart", "installPart", "removePart", "upgradeWeapon", "repairWeapon", "healHero", "modifyHero", "installCyberware", "removeCyberware"];
+  const PERSONAL = ["buy", "redeem", "learnRecipe", "salvage", "setCraftJob", "buyPart", "sellPart", "installPart", "removePart", "upgradeWeapon", "installBlueprint", "repairWeapon", "healHero", "modifyHero", "installCyberware", "removeCyberware"];
   // 玩家可以自己发的个人指令（其余的个人行为由房主代自己的角色做）
-  const REMOTE = ["buy", "redeem", "learnRecipe", "salvage", "setCraftJob", "buyPart", "sellPart", "installPart", "removePart", "upgradeWeapon", "repairWeapon", "healHero", "modifyHero", "installCyberware", "removeCyberware", "choose"];
+  const REMOTE = ["buy", "redeem", "learnRecipe", "salvage", "setCraftJob", "buyPart", "sellPart", "installPart", "removePart", "upgradeWeapon", "installBlueprint", "repairWeapon", "healHero", "modifyHero", "installCyberware", "removeCyberware", "sellItem", "buybackItem", "choose"];
+  // 卖东西 / 回购（rogue.js · sellItem / buybackItem）：钱和归属由 setSellHooks 直接记进各人钱包，不走 PERSONAL 那套换钱包
+  const SELL = ["sellItem", "buybackItem"];
   let enabled = false, resolving = false, hostId = "";
 
   const flow = () => root.RunFlow || null;
@@ -48,6 +50,8 @@
   const roster = () => { const g = game(); return g && g.players ? g.players() : []; };
   function rosterIds() { return roster().map(p => p.id); }
   function onlineIds() { return roster().filter(p => p.online).map(p => p.id); }
+  /** 有资格投票的人：在线、并且名下至少有一个活着的角色（旁观者不算票，也不用等；没分配的角色归房主） */
+  function voterIds(r) { return onlineIds().filter(id => kitsOf(r, id).length > 0); }
   function playerName(id) { return roster().find(p => p.id === id)?.name || "房主"; }
   const kitsOf = (r, playerId) => living(r).filter(k => ownerOf(r, k) === playerId);
   // 补给（水、食物、维修工具包、睡袋……）队伍公用；其余（战斗道具、改装件）归个人
@@ -124,9 +128,11 @@
     if ((c.action === "installPart" || c.action === "sellPart") && typeof weaponPartItemId === "function") {
       if (available(r, payer, weaponPartItemId(c.part)) < 1) fail("这件改装件不是你的");
     }
-    if ((c.action === "installPart" || c.action === "removePart" || c.action === "upgradeWeapon" || c.action === "repairWeapon") && heroOf(r, c.kit)?.kit !== payer) fail("只能动自己角色的武器");
+    if ((c.action === "installPart" || c.action === "removePart" || c.action === "upgradeWeapon" || c.action === "installBlueprint" || c.action === "repairWeapon") && heroOf(r, c.kit)?.kit !== payer) fail("只能动自己角色的武器");
     if ((c.action === "healHero" || c.action === "modifyHero") && c.kit !== payer) fail("只能给自己的角色治疗、改造");
     if ((c.action === "installCyberware" || c.action === "removeCyberware") && (c.kit !== payer || typeof c.id !== "string")) fail("只能给自己的角色装、拆义体");
+    if (SELL.includes(c.action) && c.kit !== payer) fail("只能用自己的角色卖、回购");
+    if (c.action === "sellItem" && c.owner != null && c.owner !== "shared" && c.owner !== payer) fail("只能卖自己名下的或公用的东西");
     if (c.action === "setCraftJob" && c.kit !== payer) fail("只能给自己的角色排活");
     if (c.action === "salvage" && available(r, payer, c.item) < 1) fail("这件东西不是你的");
   }
@@ -160,6 +166,17 @@
     balance: (r, kit) => Number(data(r).purse[kit]) || 0,
     pay: (r, kit, n) => { const d = data(r); d.purse[kit] = Math.max(0, (Number(d.purse[kit]) || 0) - n); },
     made: (r, kit, id) => { if (ownable(id)) addOwned(data(r), kit, id, 1); }
+  });
+  // 卖东西：个人物品的钱进自己的钱包；公用的平分给活着的角色（零头给卖的人）；回购从卖的人的钱包扣
+  if (G_Rogue && Rogue.setSellHooks) Rogue.setSellHooks({
+    applies: r => active() && r === run(),
+    living: r => living(r),
+    free: (r, id) => free(r, id),
+    owned: (r, kit, id) => Number((data(r).owned[kit] || {})[id]) || 0,
+    take: (r, kit, id, n) => addOwned(data(r), kit, id, -n),
+    give: (r, kit, id, n) => { if (living(r).includes(kit)) addOwned(data(r), kit, id, n); },
+    balance: (r, kit) => Number(data(r).purse[kit]) || 0,
+    credit: (r, kit, n) => { const d = data(r); d.purse[kit] = Math.max(0, (Number(d.purse[kit]) || 0) + n); }
   });
   // 背包按类分个人 / 公用（rogue.js · bagByCategory）：联机时按 run.online.owned
   if (G_Rogue && Rogue.setBagOwnership) Rogue.setBagOwnership(r => (active() && r === run() ? data(r).owned : null));
@@ -306,12 +323,22 @@
   function isTeamCommand(cmd) {
     return !!cmd && (cmd.fight || ["acceptTask", "chooseNode", "restAtNode", "shortRestBeforeNode", "camp", "attemptCheck", "skipCheck", "parley", "leaveNode", "nextAct", "afterVictory"].includes(cmd.action));
   }
-  function vote(playerId, optionId) {
+  /** 长休 / 休整时房主在界面上选的安排（守夜人、食物、睡眠、吐息、弹药）：随投票结果一起执行 */
+  const REST_PLAN_FIELDS = ["watch", "food", "sleep", "spit", "ammo"];
+  function vote(playerId, optionId, cmd) {
     const r = run();
     if (!r) fail("还没有开始单局");
     const v = currentVote(r);
-    if (!v.opts.some(o => o.id === optionId)) fail("这个选项已经失效");
+    const opt = v.opts.find(o => o.id === optionId);
+    if (!opt) fail("这个选项已经失效");
+    if (!kitsOf(r, playerId).length) fail("你没有分到角色，不用投票");
     v.ballots[playerId] = optionId;
+    // 只认房主的安排；换了票就不再带着上一次选项的安排
+    const d = data(r);
+    if (playerId === hostId) {
+      d.restPlan = (cmd && (opt.cmd.action === "camp" || opt.cmd.mode === "long"))
+        ? { optionId, fields: Object.fromEntries(REST_PLAN_FIELDS.filter(k => cmd[k] != null).map(k => [k, copy(cmd[k])])) } : null;
+    }
     changed();
     return { ok: true };
   }
@@ -321,8 +348,8 @@
     if (!active() || !r || resolving) return false;
     const { opts, ballots } = currentVote(r);
     if (!opts.length || blocker(r)) return false;
-    const voters = onlineIds();
-    const cast = Object.entries(ballots).filter(([, o]) => opts.some(x => x.id === o));
+    const voters = voterIds(r);
+    const cast = Object.entries(ballots).filter(([p, o]) => voters.includes(p) && opts.some(x => x.id === o));
     if (!cast.length) return false;
     if (!force && !voters.every(id => ballots[id])) return false;
     const tally = {};
@@ -334,8 +361,10 @@
     d.lastVote = { label: pick.label, text: `${pick.label}（${top} 票${best.length > 1 ? "，平票随机" : ""}）` };
     d.ballots = {}; d.voteKey = "";
     (r.log = r.log || []).push({ act: r.act, day: r.day, text: "队伍决定：" + d.lastVote.text });
+    const plan = d.restPlan && d.restPlan.optionId === pick.id ? d.restPlan.fields : null;
+    d.restPlan = null;
     resolving = true;
-    Promise.resolve().then(() => flow().perform(copy(pick.cmd))).catch(e => console.error(e)).finally(() => { resolving = false; changed(); });
+    Promise.resolve().then(() => flow().perform(Object.assign(copy(pick.cmd), plan ? copy(plan) : {}))).catch(e => console.error(e)).finally(() => { resolving = false; changed(); });
     return true;
   }
 
@@ -383,7 +412,7 @@
   }
   /** 房主在单局界面上做个人行为：只能动房主自己操控的角色 */
   function checkHost(c) {
-    if (!active() || !PERSONAL.includes(c.action) && c.action !== "choose") return;
+    if (!active() || !PERSONAL.includes(c.action) && !SELL.includes(c.action) && c.action !== "choose") return;
     const r = run(), kit = c.action === "choose" ? c.kit : payerOf(r, c);
     // 操控者掉线时，房主可以替他选升级（不然只能等他回来）
     if (c.action === "choose" && !onlineIds().includes(ownerOf(r, kit))) return;
@@ -448,6 +477,8 @@
     // 个人能做的事：商店、工匠、诊所
     const shop = Rogue.canShop(r) ? Rogue.shopStock(r).map(row => ({ key: row.key, name: Rogue.shopItemName(row), price: row.price, team: !row.give.item || !ownable(row.give.item) })) : null;
     // 商店积分：各人自己的（记在自己操控的角色名下）
+    // 卖出 / 回购（shop-sell.js 形状）：只有自己操控的角色名下的 + 公用的，回购单只有自己角色卖的
+    const shopSell = shop && mine.length ? Rogue.shopSellView(r, { kits: mine }) : null;
     const pointsOf = kit => { r._pointsPayer = kit; try { return Rogue.shopPoints(r); } finally { delete r._pointsPayer; } };
     const points = shop && mine[0] ? Object.assign(pointsOf(mine[0]), { redeem: Rogue.redeemList() }) : null;
     const smithId = (Rogue.presentSmiths(r) || [])[0] || null;
@@ -516,14 +547,14 @@
       heroes, mine, freeItems, task, board,
       fallen: (r.fallen || []).map(f => name(f.kit)),
       result: r.stage === "over" && r.result ? { win: !!r.result.win, text: r.result.text || "" } : null,
-      vote: { options: opts.map(o => ({ id: o.id, label: o.label, voters: Object.entries(ballots).filter(([, x]) => x === o.id).map(([p]) => playerName(p)), mine: ballots[playerId] === o.id })),
-        blocked: blocker(r), voted: Object.keys(ballots).filter(id => onlineIds().includes(id)).length, voters: onlineIds().length },
+      vote: { options: opts.map(o => ({ id: o.id, label: o.label, voters: Object.entries(ballots).filter(([p, x]) => x === o.id && voterIds(r).includes(p)).map(([p]) => playerName(p)), mine: ballots[playerId] === o.id })),
+        blocked: blocker(r), voted: Object.keys(ballots).filter(id => voterIds(r).includes(id)).length, voters: voterIds(r).length, spectator: !kitsOf(r, playerId).length },
       lastVote: d.lastVote ? d.lastVote.text : "",
       loot: d.loot.map(l => ({ no: l.no, name: itemName(l.id), qty: l.qty, source: l.source,
         needs: living(r).filter(k => l.needs[k] === "need").map(name), passes: living(r).filter(k => l.needs[k] === "pass").map(name),
         mine: mine.map(k => ({ kit: k, name: name(k), answer: l.needs[k] || "" })) })),
       lootLog: d.lootLog.slice(-5).map(x => x.text),
-      choice, waitingLevel, shop, points, smith, parts, clinic, workshop, backpack, workshopAvailable: wkAt, bag, materialBar, craft, cyber,
+      choice, waitingLevel, shop, shopSell, points, smith, parts, clinic, workshop, backpack, workshopAvailable: wkAt, bag, materialBar, craft, cyber,
       lastRest: r.lastRest || null,   // 长休结算画面（坚毅字段在 online-view.js · scrubHidden 里去掉）
       log: (r.log || []).slice(-8).map(l => l.text)
     };

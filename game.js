@@ -172,6 +172,7 @@
       badges: unitBadgesOf(u),
       res,
       iv: u.iv ? { hp: Number(u.iv.hp) || 0, atk: Number(u.iv.atk) || 0 } : null,   // 个体值（杂兵、精英）
+      race: typeof raceText === "function" ? raceText(u) : "",   // 种族（敌人）："红皮人" / "兽人·牛"
       intents: (() => { try { return typeof enemyIntents === "function" ? enemyIntents(u) : []; } catch (e) { return []; } })(),   // 名牌上的行动提示（连击……）
       atk: Math.round(Number(atk) || 0),
       weapon: !!u.weaponOf,
@@ -603,6 +604,7 @@
     if (sk.id === "__stand") return typeof standUpBlocked === "function" ? standUpBlocked(u) : null;
     if (sk.id === "__item" && typeof bagList === "function" && !bagList(u).some(x => x.combat)) return "没有能在战斗中使用的道具";   // 维修工具包也算（战斗中能用）
     if (u.stunned) return "失衡中，本回合无法行动";
+    if (typeof sinkLocked === "function" && ((sk.cost.ap || 0) || (sk.cost.bonus || 0)) && sinkLocked(u)) return "陷在流沙里没顶，不能行动";
     if ((sk.cost.ap || 0) > (u.ap || 0)) return "行动点不足";
     if ((sk.cost.bonus || 0) > (u.bonus || 0)) return "附赠行动不足";
     if (sk.id === "__move" && u.noMove) return "本回合无法移动";
@@ -846,11 +848,11 @@
     // 在铭牌上沿排成左右两列、一行一行往上叠：不挡铭牌中间的伤害数字，也不压到隔壁的铭牌
     const side = n % 2 ? -1 : 1;
     const row = Math.floor((n - 1) / 2);
-    const tilt = side * (6 + Math.random() * 7);                  // 往外侧倾斜 6°–13°
+    const tilt = side * (6 + fxRandom() * 7);                  // 往外侧倾斜 6°–13°
     d.style.left = (p.x + side * p.r.width * 0.28) + "px";
     d.style.top = (p.r.top - 8 - row * 52) + "px";
     d.style.setProperty("--tilt", tilt.toFixed(1) + "deg");
-    d.style.setProperty("--dx", (side * (30 + Math.random() * 16)).toFixed(0) + "px");
+    d.style.setProperty("--dx", (side * (30 + fxRandom() * 16)).toFixed(0) + "px");
     // 单独一层，压在顶部的技能横幅之上（顶排敌人的字不会被横幅挡住）
     let layer = $("g-fxw");
     if (!layer) { layer = el("div", "g-fx g-fxw"); layer.id = "g-fxw"; document.body.appendChild(layer); }
@@ -1097,7 +1099,7 @@
     const dx = t.x - a.x, dy = t.y - a.y, d = Math.hypot(dx, dy) || 1, ux = dx / d, uy = dy / d;
     const reach = o.reach >= 999 ? d : Math.max(16, Math.min(d - Math.min(a.w, t.w) * .5, o.reach || (o.heavy ? 112 : 92)));
     const k = o.speed || 1;
-    const token = String(Math.random());
+    const token = String(fxRandom());
     c.wrap.dataset.dash = token;
     c.wrap.classList.add("lunge");
     if (sp(90) > 0) {
@@ -1116,7 +1118,7 @@
   function nudgeCard(id, dx, dy, ms) {
     const c = cards.get(id);
     if (!c || G.skip) return;
-    const token = String(Math.random());
+    const token = String(fxRandom());
     c.wrap.dataset.dash = token;
     c.wrap.classList.add("lunge");
     c.wrap.style.transition = `transform ${sp((ms || 240) * .4)}ms cubic-bezier(.2, .8, .3, 1)`;
@@ -1193,7 +1195,7 @@
   /** 远程：往后一顿再回来（后坐力） */
   function recoil(c, a, t, px) {
     const dx = t.x - a.x, dy = t.y - a.y, d = Math.hypot(dx, dy) || 1, k = px || 8;
-    const token = String(Math.random());
+    const token = String(fxRandom());
     c.wrap.dataset.dash = token;
     c.wrap.classList.add("lunge");
     c.wrap.style.transition = `transform ${sp(70)}ms ease-out`;
@@ -1739,7 +1741,7 @@
       $("g-check-rate").textContent = (spec.rateText || "成功率 " + spec.chance + "%") + (spec.note ? " · " + spec.note : "");
       $("g-check-hint").textContent = "检定中";
       if (window.Sfx && !G.sim) Sfx.ui("dice");   // 掷骰
-      num.textContent = String(1 + Math.floor(Math.random() * 100));
+      num.textContent = String(1 + Math.floor(fxRandom() * 100));
       num.className = "check-num";
       box.classList.add("show");
       let delay = 28;
@@ -1749,7 +1751,7 @@
         ticks++;
         if (G.skip && ticks > 4) delay = 400;
         if (delay < 220) {
-          num.textContent = String(1 + Math.floor(Math.random() * 100));
+          num.textContent = String(1 + Math.floor(fxRandom() * 100));
           delay = Math.min(240, delay * 1.22 + 6);
           realTimeout(step, delay);
           return;
@@ -2474,7 +2476,7 @@
     $("g-pvbox").classList.add("live");
     $("g-pvbox").innerHTML = `<h4>${esc(s.name)} · Lv${s.level}</h4>
       <div class="ln key">${esc(layers)}</div>
-      <div class="ln">架势 ${s.def}/${s.defMax} · ATK ${s.atk} · ${s.zone} 区</div>
+      <div class="ln">架势 ${defText(s)} · ATK ${s.atk} · ${s.zone} 区</div>
       <div class="ln">${esc(s.status || "无状态")}</div>
       ${s.res ? `<div class="ln">${esc(s.res)}</div>` : ""}
       ${intentHtml(id)}
@@ -2602,7 +2604,7 @@
     if (s.flying) tokens.push("飞行");
     (s.status ? s.status.split(" · ") : []).forEach(t => { if (t && t !== "无状态") tokens.push(t); });
     (s.hung || []).forEach(n => tokens.push(n));
-    return UnitTip.html({ kind, kit: s.kit, ownerName: owner && owner.name, escort: s.escort }, tokens.filter(Boolean), { name: s.name, sub: `Lv${s.level} · ${s.zone} 区${s.iv && typeof ivText === "function" ? " · 个体值 " + ivText(s) : ""}`,
+    return UnitTip.html({ kind, kit: s.kit, ownerName: owner && owner.name, escort: s.escort }, tokens.filter(Boolean), { name: s.name, sub: `Lv${s.level} · ${s.zone} 区${s.race ? " · " + s.race : ""}${s.iv && typeof ivText === "function" ? " · 个体值 " + ivText(s) : ""}`,
       mechs: window.UnitCard && UnitCard.mechLines ? UnitCard.mechLines(s) : [] });   // 首领机制：还有几回合落下
   }
   function onCardHover(id, on) {
@@ -3998,10 +4000,13 @@
       attrPoints: Number(u.attrPoints) || 0,
       attrPicks: (u.attrPicks || []).slice(),
       cyberPlan: u.cyberPlan ? JSON.parse(JSON.stringify(u.cyberPlan)) : null,   // 义体改造方案（跑团诊所，trpg.js · trpgModifyHero）
+      cyberware: u.cyberware ? JSON.parse(JSON.stringify(u.cyberware)) : null,   // 装上的义体（跑团诊所，trpg.js · trpgCyberwareAct）
+      cyberOverinstall: !!u.cyberOverinstall,
       // 专长（跑团 trpg.js · trpgPickFeat）：选好的、兼修的、还没分配的点（以前没存，下一场开打 / 读档就丢了）
       feats: (u.feats || []).slice(),
       featFull: (u.featFull || []).slice(),
       featPoints: Number(u.featPoints) || 0,
+      featPointLevels: (u.featPointLevels || []).slice(),   // 每个没用的专长点是几级给的
       notes: u.levelNotes ? JSON.parse(JSON.stringify(u.levelNotes)) : null
     };
   }
@@ -4062,6 +4067,14 @@
         const have = (u.feats || []).length + (Number(u.featPoints) || 0);
         if (should > have) u.featPoints = (Number(u.featPoints) || 0) + should - have;
       }
+      // 来源等级：新档直接读；旧档没有的按升级表补（feats.js · featPointLevelsOf），不丢点
+      if (Array.isArray(s.featPointLevels)) u.featPointLevels = s.featPointLevels.slice();
+      if (typeof featPointLevelsOf === "function") featPointLevelsOf(u);
+      // 义体：先放回去，下面 applyLevelStats 才会按它扣生命 / 坚毅上限、重算改造率（旧档没有这两项就是没装）
+      if (Array.isArray(s.cyberware) && s.cyberware.length) u.cyberware = JSON.parse(JSON.stringify(s.cyberware));
+      else if (u.cyberware) delete u.cyberware;
+      if (s.cyberOverinstall) u.cyberOverinstall = true;
+      else if (u.cyberOverinstall) delete u.cyberOverinstall;
       if (s.cyberPlan) {
         // 义体改造：按方案重建血量层（applyLevelStats 只会重建已经有方案的单位，先摆一层肉体给它换）
         u.cyberPlan = JSON.parse(JSON.stringify(s.cyberPlan));
@@ -5114,7 +5127,7 @@
       }
       WorldMap.open(o);
     };
-    $("g-restart").onclick = () => { if (G.depth === 0) setupBattle(Number($("g-level").value) || 1, G.lastEncounter || null); };
+    $("g-restart").onclick = () => { if (typeof Training !== "undefined" && Training.restart()) return; if (G.depth === 0) setupBattle(Number($("g-level").value) || 1, G.lastEncounter || null); };
     $("g-again").onclick = () => setupBattle(Number($("g-level").value) || 1, G.lastEncounter || null);
     $("g-retreat").onclick = askRetreat;
     $("g-undo").onclick = doUndo;

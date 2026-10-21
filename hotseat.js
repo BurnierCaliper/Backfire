@@ -305,6 +305,31 @@
       swaps = swaps.filter(s => s.requester !== playerId && s.responder !== playerId);
       return reconcile(true);
     }
+    /** 现在能不能转交角色：只在两个单位的回合之间（选顺序阶段，或我方某单位还没动手时）。返回 { ok, reason } */
+    function transferState() {
+      if (ask) return { ok: false, reason: "有协助询问在等人回答，回答完才能转交" };
+      if (phase === "selecting") return { ok: true, reason: "" };
+      if (phase === "acting") {
+        reconcile(false);
+        const row = slots.find(r => r && r.unitId === current());
+        if (row && row.spent) return { ok: false, reason: `${row.unitName} 正在行动，行动完（或结束回合）才能转交` };
+        return { ok: true, reason: "" };
+      }
+      if (phase === "enemy") return { ok: false, reason: "敌人行动中，回到我方回合再转交" };
+      return { ok: false, reason: "现在不在战斗回合里，请用「角色分配」" };
+    }
+    /** 主持人把某个英雄（连同它的武器人）转交给另一名操作者（含收回给主持人）；顺序格子不变 */
+    function transfer(id, heroId, toId) {
+      host(id); operator(toId);
+      const gate = transferState();
+      if (!gate.ok) fail("transfer_blocked", gate.reason);
+      if (!maps().heroes.some(u => u.id === heroId)) fail("not_hero", "只能转交英雄角色");
+      if ((assignments[heroId] || gmId) === toId) fail("transfer_same", "这个角色本来就由这名玩家操作");
+      if (toId === gmId) delete assignments[heroId]; else assignments[heroId] = toId;
+      confirmed.delete(toId);
+      swaps = swaps.filter(s => ![s.actor, s.target].some(u => rowFor(u) && (rowFor(u).stableKey || "").split(":weapon:")[0] === heroId));
+      return reconcile(true);
+    }
     function beginRound(number) {
       if (!Number.isInteger(number) || number < 1) fail("round", "回合编号无效");
       if (phase === "ended") fail("ended", "战斗已经结束");
@@ -488,7 +513,10 @@
       const op = operator(id);
       // 小队聊天在大厅、探索和战斗中都开放
       if (typeof text !== "string" || !text.trim()) fail("chat_empty", "消息不能为空");
-      const row = { id: "chat-" + (++sequence), operatorId: id, operatorName: op.name, text: text.trim().slice(0, 500), at: now() };
+      // 多行消息（比如字符画）保留第一行行首的空格，只去掉开头的空行和末尾空白；单行照旧去掉两头空白
+      const body = text.replace(/\r\n?/g, "\n");
+      const clean = body.includes("\n") ? body.replace(/^\s*\n/, "").trimEnd() : body.trim();
+      const row = { id: "chat-" + (++sequence), operatorId: id, operatorName: op.name, text: clean.slice(0, 500), at: now() };
       chat.push(row);
       if (chat.length > CHAT_KEEP) chat.splice(0, chat.length - CHAT_KEEP);
       return emit("chat");
@@ -531,7 +559,7 @@
     }
     setAssignments(options.assignments || {});
     return { snapshot, reconcile, setAssignments, beginRound, pick: place, confirm, forceStart, move, acceptSwap,
-      assertAction, finishUnit, markSpent, takeOver, openAsk, answer, tick, askFor, chat: chatMessage, endBattle, reset, checkpoint, restore,
+      assertAction, finishUnit, markSpent, takeOver, transfer, transferState, openAsk, answer, tick, askFor, chat: chatMessage, endBattle, reset, checkpoint, restore,
       openCheck, rollCheck: rollCheckFor, closeCheck, requestAttr, decideAttr, skillRoll, showTitle,
       ownerOf: unitId => (rowFor(unitId) || {}).operatorId || null,
       extendAsk(ms) { if (ask && Number.isFinite(ms) && ms > 0) { ask.deadline += ms; emit("askResumed"); } },

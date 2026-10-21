@@ -13,7 +13,7 @@
   const gapNames = { open: "畅通", bridge: "不稳桥梁", wall: "危墙", door: "机关门", void: "空隙" };
   const numericUnit = { hp: "最内层生命", shp: "坚毅生命（仅主持人）", shpMax: "坚毅生命上限", def: "架势", defMax: "架势上限", ap: "行动点", apMax: "行动点上限", bonus: "附赠行动", bonusMax: "附赠行动上限", atk: "个人 ATK", level: "等级", zone: "所在区", highEnergy: "高能层数" };
   const flagUnit = { stunned: "失衡", dying: "濒死", dead: "倒下", flying: "飞行" };
-  const NO_TARGET = new Set("en_boom_fuse en_patrol_chase en_patrol_near en_gl en_gl_fire en_ant_shell en_ant_shell_fire en_gas_ignite en_hunter_heat en_alarm_zap en_bigsand_summon en_bigsand_heal en_live_absorb en_giant_sand_pulse en_boat_arc en_king_hold en_king_exec en_thug_mutiny en_chi_cover ufo_stomp ufo_sweep ufo_prime ufo_boom en_agg2_overheat en_agg3_debris en_agg1_rush en_agg1_rush_prep ufo_summon".split(" "));
+  const NO_TARGET = new Set("en_boom_fuse en_patrol_chase en_patrol_near en_gl en_gl_fire en_ant_shell en_ant_shell_fire en_riot_bottle en_riot_bottle_fireen_gas_ignite en_hunter_heat en_alarm_zap en_bigsand_summon en_bigsand_heal en_live_absorb en_giant_sand_pulse en_boat_arc en_king_hold en_king_exec en_thug_mutiny en_chi_cover ufo_stomp ufo_sweep ufo_prime ufo_boom en_agg2_overheat en_agg3_debris en_agg1_rush en_agg1_rush_prep ufo_summon".split(" "));
   function mount(bridge) {
     if (!bridge || typeof bridge.getView !== "function" || typeof bridge.submit !== "function") throw new TypeError("OnlineGMUI requires getView and submit");
     let view, container = null, open = false, tab = "enemies", busy = false, notice = "", silent = false;
@@ -38,6 +38,13 @@
     const isFishKit = kit => typeof SAND_FISH_KITS !== "undefined" && SAND_FISH_KITS.includes(kit);
     const enrichNames = { "": "随机（开战时 10%，沙暴 25%）", on: "富集", off: "普通（不富集）" };
     const ivVal = id => { const v = value(id); return v === undefined || v === null || String(v).trim() === "" ? null : Math.max(-10, Math.min(10, Math.round(Number(v)))); };
+    // 种族（enemies.js）：空 = 随机（固定种族的敌人照固定）；「类人」= 四个大支里随机
+    const raceNames = () => {
+      const o = { "": "随机 / 照配置" };
+      if (typeof ENEMY_RACES === "undefined") return o;
+      ["人类", "红皮人", "类人"].concat(Object.keys(ENEMY_RACES).filter(r => !["人类", "红皮人"].includes(r)).reduce((a, r) => a.concat([r], (ENEMY_RACES[r].branches || []).map(b => r + "·" + b)), [])).forEach(r => { o[r] = r; });
+      return o;
+    };
     const select = (id, label, options) => `<label>${label}<select id="${id}">${options}</select></label>`;
     const number = (id, label, initial = 0, min = 0, max = "", step = "any") => { if (id.endsWith("-level") || (id === "ogm-unit-value" && unitField === "level")) max = 25; return `<label>${label}<input id="${id}" type="number" min="${min}"${max === "" ? "" : ` max="${max}"`} step="${step}" value="${esc(initial)}" required></label>`; };
     const check = (id, label, yes) => `<label class="ogm-check"><input id="${id}" type="checkbox"${yes ? " checked" : ""}>${label}</label>`;
@@ -63,13 +70,15 @@
     }
     function enemiesMarkup() {
       const library = presets(); if (!library.some(p => p.id === enemyId)) enemyId = library[0]?.id || "";
-      return `<h3>生成敌人</h3><div class="ogm-grid">${select("ogm-enemy-kind", "种类", library.map(p => option(p.id, p.name || p.label || p.id, p.id === enemyId)).join(""))}${number("ogm-enemy-level", "等级", partyLevel(), 1, "", 1)}${select("ogm-enemy-zone", "加入区域", zoneOptions(zones().length))}${number("ogm-enemy-count", "数量", 1, 1, 100, 1)}${ivInput("ogm-enemy-iv-hp", "血量水平 %")}${ivInput("ogm-enemy-iv-atk", "ATK 水平 %")}${isFishKit(enemyId) ? select("ogm-enemy-enrich", "富集", options(enrichNames, "")) : ""}</div><p class="ogm-muted">个体值：杂兵、精英的血量和 ATK 在 ±10% 内波动；水平空着就随机，写了就按写的（−10～10）。首领不波动。</p>${button("加入战场", "spawn", 'class="ogm-primary"', !enemyId)}<h3>在场敌人</h3><div class="ogm-actions">${button("全部手动", "manual-all-on")}${button("全部交给 AI", "manual-all-off")}</div><ul class="ogm-enemies">${enemies().map(u => `<li><span><b>${esc(u.name)}</b><small>${esc(u.zone)} 区 · Lv${esc(u.level)} · ${manual(u) ? "手动" : "AI"}</small></span><div class="ogm-actions">${button(manual(u) ? "交给 AI" : "手动", "manual-one", `data-id="${esc(u.id)}"`)}${button("移出", "remove-enemy", `data-id="${esc(u.id)}"`)}${button("击杀", "kill-enemy", `data-id="${esc(u.id)}" class="ogm-danger"`)}</div></li>`).join("") || "<li>当前没有敌人。</li>"}</ul><p class="ogm-muted">移出：无击杀奖励、无死亡效果。击杀：按正常死亡结算。</p><h3>手动行动</h3>${manualMarkup()}`;
+      return `<h3>生成敌人</h3><div class="ogm-grid">${select("ogm-enemy-kind", "种类", library.map(p => option(p.id, p.name || p.label || p.id, p.id === enemyId)).join(""))}${number("ogm-enemy-level", "等级", partyLevel(), 1, "", 1)}${select("ogm-enemy-zone", "加入区域", zoneOptions(zones().length))}${number("ogm-enemy-count", "数量", 1, 1, 100, 1)}${ivInput("ogm-enemy-iv-hp", "血量水平 %")}${ivInput("ogm-enemy-iv-atk", "ATK 水平 %")}${select("ogm-enemy-race", "种族", options(raceNames(), ""))}${isFishKit(enemyId) ? select("ogm-enemy-enrich", "富集", options(enrichNames, "")) : ""}</div><p class="ogm-muted">个体值：杂兵、精英的血量和 ATK 在 ±10% 内波动；水平空着就随机，写了就按写的（−10～10）。首领不波动。种族：空着就按敌人的配置（固定的照固定，随机的抽），只有有种族的敌人才生效。</p>${button("加入战场", "spawn", 'class="ogm-primary"', !enemyId)}<h3>在场敌人</h3><div class="ogm-actions">${button("全部手动", "manual-all-on")}${button("全部交给 AI", "manual-all-off")}</div><ul class="ogm-enemies">${enemies().map(u => `<li><span><b>${esc(u.name)}</b><small>${esc(u.zone)} 区 · Lv${esc(u.level)} · ${manual(u) ? "手动" : "AI"}</small></span><div class="ogm-actions">${button(manual(u) ? "交给 AI" : "手动", "manual-one", `data-id="${esc(u.id)}"`)}${button("移出", "remove-enemy", `data-id="${esc(u.id)}"`)}${button("击杀", "kill-enemy", `data-id="${esc(u.id)}" class="ogm-danger"`)}</div></li>`).join("") || "<li>当前没有敌人。</li>"}</ul><p class="ogm-muted">移出：无击杀奖励、无死亡效果。击杀：按正常死亡结算。</p><h3>手动行动</h3>${manualMarkup()}`;
     }
     function unitMarkup() {
       const u = selectedUnit(); if (!u) return "<p>场上没有单位。</p>"; unitId = u.id;
       const names = Object.assign({}, numericUnit, flagUnit, { layers: "各层生命与上限", statuses: "添加 / 移除状态", latestElement: "最近元素", self: "自身状态" },
         typeof ivEligible === "function" && ivEligible(u) ? { iv: "个体值（血量 / ATK 水平）" } : {},
+        typeof enemyRaceInfo === "function" && enemyRaceInfo(u) ? { race: "种族" } : {},
         isFishKit(u.kit) ? { enriched: "富集与否" } : {});
+      if (unitField === "race" && !names.race) unitField = "hp";
       if (unitField === "iv" && !names.iv) unitField = "hp";
       if (unitField === "enriched" && !names.enriched) unitField = "hp";
       let editor;
@@ -77,6 +86,10 @@
       else if (unitField === "statuses") editor = `<div class="ogm-grid">${select("ogm-status", "状态", options(statusNames, "burn"))}${number("ogm-status-value", "层数（0 移除；开关状态用 0 / 1）", 1, 0, "", 1)}</div>`;
       else if (unitField === "latestElement") editor = select("ogm-unit-value", "最近元素", options({ "": "无", physical: "物理", fire: "火", acid: "酸", electric: "电", ice: "冰", energy: "能量", harmonic: "谐波" }, u.statuses?.latestElement || ""));
       else if (unitField === "iv") editor = `<div class="ogm-grid">${number("ogm-iv-hp", "血量水平 %（−10～10）", (u.iv || {}).hp || 0, -10, 10, 1)}${number("ogm-iv-atk", "ATK 水平 %（−10～10）", (u.iv || {}).atk || 0, -10, 10, 1)}</div><p class="ogm-muted">按生成时的原始数值重算：血量上限 ×(1 + 血量%)（已受的伤按比例保留），ATK ×(1 + ATK%)。</p>`;
+      else if (unitField === "race") {
+        const o = raceNames(); delete o[""];
+        editor = `${select("ogm-unit-value", "种族", options(o, typeof raceLabel === "function" ? raceLabel(u.race) : ""))}<p class="ogm-muted">按生成时的原始数值重算六维（先去掉旧种族加的，再加新种族的；只有随机种族的盗匪、燃气收集机才改数值），个体值跟着重算。</p>`;
+      }
       else if (unitField === "enriched") editor = `${select("ogm-unit-value", "富集", options({ on: "富集", off: "普通（不富集）" }, u.enriched ? "on" : "off"))}<p class="ogm-muted">富集：装甲层 ×1.5、名字加「富集」、打倒奎支 ×5 并掉武器升级材料、第 3 回合起会下潜逃走。改成普通则反过来（已受的伤按比例保留）。定了以后开战不再随机。</p>`;
       else if (unitField === "self") editor = select("ogm-unit-value", "自身状态", options({ none: "无", burn: "焚身", frost: "霜结", splash: "溅射", conductor: "导体", anchor: "锚定", store: "储能", doppler: "多普勒" }, u.self));
       else if (Object.prototype.hasOwnProperty.call(flagUnit, unitField)) editor = check("ogm-unit-flag", esc(flagUnit[unitField]), !!u[unitField]);
@@ -152,6 +165,7 @@
           cmd = { type: "gm.spawnEnemy", enemyId: value("ogm-enemy-kind"), level: num("ogm-enemy-level"), zone: num("ogm-enemy-zone"), count: num("ogm-enemy-count") };
           const ivHp = ivVal("ogm-enemy-iv-hp"), ivAtk = ivVal("ogm-enemy-iv-atk");
           if (ivHp != null || ivAtk != null) cmd.iv = { hp: ivHp, atk: ivAtk };
+          const race = value("ogm-enemy-race"); if (race) cmd.race = race;
           const enr = isFishKit(cmd.enemyId) ? value("ogm-enemy-enrich") : ""; if (enr) cmd.enriched = enr === "on";
           break;
         }
@@ -170,6 +184,7 @@
           if (unitField === "layers") patch = { layers: u.layers.map((l, i) => ({ current: num("ogm-layer-hp-" + i), max: num("ogm-layer-max-" + i) })) };
           else if (unitField === "latestElement") patch = { statuses: { latestElement: value("ogm-unit-value") || null } };
           else if (unitField === "iv") patch = { iv: { hp: num("ogm-iv-hp"), atk: num("ogm-iv-atk") } };
+          else if (unitField === "race") patch = { race: value("ogm-unit-value") };
           else if (unitField === "enriched") patch = { enriched: value("ogm-unit-value") === "on" };
           else if (unitField === "statuses") { const key = value("ogm-status"), n = num("ogm-status-value"); patch = { statuses: { [key]: key === "burn" ? n : n !== 0 } }; }
           else patch = { [unitField]: Object.prototype.hasOwnProperty.call(flagUnit, unitField) ? checked("ogm-unit-flag") : unitField === "self" ? value("ogm-unit-value") : num("ogm-unit-value") };

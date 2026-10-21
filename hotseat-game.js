@@ -12,7 +12,7 @@
   const packetListeners = new Set();
   const listeners = new Set(), authorityContext = {}, actionTypes = new Set(["skill", "move", "standUp", "useItem"]);
   const automatic = new Set(["battle.supportInfo", "battle.checkSolo", "battle.rememberCampaign", "battle.loadCampaign"]);
-  const tableTypes = new Set(["checkOpen", "checkRoll", "checkClose", "attrRequest", "attrDecide", "skillRoll", "showTitle", "purseTransfer", "shopBuy", "shopRedeem", "cyberRequest", "cyberwareInstall", "cyberwareRemove"]);
+  const tableTypes = new Set(["checkOpen", "checkRoll", "checkClose", "attrRequest", "attrDecide", "skillRoll", "showTitle", "purseTransfer", "shopBuy", "shopRedeem", "cyberRequest", "cyberwareInstall", "cyberwareRemove", "shopSell", "shopBuyback"]);
   const orderTypes = new Set(["orderPick", "orderConfirm", "orderStart", "orderMove", "orderSwapAccept", "answer", "chat", ...tableTypes]);
   const copy = value => JSON.parse(JSON.stringify(value));
   const active = () => !!(enabled && configured && session && authority && !state.solo);
@@ -342,6 +342,27 @@
       session.chat(sender, "🦾 " + notes.join(" "));
       return { notes };
     },
+    // 跑团卖东西 / 回购（shop-sell.js）：要有开着的店；玩家只能以自己操控的角色卖（钱进队伍公账）、回购（从自己钱包付）；主持人哪个都能
+    shopSell: c => {
+      if (typeof trpgShopSell !== "function" || typeof TRPG === "undefined" || !TRPG.active) fail("只有跑团模式有商人");
+      const kit = String(c.kit || "");
+      if (sender !== gm()) { const own = heroes().find(u => u.kit === kit); if (!own || session.ownerOf(own.id) !== sender) fail("只能以自己的角色卖东西"); }
+      let out;
+      try { out = trpgShopSell(kit || null, String(c.id || ""), c.qty, c.owner); } catch (e) { fail(e.message); }
+      if (root.GAME && GAME.rememberCampaign) GAME.rememberCampaign();
+      session.chat(sender, "💰 " + out.msg);
+      return out;
+    },
+    shopBuyback: c => {
+      if (typeof trpgShopBuyback !== "function" || typeof TRPG === "undefined" || !TRPG.active) fail("只有跑团模式有商人");
+      const kit = String(c.kit || "");
+      if (sender !== gm()) { const own = heroes().find(u => u.kit === kit); if (!own || session.ownerOf(own.id) !== sender) fail("只能用自己角色的钱包回购"); }
+      let out;
+      try { out = trpgShopBuyback(kit || null, String(c.token || "")); } catch (e) { fail(e.message); }
+      if (root.GAME && GAME.rememberCampaign) GAME.rememberCampaign();
+      session.chat(sender, "💰 " + out.msg);
+      return out;
+    },
     shopRedeem: c => {
       if (typeof trpgMerchantRedeem !== "function" || typeof TRPG === "undefined" || !TRPG.active) fail("只有跑团模式有商人");
       const open = trpgMerchantOpenNow();
@@ -408,6 +429,26 @@
       if (choice && choice.owner === id) choice.owner = gm();
       authority.broadcast(); refresh();
       return { ok: true };
+    },
+    /** 战斗中能不能转交角色：{ ok, reason }（按钮灰掉时把 reason 写在旁边） */
+    transferState() {
+      if (!active()) return { ok: false, reason: "热座尚未配置" };
+      if (choice) return { ok: false, reason: "有分步选择在等人回答，回答完才能转交" };
+      return session.transferState();
+    },
+    /** 主持人把英雄（连同武器人）转交给另一名操作者；toId 为主持人 = 收回。联机每人最多一名角色的限制照旧 */
+    transferHero(heroId, toId) {
+      const gate = this.transferState();
+      if (!gate.ok) fail(gate.reason);
+      const hero = heroes().find(u => u.id === heroId);
+      if (!hero) fail("只能转交英雄角色");
+      if (!config.players.some(p => p.id === toId)) fail("没有这名玩家");
+      if (network && toId !== gm() && heroes().some(u => u.id !== heroId && (session.snapshot().assignments[u.id] || gm()) === toId)) fail("每名在线玩家最多操控一名角色，请先把他现在的角色交还或转给别人");
+      session.transfer(gm(), heroId, toId);
+      ownerByKit[hero.kit] = toId;
+      if (config.assignments) { if (toId === gm()) delete config.assignments[heroId]; else config.assignments[heroId] = toId; }
+      authority.broadcast(); refresh();
+      return { ok: true, heroName: hero.name, toName: config.players.find(p => p.id === toId).name };
     },
     checkpoint(now = Date.now()) { if (!active()) return null; const snapshot = session.checkpoint(); return copy({ config, ownerByKit, playerId, session: snapshot,
       askRemainingMs: snapshot.ask ? Math.max(0, snapshot.ask.deadline - now) : null, newRoundSpends, choiceNo, openingChoice: !!choice && !state.combatStarted }); },

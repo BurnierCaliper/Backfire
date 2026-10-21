@@ -148,6 +148,20 @@ test("real Worker WS: per-endpoint frame rate is enforced", async t => {
   await until(() => attacker.received.some(m => m.code === "rate_limit"));
 });
 
+test("real Worker WS: 超限先拒绝这一条（不断线），持续超限才断开", async t => {
+  const { host, server } = await room(t), p = await raw(server.url, host.identity.roomCode);
+  t.after(() => p.socket.close()); host.onMessage(() => {});
+  p.send({ kind: "join", role: "player", name: "Burst" }); await until(() => p.received.some(m => m.kind === "joined"));
+  for (let i = 0; i < 125; i++) p.send({ kind: "data", id: "b_" + i, payload: {} });
+  await until(() => p.received.some(m => m.code === "rate_limit"));
+  const err = p.received.find(m => m.code === "rate_limit");
+  assert.match(err.error, /发送太快/);
+  await pause(150);
+  assert.equal(p.socket.readyState, WebSocket.OPEN, "刚超限不应断线");
+  for (let i = 0; i < 100; i++) p.send({ kind: "data", id: "c_" + i, payload: {} });
+  await until(() => p.socket.readyState === WebSocket.CLOSED, "持续超限应断开");
+});
+
 test("real Worker HTTP: origin, payload and admission limits", async t => {
   const server = await createLocalRelayServer({ origins: ["https://game.example"] }); t.after(() => server.close());
   const request = (body, origin) => fetch(server.url + "/rooms", { method: "POST", headers: { "Content-Type": "application/json", ...(origin ? { Origin: origin } : {}) }, body: JSON.stringify(body) });

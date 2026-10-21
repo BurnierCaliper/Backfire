@@ -243,6 +243,9 @@ test("联机跑团主持人：大厅里勾选队员换人；探索时顶栏有�
   await page.evaluate(() => {
     OnlineGame.partyChoices = () => [{ kit: "ruby", name: "瑞比", on: true }, { kit: "hiaki", name: "绯秋", on: true }, { kit: "kolt", name: "柯尔特", on: false }];
     OnlineGame.setParty = kits => { fixture.calls.push({ kind: "setParty", args: kits }); return { ok: true }; };
+    window.__transferGate = { ok: false, reason: "瑞比 正在行动，行动完（或结束回合）才能转交" };
+    OnlineGame.transferState = () => window.__transferGate;
+    OnlineGame.transfer = (hero, to) => { fixture.calls.push({ kind: "transfer", args: [hero, to] }); return { ok: true }; };
     fixture.set({ active: true, isHost: true, identity: { id: "gm" }, screen: "lobby" });
   });
   await page.waitForSelector("[data-party-kit=kolt]");
@@ -256,8 +259,14 @@ test("联机跑团主持人：大厅里勾选队员换人；探索时顶栏有�
   await page.evaluate(() => fixture.set({ screen: "battle" }));
   assert.equal(await page.locator('[data-online="openAssign"]').count(), 0);
   // 面板还开着（刚才点开的）：战斗中只写说明，没有分配下拉框
-  assert.match(await page.locator("#online-panel").innerText(), /战斗中不能改角色分配/);
+  assert.match(await page.locator("#online-panel").innerText(), /战斗中转交角色/);
   assert.equal(await page.locator("[data-assign]").count(), 0);
+  // 不在两个单位的回合之间：按钮灰掉，原因写在旁边；回合之间：可以点，转给选中的人
+  assert.match(await page.locator("[data-transfer-reason]").innerText(), /正在行动/);
+  assert.equal(await page.locator('[data-online="transfer"]').first().isDisabled(), true);
+  await page.evaluate(() => { window.__transferGate = { ok: true, reason: "" }; fixture.set({ screen: "battle" }); });
+  await page.waitForSelector('[data-online="transfer"]:not([disabled])');
+  assert.equal(await page.locator("[data-transfer-reason]").count(), 0);
   assert.deepEqual(o.errors, []);
 });
 
@@ -580,4 +589,44 @@ test("联机玩家（body.online-player）：工坊 / 背包 / 克制表 / 诊�
     await page.evaluate(sel => { document.querySelector(sel).hidden = true; }, sel);
   }
   assert.deepEqual(o.errors, []);
+});
+
+test("任务提示 · 一个包里有多条变动合成一句；任务更新不会把正在看的背包盖掉", async t => {
+  const o = await open(t); if (!o) return; const { page } = o;
+  const q = (id, name, status, extra = {}) => ({ id, name, category: "side", owner: "", status, goal: "", days: 0, private: false, index: 0, got: false, failWhy: "", reward: { xp: 0, kuizhi: 0, items: [] }, steps: [], ...extra });
+  const send = quests => page.evaluate(quests => { fixture.set({ packet: { ...fixture.view.packet, quests } }); }, quests);
+  await player(page, { screen: "exploration", mode: "trpg" });
+  await send([q("q1", "甲任务", "active")]);
+  await send([q("q1", "甲任务", "done", { reward: { xp: 5, kuizhi: 0, items: [] } }), q("q2", "乙任务", "active")]);
+  const text = await page.locator(".ol-toast").first().textContent();
+  assert.match(text, /任务完成：「甲任务」/); assert.match(text, /新任务：「乙任务」/);
+  await page.click('[data-online="quests"]');
+  assert.equal(await page.locator("#online-bag .ol-quest-card").count() > 0, true);
+  await page.evaluate(() => { document.querySelector("#online-bag").innerHTML = '<div class="ol-card" id="fake-bag"><header><h2>背包</h2></header></div>'; });
+  await send([q("q1", "甲任务", "done"), q("q2", "乙任务", "done")]);
+  assert.equal(await page.locator("#online-bag #fake-bag").count(), 1, "背包还在");
+  assert.equal(await page.locator("#online-bag .ol-quest-card").count(), 0);
+  assert.deepEqual(o.errors, []);
+});
+
+test("#176 手机 390px：战场框占半屏、触屏提示、选序弹层不透字", async t => {
+  const o = await open(t, true); if (!o) return; const { page } = o; await player(page);
+  await page.waitForSelector('.ol-battle [data-ob-skill="ruby_aa"]');
+  const vh = await page.evaluate(() => innerHeight);
+  const h = await page.locator(".ol-battle .g-field").evaluate(e => e.getBoundingClientRect().height);
+  assert.ok(h >= vh * 0.45, `战场框高 ${h}px，应至少约半屏（${vh}px）`);
+  const hint = await page.locator(".ol-battle .hint").innerText();
+  assert.doesNotMatch(hint, /悬停|空格/);
+  assert.match(hint, /点技能看说明/);
+  assert.equal(await page.locator(".ol-battle .endturn small").count(), 0);
+  const bg = await page.evaluate(() => { const d = document.createElement("section"); d.className = "hs-ui hs-overlay"; document.body.append(d); const c = getComputedStyle(d).backgroundColor; d.remove(); return c; });
+  assert.equal(bg, "rgb(11, 8, 6)", "弹层背景要不透明");
+  assert.deepEqual(o.errors, []);
+});
+
+test("#176 桌面宽度：保留悬停 / 空格提示", async t => {
+  const o = await open(t, false); if (!o) return; const { page } = o; await player(page);
+  await page.waitForSelector('.ol-battle [data-ob-skill="ruby_aa"]');
+  assert.match(await page.locator(".ol-battle .hint").innerText(), /悬停技能看说明/);
+  assert.equal(await page.locator(".ol-battle .endturn small").count(), 1);
 });

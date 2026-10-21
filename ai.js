@@ -27,10 +27,11 @@ const EnemyAI = (function () {
       !(typeof bpUntargetable === "function" && bpUntargetable(u)));   // 单局图纸：安全的迷彩（武器人形态）
   }
   // 不按「打单个目标」瞄准的技能：标定区域的榴弹（落点任意），不看危墙
-  const ZONE_PICK = { en_gl: true, en_gl_fire: true, en_ant_shell: true, en_ant_shell_fire: true };
+  const ZONE_PICK = { en_gl: true, en_gl_fire: true, en_ant_shell: true, en_ant_shell_fire: true, en_riot_bottle: true, en_riot_bottle_fire: true };
   // 不需要目标 / 不是攻击的技能：找站位时不拿它们来算「能不能打到」
   const NO_TARGET = { en_agg3_debris: true, en_agg1_rush: true, en_agg1_rush_prep: true, en_king_hold: true, en_king_exec: true, en_bigsand_summon: true, en_bigsand_heal: true, ufo_prime: true,
-    ufo_boom: true, ufo_stomp: true, ufo_sweep: true, ufo_summon: true, en_agg2_overheat: true, en_giant_sand_pulse: true, en_thug_mutiny: true, en_gas_ignite: true, en_hunter_heat: true, en_alarm_zap: true };
+    ufo_boom: true, ufo_stomp: true, ufo_sweep: true, ufo_summon: true, en_agg2_overheat: true, en_giant_sand_pulse: true, en_thug_mutiny: true, en_gas_ignite: true, en_hunter_heat: true, en_alarm_zap: true,
+    en_riot_bottle: true, en_riot_bottle_fire: true };
   function canAimSkill(u, sid, t) {
     if (!inSkillReach(u, sid, t)) return false;
     // 隔着危墙 / 关着的门打不到（dealTo 会挡下来）：以前照样瞄准，结果每回合白打
@@ -52,7 +53,7 @@ const EnemyAI = (function () {
     // 射程表里没有的技能按单位卡上的射程判断，和 dealTo 一致（以前一律按 0–1：远距离的人形沙灵瞄准同区的人，每回合空放）
     const rg = u.range || "any";
     if (rg === "melee") return d === 0;
-    if (rg === "ranged") return d === 1;
+    if (rg === "ranged") return d === 1 || (d === 0 && typeof enemyForcedPointBlank === "function" && enemyForcedPointBlank(u, t));   // 被牵制的抵近喷洒（播撒者）
     return d <= 1;
   }
   function retargetLegal(u, sid, preferred, prey, forced) {
@@ -129,6 +130,12 @@ const EnemyAI = (function () {
     captain_lizard: { dist: 1,    aim: "local",   near: "en_liz",            far: "en_liz" },
     ant_guard:      { dist: 1,    aim: "local",   near: "en_ant_spray",      far: "en_ant_spray", special: "ant" },
     gas_collector:  { dist: 0,    aim: "local",   special: "gas" },
+    // 外城区镇压部队（docs/suppression-force.md）：警棍盾、喷火兵近战主动贴近；步枪、投手远程主动远离；小队长远近皆可
+    riot_baton:     { dist: 0,    aim: "local",   near: "en_riot_baton" },
+    riot_rifle:     { dist: 1,    aim: "local",   near: "en_riot_rifle",     far: "en_riot_rifle" },
+    riot_molotov:   { dist: 1,    aim: "local",   special: "riot_bottle" },
+    riot_flamer:    { dist: 0,    aim: "local",   near: "en_riot_spray" },
+    riot_captain:   { dist: null, aim: "local",   near: "en_riot_pistol",    far: "en_riot_pistol" },
     ant_hunter:     { dist: 1,    aim: "local",   near: "en_hunter_shot",    far: "en_hunter_shot" },
     bigsand:        { dist: null, aim: "local",   near: "en_bigsand",        special: "bigsand" },
     livesand:       { dist: null, aim: "local",   special: "livesand" },
@@ -151,15 +158,28 @@ const EnemyAI = (function () {
     const from = Number(u.zone), goal = Number(to);
     const here = zdist(from, goal);
     const abyss = (z) => !u.flying && state.fields && state.fields[z] && state.fields[z].abyss;
-    const opts = adjacentZones(from).map(Number).filter(z => !abyss(z) && zdist(z, goal) < here);
+    // 隔着危墙 / 关着的门的区走不过去（doMove 会被拦下、不扣点），不当作前进方向
+    const blocked = (z) => { const g = typeof getGap === "function" ? getGap(from, z) : { type: "open" }; return g.type === "wall" || (g.type === "door" && !g.open); };
+    const opts = adjacentZones(from).map(Number).filter(z => !abyss(z) && !blocked(z) && zdist(z, goal) < here);
     if (!opts.length) return null;
     return opts.sort((a, b) => zdist(a, goal) - zdist(b, goal) || a - b)[0];
   }
-  /** 这一步移动付不付得起：杂兵用行动点，精英 / 首领只能用附赠行动；被禁足 / 霜结不能动 */
-  function canPayMove(u) {
+  /** 这一步移动付不付得起，按 app.js · doMoveInner 实际结算的消耗算：
+   *  离开酸液地面 / 越过空隙（给出 dest 且隔着空隙）扣 1 行动点（荒原行者改扣附赠）；导体 / 探测模式不耗；
+   *  其余杂兵用行动点，精英 / 首领用附赠行动。被禁足 / 霜结不能动 */
+  function canPayMove(u, dest) {
     if (!u || u.noMove || u.self === "frost") return false;
     if (AI_SPEC[u.kit] && AI_SPEC[u.kit].fixed) return false;   // 不会主动移动（矿场警戒自动机）
+    const wanderer = typeof featHas === "function" && featHas(u, "wanderer");
+    const fromF = (state.fields && state.fields[u.zone]) || {};
+    const overVoid = dest != null && !u.flying && typeof getGap === "function" && getGap(u.zone, dest).type === "void";
+    const leaveAcid = !!fromF.acid && !u.flying;
+    if (wanderer && (overVoid || leaveAcid)) return (u.bonus || 0) >= 1;
     const rank = typeof enemyRankOf === "function" ? enemyRankOf(u) : "minion";
+    // 这两种移动要花行动点：杂兵照常 1 点够；精英 / 首领的计划是「附赠移动 + 行动点出手」，花掉最后 1 点就没法出手了，要留 1 点
+    const apMove = overVoid || (leaveAcid && !(typeof acidGroundWalker === "function" && acidGroundWalker(u)));
+    if (apMove) return (u.ap || 0) >= (rank === "minion" ? 1 : 2);
+    if (u.self === "conductor" || (u.kit === "ecmo" && u.resources && u.resources.probe)) return true;
     return rank === "minion" ? (u.ap || 0) >= 1 : (u.bonus || 0) >= 1;
   }
   /** 能正常走过去的相邻区（不隔危墙 / 关着的门；地面单位不走空隙、不进深渊） */
@@ -218,6 +238,12 @@ const EnemyAI = (function () {
       (zdist(u.zone, a.zone) - zdist(u.zone, b.zone)) || (hpOf(a) - hpOf(b)));
   }
 
+  function isRiotUnit(u) { return !!u && !u.isPlayer && typeof factionOf === "function" && factionOf(u) === "镇压队"; }
+  /** 镇压小队长活着、在战场上（失衡的也算在场） */
+  function riotCaptainOnField() { return state.units.some(x => x.kit === "riot_captain" && unitAlive(x)); }
+  /** 已经有灼烧（免疫灼烧的自焚者也当作有，免得永远优先挑它） */
+  function alreadyBurning(p) { return (Number(p.statuses && p.statuses.burn) || 0) > 0 || p.self === "burn"; }
+
   /** 选目标。强制目标（决一死战 / 嘲讽）优先，其次手册写明的追击规则，最后才是同区优先。 */
   function aiTarget(u, spec, prey) {
     const pick = aiTargetBase(u, spec, prey);
@@ -240,6 +266,11 @@ const EnemyAI = (function () {
     if (isOutlawThug(u) && typeof kingFocusTarget === "function") {
       const f = kingFocusTarget();
       if (f && prey.includes(f)) return { unit: f, forced: true };
+    }
+    // 镇压小队长「指挥」：他在场时，镇压队全体优先挑还没有灼烧的敌人，尽量让每个敌人都挂上灼烧
+    if (isRiotUnit(u) && riotCaptainOnField()) {
+      const fresh = prey.filter(p => !alreadyBurning(p));
+      if (fresh.length) prey = fresh;
     }
     let aim = spec.aim || "local";
     // 手册：强盗头子在场时，所有狂徒集火血量最低者
@@ -287,7 +318,8 @@ const EnemyAI = (function () {
       return stepToward(u, target.zone);
     }
     // 太近 → 后撤。手册规定优先退到没有敌人的区，退不掉才留下打。
-    const open = adjacentZones(u.zone).filter(z => !preyInZone(prey, z).length && (u.flying || !(state.fields && state.fields[z] && state.fields[z].abyss)));
+    // 只退到走得通的区（不隔危墙 / 关着的门）
+    const open = walkableNeighbors(u).filter(z => !preyInZone(prey, z).length);
     if (!open.length) return null;
     return open.sort((a, b) => zdist(b, target.zone) - zdist(a, target.zone))[0];
   }
@@ -304,6 +336,11 @@ const EnemyAI = (function () {
     if (spec.special === "gl") {
       if (has("en_gl_fire")) return "en_gl_fire";
       return has("en_gl") ? "en_gl" : null;
+    }
+    if (spec.special === "riot_bottle") {
+      // 和榴弹一样：标定过、轮到落地就落地，否则标定一个区
+      if (has("en_riot_bottle_fire")) return "en_riot_bottle_fire";
+      return has("en_riot_bottle") ? "en_riot_bottle" : null;
     }
     if (spec.special === "alarm") {
       // 不移动：场上有高能的敌人就电涌，没有就待机
@@ -411,7 +448,7 @@ const EnemyAI = (function () {
       zones.sort((a, b) => b.n - a.n);
       return zones.length ? { dest: zones[0].z } : null;
     }
-    if (sid === "en_gl" || sid === "en_ant_shell") {
+    if (sid === "en_gl" || sid === "en_ant_shell" || sid === "en_riot_bottle") {
       // 被决一死战 / 嘲讽牵制：只能选牵制者所在的区（作者定）
       const forced = typeof enemyForcedTarget === "function" ? enemyForcedTarget(u) : null;
       if (forced) return { dest: Number(forced.zone) };
@@ -541,8 +578,10 @@ const EnemyAI = (function () {
 
     // 沙漠生物的习性：夜晚 / 沙暴不走进有沙珊瑚的区（desert.js · coralAvoid）
     if (step != null && typeof coralAvoid === "function" && coralAvoid(u, step)) step = null;
+    // 付不起移动（精英 / 首领没有附赠行动、杂兵没有行动点）就不规划移动，改看付得起的行动（原地能打就打，打不到就不出手）
+    if (step != null && !canPayMove(u, step)) step = null;
     let sid = aiSpecial(u, spec, target, prey, has, list);
-    if (sid && !["en_agg3_debris", "en_agg1_rush", "en_agg1_rush_prep", "en_king_hold", "en_king_exec", "en_bigsand_summon", "en_bigsand_heal", "ufo_prime", "ufo_boom", "ufo_stomp", "ufo_sweep", "en_agg2_overheat", "en_gl", "en_gl_fire", "en_ant_shell", "en_ant_shell_fire", "en_gas_ignite", "en_alarm_zap", "en_giant_sand_pulse"].includes(sid)) {
+    if (sid && !["en_agg3_debris", "en_agg1_rush", "en_agg1_rush_prep", "en_king_hold", "en_king_exec", "en_bigsand_summon", "en_bigsand_heal", "ufo_prime", "ufo_boom", "ufo_stomp", "ufo_sweep", "en_agg2_overheat", "en_gl", "en_gl_fire", "en_ant_shell", "en_ant_shell_fire", "en_riot_bottle", "en_riot_bottle_fire", "en_gas_ignite", "en_alarm_zap", "en_giant_sand_pulse"].includes(sid)) {
       const rt = retargetLegal(u, sid, target, prey, pick.forced);
       if (rt.target) target = rt.target;
       if (rt.sid) sid = rt.sid;
@@ -555,6 +594,7 @@ const EnemyAI = (function () {
       sid === "en_bigsand_summon" || sid === "en_bigsand_heal" || sid === "ufo_prime" ||
       sid === "ufo_boom" || sid === "ufo_stomp" || sid === "ufo_sweep" || sid === "en_agg2_overheat" ||
       sid === "en_giant_sand_pulse" ||   // 全域沙暴打所有区域，不用瞄准
+      sid === "en_riot_bottle_fire" ||   // 燃烧瓶落地打标定好的区，不看现在的目标在哪
       sid === "en_gas_ignite" ||         // 点燃燃气打自己所在的区
       sid === "en_alarm_zap";            // 电涌打所有高能的敌人，不用瞄准
     if (sid && (inRange || !step || noTargetNeeded)) {
@@ -676,10 +716,16 @@ const EnemyAI = (function () {
   /** 发号施令的敌人总是第一个行动：亡命之王的命令要用狂徒们这一回合的行动点（回防筑墙）、
    *  改狂徒们的目标（攻击命令），排在最后的话狂徒早就把行动点用完了。其余照「杂兵 → 精英 → 首领」 */
   const COMMANDERS = ["outlaw_king"];
+  /** 敌人回合要行动的单位：敌人 + 我方同阵营的友军（友军打和它敌对的单位，目标由 validPrey 按 hostileTo 选）。
+   *  foes() 照旧不含友军（胜负判定、「还剩几个敌人」用它）；中立生物不行动 */
+  function actors() {
+    return foes().concat(state.units.filter(u => !u.isPlayer && unitAlive(u) && u.kit !== "ironwall" &&
+      typeof playerAllied === "function" && playerAllied(u) && !(typeof isNeutralCreature === "function" && isNeutralCreature(u))));
+  }
   function actingOrder() {
     const r = { minion: 0, elite: 1, boss: 2 };
     const key = u => (COMMANDERS.includes(u.kit) ? -1 : (r[enemyRankOf(u)] || 0));
-    return foes().sort((a, b) => key(a) - key(b)).map(u => u.id);
+    return actors().sort((a, b) => key(a) - key(b)).map(u => u.id);
   }
 
   return {
@@ -691,6 +737,6 @@ const EnemyAI = (function () {
     target: aiTarget,
     step: aiStep,
     special: aiSpecial,
-    unitAlive, players, foes
+    unitAlive, players, foes, actors
   };
 })();

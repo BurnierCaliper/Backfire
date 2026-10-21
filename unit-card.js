@@ -59,6 +59,7 @@
   function update(c, s, opts) {
     const q = (sel) => c.unit.querySelector(sel);
     q(".u-name").textContent = s.name;
+    q(".u-name").title = s.race ? `${s.name} · ${s.race}` : "";
     if (c.intents) {
       const list = Array.isArray(s.intents) ? s.intents : [];
       const key = list.join("|");
@@ -71,7 +72,9 @@
     q(".u-lv").textContent = "Lv" + s.level;
     // 个体值（杂兵、精英）：铭牌上停一下就能看到血量 / ATK 水平
     const ivSign = (n) => (n > 0 ? "+" : n < 0 ? "−" : "±") + Math.abs(n) + "%";
-    q(".u-lv").title = s.iv ? `个体值：血量 ${ivSign(s.iv.hp)} · ATK ${ivSign(s.iv.atk)}` : "";
+    // 种族（敌人）：和个体值一起放在等级的悬停里，例如「红皮人 · 个体值：血量 +3% · ATK −2%」
+    q(".u-lv").title = [s.race || "", s.iv ? `个体值：血量 ${ivSign(s.iv.hp)} · ATK ${ivSign(s.iv.atk)}` : ""].filter(Boolean).join(" · ");
+    c.unit.dataset.race = s.race || "";
     c.unit.dataset.iv = s.iv ? `${s.iv.hp},${s.iv.atk}` : "";
     q(".u-atk").textContent = "ATK " + s.atk;
 

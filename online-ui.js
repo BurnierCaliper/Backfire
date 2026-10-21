@@ -24,7 +24,7 @@
     const NAME_KEY = "backfire.online.name";
     const savedName = (() => { try { return localStorage.getItem(NAME_KEY) || ""; } catch (e) { return ""; } })();
     let partyDraft = null;   // 主持人正在勾的队员（还没点「按勾选换队员」）
-    let form = { url: "", name: savedName, roomCode: "", slot: "0", campaignName: "", mode: "trpg", to: "all", text: "", chatText: "" }, assignments = {};
+    let form = { url: "", name: savedName, roomCode: "", slot: "0", campaignName: "", mode: "trpg", to: "all", text: "", chatText: "" }, assignments = {}, transferDraft = {};
     const unsubs = [], nodes = [], titleButtons = [], lastMarkup = {};
     const byId = id => document.getElementById(id);
     const own = () => view.identity && view.identity.id;
@@ -47,7 +47,7 @@
     toast.hidden = true;
     // 玩家右侧栏：「战斗 / 记录」和「小队」两个频道。输入框只建一次，收到新消息只更新列表，不会打断输入
     const side = make("aside", "online-side", "ol-side", { "aria-label": "战斗记录与小队聊天" });
-    side.innerHTML = `<nav class="ol-side-tabs" role="tablist"><button type="button" role="tab" data-side="log" class="ol-tab"></button><button type="button" role="tab" data-side="chat" class="ol-tab">小队<span class="ol-badge" hidden></span></button><button type="button" class="ol-side-fold" data-side-fold hidden>展开 ▴</button></nav><ol class="ol-side-log" aria-live="polite"></ol><ol class="ol-side-chat" aria-live="polite"></ol><form class="ol-side-form" id="ol-side-form"><label class="ol-sr-only" for="ol-side-text">小队消息</label><button type="button" class="ol-button ol-dice" data-roll-open="1" title="选一个熟练项掷 d100">🎲 掷骰</button><input id="ol-side-text" maxlength="500" autocomplete="off" placeholder="和队友说点什么…"><button type="submit" class="ol-button ol-primary">发送</button></form>`;
+    side.innerHTML = `<nav class="ol-side-tabs" role="tablist"><button type="button" role="tab" data-side="log" class="ol-tab"></button><button type="button" role="tab" data-side="chat" class="ol-tab">小队<span class="ol-badge" hidden></span></button><button type="button" class="ol-side-fold" data-side-fold hidden>展开 ▴</button></nav><ol class="ol-side-log" aria-live="polite"></ol><ol class="ol-side-chat" aria-live="polite"></ol><form class="ol-side-form" id="ol-side-form"><label class="ol-sr-only" for="ol-side-text">小队消息</label><button type="button" class="ol-button ol-dice" data-roll-open="1" title="选一个熟练项掷 d100">🎲 掷骰</button><textarea id="ol-side-text" rows="1" maxlength="500" autocomplete="off" enterkeyhint="send" title="Enter 发送，Shift+Enter 换行" placeholder="和队友说点什么…"></textarea><button type="submit" class="ol-button ol-primary">发送</button></form>`;
     side.hidden = true;
     const bagBox = make("section", "online-bag", "ol-overlay ol-bag", { role: "dialog", "aria-label": "背包" });
     bagBox.hidden = true;
@@ -90,7 +90,8 @@
       sideTab[view.screen === "battle" || view.screen === "ended" ? "battle" : "other"] = tab.dataset.side; renderSide(true);
       if (tab.dataset.side === "chat") side.querySelector("#ol-side-text")?.focus({ preventScroll: true });
     });
-    side.addEventListener("keydown", event => event.stopPropagation());
+    side.addEventListener("keydown", event => { event.stopPropagation(); chatEnter(event); });
+    side.addEventListener("input", event => fitChatBox(event.target));
     side.addEventListener("submit", event => { event.preventDefault(); sendSideChat(); });
     bagBox.addEventListener("click", event => { if (event.target === bagBox || event.target.closest('[data-bag="close"]')) bagBox.hidden = true; });
     const onRollOpen = event => {
@@ -258,7 +259,14 @@
       // 联机跑团：主持人在大厅 / 探索时直接勾选队员（单机的「队伍」页被房间面板挡着）
       const choices = mayAssign && view.mode !== "rogue" && api.partyChoices ? api.partyChoices() : [];
       const partyPicker = choices.length ? `<section class="ol-party-pick" aria-label="队员"><h3>队员</h3><p class="ol-muted">勾选这次跑团的角色。换人后，留下来的角色还是原来的人操控，新加入的先归主持人。</p><div class="ol-party-list">${choices.map(c => `<label class="ol-check"><input type="checkbox" data-party-kit="${esc(c.kit)}"${(partyDraft ? partyDraft.includes(c.kit) : c.on) ? " checked" : ""}> ${esc(c.name)}</label>`).join("")}</div>${button("按勾选换队员", "setParty", "", disabled())}</section>` : "";
-      return `<section><h3>房间成员</h3><ul class="ol-roster">${players().map(p => `<li><span><b>${esc(p.name)}</b>${p.gm ? ' <small>主持人</small>' : ""}</span><span class="${p.online ? "ol-online" : "ol-muted"}">${p.online ? "在线" : "离线"}</span><small>${esc(heroes.filter(h => h.owner === p.id).map(h => h.name).join("、") || (p.gm ? "未分配角色由主持人操作" : "等待分配角色"))}</small>${view.isHost && !p.gm ? seatTools(p) : ""}</li>`).join("")}</ul>${mayAssign ? `<h3 id="ol-assign-head">角色分配</h3><div class="ol-assignments">${heroes.map(h => `<label><span>${esc(h.name)}</span><select data-assign="${esc(h.id)}" aria-label="${esc(h.name)}的玩家">${players().map(p => option(p.id, p.name + (p.gm ? " · 主持人" : ""), (assignments[h.id] || h.owner) === p.id)).join("")}</select></label>`).join("")}</div>${button("保存角色分配", "assign", "", disabled() || !heroes.length)}` : view.isHost && view.screen === "battle" ? '<p class="ol-muted">战斗中不能改角色分配；玩家掉线可以先「接管」，打完回到探索再重新分配。</p>' : ""}</section>${partyPicker}`;
+      return `<section><h3>房间成员</h3><ul class="ol-roster">${players().map(p => `<li><span><b>${esc(p.name)}</b>${p.gm ? ' <small>主持人</small>' : ""}</span><span class="${p.online ? "ol-online" : "ol-muted"}">${p.online ? "在线" : "离线"}</span><small>${esc(heroes.filter(h => h.owner === p.id).map(h => h.name).join("、") || (p.gm ? "未分配角色由主持人操作" : "等待分配角色"))}</small>${view.isHost && !p.gm ? seatTools(p) : ""}</li>`).join("")}</ul>${mayAssign ? `<h3 id="ol-assign-head">角色分配</h3><div class="ol-assignments">${heroes.map(h => `<label><span>${esc(h.name)}</span><select data-assign="${esc(h.id)}" aria-label="${esc(h.name)}的玩家">${players().map(p => option(p.id, p.name + (p.gm ? " · 主持人" : ""), (assignments[h.id] || h.owner) === p.id)).join("")}</select></label>`).join("")}</div>${button("保存角色分配", "assign", "", disabled() || !heroes.length)}` : view.isHost && view.screen === "battle" ? transferMarkup(heroes) : ""}</section>${partyPicker}`;
+    }
+    /** 战斗中转交角色（只在两个单位的回合之间；不满足时按钮灰掉并写明原因；联机单局不能转交） */
+    function transferMarkup(heroes) {
+      if (view.mode === "rogue" || typeof api.transfer !== "function") return '<p class="ol-muted">联机单局开局后座位固定，不能转交；玩家掉线可以先「接管」。</p>';
+      const gate = typeof api.transferState === "function" ? api.transferState() : { ok: false, reason: "这个版本不支持转交" };
+      const rows = heroes.map(h => { const to = transferDraft[h.id] || own(); return `<label><span>${esc(h.name)}</span><select data-transfer="${esc(h.id)}" aria-label="${esc(h.name)}转交给"${gate.ok ? "" : " disabled"}>${players().map(p => option(p.id, p.name + (p.gm ? " · 主持人（收回）" : ""), to === p.id)).join("")}</select>${button("转交", "transfer", `data-hero="${esc(h.id)}"`, !gate.ok || pending)}</label>`; }).join("");
+      return `<h3>战斗中转交角色</h3><p class="ol-muted">只能在两个单位的回合之间转交，武器人跟着角色一起转；每名玩家最多操控一名角色；玩家掉线可以先「接管」。</p>${gate.ok ? "" : `<p class="ol-muted" role="status" data-transfer-reason>现在不能转交：${esc(gate.reason)}</p>`}<div class="ol-assignments">${rows}</div>`;
     }
     /** 主持人对玩家座位的操作：掉线时「接管」他的角色（战斗中也行）；「释放座位」让丢了恢复令牌的人能用同一个昵称重新加入 */
     function seatTools(p) {
@@ -296,7 +304,7 @@
       return `<div class="ol-card"><header><div><span class="ol-muted">${starting ? "大厅" : "联机房间"}</span><div class="ol-code-row"><h2 class="ol-code">${esc(view.roomCode)}</h2>${view.roomCode ? button("复制房间码", "copyCode") : ""}</div></div>${canClose ? button("收起", "close") : ""}</header><p class="ol-connection" role="status">${esc(paused() ? view.status?.connected ? "房主离线，等待恢复" : "连接中断，正在重连" : "已连接")}</p>${rosterMarkup()}${starting ? `<footer>${view.isHost ? button(view.mode === "rogue" ? "开始" : "开始跑团", "start", "", disabled() || !players().some(p => !p.gm && p.online), true) + (view.mode === "rogue" && !(view.heroes || []).length ? '<p class="ol-muted">先在单局画面选好队伍、点「出发」，这里才能把角色分给大家。</p>' : "") : '<p class="ol-muted">等待房主分配角色并开始。</p>'}</footer>` : ""}${starting ? lobbyChatMarkup() : ""}${messagesMarkup()}<footer>${button("重新连接", "reconnect", "", pending)}${button(view.isHost ? "离开并保存" : "离开房间", "leave", "", pending)}</footer><p class="ol-notice" role="status">${esc(notice || view.notice || view.packet?.systemNotice || (view.storageError ? "本机保存失败，请保持页面打开并检查存储空间。" : ""))}</p></div>`;
     }
     function lobbyChatMarkup() {
-      return `<section class="ol-messages"><h3>大厅交流</h3><ol aria-live="polite" data-keep-scroll="lobby">${(hs().chat || []).map(m => `<li><b>${esc(m.name || m.operatorName || "玩家")}</b><p>${esc(m.text)}</p></li>`).join("") || '<li class="ol-muted">在这里与所有人商量准备事项。</li>'}</ol><form id="ol-lobby-chat"><label class="ol-sr-only" for="ol-lobby-text">大厅聊天</label><input id="ol-lobby-text" data-field="chatText" maxlength="500" value="${esc(form.chatText)}" placeholder="所有人都能看到…"><button class="ol-button" type="submit"${disabled() ? " disabled" : ""}>发送到大厅</button></form></section>`;
+      return `<section class="ol-messages"><h3>大厅交流</h3><ol aria-live="polite" data-keep-scroll="lobby">${(hs().chat || []).map(m => `<li><b>${esc(m.name || m.operatorName || "玩家")}</b><p${artAttr(m.text)}>${esc(m.text)}</p></li>`).join("") || '<li class="ol-muted">在这里与所有人商量准备事项。</li>'}</ol><form id="ol-lobby-chat"><label class="ol-sr-only" for="ol-lobby-text">大厅聊天</label><input id="ol-lobby-text" data-field="chatText" maxlength="500" value="${esc(form.chatText)}" placeholder="所有人都能看到…"><button class="ol-button" type="submit"${disabled() ? " disabled" : ""}>发送到大厅</button></form></section>`;
     }
     function fieldsMarkup(data, zone) {
       const field = data.fields?.[zone] || {}, parts = [];
@@ -339,14 +347,15 @@
         const n = Math.max(1, Number(shopDraft.qty[r.key]) || 1), out = r.stock === 0;
         return `<li><span class="ol-shop-name"><b>${esc(r.name)}</b>${r.hint ? `<small>${esc(r.hint)}</small>` : ""}</span>
           <span class="ol-shop-price">${r.price !== r.base ? `<s>${esc(r.base)}</s> ` : ""}<b>${esc(r.price)}</b> 奎支${r.stock != null ? ` · 剩 ${esc(r.stock)}` : ""}</span>
-          <input type="number" min="1" step="1" value="${esc(n)}" data-shop-qty="${esc(r.key)}" aria-label="买几份">${button(out ? "卖完了" : "买", "shopBuy", `data-key="${esc(r.key)}"`, disabled() || out || !shopDraft.payer || wallet < r.price * n)}</li>`;
+          <input type="number" min="1" step="1" value="${esc(n)}" data-shop-qty="${esc(r.key)}" aria-label="买几份">${button(out ? "卖完了" : "买", "shopBuy", `data-key="${esc(r.key)}"`, disabled() || out || !shopDraft.payer || wallet < r.price * n)}${why(out ? "卖完了" : !shopDraft.payer ? "先选付款人" : lack(wallet, r.price * n))}</li>`;
       }).join("")}</ul>`).join("");
-      const pts = s.points ? `<h4>积分兑换（队伍商店积分 ${esc(s.points.have)}）</h4><div class="ol-shop-redeem">${s.points.rows.map(x => button(`${x.name} · ${x.points} 积分`, "shopRedeem", `data-item="${esc(x.item)}"`, disabled() || s.points.have < x.points)).join("") || '<span class="ol-muted">这里没有能兑换的东西。</span>'}</div>` : "";
+      const pts = s.points ? `<h4>积分兑换（队伍商店积分 ${esc(s.points.have)}）</h4><div class="ol-shop-redeem">${s.points.rows.map(x => button(`${x.name} · ${x.points} 积分`, "shopRedeem", `data-item="${esc(x.item)}"`, disabled() || s.points.have < x.points) + why(s.points.have < x.points ? `还差 ${x.points - s.points.have} 积分` : "")).join("") || '<span class="ol-muted">这里没有能兑换的东西。</span>'}</div>` : "";
+      const buyHtml = `${mine.length ? `<label>由谁付 <select data-shop-payer>${mine.map(h => option(h.kit, `${h.name}（${h.amount} 奎支）`, h.kit === shopDraft.payer)).join("")}</select></label>` : '<p class="ol-muted">你还没有操控的角色，不能买东西。</p>'}
+        ${rows || '<p class="ol-muted">这家店还没有商品。</p>'}${pts}
+        <p class="ol-muted">买到的东西进队伍背包；买东西照常攒商店积分。主持人关店后这里就收起来。</p>`;
       return `<section class="ol-shop" aria-label="商店"><header><h3>🛒 ${esc(s.name)}</h3>${s.discount ? `<span class="ol-q-tag ol-q-main">${esc(Number.isInteger(z) ? z : z.toFixed(1))} 折</span>` : ""}</header>
         ${s.note ? `<p class="ol-muted">${esc(s.note)}</p>` : ""}
-        ${mine.length ? `<label>由谁付 <select data-shop-payer>${mine.map(h => option(h.kit, `${h.name}（${h.amount} 奎支）`, h.kit === shopDraft.payer)).join("")}</select></label>` : '<p class="ol-muted">你还没有操控的角色，不能买东西。</p>'}
-        ${rows || '<p class="ol-muted">这家店还没有商品。</p>'}${pts}
-        <p class="ol-muted">买到的东西进队伍背包；买东西照常攒商店积分。主持人关店后这里就收起来。</p></section>`;
+        ${sellTabs("trpg", view.packet?.shopSell || null, buyHtml, () => sellModelTrpg(s))}</section>`;
     }
     function purseMarkup() {
       const p = view.packet?.purse;
@@ -463,7 +472,10 @@
       return `<section class="ol-actions" aria-label="我的行动"><header><h3>${esc(choices?.title || "轮到你行动")}</h3>${currentMenu ? button("重选技能", "resetMenu", "", disabled()) : ""}</header>${choices ? choices.kind === "ready" ? `<p>选项已确认。</p>${button("执行行动", "execute", "", disabled() || !choices.command, true)}` : `<div class="ol-action-options">${(choices.options || []).map((o, index) => `<div>${button(o.label ?? String(o.value ?? "不选"), "option", `data-option="${index}"`, disabled() || o.disabled, true)}${o.sub || o.reason ? `<small>${esc(o.reason || o.sub)}</small>` : ""}</div>`).join("") || '<p class="ol-muted">当前没有可选项。</p>'}</div>` : button("选择行动", "actor", `data-actor="${esc(current)}"`, disabled(), true)}${button("结束我的行动", "endTurn", `data-actor="${esc(current)}"`, disabled())}</section>`;
     }
     /* ---------- 联机单局（online-rogue.js 在房主那里算好，按收件人发来） ---------- */
-    const rogueAct = (text, cmd, off = false, primary = false) => button(text, "rogueAct", `data-cmd="${esc(JSON.stringify(cmd))}"`, disabled() || off, primary);
+    // 按钮灰掉要写原因：off 传字符串 = 灰掉，并把这句话写在按钮旁边
+    const why = text => text ? `<small class="ol-why">${esc(text)}</small>` : "";
+    const lack = (have, need) => Number(have) < Number(need) ? `还差 ${Math.ceil(Number(need) - Number(have))} 奎支` : false;
+    const rogueAct = (text, cmd, off = false, primary = false) => button(text, "rogueAct", `data-cmd="${esc(JSON.stringify(cmd))}"`, disabled() || !!off, primary) + why(typeof off === "string" ? off : "");
     /** 装件前后对比：只算选中的那一个（房主算好的 smith.installPreviews） */
     function partCompare(r, part, slot) {
       if (!slot || !r.smith || !global.ModCompare) return "";
@@ -514,6 +526,50 @@
       if (!global.BackpackUI || !global.WorkshopData) return;
       BackpackUI.open(() => { const r = view.packet?.rogue; return r ? WorkshopData.viewBackpackModel(r) : null; }, { openWorkshop: id => openWorkshop(id) });
     }
+    /* ---------- 商店 · 买 / 卖页签（shop-sell-ui.js）：视图是房主算好的，这里只画；离开商店（包里没有卖出视图）就回到「买」 ---------- */
+    const arrOf = v => Array.isArray(v) ? v : Array.isArray(v?.rows) ? v.rows : [];
+    /** 联机单局：packet.rogue.shopSell（online-rogue.js · Rogue.shopSellView(r, { kits: mine })）：只有自己的英雄和公用 */
+    const rogueSellView = r => r?.shopSell || null;
+    function sellModelRogue(r, payer) {
+      const heroes = (r.heroes || []).filter(h => !h.dead).map(h => ({ kit: h.kit, name: h.name, purse: h.mine ? h.purse : null, mine: h.mine }));
+      return ShopSellUI.model(rogueSellView(r), { key: "rogue", heroes, mine: k => heroes.some(h => h.kit === k && h.mine), actor: payer,
+        money: k => (heroes.find(h => h.kit === k) || {}).purse ?? null, disabled: disabled() });
+    }
+    function sellModelTrpg(s) {
+      const heroes = ((view.packet?.purse || {}).heroes || []).map(h => ({ kit: h.kit, name: h.name, purse: h.mine ? h.amount ?? null : null, mine: h.mine }));
+      return ShopSellUI.model(view.packet?.shopSell, { key: "trpg", heroes, mine: k => heroes.some(h => h.kit === k && h.mine), actor: shopDraft.payer,
+        money: k => (heroes.find(h => h.kit === k) || {}).purse ?? null, disabled: disabled() });
+    }
+    function sellTabs(key, sellView, buyHtml, modelFn) {
+      if (!global.ShopSellUI) return buyHtml;
+      ShopSellUI.sync(key, !!sellView);
+      const sell = ShopSellUI.tabOf(key) === "sell";
+      return `<div class="ss-host" data-ss-host="${esc(key)}">${ShopSellUI.tabsHtml(key, { sellOff: !sellView })}${sell ? ShopSellUI.html(modelFn()) : buyHtml}</div>`;
+    }
+    /** 卖 / 买回：单局走 rogue.act；跑团是 shopSell / shopBuyback 消息。结果带 payout 时提示钱进了谁的钱包 */
+    async function sellSubmit(cmd) {
+      if (disabled()) return;
+      const trpg = view.mode !== "rogue" && view.packet?.mode !== "rogue";
+      const msg = !trpg ? { type: "rogue.act", command: cmd }
+        : cmd.action === "sellItem" ? { type: "shopSell", kit: cmd.kit, id: cmd.id, qty: cmd.qty, owner: cmd.owner } : { type: "shopBuyback", kit: cmd.kit, token: cmd.token };
+      // 提示不看这次 submit 的回执：房主算好的结果放在包里的 shopSell.last（只有卖的人看得到），observeSellLast 按 seq 只弹一次
+      if (await call(() => api.submit(msg)) && global.Sfx) Sfx.ui("coin");
+    }
+    /** 卖 / 买回的结果：packet.rogue.shopSell.last（单局）或 packet.shopSell.last（跑团）= {seq,kind,by,ok,total,payout,msg}；
+     * 每个 seq 只弹一次（之后的包还带着同一个 last 不再弹）；离开商店 last 变 null 时忘掉记录（seq 不会重复） */
+    let sellSeen = null, sellHadView = false;
+    function observeSellLast() {
+      const sv = (view.packet?.mode === "rogue" ? view.packet?.rogue?.shopSell : view.packet?.shopSell) || null, last = sv ? sv.last || null : null;
+      const appeared = !!sv && !sellHadView;   // 刚进店 / 刚连上：包里已经带着的旧结果不重播
+      sellHadView = !!sv;
+      if (!last) { sellSeen = null; return; }
+      if (appeared || !global.ShopSellUI) { sellSeen = last.seq; return; }
+      if (sellSeen !== null && last.seq <= sellSeen) return;
+      sellSeen = last.seq;
+      const heroes = view.packet?.rogue?.heroes || view.packet?.purse?.heroes || [];
+      toast.textContent = ShopSellUI.toastText(last, k => k === "party" ? "队伍公账" : (heroes.find(h => h.kit === k) || {}).name || k);
+      toast.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { toast.hidden = true; }, 4500);
+    }
     function rogueMarkup(r) {
       const mine = (r.heroes || []).filter(h => h.mine), payer = mine[0] ? mine[0].kit : null, purse = mine[0] ? mine[0].purse : 0;
       const stageName = { board: "任务板", task: "任务途中", camp: "回城休整", boss: "幕末首领", interlude: "幕间", victory: "四幕通关", over: "本局结束" }[r.stage] || "";
@@ -522,7 +578,7 @@
       const heroes = `<section class="ol-rogue-party" aria-label="队伍">${(r.heroes || []).map(h => `<article class="ol-unit ol-ally${h.mine ? " ol-selected" : ""}"><header><h3>${esc(h.name)}</h3><small>Lv${esc(h.level)}${h.pending ? " · 待选升级" : ""}</small></header><small>${esc(h.ownerName)}${h.mine ? "（你）" : ""}</small><p>血 ${esc(h.hp)}/${esc(h.hpMax)} · 经验 ${esc(h.xp)}${h.xpNext ? "/" + esc(h.xpNext) : ""} · <b>${esc(h.purse)} 奎支</b></p><p class="ol-muted">${esc((h.weapons || []).map(w => `${w.name} Lv${w.level} 耐久 ${w.dur}/${w.durMax}`).join("；"))}</p>${(h.items || []).length ? `<p>名下：${esc(h.items.map(x => `${x.name}×${x.qty}`).join("、"))}</p>` : ""}</article>`).join("")}${(r.fallen || []).length ? `<p class="ol-muted">阵亡：${esc(r.fallen.join("、"))}</p>` : ""}${(r.freeItems || []).length ? `<p class="ol-muted">队伍公用：${esc(r.freeItems.map(x => `${x.name}×${x.qty}`).join("、"))}</p>` : ""}</section>`;
       const choice = r.choice ? `<section class="ol-rogue-box" aria-label="升级"><h3>${esc(r.choice.name)} ${esc(r.choice.level)} 级：${esc(r.choice.title)}${r.choice.more > 0 ? ` <small class="ol-muted">还有 ${esc(r.choice.more)} 项待选</small>` : ""}</h3><div class="ol-attr-btns">${r.choice.options.map(o => rogueAct(o.label + (o.hint ? "（" + o.hint + "）" : ""), { action: "choose", kit: r.choice.kit, index: r.choice.index, value: o.value }, false, true)).join("")}</div></section>` : "";
       const v = r.vote || { options: [] };
-      const vote = v.options.length ? `<section class="ol-rogue-box ol-rogue-vote" aria-label="队伍投票"><h3>队伍投票</h3><p class="ol-muted">${esc(v.voted)}/${esc(v.voters)} 人已投。所有在线的人投完按多数决定，平票随机。${v.blocked ? esc(v.blocked) + "。" : ""}</p><ul>${v.options.map(o => `<li>${button((o.mine ? "✔ " : "") + o.label, "rogueVote", `data-option="${esc(o.id)}"`, disabled(), o.mine)}<small>${esc(o.voters.join("、"))}</small></li>`).join("")}</ul>${v.options.some(o => o.mine) ? button("撤回我的票", "rogueUnvote", "", disabled()) : ""}</section>` : "";
+      const vote = v.options.length ? `<section class="ol-rogue-box ol-rogue-vote" aria-label="队伍投票"><h3>队伍投票</h3><p class="ol-muted">需要 ${esc(v.voted)} / ${esc(v.voters)} 人投票。只有在线、分到角色的人算票，旁观者不用投；投完按多数决定，平票随机。${v.spectator ? "你没有分到角色，只能旁观。" : ""}${v.blocked ? esc(v.blocked) + "。" : ""}</p><ul>${v.options.map(o => `<li>${button((o.mine ? "✔ " : "") + o.label, "rogueVote", `data-option="${esc(o.id)}"`, disabled() || !!v.spectator, o.mine)}<small>${esc(o.voters.join("、"))}</small></li>`).join("")}</ul>${v.options.some(o => o.mine) ? button("撤回我的票", "rogueUnvote", "", disabled()) : ""}</section>` : "";
       const last = r.lastVote ? `<p class="ol-muted">上一次队伍决定：${esc(r.lastVote)}</p>` : "";
       const waits = (r.waitingLevel || []).length ? `<p class="ol-muted">等 ${esc(r.waitingLevel.join("、"))} 选升级。</p>` : "";
       const loot = (r.loot || []).map(l => `<section class="ol-rogue-box" aria-label="战利品"><h3>战利品：${esc(l.name)} ×${esc(l.qty)}</h3><p class="ol-muted">${esc(l.source)} · 需求：${esc(l.needs.join("、") || "无")} · 放弃：${esc(l.passes.join("、") || "无")}。在需求的人里抽一个；没人需求就随机给。</p><div class="ol-attr-btns">${(l.mine || []).map(m => m.answer ? `<span>${esc(m.name)}：${m.answer === "need" ? "需求" : "放弃"}</span>` : button(m.name + " 需求", "rogueNeed", `data-loot="${esc(l.no)}" data-kit="${esc(m.kit)}" data-want="1"`, disabled(), true) + button(m.name + " 放弃", "rogueNeed", `data-loot="${esc(l.no)}" data-kit="${esc(m.kit)}" data-want="0"`, disabled())).join("")}</div></section>`).join("");
@@ -530,14 +586,15 @@
       const board = r.board ? `<section class="ol-rogue-box" aria-label="任务板"><h3>任务板</h3><ul>${r.board.map(t => `<li><b>${esc(t.name)}</b>（${esc(t.days)} 天 · 报酬 ${esc(t.kuizhi)} 奎支 · 每人 ${esc(t.xp)} 经验）<br><small>${esc(t.goal)}${t.blocked ? " · " + esc(t.blocked) : ""}</small></li>`).join("")}</ul></section>` : "";
       const task = r.task ? `<section class="ol-rogue-box" aria-label="任务"><h3>${esc(r.task.name)}</h3><p class="ol-muted">${esc(r.task.goal)}</p><ol class="ol-rogue-route">${r.task.nodes.map(n => `<li class="${n.current ? "ol-open" : n.done ? "ol-muted" : ""}">${esc(n.label)}${n.done ? " ✓" : n.current ? " ←" : ""}</li>`).join("")}</ol></section>` : "";
       const pts = r.points;
-      const redeem = pts && pts.redeem && pts.redeem.length ? `<h4>积分兑换（你有 ${esc(pts.points)} 积分，再花 ${esc(pts.next)} 奎支得 1 分）</h4><ul>${pts.redeem.map(it => `<li>${esc(it.name)} · ${esc(it.points)} 积分 ${rogueAct("兑换", { action: "redeem", item: it.id, payer }, pts.points < it.points)}</li>`).join("")}</ul>` : "";
-      const shop = r.shop && payer ? `<section class="ol-rogue-box" aria-label="商店"><h3>商店（你有 ${esc(purse)} 奎支）</h3><ul>${r.shop.map(row => `<li>${esc(row.name)} · ${esc(row.price)} 奎支${row.team ? " · 归队伍公用" : ""} ${rogueAct("买", { action: "buy", key: row.key, qty: 1, payer }, purse < row.price)}</li>`).join("")}</ul>${redeem}</section>` : "";
-      const smith = r.smith && payer ? `<section class="ol-rogue-box" aria-label="工匠"><h3>${esc(r.smith.name)}（你有 ${esc(purse)} 奎支）</h3><ul>${r.smith.upgrades.map(o => `<li>${esc(o.name)} Lv${esc(o.level)} ${o.max ? "已满级" : rogueAct(`升到 ${o.level + 1} 级（${o.cost}）`, { action: "upgradeWeapon", kit: o.kit, smith: r.smith.id }, purse < o.cost)}</li>`).join("")}${r.smith.offers.map(o => `<li>改装件 ${esc(o.name)}<small>${esc(o.text)}</small> ${o.sold ? "已卖出" : rogueAct(`买（${o.price}）`, { action: "buyPart", smith: r.smith.id, index: o.index, payer }, purse < o.price)}</li>`).join("")}</ul></section>` : "";
+      const redeem = pts && pts.redeem && pts.redeem.length ? `<h4>积分兑换（你有 ${esc(pts.points)} 积分，再花 ${esc(pts.next)} 奎支得 1 分）</h4><ul>${pts.redeem.map(it => `<li>${esc(it.name)} · ${esc(it.points)} 积分 ${rogueAct("兑换", { action: "redeem", item: it.id, payer }, pts.points < it.points && `还差 ${it.points - pts.points} 积分`)}</li>`).join("")}</ul>` : "";
+      const buyList = r.shop ? `<ul>${arrOf(r.shop).map(row => `<li>${esc(row.name)} · ${esc(row.price)} 奎支${row.team ? " · 归队伍公用" : ""} ${rogueAct("买", { action: "buy", key: row.key, qty: 1, payer }, lack(purse, row.price))}</li>`).join("")}</ul>${redeem}` : "";
+      const shop = r.shop && payer ? `<section class="ol-rogue-box" aria-label="商店"><h3>商店（你有 ${esc(purse)} 奎支）</h3>${sellTabs("rogue", rogueSellView(r), buyList, () => sellModelRogue(r, payer))}</section>` : "";
+      const smith = r.smith && payer ? `<section class="ol-rogue-box" aria-label="工匠"><h3>${esc(r.smith.name)}（你有 ${esc(purse)} 奎支）</h3><ul>${r.smith.upgrades.map(o => `<li>${esc(o.name)} Lv${esc(o.level)} ${o.max ? "已满级" : rogueAct(`升到 ${o.level + 1} 级（${o.cost}）`, { action: "upgradeWeapon", kit: o.kit, smith: r.smith.id }, lack(purse, o.cost))}</li>`).join("")}${r.smith.offers.map(o => `<li>改装件 ${esc(o.name)}<small>${esc(o.text)}</small> ${o.sold ? "已卖出" : rogueAct(`买（${o.price}）`, { action: "buyPart", smith: r.smith.id, index: o.index, payer }, lack(purse, o.price))}</li>`).join("")}</ul></section>` : "";
       const slots = r.smith ? r.smith.slots || [] : [];
-      const parts = r.parts && r.parts.length && payer ? `<section class="ol-rogue-box" aria-label="改装件"><h3>你的改装件</h3><ul>${r.parts.map((p, i) => `<li>${esc(p.name)} ×${esc(p.have)}<small>${esc(p.text)}</small> ${rogueAct(`卖掉（${p.sell}）`, { action: "sellPart", part: p.id, payer })}${slots.length ? `<select id="ol-rp-${i}" data-ol-cmp="${esc(p.id)}" aria-label="装到哪个槽">${slots.map(x => option(`${x.kit}:${x.slot}`, `${x.name} 槽 ${x.slot + 1}${x.cur ? "（现在：" + x.cur + "）" : ""}`, false)).join("")}</select>${button(`装上（${p.install}）`, "roguePartInstall", `data-part="${esc(p.id)}" data-select="ol-rp-${i}" data-smith="${esc(r.smith.id)}"`, disabled() || purse < p.install)}<span class="pt-cmp" id="ol-rp-${i}-cmp">${partCompare(r, p.id, slots[0])}</span>` : ""}</li>`).join("")}</ul></section>` : "";
+      const parts = r.parts && r.parts.length && payer ? `<section class="ol-rogue-box" aria-label="改装件"><h3>你的改装件</h3><ul>${r.parts.map((p, i) => `<li>${esc(p.name)} ×${esc(p.have)}<small>${esc(p.text)}</small> ${rogueAct(`卖掉（${p.sell}）`, { action: "sellPart", part: p.id, payer })}${slots.length ? `<select id="ol-rp-${i}" data-ol-cmp="${esc(p.id)}" aria-label="装到哪个槽">${slots.map(x => option(`${x.kit}:${x.slot}`, `${x.name} 槽 ${x.slot + 1}${x.cur ? "（现在：" + x.cur + "）" : ""}`, false)).join("")}</select>${button(`装上（${p.install}）`, "roguePartInstall", `data-part="${esc(p.id)}" data-select="ol-rp-${i}" data-smith="${esc(r.smith.id)}"`, disabled() || !!lack(purse, p.install))}${why(lack(purse, p.install))}<span class="pt-cmp" id="ol-rp-${i}-cmp">${partCompare(r, p.id, slots[0])}</span>` : ""}</li>`).join("")}</ul></section>` : "";
       const filled = slots.filter(x => x.cur);
       const unmount = r.smith && filled.length ? `<section class="ol-rogue-box" aria-label="拆改装件"><h3>已装的改装件</h3><ul>${filled.map(x => `<li>${esc(x.name)} 槽 ${esc(x.slot + 1)}：${esc(x.cur)} ${rogueAct("拆下（不要钱）", { action: "removePart", kit: x.kit, slot: x.slot, smith: r.smith.id })}</li>`).join("")}</ul></section>` : "";
-      const clinic = r.clinic && r.clinic.length ? `<section class="ol-rogue-box" aria-label="诊所"><h3>诊所（你有 ${esc(purse)} 奎支）</h3><ul>${r.clinic.map(c => `<li>${esc(c.name)} ${c.cost ? rogueAct(`治疗到满血（${c.cost}）`, { action: "healHero", kit: c.kit }, purse < c.cost) : "满血"}</li>${c.cyber ? cyberMarkup(c, purse) : ""}`).join("")}</ul></section>` : "";
+      const clinic = r.clinic && r.clinic.length ? `<section class="ol-rogue-box" aria-label="诊所"><h3>诊所（你有 ${esc(purse)} 奎支）</h3><ul>${r.clinic.map(c => `<li>${esc(c.name)} ${c.cost ? rogueAct(`治疗到满血（${c.cost}）`, { action: "healHero", kit: c.kit }, lack(purse, c.cost)) : "满血"}</li>${c.cyber ? cyberMarkup(c, purse) : ""}`).join("")}</ul></section>` : "";
       const cwEntry = global.CyberwareUI && cyberwareSrc() ? `<section class="ol-rogue-box ol-cw-entry" aria-label="义体"><div class="ol-attr-btns">${button("诊所 · 义体", "rogueCyberware", "", false, true)}</div></section>` : "";
       const wk = r.workshop;
       // 工坊 / 背包：按钮打开浮层（workshop-ui.js / backpack-ui.js，和房主同一套渲染器；数据是 viewFor 的 craft / bag / materialBar …）
@@ -613,7 +670,7 @@
     const chatRows = () => (hs().chat || []).filter(m => m && typeof m.text === "string");
     const clock = at => { if (!at) return ""; const d = new Date(at); return isNaN(d) ? "" : `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
     function chatListMarkup(rows) {
-      return rows.map(m => `<li class="${m.operatorId && m.operatorId === own() ? "ol-mine" : ""}${m.roll ? " ol-roll" : ""}${m.tier ? " ol-tier-" + m.tier : ""}${m.secret ? " ol-secret" : ""}${m.title ? " ol-title-row" : ""}"><div><b>${esc(m.name || m.operatorName || playerName(m.operatorId))}</b><small>${esc(clock(m.at))}</small></div><p>${esc(m.text)}</p></li>`).join("") || '<li class="ol-muted">还没有人说话。消息所有人都能看到，并一直保留在记录里。</li>';
+      return rows.map(m => `<li class="${m.operatorId && m.operatorId === own() ? "ol-mine" : ""}${m.roll ? " ol-roll" : ""}${m.tier ? " ol-tier-" + m.tier : ""}${m.secret ? " ol-secret" : ""}${m.title ? " ol-title-row" : ""}"><div><b>${esc(m.name || m.operatorName || playerName(m.operatorId))}</b><small>${esc(clock(m.at))}</small></div><p${artAttr(m.text)}>${esc(m.text)}</p></li>`).join("") || '<li class="ol-muted">还没有人说话。消息所有人都能看到，并一直保留在记录里。</li>';
     }
     /** 更新列表（只换列表内容，不碰输入框）；原来在底部就继续贴底 */
     function fillList(list, markup) {
@@ -649,14 +706,33 @@
       if (force || sideKeys.chat !== chatMarkup) { sideKeys.chat = chatMarkup; fillList(side.querySelector(".ol-side-chat"), chatMarkup); }
       side.querySelector(".ol-side-form button[type=submit]").disabled = chatSending || paused();
     }
+    /** 聊天框：Enter 发送，Shift+Enter 换行；输入法选字时按的 Enter 不算 */
+    function chatEnter(event) {
+      if (event.key !== "Enter" || event.shiftKey || event.isComposing || event.keyCode === 229 || event.target.tagName !== "TEXTAREA") return;
+      event.preventDefault();
+      event.target.form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    }
+    /** 聊天框跟着内容长高，最多 160px，再多就在框里滚动 */
+    function fitChatBox(box) {
+      if (box?.tagName !== "TEXTAREA") return;
+      box.style.height = "auto"; box.style.height = Math.min(box.scrollHeight + 2, 160) + "px";
+    }
+    /** 多行字符画（有行首空格或全角空格）：不自动折行，CSS 按最长一行的字宽（--cols，全角算 1）缩小字号；普通消息不加 */
+    function artAttr(t) {
+      if (typeof t !== "string" || !t.includes("\n") || !/(?:^|\n)[ \t　]|　/.test(t)) return "";
+      const wide = /[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]/;
+      const cols = Math.max(...t.split("\n").map(line => Array.from(line).reduce((w, ch) => w + (wide.test(ch) || ch.codePointAt(0) > 0xffff ? 1 : 0.55), 0)));
+      return ` class="ol-art" style="--cols:${Math.ceil(cols) + 0.5}"`;
+    }
     async function sendChatText(input, button) {
-      const text = input.value.trim();
-      if (!text || chatSending || paused()) return;
+      // 原样发给房主，由房主统一整理空白（多行消息要保留第一行行首的空格）
+      const text = input.value;
+      if (!text.trim() || chatSending || paused()) return;
       chatSending = true; if (button) button.disabled = true;
       try {
         const result = await api.submit({ type: "chat", text });
         if (result?.ok === false) { notice = result.error || "消息没有发出去"; render(); }
-        else input.value = "";
+        else { input.value = ""; fitChatBox(input); }
       } catch (error) { notice = error.message || "消息没有发出去"; render(); }
       finally { chatSending = false; if (button) button.disabled = paused(); }
     }
@@ -673,12 +749,13 @@
           const nav = document.createElement("nav"); nav.className = "ol-host-tabs"; nav.setAttribute("role", "tablist");
           nav.innerHTML = `<button type="button" role="tab" data-host-tab="log" class="ol-tab">${label}</button><button type="button" role="tab" data-host-tab="chat" class="ol-tab">小队<span class="ol-badge" hidden></span></button>`;
           const box = document.createElement("div"); box.className = "ol-host-chat";
-          box.innerHTML = `<ol class="ol-side-chat" aria-live="polite"></ol><form class="ol-side-form"><button type="button" class="ol-button ol-dice" data-roll-open="1" title="选角色和熟练项掷 d100（可以暗骰）">🎲</button><button type="button" class="ol-button ol-dice" data-title-open="1" title="在所有玩家画面中间打出大字（比如「援军来了」）">📢</button><input maxlength="500" autocomplete="off" aria-label="小队消息" placeholder="说点什么…"><button type="submit" class="ol-button ol-primary">发送</button></form>`;
+          box.innerHTML = `<ol class="ol-side-chat" aria-live="polite"></ol><form class="ol-side-form"><button type="button" class="ol-button ol-dice" data-roll-open="1" title="选角色和熟练项掷 d100（可以暗骰）">🎲</button><button type="button" class="ol-button ol-dice" data-title-open="1" title="在所有玩家画面中间打出大字（比如「援军来了」）">📢</button><textarea rows="1" maxlength="500" autocomplete="off" enterkeyhint="send" aria-label="小队消息" title="Enter 发送，Shift+Enter 换行" placeholder="说点什么…"></textarea><button type="submit" class="ol-button ol-primary">发送</button></form>`;
           root.prepend(nav); root.appendChild(box);
           const m = { root, nav, box, tab: def, key: "", seen: null, unread: 0, remove() { nav.remove(); box.remove(); root.classList.remove("ol-chat-mode"); } };
-          nav.addEventListener("click", e => { const b = e.target.closest("[data-host-tab]"); if (!b) return; m.tab = b.dataset.hostTab; paintHost(m, true); if (m.tab === "chat") box.querySelector("input").focus({ preventScroll: true }); });
-          box.addEventListener("keydown", e => e.stopPropagation());
-          box.addEventListener("submit", e => { e.preventDefault(); sendChatText(box.querySelector("input"), box.querySelector("button[type=submit]")); });
+          nav.addEventListener("click", e => { const b = e.target.closest("[data-host-tab]"); if (!b) return; m.tab = b.dataset.hostTab; paintHost(m, true); if (m.tab === "chat") box.querySelector("textarea").focus({ preventScroll: true }); });
+          box.addEventListener("keydown", e => { e.stopPropagation(); chatEnter(e); });
+          box.addEventListener("input", e => fitChatBox(e.target));
+          box.addEventListener("submit", e => { e.preventDefault(); sendChatText(box.querySelector("textarea"), box.querySelector("button[type=submit]")); });
           hostMounts.push(m);
         }
       }
@@ -771,22 +848,23 @@
       const list = questList();
       const now = Object.fromEntries(list.map(q => [q.id, { status: q.status, done: q.steps.filter(s => s.state === "done").length, name: q.name, q }]));
       if (questSeen) {
-        let msg = "";
+        const msgs = [];   // 一个包里可能同时有好几条变动：都收集起来，合成一句提示
         for (const id of Object.keys(now)) {
           const a = questSeen[id], b = now[id];
-          if (!a) msg = `新任务：「${b.name}」（${b.q.category === "main" ? "主线" : b.q.category === "personal" ? "个人" : "支线"}）`;
-          else if (a.status !== b.status && b.status === "done") msg = `任务完成：「${b.name}」${b.q.reward.xp ? ` · 每人 +${b.q.reward.xp} 经验` : ""}${b.q.reward.kuizhi ? ` · +${b.q.reward.kuizhi} 奎支` : ""}`;
-          else if (a.status !== b.status && b.status === "failed") msg = `任务失败：「${b.name}」`;
-          else if (a.status !== b.status && b.status === "active") msg = `接下任务：「${b.name}」`;
+          if (!a) msgs.push(`新任务：「${b.name}」（${b.q.category === "main" ? "主线" : b.q.category === "personal" ? "个人" : "支线"}）`);
+          else if (a.status !== b.status && b.status === "done") msgs.push(`任务完成：「${b.name}」${b.q.reward.xp ? ` · 每人 +${b.q.reward.xp} 经验` : ""}${b.q.reward.kuizhi ? ` · +${b.q.reward.kuizhi} 奎支` : ""}`);
+          else if (a.status !== b.status && b.status === "failed") msgs.push(`任务失败：「${b.name}」`);
+          else if (a.status !== b.status && b.status === "active") msgs.push(`接下任务：「${b.name}」`);
           else if (b.done > a.done) {
             const st = b.q.steps[b.done - 1] || {};
-            msg = `任务更新：「${b.name}」推进到第 ${b.done + 1} 步${st.xp ? ` · 每人 +${st.xp} 经验` : ""}${st.kuizhi ? ` · +${st.kuizhi} 奎支` : ""}`;
+            msgs.push(`任务更新：「${b.name}」推进到第 ${b.done + 1} 步${st.xp ? ` · 每人 +${st.xp} 经验` : ""}${st.kuizhi ? ` · +${st.kuizhi} 奎支` : ""}`);
           }
         }
-        if (msg) { toast.textContent = "📜 " + msg; toast.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { toast.hidden = true; }, 4500); }
+        if (msgs.length) { toast.textContent = "📜 " + msgs.join("；"); toast.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { toast.hidden = true; }, 4500); }
       }
       questSeen = now;
-      if (questBoxOpen && !bagBox.hidden) bagBox.innerHTML = questMarkup();   // 面板开着：跟着更新
+      // 任务日志和背包 / 资料共用 bagBox：只在容器里真的还是任务日志时才跟着更新，别把正在看的背包盖掉
+      if (questBoxOpen && !bagBox.hidden && bagBox.querySelector(".ol-quest-card")) bagBox.innerHTML = questMarkup();
       if (bagBox.hidden) questBoxOpen = false;
     }
     /** 长休结算：房主那边长休完，玩家画面也弹（单局在 rogue.lastRest，跑团在 rest） */
@@ -941,7 +1019,7 @@
         html(dock, button(`${view.roomCode || "房间"} · ${paused() ? "重连中" : "消息与成员"}${privUnread && !view.isHost ? ` · ${privUnread} 条新消息` : ""}`, "openRoom", privUnread && !view.isHost ? 'data-alert="1"' : "", false) +
           (view.isHost && view.mode !== "rogue" && ["exploration", "ended"].includes(view.screen) ? button("角色分配", "openAssign", "", false) : ""), "dock");
         observeMessages();
-        if (!view.isHost) { observeQuests(); observeCamp(); observeRest(); observeShop(); }
+        if (!view.isHost) { observeQuests(); observeCamp(); observeRest(); observeShop(); observeSellLast(); }
       }
       // 联机单局的房主：大厅里先要在单局画面选队伍，房间面板不挡着；队伍选好（有角色可分）时自动打开一次
       const rogueHost = view.active && view.isHost && view.mode === "rogue";
@@ -1007,7 +1085,7 @@
       else if (!acting) hint = view.packet?.manualPhase || view.manualPhase ? "主持人正在操控敌人。" : hs().phase === "enemy" ? "敌人行动中。" : "等待开始。";
       else if (!mine.includes(cur)) hint = `等待 ${curUnit ? curUnit.name : "队友"}${curUnit && hs().units ? `（${playerName((hs().units.find(u => u.id === cur) || {}).owner)}）` : ""} 行动。`;
       else if (!choices) hint = "正在取技能…";
-      else hint = `${curUnit ? curUnit.name : ""}　选择技能（1–9）。悬停技能看说明，空格结束行动。`;
+      else hint = `${curUnit ? curUnit.name : ""}　${global.OnlineBattle && global.OnlineBattle.isTouch && global.OnlineBattle.isTouch() ? "选择技能。点技能看说明。" : "选择技能（1–9）。悬停技能看说明，空格结束行动。"}`;
       const field = fieldAsk();
       if (field) {
         // 有对应单位的选项 → value 是单位 id（战场上亮起、编号）；其余 value 为空 → 提示栏按钮
@@ -1134,9 +1212,14 @@
       const key = event.target.dataset.field; if (key && Object.hasOwn(form, key)) form[key] = event.target.value; }
     function change(event) {
       input(event); if (event.target.dataset.field === "mode") render(); if (event.target.dataset.assign) assignments[event.target.dataset.assign] = event.target.value;
+      if (event.target.dataset.transfer) transferDraft[event.target.dataset.transfer] = event.target.value;
       if (event.target.dataset.partyKit) partyDraft = [...document.querySelectorAll("[data-party-kit]")].filter(x => x.checked).map(x => x.dataset.partyKit);
     }
     async function click(event) {
+      if (global.ShopSellUI && event.target.closest?.("[data-ss-host]")) {
+        let cmd = null;
+        if (ShopSellUI.handle(event, c => { cmd = c; }, () => { lastMarkup.supplies = ""; render(); paintSupplies(); })) { if (cmd) await sellSubmit(cmd); return; }
+      }
       const b = event.target.closest("[data-online]"); if (!b || b.disabled) return;
       switch (b.dataset.online) {
         case "createTab": entry = "create"; render(); break;
@@ -1165,6 +1248,7 @@
         }
         case "openAssign": panelOpen = true; render(); document.getElementById("ol-assign-head")?.scrollIntoView({ block: "start" }); break;
         case "assign": await call(() => api.assign(Object.fromEntries((view.heroes || []).map(h => [h.id, assignments[h.id] || h.owner || own()])))); assignments = {}; break;
+        case "transfer": if (typeof api.transfer === "function") { const hero = b.dataset.hero; await call(() => api.transfer(hero, transferDraft[hero] || own())); transferDraft = {}; } break;
         case "takeOver": if (typeof api.takeOver === "function") await call(() => api.takeOver(b.dataset.player)); break;
         case "releaseSeat":
           if (typeof api.releaseSeat !== "function") break;
@@ -1352,7 +1436,7 @@
       const AF = global.AttackFx;
       const dx = t.x - a.x, dy = t.y - a.y, d = Math.hypot(dx, dy) || 1, ux = dx / d, uy = dy / d;
       const reach = o.reach >= 999 ? d : Math.max(16, Math.min(d - Math.min(a.w, t.w) * .5, o.reach || (o.heavy ? 112 : 92)));
-      const k = o.speed || 1, token = String(Math.random());
+      const k = o.speed || 1, token = String(fxRandom());
       node.dataset.olDash = token; node.style.zIndex = "5";
       node.style.transition = `transform ${90 * k}ms cubic-bezier(.2, .7, .3, 1)`;
       node.style.transform = `translate(${(-ux * 12).toFixed(1)}px, ${(-uy * 12).toFixed(1)}px)`;
@@ -1388,14 +1472,14 @@
         dash: (id, to, o) => { const n = cardFor(id); return dashCard(n, rectOf(n), to, o); },
         recoil: (id, to, px) => {
           const n = cardFor(id), a = rectOf(n); if (!n || !a || !to) return;
-          const dx = to.x - a.x, dy = to.y - a.y, d = Math.hypot(dx, dy) || 1, k = px || 8, token = String(Math.random());
+          const dx = to.x - a.x, dy = to.y - a.y, d = Math.hypot(dx, dy) || 1, k = px || 8, token = String(fxRandom());
           n.dataset.olDash = token; n.style.transition = "transform 70ms ease-out";
           n.style.transform = `translate(${(-dx / d * k).toFixed(1)}px, ${(-dy / d * k).toFixed(1)}px)`;
           settleCard(n, token, 110, 220);
         },
         nudge: (id, dx, dy, ms) => {
           const n = cardFor(id); if (!n) return;
-          const token = String(Math.random()); ms = ms || 240;
+          const token = String(fxRandom()); ms = ms || 240;
           n.dataset.olDash = token; n.style.transition = `transform ${ms * .4}ms cubic-bezier(.2, .8, .3, 1)`;
           n.style.transform = `translate(${dx}px, ${dy}px)`;
           settleCard(n, token, ms * .9, 260);

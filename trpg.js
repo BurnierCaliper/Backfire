@@ -105,12 +105,13 @@ function trpgProfLevel(u, prof) {
 function trpgCraftOdds(kit, itemId, diff, helper) {
   const it = craftItem(itemId), u = trpgHeroes().find(h => h.kit === kit);
   if (!it || !u) return null;
+  if (u.dead) return null;   // 死亡角色不能制作（主持人复活后才能做）
   diff = ROGUE_CHECKS.diffs[diff] ? diff : it.diff;
   const level = trpgProfLevel(u, it.prof);
   const hp = (u.layers || []).reduce((a, l) => a + (Number(l.current) || 0), 0), max = (u.layers || []).reduce((a, l) => a + (Number(l.max) || 0), 0);
   const perks = checkPerksFor(u.kit, it.prof, hp * 2 < max);
   const hu = helper && helper !== kit ? trpgHeroes().find(h => h.kit === helper) : null;
-  const helped = !!(hu && trpgProfLevel(hu, it.prof) > 0);
+  const helped = !!(hu && !hu.dead &&trpgProfLevel(hu, it.prof) > 0);
   const adv = !!perks.adv || helped, dis = !!perks.dis && !adv;
   const base = ROGUE_CHECKS.chance[level][["easy", "normal", "hard", "extreme"].indexOf(diff)] || 0;
   let chance = adv ? 1 - (1 - base) * (1 - base) : dis ? base * base : base;
@@ -118,21 +119,49 @@ function trpgCraftOdds(kit, itemId, diff, helper) {
   return { kit, item: it.id, name: u.name, prof: it.prof, diff, diffName: ROGUE_CHECKS.diffs[diff].name, level, base, chance: base ? chance : 0,
     adv, dis, reroll: !!perks.reroll, helped, hours: CRAFT_RULES.hours[diff] };
 }
-/** 制作一样：c = { kit, item, diff?, helper?, result: "roll"（程序掷）/ "ok" / "fail"（记下玩家掷的结果）}。材料要背包里有实物（金属也是） */
+/** 制作一样：c = { kit, item, diff?, helper?, result: "roll"（程序掷）/ "ok" / "fail"（记下玩家掷的结果）}。材料要背包里有实物（金属也是）。
+ *  同时做好几样：c = { jobs: [上面那种…] }，大家一起开工，时间只推进一次、按最久的那件算（设计文档：休息时大家同时各做各的） */
 function trpgCraft(c) {
   c = c || {};
+  if (Array.isArray(c.jobs)) {
+    const out = [], busy = new Set();
+    let hours = 0;
+    const nameOf = (kit) => (trpgHeroes().find(h => h.kit === kit) || {}).name || kit;
+    c.jobs.filter(Boolean).forEach(j => {
+      // 设计文档第 5 节：打下手的人这段时间不能做自己的东西；做东西的人和打下手的人都算忙，同一个人同一段时间只做一件事
+      if (busy.has(j.kit)) { out.push(`${nameOf(j.kit)} 同时只能做一样东西。`); return; }
+      if (j.helper && busy.has(j.helper)) { out.push(`${nameOf(j.helper)} 已经在忙了。`); return; }
+      if (j.helper && j.helper === j.kit) { out.push(`${nameOf(j.kit)} 不能给自己打下手。`); return; }
+      busy.add(j.kit);
+      if (j.helper) busy.add(j.helper);
+      const r = trpgCraftOne(j);
+      out.push(...r.notes);
+      hours = Math.max(hours, r.hours);
+    });
+    return out.concat(trpgPassHours(hours));
+  }
+  const r = trpgCraftOne(c);
+  return r.notes.concat(trpgPassHours(r.hours));
+}
+/** 做一样但不推进时间：返回 { notes, hours }（没做成 hours 为 0） */
+function trpgCraftOne(c) {
   const it = craftItem(c.item);
-  if (!it) return ["没有这个配方。"];
-  if (!trpgKnowsRecipe(it.id)) return [`还不会做${it.name}（在工坊页教会配方）。`];
+  if (!it) return { notes: ["没有这个配方。"], hours: 0 };
+  if (!trpgKnowsRecipe(it.id)) return { notes: [`还不会做${it.name}（在工坊页教会配方）。`], hours: 0 };
   const o = trpgCraftOdds(c.kit, it.id, c.diff, c.helper);
-  if (!o) return ["没有这名角色。"];
+  if (!o) {
+    const d = trpgHero(c.kit);
+    return { notes: [d && d.dead ? `${d.name} 已死亡，不能制作。` : "没有这名角色。"], hours: 0 };
+  }
+  const hd = c.helper ? trpgHero(c.helper) : null;
+  if (hd && hd.dead) return { notes: [`${hd.name} 已死亡，不能打下手。`], hours: 0 };
   const rc = CRAFT_RECIPES[it.id];
   const lack = Object.keys(rc).filter(id => bagCount(id) < rc[id]);
-  if (lack.length) return ["材料不够：" + lack.map(id => `${ITEM_CATALOG[id].name} 差 ${rc[id] - bagCount(id)}`).join("，") + "。"];
+  if (lack.length) return { notes: ["材料不够：" + lack.map(id => `${ITEM_CATALOG[id].name} 差 ${rc[id] - bagCount(id)}`).join("，") + "。"], hours: 0 };
   let ok, rollText = "";
   if (c.result === "ok" || c.result === "fail") ok = c.result === "ok";
   else {
-    if (!o.base) return [`${o.name} 没有「${it.prof}」熟练，做不了${o.diffName}的东西。`];
+    if (!o.base) return { notes: [`${o.name} 没有「${it.prof}」熟练，做不了${o.diffName}的东西。`], hours: 0 };
     const r = typeof Hotseat !== "undefined" ? Hotseat.rollCheck({ base: o.base, adv: o.adv, dis: o.dis, reroll: o.reroll }) : { ok: Math.random() < o.chance, rolls: [] };
     ok = r.ok;
     rollText = r.rolls.length ? `d100 ${r.rolls.map(x => x.roll == null ? x.label : (x.label ? x.label + " " : "") + x.roll).join("，")} → ` : "";
@@ -144,7 +173,7 @@ function trpgCraft(c) {
   const out = [`${o.name}${helperName} 制作${it.name}（${o.diffName} · 成功率 ${Math.round(o.chance * 1000) / 10}%）：${rollText}${ok ? "成功" : "失败"}。` +
     (ok ? `用掉 ${used}。` : `损失 ${used}，壳体留着。`)];
   if (ok) bagAdd(it.id, 1);
-  return out.concat(trpgPassHours(o.hours));
+  return { notes: out, hours: o.hours };
 }
 function trpgSalvage(itemId) {
   const y = salvageYield(itemId);
@@ -216,11 +245,13 @@ function trpgPayWith(payer, fn) {
   if (!payer || payer === TRPG_PARTY_PURSE) return fn();
   if (!trpgHeroes().some(h => h.kit === payer)) return ["没有这名角色。"];
   const pool = Number(state.kuizhi) || 0;
-  state.kuizhi = trpgPurse(payer);
+  const start = trpgPurse(payer);
+  state.kuizhi = start;
   try {
     const out = fn();
     trpgPurseSet(payer, state.kuizhi);
-    if (Array.isArray(out)) out.push(`（由 ${trpgPurseName(payer)} 付，钱包剩 ${trpgPurse(payer)}）`);
+    // 没花钱（维修 / 制作 / 教配方这类不收钱的操作，或者操作失败）就不写「由谁付」
+    if (Array.isArray(out) && trpgPurse(payer) !== start) out.push(`（由 ${trpgPurseName(payer)} 付，钱包剩 ${trpgPurse(payer)}）`);
     return out;
   } finally { state.kuizhi = pool; }
 }
@@ -376,7 +407,8 @@ function trpgShortRest(kits) {
 function trpgLongRest(plan) {
   TRPG.camp = null;
   const r = ledgerLongRest(plan || {}, []);
-  if (typeof trpgTaskRestEscort === "function") trpgTaskRestEscort(r.notes);
+  // 补给不够只能硬撑（ok:false）时队员没恢复，护送 VIP 也一样不恢复
+  if (r.ok !== false && typeof trpgTaskRestEscort === "function") trpgTaskRestEscort(r.notes);
   if (r.report) TRPG.lastRest = r.report;   // 长休结算画面：主持人本机弹，联机玩家收到 rest 包（online-view.js · projectRest）
   return r.notes;
 }
@@ -439,11 +471,15 @@ function trpgPickFeat(kit, id, fullId) {
   const u = trpgHeroes().find(h => h.kit === kit);
   if (!u) return ["没有这个角色。"];
   if (!(Number(u.featPoints) > 0)) return [`${u.name} 没有可以分配的专长。`];
-  if (typeof featChoicesFor !== "function" || featChoicesFor(u, u.level).indexOf(id) < 0) return ["这项专长现在不能选。"];
+  // 每个专长点按自己的来源等级判断能选哪层；用满足条件的最低一点，高等级的点留着
+  const pts = featPointLevelsOf(u);
+  const at = typeof featChoicesFor !== "function" ? -1 : pts.findIndex(L => featChoicesFor(u, L).indexOf(id) >= 0);
+  if (at < 0) return ["这项专长现在不能选。"];
   const f = FEATS[id];
   if (id === "dualclass" && featFullOptions(u).indexOf(fullId) < 0) return ["兼修要选一张专长①–③的职责涉猎专长。"];
   u.feats = (u.feats || []).concat(id);
   if (id === "dualclass") u.featFull = (u.featFull || []).concat(fullId);
+  u.featPointLevels = pts.filter((_, i) => i !== at);
   u.featPoints -= 1;
   if (typeof applyLevelStats === "function") applyLevelStats(u);
   ledgerCapture();
@@ -475,6 +511,11 @@ function trpgUpgradeInfo(owner, kit) {
   }));
   return { lv, next, max: false, mats, labor: rc.labor || 0, canSelf: next <= U.selfMaxLevel, enough: mats.every(m => m.have >= m.need) };
 }
+/** 找工匠升级的默认加工费：参考费用，带巧手匠人的队伍打八折（主持人另填费用则按填的） */
+function trpgSmithFee(info) {
+  const mul = typeof featHaggleMul === "function" ? featHaggleMul(trpgHeroes(), 1) : 1;
+  return Math.round((Number(info.labor) || 0) * mul);
+}
 /** mode：self 自己在工作站（≤4 级，只耗材料）/ smith 找工匠（材料 + 费用）/ gm 主持人直接升（不耗） */
 function trpgUpgradeWeapon(ownerKit, kit, mode, fee) {
   const owner = trpgHeroes().find(h => h.kit === ownerKit);
@@ -486,7 +527,7 @@ function trpgUpgradeWeapon(ownerKit, kit, mode, fee) {
   if (mode !== "gm") {
     if (mode === "self" && !info.canSelf) return [`${wname} 升 ${info.next} 级要找武器工匠，自己在工作站只能升到 ${HANDBOOK_WEAPON_UPGRADE.selfMaxLevel} 级。`];
     if (!info.enough) return [`材料不够：${info.mats.map(m => `${m.name} ${m.have}/${m.need}`).join("、")}。`];
-    const pay = mode === "smith" ? Math.max(0, Math.floor(Number(fee != null ? fee : info.labor) || 0)) : 0;
+    const pay = mode === "smith" ? Math.max(0, Math.floor(Number(fee != null ? fee : trpgSmithFee(info)) || 0)) : 0;
     if (pay > (Number(state.kuizhi) || 0)) return [`奎支不够付加工费：要 ${pay}，手里只有 ${Number(state.kuizhi) || 0}。`];
     info.mats.forEach(m => bagAdd(m.id, -m.need));
     if (pay) state.kuizhi -= pay;

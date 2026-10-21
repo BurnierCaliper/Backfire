@@ -1,14 +1,26 @@
 /* 背包、掉落、道具使用。计算器和游戏共用。 */
 
 const ITEM_CATALOG = {
-  medkit:     { name: "简易医疗包", hint: "治疗一名友方 1d4+6 内层生命", target: "ally", combat: true },
-  clinic:     { name: "诊所医疗包", hint: "治疗一名友方 2d4+6 内层生命", target: "ally", combat: true },
+  // heal：治疗骰（n 个 s 面骰 + flat），用道具 / 休整用道具 / 专长「拉一把」都读这一处（itemHealSpec）
+  medkit:     { name: "简易医疗包", hint: "治疗一名友方 1d4+6 生命（从内层往外补，可以治到外层）", target: "ally", combat: true, heal: { n: 1, s: 4, flat: 6 } },
+  clinic:     { name: "诊所医疗包", hint: "治疗一名友方 2d4+6 生命（从内层往外补，可以治到外层）", target: "ally", combat: true, heal: { n: 2, s: 4, flat: 6 } },
   stim:       { name: "强心注射剂", hint: "自身恢复 16 生命，消耗一些坚毅生命（不会致死）", target: "self", combat: true },
   steroid:    { name: "强化注射剂", hint: "自身 ATK +3 至战斗结束，消耗一些坚毅生命（不会致死）", target: "self", combat: true },
   bomb_e:     { name: "简易电手榴弹", hint: "对一个区域全部单位造成 1d6+6 电击", target: "zone", combat: true },
   bomb_a:     { name: "简易酸液瓶", hint: "对一个区域全部单位造成 1d6+6 酸液", target: "zone", combat: true },
   shockbomb:  { name: "冲击炸弹", hint: "对一个区域全部单位造成 2 击破", target: "zone", combat: true }
 };
+
+/** 医疗道具的治疗骰；没有 heal 的（如只能自己用的强心注射剂）不算医疗道具，返回 null */
+function itemHealSpec(itemId) {
+  const h = ITEM_CATALOG[itemId] && ITEM_CATALOG[itemId].heal;
+  return h && Number(h.n) > 0 && Number(h.s) > 0 ? { n: Number(h.n), s: Number(h.s), flat: Number(h.flat) || 0 } : null;
+}
+/** 掷一件医疗道具的治疗骰 → { total, text }；不是医疗道具返回 null */
+function rollItemHeal(itemId) {
+  const h = itemHealSpec(itemId);
+  return h ? takeDice(h.n, h.s, h.flat) : null;
+}
 
 /* ===== 效果道具（作者 10/15 定稿，docs/workshop-design.md）=====
  * 游戏里现有的每一种效果对应一个道具，共 36 个。全部花附赠动作（game.js / battle-commands.js 的 __item）。
@@ -91,48 +103,119 @@ EFFECT_ITEMS.forEach(it => {
  * 结构材料（金属 → 赫心结晶）照旧只用于武器升级；道具制作另用这 7 种。队伍公用（supply：联机时不按需求分配，直接进公用背包）。
  *   cls：chem 化学 / elec 电子 / bio 生物；tier：1 常见、2 精制；price 参考价（黑市按 CRAFT_BLACK_MARKET 倍出售） */
 const CRAFT_MATERIALS = [
-  { id: "cm_scrap",  name: "废料",       price: 100, cls: "shell", tier: 0, hint: "道具的壳体。机械敌人掉落；拆解道具也能拿回" },
-  { id: "cm_chem",   name: "化工残液",   price: 200, cls: "chem",  tier: 1, hint: "化学 · 常见。酸 / 火系敌人掉落" },
-  { id: "cm_gas",    name: "燃气浓缩物", price: 600, cls: "chem",  tier: 2, hint: "化学 · 精制。精英、首领，第二采矿场的燃气机械掉落" },
-  { id: "cm_coil",   name: "废线圈",     price: 200, cls: "elec",  tier: 1, hint: "电子 · 常见。电 / 能量系机械掉落" },
-  { id: "cm_cell",   name: "电芯",       price: 600, cls: "elec",  tier: 2, hint: "电子 · 精制。精英、首领，第三采矿场、巨人城机械掉落" },
-  { id: "cm_scale",  name: "沙鱼鳞",     price: 200, cls: "bio",   tier: 1, hint: "生物 · 常见。带沙尘层的沙漠生物掉落" },
-  { id: "cm_spirit", name: "星灵组织",   price: 600, cls: "bio",   tier: 2, hint: "生物 · 精制。带星灵层的敌人（触灵、陨体衍蛛、弦蚣……）掉落" }
+  { id: "cm_scrap",  name: "废料",       price: 100, cls: "shell", tier: 0, hint: "道具的壳体。外城区机器人看守、狂徒等机械与人形敌人常掉；拆解道具也能拿回" },
+  { id: "cm_chem",   name: "化工残液",   price: 200, cls: "chem",  tier: 1, hint: "化学 · 常见。采矿场的投料无人机、矿场看守机器人，自爆小车与各路警卫队队长常掉" },
+  { id: "cm_gas",    name: "燃气浓缩物", price: 600, cls: "chem",  tier: 2, hint: "化学 · 精制。采矿场的燃气收集机、播撒者、蚁型特殊戒备兵种等精英多掉，亡命之王必掉" },
+  { id: "cm_coil",   name: "废线圈",     price: 200, cls: "elec",  tier: 1, hint: "电子 · 常见。外城区机器人看守、安保巡逻车、巡检浮标常掉，高压巡逻艇、飞碟触灵掉得更多" },
+  { id: "cm_cell",   name: "电芯",       price: 600, cls: "elec",  tier: 2, hint: "电子 · 精制。高压巡逻艇、巨人、观测鸦等精英多掉，杂兵偶尔也有" },
+  { id: "cm_scale",  name: "沙鱼鳞",     price: 200, cls: "bio",   tier: 1, hint: "生物 · 常见。沙漠的沙灵、沙鱼、大沙灵 / 活沙常掉，穴鸦、尘虫偶尔掉" },
+  { id: "cm_spirit", name: "星灵组织",   price: 600, cls: "bio",   tier: 2, hint: "生物 · 精制。第三采矿场的陨体衍蛛、陨体弦蚣，机甲触灵、观测鸦多掉，沙灵聚合体必掉" }
 ];
 const CRAFT_BLACK_MARKET = 3;   // 道具材料普通商店不卖，黑市按参考价的几倍卖
-/* 打倒一个敌人掉多少材料：按档次。common / refined 是每个材料类别各掷一次的概率（≥1 表示保底这么多份）；scrap 是废料 [最少, 最多]（有装甲 / 护盾的机械才掉） */
-const CRAFT_DROPS = {
-  minion: { common: 0.4, refined: 0.03, scrap: [0, 1] },
-  elite:  { common: 1,   refined: 0.4,  scrap: [1, 2] },
-  boss:   { common: 2,   refined: 1,    scrap: [2, 3] }
-};
 CRAFT_MATERIALS.forEach(m => { ITEM_CATALOG[m.id] = { name: m.name, hint: m.hint, combat: false, supply: true, material: "craft" }; });
-/** 这个敌人属于哪些材料类别：酸 / 火 → 化学；电 / 能量 → 电子；沙尘层 → 生物（沙鱼鳞）；星灵层 → 生物（星灵组织）；装甲 / 护盾 → 机械（废料） */
-function craftClassesOf(u) {
-  const el = String((u.suggest && u.suggest.element) || u.element || "physical");
-  const types = (u.layers || []).map(l => l.type);
-  return {
-    chem: el === "acid" || el === "fire",
-    elec: el === "electric" || el === "energy",
-    sand: types.includes("sand"),
-    spirit: types.includes("spirit"),
-    mech: types.includes("armor") || types.includes("shield")
-  };
+
+/* ===== 敌人掉落表（制作材料）：每个敌人登记自己能掉什么 —— 改掉落只改这一处 =====
+ *   键是敌人 kit（单位上的 u.kit）；值是 { 材料 id: 期望份数 }。
+ *   期望份数 p < 1：有 p 的概率掉 1 份；p ≥ 1：保底 floor(p) 份，小数部分再掷一次多 1 份。
+ *   主题：机械掉废料 / 线圈 / 电芯，酸火系掉化工残液 / 燃气浓缩物，沙漠生物掉沙鱼鳞，星灵 / 异星生物掉星灵组织。
+ *   稀有度：常见料（废料、化工残液、废线圈、沙鱼鳞）杂兵 0.1–0.35；精制料（燃气浓缩物、电芯、星灵组织）杂兵 0.03–0.15；
+ *   精英明显更高（合计 1.5–2.5 份）；首领有保底。目标：4 个杂兵一场期望 1–3 份。
+ *   不在表里的 kit 不掉（召唤物另外排除，见 rogue.js · rollMaterialDrops / app.js · trpgEnemyMaterials）。 */
+const ENEMY_DROPS = {
+  // —— 天网安保（外城区 / 巨人城）：机械 + 电子 ——
+  guard_sword:  { cm_scrap: 0.25, cm_coil: 0.25, cm_cell: 0.05 },
+  guard_gun:    { cm_coil: 0.25, cm_scrap: 0.15, cm_cell: 0.08 },
+  patrol_car:   { cm_coil: 0.25, cm_scrap: 0.2, cm_cell: 0.06 },
+  boomcar:      { cm_scrap: 0.2, cm_chem: 0.2, cm_gas: 0.06 },          // 炸药车
+  buoy:         { cm_coil: 0.25, cm_scrap: 0.15, cm_cell: 0.08 },
+  swarm:        { cm_scrap: 0.2, cm_coil: 0.15 },                       // 三只一组
+  patrolboat:   { cm_coil: 0.9, cm_cell: 0.8, cm_scrap: 0.4 },
+  // —— 第一采矿场：用酸的安保 ——
+  dumpdrone:    { cm_chem: 0.3, cm_scrap: 0.2, cm_gas: 0.04 },
+  mine_guard:   { cm_chem: 0.25, cm_scrap: 0.25, cm_gas: 0.04 },
+  spreader:     { cm_chem: 1.05, cm_gas: 0.5, cm_scrap: 0.4 },
+  ant_guard:    { cm_chem: 1.05, cm_gas: 0.5, cm_cell: 0.25 },
+  // —— 第二采矿场：用火的燃气机械（燃气浓缩物的主要来源） ——
+  mine_overseer: { cm_chem: 0.25, cm_gas: 0.12, cm_scrap: 0.1 },
+  flint_sweeper: { cm_gas: 0.15, cm_chem: 0.2, cm_scrap: 0.15 },
+  gas_collector: { cm_gas: 1.15, cm_chem: 0.65, cm_scrap: 0.4 },
+  ant_hunter:    { cm_gas: 0.65, cm_chem: 0.8, cm_cell: 0.25 },
+  // —— 第三采矿场：能量机械（电芯）+ 异星生物（星灵组织） ——
+  alarm_bot:        { cm_coil: 0.25, cm_cell: 0.12, cm_scrap: 0.15 },
+  meteor_miner:     { cm_cell: 0.12, cm_spirit: 0.08, cm_scrap: 0.2 },
+  meteor_spider:    { cm_spirit: 0.15, cm_coil: 0.12 },                 // 两只一组
+  meteor_centipede: { cm_spirit: 0.15, cm_cell: 0.08, cm_coil: 0.1 },
+  // —— 警卫队（有机体 + 装备） ——
+  captain_wolf:   { cm_chem: 0.65, cm_cell: 0.4, cm_scrap: 0.5 },        // 冷凝罐 → 化工残液
+  captain_ox:     { cm_chem: 0.65, cm_cell: 0.4, cm_scrap: 0.5 },
+  captain_lizard: { cm_chem: 0.8, cm_scale: 0.5, cm_gas: 0.25 },
+  // —— 镇压队（外城区，赤牙麾下的火属性部队）：燃料 + 护盾发生器 ——
+  riot_baton:   { cm_scrap: 0.2, cm_chem: 0.1, cm_cell: 0.08 },          // 防暴盾 → 电芯
+  riot_rifle:   { cm_chem: 0.2, cm_gas: 0.08, cm_scrap: 0.1 },
+  riot_molotov: { cm_chem: 0.25, cm_gas: 0.1 },                          // 燃烧瓶
+  riot_flamer:  { cm_gas: 1.0, cm_chem: 0.65, cm_cell: 0.3 },            // 喷火器的燃料罐
+  riot_captain: { cm_chem: 0.65, cm_gas: 0.4, cm_cell: 0.4, cm_scrap: 0.3 },
+  // —— 盗匪（外城区）：搜身拿到的破烂 ——
+  thug_knife:  { cm_scrap: 0.2, cm_chem: 0.08 },
+  thug_hammer: { cm_scrap: 0.2, cm_coil: 0.08 },
+  bandit_boss: { cm_chem: 0.8, cm_gas: 0.4, cm_cell: 0.2, cm_scrap: 0.4 },
+  outlaw_king: { cm_chem: 2, cm_gas: 1, cm_cell: 1, cm_scrap: 1 },
+  // —— 沙灵（沙漠） ——
+  sand_beast:     { cm_scale: 0.3, cm_spirit: 0.03 },
+  sand_human:     { cm_scale: 0.3, cm_spirit: 0.03 },
+  bigsand:        { cm_scale: 1.15, cm_spirit: 0.3 },
+  livesand:       { cm_scale: 1.15, cm_spirit: 0.3 },
+  dustbody:       { cm_scale: 1.05, cm_chem: 0.4, cm_scrap: 0.4 },
+  sand_aggregate: { cm_scale: 3, cm_spirit: 1, cm_scrap: 1 },
+  // —— 触灵（天网设施 / 巨人城）：机械 + 星灵 ——
+  mecha_mg: { cm_scrap: 0.8, cm_spirit: 0.65, cm_cell: 0.4 },
+  mecha_gl: { cm_scrap: 0.65, cm_spirit: 0.65, cm_gas: 0.45 },
+  ufo_body: { cm_cell: 2, cm_coil: 2, cm_spirit: 1, cm_scrap: 1 },
+  ufo_leg:  {},                                                          // 飞碟的部件，算在本体里
+  // —— 巨人城 ——
+  giant: { cm_scrap: 0.8, cm_cell: 0.65, cm_spirit: 0.3 },
+  // —— 野生 / 沙漠生物 ——
+  crow:            { cm_scale: 0.18, cm_chem: 0.08 },                    // 4–6 只一群
+  sandfish_lead:   { cm_scale: 1.3, cm_scrap: 0.4, cm_spirit: 0.25 },
+  sandfish_drive:  { cm_scale: 0.35, cm_scrap: 0.1 },
+  sandfish_ambush: { cm_scale: 0.35, cm_scrap: 0.1 },
+  dust_bug:  { cm_scale: 0.1 },                                          // 中立生物：小概率
+  tube_worm: { cm_chem: 0.06, cm_scale: 0.04 },
+  // —— 古代造物（沙漠）：沙漠里的电芯来源 ——
+  watchcrow: { cm_cell: 0.65, cm_spirit: 0.65, cm_coil: 0.5 },
+  // —— 首领（首领池） ——
+  chixia: { cm_scale: 2, cm_gas: 1, cm_cell: 1, cm_chem: 1 }
+};
+/** 预设 id 和场上单位 kit 不一样的（飞碟 Boss 组生成的是 ufo_body） */
+const ENEMY_DROP_ALIAS = { ufo_boss: "ufo_body" };
+/** 一个敌人的掉落表 → [{ id, name, chance }]（chance = 期望份数）；不认识的 → [] */
+function enemyDropTable(kit) {
+  const t = ENEMY_DROPS[ENEMY_DROP_ALIAS[kit] || kit] || {};
+  return Object.keys(t).filter(id => t[id] > 0).map(id => ({ id, name: (ITEM_CATALOG[id] || {}).name || id, chance: t[id] }));
 }
-/** 掷一个敌人的材料掉落 → [{ id, qty }]（用调用方装好的随机数） */
-function rollCraftMaterials(u) {
-  if (!u || u.isPlayer) return [];
-  const rank = typeof enemyRankOf === "function" ? enemyRankOf(u) : "minion";
-  const D = CRAFT_DROPS[rank] || CRAFT_DROPS.minion;
-  const c = craftClassesOf(u), out = {};
-  const add = (id, n) => { if (n > 0) out[id] = (out[id] || 0) + n; };
-  const roll = (p) => p >= 1 ? Math.floor(p) : (Math.random() < p ? 1 : 0);
-  if (c.mech) add("cm_scrap", D.scrap[0] + Math.floor(Math.random() * (D.scrap[1] - D.scrap[0] + 1)));
-  if (c.chem) { add("cm_chem", roll(D.common)); add("cm_gas", roll(D.refined)); }
-  if (c.elec) { add("cm_coil", roll(D.common)); add("cm_cell", roll(D.refined)); }
-  if (c.sand) add("cm_scale", roll(D.common));
-  if (c.spirit) add("cm_spirit", roll(Math.max(D.refined, D.common * 0.5)));
-  return Object.keys(out).map(id => ({ id, qty: out[id] }));
+/** 一组敌人掉的材料 → [{ id, qty }]（按材料表顺序）。enemies：kit 字符串或单位（u.kit）；rng：() => [0,1)，不传用 Math.random（单局外面包了 withRng） */
+function rollEnemyDrops(enemies, rng) {
+  const r = typeof rng === "function" ? rng : Math.random;
+  const total = {};
+  (enemies || []).forEach(e => {
+    const kit = typeof e === "string" ? e : e && !e.isPlayer ? e.kit : null;
+    if (!kit) return;
+    enemyDropTable(kit).forEach(d => {
+      const n = Math.floor(d.chance) + (r() < d.chance - Math.floor(d.chance) ? 1 : 0);
+      if (n > 0) total[d.id] = (total[d.id] || 0) + n;
+    });
+  });
+  return CRAFT_MATERIALS.map(m => m.id).filter(id => total[id]).map(id => ({ id, qty: total[id] }));
+}
+/** 战后算掉落的敌人：打倒的（dead）、不是召唤物 / 铁壁 */
+function enemyDropFoes(units) {
+  return (units || []).filter(u => u && !u.isPlayer && u.dead && !u.summonedBy && u.kit !== "ironwall");
+}
+/** 期望份数（不掷骰）：{ 材料 id: 期望 }，给模拟 / 测试用 */
+function enemyDropExpected(enemies) {
+  const out = {};
+  (enemies || []).forEach(e => enemyDropTable(typeof e === "string" ? e : e && e.kit).forEach(d => { out[d.id] = (out[d.id] || 0) + d.chance; }));
+  return out;
 }
 
 /* ===== 制作配方（docs/workshop-design.md 第 3、5 节）=====
@@ -346,15 +429,8 @@ function useRepairKit(actor, target, kit, notes) {
     notes.push(`${actor.name} 用维修工具包修好倒地的 ${row.name}：恢复 ${used} 点生命重新站起来，用掉 ${used} 点维修量（还剩 ${repairPoints()} 点）。`);
     return notes;
   }
-  if (row.need <= 0) { notes.push(`${row.name} 耐久已满。`); return notes; }
-  const before = row.dur;
-  const used = spendRepairPoints(row.need);
-  restoreDurability(row.kit, used);
-  // 修好的武器回到主人手里——除非它正以武器人在场（以前修在场的武器人会把主人也设成持械，两边同时拿着）
-  if (row.owner && row.owner.weaponHeld === false && !row.owner.dead && before <= 0 && typeof heldWeaponKit === "function" &&
-      !(typeof weaponOutOnField === "function" && weaponOutOnField(row.kit))) row.owner.weaponHeld = true;
-  notes.push(`${actor.name} 用维修工具包修 ${row.name}：耐久 ${before} → ${weaponDur(row.kit)}，用掉 ${used} 点维修量（还剩 ${repairPoints()} 点）。`);
-  return notes;
+  // 修耐久和「修理」面板命令走同一套（ledgerRepair）：同样的消耗和恢复量，战斗中修好的武器这一场仍按受损算
+  return ledgerRepair(row.kit, notes);
 }
 /** 道具自己扣坚毅生命（强心 / 强化注射剂）：不会致死，坚毅最少留 1。返回实际扣掉的量 */
 function selfShpCost(u, n) {
@@ -376,7 +452,10 @@ function useItemOn(actor, itemId, target, zone) {
     const why = itemUseError(actor, itemId, target, zone);
     if (why) { notes.push(why); notes.unused = true; return notes; }   // 没用掉：不扣附赠动作（battle-commands.js）
     bagAdd(itemId, -1, notes);
-    useEffectItem(actor, spec.effect, target, zone, notes);
+    // 战-M3：道具造成的伤害 / 挂的状态也记使用者（击杀归属 #114），和手榴弹一致
+    const prevUser = state._itemUserId;
+    state._itemUserId = actor && actor.isPlayer ? actor.id : null;
+    try { useEffectItem(actor, spec.effect, target, zone, notes); } finally { state._itemUserId = prevUser; }
     return notes;
   }
   // 投掷类道具（手榴弹、酸液瓶、冲击炸弹）：危墙 / 关着的门倒塌 / 打开之前影响不到对面，扔过去没用，道具不用掉
@@ -385,11 +464,12 @@ function useItemOn(actor, itemId, target, zone) {
     const block = lineBlocked(actor.zone, z);
     if (block) { notes.push(`${actor.name} 的${spec.name}影响不到 ${z} 区：${block}`); notes.unused = true; return notes; }
   }
+  // 强心注射剂靠治疗恢复生命：起身中（靠坚毅生命战斗）治疗不起作用，不让用，也不扣坚毅和道具
+  if (itemId === "stim" && actor.upOnShp) { notes.push(`${actor.name} 起身中，强心注射剂的治疗不起作用，没有使用。`); notes.unused = true; return notes; }
   bagAdd(itemId, -1, notes);
-  if (itemId === "medkit" || itemId === "clinic") {
+  if (itemHealSpec(itemId)) {
     const t = target || actor;
-    const n = itemId === "clinic" ? 2 : 1;
-    const r = takeDice(n, 4, 6);
+    const r = rollItemHeal(itemId);
     // 和其他治疗一样从内往外补，可以治到外层（作者定）
     const got = typeof healUnit === "function" ? healUnit(t, r.total) : r.total;
     notes.push(`${actor.name} 对 ${t.name} 使用${spec.name}，掷出 ${r.text}，实际恢复 ${Math.floor(got || 0)}` +
@@ -423,6 +503,8 @@ function useItemOn(actor, itemId, target, zone) {
         return;
       }
       if (itemId === "shockbomb") {
+        // 下潜中的单位范围攻击打不到（和投掷罐一样）：震荡弹直接走 dealBreak，没经过下潜判定
+        if (u.submerged) { notes.push(`${u.name} 下潜中，没有被波及。`); return; }
         if (typeof dealBreak === "function") dealBreak(u, 2, "physical", notes, spec.name);
       } else {
         const ele = itemId === "bomb_e" ? "electric" : "acid";
@@ -493,6 +575,7 @@ function itemApplyStatus(actor, u, key, notes) {
   u.statuses = u.statuses || {};
   if (key === "burn") {
     if (typeof grantBurn === "function") grantBurn(u, 1, notes);
+    if (typeof markStatusOwner === "function" && actor && actor.isPlayer) markStatusOwner(u, "burn", actor.id);   // 战-M2：击杀归属，灼烧算挂它的人
     if (u.self !== "burn") notes.push(`${u.name} 灼烧 → ${u.statuses.burn} 层。`);
   } else if (key === "unstable") {
     if (typeof applyUnstable === "function" && applyUnstable(u, notes)) {
@@ -503,6 +586,7 @@ function itemApplyStatus(actor, u, key, notes) {
     if (key === "chase") u.chasers = (u.chasers || []).filter(id => id !== actor.id).concat(actor.id);
     if (key === "high") u.highApplyTurn = state.turnNo;
     u.statuses[key] = true;
+    if (typeof markStatusOwner === "function" && actor && actor.isPlayer) markStatusOwner(u, key, actor.id);   // 击杀归属：谁挂的状态
     if (key === "shockwave" && typeof syncShockwave === "function") syncShockwave(u, notes);
     notes.push(`${u.name} 获得${EFFECT_STATUS_CN[key] || key}。`);
   }
@@ -514,11 +598,12 @@ function itemApplyStatus(actor, u, key, notes) {
 /** 闪光震撼弹：失衡晕眩。首领无效（itemUseError 已拦）；10 级起的精英按首领规则只推进 1 个晕眩标记（imbalanceLine 里记） */
 function itemStun(u, notes) {
   if (u.stunned) { notes.push(`${u.name} 已经在失衡中。`); return; }
-  if (u.noPosture) { notes.push(`${u.name} 没有架势，不会失衡。`); return; }
+  if (u.noPosture || u.trainingDummy) { notes.push(`${u.name} 没有架势，不会失衡。`); return; }
   u.stunned = true;
   notes.push(typeof imbalanceLine === "function" ? imbalanceLine(u) : `${u.name} 失衡。`);
   if (typeof endSelfOnStun === "function") endSelfOnStun(u, notes);
   if (typeof queueAssistAttack === "function") queueAssistAttack(null, u);
+  if (typeof bossQuickRecover === "function") bossQuickRecover(u, notes);   // 10 级起精英标记没攒满：失衡立刻恢复，和其他来源一样
 }
 function useEffectItem(actor, it, target, zone, notes) {
   if (it.target === "zone") {
@@ -532,6 +617,8 @@ function useEffectItem(actor, it, target, zone, notes) {
     const units = (state.units || []).filter(u => itemPresent(u) && Number(u.zone) === z && u.kit !== "ironwall" && (!it.alliesOnly || u.isPlayer));
     if (!units.length) notes.push(`${z} 区没有单位。`);
     units.forEach(u => {
+      // 下潜中的单位范围攻击打不到（effects.js · 下潜）；投掷罐不是谐波，也不例外
+      if (u.submerged) { notes.push(`${u.name} 下潜中，没有被波及。`); return; }
       const shield = !it.alliesOnly && typeof aoeShieldFor === "function" ? aoeShieldFor(u, actor) : null;   // 屏障只挡敌方扔过来的
       if (shield) { notes.push(`${u.name} 被${shield.name}护住，没受影响。`); return; }
       itemApplyStatus(actor, u, it.key, notes);

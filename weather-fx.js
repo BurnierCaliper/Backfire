@@ -3,6 +3,7 @@
  * 游戏画面每次刷新天气时调 WeatherFx.sync（game.js · applyEnv）。 */
 (function (root) {
   "use strict";
+  const fxRand = () => (typeof fxRandom === "function" ? fxRandom() : Math.random());   // 画面效果的随机数：不动战斗用的种子随机数（run.js · fxRandom）
   const PHASE_STEPS = ["trough", "balance", "peak", "balance"];   // 相位天气 0..3：波谷 / 平衡 / 波峰 / 平衡（app.js · phaseWeatherName）
   /** 相位阶段 → data-phase-step；不是相位天气返回 "" */
   function phaseStepName(weather, step) {
@@ -32,13 +33,13 @@
       const host = doc().querySelector(".wfx-acid");
       if (!host) { acidTimer = null; return; }
       if (!doc().hidden && host.childElementCount < 40) {
-        const r = doc().createElement("b"), big = Math.random() < .25;
-        const sz = big ? 70 + Math.random() * 60 : 16 + Math.random() * 46;
-        r.style.cssText = `left:${(Math.random() * 100).toFixed(2)}%;top:${(Math.random() * 100).toFixed(2)}%;width:${sz | 0}px;height:${(sz * (.82 + Math.random() * .1)) | 0}px;--d:${(1.6 + Math.random() * 1.6 + sz / 120).toFixed(2)}s`;
+        const r = doc().createElement("b"), big = fxRand() < .25;
+        const sz = big ? 70 + fxRand() * 60 : 16 + fxRand() * 46;
+        r.style.cssText = `left:${(fxRand() * 100).toFixed(2)}%;top:${(fxRand() * 100).toFixed(2)}%;width:${sz | 0}px;height:${(sz * (.82 + fxRand() * .1)) | 0}px;--d:${(1.6 + fxRand() * 1.6 + sz / 120).toFixed(2)}s`;
         r.addEventListener("animationend", () => r.remove());
         host.appendChild(r);
       }
-      acidTimer = setTimeout(spawn, 60 + Math.random() * Math.random() * 420);
+      acidTimer = setTimeout(spawn, 60 + fxRand() * fxRand() * 420);
     };
     spawn();
   }
@@ -47,7 +48,7 @@
   function startThunder() {
     if (thunderOn || reduced()) return;
     thunderOn = true;
-    const R = Math.random;
+    const R = fxRand;
     const zoneFlash = () => {
       const host = doc().querySelector(".wfx-thunder");
       if (!host) return false;

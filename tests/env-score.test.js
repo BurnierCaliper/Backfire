@@ -12,6 +12,7 @@ function field(opt) {
   c.startCombat();
   const st = c.S.state;
   st.units.forEach(u => { u.zone = 1; });
+  c.findKit("tou", st.units).zone = 2;   // 灯不和敌人同区：不然敌人被决一死战拦着，只打得到灯
   st.units.filter(u => u.isPlayer).forEach(u => { u.bonus = 0; u.layers = [{ type: "flesh", current: 300, max: 300 }]; });
   const foe = st.units.find(u => !u.isPlayer);
   foe.layers = [{ type: "flesh", current: 900, max: 900 }];

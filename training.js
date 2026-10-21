@@ -84,7 +84,11 @@
       if (o.fields[z]) setZoneField(z, o.fields[z]);
       if (o.high[z]) S.fields[z].highland = true;
     });
-    const spawn = spawnEnemyGroup;
+    // 战-M4：假人和精英牛都不带个体值（和 BattleSim.setup 一样关掉），同等级的布置完全一样
+    const spawn = (...args) => {
+      ENEMY_IV.off++;
+      try { return spawnEnemyGroup(...args); } finally { ENEMY_IV.off--; }
+    };
     const dummy = spawn("thug_knife", level, 1, 2)[0];
     dummy.name = DUMMY_NAME;
     const ox = spawn("captain_ox", level, 4, 2)[0];
@@ -102,7 +106,8 @@
     S.units.filter(u => u.isPlayer).forEach(u => { u.zone = 1; });
     S.dptBank = 0;   // 补血之前假人已经掉的血
     S.dptScrap = kit === "kolt" ? { every: 3, type: "shield", lost: spawn("captain_ox", level, 4, 1)[0].layers[0].max } : null;
-    S.training = { kit, level, opts: o, turn: 0, turnStart: 0, per: [] };
+    // 假人原始的层（种类和最大值）：聚焦抹层会把层写成 0/0 或直接移走，补满时按这个重建
+    S.training = { kit, level, opts: o, turn: 0, turnStart: 0, per: [], dummyLayers: dummy.layers.map(l => ({ type: l.type, max: l.max })) };
     return { dummy };
   }
 
@@ -112,12 +117,17 @@
   const damage = S => (Number(S.dptBank) || 0) + dummyLost(S);
   /** 假人掉到一半以下：补满，掉的血记进总伤害（也会顺手把假人从「倒下」里拉回来） */
   function refillDummy(S) {
+    const spec = S.training && S.training.dummyLayers;
     dummies(S).forEach(u => {
-      const max = (u.layers || []).reduce((a, l) => a + (Number(l.max) || 0), 0);
+      // 架势无限：不管什么效果动过，每次结算后补回满、清掉失衡
+      u.def = u.defMax = DUMMY_DEF; u.stunned = false; u._imbalanceLock = false;
+      const lost = spec && !(u.layers || []).every((l, i) => spec.length === u.layers.length && l.type === spec[i].type && l.max === spec[i].max && !l.sealed);
+      const max = spec ? spec.reduce((a, l) => a + l.max, 0) : (u.layers || []).reduce((a, l) => a + (Number(l.max) || 0), 0);
       const cur = (u.layers || []).reduce((a, l) => a + Math.max(0, Number(l.current) || 0), 0);
-      if (!u.dead && !u._removed && cur >= max * REFILL_AT) return;
+      if (!lost && !u.dead && !u._removed && cur >= max * REFILL_AT) return;
       S.dptBank = (Number(S.dptBank) || 0) + (max - cur);
-      u.layers.forEach(l => { l.current = l.max; });
+      if (spec) u.layers = spec.map(l => ({ type: l.type, current: l.max, max: l.max })); else u.layers.forEach(l => { l.current = l.max; });
+      u.focuses = [];
       u.dead = false; u.dying = false; u._removed = false; u.hidden = false;
     });
   }
@@ -161,7 +171,7 @@
       el.addEventListener("click", e => {
         const b = e.target.closest("button[data-tr]");
         if (!b) return;
-        if (b.dataset.tr === "restart") start(Training.kit, Training.level, Training.opts);
+        if (b.dataset.tr === "restart") restart();
         if (b.dataset.tr === "config") open();
         if (b.dataset.tr === "exit") root.location.reload();
         if (b.dataset.tr === "fold") { el.classList.toggle("folded"); paint(); }
@@ -184,6 +194,13 @@
       + `<table style="width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;margin:6px 0">${rows}</table>`
       + `<div>前 ${TURNS} 回合合计 <b style="color:#ffd56b">${Math.round(first8)}</b>${per.length > TURNS ? ` · 全部 ${Math.round(total)}` : ""}</div>`
       + `<div style="display:flex;gap:6px;margin-top:8px"><button class="g-train-btn" data-tr="restart">重新开始</button><button class="g-train-btn" data-tr="config">换布置</button><button class="g-train-btn" data-tr="exit">离开训练场</button></div>`);
+  }
+
+  /** 顶栏「重新开始」：在训练场里就重开这一场训练（返回 true）；不在训练场返回 false，交给普通战斗处理 */
+  function restart() {
+    if (!Training.active) return false;
+    start(Training.kit, Training.level, Training.opts);
+    return true;
   }
 
   function start(kit, level, opts) {
@@ -247,7 +264,7 @@
     if (dlg.showModal) dlg.showModal(); else dlg.setAttribute("open", "");
   }
 
-  const Training = { active: false, kit: null, level: 10, opts: null, DEFAULT_OPTS, normOpts, optsText, HEROES, TURNS, setupField, refillDummy, injectScrap, damage, tick, start, open, DUMMY_NAME };
+  const Training = { active: false, kit: null, level: 10, opts: null, DEFAULT_OPTS, normOpts, optsText, HEROES, TURNS, setupField, refillDummy, injectScrap, damage, tick, start, restart, open, DUMMY_NAME };
   root.Training = Training;
 
   if (doc) {

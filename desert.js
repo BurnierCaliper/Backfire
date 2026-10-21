@@ -330,12 +330,36 @@ function sandFishPlan(u) {
   if (!isSandFish(u) || u.stunned) return null;
   const night = desertNight();
   const hungry = night || totalHp(u) < totalMaxHp(u) * DESERT.hungryBelow;
-  const prey = desertPrey().filter(p => p.detected && !coralAvoid(u, p.zone));
+  // 追猎只挑走得到的猎物：隔着危墙 / 关着的门 / 空隙、或要踏进深渊的，路径算不出来就换一个（都不行就交给常规行动）
+  const route = (p) => {
+    if (Number(u.zone) === Number(p.zone) || typeof zonePath !== "function") return [Number(u.zone), Number(p.zone)];
+    return zonePath(Number(u.zone), Number(p.zone), (a, b) => {
+      const g = typeof getGap === "function" ? getGap(a, b) : { type: "open" };
+      if (g.type === "wall" || (g.type === "door" && !g.open)) return false;
+      if (g.type === "void" && !u.flying) return false;
+      return u.flying || !(state.fields && state.fields[b] && state.fields[b].abyss);
+    });
+  };
+  const prey = desertPrey().filter(p => p.detected && !coralAvoid(u, p.zone) && route(p));
   if (hungry && prey.length && (u.ap || 0) > 0) {
     const d = (p) => zoneDist(Number(u.zone), Number(p.zone), state.zoneMode);
     const p = prey.sort((x, y) => d(x) - d(y) || totalHp(x) - totalHp(y))[0];
     const sid = FISH_MAIN_SKILL[u.kit];
-    if (sid) {
+    if (sid && d(p) > 0) {
+      // 猎物不在同区：先走过去（以前直接付行动点出手、原地咬空，夜晚每回合空过）。
+      // 杂兵走路花行动点、精英用附赠；付不起或路上有沙珊瑚就不走，改看别的行动
+      const rank = typeof enemyRankOf === "function" ? enemyRankOf(u) : "minion";
+      const canMove = !u.noMove && u.self !== "frost" && (rank === "minion" ? (u.ap || 0) >= 1 : (u.bonus || 0) >= 1);
+      const path = route(p);
+      const dest = path && path.length > 1 ? Number(path[1]) : null;
+      if (canMove && dest != null && !coralAvoid(u, dest)) {
+        return {
+          thunk: () => { state.attackerId = u.id; doMove(u, dest); },
+          meta: { actorId: u.id, skillName: `移动到 ${dest} 区` },
+          ai: { kind: "move", dest, target: p }
+        };
+      }
+    } else if (sid) {
       return {
         thunk: () => { state.attackerId = u.id; state.targetId = p.id; runSkill(sid); },
         meta: { actorId: u.id, targetId: p.id, skillName: `${u.name} 捕食 ${p.name}` },

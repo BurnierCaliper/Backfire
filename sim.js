@@ -95,7 +95,7 @@ const BattleSim = (function () {
     } else {
       if (typeof Chain !== "undefined") Chain.clear();
       (opt.enemies || []).forEach(row => {
-        spawnEnemyGroup(row.id, Number(row.lv) || level, partyN, row.zone, row.iv).forEach(u => state.units.push(u));
+        spawnEnemyGroup(row.id, Number(row.lv) || level, partyN, row.zone, row.iv, row.race).forEach(u => state.units.push(u));
       });
     }
   }

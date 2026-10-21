@@ -73,11 +73,12 @@ const Rogue = (function () {
     return C.extraActLevels[run.act - C.acts - 1] || C.extraActLevels[C.extraActLevels.length - 1];
   }
   /** 本幕此刻的敌人等级：随本幕已用天数从「起」涨到「止」 */
-  function enemyLevel(run, bonus) {
+  function enemyLevel(run, bonus, over) {
     if (run.growth) return Math.max(1, partyLevel(run) + (bonus || 0));
     const [a, b] = levelRange(run);
     const t = Math.min(1, (run.actDay || 0) / Math.max(1, C.daysPerAct));
-    return Math.max(a, Math.min(b, Math.round(a + (b - a) * t) + (bonus || 0)));
+    // over：允许超过本幕「止」几级（精英战用 C.eliteOverCap，其他战斗不超）
+    return Math.max(a, Math.min(b + (over || 0), Math.round(a + (b - a) * t) + (bonus || 0)));
   }
 
   /* ---------- 角色 ---------- */
@@ -208,7 +209,7 @@ const Rogue = (function () {
     if (opt.daily) {
       if (opt.solo || opt.growth) throw new Error("每日挑战不能和单人模式 / 长线养成一起开。");
       const m = /^daily-(\d{4}-\d{2}-\d{2})$/.exec(String(run.seed || ""));
-      run.daily = { date: m ? m[1] : dailyDate(opt.date), offers: {} };
+      run.daily = { date: m ? m[1] : dailyDate(opt.date), offers: {}, party: run.party.map(h => h.kit) };   // 开局队伍：阵亡后 party 会变，记录用这份
       run.featLog = [];      // 每次专长选择：{ key, kit, level, offered, picked }（选取率 = 被选 / 出现）
     }
     if (opt.growth) {
@@ -700,7 +701,9 @@ const Rogue = (function () {
     }
     if (p.type === "prof") {
       const have = heroProfs(h);
-      const opts = PROF_LIST.filter(n => (have[n] || 0) < PROF_MAX)
+      // 同一组（多面手的三项）已经选过的不能再选
+      const taken = p.group ? ((h.profGroups || {})[p.group] || []) : [];
+      const opts = PROF_LIST.filter(n => (have[n] || 0) < PROF_MAX && taken.indexOf(n) < 0)
         .map(n => ({ value: n, label: have[n] ? `${n} ${have[n]} → ${have[n] + 1} 级` : `${n}（新学）`, hint: profCategory(n) }));
       // 已有的排前面（升级），新学的按手册顺序
       return opts.filter(o => have[o.value]).concat(opts.filter(o => !have[o.value]));
@@ -764,6 +767,12 @@ const Rogue = (function () {
     } else if (p.type === "prof") {
       const have = heroProfs(h);
       have[value] = (have[value] || 0) + 1;
+      if (p.group) {
+        h.profGroups = Object.assign({}, h.profGroups);
+        h.profGroups[p.group] = (h.profGroups[p.group] || []).concat(value);
+        // 这一组选完了就清掉记录
+        if (!h.pending.some((q, i) => i !== index && q.group === p.group)) delete h.profGroups[p.group];
+      }
       notes.push(`${heroName(kit)} 熟练项「${value}」${have[value] > 1 ? "升到 " + have[value] + " 级" : "（新学，一级）"}。`);
     } else if (p.type === "feat") {
       if (run.daily) dailyNotePick(run, kit, value);   // 每日挑战：记下这次选了哪个（在加进 feats 之前，按出现的那一行找）
@@ -892,7 +901,7 @@ const Rogue = (function () {
       enc.features = withRng(key + ":field", () => rollBattlefield(run, false, enc.zoneMode));
       return {
         kind: "elite", title: `${run.task.name} · ${tg.name}`,
-        party: partyKits, encounter: enc, level: enemyLevel(run, run.task.diff + C.eliteLevelBonus), seed: key, before, retreat: true
+        party: partyKits, encounter: enc, level: enemyLevel(run, run.task.diff + C.eliteLevelBonus, C.eliteOverCap), seed: key, before, retreat: true
       };
     }
     const enc = withRng(key, () => {
@@ -906,7 +915,7 @@ const Rogue = (function () {
     return {
       kind: node.type,
       title: `${run.task.name} · 第 ${run.task.index + 1} 站${node.type === "elite" ? "（精英）" : ""}`,
-      party: partyKits, encounter: enc, level: enemyLevel(run, bonus), seed: key, before, retreat: true
+      party: partyKits, encounter: enc, level: enemyLevel(run, bonus, node.type === "elite" ? C.eliteOverCap : 0), seed: key, before, retreat: true
     };
   }
 
@@ -922,7 +931,12 @@ const Rogue = (function () {
   /** 战斗结束后调用。outcome：win / lose / retreat */
   function finishBattle(run, outcome) {
     const notes = [];
+    if (run.stage !== "task" && run.stage !== "boss") throw new Error("现在不在战斗中");
     const boss = run.stage === "boss";
+    if (!boss && !run.ambush) {
+      const cur = currentNode(run);
+      if (!cur || (cur.type !== "battle" && cur.type !== "elite")) throw new Error("当前节点不是战斗");
+    }
     // 首领战不能撤退（rogue-data.js · bossRetreat）：规则层也拒绝，撤退不能算击败首领（以前只靠界面拦）
     if (boss && outcome === "retreat") throw new Error("首领战不能撤退");
     // 单人：这场没用完的支援次数带到之后的战斗
@@ -1048,19 +1062,17 @@ const Rogue = (function () {
     bagAdd(id, qty);
     notes.push(`${source ? source + "：" : ""}获得 ${ITEM_CATALOG[id].name} ×${qty}。`);
   }
-  /** 打赢之后打倒的敌人掉制作材料（items.js · rollCraftMaterials）：合在一起记一行，进背包（材料是队伍公用的） */
+  /** 打赢之后打倒的敌人掉制作材料（items.js · ENEMY_DROPS / rollEnemyDrops，按敌人登记）：合在一起记一行，进背包（材料是队伍公用的）。
+   *  中立生物（尘虫、管虫）也按表小概率掉；召唤物、铁壁、飞碟机械足不掉；逃走的（没 dead）不掉 */
   function rollMaterialDrops(run, notes) {
-    if (typeof rollCraftMaterials !== "function") return;
-    const foes = (state.units || []).filter(u => u && !u.isPlayer && (u.dead || u._removed) && !u.summonedBy && u.kit !== "ironwall" && u.kit !== "ufo_leg" &&
-      !(typeof isNeutralCreature === "function" && isNeutralCreature(u)));
+    if (typeof rollEnemyDrops !== "function") return;
+    const foes = enemyDropFoes(state.units);
     if (!foes.length) return;
     const key = `${run.seed}:mats:${run.act}:${run.taskNo}:${run.task ? run.task.index : "b"}:${run.day}:${(run.matNo = (run.matNo || 0) + 1)}`;
-    const total = {};
-    withRng(key, () => foes.forEach(u => rollCraftMaterials(u).forEach(m => { total[m.id] = (total[m.id] || 0) + m.qty; })));
-    const ids = Object.keys(total);
-    if (!ids.length) return;
-    ids.forEach(id => grantLoot(run, id, total[id], [], "材料"));
-    notes.push(`材料：${ids.map(id => `${ITEM_CATALOG[id].name} ×${total[id]}`).join("、")}。`);
+    const got = withRng(key, () => rollEnemyDrops(foes));
+    if (!got.length) return;
+    got.forEach(m => grantLoot(run, m.id, m.qty, [], "材料"));
+    notes.push(`材料：${got.map(m => `${ITEM_CATALOG[m.id].name} ×${m.qty}`).join("、")}。`);
   }
   /** 打赢之后掉的道具（rogue-data.js · ROGUE_CONFIG.itemDrops）：kind = battle / elite / boss */
   function rollItemDrops(run, kind, notes) {
@@ -1134,6 +1146,7 @@ const Rogue = (function () {
     const node = currentNode(run);
     if (!node || ["shop", "smith", "clinic"].indexOf(node.type) < 0) throw new Error("这里没有可以离开的节点");
     const notes = [];
+    delete run.shopSell;   // 离店：回购单清空
     passHours(run, NODE[node.type].hours, notes);
     if (run.stage !== "over") advanceNode(run, notes);
     return logAll(run, notes);
@@ -1287,6 +1300,7 @@ const Rogue = (function () {
     const node = currentNode(run);
     node.check.result = { kit, prof: o.level, ok, opt: info.opt, profName: info.prof };
     if (ok) {
+      growthDailyBump(run, "check_ok", 1, notes);   // 长线养成每日任务「完成检定」
       state.kuizhi = (Number(state.kuizhi) || 0) + info.reward;
       notes.push(`获得 ${info.reward} 奎支（现有 ${state.kuizhi}）。`);
     } else if (info.injure && o.noHurt) {
@@ -1381,6 +1395,7 @@ const Rogue = (function () {
     notes.push(...r.notes);
     // 补给不够只能消磨时间：时间照样过，满 80 小时力竭致死（以前这里不判）
     if (!(r.out && r.out.ok)) exhaustDeath(run, notes);
+    else growthDailyBump(run, "long_rest", 1, notes);   // 长线养成每日任务「长休」
     return r.out && r.out.ok;
   }
   /** 进下一站 / 首领战之前能短休的地方（休息点自己有短休按钮） */
@@ -1464,12 +1479,20 @@ const Rogue = (function () {
       state.kuizhi = (Number(state.kuizhi) || 0) + pay;
       notes.push(`没有停下休息，顺手做了点零活：获得 ${pay} 奎支（现有 ${state.kuizhi}）。`);
     } else {
+      const can = canShortRestAtNode(run);
+      if (!can.ok) throw new Error(can.why);
       const r = withParty(run, () => ledgerShortRest(null, notes));
       notes.push(...r.notes);
       exhaustDeath(run, notes);
     }
     if (run.stage !== "over") advanceNode(run, notes);
     return logAll(run, notes);
+  }
+
+  /** 休息点的短休按钮：没人有次数时不能点（以前照样白过一站） */
+  function canShortRestAtNode(run) {
+    if (!shortRestLeftAll(run).some(x => x.left > 0)) return { ok: false, why: "今天大家的短休次数都用完了" };
+    return { ok: true };
   }
 
   /* ---------- 诊所：治疗与义体改造 ---------- */
@@ -1636,6 +1659,7 @@ const Rogue = (function () {
     if (row.give.item) bagAdd(row.give.item, qty);
     const notes = [`买下 ${shopItemName(row)} ×${qty}，花掉 ${cost} 奎支。`];
     earnShopPoints(run, cost, notes);
+    growthDailyBump(run, "shop", cost, notes);   // 长线养成每日任务「商店消费」
     return logAll(run, notes);
   }
 
@@ -1674,6 +1698,78 @@ const Rogue = (function () {
     b.points -= it.points;
     bagAdd(itemId, 1);
     return logAll(run, [`用 ${it.points} 积分兑换 ${it.name}（剩 ${b.points} 积分）。`]);
+  }
+
+  /* ---------- 卖东西 / 回购（shop-sell.js）：单机钱进 state.kuizhi；联机由 online-rogue.js 装 setSellHooks 管归属和钱包 ---------- */
+  let sellHooks = null;
+  function setSellHooks(h) { sellHooks = h && typeof h === "object" ? h : null; }
+  const sellH = run => (sellHooks && sellHooks.applies(run) ? sellHooks : null);
+  function sellBook(run) { return shopBuybackBook(run, "shopSell", shopPlace(run)); }
+  /** 卖出视图 { items, buyback }。opt.kits：看的人操控的角色（联机：只给这些角色的个人物品和他们卖的回购单；不传 = 全部） */
+  function shopSellView(run, opt) {
+    if (!canShop(run)) return null;
+    opt = opt || {};
+    const H = sellH(run), book = sellBook(run), counts = bagCounts();
+    const kits = Array.isArray(opt.kits) ? opt.kits : null;
+    const items = [];
+    Object.keys(counts).filter(shopSellListable).forEach(id => {
+      const shared = H ? H.free(run, id) : counts[id];
+      if (shared > 0) items.push(shopSellRow(id, shared, "shared"));
+    });
+    if (H) (kits || H.living(run)).forEach(k => Object.keys(counts).filter(shopSellListable).forEach(id => {
+      const n = Math.min(H.owned(run, k, id), counts[id]);
+      if (n > 0) items.push(shopSellRow(id, n, k));
+    }));
+    const see = who => !kits || kits.includes(who) || (!H && who === "party");
+    const buyback = book.list.filter(r => see(r.seller)).map(shopBuybackPublic);
+    const last = book.last && see(book.last.by) ? shopSellLastFor(book, null) : null;
+    return { items, buyback, last };
+  }
+  /** 卖：{ kit 卖的人, id, qty, owner: "shared" | 角色 kit } → { ok, total, payout: [{ to, amount }], msg } */
+  function sellItem(run, o) {
+    o = o || {};
+    if (!canShop(run)) throw new Error("这里没有商店");
+    const H = sellH(run), id = String(o.id || ""), owner = o.owner == null ? "shared" : String(o.owner);
+    const seller = H ? String(o.kit || "") : (o.kit ? String(o.kit) : "party");
+    if (H && !H.living(run).includes(seller)) throw new Error("要指定由哪名角色卖");
+    if (owner !== "shared" && (!H || owner !== seller)) throw new Error(H ? "只能卖自己名下的或公用的东西" : "单机的东西都是公用的");
+    const chk = shopSellCheck(id);
+    if (!chk.ok) throw new Error(`不能卖：${chk.reason}`);
+    const have = !H ? bagCount(id) : owner === "shared" ? H.free(run, id) : Math.min(H.owned(run, owner, id), bagCount(id));
+    const n = shopSellQty(o.qty, have);
+    const total = shopSellPrice(id) * n;
+    let payout;
+    if (H && owner !== "shared") { H.take(run, owner, id, n); bagAdd(id, -n); payout = [{ to: seller, amount: total }]; H.credit(run, seller, total); }
+    else if (H) {
+      bagAdd(id, -n);
+      // 联机没有队伍公账：平分给还活着的角色，零头给卖的人
+      const ks = H.living(run), each = Math.floor(total / ks.length), rest = total - each * ks.length;
+      payout = ks.map(k => ({ to: k, amount: each + (k === seller ? rest : 0) })).filter(p => p.amount > 0);
+      payout.forEach(p => H.credit(run, p.to, p.amount));
+    } else { bagAdd(id, -n); state.kuizhi = (Number(state.kuizhi) || 0) + total; payout = [{ to: "party", amount: total }]; }
+    shopBuybackAdd(sellBook(run), { id, qty: n, price: total, owner, seller });
+    const msg = `${H ? heroName(seller) + " " : ""}卖掉 ${shopSellName(id)} ×${n}，得 ${total} 奎支${H && owner === "shared" && payout.length > 1 ? "（公用的东西，钱平分给全队）" : ""}。`;
+    logAll(run, [msg]);
+    return shopSellResult(run, "shopSell", sellBook(run), { ok: true, total, payout, msg }, "sell", seller);
+  }
+  /** 回购：{ kit, token } → 卖的人按卖出价付钱，东西回到原来的归属 */
+  function buybackItem(run, o) {
+    o = o || {};
+    if (!canShop(run)) throw new Error("这里没有商店");
+    const H = sellH(run), book = sellBook(run);
+    const i = book.list.findIndex(r => r.token === o.token);
+    if (i < 0) throw new Error("回购单里没有这件");
+    const r = book.list[i], payer = H ? String(o.kit || "") : "party";
+    if (H && r.seller !== payer) throw new Error("只有卖掉它的人能买回来");
+    const bal = H ? H.balance(run, payer) : Number(state.kuizhi) || 0;
+    if (bal < r.price) throw new Error(`奎支不够（要 ${r.price}，现有 ${bal}）`);
+    if (H) H.credit(run, payer, -r.price); else state.kuizhi = bal - r.price;
+    bagAdd(r.id, r.qty);
+    if (H && r.owner !== "shared") H.give(run, r.owner, r.id, r.qty);
+    book.list.splice(i, 1);
+    const msg = `${H ? heroName(payer) + " " : ""}买回 ${r.name} ×${r.qty}，花掉 ${r.price} 奎支。`;
+    logAll(run, [msg]);
+    return shopSellResult(run, "shopSell", book, { ok: true, total: r.price, payout: [{ to: payer, amount: -r.price }], msg }, "buyback", payer);
   }
 
   /* ---------- 制作（items.js · CRAFT_RECIPES / CRAFT_RULES；rogue-data.js · ROGUE_CRAFT）---------- */
@@ -2597,16 +2693,23 @@ const Rogue = (function () {
         t.progress = Math.min(t.target, t.progress + Math.floor(t.target * 0.25));
       } else if (t.id === "no_death") {
         t.progress = Math.min(t.target, t.progress + 1);
-      } else if (t.id === "long_rest") {
-        // 长休进度在休息节点结算
-      } else if (t.id === "check_ok") {
-        // 检定进度在检定成功时结算
-      } else if (t.id === "shop") {
-        // 商店消费进度在购买时结算
       } else if (t.id === "weather") {
-        // 天气变更进度在改天气时结算
+        // 本场我方主动改过天气（app.js · setWeather 记数）
+        t.progress = Math.min(t.target, t.progress + (Number(state.playerWeatherChanges) || 0));
       }
+      // long_rest / check_ok / shop 不在战后结算：分别在 doLongRest / attemptCheck / buy 里写入（growthDailyBump）
       if (t.progress >= t.target && !t.done) completeGrowthDailyTask(run, t, notes);
+    });
+  }
+  /** 长线养成每日任务：给指定 id 的任务加进度（长休 / 检定成功 / 商店消费在发生的地方调用） */
+  function growthDailyBump(run, id, n, notes) {
+    if (!run || !run.growth || !(n > 0)) return;
+    const daily = ensureGrowthDaily(run);
+    if (!daily) return;
+    daily.tasks.forEach(t => {
+      if (t.id !== id || t.done) return;
+      t.progress = Math.min(t.target, t.progress + n);
+      if (t.progress >= t.target) completeGrowthDailyTask(run, t, notes);
     });
   }
   function completeGrowthDailyTask(run, task, notes) {
@@ -2773,7 +2876,7 @@ function advanceDays(run, n) {
     if (!run.daily || run.daily.recorded) return;
     run.daily.recorded = true;
     const s = dailyStats();
-    s.runs.push({ date: run.daily.date, seed: run.seed, party: run.party.map(h => h.kit), result: clone(run.result || null), feats: clone(run.featLog || []) });
+    s.runs.push({ date: run.daily.date, seed: run.seed, party: (run.daily.party || run.party.map(h => h.kit).concat((run.fallen || []).map(f => f.kit))).slice(), result: clone(run.result || null), feats: clone(run.featLog || []) });
     const keep = D().keepRuns || 200;
     if (s.runs.length > keep) s.runs = s.runs.slice(-keep);
     const ls = dailyStorage();
@@ -2943,15 +3046,15 @@ function advanceDays(run, n) {
     battleSpec, applyPartyToField, finishBattle,
     checkInfo, checkChance, checkOdds, attemptCheck, skipCheck, heroProfs, parleyOptions, parley,
     role2Options, soloBattleInfo,
-    restPlan, restOptions, canLongRest, sheetData, armoryData, lowHpWarning, escortInfo, partOffers, buyPart, sellPart, canSellParts, partStock, partSellPrice, partInstallCost, installPart, removePart, restAtNode, leaveNode, canShortRestBefore, shortRestBeforeNode,
+    restPlan, restOptions, canLongRest, sheetData, armoryData, lowHpWarning, escortInfo, partOffers, buyPart, sellPart, canSellParts, partStock, partSellPrice, partInstallCost, installPart, removePart, restAtNode, leaveNode, canShortRestBefore, canShortRestAtNode, shortRestBeforeNode,
     ambushChance, watchOptions,
-    interludeOptions, campStatus: campStatusOf, buy, shopPoints, redeemList, redeem, craftPlace, craftList, craftOdds, craft, knowsRecipe, learnOptions, learnRecipe, rollRecipeChip, salvageList, salvage, setCraftHooks, setCraftJob, craftQueue, craftQueued, bagCounts, inventory, recipeStatus, recipeBook, materialUses, workshopAvailable, craftListGrouped, craftPreview, recipesUsingMaterial, setBagOwnership, bagByCategory, materialBar, cyberSummary, modInstallPreview, matchupChart: (w, o) => matchupChart(w, o), matchupForState: (st, id) => matchupForState(st, id), itemCategory: id => itemCategory(id),  canShop, shopItemName, shopStock, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
+    interludeOptions, campStatus: campStatusOf, buy, setSellHooks, shopSellView, sellItem, buybackItem, shopPoints, redeemList, redeem, craftPlace, craftList, craftOdds, craft, knowsRecipe, learnOptions, learnRecipe, rollRecipeChip, salvageList, salvage, setCraftHooks, setCraftJob, craftQueue, craftQueued, bagCounts, inventory, recipeStatus, recipeBook, materialUses, workshopAvailable, craftListGrouped, craftPreview, recipesUsingMaterial, setBagOwnership, bagByCategory, materialBar, cyberSummary, modInstallPreview, matchupChart: (w, o) => matchupChart(w, o), matchupForState: (st, id) => matchupForState(st, id), itemCategory: id => itemCategory(id),  canShop, shopItemName, shopStock, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
     presentSmiths, smithInfo, claimBlueprint, installBlueprint, blueprintById, weaponModsOf,
     smithQuote, introduceSmith,
     canClinic, cyberInfo, cyberPreview, cyberCost, modifyHero, cyberwarePacketFor, cyberwarePreviewFor, installCyberware, removeCyberware, healCost, healHero,
     pendingChoices, choiceOptions, choose, queueLevelRewards,
     dailyDate, dailySeed, dailyParty, dailyStats, featPickRates,
-    drawInfo, drawHero, swapHero, partyLevel, growthXp: () => growthOn, routeEta, growthDaily: ensureGrowthDaily,
+    drawInfo, drawHero, swapHero, partyLevel, growthXp: () => growthOn, routeEta, growthDaily: ensureGrowthDaily, growthDailyBump,
     camp, nextAct, afterVictory, endRun,
     enterRunMode, leaveRunMode, syncWorld, save, inRunMode: () => !!stash,
     setLootHandler, grantLoot, rollItemDrops
