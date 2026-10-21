@@ -222,7 +222,23 @@ const ENCOUNTER_TOKENS = 4;
 const CHANCE_EXTRA_TOKEN = 0.05;   // 变 5 代币
 const CHANCE_MIXED = 0.05;         // 混战：无视阵营
 
-/** 每个敌人的阵营、出没区域、代币、成组数量 */
+/** 随机种族的权重表（写进 ENEMY_INFO.races；有哪些种族、小分支见 enemies.js · ENEMY_RACES）。
+ *  race 可以写大支（"猫类人"，小分支再平分）、"类人"（四个大支平分）或带小分支的 "兽人·猫"；w 是权重，不必加到 100 */
+const ENEMY_RACE_TABLES = {
+  // 盗匪：人类 60 / 红皮人 20 / 类人 20（四个大支各 5%，大支里的小分支再平分）
+  bandit: [{ race: "人类", w: 60 }, { race: "红皮人", w: 20 }, { race: "类人", w: 20 }],
+  // 燃气收集机：类人四个大支各 25%
+  humanoid: [{ race: "类人", w: 100 }],
+  // 蚁型兵种：兽人五支，猫约 6.7%（其余的 2/7），狼 / 牛 / 蜥蜴 / 熊各约 23.3%
+  ant: [{ race: "兽人·狼", w: 7 }, { race: "兽人·牛", w: 7 }, { race: "兽人·蜥蜴", w: 7 }, { race: "兽人·熊", w: 7 }, { race: "兽人·猫", w: 2 }]
+};
+
+/** 每个敌人的阵营、出没区域、代币、成组数量
+ *  种族（有机体的敌人才写，没写 = 无种族；规则见 docs/enemy-race.md，换算在 enemies.js · applyEnemyRace）：
+ *    race: "兽人·牛"                      固定种族（大支·小分支），不受个体值开关影响，不套六维
+ *    races: ENEMY_RACE_TABLES.bandit      随机种族：[{ race: "人类", w: 60 }, …] 权重表，生成时抽
+ *    raceAttrs: true                      随机种族的敌人再按种族的六维修正改数值（体质只加最内层肉体）；不写 = 只挂种族、不改数值
+ *  新增兵种照这个格式加。 */
 const ENEMY_INFO = {
   // —— 天网安保（机械）——
   guard_sword: { faction: "安保", regions: ["外城区", "巨人城"], tokens: 1 },
@@ -236,12 +252,12 @@ const ENEMY_INFO = {
   dumpdrone:   { faction: "安保", regions: ["第一采矿场", "巨人城"], tokens: 1 },
   spreader:    { faction: "安保", regions: ["第一采矿场"], tokens: 2 },
   mine_guard:  { faction: "安保", regions: ["第一采矿场"], tokens: 1 },
-  ant_guard:   { faction: "安保", regions: ["第一采矿场"], tokens: 2 },
+  ant_guard:   { faction: "安保", regions: ["第一采矿场"], tokens: 2, races: ENEMY_RACE_TABLES.ant },
   // 第二采矿场：用火的安保部队
-  mine_overseer: { faction: "安保", regions: ["第二采矿场"], tokens: 1 },
+  mine_overseer: { faction: "安保", regions: ["第二采矿场"], tokens: 1, race: "兽人·熊" },
   flint_sweeper: { faction: "安保", regions: ["第二采矿场"], tokens: 1 },
-  gas_collector: { faction: "安保", regions: ["第二采矿场"], tokens: 2 },
-  ant_hunter:    { faction: "安保", regions: ["第二采矿场"], tokens: 2 },
+  gas_collector: { faction: "安保", regions: ["第二采矿场"], tokens: 2, races: ENEMY_RACE_TABLES.humanoid, raceAttrs: true },
+  ant_hunter:    { faction: "安保", regions: ["第二采矿场"], tokens: 2, races: ENEMY_RACE_TABLES.ant },
   // 第三采矿场：用能量的安保部队（还会有异星生物）
   alarm_bot:     { faction: "安保", regions: ["第三采矿场"], tokens: 1 },
   meteor_miner:  { faction: "安保", regions: ["第三采矿场"], tokens: 1 },
@@ -249,15 +265,16 @@ const ENEMY_INFO = {
   meteor_spider:    { faction: "异星生物", regions: ["第三采矿场"], tokens: 1, group: 2 },
   meteor_centipede: { faction: "异星生物", regions: ["第三采矿场"], tokens: 1 },
   // —— 警卫队（有机体，可与安保混编）——
-  captain_wolf:   { faction: "警卫队", regions: ["巨人城", "外城区"], tokens: 2 },
-  captain_ox:     { faction: "警卫队", regions: ["巨人城", "外城区"], tokens: 2 },
-  captain_lizard: { faction: "警卫队", regions: ["巨人城", "外城区"], tokens: 2 },
+  captain_wolf:   { faction: "警卫队", regions: ["巨人城", "外城区"], tokens: 2, race: "兽人·狼" },
+  captain_ox:     { faction: "警卫队", regions: ["巨人城", "外城区"], tokens: 2, race: "兽人·牛" },
+  captain_lizard: { faction: "警卫队", regions: ["巨人城", "外城区"], tokens: 2, race: "兽人·蜥蜴" },
   // —— 盗匪 ——
-  thug_knife:  { faction: "盗匪", regions: ["外城区"], tokens: 1 },
-  thug_hammer: { faction: "盗匪", regions: ["外城区"], tokens: 1 },
-  bandit_boss: { faction: "盗匪", regions: ["外城区"], tokens: 2 },
+  thug_knife:  { faction: "盗匪", regions: ["外城区"], tokens: 1, races: ENEMY_RACE_TABLES.bandit, raceAttrs: true },
+  thug_hammer: { faction: "盗匪", regions: ["外城区"], tokens: 1, races: ENEMY_RACE_TABLES.bandit, raceAttrs: true },
+  bandit_boss: { faction: "盗匪", regions: ["外城区"], tokens: 2, races: ENEMY_RACE_TABLES.bandit, raceAttrs: true },
   // 主持人手册：每次出场带强盗头子、匕首狂徒、锤狂徒各一，和他同区（固定随从，不按代币抽）
   outlaw_king: { faction: "盗匪", regions: ["外城区"], tokens: 4, boss: true,
+                 races: ENEMY_RACE_TABLES.bandit, raceAttrs: true,
                  escorts: ["bandit_boss", "thug_knife", "thug_hammer"],
                  waves: OUTLAW_KING_WAVES },
   // —— 沙灵 ——
@@ -638,7 +655,8 @@ function spawnEncounterRows(rows, baseLevel, partySize) {
       }
       const u = p.build(lv(row.level), partySize);
       // 个体值（enemies.js）：模板里主持人写死的水平照写，没写的随机
-      if (typeof applyEnemyIV === "function") applyEnemyIV(u, row.iv);
+      // 种族（enemies.js）：先种族、再个体值；模板里写了种族的照写，空着 = 随机（固定种族的敌人照固定）
+      if (typeof applyEnemyIV === "function") applyEnemyIV(u, row.iv, row.race);
       // near：跟着某个单位进场（援军赶到亡命之王身边），那个单位不在了就照写的区
       const nearU = row.near ? (state.units || []).find(x => !x.isPlayer && !x.dead && !x.hidden && x.kit === row.near) : null;
       u.zone = nearU ? Number(nearU.zone) : (Number(row.zone) || 2);

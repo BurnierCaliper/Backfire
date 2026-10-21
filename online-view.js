@@ -137,6 +137,9 @@
     // 个体值（杂兵、精英）：血量 / ATK 水平（百分比，公开）
     const iv = get(unit, "iv");
     if (obj(iv)) { const h = number(get(iv, "hp")), a = number(get(iv, "atk")); if (h !== undefined && a !== undefined) out.iv = { hp: h, atk: a }; }
+    // 种族（敌人，公开）：{ race, branch }，只放行文本
+    const race = get(unit, "race");
+    if (obj(race) && typeof get(race, "race") === "string") { out.race = { race: String(get(race, "race")).slice(0, 12) }; if (typeof get(race, "branch") === "string" && get(race, "branch")) out.race.branch = String(get(race, "branch")).slice(0, 12); }
     out.statuses = selected(get(unit, "statuses"), statusKeys);
     out.instant = selected(get(unit, "instant"), ["melt", "sting", "overload", "shift", "spread", "refract", "iceNext"]);
     const r = get(unit, "resources"); out.resources = copyFields(r, {}, [], resourceNumbers, resourceFlags);

@@ -121,7 +121,7 @@ test("无界面模拟也会一场接一场打下去", () => {
   const enc = ENC();
   enc.enemies[0].level = 1; enc.stages[0].enemies[0].count = 1;
   c.BattleSim.setup({ party: ["ras", "yuito"], encounter: enc, level: 1, seed: "SIM" });
-  c.S.state.units.filter(u => u.isPlayer).forEach(u => { u.atk = 999; });
+  c.S.state.units.filter(u => u.isPlayer).forEach(u => { u.atk = 999; u.personalAtk = 999; });   // 出手用的是 personalAtk；援军开战后生成，种族 / 个体值是随机的，血量不固定
   const r = c.BattleSim.run({ maxRounds: 40 });
   const log = c.S.state.logPages.flatMap(p => p.lines.map(l => l.text)).join("\n");
   assert.match(log, /援军抵达/);

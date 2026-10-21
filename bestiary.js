@@ -240,6 +240,9 @@ function bestiaryRecordBattle(outcome) {
     e.minLv = e.minLv == null ? lv : Math.min(e.minLv, lv);
     e.maxLv = e.maxLv == null ? lv : Math.max(e.maxLv, lv);
     if (u.dead) e.kills += 1;   // 下潜逃走的（只有 _removed）不是击杀
+    // 种族（enemies.js）：随机种族的敌人记下见过哪些
+    const rl = typeof raceText === "function" ? raceText(u) : "";
+    if (rl) { e.races = Array.isArray(e.races) ? e.races : []; if (!e.races.includes(rl)) e.races.push(rl); }
     e.last = now;
     e.lastOutcome = outcome || null;
     d.kits[kit] = e;
@@ -291,7 +294,21 @@ function bestiaryStats(kit, level, partySize) {
   };
 }
 
-/** 图鉴的整张表：[{ kit, name, rank, faction, regions, seen, rec, text }]（按 杂兵 → 精英 → 首领 排） */
+/** 图鉴里的种族说明：固定的写种族，随机的写「随机：人类 / 红皮人 / 类人」（权重表里的大支，类人四支合并）；没有种族是空串 */
+function bestiaryRaceText(kit) {
+  const info = (typeof ENEMY_INFO !== "undefined" && ENEMY_INFO[kit]) || (typeof ENEMY_RACE_EXTRA !== "undefined" && ENEMY_RACE_EXTRA[kit]) || null;
+  if (!info) return "";
+  if (info.race) return info.race;
+  if (!Array.isArray(info.races) || !info.races.length) return "";
+  const names = [];
+  info.races.forEach(r => {
+    const big = String(r.race).split("·")[0];
+    const n = typeof ENEMY_RACE_GROUPS !== "undefined" && Object.keys(ENEMY_RACE_GROUPS).some(g => ENEMY_RACE_GROUPS[g].includes(big)) ? "类人" : big;
+    if (!names.includes(n)) names.push(n);
+  });
+  return "随机：" + names.join(" / ");
+}
+/** 图鉴的整张表：[{ kit, name, rank, faction, regions, seen, rec, text, race }]（按 杂兵 → 精英 → 首领 排） */
 function bestiaryEntries() {
   const d = bestiaryLoad();
   const order = { minion: 0, elite: 1, boss: 2 };
@@ -304,6 +321,7 @@ function bestiaryEntries() {
         kit: p.id, name: bestiaryName(p.id), rank, rankName: BESTIARY_RANK_NAME[rank] || rank,
         faction: info.faction || (BESTIARY_TEXT[p.id] || {}).faction || "", regions: info.regions || (BESTIARY_TEXT[p.id] || {}).regions || [],
         seen: !!d.kits[p.id], rec: d.kits[p.id] || null,
+        race: bestiaryRaceText(p.id), racesSeen: d.kits[p.id] && Array.isArray(d.kits[p.id].races) ? d.kits[p.id].races.slice() : [],
         text: BESTIARY_TEXT[p.id] || null, rankNote: BESTIARY_RANK_NOTE[rank] || "",
         // 可能掉的制作材料（items.js · enemyDropTable）：[{ id, name, chance 期望份数 }]，图鉴详情「可能掉落」一节显示（bestiary-ui.js · dropsSection）
         drops: typeof enemyDropTable === "function" ? enemyDropTable(p.id) : []
