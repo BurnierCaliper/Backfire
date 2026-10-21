@@ -57,6 +57,10 @@
       if (!p || typeof scrapsFor !== "function" || !scrapsFor(actor).includes(p)) return null;
       return { id, name: "操控 " + p.name, cost: { ap: 1 } };
     }
+    if (id.startsWith("veh_board:") || id.startsWith("veh_pull:")) {   // 载具：上车、拉人下车（vehicle.js）
+      if (typeof vehicleSkillWhy !== "function" || vehicleSkillWhy(actor, id)) return null;
+      return { id, name: id.startsWith("veh_board:") ? "上车" : "拉人下车", cost: vehicleSkillCost(id) };
+    }
     if (id.startsWith("hack_turret:")) {
       const p = (state.props || []).find(x => "hack_turret:" + x.id === id);
       if (!p || typeof turretHackError !== "function" || turretHackError(actor, p)) return null;
