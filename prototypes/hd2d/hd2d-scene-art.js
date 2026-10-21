@@ -240,7 +240,7 @@
     (O.ledges || []).forEach(l => {
       if (l.side !== "left" && l.side !== "right") return;
       const c = l.pts.reduce((a, p) => ({ x: a.x + p.x / l.pts.length, z: a.z + p.z / l.pts.length }), { x: 0, z: 0 });
-      const r = L.outlineDist(l.pts, c.x, c.z) - SPOT.clear;
+      const r = Math.min(L.outlineDist(l.pts, c.x, c.z) - SPOT.clear, Math.abs(c.x) - inner);   // 贴得很近的台子：也让开站位区和脚下那一圈
       if (r >= rad) out.push({ x: round3(c.x), z: round3(c.z), y: round3(z.h * l.h), r: round3(r), on: "ledge", side: l.side === "left" ? -1 : 1 });
     });
     return out;

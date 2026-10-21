@@ -28,7 +28,10 @@ const DONE = [
   // 第二采矿场：第一采矿场的变体，加喷火的管道、橙红发光的岩石
   { region: "第二采矿场", scene: "rim", key: "mine2_rim", must: ["pitWall", "rimLip", "rail", "liftShaft", "lift", "pitLight", "farRim", "firePipe", "fire", "glowRock"] },
   { region: "第二采矿场", scene: "mid", key: "mine2_mid", must: ["pitWall", "berm", "cone", "rockWall", "foreRock", "liftShaft", "lift", "pitLight", "firePipe", "fire", "glowRock"] },
-  { region: "第二采矿场", scene: "floor", key: "mine2_floor", must: ["pitFloorWall", "pipes", "vent", "lantern", "floorRock", "foreRock", "firePipe", "fire", "glowRock"] }
+  { region: "第二采矿场", scene: "floor", key: "mine2_floor", must: ["pitFloorWall", "pipes", "vent", "lantern", "floorRock", "foreRock", "firePipe", "fire", "glowRock"] },
+  // 第三采矿场：浅坑（矿外看得到坑底）、紫色晶体、半埋的陨石、紫色电弧
+  { region: "第三采矿场", scene: "rim", key: "mine3_rim", must: ["pitWall", "pitFloor", "rimLip", "meteor", "crystal", "arc"] },
+  { region: "第三采矿场", scene: "floor", key: "mine3_floor", must: ["pitWall", "pitFloor", "rimLip", "meteor", "crystal", "arc", "foreRock"] }
 ];
 const PARTY = ["kolt", "helu", "ruby", "yuito"];
 const DESKTOP = { width: 1440, height: 900, top: 46, bottom: 160 };   // 桌面 1440×900：顶栏 + 展开的技能栏
@@ -244,7 +247,7 @@ test("矿外是往下陷的大矿坑（#242 截图验收 · 第二次：对面�
   const { THREE, B } = P, M = mine();
   try {
     const S = H.load().BattleSim, Q = M.PIT.rim, lumaOf = (c) => 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
-    for (const d of DONE.filter(x => x.scene === "rim")) for (const bdx of boardsFor(S).filter(x => !x.id.includes("挤"))) {
+    for (const d of DONE.filter(x => x.scene === "rim" && x.region !== "第三采矿场")) for (const bdx of boardsFor(S).filter(x => !x.id.includes("挤"))) {
       const layout = layoutOf(bdx.st, d), cam = layout.camera, b = layout.bounds, tag = `${d.key} ${bdx.id}`;
       const dims = M.pitDims(Q, b, cam), usable = DESKTOP.height - DESKTOP.top - DESKTOP.bottom;
       assert.ok(dims.D >= (cam.pos.z - dims.rimZ) * 0.9 && dims.D >= 36, `${tag}：对面坑壁离坑边只有 ${dims.D.toFixed(1)}（镜头到坑边 ${(cam.pos.z - dims.rimZ).toFixed(1)}）`);
@@ -298,13 +301,16 @@ test("矿外是往下陷的大矿坑（#242 截图验收 · 第二次：对面�
   } finally { P.restore(); }
 });
 
-/** 从布局的默认镜头往屏幕上的一点（像素）打一条线，先碰到远景里的什么（userData.art；碰不到 = null） */
-function hitAt(THREE, layout, root, px, py) {
+/** 从布局的默认镜头往屏幕上的一点（像素）打一条线，先碰到远景里的什么（userData.art；碰不到 = null）。
+ *  solid = 只算挡得住视线的：藏着的、加色发光的（光晕、电弧、亮的坑底）、Sprite 不算 */
+function hitAt(THREE, layout, root, px, py, solid) {
   const c = layout.camera, cam = new THREE.PerspectiveCamera(c.fov, c.aspect, 0.5, 400);
   cam.position.set(c.pos.x, c.pos.y, c.pos.z); cam.lookAt(c.target.x, c.target.y, c.target.z); cam.updateMatrixWorld(true);
   const ray = new THREE.Raycaster();
   ray.setFromCamera(new THREE.Vector2(px / c.width * 2 - 1, 1 - py / c.height * 2), cam);
+  const shown = (o) => { for (let q = o; q; q = q.parent) if (!q.visible) return false; return true; };
   for (const h of ray.intersectObject(root, true)) {
+    if (solid && (h.object.isSprite || !shown(h.object) || (h.object.material && h.object.material.blending === THREE.AdditiveBlending))) continue;
     for (let o = h.object; o; o = o.parent) if (o.userData && o.userData.art) return { what: o.userData.art, point: h.point };
   }
   return null;
@@ -364,6 +370,61 @@ test("第二采矿场是第一采矿场的变体（#242）：三个场景一一�
     const key = L.groundOf("第二采矿场", s), layout = layoutOf(BOARDS.line3(S), { region: "第二采矿场", scene: s });
     assert.ok(layout.zones.filter(z => z.ground).some(z => M.zonePlan(z, key).some(p => p.kind === "glow")), s + "：地台上有发光的石头");
   });
+});
+
+test("第三采矿场（#242）：浅坑——矿外从默认镜头看得到远处的坑底；深色的坑里到处是紫色晶体（地台上每块都有晶簇、远景里几十丛，发紫光）；背景里巨大的陨石：半截埋在地里（球心就在坑底那么高）、整个在顶栏下面、占画面宽的四分之一以上，月球色（灰）、有月球坑（表面凹凸）、发紫光（自发光、亮的坑底、光晕）；矿底的光照不随时间变；几处在跳紫色电弧", async (t) => {
+  const P = await protoEnv(t);
+  if (!P) return;
+  const { THREE, B, A } = P, M = mine();
+  try {
+    const S = H.load().BattleSim, hsl = (c) => { const h = {}; new THREE.Color(c).getHSL(h); return h; }, purple = (c) => { const h = hsl(c); return h.h > 0.66 && h.h < 0.88 && h.s > 0.4; };
+    for (const d of DONE.filter(x => x.region === "第三采矿场")) {
+      for (const bdx of boardsFor(S).filter(x => !x.id.includes("挤"))) {
+        const layout = layoutOf(bdx.st, d), cam = layout.camera, tag = `${d.key} ${bdx.id}`, dims = M.mine3Dims(d.scene, layout.bounds, cam), m = dims.meteor;
+        assert.equal(m.y, dims.floorY, tag + "：陨石的球心就在坑底那么高（半截埋在地里）");
+        const top = L.project(cam, { x: m.x, y: m.y + m.r, z: m.z }), lf = L.project(cam, { x: m.x - m.r, y: m.y, z: m.z }), rt = L.project(cam, { x: m.x + m.r, y: m.y, z: m.z });
+        assert.ok(top.y > DESKTOP.top + 4 && top.y < DESKTOP.top + 60, `${tag}：陨石的顶在顶栏下面一点（屏幕 y ${top.y.toFixed(0)}）`);
+        assert.ok(rt.x - lf.x > cam.width * (d.scene === "rim" ? 0.24 : 0.28) && lf.x > 0 && rt.x < cam.width, `${tag}：陨石在画面里、够大（宽 ${(rt.x - lf.x).toFixed(0)} 像素）`);
+        const bd = backdropOf(B, layout, "dusk");
+        bd.group.updateMatrixWorld(true);
+        const arts = artOf(bd.group), met = arts.find(o => o.what === "meteor").obj;
+        assert.ok(met.position.z + m.r < layout.bounds.minZ - L.CONFIG.lamps.back - 1, `${tag}：陨石在灯后面`);
+        // 月球色：顶点颜色是灰的（饱和度低）；月球坑：表面离球心有远有近
+        const body = met.children.find(o => o.isMesh && !o.material.transparent), glow = met.children.find(o => o.isMesh && o.material.transparent);
+        const cl = body.geometry.attributes.color, ps = body.geometry.attributes.position, c = new THREE.Color();
+        let sat = 0, lo = Infinity, hi = 0;
+        for (let i = 0; i < cl.count; i++) { c.setRGB(cl.getX(i), cl.getY(i), cl.getZ(i)); sat += hsl(c).s / cl.count; const k = Math.hypot(ps.getX(i), ps.getY(i), ps.getZ(i)) / m.r; lo = Math.min(lo, k); hi = Math.max(hi, k); }
+        assert.ok(sat < 0.12, `${tag}：陨石不是月球的灰（饱和度 ${sat.toFixed(2)}）`);
+        assert.ok(lo < 0.96 && hi > 1, `${tag}：陨石上要有月球坑（表面 ${lo.toFixed(2)}–${hi.toFixed(2)} × 半径）`);
+        // 发紫光：整块淡淡的紫色自发光 + 一个个亮的坑底（加色）+ 背后的光晕 + 照亮附近的紫光
+        assert.ok(purple(body.material.emissive) && body.material.emissiveIntensity > 0, tag + "：陨石自己发紫光");
+        assert.ok(glow && glow.geometry.attributes.position.count / 3 >= 30 && glow.material.blending === THREE.AdditiveBlending, tag + "：陨石上亮的坑底");
+        assert.ok(met.children.some(o => o.isSprite) && met.children.some(o => o.isPointLight && purple(o.color)), tag + "：陨石的紫色光晕和紫光");
+        // 紫色晶体：远景里几十丛（实例网格），都发紫光
+        const crystals = arts.filter(o => o.what === "crystal").map(o => o.obj);
+        assert.ok(crystals.reduce((n, o) => n + o.count, 0) >= 100, `${tag}：远景里的紫色晶体太少`);
+        crystals.forEach(o => assert.ok(purple(o.material.emissive) && o.material.emissiveIntensity > 1, `${tag}：晶体发紫光`));
+        // 电弧：几处
+        assert.equal(arts.filter(o => o.what === "arc").length, A.of(d.key).art.backdrop.arcs, tag + "：几处在跳电弧");
+        // 矿外：浅坑，从默认镜头往陨石左边、对面坑壁脚下和这边坑沿之间打射线，碰到的是坑底（或者坑底上的晶体）
+        if (d.scene === "rim") {
+          const y0 = L.project(cam, { x: dims.cx, y: dims.floorY, z: dims.zBase }).y, y1 = L.project(cam, { x: dims.cx, y: L.CONFIG.groundY, z: dims.rimZ }).y;
+          let floor = 0, all = 0;
+          for (let py = y0 + 4; py < y1 - 4; py += 6) [0.12, 0.25, 0.38].forEach(u => { const h = hitAt(THREE, layout, bd.group, cam.width * u, py, true); all++; if (h && (h.what === "pitFloor" || h.what === "crystal") && Math.abs(h.point.y - dims.floorY) < 1.5) floor++; });
+          assert.ok(all > 0 && floor / all > 0.8, `${tag}：矿外看得到远处的坑底（${floor}/${all}）`);
+          assert.ok(dims.floorY > L.CONFIG.groundY - 10, tag + "：坑浅");
+        }
+        bd.dispose();
+      }
+      // 地台上：每块默认地台都有一丛紫色晶体
+      const layout = layoutOf(BOARDS.line3(S), d);
+      layout.zones.filter(z => z.ground).forEach(z => assert.ok(M.zonePlan(z, d.key).some(p => p.kind === "crystal"), `${d.key} ${z.id} 区：地台上有紫色晶体`));
+    }
+    // 矿底：白天黑夜几乎没区别（三个光影主题同一套），比矿外暗
+    const themes = sceneThemes(), lit = ["day", "dusk", "night"].map(n => A.lighting(themes, n, "mine3_floor"));
+    lit.forEach(l => assert.deepEqual(l.T, lit[0].T, "第三采矿场的矿底光照不随时间变"));
+    ["day", "dusk", "night"].forEach(n => { const r = A.lighting(themes, n, "mine3_rim").T; assert.ok(lit[0].T.hemi < r.hemi && lit[0].T.sunI < r.sunI, n + "：矿底比矿外暗"); });
+  } finally { P.restore(); }
 });
 
 /* ---------- 2. 装饰不压住站位 / 铭牌 ---------- */

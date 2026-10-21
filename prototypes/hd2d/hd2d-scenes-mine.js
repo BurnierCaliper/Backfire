@@ -34,6 +34,13 @@
     mine2: {
       rock: [0xb8664a, 0x9c5038, 0xc77a5a, 0x8a4230, 0xab5c40], wall: [0x5e382a, 0x4c2c20, 0x6c4030, 0x42261c], dark: 0x120706, metal: 0x4e3a32, lamp: 0xffa860, cone: 0xe8742a,
       steam: 0x8a7470, glow: 0xff4a14, glowBase: 0x3a1408, fire: [0xffd27a, 0xff6a24]
+    },
+    /* 第三采矿场：深色的坑（冷的灰紫岩石）；crystal 紫色晶体发的光（三种：紫 / 品紫 / 蓝紫）、crystalBase 晶体本身的颜色；
+     * moon 陨石月球色的几层灰、maria 大片暗一点的「月海」、meteorGlow 陨石发的紫光、arc 电弧、mist 坑里暗的雾 */
+    mine3: {
+      rock: [0x4c4860, 0x403c52, 0x58546c, 0x383448, 0x4a4660], wall: [0x2e2a3c, 0x26222f, 0x34304a, 0x221e2c], dark: 0x08060e,
+      metal: 0x464256, lamp: 0xd8d0ff, cone: 0xe8742a, steam: 0x8a8498,
+      crystal: [0x9a4cff, 0xc05cff, 0x6a5cff], crystalBase: 0x2a1648, moon: [0xb6b6be, 0xa8a8b2, 0x9c9ca8], maria: 0x686876, meteorGlow: 0xb06cff, arc: 0xd8a8ff, mist: 0x1c1628
     }
   };
   /** 大矿坑（矿外 rim、矿内 mid 共用一种对面坑壁）：一级级台阶往下（平面上像半个碗：正中最远，往画面两边弯过来），越往下越黑，到底漆黑一片
@@ -92,8 +99,40 @@
       vents: 4, lanterns: { n: 2, y: 1.9, power: 5, dist: 6.5, halo: 1.5, pool: [2.6, 0.55] }, rocks: { n: 9, size: [0.35, 0.85] }
     }
   };
-  /** 会发光的东西有多亮（自发光 > 1 才会被泛光抓到）：rock 地台上带发光裂纹的石头；backdrop 远景里的发光岩石（乘一个 0.6–1.1 的随机数） */
-  const GLOW = { rock: 1.6, backdrop: 1.5 };
+  /** 会发光的东西有多亮（自发光 > 1 才会被泛光抓到）：rock 地台上带发光裂纹的石头；backdrop 远景里的发光岩石（乘一个 0.6–1.1 的随机数）；
+   *  crystal 地台上的紫色晶体、crystalFar 远景里的晶簇 */
+  const GLOW = { rock: 1.6, backdrop: 1.5, crystal: 1.5, crystalFar: 1.9 };
+  /** 第三采矿场（晶矿）的矿坑：浅（矿外就看得到远处很小的坑底），深色的坑里到处是紫色晶体
+   *   rim    矿外：坑边在灯后面再往后 edge，坑底比我们这层低 depth；对面坑壁的脚落在画面上「顶栏往下 wall」那一行（× 顶栏和技能栏之间那一块的高度，下同），
+   *          对面坑沿在 rimAt 那一行（坑沿多高按镜头倒算）；几级台阶 benches、每级往前伸 run、往两边弯 curve；坑壁的颜色：haze 往雾色靠多少、
+   *          dark 从哪开始暗、到哪全黑（比例：坑沿 → 坑底，> 1 = 到坑底也没全黑）；sky 天幕在对面坑沿后面多远；land 坑沿后面那片地往雾色靠多少；
+   *          floor 坑底的颜色：越远越往暗的雾靠多少（mist）、起伏多大（bump）
+   *   floor  矿底：灯后面再往后 edge 是陨石砸出来的坑的坑沿（地台外面那片地铺到这里为止），坑里低 depth；
+   *          后面远处的坑壁在陨石后面 back，一级级往上出了画面（step 每级多高、run 往前伸多少），颜色同上 */
+  const PIT3 = {
+    rim: { edge: 1.4, depth: 6.5, wall: 0.17, rimAt: 0.05, benches: 4, run: 0.9, curve: 0.15, wide: 1.2, haze: 0.4, dark: [0.25, 1.7], sky: 24, land: 0.72, seg: 80, jitter: 0.08, floor: { mist: 0.55, bump: 0.18 } },
+    floor: { edge: 1.2, depth: 7, back: 10, step: 1.6, run: 0.5, curve: 0.25, wide: 1.2, haze: 0.25, dark: [0.05, 1.1], sky: 14, land: 0.6, seg: 80, jitter: 0.08, floor: { mist: 0.4, bump: 0.12 } }
+  };
+  /** 陨石（第三采矿场的背景）：近似圆的一块，半截埋在地里（球心就在坑底那么高），月球色、一个个月球坑，发紫光。
+   *   rim / floor   摆在哪：画面上球顶在「顶栏往下 top」那一行、球心在 base 那一行（大小按镜头倒算：远景里占满坑的那一截）；u 横着偏多少（× 画面在那里的半宽）；
+   *                 front 球最前面离这边坑边 / 陨石坑的坑沿至少多远
+   *   detail   球面分多细（低多边形；只留前上方看得到的面）；craters 几个月球坑、角半径范围（弧度）；depth 坑多深（× 角半径）；maria 几大片月海
+   *   glow     几成的坑底发紫光（叠一层加色的亮面，泛光会抓到）、多亮；emissive 整块淡淡的紫光；halo 背后一圈紫色光晕（× 半径、多不透明）；
+   *   light    前面一盏紫色的点光源照亮附近（多亮、照多远 × 半径）；pulse 发光慢慢一明一暗（周期秒、幅度；减少动态效果时不动）；anchors 电弧打在表面上的几个点 */
+  const METEOR = {
+    rim: { top: 0.012, base: 0.42, u: 0.3, front: 4 },
+    floor: { top: 0.004, base: 0.42, u: 0.06, front: 1.6 },
+    detail: 18, craters: [24, 0.07, 0.32], depth: 0.2, maria: 5, glow: [0.55, 1.5], emissive: 0.12, halo: [2.8, 0.32], light: [36, 2.6], pulse: [5.5, 0.18], anchors: 12
+  };
+  /** 紫色晶体：一丛几根（cluster），每根多粗（radius）、多高（height，× 整丛多高）、最多歪多少度（tilt）、尖多长（tip，× 柱身）；
+   *  远景里的晶簇按屏幕上多高定大小（px，像素，桌面 900 高的画面）：
+   *   rim    矿外：坑底撒几丛（floor）、对面坑壁台阶上几丛（wall）、这边坑沿几丛（edge）
+   *   floor  矿底：陨石坑的坑沿上几丛（lip）、坑里几丛（pit）、战场两边后面几丛（side） */
+  const CRYSTAL = {
+    cluster: [3, 6], radius: [0.1, 0.17], height: [0.55, 1], tilt: 24, tip: 0.5,
+    rim: { floor: 46, wall: 14, edge: 12, px: [9, 24] },
+    floor: { lip: 12, pit: 26, side: 10, px: [26, 64] }
+  };
   /** 第二采矿场：喷火的管道摆在哪、几根（时不时喷火的频率在 AMBIENT.fire）
    *   rim     坑边（栏杆后面、灯前面）几根立管：横着在战场半宽的几成处（u）、多高（h）
    *   mid     运输道的边后面、开口两边各一根（贴着岩壁的边，火在开口里窜上去）
@@ -118,11 +157,15 @@
     /* steam   矿底管道的排气口：隔多久喷一阵、每阵多久；一阵冒几团气、往上飘多高、一团从多大长到多大、多不透明（减少动态效果时不喷） */
     steam: { every: [2.5, 7], dur: [1.4, 2.4], puffs: 6, rise: 1.5, size: [0.25, 1.1], opacity: 0.5 },
     /* fire    第二采矿场喷火的管道：隔多久喷一阵、每阵多久；火焰几团、窜多高、根部 / 顶上一团多大、多亮；平时管口一点小火苗多大（减少动态效果时只剩小火苗） */
-    fire: { every: [3, 8], dur: [0.9, 1.8], flames: 7, height: [1.2, 2], size: [0.55, 0.22], opacity: 0.9, pilot: 0.22 }
+    fire: { every: [3, 8], dur: [0.9, 1.8], flames: 7, height: [1.2, 2], size: [0.55, 0.22], opacity: 0.9, pilot: 0.22 },
+    /* arc     第三采矿场的紫色电弧（每个场景几处在跳：ART 的 backdrop.arcs）：隔多久跳一道、每道多久；每 flick 秒重新抖一下；
+     *         亮带分几段、折点偏多少（× 两头的距离）、多宽（像素）；两头离多远（像素）；几成带一道分叉；两头的亮点多大（像素）（减少动态效果时不跳） */
+    arc: { every: [1.4, 4.5], dur: [0.22, 0.55], flick: 0.06, segs: 10, jag: 0.14, width: 2.6, reach: [40, 260], fork: 0.6, spark: 14 }
   };
   /** 每个场景（键 = 地面主题）：
-   *   palette / depth（rim 矿外、mid 矿内）/ pit（PIT 的哪一套）
-   *   decor     地台上的装饰：band 左右边带上几个、ledge 台子上几个、size 半径范围、tone 用色调里的哪组颜色（rock 砂岩 / wall 暗的岩石）
+   *   palette / depth（rim 矿外、mid 矿内、floor 矿底；第三采矿场的 rim3 / floor3）/ pit（PIT 的哪一套）
+   *   decor     地台上的装饰：band 左右边带上几个、ledge 台子上几个、size 半径范围、tone 用色调里的哪组颜色（rock 砂岩 / wall 暗的岩石）；
+   *             glow / crystal / pipes 几成是带发光裂纹的石头 / 紫色晶簇 / 一截截管子（其余是石头）
    *   backdrop  远景：lights 坑壁上几盏灯（blink 几成会闪）、lifts 运载电梯在哪（× 画面在对面坑壁那里的半宽，从中间往左右）、
    *             rail 坑边栏杆、farRim 对面坑沿上的矿井架 / 筒仓 / 烟囱；berm 坑边的挡车土埂、walls 近处的岩壁（WALLS）、fore 前景的石头（FORE）
    *   ambient   有哪些环境动画（AMBIENT 的键）
@@ -203,6 +246,37 @@
           set: { dofFar: 0.012 }, grade: { vignette: 0.55, temp: [1.1, 0.96, 0.88] }
         }
       }
+    },
+    /* 第三采矿场（只有矿外 / 矿底）：深色的坑里到处是紫色晶体（地台上几成装饰是晶簇：decor.crystal），背景里半截埋在地里、发紫光的大陨石（meteor：METEOR 的哪一套），
+     * 时不时跳紫色电弧（arcs：几处在跳）；坑（pit3：PIT3 的哪一套）、晶簇（crystals：CRYSTAL 的哪一套） */
+    mine3_rim: {
+      palette: "mine3", depth: "rim3",
+      decor: { band: 3, ledge: 2, size: [0.1, 0.17], tone: "rock", crystal: 0.6 },
+      backdrop: { pit3: "rim", meteor: "rim", crystals: "rim", arcs: 3 },
+      ambient: ["arc"],
+      // 露天：跟着光影主题，整体往冷的灰紫靠一点、稍暗（紫光显眼）
+      light: {
+        all: {
+          scale: { hemi: 0.85, sunI: 0.85 },
+          tint: { fog: [0x4a3a66, 0.35], sky: [0x5a4280, 0.22], hemiGround: [0x2a1e40, 0.45], sun: [0xe8d8ff, 0.15] },
+          grade: { temp: [0.98, 0.96, 1.05] }
+        }
+      }
+    },
+    mine3_floor: {
+      palette: "mine3", depth: "floor3",
+      decor: { band: 3, ledge: 2, size: [0.14, 0.24], tone: "wall", crystal: 0.7 },
+      backdrop: { pit3: "floor", meteor: "floor", crystals: "floor", arcs: 4, fore: "mid" },
+      ambient: ["arc"],
+      // 矿底：白天黑夜几乎没区别（fixed：都按夜晚那一套画，再压暗、往紫靠），亮光靠晶体和陨石的紫光
+      light: {
+        fixed: "night",
+        all: {
+          scale: { hemi: 0.6, sunI: 0.4, rimI: 0.6, exposure: 0.95, lamp: 2.2 },
+          tint: { fog: [0x140c22, 0.8], sky: [0x120a20, 0.85], hemiSky: [0x6a5a90, 0.5], hemiGround: [0x0c0814, 0.7], sun: [0xc8b0ff, 0.4], rim: [0xb080ff, 0.5] },
+          set: { dofFar: 0.012 }, grade: { vignette: 0.5, temp: [0.97, 0.95, 1.06] }
+        }
+      }
     }
   };
   /** 地面主题（并进布局的 GROUNDS，写法同 hd2d-layout.js 的 GROUNDS）：顶面 / 侧面贴图是这里画的（art 开头），backdrop 指回这一套 */
@@ -237,12 +311,24 @@
       tex: "artPitFloor", tint: 0xf0bcaa, side: "artBenchSide", sideTint: 0x8c6052, glow: 0xff5a1e, decals: { ember: 3, slag: 2, crack: 2 },
       pebbles: 18, pebble: 0x4e3430, rock: 0x3e2620, decor: "art", ground: 0x2e1a14, backdrop: "mine2_floor",
       lamps: { kind: "hanging", color: 0xffa860, day: 2, dusk: 2, night: 2 }
+    },
+    // 第三采矿场：深色的地里夹着会发光的紫色晶屑 / 晶脉（glow 是它发的光，顶面的发光贴图在 …Glow）
+    mine3_rim: {   // 第三采矿场 · 矿外：深灰紫的碎石地（夹着细小的紫色晶屑），冷色的爆破断面；地台外面是深灰紫的地；一盏冷光矿灯
+      tex: "artDarkGravel", tint: 0xffffff, side: "artBenchSide", sideTint: 0x9a94b0, glow: 0xa060ff, decals: { crystal: 2, gravel: 2, crack: 2 },
+      pebbles: 16, pebble: 0x5a5668, rock: 0x4a4658, decor: "art", ground: 0x3a3646, backdrop: "mine3_rim",
+      lamps: { kind: "hanging", color: 0xd8d0ff, day: 1, dusk: 1, night: 1 }
+    },
+    mine3_floor: {   // 第三采矿场 · 矿底：暗色的岩盘，一道道发紫光的晶脉；地台外面是黑紫的地；一盏冷光矿灯（亮光靠晶体）
+      tex: "artVeinRock", tint: 0xffffff, side: "artBenchSide", sideTint: 0x7a7090, glow: 0xa060ff, decals: { crystal: 3, slag: 1, crack: 2 },
+      pebbles: 18, pebble: 0x4a4658, rock: 0x3a3646, decor: "art", ground: 0x24202e, backdrop: "mine3_floor",
+      lamps: { kind: "hanging", color: 0xd0c8ff, day: 1, dusk: 1, night: 1 }
     }
   };
   /** 区域 → 场景 id（world-data.js · BATTLE_SCENES）→ 地面主题 */
   const SCENES = {
     "第一采矿场": { rim: "mine1_rim", mid: "mine1_mid", floor: "mine1_floor" },
-    "第二采矿场": { rim: "mine2_rim", mid: "mine2_mid", floor: "mine2_floor" }
+    "第二采矿场": { rim: "mine2_rim", mid: "mine2_mid", floor: "mine2_floor" },
+    "第三采矿场": { rim: "mine3_rim", floor: "mine3_floor" }
   };
 
   /* ---------- 小工具 ---------- */
@@ -264,6 +350,30 @@
     geo.computeVertexNormals();
     return geo;
   }
+  /** 一根晶体的形状（单位尺寸：底半径 1、柱身高 1，上面一个尖 CRYSTAL.tip）：六棱柱 + 六棱锥的尖，非索引（低多边形，一面一个颜色） */
+  function crystalGeo(kit) {
+    const THREE = kit.THREE, n = 6, pos = [];
+    const ring = (y, r) => Array.from({ length: n }, (_, i) => { const a = (i / n) * Math.PI * 2; return [Math.cos(a) * r, y, Math.sin(a) * r]; });
+    const b = ring(0, 1), u = ring(1, 0.92), apex = [0, 1 + CRYSTAL.tip, 0];
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      pos.push(...b[i], ...u[j], ...b[j], ...b[i], ...u[i], ...u[j], ...u[i], ...apex, ...u[j]);   // 柱面两个三角形 + 尖
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    geo.computeVertexNormals();
+    return geo;
+  }
+  /** 一丛晶体里每一根怎么摆（纯函数）：整丛高 s，几根（CRYSTAL.cluster），第一根在中间、最高、几乎直立，别的根部离中心 0.1–0.28 s、往外歪（最多 CRYSTAL.tilt 度）。
+   *  返回 [{ x, z, r 半径, h 总高, rx, ry, rz }]（旋转按 "XZY" 的顺序：先绕自己的轴转、再歪）；整丛横着不超出 0.95 s（外框也不超出） */
+  function crystalPoses(R, s) {
+    const C = CRYSTAL, n = C.cluster[0] + Math.floor(R() * (C.cluster[1] - C.cluster[0] + 1)), out = [];
+    for (let i = 0; i < n; i++) {
+      const a = R() * Math.PI * 2, d = i ? s * (0.1 + R() * 0.18) : 0, t = (i ? 0.4 + R() * 0.6 : R() * 0.3) * C.tilt * D2R;
+      out.push({ x: Math.cos(a) * d, z: Math.sin(a) * d, r: s * A.span(R, C.radius) * (i ? 1 : 1.12), h: s * (i ? A.span(R, C.height) : 1), rx: t * Math.sin(a), ry: R() * Math.PI, rz: -t * Math.cos(a) });
+    }
+    return out;
+  }
   /** 战场范围（远景的 env 给的是中心和半宽） */
   const boundsOf = (env) => ({ minX: env.cx - env.hx, maxX: env.cx + env.hx, minZ: env.cz - env.hz, maxZ: env.cz + env.hz });
   /** 关掉阴影、打上标签（测试按 userData.art 认是什么） */
@@ -276,6 +386,59 @@
   /* ---------- 贴图（canvas 程序贴图，没有图片文件）---------- */
   /** 一张美术包的贴图：kit.canvasTex 画（按名字缓存），贴图的 name 就是它在包里的名字（测试按它认） */
   const paint = (name, size, draw, opt) => (kit) => named(kit.canvasTex("art-" + name, size, (g, s, r) => draw(g, s, r, kit), opt), name);
+  /** 碎裂的石板（矿底的岩盘、第三采矿场的晶脉岩）：5 × 5 块四边形，角点随机挪（按 i % n、j % n 取：贴图首尾相接），每块颜色随机，接缝暗、带一道细亮边 */
+  function plates(g, s, r, tones, seam, shine) {
+    const n = 5, cell = s / n, ox = [], oy = [];
+    for (let i = 0; i < n; i++) { ox.push([]); oy.push([]); for (let j = 0; j < n; j++) { ox[i].push((r() - 0.5) * cell * 0.55); oy[i].push((r() - 0.5) * cell * 0.55); } }
+    const pt = (i, j) => [i * cell + ox[i % n][j % n], j * cell + oy[i % n][j % n]];
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+      const q = [pt(i, j), pt(i + 1, j), pt(i + 1, j + 1), pt(i, j + 1)], col = tones[Math.floor(r() * tones.length)];
+      [[0, 0], [-s, 0], [0, -s], [-s, -s]].forEach(([dx, dy]) => {   // 跨过边的那一截绕回来画
+        g.beginPath(); q.forEach(([x, y], k) => (k ? g.lineTo(x + dx, y + dy) : g.moveTo(x + dx, y + dy))); g.closePath();
+        g.fillStyle = col; g.fill();
+        g.strokeStyle = seam; g.lineWidth = 3; g.stroke();
+        g.strokeStyle = shine; g.lineWidth = 1; g.stroke();
+      });
+    }
+  }
+  /** 第三采矿场的地里的晶屑、晶脉：位置按固定的种子算，贴图和它的发光贴图（…Glow）画同一批，对得上；跨过边的绕回来画（贴图首尾相接，256 见方） */
+  const SHARDS = (() => { const r = A.rand(4242), out = []; for (let i = 0; i < 46; i++) out.push({ x: r() * 256, y: r() * 256, len: 4 + r() * 8, w: 1.4 + r() * 1.8, a: r() * Math.PI }); return out; })();
+  const VEINS = (() => {
+    const r = A.rand(5151), out = [];
+    for (let i = 0; i < 7; i++) {
+      let x = r() * 256, y = r() * 256, a = r() * Math.PI * 2;
+      const pts = [[x, y]], n = 8 + Math.floor(r() * 8);
+      for (let k = 0; k < n; k++) { a += (r() - 0.5) * 1.1; x += Math.cos(a) * (6 + r() * 9); y += Math.sin(a) * (6 + r() * 9); pts.push([x, y]); }
+      out.push({ pts, w: 1.2 + r() * 1.6 });
+    }
+    return out;
+  })();
+  const around9 = (fn) => [-256, 0, 256].forEach(dx => [-256, 0, 256].forEach(dy => fn(dx, dy)));
+  /** 一片晶屑（细长的菱形）：glow = 画在发光贴图上（亮的淡紫 + 一圈软光） */
+  function shard(g, sh, glow) {
+    around9((dx, dy) => {
+      const x = sh.x + dx, y = sh.y + dy;
+      if (x < -24 || x > 280 || y < -24 || y > 280) return;
+      if (glow) {
+        const grd = g.createRadialGradient(x, y, 0, x, y, sh.len * 1.7);
+        grd.addColorStop(0, "rgba(200,170,255,.4)"); grd.addColorStop(1, "rgba(200,170,255,0)");
+        g.fillStyle = grd; g.fillRect(x - sh.len * 1.7, y - sh.len * 1.7, sh.len * 3.4, sh.len * 3.4);
+      }
+      g.save(); g.translate(x, y); g.rotate(sh.a);
+      g.beginPath(); g.moveTo(-sh.len, 0); g.lineTo(0, -sh.w); g.lineTo(sh.len, 0); g.lineTo(0, sh.w); g.closePath();
+      g.fillStyle = glow ? "rgba(240,230,255,1)" : "rgba(150,104,232,.9)"; g.fill();
+      if (!glow) { g.strokeStyle = "rgba(230,214,255,.7)"; g.lineWidth = 0.8; g.stroke(); }
+      g.restore();
+    });
+  }
+  /** 一道晶脉（弯弯曲曲的一条）：glow = 画在发光贴图上（外面一圈宽的软光，中间一道亮的） */
+  function vein(g, v, glow) {
+    around9((dx, dy) => {
+      const line = (w, col) => { g.strokeStyle = col; g.lineWidth = w; g.lineCap = "round"; g.lineJoin = "round"; g.beginPath(); v.pts.forEach(([x, y], k) => (k ? g.lineTo(x + dx, y + dy) : g.moveTo(x + dx, y + dy))); g.stroke(); };
+      if (glow) { line(v.w * 4, "rgba(190,150,255,.22)"); line(v.w, "rgba(240,228,255,1)"); }
+      else { line(v.w * 2.2, "rgba(20,10,36,.6)"); line(v.w, "rgba(140,96,220,.9)"); }
+    });
+  }
   const TEXTURES = {
     /** 砂岩地（矿外）：一行行砂岩板（高低、宽窄不一，接缝在贴图边上首尾相接），每块颜色略不同、带交错层理的细纹，接缝里积着沙，零星的裂缝和碎石 */
     artSandstone: paint("artSandstone", 256, (g, s, r, kit) => {
@@ -380,19 +543,7 @@
     /** 矿底的地：暗色的岩盘——一块块碎裂的石板（四边形，深浅不一，接缝在贴图边上首尾相接），缝里积着黑泥，几摊潮湿发暗的地方，零星的碎矿渣和亮一点的碎石 */
     artPitFloor: paint("artPitFloor", 256, (g, s, r, kit) => {
       g.fillStyle = "#3b322b"; g.fillRect(0, 0, s, s);
-      const n = 5, cell = s / n, ox = [], oy = [];
-      for (let i = 0; i < n; i++) { ox.push([]); oy.push([]); for (let j = 0; j < n; j++) { ox[i].push((r() - 0.5) * cell * 0.55); oy[i].push((r() - 0.5) * cell * 0.55); } }
-      const pt = (i, j) => [i * cell + ox[i % n][j % n], j * cell + oy[i % n][j % n]];   // 角点的偏移按 i % n、j % n 取：首尾相接
-      const tones = ["#3f362f", "#352d27", "#463c34", "#2f2823", "#40372f"];
-      for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
-        const q = [pt(i, j), pt(i + 1, j), pt(i + 1, j + 1), pt(i, j + 1)], col = tones[Math.floor(r() * tones.length)];
-        [[0, 0], [-s, 0], [0, -s], [-s, -s]].forEach(([dx, dy]) => {   // 跨过边的那一截绕回来画
-          g.beginPath(); q.forEach(([x, y], k) => (k ? g.lineTo(x + dx, y + dy) : g.moveTo(x + dx, y + dy))); g.closePath();
-          g.fillStyle = col; g.fill();
-          g.strokeStyle = "rgba(12,8,5,.75)"; g.lineWidth = 3; g.stroke();
-          g.strokeStyle = "rgba(255,230,200,.06)"; g.lineWidth = 1; g.stroke();
-        });
-      }
+      plates(g, s, r, ["#3f362f", "#352d27", "#463c34", "#2f2823", "#40372f"], "rgba(12,8,5,.75)", "rgba(255,230,200,.06)");
       for (let i = 0; i < 7; i++) {   // 潮湿发暗的地方
         const x = r() * s, y = r() * s, rad = 14 + r() * 30, grd = g.createRadialGradient(x, y, 0, x, y, rad);
         grd.addColorStop(0, "rgba(8,6,4,.38)"); grd.addColorStop(1, "rgba(8,6,4,0)");
@@ -414,6 +565,37 @@
         g.fillStyle = grd; g.fillRect(x - rad, y - rad, rad * 2, rad * 2);
       }
     }),
+    /** 深色的碎石地（第三采矿场 · 矿外）：深灰紫的底、深浅不一的大片，密密的棱角碎石（亮面 + 暗面），夹着一片片细长的紫色晶屑（SHARDS），几道裂缝 */
+    artDarkGravel: paint("artDarkGravel", 256, (g, s, r, kit) => {
+      g.fillStyle = "#3b3946"; g.fillRect(0, 0, s, s);
+      for (let i = 0; i < 18; i++) {
+        g.fillStyle = r() < 0.55 ? `rgba(10,8,20,${0.08 + r() * 0.1})` : `rgba(200,190,230,${0.03 + r() * 0.04})`;
+        g.beginPath(); g.ellipse(r() * s, r() * s, 20 + r() * 50, 14 + r() * 30, r() * 3, 0, 7); g.fill();
+      }
+      kit.speckle(g, s, r, 2600, "rgba(220,214,240,.12)", "rgba(6,4,12,.3)");
+      for (let i = 0; i < 700; i++) {
+        const x = r() * s, y = r() * s, w = 1.5 + r() * 3.5, h = 1.2 + r() * 2.5, v = 60 + Math.floor(r() * 46);
+        g.fillStyle = "rgba(0,0,0,.4)"; g.fillRect(x + 1, y + 1, w, h);
+        g.fillStyle = `rgb(${v},${v - 4},${v + 12})`; g.fillRect(x, y, w, h);
+      }
+      SHARDS.forEach(sh => shard(g, sh, false));
+      g.strokeStyle = "rgba(4,2,10,.55)";
+      for (let k = 0; k < 4; k++) kit.crack(g, r, r() * s, r() * s, 5 + Math.floor(r() * 5), 1.1, 1);
+    }),
+    /** 上面那张的发光贴图（自发光，地面主题的 glow 色）：黑底上只有晶屑亮 */
+    artDarkGravelGlow: paint("artDarkGravelGlow", 256, (g, s) => { g.fillStyle = "#000"; g.fillRect(0, 0, s, s); SHARDS.forEach(sh => shard(g, sh, true)); }),
+    /** 晶脉岩（第三采矿场 · 矿底）：冷色的暗岩盘（碎裂的石板），一道道弯弯曲曲的紫色晶脉（VEINS），细碎的斑点和裂缝 */
+    artVeinRock: paint("artVeinRock", 256, (g, s, r, kit) => {
+      g.fillStyle = "#2c2a36"; g.fillRect(0, 0, s, s);
+      plates(g, s, r, ["#312e3b", "#2a2731", "#37333f", "#26232d", "#33303d"], "rgba(6,4,12,.75)", "rgba(220,210,255,.06)");
+      kit.speckle(g, s, r, 2200, "rgba(226,220,255,.07)", "rgba(0,0,0,.25)");
+      VEINS.forEach(v => vein(g, v, false));
+      g.strokeStyle = "rgba(4,2,10,.6)";
+      for (let k = 0; k < 4; k++) kit.crack(g, r, r() * s, r() * s, 5 + Math.floor(r() * 5), 1.1, 1);
+      for (let k = 0; k < 3; k++) kit.gravel(g, r, r() * s, r() * s, 5 + r() * 8, 8 + Math.floor(r() * 8));
+    }),
+    /** 上面那张的发光贴图：黑底上只有晶脉亮 */
+    artVeinRockGlow: paint("artVeinRockGlow", 256, (g, s) => { g.fillStyle = "#000"; g.fillRect(0, 0, s, s); VEINS.forEach(v => vein(g, v, true)); }),
     /** 贴花：一摊被风吹积的浮沙（浅色、软边，几道细沙纹） */
     artSandDrift: paint("artSandDrift", 128, (g, s, r, kit) => {
       const grd = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s * 0.46);
@@ -440,10 +622,11 @@
     const D = art.decor, R = A.rand(z.id * 977 + seedOf(key)), spots = A.zoneSpots(z, D.size[0]);
     const band = A.pick(spots.filter(s => s.on === "band"), D.band, R, 1.4);
     const ledge = A.pick(spots.filter(s => s.on === "ledge"), D.ledge, R, 0.8);
-    // kind：rock 石头；pipe 一截管子（矿底）；glow 带发光裂纹的石头（第二采矿场）——每块地台上各占几成按 decor.glow / decor.pipes
-    // （发光的至少一块；挑出来的点本来就是打乱过的，前面几个当发光的、再几个当管子）
-    const all = band.concat(ledge), nGlow = D.glow ? Math.max(1, Math.round(all.length * D.glow)) : 0, nPipe = D.pipes ? Math.round(all.length * D.pipes) : 0;
-    const kindOf = (i) => (i < nGlow ? "glow" : i < nGlow + nPipe ? "pipe" : D.kind || "rock");
+    // kind：rock 石头；pipe 一截管子（矿底）；glow 带发光裂纹的石头（第二采矿场）；crystal 一丛紫色晶体（第三采矿场）——每块地台上各占几成按 decor.glow / crystal / pipes
+    // （发光的、晶簇至少一个；挑出来的点本来就是打乱过的，前面几个当发光的、再几个当晶簇、再几个当管子）
+    const all = band.concat(ledge), atLeast = (k) => (k ? Math.max(1, Math.round(all.length * k)) : 0);
+    const counts = [["glow", atLeast(D.glow)], ["crystal", atLeast(D.crystal)], ["pipe", D.pipes ? Math.round(all.length * D.pipes) : 0]];
+    const kindOf = (i) => { for (const [k, n] of counts) { if (i < n) return k; i -= n; } return D.kind || "rock"; };
     return all.map((s, i) => ({ kind: kindOf(i), x: s.x, z: s.z, y: s.y, size: Math.min(A.span(R, D.size), s.r), on: s.on }));
   }
   /** 挂钩：地台上的装饰（hd2d-world.js · buildZone 交过来；地台本体、贴花、小石子已经画好了）。
@@ -466,6 +649,15 @@
       } else if (d.kind === "glow") {
         m = kit.mesh(rockGeo(kit, d.size, R, 0.62), kit.mat("art-glowrock-" + art.palette, col, { roughness: 0.9, emissive: P.glow, emissiveIntensity: GLOW.rock, emissiveMap: kit.tex("artLavaVein") }), d.x, d.y + d.size * 0.32, d.z);
         m.rotation.y = R() * Math.PI * 2;
+      } else if (d.kind === "crystal") {
+        // 一丛紫色晶体：整丛在半径 size 里（高 ≈ size），几根各用一种紫（材质按色调缓存）
+        m = new THREE.Group();
+        crystalPoses(R, d.size).forEach((s, i) => {
+          const k = i % P.crystal.length, c = kit.mesh(crystalGeo(kit), kit.mat("art-crystal-" + art.palette + "-" + k, P.crystalBase, { emissive: P.crystal[k], emissiveIntensity: GLOW.crystal, roughness: 0.3, metalness: 0.15 }), s.x, -0.02, s.z);
+          c.rotation.set(s.rx, s.ry, s.rz, "XZY"); c.scale.set(s.r, s.h / (1 + CRYSTAL.tip), s.r);
+          m.add(c);
+        });
+        m.position.set(d.x, d.y, d.z);
       } else {
         m = kit.mesh(rockGeo(kit, d.size, R, 0.62), kit.mat("art-rock-" + art.palette, col, { roughness: 1 }), d.x, d.y + d.size * 0.32, d.z);
         m.rotation.y = R() * Math.PI * 2;
@@ -507,12 +699,28 @@
     const occAt = (z) => (ok && cam.pos.z > rimZ + 1 ? gY - (rimZ - z) * (cam.pos.y - gY) / (cam.pos.z - rimZ) : -Infinity);
     return { rimZ, zFar, D, top, ref, cx, halfW, W: halfW * Q.wide, yOcc: Math.min(occ, ref - 2), sky: b.minZ - zFar + Q.sky, px, occAt };
   }
-  /** 画面上「顶栏往下 frac」（× 顶栏和技能栏之间那一块的高度）那一行的视线，在进深 z 处多高（镜头正对 −z，和布局的镜头同一种） */
-  function rowHeight(cam, z, frac) {
+  /** 画面上「顶栏往下 frac」（× 顶栏和技能栏之间那一块的高度）那一行的视线方向 { dy, dz }（镜头正对 −z，和布局的镜头同一种；没给画面大小 = 整个画面） */
+  function rowRay(cam, frac) {
     const H = cam.height || 1, v = cam.view || {}, t = (v.top || 0) / H, bt = (v.bottom || 0) / H;
     const yN = 1 - 2 * (t + frac * (1 - t - bt)), e = cam.elevation * D2R, th = Math.tan(cam.fov * D2R / 2) * yN;
-    const dy = -Math.sin(e) + Math.cos(e) * th, dz = -Math.cos(e) - Math.sin(e) * th;   // 视线：往前 + 往上 th
-    return cam.pos.y + (z - cam.pos.z) / dz * dy;
+    return { dy: -Math.sin(e) + Math.cos(e) * th, dz: -Math.cos(e) - Math.sin(e) * th };   // 视线：往前 + 往上 th
+  }
+  /** 那一行的视线在进深 z 处多高 */
+  const rowHeight = (cam, z, frac) => { const r = rowRay(cam, frac); return cam.pos.y + (z - cam.pos.z) / r.dz * r.dy; };
+  /** 那一行的视线碰到高 y 的平面在哪（z） */
+  const rowHit = (cam, frac, y) => { const r = rowRay(cam, frac); return cam.pos.z + (y - cam.pos.y) / r.dy * r.dz; };
+  /** 半截埋在地里的球摆多远、多大（纯函数）：球心在高 y 的地面上，画面上球心在 fBase 那一行、球的上沿在 fTop 那一行；
+   *  球最前面（z + r）不过 zMax（太近就往后挪、跟着变小）。返回 { z, r } */
+  function domeOf(cam, y, fTop, fBase, zMax) {
+    const tr = rowRay(cam, fTop), thTop = Math.atan2(-tr.dy, -tr.dz), h = cam.pos.y - y;
+    const rOf = (z) => { const L = cam.pos.z - z; return Math.hypot(h, L) * Math.sin(Math.max(0, Math.atan2(h, L) - thTop)); };
+    let z = rowHit(cam, fBase, y);
+    if (z + rOf(z) > zMax) {
+      let lo = z - 200, hi = z;
+      for (let i = 0; i < 40; i++) { const m = (lo + hi) / 2; if (m + rOf(m) > zMax) hi = m; else lo = m; }
+      z = lo;
+    }
+    return { z, r: rOf(z) };
   }
   /**
    * 对面的坑壁：一级级台阶往下（第 k 级的台面在 top − k × step，台阶边在 zFar + 弯过来的那一点 + k × run，越往下越靠近这边，最近到坑边前 gap），
@@ -1036,10 +1244,262 @@
     return out;
   }
 
+  /* ---------- 远景：第三采矿场（浅坑、紫色晶体、半埋的陨石、紫色电弧）---------- */
+  /**
+   * 第三采矿场的坑摆在哪（纯函数，天幕挪多远也用它）。s = "rim" 矿外 / "floor" 矿底（PIT3、METEOR 的哪一套）：
+   *   矿外：坑边 rimZ（灯后面再往后 edge），坑底 floorY；对面坑壁的脚 zBase（画面上 wall 那一行看过去碰到坑底的地方），坑沿 zFar / top（rimAt 那一行，按镜头倒算）
+   *   矿底：rimZ 是陨石砸出来的坑的坑沿，坑底 floorY；后面的坑壁在陨石后面 back，一级级往上出了画面
+   *   陨石 meteor：{ x, y（球心，就在坑底那么高：半截埋在地里）, z, r }（按 METEOR 的 top / base 两行倒算，最前面离 rimZ 至少 front）
+   * 返回 { rimZ, floorY, zBase, zFar, top, n 几级台阶, step 每级多高, D, cx, halfW, W, ref, yOcc, sky, px, pxAt(p) 那里一个像素多大, occAt(z), meteor }
+   */
+  function mine3Dims(s, b, cam) {
+    const Q = PIT3[s], MT = METEOR[s], gY = L.CONFIG.groundY, lampZ = b.minZ - L.CONFIG.lamps.back, cx = (b.minX + b.maxX) / 2;
+    const c = cam && cam.pos && Number.isFinite(cam.elevation) && Number.isFinite(cam.fov) ? cam : { pos: { x: cx, y: 25, z: (b.minZ + b.maxZ) / 2 + 45 }, elevation: 30, fov: 22 };
+    const rimZ = lampZ - Q.edge, floorY = gY - Q.depth;
+    const pxAt = (p) => 2 * Math.hypot(p.x - (c.pos.x || 0), p.y - c.pos.y, p.z - c.pos.z) * Math.tan(c.fov * D2R / 2) / 900;
+    const halfAt = (z, y) => {
+      if (c.right && c.tanHalf && c.aspect) { const p = L.toNdc(c, { x: cx, y, z }), q = L.toNdc(c, { x: cx + 1, y, z }); if (q.x - p.x > 1e-6) return 1 / (q.x - p.x); }
+      return (b.maxX - b.minX) / 2 + (rimZ - z) * 0.4;
+    };
+    const occK = c.pos.z > rimZ + 1 ? (c.pos.y - gY) / (c.pos.z - rimZ) : 0, occAt = (z) => (occK ? gY - (rimZ - z) * occK : -Infinity);
+    const m = domeOf(c, floorY, MT.top, MT.base, rimZ - MT.front);
+    const meteor = { x: cx + MT.u * halfAt(m.z, floorY + m.r * 0.5), y: floorY, z: m.z, r: m.r };
+    let zFar, top, n, step, zBase;
+    if (s === "rim") {
+      zBase = Math.min(rowHit(c, Q.wall, floorY), m.z - m.r * 0.6);
+      zFar = zBase - (Q.benches - 1) * Q.run;
+      top = Math.max(floorY + 1.5, rowHeight(c, zFar, Q.rimAt));
+      n = Q.benches; step = (top - floorY) / n;
+    } else {
+      zFar = m.z - m.r - Q.back;
+      top = Math.max(floorY + 4, rowHeight(c, zFar, 0) + 3);   // 出了画面上沿
+      step = Q.step; n = Math.ceil((top - floorY) / step) + 1;
+      zBase = zFar + (n - 1) * Q.run;
+    }
+    const halfW = halfAt(zFar, top);
+    return {
+      rimZ, floorY, zBase, zFar, top, n, step, D: rimZ - zFar, cx, halfW, W: halfW * Q.wide, ref: Math.min(top, rowHeight(c, zFar, 0)), yOcc: floorY,
+      sky: b.minZ - zFar + Q.sky, px: pxAt({ x: cx, y: top, z: zFar }), pxAt, occAt, meteor
+    };
+  }
+  /** 第三采矿场的坑壁交给 pitWall 画：几级台阶从坑沿（矿底是画面上沿外面）下到坑底，颜色往暗的雾靠，越往下越暗 */
+  const wall3Q = (Q, d) => ({
+    step: d.step, run: Q.run, benches: d.n, bottom: d.floorY - 1, seg: Q.seg, jitter: Q.jitter, curve: Q.curve, wide: Q.wide, gap: 1.5, shaft: [0.6, 1.1],
+    dim: 1, haze: Q.haze, hazeTo: 1, hazeDark: 0.35, land: Q.land, riser: 0.8, dark: Q.dark
+  });
+  /** 一片坑底（平的、微微起伏的低多边形地面）：x0–x1、z0（近）–z1（远），高 y；颜色按三角形：tones 随机深浅，越远越往 mist 靠 k；不吃场景的雾 */
+  function flatFloor(kit, env, R, o) {
+    const THREE = kit.THREE, nx = o.nx || 64, nz = o.nz || 16, V = [], pos = [], col = [], c = new THREE.Color(), mist = new THREE.Color(o.mist);
+    for (let i = 0; i <= nx; i++) {
+      V.push([]);
+      for (let j = 0; j <= nz; j++) {
+        const inner = i > 0 && i < nx && j > 0 && j < nz;
+        V[i].push([o.x0 + (o.x1 - o.x0) * (i + (inner ? (R() - 0.5) * 0.6 : 0)) / nx, o.y + (j > 0 ? (R() - 0.5) * o.bump : 0), o.z0 + (o.z1 - o.z0) * (j + (inner ? (R() - 0.5) * 0.6 : 0)) / nz]);
+      }
+    }
+    const tri = (a, b, e) => {
+      const k = clamp((o.z0 - (a[2] + b[2] + e[2]) / 3) / Math.max(1e-3, o.z0 - o.z1), 0, 1);
+      c.set(o.tones[Math.floor(R() * o.tones.length)]).multiplyScalar(0.8 + R() * 0.3).lerp(mist, o.k * k);
+      [a, b, e].forEach(p => { pos.push(p[0], p[1], p[2]); col.push(c.r, c.g, c.b); });
+    };
+    for (let i = 0; i < nx; i++) for (let j = 0; j < nz; j++) { const a = V[i][j], b = V[i + 1][j], e = V[i + 1][j + 1], f = V[i][j + 1]; tri(a, b, e); tri(a, e, f); }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+    geo.computeVertexNormals();
+    return new THREE.Mesh(geo, env.keep(new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 1, metalness: 0, fog: false })));
+  }
+  /** 远景里的一片晶簇（按三种紫分成三个实例网格，标签 what）：list = [{ x, y, z, s（整丛多高）}]，每丛几根（crystalPoses）。返回每丛尖上的点（电弧打在这里） */
+  function crystalField(kit, env, P, R, list, what) {
+    const THREE = kit.THREE, geo = crystalGeo(kit), o = new THREE.Object3D(), poses = P.crystal.map(() => []), tips = [];
+    list.forEach(q => {
+      const k0 = Math.floor(R() * P.crystal.length);   // 每丛从哪种紫开始轮
+      crystalPoses(R, q.s).forEach((s, i) => poses[(k0 + i) % P.crystal.length].push({ q, s }));
+      tips.push({ x: q.x, y: q.y + q.s * 0.95, z: q.z, s: q.s });
+    });
+    poses.forEach((list2, k) => {
+      if (!list2.length) return;
+      const im = new THREE.InstancedMesh(geo, env.keep(new THREE.MeshStandardMaterial({ color: P.crystalBase, emissive: P.crystal[k], emissiveIntensity: GLOW.crystalFar, roughness: 0.3, metalness: 0.15, flatShading: true, fog: false })), list2.length);
+      list2.forEach(({ q, s }, j) => { o.position.set(q.x + s.x, q.y - q.s * 0.04, q.z + s.z); o.rotation.set(s.rx, s.ry, s.rz, "XZY"); o.scale.set(s.r, s.h / (1 + CRYSTAL.tip), s.r); o.updateMatrix(); im.setMatrixAt(j, o.matrix); });
+      env.group.add(tag(im, what || "crystal"));
+    });
+    return tips;
+  }
+  /**
+   * 陨石：近似圆的一块（球面上一个个月球坑：坑底往下凹、坑沿凸起一圈，再加几大片暗一点的「月海」），月球的灰；半截埋在地里（球心在地面那么高），
+   * 只留前上方看得到的面（低多边形）。几成的坑底发紫光（叠一层加色的亮面，泛光会抓到），整块淡淡发紫，背后一圈紫色光晕，前面一盏紫色的点光源照亮附近；
+   * 发光慢慢一明一暗（减少动态效果时不动）。m = { x, y, z, r }。返回 表面上朝镜头的几个点（电弧打在这里）
+   */
+  function meteor(kit, env, P, R, m) {
+    const THREE = kit.THREE, MT = METEOR, src = new THREE.IcosahedronGeometry(1, MT.detail).attributes.position, v = new THREE.Vector3();
+    const [nC, a0, a1] = MT.craters, craters = [], maria = [];
+    for (let i = 0; i < nC; i++) {
+      const dir = new THREE.Vector3(R() * 2 - 1, 0.05 + R() * 0.9, R() * 1.3 - 0.3).normalize(), a = a0 + (a1 - a0) * Math.pow(R(), 1.6);
+      craters.push({ dir, a, d: a * MT.depth, glow: R() < MT.glow[0] });
+    }
+    for (let i = 0; i < MT.maria; i++) maria.push({ dir: new THREE.Vector3(R() * 2 - 1, R(), R() * 2 - 1).normalize(), a: 0.35 + R() * 0.45 });
+    /** 方向 → 半径倍数 k、在坑里多深 pit（0–1）、发光多亮 glow（0–1）、坑沿 rim、月海 mar（纯函数：同一个方向每次一样，面不裂开） */
+    const shape = (dir) => {
+      let k = 1, pit = 0, glow = 0, rim = 0, mar = 0;
+      craters.forEach(c => {
+        const t = dir.angleTo(c.dir) / c.a;
+        if (t < 1) { k -= c.d * (1 - t * t); if (1 - t > pit) { pit = 1 - t; glow = c.glow && t < 0.62 ? 1 - t / 0.62 : 0; } }
+        else if (t < 1.4) { const u = (t - 1) / 0.4; k += c.d * 0.35 * (1 - u * u); rim = Math.max(rim, 1 - u); }
+      });
+      maria.forEach(q => { const t = dir.angleTo(q.dir) / q.a; if (t < 1) mar = Math.max(mar, 1 - t * t); });
+      return { k: k * (1 + 0.025 * Math.sin(dir.x * 7.1 + dir.y * 3.3) * Math.sin(dir.z * 5.7 - dir.y * 2.1)), pit, glow, rim, mar };
+    };
+    const pos = [], col = [], gpos = [], gcol = [], c = new THREE.Color(), moon = P.moon.map(x => new THREE.Color(x)), maC = new THREE.Color(P.maria), glowC = new THREE.Color(P.meteorGlow);
+    for (let f = 0; f < src.count; f += 3) {
+      const ds = [0, 1, 2].map(j => v.fromBufferAttribute(src, f + j).clone().normalize()), cen = ds[0].clone().add(ds[1]).add(ds[2]).normalize();
+      if (cen.y < -0.22 || cen.z < -0.45) continue;   // 埋在地下的、背面的不要
+      const sh = shape(cen), pts = ds.map(d => d.clone().multiplyScalar(m.r * shape(d).k));
+      c.copy(moon[Math.floor(R() * moon.length)]).lerp(maC, sh.mar * 0.65).multiplyScalar((1 - 0.28 * sh.pit) * (1 + 0.12 * sh.rim) * (0.95 + R() * 0.1));
+      pts.forEach(p => { pos.push(p.x, p.y, p.z); col.push(c.r, c.g, c.b); });
+      if (sh.glow > 0.05) { const g = glowC.clone().multiplyScalar(MT.glow[1] * (0.35 + 0.65 * sh.glow)); pts.forEach(p => { gpos.push(p.x, p.y, p.z); gcol.push(g.r, g.g, g.b); }); }
+    }
+    const mk = (p, cl) => { const geo = new THREE.BufferGeometry(); geo.setAttribute("position", new THREE.Float32BufferAttribute(p, 3)); geo.setAttribute("color", new THREE.Float32BufferAttribute(cl, 3)); geo.computeVertexNormals(); return geo; };
+    const g = new THREE.Group();
+    g.add(new THREE.Mesh(mk(pos, col), env.keep(new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.95, metalness: 0, emissive: P.meteorGlow, emissiveIntensity: MT.emissive, fog: false }))));
+    const glowM = env.keep(new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, toneMapped: false, fog: false }));
+    if (gpos.length) g.add(new THREE.Mesh(mk(gpos, gcol), glowM));
+    const haloM = env.keep(new THREE.SpriteMaterial({ map: env.keep(kit.smokeTexture()), color: P.meteorGlow, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: MT.halo[1], fog: false }));
+    const halo = new THREE.Sprite(haloM);
+    halo.scale.setScalar(m.r * MT.halo[0]); halo.position.set(0, m.r * 0.2, -m.r * 0.35); g.add(halo);
+    const light = new THREE.PointLight(P.meteorGlow, MT.light[0], m.r * MT.light[1], 2);
+    light.position.set(0, m.r * 0.55, m.r * 1.1); g.add(light);
+    g.position.set(m.x, m.y, m.z);
+    env.group.add(tag(g, "meteor"));
+    const [per, amp] = MT.pulse, ph = R() * 6;
+    env.anims.push((t, dt) => { const k = dt > 0 ? 1 + amp * Math.sin((t / per) * Math.PI * 2 + ph) : 1; glowM.opacity = k; haloM.opacity = MT.halo[1] * k; light.intensity = MT.light[0] * k; });
+    // 电弧打在表面上的几个点：朝镜头、偏上
+    const out = [];
+    for (let i = 0; i < MT.anchors; i++) {
+      const dir = new THREE.Vector3(R() * 1.6 - 0.8, 0.15 + R() * 0.65, 0.5 + R() * 0.5).normalize(), k = shape(dir).k;
+      out.push({ x: m.x + dir.x * m.r * k, y: m.y + dir.y * m.r * k, z: m.z + dir.z * m.r * k, meteor: true });
+    }
+    return out;
+  }
+  /**
+   * 一处紫色电弧（AMBIENT.arc）：时不时在两个点之间跳一道锯齿形的电弧——正对镜头的一条亮带（两头细、中间粗）+ 一道分叉 + 两头的亮点，
+   * 一道持续 dur 秒、每 flick 秒重新抖一下；两个点由 pick(r) 挑（晶簇的尖 ↔ 陨石的表面 / 晶簇 ↔ 晶簇），宽窄按那里一个像素多大（pxAt）。
+   * 减少动态效果时不跳。返回 Group（userData.ambient.puffs = 亮带和亮点：跳的时候看得见）
+   */
+  function arcEmitter(kit, env, P, i, pick, pxAt, tex) {
+    const THREE = kit.THREE, S = AMBIENT.arc, g = new THREE.Group(), r = A.rand(i * 977 + 41);
+    const mat = env.keep(new THREE.MeshBasicMaterial({ color: new THREE.Color(P.arc).multiplyScalar(3), transparent: true, opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false, fog: false }));
+    const strip = (n) => {
+      const idx = [];
+      for (let k = 0; k < n; k++) { const a = k * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array((n + 1) * 6), 3)); geo.setIndex(idx);
+      const m = new THREE.Mesh(geo, mat); m.frustumCulled = false; m.visible = false; g.add(m);
+      return m;
+    };
+    const main = strip(S.segs), fork = strip(Math.ceil(S.segs / 2));
+    const sparks = [0, 1].map(() => {
+      const sp = new THREE.Sprite(env.keep(new THREE.SpriteMaterial({ map: tex, color: new THREE.Color(P.arc).multiplyScalar(2), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false, fog: false })));
+      sp.visible = false; g.add(sp); return sp;
+    });
+    /** 亮带的顶点：p0 → p1 一路折几下（中间偏 jag × 长度，两头不偏），宽 w（中间最宽） */
+    const lay = (m, p0, p1, w, jag) => {
+      const P3 = m.geometry.attributes.position, n = P3.count / 2 - 1, dx = p1.x - p0.x, dy = p1.y - p0.y, len = Math.hypot(dx, dy) || 1, nx = -dy / len, ny = dx / len;
+      for (let k = 0; k <= n; k++) {
+        const t = k / n, off = k && k < n ? (r() - 0.5) * 2 * jag * len * Math.sin(Math.PI * t) : 0, hw = w * (0.35 + 0.65 * Math.sin(Math.PI * Math.min(1, t * 1.2 + 0.1)));
+        const x = p0.x + dx * t + nx * off, y = p0.y + dy * t + ny * off, z = p0.z + (p1.z - p0.z) * t;
+        P3.setXYZ(k * 2, x - nx * hw, y - ny * hw, z); P3.setXYZ(k * 2 + 1, x + nx * hw, y + ny * hw, z);
+      }
+      P3.needsUpdate = true; m.geometry.computeBoundingSphere();
+      return { x: p0.x + dx * 0.5, y: p0.y + dy * 0.5, z: (p0.z + p1.z) / 2, len };
+    };
+    let ends = pick(r), acc = 0;
+    const shake = () => {
+      const [a, b] = ends, w = S.width * pxAt(a), mid = lay(main, a, b, w, S.jag);
+      const ang = Math.atan2(b.y - a.y, b.x - a.x) + (r() < 0.5 ? 1 : -1) * (0.5 + r() * 0.7), fl = mid.len * (0.3 + r() * 0.25);
+      lay(fork, mid, { x: mid.x + Math.cos(ang) * fl, y: mid.y + Math.sin(ang) * fl, z: mid.z }, w * 0.6, S.jag * 1.3);
+      [a, b].forEach((p, k) => { sparks[k].position.set(p.x, p.y, p.z); sparks[k].scale.setScalar(S.spark * pxAt(p) * (0.7 + r() * 0.6)); });
+    };
+    shake();   // 先摆好（没跳的时候藏着）：外框在两个点之间
+    const beat = A.beat(r, S.every, S.dur, 0.3 + r() * S.every[1]);
+    g.userData.ambient = { kind: "arc", beat, puffs: [main, fork].concat(sparks) };
+    env.anims.push((t, dt) => {
+      const p = dt > 0 ? beat.step(dt) : -1;
+      if (p < 0) { main.visible = fork.visible = false; sparks.forEach(s => { s.visible = false; }); return; }
+      if (p === 0) { ends = pick(r); acc = S.flick; }
+      if ((acc += dt) >= S.flick) { acc = 0; shake(); main.material.opacity = 0.65 + r() * 0.35; fork.visible = r() < S.fork; }
+      main.visible = true; sparks.forEach(s => { s.visible = true; });
+    });
+    env.group.add(tag(g, "arc"));
+    return g;
+  }
+  /** 电弧的两头怎么挑：随便挑一丛晶体的尖，另一头在离它 reach（像素）以内——先找陨石表面上的点，没有就找别的晶簇；都太远就挑最近的 */
+  function arcPicker(tips, anchors, pxAt) {
+    const S = AMBIENT.arc, all = tips.concat(anchors);
+    return (r) => {
+      const a = tips[Math.floor(r() * tips.length)], u = pxAt(a), near = (q) => { const d = Math.hypot(q.x - a.x, q.y - a.y, q.z - a.z) / u; return q !== a && d >= S.reach[0] && d <= S.reach[1]; };
+      const m = anchors.filter(near), c = tips.filter(near), list = m.length && (r() < 0.6 || !c.length) ? m : c;
+      if (list.length) return [a, list[Math.floor(r() * list.length)]];
+      const b = all.filter(q => q !== a).sort((p, q) => Math.hypot(p.x - a.x, p.y - a.y, p.z - a.z) - Math.hypot(q.x - a.x, q.y - a.y, q.z - a.z))[0] || a;
+      return [a, b];
+    };
+  }
+  /** 矿外（第三采矿场）：站在浅坑的坑边。坑底就在下面不远，看得到它一直铺到远处（越远越暗、越小），对面几级台阶的坑壁和坑沿；
+   *  坑底偏右半截埋着巨大的陨石（发紫光）；坑底、坑壁台阶上、这边坑沿上到处是紫色晶簇；几处时不时跳紫色电弧。返回 groundEdge（坑边） */
+  function rim3Scene(kit, env, art, P, R, b) {
+    const Q = PIT3.rim, CR = CRYSTAL.rim, d = mine3Dims("rim", b, env.cam), M = d.meteor;
+    const wall = pitWall(kit, env, wall3Q(Q, d), P, R, d, []);
+    env.group.add(wall.mesh);
+    env.group.add(tag(flatFloor(kit, env, R, { x0: env.x0, x1: env.x1, z0: d.rimZ, z1: d.zBase - 0.5, y: d.floorY, tones: P.wall, mist: P.mist, k: Q.floor.mist, bump: Q.floor.bump }), "pitFloor"));
+    rimLip(kit, env, P, R, d.rimZ);
+    const anchors = meteor(kit, env, P, R, M);
+    // 晶簇：坑底（看得到的那一截：这边坑沿挡住的地方往后，让开陨石）、对面坑壁的台阶边上、这边坑沿上（灯后面）
+    const sz = (p) => A.span(R, CR.px) * d.pxAt(p), list = [], wallList = [], edge = [];
+    const zSee = Math.min(d.rimZ - 2, d.rimZ - (L.CONFIG.groundY - d.floorY) / Math.max(0.05, (env.cam && env.cam.pos ? (env.cam.pos.y - L.CONFIG.groundY) / (env.cam.pos.z - d.rimZ) : 0.5)));
+    for (let i = 0, tries = 0; list.length < CR.floor && tries < CR.floor * 30; tries++) {
+      const z = d.zBase + (zSee - d.zBase) * Math.pow(R(), 0.8), x = d.cx + (R() * 2 - 1) * (d.halfW * 0.95), p = { x, y: d.floorY, z };
+      if (Math.hypot(x - M.x, z - M.z) < M.r * 1.08) continue;   // 不长在陨石里
+      list.push(Object.assign(p, { s: sz(p) }));
+    }
+    for (let i = 0; i < CR.wall; i++) { const x = d.cx + (R() * 2 - 1) * d.halfW * 0.9, e = wall.edgeAt(1 + Math.floor(R() * Math.max(1, d.n - 1)), x), p = { x, y: e.y, z: e.z + 0.1 }; wallList.push(Object.assign(p, { s: sz(p) * 0.8 })); }
+    for (let i = 0; i < CR.edge; i++) { const s = 0.35 + R() * 0.45; edge.push({ x: d.cx + (R() * 2 - 1) * (env.hx + 8), y: L.CONFIG.groundY, z: d.rimZ - 0.1 - s * 0.5, s }); }   // 整丛都在坑边后面（灯后面）
+    const tips = crystalField(kit, env, P, R, list.concat(wallList), "crystal");
+    crystalField(kit, env, P, R, edge, "crystal");
+    // 电弧：在坑底的晶簇和陨石之间跳
+    const tex = env.keep(kit.smokeTexture()), pickArc = arcPicker(tips, anchors, d.pxAt);
+    for (let i = 0; i < (art.backdrop.arcs || 0); i++) arcEmitter(kit, env, P, i, pickArc, d.pxAt, tex);
+    return d.rimZ;
+  }
+  /** 矿底（第三采矿场）：站在坑底。战场后面不远就是陨石砸出来的坑（坑沿一排碎石和晶簇，地台外面那片地铺到这里为止），
+   *  巨大的陨石半截埋在坑里，几乎占满画面上半截（发紫光）；坑里、坑沿上、战场两边后面到处是紫色晶簇；陨石后面远处是一级级往上的坑壁（暗）；
+   *  前景左右两角几块石头；几处时不时跳紫色电弧（晶簇 ↔ 陨石）。返回 groundEdge（陨石坑的坑沿） */
+  function floor3Scene(kit, env, art, P, R, b) {
+    const Q = PIT3.floor, CR = CRYSTAL.floor, d = mine3Dims("floor", b, env.cam), M = d.meteor, gY = L.CONFIG.groundY;
+    const wall = pitWall(kit, env, wall3Q(Q, d), P, R, d, []);
+    env.group.add(wall.mesh);
+    env.group.add(tag(flatFloor(kit, env, R, { x0: env.x0, x1: env.x1, z0: d.rimZ, z1: d.zBase - 0.5, y: d.floorY, tones: P.wall, mist: P.mist, k: Q.floor.mist, bump: Q.floor.bump }), "pitFloor"));
+    rimLip(kit, env, { rock: P.wall }, R, d.rimZ);
+    const anchors = meteor(kit, env, P, R, M);
+    const sz = (p) => A.span(R, CR.px) * d.pxAt(p), pit = [], lip = [], side = [];
+    for (let i = 0, tries = 0; pit.length < CR.pit && tries < CR.pit * 30; tries++) {   // 坑里：陨石周围（不长在陨石里，不过坑沿）
+      const a = R() * Math.PI * 2, dist = M.r * (1.1 + R() * 1.4), p = { x: M.x + Math.cos(a) * dist * 1.4, y: d.floorY, z: M.z + Math.sin(a) * dist * 0.7 }, s = sz(p);
+      if (p.z + s > d.rimZ - 0.6 || p.z < d.zBase || Math.hypot(p.x - M.x, p.z - M.z) < M.r * 1.04 + s * 0.6) continue;
+      pit.push(Object.assign(p, { s }));
+    }
+    // 坑沿上、战场两边后面（横着在战场外面）：整丛都在坑沿后面（灯后面）
+    for (let i = 0; i < CR.lip; i++) { const x = env.cx + (R() * 2 - 1) * (env.hx + 6), s = Math.min(1.1, sz({ x, y: gY, z: d.rimZ }) * 0.7); lip.push({ x, y: gY, z: d.rimZ - 0.2 - s * 0.95, s }); }
+    for (let i = 0; i < CR.side; i++) { const sd = i % 2 ? 1 : -1, s = 0.5 + R() * 0.6; side.push({ x: env.cx + sd * (env.hx + 1.6 + R() * 5), y: gY, z: d.rimZ - 0.2 - s * 0.95 - R() * 0.6, s }); }
+    const tips = crystalField(kit, env, P, R, pit, "crystal");
+    crystalField(kit, env, P, R, lip.concat(side), "crystal");
+    if (art.backdrop.fore) foreRocks(kit, env, P, R, b, FORE[art.backdrop.fore]);
+    const tex = env.keep(kit.smokeTexture()), pickArc = arcPicker(tips, anchors, d.pxAt);
+    for (let i = 0; i < (art.backdrop.arcs || 0); i++) arcEmitter(kit, env, P, i, pickArc, d.pxAt, tex);
+    return d.rimZ;
+  }
+
   /* ---------- 挂钩：远景 ---------- */
   /** 天边画的远景：矿外用以前采矿场的那条（远处的厂区 + 坑壁），在对面坑沿后面露出来（低镜头时）；矿内 / 矿底被坑壁整个挡住，用以前的 */
   function band(kit, colors, seed, a) {
-    return a.art.depth === "rim" ? kit.bandTexture("mine", colors, seed) : null;
+    return a.art.depth === "rim" || a.art.depth === "rim3" ? kit.bandTexture("mine", colors, seed) : null;
   }
   /** 中景、矿坑、战场周围的装饰、环境动画（hd2d-backdrop.js · buildBackdrop 交过来）：返回 { groundEdge } */
   function backdrop(kit, env, a) {
@@ -1047,14 +1507,17 @@
     if (art.depth === "rim") return { groundEdge: rimScene(kit, env, art, P, R, b) };
     if (art.depth === "mid") return { groundEdge: midScene(kit, env, art, P, R, b) };
     if (art.depth === "floor") floorScene(kit, env, art, P, R, b);
+    if (art.depth === "rim3") return { groundEdge: rim3Scene(kit, env, art, P, R, b) };
+    if (art.depth === "floor3") return { groundEdge: floor3Scene(kit, env, art, P, R, b) };
     return {};
   }
-  /** 天幕挪到多远（hd2d-backdrop.js 建天幕前问）：大矿坑的天幕在对面坑壁后面 PIT.sky；别的场景照旧（null） */
+  /** 天幕挪到多远（hd2d-backdrop.js 建天幕前问）：大矿坑的天幕在对面坑壁后面 PIT.sky、第三采矿场的在坑壁后面 PIT3.sky；别的场景照旧（null） */
   function skyGap(bounds, cam, a) {
+    if (a.art.backdrop && a.art.backdrop.pit3) return mine3Dims(a.art.backdrop.pit3, bounds, cam).sky;
     return PIT[a.art.pit] ? pitDims(PIT[a.art.pit], bounds, cam).sky : null;
   }
 
   const pack = { name: "mine", scenes: SCENES, grounds: GROUNDS, art: ART, textures: TEXTURES, decals: DECALS, zone, band, backdrop, skyGap };
   A.add(pack);
-  return Object.assign({ PALETTE, PIT, LIFT, WALLS, BERM, FORE, FLOOR, GLOW, AMBIENT, zonePlan, seedOf, pitDims }, pack);
+  return Object.assign({ PALETTE, PIT, LIFT, WALLS, BERM, FORE, FLOOR, GLOW, PIT3, METEOR, CRYSTAL, AMBIENT, zonePlan, seedOf, pitDims, mine3Dims, crystalPoses, domeOf }, pack);
 });
