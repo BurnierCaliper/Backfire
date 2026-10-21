@@ -40,6 +40,63 @@
     return `<div class="tr-row tr-payer">由谁付 <select data-payer>${opts.map(([k, n]) => `<option value="${esc(k)}"${k === payer ? " selected" : ""}>${esc(n)}</option>`).join("")}</select>
       <span class="r-hint">买东西、修理、升级、改装、制作、兑换都从这里扣钱。</span></div>`;
   }
+  /* ---------- 商店 · 买 / 卖页签（shop-sell-ui.js；卖出视图 trpgShopSellFor(id, isGM)，指令 shopSell / shopBuyback 走 OnlineGame.submit） ---------- */
+  function trpgSellView() { try { return typeof trpgShopSellView === "function" ? trpgShopSellView(null) : null; } catch (_) { return null; } }
+  let sellSeller = "party";   // 主持人卖东西 / 回购记在谁名下（「谁卖」选单，默认队伍公账）
+  function sellSellerHtml() {
+    const opts = [["party", `队伍公账（${trpgPurse("party")}）`]].concat(heroes().filter(h => !h.dead).map(h => [h.kit, `${h.name}（${trpgPurse(h.kit)}）`]));
+    if (!opts.some(([k]) => k === sellSeller)) sellSeller = "party";
+    return `<div class="tr-row tr-payer">谁卖 <select data-ss-seller>${opts.map(([k, n]) => `<option value="${esc(k)}"${k === sellSeller ? " selected" : ""}>${esc(n)}</option>`).join("")}</select>
+      <span class="r-hint">卖得的钱进队伍公账；回购只能由卖的人从他的钱包买回。</span></div>`;
+  }
+  function trpgSellModel(v) {
+    const hs = heroes().filter(h => !h.dead).map(h => ({ kit: h.kit, name: h.name, purse: trpgPurse(h.kit) }));
+    return ShopSellUI.model(v, { key: "trpg-gm", heroes: hs, actor: sellSeller, canAct: () => true, money: k => trpgPurse(k || "party") });
+  }
+  const sellName = k => k === "party" ? "队伍公账" : ((heroes().find(h => h.kit === k) || {}).name || k);
+  /** 结果提示按 shopSell.last.seq 只弹一次（联机时房主的 submit 可能因为战斗演出排队，回执不可靠） */
+  let gmSellSeen = null;
+  function gmSellToast(v) {
+    const last = v && v.last;
+    if (!v) { gmSellSeen = null; return; }          // 离开商店：忘掉（seq 不会重复）
+    if (gmSellSeen === null) { gmSellSeen = last ? last.seq : 0; return; }   // 刚打开：旧结果不重播
+    if (!last || last.seq <= gmSellSeen) return;
+    gmSellSeen = last.seq;
+    ShopSellUI.toast(ShopSellUI.toastText(last, sellName));
+  }
+  /** 主持人卖 / 买回：联机时走 OnlineGame.submit（和诊所一样，hotseat-game.js · shopSell / shopBuyback）；单机直接 trpg 指令。失败显示原因 */
+  async function trpgSellSubmit(cmd) {
+    const msg = cmd.action === "sellItem" ? { type: "shopSell", kit: cmd.kit, id: cmd.id, qty: cmd.qty, owner: cmd.owner } : { type: "shopBuyback", kit: cmd.kit, token: cmd.token };
+    if (gmSellSeen === null) { const b = (trpgSellView() || {}).last; gmSellSeen = b ? b.seq : 0; }
+    try {
+      if (typeof OnlineGame !== "undefined" && OnlineGame.isHost && OnlineGame.isHost()) {
+        const r = await OnlineGame.submit(msg);
+        if (r && r.ok === false) throw new Error(r.error || r.msg || "没做成");
+      } else {
+        pushUndo();
+        const res = Commands.dispatch(Object.assign({ type: "trpg", action: msg.type }, msg, { type: "trpg" }));
+        if (res && res.msg) { log.push({ stamp: stampNow(), lines: ["💰 " + res.msg] }); saveLog(); }
+        save();
+      }
+      if (window.Sfx) Sfx.ui("coin");
+    } catch (e) { ShopSellUI.toast(ShopSellUI.toastText({ ok: false, msg: e.message || String(e) })); }
+    render();
+  }
+  function tabBuyShop() {
+      const groups = [];
+      HANDBOOK_SHOP.forEach(r => { if (groups.indexOf(r.group) < 0) groups.push(r.group); });
+      return payerHtml() + `<p class="r-hint">价格照手册物品表。「买」扣奎支；「给予」是主持人直接给（战利品、奖励），不扣钱。</p>` +
+        groups.map(g => `<h3>${esc(g)}</h3><div class="shop">${HANDBOOK_SHOP.filter(r => r.group === g).map(r => {
+          const id = r.give.item;
+          const have = r.give.water ? `${ledgerWater()} ml` : `有 ${bagCount(id)}`;
+          const hint = r.note || (id && ITEM_CATALOG[id] ? ITEM_CATALOG[id].hint : "");
+          return `<div class="shop-row"><span class="s-name">${esc(trpgShopName(r))}${hint ? `<small>${esc(hint)}</small>` : ""}</span>
+            <span class="s-have">${have}</span><span class="s-price">${r.price}</span>
+            <input type="number" min="1" value="1" data-qty="${esc(r.key)}" style="width:52px">
+            <button class="g-btn small" data-buy="${esc(r.key)}">买</button>
+            <button class="g-btn small" data-give="${esc(r.key)}">给予</button></div>`;
+        }).join("")}</div>`).join("");
+    }
   function walletHtml() {
     const hs = heroes().filter(h => !h.dead);
     const all = [["party", "队伍公账"]].concat(hs.map(h => [h.kit, h.name]));
@@ -256,19 +313,12 @@
         <button class="g-btn" id="tr-restore">全员复原（不扣补给、不推进时间）</button>`;
     },
     shop() {
-      const groups = [];
-      HANDBOOK_SHOP.forEach(r => { if (groups.indexOf(r.group) < 0) groups.push(r.group); });
-      return payerHtml() + `<p class="r-hint">价格照手册物品表。「买」扣奎支；「给予」是主持人直接给（战利品、奖励），不扣钱。</p>` +
-        groups.map(g => `<h3>${esc(g)}</h3><div class="shop">${HANDBOOK_SHOP.filter(r => r.group === g).map(r => {
-          const id = r.give.item;
-          const have = r.give.water ? `${ledgerWater()} ml` : `有 ${bagCount(id)}`;
-          const hint = r.note || (id && ITEM_CATALOG[id] ? ITEM_CATALOG[id].hint : "");
-          return `<div class="shop-row"><span class="s-name">${esc(trpgShopName(r))}${hint ? `<small>${esc(hint)}</small>` : ""}</span>
-            <span class="s-have">${have}</span><span class="s-price">${r.price}</span>
-            <input type="number" min="1" value="1" data-qty="${esc(r.key)}" style="width:52px">
-            <button class="g-btn small" data-buy="${esc(r.key)}">买</button>
-            <button class="g-btn small" data-give="${esc(r.key)}">给予</button></div>`;
-        }).join("")}</div>`).join("");
+      if (!window.ShopSellUI) return tabBuyShop();
+      const v = trpgSellView();
+      ShopSellUI.sync("trpg-gm", !!v);
+      const sell = ShopSellUI.tabOf("trpg-gm") === "sell";
+      gmSellToast(v);
+      return `<div class="ss-host" data-ss-host="trpg-gm">${ShopSellUI.tabsHtml("trpg-gm", { sellOff: !v })}${sell ? sellSellerHtml() + ShopSellUI.html(trpgSellModel(v)) : tabBuyShop()}</div>`;
     },
     bag() {
       const items = bagList();
@@ -1305,7 +1355,9 @@
     on("tr-long", () => act(ruleCommand("campOpen", { plan: restPlan(false) })));
     on("tr-long-force", () => act(ruleCommand("campOpen", { plan: restPlan(true) })));
     on("tr-restore", () => act(ruleCommand("restore")));
-    // 商店
+    // 商店（买 / 卖页签）
+    P.querySelectorAll("[data-ss-seller]").forEach(sel => { sel.onchange = () => { sellSeller = sel.value; render(); }; });
+    P.querySelectorAll("[data-ss-host]").forEach(h => { h.onclick = e => { if (window.ShopSellUI) ShopSellUI.handle(e, trpgSellSubmit, render); }; });
     const qty = (key) => (P.querySelector(`[data-qty="${key}"]`) || {}).value || 1;
     P.querySelectorAll("[data-buy]").forEach(b => { b.onclick = () => { if (window.Sfx) Sfx.ui("coin"); act(ruleCommand("buy", { key: b.dataset.buy, qty: qty(b.dataset.buy), free: false })); }; });
     P.querySelectorAll("[data-give]").forEach(b => { b.onclick = () => act(ruleCommand("buy", { key: b.dataset.give, qty: qty(b.dataset.give), free: true })); });

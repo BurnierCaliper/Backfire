@@ -64,6 +64,7 @@ function trpgMerchantDelete(id) {
 }
 /** 开店（玩家画面同步弹出商人界面）/ 关店（id = null） */
 function trpgMerchantOpen(id) {
+  if (typeof trpgShopSellReset === "function" && (LEDGER.shopOpen || null) !== (id || null)) trpgShopSellReset();   // 离店：回购单清空（shop-sell.js）
   if (!id) { const was = trpgMerchantOpenNow(); LEDGER.shopOpen = null; return [was ? `「${was.name}」收摊了。` : "现在没有开着的商店。"]; }
   const m = trpgMerchantById(id);
   if (!m) return ["没有这个商人。"];

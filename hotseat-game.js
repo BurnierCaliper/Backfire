@@ -12,7 +12,7 @@
   const packetListeners = new Set();
   const listeners = new Set(), authorityContext = {}, actionTypes = new Set(["skill", "move", "standUp", "useItem"]);
   const automatic = new Set(["battle.supportInfo", "battle.checkSolo", "battle.rememberCampaign", "battle.loadCampaign"]);
-  const tableTypes = new Set(["checkOpen", "checkRoll", "checkClose", "attrRequest", "attrDecide", "skillRoll", "showTitle", "purseTransfer", "shopBuy", "shopRedeem", "cyberRequest", "cyberwareInstall", "cyberwareRemove"]);
+  const tableTypes = new Set(["checkOpen", "checkRoll", "checkClose", "attrRequest", "attrDecide", "skillRoll", "showTitle", "purseTransfer", "shopBuy", "shopRedeem", "cyberRequest", "cyberwareInstall", "cyberwareRemove", "shopSell", "shopBuyback"]);
   const orderTypes = new Set(["orderPick", "orderConfirm", "orderStart", "orderMove", "orderSwapAccept", "answer", "chat", ...tableTypes]);
   const copy = value => JSON.parse(JSON.stringify(value));
   const active = () => !!(enabled && configured && session && authority && !state.solo);
@@ -341,6 +341,27 @@
       if (root.GAME && GAME.rememberCampaign) GAME.rememberCampaign();
       session.chat(sender, "🦾 " + notes.join(" "));
       return { notes };
+    },
+    // 跑团卖东西 / 回购（shop-sell.js）：要有开着的店；玩家只能以自己操控的角色卖（钱进队伍公账）、回购（从自己钱包付）；主持人哪个都能
+    shopSell: c => {
+      if (typeof trpgShopSell !== "function" || typeof TRPG === "undefined" || !TRPG.active) fail("只有跑团模式有商人");
+      const kit = String(c.kit || "");
+      if (sender !== gm()) { const own = heroes().find(u => u.kit === kit); if (!own || session.ownerOf(own.id) !== sender) fail("只能以自己的角色卖东西"); }
+      let out;
+      try { out = trpgShopSell(kit || null, String(c.id || ""), c.qty, c.owner); } catch (e) { fail(e.message); }
+      if (root.GAME && GAME.rememberCampaign) GAME.rememberCampaign();
+      session.chat(sender, "💰 " + out.msg);
+      return out;
+    },
+    shopBuyback: c => {
+      if (typeof trpgShopBuyback !== "function" || typeof TRPG === "undefined" || !TRPG.active) fail("只有跑团模式有商人");
+      const kit = String(c.kit || "");
+      if (sender !== gm()) { const own = heroes().find(u => u.kit === kit); if (!own || session.ownerOf(own.id) !== sender) fail("只能用自己角色的钱包回购"); }
+      let out;
+      try { out = trpgShopBuyback(kit || null, String(c.token || "")); } catch (e) { fail(e.message); }
+      if (root.GAME && GAME.rememberCampaign) GAME.rememberCampaign();
+      session.chat(sender, "💰 " + out.msg);
+      return out;
     },
     shopRedeem: c => {
       if (typeof trpgMerchantRedeem !== "function" || typeof TRPG === "undefined" || !TRPG.active) fail("只有跑团模式有商人");
