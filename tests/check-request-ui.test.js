@@ -17,7 +17,7 @@ async function open(t, mobile = false) {
   t.after(() => context.close());
   const page = await context.newPage(), errors = []; page.on("pageerror", e => errors.push(e.message));
   await page.setContent('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><body><section id="scr-title"><div class="t-menu"></div></section><main class="g-app">Original host battlefield</main></body>');
-  for (const file of ["game.css", "skin.css", "online.css"]) await page.addStyleTag({ path: path.resolve(__dirname, "..", file) });
+  for (const file of ["game.css", "skin.css", "online.css", "workshop.css"]) await page.addStyleTag({ path: path.resolve(__dirname, "..", file) });
   await page.evaluate(() => {
     const players = [{ id: "gm", name: "主持人", gm: true, online: true }, { id: "p1", name: "甲", online: true }, { id: "p2", name: "乙", online: true }];
     const unit = (id, name, isPlayer, zone) => ({ id, name, isPlayer, zone, level: 1, ap: 2, apMax: 2, bonus: 1, bonusMax: 1, def: 6, defMax: 6, layers: [{ type: "flesh", current: 30, max: 35 }], statuses: {}, resources: { nano: 2 } });
@@ -137,6 +137,10 @@ test("主持人：有待处理申请时左下角「检定申请 · N」；浮层
     { id: "r2", unitId: "b", unitName: "绯秋", operatorId: "p2", prof: "说服", note: "", status: "pending" }]);
   await page.waitForSelector(".crq-pill:not([hidden])");
   assert.equal(await page.locator(".crq-pill").innerText(), "检定申请 · 2");
+  const pill = await page.locator(".crq-pill").evaluate(e => { const r = e.getBoundingClientRect(), cs = getComputedStyle(e); return { w: r.width, h: r.height, left: r.left, bottom: innerHeight - r.bottom, vw: innerWidth, vh: innerHeight, bg: cs.backgroundColor, z: cs.zIndex }; });
+  assert.ok(pill.w < pill.vw / 2 && pill.h < pill.vh / 2, `左下角的小按钮，不能变成整屏遮罩：${JSON.stringify(pill)}`);
+  assert.ok(pill.left <= 20 && pill.bottom <= 20, `贴在左下角：${JSON.stringify(pill)}`);
+  assert.equal(pill.z, "95");
   await page.click(".crq-pill");
   const r1 = page.locator('[data-req-id="r1"]');
   assert.match(await r1.innerText(), /红玉「侦察」二级熟练（看看门后） · 甲/);

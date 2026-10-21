@@ -375,6 +375,7 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
   - 只用 `view.checkRequests` / `view.checks`（online-view.js 白名单），不画任何坚毅生命数值；浮层带 `.ovl`，按钮 44px，390px 不横向溢出。联机单局不出现。
   - 单机热座（同一台设备）没有这条入口：大家看同一块屏幕，主持人直接在「检定」页发起即可。
   - 新测试 `tests/check-request-ui.test.js`。
+  - **修（@claude 审查）**：主持人左下角「检定申请 · N」按钮以前误带 `.ovl`，`workshop.css` 后加载把它变成整屏遮罩（z-index 8500、inset 0），一有申请主持人就点不到下面的画面。现在按钮不带 `.ovl`，`online.css` 显式写 `inset: auto auto 12px 12px`；测试按 game.html 的顺序加载 `workshop.css`，并断言按钮在左下角、没有盖满屏幕。
 
 - **联机跑团：主持人暗骰检定、玩家主动发起检定、战斗模板「Lv随队」**（策划定；hotseat.js · `openCheck` / `rollCheckFor` / `requestCheck` / `decideCheck` / `tableNote`；hotseat-game.js · `checkSpec` / `checkRequest` / `checkDecide`；online-view.js · `checks` / `checkRequests` 白名单；online-game.js；battle-templates.js · `btPartyLevel` / `btOneEncounter`；trpg-ui.js、online-ui.js 只加了最小入口；测试 tests/trpg-online-rules.test.js）
   - **暗骰**：以前只有小队频道的 🎲 能暗骰，而且只能选英雄；主持人「检定」页发起的检定没有暗骰，结果玩家都看得到。现在检定页可勾「暗骰」（`checkOpen` 带 `secret: true`，只有主持人能用）：目标可以是任何在场单位（敌人等没有角色卡的按没有熟练算），只有主持人能掷；检定本身、结果和频道里的记录都标 `secret`，`online-view.js` 不发给玩家。

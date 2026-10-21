@@ -74,7 +74,7 @@
   function mount(o) {
     const doc = root.document;
     const box = doc.createElement("section"); box.id = "online-check-req"; box.className = "ol-ui ol-overlay ol-bag ovl crq"; box.setAttribute("role", "dialog"); box.setAttribute("aria-label", "申请检定"); box.hidden = true;
-    const pill = doc.createElement("button"); pill.type = "button"; pill.className = "ol-ui g-btn ol-button ol-primary ovl crq-pill"; pill.dataset.crq = "open"; pill.hidden = true;
+    const pill = doc.createElement("button"); pill.type = "button"; pill.className = "ol-ui g-btn ol-button ol-primary crq-pill"; pill.dataset.crq = "open"; pill.hidden = true;
     doc.body.appendChild(box); doc.body.appendChild(pill);
     const form = { unit: "", prof: "", note: "" }, diff = {};
     let open = false, busy = false, last = "";
