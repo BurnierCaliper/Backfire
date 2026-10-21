@@ -14,6 +14,7 @@
  *       酸雨：雨丝是 3D 的；2D 的涟漪落在地台顶面上（rippleAt：按这一刻的镜头投到屏幕上，weather-fx.js 的 spot），按俯角压扁、越近越大，不飘在天上；
  *             近景 / 特写只落在看的那个区（别的区被景深糊掉了）
  *       雪 / 酷暑 / 微光 / 相位：3D 是场景里的粒子（雪花、火星、光点），2D 是贴着画面的那一层（前景的雪、底下升腾的热浪、四角的光晕、谐波雾带），一前一后
+ *   - 室内的场景（下水道，#241）不叠天上来的天气：sync 先问区域场景的美术这个场景换成哪种（indoor → hd2d-scene-art.js · weather）
  * 3D 那边配合的（沙暴的雾更浓更黄、远景蒙上沙色、远处景深更糊、沙粒顺着风横飞）在 hd2d-weather.js 的 WEATHER.sand 和 hd2d-scene.js。
  * #251（主人试玩反馈 · 三续：「沙暴还不够明显——要有旧画面那种翻滚的大团沙雾」）：正式画面的沙雾套上来以后和沙地、沙暴的雾几乎一个颜色，看不见。
  * 沙暴时 2D 层里再铺一层原型自己的沙雾（.hd2d-sand：整层蒙的、远处更浓的一层、一团团顺着风飘过的，见 sandOf / hazeAt / sandPuffs），
@@ -226,6 +227,13 @@
     return null;
   }
 
+  /** 室内的场景（下水道）不叠天上来的天气（#241）：区域场景的美术说这个场景换成哪种（hd2d-scene-art.js · weather，按布局的地面主题）；
+   *  没加载 / 没有布局 = 原样。layout 不给就用 s.layout */
+  function indoor(s, layout) {
+    const A = root.HD2DSceneArt, lay = layout || (s && s.layout);
+    return s && lay && A && typeof A.weather === "function" ? Object.assign({}, s, { weather: A.weather(lay.ground, s.weather).wfx }) : s;
+  }
+
   /* ---------- 页面用：在 #stage 里放 2D 层 ---------- */
   /** stage = #stage（3D 画布和铭牌层都在里面）；opts = { lens(), view(), flash(), random }（见文件头；random = 酸雨的涟漪、沙暴的一团团沙雾放在哪用的随机数，
    *  不给用 Math.random）。返回 { host, sync(s), plan（上一次的）, dispose() } */
@@ -240,9 +248,9 @@
     let last = null, layout = null, raf = 0, flashNow = -1, sandEl = null, sandDir = "";
     const spot = () => rippleAt(layout, opts.lens ? opts.lens() : null, opts.random, opts.view ? opts.view() : null, last && last.rippleZones);
     function sync(s) {
-      const p = plan(s), WF = root.WeatherFx;
-      last = p;
       if (s && s.layout) layout = s.layout;
+      const p = plan(indoor(s, layout)), WF = root.WeatherFx;
+      last = p;
       // weather-fx.css 的夜晚样子写在 .g-app.is-night .wfx-… 上（正式画面的 #g-app）：这一层也带上这两个 class。
       // 不写 data-weather，所以 weather-fx.css 里给正式画面面板换色的 .g-app[data-weather=…] 那些规则一条都不会套到原型上
       host.classList.toggle("g-app", p.night);
@@ -313,5 +321,5 @@
     };
   }
 
-  return { WFX, windOf, screenDir, elevationOf, plan, sandOf, hazeAt, sandPuffs, rippleAt, create };
+  return { WFX, windOf, screenDir, elevationOf, plan, indoor, sandOf, hazeAt, sandPuffs, rippleAt, create };
 });

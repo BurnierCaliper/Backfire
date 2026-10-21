@@ -38,7 +38,7 @@ const L = window.HD2DLayout;
 /** 三段镜头（hd2d-camera.js，普通脚本，紧跟着布局加载）：每一段的俯角、视野、距离、景深、过渡都在它的 CAMERA 里 */
 const C = window.HD2DCamera;
 /** 区域场景的美术（#242，hd2d-scene-art.js）：场景自己的光照 / 调色（矿内、矿底压暗；矿底不分白天黑夜）。没加载就照旧按光影主题 */
-const ART = window.HD2DSceneArt || { lighting: () => null };
+const ART = window.HD2DSceneArt || { lighting: () => null, weather: (k, w) => ({ fx: w || "none" }) };
 
 /* ---------- 配置 ---------- */
 const CAM = {
@@ -518,12 +518,13 @@ export function createHd2dScene(container, options) {
     }
     state.boardSig = boardSig(layout);
     state.bounds = layout.bounds;
-    const plan = weatherPlan(state.meta.weather || "none", state.meta.theme);   // 雷鸣：远景要画乌云
+    const fx = ART.weather(layout.ground, state.meta.weather || "none").fx;   // 室内的场景（下水道）不画天上来的天气（#241，hd2d-scene-art.js · weather）
+    const plan = weatherPlan(fx, state.meta.theme);   // 雷鸣：远景要画乌云
     const look = L.GROUNDS[layout.ground] || {};   // 远景跟着区域（沙漠 → 沙丘，采矿场 → 岩壁，城市 → 楼群）
     syncBackdrop(layout, state.meta.backdrop || look.backdrop || backdropOf(state.meta.theme), plan, look.skyline);
     // 天气：闪电从默认镜头的画面上沿外面劈下来；远处的雷劈在哪问远景
     weather.setBounds(layout.bounds, { camera: layout.camera, farPoint: state.backdrop.farPoint });
-    weather.set(state.meta.weather || "none", state.meta.theme);
+    weather.set(fx, state.meta.theme);
     syncPlates();
     // 特写的单位不在了（被打倒、藏起来）：退出特写，镜头平滑拉回正常的近景（#237）
     const wasClose = state.close, reset = newBoard || state.wantFit;
@@ -539,12 +540,12 @@ export function createHd2dScene(container, options) {
    *  沙暴时整片远景蒙上沙色（dust，天边也接上沙黄的雾色，#240）；skyline = 楼群的高度倍数 */
   function syncBackdrop(layout, kind, plan, skyline) {
     const c = layout.camera, storm = !!plan.storm, T = themeNow(), dust = dustOf(T, plan.tint);   // themeNow：场景有自己的光照（state.lit，#242）就用它
-    const sig = [kind, skyline || 1, state.meta.theme, storm ? "storm" : "", dust ? ["dust", dust.color, dust.sky, dust.haze, dust.veil, dust.sun].join(",") : "",
+    const sig = [kind, skyline || 1, state.meta.theme, state.meta.weather || "none", storm ? "storm" : "", dust ? ["dust", dust.color, dust.sky, dust.haze, dust.veil, dust.sun].join(",") : "",
       Object.values(layout.bounds).map(v => Math.round(v)).join(","), c ? [c.dist, c.pos.y, c.pos.z].map(v => Math.round(v)).join(",") : ""].join("|");
     if (sig === state.backdropSig) return;
     state.backdropSig = sig;
     if (state.backdrop) { scene.remove(state.backdrop.group); state.backdrop.dispose(); }
-    state.backdrop = buildBackdrop(kind, layout.bounds, state.meta.theme, c, { sky: T.sky, fog: storm || dust ? fogColorOf(T, plan.tint).getHex() : T.fog, storm, skyline, dust });
+    state.backdrop = buildBackdrop(kind, layout.bounds, state.meta.theme, c, { sky: T.sky, fog: storm || dust ? fogColorOf(T, plan.tint).getHex() : T.fog, weather: state.meta.weather || "none", storm, skyline, dust });
     scene.add(state.backdrop.group);
   }
   const boardSig = (l) => l.zones.map(z => [z.id, Math.round(z.cx * 10), Math.round(z.cz * 10)].join(",")).join(";");
