@@ -368,6 +368,11 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **过载反伤打死的敌人算过载者的击杀**（主人 10/21 定，Closes #203；effects.js · `afterDamageTaken`；测试 tests/issue-203.test.js）
+  - 以前：单位带过载、装甲血量被近距离攻击时反伤 50% 闪电，`applyTypedDot(攻击者, …)` 不传 `by`，按 #114 原规则「算行动中的人 / 不改最后一击」。反伤多半发生在敌人回合，所以反伤打死的敌人没人拿击杀，或算成之前打过它的别的玩家（#187 改格挡反伤时这一处没改）。
+  - 现在：过载者是玩家时传 `{ by: 过载者.id }`，和 #187 的格挡反伤一样，反伤算过载者造成的伤害，打死算过载者的击杀；这个敌人之前被别的玩家打过也算过载者。
+  - 不变：过载者不是玩家（敌人带过载反伤玩家、敌人之间的反伤）照旧，不传 `by`。反伤的触发条件和数值（装甲受近距离攻击、50%、闪电）没动。
+  - 测试：玩家带过载被近战打、反伤打死攻击者 → 击杀算这名玩家；那个敌人之前被柯尔特打过 → 仍算过载者（这两条在旧代码上失败）；过载者不是玩家照旧（敌人带过载照样反伤玩家；敌人之间的反伤打死敌人，照旧算之前最后打过它的玩家）。
 - **分步选择的技能：真正打出去之前随时能放弃，界面补上明显的「放弃（Esc）」按钮**（issue #188；game.js · `showPickBar` / `canGiveUp` / `pickUnit` / `pickZone`，app.js · `renderSkillFlow` 与 Esc 键；测试 `tests/skillflow-giveup.test.js`）。
   - **核对结果**：战斗界面（单机、热座、联机玩家端共用 game.js）的分步选择一直是在本地把每一步的选择攒进 `picks`，最后一步选完才发**一条**技能指令，中途不扣行动点 / 附赠 / 资源、不换刀头、不改架势和标记、不记行动分；联机玩家端因此没有会残留在房主那边的 `skillFlow`。拆装部件的刀头也是在结算（`runSkill`）里才换，不是分步中途换的。计算器面板的分步（`beginSkillFlow`）放弃走 `cancelSkillFlow`，也不碰别的状态。
   - **以前**：选目标 / 选区域时只有「右键 / 点空白处取消」的文字提示，没有按钮；计算器面板按 Esc 不会放弃分步。**现在**：战场上点选目标、选区域的每一步，提示栏旁边都有「放弃（Esc）」按钮（Esc、右键照旧）；计算器面板的按钮改名「放弃（Esc）」，Esc 也能放弃。
@@ -376,7 +381,7 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 - **打中立生物的得分降到 1/4；格挡反伤打死的敌人算格挡者的击杀**（主人 10/21 定，Closes #187；app.js · `SCORE_RULES.neutralMul` / `scoreTargetMul` / `applyCombat` / `scoreEnvHit` / `scoreWeatherHelp` / `trackHealBy` / `noteSideDamage` / `explodeHigh` / 铁壁挡攻击 / `performAssistBlock`；测试 tests/issue-187.test.js）
   - 中立生物（尘虫、管虫）：以前打它的伤害分、击破分、失衡分、溢出分（含环境分、天气加成）和打普通敌人一样满额，一只尘虫可以白送 50 分失衡分。现在这些分都只拿原来的 1/4（`SCORE_RULES.neutralMul = 0.25`，向下取整）。基准分照旧不算中立生物，击杀分 / 经验 / 掉落规则不变。
   - 格挡反伤：以前雷鸣下成功的协助格挡反伤、哔哩哩格挡反伤、铁壁的过载 / 雷鸣反伤都是 `applyTypedDot(attacker, …)` 不传 `by`，又发生在敌人回合，所以反伤打死的敌人没人拿击杀（或算成之前打过它的别人）。现在这几处都传 `{ by: 格挡者 }`，按 #114 的击杀归属，反伤算格挡者造成的伤害，打死算他的击杀（铁壁算川川）。
-  - 没改：`effects.js` 的过载反伤是「被近战打时」触发、不是格挡，仍按 #114 原规则（没传 `by`，算行动中的人 / 不改最后一击）。
+  - 没改：`effects.js` 的过载反伤是「被近战打时」触发、不是格挡，仍按 #114 原规则（没传 `by`，算行动中的人 / 不改最后一击）。**（#203 主人定「算」，已改：过载者是玩家时算过载者的击杀，见上面「过载反伤打死的敌人算过载者的击杀」）**
 - **#157 补查「需要作者确认」四条的决定**（Closes #186；hotseat.js · `openAsk` / `tick` / `extendAsk`；hotseat-game.js · `requestAsk` / `checkpoint` / `trpgOwnKit` / `smithUpgrade` / `workshopCraft` / `workshopSalvage`；trpg.js · `TRPG.smithOpen` / `workshopOpen` / `trpgSmithPacket` / `trpgSmithUpgrade` / `trpgWorkshopPacket` / `trpgWorkshopCraft` / `trpgWorkshopSalvage`；trpg-commands.js · `smithOpen` / `workshopOpen`；trpg-ui.js；online-game.js · `rawPacket` / `trpgPacketsFor`；online-view.js · `projectSmith` / `projectWorkshop`；online-ui.js；gm-commands.js · `patchUnit` / `edit` / `gm.copyUnit`；online-gm-ui.js；测试 `hotseat-bridge.test.js`、`trpg-online-smith-workshop.test.js`、`gm-unit-editor-parity.test.js`）
   - **主持人危险按钮的二次确认 / 撤销**：主人定「不用」，**不做**。没有改代码，backlog 里标成「已定：不做」。
   - **联机玩家端的武器升级 / 工坊 / 商人入口**：
