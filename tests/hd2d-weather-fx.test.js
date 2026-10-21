@@ -628,7 +628,7 @@ test("原型页（#240）：2D 层拿到这一刻的镜头（酸雨的涟漪落�
   const html = fs.readFileSync(path.join(DIR, "index.html"), "utf8"), mod = /<script type="module">([\s\S]*?)<\/script>/.exec(html)[1];
   assert.ok(/wfx = WX\.create\(\$\("stage"\), \{ lens: \(\) => HD2DFx\.lens\(sc\.lensNow\(\)\), view: \(\) => sc\.view\(\), flash: \(\) => sc\.flash \}\)/.test(mod), "镜头、画面、闪光交给 2D 层");
   assert.ok(/reduced: !sc\.motion, layout: wfxLayout/.test(mod), "布局交给 2D 层");
-  assert.ok(/params\.get\("weather"\)/.test(mod) && /st\.weather = weatherPick\.weather/.test(mod) && /st = demo\.make\(pageRegion\(\)\);\s*pickWeather\(\);/.test(mod), "?weather= 写进战斗状态（换演示也带着）");
+  assert.ok(/params\.get\("weather"\)/.test(mod) && /st\.weather = weatherPick\.weather/.test(mod) && /st = demo\.make\(pageRegion\(\)\);\s*(?:placeLook\(\);\s*)?pickWeather\(\);/.test(mod), "?weather= 写进战斗状态（换演示也带着）");
   assert.ok(/sandDirOptions\(\)\.includes\(weatherPick\.wind\)/.test(mod), "?wind= 只认这块棋盘能用的风向");
   // 规则环境里照页面的做法把演示战场改成酸雨再投影：投影里是改过的天气，2D 层照它叠
   const ctx = H.load(), st = DEMOS.cross(ctx.BattleSim);
