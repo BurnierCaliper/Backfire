@@ -360,13 +360,15 @@ export function createHd2dScene(container, options) {
       ? chips.slice(0, PLATE.bigChips).map(c => `<em style="background:${colorOf(c.key)}">${esc(c.label)}</em>`).join("") + (chips.length > PLATE.bigChips ? `<em class="pl-x">+${chips.length - PLATE.bigChips}</em>` : "")
       : `<span class="pl-none">无状态</span>`;
     const defText = `架势 ${p.def.cur}/${p.def.max}${p.def.big ? "+" : ""}`;
-    return `<div class="pl-more" role="tooltip"><div class="pl-stats"><b>Lv${p.level}</b><span>ATK ${p.atk}</span><span>血量 ${p.hp.cur}/${p.hp.max}</span><span>${defText}</span></div>${more ? `<div class="pl-chips">${more}</div>` : ""}</div>
+    // 行动点 / 附赠（#238，画法照 unit-card.js）：紧凑铭牌贴在卡片右上角，放大的写在名字那一行；HTML 在 hd2d-ui.js · econHtml
+    const UIX = window.HD2DUI, econ = (big) => (UIX ? UIX.econHtml(p.econ, big) : ""), econText = UIX && p.econ ? `<span>${esc(UIX.econText(p.econ))}</span>` : "";
+    return `<div class="pl-more" role="tooltip"><div class="pl-stats"><b>Lv${p.level}</b><span>ATK ${p.atk}</span><span>血量 ${p.hp.cur}/${p.hp.max}</span><span>${defText}</span>${econText}</div>${more ? `<div class="pl-chips">${more}</div>` : ""}</div>
       <div class="pl-big" data-hit tabindex="0" role="button" aria-label="${esc(p.name)}"><span class="pl-mark" aria-hidden="true"></span>
-      <div class="pl-r1"><span class="pl-nm">${esc(p.name)}</span><span class="pl-lv">Lv${p.level}</span></div>
+      <div class="pl-r1"><span class="pl-nm">${esc(p.name)}</span>${econ(true)}<span class="pl-lv">Lv${p.level}</span></div>
       <div class="pl-r2"><div class="pl-bar">${segs}</div><span class="pl-hp">${p.hp.cur}/${p.hp.max}</span></div>
       <div class="pl-r3"><span class="pl-def">${pips(PLATE.bigPips, false)}</span><span class="pl-dn">${defText}</span><span class="pl-atk">ATK ${p.atk}</span></div>
       <div class="pl-r4">${tags}</div></div>
-      <div class="pl-card" data-hit tabindex="0" role="button" aria-label="${esc(p.name)}"><span class="pl-mark" aria-hidden="true"></span><span class="pl-name">${esc(p.name)}</span>
+      <div class="pl-card" data-hit tabindex="0" role="button" aria-label="${esc(p.name)}"><span class="pl-mark" aria-hidden="true"></span>${econ(false)}<span class="pl-name">${esc(p.name)}</span>
       <div class="pl-mid">${dots ? `<span class="pl-dots">${dots}</span>` : ""}<div class="pl-bar">${segs}</div><span class="pl-def">${def}</span></div></div>`;
   }
 

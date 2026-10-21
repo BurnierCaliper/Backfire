@@ -53,6 +53,22 @@ body { position: fixed; inset: 0; user-select: none; }
 .pl-def b { display: block; width: 7px; height: 7px; transform: rotate(45deg) scale(.82); border: 1.5px solid #6a5a3a; box-sizing: border-box; }
 .pl-def b.on { background: var(--hazard); border-color: var(--hazard); }
 .pl-def .n { font-size: 10px; line-height: 10px; color: var(--hazard); white-space: nowrap; }
+/* 行动点 / 附赠动作（#238，画法照 unit-card.js：圆点 = 行动点，三角 = 附赠；还有的实心，用掉的空心 / 灰）。
+ * 紧凑铭牌：贴在卡片右上角、压着上边框的一小块胶带（不占名字和血条的地方，鼠标穿过去）；近景放大的铭牌（.in）：写在名字那一行 */
+.pl-econ {
+  position: absolute; right: 6px; top: -8px; z-index: 1; display: flex; gap: 2px; align-items: center; height: 10px; padding: 0 3px;
+  background: var(--oil); border: 1px solid var(--side); border-radius: 3px; box-shadow: 1px 1px 0 rgba(0, 0, 0, .6); pointer-events: none; --econ: var(--side);
+}
+.pl-econ i { display: block; flex: none; box-sizing: border-box; }
+.pl-econ i.ap { width: 6px; height: 6px; border-radius: 50%; border: 1px solid var(--econ); }
+.pl-econ i.ap.on { background: var(--econ); }
+.pl-econ i.bn { width: 0; height: 0; border-left: 3.5px solid transparent; border-right: 3.5px solid transparent; border-bottom: 6px solid #6a6258; }
+.pl-econ i.bn.on { border-bottom-color: var(--econ); }
+.pl-econ b { font: 900 9px/1 var(--ui-sans); color: var(--econ); white-space: nowrap; }
+.pl-econ.in { position: static; align-self: center; height: auto; padding: 0; gap: 3px; background: none; border: 0; box-shadow: none; pointer-events: auto; }
+.pl-econ.in i.ap { width: 9px; height: 9px; border-width: 1.5px; }
+.pl-econ.in i.bn { border-left-width: 5px; border-right-width: 5px; border-bottom-width: 9px; }
+.pl-econ.in b { font-size: 11px; }
 /* 当前行动：描金边、发光，名字左边一个金色小箭头（在铭牌框里，不伸到别的铭牌上） */
 .pl-mark { display: none; position: absolute; left: -2px; top: 6px; width: 0; height: 0; border-top: 5px solid transparent; border-bottom: 5px solid transparent; border-left: 7px solid var(--hazard);
   filter: drop-shadow(1px 1px 0 var(--ink)); animation: pl-nudge 1s ease-in-out infinite; }
