@@ -368,6 +368,14 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **每个敌人独立的制作材料掉落表**（PR #172，Closes #170；items.js · `ENEMY_DROPS` / `ENEMY_DROP_ALIAS` / `enemyDropTable` / `rollEnemyDrops` / `enemyDropExpected` / `enemyDropFoes`；rogue.js · `rollMaterialDrops`；app.js · `settleBattleRewards` / `trpgEnemyMaterials` / `mergeBattleDrops`；bestiary.js · `bestiaryEntries().drops`；online-view.js · `projectDrops`；测试 tests/craft-materials.test.js）
+  - 以前：按敌人属性 / 层归类（`craftClassesOf`），再按杂兵 / 精英 / 首领三档套 `CRAFT_DROPS` 的统一比例（`rollCraftMaterials`）；只有单局会掉，中立生物（尘虫、管虫）和飞碟机械足不掉。
+  - 现在：`items.js · ENEMY_DROPS` 给 45 种敌人每个一张表（键为 kit），值是**期望数量**：小于 1 是掉 1 份的概率；大于等于 1 时整数部分保底、小数部分再掷一次。数字都在这张表里。
+  - `ENEMY_DROP_ALIAS = { ufo_boss: "ufo_body" }`：飞碟 Boss 预设 id 和场上本体 kit 不同，按本体表掉。`ufo_leg` 是**有意的空表**：机械足是飞碟的部件，掉落都算在本体里。
+  - `rollMaterialDrops` 不再用 `isNeutralCreature` 过滤：单局和跑团里被打倒的中立生物（尘虫、管虫）现在会小概率掉落。这是作者确认的有意改动。逃走（`_removed`、未 `dead`）的仍不掉。
+  - 跑团：战斗胜利后，打倒的敌人按同一张表掉材料进队伍公用背包，和主持人配的掉落用 `mergeBattleDrops` 合成一份结算（同一件合并数量）；输了 / 撤退不掉；单局模式里跑团这条不触发（由 `rollMaterialDrops` 掉，不重复）。召唤物和铁壁（`enemyDropFoes` 排除）不掉。
+  - 跑团掉落用 `Math.random`；联机时只有房主端执行 `battle.finish` → `settleBattleRewards`（玩家端命令经 rpc 交给房主），结果经 `projectDrops` 同步；同一场重复结算读 `bs.rewardSettlement` 缓存，不重掷、不重复进背包。
+  - 图鉴条目多了 `drops: [{ id, name, chance }]` 数据，图鉴界面已显示「可能掉落」（PR #173）。不涉及坚毅数值。
 - **联机跑团：战斗中主持人把角色转交给别的玩家**（issue #165，主人 10/21 定的规则；hotseat.js · `transfer` / `transferState`，hotseat-game.js · `transferHero` / `transferState`，online-game.js · `OnlineGame.transfer` / `transferState`，online-view.js · `projectLogs` 的 `transfer` 记录，online-ui.js · `transferMarkup`；测试 tests/hotseat.test.js、tests/online-host.test.js、tests/online-ui.test.js、tests/online-rogue.test.js）
   - **以前**：战斗中角色分配锁死，只能在玩家掉线时「接管」（一次收走他的全部角色，只能给主持人）。
   - **现在**：房间面板在战斗中多一块「战斗中转交角色」：每个角色一个下拉框（所有玩家 + 主持人）和「转交」按钮。选主持人 = 收回给主持人。
@@ -887,7 +895,7 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
     - 打赢精英 25%、首领必定掉配方芯片：直接学会一张还不会的配方，优先队伍里有人能做的。
   - 联机单局暂时不显示工坊面板；联机同步、跑团主持人工具和拆解放到第 5 步。
 
-- **工坊第 3 步：制作材料与掉落**（作者定；items.js · `CRAFT_MATERIALS` / `CRAFT_DROPS` / `craftClassesOf` / `rollCraftMaterials`；rogue.js · `rollMaterialDrops`；online-rogue.js；trpg-data.js · `HANDBOOK_SHOP`「制作材料（黑市）」；tests/craft-materials.test.js）
+- **工坊第 3 步：制作材料与掉落**（作者定；items.js · `CRAFT_MATERIALS` / `ENEMY_DROPS` / `enemyDropTable` / `rollEnemyDrops` / `enemyDropExpected` / `enemyDropFoes`（原 `CRAFT_DROPS` / `craftClassesOf` / `rollCraftMaterials` 已由 PR #172 替换，见上方记录）；rogue.js · `rollMaterialDrops`；online-rogue.js；trpg-data.js · `HANDBOOK_SHOP`「制作材料（黑市）」；tests/craft-materials.test.js）
   - 7 种材料，放在队伍背包里共用：
     - 废料（壳体）；
     - 化工残液 / 燃气浓缩物（化学）；
@@ -898,7 +906,7 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
     - 电 / 能量属性 → 电子；
     - 有沙尘层 → 沙鱼鳞；有星灵层 → 星灵组织；
     - 有装甲 / 护盾层 → 废料。
-  - 掉多少看敌人档次（数字都在 `CRAFT_DROPS`）：
+  - 掉多少看敌人档次（当时的数字在 `CRAFT_DROPS`；现已改为每个敌人一张表 `ENEMY_DROPS`，见 PR #172 记录）：
     - 杂兵：常见材料 40%，精制 3%，废料 0–1；
     - 精英：常见材料保底 1 份，精制 40%，废料 1–2；
     - 首领：常见材料 2 份，精制 1 份，废料 2–3。
