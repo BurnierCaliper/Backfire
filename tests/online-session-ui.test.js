@@ -663,6 +663,14 @@ test("联机：按钮掷 d100 / 主持人暗骰；主持人发起检定、玩家
   await host.evaluate(id => OnlineGame.queueHostEdit(() => { state.units.find(u => u.id === id).attrPoints = 1; }), mine);
   await alice.waitForSelector('#online-stage [data-online="attrRequest"][data-attr="dex"]');
   await alice.click('#online-stage [data-online="attrRequest"][data-attr="dex"]');
+  // 属性点申请区和自己的卡在同一个网格格子里，贴在卡片下面（不是单独占一格排到旁边）
+  const layout = await alice.evaluate(() => {
+    const attr = document.querySelector("#online-stage .ol-party .ol-attr"), cell = attr && attr.closest(".ol-party-cell"), card = cell && cell.querySelector(".rhero.mine");
+    if (!card) return null;
+    const a = attr.getBoundingClientRect(), c = card.getBoundingClientRect();
+    return { parentIsCell: attr.parentElement === cell, cellInGrid: cell.parentElement.classList.contains("ol-party"), below: a.top >= c.bottom - 1, left: Math.abs(a.left - c.left) <= 1 };
+  });
+  assert.deepEqual(layout, { parentIsCell: true, cellInGrid: true, below: true, left: true });
   await alice.waitForFunction(() => /等主持人确认：敏捷 \+1/.test(document.getElementById("online-stage").textContent));
   await shot(alice, "attr-1-player");
   await host.click('#tr-tabs [data-tab="party"]');

@@ -652,9 +652,11 @@
       const focus = mineKits.includes(focusKit) ? focusKit : mineKits[0];
       return `<section class="tr-party ol-party" aria-label="队伍">${party.map(h => {
         const owner = ownerOf(h), mine = owner === own();
-        // 自己的角色卡下面接属性点申请（attrMarkup 要 view.units 里的 attrs / attrPicks，队伍卡数据里没有）
-        const u = mine ? units.find(x => x.id === h.id) : null;
-        return PC.heroCardHtml(h, { gm: false, buttons: mine ? "online" : false, owner: owner ? playerName(owner) : "", mine, focusable: mine && mineKits.length > 1, focus: mine && h.kit === focus }) + (u ? attrMarkup(u) : "");
+        // 自己的角色卡下面接属性点申请（attrMarkup 要 state.units 里的 attrs / attrPicks，队伍卡数据里没有）
+        const u = mine ? units.find(x => x.id === h.id) : null, attr = u ? attrMarkup(u) : "";
+        const html = PC.heroCardHtml(h, { gm: false, buttons: mine ? "online" : false, owner: owner ? playerName(owner) : "", mine, focusable: mine && mineKits.length > 1, focus: mine && h.kit === focus });
+        // .ol-party 是网格：申请区要和卡片放进同一格，不然会单独占一格，排到卡片旁边像多了一张卡
+        return attr ? `<div class="ol-party-cell">${html}${attr}</div>` : html;
       }).join("")}</section>`;
     }
     function observeMessages() {

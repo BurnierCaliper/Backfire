@@ -479,6 +479,10 @@ body.online-player.ol-in-battle .ol-battle .sk.blocked .cost { color: #d9a07a; }
 .ol-clock b { color: var(--sk-canvas, #ece0c6); font-family: var(--num, inherit); }
 .ol-clock .warn { color: var(--foe, #e0604a); }
 .ol-party { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; margin-top: 12px; }
+/* 自己的卡 + 属性点申请区同占一格，申请区贴在卡片下面 */
+.ol-party-cell { display: flex; flex-direction: column; min-width: 0; }
+.ol-party-cell .ol-attr { margin: 6px 0 0; }
+.ol-party-cell > .ol-muted { margin: 4px 0 0; font-size: 12px; }
 .ol-party .rhero.mine { border-left-color: var(--sk-mint, #39e6b4); }
 .ol-party .rhero.focus { outline: 2px solid var(--sk-hazard, #f2c230); outline-offset: -2px; }
 .ol-party .rh-top { flex-wrap: wrap; gap: 4px; align-items: center; }
