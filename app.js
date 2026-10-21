@@ -426,6 +426,7 @@ function propCard(p) {
 
 function statusLine(u) {
   const s = [];
+  if (u.vehMerged && typeof vehicleOf === "function") { const vp = vehicleOf(u); if (vp) s.push(vehicleSeatText(vp), `驾驶员：${u.name}`); }   // 载具（vehicle.js）：合并后画成车的卡片，写乘员和驾驶员是谁
   if (Number(u.stunMarks) > 0) s.push(`晕眩标记 ${u.stunMarks}/${typeof BOSS_STUN_MARKS !== "undefined" ? BOSS_STUN_MARKS : 2}`);
   if (u.statuses) {
     if (u.statuses.burn > 0) s.push("灼烧×" + u.statuses.burn);
@@ -1660,17 +1661,27 @@ function refreshEnemyEconomy(u, notes) {
     }
     if (!u.flying && w > 0) bonus += 1;
   }
+  // 种族被动（enemies.js）：千里马第一回合 +1 附赠（在不稳之前加，不稳照样把它清掉）。
+  // 只在真正的敌人回合开始（startEnemyPhase 传了 notes）才算一个回合；生成时的初始化不算
+  if (notes && typeof raceBonusExtra === "function") bonus += raceBonusExtra(u);
   // 不稳：敌人一样失去附赠动作，触发一次后消失
   if (u.statuses && u.statuses.unstable) {
     bonus = 0;
     u.statuses.unstable = false;
     if (notes) notes.push(`${u.name} 不稳：这回合失去附赠动作。`);
   }
+  // 易怒蛮牛发作后这回合没有附赠
+  if (u.raceNoBonus) {
+    u.raceNoBonus = false;
+    bonus = 0;
+    if (notes) notes.push(`${u.name} 易怒蛮牛：这回合失去附赠动作。`);
+  }
   if (loseAp) ap = 0;
   u.ap = Math.max(0, ap);
   u.apMax = u.ap;
   u.bonus = Math.max(0, bonus);
   u.bonusMax = Math.max(u.bonus, bonus);
+  if (typeof vehicleEconomy === "function") vehicleEconomy(u);   // 载具驾驶员每回合有 1 个附赠（移动 / 冲撞）
 }
 
 function beginRound(notes) {
@@ -1956,7 +1967,9 @@ function tickFireField(z, notes) {
       parts.push(r.text);
     }
     const x = envMult(u);
-    applyTypedDot(u, dmg * x, "fire", notes, `${u.name} 火场${stacks}层 ${parts.join(" + ")} = ${dmg}${x > 1 ? ` ×${x}（场地效果${x > 2 ? "×4" : "翻倍"}）= ${dmg * x}` : ""}`);
+    const cut = typeof raceFieldDamage === "function" ? raceFieldDamage(u, dmg * x) : dmg * x;   // 环境适应（鼠类人·鼠）：50% 概率免疫
+    if (cut <= 0 && dmg * x > 0) { notes.push(`${u.name} 火场${stacks}层：环境适应，免疫这次场地伤害。`); return; }
+    applyTypedDot(u, cut, "fire", notes, `${u.name} 火场${stacks}层 ${parts.join(" + ")} = ${dmg}${x > 1 ? ` ×${x}（场地效果${x > 2 ? "×4" : "翻倍"}）= ${dmg * x}` : ""}`);
   }));
   // 酷暑让火场层数再 +1：看的是这一区的天气（隔离区不受天气影响）；末日把这 +1 也翻倍
   const heat = zoneWeather(z) === "heat";
@@ -1978,7 +1991,9 @@ function tickAcidFieldFor(u, weather, notes) {
   const d = statusDotDice("acidfield", u.level, weather);
   const r = takeDice(d.n, d.s, 0);
   const x = envMult(u);
-  withEnvOwner((state.fields[u.zone] || {}).by, () => applyTypedDot(u, r.total * x, "acid", notes, `${u.name} 酸液地面 ${r.text}${x > 1 ? ` ×${x}（场地效果${x > 2 ? "×4" : "翻倍"}）` : ""}`));
+  const cut = typeof raceFieldDamage === "function" ? raceFieldDamage(u, r.total * x) : r.total * x;   // 环境适应（鼠类人·鼠）：50% 概率免疫
+  if (cut <= 0 && r.total * x > 0) { notes.push(`${u.name} 酸液地面：环境适应，免疫这次场地伤害。`); return; }
+  withEnvOwner((state.fields[u.zone] || {}).by, () => applyTypedDot(u, cut, "acid", notes, `${u.name} 酸液地面 ${r.text}${x > 1 ? ` ×${x}（场地效果${x > 2 ? "×4" : "翻倍"}）` : ""}`));
 }
 function tickHealFieldFor(u, weather, notes) {
   if (fieldExempt(u)) return;
@@ -2019,6 +2034,8 @@ function startPlayerPhase() {
   state.combatPhase = "player";
   state.units.forEach(u => {
     if (!u.isPlayer || u.hidden || u.dead) return;
+    // 晕眩标记（首领的规则；我方只有和载具合并的驾驶员用，vehicle.js）：没攒满就只恢复架势、照常行动；攒满了照常晕眩，标记清零
+    if (u.stunned) bossShrugStun(u, notes);
     const wasStun = !!u.stunned;
     refreshEconomy(u);
     if (wasStun) {
@@ -3301,6 +3318,8 @@ function pulseHighVoltage(target, amount, hitNo, hitMax) {
   let dmg = r.total;
   const ex = envMult(target);
   dmg *= ex;   // 恶劣环境 / 末日：场地效果翻倍（两个叠加 ×4）
+  if (typeof raceFieldDamage === "function") dmg = raceFieldDamage(target, dmg);   // 环境适应（鼠类人·鼠）：50% 概率免疫
+  if (!(dmg > 0)) { notes.push(`${target.name} 高压场地：环境适应，免疫这次场地伤害。`); return notes; }
   target._hvBusy = true;
   const tag = (hitMax > 1) ? `第${hitNo}/${hitMax}击 ` : "";
   withEnvOwner(f.by, () => applyTypedDot(target, dmg, "electric", notes, `${target.name} 高压场地${tag}${r.text}${ex > 1 ? "×" + ex : ""}`));
@@ -3703,7 +3722,8 @@ function voidCrossOdds(u) {
   const table = typeof ROGUE_CHECKS !== "undefined" ? ROGUE_CHECKS.chance : [[0.5, 0, 0, 0], [1, 0.5, 0.25, 0.125], [1, 1, 0.5, 0.25], [1, 1, 0.75, 0.5]];
   const base = (table[level] || [])[VOID_CROSS.diff] || 0;
   const hpLow = mine && totalHp(u) * 2 < totalMaxHp(u);
-  const perks = mine && typeof checkPerksFor === "function" ? checkPerksFor(u.kit, VOID_CROSS.prof, hpLow) : {};
+  const perks = mine && typeof checkPerksFor === "function" ? checkPerksFor(u.kit, VOID_CROSS.prof, hpLow)
+    : (!mine && typeof raceCheckPerks === "function" ? raceCheckPerks(u) : {});   // 敌人：种族被动（人类·迎难直上）
   let p = perks.adv ? 1 - (1 - base) * (1 - base) : perks.dis ? base * base : base;
   if (perks.reroll) p = 1 - (1 - p) * (1 - p);
   return { mine, level, base, chance: p, perks };
@@ -4211,6 +4231,7 @@ function structureTargets(actor, minD, maxD) {
   (state.props || []).forEach(p => {
     if (BARRIER_SIDE[p.kind] === "player") return;   // 自己的铁壁 / 防护罩不当目标
     if (!(p.hp > 0) && p.kind !== "button" && p.kind !== "lever") return;
+    if (p.isVehicle && typeof vehiclePilot === "function" && vehiclePilot(p)) return;   // 有驾驶员的车和驾驶员合并成一个单位，打驾驶员（vehicle.js）
     if (inR(p.zone) && !lineBlocked(actor.zone, p.zone)) out.push({ id: "prop:" + p.id, name: p.name, zone: p.zone, isPlayer: p.faction !== "enemy" });
   });
   const zm = Number(state.zoneMode) || 2;
@@ -4301,7 +4322,7 @@ function damageProp(p, opt, attacker) {
     lose = Math.max(1, Math.floor(opt.dmg || 5));
     // 写了血量类型的配置物（电池、炮台是装甲生命值）照属性克制表算倍率，和单位的装甲层一样吃天气：
     // 天气增减伤、微光反转克制、酸雨装甲减伤失效（隔离区不受天气影响）
-    const type = PROP_HP_TYPE[p.kind];
+    const type = PROP_HP_TYPE[p.kind] || (p.isVehicle ? "armor" : null);   // 载具（vehicle.js）是纯装甲
     let m = 1, chartOnly = 1;
     if (type && CHART[element]) {
       const f = state.fields[p.zone] || {};
@@ -4333,6 +4354,7 @@ function damageProp(p, opt, attacker) {
 function destroyProp(p, attacker) {
   const notes = [`${p.name} 被摧毁。`];
   if (typeof coralPropDestroyed === "function") coralPropDestroyed(p, notes);   // 沙珊瑚：被抓的人脱困
+  if (p.isVehicle && typeof vehicleDestroy === "function") return vehicleDestroy(p, notes);   // 载具被摧毁：殉爆（vehicle.js）
   if (BARRIER_SIDE[p.kind]) {
     notes.push(...breakIronWall(p, []));
     return notes;
@@ -4417,7 +4439,8 @@ function iceLeaveCheck(u) {
   const lvText = ["没有熟练", "一级熟练", "二级熟练", "三级熟练"][level] || "";
   if (base >= 1) return { ok: true, text: `简单「运动」检定（${lvText}，默认通过）` };
   const hpLow = totalHp(u) * 2 < totalMaxHp(u);
-  const perks = u.isPlayer && typeof checkPerksFor === "function" ? checkPerksFor(u.kit, "运动", hpLow) : {};
+  const perks = u.isPlayer && typeof checkPerksFor === "function" ? checkPerksFor(u.kit, "运动", hpLow)
+    : (!u.isPlayer && typeof raceCheckPerks === "function" ? raceCheckPerks(u) : {});
   const roll = () => Math.random() < base;
   const once = () => perks.adv ? (roll() || roll()) : perks.dis ? (roll() && roll()) : roll();
   let ok = once();
@@ -4438,6 +4461,7 @@ function doMove(unit, dest, moveOpt) {
   LOG_ACTOR_ID = unit.id;
   let lines;
   try { lines = withLogSink(() => doMoveInner(unit, dest, moveOpt)); } finally { LOG_ACTOR_ID = prevActor; }
+  if (typeof vehicleSync === "function") vehicleSync();   // 驾驶员带着整辆车走（炮手和车跟着驾驶员的区）
   // 「X：1 区 → 2 区」挪到最前面，花费跟在后面
   const i = lines.findIndex(s => /区 → \d+ 区/.test(s));
   if (i > 0) lines.unshift(lines.splice(i, 1)[0]);
@@ -4452,6 +4476,11 @@ function doMoveInner(unit, dest, moveOpt) {
     return;
   }
   moveOpt = moveOpt || {};
+  // 坐在车上的炮手不能自己移动（驾驶员带着整辆车走，见 vehicle.js）
+  if (unit.vehId && !unit.vehMerged && !moveOpt.forced) {
+    paintSkillLog(`${unit.name} 在车里，不能自己移动。先下车，或者让驾驶员开车。`);
+    return;
+  }
   // 濒死没起身的人不能自己移动（以前规则层不拦，只靠界面）
   if (unit.dying && !moveOpt.free && !moveOpt.forced) {
     paintSkillLog(`${unit.name} 濒死中。先点「起身」。`);
@@ -4568,8 +4597,11 @@ function doMoveInner(unit, dest, moveOpt) {
     const chk = iceLeaveCheck(unit);
     if (!chk.ok) {
       const br = iceFieldBreak(unit);
-      dealBreak(unit, br, "ice", notes, "冻土离开失败");
-      notes.push(`离开冻土：${chk.text}，失败：留在 ${from} 区并受 ${br} 冰击破。`);
+      if (typeof raceFieldImmune === "function" && raceFieldImmune(unit)) notes.push(`离开冻土：${chk.text}，失败：留在 ${from} 区；环境适应，免疫这次冰击破。`);   // 鼠类人·鼠：50% 概率免疫
+      else {
+        dealBreak(unit, br, "ice", notes, "冻土离开失败");
+        notes.push(`离开冻土：${chk.text}，失败：留在 ${from} 区并受 ${br} 冰击破。`);
+      }
       paintSkillLog(notes.join("\n"));
       renderAll();
       return;
@@ -4588,6 +4620,7 @@ function doMoveInner(unit, dest, moveOpt) {
   enterFrozenGround(unit, notes);
   applyAbyssFall(unit, from, notes);
   if (typeof afterMove === "function") afterMove(unit, notes);
+  if (typeof raceAfterMove === "function") raceAfterMove(unit, notes);   // 迅袭（enemies.js）：移动回 1 架势
   if (typeof featAlertOnEnter === "function") featAlertOnEnter(unit, notes);   // 警戒（feats.js）：敌人走进来挨一下
   chaseFollow(unit, notes);
   notes.unshift(`${unit.name}：${from} 区 → ${unit.zone} 区${moveOpt.free ? "（技能内移动，不耗附赠）" : ""}`);
@@ -4608,6 +4641,7 @@ function enterFrozenGround(unit, notes) {
   const toF = state.fields[unit.zone] || emptyField();
   if (!toF.ice || fieldExempt(unit)) return;
   if (typeof featHas === "function" && featHas(unit, "wanderer")) return;   // 荒原行者：进入冻土不受击破
+  if (typeof raceFieldImmune === "function" && raceFieldImmune(unit)) { notes.push(`${unit.name} 进入冻土：环境适应，免疫这次冰击破。`); return; }   // 鼠类人·鼠：50% 概率免疫
   const br = iceFieldBreak(unit);
   notes.push(`${unit.name} 进入冻土：冰击破 ${br}。`);
   dealBreak(unit, br, "ice", notes, "进入冻土");
@@ -4868,6 +4902,7 @@ function applyCombat(target, result, attacker) {
   if (typeof endSelfOnStun === "function") endSelfOnStun(target, notes);
   // 死刑：被标记的人倒下了 → 立刻转标
   if (typeof bossMechSync === "function") bossMechSync(notes);
+  if (typeof raceAfterHurt === "function") raceAfterHurt(target, result, attacker, notes);   // 易怒蛮牛（enemies.js）
   return notes;
 }
 
@@ -5086,6 +5121,7 @@ function settleEnemyKill(target, notes) {
 function sweepDeadEnemies() {
   const notes = [];
   if (typeof deathStatueSweep === "function") deathStatueSweep(notes);   // 被沙珊瑚缠住时死掉的：留下死亡雕像
+  if (typeof vehicleSweep === "function") vehicleSweep(notes);   // 载具：驾驶员倒下换人，装甲打空殉爆（vehicle.js）
   const list = (state.units || []).slice();
   list.forEach(u => {
     if (!u || u.isPlayer || u._removed) return;
@@ -6446,6 +6482,7 @@ function applyKnockdown(unit, notes, opt) {
   opt = opt || {};
   notes = notes || [];
   if (!unit || unit.dead || !isInnerDepleted(unit)) return null;
+  if (unit.vehId && typeof vehiclePilotDown === "function") vehiclePilotDown(unit, notes);   // 驾驶员倒下：离开座位，车上下一个人接任（vehicle.js）
   if (unit.isPlayer && !isWeaponUnit(unit)) {
     if (unit.upOnShp) {
       const before = Math.max(0, Number(unit.shp) || 0);
@@ -7778,6 +7815,7 @@ function dealTo(attacker, target, opt) {
   // 原始击破（后面会被目标一侧的效果改写，例如「加倍击破」翻倍）：导体额外那一下按它重新结算
   if (!("_origBaseBreak" in opt)) opt._origBaseBreak = opt.baseBreak;
   opt.flags = makeDealFlags(opt.flags);
+  if (typeof vehicleSync === "function") vehicleSync();   // 被推 / 拉走的驾驶员：车和炮手先跟到他所在的区（vehicle.js）
   if (target && target.isStructure) return dealToStructure(attacker, target, opt);   // 打配置物 / 危墙的替身（#52）
   // 战场数据：击杀在伤害结算里就会发生，所以先记下「最后一击是谁」
   if (attacker && target && attacker.isPlayer && !target.isPlayer && (state.units || []).includes(attacker)) target._lastHitBy = attacker.id;
@@ -7852,6 +7890,15 @@ function dealTo(attacker, target, opt) {
     if (guard) {
       appendLog(`${guard.name} 挡在 ${target.name} 身前，替他承受这次攻击。`);
       target = guard;
+    }
+  }
+  // 载具（vehicle.js）：同区同阵营的单位挨打时，车每次各掷一次代挡（空车也算，范围攻击每人各掷）；成功就由车（驾驶员）承受这次攻击
+  if (target && attacker && typeof vehicleGuard === "function") {
+    const vg = vehicleGuard(attacker, target, opt);
+    if (vg) {
+      appendLog(`${vg.vehicle.name}替 ${target.name} 代挡了这次攻击（${Math.round(vg.chance * 100)}%）。`);
+      if (vg.struct) return dealToStructure(attacker, vg.struct, opt);
+      target = vg.unit;
     }
   }
   // 飞行：近程攻击飞行单位要额外付一个附赠行动；付不起就打不到。
@@ -7984,6 +8031,14 @@ function dealTo(attacker, target, opt) {
       flags.drWhy = flags.drWhy ? flags.drWhy + "、防暴盾" : "防暴盾";
     }
   }
+  // 张开掩体（载具）：合并后的驾驶员（车）受伤 −25%，和其他百分比加算
+  if (target && target.vehMerged && flags.action !== false && !flags.environment && typeof vehicleCoverDr === "function") {
+    const cdr = vehicleCoverDr(target);
+    if (cdr > 0) {
+      flags.drPct = (Number(flags.drPct) || 0) + cdr;
+      flags.drWhy = flags.drWhy ? flags.drWhy + "、张开掩体" : "张开掩体";
+    }
+  }
   // 挂在「下一击」上的猛击 / 穿刺 / 弱点特效只作用于真正的攻击行动，
   // 不作用于这一击派生出来的环境伤害（雷击转移、爆燃溢出、反弹……），也不会被它们提前用掉
   const realAttack = flags.action !== false && !flags.environment;
@@ -8089,6 +8144,8 @@ function dealTo(attacker, target, opt) {
     diceValue,
     firstHitBonus: prepBonus,
     firstHitNote: prepNote,
+    // 迅袭（猫类人·豹）：整场第一个行动里的第一击 +击破；反应（协助、借机）和环境伤害不算
+    firstBreak: flags.action && !isReaction && !flags.environment && typeof raceFirstBreak === "function" ? raceFirstBreak(attacker) : 0,
     element: opt.element || "physical",
     baseBreak: br,
     hits: opt.hits || 1,
@@ -8109,6 +8166,11 @@ function dealTo(attacker, target, opt) {
     atkRange: opt.atkRange || "any"
   });
   res.flags = flags;
+  // 种族被动（enemies.js）：这一击算出手了——迅袭的「第一个行动」用掉；注意力涣散记下这回合打的是谁
+  if (attacker && flags.action && !isReaction && !flags.environment && res.ok !== false) {
+    if (typeof raceMarkActed === "function") raceMarkActed(attacker);
+    if (typeof raceNoteAttack === "function") raceNoteAttack(attacker, target);
+  }
   const wasStunnedT = !!target.stunned;
   const wasFlyingT = !!target.flying;   // 击破飞行单位时引擎会先把它击落（engine.js · applyResultToUnit），荒原行者要看结算前的飞行状态
   const dopplerT = target.self === "doppler";   // 被这一下打进失衡、多普勒随晕眩结束，这一下的击破照样传出去
@@ -10759,8 +10821,9 @@ function renderLog() {
  * 只是每次失衡记 1 个晕眩标记：到它自己的回合开始时，标记没满 BOSS_STUN_MARKS 个就恢复架势、照常行动；
  * 满了才真正晕眩（跳过这个回合），之后标记清零。目的是加快首领战的节奏。 */
 const BOSS_STUN_MARKS = 2;
-/** 用这套规则的：首领，以及 10 级起的精英（ELITE_RULE_MIN_LEVEL） */
+/** 用这套规则的：首领，以及 10 级起的精英（ELITE_RULE_MIN_LEVEL）；还有和载具合并的驾驶员（敌我都算） */
 function isBossUnit(u) {
+  if (u && u.vehMerged) return true;   // 载具驾驶员：架势、两个晕眩标记用车的，我方抢到车也一样（vehicle.js）
   if (!u || u.isPlayer || typeof enemyRankOf !== "function") return false;
   const r = enemyRankOf(u);
   return r === "boss" || (r === "elite" && (Number(u.level) || 1) >= (typeof ELITE_RULE_MIN_LEVEL !== "undefined" ? ELITE_RULE_MIN_LEVEL : 10));
@@ -10775,9 +10838,10 @@ function noteBossBreak(u) {
   return u.stunMarks;
 }
 function bossMarkText(u) {
+  const veh = u.vehMerged && typeof vehicleOf === "function" ? vehicleOf(u) : null;   // 载具驾驶员：标记是车的（vehicle.js）
   return u.stunMarks >= BOSS_STUN_MARKS
     ? `晕眩标记 ${u.stunMarks}/${BOSS_STUN_MARKS}：攒满了，下个回合真正晕眩。`
-    : `晕眩标记 ${u.stunMarks}/${BOSS_STUN_MARKS}：${enemyRankOf(u) === "boss" ? "首领" : "精英"}要攒满 ${BOSS_STUN_MARKS} 个才会晕眩，架势立刻恢复，可以接着打下一个标记。`;
+    : `晕眩标记 ${u.stunMarks}/${BOSS_STUN_MARKS}：${veh ? veh.name : enemyRankOf(u) === "boss" ? "首领" : "精英"}要攒满 ${BOSS_STUN_MARKS} 个才会晕眩，架势立刻恢复，可以接着打下一个标记。`;
 }
 /** 没攒满标记的失衡：立刻恢复架势（协助攻击照常排队、照常打出） */
 function bossQuickRecover(u, notes) {
@@ -11047,6 +11111,7 @@ function summonableBlades(h) {
 
 /** 不满足前提时返回原因字符串，满足返回 null */
 function skillRequirementError(actor, id) {
+  if (actor && /^veh_/.test(String(id)) && typeof vehicleSkillWhy === "function") return vehicleSkillWhy(actor, id);   // 载具招式（vehicle.js）
   if (actor && typeof featOfSkill === "function" && featOfSkill(id)) return featSkillWhy(actor, id);
   const fn = SKILL_REQUIREMENT[id];
   if (!actor || typeof fn !== "function") return null;
@@ -11370,6 +11435,11 @@ function runSkillInner(id, optRun) {
       return;
     }
   }
+  // 载具招式（vehicle.js）：敌人在扣点之前验一遍（我方的在下面 skillRequirementError 验）
+  if (!a.isPlayer && /^veh_/.test(String(id)) && typeof vehicleSkillWhy === "function") {
+    const why = vehicleSkillWhy(a, id, t);
+    if (why) { paintSkillLog(why); return; }
+  }
   const duelTou = typeof touDuelVictim === "function" ? touDuelVictim(a) : null;
   if (duelTou && id !== "assist_block") {
     const isAssist = /assist/.test(id) || id === "ufo_assist";
@@ -11599,7 +11669,10 @@ function runSkillInner(id, optRun) {
   const dabbleBase = a.isPlayer && typeof featBeginDelegate === "function" ? featBeginDelegate(a, id) : null;
   if (dabbleBase) id = dabbleBase;
   try {
-    if (typeof featOfSkill === "function" && featOfSkill(id)) {
+    if (/^veh_/.test(String(id)) && typeof runVehicleSkill === "function") {
+      // 载具招式（vehicle.js）：上下车、拉人、开炮、焚烧、张开掩体、冲撞；行动点上面已经扣过
+      runVehicleSkill(id, a, t, hitOne, lines, needT);
+    } else if (typeof featOfSkill === "function" && featOfSkill(id)) {
       // 专长动作（feats.js）：行动点上面已经扣过
       const fl = state.skillFlow;
       runFeatSkill(a, id, { t, picks: (fl && fl.picks) || {}, lines, hitOne });

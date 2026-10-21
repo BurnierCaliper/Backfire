@@ -584,6 +584,8 @@ function finishEncounter(spec, opt) {
   spec.weather = opt.weather != null ? opt.weather : regionWeather(spec.region);
   if (!spec.features) { const feats = regionFeatures(spec.region, zoneMode); if (feats.length) spec.features = feats; }
   applyEncounterLayout(spec);
+  // 载具（vehicle.js）：镇压部队的遭遇有概率带一台移动堡垒，一场最多一台；开战时由 buildEncounter 摆上场，并安排驾驶员
+  if (spec.vehicles === undefined && typeof vehicleRollEncounter === "function") spec.vehicles = vehicleRollEncounter(spec);
   // 有沙鱼的沙漠遭遇：配上尘虫 / 管虫（中立生物，不占代币，desert.js · DESERT.spawn）
   if (typeof addDesertNeutrals === "function") addDesertNeutrals(spec);
   spec.id = "roll:" + spec.region + ":" + (spec.faction || "") + ":" + spec.enemies.map(e => e.preset).join("+");
@@ -631,6 +633,8 @@ function buildEncounter(spec, baseLevel, partySize) {
   buildEncounterField(spec);
   const made = spawnEncounterRows(spec.enemies, baseLevel, partySize);
   applyBattlefieldFeatures(spec.features, baseLevel);
+  // 移动堡垒：一定有一个这个阵营的敌人坐在车上当驾驶员（vehicle.js）
+  if (typeof vehicleEncounterSetup === "function") vehicleEncounterSetup(spec, made, baseLevel, partySize);
   return made;
 }
 /** 遭遇的区、棋盘、场地（不动天气）。连续战斗换到下一个区域时也用这个（chain.js） */

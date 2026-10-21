@@ -461,7 +461,7 @@ while (run.stage !== "over" && !terminalOutcome && steps++ < maxSteps) {
         ? run.party.slice().sort((a, b) => R.heroView(run, b).hp / R.heroView(run, b).hpMax - R.heroView(run, a).hp / R.heroView(run, a).hpMax)[0].kit
         : null;
       if (R.canLongRest(run)) tryDo("休息点长休", () => R.restAtNode(run, "long", { watch }));
-      else if (partyHpRatio() < 0.85) tryDo("休息点短休", () => R.restAtNode(run, "short"));
+      else if (partyHpRatio() < 0.85 && R.canShortRestAtNode(run).ok) tryDo("休息点短休", () => R.restAtNode(run, "short"));
       else tryDo("休息点离开", () => R.restAtNode(run, "leave"));
     } else if (node.type === "shop") {
       shopping(); repairs(); tryDo("离开商店", () => R.leaveNode(run));

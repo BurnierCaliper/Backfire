@@ -417,6 +417,8 @@ test("AI 位置：警棍盾 / 喷火兵近战贴近；步枪、投手远程远�
   const r = f.E("riot_rifle"); r.zone = 1; f.c.refreshEnemyEconomy(r);
   assert.match(f.c.EnemyAI.plan(r).meta.skillName, /移动到 2 区/, "远程：同区就退开");
   const cap = f.E("riot_captain"); cap.zone = 1; f.c.refreshEnemyEconomy(cap);
+  // 小队长是兽人·狼：有附赠时会先用种族附赠「追猎本能」（#161）。这里只看站位，所以先把附赠拿掉
+  cap.bonus = 0;
   assert.match(f.c.EnemyAI.plan(cap).meta.skillName, /火焰手枪/, "远近皆可：同区直接开枪，不后撤");
 });
 

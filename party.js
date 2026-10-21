@@ -595,6 +595,7 @@ function checkPerksFor(kit, prof, hpLow) {
 
 function skillCost(id) {
   if (id === "sand_pull") return { bonus: 1 };
+  if (/^veh_/.test(String(id)) && typeof vehicleSkillCost === "function") return vehicleSkillCost(id);   // 载具：上车 / 拉人 1 行动点，下车不花，冲撞 1 附赠（vehicle.js）
   // 人器一心（feats.js）：唤出武器人只花附赠（每场一次），武器人变回武器不花行动点
   const featAdj = typeof featCostAdjust === "function" ? featCostAdjust(id) : null;
   if (featAdj) return featAdj;
@@ -804,6 +805,8 @@ function blockBreakdown(unit) {
 
 function skillList(unit) {
   if (!unit || !unit.kit) return [];
+  // 坐在车上的人只能用车的武器（vehicle.js）
+  if (unit.vehId && typeof vehicleSkillList === "function") return vehicleSkillList(unit);
   const mecha = !!(unit.resources && unit.resources.mecha);
   const held = unit.weaponHeld !== false && !weaponIsOut(unit);
   const list = [];
@@ -1138,6 +1141,7 @@ function effectiveAtk(unit, units) {
   if (unit.kit === "kolt" && (unit.resources || {}).bit === "acid" && typeof passivePlus === "function" && passivePlus(unit, 1)) base += 5;
   if (unit.bondAtk) base += Number(unit.bondAtk) || 0;
   if (unit.duetAtk) base += Number(unit.duetAtk) || 0;   // 双重奏：溢出的治疗，下回合开始失去
+  if (unit.race && typeof raceAtkAdjust === "function") base += raceAtkAdjust(unit, units);   // 种族被动·独狼（enemies.js）
   if (unit.resources && unit.resources.mecha && unit.resources.overdrive) base *= 1.2;   // 银翼·机体强化
   // 陨体衍蛛：除自己之外，场上每有一只活着的陨体衍蛛，atk +25%
   if (unit.kit === "meteor_spider") {

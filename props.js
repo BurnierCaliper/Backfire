@@ -33,11 +33,12 @@ function propKindName(kind) {
     coral_branch: "沙珊瑚枝",
     coral_tentacle: "沙珊瑚触须",
     death_statue: "死亡雕像"
-  })[kind] || kind;
+  })[kind] || (typeof vehicleCfg === "function" && vehicleCfg(kind) ? vehicleCfg(kind).name : kind);
 }
 
 function makeProp(kind, zone, level) {
   const lv = Math.max(1, Number(level) || 1);
+  if (typeof vehicleCfg === "function" && vehicleCfg(kind)) return makeVehicleProp(kind, zone, lv);   // 载具配置物（vehicle.js）
   const base = {
     id: "p" + Math.random().toString(36).slice(2, 9),
     kind,

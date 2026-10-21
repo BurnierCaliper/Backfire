@@ -36,6 +36,11 @@
     const disabled = () => pending || paused() || animating;
     const button = (text, action, data = "", off = false, primary = false) => `<button type="button" class="g-btn ol-button${primary ? " ol-primary" : ""}" data-online="${action}" ${data}${off ? " disabled" : ""}>${esc(text)}</button>`;
     const option = (value, text, selected) => `<option value="${esc(value)}"${selected ? " selected" : ""}>${esc(text)}</option>`;
+    // 未读红点（#207）：「消息与成员」按钮右上角、「大厅交流」标题旁、「小队」标签同一个样式；超过 9 条写「9+」。数字只给眼睛看，读屏念后面的「（N 条新消息）」
+    const dotText = n => n > 9 ? "9+" : String(n);
+    const dotMarkup = (n, extra = "") => n > 0 ? `<span class="ol-dot${extra}" aria-hidden="true">${dotText(n)}</span><span class="ol-sr-only">（${n} 条新消息）</span>` : "";
+    /** 红点刚出现的那一下轻轻弹一下（动画在 online.css 的 .ol-dot-pop；系统开了「减少动态效果」就不播） */
+    const popDot = el => { if (el) el.classList.add("ol-dot-pop"); };
     function make(tag, id, className, attrs = {}) {
       const node = document.createElement(tag); node.id = id; node.className = "ol-ui " + className;
       for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
@@ -48,7 +53,7 @@
     toast.hidden = true;
     // 玩家右侧栏：「战斗 / 记录」和「小队」两个频道。输入框只建一次，收到新消息只更新列表，不会打断输入
     const side = make("aside", "online-side", "ol-side", { "aria-label": "战斗记录与小队聊天" });
-    side.innerHTML = `<nav class="ol-side-tabs" role="tablist"><button type="button" role="tab" data-side="log" class="ol-tab"></button><button type="button" role="tab" data-side="chat" class="ol-tab">小队<span class="ol-badge" hidden></span></button><button type="button" class="ol-side-fold" data-side-fold hidden>展开 ▴</button></nav><ol class="ol-side-log" aria-live="polite"></ol><ol class="ol-side-chat" aria-live="polite"></ol><form class="ol-side-form" id="ol-side-form"><label class="ol-sr-only" for="ol-side-text">小队消息</label><button type="button" class="ol-button ol-dice" data-roll-open="1" title="选一个熟练项掷 d100">🎲 掷骰</button><textarea id="ol-side-text" rows="1" maxlength="500" autocomplete="off" enterkeyhint="send" title="Enter 发送，Shift+Enter 换行" placeholder="和队友说点什么…"></textarea><button type="submit" class="ol-button ol-primary">发送</button></form>`;
+    side.innerHTML = `<nav class="ol-side-tabs" role="tablist"><button type="button" role="tab" data-side="log" class="ol-tab"></button><button type="button" role="tab" data-side="chat" class="ol-tab">小队<span class="ol-dot ol-badge ol-dot-pop" hidden></span></button><button type="button" class="ol-side-fold" data-side-fold hidden>展开 ▴</button></nav><ol class="ol-side-log" aria-live="polite"></ol><ol class="ol-side-chat" aria-live="polite"></ol><form class="ol-side-form" id="ol-side-form"><label class="ol-sr-only" for="ol-side-text">小队消息</label><button type="button" class="ol-button ol-dice" data-roll-open="1" title="选一个熟练项掷 d100">🎲 掷骰</button><textarea id="ol-side-text" rows="1" maxlength="500" autocomplete="off" enterkeyhint="send" title="Enter 发送，Shift+Enter 换行" placeholder="和队友说点什么…"></textarea><button type="submit" class="ol-button ol-primary">发送</button></form>`;
     side.hidden = true;
     const bagBox = make("section", "online-bag", "ol-overlay ol-bag", { role: "dialog", "aria-label": "背包" });
     bagBox.hidden = true;
@@ -56,6 +61,9 @@
     const suppliesBox = make("section", "online-supplies", "ol-overlay ol-bag ol-supplies-box", { role: "dialog", "aria-label": "物资" });
     suppliesBox.hidden = true;
     let suppliesOpen = false, privUnread = 0, autoResumeTried = false;
+    // 大厅交流的未读（#207）：大厅里别人发的、还没看到的条数；lobbySeen 为 null 时下一次只记下已有的消息（刚进大厅、重新同步）
+    // dockDot / lobbyDot：上一次画出来的红点数，从 0 变成有的那一下才弹
+    let lobbyUnread = 0, lobbySeen = null, dockDot = 0, lobbyDot = 0;
     // 房间暂停：固定在顶栏下面的一条横幅，不会被内容挤到下面
     const pauseBar = make("div", "online-pause", "ol-pause-bar", { role: "status", "aria-live": "polite" });
     pauseBar.hidden = true;
@@ -84,7 +92,9 @@
       side.classList.toggle("ol-side-folded", fold); document.body.classList.toggle("ol-side-folded", fold);
       const t = side.querySelector("[data-side-fold]"); if (t) { t.hidden = !phoneSide(); t.textContent = sideOpen ? "收起 ▾" : "展开 ▴"; }
     }
-    if (typeof addEventListener === "function") addEventListener("resize", () => { if (!destroyed) paintSideFold(); });
+    if (typeof addEventListener === "function") addEventListener("resize", () => { if (!destroyed) { paintSideFold(); seeLobbyChat(); } });
+    // 房间面板往下翻到「大厅交流」：看到了，红点消失
+    panel.addEventListener("scroll", () => seeLobbyChat(), { passive: true });
     side.addEventListener("click", event => {
       if (event.target.closest("[data-side-fold]")) { sideOpen = !sideOpen; paintSideFold(); return; }
       const tab = event.target.closest("[data-side]"); if (!tab) return;
@@ -173,12 +183,17 @@
       if (TIP_SELF[u.self] && !(u.self === "store" && !st.high && Number(u.highEnergy) > 0)) tokens.push(TIP_SELF[u.self] + (u.self === "burn" && Number(u.selfBurnStacks) > 1 ? "×" + u.selfBurnStacks : ""));
       ((u.resources || {}).nextAtkFx || []).forEach(k => { if (TIP_ATK[k]) tokens.push(TIP_ATK[k]); });
       (u.marks || []).forEach(m => tokens.push(m === "needle" ? "刺入" : m === "bond" ? "牵挂" : ""));
-      statusTokens(u).forEach(t => { if (!tokens.includes(t)) tokens.push(t); });
+      // 载具：和车合并的驾驶员按车写（和本机画面一样，game.js · unitTipHtml）——乘员和驾驶员写在乘员名单里，不当成身上的效果
+      const vc = u.vehicle && typeof u.vehicle === "object" ? u.vehicle : null;
+      statusTokens(u).forEach(t => { if (!tokens.includes(t) && !(vc && (t === vc.seatText || /^驾驶员[:：]/.test(t)))) tokens.push(t); });
       const owner = u.weaponOf ? (data.units || []).find(x => x.kit === u.weaponOf && !x.weaponOf) : null;
       const kind = u.isPlayer ? (u.escort ? "escort" : u.weaponOf || u.weaponUnit ? "weapon" : "hero") : "enemy";
       // 首领机制的倒计时：主机投影好的 display.marks / casts（online-view.js），这里只拼文字
       const mechs = global.UnitCard && global.UnitCard.mechLines ? global.UnitCard.mechLines({ marks: (u.display || {}).marks, casts: (u.display || {}).casts }) : [];
-      return T.html({ kind, kit: u.kit, ownerName: owner && owner.name, escort: u.escort }, tokens.filter(Boolean), { name: u.name || u.id, sub: `Lv${u.level || 1} · ${u.zone} 区`, mechs });
+      if (vc) return T.html({ kind: "prop", propKind: vc.kind }, tokens.filter(Boolean), { name: vc.name || u.name || u.id, sub: `Lv${vc.level || 1} · ${u.zone} 区 · ${u.isPlayer ? "我方" : "敌方"}`, mechs,
+        rows: Array.isArray(vc.roster) ? vc.roster : null, rowsTitle: vc.seatText || "" });
+      // 分阶段的首领 / 精英：主机算好的阶段编号（display.stage），能力只列这一阶段的，和单机一样
+      return T.html({ kind, kit: u.kit, ownerName: owner && owner.name, escort: u.escort, stage: (u.display || {}).stage }, tokens.filter(Boolean), { name: u.name || u.id, sub: `Lv${u.level || 1} · ${u.zone} 区`, mechs });
     }
     const hoverable = (t) => t && t.closest && t.closest("[data-unit-id], [data-prop-id]");
     stage.addEventListener("mouseover", event => {
@@ -277,7 +292,28 @@
       return `<div class="ol-card"><header><div><span class="ol-muted">${starting ? "大厅" : "联机房间"}</span><div class="ol-code-row"><h2 class="ol-code">${esc(view.roomCode)}</h2>${view.roomCode ? button("复制房间码", "copyCode") : ""}</div></div>${canClose ? button("收起", "close") : ""}</header><p class="ol-connection" role="status">${esc(paused() ? view.status?.connected ? "房主离线，等待恢复" : "连接中断，正在重连" : "已连接")}</p>${rosterMarkup()}${starting ? `<footer>${view.isHost ? button(view.mode === "rogue" ? "开始" : "开始跑团", "start", "", disabled() || !players().some(p => !p.gm && p.online), true) + (view.mode === "rogue" && !(view.heroes || []).length ? '<p class="ol-muted">先在单局画面选好队伍、点「出发」，这里才能把角色分给大家。</p>' : "") : '<p class="ol-muted">等待房主分配角色并开始。</p>'}</footer>` : ""}${starting ? lobbyChatMarkup() : ""}${messagesMarkup()}<footer>${button("重新连接", "reconnect", "", pending)}${button(view.isHost ? "离开并保存" : "离开房间", "leave", "", pending)}</footer><p class="ol-notice" role="status">${esc(notice || view.notice || view.packet?.systemNotice || (view.storageError ? "本机保存失败，请保持页面打开并检查存储空间。" : ""))}</p></div>`;
     }
     function lobbyChatMarkup() {
-      return `<section class="ol-messages"><h3>大厅交流</h3><ol aria-live="polite" data-keep-scroll="lobby">${(hs().chat || []).map(m => `<li><b>${esc(m.name || m.operatorName || "玩家")}</b><p${artAttr(m.text)}>${esc(m.text)}</p></li>`).join("") || '<li class="ol-muted">在这里与所有人商量准备事项。</li>'}</ol><form id="ol-lobby-chat"><label class="ol-sr-only" for="ol-lobby-text">大厅聊天</label><input id="ol-lobby-text" data-field="chatText" maxlength="500" value="${esc(form.chatText)}" placeholder="所有人都能看到…"><button class="ol-button" type="submit"${disabled() ? " disabled" : ""}>发送到大厅</button></form></section>`;
+      return `<section class="ol-messages ol-lobby-chat"><h3>大厅交流${dotMarkup(lobbyUnread, " ol-badge")}</h3><ol aria-live="polite" data-keep-scroll="lobby">${(hs().chat || []).map(m => `<li><b>${esc(m.name || m.operatorName || "玩家")}</b><p${artAttr(m.text)}>${esc(m.text)}</p></li>`).join("") || '<li class="ol-muted">在这里与所有人商量准备事项。</li>'}</ol><form id="ol-lobby-chat"><label class="ol-sr-only" for="ol-lobby-text">大厅聊天</label><input id="ol-lobby-text" data-field="chatText" maxlength="500" value="${esc(form.chatText)}" placeholder="所有人都能看到…"><button class="ol-button" type="submit"${disabled() ? " disabled" : ""}>发送到大厅</button></form></section>`;
+    }
+    /** 大厅交流（#207）：大厅里别人发的新消息先记成未读，「大厅交流」露出来了才算看到（seeLobbyChat）。
+     *  开局后同一份聊天在「小队」频道里，那里有自己的红点，这里清零 */
+    function observeLobbyChat() {
+      if (view.screen !== "lobby") { lobbyUnread = 0; lobbySeen = null; return; }
+      const rows = chatRows();
+      if (!lobbySeen) { lobbySeen = new Set(rows.map(m => m.id)); return; }
+      const fresh = rows.filter(m => m.id && !lobbySeen.has(m.id));
+      fresh.forEach(m => lobbySeen.add(m.id));
+      lobbyUnread += fresh.filter(m => m.operatorId !== own()).length;
+    }
+    /** 「大厅交流」最下面（新消息在那）露在房间面板里，算看到了 */
+    function lobbyChatInView() {
+      const list = panel.hidden ? null : panel.querySelector('[data-keep-scroll="lobby"]');
+      if (!list) return false;
+      const r = list.getBoundingClientRect(), box = panel.getBoundingClientRect();
+      return r.height > 0 && r.bottom <= box.bottom + 2 && r.bottom >= box.top + Math.min(r.height, 40);
+    }
+    function seeLobbyChat() {
+      if (destroyed || !lobbyUnread || !lobbyChatInView()) return;
+      lobbyUnread = 0; paintDock(); paintPanel();
     }
     /** 跑团私人钱包（房主按收件人算好：自己的角色有余额，队友只有名字）：看余额、给队友转钱 */
     const purseDraft = { from: "", to: "", n: "" };   // 转账表单：包刷新重画时保留填了一半的值
@@ -662,7 +698,10 @@
     function observeMessages() {
       const rows = view.messages || [], incoming = rows.filter(m => !seenMessages.has(m.id) && m.from !== own());
       for (const m of rows) seenMessages.add(m.id);
-      if (messagesInitialized && incoming.length && !panelOpen) privUnread += incoming.length;   // 消息提示一闪就没：在「消息与成员」按钮上留个未读数
+      // 消息提示一闪就没：别人发来的新私信（房主收到玩家的回复也算）记在「消息与成员」按钮的红点上（#207）。
+      // 面板开着就算看到了——按面板实际开没开算：大厅里玩家 / 跑团房主的面板一直开着，以前只看 panelOpen，大厅里来的私信会在开局后的按钮上留一个过期的数
+      if (!panel.hidden) privUnread = 0;
+      else if (messagesInitialized && incoming.length) privUnread += incoming.length;
       if (messagesInitialized && incoming.length) {
         const message = incoming[incoming.length - 1];
         toast.textContent = `${message.to === "all" ? "主持人消息" : "仅你可见"}：${message.text}`; toast.hidden = false;
@@ -702,7 +741,7 @@
       logTab.classList.toggle("on", tab === "log"); chatTab.classList.toggle("on", tab === "chat");
       logTab.setAttribute("aria-selected", String(tab === "log")); chatTab.setAttribute("aria-selected", String(tab === "chat"));
       trackUnread(tab === "chat");
-      const badge = chatTab.querySelector(".ol-badge"); badge.hidden = !unread; badge.textContent = unread > 99 ? "99+" : String(unread);
+      const badge = chatTab.querySelector(".ol-badge"); badge.hidden = !unread; badge.textContent = dotText(unread);
       const logs = view.packet?.publicLogs || [];
       const logMarkup = logs.map(l => `<li>${esc(l.text || "")}</li>`).join("") || '<li class="ol-muted">还没有公开记录。</li>';
       if (force || sideKeys.log !== logMarkup) { sideKeys.log = logMarkup; fillList(side.querySelector(".ol-side-log"), logMarkup); }
@@ -751,7 +790,7 @@
         for (const [root, label, def] of [[document.getElementById("g-log"), "战斗", "log"], [document.querySelector("#scr-trpg .tr-log"), "探索", "chat"]]) {
           if (!root) continue;
           const nav = document.createElement("nav"); nav.className = "ol-host-tabs"; nav.setAttribute("role", "tablist");
-          nav.innerHTML = `<button type="button" role="tab" data-host-tab="log" class="ol-tab">${label}</button><button type="button" role="tab" data-host-tab="chat" class="ol-tab">小队<span class="ol-badge" hidden></span></button>`;
+          nav.innerHTML = `<button type="button" role="tab" data-host-tab="log" class="ol-tab">${label}</button><button type="button" role="tab" data-host-tab="chat" class="ol-tab">小队<span class="ol-dot ol-badge ol-dot-pop" hidden></span></button>`;
           const box = document.createElement("div"); box.className = "ol-host-chat";
           box.innerHTML = `<ol class="ol-side-chat" aria-live="polite"></ol><form class="ol-side-form"><button type="button" class="ol-button ol-dice" data-roll-open="1" title="选角色和熟练项掷 d100（可以暗骰）">🎲</button><button type="button" class="ol-button ol-dice" data-title-open="1" title="在所有玩家画面中间打出大字（比如「援军来了」）">📢</button><textarea rows="1" maxlength="500" autocomplete="off" enterkeyhint="send" aria-label="小队消息" title="Enter 发送，Shift+Enter 换行" placeholder="说点什么…"></textarea><button type="submit" class="ol-button ol-primary">发送</button></form>`;
           root.prepend(nav); root.appendChild(box);
@@ -772,7 +811,7 @@
       if (!m.seen) m.seen = new Set(rows.map(r => r.id));
       const fresh = rows.filter(r => r.id && !m.seen.has(r.id)); fresh.forEach(r => m.seen.add(r.id));
       if (m.tab === "chat") m.unread = 0; else m.unread += fresh.filter(r => r.operatorId !== own()).length;
-      const badge = m.nav.querySelector(".ol-badge"); badge.hidden = !m.unread; badge.textContent = String(m.unread);
+      const badge = m.nav.querySelector(".ol-badge"); badge.hidden = !m.unread; badge.textContent = dotText(m.unread);
       const markup = chatListMarkup(rows);
       if (force || m.key !== markup) { m.key = markup; fillList(m.box.querySelector(".ol-side-chat"), markup); }
     }
@@ -1004,6 +1043,7 @@
         historyRoom = nextRoom; historyRows = []; historyHasMore = true; historyLoading = false; historyGeneration++;
         seenMessages = new Set(); messagesInitialized = false; clearTimeout(toastTimer); toast.hidden = true;
         questSeen = null; questBoxOpen = false; restSeen = undefined;
+        privUnread = 0; lobbyUnread = 0; lobbySeen = null;   // 换了房间：上一个房间的未读红点不带过来
       }
       if (view.active) historyRows = mergeMessages([...historyRows, ...(view.messages || [])]);
       playTitle();
@@ -1023,14 +1063,7 @@
         if (global.MatchupUI) { if (!matchupOf()) global.MatchupUI.close(); else global.MatchupUI.refresh(); }
       }
       document.body.classList.toggle("online-player", !!view.active && !view.isHost);
-      if (view.active) {
-        if (!animating) displayState = view.state || null;
-        if (request && (request.actor !== hs().currentUnitId || hs().phase !== "acting")) { request = currentMenu = null; actionGeneration++; }
-        html(dock, button(`${view.roomCode || "房间"} · ${paused() ? "重连中" : "消息与成员"}${privUnread && !view.isHost ? ` · ${privUnread} 条新消息` : ""}`, "openRoom", privUnread && !view.isHost ? 'data-alert="1"' : "", false) +
-          (view.isHost && view.mode !== "rogue" && ["exploration", "ended"].includes(view.screen) ? button("角色分配", "openAssign", "", false) : ""), "dock");
-        observeMessages();
-        if (!view.isHost) { observeQuests(); observeCamp(); observeRest(); observeShop(); observeSellLast(); }
-      }
+      // 先定房间面板开不开（下面数新消息要用：面板开着，私信就算看到了）
       // 联机单局的房主：大厅里先要在单局画面选队伍，房间面板不挡着；队伍选好（有角色可分）时自动打开一次
       const rogueHost = view.active && view.isHost && view.mode === "rogue";
       const heroCount = (view.heroes || []).length;
@@ -1042,6 +1075,13 @@
       const myAsk = view.active && !view.isHost && hs().ask && hs().ask.eligible && !hs().ask.declined;
       if (myAsk && view.screen !== "lobby") { panelOpen = false; suppliesOpen = false; }
       panel.hidden = !(panelOpen || view.active && view.screen === "lobby" && !rogueHost);
+      if (view.active) {
+        if (!animating) displayState = view.state || null;
+        if (request && (request.actor !== hs().currentUnitId || hs().phase !== "acting")) { request = currentMenu = null; actionGeneration++; }
+        observeMessages(); observeLobbyChat();
+        paintDock();   // 数完新消息再画按钮：红点和这一包的消息一起出来（以前按钮先画，未读数要等下一次重画）
+        if (!view.isHost) { observeQuests(); observeCamp(); observeRest(); observeShop(); observeSellLast(); }
+      }
       pauseBar.hidden = !(view.active && !view.isHost && view.screen !== "lobby" && (paused() || view.offlineWait));
       // 离线等待：显示还剩几秒（到时间自动跳过 / 结束他的行动）；截止时间已换成本机的钟（online-game.js · localDeadlines）
       if (!pauseBar.hidden) {
@@ -1051,13 +1091,29 @@
       }
       document.body.classList.toggle("ol-paused", !pauseBar.hidden);
       paintLevelUps();
-      if (!panel.hidden) html(panel, view.active ? roomMarkup() : entryMarkup(), "panel");
+      paintPanel();
+      seeLobbyChat();
       renderSide();
       mountHostChat();
       if (!stage.hidden) paintStage();
       paintSupplies();
       if (checkReq) checkReq.sync();
       if (view.active && !view.isHost) scheduleAutoMenu();
+    }
+    /** 「房间码 · 消息与成员」：别人发来的新私信、大厅交流里还没看到的新消息，记在按钮右上角的红点上（#207；
+     *  以前只有玩家有，写成按钮后面的「· N 条新消息」）。按钮文字只留房间码和「消息与成员」，手机上太长时省略的是这段文字，红点不被裁掉。
+     *  按钮带 id：来消息重画时键盘焦点留在按钮上（html() 按 id 找回焦点） */
+    function paintDock() {
+      const count = privUnread + lobbyUnread, was = dockDot; dockDot = count;
+      html(dock, `<button type="button" class="g-btn ol-button" id="ol-room-open" data-online="openRoom"><span class="ol-dock-label">${esc(`${view.roomCode || "房间"} · ${paused() ? "重连中" : "消息与成员"}`)}</span>${dotMarkup(count)}</button>` +
+        (view.isHost && view.mode !== "rogue" && ["exploration", "ended"].includes(view.screen) ? button("角色分配", "openAssign", "", false) : ""), "dock");
+      if (count && !was) popDot(dock.querySelector(".ol-dot"));
+    }
+    function paintPanel() {
+      if (panel.hidden) return;
+      const count = view.active && view.screen === "lobby" ? lobbyUnread : 0, was = lobbyDot; lobbyDot = count;
+      html(panel, view.active ? roomMarkup() : entryMarkup(), "panel");
+      if (count && !was) popDot(panel.querySelector(".ol-lobby-chat .ol-dot"));
     }
     /** 舞台：文字部分照旧拼 HTML；战斗画面是常驻的一块（单位卡有动画，不能每次重建），每次画完再挂回占位处 */
     function paintStage() {
@@ -1237,7 +1293,7 @@
         case "joinTab": entry = "join"; render(); break;
         case "close": panelOpen = false; render(); break;
         case "cancelConnect": api.cancelConnect?.(); break;   // 连接中的「取消」：call() 收到「已取消连接」后恢复表单
-        case "openRoom": panelOpen = true; privUnread = 0; render(); break;
+        case "openRoom": panelOpen = true; render(); break;   // 面板开了，私信的红点在 observeMessages 里清掉
         case "messageHistory": await earlierMessages(); break;
         case "connect": {
           const opts = { url: form.url.trim() || DEFAULT_RELAY, name: form.name.trim() || (entry === "create" ? "主持人" : "玩家") };
@@ -1335,6 +1391,7 @@
         // pagination at this window, rather than retaining two disjoint ranges.
         historyRows = []; historyHasMore = true; historyLoading = false; historyGeneration++;
         seenMessages = new Set(); messagesInitialized = false; clearTimeout(toastTimer); toast.hidden = true;
+        lobbySeen = null;   // 重新同步带来的大厅聊天记录不算新消息
         displayState = packet.state || null; animating = false; return;
       }
       const tape = packet.tape || [];
