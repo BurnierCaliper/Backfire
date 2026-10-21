@@ -749,7 +749,7 @@ function triggerCollapse(zone) {
   const r = takeDice(n, 10, 0);
   notes.push(`${zone} 区塌陷：${r.text} 物理 + 2 击破（飞行免疫）。`);
   // 保释中的单位豁免场地；恶劣环境 / 末日让塌陷的击破和伤害翻倍
-  state.units.filter(u => !u.hidden && !u.dead && Number(u.zone) === Number(zone) && !u.flying && !fieldExempt(u)).forEach(u => {
+  state.units.filter(u => !u.hidden && !u.dead && !u._removed && Number(u.zone) === Number(zone) && !u.flying && !fieldExempt(u)).forEach(u => {
     const x = envMult(u);
     dealBreak(u, 2 * x, "physical", notes, x > 1 ? "塌陷 ×2" : "塌陷");
     withEnvOwner(f.by, () => applyTypedDot(u, r.total * x, "physical", notes, `${u.name} 塌陷伤害${x > 1 ? ` ×${x}（场地效果${x > 2 ? "×4" : "翻倍"}）` : ""}`));
@@ -771,7 +771,7 @@ function destroyRuinGround(zone, notes) {
   f.abyss = true;
   notes = notes || [];
   notes.push(`${zone} 区变为深渊。`);
-  state.units.filter(u => !u.hidden && !u.dead && Number(u.zone) === Number(zone) && !u.flying).forEach(u => {
+  state.units.filter(u => !u.hidden && !u.dead && !u._removed && Number(u.zone) === Number(zone) && !u.flying).forEach(u => {
     applyAbyssFall(u, otherZone(zone), notes);
   });
 }
@@ -814,7 +814,7 @@ function tickRuinGround(notes) {
     const f = state.fields[z];
     if (!f || !f.ruinOn) return;
     if (f.ruinMax == null) f.ruinMax = Math.max(20, Number(f.ruinHp) || 30);
-    const grounds = state.units.filter(u => !u.hidden && !u.dead && Number(u.zone) === Number(z) && !u.flying);
+    const grounds = state.units.filter(u => !u.hidden && !u.dead && !u._removed &&Number(u.zone) === Number(z) && !u.flying);
     grounds.forEach(u => {
       const r = takeDice(1, 6, 0);
       f.ruinHp = Math.max(0, (Number(f.ruinHp) || 0) - r.total);
@@ -997,7 +997,7 @@ function selfName(k) {
 }
 
 function fieldUnits() {
-  return state.units.filter(u => u && u.id && !u.hidden && !u.dead);
+  return state.units.filter(u => u && u.id && !u.hidden && !u.dead && !u._removed);
 }
 
 function optionExists(el, value) {
@@ -2287,7 +2287,7 @@ function turnEnd() {
   });
   (state.props || []).forEach(p => {
     if (p.kind === "acid" && p.hp < 3) {
-      const pool = state.units.filter(u => !u.hidden && !u.dead && Number(u.zone) === Number(p.zone));
+      const pool = state.units.filter(u => !u.hidden && !u.dead && !u._removed &&Number(u.zone) === Number(p.zone));
       if (pool.length) {
         const u = pool[Math.floor(Math.random() * pool.length)];
         const dmg = 4 + (p.level || 1);
@@ -4223,7 +4223,7 @@ function destroyGap(key, g) {
     const diceN = 1 + dieStep(lv, 5);
     const r = takeDice(diceN, 10, 0);
     const dmg = Math.floor(r.total);
-    const victims = state.units.filter(u => !u.hidden && !u.dead && Number(u.zone) === Number(fallTo));
+    const victims = state.units.filter(u => !u.hidden && !u.dead && !u._removed &&Number(u.zone) === Number(fallTo));
     notes.push(`危墙向 ${fallTo} 区倒塌：${r.text} 物理 + 2 击破。`);
     if (!victims.length) notes.push(`${fallTo} 区没有单位承受倒塌。`);
     victims.forEach(u => {
@@ -4311,7 +4311,7 @@ function destroyProp(p, attacker) {
     const dmg = r.total;
     notes.push(`爆炸：同区 ${r.text} 火焰 + 2 击破。`);
     markAoeZone(p.zone, { element: "fire", dmg, attacker, from: p.zone, env: true });   // 从桶所在的区炸开（环境伤害：屏障照样挨，不看是谁引爆的）
-    state.units.filter(u => !u.hidden && !u.dead && Number(u.zone) === Number(p.zone)).forEach(u => {
+    state.units.filter(u => !u.hidden && !u.dead && !u._removed && Number(u.zone) === Number(p.zone)).forEach(u => {
       const fake = unitOf("爆炸桶", lv, [{ type: "armor", hp: 1 }], 0, 0);
       fake.zone = p.zone;
       fake.envSrc = true; fake.envBy = envCreditId(attacker);   // 环境分数：记在引爆它的人身上
@@ -4330,7 +4330,7 @@ function destroyProp(p, attacker) {
     const dmg = r.total;
     notes.push(`电池爆炸：同区所有单位（不分敌我）${r.text} 电击。`);
     markAoeZone(p.zone, { element: "electric", dmg, attacker, from: p.zone, env: true });
-    state.units.filter(u => !u.hidden && !u.dead && Number(u.zone) === Number(p.zone)).forEach(u => {
+    state.units.filter(u => !u.hidden && !u.dead && !u._removed && Number(u.zone) === Number(p.zone)).forEach(u => {
       const fake = unitOf("电池", lv, [{ type: "armor", hp: 1 }], 0, 0);
       fake.zone = p.zone;
       fake.envSrc = true; fake.envBy = envCreditId(attacker);
@@ -4943,7 +4943,7 @@ function explodeBoomcar(target, notes) {
   notes.push(`${target.name} 死亡引爆：同区 ${half} 能量 + 1 击破。`);
   markAoeZone(target.zone, { element: "energy", dmg: half, attacker: target });
   // 同区不分敌我的范围伤害（不能协助格挡）
-  state.units.filter(u => !u.hidden && !u.dead && u.id !== target.id && Number(u.zone) === Number(target.zone)).forEach(u => {
+  state.units.filter(u => !u.hidden && !u.dead && !u._removed && u.id !== target.id &&Number(u.zone) === Number(target.zone)).forEach(u => {
     const fake = unitOf("小车残骸", target.level, [{ type: "armor", hp: 1 }], 0, 0);
     fake.zone = target.zone;
     dealTo(fake, u, { atk: 0, mult: 0, flat: half, element: "energy", baseBreak: 1, flags: { action: true, aoe: true } });
@@ -5089,7 +5089,7 @@ function sweepDeadEnemies() {
 }
 
 function visibleEnemies(zone) {
-  return state.units.filter(u => !u.hidden && !u.isPlayer && Number(u.zone) === Number(zone));
+  return state.units.filter(u => !u.hidden && !u._removed && !u.isPlayer && Number(u.zone) === Number(zone));
 }
 
 function skillTarget() {

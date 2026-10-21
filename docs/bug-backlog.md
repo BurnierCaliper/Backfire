@@ -116,15 +116,15 @@
 ### 低（21）
 
 **专长**
-- [ ] **L-1 主持人「全员复原」不刷新 `LEDGER.shortOnce`**（以身作盾、挺身等「每次短休 N 次」的专长）：`ledger.js:788-803` · `ledgerRestoreAll` 清了 `shortUsed` / `restOnce` 漏了 `shortOnce`；对照长休 `765`、短休 `523`；入口 `trpg-commands.js:17`、`battle-commands.js:201`。读代码判断。
-- [ ] **L-2 兼修后的勾索仍拉不动首领**：兼修改走原技能「拉拽」（`app.js:12852` · `displaceTo` 无首领限制），但 `feats.js:539-555` · `featSkillTargetWhy` 最后仍调勾索自己的 `targetWhy`（`feats.js:199`）拦首领。战地包扎同理，影响很小。读代码判断。
-- [ ] **L-3 涉猎专长在技能栏的说明沿用原技能文字，次数 / 加强与实际不符**：`feats.js:516-523` · `featSkills` 取 `roleSkillDef(...).hint`（`party.js:1050-1100`、`app.js:7164`）。震慑写「每场两三次」实际 1 次；续时 / 硬撑 / 看破写两次实际 1 次；加固 15 级「可自选血量种类」、鼓劲 15 级加强都被 `_dabbleNerf` 关掉但仍显示。读代码判断。
-- [ ] **L-4 跑团「找工匠升级」不打八折**（巧手匠人说明与 README 写商店和工匠都 8 折）：`trpg.js:511` · `trpgUpgradeWeapon` 的 `smith` 模式直接用 `info.labor` 或主持人填的费用，界面默认值也是原价（`trpg-ui.js:295-307`）。可能是有意让主持人定。读代码判断。
+- [x] **L-1 【已修 #149：`ledgerRestoreAll` 补清 `shortOnce`】主持人「全员复原」不刷新 `LEDGER.shortOnce`**（以身作盾、挺身等「每次短休 N 次」的专长）：`ledger.js:788-803` · `ledgerRestoreAll` 清了 `shortUsed` / `restOnce` 漏了 `shortOnce`；对照长休 `765`、短休 `523`；入口 `trpg-commands.js:17`、`battle-commands.js:201`。读代码判断。
+- [x] **L-2 【已修 #149：走原技能时 `featSkillTargetWhy` 不再调专长自己的 `targetWhy`】兼修后的勾索仍拉不动首领**：兼修改走原技能「拉拽」（`app.js:12852` · `displaceTo` 无首领限制），但 `feats.js:539-555` · `featSkillTargetWhy` 最后仍调勾索自己的 `targetWhy`（`feats.js:199`）拦首领。战地包扎同理，影响很小。读代码判断。
+- [x] **L-3 【已修 #149：`featSkills` 涉猎版按 1 级取说明并去掉原技能的「每场 N 次」】涉猎专长在技能栏的说明沿用原技能文字，次数 / 加强与实际不符**：`feats.js:516-523` · `featSkills` 取 `roleSkillDef(...).hint`（`party.js:1050-1100`、`app.js:7164`）。震慑写「每场两三次」实际 1 次；续时 / 硬撑 / 看破写两次实际 1 次；加固 15 级「可自选血量种类」、鼓劲 15 级加强都被 `_dabbleNerf` 关掉但仍显示。读代码判断。
+- [x] **L-4 【已修 #149：新增 `trpgSmithFee`，不填费用时带巧手匠人默认八折，界面默认值同步】跑团「找工匠升级」不打八折**（巧手匠人说明与 README 写商店和工匠都 8 折）：`trpg.js:511` · `trpgUpgradeWeapon` 的 `smith` 模式直接用 `info.labor` 或主持人填的费用，界面默认值也是原价（`trpg-ui.js:295-307`）。可能是有意让主持人定。读代码判断。
 
 **单局**
-- [ ] **L-5 精英战的 +1 级加成常被本幕等级上限吞掉**：`rogue.js:76-81` · `enemyLevel`，`min(b, round(a+(b-a)*t) + bonus)`，`actDay≥6` 后精英与普通战同级；`ROGUE_CONFIG.eliteLevelBonus` 注释写「精英比同时期普通战斗高几级」。可能是有意封顶。读代码判断。
-- [ ] **L-6 `finishBattle` 没有阶段保护**：`acceptTask` / `camp` / `restAtNode` / `afterVictory` 都校验 `run.stage`，只有 `rogue.js:931` · `finishBattle`（及 `rogue-commands.js` 的 `actions.finishBattle`）没有。任务板上调用会在 `advanceNode` 的 `run.task.hunt` 抛 TypeError，非战斗节点调用会把节点「打完」并推进。UI 重复触发才会遇到。读代码判断。
-- [ ] **L-7 休息点「短休」在没人有次数时仍可点，白白过一站**：`rogue.js:1445` · `restAtNode`，按钮 `rogue-ui.js:378`。`ledgerShortRest` 只写「次数已用完」，`advanceNode` 照走。应灰掉或提示。读代码判断。
+- [x] **L-5 【已修 #149：新增 `ROGUE_CONFIG.eliteOverCap`（默认 1），精英战可超过本幕上限】精英战的 +1 级加成常被本幕等级上限吞掉**：`rogue.js:76-81` · `enemyLevel`，`min(b, round(a+(b-a)*t) + bonus)`，`actDay≥6` 后精英与普通战同级；`ROGUE_CONFIG.eliteLevelBonus` 注释写「精英比同时期普通战斗高几级」。可能是有意封顶。读代码判断。
+- [x] **L-6 【已修 #149：`finishBattle` 校验 `run.stage` 和当前节点】`finishBattle` 没有阶段保护**：`acceptTask` / `camp` / `restAtNode` / `afterVictory` 都校验 `run.stage`，只有 `rogue.js:931` · `finishBattle`（及 `rogue-commands.js` 的 `actions.finishBattle`）没有。任务板上调用会在 `advanceNode` 的 `run.task.hunt` 抛 TypeError，非战斗节点调用会把节点「打完」并推进。UI 重复触发才会遇到。读代码判断。
+- [x] **L-7 【已修 #149：新增 `canShortRestAtNode`，按钮灰掉写原因，`restAtNode` 也拒绝】休息点「短休」在没人有次数时仍可点，白白过一站**：`rogue.js:1445` · `restAtNode`，按钮 `rogue-ui.js:378`。`ledgerShortRest` 只写「次数已用完」，`advanceNode` 照走。应灰掉或提示。读代码判断。
 - [ ] **L-8 休息点遭遇战（被偷袭）打赢后不计这场战斗的时间**：撤退 / 败北会 `passHours(NODE.battle.hours)`，打赢只走 `doLongRest`。`rogue.js:931` 起 `finishBattle` 的 ambush 分支。可能是有意并进长休。读代码判断。
 
 **工坊 / 长休**
@@ -138,11 +138,11 @@
 - [x] **L-16 跑团里不花钱的操作选了「由谁付」，日志仍写「由 X 付，钱包剩 N」（#150 已修：钱包没变就不写这句）**：`trpg-commands.js:64` · `PAYABLE` 含 `repair` / `craft` / `teachRecipe`，`trpgPayWith` 末尾无条件追加。钱不会错，文字误导。读代码判断。
 
 **敌人 / 地形**
-- [ ] **L-17 高压巡逻艇电弧扫射的「感电」可能落在没被打到的人身上**：`enemies.js` · `en_boat_arc` 的 `hit = allPlayers().filter(距离1)` 不排除死亡 / 倒地 / 隔墙，`pick` 直接上 `shock`；`ai.js`（`special === "boat"`）也只看 `zdist === 1`。读代码判断。
-- [ ] **L-18 赤牙「引火」直接写 `statuses.burn`，绕过 `grantBurn`**：`enemies.js:1785-1789` · `en_chi_ignite`，自焚（`self === "burn"`）免疫失效；预热版名单也不排除死亡 / 倒地。赤牙目前没接 AI（README 128），只在主持人手动时出现。读代码判断。
-- [ ] **L-19 图鉴 / 单位卡写固定骰，实际每 5 级升档**：`engine.js` · `unitOf` 的 `suggest.dice` vs `enemies.js` 用 `leveledSides` 的 `en_buoy` / `en_dump` / `en_swarm` / `en_crow` / `en_boat_arc` / `en_spread` / `en_watch` / `en_dust_grind` / `en_dust_lift`，牛队长冲撞、狼队长借机骰数随 `addedDiceByLevel` 增加；`bestiaryStats` 读 `suggest.dice` 不随等级。README 1578 只提蜂群。例：15 级浮标图鉴写 1d4 实际 1d8。读代码判断。
-- [ ] **L-20 AI 把「离开酸液地面 / 越过空隙」当附赠移动规划，实际扣行动点**：`ai.js` · `canPayMove`（精英 / 首领只看 `bonus >= 1`）vs `app.js` · `doMoveInner`（酸液非行走者 / `overVoid` 走 `spendAp`）。1 行动点 + 1 附赠的精英站在酸液上会把唯一行动点花在移动上。规则本身没问题，是 AI 没算这笔代价。读代码判断。
-- [ ] **L-21 已 `_removed` 但没 `dead` 的单位仍在范围效果名单里**：`desert.js:142`（尘虫迁走）、`205` / `214`（沙鱼下潜逃走）不像 `removeEnemyFromField` 那样清出 `state.units`；`fieldUnits()` / `visibleEnemies()` / 爆炸桶、电池、危墙倒塌的 `filter(!hidden && !dead)` 都不滤 `_removed`，范围效果仍波及并在日志出现名字。影响小，未验证打死后是否结算经验。读代码判断。
+- [x] **L-17 高压巡逻艇电弧扫射的「感电」可能落在没被打到的人身上（#153 已修：感电只在这一击打中的人里挑，死亡 / 倒地 / 隔墙的不算）**：`enemies.js` · `en_boat_arc` 的 `hit = allPlayers().filter(距离1)` 不排除死亡 / 倒地 / 隔墙，`pick` 直接上 `shock`；`ai.js`（`special === "boat"`）也只看 `zdist === 1`。读代码判断。
+- [x] **L-18 赤牙「引火」直接写 `statuses.burn`，绕过 `grantBurn`（#153 已修：改走 `grantBurn`，预热版只点站着的人）**：`enemies.js:1785-1789` · `en_chi_ignite`，自焚（`self === "burn"`）免疫失效；预热版名单也不排除死亡 / 倒地。赤牙目前没接 AI（README 128），只在主持人手动时出现。读代码判断。
+- [x] **L-19 图鉴 / 单位卡写固定骰，实际每 5 级升档（#153 已修：图鉴伤害骰旁注明「基础骰，每 5 级升一档 / 骰数每 5 级 +1」）**：`engine.js` · `unitOf` 的 `suggest.dice` vs `enemies.js` 用 `leveledSides` 的 `en_buoy` / `en_dump` / `en_swarm` / `en_crow` / `en_boat_arc` / `en_spread` / `en_watch` / `en_dust_grind` / `en_dust_lift`，牛队长冲撞、狼队长借机骰数随 `addedDiceByLevel` 增加；`bestiaryStats` 读 `suggest.dice` 不随等级。README 1578 只提蜂群。例：15 级浮标图鉴写 1d4 实际 1d8。读代码判断。
+- [x] **L-20 AI 把「离开酸液地面 / 越过空隙」当附赠移动规划，实际扣行动点（#153 已修：`canPayMove(u, dest)` 按实际消耗判断，精英 / 首领用行动点移动要多留 1 点出手）**：`ai.js` · `canPayMove`（精英 / 首领只看 `bonus >= 1`）vs `app.js` · `doMoveInner`（酸液非行走者 / `overVoid` 走 `spendAp`）。1 行动点 + 1 附赠的精英站在酸液上会把唯一行动点花在移动上。规则本身没问题，是 AI 没算这笔代价。读代码判断。
+- [x] **L-21 已 `_removed` 但没 `dead` 的单位仍在范围效果名单里（#153 已修：`fieldUnits` / `visibleEnemies` 和各同区范围名单排除 `_removed`；逃走的仍不算击杀）**：`desert.js:142`（尘虫迁走）、`205` / `214`（沙鱼下潜逃走）不像 `removeEnemyFromField` 那样清出 `state.units`；`fieldUnits()` / `visibleEnemies()` / 爆炸桶、电池、危墙倒塌的 `filter(!hidden && !dead)` 都不滤 `_removed`，范围效果仍波及并在日志出现名字。影响小，未验证打死后是否结算经验。读代码判断。
 
 ### 战斗规则 / 技能 / 评分 / 训练场
 

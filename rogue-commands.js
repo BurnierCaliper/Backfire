@@ -94,6 +94,7 @@ const RogueCommands = (function () {
     partStock: () => Rogue.partStock(),
     canSellParts: (_c, run) => Rogue.canSellParts(run),
     canShortRestBefore: (_c, run) => Rogue.canShortRestBefore(run),
+    canShortRestAtNode: (_c, run) => Rogue.canShortRestAtNode(run),
     watchOptions: (_c, run) => Rogue.watchOptions(run),
     drawInfo: (_c, run) => Rogue.drawInfo(run)
   };

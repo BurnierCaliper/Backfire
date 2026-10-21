@@ -172,7 +172,7 @@ const Bestiary = (() => {
           <div><small>血量合计</small><b>${total}</b></div>
           <div><small>架势</small><b>${st.def}</b></div>
           <div><small>atk</small><b>${st.atk}</b></div>
-          ${st.dice ? `<div><small>伤害骰</small><b>${st.dice[0]}d${st.dice[1]}</b></div>` : ""}
+          ${st.dice ? `<div><small>伤害骰</small><b>${st.dice[0]}d${st.dice[1]}</b>${st.diceScale ? `<small>（基础骰，${esc(st.diceScale)}）</small>` : ""}</div>` : ""}
         </div>
         <p class="bx-note">按 ${party} 人队、Lv${lv} 计算（和战斗里一样）。${esc(e.rankNote)}</p>
       </div>` : `<p class="bx-note">这个敌人的数值没法单独计算。</p>`;

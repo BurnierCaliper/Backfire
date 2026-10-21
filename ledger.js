@@ -799,6 +799,7 @@ function ledgerRestoreAll(notes) {
   LEDGER.weapons = {};
   LEDGER.shortUsed = {};
   LEDGER.restOnce = {};
+  LEDGER.shortOnce = {};
   notes.push("主持人：全员血量、坚毅、耐久复原。");
   ledgerCapture();
   return notes;
