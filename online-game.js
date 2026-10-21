@@ -107,7 +107,8 @@
       rest: !rogue() && typeof TRPG !== "undefined" ? TRPG.lastRest || null : null,
       camp: !rogue() && typeof TRPG !== "undefined" && TRPG.camp ? Object.assign({ force: TRPG.camp.force }, TRPG.camp.status) : null,
       // 跑团探索的队伍卡（party-cards.js · heroDto，gm:false：根本不带坚毅生命字段）；online-view.js · projectParty 再按白名单过一遍
-      party: !rogue() && typeof TRPG !== "undefined" && TRPG.active && typeof trpgHeroes === "function" && root.PartyCards ? trpgHeroes().map(h => PartyCards.heroDto(h, { gm: false })) : null,
+      // 只在探索 / 结算时发：战斗里玩家画面不画队伍卡（online-ui.js · partyMarkup），每个结算包都整份带上会白占 50 KiB 预算
+      party: liveScreen() !== "battle" && !rogue() && typeof TRPG !== "undefined" && TRPG.active && typeof trpgHeroes === "function" && root.PartyCards ? trpgHeroes().map(h => PartyCards.heroDto(h, { gm: false })) : null,
       // 游戏时钟 + 距上次长休的小时数（主持人顶栏同一句话，party-cards.js · clockHtml）；单局也用 LEDGER
       clock: typeof LEDGER !== "undefined" ? { day: LEDGER.day, clock: LEDGER.clock, hours: Number(LEDGER.hours) || 0 } : null };
   }

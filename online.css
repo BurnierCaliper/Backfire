@@ -117,7 +117,17 @@ body.ol-has-side .hs-overlay { right: 330px; }
 .ol-tab { flex: 1; position: relative; min-height: 40px; font: inherit; font-weight: 800; font-size: 15px; color: #cbb99a; background: transparent; border: 0; cursor: pointer; }
 .ol-tab.on { color: #0b0806; background: var(--sk-hazard, #f2c230); }
 .ol-tab:focus-visible { outline: 2px solid var(--sk-mint, #39e6b4); outline-offset: -2px; }
-.ol-badge { display: inline-block; min-width: 18px; margin-left: 6px; padding: 0 5px; font-size: 11px; line-height: 18px; border-radius: 9px; color: #fff; background: #d8413a; }
+/* 未读红点（#207）：「消息与成员」按钮右上角、「大厅交流」标题旁、「小队」标签同一个样式——红底白字、白色描边，超过 9 条写「9+」 */
+.ol-dot { box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px; padding: 0 5px; border: 2px solid #fff; border-radius: 10px; color: #fff; background: #e0362c; font-size: 11px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; vertical-align: middle; box-shadow: 0 1px 3px #000a; pointer-events: none; }
+.ol-badge { margin-left: 6px; }   /* 跟在文字后面的红点（「小队」标签、「大厅交流」标题） */
+/* 出现的那一下轻轻弹一下：按钮、标题上的由 online-ui.js 在红点从没有到有时加 .ol-dot-pop；「小队」标签上的一直带着，显示出来时播一次 */
+.ol-dot-pop { animation: ol-dot-pop .36s ease-out; }
+@keyframes ol-dot-pop { 0% { transform: scale(.3); } 60% { transform: scale(1.18); } 100% { transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { .ol-dot-pop { animation: none; } }
+/* 「消息与成员」按钮：红点压在按钮右上角；旁边的「角色分配」让开一点，红点不压到它 */
+.ol-dock [data-online="openRoom"] { position: relative; }
+.ol-dock [data-online="openRoom"] .ol-dot { position: absolute; z-index: 1; top: -8px; right: -8px; }
+.ol-dock .ol-button + .ol-button { margin-left: 10px; }
 .ol-side-log, .ol-side-chat { flex: 1; min-height: 0; margin: 0; padding: 10px 14px 10px 30px; overflow-y: auto; color: #e9dcc0; font-size: 14px; line-height: 1.55; }
 .ol-side-chat { list-style: none; padding-left: 14px; }
 .ol-side[data-tab="log"] .ol-side-chat, .ol-side[data-tab="log"] .ol-side-form { display: none; }
@@ -326,6 +336,9 @@ body.online-player .ol-dock .ol-button { min-height: 36px; padding: 6px 12px; }
   .ol-stage-heading .ol-info-tools { gap: 6px; }
   .ol-stage-heading .ol-info-tools .ol-button { padding: 6px 8px; min-height: 34px; }
   body.online-player .ol-dock .ol-button { font-size: 12px; padding: 4px 8px; min-height: 30px; max-width: 46vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* 「消息与成员」：省略号挪到按钮里的文字上，按钮本身不裁切，右上角的红点才露得出来（#207） */
+  body.online-player .ol-dock [data-online="openRoom"] { overflow: visible; }
+  body.online-player .ol-dock .ol-dock-label { display: block; overflow: hidden; text-overflow: ellipsis; }
 }
 @media (max-width: 760px) {
   body.online-player #hs-bar .hs-tag { display: none; }
@@ -474,7 +487,11 @@ body.online-player.ol-in-battle .ol-battle .sk.blocked .cost { color: #d9a07a; }
 .ol-clock { margin: 4px 0 8px; padding: 6px 10px; background: rgba(0, 0, 0, .25); font-size: 13px; color: var(--sk-muted, #a8977b); }
 .ol-clock b { color: var(--sk-canvas, #ece0c6); font-family: var(--num, inherit); }
 .ol-clock .warn { color: var(--foe, #e0604a); }
-.ol-party { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; margin-top: 12px; }
+.ol-party { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; margin-top: 12px; align-items: start; } /* 卡片按内容高度对齐：自己那格多了属性点申请区，同一行别的卡不被拉高 */
+/* 自己的卡 + 属性点申请区同占一格，申请区贴在卡片下面 */
+.ol-party-cell { display: flex; flex-direction: column; min-width: 0; }
+.ol-party-cell .ol-attr { margin: 6px 0 0; }
+.ol-party-cell > .ol-muted { margin: 4px 0 0; font-size: 12px; }
 .ol-party .rhero.mine { border-left-color: var(--sk-mint, #39e6b4); }
 .ol-party .rhero.focus { outline: 2px solid var(--sk-hazard, #f2c230); outline-offset: -2px; }
 .ol-party .rh-top { flex-wrap: wrap; gap: 4px; align-items: center; }

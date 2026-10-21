@@ -93,6 +93,10 @@
     [/^bare_aa$/, "smash", { fist: true }],
     [/^use_scrap:/, "spread"],
     [/^hack_turret:/, "hex", { glitch: true }],
+    [/^veh_fire$/, "flame"],
+    [/^veh_burn$/, "spread"],
+    [/^veh_ram$/, "smash"],
+    [/^veh_(board|pull|leave|cover)/, "none"],
     [/^(\w+_summon|\w+_return|ruby_unmecha|mint_mecha|xia_engine|xia_selfburn|hiaki_sheath|nora_soothe|latte_ice|helu_(wave|storm|scan)|ecmo_probe|ras_(super|rampage)|edc_(drain|siphon)|longge_(safety|drink|reload)|chuan_pulse|torque_divert|kolt_scrap|wing_boost|wing_relay|ruby_relay|ruby_refuel|weapon_retrieve|sand_pull|__move|__item|__stand)$/, "none"]
   ];
 
