@@ -34,6 +34,12 @@ test("L-12：角色守夜时日志不再说「除守夜者外」（他的武器�
   assert.match(out, /全部武器耐久回满/);
 });
 
+test("L-12：武器人守夜时日志写「除守夜的那把武器外」", () => {
+  const c = field();
+  const out = c.ledgerLongRest({ hours: 8, watch: "torque", force: true }, []).notes.join(" ");
+  assert.match(out, /除守夜的那把武器外/);
+});
+
 test("L-14：医疗包 hint 不再说只治内层", () => {
   const c = field();
   ["medkit", "clinic"].forEach(id => {

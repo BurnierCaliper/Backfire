@@ -758,7 +758,7 @@ function ledgerLongRest(plan, notes) {
   const keepW = watch && LEDGER.weapons && LEDGER.weapons[watch];
   LEDGER.weapons = keepW ? { [watch]: keepW } : {};
   // 守夜的是角色时他的武器照样回满；只有武器人守夜，那把武器才不回
-  const watchIsWeapon = !!watch && partyHeroes().some(x => x.kit === watch && isWeaponUnit(x));
+  const watchIsWeapon = !!watch && !!weaponOwner(watch);   // 武器人不在 partyHeroes 里，看它是不是某个角色的武器
   notes.push(watchIsWeapon ? "除守夜的那把武器外，武器耐久回满，武器人伤势痊愈。" :"全部武器耐久回满，武器人伤势痊愈。");
   LEDGER.hours = 0;
   const keep = (tab) => (watch && tab && tab[watch] != null ? { [watch]: tab[watch] } : {});
