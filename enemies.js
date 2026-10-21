@@ -2551,8 +2551,10 @@ function raceText(u) { return u && u.race ? raceLabel(u.race) : ""; }
 
 /* ===== 种族被动（docs/enemy-race.md 第 4 节） =====
  * 照搬角色的种族特长 / 缺陷，按 u.race 通用生效（不看具体兵种）；角色也走同一份（racePerkKey 把 "兽人-蜥蜴" 这样的写法归一成 "兽人·蜥蜴"）。
- * 数值放 RACE_PERK，各被动的开关和说明放 RACE_PERKS。 */
+ * 数值放 RACE_PERK，各被动的开关和说明放 RACE_PERKS。
+ * RACE_PERK.off > 0 时敌人的种族被动全部不生效（种族、六维换算照旧）：只给平衡模拟工具用（tools/enemy-balance.js），默认 0 = 开，游戏里不碰 */
 const RACE_PERK = {
+  off: 0,                 // 工具用的总开关（照 ENEMY_IV.off 的写法）：> 0 = 关掉敌人的种族被动
   fireCut: 0.25,          // 红皮人·热耐性：受火伤 −25%（和克制表加算）
   energyUp: 0.25,         // 兽人·蜥蜴·鳞片：受能量伤害 +25%
   loneWolfDiv: 2,         // 犬类人·狼·独狼：atk ± 等级 ÷ 2（向下取整）
@@ -2606,8 +2608,8 @@ function racePerkLinesFor(label) {
 }
 function racePerkLines(u) { return racePerkLinesFor(racePerkKey(u)); }
 
-/** 敌人的种族被动配置（只认 u.race；角色走各自的实现） */
-function enemyRacePerk(u) { return u && u.race ? racePerk(u) : null; }
+/** 敌人的种族被动配置（只认 u.race；角色走各自的实现）。RACE_PERK.off（工具用）打开时一律没有 */
+function enemyRacePerk(u) { return u && u.race && !(RACE_PERK.off > 0) ? racePerk(u) : null; }
 
 /** 种族对「受到某属性伤害」的百分比修正：[{ value, reason }]（engine.js · resolveAttack 和 matchup.js 的克制表共用）。
  *  角色的鳞片还是走 engine / matchup 里原来那一行，这里只管 u.race 的敌人，数值同一份 RACE_PERK */
@@ -2680,7 +2682,7 @@ function raceAfterMove(u, notes) {
 function raceBonusExtra(u) {
   if (!u || !u.race) return 0;
   u.raceRounds = (u.raceRounds || 0) + 1;
-  const p = racePerk(u);
+  const p = enemyRacePerk(u);
   return p && p.firstBonus && u.raceRounds === 1 ? RACE_PERK.firstBonus : 0;
 }
 
@@ -2804,7 +2806,7 @@ function raceBonusChoice(u, prey, step) {
   if (!u || u.isPlayer || !u.race || (u.bonus || 0) < 1) return null;
   const rank = typeof enemyRankOf === "function" ? enemyRankOf(u) : "minion";
   if (rank !== "minion" && step != null) return null;
-  const p = racePerk(u);
+  const p = enemyRacePerk(u);
   if (!p) return null;
   const mine = (id) => (enemySkillList(u) || []).some(s => s.id === id);
   const near = (prey || []).filter(x => !x.kind && Number(x.zone) === Number(u.zone));
