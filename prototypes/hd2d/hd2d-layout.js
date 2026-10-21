@@ -1,15 +1,20 @@
 /* Antlerscale: Backfire · HD-2D 战场原型 · 布局（纯函数）
  *
- * 只做计算：输入战斗状态（state），输出每个区在 3D 世界里的位置 / 大小、区之间的间隔、每个单位的站位和铭牌上要写的字。
+ * 只做计算：输入战斗状态（state），输出每个区在 3D 世界里的位置 / 大小、区之间的间隔、每个单位的站位、铭牌上要写的字，
+ * 还有默认镜头（取景）和每块铭牌在屏幕上的矩形。
  * 不碰 three.js，也不碰 DOM，所以 Node 里可以直接 require 来测（tests/hd2d-layout.test.js）。
  *
- *   const out = HD2DLayout.build(state, { portrait: false });
+ *   const out = HD2DLayout.build(state, { portrait: false, view: { width, height, top, bottom } });
  *   out.zones   [{ id, cx, cz, w, d, h, topY, kind, effects, hole … }]
  *   out.gaps    [{ key, a, b, type, open, x, z, axis, length, width … }]
- *   out.units   [{ id, zone, x, y, z, flying, submerged, plate … }]
+ *   out.units   [{ id, zone, x, y, z, flying, submerged, lift, rect, plate … }]
  *   out.bounds  { minX, maxX, minZ, maxZ, maxY }
+ *   out.camera  { target, dist, pos, fov, elevation, aspect, width, height }   // 场景照这个摆默认镜头
  *
  * 坐标：x 向右，y 向上，z 朝镜头（镜头在 +z 一侧看过来）。我方站在 +z（前排），敌方站在 −z（后排）。
+ * 铭牌是固定像素大小的 DOM，所以站位按屏幕算：用和场景同一套透视镜头（fitView）把脚下的点投到屏幕上，
+ * 同一排相邻两人至少隔开一块铭牌宽；前后排在屏幕上叠到的，后排整排往上抬（lift，像素，铭牌下面拉一根细杆连到脚下），
+ * 这样任意两块铭牌的矩形都不重叠。没给 view 时按桌面 1440×900 估（手机竖屏按 390×844）。
  * 坚毅生命（shp）的具体数值是手册规定不给玩家看的：铭牌数据（plateData）里压根不读它。 */
 (function (root, factory) {
   if (typeof module === "object" && module.exports) module.exports = factory();
@@ -19,23 +24,35 @@
 
   /* ---------- 配置（数值都在这里，逻辑里不写死）---------- */
   const CONFIG = {
-    zoneSize: 6.4,        // 每个区的地台边长
+    zoneSize: 7.2,        // 每个区的地台边长（第二轮从 6.4 放大，给站位留空）
     zoneGap: 2.6,         // 区和区之间的缝（桥 / 墙 / 门 / 空隙摆在这条缝里）
-    baseH: 0.5,           // 普通地台的厚度（顶面高度）
-    highH: 1.3,           // 高地 / 沙珊瑚台地的顶面高度
-    pad: 0.9,             // 地台边缘留给装饰的一圈，单位不站进去
+    baseH: 0.8,           // 普通地台的厚度（顶面高度）；加厚了，侧面的砖 / 铁皮 / 岩层才看得出来
+    highH: 1.6,           // 高地 / 沙珊瑚台地的顶面高度
+    pad: 0.8,             // 地台边缘留给装饰的一圈，单位不站进去
     holeRatio: 0.2,       // 深渊黑洞半径 = 地台边长 × 这个比例
     unit: {
-      w: 1.9,             // 铭牌占的宽（竖起来的铭牌是 DOM，桌面宽度下约 90px，要给它留够横向的空）
-      d: 0.9,             // 铭牌占的进深（站位格子的大小，不是画出来的厚度）
+      d: 0.9,             // 站位格子的进深（世界单位）
       rowStep: 1.6,       // 前后两排的间距（地台放不下时压缩，最小 = d）
       stagger: 0.28,      // 同一排里相邻的单位前后错开多少（隔一个往前挪一点；排距放不下时自动缩小）
       groupGap: 0.5,      // 敌我两拨之间多留的空
+      minCol: 1.2,        // 同一排相邻两人脚下至少隔多远（世界单位；铭牌宽另外按屏幕算）
       flyLift: 1.25,      // 飞行单位浮起的高度
       sink: 0.55,         // 下潜单位沉下去的深度（铭牌只露半截）
-      plateW: 1.9,        // 铭牌画出来的宽
-      plateH: 1.7         // 铭牌画出来的高（取景时要把竖起来的铭牌也装进去）
+      plateH: 1.7         // 取景时给竖起来的铭牌（含后排抬高）留的高度（世界单位）
     },
+    /* 铭牌（DOM）的像素尺寸：hd2d-scene.js 照这个设铭牌的宽高，这里照这个算它在屏幕上的矩形 */
+    plate: {
+      w: 120, h: 40,                  // 桌面：名字一行 + 血条 / 架势一行（13px 的字，8 个汉字的名字放得下）
+      phoneW: 100, phoneH: 36, phoneMax: 720,   // 窗口宽度 ≤ phoneMax 时用手机尺寸
+      gapX: 8, gapY: 6,               // 两块铭牌之间至少留的空（像素）
+      bob: 2,                         // 待机时上下浮动的幅度（像素）：算矩形时上下各让出这么多
+      maxLift: 140,                   // 后排最多抬高多少像素（再高就和脚下的点脱节了）
+      scaleExp: 0.85, minScale: 0.74, maxScale: 1.15   // 按离镜头远近缩放：(焦距 / 距离)^scaleExp，夹在这个范围里
+    },
+    /* 默认镜头：场景（hd2d-scene.js）也用这一份 */
+    camera: { fov: 22, elevation: 30, margin: 0.97, targetY: 0.6 },
+    view: { width: 1440, height: 900, top: 46, bottom: 160 },        // 桌面：顶栏 + 展开的技能栏
+    phoneView: { width: 390, height: 844, top: 42, bottom: 56 },     // 手机竖屏：面板默认收起
     maxDefPips: 12        // 架势菱形最多画几个（训练木桩之类的巨大架势不画满）
   };
 
@@ -49,6 +66,8 @@
   };
 
   const num = (v, d) => (Number.isFinite(Number(v)) ? Number(v) : d);
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const D2R = Math.PI / 180;
 
   /* ---------- 棋盘 ---------- */
   /** 读棋盘：特殊棋盘用 state.board；没有就按 zoneMode 当直排（和规则里 currentBoard 的口径一致） */
@@ -111,16 +130,116 @@
     return plate;
   }
 
+  /* ---------- 镜头（和 hd2d-scene.js 用同一套：透视、俯角 elevation、正对 −z 方向）---------- */
+  /** 镜头摆在 target 后上方 dist 远处，朝 target 看 */
+  function camAt(target, dist, aspect) {
+    const C = CONFIG.camera, e = C.elevation * D2R, se = Math.sin(e), ce = Math.cos(e);
+    return {
+      target: { x: target.x, y: target.y, z: target.z }, dist,
+      pos: { x: target.x, y: target.y + se * dist, z: target.z + ce * dist },
+      right: { x: 1, y: 0, z: 0 }, up: { x: 0, y: ce, z: -se }, back: { x: 0, y: se, z: ce },
+      fov: C.fov, elevation: C.elevation, aspect, tanHalf: Math.tan(C.fov * D2R / 2)
+    };
+  }
+  /** 世界坐标 → NDC（−1…1，y 向上）；depth 是沿视线到镜头的距离 */
+  function toNdc(cam, p) {
+    const vx = p.x - cam.pos.x, vy = p.y - cam.pos.y, vz = p.z - cam.pos.z;
+    const xv = vx * cam.right.x + vy * cam.right.y + vz * cam.right.z;
+    const yv = vx * cam.up.x + vy * cam.up.y + vz * cam.up.z;
+    const depth = -(vx * cam.back.x + vy * cam.back.y + vz * cam.back.z);
+    return { x: xv / (depth * cam.tanHalf * cam.aspect), y: yv / (depth * cam.tanHalf), depth };
+  }
+  /** 世界坐标 → 屏幕像素（左上角为原点，y 向下） */
+  function project(cam, p) {
+    const n = toNdc(cam, p);
+    return { x: (n.x + 1) / 2 * cam.width, y: (1 - n.y) / 2 * cam.height, depth: n.depth };
+  }
+  /** 铭牌按离镜头远近的缩放（场景每帧用同一个公式） */
+  function plateScale(cam, p) {
+    const P = CONFIG.plate;
+    const d = Math.hypot(p.x - cam.pos.x, p.y - cam.pos.y, p.z - cam.pos.z);
+    return clamp(Math.pow(cam.dist / Math.max(1e-6, d), P.scaleExp), P.minScale, P.maxScale);
+  }
+  function viewOf(opts) {
+    const base = opts.portrait ? CONFIG.phoneView : CONFIG.view, v = opts.view || {};
+    return {
+      width: Math.max(1, num(v.width, base.width)), height: Math.max(1, num(v.height, base.height)),
+      top: Math.max(0, num(v.top, base.top)), bottom: Math.max(0, num(v.bottom, base.bottom))
+    };
+  }
+  /** 取景：让整个战场刚好装进「上下被界面盖住之后剩下的那一块」（迭代：先居中，再按超出 / 留空的比例推拉） */
+  function fitView(bounds, view) {
+    const C = CONFIG.camera;
+    const W = Math.max(1, view.width), H = Math.max(1, view.height), aspect = W / H;
+    const lo = -1 + 2 * (view.bottom || 0) / H, hi = 1 - 2 * (view.top || 0) / H;
+    const b = bounds, top = b.maxY + 0.5, pts = [];
+    [b.minX, b.maxX].forEach(x => [0, top].forEach(y => [b.minZ, b.maxZ].forEach(z => pts.push({ x, y, z }))));
+    const t = { x: (b.minX + b.maxX) / 2, y: C.targetY, z: (b.minZ + b.maxZ) / 2 };
+    let dist = 40, cam = null;
+    for (let it = 0; it < 14; it++) {
+      cam = camAt(t, dist, aspect);
+      let x0 = 9, x1 = -9, y0 = 9, y1 = -9;
+      pts.forEach(p => { const n = toNdc(cam, p); x0 = Math.min(x0, n.x); x1 = Math.max(x1, n.x); y0 = Math.min(y0, n.y); y1 = Math.max(y1, n.y); });
+      const dy = (lo + hi) / 2 - (y0 + y1) / 2, dx = -(x0 + x1) / 2;
+      const half = cam.tanHalf * dist, mu = -dy * half, mr = -dx * half * aspect;
+      t.x += cam.up.x * mu + cam.right.x * mr; t.y += cam.up.y * mu + cam.right.y * mr; t.z += cam.up.z * mu + cam.right.z * mr;
+      const k = Math.max((x1 - x0) / (2 * C.margin), (y1 - y0) / ((hi - lo) * C.margin));
+      dist *= Math.min(1.6, Math.max(0.6, k));
+    }
+    cam = camAt(t, dist, aspect);
+    cam.width = W; cam.height = H; cam.view = { top: view.top || 0, bottom: view.bottom || 0 };
+    return cam;
+  }
+  /** 默认镜头的画面上沿那条视线，在进深 z 处离地多高：远景剪影不超过这个高度，整个轮廓就都在画面里（hd2d-backdrop.js 用） */
+  function frameTop(cam, z) {
+    return cam.pos.y - (cam.pos.z - z) * Math.tan((cam.elevation - cam.fov / 2) * D2R);
+  }
+  /** 铭牌的像素尺寸（桌面 / 手机） */
+  function plateSize(view) {
+    const P = CONFIG.plate;
+    return view.width <= P.phoneMax ? { w: P.phoneW, h: P.phoneH } : { w: P.w, h: P.h };
+  }
+  /** 一块铭牌在屏幕上的矩形（像素，y 向下）：底边中点在脚下的点往上 lift 像素，大小按远近缩放，上下各让出浮动的幅度 */
+  function plateRect(cam, size, anchor, lift) {
+    const s = project(cam, anchor), k = plateScale(cam, anchor), bob = CONFIG.plate.bob;
+    const w = size.w * k, h = size.h * k;
+    return { cx: s.x, foot: s.y, scale: k, x0: s.x - w / 2, x1: s.x + w / 2, y0: s.y - lift - h - bob, y1: s.y - lift + bob };
+  }
+
   /* ---------- 站位 ---------- */
-  /** 一个区里所有单位的站位（局部坐标，相对区中心）。敌方在后排（−z），我方在前排（+z） */
-  function arrangeUnits(zone, list) {
+  /** 一个区里一排最多站几个人，以及相邻两人的间距（世界单位）。
+   *  铭牌按 (焦距 / 距离)^0.85 缩放，比地面缩得慢，所以越远越挤：前沿、后沿都量一遍，取挤的那边 */
+  function columnsOf(zone, cam, size) {
+    const P = CONFIG.plate, U = CONFIG.unit;
+    const usableW = zone.w - 2 * CONFIG.pad;
+    if (!cam) return { per: Math.max(1, Math.floor(usableW / U.minCol + 1e-9) + 1), step: U.minCol };
+    let step = U.minCol, plateW = 0, overhang = Infinity;
+    [1, -1].forEach(edge => {
+      const z = zone.cz + edge * (zone.d / 2 - CONFIG.pad), y = zone.topY;
+      const a = project(cam, { x: zone.cx - 0.5, y, z }), b = project(cam, { x: zone.cx + 0.5, y, z });
+      const ppu = Math.max(1e-6, Math.abs(b.x - a.x));                     // 这里 1 个世界单位横向多少像素
+      const w = size.w * plateScale(cam, { x: zone.cx, y, z }) / ppu;         // 铭牌宽（世界单位）
+      plateW = Math.max(plateW, w);
+      step = Math.max(step, w + P.gapX / ppu);
+      overhang = Math.min(overhang, Math.max(0, CONFIG.zoneGap / 2 - P.gapX / ppu));   // 铭牌最多伸出地台边缘多少（不压到隔壁区的铭牌）
+    });
+    let per = 1;
+    while (per * step <= usableW + 1e-9 && per * step / 2 + plateW / 2 <= zone.w / 2 + overhang + 1e-9) per++;
+    return { per, step };
+  }
+
+  /** 一个区里所有单位的站位（局部坐标，相对区中心）。敌方在后排（−z），我方在前排（+z）。
+   *  cam / size 给了就按屏幕上的铭牌宽排列数；没给就按 minCol 的间距排（只看脚下不重叠） */
+  function arrangeUnits(zone, list, cam, size) {
     const U = CONFIG.unit;
-    const usableW = zone.w - 2 * CONFIG.pad, usableD = zone.d - 2 * CONFIG.pad;
-    const perRow = Math.max(1, Math.floor(usableW / U.w + 1e-9));
+    const usableD = zone.d - 2 * CONFIG.pad;
+    const cols = columnsOf(zone, cam, size || plateSize(CONFIG.view));
     const foes = list.filter(u => !u.isPlayer), mine = list.filter(u => u.isPlayer);
     const rowsOf = (g) => {
       const rows = [];
-      for (let i = 0; i < g.length; i += perRow) rows.push(g.slice(i, i + perRow));
+      if (!g.length) return rows;
+      const n = Math.ceil(g.length / cols.per), per = Math.ceil(g.length / n);   // 排得匀一点：4 人分 2+2，不分 3+1
+      for (let i = 0; i < g.length; i += per) rows.push(g.slice(i, i + per));
       return rows;
     };
     const fr = rowsOf(foes), mr = rowsOf(mine);
@@ -131,27 +250,65 @@
     const out = [];
     // 前后错开：隔一个往前（+z）挪一点，铭牌不排成一条线；排距小的时候少挪，保证不压到前后排。深渊区不挪（要贴着洞沿）
     const stag = zone.hole > 0 ? 0 : (total > 1 ? Math.min(U.stagger, Math.max(0, (step - U.d) / 2)) : U.stagger);
-    const put = (rows, zOf) => rows.forEach((row, r) => row.forEach((u, i) => {
-      out.push({ unit: u, x: (i - (row.length - 1) / 2) * U.w, z: zOf(r) + (i % 2 ? stag : -stag), row: r, col: i });
+    const put = (rows, zOf, tag) => rows.forEach((row, r) => row.forEach((u, i) => {
+      out.push({ unit: u, x: (i - (row.length - 1) / 2) * cols.step, z: zOf(r) + (i % 2 ? stag : -stag), row: tag + r, col: i, colStep: cols.step });
     }));
     if (zone.hole > 0) {
       // 深渊：黑洞在地台中间，地面单位站在洞的两侧边沿上，敌方在后、我方在前
       const rim = zone.hole + U.d / 2 + 0.35;
-      put(fr, r => -rim - r * step);
-      put(mr, r => rim + r * step);
+      put(fr, r => -rim - r * step, "f");
+      put(mr, r => rim + r * step, "m");
     } else {
       // 其余：两拨一起居中。后排是敌方（第 0 排最靠后），紧接着是我方
       const top = -((total - 1) * step + extra) / 2;
-      put(fr, r => top + r * step);
-      put(mr, r => top + (fr.length + r) * step + extra);
+      put(fr, r => top + r * step, "f");
+      put(mr, r => top + (fr.length + r) * step + extra, "m");
     }
     return out;
+  }
+
+  /**
+   * 后排抬高：从屏幕上最靠下（离镜头最近）的一排开始放，后面每一排如果和已经放好的铭牌在屏幕上叠到，
+   * 就整排往上抬，直到让开 gapY（最多抬 maxLift）。每个单位写上 lift（像素）和 rect（屏幕矩形）。
+   */
+  function liftRows(units, cam, size) {
+    const P = CONFIG.plate;
+    const rows = new Map();
+    units.forEach(u => {
+      const key = u.zone + ":" + u.row;
+      if (!rows.has(key)) rows.set(key, []);
+      rows.get(key).push(u);
+    });
+    const anchor = (u) => ({ x: u.x, y: u.y, z: u.z });
+    const list = [...rows.values()].map(items => ({ items, foot: items.reduce((a, u) => a + project(cam, anchor(u)).y, 0) / items.length }));
+    list.sort((a, b) => b.foot - a.foot);
+    const placed = [];
+    const hits = (r, p) => r.x0 < p.x1 && p.x0 < r.x1 && r.y0 < p.y1 + P.gapY && p.y0 < r.y1 + P.gapY;
+    list.forEach(row => {
+      let lift = 0;
+      for (let guard = 0; guard < 40; guard++) {
+        let need = 0;
+        row.items.forEach(u => {
+          const r = plateRect(cam, size, anchor(u), lift);
+          placed.forEach(p => { if (hits(r, p)) need = Math.max(need, r.y1 - (p.y0 - P.gapY)); });
+        });
+        if (need <= 0.01) break;
+        lift = Math.min(P.maxLift, lift + need);
+        if (lift >= P.maxLift) break;
+      }
+      row.items.forEach(u => {
+        u.lift = Math.round(lift * 10) / 10;
+        u.rect = plateRect(cam, size, anchor(u), u.lift);
+        placed.push(u.rect);
+      });
+    });
   }
 
   /* ---------- 总入口 ---------- */
   /**
    * 排出整个战场。
    *   opts.portrait  竖屏（手机）：整块棋盘转 90°，直排沿进深（前后）排开，我方在最前面
+   *   opts.view      { width, height, top, bottom }：画面大小和上下被界面盖住的像素（场景传真实的；不给按桌面 / 手机的默认值）
    */
   function build(state, opts) {
     opts = opts || {};
@@ -192,6 +349,18 @@
       };
     }).filter(Boolean);
 
+    // 整个战场的范围（取景用）：只看地台，和单位站在哪无关，镜头才不会跟着站位来回变
+    const U = CONFIG.unit;
+    const b = { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity, maxY: 0 };
+    zones.forEach(z => {
+      b.minX = Math.min(b.minX, z.cx - z.w / 2); b.maxX = Math.max(b.maxX, z.cx + z.w / 2);
+      b.minZ = Math.min(b.minZ, z.cz - z.d / 2); b.maxZ = Math.max(b.maxZ, z.cz + z.d / 2);
+      b.maxY = Math.max(b.maxY, z.topY + U.flyLift + U.plateH);
+    });
+    const view = viewOf(opts);
+    const camera = fitView(b, view);
+    const size = plateSize(view);
+
     // 单位：藏起来的、死了的、被移出的不画
     const visible = (state.units || []).filter(u => u && !u.hidden && !u.dead && !u._removed && !u.fused);
     const byZone = {};
@@ -201,11 +370,10 @@
       (byZone[z.id] = byZone[z.id] || []).push(u);
     });
     const units = [];
-    const U = CONFIG.unit;
     zones.forEach(z => {
       const list = byZone[z.id];
       if (!list) return;
-      arrangeUnits(z, list).forEach(slot => {
+      arrangeUnits(z, list, camera, size).forEach(slot => {
         const u = slot.unit;
         const flying = !!u.flying && !u.submerged;
         const submerged = !!u.submerged;
@@ -214,22 +382,19 @@
           x: z.cx + slot.x, z: z.cz + slot.z,
           groundY: z.topY, flying, submerged,
           y: z.topY + (flying ? U.flyLift : 0) - (submerged ? U.sink : 0),
-          footprint: { w: U.w, d: U.d },
-          plateW: U.plateW, plateH: U.plateH,
+          row: slot.row, col: slot.col,
+          footprint: { w: slot.colStep, d: U.d },
+          lift: 0, rect: null,             // liftRows 填：后排抬高的像素、铭牌在屏幕上的矩形
           plate: plateData(u)
         });
       });
     });
-
-    // 整个战场的范围（镜头取景用）
-    const b = { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity, maxY: 0 };
-    zones.forEach(z => {
-      b.minX = Math.min(b.minX, z.cx - z.w / 2); b.maxX = Math.max(b.maxX, z.cx + z.w / 2);
-      b.minZ = Math.min(b.minZ, z.cz - z.d / 2); b.maxZ = Math.max(b.maxZ, z.cz + z.d / 2);
-      b.maxY = Math.max(b.maxY, z.topY + U.flyLift + U.plateH);
-    });
-    return { portrait, boardId: board.id, zones, gaps, units, bounds: b };
+    liftRows(units, camera, size);
+    return { portrait, boardId: board.id, zones, gaps, units, bounds: b, camera, view, plateSize: size };
   }
 
-  return { CONFIG, KIND_ORDER, STATUS_LABELS, build, boardOf, fieldKinds, plateData, arrangeUnits, gapKeyOf };
+  return {
+    CONFIG, KIND_ORDER, STATUS_LABELS, build, boardOf, fieldKinds, plateData, arrangeUnits, gapKeyOf,
+    fitView, project, plateScale, plateRect, plateSize, frameTop
+  };
 });

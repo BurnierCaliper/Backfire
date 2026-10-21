@@ -21,7 +21,6 @@
 </svg>
 
 <div id="stage"></div>
-<div id="vignette"></div>
 
 <header id="topbar">
   <span class="brand">BACKFIRE · HD-2D</span>
@@ -58,11 +57,15 @@
 <div id="toast"></div>
 <div id="loading">载入战场……</div>
 
-<div id="calc-core" hidden></div>
+<div id="calc-core" hidden>
+  <!-- 旧计算器的元素：app.js 的 syncBladeSel 会逐个改 bladeSel 的 options，替身 div 没有 options 会报错，所以这个照 game.html 放真的下拉框 -->
+  <select id="bladeSel"><option value="niu">丹生谷（火）</option><option value="naruto">鳴門（冰）</option></select>
+</div>
 <script>
-/* 垫片（照 game.html 的做法）：app.js 在有页面时会自己跑 init()，去找旧计算器的 presetSelect、zoneMode 等一大批元素，
- * 这个原型页面里没有，找不到就会报 Cannot set properties of null。这里让「不认识的 id」拿到一个藏起来的替身，
- * 原型自己的元素（下面这些前缀）照实返回，不被替身骗过。也不让计算器读写它自己的存档。不改 app.js。 */
+/* 垫片（照 game.html 的做法）：app.js 在有页面时会自己跑 init()，去找旧计算器的 presetSelect、zoneMode、partySize 等一大批元素，
+ * 这个原型页面里没有，找不到就会报 Cannot set properties of null。这里让「不认识的 id」拿到一个藏起来的替身（div），
+ * 原型自己的元素（OWN 里逐个列出的 id，整个匹配，不按前缀——以前按前缀，partySize 被 party 拦下拿到 null）照实返回，
+ * 不被替身骗过。也不让计算器读写它自己的存档。不改 app.js。 */
 window.GAME_MODE = true;
 (function () {
   var add = window.addEventListener.bind(window);
@@ -75,7 +78,7 @@ window.GAME_MODE = true;
   Storage.prototype.getItem = function (k) { return calcKey(String(k)) ? null : gi.call(this, k); };
   Storage.prototype.setItem = function (k, v) { if (calcKey(String(k))) return; return si.call(this, k, v); };
   var byId = Document.prototype.getElementById;
-  var OWN = /^(stage|vignette|topbar|tb-|demo-|party|log|dock|skills|toast|loading|calc-core)/;
+  var OWN = /^(?:stage|topbar|tb-turn|tb-weather|tb-map|tb-compact|demo-select|demo-btn|party|party-toggle|party-list|logdrawer|log-toggle|log-body|dock|dock-toggle|dock-who|dock-hint|skills|toast|loading|calc-core)$/;
   Document.prototype.getElementById = function (id) {
     var e = byId.call(this, id);
     if (e || OWN.test(String(id))) return e;
@@ -226,9 +229,10 @@ const DEMOS = [
 let sc = null, demo = null, st = null, actorId = null;
 const weatherText = (w) => (!w || w === "none") ? "晴天" : (typeof weatherName === "function" ? weatherName(w) : w);
 
+/** 排战场：铭牌是固定像素大小的 DOM，所以把真实的画面大小和上下被面板盖住的像素交给布局，它按同一个镜头算站位 */
 function build() {
-  if (!st) return null;
-  return L.build(st, { portrait: !!(sc && sc.portrait) });
+  if (!st || !sc) return null;
+  return L.build(st, { portrait: !!sc.portrait, view: sc.view() });
 }
 function repaint(resetView) {
   const layout = build();
@@ -303,13 +307,13 @@ function wirePanel(panelId, btnId, labelOn, labelOff, startOpen) {
   b.addEventListener("click", () => set(p.classList.contains("collapsed")));
   set(startOpen);
 }
-/** 取景时让开顶栏和底部技能栏 */
+/** 取景时让开顶栏和底部技能栏；让开的大小变了，铭牌的站位也跟着重排 */
 function reinset(refit) {
   if (!sc) return;
   const top = $("topbar").offsetHeight;
   const bottom = $("dock").offsetHeight;
   sc.setInsets({ top: top + 6, bottom: bottom + 4 });
-  if (refit) sc.refit();
+  repaint(refit);
 }
 
 /* ---------- 启动 ---------- */
@@ -330,10 +334,10 @@ function boot() {
   $("demo-select").addEventListener("change", e => loadDemo(e.target.value));
   $("demo-btn").addEventListener("click", () => loadDemo(DEMOS[(DEMOS.indexOf(demo) + 1) % DEMOS.length].id));   // 手机：小按钮轮流切
   sc = createHd2dScene($("stage"), {
-    onPortraitChange() { if (st) { repaint(true); } }
+    onPortraitChange() { if (sc && st) repaint(true); },
+    onViewChange() { if (sc && st) reinset(true); }      // 窗口大小变了：按新画面重排铭牌、镜头回到默认
   });
   reinset(false);
-  window.addEventListener("resize", () => reinset(false));
   loadDemo(new URLSearchParams(location.search).get("demo") || DEMOS[0].id);
   $("loading").classList.add("done");
   window.HD2D = { sc, DEMOS, L, get state() { return st; } };   // 方便在控制台里看
