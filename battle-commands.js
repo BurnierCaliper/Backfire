@@ -3,7 +3,7 @@
   "use strict";
   let local = {};
   const types = ["skill", "move", "standUp", "useItem", "startCombat", "endTurn", "openingChoice", "blockAnswer", "assistAnswer", "koltSwapAnswer", "heluScanAnswer", "longgeSafetyAnswer", "retreat", "battle.endPlayerTurn", "battle.endEnemyTurn", "battle.enemyAction", "battle.finish", "battle.afterBattle", "battle.checkSolo", "battle.supportInfo", "battle.rememberCampaign", "battle.loadCampaign", "battle.cleanQueues", "battle.setup", "battle.setupRogue", "battle.panel", "battle.undo", "battle.continue", "battle.chain"];
-  const panelActions = ["bagAdd", "currency", "water", "healItem", "repair", "advance", "shortRest", "longRest", "restore", "cheat", "saveSlot", "loadSlot", "clearSlot", "addParty", "removeParty", "addEnemy", "removeEnemy", "setField", "ruinHp", "setGap", "gapHp", "rollWall", "toggleDoor", "addProp", "removeProp", "setZones", "setPartySize", "setWeather", "rollEncounter", "rollBossEncounter", "selectEncounter", "normalizeBag", "normalizeGaps", "normalizeField", "setHighland", "setExecution", "setShare", "setSpread", "setTower", "setDrops"];
+  const panelActions = ["bagAdd", "currency", "water", "healItem", "repair", "advance", "shortRest", "longRest", "restore", "cheat", "saveSlot", "loadSlot", "clearSlot", "addParty", "removeParty", "addEnemy", "removeEnemy", "setField", "ruinHp", "setGap", "gapHp", "rollWall", "toggleDoor", "addProp", "removeProp", "setZones", "setPartySize", "setWeather", "setRegion", "setLight", "rollEncounter", "rollBossEncounter", "selectEncounter", "normalizeBag", "normalizeGaps", "normalizeField", "setHighland", "setExecution", "setShare", "setSpread", "setTower", "setDrops"];
   function configure(adapter) { local = Object.assign({}, local, adapter || {}); }
   function environment(context) { return Object.assign({}, local, context || {}); }
   // Rogue's legacy encounter rows explicitly contain level: undefined when they
@@ -55,6 +55,9 @@
       if (cmd.action === "setGap") oneOf(cmd.kind, ["open", "bridge", "wall", "door", "void"], "gap kind");
       if (["setGap", "gapHp", "rollWall", "toggleDoor"].includes(cmd.action)) oneOf(cmd.key, ["1-2", "2-3"], "gap key");
       if (cmd.action === "setWeather") oneOf(cmd.value, ["none", "heat", "snow", "acid", "thunder", "glow", "sand", "phase"], "weather");
+      // 所在区域 / 光影（只是画面）："" = 跟着地图 / 跟着时钟；区域只认 world-data.js 的 BATTLE_REGIONS，光影只认 daylight.js 的三个值
+      if (cmd.action === "setRegion") oneOf(cmd.value, [""].concat(typeof BATTLE_REGIONS !== "undefined" ? BATTLE_REGIONS : []), "battle region");
+      if (cmd.action === "setLight") oneOf(cmd.value, [""].concat(typeof DayLight !== "undefined" ? DayLight.LIGHTS : []), "battle light");
       if (cmd.action === "setZones") oneOf(cmd.value, [2, 3].concat(typeof BOARD_LAYOUTS !== "undefined" ? Object.keys(BOARD_LAYOUTS) : []), "zone count");
       if (cmd.action === "setPartySize") oneOf(cmd.value, [2, 3, 4], "party size");
       if (["setField", "ruinHp", "setHighland", "addProp", "addParty", "addEnemy"].includes(cmd.action)) oneOf(cmd.zone, [1, 2, 3], "zone");
@@ -180,6 +183,8 @@
         u.zone = Math.min(Number(state.zoneMode), Number(row.zone) || Number(state.zoneMode)); state.units.push(u);
       });
     }
+    // 所在区域、光影（只是画面）：遭遇的 region / 跑团队伍在地图上的地点；光影跟着时钟（world-data.js · battleLookStart）
+    if (typeof battleLookStart === "function") battleLookStart({ region: enc && enc.region });
     return { encounter: enc, partySize: partyN, notes };
   }
   function panel(cmd, env) {
@@ -296,6 +301,9 @@
       }
       case "setPartySize": g.partySize = state.partySize = Number(cmd.value) || 2; break;
       case "setWeather": { const was = state.weather; state.weather = cmd.value || "none"; state.weatherBy = null; if (cmd.persist) g.weather = state.weather; if (state.weather === "sand" && was !== "sand" && typeof rollSandDir === "function") rollSandDir(); break; }
+      // 所在区域 / 光影：只是画面的标签，不改结算（规则的白天 / 夜晚照旧跟着时钟）。只管这一场，下一场开战回到跟着地图 / 时钟
+      case "setRegion": value = battleLookSet({ region: cmd.value }); break;
+      case "setLight": value = battleLookSet({ light: cmd.value }); break;
       case "rollEncounter": value = rollEncounter({ region: cmd.region, ...(cmd.faction ? { faction: cmd.faction } : {}) }); break;
       case "rollBossEncounter": { const bosses = Object.keys(ENEMY_INFO || {}).filter(k => ENEMY_INFO[k].boss && ENEMY_INFO[k].regions.indexOf(cmd.region) >= 0); if (bosses.length) value = rollBossEncounter(bosses[Math.floor(Math.random() * bosses.length)], { region: cmd.region }); break; }
       case "selectEncounter": g.lastEncounter = cmd.encounter; value = cmd.encounter; break;

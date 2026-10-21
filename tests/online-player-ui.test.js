@@ -53,7 +53,7 @@ async function open(t, mobile = false) {
     // when no rules state or battle engine exists in its environment.
     for (const name of ["GAME", "state", "BattleCommands", "dispatch", "skillFlowSteps", "previewOf", "Screens"]) Object.defineProperty(window, name, { configurable: true, get() { throw new Error("Display touched rules: " + name); } });
   });
-  for (const file of ["hud-icons.js", "unit-card.js", "unit-tip.js", "online-battle.js", "party-cards.js", "online-ui.js"]) await page.addScriptTag({ path: path.resolve(__dirname, "..", file) });
+  for (const file of ["hud-icons.js", "unit-card.js", "unit-tip.js", "online-battle.js", "daylight.js", "party-cards.js", "online-ui.js"]) await page.addScriptTag({ path: path.resolve(__dirname, "..", file) });
   return { page, errors };
 }
 async function player(page, patch = {}) { await page.evaluate(patch => fixture.set({ active: true, isHost: false, identity: { id: "p1" }, screen: "battle", ...patch }), patch); }
@@ -102,8 +102,10 @@ test("时钟：和主持人顶栏同一句「距上次长休」，过 20 小时�
   assert.match(h, /第 <b>2<\/b> 天 <b class="tr-time">14:30<\/b> 下午 · 距上次长休 <b>3 小时 20 分<\/b>/);
   assert.match(PC.clockHtml({ day: 1, clock: 0, hours: 41 }), /力竭 2/);
   assert.deepEqual([17 * 60 + 59, 18 * 60, 4 * 60 + 59, 5 * 60].map(PC.isNight), [false, true, true, false]);
-  const ledger = fs.readFileSync(path.join(ROOT, "ledger.js"), "utf8");
-  assert.match(ledger, /nightFrom: 18 \* 60, nightTo: 5 \* 60/, "改了昼夜分界要同时改 party-cards.js");
+  // 昼夜分界只有一份（daylight.js 的 DAY_LIGHT，#229）：ledger.js 和 party-cards.js 都读它，不再各写一份
+  const ledger = fs.readFileSync(path.join(ROOT, "ledger.js"), "utf8"), cards = fs.readFileSync(path.join(ROOT, "party-cards.js"), "utf8");
+  assert.match(ledger, /function isNightClock\(min\) \{ return DayLight\.isNight\(min\); \}/);
+  assert.match(cards, /const isNight = m => dayLight\(\)\.isNight\(m\);/);
   // 主持人顶栏 / 左栏和玩家画面用同一个渲染器；房主的包里带 hours 和 party
   const tu = fs.readFileSync(path.join(ROOT, "trpg-ui.js"), "utf8"), og = fs.readFileSync(path.join(ROOT, "online-game.js"), "utf8");
   assert.match(tu, /PartyCards\.clockHtml\(\{ day: LEDGER\.day, clock: LEDGER\.clock, hours: LEDGER\.hours \}\)/);

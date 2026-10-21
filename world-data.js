@@ -41,6 +41,59 @@ function worldPlaceOf(regionOrId) {
     WORLD_PLACES.find(p => p.name === regionOrId) || null;
 }
 
+/* ===== 战斗所在的区域、光影（只是画面用的标签：HD-2D 战场默认地台的地面、远景、灯、天空；不改任何结算） =====
+ * BATTLE_REGIONS：战斗状态的 state.region 只认这里的区域名，联机白名单（online-view.js · projectState）也只放行这些。
+ *   区域名用游戏里现成的：单局各幕 / 幕间改走的采矿场（rogue-data.js 的 regions / altRegions）、遭遇的 region。
+ *   地图地点 id（跑团 LEDGER.place：mine_1、outer_city……）、地点名（天网塔）按上面的 WORLD_REGION_PLACE / WORLD_PLACES 对到区域；
+ *   地图上别的地点（星际港口、极北禁区、太阳能板群……）不是区域，认不得。
+ *   HD-2D 原型的地面主题表（prototypes/hd2d/hd2d-layout.js 的 REGIONS / REGION_ALIAS）和这里一一对上（tests/region-light.test.js 核对）。 */
+const BATTLE_REGIONS = ["外城区", "沙漠", "巨人城", "天网设施", "第一采矿场", "第二采矿场", "第三采矿场",
+  "下水道"];   // 下水道：游戏里还没有这张图（ROADMAP 里的「下水道」），HD-2D 原型先放了地面主题；主持人可以在战场配置里选
+/** 区域名 / 地图地点 id / 地点名 → 区域名（BATTLE_REGIONS 里的）；认不得的返回 null */
+function battleRegionName(x) {
+  if (typeof x !== "string") return null;
+  const s = x.trim();
+  if (BATTLE_REGIONS.indexOf(s) >= 0) return s;
+  const p = worldPlaceOf(s);
+  return p ? BATTLE_REGIONS.find(r => (worldPlaceOf(r) || {}).id === p.id) || null : null;
+}
+/*   state.region      这场战斗在哪个区域（BATTLE_REGIONS 里的名字；没有 / 认不得 = null）
+ *   state.light       光影：day 白天 / dusk 傍晚 / night 夜晚（daylight.js · LIGHTS）
+ *   state.regionMap   开战时从地图来的区域（主持人没选时用它）：
+ *                       单局 = 这一幕的区域（Rogue.region(run)，单局的遭遇都带着它：rogue.js · battleSpec → spec.encounter.region）；
+ *                       战斗原型 / 遭遇 = spec.region（遭遇表、随机遭遇的 region；BattleSim.setup 也可以直接给 region）；
+ *                       跑团 = 队伍在地图上的地点（LEDGER.place → 区域）；地图上没标队伍的位置时用遭遇的 region
+ *   state.regionPick / state.lightPick   主持人在战场配置里选的（null = 跟着地图 / 跟着时钟）；每场开战清掉
+ * 光影跟着时钟（ledger.js · clockLight，和规则的昼夜同一张表 daylight.js）：开战时、主持人改了以后、联机每次发包前（online-game.js）
+ * 按当前时钟重算，推进时间以后也跟着变。规则上的白天 / 夜晚（沙漠生物等）只看时钟，不看这里选的光影。 */
+/** 开战时写进战斗状态（battle-commands.js · battle.setup、sim.js · BattleSim.setup 布置完调用）。
+ *  spec.region = 这场的区域（遭遇 / 战斗原型）；spec.light = 布置时就定好的光影（和主持人选的一样，不给就跟着时钟） */
+function battleLookStart(spec) {
+  spec = spec || {};
+  const placed = typeof TRPG !== "undefined" && TRPG.active && typeof LEDGER !== "undefined" && LEDGER.place;
+  state.regionMap = battleRegionName(placed ? LEDGER.place : spec.region);
+  state.regionPick = null;
+  state.lightPick = DayLight.LIGHTS.indexOf(spec.light) >= 0 ? spec.light : null;
+  return battleLookSync();
+}
+/** 按主持人选的 / 地图 / 当前时钟重算 state.region、state.light */
+function battleLookSync() {
+  state.region = battleRegionName(state.regionPick) || battleRegionName(state.regionMap);
+  state.light = DayLight.LIGHTS.indexOf(state.lightPick) >= 0 ? state.lightPick : clockLight(clockNow());
+  return { region: state.region, light: state.light };
+}
+/** 主持人在战场配置里改（battle-commands.js · battle.panel 的 setRegion / setLight）：
+ *  patch.region = 区域名，"" = 跟着地图；patch.light = day / dusk / night，"" = 跟着时钟。认不得的值抛错，什么都不改 */
+function battleLookSet(patch) {
+  patch = patch || {};
+  const has = k => Object.prototype.hasOwnProperty.call(patch, k);
+  if (has("region") && patch.region !== "" && BATTLE_REGIONS.indexOf(patch.region) < 0) throw new Error("认不得的区域：" + patch.region);
+  if (has("light") && patch.light !== "" && DayLight.LIGHTS.indexOf(patch.light) < 0) throw new Error("认不得的光影：" + patch.light);
+  if (has("region")) state.regionPick = patch.region || null;
+  if (has("light")) state.lightPick = patch.light || null;
+  return battleLookSync();
+}
+
 /** 离 (x, y) 最近的地点（按地图图片上的实际距离算） */
 function worldNearestPlace(x, y) {
   let best = null, bd = Infinity;

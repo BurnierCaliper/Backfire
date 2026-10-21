@@ -425,17 +425,16 @@ function parseClock(text) {
   if (h > 23 || mi > 59) return null;
   return h * 60 + mi;
 }
-/** 时段：深夜 / 清晨 / 上午 / 中午 / 下午 / 傍晚 / 夜晚 */
+/** 时段：深夜 / 清晨 / 上午 / 中午 / 下午 / 傍晚 / 夜晚。深夜到几点、几点起傍晚 / 夜晚和光影同一张表（daylight.js 的 DAY_LIGHT） */
 function dayPeriod(min) {
-  const h = Math.floor((((Number(min) || 0) % 1440) + 1440) % 1440 / 60);
-  return h < 5 ? "深夜" : h < 8 ? "清晨" : h < 12 ? "上午" : h < 14 ? "中午" : h < 18 ? "下午" : h < 20 ? "傍晚" : "夜晚";
+  const m = (((Number(min) || 0) % 1440) + 1440) % 1440, h = Math.floor(m / 60), T = DayLight.DAY_LIGHT;
+  return m < T.day ? "深夜" : h < 8 ? "清晨" : h < 12 ? "上午" : h < 14 ? "中午" : m < T.dusk ? "下午" : m < T.night ? "傍晚" : "夜晚";
 }
-/* 昼夜（沙漠生物等会按昼夜换行为，desert.js）：白天 05:00–18:00，夜晚 18:00–05:00 */
-const DAY_NIGHT = { nightFrom: 18 * 60, nightTo: 5 * 60 };
-function isNightClock(min) {
-  const m = ((Math.floor(Number(min) || 0) % 1440) + 1440) % 1440;
-  return m >= DAY_NIGHT.nightFrom || m < DAY_NIGHT.nightTo;
-}
+/* 昼夜（沙漠生物等会按昼夜换行为，desert.js）：几点到几点算白天 / 傍晚 / 夜晚在 daylight.js 的 DAY_LIGHT（规则和画面共用一张表）。
+ * 规则上的夜晚 = 傍晚 + 夜晚（18:00–05:00），白天 05:00–18:00 */
+function isNightClock(min) { return DayLight.isNight(min); }
+/** 这个时刻的光影：day 白天 / dusk 傍晚 / night 夜晚（战斗状态的 state.light 默认跟着它，只是画面） */
+function clockLight(min) { return DayLight.lightAt(min); }
 /** 现在的时钟（分钟） */
 function clockNow() {
   return typeof LEDGER !== "undefined" && LEDGER.clock != null ? Number(LEDGER.clock) : CLOCK_START;

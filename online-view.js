@@ -241,6 +241,11 @@
     out.weatherLocked = !!get(state, "weatherLock");
     enumField(state, out, "combatPhase", ["player", "enemy"]);
     enumField(state, out, "weather", ["none", "heat", "snow", "acid", "thunder", "glow", "sand", "phase"]);
+    // 这场战斗在哪个区域、光影（白天 / 傍晚 / 夜晚）：只是画面的标签（HD-2D 战场的地面、远景、天空、灯）。
+    // 区域只放行主机配置表认得的名字（world-data.js · battleRegionName；地图地点 id 换成区域名），光影只放行三个值（daylight.js · LIGHTS）；
+    // 认不得的、主机没有配置表的，一律不发。主持人选过的 / 跟着地图、时钟的，房主发包前已经算好写在 state 里（world-data.js · battleLookSync）
+    const region = text(call("battleRegionName", get(state, "region")), 12); if (region) out.region = region;
+    enumField(state, out, "light", ["day", "dusk", "night"]);
     out.units = arr(get(state, "units")).slice(0, 200).map(projectUnit).filter(Boolean);
     // 连续战斗第几场 / 共几场、援军还有几回合到哪个区（chain.js · status 的格式）
     const chain = get(state, "chain"), waves = arr(get(state, "waves")).filter(w => obj(w) && !get(w, "done"));

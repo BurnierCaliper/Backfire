@@ -127,7 +127,9 @@
     }
   };
   const GROUND_DEFAULT = "concrete";
-  /** 区域名 → 地面主题。区域名用游戏里现成的：rogue-data.js 的 regions（单局各幕）/ altRegions（幕间改走的采矿场），也是遭遇的 region */
+  /** 区域名 → 地面主题。区域名用游戏里现成的：rogue-data.js 的 regions（单局各幕）/ altRegions（幕间改走的采矿场），也是遭遇的 region。
+   *  正式的区域名列表在 world-data.js 的 BATTLE_REGIONS（战斗状态的 state.region、联机白名单只认它）：这里的区域名、下面的别名
+   *  和它一一对上，加区域两边一起加（tests/region-light.test.js 核对） */
   const REGIONS = {
     "外城区": "outer", "沙漠": "desert", "巨人城": "giant", "天网设施": "skynet",
     "第一采矿场": "mine1", "第二采矿场": "mine2", "第三采矿场": "mine3",

@@ -319,6 +319,15 @@
         </select>
       </label>
     </div>
+    <div class="sheet-foot row">
+      <label title="这场战斗在哪个区域：默认跟着地图（跑团 = 队伍在地图上的位置，单局 = 这一幕的区域，遭遇 = 遭遇的区域）">所在区域
+        <select id="g-cfg-region"></select>
+      </label>
+      <label title="白天 / 傍晚 / 夜晚：默认跟着游戏时钟">光影
+        <select id="g-cfg-light"></select>
+      </label>
+    </div>
+    <p class="sheet-k" id="g-cfg-look-note">所在区域、光影只是画面（地面、远景、天空、灯光），联机玩家看到的跟着变；不改任何结算：沙漠生物等的白天 / 夜晚照旧跟着时钟走。只管这一场，下一场开战回到跟着地图 / 时钟。</p>
     <p class="sheet-k">场上敌人</p>
     <div id="g-enemy-list" class="sheet-list"></div>
     <div class="sheet-foot row">
@@ -876,6 +885,7 @@ window.GAME_MODE = true;
 <script src="shop-sell.js"></script>
 <script src="matchup.js"></script>
 <script src="cyberware.js"></script>
+<script src="daylight.js"></script>
 <script src="ledger.js"></script>
 <script src="commands.js"></script>
 <script src="app.js"></script>
