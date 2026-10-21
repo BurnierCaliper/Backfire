@@ -75,7 +75,7 @@ test("我方和某阵营同阵营（战斗模板）：友军不打我方、我�
   c.BattleSim.setup({ party: ["kolt", "helu"], encounter: enc, level: 3, seed: "ALLY" });
   c.startCombat();
   const S = c.S.state;
-  assert.deepEqual([...S.playerAllies].sort(), ["安保", "警卫队"], "能混编的警卫队也算友军");
+  assert.deepEqual([...S.playerAllies].sort(), ["安保", "警卫队", "镇压队"], "是一伙的警卫队、镇压队也算友军");
   const g = S.units.find(u => u.kit === "guard_sword"), t = S.units.find(u => u.kit === "thug_knife"), k = c.findKit("kolt", S.units);
   assert.equal(c.hostileTo(k, g), false); assert.equal(c.hostileTo(k, t), true); assert.equal(c.hostileTo(g, t), true);
   assert.match(c.statusLine(g), /友军/);

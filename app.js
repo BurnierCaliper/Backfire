@@ -656,8 +656,8 @@ function explodeHigh(unit, total, opt) {
       creditPlayerHit(unit, (envOwnerUnit(opt.envBy) || {}).id);   // 击杀算环境的所有者；没有所有者就算之前最后打过它的玩家
       scoreEnvHit(unit, { total: lifeBefore, breakDealt: 0 }, envWho, 0, "爆炸");
       const over = Math.floor(unit.overkill * SCORE_RULES.overkill);
-      if (over > 0) envCommit(() => addScore("env", over * SCORE_RULES.env, envWho));
-    } else if (acc && acc.actorIsPlayer) addScore("overkill", Math.floor(unit.overkill * SCORE_RULES.overkill), unitById(acc.actorId));
+      if (over > 0) envCommit(() => addScore("env", over * SCORE_RULES.env * scoreTargetMul(unit), envWho));
+    } else if (acc && acc.actorIsPlayer) addScore("overkill", Math.floor(unit.overkill * SCORE_RULES.overkill) * scoreTargetMul(unit), unitById(acc.actorId));
   }
   const boomOwner = envBoom ? (envOwnerUnit(opt.envBy) || {}).id : statusOwnerId(unit, "high");   // 高能状态的所有者（要在清掉高能之前取）
   (unit.layers || []).forEach(l => { l.current = 0; });
@@ -2073,6 +2073,10 @@ function startEnemyPhase() {
         u.resources.glReady = true;
         notes.push(`${u.name} 榴弹已就绪，可对 ${u.resources.glZone} 区发射。`);
       }
+      if (u.kit === "riot_molotov" && u.resources && u.resources.bottlePending && u.resources.bottleZone && !u.resources.bottleReady) {
+        u.resources.bottleReady = true;
+        notes.push(`${u.name} 燃烧瓶已就绪，可对 ${u.resources.bottleZone} 区投出。`);
+      }
       if (u.kit === "ant_guard" && u.resources && u.resources.shellPending && u.resources.shellZone && !u.resources.shellReady) {
         u.resources.shellReady = true;
         notes.push(`${u.name} 大酸液弹已就绪，可对 ${u.resources.shellZone} 区发射。`);
@@ -2569,8 +2573,13 @@ const SCORE_RULES = {
   ap: 10,          // 我方每用 1 点行动点
   apGiftShare: 0.5,   // 队友给的行动点（意式浓缩……）：用它的那次行动得的分，这个比例记在给行动点的人身上
   bonusAction: 5,  // 我方每用 1 次附赠行动
-  env: 1.2         // 环境分数：利用配置物或场地（环境）造成的伤害 / 击破 / 溢出，分数 ×1.2
+  env: 1.2,        // 环境分数：利用配置物或场地（环境）造成的伤害 / 击破 / 溢出，分数 ×1.2
+  neutralMul: 0.25 // 打中立生物（尘虫、管虫）：伤害 / 击破 / 失衡 / 溢出分（含环境分）只拿原来的这个比例（#187）；基准分不算它们
 };
+/** 打在这个单位身上的伤害 / 击破 / 失衡 / 溢出分的倍率：中立生物按 SCORE_RULES.neutralMul，其他 1 */
+function scoreTargetMul(u) {
+  return u && !u.isPlayer && typeof isNeutralCreature === "function" && isNeutralCreature(u) ? SCORE_RULES.neutralMul : 1;
+}
 // 招式疲劳（像大乱斗的同招衰减）：同一个角色连续几个回合用同一个技能，这次行动的总得分打折。
 // 下标 = 连续第几个回合（1 不扣），超出表的按最后一项封顶
 const SCORE_FATIGUE = [0, 0, 0.10, 0.25, 0.40];
@@ -2823,7 +2832,8 @@ function envOwnerUnit(by) {
 /** 当前正在行动的我方单位 id（谁的行动都不在进行时是 null） */
 function actingPlayerId() {
   const acc = state.actionAcc;
-  return acc && acc.actorIsPlayer ? acc.actorId : null;
+  if (acc && acc.actorIsPlayer) return acc.actorId;
+  return state._itemUserId != null ? state._itemUserId : null;   // 战-M3：使用道具不开 actionAcc，道具的即时伤害 / 状态按使用者算
 }
 /** 记下「最后一个伤害过这个敌人的玩家」：击杀归属只看它。uid 不是我方单位就不动 */
 function creditPlayerHit(target, uid) {
@@ -2851,7 +2861,7 @@ function scoreEnvHit(target, res, who, bonus, label) {
   envCommit(() => {
     st.dmg += dmg; st.brk += brk; st.env = (st.env || 0) + dmg;
     burstNote(st, null, dmg, `环境 · ${label || "配置物 / 场地"}`, res);
-    addScore("env", (dmg * SCORE_RULES.dmg + brk * SCORE_RULES.brk) * SCORE_RULES.env, who, bonus);
+    addScore("env", (dmg * SCORE_RULES.dmg + brk * SCORE_RULES.brk) * SCORE_RULES.env * scoreTargetMul(target), who, bonus);
   });
   return who;
 }
@@ -2864,7 +2874,7 @@ function scoreWeatherHelp(attacker, target, res, ours) {
   const up = Math.floor(Number(res.weatherUp) || 0), down = Math.floor(Number(res.weatherDown) || 0);
   if (!target.isPlayer && ours && up > 0) envCommit(() => {
     st.weatherUp = (st.weatherUp || 0) + up;
-    addScore("env", up * SCORE_RULES.dmg, owner);
+    addScore("env", up * SCORE_RULES.dmg * scoreTargetMul(target), owner);
   });
   if (target.isPlayer && down > 0 && !(attacker && attacker.isPlayer)) envCommit(() => {
     st.weatherDown = (st.weatherDown || 0) + down;
@@ -2877,6 +2887,7 @@ function resetBattleRecords() {
   state.skillStreak = {};
   state.battleScore = { total: 0, parts: {} };
   state.scoreSeen = {};
+  state.scoreActLv = 0;
   state.battleGains = { xp: 0, kuizhi: 0 };
   state.lastBrokenLayer = null;   // 废物利用：每场重新记（上一场打碎的层不能拿来用）
   state.weaponFallen = {};        // 本场倒下过的武器（取回后 atk / 格挡加成减半）
@@ -2902,8 +2913,9 @@ function scoreAct() {
   if (Number(state.scoreAct) > 0) return Number(state.scoreAct);
   const ranges = (typeof ROGUE_CONFIG !== "undefined" && ROGUE_CONFIG.actLevels) || [[1, 4], [5, 8], [9, 12], [12, 15]];
   const foes = (state.units || []).filter(u => !u.isPlayer && u.kit !== "ironwall");
-  if (!foes.length) return 1;
-  const lv = Math.max(...foes.map(u => Number(u.level) || 1));
+  if (!foes.length && !(Number(state.scoreActLv) > 0)) return 1;
+  // 战-L2：记下见过的最高等级，死掉的敌人被移出场后分数线不会变低
+  const lv = state.scoreActLv = Math.max(Number(state.scoreActLv) || 0, ...foes.map(u => Number(u.level) || 1));
   for (let i = 0; i < ranges.length; i++) if (lv <= ranges[i][1]) return i + 1;
   return ranges.length + Math.ceil((lv - ranges[ranges.length - 1][1]) / 5);   // 额外幕：每 5 级一幕
 }
@@ -3055,7 +3067,7 @@ function trackHealBy(actor, fn) {
       // 首领 / 精英没攒满标记的失衡会立刻恢复架势，这时按新记上的晕眩标记数算（一次行动打出两次也算两次）
       const n = marks.has(u.id) ? Math.max(0, (Number(u.stunMarks) || 0) - marks.get(u.id)) : (calm.has(u.id) && u.stunned ? 1 : 0);
       if (n > 0 && !u.dead) for (let i = 0; i < n; i++) {
-        addScore("stagger", SCORE_RULES.stagger, actor, Number(u._staggerBonus) || 0);
+        addScore("stagger", SCORE_RULES.stagger * scoreTargetMul(u), actor, Number(u._staggerBonus) || 0);
         const ss = battleStat(actor); if (ss) ss.staggers = (ss.staggers || 0) + 1;   // 战场数据：打出失衡
       }
       if (u._staggerBonus) u._staggerBonus = 0;
@@ -3089,7 +3101,7 @@ function noteSideDamage(amount, label, unit, noScore) {
   if (acc.actorIsPlayer && !(unit && unit.isPlayer) && !noScore) {
     const who = unitById(acc.actorId);
     const st = battleStat(who);
-    if (st) { st.dmg += n; addScore("dmg", n * SCORE_RULES.dmg, who); burstNote(st, who, n, `${acc.skillName || "行动"} · ${key}`); }
+    if (st) { st.dmg += n; addScore("dmg", n * SCORE_RULES.dmg * scoreTargetMul(unit), who); burstNote(st, who, n, `${acc.skillName || "行动"} · ${key}`); }
   }
 }
 
@@ -3222,15 +3234,16 @@ function hitBarrier(p, attacker, opt) {
   // 川川卡面：铁壁也受过载和雷鸣的反伤增益（只反敌人的攻击；配置物爆炸这类假攻击者不反）
   if (p.kind === "ironwall" && attacker && !attacker.isPlayer && !attacker.dead && (state.units || []).includes(attacker)) {
     const c = findKit("chuan", state.units);
+    const wallOwner = c;   // 铁壁是川川的配置物
     // 过载：装甲受到近距离攻击时，反伤 50% 这次受到的伤害（闪电）。先打在外层护盾上的不算
     if (c && c.instant && c.instant.overload && shieldNow <= 0 && dmg > 0 && Number(attacker.zone) === Number(p.zone)) {
       const back = Math.floor(dmg * 0.5);
-      if (back > 0) applyTypedDot(attacker, back, "electric", notes, `${p.name} 过载反伤 → ${attacker.name}`);
+      if (back > 0) applyTypedDot(attacker, back, "electric", notes, `${p.name} 过载反伤 → ${attacker.name}`, { by: wallOwner && wallOwner.id });   // 反伤算铁壁所有者（川川）的伤害（#187）
     }
     // 雷鸣：挡下攻击和成功的协助格挡一样，反伤 等级 × 1d4 闪电
     if (!attacker.dead && currentWeatherFor(dummy) === "thunder") {
       const r = takeDice(Math.max(1, Number(p.level) || 1), 4, 0);
-      applyTypedDot(attacker, r.total, "electric", notes, `雷鸣：${p.name} 挡下攻击反伤 ${r.text}`);
+      applyTypedDot(attacker, r.total, "electric", notes, `雷鸣：${p.name} 挡下攻击反伤 ${r.text}`, { by: wallOwner && wallOwner.id });
     }
   }
   if (p.hp <= 0) notes.push(...breakIronWall(p, []));
@@ -6796,7 +6809,7 @@ function performAssistBlock(helper, target, attacker, forced, atkRange) {
     // 雷鸣：成功的协助格挡可以额外造成 等级 × 1d4 闪电伤害的反伤
     if (attacker && !attacker.dead && currentWeatherFor(helper) === "thunder") {
       const r = takeDice(Math.max(1, Number(helper.level) || 1), 4, 0);
-      applyTypedDot(attacker, r.total, "electric", notes, `雷鸣：${helper.name} 格挡反伤 ${r.text}`);
+      applyTypedDot(attacker, r.total, "electric", notes, `雷鸣：${helper.name} 格挡反伤 ${r.text}`, { by: helper.id });   // 反伤算格挡者的伤害（#187）
     }
     if (helper.kit === "nora" && attacker) setPierce(helper, attacker, notes);
     if (helper.kit === "vitas") flipMood(noraOf(), notes, "维塔斯格挡成功");
@@ -7463,6 +7476,8 @@ function attackConnected(res, flags) {
   return b !== "assistOk" && b !== "bareOk";
 }
 
+/** 身上的灼烧层数 */
+function burnStackCount(u) { return Math.max(0, Math.floor(Number(u && u.statuses && u.statuses.burn) || 0)); }
 function runOnConnect(attacker, target, spec, res) {
   const notes = [];
   if (!spec || !target) return notes;
@@ -7489,6 +7504,21 @@ function runOnConnect(attacker, target, spec, res) {
       const after = Number(target.statuses && target.statuses.burn) || 0;
       if (after > before) notes.push(`${target.name} 灼烧 +${after - before} → ${after} 层。`);
     }
+  }
+  if (spec.burnEach) {
+    // 多段攻击每一段各掷一次（火焰喷射兵）：成功一次灼烧 +1
+    const segs = ((res && res.perHit) || []).length || 1;
+    let got = 0;
+    for (let i = 0; i < segs; i++) if (Math.random() < spec.burnEach && typeof grantBurn === "function") { grantBurn(target, 1, notes); got++; }
+    if (got) notes.push(`${target.name} 灼烧 +${got} → ${Number(target.statuses && target.statuses.burn) || 0} 层（${segs} 段各 ${Math.round(spec.burnEach * 100)}%）。`);
+  }
+  if (spec.instant && typeof applyInstantEffect === "function") {
+    applyInstantEffect(target, spec.instant, notes);
+    notes.push(`${target.name} 被施加${INSTANT_NAME[spec.instant] || spec.instant}。`);
+  }
+  if (spec.activate === "burn" && burnStackCount(target) > 0) {
+    // 激活灼烧：目标没有灼烧就不触发（triggerOneStatus 没有灼烧时会改激活别的状态，这里先挡掉）
+    notes.push(...triggerOneStatus(target, attacker, "burn"));
   }
   if (spec.dest != null) {
     const dest = Number(spec.dest);
@@ -7946,6 +7976,14 @@ function dealTo(attacker, target, opt) {
     const dr = mechChargeDr(target);
     if (dr > 0) { flags.drPct = (Number(flags.drPct) || 0) + dr; flags.drWhy = "蓄满能量"; }
   }
+  // 防暴盾（镇压队员·警棍盾）：同区有护盾还没打空的警棍盾，友军受到的远程攻击 −25%，和其他百分比加算（enemies.js · riotShieldDr）
+  if (target && !target.isPlayer && flags.action !== false && !flags.environment && typeof riotShieldDr === "function") {
+    const sdr = riotShieldDr(target, attacker, opt);
+    if (sdr > 0) {
+      flags.drPct = (Number(flags.drPct) || 0) + sdr;
+      flags.drWhy = flags.drWhy ? flags.drWhy + "、防暴盾" : "防暴盾";
+    }
+  }
   // 挂在「下一击」上的猛击 / 穿刺 / 弱点特效只作用于真正的攻击行动，
   // 不作用于这一击派生出来的环境伤害（雷击转移、爆燃溢出、反弹……），也不会被它们提前用掉
   const realAttack = flags.action !== false && !flags.environment;
@@ -8125,7 +8163,7 @@ function dealTo(attacker, target, opt) {
       // 哔哩哩格挡成功：自身不掉架势，把这一击原本的伤害 50% 以闪电反伤给进攻者
       if (attacker && !attacker.dead && !attacker.isProp) {
         const back = Math.floor((Number(res.blockedRaw) || 0) * 0.5);
-        if (back > 0) applyTypedDot(attacker, back, "electric", extra, `${bh.name} 格挡反伤 → ${attacker.name}`);
+        if (back > 0) applyTypedDot(attacker, back, "electric", extra, `${bh.name} 格挡反伤 → ${attacker.name}`, { by: bh.id });   // 反伤算格挡者的伤害（#187）
       }
     } else extra.push(...applyBlockBreakToHelper(flags.blockHelperId, res.helperBreak));
     if (typeof featAfterBlock === "function") featAfterBlock(bh, attacker, target, extra);   // 推搡（feats.js）：挡下后把攻击者推开
@@ -8183,10 +8221,11 @@ function dealTo(attacker, target, opt) {
     } else if (attacker && target && attacker.isPlayer && !target.isPlayer) {
       const st = battleStat(attacker);
       if (st) {
-        st.dmg += Math.floor(Number(res.total) || 0); st.brk += Number(res.breakDealt) || 0;
+        const brkReal = res.breakSpent != null ? Number(res.breakSpent) || 0 : Number(res.breakDealt) || 0;   // 战-M5：实际扣掉的架势
+        st.dmg += Math.floor(Number(res.total) || 0); st.brk += brkReal;
         burstNote(st, attacker, res.total, burstLabel(opt.flags), res);
-        addScore("dmg", Math.floor(Number(res.total) || 0) * SCORE_RULES.dmg, attacker, scoreBonus);
-        addScore("brk", (Number(res.breakDealt) || 0) * SCORE_RULES.brk, attacker, scoreBonus);
+        addScore("dmg", Math.floor(Number(res.total) || 0) * SCORE_RULES.dmg * scoreTargetMul(target), attacker, scoreBonus);
+        addScore("brk", brkReal * SCORE_RULES.brk * scoreTargetMul(target), attacker, scoreBonus);
         scoreWeatherHelp(attacker, target, res, true);
       }
     }
@@ -8205,8 +8244,8 @@ function dealTo(attacker, target, opt) {
     if (target && !target.isPlayer && (target.dead || totalHp(target) <= 0) && (res.intended || 0) > 0) {
       const over = Math.max(0, (res.intended || 0) - (res.total || 0));
       if (over > 0) target.overkill = (Number(target.overkill) || 0) + over;
-      if (over > 0 && envWho) addScore("env", Math.floor(over * SCORE_RULES.overkill) * SCORE_RULES.env, envWho, scoreBonus);
-      else if (over > 0 && attacker && attacker.isPlayer && !attacker.envSrc) addScore("overkill", Math.floor(over * SCORE_RULES.overkill), attacker, scoreBonus);
+      if (over > 0 && envWho) addScore("env", Math.floor(over * SCORE_RULES.overkill) * SCORE_RULES.env * scoreTargetMul(target), envWho, scoreBonus);
+      else if (over > 0 && attacker && attacker.isPlayer && !attacker.envSrc) addScore("overkill", Math.floor(over * SCORE_RULES.overkill) * scoreTargetMul(target), attacker, scoreBonus);
       const maxHp = (target.layers || []).reduce((a, l) => a + (Number(l.max) || 0), 0);
       if ((res.intended || 0) >= maxHp * 0.5) target.killBig = true;
     }
@@ -9287,12 +9326,12 @@ function skillFlowSteps(id, actor, picks) {
       }
     ];
   }
-  if (id === "en_gl" || id === "en_ant_shell") {
+  if (id === "en_gl" || id === "en_ant_shell" || id === "en_riot_bottle") {
     return [{
       key: "dest",
       type: "zone",
       optional: false,
-      label: id === "en_gl" ? "榴弹落点区域" : "大酸液弹落点区域",
+      label: id === "en_gl" ? "榴弹落点区域" : id === "en_riot_bottle" ? "燃烧瓶落点区域" : "大酸液弹落点区域",
       zones
     }];
   }
@@ -9784,7 +9823,7 @@ function renderSkillFlow() {
   }
   const cancel = document.createElement("button");
   cancel.className = "btn small danger";
-  cancel.textContent = "取消技能";
+  cancel.textContent = "放弃（Esc）";
   cancel.onclick = () => calcCommand("skillCancel");
   opts.appendChild(cancel);
 }
@@ -11091,6 +11130,20 @@ function skillTargetError(a, id, t) {
     if (!tgt || sandPullTargets(a).indexOf(tgt) < 0) return "要选距离 1 以内陷在流沙里的友方";
   }
   if (id === "role_renew" && t && !t.isPlayer) return "续命只能对友方使用";
+  // 战-L1：攻击友军 / 近战打飞行目标附赠不够，以前都是 dealTo 里才拒绝，行动点早扣了还记行动分；这里在扣点前拦下
+  if (a.isPlayer && t && t.id && !t.isPlayer && !isStructureToken(t.id) && !(typeof featOfSkill === "function" && featOfSkill(id))) {
+    let sk = null;
+    try { sk = (skillList(a) || []).find(s => s.id === id); } catch (e) {}
+    const hint = sk ? (sk.hint || "") + " " + (sk.name || "") : "";
+    const side = (typeof SKILL_TARGET_SIDE !== "undefined" && SKILL_TARGET_SIDE[id]) ||
+      (/任意单位|拉到|磁力/.test(hint) ? "any" : /友方|队友/.test(hint) ? "ally" : "enemy");
+    if (side === "enemy" && sk && typeof playerAllied === "function" && playerAllied(t)) return `${t.name} 是友军，不会被我方攻击`;
+    const rg = skillRangeFor(a, id) || (typeof parseSkillRange === "function" ? parseSkillRange(hint) : null);
+    if (side === "enemy" && sk && rg && rg.max === 0 && !/所有|全部|范围|每名/.test(hint) &&
+        t.flying && !a.flying && Number(t.zone) === Number(a.zone) && !(typeof featHas === "function" && featHas(a, "wanderer")) &&
+        !["longge_aa", "longge_chill", "longge_heat", "longge_spit", "xiaoxiao_punch", "xiaoxiao_combo"].includes(id) &&
+        (Number(a.bonus) || 0) < (skillCost(id).bonus || 0) + 1) return `${t.name} 在飞行，近程攻击需要额外 1 附赠行动`;
+  }
   // 职责技能：分步里选的对象不合法就在扣点之前拦下
   if (/^role_(spread|shelter|boost|gold|double_dot|buffer|sturdy|halve|omen)$/.test(id)) {
     const why = roleTargetError(a, id, t);
@@ -13703,7 +13756,12 @@ function init() {
   if (em) em.addEventListener("click", e => { if (e.target === em) closeHidden("editorModal"); });
   uiEl("btnClosePlayer").onclick = closeModal;
   modal.addEventListener("click", (e) => { if (e.target === modal) closeModal(); });
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    closeModal();
+    // 分步选择中按 Esc = 放弃这个技能（还没结算，什么都不扣不改）；战斗界面（game.js）自己处理 Esc
+    if (state.skillFlow && !document.querySelector(".g-hud")) calcCommand("skillCancel");
+  });
   uiEl("btnLoadLive").onclick = () => calcCommand("loadLive");
   uiEl("attackerSel").addEventListener("change", () => renderSkills());
   uiEl("bladeSel").onchange = () => calcCommand("blade", { value: uiEl("bladeSel").value });
