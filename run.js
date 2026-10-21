@@ -449,7 +449,7 @@ function rollEncounter(opt) {
     tier: enemies.some(e => enemyTokens(e.preset) >= 2 && !(ENEMY_INFO[e.preset] || {}).pack) ? "elite" : "normal",
     tokens, mixed, extraToken: extra,
     enemies
-  }, opt);
+  }, opt, pool);
 }
 
 /** 悬赏目标（rogue.js 悬赏任务）：血量、atk 乘倍率，名字前加【目标】 */
@@ -576,16 +576,21 @@ function layoutLabel(kind) {
   })[kind] || kind;
 }
 
-/** 补上区制、天气和站位 */
-function finishEncounter(spec, opt) {
+/** 补上区制、天气和站位。pool：抽敌人用的池子（rollEncounter 传进来；车占代币时补抽用，vehicle.js · vehiclePayTokens） */
+function finishEncounter(spec, opt, pool) {
   opt = opt || {};
+  const picks = (spec.enemies || []).slice();   // 抽到的先后：三区制的站位会把敌人拆开打乱，车占代币时从最后抽到的往前退
   const zoneMode = Number(opt.zoneMode) || (Math.random() < 0.5 ? 2 : 3);
   spec.zoneMode = zoneMode;
   spec.weather = opt.weather != null ? opt.weather : regionWeather(spec.region);
   if (!spec.features) { const feats = regionFeatures(spec.region, zoneMode); if (feats.length) spec.features = feats; }
   applyEncounterLayout(spec);
   // 载具（vehicle.js）：镇压部队的遭遇有概率带一台移动堡垒，一场最多一台；开战时由 buildEncounter 摆上场，并安排驾驶员
-  if (spec.vehicles === undefined && typeof vehicleRollEncounter === "function") spec.vehicles = vehicleRollEncounter(spec);
+  if (spec.vehicles === undefined && typeof vehicleRollEncounter === "function") {
+    spec.vehicles = vehicleRollEncounter(spec);
+    // 车占代币（VEHICLES.*.tokens，只给平衡模拟工具用；默认 0 = 不占，这一步什么都不做）：带车的遭遇退掉这么多代币的敌人
+    if (typeof vehiclePayTokens === "function") vehiclePayTokens(spec, picks, pool);
+  }
   // 有沙鱼的沙漠遭遇：配上尘虫 / 管虫（中立生物，不占代币，desert.js · DESERT.spawn）
   if (typeof addDesertNeutrals === "function") addDesertNeutrals(spec);
   spec.id = "roll:" + spec.region + ":" + (spec.faction || "") + ":" + spec.enemies.map(e => e.preset).join("+");

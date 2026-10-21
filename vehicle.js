@@ -22,6 +22,8 @@ const VEHICLES = {
     faction: "镇压队",                         // 敌方只有这个阵营的单位能上车；空车替它代挡
     seats: 4,
     appear: 0.3,                               // 这个阵营的遭遇里出现的概率，一场最多一台
+    tokens: 0,                                 // 占几枚代币：0 = 不占（规则：车加在抽满代币的遭遇上）。只给平衡模拟工具用（照 RACE_PERK.off 的写法；
+                                               //   tools/enemy-balance.js 改成 1 测「车占 1 枚代币」），游戏里不碰；> 0 时带车的遭遇退掉这么多代币的敌人（vehiclePayTokens）
     armor: { base: 42, perLevel: 11, per5: 2 },    // 纯装甲 = base + perLevel×(等级−1) + per5×⌊等级/5⌋，按队伍人数 scaleHp
     def: { base: 5, every: 10 },               // 架势 = base + ⌊等级/every⌋
     stunMarks: 2,                              // 晕眩标记（BOSS_STUN_MARKS，和首领一样）
@@ -565,6 +567,46 @@ function vehicleRollEncounter(spec) {
     if (has && Math.random() < c.appear) out.push({ kind });
   });
   return out;
+}
+/** 车占代币（VEHICLES.*.tokens > 0，只给平衡模拟工具用；默认 0 时什么都不做、不掷骰）：带车的遭遇从敌人里退掉这么多代币。
+ *  picks = 抽到的先后（finishEncounter 排站位之前记下的：三区制的站位会把敌人拆成一只一行再打乱）。从最后抽到的往前退，
+ *  这台车的阵营至少留一个人（开局要有驾驶员，vehicleEncounterSetup）；退掉的是 2 枚代币的精英、多退了的，
+ *  从同一个池子补抽回去（pool = rollEncounter 抽敌人用的池子；没给就用这场遭遇里有的阵营）——和一开始就少抽这么多代币一样。
+ *  实际退掉几枚记在 spec.vehicles[0].tokens，也是返回值 */
+function vehiclePayTokens(spec, picks, pool) {
+  const v = ((spec && spec.vehicles) || [])[0];
+  const c = v && VEHICLES[v.kind];
+  const want = c ? Math.max(0, Math.floor(Number(c.tokens) || 0)) : 0;
+  if (!want) return 0;
+  const rows = spec.enemies || (spec.enemies = []);
+  const info = (k) => enemyInfo(k) || {};
+  const size = (r) => Math.max(1, Number(r.count) || 1);
+  const crew = () => rows.reduce((n, r) => n + (info(r.preset).faction === c.faction ? size(r) : 0), 0);
+  let paid = 0, zone = null;
+  for (let i = (picks || []).length - 1; i >= 0 && paid < want; i--) {
+    const p = picks[i];
+    if (info(p.preset).faction === c.faction && crew() - size(p) < 1) continue;   // 最后一个镇压队员留着当驾驶员
+    // 两区制：抽到的那一行原样在；三区制：按兵种从后往前拿掉这么多只
+    let left = size(p);
+    const at = rows.indexOf(p);
+    if (at >= 0) { zone = p.zone; rows.splice(at, 1); left = 0; }
+    for (let j = rows.length - 1; j >= 0 && left > 0; j--) {
+      if (rows[j].preset !== p.preset) continue;
+      zone = rows[j].zone; left -= size(rows[j]); rows.splice(j, 1);
+    }
+    if (left < size(p)) paid += enemyTokens(p.preset);
+  }
+  if (paid > want) {
+    const have = new Set(rows.map(r => info(r.preset).faction));
+    const from = pool && pool.length ? pool : regionPool(spec.region).filter(k => have.has(info(k).faction));
+    pickByTokens(from, paid - want).forEach(e => {
+      if (zone != null) e.zone = zone;
+      rows.push(e);
+      paid -= enemyTokens(e.preset);
+    });
+  }
+  v.tokens = paid;
+  return paid;
 }
 /** 开战时把车摆上场：停在驾驶员所在的区，从这场遭遇里这个阵营的敌人中随机挑一个坐上去当驾驶员。返回摆好的车 */
 function vehicleEncounterSetup(spec, made, level, party) {
