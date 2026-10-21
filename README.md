@@ -368,6 +368,11 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **掉落表微调：第三采矿场加量、穴鸦改掉废料**（作者定；items.js · `ENEMY_DROPS` / `CRAFT_MATERIALS` 说明文字；测试 tests/craft-materials.test.js）
+  - 第三采矿场：以前 4 个杂兵一场期望约 1.5（按代币算约 1.8），是各区最低；现在略调高，4 个杂兵约 1.95（按代币、衍蛛两只一组约 2.3），仍在 1–3。警戒自动机 0.52→0.60、陨石开采机 0.40→0.50、陨体衍蛛 0.27→0.35、陨体弦蚣 0.33→0.50。
+  - 穴鸦：以前掉沙鱼鳞 0.18 + 化工残液 0.08；食腐鸟掉鳞不合理，现在改为废料 0.12 + 废线圈 0.06 + 化工残液 0.08（单只合计仍 0.26，4 只一群约 1.04）。沙鱼鳞说明去掉穴鸦，废料说明加上穴鸦。
+  - 警卫队长（狼 / 牛）两张表相同，保持不变。图鉴显示不在这次改动里。
+
 - **每个敌人独立的制作材料掉落表**（PR #172，Closes #170；items.js · `ENEMY_DROPS` / `ENEMY_DROP_ALIAS` / `enemyDropTable` / `rollEnemyDrops` / `enemyDropExpected` / `enemyDropFoes`；rogue.js · `rollMaterialDrops`；app.js · `settleBattleRewards` / `trpgEnemyMaterials` / `mergeBattleDrops`；bestiary.js · `bestiaryEntries().drops`；online-view.js · `projectDrops`；测试 tests/craft-materials.test.js）
   - 以前：按敌人属性 / 层归类（`craftClassesOf`），再按杂兵 / 精英 / 首领三档套 `CRAFT_DROPS` 的统一比例（`rollCraftMaterials`）；只有单局会掉，中立生物（尘虫、管虫）和飞碟机械足不掉。
   - 现在：`items.js · ENEMY_DROPS` 给 45 种敌人每个一张表（键为 kit），值是**期望数量**：小于 1 是掉 1 份的概率；大于等于 1 时整数部分保底、小数部分再掷一次。数字都在这张表里。

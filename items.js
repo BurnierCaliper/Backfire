@@ -103,12 +103,12 @@ EFFECT_ITEMS.forEach(it => {
  * 结构材料（金属 → 赫心结晶）照旧只用于武器升级；道具制作另用这 7 种。队伍公用（supply：联机时不按需求分配，直接进公用背包）。
  *   cls：chem 化学 / elec 电子 / bio 生物；tier：1 常见、2 精制；price 参考价（黑市按 CRAFT_BLACK_MARKET 倍出售） */
 const CRAFT_MATERIALS = [
-  { id: "cm_scrap",  name: "废料",       price: 100, cls: "shell", tier: 0, hint: "道具的壳体。外城区机器人看守、狂徒等机械与人形敌人常掉；拆解道具也能拿回" },
+  { id: "cm_scrap",  name: "废料",       price: 100, cls: "shell", tier: 0, hint: "道具的壳体。外城区机器人看守、狂徒等机械与人形敌人常掉，穴鸦也会叼来；拆解道具也能拿回" },
   { id: "cm_chem",   name: "化工残液",   price: 200, cls: "chem",  tier: 1, hint: "化学 · 常见。采矿场的投料无人机、矿场看守机器人，自爆小车与各路警卫队队长常掉" },
   { id: "cm_gas",    name: "燃气浓缩物", price: 600, cls: "chem",  tier: 2, hint: "化学 · 精制。采矿场的燃气收集机、播撒者、蚁型特殊戒备兵种等精英多掉，亡命之王必掉" },
   { id: "cm_coil",   name: "废线圈",     price: 200, cls: "elec",  tier: 1, hint: "电子 · 常见。外城区机器人看守、安保巡逻车、巡检浮标常掉，高压巡逻艇、飞碟触灵掉得更多" },
   { id: "cm_cell",   name: "电芯",       price: 600, cls: "elec",  tier: 2, hint: "电子 · 精制。高压巡逻艇、巨人、观测鸦等精英多掉，杂兵偶尔也有" },
-  { id: "cm_scale",  name: "沙鱼鳞",     price: 200, cls: "bio",   tier: 1, hint: "生物 · 常见。沙漠的沙灵、沙鱼、大沙灵 / 活沙常掉，穴鸦、尘虫偶尔掉" },
+  { id: "cm_scale",  name: "沙鱼鳞",     price: 200, cls: "bio",   tier: 1, hint: "生物 · 常见。沙漠的沙灵、沙鱼、大沙灵 / 活沙常掉，尘虫偶尔掉" },
   { id: "cm_spirit", name: "星灵组织",   price: 600, cls: "bio",   tier: 2, hint: "生物 · 精制。第三采矿场的陨体衍蛛、陨体弦蚣，机甲触灵、观测鸦多掉，沙灵聚合体必掉" }
 ];
 const CRAFT_BLACK_MARKET = 3;   // 道具材料普通商店不卖，黑市按参考价的几倍卖
@@ -141,10 +141,10 @@ const ENEMY_DROPS = {
   gas_collector: { cm_gas: 1.15, cm_chem: 0.65, cm_scrap: 0.4 },
   ant_hunter:    { cm_gas: 0.65, cm_chem: 0.8, cm_cell: 0.25 },
   // —— 第三采矿场：能量机械（电芯）+ 异星生物（星灵组织） ——
-  alarm_bot:        { cm_coil: 0.25, cm_cell: 0.12, cm_scrap: 0.15 },
-  meteor_miner:     { cm_cell: 0.12, cm_spirit: 0.08, cm_scrap: 0.2 },
-  meteor_spider:    { cm_spirit: 0.15, cm_coil: 0.12 },                 // 两只一组
-  meteor_centipede: { cm_spirit: 0.15, cm_cell: 0.08, cm_coil: 0.1 },
+  alarm_bot:        { cm_coil: 0.28, cm_cell: 0.12, cm_scrap: 0.2 },
+  meteor_miner:     { cm_cell: 0.15, cm_spirit: 0.08, cm_scrap: 0.27 },
+  meteor_spider:    { cm_spirit: 0.18, cm_coil: 0.17 },                 // 两只一组
+  meteor_centipede: { cm_spirit: 0.22, cm_cell: 0.08, cm_coil: 0.2 },
   // —— 警卫队（有机体 + 装备） ——
   captain_wolf:   { cm_chem: 0.65, cm_cell: 0.4, cm_scrap: 0.5 },        // 冷凝罐 → 化工残液
   captain_ox:     { cm_chem: 0.65, cm_cell: 0.4, cm_scrap: 0.5 },
@@ -169,7 +169,7 @@ const ENEMY_DROPS = {
   // —— 巨人城 ——
   giant: { cm_scrap: 0.8, cm_cell: 0.65, cm_spirit: 0.3 },
   // —— 野生 / 沙漠生物 ——
-  crow:            { cm_scale: 0.18, cm_chem: 0.08 },                    // 4–6 只一群
+  crow:            { cm_scrap: 0.12, cm_coil: 0.06, cm_chem: 0.08 },    // 4–6 只一群；食腐鸟，叼回来的是破烂和碎线圈
   sandfish_lead:   { cm_scale: 1.3, cm_scrap: 0.4, cm_spirit: 0.25 },
   sandfish_drive:  { cm_scale: 0.35, cm_scrap: 0.1 },
   sandfish_ambush: { cm_scale: 0.35, cm_scrap: 0.1 },
