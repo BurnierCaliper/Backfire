@@ -122,3 +122,5 @@ BASIC 打法不会上车、不会拉人，所以「抢车」一定是 0：这一
 这一份是补充：外城区在额外幕里会再出现一次（第 5 幕，普通战 17–20 级、精英战 18–21 级），只补跑了「兵种对照」和「有 / 没有移动堡垒」两组，用来看等级高了以后「ATK 低 1」和堡垒装甲成长的影响。分析和「需要作者看的地方」都写在第 1 幕的报告 [new-enemies-1021.md](new-enemies-1021.md) 里。
 
 重跑：`node tools/enemy-balance.js --act 5 --groups template,fortress --out docs/balance/new-enemies-1021-act5`
+
+车占 1 枚代币的补测（issue #235，同一批种子）见 [fortress-token-1021-act5.md](fortress-token-1021-act5.md)，分析在 [fortress-token-1021.md](fortress-token-1021.md)。
