@@ -74,19 +74,24 @@ async function withBag(page, screen = "exploration") {
 const noGrit = async page => {
   for (const sel of ["#bp-overlay", "#online-supplies"]) {
     const txt = await page.evaluate(s => (document.querySelector(s) || {}).innerText || "", sel);
-    assert.doesNotMatch(txt, /4321|9876|坚毅生命\s*[:：]?\s*\d/, `${sel} 不显示坚毅生命数值`);
+    assert.doesNotMatch(txt, /4321|9876/, `${sel} 不显示玩家当前的坚毅生命（shp / shpMax）`);
   }
 };
 const sub = page => page.locator("#bp-overlay .ws-sub").innerText();
 const bagOpen = page => page.evaluate(() => { const b = document.getElementById("bp-overlay"); return !!b && !b.hidden; });
 
-test("道具目录：任何道具说明都不带坚毅生命的数字（背包在本地查说明，不经过 online-view.js 过滤）", () => {
-  const vm = require("node:vm"), fs = require("node:fs");
-  const ctx = {}; vm.createContext(ctx);
-  vm.runInContext(fs.readFileSync(path.resolve(__dirname, "..", "items.js"), "utf8") + "\n;this.__C = ITEM_CATALOG;", ctx);
-  const hints = Object.entries(ctx.__C).filter(([, v]) => v && v.hint);
-  assert.ok(hints.length > 5);
-  for (const [id, v] of hints) assert.doesNotMatch(v.hint, /坚毅[^，。；]{0,6}\d/, id);
+// 规则：道具 / 效果说明可以写明坚毅生命的消耗；只有玩家当前剩余的坚毅生命（shp / shpMax）绝不给玩家看
+test("跑团玩家：背包照原样显示提到坚毅生命消耗的道具说明，但不显示任何人当前的坚毅生命", async t => {
+  const o = await open(t, true); if (!o) return; const { page } = o; await withBag(page);
+  await page.evaluate(() => { fixture.view.state.bag.items.push({ id: "stim", qty: 1 }); fixture.emit(); });
+  await page.locator('[data-online="info"][data-info="bag"]').first().click();
+  await page.click('#bp-overlay [data-bp-tab="consumable"]');
+  const txt = await page.locator("#bp-overlay").innerText();
+  const hint = await page.evaluate(() => ITEM_CATALOG.stim.hint);
+  assert.match(hint, /坚毅生命/);
+  assert.ok(txt.includes(hint), "道具说明原样显示，可以提到坚毅生命消耗");
+  await noGrit(page);
+  assert.deepEqual(o.errors, []);
 });
 
 for (const mobile of [false, true]) {
