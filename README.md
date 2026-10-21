@@ -368,6 +368,12 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **联机：按钮灰掉的原因照原样给玩家、单局投票只算有角色的人、玩家看得到「起身」**（issue #135；tests/online-view.test.js、tests/online-vote-135.test.js）
+  - **灰掉的原因**：以前 `online-view.js · safeError` 把原因文字换成一句笼统的「操作未生效…」（「纳米能源不足 20」「只能在居合架势下使用」都看不到），正则表还会把句子分错类别（「本回合无法移动」变成「当前不能移动到该区域」）。现在原句照给，只用现有的敏感词过滤（`text()`）挡掉提到坚毅生命 / SHP / 后台的句子，挡掉的才换成笼统的话。坚毅生命的具体数值仍然不会发给玩家。
+  - **没钱的按钮写原因**：商店 `shopBuy`、积分 `shopRedeem`、单局里 `rogueAct`（兑换 / 买 / 升级 / 治疗 / 装上）灰掉时，按钮旁写「还差 N 奎支」「还差 N 积分」「卖完了」「先选付款人」（`online-ui.js`、`online.css · .ol-why`）。
+  - **单局投票只算有角色的人**：以前所有在线的人都算一票，没分到角色的旁观者不投就卡住结算。现在只有「在线且名下有角色」的人算票（没分配的角色归房主），旁观者投票会被拒绝，结算也不等他们（`online-rogue.js · voterIds / vote / tryResolve / computeView`）。界面写「需要 X / Y 人投票」，旁观者自己看到「你没有分到角色，只能旁观」且投票按钮灰掉。
+  - **「起身」状态给玩家看**：`online-view.js · projectUnit` 发 `upOnShp` 布尔值，`online-battle.js · snapUnit` 不再写死 false，玩家卡片和单机一样显示「起身」标。只发布尔值，不发任何坚毅数值。
+
 - **「中」杂项六条 + 两个尾巴**（issue #125；tests/misc-six-125.test.js）
   - **战斗中修武器两条路统一**：「使用道具」（`items.js · useRepairKit`）和「修理」命令（`ledger.js · ledgerRepair`）以前各算各的：道具那条修好耐久后不标「本场受损」（atk / 格挡加成照旧满值、还能唤出武器人），命令那条标了；命令那条也不会把倒地的武器人修起来。现在耐久都走 `ledgerRepair`（缺几点修几点、同样扣维修量、战斗中修好的武器这一场按受损算），倒地的武器人两条路都走 `useRepairKit`（恢复最大生命 25%）。
   - **跑团工坊可以同时做**：`trpgCraft` 新增 `{ jobs: [...] }`，每人做一样、一起开工，时间只推进一次、按最久的那件算（`trpg.js · trpgCraft / trpgCraftOne`、`trpg-commands.js`）。以前每做一样推进一次，两件会多算时间。同一个人同时只能做一样。单局的 `Rogue.craft` 本来就是这样。
