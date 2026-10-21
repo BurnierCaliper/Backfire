@@ -552,7 +552,8 @@ export function createHd2dScene(container, options) {
   function goTo(tier, zone, opts) {
     opts = opts || {};
     if (!state.layout) return;
-    if (opts.keep && state.tween) opts = {};   // 正在过渡：改成过渡到新算的这一段
+    if (opts.keep && state.tween && !state.tween.push) opts = {};   // 正在过渡：改成过渡到新算的这一段（攻击演出推镜头的过渡不打断）
+    if (!opts.keep) state.pushBack = null;     // 玩家自己换了镜头：演出播完不再拉回推之前的位置
     const to = C.pose(state.layout, tier, zone, { actorId: state.actorId });
     state.tier = to.tier; state.zone = to.zone; state.pose = to;
     state.plates.forEach((p, id) => { const q = to.plates[id]; p.liftFrom = p.lift; p.liftTo = q ? q.lift : 0; });
@@ -778,7 +779,7 @@ export function createHd2dScene(container, options) {
       const p = C.at(state.tween, now() - state.tween.t0);
       applyPose(p);
       state.plates.forEach(pl => setLift(pl, pl.liftFrom + (pl.liftTo - pl.liftFrom) * p.k));
-      if (p.k >= 1) { state.tween = null; arrive(); }
+      if (p.k >= 1) { const pushed = state.tween.push; state.tween = null; if (!pushed) arrive(); }   // 推镜头推到了：等演出播完 poseRelease 拉回来再交还拖动
     } else {
       clampPan();
       controls.update();
@@ -849,6 +850,42 @@ export function createHd2dScene(container, options) {
     },
     select, setTier, setZone, stepZone, cameraInfo,
     stepTier(dir) { setTier(C.stepTier(state.tier, dir)); },
+    /** 攻击演出的适配器（hd2d-fx.js · adapter）问的：这一刻的镜头、一块铭牌现在在哪（抬多高、是不是近景放大的那张）、一个区的地台 */
+    lensNow() {
+      return { pos: camera.position.clone(), target: controls.target.clone(), fov: camera.fov, width: Math.max(1, container.clientWidth), height: Math.max(1, container.clientHeight) };
+    },
+    plateOf(id) {
+      const p = state.plates.get(id);
+      if (!p || !p.u) return null;
+      const g = p.group.position;
+      return { x: g.x, y: g.y, z: g.z, lift: p.lift, big: p.big, zone: p.u.zone };
+    },
+    zoneOf(id) { return state.layout ? state.layout.zones.find(z => z.id === Number(id)) || null : null; },
+    /** 这一刻的镜头（hd2d-camera.js · poseFrom：玩家拖动过的也算），带上这一段是远 / 中 / 近（推镜头只推远景 / 中景） */
+    poseNow() {
+      return Object.assign(C.poseFrom(camera.position, controls.target, camera.fov, state.cur || state.pose), { tier: state.tier });
+    },
+    /** 出手时镜头稍微推一下（p = hd2d-fx.js · pushPose 算的）：secs 秒过渡过去，过渡中、推着的时候不接拖动；段和选中的区不变。
+     *  第一次推之前记下现在的位置，poseRelease 拉回这里（玩家原来选的这一段、拖动过的也回到拖动过的地方）。减少动态效果时外面不会叫它 */
+    posePush(p, secs) {
+      if (!state.layout || !p) return;
+      const from = C.poseFrom(camera.position, controls.target, camera.fov, state.cur || state.pose);
+      if (!state.pushBack) state.pushBack = Object.assign({}, from, { k: 1 });
+      state.plates.forEach(pl => { pl.liftFrom = pl.lift; });   // 过渡里铭牌的抬高照常插值：从现在的高度接着走，不跳回上一次换段的起点
+      state.tween = { from, to: p, duration: Math.max(0, secs || 0), ease: p.ease || "inOutCubic", push: true, t0: now() };
+      controls.enabled = false;
+      openLimits();
+    },
+    /** 演出播完：拉回推之前的位置（secs 秒；玩家中途自己换了镜头就不拉），到了交还拖动 */
+    poseRelease(secs) {
+      const back = state.pushBack;
+      state.pushBack = null;
+      if (!back || !state.layout) return;
+      const from = C.poseFrom(camera.position, controls.target, camera.fov, state.cur || state.pose);
+      state.plates.forEach(pl => { pl.liftFrom = pl.lift; });
+      state.tween = { from, to: back, duration: Math.max(0, secs || 0), ease: "inOutCubic", t0: now() };
+      if (!(state.tween.duration > 0)) { state.tween = null; applyPose(Object.assign({}, back, { k: 1 })); arrive(); }
+    },
     dispose() {
       disposed = true; cancelAnimationFrame(raf); ro.disconnect(); container.removeEventListener("wheel", onWheel);
       state.plates.forEach(disposePlate); clearWorld(); weather.dispose();

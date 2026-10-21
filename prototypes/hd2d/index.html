@@ -58,7 +58,11 @@
     <button class="toggle" id="dock-toggle" aria-expanded="false">技能 ▲</button>
     <span class="who" id="dock-who"></span>
     <span class="grow"></span>
-    <span class="hint" id="dock-hint">原型：点技能不会真的出招</span>
+    <span class="hint" id="dock-hint" title="「演示出招」：房主用规则结算一次普通攻击，画面只按联机玩家收到的包播放">原型：演示出招按联机包播放</span>
+    <button class="toggle fxc" id="fx-speed" title="演出速度（AttackFx.setClock 的倍率）">演出 1×</button>
+    <button class="toggle fxc" id="push-toggle" aria-pressed="true" title="出手时镜头稍微推向攻击者和目标（远景 / 中景），播完回到原来的镜头；系统开了「减少动态效果」时不推">推镜头 开</button>
+    <button class="toggle fxc" id="fx-skip" disabled title="跳过正在播的演出（Esc）">跳过</button>
+    <button class="btn alt" id="demo-strike" title="房主用规则结算一次普通攻击（当前行动的人；够不着就换我方别人），投影成联机玩家收到的包，再按包播攻击演出和伤害数字">演示出招</button>
   </div>
   <div id="skills"></div>
 </footer>
@@ -91,7 +95,7 @@ window.GAME_MODE = true;
   Storage.prototype.getItem = function (k) { return calcKey(String(k)) ? null : gi.call(this, k); };
   Storage.prototype.setItem = function (k, v) { if (calcKey(String(k))) return; return si.call(this, k, v); };
   var byId = Document.prototype.getElementById;
-  var OWN = /^(?:stage|topbar|tb-turn|tb-weather|tb-map|tb-compact|cam-bar|cam-far|cam-mid|cam-near|cam-zone|demo-select|region-select|demo-btn|party|party-toggle|party-list|logdrawer|log-toggle|log-body|dock|dock-toggle|dock-who|dock-hint|skills|zone-prev|zone-next|toast|loading|calc-core)$/;
+  var OWN = /^(?:stage|topbar|tb-turn|tb-weather|tb-map|tb-compact|cam-bar|cam-far|cam-mid|cam-near|cam-zone|demo-select|region-select|demo-btn|party|party-toggle|party-list|logdrawer|log-toggle|log-body|dock|dock-toggle|dock-who|dock-hint|demo-strike|fx-speed|fx-skip|push-toggle|hd2d-pop|hd2d-shade|skills|zone-prev|zone-next|toast|loading|calc-core)$/;
   Document.prototype.getElementById = function (id) {
     var e = byId.call(this, id);
     if (e || OWN.test(String(id))) return e;
@@ -151,6 +155,9 @@ window.GAME_MODE = true;
 <script src="../../training.js"></script>
 <!-- 联机的展示白名单：画面只用它投影过的状态（projectState），和联机玩家拿到的一样 -->
 <script src="../../online-view.js"></script>
+<!-- 攻击演出（出手 / 弹道 / 打中 / 击倒 / 格挡）和受击粒子：正式游戏的 2D 演出，原样加载，位置由 hd2d-fx.js 的适配器给 -->
+<script src="../../attack-fx.js"></script>
+<script src="../../hit-fx.js"></script>
 <script>
 /* 规则文件在浏览器里加载，会带着「去写正式页面元素」的界面函数（renderAll、renderZones……）。
  * 这个原型只拿规则算数据，页面上没有那些元素，所以把 render 开头的界面函数换成空的。
@@ -168,6 +175,9 @@ window.GAME_MODE = true;
 </script>
 <script src="hd2d-layout.js"></script>
 <script src="hd2d-camera.js"></script>
+<script src="hd2d-fx.js"></script>
+<script src="hd2d-host.js"></script>
+<script src="hd2d-play.js"></script>
 <script type="module">
 import { createHd2dScene } from "./hd2d-scene.js";
 
@@ -322,15 +332,75 @@ function renderSkills() {
   if (!list.length) list = [{ name: "普通攻击", hint: "（原型占位）" }, { name: "移动", hint: "（原型占位）" }, { name: "防御", hint: "（原型占位）" }];
   const colors = ["", "mint", "alt", "pink"];
   $("skills").innerHTML = list.slice(0, 12).map((s, i) => `<button class="btn ${colors[i % colors.length]}" title="${esc(s.hint || "")}">${esc(s.name)}</button>`).join("");
-  $("skills").querySelectorAll(".btn").forEach(b => b.addEventListener("click", () => toast("第一阶段：技能按钮只是摆设，不会真的出招")));
+  $("skills").querySelectorAll(".btn").forEach(b => b.addEventListener("click", () => toast("技能按钮还是摆设：点右边的「演示出招」，看规则结算的一次普通攻击")));
 }
 /** 日志：联机玩家看的是房主发的公开日志（online-view.js · projectLogs 的白名单，不是规则的原始日志）。
- *  原型还没接出招，没有公开日志（publicLogs 是空的），第二阶段接真实战斗时由出招往里填 */
+ *  publicLogs 是房主这边开场的（原型没有）；packetLogs 是「演示出招」收到的包里投影好的公开日志（packet.publicLogs） */
 const publicLogs = [];
+let packetLogs = [];
 function renderLog() {
-  const lines = OnlineView.projectLogs(publicLogs).map(l => l.text).filter(Boolean);
+  const lines = OnlineView.projectLogs(publicLogs).concat(packetLogs).map(l => l.text).filter(Boolean);
   $("log-body").innerHTML = (lines.length ? lines : ["（战斗还没开始，日志是空的）"]).map(t => `<p>${esc(t)}</p>`).join("") +
-    `<p class="dim">—— 原型：这里显示联机玩家看得到的公开日志，第二阶段才会接真实战斗。</p>`;
+    `<p class="dim">—— 原型：这里显示联机玩家看得到的公开日志（「演示出招」收到的包里的）。</p>`;
+}
+
+/* ---------- 演示出招（第二阶段 · 二，#230）----------
+ * 房主那边：HD2DHost.strike 用规则结算一次普通攻击（当前行动的人；够不着就换我方别人），拼成联机的结果包，
+ * 过一遍 online-view.js 的白名单（OnlineView.projectPacket）= 联机玩家收到的那一份。
+ * 画面这边：HD2DPlay.play 只拿这个包播（attack-fx 的出手 / 弹道 / 打中 + HitFx 受击粒子 + 纸片风伤害数字），
+ * 位置问适配器（HD2DFx.adapter：3D 铭牌投影到屏幕上，镜头动了跟着变）；打中的那一刻铭牌换成包里的 state。不读房主的 st */
+let striking = false, strikeN = 0;
+function fxAdapter() {
+  return HD2DFx.adapter({ lens: () => sc.lensNow(), plate: (id) => sc.plateOf(id), zone: (id) => sc.zoneOf(id), size: (big) => L.plateSize(sc.view(), big) });
+}
+/* 演出速度：HD2DFx.FX.speeds 里轮流切（1×、2×），倍率 = 1 / 速度，交给 AttackFx.setClock（HD2DPlay.setClock 一起设）；跳过 = 正在播的立刻结束 */
+let speed = HD2DFx.FX.speeds[0];
+HD2DPlay.setClock(() => 1 / speed);
+/** 出手时镜头稍微推一下（hd2d-fx.js · pushPose：远景 / 中景，攻击者和目标的铭牌推过去也在画面里），播完拉回原来的镜头。
+ *  页面上的「推镜头」关了、系统开了「减少动态效果」（sc.motion 为 false）时不推 */
+let pushOn = true;
+function fxCamera() {
+  return {
+    push(actorId, targetId, secs) {
+      const v = sc.view(), a = sc.plateOf(actorId), b = sc.plateOf(targetId);
+      const plates = [a, b].filter(Boolean).map(q => Object.assign({ size: L.plateSize(v, !!q.big) }, q));
+      const p = HD2DFx.pushPose(sc.poseNow(), a, b, { enabled: pushOn, reduced: !sc.motion, view: v, plates });
+      if (!p) return false;
+      sc.posePush(p, secs);
+      return true;
+    },
+    release(secs) { sc.poseRelease(secs); }
+  };
+}
+function syncFxControls() {
+  $("fx-speed").textContent = "演出 " + speed + "×";
+  $("push-toggle").textContent = "推镜头 " + (pushOn ? "开" : "关");
+  $("push-toggle").setAttribute("aria-pressed", String(pushOn));
+  $("fx-skip").disabled = !striking;
+}
+/** 画面换成包里的那一份（packet.state：房主投影好发来的），和联机玩家一样 */
+function showPacket(packet) {
+  pv = packet.state;
+  const layout = L.build(pv, { portrait: !!sc.portrait, view: sc.view(), region: regionNow(), theme: themeNow() });
+  sc.setBattle(layout, { weather: pv.weather, theme: themeNow(), actorId });
+  renderUI(layout);
+}
+async function demoStrike() {
+  if (striking || !st || !sc) return;
+  const env = { G: window, state: st, BattleSim, OnlineView, AttackFx, itemCatalog: typeof ITEM_CATALOG !== "undefined" ? ITEM_CATALOG : {} };
+  const before = pv;
+  let packet = null;
+  try { packet = HD2DHost.strike(env, { actorId, pick: strikeN, seq: strikeN }); } catch (e) { console.error(e); toast("结算出错：" + e.message); return; }
+  if (!packet) { toast("我方谁都够不着敌人（或者敌人都倒下了）"); return; }
+  strikeN++;
+  packetLogs = packetLogs.concat(packet.publicLogs || []);
+  striking = true; $("demo-strike").disabled = true; syncFxControls();
+  try {
+    await HD2DPlay.play(packet, fxAdapter(), {
+      before, bigHit: typeof bigHitInfo === "function" ? bigHitInfo : null, view: () => sc.view(), onImpact: () => showPacket(packet),
+      camera: fxCamera(), lens: () => sc.lensNow()
+    });
+  } catch (e) { console.error(e); } finally { striking = false; $("demo-strike").disabled = false; syncFxControls(); }
 }
 let toastTimer = 0;
 function toast(msg) {
@@ -376,6 +446,7 @@ function syncCamera(info) {
 }
 function onKey(e) {
   if (!sc || e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
+  if (e.key === "Escape" && striking) { e.preventDefault(); HD2DPlay.skip(); return; }   // 跳过正在播的演出
   const t = e.target, tag = t && t.tagName;
   if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA" || (t && t.isContentEditable)) return;
   const K = CAMS.CAMERA.keys, tier = CAMS.CAMERA.order.find(x => K[x] === e.key);
@@ -387,6 +458,8 @@ function onKey(e) {
 function loadDemo(id) {
   demo = DEMOS.find(d => d.id === id) || DEMOS[0];
   st = demo.make(pageRegion());
+  strikeN = 0; packetLogs = [];
+  if (window.HD2DPlay) HD2DPlay.clear();
   project();
   const p = players();
   actorId = p.length ? p[0].id : null;
@@ -409,6 +482,7 @@ function syncUrl() {
   q.set("demo", demo.id);
   if (regionPick == null) q.delete("region"); else q.set("region", regionPick);
   if (camInfo && camInfo.tier !== "far") { q.set("cam", camInfo.tier); q.set("zone", camInfo.zone); } else { q.delete("cam"); q.delete("zone"); }
+  if (pushOn) q.delete("push"); else q.set("push", "0");
   try { history.replaceState(null, "", location.pathname + "?" + q.toString()); } catch (e) { /* 打不开 history（例如本地文件）就算了 */ }
 }
 function boot() {
@@ -425,6 +499,8 @@ function boot() {
   $("region-select").addEventListener("change", e => { regionPick = e.target.value || null; battleLookStart({ region: pageRegion(), light: demo.theme }); syncRegion(); repaint(true); });
   const params = new URLSearchParams(location.search);
   regionPick = params.get("region") || null;      // ?region=沙漠 / ?region=mine_1（地图地点 id 也认）
+  pushOn = params.get("push") !== "0";            // ?push=0：出手时不推镜头
+  if (params.get("paper") === "0") HD2DFx.FX.paper.on = false;   // ?paper=0：打中时不压扁、不投影子（对比用）
   sc = createHd2dScene($("stage"), {
     camera: { tier: params.get("cam"), zone: params.get("zone") },   // ?cam=near&zone=3：开场就是近景看 3 区
     onCameraChange: syncCamera,
@@ -434,11 +510,17 @@ function boot() {
   CAMS.CAMERA.order.forEach(t => $("cam-" + t).addEventListener("click", () => sc.setTier(t)));
   $("zone-prev").addEventListener("click", () => sc.stepZone(-1));
   $("zone-next").addEventListener("click", () => sc.stepZone(1));
+  $("demo-strike").addEventListener("click", demoStrike);
+  // 演出开关：速度（1× / 2×）、推镜头（?push=0 关，开场时读）、跳过
+  $("fx-speed").addEventListener("click", () => { const S = HD2DFx.FX.speeds; speed = S[(S.indexOf(speed) + 1) % S.length]; syncFxControls(); });
+  $("push-toggle").addEventListener("click", () => { pushOn = !pushOn; syncFxControls(); syncUrl(); });
+  $("fx-skip").addEventListener("click", () => HD2DPlay.skip());
+  syncFxControls();
   window.addEventListener("keydown", onKey);
   reinset(false);
   loadDemo(params.get("demo") || DEMOS[0].id);
   $("loading").classList.add("done");
-  window.HD2D = { sc, DEMOS, L, CAMS, get state() { return st; }, get view() { return pv; } };   // 方便在控制台里看（state 是房主的完整状态，view 是画面用的投影）
+  window.HD2D = { sc, DEMOS, L, CAMS, strike: demoStrike, get state() { return st; }, get view() { return pv; } };   // 方便在控制台里看（state 是房主的完整状态，view 是画面用的投影）
 }
 try { boot(); } catch (e) {
   $("loading").classList.add("done");
