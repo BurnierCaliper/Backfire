@@ -16,6 +16,9 @@ const TrpgCommands = (() => {
     campClose: () => trpgCampClose(),
     restore: () => ledgerRestoreAll([]),
     buy: c => trpgBuy(c.key, c.qty, c.free),
+    // 卖东西 / 回购（shop-sell.js）：要有开着的商人；卖的钱进队伍公账，回购由卖的人付
+    shopSell: c => trpgShopSell(c.kit, c.id, c.qty, c.owner),
+    shopBuyback: c => trpgShopBuyback(c.kit, c.token),
     adjustKuizhi: c => trpgAdjustKuizhi(c.amount, c.why),
     purseTransfer: c => trpgPurseTransfer(c.from, c.to, c.amount),
     modifyHero: c => trpgModifyHero(c.kit, c.plan, !!c.free),

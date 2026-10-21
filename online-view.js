@@ -629,6 +629,7 @@
     if (own(packet, "quests")) out.quests = projectQuests(get(packet, "quests"));
     if (own(packet, "purse")) out.purse = projectPurse(get(packet, "purse"));
     if (own(packet, "shop")) out.shop = projectShop(get(packet, "shop"));
+    if (own(packet, "shopSell")) out.shopSell = projectShopSell(get(packet, "shopSell"));
     if (own(packet, "clinic")) out.clinic = projectClinic(get(packet, "clinic"));
     if (own(packet, "cyberware")) out.cyberware = projectCyberware(get(packet, "cyberware"));
     // 长休结算：不带坚毅（只带那一句 mood）；游戏时钟
@@ -691,6 +692,18 @@
       rows: arr(s.rows).slice(0, 200).filter(obj).map(r => ({ key: str(r.key, 40), name: str(r.name, 60), hint: str(r.hint, 160), group: str(r.group, 30),
         base: num(r.base), price: num(r.price), stock: r.stock == null ? null : num(r.stock) })).filter(r => r.key),
       points: pts };
+  }
+  /** 卖东西 / 回购（shop-sell.js）：{ items: [{ id, name, qty, unitPrice, owner, ok, reason }], buyback: [{ token, id, name, qty, price, owner, seller }] } */
+  function projectShopSell(s) {
+    if (!obj(s)) return null;
+    const str = (v, n) => typeof v === "string" ? v.slice(0, n) : "";
+    const num = v => (typeof v === "number" && isFinite(v) ? Math.max(0, Math.floor(v)) : 0);
+    return {
+      items: arr(s.items).slice(0, 300).filter(obj).map(r => ({ id: str(r.id, 60), name: str(r.name, 60), qty: num(r.qty), unitPrice: r.unitPrice == null ? null : num(r.unitPrice),
+        owner: str(r.owner, 40), ok: !!r.ok, reason: str(r.reason, 20) })).filter(r => r.id),
+      buyback: arr(s.buyback).slice(0, 100).filter(obj).map(r => ({ token: str(r.token, 20), id: str(r.id, 60), name: str(r.name, 60), qty: num(r.qty), price: num(r.price),
+        owner: str(r.owner, 40), seller: str(r.seller, 40) })).filter(r => r.token)
+    };
   }
   /** 跑团诊所：自己的角色的改造信息（肉体上限、可改上限、改造率、单价、现在的方案）和最近一条申请的状态 */
   function projectClinic(c) {
@@ -775,7 +788,7 @@
     });
     return out;
   }
-  const api = { SCHEMA, pickKeys, projectHud, projectPacket, projectQuests, projectPurse, projectShop, projectClinic, projectCyberware, projectRest, projectCamp, projectSheets, projectBagDetail, projectUnit, projectState, projectTape, projectFx, projectMessages, projectLogs, projectView, projectActionMenu, safeText: text, safeError };
+  const api = { SCHEMA, pickKeys, projectHud, projectPacket, projectQuests, projectPurse, projectShop, projectShopSell, projectClinic, projectCyberware, projectRest, projectCamp, projectSheets, projectBagDetail, projectUnit, projectState, projectTape, projectFx, projectMessages, projectLogs, projectView, projectActionMenu, safeText: text, safeError };
   root.OnlineView = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof globalThis !== "undefined" ? globalThis : window);
