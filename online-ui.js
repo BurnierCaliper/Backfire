@@ -765,22 +765,23 @@
       const list = questList();
       const now = Object.fromEntries(list.map(q => [q.id, { status: q.status, done: q.steps.filter(s => s.state === "done").length, name: q.name, q }]));
       if (questSeen) {
-        let msg = "";
+        const msgs = [];   // 一个包里可能同时有好几条变动：都收集起来，合成一句提示
         for (const id of Object.keys(now)) {
           const a = questSeen[id], b = now[id];
-          if (!a) msg = `新任务：「${b.name}」（${b.q.category === "main" ? "主线" : b.q.category === "personal" ? "个人" : "支线"}）`;
-          else if (a.status !== b.status && b.status === "done") msg = `任务完成：「${b.name}」${b.q.reward.xp ? ` · 每人 +${b.q.reward.xp} 经验` : ""}${b.q.reward.kuizhi ? ` · +${b.q.reward.kuizhi} 奎支` : ""}`;
-          else if (a.status !== b.status && b.status === "failed") msg = `任务失败：「${b.name}」`;
-          else if (a.status !== b.status && b.status === "active") msg = `接下任务：「${b.name}」`;
+          if (!a) msgs.push(`新任务：「${b.name}」（${b.q.category === "main" ? "主线" : b.q.category === "personal" ? "个人" : "支线"}）`);
+          else if (a.status !== b.status && b.status === "done") msgs.push(`任务完成：「${b.name}」${b.q.reward.xp ? ` · 每人 +${b.q.reward.xp} 经验` : ""}${b.q.reward.kuizhi ? ` · +${b.q.reward.kuizhi} 奎支` : ""}`);
+          else if (a.status !== b.status && b.status === "failed") msgs.push(`任务失败：「${b.name}」`);
+          else if (a.status !== b.status && b.status === "active") msgs.push(`接下任务：「${b.name}」`);
           else if (b.done > a.done) {
             const st = b.q.steps[b.done - 1] || {};
-            msg = `任务更新：「${b.name}」推进到第 ${b.done + 1} 步${st.xp ? ` · 每人 +${st.xp} 经验` : ""}${st.kuizhi ? ` · +${st.kuizhi} 奎支` : ""}`;
+            msgs.push(`任务更新：「${b.name}」推进到第 ${b.done + 1} 步${st.xp ? ` · 每人 +${st.xp} 经验` : ""}${st.kuizhi ? ` · +${st.kuizhi} 奎支` : ""}`);
           }
         }
-        if (msg) { toast.textContent = "📜 " + msg; toast.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { toast.hidden = true; }, 4500); }
+        if (msgs.length) { toast.textContent = "📜 " + msgs.join("；"); toast.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { toast.hidden = true; }, 4500); }
       }
       questSeen = now;
-      if (questBoxOpen && !bagBox.hidden) bagBox.innerHTML = questMarkup();   // 面板开着：跟着更新
+      // 任务日志和背包 / 资料共用 bagBox：只在容器里真的还是任务日志时才跟着更新，别把正在看的背包盖掉
+      if (questBoxOpen && !bagBox.hidden && bagBox.querySelector(".ol-quest-card")) bagBox.innerHTML = questMarkup();
       if (bagBox.hidden) questBoxOpen = false;
     }
     /** 长休结算：房主那边长休完，玩家画面也弹（单局在 rogue.lastRest，跑团在 rest） */

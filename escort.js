@@ -77,7 +77,9 @@ function escortAct(notes) {
   (state.units || []).filter(u => u.escort && !u.dead && !u.hidden && !u._removed).forEach(u => {
     if (!ESCORT_KINDS[u.escort] || !ESCORT_KINDS[u.escort].moves) return;
     if (u.stunned) { notes.push(`${u.name} 失衡，这回合没法行动。`); return; }
-    const foes = (state.units || []).filter(e => !e.isPlayer && !e.dead && !e.hidden && !e._removed && e.kit !== "ironwall" && !e.untargetable);
+    // 只算真正敌对的：中立生物（尘虫、管虫）、友军不算；下潜中的单位躲不开也打不到，同样不算
+    const foes = (state.units || []).filter(e => !e.isPlayer && !e.dead && !e.hidden && !e._removed && e.kit !== "ironwall" && !e.untargetable &&
+      !e.submerged && (typeof hostileTo !== "function" || hostileTo(u, e)));
     const count = (z) => foes.filter(e => Number(e.zone) === Number(z)).length;
     const maxZ = Number(state.zoneMode) || 2;
     const from = Number(u.zone);
