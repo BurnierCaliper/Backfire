@@ -1,10 +1,10 @@
 /* Antlerscale: Backfire · HD-2D 战场原型 · three.js 场景
  *
- * 把 hd2d-layout.js 排好的战场画出来：地台 / 间隔 / 装饰（hd2d-world.js）、铭牌、天气（hd2d-weather.js），
- * 加上镜头、灯光、雾和后期（景深 + 泛光 + 热浪）。
+ * 把 hd2d-layout.js 排好的战场画出来：地台 / 间隔 / 装饰（hd2d-world.js）、远景和废土地面（hd2d-backdrop.js）、
+ * 铭牌（CSS2DRenderer：DOM 立在 3D 位置上，始终正面朝向镜头）、天气（hd2d-weather.js），加上镜头、灯光、雾和后期（景深 + 泛光 + 热浪）。
  *
  *   const sc = createHd2dScene(container, { onPortraitChange(p) {...} });
- *   sc.setBattle(layout, { weather: "sand", theme: "dusk", actorId });   // layout = HD2DLayout.build(state, { portrait: sc.portrait })
+ *   sc.setBattle(layout, { weather: "sand", theme: "dusk", backdrop: "desert", actorId });   // layout = HD2DLayout.build(state, { portrait: sc.portrait })
  *   sc.setInsets({ top, bottom });   // 上下被界面盖住的像素，取景时让开
  *   sc.dispose();
  * 页面只在 index.html 里被 import；不改正式游戏的任何文件。 */
@@ -16,25 +16,28 @@ import { BokehPass } from "three/addons/postprocessing/BokehPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+import { CSS2DRenderer, CSS2DObject } from "three/addons/renderers/CSS2DRenderer.js";
 import { buildZone, buildGap, disposeTree } from "./hd2d-world.js";
+import { buildBackdrop, buildGround, skyTexture } from "./hd2d-backdrop.js";
 import { createWeather } from "./hd2d-weather.js";
 
 /* ---------- 配置 ---------- */
 const CAM = {
   fov: 22,                // 视角窄一点，像看沙盘模型
-  elevation: 36,          // 默认俯角（度）；斜 30–40°
-  minElev: 24, maxElev: 48,   // 鼠标拖动能转到的俯角范围
+  elevation: 30,          // 默认俯角（度）；低一点才看得到地台后面的远景
+  minElev: 22, maxElev: 46,   // 鼠标拖动能转到的俯角范围
   maxAzimuth: 0.5,        // 左右最多转多少弧度
   near: 1, far: 220,
   zoomIn: 0.5, zoomOut: 1.12,   // 相对「刚好装下整个战场」的距离
-  margin: 0.93,           // 取景时留的边（NDC 的比例）
+  margin: 0.97,           // 取景时留的边（NDC 的比例）：地台尽量填满画面宽度
   panPad: 3               // 平移时目标点最多离战场边缘多远
 };
-const DOF = { aperture: 0.00075, maxblur: 0.009 };   // 景深：焦点在战场中间，远近两头微微糊
-const PLATE = { canvasW: 360, canvasH: 264, sideColor: { player: "#39e6b4", foe: "#d8322a" } };
+const DOF = { aperture: 0.0018, maxblur: 0.014 };   // 景深：焦点在战场中间，前后两头、远景糊开（距焦点差 1 个单位约糊 aperture 这么多）
+/** 铭牌（DOM）：随距离缩放、远的淡一点。基准大小在 hd2d.css 的 .hd2d-plate（名字 13px） */
+const PLATE = { scaleExp: 0.85, minScale: 0.74, maxScale: 1.15, fadeRange: 14, fadeMin: 0.7, maxChips: 3 };
 const LAYER_COLOR = { flesh: "#d8574a", armor: "#9aa7b3", shield: "#4fb8ff", sand: "#d1a85a", spirit: "#c07cf0" };
 const STATUS_COLOR = { burn: "#ff5b2e", shock: "#ffd32e", corr: "#9be03a", frostbite: "#7ccfe8", shockwave: "#ff9a3c", high: "#ff4fa3", reso: "#c07cf0", unstable: "#c07cf0", weak: "#a8977b", inspire: "#39e6b4", sturdy: "#ffc93c", hide: "#6b7a8a", advantage: "#f2c230", chase: "#ff7a2e" };
-const FONT = "'Microsoft YaHei','PingFang SC','Noto Sans CJK SC','Heiti SC','WenQuanYi Micro Hei',sans-serif";
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
 /* 光影主题：白天 / 傍晚的暖光 / 夜晚的冷光 */
 const THEMES = {
@@ -73,7 +76,6 @@ export function createHd2dScene(container, options) {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.localClippingEnabled = true;     // 下潜单位的铭牌只露半截，靠裁剪面
   renderer.domElement.className = "hd2d-canvas";
   container.appendChild(renderer.domElement);
 
@@ -87,9 +89,12 @@ export function createHd2dScene(container, options) {
   sun.shadow.bias = -0.0004;
   sun.shadow.normalBias = 0.03;
   scene.add(hemi, sun, sun.target);
-  const ground = new THREE.Mesh(new THREE.CircleGeometry(90, 48), new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 1 }));
-  ground.rotation.x = -Math.PI / 2; ground.position.y = -0.32; ground.receiveShadow = true;
+  const ground = buildGround();       // 地台下面一大片暗色废土
   scene.add(ground);
+  // 铭牌层：DOM 叠在画面上，每块铭牌挂在 3D 位置上，不拦鼠标（拖动转镜头仍然落在 canvas 上）
+  const labels = new CSS2DRenderer();
+  labels.domElement.className = "hd2d-labels";
+  container.appendChild(labels.domElement);
 
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true; controls.dampingFactor = 0.09;
@@ -119,25 +124,18 @@ export function createHd2dScene(container, options) {
 
   const state = {
     portrait: false, layout: null, meta: { weather: "none", theme: "day" }, insets: { top: 0, bottom: 0 },
-    world: null, plates: new Map(), ctx: null, fit: 20, bounds: null, themeName: "day", actorId: null, wantFit: true
+    world: null, backdrop: null, backdropSig: "", plates: new Map(), ctx: null, fit: 20, bounds: null, themeName: "day", actorId: null, wantFit: true
   };
   const weather = createWeather(scene, { bounds: { minX: -10, maxX: 10, minZ: -10, maxZ: 10 } });
   const clock = new THREE.Clock();
   let time = 0, raf = 0, disposed = false;
 
   /* ---------- 主题 / 天气 ---------- */
-  function skyTexture(top, bot) {
-    const c = document.createElement("canvas"); c.width = 4; c.height = 256;
-    const g = c.getContext("2d"), grd = g.createLinearGradient(0, 0, 0, 256);
-    grd.addColorStop(0, top); grd.addColorStop(1, bot);
-    g.fillStyle = grd; g.fillRect(0, 0, 4, 256);
-    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
-  }
   function applyTheme() {
     const T = THEMES[state.meta.theme] || THEMES.day;
     state.themeName = state.meta.theme;
     if (scene.background && scene.background.dispose) scene.background.dispose();
-    scene.background = skyTexture(T.skyTop, T.skyBot);
+    scene.background = skyTexture(T.skyTop, T.skyBot, state.themeName === "night");
     hemi.color.set(T.hemiSky); hemi.groundColor.set(T.hemiGround);
     sun.color.set(T.sun); sun.position.set(...T.sunPos).add(sun.target.position);
     ground.material.color.set(T.ground);
@@ -151,93 +149,56 @@ export function createHd2dScene(container, options) {
     const tint = weather.tint;
     const color = new THREE.Color(T.fog);
     if (tint && tint.fog != null) color.lerp(new THREE.Color(tint.fog), 0.6);
-    const near = state.fit * (tint ? tint.near : 1) * 0.95, far = state.fit * (tint ? tint.far : 1) * 2.3;
+    const near = state.fit * (tint ? tint.near : 1) * 1.1, far = state.fit * (tint ? tint.far : 1) * 3.4;   // 雾放远一点：近处地台不蒙，远处废土渐渐沉进雾里
     scene.fog = new THREE.Fog(color, near, far);
     ground.material.color.set(T.ground).lerp(color, 0.15);
   }
 
-  /* ---------- 铭牌 ---------- */
-  function roundRect(g, x, y, w, h, r) {
-    g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
-  }
-  /** 画一块铭牌：名字 / 等级 / 分层血条 / 架势菱形 / 状态 / ATK。只读 plate（layout 给的白名单数据），没有坚毅生命 */
-  function drawPlate(canvas, p) {
-    const W = canvas.width, H = canvas.height, g = canvas.getContext("2d");
-    g.clearRect(0, 0, W, H);
-    const side = PLATE.sideColor[p.side];
-    g.fillStyle = "#17120e"; roundRect(g, 4, 4, W - 8, H - 8, 18); g.fill();
-    g.strokeStyle = side; g.lineWidth = 8; roundRect(g, 4, 4, W - 8, H - 8, 18); g.stroke();
-    g.fillStyle = "rgba(255,255,255,.05)"; roundRect(g, 12, 12, W - 24, 52, 10); g.fill();
-    // 名字（黑体加粗，太长就缩小）+ 等级
-    g.textBaseline = "middle"; g.fillStyle = "#ece0c6";
-    let fs = 32; g.font = `900 ${fs}px ${FONT}`;
-    while (g.measureText(p.name).width > W - 130 && fs > 18) { fs -= 2; g.font = `900 ${fs}px ${FONT}`; }
-    g.fillText(p.name, 24, 38);
-    g.font = `900 22px ${FONT}`; const lv = "Lv" + p.level, lw = g.measureText(lv).width;
-    g.fillStyle = "#c99a46"; g.fillText(lv, W - 24 - lw, 38);
-    // 分层血条
-    const bx = 22, by = 76, bw = W - 44, bh = 28;
-    g.fillStyle = "#050403"; roundRect(g, bx - 3, by - 3, bw + 6, bh + 6, 6); g.fill();
+  /* ---------- 铭牌（DOM，竖立，正面朝镜头）---------- */
+  /** 铭牌的 HTML。只读 plate（layout 给的白名单数据），没有坚毅生命 */
+  function plateHtml(p) {
     const total = Math.max(1, p.hp.max);
-    let x = bx;
-    for (let i = p.layers.length - 1; i >= 0; i--) {       // 数组 0 是最外层，画在最右
-      const l = p.layers[i], w = bw * l.max / total;
-      g.fillStyle = "#2a2520"; g.fillRect(x, by, w - 2, bh);
-      g.fillStyle = LAYER_COLOR[l.type] || "#d8574a"; g.fillRect(x, by, Math.max(0, (w - 2) * (l.max ? l.cur / l.max : 0)), bh);
-      x += w;
-    }
-    g.fillStyle = "rgba(255,255,255,.18)"; g.fillRect(bx, by, bw, 5);
-    g.font = `900 22px ${FONT}`; g.fillStyle = "#ece0c6"; g.textAlign = "left";
-    g.fillText(`${p.hp.cur}/${p.hp.max}`, 24, 126);
-    g.textAlign = "right"; g.fillStyle = "#ffc93c"; g.fillText("ATK " + p.atk, W - 24, 126); g.textAlign = "left";
-    // 架势菱形
-    if (p.def.big) { g.fillStyle = "#f2c230"; g.font = `900 22px ${FONT}`; g.fillText(`架势 ${p.def.cur}+`, 24, 160); }
-    else for (let i = 0; i < p.def.max; i++) {
-      const cx = 30 + i * 26, cy = 160;
-      g.beginPath(); g.moveTo(cx, cy - 11); g.lineTo(cx + 10, cy); g.lineTo(cx, cy + 11); g.lineTo(cx - 10, cy); g.closePath();
-      if (i < p.def.cur) { g.fillStyle = "#f2c230"; g.fill(); } else { g.strokeStyle = "#6a5a3a"; g.lineWidth = 3; g.stroke(); }
-    }
-    // 状态徽章（最多一行半，多的写 +n）
-    let sx = 22, sy = 200;
-    const chips = p.statuses.concat(p.flags.map(f => ({ key: f.key, label: f.label })));
-    g.font = `900 20px ${FONT}`;
-    chips.forEach((s, i) => {
-      const w = g.measureText(s.label).width + 18;
-      if (sx + w > W - 22) { if (sy > 200) { return; } sx = 22; sy = 236; }
-      if (sy > 236) return;
-      g.fillStyle = s.key === "dying" ? "#d8322a" : s.key === "stunned" ? "#ff9a3c" : (STATUS_COLOR[s.key] || "#a8977b");
-      roundRect(g, sx, sy - 14, w, 28, 6); g.fill();
-      g.fillStyle = "#0b0806"; g.fillText(s.label, sx + 9, sy + 1);
-      sx += w + 8;
-    });
+    const segs = p.layers.slice().reverse().map(l =>     // 数组 0 是最外层，画在最右
+      `<i style="width:${100 * l.max / total}%;background:linear-gradient(90deg,${LAYER_COLOR[l.type] || "#d8574a"} ${l.max ? 100 * l.cur / l.max : 0}%,#2a2520 0)"></i>`).join("");
+    let def = "";
+    if (p.def.big) def = `<span class="pl-big">架势 ${p.def.cur}+</span>`;
+    else for (let i = 0; i < p.def.max; i++) def += `<b class="${i < p.def.cur ? "on" : ""}"></b>`;
+    const chips = p.statuses.map(s => ({ key: s.key, label: s.label })).concat(p.flags.map(f => ({ key: f.key, label: f.label })));
+    const shown = chips.slice(0, PLATE.maxChips).map(c => {
+      const col = c.key === "dying" ? "#d8322a" : c.key === "stunned" ? "#ff9a3c" : (STATUS_COLOR[c.key] || "#a8977b");
+      return `<em style="background:${col}">${esc(c.label)}</em>`;
+    }).join("") + (chips.length > PLATE.maxChips ? `<em class="more">+${chips.length - PLATE.maxChips}</em>` : "");
+    return `<div class="pl-chips">${shown}</div><div class="pl-card ${p.side}">
+      <div class="pl-top"><span class="pl-name">${esc(p.name)}</span><span class="pl-lv">Lv${p.level}</span></div>
+      <div class="pl-bar">${segs}<span>${p.hp.cur}/${p.hp.max}</span></div>
+      <div class="pl-low"><span class="pl-def">${def}</span><span class="pl-atk">ATK ${p.atk}</span></div></div>`;
   }
 
   function makePlate(u) {
-    const canvas = document.createElement("canvas");
-    canvas.width = PLATE.canvasW; canvas.height = PLATE.canvasH;
-    const map = new THREE.CanvasTexture(canvas);
-    map.colorSpace = THREE.SRGBColorSpace; map.anisotropy = 8;
-    const material = new THREE.MeshBasicMaterial({ map, transparent: true, side: THREE.DoubleSide, depthWrite: true, alphaTest: 0.02 });
-    const geo = new THREE.PlaneGeometry(u.plateW, u.plateH); geo.translate(0, u.plateH / 2, 0);
-    const card = new THREE.Mesh(geo, material);
-    // 地面影子：一个压扁的圆
-    const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.62, 24), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.42, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
-    shadow.rotation.x = -Math.PI / 2; shadow.scale.set(1.15, 0.62, 1);
+    const el = document.createElement("div");
+    el.className = "hd2d-plate";
+    el.innerHTML = '<div class="pl-in"></div><div class="pl-arrow" aria-hidden="true"></div>';
+    const label = new CSS2DObject(el);
+    label.center.set(0.5, 1);                 // 下边缘贴着脚下的点
+    // 地面影子：一个压扁的圆（比铭牌略宽）
+    const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.62, 24), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.45, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+    shadow.rotation.x = -Math.PI / 2;
     // 下潜时脚边的沙纹
     const ripple = new THREE.Mesh(new THREE.RingGeometry(0.45, 0.52, 28), new THREE.MeshBasicMaterial({ color: 0xe8d29a, transparent: true, opacity: 0.6, depthWrite: false, side: THREE.DoubleSide }));
     ripple.rotation.x = -Math.PI / 2; ripple.scale.set(1.4, 0.8, 1);
-    const marker = new THREE.Mesh(new THREE.ConeGeometry(0.17, 0.3, 4), new THREE.MeshBasicMaterial({ color: new THREE.Color(0xf2c230).multiplyScalar(1.6), toneMapped: false }));
-    marker.rotation.x = Math.PI; marker.visible = false;
+    // 当前行动：脚下一圈发光的光圈（铭牌上方另有一个跳动的箭头）
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.78, 0.95, 40), new THREE.MeshBasicMaterial({ color: new THREE.Color(0xf2c230).multiplyScalar(2.2), toneMapped: false, transparent: true, opacity: 0.95, depthWrite: false, side: THREE.DoubleSide }));
+    ring.rotation.x = -Math.PI / 2; ring.visible = false;
     const group = new THREE.Group();
-    group.add(card, marker);
-    scene.add(group, shadow, ripple);
-    return { id: u.id, canvas, map, material, card, shadow, ripple, marker, group, geo, key: "", clip: null };
+    group.add(label);
+    scene.add(group, shadow, ripple, ring);
+    return { id: u.id, el, inner: el.firstChild, label, shadow, ripple, ring, group, key: "", sc: 0 };
   }
   function disposePlate(p) {
-    scene.remove(p.group, p.shadow, p.ripple);
-    p.map.dispose(); p.material.dispose(); p.geo.dispose();
+    scene.remove(p.group, p.shadow, p.ripple, p.ring);
+    p.group.remove(p.label);                 // 触发 removed 事件，把 DOM 摘掉
     p.shadow.geometry.dispose(); p.shadow.material.dispose(); p.ripple.geometry.dispose(); p.ripple.material.dispose();
-    p.marker.geometry.dispose(); p.marker.material.dispose();
+    p.ring.geometry.dispose(); p.ring.material.dispose();
   }
   function syncPlates() {
     const live = new Set();
@@ -246,23 +207,22 @@ export function createHd2dScene(container, options) {
       let p = state.plates.get(u.id);
       if (!p) { p = makePlate(u); state.plates.set(u.id, p); }
       const key = JSON.stringify(u.plate);
-      if (key !== p.key) { p.key = key; drawPlate(p.canvas, u.plate); p.map.needsUpdate = true; }
+      if (key !== p.key) { p.key = key; p.inner.innerHTML = plateHtml(u.plate); }
       p.u = u;
       p.group.position.set(u.x, u.y, u.z);
       p.shadow.position.set(u.x, u.groundY + 0.025, u.z);
       p.ripple.position.set(u.x, u.groundY + 0.03, u.z);
+      p.ring.position.set(u.x, u.groundY + 0.04, u.z);
       p.ripple.visible = u.submerged;
-      p.shadow.material.opacity = u.flying ? 0.28 : u.submerged ? 0.15 : 0.42;
-      p.shadow.scale.set(u.flying ? 0.9 : 1.15, u.flying ? 0.5 : 0.62, 1);
-      p.material.opacity = u.submerged ? 0.6 : u.plate.flags.some(f => f.key === "dying") ? 0.8 : 1;
-      p.material.clippingPlanes = u.submerged ? [new THREE.Plane(new THREE.Vector3(0, 1, 0), -u.groundY)] : null;
-      p.material.needsUpdate = true;
-      p.marker.position.set(0, u.plateH + 0.4, 0);
+      p.shadow.material.opacity = u.flying ? 0.3 : u.submerged ? 0.15 : 0.45;
+      p.shadow.scale.set(u.flying ? 1.3 : 1.6, u.flying ? 0.7 : 0.85, 1);
+      p.el.classList.toggle("sub", u.submerged);
+      p.el.classList.toggle("dying", u.plate.flags.some(f => f.key === "dying"));
     });
     state.plates.forEach((p, id) => { if (!live.has(id)) { disposePlate(p); state.plates.delete(id); } });
     markActor();
   }
-  function markActor() { state.plates.forEach(p => { p.marker.visible = p.id === state.actorId; }); }
+  function markActor() { state.plates.forEach(p => { const on = p.id === state.actorId; p.el.classList.toggle("actor", on); p.ring.visible = on; }); }
 
   /* ---------- 战场 ---------- */
   function clearWorld() {
@@ -284,12 +244,23 @@ export function createHd2dScene(container, options) {
     }
     state.boardSig = boardSig(layout);
     state.bounds = layout.bounds;
+    syncBackdrop(layout.bounds, state.meta.backdrop || backdropOf(state.meta.theme));
     weather.setBounds(layout.bounds);
     weather.set(state.meta.weather || "none");
     syncPlates();
     applyTheme();
     fitShadow();
     fitCamera(newBoard || state.wantFit);
+  }
+  /** 远景按场景变：没指定就按光影主题猜 */
+  const backdropOf = (theme) => theme === "night" ? "night" : theme === "dusk" ? "mine" : "wasteland";
+  function syncBackdrop(bounds, kind) {
+    const sig = [kind, state.meta.theme, Object.values(bounds).map(v => Math.round(v)).join(",")].join("|");
+    if (sig === state.backdropSig) return;
+    state.backdropSig = sig;
+    if (state.backdrop) { scene.remove(state.backdrop.group); state.backdrop.dispose(); }
+    state.backdrop = buildBackdrop(kind, bounds, state.meta.theme);
+    scene.add(state.backdrop.group);
   }
   const boardSig = (l) => l.zones.map(z => [z.id, Math.round(z.cx * 10), Math.round(z.cz * 10)].join(",")).join(";");
   const worldSig = (l) => boardSig(l) + "|" + l.zones.map(z => z.kind + z.effects.join("+") + z.h).join(";") + "|" + l.gaps.map(g => [g.key, g.type, g.open, g.maxHp ? Math.ceil((g.hp / g.maxHp) * 4) : 4].join(",")).join(";");
@@ -335,7 +306,7 @@ export function createHd2dScene(container, options) {
     if (reset) { placeCamera(target, dist); controls.target.copy(target); controls.update(); }
     else { camera.position.copy(keepPos); camera.quaternion.copy(keepQuat); camera.updateMatrixWorld(); }
     state.wantFit = false;
-    camera.far = Math.max(CAM.far, dist * 4); camera.updateProjectionMatrix();
+    camera.far = Math.max(CAM.far, dist * 7); camera.updateProjectionMatrix();
     bokeh.uniforms.farClip.value = camera.far;
     applyFog();
   }
@@ -363,6 +334,7 @@ export function createHd2dScene(container, options) {
     renderer.setSize(w, h, false);
     composer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     composer.setSize(w, h);
+    labels.setSize(w, h);
     camera.aspect = w / h; camera.updateProjectionMatrix();
     bokeh.uniforms.aspect.value = camera.aspect;
     const portrait = w / h < 0.85;
@@ -390,21 +362,26 @@ export function createHd2dScene(container, options) {
     heatPass.enabled = weather.heat > 0;
     heatPass.uniforms.time.value = time;
     if (state.ctx) state.ctx.lamps.forEach((l, i) => { if (l.light) l.light.intensity = l.base * T.lamp * (1 + Math.sin(time * 7 + i * 3) * 0.04); });
-    // 铭牌：面向镜头（只绕竖轴转，铭牌始终直立）；飞行的上下浮动，影子跟着缩放
+    // 铭牌：DOM 自己就正对镜头；这里管飞行的上下浮动、影子跟着缩放、行动光圈脉动，以及按远近缩放 / 变淡
+    const focus = camera.position.distanceTo(controls.target);
     state.plates.forEach(p => {
       const u = p.u;
-      p.group.rotation.y = Math.atan2(camera.position.x - p.group.position.x, camera.position.z - p.group.position.z);
       const bob = u.flying ? Math.sin(time * 2 + u.x) * 0.1 : 0;
       p.group.position.y = u.y + bob;
-      if (u.flying) p.shadow.scale.x = 0.9 - bob * 0.5;
+      if (u.flying) p.shadow.scale.x = 1.3 - bob * 0.5;
       if (u.submerged) p.ripple.scale.setScalar(1.2 + ((time * 0.6) % 1) * 0.5);
-      if (p.marker.visible) p.marker.position.y = u.plateH + 0.4 + Math.sin(time * 4) * 0.07;
-      p.marker.rotation.y = time * 2;
+      if (p.ring.visible) { const k = 1 + Math.sin(time * 4) * 0.06; p.ring.scale.set(1.5 * k, 0.9 * k, 1); }
+      const d = camera.position.distanceTo(p.group.position);
+      const sc = THREE.MathUtils.clamp(Math.pow(focus / d, PLATE.scaleExp), PLATE.minScale, PLATE.maxScale);
+      if (Math.abs(sc - p.sc) > 0.004) { p.sc = sc; p.inner.style.transform = "scale(" + sc.toFixed(3) + ")"; }
+      const op = 1 - (1 - PLATE.fadeMin) * THREE.MathUtils.clamp((d - focus) / PLATE.fadeRange, 0, 1);
+      p.el.style.opacity = u.submerged ? 0.6 : op.toFixed(2);
     });
     clampPan();
     controls.update();
-    bokeh.uniforms.focus.value = camera.position.distanceTo(controls.target);   // 焦点在战场中间
+    bokeh.uniforms.focus.value = focus;   // 焦点在战场中间
     composer.render(dt);
+    labels.render(scene, camera);
   }
 
   const ro = new ResizeObserver(resize);
@@ -421,6 +398,8 @@ export function createHd2dScene(container, options) {
     dispose() {
       disposed = true; cancelAnimationFrame(raf); ro.disconnect();
       state.plates.forEach(disposePlate); clearWorld(); weather.dispose();
+      if (state.backdrop) { scene.remove(state.backdrop.group); state.backdrop.dispose(); }
+      labels.domElement.remove();
       composer.dispose(); controls.dispose(); renderer.dispose(); renderer.domElement.remove();
     }
   };
