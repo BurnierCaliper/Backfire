@@ -1,8 +1,11 @@
 // 移动堡垒与通用载具配置物（docs/suppression-force.md 第 3 节，issue #162）：
 // 数值、上下车、驾驶员递补、驾驶员与车合并的血量层、代挡 40% / 张开掩体 100%、殉爆、抢车、开局驾驶员、AI、显示
+// 作者在 PR #199 定的四处：没有熟练照熟练项检定表；我方驾驶员也用车的晕眩标记；合并后只显示一张堡垒的卡片；车的架势和晕眩标记不重置
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("fs");
+const path = require("path");
 const H = require("./headless");
 const vm = require("vm");
 const get = (c, expr) => vm.runInContext(expr, c);
@@ -47,6 +50,15 @@ function hit(f, attacker, target, opt) {
   return f.c.dealTo(attacker, target, Object.assign({ atk: 10, mult: 1, element: "physical", baseBreak: 0, flags: { action: true, anyRange: true, blockResolved: true } }, opt || {}));
 }
 const rnd = (f, v) => { f.c.Math.random = typeof v === "function" ? v : () => v; };
+/** 把画面层也载进这套规则环境（状态徽章、战斗画面的快照、联机投影、联机玩家画面）：只用快照 / 投影函数，不碰网页元素 */
+function withView(f) {
+  const c = f.c;
+  if (!c.GAME) {
+    c.document = { readyState: "loading", addEventListener() {}, getElementById() { return null; } };
+    for (const file of ["hud-icons.js", "unit-card.js", "game.js", "online-view.js", "online-battle.js"]) vm.runInContext(fs.readFileSync(path.join(H.ROOT, file), "utf8"), c, { filename: file });
+  }
+  return c;
+}
 
 /* ---------- 数值 ---------- */
 test("数值：纯装甲 42+11×(等级−1)+2×⌊等级/5⌋，架势 5 每 10 级 +1，ATK 7+(等级−1)，开炮骰 1d6 起每 5 级升一档（2 人队与文档表一致）", () => {
@@ -145,6 +157,66 @@ test("车里没人了就变回空的配置物（装甲还在，仍在场上）",
   assert.equal(f.c.vehiclePilot(p), null);
 });
 
+test("车的架势和晕眩标记不重置（作者定）：车里的人走光变回空车时保留当时的架势和已经攒下的标记，之后谁上车（敌我都一样）就接着用", () => {
+  const f = riotField(2, 2, { lv: 5 });
+  const [a, b] = riots(f);
+  const k = f.P("kolt"); k.zone = 2;
+  const p = car(f, 2, 5);
+  f.c.vehicleBoard(a, p);
+  a.def = 2; a.stunMarks = 1;   // 车已经被打掉 3 点架势、攒了 1 个晕眩标记
+  f.c.vehicleLeave(a);
+  eq([p.veh.def, p.veh.defMax, p.veh.stunMarks, p.veh.stunned], [2, 5, 1, false], "空车不重置");
+  // 镇压队另一个人上车：接着用
+  f.c.vehicleBoard(b, p);
+  eq([b.def, b.defMax, b.stunMarks], [2, 5, 1]);
+  // 再走空，我方抢上车：一样接着用；再失衡一次就攒满两个，真正晕眩
+  f.c.vehicleLeave(b);
+  eq([p.veh.def, p.veh.stunMarks], [2, 1]);
+  f.c.vehicleBoard(k, p);
+  eq([k.def, k.defMax, k.stunMarks], [2, 5, 1], "我方坐上去也接着用");
+  rnd(f, 0.99);
+  hit(f, b, k, { atk: 1, baseBreak: 5 });
+  eq([k.stunned, k.stunMarks], [true, 2], "第二个标记：攒满，真正晕眩");
+});
+
+test("车走空时正在失衡（两个标记攒满）也照样留着：下一个上车的人接着失衡、不多记标记，到他自己的回合开始晕眩一回合、标记清零", () => {
+  const f = riotField(1, 2, { lv: 5 });
+  const [a] = riots(f);
+  const k = f.P("kolt"); k.zone = 2; k.profs = { "运动": 3, "载具驾驶": 3 };
+  const p = car(f, 2, 5);
+  f.c.vehicleBoard(a, p);
+  rnd(f, 0.99);
+  hit(f, k, a, { atk: 1, baseBreak: 5 });
+  hit(f, k, a, { atk: 1, baseBreak: 5 });
+  eq([a.stunned, a.stunMarks], [true, 2], "敌方驾驶员攒满两个标记，真正失衡");
+  // 我方把失衡的驾驶员拉下车，车走空
+  rnd(f, 0.1);
+  f.c.vehiclePull(k, p, a, []);
+  assert.ok(!a.vehId);
+  eq([p.veh.stunned, p.veh.stunMarks, p.veh.def], [true, 2, 0], "车的失衡、标记、架势都留着");
+  // 我方坐上去：接着失衡（这次失衡已经记过标记，不再多记一个）
+  f.c.vehicleBoard(k, p);
+  eq([k.stunned, k.stunMarks, k.def], [true, 2, 0]);
+  const notes = [];
+  f.c.settleBossStuns(notes);
+  eq(notes, [], "换人不多记标记");
+  f.c.startPlayerPhase();
+  eq([k.ap, k.bonus, k.stunned, k.stunMarks, k.def], [0, 0, false, 0, 5], "我方回合开始：晕眩一回合，标记清零，架势回满");
+});
+
+test("驾驶员没走倒下的流程就死了（直接判死）：车的装甲、架势、晕眩标记照样收回车上，下一个人接着用", () => {
+  const f = riotField(2, 2);
+  const [a, b] = riots(f);
+  const p = car(f, 2, 5);
+  f.c.vehicleBoard(a, p); f.c.vehicleBoard(b, p);
+  a.layers[0].current = 50; a.def = 3; a.stunMarks = 1;
+  a.dead = true;
+  f.c.vehicleSync();
+  assert.ok(b.vehMerged && !b.fused, "b 接任");
+  eq([b.layers[0].veh, b.layers[0].current, b.def, b.stunMarks], [p.id, 50, 3, 1]);
+  assert.ok(!a.vehMerged && !a.vehId && a.layers.every(l => !l.veh), "死掉的驾驶员身上不再挂着车");
+});
+
 /* ---------- 合并后的血量层 ---------- */
 test("合并：车的装甲在最外层，驾驶员自己的护盾、肉体在里面；架势、晕眩标记用车的；刺骨 / 穿刺这类打内层的能绕过装甲", () => {
   const f = riotField(1, 2);
@@ -209,6 +281,55 @@ test("驾驶员的内层被打空：驾驶员倒下 / 死亡，车的装甲留�
   g.c.applyKnockdown(kk, []);
   assert.ok(hh.vehMerged && !hh.fused, "玩家驾驶员倒下，下一个人接任");
   assert.ok(!kk.vehId);
+});
+
+test("我方驾驶员也用车的架势和两个晕眩标记（作者定）：第一次失衡记 1 个标记、架势立刻恢复；第二次攒满才真正晕眩，我方回合开始跳过一回合、标记清零", () => {
+  const f = riotField(1, 2, { lv: 5 });
+  const [x] = riots(f);
+  const k = f.P("kolt"); k.zone = 2;
+  const own = [k.def, k.defMax];
+  const p = car(f, 2, 5);
+  f.c.vehicleBoard(k, p);
+  eq([k.def, k.defMax], [5, 5], "架势用车的（5 级：5）");
+  assert.ok(f.c.isBossUnit(k), "我方驾驶员也按两个晕眩标记算");
+  rnd(f, 0.99);
+  // 第一次打空架势：记 1 个标记，失衡立刻结束、架势回满（车的 5）
+  const r1 = hit(f, x, k, { atk: 1, baseBreak: 5 });
+  eq([k.stunMarks, k.stunned, k.def], [1, false, 5]);
+  assert.match((r1.extra || []).join("\n"), /晕眩标记 1\/2：移动堡垒要攒满 2 个才会晕眩/);
+  // 第二次：攒满，真正晕眩
+  hit(f, x, k, { atk: 1, baseBreak: 5 });
+  eq([k.stunMarks, k.stunned], [2, true]);
+  // 我方回合开始：跳过这一回合，标记清零，架势回满
+  f.c.startPlayerPhase();
+  eq([k.ap, k.bonus, k.stunned, k.stunMarks, k.def], [0, 0, false, 0, 5]);
+  // 下一回合照常行动
+  f.c.startPlayerPhase();
+  assert.ok(k.ap >= 1, "晕过以后照常行动");
+  // 下车：换回自己的架势，不再按晕眩标记算
+  f.c.vehicleLeave(k);
+  eq([k.def, k.defMax], own);
+  assert.ok(!f.c.isBossUnit(k));
+});
+
+test("我方驾驶员：没经过失衡结算就被设成失衡的，回合开始照首领规则记标记——没攒满就恢复架势、照常行动；卡片上一直挂「晕眩标记 n/2」", () => {
+  const f = riotField(1, 2);
+  const c = withView(f);
+  const k = f.P("kolt"), hl = f.P("helu"); k.zone = 2;
+  const p = car(f, 2, 5);
+  c.vehicleBoard(k, p);
+  const mark = u => (c.HudIcons.unitBadges(u).find(b => b.key === "stunMark") || {}).stack;
+  assert.equal(mark(k), "0/2", "我方驾驶员也挂晕眩标记徽章");
+  assert.equal(mark(hl), undefined, "没开车的我方单位没有");
+  k.stunned = true; k.def = 0; k.stunMarks = 0;
+  c.startPlayerPhase();
+  eq([k.stunned, k.stunMarks, k.def], [false, 1, 5]);
+  assert.ok(k.ap >= 1, "没攒满：照常行动");
+  assert.equal(mark(k), "1/2");
+  // 普通的我方单位照旧：失衡就跳过一回合，不记标记
+  hl.stunned = true; hl.def = 0;
+  c.startPlayerPhase();
+  eq([hl.ap, hl.stunMarks || 0], [0, 0]);
 });
 
 /* ---------- 代挡 ---------- */
@@ -462,6 +583,30 @@ test("拉人下车：没有「运动」熟练做不了困难检定；拉人要�
   k.profs = {};
   get(f.c, "VEHICLE_RULES").unskilledChance = 0.5;
   assert.equal(f.c.vehiclePullError(k, p, a), null, "unskilledChance 填数后没有熟练也能尝试");
+});
+
+test("没有熟练照熟练项检定表（作者定）：困难「运动」/ 普通「载具驾驶」没有熟练都不能尝试，unskilledChance 不填；文档「抢车」一节也照检定表写", () => {
+  const f = riotField(1, 2);
+  const [a] = riots(f);
+  const k = f.P("kolt"); k.zone = 2; k.profs = {};
+  const R = get(f.c, "VEHICLE_RULES");
+  assert.equal(R.unskilledChance, null, "unskilledChance 不填");
+  const table = get(f.c, "ROGUE_CHECKS").chance;
+  eq([table[0][R.pullCheck.diff], table[0][R.boardCheck.diff]], [0, 0], "检定表：没有熟练时困难、普通都是 0");
+  eq([f.c.vehicleCheckOdds(k, R.pullCheck).chance, f.c.vehicleCheckOdds(k, R.boardCheck).chance], [0, 0]);
+  const p = car(f, 2);
+  assert.match(f.c.vehicleBoardError(k, p), /没有「载具驾驶」熟练/);
+  f.c.vehicleBoard(a, p);
+  assert.match(f.c.vehiclePullError(k, p, a), /没有「运动」熟练/);
+  // 有熟练照表：一级熟练困难 25%、普通 50%
+  k.profs = { "运动": 1, "载具驾驶": 1 };
+  eq([f.c.vehicleCheckOdds(k, R.pullCheck).base, f.c.vehicleCheckOdds(k, R.boardCheck).base], [0.25, 0.5]);
+  // 文档：「没有熟练按 50%」是写错了，改成照熟练项检定表
+  const doc = fs.readFileSync(path.join(H.ROOT, "docs/suppression-force.md"), "utf8");
+  const sec = doc.slice(doc.indexOf("### 抢车"), doc.indexOf("## 4."));
+  assert.doesNotMatch(sec, /没有熟练按 50%/);
+  assert.match(sec, /困难难度「运动」检定[^\n]*熟练项检定表[^\n]*没有「运动」熟练不能尝试困难检定/);
+  assert.match(sec, /普通难度「载具驾驶」检定[^\n]*没有「载具驾驶」熟练不能尝试普通检定/);
 });
 
 test("拉人下车（敌人）：成功率 25%；镇压队 AI 在我方占着车时会尝试把驾驶员拉下来", () => {
@@ -742,7 +887,7 @@ test("整场模拟：带车的镇压队打一场不报错，车能开炮 / 被�
 });
 
 /* ---------- 显示、联机 ---------- */
-test("显示：乘员 n / 4，悬停列出驾驶员和炮手（只有名字）；驾驶员身上有「驾驶员」标记", () => {
+test("显示：乘员 n / 4，悬停列出驾驶员和炮手（只有名字）；合并后的卡片写乘员和驾驶员是谁", () => {
   const f = riotField(3, 2);
   const [a, b, d] = riots(f);
   const p = car(f, 2);
@@ -751,7 +896,104 @@ test("显示：乘员 n / 4，悬停列出驾驶员和炮手（只有名字）�
   f.c.vehicleBoard(a, p); f.c.vehicleBoard(b, p);
   assert.equal(f.c.vehicleSeatText(p), "乘员 2 / 4");
   eq(f.c.vehicleRosterLines(p), [`驾驶员：${a.name}`, `炮手：${b.name}`]);
-  assert.match(f.c.statusLine(a), /驾驶员 乘员 2 \/ 4/);
+  assert.match(f.c.statusLine(a), new RegExp(`乘员 2 / 4 · 驾驶员：${a.name}`));
+});
+
+test("合并后只显示一张卡（作者定）：有驾驶员时只画合并后的那个单位，画成堡垒的卡片（名字、等级、ATK 按堡垒，写乘员 n / 4、驾驶员是谁）；配置物卡片、驾驶员自己的卡片都不单独画；没人驾驶时照旧画配置物卡片", () => {
+  const f = riotField(2, 2, { lv: 5 });
+  const c = withView(f);
+  const [a, b] = riots(f);
+  const p = car(f, 2, 5);
+  const snaps = () => plain(c.GAME.snapAll());
+  const propSnap = () => snaps().find(s => s.id === "prop:" + p.id);
+  const mine = () => snaps().filter(s => !s.hidden && [`prop:${p.id}`, a.id, b.id].includes(s.id));
+  const head = s => plain(c.UnitCard.headOf(s));   // 卡片顶上写的名字、等级、ATK
+  // 空车：画配置物卡片
+  eq(mine().map(s => s.id).sort(), [`prop:${p.id}`, a.id, b.id].sort(), "空车：配置物卡片和两个人的卡片各画各的");
+  assert.match(propSnap().status, /乘员 0 \/ 4/);
+  // 镇压队坐上去：只剩一张堡垒的卡片（id 是驾驶员的：点它、打它就是打合并后的单位）
+  c.vehicleBoard(a, p); c.vehicleBoard(b, p);
+  eq(mine().map(s => s.id), [a.id], "配置物卡片、炮手都藏起来，只剩合并后的那一张");
+  const sa = mine()[0];
+  eq(head(sa), { name: "移动堡垒", level: 5, atk: 11, race: "", iv: null }, "卡片上的名字、等级、ATK 按堡垒，不写驾驶员的种族 / 个体值");
+  eq([sa.name, sa.isPlayer], [a.name, false], "快照的 name 照旧是驾驶员自己的（队伍栏、日志认它）");
+  eq([sa.vehicle.kind, sa.vehicle.seatText, sa.vehicle.pilot], ["fortress", "乘员 2 / 4", a.name]);
+  assert.match(sa.status, new RegExp(`乘员 2 / 4 · 驾驶员：${a.name}`), "卡片上写乘员和驾驶员是谁");
+  eq(sa.layers.map(l => l.type), ["armor", "shield", "flesh"], "血条是合并后的（车的装甲在最外层）");
+  // 驾驶员下车：接任的人变成堡垒的卡片，下车的人变回自己的卡片
+  c.vehicleLeave(a);
+  eq(mine().map(s => [s.id, head(s).name]).sort(), [[a.id, a.name], [b.id, "移动堡垒"]].sort());
+  // 全部下车：配置物卡片回来
+  c.vehicleLeave(b);
+  eq(mine().map(s => s.id).sort(), [`prop:${p.id}`, a.id, b.id].sort());
+  const sb = snaps().find(s => s.id === b.id);
+  eq([sb.vehicle, head(sb).name], [null, b.name]);
+});
+
+test("我方开车也只显示一张堡垒的卡片（我方阵营）；卡片外观和悬停说明按堡垒，队伍栏照旧写角色自己的名字", () => {
+  const f = riotField(1, 3, { zoneMode: 3 });
+  const c = withView(f);
+  const k = f.P("kolt"); k.zone = 1;
+  const p = car(f, 1, 5);
+  c.vehicleBoard(k, p);
+  const all = plain(c.GAME.snapAll());
+  const s = all.find(x => x.id === k.id);
+  eq([c.UnitCard.headOf(s).name, s.name, s.isPlayer, s.hidden, s.vehicle.pilot, s.vehicle.seatText], ["移动堡垒", k.name, true, false, k.name, "乘员 1 / 4"]);
+  assert.ok(all.find(x => x.id === "prop:" + p.id).hidden, "配置物卡片藏起来");
+  // 画法：单位卡按 s.vehicle 换成堡垒的外观（game.css · .unit.vehicle）；悬停说明用配置物图鉴里的堡垒和乘员名单（本机、联机一样）
+  assert.match(fs.readFileSync(path.join(H.ROOT, "unit-card.js"), "utf8"), /classList\.toggle\("vehicle", !!s\.vehicle\)/);
+  assert.match(fs.readFileSync(path.join(H.ROOT, "game.css"), "utf8"), /\.unit\.vehicle \{/);
+  assert.match(fs.readFileSync(path.join(H.ROOT, "game.js"), "utf8"), /const info = vc \? \{ kind: "prop", propKind: vc\.kind \}/);
+  assert.match(fs.readFileSync(path.join(H.ROOT, "online-ui.js"), "utf8"), /if \(vc\) return T\.html\(\{ kind: "prop", propKind: vc\.kind \}/);
+  // 队伍栏（game.js）用 u.name 画名字
+  assert.match(fs.readFileSync(path.join(H.ROOT, "game.js"), "utf8"), /<span class="n"><span>\$\{esc\(u\.name\)\}<\/span>/);
+});
+
+test("联机玩家画面也只有一张堡垒的卡片：配置物 hidden，驾驶员带 vehicle（卡片名字按堡垒；name 照旧是驾驶员自己的，队伍栏用）；演出里每一下的快照也带着；不带坚毅数值", () => {
+  const f = riotField(2, 2, { lv: 5 });
+  const c = withView(f);
+  const [a] = riots(f);
+  const k = f.P("kolt"); k.zone = 2; k.shp = 777002;
+  const p = car(f, 2, 5);
+  const view = () => plain(c.OnlineView.projectState(f.S, {}));
+  const cards = v => plain(c.OnlineBattle.cardSnaps(v)).filter(s => [`prop:${p.id}`, a.id, k.id].includes(s.id));
+  const shown = cs => cs.map(s => [s.id, c.UnitCard.headOf(s).name]).sort();
+  // 空车：配置物卡片
+  let v = view();
+  assert.ok(!v.props.find(x => x.id === p.id).hidden);
+  assert.ok(cards(v).some(s => s.id === "prop:" + p.id));
+  // 镇压队开车
+  c.vehicleBoard(a, p);
+  v = view();
+  assert.equal(v.props.find(x => x.id === p.id).hidden, true, "配置物 hidden");
+  const ua = v.units.find(u => u.id === a.id);
+  assert.equal(ua.name, a.name, "name 照旧是驾驶员自己的");
+  eq([ua.vehicle.kind, ua.vehicle.name, ua.vehicle.seatText, ua.vehicle.pilot, ua.vehicle.level, ua.vehicle.atk], ["fortress", "移动堡垒", "乘员 1 / 4", a.name, 5, 11]);
+  assert.equal(ua.stunMax, 2);
+  let cs = cards(v);
+  eq(shown(cs), [[a.id, "移动堡垒"], [k.id, k.name]].sort(), "玩家画面不画配置物卡片，驾驶员画成堡垒");
+  eq([cs.find(s => s.id === a.id).vehicle.kind, c.UnitCard.headOf(cs.find(s => s.id === a.id)).atk], ["fortress", 11]);
+  // 我方抢到车：一样
+  c.vehicleLeave(a);
+  c.vehicleBoard(k, p);
+  v = view();
+  const uk = v.units.find(u => u.id === k.id);
+  eq([uk.name, uk.vehicle.name, uk.vehicle.pilot, uk.stunMax], [k.name, "移动堡垒", k.name, 2], "我方驾驶员也带晕眩标记上限 2");
+  cs = cards(v);
+  eq(shown(cs), [[a.id, a.name], [k.id, "移动堡垒"]].sort());
+  assert.doesNotMatch(JSON.stringify(v), /777002|"shp"/, "坚毅生命不进玩家数据");
+  // 演出里每一下的快照（game.js · snapAll）：投影后一样带着 vehicle，name 照旧（玩家的队伍栏不会变成「移动堡垒」）
+  const tape = plain(c.OnlineView.projectTape([{ type: "pop", unitId: k.id, kind: "dmg", value: 3, snap: c.GAME.snapAll() }], { state: f.S }));
+  const tk = tape[0].snap.find(u => u.id === k.id);
+  eq([tk.name, tk.vehicle && tk.vehicle.name, tk.vehicle && tk.vehicle.seatText], [k.name, "移动堡垒", "乘员 1 / 4"]);
+  assert.ok(!tape[0].snap.some(u => u.id === a.id && u.vehicle), "下了车的人没有");
+  assert.doesNotMatch(JSON.stringify(tape), /777002|"shp"/);
+  // 没人驾驶：配置物卡片回来
+  c.vehicleLeave(k);
+  v = view();
+  assert.ok(!v.props.find(x => x.id === p.id).hidden);
+  assert.equal(v.units.find(u => u.id === k.id).vehicle, undefined);
+  assert.ok(cards(v).some(s => s.id === "prop:" + p.id));
 });
 
 test("联机：配置物下发乘员 n / 4 和名单，不带坚毅等数值", () => {

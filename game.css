@@ -244,6 +244,12 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
 .unit.prop .u-name { font-size: 12px; max-width: 72px; }
 .unit.prop .u-hp { width: 70%; height: 8px; }
 .g-field.z3 .unit.prop { width: 72px; height: 72px; }
+/* 载具（vehicle.js）：驾驶员和车合并后只剩这一张卡，画成车——配置物的铁褐色描边加钢板斜纹底；左边的阵营色条照旧（敌红我蓝） */
+.unit.vehicle {
+  background: repeating-linear-gradient(135deg, rgba(138, 122, 98, .07) 0 6px, transparent 6px 12px), linear-gradient(180deg, #f6f2ea, #e9e2d5);
+  box-shadow: inset 0 0 0 2px #8a7a62, inset 0 0 0 4px rgba(138, 122, 98, .22);
+}
+.unit.vehicle .u-name { font-weight: 700; color: #4a3f30; }
 
 /* ---------- 中立生物（desert.js · 尘虫、管虫）：迷你名牌 ----------
  * 只留名字、细血条、架势和几个小标签；沙黄色细框，和红框的敌人、蓝框的我方分开 */

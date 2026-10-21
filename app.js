@@ -426,7 +426,7 @@ function propCard(p) {
 
 function statusLine(u) {
   const s = [];
-  if (u.vehMerged && typeof vehicleOf === "function") { const vp = vehicleOf(u); if (vp) s.push(`驾驶员 ${vehicleSeatText(vp)}`); }   // 载具（vehicle.js）
+  if (u.vehMerged && typeof vehicleOf === "function") { const vp = vehicleOf(u); if (vp) s.push(vehicleSeatText(vp), `驾驶员：${u.name}`); }   // 载具（vehicle.js）：合并后画成车的卡片，写乘员和驾驶员是谁
   if (Number(u.stunMarks) > 0) s.push(`晕眩标记 ${u.stunMarks}/${typeof BOSS_STUN_MARKS !== "undefined" ? BOSS_STUN_MARKS : 2}`);
   if (u.statuses) {
     if (u.statuses.burn > 0) s.push("灼烧×" + u.statuses.burn);
@@ -2021,6 +2021,8 @@ function startPlayerPhase() {
   state.combatPhase = "player";
   state.units.forEach(u => {
     if (!u.isPlayer || u.hidden || u.dead) return;
+    // 晕眩标记（首领的规则；我方只有和载具合并的驾驶员用，vehicle.js）：没攒满就只恢复架势、照常行动；攒满了照常晕眩，标记清零
+    if (u.stunned) bossShrugStun(u, notes);
     const wasStun = !!u.stunned;
     refreshEconomy(u);
     if (wasStun) {
@@ -10783,9 +10785,9 @@ function renderLog() {
  * 只是每次失衡记 1 个晕眩标记：到它自己的回合开始时，标记没满 BOSS_STUN_MARKS 个就恢复架势、照常行动；
  * 满了才真正晕眩（跳过这个回合），之后标记清零。目的是加快首领战的节奏。 */
 const BOSS_STUN_MARKS = 2;
-/** 用这套规则的：首领，以及 10 级起的精英（ELITE_RULE_MIN_LEVEL） */
+/** 用这套规则的：首领，以及 10 级起的精英（ELITE_RULE_MIN_LEVEL）；还有和载具合并的驾驶员（敌我都算） */
 function isBossUnit(u) {
-  if (u && u.vehMerged && !u.isPlayer) return true;   // 载具驾驶员：晕眩标记用车的（vehicle.js）
+  if (u && u.vehMerged) return true;   // 载具驾驶员：架势、两个晕眩标记用车的，我方抢到车也一样（vehicle.js）
   if (!u || u.isPlayer || typeof enemyRankOf !== "function") return false;
   const r = enemyRankOf(u);
   return r === "boss" || (r === "elite" && (Number(u.level) || 1) >= (typeof ELITE_RULE_MIN_LEVEL !== "undefined" ? ELITE_RULE_MIN_LEVEL : 10));
@@ -10800,9 +10802,10 @@ function noteBossBreak(u) {
   return u.stunMarks;
 }
 function bossMarkText(u) {
+  const veh = u.vehMerged && typeof vehicleOf === "function" ? vehicleOf(u) : null;   // 载具驾驶员：标记是车的（vehicle.js）
   return u.stunMarks >= BOSS_STUN_MARKS
     ? `晕眩标记 ${u.stunMarks}/${BOSS_STUN_MARKS}：攒满了，下个回合真正晕眩。`
-    : `晕眩标记 ${u.stunMarks}/${BOSS_STUN_MARKS}：${enemyRankOf(u) === "boss" ? "首领" : "精英"}要攒满 ${BOSS_STUN_MARKS} 个才会晕眩，架势立刻恢复，可以接着打下一个标记。`;
+    : `晕眩标记 ${u.stunMarks}/${BOSS_STUN_MARKS}：${veh ? veh.name : enemyRankOf(u) === "boss" ? "首领" : "精英"}要攒满 ${BOSS_STUN_MARKS} 个才会晕眩，架势立刻恢复，可以接着打下一个标记。`;
 }
 /** 没攒满标记的失衡：立刻恢复架势（协助攻击照常排队、照常打出） */
 function bossQuickRecover(u, notes) {

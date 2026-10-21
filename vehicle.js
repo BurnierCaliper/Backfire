@@ -7,10 +7,13 @@
  * 数据：车是 state.props 里的一个配置物（kind = 载具表的键，isVehicle = true），身上的 veh 记着座位、阵营、架势和掩体：
  *   veh.seats  按上车顺序排的单位 id，第 0 个是驾驶员，其余是炮手
  *   veh.side   车现在属于哪一方（"enemy" / "player"）；空车 = 最后坐在车上的一方
+ *   veh.def / defMax / stunned / stunMarks  车的架势和晕眩标记。空车也不重置：车里的人走光时保留当时的值，之后谁上车就接着用
  *   p.hp / p.maxHp  车体装甲。没有驾驶员时它就是真值；有驾驶员时真值在驾驶员身上那一层 veh 装甲里，每次 vehicleSync 抄回来
  * 驾驶员和车合并成一个单位（照瑞比的银翼机甲，app.js · enterMecha / exitMecha）：
- *   车的装甲拼在驾驶员血量层的最外层（layer.veh = 车 id），驾驶员自己的层在里面；架势、晕眩标记用车的；
+ *   车的装甲拼在驾驶员血量层的最外层（layer.veh = 车 id），驾驶员自己的层在里面；
+ *   架势、两个晕眩标记用车的，敌我驾驶员都一样（app.js · isBossUnit 认合并后的驾驶员）；
  *   刺骨这类打内层的效果直接打驾驶员；驾驶员的内层被打空 = 驾驶员倒下，车的装甲留着，按上车顺序换人接任。
+ *   画面上只有一张卡：合并后的单位画成车的卡片（vehicleCardOf），车自己的配置物卡片藏起来；没人驾驶时照旧画配置物卡片。
  * 炮手（fused = true）藏在车里：选不中、不被范围波及，轮到他们时用车上的武器。 */
 
 const VEHICLES = {
@@ -73,7 +76,7 @@ function makeVehicleProp(kind, zone, level, party) {
     kind, name: c.name, zone: Number(zone) || 1, level: lv,
     faction: "enemy", movable: false, hp: s.armor, maxHp: s.armor, link: "1-2",
     isVehicle: true,
-    veh: { seats: [], side: "enemy", atk: s.atk, dieSides: s.dieSides, def: s.def, defMax: s.def, stunned: false, stunMarks: 0, cover: false }
+    veh: { seats: [], side: "enemy", atk: s.atk, dieSides: s.dieSides, def: s.def, defMax: s.def, stunned: false, stunMarks: 0, stunMarked: false, cover: false }
   };
 }
 /** 做一台车放到场上 */
@@ -105,7 +108,7 @@ function vehicleArmor(p) {
   return layer ? { cur: Math.max(0, Number(layer.current) || 0), max: Math.max(1, Number(layer.max) || 1) } : { cur: Math.max(0, Number(p.hp) || 0), max: Math.max(1, Number(p.maxHp) || 1) };
 }
 
-/** 驾驶员和车合并：装甲拼在最外层，架势 / 晕眩标记用车的 */
+/** 驾驶员和车合并：装甲拼在最外层，架势 / 晕眩标记用车的（敌我驾驶员一样） */
 function vehicleMerge(p, u) {
   if (!p || !u || u.vehMerged) return;
   u._vehPre = { def: u.def, defMax: u.defMax, stunned: !!u.stunned, stunMarks: Number(u.stunMarks) || 0 };
@@ -114,10 +117,12 @@ function vehicleMerge(p, u) {
   u.def = p.veh.def; u.defMax = p.veh.defMax;
   u.stunned = !!p.veh.stunned;
   u.stunMarks = Number(p.veh.stunMarks) || 0;
+  u._bossMarked = !!(p.veh.stunned && p.veh.stunMarked);   // 车这次失衡已经记过标记：换人接着用，不再多记一个
+  u._bossRefill = false;
   u.vehMerged = true;
   p.zone = Number(u.zone);
 }
-/** 驾驶员和车分开：剩下的装甲、架势、晕眩标记还给车，驾驶员换回自己的 */
+/** 驾驶员和车分开：剩下的装甲、架势、晕眩标记还给车（车走空了也留着，不重置），驾驶员换回自己的 */
 function vehicleUnmerge(p, u) {
   if (!p || !u || !u.vehMerged) return;
   const layer = (u.layers || []).find(l => l.veh === p.id);
@@ -128,6 +133,7 @@ function vehicleUnmerge(p, u) {
   }
   p.veh.def = Number(u.def) || 0; p.veh.defMax = Number(u.defMax) || p.veh.defMax;
   p.veh.stunned = !!u.stunned; p.veh.stunMarks = Number(u.stunMarks) || 0;
+  p.veh.stunMarked = !!(u.stunned && u._bossMarked);
   const pre = u._vehPre;
   if (pre) { u.def = pre.def; u.defMax = pre.defMax; u.stunned = pre.stunned; u.stunMarks = pre.stunMarks; }
   delete u._vehPre;
@@ -145,10 +151,21 @@ function vehicleRosterLines(p) {
   if (!occ.length) return ["车上没有人"];
   return occ.map((u, i) => `${i === 0 ? "驾驶员" : "炮手"}：${u.name}`);
 }
+/** 显示用：和车合并的驾驶员画成车的卡片——名字、外观、等级、ATK 按车，卡片上写乘员 n / 4、驾驶员是谁。
+ *  不是合并后的驾驶员返回 null（game.js · snapUnit、online-view.js · projectUnit 共用） */
+function vehicleCardOf(u) {
+  const p = u && u.vehMerged ? vehicleOf(u) : null;
+  if (!p) return null;
+  return { kind: p.kind, name: p.name, level: p.level, atk: p.veh.atk, seatText: vehicleSeatText(p), pilot: u.name, roster: vehicleRosterLines(p) };
+}
+/** 显示用：这台车的配置物卡片要不要藏起来（有驾驶员时只画合并后的那张车的卡片） */
+function vehiclePropHidden(p) { return isVehicleProp(p) && !!vehiclePilot(p); }
 
 /** 让车的数据跟上驾驶员：位置、装甲、归属。炮手跟着车走 */
 function vehicleSync() {
   vehicleProps().forEach(p => {
+    // 驾驶员没走下车 / 倒下的流程就死了或离场（直接判死、移出战场）：先把车的装甲、架势、晕眩标记收回车上，下一个人接着用
+    (state.units || []).forEach(u => { if (u && u.vehMerged && u.vehId === p.id && (u.dead || u._removed)) { vehicleUnmerge(p, u); u.vehId = null; } });
     const occ = vehicleOccupants(p);
     p.veh.seats = occ.map(u => u.id);
     const pilot = occ[0];
@@ -187,7 +204,7 @@ function vehicleRemoveSeat(p, u, notes) {
   if (!vehicleOccupants(p).length) {
     p.veh.side = lastSide;   // 空车替最后坐在车上的一方代挡
     p.faction = lastSide;
-    p.veh.stunned = false; p.veh.stunMarks = 0; p.veh.def = p.veh.defMax;
+    // 车的架势和晕眩标记不重置：vehicleUnmerge 已经把当时的值还给车，下一个上车的人接着用
   }
   return notes;
 }
