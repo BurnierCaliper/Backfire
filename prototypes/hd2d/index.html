@@ -540,8 +540,8 @@ function onKey(e) {
 function loadDemo(id) {
   demo = DEMOS.find(d => d.id === id) || DEMOS[0];
   st = demo.make(pageRegion());
-  pickWeather();
   placeLook();
+  pickWeather();
   strikeN = 0; packetLogs = [];
   if (window.HD2DPlay) HD2DPlay.clear();
   project();
