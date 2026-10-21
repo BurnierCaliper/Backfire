@@ -1542,6 +1542,7 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
       const p = enemyPresets().find(x => x.id === kind);
       const u = applyEnemyIV(p.build(a.level, state.partySize));
       u.zone = a.zone;
+      u.summonedBy = a.id;   // 召唤物战后不掉材料（rogue.js · rollMaterialDrops）
       state.units.push(u);
     }
     lines.push(`召唤了 ${n} 只沙灵到 ${a.zone} 区。`);

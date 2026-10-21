@@ -116,7 +116,7 @@
   function projectUnit(unit) {
     if (!obj(unit) || !id(get(unit, "id"))) return null;
     const out = identifiers(unit, {}, ["id", "kit", "weaponOf", "owner", "operatorId"]);
-    copyFields(unit, out, ["name", "escort"], ["level", "xp", "attrPoints", "zone", "atk", "def", "defMax", "ap", "apMax", "bonus", "bonusMax", "highEnergy", "stunMarks", "sink"], ["isPlayer", "weaponUnit", "isProp", "isGap", "isDevice", "dying", "stunned", "flying", "dead", "hidden", "noMove", "dormant", "submerged", "neutral"]);
+    copyFields(unit, out, ["name", "escort"], ["level", "xp", "attrPoints", "zone", "atk", "def", "defMax", "ap", "apMax", "bonus", "bonusMax", "highEnergy", "stunMarks", "sink"], ["isPlayer", "weaponUnit", "isProp", "isGap", "isDevice", "dying", "stunned", "upOnShp", "flying", "dead", "hidden", "noMove", "dormant", "submerged", "neutral"]);
     if (get(unit, "fused") || get(unit, "_removed")) out.hidden = true;
     // 带着高能被打死的敌人：高能自爆演完之前先不算死（和本机画面一样，卡片等自爆后才淡出）
     if (out.dead && !out.isPlayer && (number(call("highBoomValue", unit)) || 0) > 0) { out.dead = false; out.hidden = false; }
@@ -478,25 +478,9 @@
   }
   function safeError(error) {
     const value = text(error, 500);
-    if (!value) return "操作未生效，请检查当前权限与可用选项";
-    const reasons = [
-      [/不是你的|不属于你|不能代替/, "不能操作或代答其他玩家的单位"],
-      [/只能从自己角色的钱包/, "只能从自己角色的钱包转钱"], [/只能用自己角色的钱包/, "只能用自己角色的钱包付钱"], [/已经关门/, "这家店已经关门了"], [/只能给自己的角色申请/, "只能给自己的角色申请改造"], [/诊所现在没开/, "诊所现在没开"],
-      [/最多只能改造|内层必须|最多 \d+ 种血量|改造量必须/, "改造方案不合规则"], [/方案没有变化/, "方案没有变化"], [/钱包里的钱不够/, "钱包里的钱不够"],
-      [/卖完了|只剩 \d+ 份/, "库存不够了"], [/积分不够/, "商店积分不够"], [/不能用积分兑换|换不到/, "这家店换不到这件"], [/奎支不够/, "钱包里的钱不够"], [/不够转|奎支，不够/, "钱包里的钱不够"], [/不能转给自己/, "不能转给自己"],
-      [/还没轮到|不是你的回合|当前顺位/, "还没轮到这个单位"],
-      [/行动点不足/, "行动点不足"], [/附赠行动不足/, "附赠行动不足"],
-      [/只有房主|只有主持人/, "只有主持人可以执行此操作"],
-      [/版本不同/, "版本不同，请刷新"], [/等待.*回应|等待.*选择/, "正在等待玩家回应"],
-      [/选择顺序|确定行动顺序/, "请先确定行动顺序"], [/已被占用/, "已被占用"],
-      [/固定.*调整|锁定/, "这个顺序格已经固定"], [/失衡/, "失衡中，无法行动"],
-      [/濒死|起身/, "当前状态不允许该行动"], [/敌人回合|敌方回合/, "当前是敌人回合"],
-      [/超出.*射程|射程.*不足/, "目标超出技能射程"], [/分步|技能目标|可用目标/, "目标或分步选择已失效"],
-      [/没有.*道具|缺货/, "没有这件可用道具"], [/相邻|移动/, "当前不能移动到该区域"],
-      [/战斗.*结束|战斗.*开始/, "当前战斗阶段不允许该操作"], [/过期|失效/, "这个选择已经失效"],
-      [/掉线|离线|暂停/, "房主离线，等待恢复连接"], [/结算|播放行动/, "正在结算，请稍候"]
-    ];
-    return (reasons.find(([pattern]) => pattern.test(value)) || [null, "操作未生效，请检查当前权限与可用选项"])[1];
+    // 原因文字照原样给玩家看（和单机一样）；text() 的敏感词过滤会挡掉提到坚毅生命具体数值 / 后台的句子，挡掉的才换成笼统的话
+    // 敏感词用规范化后的文字判断（全角 ＳＨＰ 也挡得住），给玩家看的是去掉控制字符的原句（全角逗号不被改成半角）
+    return value ? error.replace(/[\u0000-\u001f\u007f​-‏‪-‮⁠-⁯]/g, "").slice(0, 500) : "操作未生效，请检查当前权限与可用选项";
   }
   function projectView(view, context) {
     if (!obj(view)) return null;

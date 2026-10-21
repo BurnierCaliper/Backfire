@@ -208,7 +208,7 @@ const Rogue = (function () {
     if (opt.daily) {
       if (opt.solo || opt.growth) throw new Error("每日挑战不能和单人模式 / 长线养成一起开。");
       const m = /^daily-(\d{4}-\d{2}-\d{2})$/.exec(String(run.seed || ""));
-      run.daily = { date: m ? m[1] : dailyDate(opt.date), offers: {} };
+      run.daily = { date: m ? m[1] : dailyDate(opt.date), offers: {}, party: run.party.map(h => h.kit) };   // 开局队伍：阵亡后 party 会变，记录用这份
       run.featLog = [];      // 每次专长选择：{ key, kit, level, offered, picked }（选取率 = 被选 / 出现）
     }
     if (opt.growth) {
@@ -1295,6 +1295,7 @@ const Rogue = (function () {
     const node = currentNode(run);
     node.check.result = { kit, prof: o.level, ok, opt: info.opt, profName: info.prof };
     if (ok) {
+      growthDailyBump(run, "check_ok", 1, notes);   // 长线养成每日任务「完成检定」
       state.kuizhi = (Number(state.kuizhi) || 0) + info.reward;
       notes.push(`获得 ${info.reward} 奎支（现有 ${state.kuizhi}）。`);
     } else if (info.injure && o.noHurt) {
@@ -1389,6 +1390,7 @@ const Rogue = (function () {
     notes.push(...r.notes);
     // 补给不够只能消磨时间：时间照样过，满 80 小时力竭致死（以前这里不判）
     if (!(r.out && r.out.ok)) exhaustDeath(run, notes);
+    else growthDailyBump(run, "long_rest", 1, notes);   // 长线养成每日任务「长休」
     return r.out && r.out.ok;
   }
   /** 进下一站 / 首领战之前能短休的地方（休息点自己有短休按钮） */
@@ -1644,6 +1646,7 @@ const Rogue = (function () {
     if (row.give.item) bagAdd(row.give.item, qty);
     const notes = [`买下 ${shopItemName(row)} ×${qty}，花掉 ${cost} 奎支。`];
     earnShopPoints(run, cost, notes);
+    growthDailyBump(run, "shop", cost, notes);   // 长线养成每日任务「商店消费」
     return logAll(run, notes);
   }
 
@@ -2605,16 +2608,23 @@ const Rogue = (function () {
         t.progress = Math.min(t.target, t.progress + Math.floor(t.target * 0.25));
       } else if (t.id === "no_death") {
         t.progress = Math.min(t.target, t.progress + 1);
-      } else if (t.id === "long_rest") {
-        // 长休进度在休息节点结算
-      } else if (t.id === "check_ok") {
-        // 检定进度在检定成功时结算
-      } else if (t.id === "shop") {
-        // 商店消费进度在购买时结算
       } else if (t.id === "weather") {
-        // 天气变更进度在改天气时结算
+        // 本场我方主动改过天气（app.js · setWeather 记数）
+        t.progress = Math.min(t.target, t.progress + (Number(state.playerWeatherChanges) || 0));
       }
+      // long_rest / check_ok / shop 不在战后结算：分别在 doLongRest / attemptCheck / buy 里写入（growthDailyBump）
       if (t.progress >= t.target && !t.done) completeGrowthDailyTask(run, t, notes);
+    });
+  }
+  /** 长线养成每日任务：给指定 id 的任务加进度（长休 / 检定成功 / 商店消费在发生的地方调用） */
+  function growthDailyBump(run, id, n, notes) {
+    if (!run || !run.growth || !(n > 0)) return;
+    const daily = ensureGrowthDaily(run);
+    if (!daily) return;
+    daily.tasks.forEach(t => {
+      if (t.id !== id || t.done) return;
+      t.progress = Math.min(t.target, t.progress + n);
+      if (t.progress >= t.target) completeGrowthDailyTask(run, t, notes);
     });
   }
   function completeGrowthDailyTask(run, task, notes) {
@@ -2781,7 +2791,7 @@ function advanceDays(run, n) {
     if (!run.daily || run.daily.recorded) return;
     run.daily.recorded = true;
     const s = dailyStats();
-    s.runs.push({ date: run.daily.date, seed: run.seed, party: run.party.map(h => h.kit), result: clone(run.result || null), feats: clone(run.featLog || []) });
+    s.runs.push({ date: run.daily.date, seed: run.seed, party: (run.daily.party || run.party.map(h => h.kit).concat((run.fallen || []).map(f => f.kit))).slice(), result: clone(run.result || null), feats: clone(run.featLog || []) });
     const keep = D().keepRuns || 200;
     if (s.runs.length > keep) s.runs = s.runs.slice(-keep);
     const ls = dailyStorage();
@@ -2959,7 +2969,7 @@ function advanceDays(run, n) {
     canClinic, cyberInfo, cyberPreview, cyberCost, modifyHero, cyberwarePacketFor, cyberwarePreviewFor, installCyberware, removeCyberware, healCost, healHero,
     pendingChoices, choiceOptions, choose, queueLevelRewards,
     dailyDate, dailySeed, dailyParty, dailyStats, featPickRates,
-    drawInfo, drawHero, swapHero, partyLevel, growthXp: () => growthOn, routeEta, growthDaily: ensureGrowthDaily,
+    drawInfo, drawHero, swapHero, partyLevel, growthXp: () => growthOn, routeEta, growthDaily: ensureGrowthDaily, growthDailyBump,
     camp, nextAct, afterVictory, endRun,
     enterRunMode, leaveRunMode, syncWorld, save, inRunMode: () => !!stash,
     setLootHandler, grantLoot, rollItemDrops

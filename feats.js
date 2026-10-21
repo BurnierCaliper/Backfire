@@ -722,7 +722,9 @@ function featAfterHit(attacker, target, res, flags, extra, stunnedNow, wasFlying
     if (Number(target.zone) !== Number(attacker.zone) && canDisplace(target)) displaceTo(target, attacker.zone, extra, "被击落");
   }
   if (featHas(attacker, "momentum") && !(flags && flags.momentum)) {
-    const others = visibleEnemies(target.zone).filter(u => u.id !== target.id && !u.dead && !u.fused && !u.stunned && Number(u.def) === 1);
+    // 只对和攻击者敌对的单位生效（中立生物、友军不算；visibleEnemies 只看 !isPlayer，不够）
+    const others = visibleEnemies(target.zone).filter(u => u.id !== target.id && !u.dead && !u.fused && !u.stunned && Number(u.def) === 1 &&
+      (typeof hostileTo !== "function" || hostileTo(attacker, u)));
     others.forEach(u => dealBreak(u, 1, "none", extra, "乘势", { by: attacker }));
     if (others.length) extra.push(`乘势：${others.map(u => u.name).join("、")} 各受 1 点无属性击破。`);
   }
