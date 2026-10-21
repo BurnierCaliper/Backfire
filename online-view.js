@@ -120,8 +120,8 @@
     if (get(unit, "fused") || get(unit, "_removed")) out.hidden = true;
     // 带着高能被打死的敌人：高能自爆演完之前先不算死（和本机画面一样，卡片等自爆后才淡出）
     if (out.dead && !out.isPlayer && (number(call("highBoomValue", unit)) || 0) > 0) { out.dead = false; out.hidden = false; }
-    // 首领 / 10 级起精英：要攒几个晕眩标记才晕眩（玩家那边画「晕眩标记 n/2」徽章；他们自己算不出敌人的级别规则）
-    try { if (!get(unit, "isPlayer") && typeof root.isBossUnit === "function" && root.isBossUnit(unit)) out.stunMax = 2; } catch (e) {}
+    // 首领 / 10 级起精英 / 和载具合并的驾驶员（敌我都算）：要攒几个晕眩标记才晕眩（玩家那边画「晕眩标记 n/2」徽章；他们自己算不出敌人的级别规则）
+    try { if (typeof root.isBossUnit === "function" && root.isBossUnit(unit)) out.stunMax = 2; } catch (e) {}
     // 属性（升级加点要看）：六项数值和曾经加过的项
     const attrs = get(unit, "attrs");
     if (obj(attrs)) { out.attrs = {}; for (const k of ["str", "con", "dex", "wil", "int", "sta"]) { const v = number(get(attrs, k)); if (v !== undefined) out.attrs[k] = v; } }
@@ -178,6 +178,16 @@
     if (obj(r) && get(unit, "isPlayer") && root.HudIcons) { let hud = null; try { hud = root.HudIcons.gaugeState(unit); } catch (e) {} const dto = projectHud(hud); if (dto) out.hud = dto; }
     // status/res 不直接转发：上面 displayOf 一段一段过滤后放进 display
     const display = displayOf(unit); if (display) out.display = display;
+    // 载具（vehicle.js）：和车合并的驾驶员画成车的卡片——名字、等级、ATK 按车，写乘员 n / 4、驾驶员是谁（只有名字，不含坚毅数值）。
+    // name 照旧是驾驶员自己的名字（队伍栏用），卡片上的名字看 vehicle.name。演出里每一下的快照（game.js · snapUnit）已经带着 vehicle，照同一份白名单转
+    const vc = call("vehicleCardOf", unit) || get(unit, "vehicle");
+    if (obj(vc)) {
+      const v = {}; enumField(vc, v, "kind", vehicleKinds);
+      copyFields(vc, v, ["name", "seatText", "pilot"], ["level", "atk"], []);
+      const roster = arr(get(vc, "roster")).slice(0, 8).map(t => text(t, 60)).filter(Boolean);
+      if (roster.length) v.roster = roster;
+      if (v.kind && v.name) out.vehicle = v;
+    }
     return out;
   }
   /** 角色仪表的数据：只放数字、开关和几个固定取值的字段（gaugeState 的输出） */
@@ -199,12 +209,22 @@
     }
     return dto;
   }
+  const vehicleKinds = ["fortress"];   // 载具配置物的种类（vehicle.js · VEHICLES 的键）
   function projectProp(prop) {
     if (!obj(prop) || !id(get(prop, "id"))) return null;
     const out = identifiers(prop, {}, ["id"]);
     copyFields(prop, out, ["name"], ["zone", "level", "hp", "maxHp", "shield", "shieldMax"], ["destroyed"]);
-    enumField(prop, out, "kind", ["button", "lever", "battery", "boom", "acid", "scrap", "turret", "ironwall", "scrapwall", "dome", "coral_branch", "coral_tentacle", "death_statue"]);
+    enumField(prop, out, "kind", ["button", "lever", "battery", "boom", "acid", "scrap", "turret", "ironwall", "scrapwall", "dome", "coral_branch", "coral_tentacle", "death_statue"].concat(vehicleKinds));
     enumField(prop, out, "faction", ["player", "enemy", "neutral"]);
+    // 载具（vehicle.js）：乘员 n / 4，悬停列出谁在车里、谁是驾驶员（只有名字，不含任何坚毅数值）
+    if (get(prop, "isVehicle") === true) {
+      out.isVehicle = true;
+      const seat = text(call("vehicleSeatText", prop), 20); if (seat) out.seatText = seat;
+      const roster = arr(call("vehicleRosterLines", prop)).slice(0, 8).map(t => text(t, 60)).filter(Boolean);
+      if (roster.length) out.roster = roster;
+      // 有驾驶员：和本机画面一样只画合并后的那张车的卡片（驾驶员那边的 vehicle），配置物卡片藏起来
+      if (call("vehiclePropHidden", prop) === true) out.hidden = true;
+    }
     return out;
   }
   function projectState(state, context = {}) {

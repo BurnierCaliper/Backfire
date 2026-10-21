@@ -22,8 +22,13 @@
   function snapUnit(u) {
     const d = u.display || {};
     const layers = (u.layers || []).map(l => ({ type: l.type || "flesh", cur: Math.max(0, Math.round(Number(l.current) || 0)), max: Math.max(0, Number(l.max) || 0) }));
+    // 载具：和车合并的驾驶员画成车的卡片（主机 online-view.js 发来 vehicle）：卡片上的名字、等级、ATK 由 unit-card.js · headOf 按车写，和本机画面一样；
+    // name 照旧是驾驶员自己的（队伍栏用）
+    const vc = u.vehicle && typeof u.vehicle === "object" ? u.vehicle : null;
+    const vehicle = vc ? { kind: vc.kind || "", name: vc.name || "", level: Number(vc.level) || 1, atk: Math.round(Number(vc.atk) || 0), seatText: vc.seatText || "", pilot: vc.pilot || "",
+      roster: Array.isArray(vc.roster) ? vc.roster.filter(x => typeof x === "string").slice(0, 8) : [] } : null;
     return {
-      id: u.id, name: u.name || u.id, level: u.level || 1, isPlayer: !!u.isPlayer, kit: u.kit || "", zone: Number(u.zone) || 1,
+      id: u.id, name: u.name || u.id, vehicle, level: u.level || 1, isPlayer: !!u.isPlayer, kit: u.kit || "", zone: Number(u.zone) || 1,
       hidden: !!u.hidden, dead: !!u.dead, weaponUnit: !!(u.weaponOf || u.weaponUnit), dying: !!u.dying, upOnShp: !!u.upOnShp,
       stunned: !!u.stunned, iceNext: !!(u.instant && u.instant.iceNext),
       def: Math.max(0, Number(u.def) || 0), defMax: Math.max(0, Number(u.defMax) || 0), layers, shp: 0, shpMax: 0,
@@ -42,15 +47,22 @@
   }
   function snapProp(p) {
     const max = Math.max(1, Number(p.maxHp) || Number(p.hp) || 1), cur = Math.max(0, Number(p.hp) || 0);
-    const name = ({ button: "按钮", lever: "拉杆", battery: "超充能电池", boom: "爆炸桶", acid: "酸液桶", scrap: "碎渣机炮", turret: "防卫自律炮台", ironwall: "铁壁", scrapwall: "废铁墙", dome: "防护罩", coral_branch: "沙珊瑚枝", coral_tentacle: "沙珊瑚触须", death_statue: "死亡雕像" })[p.kind] || p.kind || "配置物";
+    const name = ({ button: "按钮", lever: "拉杆", battery: "超充能电池", boom: "爆炸桶", acid: "酸液桶", scrap: "碎渣机炮", turret: "防卫自律炮台", ironwall: "铁壁", scrapwall: "废铁墙", dome: "防护罩", coral_branch: "沙珊瑚枝", coral_tentacle: "沙珊瑚触须", death_statue: "死亡雕像", fortress: "移动堡垒" })[p.kind] || p.kind || "配置物";
     return {
+      roster: p.roster || null,   // 载具的乘员名单（悬停显示）
       id: "prop:" + p.id, name: p.name || name, isPlayer: p.faction !== "enemy", isProp: true, isDevice: DEVICE.includes(p.kind),
       zone: Number(p.zone) || 1, level: p.level || 1, atk: 0,
       // 铁壁的外层护盾（川川多耗电能加的）画在装甲外面
       layers: (Number(p.shieldMax) > 0 ? [{ type: "shield", max: Number(p.shieldMax), cur: Math.max(0, Number(p.shield) || 0) }] : []).concat([{ type: "armor", max, cur }]),
-      def: 0, defMax: 0, ap: 0, apMax: 0, bonus: 0, bonusMax: 0, status: name, res: p.kind === "battery" || p.kind === "turret" ? (p.faction === "enemy" ? "敌方" : "我方") : "",
-      highEnergy: 0, flying: false, stunned: false, dying: false, dead: !!p.destroyed || (cur <= 0 && !DEVICE.includes(p.kind)), hidden: false, marks: [], casts: [], hung: [], badges: []
+      def: 0, defMax: 0, ap: 0, apMax: 0, bonus: 0, bonusMax: 0, status: name + (p.seatText ? " · " + p.seatText : ""), res: p.kind === "battery" || p.kind === "turret" || p.isVehicle ? (p.faction === "enemy" ? "敌方" : "我方") : "",
+      highEnergy: 0, flying: false, stunned: false, dying: false, dead: !!p.destroyed || (cur <= 0 && !DEVICE.includes(p.kind)), hidden: !!p.hidden, marks: [], casts: [], hung: [], badges: []
     };
+  }
+  /** 战场上要画的卡片：藏起来的单位（炮手、下潜……）和藏起来的配置物（有驾驶员的车：只画合并后的那张车的卡片）都不画 */
+  function cardSnaps(data) {
+    data = data || {};
+    return (data.units || []).filter(u => !u.hidden).map(snapUnit)
+      .concat((data.props || []).filter(p => !p.destroyed && !p.hidden).map(snapProp));
   }
   /** 区域的颜色和文字（和 app.js · fieldThemeClass / fieldTags 同样的判断；这里只看主机发来的展示字段，不碰规则） */
   function fieldClass(f) {
@@ -194,8 +206,7 @@
     function paintCards(data, ui) {
       const kit = root.UnitCard;
       if (!kit) return;
-      const snaps = (data.units || []).filter(u => !u.hidden).map(snapUnit)
-        .concat((data.props || []).filter(p => !p.destroyed).map(snapProp));
+      const snaps = cardSnaps(data);
       const seen = new Set();
       const targetNo = pickNumbers(ui, "unit");
       const targets = targetNo ? new Set(targetNo.keys()) : null;
@@ -210,6 +221,7 @@
           cards.set(s.id, c);
         }
         try { kit.update(c, s, {}); } catch (e) { /* 少字段的快照画不全也不要卡住整个画面 */ }
+        if (s.roster) c.wrap.title = s.roster.join("；");   // 载具：悬停列出乘员和驾驶员（合并后车的卡片在 online-ui.js · unitTip 的说明里列）
         const grp = field.querySelector(`.g-zone[data-num="${s.zone}"] .grp.${s.isProp ? "prop" : s.isPlayer ? "player" : "enemy"}`) || field.querySelector(".g-zone .grp");
         if (grp && c.wrap.parentElement !== grp) grp.appendChild(c.wrap);
         c.wrap.classList.toggle("is-actor", !!ui.current && s.id === ui.current && !!ui.acting);
@@ -369,7 +381,7 @@
     return { el, update, cardOf, destroy };
   }
 
-  const api = { create, snapUnit, snapProp, tickCountdowns, isTouch };
+  const api = { create, snapUnit, snapProp, cardSnaps, tickCountdowns, isTouch };
   root.OnlineBattle = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof window !== "undefined" ? window : globalThis);

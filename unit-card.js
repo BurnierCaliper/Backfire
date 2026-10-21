@@ -1,7 +1,8 @@
 /* Antlerscale: Backfire · 单位卡（战场上的铭牌）的画法
  * 战斗画面（game.js）和联机玩家的战斗画面（online-battle.js）共用：只管 DOM，不碰规则和战场状态。
  *   const c = UnitCard.create(snap)   → { id, wrap, unit, … }（snap 的字段见 game.js · snapUnit）
- *   UnitCard.update(c, snap, { sim })  → 按快照更新血条、架势、耐久、行动点、状态徽章；sim 时不播放生效动画 */
+ *   UnitCard.update(c, snap, { sim })  → 按快照更新血条、架势、耐久、行动点、状态徽章；sim 时不播放生效动画
+ *   UnitCard.headOf(snap)              → 卡片顶上写的名字、等级、ATK（和载具合并的驾驶员按车写） */
 (function (root) {
   "use strict";
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -56,10 +57,19 @@
     return c;
   }
 
+  /** 卡片顶上写的名字、等级、ATK、种族、个体值。和载具合并的驾驶员（s.vehicle，vehicle.js · vehicleCardOf）画成车：
+   *  名字、等级、ATK 按车，不写驾驶员的种族 / 个体值；快照里的 name 等字段照旧是驾驶员自己的 */
+  function headOf(s) {
+    const v = s && s.vehicle;
+    if (v) return { name: v.name || s.name, level: v.level || s.level, atk: v.atk != null ? v.atk : s.atk, race: "", iv: null };
+    return { name: s.name, level: s.level, atk: s.atk, race: s.race || "", iv: s.iv || null };
+  }
+
   function update(c, s, opts) {
     const q = (sel) => c.unit.querySelector(sel);
-    q(".u-name").textContent = s.name;
-    q(".u-name").title = s.race ? `${s.name} · ${s.race}` : "";
+    const head = headOf(s);
+    q(".u-name").textContent = head.name;
+    q(".u-name").title = head.race ? `${head.name} · ${head.race}` : "";
     if (c.intents) {
       const list = Array.isArray(s.intents) ? s.intents : [];
       const key = list.join("|");
@@ -69,14 +79,17 @@
       }
       c.wrap.classList.toggle("has-intent", list.length > 0);
     }
-    q(".u-lv").textContent = "Lv" + s.level;
+    q(".u-lv").textContent = "Lv" + head.level;
     // 个体值（杂兵、精英）：铭牌上停一下就能看到血量 / ATK 水平
     const ivSign = (n) => (n > 0 ? "+" : n < 0 ? "−" : "±") + Math.abs(n) + "%";
     // 种族（敌人）：和个体值一起放在等级的悬停里，例如「红皮人 · 个体值：血量 +3% · ATK −2%」
-    q(".u-lv").title = [s.race || "", s.iv ? `个体值：血量 ${ivSign(s.iv.hp)} · ATK ${ivSign(s.iv.atk)}` : ""].filter(Boolean).join(" · ");
-    c.unit.dataset.race = s.race || "";
-    c.unit.dataset.iv = s.iv ? `${s.iv.hp},${s.iv.atk}` : "";
-    q(".u-atk").textContent = "ATK " + s.atk;
+    q(".u-lv").title = [head.race, head.iv ? `个体值：血量 ${ivSign(head.iv.hp)} · ATK ${ivSign(head.iv.atk)}` : ""].filter(Boolean).join(" · ");
+    c.unit.dataset.race = head.race;
+    c.unit.dataset.iv = head.iv ? `${head.iv.hp},${head.iv.atk}` : "";
+    // 载具（vehicle.js）：和车合并的驾驶员画成车的卡片（外观见 game.css · .unit.vehicle）；下车 / 换人后变回原样
+    c.unit.classList.toggle("vehicle", !!s.vehicle);
+    c.unit.dataset.vehicle = s.vehicle ? String(s.vehicle.kind || "") : "";
+    q(".u-atk").textContent = "ATK " + head.atk;
 
     // 分层血条：数组 0 是最外层，显示在最右
     const key = s.layers.map(l => l.type + ":" + l.max).join("|");
@@ -221,7 +234,7 @@
     c.prev = s;
   }
 
-  const api = { create, update, sumCur, sumMax, mechLeft, mechLines, towerTip, towerHtml };
+  const api = { create, update, headOf, sumCur, sumMax, mechLeft, mechLines, towerTip, towerHtml };
   root.UnitCard = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof window !== "undefined" ? window : globalThis);

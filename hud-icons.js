@@ -222,18 +222,18 @@
     if (Number(u.sink) > 0) out.unshift({ key: "sink", stack: String(u.sink), title: `下陷 ${u.sink} 层（流沙）：每回合开始失去生命上限 ${5 * Number(u.sink)}%；2 层起自己走不出去，3 层不能行动、不能协助。不花行动点就慢慢浮出来` });
     if (u.submerged) out.unshift({ key: "submerged", stack: "", title: "下潜：选不中、范围攻击打不到；只有谐波攻击和塌陷打得到（打到就被迫浮上来 +1 击破）。自己攻击时解除" });
     if (u.dormant) out.unshift({ key: "dormant", stack: "", title: "休眠：不行动、不协助，被叫醒后才开始行动" });
-    // 首领和 10 级起的精英：一直挂着晕眩标记（0/2 也挂），开打前就看得出要失衡两次才会晕眩
+    // 首领、10 级起的精英、载具（和车合并的驾驶员，敌我都算）：一直挂着晕眩标记（0/2 也挂），开打前就看得出要失衡两次才会晕眩
     const max = stunMarkMax(u);
     if (max > 0) {
       const n = Math.min(max, Number(u.stunMarks) || 0);
-      out.unshift({ key: "stunMark", stack: `${n}/${max}`, title: `晕眩标记 ${n}/${max}：首领和 10 级以上的精英每失衡一次记 1 个标记，攒满 ${max} 个才会真正晕眩（跳过回合）；没攒满时架势立刻恢复` });
+      out.unshift({ key: "stunMark", stack: `${n}/${max}`, title: `晕眩标记 ${n}/${max}：首领、10 级以上的精英和载具（驾驶员用车的标记）每失衡一次记 1 个标记，攒满 ${max} 个才会真正晕眩（跳过回合）；没攒满时架势立刻恢复` });
     }
     return out;
   }
-  /** 这个单位用不用晕眩标记规则：联机投影过来的带 stunMax，本地单位直接问规则 */
+  /** 这个单位用不用晕眩标记规则：联机投影过来的带 stunMax，本地单位直接问规则（我方只有和载具合并的驾驶员用，vehicle.js） */
   function stunMarkMax(u) {
     if (u.stunMax != null) return Number(u.stunMax) || 0;
-    if (u.isPlayer || typeof root.isBossUnit !== "function") return 0;
+    if ((u.isPlayer && !u.vehMerged) || typeof root.isBossUnit !== "function") return 0;
     try { return root.isBossUnit(u) ? (typeof root.BOSS_STUN_MARKS === "number" ? root.BOSS_STUN_MARKS : 2) : 0; } catch (e) { return 0; }
   }
   /** 状态文字里的一个词有没有对应的图标（「灼烧×3」「高能 5」「自焚×2」都算） */
