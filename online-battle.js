@@ -168,17 +168,8 @@
           if (!tb) { tb = make("div", "zthreat"); z.appendChild(tb); }
           tb.innerHTML = th.map(t => `<span class="${t.ready ? "rd" : ""}">${esc(t.label)}${t.from ? `<i>${esc(t.from)}</i>` : ""}</span>`).join("");
         }
-        // 踩塔：区域边框 + 角上的牌子
-        const tw = zv.towers || [];
-        z.classList.toggle("tower", tw.length > 0);
-        z.classList.toggle("tower-ready", tw.some(t => t.left <= 0));
-        z.classList.toggle("tower-short", tw.some(t => t.have < t.need));
-        let tt = z.querySelector(".ztower");
-        if (!tw.length) { if (tt) tt.remove(); }
-        else {
-          if (!tt) { tt = make("div", "ztower"); z.appendChild(tt); }
-          tt.innerHTML = UnitCard.towerHtml(tw);   // 「踩塔 · 还有 N 回合 · 1/1 人」（unit-card.js）
-        }
+        // 踩塔：区名旁边的图标 + 地面上的一圈（unit-card.js，和本地战斗画面同一套）
+        if (root.UnitCard && UnitCard.paintTowers) UnitCard.paintTowers(z, zv.towers || []);
         z.classList.toggle("is-move-target", !!(zoneOpts && zoneOpts.has(Number(z.dataset.num))));
         setPickBadge(z, zoneNo ? zoneNo.get(String(z.dataset.num)) : 0);
       });
@@ -191,10 +182,10 @@
     }
 
     let lastTargetKey = "";
-    function paintCards(data, ui) {
+    function paintCards(data, ui, unitSnaps) {
       const kit = root.UnitCard;
       if (!kit) return;
-      const snaps = (data.units || []).filter(u => !u.hidden).map(snapUnit)
+      const snaps = (unitSnaps || (data.units || []).filter(u => !u.hidden).map(snapUnit))
         .concat((data.props || []).filter(p => !p.destroyed).map(snapProp));
       const seen = new Set();
       const targetNo = pickNumbers(ui, "unit");
@@ -283,7 +274,10 @@
       if (root.HeroSheet && HeroSheet.hideTip && (ui.armed || ui.busy)) HeroSheet.hideTip();
       layout(data);
       paintZones(data, ui);
-      paintCards(data, ui);
+      const units = (data.units || []).filter(u => !u.hidden).map(snapUnit);
+      paintCards(data, ui, units);
+      // 战场正上方的首领机制横幅（unit-card.js · paintBanner，和本地战斗画面同一套）
+      if (root.UnitCard && UnitCard.paintBanner) UnitCard.paintBanner(field, units);
       paintHud(data, ui);
       fitZones();
     }

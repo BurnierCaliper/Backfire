@@ -353,17 +353,9 @@
         ).join("");
       }
     });
-    // 踩塔：区域边框 + 角上一块牌子「踩塔 N · 1/1 人」（人数不够时变红）
-    document.querySelectorAll(".g-zone").forEach(z => {
-      const tw = (env.zones[z.dataset.num] || {}).towers || [];
-      z.classList.toggle("tower", tw.length > 0);
-      z.classList.toggle("tower-ready", tw.some(t => t.left <= 0));
-      z.classList.toggle("tower-short", tw.some(t => t.have < t.need));
-      let tb = z.querySelector(".ztower");
-      if (!tw.length) { if (tb) tb.remove(); return; }
-      if (!tb) { tb = el("div", "ztower"); z.appendChild(tb); }
-      tb.innerHTML = UnitCard.towerHtml(tw);   // 「踩塔 · 还有 N 回合 · 1/1 人」（unit-card.js）
-    });
+    // 踩塔：区名旁边一个塔的图标（数字 = 还有几回合，旁边写几人 / 要几人）+ 地面上的一圈（unit-card.js，联机玩家画面同一套）
+    // 只画本机的战场（联机玩家的战场由 online-battle.js 自己画，窗口缩放时这里不去动它）
+    document.querySelectorAll("#g-field .g-zone").forEach(z => UnitCard.paintTowers(z, (env.zones[z.dataset.num] || {}).towers || []));
     paintGaps();
   }
   const toMap = (arr) => new Map(arr.map(s => [s.id, s]));
@@ -728,8 +720,14 @@
     G.view = next;
     paintGaps();
     paintSandStir(snaps);
+    paintMechBar(snaps);
     fitZones();
     return beats;
+  }
+
+  /** 战场正上方的首领机制横幅（unit-card.js · paintBanner）：和援军倒计时摞在一起，有机制时战场顶上留出它的高度 */
+  function paintMechBar(snaps) {
+    if (window.UnitCard && UnitCard.paintBanner) UnitCard.paintBanner($("g-field"), snaps);
   }
 
   /** 夜晚下潜的中立生物（尘虫迁徙）：每个区角上一块「沙下动静 ×N」，点开看每只的状态；谐波选目标时点列表里的那一只 */
@@ -3403,12 +3401,14 @@
 
   function refreshTop() {
     // 连续战斗第几场、援军倒计时（chain.js）
-    // 浮在战场正上方（顶栏已经很挤）；战场重画时挂回去
+    // 浮在战场正上方（顶栏已经很挤），和首领机制横幅摞在同一摞里（unit-card.js · topStack），上下排开不打架；战场重画时挂回去
     let ch = document.getElementById("g-chain");
     const field = $("g-field");
+    const top = field && window.UnitCard && UnitCard.topStack ? UnitCard.topStack(field) : field;
     if (!ch && field) { ch = document.createElement("div"); ch.id = "g-chain"; ch.className = "g-chain"; ch.hidden = true; }
-    if (ch && field && ch.parentNode !== field) field.appendChild(ch);
+    if (ch && top && ch.parentNode !== top) top.insertBefore(ch, top.firstChild);
     if (ch && typeof Chain !== "undefined") { const h = Chain.barHtml(Chain.status()); ch.hidden = !h; if (ch.innerHTML !== h) ch.innerHTML = h; }
+    if (field && window.UnitCard && UnitCard.fitTop) UnitCard.fitTop(field);   // 援军那一行变了：留给横幅的高度跟着变
     $("g-round").textContent = state.combatStarted ? `第 ${state.turnNo || 1} 回合` : "准备中";
     const ph = $("g-phasel");
     ph.textContent = !state.combatStarted ? "等待开始" : (state.combatPhase === "enemy" ? "敌人行动" : "我方行动");
