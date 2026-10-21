@@ -38,7 +38,8 @@ function fixture() {
   };
 }
 function noSecrets(value) {
-  const wire = JSON.stringify(value);
+  // upOnShp 是「起身」布尔值（给玩家看，只准是 true / false）；其余带 shp 的字段仍然不许出现
+  const wire = JSON.stringify(value).replace(/"upOnShp":(true|false)/g, "");
   assert.doesNotMatch(wire, /SECRET|732911|827319|617392|321987|shp|坚毅|backstage|privateHistory|reconnectToken/i);
 }
 
@@ -105,6 +106,17 @@ test("private messages require explicit allowed routing and do not carry nested 
   assert.deepEqual(out, [{ from: "host", to: "p1", text: "你看见一道门", private: true }]);
 });
 
+test("小队聊天：正文保留换行和全角空格（字符画才能对齐），敏感词和其他控制字符照样过滤", () => {
+  const art = "　　龍龍\n龍奶奶龍\n　爪　爪";
+  const out = V.projectView({ chat: [
+    { id: "chat-1", operatorId: "p1", name: "甲", text: art, at: 1 },
+    { id: "chat-2", operatorId: "p1", name: "甲", text: "第一行\r\n第二行\u200b\u202e\u0007", at: 2 },
+    { id: "chat-3", operatorId: "p1", name: "甲", text: "　\nＳ\nＨ\nＰ 732911", at: 3 },
+    { id: "chat-4", operatorId: "p1", name: "甲", text: "坚\n毅\n生命", at: 4 },
+    { id: "chat-5", operatorId: "p1", name: "甲", text: "坚\n毅", at: 5 }] }, player);
+  assert.deepEqual(out.chat.map(m => m.text), [art, "第一行\n第二行", "坚\n毅"]);
+});
+
 test("recipient filtering precedes the live 300-message window and cannot be displaced by other private traffic", () => {
   const messages = [{ id: "mine", from: "host", to: "p1", text: "保留给我的线索", at: 1 },
     ...Array.from({ length: 299 }, (_, i) => ({ id: "other" + i, from: "host", to: "p2", text: "OTHER_PRIVATE_" + i, at: i + 2 }))];
@@ -116,7 +128,7 @@ test("recipient filtering precedes the live 300-message window and cannot be dis
 
 test("result, ack, resync, lobby, waiting and messages envelopes all apply the same outbound boundary", () => {
   for (const type of ["result", "ack", "resync", "lobby", "waiting", "gmMsg", "gmReply", "joined"]) {
-    const source = fixture(); source.type = type; source.error = "SECRET-ERROR 732911"; source.ok = false;
+    const source = fixture(); source.type = type; source.error = "SHP 732911 SECRET-ERROR"; source.ok = false;
     const out = V.projectPacket(source, player); noSecrets(out); assert.equal(out.type, type);
     assert.match(out.error, /操作未生效/);
   }
@@ -154,10 +166,26 @@ test("unknown logs and errors never use free-form notes as public summaries", ()
   noSecrets(logs); assert.equal(logs.length, 5);
   assert.equal(logs[1].text, "主持人调整了战场"); assert.equal(logs[2].text, "主持人更新了天气");
   assert.equal(logs[3].text, "主持人在 2 区加入 狂徒 Lv3");
-  assert.match(V.safeError("不是你的角色"), /其他玩家/); assert.match(V.safeError("还没轮到这个单位"), /还没轮到/);
-  assert.equal(V.safeError("不合法的分步选择 SECRET-DETAIL"), "目标或分步选择已失效");
-  assert.match(V.safeError("未知内部内容 918237"), /操作未生效/);
+  assert.match(V.safeError("坚毅生命 918237"), /操作未生效/); assert.match(V.safeError("后台备注 SECRET"), /操作未生效/);
   assert.equal(V.safeText("ＳＨＰ 732911"), null); assert.equal(V.safeText("S\u200bH\u200bP 732911"), null);
+});
+
+test("按钮灰掉的原因照原样给玩家看，只挡提到坚毅生命的句子；不会被分到错误类别（issue #135）", () => {
+  for (const reason of ["纳米能源不足 20", "只能在居合架势下使用", "陷在流沙里没顶，不能行动", "咖啡液不足 2", "没有咖啡液", "已经在待命",
+    "热锅只能用丹生谷发动", "这个单位没有这项可用技能", "本回合无法移动", "目标已失衡，不能再选", "濒死中，请先起身", "不是你的角色", "还没轮到这个单位"])
+    assert.equal(V.safeError(reason), reason);
+  for (const reason of ["坚毅生命不足 7", "SHP 7", "S​H​P 7"]) assert.match(V.safeError(reason), /操作未生效/);
+  const menu = V.projectActionMenu({ choices: { kind: "skill", options: [{ value: "a", label: "斩", disabled: true, reason: "只能在居合架势下使用" }, { value: "b", label: "刺", disabled: true, reason: "还剩 坚毅生命 9" }] } });
+  assert.equal(menu.choices.options[0].reason, "只能在居合架势下使用"); assert.match(menu.choices.options[1].reason, /操作未生效/);
+});
+
+test("起身状态：玩家收到 upOnShp 布尔值，但没有任何坚毅数值（issue #135）", () => {
+  const up = { ...unit("u9"), upOnShp: true, dying: false };
+  const p = V.projectUnit(up);
+  assert.strictEqual(p.upOnShp, true); assert.strictEqual(V.projectUnit(unit()).upOnShp, false);
+  const wire = JSON.stringify(p).replace(/"upOnShp":(true|false)/, "");
+  assert.doesNotMatch(wire, /shp|732911|827319|617392|321987|坚毅/i);
+  assert.deepEqual(Object.keys(p).filter(k => /shp/i.test(k)), ["upOnShp"]);
 });
 
 test("ask projection repeats ownership checks and rejects hidden extras and stale cached recipient views", () => {

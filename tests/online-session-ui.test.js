@@ -478,11 +478,28 @@ test("联机：玩家能看角色资料 / 武器 / 背包；小队聊天全程�
   // 主持人：探索记录栏有「探索 / 小队」频道，也能直接回
   await host.locator('.tr-log [data-host-tab="chat"]').click();
   assert.match(await host.locator(".tr-log .ol-host-chat").innerText(), /我们先去黑市/);
-  await host.fill(".tr-log .ol-host-chat input", "好的路上小心");
+  await host.fill(".tr-log .ol-host-chat textarea", "好的路上小心");
   await host.click(".tr-log .ol-host-chat button[type=submit]");
   try { await host.waitForFunction(() => HotseatGame.getView().chat.some(m => m.text === "好的路上小心"), null, { timeout: 5000 }); }
-  catch (e) { throw new Error("主持人消息没发出去：" + JSON.stringify(await host.evaluate(() => ({ notice: OnlineGame.getView().notice, input: document.querySelector(".tr-log .ol-host-chat input").value, chat: HotseatGame.getView().chat })))); }
+  catch (e) { throw new Error("主持人消息没发出去：" + JSON.stringify(await host.evaluate(() => ({ notice: OnlineGame.getView().notice, input: document.querySelector(".tr-log .ol-host-chat textarea").value, chat: HotseatGame.getView().chat })))); }
   await alice.waitForFunction(() => /好的路上小心/.test(document.querySelector("#online-side .ol-side-chat").textContent));
+  // 多行：Shift+Enter 只换行不发送，Enter 发送
+  await alice.click("#ol-side-text");
+  await alice.keyboard.type("第一行"); await alice.keyboard.press("Shift+Enter"); await alice.keyboard.type("第二行");
+  assert.equal(await alice.inputValue("#ol-side-text"), "第一行\n第二行", "Shift+Enter 只换行");
+  await alice.keyboard.press("Enter");
+  await host.waitForFunction(() => HotseatGame.getView().chat.some(m => m.text === "第一行\n第二行"));
+  // 字符画：换行和全角空格原样到对方，不折行，字号缩到聊天栏放得下（主持人探索记录栏最窄）
+  const art = ["　　龍龍龍", "龍".repeat(18), "　爪　　爪"].join("\n");
+  await alice.fill("#ol-side-text", art); await alice.press("#ol-side-text", "Enter");
+  const artShape = (page, sel) => page.waitForFunction(([sel, t]) => {
+    const p = [...document.querySelectorAll(sel)].find(x => x.textContent === t);
+    return p && { art: p.classList.contains("ol-art"), lines: Math.round(p.clientHeight / parseFloat(getComputedStyle(p).lineHeight)), fits: p.scrollWidth <= p.clientWidth };
+  }, [sel, art], { timeout: 5000 }).then(h => h.jsonValue());
+  await bob.click('#online-side [data-side="chat"]');   // Bob 是手机宽度，聊天栏默认收起：点「小队」展开再量
+  assert.deepEqual(await artShape(bob, "#online-side .ol-side-chat p"), { art: true, lines: 3, fits: true });
+  assert.deepEqual(await artShape(host, ".tr-log .ol-host-chat p"), { art: true, lines: 3, fits: true });
+  assert.equal(await alice.inputValue("#ol-side-text"), "", "发出去后清空输入框");
   // 输入法拼字中：别人发消息时，输入框不被换掉，拼到一半的内容还在
   await bob.click("#ol-side-text");
   await bob.evaluate(() => { window.__inp = document.getElementById("ol-side-text"); window.__inp.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true })); window.__inp.value = "wo m"; });

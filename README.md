@@ -368,6 +368,40 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **第三轮 · 联机低级五条：公开记录补全、任务面板不盖背包、任务提示合并、`offlineTick` 判空、转发限速先拒绝再断线**（issue #145；online-game.js · `actionLabel` / `onActionSettled` / `offlineTick`，online-view.js · `projectLogs`，online-ui.js · `observeQuests`，relay/worker.js · `RATE` / `RATE_KICK_OVER`；测试 tests/online-host.test.js、tests/relay.test.js、tests/online-ui.test.js）
+  - **公开记录**：以前移动、起身、用道具只写「甲 · 移动 / 起身 / 使用道具」，回合开始只写「回合开始」，胜利 / 败北 / 撤退主机不产生记录；现在移动写「移动 → N 区」，用道具写「使用道具 名称 → 对象」（有落点再加「· 到 N 区」），起身写「起身 · 重新站起」，敌人回合收尾 / 开战写「第 N 回合开始」（回合开始的持续伤害、倒下摘要跟在这一行后面），战斗结束时按结果写「战斗胜利 / 战斗结束 / 队伍撤退」。全部只用玩家画面本来就看得到的信息，不带任何坚毅生命数值。
+  - **任务面板**：以前任务日志和背包 / 资料共用一个容器，任务更新会把正在看的背包换回任务日志；现在只在容器里还是任务日志时才刷新。
+  - **任务提示**：以前一个包里有多条任务变动只弹最后一条；现在合成一句（用「；」连接）。
+  - **`offlineTick`**：以前掉线玩家的选择询问选项为空时 `ask.options[0].helper` 抛 TypeError，每 250 毫秒一次且到不了后面的回合超时处理；现在选项为空就跳过这一项，继续后面的处理。
+  - **转发限速**：以前玩家 10 秒内超过 120 帧或 256 KB 直接断线；现在先拒绝这一条并回「发送太快，请稍后重试」（`rate_limit`），同一个 10 秒窗口内被拒超过 60 条（`RATE_KICK_OVER`）才断开。数值放在文件顶部的 `RATE` 常量。
+  - 说明：本环境没装 Playwright，`tests/online-ui.test.js` 里新加的两条浏览器测试被跳过，没有实际跑过。
+
+- **第三轮 · 单机 M-6 ~ M-10：AI 后撤 / 接近看危墙门、沙鱼追猎看得到的猎物、委托人只躲真敌人、工坊打下手也算忙、硬撑长休不治 VIP**（issue #144；ai.js · `stepToward` / `aiStep`、desert.js · `sandFishPlan`、escort.js · `escortAct`、trpg.js · `trpgCraft` / `trpgLongRest`；测试 tests/bugfix-m6-m10.test.js）
+  - **AI 移动（M-6）**：以前远程敌人后撤、近战敌人接近都不看危墙 / 关着的门，被 `doMove` 拦下不扣点，整回合不出手；现在后撤只选 `walkableNeighbors`，接近的 `stepToward` 跳过被墙 / 关门挡住的区，没有走得通的就改原地能做的行动。
+  - **沙鱼追猎（M-7）**：以前夜间 / 饥饿追猎的路径不看间隔，猎物在墙 / 关门 / 空隙 / 深渊那边时每回合都返回走不通的移动；现在路径按能不能通过算，算不出路径的猎物直接换掉，都不行就交给常规行动。
+  - **委托人（M-8）**：以前 `foes` 把中立生物、友军、下潜单位也当敌人（同区只有尘虫也躲、还击总挑尘虫）；现在用 `hostileTo` 判断并排除下潜中的单位。
+  - **工坊打下手（M-9）**：以前同时开工只登记做东西的人，打下手的人还能同时做自己的、也能给两件打下手；现在做东西的和打下手的都登记为忙（`docs/workshop-design.md` 第 5 节），冲突的那件不做并提示「已经在忙了」，自己给自己打下手也不行。
+  - **硬撑长休（M-10）**：以前补给不够只能硬撑（`ok:false`、队员没恢复）时护送 VIP 仍清伤、日志写「血量回满」；现在只有长休真的成功才治 VIP。
+- **第三轮 · 单机 M-2 ~ M-5：乘势不再误伤中立 / 友军、养成每日任务四项能完成、每日挑战记录完整队伍、召唤物记 `summonedBy`**（issue #141；feats.js · `featAfterHit`、rogue.js · `growthDailyBump` / `updateGrowthDailyProgress` / `doLongRest` / `attemptCheck` / `buy` / `newRun` / `dailyRecord`、app.js · `setWeather` / `beginRound`、run.js · `buildEncounter`、enemies.js · `en_bigsand_summon`；tests/third-round-solo-m.test.js）
+  - **乘势（M-2）**：以前给同区所有架势 1 的「非玩家」单位各 1 点击破，尘虫等中立生物和友军也挨；现在只打 `hostileTo(攻击者, 它)` 为真的单位。
+  - **每日任务（M-3）**：以前「长休 / 完成检定 / 商店消费 / 更换天气」四项没有任何写入，抽到就永远完不成、「三个全完成」拿不到；现在长休成功一次 +1、检定成功一次 +1、商店每花 1 奎支 +1（目标 500）、我方单位主动改成别的天气一次 +1（`setWeather` 记到 `state.playerWeatherChanges`，每场开始清零，战后结算时读）。写入统一走 `growthDailyBump`。其余各项的每场固定增量、掷材料没走 `withRng` 这两点本条没改。
+  - **每日挑战记录（M-4）**：以前存 `run.party`，有人阵亡（移进 `run.fallen`）就少人，全灭是空数组；现在开局把队伍记在 `run.daily.party`，记录读它（没有这个字段的旧局退回 `party` + `fallen`）。
+  - **召唤物（M-5）**：飞碟触灵 10 级起每回合被动召唤的看守、大沙灵 `en_bigsand_summon` 召唤的沙灵，以前不记 `summonedBy`；现在记，和技能版 `ufo_summon` 一致——自爆会炸到飞碟自己的看守，战后材料掉落（`!u.summonedBy`）不再算它们。
+- **联机：按钮灰掉的原因照原样给玩家、单局投票只算有角色的人、玩家看得到「起身」**（issue #135；tests/online-view.test.js、tests/online-vote-135.test.js）
+  - **灰掉的原因**：以前 `online-view.js · safeError` 把原因文字换成一句笼统的「操作未生效…」（「纳米能源不足 20」「只能在居合架势下使用」都看不到），正则表还会把句子分错类别（「本回合无法移动」变成「当前不能移动到该区域」）。现在原句照给，只用现有的敏感词过滤（`text()`）挡掉提到坚毅生命 / SHP / 后台的句子，挡掉的才换成笼统的话。坚毅生命的具体数值仍然不会发给玩家。
+  - **没钱的按钮写原因**：商店 `shopBuy`、积分 `shopRedeem`、单局里 `rogueAct`（兑换 / 买 / 升级 / 治疗 / 装上）灰掉时，按钮旁写「还差 N 奎支」「还差 N 积分」「卖完了」「先选付款人」（`online-ui.js`、`online.css · .ol-why`）。
+  - **单局投票只算有角色的人**：以前所有在线的人都算一票，没分到角色的旁观者不投就卡住结算。现在只有「在线且名下有角色」的人算票（没分配的角色归房主），旁观者投票会被拒绝，结算也不等他们（`online-rogue.js · voterIds / vote / tryResolve / computeView`）。界面写「需要 X / Y 人投票」，旁观者自己看到「你没有分到角色，只能旁观」且投票按钮灰掉。
+    - 房主任何时候都能「按现在的票数决定」：房主自己没有角色时同样不算票，但强制结算只看有资格的人投的票，不会卡住；没人投票时按钮写「还没有人投票」并灰掉（`rogue-ui.js` 房主投票面板；测试 `tests/online-vote-135.test.js`）。
+  - **「起身」状态给玩家看**：`online-view.js · projectUnit` 发 `upOnShp` 布尔值，`online-battle.js · snapUnit` 不再写死 false，玩家卡片和单机一样显示「起身」标。只发布尔值，不发任何坚毅数值。
+- **跑团诊所装的义体跟着队伍记忆走；`tools/playtest.js` 的 ARENA 能跑了**（issue #134，backlog 第三轮 H-1 / M-1；tests/cyberware-campaign-memory.test.js、tests/playtest-arena.test.js）
+  - **义体不再丢**：以前 `packHero` 只存 `cyberPlan`，没存 `u.cyberware` 和 `u.cyberOverinstall`，`applyCampaignToField` 也不读，所以下一场开战或读档后义体没了、血量 / 坚毅上限变回没装的样子，钱却已经扣了。现在两项都随队伍记忆（以及存档槽）往返；读回来后先放回义体再走 `applyLevelStats`，按义体重算血量层和坚毅上限，和刚装好时一致。旧档没有这两项就当没装（`game.js · packHero / applyCampaignToField`）。
+  - **ARENA 模式**：以前先设 `run.stage = "task"` 再 `acceptTask`，而 `acceptTask` 要求在任务板前，一开跑就抛「现在不在任务板前，不能接任务」。现在接任务前把 stage 设成 `"board"`（`tools/playtest.js`）。测试用子进程跑 `ARENA=1:5:1`，断言退出码 0 并有三种战斗的战报。
+- **小队聊天能发多行和字符画**（`online-ui.js · chatEnter / artAttr`、`online-view.js · chatText`、`hotseat.js · chatMessage`、`online.css`）：
+  - 输入框改成多行：Enter 发送，Shift+Enter 换行，输入法选字时的 Enter 不算；粘贴的多行文字保留换行，输入框跟着内容长高。
+  - 多行消息保留第一行行首的空格，只去掉开头的空行和末尾空白；单行消息照旧去掉两头空白。
+  - 发给玩家的聊天正文保留换行和全角字符（`chatText` 的 `keepLines`，只有小队聊天打开，私信照旧）。以前换行会被删掉、全角空格被换成半角，字符画会散架。其余控制字符、零宽和双向控制字符照样去掉，敏感词照样按规范化后的文字过滤。
+  - 多行且带行首空格或全角空格的消息算字符画：不自动折行，字号按最长一行缩到聊天栏放得下（最大 14px）。主持人的探索记录栏最窄，18 个字宽的字符画也能完整显示。
+
 - **「中」杂项六条 + 两个尾巴**（issue #125；tests/misc-six-125.test.js）
   - **战斗中修武器两条路统一**：「使用道具」（`items.js · useRepairKit`）和「修理」命令（`ledger.js · ledgerRepair`）以前各算各的：道具那条修好耐久后不标「本场受损」（atk / 格挡加成照旧满值、还能唤出武器人），命令那条标了；命令那条也不会把倒地的武器人修起来。现在耐久都走 `ledgerRepair`（缺几点修几点、同样扣维修量、战斗中修好的武器这一场按受损算），倒地的武器人两条路都走 `useRepairKit`（恢复最大生命 25%）。
   - **跑团工坊可以同时做**：`trpgCraft` 新增 `{ jobs: [...] }`，每人做一样、一起开工，时间只推进一次、按最久的那件算（`trpg.js · trpgCraft / trpgCraftOne`、`trpg-commands.js`）。以前每做一样推进一次，两件会多算时间。同一个人同时只能做一样。单局的 `Rogue.craft` 本来就是这样。

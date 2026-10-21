@@ -1,7 +1,7 @@
 /* 联机单局（Roguelike）：规则只在房主一端跑（rogue.js / rogue-ui.js），这里管联机才有的几件事。
  *
  *   · 队伍一起决定：任务板接哪个任务、路线走哪一站、迎战 / 休息 / 离开 / 检定谁去……
- *     每个在线的人投一票（房主也是一票）。人齐了按多数决定，平票在最多票的里面随机；房主可以「按现在的票数决定」。
+ *     每个在线、名下有角色的人投一票（房主也是一票；没分到角色的旁观者不算票，也不用等）。人齐了按多数决定，平票在最多票的里面随机；房主可以「按现在的票数决定」。
  *     有人还没选完升级时先不结算（升级会影响接下来的战斗）。
  *   · 钱各算各的：每名角色一个钱包。任务报酬、敌人掉的奎支、检定奖励……进账一律平分给还活着的角色
  *     （分不尽的零头从队伍靠前的角色起每人多 1）。买东西、升级武器、治疗……都从做这件事的角色的钱包里扣。
@@ -50,6 +50,8 @@
   const roster = () => { const g = game(); return g && g.players ? g.players() : []; };
   function rosterIds() { return roster().map(p => p.id); }
   function onlineIds() { return roster().filter(p => p.online).map(p => p.id); }
+  /** 有资格投票的人：在线、并且名下至少有一个活着的角色（旁观者不算票，也不用等；没分配的角色归房主） */
+  function voterIds(r) { return onlineIds().filter(id => kitsOf(r, id).length > 0); }
   function playerName(id) { return roster().find(p => p.id === id)?.name || "房主"; }
   const kitsOf = (r, playerId) => living(r).filter(k => ownerOf(r, k) === playerId);
   // 补给（水、食物、维修工具包、睡袋……）队伍公用；其余（战斗道具、改装件）归个人
@@ -329,6 +331,7 @@
     const v = currentVote(r);
     const opt = v.opts.find(o => o.id === optionId);
     if (!opt) fail("这个选项已经失效");
+    if (!kitsOf(r, playerId).length) fail("你没有分到角色，不用投票");
     v.ballots[playerId] = optionId;
     // 只认房主的安排；换了票就不再带着上一次选项的安排
     const d = data(r);
@@ -345,8 +348,8 @@
     if (!active() || !r || resolving) return false;
     const { opts, ballots } = currentVote(r);
     if (!opts.length || blocker(r)) return false;
-    const voters = onlineIds();
-    const cast = Object.entries(ballots).filter(([, o]) => opts.some(x => x.id === o));
+    const voters = voterIds(r);
+    const cast = Object.entries(ballots).filter(([p, o]) => voters.includes(p) && opts.some(x => x.id === o));
     if (!cast.length) return false;
     if (!force && !voters.every(id => ballots[id])) return false;
     const tally = {};
@@ -544,8 +547,8 @@
       heroes, mine, freeItems, task, board,
       fallen: (r.fallen || []).map(f => name(f.kit)),
       result: r.stage === "over" && r.result ? { win: !!r.result.win, text: r.result.text || "" } : null,
-      vote: { options: opts.map(o => ({ id: o.id, label: o.label, voters: Object.entries(ballots).filter(([, x]) => x === o.id).map(([p]) => playerName(p)), mine: ballots[playerId] === o.id })),
-        blocked: blocker(r), voted: Object.keys(ballots).filter(id => onlineIds().includes(id)).length, voters: onlineIds().length },
+      vote: { options: opts.map(o => ({ id: o.id, label: o.label, voters: Object.entries(ballots).filter(([p, x]) => x === o.id && voterIds(r).includes(p)).map(([p]) => playerName(p)), mine: ballots[playerId] === o.id })),
+        blocked: blocker(r), voted: Object.keys(ballots).filter(id => voterIds(r).includes(id)).length, voters: voterIds(r).length, spectator: !kitsOf(r, playerId).length },
       lastVote: d.lastVote ? d.lastVote.text : "",
       loot: d.loot.map(l => ({ no: l.no, name: itemName(l.id), qty: l.qty, source: l.source,
         needs: living(r).filter(k => l.needs[k] === "need").map(name), passes: living(r).filter(k => l.needs[k] === "pass").map(name),

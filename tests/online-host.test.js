@@ -133,3 +133,31 @@ test("offline owner of a battlefield-pick choice (Kolt blade swap) falls back to
   f.time(2); f.tick(); await delay(0); assert.deepEqual(plain(answer), { swap: false }); assert.equal(f.c.HotseatGame.hasAsk(), false);
   assert.deepEqual(f.errors, []);
 });
+
+test("公开记录：移动写去向、道具写名字和对象、起身写清楚、回合开始带回合数、胜负撤退进记录，且不带坚毅数值", async () => {
+  const V = require("../online-view.js");
+  const f = await fixture(); start(f);
+  const settle = (cmd, tape = []) => f.c.OnlineGame.onActionSettled(cmd, { executed: true }, tape, {});
+  const itemId = Object.keys(f.c.ITEM_CATALOG).find(k => f.c.ITEM_CATALOG[k].combat && f.c.ITEM_CATALOG[k].name);
+  settle({ type: "move", actor: f.actor.id, dest: 3 });
+  settle({ type: "useItem", actor: f.actor.id, item: itemId, target: f.actor.id, dest: null });
+  settle({ type: "standUp", actor: f.actor.id });
+  settle({ type: "battle.endEnemyTurn" });
+  for (const outcome of ["win", "lose", "retreat"]) await f.c.GAME.actSystem({ type: "battle.finish", outcome }, {});
+  const projected = V.projectLogs(f.c.OnlineGame.getView().packet.publicLogs), texts = projected.map(r => r.text);
+  assert.ok(texts.some(t => t.includes("移动 → 3 区")), texts.join("|"));
+  assert.ok(texts.some(t => t.includes("使用道具 " + f.c.ITEM_CATALOG[itemId].name) && t.includes("→ " + f.actor.name)), texts.join("|"));
+  assert.ok(texts.some(t => t.includes("起身 · 重新站起")), texts.join("|"));
+  assert.ok(texts.some(t => t === `第 ${f.state.turnNo} 回合开始`), texts.join("|"));
+  for (const word of ["战斗胜利", "战斗结束", "队伍撤退"]) assert.ok(texts.includes(word), word + " 缺失：" + texts.join("|"));
+  assert.ok(!/shp|坚毅/i.test(JSON.stringify(projected)));
+});
+
+test("offlineTick：掉线玩家的选择询问选项为空时不抛错，也不挡住掉线玩家回合超时", async () => {
+  const f = await fixture(); start(f); f.offlinePlayer();
+  const real = f.c.HotseatGame.getViewFor;
+  f.c.HotseatGame.getViewFor = id => ({ ...real.call(f.c.HotseatGame, id), ask: { id: "empty", eligible: true, kind: "choice", options: [] } });
+  assert.doesNotThrow(() => f.tick());
+  f.c.HotseatGame.getViewFor = real;
+  assert.deepEqual(f.errors, []);
+});

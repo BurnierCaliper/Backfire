@@ -94,7 +94,7 @@
 
 ### 高（1）
 
-- [ ] **H-1 跑团诊所装的义体不进队伍记忆，下一场开战或读档就丢，钱照扣**
+- [x] **H-1 跑团诊所装的义体不进队伍记忆，下一场开战或读档就丢，钱照扣**（已修 issue #134：`packHero` 存 `cyberware` / `cyberOverinstall`，`applyCampaignToField` 读回并重算血量层 / 坚毅上限；tests/cyberware-campaign-memory.test.js）
   - 位置：`game.js` · `packHero`（约 3961）/ `applyCampaignToField`（约 4028）；写入端 `trpg.js` · `trpgCyberwareAct` / `trpgCyberwareInstall`。
   - 复现：跑团开诊所给某角色装义体 → `GAME.rememberCampaign()` 后重摆队伍，或存档读档 → `u.cyberware` 为空，血量 / 坚毅上限变回没装的样子。
   - 应该：义体（和 `cyberOverinstall`）跟着队伍记忆走，和 `cyberPlan` 一样；实际：丢失，钱不退。单局存在 `h.cyberware`（rogue.js:514、1577）所以没事。
@@ -102,16 +102,16 @@
 
 ### 中（10）
 
-- [ ] **M-1 `tools/playtest.js` 的 ARENA 模式一开跑就抛错（上一轮报的「不能用」）**：位置 `tools/playtest.js:405-406`（先 `run.stage = "task"` 再 `R.acceptTask(run, "main")`）、`rogue.js:438`（`acceptTask` 要求 `stage === "board"`）。复现 `ARENA=1:5:1 node tools/playtest.js`。应该能连打 battle / elite / boss 出胜率；实际第一场接任务就抛「现在不在任务板前，不能接任务」。修法：接任务前把 `run.stage` 设成 `"board"`。`BOSSTEST` / `ARENA` 没有任何测试。确认方式：读代码判断（核对了两处源码，没能运行）。
-- [ ] **M-2 乘势会误伤中立生物和友军**：给「同区其他架势 = 1 的敌人」各 1 点击破，没按 `hostileTo` 筛。位置 `feats.js:725` · `featAfterHit`，用的 `app.js:5085` · `visibleEnemies`（只看 `!u.isPlayer`）。复现：乘势角色把敌人 A 打进失衡，同区有架势 1 的 `dust_bug` 或友军 `guard_sword`。应该只对敌对生效。读代码判断。
-- [ ] **M-3 长线养成「每日任务」有 4 种永远完成不了**：`long_rest` / `check_ok` / `shop` / `weather` 注释写着在休息 / 检定 / 购买 / 改天气时结算，但全仓库没有这些写入；其余项是每场固定增量（击杀 20 杂兵每场 +4、「无死亡通关」打赢就 +1 不看倒地），和说明不符。抽到那四项则「三个全完成」奖励拿不到。位置 `rogue.js:2522` `GROWTH_GENERAL_POOL`、`2575` `updateGrowthDailyProgress`、`2620` `completeGrowthDailyTask`（还用裸 `Math.random()` 掷材料，没走 `withRng`，`2625`）。读代码判断。
-- [ ] **M-4 每日挑战记录的「队伍」在有人阵亡后不对，全灭时是空数组**：`dailyRecord` 存 `run.party.map(h => h.kit)`，阵亡者已被 `SaveStore.killHero` 移到 `run.fallen`。位置 `rogue.js:2780` · `dailyRecord`，调用点 `2722` · `endRun`（团灭走 `captureParty`、力竭走 `exhaustDeath`）。应取 `party` + `fallen` 或开局记下。读代码判断。
-- [ ] **M-5 飞碟触灵 10 级起被动召唤的看守不记 `summonedBy`**：自爆炸不到它们，材料掉落过滤（`rogue.js:1062` 用 `!u.summonedBy`）也不一致（技能版 `ufo_summon` 有记）。位置 `app.js:1779-1790` · `beginRound`；对照 `enemies.js:1953`、`2302-2309` · `detonateUfo`。README 1464 写「自爆也炸它召唤的看守」。可参照 `tests/audit-P5-enemies.test.js:432`。读代码判断。
-- [ ] **M-6 AI 的「后撤」和「接近」不看危墙 / 关着的门，被拦下后整回合不出手**：`doMove` 被 `canCross` 拦下不扣行动点、`sig` 不变，`enemyPhase` 直接 break。A：dist=1 的远程敌人被贴脸会选相邻无我方单位的区后撤，不查是否隔墙；B：目标挑选（`lowest` / `topAtk` / `nearest`）不看墙，近战敌人朝墙那边的人移动被拦。位置 `ai.js` · `aiStep`（约 286-293）/ `aiPlanBase`（`if (step != null) return move(step)`）。`tests/ai-positioning.test.js:37` 用三区所以没覆盖。应像 `firingStep` 用 `walkableNeighbors` 筛。复现：两区制 `gaps["1-2"]` 设 wall，`guard_gun` 在 1 区、我方 `[1,1]`，`EnemyAI.plan` 返回移到 2 区，执行后 zone / ap 都不变。读代码判断。
-- [ ] **M-7 沙鱼夜间 / 饥饿「追猎」隔着墙 / 关门 / 深渊的猎物，整回合被走不通的移动占掉**：`sandFishPlan` 的 `zonePath` 不看间隔，只查 `coralAvoid` 和付不付得起。猎物在墙那边时每回合都返回「移动」，沙鱼从不攻击眼前的玩家。位置 `desert.js` · `sandFishPlan`。应用 `walkableNeighbors` 同款判断。读代码判断。
-- [ ] **M-8 护送人物「委托人」把中立生物、友军、下潜单位算成「敌人」**：`escort.js` · `escortAct` 的 `foes` 只排除 `isPlayer/dead/hidden/_removed/ironwall/untargetable`。同区只有一只尘虫也会「躲开」；还击按血量最低挑，沙漠里几乎总选尘虫（desert.js 文件头写「谁都不会主动打它们」），也会选打不到的下潜 / 距离 2 / 友军。应用 `hostileTo` 口径并筛打得到的。读代码判断。
-- [ ] **M-9 跑团工坊同时开工时，打下手的人还能同时做自己的东西**：`trpg.js:123-135` · `trpgCraft` 的 `busy` 只登记 `j.kit` 不登记 `j.helper`；同一个人给两件打下手也不拦。对照 `docs/workshop-design.md` 第 5 节和单局 `rogue.js:1756-1763`（已拦「已经在忙了」）。读代码判断。
-- [ ] **M-10 跑团补给不够只能硬撑时，护送 VIP 仍被治满血**：`trpg.js:394-398` · `trpgLongRest` 无条件调 `trpgTaskRestEscort`（`trpg-tasks.js:367`），长休 `ok:false`（队员没恢复）时 VIP 仍清伤、日志写「血量回满」。单局只在长休成功时才走。应 `r.report.ok` 为假时不治。读代码判断。
+- [x] **M-1 `tools/playtest.js` 的 ARENA 模式一开跑就抛错（上一轮报的「不能用」）**（已修 issue #134：接任务前 `run.stage` 设成 `"board"`；tests/playtest-arena.test.js）：位置 `tools/playtest.js:405-406`（先 `run.stage = "task"` 再 `R.acceptTask(run, "main")`）、`rogue.js:438`（`acceptTask` 要求 `stage === "board"`）。复现 `ARENA=1:5:1 node tools/playtest.js`。应该能连打 battle / elite / boss 出胜率；实际第一场接任务就抛「现在不在任务板前，不能接任务」。修法：接任务前把 `run.stage` 设成 `"board"`。`BOSSTEST` / `ARENA` 没有任何测试。确认方式：读代码判断（核对了两处源码，没能运行）。
+- [x] **M-2 乘势会误伤中立生物和友军**（已修 issue #141：`featAfterHit` 只对 `hostileTo` 的单位生效；tests/third-round-solo-m.test.js）：给「同区其他架势 = 1 的敌人」各 1 点击破，没按 `hostileTo` 筛。位置 `feats.js:725` · `featAfterHit`，用的 `app.js:5085` · `visibleEnemies`（只看 `!u.isPlayer`）。复现：乘势角色把敌人 A 打进失衡，同区有架势 1 的 `dust_bug` 或友军 `guard_sword`。应该只对敌对生效。读代码判断。
+- [x] **M-3 长线养成「每日任务」有 4 种永远完成不了**（已修 issue #141：长休 / 检定成功 / 购买 / 我方改天气分别写入进度，`growthDailyBump` + `playerWeatherChanges`；其余每场固定增量和裸 `Math.random()` 没动；tests/third-round-solo-m.test.js）：`long_rest` / `check_ok` / `shop` / `weather` 注释写着在休息 / 检定 / 购买 / 改天气时结算，但全仓库没有这些写入；其余项是每场固定增量（击杀 20 杂兵每场 +4、「无死亡通关」打赢就 +1 不看倒地），和说明不符。抽到那四项则「三个全完成」奖励拿不到。位置 `rogue.js:2522` `GROWTH_GENERAL_POOL`、`2575` `updateGrowthDailyProgress`、`2620` `completeGrowthDailyTask`（还用裸 `Math.random()` 掷材料，没走 `withRng`，`2625`）。读代码判断。
+- [x] **M-4 每日挑战记录的「队伍」在有人阵亡后不对，全灭时是空数组**（已修 issue #141：开局记 `run.daily.party`，`dailyRecord` 读它；tests/third-round-solo-m.test.js）：`dailyRecord` 存 `run.party.map(h => h.kit)`，阵亡者已被 `SaveStore.killHero` 移到 `run.fallen`。位置 `rogue.js:2780` · `dailyRecord`，调用点 `2722` · `endRun`（团灭走 `captureParty`、力竭走 `exhaustDeath`）。应取 `party` + `fallen` 或开局记下。读代码判断。
+- [x] **M-5 飞碟触灵 10 级起被动召唤的看守不记 `summonedBy`**（已修 issue #141：补 `summonedBy`，顺带补 `en_bigsand_summon` 的沙灵；tests/third-round-solo-m.test.js）：自爆炸不到它们，材料掉落过滤（`rogue.js:1062` 用 `!u.summonedBy`）也不一致（技能版 `ufo_summon` 有记）。位置 `app.js:1779-1790` · `beginRound`；对照 `enemies.js:1953`、`2302-2309` · `detonateUfo`。README 1464 写「自爆也炸它召唤的看守」。可参照 `tests/audit-P5-enemies.test.js:432`。读代码判断。
+- [x] **M-6 AI 的「后撤」和「接近」不看危墙 / 关着的门，被拦下后整回合不出手**（已修 issue #144：后撤只选 `walkableNeighbors`，`stepToward` 跳过墙 / 关门，走不通改原地行动；测试 tests/bugfix-m6-m10.test.js）：`doMove` 被 `canCross` 拦下不扣行动点、`sig` 不变，`enemyPhase` 直接 break。A：dist=1 的远程敌人被贴脸会选相邻无我方单位的区后撤，不查是否隔墙；B：目标挑选（`lowest` / `topAtk` / `nearest`）不看墙，近战敌人朝墙那边的人移动被拦。位置 `ai.js` · `aiStep`（约 286-293）/ `aiPlanBase`（`if (step != null) return move(step)`）。`tests/ai-positioning.test.js:37` 用三区所以没覆盖。应像 `firingStep` 用 `walkableNeighbors` 筛。复现：两区制 `gaps["1-2"]` 设 wall，`guard_gun` 在 1 区、我方 `[1,1]`，`EnemyAI.plan` 返回移到 2 区，执行后 zone / ap 都不变。读代码判断。
+- [x] **M-7 沙鱼夜间 / 饥饿「追猎」隔着墙 / 关门 / 深渊的猎物，整回合被走不通的移动占掉**（已修 issue #144：`sandFishPlan` 路径按能否通过算，走不通的猎物换掉；测试 tests/bugfix-m6-m10.test.js）：`sandFishPlan` 的 `zonePath` 不看间隔，只查 `coralAvoid` 和付不付得起。猎物在墙那边时每回合都返回「移动」，沙鱼从不攻击眼前的玩家。位置 `desert.js` · `sandFishPlan`。应用 `walkableNeighbors` 同款判断。读代码判断。
+- [x] **M-8 护送人物「委托人」把中立生物、友军、下潜单位算成「敌人」**（已修 issue #144：`foes` 用 `hostileTo` 并排除下潜单位；测试 tests/bugfix-m6-m10.test.js）：`escort.js` · `escortAct` 的 `foes` 只排除 `isPlayer/dead/hidden/_removed/ironwall/untargetable`。同区只有一只尘虫也会「躲开」；还击按血量最低挑，沙漠里几乎总选尘虫（desert.js 文件头写「谁都不会主动打它们」），也会选打不到的下潜 / 距离 2 / 友军。应用 `hostileTo` 口径并筛打得到的。读代码判断。
+- [x] **M-9 跑团工坊同时开工时，打下手的人还能同时做自己的东西**（已修 issue #144：`trpgCraft` 把打下手的人也登记为忙；测试 tests/bugfix-m6-m10.test.js）：`trpg.js:123-135` · `trpgCraft` 的 `busy` 只登记 `j.kit` 不登记 `j.helper`；同一个人给两件打下手也不拦。对照 `docs/workshop-design.md` 第 5 节和单局 `rogue.js:1756-1763`（已拦「已经在忙了」）。读代码判断。
+- [x] **M-10 跑团补给不够只能硬撑时，护送 VIP 仍被治满血**（已修 issue #144：`trpgLongRest` 只在长休成功时才治 VIP；测试 tests/bugfix-m6-m10.test.js）：`trpg.js:394-398` · `trpgLongRest` 无条件调 `trpgTaskRestEscort`（`trpg-tasks.js:367`），长休 `ok:false`（队员没恢复）时 VIP 仍清伤、日志写「血量回满」。单局只在长休成功时才走。应 `r.report.ok` 为假时不治。读代码判断。
 
 ### 低（21）
 
@@ -161,12 +161,12 @@
 
 ### 中（2）
 
-- [ ] **联机玩家按钮灰掉的原因几乎都被换成一句笼统的话**
+- [x] **联机玩家按钮灰掉的原因几乎都被换成一句笼统的话**（已修 #135：`safeError` 原句照给，只用 `text()` 敏感词过滤挡提到坚毅生命 / SHP / 后台的句子；见 tests/online-view.test.js）
   - 位置：`online-view.js:477` `safeError`（被 `projectActionMenu` 的 `option.reason`（:467）、`projectPacket` 的 `out.error`（:610）调用）；原因文字来自 `hotseat-validation.js:66` `baseReason`、`app.js` `SKILL_REQUIREMENT`（:10768）、`costBlockReason`（:5280）。
   - 复现：对 `OnlineView.safeError` 传这些真实规则文字，看返回值。「陷在流沙里没顶，不能行动」「纳米能源不足 20」「咖啡液不足 2」「没有咖啡液」「只能在居合架势下使用」「已经在待命」「热锅只能用丹生谷发动」「这个单位没有这项可用技能」，全部返回「操作未生效，请检查当前权限与可用选项」。
   - 应该 / 实际：单机里这些技能按钮灰掉时直接写原因（缺咖啡液、要换架势……）；联机玩家只看到同一句笼统的话，不知道为什么用不了。白名单本意是防止泄露坚毅数值，但原因文字本身没有数值——建议改成「按已知句式放行」或让 `reason` 走 `text()` 的敏感词过滤而不是整句换掉。
   - 确认方式：测试复现。
-- [ ] **转发服务的房间最长 24 小时，到点房间和恢复令牌一起作废，「离开并保存」的跑团第二天回不去**
+- [x] **转发服务的房间最长 24 小时，到点房间和恢复令牌一起作废，「离开并保存」的跑团第二天回不去**（**已定：不改**，主人答复，见「需要作者确认」）
   - 位置：`relay/worker.js:138`（`ttl = Math.min(86400, …)`）、`:263` `alarm`（过期后 `deleteAll`）；主持人恢复走 `online-game.js:245` `doResume` → `RelayTransport.resumeHost`。
   - 复现：开房后超过 24 小时（或把 `ROOM_TTL_SECONDS` 设成 60 试），主持人点「恢复上次房间」，得到「房间不存在或已过期」；玩家手里的恢复令牌也一并作废。
   - 应该 / 实际：主持人界面写的是「离开并保存」，存档在本机，但房间码和座位不保存；超过一天就得重新开房、所有人重新加入、重新分配角色。`ROOM_TTL_SECONDS` 还被硬限在 86400，部署时改不了。另外过期是从创建时起算，不是从最后活动起算，连续玩了 24 小时的房间也会被踢。
@@ -174,42 +174,42 @@
 
 ### 低（9）
 
-- [ ] **错误原因映射会把不相干的句子分到错误类别**
+- [x] **错误原因映射会把不相干的句子分到错误类别**（已修 #135：映射表整个去掉，原句照给）
   - 位置：`online-view.js:480-496` `safeError` 的正则表。
   - 复现：`safeError("本回合无法移动")` → 「当前不能移动到该区域」（实际是「本回合不能移动」，不是区域问题）；`safeError("目标已失衡，不能再选")` → 「失衡中，无法行动」（说的是目标，不是行动者）；`safeError("濒死中，请先起身")` → 「当前状态不允许该行动」（丢了「先起身」）；`/失衡/`、`/移动/`、`/相邻|移动/` 太宽。
   - 应该 / 实际：该按原句放行或映射到对的类别。
   - 确认方式：测试复现。
-- [ ] **战场公开记录对玩家不够完整**
+- [x] **战场公开记录对玩家不够完整**（已修 #145：移动写去向、用道具写名称和对象、起身写清楚，回合开始带回合数，胜负撤退进记录，不带坚毅数值；回合开始的持续伤害 / 倒下摘要跟在「第 N 回合开始」那一行）
   - 位置：`online-game.js:498` `actionLabel`、`:539-543` `onActionSettled`、`online-view.js:345` `projectLogs`。
   - 现象：移动、起身、用道具在记录里只写「甲 · 移动」「甲 · 使用道具」，没有去哪一区、用了什么道具、对谁；`projectLogs` 认的 `round` / `victory` / `defeat` / `retreat` / `spawn` / `remove` 这些类型主机一条都不产生（只有 `action` / `phase` / `gm`）；`round` 就算产生也只会写「回合开始」，不带回合数（测试里 `{kind:"round",turn:2}` 输出 `"回合开始"`）；回合开始的灼烧、感电等持续伤害、击倒没有单独的行，只能从「被打倒」弹字里看。
   - 应该 / 实际：和单机战斗记录对照，玩家想知道刚才发生了什么。
   - 确认方式：部分测试复现（`round` 文字），其余读代码。
-- [ ] **按钮灰掉却没写原因（联机单局 / 跑团商店、工匠、诊所、积分）**
+- [x] **按钮灰掉却没写原因（联机单局 / 跑团商店、工匠、诊所、积分）**（已修 #135：按钮旁写「还差 N 奎支 / N 积分」「卖完了」「先选付款人」；转账按钮本来就不按钱灰掉，没改）
   - 位置：`online-ui.js:312`（`shopBuy`：没付款人、钱不够、卖完都只是 `disabled`，只有「卖完了」会改字）、`:314`（`shopRedeem` 积分不够）、`:503-510`（`rogueAct` 的「兑换」「买」「升到 N 级」「治疗」「装上」在 `purse < price` 时灰掉）、`:331`（转账）。
   - 复现：钱不够时点进商店，按钮灰着，旁边没写「还差 N 奎支」。
   - 应该 / 实际：单机商店钱不够会有提示；联机只灰掉。
   - 确认方式：读代码。
-- [ ] **任务日志面板和背包 / 资料面板共用一个容器，任务更新会把正在看的背包盖掉**
+- [x] **任务日志面板和背包 / 资料面板共用一个容器，任务更新会把正在看的背包盖掉**（已修 #145：只在容器里还是任务日志时才刷新）
   - 位置：`online-ui.js:626-640` `observeQuests`（`questBoxOpen && !bagBox.hidden` 时重写 `bagBox.innerHTML`）、`openQuests`（:615）。
   - 复现：打开任务日志（`questBoxOpen = true`），不关，直接点「背包」或「角色资料」（`bagBox` 内容换成背包），主持人这时推进一个任务 → 背包内容被换回任务日志。
   - 应该 / 实际：只在任务日志真的显示着的时候刷新。
   - 确认方式：读代码。
-- [ ] **任务提示一次只提示最后一条**
+- [x] **任务提示一次只提示最后一条**（已修 #145：多条变动合成一句）
   - 位置：`online-ui.js:629-640` `observeQuests`（`msg` 在循环里被反复覆盖）。
   - 复现：一个包里同时有「任务完成」和「新任务」，只弹排在后面的那条。
   - 应该 / 实际：至少合并成一句或排队。
   - 确认方式：读代码。
-- [ ] **联机玩家单位卡不显示「起身（起身中）」状态，主机卡有**
+- [x] **联机玩家单位卡不显示「起身（起身中）」状态，主机卡有**（已修 #135：`projectUnit` 发 `upOnShp` 布尔值，`online-battle.js` 不再写死 false，不发任何坚毅数值）
   - 位置：`online-battle.js:27`（`upOnShp: false` 写死）、`online-view.js` `projectUnit` 不发 `upOnShp`；单机 `unit-card.js:124`、`game.js:2587`、`game.js:4241` 显示「起身 / 起身中」。
   - 复现：我方角色用坚毅起身后，主机卡片有「起身」标，玩家的卡片没有；但夏的角色仪表里的 `back`（= `upOnShp`，`hud-icons.js:269`）会被 `projectHud` 当布尔值发出去——同一个状态夏发、别的角色不发，不一致（这条是读代码推的，没跑）。
   - 应该 / 实际：统一。这是布尔状态不是数值，但涉及坚毅，**先问作者**要不要给玩家看，见「需要作者确认」。
   - 确认方式：读代码。
-- [ ] **`offlineTick` 的 `ask.options[0]` 没判空**
+- [x] **`offlineTick` 的 `ask.options[0]` 没判空**（已修 #145：选项为空就跳过，不再抛错，也不挡回合超时）
   - 位置：`online-game.js:557-560`。
   - 现象：`ask.eligible && ask.kind === "choice"` 但 `ask.options` 为空时（`ownedChoice` 传了空选项，或者选项被 `projectView` 过滤）`option.helper` 抛 TypeError，`setInterval(offlineTick, 250)` 每 250 毫秒报一次，且这个循环到不了后面的「掉线玩家回合超时」逻辑。
   - 复现：没找到真实会产生空选项的技能，没测，属于防御性问题。
   - 确认方式：读代码判断，没复现。
-- [ ] **转发服务对玩家限速太紧时会直接断线**
+- [x] **转发服务对玩家限速太紧时会直接断线**（已修 #145：先拒绝并回「发送太快」，同一窗口被拒超过 60 条才断开，数值在 `relay/worker.js` 的 `RATE` 常量）
   - 位置：`relay/worker.js:170`（玩家 10 秒内超过 120 帧或 256 KB 就 `close=true` 断开）。
   - 现象：玩家端每一步技能分步都是一次 `actionOptions` 请求，加上聊天、`sheetData`、`messageHistory`，正常使用离 120 帧还远，但页面异常（重复渲染自动请求）时会被服务器直接关连接而不是只拒绝这一条。不确定会不会触发。
   - 确认方式：读代码判断，没复现。
@@ -220,11 +220,12 @@
 
 ### 需要作者确认
 
-- **道具说明里的坚毅数值**：`ledger.js:20-27` 食物 / 睡袋的说明写着「额外恢复 1 / 2 / 5 坚毅」「睡袋每小时坚毅恢复 +1」，`online-game.js:348` `bagDetail` → `projectBagDetail`（`online-view.js:761`，注释写明「道具说明是固定的目录文字，可以提到坚毅生命」）原样发给玩家。这是目录里的恢复量，不是玩家当前的坚毅数值，单机里也显示；但手册说坚毅数值绝不给玩家看，这几条算不算？
-- **起身状态（`upOnShp`）要不要给联机玩家看**（见低 · 起身状态那条）：单机卡片会写「起身 / 起身中」，联机不发；夏的角色仪表倒是发了 `back`。
-- **房间 24 小时上限**是不是有意（防占房间）？要的话建议改成「最后活动起 N 小时」并允许部署时调大。
-- **房主只能在原浏览器恢复**：房主存档只在本机 `localStorage`（`online-game.js:KEY`），换设备 / 清缓存 / 浏览器崩了，房间和存档对应不上，没有「移交房主」。是不是有意？
-- **联机单局投票要所有在线的人都投**（`online-rogue.js:336`）：没有操控角色的旁观玩家也算一票，不投的人会卡住结算，只能房主点「按现在的票数决定」。有意的话界面上提示得更明显。
+主人的答复（#135）：
+- **道具说明里的坚毅数值**（`ledger.js:20-27` 食物 / 睡袋说明里的恢复量，经 `projectBagDetail` 发给玩家）：**保留**。
+- **起身状态（`upOnShp`）要不要给联机玩家看**：**给玩家看**，已改（#135，见上面「低 · 起身状态」那条）。只发布尔值。
+- **房间 24 小时上限**：**已定：不改**。
+- **房主只能在原浏览器恢复**：**不做移交**。
+- **联机单局投票要所有在线的人都投**：**改**——只算有角色的人，旁观者不算票也不用等；界面写「需要 X / Y 人投票」。已改（#135，`online-rogue.js · voterIds`）。
 
 ## 需要作者确认（四十多条）
 

@@ -151,7 +151,9 @@ const EnemyAI = (function () {
     const from = Number(u.zone), goal = Number(to);
     const here = zdist(from, goal);
     const abyss = (z) => !u.flying && state.fields && state.fields[z] && state.fields[z].abyss;
-    const opts = adjacentZones(from).map(Number).filter(z => !abyss(z) && zdist(z, goal) < here);
+    // 隔着危墙 / 关着的门的区走不过去（doMove 会被拦下、不扣点），不当作前进方向
+    const blocked = (z) => { const g = typeof getGap === "function" ? getGap(from, z) : { type: "open" }; return g.type === "wall" || (g.type === "door" && !g.open); };
+    const opts = adjacentZones(from).map(Number).filter(z => !abyss(z) && !blocked(z) && zdist(z, goal) < here);
     if (!opts.length) return null;
     return opts.sort((a, b) => zdist(a, goal) - zdist(b, goal) || a - b)[0];
   }
@@ -287,7 +289,8 @@ const EnemyAI = (function () {
       return stepToward(u, target.zone);
     }
     // 太近 → 后撤。手册规定优先退到没有敌人的区，退不掉才留下打。
-    const open = adjacentZones(u.zone).filter(z => !preyInZone(prey, z).length && (u.flying || !(state.fields && state.fields[z] && state.fields[z].abyss)));
+    // 只退到走得通的区（不隔危墙 / 关着的门）
+    const open = walkableNeighbors(u).filter(z => !preyInZone(prey, z).length);
     if (!open.length) return null;
     return open.sort((a, b) => zdist(b, target.zone) - zdist(a, target.zone))[0];
   }

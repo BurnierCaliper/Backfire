@@ -500,7 +500,15 @@
   }
   /** 战斗记录里的行动名：查技能的中文名，不把内部技能 id（ruby_aa）露给玩家 */
   function actionLabel(cmd) {
-    const fixed = { move: "移动", standUp: "起身", useItem: "使用道具", endTurn: "结束行动" }[cmd.type];
+    // 移动写去了哪一区，用道具写用了什么、对谁，起身写清楚；都是玩家画面上本来就看得到的信息，不带任何坚毅生命数值
+    if (cmd.type === "move") return Number.isFinite(Number(cmd.dest)) && cmd.dest !== null ? `移动 → ${Number(cmd.dest)} 区` : "移动";
+    if (cmd.type === "standUp") return "起身 · 重新站起";
+    if (cmd.type === "useItem") {
+      const item = typeof ITEM_CATALOG !== "undefined" && cmd.item ? ITEM_CATALOG[cmd.item] : null;
+      const target = cmd.target ? state.units.find(u => u.id === cmd.target) : null;
+      return "使用道具" + (item?.name ? " " + item.name : "") + (target?.name ? " → " + target.name : "") + (Number.isFinite(Number(cmd.dest)) && cmd.dest !== null ? ` · 到 ${Number(cmd.dest)} 区` : "");
+    }
+    const fixed = { endTurn: "结束行动" }[cmd.type];
     if (fixed) return fixed;
     const id = cmd.skill;
     if (!id) return "行动";
@@ -543,7 +551,9 @@
       if (cmd.type?.startsWith("gm.")) publicLogs.push({ kind: "gm", summary: { "gm.editUnit": "主持人更新了单位数据", "gm.setWeather": "主持人更新了天气", "gm.addProp": "主持人添加了配置物" }[cmd.type] || "主持人调整了战场",
         action: cmd.type === "gm.spawnEnemy" ? "spawn" : cmd.type === "gm.removeUnit" ? cmd.mode : cmd.type === "gm.removeProp" ? (cmd.mode === "destroy" ? "propDestroy" : "propRemove") : cmd.type === "gm.setManual" ? (cmd.enabled ? "manualOn" : "manualOff") : "edit",
         unitName: cmd.type === "gm.spawnEnemy" ? enemyPresets().find(p => p.id === cmd.enemyId)?.name : meta.unitName, propName: meta.propName, zone: cmd.zone, level: cmd.level, at: Date.now() });
-      else if (actor) publicLogs.push({ kind: "action", actorName: actor.name, actionName: (meta.skillName && meta.skillName !== cmd.skill && meta.skillName !== cmd.type ? meta.skillName : actionLabel(cmd)), hits: hitSummary(tape), turn: state.turnNo, at: Date.now() });
+      else if (actor) publicLogs.push({ kind: "action", actorName: actor.name, actionName: (!["move", "standUp", "useItem"].includes(cmd.type) && meta.skillName && meta.skillName !== cmd.skill && meta.skillName !== cmd.type ? meta.skillName : actionLabel(cmd)), hits: hitSummary(tape), turn: state.turnNo, at: Date.now() });
+      // 新一回合开始（敌人回合收尾 / 开战）：写回合数，回合开始的持续伤害、倒下也跟着这一行
+      else if (cmd.type === "battle.endEnemyTurn" || cmd.type === "startCombat") publicLogs.push({ kind: "round", turn: state.turnNo, hits: hitSummary(tape), at: Date.now() });
       else publicLogs.push({ kind: "phase", phase: state.combatPhase, turn: state.turnNo, at: Date.now() });
       publicLogs = publicLogs.slice(-100);
     }
@@ -557,8 +567,9 @@
       // 掉线的人：协助询问一律不协助；掉线的是打出失衡、要拍板的人时，有人举手就让最先举手的出手，没人举手就等到时间
       if (ask?.isChooser) { if (ask.hands?.length) HotseatGame.receiveFrom(p.id, { type: "answer", askId: ask.id, helper: ask.hands[0].helper }); }
       else if (ask?.eligible && !ask.declined && ask.kind !== "choice") HotseatGame.receiveFrom(p.id, { type: "answer", askId: ask.id, helper: null, extra: {} });
-      if (ask?.eligible && ask.kind === "choice") {
-        const option = ask.options[0];
+      // 选项为空时（没有可替掉线玩家选的项）跳过，别抛错，也别挡住后面「掉线玩家回合超时」的处理
+      const option = ask?.eligible && ask.kind === "choice" ? ask.options?.[0] : null;
+      if (option) {
         if (offlineWait?.askId && offlineWait.actor === option.helper) offlineWait.askId = ask.id;
         if (!offlineWait || offlineWait.askId !== ask.id) { offlineWait = { actor: option.helper, name: p.name, owner: p.id, askId: ask.id, deadline: Date.now() + 60000 }; publish(); }
         if (Date.now() >= offlineWait.deadline) { HotseatGame.receiveFrom(p.id, { type: "answer", askId: ask.id, helper: option.helper, extra: option.extra }); offlineWait.askId = null; }
@@ -576,7 +587,12 @@
     const outer = commandDepth++ === 0;
     try {
       const value = next();
-      if (cmd.type === "battle.finish") settledResult = { ...value, outcome: cmd.outcome };
+      if (cmd.type === "battle.finish") {
+        settledResult = { ...value, outcome: cmd.outcome };
+        // 战斗结果进公开记录（只写结果，不带评分 / 坚毅数值）
+        const kind = { win: "victory", lose: "defeat", retreat: "retreat" }[cmd.outcome];
+        if (kind && outer) { publicLogs.push({ kind, turn: state.turnNo, at: Date.now() }); publicLogs = publicLogs.slice(-100); }
+      }
       if (cmd.type === "startCombat" || cmd.type === "battle.setup") settledResult = null;
       if (outer && !GAME.tape && ["trpg", "trpg.ui", "backstage", "calc", "battle.panel"].includes(cmd.type) &&
           !/^(normalize|saveCaptured|recordBattle)/.test(cmd.action || "")) {

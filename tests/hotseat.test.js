@@ -274,6 +274,15 @@ test("只有战前/探索可重分配；小队聊天全程开放；快照不能�
   s.endBattle(); s.setAssignments({}); s.reset(); assert.equal(s.snapshot().phase, "setup");
 });
 
+test("小队聊天：多行消息（字符画）保留换行和第一行行首的全角空格，只去掉开头的空行和末尾空白", () => {
+  const s = fixture().s;
+  s.chat("a", "\r\n　\r\n　　龍龍\r\n龍奶奶龍　\n\n");
+  assert.equal(s.snapshot().chat.at(-1).text, "　　龍龍\n龍奶奶龍");
+  s.chat("a", "　单行照旧去掉两头空白　");
+  assert.equal(s.snapshot().chat.at(-1).text, "单行照旧去掉两头空白");
+  assert.throws(() => s.chat("a", "\n　\n"), /不能为空/);
+});
+
 test("LocalTransport同步先到先得，身份绑定连接，所有收件人获得独立JSON副本", () => {
   const hub = LocalTransport.createHub({ hostId: "authority" }), a = hub.connect("a"), b = hub.connect("b");
   const received = [];
