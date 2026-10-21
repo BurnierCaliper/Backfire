@@ -91,6 +91,11 @@
     if (casts.length) d.casts = casts;
     const intents = arr(call("enemyIntents", unit)).slice(0, 4).map(x => text(x, 12)).filter(Boolean);
     if (intents.length) d.intents = intents;
+    // 分阶段的首领 / 精英现在在第几阶段：玩家端悬停说明只列这一阶段的能力。规则单位现算（bestiary.js · bestiaryStageOf）；
+    // 演出用的画面快照（game.js · snapUnit）身上没有 resources、现算不出来，用快照里已经算好的 stage。
+    // 只发阶段编号（1、2、3……），换阶段的血量门槛之类的规则数值不发
+    const stage = number(get(unit, "stage")) ?? number(call("bestiaryStageOf", unit));
+    if (Number.isInteger(stage) && stage >= 1 && stage <= 9) d.stage = stage;
     if (!get(unit, "isPlayer") && (get(unit, "dead") || get(unit, "_removed"))) {
       const ok = number(get(unit, "overkill")); if (ok > 0) d.overkill = Math.round(ok);
       if (get(unit, "killBig") === true) d.killBig = true;

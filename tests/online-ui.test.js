@@ -630,3 +630,123 @@ test("#176 桌面宽度：保留悬停 / 空格提示", async t => {
   assert.match(await page.locator(".ol-battle .hint").innerText(), /悬停技能看说明/);
   assert.equal(await page.locator(".ol-battle .endturn small").count(), 1);
 });
+
+/* ---------- #207 未读红点：「消息与成员」按钮右上角、「大厅交流」标题旁、「小队」标签 ---------- */
+// 大厅交流和「小队」频道是同一份聊天（packet.view.chat）
+const say = (page, id, from, text) => page.evaluate(([id, from, text]) => {
+  const v = fixture.view.packet.view; v.chat = [...(v.chat || []), { id, operatorId: from, name: from, text }]; fixture.emit();
+}, [id, from, text]);
+const letter = (page, id, from, to, text) => page.evaluate(m => fixture.set({ messages: [...fixture.view.messages, m] }), { id, from, to, text });
+const dockDot = page => page.locator('#online-dock [data-online="openRoom"] .ol-dot');
+const animationOf = (page, selector) => page.locator(selector).evaluate(e => getComputedStyle(e).animationName);
+
+test("#207 联机单局房主：面板收着时别人在大厅交流发一条，「消息与成员」右上角红点 1；自己发的不算；打开面板看到后消失；超过 9 条写 9+", async t => {
+  const o = await open(t); if (!o) return; const { page } = o;
+  // 联机单局的房主在大厅里先选队伍，房间面板收着（还没选队伍，不会自动打开）
+  await page.evaluate(() => fixture.set({ active: true, isHost: true, mode: "rogue", identity: { id: "gm" }, screen: "lobby", heroes: [] }));
+  assert.equal(await page.isVisible("#online-panel"), false);
+  assert.equal(await dockDot(page).count(), 0);
+  await say(page, "chat-1", "p1", "我来选红玉");
+  assert.equal(await dockDot(page).innerText(), "1");
+  await say(page, "chat-2", "gm", "好，等我选完队伍");
+  assert.equal(await dockDot(page).innerText(), "1", "自己发的不算");
+  assert.equal(await page.locator("#online-dock .ol-dock-label").innerText(), "ABCD23 · 消息与成员", "按钮文字保持简短，不再写「· N 条新消息」");
+  // 红点压在按钮右上角，白色描边
+  const spot = await dockDot(page).evaluate(e => ({ on: e.offsetParent.dataset.online, top: e.offsetTop, right: e.offsetParent.clientWidth - e.offsetLeft - e.offsetWidth, position: getComputedStyle(e).position, border: getComputedStyle(e).borderTopColor }));
+  assert.equal(spot.on, "openRoom"); assert.equal(spot.position, "absolute"); assert.equal(spot.border, "rgb(255, 255, 255)");
+  assert.ok(spot.top < 0 && spot.right < 0, "红点压在按钮右上角：" + JSON.stringify(spot));
+  // 打开面板、翻到大厅交流：看到了，红点消失；收起后也不再亮
+  await page.click('#online-dock [data-online="openRoom"]');
+  await page.locator('#online-panel [data-keep-scroll="lobby"]').evaluate(e => e.scrollIntoView({ block: "center" }));
+  await page.waitForFunction(() => !document.querySelector("#online-dock .ol-dot, #online-panel .ol-dot"));
+  await page.click('#online-panel [data-online="close"]');
+  assert.equal(await page.isVisible("#online-panel"), false);
+  assert.equal(await dockDot(page).count(), 0, "看过了，收起后不再亮");
+  // 超过 9 条写「9+」
+  for (let i = 3; i <= 13; i++) await say(page, "chat-" + i, "p2", "第 " + i + " 条");
+  assert.equal(await dockDot(page).innerText(), "9+");
+  assert.deepEqual(o.errors, []);
+});
+
+test("#207 大厅交流在面板下面看不到时，标题旁也有红点；翻到看得见就消失；看得见时来消息不亮", async t => {
+  const o = await open(t, true); if (!o) return; const { page } = o;
+  // 玩家在大厅：房间面板一直开着；人多时「大厅交流」被挤到下面，要往下翻
+  await page.evaluate(() => {
+    const crowd = Array.from({ length: 10 }, (_, i) => ({ id: "x" + i, name: "路人" + i, online: true }));
+    fixture.set({ active: true, isHost: false, identity: { id: "p1" }, screen: "lobby", players: [...fixture.view.players, ...crowd] });
+  });
+  const list = page.locator('#online-panel [data-keep-scroll="lobby"]'), headDot = page.locator("#online-panel .ol-lobby-chat h3 .ol-dot");
+  assert.ok(await list.evaluate(e => e.getBoundingClientRect().top > innerHeight), "大厅交流在面板下面，要往下翻");
+  await say(page, "chat-1", "p2", "有人吗");
+  assert.equal(await headDot.innerText(), "1");
+  await say(page, "chat-2", "p1", "我在");
+  assert.equal(await headDot.innerText(), "1", "自己发的不算");
+  await list.evaluate(e => e.scrollIntoView({ block: "center" }));
+  await page.waitForSelector("#online-panel .ol-lobby-chat .ol-dot", { state: "detached" });
+  await say(page, "chat-3", "p2", "那开始吧");
+  assert.equal(await headDot.count(), 0, "看得见的时候来消息，不亮");
+  await page.evaluate(() => { document.getElementById("online-panel").scrollTop = 0; });
+  await say(page, "chat-4", "p2", "人呢");
+  assert.equal(await headDot.innerText(), "1", "翻回顶上看不见了，再来消息又亮");
+  assert.deepEqual(o.errors, []);
+});
+
+test("#207 私信：面板收着时主持人发来一条，按钮上红点 1；自己的回复不算；打开面板后消失；房主收到玩家回复也亮", async t => {
+  const o = await open(t); if (!o) return; const { page } = o;
+  await player(page, { screen: "exploration" });
+  await letter(page, "msg-1", "gm", "p1", "只给你的线索");
+  assert.equal(await dockDot(page).innerText(), "1");
+  await letter(page, "msg-2", "p1", "gm", "收到");
+  assert.equal(await dockDot(page).innerText(), "1", "自己发的回复不算");
+  await letter(page, "msg-3", "gm", "all", "全体注意");
+  assert.equal(await dockDot(page).innerText(), "2");
+  assert.doesNotMatch(await page.locator("#online-dock .ol-dock-label").innerText(), /新消息/);
+  await page.click('#online-dock [data-online="openRoom"]');
+  assert.equal(await dockDot(page).count(), 0, "打开面板，红点消失");
+  await page.click('#online-panel [data-online="close"]');
+  assert.equal(await dockDot(page).count(), 0, "看过了，收起后不再亮");
+  // 房主（联机跑团）：面板收着时收到玩家的回复也亮；自己发的不算
+  await page.evaluate(() => fixture.set({ isHost: true, identity: { id: "gm" }, messages: [] }));
+  await letter(page, "msg-4", "gm", "p1", "去找线人");
+  assert.equal(await dockDot(page).count(), 0, "房主自己发的不算");
+  await letter(page, "msg-5", "p1", "gm", "找到了");
+  assert.equal(await dockDot(page).innerText(), "1");
+  assert.deepEqual(o.errors, []);
+});
+
+test("#207 红点出现那一下轻轻弹一下、条数变多不再弹；系统开了「减少动态效果」就不动；「小队」标签是同一个红点样式", async t => {
+  const o = await open(t); if (!o) return; const { page } = o;
+  await player(page, { screen: "exploration" });
+  await letter(page, "msg-1", "gm", "p1", "线索一");
+  assert.equal(await animationOf(page, "#online-dock .ol-dot"), "ol-dot-pop", "出现的那一下弹一下");
+  await letter(page, "msg-2", "gm", "p1", "线索二");
+  assert.equal(await animationOf(page, "#online-dock .ol-dot"), "none", "条数变多不再弹");
+  // 「小队」标签：切到记录频道，别人在小队里说话
+  await page.click('#online-side [data-side="log"]');
+  await say(page, "chat-1", "p2", "我先上");
+  const tabDot = '#online-side [data-side="chat"] .ol-dot';
+  assert.equal(await page.locator(tabDot).innerText(), "1");
+  const look = selector => page.locator(selector).evaluate(e => { const s = getComputedStyle(e); return [s.backgroundColor, s.color, s.borderTopColor, s.borderTopWidth, s.borderRadius, s.height]; });
+  assert.deepEqual(await look(tabDot), await look("#online-dock .ol-dot"), "和按钮上的红点一个样式");
+  assert.equal(await animationOf(page, tabDot), "ol-dot-pop");
+  // 系统开了「减少动态效果」：重新出现的红点也不动
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.click('#online-dock [data-online="openRoom"]'); await page.click('#online-panel [data-online="close"]');
+  assert.equal(await dockDot(page).count(), 0);
+  await letter(page, "msg-3", "gm", "p1", "线索三");
+  assert.equal(await dockDot(page).innerText(), "1");
+  assert.equal(await animationOf(page, "#online-dock .ol-dot"), "none");
+  assert.equal(await animationOf(page, tabDot), "none");
+  assert.deepEqual(o.errors, []);
+});
+
+test("#207 手机：玩家的按钮在顶栏右边，红点不被裁掉（省略号只作用在按钮文字上）", async t => {
+  const o = await open(t, true); if (!o) return; const { page } = o;
+  await player(page, { screen: "exploration" });
+  await letter(page, "msg-1", "gm", "p1", "线索");
+  assert.equal(await page.locator('#online-dock [data-online="openRoom"]').evaluate(e => getComputedStyle(e).overflow), "visible");
+  assert.equal(await page.locator("#online-dock .ol-dock-label").evaluate(e => getComputedStyle(e).textOverflow), "ellipsis");
+  const box = await dockDot(page).evaluate(e => { e.getAnimations().forEach(a => a.finish()); const r = e.getBoundingClientRect(); return { top: r.top, right: r.right, width: r.width, viewport: innerWidth }; });
+  assert.ok(box.width > 0 && box.top >= 0 && box.right <= box.viewport, "红点整个在屏幕里：" + JSON.stringify(box));
+  assert.deepEqual(o.errors, []);
+});
