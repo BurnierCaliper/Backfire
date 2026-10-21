@@ -369,6 +369,23 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 ## 规则改动记录
 
 - **联机跑团：长休结算只在变了的时候发，长休过一次以后战斗包不再整份重发**（issue #216，来源是 #213 的审查）。以前：跑团长休过一次后 `TRPG.lastRest` 一直留着（trpg.js · `trpgLongRest`），online-game.js · `rawPacket` 每个玩家包都带 `rest`，经 online-view.js · `projectRest` 投影后整份发出（默认 4 人队约 1 KB/包，mood 那句中文每字 3 字节）；online-wire.js 的增量编码只管消息、公开记录、演出快照和克制表，`rest` 每包整份重发，战斗包也一样。4v3 瑞比连击每名玩家要收 3 个结算包，合计多出约 3 KB，而 #213 修完后这一招离 50 KiB 只剩约 2.2 KB，长休过一次就会超。现在：online-wire.js 对 `rest` 做和克制表（`matchupUnchanged`）一样的处理——和上一包一样就不发，只带 `restUnchanged: true`，玩家端用上一次收到的那份还原；又长休了（内容变了）或重同步，一律整份发；`rest` 是 null（还没长休）时照发 null（比标记还短）；没有基准的 `restUnchanged` 拒绝解码，逼出重同步。玩家端解码后的 `packet.rest` 和以前一模一样，所以 online-ui.js · `observeRest` 不用改：它不会看到 `rest` 中途变成 null，同一份结算不会再弹一次。长休规则和投影白名单（坚毅照样不发）都没变。改了 online-wire.js · `create`（`pack` / `unpack` / `reset`）、docs/d3/privacy.md、docs/d3/verification.md；测试：新增 tests/online-wire-rest.test.js（往返、null、重同步、没有基准 / 坏标记、真实 4 人长休结算之后每包只多一个标记），tests/online-coordinator.test.js（玩家端每包都还原成同一份、缺号先要重同步），tests/online-session-ui.test.js（浏览器：D3 预算测试先长休一次再测 4v3 连击，战斗包不带 `rest`；长休结算弹过以后再来两包不会再弹）。
+- **首领机制提示改成 FF14 式：头顶的图标 + 战场正上方的倒计时横幅 + 点名瞬间弹一下、响一声**（主人定的方向，issue #206；unit-card.js · `MECH_ICON` / `mechIcon` / `mechTip` / `mechIconsHtml` / `towerMarkHtml` / `paintTowers` / `topStack` / `paintBanner` / `fitTop` / `bannerItems` / `MECH_ALERT` / `mechFresh` / `alertNew` / `bindTips`，sfx.js · `MARKER_PING` / `Sfx.marker`，game.js · `applyEnv` / `setView` / `paintMechBar` / `refreshTop`，online-battle.js · `paintZones` / `update`，game.css、online.css；测试 tests/boss-mech-icons.test.js、tests/boss-countdown-display.test.js）
+  - **只改显示**：机制的规则、结算和图鉴里的说明都没动。联机发给玩家的数据也没加字段——`online-view.js` 本来就发机制类型、点名对象、还有几回合（`display.marks` / `display.casts` / `zoneView.towers`），不含坚毅生命。
+  - **以前**：铭牌的状态行里写「死刑 · 还有 2 回合」「死刑→柯尔特 · 还有 2 回合」这样的色块，被点名的人铭牌内圈画红 / 黄 / 紫 / 橙框；踩塔是区域的青色粗框 + 右上角的文字牌子。
+  - **现在**：
+    - 被点名的人铭牌**上方**浮一个贴纸图标，形状一眼分得清（不只靠颜色）：死刑 = 红色破碎的盾，分担 = 橙黄色四个箭头往中间汇聚，远离 = 紫色圆圈加四个往外的箭头，齐射 = 粉色三颗扇形排开的子弹，踩塔 = 青色的塔；画法照 art/style-guide.html 的贴纸 + 粗墨线（内联 SVG）。角上的大号数字是「还有 N 回合」的 N，本回合落下写「!」并轻轻脉动（系统开了「减少动态效果」就不动，改成静止的光晕）。同时被几种机制点名就横向排开；这一排卡上面留出图标的高度，不压到上一排。铭牌上不再写机制名字、不画彩色边框。
+    - 首领头上：它正在读条的每个机制一个同样形状的图标（深底 + 机制色描边，和点名的图标区分开）。
+    - 踩塔：图标放在那个区的区名旁边，旁边写「几人 / 要几人」（人数不够标红）；地面上画一圈（人数不够时变成红色虚线）；不放在单位头上。
+    - 鼠标停在图标上（触屏点一下；点图标不会选中这个单位，点别处收起）弹出说明：机制名字（首领读条的带上点名对象）、还有几回合、什么时候落下、会发生什么（原来 `markTip` / `castTip` / `towerTip` 的文字）、怎么应对（新写在 `MECH_ICON` 里，末尾都加一句「落下那一刻首领要是失衡，会推迟一回合」）。单位本身的悬停说明照旧列出首领机制。
+    - 战场正上方中间：红字白描边的横幅，每个首领正在读条的机制一条（「死刑 → 柯尔特 · 2 回合」「踩塔 · 3 区 · 1 回合」「远离 → 全员 · 4 回合」），剩余回合少的在上面，最后一回合的那条放大、闪；结算掉、取消、首领倒下以后那一条就消失。援军倒计时（chain.js）和它摞在同一个容器里（援军在上），写法一样是「· N 回合」；有横幅时战场顶上留出它的高度，不挡区名和卡。
+    - 联机玩家的战斗画面（online-battle.js）用同一套函数，看到的一样。触屏点一下图标以后浏览器会补发 mouseout，触屏时不再把它当成鼠标离开（以前刚弹出的说明马上又收起）；联机玩家画面的说明框（挂在 body 下的 `.mech-tip`）加进 online.css 的显示白名单（以前一直被藏着）。
+    - **点名瞬间**（追加，主人已同意）：首领机制新点名到一个人（头顶的图标第一次出现）时，图标从头顶「啪」地弹出来（缩放 + 回弹，一圈机制色的光往外散），同时一声很短的提示音（`Sfx.marker`：两声「叮」先低后高，正弦波 + 一点泛音、再低通，不刺耳；几个人同一刻被点名只响一声）。区名旁边新标出来的塔也一样；首领头上的读条不弹。
+      - 只在新出现那一下：倒计时减少、刷新画面、悬停都不再弹 / 再响；第一次画（读档、刚连进来）时已经有的点名不弹。换人点名、拿掉再出现、落下以后马上重新点名（倒计时一下子往上跳 2 回合以上；首领失衡 / 被挟持推迟一回合只 +1，不算）算新的一次。
+      - 音效关着（顶栏「音效 关」）不响；系统开了「减少动态效果」就不弹，声音照音效开关走；预演时不算。
+      - 单机和联机玩家画面都有；联机只拿玩家收到的投影（`display.marks` / `zoneView.towers`）和上一次画的比，不看玩家看不到的数据。
+      - 数值都在配置里：弹出动画的时长、关键帧（缩放 / 位移 / 不透明度）、光圈大小、算重新点名的跳数在 unit-card.js 顶部的 `MECH_ALERT`；提示音的音高、长短、音量、低通、限流在 sfx.js 的 `MARKER_PING`。动画用 Web Animations 播，卡片挪区、联机画面整块重新挂上去都不会重播。
+  - **「最后一回合」怎么算**：落下之前我方只剩这一回合能应对——敌人回合开始时落下的（现在的首领都是）看「本回合落下」，我方回合开始时落下的（主持人后台能设）看「还有 1 回合」。
+  - 原来的 `UnitCard.towerHtml`（踩塔文字牌子）换成 `towerMarkHtml`；`tests/boss-countdown-display.test.js` 按新的显示方式更新断言（单机、联机、悬停说明、挤的区都还在测），新增最后一回合脉动 / 减少动态效果、触屏点图标两个浏览器测试。点名瞬间：`tests/boss-mech-icons.test.js` 新增 5 条（只认新出现的点名；弹出 + 提示音、静音、减少动态效果、预演；区名旁的塔；规则 → 联机投影 → 玩家端；`Sfx.marker` 的音高长短和静音），`tests/boss-countdown-display.test.js` 新增单机、联机玩家画面两个浏览器测试。
 - **#193 / #196 审查补充**（hotseat.js · `decideCheck` / `trimReqs`；trpg-ui.js；ROADMAP.md；测试 tests/check-followups.test.js）
   - 主持人同意检定申请时，建检定和掷骰要么都成功，要么都撤回：掷骰出错会撤掉刚建的检定和频道记录，申请仍是待处理，不再留下「已同意但检定还开着」的半截状态。
   - 主持人不同意、申请被撤回时，小队频道写一行说明，玩家知道申请为什么没了。
