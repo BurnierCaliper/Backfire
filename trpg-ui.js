@@ -1051,10 +1051,14 @@
     const enrSel = (path, e) => typeof SAND_FISH_KITS !== "undefined" && SAND_FISH_KITS.includes(e.preset)
       ? ` 富集 <select data-bte="${path}.enriched">${options([["", "随机"], ["on", "富集"], ["off", "普通"]], e.enriched === true || e.enriched === "on" ? "on" : e.enriched === false || e.enriched === "off" ? "off" : "")}</select>` : "";
     const ivInp = (path, e) => `<span class="bt-iv">个体值 血量 ${inp(path + ".iv.hp", e.iv ? e.iv.hp : null, 54, "number", ivTip)}% ATK ${inp(path + ".iv.atk", e.iv ? e.iv.atk : null, 54, "number", ivTip)}%</span>`;
+    // 种族（有种族的敌人才有）：空着 = 随机（固定种族的敌人照固定）；类人 = 四个大支里随机
+    const raceList = typeof ENEMY_RACES === "undefined" ? [] : ["人类", "红皮人", "类人"].concat(Object.keys(ENEMY_RACES).filter(r => !["人类", "红皮人"].includes(r)).reduce((a, r) => a.concat([r], (ENEMY_RACES[r].branches || []).map(b => r + "·" + b)), []));
+    const raceSel = (path, e) => typeof ENEMY_INFO !== "undefined" && ENEMY_INFO[e.preset] && (ENEMY_INFO[e.preset].races || ENEMY_INFO[e.preset].race)
+      ? ` 种族 <select data-bte="${path}.race" title="空着 = 随机；固定种族的敌人照固定">${options([["", ENEMY_INFO[e.preset].race ? "固定：" + ENEMY_INFO[e.preset].race : "随机"]].concat(raceList.map(r => [r, r])), e.race || "")}</select>` : "";
     const foes = t.enemies.map((e, j) => `<div class="tr-row">
         <select data-bte="enemies.${j}.preset" data-bte-rerender="1">${options(presets, e.preset)}</select>
         等级 ${inp(`enemies.${j}.level`, e.level, 60, "number", lvTip)} 区域 ${zoneSel(`enemies.${j}.zone`, e.zone)}
-        ${ivInp(`enemies.${j}`, e)}${enrSel(`enemies.${j}`, e)}
+        ${ivInp(`enemies.${j}`, e)}${raceSel(`enemies.${j}`, e)}${enrSel(`enemies.${j}`, e)}
         ${e.mechanics ? `<span class="tk-chip">机制：${esc(e.mechanics.map(btMechName).join("、"))}<button class="g-btn small" data-bt-act="clearMech:${j}" title="去掉这个敌人身上的首领机制">×</button></span>` : ""}
         <button class="g-btn small" data-bt-act="delEnemy:${j}">删</button></div>`).join("");
     const fields = zones.map(z => {
@@ -1079,7 +1083,7 @@
         <div class="tr-row">第 ${j + 1} 波：开战后第 ${inp(`waves.${j}.turns`, w.turns, 50, "number", ' min="1"')} 回合开始时抵达（提前打光场上的敌人就下一回合到）
           <button class="g-btn small" data-bt-act="delWave:${j}">删这波</button></div>
         ${(w.enemies || []).map((e, k) => `<div class="tr-row">　<select data-bte="waves.${j}.enemies.${k}.preset" data-bte-rerender="1">${options(presets, e.preset)}</select>
-          等级 ${inp(`waves.${j}.enemies.${k}.level`, e.level, 60, "number", lvTip)} 进入 ${zoneSel(`waves.${j}.enemies.${k}.zone`, e.zone)} ${ivInp(`waves.${j}.enemies.${k}`, e)}${enrSel(`waves.${j}.enemies.${k}`, e)}
+          等级 ${inp(`waves.${j}.enemies.${k}.level`, e.level, 60, "number", lvTip)} 进入 ${zoneSel(`waves.${j}.enemies.${k}.zone`, e.zone)} ${ivInp(`waves.${j}.enemies.${k}`, e)}${raceSel(`waves.${j}.enemies.${k}`, e)}${enrSel(`waves.${j}.enemies.${k}`, e)}
           <button class="g-btn small" data-bt-act="delWaveEnemy:${j}-${k}">删</button></div>`).join("")}
         <div class="tr-row">　<button class="g-btn small" data-bt-act="addWaveEnemy:${j}">＋ 援军敌人</button></div></div>`).join("");
     const others = (typeof battleTemplateList === "function" ? battleTemplateList() : []).filter(x => x.id !== t.id).map(x => [x.id, x.name]);

@@ -783,10 +783,12 @@ function blockStatusBonus(unit) {
 /** 不封顶的协助格挡率（空手 + 武器 + 状态）：最终格挡率在 app.js · finalBlockChance 里加完各项修正再封顶 */
 function blockChanceRaw(unit) {
   if (!unit || !unit.kit) return null;
-  if (FIXED_BLOCK[unit.kit] != null) return FIXED_BLOCK[unit.kit];
+  // 敌人的种族敏捷修正（enemies.js · setEnemyRace）：只加给本来就会格挡的敌人
+  const race = Number(unit.raceBlock) || 0;
+  if (FIXED_BLOCK[unit.kit] != null) return FIXED_BLOCK[unit.kit] + race;
   if (!unit.isPlayer && !unit.weaponOf) return null;
   if (!unit.attrs && WEAPON_BLOCK_BONUS[unit.kit] == null) return null;
-  return bareBlockChance(unit) + heldWeaponBlockBonus(unit) + blockStatusBonus(unit);
+  return bareBlockChance(unit) + heldWeaponBlockBonus(unit) + blockStatusBonus(unit) + race;
 }
 /** 协助格挡率（资料面板等显示用），最多 100% */
 function blockChance(unit) {

@@ -169,14 +169,14 @@
       const presets = enemyPresets();
       const plan = g.enemyPlan && g.enemyPlan.length ? g.enemyPlan : [{ id: "thug_knife", lv: cmd.level, zone: 2 }, { id: "thug_hammer", lv: cmd.level, zone: 2 }, { id: "bandit_boss", lv: cmd.level, zone: 2 }];
       plan.forEach(row => {
-        const pack = typeof spawnEnemyGroup === "function" ? spawnEnemyGroup(row.id, Number(row.lv) || cmd.level, partyN, row.zone) : null;
+        const pack = typeof spawnEnemyGroup === "function" ? spawnEnemyGroup(row.id, Number(row.lv) || cmd.level, partyN, row.zone, null, row.race) : null;
         // 任务节点里主持人定的富集与否（沙鱼，desert.js）
         if (pack && typeof row.enriched === "boolean" && typeof desertSetEnriched === "function") pack.forEach(u => desertSetEnriched(u, row.enriched));
         if (pack && pack.length) { pack.forEach(u => state.units.push(u)); return; }
         const p = presets.find(x => x.id === row.id);
         if (!p || !p.build) return;
         const u = p.build(Number(row.lv) || cmd.level, partyN);
-        if (typeof applyEnemyIV === "function") applyEnemyIV(u);
+        if (typeof applyEnemyIV === "function") applyEnemyIV(u, null, row.race);
         u.zone = Math.min(Number(state.zoneMode), Number(row.zone) || Number(state.zoneMode)); state.units.push(u);
       });
     }
@@ -219,7 +219,7 @@
       case "addEnemy": {
         const p = enemyPresets().find(x => x.id === cmd.preset); if (!p) break;
         const partyN = typeof syncPartySizeFromField === "function" ? syncPartySizeFromField() : liveHeroCount();
-        const pack = typeof spawnEnemyGroup === "function" ? spawnEnemyGroup(cmd.preset, cmd.level, partyN, cmd.zone, cmd.iv) : null;
+        const pack = typeof spawnEnemyGroup === "function" ? spawnEnemyGroup(cmd.preset, cmd.level, partyN, cmd.zone, cmd.iv, cmd.race) : null;
         if (pack && pack.length) pack.forEach(u => state.units.push(u));
         else { const u = p.build(cmd.level, partyN); u.zone = Math.min(cmd.zone, Number(state.zoneMode)); state.units.push(u); if (typeof refreshEnemyEconomy === "function") refreshEnemyEconomy(u); }
         g.enemyPlan = (g.enemyPlan || []).concat([{ id: cmd.preset, lv: cmd.level, zone: cmd.zone }]); break;

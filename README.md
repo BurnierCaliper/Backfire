@@ -368,6 +368,17 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **敌人种族（一）：种族数据、随机 / 固定分配、六维换算、显示、主持人指定**（issue #159，设计见 `docs/enemy-race.md`；enemies.js · `ENEMY_RACES` / `applyEnemyRace` / `setEnemyRace` / `raceDelta`，run.js · `ENEMY_INFO` / `ENEMY_RACE_TABLES`，party.js · `blockChanceRaw`，gm-commands.js、battle-commands.js、battle-templates.js、trpg-commands.js、sim.js、bestiary.js、unit-card.js、online-view.js 等；测试 `tests/enemy-race.test.js`）。种族的**被动**不在这一条里（另开 issue），这里只把种族挂到敌人身上、换算六维、显示出来。
+  - **以前**：敌人没有种族。**现在**：有机体的敌人生成时有种族，记在单位上 `u.race = { race, branch }`；生成的入口和个体值一样（`applyEnemyIV(u, iv, race)` 里先 `applyEnemyRace` 再个体值：`spawnEnemyGroup`、`spawnEncounterRows`、战斗命令加敌人、跑团「加敌人」、主持人生成敌人、`BattleSim.setup`）。
+  - **种族配置**：`ENEMY_RACES` 是种族 / 小分支的六维修正表（人类、红皮人、犬 / 猫 / 鼠 / 牛类人及其小分支、兽人五支；牛类人三个小分支的修正各不相同）；每个敌人的种族写在 `run.js · ENEMY_INFO`（格式见下）。
+  - **ENEMY_INFO 的种族格式**（新增兵种照这个加）：`race: "兽人·牛"` = 固定种族（大支·小分支，不受个体值开关影响，不套六维）；`races: ENEMY_RACE_TABLES.bandit` = 随机种族，权重表 `[{ race: "人类", w: 60 }, …]`（`race` 可写大支 `"猫类人"`，小分支再平分；可写统称 `"类人"`，四个大支平分；可写 `"兽人·猫"`；`w` 是权重，不必加到 100）；`raceAttrs: true` = 随机种族之外再按六维修正改数值，不写 = 只挂种族不改数值（蚁型兵种）。不在 `ENEMY_INFO` 里的敌人（赤牙）写在 `enemies.js · ENEMY_RACE_EXTRA`。没写种族 = 无种族。
+  - **已填的敌人**：警卫队队长狼 / 牛 / 蜥蜴 = 兽人·狼 / 牛 / 蜥蜴，矿场监工 = 兽人·熊，赤牙 = 犬类人·狼（固定）；狂徒（匕首）、狂徒（锤）、强盗头子、亡命之王 = 人类 60 / 红皮人 20 / 类人 20（类人四个大支各 5%，大支里的小分支再平分），套六维；燃气收集机 = 类人四个大支各 25%，小分支再平分，套六维（它是生物驾驶的机器，不再算「机械」）；蚁型特殊戒备 / 剿灭兵种 = 兽人五支，猫约 6.7%、狼 / 牛 / 蜥蜴 / 熊各约 23.3%，不套六维（权重 7:7:7:7:2）。
+  - **六维换算**（只对随机种族、且 `raceAttrs` 的敌人）：把「全 5 + 种族修正」和「全 5」分别代进 `growth.js · derivedFromAttrs`，差值加到敌人身上。体质 → **只加在最内层的肉体**（每 ±1：1 级 ±2，之后每级再 ±1，护盾 / 装甲不变）；力量 → atk 和 personalAtk 一起改；耐力 → 架势（`def` / `defMax`）；敏捷 → 只对本来会格挡的敌人生效（`u.raceBlock`，`blockChanceRaw` 里加上，每点 ±5%）；意志、智力不换算。例：狂徒（锤）10 级 红皮人 肉体 74 → 85、atk 13 → 15；猫类人 / 鼠类人 肉体 63。
+  - **开关**：`ENEMY_IV.off > 0`（`BattleSim.setup` 默认）时随机种族的敌人一律当人类（`{ race: "人类" }`，人类对敌人没有数值变化），测试和数值模拟保持确定；单局的战斗（`Rogue.battleSpec` 的 `iv: true`）照常随机；固定种族、主持人指定的种族不受开关影响。
+  - **显示**：铭牌的名字 / 等级悬停、单位说明（`sub`）写种族，例如「狂徒（锤）· 红皮人」；图鉴固定的写种族、随机的写「随机：人类 / 红皮人 / 类人」，遭遇过的记下见过哪些（`bestiaryRecordBattle` 记 `races`）；联机投影（`online-view.js · projectUnit`）和 `online-battle.js` 带 `race`（公开信息，只放行文本）。
+  - **跑团主持人**：战斗模板的敌人行（含援军）可以指定种族（`row.race`，空着 = 随机）；主持人工具「生成敌人」（`gm.spawnEnemy` 的 `race`）和「修改单位 → 种族」（`gm.editUnit` 的 `patch.race`）可以指定；改种族时先减掉旧种族加的数值再加新的（`u.raceDelta`），个体值已有的跟着按新的原始数值重算。指定的种族写「红皮人」「类人」（四个大支里随机）或「兽人·牛」。
+  - **旧测试调整**：`tests/enemy-iv.test.js` 里生成狂徒的几处加了 `race: "人类"`（单局之外随机种族会改血量，个体值测试只想看个体值）；`tests/chain.test.js` 的无界面连续战斗给我方同时设 `personalAtk = 999`（援军是开战后生成的，血量带随机）。
+
 - **第三轮 · 单机低级 L-17 ~ L-21（敌人 / 地形）**（issue #153；enemies.js · `en_boat_arc` / `en_chi_ignite` / 其余范围技能名单，ai.js · `canPayMove`，app.js · `fieldUnits` / `visibleEnemies` / 引爆桶、电池、小车残骸、酸液 / 冻土 / 流沙等同区名单，bestiary.js · `BESTIARY_DICE_SCALE` / `bestiaryStats`，bestiary-ui.js；测试 tests/enemy-terrain-153.test.js）
   - **L-17**：以前电弧扫射的「感电」从整份名单里挑人，可能落在死亡 / 倒地 / 隔着危墙没被打到的人身上；现在只对站着的人出手，感电只在这一击真正打中的人里挑（被牵制时仍先给牵制者）。
   - **L-18**：以前赤牙「引火」直接写 `statuses.burn`（`Math.max(1, …)`），自焚免疫失效，预热版（同区全体）还包括死亡 / 倒地的人；现在走 `grantBurn`（自焚免疫，灼烧层数 +1），预热版只点站着的人。
@@ -1191,7 +1202,7 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
     - 发射火石：1d6 发，每发 0.5×atk + 1d4 火，只有第一发 1 击破。没被嘲讽（嘲讽、禁足怒吼、决一死战）时，按顺序轮流分给远距离、打得到的不同的人（先打选定的目标）。2 发以上是连击（见上一条）。
     - 站在火场里：每一发打中都施加灼烧 1（协助也算）。
     - 协助：远距爆炸火石 1.5×atk 火，带爆燃。
-  - **燃气收集机**（`gas_collector`，机械）：数值同机甲触灵（榴弹），星灵换成肉体。主动接近，每回合先移动再行动。
+  - **燃气收集机**（`gas_collector`，有肉体层 = 生物驾驶的机器；驾驶员有种族，见「敌人种族」）：数值同机甲触灵（榴弹），星灵换成肉体。主动接近，每回合先移动再行动。
     - 所在区不是火场、能改（不是固有场地 / 深渊 / 损毁地面 / 被锁定）：点燃燃气，对同区的我方 0.5×atk 火（范围），再把这一区变成火场（火场所有者 = 它）。
     - 所在区是火场：喷火，近距离一人 3 段 0.5×atk 火，共 1 击破。点不着（固有场地等）时也喷火。
     - 目标有灼烧时：每一段打中的攻击回复 3% 血量上限 × 目标灼烧层数（点燃、喷火、协助都算）。

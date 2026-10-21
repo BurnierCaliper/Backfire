@@ -151,6 +151,7 @@ const Bestiary = (() => {
         <section class="bx-sec"><div class="bx-sec-h"><span>遭遇记录</span></div>
           <dl class="bx-facts">
             <dt>遭遇</dt><dd>${rec.met || 0} 场</dd>
+            ${e.race ? `<dt>种族</dt><dd>${esc(e.race)}${e.racesSeen.length && e.race.startsWith("随机") ? `<br><small>见过：${esc(e.racesSeen.join("、"))}</small>` : ""}</dd>` : ""}
             <dt>击倒</dt><dd>${rec.kills || 0} 只</dd>
             <dt>见过的等级</dt><dd>${rec.minLv != null ? (rec.minLv === rec.maxLv ? `Lv${rec.minLv}` : `Lv${rec.minLv}–${rec.maxLv}`) : "—"}</dd>
             <dt>首次遭遇</dt><dd>${rec.first ? new Date(rec.first).toLocaleDateString() : "—"}</dd>

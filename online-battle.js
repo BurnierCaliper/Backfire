@@ -36,6 +36,7 @@
       overkill: Number(d.overkill) || 0, killBig: !!d.killBig,
       intents: Array.isArray(d.intents) ? d.intents.filter(x => typeof x === "string").slice(0, 4) : [],
       iv: u.iv ? { hp: Number(u.iv.hp) || 0, atk: Number(u.iv.atk) || 0 } : null,
+      race: u.race && u.race.race ? (u.race.branch ? u.race.race + "·" + u.race.branch : u.race.race) : "",
       badges: root.HudIcons ? HudIcons.unitBadges(u, u.marks) : []
     };
   }
