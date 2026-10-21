@@ -16,6 +16,8 @@
  *   energy   能量  光束：快速下扫的激光音
  *   harmonic 谐波  共振：拍频的嗡鸣 + 共鸣的环响
  *
+ * 首领机制点名：Sfx.marker()，很短的两声「叮」（数值在 MARKER_PING）。
+ *
  * 用法：Sfx.play("fire", { big: true })。重击（big）更响、多一层低频。
  * 同一属性 60 ms 内只响一次，范围攻击同时打中好几个人不会叠成噪音。
  * 浏览器要求先有一次点击 / 按键才能出声，这里在第一次点击或按键时启动。
@@ -143,6 +145,18 @@
   const TONE = {
     adv: { vol: 1.3, rate: 1.12, wet: 0.5 },
     dis: { vol: 0.7, rate: 0.88, lowpass: 1100 }
+  };
+  /* ---------- 首领机制点名的提示音（unit-card.js · MECH_ALERT：头顶的图标新出现那一下，Sfx.marker） ----------
+   * 短促、不刺耳：很快的两声「叮」，先低后高（FF14 头顶标记出现那一下的意思）；正弦波 + 一点高八度的三角波泛音，再低通一下 */
+  const MARKER_PING = {
+    notes: [{ at: 0, freq: 784, len: 0.1 }, { at: 0.07, freq: 1175, len: 0.17 }],   // 每一声：几秒后响、音高（Hz，G5 → D6）、多长（秒）
+    attack: 0.005,     // 起音（秒）：很快，但不是 0（0 会「咔」一下）
+    gain: 0.34,        // 音量
+    overtone: 0.16,    // 高八度泛音的音量（相对主音）
+    overtoneLen: 0.6,  // 泛音的长短（相对主音）：先收掉，尾巴只剩干净的正弦
+    lowpass: 3200,     // 低通（Hz）：更高的泛音滤掉，不刺耳
+    q: 0.7,            // 低通的 Q：不加共振峰
+    throttle: 0.3      // 这么多秒以内只响一次：几个人同一刻被点名（远离点全员）也只响一声
   };
   let reverbIr = null;
   /** 程序生成的房间混响脉冲：1.8 秒衰减的立体声噪声 */
@@ -438,7 +452,18 @@
     osc("sine", t + 0.02, 0.4, 2600, 400, both(gainEnv(t + 0.02, 0.003, 0.12 * v, 0.38)));
   }
   VOICES.boom = boomVoice;
-  const RENDER_SECONDS = { parry: 1.4, stagger: 4.2, boom: 4.2 };
+
+  /* ---------- 首领机制点名：短促的「叮叮」（数值在 MARKER_PING） ---------- */
+  function markerVoice(t, v) {
+    const P = MARKER_PING, out = filter("lowpass", P.lowpass, P.q, master);
+    P.notes.forEach(n => {
+      const at = t + n.at;
+      osc("sine", at, n.len, n.freq, n.freq, gainEnv(at, P.attack, P.gain * v, n.len, out));
+      if (P.overtone > 0) osc("triangle", at, n.len, n.freq * 2, n.freq * 2, gainEnv(at, P.attack, P.gain * P.overtone * v, n.len * P.overtoneLen, out));
+    });
+  }
+  VOICES.marker = markerVoice;
+  const RENDER_SECONDS = { parry: 1.4, stagger: 4.2, boom: 4.2, marker: 0.6 };
 
   function play(element, opt) {
     opt = opt || {};
@@ -495,6 +520,8 @@
   function stagger() { return play("stagger", { throttle: 0.4 }); }
   /** 高能自爆的爆炸声（连锁自爆时间隔 0.25 秒以上才再响） */
   function boom() { return play("boom", { throttle: 0.25 }); }
+  /** 首领机制点名的提示音（头顶的图标新出现那一下）：几个人同一刻被点名只响一声；音效关着不响 */
+  function marker() { return play("marker", { throttle: MARKER_PING.throttle }); }
 
-  window.Sfx = { render, parry, stagger, boom, play, ui, playSample, hasSample, TUNE: SFX_TUNE, TONE, UI_LABEL, enabled, setEnabled, ELEMENTS, NAMES: { physical: "物理", fire: "火", ice: "冰", electric: "电", acid: "酸", energy: "能量", harmonic: "谐波" } };
+  window.Sfx = { render, parry, stagger, boom, marker, play, ui, playSample, hasSample, TUNE: SFX_TUNE, TONE, MARKER: MARKER_PING, UI_LABEL, enabled, setEnabled, ELEMENTS, NAMES: { physical: "物理", fire: "火", ice: "冰", electric: "电", acid: "酸", energy: "能量", harmonic: "谐波" } };
 })();
