@@ -25,7 +25,7 @@ python3 -m http.server 8000
 
 | 文件 | 内容 |
 | --- | --- |
-| `index.html` | 入口：界面外壳、按 `tests/headless.js` 里 `RULE_FILES` 的顺序加载规则文件，后面接 `online-view.js`（联机的展示白名单）；三个演示战场、区域切换、镜头按钮 / 键盘；**先投影（`OnlineView.projectState`）再交给布局** |
+| `index.html` | 入口：界面外壳、按 `tests/headless.js` 里 `RULE_FILES` 的顺序加载规则文件，后面接 `online-view.js`（联机的展示白名单）；三个演示战场、区域切换、镜头按钮 / 键盘；**先投影（`OnlineView.projectState`）再交给布局**；区域、光影读投影里的 `pv.region` / `pv.light`（#229） |
 | `hd2d-layout.js` | **纯函数**，不碰 three.js 和 DOM，Node 里能 `require`：棋盘 → 每个区的 3D 位置 / 大小、区之间的间隔、每个单位的站位、铭牌上要写的数据；还有**默认镜头**（`fitView`，场景直接照它摆，就是远景）和每块铭牌在屏幕上的矩形（`liftPlates`，中景 / 近景也用它）；**区域 → 地面主题**的配置表（`GROUNDS` / `REGIONS`）和灯摆在哪（`tests/hd2d-layout.test.js` 测它） |
 | `hd2d-camera.js` | **纯函数**（同上，Node 里能 `require`）：**三段镜头**——远景 / 中景 / 近景各自框住哪些区、镜头摆在哪（俯角、视野、距离）、景深焦点和糊的程度、雾挪多少、这一段里每块铭牌抬多高（近景放大的铭牌也不互相压住）；段与段之间的过渡（插值 + 缓动，减少动态效果时不插值）、左右换相邻的区、滚轮一次跳一段。数值都在 `CAMERA` |
 | `hd2d-scene.js` | three.js 场景：镜头（三段镜头的过渡、拖动的范围）/ 主光 + 轮廓光 / 雾 / 后期（景深、泛光、热浪、调色、雷击闪白）、打雷时镜头抖一下、铭牌（CSS2DRenderer 的 DOM，竖立、正面朝镜头；近景放大）、接触阴影、行动光圈、悬停 / 选中、点地台选区、「减少动态效果」；远景、地台外大片地面的颜色按区域的地面主题挑 |
@@ -118,11 +118,17 @@ node --test tests/hd2d-layout.test.js     # 或者 npm test
 
 ## 区域名从哪来（给 #204：接进正式战斗画面）
 
-原型里区域是页面选的（`?region=`）。以后接进正式战斗画面时，同一张 `REGIONS` 表认这些来源（区域名、地图地点 id 都认）：
+**#229 以后：战斗状态里就有**——`state.region`（这场战斗在哪个区域）和 `state.light`（光影 `day` / `dusk` / `night`），开战时写进去，`online-view.js · projectState` 的白名单放行，单机和联机都是同一份：
 
-- **单机**：单局 `Rogue.region(run)`（区域名，幕间改走的采矿场也在里面）；战斗原型的遭遇 `GAME.lastEncounter.region`（`run.js` 的 `spec.region`）；跑团 `LEDGER.place`（地图地点 id，主持人在地图上标的队伍位置）
-- **联机玩家收到的**：联机单局的 `packet.rogue.region`（`online-rogue.js · viewFor`，`online-view.js` 只做 `scrubHidden`）有区域名；联机跑团只有 `packet.view.map.place`（地图地点 id，主持人标的位置，不一定是这场战斗在哪）；**战斗状态 `packet.state`（`online-view.js · projectState` 的白名单）里没有区域名**
-- 所以现在没有一个「跟着这场战斗走、单机和联机都一样」的区域名。#204 只改原型、不改正式文件，所以还没加：建议开战时把区域写进战斗状态（例如 `state.region`，从上面的单机来源取），在 `online-view.js · projectState` 的白名单里放行（只认 `REGIONS` 里的区域名 / 地点 id），另开 issue 讨论（见下面「联机数据」）。原型页先用页面选的区域兜底
+- **区域，默认跟着地图**（`world-data.js · battleLookStart`）：单局 = 这一幕的区域（`Rogue.region(run)`，幕间改走的采矿场也是；单局的遭遇都带着它：`rogue.js · battleSpec` → `spec.encounter.region`）；战斗原型 / 遭遇 = `spec.region`（遭遇表、随机遭遇的 region；`BattleSim.setup` 也可以直接给 `region`）；跑团 = 队伍在地图上的地点（`LEDGER.place` → 区域，不是区域的地点如星际港口 = 没有），地图上没标队伍的位置时用遭遇的 region
+- **光影，默认跟着时钟**（`ledger.js · clockLight`，和规则的昼夜同一张表 `daylight.js`）：白天 05:00–18:00、傍晚 18:00–20:00、夜晚 20:00–05:00。单局也有时钟（`rogue.js` 换上了本局的档案，`clockNow()` 就是本局的），联机每次发包前按当前时钟重算
+- **主持人可以改**：战场配置里的「所在区域」「光影」下拉框（默认「跟着地图（当前：……）」「跟着时钟（当前：……）」，`battle.panel` 的 `setRegion` / `setLight`）。只管这一场，下一场开战回到跟着地图 / 时钟
+- 正式的区域名列表在 `world-data.js` 的 `BATTLE_REGIONS`，这里的 `REGIONS` / `REGION_ALIAS` 和它一一对上（`tests/region-light.test.js` 核对）；白名单只放行它认得的区域名（地点 id 换成区域名）
+- 只是画面的标签：规则上的白天 / 夜晚（沙漠生物等）只看时钟，不看选的光影
+
+原型页：演示战场把区域（演示默认的 / 顶栏下拉框 / `?region=` 选的）和光影（演示定的）当成布置战场写进战斗状态（`BattleSim.setup` 的 `region` / `light`），画面读投影里的 `pv.region` / `pv.light`；投影里没有（页面选了认不得的名字，主机不认、白名单不发）的时候再用页面选的兜底。
+
+#229 以前的情况（留作记录）：战斗状态 `packet.state` 里没有区域名，联机单局只有 `packet.rogue.region`，联机跑团只有 `packet.view.map.place`（主持人标的位置，不一定是这场战斗在哪），原型页只能用页面选的区域兜底。
 
 ## 第一阶段打磨（issue #191）
 
@@ -188,19 +194,21 @@ node --test tests/hd2d-layout.test.js     # 或者 npm test
 | 天气、回合 | 有（`weather`、`turnNo`） |
 | 当前行动单位 | 战斗状态里没有，联机玩家从 `packet.view.currentUnitId` 拿（原型页是自己点的） |
 | 坚毅生命 | **没有，也绝不能加** |
-| **区域名**（默认地台的地面、远景、灯跟着它） | **没有**。联机单局玩家能从 `packet.rogue.region` 拿到，联机跑团只有 `packet.view.map.place`（主持人标的位置，不一定是这场战斗在哪），战斗状态里都没有 |
-| **光影主题**（白天 / 傍晚 / 夜晚：天空、灯光、灯的盏数） | **没有**。游戏里也还没有「这场战斗是白天还是夜里」这个字段；跑团有游戏时钟（`packet.clock`，`PartyCards.isNight`）可以推出来，单局没有 |
+| **区域名**（默认地台的地面、远景、灯跟着它） | 有（`region`，#229）：只放行认得的区域名，地图地点 id 换成区域名。#204 时还没有 |
+| **光影主题**（白天 / 傍晚 / 夜晚：天空、灯光、灯的盏数） | 有（`light`，#229）：只放行 `day` / `dusk` / `night`。默认跟着游戏时钟（单局也有时钟：本局的档案），主持人可以在战场配置里改。#204 时还没有 |
 
-**需要加进 `online-view.js` 白名单的字段（另开 issue 讨论，这一轮没加）：**
+#204 时列出来要加进白名单的这两个字段，#229 加上了（怎么来、怎么改见上面「区域名从哪来」）：
 
-1. `state.region`：这场战斗在哪个区域。开战时从单机来源写进战斗状态（单局 `Rogue.region(run)`、战斗原型的遭遇 `spec.region`、跑团 `LEDGER.place`），白名单只放行 `hd2d-layout.js` 的 `REGIONS` / `REGION_ALIAS` 认得的区域名 / 地点 id
-2. `state.light`（名字待定）：这场战斗的光影主题 `day` / `dusk` / `night`（枚举）。跑团可以按游戏时钟定，单局要另外定规矩
+1. `state.region`：这场战斗在哪个区域。开战时从单机来源写进战斗状态（单局 `Rogue.region(run)`、战斗原型的遭遇 `spec.region`、跑团 `LEDGER.place`），白名单只放行 `world-data.js · BATTLE_REGIONS` 认得的区域名（和 `hd2d-layout.js` 的 `REGIONS` / `REGION_ALIAS` 一一对上）
+2. `state.light`：这场战斗的光影主题 `day` / `dusk` / `night`（枚举），默认跟着游戏时钟（`daylight.js` 一张表，规则的昼夜也用它）
 
-原型页现在的兜底：区域用页面选的（演示默认的 / 顶栏下拉框 / `?region=`，选「认不得（兜底）」就是联机玩家眼下真会看到的水泥地），光影主题用演示写死的，都不从房主的原始 state 读。白名单加了以后，原型页改成读投影里的就行（测试里 `pv.region` 那一条会提醒）。
+原型页：读投影里的 `pv.region` / `pv.light`；投影里没有的时候再用页面选的兜底（选「认不得（兜底）」时主机不认、白名单不发，看到的就是以前的水泥地）。都不从房主的原始 state 读。
 
 ### 测试
 
 见上面「测试」里「第二阶段 · 一」那几条（`tests/hd2d-layout.test.js`）。另外：`tests/hd2d-fake-page.js` 改成照 `index.html` 里普通脚本的顺序逐个加载（多了 `online-view.js`、`hd2d-camera.js`）；原来两条测试跟着改了预期：页面加载的脚本是「规则文件 + `online-view.js`」，布局拿的是 `project()` 而不是 `st`。
+
+#229（战斗状态带上所在区域、光影）：`tests/hd2d-layout.test.js` 里 `pv.region` 那条提醒改成断言投影里有区域名和光影（三个演示和 `index.html` 一样，把区域、光影写进战斗状态）；`tests/region-light.test.js` 核对原型的 `REGIONS` / `REGION_ALIAS` 和正式的区域名列表一一对上、原型页读 `pv.region` / `pv.light`（没有再用页面选的兜底）、不读房主原始 state 里的区域 / 光影、页面里加载了 `daylight.js`。
 
 ### 截图验收
 

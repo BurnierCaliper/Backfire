@@ -65,6 +65,8 @@ const BattleSim = (function () {
    *   level     敌人等级（enemies 里没写 lv 时用）
    *   seed      给了就装种子随机数，整场可复现
    *   before    布置完、放敌人之前调用（单局层用来盖回跨战斗的血量等）
+   *   region    这场战斗在哪个区域（只是画面；不给就用 encounter 的 region，单局的遭遇带着这一幕的区域）
+   *   light     光影 day / dusk / night（只是画面；不给就跟着时钟）
    */
   function setup(opt) {
     opt = opt || {};
@@ -83,6 +85,8 @@ const BattleSim = (function () {
     const ivOff = typeof ENEMY_IV !== "undefined" && !opt.iv;
     if (ivOff) ENEMY_IV.off++;
     try { spawnAll(opt, level, partyN); } finally { if (ivOff) ENEMY_IV.off--; }
+    // 所在区域、光影（只是画面，world-data.js · battleLookStart）
+    if (typeof battleLookStart === "function") battleLookStart({ region: opt.region != null ? opt.region : opt.encounter && opt.encounter.region, light: opt.light });
     return state;
   }
   function spawnAll(opt, level, partyN) {

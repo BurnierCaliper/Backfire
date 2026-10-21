@@ -4541,10 +4541,27 @@
     refreshAll();
   }
 
+  /** 战场配置：所在区域 / 光影（只是画面）。第一项是「跟着地图 / 跟着时钟（当前：……）」，选了别的就用选的（world-data.js · battleLookSet） */
+  function renderLookSelects() {
+    if (!$("g-cfg-region") || typeof battleLookSet !== "function") return;
+    const auto = battleRegionName(state.regionMap), now = clockLight(clockNow());
+    $("g-cfg-region").innerHTML = `<option value="">跟着地图（当前：${esc(auto || "没有")}）</option>` +
+      BATTLE_REGIONS.map(r => `<option value="${esc(r)}">${esc(r)}</option>`).join("");
+    $("g-cfg-region").value = state.regionPick || "";
+    $("g-cfg-light").innerHTML = `<option value="">跟着时钟（当前：${esc(DayLight.NAMES[now])}）</option>` +
+      DayLight.LIGHTS.map(l => `<option value="${l}">${esc(DayLight.NAMES[l])}</option>`).join("");
+    $("g-cfg-light").value = state.lightPick || "";
+  }
+  // 选了就留着选的（联机播动画时这一改会排到播完再执行）；被拒绝了（热座里不是主持人等）才换回现在的
+  function setLook(action, value) {
+    try { dispatch({ type: "battle.panel", action, value }); } catch (e) { flashHint(e.message); renderLookSelects(); }
+  }
+
   function renderFieldSheet() {
     $("g-cfg-zones").value = state.board ? String(state.board.id) : String(state.zoneMode || 2);
     $("g-cfg-ps").value = String(state.partySize || 4);
     $("g-cfg-weather").value = state.weather || "none";
+    renderLookSelects();
     const elist = $("g-enemy-list");
     elist.innerHTML = "";
     const foesNow = state.units.filter(u => !u.isPlayer && !u.hidden && u.kit !== "ufo_leg");
@@ -5106,6 +5123,8 @@
       setView(snapAll(), false);
       refreshAll();
     };
+    if ($("g-cfg-region")) $("g-cfg-region").onchange = () => setLook("setRegion", $("g-cfg-region").value);
+    if ($("g-cfg-light")) $("g-cfg-light").onchange = () => setLook("setLight", $("g-cfg-light").value);
     $("g-prop-add").onclick = () => {
       const kind = $("g-prop-kind").value;
       const zone = Number($("g-prop-zone").value) || 1;
