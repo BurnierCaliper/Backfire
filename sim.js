@@ -85,8 +85,9 @@ const BattleSim = (function () {
     const ivOff = typeof ENEMY_IV !== "undefined" && !opt.iv;
     if (ivOff) ENEMY_IV.off++;
     try { spawnAll(opt, level, partyN); } finally { if (ivOff) ENEMY_IV.off--; }
-    // 所在区域、光影（只是画面，world-data.js · battleLookStart）
-    if (typeof battleLookStart === "function") battleLookStart({ region: opt.region != null ? opt.region : opt.encounter && opt.encounter.region, light: opt.light });
+    // 所在区域、场景、光影（只是画面，world-data.js · battleLookStart）
+    if (typeof battleLookStart === "function") battleLookStart({ region: opt.region != null ? opt.region : opt.encounter && opt.encounter.region,
+      scene: opt.scene != null ? opt.scene : opt.encounter && opt.encounter.scene, light: opt.light });
     return state;
   }
   function spawnAll(opt, level, partyN) {
