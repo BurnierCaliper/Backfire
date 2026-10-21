@@ -368,6 +368,12 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **联机跑团：不在场的角色分配不再被悄悄清掉；取消每名玩家一名角色的限制；自己的几个单位可以自由换位**（策划定；hotseat-game.js · `configure` / `transferHero`；online-ui.js 转交说明文字；测试 tests/online-assign.test.js、tests/online-host.test.js）
+  - 原因：`configure` 每次都把 `ownerByKit`（按职业记的操控者）整份清空，只按**当前场上**的英雄重建；而 online-game.js · `setupOperators` 在有人进 / 出房间（名单变了）时按场上英雄重新配置。主持人开了一场没带某名角色的战斗，期间或之后有玩家进出房间，这名不在场角色的分配就没了，回到全队后归主持人。
+  - 现在：重新配置时，不在场的角色保留原来的操控者（操控者已离开房间的仍回到主持人）。
+  - #165 的「每名在线玩家最多操控一名角色」取消：主持人分配和战斗中转交都可以把几名角色给同一名玩家（联机单局的分配限制没动）。
+  - 同一名玩家的几个单位：顺序锁定前互相换位直接生效（hotseat.js · `move` 原来就按操控者判断，以前因为一人一角色用不上）；和别人的单位换位仍要对方同意，不能动别人的单位。
+
 - **敌人种族（一）：种族数据、随机 / 固定分配、六维换算、显示、主持人指定**（issue #159，设计见 `docs/enemy-race.md`；enemies.js · `ENEMY_RACES` / `applyEnemyRace` / `setEnemyRace` / `raceDelta`，run.js · `ENEMY_INFO` / `ENEMY_RACE_TABLES`，party.js · `blockChanceRaw`，gm-commands.js、battle-commands.js、battle-templates.js、trpg-commands.js、sim.js、bestiary.js、unit-card.js、online-view.js 等；测试 `tests/enemy-race.test.js`）。种族的**被动**不在这一条里（另开 issue），这里只把种族挂到敌人身上、换算六维、显示出来。
   - **以前**：敌人没有种族。**现在**：有机体的敌人生成时有种族，记在单位上 `u.race = { race, branch }`；生成的入口和个体值一样（`applyEnemyIV(u, iv, race)` 里先 `applyEnemyRace` 再个体值：`spawnEnemyGroup`、`spawnEncounterRows`、战斗命令加敌人、跑团「加敌人」、主持人生成敌人、`BattleSim.setup`）。
   - **种族配置**：`ENEMY_RACES` 是种族 / 小分支的六维修正表（人类、红皮人、犬 / 猫 / 鼠 / 牛类人及其小分支、兽人五支；牛类人三个小分支的修正各不相同）；每个敌人的种族写在 `run.js · ENEMY_INFO`（格式见下）。

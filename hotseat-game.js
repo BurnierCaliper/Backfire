@@ -77,9 +77,14 @@
       if (new Set(ids).size !== ids.length || ids.some(id => typeof id !== "string" || !id)) fail("操作者编号必须唯一");
       const assignments = value.assignments || {}, list = heroes();
       if (Object.keys(assignments).some(id => !list.some(u => u.id === id) || !ids.includes(assignments[id]))) fail("角色分配无效");
-      if (network && (value.mode !== "trpg" || value.players.filter(p => p.gm).length !== 1 || value.players.some(p => !p.gm && list.filter(u => assignments[u.id] === p.id).length > 1))) fail("每名在线玩家最多操控一名角色，未分配角色由主持人操作");
+      // #165 的「每名在线玩家最多一名角色」已取消（策划定）：主持人可以把几名角色分给同一名玩家
+      if (network && (value.mode !== "trpg" || value.players.filter(p => p.gm).length !== 1)) fail("在线跑团需要恰好一名主持人");
       if (value.mode === "coop" && (list.length !== ids.length || ids.some(id => list.filter(u => assignments[u.id] === id).length !== 1))) fail("合作模式需要每名操作者恰好一名角色，请先调整队伍");
-      config = copy(value); ownerByKit = {}; for (const u of list) ownerByKit[u.kit] = assignments[u.id] || gm();
+      // 不在场的角色（这场战斗没上、被收起来）保留原来的操控者：以前这里整份清空重建，
+      // 有人进 / 出房间时（online-game.js · setupOperators 只按场上英雄重新配置）不在场的角色就被悄悄收回给主持人
+      const prevOwners = ownerByKit, keep = {}, onField = new Set(list.map(u => u.kit)), nextGm = (value.players.find(p => p.gm) || value.players[0]).id;
+      for (const kit of Object.keys(prevOwners || {})) if (!onField.has(kit) && ids.includes(prevOwners[kit]) && prevOwners[kit] !== nextGm) keep[kit] = prevOwners[kit];
+      config = copy(value); ownerByKit = keep; for (const u of list) ownerByKit[u.kit] = assignments[u.id] || gm();
       if (!ids.includes(playerId)) playerId = gm();
       setupSession(); configured = true; notice = "";
       state.history = []; GAME.undo = []; GAME.disarm(); refresh();
@@ -436,14 +441,13 @@
       if (choice) return { ok: false, reason: "有分步选择在等人回答，回答完才能转交" };
       return session.transferState();
     },
-    /** 主持人把英雄（连同武器人）转交给另一名操作者；toId 为主持人 = 收回。联机每人最多一名角色的限制照旧 */
+    /** 主持人把英雄（连同武器人）转交给另一名操作者；toId 为主持人 = 收回。联机一名玩家可以操控几名角色（#165 的限制已取消） */
     transferHero(heroId, toId) {
       const gate = this.transferState();
       if (!gate.ok) fail(gate.reason);
       const hero = heroes().find(u => u.id === heroId);
       if (!hero) fail("只能转交英雄角色");
       if (!config.players.some(p => p.id === toId)) fail("没有这名玩家");
-      if (network && toId !== gm() && heroes().some(u => u.id !== heroId && (session.snapshot().assignments[u.id] || gm()) === toId)) fail("每名在线玩家最多操控一名角色，请先把他现在的角色交还或转给别人");
       session.transfer(gm(), heroId, toId);
       ownerByKit[hero.kit] = toId;
       if (config.assignments) { if (toId === gm()) delete config.assignments[heroId]; else config.assignments[heroId] = toId; }

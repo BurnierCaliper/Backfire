@@ -236,7 +236,7 @@
       if (view.mode === "rogue" || typeof api.transfer !== "function") return '<p class="ol-muted">联机单局开局后座位固定，不能转交；玩家掉线可以先「接管」。</p>';
       const gate = typeof api.transferState === "function" ? api.transferState() : { ok: false, reason: "这个版本不支持转交" };
       const rows = heroes.map(h => { const to = transferDraft[h.id] || own(); return `<label><span>${esc(h.name)}</span><select data-transfer="${esc(h.id)}" aria-label="${esc(h.name)}转交给"${gate.ok ? "" : " disabled"}>${players().map(p => option(p.id, p.name + (p.gm ? " · 主持人（收回）" : ""), to === p.id)).join("")}</select>${button("转交", "transfer", `data-hero="${esc(h.id)}"`, !gate.ok || pending)}</label>`; }).join("");
-      return `<h3>战斗中转交角色</h3><p class="ol-muted">只能在两个单位的回合之间转交，武器人跟着角色一起转；每名玩家最多操控一名角色；玩家掉线可以先「接管」。</p>${gate.ok ? "" : `<p class="ol-muted" role="status" data-transfer-reason>现在不能转交：${esc(gate.reason)}</p>`}<div class="ol-assignments">${rows}</div>`;
+      return `<h3>战斗中转交角色</h3><p class="ol-muted">只能在两个单位的回合之间转交，武器人跟着角色一起转；一名玩家可以操控几名角色；玩家掉线可以先「接管」。</p>${gate.ok ? "" : `<p class="ol-muted" role="status" data-transfer-reason>现在不能转交：${esc(gate.reason)}</p>`}<div class="ol-assignments">${rows}</div>`;
     }
     /** 主持人对玩家座位的操作：掉线时「接管」他的角色（战斗中也行）；「释放座位」让丢了恢复令牌的人能用同一个昵称重新加入 */
     function seatTools(p) {
