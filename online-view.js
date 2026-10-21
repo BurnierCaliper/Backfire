@@ -639,10 +639,22 @@
     // 长休结算：不带坚毅（只带那一句 mood）；游戏时钟
     if (own(packet, "rest")) out.rest = projectRest(get(packet, "rest"));
     if (own(packet, "camp")) out.camp = projectCamp(get(packet, "camp"));
-    if (own(packet, "clock")) { const ck = get(packet, "clock"); out.clock = obj(ck) ? { day: Math.max(1, Math.floor(Number(ck.day) || 1)), clock: ((Math.floor(Number(ck.clock) || 0) % 1440) + 1440) % 1440 } : null; }
+    if (own(packet, "clock")) { const ck = get(packet, "clock"); out.clock = obj(ck) ? { day: Math.max(1, Math.floor(Number(ck.day) || 1)), clock: ((Math.floor(Number(ck.clock) || 0) % 1440) + 1440) % 1440, hours: Math.max(0, Math.round((Number(ck.hours) || 0) * 60) / 60) } : null; }
+    if (own(packet, "party")) out.party = projectParty(get(packet, "party"));
     // Resync is another envelope using these same explicit projectors, not a
     // path for forwarding an opaque nested packet or raw save snapshot.
     return out;
+  }
+  /** 跑团探索的队伍卡（party-cards.js · heroDto）：白名单，坚毅生命（shp / shpMax）不在里面，房主那份就算带了也丢掉 */
+  function projectParty(list) {
+    if (!Array.isArray(list)) return null;
+    const str = (v, k) => typeof v === "string" ? text(v, k) || "" : "";
+    const num = v => (typeof v === "number" && isFinite(v) ? Math.round(v) : 0);
+    return list.slice(0, 12).filter(obj).map(h => ({ id: str(h.id, 60), kit: str(h.kit, 40), name: str(h.name, 40), level: num(h.level) || 1,
+      dead: !!h.dead, dying: !!h.dying, upOnShp: !!h.upOnShp, hp: num(h.hp), hpMax: num(h.hpMax), atk: num(h.atk), def: num(h.def), defMax: num(h.defMax),
+      block: typeof h.block === "number" && isFinite(h.block) ? Math.round(h.block) : null, xp: num(h.xp), xpNext: num(h.xpNext),
+      attrPoints: num(h.attrPoints), featPoints: num(h.featPoints), feats: arr(h.feats).slice(0, 20).map(f => str(f, 30)).filter(Boolean),
+      weapons: arr(h.weapons).slice(0, 6).filter(obj).map(w => ({ kit: str(w.kit, 40), name: str(w.name, 40), level: num(w.level) || 1, bond: num(w.bond), dur: num(w.dur), max: num(w.max) })) }));
   }
   /** 营地（长休前）：全队状态和补给，坚毅只留短词 mood */
   function projectCamp(c) {
@@ -818,7 +830,7 @@
     });
     return out;
   }
-  const api = { SCHEMA, pickKeys, projectHud, projectPacket, projectQuests, projectPurse, projectShop, projectShopSell, projectClinic, projectSmith, projectWorkshop, projectCyberware, projectRest, projectCamp, projectSheets, projectBagDetail, projectUnit, projectState, projectTape, projectFx, projectMessages, projectLogs, projectView, projectActionMenu, safeText: text, safeError };
+  const api = { SCHEMA, pickKeys, projectHud, projectPacket, projectQuests, projectPurse, projectShop, projectShopSell, projectClinic, projectSmith, projectWorkshop, projectCyberware, projectRest, projectCamp, projectParty, projectSheets, projectBagDetail, projectUnit, projectState, projectTape, projectFx, projectMessages, projectLogs, projectView, projectActionMenu, safeText: text, safeError };
   root.OnlineView = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof globalThis !== "undefined" ? globalThis : window);

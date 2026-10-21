@@ -52,6 +52,7 @@
 .ol-stage { position: fixed; z-index: 40; inset: var(--hs-top-height, 0px) 0 0; overflow-y: auto; padding: 20px 24px 95px; background: var(--sk-oil, #110e0b); }
 .ol-stage-heading { margin-bottom: 20px; }
 .ol-stage-heading strong { color: var(--sk-mint, #39e6b4); }
+.ol-field { padding: 6px 8px; background: #393723; color: #e6dbb0; font-size: 12px; }   /* online-battle.js 的战场也带 ol-field */
 .ol-weather { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border: 1px solid currentColor; color: #e6cf8b; background: #332b19; }
 .ol-weather-icon { font-size: 32px; line-height: 1; }
 .ol-weather small { display: block; margin-top: 3px; }
@@ -70,11 +71,6 @@
 .ol-xp { color: #edc17d; }
 .ol-result { border-color: #c99a46; }
 .ol-result-grade { font-size: 24px; color: #f2c230; font-weight: 700; }
-.ol-zones { display: grid; grid-template-columns: repeat(var(--ol-cols, 3), minmax(0, 1fr)); gap: 16px; align-items: start; }
-.ol-zone { grid-column: var(--ol-col, auto); grid-row: var(--ol-row, auto); min-width: 0; padding: 12px; background: #1a1511; border: 1px solid #4d4337; }
-.ol-zone > h2 { color: var(--sk-brass, #c99a46); padding-bottom: 8px; border-bottom: 1px solid #4d4337; }
-.ol-field { padding: 6px 8px; background: #393723; color: #e6dbb0; font-size: 12px; }
-.ol-gaps { display: flex; flex-wrap: wrap; gap: 8px 20px; padding: 10px 0; color: var(--sk-muted, #a8977b); }
 .ol-unit { position: relative; background: #2a2520; border: 1px solid #655947; padding: 12px; margin: 12px 0; overflow-wrap: anywhere; }
 .ol-unit header { gap: 4px; }
 .ol-unit h3 { margin: 0; }
@@ -93,10 +89,6 @@
 .ol-unit > button { width: 100%; margin-top: 10px; }
 .ol-popup { position: absolute; pointer-events: none; top: 20%; left: 50%; transform: translate(-50%, 8px); opacity: 0; font-size: 24px; font-weight: 800; color: #fff2cf; text-shadow: 0 2px 3px #000; }
 .ol-popup.ol-visible { opacity: 1; transform: translate(-50%, -8px); transition: transform .18s ease-out; }
-.ol-prop { display: grid; gap: 3px; padding: 8px; border: 1px dashed #655947; margin-top: 8px; }
-.ol-prop span { color: var(--sk-muted, #a8977b); font-size: 12px; }
-.ol-actions { margin: 18px 0; padding: 16px; background: #2a2520; border: 1px solid #c99a46; }
-.ol-actions > button { margin: 8px 8px 0 0; }
 .ol-action-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin: 12px 0; }
 .ol-action-options button { width: 100%; }
 .ol-action-options small { display: block; color: #cbb99a; padding: 4px; }
@@ -166,12 +158,8 @@ body.ol-has-side .ol-toast { right: 344px; }
   .ol-card { padding: 18px 12px; margin-top: 0; }
   .ol-card footer > button { flex: 1 1 140px; }
   .ol-stage { padding: 16px 10px 90px; }
-  .ol-zones { grid-template-columns: 1fr; gap: 14px; }
-  .ol-zone { grid-column: auto; grid-row: auto; padding: 10px; }
-  .ol-zone > h2 { font-size: 20px; }
   .ol-unit { margin: 10px 0; }
   .ol-action-options { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-  .ol-actions { padding: 12px; }
   .ol-dock { right: 8px; bottom: calc(8px + env(safe-area-inset-bottom)); }
   .ol-exploration-party { grid-template-columns: 1fr; }
   /* 手机：右侧栏改成贴在底部的一条，高度 38% */
@@ -482,6 +470,32 @@ body.online-player.ol-in-battle .ol-battle .sk.blocked .cost { color: #d9a07a; }
 .ol-confirm .ol-card { max-width: 420px; }
 .ol-confirm p { margin: 0; color: #e7dcc6; line-height: 1.6; }
 .ol-confirm-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px; }
+
+/* 主持人的街头废土皮肤（skin.css 的 .ol-skin）：舞台底色、.g-btn 按钮、队伍卡 .rhero 和主持人一样；
+   按钮保留 44px 触屏高度。弹窗（.ol-overlay / .ovl）照旧。 */
+.ol-stage.ol-skin { background-color: var(--sk-concrete, #2a2622); }
+.ol-ui .g-btn.ol-button { min-height: 44px; height: auto; }
+.ol-clock { margin: 4px 0 8px; padding: 6px 10px; background: rgba(0, 0, 0, .25); font-size: 13px; color: var(--sk-muted, #a8977b); }
+.ol-clock b { color: var(--sk-canvas, #ece0c6); font-family: var(--num, inherit); }
+.ol-clock .warn { color: var(--foe, #e0604a); }
+.ol-party { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; margin-top: 12px; }
+.ol-party .rhero.mine { border-left-color: var(--sk-mint, #39e6b4); }
+.ol-party .rhero.focus { outline: 2px solid var(--sk-hazard, #f2c230); outline-offset: -2px; }
+.ol-party .rh-top { flex-wrap: wrap; gap: 4px; align-items: center; }
+.ol-party .rh-owner { color: var(--sk-muted, #a8977b); font-size: 12px; margin: -2px 0 4px; }
+/* 夜晚色调：和 game.css 的 .g-app.is-night 同样的压暗偏蓝 + 四周暗角（按 packet.clock，18:00–05:00） */
+.ol-stage.is-night .g-zone { box-shadow: inset 0 0 0 9999px rgba(14, 22, 52, .55); border-color: #3c4566; }
+.ol-stage.is-night .g-zone .zlabel { color: #c8d2f0; }
+/* 战场四周暗角：和主持人一样只在战场上（game.js 只给战场挂 .night-vignette）；探索时只有时钟变夜色 */
+.ol-stage.is-night .g-field { position: relative; }
+.ol-stage.is-night .g-field::after { content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 5;
+  background: radial-gradient(ellipse at 50% 40%, transparent 55%, rgba(5, 8, 20, .55) 100%); }
+.ol-stage.is-night .ol-clock { background: rgba(14, 22, 52, .55); }
+/* 窄屏：标题下的工具按钮（角色资料…任务日志）排成格子、自动换行，不再横滑被截掉；保持 44px 触屏高度（探索和战斗都一样） */
+@media (max-width: 760px) {
+  body.online-player .ol-stage-heading .ol-info-tools { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 6px; overflow: visible; max-width: 100%; }
+  body.online-player .ol-stage-heading .ol-info-tools .g-btn.ol-button { min-height: 44px; min-width: 0; padding: 4px 6px; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: none; }
+}
 /* 申请检定（check-request-ui.js）：玩家浮层 / 主持人待处理列表；手机上按钮 44px、整行排开 */
 .crq-card { max-width: 560px; width: 100%; }
 .crq-form { display: grid; gap: 8px; }
