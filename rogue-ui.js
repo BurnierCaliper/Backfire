@@ -525,7 +525,8 @@
   }
   /* ---------- 商店 · 买 / 卖页签（shop-sell-ui.js；规则在 rogue.js · shopSellView / sellItem / buybackItem） ---------- */
   function sellView() {
-    try { return query("shopSell", online() ? { kit: hostPayer() } : {}); } catch (_) { return null; }
+    // 联机房主可能操控好几名角色：他们名下的东西和回购单都要列出来
+    try { return online() ? Rogue.shopSellView(run, { kits: OnlineRogue.hostKits() }) : query("shopSell", {}); } catch (_) { return null; }
   }
   function sellModel() {
     const heroes = run.party.filter(h => !h.dead).map(h => ({ kit: h.kit, name: Rogue.heroName(h.kit), purse: online() ? OnlineRogue.purse(h.kit) : null }));

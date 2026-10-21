@@ -17,8 +17,10 @@
   function reset() { ui.tab = {}; ui.qty = {}; }
   const tabOf = key => ui.tab[key || ""] === "sell" ? "sell" : "buy";
   function setTab(key, tab) { ui.tab[key || ""] = tab === "sell" ? "sell" : "buy"; }
-  const qtyKey = r => `${r.owner}|${r.id}`;
-  function qtyOf(r) { const n = Math.floor(num(ui.qty[qtyKey(r)]) || 1); return Math.max(1, Math.min(Math.max(1, num(r.qty)), n)); }
+  const rowKey = r => `${r.owner}|${r.id}`;
+  /** 数量按面板分开记：「面板 key::归属|物品」，一个面板离店清空不影响别的面板 */
+  const qtyKey = (key, r) => `${key || ""}::${rowKey(r)}`;
+  function qtyOf(key, r) { const n = Math.floor(num(ui.qty[qtyKey(key, r)]) || 1); return Math.max(1, Math.min(Math.max(1, num(r.qty)), n)); }
 
   /** 视图清洗：缺字段的行丢掉，数字取整 */
   function normalize(v) {
@@ -49,16 +51,16 @@
     return `<div class="ss-tabs" role="tablist" aria-label="买 / 卖">${b("buy", "买")}${b("sell", "卖")}</div>`;
   }
   function rowHtml(m, r) {
-    const n = qtyOf(r), off = m.disabled || !r.ok || !r.qty || !m.canAct(r.owner);
+    const n = qtyOf(m.key, r), off = m.disabled || !r.ok || !r.qty || !m.canAct(r.owner);
     const kit = r.owner === SHARED ? m.actor : r.owner;
     const why = !r.ok ? r.reason || "不收" : !m.canAct(r.owner) ? "不是你的角色" : "";
-    return `<li class="ss-row${r.ok ? "" : " off"}" data-ss-row="${esc(qtyKey(r))}">
+    return `<li class="ss-row${r.ok ? "" : " off"}" data-ss-row="${esc(rowKey(r))}">
       <span class="ss-name"><b>${esc(r.name)}</b><small>有 ${esc(r.qty)}${why ? ` · <span class="ss-why">${esc(why)}</span>` : ""}</small></span>
       <span class="ss-unit"><small>单价</small><b>${r.ok ? esc(r.unitPrice) : "—"}</b></span>
       <span class="ss-step" role="group" aria-label="卖几份">
-        <button type="button" class="g-btn ss-dec" data-ss-step="-1" data-ss-q="${esc(qtyKey(r))}" data-ss-max="${esc(r.qty)}"${off || n <= 1 ? " disabled" : ""} aria-label="少一份">−</button>
+        <button type="button" class="g-btn ss-dec" data-ss-step="-1" data-ss-q="${esc(qtyKey(m.key, r))}" data-ss-max="${esc(r.qty)}"${off || n <= 1 ? " disabled" : ""} aria-label="少一份">−</button>
         <b class="ss-n">${esc(n)}</b>
-        <button type="button" class="g-btn ss-inc" data-ss-step="1" data-ss-q="${esc(qtyKey(r))}" data-ss-max="${esc(r.qty)}"${off || n >= r.qty ? " disabled" : ""} aria-label="多一份">＋</button></span>
+        <button type="button" class="g-btn ss-inc" data-ss-step="1" data-ss-q="${esc(qtyKey(m.key, r))}" data-ss-max="${esc(r.qty)}"${off || n >= r.qty ? " disabled" : ""} aria-label="多一份">＋</button></span>
       <span class="ss-total"><small>共</small><b>${r.ok ? esc(r.unitPrice * n) : "—"}</b></span>
       <button type="button" class="g-btn ss-sell" ${cmdAttr({ action: "sellItem", kit, id: r.id, qty: n, owner: r.owner })}${off || !kit ? " disabled" : ""}>卖</button></li>`;
   }
@@ -113,13 +115,19 @@
     }
     if (t.dataset.ssCmd) {
       const c = JSON.parse(t.dataset.ssCmd);
-      if (c.action === "sellItem") delete ui.qty[`${c.owner}|${c.id}`];
+      const host = t.closest && t.closest("[data-ss-host]");
+      if (c.action === "sellItem") delete ui.qty[`${host ? host.dataset.ssHost : ""}::${c.owner}|${c.id}`];
       if (onCmd) onCmd(c); if (rerender) rerender(); return true;
     }
     return false;
   }
   /** 包里没有卖出视图了（离开商店 / 收摊）：页签回到「买」 */
-  function sync(key, hasView) { if (!hasView && tabOf(key) === "sell") setTab(key, "buy"); if (!hasView) ui.qty = {}; }
+  function sync(key, hasView) {
+    if (hasView) return;
+    if (tabOf(key) === "sell") setTab(key, "buy");
+    const pre = `${key || ""}::`;
+    Object.keys(ui.qty).forEach(k => { if (k.startsWith(pre)) delete ui.qty[k]; });
+  }
 
   /** 本机 / 房主的提示条（联机玩家用 online-ui 自己的 .ol-toast） */
   let toastBox = null, toastTimer = 0;

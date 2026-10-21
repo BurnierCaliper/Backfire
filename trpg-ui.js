@@ -42,22 +42,44 @@
   }
   /* ---------- 商店 · 买 / 卖页签（shop-sell-ui.js；卖出视图 trpgShopSellFor(id, isGM)，指令 shopSell / shopBuyback 走 OnlineGame.submit） ---------- */
   function trpgSellView() { try { return typeof trpgShopSellView === "function" ? trpgShopSellView(null) : null; } catch (_) { return null; } }
+  let sellSeller = "party";   // 主持人卖东西 / 回购记在谁名下（「谁卖」选单，默认队伍公账）
+  function sellSellerHtml() {
+    const opts = [["party", `队伍公账（${trpgPurse("party")}）`]].concat(heroes().filter(h => !h.dead).map(h => [h.kit, `${h.name}（${trpgPurse(h.kit)}）`]));
+    if (!opts.some(([k]) => k === sellSeller)) sellSeller = "party";
+    return `<div class="tr-row tr-payer">谁卖 <select data-ss-seller>${opts.map(([k, n]) => `<option value="${esc(k)}"${k === sellSeller ? " selected" : ""}>${esc(n)}</option>`).join("")}</select>
+      <span class="r-hint">卖得的钱进队伍公账；回购只能由卖的人从他的钱包买回。</span></div>`;
+  }
   function trpgSellModel(v) {
     const hs = heroes().filter(h => !h.dead).map(h => ({ kit: h.kit, name: h.name, purse: trpgPurse(h.kit) }));
-    return ShopSellUI.model(v, { key: "trpg-gm", heroes: hs, actor: payer || "party", canAct: () => true, money: k => trpgPurse(k || "party") });
+    return ShopSellUI.model(v, { key: "trpg-gm", heroes: hs, actor: sellSeller, canAct: () => true, money: k => trpgPurse(k || "party") });
   }
-  /** 主持人卖 / 买回：trpg {action:"shopSell"|"shopBuyback"}（shop-sell.js · trpgShopSell / trpgShopBuyback，失败会抛错） */
-  function trpgSellSubmit(cmd) {
-    let res;
-    pushUndo();
+  const sellName = k => k === "party" ? "队伍公账" : ((heroes().find(h => h.kit === k) || {}).name || k);
+  /** 结果提示按 shopSell.last.seq 只弹一次（联机时房主的 submit 可能因为战斗演出排队，回执不可靠） */
+  let gmSellSeen = null;
+  function gmSellToast(v) {
+    const last = v && v.last;
+    if (!v) { gmSellSeen = null; return; }          // 离开商店：忘掉（seq 不会重复）
+    if (gmSellSeen === null) { gmSellSeen = last ? last.seq : 0; return; }   // 刚打开：旧结果不重播
+    if (!last || last.seq <= gmSellSeen) return;
+    gmSellSeen = last.seq;
+    ShopSellUI.toast(ShopSellUI.toastText(last, sellName));
+  }
+  /** 主持人卖 / 买回：联机时走 OnlineGame.submit（和诊所一样，hotseat-game.js · shopSell / shopBuyback）；单机直接 trpg 指令。失败显示原因 */
+  async function trpgSellSubmit(cmd) {
+    const msg = cmd.action === "sellItem" ? { type: "shopSell", kit: cmd.kit, id: cmd.id, qty: cmd.qty, owner: cmd.owner } : { type: "shopBuyback", kit: cmd.kit, token: cmd.token };
+    if (gmSellSeen === null) { const b = (trpgSellView() || {}).last; gmSellSeen = b ? b.seq : 0; }
     try {
-      res = cmd.action === "sellItem" ? Commands.dispatch({ type: "trpg", action: "shopSell", kit: cmd.kit, id: cmd.id, qty: cmd.qty, owner: cmd.owner })
-        : Commands.dispatch({ type: "trpg", action: "shopBuyback", kit: cmd.kit, token: cmd.token });
+      if (typeof OnlineGame !== "undefined" && OnlineGame.isHost && OnlineGame.isHost()) {
+        const r = await OnlineGame.submit(msg);
+        if (r && r.ok === false) throw new Error(r.error || r.msg || "没做成");
+      } else {
+        pushUndo();
+        const res = Commands.dispatch(Object.assign({ type: "trpg", action: msg.type }, msg, { type: "trpg" }));
+        if (res && res.msg) { log.push({ stamp: stampNow(), lines: ["💰 " + res.msg] }); saveLog(); }
+        save();
+      }
       if (window.Sfx) Sfx.ui("coin");
-      if (res && res.msg) { log.push({ stamp: stampNow(), lines: ["💰 " + res.msg] }); saveLog(); }
-      save();
-    } catch (e) { res = { ok: false, msg: e.message || String(e) }; }
-    ShopSellUI.toast(ShopSellUI.toastText(res, k => k === "party" ? "队伍公账" : ((heroes().find(h => h.kit === k) || {}).name || k)));
+    } catch (e) { ShopSellUI.toast(ShopSellUI.toastText({ ok: false, msg: e.message || String(e) })); }
     render();
   }
   function tabBuyShop() {
@@ -295,7 +317,8 @@
       const v = trpgSellView();
       ShopSellUI.sync("trpg-gm", !!v);
       const sell = ShopSellUI.tabOf("trpg-gm") === "sell";
-      return `<div class="ss-host" data-ss-host="trpg-gm">${ShopSellUI.tabsHtml("trpg-gm", { sellOff: !v })}${sell ? ShopSellUI.html(trpgSellModel(v)) : tabBuyShop()}</div>`;
+      gmSellToast(v);
+      return `<div class="ss-host" data-ss-host="trpg-gm">${ShopSellUI.tabsHtml("trpg-gm", { sellOff: !v })}${sell ? sellSellerHtml() + ShopSellUI.html(trpgSellModel(v)) : tabBuyShop()}</div>`;
     },
     bag() {
       const items = bagList();
@@ -1333,6 +1356,7 @@
     on("tr-long-force", () => act(ruleCommand("campOpen", { plan: restPlan(true) })));
     on("tr-restore", () => act(ruleCommand("restore")));
     // 商店（买 / 卖页签）
+    P.querySelectorAll("[data-ss-seller]").forEach(sel => { sel.onchange = () => { sellSeller = sel.value; render(); }; });
     P.querySelectorAll("[data-ss-host]").forEach(h => { h.onclick = e => { if (window.ShopSellUI) ShopSellUI.handle(e, trpgSellSubmit, render); }; });
     const qty = (key) => (P.querySelector(`[data-qty="${key}"]`) || {}).value || 1;
     P.querySelectorAll("[data-buy]").forEach(b => { b.onclick = () => { if (window.Sfx) Sfx.ui("coin"); act(ruleCommand("buy", { key: b.dataset.buy, qty: qty(b.dataset.buy), free: false })); }; });
