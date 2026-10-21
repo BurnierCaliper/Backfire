@@ -102,7 +102,7 @@
  * calculator dialogs live outside the original screen roots; hiding individual
  * screen IDs leaves those dialogs in the outer document and its scroll range. */
 body.online-player { overflow: hidden; }
-body.online-player > :not(.ol-ui):not(.hs-ui):not(.hs-sheet):not(.ar-sheet):not(.wm):not(#sk-tip):not(.sk-tip):not(.unit-tip):not(.rr-overlay):not(.ovl) { display: none !important; }
+body.online-player > :not(.ol-ui):not(.hs-ui):not(.hs-sheet):not(.ar-sheet):not(.wm):not(#sk-tip):not(.sk-tip):not(.unit-tip):not(.mech-tip):not(.rr-overlay):not(.ovl) { display: none !important; }
 /* 玩家看自己的角色资料 / 武器页：压在联机舞台上面 */
 body.online-player .hs-sheet, body.online-player .ar-sheet { z-index: 95; }
 /* 玩家右侧栏：战斗（记录）/ 小队 两个频道 */
@@ -400,6 +400,7 @@ body.online-player.ol-in-battle .ol-battle .sk.blocked .cost { color: #d9a07a; }
 @media (max-height: 820px) and (min-width: 821px) {
   body.online-player.ol-in-battle .ol-battle .g-field { padding: 8px 10px 6px; }
   body.online-player.ol-in-battle .ol-battle .g-field .g-zone { padding-top: 20px; }
+  body.online-player.ol-in-battle .ol-battle .g-field .g-zone.tower { padding-top: 38px; }   /* 区名旁边有踩塔的图标（unit-card.js · paintTowers） */
 }
 /* 窄屏：技能栏固定在屏幕下方；战斗记录 / 小队沿用 #58 的默认收起底栏（online-ui.js phoneSide） */
 @media (max-width: 820px) {
