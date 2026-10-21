@@ -342,8 +342,8 @@ test("沙暴时远景也蒙上沙色（#240）：天幕往沙黄的雾色靠、�
     const dist = (a, c) => Math.hypot(a.r - c.r, a.g - c.g, a.b - c.b);
     for (const theme of ["day", "dusk", "night"]) for (const kind of ["desert", "mine", "city"]) {
       const tint = WX.weatherPlan("sand", theme).tint, fog = WX.fogColor(F.theme[theme], tint), tag = `${theme} ${kind}`;
-      assert.ok(tint.sky > 0 && tint.haze > B.BACKDROP.haze && tint.veil > 0, "沙暴的远景蒙多少在配置里（WEATHER.sand 的 sky / haze / veil）");
-      const dust = { color: fog.getHex(), sky: tint.sky, haze: tint.haze, veil: tint.veil };
+      assert.ok(tint.sky > 0 && tint.haze > B.BACKDROP.haze && tint.veil > 0 && tint.sun < 1, "沙暴的远景蒙多少在配置里（WEATHER.sand 的 sky / haze / veil / sun）");
+      const dust = { color: fog.getHex(), sky: tint.sky, haze: tint.haze, veil: tint.veil, sun: tint.sun };
       const calm = B.buildBackdrop(kind, b, theme, layout.camera, { sky: SKY[theme], fog: F.theme[theme] });
       const sand = B.buildBackdrop(kind, b, theme, layout.camera, { sky: SKY[theme], fog: fog.getHex(), dust });
       const skyOf = (bd) => bd.group.children.find(o => o.material && o.material.uniforms && o.material.uniforms.c0).material.uniforms;
@@ -351,6 +351,8 @@ test("沙暴时远景也蒙上沙色（#240）：天幕往沙黄的雾色靠、�
       ["c0", "c1", "c2", "c3"].forEach(k => assert.ok(dist(su[k].value, fog) < dist(cu[k].value, fog) - 0.01, `${tag}：天幕的 ${k} 没有往沙黄的雾色靠`));
       assert.ok(su.hazeH.value === tint.haze && cu.hazeH.value === B.BACKDROP.haze, tag + "：贴地的雾更高");
       assert.ok(su.stars.value === 0 && su.clouds.value === 0, tag + "：星星、亮云看不见");
+      const lum = (c) => c.r + c.g + c.b;
+      assert.ok(Math.abs(lum(su.sunColor.value) - lum(cu.sunColor.value) * tint.sun) < 1e-6, tag + "：太阳的光晕只剩 sun 成");
       if (theme === "night") assert.equal(cu.stars.value, 1, "平时夜里有星星");
       // 中景剪影（MeshStandardMaterial）更偏雾色
       const props = (bd) => { const out = []; bd.group.traverse(o => { if (o.isMesh && o.material && o.material.type === "MeshStandardMaterial") out.push(o.material.color); }); return out; };

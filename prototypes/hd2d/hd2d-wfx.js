@@ -161,12 +161,11 @@
     }
     /** 雷鸣：3D 打雷闪白的那一下，2D 层跟着淡掉（--wfx-flash）。只在要淡的天气里每帧读 opts.flash()（场景的 sc.flash，减少动态效果时那边已经减弱过） */
     function watchFlash(on) {
-      const raf0 = root.requestAnimationFrame, caf = root.cancelAnimationFrame;
-      if (on && !raf && opts.flash && raf0) {
-        const tick = () => { raf = raf0(tick); setFlash(opts.flash() * (last ? last.flash : 0)); };
-        raf = raf0(tick);
+      if (on && !raf && opts.flash && root.requestAnimationFrame) {
+        const tick = () => { raf = root.requestAnimationFrame(tick); setFlash(opts.flash() * (last ? last.flash : 0)); };
+        raf = root.requestAnimationFrame(tick);
       } else if (!on && raf) {
-        if (caf) caf(raf);
+        if (root.cancelAnimationFrame) root.cancelAnimationFrame(raf);
         raf = 0;
       }
       if (!on) setFlash(0);

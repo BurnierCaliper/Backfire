@@ -15,8 +15,8 @@
  *   fx.strike       // 最近一道雷 { n, x, z, edge, age }（远景拿 x 照亮那一片云），还没打过是 null
  *   fx.storm        // 有没有乌云 + 雷击（场景拿去压暗灯光）
  *   fx.heat         // 酷暑的热浪强度 0–1，由场景拿去开扭曲后期
- *   fx.tint         // { fog: 0xRRGGBB, near, far, mix, sky, haze, veil, dof }：这个天气想要的雾（near / far 乘在场景算好的雾距上，见 fogRange；
- *                   //   雾色往 fog 靠 mix，见 fogColor）；sky / haze / veil = 远景蒙上多少沙尘（hd2d-backdrop.js 的 colors.dust）；dof = 远处景深多糊几倍
+ *   fx.tint         // { fog: 0xRRGGBB, near, far, mix, sky, haze, veil, sun, dof }：这个天气想要的雾（near / far 乘在场景算好的雾距上，见 fogRange；
+ *                   //   雾色往 fog 靠 mix，见 fogColor）；sky / haze / veil / sun = 远景蒙上多少沙尘（hd2d-backdrop.js 的 colors.dust）；dof = 远处景深多糊几倍
  * 减少动态效果时场景传 dt = 0、t 停住：粒子停在原地；雷击按真实时间（opts.dt）照打，但只闪一下、亮度打折，镜头不抖。
  * 2D 的天气层（正式画面的 weather-fx.css / weather-fx.js 原样套上来）在 hd2d-wfx.js，压在这些 3D 粒子上面（#240）。 */
 import * as THREE from "three";
@@ -31,7 +31,7 @@ const L = window.HD2DLayout;
  *   沙粒顺着风横飞（wind：速度的 x 分量是顺风的、z 分量是横着飘的，转到 setWind 给的风向上；和 2D 层的沙雾一个方向），
  *   再加一层短短的拖影（streak：lines，跟着沙粒一起飞，看得出在横飞）；
  *   雾更浓更黄：雾色更偏沙黄、mix 更往它靠，起雾 / 全进雾都更近（以前 near 0.55 / far 2.3：起雾早但拉得很长，战场后面的地反而比晴天还清楚）；
- *   远景蒙上沙色（hd2d-backdrop.js 的 colors.dust：sky 天幕往雾色靠多少、haze 贴地融进雾里的那一截多高、veil 中景剪影至少蒙多少，星星和亮云盖住）；
+ *   远景蒙上沙色（hd2d-backdrop.js 的 colors.dust：sky 天幕往雾色靠多少、haze 贴地融进雾里的那一截多高、veil 中景剪影至少蒙多少、sun 太阳的光晕剩几成，星星和亮云盖住）；
  *   远处景深更糊（dof：远处的糊上限 × 这个数）。2D 的沙雾在 hd2d-wfx.js（正式画面的 .wfx-sand 原样套上来） */
 const FOG_MIX = 0.6;
 const WEATHER = {
@@ -39,7 +39,7 @@ const WEATHER = {
     kind: "points", count: 1600, size: 0.16, color: 0xe6bd7c, opacity: 0.85, vel: [8.5, -0.35, 1.2], jitter: 1.5, wind: true,
     streak: { count: 520, len: 0.75, color: 0xf2d29a, opacity: 0.45 },
     fog: { day: 0xd09a50, dusk: 0xc08850, night: 0x8a6a3a }, mix: 0.8, near: 0.76, far: 0.9,
-    sky: 0.5, haze: 0.42, veil: 0.35, dof: 1.8
+    sky: 0.5, haze: 0.42, veil: 0.35, sun: 0.6, dof: 1.8
   },
   snow: { kind: "points", count: 1300, size: 0.18, color: 0xffffff, opacity: 0.9, vel: [0.25, -1.3, 0.1], jitter: 0.45, sway: 0.5, fog: 0xc6d3de, near: 0.7, far: 3.0 },
   acid: { kind: "lines", count: 1000, len: 0.75, color: 0xa6e04a, opacity: 0.6, vel: [0.6, -15, 0.2], fog: 0x6a8a34, near: 0.65, far: 2.8, additive: true },
@@ -93,7 +93,7 @@ export function weatherPlan(kind, theme) {
     streak: cfg && cfg.kind && cfg.streak ? Object.assign({ kind: "lines", vel: cfg.vel, wind: cfg.wind }, cfg.streak) : null,
     ambient: AMBIENT[kind] || AMBIENT.clear[theme] || AMBIENT.clear.day,
     storm: !!(cfg && cfg.storm),
-    tint: fog != null ? { fog, near: cfg.near, far: cfg.far, mix: cfg.mix != null ? cfg.mix : FOG_MIX, sky: cfg.sky || 0, haze: cfg.haze || 0, veil: cfg.veil || 0, dof: cfg.dof || 1 } : null
+    tint: fog != null ? { fog, near: cfg.near, far: cfg.far, mix: cfg.mix != null ? cfg.mix : FOG_MIX, sky: cfg.sky || 0, haze: cfg.haze || 0, veil: cfg.veil || 0, sun: cfg.sun != null ? cfg.sun : 1, dof: cfg.dof || 1 } : null
   };
 }
 

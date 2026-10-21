@@ -323,7 +323,7 @@ export function createHd2dScene(container, options) {
   function fogColorOf(T, tint) { return fogColor(T.fog, tint); }
   /** 沙暴（#240）：远景蒙上的沙尘（hd2d-backdrop.js 的 colors.dust）——颜色就是这时的雾色，蒙多少按天气配置（tint.sky / haze / veil）；别的天气是 null */
   function dustOf(T, tint) {
-    return tint && tint.sky > 0 ? { color: fogColorOf(T, tint).getHex(), sky: tint.sky, haze: tint.haze, veil: tint.veil } : null;
+    return tint && tint.sky > 0 ? { color: fogColorOf(T, tint).getHex(), sky: tint.sky, haze: tint.haze, veil: tint.veil, sun: tint.sun } : null;
   }
   function applyFog() {
     const T = THEMES[state.themeName] || THEMES.day;
@@ -531,7 +531,7 @@ export function createHd2dScene(container, options) {
    *  沙暴时整片远景蒙上沙色（dust，天边也接上沙黄的雾色，#240）；skyline = 楼群的高度倍数 */
   function syncBackdrop(layout, kind, plan, skyline) {
     const c = layout.camera, storm = !!plan.storm, T = THEMES[state.meta.theme] || THEMES.day, dust = dustOf(T, plan.tint);
-    const sig = [kind, skyline || 1, state.meta.theme, storm ? "storm" : "", dust ? ["dust", dust.color, dust.sky, dust.haze, dust.veil].join(",") : "",
+    const sig = [kind, skyline || 1, state.meta.theme, storm ? "storm" : "", dust ? ["dust", dust.color, dust.sky, dust.haze, dust.veil, dust.sun].join(",") : "",
       Object.values(layout.bounds).map(v => Math.round(v)).join(","), c ? [c.dist, c.pos.y, c.pos.z].map(v => Math.round(v)).join(",") : ""].join("|");
     if (sig === state.backdropSig) return;
     state.backdropSig = sig;

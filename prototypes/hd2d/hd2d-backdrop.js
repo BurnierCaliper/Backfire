@@ -519,8 +519,8 @@ function smokeTexture() {
  * 建一圈远景。kind = city / mine / desert / skynet / wasteland（night 是 city 的旧名字）；bounds 是战场范围；
  * camera 是布局算好的默认镜头（hd2d-layout.js 的 fitView），用来算「画面上沿那条视线」有多高；
  * colors = { sky: [地平线 → 天顶 4 个颜色], fog, storm, skyline, dust }（storm = 雷鸣：天空换成 BACKDROP.storm 的风暴色、加乌云和低云；
- * skyline = 楼群的高度倍数，外城区矮、巨人城高；dust = 沙暴的沙尘 { color, sky, haze, veil }：天幕往 color 靠 sky、贴地融进雾里的那一截高 haze、
- * 中景剪影至少往雾色靠 veil，见 hd2d-weather.js 的 WEATHER.sand）。返回 { group, update(t, dt, { flash, x }), farPoint(r), dispose }。
+ * skyline = 楼群的高度倍数，外城区矮、巨人城高；dust = 沙暴的沙尘 { color, sky, haze, veil, sun }：天幕往 color 靠 sky、贴地融进雾里的那一截高 haze、
+ * 中景剪影至少往雾色靠 veil、太阳的光晕剩 sun 成，见 hd2d-weather.js 的 WEATHER.sand）。返回 { group, update(t, dt, { flash, x }), farPoint(r), dispose }。
  */
 export function buildBackdrop(kind, bounds, themeName, camera, colors) {
   colors = colors || {};
@@ -551,7 +551,7 @@ export function buildBackdrop(kind, bounds, themeName, camera, colors) {
   const skyM = keep(skyMaterial(sky, {
     camY: cam.pos.y, camZ: cam.pos.z, slope, fog, haze: dust ? dust.haze : 0,
     sun: dusk ? [0.3, 0.12, 0.09] : night ? [0.22, 0.9, 0.05] : [0.28, 0.75, 0.16],
-    sunColor: new THREE.Color(dusk ? 0xff9a50 : night ? 0x30405a : 0x6a5530).multiplyScalar(storm ? 0.35 : dust ? 0.6 : 1), stars: night && !storm && !dust,
+    sunColor: new THREE.Color(dusk ? 0xff9a50 : night ? 0x30405a : 0x6a5530).multiplyScalar(storm ? 0.35 : dust && dust.sun != null ? dust.sun : 1), stars: night && !storm && !dust,
     clouds: storm || dust ? 0 : dusk ? 0.55 : themeName === "day" ? 0.25 : 0, cloudColor: dusk ? 0xffb090 : 0xf4e2bc,
     storm, cloudDark: cloud[0], cloudLit: cloud[1]
   }));
