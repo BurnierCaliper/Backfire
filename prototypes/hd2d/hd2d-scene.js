@@ -513,11 +513,13 @@ export function createHd2dScene(container, options) {
     weather.setBounds(layout.bounds, { camera: layout.camera, farPoint: state.backdrop.farPoint });
     weather.set(state.meta.weather || "none", state.meta.theme);
     syncPlates();
-    // 特写的单位不在了（被打倒、藏起来）：退出特写，回到正常的近景（#237）
+    // 特写的单位不在了（被打倒、藏起来）：退出特写，镜头平滑拉回正常的近景（#237）
+    const wasClose = state.close, reset = newBoard || state.wantFit;
     state.close = C.camStep(camState(), { type: "units", ids: layout.units.map(u => u.id) }).close;
     applyTheme();
     fitShadow();
-    fitCamera(newBoard || state.wantFit);
+    fitCamera(reset);
+    if (wasClose != null && state.close == null && !reset) goTo(state.tier, state.zone);
   }
   /** 区域认不得（布局给的地面主题没有远景）也没指定时，按光影主题猜 */
   const backdropOf = (theme) => theme === "night" ? "night" : theme === "dusk" ? "mine" : "wasteland";

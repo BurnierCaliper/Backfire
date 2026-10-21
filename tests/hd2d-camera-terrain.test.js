@@ -200,6 +200,7 @@ test("近景双击单位特写（#237）：镜头平滑推到这个单位面前�
   assert.ok(/renderer\.domElement\.addEventListener\("dblclick"[\s\S]{0,200}C\.unitAt\(/.test(scene), "双击地台上的站位：认出是谁，特写");
   assert.ok(/C\.closePose\(/.test(scene) && /C\.camStep\(camState\(\), \{ type: "tier"/.test(scene) && /C\.camStep\(camState\(\), \{ type: "wheel"/.test(scene) && /type: "zone"/.test(scene) && /type: "units"/.test(scene), "换段 / 滚轮 / 换区 / 重排都走状态机");
   assert.ok(/C\.tween\(from, to, \{ reduced: !!opts\.snap \|\| !state\.motion \}\)/.test(scene), "减少动态效果时直接切过去（和换段一样）");
+  assert.ok(/wasClose != null && state\.close == null && !reset\) goTo\(state\.tier, state\.zone\)/.test(scene), "特写的人被打倒 / 藏起来：镜头拉回正常的近景（不停在原地）");
   assert.ok(/\* p\.zoom/.test(scene) && /classList\.toggle\("hide", p\.hide\)/.test(scene) && /\.hd2d-plate\.hide \.pl-in/.test(css), "特写的铭牌再放大，压到它的藏起来");
   const html = fs.readFileSync(path.join(DIR, "index.html"), "utf8");
   assert.ok(/info\.close != null \? " · 特写 "/.test(html) && /sc\.setTier\(t\)/.test(html), "页面：镜头条写着特写谁；远 / 中按钮、1 / 2 键照旧 setTier（就退出特写）");
