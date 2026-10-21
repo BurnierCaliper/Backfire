@@ -368,6 +368,12 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **第三轮 · 单机 M-6 ~ M-10：AI 后撤 / 接近看危墙门、沙鱼追猎看得到的猎物、委托人只躲真敌人、工坊打下手也算忙、硬撑长休不治 VIP**（issue #144；ai.js · `stepToward` / `aiStep`、desert.js · `sandFishPlan`、escort.js · `escortAct`、trpg.js · `trpgCraft` / `trpgLongRest`；测试 tests/bugfix-m6-m10.test.js）
+  - **AI 移动（M-6）**：以前远程敌人后撤、近战敌人接近都不看危墙 / 关着的门，被 `doMove` 拦下不扣点，整回合不出手；现在后撤只选 `walkableNeighbors`，接近的 `stepToward` 跳过被墙 / 关门挡住的区，没有走得通的就改原地能做的行动。
+  - **沙鱼追猎（M-7）**：以前夜间 / 饥饿追猎的路径不看间隔，猎物在墙 / 关门 / 空隙 / 深渊那边时每回合都返回走不通的移动；现在路径按能不能通过算，算不出路径的猎物直接换掉，都不行就交给常规行动。
+  - **委托人（M-8）**：以前 `foes` 把中立生物、友军、下潜单位也当敌人（同区只有尘虫也躲、还击总挑尘虫）；现在用 `hostileTo` 判断并排除下潜中的单位。
+  - **工坊打下手（M-9）**：以前同时开工只登记做东西的人，打下手的人还能同时做自己的、也能给两件打下手；现在做东西的和打下手的都登记为忙（`docs/workshop-design.md` 第 5 节），冲突的那件不做并提示「已经在忙了」，自己给自己打下手也不行。
+  - **硬撑长休（M-10）**：以前补给不够只能硬撑（`ok:false`、队员没恢复）时护送 VIP 仍清伤、日志写「血量回满」；现在只有长休真的成功才治 VIP。
 - **第三轮 · 单机 M-2 ~ M-5：乘势不再误伤中立 / 友军、养成每日任务四项能完成、每日挑战记录完整队伍、召唤物记 `summonedBy`**（issue #141；feats.js · `featAfterHit`、rogue.js · `growthDailyBump` / `updateGrowthDailyProgress` / `doLongRest` / `attemptCheck` / `buy` / `newRun` / `dailyRecord`、app.js · `setWeather` / `beginRound`、run.js · `buildEncounter`、enemies.js · `en_bigsand_summon`；tests/third-round-solo-m.test.js）
   - **乘势（M-2）**：以前给同区所有架势 1 的「非玩家」单位各 1 点击破，尘虫等中立生物和友军也挨；现在只打 `hostileTo(攻击者, 它)` 为真的单位。
   - **每日任务（M-3）**：以前「长休 / 完成检定 / 商店消费 / 更换天气」四项没有任何写入，抽到就永远完不成、「三个全完成」拿不到；现在长休成功一次 +1、检定成功一次 +1、商店每花 1 奎支 +1（目标 500）、我方单位主动改成别的天气一次 +1（`setWeather` 记到 `state.playerWeatherChanges`，每场开始清零，战后结算时读）。写入统一走 `growthDailyBump`。其余各项的每场固定增量、掷材料没走 `withRng` 这两点本条没改。

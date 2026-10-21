@@ -125,9 +125,14 @@ function trpgCraft(c) {
   if (Array.isArray(c.jobs)) {
     const out = [], busy = new Set();
     let hours = 0;
+    const nameOf = (kit) => (trpgHeroes().find(h => h.kit === kit) || {}).name || kit;
     c.jobs.filter(Boolean).forEach(j => {
-      if (busy.has(j.kit)) { out.push(`${(trpgHeroes().find(h => h.kit === j.kit) || {}).name || j.kit} 同时只能做一样东西。`); return; }
+      // 设计文档第 5 节：打下手的人这段时间不能做自己的东西；做东西的人和打下手的人都算忙，同一个人同一段时间只做一件事
+      if (busy.has(j.kit)) { out.push(`${nameOf(j.kit)} 同时只能做一样东西。`); return; }
+      if (j.helper && busy.has(j.helper)) { out.push(`${nameOf(j.helper)} 已经在忙了。`); return; }
+      if (j.helper && j.helper === j.kit) { out.push(`${nameOf(j.kit)} 不能给自己打下手。`); return; }
       busy.add(j.kit);
+      if (j.helper) busy.add(j.helper);
       const r = trpgCraftOne(j);
       out.push(...r.notes);
       hours = Math.max(hours, r.hours);
@@ -394,7 +399,8 @@ function trpgShortRest(kits) {
 function trpgLongRest(plan) {
   TRPG.camp = null;
   const r = ledgerLongRest(plan || {}, []);
-  if (typeof trpgTaskRestEscort === "function") trpgTaskRestEscort(r.notes);
+  // 补给不够只能硬撑（ok:false）时队员没恢复，护送 VIP 也一样不恢复
+  if (r.ok !== false && typeof trpgTaskRestEscort === "function") trpgTaskRestEscort(r.notes);
   if (r.report) TRPG.lastRest = r.report;   // 长休结算画面：主持人本机弹，联机玩家收到 rest 包（online-view.js · projectRest）
   return r.notes;
 }
