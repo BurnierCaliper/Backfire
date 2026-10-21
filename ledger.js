@@ -395,11 +395,11 @@ function ledgerCapture() {
   });
 }
 
-/** 战斗结束：每把武器 −1，被击败的武器人再 −2，然后记下状态 */
+/** 战斗结束：每把武器 −1（死亡角色的武器不扣），被击败的武器人再 −2，然后记下状态 */
 function ledgerAfterBattle(notes) {
   notes = notes || [];
   const heroes = partyHeroes();
-  heroes.forEach(h => (h.linkedKits || []).forEach(k => spendDurability(k, 1, "战斗结束", notes)));
+  heroes.filter(h => !h.dead).forEach(h =>(h.linkedKits || []).forEach(k => spendDurability(k, 1, "战斗结束", notes)));
   (state.units || []).filter(u => u.isPlayer && isWeaponUnit(u) && !u.escort && u.dead && !u._durCounted).forEach(u => {
     u._durCounted = true;
     spendDurability(u.kit, 2, "武器人被击败", notes);
