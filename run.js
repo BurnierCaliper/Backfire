@@ -586,6 +586,7 @@ function buildEncounter(spec, baseLevel, partySize) {
   state.zoneMode = Number(spec.zoneMode) || 2;
   state.board = null;
   state.weather = spec.weather || "none"; state.weatherBy = null;
+  state.playerWeatherChanges = 0;   // 本场我方主动改天气的次数（长线养成每日任务用）
   if (state.weather === "sand" && typeof rollSandDir === "function") rollSandDir();   // 开场沙暴：风向随机
   // 我方同阵营（跑团战斗模板）：这个阵营和能和它混编的阵营都算友军
   state.playerAllies = spec.allyFaction ? alliesOf(spec.allyFaction) : [];

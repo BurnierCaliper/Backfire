@@ -368,6 +368,11 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **第三轮 · 单机 M-2 ~ M-5：乘势不再误伤中立 / 友军、养成每日任务四项能完成、每日挑战记录完整队伍、召唤物记 `summonedBy`**（issue #141；feats.js · `featAfterHit`、rogue.js · `growthDailyBump` / `updateGrowthDailyProgress` / `doLongRest` / `attemptCheck` / `buy` / `newRun` / `dailyRecord`、app.js · `setWeather` / `beginRound`、run.js · `buildEncounter`、enemies.js · `en_bigsand_summon`；tests/third-round-solo-m.test.js）
+  - **乘势（M-2）**：以前给同区所有架势 1 的「非玩家」单位各 1 点击破，尘虫等中立生物和友军也挨；现在只打 `hostileTo(攻击者, 它)` 为真的单位。
+  - **每日任务（M-3）**：以前「长休 / 完成检定 / 商店消费 / 更换天气」四项没有任何写入，抽到就永远完不成、「三个全完成」拿不到；现在长休成功一次 +1、检定成功一次 +1、商店每花 1 奎支 +1（目标 500）、我方单位主动改成别的天气一次 +1（`setWeather` 记到 `state.playerWeatherChanges`，每场开始清零，战后结算时读）。写入统一走 `growthDailyBump`。其余各项的每场固定增量、掷材料没走 `withRng` 这两点本条没改。
+  - **每日挑战记录（M-4）**：以前存 `run.party`，有人阵亡（移进 `run.fallen`）就少人，全灭是空数组；现在开局把队伍记在 `run.daily.party`，记录读它（没有这个字段的旧局退回 `party` + `fallen`）。
+  - **召唤物（M-5）**：飞碟触灵 10 级起每回合被动召唤的看守、大沙灵 `en_bigsand_summon` 召唤的沙灵，以前不记 `summonedBy`；现在记，和技能版 `ufo_summon` 一致——自爆会炸到飞碟自己的看守，战后材料掉落（`!u.summonedBy`）不再算它们。
 - **跑团诊所装的义体跟着队伍记忆走；`tools/playtest.js` 的 ARENA 能跑了**（issue #134，backlog 第三轮 H-1 / M-1；tests/cyberware-campaign-memory.test.js、tests/playtest-arena.test.js）
   - **义体不再丢**：以前 `packHero` 只存 `cyberPlan`，没存 `u.cyberware` 和 `u.cyberOverinstall`，`applyCampaignToField` 也不读，所以下一场开战或读档后义体没了、血量 / 坚毅上限变回没装的样子，钱却已经扣了。现在两项都随队伍记忆（以及存档槽）往返；读回来后先放回义体再走 `applyLevelStats`，按义体重算血量层和坚毅上限，和刚装好时一致。旧档没有这两项就当没装（`game.js · packHero / applyCampaignToField`）。
   - **ARENA 模式**：以前先设 `run.stage = "task"` 再 `acceptTask`，而 `acceptTask` 要求在任务板前，一开跑就抛「现在不在任务板前，不能接任务」。现在接任务前把 stage 设成 `"board"`（`tools/playtest.js`）。测试用子进程跑 `ARENA=1:5:1`，断言退出码 0 并有三种战斗的战报。

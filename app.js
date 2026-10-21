@@ -116,6 +116,11 @@ function setWeather(kind, opts) {
   if (why) return why;
   const was = state.weather;
   state.weather = kind;
+  // 长线养成每日任务「更换天气」：我方单位主动改成别的天气，记一次（战后 rogue.js · updateGrowthDailyProgress 读）
+  if (kind !== was && opts.by != null) {
+    const by = typeof unitById === "function" ? unitById(opts.by) : null;
+    if (by && by.isPlayer) state.playerWeatherChanges = (Number(state.playerWeatherChanges) || 0) + 1;
+  }
   // 天气的所有者（环境分数）：谁放的天气；主持人 / 固有天气没有所有者
   if (kind !== was || opts.by != null) state.weatherBy = kind === "none" ? null : (opts.by != null ? opts.by : null);
   if (kind === "sand" && (was !== "sand" || opts.casterZone != null)) rollSandDir(opts.casterZone);
@@ -1810,6 +1815,7 @@ function beginRound(notes) {
         if (p) {
           const guard = typeof applyEnemyIV === "function" ? applyEnemyIV(p.build(u.level, state.partySize)) : p.build(u.level, state.partySize);
           guard.zone = u.zone;
+          guard.summonedBy = u.id;   // 和技能版 ufo_summon 一致：自爆连它一起炸，战后不掉材料
           state.units.push(guard);
           notes.push(`十级被动：召唤 ${guard.name}。`);
         }
