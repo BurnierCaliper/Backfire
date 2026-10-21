@@ -145,3 +145,95 @@ test("铭牌上画出行动点 / 附赠：紧凑铭牌贴在卡片右上角，�
   const page = read("index.html");
   assert.ok(page.indexOf('<script src="hd2d-ui.js"></script>') > 0 && page.indexOf('<script src="hd2d-ui.js"></script>') < page.indexOf('<script type="module">'), "页面加载 hd2d-ui.js");
 });
+
+/* ---------- 2. 队伍栏：名字右边身上的效果 ---------- */
+const HI = () => require("../hud-icons.js");
+test("队伍栏的效果：投影里的状态 / 即时效果 / 濒死 / 失衡……排成一列（hud-icons.js 的图标 + 没图标的短标签），角色自己的仪表读数不算；多了写 +n，悬停看全部；没有坚毅生命", () => {
+  const U = ui(), icons = HI();
+  const d = demo("mine");
+  const unit = (kit) => d.st.units.find(u => u.kit === kit);
+  Object.assign(unit("kolt"), { dying: true }); unit("kolt").statuses.inspire = true; unit("kolt").instant = { melt: true };   // 灼烧 2 是演示本来就有的
+  unit("ruby").stunned = true; unit("ruby").tauntTo = unit("kolt").id;
+  const pv = d.pv();
+  const pu = (kit) => pv.units.find(u => u.id === unit(kit).id);
+  const kolt = U.effectsOf(pu("kolt"), icons);
+  assert.deepEqual(kolt.map(e => e.name), ["濒死", "灼烧", "振奋", "熔融"], "柯尔特：濒死在最前面，然后是有图标的灼烧 / 振奋 / 熔融；状态文字里的「电钻」是刀头，不算效果");
+  assert.equal(kolt.find(e => e.key === "burn").stack, "2", "灼烧带层数");
+  assert.ok(kolt.filter(e => e.icon).every(e => icons.ICONS[e.key]) && !kolt.find(e => e.key === "dying").icon, "有图标的用 hud-icons 的徽章，濒死写字");
+  const ruby = U.effectsOf(pu("ruby"), icons);
+  assert.deepEqual(ruby.map(e => e.name), ["失衡", "嘲讽"], "瑞比：失衡 + 状态文字里没图标的嘲讽");
+  assert.deepEqual(U.effectsOf(pu("yuito"), icons), [], "结人身上什么都没有");
+  // 没有 hud-icons.js 时只写短标签（状态文字里一段一段的）
+  assert.ok(U.effectsOf(pu("kolt"), null).every(e => !e.icon) && U.effectsOf(pu("kolt"), null).some(e => e.name === "灼烧×2"));
+  // 画出来：最多 UI.effects.show 个，多的写 +n；悬停的那一块列出全部（名字 + 层数）；读屏也念全部
+  const html = U.effectsHtml(kolt, icons);
+  const head = html.slice(0, html.indexOf('class="pm-fx-all"')), all = html.slice(html.indexOf('class="pm-fx-all"'));
+  assert.equal(U.UI.effects.show, 3);
+  assert.equal((head.match(/class="hi-badge /g) || []).length + (head.match(/class="fx-t/g) || []).length, 3, "名字右边摆 3 个");
+  assert.ok(/class="fx-more">\+1</.test(head), "多的写 +1");
+  assert.ok(["濒死", "灼烧 2", "振奋", "熔融"].every(n => all.includes(`<b>${n}</b>`)), "悬停看全部");
+  assert.ok(/aria-label="身上的效果：濒死、灼烧 2、振奋、熔融"/.test(html) && /tabindex="0"/.test(html), "键盘停上去也能看，读屏念全部");
+  assert.equal(U.effectsHtml([], icons), "", "没有效果就什么都不画");
+  assert.ok(!/fx-more/.test(U.effectsHtml(ruby, icons)), "两个就不写 +n");
+  pv.units.forEach(u => noShp(U.effectsHtml(U.effectsOf(u, icons), icons), "效果"));
+  // 只读投影：冻住的投影单位照样排得出来；读到的单位字段都在白名单里
+  const frozen = JSON.parse(JSON.stringify(pu("kolt")));
+  (function deepFreeze(o) { Object.freeze(o); Object.values(o).forEach(v => { if (v && typeof v === "object" && !Object.isFrozen(v)) deepFreeze(v); }); })(frozen);
+  assert.deepEqual(U.effectsOf(frozen, icons).map(e => e.name), kolt.map(e => e.name));
+  const allowed = projectedUnitFields(), src = read("hd2d-ui.js");
+  new Set([...fnSource(src, "effectsOf").matchAll(/\bu\.(\w+)/g)].map(m => m[1])).forEach(f => assert.ok(allowed.has(f), "effectsOf 读了白名单里没有的 u." + f));
+  U.UI.effects.flags.forEach(f => assert.ok(allowed.has(f.key), f.key + " 在白名单里"));
+  // 页面：队伍栏用投影过的单位（players() 读 pv）排效果，加载 hud-icons.js / hud-icons.css；名字右边
+  const page = read("index.html"), mod = /<script type="module">([\s\S]*?)<\/script>/.exec(page)[1];
+  assert.ok(/function players\(\) \{ return \(pv \? pv\.units : \[\]\)/.test(mod), "队伍栏的人从投影里来");
+  assert.ok(/UIX\.effectsHtml\(UIX\.effectsOf\(u, window\.HudIcons\)/.test(mod), "队伍栏排效果");
+  assert.ok(/class="nm-t">[^`]*<span class="lv">[^`]*\$\{fx\}<\/div>/.test(mod), "效果在名字（和等级）的右边");
+  assert.ok(page.includes('<script src="../../hud-icons.js"></script>') && page.includes('<link rel="stylesheet" href="../../hud-icons.css">'), "加载 hud-icons");
+  const css = read("hd2d.css");
+  assert.ok(/\.pm-fx:hover \.pm-fx-all, \.pm-fx:focus \.pm-fx-all \{ display: grid;/.test(css), "悬停 / 键盘停上去展开全部");
+});
+
+/* ---------- 3. 按主职责的头像 ---------- */
+test("头像：每个主职责一个图标（职责用 growth.js · ROLE_LIST），底色是主属性 → 副属性的代表色从左上到右下渐变（属性色 = attack-fx.js 的 COL，主副属性照角色卡 note）", () => {
+  const U = ui(), AF = require("../attack-fx.js");
+  require("../icons.js");   // icons.js 没有 module.exports，挂在 globalThis.Icons 上
+  const IC = globalThis.Icons;
+  const ctx = H.load();
+  const ROLES = plain(vm.runInContext("ROLE_LIST", ctx)), ELE = plain(vm.runInContext("ELE_BY_CN", ctx));   // 规则环境里的对象换成这边的（deepEqual 比原型）
+  // 对应表在配置里：九种职责各一个、互不相同；属性色就是 attack-fx.js 的 COL，名字和 icons.js 一样
+  assert.deepEqual(Object.keys(U.UI.roles).sort(), ROLES.slice().sort(), "每个主职责一个图标，职责名和游戏里一样");
+  assert.equal(new Set(Object.values(U.UI.roles)).size, ROLES.length, "图标互不相同");
+  assert.deepEqual(U.UI.elements, AF.COL, "属性色和 attack-fx.js 的 COL 一样");
+  assert.deepEqual(U.UI.elementNames, IC.NAME, "属性名和 icons.js 一样");
+  const cards = plain(ctx.livePartyCards());
+  const looks = U.heroLooks(cards, ELE);
+  const heroes = cards.filter(c => c.roles && !c.weaponOf);
+  assert.ok(heroes.length >= 10, "角色卡都读到了");
+  assert.deepEqual(Object.keys(looks).sort(), heroes.map(c => c.kit).sort(), "武器人不算");
+  noShp(looks, "头像资料");   // 角色卡上有坚毅生命（shp），头像只拿职责和属性
+  heroes.forEach(c => {
+    const [main, sub] = c.note.split("·")[1].split("/").map(s => ELE[s.trim()]);
+    const look = looks[c.kit], av = U.avatarOf(look);
+    assert.ok(ROLES.includes(c.roles.primary), c.kit + " 的主职责在职责表里");
+    assert.deepEqual(look, { role: c.roles.primary, main, sub }, c.kit + "：主职责 + 主 / 副属性（note 里斜杠前主、后副）");
+    assert.equal(av.glyph, U.UI.roles[c.roles.primary], c.kit + "：按主职责的图标");
+    assert.equal(av.background, `linear-gradient(to bottom right, ${AF.COL[main]}, ${AF.COL[sub]})`, c.kit + "：左上主属性色 → 右下副属性色");
+    const html = U.avatarHtml(av);
+    assert.ok(html.includes(`style="background:${av.background}"`) && html.includes('<g class="rim">') && html.includes('<g class="ink">'), c.kit + "：渐变底 + 白边墨线的贴纸图标");
+    assert.ok(html.includes("主职责 " + c.roles.primary), c.kit + "：悬停写着主职责");
+  });
+  // 演示队伍：瑞比 直伤 能量→电、Helumica 环境手 谐波→物理、结人 辅助 冰→酸、柯尔特 坦克 电→酸
+  const want = { ruby: ["直伤", "energy", "electric"], helu: ["环境手", "harmonic", "physical"], yuito: ["辅助", "ice", "acid"], kolt: ["坦克", "electric", "acid"] };
+  Object.keys(want).forEach(k => assert.deepEqual([looks[k].role, looks[k].main, looks[k].sub], want[k], k));
+  // 认不得的角色：人形图标 + 灰底；只有一种属性：纯色
+  const none = U.avatarOf(null);
+  assert.equal(none.glyph, U.UI.avatar.glyph);
+  assert.equal(none.background, `linear-gradient(to bottom right, ${U.UI.avatar.fallback}, ${U.UI.avatar.fallback})`);
+  assert.equal(U.avatarOf({ role: "坦克", main: "fire", sub: null }).background, `linear-gradient(to bottom right, ${AF.COL.fire}, ${AF.COL.fire})`);
+  // 页面：头像按投影里的 kit 查（不再是写着名字第一个字的圆圈），资料来自角色卡；CSS 是贴纸风（白边 + 墨线）
+  const mod = /<script type="module">([\s\S]*?)<\/script>/.exec(read("index.html"))[1];
+  assert.ok(/UIX\.avatarHtml\(UIX\.avatarOf\(LOOKS\[u\.kit\]/.test(mod) && /UIX\.heroLooks\(typeof livePartyCards === "function" \? livePartyCards\(\) : \[\], typeof ELE_BY_CN/.test(mod), "头像按 kit 查角色卡上的职责和属性");
+  assert.ok(!/class="face">\$\{esc\(p\.name\.slice\(0, 1\)\)\}/.test(mod), "不再是名字第一个字的圆圈");
+  const css = read("hd2d.css");
+  assert.ok(/\.av-ic \.rim \* \{[^}]*stroke: var\(--canvas\)/.test(css) && /\.av-ic \.ink \* \{[^}]*stroke: var\(--ink\)/.test(css), "白边 + 墨线");
+});

@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>Antlerscale: Backfire · HD-2D 战场原型</title>
 <link rel="stylesheet" href="../../fonts/fonts.css">
+<link rel="stylesheet" href="../../hud-icons.css">
 <link rel="stylesheet" href="hd2d.css">
 <script type="importmap">{"imports":{"three":"../../vendor/three/three.module.min.js","three/addons/":"../../vendor/three/addons/"}}</script>
 </head>
@@ -158,6 +159,9 @@ window.GAME_MODE = true;
 <!-- 攻击演出（出手 / 弹道 / 打中 / 击倒 / 格挡）和受击粒子：正式游戏的 2D 演出，原样加载，位置由 hd2d-fx.js 的适配器给 -->
 <script src="../../attack-fx.js"></script>
 <script src="../../hit-fx.js"></script>
+<!-- 界面图标（#238）：七种属性的贴纸图标（技能按钮的属性角标）、状态 / 效果徽章（队伍栏名字右边的效果）。正式游戏的文件，原样加载 -->
+<script src="../../icons.js"></script>
+<script src="../../hud-icons.js"></script>
 <script>
 /* 规则文件在浏览器里加载，会带着「去写正式页面元素」的界面函数（renderAll、renderZones……）。
  * 这个原型只拿规则算数据，页面上没有那些元素，所以把 render 开头的界面函数换成空的。
@@ -184,7 +188,11 @@ import { createHd2dScene } from "./hd2d-scene.js";
 
 const L = window.HD2DLayout;
 const CAMS = window.HD2DCamera;
+const UIX = window.HD2DUI;   // 界面数据（#238）：铭牌的行动点 / 附赠、队伍栏的效果和头像、技能按钮
 const $ = (id) => document.getElementById(id);
+/* 头像要的公开资料：每个角色的主职责、主 / 副属性（角色卡 party.js · livePartyCards 上的 roles.primary 和 note，图鉴里也写着）。
+ * 投影里没有这两项，按投影里的 kit 查这张表（见 README「#238」里缺的字段）；角色卡上别的字段一个都不拿 */
+const LOOKS = UIX.heroLooks(typeof livePartyCards === "function" ? livePartyCards() : [], typeof ELE_BY_CN !== "undefined" ? ELE_BY_CN : null);
 
 /* ---------- 演示战场（用真规则 BattleSim.setup 生成，再补上场地 / 间隔 / 状态） ---------- */
 const PARTY = ["kolt", "helu", "ruby", "yuito"];
@@ -301,14 +309,16 @@ function renderUI(layout) {
   // 手机上的精简顶栏：R1 · 晴 · 第一采矿场
   const wt = weatherText(pv.weather);
   $("tb-compact").textContent = "R" + (pv.turnNo || 1) + " · " + wt.replace(/天$/, "") + " · " + place;
-  // 队伍栏：只用铭牌数据（没有坚毅生命）
+  // 队伍栏：只用铭牌数据和投影过的单位（没有坚毅生命）。头像 = 主职责图标 + 主副属性色渐变（角色卡上的公开资料，按投影里的 kit 查）；
+  // 名字右边是身上的效果（投影里的状态 / 即时 / 自我效果……，hud-icons.js 的图标，多了写 +n，悬停看全部）
   const plates = {};
   layout.units.forEach(u => { plates[u.id] = u.plate; });
   $("party-list").innerHTML = players().map(u => {
     const p = plates[u.id]; if (!p) return "";
     const segs = p.layers.slice().reverse().map(l => `<i style="width:${p.hp.max ? 100 * l.max / p.hp.max : 0}%;background:linear-gradient(90deg,${LAYER[l.type] || "#d8574a"} ${l.max ? 100 * l.cur / l.max : 0}%,#2a2520 0)"></i>`).join("");
-    return `<div class="pm ${u.id === actorId ? "on" : ""}" data-id="${u.id}"><span class="face">${esc(p.name.slice(0, 1))}</span>
-      <div class="meta"><div class="nm">${esc(p.name)} <span class="lv">Lv${p.level}</span></div><div class="bar">${segs}</div></div></div>`;
+    const fx = UIX.effectsHtml(UIX.effectsOf(u, window.HudIcons), window.HudIcons);
+    return `<div class="pm ${u.id === actorId ? "on" : ""}" data-id="${u.id}">${UIX.avatarHtml(UIX.avatarOf(LOOKS[u.kit] || null))}
+      <div class="meta"><div class="nm"><span class="nm-t">${esc(p.name)}</span><span class="lv">Lv${p.level}</span>${fx}</div><div class="bar">${segs}</div></div></div>`;
   }).join("");
   document.querySelectorAll(".pm").forEach(el => el.addEventListener("click", () => setActor(el.dataset.id)));
   renderSkills();

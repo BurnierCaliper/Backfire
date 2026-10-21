@@ -247,7 +247,7 @@ body { position: fixed; inset: 0; user-select: none; }
 #logdrawer.collapsed .head { padding: 8px; }
 #logdrawer.collapsed { max-height: none; width: min(340px, 86vw); background: transparent; border: 0; box-shadow: none; background-image: none; }
 
-#party { left: 0; top: calc(var(--topbar-h) + 10px); width: min(232px, 62vw); border-left: 0; }
+#party { left: 0; top: calc(var(--topbar-h) + 10px); width: min(264px, 72vw); border-left: 0; }   /* 名字右边多了效果（#238），比以前宽一点 */
 #party .list { display: flex; flex-direction: column; gap: 6px; padding: 0 10px 10px; }
 #party.collapsed .list, #party.collapsed .head .tape { display: none; }
 #party.collapsed { background: transparent; border: 0; box-shadow: none; background-image: none; }
@@ -260,11 +260,44 @@ body { position: fixed; inset: 0; user-select: none; }
   width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; flex: none;
   font: 900 16px var(--ui-sans); color: var(--ink); background: var(--mint); border: 2px solid var(--ink);
 }
-.pm .nm { font-weight: 900; font-size: 14px; line-height: 1.1; text-shadow: 2px 2px 0 var(--ink); }
+.pm .nm { display: flex; align-items: center; gap: 5px; min-height: 18px; font-weight: 900; font-size: 14px; line-height: 1.1; text-shadow: 2px 2px 0 var(--ink); }
+.pm .nm-t { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pm .bar { height: 7px; margin-top: 4px; background: #2a2520; border: 1px solid var(--ink); display: flex; }
 .pm .bar i { display: block; height: 100%; }
 .pm .meta { min-width: 0; flex: 1; }
-.pm .lv { font: 11px var(--marker); color: var(--muted); }
+.pm .lv { flex: none; font: 11px var(--marker); color: var(--muted); }
+/* 头像（#238）：按主职责的贴纸图标（白边 + 墨线，同 art/style-guide.html），底色是主属性 → 副属性从左上到右下的渐变（行内的 background，hd2d-ui.js · avatarOf） */
+.pm .face.av {
+  width: 34px; height: 34px; border-radius: 8px; border: 2px solid var(--ink);
+  box-shadow: 0 0 0 2px var(--canvas), 2px 3px 0 2px rgba(0, 0, 0, .5); transform: rotate(-3deg);
+}
+.pm.on .face.av { box-shadow: 0 0 0 2px var(--hazard), 2px 3px 0 2px rgba(0, 0, 0, .5); }
+.av-ic { width: 26px; height: 26px; display: block; overflow: visible; }
+.av-ic .rim * { fill: none; stroke: var(--canvas); stroke-width: 9; stroke-linejoin: round; stroke-linecap: round; }
+.av-ic .rim .thin { stroke-width: 7; }
+.av-ic .rim .bold { stroke-width: 10.5; }
+.av-ic .rim .solid { fill: var(--canvas); }
+.av-ic .ink * { fill: none; stroke: var(--ink); stroke-width: 4.2; stroke-linejoin: round; stroke-linecap: round; }
+.av-ic .ink .thin { stroke-width: 2.8; }
+.av-ic .ink .bold { stroke-width: 5.6; }
+.av-ic .ink .solid { fill: var(--ink); stroke-width: 1.5; }
+/* 名字右边身上的效果（#238）：hud-icons.js 的徽章缩小一号；没有图标的写短标签；多了写 +n，悬停 / 键盘停上去展开全部 */
+.pm-fx { position: relative; display: inline-flex; flex-wrap: nowrap; align-items: center; gap: 3px; margin-left: auto; flex: none; outline: none; text-shadow: none; }
+.pm-fx:focus-visible { outline: 2px solid var(--canvas); outline-offset: 2px; }
+.pm-fx > .hi-badge .hi-svg { width: 17px; height: 17px; }
+.pm-fx .hi-badge .hi-stack { right: -4px; bottom: -4px; min-width: 11px; height: 11px; font-size: 8px; line-height: 9px; }
+.pm-fx .fx-t { font: 900 10px/1 var(--ui-sans); font-style: normal; padding: 2px 4px; color: var(--ink); background: var(--muted); border-radius: 2px; white-space: nowrap; }
+.pm-fx .fx-t.bad { background: var(--blood); color: var(--canvas); }
+.pm-fx .fx-t.warn { background: #ff9a3c; }
+.pm-fx .fx-more { font: 900 10px/1 var(--ui-sans); font-style: normal; padding: 2px 4px; color: var(--canvas); background: var(--edge); border-radius: 2px; }
+.pm-fx-all {
+  display: none; position: absolute; left: 0; top: calc(100% + 6px); z-index: 8; min-width: 120px; max-width: 220px; padding: 6px 8px;
+  background: rgba(17, 14, 11, .97); border: 2px solid var(--ink); border-radius: 3px; box-shadow: 3px 4px 0 rgba(0, 0, 0, .55);
+}
+.pm-fx:hover .pm-fx-all, .pm-fx:focus .pm-fx-all { display: grid; gap: 5px; }
+.pm-fx-all .fx-row { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.pm-fx-all .fx-row b { font: 900 12px/1.2 var(--ui-sans); color: var(--canvas); }
+.pm-fx-all .hi-badge .hi-svg { width: 18px; height: 18px; }
 
 #toast {
   position: fixed; z-index: 20; left: 50%; top: calc(var(--topbar-h) + 14px); transform: translateX(-50%); max-width: 90vw;
