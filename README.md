@@ -368,6 +368,14 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **第三轮 · 联机低级五条：公开记录补全、任务面板不盖背包、任务提示合并、`offlineTick` 判空、转发限速先拒绝再断线**（issue #145；online-game.js · `actionLabel` / `onActionSettled` / `offlineTick`，online-view.js · `projectLogs`，online-ui.js · `observeQuests`，relay/worker.js · `RATE` / `RATE_KICK_OVER`；测试 tests/online-host.test.js、tests/relay.test.js、tests/online-ui.test.js）
+  - **公开记录**：以前移动、起身、用道具只写「甲 · 移动 / 起身 / 使用道具」，回合开始只写「回合开始」，胜利 / 败北 / 撤退主机不产生记录；现在移动写「移动 → N 区」，用道具写「使用道具 名称 → 对象」（有落点再加「· 到 N 区」），起身写「起身 · 重新站起」，敌人回合收尾 / 开战写「第 N 回合开始」（回合开始的持续伤害、倒下摘要跟在这一行后面），战斗结束时按结果写「战斗胜利 / 战斗结束 / 队伍撤退」。全部只用玩家画面本来就看得到的信息，不带任何坚毅生命数值。
+  - **任务面板**：以前任务日志和背包 / 资料共用一个容器，任务更新会把正在看的背包换回任务日志；现在只在容器里还是任务日志时才刷新。
+  - **任务提示**：以前一个包里有多条任务变动只弹最后一条；现在合成一句（用「；」连接）。
+  - **`offlineTick`**：以前掉线玩家的选择询问选项为空时 `ask.options[0].helper` 抛 TypeError，每 250 毫秒一次且到不了后面的回合超时处理；现在选项为空就跳过这一项，继续后面的处理。
+  - **转发限速**：以前玩家 10 秒内超过 120 帧或 256 KB 直接断线；现在先拒绝这一条并回「发送太快，请稍后重试」（`rate_limit`），同一个 10 秒窗口内被拒超过 60 条（`RATE_KICK_OVER`）才断开。数值放在文件顶部的 `RATE` 常量。
+  - 说明：本环境没装 Playwright，`tests/online-ui.test.js` 里新加的两条浏览器测试被跳过，没有实际跑过。
+
 - **第三轮 · 单机 M-2 ~ M-5：乘势不再误伤中立 / 友军、养成每日任务四项能完成、每日挑战记录完整队伍、召唤物记 `summonedBy`**（issue #141；feats.js · `featAfterHit`、rogue.js · `growthDailyBump` / `updateGrowthDailyProgress` / `doLongRest` / `attemptCheck` / `buy` / `newRun` / `dailyRecord`、app.js · `setWeather` / `beginRound`、run.js · `buildEncounter`、enemies.js · `en_bigsand_summon`；tests/third-round-solo-m.test.js）
   - **乘势（M-2）**：以前给同区所有架势 1 的「非玩家」单位各 1 点击破，尘虫等中立生物和友军也挨；现在只打 `hostileTo(攻击者, 它)` 为真的单位。
   - **每日任务（M-3）**：以前「长休 / 完成检定 / 商店消费 / 更换天气」四项没有任何写入，抽到就永远完不成、「三个全完成」拿不到；现在长休成功一次 +1、检定成功一次 +1、商店每花 1 奎支 +1（目标 500）、我方单位主动改成别的天气一次 +1（`setWeather` 记到 `state.playerWeatherChanges`，每场开始清零，战后结算时读）。写入统一走 `growthDailyBump`。其余各项的每场固定增量、掷材料没走 `withRng` 这两点本条没改。

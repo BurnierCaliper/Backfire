@@ -1,6 +1,8 @@
 // Optional relay: identity, room lifecycle and bounded forwarding only. No game
 // rules, battle state, private-message history or save files are stored here.
 const FRAME_MAX = 50 * 1024, MESSAGE_MAX = 2 * 1024 * 1024, WIRE = 1;
+// 限速：10 秒窗口内的帧数 / 字节数。超限先拒绝这一条并回「发送太快」，同一窗口内被拒的条数再超过 RATE_KICK_OVER 才断开
+const RATE = { windowMs: 10000, player: { frames: 120, bytes: 256 * 1024 }, host: { frames: 2400, bytes: 12 * 1024 * 1024 } }, RATE_KICK_OVER = 60;
 const SEAT_CONFIRM_MS = 20000;   // 新座位要在这么久之内确认（客户端收到 joined 后的 confirm），不然当幽灵座位清掉（env.SEAT_CONFIRM_MS 可改，测试用）
 const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const encoder = new TextEncoder();
@@ -164,10 +166,16 @@ export class Room {
     if (!connection.id) { await this.join(ws, message); return; }
     if (this.meta.seats.every(seat => seat.id !== connection.id)) { this.error(ws, "座位已失效", null, "identity", true); return; }
     const now = Date.now();
-    if (now - connection.rateAt >= 10000) Object.assign(connection, { rateAt: now, frames: 0, bytes: 0 });
+    if (now - connection.rateAt >= RATE.windowMs) Object.assign(connection, { rateAt: now, frames: 0, bytes: 0, over: 0 });
     connection.frames++; connection.bytes += size(text);
     const isHost = connection.role === "host";
-    if (connection.frames > (isHost ? 2400 : 120) || connection.bytes > (isHost ? 12 * 1024 * 1024 : 256 * 1024)) { this.error(ws, "消息过快，请稍后重试", message.id, "rate_limit", true); return; }
+    const limit = isHost ? RATE.host : RATE.player;
+    if (connection.frames > limit.frames || connection.bytes > limit.bytes) {
+      connection.over = (connection.over || 0) + 1;
+      ws.serializeAttachment(connection);
+      this.error(ws, "发送太快，请稍后重试", message.id, "rate_limit", connection.over > RATE_KICK_OVER);
+      return;
+    }
     ws.serializeAttachment(connection);
     // 新座位的确认：客户端收到 joined（拿到恢复令牌）后马上回一句。20 秒内没确认的座位当成幽灵座位清掉（alarm）
     if (message.kind === "confirm") {
