@@ -355,7 +355,7 @@
     });
     // 踩塔：区名旁边一个塔的图标（数字 = 还有几回合，旁边写几人 / 要几人）+ 地面上的一圈（unit-card.js，联机玩家画面同一套）
     // 只画本机的战场（联机玩家的战场由 online-battle.js 自己画，窗口缩放时这里不去动它）
-    document.querySelectorAll("#g-field .g-zone").forEach(z => UnitCard.paintTowers(z, (env.zones[z.dataset.num] || {}).towers || []));
+    document.querySelectorAll("#g-field .g-zone").forEach(z => UnitCard.paintTowers(z, (env.zones[z.dataset.num] || {}).towers || [], { sim: G.sim }));
     paintGaps();
   }
   const toMap = (arr) => new Map(arr.map(s => [s.id, s]));

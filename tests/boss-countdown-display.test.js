@@ -185,9 +185,27 @@ async function checkIconTip(page, sel) {
   assert.doesNotMatch(tip.text, /坚毅生命|777001/);
 }
 
-/** 单机：Roguelike 同一个战斗画面，首领（和五个手下挤在 2 区）挂上四种机制、一长串状态，开战 */
-async function localBoss(page, origin) {
+/** 点名瞬间：记下每一次弹出（unit-card.js · popIcon 的 Web Animations，id "mech-pop"：谁头上 / 哪个区、哪种图标、什么机制）
+ *  和每一次提示音（Sfx.marker 被叫了几次） */
+const SPY = () => {
+  window.__pops = []; window.__pings = 0;
+  const animate = Element.prototype.animate;
+  Element.prototype.animate = function (frames, opts) {
+    if (opts && opts.id === "mech-pop") {
+      const w = this.closest(".unit-wrap"), z = this.closest(".g-zone");
+      window.__pops.push({ unit: w ? w.dataset.id : null, zone: !w && z ? z.dataset.num : null, kind: [...this.classList].find(c => /^k-/.test(c)) || "", type: this.dataset.mech });
+    }
+    return animate.call(this, frames, opts);
+  };
+  const marker = Sfx.marker;
+  Sfx.marker = function () { window.__pings++; return marker.apply(this, arguments); };
+};
+const spied = (page, from) => page.evaluate(n => ({ pops: window.__pops.slice(n || 0), pings: window.__pings, count: window.__pops.length }), from || 0);
+
+/** 单机：Roguelike 同一个战斗画面，首领（和五个手下挤在 2 区）挂上四种机制、一长串状态，开战。opts.spy：开战前装上 SPY */
+async function localBoss(page, origin, opts) {
   await page.goto(origin + "/game.html"); await page.waitForFunction(() => !!window.GAME && !!window.UnitCard);
+  if (opts && opts.spy) await page.evaluate(SPY);
   await page.evaluate(MECHS => {
     GAME.skip = true; GAME.instant = true;
     Screens.show("battle");
@@ -303,8 +321,84 @@ test("触屏：点一下头顶的图标弹出说明（不会选中这个单位�
   assert.deepEqual(errors, []);
 });
 
-test("联机单局玩家画面（1280×800）：头顶图标、区名旁的塔、正上方的横幅、悬停说明和单机一样；内容多时能滚动；战场高度不变、页面不滚动；玩家数据不含坚毅生命", { timeout: 120000 }, async t => {
+/** 分担换一个人点名（转给另一个没被它点名的队友），重画；返回新点名的人、他头上那个图标是不是正在弹（Web Animations + 一圈光） */
+const RETARGET = () => {
+  const m = state.units.find(u => !u.isPlayer && u.mechanics).mechanics.find(x => x.type === "share");
+  const to = state.units.find(u => u.isPlayer && !u.hidden && !u.dead && u.id !== m.st.targetId);
+  m.st.targetId = to.id;
+  GAME.refresh();
+  const ico = document.querySelector(`#g-field .unit-wrap[data-id="${to.id}"] .u-mechs .mech-ico[data-mech="share"]`);
+  return { to: to.id, icon: !!ico, running: !!ico && ico.getAnimations().some(a => a.id === "mech-pop"), burst: !!ico && !!ico.querySelector(".mi-burst") };
+};
+
+test("点名瞬间（单机）：开战那一刻被点名的人头上的图标「啪」地弹出来、区名旁边的塔也弹，响一声提示音；刷新画面、悬停、倒计时减少都不再弹 / 响；换人点名再弹；静音时不响；减少动态效果时不弹、声音照响", { timeout: 60000 }, async t => {
   if (!browser) { t.skip("Playwright/browser unavailable"); return; }
+  const origin = await site(t);
+  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } }); t.after(() => context.close());
+  const page = await context.newPage(); const errors = []; page.on("pageerror", e => errors.push(e.message));
+  const bossId = await localBoss(page, origin, { spy: true });
+  await page.waitForFunction(() => window.__pops.length > 0 && window.__pings > 0);
+  const who = await page.evaluate(() => {
+    const b = state.units.find(u => !u.isPlayer && u.mechanics), st = t => b.mechanics.find(x => x.type === t).st;
+    return { exec: st("execution").targetId, share: st("share").targetId, tower: String(st("tower").zones[0]), heroes: st("spread").targetIds.slice() };
+  });
+  const first = await spied(page);
+  const popped = (unit, type) => first.pops.some(p => p.unit === unit && p.type === type && p.kind === "k-mark");
+  assert.ok(popped(who.exec, "execution"), "死刑点名的人头上弹了 " + JSON.stringify(first.pops));
+  assert.ok(popped(who.share, "share"), "分担点名的人头上弹了");
+  for (const id of who.heroes) assert.ok(popped(id, "spread"), id + " 头上的远离弹了");
+  assert.ok(first.pops.some(p => p.zone === who.tower && p.type === "tower" && p.kind === "k-zone"), "区名旁边的塔弹了");
+  assert.ok(!first.pops.some(p => p.unit === bossId), "首领头上的读条不弹");
+  assert.ok(first.pings >= 1, "响了提示音");
+  // 提示音本身：短促、有声、不削顶（sfx.js · MARKER_PING）
+  const ping = await page.evaluate(async () => {
+    const d = await Sfx.render("marker");
+    let peak = 0, last = 0;
+    for (let i = 0; i < d.length; i++) { const a = Math.abs(d[i]); peak = Math.max(peak, a); if (a > 0.01) last = i; }
+    return { peak, len: last / 44100 };
+  });
+  assert.ok(ping.peak > 0.05 && ping.peak < 1, "提示音音量 " + ping.peak);
+  assert.ok(ping.len < 0.35, "提示音很短：" + ping.len + " 秒");
+  // 弹完以后：刷新画面、悬停图标、倒计时减少——都不再弹、不再响
+  await page.waitForTimeout(700);
+  const base = await spied(page);
+  await page.evaluate(() => { GAME.refresh(); GAME.refresh(); });
+  await page.hover(`#g-field .unit-wrap[data-id="${who.exec}"] .u-mechs .mech-ico[data-mech="execution"]`);
+  await page.waitForSelector(".mech-tip.show");
+  await page.mouse.move(4, 4);
+  await page.evaluate(() => { state.units.find(u => !u.isPlayer && u.mechanics).mechanics.forEach(m => { if (m.st && m.st.due != null) m.st.due -= 1; }); GAME.refresh(); });
+  await page.waitForTimeout(200);
+  const quiet = await spied(page, base.count);
+  assert.deepEqual([quiet.pops, quiet.pings], [[], base.pings], "刷新、悬停、倒计时减少都不再弹 / 响 " + JSON.stringify(quiet));
+  // 换人点名（分担转到另一个人身上）：新的那个人头上弹出来，响一声
+  const moved = await page.evaluate(RETARGET);
+  assert.ok(moved.icon && moved.running && moved.burst, "新被点名的人头上的图标正在弹（缩放 + 一圈光）" + JSON.stringify(moved));
+  if (process.env.SHOTS) { await page.waitForTimeout(110); await page.screenshot({ path: path.join(process.env.SHOTS, "issue206-mark-pop.png") }); }
+  const a1 = await spied(page, base.count);
+  assert.deepEqual(a1.pops.map(p => [p.unit, p.type]), [[moved.to, "share"]], "只弹新点名的那一个");
+  assert.equal(a1.pings, base.pings + 1, "响一声");
+  // 静音（顶栏「音效 关」）：照样弹，不叫提示音
+  await page.waitForTimeout(700);
+  const b2 = await spied(page);
+  await page.evaluate(() => Sfx.setEnabled(false));
+  const muted = await page.evaluate(RETARGET);
+  const a2 = await spied(page, b2.count);
+  assert.deepEqual([muted.running, a2.pops.map(p => [p.unit, p.type]), a2.pings], [true, [[muted.to, "share"]], b2.pings], "静音：照样弹，不响");
+  await page.evaluate(() => Sfx.setEnabled(true));
+  // 系统开了「减少动态效果」：不弹，声音照音效开关响
+  await page.waitForTimeout(700);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const b3 = await spied(page);
+  const calm = await page.evaluate(RETARGET);
+  const a3 = await spied(page, b3.count);
+  assert.deepEqual([calm.icon, calm.running, calm.burst, a3.pops, a3.pings], [true, false, false, [], b3.pings + 1], "减少动态效果：不弹，照响");
+  assert.deepEqual(errors, []);
+});
+
+/** 联机单局：房主 + 玩家 Alice（1280×800），首领挂上四种机制开战，等到 Alice 画面上首领头上有四个图标。
+ *  opts.spy：Alice 的页面一打开就装上 SPY，并且等她的战场先画好（第一次画只记下）再开战 */
+async function onlineBoss(t, opts) {
+  opts = opts || {};
   const { createLocalRelayServer } = require("../relay/local-server.cjs");
   const origin = await site(t);
   const relay = await createLocalRelayServer({ origins: [origin] }); t.after(() => relay.close());
@@ -315,6 +409,7 @@ test("联机单局玩家画面（1280×800）：头顶图标、区名旁的塔�
     p.on("pageerror", e => errors.push(e.message)); p.on("dialog", d => d.accept());
     await p.goto(origin + "/game.html"); await p.waitForFunction(() => !!window.OnlineGame && !!window.GAME);
     await p.evaluate(() => { GAME.skip = true; GAME.instant = true; window.__noLevelUpPopup = true; });
+    if (opts.spy && i === 1) await p.evaluate(SPY);
   }
   const [host, alice] = pages;
   const code = await host.evaluate(async url => { await OnlineGame.create({ url, name: "房主", mode: "rogue" }); return OnlineGame.getView().roomCode; }, relay.url);
@@ -340,6 +435,7 @@ test("联机单局玩家画面（1280×800）：头顶图标、区名旁的塔�
   await host.evaluate(id => OnlineRogue.vote(id, "fight"), hostId);
   await host.waitForFunction(() => Screens.is("battle") && state.units.some(u => !u.isPlayer));
   await alice.waitForFunction(() => OnlineGame.getView().screen === "battle");
+  if (opts.spy) await alice.waitForFunction(() => document.querySelectorAll(".ol-battle .unit-wrap").length > 0);
   await host.evaluate(MECHS => { const boss = state.units.find(u => !u.isPlayer && !u.dead); MECHS.forEach(m => addBossMechanic(boss, m)); GAME.startOrEnd(); }, MECHS);
   await host.waitForFunction(() => state.combatStarted);
   const bossId = await host.evaluate(PILE);
@@ -352,6 +448,12 @@ test("联机单局玩家画面（1280×800）：头顶图标、区名旁的塔�
   await alice.waitForFunction(id => document.querySelectorAll(`.ol-battle [data-unit-id="${id}"] .u-mechs .mech-ico`).length === 4 && !document.querySelector(".hs-overlay:not([hidden]) .hs-card"), bossId).catch(() => {});
   await alice.waitForFunction(fourIcons, bossId);
   await alice.waitForTimeout(400);
+  return { host, alice, bossId, who, errors };
+}
+
+test("联机单局玩家画面（1280×800）：头顶图标、区名旁的塔、正上方的横幅、悬停说明和单机一样；内容多时能滚动；战场高度不变、页面不滚动；玩家数据不含坚毅生命", { timeout: 120000 }, async t => {
+  if (!browser) { t.skip("Playwright/browser unavailable"); return; }
+  const { alice, bossId, who, errors } = await onlineBoss(t);
   const card = await alice.$eval(`.ol-battle [data-unit-id="${bossId}"]`, CARD);
   assert.deepEqual(card.icons.map(i => [i.kind, i.type, i.n]), [["k-cast", "execution", "3"], ["k-cast", "share", "2"], ["k-cast", "tower", "2"], ["k-cast", "spread", "4"]]);
   assert.ok(card.icons.every(i => i.above && i.seen), JSON.stringify(card.icons));
@@ -384,5 +486,44 @@ test("联机单局玩家画面（1280×800）：头顶图标、区名旁的塔�
     await alice.mouse.wheel(0, 5000); await alice.waitForTimeout(150);
     await alice.screenshot({ path: path.join(process.env.SHOTS, "bug3-online-overflow-tip-scrolled.png") });
   }
+  assert.deepEqual(errors, []);
+});
+
+test("点名瞬间（联机玩家画面）：开战那一刻被点名的人头上的图标、区名旁边的塔弹出来，响一声（只看玩家收到的数据）；房主重发一样的画面不再弹 / 响；换人点名再弹", { timeout: 120000 }, async t => {
+  if (!browser) { t.skip("Playwright/browser unavailable"); return; }
+  const { host, alice, bossId, who, errors } = await onlineBoss(t, { spy: true });
+  const more = await host.evaluate(() => {
+    const b = state.units.find(u => !u.isPlayer && u.mechanics);
+    const st = t => b.mechanics.find(x => x.type === t).st;
+    return { tower: String(st("tower").zones[0]), heroes: st("spread").targetIds.slice() };
+  });
+  const first = await spied(alice);
+  const popped = (unit, type) => first.pops.some(p => p.unit === unit && p.type === type && p.kind === "k-mark");
+  assert.ok(popped(who.exec, "execution"), "死刑点名的人头上弹了 " + JSON.stringify(first.pops));
+  assert.ok(popped(who.share, "share"), "分担点名的人头上弹了");
+  for (const id of more.heroes) assert.ok(popped(id, "spread"), id + " 头上的远离弹了");
+  assert.ok(first.pops.some(p => p.zone === more.tower && p.type === "tower" && p.kind === "k-zone"), "区名旁边的塔弹了");
+  assert.ok(!first.pops.some(p => p.unit === bossId), "首领头上的读条不弹");
+  assert.ok(first.pings >= 1, "响了提示音");
+  // 房主再发一次一样的画面：不再弹、不再响
+  await alice.waitForTimeout(700);
+  const base = await spied(alice);
+  await host.evaluate(() => OnlineGame.touch());
+  await alice.waitForTimeout(800);
+  const quiet = await spied(alice, base.count);
+  assert.deepEqual([quiet.pops, quiet.pings], [[], base.pings], "重发一样的画面不再弹 / 响 " + JSON.stringify(quiet));
+  // 换人点名：房主把分担转给另一个队友，玩家画面上新的那个人头上弹出来、响一声
+  const to = await host.evaluate(() => {
+    const m = state.units.find(u => !u.isPlayer && u.mechanics).mechanics.find(x => x.type === "share");
+    const u = state.units.find(x => x.isPlayer && !x.hidden && !x.dead && x.id !== m.st.targetId);
+    m.st.targetId = u.id; OnlineGame.touch();
+    return u.id;
+  });
+  await alice.waitForFunction(id => !!document.querySelector(`.ol-battle [data-unit-id="${id}"] .u-mechs .mech-ico[data-mech="share"]`), to);
+  const after = await spied(alice, base.count);
+  assert.deepEqual(after.pops.map(p => [p.unit, p.type]), [[to, "share"]], "只弹新点名的那一个");
+  assert.equal(after.pings, base.pings + 1, "响一声");
+  if (process.env.SHOTS) await alice.screenshot({ path: path.join(process.env.SHOTS, "issue206-online-mark-pop.png") });
+  assert.doesNotMatch(await alice.evaluate(() => JSON.stringify(OnlineGame.getView().state || {})), /777001|"shp"/, "玩家收到的数据里没有坚毅生命");
   assert.deepEqual(errors, []);
 });

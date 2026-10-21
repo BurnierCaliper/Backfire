@@ -368,7 +368,7 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
-- **首领机制提示改成 FF14 式：头顶的图标 + 战场正上方的倒计时横幅**（主人定的方向，issue #206；unit-card.js · `MECH_ICON` / `mechIcon` / `mechTip` / `mechIconsHtml` / `towerMarkHtml` / `paintTowers` / `topStack` / `paintBanner` / `fitTop` / `bannerItems`，game.js · `applyEnv` / `setView` / `paintMechBar` / `refreshTop`，online-battle.js · `paintZones` / `update`，game.css、online.css；测试 tests/boss-mech-icons.test.js、tests/boss-countdown-display.test.js）
+- **首领机制提示改成 FF14 式：头顶的图标 + 战场正上方的倒计时横幅 + 点名瞬间弹一下、响一声**（主人定的方向，issue #206；unit-card.js · `MECH_ICON` / `mechIcon` / `mechTip` / `mechIconsHtml` / `towerMarkHtml` / `paintTowers` / `topStack` / `paintBanner` / `fitTop` / `bannerItems` / `MECH_ALERT` / `mechFresh` / `alertNew` / `bindTips`，sfx.js · `MARKER_PING` / `Sfx.marker`，game.js · `applyEnv` / `setView` / `paintMechBar` / `refreshTop`，online-battle.js · `paintZones` / `update`，game.css、online.css；测试 tests/boss-mech-icons.test.js、tests/boss-countdown-display.test.js）
   - **只改显示**：机制的规则、结算和图鉴里的说明都没动。联机发给玩家的数据也没加字段——`online-view.js` 本来就发机制类型、点名对象、还有几回合（`display.marks` / `display.casts` / `zoneView.towers`），不含坚毅生命。
   - **以前**：铭牌的状态行里写「死刑 · 还有 2 回合」「死刑→柯尔特 · 还有 2 回合」这样的色块，被点名的人铭牌内圈画红 / 黄 / 紫 / 橙框；踩塔是区域的青色粗框 + 右上角的文字牌子。
   - **现在**：
@@ -377,9 +377,14 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
     - 踩塔：图标放在那个区的区名旁边，旁边写「几人 / 要几人」（人数不够标红）；地面上画一圈（人数不够时变成红色虚线）；不放在单位头上。
     - 鼠标停在图标上（触屏点一下；点图标不会选中这个单位，点别处收起）弹出说明：机制名字（首领读条的带上点名对象）、还有几回合、什么时候落下、会发生什么（原来 `markTip` / `castTip` / `towerTip` 的文字）、怎么应对（新写在 `MECH_ICON` 里，末尾都加一句「落下那一刻首领要是失衡，会推迟一回合」）。单位本身的悬停说明照旧列出首领机制。
     - 战场正上方中间：红字白描边的横幅，每个首领正在读条的机制一条（「死刑 → 柯尔特 · 2 回合」「踩塔 · 3 区 · 1 回合」「远离 → 全员 · 4 回合」），剩余回合少的在上面，最后一回合的那条放大、闪；结算掉、取消、首领倒下以后那一条就消失。援军倒计时（chain.js）和它摞在同一个容器里（援军在上），写法一样是「· N 回合」；有横幅时战场顶上留出它的高度，不挡区名和卡。
-    - 联机玩家的战斗画面（online-battle.js）用同一套函数，看到的一样。
+    - 联机玩家的战斗画面（online-battle.js）用同一套函数，看到的一样。触屏点一下图标以后浏览器会补发 mouseout，触屏时不再把它当成鼠标离开（以前刚弹出的说明马上又收起）；联机玩家画面的说明框（挂在 body 下的 `.mech-tip`）加进 online.css 的显示白名单（以前一直被藏着）。
+    - **点名瞬间**（追加，主人已同意）：首领机制新点名到一个人（头顶的图标第一次出现）时，图标从头顶「啪」地弹出来（缩放 + 回弹，一圈机制色的光往外散），同时一声很短的提示音（`Sfx.marker`：两声「叮」先低后高，正弦波 + 一点泛音、再低通，不刺耳；几个人同一刻被点名只响一声）。区名旁边新标出来的塔也一样；首领头上的读条不弹。
+      - 只在新出现那一下：倒计时减少、刷新画面、悬停都不再弹 / 再响；第一次画（读档、刚连进来）时已经有的点名不弹。换人点名、拿掉再出现、落下以后马上重新点名（倒计时一下子往上跳 2 回合以上；首领失衡 / 被挟持推迟一回合只 +1，不算）算新的一次。
+      - 音效关着（顶栏「音效 关」）不响；系统开了「减少动态效果」就不弹，声音照音效开关走；预演时不算。
+      - 单机和联机玩家画面都有；联机只拿玩家收到的投影（`display.marks` / `zoneView.towers`）和上一次画的比，不看玩家看不到的数据。
+      - 数值都在配置里：弹出动画的时长、关键帧（缩放 / 位移 / 不透明度）、光圈大小、算重新点名的跳数在 unit-card.js 顶部的 `MECH_ALERT`；提示音的音高、长短、音量、低通、限流在 sfx.js 的 `MARKER_PING`。动画用 Web Animations 播，卡片挪区、联机画面整块重新挂上去都不会重播。
   - **「最后一回合」怎么算**：落下之前我方只剩这一回合能应对——敌人回合开始时落下的（现在的首领都是）看「本回合落下」，我方回合开始时落下的（主持人后台能设）看「还有 1 回合」。
-  - 原来的 `UnitCard.towerHtml`（踩塔文字牌子）换成 `towerMarkHtml`；`tests/boss-countdown-display.test.js` 按新的显示方式更新断言（单机、联机、悬停说明、挤的区都还在测），新增最后一回合脉动 / 减少动态效果、触屏点图标两个浏览器测试。
+  - 原来的 `UnitCard.towerHtml`（踩塔文字牌子）换成 `towerMarkHtml`；`tests/boss-countdown-display.test.js` 按新的显示方式更新断言（单机、联机、悬停说明、挤的区都还在测），新增最后一回合脉动 / 减少动态效果、触屏点图标两个浏览器测试。点名瞬间：`tests/boss-mech-icons.test.js` 新增 5 条（只认新出现的点名；弹出 + 提示音、静音、减少动态效果、预演；区名旁的塔；规则 → 联机投影 → 玩家端；`Sfx.marker` 的音高长短和静音），`tests/boss-countdown-display.test.js` 新增单机、联机玩家画面两个浏览器测试。
 - **分步选择的技能：真正打出去之前随时能放弃，界面补上明显的「放弃（Esc）」按钮**（issue #188；game.js · `showPickBar` / `canGiveUp` / `pickUnit` / `pickZone`，app.js · `renderSkillFlow` 与 Esc 键；测试 `tests/skillflow-giveup.test.js`）。
   - **核对结果**：战斗界面（单机、热座、联机玩家端共用 game.js）的分步选择一直是在本地把每一步的选择攒进 `picks`，最后一步选完才发**一条**技能指令，中途不扣行动点 / 附赠 / 资源、不换刀头、不改架势和标记、不记行动分；联机玩家端因此没有会残留在房主那边的 `skillFlow`。拆装部件的刀头也是在结算（`runSkill`）里才换，不是分步中途换的。计算器面板的分步（`beginSkillFlow`）放弃走 `cancelSkillFlow`，也不碰别的状态。
   - **以前**：选目标 / 选区域时只有「右键 / 点空白处取消」的文字提示，没有按钮；计算器面板按 Esc 不会放弃分步。**现在**：战场上点选目标、选区域的每一步，提示栏旁边都有「放弃（Esc）」按钮（Esc、右键照旧）；计算器面板的按钮改名「放弃（Esc）」，Esc 也能放弃。

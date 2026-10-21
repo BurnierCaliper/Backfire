@@ -3,8 +3,8 @@
  *   const c = UnitCard.create(snap)   → { id, wrap, unit, … }（snap 的字段见 game.js · snapUnit）
  *   UnitCard.update(c, snap, { sim })  → 按快照更新血条、架势、耐久、行动点、状态徽章、头顶的首领机制图标；sim 时不播放生效动画
  * 首领机制（FF14 式）：被点名的人头上一个贴纸图标（角上的大数字 = 还有几回合），首领头上是它正在读条的机制，
- * 悬停 / 触屏点一下看说明；铭牌上不写机制名字、不画边框。
- *   UnitCard.paintTowers(zone, towers)  → 踩塔：区名旁边的图标 + 地面上的一圈
+ * 悬停 / 触屏点一下看说明；铭牌上不写机制名字、不画边框。新点名的那一下图标「啪」地弹出来、响一声（MECH_ALERT）。
+ *   UnitCard.paintTowers(zone, towers, { sim })  → 踩塔：区名旁边的图标 + 地面上的一圈
  *   UnitCard.paintBanner(field, snaps)  → 战场正上方的机制横幅（红字白描边，剩余回合少的在上面），和援军倒计时摞在 topStack(field) 里 */
 (function (root) {
   "use strict";
@@ -61,6 +61,22 @@
   // 所有机制都一样（boss-mechanics.js · bossMechPhaseStart）
   const MECH_DELAY = "落下那一刻首领要是失衡，会推迟一回合。";
   const INK = "#0b0806";
+  // 点名瞬间的提示：首领机制新点名到一个人（头顶的图标第一次出现），图标从头顶「啪」地弹出来（缩放 + 回弹 + 一圈往外散的光），
+  // 同时一声短促的提示音（sfx.js · Sfx.marker：音效关着就不响）。系统开了「减少动态效果」就不弹，声音照音效开关走。
+  // 只在新出现那一下：倒计时减少、重画、悬停都不再弹 / 再响；落下以后马上重新点名（倒计时一下子往上跳）算新的一次。
+  //   kinds：哪几种图标会弹（mark 被点名的人头上的、zone 区名旁边的塔；首领头上的读条不弹）
+  //   jump：倒计时往上跳了至少几回合才算重新点名（首领失衡 / 被挟持推迟一回合只 +1，不算）；0 = 只看新出现
+  //   ms：弹出动画多长（毫秒）；easing：每一段的缓动
+  //   frames：关键帧（at 第几成时间、scale 缩放、y 往下偏几 px、alpha 不透明度）：从头顶下面冒出来、冲过头放大、回弹一下、落定
+  //   burst：同时一圈机制色的光往外散（缩放 from → to，起始不透明度 alpha）
+  const MECH_ALERT = {
+    kinds: ["mark", "zone"],
+    jump: 2,
+    ms: 480,
+    easing: "ease-out",
+    frames: [{ at: 0, scale: 0.2, y: 14, alpha: 0 }, { at: 0.45, scale: 1.34, y: -2, alpha: 1 }, { at: 0.72, scale: 0.9, y: 0, alpha: 1 }, { at: 1, scale: 1, y: 0, alpha: 1 }],
+    burst: { from: 0.5, to: 1.9, alpha: 0.9 }
+  };
 
   // 首领机制的倒计时文字（头顶图标的说明、单位的悬停说明、踩塔、横幅共用）
   const when = (x) => x.left > 0 ? `${x.left} 回合后` : `这回合${x.phase === "player" ? "我方" : "敌人"}回合开始时`;
@@ -94,6 +110,8 @@
   const targetText = (x) => String((x && x.target) || "").replace(/\s*[（(]\d+[）)]$/, "");
   /** 踩塔的区：「3区、2区」写成「3 区、2 区」 */
   const zonesText = (t) => String(t || "").split(/[、,，]/).map(s => s.trim().replace(/^(\d+)\s*区$/, "$1 区")).filter(Boolean).join("、");
+  /** 一个图标认人用的 key（data-mkey）：哪一种图标、什么机制、叫什么、哪个首领放的（重画以后找回同一个图标、认出新出现的点名） */
+  const mkeyOf = (x, kind) => [kind, x.type, x.name || "", x.by || ""].join(":");
 
   /** 贴纸图标的 SVG（48×48）：墨线外圈 + 白边 + 机制色的底，图形先描粗墨线再描白；
    *  首领读条（kind "cast"）反过来：机制色的边、深色的底、机制色的图形 */
@@ -123,7 +141,7 @@
     const cfg = MECH_ICON[x.type] || MECH_OTHER, n = mechN(x), bar = kind === "bar";
     const tip = bar ? null : mechTip(x, kind);
     return `<span class="mech-ico k-${kind} t-${esc(x.type)}${mechLast(x) ? " last" : ""}" style="--mc:${cfg.color};--tilt:${cfg.tilt}deg" data-mech="${esc(x.type)}" data-left="${n}"` +
-      (bar ? ` aria-hidden="true">` : ` data-mkey="${esc(kind + ":" + x.type + ":" + (x.name || ""))}" data-mtip="${esc(JSON.stringify(tip))}" role="img" aria-label="${esc(tip.name + "：" + tip.left)}">`) +
+      (bar ? ` aria-hidden="true">` : ` data-mkey="${esc(mkeyOf(x, kind))}" data-mtip="${esc(JSON.stringify(tip))}" role="img" aria-label="${esc(tip.name + "：" + tip.left)}">`) +
       mechSvg(x.type, kind) + (bar ? "" : `<b class="mi-n" aria-hidden="true">${n > 0 ? n : "!"}</b>`) + `</span>`;
   }
   /** 单位头顶的图标：被点名的标记（marks），首领正在读条的机制（casts）；倒下 / 藏起来的单位不画 */
@@ -172,7 +190,8 @@
     tipBound = true;
     const icoOf = (t) => t && t.closest ? t.closest(".mech-ico[data-mtip]") : null;
     document.addEventListener("mouseover", e => { if (touchUI()) return; const i = icoOf(e.target); if (i && i !== tipFor) showTip(i); });
-    document.addEventListener("mouseout", e => { const i = icoOf(e.target); if (i && i === tipFor && !i.contains(e.relatedTarget)) hideTip(); });
+    // 触屏点一下之后浏览器会补发 mouseout：不当成鼠标离开（不然刚弹出的说明马上又收起），触屏只认点击
+    document.addEventListener("mouseout", e => { if (touchUI()) return; const i = icoOf(e.target); if (i && i === tipFor && !i.contains(e.relatedTarget)) hideTip(); });
     // 触屏：点图标弹出 / 收起说明，不当成点了这张卡（免得选中目标）；点别处收起
     document.addEventListener("click", e => {
       const i = icoOf(e.target);
@@ -193,10 +212,74 @@
     }
   }
 
+  /* ---------- 点名瞬间：新出现的点名弹一下 + 提示音（MECH_ALERT） ---------- */
+  const nowMs = () => (root.performance && typeof root.performance.now === "function" ? root.performance.now() : Date.now());
+  const stillUI = () => { try { return !!(root.matchMedia && root.matchMedia("(prefers-reduced-motion: reduce)").matches); } catch (e) { return false; } };
+  /** 和上次画的比，这次新出现的点名。memo._mechSeen 记着上次每个点名还有几回合（没有 = 第一次画：只记下，不算新出现——
+   *  读档、刚连进来、重开画面时已经有的点名不弹）；list：这次画的标记；kind：mark / zone（不在 MECH_ALERT.kinds 里的只记不算）。
+   *  新出现 = 上次没有这个点名，或者倒计时一下子往上跳了 MECH_ALERT.jump 回合以上（落下以后马上重新点名）；倒计时减少、一样的重画都不算 */
+  function mechFresh(memo, list, kind) {
+    if (!memo) return [];
+    const marks = (list || []).filter(x => x && x.type), before = memo._mechSeen, seen = new Map();
+    marks.forEach(x => seen.set(mkeyOf(x, kind), mechN(x)));
+    memo._mechSeen = seen;
+    if (!before || !MECH_ALERT.kinds.includes(kind)) return [];
+    const jump = Math.max(0, Number(MECH_ALERT.jump) || 0);
+    return marks.filter(x => {
+      const was = before.get(mkeyOf(x, kind));
+      return was == null || (jump > 0 && mechN(x) - was >= jump);
+    });
+  }
+  /** 点名的提示音（sfx.js · Sfx.marker）：音效关着（静音）就不调用；几个人同一刻被点名只响一声（Sfx 里限流） */
+  function ping() {
+    const S = root.Sfx;
+    if (!S || typeof S.marker !== "function" || (typeof S.enabled === "function" && !S.enabled())) return false;
+    try { return S.marker() !== false; } catch (e) { return false; }
+  }
+  /** 一个图标「啪」地弹出来 + 一圈机制色的光往外散（Web Animations：卡片挪区、联机画面整块挂回去都不会重播）。
+   *  elapsed：图标被重画换掉了，新的那个接着从这里演完。返回动画（id "mech-pop"） */
+  function popIcon(ico, elapsed) {
+    if (!ico || typeof ico.animate !== "function") return null;
+    const A = MECH_ALERT, from = Math.max(0, Number(elapsed) || 0);
+    const pop = ico.animate(A.frames.map(f => ({ offset: f.at, transform: `translateY(${f.y}px) scale(${f.scale})`, opacity: f.alpha, easing: A.easing })), { duration: A.ms, id: "mech-pop" });
+    if (from) pop.currentTime = from;
+    if (ico.classList) ico.classList.add("pop");
+    pop.onfinish = pop.oncancel = () => { if (ico.classList) ico.classList.remove("pop"); };
+    if (A.burst && typeof document !== "undefined" && ico.appendChild) {
+      const ring = el("i", "mi-burst");
+      ring.setAttribute("aria-hidden", "true");
+      ico.appendChild(ring);
+      const b = ring.animate([{ transform: `scale(${A.burst.from})`, opacity: A.burst.alpha }, { transform: `scale(${A.burst.to})`, opacity: 0 }], { duration: A.ms, easing: A.easing, fill: "forwards", id: "mech-pop-burst" });
+      if (from) b.currentTime = from;
+      b.onfinish = b.oncancel = () => ring.remove();
+    }
+    return pop;
+  }
+  /** 点名瞬间：box（头顶那一排 .u-mechs / 区名旁边的 .ztower-mark）刚按 list 画好。和上次比新出现的点名（mechFresh，
+   *  记在 memo 上，默认就是 box）：图标弹一下（减少动态效果时不弹）、响一声（音效关着不响）；还没弹完的图标被重画换掉了，接着弹完。
+   *  sim（预演）时什么都不做。返回新出现的点名 */
+  function alertNew(box, list, kind, opts, memo) {
+    if (opts && opts.sim) return [];
+    memo = memo || box;
+    if (!memo) return [];
+    const fresh = mechFresh(memo, list, kind);
+    const t = nowMs(), pops = memo._mechPops || (memo._mechPops = new Map());
+    pops.forEach((t0, k) => { if (t - t0 >= MECH_ALERT.ms) pops.delete(k); });
+    if (!stillUI()) fresh.forEach(x => pops.set(mkeyOf(x, kind), t));
+    if (pops.size && box && box.querySelectorAll) [...box.querySelectorAll(".mech-ico[data-mkey]")].forEach(i => {
+      const t0 = pops.get(i.dataset.mkey);
+      if (t0 == null || i._mechPop) return;
+      try { i._mechPop = popIcon(i, t - t0) || true; } catch (e) { i._mechPop = true; }   // 弹不出来也不能耽误画卡
+    });
+    if (fresh.length) ping();
+    return fresh;
+  }
+
   /* ---------- 踩塔：区名旁边的图标 + 地面上的一圈 ---------- */
   /** z：.g-zone；list：这个区上的塔（boss-mechanics.js · bossZoneMarks / 联机的 zoneView.towers）。
-   *  区名包进一行（.zhead），图标排在区名后面；地面的圈人数不够时是红色虚线，最后一回合圈和图标一起脉动 */
-  function paintTowers(z, list) {
+   *  区名包进一行（.zhead），图标排在区名后面；地面的圈人数不够时是红色虚线，最后一回合圈和图标一起脉动。
+   *  新标出来的塔和点名一样弹一下、响一声（opts.sim：预演时不算） */
+  function paintTowers(z, list, opts) {
     if (!z) return;
     list = (list || []).filter(t => t && t.type);
     const on = list.length > 0;
@@ -207,11 +290,13 @@
     let head = lab && lab.parentElement && lab.parentElement.classList.contains("zhead") ? lab.parentElement : null;
     if (on && lab && !head) { head = el("div", "zhead"); lab.parentNode.insertBefore(head, lab); head.appendChild(lab); }
     let mark = head ? head.querySelector(":scope > .ztower-mark") : null;
-    if (!on) { if (mark) mark.remove(); }
+    if (!on) { if (mark) mark.remove(); mark = null; }
     else if (head) {
       if (!mark) { mark = el("span", "ztower-mark"); head.appendChild(mark); }
       setHtml(mark, towerMarkHtml(list));
     }
+    // 记在区上（没有塔的时候图标那一块拿掉了，下次标出来照样认得出是新的）
+    alertNew(mark, list, "zone", opts, z);
     let ring = z.querySelector(":scope > .ztower-ring");
     if (!on) { if (ring) ring.remove(); }
     else if (!ring) { ring = el("div", "ztower-ring"); ring.setAttribute("aria-hidden", "true"); z.insertBefore(ring, z.firstChild); }
@@ -310,10 +395,11 @@
       c.wrap.classList.toggle("has-intent", list.length > 0);
     }
     // 首领机制：被点名的人头上浮一个图标（死刑 / 分担 / 远离 / 齐射），首领头上是它正在读条的机制；
-    // 铭牌上不写机制名字、不画边框，悬停 / 触屏点一下图标才看说明
+    // 铭牌上不写机制名字、不画边框，悬停 / 触屏点一下图标才看说明。新点名的那一下弹出来、响一声（第一次画、预演时不算）
     if (c.mechs) {
       setHtml(c.mechs, mechIconsHtml(s));
       c.wrap.classList.toggle("has-mech", !!c.mechs._mechHtml);
+      alertNew(c.mechs, s.dead || s.hidden ? [] : s.marks, "mark", opts);
     }
     q(".u-lv").textContent = "Lv" + s.level;
     // 个体值（杂兵、精英）：铭牌上停一下就能看到血量 / ATK 水平
@@ -460,6 +546,7 @@
   const api = {
     create, update, sumCur, sumMax, mechLeft, mechLines, towerTip,
     MECH_ICON, mechN, mechLast, mechTip, mechTipHtml, mechIcon, mechIconsHtml, towerMarkHtml, paintTowers,
+    MECH_ALERT, mechFresh, alertNew,
     topStack, paintBanner, fitTop, bannerItems, bannerText, hideTip
   };
   root.UnitCard = api;

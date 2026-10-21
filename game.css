@@ -2278,6 +2278,13 @@ body:not([data-screen="battle"]) .g-rank { display: none !important; }
   0%, 100% { transform: rotate(var(--tilt)) scale(1); }
   50% { transform: rotate(var(--tilt)) scale(1.1); filter: drop-shadow(2px 3px 0 rgba(11, 8, 6, .45)) drop-shadow(0 0 6px var(--mc)); }
 }
+/* 点名瞬间：新被点名的图标从头顶「啪」地弹出来，一圈机制色的光往外散。
+ * 动画由脚本播（unit-card.js · MECH_ALERT / popIcon，数值都在那里；「减少动态效果」时不播），这里只管弹的支点和光圈的样子 */
+.mech-ico.pop { z-index: 2; transform-origin: 50% 80%; }
+.mech-ico .mi-burst {
+  position: absolute; inset: -3px; border-radius: 50%; pointer-events: none; opacity: 0;
+  border: 3px solid var(--mc); box-shadow: 0 0 0 2px rgba(11, 8, 6, .55), 0 0 14px var(--mc);
+}
 /* 说明浮窗：机制名字、还有几回合、会发生什么、怎么应对 */
 .mech-tip {
   position: fixed; z-index: 86; display: none; pointer-events: none; width: max-content; max-width: min(320px, calc(100vw - 16px));

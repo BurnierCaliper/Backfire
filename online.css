@@ -110,7 +110,7 @@
  * calculator dialogs live outside the original screen roots; hiding individual
  * screen IDs leaves those dialogs in the outer document and its scroll range. */
 body.online-player { overflow: hidden; }
-body.online-player > :not(.ol-ui):not(.hs-ui):not(.hs-sheet):not(.ar-sheet):not(.wm):not(#sk-tip):not(.sk-tip):not(.unit-tip):not(.rr-overlay):not(.ovl) { display: none !important; }
+body.online-player > :not(.ol-ui):not(.hs-ui):not(.hs-sheet):not(.ar-sheet):not(.wm):not(#sk-tip):not(.sk-tip):not(.unit-tip):not(.mech-tip):not(.rr-overlay):not(.ovl) { display: none !important; }
 /* 玩家看自己的角色资料 / 武器页：压在联机舞台上面 */
 body.online-player .hs-sheet, body.online-player .ar-sheet { z-index: 95; }
 /* 玩家右侧栏：战斗（记录）/ 小队 两个频道 */
