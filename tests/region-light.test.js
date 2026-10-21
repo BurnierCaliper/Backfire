@@ -344,7 +344,7 @@ test("联机跑团：房主在战场配置里换光影 / 区域，战斗中也�
   assert.equal(player().light, "night");
   const og = code("online-game.js"), raw = og.slice(og.indexOf("function rawPacket("));
   assert.ok(/battleLookSync\(\)/.test(raw.slice(0, raw.indexOf("return {"))), "rawPacket 发包前按当前时钟重算光影");
-  assert.match(og, /\["setRegion", "setLight"\]\.includes\(cmd\.action\)[\s\S]{0,120}"主持人调整了战场"/);
+  assert.match(og, /\["setRegion", "setScene", "setLight"\]\.includes\(cmd\.action\)[\s\S]{0,120}"主持人调整了战场"/);   // #239 加了场景
   assert.ok(c.OnlineView.projectLogs([{ kind: "gm", summary: "主持人调整了战场" }])[0].text === "主持人调整了战场");
 });
 
@@ -370,7 +370,7 @@ test("HD-2D 原型：画面读投影里的 pv.region / pv.light，没有再用�
   const mod = /<script type="module">([\s\S]*?)<\/script>/.exec(html)[1];
   assert.match(mod, /const regionNow = \(\) => \(pv && pv\.region\) \|\| pageRegion\(\);/);
   assert.match(mod, /const themeNow = \(\) => \(pv && pv\.light\) \|\| demo\.theme;/);
-  assert.match(mod, /L\.build\(project\(\), \{[^}]*region: regionNow\(\), theme: themeNow\(\) \}\)/);
+  assert.match(mod, /L\.build\(project\(\), \{[^}]*region: regionNow\(\), (?:scene: sceneNow\(\), )?theme: themeNow\(\) \}\)/);   // #239 加了场景
   assert.match(mod, /sc\.setBattle\(layout, \{ weather: pv\.weather, theme: themeNow\(\)/);
   assert.equal((mod.match(/BattleSim\.setup\(\{[^}]*region, light: this\.theme,/g) || []).length, 3, "三个演示都把区域、光影写进战斗状态");
   assert.doesNotMatch(mod, /\bst\.(?:region|light|regionMap|regionPick|lightPick)\b/, "不读房主原始 state 里的区域 / 光影");
