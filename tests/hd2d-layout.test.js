@@ -709,12 +709,12 @@ test("乌云：雷鸣时远景的天幕压暗、盖上慢慢飘的厚云（星�
     assert.ok(su.flashU.value < u6, "云亮的地方跟着雷走");
     storm.update(10, 0.016, { flash: 0, x: 0 });
     assert.ok(su.flash.value === 0 && low.every(o => o.material.uniforms.flash.value === 0));
-    // 远处的雷：劈在低云前面（天幕、低云都是一圈弧，两边离得近；劈在后面会被挡住），比战场边缘的雷远，横着在画面里
-    const S = B.BACKDROP, cx = (b.minX + b.maxX) / 2, cz = (b.minZ + b.maxZ) / 2;
-    const rx = (b.maxX - b.minX) / 2 + S.sideGap, rz = (b.maxZ - b.minZ) / 2 + S.skyGap, lx = rx - S.storm.low.inset, lz = rz - S.storm.low.inset;
-    const arcZ = (x, ax, az) => { const k = (x - cx) / ax; return cz - az * Math.sqrt(Math.max(0, 1 - k * k)); };
+    // 远处的雷：劈在低云前面（劈在后面会被挡住），比战场边缘的雷远，横着在画面里。
+    // 天幕、低云都是平的（#237：以前是一圈弧，地平线弯下去像小星球）：天幕立在战场后沿再往后 skyGap，低云在它前面 low.inset
+    const S = B.BACKDROP, cz = (b.minZ + b.maxZ) / 2;
+    const rz = (b.maxZ - b.minZ) / 2 + S.skyGap, skyAt = cz - rz, lowAt = skyAt + S.storm.low.inset;
     [-1, -0.5, 0, 0.5, 1].forEach(r => {
-      const p = storm.farPoint(r), skyZ = arcZ(p.x, rx, rz), lowZ = arcZ(p.x, lx, lz);
+      const p = storm.farPoint(r), skyZ = skyAt, lowZ = lowAt;
       assert.ok(p.z > skyZ + 0.05 && p.z > lowZ + 0.05, `远处的雷 r=${r} 在天幕 / 低云后面（z=${p.z.toFixed(2)}，天幕 ${skyZ.toFixed(2)}，低云 ${lowZ.toFixed(2)}）`);
       assert.ok(p.z < b.minZ - WX.STORM.edgeDepth[1], `远处的雷 r=${r} 不比战场边缘的远（z=${p.z.toFixed(2)}）`);
       const s = L.project(cam, { x: p.x, y: 0, z: p.z });

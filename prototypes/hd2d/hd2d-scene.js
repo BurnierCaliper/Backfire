@@ -56,8 +56,9 @@ const RING = { radius: 1.05, spin: 0.45, pulse: 0.05 };
 const SHADOW = { core: 0.42, coreOpacity: 0.78, soft: 1.05, softOpacity: 0.42 };
 /** 灯（战场外缘的路灯 / 矿灯）偶尔闪一下：隔 wait 秒（随机）闪 dur 秒 */
 const FLICKER = { wait: [3, 11], dur: [0.18, 0.55], low: 0.12 };
-/** 雾：从镜头到战场后沿开始起雾，再往后 depth 远基本全进雾（天幕的底边在这一段里，地面和天边连成一片） */
-const FOG = { depth: 30 };
+/** 雾：从镜头到战场后沿开始起雾，再往后 depth 远基本全进雾（天幕的底边在这一段里，地面和天边连成一片）。
+ *  #237：远处收得近一点（以前 30），像一个舞台场景，不是一望无际的星球 */
+const FOG = { depth: 24 };
 /** 雷击（天气给的闪光 0–1，减少动态效果时天气那边已经减弱过）：全屏往白色推多少（white；color 是显示用的 sRGB 颜色）、
  *  灯光 / 曝光 / 泛光推亮多少；乌云下面平时的灯光压暗到几成（dim）。间隔、连闪、抖动幅度在 hd2d-weather.js 的 STORM */
 const FLASH = { white: 0.42, color: [0.92, 0.95, 1.0], hemi: 3.2, sun: 2.5, exposure: 0.35, bloom: 0.5, dim: 0.8 };

@@ -294,6 +294,65 @@ test("高地真的高（#237）：高地 / 沙珊瑚台地比普通区高出地�
   assert.ok(coral.highland && coral.topY - L.CONFIG.baseH >= L.CONFIG.baseH * 1.25 - 1e-9, "沙珊瑚台地一样高");
 });
 
+/* ---------- 2. 背景不要球面（在真的 three.js 里建远景量）---------- */
+test("背景不要球面（#237）：天幕、天边画的远景、雷鸣的低云都是平的（以前绕着战场的半个椭圆筒，地平线弯下去像小星球），远 / 中 / 近镜头里地平线是一条直线，左右转到头也看不到天幕的边；中景剪影一层层排在战场后面（不绕到两侧）；地台外面的地是一块平的方地；远处靠雾收住", async (t) => {
+  const P = await protoEnv(t);
+  if (!P) return;
+  const { THREE, B } = P, C = cams(), F = fxm();
+  try {
+    const colors = { sky: ["#ffc47c", "#f28a5a", "#b9587a", "#4b3368"], fog: 0xc98a72 };
+    const scene = fs.readFileSync(path.join(DIR, "hd2d-scene.js"), "utf8");
+    assert.ok(Number.isFinite(B.BACKDROP.haze) && B.BACKDROP.haze > 0.1 && /hazeH/.test(fs.readFileSync(path.join(DIR, "hd2d-backdrop.js"), "utf8")), "天幕贴地的一截融进雾里（高度在配置里）");
+    assert.ok(/const FOG = \{ depth: (\d+)/.test(scene) && Number(/const FOG = \{ depth: (\d+)/.exec(scene)[1]) < 30, "远处的雾收得比以前（30）近");
+    for (const id of Object.keys(DEMOS)) {
+      const { layout } = demoLayout(id), b = layout.bounds;
+      for (const [kind, theme, storm] of [["mine", "dusk"], ["desert", "day"], ["city", "night"], ["skynet", "day"], ["wasteland", "day"], ["city", "night", true]]) {
+        const bd = B.buildBackdrop(kind, b, theme, layout.camera, Object.assign({ storm }, colors)), tag = `${id} ${kind} ${theme}${storm ? " 雷鸣" : ""}`;
+        bd.update(1, 0.016, { flash: 0.5, x: 0 });
+        const flats = bd.group.children.filter(o => o.isMesh && o.geometry.type === "BufferGeometry");   // 天幕、天边的远景、低云
+        assert.ok(flats.length >= (storm ? 3 : 2), tag + "：有天幕、远景带子" + (storm ? "、低云" : ""));
+        flats.forEach(o => {
+          const pos = o.geometry.attributes.position, zs = new Set();
+          for (let i = 0; i < pos.count; i++) zs.add(Math.round(pos.getZ(i) * 1000));
+          assert.equal(zs.size, 1, `${tag}：${o.userData.layer || (o.userData.cloud ? "低云" : "?")} 不是平的（进深有 ${zs.size} 种）`);
+          assert.ok(pos.getZ(0) < b.minZ, tag + "：在战场后面");
+        });
+        // 地平线（天幕的下沿）在远 / 中 / 近镜头里是一条直线；左右转到头（0.5 弧度）也看不到天幕的边
+        const sky = flats.find(o => o.userData.layer === "sky") || flats[0], pos = sky.geometry.attributes.position;
+        const bottom = [];
+        for (let i = 0; i < pos.count; i++) if (pos.getY(i) < 0) bottom.push({ x: pos.getX(i), y: pos.getY(i), z: pos.getZ(i) });
+        const ends = [bottom[0], bottom[bottom.length - 1]];
+        for (const tier of ["far", "mid", "near"]) for (const zid of [layout.zones[0].id, layout.zones[layout.zones.length - 1].id]) for (const az of [-0.5, 0, 0.5]) {
+          const p = C.pose(layout, tier, zid), ln = F.lens({ pos: C.posOf(p.target, p.dist, p.elevation, az), target: p.target, fov: p.fov, width: DESKTOP.width, height: DESKTOP.height });
+          const s = bottom.map(q => L.project(ln, q)).filter(q => q.depth > 0 && q.x > -50 && q.x < DESKTOP.width + 50);
+          assert.ok(s.length >= 3, `${tag} ${tier} ${zid} 区 ${az}：看得到地平线`);
+          const a = s[0], c = s[s.length - 1];
+          const off = Math.max(...s.map(q => Math.abs((q.y - a.y) - (c.y - a.y) * (q.x - a.x) / ((c.x - a.x) || 1))));
+          assert.ok(off < 1, `${tag} ${tier} ${zid} 区 方位 ${az}：地平线弯了 ${off.toFixed(1)}px`);
+          const e0 = L.project(ln, ends[0]), e1 = L.project(ln, ends[1]);   // 天幕左右两头的下角：在画面外（或者在镜头后面）
+          assert.ok((e0.depth <= 0 || e0.x < 0) && (e1.depth <= 0 || e1.x > DESKTOP.width), `${tag} ${tier} ${zid} 区 方位 ${az}：看得到天幕的边（${e0.x.toFixed(0)} … ${e1.x.toFixed(0)}）`);
+        }
+        // 中景剪影：都在战场后沿后面，排成几层（进深只有 BACKDROP.mid.layers 那几种）
+        const props = bd.group.children.filter(o => !flats.includes(o) && (o.isGroup || (o.isMesh && o.geometry.type !== "SphereGeometry")));
+        assert.ok(props.length >= 6, tag + "：中景剪影有好几个");
+        const depths = new Set();
+        props.forEach(o => {
+          const box = new THREE.Box3().setFromObject(o);
+          assert.ok(o.position.z < b.minZ - 1 && box.max.z < b.minZ + 1.5, `${tag}：剪影 ${o.userData.kind || o.geometry && o.geometry.type} 绕到了战场旁边（z=${o.position.z.toFixed(1)}）`);
+          depths.add(Math.round(o.position.z * 100));
+        });
+        assert.ok(depths.size <= B.BACKDROP.mid.layers.length, `${tag}：剪影的进深有 ${depths.size} 种，不是一层层的`);
+        bd.dispose();
+      }
+    }
+    // 地台外面的地：一块平的方地（以前是圆盘）
+    const g = B.buildGround(), gb = new THREE.Box3().setFromObject(g);
+    assert.equal(g.geometry.type, "PlaneGeometry", "地面是平的方地");
+    assert.ok(gb.max.y - gb.min.y < 1e-6 && Math.abs(gb.max.y - L.CONFIG.groundY) < 1e-6, "地面基本是平的，高度是 CONFIG.groundY");
+    g.geometry.dispose(); g.material.dispose();
+  } finally { P.restore(); }
+});
+
 /* ---------- 3 / 4 在真的 three.js 里建出来 ---------- */
 /* 场景里的积木只建 three.js 的物体，不碰 WebGL：在 Node 里用 vendor 的真 three.js 建一遍（和 tests/hd2d-layout.test.js 的 protoEnv 一样）。
  * canvas 程序纹理用一个什么都接受的假 2D 画布代替 */
