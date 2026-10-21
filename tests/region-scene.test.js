@@ -85,6 +85,33 @@ test("场景表在正式配置里（world-data.js · BATTLE_SCENES，和 BATTLE_
   for (const r of ["月球", null, undefined, "", "__proto__", "constructor", 42]) assert.deepEqual(plain(c.battleScenes(r)), [], "认不得的区域没有场景：" + String(r));
 });
 
+test("HD-2D 原型的地面主题表按场景留出接口（hd2d-layout.js · SCENES）：区域、场景 id 和正式的场景表一一对上，先都用所属区域现在的样子；布局带上场景", () => {
+  const c = H.load(), T = vm.runInContext("BATTLE_SCENES", c), L = require("../prototypes/hd2d/hd2d-layout.js");
+  assert.deepEqual(Object.keys(L.SCENES).sort(), Object.keys(T).sort(), "原型的 SCENES 和正式的场景表区域一一对上");
+  Object.entries(T).forEach(([r, list]) => {
+    assert.deepEqual(Object.keys(L.SCENES[r]).sort(), plain(list.map(s => s.id)).sort(), r + "：场景 id 一一对上");
+    list.forEach(s => {
+      assert.ok(L.GROUNDS[L.SCENES[r][s.id]], `${r} · ${s.name}：地面主题在 GROUNDS 里`);
+      assert.equal(L.groundOf(r, s.id), L.groundOf(r), `${r} · ${s.name}：先用所属区域现在的样子`);
+      assert.equal(L.sceneOf(r, s.id), s.id);
+    });
+  });
+  // 认不得的场景 = 区域自己的样子；认不得的区域 = 兜底；地图地点 id 也认
+  assert.equal(L.groundOf("第一采矿场", "dune"), L.groundOf("第一采矿场"));
+  assert.equal(L.groundOf("mine_2", "floor"), "mine2");
+  assert.equal(L.sceneOf("mine_2", "floor"), "floor");
+  assert.equal(L.groundOf("月球", "rim"), L.GROUND_DEFAULT);
+  for (const [r, s] of [["第三采矿场", "mid"], ["沙漠", "rim"], ["月球", "rim"], ["第一采矿场", "__proto__"], ["第一采矿场", "constructor"], ["第一采矿场", undefined], ["第一采矿场", 1]])
+    assert.equal(L.sceneOf(r, s), null, `认不得：${r} / ${String(s)}`);
+  // 布局：给了场景就带上（out.scene），地面主题按「区域 + 场景」挑
+  const st = { zoneMode: 2, units: [], fields: {}, gaps: {} };
+  const out = L.build(st, { region: "第一采矿场", scene: "floor" });
+  assert.deepEqual([out.region, out.scene, out.ground], ["第一采矿场", "floor", "mine1"]);
+  assert.equal(L.build(st, { region: "第三采矿场", scene: "mid" }).scene, null, "第三采矿场没有矿内");
+  assert.equal(L.build(st, { region: "第一采矿场" }).scene, null);
+  assert.equal(L.build(st, { scene: "rim" }).scene, null, "没有区域就没有场景");
+});
+
 /* ---------- 2. 默认跟着地图 ---------- */
 test("默认（沙漠）：场上有沙珊瑚台地场地 → 沙珊瑚台地，否则沙丘；沙珊瑚枝不算，不在场上的区不算；战斗中台地出现 / 消失，重算（联机每次发包前）就跟着变", () => {
   const c = H.load(), st = () => c.S.state;
@@ -400,6 +427,38 @@ test("战场配置（game.html / game.js）：「所在区域」旁边一个「�
   // 改好了（不是排着等动画播完）就重画：换了区域，场景的选项跟着变
   assert.match(fn, /if \(\(state\[LOOK_PICK\[action\]\] \|\| ""\) === value\) renderLookSelects\(\);/);
   assert.match(js, /const LOOK_PICK = \{ setRegion: "regionPick", setScene: "scenePick", setLight: "lightPick" \};/);
+});
+
+/* ---------- 7. HD-2D 原型接上 ---------- */
+test("HD-2D 原型：画面读投影里的 pv.scene，没有再用页面选的兜底；顶栏的场景下拉框（选项跟着区域变，网址 ?scene=）选的当成布置战场写进战斗状态；不绕开白名单读房主的 st", () => {
+  const html = read("prototypes/hd2d/index.html");
+  const mod = /<script type="module">([\s\S]*?)<\/script>/.exec(html)[1];
+  assert.ok(html.includes('id="scene-select"'), "顶栏有场景下拉框");
+  assert.ok(new RegExp(/var OWN = \/(.*)\/;/.exec(html)[1]).test("scene-select"), "垫片认得场景下拉框是页面自己的元素");
+  assert.match(mod, /const sceneNow = \(\) => \(pv && pv\.scene\) \|\| scenePick;/);
+  assert.equal((mod.match(/L\.build\((?:project\(\)|pv), \{[^}]*region: regionNow\(\), scene: sceneNow\(\), theme: themeNow\(\) \}\)/g) || []).length, 2, "两处排布局都带上场景");
+  assert.match(mod, /battleLookStart\(\{ region: pageRegion\(\), scene: scenePick, light: demo\.theme \}\)/, "页面选的场景当成布置战场写进战斗状态");
+  assert.match(mod, /function loadDemo\(id\) \{[\s\S]*?st = demo\.make\(pageRegion\(\)\);\s*placeLook\(\);/, "演示布置完（场地都摆好了）再写一遍，场景的默认看得到沙珊瑚台地");
+  assert.match(mod, /\.get\("scene"\)/, "网址参数 ?scene=");
+  assert.match(mod, /battleScenes\(/, "下拉框列的是正式场景表里当前区域的场景");
+  assert.doesNotMatch(mod, /\bst\.(?:scene|scenePick|sceneMap)\b/, "不读房主原始 state 里的场景");
+  const css = read("prototypes/hd2d/hd2d.css");
+  assert.ok(/@media \(max-width: 720px\)[\s\S]*#scene-select[^{]*\{[^}]*display: none/.test(css), "手机上收起场景下拉框（和区域下拉框一样）");
+  // 假网页：页面环境里投影过的演示战场有场景；演示布置完再写一遍（和页面一样），沙珊瑚台地算得上
+  const page = require("./hd2d-fake-page").load();
+  assert.deepEqual(page.errors, []);
+  const P = page.ctx;
+  let pv = P.OnlineView.projectState(P.BattleSim.setup({ party: PARTY, enemies: [], region: "第一采矿场", scene: "floor", light: "dusk", seed: "SCN-PAGE" }), {});
+  assert.deepEqual([pv.region, pv.scene], ["第一采矿场", "floor"]);
+  const st = P.BattleSim.setup({ party: PARTY, enemies: [], region: "沙漠", light: "day", seed: "SCN-PAGE2" });
+  st.fields[2].coral = true;
+  P.battleLookStart({ region: "沙漠", scene: null, light: "day" });
+  pv = P.OnlineView.projectState(st, {});
+  assert.deepEqual([pv.region, pv.scene], ["沙漠", "coral"]);
+  P.battleLookStart({ region: "第三采矿场", scene: "mid", light: "day" });
+  assert.equal(P.OnlineView.projectState(st, {}).scene, "rim", "页面选了这个区域没有的场景：主机不认，按默认");
+  const none = P.OnlineView.projectState(P.BattleSim.setup({ party: PARTY, enemies: [], region: "?", scene: "rim", seed: "SCN-PAGE3" }), {});
+  assert.equal(none.scene, undefined, "认不得的区域：投影里没有场景（画面用页面选的兜底）");
 });
 
 /* ---------- 浏览器：主持人在战场配置里换场景（没装 Playwright 时跳过） ---------- */

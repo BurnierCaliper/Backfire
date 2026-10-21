@@ -40,6 +40,7 @@
   </div>
   <select id="demo-select" aria-label="切换演示战场"></select>
   <select id="region-select" aria-label="切换区域（地面、远景、灯跟着变）" title="这场战斗在哪个区域：地面、远景、灯跟着变（也可以在网址后面加 ?region=沙漠）"></select>
+  <select id="scene-select" aria-label="切换场景（区域里的哪个地方）" title="区域里的哪个地方：采矿场的矿外 / 矿内 / 矿底、沙漠的沙丘 / 沙珊瑚台地；选项跟着区域变（也可以在网址后面加 ?scene=floor）"></select>
   <button class="toggle" id="demo-btn" aria-label="切换演示战场">换场</button>
 </header>
 
@@ -95,7 +96,7 @@ window.GAME_MODE = true;
   Storage.prototype.getItem = function (k) { return calcKey(String(k)) ? null : gi.call(this, k); };
   Storage.prototype.setItem = function (k, v) { if (calcKey(String(k))) return; return si.call(this, k, v); };
   var byId = Document.prototype.getElementById;
-  var OWN = /^(?:stage|topbar|tb-turn|tb-weather|tb-map|tb-compact|cam-bar|cam-far|cam-mid|cam-near|cam-zone|demo-select|region-select|demo-btn|party|party-toggle|party-list|logdrawer|log-toggle|log-body|dock|dock-toggle|dock-who|dock-hint|demo-strike|fx-speed|fx-skip|push-toggle|hd2d-pop|hd2d-shade|skills|zone-prev|zone-next|toast|loading|calc-core)$/;
+  var OWN = /^(?:stage|topbar|tb-turn|tb-weather|tb-map|tb-compact|cam-bar|cam-far|cam-mid|cam-near|cam-zone|demo-select|region-select|scene-select|demo-btn|party|party-toggle|party-list|logdrawer|log-toggle|log-body|dock|dock-toggle|dock-who|dock-hint|demo-strike|fx-speed|fx-skip|push-toggle|hd2d-pop|hd2d-shade|skills|zone-prev|zone-next|toast|loading|calc-core)$/;
   Document.prototype.getElementById = function (id) {
     var e = byId.call(this, id);
     if (e || OWN.test(String(id))) return e;
@@ -274,13 +275,24 @@ const pageRegion = () => (regionPick != null ? regionPick : demo.region);
 const regionNow = () => (pv && pv.region) || pageRegion();
 /** 光影主题：投影里的 pv.light（演示定的写进了战斗状态：BattleSim.setup 的 light）；没有再用演示的 */
 const themeNow = () => (pv && pv.light) || demo.theme;
+/** 场景（区域里的哪个地方，#239）：页面选的 = 顶栏场景下拉框 / 网址的 ?scene= 选的（world-data.js · BATTLE_SCENES 的 id）；null = 跟着默认
+ *  （采矿场矿外，沙漠场上有沙珊瑚台地就是台地……：world-data.js · battleSceneAuto）。和区域一样当成布置战场写进战斗状态（battleLookStart 的 scene），
+ *  画面读投影里的 pv.scene（主机认得的才发）；投影里没有再用页面选的兜底 */
+let scenePick = null;
+const sceneNow = () => (pv && pv.scene) || scenePick;
+/** 区域、场景、光影当成布置战场写进战斗状态（和战斗原型的遭遇一样）。演示布置完（场地都摆好了，沙珊瑚台地算得上）、换区域 / 场景时都写一遍；
+ *  页面选的场景这个区域没有（换了区域），回到默认（和战场配置一样） */
+function placeLook() {
+  if (scenePick != null && !battleSceneId(pageRegion(), scenePick)) scenePick = null;
+  battleLookStart({ region: pageRegion(), scene: scenePick, light: demo.theme });
+}
 const weatherText = (w) => (!w || w === "none") ? "晴天" : (typeof weatherName === "function" ? weatherName(w) : w);
 
 /** 排战场：铭牌是固定像素大小的 DOM，所以把真实的画面大小和上下被面板盖住的像素交给布局，它按同一个镜头算站位；
  *  区域（地面、远景、灯）和光影主题（灯白天 / 夜里几盏）也交给布局。交给布局的是投影过的状态（先投影，区域、光影再读投影里的） */
 function build() {
   if (!st || !sc) return null;
-  return L.build(project(), { portrait: !!sc.portrait, view: sc.view(), region: regionNow(), theme: themeNow() });
+  return L.build(project(), { portrait: !!sc.portrait, view: sc.view(), region: regionNow(), scene: sceneNow(), theme: themeNow() });
 }
 function repaint(resetView) {
   const layout = build();
@@ -381,7 +393,7 @@ function syncFxControls() {
 /** 画面换成包里的那一份（packet.state：房主投影好发来的），和联机玩家一样 */
 function showPacket(packet) {
   pv = packet.state;
-  const layout = L.build(pv, { portrait: !!sc.portrait, view: sc.view(), region: regionNow(), theme: themeNow() });
+  const layout = L.build(pv, { portrait: !!sc.portrait, view: sc.view(), region: regionNow(), scene: sceneNow(), theme: themeNow() });
   sc.setBattle(layout, { weather: pv.weather, theme: themeNow(), actorId });
   renderUI(layout);
 }
@@ -458,6 +470,7 @@ function onKey(e) {
 function loadDemo(id) {
   demo = DEMOS.find(d => d.id === id) || DEMOS[0];
   st = demo.make(pageRegion());
+  placeLook();
   strikeN = 0; packetLogs = [];
   if (window.HD2DPlay) HD2DPlay.clear();
   project();
@@ -465,6 +478,7 @@ function loadDemo(id) {
   actorId = p.length ? p[0].id : null;
   $("demo-select").value = demo.id;
   syncRegion();
+  syncScene();
   repaint(true);
 }
 /** 区域下拉框：「按演示」（显示演示默认的区域）、配置表里的每个区域、「认不得的区域」（看兜底的样子）。网址跟着改，截图时复制网址就能回到同一个画面 */
@@ -475,12 +489,22 @@ function syncRegion() {
   sel.value = regionPick == null ? "" : L.regionName(regionPick) || UNKNOWN;
   syncUrl();
 }
-/** 网址：演示战场、区域、镜头（?cam=mid / near）和看的那个区（?zone=3）。复制网址就能回到同一个画面（截图用） */
+/** 场景下拉框：「默认」（括号里是现在跟着默认的那个场景）、当前区域的每个场景（正式的场景表：world-data.js · battleScenes），选项跟着区域变。网址跟着改 */
+function syncScene() {
+  const sel = $("scene-select"), region = L.regionName(regionNow()), list = battleScenes(region);
+  const now = list.find(s => s.id === (pv && pv.scene));
+  sel.innerHTML = `<option value="">场景：默认${scenePick == null && now ? "（" + esc(now.name) + "）" : ""}</option>` +
+    list.map(s => `<option value="${esc(s.id)}">场景：${esc(s.name)}</option>`).join("");
+  sel.value = scenePick || "";
+  syncUrl();
+}
+/** 网址：演示战场、区域、场景、镜头（?cam=mid / near）和看的那个区（?zone=3）。复制网址就能回到同一个画面（截图用） */
 function syncUrl() {
   if (!demo) return;
   const q = new URLSearchParams(location.search);
   q.set("demo", demo.id);
   if (regionPick == null) q.delete("region"); else q.set("region", regionPick);
+  if (scenePick == null) q.delete("scene"); else q.set("scene", scenePick);
   if (camInfo && camInfo.tier !== "far") { q.set("cam", camInfo.tier); q.set("zone", camInfo.zone); } else { q.delete("cam"); q.delete("zone"); }
   if (pushOn) q.delete("push"); else q.set("push", "0");
   try { history.replaceState(null, "", location.pathname + "?" + q.toString()); } catch (e) { /* 打不开 history（例如本地文件）就算了 */ }
@@ -495,10 +519,12 @@ function boot() {
   $("demo-btn").addEventListener("click", () => loadDemo(DEMOS[(DEMOS.indexOf(demo) + 1) % DEMOS.length].id));   // 手机：小按钮轮流切
   $("region-select").innerHTML = `<option value="">区域：按演示</option>` + Object.keys(L.REGIONS).map(n => `<option value="${esc(n)}">区域：${esc(n)}</option>`).join("") +
     `<option value="${UNKNOWN}">区域：认不得（兜底）</option>`;
-  // 换区域：和开战时一样写进战斗状态（battleLookStart），画面再读投影里的
-  $("region-select").addEventListener("change", e => { regionPick = e.target.value || null; battleLookStart({ region: pageRegion(), light: demo.theme }); syncRegion(); repaint(true); });
+  // 换区域 / 场景：和开战时一样写进战斗状态（battleLookStart），画面再读投影里的；场景的选项跟着区域变
+  $("region-select").addEventListener("change", e => { regionPick = e.target.value || null; placeLook(); syncRegion(); repaint(true); syncScene(); });
+  $("scene-select").addEventListener("change", e => { scenePick = e.target.value || null; placeLook(); repaint(true); syncScene(); });
   const params = new URLSearchParams(location.search);
   regionPick = params.get("region") || null;      // ?region=沙漠 / ?region=mine_1（地图地点 id 也认）
+  scenePick = params.get("scene") || null;        // ?scene=floor（这个区域没有的场景不认，回到默认）
   pushOn = params.get("push") !== "0";            // ?push=0：出手时不推镜头
   if (params.get("paper") === "0") HD2DFx.FX.paper.on = false;   // ?paper=0：打中时不压扁、不投影子（对比用）
   sc = createHd2dScene($("stage"), {
