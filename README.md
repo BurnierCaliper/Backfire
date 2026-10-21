@@ -368,6 +368,14 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **第三轮 · 联机低级五条：公开记录补全、任务面板不盖背包、任务提示合并、`offlineTick` 判空、转发限速先拒绝再断线**（issue #145；online-game.js · `actionLabel` / `onActionSettled` / `offlineTick`，online-view.js · `projectLogs`，online-ui.js · `observeQuests`，relay/worker.js · `RATE` / `RATE_KICK_OVER`；测试 tests/online-host.test.js、tests/relay.test.js、tests/online-ui.test.js）
+  - **公开记录**：以前移动、起身、用道具只写「甲 · 移动 / 起身 / 使用道具」，回合开始只写「回合开始」，胜利 / 败北 / 撤退主机不产生记录；现在移动写「移动 → N 区」，用道具写「使用道具 名称 → 对象」（有落点再加「· 到 N 区」），起身写「起身 · 重新站起」，敌人回合收尾 / 开战写「第 N 回合开始」（回合开始的持续伤害、倒下摘要跟在这一行后面），战斗结束时按结果写「战斗胜利 / 战斗结束 / 队伍撤退」。全部只用玩家画面本来就看得到的信息，不带任何坚毅生命数值。
+  - **任务面板**：以前任务日志和背包 / 资料共用一个容器，任务更新会把正在看的背包换回任务日志；现在只在容器里还是任务日志时才刷新。
+  - **任务提示**：以前一个包里有多条任务变动只弹最后一条；现在合成一句（用「；」连接）。
+  - **`offlineTick`**：以前掉线玩家的选择询问选项为空时 `ask.options[0].helper` 抛 TypeError，每 250 毫秒一次且到不了后面的回合超时处理；现在选项为空就跳过这一项，继续后面的处理。
+  - **转发限速**：以前玩家 10 秒内超过 120 帧或 256 KB 直接断线；现在先拒绝这一条并回「发送太快，请稍后重试」（`rate_limit`），同一个 10 秒窗口内被拒超过 60 条（`RATE_KICK_OVER`）才断开。数值放在文件顶部的 `RATE` 常量。
+  - 说明：本环境没装 Playwright，`tests/online-ui.test.js` 里新加的两条浏览器测试被跳过，没有实际跑过。
+
 - **第三轮 · 单机 M-6 ~ M-10：AI 后撤 / 接近看危墙门、沙鱼追猎看得到的猎物、委托人只躲真敌人、工坊打下手也算忙、硬撑长休不治 VIP**（issue #144；ai.js · `stepToward` / `aiStep`、desert.js · `sandFishPlan`、escort.js · `escortAct`、trpg.js · `trpgCraft` / `trpgLongRest`；测试 tests/bugfix-m6-m10.test.js）
   - **AI 移动（M-6）**：以前远程敌人后撤、近战敌人接近都不看危墙 / 关着的门，被 `doMove` 拦下不扣点，整回合不出手；现在后撤只选 `walkableNeighbors`，接近的 `stepToward` 跳过被墙 / 关门挡住的区，没有走得通的就改原地能做的行动。
   - **沙鱼追猎（M-7）**：以前夜间 / 饥饿追猎的路径不看间隔，猎物在墙 / 关门 / 空隙 / 深渊那边时每回合都返回走不通的移动；现在路径按能不能通过算，算不出路径的猎物直接换掉，都不行就交给常规行动。

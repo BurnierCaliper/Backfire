@@ -352,7 +352,8 @@
       if (!obj(row) || get(row, "silent") === true || !Object.hasOwn(templates, get(row, "kind"))) return [];
       const out = identifiers(row, { kind: get(row, "kind"), text: templates[get(row, "kind")] }, ["id", "actorId"]);
       copyFields(row, out, [], ["turnNo", "turn", "at", "seq"], []);
-      if (out.kind === "action") {
+      if (out.kind === "round" && number(get(row, "turn")) > 0) out.text = `第 ${Math.floor(number(get(row, "turn")))} 回合开始`;
+      if (out.kind === "action" || out.kind === "round") {
         const actor = text(get(row, "actorName"), 60), action = text(get(row, "actionName"), 60);
         if (actor && action) out.text = actor + " · " + action;
         // 结算摘要（online-game.js · hitSummary）：谁受了多少伤害 / 击破 / 治疗、弹出的状态字。只认数字和白名单里的弹字

@@ -581,3 +581,21 @@ test("联机玩家（body.online-player）：工坊 / 背包 / 克制表 / 诊�
   }
   assert.deepEqual(o.errors, []);
 });
+
+test("任务提示 · 一个包里有多条变动合成一句；任务更新不会把正在看的背包盖掉", async t => {
+  const o = await open(t); if (!o) return; const { page } = o;
+  const q = (id, name, status, extra = {}) => ({ id, name, category: "side", owner: "", status, goal: "", days: 0, private: false, index: 0, got: false, failWhy: "", reward: { xp: 0, kuizhi: 0, items: [] }, steps: [], ...extra });
+  const send = quests => page.evaluate(quests => { fixture.set({ packet: { ...fixture.view.packet, quests } }); }, quests);
+  await player(page, { screen: "exploration", mode: "trpg" });
+  await send([q("q1", "甲任务", "active")]);
+  await send([q("q1", "甲任务", "done", { reward: { xp: 5, kuizhi: 0, items: [] } }), q("q2", "乙任务", "active")]);
+  const text = await page.locator(".ol-toast").first().textContent();
+  assert.match(text, /任务完成：「甲任务」/); assert.match(text, /新任务：「乙任务」/);
+  await page.click('[data-online="quests"]');
+  assert.equal(await page.locator("#online-bag .ol-quest-card").count() > 0, true);
+  await page.evaluate(() => { document.querySelector("#online-bag").innerHTML = '<div class="ol-card" id="fake-bag"><header><h2>背包</h2></header></div>'; });
+  await send([q("q1", "甲任务", "done"), q("q2", "乙任务", "done")]);
+  assert.equal(await page.locator("#online-bag #fake-bag").count(), 1, "背包还在");
+  assert.equal(await page.locator("#online-bag .ol-quest-card").count(), 0);
+  assert.deepEqual(o.errors, []);
+});
