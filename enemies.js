@@ -286,13 +286,16 @@ function forcedZonePick(a, zone, lines) {
   return Number(f.zone);
 }
 
-/** 敌人能用的技能：本体的 + 种族的附赠技能（无法行动的敌人，例如被挟持的亡命之王，一个都没有） */
+/** 敌人能用的技能：本体的 + 种族的附赠技能（无法行动的敌人，例如被挟持的亡命之王，一个都没有；
+ *  坐在车上的只能用车的武器，种族的附赠技能也不能用，vehicle.js） */
 function enemySkillList(u) {
   const base = enemySkillListBase(u);
-  return base.length ? base.concat(raceSkills(u)) : base;
+  return base.length && !u.vehId ? base.concat(raceSkills(u)) : base;
 }
 function enemySkillListBase(u) {
   if (!u || u.isPlayer) return [];
+  // 坐在车上的敌人只能用车的武器（vehicle.js）
+  if (u.vehId && typeof vehicleSkillList === "function") return vehicleSkillList(u).map(s => ({ id: s.id, label: s.name }));
   const common = [
     { id: "en_approach", label: "移向目标" },
     { id: "en_flee", label: "远离目标" },
@@ -562,7 +565,9 @@ function enemySkillListBase(u) {
       list = [{ id: "en_live", label: "活沙冲击" }];
     }
   }
-  return common.concat(list);
+  // 同区有车：镇压队可以上车 / 把我方的人拉下车（vehicle.js）
+  const ground = typeof vehicleGroundSkills === "function" ? vehicleGroundSkills(u).map(s => ({ id: s.id, label: s.name })) : [];
+  return common.concat(list, ground);
 }
 
 /** 活沙被杀死时吸收的：四足 / 人形 / 大沙灵，以及沙漠生物阵营（沙鱼，作者 10/19 定）。
@@ -753,6 +758,7 @@ const ENEMY_SKILL_COST = {
   en_chi_hunt: { ap: 0, bonus: 1 }
 };
 function enemySkillCost(u, id) {
+  if (/^veh_/.test(String(id)) && typeof vehicleSkillCost === "function") return Object.assign({ ap: 0, bonus: 0 }, vehicleSkillCost(id));   // 载具（vehicle.js）
   return ENEMY_SKILL_COST[id] || RACE_SKILL_COST[id] || { ap: 1, bonus: 0 };
 }
 

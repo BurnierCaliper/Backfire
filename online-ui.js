@@ -173,11 +173,15 @@
       if (TIP_SELF[u.self] && !(u.self === "store" && !st.high && Number(u.highEnergy) > 0)) tokens.push(TIP_SELF[u.self] + (u.self === "burn" && Number(u.selfBurnStacks) > 1 ? "×" + u.selfBurnStacks : ""));
       ((u.resources || {}).nextAtkFx || []).forEach(k => { if (TIP_ATK[k]) tokens.push(TIP_ATK[k]); });
       (u.marks || []).forEach(m => tokens.push(m === "needle" ? "刺入" : m === "bond" ? "牵挂" : ""));
-      statusTokens(u).forEach(t => { if (!tokens.includes(t)) tokens.push(t); });
+      // 载具：和车合并的驾驶员按车写（和本机画面一样，game.js · unitTipHtml）——乘员和驾驶员写在乘员名单里，不当成身上的效果
+      const vc = u.vehicle && typeof u.vehicle === "object" ? u.vehicle : null;
+      statusTokens(u).forEach(t => { if (!tokens.includes(t) && !(vc && (t === vc.seatText || /^驾驶员[:：]/.test(t)))) tokens.push(t); });
       const owner = u.weaponOf ? (data.units || []).find(x => x.kit === u.weaponOf && !x.weaponOf) : null;
       const kind = u.isPlayer ? (u.escort ? "escort" : u.weaponOf || u.weaponUnit ? "weapon" : "hero") : "enemy";
       // 首领机制的倒计时：主机投影好的 display.marks / casts（online-view.js），这里只拼文字
       const mechs = global.UnitCard && global.UnitCard.mechLines ? global.UnitCard.mechLines({ marks: (u.display || {}).marks, casts: (u.display || {}).casts }) : [];
+      if (vc) return T.html({ kind: "prop", propKind: vc.kind }, tokens.filter(Boolean), { name: vc.name || u.name || u.id, sub: `Lv${vc.level || 1} · ${u.zone} 区 · ${u.isPlayer ? "我方" : "敌方"}`, mechs,
+        rows: Array.isArray(vc.roster) ? vc.roster : null, rowsTitle: vc.seatText || "" });
       return T.html({ kind, kit: u.kit, ownerName: owner && owner.name, escort: u.escort }, tokens.filter(Boolean), { name: u.name || u.id, sub: `Lv${u.level || 1} · ${u.zone} 区`, mechs });
     }
     const hoverable = (t) => t && t.closest && t.closest("[data-unit-id], [data-prop-id]");

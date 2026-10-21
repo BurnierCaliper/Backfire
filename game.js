@@ -19,6 +19,8 @@
   const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
   const sumCur = (s) => (s.layers || []).reduce((a, l) => a + l.cur, 0);
   const sumMax = (s) => (s.layers || []).reduce((a, l) => a + l.max, 0);
+  // 卡片上写的名字、等级、ATK（unit-card.js · headOf：和载具合并的驾驶员按车写）
+  const headOf = (s) => (window.UnitCard && UnitCard.headOf ? UnitCard.headOf(s) : s);
 
   const G = {
     tape: null,        // 正在记录的事件
@@ -133,9 +135,14 @@
     } catch (e) {}
     try { if (u.isPlayer) res = resourceText(u); } catch (e) {}
     try { atk = effectiveAtk(u, state.units); } catch (e) {}
+    // 载具（vehicle.js）：和车合并的驾驶员画成车的卡片——卡片上的名字、外观、等级、ATK 按车（unit-card.js · headOf），状态行写乘员 n / 4 和驾驶员是谁。
+    // name 等字段照旧是驾驶员自己的（队伍栏、日志、联机都认它）
+    let veh = null;
+    try { veh = typeof vehicleCardOf === "function" ? vehicleCardOf(u) : null; } catch (e) {}
     return {
       id: u.id,
       name: u.name,
+      vehicle: veh,
       level: u.level || 1,
       isPlayer: !!u.isPlayer,
       kit: u.kit || "",
@@ -266,10 +273,11 @@
       layers: (Number(p.shieldMax) > 0 ? [{ type: "shield", max: Number(p.shieldMax), cur: Math.max(0, Number(p.shield) || 0) }] : [])
         .concat([{ type: "armor", max: max, cur: cur }]),
       def: 0, defMax: 0, ap: 0, apMax: 0, bonus: 0, bonusMax: 0,
-      status: (typeof propKindName === "function" ? propKindName(p.kind) : p.kind) + (p.kind === "door" ? "" : ""),
-      res: p.kind === "battery" || p.kind === "turret" ? (p.faction === "enemy" ? "敌方" : "我方") : "",
+      status: (typeof propKindName === "function" ? propKindName(p.kind) : p.kind) + (p.kind === "door" ? "" : "") + (p.isVehicle && typeof vehicleSeatText === "function" ? " · " + vehicleSeatText(p) : ""),
+      res: p.kind === "battery" || p.kind === "turret" || p.isVehicle ? (p.faction === "enemy" ? "敌方" : "我方") : "",
       highEnergy: 0, flying: false, stunned: false, dying: false, dead: cur <= 0 && p.kind !== "button" && p.kind !== "lever",
-      hidden: false
+      // 有驾驶员的车：只画和驾驶员合并后的那张车的卡片（snapUnit），配置物卡片藏起来（vehicle.js）
+      hidden: typeof vehiclePropHidden === "function" && vehiclePropHidden(p)
     };
   }
   /** 区域之间的危墙 / 不稳桥梁：可以被攻击，快照和配置物一样（画在两区之间的竖条上，不单独出铭牌） */
@@ -293,7 +301,7 @@
   }
   function targetName(id) {
     const s = G.view.get(id);
-    if (s) return s.name;
+    if (s) return headOf(s).name;
     const u = unitById(id);
     return u ? u.name : "";
   }
@@ -517,7 +525,7 @@
       // 资源前后的文字（快照里的 res）：卡片数值牌和预览框写「资源：之前 → 之后」；配置物的 res 是阵营
       p.resBefore = bs.res || "";
       p.resAfter = s2.res || "";
-      p.name = bs.name;
+      p.name = headOf(bs).name;
       p.isProp = !!bs.isProp;
       // 属性颜色按攻击动作本身那一下：高压场地这类连带伤害会先弹出来，不能拿第一个
       const dmgPops = hi.tape.filter(e => e.type === "pop" && e.unitId === id && e.kind === "dmg" && Number(e.value) > 0);
@@ -588,6 +596,10 @@
         cost: { ap: 1 }
       });
     });
+    // 同区有车：上车、把对方的人拉下车（vehicle.js；坐在车上的人用 skillList 里的车上招式）
+    if (typeof vehicleGroundSkills === "function") vehicleGroundSkills(u).forEach(s => {
+      out.push({ id: s.id, name: s.name, hint: s.hint, cost: vehicleSkillCost(s.id) });
+    });
     out.push({ id: "__item", name: "使用道具", hint: "从背包里选一件在战斗中使用。", cost: { bonus: 1 } });
     out.push({ id: "__move", name: "移动", hint: "移动到另一个区域。离开有借机攻击敌人的区域会被追打。", cost: typeof moveBaseCost === "function" ? moveBaseCost(u) : { bonus: 1 } });
     return out;
@@ -609,6 +621,7 @@
     if ((sk.cost.ap || 0) > (u.ap || 0)) return "行动点不足";
     if ((sk.cost.bonus || 0) > (u.bonus || 0)) return "附赠行动不足";
     if (sk.id === "__move" && u.noMove) return "本回合无法移动";
+    if (sk.id === "__move" && u.vehId && !u.vehMerged) return "在车里，不能自己移动（驾驶员开车，或者先下车）";
     if (String(sk.id).indexOf("use_scrap:") === 0 && typeof scrapTargets === "function") {
       const p = (state.props || []).find(x => "use_scrap:" + x.id === sk.id);
       if (p && typeof scrapReady === "function" && !scrapReady(p)) return "碎渣机炮这一回合已经发射过了";
@@ -2401,7 +2414,7 @@
         if (window.OnlineGame?.isHost() && GMCommands.isManual(unitById(uid))) continue;
         for (let n = 0; n < 5; n++) {
           const u = unitById(uid);
-          if (!u || !unitAlive(u) || u.stunned || (u.ap || 0) <= 0) {
+          if (!u || !(unitAlive(u) || (typeof vehicleRiderActs === "function" && vehicleRiderActs(u))) || u.stunned || (u.ap || 0) <= 0) {
             if (uid === id && n === 0) steps.push(u && u.stunned ? "失衡中，这回合动不了" : "这回合不会行动");
             break;
           }
@@ -2460,10 +2473,11 @@
     const s = G.view.get(id);
     if (!s) return;
     const layers = s.layers.map(l => `${LAYER[l.type] || l.type} ${l.cur}/${l.max}`).reverse().join("　");
+    const head = headOf(s);
     $("g-pvbox").classList.add("live");
-    $("g-pvbox").innerHTML = `<h4>${esc(s.name)} · Lv${s.level}</h4>
+    $("g-pvbox").innerHTML = `<h4>${esc(head.name)} · Lv${head.level}</h4>
       <div class="ln key">${esc(layers)}</div>
-      <div class="ln">架势 ${defText(s)} · ATK ${s.atk} · ${s.zone} 区</div>
+      <div class="ln">架势 ${defText(s)} · ATK ${head.atk} · ${s.zone} 区</div>
       <div class="ln">${esc(s.status || "无状态")}</div>
       ${s.res ? `<div class="ln">${esc(s.res)}</div>` : ""}
       ${intentHtml(id)}
@@ -2584,9 +2598,11 @@
     if (s.isProp) {
       const p = (state.props || []).find(x => "prop:" + x.id === id);
       const hp = s.isDevice ? "" : `耐久 ${sumCur(s)}/${sumMax(s)}`;
-      return UnitTip.html({ kind: "prop", propKind: p && p.kind }, [], { name: s.name, sub: [hp, s.res, s.zone + " 区"].filter(Boolean).join(" · ") });
+      return UnitTip.html({ kind: "prop", propKind: p && p.kind }, [], { name: s.name, sub: [hp, s.res, s.zone + " 区"].filter(Boolean).join(" · "),
+        rows: p && p.isVehicle && typeof vehicleRosterLines === "function" ? vehicleRosterLines(p) : null, rowsTitle: p && p.isVehicle ? vehicleSeatText(p) : "" });
     }
     const u = unitById(id);
+    const vc = s.vehicle;   // 载具（vehicle.js）：和车合并的驾驶员按车写——配置物图鉴里车的说明，加上乘员名单
     const owner = u && u.weaponOf ? state.units.find(x => x.kit === u.weaponOf && !isWeaponUnit(x)) : null;
     const kind = s.isPlayer ? (s.escort ? "escort" : s.weaponUnit ? "weapon" : "hero") : "enemy";
     const tokens = [];
@@ -2595,11 +2611,15 @@
     if (s.upOnShp) tokens.push("起身");
     if (s.stunned && !s.dead) tokens.push("失衡");
     if (s.flying) tokens.push("飞行");
-    (s.status ? s.status.split(" · ") : []).forEach(t => { if (t && t !== "无状态") tokens.push(t); });
+    // 乘员和驾驶员写在下面的乘员名单里，不当成身上的效果
+    (s.status ? s.status.split(" · ") : []).forEach(t => { if (t && t !== "无状态" && !(vc && (t === vc.seatText || /^驾驶员：/.test(t)))) tokens.push(t); });
     (s.hung || []).forEach(n => tokens.push(n));
-    return UnitTip.html({ kind, kit: s.kit, ownerName: owner && owner.name, escort: s.escort }, tokens.filter(Boolean), { name: s.name, sub: `Lv${s.level} · ${s.zone} 区${s.race ? " · " + s.race : ""}${s.iv && typeof ivText === "function" ? " · 个体值 " + ivText(s) : ""}`,
+    const info = vc ? { kind: "prop", propKind: vc.kind } : { kind, kit: s.kit, ownerName: owner && owner.name, escort: s.escort };
+    const head = headOf(s);
+    return UnitTip.html(info, tokens.filter(Boolean), { name: head.name, sub: `Lv${head.level} · ${s.zone} 区${vc ? " · " + (s.isPlayer ? "我方" : "敌方") : ""}${head.race ? " · " + head.race : ""}${head.iv && typeof ivText === "function" ? " · 个体值 " + ivText(head) : ""}`,
       mechs: window.UnitCard && UnitCard.mechLines ? UnitCard.mechLines(s) : [],   // 首领机制：还有几回合落下
-      perks: s.racePerks || [] });                                                   // 种族被动
+      rows: vc ? vc.roster : null, rowsTitle: vc ? vc.seatText : "",
+      perks: vc ? [] : (s.racePerks || []) });                                       // 种族被动（画成车时不写驾驶员的）
   }
   function onCardHover(id, on) {
     const fieldPick = !!(choiceResolve && choiceResolve.field);   // 结算队列里在战场上点选（那时动作还没结束，G.depth > 0）
@@ -2712,6 +2732,7 @@
         ? (() => { const d = zoneDist(actor.zone, fake.zone, state.zoneMode); return d >= ov.min && d <= ov.max; })()
         : (typeof inSkillRange !== "function" || inSkillRange(actor, fake, hint, state.zoneMode));
       (state.props || []).forEach(p => {
+        if (p.isVehicle && typeof vehiclePilot === "function" && vehiclePilot(p)) return;   // 有驾驶员的车和驾驶员是一个单位，打驾驶员
         const fake = { id: "prop:" + p.id, name: p.name, zone: p.zone, isPlayer: p.faction !== "enemy" };
         if (inRange(fake)) all.push(fake);
       });
@@ -2901,7 +2922,7 @@
         if (window.OnlineGame?.isHost() && (GMCommands.isManual(unitById(id)) || !GMCommands.enemyMayAct(unitById(id)))) break;
         if (window.OnlineGame?.isHost()) await OnlineGame.waitUntilReady();
         const u = unitById(id);
-        if (!u || !unitAlive(u) || u.stunned || (u.ap || 0) <= 0) break;
+        if (!u || !(unitAlive(u) || (typeof vehicleRiderActs === "function" && vehicleRiderActs(u))) || u.stunned || (u.ap || 0) <= 0) break;
         const sig = `${u.ap}|${u.bonus}|${u.zone}`;
         const actKey = `act:${state.turnNo}:${id}:${n}`;
         const tape = await perform({ type: "battle.enemyAction", actor: id, step: n, seed: actKey }, {}, true);

@@ -676,6 +676,11 @@ const EnemyAI = (function () {
     if (u && u.dormant) return null;         // 休眠：不行动，直到被叫醒
     if (typeof sinkLocked === "function" && sinkLocked(u)) return null;   // 流沙没顶：不能行动
     if (typeof isNeutralCreature === "function" && isNeutralCreature(u)) return null;   // 中立生物不行动
+    // 载具（vehicle.js）：坐在车上的镇压队用车的武器，没上车的会上车、抢车。undefined = 不归载具管，照常决策
+    if (typeof vehicleAiPlan === "function") {
+      const vp = vehicleAiPlan(u);
+      if (vp !== undefined) return vp;
+    }
     if (typeof sandFishPlan === "function") {   // 沙鱼：捕食、白天的伏咬沙鱼潜伏不动（desert.js）
       const fp = sandFishPlan(u);
       if (fp === "wait") return null;
@@ -734,7 +739,8 @@ const EnemyAI = (function () {
    *  foes() 照旧不含友军（胜负判定、「还剩几个敌人」用它）；中立生物不行动 */
   function actors() {
     return foes().concat(state.units.filter(u => !u.isPlayer && unitAlive(u) && u.kit !== "ironwall" &&
-      typeof playerAllied === "function" && playerAllied(u) && !(typeof isNeutralCreature === "function" && isNeutralCreature(u))));
+      typeof playerAllied === "function" && playerAllied(u) && !(typeof isNeutralCreature === "function" && isNeutralCreature(u))),
+      typeof vehicleRiderActors === "function" ? vehicleRiderActors() : []);   // 车里的炮手也要行动
   }
   function actingOrder() {
     const r = { minion: 0, elite: 1, boss: 2 };

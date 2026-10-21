@@ -273,7 +273,7 @@ const BattleSim = (function () {
     for (const id of EnemyAI.actingOrder()) {
       for (let n = 0; n < 5; n++) {
         const u = unitById(id);
-        if (!u || !alive(u) || u.stunned || (u.ap || 0) <= 0) break;
+        if (!u || !(alive(u) || (typeof vehicleRiderActs === "function" && vehicleRiderActs(u))) || u.stunned || (u.ap || 0) <= 0) break;
         const plan = EnemyAI.plan(u);
         if (!plan) break;
         const before = sig(u);
