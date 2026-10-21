@@ -113,7 +113,7 @@
   /**
    * 适配器：attack-fx / hit-fx 拿单位、区在屏幕上的位置都问它。src（场景给的，都是函数，每次调用拿当时的）：
    *   lens()      这一刻的镜头输入 { pos, target, fov, width, height }
-   *   plate(id)   这块铭牌现在在哪 { x, y, z, lift, big }（没有这块铭牌 = null）
+   *   plate(id)   这块铭牌现在在哪 { x, y, z, lift, big, zoom }（没有这块铭牌 = null；zoom = 特写时再放大多少，不给 = 1）
    *   zone(id)    这个区的地台 { cx, cz, w, d, topY }
    *   size(big)   铭牌的像素尺寸（big = 近景放大的那张）
    *   offset()    画面左上角在视口里的位置（不给 = 0, 0；原型的画面铺满整个窗口）
@@ -127,9 +127,11 @@
       const s = box(r.left + (o.left || 0), r.top + (o.top || 0), r.w, r.h, (r.y - r.top) / r.h);
       return r.foot != null ? Object.assign(s, { scale: r.scale, foot: r.foot + (o.top || 0) }) : s;
     };
+    // 铭牌的像素尺寸：近景放大的那张（big），特写的那个单位再乘 zoom（#237：hd2d-camera.js 的 CAMERA.close.zoom）
+    const sizeOf = (p) => { const s = src.size(!!p.big); return s && p.zoom > 0 && p.zoom !== 1 ? { w: s.w * p.zoom, h: s.h * p.zoom } : s; };
     const unit = (id) => {
       const p = src.plate(id);
-      const r = p ? rectOf(lens(src.lens()), p, src.size(!!p.big)) : null;
+      const r = p ? rectOf(lens(src.lens()), p, sizeOf(p)) : null;
       if (r) { const s = shift(r); last.set(id, s); return s; }
       return last.get(id) || null;
     };

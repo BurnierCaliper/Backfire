@@ -121,6 +121,90 @@ test("伤害数字、击破数字放大（#237）：远 / 中 / 近同一块铭�
   assert.ok(S.big > S.dmg && S.dmg > S.brk);
 });
 
+/* ---------- 5. 近景双击单位特写 ---------- */
+test("近景双击单位特写（#237）的状态机：近景里双击一个单位 → 特写它（再双击别人就换人）；远景 / 中景里双击不特写；拉远（滚轮往后、按 2 / 1、点远 / 中）退出特写回到正常镜头（往后滚一下回到正常的近景）；选了别的区、特写的单位不在了也退出", () => {
+  const C = cams();
+  assert.equal(typeof C.camStep, "function", "镜头的状态机（hd2d-camera.js · camStep）");
+  const near = { tier: "near", zone: 2, close: null };
+  // 双击：近景里特写，远景 / 中景里不特写
+  const c1 = C.camStep(near, { type: "dblclick", unit: "u1", zone: 2 });
+  assert.deepEqual(c1, { tier: "near", zone: 2, close: "u1" }, "近景里双击：特写");
+  assert.deepEqual(near, { tier: "near", zone: 2, close: null }, "不改传进来的状态");
+  assert.deepEqual(C.camStep(c1, { type: "dblclick", unit: "u2", zone: 2 }), { tier: "near", zone: 2, close: "u2" }, "特写时双击别人：换人");
+  ["far", "mid"].forEach(t => assert.deepEqual(C.camStep({ tier: t, zone: 2, close: null }, { type: "dblclick", unit: "u1", zone: 2 }), { tier: t, zone: 2, close: null }, t + "：双击不特写"));
+  // 拉远：滚轮往后 → 回到正常的近景（再往后才到中景）；往前滚不动
+  assert.deepEqual(C.camStep(c1, { type: "wheel", step: -1 }), { tier: "near", zone: 2, close: null }, "滚轮往后：退出特写，回到正常的近景");
+  assert.deepEqual(C.camStep(C.camStep(c1, { type: "wheel", step: -1 }), { type: "wheel", step: -1 }), { tier: "mid", zone: 2, close: null }, "再往后：中景");
+  assert.deepEqual(C.camStep(c1, { type: "wheel", step: 1 }), c1, "特写时往前滚：不动");
+  assert.deepEqual(C.camStep(near, { type: "wheel", step: -1 }), { tier: "mid", zone: 2, close: null }, "没在特写：照旧一段一段跳");
+  // 按 2 / 1、点远 / 中：退出特写到那一段；按 3 / 点近：回到正常的近景
+  assert.deepEqual(C.camStep(c1, { type: "tier", tier: "mid" }), { tier: "mid", zone: 2, close: null }, "按 2 / 点中");
+  assert.deepEqual(C.camStep(c1, { type: "tier", tier: "far" }), { tier: "far", zone: 2, close: null }, "按 1 / 点远");
+  assert.deepEqual(C.camStep(c1, { type: "tier", tier: "near" }), { tier: "near", zone: 2, close: null }, "按 3 / 点近：正常的近景");
+  // 选了别的区（点地台、左右换区、当前行动单位到了别的区）退出；还是同一个区不动
+  assert.deepEqual(C.camStep(c1, { type: "zone", zone: 3 }), { tier: "near", zone: 3, close: null }, "换到别的区：退出特写");
+  assert.deepEqual(C.camStep(c1, { type: "zone", zone: 2 }), c1, "点同一个区（双击站位时先来的两下单击）：不动");
+  // 重排以后特写的单位不在了（被打倒、藏起来）：退出
+  assert.deepEqual(C.camStep(c1, { type: "units", ids: ["u2", "u3"] }), { tier: "near", zone: 2, close: null });
+  assert.deepEqual(C.camStep(c1, { type: "units", ids: ["u1"] }), c1);
+});
+
+test("近景双击单位特写（#237）：镜头平滑推到这个单位面前（比近景近、正对着它），它的放大铭牌再大一点、立在脚下、整块在顶栏和技能栏之间，别的铭牌变淡、压到它的藏起来；推过去的时长 / 距离 / 俯角在 CAMERA.close；减少动态效果时直接切过去；双击站位也认得是谁", () => {
+  const C = cams(), T = C.CAMERA.close, F = fxm(), P = L.CONFIG.plate;
+  assert.ok(T && Number.isFinite(T.dist) && Number.isFinite(T.elevation) && Number.isFinite(T.fov) && Number.isFinite(T.duration) && T.zoom > 1, "特写的距离、俯角、视野、时长、铭牌放大在 CAMERA.close");
+  assert.ok(T.duration >= 0.3 && T.duration <= 1 && C.EASE[T.ease] && T.tilt[0] <= T.elevation && T.elevation <= T.tilt[1], "时长 0.3–1 秒、缓动认得、俯角在拖动范围里");
+  for (const id of Object.keys(DEMOS)) {
+    const { layout } = demoLayout(id);
+    layout.units.forEach(u => {
+      const p = C.closePose(layout, u.id), n = C.pose(layout, "near", u.zone), tag = `${id} 特写 ${u.plate.name}`;
+      assert.ok(p && p.close === u.id && p.tier === "near" && p.zone === u.zone, tag + "：还算近景，选中的区是它所在的区");
+      assert.ok(p.dist < n.dist * 0.75, `${tag}：比近景近（${p.dist.toFixed(1)} / ${n.dist.toFixed(1)}）`);
+      assert.ok(p.elevation === T.elevation && p.fov === T.fov && p.azimuth === 0, tag + "：俯角、视野照 CAMERA.close，正对着");
+      assert.ok(Math.abs(p.target.x - u.x) < 0.3 && Math.abs(p.target.z - u.z) < 3, tag + "：看的是这个单位");
+      // 它的铭牌：放大的那张再乘 zoom，立在脚下，整块在顶栏和技能栏之间；比近景里大
+      const q = p.plates[u.id], r = q.rect, big = L.plateSize(layout.view, true);
+      assert.ok(q.close && q.big && !q.dim && !q.hide && q.lift === 0 && q.zoom === T.zoom, tag + "：铭牌放大、立在脚下");
+      assert.ok(Math.abs((r.x1 - r.x0) - big.w * T.zoom * r.scale) < 0.5, tag + "：铭牌的宽 = 放大的那张 × zoom");
+      assert.ok(r.x0 >= 0 && r.x1 <= DESKTOP.width && r.y0 >= DESKTOP.top && r.y1 <= DESKTOP.height - DESKTOP.bottom, `${tag}：铭牌出了画面 ${JSON.stringify([r.x0, r.y0, r.x1, r.y1].map(Math.round))}`);
+      assert.ok(r.x1 - r.x0 > (n.plates[u.id].rect.x1 - n.plates[u.id].rect.x0) * 1.2, tag + "：比近景里的铭牌大");
+      // 别的铭牌：变淡；露出来的（没藏起来的）不压它、彼此也不压
+      const shown = layout.units.filter(x => !p.plates[x.id].hide);
+      layout.units.filter(x => x.id !== u.id).forEach(x => assert.ok(p.plates[x.id].dim && !p.plates[x.id].close, tag + "：别的铭牌变淡"));
+      for (let i = 0; i < shown.length; i++) for (let j = i + 1; j < shown.length; j++) {
+        assert.ok(apart(p.plates[shown[i].id].rect, p.plates[shown[j].id].rect), `${tag}：${shown[i].plate.name} 和 ${shown[j].plate.name} 的铭牌压住了`);
+      }
+      // 适配器（攻击演出、伤害数字）按特写放大以后的铭牌算矩形
+      const ad = rig(layout, p), ar = ad.rectOf(u.id);
+      assert.ok(Math.abs(ar.w - (r.x1 - r.x0)) < 0.5, tag + "：适配器的矩形跟着特写放大");
+      // 推过去：从近景平滑出发、到了就是特写；时长照 CAMERA.close；减少动态效果直接切过去；拉回近景用平常的过渡
+      const tw = C.tween(n, p, {});
+      assert.equal(tw.duration, T.duration);
+      const s0 = C.at(tw, 0), s1 = C.at(tw, tw.duration), mid = C.at(tw, tw.duration / 2);
+      assert.ok(Math.hypot(s0.pos.x - n.pos.x, s0.pos.y - n.pos.y, s0.pos.z - n.pos.z) < 1e-9 && Math.hypot(s1.pos.x - p.pos.x, s1.pos.y - p.pos.y, s1.pos.z - p.pos.z) < 1e-9 && s1.close === u.id, tag + "：第 0 帧在近景、最后到特写");
+      assert.ok(mid.dist < n.dist && mid.dist > p.dist, tag + "：中途在两头之间（平滑推过去）");
+      assert.equal(C.tween(n, p, { reduced: true }).duration, 0, tag + "：减少动态效果直接切过去");
+      assert.equal(C.tween(p, n, {}).duration, C.CAMERA.transition.duration, tag + "：拉回近景用平常的过渡");
+      // 双击站位：脚下那一点认得是谁；脚下旁边一点点也算；别的区、空地不算
+      assert.equal(C.unitAt(layout, u.zone, u.x, u.z), u.id, tag + "：双击站位");
+      assert.equal(C.unitAt(layout, u.zone, u.x + 0.2, u.z - 0.15), layout.units.filter(x => x.zone === u.zone).sort((a, b) => Math.hypot(a.x - u.x - 0.2, a.z - u.z + 0.15) - Math.hypot(b.x - u.x - 0.2, b.z - u.z + 0.15))[0].id);
+      const other = layout.zones.find(z => z.id !== u.zone);
+      assert.equal(C.unitAt(layout, other.id, u.x, u.z), null, tag + "：别的区不算");
+    });
+    const z = layout.zones[0];
+    assert.equal(C.unitAt(layout, z.id, z.cx + z.w / 2 - 0.05, z.cz + z.d / 2 - 0.05), null, id + "：地台角上的空地不算");
+    assert.equal(C.closePose(layout, "nobody"), null, "没有这个单位：不特写");
+  }
+  // 场景、页面接上：双击铭牌 / 站位 → closeUp；换段、滚轮、换区都走状态机；特写时铭牌再放大、别的藏起来
+  const scene = fs.readFileSync(path.join(DIR, "hd2d-scene.js"), "utf8"), css = fs.readFileSync(path.join(DIR, "hd2d.css"), "utf8");
+  assert.ok(/addEventListener\("dblclick"[^\n]*closeUp\(p\.id\)/.test(scene), "双击铭牌：特写");
+  assert.ok(/renderer\.domElement\.addEventListener\("dblclick"[\s\S]{0,200}C\.unitAt\(/.test(scene), "双击地台上的站位：认出是谁，特写");
+  assert.ok(/C\.closePose\(/.test(scene) && /C\.camStep\(camState\(\), \{ type: "tier"/.test(scene) && /C\.camStep\(camState\(\), \{ type: "wheel"/.test(scene) && /type: "zone"/.test(scene) && /type: "units"/.test(scene), "换段 / 滚轮 / 换区 / 重排都走状态机");
+  assert.ok(/C\.tween\(from, to, \{ reduced: !!opts\.snap \|\| !state\.motion \}\)/.test(scene), "减少动态效果时直接切过去（和换段一样）");
+  assert.ok(/\* p\.zoom/.test(scene) && /classList\.toggle\("hide", p\.hide\)/.test(scene) && /\.hd2d-plate\.hide \.pl-in/.test(css), "特写的铭牌再放大，压到它的藏起来");
+  const html = fs.readFileSync(path.join(DIR, "index.html"), "utf8");
+  assert.ok(/info\.close != null \? " · 特写 "/.test(html) && /sc\.setTier\(t\)/.test(html), "页面：镜头条写着特写谁；远 / 中按钮、1 / 2 键照旧 setTier（就退出特写）");
+});
+
 /* ---------- 3. 区的外轮廓不规则 ---------- */
 const FOES = [{ id: "guard_sword", lv: 2 }, { id: "thug_knife", lv: 2 }, { id: "buoy", lv: 2 }, { id: "crow", lv: 2 }, { id: "thug_hammer", lv: 2 }];
 const CASES = [
