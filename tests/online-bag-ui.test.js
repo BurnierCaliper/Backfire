@@ -55,7 +55,7 @@ async function open(t, mobile = false) {
     // when no rules state or battle engine exists in its environment.
     for (const name of ["GAME", "state", "BattleCommands", "dispatch", "skillFlowSteps", "previewOf", "Screens"]) Object.defineProperty(window, name, { configurable: true, get() { throw new Error("Display touched rules: " + name); } });
   });
-  for (const file of ["items.js", "inventory.js", "workshop-data-adapter.js", "backpack-ui.js", "hud-icons.js", "unit-card.js", "unit-tip.js", "online-battle.js", "online-ui.js"]) await page.addScriptTag({ path: path.resolve(__dirname, "..", file) });
+  for (const file of ["items.js", "ledger.js", "inventory.js", "workshop-data-adapter.js", "backpack-ui.js", "hud-icons.js", "unit-card.js", "unit-tip.js", "online-battle.js", "online-ui.js"]) await page.addScriptTag({ path: path.resolve(__dirname, "..", file) });
   return { page, errors };
 }
 async function player(page, patch = {}) { await page.evaluate(patch => fixture.set({ active: true, isHost: false, identity: { id: "p1" }, screen: "battle", ...patch }), patch); }
@@ -71,24 +71,32 @@ async function withBag(page, screen = "exploration") {
     fixture.emit();
   });
 }
+// 先去掉道具目录里的说明文字（可以写坚毅生命消耗），剩下的文字里不能有 shp / shpMax 的值，也不能有「坚毅生命 + 数字」
+// （例如由剩余值算出来的百分比、扣了多少、前后对比）
 const noGrit = async page => {
   for (const sel of ["#bp-overlay", "#online-supplies"]) {
-    const txt = await page.evaluate(s => (document.querySelector(s) || {}).innerText || "", sel);
+    const txt = await page.evaluate(s => {
+      let t = (document.querySelector(s) || {}).innerText || "";
+      const hints = Object.values(typeof ITEM_CATALOG !== "undefined" ? ITEM_CATALOG : {}).map(v => v && v.hint).filter(Boolean).sort((a, b) => b.length - a.length);
+      for (const h of hints) t = t.split(h).join("");
+      return t;
+    }, sel);
     assert.doesNotMatch(txt, /4321|9876/, `${sel} 不显示玩家当前的坚毅生命（shp / shpMax）`);
+    assert.doesNotMatch(txt, /坚毅(生命)?\s*[:：]?\s*[+-]?\d/, `${sel} 除道具说明外不出现「坚毅生命 + 数字」`);
   }
 };
 const sub = page => page.locator("#bp-overlay .ws-sub").innerText();
 const bagOpen = page => page.evaluate(() => { const b = document.getElementById("bp-overlay"); return !!b && !b.hidden; });
 
-// 规则：道具 / 效果说明可以写明坚毅生命的消耗；只有玩家当前剩余的坚毅生命（shp / shpMax）绝不给玩家看
+// 规则：道具 / 效果说明可以写明坚毅生命的具体消耗 / 恢复量；玩家当前剩余的坚毅生命（shp / shpMax），以及任何能推出剩余值的数字（shpBase / shpBonus、实际扣了多少、前后对比、百分比）绝不给玩家看
 test("跑团玩家：背包照原样显示提到坚毅生命消耗的道具说明，但不显示任何人当前的坚毅生命", async t => {
   const o = await open(t, true); if (!o) return; const { page } = o; await withBag(page);
-  await page.evaluate(() => { fixture.view.state.bag.items.push({ id: "stim", qty: 1 }); fixture.emit(); });
+  await page.evaluate(() => { fixture.view.state.bag.items.push({ id: "food_gourmet", qty: 1 }); fixture.emit(); });
   await page.locator('[data-online="info"][data-info="bag"]').first().click();
   await page.click('#bp-overlay [data-bp-tab="consumable"]');
   const txt = await page.locator("#bp-overlay").innerText();
-  const hint = await page.evaluate(() => ITEM_CATALOG.stim.hint);
-  assert.match(hint, /坚毅生命/);
+  const hint = await page.evaluate(() => ITEM_CATALOG.food_gourmet.hint);
+  assert.match(hint, /坚毅\s*\d|\d\s*坚毅/, "选一条带数字的说明（美食：额外恢复 5 坚毅）");
   assert.ok(txt.includes(hint), "道具说明原样显示，可以提到坚毅生命消耗");
   await noGrit(page);
   assert.deepEqual(o.errors, []);
