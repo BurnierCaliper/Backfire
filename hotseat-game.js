@@ -430,6 +430,26 @@
       authority.broadcast(); refresh();
       return { ok: true };
     },
+    /** 战斗中能不能转交角色：{ ok, reason }（按钮灰掉时把 reason 写在旁边） */
+    transferState() {
+      if (!active()) return { ok: false, reason: "热座尚未配置" };
+      if (choice) return { ok: false, reason: "有分步选择在等人回答，回答完才能转交" };
+      return session.transferState();
+    },
+    /** 主持人把英雄（连同武器人）转交给另一名操作者；toId 为主持人 = 收回。联机每人最多一名角色的限制照旧 */
+    transferHero(heroId, toId) {
+      const gate = this.transferState();
+      if (!gate.ok) fail(gate.reason);
+      const hero = heroes().find(u => u.id === heroId);
+      if (!hero) fail("只能转交英雄角色");
+      if (!config.players.some(p => p.id === toId)) fail("没有这名玩家");
+      if (network && toId !== gm() && heroes().some(u => u.id !== heroId && (session.snapshot().assignments[u.id] || gm()) === toId)) fail("每名在线玩家最多操控一名角色，请先把他现在的角色交还或转给别人");
+      session.transfer(gm(), heroId, toId);
+      ownerByKit[hero.kit] = toId;
+      if (config.assignments) { if (toId === gm()) delete config.assignments[heroId]; else config.assignments[heroId] = toId; }
+      authority.broadcast(); refresh();
+      return { ok: true, heroName: hero.name, toName: config.players.find(p => p.id === toId).name };
+    },
     checkpoint(now = Date.now()) { if (!active()) return null; const snapshot = session.checkpoint(); return copy({ config, ownerByKit, playerId, session: snapshot,
       askRemainingMs: snapshot.ask ? Math.max(0, snapshot.ask.deadline - now) : null, newRoundSpends, choiceNo, openingChoice: !!choice && !state.combatStarted }); },
     restoreOnline(saved) { network = enabled = true; configured = false; config = copy(saved.config); ownerByKit = copy(saved.ownerByKit); playerId = saved.playerId; newRoundSpends = saved.newRoundSpends || null; choiceNo = saved.choiceNo || 0;
