@@ -59,8 +59,8 @@ test("钱不够 / 诊所没开：失败且不扣钱", () => {
 test("联机接线：房主发 cyberware（诊所开着才发）；cyberwareInstall / cyberwareRemove 只能动自己的角色", () => {
   const og = read("online-game.js"), hg = read("hotseat-game.js");
   assert.match(og, /TRPG\.clinicOpen \? trpgCyberwareFor\(id, id === identity\.id\) : null/);
-  assert.match(og, /"cyberwareInstall", "cyberwareRemove"\]\);/);
-  assert.match(hg, /"cyberRequest", "cyberwareInstall", "cyberwareRemove"\]\);/);
+  assert.match(og, /"cyberwareInstall", "cyberwareRemove"[^\]]*\]\);/);
+  assert.match(hg, /"cyberRequest", "cyberwareInstall", "cyberwareRemove"[^\]]*\]\);/);
   assert.match(hg, /cyberwareInstall: c => \{[\s\S]*?session\.ownerOf\(own\.id\) !== sender\)\) fail\("只能给自己的角色装、拆义体"\)/);
   assert.match(hg, /cyberwareRemove: c => \{[\s\S]*?trpgCyberwareRemove\(kit, id\)/);
 });

@@ -541,20 +541,18 @@
     const sell = ShopSellUI.tabOf("run") === "sell";
     return `<div class="ss-host" data-ss-host="run">${ShopSellUI.tabsHtml("run", { sellOff: !v })}${sell ? ShopSellUI.html(sellModel()) : buy()}</div>`;
   }
-  /** 卖 / 买回：Rogue.sellItem / buybackItem 返回 {ok,total,payout,msg}；提示钱进了谁的钱包 */
+  /** 卖 / 买回：run {action:"sellItem"|"buybackItem"}（rogue.js · sellItem / buybackItem，失败会抛错）；提示钱进了谁的钱包 */
   function sellAct(cmd) {
-    const fn = cmd.action === "sellItem" ? Rogue.sellItem : Rogue.buybackItem;
     let res, error;
     try {
-      if (typeof fn !== "function") throw new Error("卖东西的规则还没接上");
-      const arg = cmd.action === "sellItem" ? { kit: cmd.kit, id: cmd.id, qty: cmd.qty, owner: cmd.owner } : { kit: cmd.kit, token: cmd.token };
-      res = fn.length >= 2 ? fn(run, arg) : fn(arg);
-      if (res && res.ok === false) throw new Error(res.msg || "没卖成");
+      if (online()) OnlineRogue.checkHost(cmd);
+      res = dispatch(Object.assign({ type: "run" }, cmd), { run });
       if (window.Sfx) Sfx.ui("coin");
     } catch (e) { error = e; }
-    const text = res ? ShopSellUI.toastText(res, k => k === "party" ? "队伍" : Rogue.heroName(k)) : "";
-    completeAction(text ? [text] : [], error);
-    if (text && !error) ShopSellUI.toast(text);
+    const text = res && typeof res === "object" && !Array.isArray(res) ? ShopSellUI.toastText(res, k => k === "party" ? "队伍" : Rogue.heroName(k)) : "";
+    completeAction(text ? [text] : Array.isArray(res) ? res : [], error);
+    if (text) ShopSellUI.toast(text);
+    else if (error) ShopSellUI.toast(`没做成：${error.message}`);
   }
   /** 商店积分：每花 ROGUE_SHOP_POINTS.per 奎支得 1 分，兑换自我效果道具（联机时是房主自己的积分） */
   function redeemList() {

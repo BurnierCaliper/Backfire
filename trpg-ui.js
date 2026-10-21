@@ -41,23 +41,23 @@
       <span class="r-hint">买东西、修理、升级、改装、制作、兑换都从这里扣钱。</span></div>`;
   }
   /* ---------- 商店 · 买 / 卖页签（shop-sell-ui.js；卖出视图 trpgShopSellFor(id, isGM)，指令 shopSell / shopBuyback 走 OnlineGame.submit） ---------- */
-  const gmId = () => (window.OnlineGame && OnlineGame.getView && (OnlineGame.getView().identity || {}).id) || "gm";
-  function trpgSellView() { try { return typeof trpgShopSellFor === "function" ? trpgShopSellFor(gmId(), true) : null; } catch (_) { return null; } }
+  function trpgSellView() { try { return typeof trpgShopSellView === "function" ? trpgShopSellView(null) : null; } catch (_) { return null; } }
   function trpgSellModel(v) {
     const hs = heroes().filter(h => !h.dead).map(h => ({ kit: h.kit, name: h.name, purse: trpgPurse(h.kit) }));
-    return ShopSellUI.model(v, { key: "trpg-gm", heroes: hs, actor: payer !== "party" ? payer : (hs[0] || {}).kit, money: k => trpgPurse(k) });
+    return ShopSellUI.model(v, { key: "trpg-gm", heroes: hs, actor: payer || "party", canAct: () => true, money: k => trpgPurse(k || "party") });
   }
-  async function trpgSellSubmit(cmd) {
-    const msg = cmd.action === "sellItem" ? { type: "shopSell", kit: cmd.kit, id: cmd.id, qty: cmd.qty, owner: cmd.owner } : { type: "shopBuyback", kit: cmd.kit, token: cmd.token };
-    let res = null;
+  /** 主持人卖 / 买回：trpg {action:"shopSell"|"shopBuyback"}（shop-sell.js · trpgShopSell / trpgShopBuyback，失败会抛错） */
+  function trpgSellSubmit(cmd) {
+    let res;
+    pushUndo();
     try {
-      const sub = window.OnlineGame && OnlineGame.getView && OnlineGame.getView().active ? OnlineGame.submit : window.HotseatGame ? HotseatGame.submit : null;
-      if (!sub) throw new Error("卖东西的规则还没接上");
-      const got = await sub(msg);
-      res = got && (got.payout || got.ok === false ? got : got.result || got);
+      res = cmd.action === "sellItem" ? Commands.dispatch({ type: "trpg", action: "shopSell", kit: cmd.kit, id: cmd.id, qty: cmd.qty, owner: cmd.owner })
+        : Commands.dispatch({ type: "trpg", action: "shopBuyback", kit: cmd.kit, token: cmd.token });
+      if (window.Sfx) Sfx.ui("coin");
+      if (res && res.msg) { log.push({ stamp: stampNow(), lines: ["💰 " + res.msg] }); saveLog(); }
+      save();
     } catch (e) { res = { ok: false, msg: e.message || String(e) }; }
-    if (res && res.ok !== false && window.Sfx) Sfx.ui("coin");
-    if (res) ShopSellUI.toast(ShopSellUI.toastText(res, k => k === "party" ? "队伍公账" : ((heroes().find(h => h.kit === k) || {}).name || k)));
+    ShopSellUI.toast(ShopSellUI.toastText(res, k => k === "party" ? "队伍公账" : ((heroes().find(h => h.kit === k) || {}).name || k)));
     render();
   }
   function tabBuyShop() {

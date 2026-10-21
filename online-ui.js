@@ -317,7 +317,7 @@
         <p class="ol-muted">买到的东西进队伍背包；买东西照常攒商店积分。主持人关店后这里就收起来。</p>`;
       return `<section class="ol-shop" aria-label="商店"><header><h3>🛒 ${esc(s.name)}</h3>${s.discount ? `<span class="ol-q-tag ol-q-main">${esc(Number.isInteger(z) ? z : z.toFixed(1))} 折</span>` : ""}</header>
         ${s.note ? `<p class="ol-muted">${esc(s.note)}</p>` : ""}
-        ${sellTabs("trpg", s.sell || null, buyHtml, () => sellModelTrpg(s))}</section>`;
+        ${sellTabs("trpg", view.packet?.shopSell || null, buyHtml, () => sellModelTrpg(s))}</section>`;
     }
     function purseMarkup() {
       const p = view.packet?.purse;
@@ -487,8 +487,8 @@
     }
     /* ---------- 商店 · 买 / 卖页签（shop-sell-ui.js）：视图是房主算好的，这里只画；离开商店（包里没有卖出视图）就回到「买」 ---------- */
     const arrOf = v => Array.isArray(v) ? v : Array.isArray(v?.rows) ? v.rows : [];
-    /** 联机单局：packet.rogue.shopSell（也认 rogue.shop.sell / packet.shop.sell）：只有自己的英雄和公用 */
-    const rogueSellView = r => r?.shopSell || r?.shop?.sell || view.packet?.shop?.sell || null;
+    /** 联机单局：packet.rogue.shopSell（online-rogue.js · Rogue.shopSellView(r, { kits: mine })）：只有自己的英雄和公用 */
+    const rogueSellView = r => r?.shopSell || null;
     function sellModelRogue(r, payer) {
       const heroes = (r.heroes || []).filter(h => !h.dead).map(h => ({ kit: h.kit, name: h.name, purse: h.mine ? h.purse : null, mine: h.mine }));
       return ShopSellUI.model(rogueSellView(r), { key: "rogue", heroes, mine: k => heroes.some(h => h.kit === k && h.mine), actor: payer,
@@ -496,7 +496,7 @@
     }
     function sellModelTrpg(s) {
       const heroes = ((view.packet?.purse || {}).heroes || []).map(h => ({ kit: h.kit, name: h.name, purse: h.mine ? h.amount ?? null : null, mine: h.mine }));
-      return ShopSellUI.model(s.sell, { key: "trpg", heroes, mine: k => heroes.some(h => h.kit === k && h.mine), actor: shopDraft.payer,
+      return ShopSellUI.model(view.packet?.shopSell, { key: "trpg", heroes, mine: k => heroes.some(h => h.kit === k && h.mine), actor: shopDraft.payer,
         money: k => (heroes.find(h => h.kit === k) || {}).purse ?? null, disabled: disabled() });
     }
     function sellTabs(key, sellView, buyHtml, modelFn) {
