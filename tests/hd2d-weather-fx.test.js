@@ -93,20 +93,40 @@ function fakeDom() {
   doc.querySelectorAll = (sel) => doc.body.querySelectorAll(sel);
   return doc;
 }
-/** opts.reduced = 系统开了「减少动态效果」。计时器不真的跑：记下来，测试里手动推（timers） */
+/** 固定种子的随机数（每次跑都一样） */
+function seeded(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let x = Math.imul(a ^ (a >>> 15), a | 1);
+    x ^= x + Math.imul(x ^ (x >>> 7), x | 61);
+    return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+  };
+}
+/** 照原型页的顺序加载普通脚本（布局 → 镜头 → weather-fx.js → hd2d-wfx.js）。opts.reduced = 系统开了「减少动态效果」；opts.only = 只加载 weather-fx.js（正式画面那样）。
+ *  计时器、动画帧都不真的跑：记下来，测试里手动推（timers / frames）；Math.random 换成固定种子的 */
 function wfxPage(opts) {
-  const doc = fakeDom(), timers = [];
+  opts = opts || {};
+  const doc = fakeDom(), timers = [], frames = new Map();
+  const M = Object.create(Math);
+  M.random = seeded(opts.seed || 11);
+  let fid = 0;
   const sandbox = {
-    document: doc, console, Math,
+    document: doc, console, Math: M,
     setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length; }, clearTimeout() {},
-    matchMedia: (q) => ({ matches: !!(opts && opts.reduced) && /prefers-reduced-motion: reduce/.test(q) })
+    requestAnimationFrame: (fn) => { frames.set(++fid, fn); return fid; }, cancelAnimationFrame: (id) => { frames.delete(id); },
+    matchMedia: (q) => ({ matches: !!opts.reduced && /prefers-reduced-motion: reduce/.test(q) })
   };
   sandbox.window = sandbox; sandbox.self = sandbox; sandbox.globalThis = sandbox;
   const ctx = vm.createContext(sandbox);
-  for (const f of ["weather-fx.js", "prototypes/hd2d/hd2d-wfx.js"]) vm.runInContext(read(f), ctx, { filename: f });
+  const files = opts.only ? ["weather-fx.js"] : ["prototypes/hd2d/hd2d-layout.js", "prototypes/hd2d/hd2d-camera.js", "weather-fx.js", "prototypes/hd2d/hd2d-wfx.js"];
+  for (const f of files) vm.runInContext(read(f), ctx, { filename: f });
   const stage = doc.createElement("div");
   doc.body.appendChild(stage);
-  return { doc, stage, timers, WF: sandbox.WeatherFx, W: sandbox.HD2DWfx };
+  /** 推 n 下计时器 / 动画帧（每次把排着的都跑一遍；跑的时候新排的留到下一下） */
+  const runTimers = (n) => { for (let i = 0; i < (n || 1); i++) timers.splice(0).forEach(t => t.fn()); };
+  const runFrames = (n) => { for (let i = 0; i < (n || 1); i++) { const list = [...frames.values()]; frames.clear(); list.forEach(fn => fn()); } };
+  return { doc, stage, timers, frames, runTimers, runFrames, WF: sandbox.WeatherFx, W: sandbox.HD2DWfx, random: M.random };
 }
 
 /* ---------- 真的 three.js（和 tests/hd2d-layout.test.js 的 protoEnv 一样）---------- */
@@ -366,7 +386,7 @@ test("三段镜头（#240）：2D 天气层远景淡一点，中景、近景、�
   // 页面：换段 / 特写时跟着换
   const html = fs.readFileSync(path.join(DIR, "index.html"), "utf8");
   assert.ok(/syncUrl\(\);\s*syncWeather\(\);/.test(html), "镜头变了（syncCamera）就重排一次 2D 层");
-  assert.ok(/tier: camInfo \? camInfo\.tier : sc\.tier, close: !!\(camInfo && camInfo\.close != null\), reduced: !sc\.motion/.test(html), "段、特写、减少动态效果交给 2D 层");
+  assert.ok(/tier: camInfo \? camInfo\.tier : sc\.tier, close: !!\(camInfo && camInfo\.close != null\), zone: camInfo \? camInfo\.zone : sc\.zone, reduced: !sc\.motion/.test(html), "段、特写、看的那个区、减少动态效果交给 2D 层");
 });
 
 /* ---------- 6. 原型页接线 ---------- */
@@ -375,7 +395,7 @@ test("原型页（#240）：原样加载 weather-fx.css / weather-fx.js（正式
   const mod = /<script type="module">([\s\S]*?)<\/script>/.exec(html)[1];
   assert.ok(html.indexOf('href="../../weather-fx.css"') > 0 && html.indexOf('href="../../weather-fx.css"') < html.indexOf('href="hd2d.css"'), "weather-fx.css 在 hd2d.css 前面（原型的样式能盖过它）");
   assert.ok(html.indexOf('src="../../weather-fx.js"') > 0 && html.indexOf('src="hd2d-wfx.js"') > html.indexOf('src="../../weather-fx.js"') && html.indexOf('src="hd2d-wfx.js"') < html.indexOf('<script type="module">'), "加载 weather-fx.js 和 hd2d-wfx.js");
-  assert.ok(/wfx = WX\.create\(\$\("stage"\)\)/.test(mod), "2D 层放在 #stage 里");
+  assert.ok(/wfx = WX\.create\(\$\("stage"\)/.test(mod), "2D 层放在 #stage 里");
   assert.ok(/sc\.setWind\(WX\.windOf\(pv\.sandDir, portrait\)\)/.test(mod), "3D 沙粒按投影里的风向飞");
   assert.ok(/weather: pv\.weather, theme: themeNow\(\), sandDir: pv\.sandDir, phaseStep: pv\.phaseStep/.test(mod), "2D 层只读投影（天气、风向、相位、光影）");
   assert.ok(!/st\.sandDir\b(?! =)/.test(mod.replace(/if \(weatherPick\.wind[^\n]*/, "")) && !/st\.phaseStep\b(?! =)/.test(mod) && !/weather: st\.weather/.test(mod), "不绕开白名单读房主的原始 state（网址 ?weather= 是往战斗状态里写，和主持人改天气一样）");
@@ -392,4 +412,227 @@ test("原型页（#240）：原样加载 weather-fx.css / weather-fx.js（正式
   const page = require("./hd2d-fake-page").load();
   assert.deepEqual(page.errors, [], "假网页加载报错");
   assert.ok(page.ctx.HD2DWfx && page.ctx.WeatherFx && typeof page.ctx.HD2DWfx.create === "function");
+});
+
+/* ---------- 7. weather-fx.js 只加可选参数、默认值不变 ---------- */
+test("weather-fx.js 只加了两个可选参数（#240），不给就是正式画面原来的样子：雷鸣照打区域闪光 / 远处闪电，strikes: false 才不打；酸雨的涟漪照旧整层随机（位置、大小、时长和以前的公式一模一样），给了 spot 才落在它说的地方、它说 null 这一下就不落；减少动态效果时照旧不生成", () => {
+  // 正式画面（只加载 weather-fx.js、不给新参数）
+  const F = wfxPage({ only: true, seed: 5 }), field = F.doc.createElement("div");
+  F.doc.body.appendChild(field);
+  F.WF.sync({ field, weather: "thunder" });
+  assert.equal(F.timers.length, 2, "雷鸣：区域闪光、远处闪电两条计时链都开着");
+  F.runTimers(1);
+  assert.ok(field.querySelector("wfx").children.some(c => c.tagName === "S"), "到点打了远处闪电");
+  // 酸雨：涟漪的位置 / 大小 / 时长和以前的公式一模一样（同一串随机数）
+  const ref = seeded(7);
+  const want = () => {
+    const big = ref() < 0.25, sz = big ? 70 + ref() * 60 : 16 + ref() * 46;
+    return `left:${(ref() * 100).toFixed(2)}%;top:${(ref() * 100).toFixed(2)}%;width:${sz | 0}px;height:${(sz * (0.82 + ref() * 0.1)) | 0}px;--d:${(1.6 + ref() * 1.6 + sz / 120).toFixed(2)}s`;
+  };
+  const A = wfxPage({ only: true, seed: 7 }), af = A.doc.createElement("div");
+  A.doc.body.appendChild(af);
+  A.WF.sync({ field: af, weather: "acid" });
+  const ripples = () => af.querySelector("wfx-acid").children.filter(c => c.tagName === "B");
+  const first = ripples()[0];
+  assert.ok(first, "进了酸雨马上落第一个涟漪");
+  assert.equal(first.style.cssText, want(), "不给 spot：涟漪和以前一模一样");
+  ref(); ref(); A.runTimers(1);   // 两次涟漪之间的间隔用了两个随机数（setTimeout 的时长）
+  assert.equal(ripples()[1].style.cssText, want(), "第二个也一样");
+  // strikes: false：雷鸣不打区域闪光、远处闪电（HD-2D 原型：3D 场景自己有雷击）
+  const T = wfxPage({ only: true }), tf = T.doc.createElement("div");
+  T.doc.body.appendChild(tf);
+  T.WF.sync({ field: tf, weather: "thunder", strikes: false });
+  assert.equal(T.timers.length, 0, "strikes: false 一条计时链都不开");
+  assert.ok(tf.querySelector("wfx-thunder") && tf.querySelector("wfx-thunder").innerHTML === "<i></i><i></i>", "雷鸣的叠加层（暗色云影）照旧");
+  // spot：落在它说的地方；它说 null 这一下不落，计时链照走
+  const S = wfxPage({ only: true }), sf = S.doc.createElement("div");
+  S.doc.body.appendChild(sf);
+  let n = 0;
+  S.WF.sync({ field: sf, weather: "acid", spot: () => (n++ % 2 ? null : { x: 12.5, y: 70 }) });
+  S.runTimers(5);
+  const bs = sf.querySelector("wfx-acid").children;
+  assert.equal(bs.length, 3, "6 下里 spot 给了 3 个位置，只落了 3 个");
+  bs.forEach(b => assert.ok(/^left:12\.50%;top:70\.00%;/.test(b.style.cssText), "落在 spot 说的地方"));
+  assert.equal(S.timers.length, 1, "计时链照走");
+  // 减少动态效果：照旧不生成涟漪、不打闪电（给了参数也一样）
+  const R = wfxPage({ only: true, reduced: true }), rf = R.doc.createElement("div");
+  R.doc.body.appendChild(rf);
+  R.WF.sync({ field: rf, weather: "acid", spot: () => ({ x: 50, y: 50 }) });
+  R.WF.sync({ field: rf, weather: "thunder" });
+  assert.equal(R.timers.length, 0, "减少动态效果：不生成");
+  // 正式画面照旧这样调（不给新参数）
+  assert.ok(/WeatherFx\.sync\(\{ field: fieldEl, app: \$\("g-app"\), weather: env\.weather, sandDir: state\.sandDir, phaseStep: state\.phaseStep \}\)/.test(read("game.js")));
+});
+
+/* ---------- 8. 其他天气逐个接上 ---------- */
+test("其他天气逐个接上（#240）：雪、酸雨、雷鸣、酷暑、微光、相位都叠正式画面的那一层（.wfx-…，相位的阶段跟着投影里的 phaseStep），原型不另画；跟不跟三段镜头放大按配置（酷暑贴着底边、微光贴着四角、酸雨的涟漪要落在地台上，不放大）", () => {
+  const P = wfxPage(), W = P.W, wfx = W.create(P.stage), css = read("weather-fx.css"), mine = fs.readFileSync(path.join(DIR, "hd2d.css"), "utf8");
+  const all = ["sand", "snow", "acid", "thunder", "heat", "glow", "phase"];
+  assert.deepEqual(Object.keys(W.WFX.weather).sort(), all.slice().sort(), "七种天气都接上了");
+  for (const w of all) {
+    for (const tier of ["far", "near"]) {
+      const p = wfx.sync({ weather: w, theme: "dusk", sandDir: "W", phaseStep: 2, tier });
+      const layer = wfx.host.querySelectorAll("wfx");
+      assert.equal(layer.length, 1, w + "：一层");
+      assert.equal(layer[0].className, P.WF.layerClass(w), w + "：就是正式画面的那一层");
+      assert.ok(css.includes(".wfx-" + w), w + "：样子在 weather-fx.css 里");
+      assert.equal(p.scale > 1, tier === "near" && ["sand", "snow", "thunder", "phase"].includes(w), `${w} ${tier}：跟不跟镜头放大`);
+    }
+    assert.ok(!new RegExp("\\.wfx-" + w + "(?![\\w-])[^{]*\\{[^}]*(background|animation)").test(mine), w + "：原型的 hd2d.css 不另画（不另写背景 / 动画）");
+  }
+  // 相位：阶段跟着投影里的 phaseStep（0 波谷 / 1 平衡 / 2 波峰 / 3 平衡）
+  [[0, "trough"], [1, "balance"], [2, "peak"], [3, "balance"]].forEach(([step, name]) => {
+    wfx.sync({ weather: "phase", theme: "day", phaseStep: step, tier: "far" });
+    assert.equal(wfx.host.querySelector("wfx").dataset.phaseStep, name, "相位 " + step);
+  });
+  // 只有雷鸣不让 weather-fx.js 自己打闪电；只有酸雨的涟漪落在地台上
+  all.forEach(w => {
+    const p = W.plan({ weather: w, tier: "far" });
+    assert.equal(p.strikes, w !== "thunder", w + "：strikes");
+    assert.equal(p.ripples, w === "acid", w + "：ripples");
+    assert.equal(p.flash > 0, w === "thunder", w + "：打雷闪白时淡掉");
+  });
+  assert.equal(W.plan({ weather: "rain" }).weather, "none", "认不得的天气不叠");
+});
+
+test("雷鸣（#240）：2D 层只留正式画面的暗色云影和紫调——不打闪电、不闪区域（3D 场景已经有雷击，不重复），也不下雨；3D 打雷闪白的那一下 2D 层跟着淡掉（不把闪白压暗一块），雷过去就回来；换别的天气不再跟着闪", () => {
+  const P = wfxPage();
+  let flash = 0;
+  const wfx = P.W.create(P.stage, { flash: () => flash }), host = wfx.host;
+  wfx.sync({ weather: "thunder", theme: "night", tier: "far" });
+  P.runTimers(10); P.runFrames(1);
+  const layer = host.querySelector("wfx-thunder");
+  assert.ok(layer && layer.innerHTML === "<i></i><i></i>" && layer.children.length === 0, "只有两层云影：没有区域闪光（u）、闪电（s），也没有雨");
+  assert.equal(P.timers.length, 0, "weather-fx.js 没开雷击的计时链");
+  assert.ok(!/rain|雨/.test(read("weather-fx.css").split("\n").filter(l => /wfx-thunder/.test(l)).join("\n")), "正式画面的雷鸣层本来就没有雨");
+  // 打雷：2D 层跟着淡掉（× 配置的 flash），雷过去就回来
+  const cfg = P.W.WFX.weather.thunder.flash;
+  assert.ok(cfg > 0 && cfg <= 1);
+  flash = 1; P.runFrames(1);
+  assert.equal(host.style.getPropertyValue("--wfx-flash"), cfg.toFixed(3), "闪白最亮时淡掉 flash 那么多");
+  flash = 0.4; P.runFrames(1);
+  assert.equal(host.style.getPropertyValue("--wfx-flash"), (0.4 * cfg).toFixed(3));
+  flash = 0; P.runFrames(1);
+  assert.equal(host.style.getPropertyValue("--wfx-flash"), "0.000", "雷过去就回来");
+  // 换成沙暴：不再每帧读闪光，淡掉的也回来
+  flash = 1; wfx.sync({ weather: "sand", theme: "night", sandDir: "E", tier: "far" });
+  P.runFrames(3);
+  assert.equal(host.style.getPropertyValue("--wfx-flash"), "0.000", "沙暴不跟着闪");
+  assert.equal(P.frames.size, 0, "不在雷鸣时不占动画帧");
+  // CSS：整层的不透明度跟着 --wfx-flash；场景把这一帧的闪光给出来；3D 的雷鸣照旧不下雨（hd2d-weather.js 的 WEATHER.thunder 没有粒子）
+  assert.ok(/\.hd2d-wfx \{[^}]*opacity: calc\(1 - var\(--wfx-flash, 0\)\)/.test(fs.readFileSync(path.join(DIR, "hd2d.css"), "utf8")), "2D 层跟着闪光淡掉");
+  assert.ok(/get flash\(\) \{ return weather\.flash; \}/.test(fs.readFileSync(path.join(DIR, "hd2d-scene.js"), "utf8")), "场景给出这一帧的闪光");
+  assert.ok(!/thunder: \{[^}]*kind:/.test(fs.readFileSync(path.join(DIR, "hd2d-weather.js"), "utf8")), "3D 的雷鸣照旧没有雨粒子");
+});
+
+/* ---------- 9. 酸雨的涟漪落在地台上 ---------- */
+/** 点在不在多边形里（屏幕坐标） */
+function inPoly(poly, x, y) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i], b = poly[j];
+    if ((a.y > y) !== (b.y > y) && x < (b.x - a.x) * (y - a.y) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}
+/** 解 hd2d.css 里一条 scale / translate 的值（只认这里用到的：数、var(--x, 默认)、calc(… N% …)），pct = 百分比对着的长度 */
+function cssVal(token, vars, pct) {
+  let e = token.replace(/var\((--[\w-]+), ([\d.]+)\)/g, (m, k, d) => String(k in vars ? vars[k] : Number(d)));
+  e = e.replace(/calc\(/g, "(").replace(/([\d.]+)%/g, (m, num) => `(${num} / 100 * ${pct})`);
+  assert.ok(/^[\d.\s()+\-*/]+$/.test(e), "认得的写法：" + token);
+  return Function("return " + e)();
+}
+/** 按最外层的空格切开（calc(…) 里的空格不切） */
+function splitTop(s) {
+  const out = [];
+  let depth = 0, cur = "";
+  for (const ch of s.trim()) {
+    if (ch === "(") depth++;
+    if (ch === ")") depth--;
+    if (ch === " " && !depth) { if (cur) out.push(cur); cur = ""; } else cur += ch;
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+test("酸雨的涟漪（#240）：落在地台顶面上（三个演示 × 远 / 中 / 近，按这一刻的镜头投到屏幕上，都在某个区的地台轮廓里、深渊的洞口外、顶栏和技能栏之间），不在天上；近景只落在看的那个区（别的区被景深糊掉了）；按镜头俯角压扁、越近越大，压扁 / 放大以后中心还在落点；涟漪的画法、动画照旧是 weather-fx.css 的", () => {
+  const W = wfxm(), C = cams(), FXM = require("../prototypes/hd2d/hd2d-fx.js"), css = fs.readFileSync(path.join(DIR, "hd2d.css"), "utf8");
+  for (const id of Object.keys(DEMOS)) {
+    const { layout } = demoLayout(id);
+    for (const tier of ["far", "mid", "near"]) {
+      const focus = layout.zones[layout.zones.length - 1].id, p = C.pose(layout, tier, focus), only = W.plan({ weather: "acid", tier, zone: focus }).rippleZones;
+      assert.deepEqual(only, tier === "near" ? [focus] : null, tier + "：涟漪落在哪几个区");
+      const cam = FXM.lens({ pos: p.pos, target: p.target, fov: p.fov, width: DESKTOP.width, height: DESKTOP.height });
+      const polys = layout.zones.map(z => {
+        const pts = z.outline && z.outline.pts ? z.outline.pts : [{ x: -z.w / 2, z: -z.d / 2 }, { x: z.w / 2, z: -z.d / 2 }, { x: z.w / 2, z: z.d / 2 }, { x: -z.w / 2, z: z.d / 2 }];
+        const hole = z.hole > 0 ? Array.from({ length: 24 }, (_, i) => L.project(cam, { x: z.cx + Math.cos(i / 24 * Math.PI * 2) * z.hole, y: z.topY, z: z.cz + Math.sin(i / 24 * Math.PI * 2) * z.hole })) : null;
+        return { id: z.id, poly: pts.map(q => L.project(cam, { x: z.cx + q.x, y: z.topY, z: z.cz + q.z })), hole };
+      });
+      const rand = seeded(3), hits = new Map(), tag = `${id} ${tier}`;
+      let got = 0;
+      for (let i = 0; i < 300; i++) {
+        const s = W.rippleAt(layout, cam, rand, DESKTOP, only);
+        if (!s) continue;
+        got++;
+        const x = s.x / 100 * DESKTOP.width, y = s.y / 100 * DESKTOP.height;
+        assert.ok(y >= DESKTOP.top && y <= DESKTOP.height - DESKTOP.bottom && x >= 0 && x <= DESKTOP.width, tag + "：涟漪落在画面外 / 界面底下");
+        // 屏幕上前后的地台会叠住一点（高地的顶面投上去盖住后面的区）：在哪几个区的轮廓里都算
+        const inside = polys.filter(q => inPoly(q.poly, x, y)).filter(q => !q.hole || !inPoly(q.hole, x, y));
+        assert.ok(inside.length, `${tag}：涟漪（${x.toFixed(0)}, ${y.toFixed(0)}）没落在任何一个区的地台上（或者落进了深渊的洞口）`);
+        if (tier === "near") assert.ok(inside.some(q => q.id === focus), `${tag}：近景的涟漪没落在看的那个区`);
+        hits.set(inside[0].id, (hits.get(inside[0].id) || 0) + 1);
+      }
+      assert.ok(got > 200, `${tag}：300 下只落了 ${got} 个`);
+      if (tier === "far") assert.equal(hits.size, layout.zones.length, id + " 远景：每个区都下着");
+    }
+  }
+  // 压扁 / 放大：俯角越低越扁（sin 俯角）、越近越大
+  const tiers = [["far"], ["mid"], ["near"], ["near", true]].map(([tier, close]) => W.plan({ weather: "acid", tier, close }));
+  tiers.forEach(p => assert.ok(Math.abs(p.squash - Math.sin(W.elevationOf(p.tier) * Math.PI / 180)) < 1e-9 && p.squash < 0.6, p.tier + "：按俯角压扁"));
+  tiers.slice(1).forEach((p, i) => assert.ok(p.squash < tiers[i].squash && p.rippleScale > tiers[i].rippleScale, p.tier + "：越近越扁（俯角越低）、越大"));
+  // hd2d.css：用单独的 scale / translate 叠在 weather-fx.css 的涟漪动画（transform: translate(-50%, -50%) scale(k)）外面；
+  // 按 CSS 的合成顺序（translate · scale · transform，绕盒子中心）算一遍：涟漪横向放大 rs、纵向 rs × sq，中心还在落点（left / top）
+  const rule = /\.hd2d-wfx \.wfx-acid b \{([^}]*)\}/.exec(css);
+  assert.ok(rule && !/background|animation|transform:/.test(rule[1]), "只加 scale / translate，涟漪的画法、动画、transform 都是 weather-fx.css 的");
+  assert.ok(/\.wfx-acid b \{[^}]*transform: translate\(-50%, -50%\) scale\(\.08\)/.test(read("weather-fx.css")), "正式画面的涟漪：transform 把盒子中心放在 left / top");
+  const prop = (k) => splitTop(new RegExp("(?:^|;|\\s)" + k + ": ([^;]+);").exec(rule[1])[1]);
+  for (const [rs, sq] of [[1, 1], [1.7, 0.41], [2, 0.34], [0.8, 0.5]]) {
+    const vars = { "--wfx-rs": rs, "--wfx-sq": sq }, w = 120, h = 104;
+    const [sx, sy] = prop("scale").map(t => cssVal(t, vars, 0)), [tx, ty] = prop("translate").map((t, i) => cssVal(t, vars, i ? h : w));
+    assert.ok(Math.abs(sx - rs) < 1e-9 && Math.abs(sy - rs * sq) < 1e-9, "横向放大 rs、纵向再压扁 sq");
+    // 盒子中心（相对绕着转的中心是 0, 0）：transform 先挪到 (−w/2, −h/2)（动画里 scale(k) 对中心没有影响），再 scale、再 translate；加回 (w/2, h/2) 就是相对盒子左上角（= left / top）的位置
+    const cx = sx * (-w / 2) + tx + w / 2, cy = sy * (-h / 2) + ty + h / 2;
+    assert.ok(Math.abs(cx) < 1e-9 && Math.abs(cy) < 1e-9, `rs=${rs} sq=${sq}：中心偏离落点 (${cx.toFixed(2)}, ${cy.toFixed(2)})`);
+  }
+  // 假网页：酸雨时 weather-fx.js 问 rippleAt 落在哪（页面给这一刻的镜头和画面），涟漪都在地台上；压扁 / 放大写在 2D 层上
+  const P = wfxPage(), { layout } = demoLayout("cross"), pose = C.pose(layout, "far", 3);
+  const cam = FXM.lens({ pos: pose.pos, target: pose.target, fov: pose.fov, width: DESKTOP.width, height: DESKTOP.height });
+  const wfx = P.W.create(P.stage, { lens: () => cam, view: () => DESKTOP, random: seeded(9) });
+  const pl = wfx.sync({ weather: "acid", theme: "night", tier: "far", layout });
+  P.runTimers(30);
+  const bs = wfx.host.querySelector("wfx-acid").children;
+  assert.ok(bs.length >= 20, "下着涟漪");
+  const polys = layout.zones.map(z => z.outline.pts.map(q => L.project(cam, { x: z.cx + q.x, y: z.topY, z: z.cz + q.z })));
+  bs.forEach(b => {
+    const m = /^left:([\d.]+)%;top:([\d.]+)%;/.exec(b.style.cssText), x = m[1] / 100 * DESKTOP.width, y = m[2] / 100 * DESKTOP.height;
+    assert.ok(polys.some(poly => inPoly(poly, x, y)), "页面里的涟漪落在地台上");
+  });
+  assert.equal(wfx.host.style.getPropertyValue("--wfx-sq"), pl.squash.toFixed(3));
+  assert.equal(wfx.host.style.getPropertyValue("--wfx-rs"), String(pl.rippleScale));
+  assert.ok(wfx.host.classList.contains("is-night"), "夜晚样子（正式画面：涟漪更亮）");
+});
+
+/* ---------- 10. 原型页接线（其他天气）---------- */
+test("原型页（#240）：2D 层拿到这一刻的镜头（酸雨的涟漪落在地台上）、画面大小（让开顶栏和技能栏）、雷击的闪光（雷鸣闪白时淡掉）和布局；网址 ?weather= 换天气（截图用）是往战斗状态里写，画面照样只读投影", () => {
+  const html = fs.readFileSync(path.join(DIR, "index.html"), "utf8"), mod = /<script type="module">([\s\S]*?)<\/script>/.exec(html)[1];
+  assert.ok(/wfx = WX\.create\(\$\("stage"\), \{ lens: \(\) => HD2DFx\.lens\(sc\.lensNow\(\)\), view: \(\) => sc\.view\(\), flash: \(\) => sc\.flash \}\)/.test(mod), "镜头、画面、闪光交给 2D 层");
+  assert.ok(/reduced: !sc\.motion, layout: wfxLayout/.test(mod), "布局交给 2D 层");
+  assert.ok(/params\.get\("weather"\)/.test(mod) && /st\.weather = weatherPick\.weather/.test(mod) && /st = demo\.make\(pageRegion\(\)\);\s*pickWeather\(\);/.test(mod), "?weather= 写进战斗状态（换演示也带着）");
+  assert.ok(/sandDirOptions\(\)\.includes\(weatherPick\.wind\)/.test(mod), "?wind= 只认这块棋盘能用的风向");
+  // 规则环境里照页面的做法把演示战场改成酸雨再投影：投影里是改过的天气，2D 层照它叠
+  const ctx = H.load(), st = DEMOS.cross(ctx.BattleSim);
+  st.weather = "acid";
+  const pv = projectIn(ctx, st);
+  assert.equal(pv.weather, "acid", "投影里是改过的天气");
+  const p = wfxm().plan({ weather: pv.weather, theme: pv.light, sandDir: pv.sandDir, phaseStep: pv.phaseStep, tier: "far" });
+  assert.ok(p.weather === "acid" && p.ripples && p.night);
 });

@@ -22,10 +22,17 @@ body { position: fixed; inset: 0; user-select: none; }
 .hd2d-canvas { display: block; width: 100%; height: 100%; touch-action: none; outline: none; }
 /* 天气的 2D 层（#240）：正式战斗画面的天气动效（weather-fx.css 的 .wfx-{天气}，WeatherFx.sync 生成）原样套在 3D 画面上。
  * 放在 #stage 里：3D 画布之上、铭牌（.hd2d-labels，z 1）之下（z-index 由 hd2d-wfx.js 的 WFX.z 写在行内）；界面面板（z 5–6）、攻击演出、伤害数字更在上面；不挡鼠标。
- * 三段镜头的强弱：--wfx-o 整层的不透明度、--wfx-s 从画面中间放大多少、--wfx-t 换段渐变多久（hd2d-wfx.js 的 WFX.tier / fade）；减少动态效果时不渐变 */
-.hd2d-wfx { position: absolute; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+ * 三段镜头的强弱：--wfx-o 整层的不透明度、--wfx-s 从画面中间放大多少、--wfx-t 换段渐变多久（hd2d-wfx.js 的 WFX.tier / fade）；减少动态效果时不渐变。
+ * 雷鸣：3D 打雷闪白的那一下整层跟着淡掉（--wfx-flash，hd2d-wfx.js 每帧写） */
+.hd2d-wfx { position: absolute; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; opacity: calc(1 - var(--wfx-flash, 0)); }
 .hd2d-wfx > .wfx { opacity: var(--wfx-o, 1); transform: scale(var(--wfx-s, 1)); transition: opacity var(--wfx-t, .5s) ease-in-out, transform var(--wfx-t, .5s) ease-in-out; }
 @media (prefers-reduced-motion: reduce) { .hd2d-wfx > .wfx { transition: none; } }
+/* 酸雨的涟漪落在地台顶面上（位置由 hd2d-wfx.js · rippleAt 给）：地上的一圈斜着看是扁的——按镜头俯角压扁（--wfx-sq = sin 俯角）、越近越大（--wfx-rs）。
+ * 用单独的 scale / translate 属性叠在 weather-fx.css 的涟漪动画（transform）外面，涟漪的画法、动画照旧；translate 把压扁 / 放大以后的中心挪回落点 */
+.hd2d-wfx .wfx-acid b {
+  scale: var(--wfx-rs, 1) calc(var(--wfx-rs, 1) * var(--wfx-sq, 1));
+  translate: calc((var(--wfx-rs, 1) - 1) * 50%) calc((var(--wfx-rs, 1) * var(--wfx-sq, 1) - 1) * 50%);
+}
 
 /* ---------- 铭牌（DOM，由 CSS2DRenderer 摆在 3D 位置上，细杆的底贴着脚下）----------
  * 紧凑版：名字一行，状态小圆点 + 分层血条 + 架势一行；等级、ATK、血量数字、状态文字悬停 / 选中时从头顶展开。

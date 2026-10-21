@@ -353,7 +353,7 @@ function syncWeather(layout) {
   sc.setWind(WX.windOf(pv.sandDir, portrait));
   wfx.sync({
     weather: pv.weather, theme: themeNow(), sandDir: pv.sandDir, phaseStep: pv.phaseStep, portrait,
-    tier: camInfo ? camInfo.tier : sc.tier, close: !!(camInfo && camInfo.close != null), reduced: !sc.motion
+    tier: camInfo ? camInfo.tier : sc.tier, close: !!(camInfo && camInfo.close != null), zone: camInfo ? camInfo.zone : sc.zone, reduced: !sc.motion, layout: wfxLayout
   });
 }
 /** 截图用（#240）：网址加 ?weather=snow 换天气（沙暴再加 &wind=W 换风向，相位加 &phase=2 换阶段）。
@@ -579,7 +579,8 @@ function boot() {
     onPortraitChange() { if (sc && st) repaint(true); },
     onViewChange() { if (sc && st) reinset(true); }      // 窗口大小变了：按新画面重排铭牌、镜头回到这一段的位置
   });
-  wfx = WX.create($("stage"));   // 天气的 2D 层（#240）：3D 画布之上、铭牌之下
+  // 天气的 2D 层（#240）：3D 画布之上、铭牌之下。酸雨的涟漪按这一刻的镜头落在地台上（lens / view），雷鸣闪白时跟着淡掉（flash）
+  wfx = WX.create($("stage"), { lens: () => HD2DFx.lens(sc.lensNow()), view: () => sc.view(), flash: () => sc.flash });
   CAMS.CAMERA.order.forEach(t => $("cam-" + t).addEventListener("click", () => sc.setTier(t)));
   $("zone-prev").addEventListener("click", () => sc.stepZone(-1));
   $("zone-next").addEventListener("click", () => sc.stepZone(1));

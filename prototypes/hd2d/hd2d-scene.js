@@ -13,6 +13,7 @@
  *   sc.setTier("near") / sc.stepTier(±1) / sc.setZone(区号) / sc.stepZone(±1)   // 三段镜头（远景 / 中景 / 近景看单个区域，hd2d-camera.js）
  *   sc.closeUp(单位 id)   // 近景里特写一个单位（双击铭牌 / 站位就是它，#237）；拉远（滚轮往后、2 / 1、远 / 中按钮）退出，状态机在 hd2d-camera.js · camStep
  *   sc.setWind({ x, z })  // 沙暴的风（hd2d-wfx.js · windOf 按投影里的 sandDir 算）：3D 的沙粒顺着它飞，和 2D 层的沙雾一个方向（#240）
+ *   sc.flash              // 这一帧雷击的闪光 0–1：天气的 2D 层跟着淡掉（#240）
  *   createHd2dScene(container, { camera: { tier, zone }, onCameraChange(info) {...} })   // 开场的镜头；镜头一变就告诉外面（换按钮、网址）
  *   sc.dispose();
  * 镜头是这个玩家自己的视角：滚轮在三段之间跳、点地台 / 铭牌选区，都只动这边的画面，不写进战斗状态，也不同步给别人。
@@ -907,6 +908,8 @@ export function createHd2dScene(container, options) {
     stepTier(dir) { setTier(C.stepTier(state.tier, dir)); },
     /** 沙暴的风（世界里的方向 { x, z }，hd2d-wfx.js · windOf）：3D 的沙粒、拖影、大团沙尘顺着它飞（#240） */
     setWind(w) { weather.setWind(w); },
+    /** 这一帧雷击的闪光（0–1，减少动态效果时已经减弱过）：天气的 2D 层跟着淡掉，不把闪白压暗一块（#240） */
+    get flash() { return weather.flash; },
     /** 攻击演出的适配器（hd2d-fx.js · adapter）问的：这一刻的镜头、一块铭牌现在在哪（抬多高、是不是近景放大的那张）、一个区的地台 */
     lensNow() {
       return { pos: camera.position.clone(), target: controls.target.clone(), fov: camera.fov, width: Math.max(1, container.clientWidth), height: Math.max(1, container.clientHeight) };
