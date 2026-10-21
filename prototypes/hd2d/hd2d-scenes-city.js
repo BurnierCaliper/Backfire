@@ -49,7 +49,9 @@
     stain: { h: 1.2, dark: 0.62, tint: 0x3a4628 },
     lamps: { n: 6, h: 2.7, reach: 2.8, gain: 1.8, color: 0xe4f0a8, blink: 1 },
     pipes: [{ h: 1.6, r: 0.17, color: 0x4a3a2e }, { h: 2.05, r: 0.08, color: 0x2a3032 }, { h: 3.6, r: 0.26, color: 0x50463a }],
-    water: { y: 0.04, speed: 0.35, color: 0x5a6440 }
+    water: { y: 0.04, speed: 0.35, color: 0x5a6440 },
+    // 排污口：管壁上伸出来一截横着的管子（u 横向位置 × 战场半宽，离地 h，半径 r），污水从管口往下流进地上的污水里（fall 每秒往下走多少）
+    outfall: { u: 0.55, h: 1.7, r: 0.55, fall: 1.2, color: 0x6a7048 }
   };
   /** 环境动画的频率（秒）：flicker 管壁上会闪的灯隔多久闪一下、每次暗多久。减少动态效果时灯一直亮着、污水不流 */
   const AMBIENT = { flicker: { every: [1.5, 5], dur: [0.06, 0.25] } };
@@ -570,12 +572,60 @@
     env.anims.push((t, dt) => { if (dt > 0) tex.offset.x = (tex.offset.x + W.speed * dt / tile) % 1; });
     return m;
   }
-  /** 下水道：巨大圆管的后半边（管壁、接缝、灯照亮的那一圈）、管壁上的灯和管子、地上的污水 */
+  /** 排污口（TUNNEL.outfall）：管壁上伸出来一截横着的管子（管口里面是黑的），一股污水从管口往下流进地上的污水里（贴图往下走），
+   *  落水的地方一圈浮沫一胀一缩。减少动态效果时都停住 */
+  function outfall(kit, env, S, seed) {
+    const THREE = kit.THREE, O = TUNNEL.outfall, x = env.cx + O.u * env.hx, yo = S.y0 + O.h;
+    const zTop = S.at(O.h + O.r).z, zBot = S.at(Math.max(0.05, O.h - O.r)).z, mouth = zBot + 0.4, len = mouth - (zTop - 0.2);
+    const g = new THREE.Group(), metal = env.keep(new THREE.MeshStandardMaterial({ color: 0x4c4a40, roughness: 0.75, metalness: 0.35, flatShading: true, fog: false, side: THREE.DoubleSide }));
+    const pipe = kit.put(new THREE.Mesh(new THREE.CylinderGeometry(O.r, O.r, len, 14, 1, true), metal), x, yo, mouth - len / 2);
+    pipe.rotation.x = Math.PI / 2; g.add(pipe);
+    const lip = kit.put(new THREE.Mesh(new THREE.TorusGeometry(O.r, 0.06, 5, 16), metal), x, yo, mouth); g.add(lip);
+    g.add(kit.put(new THREE.Mesh(new THREE.CircleGeometry(O.r * 0.98, 14), env.keep(new THREE.MeshBasicMaterial({ color: 0x050605, fog: false }))), x, yo, mouth - 0.5));
+    // 往下流的那一股：竖着的一条，贴图（一道道竖的水纹，左右两边透明）往下走
+    const flowTex = farTex(kit, env, 64, (gc, s, r) => {
+      for (let k = 0; k < 40; k++) {
+        const xx = s * (0.15 + r() * 0.7), a = 0.25 + r() * 0.5;
+        gc.fillStyle = `rgba(${150 + Math.floor(r() * 60)},${150 + Math.floor(r() * 50)},${90 + Math.floor(r() * 40)},${a})`;
+        gc.fillRect(xx, r() * s, 1 + r() * 3, 8 + r() * 24);
+      }
+    }, seed + 23);
+    flowTex.magFilter = THREE.LinearFilter;
+    // 管壁底下往前弯，所以这股水不是直着掉下去，是从管口下沿顺着管壁流到管底（一条贴着管壁往里一点的带子，往下稍微散开）；
+    // uv 的 v 按流过的长度算（每 0.8 一张贴图）
+    const pos = [], uv = [], idx = [], w = O.r * 1.3, rows = 12, lipH = O.h - O.r - 0.1, phiLip = Math.acos((S.r - lipH) / S.r), step = S.r * phiLip / rows;
+    const row = (xw, y, z, v) => { [-1, 1].forEach(s => { pos.push(x + s * xw / 2, y, z); uv.push(s < 0 ? 0 : 1, v); }); };
+    row(w * 0.9, yo - O.r * 0.92, mouth, 0.5 / 0.8);   // 管口下沿
+    for (let j = 0; j <= rows; j++) { const p = S.point(phiLip * (1 - j / rows)); row(w * (1 + 0.35 * j / rows), p.y + p.ny * 0.04, p.z + p.nz * 0.04, -j * step / 0.8); }
+    for (let j = 0; j <= rows; j++) { const a = j * 2; idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); }
+    const fg = new THREE.BufferGeometry();
+    fg.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); fg.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+    fg.setIndex(idx); fg.computeVertexNormals();
+    g.add(new THREE.Mesh(fg, env.keep(new THREE.MeshStandardMaterial({ map: flowTex, color: O.color, transparent: true, depthWrite: false, roughness: 0.3, metalness: 0.1, side: THREE.DoubleSide, fog: false }))));
+    env.group.add(tag(g, "outfall"));
+    // 流到管底的地方：一圈浮沫，平铺在污水上（和污水一样不算「装饰」）
+    const foamTex = farTex(kit, env, 64, (gc, s, r) => {
+      for (let k = 0; k < 90; k++) {
+        const a = r() * 7, d = Math.sqrt(r()) * s * 0.45;
+        gc.fillStyle = `rgba(220,224,186,${0.2 + r() * 0.5})`; gc.fillRect(s / 2 + Math.cos(a) * d, s / 2 + Math.sin(a) * d * 0.6, 1 + r() * 3, 1 + r() * 2);
+      }
+    }, seed + 29);
+    const foam = kit.put(new THREE.Mesh(new THREE.PlaneGeometry(w * 2.2, 1.0), env.keep(new THREE.MeshBasicMaterial({ map: foamTex, color: 0xb8bc98, transparent: true, depthWrite: false, fog: false }))), x, S.y0 + TUNNEL.water.y + 0.02, S.zw + 0.3);
+    foam.rotation.x = -Math.PI / 2; foam.userData.flow = "foam";
+    env.group.add(foam);
+    env.anims.push((t, dt) => {
+      if (!(dt > 0)) return;
+      flowTex.offset.y = (flowTex.offset.y + O.fall * dt / 0.8) % 1;
+      const k = 1 + Math.sin(t * 3.1) * 0.08; foam.scale.set(k, k, 1);
+    });
+  }
+  /** 下水道：巨大圆管的后半边（管壁、接缝、灯照亮的那一圈）、管壁上的灯和管子、排污口、地上的污水 */
   function tunnelScene(kit, env, seed) {
     const S = tunnelShape(env), lamps = tunnelLamps(env, S);
     tunnelWall(kit, env, S, lamps);
     wallLamps(kit, env, lamps);
     wallPipes(kit, env, S);
+    outfall(kit, env, S, seed);
     sewage(kit, env, S, seed);
   }
 

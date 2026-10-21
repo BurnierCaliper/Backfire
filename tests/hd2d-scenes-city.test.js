@@ -19,7 +19,7 @@ const packs = () => { city(); return art(); };
 /** 做好了的场景（区域、场景 id、地面主题），远景里一定有的东西（userData.art） */
 const DONE = [
   { region: "外城区", scene: "street", key: "outer_street", must: ["shack", "house", "pipe", "cliff"] },
-  { region: "下水道", scene: "tunnel", key: "sewer_tunnel", must: ["tunnelWall", "tunnelRib", "lampPool", "wallLamp", "wallPipe"] }
+  { region: "下水道", scene: "tunnel", key: "sewer_tunnel", must: ["tunnelWall", "tunnelRib", "lampPool", "wallLamp", "wallPipe", "outfall"] }
 ];
 const PARTY = ["kolt", "helu", "ruby", "yuito"];
 const DESKTOP = { width: 1440, height: 900, top: 46, bottom: 160 };
