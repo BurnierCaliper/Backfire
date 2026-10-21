@@ -1,6 +1,9 @@
 /* 天气动效（PR #53）：在战场里放 .wfx-{天气} 叠加层，样式在 weather-fx.css。
  * 酸雨的涟漪、雷鸣的区域闪光 / 远处闪电是 JS 随机生成的小元素，播完自己删掉；离开这个天气，计时链自己停。
- * 游戏画面每次刷新天气时调 WeatherFx.sync（game.js · applyEnv）。 */
+ * 游戏画面每次刷新天气时调 WeatherFx.sync（game.js · applyEnv）。
+ * HD-2D 原型（prototypes/hd2d/hd2d-wfx.js，#240）把它当成一层 2D 压在 3D 画面上，多给两个可选参数（不给 = 正式画面的样子，一点不变）：
+ *   strikes: false   雷鸣不打区域闪光、远处闪电（3D 场景自己有雷击）
+ *   spot()           酸雨的涟漪落在哪：返回 { x, y }（叠加层里的百分比）或 null（这一下不落）；不给 = 整层随机 */
 (function (root) {
   "use strict";
   const fxRand = () => (typeof fxRandom === "function" ? fxRandom() : Math.random());   // 画面效果的随机数：不动战斗用的种子随机数（run.js · fxRandom）
@@ -17,7 +20,7 @@
   const reduced = () => !!(root.matchMedia && root.matchMedia("(prefers-reduced-motion: reduce)").matches);
   const doc = () => root.document;
 
-  let acidTimer = null, thunderGen = 0, thunderOn = false;
+  let acidTimer = null, acidSpot = null, thunderGen = 0, thunderOn = false;   // acidSpot：sync 的可选参数 spot（HD-2D 原型）
 
   function makeLayer(cls) {
     const fx = doc().createElement("div");
@@ -26,16 +29,18 @@
     return fx;
   }
 
-  /* 酸雨：随机位置 / 大小 / 时长的涟漪 */
+  /* 酸雨：随机位置 / 大小 / 时长的涟漪（给了 spot 就问它落在哪，返回 null 这一下不落） */
   function startAcid() {
     if (acidTimer || reduced()) return;
     const spawn = () => {
       const host = doc().querySelector(".wfx-acid");
       if (!host) { acidTimer = null; return; }
-      if (!doc().hidden && host.childElementCount < 40) {
+      const at = !doc().hidden && host.childElementCount < 40 && acidSpot ? acidSpot() : null;
+      if (!doc().hidden && host.childElementCount < 40 && (!acidSpot || at)) {
         const r = doc().createElement("b"), big = fxRand() < .25;
         const sz = big ? 70 + fxRand() * 60 : 16 + fxRand() * 46;
-        r.style.cssText = `left:${(fxRand() * 100).toFixed(2)}%;top:${(fxRand() * 100).toFixed(2)}%;width:${sz | 0}px;height:${(sz * (.82 + fxRand() * .1)) | 0}px;--d:${(1.6 + fxRand() * 1.6 + sz / 120).toFixed(2)}s`;
+        const left = at ? Number(at.x) : fxRand() * 100, top = at ? Number(at.y) : fxRand() * 100;
+        r.style.cssText = `left:${left.toFixed(2)}%;top:${top.toFixed(2)}%;width:${sz | 0}px;height:${(sz * (.82 + fxRand() * .1)) | 0}px;--d:${(1.6 + fxRand() * 1.6 + sz / 120).toFixed(2)}s`;
         r.addEventListener("animationend", () => r.remove());
         host.appendChild(r);
       }
@@ -94,7 +99,7 @@
   function stopThunder() { if (thunderOn) { thunderOn = false; thunderGen++; } }
 
   /** 按现在的天气摆好战场叠加层和界面的 data-*。
-   *  opt：{ field：战场元素（放叠加层），app：#g-app，weather，sandDir，phaseStep } */
+   *  opt：{ field：战场元素（放叠加层），app：#g-app，weather，sandDir，phaseStep；可选（HD-2D 原型用，不给 = 正式画面的样子）：strikes，spot } */
   function sync(opt) {
     opt = opt || {};
     const field = opt.field, app = opt.app, weather = opt.weather || "none";
@@ -112,8 +117,9 @@
       fx.dataset.sandDir = opt.sandDir || "";
       if (ps) fx.dataset.phaseStep = ps; else delete fx.dataset.phaseStep;
     }
+    acidSpot = typeof opt.spot === "function" ? opt.spot : null;
     if (weather === "acid") startAcid();
-    if (weather === "thunder") startThunder(); else stopThunder();
+    if (weather === "thunder" && opt.strikes !== false) startThunder(); else stopThunder();
     return fx;
   }
 

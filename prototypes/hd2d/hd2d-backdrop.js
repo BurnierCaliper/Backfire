@@ -13,8 +13,9 @@
  * 剪影越远越接近天边的雾色（空气透视），景深再稍微糊一点（远处的糊上限在场景的 THEMES.dofFar）。
  * 雷鸣（storm）时天幕换成压暗的风暴色、画上慢慢翻滚的厚云（星星被盖住），中景上方再挂一层半透明的低云；
  * 打雷时云从里面亮起来，离雷近的那一片更亮。远处的雷劈在哪由这里给（farPoint：低云前面、画面里；天幕、低云都是平的）。
+ * 沙暴（dust，#240）时整片远景蒙上一层沙色：天幕往沙尘的颜色靠、贴地融进雾里的那一截更高，中景剪影也更偏雾色，星星和亮云看不见，太阳的光晕淡一点。
  *
- *   const bd = buildBackdrop("mine", bounds, "dusk", layout.camera, { sky: [...4 色], fog: 0xRRGGBB, storm, skyline });
+ *   const bd = buildBackdrop("mine", bounds, "dusk", layout.camera, { sky: [...4 色], fog: 0xRRGGBB, storm, skyline, dust });
  *   scene.add(bd.group); 每帧 bd.update(t, dt, { flash, x })（flash / x = 雷击的闪光和位置）；bd.farPoint(r)；bd.dispose();
  * 剪影和天幕不吃场景雾（雾会把它们全抹成一个色），颜色自己按远近调。 */
 import * as THREE from "three";
@@ -89,6 +90,14 @@ export function skyTexture(stops, stars) {
     }
   }
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+
+/** 沙暴（#240）：天幕的四个颜色往沙尘的颜色（dust.color，就是这时的雾色）靠 dust.sky（0–1）。
+ *  场景的屏幕背景（转到天幕外面时露出来的那块）也用它；没有沙尘原样返回 */
+export function dustSky(sky, dust) {
+  if (!dust || !(dust.sky > 0)) return sky;
+  const d = new THREE.Color(dust.color);
+  return sky.map(c => "#" + new THREE.Color(c).lerp(d, Math.min(1, dust.sky)).getHexString());
 }
 
 /** 废土地面：干裂的地、车辙、碎石 */
@@ -167,7 +176,7 @@ function skyMaterial(colors, opts) {
       c2: { value: new THREE.Color(colors[2]) }, c3: { value: new THREE.Color(colors[3]) },
       stops: { value: new THREE.Vector4(...BACKDROP.stops) },
       camY: { value: opts.camY }, camZ: { value: opts.camZ }, slope: { value: opts.slope }, base: { value: -0.35 },
-      haze: { value: new THREE.Color(opts.fog) }, hazeH: { value: BACKDROP.haze },
+      haze: { value: new THREE.Color(opts.fog) }, hazeH: { value: opts.haze > 0 ? opts.haze : BACKDROP.haze },
       sun: { value: new THREE.Vector3(opts.sun[0], opts.sun[1], opts.sun[2]) }, sunColor: { value: new THREE.Color(opts.sunColor) },
       stars: { value: opts.stars ? 1 : 0 }, clouds: { value: opts.clouds || 0 }, cloudColor: { value: new THREE.Color(opts.cloudColor || 0xffffff) },
       storm: { value: opts.storm ? 1 : 0 }, time: { value: 0 }, cover: { value: ST.cover },
@@ -509,8 +518,9 @@ function smokeTexture() {
 /**
  * 建一圈远景。kind = city / mine / desert / skynet / wasteland（night 是 city 的旧名字）；bounds 是战场范围；
  * camera 是布局算好的默认镜头（hd2d-layout.js 的 fitView），用来算「画面上沿那条视线」有多高；
- * colors = { sky: [地平线 → 天顶 4 个颜色], fog, storm, skyline }（storm = 雷鸣：天空换成 BACKDROP.storm 的风暴色、加乌云和低云；
- * skyline = 楼群的高度倍数，外城区矮、巨人城高）。返回 { group, update(t, dt, { flash, x }), farPoint(r), dispose }。
+ * colors = { sky: [地平线 → 天顶 4 个颜色], fog, storm, skyline, dust }（storm = 雷鸣：天空换成 BACKDROP.storm 的风暴色、加乌云和低云；
+ * skyline = 楼群的高度倍数，外城区矮、巨人城高；dust = 沙暴的沙尘 { color, sky, haze, veil, sun }：天幕往 color 靠 sky、贴地融进雾里的那一截高 haze、
+ * 中景剪影至少往雾色靠 veil、太阳的光晕剩 sun 成，见 hd2d-weather.js 的 WEATHER.sand）。返回 { group, update(t, dt, { flash, x }), farPoint(r), dispose }。
  */
 export function buildBackdrop(kind, bounds, themeName, camera, colors) {
   colors = colors || {};
@@ -530,17 +540,19 @@ export function buildBackdrop(kind, bounds, themeName, camera, colors) {
   const slope = Math.tan((cam.elevation - cam.fov / 2) * D2R);   // 天空的着色器里用同一条视线
   /** 默认镜头的画面上沿那条视线，在 z 处离地多高（这么高以内的东西整个都在画面里） */
   const topY = (z) => L.frameTop(cam, z);
-  const sky = storm ? (ST.sky[themeName] || ST.sky.day) : (colors.sky || ["#e8d8b8", "#d8c8a8", "#b8b0a0", "#8a8a90"]);
+  const dust = !storm && colors.dust ? colors.dust : null;   // 沙暴：远景蒙上一层沙色（雷鸣的风暴天空优先）
+  const sky = storm ? (ST.sky[themeName] || ST.sky.day) : dustSky(colors.sky || ["#e8d8b8", "#d8c8a8", "#b8b0a0", "#8a8a90"], dust);
   const fog = new THREE.Color(colors.fog != null ? colors.fog : 0x888888);
   const hazeOf = (k) => new THREE.Color(sky[0]).lerp(fog, 0.5).lerp(new THREE.Color(T.body), 1 - k);   // k 越大越靠近天边的雾色
 
-  /* 1. 天幕（雷鸣时：风暴色 + 乌云，星星和亮云不画，夕阳只透出一点）：一块平的布景板，立在战场后沿再往后 skyGap，往左右各伸出去 wide */
+  /* 1. 天幕（雷鸣时：风暴色 + 乌云，星星和亮云不画，夕阳只透出一点；沙暴时：沙色、贴地的雾更高，星星和亮云也看不见）：
+   *    一块平的布景板，立在战场后沿再往后 skyGap，往左右各伸出去 wide */
   const rz = hz + BACKDROP.skyGap, skyZ = cz - rz, x0 = cx - hx - BACKDROP.wide, x1 = cx + hx + BACKDROP.wide;
   const skyM = keep(skyMaterial(sky, {
-    camY: cam.pos.y, camZ: cam.pos.z, slope, fog,
+    camY: cam.pos.y, camZ: cam.pos.z, slope, fog, haze: dust ? dust.haze : 0,
     sun: dusk ? [0.3, 0.12, 0.09] : night ? [0.22, 0.9, 0.05] : [0.28, 0.75, 0.16],
-    sunColor: new THREE.Color(dusk ? 0xff9a50 : night ? 0x30405a : 0x6a5530).multiplyScalar(storm ? 0.35 : 1), stars: night && !storm,
-    clouds: storm ? 0 : dusk ? 0.55 : themeName === "day" ? 0.25 : 0, cloudColor: dusk ? 0xffb090 : 0xf4e2bc,
+    sunColor: new THREE.Color(dusk ? 0xff9a50 : night ? 0x30405a : 0x6a5530).multiplyScalar(storm ? 0.35 : dust && dust.sun != null ? dust.sun : 1), stars: night && !storm && !dust,
+    clouds: storm || dust ? 0 : dusk ? 0.55 : themeName === "day" ? 0.25 : 0, cloudColor: dusk ? 0xffb090 : 0xf4e2bc,
     storm, cloudDark: cloud[0], cloudLit: cloud[1]
   }));
   const skyMesh = new THREE.Mesh(keep(flatGeometry(x0, x1, skyZ, -0.6, BACKDROP.skyH, 72)), skyM);
@@ -572,8 +584,8 @@ export function buildBackdrop(kind, bounds, themeName, camera, colors) {
 
   /* 3. 中景几何体 */
   const std = (color, opt) => keep(new THREE.MeshStandardMaterial(Object.assign({ color, roughness: 1, flatShading: true, fog: false }, opt || {})));
-  /** 一层的材质：远一点的偏向雾色，再带一点自发光（像被雾里的光照着） */
-  const mixOf = (c, k) => new THREE.Color(c).lerp(hazeOf(1), k * 0.55);
+  /** 一层的材质：远一点的偏向雾色，再带一点自发光（像被雾里的光照着）；沙暴时近的那层也至少蒙上 dust.veil */
+  const mixOf = (c, k) => new THREE.Color(c).lerp(hazeOf(1), Math.min(1, k * 0.55 + (dust ? dust.veil || 0 : 0)));
   const emOf = (k) => hazeOf(1).multiplyScalar(0.18 + k * 0.35);
   const layerMats = (k) => {
     const mix = (c) => mixOf(c, k), em = emOf(k);
