@@ -304,7 +304,9 @@ function bestiaryEntries() {
         kit: p.id, name: bestiaryName(p.id), rank, rankName: BESTIARY_RANK_NAME[rank] || rank,
         faction: info.faction || (BESTIARY_TEXT[p.id] || {}).faction || "", regions: info.regions || (BESTIARY_TEXT[p.id] || {}).regions || [],
         seen: !!d.kits[p.id], rec: d.kits[p.id] || null,
-        text: BESTIARY_TEXT[p.id] || null, rankNote: BESTIARY_RANK_NOTE[rank] || ""
+        text: BESTIARY_TEXT[p.id] || null, rankNote: BESTIARY_RANK_NOTE[rank] || "",
+        // 可能掉的制作材料（items.js · enemyDropTable）：[{ id, name, chance 期望份数 }]，界面未接（给 Akane）
+        drops: typeof enemyDropTable === "function" ? enemyDropTable(p.id) : []
       };
     });
   return list.sort((a, b) => (order[a.rank] - order[b.rank]) || 0);
