@@ -90,6 +90,13 @@ test("队伍卡白名单：online-view.js · projectParty 丢掉坚毅（房主�
   assert.match(html, /扭矩 Lv2 · 羁绊 1 · 耐久 4\/6/); assert.match(html, /备用刀 Lv1 · 耐久 0\/5（损坏）/); assert.match(html, /血量 <span>26\/35/);
 });
 
+test("属性点提示：玩家的队伍卡不再写「（队伍页）」（玩家没有队伍页，申请按钮就在卡下面）；主持人卡照旧指向队伍页", () => {
+  const h = { ...partyFixture()[0], attrPoints: 2 };
+  const player = PC.heroCardHtml(h, { gm: false }), gm = PC.heroCardHtml(h, { gm: true });
+  assert.match(player, /有 2 点属性点可分配/); assert.doesNotMatch(player, /队伍页/);
+  assert.match(gm, /有 2 点属性点可分配（队伍页）/);
+});
+
 test("时钟：和主持人顶栏同一句「距上次长休」，过 20 小时带力竭提示；18:00–05:00 算夜晚（和 ledger.js 一致）", () => {
   const h = PC.clockHtml({ day: 2, clock: 14 * 60 + 30, hours: 3 + 20 / 60 });
   assert.match(h, /第 <b>2<\/b> 天 <b class="tr-time">14:30<\/b> 下午 · 距上次长休 <b>3 小时 20 分<\/b>/);
