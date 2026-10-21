@@ -751,6 +751,23 @@ test("车上的人只能用车的武器：种族的附赠技能（追猎本能�
   assert.ok(f.c.enemySkillList(mol).some(s => s.id === "race_spit"), "下车后：吐酸回来了");
 });
 
+test("驾驶员是牛兽人（警棍盾）：易怒蛮牛照样触发，整辆车连炮手一起冲到别的区，再撞一个人 1 击破（作者 10/21 定）", () => {
+  const f = riotField(2, 2);
+  const [a, b] = riots(f);
+  assert.equal(a.kit, "riot_baton");
+  const p = car(f, 2); f.c.vehicleBoard(a, p); f.c.vehicleBoard(b, p);
+  a.layers.forEach(l => { l.current = Math.floor(l.max * 0.3); });   // 合并后的血量（含车的装甲）低于一半
+  const k = f.P("kolt"), h = f.P("helu"); k.zone = 1; h.zone = 1;
+  const d0 = k.def + h.def, notes = [];
+  f.c.raceAfterHurt(a, { total: 5 }, null, notes);
+  assert.equal(a.zone, 1, "驾驶员冲到另一个区");
+  assert.equal(p.zone, 1, "车跟着驾驶员走");
+  assert.equal(b.zone, 1, "炮手也在车里一起过去");
+  assert.equal(a.vehId, p.id, "冲完还在车上");
+  assert.equal(d0 - (k.def + h.def), 1, "撞到新所在区的一个人，1 击破");
+  assert.match(notes.join("\n"), /易怒蛮牛/);
+});
+
 test("车上的人只能用车的武器：技能表只有车上的招式；炮手不能自己移动", () => {
   const f = riotField(2, 2);
   const [a, b] = riots(f);
