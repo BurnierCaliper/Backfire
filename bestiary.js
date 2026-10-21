@@ -262,6 +262,13 @@ function bestiaryRank(kit) {
   return (typeof ENEMY_RANK !== "undefined" && ENEMY_RANK[kit]) || "minion";
 }
 
+/** 伤害骰随等级变化的敌人（enemies.js 里用 leveledSides / addedDiceByLevel 的）：图鉴的「伤害骰」是 1 级基础骰，旁边注明怎么变 */
+const BESTIARY_DICE_SCALE = {
+  buoy: "每 5 级升一档", dumpdrone: "每 5 级升一档", swarm: "每 5 级升一档", crow: "每 5 级升一档",
+  patrolboat: "每 5 级升一档", spreader: "每 5 级升一档", watchcrow: "每 5 级升一档", dustbody: "每 5 级升一档",
+  captain_ox: "骰数每 5 级 +1", captain_wolf: "借机骰数每 5 级 +1"
+};
+
 /** 按等级、人数算出来的数值（和战斗里一样用 enemyPresets().build） */
 function bestiaryStats(kit, level, partySize) {
   const p = bestiaryPreset(kit);
@@ -279,6 +286,7 @@ function bestiaryStats(kit, level, partySize) {
     element: sg.element || "physical",
     elementName: (typeof ELE !== "undefined" && ELE[sg.element]) || sg.element || "物理",
     dice: Array.isArray(sg.dice) ? sg.dice : null,
+    diceScale: BESTIARY_DICE_SCALE[kit] || "",
     flying: !!u.flying
   };
 }
