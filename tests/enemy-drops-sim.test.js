@@ -91,11 +91,9 @@ function anyDropRate(c, kit, seed) {
   for (let n = 0; n < FIGHTS; n++) if (c.rollEnemyDrops([kit], r).length) any++;
   return any / FIGHTS;
 }
-// 「小概率」按 ≤ 10% 算，留 2 个百分点的抽样误差。管虫（化工残液 0.08 + 沙鱼鳞 0.05）合起来约 12.6%，
-// 超了一点：已知不足，先标 todo，不放宽标准。
+// 「小概率」按 ≤ 10% 算，留 2 个百分点的抽样误差
 NEUTRAL.forEach((k, i) => {
-  const todo = k === "tube_worm" ? "已知不足：管虫两种料合计约 12.6% 会掉东西（> 10%）" : undefined;
-  test(`中立生物 ${k} 很少掉（≤ 约 10%）`, { todo }, () => {
+  test(`中立生物 ${k} 很少掉（≤ 约 10%）`, () => {
     const c = H.load();
     const p = anyDropRate(c, k, 6000 + i);
     console.log(`# ${k} 掉东西的概率：${(p * 100).toFixed(1)}%`);
