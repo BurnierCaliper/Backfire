@@ -2230,7 +2230,7 @@ function turnEnd() {
       if (!u.resources.mecha) {
         addNano(10);
         notes.push(`收发代理：无人机提取纳米 +10 → ${u.resources.nano}`);
-      } else if ((u.resources.nano || 0) >= 10) {
+      } else if (nanoAvailable(u) >= 10) {   // 纳米不够的差额从储备能源扣（#219）
         // 激光不能穿墙：隔着危墙 / 关着的门的敌人不算可选目标；一个都没有就什么都不干（不耗纳米）。
         // 锁定前先判断够不够得着（和 dealTo 的判定一致：距离 ≤1、没躲藏、没下潜、不是友军 / 飞碟本体），
         // 以前只看墙，锁到距离 2 / 躲藏 / 下潜的目标，激光打不出去纳米却照扣
@@ -2242,21 +2242,22 @@ function turnEnd() {
         const pool = high.length ? high : foes;
         const tgt = pool.slice().sort((x, y) => totalHp(x) - totalHp(y))[0];
         if (tgt) {
-          u.resources.nano -= 10;
-          notes.push(`银翼·收发代理：无人机激光射向 ${tgt.name}（纳米 −10 → ${u.resources.nano}）。`);
+          const paid = spendNano(10, { ruby: u });
+          notes.push(`银翼·收发代理：无人机激光射向 ${tgt.name}（${nanoSpentText(u, paid)}）。`);
           const shots = 2 + (u.resources.overdrive ? 1 : 0);   // 机体强化：无人机攻击次数 +1
           for (let i = 0; i < shots && !tgt.dead; i++) {
             // 每一发照普通命中的格式写进回合结束的日志（hitOne2 现在会写出伤害行）
             hitOne2(u, tgt, { element: "energy", mult: 0.2, diceN: 1, diceS: 12, baseBreak: 0, atk: effectiveAtk(u, state.units), atkRange: "any", usePrep: false, flags: { action: true } }, notes);
           }
         } else notes.push("银翼·收发代理：没有打得到的敌人，无人机这回合什么都不干。");
-      } else notes.push("银翼·收发代理：纳米不足 10，无人机这回合没有发射。");
+      } else notes.push(`银翼·收发代理：纳米${nanoReserveOf(u) ? "（含储备能源）" : ""}不足 10，无人机这回合没有发射。`);
     }
     if (u.kit === "ruby" && u.resources && u.resources.mecha) {
       const cost = 20 + (u.resources.overdrive ? 20 : 0);   // 机体强化：每回合多耗 20
-      u.resources.nano = Math.max(0, (u.resources.nano || 0) - cost);
-      notes.push(`${u.name} 机甲维持：纳米 −${cost} → ${u.resources.nano}`);
-      if (u.resources.nano <= 0) notes.push(...exitMecha(u, "纳米耗尽，机甲结束"));
+      // 纳米不够的差额从储备能源扣；两边都扣光才因为纳米耗尽退出机甲（#219）
+      const paid = spendNano(cost, { ruby: u, partial: true });
+      notes.push(`${u.name} 机甲维持：${paid.reserve ? nanoSpentText(u, paid) : `纳米 −${cost} → ${u.resources.nano}`}`);
+      if (nanoAvailable(u) <= 0) notes.push(...exitMecha(u, "纳米耗尽，机甲结束"));
     }
     // 年糕咬住记了 noMoveUntil：持续到下一个敌人回合结束；其余禁足到这一回合结束
     if (u.noMove && !(Number(u.noMoveUntil) > Number(state.turnNo))) {
@@ -2970,6 +2971,7 @@ function settleBattleRewards(outcome) {
   if (!["win", "lose", "retreat"].includes(outcome)) throw new Error("未知的战斗结局：" + outcome);
   state.battleScore = state.battleScore || { total: 0, parts: {} };
   const bs = state.battleScore;
+  clearNanoReserve();   // 瑞比的储备能源战斗结束清零（#219）；连续战斗换区域不走这里，还是同一场
   if (bs.rewardSettlement) return {
     outcome: bs.rewardSettlement.outcome, grade: bs.rewardSettlement.grade,
     finishBonus: null, xpBonus: 0, totalXpBonus: bs.rewardSettlement.xpBonus,
@@ -7188,7 +7190,7 @@ function resetBattleFlags(u) {
   if (u.kit === "torque") { r.divertGuard = false; r.divertArmor0 = 0; }
   if (u.kit === "ecmo") { r.probe = false; r.probeZones = []; }
   if (u.kit === "ras") r.siphon = false;
-  if (u.kit === "ruby") { r.drone = false; r.overdrive = false; }
+  if (u.kit === "ruby") { r.drone = false; r.overdrive = false; delete r.nanoReserve; }   // 储备能源不跨战斗（#219）；纳米照旧
   if (u.kit === "hiaki") r.powder = false;
   if (u.kit === "niu") r.standby = false;
   if (u.kit === "ras") { r.energyPct = 0; r.light = 0; r.unstable = false; }
@@ -8433,6 +8435,54 @@ function addNano(n) {
   ruby.resources.nano = Math.max(0, Math.min(100, (ruby.resources.nano || 0) + n));
 }
 
+/* 瑞比「补充能源」（纳米科技+，作者 10/21 定，#219）：附赠动作二选一——纳米 +nano，或者把全部纳米按 compressRate（储备 / 纳米，1:1）
+ * 压缩成储备能源、纳米归 0。储备能源记在 resources.nanoReserve：没有上限，纳米不够时自动补差额（spendNano），
+ * 只在这一场战斗里有（战斗结束 / 开战清零；连续战斗换区域还是同一场）。没有储备时不留这个键（显示只在有储备时写「储备 n」） */
+const RUBY_REFUEL = { nano: 10, compressRate: 1 };
+function nanoReserveOf(ruby) { return Math.max(0, Number(ruby && ruby.resources && ruby.resources.nanoReserve) || 0); }
+/** 瑞比能用的纳米能源：纳米 + 储备能源（花纳米的门槛都按这个算） */
+function nanoAvailable(ruby) {
+  ruby = ruby || findKit("ruby", state.units);
+  return ruby ? Math.max(0, Number(ruby.resources && ruby.resources.nano) || 0) + nanoReserveOf(ruby) : 0;
+}
+/** 花纳米能源：先扣纳米，纳米不够的差额从储备能源里扣。
+ *  纳米 + 储备不够 n 时不扣、返回 null；opt.partial（机甲维持）有多少扣多少，两边都扣到 0 为止。
+ *  返回这次从纳米、储备各扣了多少 { nano, reserve } */
+function spendNano(n, opt) {
+  opt = opt || {};
+  const ruby = opt.ruby || findKit("ruby", state.units);
+  if (!ruby) return null;
+  const r = ruby.resources = ruby.resources || {};
+  const need = Math.max(0, Number(n) || 0);
+  const nano = Math.max(0, Number(r.nano) || 0), reserve = nanoReserveOf(ruby);
+  if (nano + reserve < need && !opt.partial) return null;
+  const fromNano = Math.min(nano, need), fromReserve = Math.min(reserve, need - fromNano);
+  r.nano = nano - fromNano;
+  if (reserve - fromReserve > 0) r.nanoReserve = reserve - fromReserve;
+  else delete r.nanoReserve;
+  return { nano: fromNano, reserve: fromReserve };
+}
+/** 日志里的扣除：「纳米 −5 → 0，储备能源 −15 → 35」（没动储备就只写纳米） */
+function nanoSpentText(ruby, paid) {
+  const r = (ruby && ruby.resources) || {};
+  return `纳米 −${paid ? paid.nano : 0} → ${Number(r.nano) || 0}` + (paid && paid.reserve ? `，储备能源 −${paid.reserve} → ${nanoReserveOf(ruby)}` : "");
+}
+/** 压缩 n 点纳米换得多少储备能源 */
+function nanoCompressGain(n) { return Math.floor(Math.max(0, Number(n) || 0) * RUBY_REFUEL.compressRate); }
+/** 补充能源·压缩：全部纳米按比例转进储备能源，纳米归 0 */
+function compressNano(ruby, lines) {
+  const r = ruby.resources = ruby.resources || {};
+  const nano = Math.max(0, Number(r.nano) || 0);
+  const add = nanoCompressGain(nano);
+  r.nano = 0;
+  if (add > 0) r.nanoReserve = nanoReserveOf(ruby) + add;
+  lines.push(`补充能源·压缩：纳米 ${nano} → 0，储备能源 +${add} → ${nanoReserveOf(ruby)}。`);
+}
+/** 战斗结束：储备能源清零（不跨战斗保留；纳米照旧） */
+function clearNanoReserve() {
+  (state.units || []).forEach(u => { if (u && u.resources && "nanoReserve" in u.resources) delete u.resources.nanoReserve; });
+}
+
 function beanToLiquid() {
   const y = findKit("yuito", state.units);
   if (!y || !y.resources) return false;
@@ -8668,7 +8718,7 @@ function enterMecha() {
   const notes = [];
   if (!ruby) return ["场上没有瑞比。"];
   if (!(typeof passiveOnKit !== "function" || passiveOnKit("ruby"))) return ["瑞比放弃了被动「银翼」，无法进入机甲。"];
-  if ((ruby.resources.nano || 0) <= 0) return ["纳米能源不足，无法进入机甲。"];
+  if (nanoAvailable(ruby) <= 0) return ["纳米能源不足，无法进入机甲。"];   // 纳米 + 储备能源（#219）
   if (!mint || mint.hidden) {
     const spawned = spawnWeapon(ruby, "mint");
     if (!spawned) return ["需要明特在场且与瑞比同区。先唤出明特。"];
@@ -9353,6 +9403,14 @@ function skillFlowSteps(id, actor, picks) {
     // 15 级：缓冲可以自选给哪一种血量（选完再选目标）
     return [{ key: "layer", type: "choice", optional: false, label: "缓冲给哪一种血量",
       options: ["shield", "armor", "flesh", "sand", "spirit"].map(k => ({ value: k, label: LAYER[k] })) }];
+  }
+  if (id === "ruby_refuel") {
+    // 补充能源（#219）：纳米 +10，或者把全部纳米压缩成储备能源。纳米是 0 时没有东西可以压缩：不问，直接 +10
+    const nano = Math.max(0, Number(actor.resources && actor.resources.nano) || 0), reserve = nanoReserveOf(actor);
+    if (nano <= 0) return [];
+    return [{ key: "mode", type: "choice", optional: false, label: `补充能源：纳米 +${RUBY_REFUEL.nano}，或者把全部纳米压缩成储备能源`,
+      options: [{ value: "nano", label: `纳米 +${RUBY_REFUEL.nano}（现在 ${nano}）` },
+        { value: "compress", label: `压缩：纳米 ${nano} → 0，储备能源 ${reserve} → ${reserve + nanoCompressGain(nano)}` }] }];
   }
   if (id === "ruby_trigger" || id === "ruby_short" || id === "wing_aa" || id === "mint_steal") {
     const units = (typeof fieldUnits === "function" ? fieldUnits() : state.units).filter(u =>
@@ -10900,7 +10958,7 @@ const SKILL_REQUIREMENT = {
   niu_standby:    (a) => res(a).standby ? "已经在待命" : null,
   ruby_relay:     () => (findKit("ruby", state.units) || {}).resources && findKit("ruby", state.units).resources.drone ? "已经有小型无人机" : null,
   wing_relay:     () => (findKit("ruby", state.units) || {}).resources && findKit("ruby", state.units).resources.drone ? "已经有小型无人机" : null,
-  mint_repair:    () => (((findKit("ruby", state.units) || {}).resources || {}).nano || 0) >= 20 ? null : "纳米能源不足 20",
+  mint_repair:    () => nanoAvailable() >= 20 ? null : "纳米能源不足 20",   // 纳米 + 储备能源（#219）
   wing_boost:     (a) => res(a).overdrive ? "机体强化已经生效" : null,
   yuito_cold:     (a) => (res(a).liquid || 0) >= 1 ? null : "没有咖啡液",
   yuito_duet:     (a) => (res(a).liquid || 0) >= 2 ? null : "咖啡液不足 2",
@@ -11286,6 +11344,8 @@ function skillTargetError(a, id, t) {
       return p && BARRIER_SIDE[p.kind] === "player" ? `不能打自己这边的${p.name}` : "这个目标不在 1 距离以内";
     }
   }
+  // 补充能源选了压缩：没有纳米可以压缩就不白花附赠动作（纳米是 0 时分步里本来就不给这个选项）
+  if (id === "ruby_refuel" && flp.mode === "compress" && !(Number(res(a).nano) > 0)) return "没有纳米能源可以压缩";
   // 回收护盾：目标身上要有能回收的护盾（电池的机械护盾、当作最内层的护盾不算），不白花附赠动作
   if (id === "chuan_reclaim" && t && t.id && t.isPlayer &&
       !(t.layers || []).some(l => l.type === "shield" && !l.batteryShield && !l.inner && (Number(l.current) || 0) > 0)) return `${t.name} 身上没有能回收的护盾`;
@@ -12367,8 +12427,13 @@ function runSkillInner(id, optRun) {
       t.magnetShield = true;
       lines.push(...triggerMagnetShield(t));
     } else if (id === "ruby_refuel") {
-      addNano(10);
-      lines.push(`补充能源：纳米 +10 → ${a.resources.nano}。`);
+      // 补充能源（#219）：二选一，分步里选的 mode——"compress" 压缩成储备能源，其余（没选）纳米 +10
+      const fl = state.skillFlow;
+      if (fl && fl.picks && fl.picks.mode === "compress") compressNano(a, lines);
+      else {
+        addNano(RUBY_REFUEL.nano);
+        lines.push(`补充能源：纳米 +${RUBY_REFUEL.nano} → ${a.resources.nano}。`);
+      }
     } else if (id === "chuan_over") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       applyInstantEffect(t, "overload", lines);
@@ -12609,11 +12674,13 @@ function runSkillInner(id, optRun) {
       a.atk = effectiveAtk(a, state.units);
       lines.push("机体强化：每回合消耗的纳米能源 +20，atk +20%，普通攻击溅射倍率 +0.1。");
     } else if (id === "mint_repair") {
-      // 机体修复：消耗 20 纳米，自身恢复 50% 生命上限，+1 架势
-      addNano(-20);
+      // 机体修复：消耗 20 纳米（纳米不够的差额从储备能源扣，#219），自身恢复 50% 生命上限，+1 架势
+      const ruby = findKit("ruby", state.units);
+      const paid = spendNano(20, { ruby, partial: true });   // 门槛（SKILL_REQUIREMENT）已经查过够 20
       const got = healUnit(a, Math.floor(totalMaxHp(a) * 0.5));
       a.def = Math.min(a.defMax || a.def, (Number(a.def) || 0) + 1);
-      lines.push(`机体修复：消耗 20 纳米，恢复 ${got} 生命，架势 +1。纳米 → ${(findKit("ruby", state.units) || {}).resources ? findKit("ruby", state.units).resources.nano : "—"}`);
+      const left = !ruby || !ruby.resources ? "纳米 → —" : paid && paid.reserve ? nanoSpentText(ruby, paid) : "纳米 → " + ruby.resources.nano;
+      lines.push(`机体修复：消耗 20 纳米，恢复 ${got} 生命，架势 +1。${left}`);
     } else if (id === "yuito_cold") {
       // 冷萃：1 咖啡液。距离 ≤1 的区变冻土，那一区的敌人 0.5atk 冰 +1 击破，友方 +1 架势
       const fl = state.skillFlow;

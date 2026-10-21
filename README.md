@@ -368,6 +368,18 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **瑞比「补充能源」：可以把纳米压缩成没有上限的储备能源**（作者 10/21 定，Closes #219；app.js · `RUBY_REFUEL` / `nanoAvailable` / `spendNano` / `compressNano` / `clearNanoReserve` / `skillFlowSteps` / `skillTargetError` / `SKILL_REQUIREMENT.mint_repair` / `runSkillInner`（`ruby_refuel`、`mint_repair`）/ `turnEnd` / `enterMecha` / `resetBattleFlags` / `settleBattleRewards`，party.js · `skillList` / `resourceText`，hud-icons.js · `gaugeState` / `GAUGE.ruby`，skill-text.js，online-view.js，online-ui.js，game.js · `packHero` 注释；测试 `tests/issue-219.test.js`）
+  - **以前**：补充能源（纳米科技+）只能纳米 +10；纳米上限 100，满了加的就溢出浪费。**现在**：一个附赠动作二选一（分步选择 `mode`）：「纳米 +10」，或「压缩」——把当前全部纳米按 1:1 转进储备能源（`resources.nanoReserve`），纳米归 0。数值在 `RUBY_REFUEL`（`nano: 10`、`compressRate: 1`）。
+  - **储备能源没有上限**，纳米不够时自动补差额：花纳米统一走 `spendNano`（先扣纳米，差额扣储备），门槛都按「纳米 + 储备」（`nanoAvailable`）算。全部搜过一遍，花纳米的只有下面四处；其余用到纳米的地方都是加纳米（上限照旧 100，不碰储备）：
+    - 机甲维持（每回合 20，机体强化 40）：有多少扣多少，纳米和储备**都扣到 0** 才因为「纳米耗尽」退出机甲（以前纳米到 0 就退）；
+    - 无人机激光（银翼·收发代理）10：纳米 + 储备够 10 就发射（以前只看纳米）；
+    - 机体修复 20：门槛和扣除都按纳米 + 储备；
+    - 进入机甲：纳米 + 储备 > 0 就能进（以前要纳米 > 0）。
+  - **纳米是 0 时**没有东西可以压缩：分步不问，按钮直接 +10；硬发「压缩」的指令在扣附赠动作之前拦下（`skillTargetError`：没有纳米能源可以压缩）。没选 `mode`（旧指令、模拟器）照旧 +10。
+  - **战斗结束清零**：`settleBattleRewards`（胜利 / 失败 / 撤退都走这里）清掉；开战 `resetBattleFlags` 也清，队伍记忆（game.js · `packHero`）照旧只保留纳米、不带储备。连续战斗换区域还是同一场战斗，储备接着用。没有储备时不留 `nanoReserve` 这个键。
+  - **显示**：能量表（hud-icons.js）有储备时在纳米下面写「储备 n」，「可进入机甲 / 能源不足」和纳米条的颜色按纳米 + 储备算；资源文字（party.js · `resourceText`）写「纳米 n/100 · 储备 n」，没有储备不写。技能条提示、技能说明（`ruby_refuel`）、纳米科技+ 的说明都写上压缩和储备能源。
+  - **联机**：online-view.js 资源白名单加 `nanoReserve`（不是坚毅数值，可以下发），能量表的 `reserve` 跟着 `projectHud` 下发；online-ui.js 资源名表加 `nanoReserve: "储备"`。分步用现成的 `mode`（已在分步白名单里）。
+  - **测试**：`tests/issue-219.test.js` 14 条：两个选项各花一个附赠、压缩 1:1 后纳米归 0、储备超过 100、数值在配置表、纳米 0 时直接 +10、机甲维持 / 无人机激光 / 机体修复纳米不够从储备扣、两边扣光才退出机甲、纳米 0 储备 > 0 能进机甲、战斗结束清零、下一场不带储备、连续战斗不清零、能量表和资源文字、联机白名单。除了「连续战斗不清零」（锁住现有行为），其余 13 条在改之前都失败。
 - **敌人种族（二）：种族被动在敌人身上生效**（issue #161，设计见 `docs/enemy-race.md` 第 4、7 节；enemies.js · `RACE_PERK` / `RACE_PERKS` / `racePerk` / `raceDefendMods` / `raceAtkAdjust` / `raceCheckPerks` / `raceFieldDamage` / `raceFirstBreak` / `raceAfterMove` / `raceBonusExtra` / `raceBreakCap` / `raceAttackMods` / `raceAfterHurt` / `raceSkills` / `raceRunSkill` / `raceBonusChoice`，engine.js · `resolveAttack` / `applyResultToUnit`，party.js · `effectiveAtk`，matchup.js · `matchupDefenderRow`，app.js · `dealTo` / `applyCombat` / `refreshEnemyEconomy` / `doMoveInner` / `voidCrossOdds` / `iceLeaveCheck` / 场地结算，ai.js · `aiPlanBase`，bestiary.js、bestiary-ui.js、game.js、unit-card.js、unit-tip.js、online-battle.js；测试 `tests/enemy-race-perks.test.js`、`tests/audit-P6-terrain.test.js`）
   - **以前**：敌人有种族但只是一个标签（和六维换算），种族被动不起作用。**现在**：按 `u.race` 通用生效（不看具体兵种，镇压部队等固定兽人兵种同样吃到）；数值全放 `RACE_PERK`，开关和说明放 `RACE_PERKS`。
   - **人类·迎难直上**：敌人的检定（越过空隙、离开冻土）失败时重掷一次，成功率 50% → 75%（和角色共用 `voidCrossOdds` / `iceLeaveCheck` 里的重掷；没有种族或别的种族的敌人仍是 50%）。

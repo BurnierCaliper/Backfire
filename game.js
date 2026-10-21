@@ -4002,6 +4002,7 @@
       resources: (function () {
         const r = u.resources || {};
         const keep = {};
+        // 瑞比的储备能源（nanoReserve，补充能源压缩出来的）不跨战斗，不放进来（#219）
         ["nano", "bean", "liquid", "power"].forEach(k => { if (r[k] != null) keep[k] = r[k]; });
         if (r.blade) keep.blade = r.blade;
         return keep;

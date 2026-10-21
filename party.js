@@ -944,7 +944,7 @@ function skillList(unit) {
     add({ id: "chuan_reclaim", name: "回收护盾", hint: "附赠 · 清除一名友方的护盾，得到 2 电能，并触发磁场护盾" });
   }
   if (unit.kit === "ruby" && !(unit.resources && unit.resources.mecha) && typeof passivePlus === "function" && passivePlus(unit, 1)) {
-    add({ id: "ruby_refuel", name: "补充能源", hint: "附赠 · 获得 10 点纳米能源", bare: true });
+    add({ id: "ruby_refuel", name: "补充能源", hint: "附赠 · 纳米 +10，或把全部纳米压缩成储备能源（没有上限，纳米不够时自动用）", bare: true });
   }
   if (unit.kit === "bili") {
     add({ id: "bili_beam", name: "电光束", hint: "任意距离 · 1atk 电击 · 感电" });
@@ -1176,7 +1176,7 @@ function baseEffectiveAtk(unit, units) {
 function resourceText(unit) {
   if (!unit || !unit.kit) return "";
   const r = unit.resources || {};
-  if (unit.kit === "ruby") return `纳米 ${r.nano || 0}/100${r.mecha ? " · 机甲中" : ""}${r.overdrive ? " · 机体强化" : ""}${r.drone ? (r.mecha ? " · 无人机（激光）" : " · 无人机") : ""}${r.preparedActive ? " · 准备生效" : (r.preparedPending || r.prepared) ? " · 已准备" : ""}`;
+  if (unit.kit === "ruby") return `纳米 ${r.nano || 0}/100${Number(r.nanoReserve) > 0 ? " · 储备 " + r.nanoReserve : ""}${r.mecha ? " · 机甲中" : ""}${r.overdrive ? " · 机体强化" : ""}${r.drone ? (r.mecha ? " · 无人机（激光）" : " · 无人机") : ""}${r.preparedActive ? " · 准备生效" : (r.preparedPending || r.prepared) ? " · 已准备" : ""}`;
   if (unit.kit === "mint") return `耐久 ${r.durability != null ? r.durability : "—"}`;
   if (unit.kit === "yuito") {
     const bond = r.bondName ? ` · 牵挂 ${r.bondName}` : " · 无牵挂";
