@@ -24,7 +24,7 @@
     const layers = (u.layers || []).map(l => ({ type: l.type || "flesh", cur: Math.max(0, Math.round(Number(l.current) || 0)), max: Math.max(0, Number(l.max) || 0) }));
     return {
       id: u.id, name: u.name || u.id, level: u.level || 1, isPlayer: !!u.isPlayer, kit: u.kit || "", zone: Number(u.zone) || 1,
-      hidden: !!u.hidden, dead: !!u.dead, weaponUnit: !!(u.weaponOf || u.weaponUnit), dying: !!u.dying, upOnShp: false,
+      hidden: !!u.hidden, dead: !!u.dead, weaponUnit: !!(u.weaponOf || u.weaponUnit), dying: !!u.dying, upOnShp: !!u.upOnShp,
       stunned: !!u.stunned, iceNext: !!(u.instant && u.instant.iceNext),
       def: Math.max(0, Number(u.def) || 0), defMax: Math.max(0, Number(u.defMax) || 0), layers, shp: 0, shpMax: 0,
       flying: !!u.flying, highEnergy: Number(u.highEnergy) || 0,

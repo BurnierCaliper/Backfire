@@ -195,7 +195,7 @@ test("联机展示：主机把本地卡片的状态行、资源、实际 atk、�
   // 玩家端的卡片用上这些字段
   const snap = c.OnlineBattle ? c.OnlineBattle.snapUnit(e) : null;
   if (snap) assert.match(snap.status, /掩护/);
-  assert.doesNotMatch(JSON.stringify(out), /坚毅|shp/i);
+  assert.doesNotMatch(JSON.stringify(out).replace(/"upOnShp":(true|false),?/g, ""), /坚毅|shp/i);   // 「起身」布尔值给玩家看，其余坚毅字段不许出现
 });
 
 test("skill menu carries the host's real cost per option: move / item cost a bonus action, conductor moves free, leaving acid costs an action point", () => {
