@@ -221,6 +221,29 @@ const BESTIARY_RANK_NOTE = {
   elite: "10 级及以上的精英架势打六折（上面的数字已经算进去），攒满 2 个晕眩标记才真正跳过回合。",
   boss: "首领架势打六折（上面的数字已经算进去），攒满 2 个晕眩标记才真正跳过回合。"
 };
+/** 分阶段的首领 / 精英（#205）：战斗里的悬停说明（unit-tip.js）只列当前阶段的能力，图鉴照旧列全部。
+ *  skill：只有这一阶段才有的招式。enemies.js · enemySkillList 按规则状态给出招式表，现在有哪个就是哪个阶段
+ *         （换阶段的条件只写在规则里一处，这里不再抄一遍血量 / 机械足的门槛）；
+ *  abilities：BESTIARY_TEXT 里属于这一阶段的那几行能力的开头。没被任何阶段认领的行是各阶段共有的，每个阶段都列。 */
+const BESTIARY_STAGES = {
+  // resources.phase：外层沙壳打穿 → 二阶段，装甲击破 → 三阶段，三阶段吸引碎片两次 → 回到二阶段
+  sand_aggregate: [
+    { name: "一阶段", skill: "en_agg1_melee", abilities: ["一阶段", "沙尘爆裂", "狂暴连打"] },
+    { name: "二阶段", skill: "en_agg2_melee", abilities: ["二阶段", "电能炮"] },
+    { name: "三阶段", skill: "en_agg3_debris", abilities: ["三阶段", "吸引碎片"] }
+  ],
+  // 本体 + 五条机械足，按还活着的机械足：4–5 条踩踏，2–3 条激光扫射，剩 1 条准备自爆。机械足的说明跟着本体
+  ufo_boss: [
+    { name: "机械足 4–5 条", skill: "ufo_stomp", abilities: ["五足齐全"] },
+    { name: "机械足 2–3 条", skill: "ufo_sweep", abilities: ["剩三足"] },
+    { name: "机械足 1 条", skill: "ufo_prime", abilities: ["剩一足"] }
+  ],
+  // 被杀死时吸收场上的沙灵 / 沙鱼，变成巨型活沙（resources.giant）
+  livesand: [
+    { name: "活沙", skill: "en_live", abilities: ["每回合一次", "被杀死时吸收"] },
+    { name: "巨型活沙", skill: "en_giant_sand_melee", abilities: ["巨型活沙"] }
+  ]
+};
 
 /* ---------- 记录（本机 localStorage） ---------- */
 function bestiaryStore() {
@@ -242,6 +265,16 @@ function bestiaryKitOf(u) {
   if (!u || u.isPlayer || u.isProp || !u.kit) return null;
   if (u.kit === "ufo_leg" || u.kit === "ufo_body") return "ufo_boss";
   return BESTIARY_SKIP.includes(u.kit) ? null : u.kit;
+}
+/** 分阶段的敌人现在在第几阶段（从 1 数；不分阶段、认不出来的是 0）。只读规则状态，不改任何东西。
+ *  飞碟触灵的机械足跟着本体算。联机由房主算好，online-view.js 只把这个编号发给玩家 */
+function bestiaryStageOf(u) {
+  const stages = BESTIARY_STAGES[bestiaryKitOf(u)];
+  if (!stages || typeof enemySkillList !== "function") return 0;
+  const self = u.kit === "ufo_leg" && typeof ufoBodyOf === "function" ? ufoBodyOf(u) : u;
+  let ids = [];
+  try { ids = (enemySkillList(self) || []).map(s => s.id); } catch (e) { return 0; }
+  return stages.findIndex(s => ids.includes(s.skill)) + 1;
 }
 /** 一场战斗结束：场上出现过的敌人都记为遭遇过（次数、见过的等级、打倒几只） */
 function bestiaryRecordBattle(outcome) {

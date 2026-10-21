@@ -1,7 +1,8 @@
 /* Antlerscale: Backfire · 单位悬停说明（战斗画面和联机玩家画面共用）
  * 鼠标停在单位 / 配置物上：一段简单描述（从图鉴摘：角色介绍、敌人的行动方式和能力、配置物说明），
  * 再把身上的效果一条条用文字写出来（名字 + 图鉴里的说明），玩家不认识图标也看得懂。
- *   UnitTip.describe(info)  → { kicker, text, list }   info: { kind: "hero" | "weapon" | "enemy" | "prop" | "gap", kit, propKind, gapType, ownerName }
+ *   UnitTip.describe(info)  → { kicker, text, list, stage }   info: { kind: "hero" | "weapon" | "enemy" | "prop" | "gap", kit, propKind, gapType, ownerName, stage }
+ *     stage：分阶段的首领 / 精英现在在第几阶段（bestiary.js · bestiaryStageOf，联机由房主算好发过来），能力只列这一阶段的
  *   UnitTip.effect(token)   → { name, text }           token：状态文字里的一个词（「灼烧×3」「高能 5」「导体」「失衡」…）
  *   UnitTip.html(info, tokens, head) → 浮窗内容 */
 (function (root) {
@@ -49,11 +50,21 @@
     return { name: raw, text: "" };
   }
 
+  /** 分阶段的敌人（bestiary.js · BESTIARY_STAGES）：当前阶段的能力 + 各阶段共有的，照原来的顺序；
+   *  不分阶段、不知道在哪个阶段的照旧全列 */
+  function stageAbilities(kit, all, stage) {
+    const stages = (g("BESTIARY_STAGES") || {})[kit];
+    const cur = Array.isArray(stages) ? stages[Number(stage) - 1] : null;
+    if (!cur) return { lines: all.slice(), stage: "" };
+    const owner = a => stages.findIndex(s => (s.abilities || []).some(p => a.startsWith(p)));
+    return { lines: all.filter(a => { const i = owner(a); return i < 0 || stages[i] === cur; }), stage: cur.name };
+  }
+
   const KIND_NAME = { hero: "角色", weapon: "武器人", escort: "护送对象", enemy: "敌人", prop: "配置物", gap: "间隔" };
   /** 简单描述：角色看图鉴介绍，武器人看被动，敌人看行动方式和能力，配置物 / 间隔看配置物图鉴 */
   function describe(info) {
     info = info || {};
-    const out = { kicker: KIND_NAME[info.kind] || "", text: "", list: [] };
+    const out = { kicker: KIND_NAME[info.kind] || "", text: "", list: [], stage: "" };
     if (info.kind === "hero") {
       const h = (g("HERO_CODEX") || {})[info.kit];
       if (h) out.text = h.intro;
@@ -72,8 +83,11 @@
       const rank = (g("BESTIARY_RANK_NAME") || {})[(g("ENEMY_RANK") || {})[info.kit]] || "";
       out.kicker = [rank, t.faction].filter(Boolean).join(" · ") || "敌人";
       if (t.move) out.text = "行动方式：" + t.move;
+      // 分阶段的首领 / 精英只列当前阶段的能力（别的阶段只提一句「还有其他阶段」，不剧透；图鉴照旧全列）
+      const ab = stageAbilities(kit, t.abilities || [], info.stage);
+      out.stage = ab.stage;
       // 能力只摘名字和一句话，太长的截短（完整的去图鉴看）
-      out.list = (t.abilities || []).map(a => a.length > 60 ? a.slice(0, 58) + "…" : a);
+      out.list = ab.lines.map(a => a.length > 60 ? a.slice(0, 58) + "…" : a);
     } else if (info.kind === "prop" || info.kind === "gap") {
       const id = info.kind === "gap" ? info.gapType : info.propKind;
       const p = (g("CODEX_PROPS") || []).find(x => x.id === id);
@@ -95,6 +109,8 @@
       // 首领机制放在描述前面：还有几回合落下最要紧
       (mechs.length ? `<div class="ut-h ut-mech-h">首领机制 · 倒计时</div><ul class="ut-mechs">${mechs.map(x => { const i = x.indexOf("："); return `<li>${i > 0 && i < 30 ? `<b>${esc(x.slice(0, i))}</b>${esc(x.slice(i))}` : esc(x)}</li>`; }).join("")}</ul>` : "") +
       (d.text ? `<p class="ut-desc">${esc(d.text)}</p>` : "") +
+      // 分阶段的：写出现在是哪个阶段，别的阶段只留一句，不写它们的能力
+      (d.stage ? `<p class="ut-stage">当前阶段：<b>${esc(d.stage)}</b> · 还有其他阶段</p>` : "") +
       (d.list.length ? `<ul class="ut-list">${d.list.map(x => { const i = x.indexOf("："); return `<li>${i > 0 && i < 18 ? `<b>${esc(x.slice(0, i))}</b>${esc(x.slice(i))}` : esc(x)}</li>`; }).join("")}</ul>` : "") +
       `<div class="ut-h">身上的效果</div>` +
       (rows.length ? `<ul class="ut-effects">${rows.map(e => {
