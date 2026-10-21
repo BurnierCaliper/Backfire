@@ -203,8 +203,15 @@
     if (!obj(prop) || !id(get(prop, "id"))) return null;
     const out = identifiers(prop, {}, ["id"]);
     copyFields(prop, out, ["name"], ["zone", "level", "hp", "maxHp", "shield", "shieldMax"], ["destroyed"]);
-    enumField(prop, out, "kind", ["button", "lever", "battery", "boom", "acid", "scrap", "turret", "ironwall", "scrapwall", "dome", "coral_branch", "coral_tentacle", "death_statue"]);
+    enumField(prop, out, "kind", ["button", "lever", "battery", "boom", "acid", "scrap", "turret", "ironwall", "scrapwall", "dome", "coral_branch", "coral_tentacle", "death_statue", "fortress"]);
     enumField(prop, out, "faction", ["player", "enemy", "neutral"]);
+    // 载具（vehicle.js）：乘员 n / 4，悬停列出谁在车里、谁是驾驶员（只有名字，不含任何坚毅数值）
+    if (get(prop, "isVehicle") === true) {
+      out.isVehicle = true;
+      const seat = text(call("vehicleSeatText", prop), 20); if (seat) out.seatText = seat;
+      const roster = arr(call("vehicleRosterLines", prop)).slice(0, 8).map(t => text(t, 60)).filter(Boolean);
+      if (roster.length) out.roster = roster;
+    }
     return out;
   }
   function projectState(state, context = {}) {

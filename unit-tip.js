@@ -90,10 +90,13 @@
     const seen = new Set();
     const rows = effs.filter(e => { if (seen.has(e.name)) return false; seen.add(e.name); return true; });
     const mechs = (head && Array.isArray(head.mechs) ? head.mechs : []).filter(x => typeof x === "string" && x);
+    // 载具的乘员名单（vehicle.js）：head.rowsTitle 是小标题（「乘员 n / 4」），head.rows 一行一个人
+    const rows2 = (head && Array.isArray(head.rows) ? head.rows : []).filter(x => typeof x === "string" && x);
     return `<div class="ut-top"><b>${esc(head && head.name || "")}</b>${head && head.sub ? `<span>${esc(head.sub)}</span>` : ""}</div>` +
       (d.kicker ? `<div class="ut-kicker">${esc(d.kicker)}</div>` : "") +
       // 首领机制放在描述前面：还有几回合落下最要紧
       (mechs.length ? `<div class="ut-h ut-mech-h">首领机制 · 倒计时</div><ul class="ut-mechs">${mechs.map(x => { const i = x.indexOf("："); return `<li>${i > 0 && i < 30 ? `<b>${esc(x.slice(0, i))}</b>${esc(x.slice(i))}` : esc(x)}</li>`; }).join("")}</ul>` : "") +
+      (rows2.length ? `<div class="ut-h">${esc((head && head.rowsTitle) || "乘员")}</div><ul class="ut-list">${rows2.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : "") +
       (d.text ? `<p class="ut-desc">${esc(d.text)}</p>` : "") +
       (d.list.length ? `<ul class="ut-list">${d.list.map(x => { const i = x.indexOf("："); return `<li>${i > 0 && i < 18 ? `<b>${esc(x.slice(0, i))}</b>${esc(x.slice(i))}` : esc(x)}</li>`; }).join("")}</ul>` : "") +
       `<div class="ut-h">身上的效果</div>` +

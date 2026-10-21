@@ -426,6 +426,7 @@ function propCard(p) {
 
 function statusLine(u) {
   const s = [];
+  if (u.vehMerged && typeof vehicleOf === "function") { const vp = vehicleOf(u); if (vp) s.push(`驾驶员 ${vehicleSeatText(vp)}`); }   // 载具（vehicle.js）
   if (Number(u.stunMarks) > 0) s.push(`晕眩标记 ${u.stunMarks}/${typeof BOSS_STUN_MARKS !== "undefined" ? BOSS_STUN_MARKS : 2}`);
   if (u.statuses) {
     if (u.statuses.burn > 0) s.push("灼烧×" + u.statuses.burn);
@@ -1671,6 +1672,7 @@ function refreshEnemyEconomy(u, notes) {
   u.apMax = u.ap;
   u.bonus = Math.max(0, bonus);
   u.bonusMax = Math.max(u.bonus, bonus);
+  if (typeof vehicleEconomy === "function") vehicleEconomy(u);   // 载具驾驶员每回合有 1 个附赠（移动 / 冲撞）
 }
 
 function beginRound(notes) {
@@ -4205,6 +4207,7 @@ function structureTargets(actor, minD, maxD) {
   (state.props || []).forEach(p => {
     if (BARRIER_SIDE[p.kind] === "player") return;   // 自己的铁壁 / 防护罩不当目标
     if (!(p.hp > 0) && p.kind !== "button" && p.kind !== "lever") return;
+    if (p.isVehicle && typeof vehiclePilot === "function" && vehiclePilot(p)) return;   // 有驾驶员的车和驾驶员合并成一个单位，打驾驶员（vehicle.js）
     if (inR(p.zone) && !lineBlocked(actor.zone, p.zone)) out.push({ id: "prop:" + p.id, name: p.name, zone: p.zone, isPlayer: p.faction !== "enemy" });
   });
   const zm = Number(state.zoneMode) || 2;
@@ -4295,7 +4298,7 @@ function damageProp(p, opt, attacker) {
     lose = Math.max(1, Math.floor(opt.dmg || 5));
     // 写了血量类型的配置物（电池、炮台是装甲生命值）照属性克制表算倍率，和单位的装甲层一样吃天气：
     // 天气增减伤、微光反转克制、酸雨装甲减伤失效（隔离区不受天气影响）
-    const type = PROP_HP_TYPE[p.kind];
+    const type = PROP_HP_TYPE[p.kind] || (p.isVehicle ? "armor" : null);   // 载具（vehicle.js）是纯装甲
     let m = 1, chartOnly = 1;
     if (type && CHART[element]) {
       const f = state.fields[p.zone] || {};
@@ -4327,6 +4330,7 @@ function damageProp(p, opt, attacker) {
 function destroyProp(p, attacker) {
   const notes = [`${p.name} 被摧毁。`];
   if (typeof coralPropDestroyed === "function") coralPropDestroyed(p, notes);   // 沙珊瑚：被抓的人脱困
+  if (p.isVehicle && typeof vehicleDestroy === "function") return vehicleDestroy(p, notes);   // 载具被摧毁：殉爆（vehicle.js）
   if (BARRIER_SIDE[p.kind]) {
     notes.push(...breakIronWall(p, []));
     return notes;
@@ -4432,6 +4436,7 @@ function doMove(unit, dest, moveOpt) {
   LOG_ACTOR_ID = unit.id;
   let lines;
   try { lines = withLogSink(() => doMoveInner(unit, dest, moveOpt)); } finally { LOG_ACTOR_ID = prevActor; }
+  if (typeof vehicleSync === "function") vehicleSync();   // 驾驶员带着整辆车走（炮手和车跟着驾驶员的区）
   // 「X：1 区 → 2 区」挪到最前面，花费跟在后面
   const i = lines.findIndex(s => /区 → \d+ 区/.test(s));
   if (i > 0) lines.unshift(lines.splice(i, 1)[0]);
@@ -4446,6 +4451,11 @@ function doMoveInner(unit, dest, moveOpt) {
     return;
   }
   moveOpt = moveOpt || {};
+  // 坐在车上的炮手不能自己移动（驾驶员带着整辆车走，见 vehicle.js）
+  if (unit.vehId && !unit.vehMerged && !moveOpt.forced) {
+    paintSkillLog(`${unit.name} 在车里，不能自己移动。先下车，或者让驾驶员开车。`);
+    return;
+  }
   // 濒死没起身的人不能自己移动（以前规则层不拦，只靠界面）
   if (unit.dying && !moveOpt.free && !moveOpt.forced) {
     paintSkillLog(`${unit.name} 濒死中。先点「起身」。`);
@@ -5080,6 +5090,7 @@ function settleEnemyKill(target, notes) {
 function sweepDeadEnemies() {
   const notes = [];
   if (typeof deathStatueSweep === "function") deathStatueSweep(notes);   // 被沙珊瑚缠住时死掉的：留下死亡雕像
+  if (typeof vehicleSweep === "function") vehicleSweep(notes);   // 载具：驾驶员倒下换人，装甲打空殉爆（vehicle.js）
   const list = (state.units || []).slice();
   list.forEach(u => {
     if (!u || u.isPlayer || u._removed) return;
@@ -6440,6 +6451,7 @@ function applyKnockdown(unit, notes, opt) {
   opt = opt || {};
   notes = notes || [];
   if (!unit || unit.dead || !isInnerDepleted(unit)) return null;
+  if (unit.vehId && typeof vehiclePilotDown === "function") vehiclePilotDown(unit, notes);   // 驾驶员倒下：离开座位，车上下一个人接任（vehicle.js）
   if (unit.isPlayer && !isWeaponUnit(unit)) {
     if (unit.upOnShp) {
       const before = Math.max(0, Number(unit.shp) || 0);
@@ -7772,6 +7784,7 @@ function dealTo(attacker, target, opt) {
   // 原始击破（后面会被目标一侧的效果改写，例如「加倍击破」翻倍）：导体额外那一下按它重新结算
   if (!("_origBaseBreak" in opt)) opt._origBaseBreak = opt.baseBreak;
   opt.flags = makeDealFlags(opt.flags);
+  if (typeof vehicleSync === "function") vehicleSync();   // 被推 / 拉走的驾驶员：车和炮手先跟到他所在的区（vehicle.js）
   if (target && target.isStructure) return dealToStructure(attacker, target, opt);   // 打配置物 / 危墙的替身（#52）
   // 战场数据：击杀在伤害结算里就会发生，所以先记下「最后一击是谁」
   if (attacker && target && attacker.isPlayer && !target.isPlayer && (state.units || []).includes(attacker)) target._lastHitBy = attacker.id;
@@ -7846,6 +7859,15 @@ function dealTo(attacker, target, opt) {
     if (guard) {
       appendLog(`${guard.name} 挡在 ${target.name} 身前，替他承受这次攻击。`);
       target = guard;
+    }
+  }
+  // 载具（vehicle.js）：同区同阵营的单位挨打时，车每次各掷一次代挡（空车也算，范围攻击每人各掷）；成功就由车（驾驶员）承受这次攻击
+  if (target && attacker && typeof vehicleGuard === "function") {
+    const vg = vehicleGuard(attacker, target, opt);
+    if (vg) {
+      appendLog(`${vg.vehicle.name}替 ${target.name} 代挡了这次攻击（${Math.round(vg.chance * 100)}%）。`);
+      if (vg.struct) return dealToStructure(attacker, vg.struct, opt);
+      target = vg.unit;
     }
   }
   // 飞行：近程攻击飞行单位要额外付一个附赠行动；付不起就打不到。
@@ -7976,6 +7998,14 @@ function dealTo(attacker, target, opt) {
     if (sdr > 0) {
       flags.drPct = (Number(flags.drPct) || 0) + sdr;
       flags.drWhy = flags.drWhy ? flags.drWhy + "、防暴盾" : "防暴盾";
+    }
+  }
+  // 张开掩体（载具）：合并后的驾驶员（车）受伤 −25%，和其他百分比加算
+  if (target && target.vehMerged && flags.action !== false && !flags.environment && typeof vehicleCoverDr === "function") {
+    const cdr = vehicleCoverDr(target);
+    if (cdr > 0) {
+      flags.drPct = (Number(flags.drPct) || 0) + cdr;
+      flags.drWhy = flags.drWhy ? flags.drWhy + "、张开掩体" : "张开掩体";
     }
   }
   // 挂在「下一击」上的猛击 / 穿刺 / 弱点特效只作用于真正的攻击行动，
@@ -10755,6 +10785,7 @@ function renderLog() {
 const BOSS_STUN_MARKS = 2;
 /** 用这套规则的：首领，以及 10 级起的精英（ELITE_RULE_MIN_LEVEL） */
 function isBossUnit(u) {
+  if (u && u.vehMerged && !u.isPlayer) return true;   // 载具驾驶员：晕眩标记用车的（vehicle.js）
   if (!u || u.isPlayer || typeof enemyRankOf !== "function") return false;
   const r = enemyRankOf(u);
   return r === "boss" || (r === "elite" && (Number(u.level) || 1) >= (typeof ELITE_RULE_MIN_LEVEL !== "undefined" ? ELITE_RULE_MIN_LEVEL : 10));
@@ -11041,6 +11072,7 @@ function summonableBlades(h) {
 
 /** 不满足前提时返回原因字符串，满足返回 null */
 function skillRequirementError(actor, id) {
+  if (actor && /^veh_/.test(String(id)) && typeof vehicleSkillWhy === "function") return vehicleSkillWhy(actor, id);   // 载具招式（vehicle.js）
   if (actor && typeof featOfSkill === "function" && featOfSkill(id)) return featSkillWhy(actor, id);
   const fn = SKILL_REQUIREMENT[id];
   if (!actor || typeof fn !== "function") return null;
@@ -11364,6 +11396,11 @@ function runSkillInner(id, optRun) {
       return;
     }
   }
+  // 载具招式（vehicle.js）：敌人在扣点之前验一遍（我方的在下面 skillRequirementError 验）
+  if (!a.isPlayer && /^veh_/.test(String(id)) && typeof vehicleSkillWhy === "function") {
+    const why = vehicleSkillWhy(a, id, t);
+    if (why) { paintSkillLog(why); return; }
+  }
   const duelTou = typeof touDuelVictim === "function" ? touDuelVictim(a) : null;
   if (duelTou && id !== "assist_block") {
     const isAssist = /assist/.test(id) || id === "ufo_assist";
@@ -11593,7 +11630,10 @@ function runSkillInner(id, optRun) {
   const dabbleBase = a.isPlayer && typeof featBeginDelegate === "function" ? featBeginDelegate(a, id) : null;
   if (dabbleBase) id = dabbleBase;
   try {
-    if (typeof featOfSkill === "function" && featOfSkill(id)) {
+    if (/^veh_/.test(String(id)) && typeof runVehicleSkill === "function") {
+      // 载具招式（vehicle.js）：上下车、拉人、开炮、焚烧、张开掩体、冲撞；行动点上面已经扣过
+      runVehicleSkill(id, a, t, hitOne, lines, needT);
+    } else if (typeof featOfSkill === "function" && featOfSkill(id)) {
       // 专长动作（feats.js）：行动点上面已经扣过
       const fl = state.skillFlow;
       runFeatSkill(a, id, { t, picks: (fl && fl.picks) || {}, lines, hitOne });
