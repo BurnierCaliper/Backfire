@@ -323,11 +323,14 @@
       <label title="这场战斗在哪个区域：默认跟着地图（跑团 = 队伍在地图上的位置，单局 = 这一幕的区域，遭遇 = 遭遇的区域）">所在区域
         <select id="g-cfg-region"></select>
       </label>
+      <label title="区域里的哪个地方（采矿场的矿外 / 矿内 / 矿底，沙漠的沙丘 / 沙珊瑚台地）：选项跟着所在区域变；默认是表里第一个（采矿场 = 矿外），沙漠场上有沙珊瑚台地就是台地，单局每场随机">场景
+        <select id="g-cfg-scene"></select>
+      </label>
       <label title="白天 / 傍晚 / 夜晚：默认跟着游戏时钟">光影
         <select id="g-cfg-light"></select>
       </label>
     </div>
-    <p class="sheet-k" id="g-cfg-look-note">所在区域、光影只是画面（地面、远景、天空、灯光），联机玩家看到的跟着变；不改任何结算：沙漠生物等的白天 / 夜晚照旧跟着时钟走。只管这一场，下一场开战回到跟着地图 / 时钟。</p>
+    <p class="sheet-k" id="g-cfg-look-note">所在区域、场景、光影只是画面（地面、远景、天空、灯光），联机玩家看到的跟着变；不改任何结算：沙漠生物等的白天 / 夜晚照旧跟着时钟走。只管这一场，下一场开战回到跟着地图 / 时钟。</p>
     <p class="sheet-k">场上敌人</p>
     <div id="g-enemy-list" class="sheet-list"></div>
     <div class="sheet-foot row">

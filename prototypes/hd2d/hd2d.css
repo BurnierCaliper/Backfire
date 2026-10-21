@@ -173,11 +173,12 @@ body { position: fixed; inset: 0; user-select: none; }
 #topbar .map { font-weight: 900; color: var(--canvas); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #topbar .sep { color: var(--edge); }
 #topbar .compact, #demo-btn { display: none; }
-#demo-select, #region-select {
+#demo-select, #region-select, #scene-select {
   max-width: 46vw; font: 900 13px var(--ui-sans); color: var(--ink); background: var(--canvas);
   border: 2px solid var(--ink); padding: 3px 6px; box-shadow: 2px 3px 0 rgba(0, 0, 0, .5);
 }
 #region-select { max-width: 22vw; background: #d8cdb4; }   /* 区域（地面 / 远景 / 灯）：截图比对用 */
+#scene-select { max-width: 16vw; background: #d8cdb4; }    /* 场景（区域里的哪个地方：矿外 / 矿内 / 矿底……，#239）：截图比对用 */
 
 /* ---------- 镜头：顶栏里的远 / 中 / 近三段按钮 + 选中的区；中景 / 近景时屏幕两边的换区箭头 ---------- */
 #topbar .cam { display: flex; align-items: center; gap: 4px; flex: none; }
@@ -263,7 +264,7 @@ body { position: fixed; inset: 0; user-select: none; }
 @media (max-width: 720px) {
   :root { --topbar-h: 36px; }
   #topbar { gap: 8px; padding: 0 8px; font-size: 12px; }
-  #topbar .brand, #topbar .sep.hide-sm, #topbar .info > .tape, #topbar .info > .map, #demo-select, #region-select { display: none; }
+  #topbar .brand, #topbar .sep.hide-sm, #topbar .info > .tape, #topbar .info > .map, #demo-select, #region-select, #scene-select { display: none; }
   #topbar .info { flex: 1; min-width: 0; }
   #topbar .compact { display: block; font-weight: 900; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #demo-btn { display: block; flex: none; }

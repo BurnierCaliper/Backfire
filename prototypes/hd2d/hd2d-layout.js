@@ -10,7 +10,7 @@
  *   out.units   [{ id, zone, x, y, z, flying, submerged, lift, rect, plate … }]
  *   out.bounds  { minX, maxX, minZ, maxZ, maxY }
  *   out.camera  { target, dist, pos, fov, elevation, aspect, width, height }   // 场景照这个摆默认镜头（= 远景；中景 / 近景在 hd2d-camera.js）
- *   out.region / out.ground / out.lamps   // 这场战斗在哪个区域（opts.region）、地面主题（GROUNDS 的键）、灯摆在哪（战场外缘，0–2 盏）
+ *   out.region / out.scene / out.ground / out.lamps   // 这场战斗在哪个区域（opts.region）、区域里的哪个场景（opts.scene）、地面主题（GROUNDS 的键）、灯摆在哪（战场外缘，0–2 盏）
  * state 用联机投影过的（online-view.js · projectState，和联机玩家拿到的一样）；房主的完整 state 也排得出来，结果一样。
  *
  * 坐标：x 向右，y 向上，z 朝镜头（镜头在 +z 一侧看过来）。我方站在 +z（前排），敌方站在 −z（后排）。
@@ -140,6 +140,19 @@
     "天网塔": "天网设施", outer_city: "外城区", desert: "沙漠", giant_city: "巨人城", skynet: "天网设施",
     mine_1: "第一采矿场", mine_2: "第二采矿场", mine_3: "第三采矿场"
   };
+  /** 区域下面的场景（#239：战斗状态的 state.scene / 投影的 pv.scene，id 见 world-data.js 的 BATTLE_SCENES）→ 地面主题（GROUNDS 的键）。
+   *  先留出接口：每个场景都先用所属区域现在的样子；各场景的美术做好以后，把这里换成它自己的 GROUNDS 键就行。
+   *  区域、场景 id 和正式的场景表一一对上，加场景两边一起加（tests/region-scene.test.js 核对） */
+  const SCENES = {
+    "外城区": { street: "outer" },
+    "沙漠": { dune: "desert", coral: "desert" },                     // 沙丘 / 沙珊瑚台地
+    "巨人城": { city: "giant" },
+    "天网设施": { facility: "skynet" },
+    "第一采矿场": { rim: "mine1", mid: "mine1", floor: "mine1" },     // 矿外 / 矿内 / 矿底
+    "第二采矿场": { rim: "mine2", mid: "mine2", floor: "mine2" },
+    "第三采矿场": { rim: "mine3", floor: "mine3" },                   // 没有矿内
+    "下水道": { tunnel: "sewer" }
+  };
 
   /** 状态徽章：statuses 里的键 → 铭牌上的字（敌我通用）。数值型的（灼烧层数）带上层数 */
   const STATUS_LABELS = {
@@ -190,10 +203,15 @@
     const s = x.trim();
     return own(REGIONS, s) ? s : own(REGION_ALIAS, s) ? REGION_ALIAS[s] : null;
   }
-  /** 区域 → 地面主题（GROUNDS 的键）；认不得的用兜底 GROUND_DEFAULT */
-  function groundOf(x) {
+  /** 这个区域有的场景 id 原样返回；别的（别的区域的、乱写的、没有区域）返回 null */
+  function sceneOf(x, scene) {
     const name = regionName(x);
-    return name ? REGIONS[name] : GROUND_DEFAULT;
+    return name && own(SCENES, name) && typeof scene === "string" && own(SCENES[name], scene) ? scene : null;
+  }
+  /** 区域（+ 场景）→ 地面主题（GROUNDS 的键）；场景认不得 / 不给 = 区域自己的；区域认不得的用兜底 GROUND_DEFAULT */
+  function groundOf(x, scene) {
+    const name = regionName(x), s = sceneOf(x, scene);
+    return name ? (s ? SCENES[name][s] : REGIONS[name]) : GROUND_DEFAULT;
   }
   /** 这场战斗放几盏灯、什么灯：看地面主题和光影主题（day / dusk / night），不超过 CONFIG.lamps.max */
   function lampPlan(ground, theme) {
@@ -437,7 +455,8 @@
    *   opts.portrait  竖屏（手机）：整块棋盘转 90°，直排沿进深（前后）排开，我方在最前面
    *   opts.view      { width, height, top, bottom }：画面大小和上下被界面盖住的像素（场景传真实的；不给按桌面 / 手机的默认值）
    *   opts.region    这场战斗在哪个区域（游戏里的区域名或地图地点 id）：没有场地效果的地台按它换地面（zone.ground），灯按它摆；认不得 / 不给 = 以前的样子
-   *   opts.theme     光影主题 day / dusk / night（灯的盏数看白天还是夜晚；不给按白天）
+   *   opts.scene     区域里的哪个场景（投影里的 pv.scene，SCENES 的 id）：地面主题按「区域 + 场景」挑（现在每个场景都还是所属区域的样子）；认不得 / 不给 = 区域的
+   *   opts.theme    光影主题 day / dusk / night（灯的盏数看白天还是夜晚；不给按白天）
    */
   function build(state, opts) {
     opts = opts || {};
@@ -446,7 +465,7 @@
     const S = CONFIG.zoneSize, pitch = S + CONFIG.zoneGap;
     const xs = board.zones.map(z => z.x), ys = board.zones.map(z => z.y);
     const midX = (Math.min(...xs) + Math.max(...xs)) / 2, midY = (Math.min(...ys) + Math.max(...ys)) / 2;
-    const region = regionName(opts.region), ground = groundOf(opts.region);
+    const region = regionName(opts.region), scene = sceneOf(opts.region, opts.scene), ground = groundOf(opts.region, opts.scene);
 
     const zones = board.zones.map(bz => {
       const fk = fieldKinds((state.fields || {})[bz.id]);
@@ -523,10 +542,11 @@
     });
     liftRows(units, camera, size);
     const lamps = lampSpots(zones, lampPlan(ground, opts.theme || "day"));
-    return { portrait, boardId: board.id, zones, gaps, units, bounds: b, camera, view, plateSize: size, region, ground, lamps };
+    return { portrait, boardId: board.id, zones, gaps, units, bounds: b, camera, view, plateSize: size, region, scene, ground, lamps };
   }
 
   return {
+    SCENES, sceneOf,   // 区域下面的场景（#239）
     CONFIG, KIND_ORDER, STATUS_LABELS, GROUNDS, GROUND_DEFAULT, REGIONS, REGION_ALIAS, build, boardOf, fieldKinds, plateData, arrangeUnits, gapKeyOf,
     fitView, camAt, toNdc, project, plateScale, plateRect, plateSize, liftPlates, frameTop, regionName, groundOf, lampPlan
   };
