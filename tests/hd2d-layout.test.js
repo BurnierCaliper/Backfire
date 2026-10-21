@@ -981,8 +981,9 @@ test("联机数据：原型页先用 OnlineView.projectState 投影再交给布�
     for (const region of [undefined, "沙漠"]) for (const portrait of [false, true]) {
       const opts = { view: DESKTOP, region, theme: "dusk", portrait };
       const a = L.build(raw, opts), b = L.build(pv, opts), tag = `${id} ${region || "不给区域"}${portrait ? " 竖屏" : ""}`;
-      const json = JSON.stringify(b);
-      assert.ok(!/shp/i.test(json) && !json.includes(String(SHP)) && !json.includes(String(SHP_MAX)), tag + "：布局里有坚毅生命");
+      // 按「单独的一个数」找（布局里满是坐标小数，595.8610271177713 这种碰巧含 7771 的不算；#237 高地加高以后坐标变了碰上了）
+      const json = JSON.stringify(b), lone = (n) => new RegExp(`(?<![\\d.])${n}(?![\\d.])`).test(json);
+      assert.ok(!/shp/i.test(json) && !lone(SHP) && !lone(SHP_MAX), tag + "：布局里有坚毅生命");
       // 地台、间隔、灯、镜头、范围一模一样
       ["zones", "gaps", "lamps", "camera", "bounds", "region", "ground", "plateSize"].forEach(k => assert.deepEqual(plain(b[k]), plain(a[k]), tag + "：" + k + " 不一样"));
       // 单位：站位、抬高、屏幕矩形、铭牌一样；名字是投影规范化过的（全角括号 → 半角：OnlineView.safeText），ATK 是主机算好的实际 ATK（display.atk，联机单位卡也用它）

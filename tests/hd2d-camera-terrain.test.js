@@ -120,3 +120,300 @@ test("伤害数字、击破数字放大（#237）：远 / 中 / 近同一块铭�
   const S = F.FX.num.size;
   assert.ok(S.big > S.dmg && S.dmg > S.brk);
 });
+
+/* ---------- 3. 区的外轮廓不规则 ---------- */
+const FOES = [{ id: "guard_sword", lv: 2 }, { id: "thug_knife", lv: 2 }, { id: "buoy", lv: 2 }, { id: "crow", lv: 2 }, { id: "thug_hammer", lv: 2 }];
+const CASES = [
+  { name: "两区直排", opt: { zoneMode: 2 } }, { name: "三区直排", opt: { zoneMode: 3 } }, { name: "四区直排", opt: { board: "line4" } },
+  { name: "2×2", opt: { board: "square4" } }, { name: "十字五区", opt: { board: "cross5" } }
+];
+/** 各种棋盘：我方 4 人 + n 个敌人，敌人分到各个区（同区挤 / 每个区都有人） */
+function boardState(c, nFoes, crowd) {
+  const st = H.load().BattleSim.setup(Object.assign({ party: PARTY, seed: "HD2D", enemies: FOES.slice(0, nFoes).map(f => Object.assign({ zone: 0 }, f)) }, c.opt));
+  const pz = st.units.find(u => u.isPlayer && !u.hidden).zone;
+  st.units.filter(u => !u.isPlayer).forEach((u, i) => { u.zone = crowd ? pz : ((i + 1) % st.zoneMode) + 1; });
+  return st;
+}
+/** 多边形有没有自己交叉（不相邻的两条边相交） */
+function selfCrossing(P) {
+  const o = (p, q, r) => Math.sign((q.x - p.x) * (r.z - p.z) - (q.z - p.z) * (r.x - p.x));
+  const n = P.length;
+  for (let i = 0; i < n; i++) for (let j = i + 2; j < n; j++) {
+    if (i === 0 && j === n - 1) continue;
+    const a = P[i], b = P[(i + 1) % n], c = P[j], d = P[(j + 1) % n];
+    if (o(a, b, c) * o(a, b, d) < 0 && o(c, d, a) * o(c, d, b) < 0) return [i, j];
+  }
+  return null;
+}
+/** 一条边上沿边的坐标 t（−len/2 … len/2，0 = 正中）、往外 off 的点（局部坐标） */
+function sidePoint(z, side, t, off) {
+  const hw = z.w / 2, hd = z.d / 2;
+  if (side === "back") return { x: t, z: -hd - off };
+  if (side === "front") return { x: t, z: hd + off };
+  if (side === "left") return { x: -hw - off, z: t };
+  return { x: hw + off, z: t };
+}
+const SIDES = ["back", "right", "front", "left"];
+
+test("区的外轮廓不规则（#237）：各种棋盘、横竖屏、各区域，每块地台的外轮廓是不规则的多边形（有缺口、凸起、削掉的角，不自己交叉），只在外缘：站位区整个在里面、每个单位都站在多边形里；挨着别的区的那条边中间平直、整条边不往外凸，桥 / 墙 / 门接得上", () => {
+  const O = L.CONFIG.outline, U = L.CONFIG;
+  assert.ok(O && O.amount > 0 && O.cut > 0 && O.cut < U.pad && O.bump > 0 && O.chip[0] > O.cut && O.mouth > 0, "不规则程度在配置表里（CONFIG.outline），往里缺的比留给装饰的那一圈（pad）窄");
+  for (const c of CASES) for (const portrait of [false, true]) for (const region of [undefined, "沙漠", "外城区"]) for (const crowd of [false, true]) {
+    const st = boardState(c, crowd ? 4 : 5, crowd);
+    st.fields[1].highland = true;
+    const out = L.build(st, { view: DESKTOP, portrait, region }), tag0 = `${c.name}${portrait ? " 竖屏" : ""} ${region || "不给区域"}${crowd ? " 同区挤" : ""}`;
+    const sigs = new Set();
+    out.zones.forEach(z => {
+      const P = z.outline && z.outline.pts, tag = `${tag0} ${z.id} 区`, hw = z.w / 2, hd = z.d / 2;
+      assert.ok(Array.isArray(P) && P.length >= 12, tag + "：外轮廓不是方的（折点够多）");
+      assert.equal(selfCrossing(P), null, tag + "：外轮廓自己交叉了");
+      const offs = P.map(p => Math.max(Math.abs(p.x) - hw, Math.abs(p.z) - hd));   // 每个折点离方框多远（往外是正的）
+      offs.forEach(v => assert.ok(v >= -O.cut - 1e-6 && v <= O.bump + 1e-6, `${tag}：折点离方框 ${v.toFixed(3)}，超出了 cut / bump`));
+      assert.ok(offs.some(v => v < -0.1), tag + "：有往里缺的");
+      [[-1, -1], [1, -1], [1, 1], [-1, 1]].forEach(([sx, sz]) => assert.ok(!L.insideOutline(P, sx * (hw - 0.02), sz * (hd - 0.02)), `${tag}：角上没削掉一块`));
+      sigs.add(JSON.stringify(P));
+      // 站位区（离边 pad 以内）整个在多边形里：四个角在里面，没有折点伸进站位区
+      const ux = hw - U.pad, uz = hd - U.pad;
+      [[-1, -1], [1, -1], [1, 1], [-1, 1]].forEach(([sx, sz]) => assert.ok(L.outlineDist(P, sx * ux, sz * uz) > 0, `${tag}：站位区的角 (${sx * ux}, ${sz * uz}) 在轮廓外面`));
+      P.forEach(p => assert.ok(Math.abs(p.x) >= ux - 1e-9 || Math.abs(p.z) >= uz - 1e-9, `${tag}：折点 (${p.x}, ${p.z}) 伸进了站位区`));
+      out.units.filter(u => u.zone === z.id).forEach(u => {
+        const d = L.outlineDist(P, u.x - z.cx, u.z - z.cz);
+        assert.ok(d >= 0.2, `${tag}：${u.plate.name} 离外轮廓只有 ${d.toFixed(2)}（要站在多边形里）`);
+      });
+      // 挨着别的区的边：中间 mouth 那么宽是平直的（往里一点在里面、往外一点在外面），整条边没有往外凸的折点；台子、碎块不往那边摆
+      const sides = L.neighborSides(z, out.zones, U.zoneSize + U.zoneGap);
+      assert.deepEqual(z.outline.sides, sides, tag);
+      SIDES.filter(s => sides[s]).forEach(s => {
+        const len = s === "left" || s === "right" ? z.d : z.w;
+        for (let t = -O.mouth * len / 2; t <= O.mouth * len / 2 + 1e-9; t += len / 20) {
+          const a = sidePoint(z, s, t, -0.03), b = sidePoint(z, s, t, 0.03);
+          assert.ok(L.insideOutline(P, a.x, a.z) && !L.insideOutline(P, b.x, b.z), `${tag}：挨着别的区的 ${s} 边在 t=${t.toFixed(2)} 不平直`);
+        }
+        P.filter(p => (s === "back" && p.z < -hd + 1e-9) || (s === "front" && p.z > hd - 1e-9) || (s === "left" && p.x < -hw + 1e-9) || (s === "right" && p.x > hw - 1e-9))
+          .forEach(p => assert.ok(Math.max(Math.abs(p.x) - hw, Math.abs(p.z) - hd) <= 1e-9, `${tag}：${s} 边挨着别的区，不该往外凸（伸进缝里）`));
+        assert.ok(!z.outline.ledges.some(l => l.side === s), tag + "：台子摆进了缝里");
+      });
+      z.outline.chunks.forEach(k => {
+        assert.ok(L.outlineDist(P, k.x, k.z) <= -k.size + 1e-6, `${tag}：碎块压在地台上了`);
+        const side = Math.abs(k.x) - hw > Math.abs(k.z) - hd ? (k.x > 0 ? "right" : "left") : (k.z > 0 ? "front" : "back");
+        assert.ok(!sides[side], `${tag}：碎块掉进了和 ${side} 边那个区之间的缝里`);
+      });
+      // 桥 / 墙 / 门：落在两头地台平直的那一段上（桥面和两边的护栏柱子都踩在地台上）
+      out.gaps.filter(g => g.a === z.id || g.b === z.id).forEach(g => {
+        const other = out.zones.find(q => q.id === (g.a === z.id ? g.b : g.a)), dx = other.cx - z.cx, dz = other.cz - z.cz;
+        const s = Math.abs(dx) > Math.abs(dz) ? (dx > 0 ? "right" : "left") : (dz > 0 ? "front" : "back");
+        const bw = g.width * 0.34;
+        [-1, 1].forEach(e => { const p = sidePoint(z, s, e * (bw / 2 + 0.1), -0.3); assert.ok(L.outlineDist(P, p.x, p.z) > 0.2, `${tag}：${g.key} 的桥在 ${s} 边落不到地台上`); });
+      });
+    });
+    assert.equal(sigs.size, out.zones.length, tag0 + "：每块地台的形状都不一样");
+  }
+});
+
+test("外轮廓用种子固定（#237）：同一场战斗再排一遍、换窗口大小、联机投影过的，形状一模一样；不规则程度在配置里一个数（amount = 0 就是以前的方块）；外轮廓只动外缘，站位、后排抬高、铭牌的屏幕矩形和方块时完全一样", () => {
+  const O = L.CONFIG.outline;
+  // 按数据比（JSON 一遍）：规则环境是另一个 vm，数组的原型不是同一个，严格比较会把一模一样的数据也判成不一样（tests/hd2d-layout.test.js 的 plain 一样）
+  const plain = (v) => JSON.parse(JSON.stringify(v)), shapes = (l) => plain(l.zones.map(z => z.outline));
+  for (const id of Object.keys(DEMOS)) {
+    const { st, pv, layout } = demoLayout(id);
+    const again = L.build(pv, { view: DESKTOP, region: pv.region, theme: pv.light });
+    assert.deepEqual(shapes(again), shapes(layout), id + "：再排一遍形状变了");
+    const raw = L.build(st, { view: DESKTOP, region: pv.region, theme: pv.light });
+    assert.deepEqual(shapes(raw), shapes(layout), id + "：房主完整的 state 和联机投影排出来的形状不一样");
+    const small = L.build(pv, { view: { width: 1280, height: 720, top: 46, bottom: 120 }, region: pv.region, theme: pv.light });
+    assert.deepEqual(shapes(small), shapes(layout), id + "：换了窗口大小形状变了");
+    // 打坏了桥、开了门：形状不变（只看哪几条边挨着别的区，不看缝里现在是什么）
+    const broken = JSON.parse(JSON.stringify(pv));
+    Object.values(broken.gaps || {}).forEach(g => { g.type = "void"; g.open = !g.open; });
+    assert.deepEqual(shapes(L.build(broken, { view: DESKTOP, region: pv.region })), shapes(layout), id + "：间隔变了地台的形状跟着变");
+    // 程度：amount = 0 就是以前的正方形，没有台子、碎块；站位 / 抬高 / 铭牌矩形和不规则时一样
+    const keep = O.amount;
+    try {
+      O.amount = 0;
+      const square = L.build(pv, { view: DESKTOP, region: pv.region, theme: pv.light });
+      square.zones.forEach(z => {
+        assert.equal(z.outline.pts.length, 4, id + "：amount = 0 应该是正方形");
+        z.outline.pts.forEach(p => assert.ok(Math.abs(Math.abs(p.x) - z.w / 2) < 1e-9 && Math.abs(Math.abs(p.z) - z.d / 2) < 1e-9));
+        assert.ok(!z.outline.ledges.length && !z.outline.chunks.length);
+      });
+      assert.deepEqual(plain(square.units), plain(layout.units), id + "：外轮廓不规则了，站位 / 铭牌跟着变了");
+      assert.deepEqual(plain(square.camera), plain(layout.camera), id + "：镜头跟着外轮廓变了");
+      O.amount = 0.5;
+      const half = L.build(pv, { view: DESKTOP, region: pv.region, theme: pv.light });
+      const depth = (l) => Math.min(...l.zones.flatMap(z => z.outline.pts.map(p => Math.max(Math.abs(p.x) - z.w / 2, Math.abs(p.z) - z.d / 2))));
+      assert.ok(depth(half) > depth(layout) + 0.05, id + "：amount 调小，缺口跟着变浅");
+    } finally { O.amount = keep; }
+  }
+});
+
+/* ---------- 4. 高地真的高 ---------- */
+/** 高地上的人在屏幕上至少高出多少像素（和同一场战斗拿掉高地比，同一个镜头）、高地的侧面在屏幕上至少多高。
+ *  以前只高 1 倍地台厚度时（mine 3 区）：高出 33 / 63 / 100px，侧面中景 136px、近景 239px；现在 1.5 倍：49 / 96 / 152px，侧面 170 / 297px */
+const GAIN = { far: 42, mid: 80, near: 130 }, FACE = { mid: 150, near: 260 };
+test("高地真的高（#237）：高地 / 沙珊瑚台地比普通区高出地台厚度的 1.25–1.5 倍（以前只高 1 倍，看不出来），高度在配置里；高地上的单位、铭牌跟着抬高；中景、近景里高地的侧面明显比普通区高，和相邻区之间有落差（桥斜着搭上去）", () => {
+  const C = cams(), U = L.CONFIG;
+  for (const [id, hz] of [["mine", 3], ["cross", 2]]) {
+    const { st, pv, layout } = demoLayout(id);
+    const high = layout.zones.find(z => z.id === hz), flat = layout.zones.find(z => !z.highland);
+    const rise = high.topY - flat.topY;
+    assert.ok(high.highland && rise >= U.baseH * 1.25 - 1e-9 && rise <= U.baseH * 1.5 + 1e-9, `${id}：高地比普通区高出 ${rise.toFixed(2)}（地台厚 ${U.baseH}）`);
+    assert.ok(Number.isFinite(U.highRise) && Math.abs(rise - U.baseH * U.highRise) < 1e-9, "高出多少在配置里（CONFIG.highRise）");
+    layout.units.filter(u => u.zone === hz && !u.flying && !u.submerged).forEach(u => assert.equal(u.y, high.topY, "高地上的人站在高地的顶面上"));
+    // 同一场战斗把高地拿掉再排一遍：高地上的人（脚下的点、铭牌）在屏幕上高出一截——远 / 中 / 近都看得出
+    const flatPv = JSON.parse(JSON.stringify(pv));
+    flatPv.fields[hz].highland = false;
+    const ref = L.build(flatPv, { view: DESKTOP, region: pv.region, theme: pv.light });
+    for (const tier of ["far", "mid", "near"]) {
+      const p = C.pose(layout, tier, hz), q = C.pose(ref, tier, hz), tag = `${id} ${tier}`;
+      // 同一个镜头（用拿掉高地以后的）看两边的脚下：高地上的人高出多少像素
+      const gain = layout.units.filter(u => u.zone === hz).map(u => {
+        const r = ref.units.find(x => x.id === u.id);
+        return L.project(q.cam, r).y - L.project(q.cam, u).y;
+      });
+      const want = GAIN[tier];
+      gain.forEach(g => assert.ok(g >= want, `${tag}：高地上的人只高出 ${g.toFixed(1)}px`));
+      // 这一段自己的镜头：铭牌立在高地的顶面上（矩形的底挂在抬高了的脚下）
+      layout.units.filter(u => u.zone === hz).forEach(u => assert.ok(Math.abs(p.plates[u.id].rect.foot - L.project(p.cam, u).y) < 0.5, `${tag}：${u.plate.name} 的铭牌没跟着抬高`));
+      // 侧面：高地前沿正中从地上到顶面的那一截，在屏幕上比普通区的高 2.2 倍以上
+      if (tier !== "far") {
+        const face = (z) => L.project(p.cam, { x: z.cx, y: 0, z: z.cz + z.d / 2 }).y - L.project(p.cam, { x: z.cx, y: z.topY, z: z.cz + z.d / 2 }).y;
+        const k = face(high) / face(flat);
+        assert.ok(k >= 2.2, `${tag}：高地的侧面只有普通区的 ${k.toFixed(2)} 倍高`);
+        assert.ok(face(high) >= FACE[tier], `${tag}：高地的侧面只有 ${face(high).toFixed(0)}px 高`);
+      }
+    }
+    // 和相邻区之间的间隔：两头一高一低（桥斜着搭上高地）
+    layout.gaps.filter(g => g.a === hz || g.b === hz).forEach(g => {
+      const other = layout.zones.find(z => z.id === (g.a === hz ? g.b : g.a));
+      assert.deepEqual([g.y0, g.y1].sort(), [other.topY, high.topY].sort(), `${id} ${g.key}：间隔两头的高度`);
+      if (!other.highland) assert.ok(Math.abs(g.y0 - g.y1) >= rise - 1e-9, `${id} ${g.key}：和相邻区之间有落差`);
+    });
+  }
+  // 沙珊瑚台地也算高地
+  const { layout } = demoLayout("desert"), coral = layout.zones.find(z => z.id === 4);
+  assert.ok(coral.highland && coral.topY - L.CONFIG.baseH >= L.CONFIG.baseH * 1.25 - 1e-9, "沙珊瑚台地一样高");
+});
+
+/* ---------- 3 / 4 在真的 three.js 里建出来 ---------- */
+/* 场景里的积木只建 three.js 的物体，不碰 WebGL：在 Node 里用 vendor 的真 three.js 建一遍（和 tests/hd2d-layout.test.js 的 protoEnv 一样）。
+ * canvas 程序纹理用一个什么都接受的假 2D 画布代替 */
+let protoHooked = false;
+async function protoEnv(t) {
+  const mod = require("node:module"), { pathToFileURL } = require("url");
+  if (typeof mod.register !== "function") { t.skip("这个 Node 版本没有 module.register"); return null; }
+  const threeUrl = pathToFileURL(path.join(__dirname, "..", "vendor", "three", "three.module.min.js")).href;
+  if (!protoHooked) {
+    protoHooked = true;
+    mod.register("data:text/javascript," + encodeURIComponent(`export async function resolve(s, c, n) {
+      if (s === "three") return { url: ${JSON.stringify(threeUrl)}, format: "module", shortCircuit: true };
+      const r = await n(s, c);
+      return /\\/(prototypes\\/hd2d|vendor\\/three)\\//.test(r.url) ? Object.assign({}, r, { format: "module" }) : r;
+    }`));
+  }
+  const any = () => new Proxy(function () {}, { get: (o, k) => (k === Symbol.toPrimitive ? () => 0 : any()), set: () => true, apply: () => any() });
+  const keep = { document: globalThis.document, window: globalThis.window };
+  const restore = () => {
+    globalThis.document = keep.document; globalThis.window = keep.window;
+    if (keep.document === undefined) delete globalThis.document;
+    if (keep.window === undefined) delete globalThis.window;
+  };
+  globalThis.document = { createElement: () => ({ width: 0, height: 0, style: {}, getContext: () => any() }) };
+  globalThis.window = { HD2DLayout: L };
+  try {
+    const url = (f) => pathToFileURL(path.join(DIR, f)).href;
+    const THREE = await import(threeUrl);
+    const W = await import(url("hd2d-world.js")), B = await import(url("hd2d-backdrop.js"));
+    return { THREE, W, B, restore };
+  } catch (e) { restore(); throw e; }
+}
+
+test("真的 three.js 里（#237）：地台按不规则的外轮廓挤出来（顶面的折点就是轮廓），上沿的亮边、底座跟着轮廓；贴花、小石子、装饰都在轮廓里；有矮一截的台子和脚下的碎块；高地下面垫一块岩层底座、台阶爬到顶，桥从普通区斜着搭上高地", async (t) => {
+  const P = await protoEnv(t);
+  if (!P) return;
+  const { THREE, W } = P;
+  try {
+    for (const id of Object.keys(DEMOS)) {
+      const { layout } = demoLayout(id), ctx = { anim: [], lamps: [], fxLights: 0, theme: "dusk" };
+      layout.zones.forEach(z => {
+        const g = W.buildZone(z, ctx), tag = `${id} ${z.id} 区（${z.kind}）`, P2 = z.outline.pts;
+        const part = (name) => g.children.filter(o => o.userData && o.userData.part === name);
+        const body = part("body")[0];
+        assert.ok(body && Array.isArray(body.material) && body === g.children.find(o => o.isMesh && Array.isArray(o.material)), tag + "：地台本体（顶面 + 侧面两种材质）");
+        // 顶面的折点：都在 y = 顶面高度上，横向就是外轮廓的折点（挤出来的，不是方块）
+        const pos = body.geometry.attributes.position, tops = [];
+        for (let i = 0; i < pos.count; i++) if (Math.abs(pos.getY(i) - z.h) < 1e-5) tops.push({ x: pos.getX(i), z: pos.getZ(i) });
+        P2.forEach(p => assert.ok(tops.some(q => Math.hypot(q.x - p.x, q.z - p.z) < 1e-4), `${tag}：外轮廓的折点 (${p.x}, ${p.z}) 不在顶面上`));
+        tops.forEach(q => assert.ok(L.outlineDist(P2, q.x, q.z) > -1e-3 || (z.hole > 0 && Math.hypot(q.x, q.z) <= z.hole + 1e-3), `${tag}：顶面伸出了外轮廓`));
+        // 上沿的亮边、底座跟着轮廓走
+        const trim = part("trim")[0], skirt = part("skirt")[0];
+        assert.ok(trim && skirt, tag + "：有亮边、底座");
+        const tb = new THREE.Box3().setFromObject(trim);
+        assert.ok(tb.min.y >= z.h - 0.02 && tb.max.y <= z.h + 0.1, tag + "：亮边在顶面上沿");
+        const tp = trim.geometry.attributes.position;
+        for (let i = 0; i < tp.count; i += 3) assert.ok(L.outlineDist(P2, tp.getX(i), tp.getZ(i)) > -1e-3, `${tag}：亮边伸出了外轮廓`);
+        // 贴花、小石子、装饰（废铁、石块、管道、桶、晶簇、珊瑚……）都在轮廓里（不悬在缺口上）
+        const top = z.h + 0.001;
+        g.children.forEach(o => {
+          const who = o.userData.part;
+          if (who || !o.isMesh || o.isInstancedMesh || o.position.y < top) return;
+          if (o.geometry.type === "PlaneGeometry" || o.geometry.type === "DodecahedronGeometry" || o.geometry.type === "BoxGeometry" || o.geometry.type === "CylinderGeometry" || o.geometry.type === "OctahedronGeometry") {
+            assert.ok(L.outlineDist(P2, o.position.x, o.position.z) > 0.05, `${tag}：${o.geometry.type} 在 (${o.position.x.toFixed(2)}, ${o.position.z.toFixed(2)}) 悬在外轮廓外面`);
+          }
+        });
+        const stones = g.children.find(o => o.isInstancedMesh);
+        if (stones) {
+          const m = new THREE.Matrix4(), v = new THREE.Vector3();
+          for (let i = 0; i < stones.count; i++) { stones.getMatrixAt(i, m); v.setFromMatrixPosition(m); assert.ok(L.outlineDist(P2, v.x, v.z) > 0, `${tag}：小石子掉在外面`); }
+        }
+        // 矮一截的台子、碎块：在轮廓外沿 / 地上
+        part("ledge").forEach(l => { const b = new THREE.Box3().setFromObject(l); assert.ok(b.max.y < z.h - 0.1 && b.min.y > -0.01, tag + "：台子比顶面矮一截"); });
+        part("chunk").forEach(k => assert.ok(k.position.y < 0.3 && L.outlineDist(P2, k.position.x, k.position.z) < 0, tag + "：碎块在地台脚下"));
+        assert.equal(part("ledge").length, z.outline.ledges.length);
+        assert.equal(part("chunk").length, z.outline.chunks.length);
+        // 高地：岩层底座 + 台阶
+        const ped = part("pedestal")[0];
+        if (z.highland) {
+          assert.ok(ped, tag + "：高地下面垫着岩层底座");
+          const pb = new THREE.Box3().setFromObject(ped), bb = new THREE.Box3().setFromObject(body);
+          assert.ok(Math.abs(pb.min.y) < 1e-6 && Math.abs(pb.max.y - (z.h - L.CONFIG.baseH)) < 1e-6 && Math.abs(bb.min.y - (z.h - L.CONFIG.baseH)) < 1e-6 && Math.abs(bb.max.y - z.h) < 1e-6, tag + "：底座在下面（高出来的那一截），地台照常厚 baseH");
+          assert.ok(pb.max.x > bb.max.x && pb.min.x < bb.min.x, tag + "：底座比地台往外多出一点（看得出一级落差）");
+          const rock = ped.material[1];
+          assert.ok(rock.map && rock !== body.material[1], tag + "：底座的侧面是岩层（和地台的侧面分得开）");
+          if (z.outline.stairs) {
+            const steps = part("stairs");
+            assert.ok(steps.length >= 2, tag + "：有台阶");
+            const tops2 = steps.map(s => new THREE.Box3().setFromObject(s).max.y).sort((a, b) => a - b);
+            assert.ok(tops2[tops2.length - 1] < z.h && tops2[tops2.length - 1] > z.h * 0.6, tag + "：台阶一级级爬到快到顶面");
+          }
+        } else assert.ok(!ped && !part("stairs").length, tag + "：普通区没有底座、台阶");
+        W.disposeTree(g);
+      });
+      // 桥：高地和普通区之间斜着搭上去，两头的木板落在两头的地台顶面上
+      layout.gaps.filter(g => g.type === "bridge").forEach(gap => {
+        const g = W.buildGap(gap, ctx), planks = [];
+        g.updateMatrixWorld(true);
+        g.traverse(o => { if (o.isMesh && o.geometry.type === "BoxGeometry" && o.geometry.parameters.depth > 1) planks.push(new THREE.Box3().setFromObject(o)); });
+        assert.ok(planks.length >= 3, `${id} ${gap.key}：有桥板`);
+        const lo = Math.min(...planks.map(b => b.max.y)), hi = Math.max(...planks.map(b => b.max.y));
+        const tag = `${id} ${gap.key}（两头 ${gap.y0} / ${gap.y1}）`;
+        assert.ok(Math.abs(lo - Math.min(gap.y0, gap.y1)) < 0.25 && Math.abs(hi - Math.max(gap.y0, gap.y1)) < 0.25, `${tag}：桥板从 ${lo.toFixed(2)} 到 ${hi.toFixed(2)}，接不上两头的地台`);
+        W.disposeTree(g);
+      });
+    }
+    // 高地 ↔ 普通区的桥（演示里没有，自己搭一座）：斜的
+    const st = boardState(CASES[1], 2);
+    st.fields[2].highland = true; st.gaps["1-2"] = gapOf("bridge", 10); st.gaps["2-3"] = gapOf("bridge", 10);
+    const out = L.build(st, { view: DESKTOP }), ctx = { anim: [], lamps: [], fxLights: 0, theme: "day" };
+    out.gaps.forEach(gap => {
+      assert.ok(Math.abs(gap.y0 - gap.y1) > 1, gap.key + "：一头高一头低");
+      const g = W.buildGap(gap, ctx), centers = [];
+      g.updateMatrixWorld(true);
+      g.traverse(o => { if (o.isMesh && o.geometry.type === "BoxGeometry" && o.geometry.parameters.depth > 1) centers.push(new THREE.Box3().setFromObject(o).getCenter(new THREE.Vector3())); });
+      // 沿着间隔从 y0 那头走到 y1 那头（横的从左往右，竖的从前往后）：桥板一块比一块高 / 低
+      centers.sort((a, b) => (gap.axis === "x" ? a.x - b.x : b.z - a.z));
+      assert.ok(centers.length >= 3, gap.key + "：有桥板");
+      for (let i = 1; i < centers.length; i++) assert.ok((centers[i].y - centers[i - 1].y) * Math.sign(gap.y1 - gap.y0) > 0, gap.key + "：桥板一块比一块高（斜着搭上高地）");
+      W.disposeTree(g);
+    });
+  } finally { P.restore(); }
+});

@@ -524,7 +524,9 @@ export function createHd2dScene(container, options) {
     scene.add(state.backdrop.group);
   }
   const boardSig = (l) => l.zones.map(z => [z.id, Math.round(z.cx * 10), Math.round(z.cz * 10)].join(",")).join(";");
-  const worldSig = (l) => boardSig(l) + "|" + (state.meta.theme || "") + "|" + l.zones.map(z => z.kind + z.effects.join("+") + z.h + (z.ground || "")).join(";") + "|" + l.gaps.map(g => [g.key, g.type, g.open, g.maxHp ? Math.ceil((g.hp / g.maxHp) * 4) : 4].join(",")).join(";") +
+  /** 不规则外轮廓的签名（#237：形状按棋盘 + 区号 + 区域定，换了区域要重建） */
+  const outlineSig = (z) => (z.outline && z.outline.pts ? z.outline.pts.map(p => p.x.toFixed(2) + "," + p.z.toFixed(2)).join(" ") : "");
+  const worldSig = (l) => boardSig(l) + "|" + (state.meta.theme || "") + "|" + l.zones.map(z => z.kind + z.effects.join("+") + z.h + (z.ground || "") + "/" + outlineSig(z)).join(";") + "|" + l.gaps.map(g => [g.key, g.type, g.open, g.maxHp ? Math.ceil((g.hp / g.maxHp) * 4) : 4].join(",")).join(";") +
     "|" + (l.lamps || []).map(p => [p.kind, Math.round(p.x * 10), Math.round(p.z * 10), p.color].join(",")).join(";");
 
   /* ---------- 镜头 ---------- */
@@ -629,16 +631,19 @@ export function createHd2dScene(container, options) {
   }
   function notify() { if (options.onCameraChange) options.onCameraChange(cameraInfo()); }
 
-  /** 选中的区：地台顶面靠边一圈细框 */
-  let focusRing = null, focusSize = 0;
+  /** 选中的区：地台顶面靠边一圈细框（跟着不规则的外轮廓走：离边 inset、宽 width，#237） */
+  let focusRing = null, focusKey = "";
   function placeFocus() {
     const z = state.layout && state.layout.zones.find(q => q.id === state.zone);
     if (!z) { if (focusRing) focusRing.visible = false; return; }
-    const size = Math.max(z.w, z.d) - 2 * FOCUS.inset;
-    if (!focusRing || Math.abs(size - focusSize) > 1e-6) {
-      const a = size / 2, b = a - FOCUS.width, shape = new THREE.Shape(), hole = new THREE.Path();
-      shape.moveTo(-a, -a); shape.lineTo(a, -a); shape.lineTo(a, a); shape.lineTo(-a, a); shape.closePath();
-      hole.moveTo(-b, -b); hole.lineTo(-b, b); hole.lineTo(b, b); hole.lineTo(b, -b); hole.closePath();
+    const hw = z.w / 2, hd = z.d / 2;
+    const pts = z.outline && z.outline.pts && z.outline.pts.length >= 3 ? z.outline.pts : [{ x: -hw, z: -hd }, { x: hw, z: -hd }, { x: hw, z: hd }, { x: -hw, z: hd }];
+    const key = z.id + "|" + outlineSig(z);
+    if (!focusRing || key !== focusKey) {
+      const outer = L.offsetOutline(pts, FOCUS.inset), inner = L.offsetOutline(pts, FOCUS.inset + FOCUS.width);
+      const shape = new THREE.Shape(), hole = new THREE.Path();
+      outer.forEach((p, i) => (i ? shape.lineTo(p.x, -p.z) : shape.moveTo(p.x, -p.z))); shape.closePath();   // 转 −90° 以后形状的 y = −z
+      inner.forEach((p, i) => (i ? hole.lineTo(p.x, -p.z) : hole.moveTo(p.x, -p.z))); hole.closePath();
       shape.holes.push(hole);
       if (focusRing) { focusRing.geometry.dispose(); focusRing.geometry = new THREE.ShapeGeometry(shape); }
       else {
@@ -649,7 +654,7 @@ export function createHd2dScene(container, options) {
         focusRing.rotation.x = -Math.PI / 2; focusRing.renderOrder = 2;
         scene.add(focusRing);
       }
-      focusSize = size;
+      focusKey = key;
     }
     focusRing.position.set(z.cx, z.topY + 0.025, z.cz);
     focusRing.visible = true;
