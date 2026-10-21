@@ -300,10 +300,10 @@
         if (info.max) return `<div class="tr-up"><b>${esc(name)}</b>（${esc(h.name)}）Lv${info.lv} · 已满级</div>`;
         const mats = info.mats.map(m => `<span class="${m.have >= m.need ? "" : "bad"}">${esc(m.name)} ${m.have}/${m.need}</span>`).join("、");
         return `<div class="tr-up"><b>${esc(name)}</b>（${esc(h.name)}）Lv${info.lv} → ${info.next}
-          <div class="r-hint">材料：${mats}${info.labor ? ` · 工匠参考费用 ${info.labor} 奎支上下` : ""}</div>
+          <div class="r-hint">材料：${mats}${info.labor ? ` · 工匠参考费用 ${trpgSmithFee(info)} 奎支上下` : ""}</div>
           <div class="tr-row">
             ${info.canSelf ? `<button class="g-btn small" data-up="${esc(h.kit)}:${esc(k)}:self" ${info.enough ? "" : "disabled"}>在工作站自己升（只耗材料）</button>` : ""}
-            <span>工匠费用 <input type="number" value="${info.labor}" min="0" data-fee="${esc(k)}" style="width:90px"></span>
+            <span>工匠费用 <input type="number" value="${trpgSmithFee(info)}" min="0" data-fee="${esc(k)}" style="width:90px"></span>
             <button class="g-btn small" data-up="${esc(h.kit)}:${esc(k)}:smith" ${info.enough ? "" : "disabled"}>找工匠升（材料 + 费用）</button>
             <button class="g-btn small" data-up="${esc(h.kit)}:${esc(k)}:gm">主持人直接升（不耗）</button>
           </div></div>`;

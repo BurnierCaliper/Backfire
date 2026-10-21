@@ -368,6 +368,15 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **第三轮 · 单机低级 L-1 ~ L-7：全员复原刷新短休专长、兼修勾索拉首领、涉猎说明按实际写、工匠八折、精英等级、finishBattle 阶段保护、休息点短休灰掉**（issue #149；ledger.js · `ledgerRestoreAll`，feats.js · `featSkillTargetWhy` / `featSkills`，trpg.js · `trpgSmithFee` / `trpgUpgradeWeapon`，trpg-ui.js，rogue.js · `enemyLevel` / `battleSpec` / `finishBattle` / `restAtNode` / `canShortRestAtNode`，rogue-data.js · `eliteOverCap`，rogue-ui.js，rogue-commands.js；测试 `tests/third-round-solo-l.test.js`；L-8 按 issue 要求先不动）
+  - **L-1**：主持人「全员复原」以前清了 `shortUsed` / `restOnce` 漏了 `shortOnce`，以身作盾、挺身等「每次短休 N 次」的次数不刷新；现在一并清空。
+  - **L-2**：兼修后的勾索 / 战地包扎走原技能，以前最后还调专长自己的 `targetWhy`，把首领拦下；现在走原技能就只看原技能的目标判断（拉拽没有首领限制）。没兼修的勾索仍然拉不动首领。
+  - **L-3**：涉猎专长（没兼修）在技能栏的说明以前沿用原技能文字（震慑「每场两三次」、看破 / 硬撑 / 续时写两次、加固 15 级「可自选血量种类」、鼓劲 15 级加强），和实际不符；现在按 1 级（涉猎版不吃等级加强）取说明，去掉原技能写的「每场 N 次」，后面统一补专长实际的剩余次数。兼修完整版照原技能。
+  - **L-4**：跑团「找工匠升级」以前直接用参考费用（或主持人填的）收费，不打八折；现在不填费用时，带巧手匠人的队伍默认按 8 折（`trpgSmithFee`，界面默认值和参考费用也是八折价）。主持人另填的费用仍照填的收。
+  - **L-5**：精英战的 +1 级以前被本幕上限吞掉（`actDay ≥ 6` 后精英与普通战同级）；现在精英战的等级最多可以超过本幕「止」`ROGUE_CONFIG.eliteOverCap` 级（默认 1），幕末精英比普通战高 `eliteLevelBonus` 级。普通战、遭遇战、首领战不变；养成模式本来就不封顶。
+  - **L-6**：`finishBattle` 以前没有阶段保护；现在只在 `task` / `boss` 阶段接受，且 `task` 阶段的当前节点必须是战斗 / 精英（休息点遭遇战除外），否则报错并且不改任何状态。
+  - **L-7**：休息点「短休」以前没人有次数时照样能点、白过一站；现在没人能短休时按钮灰掉并写「今天大家的短休次数都用完了」，规则层也拒绝（`canShortRestAtNode`）。
+
 - **第三轮 · 联机低级五条：公开记录补全、任务面板不盖背包、任务提示合并、`offlineTick` 判空、转发限速先拒绝再断线**（issue #145；online-game.js · `actionLabel` / `onActionSettled` / `offlineTick`，online-view.js · `projectLogs`，online-ui.js · `observeQuests`，relay/worker.js · `RATE` / `RATE_KICK_OVER`；测试 tests/online-host.test.js、tests/relay.test.js、tests/online-ui.test.js）
   - **公开记录**：以前移动、起身、用道具只写「甲 · 移动 / 起身 / 使用道具」，回合开始只写「回合开始」，胜利 / 败北 / 撤退主机不产生记录；现在移动写「移动 → N 区」，用道具写「使用道具 名称 → 对象」（有落点再加「· 到 N 区」），起身写「起身 · 重新站起」，敌人回合收尾 / 开战写「第 N 回合开始」（回合开始的持续伤害、倒下摘要跟在这一行后面），战斗结束时按结果写「战斗胜利 / 战斗结束 / 队伍撤退」。全部只用玩家画面本来就看得到的信息，不带任何坚毅生命数值。
   - **任务面板**：以前任务日志和背包 / 资料共用一个容器，任务更新会把正在看的背包换回任务日志；现在只在容器里还是任务日志时才刷新。

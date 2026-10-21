@@ -97,7 +97,8 @@ test("M-3 每日任务「更换天气」：我方单位主动改天气记一次�
   assert.equal(S.playerWeatherChanges, 1);
   const t = forceTask(R, run, "weather", 1);
   R.acceptTask(run, 0);
-  run.party.length && R.finishBattle(run, "win");
+  run.task.nodes[run.task.index] = { type: "battle" };   // finishBattle 现在只认战斗节点（L-6）
+  R.finishBattle(run, "win");
   assert.equal(t.done, true);
 });
 

@@ -73,11 +73,12 @@ const Rogue = (function () {
     return C.extraActLevels[run.act - C.acts - 1] || C.extraActLevels[C.extraActLevels.length - 1];
   }
   /** 本幕此刻的敌人等级：随本幕已用天数从「起」涨到「止」 */
-  function enemyLevel(run, bonus) {
+  function enemyLevel(run, bonus, over) {
     if (run.growth) return Math.max(1, partyLevel(run) + (bonus || 0));
     const [a, b] = levelRange(run);
     const t = Math.min(1, (run.actDay || 0) / Math.max(1, C.daysPerAct));
-    return Math.max(a, Math.min(b, Math.round(a + (b - a) * t) + (bonus || 0)));
+    // over：允许超过本幕「止」几级（精英战用 C.eliteOverCap，其他战斗不超）
+    return Math.max(a, Math.min(b + (over || 0), Math.round(a + (b - a) * t) + (bonus || 0)));
   }
 
   /* ---------- 角色 ---------- */
@@ -900,7 +901,7 @@ const Rogue = (function () {
       enc.features = withRng(key + ":field", () => rollBattlefield(run, false, enc.zoneMode));
       return {
         kind: "elite", title: `${run.task.name} · ${tg.name}`,
-        party: partyKits, encounter: enc, level: enemyLevel(run, run.task.diff + C.eliteLevelBonus), seed: key, before, retreat: true
+        party: partyKits, encounter: enc, level: enemyLevel(run, run.task.diff + C.eliteLevelBonus, C.eliteOverCap), seed: key, before, retreat: true
       };
     }
     const enc = withRng(key, () => {
@@ -914,7 +915,7 @@ const Rogue = (function () {
     return {
       kind: node.type,
       title: `${run.task.name} · 第 ${run.task.index + 1} 站${node.type === "elite" ? "（精英）" : ""}`,
-      party: partyKits, encounter: enc, level: enemyLevel(run, bonus), seed: key, before, retreat: true
+      party: partyKits, encounter: enc, level: enemyLevel(run, bonus, node.type === "elite" ? C.eliteOverCap : 0), seed: key, before, retreat: true
     };
   }
 
@@ -930,7 +931,12 @@ const Rogue = (function () {
   /** 战斗结束后调用。outcome：win / lose / retreat */
   function finishBattle(run, outcome) {
     const notes = [];
+    if (run.stage !== "task" && run.stage !== "boss") throw new Error("现在不在战斗中");
     const boss = run.stage === "boss";
+    if (!boss && !run.ambush) {
+      const cur = currentNode(run);
+      if (!cur || (cur.type !== "battle" && cur.type !== "elite")) throw new Error("当前节点不是战斗");
+    }
     // 首领战不能撤退（rogue-data.js · bossRetreat）：规则层也拒绝，撤退不能算击败首领（以前只靠界面拦）
     if (boss && outcome === "retreat") throw new Error("首领战不能撤退");
     // 单人：这场没用完的支援次数带到之后的战斗
@@ -1474,12 +1480,20 @@ const Rogue = (function () {
       state.kuizhi = (Number(state.kuizhi) || 0) + pay;
       notes.push(`没有停下休息，顺手做了点零活：获得 ${pay} 奎支（现有 ${state.kuizhi}）。`);
     } else {
+      const can = canShortRestAtNode(run);
+      if (!can.ok) throw new Error(can.why);
       const r = withParty(run, () => ledgerShortRest(null, notes));
       notes.push(...r.notes);
       exhaustDeath(run, notes);
     }
     if (run.stage !== "over") advanceNode(run, notes);
     return logAll(run, notes);
+  }
+
+  /** 休息点的短休按钮：没人有次数时不能点（以前照样白过一站） */
+  function canShortRestAtNode(run) {
+    if (!shortRestLeftAll(run).some(x => x.left > 0)) return { ok: false, why: "今天大家的短休次数都用完了" };
+    return { ok: true };
   }
 
   /* ---------- 诊所：治疗与义体改造 ---------- */
@@ -2961,7 +2975,7 @@ function advanceDays(run, n) {
     battleSpec, applyPartyToField, finishBattle,
     checkInfo, checkChance, checkOdds, attemptCheck, skipCheck, heroProfs, parleyOptions, parley,
     role2Options, soloBattleInfo,
-    restPlan, restOptions, canLongRest, sheetData, armoryData, lowHpWarning, escortInfo, partOffers, buyPart, sellPart, canSellParts, partStock, partSellPrice, partInstallCost, installPart, removePart, restAtNode, leaveNode, canShortRestBefore, shortRestBeforeNode,
+    restPlan, restOptions, canLongRest, sheetData, armoryData, lowHpWarning, escortInfo, partOffers, buyPart, sellPart, canSellParts, partStock, partSellPrice, partInstallCost, installPart, removePart, restAtNode, leaveNode, canShortRestBefore, canShortRestAtNode, shortRestBeforeNode,
     ambushChance, watchOptions,
     interludeOptions, campStatus: campStatusOf, buy, shopPoints, redeemList, redeem, craftPlace, craftList, craftOdds, craft, knowsRecipe, learnOptions, learnRecipe, rollRecipeChip, salvageList, salvage, setCraftHooks, setCraftJob, craftQueue, craftQueued, bagCounts, inventory, recipeStatus, recipeBook, materialUses, workshopAvailable, craftListGrouped, craftPreview, recipesUsingMaterial, setBagOwnership, bagByCategory, materialBar, cyberSummary, modInstallPreview, matchupChart: (w, o) => matchupChart(w, o), matchupForState: (st, id) => matchupForState(st, id), itemCategory: id => itemCategory(id),  canShop, shopItemName, shopStock, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
     presentSmiths, smithInfo, claimBlueprint, installBlueprint, blueprintById, weaponModsOf,
