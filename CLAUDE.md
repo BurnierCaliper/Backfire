@@ -1,5 +1,7 @@
 # Antlerscale: Backfire · 给 Claude 的项目规则
 
+> 协作约定（分支流程、多个会话同时干活）见 [AGENTS.md](AGENTS.md)，开工前先看；下面是这个项目额外的规则。
+
 纯前端游戏（浏览器直接打开 `game.html`），规则计算在 `app.js` / `engine.js`，战斗画面在 `game.js`，联机在 `online-*.js` / `hotseat*.js`。上手说明见 `ROADMAP.md`，规则细节和每次改动的记录见 `README.md`。
 
 ## 改代码时必须做到
