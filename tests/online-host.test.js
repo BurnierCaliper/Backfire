@@ -153,19 +153,21 @@ test("公开记录：移动写去向、道具写名字和对象、起身写清�
   assert.ok(!/shp|坚毅/i.test(JSON.stringify(projected)));
 });
 
-test("转交角色（#165）：回合之间主持人把角色转给玩家，双方立刻换手，写一行公开记录；每人最多一个角色，收回给主持人", async () => {
+test("转交角色（#165）：回合之间主持人把角色转给玩家，双方立刻换手，写一行公开记录；一名玩家可以有几个角色，收回给主持人", async () => {
   const f = await fixture(); start(f);
   const { OnlineGame, HotseatGame } = f.c, ruby = f.state.units.find(u => u.kit === "ruby" && u.isPlayer && !u.weaponOf);
   const owners = () => Object.fromEntries(HotseatGame.getView().heroes.map(h => [h.id, h.owner]));
   assert.deepEqual(plain(OnlineGame.transferState()), { ok: true, reason: "" });
-  assert.throws(() => OnlineGame.transfer(ruby.id, "p2"), /最多操控一名角色/);   // 柯尔特还在 p2 手里：沿用每人一个角色的限制
+  OnlineGame.transfer(ruby.id, "p2");   // 柯尔特还在 p2 手里：#165 的每人一个角色限制已取消，可以再给他一个
+  assert.equal(owners()[ruby.id], "p2"); assert.equal(owners()[f.actor.id], "p2");
+  OnlineGame.transfer(ruby.id, "host");
   OnlineGame.transfer(f.actor.id, "host");   // 收回给主持人
   assert.equal(owners()[f.actor.id], "host");
   assert.throws(() => HotseatGame.assertActionFrom("p2", f.actor.id), /不是你的/);
   OnlineGame.transfer(ruby.id, "p2");
   assert.equal(owners()[ruby.id], "p2"); assert.equal(owners()[f.actor.id], "host");
   const logs = OnlineGame.getView().packet.publicLogs.filter(r => r.kind === "transfer");
-  assert.deepEqual(logs.map(r => [r.heroName, r.toName, !!r.toGM]), [[f.actor.name, "主持人", true], [ruby.name, "玩家", false]]);
+  assert.deepEqual(logs.map(r => [r.heroName, r.toName, !!r.toGM]), [[ruby.name, "玩家", false], [ruby.name, "主持人", true], [f.actor.name, "主持人", true], [ruby.name, "玩家", false]]);
   assert.deepEqual(f.errors, []);
 });
 

@@ -365,7 +365,8 @@ test("D2 integration: real authority projects assistance only to the owner and c
   });
   assert.ok(await page.isVisible("#hs-reaction"));
   assert.equal(await page.locator('[data-hs="answer"]').count(), 0);
-  assert.match(await page.textContent("#hs-countdown"), /^(19|20) 秒$/);
+  // #186（主人定）：热座的协助询问不限时，不再显示倒计时
+  assert.equal(((await page.textContent("#hs-countdown").catch(() => "")) || "").trim(), "");
   await page.selectOption("#hs-player", "p2");
   assert.equal(await page.locator('[data-hs="answer"]').count(), 1);
   await page.click('[data-hs="answer"]');

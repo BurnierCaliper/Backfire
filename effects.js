@@ -242,6 +242,8 @@ function onBreakTaken(u, amount, element, notes, wasDoppler) {
 /** 被打进失衡的那一刻 */
 function onBroken(u, notes) {
   if (!u || u.dead) return;
+  // 燃料罐（火焰喷射兵）：被打进失衡时罐子破裂（enemies.js · riotFuelBurst）
+  if (u.kit === "riot_flamer" && typeof riotFuelBurst === "function") riotFuelBurst(u, notes);
   // 刺骨：目标被击破时再次造成一次此伤害
   if (u.instant && u.instant.sting) stingPulse(u, "ice", notes, "刺骨（被击破）");
   // 过载：若过载期间被击破，发生过载爆炸，单位受到 等级 × 1d4 点电属性伤害

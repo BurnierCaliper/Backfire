@@ -377,6 +377,68 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
   - **夜晚色调**：`packet.clock` 在 18:00–05:00（和 ledger.js · isNightClock 一样）时玩家舞台加 `is-night`：战场区域压暗偏蓝、四周暗角（和 game.css 的 `.g-app.is-night` 一样），探索时时钟行变夜色；跑团和单局都一样。
   - **删掉旧的文字战场**（`ol-zones` / `gapsMarkup` / `zoneGrid` / `actionsMarkup`）：战斗一直走 online-battle.js，这套只在没加载 online-battle.js 时用，已经没有页面会走到。
   - **旧测试调整**：`tests/armory.test.js` 查「资料 / 武器」按钮的地方从 trpg-ui.js 改到 party-cards.js。新测试 `tests/online-player-ui.test.js`。
+- **联机跑团：不在场的角色分配不再被悄悄清掉；取消每名玩家一名角色的限制；自己的几个单位可以自由换位**（策划定；hotseat-game.js · `configure` / `transferHero`；online-ui.js 转交说明文字；测试 tests/online-assign.test.js、tests/online-host.test.js）
+  - 原因：`configure` 每次都把 `ownerByKit`（按职业记的操控者）整份清空，只按**当前场上**的英雄重建；而 online-game.js · `setupOperators` 在有人进 / 出房间（名单变了）时按场上英雄重新配置。主持人开了一场没带某名角色的战斗，期间或之后有玩家进出房间，这名不在场角色的分配就没了，回到全队后归主持人。
+  - 现在：重新配置时，不在场的角色保留原来的操控者（操控者已离开房间的仍回到主持人）。
+  - #165 的「每名在线玩家最多操控一名角色」取消：主持人分配和战斗中转交都可以把几名角色给同一名玩家（联机单局的分配限制没动）。
+  - 同一名玩家的几个单位：顺序锁定前互相换位直接生效（hotseat.js · `move` 原来就按操控者判断，以前因为一人一角色用不上）；和别人的单位换位仍要对方同意，不能动别人的单位。
+- **联机跑团「申请检定」界面**（规则在 #193 · `checkRequest` / `checkDecide`；新文件 `check-request-ui.js`）
+  - **以前**：玩家只能在掷骰窗口里点一个「申请检定」，看不到申请有没有被处理；主持人要切到「检定」页才看得到申请，战斗中看不到。**现在**：
+  - **玩家**：标题工具栏「申请检定」（有待处理的显示「· 等待 N」）→ 浮层：选自己操控的哪名角色（可以好几名）、熟练项（带熟练等级）、想做什么 → 提交。下面列「我的申请」：等主持人（可撤回；同一角色有一条在等时不能再提）/ 已同意（难度、成功率、成功或失败、d100 点数）/ 主持人没有同意 / 已撤回；还有队友最近的检定结果。
+  - **主持人**：有待处理的申请时左下角出现「检定申请 · N」（探索、战斗都在）→ 浮层：每条选难度（选项里写这名角色的成功率）「批准并掷骰」/「拒绝」，下面列最近处理的。原来「检定」页的列表和暗骰勾选（#193）照旧。
+  - 只用 `view.checkRequests` / `view.checks`（online-view.js 白名单），不画任何坚毅生命数值；浮层带 `.ovl`，按钮 44px，390px 不横向溢出。联机单局不出现。
+  - 单机热座（同一台设备）没有这条入口：大家看同一块屏幕，主持人直接在「检定」页发起即可。
+  - 新测试 `tests/check-request-ui.test.js`。
+  - **修（@claude 审查）**：主持人左下角「检定申请 · N」按钮以前误带 `.ovl`，`workshop.css` 后加载把它变成整屏遮罩（z-index 8500、inset 0），一有申请主持人就点不到下面的画面。现在按钮不带 `.ovl`，`online.css` 显式写 `inset: auto auto 12px 12px`；测试按 game.html 的顺序加载 `workshop.css`，并断言按钮在左下角、没有盖满屏幕。
+
+- **联机跑团：主持人暗骰检定、玩家主动发起检定、战斗模板「Lv随队」**（策划定；hotseat.js · `openCheck` / `rollCheckFor` / `requestCheck` / `decideCheck` / `tableNote`；hotseat-game.js · `checkSpec` / `checkRequest` / `checkDecide`；online-view.js · `checks` / `checkRequests` 白名单；online-game.js；battle-templates.js · `btPartyLevel` / `btOneEncounter`；trpg-ui.js、online-ui.js 只加了最小入口；测试 tests/trpg-online-rules.test.js）
+  - **暗骰**：以前只有小队频道的 🎲 能暗骰，而且只能选英雄；主持人「检定」页发起的检定没有暗骰，结果玩家都看得到。现在检定页可勾「暗骰」（`checkOpen` 带 `secret: true`，只有主持人能用）：目标可以是任何在场单位（敌人等没有角色卡的按没有熟练算），只有主持人能掷；检定本身、结果和频道里的记录都标 `secret`，`online-view.js` 不发给玩家。
+  - **主动发起检定**（照属性点申请）：玩家给自己的角色提 `{ type: "checkRequest", unitId, prof, note }` → 主持人 `{ type: "checkDecide", requestId, decision: "approve", diff }` 定难度同意，房主随即按角色卡建检定并权威掷骰（结果进小队频道、所有人可见）；`decision: "reject"` 不同意，`"cancel"` 申请人或主持人撤回。同一角色同时只能有一条待处理。玩家视图多了 `checkRequests: [{ id, unitId, unitName, operatorId, prof, note, status, checkId? }]`。
+  - **Lv随队**：以前模板里等级空着的敌人 / 配置物跟着开战时主持人选的战斗等级（默认 1 级）。现在跑团里开战时按队伍等级 `trpgPartyLevel()`（在队英雄等级平均，四舍五入，至少 1；和任务敌人默认等级、手册报酬用的是同一个数）。跑团外照旧跟着战斗等级。
+  - 坚毅生命照旧不进玩家的包。
+- **分步选择的技能：真正打出去之前随时能放弃，界面补上明显的「放弃（Esc）」按钮**（issue #188；game.js · `showPickBar` / `canGiveUp` / `pickUnit` / `pickZone`，app.js · `renderSkillFlow` 与 Esc 键；测试 `tests/skillflow-giveup.test.js`）。
+  - **核对结果**：战斗界面（单机、热座、联机玩家端共用 game.js）的分步选择一直是在本地把每一步的选择攒进 `picks`，最后一步选完才发**一条**技能指令，中途不扣行动点 / 附赠 / 资源、不换刀头、不改架势和标记、不记行动分；联机玩家端因此没有会残留在房主那边的 `skillFlow`。拆装部件的刀头也是在结算（`runSkill`）里才换，不是分步中途换的。计算器面板的分步（`beginSkillFlow`）放弃走 `cancelSkillFlow`，也不碰别的状态。
+  - **以前**：选目标 / 选区域时只有「右键 / 点空白处取消」的文字提示，没有按钮；计算器面板按 Esc 不会放弃分步。**现在**：战场上点选目标、选区域的每一步，提示栏旁边都有「放弃（Esc）」按钮（Esc、右键照旧）；计算器面板的按钮改名「放弃（Esc）」，Esc 也能放弃。
+  - **不变**：结算开始后照旧不能撤回；单机「撤销」按钮不受影响；结算队列里的点选（换刀头追击、扫描）有自己的按钮，不加放弃。
+  - **测试**：所有角色的所有分步技能「开始 → 放弃」后整个 state（除战斗记录）和开始前一样；拆装部件走一步后放弃，刀头、行动点、附赠、收回状态都不变。
+- **打中立生物的得分降到 1/4；格挡反伤打死的敌人算格挡者的击杀**（主人 10/21 定，Closes #187；app.js · `SCORE_RULES.neutralMul` / `scoreTargetMul` / `applyCombat` / `scoreEnvHit` / `scoreWeatherHelp` / `trackHealBy` / `noteSideDamage` / `explodeHigh` / 铁壁挡攻击 / `performAssistBlock`；测试 tests/issue-187.test.js）
+  - 中立生物（尘虫、管虫）：以前打它的伤害分、击破分、失衡分、溢出分（含环境分、天气加成）和打普通敌人一样满额，一只尘虫可以白送 50 分失衡分。现在这些分都只拿原来的 1/4（`SCORE_RULES.neutralMul = 0.25`，向下取整）。基准分照旧不算中立生物，击杀分 / 经验 / 掉落规则不变。
+  - 格挡反伤：以前雷鸣下成功的协助格挡反伤、哔哩哩格挡反伤、铁壁的过载 / 雷鸣反伤都是 `applyTypedDot(attacker, …)` 不传 `by`，又发生在敌人回合，所以反伤打死的敌人没人拿击杀（或算成之前打过它的别人）。现在这几处都传 `{ by: 格挡者 }`，按 #114 的击杀归属，反伤算格挡者造成的伤害，打死算他的击杀（铁壁算川川）。
+  - 没改：`effects.js` 的过载反伤是「被近战打时」触发、不是格挡，仍按 #114 原规则（没传 `by`，算行动中的人 / 不改最后一击）。
+- **#157 补查「需要作者确认」四条的决定**（Closes #186；hotseat.js · `openAsk` / `tick` / `extendAsk`；hotseat-game.js · `requestAsk` / `checkpoint` / `trpgOwnKit` / `smithUpgrade` / `workshopCraft` / `workshopSalvage`；trpg.js · `TRPG.smithOpen` / `workshopOpen` / `trpgSmithPacket` / `trpgSmithUpgrade` / `trpgWorkshopPacket` / `trpgWorkshopCraft` / `trpgWorkshopSalvage`；trpg-commands.js · `smithOpen` / `workshopOpen`；trpg-ui.js；online-game.js · `rawPacket` / `trpgPacketsFor`；online-view.js · `projectSmith` / `projectWorkshop`；online-ui.js；gm-commands.js · `patchUnit` / `edit` / `gm.copyUnit`；online-gm-ui.js；测试 `hotseat-bridge.test.js`、`trpg-online-smith-workshop.test.js`、`gm-unit-editor-parity.test.js`）
+  - **主持人危险按钮的二次确认 / 撤销**：主人定「不用」，**不做**。没有改代码，backlog 里标成「已定：不做」。
+  - **联机玩家端的武器升级 / 工坊 / 商人入口**：
+    - 联机单局：商店（买 / 卖 / 积分兑换）、工匠（武器升级 / 改装件）、工坊（制作 / 拆解 / 学配方）、背包的入口本来就有（`online-rogue.js · viewFor`、`online-ui.js` 的单局面板），**不缺**，只补了一条测试把这件事钉住。
+    - 联机跑团：商人（`shopBuy` / `shopSell` / `shopBuyback`）本来就有；**缺的是武器升级和工坊**，以前只有主持人面板能操作。现在主持人在「武器升级」页、「工坊」页各有一个「向联机玩家开放」开关（`TRPG.smithOpen` / `workshopOpen`，默认关，和诊所的 `clinicOpen` 一样不进存档），开了玩家在「物资」里就能看到入口。
+    - 武器升级：玩家只能升自己角色的武器；≤ 4 级可以「在工作站自己升」（只耗队伍背包里的材料），5 级以上「找工匠升」（材料 + 参考加工费 `trpgSmithFee`，带巧手匠人打八折），**加工费从这名角色自己的钱包出**（`trpgPayWith`），钱包不够 / 材料不够 / 工匠没开都失败且不扣任何东西。主持人面板里自己填费用、免费直升的做法不变。
+    - 工坊：玩家只能让自己的角色制作，由程序掷骰（难度按配方，可选一名队友打下手），推进游戏时间，失败损失材料，规则同主持人面板；会的配方才能做；拆解不花时间不花钱。**学配方仍由主持人教会**（`trpgTeachRecipe`），跑团里没有玩家自己学配方的规则，玩家端只显示「还不会（找主持人教会）」。
+    - 都由房主结算（hotseat-game.js 的 `smithUpgrade` / `workshopCraft` / `workshopSalvage`，只认自己操控的角色，主持人哪个都行），结果写进小队频道。发给玩家的数据只有材料数量、价格、成功率这类公开数字，经 `online-view.js · projectSmith / projectWorkshop` 白名单，**没有坚毅生命**。
+  - **热座（同一台设备）的协助询问 20 秒倒计时**：以前热座和联机一样，协助 / 格挡询问 20 秒没人点就当作不协助；现在热座**不限时**，和单机一样等人回答（`openAsk` 的 `untimed`，`deadline` 为 `null`，`tick` / `extendAsk` / `checkpoint` 都跳过空的截止时间）。联机的 20 秒不变，**掉线玩家的超时兜底（`online-game.js · offlineTick`）没有动**。
+  - **联机主持人的单位编辑器统一成单机那套**：以前联机面板只能改数值、状态、层生命；现在字段和单机编辑器（`app.js · renderEditor`）一样：名称、即时效果（熔融 / 刺骨 / 过载 / 错位 / 扩散 / 折射）、挂下一击的七种属性专属攻击效果、加 / 删血量层、改层类型、结算中和、回满架势、复制单位（只能复制敌人，多部件的飞碟不行）；切换自我效果时同步焚身层数、改感电震荡时同步（和单机 `CalcCommands` 一致）。校验沿用单机的取值范围（等级 1–25、名称 1–40 字、即时效果 / 攻击效果 / 层类型只能是单机能选的那些），新增的保护：删层至少留一层、一次最多 6 层。联机面板原有的额外字段（坚毅生命、行动点、个体值、富集）保留。没有搬的：「存进卡组」（单机计算器的角色卡库，联机没有）。
+
+- **外城区镇压部队：五个兵种入库**（issue #160，设计见 [docs/suppression-force.md](docs/suppression-force.md) 第 1、2 节；移动堡垒不在这次里）。以前没有这支部队；现在新增阵营「镇压队」和五个兵种，只在外城区出现（engine.js · `RIOT_STATS` / `enemyPresets`，growth.js · `ENEMY_RANK`，enemies.js · `RIOT_CFG` / `runEnemyActionInner` / `ZONE_THREATS` / `enemySkillList` / `ENEMY_SKILL_RANGE` / `HOSTILE_PAIRS`，app.js · `runOnConnect` / `dealTo` / `startEnemyPhase`，effects.js · `onBroken`，ai.js · `AI_SPEC` / `aiSpecial` / `aiTargetBase`，run.js · `ENEMY_INFO` / `ALLIED_FACTIONS` / `FACTION_MIX_CHANCE` / `encounterFactions`，bestiary.js · `BESTIARY_TEXT`；测试 tests/riot-force.test.js，tests/three-way.test.js 的友军名单加上镇压队）。
+  - **数值**（外层护盾、内层肉体，武器全是火；ATK 已比参照模板低 1）：镇压队员·警棍盾（杂兵 1 代币，兽人·牛）护盾 8 +2 / 肉体 12 +4 / 架势 4 / ATK 3 +1；镇压队员·燃烧步枪（杂兵 1，兽人·熊）6 +2 / 6 +2 / 3 / 4 +1；燃烧瓶投手（杂兵 1，兽人·蜥蜴）5 +2 / 5 +2 / 3 / 3 +1；火焰喷射兵（精英 2，兽人·熊）16 +6 / 26 +7，架势、ATK 成长照警卫队队长（牛），ATK 每级少 1；镇压小队长（精英 2，兽人·狼）15 +6 / 20 +5，架势、ATK 成长照警卫队队长（狼），ATK 每级少 1。杂兵架势每 10 级 +1；精英架势每 5 级 +1，10 级起照现有精英规则 ×60%。血量按队伍人数 `scaleHp`。
+  - **招式**：警棍盾——火焰警棍 atk + 1d4 火、2 击破、打中熔融；被动「防暴盾」：自己的护盾层还有血时，同区友军受到的远程攻击 −25%（用 `flags.drPct` 和其他百分比加算，多面盾不叠加）；协助冲到目标所在区普通攻击一次（带熔融）。燃烧步枪——燃烧弹 atk + 1d4 火、1 击破，打中后 `triggerOneStatus(t, src, "burn")` 激活灼烧（目标没有灼烧就不触发，也不会顺手激活别的状态）；协助远距 0.5×atk 火，同样激活。燃烧瓶投手——先标定区（`bottleZone / bottlePending / bottleReady`，区域预警「燃烧瓶标定 / 燃烧瓶待发」），下个敌人回合落地：那一区的敌对单位 0.5×atk 火、灼烧 1（已经是火场灼烧 2），然后那一区变火场；抛射越过危墙和关着的门；不能协助（`enemyMayAssist`）。火焰喷射兵——单体 3 段 0.3×atk 火；目标有灼烧时每段各 1 击破，没有时 3 段共 1 击破；每一段各掷 15% 灼烧 1（`runOnConnect` 新增 `burnEach`）；被动「燃料罐」：被打进失衡时同区所有单位（不分敌我）0.5×atk 火，那一区变火场（`onBroken → riotFuelBurst`）；协助冲进目标所在区喷火一次。镇压小队长——火焰手枪 atk + 1d6 火、1 击破、灼烧 1，远近皆可；协助远距 1×atk 火、灼烧 1；被动「指挥」只改 AI：他活着在场时，所有镇压队单位优先挑还没有灼烧的敌人（都有灼烧则照旧）。`runOnConnect` 另新增 `instant`（打中施加熔融这类即时效果）和 `activate`。
+  - **AI**：警棍盾、喷火兵近战主动贴近；步枪、投手远程主动远离；小队长远近皆可（不主动移动，够不着时走一步）。投手的标定 → 落地由 AI 自己跑完（照榴弹的流程）。
+  - **阵营和遭遇**：新阵营「镇压队」，只在外城区；和安保、警卫队是一伙（`ALLIED_FACTIONS` 加进第三个阵营，友军判断随之包含镇压队），和盗匪互相敌对（`HOSTILE_PAIRS`）。以前同伙阵营想混就混；现在新增配置表 `FACTION_MIX_CHANCE = { "镇压队": 0.15 }`，抽遭遇时用 `encounterFactions`：抽到镇压队只有 15% 混入安保 + 警卫队，抽到安保 / 警卫队时镇压队也只有 15% 加进来；没写在表里的阵营（安保 + 警卫队、盗匪）行为不变。外城区三方混战（`THREE_WAY`）保持原样，镇压队不进去。五个兵种的固定种族写在 `ENEMY_INFO.race`（与 #159 约定的格式），只写配置，种族被动另外实装；图鉴写了种族、招式和被动。
+  - **按文档字面做的几处，拿不准的在 PR 里问过**：投手落地只炸敌对的单位（文档写「那一区所有单位」，现按榴弹一样只炸敌对，`RIOT_CFG.bottle.friendlyFire` 可改）；防暴盾的「同区友军」包含警棍盾自己；精英的架势按「照队长写法」每 5 级 +1（文档第 1 节开头「每 10 级 +1」是写杂兵的狂徒写法）。
+  - **材料掉落**（items.js · `ENEMY_DROPS`，合并 main 后补）：警棍盾 废料 0.2 / 化工残液 0.1 / 电芯 0.08；燃烧步枪 化工残液 0.2 / 燃气浓缩物 0.08 / 废料 0.1；燃烧瓶投手 化工残液 0.25 / 燃气浓缩物 0.1；火焰喷射兵 燃气浓缩物 1.0 / 化工残液 0.65 / 电芯 0.3；镇压小队长 化工残液 0.65 / 燃气浓缩物 0.4 / 电芯 0.4 / 废料 0.3（期望份数，照掉落表的杂兵 / 精英区间）。种族由图鉴的种族栏显示，能力说明里不再重复写（tests/craft-materials.test.js 的敌人总数 45 → 50）。
+  - **作者确认（10/21）**：投手落地只炸敌对单位、防暴盾也算警棍盾自己，都按现在的做法。
+- **联机：移动校验和单机对齐 + 手机战斗画面三处**（issue #176，backlog「第三轮排查：联机 · 补查」；hotseat-validation.js · `descriptor` / `voidMoveCost` / `assertBase` / `checkMove`，online-battle.js · `isTouch` / `paintCards`，online-ui.js · `battleUi`，online.css；测试 tests/hotseat-validation.test.js、tests/feat-bugs-104.test.js、tests/online-ui.test.js）
+  - **移动消耗**：以前联机校验把移动写死成「1 附赠」，导体 / 探测模式用光附赠就被拦，酸液地面离开要附赠和行动点都有，越过空隙还要 1 附赠。现在用单机同一个 `moveBaseCost`：导体 / 探测模式 0，离开酸液地面只要 1 行动点，其余 1 附赠；越过空隙只要 1 行动点（荒原行者仍是 1 附赠）。没有荒原行者的角色在酸液地面行动点为 0 时，「移动」按钮直接灰掉并写原因。
+  - **深渊方向**：以前拦的是「从深渊走出」、放行「走进深渊」。现在和单机一样按目的区判断：地面单位不能走进深渊，站在里面的可以走出来。
+  - **缠绕 / 流沙**：被沙珊瑚缠住、流沙下陷 2 层以上，校验阶段就拒绝，原因（和单机日志同一句）回给玩家，不再「指令成功但单位没动」。
+  - **手机画面**（≤820px）：玩家战场框至少 50% 可视高度；轮到选目标时，战场自动滚到第一个目标所在的区（目标集合变化时才滚）；桌面布局不变。触屏设备（`hover: none` 或 `pointer: coarse`）提示改成「选择技能。点技能看说明。」，结束行动按钮不显示「空格」。选行动顺序 / 询问的弹层背景改为不透明，不再透出底下的字。
+
+- **补查修复：战斗规则 / 评分 / 训练场 7 条**（issue #175，backlog 战-M1 ~ M5、战-L1、战-L2）
+  - **战-M1 柯尔特普攻射程**：以前 `SKILL_RANGE.kolt_aa` 固定 0–1，电钻（只打同区）选得到距离 1 的敌人，行动点扣完才拒绝还记行动分。现在射程随刀头变：电钻 0–0、酸液炮 1–1，射程预检就拦下，不扣点不记分。（engine.js · `SKILL_RANGE_BY_STATE.kolt_aa`）
+  - **战-M2 燃烧瓶灼烧记所有者**：以前灼烧不记所有者，烧死的敌人算上一个打它的人。现在按 #114「持续伤害算状态所有者」算使用者。（items.js · `itemApplyStatus`）
+  - **战-M3 道具伤害记归属**：以前冰锥弹等即时效果道具打死敌人，击杀算上一个打过的人。现在用效果道具期间记使用者（`state._itemUserId`，`actingPlayerId` 回落到它），道具造成的伤害和挂的状态都算使用者，和手榴弹一致。（items.js · `useItemOn`，app.js · `actingPlayerId`）
+  - **战-M4 训练假人无个体值**：以前假人和精英牛带 ±10% 个体值，各角色同等级布置不同。现在生成时关掉个体值（`ENEMY_IV.off++`），同等级完全一样。（training.js · `setupField`）
+  - **战-M5 击破按实际扣掉的架势算**：以前击破分 / 击破数按名义击破，假人、背水一战、坚挺、已失衡的敌人都照加。现在按实际扣掉的架势（`result.breakSpent`）；对已失衡的敌人每一击不再加击破分（作者确认：实际扣多少算多少）。（engine.js · `applyResultToUnit`，app.js · `dealTo`）
+  - **战-L1 友军 / 飞行预检**：以前攻击友军、近战打飞行目标附赠不够，行动点先扣了才拒绝，还记行动分。现在在技能预检里拒绝，不扣点不记分。（app.js · `skillTargetError`）
+  - **战-L2 评分幕数**：以前按场上现存敌人的最高等级算，死掉的敌人移出后分数线变低。现在记下见过的最高等级（`state.scoreActLv`），开战重置。（app.js · `scoreAct` / `resetBattleRecords`）
+  - 测试：tests/combat-recheck-175.test.js（7 条，先在旧代码上失败）；tests/structures.test.js 的幕数断言改成「同一场记住最高等级，重新开战才重算」。
 
 - **敌人种族（一）：种族数据、随机 / 固定分配、六维换算、显示、主持人指定**（issue #159，设计见 `docs/enemy-race.md`；enemies.js · `ENEMY_RACES` / `applyEnemyRace` / `setEnemyRace` / `raceDelta`，run.js · `ENEMY_INFO` / `ENEMY_RACE_TABLES`，party.js · `blockChanceRaw`，gm-commands.js、battle-commands.js、battle-templates.js、trpg-commands.js、sim.js、bestiary.js、unit-card.js、online-view.js 等；测试 `tests/enemy-race.test.js`）。种族的**被动**不在这一条里（另开 issue），这里只把种族挂到敌人身上、换算六维、显示出来。
   - **以前**：敌人没有种族。**现在**：有机体的敌人生成时有种族，记在单位上 `u.race = { race, branch }`；生成的入口和个体值一样（`applyEnemyIV(u, iv, race)` 里先 `applyEnemyRace` 再个体值：`spawnEnemyGroup`、`spawnEncounterRows`、战斗命令加敌人、跑团「加敌人」、主持人生成敌人、`BattleSim.setup`）。

@@ -14,6 +14,8 @@ const TRPG = {
   camp: null,        // 营地（长休前）：{ plan, force, status: ledger.js · campStatus }；联机玩家也看到
   taskBattle: null,  // 正在打的任务战斗 { id, index }（trpg-tasks.js）
   clinicOpen: false, // 诊所向联机玩家开放（玩家可以申请义体改造），主持人在「诊所」页开关
+  smithOpen: false,  // 工匠向联机玩家开放（玩家给自己的武器升级，加工费从这名角色的钱包出），主持人在「武器升级」页开关
+  workshopOpen: false, // 工坊向联机玩家开放（玩家给自己制作 / 拆解），主持人在「工坊」页开关
   cyberRequests: []  // 联机玩家的改造申请：[{ id, kit, plan, by, byName, status: pending / done / denied, note }]
 };
 
@@ -182,6 +184,68 @@ function trpgSalvage(itemId) {
   bagAdd(itemId, -1);
   Object.keys(y).forEach(id => bagAdd(id, y[id]));
   return [`拆掉 ${ITEM_CATALOG[itemId].name}：拿回 ${Object.keys(y).map(id => `${ITEM_CATALOG[id].name}×${y[id]}`).join("、")}。`];
+}
+/* ---------- 联机玩家的武器升级 / 工坊（规则同主持人面板，入口在 online-ui.js；联机由房主结算，hotseat-game.js）----------
+ * 主持人开了「工匠 / 工坊向联机玩家开放」玩家才能用；只能动自己操控的角色；钱从这名角色自己的钱包出。
+ * 发给玩家的包里只有材料数量、价格、成功率这类公开数字，没有坚毅生命。 */
+/** 联机包 / 界面：{ kit, name, purse, weapons: [{ kit, name, lv, next, max, canSelf, enough, fee, mats }] } */
+function trpgSmithPacket(kit) {
+  const u = trpgHero(kit);
+  if (!u) return null;
+  const weapons = (u.linkedKits || []).map(k => {
+    const info = trpgUpgradeInfo(u, k);
+    return { kit: k, name: typeof weaponName === "function" ? weaponName(k) : k, lv: info.lv, next: info.next, max: !!info.max, canSelf: !!info.canSelf,
+      enough: !!info.enough, fee: info.max ? 0 : trpgSmithFee(info), mats: info.mats.map(m => ({ name: m.name, need: m.need, have: m.have })) };
+  });
+  return { kit, name: u.name, purse: trpgPurse(kit), weapons };
+}
+/** 玩家升级武器：mode self（工作站，≤ 4 级，只耗材料）/ smith（找工匠，材料 + 参考加工费，费用从这名角色的钱包出）；失败抛错，不扣钱 */
+function trpgSmithUpgrade(kit, weaponKit, mode) {
+  if (!TRPG.smithOpen) throw new Error("工匠现在没开");
+  if (mode !== "self" && mode !== "smith") throw new Error("不认识的升级方式");
+  const u = trpgHero(kit);
+  if (!u) throw new Error("没有这名角色");
+  if (u.dead) throw new Error(`${u.name} 已死亡`);
+  if (!(u.linkedKits || []).includes(weaponKit)) throw new Error("这不是你的武器");
+  const before = trpgWeaponLevel(u, weaponKit);
+  const notes = mode === "smith" ? trpgPayWith(kit, () => trpgUpgradeWeapon(kit, weaponKit, "smith")) : trpgUpgradeWeapon(kit, weaponKit, "self");
+  if (trpgWeaponLevel(u, weaponKit) === before) throw new Error(notes[0] || "升不了");
+  return notes;
+}
+/** 联机包 / 界面：{ kit, name, recipes: [{ id, name, prof, diff, diffName, hours, known, level, chance, mats }], salvage: [{ id, name, qty, yields }], points } */
+function trpgWorkshopPacket(kit) {
+  const u = trpgHero(kit);
+  if (!u) return null;
+  const recipes = EFFECT_ITEMS.filter(it => CRAFT_RECIPES[it.id]).map(it => {
+    const rc = CRAFT_RECIPES[it.id], o = trpgCraftOdds(kit, it.id, null, null);
+    return { id: it.id, name: it.name, prof: it.prof, diff: it.diff, diffName: ROGUE_CHECKS.diffs[it.diff].name, hours: CRAFT_RULES.hours[it.diff],
+      known: trpgKnowsRecipe(it.id), level: o ? o.level : 0, chance: o ? Math.round(o.chance * 1000) / 10 : 0,
+      mats: Object.keys(rc).map(id => ({ id, name: ITEM_CATALOG[id].name, need: rc[id], have: bagCount(id) })) };
+  });
+  const salvage = bagList().filter(x => salvageYield(x.id)).map(x => {
+    const y = salvageYield(x.id);
+    return { id: x.id, name: x.name, qty: x.qty, yields: Object.keys(y).map(id => `${ITEM_CATALOG[id].name}×${y[id]}`).join("、") };
+  });
+  return { kit, name: u.name, recipes, salvage, points: trpgPointsInfo().points };
+}
+/** 玩家制作：程序掷骰，难度按配方，可以让队友打下手；配方要主持人教会才行。成功率 / 材料不够这类失败抛错，不推进时间 */
+function trpgWorkshopCraft(kit, item, helper) {
+  if (!TRPG.workshopOpen) throw new Error("工坊现在没开");
+  const it = craftItem(item);
+  if (!it) throw new Error("没有这个配方");
+  if (!trpgKnowsRecipe(it.id)) throw new Error(`还不会做${it.name}，要主持人教会配方`);
+  const r = trpgCraftOne({ kit, item: it.id, helper: helper || null, result: "roll" });
+  if (!r.hours) throw new Error(r.notes[0] || "做不了");
+  return r.notes.concat(trpgPassHours(r.hours));
+}
+/** 玩家拆解背包里的东西（不花时间、不花钱） */
+function trpgWorkshopSalvage(kit, itemId) {
+  if (!TRPG.workshopOpen) throw new Error("工坊现在没开");
+  const u = trpgHero(kit);
+  if (!u || u.dead) throw new Error("没有这名角色");
+  const notes = trpgSalvage(itemId);
+  if (!/^拆掉/.test(notes[0] || "")) throw new Error(notes[0] || "拆不了");
+  return notes;
 }
 /** 背包里的东西 ±n（丢弃、剧情里拿走 / 得到） */
 function trpgAdjustItem(id, n) {
