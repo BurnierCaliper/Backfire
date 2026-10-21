@@ -305,7 +305,7 @@ function bestiaryEntries() {
         faction: info.faction || (BESTIARY_TEXT[p.id] || {}).faction || "", regions: info.regions || (BESTIARY_TEXT[p.id] || {}).regions || [],
         seen: !!d.kits[p.id], rec: d.kits[p.id] || null,
         text: BESTIARY_TEXT[p.id] || null, rankNote: BESTIARY_RANK_NOTE[rank] || "",
-        // 可能掉的制作材料（items.js · enemyDropTable）：[{ id, name, chance 期望份数 }]，界面未接（给 Akane）
+        // 可能掉的制作材料（items.js · enemyDropTable）：[{ id, name, chance 期望份数 }]，图鉴详情「可能掉落」一节显示（bestiary-ui.js · dropsSection）
         drops: typeof enemyDropTable === "function" ? enemyDropTable(p.id) : []
       };
     });
