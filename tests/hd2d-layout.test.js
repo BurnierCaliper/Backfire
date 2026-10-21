@@ -208,9 +208,10 @@ test("原型的浏览器脚本能通过语法检查，规则文件加载顺序�
   ["three.module.min.js", "addons/controls/OrbitControls.js", "addons/postprocessing/BokehPass.js", "addons/postprocessing/UnrealBloomPass.js",
     "addons/postprocessing/OutputPass.js", "addons/postprocessing/ShaderPass.js", "addons/postprocessing/RenderPass.js", "addons/postprocessing/EffectComposer.js", "addons/renderers/CSS2DRenderer.js"]
     .forEach(f => assert.ok(fs.existsSync(path.join(base, f)), f));
-  // 规则文件（和 headless 一个顺序），后面接联机的展示白名单 online-view.js（#204：画面只用它投影过的状态）
+  // 规则文件（和 headless 一个顺序），后面接联机的展示白名单 online-view.js（#204：画面只用它投影过的状态），
+  // 再接正式游戏的 2D 演出 attack-fx.js / hit-fx.js（#230：攻击演出和受击粒子，原样加载）
   const tags = [...html.matchAll(/<script src="\.\.\/\.\.\/([^"]+)"><\/script>/g)].map(m => m[1]);
-  assert.equal(tags.join(), H.RULE_FILES.filter(f => fs.existsSync(path.join(__dirname, "..", f))).concat(["online-view.js"]).join());
+  assert.equal(tags.join(), H.RULE_FILES.filter(f => fs.existsSync(path.join(__dirname, "..", f))).concat(["online-view.js", "attack-fx.js", "hit-fx.js"]).join());
 });
 
 /* ---------- 第一阶段打磨（issue #191）---------- */
