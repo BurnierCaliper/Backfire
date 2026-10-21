@@ -144,7 +144,12 @@
       t = t && typeof t === "object" ? t : {};
       return { seq: Number(t.seq) || 0, title: t.title && typeof t.title.text === "string" ? t.title : null, checks: (Array.isArray(t.checks) ? t.checks : []).filter(c => c && Array.isArray(c.targets)).slice(-TABLE_KEEP),
         attrs: (Array.isArray(t.attrs) ? t.attrs : []).filter(r => r && Array.isArray(r.attrs)).slice(-TABLE_KEEP),
-        checkReqs: (Array.isArray(t.checkReqs) ? t.checkReqs : []).filter(r => r && typeof r.prof === "string").slice(-TABLE_KEEP) };
+        checkReqs: trimReqs((Array.isArray(t.checkReqs) ? t.checkReqs : []).filter(r => r && typeof r.prof === "string")) };
+    }
+    /** 检定申请只保留最近 TABLE_KEEP 条，但待处理的一条都不丢（先丢最旧的已处理记录） */
+    function trimReqs(list) {
+      while (list.length > TABLE_KEEP) { const i = list.findIndex(r => r.status !== "pending"); if (i < 0) break; list.splice(i, 1); }
+      return list;
     }
     function tableNote(id, text, secret) {
       const op = operator(id);
@@ -188,7 +193,7 @@
     }
     /** 主持人发起检定。spec：{ prof, diff, diffName, note, secret?, targets: [{ unitId, name, base, adv, dis, reroll, level, perkText }] }
      *  secret：暗骰检定（目标可以是任何单位，只有主持人能掷，检定和结果都不发给玩家）。返回快照；新检定是 table.checks 最后一条 */
-    function openCheck(id, spec) {
+    function openCheck(id, spec, quiet) {
       operator(id);
       if (id !== gmId) fail("table_gm", "只有主持人能发起检定");
       const secret = !!(spec && spec.secret);
@@ -201,7 +206,7 @@
       table.checks.push(check);
       if (table.checks.length > TABLE_KEEP) table.checks.splice(0, table.checks.length - TABLE_KEEP);
       tableNote(id, `${secret ? "暗骰 · " : ""}主持人发起${check.diffName}「${check.prof}」检定：${check.targets.map(t => t.name).join("、")}${check.note ? "（" + check.note + "）" : ""}`, secret);
-      return emit("table");
+      return quiet ? null : emit("table");
     }
     function rollCheckFor(id, checkId, unitId) {
       operator(id);
@@ -239,7 +244,7 @@
       const row = { id: "ckreq-" + (++table.seq), unitId: String(unitId), unitName: String(name || unitId).slice(0, 40), operatorId: id,
         prof: prof.slice(0, 20), note: String(note || "").slice(0, 200), status: "pending", at: now() };
       table.checkReqs.push(row);
-      if (table.checkReqs.length > TABLE_KEEP) table.checkReqs.splice(0, table.checkReqs.length - TABLE_KEEP);
+      trimReqs(table.checkReqs);
       tableNote(id, `${row.unitName} 申请「${row.prof}」检定${row.note ? "（" + row.note + "）" : ""}，等主持人定难度`);
       return emit("table");
     }
@@ -248,14 +253,31 @@
       operator(id);
       const row = table.checkReqs.find(r => r.id === reqId);
       if (!row || row.status !== "pending") fail("table_check", "这条检定申请已经处理过了");
-      if (decision === "cancel") { if (id !== row.operatorId && id !== gmId) fail("table_owner", "只能撤回自己的申请"); row.status = "cancelled"; row.decidedAt = now(); return emit("table"); }
+      if (decision === "cancel") {
+        if (id !== row.operatorId && id !== gmId) fail("table_owner", "只能撤回自己的申请");
+        row.status = "cancelled"; row.decidedAt = now();
+        tableNote(id, `${row.unitName} 的「${row.prof}」检定申请已${id === row.operatorId ? "撤回" : "被主持人撤回"}`);
+        return emit("table");
+      }
       if (id !== gmId) fail("table_gm", "只有主持人能处理检定申请");
-      if (decision !== "approve") { row.status = "rejected"; row.decidedAt = now(); return emit("table"); }
+      if (decision !== "approve") {
+        row.status = "rejected"; row.decidedAt = now();
+        tableNote(id, `主持人没有同意 ${row.unitName} 的「${row.prof}」检定申请`);
+        return emit("table");
+      }
       if (!spec || !Array.isArray(spec.targets) || spec.targets.length !== 1 || spec.targets[0].unitId !== row.unitId) fail("table_check", "检定要按申请的角色来");
-      openCheck(id, Object.assign({}, spec, { secret: false, note: spec.note || row.note }));
-      const check = table.checks[table.checks.length - 1];
-      row.status = "approved"; row.decidedAt = now(); row.checkId = check.id;
-      return rollCheckFor(id, check.id, row.unitId);   // 房主权威掷骰，结果写进小队频道、所有人都看得到
+      // 建检定和掷骰要么都成，要么都不算：掷骰出错时撤掉刚建的检定和频道记录，申请仍是待处理（不留「已同意 + 检定还开着」的半截状态）
+      const keepChecks = table.checks.slice(), keepChat = chat.slice(), keepSeq = table.seq;
+      try {
+        openCheck(id, Object.assign({}, spec, { secret: false, note: spec.note || row.note }), true);
+        const check = table.checks[table.checks.length - 1];
+        row.status = "approved"; row.decidedAt = now(); row.checkId = check.id;
+        return rollCheckFor(id, check.id, row.unitId);   // 房主权威掷骰，结果写进小队频道、所有人都看得到
+      } catch (e) {
+        table.checks = keepChecks; chat.splice(0, chat.length, ...keepChat); table.seq = keepSeq;
+        row.status = "pending"; delete row.decidedAt; delete row.checkId;
+        throw e;
+      }
     }
     /** 玩家给自己的角色申请属性点（一次一点），主持人确认后才真正加上 */
     function requestAttr(id, unitId, attr, name) {

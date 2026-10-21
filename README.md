@@ -368,6 +368,12 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **#193 / #196 审查补充**（hotseat.js · `decideCheck` / `trimReqs`；trpg-ui.js；ROADMAP.md；测试 tests/check-followups.test.js）
+  - 主持人同意检定申请时，建检定和掷骰要么都成功，要么都撤回：掷骰出错会撤掉刚建的检定和频道记录，申请仍是待处理，不再留下「已同意但检定还开着」的半截状态。
+  - 主持人不同意、申请被撤回时，小队频道写一行说明，玩家知道申请为什么没了。
+  - 检定申请超过 20 条时先丢最旧的已处理记录，待处理的申请不会被挤掉。
+  - 检定页的「暗骰」勾选：以前发起后一直勾着，下次容易误发暗骰；现在**发起成功后**才自动取消（`trpg-ui.js · checkSubmit` 的 onOk），发起失败时保持勾选，避免再点一次变成公开检定、把结果漏给玩家。
+  - ROADMAP 里「合作单局每人一名角色」的规则说明改成跑团可以一人多角色。
 - **联机玩家「物资」→「钱包与商店」，「背包」改用共用背包浮层，道具只列一处**（设计师反馈「物资和背包分不清、东西列了两遍」；online-ui.js · `suppliesMarkup` / `suppliesButton` / `trpgBagModel` / `openBag` / `openBackpack` / `closeMyBag` / `render` / `rogueMarkup` / `openInfo`，backpack-ui.js · `open` / `refresh` / `inBattleMode` / `html`，workshop-data-adapter.js · `viewBackpackModel`，backpack.css，online.css；测试：新增 tests/online-bag-ui.test.js，改 tests/online-ui.test.js、tests/online-session-ui.test.js、tests/shop-sell-ui.test.js）
   - **以前**：跑团玩家的「物资」弹窗既有商店 / 工匠 / 工坊 / 诊所 / 钱包，又在底下列一遍「队伍公共物资」（奎支、水、道具 × 数量）；「背包」按钮又向房主要一份文字清单；联机单局标题栏有「背包」，正文「工坊与背包」里又有一个「背包」。
   - **钱包与商店**（跑团，原「物资」，`data-online="supplies"` 不变）= 钱和花钱的地方：公账 / 奎支、自己的钱包、商店、工匠、工坊、诊所 · 义体，顶上一行说明「队伍的道具在「背包」里看」，不再列道具。**联机单局不显示这个按钮**：单局的钱包、商店、工匠、诊所、工坊都在正文和队伍卡上，而 `state.kuizhi` 在单局只是马上平分清零的临时公账。
@@ -461,6 +467,7 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
   - **暗骰**：以前只有小队频道的 🎲 能暗骰，而且只能选英雄；主持人「检定」页发起的检定没有暗骰，结果玩家都看得到。现在检定页可勾「暗骰」（`checkOpen` 带 `secret: true`，只有主持人能用）：目标可以是任何在场单位（敌人等没有角色卡的按没有熟练算），只有主持人能掷；检定本身、结果和频道里的记录都标 `secret`，`online-view.js` 不发给玩家。
   - **主动发起检定**（照属性点申请）：玩家给自己的角色提 `{ type: "checkRequest", unitId, prof, note }` → 主持人 `{ type: "checkDecide", requestId, decision: "approve", diff }` 定难度同意，房主随即按角色卡建检定并权威掷骰（结果进小队频道、所有人可见）；`decision: "reject"` 不同意，`"cancel"` 申请人或主持人撤回。同一角色同时只能有一条待处理。玩家视图多了 `checkRequests: [{ id, unitId, unitName, operatorId, prof, note, status, checkId? }]`。
   - **Lv随队**：以前模板里等级空着的敌人 / 配置物跟着开战时主持人选的战斗等级（默认 1 级）。现在跑团里开战时按队伍等级 `trpgPartyLevel()`（在队英雄等级平均，四舍五入，至少 1；和任务敌人默认等级、手册报酬用的是同一个数）。跑团外照旧跟着战斗等级。
+  - 补充：「随队」的等级在开战建遭遇（`battleTemplateToEncounter`）的那一刻按当时的队伍等级算好写进遭遇，之后战斗中有人升级不会改变已经上场敌人的等级。
   - 坚毅生命照旧不进玩家的包。
 - **分步选择的技能：真正打出去之前随时能放弃，界面补上明显的「放弃（Esc）」按钮**（issue #188；game.js · `showPickBar` / `canGiveUp` / `pickUnit` / `pickZone`，app.js · `renderSkillFlow` 与 Esc 键；测试 `tests/skillflow-giveup.test.js`）。
   - **核对结果**：战斗界面（单机、热座、联机玩家端共用 game.js）的分步选择一直是在本地把每一步的选择攒进 `picks`，最后一步选完才发**一条**技能指令，中途不扣行动点 / 附赠 / 资源、不换刀头、不改架势和标记、不记行动分；联机玩家端因此没有会残留在房主那边的 `skillFlow`。拆装部件的刀头也是在结算（`runSkill`）里才换，不是分步中途换的。计算器面板的分步（`beginSkillFlow`）放弃走 `cancelSkillFlow`，也不碰别的状态。
