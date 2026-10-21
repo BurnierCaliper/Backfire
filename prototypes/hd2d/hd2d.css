@@ -135,6 +135,8 @@ body { position: fixed; inset: 0; user-select: none; }
 /* 近景里别的区的铭牌：变淡（透明度在场景里乘 PLATE.dim），再糊一点（铭牌是 DOM，后期的景深糊不到它）；悬停 / 选中时照常看得清 */
 .hd2d-plate.dim .pl-in { filter: blur(1.6px) saturate(.75); }
 .hd2d-plate.dim.hover .pl-in, .hd2d-plate.dim.sel .pl-in { filter: none; }
+/* 特写（#237，近景里双击一个单位）：它的铭牌在场景里再放大（transform 的 scale 乘 CAMERA.close.zoom）、叠在最上面（.close）；别的铭牌压到它的藏起来 */
+.hd2d-plate.hide .pl-in, .hd2d-plate.hide .pl-post { visibility: hidden; }
 /* 减少动态效果：铭牌不浮动、小箭头不动（场景那边其它动画也停） */
 .hd2d-labels.still .pl-bob, .hd2d-labels.still .pl-mark { animation: none; }
 @media (prefers-reduced-motion: reduce) { .pl-bob, .pl-mark { animation: none; } }
