@@ -38,7 +38,10 @@
     side: [{ gap: 0, step: 1.8 }, { gap: 2.1, step: 2.1 }],
     shack: { w: [1.0, 1.5], h: [0.75, 1.05], d: [0.8, 1.1] },
     house: { w: [1.3, 2.0], h: [0.95, 1.4], d: [1.0, 1.4] },
-    houses: 0.4
+    houses: 0.4,
+    lit: { day: 0, dusk: 0.3, night: 0.55 },   // 几成的门洞 / 窗洞透出暖光（自己发光，泛光会抓到）；glow 光的颜色
+    glow: 0xffb060,
+    flue: 0.35                                 // 几成的棚屋顶上插一根烟囱管
   };
   /** 一间棚屋 / 矮房子的样子（× 这一间的宽 / 进深 / 高）：roof 屋顶比墙宽多少、深多少，lean 屋顶往门那边挪多少，eave 中心离门前那条线至少多远
    *  （= 屋顶伸出去的那一截：roof.d / 2 + lean，再留一点），door / win 门洞、窗洞的宽高 */
@@ -64,7 +67,13 @@
       palette: "street",
       decor: { band: 3, ledge: 2, size: [0.16, 0.22], kinds: ["barrel", "barrel", "tire"] },
       backdrop: { slum: true, pipes: true, cliffs: true, band: "desert" },
-      light: { all: { tint: { fog: [0xd8b47a, 0.25], hemiGround: [0xb08850, 0.35] } } }
+      // 黄沙反上来的暖光、带沙尘的雾；白天天色偏土黄，夜里棚屋透出暖光（SLUM.lit），路灯亮一点
+      light: {
+        all: { tint: { fog: [0xd8b47a, 0.25], hemiGround: [0xb08850, 0.35] } },
+        day: { tint: { sky: [0xe8cf98, 0.18] }, grade: { temp: [1.06, 1.0, 0.9] } },
+        dusk: { tint: { fog: [0xd0905a, 0.12] } },
+        night: { tint: { hemiGround: [0x3a2c20, 0.3] }, scale: { lamp: 1.15 } }
+      }
     }
   };
   /** 地面主题（并进布局的 GROUNDS，写法同 hd2d-layout.js 的 GROUNDS）：顶面 / 侧面贴图是这里画的（art 开头），backdrop 指回这一套 */
@@ -258,7 +267,9 @@
     }, seed + 7);
     return {
       sheet: P.sheet.map(c => std(c, sheetTex)), wall: P.wall.map(c => std(c, wallTex, { metalness: 0 })),
-      roof: P.roof.map(c => std(c, sheetTex)), dark: std(P.dark, null, { roughness: 1, metalness: 0 })
+      roof: P.roof.map(c => std(c, sheetTex)), dark: std(P.dark, null, { roughness: 1, metalness: 0 }),
+      glow: env.keep(new THREE.MeshBasicMaterial({ color: new THREE.Color(SLUM.glow).multiplyScalar(1.8), toneMapped: false, fog: false })),
+      lit: SLUM.lit[env.theme] || 0
     };
   }
   /** 一间铁皮棚屋 / 矮房子：方盒子（铁皮的 / 砖墙的），单坡屋顶往前伸出一截，前面一个黑门洞、矮房子再开一两个窗洞；屋顶上压几块石头 */
@@ -268,11 +279,15 @@
     body.position.y = h.h / 2; g.add(body);
     const roof = new THREE.Mesh(new THREE.BoxGeometry(h.w * HUT.roof.w, 0.05, h.d * HUT.roof.d), pick(M.roof));
     roof.position.set(0, h.h + 0.05, h.d * HUT.lean); roof.rotation.x = HUT.tilt[h.kind]; g.add(roof);
-    const door = new THREE.Mesh(new THREE.PlaneGeometry(h.w * HUT.door[0], h.h * HUT.door[1]), M.dark);
+    const hole = () => (R() < M.lit ? M.glow : M.dark);   // 傍晚 / 夜里一部分透出暖光
+    const door = new THREE.Mesh(new THREE.PlaneGeometry(h.w * HUT.door[0], h.h * HUT.door[1]), hole());
     door.position.set((R() - 0.5) * h.w * 0.4, h.h * HUT.door[1] / 2, h.d / 2 + 0.006); g.add(door);
     if (h.kind === "house") {
-      const win = new THREE.Mesh(new THREE.PlaneGeometry(h.w * HUT.win[0], h.h * HUT.win[1]), M.dark);
+      const win = new THREE.Mesh(new THREE.PlaneGeometry(h.w * HUT.win[0], h.h * HUT.win[1]), hole());
       win.position.set(door.position.x > 0 ? -h.w * 0.25 : h.w * 0.25, h.h * 0.6, h.d / 2 + 0.006); g.add(win);
+    } else if (R() < SLUM.flue) {   // 棚屋顶上的烟囱管
+      const flue = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, h.h * 0.5, 6), M.dark);
+      flue.position.set((R() - 0.5) * h.w * 0.6, h.h * 1.2, -h.d * 0.2); g.add(flue);
     }
     return g;
   }
