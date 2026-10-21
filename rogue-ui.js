@@ -380,9 +380,7 @@
         </div>`;
     },
     shop: () => `<p>路边有个摊子。手里有 ${money()} 奎支。</p>
-        ${shopList()}
-        ${partRows(null)}
-        ${repairRows()}
+        ${shopTabs()}
         <button class="g-btn r-main" id="r-leave">离开</button>`,
     smith: () => {
       const id = query("presentSmiths")[0];
@@ -524,6 +522,39 @@
         <span class="s-price">${r.price}</span>
         <button class="g-btn" data-buy="${esc(r.key)}" ${money() < r.price ? "disabled" : ""}>买</button></div>`;
     }).join("")}</div>${redeemList()}`;
+  }
+  /* ---------- 商店 · 买 / 卖页签（shop-sell-ui.js；规则在 rogue.js · shopSellView / sellItem / buybackItem） ---------- */
+  function sellView() {
+    // 联机房主可能操控好几名角色：他们名下的东西和回购单都要列出来
+    try { return online() ? Rogue.shopSellView(run, { kits: OnlineRogue.hostKits() }) : query("shopSell", {}); } catch (_) { return null; }
+  }
+  function sellModel() {
+    const heroes = run.party.filter(h => !h.dead).map(h => ({ kit: h.kit, name: Rogue.heroName(h.kit), purse: online() ? OnlineRogue.purse(h.kit) : null }));
+    const mine = online() ? (k => OnlineRogue.hostKits().includes(k)) : null;
+    // 单机：东西都是公用的，钱进奎支（卖的人记成 "party"）
+    return ShopSellUI.model(sellView(), { key: "run", heroes, mine, actor: online() ? hostPayer() : "party", canAct: online() ? null : () => true,
+      money: k => online() ? OnlineRogue.purse(k) : money() });
+  }
+  function shopTabs() {
+    const buy = () => `${shopList()}${partRows(null)}${repairRows()}`;
+    if (!window.ShopSellUI) return buy();
+    const v = sellView();
+    ShopSellUI.sync("run", !!v);
+    const sell = ShopSellUI.tabOf("run") === "sell";
+    return `<div class="ss-host" data-ss-host="run">${ShopSellUI.tabsHtml("run", { sellOff: !v })}${sell ? ShopSellUI.html(sellModel()) : buy()}</div>`;
+  }
+  /** 卖 / 买回：run {action:"sellItem"|"buybackItem"}（rogue.js · sellItem / buybackItem，失败会抛错）；提示钱进了谁的钱包 */
+  function sellAct(cmd) {
+    let res, error;
+    try {
+      if (online()) OnlineRogue.checkHost(cmd);
+      res = dispatch(Object.assign({ type: "run" }, cmd), { run });
+      if (window.Sfx) Sfx.ui("coin");
+    } catch (e) { error = e; }
+    const text = res && typeof res === "object" && !Array.isArray(res) ? ShopSellUI.toastText(res, k => k === "party" ? "队伍" : Rogue.heroName(k)) : "";
+    completeAction(text ? [text] : Array.isArray(res) ? res : [], error);
+    if (text) ShopSellUI.toast(text);
+    else if (error) ShopSellUI.toast(`没做成：${error.message}`);
   }
   /** 商店积分：每花 ROGUE_SHOP_POINTS.per 奎支得 1 分，兑换自我效果道具（联机时是房主自己的积分） */
   function redeemList() {
@@ -723,7 +754,7 @@
       case "task": return renderTask();
       case "camp": {
         const plan = query("restPlan", restSel);
-        const shopping = C.campShop ? `<p class="r-hint">回到城里，出发前可以补货。手里有 ${money()} 奎支。</p>${shopList()}${partRows(null)}${repairRows()}` : "";
+        const shopping = C.campShop ? `<p class="r-hint">回到城里，出发前可以补货。手里有 ${money()} 奎支。</p>${shopTabs()}` : "";
         const clinic = C.campClinic ? `<h3 class="r-sub">诊所</h3>${clinicPanel()}` : "";
         const food = restFoodText(plan);
         return `<h2>休整</h2>
@@ -877,6 +908,7 @@
         act({ action: "acceptTask", which: w });
       };
     });
+    body.querySelectorAll("[data-ss-host]").forEach(h => { h.onclick = e => { if (window.ShopSellUI) ShopSellUI.handle(e, sellAct, render); }; });
     body.querySelectorAll("[data-buy]").forEach(b => { b.onclick = () => { if (window.Sfx) Sfx.ui("coin"); act({ action: "buy", key: b.dataset.buy, qty: 1 }); }; });
     body.querySelectorAll("[data-redeem]").forEach(b => { b.onclick = () => { if (window.Sfx) Sfx.ui("coin"); act({ action: "redeem", item: b.dataset.redeem }); }; });
     body.querySelectorAll("[data-upgrade]").forEach(b => { b.onclick = () => act({ action: "upgradeWeapon", kit: b.dataset.upgrade, smith: b.dataset.smith }); });
