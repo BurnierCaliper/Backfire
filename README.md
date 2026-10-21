@@ -368,6 +368,14 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **第三轮 · 单机低级 L-1 ~ L-7：全员复原刷新短休专长、兼修勾索拉首领、涉猎说明按实际写、工匠八折、精英等级、finishBattle 阶段保护、休息点短休灰掉**（issue #149；ledger.js · `ledgerRestoreAll`，feats.js · `featSkillTargetWhy` / `featSkills`，trpg.js · `trpgSmithFee` / `trpgUpgradeWeapon`，trpg-ui.js，rogue.js · `enemyLevel` / `battleSpec` / `finishBattle` / `restAtNode` / `canShortRestAtNode`，rogue-data.js · `eliteOverCap`，rogue-ui.js，rogue-commands.js；测试 `tests/third-round-solo-l.test.js`；L-8 按 issue 要求先不动）
+  - **L-1**：主持人「全员复原」以前清了 `shortUsed` / `restOnce` 漏了 `shortOnce`，以身作盾、挺身等「每次短休 N 次」的次数不刷新；现在一并清空。
+  - **L-2**：兼修后的勾索 / 战地包扎走原技能，以前最后还调专长自己的 `targetWhy`，把首领拦下；现在走原技能就只看原技能的目标判断（拉拽没有首领限制）。没兼修的勾索仍然拉不动首领。
+  - **L-3**：涉猎专长（没兼修）在技能栏的说明以前沿用原技能文字（震慑「每场两三次」、看破 / 硬撑 / 续时写两次、加固 15 级「可自选血量种类」、鼓劲 15 级加强），和实际不符；现在按 1 级（涉猎版不吃等级加强）取说明，去掉原技能写的「每场 N 次」，后面统一补专长实际的剩余次数。兼修完整版照原技能。
+  - **L-4**：跑团「找工匠升级」以前直接用参考费用（或主持人填的）收费，不打八折；现在不填费用时，带巧手匠人的队伍默认按 8 折（`trpgSmithFee`，界面默认值和参考费用也是八折价）。主持人另填的费用仍照填的收。
+  - **L-5**：精英战的 +1 级以前被本幕上限吞掉（`actDay ≥ 6` 后精英与普通战同级）；现在精英战的等级最多可以超过本幕「止」`ROGUE_CONFIG.eliteOverCap` 级（默认 1），幕末精英比普通战高 `eliteLevelBonus` 级。普通战、遭遇战、首领战不变；养成模式本来就不封顶。
+  - **L-6**：`finishBattle` 以前没有阶段保护；现在只在 `task` / `boss` 阶段接受，且 `task` 阶段的当前节点必须是战斗 / 精英（休息点遭遇战除外），否则报错并且不改任何状态。
+  - **L-7**：休息点「短休」以前没人有次数时照样能点、白过一站；现在没人能短休时按钮灰掉并写「今天大家的短休次数都用完了」，规则层也拒绝（`canShortRestAtNode`）。
 - **第三轮 · 单机低级 L-10、L-12 ~ L-16（工坊 / 长休）**（issue #150；ledger.js · `ledgerHealItem` / `ledgerLongRest` 守夜日志，items.js · `ITEM_CATALOG` 医疗包 hint / `useItemOn` 强心注射剂，trpg.js · `trpgPayWith`，README「休整」一节；测试 tests/workshop-low-150.test.js）
   - **L-10**：以前对死亡角色用医疗包，先扣道具再治疗（对死人无效），日志「实际恢复 0」；现在先判断，死了提示「已死亡，不能治疗」，不扣道具。
   - **L-12**：以前守夜日志一律写「除守夜者外，武器耐久回满」；实际只有武器人守夜时那把才不回，角色守夜时他自己的武器照样回满。现在角色守夜写「全部武器耐久回满」，武器人守夜写「除守夜的那把武器外」。

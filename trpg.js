@@ -505,6 +505,11 @@ function trpgUpgradeInfo(owner, kit) {
   }));
   return { lv, next, max: false, mats, labor: rc.labor || 0, canSelf: next <= U.selfMaxLevel, enough: mats.every(m => m.have >= m.need) };
 }
+/** 找工匠升级的默认加工费：参考费用，带巧手匠人的队伍打八折（主持人另填费用则按填的） */
+function trpgSmithFee(info) {
+  const mul = typeof featHaggleMul === "function" ? featHaggleMul(trpgHeroes(), 1) : 1;
+  return Math.round((Number(info.labor) || 0) * mul);
+}
 /** mode：self 自己在工作站（≤4 级，只耗材料）/ smith 找工匠（材料 + 费用）/ gm 主持人直接升（不耗） */
 function trpgUpgradeWeapon(ownerKit, kit, mode, fee) {
   const owner = trpgHeroes().find(h => h.kit === ownerKit);
@@ -516,7 +521,7 @@ function trpgUpgradeWeapon(ownerKit, kit, mode, fee) {
   if (mode !== "gm") {
     if (mode === "self" && !info.canSelf) return [`${wname} 升 ${info.next} 级要找武器工匠，自己在工作站只能升到 ${HANDBOOK_WEAPON_UPGRADE.selfMaxLevel} 级。`];
     if (!info.enough) return [`材料不够：${info.mats.map(m => `${m.name} ${m.have}/${m.need}`).join("、")}。`];
-    const pay = mode === "smith" ? Math.max(0, Math.floor(Number(fee != null ? fee : info.labor) || 0)) : 0;
+    const pay = mode === "smith" ? Math.max(0, Math.floor(Number(fee != null ? fee : trpgSmithFee(info)) || 0)) : 0;
     if (pay > (Number(state.kuizhi) || 0)) return [`奎支不够付加工费：要 ${pay}，手里只有 ${Number(state.kuizhi) || 0}。`];
     info.mats.forEach(m => bagAdd(m.id, -m.need));
     if (pay) state.kuizhi -= pay;

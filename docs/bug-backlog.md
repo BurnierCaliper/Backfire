@@ -116,15 +116,15 @@
 ### 低（21）
 
 **专长**
-- [ ] **L-1 主持人「全员复原」不刷新 `LEDGER.shortOnce`**（以身作盾、挺身等「每次短休 N 次」的专长）：`ledger.js:788-803` · `ledgerRestoreAll` 清了 `shortUsed` / `restOnce` 漏了 `shortOnce`；对照长休 `765`、短休 `523`；入口 `trpg-commands.js:17`、`battle-commands.js:201`。读代码判断。
-- [ ] **L-2 兼修后的勾索仍拉不动首领**：兼修改走原技能「拉拽」（`app.js:12852` · `displaceTo` 无首领限制），但 `feats.js:539-555` · `featSkillTargetWhy` 最后仍调勾索自己的 `targetWhy`（`feats.js:199`）拦首领。战地包扎同理，影响很小。读代码判断。
-- [ ] **L-3 涉猎专长在技能栏的说明沿用原技能文字，次数 / 加强与实际不符**：`feats.js:516-523` · `featSkills` 取 `roleSkillDef(...).hint`（`party.js:1050-1100`、`app.js:7164`）。震慑写「每场两三次」实际 1 次；续时 / 硬撑 / 看破写两次实际 1 次；加固 15 级「可自选血量种类」、鼓劲 15 级加强都被 `_dabbleNerf` 关掉但仍显示。读代码判断。
-- [ ] **L-4 跑团「找工匠升级」不打八折**（巧手匠人说明与 README 写商店和工匠都 8 折）：`trpg.js:511` · `trpgUpgradeWeapon` 的 `smith` 模式直接用 `info.labor` 或主持人填的费用，界面默认值也是原价（`trpg-ui.js:295-307`）。可能是有意让主持人定。读代码判断。
+- [x] **L-1 【已修 #149：`ledgerRestoreAll` 补清 `shortOnce`】主持人「全员复原」不刷新 `LEDGER.shortOnce`**（以身作盾、挺身等「每次短休 N 次」的专长）：`ledger.js:788-803` · `ledgerRestoreAll` 清了 `shortUsed` / `restOnce` 漏了 `shortOnce`；对照长休 `765`、短休 `523`；入口 `trpg-commands.js:17`、`battle-commands.js:201`。读代码判断。
+- [x] **L-2 【已修 #149：走原技能时 `featSkillTargetWhy` 不再调专长自己的 `targetWhy`】兼修后的勾索仍拉不动首领**：兼修改走原技能「拉拽」（`app.js:12852` · `displaceTo` 无首领限制），但 `feats.js:539-555` · `featSkillTargetWhy` 最后仍调勾索自己的 `targetWhy`（`feats.js:199`）拦首领。战地包扎同理，影响很小。读代码判断。
+- [x] **L-3 【已修 #149：`featSkills` 涉猎版按 1 级取说明并去掉原技能的「每场 N 次」】涉猎专长在技能栏的说明沿用原技能文字，次数 / 加强与实际不符**：`feats.js:516-523` · `featSkills` 取 `roleSkillDef(...).hint`（`party.js:1050-1100`、`app.js:7164`）。震慑写「每场两三次」实际 1 次；续时 / 硬撑 / 看破写两次实际 1 次；加固 15 级「可自选血量种类」、鼓劲 15 级加强都被 `_dabbleNerf` 关掉但仍显示。读代码判断。
+- [x] **L-4 【已修 #149：新增 `trpgSmithFee`，不填费用时带巧手匠人默认八折，界面默认值同步】跑团「找工匠升级」不打八折**（巧手匠人说明与 README 写商店和工匠都 8 折）：`trpg.js:511` · `trpgUpgradeWeapon` 的 `smith` 模式直接用 `info.labor` 或主持人填的费用，界面默认值也是原价（`trpg-ui.js:295-307`）。可能是有意让主持人定。读代码判断。
 
 **单局**
-- [ ] **L-5 精英战的 +1 级加成常被本幕等级上限吞掉**：`rogue.js:76-81` · `enemyLevel`，`min(b, round(a+(b-a)*t) + bonus)`，`actDay≥6` 后精英与普通战同级；`ROGUE_CONFIG.eliteLevelBonus` 注释写「精英比同时期普通战斗高几级」。可能是有意封顶。读代码判断。
-- [ ] **L-6 `finishBattle` 没有阶段保护**：`acceptTask` / `camp` / `restAtNode` / `afterVictory` 都校验 `run.stage`，只有 `rogue.js:931` · `finishBattle`（及 `rogue-commands.js` 的 `actions.finishBattle`）没有。任务板上调用会在 `advanceNode` 的 `run.task.hunt` 抛 TypeError，非战斗节点调用会把节点「打完」并推进。UI 重复触发才会遇到。读代码判断。
-- [ ] **L-7 休息点「短休」在没人有次数时仍可点，白白过一站**：`rogue.js:1445` · `restAtNode`，按钮 `rogue-ui.js:378`。`ledgerShortRest` 只写「次数已用完」，`advanceNode` 照走。应灰掉或提示。读代码判断。
+- [x] **L-5 【已修 #149：新增 `ROGUE_CONFIG.eliteOverCap`（默认 1），精英战可超过本幕上限】精英战的 +1 级加成常被本幕等级上限吞掉**：`rogue.js:76-81` · `enemyLevel`，`min(b, round(a+(b-a)*t) + bonus)`，`actDay≥6` 后精英与普通战同级；`ROGUE_CONFIG.eliteLevelBonus` 注释写「精英比同时期普通战斗高几级」。可能是有意封顶。读代码判断。
+- [x] **L-6 【已修 #149：`finishBattle` 校验 `run.stage` 和当前节点】`finishBattle` 没有阶段保护**：`acceptTask` / `camp` / `restAtNode` / `afterVictory` 都校验 `run.stage`，只有 `rogue.js:931` · `finishBattle`（及 `rogue-commands.js` 的 `actions.finishBattle`）没有。任务板上调用会在 `advanceNode` 的 `run.task.hunt` 抛 TypeError，非战斗节点调用会把节点「打完」并推进。UI 重复触发才会遇到。读代码判断。
+- [x] **L-7 【已修 #149：新增 `canShortRestAtNode`，按钮灰掉写原因，`restAtNode` 也拒绝】休息点「短休」在没人有次数时仍可点，白白过一站**：`rogue.js:1445` · `restAtNode`，按钮 `rogue-ui.js:378`。`ledgerShortRest` 只写「次数已用完」，`advanceNode` 照走。应灰掉或提示。读代码判断。
 - [ ] **L-8 休息点遭遇战（被偷袭）打赢后不计这场战斗的时间**：撤退 / 败北会 `passHours(NODE.battle.hours)`，打赢只走 `doLongRest`。`rogue.js:931` 起 `finishBattle` 的 ambush 分支。可能是有意并进长休。读代码判断。
 
 **工坊 / 长休**

@@ -516,8 +516,9 @@ function featSkills(u) {
     let hint = f.skill.hint;
     let name = f.skill.name || f.name;
     if (f.dabble && (full || !hint)) {
-      const def = typeof roleSkillDef === "function" ? roleSkillDef(f.dabble.role, f.dabble.n, u) : null;
-      hint = def ? def.hint : f.text;
+      // 涉猎版（没兼修）不吃原技能的等级加强（_dabbleNerf），次数也按专长自己的来：按 1 级取说明，去掉原技能写的「每场 N 次」，由后面的 usesText 补实际次数
+      const def = typeof roleSkillDef === "function" ? roleSkillDef(f.dabble.role, f.dabble.n, full ? u : Object.assign({}, u, { level: 1 })) : null;
+      hint = def ? (full ? def.hint : def.hint.replace(/每场[一二两三四\d]+次[，,]?/, "").replace(/(\s·\s*)+$/, "").replace(/·\s*·/g, "·")) : f.text;
       if (full && def) name = `${f.name}（${def.name}·完整）`;
     }
     return { id: FEAT_SKILL_PREFIX + id, name, hint: `专长 · ${hint || f.text || ""}${usesText}`, bare: true, feat: true };
@@ -551,6 +552,8 @@ function featSkillTargetWhy(a, skillId, t, picks) {
     if (side === "ally" && t.id === a.id) return "要选其他友方";
     if (side === "enemy" && t.isPlayer) return "只能对敌人使用";
   }
+  // 兼修后走原技能：目标判断只看原技能（勾索自己的「拉不动首领」不再拦；原技能「拉拽」没有首领限制）
+  if (base) return null;
   return typeof f.skill.targetWhy === "function" ? (f.skill.targetWhy(a, t, picks || {}) || null) : null;
 }
 /** 涉猎（没兼修）调用原技能时，原技能里按等级解锁的加强（15 级缓冲选血量种类、全体坚挺……）不算 */
