@@ -223,24 +223,35 @@ test("铭牌前后错开：同一拨单位不排成一条线，错开后仍不�
   assert.ok(new Set(mine.map(u => u.z.toFixed(3))).size > 1, "铭牌没有前后错开");
 });
 
-test("竖起来的铭牌够大：站位宽度留够桌面宽度下 13px 的名字，高度装得进取景范围", () => {
-  const U = L.CONFIG.unit;
-  assert.ok(U.w >= 1.8, "铭牌横向要留够空");
+test("竖起来的铭牌够大：名字一行放得下 8 个 13px 的汉字，取景范围算上了铭牌的高度", () => {
+  const U = L.CONFIG.unit, P = L.CONFIG.plate;
+  assert.ok(P.w - 2 * (2 + 5) >= 8 * 13, "桌面铭牌的宽（去掉边框和内边距）放得下 8 个 13px 的汉字（机器人看守（剑））");
   assert.ok(U.plateH >= 1.5, "铭牌是竖着的，取景范围要算上它的高度");
   const out = L.build(setupCase({ opt: { zoneMode: 3 } }, 4), {});
-  out.units.forEach(u => assert.ok(out.bounds.maxY >= u.groundY + u.plateH - 1e-9, "取景范围包得住铭牌"));
+  out.units.forEach(u => assert.ok(out.bounds.maxY >= u.groundY + U.plateH - 1e-9, "取景范围包得住铭牌"));
 });
 
-test("原型页面：垫片放在规则文件之前，页面自己的元素 id 不会被替身拦走（修 app.js init() 的 null 报错）", () => {
+test("原型页面：垫片放在规则文件之前，页面自己的元素 id 整个匹配，旧计算器的元素都交给替身（修 app.js init() 的 null 报错）", () => {
   const fs = require("fs"), path = require("path");
   const html = fs.readFileSync(path.join(__dirname, "..", "prototypes", "hd2d", "index.html"), "utf8");
   const shim = html.indexOf("Document.prototype.getElementById"), rules = html.indexOf('<script src="../../run.js">');
   assert.ok(shim > 0 && shim < rules, "垫片要在规则文件之前");
   assert.ok(html.includes("window.GAME_MODE = true"), "和 game.html 一样打开 GAME_MODE（也让坚毅生命数值对玩家不可见）");
   const own = new RegExp(/var OWN = \/(.*)\/;/.exec(html)[1]);
-  const ids = [...html.matchAll(/\$\("([^"]+)"\)/g)].map(m => m[1]).concat([...html.matchAll(/\sid="([^"]+)"/g)].map(m => m[1]));
+  // 页面自己的元素（#calc-core 里放的是旧计算器的元素，不算）都在 OWN 里
+  const pageHtml = html.replace(/<div id="calc-core"[\s\S]*?<\/div>/, "");
+  const ids = [...html.matchAll(/\$\("([^"]+)"\)/g)].map(m => m[1]).concat([...pageHtml.matchAll(/\sid="([^"]+)"/g)].map(m => m[1]));
   ids.filter(id => id !== "spray").forEach(id => assert.ok(own.test(id), `页面元素 #${id} 会被垫片当成计算器元素`));
-  ["presetSelect", "zoneMode", "weather", "btnUndo"].forEach(id => assert.ok(!own.test(id), id + " 应该交给替身"));
+  // app.js 的 init() 用到的每一个元素（以前 partySize 被前缀 party 拦下、拿到 null）都不在 OWN 里
+  const app = fs.readFileSync(path.join(__dirname, "..", "app.js"), "utf8");
+  const start = app.indexOf("\nfunction init() {"), end = app.indexOf("\nif (HAS_DOM) init();");
+  assert.ok(start > 0 && end > start, "找得到 app.js 的 init()");
+  const used = [...new Set([...app.slice(start, end).matchAll(/uiEl\("([^"]+)"\)/g)].map(m => m[1]))];
+  assert.ok(used.length >= 40 && used.includes("partySize") && used.includes("zoneMode"));
+  used.forEach(id => assert.ok(!own.test(id), `init() 用到的 #${id} 应该交给替身`));
+  ["logPageLabel", "skillBtns", "zones"].forEach(id => assert.ok(!own.test(id), id + " 应该交给替身"));
+  // 必须是真下拉框的那个（syncBladeSel 会逐个改 options）放在 #calc-core 里
+  assert.ok(/<div id="calc-core"[^>]*>[\s\S]*<select id="bladeSel">[\s\S]*value="niu"[\s\S]*value="naruto"[\s\S]*<\/select>[\s\S]*?<\/div>/.test(html), "bladeSel 是真的下拉框");
 });
 
 test("危墙：矮而薄（尺寸在配置表 WALL 里），不会盖住铭牌", () => {
@@ -261,4 +272,677 @@ test("手机顶栏：有精简文字和切换小按钮；铭牌 HTML 不碰 shp"
   assert.ok(/@media \(max-width: 720px\)[\s\S]*#demo-select[^{]*\{[^}]*display: none/.test(css), "手机上下拉框收起来");
   const scene = fs.readFileSync(path.join(dir, "hd2d-scene.js"), "utf8");
   assert.ok(!/shp/i.test(scene.slice(scene.indexOf("function plateHtml"), scene.indexOf("function makePlate"))), "铭牌 HTML 不碰 shp");
+});
+
+/* ---------- 第一阶段打磨第二轮（issue #202）---------- */
+const D2R = Math.PI / 180;
+const DESKTOP = { width: 1440, height: 900, top: 46, bottom: 160 };   // 桌面 1440×900：顶栏 + 展开的技能栏
+/** 独立写的透视投影（不用布局里的 project）：按布局给的默认镜头，把世界坐标投到屏幕像素（左上角为原点，y 向下） */
+function screenOf(cam, p) {
+  const e = cam.elevation * D2R, t = Math.tan(cam.fov * D2R / 2);
+  const dx = p.x - cam.pos.x, dy = p.y - cam.pos.y, dz = p.z - cam.pos.z;
+  const ahead = -(dy * Math.sin(e) + dz * Math.cos(e));      // 沿视线往前多远
+  const up = dy * Math.cos(e) - dz * Math.sin(e);             // 镜头的「上」方向
+  return { x: (dx / (ahead * t * cam.aspect) + 1) / 2 * cam.width, y: (1 - up / (ahead * t)) / 2 * cam.height, dist: Math.hypot(dx, dy, dz) };
+}
+/** 一块铭牌在屏幕上的矩形：底边中点 = 脚下的点往上 lift 像素；大小 = 铭牌的像素尺寸 × 按远近的缩放；上下各让出浮动的幅度 */
+function plateBox(out, u) {
+  const P = L.CONFIG.plate, cam = out.camera, s = screenOf(cam, u);
+  const k = Math.min(P.maxScale, Math.max(P.minScale, Math.pow(cam.dist / s.dist, P.scaleExp)));
+  const w = out.plateSize.w * k, h = out.plateSize.h * k;
+  return { x0: s.x - w / 2, x1: s.x + w / 2, y0: s.y - u.lift - h - P.bob, y1: s.y - u.lift + P.bob };
+}
+const boxesOverlap = (a, b) => a.x0 < b.x1 - 0.01 && b.x0 < a.x1 - 0.01 && a.y0 < b.y1 - 0.01 && b.y0 < a.y1 - 0.01;
+/** 两两比一遍，返回重叠的那几对（名字） */
+function overlapsOf(out, list) {
+  list = list || out.units;
+  const bad = [];
+  for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
+    if (boxesOverlap(plateBox(out, list[i]), plateBox(out, list[j]))) bad.push(list[i].plate.name + " × " + list[j].plate.name);
+  }
+  return bad;
+}
+/** 4 个我方单位都在我方区，nFoes 个敌人也挤进同一区，其余敌人放到别的区 */
+function crowded(opt, nFoes) {
+  const ctx = H.load();
+  const st = ctx.BattleSim.setup(Object.assign({
+    party: PARTY, seed: "HD2D", enemies: FOES.slice(0, Math.max(1, nFoes)).map(f => Object.assign({ zone: 0 }, f))
+  }, opt));
+  const pz = st.units.find(u => u.isPlayer && !u.hidden).zone;
+  st.units.filter(u => !u.isPlayer).forEach((u, i) => { u.zone = i < nFoes ? pz : ((i + 1) % st.zoneMode) + 1; });
+  return { st, pz };
+}
+
+test("默认镜头：布局算的镜头正对目标点，整个战场装在顶栏和技能栏之间（桌面 1440×900；场景直接用这个镜头）", () => {
+  for (const c of CASES) {
+    const out = L.build(setupCase(c), { view: DESKTOP });
+    const cam = out.camera;
+    const mid = screenOf(cam, cam.target);
+    assert.ok(Math.abs(mid.x - 720) < 0.5 && Math.abs(mid.y - 450) < 0.5, c.name + "：目标点在画面正中");
+    const b = out.bounds;
+    [b.minX, b.maxX].forEach(x => [0, b.maxY + 0.5].forEach(y => [b.minZ, b.maxZ].forEach(z => {
+      const s = screenOf(cam, { x, y, z });
+      assert.ok(s.x >= 0 && s.x <= DESKTOP.width && s.y >= DESKTOP.top - 0.5 && s.y <= DESKTOP.height - DESKTOP.bottom + 0.5, `${c.name}：战场的角 (${x}, ${y}, ${z}) 跑出了可用区域`);
+    })));
+  }
+  const fs = require("fs"), path = require("path");
+  const scene = fs.readFileSync(path.join(__dirname, "..", "prototypes", "hd2d", "hd2d-scene.js"), "utf8");
+  assert.ok(/layout\.camera/.test(scene) && /L\.CONFIG\.camera\.fov/.test(scene), "场景用布局算好的镜头（铭牌的屏幕位置才对得上）");
+});
+
+test("同一区 4 个我方单位：每两块铭牌在屏幕上的矩形都不重叠（桌面 1440×900，各种棋盘）", () => {
+  for (const c of CASES) {
+    const { st, pz } = crowded(c.opt, 0);
+    const out = L.build(st, { view: DESKTOP });
+    const mine = out.units.filter(u => u.zone === pz);
+    assert.equal(mine.length, 4, c.name + "：我方 4 人都在同一区");
+    assert.deepEqual(overlapsOf(out, mine), [], c.name + "：同一区的铭牌互相压住");
+    assert.deepEqual(overlapsOf(out), [], c.name + "：整个战场有铭牌互相压住");
+  }
+});
+
+test("同一区挤 6 个、8 个、9 个单位（敌我混站，有飞行的）也不重叠；窗口大小、技能栏收起来都一样", () => {
+  const views = [DESKTOP, Object.assign({}, DESKTOP, { bottom: 60 }), { width: 1920, height: 1080, top: 46, bottom: 160 }, { width: 1280, height: 720, top: 46, bottom: 160 }];
+  for (const c of CASES) {
+    for (const n of [2, 4, 5]) {
+      const { st, pz } = crowded(c.opt, n);
+      views.forEach(v => {
+        const out = L.build(st, { view: v });
+        assert.equal(out.units.filter(u => u.zone === pz).length, 4 + n);
+        assert.deepEqual(overlapsOf(out), [], `${c.name}，同区 ${4 + n} 人，${v.width}×${v.height}`);
+        out.units.forEach(u => assert.ok(u.lift >= 0 && u.lift <= L.CONFIG.plate.maxLift, "抬高在 0–maxLift 之间"));
+      });
+    }
+  }
+});
+
+test("后排抬高：前后排叠到时整排往上抬（同一排抬得一样高），布局给的屏幕矩形和独立投影一致", () => {
+  const { st, pz } = crowded({ zoneMode: 3 }, 2);
+  const out = L.build(st, { view: DESKTOP });
+  const rows = {};
+  out.units.filter(u => u.zone === pz).forEach(u => { (rows[u.row] = rows[u.row] || []).push(u); });
+  assert.ok(Object.keys(rows).length >= 2, "6 个人分了几排");
+  Object.values(rows).forEach(r => assert.equal(new Set(r.map(u => u.lift)).size, 1, "同一排抬得一样高"));
+  assert.ok(out.units.some(u => u.lift > 0), "有一排被抬高了");
+  out.units.forEach(u => {
+    const b = plateBox(out, u);
+    ["x0", "x1", "y0", "y1"].forEach(k => assert.ok(Math.abs(b[k] - u.rect[k]) < 0.5, `${u.plate.name} 的 ${k}：布局 ${u.rect[k]} / 投影 ${b[k]}`));
+  });
+});
+
+/* 三个演示战场：和 index.html 的 DEMOS 一样的布置 */
+const gapOf = (type, hp, open) => ({ type, hp: hp || 0, maxHp: hp || 0, open: open !== false, lastFrom: null });
+const DEMO_SETUPS = {
+  mine(S) {
+    const st = S.setup({ party: PARTY, zoneMode: 3, seed: "hd2d-mine", enemies: [{ id: "guard_sword", lv: 2, zone: 3 }, { id: "guard_gun", lv: 2, zone: 3 }, { id: "thug_hammer", lv: 2, zone: 2 }, { id: "boomcar", lv: 2, zone: 2 }] });
+    st.fields[2].acid = true; st.fields[3].highland = true; st.gaps["1-2"] = gapOf("bridge", 12); st.gaps["2-3"] = gapOf("wall", 20, false);
+    st.units.find(u => u.kit === "kolt").statuses.burn = 2; st.units.find(u => u.kit === "guard_gun").statuses.shock = true;
+    return st;
+  },
+  desert(S) {
+    const st = S.setup({ party: PARTY, board: "square4", weather: "sand", seed: "hd2d-desert", enemies: [{ id: "sandfish_ambush", lv: 2, zone: 1 }, { id: "sandfish_lead", lv: 2, zone: 2 }, { id: "sand_beast", lv: 2, zone: 4 }, { id: "sand_human", lv: 2, zone: 4 }] });
+    st.fields[1].quicksand = true; st.fields[4].coral = true; st.gaps["1-3"] = gapOf("void"); st.gaps["2-4"] = gapOf("bridge", 10);
+    const shark = st.units.find(u => u.kit === "sandfish_ambush"); if (shark) shark.submerged = true;
+    return st;
+  },
+  cross(S) {
+    const st = S.setup({ party: PARTY, board: "cross5", weather: "thunder", seed: "hd2d-cross", enemies: [{ id: "crow", lv: 2, zone: 1 }, { id: "buoy", lv: 2, zone: 1 }, { id: "thug_hammer", lv: 2, zone: 3 }, { id: "guard_gun", lv: 2, zone: 4 }] });
+    st.fields[1].abyss = true; st.fields[2].highland = true; st.fields[3].electric = true; st.fields[4].acid = true;
+    st.gaps["1-3"] = gapOf("void"); st.gaps["2-3"] = gapOf("door", 0, false); st.gaps["3-4"] = gapOf("bridge", 12);
+    st.units.find(u => u.kit === "guard_gun").stunned = true;
+    return st;
+  }
+};
+
+test("三个演示战场（桌面 1440×900）：铭牌两两不重叠，都在顶栏和技能栏之间；铭牌文字里没有 shp 数值", () => {
+  const fs = require("fs"), path = require("path");
+  const html = fs.readFileSync(path.join(__dirname, "..", "prototypes", "hd2d", "index.html"), "utf8");
+  Object.keys(DEMO_SETUPS).forEach(id => {
+    assert.ok(html.includes(`id: "${id}"`), "index.html 里有演示战场 " + id);
+    const st = DEMO_SETUPS[id](H.load().BattleSim);
+    st.units.forEach(u => { u.shp = 7771; u.shpMax = 7772; });
+    const out = L.build(st, { view: DESKTOP });
+    assert.ok(out.units.length >= 8, id + "：单位都排上了");
+    assert.deepEqual(overlapsOf(out), [], id + "：铭牌互相压住");
+    out.units.forEach(u => {
+      const b = plateBox(out, u);
+      assert.ok(b.y0 >= DESKTOP.top && b.y1 <= DESKTOP.height - DESKTOP.bottom && b.x0 >= 0 && b.x1 <= DESKTOP.width, `${id}：${u.plate.name} 的铭牌被顶栏 / 技能栏 / 画面边缘挡住`);
+      assert.ok(!u.plate.text.join("|").includes("7771") && !JSON.stringify(u.plate).includes("7772"), "铭牌文字里没有坚毅生命的数值");
+    });
+  });
+});
+
+test("远景剪影的高度上限：画面上沿那条视线（frameTop）上的点正好投到画面最上沿；剪影只用到它的一部分", () => {
+  Object.keys(DEMO_SETUPS).forEach(id => {
+    const out = L.build(DEMO_SETUPS[id](H.load().BattleSim), { view: DESKTOP });
+    const cam = out.camera;
+    [-2, -5, -9, -14].forEach(dz => {
+      const z = out.bounds.minZ + dz, s = screenOf(cam, { x: 3, y: L.frameTop(cam, z), z });
+      assert.ok(Math.abs(s.y) < 0.5, `${id}：z=${z} 处 frameTop 投到 y=${s.y.toFixed(2)}，应该是画面最上沿`);
+    });
+  });
+  const fs = require("fs"), path = require("path");
+  const src = fs.readFileSync(path.join(__dirname, "..", "prototypes", "hd2d", "hd2d-backdrop.js"), "utf8");
+  const fill = Number(/fill:\s*([\d.]+)/.exec(src)[1]);
+  assert.ok(fill > 0.5 && fill < 1, "中景剪影最高只到画面上沿视线的 fill 倍（整个轮廓都在画面里）");
+  assert.ok(/L\.frameTop\(cam, z\)/.test(src), "远景用布局的 frameTop 算高度上限");
+});
+
+test("原型页面：照页面的顺序跑垫片 → 规则文件，app.js 的 init() 跑完不报错；演示战场在页面环境里也排得出来（issue #202）", () => {
+  const fs = require("fs"), path = require("path");
+  const P = require("./hd2d-fake-page");
+  const page = P.load();
+  assert.deepEqual(page.errors, [], "加载时报错");
+  // 旧计算器的元素都拿到了替身（init() 前后一共几十个），bladeSel 用的是页面里那个真下拉框
+  const core = page.document.getElementById("calc-core");
+  const ids = core.childNodes.map(c => c.id);
+  ["presetSelect", "zoneMode", "partySize", "weather", "phaseStep", "attackerSel", "btnApply"].forEach(id => assert.ok(ids.includes(id), id + " 有替身"));
+  assert.equal(page.document.getElementById("bladeSel").tagName, "SELECT");
+  // 页面环境里跑演示战场的布置和布局
+  Object.keys(DEMO_SETUPS).forEach(id => {
+    const out = page.ctx.HD2DLayout.build(DEMO_SETUPS[id](page.ctx.BattleSim), { view: DESKTOP });
+    assert.ok(out.units.length >= 8, id);
+  });
+  assert.deepEqual(page.errors, [], "跑演示战场时报错");
+  // 这个假网页抓得到以前的报错：按前缀放行的旧垫片在 partySize 报错（app.js:13680），没有真下拉框时 syncBladeSel 报错
+  const html = fs.readFileSync(path.join(__dirname, "..", "prototypes", "hd2d", "index.html"), "utf8");
+  const old = P.load({ html: html.replace(/var OWN = \/.*\/;/, "var OWN = /^(stage|vignette|topbar|tb-|demo-|party|log|dock|skills|toast|loading|calc-core)/;") });
+  assert.ok(old.errors.some(e => /partySize/.test(e)), "旧垫片：partySize 拿到 null");
+  const noSel = P.load({ html: html.replace(/<select id="bladeSel">[\s\S]*?<\/select>/, "") });
+  assert.ok(noSel.errors.some(e => /options/.test(e)), "替身 div 没有 options");
+});
+
+test("减少动态效果：场景跟着系统设置停住待机动画（铭牌浮动、闪烁、冒泡、光圈旋转、飘浮物、颗粒）；雷击不抖镜头、闪光减弱", () => {
+  const fs = require("fs"), path = require("path");
+  const dir = path.join(__dirname, "..", "prototypes", "hd2d");
+  const scene = fs.readFileSync(path.join(dir, "hd2d-scene.js"), "utf8"), css = fs.readFileSync(path.join(dir, "hd2d.css"), "utf8");
+  const weather = fs.readFileSync(path.join(dir, "hd2d-weather.js"), "utf8");
+  assert.ok(/prefers-reduced-motion: reduce/.test(scene) && /addEventListener\("change"/.test(scene), "场景听系统的「减少动态效果」，中途切换也跟着变");
+  assert.ok(/const moving = state\.motion, adt = moving \? dt : 0/.test(scene) && /animT \+= adt/.test(scene), "动画时间只在允许动的时候走（地台动画、远景、天气、颗粒、光圈都按 animT）");
+  assert.ok(/if \(state\.motion\)/.test(scene), "路灯只在允许动的时候闪");
+  // 雷击按真实时间走（减少动态效果时照样打），要不要减弱交给天气（闪光打折、不给抖动，行为见下面雷击的测试）
+  assert.ok(/weather\.update\(adt, animT, \{ dt, reduced: !moving \}\)/.test(scene) && /opts\.reduced/.test(weather), "减少动态效果时雷击照打，但由天气减弱闪光、不抖镜头");
+  assert.ok(/@media \(prefers-reduced-motion: reduce\)\s*\{[^}]*\.pl-bob[^}]*animation: none/.test(css) && /\.still \.pl-bob/.test(css), "铭牌的浮动停掉");
+});
+
+/* 场景里的积木（地台 / 间隔 / 远景 / 天气）只建 three.js 的物体，不碰 WebGL：在 Node 里用 vendor 的真 three.js 建一遍、跑几帧动画。
+ * canvas 程序纹理用一个什么都接受的假 2D 画布代替（这里只查会不会报错、建出来什么，画得好不好看要在浏览器里看）。
+ * protoEnv(t)：把 "three" 指到 vendor 的 three.js，临时放上假的 document / window，import 原型的几个模块；用完 restore() */
+let protoHooked = false;
+async function protoEnv(t) {
+  const mod = require("node:module"), path = require("path"), { pathToFileURL } = require("url");
+  if (typeof mod.register !== "function") { t.skip("这个 Node 版本没有 module.register"); return null; }
+  const threeUrl = pathToFileURL(path.join(__dirname, "..", "vendor", "three", "three.module.min.js")).href;
+  if (!protoHooked) {
+    protoHooked = true;
+    mod.register("data:text/javascript," + encodeURIComponent(`export async function resolve(s, c, n) {
+      if (s === "three") return { url: ${JSON.stringify(threeUrl)}, format: "module", shortCircuit: true };
+      const r = await n(s, c);
+      return /\\/(prototypes\\/hd2d|vendor\\/three)\\//.test(r.url) ? Object.assign({}, r, { format: "module" }) : r;
+    }`));
+  }
+  const any = () => new Proxy(function () {}, { get: (o, k) => (k === Symbol.toPrimitive ? () => 0 : any()), set: () => true, apply: () => any() });
+  const keep = { document: globalThis.document, window: globalThis.window };
+  const restore = () => {
+    globalThis.document = keep.document; globalThis.window = keep.window;
+    if (keep.document === undefined) delete globalThis.document;
+    if (keep.window === undefined) delete globalThis.window;
+  };
+  globalThis.document = { createElement: () => ({ width: 0, height: 0, style: {}, getContext: () => any() }) };
+  globalThis.window = { HD2DLayout: L };
+  try {
+    const dir = path.join(__dirname, "..", "prototypes", "hd2d"), url = (f) => pathToFileURL(path.join(dir, f)).href;
+    const THREE = await import(threeUrl);
+    const W = await import(url("hd2d-world.js")), B = await import(url("hd2d-backdrop.js")), WX = await import(url("hd2d-weather.js"));
+    return { THREE, W, B, WX, restore };
+  } catch (e) { restore(); throw e; }
+}
+
+test("场景的积木在 Node 里用真的 three.js 建得出来：各种地台、间隔、远景、天气和飘浮物，动画跑几帧（含「减少动态效果」的停住）不报错", async (t) => {
+  const P = await protoEnv(t);
+  if (!P) return;
+  const { THREE, W, B, WX } = P;
+  try {
+    const scene = new THREE.Scene();
+    const kinds = ["concrete", "abyss", "acid", "quicksand", "coral", "highland", "fire", "ice", "electric", "energy", "harmonic", "heal"];
+    for (const theme of ["day", "dusk", "night"]) {
+      const ctx = { anim: [], lamps: [], fxLights: 0, theme };
+      kinds.forEach((k, i) => {
+        const fk = L.fieldKinds({ [k === "fire" ? "fireOn" : k]: true }), high = k === "highland" || k === "coral";
+        scene.add(W.buildZone({ id: i + 1, cx: i * 10, cz: 0, w: 7.2, d: 7.2, h: high ? 1.6 : 0.8, topY: high ? 1.6 : 0.8, kind: fk.kind, effects: fk.effects, highland: high, hole: k === "abyss" ? 1.44 : 0 }, ctx));
+      });
+      ["bridge", "wall", "door", "void", "open"].forEach((type, i) => scene.add(W.buildGap({ key: "1-2", a: 1, b: 2, type, open: i % 2 === 0, hp: 5, maxHp: 10, x: 0, z: 0, axis: i % 2 ? "z" : "x", length: 2.6, width: 7.2, topY: 0.8 }, ctx)));
+      // 各区域的默认地台（含垫高的高地）
+      Object.keys(L.GROUNDS).forEach((key, i) => [false, true].forEach(high => {
+        const h = high ? 1.6 : 0.8;
+        scene.add(W.buildZone({ id: 40 + i * 2 + (high ? 1 : 0), cx: i * 10, cz: 12, w: 7.2, d: 7.2, h, topY: h, kind: high ? "highland" : "concrete", effects: high ? ["highland"] : [], highland: high, hole: 0, ground: key === L.GROUND_DEFAULT ? null : key }, ctx));
+      }));
+      assert.equal(ctx.lamps.length, 0, "地台上不再放路灯（灯在战场外缘，见下面「路灯」的测试）");
+      scene.add(W.buildLamps([{ x: -8, z: -6, kind: "street", color: 0xffd9a0, dir: 1 }, { x: 8, z: -6, kind: "hanging", color: 0xffc06a, dir: -1 }], ctx));
+      for (let f = 0; f < 6; f++) ctx.anim.forEach(fn => fn(f * 0.37, 0.016));
+      ctx.anim.forEach(fn => fn(1, 0));
+      assert.ok(ctx.anim.length >= 6 && ctx.lamps.length === 2, "有待机动画、有灯");
+      ctx.lamps.forEach(l => assert.ok(l.bulb && l.bulbColor && l.wait > 0 && l.flick === 0, "路灯带着闪烁要用的数据"));
+    }
+    const st = DEMO_SETUPS.mine(H.load().BattleSim), out = L.build(st, { view: DESKTOP });
+    for (const [kind, theme, storm] of [["mine", "dusk"], ["desert", "day"], ["night", "night"], ["wasteland", "day"], ["night", "night", true], ["mine", "dusk", true], ["desert", "day", true]]) {
+      const bd = B.buildBackdrop(kind, out.bounds, theme, out.camera, { sky: ["#ffc47c", "#f28a5a", "#b9587a", "#4b3368"], fog: 0xc98a72, storm });
+      bd.update(1.2, 0.016); bd.update(1.2, 0); bd.update(1.3, 0.016, { flash: 0.8, x: 2 });
+      const box = new THREE.Box3();
+      let objects = 0;
+      bd.group.children.forEach(o => {
+        if (o.isSprite || !o.isObject3D || (o.geometry && !o.geometry.type.endsWith("Geometry"))) return;
+        if (o.material && (o.material.type === "ShaderMaterial" || o.material.map)) return;   // 天幕、天边那圈画的远景
+        if (o.geometry && o.geometry.type === "BufferGeometry") return;
+        if (o.isMesh && o.geometry.type === "SphereGeometry" && o.material.type === "MeshBasicMaterial") return;   // 红灯、远处的炉火
+        box.setFromObject(o); objects++;
+        if (kind !== "night") assert.ok(box.max.y <= L.frameTop(out.camera, box.max.z) * 0.9, `${kind}：中景剪影冒出画面上沿（${box.max.y.toFixed(1)}）`);
+      });
+      assert.ok(objects >= 6, kind + "：中景剪影有好几个");
+      bd.dispose();
+    }
+    B.buildGround(); B.skyTexture(["#000", "#111", "#222", "#333"], true);
+    const fx = WX.createWeather(scene, { bounds: out.bounds });
+    for (const w of ["none", "sand", "snow", "acid", "thunder", "heat", "glow", "phase"]) {
+      for (const theme of ["day", "dusk", "night"]) { fx.set(w, theme); fx.update(0.016, 3.3); fx.update(0, 3.3); }
+    }
+    assert.ok(Object.keys(WX.AMBIENT).length >= 8 && WX.AMBIENT.clear.dusk, "各种天气都有自己的飘浮物，晴天按光影主题");
+    fx.dispose(); W.disposeTree(scene);
+  } finally { P.restore(); }
+});
+
+test("铭牌：紧凑版只放名字 + 状态小圆点 + 血条 + 架势，ATK / 血量数字 / 状态文字悬停、选中时才展开；尺寸和布局用同一份配置", () => {
+  const fs = require("fs"), path = require("path");
+  const dir = path.join(__dirname, "..", "prototypes", "hd2d");
+  const scene = fs.readFileSync(path.join(dir, "hd2d-scene.js"), "utf8"), css = fs.readFileSync(path.join(dir, "hd2d.css"), "utf8");
+  const html = scene.slice(scene.indexOf("function plateHtml"), scene.indexOf("function makePlate"));
+  const card = html.slice(html.indexOf('class="pl-card"')), more = html.slice(html.indexOf('class="pl-more"'), html.indexOf('class="pl-card"'));
+  assert.ok(/pl-name/.test(card) && /pl-bar/.test(card) && /pl-def/.test(card) && /pl-dots/.test(card), "卡片上：名字、状态小圆点、血条、架势");
+  assert.ok(!/ATK/.test(card) && /ATK/.test(more) && /pl-chips/.test(more), "ATK、状态文字在展开的详情里");
+  assert.ok(/\.hd2d-plate\.hover \.pl-more, \.hd2d-plate\.sel \.pl-more \{ display: block; \}/.test(css), "悬停 / 选中时展开");
+  assert.ok(/--pw/.test(scene) && /plateSize/.test(scene) && /width: var\(--pw\); height: var\(--ph\)/.test(css), "卡片的宽高用布局的 CONFIG.plate");
+});
+
+/* ---------- 雷鸣不下雨（#202 第二轮截图验收后主人的要求）：雷鸣只有乌云 + 随机雷击，酸雨照旧下雨 ---------- */
+/** 雨：雨丝（lines），或者往下落得飞快的粒子（雪每秒只落 1.3，不算） */
+const isRain = (c) => !!c && (c.kind === "lines" || (Array.isArray(c.vel) && c.vel[1] < -3));
+/** 场景里有几组「雨」：雨丝（LineSegments），或者一半以上的点每秒往下落 3 个单位以上的粒子（按真的顶点位置量） */
+function rainIn(scene, fx) {
+  fx.update(1 / 60, 1, { dt: 1 / 60 });
+  const before = new Map();
+  scene.traverse(o => { if ((o.isPoints || o.isLineSegments) && o.geometry.attributes.position) before.set(o, Float32Array.from(o.geometry.attributes.position.array)); });
+  fx.update(1 / 60, 1.05, { dt: 1 / 60 });
+  let n = 0;
+  before.forEach((a, o) => {
+    const b = o.geometry.attributes.position.array, dy = [];
+    for (let i = 1; i < a.length; i += 3) dy.push((b[i] - a[i]) / 0.05);
+    dy.sort((p, q) => p - q);
+    if (o.isLineSegments || dy[dy.length >> 1] < -3) n++;
+  });
+  return n;
+}
+/** 固定种子的随机数：雷击的间隔、位置每次跑都一样 */
+function seeded(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let x = Math.imul(a ^ (a >>> 15), a | 1);
+    x ^= x + Math.imul(x ^ (x >>> 7), x | 61);
+    return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const STORM_BOUNDS = { minX: -13.4, maxX: 13.4, minZ: -13.4, maxZ: 13.4 };
+/** 跑 secs 秒雷鸣（每帧 1/60，reduced = 减少动态效果：动画时间停住、真实时间照走），记下每道雷：什么时候打下来、劈在哪、之后每帧的闪光、最大的抖动（像素） */
+function runStorm(WX, scene, secs, reduced) {
+  const fx = WX.createWeather(scene, { bounds: STORM_BOUNDS, random: seeded(7) });
+  fx.set("thunder", "night");
+  const dt = 1 / 60, list = [];
+  let t = 0, cur = null, n = 0;
+  for (let f = 0; f < secs * 60; f++) {
+    t += dt;
+    fx.update(reduced ? 0 : dt, reduced ? 0 : t, { dt, reduced });
+    const s = fx.strike;
+    if (s && s.n !== n) { n = s.n; cur = { at: t, edge: s.edge, x: s.x, z: s.z, flash: [], shake: 0 }; list.push(cur); }
+    if (cur) { cur.flash.push(fx.flash); cur.shake = Math.max(cur.shake, Math.hypot(fx.shake.x, fx.shake.y)); }
+  }
+  fx.dispose();
+  return list;
+}
+
+test("雷鸣不下雨（主人要求）：真的 three.js 场景里雷鸣建不出雨丝，酸雨照旧下雨；天气配置表里雷鸣没有雨粒子，只有乌云 + 随机雷击", async (t) => {
+  const P = await protoEnv(t);
+  if (!P) return;
+  const { THREE, WX } = P;
+  try {
+    const scene = new THREE.Scene();
+    const fx = WX.createWeather(scene, { bounds: STORM_BOUNDS });
+    fx.set("thunder", "night");
+    assert.equal(rainIn(scene, fx), 0, "雷鸣的场景里有雨丝 / 往下落的雨");
+    fx.set("acid", "night");
+    assert.ok(rainIn(scene, fx) >= 1, "酸雨的场景里没有雨丝");
+    fx.dispose();
+    assert.equal(scene.children.length, 0, "天气拿掉后场景里不留东西");
+    // 配置表：雷鸣不生成天气粒子（main = null），飘浮物也不是雨；打开的是乌云 + 雷击（storm）。酸雨还是雨丝、不打雷
+    const thunder = WX.weatherPlan("thunder", "night"), acid = WX.weatherPlan("acid", "night");
+    assert.equal(thunder.main, null, "雷鸣不生成天气粒子（雨丝）");
+    assert.ok(!isRain(WX.WEATHER.thunder) && !isRain(thunder.ambient), "雷鸣的配置里没有雨（飘浮物也不往下落）");
+    assert.ok(thunder.storm && WX.WEATHER.thunder.storm && thunder.tint, "雷鸣：乌云 + 雷击，雾压暗");
+    assert.ok(acid.main === WX.WEATHER.acid && isRain(acid.main) && !acid.storm, "酸雨照旧下雨，不打雷");
+    ["none", "sand", "snow", "heat", "glow", "phase"].forEach(w => {
+      const p = WX.weatherPlan(w, "day");
+      assert.ok(!p.storm && !isRain(p.main) && p.ambient, w + "：不打雷、不下雨，有飘浮物");
+    });
+  } finally { P.restore(); }
+});
+
+test("雷击：间隔随机、落在配置的范围里，远处和战场边缘都会劈；每道雷全屏闪白 + 镜头轻微抖一下（边缘的比远处的重），一秒内退干净；减少动态效果时照打，但不抖镜头、闪光减弱、只闪一下", async (t) => {
+  const P = await protoEnv(t);
+  if (!P) return;
+  const { THREE, WX } = P;
+  try {
+    const S = WX.STORM;
+    assert.ok(S.interval[0] > 0 && S.interval[1] > S.interval[0] && S.first[1] >= S.first[0] && S.first[0] > 0, "间隔（闪光频率）是配置里的一个范围");
+    assert.ok(S.shake.edge > S.shake.far && S.shake.far > 0 && S.shake.dur > 0, "抖动幅度、时长在配置里");
+    assert.ok(S.reduced.flash > 0 && S.reduced.flash < 1, "减少动态效果时闪光减弱多少在配置里");
+    const scene = new THREE.Scene(), secs = 150, frame = 1 / 60 + 1e-6, b = STORM_BOUNDS;
+    for (const reduced of [false, true]) {
+      const list = runStorm(WX, scene, secs, reduced), tag = reduced ? "减少动态效果：" : "";
+      assert.ok(list.length >= Math.floor(secs / S.interval[1]), tag + `${secs} 秒只打了 ${list.length} 道雷`);
+      assert.ok(list[0].at >= S.first[0] - frame && list[0].at <= S.first[1] + frame, tag + `第一道雷在 ${list[0].at.toFixed(2)} 秒，不在 first 的范围里`);
+      const gaps = list.slice(1).map((s, i) => s.at - list[i].at);
+      gaps.forEach(g => assert.ok(g >= S.interval[0] - frame && g <= S.interval[1] + frame, tag + `两道雷隔了 ${g.toFixed(2)} 秒，不在 ${S.interval} 里`));
+      assert.ok(new Set(gaps.map(g => Math.round(g * 4))).size >= 4, tag + "间隔是随机的，不是固定节拍");
+      assert.ok(list.some(s => s.edge) && list.some(s => !s.edge), tag + "有劈在战场边缘的，也有劈在远处的");
+      list.forEach(s => assert.ok(s.edge ? s.z < b.minZ && s.z > b.minZ - 4 && s.x > b.minX && s.x < b.maxX : s.z < b.minZ - 4, tag + `雷劈的位置不对（${s.edge ? "边缘" : "远处"}：${s.x.toFixed(1)}, ${s.z.toFixed(1)}）`));
+      list.slice(0, -1).forEach(s => assert.ok(s.flash[60] < 0.02, tag + `闪光一秒后还有 ${s.flash[60]}（要短促）`));
+      const peak = (s) => Math.max(...s.flash);
+      if (!reduced) {
+        list.forEach(s => assert.ok(peak(s) >= 0.6 && peak(s) <= 1 + 1e-9, `闪白的亮度 ${peak(s)}`));
+        list.forEach(s => assert.ok(s.shake > 0.5 && s.shake <= (s.edge ? S.shake.edge : S.shake.far) + 1e-9, `镜头抖了 ${s.shake.toFixed(2)}px（要轻微）`));
+        const edgeMin = Math.min(...list.filter(s => s.edge).map(s => s.shake)), farMax = Math.max(...list.filter(s => !s.edge).map(s => s.shake));
+        assert.ok(edgeMin > farMax, "战场边缘的雷比远处的抖得重");
+        assert.ok(list.some(s => s.flash.some((v, i) => i > 0 && v > s.flash[i - 1] + 0.05)), "一道雷里连闪几下");
+      } else {
+        list.forEach(s => {
+          assert.equal(s.shake, 0, "减少动态效果：不抖镜头");
+          assert.ok(peak(s) > 0 && peak(s) <= S.reduced.flash + 1e-9, `减少动态效果：闪光减弱（${peak(s)}）`);
+          s.flash.forEach((v, i) => assert.ok(i === 0 || v <= s.flash[i - 1] + 1e-9, "减少动态效果：只闪一下，不连闪"));
+        });
+      }
+    }
+    // 画面这边：闪白、推亮灯光的强度在 FLASH 配置里；抖动只在渲染这一下挪镜头，渲染完挪回去（OrbitControls 不受影响）
+    const fs = require("fs"), path = require("path");
+    const src = fs.readFileSync(path.join(__dirname, "..", "prototypes", "hd2d", "hd2d-scene.js"), "utf8");
+    assert.ok(/const FLASH = \{/.test(src) && /grade\.uniforms\.flash\.value = fl \* FLASH\.white/.test(src) && /uniform float flash;/.test(src), "全屏闪白在调色后期里，强度在 FLASH 配置里");
+    assert.ok(/weather\.shake/.test(src) && /camera\.position\.add\(shakeV\)/.test(src) && /camera\.position\.sub\(shakeV\)/.test(src), "镜头抖动只挪渲染这一下");
+  } finally { P.restore(); }
+});
+
+test("乌云：雷鸣时远景的天幕压暗、盖上慢慢飘的厚云（星星被盖住），中景上方再挂一层低云；打雷时云被照亮；远处的雷劈在低云前面、画面里", async (t) => {
+  const P = await protoEnv(t);
+  if (!P) return;
+  const { B, WX } = P;
+  try {
+    const out = L.build(DEMO_SETUPS.cross(H.load().BattleSim), { view: DESKTOP }), cam = out.camera, b = out.bounds;
+    const night = { sky: ["#2f4673", "#1d2d52", "#101b38", "#060b1a"], fog: 0x1b2742 };
+    const calm = B.buildBackdrop("night", b, "night", cam, night);
+    const storm = B.buildBackdrop("night", b, "night", cam, Object.assign({ storm: true }, night));
+    const skyOf = (bd) => bd.group.children.find(o => o.material && o.material.uniforms && o.material.uniforms.c0).material.uniforms;
+    const su = skyOf(storm), cu = skyOf(calm);
+    const lum = (c) => 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+    assert.ok(su.storm.value === 1 && cu.storm.value === 0, "雷鸣的天幕画乌云，平时不画");
+    assert.ok(su.stars.value === 0 && cu.stars.value === 1, "乌云把星星盖住");
+    ["c0", "c1", "c2", "c3"].forEach(k => assert.ok(lum(su[k].value) < lum(cu[k].value), "天空压暗：" + k));
+    const low = storm.group.children.filter(o => o.userData.cloud);
+    assert.ok(low.length >= 1 && !calm.group.children.some(o => o.userData.cloud), "雷鸣时中景上方挂着低云，平时没有");
+    // 云慢慢飘：跟着动画时间走（减少动态效果时场景传进来的时间停住，云也停住）
+    storm.update(10, 0.016, { flash: 0, x: 0 });
+    assert.ok(su.time.value === 10 && low.every(o => o.material.uniforms.time.value === 10), "云跟着动画时间飘");
+    // 打雷：天幕和低云都被照亮，亮的地方跟着雷走；雷过去就暗回去
+    storm.update(10, 0.016, { flash: 0.8, x: 6 });
+    const u6 = su.flashU.value;
+    assert.ok(su.flash.value > 0.5 && low.every(o => o.material.uniforms.flash.value > 0.5), "打雷时云被照亮");
+    storm.update(10, 0.016, { flash: 0.8, x: -6 });
+    assert.ok(su.flashU.value < u6, "云亮的地方跟着雷走");
+    storm.update(10, 0.016, { flash: 0, x: 0 });
+    assert.ok(su.flash.value === 0 && low.every(o => o.material.uniforms.flash.value === 0));
+    // 远处的雷：劈在低云前面（天幕、低云都是一圈弧，两边离得近；劈在后面会被挡住），比战场边缘的雷远，横着在画面里
+    const S = B.BACKDROP, cx = (b.minX + b.maxX) / 2, cz = (b.minZ + b.maxZ) / 2;
+    const rx = (b.maxX - b.minX) / 2 + S.sideGap, rz = (b.maxZ - b.minZ) / 2 + S.skyGap, lx = rx - S.storm.low.inset, lz = rz - S.storm.low.inset;
+    const arcZ = (x, ax, az) => { const k = (x - cx) / ax; return cz - az * Math.sqrt(Math.max(0, 1 - k * k)); };
+    [-1, -0.5, 0, 0.5, 1].forEach(r => {
+      const p = storm.farPoint(r), skyZ = arcZ(p.x, rx, rz), lowZ = arcZ(p.x, lx, lz);
+      assert.ok(p.z > skyZ + 0.05 && p.z > lowZ + 0.05, `远处的雷 r=${r} 在天幕 / 低云后面（z=${p.z.toFixed(2)}，天幕 ${skyZ.toFixed(2)}，低云 ${lowZ.toFixed(2)}）`);
+      assert.ok(p.z < b.minZ - WX.STORM.edgeDepth[1], `远处的雷 r=${r} 不比战场边缘的远（z=${p.z.toFixed(2)}）`);
+      const s = L.project(cam, { x: p.x, y: 0, z: p.z });
+      assert.ok(s.x > 0 && s.x < DESKTOP.width, `远处的雷 r=${r} 在画面外（x=${s.x.toFixed(0)}）`);
+    });
+    calm.dispose(); storm.dispose();
+  } finally { P.restore(); }
+});
+
+/* ---------- 路灯大幅减少、默认地台跟着地图换材质（#202 截图验收后主人的反馈）---------- */
+/** 游戏里现成的区域名：rogue-data.js 的 regions（单局各幕）+ altRegions（幕间改走的采矿场）；world-data.js 的区域 → 地图地点 id */
+function gameRegions() {
+  const ctx = H.load(), C = ctx.S.ROGUE_CONFIG;
+  return { names: [...new Set(C.regions.concat(Object.values(C.altRegions || {})))], places: require("vm").runInContext("WORLD_REGION_PLACE", ctx) };
+}
+const MINES = ["第一采矿场", "第二采矿场", "第三采矿场"];
+const LIGHTS = ["day", "dusk", "night"];
+
+test("区域 → 地面主题：游戏里的每个区域各有一套地面、互不相同；地图地点 id 和别名对到同一套；认不得的区域兜底成以前的水泥地", () => {
+  const { names, places } = gameRegions();
+  assert.ok(names.length >= 7 && names.includes("外城区") && MINES.every(n => names.includes(n)), "区域名取自 rogue-data.js：" + names);
+  const keys = names.map(n => L.groundOf(n));
+  keys.forEach((k, i) => {
+    assert.ok(L.GROUNDS[k], names[i] + "：配置表里有这套地面");
+    assert.notEqual(k, L.GROUND_DEFAULT, names[i] + "：不该落到兜底");
+    assert.equal(L.regionName(names[i]), names[i]);
+  });
+  assert.equal(new Set(keys).size, names.length, "不同区域选出不同的地面主题：" + keys);
+  // 同一个地方的别名：地图地点 id（跑团 LEDGER.place、联机跑团 view.map.place 发的是它）、天网塔 = 天网设施
+  Object.entries(places).forEach(([name, id]) => {
+    assert.equal(L.groundOf(id), L.groundOf(name), `${id} 和 ${name} 是同一个地方`);
+    assert.equal(L.regionName(id), L.regionName(name));
+  });
+  MINES.forEach((n, i) => assert.equal(L.regionName("mine_" + (i + 1)), n));
+  // 认不得的（没给、空的、还没有地面主题的地点、乱写的）：兜底，就是以前的水泥砖 + 油渍
+  [undefined, null, "", "月球", "极北禁区", 42, {}].forEach(x => {
+    assert.equal(L.groundOf(x), L.GROUND_DEFAULT, "认不得的区域兜底：" + String(x));
+    assert.equal(L.regionName(x), null);
+  });
+  const D = L.GROUNDS[L.GROUND_DEFAULT];
+  assert.ok(D.tex === "concrete" && D.side === "brick" && D.decals.oil > 0 && D.decals.crack > 0 && D.ground == null, "兜底 = 以前的水泥砖 + 油渍 / 裂缝，大片地面照旧");
+  // 每套地面看得出不同：顶面贴图 / 颜色、侧面、贴花、地台外的大片地面
+  const all = Object.keys(L.GROUNDS);
+  const sig = (k) => { const g = L.GROUNDS[k]; return [g.tex, g.tint, g.side, g.sideTint, JSON.stringify(g.decals), g.ground].join("|"); };
+  assert.equal(new Set(all.map(sig)).size, all.length, "有两套地面长得一样");
+  all.filter(k => k !== L.GROUND_DEFAULT).forEach(k => assert.ok(Number.isInteger(L.GROUNDS[k].ground) && L.GROUNDS[k].tex !== D.tex, k + "：自己的顶面贴图、地台外大片地面的颜色"));
+  // 主人给的大致对应
+  const G = (n) => L.GROUNDS[L.groundOf(n)];
+  assert.ok(G("外城区").side === "sheet" && G("外城区").decals.crack > 0, "外城区：开裂沥青 / 水泥、铁皮侧面");
+  assert.ok(G("沙漠").side === "strata" && G("沙漠").decals.ripple > 0, "沙漠：沙地 + 沙纹、岩层侧面");
+  MINES.forEach(n => assert.ok(G(n).side === "strata" && G(n).decals.slag > 0 && G(n).decals.gravel > 0, n + "：碎石 + 矿渣、岩层侧面"));
+  assert.ok(G("第三采矿场").glow && !G("第一采矿场").glow, "三采带一点能量矿的冷光");
+  assert.ok(G("巨人城").metal > 0 && G("巨人城").decals.grate > 0, "巨人城：金属地板 / 格栅");
+  assert.ok(G("天网设施").glow && G("天网设施").metal > 0 && G("天网设施").decor === "clean", "天网设施：干净的金属面板 + 发光接缝");
+  assert.ok(L.regionName("下水道") === "下水道" && G("下水道").decals.puddle > 0, "下水道（游戏里还没有这张图，先放在表里）：湿水泥 + 积水");
+});
+
+test("默认地台（没有场地效果的，或者只是垫高的高地）跟着区域换地面；有场地效果的（酸液、电、冰、流沙、珊瑚、深渊……）照旧；不给区域 / 认不得的区域和以前一样", () => {
+  const st = setupCase({ opt: { board: "cross5" } }, 1);
+  st.fields[1].acid = true; st.fields[2].highland = true; st.fields[4].electric = true; st.fields[5].highland = true; st.fields[5].fire = 2;
+  const base = L.build(st, { view: DESKTOP });
+  assert.ok(base.region === null && base.ground === L.GROUND_DEFAULT, "不给区域：兜底");
+  base.zones.forEach(z => assert.equal(z.ground, null, "不给区域：地台照旧"));
+  const { names } = gameRegions();
+  names.concat(["下水道", "mine_2", "天网塔"]).forEach(region => {
+    const out = L.build(st, { view: DESKTOP, region }), key = L.groundOf(region);
+    assert.ok(out.region === L.regionName(region) && out.ground === key, region);
+    out.zones.forEach((z, i) => {
+      const b = base.zones[i];
+      assert.ok(z.kind === b.kind && z.h === b.h && z.effects.join() === b.effects.join(), "地台的样子（kind）、高度不随区域变");
+      const plain = z.effects.every(e => e === "highland");
+      assert.equal(z.ground, plain ? key : null, `${region} ${z.id} 区（${z.effects.join("+") || "默认"}）`);
+    });
+    assert.equal(out.zones.filter(z => z.ground).map(z => z.id).join(), "2,3", region + "：只垫高的 2 区、默认的 3 区换了地面");
+  });
+  // 每一种场地效果，单独放或者和高地叠在一起：都不受区域影响
+  const s = setupCase({ opt: { zoneMode: 2 } }, 1);
+  L.KIND_ORDER.filter(k => k !== "highland").forEach(k => [{ [k]: true }, { [k]: true, highland: true }].forEach(f => {
+    s.fields[1] = Object.assign({}, f);
+    ["沙漠", "巨人城", "第三采矿场", "下水道"].forEach(region => {
+      const z = L.build(s, { region }).zones[0];
+      assert.ok(z.effects.includes(k) && z.ground === null, `${k}${f.highland ? " + 高地" : ""} 在 ${region}：有场地效果，不换地面`);
+    });
+  }));
+  // 认不得的区域：和不给区域一样
+  const odd = L.build(st, { view: DESKTOP, region: "月球" });
+  assert.ok(odd.region === null && odd.ground === L.GROUND_DEFAULT);
+  odd.zones.forEach(z => assert.equal(z.ground, null));
+});
+
+test("路灯：整场最多 CONFIG.lamps.max 盏（每张地图放几盏、放什么在 GROUNDS 的 lamps），放在战场后沿外面、不在地台上，默认镜头里看得见；沙漠 / 采矿场没有路灯", () => {
+  const max = L.CONFIG.lamps.max;
+  assert.ok(max >= 1 && max <= 2, "整场最多 1–2 盏");
+  const { names } = gameRegions(), regions = names.concat(["下水道", "月球", null]);
+  for (const c of CASES) {
+    const st = setupCase(c);
+    for (const region of regions) for (const theme of LIGHTS) {
+      const out = L.build(st, { view: DESKTOP, region, theme }), tag = `${c.name} ${region} ${theme}`;
+      const plan = L.lampPlan(out.ground, theme);
+      assert.ok(Array.isArray(out.lamps) && out.lamps.length === plan.count && out.lamps.length <= max, tag + `：${out.lamps && out.lamps.length} 盏`);
+      out.lamps.forEach(l => {
+        assert.equal(l.kind, plan.kind);
+        out.zones.forEach(z => assert.ok(Math.abs(l.x - z.cx) > z.w / 2 + 0.3 || Math.abs(l.z - z.cz) > z.d / 2 + 0.3, `${tag}：灯放在 ${z.id} 区的地台上了`));
+        assert.ok(l.z < out.bounds.minZ && l.z > out.bounds.minZ - 3, `${tag}：灯在战场后沿外面（z=${l.z.toFixed(2)}）`);
+        const h = L.CONFIG.lamps.h[l.kind];
+        assert.ok(h > 1, "灯的高度在配置里");
+        [0, h].forEach(y => {
+          const s = screenOf(out.camera, { x: l.x, y: L.CONFIG.groundY + y, z: l.z });
+          assert.ok(s.x >= 0 && s.x <= DESKTOP.width && s.y >= DESKTOP.top && s.y <= DESKTOP.height - DESKTOP.bottom, `${tag}：灯（${y ? "灯头" : "灯杆底"}）不在画面里（${s.x.toFixed(0)}, ${s.y.toFixed(0)}）`);
+        });
+      });
+    }
+  }
+  // 沙漠、采矿场默认不放路灯：沙漠什么灯都没有，采矿场最多一盏小矿灯（吊灯）
+  const st = setupCase({ opt: { zoneMode: 3 } });
+  for (const theme of LIGHTS) {
+    assert.equal(L.build(st, { region: "沙漠", theme }).lamps.length, 0, "沙漠没有灯：" + theme);
+    MINES.forEach(n => {
+      const ls = L.build(st, { region: n, theme }).lamps;
+      assert.ok(ls.length <= 1 && ls.every(l => l.kind === "hanging"), `${n}：没有路灯，最多一盏矿灯（${theme}）`);
+    });
+  }
+  // 本来就该有灯的地方：外城区 / 巨人城 / 天网设施 / 下水道，夜里有灯
+  ["外城区", "巨人城", "天网设施", "下水道"].forEach(n => assert.ok(L.build(st, { region: n, theme: "night" }).lamps.length >= 1, n + "夜里有灯"));
+});
+
+test("真的 three.js 里：默认地台的顶面 / 侧面 / 贴花按区域换，有场地效果的地台和不给区域时是同一套材质和贴花；认不得的区域就是以前的水泥地", async (t) => {
+  const P = await protoEnv(t);
+  if (!P) return;
+  const { W } = P;
+  try {
+    const st = setupCase({ opt: { board: "cross5" } }, 1);
+    st.fields[1].acid = true; st.fields[2].highland = true; st.fields[4].electric = true; st.fields[5].ice = true;
+    /** 建一遍整个战场的地台，记下每块的顶面 / 侧面材质和贴花的贴图 */
+    const looks = (region) => {
+      const out = L.build(st, { view: DESKTOP, region, theme: "dusk" }), ctx = { anim: [], lamps: [], fxLights: 0, theme: "dusk" };
+      return out.zones.map(z => {
+        const g = W.buildZone(z, ctx), body = g.children.find(o => o.isMesh && Array.isArray(o.material));
+        const decals = new Set();
+        g.traverse(o => { if (o.isMesh && o.geometry.type === "PlaneGeometry" && o.material.transparent && o.material.map) decals.add(o.material.map); });
+        W.disposeTree(g);
+        return { z, top: body.material[0], side: body.material[1], decals };
+      });
+    };
+    const same = (a, b) => a.top === b.top && a.side === b.side && a.decals.size === b.decals.size && [...a.decals].every(x => b.decals.has(x));
+    const none = looks(null);
+    assert.ok(none.filter(x => !x.z.effects.length).every(x => x.decals.size > 0), "默认地台上铺着贴花");
+    looks("月球").forEach((x, i) => assert.ok(same(x, none[i]), `认不得的区域：${x.z.id} 区和以前一样`));
+    const { names } = gameRegions(), tops = new Set();
+    names.concat(["下水道"]).forEach(region => {
+      looks(region).forEach((x, i) => {
+        if (!x.z.ground) { assert.ok(same(x, none[i]), `${region}：有场地效果的 ${x.z.id} 区（${x.z.kind}）不该变`); return; }
+        assert.ok(x.top !== none[i].top && x.top.map !== none[i].top.map && x.side !== none[i].side, `${region}：${x.z.id} 区的顶面、侧面跟着区域换了`);
+        assert.ok([...x.decals].some(d => !none[i].decals.has(d)) || x.decals.size === 0, `${region}：${x.z.id} 区的贴花跟着区域换了`);
+        tops.add(x.top);
+      });
+    });
+    assert.ok(tops.size >= names.length, "不同区域的默认地台顶面不一样");
+  } finally { P.restore(); }
+});
+
+test("真的 three.js 里：地台和间隔上不再放路灯，整场的灯就是布局给的那 0–2 盏；沙漠没有灯，采矿场只有矿灯", async (t) => {
+  const P = await protoEnv(t);
+  if (!P) return;
+  const { W } = P;
+  try {
+    const { names } = gameRegions();
+    for (const c of CASES) {
+      const st = setupCase(c);
+      for (const region of names.concat(["下水道", null])) for (const theme of ["day", "night"]) {
+        const out = L.build(st, { view: DESKTOP, region, theme }), ctx = { anim: [], lamps: [], fxLights: 0, theme }, tag = `${c.name} ${region} ${theme}`;
+        const built = out.zones.map(z => W.buildZone(z, ctx)).concat(out.gaps.map(g => W.buildGap(g, ctx)));
+        assert.equal(ctx.lamps.length, 0, tag + "：地台 / 间隔上不该有路灯");
+        built.push(W.buildLamps(out.lamps, ctx));
+        assert.ok(ctx.lamps.length === out.lamps.length && ctx.lamps.length <= L.CONFIG.lamps.max, tag);
+        if (region === "沙漠") assert.equal(ctx.lamps.length, 0, tag);
+        if (MINES.includes(region)) assert.ok(ctx.lamps.every(l => l.kind === "hanging"), tag + "：采矿场只有矿灯");
+        ctx.lamps.forEach(l => assert.ok(l.light && l.bulb && l.bulbColor && l.wait > 0 && l.flick === 0, tag + "：灯会发光、带着闪烁要用的数据"));
+        built.forEach(o => W.disposeTree(o));
+      }
+    }
+  } finally { P.restore(); }
+});
+
+test("远景跟着区域：沙漠 → 沙丘、采矿场 → 岩壁（矿井架 / 烟囱还在）、城市 → 楼群（白天 / 傍晚 / 夜晚都建得出来）、天网设施 → 沙丘里的高塔；场景按布局给的区域挑远景、地面颜色和灯", async (t) => {
+  const P = await protoEnv(t);
+  if (!P) return;
+  const { B, THREE } = P;
+  try {
+    const G = (n) => L.GROUNDS[L.groundOf(n)];
+    assert.equal(G("沙漠").backdrop, "desert");
+    MINES.forEach(n => assert.equal(G(n).backdrop, "mine", n));
+    ["外城区", "巨人城", "下水道"].forEach(n => assert.equal(G(n).backdrop, "city", n));
+    assert.equal(G("天网设施").backdrop, "skynet");
+    assert.equal(L.GROUNDS[L.GROUND_DEFAULT].backdrop, null, "认不得的区域：远景照旧按光影主题挑");
+    const out = L.build(DEMO_SETUPS.cross(H.load().BattleSim), { view: DESKTOP });
+    const count = (bd, kind) => { let n = 0; bd.group.traverse(o => { if (o.userData && o.userData.kind === kind) n++; }); return n; };
+    const colors = { sky: ["#ffc47c", "#f28a5a", "#b9587a", "#4b3368"], fog: 0xc98a72 };
+    for (const theme of LIGHTS) for (const storm of [false, true]) {
+      const opt = Object.assign({ storm }, colors), tag = theme + (storm ? " 雷鸣" : "");
+      const make = (kind, extra) => { const bd = B.buildBackdrop(kind, out.bounds, theme, out.camera, Object.assign({}, opt, extra)); bd.update(1, 0.016, { flash: 0.5, x: 0 }); return bd; };
+      const city = make("city"), mine = make("mine"), desert = make("desert"), sky = make("skynet");
+      assert.ok(count(city, "tower") >= 8, tag + "：城市远景是楼群");
+      assert.ok(count(mine, "cliff") >= 2 && count(mine, "headframe") === 1, tag + "：采矿场远景有岩壁，矿井架还在");
+      assert.ok(count(desert, "dune") >= 2, tag + "：沙漠远景有沙丘");
+      assert.ok(count(sky, "skynet") === 1 && count(sky, "dune") >= 2, tag + "：天网设施是沙丘里的一座高塔");
+      [city, mine, desert, sky].forEach(bd => bd.dispose());
+    }
+    // 楼群的高低按区域（外城区是矮房子，巨人城是高楼）
+    const tallest = (skyline) => {
+      const bd = B.buildBackdrop("city", out.bounds, "day", out.camera, Object.assign({ skyline }, colors));
+      let h = 0; bd.group.traverse(o => { if (o.userData.kind === "tower") h = Math.max(h, new THREE.Box3().setFromObject(o).max.y); });
+      bd.dispose(); return h;
+    };
+    assert.ok(G("巨人城").skyline > G("外城区").skyline && tallest(G("巨人城").skyline) > tallest(G("外城区").skyline) * 1.2, "巨人城的楼比外城区的高");
+    // 场景：远景、地台外大片地面的颜色按布局给的地面主题（layout.ground），灯按布局摆
+    const fs = require("fs"), path = require("path");
+    const scene = fs.readFileSync(path.join(__dirname, "..", "prototypes", "hd2d", "hd2d-scene.js"), "utf8");
+    assert.ok(/L\.GROUNDS\[[^\]]*\.ground\]/.test(scene) && /buildLamps\(layout\.lamps/.test(scene), "场景照布局给的地面主题挑远景 / 地面颜色，灯照布局摆");
+  } finally { P.restore(); }
+});
+
+test("原型页：顶栏可以切换区域（下拉框，或者网址加 ?region=沙漠），三个演示默认分别是采矿场 / 沙漠 / 外城区；布局拿到的就是页面选的区域", () => {
+  const fs = require("fs"), path = require("path");
+  const html = fs.readFileSync(path.join(__dirname, "..", "prototypes", "hd2d", "index.html"), "utf8");
+  assert.ok(html.includes('id="region-select"'), "顶栏有区域下拉框");
+  assert.ok(/\.get\("region"\)/.test(html), "网址参数 ?region=");
+  assert.ok(/Object\.keys\(L\.REGIONS\)/.test(html), "下拉框列的是配置表里的区域名");
+  Object.entries({ mine: "第一采矿场", desert: "沙漠", cross: "外城区" }).forEach(([id, region]) =>
+    assert.ok(new RegExp(`id: "${id}",[^\\n]*region: "${region}"`).test(html), `演示 ${id} 默认在 ${region}`));
+  assert.ok(/L\.build\(st, \{[^}]*region:[^}]*theme:/.test(html), "布局拿到页面选的区域和光影主题（灯的数量看白天 / 夜晚）");
+  const css = fs.readFileSync(path.join(__dirname, "..", "prototypes", "hd2d", "hd2d.css"), "utf8");
+  assert.ok(/@media \(max-width: 720px\)[\s\S]*#region-select[^{]*\{[^}]*display: none/.test(css), "手机上收起区域下拉框（这一轮不专门调手机，别弄坏）");
 });
