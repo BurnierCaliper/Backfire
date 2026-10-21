@@ -476,7 +476,7 @@ const TEX = {
     g.beginPath(); g.ellipse(s / 2 - 8, s / 2 - 6, s * 0.16, s * 0.05, -0.2, 0, 7); g.stroke();
   }, { clamp: true, smooth: true })
 };
-const tex = (name) => TEX[name]();
+const tex = (name) => (TEX[name] || ART.texture(name, KIT))();   // 区域场景的美术包（#242）画的贴图也认
 
 const matCache = new Map();
 function mat(key, color, opt) {
@@ -500,6 +500,10 @@ function mesh(geo, material, x, y, z, cast = true, recv = true) {
   return m;
 }
 
+/** 区域场景的美术（#242，hd2d-scene-art.js 登记的美术包）：贴图 / 贴花 / 地台上的装饰找它要；画东西用的 three.js 和小工具打包成 KIT 交过去。没加载就当没有 */
+const ART = window.HD2DSceneArt || { texture: () => null, decal: () => null, zone: () => false };
+const KIT = { THREE, WORLD, rng, canvasTex, speckle, crack, gravel, slagChunks, tex, mat, glow, mesh, outlinePts, onTop, prism, shapeOf };
+
 /* ---------- 地台 ---------- */
 /** 有场地效果的地台（和不知道在哪个区域时的默认地台）：顶面贴图；side 是侧面材质：砖（水泥地）、铁皮（酸液 / 电 / 能量这些铁板地）、
  *  岩层（高地、沙地、深渊、冰）。知道区域时，默认地台换成 hd2d-layout.js 的 GROUNDS 那一套（zone.ground） */
@@ -522,7 +526,7 @@ const TOP_STYLE = {
 const lookOf = (z) => (z.ground && L.GROUNDS[z.ground]) || null;
 /** 地面主题里会发光的那层：贴图名 + "Glow" 有画的（天网设施的接缝）就当自发光贴图，颜色 = 主题的 glow */
 function glowMap(look, name, repeat) {
-  if (!look.glow || !TEX[name + "Glow"]) return {};
+  if (!look.glow || !(TEX[name + "Glow"] || ART.texture(name + "Glow", KIT))) return {};
   const e = tex(name + "Glow");
   e.repeat.set(repeat, repeat);
   return { emissiveMap: e, emissive: look.glow, emissiveIntensity: WORLD.glow };
@@ -664,7 +668,7 @@ function addGroundDetail(g, z, r, look) {
   };
   let layer = 0;   // 每块贴花抬高一点点，叠在一起时不打架
   const place = (kind, n) => {
-    const P = DECALS[kind];
+    const P = DECALS[kind] || ART.decal(kind);
     if (!P || !(n > 0)) return;
     const tx = tex(P.tex);
     const opt = { map: tx, transparent: true, depthWrite: false, roughness: P.rough != null ? P.rough : 0.95, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 };
@@ -725,7 +729,7 @@ export function buildZone(z, ctx) {
   if (fx.has("ice")) addIce(g, z, r);
   if (fx.has("electric")) addElectric(g, z, ctx);
   ["energy", "harmonic", "heal"].forEach(k => { if (fx.has(k)) addRing(g, z, k, ctx); });
-  decorate(g, z, r, look);
+  if (!ART.zone(KIT, g, z, ctx, r, look)) decorate(g, z, r, look);   // 区域场景（#242）的地台装饰由美术包摆
   return g;
 }
 
