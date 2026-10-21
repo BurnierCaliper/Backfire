@@ -368,6 +368,9 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **图鉴「可能掉落」改为模糊档位，不显示具体数字**（策划要求；bestiary-ui.js · `DROP_RARITY` / `dropChanceText`；测试 tests/bestiary-drops-ui.test.js）
+  - 以前：图鉴写「25% 掉 1 份」「保底 1 份，15% 再多 1 份」这样的具体概率和份数（PR #173）。
+  - 现在：期望份数 ≥ 1 写「必掉」（有小数部分写「必掉，有时更多」）；否则按掉率分档：≥ 40% 常见、15%–40% 少见、< 15% 罕见（档位集中在 `DROP_RARITY`）。材料的常见 / 精制标签保留。掉落数据（items.js · `ENEMY_DROPS`）和掉落规则不变。
 - **每个敌人独立的制作材料掉落表**（PR #172，Closes #170；items.js · `ENEMY_DROPS` / `ENEMY_DROP_ALIAS` / `enemyDropTable` / `rollEnemyDrops` / `enemyDropExpected` / `enemyDropFoes`；rogue.js · `rollMaterialDrops`；app.js · `settleBattleRewards` / `trpgEnemyMaterials` / `mergeBattleDrops`；bestiary.js · `bestiaryEntries().drops`；online-view.js · `projectDrops`；测试 tests/craft-materials.test.js）
   - 以前：按敌人属性 / 层归类（`craftClassesOf`），再按杂兵 / 精英 / 首领三档套 `CRAFT_DROPS` 的统一比例（`rollCraftMaterials`）；只有单局会掉，中立生物（尘虫、管虫）和飞碟机械足不掉。
   - 现在：`items.js · ENEMY_DROPS` 给 45 种敌人每个一张表（键为 kit），值是**期望数量**：小于 1 是掉 1 份的概率；大于等于 1 时整数部分保底、小数部分再掷一次。数字都在这张表里。
