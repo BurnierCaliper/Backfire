@@ -61,6 +61,7 @@
     // 掷骰：选角色、选熟练项，掷一颗 d100（点数越低越好）
     const rollBox = make("section", "online-roll", "ol-overlay ol-bag ol-roll", { role: "dialog", "aria-label": "掷骰" });
     rollBox.hidden = true;
+    let checkReq = null;   // 申请检定（check-request-ui.js）：玩家申请 / 主持人批准的浮层，下面 mount
     const rollForm = { unit: "", prof: "", note: "", secret: false };
     // 大字：主持人发，所有人画面中间出现（像 Minecraft 的 /title）
     const titleShow = make("div", "online-title", "ol-title-show", { "aria-live": "assertive" });
@@ -120,6 +121,7 @@
     rollBox.addEventListener("click", event => {
       if (event.target === rollBox || event.target.closest('[data-roll="close"]')) { rollBox.hidden = true; return; }
       if (event.target.closest('[data-roll="go"]')) doRoll();
+      if (event.target.closest('[data-roll="ask"]')) askCheck();
     });
     rollBox.addEventListener("change", event => {
       const t = event.target;
@@ -340,16 +342,54 @@
         <label><input type="number" id="ol-purse-n" data-purse="n" min="1" max="${esc(Math.max(1, Number((mine.find(h => h.kit === purseDraft.from) || mine[0]).amount) || 0))}" step="1" placeholder="数额" value="${esc(purseDraft.n)}" aria-label="转多少奎支"> 奎支</label>${button("转过去", "purseTransfer", "", disabled())}</div>
         <p class="ol-muted">任务的奎支报酬自动平分进各人钱包，个人任务的只进你自己的。转账会写进小队频道。</p></section>`;
     }
+    /** 跑团工匠（主持人开了才有，房主算好的 view.packet.smith）：给自己的武器升级，加工费从这名角色的钱包出 */
+    function trpgSmithMarkup() {
+      const heroes = view.packet?.smith?.heroes || [];
+      if (view.mode === "rogue" || !heroes.length) return "";
+      const rows = heroes.map(h => `<li><b>${esc(h.name)}</b> <span class="ol-muted">钱包 ${esc(h.purse)} 奎支</span><ul>${h.weapons.map(w => {
+        if (w.max) return `<li>${esc(w.name)} Lv${esc(w.lv)} · 已满级</li>`;
+        const mats = w.mats.map(m => `<span class="${m.have >= m.need ? "" : "ol-bad"}">${esc(m.name)} ${esc(m.have)}/${esc(m.need)}</span>`).join("、");
+        const data = `data-kit="${esc(h.kit)}" data-weapon="${esc(w.kit)}"`;
+        return `<li>${esc(w.name)} Lv${esc(w.lv)} → ${esc(w.next)} <small>材料：${mats}</small>
+          ${w.canSelf ? button("在工作站自己升（只耗材料）", "smithUpgrade", `${data} data-mode="self"`, disabled() || !w.enough) : ""}
+          ${button(`找工匠升（${w.fee} 奎支）`, "smithUpgrade", `${data} data-mode="smith"`, disabled() || !w.enough || h.purse < w.fee, !w.canSelf)}</li>`;
+      }).join("") || '<li class="ol-muted">没有可升级的武器</li>'}</ul></li>`).join("");
+      return `<section class="ol-rogue-box ol-trpg-smith" aria-label="武器升级"><h3>🔨 武器升级（工匠开着）</h3><ul>${rows}</ul>
+        <p class="ol-muted">材料从队伍背包出；加工费用参考价，从这名角色自己的钱包出。</p></section>`;
+    }
+    /** 跑团工坊（主持人开了才有）：制作已会的配方（程序掷骰，队友可打下手）、拆解背包里的东西；学配方由主持人教会 */
+    const workshopDraft = { kit: "", helper: "" };
+    function trpgWorkshopMarkup() {
+      const heroes = view.packet?.workshop?.heroes || [];
+      if (view.mode === "rogue" || !heroes.length) return "";
+      if (!heroes.some(h => h.kit === workshopDraft.kit)) workshopDraft.kit = heroes[0].kit;
+      const hero = heroes.find(h => h.kit === workshopDraft.kit);
+      const others = (view.packet?.purse?.heroes || []).filter(h => h.kit !== hero.kit);
+      if (!others.some(h => h.kit === workshopDraft.helper)) workshopDraft.helper = "";
+      const recipes = hero.recipes.map(r => {
+        const mats = r.mats.map(m => `<span class="${m.have >= m.need ? "" : "ol-bad"}">${esc(m.name)} ${esc(m.have)}/${esc(m.need)}</span>`).join(" + ");
+        const can = r.known && r.chance > 0 && r.mats.every(m => m.have >= m.need);
+        return `<li><b>${esc(r.name)}</b> <small>${esc(r.prof)} · ${esc(r.diffName)} · ${esc(r.hours)} 小时 · ${mats}${r.known ? ` · 成功率 ${esc(r.chance)}%` : ""}</small>
+          ${r.known ? button("制作", "workshopCraft", `data-item="${esc(r.id)}"`, disabled() || !can) : '<span class="ol-muted">还不会（找主持人教会）</span>'}</li>`;
+      }).join("");
+      const salvage = hero.salvage.map(x => `<li>${esc(x.name)} ×${esc(x.qty)} → ${esc(x.yields)} ${button("拆一件", "workshopSalvage", `data-item="${esc(x.id)}"`, disabled())}</li>`).join("");
+      return `<section class="ol-rogue-box ol-trpg-workshop" aria-label="工坊"><h3>⚙ 工坊（开着）</h3>
+        <p><label>谁做 <select data-workshop="kit">${heroes.map(h => option(h.kit, h.name, h.kit === hero.kit)).join("")}</select></label>
+        <label>打下手 <select data-workshop="helper">${[["", "没人帮"]].concat(others.map(h => [h.kit, h.name])).map(([k, n]) => option(k, n, k === workshopDraft.helper)).join("")}</select></label></p>
+        <h4>制作</h4><ul>${recipes || '<li class="ol-muted">没有配方</li>'}</ul>
+        <h4>拆解（不花时间）</h4><ul>${salvage || '<li class="ol-muted">背包里没有能拆的东西</li>'}</ul>
+        <p class="ol-muted">制作由程序掷骰，会推进游戏时间；失败会损失一部分材料。学新配方要主持人教会。</p></section>`;
+    }
     function suppliesMarkup(data) {
       const bag = data.bag || {}, items = (bag.items || []).filter(item => item.qty > 0);
-      return `${shopMarkup()}${trpgCyberwareMarkup()}${trpgClinicMarkup()}${purseMarkup()}<section class="ol-supplies" aria-label="队伍公共物资"><h3>队伍公共物资</h3><div class="ol-points"><span>${view.packet?.purse ? "队伍公账" : "奎支"} ${esc(data.kuizhi ?? 0)}</span><span>水 ${esc(bag.water ?? 0)} ml</span></div><ul>${items.map(item => `<li>${esc(item.name || item.id)} × ${esc(item.qty)}</li>`).join("") || '<li class="ol-muted">背包为空</li>'}</ul></section>`;
+      return `${shopMarkup()}${trpgSmithMarkup()}${trpgWorkshopMarkup()}${trpgCyberwareMarkup()}${trpgClinicMarkup()}${purseMarkup()}<section class="ol-supplies" aria-label="队伍公共物资"><h3>队伍公共物资</h3><div class="ol-points"><span>${view.packet?.purse ? "队伍公账" : "奎支"} ${esc(data.kuizhi ?? 0)}</span><span>水 ${esc(bag.water ?? 0)} ml</span></div><ul>${items.map(item => `<li>${esc(item.name || item.id)} × ${esc(item.qty)}</li>`).join("") || '<li class="ol-muted">背包为空</li>'}</ul></section>`;
     }
     function suppliesCard(data) {
       return `<div class="ol-card ol-supplies-card"><header><h2>物资</h2>${button("关闭", "suppliesClose")}</header>${suppliesMarkup(data)}</div>`;
     }
     /** 舞台顶上的「物资」按钮：商店 / 诊所开着时带提示 */
     function suppliesButton() {
-      const tags = [view.packet?.shop ? "🛒" : "", view.packet?.clinic?.heroes?.length || view.packet?.cyberware?.heroes?.length ? "🦾" : ""].filter(Boolean).join("");
+      const tags = [view.packet?.shop ? "🛒" : "", view.packet?.smith?.heroes?.length ? "🔨" : "", view.packet?.workshop?.heroes?.length ? "⚙" : "",view.packet?.clinic?.heroes?.length || view.packet?.cyberware?.heroes?.length ? "🦾" : ""].filter(Boolean).join("");
       return button(`物资${tags ? " · " + tags : ""}`, "supplies", tags ? 'data-alert="1"' : "");
     }
     function paintSupplies() {
@@ -913,7 +953,7 @@
       const profOpts = Object.keys(groups).map(g => `<optgroup label="${esc(g)}">${groups[g].map(p => { const lv = u ? profLevel(u.kit, p) : 0; return option(p, `${p}${lv ? "（" + LV[lv] + "）" : ""}`, p === rollForm.prof); }).join("")}</optgroup>`).join("");
       const level = u ? profLevel(u.kit, rollForm.prof) : 0;
       const perks = u && typeof checkPerksFor === "function" ? checkPerksFor(u.kit, rollForm.prof, false) : {};
-      rollBox.innerHTML = `<div class="ol-card"><header><h2>掷骰 · d100</h2><button type="button" class="ol-button" data-roll="close">关闭</button></header>${units.length ? `<label>角色<select id="ol-roll-unit">${units.map(x => option(x.id, x.name, x.id === rollForm.unit)).join("")}</select></label><label>熟练项<select id="ol-roll-prof">${profOpts}</select></label><p class="ol-roll-lines"><b>${esc(LV[level])}</b>　点数越低越好：${esc(rollLines(level))}${perks.adv ? "（种族优势：掷两颗取低）" : perks.dis ? "（种族劣势：掷两颗取高）" : ""}</p><label>说明（可不填）<input id="ol-roll-note" maxlength="80" value="${esc(rollForm.note)}" placeholder="比如：撬开仓库的锁"></label>${view.isHost ? `<label class="ol-check-line"><input type="checkbox" id="ol-roll-secret"${rollForm.secret ? " checked" : ""}> 暗骰（结果只有主持人看得到）</label>` : ""}<footer><button type="button" class="ol-button ol-primary" data-roll="go"${disabled() ? " disabled" : ""}>掷 d100</button></footer>` : '<p class="ol-muted">还没有分配到你的角色。</p>'}</div>`;
+      rollBox.innerHTML = `<div class="ol-card"><header><h2>掷骰 · d100</h2><button type="button" class="ol-button" data-roll="close">关闭</button></header>${units.length ? `<label>角色<select id="ol-roll-unit">${units.map(x => option(x.id, x.name, x.id === rollForm.unit)).join("")}</select></label><label>熟练项<select id="ol-roll-prof">${profOpts}</select></label><p class="ol-roll-lines"><b>${esc(LV[level])}</b>　点数越低越好：${esc(rollLines(level))}${perks.adv ? "（种族优势：掷两颗取低）" : perks.dis ? "（种族劣势：掷两颗取高）" : ""}</p><label>说明（可不填）<input id="ol-roll-note" maxlength="80" value="${esc(rollForm.note)}" placeholder="比如：撬开仓库的锁"></label>${view.isHost ? `<label class="ol-check-line"><input type="checkbox" id="ol-roll-secret"${rollForm.secret ? " checked" : ""}> 暗骰（结果只有主持人看得到）</label>` : ""}<footer>${view.isHost ? "" : `<button type="button" class="ol-button" data-roll="ask"${disabled() ? " disabled" : ""} title="请主持人定难度，同意后由房主掷骰，结果大家都看得到">申请检定</button>`}<button type="button" class="ol-button ol-primary" data-roll="go"${disabled() ? " disabled" : ""}>掷 d100</button></footer>` : '<p class="ol-muted">还没有分配到你的角色。</p>'}</div>`;
     }
     /** 游戏内确认：返回 Promise<boolean>。同时只开一个，新的会把旧的当作取消 */
     function askConfirm(title, text, okLabel = "确定", cancelLabel = "取消") {
@@ -933,6 +973,11 @@
       const cmd = { type: "skillRoll", unitId: rollForm.unit, prof: rollForm.prof, note: rollForm.note.trim() };
       if (view.isHost && rollForm.secret) cmd.secret = true;
       if (await call(() => api.submit(cmd))) { rollForm.note = ""; rollBox.hidden = true; }
+    }
+    /** 主动发起检定（规则层 hotseat.js · requestCheck）：主持人定难度同意后房主掷骰 */
+    async function askCheck() {
+      if (!rollForm.unit || !rollForm.prof || disabled()) return;
+      if (await call(() => api.submit({ type: "checkRequest", unitId: rollForm.unit, prof: rollForm.prof, note: rollForm.note.trim() }))) { rollForm.note = ""; rollBox.hidden = true; }
     }
     /** 最近 10 场战绩：每场的结果、评价、掉落，和每个人的数据 */
     function recordMarkup(list) {
@@ -1016,6 +1061,7 @@
       mountHostChat();
       if (!stage.hidden) paintStage();
       paintSupplies();
+      if (checkReq) checkReq.sync();
       if (view.active && !view.isHost) scheduleAutoMenu();
     }
     /** 舞台：文字部分照旧拼 HTML；战斗画面是常驻的一块（单位卡有动画，不能每次重建），每次画完再挂回占位处 */
@@ -1054,7 +1100,7 @@
       else if (!acting) hint = view.packet?.manualPhase || view.manualPhase ? "主持人正在操控敌人。" : hs().phase === "enemy" ? "敌人行动中。" : "等待开始。";
       else if (!mine.includes(cur)) hint = `等待 ${curUnit ? curUnit.name : "队友"}${curUnit && hs().units ? `（${playerName((hs().units.find(u => u.id === cur) || {}).owner)}）` : ""} 行动。`;
       else if (!choices) hint = "正在取技能…";
-      else hint = `${curUnit ? curUnit.name : ""}　选择技能（1–9）。悬停技能看说明，空格结束行动。`;
+      else hint = `${curUnit ? curUnit.name : ""}　${global.OnlineBattle && global.OnlineBattle.isTouch && global.OnlineBattle.isTouch() ? "选择技能。点技能看说明。" : "选择技能（1–9）。悬停技能看说明，空格结束行动。"}`;
       const field = fieldAsk();
       if (field) {
         // 有对应单位的选项 → value 是单位 id（战场上亮起、编号）；其余 value 为空 → 提示栏按钮
@@ -1172,6 +1218,7 @@
     function input(event) {
       const box = event.target.closest && event.target.closest("[data-cyber-box]");
       if (box) { cyberDraft[box.dataset.cyberBox] = cyberPlanOf(box.dataset.cyberBox); return; }
+      if (event.target.dataset.workshop) { workshopDraft[event.target.dataset.workshop] = event.target.value; if (event.type === "change") { lastMarkup.supplies = ""; render(); paintSupplies(); } return; }
       if (event.target.dataset.purse) { purseDraft[event.target.dataset.purse] = event.target.value; return; }
       if (event.target.dataset.shopQty) { shopDraft.qty[event.target.dataset.shopQty] = event.target.value; return; }
       if (event.target.hasAttribute && event.target.hasAttribute("data-shop-payer")) { shopDraft.payer = event.target.value; if (event.type === "change") render(); return; }
@@ -1234,6 +1281,9 @@
         case "checkRoll": if (!disabled()) await call(() => api.submit({ type: "checkRoll", checkId: b.dataset.check, unitId: b.dataset.unit })); break;
         case "attrRequest": if (!disabled()) await call(() => api.submit({ type: "attrRequest", unitId: b.dataset.unit, attr: b.dataset.attr })); break;
         case "shopBuy": if (!disabled()) { if (global.Sfx) Sfx.ui("coin"); await call(() => api.submit({ type: "shopBuy", merchant: view.packet?.shop?.id, key: b.dataset.key, qty: Math.max(1, Number(shopDraft.qty[b.dataset.key]) || 1), payer: shopDraft.payer })); } break;
+        case "smithUpgrade": if (!disabled()) await call(() => api.submit({ type: "smithUpgrade", kit: b.dataset.kit, weapon: b.dataset.weapon, mode: b.dataset.mode })); break;
+        case "workshopCraft": if (!disabled()) await call(() => api.submit({ type: "workshopCraft", kit: workshopDraft.kit, item: b.dataset.item, helper: workshopDraft.helper || null })); break;
+        case "workshopSalvage": if (!disabled()) await call(() => api.submit({ type: "workshopSalvage", kit: workshopDraft.kit, item: b.dataset.item })); break;
         case "shopRedeem": if (!disabled()) await call(() => api.submit({ type: "shopRedeem", merchant: view.packet?.shop?.id, item: b.dataset.item })); break;
         case "purseTransfer": if (!disabled()) await call(() => api.submit({ type: "purseTransfer", from: byId("ol-purse-from")?.value, to: byId("ol-purse-to")?.value, amount: Number(byId("ol-purse-n")?.value) || 0 })); break;
         case "rogueVote": if (!disabled()) await call(() => api.submit({ type: "rogue.vote", option: b.dataset.option })); break;
@@ -1521,11 +1571,14 @@
     // 倒计时（询问、离线等待）每半秒刷新一次文字
     const countdownTimer = setInterval(() => { if (global.OnlineBattle && global.OnlineBattle.tickCountdowns) global.OnlineBattle.tickCountdowns(document); }, 500);
     unsubs.push(() => clearInterval(countdownTimer));
+    // 申请检定：规则在 hotseat.js · requestCheck / decideCheck；角色是自己操控的（可以好几名），主持人看全队
+    if (global.CheckRequestUI) checkReq = global.CheckRequestUI.mount({ api, view: () => view, own, call, profLevel, playerName,
+      units: () => view.isHost ? ((displayState || view.state || {}).units || []).filter(u => u.isPlayer && !u.weaponOf && u.kit) : rollUnits() });
     if (typeof api.subscribe === "function") unsubs.push(api.subscribe(render));
     if (typeof api.onPacket === "function") unsubs.push(api.onPacket(playPacket));
     render();
     const instance = { render, open(which = "join") { entry = which; panelOpen = true; render(); }, destroy() {
-      destroyed = true; if (battle) { battle.destroy(); battle = null; } playbackGeneration++; actionGeneration++; historyGeneration++; clearTimeout(toastTimer);
+      destroyed = true; if (checkReq) { checkReq.destroy(); checkReq = null; } if (battle) { battle.destroy(); battle = null; } playbackGeneration++; actionGeneration++; historyGeneration++; clearTimeout(toastTimer);
       document.removeEventListener("compositionstart", onCompStart, true); document.removeEventListener("compositionend", onCompEnd, true);
       document.removeEventListener("click", onRollOpen); document.removeEventListener("scroll", onListScroll, true); clearTimeout(titleTimer);
       while (hostMounts.length) hostMounts.pop().remove(); document.body.classList.remove("ol-has-side", "ol-host-online", "ol-in-battle");

@@ -149,6 +149,12 @@ const ENEMY_DROPS = {
   captain_wolf:   { cm_chem: 0.65, cm_cell: 0.4, cm_scrap: 0.5 },        // 冷凝罐 → 化工残液
   captain_ox:     { cm_chem: 0.65, cm_cell: 0.4, cm_scrap: 0.5 },
   captain_lizard: { cm_chem: 0.8, cm_scale: 0.5, cm_gas: 0.25 },
+  // —— 镇压队（外城区，赤牙麾下的火属性部队）：燃料 + 护盾发生器 ——
+  riot_baton:   { cm_scrap: 0.2, cm_chem: 0.1, cm_cell: 0.08 },          // 防暴盾 → 电芯
+  riot_rifle:   { cm_chem: 0.2, cm_gas: 0.08, cm_scrap: 0.1 },
+  riot_molotov: { cm_chem: 0.25, cm_gas: 0.1 },                          // 燃烧瓶
+  riot_flamer:  { cm_gas: 1.0, cm_chem: 0.65, cm_cell: 0.3 },            // 喷火器的燃料罐
+  riot_captain: { cm_chem: 0.65, cm_gas: 0.4, cm_cell: 0.4, cm_scrap: 0.3 },
   // —— 盗匪（外城区）：搜身拿到的破烂 ——
   thug_knife:  { cm_scrap: 0.2, cm_chem: 0.08 },
   thug_hammer: { cm_scrap: 0.2, cm_coil: 0.08 },
@@ -446,7 +452,10 @@ function useItemOn(actor, itemId, target, zone) {
     const why = itemUseError(actor, itemId, target, zone);
     if (why) { notes.push(why); notes.unused = true; return notes; }   // 没用掉：不扣附赠动作（battle-commands.js）
     bagAdd(itemId, -1, notes);
-    useEffectItem(actor, spec.effect, target, zone, notes);
+    // 战-M3：道具造成的伤害 / 挂的状态也记使用者（击杀归属 #114），和手榴弹一致
+    const prevUser = state._itemUserId;
+    state._itemUserId = actor && actor.isPlayer ? actor.id : null;
+    try { useEffectItem(actor, spec.effect, target, zone, notes); } finally { state._itemUserId = prevUser; }
     return notes;
   }
   // 投掷类道具（手榴弹、酸液瓶、冲击炸弹）：危墙 / 关着的门倒塌 / 打开之前影响不到对面，扔过去没用，道具不用掉
@@ -566,6 +575,7 @@ function itemApplyStatus(actor, u, key, notes) {
   u.statuses = u.statuses || {};
   if (key === "burn") {
     if (typeof grantBurn === "function") grantBurn(u, 1, notes);
+    if (typeof markStatusOwner === "function" && actor && actor.isPlayer) markStatusOwner(u, "burn", actor.id);   // 战-M2：击杀归属，灼烧算挂它的人
     if (u.self !== "burn") notes.push(`${u.name} 灼烧 → ${u.statuses.burn} 层。`);
   } else if (key === "unstable") {
     if (typeof applyUnstable === "function" && applyUnstable(u, notes)) {
