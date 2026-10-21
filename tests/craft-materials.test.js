@@ -91,3 +91,80 @@ test("图鉴条目带可能掉的材料（数据）", () => {
   const e = c.bestiaryEntries().find(x => x.kit === "gas_collector");
   assert.ok(e.drops.some(d => d.id === "cm_gas" && d.name === "燃气浓缩物" && d.chance > 0));
 });
+
+// —— 跑团路径（PR #172 审查补测）——
+const J = x => JSON.parse(JSON.stringify(x));
+const trpgBattle = (enemies, seed) => {
+  const c = H.load();
+  c.BattleSim.setup({ party: ["kolt", "helu"], enemies, seed });
+  c.S.TRPG.active = true;
+  c.S.state.bag = { items: [] };
+  return c;
+};
+const matTotal = c => vm.runInContext("CRAFT_MATERIALS", c).map(m => c.bagCount(m.id)).reduce((a, b) => a + b, 0);
+
+test("跑团：打赢才掉，输了 / 撤退都不掉（掷骰全中也不掉）", () => {
+  for (const outcome of ["win", "lose", "retreat"]) {
+    const c = trpgBattle([{ id: "guard_sword", lv: 5, zone: 2 }, { id: "guard_gun", lv: 5, zone: 2 }], "TW" + outcome);
+    vm.runInContext("Math.random = () => 0", c);
+    c.S.state.units.filter(u => !u.isPlayer).forEach(u => { u.dead = true; });
+    const r = c.settleBattleRewards(outcome);
+    if (outcome === "win") { assert.ok(matTotal(c) > 0, "胜利掉材料"); assert.ok(r.drops && r.drops.items.length); }
+    else { assert.equal(matTotal(c), 0, outcome + " 不掉"); assert.equal(r.drops, null); }
+  }
+});
+
+test("跑团：同一场结算两次（rewardSettlement 已缓存）不重掷、不重复进背包", () => {
+  const c = trpgBattle([{ id: "outlaw_king", lv: 5, zone: 2 }], "TWICE");
+  c.S.state.units.filter(u => !u.isPlayer).forEach(u => { u.dead = true; });
+  let calls = 0;
+  vm.runInContext("Math.random = () => 0", c);
+  const r1 = J(c.settleBattleRewards("win"));
+  const bag1 = matTotal(c);
+  c.__count = () => { calls++; return 0; };
+  vm.runInContext("Math.random = () => __count()", c);
+  const r2 = J(c.settleBattleRewards("win"));
+  assert.equal(r2.alreadySettled, true);
+  assert.equal(calls, 0, "第二次没有掷骰");
+  assert.equal(matTotal(c), bag1, "背包没多");
+  assert.deepEqual(r2.drops, r1.drops, "返回的是缓存的合并掉落");
+});
+
+test("mergeBattleDrops：同 id 合并数量；只有一边有值时原样返回；都没有为 null", () => {
+  const c = H.load();
+  const a = { kuizhi: 50, items: [{ id: "cm_scrap", name: "废料", qty: 1 }, { id: "medkit", name: "医疗包", qty: 1 }] };
+  const b = { kuizhi: 0, items: [{ id: "cm_scrap", name: "废料", qty: 2 }, { id: "cm_cell", name: "电芯", qty: 1 }] };
+  const m = J(c.mergeBattleDrops(a, b));
+  assert.equal(m.kuizhi, 50);
+  assert.deepEqual(m.items.map(x => [x.id, x.qty]), [["cm_scrap", 3], ["medkit", 1], ["cm_cell", 1]]);
+  assert.equal(a.items[0].qty, 1, "不改原对象");
+  assert.deepEqual(J(c.mergeBattleDrops(a, null)), J(a));
+  assert.deepEqual(J(c.mergeBattleDrops(null, b)), J(b));
+  assert.equal(c.mergeBattleDrops(null, null), null);
+});
+
+test("跑团：飞碟 Boss（ufo_boss → ufo_body 别名）按本体表掉，机械足空表不掉", () => {
+  const c = trpgBattle([{ id: "ufo_boss", lv: 10, zone: 2 }], "UFO");
+  vm.runInContext("Math.random = () => 0.99", c);   // 只剩整数保底
+  const foes = c.S.state.units.filter(u => !u.isPlayer);
+  assert.ok(foes.some(u => u.kit === "ufo_body"));
+  foes.forEach(u => { u.dead = true; });
+  assert.deepEqual(J(c.enemyDropTable("ufo_leg")), []);
+  const r = J(c.settleBattleRewards("win"));
+  const got = Object.fromEntries(r.drops.items.map(x => [x.id, x.qty]));
+  assert.deepEqual(got, { cm_scrap: 1, cm_coil: 2, cm_cell: 2, cm_spirit: 1 }, JSON.stringify(got));
+});
+
+test("召唤物和铁壁不掉落", () => {
+  const c = H.load();
+  const summon = { kit: "guard_sword", dead: true, summonedBy: "x" };
+  const wall = { kit: "ironwall", dead: true };
+  const real = { kit: "guard_sword", dead: true };
+  assert.deepEqual(J(c.enemyDropFoes([summon, wall, real, { kit: "guard_sword", dead: false }])), [real]);
+  const t = trpgBattle([{ id: "guard_sword", lv: 5, zone: 2 }], "SUMMON");
+  vm.runInContext("Math.random = () => 0", t);
+  t.S.state.units.filter(u => !u.isPlayer).forEach(u => { u.dead = true; u.summonedBy = "boss"; });
+  t.S.state.units.push({ kit: "ironwall", dead: true, isPlayer: false, layers: [] });
+  t.settleBattleRewards("win");
+  assert.equal(matTotal(t), 0);
+});
