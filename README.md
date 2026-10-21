@@ -368,6 +368,16 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **联机玩家画面（一）：长休时间、和主持人共用的队伍卡、主持人皮肤、夜晚色调、一人多角色**（设计师反馈「玩家端和主持人端差太多」；新文件 `party-cards.js`）
+  - **以前**：联机跑团玩家看不到「距上次长休」；探索时的队伍卡是玩家端另写的一套，只有生命 / 行动 / 架势，没有武器耐久；舞台是单独的 `.ol-*` 样式；夜晚没有色调。**现在**：
+  - **时钟**：房主的包 `clock` 多带 `hours`（`LEDGER.hours`，联机单局也是 LEDGER）；玩家标题下面一行和主持人顶栏同一句「第 N 天 HH:MM 时段 · 距上次长休 X 小时」，过 20 小时带力竭提示（`PartyCards.clockHtml`，trpg-ui.js 顶栏也改用它）。
+  - **队伍卡**：主持人左栏（trpg-ui.js · renderParty）抽成 `PartyCards.heroDto` / `heroCardHtml`，联机玩家探索画面用同一个渲染器：血量、攻击力、架势、协助格挡、经验、专长、**每把武器的等级 / 羁绊 / 耐久（损坏标红）**。发给玩家的是 `heroDto(h, { gm: false })`（根本没有坚毅字段），`online-view.js · projectParty` 再按白名单过一遍；玩家卡片不画「坚毅」那一行。
+  - **一名玩家操控好几名角色**：自己的卡都标「（你）」并有「资料 / 武器」按钮（打开对应那一名）；有两名以上时可以「切换到这名」，顶上的「角色资料 / 武器」默认打开当前角色。规则上的人数限制不在这里改。
+  - **皮肤**：玩家舞台加 `.ol-skin`（skin.css 的街头废土选择器里加上它），按钮改成 `.g-btn`（保留 44px 触屏高度）；弹窗照旧（`.ovl`）。
+  - **夜晚色调**：`packet.clock` 在 18:00–05:00（和 ledger.js · isNightClock 一样）时玩家舞台加 `is-night`：战场区域压暗偏蓝、四周暗角（和 game.css 的 `.g-app.is-night` 一样），探索时时钟行变夜色；跑团和单局都一样。
+  - **删掉旧的文字战场**（`ol-zones` / `gapsMarkup` / `zoneGrid` / `actionsMarkup`）：战斗一直走 online-battle.js，这套只在没加载 online-battle.js 时用，已经没有页面会走到。
+  - **旧测试调整**：`tests/armory.test.js` 查「资料 / 武器」按钮的地方从 trpg-ui.js 改到 party-cards.js。新测试 `tests/online-player-ui.test.js`。
+
 - **敌人种族（一）：种族数据、随机 / 固定分配、六维换算、显示、主持人指定**（issue #159，设计见 `docs/enemy-race.md`；enemies.js · `ENEMY_RACES` / `applyEnemyRace` / `setEnemyRace` / `raceDelta`，run.js · `ENEMY_INFO` / `ENEMY_RACE_TABLES`，party.js · `blockChanceRaw`，gm-commands.js、battle-commands.js、battle-templates.js、trpg-commands.js、sim.js、bestiary.js、unit-card.js、online-view.js 等；测试 `tests/enemy-race.test.js`）。种族的**被动**不在这一条里（另开 issue），这里只把种族挂到敌人身上、换算六维、显示出来。
   - **以前**：敌人没有种族。**现在**：有机体的敌人生成时有种族，记在单位上 `u.race = { race, branch }`；生成的入口和个体值一样（`applyEnemyIV(u, iv, race)` 里先 `applyEnemyRace` 再个体值：`spawnEnemyGroup`、`spawnEncounterRows`、战斗命令加敌人、跑团「加敌人」、主持人生成敌人、`BattleSim.setup`）。
   - **种族配置**：`ENEMY_RACES` 是种族 / 小分支的六维修正表（人类、红皮人、犬 / 猫 / 鼠 / 牛类人及其小分支、兽人五支；牛类人三个小分支的修正各不相同）；每个敌人的种族写在 `run.js · ENEMY_INFO`（格式见下）。

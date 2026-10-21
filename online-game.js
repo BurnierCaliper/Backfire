@@ -103,7 +103,10 @@
       // 长休结算（跑团；单局的在 rogue.lastRest 里）和游戏时钟：online-view.js · projectRest / clock 白名单
       rest: !rogue() && typeof TRPG !== "undefined" ? TRPG.lastRest || null : null,
       camp: !rogue() && typeof TRPG !== "undefined" && TRPG.camp ? Object.assign({ force: TRPG.camp.force }, TRPG.camp.status) : null,
-      clock: typeof LEDGER !== "undefined" ? { day: LEDGER.day, clock: LEDGER.clock } : null };
+      // 跑团探索的队伍卡（party-cards.js · heroDto，gm:false：根本不带坚毅生命字段）；online-view.js · projectParty 再按白名单过一遍
+      party: !rogue() && typeof TRPG !== "undefined" && TRPG.active && typeof trpgHeroes === "function" && root.PartyCards ? trpgHeroes().map(h => PartyCards.heroDto(h, { gm: false })) : null,
+      // 游戏时钟 + 距上次长休的小时数（主持人顶栏同一句话，party-cards.js · clockHtml）；单局也用 LEDGER
+      clock: typeof LEDGER !== "undefined" ? { day: LEDGER.day, clock: LEDGER.clock, hours: Number(LEDGER.hours) || 0 } : null };
   }
   function sendProjected(id, packet) {
     const safe = OnlineView.projectPacket(packet, { recipientId: id, gmId: identity.id, itemCatalog: typeof ITEM_CATALOG !== "undefined" ? ITEM_CATALOG : {} });
