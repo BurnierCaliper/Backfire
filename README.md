@@ -368,6 +368,9 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **跑团诊所装的义体跟着队伍记忆走；`tools/playtest.js` 的 ARENA 能跑了**（issue #134，backlog 第三轮 H-1 / M-1；tests/cyberware-campaign-memory.test.js、tests/playtest-arena.test.js）
+  - **义体不再丢**：以前 `packHero` 只存 `cyberPlan`，没存 `u.cyberware` 和 `u.cyberOverinstall`，`applyCampaignToField` 也不读，所以下一场开战或读档后义体没了、血量 / 坚毅上限变回没装的样子，钱却已经扣了。现在两项都随队伍记忆（以及存档槽）往返；读回来后先放回义体再走 `applyLevelStats`，按义体重算血量层和坚毅上限，和刚装好时一致。旧档没有这两项就当没装（`game.js · packHero / applyCampaignToField`）。
+  - **ARENA 模式**：以前先设 `run.stage = "task"` 再 `acceptTask`，而 `acceptTask` 要求在任务板前，一开跑就抛「现在不在任务板前，不能接任务」。现在接任务前把 stage 设成 `"board"`（`tools/playtest.js`）。测试用子进程跑 `ARENA=1:5:1`，断言退出码 0 并有三种战斗的战报。
 - **小队聊天能发多行和字符画**（`online-ui.js · chatEnter / artAttr`、`online-view.js · chatText`、`hotseat.js · chatMessage`、`online.css`）：
   - 输入框改成多行：Enter 发送，Shift+Enter 换行，输入法选字时的 Enter 不算；粘贴的多行文字保留换行，输入框跟着内容长高。
   - 多行消息保留第一行行首的空格，只去掉开头的空行和末尾空白；单行消息照旧去掉两头空白。

@@ -3985,6 +3985,8 @@
       attrPoints: Number(u.attrPoints) || 0,
       attrPicks: (u.attrPicks || []).slice(),
       cyberPlan: u.cyberPlan ? JSON.parse(JSON.stringify(u.cyberPlan)) : null,   // 义体改造方案（跑团诊所，trpg.js · trpgModifyHero）
+      cyberware: u.cyberware ? JSON.parse(JSON.stringify(u.cyberware)) : null,   // 装上的义体（跑团诊所，trpg.js · trpgCyberwareAct）
+      cyberOverinstall: !!u.cyberOverinstall,
       // 专长（跑团 trpg.js · trpgPickFeat）：选好的、兼修的、还没分配的点（以前没存，下一场开打 / 读档就丢了）
       feats: (u.feats || []).slice(),
       featFull: (u.featFull || []).slice(),
@@ -4053,6 +4055,11 @@
       // 来源等级：新档直接读；旧档没有的按升级表补（feats.js · featPointLevelsOf），不丢点
       if (Array.isArray(s.featPointLevels)) u.featPointLevels = s.featPointLevels.slice();
       if (typeof featPointLevelsOf === "function") featPointLevelsOf(u);
+      // 义体：先放回去，下面 applyLevelStats 才会按它扣生命 / 坚毅上限、重算改造率（旧档没有这两项就是没装）
+      if (Array.isArray(s.cyberware) && s.cyberware.length) u.cyberware = JSON.parse(JSON.stringify(s.cyberware));
+      else if (u.cyberware) delete u.cyberware;
+      if (s.cyberOverinstall) u.cyberOverinstall = true;
+      else if (u.cyberOverinstall) delete u.cyberOverinstall;
       if (s.cyberPlan) {
         // 义体改造：按方案重建血量层（applyLevelStats 只会重建已经有方案的单位，先摆一层肉体给它换）
         u.cyberPlan = JSON.parse(JSON.stringify(s.cyberPlan));

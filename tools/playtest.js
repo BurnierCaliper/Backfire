@@ -401,7 +401,7 @@ if (env.ARENA) {
       terminalOutcome = null;
       run.main.done = false;
       run.actDay = 0;
-      run.stage = kind === "boss" ? "boss" : "task";
+      run.stage = kind === "boss" ? "boss" : "board";   // acceptTask 只在任务板前才让接
       run.seed = SEED + ":" + kind + i;
       run.result = null;
       if (kind !== "boss") { tryDo("接任务", () => R.acceptTask(run, "main")); run.stage = "task"; run.task.nodes[run.task.index] = { type: kind, done: false }; }
