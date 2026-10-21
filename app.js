@@ -9823,7 +9823,7 @@ function renderSkillFlow() {
   }
   const cancel = document.createElement("button");
   cancel.className = "btn small danger";
-  cancel.textContent = "取消技能";
+  cancel.textContent = "放弃（Esc）";
   cancel.onclick = () => calcCommand("skillCancel");
   opts.appendChild(cancel);
 }
@@ -13756,7 +13756,12 @@ function init() {
   if (em) em.addEventListener("click", e => { if (e.target === em) closeHidden("editorModal"); });
   uiEl("btnClosePlayer").onclick = closeModal;
   modal.addEventListener("click", (e) => { if (e.target === modal) closeModal(); });
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    closeModal();
+    // 分步选择中按 Esc = 放弃这个技能（还没结算，什么都不扣不改）；战斗界面（game.js）自己处理 Esc
+    if (state.skillFlow && !document.querySelector(".g-hud")) calcCommand("skillCancel");
+  });
   uiEl("btnLoadLive").onclick = () => calcCommand("loadLive");
   uiEl("attackerSel").addEventListener("change", () => renderSkills());
   uiEl("bladeSel").onchange = () => calcCommand("blade", { value: uiEl("bladeSel").value });
