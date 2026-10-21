@@ -239,7 +239,7 @@ const SHOP = { id: "m1", name: "老铁杂货", note: "", discount: 0, rows: [{ k
 const PURSE = { party: 200, heroes: [{ kit: "kolt", name: "柯尔特", mine: true, amount: 120 }, { kit: "helu", name: "赫鲁", mine: false }] };
 const own = v => ({ items: v.items.filter(r => r.owner !== "helu"), buyback: v.buyback });
 
-test("跑团联机玩家：物资里的商店有 买 / 卖，卖 / 买回发 shopSell / shopBuyback，新包重画，收摊后回到「买」；390px 不溢出", async t => {
+test("跑团联机玩家：「钱包与商店」里的商店有 买 / 卖，卖 / 买回发 shopSell / shopBuyback，新包重画，收摊后回到「买」；390px 不溢出", async t => {
   const o = await online(t); if (!o) return; const { page, errors } = o;
   await page.evaluate(p => { fixture.view.packet = Object.assign(fixture.view.packet, p); fixture.emit(); }, { shop: SHOP, shopSell: own(VIEW), purse: PURSE, mode: "trpg" });
   await page.click('[data-online="supplies"]');
