@@ -210,9 +210,10 @@ test("原型的浏览器脚本能通过语法检查，规则文件加载顺序�
     .forEach(f => assert.ok(fs.existsSync(path.join(base, f)), f));
   // 规则文件（和 headless 一个顺序），后面接联机的展示白名单 online-view.js（#204：画面只用它投影过的状态），
   // 再接正式游戏的 2D 演出 attack-fx.js / hit-fx.js（#230：攻击演出和受击粒子，原样加载），
-  // 最后是界面图标 icons.js / hud-icons.js（#238：技能按钮的属性角标、队伍栏的效果徽章，原样加载）
+  // 然后是界面图标 icons.js / hud-icons.js（#238：技能按钮的属性角标、队伍栏的效果徽章，原样加载），
+  // 最后是天气动效 weather-fx.js（#240：正式画面的 2D 天气叠加层，原样加载，压在 3D 画面上）
   const tags = [...html.matchAll(/<script src="\.\.\/\.\.\/([^"]+)"><\/script>/g)].map(m => m[1]);
-  assert.equal(tags.join(), H.RULE_FILES.filter(f => fs.existsSync(path.join(__dirname, "..", f))).concat(["online-view.js", "attack-fx.js", "hit-fx.js", "icons.js", "hud-icons.js"]).join());
+  assert.equal(tags.join(), H.RULE_FILES.filter(f => fs.existsSync(path.join(__dirname, "..", f))).concat(["online-view.js", "attack-fx.js", "hit-fx.js", "icons.js", "hud-icons.js", "weather-fx.js"]).join());
 });
 
 /* ---------- 第一阶段打磨（issue #191）---------- */

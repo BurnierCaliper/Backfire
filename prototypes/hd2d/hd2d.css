@@ -20,6 +20,12 @@ body { position: fixed; inset: 0; user-select: none; }
 /* ---------- 战场：占满屏幕（暗角、颗粒、色温在 three.js 的调色后期里做，不盖住铭牌）---------- */
 #stage { position: fixed; inset: 0; z-index: 0; }
 .hd2d-canvas { display: block; width: 100%; height: 100%; touch-action: none; outline: none; }
+/* 天气的 2D 层（#240）：正式战斗画面的天气动效（weather-fx.css 的 .wfx-{天气}，WeatherFx.sync 生成）原样套在 3D 画面上。
+ * 放在 #stage 里：3D 画布之上、铭牌（.hd2d-labels，z 1）之下（z-index 由 hd2d-wfx.js 的 WFX.z 写在行内）；界面面板（z 5–6）、攻击演出、伤害数字更在上面；不挡鼠标。
+ * 三段镜头的强弱：--wfx-o 整层的不透明度、--wfx-s 从画面中间放大多少、--wfx-t 换段渐变多久（hd2d-wfx.js 的 WFX.tier / fade）；减少动态效果时不渐变 */
+.hd2d-wfx { position: absolute; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+.hd2d-wfx > .wfx { opacity: var(--wfx-o, 1); transform: scale(var(--wfx-s, 1)); transition: opacity var(--wfx-t, .5s) ease-in-out, transform var(--wfx-t, .5s) ease-in-out; }
+@media (prefers-reduced-motion: reduce) { .hd2d-wfx > .wfx { transition: none; } }
 
 /* ---------- 铭牌（DOM，由 CSS2DRenderer 摆在 3D 位置上，细杆的底贴着脚下）----------
  * 紧凑版：名字一行，状态小圆点 + 分层血条 + 架势一行；等级、ATK、血量数字、状态文字悬停 / 选中时从头顶展开。

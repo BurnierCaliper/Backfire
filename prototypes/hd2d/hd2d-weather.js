@@ -8,23 +8,39 @@
  *
  *   const fx = createWeather(scene, { bounds, random });   // random 不给就用 Math.random
  *   fx.setBounds(bounds, { camera, farPoint });   // camera = 布局的默认镜头（闪电从画面上沿外面劈下来、粗细按像素算）；farPoint(r) = 远处的雷劈在哪（远景给）
+ *   fx.setWind({ x, z });   // 沙暴的风（世界里的方向，hd2d-wfx.js · windOf 按 state.sandDir 算）：配置里写了 wind 的粒子顺着它飞（#240）
  *   fx.set("sand", "day");  fx.update(dt, t, { dt: 真实的 dt, reduced });
  *   fx.flash        // 雷击的闪光 0–1（场景拿去全屏闪白、推亮灯光；减少动态效果时这里已经减弱过）
  *   fx.shake        // { x, y }：这一帧镜头抖动的偏移（像素；减少动态效果时恒为 0）
  *   fx.strike       // 最近一道雷 { n, x, z, edge, age }（远景拿 x 照亮那一片云），还没打过是 null
  *   fx.storm        // 有没有乌云 + 雷击（场景拿去压暗灯光）
  *   fx.heat         // 酷暑的热浪强度 0–1，由场景拿去开扭曲后期
- *   fx.tint         // { fog: 0xRRGGBB|null, near, far }：这个天气想要的雾色（near / far 乘在场景算好的雾距上）
- * 减少动态效果时场景传 dt = 0、t 停住：粒子停在原地；雷击按真实时间（opts.dt）照打，但只闪一下、亮度打折，镜头不抖。 */
+ *   fx.tint         // { fog: 0xRRGGBB, near, far, mix, sky, haze, veil, dof }：这个天气想要的雾（near / far 乘在场景算好的雾距上，见 fogRange；
+ *                   //   雾色往 fog 靠 mix，见 fogColor）；sky / haze / veil = 远景蒙上多少沙尘（hd2d-backdrop.js 的 colors.dust）；dof = 远处景深多糊几倍
+ * 减少动态效果时场景传 dt = 0、t 停住：粒子停在原地；雷击按真实时间（opts.dt）照打，但只闪一下、亮度打折，镜头不抖。
+ * 2D 的天气层（正式画面的 weather-fx.css / weather-fx.js 原样套上来）在 hd2d-wfx.js，压在这些 3D 粒子上面（#240）。 */
 import * as THREE from "three";
 
 /** 布局（hd2d-layout.js，普通脚本，比这个模块先加载）：闪电从画面上沿那条视线（frameTop）外面劈下来 */
 const L = window.HD2DLayout;
 
 /* 每种天气的参数（数量 / 速度 / 颜色都在这里）。kind 是天气粒子（points 点 / lines 雨丝），没有 kind 就不生成粒子。
- * 雷鸣不下雨（主人要求）：只有雾色和 storm（乌云 + 雷击，参数在下面的 STORM）；酸雨照旧是雨丝 */
+ * 雷鸣不下雨（主人要求）：只有雾色和 storm（乌云 + 雷击，参数在下面的 STORM）；酸雨照旧是雨丝。
+ * 雾：fog 雾色（可以按光影主题分开写 { day, dusk, night }）、mix 场景的雾色往它靠多少（不写 = FOG_MIX）、near / far 起雾 / 全进雾的地方乘多少（fogRange）。
+ * 沙暴（#240：主人嫌「还没有之前的天气效果明显」）——
+ *   沙粒顺着风横飞（wind：速度的 x 分量是顺风的、z 分量是横着飘的，转到 setWind 给的风向上；和 2D 层的沙雾一个方向），
+ *   再加一层短短的拖影（streak：lines，跟着沙粒一起飞，看得出在横飞）；
+ *   雾更浓更黄：雾色更偏沙黄、mix 更往它靠，起雾 / 全进雾都更近（以前 near 0.55 / far 2.3：起雾早但拉得很长，战场后面的地反而比晴天还清楚）；
+ *   远景蒙上沙色（hd2d-backdrop.js 的 colors.dust：sky 天幕往雾色靠多少、haze 贴地融进雾里的那一截多高、veil 中景剪影至少蒙多少，星星和亮云盖住）；
+ *   远处景深更糊（dof：远处的糊上限 × 这个数）。2D 的沙雾在 hd2d-wfx.js（正式画面的 .wfx-sand 原样套上来） */
+const FOG_MIX = 0.6;
 const WEATHER = {
-  sand: { kind: "points", count: 1100, size: 0.14, color: 0xe0b878, opacity: 0.75, vel: [7.5, -0.35, 1.2], jitter: 1.5, fog: 0xc9a164, near: 0.55, far: 2.3 },
+  sand: {
+    kind: "points", count: 1600, size: 0.16, color: 0xe6bd7c, opacity: 0.85, vel: [8.5, -0.35, 1.2], jitter: 1.5, wind: true,
+    streak: { count: 520, len: 0.75, color: 0xf2d29a, opacity: 0.45 },
+    fog: { day: 0xd09a50, dusk: 0xc08850, night: 0x8a6a3a }, mix: 0.8, near: 0.76, far: 0.9,
+    sky: 0.5, haze: 0.42, veil: 0.35, dof: 1.8
+  },
   snow: { kind: "points", count: 1300, size: 0.18, color: 0xffffff, opacity: 0.9, vel: [0.25, -1.3, 0.1], jitter: 0.45, sway: 0.5, fog: 0xc6d3de, near: 0.7, far: 3.0 },
   acid: { kind: "lines", count: 1000, len: 0.75, color: 0xa6e04a, opacity: 0.6, vel: [0.6, -15, 0.2], fog: 0x6a8a34, near: 0.65, far: 2.8, additive: true },
   thunder: { fog: 0x39465a, near: 0.6, far: 2.6, storm: true },
@@ -33,14 +49,14 @@ const WEATHER = {
   phase: { kind: "points", count: 160, size: 0.16, color: 0xc07cf0, opacity: 0.8, vel: [0, 0.3, 0], jitter: 0.5, sway: 0.9, fog: null, near: 1, far: 1, additive: true }
 };
 /* 飘浮物：一直在，慢；只飘在战场上方一层（top 以下），光里亮的那几颗更亮（bright = 亮的比例）。
- * 晴天按光影主题，其余按天气 */
+ * 晴天按光影主题，其余按天气；写了 wind 的顺着沙暴的风飘（同 WEATHER） */
 const AMBIENT = {
   clear: {
     day: { count: 150, size: 0.1, color: 0xfff1cf, opacity: 0.55, vel: [0.12, 0.05, 0.04], sway: 0.35, jitter: 0.5, bright: 0.25, additive: true },
     dusk: { count: 180, size: 0.11, color: 0xffc896, opacity: 0.6, vel: [0.1, 0.06, 0.03], sway: 0.35, jitter: 0.5, bright: 0.3, additive: true },
     night: { count: 110, size: 0.09, color: 0xb0ccff, opacity: 0.45, vel: [0.06, 0.04, 0.02], sway: 0.3, jitter: 0.4, bright: 0.2, additive: true }
   },
-  sand: { count: 120, size: 0.26, color: 0xe8c48a, opacity: 0.32, vel: [1.6, 0.05, 0.3], sway: 0.6, jitter: 0.8, bright: 0.1 },
+  sand: { count: 160, size: 0.26, color: 0xe8c48a, opacity: 0.36, vel: [1.6, 0.05, 0.3], sway: 0.6, jitter: 0.8, bright: 0.1, wind: true },
   snow: { count: 90, size: 0.12, color: 0xeaf6ff, opacity: 0.8, vel: [0.05, 0.08, 0.02], sway: 0.5, jitter: 0.5, bright: 0.4, additive: true },
   acid: { count: 90, size: 0.12, color: 0xb8ff6a, opacity: 0.65, vel: [0.04, 0.18, 0.02], sway: 0.6, jitter: 0.4, bright: 0.3, additive: true },
   thunder: { count: 100, size: 0.22, color: 0x8d96a6, opacity: 0.24, vel: [0.85, 0.03, 0.12], sway: 0.6, jitter: 0.9, bright: 0.12 },   // 风卷起来的尘（不是雨）
@@ -67,16 +83,40 @@ const STORM = {
   reduced: { flash: 0.35, fade: 5, bolt: 0.6 }         // 减少动态效果：闪光只到 35%、只闪一下（退得慢一点，不刺眼）、闪电淡一点；镜头不抖
 };
 
-/** 一种天气要建哪些东西（纯数据，不碰 three.js）：main 天气粒子（雨 / 雪 / 沙……，没有就是 null）、ambient 飘浮物、storm 乌云 + 雷击、tint 雾色 */
+/** 一种天气要建哪些东西（纯数据，不碰 three.js）：main 天气粒子（雨 / 雪 / 沙……，没有就是 null）、streak 沙粒的拖影（没有就是 null）、
+ *  ambient 飘浮物、storm 乌云 + 雷击、tint 雾（雾色按光影主题挑好；mix / sky / haze / veil / dof 没写的用不改变画面的默认值） */
 export function weatherPlan(kind, theme) {
   const cfg = WEATHER[kind] || null;
+  const fog = cfg && cfg.fog != null && typeof cfg.fog === "object" ? (cfg.fog[theme] != null ? cfg.fog[theme] : cfg.fog.day) : cfg && cfg.fog;
   return {
     main: cfg && cfg.kind ? cfg : null,
+    streak: cfg && cfg.kind && cfg.streak ? Object.assign({ kind: "lines", vel: cfg.vel, wind: cfg.wind }, cfg.streak) : null,
     ambient: AMBIENT[kind] || AMBIENT.clear[theme] || AMBIENT.clear.day,
     storm: !!(cfg && cfg.storm),
-    tint: cfg && cfg.fog != null ? { fog: cfg.fog, near: cfg.near, far: cfg.far } : null
+    tint: fog != null ? { fog, near: cfg.near, far: cfg.far, mix: cfg.mix != null ? cfg.mix : FOG_MIX, sky: cfg.sky || 0, haze: cfg.haze || 0, veil: cfg.veil || 0, dof: cfg.dof || 1 } : null
   };
 }
+
+/** 雾从哪开始、到哪全进雾（场景每帧按它设 scene.fog；three.js 的线性雾按 smoothstep(near, far, 沿视线的深度) 混进雾色）：
+ *  镜头到战场后沿的大致距离 back（默认镜头的距离 + 半个战场的进深 × cos 俯角；中景 / 近景推近了再挪 shift = hd2d-camera.js · pose 的 fogShift）起雾，
+ *  再往后 depth（hd2d-scene.js 的 FOG.depth）全进雾；天气想要的雾（tint）把起雾的地方乘 near、全进雾的地方乘 far */
+export function fogRange(layout, shift, tint, depth) {
+  const b = layout && layout.bounds, fit = layout && layout.camera ? layout.camera.dist : 20;
+  const back = Math.max(0, fit + (b ? (b.maxZ - b.minZ) / 2 * Math.cos(L.CONFIG.camera.elevation * Math.PI / 180) : 8) + (shift || 0));
+  return { near: back * (tint ? tint.near : 1), far: (back + depth) * (tint ? tint.far : 1) };
+}
+/** 雾色：光影主题的雾（themeFog），往这个天气想要的雾色靠 tint.mix（场景的雾、雷鸣 / 沙暴时远景的天边都用它） */
+export function fogColor(themeFog, tint) {
+  const c = new THREE.Color(themeFog);
+  if (tint && tint.fog != null) c.lerp(new THREE.Color(tint.fog), tint.mix != null ? tint.mix : FOG_MIX);
+  return c;
+}
+/** 顺着风飞（配置里写了 wind 的粒子）：速度的 x 分量（顺风）转到风向 wind = { x, z } 上，z 分量（横着飘）跟着转；y 不动 */
+export function windVel(vel, wind) {
+  const w = wind || { x: 1, z: 0 };
+  return [vel[0] * w.x - vel[2] * w.z, vel[1], vel[0] * w.z + vel[2] * w.x];
+}
+const windy = (cfg, wind) => (cfg && cfg.wind ? Object.assign({}, cfg, { vel: windVel(cfg.vel, wind) }) : cfg);
 
 /** 软的圆点（所有点状粒子共用）：不再是方块 */
 let dotTex = null;
@@ -177,10 +217,10 @@ function ribbon(pos, col, pts, z, w, gw, level) {
 }
 
 export function createWeather(scene, opt) {
-  const api = { kind: "none", theme: "day", flash: 0, heat: 0, tint: null, storm: false, shake: { x: 0, y: 0 }, strike: null, set, update, setBounds, dispose };
+  const api = { kind: "none", theme: "day", flash: 0, heat: 0, tint: null, storm: false, shake: { x: 0, y: 0 }, strike: null, wind: { x: 1, z: 0 }, set, update, setBounds, setWind, dispose };
   const rand = opt.random || Math.random;
   const between = (r) => r[0] + rand() * (r[1] - r[0]);
-  let main = null, amb = null, cfg = null, box = null, ambBox = null, bounds = null, view = {};
+  let main = null, streak = null, amb = null, cfg = null, box = null, ambBox = null, bounds = null, view = {};
   let nextBolt = 0, strikes = 0, hit = null, bolt = null;   // hit：最近一道雷（就是 api.strike）；bolt：它的闪电
   setBounds(opt.bounds);
 
@@ -192,6 +232,14 @@ export function createWeather(scene, opt) {
     ambBox = { x0: b.minX - AMB.pad, x1: b.maxX + AMB.pad, z0: b.minZ - AMB.pad, z1: b.maxZ + AMB.pad };
     if (main || amb) set(api.kind, api.theme, true);
   }
+  /** 沙暴的风（世界里的方向，长度不论）：变了而且这个天气的粒子要顺着风飞，就按新的风向重新铺一遍 */
+  function setWind(w) {
+    const x = Number(w && w.x) || 0, z = Number(w && w.z) || 0, l = Math.hypot(x, z);
+    const next = l > 1e-9 ? { x: x / l, z: z / l } : { x: 1, z: 0 };
+    if (Math.abs(next.x - api.wind.x) < 1e-9 && Math.abs(next.z - api.wind.z) < 1e-9) return;
+    api.wind = next;
+    if (cfg && cfg.wind) set(api.kind, api.theme, true);
+  }
 
   function clearBolt() {
     if (!bolt) return;
@@ -201,6 +249,7 @@ export function createWeather(scene, opt) {
   }
   function clear() {
     if (main) { main.dispose(); main = null; }
+    if (streak) { streak.dispose(); streak = null; }
     if (amb) { amb.dispose(); amb = null; }
     clearBolt();
     cfg = null; hit = null;
@@ -214,16 +263,18 @@ export function createWeather(scene, opt) {
     api.kind = kind; api.theme = theme;
     const plan = weatherPlan(kind, theme);
     cfg = WEATHER[kind] || null;
-    if (plan.main) main = particles(scene, plan.main, box, HEIGHT);
+    if (plan.main) main = particles(scene, windy(plan.main, api.wind), box, HEIGHT);
+    if (plan.streak) streak = particles(scene, windy(plan.streak, api.wind), box, HEIGHT);
     api.tint = plan.tint;
     api.storm = plan.storm;
     if (plan.storm) nextBolt = between(STORM.first);
-    amb = particles(scene, plan.ambient, ambBox, AMB.top - AMB.low, { low: AMB.low });
+    amb = particles(scene, windy(plan.ambient, api.wind), ambBox, AMB.top - AMB.low, { low: AMB.low });
   }
 
   /** opts.dt：真实经过的时间（雷击按它数，减少动态效果时也照走）；opts.reduced：减少动态效果。不给 opts 时 dt = 0 当作减少动态效果 */
   function update(dt, t, opts) {
     if (main) main.fill(t);
+    if (streak) streak.fill(t);
     if (amb) amb.fill(t);
     if (!cfg) return;
     api.heat = cfg.heat ? 1 : 0;
@@ -305,4 +356,4 @@ export function createWeather(scene, opt) {
   return api;
 }
 
-export { WEATHER, AMBIENT, STORM };
+export { WEATHER, AMBIENT, STORM, FOG_MIX };

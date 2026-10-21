@@ -12,6 +12,7 @@
  *   sc.setInsets({ top, bottom });   // 上下被界面盖住的像素（布局取景时让开），改了以后外面重排一次
  *   sc.setTier("near") / sc.stepTier(±1) / sc.setZone(区号) / sc.stepZone(±1)   // 三段镜头（远景 / 中景 / 近景看单个区域，hd2d-camera.js）
  *   sc.closeUp(单位 id)   // 近景里特写一个单位（双击铭牌 / 站位就是它，#237）；拉远（滚轮往后、2 / 1、远 / 中按钮）退出，状态机在 hd2d-camera.js · camStep
+ *   sc.setWind({ x, z })  // 沙暴的风（hd2d-wfx.js · windOf 按投影里的 sandDir 算）：3D 的沙粒顺着它飞，和 2D 层的沙雾一个方向（#240）
  *   createHd2dScene(container, { camera: { tier, zone }, onCameraChange(info) {...} })   // 开场的镜头；镜头一变就告诉外面（换按钮、网址）
  *   sc.dispose();
  * 镜头是这个玩家自己的视角：滚轮在三段之间跳、点地台 / 铭牌选区，都只动这边的画面，不写进战斗状态，也不同步给别人。
@@ -28,8 +29,8 @@ import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { CSS2DRenderer, CSS2DObject } from "three/addons/renderers/CSS2DRenderer.js";
 import { buildZone, buildGap, buildLamps, disposeTree, rng } from "./hd2d-world.js";
-import { buildBackdrop, buildGround, skyTexture, BACKDROP } from "./hd2d-backdrop.js";
-import { createWeather, weatherPlan } from "./hd2d-weather.js";
+import { buildBackdrop, buildGround, skyTexture, dustSky, BACKDROP } from "./hd2d-backdrop.js";
+import { createWeather, weatherPlan, fogRange as fogRangeOf, fogColor } from "./hd2d-weather.js";
 
 /** 布局（hd2d-layout.js，普通脚本，比这个模块先加载）：镜头和铭牌尺寸跟布局用同一份配置 */
 const L = window.HD2DLayout;
@@ -294,9 +295,9 @@ export function createHd2dScene(container, options) {
     const T = THEMES[state.meta.theme] || THEMES.day;
     state.themeName = state.meta.theme;
     if (scene.background && scene.background.dispose) scene.background.dispose();
-    // 天幕以外露出来的地方（转到很偏时）；雷鸣时和天幕一样换成风暴色、没有星星
-    const storm = weather.storm;
-    scene.background = skyTexture(storm ? BACKDROP.storm.sky[state.themeName] || T.sky : T.sky, state.themeName === "night" && !storm);
+    // 天幕以外露出来的地方（转到很偏时）；雷鸣时和天幕一样换成风暴色、没有星星；沙暴时和天幕一样蒙上沙色、没有星星
+    const storm = weather.storm, dust = dustOf(T, weather.tint);
+    scene.background = skyTexture(storm ? BACKDROP.storm.sky[state.themeName] || T.sky : dustSky(T.sky, dust), state.themeName === "night" && !storm && !dust);
     hemi.color.set(T.hemiSky); hemi.groundColor.set(T.hemiGround);
     sun.color.set(T.sun); rim.color.set(T.rim); rim.intensity = T.rimI;
     ground.material.color.copy(groundColor(T));
@@ -317,11 +318,11 @@ export function createHd2dScene(container, options) {
     const day = new THREE.Color(THEMES.day.ground), now = new THREE.Color(T.ground);
     return new THREE.Color(look.ground).multiply(new THREE.Color(now.r / day.r, now.g / day.g, now.b / day.b));
   }
-  /** 雾色：光影主题的雾，往这个天气想要的雾色靠 */
-  function fogColorOf(T, tint) {
-    const color = new THREE.Color(T.fog);
-    if (tint && tint.fog != null) color.lerp(new THREE.Color(tint.fog), 0.6);
-    return color;
+  /** 雾色：光影主题的雾，往这个天气想要的雾色靠（靠多少按天气配置 tint.mix，hd2d-weather.js · fogColor） */
+  function fogColorOf(T, tint) { return fogColor(T.fog, tint); }
+  /** 沙暴（#240）：远景蒙上的沙尘（hd2d-backdrop.js 的 colors.dust）——颜色就是这时的雾色，蒙多少按天气配置（tint.sky / haze / veil）；别的天气是 null */
+  function dustOf(T, tint) {
+    return tint && tint.sky > 0 ? { color: fogColorOf(T, tint).getHex(), sky: tint.sky, haze: tint.haze, veil: tint.veil } : null;
   }
   function applyFog() {
     const T = THEMES[state.themeName] || THEMES.day;
@@ -330,12 +331,12 @@ export function createHd2dScene(container, options) {
     fogRange(state.cur ? state.cur.fogShift : 0);
     ground.material.color.copy(groundColor(T)).lerp(color, 0.12);
   }
-  /** 雾从哪开始、到哪全进雾：默认镜头到战场后沿的大致距离起雾；中景 / 近景镜头推近了，起雾的地方跟着挪近 shift（hd2d-camera.js · pose 的 fogShift；远景是 0） */
+  /** 雾从哪开始、到哪全进雾：默认镜头到战场后沿的大致距离起雾；中景 / 近景镜头推近了，起雾的地方跟着挪近 shift（hd2d-camera.js · pose 的 fogShift；远景是 0）。
+   *  算法在 hd2d-weather.js · fogRange（纯函数，测试也用它算每个区进了几成雾） */
   function fogRange(shift) {
     if (!scene.fog) return;
-    const tint = weather.tint, b = state.bounds;
-    const back = Math.max(0, state.fit + (b ? (b.maxZ - b.minZ) / 2 * Math.cos(THREE.MathUtils.degToRad(L.CONFIG.camera.elevation)) : 8) + (shift || 0));   // 镜头到战场后沿的大致距离
-    scene.fog.near = back * (tint ? tint.near : 1); scene.fog.far = (back + FOG.depth) * (tint ? tint.far : 1);
+    const r = fogRangeOf(state.layout, shift, weather.tint, FOG.depth);
+    scene.fog.near = r.near; scene.fog.far = r.far;
   }
 
   /* ---------- 铭牌（DOM，竖立，正面朝镜头）---------- */
@@ -525,15 +526,16 @@ export function createHd2dScene(container, options) {
   }
   /** 区域认不得（布局给的地面主题没有远景）也没指定时，按光影主题猜 */
   const backdropOf = (theme) => theme === "night" ? "night" : theme === "dusk" ? "mine" : "wasteland";
-  /** plan = 天气要建的东西（weatherPlan）：雷鸣时远景换成风暴色的天、画乌云，天边接上压暗了的雾色；skyline = 楼群的高度倍数 */
+  /** plan = 天气要建的东西（weatherPlan）：雷鸣时远景换成风暴色的天、画乌云，天边接上压暗了的雾色；
+   *  沙暴时整片远景蒙上沙色（dust，天边也接上沙黄的雾色，#240）；skyline = 楼群的高度倍数 */
   function syncBackdrop(layout, kind, plan, skyline) {
-    const c = layout.camera, storm = !!plan.storm;
-    const sig = [kind, skyline || 1, state.meta.theme, storm ? "storm" : "", Object.values(layout.bounds).map(v => Math.round(v)).join(","), c ? [c.dist, c.pos.y, c.pos.z].map(v => Math.round(v)).join(",") : ""].join("|");
+    const c = layout.camera, storm = !!plan.storm, T = THEMES[state.meta.theme] || THEMES.day, dust = dustOf(T, plan.tint);
+    const sig = [kind, skyline || 1, state.meta.theme, storm ? "storm" : "", dust ? ["dust", dust.color, dust.sky, dust.haze, dust.veil].join(",") : "",
+      Object.values(layout.bounds).map(v => Math.round(v)).join(","), c ? [c.dist, c.pos.y, c.pos.z].map(v => Math.round(v)).join(",") : ""].join("|");
     if (sig === state.backdropSig) return;
     state.backdropSig = sig;
     if (state.backdrop) { scene.remove(state.backdrop.group); state.backdrop.dispose(); }
-    const T = THEMES[state.meta.theme] || THEMES.day;
-    state.backdrop = buildBackdrop(kind, layout.bounds, state.meta.theme, c, { sky: T.sky, fog: storm ? fogColorOf(T, plan.tint).getHex() : T.fog, storm, skyline });
+    state.backdrop = buildBackdrop(kind, layout.bounds, state.meta.theme, c, { sky: T.sky, fog: storm || dust ? fogColorOf(T, plan.tint).getHex() : T.fog, storm, skyline, dust });
     scene.add(state.backdrop.group);
   }
   const boardSig = (l) => l.zones.map(z => [z.id, Math.round(z.cx * 10), Math.round(z.cz * 10)].join(",")).join(";");
@@ -849,11 +851,12 @@ export function createHd2dScene(container, options) {
       const op = (1 - (1 - PLATE.fadeMin) * THREE.MathUtils.clamp((d - focus) / PLATE.fadeRange, 0, 1)) * (p.dim ? PLATE.dim : 1);
       p.el.style.opacity = u.submerged ? Math.min(op, 0.82).toFixed(2) : op.toFixed(2);
     });
-    // 景深：焦点 = 镜头到它看的那一点 + 这一段的 shift（远景是战场中间，中景 / 近景对准选中的区）；糊多少按这一段的（C.CAMERA[段].dof）
-    const cur = state.cur, D = cur ? cur.dof : DOF0;
+    // 景深：焦点 = 镜头到它看的那一点 + 这一段的 shift（远景是战场中间，中景 / 近景对准选中的区）；糊多少按这一段的（C.CAMERA[段].dof）。
+    // 远处的糊上限再乘天气的 dof（沙暴：远处看不清，#240；别的天气是 1）
+    const cur = state.cur, D = cur ? cur.dof : DOF0, wt = weather.tint;
     bokeh.uniforms.focus.value = focus + (cur ? cur.dof.shift : 0);
     bokeh.uniforms.aperture.value = D.aperture; bokeh.uniforms.maxblur.value = D.maxblur;
-    bokeh.uniforms.maxblurFar.value = T.dofFar * D.far;
+    bokeh.uniforms.maxblurFar.value = T.dofFar * D.far * (wt && wt.dof > 0 ? wt.dof : 1);
     // 近景：焦点区左右两边再按横着离开多远糊一层——焦点区中心换到镜头空间的横坐标
     bokeh.uniforms.lateral.value = D.lateral || 0;
     if (D.lateral > 0) {
@@ -902,6 +905,8 @@ export function createHd2dScene(container, options) {
     },
     select, setTier, setZone, stepZone, cameraInfo,
     stepTier(dir) { setTier(C.stepTier(state.tier, dir)); },
+    /** 沙暴的风（世界里的方向 { x, z }，hd2d-wfx.js · windOf）：3D 的沙粒、拖影、大团沙尘顺着它飞（#240） */
+    setWind(w) { weather.setWind(w); },
     /** 攻击演出的适配器（hd2d-fx.js · adapter）问的：这一刻的镜头、一块铭牌现在在哪（抬多高、是不是近景放大的那张）、一个区的地台 */
     lensNow() {
       return { pos: camera.position.clone(), target: controls.target.clone(), fov: camera.fov, width: Math.max(1, container.clientWidth), height: Math.max(1, container.clientHeight) };

@@ -6,6 +6,8 @@
 <title>Antlerscale: Backfire · HD-2D 战场原型</title>
 <link rel="stylesheet" href="../../fonts/fonts.css">
 <link rel="stylesheet" href="../../hud-icons.css">
+<!-- 天气动效（#240）：正式战斗画面的 2D 天气叠加层，原样加载（只用到 .wfx-…；给正式画面面板换色的规则要 #g-app，原型里没有） -->
+<link rel="stylesheet" href="../../weather-fx.css">
 <link rel="stylesheet" href="hd2d.css">
 <script type="importmap">{"imports":{"three":"../../vendor/three/three.module.min.js","three/addons/":"../../vendor/three/addons/"}}</script>
 </head>
@@ -172,6 +174,8 @@ window.GAME_MODE = true;
 <!-- 界面图标（#238）：七种属性的贴纸图标（技能按钮的属性角标）、状态 / 效果徽章（队伍栏名字右边的效果）。正式游戏的文件，原样加载 -->
 <script src="../../icons.js"></script>
 <script src="../../hud-icons.js"></script>
+<!-- 天气动效（#240）：正式战斗画面的天气叠加层（WeatherFx.sync），原样加载；当成一层 2D 压在 3D 画面上，怎么叠在 hd2d-wfx.js -->
+<script src="../../weather-fx.js"></script>
 <script>
 /* 规则文件在浏览器里加载，会带着「去写正式页面元素」的界面函数（renderAll、renderZones……）。
  * 这个原型只拿规则算数据，页面上没有那些元素，所以把 render 开头的界面函数换成空的。
@@ -193,12 +197,14 @@ window.GAME_MODE = true;
 <script src="hd2d-fx.js"></script>
 <script src="hd2d-host.js"></script>
 <script src="hd2d-play.js"></script>
+<script src="hd2d-wfx.js"></script>
 <script type="module">
 import { createHd2dScene } from "./hd2d-scene.js";
 
 const L = window.HD2DLayout;
 const CAMS = window.HD2DCamera;
 const UIX = window.HD2DUI;   // 界面数据（#238）：铭牌的行动点 / 附赠、队伍栏的效果和头像、技能按钮
+const WX = window.HD2DWfx;   // 天气的 2D 层（#240）：正式画面的 weather-fx 压在 3D 画面上
 const $ = (id) => document.getElementById(id);
 /* 头像要的公开资料：每个角色的主职责、主 / 副属性（角色卡 party.js · livePartyCards 上的 roles.primary 和 note，图鉴里也写着）。
  * 投影里没有这两项，按投影里的 kit 查这张表（见 README「#238」里缺的字段）；角色卡上别的字段一个都不拿 */
@@ -333,6 +339,31 @@ function renderUI(layout) {
   document.querySelectorAll(".pm").forEach(el => el.addEventListener("click", () => setActor(el.dataset.id)));
   renderSkills();
   renderLog();
+  syncWeather(layout);
+}
+/* ---------- 天气的 2D 层（#240）----------
+ * 正式战斗画面的天气动效（weather-fx.css / weather-fx.js）原样压在 3D 画面上面、铭牌和界面面板下面（hd2d-wfx.js）。
+ * 只读投影：天气、风向、相位阶段、光影（pv.weather / pv.sandDir / pv.phaseStep / pv.light）；镜头是这个玩家自己的（远 / 中 / 近、特写）。
+ * 3D 的沙粒顺着同一个风飞（sc.setWind）：风在屏幕上往哪边吹按布局算（竖屏时棋盘整块转了 90°） */
+let wfx = null, wfxLayout = null;
+function syncWeather(layout) {
+  if (layout) wfxLayout = layout;
+  if (!wfx || !sc || !pv) return;
+  const portrait = !!(wfxLayout && wfxLayout.portrait);
+  sc.setWind(WX.windOf(pv.sandDir, portrait));
+  wfx.sync({
+    weather: pv.weather, theme: themeNow(), sandDir: pv.sandDir, phaseStep: pv.phaseStep, portrait,
+    tier: camInfo ? camInfo.tier : sc.tier, close: !!(camInfo && camInfo.close != null), reduced: !sc.motion
+  });
+}
+/** 截图用（#240）：网址加 ?weather=snow 换天气（沙暴再加 &wind=W 换风向，相位加 &phase=2 换阶段）。
+ *  和主持人改天气一样写进战斗状态（state.weather / sandDir / phaseStep），画面照样只读投影；风向要是这块棋盘能用的（engine.js · sandDirOptions） */
+let weatherPick = null;
+function pickWeather() {
+  if (!weatherPick || !st) return;
+  st.weather = weatherPick.weather;
+  if (weatherPick.wind && (typeof sandDirOptions !== "function" || sandDirOptions().includes(weatherPick.wind))) st.sandDir = weatherPick.wind;
+  if (weatherPick.phase != null) st.phaseStep = weatherPick.phase;
 }
 const LAYER = { flesh: "#d8574a", armor: "#9aa7b3", shield: "#4fb8ff", sand: "#d1a85a", spirit: "#c07cf0" };
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -481,6 +512,7 @@ function syncCamera(info) {
     b.textContent = text;
   });
   syncUrl();
+  syncWeather();   // 天气的 2D 层：近景 / 特写稍微加强（#240）
 }
 function onKey(e) {
   if (!sc || e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
@@ -496,6 +528,7 @@ function onKey(e) {
 function loadDemo(id) {
   demo = DEMOS.find(d => d.id === id) || DEMOS[0];
   st = demo.make(pageRegion());
+  pickWeather();
   strikeN = 0; packetLogs = [];
   if (window.HD2DPlay) HD2DPlay.clear();
   project();
@@ -539,12 +572,14 @@ function boot() {
   regionPick = params.get("region") || null;      // ?region=沙漠 / ?region=mine_1（地图地点 id 也认）
   pushOn = params.get("push") !== "0";            // ?push=0：出手时不推镜头
   if (params.get("paper") === "0") HD2DFx.FX.paper.on = false;   // ?paper=0：打中时不压扁、不投影子（对比用）
+  if (params.get("weather")) weatherPick = { weather: params.get("weather"), wind: params.get("wind"), phase: params.get("phase") != null ? Number(params.get("phase")) : null };   // ?weather=snow（#240）
   sc = createHd2dScene($("stage"), {
     camera: { tier: params.get("cam"), zone: params.get("zone") },   // ?cam=near&zone=3：开场就是近景看 3 区
     onCameraChange: syncCamera,
     onPortraitChange() { if (sc && st) repaint(true); },
     onViewChange() { if (sc && st) reinset(true); }      // 窗口大小变了：按新画面重排铭牌、镜头回到这一段的位置
   });
+  wfx = WX.create($("stage"));   // 天气的 2D 层（#240）：3D 画布之上、铭牌之下
   CAMS.CAMERA.order.forEach(t => $("cam-" + t).addEventListener("click", () => sc.setTier(t)));
   $("zone-prev").addEventListener("click", () => sc.stepZone(-1));
   $("zone-next").addEventListener("click", () => sc.stepZone(1));
