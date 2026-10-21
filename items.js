@@ -103,13 +103,13 @@ EFFECT_ITEMS.forEach(it => {
  * 结构材料（金属 → 赫心结晶）照旧只用于武器升级；道具制作另用这 7 种。队伍公用（supply：联机时不按需求分配，直接进公用背包）。
  *   cls：chem 化学 / elec 电子 / bio 生物；tier：1 常见、2 精制；price 参考价（黑市按 CRAFT_BLACK_MARKET 倍出售） */
 const CRAFT_MATERIALS = [
-  { id: "cm_scrap",  name: "废料",       price: 100, cls: "shell", tier: 0, hint: "道具的壳体。机械敌人掉落；拆解道具也能拿回" },
-  { id: "cm_chem",   name: "化工残液",   price: 200, cls: "chem",  tier: 1, hint: "化学 · 常见。酸 / 火系敌人掉落" },
-  { id: "cm_gas",    name: "燃气浓缩物", price: 600, cls: "chem",  tier: 2, hint: "化学 · 精制。精英、首领，第二采矿场的燃气机械掉落" },
-  { id: "cm_coil",   name: "废线圈",     price: 200, cls: "elec",  tier: 1, hint: "电子 · 常见。电 / 能量系机械掉落" },
-  { id: "cm_cell",   name: "电芯",       price: 600, cls: "elec",  tier: 2, hint: "电子 · 精制。精英、首领，第三采矿场、巨人城机械掉落" },
-  { id: "cm_scale",  name: "沙鱼鳞",     price: 200, cls: "bio",   tier: 1, hint: "生物 · 常见。带沙尘层的沙漠生物掉落" },
-  { id: "cm_spirit", name: "星灵组织",   price: 600, cls: "bio",   tier: 2, hint: "生物 · 精制。带星灵层的敌人（触灵、陨体衍蛛、弦蚣……）掉落" }
+  { id: "cm_scrap",  name: "废料",       price: 100, cls: "shell", tier: 0, hint: "道具的壳体。外城区看守、暴徒等机械与人形敌人常掉；拆解道具也能拿回" },
+  { id: "cm_chem",   name: "化工残液",   price: 200, cls: "chem",  tier: 1, hint: "化学 · 常见。采矿场的倾倒机、矿卫，自爆小车与各路队长常掉" },
+  { id: "cm_gas",    name: "燃气浓缩物", price: 600, cls: "chem",  tier: 2, hint: "化学 · 精制。采矿场的集气者、撒布机、蚁卫等精英多掉，法外之王必掉" },
+  { id: "cm_coil",   name: "废线圈",     price: 200, cls: "elec",  tier: 1, hint: "电子 · 常见。外城区看守、巡逻车、浮标常掉，巡逻艇、UFO 掉得更多" },
+  { id: "cm_cell",   name: "电芯",       price: 600, cls: "elec",  tier: 2, hint: "电子 · 精制。巡逻艇、巨人、守望鸦等精英多掉，杂兵偶尔也有" },
+  { id: "cm_scale",  name: "沙鱼鳞",     price: 200, cls: "bio",   tier: 1, hint: "生物 · 常见。沙漠的沙兽、沙鱼、大沙 / 活沙常掉，穴鸦、尘虫偶尔掉" },
+  { id: "cm_spirit", name: "星灵组织",   price: 600, cls: "bio",   tier: 2, hint: "生物 · 精制。陨星采矿场的衍蛛、弦蚣，机甲、守望鸦多掉，沙聚合体必掉" }
 ];
 const CRAFT_BLACK_MARKET = 3;   // 道具材料普通商店不卖，黑市按参考价的几倍卖
 CRAFT_MATERIALS.forEach(m => { ITEM_CATALOG[m.id] = { name: m.name, hint: m.hint, combat: false, supply: true, material: "craft" }; });
@@ -169,7 +169,7 @@ const ENEMY_DROPS = {
   // —— 巨人城 ——
   giant: { cm_scrap: 0.8, cm_cell: 0.65, cm_spirit: 0.3 },
   // —— 野生 / 沙漠生物 ——
-  crow:            { cm_scale: 0.12, cm_chem: 0.05 },                    // 4–6 只一群
+  crow:            { cm_scale: 0.18, cm_chem: 0.08 },                    // 4–6 只一群
   sandfish_lead:   { cm_scale: 1.3, cm_scrap: 0.4, cm_spirit: 0.25 },
   sandfish_drive:  { cm_scale: 0.35, cm_scrap: 0.1 },
   sandfish_ambush: { cm_scale: 0.35, cm_scrap: 0.1 },
