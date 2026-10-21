@@ -368,6 +368,11 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **第三轮 · 单机 M-2 ~ M-5：乘势不再误伤中立 / 友军、养成每日任务四项能完成、每日挑战记录完整队伍、召唤物记 `summonedBy`**（issue #141；feats.js · `featAfterHit`、rogue.js · `growthDailyBump` / `updateGrowthDailyProgress` / `doLongRest` / `attemptCheck` / `buy` / `newRun` / `dailyRecord`、app.js · `setWeather` / `beginRound`、run.js · `buildEncounter`、enemies.js · `en_bigsand_summon`；tests/third-round-solo-m.test.js）
+  - **乘势（M-2）**：以前给同区所有架势 1 的「非玩家」单位各 1 点击破，尘虫等中立生物和友军也挨；现在只打 `hostileTo(攻击者, 它)` 为真的单位。
+  - **每日任务（M-3）**：以前「长休 / 完成检定 / 商店消费 / 更换天气」四项没有任何写入，抽到就永远完不成、「三个全完成」拿不到；现在长休成功一次 +1、检定成功一次 +1、商店每花 1 奎支 +1（目标 500）、我方单位主动改成别的天气一次 +1（`setWeather` 记到 `state.playerWeatherChanges`，每场开始清零，战后结算时读）。写入统一走 `growthDailyBump`。其余各项的每场固定增量、掷材料没走 `withRng` 这两点本条没改。
+  - **每日挑战记录（M-4）**：以前存 `run.party`，有人阵亡（移进 `run.fallen`）就少人，全灭是空数组；现在开局把队伍记在 `run.daily.party`，记录读它（没有这个字段的旧局退回 `party` + `fallen`）。
+  - **召唤物（M-5）**：飞碟触灵 10 级起每回合被动召唤的看守、大沙灵 `en_bigsand_summon` 召唤的沙灵，以前不记 `summonedBy`；现在记，和技能版 `ufo_summon` 一致——自爆会炸到飞碟自己的看守，战后材料掉落（`!u.summonedBy`）不再算它们。
 - **联机：按钮灰掉的原因照原样给玩家、单局投票只算有角色的人、玩家看得到「起身」**（issue #135；tests/online-view.test.js、tests/online-vote-135.test.js）
   - **灰掉的原因**：以前 `online-view.js · safeError` 把原因文字换成一句笼统的「操作未生效…」（「纳米能源不足 20」「只能在居合架势下使用」都看不到），正则表还会把句子分错类别（「本回合无法移动」变成「当前不能移动到该区域」）。现在原句照给，只用现有的敏感词过滤（`text()`）挡掉提到坚毅生命 / SHP / 后台的句子，挡掉的才换成笼统的话。坚毅生命的具体数值仍然不会发给玩家。
   - **没钱的按钮写原因**：商店 `shopBuy`、积分 `shopRedeem`、单局里 `rogueAct`（兑换 / 买 / 升级 / 治疗 / 装上）灰掉时，按钮旁写「还差 N 奎支」「还差 N 积分」「卖完了」「先选付款人」（`online-ui.js`、`online.css · .ol-why`）。
