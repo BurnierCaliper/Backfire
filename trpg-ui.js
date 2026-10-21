@@ -178,45 +178,17 @@
     const ub = $("tr-undo");
     if (ub) { ub.disabled = !undoStack.length; ub.textContent = undoStack.length > 1 ? `撤销（${undoStack.length}）` : "撤销"; }
     $("tr-slot-name").textContent = slot >= 0 ? `存档 ${slot + 1} · ${slotName}` : "";
-    const t = exhaustTier();
-    const ck = LEDGER.clock == null ? 480 : LEDGER.clock;
-    $("tr-clock").innerHTML = `第 <b>${LEDGER.day || 1}</b> 天 <b class="tr-time">${clockText(ck)}</b> ${dayPeriod(ck)} · 距上次长休 <b>${durationText(LEDGER.hours || 0)}</b>` +
-      (t ? ` · <span class="warn">${esc(exhaustText(t))}</span>` : "");
+    $("tr-clock").innerHTML = PartyCards.clockHtml({ day: LEDGER.day, clock: LEDGER.clock, hours: LEDGER.hours });   // party-cards.js：联机玩家画面同一套
     const food = FOOD_ORDER.reduce((s, id) => s + bagCount(id), 0);
     const purses = heroes().filter(h => !h.dead).reduce((s, h) => s + trpgPurse(h.kit), 0);
     $("tr-supplies").innerHTML = `<span title="队伍公账 / 各人钱包合计">公账 <b>${Number(state.kuizhi) || 0}</b> · 钱包 <b>${purses}</b></span><span>水 <b>${ledgerWater()}</b> ml</span><span>食物 <b>${food}</b> 份</span>` +
       `<button class="g-btn small" data-career="1" title="这个存档所有战斗里每个角色的输出占比和团队贡献">整局数据</button>`;
   }
 
-  /** 面板上的攻击力：角色 + 手里的武器（和战斗里一样算） */
-  function heroAtk(h) {
-    try { return typeof effectiveAtk === "function" ? effectiveAtk(h, state.units) : (Number(h.atk) || 0); } catch (e) { return Number(h.atk) || 0; }
-  }
   /* ---------- 左栏：队伍状态（主持人视角，坚毅生命照常显示） ---------- */
   function renderParty() {
-    $("tr-party").innerHTML = heroes().map(h => {
-      const tag = h.dead ? "死亡" : h.dying ? "濒死" : h.upOnShp ? "起身中" : "";
-      const xpNext = typeof xpToNext === "function" ? xpToNext(h.level || 1) : 0;
-      const weapons = (h.linkedKits || []).map(k => {
-        const lv = (h.weaponLevels || {})[k] || 1;
-        const d = weaponDur(k), m = weaponDurMax(k);
-        const bond = typeof weaponBond === "function" ? weaponBond(h, k) : 0;
-        return `<div class="rh-w${d <= 0 ? " broken" : ""}">${esc(weaponName(k))} Lv${lv}${bond ? ` · 羁绊 ${bond}` : ""} · 耐久 ${d}/${m}${d <= 0 ? "（损坏）" : ""}</div>`;
-      }).join("");
-      return `<div class="rhero${h.dead ? " fallen" : h.dying ? " dying" : ""}">
-        <div class="rh-top"><b>${esc(h.name)}</b><span>Lv${h.level || 1}${tag ? " · " + tag : ""}</span><button class="g-btn small rh-sheet" data-sheet="${esc(h.kit)}" title="数值、被动和技能说明">资料</button><button class="g-btn small rh-sheet" data-armory="${esc(h.kit)}" title="武器补正、atk 明细、改装件和客制化">武器</button></div>
-        <div class="rh-row">血量 <span>${totalHpOf(h)}/${totalHpMaxOf(h)}</span></div>
-        <div class="rh-row">攻击力 <span>${heroAtk(h)}</span></div>
-        <div class="rh-row">架势 <span>${Number(h.def) || 0}/${Number(h.defMax != null ? h.defMax : h.def) || 0}</span></div>
-        <div class="rh-row">协助格挡 <span>${typeof blockChance === "function" && blockChance(h) != null ? blockChance(h) + "%" : "—"}</span></div>
-        <div class="rh-row">坚毅 <span>${Number(h.shp) || 0}/${Number(h.shpMax) || 0}</span></div>
-        <div class="rh-row">经验 <span>${Number(h.xp) || 0}/${xpNext || "满"}</span></div>
-        ${Number(h.attrPoints) > 0 ? `<div class="rh-w tr-attn">有 ${h.attrPoints} 点属性点可分配（队伍页）</div>` : ""}
-        ${Number(h.featPoints) > 0 ? `<div class="rh-w tr-attn">有 ${h.featPoints} 项专长可选（队伍页）</div>` : ""}
-        ${(h.feats || []).length && typeof featLabel === "function" ? `<div class="rh-w">专长：${esc(h.feats.map(id => (FEATS[id] || {}).name || id).join("、"))}</div>` : ""}
-        ${weapons}
-      </div>`;
-    }).join("") || `<p class="r-hint">还没有队员。到「队伍」页选人。</p>`;
+    // party-cards.js：联机玩家的探索画面用同一个渲染器（玩家那份不带坚毅）
+    $("tr-party").innerHTML = heroes().map(h => PartyCards.heroCardHtml(PartyCards.heroDto(h, { gm: true, units: state.units }), { gm: true, buttons: true })).join("") || `<p class="r-hint">还没有队员。到「队伍」页选人。</p>`;
   }
 
   /* ---------- 各页 ---------- */

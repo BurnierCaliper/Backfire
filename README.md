@@ -368,6 +368,15 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **联机玩家画面（一）：长休时间、和主持人共用的队伍卡、主持人皮肤、夜晚色调、一人多角色**（设计师反馈「玩家端和主持人端差太多」；新文件 `party-cards.js`）
+  - **以前**：联机跑团玩家看不到「距上次长休」；探索时的队伍卡是玩家端另写的一套，只有生命 / 行动 / 架势，没有武器耐久；舞台是单独的 `.ol-*` 样式；夜晚没有色调。**现在**：
+  - **时钟**：房主的包 `clock` 多带 `hours`（`LEDGER.hours`，联机单局也是 LEDGER）；玩家标题下面一行和主持人顶栏同一句「第 N 天 HH:MM 时段 · 距上次长休 X 小时」，过 20 小时带力竭提示（`PartyCards.clockHtml`，trpg-ui.js 顶栏也改用它）。
+  - **队伍卡**：主持人左栏（trpg-ui.js · renderParty）抽成 `PartyCards.heroDto` / `heroCardHtml`，联机玩家探索画面用同一个渲染器：血量、攻击力、架势、协助格挡、经验、专长、**每把武器的等级 / 羁绊 / 耐久（损坏标红）**。发给玩家的是 `heroDto(h, { gm: false })`（根本没有坚毅字段），`online-view.js · projectParty` 再按白名单过一遍；玩家卡片不画「坚毅」那一行。
+  - **一名玩家操控好几名角色**：自己的卡都标「（你）」并有「资料 / 武器」按钮（打开对应那一名）；有两名以上时可以「切换到这名」，顶上的「角色资料 / 武器」默认打开当前角色。规则上的人数限制不在这里改。
+  - **皮肤**：玩家舞台加 `.ol-skin`（skin.css 的街头废土选择器里加上它），按钮改成 `.g-btn`（保留 44px 触屏高度）；弹窗照旧（`.ovl`）。
+  - **夜晚色调**：`packet.clock` 在 18:00–05:00（和 ledger.js · isNightClock 一样）时玩家舞台加 `is-night`：战场区域压暗偏蓝、四周暗角（和 game.css 的 `.g-app.is-night` 一样），探索时时钟行变夜色；跑团和单局都一样。
+  - **删掉旧的文字战场**（`ol-zones` / `gapsMarkup` / `zoneGrid` / `actionsMarkup`）：战斗一直走 online-battle.js，这套只在没加载 online-battle.js 时用，已经没有页面会走到。
+  - **旧测试调整**：`tests/armory.test.js` 查「资料 / 武器」按钮的地方从 trpg-ui.js 改到 party-cards.js。新测试 `tests/online-player-ui.test.js`。
 - **联机跑团：不在场的角色分配不再被悄悄清掉；取消每名玩家一名角色的限制；自己的几个单位可以自由换位**（策划定；hotseat-game.js · `configure` / `transferHero`；online-ui.js 转交说明文字；测试 tests/online-assign.test.js、tests/online-host.test.js）
   - 原因：`configure` 每次都把 `ownerByKit`（按职业记的操控者）整份清空，只按**当前场上**的英雄重建；而 online-game.js · `setupOperators` 在有人进 / 出房间（名单变了）时按场上英雄重新配置。主持人开了一场没带某名角色的战斗，期间或之后有玩家进出房间，这名不在场角色的分配就没了，回到全队后归主持人。
   - 现在：重新配置时，不在场的角色保留原来的操控者（操控者已离开房间的仍回到主持人）。

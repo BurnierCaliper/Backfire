@@ -11,6 +11,7 @@
     if (mounted) mounted.destroy();
     if (!api || typeof api.getView !== "function" || typeof document === "undefined") return null;
     let view = {}, panelOpen = false, entry = "join", notice = "", pending = false, destroyed = false, rogueHeroesSeen = false, lastScreen = "";
+    let focusKit = "";   // 一名玩家可以操控好几名角色：「角色资料 / 武器」默认打开哪一名（队伍卡上切换）
     let currentMenu = null, request = null, selectedActor = "", actionGeneration = 0, playbackGeneration = 0;
     // 战斗画面（online-battle.js）：和单人 / 跑团同一套画面；skillOptions 是当前角色的技能栏，autoKey 防止重复自动取技能
     let battle = null, skillOptions = [], skillsFor = "", autoKey = "";
@@ -33,7 +34,7 @@
     const hs = () => view.packet && view.packet.view || {};
     const paused = () => !view.status?.connected || !view.status?.hostOnline || !!view.status?.paused;
     const disabled = () => pending || paused() || animating;
-    const button = (text, action, data = "", off = false, primary = false) => `<button type="button" class="ol-button${primary ? " ol-primary" : ""}" data-online="${action}" ${data}${off ? " disabled" : ""}>${esc(text)}</button>`;
+    const button = (text, action, data = "", off = false, primary = false) => `<button type="button" class="g-btn ol-button${primary ? " ol-primary" : ""}" data-online="${action}" ${data}${off ? " disabled" : ""}>${esc(text)}</button>`;
     const option = (value, text, selected) => `<option value="${esc(value)}"${selected ? " selected" : ""}>${esc(text)}</option>`;
     function make(tag, id, className, attrs = {}) {
       const node = document.createElement(tag); node.id = id; node.className = "ol-ui " + className;
@@ -41,7 +42,7 @@
       document.body.appendChild(node); nodes.push(node); return node;
     }
     const dock = make("div", "online-dock", "ol-dock");
-    const stage = make("main", "online-stage", "ol-stage", { "aria-label": "联机战场" });
+    const stage = make("main", "online-stage", "ol-stage ol-skin", { "aria-label": "联机战场" });
     const panel = make("section", "online-panel", "ol-overlay", { role: "dialog", "aria-label": "联机房间" });
     const toast = make("aside", "online-toast", "ol-toast", { role: "status", "aria-live": "polite" });
     toast.hidden = true;
@@ -278,30 +279,6 @@
     function lobbyChatMarkup() {
       return `<section class="ol-messages"><h3>大厅交流</h3><ol aria-live="polite" data-keep-scroll="lobby">${(hs().chat || []).map(m => `<li><b>${esc(m.name || m.operatorName || "玩家")}</b><p${artAttr(m.text)}>${esc(m.text)}</p></li>`).join("") || '<li class="ol-muted">在这里与所有人商量准备事项。</li>'}</ol><form id="ol-lobby-chat"><label class="ol-sr-only" for="ol-lobby-text">大厅聊天</label><input id="ol-lobby-text" data-field="chatText" maxlength="500" value="${esc(form.chatText)}" placeholder="所有人都能看到…"><button class="ol-button" type="submit"${disabled() ? " disabled" : ""}>发送到大厅</button></form></section>`;
     }
-    function fieldsMarkup(data, zone) {
-      const field = data.fields?.[zone] || {}, parts = [];
-      if (field.fireOn || field.fire > 0) parts.push(`火场 ${field.fire || 1}`);
-      for (const [key, label] of Object.entries({ electric: "通电", acid: "酸液", ice: "冰面", harmonic: "干涉场", heal: "治疗", highland: "高地", abyss: "深渊", isolate: "隔绝" })) if (field[key]) parts.push(label);
-      if (field.energy) parts.push(`能量 ${field.energyVal || 0}`);
-      if (field.collapseOn) parts.push(`塌陷 ${field.collapse || 0} / 5`);
-      if (field.ruinOn) parts.push(`损毁地面 ${field.ruinHp || 0} / ${field.ruinMax || 0}`);
-      if (field.fieldLocked) parts.push("场地已锁定");
-      return parts.length ? `<p class="ol-field">${esc(parts.join(" · "))}</p>` : "";
-    }
-    /** 区的排版：普通直排一行；特殊棋盘按坐标摆成格子（四区方形 2×2、五区十字……） */
-    function zoneGrid(data) {
-      const b = data.board;
-      if (b && Array.isArray(b.zones) && b.zones.length) {
-        const cols = Math.max(...b.zones.map(z => z.x)) + 1;
-        return { style: ` style="--ol-cols:${cols}"`, zones: b.zones.slice().sort((p, q) => p.id - q.id).map(z => ({ id: z.id, style: ` style="--ol-col:${z.x + 1};--ol-row:${z.y + 1}"` })) };
-      }
-      const n = Math.min(9, Math.max(2, Number(data.zoneMode) || 3));
-      return { style: ` style="--ol-cols:${n}"`, zones: Array.from({ length: n }, (_, i) => ({ id: i + 1, style: "" })) };
-    }
-    function gapsMarkup(data) {
-      const labels = { open: "畅通", wall: "危墙", bridge: "不稳桥梁", door: "机关门", void: "空隙" };
-      return `<div class="ol-gaps">${Object.entries(data.gaps || {}).filter(([key]) => /^\d-\d$/.test(key)).map(([key, gap]) => `<span>${esc(key.replace("-", " ↔ "))}：${esc(labels[gap.type] || "间隔")}${["wall", "bridge"].includes(gap.type) ? ` · 耐久 ${esc(gap.hp ?? 0)}` : gap.type === "door" ? gap.open ? " · 开" : " · 关" : ""}</span>`).join("")}</div>`;
-    }
     /** 跑团私人钱包（房主按收件人算好：自己的角色有余额，队友只有名字）：看余额、给队友转钱 */
     const purseDraft = { from: "", to: "", n: "" };   // 转账表单：包刷新重画时保留填了一半的值
     const shopDraft = { payer: "", qty: {} };              // 商店：由谁付、每件填的数量（包刷新时保留）
@@ -474,12 +451,6 @@
       const gauge = HI && u.hud && view.screen !== "exploration" ? HI.gauge(u.hud) : "";
       const available = view.screen === "battle" && u.isPlayer && owner === own() && hs().currentUnitId === u.id && hs().phase === "acting";
       return `<article class="ol-unit${u.isPlayer ? " ol-ally" : " ol-enemy"}${selectedActor === u.id ? " ol-selected" : ""}" data-unit-id="${esc(u.id)}"><header><h3>${esc(u.name || u.id)}</h3><small>Lv${esc(u.level || 1)}</small></header>${owner ? `<small>${esc(playerName(owner))}${u.weaponOf ? " · 武器人" : ""}</small>` : ""}${u.isPlayer && !u.weaponOf ? `<p class="ol-xp">经验 ${esc(u.xp ?? 0)}${typeof xpToNext === "function" && xpToNext(u.level || 1) ? ` / ${esc(xpToNext(u.level || 1))}` : ""}</p>` : ""}${view.screen === "exploration" && u.isPlayer && !u.weaponOf && owner === own() ? attrMarkup(u) : ""}<div class="ol-layers">${(u.layers || []).map(l => `<div class="ol-layer"><span>${esc(labels[l.type] || "生命")}</span><meter min="0" max="${esc(Math.max(1, Number(l.max) || 1))}" value="${esc(Math.max(0, Number(l.current) || 0))}" aria-label="${esc(labels[l.type] || "生命")}"></meter><b>${esc(l.current ?? 0)} / ${esc(l.max ?? 0)}</b></div>`).join("")}${highBar(u)}</div><div class="ol-points"><span>行动 ${esc(u.ap ?? 0)} / ${esc(u.apMax ?? 0)}</span><span>附赠 ${esc(u.bonus ?? 0)} / ${esc(u.bonusMax ?? 0)}</span>${u.def != null ? `<span>架势 ${esc(u.def)} / ${esc(u.defMax ?? u.def)}</span>` : ""}</div>${gauge ? `<div class="hi-gauge ol-gauge" aria-label="${esc(u.name || "")}的角色仪表">${gauge}</div>` : resources.length ? `<p class="ol-muted">${esc(resources.join(" · "))}</p>` : ""}${badges.length ? `<div class="hi-badges ol-badges">${badges.map(b => HI.badge(b.key, b.stack, b.title)).join("")}</div>` : ""}${conditions.length ? `<p class="ol-conditions">${esc(conditions.join(" · "))}</p>` : ""}${available ? button("选择行动", "actor", `data-actor="${esc(u.id)}"`, disabled(), true) : ""}<span class="ol-popup" aria-live="polite"></span></article>`;
-    }
-    function actionsMarkup() {
-      const current = hs().currentUnitId, mine = (hs().units || []).some(u => u.id === current && u.owner === own());
-      if (view.screen !== "battle" || hs().phase !== "acting" || !mine) return `<p class="ol-muted">${esc(view.packet?.manualPhase || view.manualPhase ? "主持人正在操控敌人" : hs().phase === "enemy" ? "敌方行动中" : "等待当前玩家行动")}</p>`;
-      const choices = currentMenu?.choices;
-      return `<section class="ol-actions" aria-label="我的行动"><header><h3>${esc(choices?.title || "轮到你行动")}</h3>${currentMenu ? button("重选技能", "resetMenu", "", disabled()) : ""}</header>${choices ? choices.kind === "ready" ? `<p>选项已确认。</p>${button("执行行动", "execute", "", disabled() || !choices.command, true)}` : `<div class="ol-action-options">${(choices.options || []).map((o, index) => `<div>${button(o.label ?? String(o.value ?? "不选"), "option", `data-option="${index}"`, disabled() || o.disabled, true)}${o.sub || o.reason ? `<small>${esc(o.reason || o.sub)}</small>` : ""}</div>`).join("") || '<p class="ol-muted">当前没有可选项。</p>'}</div>` : button("选择行动", "actor", `data-actor="${esc(current)}"`, disabled(), true)}${button("结束我的行动", "endTurn", `data-actor="${esc(current)}"`, disabled())}</section>`;
     }
     /* ---------- 联机单局（online-rogue.js 在房主那里算好，按收件人发来） ---------- */
     // 按钮灰掉要写原因：off 传字符串 = 灰掉，并把这句话写在按钮旁边
@@ -663,7 +634,26 @@
       if (screen === "lobby" || !data) return '<div class="ol-wait"><h2>等待房间同步</h2><p>房主准备好后会更新这里。</p></div>';
       if (view.packet?.mode === "rogue" && view.packet.rogue && screen === "exploration") return rogueMarkup(view.packet.rogue);
       const units = (data.units || []).filter(u => !u.hidden), logs = view.packet?.publicLogs || [];
-      return `<header class="ol-stage-heading"><div><span class="ol-muted">${esc(view.roomCode)} · ${screen === "battle" ? `第 ${data.turnNo || 1} 回合` : screen === "ended" ? "遭遇结束" : "探索环节"}</span>${screen === "battle" && global.Chain && data.chainStatus ? `<div class="ol-chain">${global.Chain.barHtml(data.chainStatus)}</div>` : ""}<h1>${screen === "battle" ? "战场" : screen === "ended" ? "战斗结算" : "与队伍同行"}</h1><div class="ol-info-tools">${global.WorldMap ? button("地图", "map") : ""}${screen === "battle" && matchupOf() ? button("克制表", "matchup") : ""}${button("角色资料", "info", 'data-info="sheet"', pending)}${button("武器", "info", 'data-info="armory"', pending)}${button("背包", "info", 'data-info="bag"', pending)}${button("战绩", "info", 'data-info="record"', pending)}${suppliesButton()}${view.packet?.mode !== "rogue" ? button(`任务日志${questList().some(q => q.status === "active") ? ` · ${questList().filter(q => q.status === "active").length}` : ""}`, "quests") : ""}</div></div>${weatherMarkup(data)}</header>${screen === "ended" ? resultMarkup() : ""}${checksMarkup(screen === "battle")}${screen === "battle" || screen === "ended" ? (global.OnlineBattle && global.UnitCard ? '<div class="ol-battle-slot"></div>' : `<div class="ol-zones"${zoneGrid(data).style}>${zoneGrid(data).zones.map(z => `<section class="ol-zone"${z.style}><h2>${z.id} 区</h2>${fieldsMarkup(data, z.id)}${units.filter(u => Number(u.zone) === z.id).map(card).join("") || '<p class="ol-muted">空区域</p>'}${(data.props || []).filter(p => Number(p.zone) === z.id && !p.destroyed).map(p => `<article class="ol-prop" data-prop-id="${esc(p.id)}"><b>${esc(p.name || p.kind || "配置物")}</b>${p.hp != null ? `<span>耐久 ${esc(p.hp)}${p.maxHp == null ? "" : " / " + esc(p.maxHp)}</span>` : ""}</article>`).join("")}</section>`).join("")}</div>${gapsMarkup(data)}${screen === "ended" ? "" : actionsMarkup()}`) : `<p class="ol-muted ol-explore-hint">主持人正在管理探索与遭遇。右侧「小队」频道可以和大家聊天，「消息与成员」里可以私下回复主持人。</p><div class="ol-exploration-party">${units.filter(u => u.isPlayer && !u.weaponOf).map(card).join("")}</div>`}`;
+      return `<header class="ol-stage-heading"><div><span class="ol-muted">${esc(view.roomCode)} · ${screen === "battle" ? `第 ${data.turnNo || 1} 回合` : screen === "ended" ? "遭遇结束" : "探索环节"}</span>${screen === "battle" && global.Chain && data.chainStatus ? `<div class="ol-chain">${global.Chain.barHtml(data.chainStatus)}</div>` : ""}<h1>${screen === "battle" ? "战场" : screen === "ended" ? "战斗结算" : "与队伍同行"}</h1>${clockLine()}<div class="ol-info-tools">${global.WorldMap ? button("地图", "map") : ""}${screen === "battle" && matchupOf() ? button("克制表", "matchup") : ""}${button("角色资料", "info", 'data-info="sheet"', pending)}${button("武器", "info", 'data-info="armory"', pending)}${button("背包", "info", 'data-info="bag"', pending)}${button("战绩", "info", 'data-info="record"', pending)}${suppliesButton()}${view.packet?.mode !== "rogue" ? button(`任务日志${questList().some(q => q.status === "active") ? ` · ${questList().filter(q => q.status === "active").length}` : ""}`, "quests") : ""}</div></div>${weatherMarkup(data)}</header>${screen === "ended" ? resultMarkup() : ""}${checksMarkup(screen === "battle")}${screen === "battle" || screen === "ended" ? '<div class="ol-battle-slot"></div>' : `<p class="ol-muted ol-explore-hint">主持人正在管理探索与遭遇。右侧「小队」频道可以和大家聊天，「消息与成员」里可以私下回复主持人。</p>${partyMarkup(units)}`}`;
+    }
+    /** 联机跑团的时钟行：和主持人顶栏同一句（party-cards.js · clockHtml，含「距上次长休」和力竭提示） */
+    function clockLine() {
+      const c = view.packet?.clock;
+      if (!c || view.packet?.mode === "rogue" || !global.PartyCards) return "";
+      return `<p class="ol-clock">${global.PartyCards.clockHtml(c)}</p>`;
+    }
+    /** 探索时的队伍卡：和主持人左栏同一个渲染器（party-cards.js），数据是 online-view.js · projectParty（没有坚毅）。
+     *  一名玩家可以操控好几名角色：自己的都标「（你）」，有两名以上时可以切换「当前角色」（资料 / 武器默认打开它） */
+    function partyMarkup(units) {
+      const party = view.packet?.party, PC = global.PartyCards;
+      if (!Array.isArray(party) || !PC) return `<div class="ol-exploration-party">${units.filter(u => u.isPlayer && !u.weaponOf).map(card).join("")}</div>`;
+      const ownerOf = h => ((hs().heroes || []).find(x => x.id === h.id) || (hs().units || []).find(x => x.id === h.id) || {}).owner;
+      const mineKits = party.filter(h => ownerOf(h) === own()).map(h => h.kit);
+      const focus = mineKits.includes(focusKit) ? focusKit : mineKits[0];
+      return `<section class="tr-party ol-party" aria-label="队伍">${party.map(h => {
+        const owner = ownerOf(h), mine = owner === own();
+        return PC.heroCardHtml(h, { gm: false, buttons: mine ? "online" : false, owner: owner ? playerName(owner) : "", mine, focusable: mine && mineKits.length > 1, focus: mine && h.kit === focus });
+      }).join("")}</section>`;
     }
     function observeMessages() {
       const rows = view.messages || [], incoming = rows.filter(m => !seenMessages.has(m.id) && m.from !== own());
@@ -800,7 +790,8 @@
     function myKit() {
       const units = (displayState || view.state || {}).units || [];
       const mine = (hs().units || []).filter(u => u.owner === own()).map(u => units.find(x => x.id === u.id)).filter(Boolean);
-      const hero = mine.find(u => !u.weaponOf) || mine[0];
+      const heroes = mine.filter(u => !u.weaponOf);
+      const hero = heroes.find(u => u.kit === focusKit) || heroes[0] || mine[0];
       return hero ? hero.kit : null;
     }
     function bagMarkup(bag) {
@@ -989,12 +980,12 @@
       }).join("");
       return `<div class="ol-card ol-record-card"><header><h2>最近 10 场战绩</h2><button type="button" class="ol-button" data-bag="close">关闭</button></header>${rows || '<p class="ol-muted">还没有打过仗。</p>'}</div>`;
     }
-    async function openInfo(kind) {
+    async function openInfo(kind, kitWanted) {
       if (pending || typeof api.sheetData !== "function") return;
       let data = null;
       const ok = await call(async () => { data = await api.sheetData(); if (data?.ok === false) return data; });
       if (!ok || !data || destroyed) return;
-      const kit = myKit();
+      const kit = kitWanted || myKit();
       if (kind === "sheet" && global.HeroSheet) global.HeroSheet.open(data.sheets || [], kit);
       else if (kind === "armory" && global.Armory) global.Armory.open(data.armory || [], kit);
       else if (kind === "record") { bagBox.innerHTML = recordMarkup(data.battles || []); bagBox.hidden = false; bagBox.querySelector('[data-bag="close"]')?.focus({ preventScroll: true }); }
@@ -1069,6 +1060,9 @@
       // 重画文字部分时战场那一块会先被拿掉，舞台一下子变矮、滚动位置被压到顶上；等战场挂回去再把滚动位置放回原处
       // （以前玩家每行动一次，画面就跳回最上面，要再往下翻）
       const top = stage.scrollTop, fieldEl = battle && battle.el.querySelector(".g-field"), fieldTop = fieldEl ? fieldEl.scrollTop : 0;
+      // 夜晚色调：和主持人 / 单机一样按游戏时钟（game.js 给 .g-app 加 is-night）；联机跑团和联机单局都发 packet.clock
+      const ck = view.packet?.clock, night = !!(view.active && ck && global.PartyCards && global.PartyCards.isNight(ck.clock));
+      stage.classList.toggle("is-night", night); document.body.classList.toggle("ol-night", night);
       html(stage, `${notice || view.notice || view.packet?.systemNotice ? `<p class="ol-notice" role="status">${esc(notice || view.notice || view.packet?.systemNotice)}</p>` : ""}${stageMarkup()}`, "stage");
       const slot = stage.querySelector(".ol-battle-slot");
       if (!slot) return;
@@ -1273,7 +1267,8 @@
         case "option": await choose(Number(b.dataset.option)); break;
         case "execute": if (currentMenu?.choices?.command && !disabled()) { const command = copy(currentMenu.choices.command); if (await call(() => api.submit(command))) { currentMenu = request = null; render(); } } break;
         case "endTurn": if (!disabled() && await endTurnOk(b.dataset.actor)) await call(() => api.submit({ type: "endTurn", actor: b.dataset.actor })); break;
-        case "info": await openInfo(b.dataset.info); break;
+        case "info": await openInfo(b.dataset.info, b.dataset.kit || null); break;
+        case "focusHero": focusKit = b.dataset.kit || ""; render(); break;
         case "quests": openQuests(); break;
         case "map": openMap(); break;
         case "supplies": suppliesOpen = true; lastMarkup.supplies = ""; paintSupplies(); suppliesBox.querySelector('[data-online="suppliesClose"]')?.focus({ preventScroll: true }); break;
