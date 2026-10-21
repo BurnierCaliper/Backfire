@@ -491,3 +491,8 @@ body.online-player.ol-in-battle .ol-battle .sk.blocked .cost { color: #d9a07a; }
 .ol-stage.is-night .g-field::after { content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 5;
   background: radial-gradient(ellipse at 50% 40%, transparent 55%, rgba(5, 8, 20, .55) 100%); }
 .ol-stage.is-night .ol-clock { background: rgba(14, 22, 52, .55); }
+/* 窄屏：标题下的工具按钮（角色资料…任务日志）排成格子、自动换行，不再横滑被截掉；保持 44px 触屏高度（探索和战斗都一样） */
+@media (max-width: 760px) {
+  body.online-player .ol-stage-heading .ol-info-tools { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 6px; overflow: visible; max-width: 100%; }
+  body.online-player .ol-stage-heading .ol-info-tools .g-btn.ol-button { min-height: 44px; min-width: 0; padding: 4px 6px; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: none; }
+}

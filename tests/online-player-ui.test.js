@@ -160,3 +160,23 @@ test("夜晚色调：packet.clock 在 18:00–05:00 时玩家舞台压暗（跑�
   assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector("#online-stage .g-field"), "::after").content), '""', "战场四周暗角");
   assert.deepEqual(o.errors, []);
 });
+
+test("390px：标题下的工具按钮换行排成格子，一个都不被截掉，按钮高度 ≥ 44px（探索和战斗）", async t => {
+  const o = await open(t, true); if (!o) return; const { page } = o;
+  await exploration(page);
+  const check = async label => {
+    const r = await page.evaluate(() => {
+      const box = document.querySelector("#online-stage .ol-stage-heading .ol-info-tools"), bb = box.getBoundingClientRect();
+      const btns = [...box.querySelectorAll("button")].filter(b => b.offsetParent);
+      return { n: btns.length, rows: new Set(btns.map(b => Math.round(b.getBoundingClientRect().top))).size, scroll: box.scrollWidth - box.clientWidth,
+        clipped: btns.filter(b => { const r = b.getBoundingClientRect(); return r.left < bb.left - 1 || r.right > bb.right + 1 || r.right > innerWidth || b.scrollWidth > b.clientWidth + 1; }).map(b => b.textContent),
+        minH: Math.min(...btns.map(b => b.getBoundingClientRect().height)), page: document.documentElement.scrollWidth <= innerWidth };
+    });
+    assert.ok(r.n >= 6, label); assert.ok(r.rows >= 2, label + " 换行"); assert.equal(r.scroll, 0, label + " 不横滑");
+    assert.deepEqual(r.clipped, [], label + " 没有被截的按钮"); assert.ok(r.minH >= 44, label + " 高度 " + r.minH); assert.ok(r.page, label);
+  };
+  await check("探索");
+  await page.evaluate(() => fixture.set({ screen: "battle" })); await page.waitForSelector("#online-stage .g-zone");
+  await check("战斗");
+  assert.deepEqual(o.errors, []);
+});
