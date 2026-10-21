@@ -178,45 +178,17 @@
     const ub = $("tr-undo");
     if (ub) { ub.disabled = !undoStack.length; ub.textContent = undoStack.length > 1 ? `撤销（${undoStack.length}）` : "撤销"; }
     $("tr-slot-name").textContent = slot >= 0 ? `存档 ${slot + 1} · ${slotName}` : "";
-    const t = exhaustTier();
-    const ck = LEDGER.clock == null ? 480 : LEDGER.clock;
-    $("tr-clock").innerHTML = `第 <b>${LEDGER.day || 1}</b> 天 <b class="tr-time">${clockText(ck)}</b> ${dayPeriod(ck)} · 距上次长休 <b>${durationText(LEDGER.hours || 0)}</b>` +
-      (t ? ` · <span class="warn">${esc(exhaustText(t))}</span>` : "");
+    $("tr-clock").innerHTML = PartyCards.clockHtml({ day: LEDGER.day, clock: LEDGER.clock, hours: LEDGER.hours });   // party-cards.js：联机玩家画面同一套
     const food = FOOD_ORDER.reduce((s, id) => s + bagCount(id), 0);
     const purses = heroes().filter(h => !h.dead).reduce((s, h) => s + trpgPurse(h.kit), 0);
     $("tr-supplies").innerHTML = `<span title="队伍公账 / 各人钱包合计">公账 <b>${Number(state.kuizhi) || 0}</b> · 钱包 <b>${purses}</b></span><span>水 <b>${ledgerWater()}</b> ml</span><span>食物 <b>${food}</b> 份</span>` +
       `<button class="g-btn small" data-career="1" title="这个存档所有战斗里每个角色的输出占比和团队贡献">整局数据</button>`;
   }
 
-  /** 面板上的攻击力：角色 + 手里的武器（和战斗里一样算） */
-  function heroAtk(h) {
-    try { return typeof effectiveAtk === "function" ? effectiveAtk(h, state.units) : (Number(h.atk) || 0); } catch (e) { return Number(h.atk) || 0; }
-  }
   /* ---------- 左栏：队伍状态（主持人视角，坚毅生命照常显示） ---------- */
   function renderParty() {
-    $("tr-party").innerHTML = heroes().map(h => {
-      const tag = h.dead ? "死亡" : h.dying ? "濒死" : h.upOnShp ? "起身中" : "";
-      const xpNext = typeof xpToNext === "function" ? xpToNext(h.level || 1) : 0;
-      const weapons = (h.linkedKits || []).map(k => {
-        const lv = (h.weaponLevels || {})[k] || 1;
-        const d = weaponDur(k), m = weaponDurMax(k);
-        const bond = typeof weaponBond === "function" ? weaponBond(h, k) : 0;
-        return `<div class="rh-w${d <= 0 ? " broken" : ""}">${esc(weaponName(k))} Lv${lv}${bond ? ` · 羁绊 ${bond}` : ""} · 耐久 ${d}/${m}${d <= 0 ? "（损坏）" : ""}</div>`;
-      }).join("");
-      return `<div class="rhero${h.dead ? " fallen" : h.dying ? " dying" : ""}">
-        <div class="rh-top"><b>${esc(h.name)}</b><span>Lv${h.level || 1}${tag ? " · " + tag : ""}</span><button class="g-btn small rh-sheet" data-sheet="${esc(h.kit)}" title="数值、被动和技能说明">资料</button><button class="g-btn small rh-sheet" data-armory="${esc(h.kit)}" title="武器补正、atk 明细、改装件和客制化">武器</button></div>
-        <div class="rh-row">血量 <span>${totalHpOf(h)}/${totalHpMaxOf(h)}</span></div>
-        <div class="rh-row">攻击力 <span>${heroAtk(h)}</span></div>
-        <div class="rh-row">架势 <span>${Number(h.def) || 0}/${Number(h.defMax != null ? h.defMax : h.def) || 0}</span></div>
-        <div class="rh-row">协助格挡 <span>${typeof blockChance === "function" && blockChance(h) != null ? blockChance(h) + "%" : "—"}</span></div>
-        <div class="rh-row">坚毅 <span>${Number(h.shp) || 0}/${Number(h.shpMax) || 0}</span></div>
-        <div class="rh-row">经验 <span>${Number(h.xp) || 0}/${xpNext || "满"}</span></div>
-        ${Number(h.attrPoints) > 0 ? `<div class="rh-w tr-attn">有 ${h.attrPoints} 点属性点可分配（队伍页）</div>` : ""}
-        ${Number(h.featPoints) > 0 ? `<div class="rh-w tr-attn">有 ${h.featPoints} 项专长可选（队伍页）</div>` : ""}
-        ${(h.feats || []).length && typeof featLabel === "function" ? `<div class="rh-w">专长：${esc(h.feats.map(id => (FEATS[id] || {}).name || id).join("、"))}</div>` : ""}
-        ${weapons}
-      </div>`;
-    }).join("") || `<p class="r-hint">还没有队员。到「队伍」页选人。</p>`;
+    // party-cards.js：联机玩家的探索画面用同一个渲染器（玩家那份不带坚毅）
+    $("tr-party").innerHTML = heroes().map(h => PartyCards.heroCardHtml(PartyCards.heroDto(h, { gm: true, units: state.units }), { gm: true, buttons: true })).join("") || `<p class="r-hint">还没有队员。到「队伍」页选人。</p>`;
   }
 
   /* ---------- 各页 ---------- */
@@ -380,7 +352,8 @@
       const give = `<div class="tr-row">随机生成 <button class="g-btn small" data-part-rand="C">C 级 +1</button><button class="g-btn small" data-part-rand="B">B 级 +1</button></div>
         <div class="tr-row">给予改装件 <select id="tr-part-give">${partOpts(p => `<option value="${esc(weaponPartItemId(p))}">${esc(weaponPartLabel(p))} · ${esc(weaponPartText(p))}</option>`)}</select>
           <button class="g-btn small" id="tr-part-give-btn">放进背包 +1</button></div>`;
-      return `<p class="r-hint">手册：升级武器需要找到工作站；${U.selfMaxLevel} 级以上无法靠自己升级，要找专门的武器工匠（材料 + 加工费，不同工匠的费用要求不一样，按剧情改费用）。材料在商店「材料」里买，或在背包里给予。</p>${rows}
+      const openBox = `<div class="tr-row"><label class="tr-pick"><input type="checkbox" id="tr-smith-open" ${TRPG.smithOpen ? "checked" : ""}>工匠向联机玩家开放（玩家可以给自己的武器升级：材料 + 参考加工费，费用从这名角色的钱包出）</label></div>`;
+      return openBox + `<p class="r-hint">手册：升级武器需要找到工作站；${U.selfMaxLevel} 级以上无法靠自己升级，要找专门的武器工匠（材料 + 加工费，不同工匠的费用要求不一样，按剧情改费用）。材料在商店「材料」里买，或在背包里给予。</p>${rows}
         <h3>改装槽 <button class="g-btn small" data-armory="${esc((heroes()[0] || {}).kit || "")}">打开武器工坊</button></h3>
         <p class="r-hint">武器等级 + 羁绊到 ${WEAPON_PART_SLOT_LEVELS.join(" 级、")} 级各开放 1 个改装槽（羁绊在「后台」里改，只解锁奖励、不提高数值）。改装件修改武器的属性补正系数；装上从背包拿走，拆下放回背包。</p>
         ${give}${slotRows}
@@ -796,6 +769,8 @@
         <div class="tr-row">熟练项 <select id="ck-prof">${profOpts}</select> 难度 <select id="ck-diff">${diffOpts}</select>
           说明 <input id="ck-note" value="${esc(checkForm.note)}" placeholder="比如：撬开仓库的锁" style="width:240px"></div>
         <div class="tr-picks">${who}</div>
+        ${online() ? `<div class="tr-row"><label><input type="checkbox" id="ck-secret"${checkForm.secret ? " checked" : ""}> 暗骰（检定和结果只有主持人看得到，可以选敌人等任何单位）</label></div>${checkForm.secret ? `<div class="tr-picks">${(state.units || []).filter(u => !u.isPlayer && !u.dead && !u._removed && !u.weaponOf).map(u => `<label class="tr-pick"><input type="checkbox" data-ck-unit="${esc(u.id)}"${checkForm.units.includes(u.id) ? " checked" : ""}>${esc(u.name)}</label>`).join("")}</div>` : ""}` : ""}
+        ${checkRequestsHtml()}
         <div class="tr-row"><button class="g-btn" id="ck-open">发起检定</button></div>
       </div>
       ${cards || '<p class="r-hint">还没有检定。</p>'}`;
@@ -968,7 +943,8 @@
     }).join("");
     const redeem = EFFECT_ITEMS.filter(x => x.points > 0).map(x =>
       `<button class="g-btn small" data-redeem="${esc(x.id)}" ${pts.points < x.points ? "disabled" : ""}>${esc(x.name)} · ${x.points} 积分</button>`).join("");
-    return payerHtml() + `<p class="r-hint">规则见设计文档第 5 节：简单、普通 1 小时，困难 2，极难 3（会推进时间）；失败时非壳体材料丢一半（向上取整），废料、金属留着；有对应熟练项的队友打下手给优势。
+    const openBox = `<div class="tr-row"><label class="tr-pick"><input type="checkbox" id="tr-workshop-open" ${TRPG.workshopOpen ? "checked" : ""}>工坊向联机玩家开放（玩家可以自己制作已会的配方、拆解背包里的东西；学配方仍由你在下面教会）</label></div>`;
+    return openBox + payerHtml() + `<p class="r-hint">规则见设计文档第 5 节：简单、普通 1 小时，困难 2，极难 3（会推进时间）；失败时非壳体材料丢一半（向上取整），废料、金属留着；有对应熟练项的队友打下手给优势。
         城里、工匠处的工坊五类都能做；野外休息点只能做投掷罐、弹针、增益 / 减益（主持人按剧情判断）。材料在「商店 · 制作材料（黑市）」里买或给予。</p>
       <h3>制作</h3>
       <div class="tr-up">
@@ -988,6 +964,7 @@
       <h3>拆解（不花时间）</h3>${salv || '<p class="r-hint">背包里没有能拆的东西。</p>'}`;
   };
   function bindWorkshop(P) {
+    const wo = $("tr-workshop-open"); if (wo) wo.onchange = () => act(ruleCommand("workshopOpen", { on: wo.checked }));
     const k = $("wk-kit"); if (!k) return;
     k.onchange = () => { craftForm.kit = k.value; render(); };
     $("wk-item").onchange = () => { craftForm.item = $("wk-item").value; craftForm.diff = ""; render(); };
@@ -1016,10 +993,16 @@
     P.querySelectorAll("[data-ck-unit]").forEach(el => { el.onchange = () => {
       const id = el.dataset.ckUnit; checkForm.units = checkForm.units.filter(x => x !== id); if (el.checked) checkForm.units.push(id);
     }; });
+    const sec = $("ck-secret"); if (sec) sec.onchange = () => { checkForm.secret = sec.checked; render(); };
+    P.querySelectorAll("[data-ck-req]").forEach(b => { b.onclick = () => {
+      const [decision, requestId] = b.dataset.ckReq.split(":");
+      checkSubmit(decision === "approve" ? { type: "checkDecide", requestId, decision, diff: checkForm.diff } : { type: "checkDecide", requestId, decision });
+    }; });
     $("ck-open").onclick = () => {
-      const ids = heroes().map(h => h.id).filter(id => checkForm.units.includes(id));
+      const pool = online() && checkForm.secret ? (state.units || []).filter(u => !u._removed && !u.weaponOf) : heroes();
+      const ids = pool.map(h => h.id).filter(id => checkForm.units.includes(id));
       if (!ids.length) { alert("至少选一名角色"); return; }
-      if (online()) { checkForm.note = ""; return checkSubmit({ type: "checkOpen", prof: checkForm.prof, diff: checkForm.diff, unitIds: ids, note: $("ck-note").value }); }
+      if (online()) { checkForm.note = ""; return checkSubmit({ type: "checkOpen", prof: checkForm.prof, diff: checkForm.diff, unitIds: ids, note: $("ck-note").value, secret: !!checkForm.secret }); }
       const spec = checkPreview(ids); if (!spec) return;
       spec.note = $("ck-note").value; checkForm.note = "";
       localChecks.push(Object.assign(spec, { id: "check-" + Date.now(), status: "open", at: Date.now(), targets: spec.targets.map(t => Object.assign(t, { result: null })) }));
@@ -1042,6 +1025,14 @@
     }; });
   }
   /** 联机时玩家申请的属性点：主持人同意才真正加上 */
+  /** 玩家主动申请的检定：主持人按上面选的难度同意（房主掷骰）或不同意 */
+  function checkRequestsHtml() {
+    if (!online()) return "";
+    const list = (HotseatGame.getView().checkRequests || []).filter(r => r.status === "pending");
+    if (!list.length) return "";
+    return `<h3>玩家申请的检定</h3>${list.map(r => `<div class="tr-row"><b>${esc(r.unitName)}</b> 想做「${esc(r.prof)}」检定${r.note ? "（" + esc(r.note) + "）" : ""}
+        <button class="g-btn small" data-ck-req="approve:${esc(r.id)}">按所选难度同意并掷骰</button><button class="g-btn small" data-ck-req="reject:${esc(r.id)}">不同意</button></div>`).join("")}`;
+  }
   function attrRequestsHtml() {
     if (!online()) return "";
     const list = (HotseatGame.getView().attrRequests || []).filter(r => r.status === "pending");
@@ -1406,6 +1397,7 @@
       };
     });
     P.querySelectorAll("[data-bp-rm]").forEach(b => { b.onclick = () => { const [owner, kit] = b.dataset.bpRm.split(":"); act(ruleCommand("removeBlueprint", { owner, kit })); }; });
+    const so = $("tr-smith-open"); if (so) so.onchange = () => act(ruleCommand("smithOpen", { on: so.checked }));
     P.querySelectorAll("[data-up]").forEach(b => {
       b.onclick = () => {
         const [owner, kit, mode] = b.dataset.up.split(":");

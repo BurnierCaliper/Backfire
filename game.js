@@ -2527,10 +2527,12 @@
         reject: () => { unmarkTargets(); showPickBar(null); resolve(null); }
       });
       markTargets(new Set([...map.keys()].filter(id => !map.get(id).invalid)));
-      showPickBar(buttons);
+      showPickBar(buttons, canGiveUp());
       refreshHud();
     });
   }
+  /** 还没打出去的选择（技能分步 / 选目标）才给「放弃」按钮；结算队列里的点选另有自己的按钮 */
+  function canGiveUp() { return !!(G.arm && G.arm.actorId) && !(choiceResolve && choiceResolve.field); }
   /** 结算队列里（换刀头、协助攻击附带的扫描）在战场上点选：选完之前别的操作都锁住，和弹窗一样 */
   async function queueFieldPick(hint, cands, labelFn, buttons) {
     setHint(hint);
@@ -2539,8 +2541,9 @@
     finally { choiceResolve = null; G.arm = null; unmarkTargets(); clearPreview(); setHint(defaultHint()); refreshHud(); }
   }
   /** 选目标时的额外按钮条（在提示栏下面） */
-  function showPickBar(buttons) {
+  function showPickBar(buttons, giveUp) {
     let bar = $("g-pick-bar");
+    if (giveUp) buttons = (buttons || []).concat([{ label: "放弃（Esc）", giveUp: true }]);
     if (!buttons || !buttons.length) { if (bar) { bar.classList.remove("show"); bar.innerHTML = ""; } return; }
     if (!bar) {
       bar = el("div", "g-pick-bar");
@@ -2551,7 +2554,9 @@
     bar.innerHTML = "";
     buttons.forEach(b => {
       const x = el("button", "g-btn", `${esc(b.label)}${b.sub ? `<small>${esc(b.sub)}</small>` : ""}`);
-      x.onclick = (e) => { e.stopPropagation(); if (G.arm && G.arm.mode === "unit") G.arm.resolve({ button: b.value }); };
+      // 放弃：和 Esc / 右键一样，还没打出去，什么都没扣没改
+      if (b.giveUp) { x.classList.add("danger"); x.onclick = (e) => { e.stopPropagation(); disarm(); }; }
+      else x.onclick = (e) => { e.stopPropagation(); if (G.arm && G.arm.mode === "unit") G.arm.resolve({ button: b.value }); };
       bar.appendChild(x);
     });
     bar.classList.add("show");
@@ -2569,9 +2574,10 @@
         tapZone: null,
         zones: new Set(zones),
         previewFn,
-        resolve: (z) => { unmarkTargets(); clearPreview(); G.arm.mode = null; resolve(z); },
-        reject: () => { unmarkTargets(); resolve(null); }
+        resolve: (z) => { unmarkTargets(); clearPreview(); showPickBar(null); G.arm.mode = null; resolve(z); },
+        reject: () => { unmarkTargets(); showPickBar(null); resolve(null); }
       });
+      showPickBar(null, canGiveUp());
       document.querySelectorAll(".g-zone").forEach(z => z.classList.toggle("is-move-target", zones.includes(Number(z.dataset.num))));
       refreshHud();
     });

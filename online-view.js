@@ -551,6 +551,7 @@
     // 主持人发起的检定：熟练项、难度、每个人的成功率和掷出的点数（都是公开的）
     out.checks = arr(get(view, "checks")).slice(-20).flatMap(c => {
       if (!obj(c) || !id(get(c, "id"))) return [];
+      if (get(c, "secret")) return [];   // 主持人暗骰检定：检定本身和结果都只在房主本机
       const dto = identifiers(c, copyFields(c, {}, ["prof", "diffName", "note"], ["at"], []), ["id"]);
       enumField(c, dto, "status", ["open", "done", "closed"]);
       dto.targets = arr(get(c, "targets")).slice(0, 12).flatMap(t => {
@@ -567,6 +568,13 @@
       const dto = identifiers(r, copyFields(r, {}, ["unitName"], ["at"], []), ["id", "unitId", "operatorId"]);
       enumField(r, dto, "status", ["pending", "approved", "rejected", "cancelled"]);
       dto.attrs = arr(get(r, "attrs")).filter(a => ["str", "con", "dex", "wil", "int", "sta"].includes(a)).slice(0, 4);
+      return [dto];
+    });
+    // 玩家主动发起的检定申请（hotseat.js · requestCheck）：熟练项、说明、状态，同意后对应的检定 id
+    out.checkRequests = arr(get(view, "checkRequests")).slice(-20).flatMap(r => {
+      if (!obj(r) || !id(get(r, "id"))) return [];
+      const dto = identifiers(r, copyFields(r, {}, ["unitName", "prof", "note"], ["at"], []), ["id", "unitId", "operatorId", "checkId"]);
+      enumField(r, dto, "status", ["pending", "approved", "rejected", "cancelled"]);
       return [dto];
     });
     out.messages = projectMessages(get(view, "messages"), context);
@@ -645,14 +653,28 @@
     if (own(packet, "shop")) out.shop = projectShop(get(packet, "shop"));
     if (own(packet, "shopSell")) out.shopSell = projectShopSell(get(packet, "shopSell"));
     if (own(packet, "clinic")) out.clinic = projectClinic(get(packet, "clinic"));
+    if (own(packet, "smith")) out.smith = projectSmith(get(packet, "smith"));
+    if (own(packet, "workshop")) out.workshop = projectWorkshop(get(packet, "workshop"));
     if (own(packet, "cyberware")) out.cyberware = projectCyberware(get(packet, "cyberware"));
     // 长休结算：不带坚毅（只带那一句 mood）；游戏时钟
     if (own(packet, "rest")) out.rest = projectRest(get(packet, "rest"));
     if (own(packet, "camp")) out.camp = projectCamp(get(packet, "camp"));
-    if (own(packet, "clock")) { const ck = get(packet, "clock"); out.clock = obj(ck) ? { day: Math.max(1, Math.floor(Number(ck.day) || 1)), clock: ((Math.floor(Number(ck.clock) || 0) % 1440) + 1440) % 1440 } : null; }
+    if (own(packet, "clock")) { const ck = get(packet, "clock"); out.clock = obj(ck) ? { day: Math.max(1, Math.floor(Number(ck.day) || 1)), clock: ((Math.floor(Number(ck.clock) || 0) % 1440) + 1440) % 1440, hours: Math.max(0, Math.round((Number(ck.hours) || 0) * 60) / 60) } : null; }
+    if (own(packet, "party")) out.party = projectParty(get(packet, "party"));
     // Resync is another envelope using these same explicit projectors, not a
     // path for forwarding an opaque nested packet or raw save snapshot.
     return out;
+  }
+  /** 跑团探索的队伍卡（party-cards.js · heroDto）：白名单，坚毅生命（shp / shpMax）不在里面，房主那份就算带了也丢掉 */
+  function projectParty(list) {
+    if (!Array.isArray(list)) return null;
+    const str = (v, k) => typeof v === "string" ? text(v, k) || "" : "";
+    const num = v => (typeof v === "number" && isFinite(v) ? Math.round(v) : 0);
+    return list.slice(0, 12).filter(obj).map(h => ({ id: str(h.id, 60), kit: str(h.kit, 40), name: str(h.name, 40), level: num(h.level) || 1,
+      dead: !!h.dead, dying: !!h.dying, upOnShp: !!h.upOnShp, hp: num(h.hp), hpMax: num(h.hpMax), atk: num(h.atk), def: num(h.def), defMax: num(h.defMax),
+      block: typeof h.block === "number" && isFinite(h.block) ? Math.round(h.block) : null, xp: num(h.xp), xpNext: num(h.xpNext),
+      attrPoints: num(h.attrPoints), featPoints: num(h.featPoints), feats: arr(h.feats).slice(0, 20).map(f => str(f, 30)).filter(Boolean),
+      weapons: arr(h.weapons).slice(0, 6).filter(obj).map(w => ({ kit: str(w.kit, 40), name: str(w.name, 40), level: num(w.level) || 1, bond: num(w.bond), dur: num(w.dur), max: num(w.max) })) }));
   }
   /** 营地（长休前）：全队状态和补给，坚毅只留短词 mood */
   function projectCamp(c) {
@@ -720,6 +742,30 @@
       last: obj(s.last) ? { seq: num(s.last.seq), kind: s.last.kind === "buyback" ? "buyback" : "sell", by: str(s.last.by, 40), ok: !!s.last.ok, total: num(s.last.total),
         payout: arr(s.last.payout).slice(0, 12).filter(obj).map(p => ({ to: str(p.to, 40), amount: typeof p.amount === "number" && isFinite(p.amount) ? Math.floor(p.amount) : 0 })), msg: str(s.last.msg, 200) } : null
     };
+  }
+  /** 跑团工匠（trpg.js · trpgSmithPacket）：{ heroes: [{ kit, name, purse, weapons: [{ kit, name, lv, next, max, canSelf, enough, fee, mats: [{ name, need, have }] }] }] }，只有公开数字 */
+  function projectSmith(s) {
+    if (!obj(s)) return null;
+    const str = (v, n) => typeof v === "string" ? v.slice(0, n) : "";
+    const num = v => (typeof v === "number" && isFinite(v) ? Math.max(0, Math.floor(v)) : 0);
+    return { heroes: arr(s.heroes).slice(0, 8).filter(obj).map(h => ({
+      kit: str(h.kit, 40), name: str(h.name, 40), purse: num(h.purse),
+      weapons: arr(h.weapons).slice(0, 8).filter(obj).map(w => ({ kit: str(w.kit, 40), name: str(w.name, 40), lv: num(w.lv), next: num(w.next), max: !!w.max, canSelf: !!w.canSelf,
+        enough: !!w.enough, fee: num(w.fee), mats: arr(w.mats).slice(0, 8).filter(obj).map(m => ({ name: str(m.name, 40), need: num(m.need), have: num(m.have) })) })).filter(w => w.kit)
+    })).filter(h => h.kit) };
+  }
+  /** 跑团工坊（trpg.js · trpgWorkshopPacket）：{ heroes: [{ kit, name, points, recipes: [...], salvage: [{ id, name, qty, yields }] }] } */
+  function projectWorkshop(w) {
+    if (!obj(w)) return null;
+    const str = (v, n) => typeof v === "string" ? v.slice(0, n) : "";
+    const num = v => (typeof v === "number" && isFinite(v) ? Math.max(0, v) : 0);
+    return { heroes: arr(w.heroes).slice(0, 8).filter(obj).map(h => ({
+      kit: str(h.kit, 40), name: str(h.name, 40), points: Math.floor(num(h.points)),
+      recipes: arr(h.recipes).slice(0, 80).filter(obj).map(r => ({ id: str(r.id, 60), name: str(r.name, 60), prof: str(r.prof, 20), diffName: str(r.diffName, 20), hours: Math.floor(num(r.hours)),
+        known: !!r.known, level: Math.floor(num(r.level)), chance: num(r.chance),
+        mats: arr(r.mats).slice(0, 12).filter(obj).map(m => ({ id: str(m.id, 60), name: str(m.name, 40), need: Math.floor(num(m.need)), have: Math.floor(num(m.have)) })) })).filter(r => r.id),
+      salvage: arr(h.salvage).slice(0, 100).filter(obj).map(x => ({ id: str(x.id, 60), name: str(x.name, 60), qty: Math.floor(num(x.qty)), yields: str(x.yields, 120) })).filter(x => x.id)
+    })).filter(h => h.kit) };
   }
   /** 跑团诊所：自己的角色的改造信息（肉体上限、可改上限、改造率、单价、现在的方案）和最近一条申请的状态 */
   function projectClinic(c) {
@@ -804,7 +850,7 @@
     });
     return out;
   }
-  const api = { SCHEMA, pickKeys, projectHud, projectPacket, projectQuests, projectPurse, projectShop, projectShopSell, projectClinic, projectCyberware, projectRest, projectCamp, projectSheets, projectBagDetail, projectUnit, projectState, projectTape, projectFx, projectMessages, projectLogs, projectView, projectActionMenu, safeText: text, safeError };
+  const api = { SCHEMA, pickKeys, projectHud, projectPacket, projectQuests, projectPurse, projectShop, projectShopSell, projectClinic, projectSmith, projectWorkshop, projectCyberware, projectRest, projectCamp, projectParty, projectSheets, projectBagDetail, projectUnit, projectState, projectTape, projectFx, projectMessages, projectLogs, projectView, projectActionMenu, safeText: text, safeError };
   root.OnlineView = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof globalThis !== "undefined" ? globalThis : window);
