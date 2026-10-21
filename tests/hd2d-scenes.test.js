@@ -22,7 +22,8 @@ const packs = () => { mine(); return art(); };
 
 /** 做好了的场景（区域、场景 id），和每个场景远景里一定有的东西（userData.art） */
 const DONE = [
-  { region: "第一采矿场", scene: "rim", key: "mine1_rim", must: ["pitWall", "rimLip", "rail", "gantry", "cage", "skipTrack", "skip", "pitLight", "farRim"] }
+  { region: "第一采矿场", scene: "rim", key: "mine1_rim", must: ["pitWall", "rimLip", "rail", "gantry", "cage", "skipTrack", "skip", "pitLight", "farRim"] },
+  { region: "第一采矿场", scene: "mid", key: "mine1_mid", must: ["pitWall", "berm", "cone", "rockWall", "foreRock", "skipTrack", "skip", "pitLight"] }
 ];
 const PARTY = ["kolt", "helu", "ruby", "yuito"];
 const DESKTOP = { width: 1440, height: 900, top: 46, bottom: 160 };   // 桌面 1440×900：顶栏 + 展开的技能栏
@@ -132,17 +133,28 @@ function screenOf(cam, pts) {
   });
   return { x0, x1, y0, y1, near };
 }
-/** 一个装饰在世界里的点：小的网格按真的顶点（转过的石头的外框比石头本身大一圈，不能拿它算），大的 / 实例网格按外框的八个角 */
-function pointsOf(THREE, obj) {
-  const out = [], v = new THREE.Vector3();
+/** 一个装饰拆成一块块（屏幕上一块块地比）：普通网格按真的顶点（转过的石头、斜着的坑壁，外框比本身大一圈，不能拿外框算），
+ *  实例网格每个实例按它自己的外框八个角。返回 [点的列表] */
+function piecesOf(THREE, obj) {
+  const out = [], v = new THREE.Vector3(), m = new THREE.Matrix4();
   obj.updateMatrixWorld(true);
   obj.traverse(o => {
     if (!o.isMesh) return;
-    const pos = o.geometry.attributes.position;
-    if (o.isInstancedMesh || pos.count > 600) {
-      const b = new THREE.Box3().setFromObject(o);
-      [b.min.x, b.max.x].forEach(x => [b.min.y, b.max.y].forEach(y => [b.min.z, b.max.z].forEach(z => out.push({ x, y, z }))));
-    } else for (let i = 0; i < pos.count; i++) { v.fromBufferAttribute(pos, i).applyMatrix4(o.matrixWorld); out.push({ x: v.x, y: v.y, z: v.z }); }
+    const geo = o.geometry, pos = geo.attributes.position;
+    if (o.isInstancedMesh) {
+      if (!geo.boundingBox) geo.computeBoundingBox();
+      const b = geo.boundingBox;
+      for (let i = 0; i < o.count; i++) {
+        o.getMatrixAt(i, m); m.premultiply(o.matrixWorld);
+        const pts = [];
+        [b.min.x, b.max.x].forEach(x => [b.min.y, b.max.y].forEach(y => [b.min.z, b.max.z].forEach(z => { v.set(x, y, z).applyMatrix4(m); pts.push({ x: v.x, y: v.y, z: v.z }); })));
+        out.push(pts);
+      }
+    } else {
+      const pts = [];
+      for (let i = 0; i < pos.count; i++) { v.fromBufferAttribute(pos, i).applyMatrix4(o.matrixWorld); pts.push({ x: v.x, y: v.y, z: v.z }); }
+      out.push(pts);
+    }
   });
   return out;
 }
@@ -275,7 +287,7 @@ test("装饰不压住铭牌（#242）：远景、中景、近景（每个有人�
         const bd = backdropOf(B, layout, "dusk");
         root.add(bd.group);
         root.updateMatrixWorld(true);
-        const things = artOf(root).filter(o => !o.obj.parent || !o.obj.parent.userData.art).map(o => ({ what: o.what, pts: pointsOf(THREE, o.obj) }));
+        const things = artOf(root).filter(o => !o.obj.parent || !o.obj.parent.userData.art).flatMap(o => piecesOf(THREE, o.obj).map(pts => ({ what: o.what, pts })));
         // 战场周围的东西：在战场范围外面（不进任何地台，后面的在灯后面）
         const b = layout.bounds, lampZ = b.minZ - L.CONFIG.lamps.back;
         artOf(bd.group).forEach(({ obj, what }) => {
@@ -315,6 +327,18 @@ test("光照 / 调色（#242）：每个场景有自己的一套（hd2d-scene-ar
     ["sky", "fog", "hemi", "sunI", "exposure", "grade", "lamp", "sunPos", "rimPos"].forEach(k => assert.ok(lit.T[k] != null, `${d.key} ${name}：${k}`));
   }));
   assert.equal(A.lighting(themes, "dusk", "outer"), null, "没登记的地面主题：照旧用光影主题");
+  // 矿内压暗：同一个采矿场、同一个光影主题，矿内的环境光 / 主光 / 曝光都比矿外低，雾更暗；灯更显眼（灯的倍数不比矿外小）
+  const done = (r, s) => DONE.find(d => d.region === r && d.scene === s);
+  ["第一采矿场", "第二采矿场"].forEach(r => {
+    const rim = done(r, "rim"), mid = done(r, "mid");
+    if (!rim || !mid) return;
+    ["day", "dusk", "night"].forEach(name => {
+      const a = A.lighting(themes, name, rim.key).T, b = A.lighting(themes, name, mid.key).T, tag = `${r} ${name}`;
+      ["hemi", "sunI", "exposure"].forEach(k => assert.ok(b[k] < a[k] * 0.95, `${tag}：矿内的 ${k} ${b[k]} 没比矿外 ${a[k]} 暗`));
+      assert.ok(A.luma(b.fog) < A.luma(a.fog) * 0.8, `${tag}：矿内的雾没比矿外暗`);
+      assert.ok(b.lamp >= a.lamp, `${tag}：矿内的灯不比矿外弱`);
+    });
+  });
   // 改的是一份拷贝，光影主题本身不变
   const before = JSON.stringify(themes);
   DONE.forEach(d => A.lighting(themes, "night", d.key));
@@ -338,19 +362,20 @@ function run(bd, secs, reduced, t0) {
   let t = t0 || 0;
   for (let f = 0; f < secs * 30; f++) { if (!reduced) t += 1 / 30; bd.update(t, reduced ? 0 : 1 / 30); }
 }
-test("环境动画（#242）：矿外的矿车、罐笼时不时上下（停多久、走多快按 AMBIENT 的配置），坑壁上的灯偶尔暗一下（间隔按配置）；减少动态效果时都停住（矿车、罐笼不动，灯一直亮着）", async (t) => {
+test("环境动画（#242）：每个场景配置里列的环境动画都在（矿车、罐笼时不时上下，停多久、走多快按 AMBIENT 的配置；坑壁上的灯偶尔暗一下，间隔按配置）；减少动态效果时都停住（矿车、罐笼不动，灯一直亮着）", async (t) => {
   const P = await protoEnv(t);
   if (!P) return;
-  const { B } = P, M = mine();
+  const { B, A } = P, M = mine();
   try {
     const S = H.load().BattleSim;
-    for (const d of DONE.filter(x => x.scene === "rim")) {
-      const layout = layoutOf(BOARDS.line3(S), d), bd = backdropOf(B, layout, "dusk");
+    for (const d of DONE) {
+      const layout = layoutOf(BOARDS.line3(S), d), bd = backdropOf(B, layout, "dusk"), want = A.of(d.key).art.ambient;
       const amb = [];
       bd.group.traverse(o => { if (o.userData.ambient) amb.push(o); });
+      want.forEach(k => assert.ok(amb.some(o => o.userData.ambient.kind === k), `${d.key}：配置里有 ${k}，远景里却没有`));
+      amb.forEach(o => assert.ok(want.includes(o.userData.ambient.kind), `${d.key}：远景里的 ${o.userData.ambient.kind} 不在配置里`));
       const movers = amb.filter(o => o.userData.ambient.mover), blinks = amb.filter(o => o.userData.ambient.kind === "blink");
-      assert.ok(movers.some(o => o.userData.ambient.kind === "skip") && movers.some(o => o.userData.ambient.kind === "cage"), d.key + "：有矿车、罐笼");
-      assert.ok(blinks.length >= 3, d.key + "：有会闪的灯");
+      if (want.includes("blink")) assert.ok(blinks.length >= 3, d.key + "：有好几盏会闪的灯");
       // 减少动态效果：跑 30 秒什么都不动，灯都亮着
       const where = () => movers.map(o => o.position.toArray().join(","));
       const p0 = where();

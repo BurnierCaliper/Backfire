@@ -538,7 +538,7 @@ export function createHd2dScene(container, options) {
   /** plan = 天气要建的东西（weatherPlan）：雷鸣时远景换成风暴色的天、画乌云，天边接上压暗了的雾色；
    *  沙暴时整片远景蒙上沙色（dust，天边也接上沙黄的雾色，#240）；skyline = 楼群的高度倍数 */
   function syncBackdrop(layout, kind, plan, skyline) {
-    const c = layout.camera, storm = !!plan.storm, T = themeNow(), dust = dustOf(T, plan.tint);
+    const c = layout.camera, storm = !!plan.storm, T = themeNow(), dust = dustOf(T, plan.tint);   // themeNow：场景有自己的光照（state.lit，#242）就用它
     const sig = [kind, skyline || 1, state.meta.theme, storm ? "storm" : "", dust ? ["dust", dust.color, dust.sky, dust.haze, dust.veil, dust.sun].join(",") : "",
       Object.values(layout.bounds).map(v => Math.round(v)).join(","), c ? [c.dist, c.pos.y, c.pos.z].map(v => Math.round(v)).join(",") : ""].join("|");
     if (sig === state.backdropSig) return;
