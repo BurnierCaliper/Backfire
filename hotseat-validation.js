@@ -44,7 +44,9 @@
   const present = u => !!u && !u.dead && !u.hidden && !u.fused && !u._removed;
   function descriptor(actor, id) {
     if (id === "__stand") return { id, cost: {} };
-    if (id === "__move" || id === "__item") return { id, cost: { bonus: 1 } };
+    // 移动的消耗和单机一致（app.js · moveBaseCost）：导体 / 探测模式 0，酸液地面离开 1 行动点，其余 1 附赠
+    if (id === "__move") return { id, cost: typeof moveBaseCost === "function" ? moveBaseCost(actor) : { bonus: 1 } };
+    if (id === "__item") return { id, cost: { bonus: 1 } };
     if (typeof id !== "string" || /^fx_|_assist$|_opp$/.test(id) || id === "assist_block") return null;
     if (id.startsWith("use_device:")) {
       const p = (state.props || []).find(x => "use_device:" + x.id === id && Number(x.zone) === Number(actor.zone) && ["button", "lever"].includes(x.kind));
@@ -80,10 +82,21 @@
     if (sk.id === "__move" && actor.noMove) return "本回合无法移动";
     return skillRequirementError(actor, sk.id) || null;
   }
-  function assertBase(actor, sk, game) {
+  // 越过空隙：地面单位这一步花 1 行动点、不花附赠（荒原行者例外，仍是 1 附赠）——和 app.js · doMoveInner 一致
+  function voidMoveCost(actor, dest) {
+    const gap = (state.gaps || {})[gapKey(Number(actor.zone), dest)];
+    const wanderer = typeof featHas === "function" && featHas(actor, "wanderer");
+    return gap && gap.type === "void" && !actor.flying && !wanderer ? { ap: 1 } : null;
+  }
+  function assertBase(actor, sk, game, cmd) {
     if (!sk) fail("这个单位没有这项可用技能", "unknown_skill");
+    if (sk.id === "__move" && cmd && Number.isInteger(cmd.dest)) {
+      const over = voidMoveCost(actor, cmd.dest);
+      if (over) sk = Object.assign({}, sk, { cost: over, apWhy: "越过空隙需要 1 行动点" });
+      else if (sk.cost.ap) sk = Object.assign({}, sk, { apWhy: "离开酸液地面需要行动点" });
+    }
     const why = baseReason(actor, sk, game);
-    if (why) fail(why);
+    if (why) fail(why === "行动点不足" && sk.apWhy ? sk.apWhy : why);
   }
   function reason(unit, skill, session, sender, game) {
     try {
@@ -172,16 +185,15 @@
     if (typeof isCrushing === "function" && isCrushing(actor)) fail("正抓在敌人身上，无法主动移动", "invalid_move");
     if (typeof touDuelVictim === "function" && touDuelVictim(actor)) fail("决一死战中不能移动", "invalid_move");
     if (actor.self === "frost") fail("霜结：无法自行移动", "invalid_move");
-    const field = (state.fields || {})[from] || {};
-    if (field.abyss && !actor.flying) fail("深渊只有飞行单位才能通过", "invalid_move");
+    // 深渊：看目的区——地面单位不能走进去（站在里面的可以走出来），和 app.js · doMoveInner 一致
+    const toField = (state.fields || {})[dest] || {};
+    if (toField.abyss && !actor.flying) fail("深渊不能站人。飞行单位才能过。", "invalid_move");
+    // 沙珊瑚缠绕、流沙下陷 2 层起：自己动不了，原因写给玩家
+    if (actor.entangled) fail(`${actor.name} 被${actor.entangled.name}缠住了，动不了：先砍断触须（打珊瑚）。`, "invalid_move");
+    if (typeof sinkStuck === "function" && sinkStuck(actor)) fail(`${actor.name} 下陷 ${sinkOf(actor)} 层，自己走不出流沙：要等下陷降下来，或者让同伴拉出来、被位移带出去。`, "invalid_move");
     const why = zoneReachable(actor, dest, true);
     if (why) fail(why, "invalid_move");
-    // 荒原行者（feats.js）：离开酸液地面、越过空隙只要附赠动作（基础消耗已查过），不用行动点、不用检定——和 app.js · doMove 一致
-    const wanderer = typeof featHas === "function" && featHas(actor, "wanderer");
-    if (field.acid && !actor.flying && !wanderer && (actor.ap || 0) < 1) fail("离开酸液地面需要行动点", "invalid_move");
-    // 空隙：地面单位花 1 行动点做运动检定才能越过（检定在执行时掷）
-    const gap = (state.gaps || {})[gapKey(from, dest)];
-    if (gap && gap.type === "void" && !actor.flying && !wanderer && (actor.ap || 0) < 1) fail("越过空隙需要 1 行动点", "invalid_move");
+    // 酸液地面离开 / 越过空隙的行动点由 assertBase 按 moveBaseCost / voidMoveCost 检查
   }
   function checkItem(actor, cmd) {
     const spec = typeof cmd.item === "string" && Object.hasOwn(ITEM_CATALOG, cmd.item) && ITEM_CATALOG[cmd.item];
@@ -226,7 +238,7 @@
       const id = { move: "__move", standUp: "__stand", useItem: "__item" }[cmd.type] || cmd.skill;
       const sk = descriptor(actor, id);
       if (cmd.type === "skill" && ["__stand", "__move", "__item"].includes(id)) fail("请使用对应的语义动作类型", "unknown_skill");
-      assertBase(actor, sk, game);
+      assertBase(actor, sk, game, cmd);
       if (cmd.type === "standUp") {
         if (isWeaponUnit(actor) || (!actor.dying && totalHp(actor) > 0)) fail("这个单位现在不需要或不能起身");
       } else if (cmd.type === "move") checkMove(actor, cmd);

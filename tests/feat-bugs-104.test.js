@@ -57,11 +57,13 @@ function moveFixture(feat) {
   return { c, state, actor, zones };
 }
 test("联机移动校验：荒原行者没有行动点也能离开酸液地面（只要附赠动作）", () => {
-  for (const [feat, want] of [[false, []], [true, [2]]]) {
-    const f = moveFixture(feat);
-    f.state.fields[1].acid = true;
-    assert.deepEqual(f.zones(), want, feat ? "荒原行者可以走" : "没有专长：缺行动点走不了");
-  }
+  // 没有专长：移动按钮本身就因缺行动点灰掉（和单机 moveBaseCost 一致，#176），菜单直接报原因
+  const f0 = moveFixture(false);
+  f0.state.fields[1].acid = true;
+  assert.throws(() => f0.zones(), /行动点/, "没有专长：缺行动点走不了");
+  const f1 = moveFixture(true);
+  f1.state.fields[1].acid = true;
+  assert.deepEqual(f1.zones(), [2], "荒原行者可以走");
 });
 test("联机移动校验：荒原行者没有行动点也能越过空隙（不用检定）", () => {
   for (const [feat, want] of [[false, []], [true, [2]]]) {

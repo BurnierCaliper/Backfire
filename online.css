@@ -482,3 +482,11 @@ body.online-player.ol-in-battle .ol-battle .sk.blocked .cost { color: #d9a07a; }
 .ol-confirm .ol-card { max-width: 420px; }
 .ol-confirm p { margin: 0; color: #e7dcc6; line-height: 1.6; }
 .ol-confirm-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px; }
+
+/* 手机：战场框至少占可视高度的一半（技能栏 / 聊天栏之外的空间都给战场），桌面布局不变 */
+@media (max-width: 820px) {
+  body.online-player.ol-in-battle .ol-battle .g-field { min-height: 50vh; min-height: 50dvh; }
+  body.online-player.ol-in-battle .ol-battle { overflow-y: auto; }
+}
+/* 联机里选行动顺序 / 询问的弹层：背景不透明，盖住底下战斗画面的字 */
+body.ol-has-side .hs-overlay:not(.hs-ask-mini), body.online-player .hs-overlay:not(.hs-ask-mini) { background: #0b0806; }

@@ -368,6 +368,12 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **联机：移动校验和单机对齐 + 手机战斗画面三处**（issue #176，backlog「第三轮排查：联机 · 补查」；hotseat-validation.js · `descriptor` / `voidMoveCost` / `assertBase` / `checkMove`，online-battle.js · `isTouch` / `paintCards`，online-ui.js · `battleUi`，online.css；测试 tests/hotseat-validation.test.js、tests/feat-bugs-104.test.js、tests/online-ui.test.js）
+  - **移动消耗**：以前联机校验把移动写死成「1 附赠」，导体 / 探测模式用光附赠就被拦，酸液地面离开要附赠和行动点都有，越过空隙还要 1 附赠。现在用单机同一个 `moveBaseCost`：导体 / 探测模式 0，离开酸液地面只要 1 行动点，其余 1 附赠；越过空隙只要 1 行动点（荒原行者仍是 1 附赠）。没有荒原行者的角色在酸液地面行动点为 0 时，「移动」按钮直接灰掉并写原因。
+  - **深渊方向**：以前拦的是「从深渊走出」、放行「走进深渊」。现在和单机一样按目的区判断：地面单位不能走进深渊，站在里面的可以走出来。
+  - **缠绕 / 流沙**：被沙珊瑚缠住、流沙下陷 2 层以上，校验阶段就拒绝，原因（和单机日志同一句）回给玩家，不再「指令成功但单位没动」。
+  - **手机画面**（≤820px）：玩家战场框至少 50% 可视高度；轮到选目标时，战场自动滚到第一个目标所在的区（目标集合变化时才滚）；桌面布局不变。触屏设备（`hover: none` 或 `pointer: coarse`）提示改成「选择技能。点技能看说明。」，结束行动按钮不显示「空格」。选行动顺序 / 询问的弹层背景改为不透明，不再透出底下的字。
+
 - **联机跑团：战斗中主持人把角色转交给别的玩家**（issue #165，主人 10/21 定的规则；hotseat.js · `transfer` / `transferState`，hotseat-game.js · `transferHero` / `transferState`，online-game.js · `OnlineGame.transfer` / `transferState`，online-view.js · `projectLogs` 的 `transfer` 记录，online-ui.js · `transferMarkup`；测试 tests/hotseat.test.js、tests/online-host.test.js、tests/online-ui.test.js、tests/online-rogue.test.js）
   - **以前**：战斗中角色分配锁死，只能在玩家掉线时「接管」（一次收走他的全部角色，只能给主持人）。
   - **现在**：房间面板在战斗中多一块「战斗中转交角色」：每个角色一个下拉框（所有玩家 + 主持人）和「转交」按钮。选主持人 = 收回给主持人。

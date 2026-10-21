@@ -83,13 +83,17 @@
       if (n.textContent !== t) n.textContent = t;
     });
   }
+  /** 触屏设备（没有悬停、主要指针是手指）：提示不写「悬停 / 空格」，结束行动按钮不显示快捷键 */
+  function isTouch() {
+    try { return !!(root.matchMedia && (root.matchMedia("(hover: none)").matches || root.matchMedia("(pointer: coarse)").matches)); } catch (e) { return false; }
+  }
   function create(cb) {
     cb = cb || {};
     const el = make("div", "ol-battle");
     const field = make("main", "g-field ol-field");
     const hud = make("footer", "g-hud ol-hud");
     hud.innerHTML = `<div class="party"></div><div class="hud-row"><div class="hi-gauge" aria-label="角色仪表"></div><div class="skills"></div>
-      <div class="hud-side"><button class="endturn" type="button" data-ob="end">结束行动<small>空格</small></button></div></div><div class="hint"></div>`;
+      <div class="hud-side"><button class="endturn" type="button" data-ob="end">结束行动${isTouch() ? "" : "<small>空格</small>"}</button></div></div><div class="hint"></div>`;
     el.append(field, hud);
     const cards = new Map();
     let layoutKey = "", last = { ui: {} };
@@ -185,6 +189,7 @@
       });
     }
 
+    let lastTargetKey = "";
     function paintCards(data, ui) {
       const kit = root.UnitCard;
       if (!kit) return;
@@ -220,6 +225,14 @@
           setTimeout(() => c.wrap.remove(), 1800);
         } else c.wrap.remove();
       });
+      // 轮到选目标：战场框在手机上装不下所有区，目标集合一变就把第一个目标所在的区滚进视野
+      const key = targets ? [...targets].sort().join(",") : "";
+      if (key && key !== lastTargetKey) {
+        const first = snaps.find(s => targets.has(s.id)), c = first && cards.get(first.id);
+        const zone = c && c.wrap.closest(".g-zone");
+        if (zone && field.scrollHeight > field.clientHeight + 1) field.scrollTop += zone.getBoundingClientRect().top - field.getBoundingClientRect().top - 4;
+      }
+      lastTargetKey = key;
     }
 
     function paintHud(data, ui) {
@@ -355,7 +368,7 @@
     return { el, update, cardOf, destroy };
   }
 
-  const api = { create, snapUnit, snapProp, tickCountdowns };
+  const api = { create, snapUnit, snapProp, tickCountdowns, isTouch };
   root.OnlineBattle = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof window !== "undefined" ? window : globalThis);
