@@ -1,7 +1,7 @@
 /* 商店卖东西（单机单局 / 联机单局 / 跑团共用的规则层，不画界面）。
  *
  *   卖价 = 物品的标准价（物品表里的基础价，不是这家店打过折的价）× 50%，向下取整。没有标准价的不能卖。
- *   任务道具（物品表标了 key / quest）、图纸不能卖；改装件走原来的 sellPart（价格规则不变），这里不列。
+ *   任务道具（物品表标了 key / quest）、图纸、地图与票券（map_* / ticket_* / 手册「地图与票券」组）不能卖；改装件走原来的 sellPart（价格规则不变），这里不列。
  *   装在身上的要先卸下；义体在诊所拆，不算背包物品。
  *   回购：同一家店、离开之前，卖掉的东西可以按卖出价买回来，由卖的人付钱，回到原来的归属（个人 / 公用）。离店清空。
  *
@@ -11,7 +11,14 @@
 "use strict";
 
 const SHOP_SELL_RATE = 0.5;
-const SHOP_SELL_REASONS = ["任务道具", "图纸", "已装备", "无标准价", "改装件"];
+const SHOP_SELL_REASONS = ["任务道具", "图纸", "已装备", "无标准价", "改装件", "地图与票券"];
+const SHOP_SELL_NO_GROUPS = ["地图与票券"];   // 手册商店（trpg-data.js · HANDBOOK_SHOP）里整组不能卖的
+/** 地图与票券：手册商店里属于这一组的，或 id 以 map_ / ticket_ 开头的 */
+function shopSellIsMapOrTicket(id) {
+  if (/^(map|ticket)_/.test(String(id))) return true;
+  const hb = typeof HANDBOOK_SHOP !== "undefined" ? HANDBOOK_SHOP : [];
+  return hb.some(r => r && r.give && r.give.item === id && SHOP_SELL_NO_GROUPS.includes(r.group));
+}
 
 /** 标准价（基础价）：物品表 price → 制作材料参考价 → 效果道具价 → 手册武器材料价 → 手册商店价 → 单局商店价。没有 → null */
 function shopStdPrice(id) {
@@ -46,6 +53,7 @@ function shopSellCheck(id, ctx) {
   if (spec && (spec.key || spec.quest)) return { ok: false, reason: "任务道具" };
   if (spec && spec.blueprint) return { ok: false, reason: "图纸" };
   if (spec && spec.part) return { ok: false, reason: "改装件" };
+  if (shopSellIsMapOrTicket(id)) return { ok: false, reason: "地图与票券" };
   if (ctx.equipped) return { ok: false, reason: "已装备" };
   if (shopSellPrice(id) == null) return { ok: false, reason: "无标准价" };
   return { ok: true, reason: "" };
@@ -61,7 +69,8 @@ const shopSellName = id => (((typeof ITEM_CATALOG !== "undefined" ? ITEM_CATALOG
 /** 取回购单；place 变了（换了店 / 离了店）就清空 */
 function shopBuybackBook(holder, key, place) {
   let b = holder[key];
-  if (!b || typeof b !== "object" || b.place !== place) b = holder[key] = { place, seq: 0, list: [] };
+  // resultSeq 跨店不归零（换店后也不会和上一家的结果撞号）
+  if (!b || typeof b !== "object" || b.place !== place) b = holder[key] = { place, seq: 0, list: [], resultSeq: Number((b || {}).resultSeq) || Number(holder[key + "Seq"]) || 0, last: null };
   if (!Array.isArray(b.list)) b.list = [];
   return b;
 }
@@ -70,6 +79,20 @@ function shopBuybackAdd(book, row) {
   const r = { token: `bb${book.seq}`, id: row.id, name: shopSellName(row.id), qty: row.qty, price: row.price, owner: row.owner, seller: row.seller };
   book.list.push(r);
   return r;
+}
+/** 记下这次结果：res.seq 每个结果递增、唯一（界面按 seq 只显示一次，两笔一模一样的买卖也分得开）；book.last 给视图 */
+function shopSellResult(holder, key, book, res, kind, by) {
+  book.resultSeq = (Number(book.resultSeq) || 0) + 1;
+  holder[key + "Seq"] = book.resultSeq;   // 离店清空回购单后也接着编号
+  res.seq = book.resultSeq;
+  book.last = { seq: res.seq, kind, by, ok: res.ok, total: res.total, payout: res.payout.map(p => ({ to: p.to, amount: p.amount })), msg: res.msg };
+  return res;
+}
+/** 视图里的 last：只给能看到的人（kits 不传 = 全部） */
+function shopSellLastFor(book, kits) {
+  const l = book.last;
+  if (!l || (kits && !kits.includes(l.by))) return null;
+  return { seq: l.seq, kind: l.kind, by: l.by, ok: l.ok, total: l.total, payout: l.payout.map(p => ({ to: p.to, amount: p.amount })), msg: l.msg };
 }
 function shopBuybackPublic(r) { return { token: r.token, id: r.id, name: r.name, qty: r.qty, price: r.price, owner: r.owner, seller: r.seller }; }
 /** 一行卖出列表 */
@@ -91,7 +114,7 @@ function trpgShopSellBook() {
   return open ? shopBuybackBook(LEDGER, "shopSell", open.id) : null;
 }
 /** 离店（关店、换店）清空回购单：trpg-merchants.js · trpgMerchantOpen 调 */
-function trpgShopSellReset() { if (typeof LEDGER !== "undefined") delete LEDGER.shopSell; }
+function trpgShopSellReset() { if (typeof LEDGER !== "undefined") delete LEDGER.shopSell; }   // 编号在 LEDGER.shopSellSeq，接着用
 /** 跑团卖出视图：{ items, buyback }；kits：看的人能回购谁卖的（不传 = 全部，主持人） */
 function trpgShopSellView(kits) {
   const book = trpgShopSellBook();
@@ -99,7 +122,7 @@ function trpgShopSellView(kits) {
   const items = ((ensureBag().items) || []).filter(x => (Number(x.qty) || 0) > 0 && shopSellListable(x.id))
     .map(x => shopSellRow(x.id, Number(x.qty) || 0, "shared"));
   const buyback = book.list.filter(r => !kits || kits.includes(r.seller)).map(shopBuybackPublic);
-  return { items, buyback };
+  return { items, buyback, last: shopSellLastFor(book, kits) };
 }
 /** 卖：kit 是卖的人（角色 kit，主持人可以写 "party"）；钱进队伍公账 */
 function trpgShopSell(kit, id, qty, owner) {
@@ -117,7 +140,7 @@ function trpgShopSell(kit, id, qty, owner) {
   shopBuybackAdd(book, { id, qty: n, price: total, owner: "shared", seller });
   if (typeof ledgerCapture === "function") ledgerCapture();
   const msg = `卖掉 ${shopSellName(id)} ×${n}，得 ${total} 奎支，进队伍公账（现有 ${state.kuizhi}）。`;
-  return { ok: true, total, payout: [{ to: TRPG_PARTY_PURSE, amount: total }], msg };
+  return shopSellResult(LEDGER, "shopSell", book, { ok: true, total, payout: [{ to: TRPG_PARTY_PURSE, amount: total }], msg }, "sell", seller);
 }
 /** 回购：只有卖的人能买回，按卖出价从他的钱包付（"party" = 公账），东西回到公用背包 */
 function trpgShopBuyback(kit, token) {
@@ -133,5 +156,5 @@ function trpgShopBuyback(kit, token) {
   book.list.splice(i, 1);
   if (typeof ledgerCapture === "function") ledgerCapture();
   const msg = `买回 ${r.name} ×${r.qty}，${trpgPurseName(payer)} 付 ${r.price} 奎支。`;
-  return { ok: true, total: r.price, payout: [{ to: payer, amount: -r.price }], msg };
+  return shopSellResult(LEDGER, "shopSell", book, { ok: true, total: r.price, payout: [{ to: payer, amount: -r.price }], msg }, "buyback", payer);
 }

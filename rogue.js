@@ -1705,8 +1705,10 @@ const Rogue = (function () {
       const n = Math.min(H.owned(run, k, id), counts[id]);
       if (n > 0) items.push(shopSellRow(id, n, k));
     }));
-    const buyback = book.list.filter(r => !kits || kits.includes(r.seller) || (!H && r.seller === "party")).map(shopBuybackPublic);
-    return { items, buyback };
+    const see = who => !kits || kits.includes(who) || (!H && who === "party");
+    const buyback = book.list.filter(r => see(r.seller)).map(shopBuybackPublic);
+    const last = book.last && see(book.last.by) ? shopSellLastFor(book, null) : null;
+    return { items, buyback, last };
   }
   /** 卖：{ kit 卖的人, id, qty, owner: "shared" | 角色 kit } → { ok, total, payout: [{ to, amount }], msg } */
   function sellItem(run, o) {
@@ -1733,7 +1735,7 @@ const Rogue = (function () {
     shopBuybackAdd(sellBook(run), { id, qty: n, price: total, owner, seller });
     const msg = `${H ? heroName(seller) + " " : ""}卖掉 ${shopSellName(id)} ×${n}，得 ${total} 奎支${H && owner === "shared" && payout.length > 1 ? "（公用的东西，钱平分给全队）" : ""}。`;
     logAll(run, [msg]);
-    return { ok: true, total, payout, msg };
+    return shopSellResult(run, "shopSell", sellBook(run), { ok: true, total, payout, msg }, "sell", seller);
   }
   /** 回购：{ kit, token } → 卖的人按卖出价付钱，东西回到原来的归属 */
   function buybackItem(run, o) {
@@ -1752,7 +1754,7 @@ const Rogue = (function () {
     book.list.splice(i, 1);
     const msg = `${H ? heroName(payer) + " " : ""}买回 ${r.name} ×${r.qty}，花掉 ${r.price} 奎支。`;
     logAll(run, [msg]);
-    return { ok: true, total: r.price, payout: [{ to: payer, amount: -r.price }], msg };
+    return shopSellResult(run, "shopSell", book, { ok: true, total: r.price, payout: [{ to: payer, amount: -r.price }], msg }, "buyback", payer);
   }
 
   /* ---------- 制作（items.js · CRAFT_RECIPES / CRAFT_RULES；rogue-data.js · ROGUE_CRAFT）---------- */
