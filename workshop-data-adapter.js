@@ -155,7 +155,7 @@
       readOnly: !!opt.battle || r.stage === "over", inBattle: !!opt.battle,
       workshop: opt.battle ? null : (r.workshopAvailable || null),
       views: (r.bag || []).map(b => Object.assign({ name: nm(b.kit) }, b)),
-      cyber: r.cyber || [],
+      cyber: opt.battle ? [] : (r.cyber || []),   // 和房主 hostBackpackModel 一致：战斗中不给义体方案
       uses: recipesUsingMaterial
     };
   }

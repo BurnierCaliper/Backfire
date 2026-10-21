@@ -23,6 +23,8 @@ const TrpgCommands = (() => {
     purseTransfer: c => trpgPurseTransfer(c.from, c.to, c.amount),
     modifyHero: c => trpgModifyHero(c.kit, c.plan, !!c.free),
     clinicOpen: c => { TRPG.clinicOpen = !!c.on; return [TRPG.clinicOpen ? "诊所开门了：联机玩家可以申请义体改造。" : "诊所关门了。"]; },
+    smithOpen: c => { TRPG.smithOpen = !!c.on; return [TRPG.smithOpen ? "工匠开门了：联机玩家可以给自己的武器升级（加工费从自己的钱包出）。" : "工匠收摊了。"]; },
+    workshopOpen: c => { TRPG.workshopOpen = !!c.on; return [TRPG.workshopOpen ? "工坊开门了：联机玩家可以制作、拆解。" : "工坊关门了。"]; },
     cyberDecide: c => trpgCyberDecide(c.id, !!c.ok),
     merchantCreate: c => trpgMerchantCreate(c.name),
     merchantSave: c => trpgMerchantSave(c.merchant),
@@ -266,7 +268,7 @@ const CalcCommands = (() => {
       case "loadLive": return loadLiveParty();
       case "blade": { const h = findKit("hiaki", state.units), want = c.value; if (h && h.resources) { if ((want === "niu" && h.resources.niuOut) || (want === "naruto" && h.resources.narutoOut)) { appendLog(`${want === "niu" ? "丹生谷" : "鳴門"} 已分出，收回前不能切换到这把刀。`); syncBladeSel(); return; } h.resources.blade = want; refreshHiakiAtk(h); render(); } return; }
       case "addProp": { snapshot(); const p = makeProp(c.kind, c.zone, c.level); p.faction = c.faction || "player"; state.props.push(p); appendLog(`在 ${c.zone} 区放置 ${p.name}（${p.faction === "enemy" ? "敌方" : "我方"}）。`); if (c.kind === "battery") syncBatteryShields().forEach(s => appendLog(s)); render(); return; }
-      case "addPreset": { snapshot(); if (c.id === "ufo_boss") { syncPartySizeFromField(); const pack = spawnUfoBoss(c.level); pack.forEach(v => state.units.push(v)); state.selectedId = state.attackerId = pack[0].id; appendLog(`飞碟触灵登场（Lv${c.level}）：本体在 2 区，机械足甲乙丙在 2 区，丁戊在 1 区。本体不能被通常攻击。`); render(); return; } const p = enemyPresets().find(v => v.id === c.id); if (!p) throw new Error("Unknown enemy preset"); const added = p.build(c.level, syncPartySizeFromField()); if (typeof applyEnemyIV === "function") applyEnemyIV(added, c.iv); added.zone = enemySpawnZone(); state.units.push(added); state.selectedId = state.targetId = added.id; if (isMechanicalUnit(added)) syncBatteryShields().forEach(s => appendLog(s)); render(); return; }
+      case "addPreset": { snapshot(); if (c.id === "ufo_boss") { syncPartySizeFromField(); const pack = spawnUfoBoss(c.level); pack.forEach(v => state.units.push(v)); state.selectedId = state.attackerId = pack[0].id; appendLog(`飞碟触灵登场（Lv${c.level}）：本体在 2 区，机械足甲乙丙在 2 区，丁戊在 1 区。本体不能被通常攻击。`); render(); return; } const p = enemyPresets().find(v => v.id === c.id); if (!p) throw new Error("Unknown enemy preset"); const added = p.build(c.level, syncPartySizeFromField()); if (typeof applyEnemyIV === "function") applyEnemyIV(added, c.iv, c.race); added.zone = enemySpawnZone(); state.units.push(added); state.selectedId = state.targetId = added.id; if (isMechanicalUnit(added)) syncBatteryShields().forEach(s => appendLog(s)); render(); return; }
       case "calculate":
       case "applyAttack":
         if (!c.input || typeof c.input !== "object" || Array.isArray(c.input)) throw new Error("Calculator attack requires explicit input");

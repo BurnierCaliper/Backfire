@@ -426,6 +426,7 @@ function propCard(p) {
 
 function statusLine(u) {
   const s = [];
+  if (u.vehMerged && typeof vehicleOf === "function") { const vp = vehicleOf(u); if (vp) s.push(vehicleSeatText(vp), `驾驶员：${u.name}`); }   // 载具（vehicle.js）：合并后画成车的卡片，写乘员和驾驶员是谁
   if (Number(u.stunMarks) > 0) s.push(`晕眩标记 ${u.stunMarks}/${typeof BOSS_STUN_MARKS !== "undefined" ? BOSS_STUN_MARKS : 2}`);
   if (u.statuses) {
     if (u.statuses.burn > 0) s.push("灼烧×" + u.statuses.burn);
@@ -656,8 +657,8 @@ function explodeHigh(unit, total, opt) {
       creditPlayerHit(unit, (envOwnerUnit(opt.envBy) || {}).id);   // 击杀算环境的所有者；没有所有者就算之前最后打过它的玩家
       scoreEnvHit(unit, { total: lifeBefore, breakDealt: 0 }, envWho, 0, "爆炸");
       const over = Math.floor(unit.overkill * SCORE_RULES.overkill);
-      if (over > 0) envCommit(() => addScore("env", over * SCORE_RULES.env, envWho));
-    } else if (acc && acc.actorIsPlayer) addScore("overkill", Math.floor(unit.overkill * SCORE_RULES.overkill), unitById(acc.actorId));
+      if (over > 0) envCommit(() => addScore("env", over * SCORE_RULES.env * scoreTargetMul(unit), envWho));
+    } else if (acc && acc.actorIsPlayer) addScore("overkill", Math.floor(unit.overkill * SCORE_RULES.overkill) * scoreTargetMul(unit), unitById(acc.actorId));
   }
   const boomOwner = envBoom ? (envOwnerUnit(opt.envBy) || {}).id : statusOwnerId(unit, "high");   // 高能状态的所有者（要在清掉高能之前取）
   (unit.layers || []).forEach(l => { l.current = 0; });
@@ -1660,17 +1661,27 @@ function refreshEnemyEconomy(u, notes) {
     }
     if (!u.flying && w > 0) bonus += 1;
   }
+  // 种族被动（enemies.js）：千里马第一回合 +1 附赠（在不稳之前加，不稳照样把它清掉）。
+  // 只在真正的敌人回合开始（startEnemyPhase 传了 notes）才算一个回合；生成时的初始化不算
+  if (notes && typeof raceBonusExtra === "function") bonus += raceBonusExtra(u);
   // 不稳：敌人一样失去附赠动作，触发一次后消失
   if (u.statuses && u.statuses.unstable) {
     bonus = 0;
     u.statuses.unstable = false;
     if (notes) notes.push(`${u.name} 不稳：这回合失去附赠动作。`);
   }
+  // 易怒蛮牛发作后这回合没有附赠
+  if (u.raceNoBonus) {
+    u.raceNoBonus = false;
+    bonus = 0;
+    if (notes) notes.push(`${u.name} 易怒蛮牛：这回合失去附赠动作。`);
+  }
   if (loseAp) ap = 0;
   u.ap = Math.max(0, ap);
   u.apMax = u.ap;
   u.bonus = Math.max(0, bonus);
   u.bonusMax = Math.max(u.bonus, bonus);
+  if (typeof vehicleEconomy === "function") vehicleEconomy(u);   // 载具驾驶员每回合有 1 个附赠（移动 / 冲撞）
 }
 
 function beginRound(notes) {
@@ -1956,7 +1967,9 @@ function tickFireField(z, notes) {
       parts.push(r.text);
     }
     const x = envMult(u);
-    applyTypedDot(u, dmg * x, "fire", notes, `${u.name} 火场${stacks}层 ${parts.join(" + ")} = ${dmg}${x > 1 ? ` ×${x}（场地效果${x > 2 ? "×4" : "翻倍"}）= ${dmg * x}` : ""}`);
+    const cut = typeof raceFieldDamage === "function" ? raceFieldDamage(u, dmg * x) : dmg * x;   // 环境适应（鼠类人·鼠）：50% 概率免疫
+    if (cut <= 0 && dmg * x > 0) { notes.push(`${u.name} 火场${stacks}层：环境适应，免疫这次场地伤害。`); return; }
+    applyTypedDot(u, cut, "fire", notes, `${u.name} 火场${stacks}层 ${parts.join(" + ")} = ${dmg}${x > 1 ? ` ×${x}（场地效果${x > 2 ? "×4" : "翻倍"}）= ${dmg * x}` : ""}`);
   }));
   // 酷暑让火场层数再 +1：看的是这一区的天气（隔离区不受天气影响）；末日把这 +1 也翻倍
   const heat = zoneWeather(z) === "heat";
@@ -1978,7 +1991,9 @@ function tickAcidFieldFor(u, weather, notes) {
   const d = statusDotDice("acidfield", u.level, weather);
   const r = takeDice(d.n, d.s, 0);
   const x = envMult(u);
-  withEnvOwner((state.fields[u.zone] || {}).by, () => applyTypedDot(u, r.total * x, "acid", notes, `${u.name} 酸液地面 ${r.text}${x > 1 ? ` ×${x}（场地效果${x > 2 ? "×4" : "翻倍"}）` : ""}`));
+  const cut = typeof raceFieldDamage === "function" ? raceFieldDamage(u, r.total * x) : r.total * x;   // 环境适应（鼠类人·鼠）：50% 概率免疫
+  if (cut <= 0 && r.total * x > 0) { notes.push(`${u.name} 酸液地面：环境适应，免疫这次场地伤害。`); return; }
+  withEnvOwner((state.fields[u.zone] || {}).by, () => applyTypedDot(u, cut, "acid", notes, `${u.name} 酸液地面 ${r.text}${x > 1 ? ` ×${x}（场地效果${x > 2 ? "×4" : "翻倍"}）` : ""}`));
 }
 function tickHealFieldFor(u, weather, notes) {
   if (fieldExempt(u)) return;
@@ -2019,6 +2034,8 @@ function startPlayerPhase() {
   state.combatPhase = "player";
   state.units.forEach(u => {
     if (!u.isPlayer || u.hidden || u.dead) return;
+    // 晕眩标记（首领的规则；我方只有和载具合并的驾驶员用，vehicle.js）：没攒满就只恢复架势、照常行动；攒满了照常晕眩，标记清零
+    if (u.stunned) bossShrugStun(u, notes);
     const wasStun = !!u.stunned;
     refreshEconomy(u);
     if (wasStun) {
@@ -2072,6 +2089,10 @@ function startEnemyPhase() {
       if (u.kit === "mecha_gl" && u.resources && u.resources.glPending && u.resources.glZone && !u.resources.glReady) {
         u.resources.glReady = true;
         notes.push(`${u.name} 榴弹已就绪，可对 ${u.resources.glZone} 区发射。`);
+      }
+      if (u.kit === "riot_molotov" && u.resources && u.resources.bottlePending && u.resources.bottleZone && !u.resources.bottleReady) {
+        u.resources.bottleReady = true;
+        notes.push(`${u.name} 燃烧瓶已就绪，可对 ${u.resources.bottleZone} 区投出。`);
       }
       if (u.kit === "ant_guard" && u.resources && u.resources.shellPending && u.resources.shellZone && !u.resources.shellReady) {
         u.resources.shellReady = true;
@@ -2209,7 +2230,7 @@ function turnEnd() {
       if (!u.resources.mecha) {
         addNano(10);
         notes.push(`收发代理：无人机提取纳米 +10 → ${u.resources.nano}`);
-      } else if ((u.resources.nano || 0) >= 10) {
+      } else if (nanoAvailable(u) >= 10) {   // 纳米不够的差额从储备能源扣（#219）
         // 激光不能穿墙：隔着危墙 / 关着的门的敌人不算可选目标；一个都没有就什么都不干（不耗纳米）。
         // 锁定前先判断够不够得着（和 dealTo 的判定一致：距离 ≤1、没躲藏、没下潜、不是友军 / 飞碟本体），
         // 以前只看墙，锁到距离 2 / 躲藏 / 下潜的目标，激光打不出去纳米却照扣
@@ -2221,21 +2242,22 @@ function turnEnd() {
         const pool = high.length ? high : foes;
         const tgt = pool.slice().sort((x, y) => totalHp(x) - totalHp(y))[0];
         if (tgt) {
-          u.resources.nano -= 10;
-          notes.push(`银翼·收发代理：无人机激光射向 ${tgt.name}（纳米 −10 → ${u.resources.nano}）。`);
+          const paid = spendNano(10, { ruby: u });
+          notes.push(`银翼·收发代理：无人机激光射向 ${tgt.name}（${nanoSpentText(u, paid)}）。`);
           const shots = 2 + (u.resources.overdrive ? 1 : 0);   // 机体强化：无人机攻击次数 +1
           for (let i = 0; i < shots && !tgt.dead; i++) {
             // 每一发照普通命中的格式写进回合结束的日志（hitOne2 现在会写出伤害行）
             hitOne2(u, tgt, { element: "energy", mult: 0.2, diceN: 1, diceS: 12, baseBreak: 0, atk: effectiveAtk(u, state.units), atkRange: "any", usePrep: false, flags: { action: true } }, notes);
           }
         } else notes.push("银翼·收发代理：没有打得到的敌人，无人机这回合什么都不干。");
-      } else notes.push("银翼·收发代理：纳米不足 10，无人机这回合没有发射。");
+      } else notes.push(`银翼·收发代理：纳米${nanoReserveOf(u) ? "（含储备能源）" : ""}不足 10，无人机这回合没有发射。`);
     }
     if (u.kit === "ruby" && u.resources && u.resources.mecha) {
       const cost = 20 + (u.resources.overdrive ? 20 : 0);   // 机体强化：每回合多耗 20
-      u.resources.nano = Math.max(0, (u.resources.nano || 0) - cost);
-      notes.push(`${u.name} 机甲维持：纳米 −${cost} → ${u.resources.nano}`);
-      if (u.resources.nano <= 0) notes.push(...exitMecha(u, "纳米耗尽，机甲结束"));
+      // 纳米不够的差额从储备能源扣；两边都扣光才因为纳米耗尽退出机甲（#219）
+      const paid = spendNano(cost, { ruby: u, partial: true });
+      notes.push(`${u.name} 机甲维持：${paid.reserve ? nanoSpentText(u, paid) : `纳米 −${cost} → ${u.resources.nano}`}`);
+      if (nanoAvailable(u) <= 0) notes.push(...exitMecha(u, "纳米耗尽，机甲结束"));
     }
     // 年糕咬住记了 noMoveUntil：持续到下一个敌人回合结束；其余禁足到这一回合结束
     if (u.noMove && !(Number(u.noMoveUntil) > Number(state.turnNo))) {
@@ -2569,8 +2591,13 @@ const SCORE_RULES = {
   ap: 10,          // 我方每用 1 点行动点
   apGiftShare: 0.5,   // 队友给的行动点（意式浓缩……）：用它的那次行动得的分，这个比例记在给行动点的人身上
   bonusAction: 5,  // 我方每用 1 次附赠行动
-  env: 1.2         // 环境分数：利用配置物或场地（环境）造成的伤害 / 击破 / 溢出，分数 ×1.2
+  env: 1.2,        // 环境分数：利用配置物或场地（环境）造成的伤害 / 击破 / 溢出，分数 ×1.2
+  neutralMul: 0.25 // 打中立生物（尘虫、管虫）：伤害 / 击破 / 失衡 / 溢出分（含环境分）只拿原来的这个比例（#187）；基准分不算它们
 };
+/** 打在这个单位身上的伤害 / 击破 / 失衡 / 溢出分的倍率：中立生物按 SCORE_RULES.neutralMul，其他 1 */
+function scoreTargetMul(u) {
+  return u && !u.isPlayer && typeof isNeutralCreature === "function" && isNeutralCreature(u) ? SCORE_RULES.neutralMul : 1;
+}
 // 招式疲劳（像大乱斗的同招衰减）：同一个角色连续几个回合用同一个技能，这次行动的总得分打折。
 // 下标 = 连续第几个回合（1 不扣），超出表的按最后一项封顶
 const SCORE_FATIGUE = [0, 0, 0.10, 0.25, 0.40];
@@ -2823,7 +2850,8 @@ function envOwnerUnit(by) {
 /** 当前正在行动的我方单位 id（谁的行动都不在进行时是 null） */
 function actingPlayerId() {
   const acc = state.actionAcc;
-  return acc && acc.actorIsPlayer ? acc.actorId : null;
+  if (acc && acc.actorIsPlayer) return acc.actorId;
+  return state._itemUserId != null ? state._itemUserId : null;   // 战-M3：使用道具不开 actionAcc，道具的即时伤害 / 状态按使用者算
 }
 /** 记下「最后一个伤害过这个敌人的玩家」：击杀归属只看它。uid 不是我方单位就不动 */
 function creditPlayerHit(target, uid) {
@@ -2851,7 +2879,7 @@ function scoreEnvHit(target, res, who, bonus, label) {
   envCommit(() => {
     st.dmg += dmg; st.brk += brk; st.env = (st.env || 0) + dmg;
     burstNote(st, null, dmg, `环境 · ${label || "配置物 / 场地"}`, res);
-    addScore("env", (dmg * SCORE_RULES.dmg + brk * SCORE_RULES.brk) * SCORE_RULES.env, who, bonus);
+    addScore("env", (dmg * SCORE_RULES.dmg + brk * SCORE_RULES.brk) * SCORE_RULES.env * scoreTargetMul(target), who, bonus);
   });
   return who;
 }
@@ -2864,7 +2892,7 @@ function scoreWeatherHelp(attacker, target, res, ours) {
   const up = Math.floor(Number(res.weatherUp) || 0), down = Math.floor(Number(res.weatherDown) || 0);
   if (!target.isPlayer && ours && up > 0) envCommit(() => {
     st.weatherUp = (st.weatherUp || 0) + up;
-    addScore("env", up * SCORE_RULES.dmg, owner);
+    addScore("env", up * SCORE_RULES.dmg * scoreTargetMul(target), owner);
   });
   if (target.isPlayer && down > 0 && !(attacker && attacker.isPlayer)) envCommit(() => {
     st.weatherDown = (st.weatherDown || 0) + down;
@@ -2877,6 +2905,7 @@ function resetBattleRecords() {
   state.skillStreak = {};
   state.battleScore = { total: 0, parts: {} };
   state.scoreSeen = {};
+  state.scoreActLv = 0;
   state.battleGains = { xp: 0, kuizhi: 0 };
   state.lastBrokenLayer = null;   // 废物利用：每场重新记（上一场打碎的层不能拿来用）
   state.weaponFallen = {};        // 本场倒下过的武器（取回后 atk / 格挡加成减半）
@@ -2902,8 +2931,9 @@ function scoreAct() {
   if (Number(state.scoreAct) > 0) return Number(state.scoreAct);
   const ranges = (typeof ROGUE_CONFIG !== "undefined" && ROGUE_CONFIG.actLevels) || [[1, 4], [5, 8], [9, 12], [12, 15]];
   const foes = (state.units || []).filter(u => !u.isPlayer && u.kit !== "ironwall");
-  if (!foes.length) return 1;
-  const lv = Math.max(...foes.map(u => Number(u.level) || 1));
+  if (!foes.length && !(Number(state.scoreActLv) > 0)) return 1;
+  // 战-L2：记下见过的最高等级，死掉的敌人被移出场后分数线不会变低
+  const lv = state.scoreActLv = Math.max(Number(state.scoreActLv) || 0, ...foes.map(u => Number(u.level) || 1));
   for (let i = 0; i < ranges.length; i++) if (lv <= ranges[i][1]) return i + 1;
   return ranges.length + Math.ceil((lv - ranges[ranges.length - 1][1]) / 5);   // 额外幕：每 5 级一幕
 }
@@ -2941,6 +2971,7 @@ function settleBattleRewards(outcome) {
   if (!["win", "lose", "retreat"].includes(outcome)) throw new Error("未知的战斗结局：" + outcome);
   state.battleScore = state.battleScore || { total: 0, parts: {} };
   const bs = state.battleScore;
+  clearNanoReserve();   // 瑞比的储备能源战斗结束清零（#219）；连续战斗换区域不走这里，还是同一场
   if (bs.rewardSettlement) return {
     outcome: bs.rewardSettlement.outcome, grade: bs.rewardSettlement.grade,
     finishBonus: null, xpBonus: 0, totalXpBonus: bs.rewardSettlement.xpBonus,
@@ -3055,7 +3086,7 @@ function trackHealBy(actor, fn) {
       // 首领 / 精英没攒满标记的失衡会立刻恢复架势，这时按新记上的晕眩标记数算（一次行动打出两次也算两次）
       const n = marks.has(u.id) ? Math.max(0, (Number(u.stunMarks) || 0) - marks.get(u.id)) : (calm.has(u.id) && u.stunned ? 1 : 0);
       if (n > 0 && !u.dead) for (let i = 0; i < n; i++) {
-        addScore("stagger", SCORE_RULES.stagger, actor, Number(u._staggerBonus) || 0);
+        addScore("stagger", SCORE_RULES.stagger * scoreTargetMul(u), actor, Number(u._staggerBonus) || 0);
         const ss = battleStat(actor); if (ss) ss.staggers = (ss.staggers || 0) + 1;   // 战场数据：打出失衡
       }
       if (u._staggerBonus) u._staggerBonus = 0;
@@ -3089,7 +3120,7 @@ function noteSideDamage(amount, label, unit, noScore) {
   if (acc.actorIsPlayer && !(unit && unit.isPlayer) && !noScore) {
     const who = unitById(acc.actorId);
     const st = battleStat(who);
-    if (st) { st.dmg += n; addScore("dmg", n * SCORE_RULES.dmg, who); burstNote(st, who, n, `${acc.skillName || "行动"} · ${key}`); }
+    if (st) { st.dmg += n; addScore("dmg", n * SCORE_RULES.dmg * scoreTargetMul(unit), who); burstNote(st, who, n, `${acc.skillName || "行动"} · ${key}`); }
   }
 }
 
@@ -3222,15 +3253,16 @@ function hitBarrier(p, attacker, opt) {
   // 川川卡面：铁壁也受过载和雷鸣的反伤增益（只反敌人的攻击；配置物爆炸这类假攻击者不反）
   if (p.kind === "ironwall" && attacker && !attacker.isPlayer && !attacker.dead && (state.units || []).includes(attacker)) {
     const c = findKit("chuan", state.units);
+    const wallOwner = c;   // 铁壁是川川的配置物
     // 过载：装甲受到近距离攻击时，反伤 50% 这次受到的伤害（闪电）。先打在外层护盾上的不算
     if (c && c.instant && c.instant.overload && shieldNow <= 0 && dmg > 0 && Number(attacker.zone) === Number(p.zone)) {
       const back = Math.floor(dmg * 0.5);
-      if (back > 0) applyTypedDot(attacker, back, "electric", notes, `${p.name} 过载反伤 → ${attacker.name}`);
+      if (back > 0) applyTypedDot(attacker, back, "electric", notes, `${p.name} 过载反伤 → ${attacker.name}`, { by: wallOwner && wallOwner.id });   // 反伤算铁壁所有者（川川）的伤害（#187）
     }
     // 雷鸣：挡下攻击和成功的协助格挡一样，反伤 等级 × 1d4 闪电
     if (!attacker.dead && currentWeatherFor(dummy) === "thunder") {
       const r = takeDice(Math.max(1, Number(p.level) || 1), 4, 0);
-      applyTypedDot(attacker, r.total, "electric", notes, `雷鸣：${p.name} 挡下攻击反伤 ${r.text}`);
+      applyTypedDot(attacker, r.total, "electric", notes, `雷鸣：${p.name} 挡下攻击反伤 ${r.text}`, { by: wallOwner && wallOwner.id });
     }
   }
   if (p.hp <= 0) notes.push(...breakIronWall(p, []));
@@ -3288,6 +3320,8 @@ function pulseHighVoltage(target, amount, hitNo, hitMax) {
   let dmg = r.total;
   const ex = envMult(target);
   dmg *= ex;   // 恶劣环境 / 末日：场地效果翻倍（两个叠加 ×4）
+  if (typeof raceFieldDamage === "function") dmg = raceFieldDamage(target, dmg);   // 环境适应（鼠类人·鼠）：50% 概率免疫
+  if (!(dmg > 0)) { notes.push(`${target.name} 高压场地：环境适应，免疫这次场地伤害。`); return notes; }
   target._hvBusy = true;
   const tag = (hitMax > 1) ? `第${hitNo}/${hitMax}击 ` : "";
   withEnvOwner(f.by, () => applyTypedDot(target, dmg, "electric", notes, `${target.name} 高压场地${tag}${r.text}${ex > 1 ? "×" + ex : ""}`));
@@ -3690,7 +3724,8 @@ function voidCrossOdds(u) {
   const table = typeof ROGUE_CHECKS !== "undefined" ? ROGUE_CHECKS.chance : [[0.5, 0, 0, 0], [1, 0.5, 0.25, 0.125], [1, 1, 0.5, 0.25], [1, 1, 0.75, 0.5]];
   const base = (table[level] || [])[VOID_CROSS.diff] || 0;
   const hpLow = mine && totalHp(u) * 2 < totalMaxHp(u);
-  const perks = mine && typeof checkPerksFor === "function" ? checkPerksFor(u.kit, VOID_CROSS.prof, hpLow) : {};
+  const perks = mine && typeof checkPerksFor === "function" ? checkPerksFor(u.kit, VOID_CROSS.prof, hpLow)
+    : (!mine && typeof raceCheckPerks === "function" ? raceCheckPerks(u) : {});   // 敌人：种族被动（人类·迎难直上）
   let p = perks.adv ? 1 - (1 - base) * (1 - base) : perks.dis ? base * base : base;
   if (perks.reroll) p = 1 - (1 - p) * (1 - p);
   return { mine, level, base, chance: p, perks };
@@ -4198,6 +4233,7 @@ function structureTargets(actor, minD, maxD) {
   (state.props || []).forEach(p => {
     if (BARRIER_SIDE[p.kind] === "player") return;   // 自己的铁壁 / 防护罩不当目标
     if (!(p.hp > 0) && p.kind !== "button" && p.kind !== "lever") return;
+    if (p.isVehicle && typeof vehiclePilot === "function" && vehiclePilot(p)) return;   // 有驾驶员的车和驾驶员合并成一个单位，打驾驶员（vehicle.js）
     if (inR(p.zone) && !lineBlocked(actor.zone, p.zone)) out.push({ id: "prop:" + p.id, name: p.name, zone: p.zone, isPlayer: p.faction !== "enemy" });
   });
   const zm = Number(state.zoneMode) || 2;
@@ -4288,7 +4324,7 @@ function damageProp(p, opt, attacker) {
     lose = Math.max(1, Math.floor(opt.dmg || 5));
     // 写了血量类型的配置物（电池、炮台是装甲生命值）照属性克制表算倍率，和单位的装甲层一样吃天气：
     // 天气增减伤、微光反转克制、酸雨装甲减伤失效（隔离区不受天气影响）
-    const type = PROP_HP_TYPE[p.kind];
+    const type = PROP_HP_TYPE[p.kind] || (p.isVehicle ? "armor" : null);   // 载具（vehicle.js）是纯装甲
     let m = 1, chartOnly = 1;
     if (type && CHART[element]) {
       const f = state.fields[p.zone] || {};
@@ -4320,6 +4356,7 @@ function damageProp(p, opt, attacker) {
 function destroyProp(p, attacker) {
   const notes = [`${p.name} 被摧毁。`];
   if (typeof coralPropDestroyed === "function") coralPropDestroyed(p, notes);   // 沙珊瑚：被抓的人脱困
+  if (p.isVehicle && typeof vehicleDestroy === "function") return vehicleDestroy(p, notes);   // 载具被摧毁：殉爆（vehicle.js）
   if (BARRIER_SIDE[p.kind]) {
     notes.push(...breakIronWall(p, []));
     return notes;
@@ -4404,7 +4441,8 @@ function iceLeaveCheck(u) {
   const lvText = ["没有熟练", "一级熟练", "二级熟练", "三级熟练"][level] || "";
   if (base >= 1) return { ok: true, text: `简单「运动」检定（${lvText}，默认通过）` };
   const hpLow = totalHp(u) * 2 < totalMaxHp(u);
-  const perks = u.isPlayer && typeof checkPerksFor === "function" ? checkPerksFor(u.kit, "运动", hpLow) : {};
+  const perks = u.isPlayer && typeof checkPerksFor === "function" ? checkPerksFor(u.kit, "运动", hpLow)
+    : (!u.isPlayer && typeof raceCheckPerks === "function" ? raceCheckPerks(u) : {});
   const roll = () => Math.random() < base;
   const once = () => perks.adv ? (roll() || roll()) : perks.dis ? (roll() && roll()) : roll();
   let ok = once();
@@ -4425,6 +4463,7 @@ function doMove(unit, dest, moveOpt) {
   LOG_ACTOR_ID = unit.id;
   let lines;
   try { lines = withLogSink(() => doMoveInner(unit, dest, moveOpt)); } finally { LOG_ACTOR_ID = prevActor; }
+  if (typeof vehicleSync === "function") vehicleSync();   // 驾驶员带着整辆车走（炮手和车跟着驾驶员的区）
   // 「X：1 区 → 2 区」挪到最前面，花费跟在后面
   const i = lines.findIndex(s => /区 → \d+ 区/.test(s));
   if (i > 0) lines.unshift(lines.splice(i, 1)[0]);
@@ -4439,6 +4478,11 @@ function doMoveInner(unit, dest, moveOpt) {
     return;
   }
   moveOpt = moveOpt || {};
+  // 坐在车上的炮手不能自己移动（驾驶员带着整辆车走，见 vehicle.js）
+  if (unit.vehId && !unit.vehMerged && !moveOpt.forced) {
+    paintSkillLog(`${unit.name} 在车里，不能自己移动。先下车，或者让驾驶员开车。`);
+    return;
+  }
   // 濒死没起身的人不能自己移动（以前规则层不拦，只靠界面）
   if (unit.dying && !moveOpt.free && !moveOpt.forced) {
     paintSkillLog(`${unit.name} 濒死中。先点「起身」。`);
@@ -4555,8 +4599,11 @@ function doMoveInner(unit, dest, moveOpt) {
     const chk = iceLeaveCheck(unit);
     if (!chk.ok) {
       const br = iceFieldBreak(unit);
-      dealBreak(unit, br, "ice", notes, "冻土离开失败");
-      notes.push(`离开冻土：${chk.text}，失败：留在 ${from} 区并受 ${br} 冰击破。`);
+      if (typeof raceFieldImmune === "function" && raceFieldImmune(unit)) notes.push(`离开冻土：${chk.text}，失败：留在 ${from} 区；环境适应，免疫这次冰击破。`);   // 鼠类人·鼠：50% 概率免疫
+      else {
+        dealBreak(unit, br, "ice", notes, "冻土离开失败");
+        notes.push(`离开冻土：${chk.text}，失败：留在 ${from} 区并受 ${br} 冰击破。`);
+      }
       paintSkillLog(notes.join("\n"));
       renderAll();
       return;
@@ -4575,6 +4622,7 @@ function doMoveInner(unit, dest, moveOpt) {
   enterFrozenGround(unit, notes);
   applyAbyssFall(unit, from, notes);
   if (typeof afterMove === "function") afterMove(unit, notes);
+  if (typeof raceAfterMove === "function") raceAfterMove(unit, notes);   // 迅袭（enemies.js）：移动回 1 架势
   if (typeof featAlertOnEnter === "function") featAlertOnEnter(unit, notes);   // 警戒（feats.js）：敌人走进来挨一下
   chaseFollow(unit, notes);
   notes.unshift(`${unit.name}：${from} 区 → ${unit.zone} 区${moveOpt.free ? "（技能内移动，不耗附赠）" : ""}`);
@@ -4595,6 +4643,7 @@ function enterFrozenGround(unit, notes) {
   const toF = state.fields[unit.zone] || emptyField();
   if (!toF.ice || fieldExempt(unit)) return;
   if (typeof featHas === "function" && featHas(unit, "wanderer")) return;   // 荒原行者：进入冻土不受击破
+  if (typeof raceFieldImmune === "function" && raceFieldImmune(unit)) { notes.push(`${unit.name} 进入冻土：环境适应，免疫这次冰击破。`); return; }   // 鼠类人·鼠：50% 概率免疫
   const br = iceFieldBreak(unit);
   notes.push(`${unit.name} 进入冻土：冰击破 ${br}。`);
   dealBreak(unit, br, "ice", notes, "进入冻土");
@@ -4855,6 +4904,7 @@ function applyCombat(target, result, attacker) {
   if (typeof endSelfOnStun === "function") endSelfOnStun(target, notes);
   // 死刑：被标记的人倒下了 → 立刻转标
   if (typeof bossMechSync === "function") bossMechSync(notes);
+  if (typeof raceAfterHurt === "function") raceAfterHurt(target, result, attacker, notes);   // 易怒蛮牛（enemies.js）
   return notes;
 }
 
@@ -5073,6 +5123,7 @@ function settleEnemyKill(target, notes) {
 function sweepDeadEnemies() {
   const notes = [];
   if (typeof deathStatueSweep === "function") deathStatueSweep(notes);   // 被沙珊瑚缠住时死掉的：留下死亡雕像
+  if (typeof vehicleSweep === "function") vehicleSweep(notes);   // 载具：驾驶员倒下换人，装甲打空殉爆（vehicle.js）
   const list = (state.units || []).slice();
   list.forEach(u => {
     if (!u || u.isPlayer || u._removed) return;
@@ -5846,20 +5897,68 @@ function convertRasLight(pct, bonusRate) {
   return gain;
 }
 
-/** 柯尔特的废料：上一个被摧毁的敌人血量层 + 腐坏抛射记下的腐蚀伤害 + 扭矩「转移注意」失去的装甲。
- *  废物利用领走它们；碎渣重炮把它们全部装填打出去 */
+/* 柯尔特的废料（koltScrapCap / koltScrapTotal / koltScrapSpend）：
+ *   capPct     废料上限 = 柯尔特生命上限 × capPct。敌人血量层来的废料按它封顶（和废物利用一样）；
+ *              「非法」改装要废料合计达到它，才能消耗等量的废料给我方目标行动点
+ *   modAp      「非法」改装消耗废料给目标的行动点（可以超过行动点上限）
+ *   spendOrder 「非法」改装扣废料的顺序：layer 敌人血量层（按封顶后的数）→ rot 腐坏抛射 → divert 扭矩转移注意 → strip 扭矩拆卸模式 */
+const KOLT_SCRAP = { capPct: 0.5, modAp: 1, spendOrder: ["layer", "rot", "divert", "strip"] };
+/** 废料上限：柯尔特生命上限的一半（KOLT_SCRAP.capPct）；没有柯尔特时不封顶 */
+function koltScrapCap(k) {
+  return k && typeof baseMaxHp === "function" ? Math.floor(baseMaxHp(k) * KOLT_SCRAP.capPct) : Infinity;
+}
+/** 柯尔特的废料：上一个被摧毁的敌人血量层 + 腐坏抛射记下的腐蚀伤害 + 扭矩「转移注意」失去的装甲 + 扭矩「拆卸模式」变成废料的外层血量。
+ *  废物利用领走它们；碎渣重炮把它们全部装填打出去；「非法」改装达到上限时扣掉一部分（koltScrapSpend） */
 function koltScrapTotal(k) {
   k = k || findKit("kolt", state.units);
   const r = (k && k.resources) || {};
-  // 敌人失去血量层得来的废料：不超过柯尔特生命上限的一半（和废物利用的封顶一样）
-  const cap = k && typeof baseMaxHp === "function" ? Math.floor(baseMaxHp(k) * 0.5) : Infinity;
-  const last = state.lastBrokenLayer ? Math.min(cap, Math.floor(Number(state.lastBrokenLayer.lost) || 0)) : 0;
-  const rot = Object.keys(r.rotStore || {}).reduce((s, t) => s + Math.floor(Number(r.rotStore[t]) || 0), 0);
-  return Math.max(0, last + rot + Math.floor(Number(r.divertArmor) || 0));
+  // 敌人失去血量层得来的废料：不超过废料上限（和废物利用的封顶一样）；其余几种单独计算，不受上限
+  const last = state.lastBrokenLayer ? Math.min(koltScrapCap(k), Math.floor(Number(state.lastBrokenLayer.lost) || 0)) : 0;
+  const sum = store => Object.keys(store || {}).reduce((s, t) => s + Math.floor(Number(store[t]) || 0), 0);
+  return Math.max(0, last + sum(r.rotStore) + Math.floor(Number(r.divertArmor) || 0) + sum(r.stripStore));
 }
 function koltScrapClear(k) {
   state.lastBrokenLayer = null;
-  if (k && k.resources) { k.resources.rotStore = {}; k.resources.divertArmor = 0; }
+  if (k && k.resources) { k.resources.rotStore = {}; k.resources.divertArmor = 0; k.resources.stripStore = {}; }
+}
+/** 「非法」改装：废料（所有来源合计）达到上限了没有 */
+function koltScrapFull(k) {
+  const cap = koltScrapCap(k);
+  return cap > 0 && cap !== Infinity && koltScrapTotal(k) >= cap;
+}
+/** 「非法」改装：从柯尔特的废料里扣掉 n 点，按 KOLT_SCRAP.spendOrder 的顺序扣；扣完的来源清零，没扣完的留着。
+ *  腐坏抛射、拆卸模式各自记着几种血量，按记录的先后依次扣。返回实际扣掉的量 */
+function koltScrapSpend(k, n) {
+  const r = (k && k.resources) || {};
+  const want = Math.max(0, Math.floor(Number(n) || 0));
+  let left = want;
+  const fromStore = store => Object.keys(store || {}).forEach(t => {
+    if (left <= 0) return;
+    const have = Math.max(0, Math.floor(Number(store[t]) || 0)), use = Math.min(left, have);
+    left -= use;
+    if (use >= have) delete store[t];
+    else store[t] = have - use;
+  });
+  const take = {
+    // 敌人血量层：按封顶后的数算；扣不完的记回那一层，下次废物利用照样能领剩下的
+    layer: () => {
+      const rec = state.lastBrokenLayer;
+      if (!rec) return;
+      const have = Math.min(koltScrapCap(k), Math.max(0, Math.floor(Number(rec.lost) || 0))), use = Math.min(left, have);
+      left -= use;
+      if (use >= have) state.lastBrokenLayer = null;
+      else rec.lost = have - use;
+    },
+    rot: () => fromStore(r.rotStore),
+    divert: () => {
+      const have = Math.max(0, Math.floor(Number(r.divertArmor) || 0)), use = Math.min(left, have);
+      left -= use;
+      r.divertArmor = have - use;
+    },
+    strip: () => fromStore(r.stripStore)
+  };
+  KOLT_SCRAP.spendOrder.forEach(src => { if (left > 0 && take[src]) take[src](); });
+  return want - left;
 }
 /** 扭矩「转移注意」结束：失去的装甲记为废料（下次废物利用额外获得等量装甲） */
 function endTorqueGuard(w, notes) {
@@ -6433,6 +6532,7 @@ function applyKnockdown(unit, notes, opt) {
   opt = opt || {};
   notes = notes || [];
   if (!unit || unit.dead || !isInnerDepleted(unit)) return null;
+  if (unit.vehId && typeof vehiclePilotDown === "function") vehiclePilotDown(unit, notes);   // 驾驶员倒下：离开座位，车上下一个人接任（vehicle.js）
   if (unit.isPlayer && !isWeaponUnit(unit)) {
     if (unit.upOnShp) {
       const before = Math.max(0, Number(unit.shp) || 0);
@@ -6796,7 +6896,7 @@ function performAssistBlock(helper, target, attacker, forced, atkRange) {
     // 雷鸣：成功的协助格挡可以额外造成 等级 × 1d4 闪电伤害的反伤
     if (attacker && !attacker.dead && currentWeatherFor(helper) === "thunder") {
       const r = takeDice(Math.max(1, Number(helper.level) || 1), 4, 0);
-      applyTypedDot(attacker, r.total, "electric", notes, `雷鸣：${helper.name} 格挡反伤 ${r.text}`);
+      applyTypedDot(attacker, r.total, "electric", notes, `雷鸣：${helper.name} 格挡反伤 ${r.text}`, { by: helper.id });   // 反伤算格挡者的伤害（#187）
     }
     if (helper.kit === "nora" && attacker) setPierce(helper, attacker, notes);
     if (helper.kit === "vitas") flipMood(noraOf(), notes, "维塔斯格挡成功");
@@ -7134,11 +7234,11 @@ function resetBattleFlags(u) {
   if (u.kit === "xia") { r.engine = false; r.fuel = 0; }
   if (u.kit === "yuito") r.bean = Math.max(1, Number(r.bean) || 0);
   if (u.kit === "ruby" && r.nano == null) r.nano = 40;
-  if (u.kit === "kolt") { r.bit = r.bit || "drill"; r.rotStore = {}; r.divertArmor = 0; }
+  if (u.kit === "kolt") { r.bit = r.bit || "drill"; r.rotStore = {}; r.divertArmor = 0; r.stripStore = {}; }
   if (u.kit === "torque") { r.divertGuard = false; r.divertArmor0 = 0; }
   if (u.kit === "ecmo") { r.probe = false; r.probeZones = []; }
   if (u.kit === "ras") r.siphon = false;
-  if (u.kit === "ruby") { r.drone = false; r.overdrive = false; }
+  if (u.kit === "ruby") { r.drone = false; r.overdrive = false; delete r.nanoReserve; }   // 储备能源不跨战斗（#219）；纳米照旧
   if (u.kit === "hiaki") r.powder = false;
   if (u.kit === "niu") r.standby = false;
   if (u.kit === "ras") { r.energyPct = 0; r.light = 0; r.unstable = false; }
@@ -7463,6 +7563,8 @@ function attackConnected(res, flags) {
   return b !== "assistOk" && b !== "bareOk";
 }
 
+/** 身上的灼烧层数 */
+function burnStackCount(u) { return Math.max(0, Math.floor(Number(u && u.statuses && u.statuses.burn) || 0)); }
 function runOnConnect(attacker, target, spec, res) {
   const notes = [];
   if (!spec || !target) return notes;
@@ -7489,6 +7591,21 @@ function runOnConnect(attacker, target, spec, res) {
       const after = Number(target.statuses && target.statuses.burn) || 0;
       if (after > before) notes.push(`${target.name} 灼烧 +${after - before} → ${after} 层。`);
     }
+  }
+  if (spec.burnEach) {
+    // 多段攻击每一段各掷一次（火焰喷射兵）：成功一次灼烧 +1
+    const segs = ((res && res.perHit) || []).length || 1;
+    let got = 0;
+    for (let i = 0; i < segs; i++) if (Math.random() < spec.burnEach && typeof grantBurn === "function") { grantBurn(target, 1, notes); got++; }
+    if (got) notes.push(`${target.name} 灼烧 +${got} → ${Number(target.statuses && target.statuses.burn) || 0} 层（${segs} 段各 ${Math.round(spec.burnEach * 100)}%）。`);
+  }
+  if (spec.instant && typeof applyInstantEffect === "function") {
+    applyInstantEffect(target, spec.instant, notes);
+    notes.push(`${target.name} 被施加${INSTANT_NAME[spec.instant] || spec.instant}。`);
+  }
+  if (spec.activate === "burn" && burnStackCount(target) > 0) {
+    // 激活灼烧：目标没有灼烧就不触发（triggerOneStatus 没有灼烧时会改激活别的状态，这里先挡掉）
+    notes.push(...triggerOneStatus(target, attacker, "burn"));
   }
   if (spec.dest != null) {
     const dest = Number(spec.dest);
@@ -7748,6 +7865,7 @@ function dealTo(attacker, target, opt) {
   // 原始击破（后面会被目标一侧的效果改写，例如「加倍击破」翻倍）：导体额外那一下按它重新结算
   if (!("_origBaseBreak" in opt)) opt._origBaseBreak = opt.baseBreak;
   opt.flags = makeDealFlags(opt.flags);
+  if (typeof vehicleSync === "function") vehicleSync();   // 被推 / 拉走的驾驶员：车和炮手先跟到他所在的区（vehicle.js）
   if (target && target.isStructure) return dealToStructure(attacker, target, opt);   // 打配置物 / 危墙的替身（#52）
   // 战场数据：击杀在伤害结算里就会发生，所以先记下「最后一击是谁」
   if (attacker && target && attacker.isPlayer && !target.isPlayer && (state.units || []).includes(attacker)) target._lastHitBy = attacker.id;
@@ -7822,6 +7940,15 @@ function dealTo(attacker, target, opt) {
     if (guard) {
       appendLog(`${guard.name} 挡在 ${target.name} 身前，替他承受这次攻击。`);
       target = guard;
+    }
+  }
+  // 载具（vehicle.js）：同区同阵营的单位挨打时，车每次各掷一次代挡（空车也算，范围攻击每人各掷）；成功就由车（驾驶员）承受这次攻击
+  if (target && attacker && typeof vehicleGuard === "function") {
+    const vg = vehicleGuard(attacker, target, opt);
+    if (vg) {
+      appendLog(`${vg.vehicle.name}替 ${target.name} 代挡了这次攻击（${Math.round(vg.chance * 100)}%）。`);
+      if (vg.struct) return dealToStructure(attacker, vg.struct, opt);
+      target = vg.unit;
     }
   }
   // 飞行：近程攻击飞行单位要额外付一个附赠行动；付不起就打不到。
@@ -7946,6 +8073,22 @@ function dealTo(attacker, target, opt) {
     const dr = mechChargeDr(target);
     if (dr > 0) { flags.drPct = (Number(flags.drPct) || 0) + dr; flags.drWhy = "蓄满能量"; }
   }
+  // 防暴盾（镇压队员·警棍盾）：同区有护盾还没打空的警棍盾，友军受到的远程攻击 −25%，和其他百分比加算（enemies.js · riotShieldDr）
+  if (target && !target.isPlayer && flags.action !== false && !flags.environment && typeof riotShieldDr === "function") {
+    const sdr = riotShieldDr(target, attacker, opt);
+    if (sdr > 0) {
+      flags.drPct = (Number(flags.drPct) || 0) + sdr;
+      flags.drWhy = flags.drWhy ? flags.drWhy + "、防暴盾" : "防暴盾";
+    }
+  }
+  // 张开掩体（载具）：合并后的驾驶员（车）受伤 −25%，和其他百分比加算
+  if (target && target.vehMerged && flags.action !== false && !flags.environment && typeof vehicleCoverDr === "function") {
+    const cdr = vehicleCoverDr(target);
+    if (cdr > 0) {
+      flags.drPct = (Number(flags.drPct) || 0) + cdr;
+      flags.drWhy = flags.drWhy ? flags.drWhy + "、张开掩体" : "张开掩体";
+    }
+  }
   // 挂在「下一击」上的猛击 / 穿刺 / 弱点特效只作用于真正的攻击行动，
   // 不作用于这一击派生出来的环境伤害（雷击转移、爆燃溢出、反弹……），也不会被它们提前用掉
   const realAttack = flags.action !== false && !flags.environment;
@@ -8051,6 +8194,8 @@ function dealTo(attacker, target, opt) {
     diceValue,
     firstHitBonus: prepBonus,
     firstHitNote: prepNote,
+    // 迅袭（猫类人·豹）：整场第一个行动里的第一击 +击破；反应（协助、借机）和环境伤害不算
+    firstBreak: flags.action && !isReaction && !flags.environment && typeof raceFirstBreak === "function" ? raceFirstBreak(attacker) : 0,
     element: opt.element || "physical",
     baseBreak: br,
     hits: opt.hits || 1,
@@ -8071,6 +8216,11 @@ function dealTo(attacker, target, opt) {
     atkRange: opt.atkRange || "any"
   });
   res.flags = flags;
+  // 种族被动（enemies.js）：这一击算出手了——迅袭的「第一个行动」用掉；注意力涣散记下这回合打的是谁
+  if (attacker && flags.action && !isReaction && !flags.environment && res.ok !== false) {
+    if (typeof raceMarkActed === "function") raceMarkActed(attacker);
+    if (typeof raceNoteAttack === "function") raceNoteAttack(attacker, target);
+  }
   const wasStunnedT = !!target.stunned;
   const wasFlyingT = !!target.flying;   // 击破飞行单位时引擎会先把它击落（engine.js · applyResultToUnit），荒原行者要看结算前的飞行状态
   const dopplerT = target.self === "doppler";   // 被这一下打进失衡、多普勒随晕眩结束，这一下的击破照样传出去
@@ -8125,7 +8275,7 @@ function dealTo(attacker, target, opt) {
       // 哔哩哩格挡成功：自身不掉架势，把这一击原本的伤害 50% 以闪电反伤给进攻者
       if (attacker && !attacker.dead && !attacker.isProp) {
         const back = Math.floor((Number(res.blockedRaw) || 0) * 0.5);
-        if (back > 0) applyTypedDot(attacker, back, "electric", extra, `${bh.name} 格挡反伤 → ${attacker.name}`);
+        if (back > 0) applyTypedDot(attacker, back, "electric", extra, `${bh.name} 格挡反伤 → ${attacker.name}`, { by: bh.id });   // 反伤算格挡者的伤害（#187）
       }
     } else extra.push(...applyBlockBreakToHelper(flags.blockHelperId, res.helperBreak));
     if (typeof featAfterBlock === "function") featAfterBlock(bh, attacker, target, extra);   // 推搡（feats.js）：挡下后把攻击者推开
@@ -8183,10 +8333,11 @@ function dealTo(attacker, target, opt) {
     } else if (attacker && target && attacker.isPlayer && !target.isPlayer) {
       const st = battleStat(attacker);
       if (st) {
-        st.dmg += Math.floor(Number(res.total) || 0); st.brk += Number(res.breakDealt) || 0;
+        const brkReal = res.breakSpent != null ? Number(res.breakSpent) || 0 : Number(res.breakDealt) || 0;   // 战-M5：实际扣掉的架势
+        st.dmg += Math.floor(Number(res.total) || 0); st.brk += brkReal;
         burstNote(st, attacker, res.total, burstLabel(opt.flags), res);
-        addScore("dmg", Math.floor(Number(res.total) || 0) * SCORE_RULES.dmg, attacker, scoreBonus);
-        addScore("brk", (Number(res.breakDealt) || 0) * SCORE_RULES.brk, attacker, scoreBonus);
+        addScore("dmg", Math.floor(Number(res.total) || 0) * SCORE_RULES.dmg * scoreTargetMul(target), attacker, scoreBonus);
+        addScore("brk", brkReal * SCORE_RULES.brk * scoreTargetMul(target), attacker, scoreBonus);
         scoreWeatherHelp(attacker, target, res, true);
       }
     }
@@ -8205,8 +8356,8 @@ function dealTo(attacker, target, opt) {
     if (target && !target.isPlayer && (target.dead || totalHp(target) <= 0) && (res.intended || 0) > 0) {
       const over = Math.max(0, (res.intended || 0) - (res.total || 0));
       if (over > 0) target.overkill = (Number(target.overkill) || 0) + over;
-      if (over > 0 && envWho) addScore("env", Math.floor(over * SCORE_RULES.overkill) * SCORE_RULES.env, envWho, scoreBonus);
-      else if (over > 0 && attacker && attacker.isPlayer && !attacker.envSrc) addScore("overkill", Math.floor(over * SCORE_RULES.overkill), attacker, scoreBonus);
+      if (over > 0 && envWho) addScore("env", Math.floor(over * SCORE_RULES.overkill) * SCORE_RULES.env * scoreTargetMul(target), envWho, scoreBonus);
+      else if (over > 0 && attacker && attacker.isPlayer && !attacker.envSrc) addScore("overkill", Math.floor(over * SCORE_RULES.overkill) * scoreTargetMul(target), attacker, scoreBonus);
       const maxHp = (target.layers || []).reduce((a, l) => a + (Number(l.max) || 0), 0);
       if ((res.intended || 0) >= maxHp * 0.5) target.killBig = true;
     }
@@ -8330,6 +8481,54 @@ function addNano(n) {
   if (n > 0 && !(typeof passiveOnKit !== "function" || passiveOnKit("ruby"))) return;   // 放弃被动「纳米科技」
   ruby.resources = ruby.resources || {};
   ruby.resources.nano = Math.max(0, Math.min(100, (ruby.resources.nano || 0) + n));
+}
+
+/* 瑞比「补充能源」（纳米科技+，作者 10/21 定，#219）：附赠动作二选一——纳米 +nano，或者把全部纳米按 compressRate（储备 / 纳米，1:1）
+ * 压缩成储备能源、纳米归 0。储备能源记在 resources.nanoReserve：没有上限，纳米不够时自动补差额（spendNano），
+ * 只在这一场战斗里有（战斗结束 / 开战清零；连续战斗换区域还是同一场）。没有储备时不留这个键（显示只在有储备时写「储备 n」） */
+const RUBY_REFUEL = { nano: 10, compressRate: 1 };
+function nanoReserveOf(ruby) { return Math.max(0, Number(ruby && ruby.resources && ruby.resources.nanoReserve) || 0); }
+/** 瑞比能用的纳米能源：纳米 + 储备能源（花纳米的门槛都按这个算） */
+function nanoAvailable(ruby) {
+  ruby = ruby || findKit("ruby", state.units);
+  return ruby ? Math.max(0, Number(ruby.resources && ruby.resources.nano) || 0) + nanoReserveOf(ruby) : 0;
+}
+/** 花纳米能源：先扣纳米，纳米不够的差额从储备能源里扣。
+ *  纳米 + 储备不够 n 时不扣、返回 null；opt.partial（机甲维持）有多少扣多少，两边都扣到 0 为止。
+ *  返回这次从纳米、储备各扣了多少 { nano, reserve } */
+function spendNano(n, opt) {
+  opt = opt || {};
+  const ruby = opt.ruby || findKit("ruby", state.units);
+  if (!ruby) return null;
+  const r = ruby.resources = ruby.resources || {};
+  const need = Math.max(0, Number(n) || 0);
+  const nano = Math.max(0, Number(r.nano) || 0), reserve = nanoReserveOf(ruby);
+  if (nano + reserve < need && !opt.partial) return null;
+  const fromNano = Math.min(nano, need), fromReserve = Math.min(reserve, need - fromNano);
+  r.nano = nano - fromNano;
+  if (reserve - fromReserve > 0) r.nanoReserve = reserve - fromReserve;
+  else delete r.nanoReserve;
+  return { nano: fromNano, reserve: fromReserve };
+}
+/** 日志里的扣除：「纳米 −5 → 0，储备能源 −15 → 35」（没动储备就只写纳米） */
+function nanoSpentText(ruby, paid) {
+  const r = (ruby && ruby.resources) || {};
+  return `纳米 −${paid ? paid.nano : 0} → ${Number(r.nano) || 0}` + (paid && paid.reserve ? `，储备能源 −${paid.reserve} → ${nanoReserveOf(ruby)}` : "");
+}
+/** 压缩 n 点纳米换得多少储备能源 */
+function nanoCompressGain(n) { return Math.floor(Math.max(0, Number(n) || 0) * RUBY_REFUEL.compressRate); }
+/** 补充能源·压缩：全部纳米按比例转进储备能源，纳米归 0 */
+function compressNano(ruby, lines) {
+  const r = ruby.resources = ruby.resources || {};
+  const nano = Math.max(0, Number(r.nano) || 0);
+  const add = nanoCompressGain(nano);
+  r.nano = 0;
+  if (add > 0) r.nanoReserve = nanoReserveOf(ruby) + add;
+  lines.push(`补充能源·压缩：纳米 ${nano} → 0，储备能源 +${add} → ${nanoReserveOf(ruby)}。`);
+}
+/** 战斗结束：储备能源清零（不跨战斗保留；纳米照旧） */
+function clearNanoReserve() {
+  (state.units || []).forEach(u => { if (u && u.resources && "nanoReserve" in u.resources) delete u.resources.nanoReserve; });
 }
 
 function beanToLiquid() {
@@ -8567,7 +8766,7 @@ function enterMecha() {
   const notes = [];
   if (!ruby) return ["场上没有瑞比。"];
   if (!(typeof passiveOnKit !== "function" || passiveOnKit("ruby"))) return ["瑞比放弃了被动「银翼」，无法进入机甲。"];
-  if ((ruby.resources.nano || 0) <= 0) return ["纳米能源不足，无法进入机甲。"];
+  if (nanoAvailable(ruby) <= 0) return ["纳米能源不足，无法进入机甲。"];   // 纳米 + 储备能源（#219）
   if (!mint || mint.hidden) {
     const spawned = spawnWeapon(ruby, "mint");
     if (!spawned) return ["需要明特在场且与瑞比同区。先唤出明特。"];
@@ -9054,6 +9253,21 @@ function skillFlowSteps(id, actor, picks) {
     for (let z = 1; z <= maxZ; z++) if (zoneDist(actor.zone, z, state.zoneMode) <= 1 && !lineBlocked(actor.zone, z) && visibleEnemies(z).length) zones.push(z);
     return [{ key: "dest", type: "zone", optional: false, label: "机枪扫射哪个区域（距离 1 以内）", zones }];
   }
+  if (id === "kolt_mod") {
+    // 「非法」改装：废料（所有来源合计）达到上限时，先选目标；目标是我方单位再选只施加过载，还是再消耗等于上限的废料让它 +1 行动点。
+    // 废料没到上限就没有分步（照常直接选目标）；目标是敌人也没有后一项
+    const k = findKit("kolt", state.units) || actor;
+    if (!koltScrapFull(k)) return [];
+    const steps = [{ key: "target", type: "unit", optional: false, label: "施加过载的目标（1 距离以内任意单位，含自己）",
+      units: fieldUnits().filter(u => !u.fused && zoneDist(actor.zone, u.zone, maxZ) <= 1) }];
+    const tgt = picks.target ? unitById(picks.target) : null;
+    if (tgt && tgt.isPlayer) {
+      const cap = koltScrapCap(k), ap = KOLT_SCRAP.modAp;
+      steps.push({ key: "mode", type: "choice", optional: false, label: `废料已达到上限（${koltScrapTotal(k)} / ${cap}）：要不要消耗 ${cap} 废料，让 ${tgt.name} 获得 ${ap} 行动点`,
+        options: [{ value: "overload", label: "只施加过载" }, { value: "ap", label: `过载 + 消耗 ${cap} 废料：${tgt.name} 行动点 +${ap}（可以超过上限）` }] });
+    }
+    return steps;
+  }
   if (id === "torque_boost") {
     const bit = ((findKit("kolt", state.units) || {}).resources || {}).bit || "drill";
     if (bit === "acid") {
@@ -9072,12 +9286,20 @@ function skillFlowSteps(id, actor, picks) {
     return steps;
   }
   if (id === "torque_strip") {
-    return [
+    // 拆下的外层血量：转移给一名同区友方，或者变成柯尔特的废料（单独计算、不受上限）；选废料就不用选接收的友方
+    const steps = [
       { key: "target", type: "unit", optional: false, label: "拆卸目标（同区敌人）",
-        units: fieldUnits().filter(u => !u.isPlayer && !u.dead && Number(u.zone) === Number(actor.zone)) },
-      { key: "ally", type: "unit", optional: false, label: "接收外层血量的同区友方",
-        units: fieldUnits().filter(u => u.isPlayer && !u.dead && Number(u.zone) === Number(actor.zone)) }
+        units: fieldUnits().filter(u => !u.isPlayer && !u.dead && Number(u.zone) === Number(actor.zone)) }
     ];
+    if (findKit("kolt", state.units)) {
+      steps.push({ key: "mode", type: "choice", optional: false, label: "拆下的外层血量怎么处理",
+        options: [{ value: "ally", label: "转移给一名同区友方" }, { value: "scrap", label: "变成柯尔特的废料（单独计算，不受上限）" }] });
+    }
+    if (picks.mode !== "scrap") {
+      steps.push({ key: "ally", type: "unit", optional: false, label: "接收外层血量的同区友方",
+        units: fieldUnits().filter(u => u.isPlayer && !u.dead && Number(u.zone) === Number(actor.zone)) });
+    }
+    return steps;
   }
   if (id === "helu_scan") {
     const zones = [];
@@ -9253,6 +9475,14 @@ function skillFlowSteps(id, actor, picks) {
     return [{ key: "layer", type: "choice", optional: false, label: "缓冲给哪一种血量",
       options: ["shield", "armor", "flesh", "sand", "spirit"].map(k => ({ value: k, label: LAYER[k] })) }];
   }
+  if (id === "ruby_refuel") {
+    // 补充能源（#219）：纳米 +10，或者把全部纳米压缩成储备能源。纳米是 0 时没有东西可以压缩：不问，直接 +10
+    const nano = Math.max(0, Number(actor.resources && actor.resources.nano) || 0), reserve = nanoReserveOf(actor);
+    if (nano <= 0) return [];
+    return [{ key: "mode", type: "choice", optional: false, label: `补充能源：纳米 +${RUBY_REFUEL.nano}，或者把全部纳米压缩成储备能源`,
+      options: [{ value: "nano", label: `纳米 +${RUBY_REFUEL.nano}（现在 ${nano}）` },
+        { value: "compress", label: `压缩：纳米 ${nano} → 0，储备能源 ${reserve} → ${reserve + nanoCompressGain(nano)}` }] }];
+  }
   if (id === "ruby_trigger" || id === "ruby_short" || id === "wing_aa" || id === "mint_steal") {
     const units = (typeof fieldUnits === "function" ? fieldUnits() : state.units).filter(u =>
       u && !u.isPlayer && !u.dead && !u.hidden && !u.fused &&
@@ -9287,12 +9517,12 @@ function skillFlowSteps(id, actor, picks) {
       }
     ];
   }
-  if (id === "en_gl" || id === "en_ant_shell") {
+  if (id === "en_gl" || id === "en_ant_shell" || id === "en_riot_bottle") {
     return [{
       key: "dest",
       type: "zone",
       optional: false,
-      label: id === "en_gl" ? "榴弹落点区域" : "大酸液弹落点区域",
+      label: id === "en_gl" ? "榴弹落点区域" : id === "en_riot_bottle" ? "燃烧瓶落点区域" : "大酸液弹落点区域",
       zones
     }];
   }
@@ -9784,7 +10014,7 @@ function renderSkillFlow() {
   }
   const cancel = document.createElement("button");
   cancel.className = "btn small danger";
-  cancel.textContent = "取消技能";
+  cancel.textContent = "放弃（Esc）";
   cancel.onclick = () => calcCommand("skillCancel");
   opts.appendChild(cancel);
 }
@@ -10720,8 +10950,9 @@ function renderLog() {
  * 只是每次失衡记 1 个晕眩标记：到它自己的回合开始时，标记没满 BOSS_STUN_MARKS 个就恢复架势、照常行动；
  * 满了才真正晕眩（跳过这个回合），之后标记清零。目的是加快首领战的节奏。 */
 const BOSS_STUN_MARKS = 2;
-/** 用这套规则的：首领，以及 10 级起的精英（ELITE_RULE_MIN_LEVEL） */
+/** 用这套规则的：首领，以及 10 级起的精英（ELITE_RULE_MIN_LEVEL）；还有和载具合并的驾驶员（敌我都算） */
 function isBossUnit(u) {
+  if (u && u.vehMerged) return true;   // 载具驾驶员：架势、两个晕眩标记用车的，我方抢到车也一样（vehicle.js）
   if (!u || u.isPlayer || typeof enemyRankOf !== "function") return false;
   const r = enemyRankOf(u);
   return r === "boss" || (r === "elite" && (Number(u.level) || 1) >= (typeof ELITE_RULE_MIN_LEVEL !== "undefined" ? ELITE_RULE_MIN_LEVEL : 10));
@@ -10736,9 +10967,10 @@ function noteBossBreak(u) {
   return u.stunMarks;
 }
 function bossMarkText(u) {
+  const veh = u.vehMerged && typeof vehicleOf === "function" ? vehicleOf(u) : null;   // 载具驾驶员：标记是车的（vehicle.js）
   return u.stunMarks >= BOSS_STUN_MARKS
     ? `晕眩标记 ${u.stunMarks}/${BOSS_STUN_MARKS}：攒满了，下个回合真正晕眩。`
-    : `晕眩标记 ${u.stunMarks}/${BOSS_STUN_MARKS}：${enemyRankOf(u) === "boss" ? "首领" : "精英"}要攒满 ${BOSS_STUN_MARKS} 个才会晕眩，架势立刻恢复，可以接着打下一个标记。`;
+    : `晕眩标记 ${u.stunMarks}/${BOSS_STUN_MARKS}：${veh ? veh.name : enemyRankOf(u) === "boss" ? "首领" : "精英"}要攒满 ${BOSS_STUN_MARKS} 个才会晕眩，架势立刻恢复，可以接着打下一个标记。`;
 }
 /** 没攒满标记的失衡：立刻恢复架势（协助攻击照常排队、照常打出） */
 function bossQuickRecover(u, notes) {
@@ -10797,7 +11029,7 @@ const SKILL_REQUIREMENT = {
   niu_standby:    (a) => res(a).standby ? "已经在待命" : null,
   ruby_relay:     () => (findKit("ruby", state.units) || {}).resources && findKit("ruby", state.units).resources.drone ? "已经有小型无人机" : null,
   wing_relay:     () => (findKit("ruby", state.units) || {}).resources && findKit("ruby", state.units).resources.drone ? "已经有小型无人机" : null,
-  mint_repair:    () => (((findKit("ruby", state.units) || {}).resources || {}).nano || 0) >= 20 ? null : "纳米能源不足 20",
+  mint_repair:    () => nanoAvailable() >= 20 ? null : "纳米能源不足 20",   // 纳米 + 储备能源（#219）
   wing_boost:     (a) => res(a).overdrive ? "机体强化已经生效" : null,
   yuito_cold:     (a) => (res(a).liquid || 0) >= 1 ? null : "没有咖啡液",
   yuito_duet:     (a) => (res(a).liquid || 0) >= 2 ? null : "咖啡液不足 2",
@@ -10823,8 +11055,9 @@ const SKILL_REQUIREMENT = {
     : !res(a).scanned ? "沙暴中再用要先做一次环境扫描才能调转风向"
     : state.weatherLock ? `天气被「${state.weatherLock}」锁定，无法调转风向` : null,
   torque_strip:   (a) => ((findKit("kolt", state.units) || {}).resources || {}).bit === "acid" ? "拆卸模式需要电钻模式" : null,
-  // 废物利用：要有「还没利用过的被摧毁的敌人血量层」或腐坏抛射攒下的记录才能用（同一层不能反复利用）
-  kolt_scrap:     (a) => state.lastBrokenLayer || (Number(res(a).divertArmor) || 0) > 0 || Object.keys(res(a).rotStore || {}).some(k => (Number(res(a).rotStore[k]) || 0) > 0)
+  // 废物利用：要有「还没利用过的被摧毁的敌人血量层」或腐坏抛射 / 转移注意 / 拆卸模式攒下的废料才能用（同一层不能反复利用）
+  kolt_scrap:     (a) => state.lastBrokenLayer || (Number(res(a).divertArmor) || 0) > 0 ||
+    [res(a).rotStore, res(a).stripStore].some(s => Object.keys(s || {}).some(k => (Number(s[k]) || 0) > 0))
     ? null : "还没有可以利用的残骸（被摧毁的敌人血量层，或腐坏抛射留下的记录）",
   kolt_rot:       (a) => ((findKit("kolt", state.units) || a).resources || {}).bit !== "acid" ? "腐坏抛射需要酸液炮模式" : null,
   kolt_mod:       (a) => ((findKit("kolt", state.units) || a).resources || {}).bit === "acid" ? "「非法」改装需要电钻模式" : null,
@@ -11008,6 +11241,7 @@ function summonableBlades(h) {
 
 /** 不满足前提时返回原因字符串，满足返回 null */
 function skillRequirementError(actor, id) {
+  if (actor && /^veh_/.test(String(id)) && typeof vehicleSkillWhy === "function") return vehicleSkillWhy(actor, id);   // 载具招式（vehicle.js）
   if (actor && typeof featOfSkill === "function" && featOfSkill(id)) return featSkillWhy(actor, id);
   const fn = SKILL_REQUIREMENT[id];
   if (!actor || typeof fn !== "function") return null;
@@ -11091,6 +11325,20 @@ function skillTargetError(a, id, t) {
     if (!tgt || sandPullTargets(a).indexOf(tgt) < 0) return "要选距离 1 以内陷在流沙里的友方";
   }
   if (id === "role_renew" && t && !t.isPlayer) return "续命只能对友方使用";
+  // 战-L1：攻击友军 / 近战打飞行目标附赠不够，以前都是 dealTo 里才拒绝，行动点早扣了还记行动分；这里在扣点前拦下
+  if (a.isPlayer && t && t.id && !t.isPlayer && !isStructureToken(t.id) && !(typeof featOfSkill === "function" && featOfSkill(id))) {
+    let sk = null;
+    try { sk = (skillList(a) || []).find(s => s.id === id); } catch (e) {}
+    const hint = sk ? (sk.hint || "") + " " + (sk.name || "") : "";
+    const side = (typeof SKILL_TARGET_SIDE !== "undefined" && SKILL_TARGET_SIDE[id]) ||
+      (/任意单位|拉到|磁力/.test(hint) ? "any" : /友方|队友/.test(hint) ? "ally" : "enemy");
+    if (side === "enemy" && sk && typeof playerAllied === "function" && playerAllied(t)) return `${t.name} 是友军，不会被我方攻击`;
+    const rg = skillRangeFor(a, id) || (typeof parseSkillRange === "function" ? parseSkillRange(hint) : null);
+    if (side === "enemy" && sk && rg && rg.max === 0 && !/所有|全部|范围|每名/.test(hint) &&
+        t.flying && !a.flying && Number(t.zone) === Number(a.zone) && !(typeof featHas === "function" && featHas(a, "wanderer")) &&
+        !["longge_aa", "longge_chill", "longge_heat", "longge_spit", "xiaoxiao_punch", "xiaoxiao_combo"].includes(id) &&
+        (Number(a.bonus) || 0) < (skillCost(id).bonus || 0) + 1) return `${t.name} 在飞行，近程攻击需要额外 1 附赠行动`;
+  }
   // 职责技能：分步里选的对象不合法就在扣点之前拦下
   if (/^role_(spread|shelter|boost|gold|double_dot|buffer|sturdy|halve|omen)$/.test(id)) {
     const why = roleTargetError(a, id, t);
@@ -11159,6 +11407,13 @@ function skillTargetError(a, id, t) {
     if (zoneDist(a.zone, tgt.zone, state.zoneMode) > (far ? 1 : 0)) return "目标超出本次射程";
   }
   const flp = (state.skillFlow && state.skillFlow.picks) || {};
+  // 「非法」改装选了「过载 + 消耗废料」：要废料达到上限、目标是我方单位（分步里才有这一项），不然在扣行动点之前拦下
+  if (id === "kolt_mod" && flp.mode === "ap") {
+    const k = findKit("kolt", state.units) || a;
+    const tgt = flp.target ? unitById(flp.target) : t;
+    if (!tgt || !tgt.isPlayer) return "只有目标是我方单位时才能消耗废料给行动点";
+    if (!koltScrapFull(k)) return `废料还没达到上限（${koltScrapTotal(k)} / ${koltScrapCap(k)}），不能消耗废料给行动点`;
+  }
   // 巨刃划空打配置物 / 危墙：要在 1 距离以内，不能打自己这边的铁壁 / 防护罩（以前能打自己的铁壁）
   if (id === "chuan_blade") {
     const ref = flp.target || state.targetId;
@@ -11168,6 +11423,8 @@ function skillTargetError(a, id, t) {
       return p && BARRIER_SIDE[p.kind] === "player" ? `不能打自己这边的${p.name}` : "这个目标不在 1 距离以内";
     }
   }
+  // 补充能源选了压缩：没有纳米可以压缩就不白花附赠动作（纳米是 0 时分步里本来就不给这个选项）
+  if (id === "ruby_refuel" && flp.mode === "compress" && !(Number(res(a).nano) > 0)) return "没有纳米能源可以压缩";
   // 回收护盾：目标身上要有能回收的护盾（电池的机械护盾、当作最内层的护盾不算），不白花附赠动作
   if (id === "chuan_reclaim" && t && t.id && t.isPlayer &&
       !(t.layers || []).some(l => l.type === "shield" && !l.batteryShield && !l.inner && (Number(l.current) || 0) > 0)) return `${t.name} 身上没有能回收的护盾`;
@@ -11316,6 +11573,11 @@ function runSkillInner(id, optRun) {
       paintSkillLog(`${a.name} ${(a.ap || 0) < enemyCost.ap ? "行动点" : "附赠行动"}不足，无法使用该技能。`);
       return;
     }
+  }
+  // 载具招式（vehicle.js）：敌人在扣点之前验一遍（我方的在下面 skillRequirementError 验）
+  if (!a.isPlayer && /^veh_/.test(String(id)) && typeof vehicleSkillWhy === "function") {
+    const why = vehicleSkillWhy(a, id, t);
+    if (why) { paintSkillLog(why); return; }
   }
   const duelTou = typeof touDuelVictim === "function" ? touDuelVictim(a) : null;
   if (duelTou && id !== "assist_block") {
@@ -11546,7 +11808,10 @@ function runSkillInner(id, optRun) {
   const dabbleBase = a.isPlayer && typeof featBeginDelegate === "function" ? featBeginDelegate(a, id) : null;
   if (dabbleBase) id = dabbleBase;
   try {
-    if (typeof featOfSkill === "function" && featOfSkill(id)) {
+    if (/^veh_/.test(String(id)) && typeof runVehicleSkill === "function") {
+      // 载具招式（vehicle.js）：上下车、拉人、开炮、焚烧、张开掩体、冲撞；行动点上面已经扣过
+      runVehicleSkill(id, a, t, hitOne, lines, needT);
+    } else if (typeof featOfSkill === "function" && featOfSkill(id)) {
       // 专长动作（feats.js）：行动点上面已经扣过
       const fl = state.skillFlow;
       runFeatSkill(a, id, { t, picks: (fl && fl.picks) || {}, lines, hitOne });
@@ -12241,8 +12506,13 @@ function runSkillInner(id, optRun) {
       t.magnetShield = true;
       lines.push(...triggerMagnetShield(t));
     } else if (id === "ruby_refuel") {
-      addNano(10);
-      lines.push(`补充能源：纳米 +10 → ${a.resources.nano}。`);
+      // 补充能源（#219）：二选一，分步里选的 mode——"compress" 压缩成储备能源，其余（没选）纳米 +10
+      const fl = state.skillFlow;
+      if (fl && fl.picks && fl.picks.mode === "compress") compressNano(a, lines);
+      else {
+        addNano(RUBY_REFUEL.nano);
+        lines.push(`补充能源：纳米 +${RUBY_REFUEL.nano} → ${a.resources.nano}。`);
+      }
     } else if (id === "chuan_over") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       applyInstantEffect(t, "overload", lines);
@@ -12483,11 +12753,13 @@ function runSkillInner(id, optRun) {
       a.atk = effectiveAtk(a, state.units);
       lines.push("机体强化：每回合消耗的纳米能源 +20，atk +20%，普通攻击溅射倍率 +0.1。");
     } else if (id === "mint_repair") {
-      // 机体修复：消耗 20 纳米，自身恢复 50% 生命上限，+1 架势
-      addNano(-20);
+      // 机体修复：消耗 20 纳米（纳米不够的差额从储备能源扣，#219），自身恢复 50% 生命上限，+1 架势
+      const ruby = findKit("ruby", state.units);
+      const paid = spendNano(20, { ruby, partial: true });   // 门槛（SKILL_REQUIREMENT）已经查过够 20
       const got = healUnit(a, Math.floor(totalMaxHp(a) * 0.5));
       a.def = Math.min(a.defMax || a.def, (Number(a.def) || 0) + 1);
-      lines.push(`机体修复：消耗 20 纳米，恢复 ${got} 生命，架势 +1。纳米 → ${(findKit("ruby", state.units) || {}).resources ? findKit("ruby", state.units).resources.nano : "—"}`);
+      const left = !ruby || !ruby.resources ? "纳米 → —" : paid && paid.reserve ? nanoSpentText(ruby, paid) : "纳米 → " + ruby.resources.nano;
+      lines.push(`机体修复：消耗 20 纳米，恢复 ${got} 生命，架势 +1。${left}`);
     } else if (id === "yuito_cold") {
       // 冷萃：1 咖啡液。距离 ≤1 的区变冻土，那一区的敌人 0.5atk 冰 +1 击破，友方 +1 架势
       const fl = state.skillFlow;
@@ -12938,7 +13210,7 @@ function runSkillInner(id, optRun) {
       // 获得上一个被摧毁的敌人血量层等量的对应血量，最多为柯尔特生命上限的 50%（腐坏抛射的记录不算在内）
       if (!rec) lines.push("本场还没有被摧毁的敌人血量层。");
       else {
-        const cap = Math.floor(baseMaxHp(a) * 0.5);
+        const cap = koltScrapCap(a);
         const amt = Math.min(Math.floor(Number(rec.lost) || 0), cap);
         grant(rec.type, amt, "废物利用");
         if ((Number(rec.lost) || 0) > cap) lines.push(`（那一层有 ${Math.floor(rec.lost)}，按生命上限一半封顶为 ${cap}）`);
@@ -12953,6 +13225,10 @@ function runSkillInner(id, optRun) {
         grant("armor", Math.floor(Number(a.resources.divertArmor)), "扭矩回收");
         a.resources.divertArmor = 0;
       }
+      // 扭矩「拆卸模式」变成废料的外层血量：按被拆下的那一层的种类领取（不受 50% 限制），然后清空
+      const strip = (a.resources && a.resources.stripStore) || {};
+      Object.keys(strip).forEach(type => grant(type, Math.floor(Number(strip[type]) || 0), "拆卸回收"));
+      if (a.resources) a.resources.stripStore = {};
       // 废物利用给自己回的血 / 加的层也算治疗（一般的治疗只统计给其他友方的）
       const gain = totalHp(a) - hp0;
       const st = gain > 0 ? battleStat(a) : null;
@@ -12975,10 +13251,19 @@ function runSkillInner(id, optRun) {
         lines.push(`过度自信：${t.name} 被嘲讽，下次攻击必须打柯尔特。`);
       }
     } else if (id === "kolt_mod") {
-      // 「非法」改装：电钻模式，对 1 距离内任意单位施加过载
-      if (!needT()) return paintSkillLog(lines.join("\n"));
-      applyInstantEffect(t, "overload", lines);
-      lines.push(`「非法」改装：${t.name} 过载。`);
+      // 「非法」改装：电钻模式，对 1 距离内任意单位施加过载。
+      // 废料达到上限、目标是我方单位时，分步里可以选再消耗等于上限的废料，让目标 +1 行动点（skillTargetError 已经查过能不能选）
+      const fl = state.skillFlow;
+      const tgt = fl && fl.picks && fl.picks.target ? unitById(fl.picks.target) : t;
+      if (!tgt) { lines.push("先在「技能目标」里选对象。"); return paintSkillLog(lines.join("\n")); }
+      applyInstantEffect(tgt, "overload", lines);
+      lines.push(`「非法」改装：${tgt.name} 过载。`);
+      const k = findKit("kolt", state.units) || a;
+      if (fl && fl.picks && fl.picks.mode === "ap" && tgt.isPlayer && koltScrapFull(k)) {
+        const cost = koltScrapSpend(k, koltScrapCap(k));
+        lines.push(`「非法」改装：消耗 ${cost} 废料（还剩 ${koltScrapTotal(k)}）。`);
+        grantAllyAp(a, tgt, KOLT_SCRAP.modAp, lines);   // 满了也加（可以超过上限）；用它打出的分数一半记给柯尔特，和意式浓缩一样
+      }
     } else if (id === "kolt_cannon") {
       // 碎渣重炮：把全部废料装填进武器。电钻 → 机枪：选距离 1 以内的一个区域，每颗子弹（扭矩atk/3 + 1d10）电击、
       // 各自独立掷骰，打那一区的随机敌人；最后不够一颗的废料也打成一发；每 2 颗 1 击破。每颗都算单体攻击（吃过度自信的嘲讽）。
@@ -13082,14 +13367,16 @@ function runSkillInner(id, optRun) {
     } else if (id === "torque_strip") {
       const fl = state.skillFlow;
       const tgt = (fl && fl.picks.target) ? unitById(fl.picks.target) : t;
+      // 分步里选了「变成废料」：拆下的外层血量记给柯尔特，不用选接收的友方（没选的旧命令照旧给友方）
+      const kolt = findKit("kolt", state.units);
+      const toScrap = !!(fl && fl.picks.mode === "scrap" && kolt);
       const ally = (fl && fl.picks.ally) ? unitById(fl.picks.ally) : null;
-      if (!tgt || !ally) { lines.push("先选拆卸目标和接收友方。"); return paintSkillLog(lines.join("\n")); }
+      if (!tgt || (!ally && !toScrap)) { lines.push("先选拆卸目标和接收友方。"); return paintSkillLog(lines.join("\n")); }
       const stunnedBefore = !!tgt.stunned;
       dealBreak(tgt, 2, "electric", lines, "拆卸");
       // 拆卸是对一个敌人的单体攻击：照样触发柯尔特「过度自信」的嘲讽（击破不走 dealTo，要单独加）
-      const koltT = findKit("kolt", state.units);
-      if (!tgt.isPlayer && !tgt.dead && (typeof passiveOn !== "function" || passiveOn(koltT || a))) {
-        tgt.tauntTo = (koltT || a).id;
+      if (!tgt.isPlayer && !tgt.dead && (typeof passiveOn !== "function" || passiveOn(kolt || a))) {
+        tgt.tauntTo = (kolt || a).id;
         lines.push(`过度自信：${tgt.name} 被嘲讽，下次攻击必须打柯尔特。`);
       }
       // 卡面：这次攻击行动造成失衡才提升到 1.5×；本来就失衡的不算
@@ -13099,8 +13386,16 @@ function runSkillInner(id, optRun) {
       if (outer) {
         const take = Math.min(amount, outer.current);
         outer.current -= take;
-        addTempLayer(ally, outer.type, take);
-        lines.push(`拆卸转移 ${take} 点${LAYER[outer.type] || outer.type}给 ${ally.name}。`);
+        if (toScrap) {
+          // 单独计算、不受上限（和腐坏抛射、转移注意一样）：按那一层的种类记下，废物利用领对应血量，碎渣重炮一起装填
+          kolt.resources = kolt.resources || {};
+          const store = kolt.resources.stripStore = kolt.resources.stripStore || {};
+          if (take > 0) store[outer.type] = (Number(store[outer.type]) || 0) + take;
+          lines.push(`拆卸转移 ${take} 点${LAYER[outer.type] || outer.type}，变成柯尔特的废料（现在共 ${koltScrapTotal(kolt)}）。`);
+        } else {
+          addTempLayer(ally, outer.type, take);
+          lines.push(`拆卸转移 ${take} 点${LAYER[outer.type] || outer.type}给 ${ally.name}。`);
+        }
         // 抽空了最内层：敌人照常被击杀（以前直接改血量不走击杀结算，0 血还能继续行动）
         if (!tgt.isPlayer && !tgt.dead && isInnerDepleted(tgt)) {
           tgt._lastHitBy = a.id;
@@ -13703,7 +13998,12 @@ function init() {
   if (em) em.addEventListener("click", e => { if (e.target === em) closeHidden("editorModal"); });
   uiEl("btnClosePlayer").onclick = closeModal;
   modal.addEventListener("click", (e) => { if (e.target === modal) closeModal(); });
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    closeModal();
+    // 分步选择中按 Esc = 放弃这个技能（还没结算，什么都不扣不改）；战斗界面（game.js）自己处理 Esc
+    if (state.skillFlow && !document.querySelector(".g-hud")) calcCommand("skillCancel");
+  });
   uiEl("btnLoadLive").onclick = () => calcCommand("loadLive");
   uiEl("attackerSel").addEventListener("change", () => renderSkills());
   uiEl("bladeSel").onchange = () => calcCommand("blade", { value: uiEl("bladeSel").value });

@@ -113,6 +113,9 @@ function battleTemplateNormalize(t) {
   const withIv = (row, e) => {
     const iv = e && e.iv && typeof e.iv === "object" ? { hp: ivOf(e.iv.hp), atk: ivOf(e.iv.atk) } : null;
     if (iv && (iv.hp != null || iv.atk != null)) row.iv = iv;
+    // 种族（enemies.js）："红皮人" / "类人" / "兽人·牛"；空着 = 开战时随机（固定种族的敌人照固定）
+    const race = e && typeof e.race === "string" && typeof raceParse === "function" && raceParse(e.race) ? e.race.trim() : "";
+    if (race) row.race = race;
     // 富集与否（沙鱼，desert.js）：编辑器里存 "on" / "off"，存档里是 true / false；别的敌人没有这一项
     const enr = e && (e.enriched === true || e.enriched === "on") ? true : e && (e.enriched === false || e.enriched === "off") ? false : null;
     if (enr !== null && typeof SAND_FISH_KITS !== "undefined" && SAND_FISH_KITS.includes(row.preset)) row.enriched = enr;
@@ -299,7 +302,14 @@ function battleTemplateToEncounter(t, nested) {
   }
   return enc;
 }
+/** 「Lv随队」（等级空着）：跑团里开战时按队伍等级 = trpg-tasks.js · trpgPartyLevel()（在队英雄等级平均、四舍五入、至少 1），
+ *  和任务敌人默认等级、手册报酬用的是同一个数。跑团外（单机快速战斗）返回 null，仍跟着开战时选的战斗等级。 */
+function btPartyLevel() {
+  return typeof TRPG !== "undefined" && TRPG && TRPG.active && typeof trpgPartyLevel === "function" ? trpgPartyLevel() : null;
+}
 function btOneEncounter(t) {
+  const party = btPartyLevel();
+  const lvl = v => v != null ? v : party;
   const zones = battleTemplateZones(t.board);
   const enc = {
     id: "tpl:" + t.id, name: t.name, template: t.id, tier: t.tier,
@@ -307,8 +317,9 @@ function btOneEncounter(t) {
     layout: "custom", layoutLocked: true,
     enemies: t.enemies.map(e => {
       const row = { preset: e.preset, zone: e.zone, count: 1 };
-      if (e.level != null) row.level = e.level;
+      if (lvl(e.level) != null) row.level = lvl(e.level);
       if (e.iv) row.iv = btClone(e.iv);
+      if (e.race) row.race = e.race;
       if (e.mechanics) row.mechanics = btClone(e.mechanics);
       if (typeof e.enriched === "boolean") row.enriched = e.enriched;
       return row;
@@ -316,7 +327,7 @@ function btOneEncounter(t) {
     fields: btClone(t.fields),
     features: []
   };
-  if (t.waves.length) enc.waves = t.waves.map(w => ({ turns: w.turns, enemies: w.enemies.map(e => Object.assign({ preset: e.preset, zone: e.zone, count: 1 }, e.level != null ? { level: e.level } : {}, e.iv ? { iv: btClone(e.iv) } : {}, typeof e.enriched === "boolean" ? { enriched: e.enriched } : {})) }));
+  if (t.waves.length) enc.waves = t.waves.map(w => ({ turns: w.turns, enemies: w.enemies.map(e => Object.assign({ preset: e.preset, zone: e.zone, count: 1 }, lvl(e.level) != null ? { level: lvl(e.level) } : {}, e.iv ? { iv: btClone(e.iv) } : {}, e.race ? { race: e.race } : {}, typeof e.enriched === "boolean" ? { enriched: e.enriched } : {})) }));
   if (t.drops) enc.drops = btClone(t.drops);
   if (typeof t.board === "string") enc.board = t.board;
   Object.keys(t.gaps).forEach(k => {
@@ -327,7 +338,7 @@ function btOneEncounter(t) {
   });
   t.props.forEach(p => {
     const f = { type: "prop", what: p.kind, zone: p.zone, faction: p.faction };
-    if (p.level != null) f.level = p.level;
+    if (lvl(p.level) != null) f.level = lvl(p.level);
     enc.features.push(f);
   });
   return enc;

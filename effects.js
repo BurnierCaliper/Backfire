@@ -121,9 +121,10 @@ function afterDamageTaken(u, element, dealt, shieldHit, notes, ctx) {
     }
   }
   // 过载：装甲血量受到近距离攻击时，反伤 50% 此次受到攻击伤害的闪电伤害
+  // 过载者是玩家：反伤算过载者的伤害，打死算过载者的击杀（#203）；不是玩家照旧（不传 by，算行动中的人 / 不改最后一击）
   if (ctx.action && ctx.melee && ctx.attacker && u.instant && u.instant.overload && ctx.startLayerType === "armor" && !ctx.attacker.dead) {
     const back = Math.floor(dealt * 0.5);
-    if (back > 0) applyTypedDot(ctx.attacker, back, "electric", notes, `${u.name} 过载反伤 → ${ctx.attacker.name}`);
+    if (back > 0) applyTypedDot(ctx.attacker, back, "electric", notes, `${u.name} 过载反伤 → ${ctx.attacker.name}`, u.isPlayer ? { by: u.id } : undefined);
   }
 }
 
@@ -242,6 +243,8 @@ function onBreakTaken(u, amount, element, notes, wasDoppler) {
 /** 被打进失衡的那一刻 */
 function onBroken(u, notes) {
   if (!u || u.dead) return;
+  // 燃料罐（火焰喷射兵）：被打进失衡时罐子破裂（enemies.js · riotFuelBurst）
+  if (u.kit === "riot_flamer" && typeof riotFuelBurst === "function") riotFuelBurst(u, notes);
   // 刺骨：目标被击破时再次造成一次此伤害
   if (u.instant && u.instant.sting) stingPulse(u, "ice", notes, "刺骨（被击破）");
   // 过载：若过载期间被击破，发生过载爆炸，单位受到 等级 × 1d4 点电属性伤害

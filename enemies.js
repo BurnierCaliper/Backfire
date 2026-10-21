@@ -14,6 +14,11 @@ const ZONE_THREATS = {
     if (!r.glPending || !r.glZone) return null;
     return { zone: r.glZone, label: r.glReady ? "榴弹待发" : "榴弹标定", ready: !!r.glReady };
   },
+  riot_molotov: (u) => {
+    const r = u.resources || {};
+    if (!r.bottlePending || !r.bottleZone) return null;
+    return { zone: r.bottleZone, label: r.bottleReady ? "燃烧瓶待发" : "燃烧瓶标定", ready: !!r.bottleReady };
+  },
   ant_guard: (u) => {
     const r = u.resources || {};
     if (!r.shellPending || !r.shellZone) return null;
@@ -76,6 +81,7 @@ function enemyAssistSkillId(u) {
 function enemyMayAssist(u) {
   if (!u || u.isPlayer) return false;
   if (u.dormant) return false;   // 休眠：不协助
+  if (u.kit === "riot_molotov") return false;   // 燃烧瓶投手不能协助（docs/suppression-force.md）
   if (u.kit === "outlaw_king" && u.resources && u.resources.hostage) return false;
   if (/^thug_/.test(u.kit || "")) {
     const king = findKit("outlaw_king", state.units);
@@ -87,7 +93,8 @@ function enemyMayAssist(u) {
 /* 协助攻击的射程。自带移动的（冲到目标那一区再打）先走一格；无限距离的总能打到；
  * 其余按技能射程（ENEMY_SKILL_RANGE，没登记的用单位卡上的 range），隔着危墙 / 关着的门打不到。 */
 const ENEMY_ASSIST_RUSH = ["en_thug_hammer_assist", "en_wolf_assist", "en_chi_exec", "en_overseer_assist", "en_gas_assist",
-  "en_fish_lead_assist", "en_fish_drive_assist", "en_fish_ambush_assist"];   // 沙鱼群起：冲到失衡的人那一区
+  "en_fish_lead_assist", "en_fish_drive_assist", "en_fish_ambush_assist",   // 沙鱼群起：冲到失衡的人那一区
+  "en_riot_baton_assist", "en_riot_spray_assist"];   // 镇压队：警棍盾、火焰喷射兵冲进目标所在区
 const ENEMY_ASSIST_ANYWHERE = ["en_patrol_assist", "ufo_assist", "en_alarm_assist"];
 function enemyAssistReach(u, t) {
   if (!u || !t) return false;
@@ -279,8 +286,16 @@ function forcedZonePick(a, zone, lines) {
   return Number(f.zone);
 }
 
+/** 敌人能用的技能：本体的 + 种族的附赠技能（无法行动的敌人，例如被挟持的亡命之王，一个都没有；
+ *  坐在车上的只能用车的武器，种族的附赠技能也不能用，vehicle.js） */
 function enemySkillList(u) {
+  const base = enemySkillListBase(u);
+  return base.length && !u.vehId ? base.concat(raceSkills(u)) : base;
+}
+function enemySkillListBase(u) {
   if (!u || u.isPlayer) return [];
+  // 坐在车上的敌人只能用车的武器（vehicle.js）
+  if (u.vehId && typeof vehicleSkillList === "function") return vehicleSkillList(u).map(s => ({ id: s.id, label: s.name }));
   const common = [
     { id: "en_approach", label: "移向目标" },
     { id: "en_flee", label: "远离目标" },
@@ -374,6 +389,25 @@ function enemySkillList(u) {
       { id: "en_gas_ignite", label: "点燃燃气（同区火焰 + 变火场）" },
       { id: "en_gas_spray", label: "喷火（三段）" },
       { id: "en_gas_assist", label: "协助：冲近灼烧 + 喷火" }
+    ],
+    riot_baton: [
+      { id: "en_riot_baton", label: "火焰警棍（熔融）" },
+      { id: "en_riot_baton_assist", label: "协助：冲近普通攻击（熔融）" }
+    ],
+    riot_rifle: [
+      { id: "en_riot_rifle", label: "燃烧弹（激活灼烧）" },
+      { id: "en_riot_rifle_assist", label: "协助：0.5×ATK 火（激活灼烧）" }
+    ],
+    riot_molotov: [
+      { id: "en_riot_bottle", label: "燃烧瓶（选择区域）" }
+    ],
+    riot_flamer: [
+      { id: "en_riot_spray", label: "喷火（三段）" },
+      { id: "en_riot_spray_assist", label: "协助：冲近喷火" }
+    ],
+    riot_captain: [
+      { id: "en_riot_pistol", label: "火焰手枪（灼烧）" },
+      { id: "en_riot_pistol_assist", label: "协助：远距 1×ATK 火（灼烧）" }
     ],
     ant_hunter: [
       { id: "en_hunter_shot", label: "灼热子弹（穿刺）" },
@@ -506,6 +540,12 @@ function enemySkillList(u) {
     if (ready) list.unshift({ id: "en_gl_fire", label: "发射榴弹（" + u.resources.glZone + "区）" });
     else list.unshift({ id: "en_gl", label: "榴弹（选择区域）" });
   }
+  if (u.kit === "riot_molotov") {
+    const r = u.resources || {};
+    list = [r.bottleReady && r.bottleZone
+      ? { id: "en_riot_bottle_fire", label: "投出燃烧瓶（" + r.bottleZone + "区）" }
+      : { id: "en_riot_bottle", label: "燃烧瓶（选择区域）" }];
+  }
   if (u.kit === "ant_guard") {
     // 站在酸液地面上：从地面汲取酸，改用大酸液弹（先标定区域，下个敌人回合发射）；已标定的照常发射
     const r = u.resources || {};
@@ -525,7 +565,9 @@ function enemySkillList(u) {
       list = [{ id: "en_live", label: "活沙冲击" }];
     }
   }
-  return common.concat(list);
+  // 同区有车：镇压队可以上车 / 把我方的人拉下车（vehicle.js）
+  const ground = typeof vehicleGroundSkills === "function" ? vehicleGroundSkills(u).map(s => ({ id: s.id, label: s.name })) : [];
+  return common.concat(list, ground);
 }
 
 /** 活沙被杀死时吸收的：四足 / 人形 / 大沙灵，以及沙漠生物阵营（沙鱼，作者 10/19 定）。
@@ -651,6 +693,16 @@ const ENEMY_SKILL_RANGE = {
   en_flint: "ranged",
   en_flint_assist: "ranged",
   en_gas_spray: "melee",
+  en_riot_baton: "melee",
+  en_riot_baton_assist: "melee",
+  en_riot_rifle: "ranged",
+  en_riot_rifle_assist: "ranged",
+  en_riot_bottle: "ranged",
+  en_riot_bottle_fire: "ranged",
+  en_riot_spray: "melee",
+  en_riot_spray_assist: "melee",
+  en_riot_pistol: "any",
+  en_riot_pistol_assist: "ranged",
   en_hunter_shot: "ranged",
   en_miner_shot: "ranged",
   en_spider_bite: "melee",
@@ -706,7 +758,8 @@ const ENEMY_SKILL_COST = {
   en_chi_hunt: { ap: 0, bonus: 1 }
 };
 function enemySkillCost(u, id) {
-  return ENEMY_SKILL_COST[id] || { ap: 1, bonus: 0 };
+  if (/^veh_/.test(String(id)) && typeof vehicleSkillCost === "function") return Object.assign({ ap: 0, bonus: 0 }, vehicleSkillCost(id));   // 载具（vehicle.js）
+  return ENEMY_SKILL_COST[id] || RACE_SKILL_COST[id] || { ap: 1, bonus: 0 };
 }
 
 /** 区域范围技能（喷洒、流沙漩涡……）能不能打到 zone：按技能射程，隔着危墙 / 关着的门打不到 */
@@ -797,6 +850,68 @@ const GAS_LIFESTEAL = 0.03;
 function gasSpray(a, t, aa) {
   return aa(t, { element: "fire", mult: 0.5, hits: 3, baseBreak: 1, breakOnce: true, onConnect: { lifesteal: GAS_LIFESTEAL } });
 }
+/* ===== 外城区镇压部队（docs/suppression-force.md 第 2 节）=====
+ * baton   警棍盾：火焰警棍 1d4、2 击破、熔融；被动「防暴盾」——自己的护盾层还有血时，同区友军受到的远程攻击伤害 −shieldDr（和其他百分比加算，多面盾不叠加）
+ * rifle   燃烧步枪：燃烧弹 1d4、1 击破；协助 assistMult×atk；打中后激活目标的灼烧
+ * bottle  燃烧瓶：落地时那一区的单位 mult×atk 火、灼烧 burn 层（已经是火场则 burnOnFire 层），然后变火场；
+ *         friendlyFire：是否连同区的友军一起炸（文档写的是「那一区所有单位」，先按只炸敌对的单位做，榴弹也是这样）
+ * flamer  喷火兵：喷火 hits 段，每段 mult×atk 火；目标有灼烧时每段各 1 击破，没有时共 1 击破；每段各掷 burnChance 概率给灼烧 1；
+ *         被动「燃料罐」——被打进失衡时同区所有单位（不分敌我）burstMult×atk 火，那一区变火场
+ * captain 小队长：火焰手枪 1d6、1 击破、灼烧 burn；协助 assistMult×atk、灼烧 burn；被动「指挥」只改 AI（ai.js · 优先挑没有灼烧的敌人） */
+const RIOT_CFG = {
+  baton:   { dice: 4, baseBreak: 2, shieldDr: 0.25 },
+  rifle:   { dice: 4, assistMult: 0.5 },
+  bottle:  { mult: 0.5, burn: 1, burnOnFire: 2, friendlyFire: false },
+  flamer:  { hits: 3, mult: 0.3, burnChance: 0.15, burstMult: 0.5 },
+  captain: { dice: 6, assistMult: 1, burn: 1 }
+};
+const RIOT_KITS = ["riot_baton", "riot_rifle", "riot_molotov", "riot_flamer", "riot_captain"];
+/** 火焰喷射兵的喷火：单体 3 段。目标有灼烧时每段各 1 击破，没有时 3 段共 1 击破；每段命中各掷一次灼烧 */
+function riotSpray(a, t, aa) {
+  const R = RIOT_CFG.flamer;
+  return aa(t, { element: "fire", mult: R.mult, hits: R.hits, baseBreak: 1, breakOnce: burnStackCount(t) <= 0, onConnect: { burnEach: R.burnChance } });
+}
+/** 防暴盾：还有护盾层的警棍盾在场，同区友军受到远程攻击时减伤的比例（0 = 没有）。target 是被打的敌人 */
+function riotShieldDr(target, attacker, opt) {
+  if (!target || target.isPlayer || !attacker || (typeof state === "undefined")) return 0;
+  const dist = zoneDist(attacker.zone, target.zone, state.zoneMode);
+  // 远程攻击：隔着区打过来的，或者这个技能本身是远距离的（抵近射击打同区也算）
+  if (!(dist >= 1) && !(opt && opt.atkRange === "ranged")) return 0;
+  const has = (state.units || []).some(u => u && u.kit === "riot_baton" && !u.dead && !u.hidden && !u._removed && !u.fused &&
+    Number(u.zone) === Number(target.zone) && (u.id === target.id || !hostileTo(u, target)) &&
+    (u.layers || []).some(l => l.type === "shield" && Number(l.current) > 0));
+  return has ? RIOT_CFG.baton.shieldDr : 0;
+}
+/** 燃料罐：火焰喷射兵被打进失衡，罐子破裂（effects.js · onBroken 调用） */
+function riotFuelBurst(u, notes) {
+  if (!u || u.kit !== "riot_flamer" || u.dead) return;
+  const z = Number(u.zone);
+  notes.push(`${u.name} 的燃料罐破裂：${z} 区所有单位受到火焰伤害。`);
+  (state.units || []).filter(x => x && x.id !== u.id && !x.dead && !x.hidden && !x._removed && !x.fused && Number(x.zone) === z).forEach(x => {
+    hitOne2(u, x, { atk: effectiveAtk(u, state.units), mult: RIOT_CFG.flamer.burstMult, element: "fire", baseBreak: 0, flags: { action: true, aoe: true } }, notes);
+  });
+  const err = typeof setZoneField === "function" ? setZoneField(z, "fire", { by: u.id }) : null;
+  notes.push(err || `${z} 区变为火场。`);
+}
+/** 燃烧瓶落地：对标定的区里的单位各 mult×atk 火、灼烧（已经是火场则灼烧更多层），然后那一区变成火场 */
+function riotBottleLand(a, aa, lines) {
+  const R = RIOT_CFG.bottle;
+  const r = a.resources = a.resources || {};
+  const zone = Number(r.bottleZone);
+  const wasFire = zoneOnFire(zone);
+  const victims = fieldUnits().filter(u => !u.dead && !u.hidden && !u._removed && Number(u.zone) === zone && u.id !== a.id &&
+    (R.friendlyFire || hostileTo(a, u)));
+  if (!victims.length) lines.push(`${zone} 区没有玩家单位。`);
+  victims.forEach(u => {
+    aa(u, { element: "fire", mult: R.mult, baseBreak: 0, flags: { action: true, aoe: true, lob: true }, onConnect: { burn: wasFire ? R.burnOnFire : R.burn } });
+  });
+  Object.assign(r, { bottleZone: 0, bottlePending: false, bottleReady: false });
+  lines.push(`${a.name} 的燃烧瓶在 ${zone} 区落地。`);
+  if (!wasFire) {
+    const err = setZoneField(zone, "fire", { by: a.id });
+    lines.push(err || `${zone} 区变为火场。`);
+  }
+}
 /** 火石清扫机：站在火场里时，每一击都造成灼烧 */
 function flintOnConnect(a) {
   return zoneOnFire(a.zone) ? { burn: 1 } : undefined;
@@ -861,7 +976,7 @@ function hunterHeatAtTurnStart(u, notes) {
  * 异星生物和其他所有阵营的敌人互相视为敌人；盗匪和安保、警卫队互相视为敌人（会互相攻击、不互相协助）。
  * 其余敌人阵营之间照旧是一伙的。 */
 const HOSTILE_FACTION = "异星生物";
-const HOSTILE_PAIRS = [["盗匪", "安保"], ["盗匪", "警卫队"], ["沙漠生物", "沙灵"]];
+const HOSTILE_PAIRS = [["盗匪", "安保"], ["盗匪", "警卫队"], ["盗匪", "镇压队"], ["沙漠生物", "沙灵"]];
 function factionOf(u) {
   if (!u) return null;
   if (u.isPlayer) return "我方";
@@ -1060,6 +1175,7 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
 
   const skillRange = ENEMY_SKILL_RANGE[id] || a.range || "any";
   const aa = (target, opt) => hitOne(a, target, Object.assign({ atk, atkRange: skillRange }, opt));
+  if (raceRunSkill(id, a, t, hitOne, lines, needT, atk)) return true;   // 种族附赠（扑灭、追猎本能、威压、吐酸）
 
   // 赤牙：自己再出手就离开掩体（掩体撑过我方回合，到她下一次出手为止）；霰弹枪的 −40% 协助格挡只算那一枪
   if (a.kit === "chixia") {
@@ -1360,6 +1476,56 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
       lines.push(`${t.name} 灼烧 → ${(t.statuses && t.statuses.burn) || 0} 层。`);
     }
     gasSpray(a, t, aa);
+    return true;
+  }
+  if (id === "en_riot_baton" || id === "en_riot_baton_assist") {
+    if (!needT()) return true;
+    stepTowardZone(a, t.zone, id === "en_riot_baton_assist" ? { free: true } : {});
+    aa(t, { element: "fire", mult: 1, diceN: 1, diceS: RIOT_CFG.baton.dice, baseBreak: RIOT_CFG.baton.baseBreak, onConnect: { instant: "melt" } });
+    return true;
+  }
+  if (id === "en_riot_rifle" || id === "en_riot_rifle_assist") {
+    if (!needT()) return true;
+    const assist = id === "en_riot_rifle_assist";
+    aa(t, { element: "fire", mult: assist ? RIOT_CFG.rifle.assistMult : 1, diceN: assist ? 0 : 1, diceS: assist ? 0 : RIOT_CFG.rifle.dice, baseBreak: 1, onConnect: { activate: "burn" } });
+    return true;
+  }
+  if (id === "en_riot_bottle") {
+    const fl = state.skillFlow;
+    let zone = Number((fl && fl.picks && fl.picks.dest) || t && t.zone);
+    if (!(zone >= 1)) { lines.push("燃烧瓶需要先选择落点区域。"); return true; }
+    zone = forcedZonePick(a, zone, lines);
+    a.resources = a.resources || {};
+    Object.assign(a.resources, { bottleZone: zone, bottlePending: true, bottleReady: false });
+    lines.push(`${a.name} 将燃烧瓶标定在 ${zone} 区。下个敌人回合落地。`);
+    return true;
+  }
+  if (id === "en_riot_bottle_fire") {
+    const zone = Number(a.resources && a.resources.bottleZone);
+    if (!(zone >= 1) || !(a.resources && a.resources.bottleReady)) {
+      lines.push("燃烧瓶尚未就绪。先标定区域，等到下一个敌人回合再投出。");
+      return true;
+    }
+    // 被牵制：已经标定好的落点不在牵制者所在的区，必须重新标定
+    const fz = forcedZonePick(a, zone, []);
+    if (fz !== zone) {
+      Object.assign(a.resources, { bottleZone: fz, bottlePending: true, bottleReady: false });
+      lines.push(`${a.name} 被牵制：放弃原来的 ${zone} 区，燃烧瓶重新标定在 ${fz} 区，下个敌人回合落地。`);
+      return true;
+    }
+    riotBottleLand(a, aa, lines);
+    return true;
+  }
+  if (id === "en_riot_spray" || id === "en_riot_spray_assist") {
+    if (!needT()) return true;
+    stepTowardZone(a, t.zone, id === "en_riot_spray_assist" ? { free: true } : {});
+    riotSpray(a, t, aa);
+    return true;
+  }
+  if (id === "en_riot_pistol" || id === "en_riot_pistol_assist") {
+    if (!needT()) return true;
+    const assist = id === "en_riot_pistol_assist";
+    aa(t, { element: "fire", mult: assist ? RIOT_CFG.captain.assistMult : 1, diceN: assist ? 0 : 1, diceS: assist ? 0 : RIOT_CFG.captain.dice, baseBreak: 1, onConnect: { burn: RIOT_CFG.captain.burn } });
     return true;
   }
   if (id === "en_hunter_shot") {
@@ -2235,7 +2401,8 @@ function setEnemyIV(u, iv) {
   return u;
 }
 /** 生成时调用：iv 里写了的项照写，没写的随机（off 时整体不动、也不记 iv）。首领不波动 */
-function applyEnemyIV(u, iv) {
+function applyEnemyIV(u, iv, race) {
+  applyEnemyRace(u, race);   // 先种族、再个体值（个体值按套完种族之后的数值算）
   if (!ivEligible(u) || u.iv) return u;
   const fixed = iv && (ivClamp(iv.hp) != null || ivClamp(iv.atk) != null);
   if (ENEMY_IV.off > 0 && !fixed) return u;
@@ -2249,7 +2416,411 @@ function ivText(u) {
   return `血量 ${f(u.iv.hp)} · ATK ${f(u.iv.atk)}`;
 }
 
-function spawnEnemyGroup(id, lv, partyN, zone, iv) {
+/* ===== 敌人种族（docs/enemy-race.md） =====
+ * 有机体的敌人有种族，记在 u.race = { race, branch }（branch 可空）。
+ * 每个敌人的种族写在 run.js · ENEMY_INFO 上（格式见那里的注释）：固定写 race: "兽人·牛"，随机写 races: [{ race, w }] 权重表。
+ * 随机种族且 ENEMY_INFO 上有 raceAttrs: true 的敌人，再按种族的六维修正换算数值（和个体值一样，生成时算一次）：
+ *   体质只加在最内层的肉体；力量改 atk / personalAtk；耐力改架势；敏捷只改本来会格挡的敌人（u.raceBlock）。
+ * u.raceDelta 记着加了多少，改种族时先减掉再加（按原始数值重算）。
+ * ENEMY_IV.off > 0（BattleSim.setup 默认）时随机种族一律当人类（人类对敌人没有数值变化）；固定种族、主持人指定的种族不受影响 */
+const ENEMY_RACES = {
+  "人类":   { mods: { wil: 1, int: 1 } },
+  "红皮人": { mods: { str: 1, con: 1, dex: -1 } },
+  "犬类人": { mods: { con: 1, dex: 1 }, branches: ["狼", "狐", "犬"] },
+  "猫类人": { mods: { dex: 1, int: 1, con: -1 }, branches: ["豹", "虎", "猫"] },
+  "鼠类人": { mods: { dex: 1, int: 1, con: -1, sta: -1 }, branches: ["鼠", "兔"] },
+  // 牛类人的三个小分支六维修正各不相同（分支的修正盖过大支的）
+  "牛类人": { mods: {}, branches: ["牛", "马", "羊"], branchMods: {
+    "牛": { str: 2, sta: 1 }, "马": { str: 1, dex: 1, sta: 1 }, "羊": { str: 1, wil: 1, int: 1 } } },
+  // 兽人五支的六维修正完全一样
+  "兽人":   { mods: { con: 1, sta: 1, int: 1 }, branches: ["狼", "牛", "蜥蜴", "猫", "熊"] }
+};
+/** 「类人」是四个大支的统称（主持人指定 / 权重表里可以只写「类人」，大支各占一份） */
+const ENEMY_RACE_GROUPS = { "类人": ["犬类人", "猫类人", "鼠类人", "牛类人"] };
+/** 不在 ENEMY_INFO 里（不进随机遭遇）的敌人的种族 */
+const ENEMY_RACE_EXTRA = { chixia: { race: "犬类人·狼" } };   // 赤牙：手册第九章「狼类人」
+
+/** "兽人·牛" / { race, branch } → { race, branch? }；认不得的返回 null */
+function raceParse(x) {
+  if (!x) return null;
+  let race, branch;
+  if (typeof x === "string") { const i = x.indexOf("·"); race = i < 0 ? x : x.slice(0, i); branch = i < 0 ? "" : x.slice(i + 1); }
+  else if (typeof x === "object") { race = x.race; branch = x.branch || ""; }
+  race = String(race || "").trim(); branch = String(branch || "").trim();
+  if (!race) return null;
+  if (ENEMY_RACE_GROUPS[race]) return branch ? null : { race };
+  const def = ENEMY_RACES[race];
+  if (!def) return null;
+  if (branch && !(def.branches || []).includes(branch)) return null;
+  return branch ? { race, branch } : { race };
+}
+function raceLabel(r) {
+  return r && r.race ? (r.branch ? r.race + "·" + r.branch : r.race) : "";
+}
+const _pickOne = (list) => list[Math.floor(Math.random() * list.length)];
+/** 把 { race }（可能是「类人」或没写小分支的大支）补成具体的 { race, branch? } */
+function raceResolve(spec) {
+  let race = spec.race, branch = spec.branch;
+  if (ENEMY_RACE_GROUPS[race]) race = _pickOne(ENEMY_RACE_GROUPS[race]);
+  const def = ENEMY_RACES[race];
+  if (!branch && def.branches) branch = _pickOne(def.branches);
+  return branch ? { race, branch } : { race };
+}
+/** 从权重表抽一个（先按权重选条目，再把大支补成小分支） */
+function raceRoll(table) {
+  const rows = (table || []).filter(r => Number(r.w) > 0 && raceParse(r.race));
+  if (!rows.length) return { race: "人类" };
+  let n = Math.random() * rows.reduce((s, r) => s + Number(r.w), 0), pick = rows[rows.length - 1];
+  for (const r of rows) { n -= Number(r.w); if (n < 0) { pick = r; break; } }
+  return raceResolve(raceParse(pick.race));
+}
+/** 这个敌人的种族配置：{ fixed, attrs } / { table, attrs } 或 null（无种族） */
+function enemyRaceInfo(u) {
+  if (!u || u.isPlayer || !u.kit) return null;
+  const info = (typeof ENEMY_INFO !== "undefined" && ENEMY_INFO[u.kit]) || ENEMY_RACE_EXTRA[u.kit];
+  if (!info) return null;
+  if (info.race) return { fixed: info.race, attrs: false };
+  if (Array.isArray(info.races) && info.races.length) return { table: info.races, attrs: !!info.raceAttrs };
+  return null;
+}
+/** 种族的六维修正（小分支的修正盖过大支） */
+function raceMods(r) {
+  const def = r && ENEMY_RACES[r.race];
+  if (!def) return {};
+  return (r.branch && def.branchMods && def.branchMods[r.branch]) || def.mods || {};
+}
+/** 「全 5 + 修正」比「全 5」多出来的数值（growth.js · derivedFromAttrs 的差值）。blocks：这个敌人会格挡 */
+function raceDelta(r, level, blocks) {
+  const mods = raceMods(r), base = { str: 5, con: 5, dex: 5, wil: 5, int: 5, sta: 5 }, plus = Object.assign({}, base);
+  Object.keys(mods).forEach(k => { plus[k] += mods[k]; });
+  const a = derivedFromAttrs(base, level), b = derivedFromAttrs(plus, level);
+  return {
+    hp: b.hp - a.hp, atk: b.personalAtk - a.personalAtk, def: b.def - a.def,
+    block: blocks ? bareBlockFromDex(plus.dex) - bareBlockFromDex(5) : 0
+  };
+}
+function _raceAdd(u, d, sign) {
+  const last = u.layers ? u.layers.length - 1 : -1;
+  if (last >= 0 && d.hp) {
+    const l = u.layers[last], oldMax = Number(l.max) || 0, cur = Number(l.current) || 0;
+    l.max = Math.max(1, oldMax + sign * d.hp);
+    l.current = cur >= oldMax ? l.max : Math.max(0, Math.min(l.max, cur + sign * d.hp));
+    if (u.ivBase && u.ivBase.max && u.ivBase.max[last] != null) u.ivBase.max[last] = Math.max(1, u.ivBase.max[last] + sign * d.hp);
+  }
+  if (d.atk) {
+    u.atk = (Number(u.atk) || 0) + sign * d.atk;
+    if (u.personalAtk != null) u.personalAtk = (Number(u.personalAtk) || 0) + sign * d.atk;
+    if (u.ivBase) { u.ivBase.atk += sign * d.atk; if (u.ivBase.personalAtk != null) u.ivBase.personalAtk += sign * d.atk; }
+  }
+  if (d.def) { u.defMax = Math.max(0, (Number(u.defMax) || 0) + sign * d.def); u.def = Math.max(0, Math.min(u.defMax, (Number(u.def) || 0) + sign * d.def)); }
+  if (d.block) u.raceBlock = (u.raceBlock || 0) + sign * d.block;
+}
+/** 定种族（生成 / 主持人改）：先减掉旧种族加的数值，再按新种族加。个体值已经有了的，按新的原始数值重算。
+ *  attrs：要不要套六维，不写就看 ENEMY_INFO.raceAttrs */
+function setEnemyRace(u, race, attrs) {
+  const r = raceParse(race);
+  if (!u || !r) return u;
+  const res = raceResolve(r);
+  if (u.raceDelta) { _raceAdd(u, u.raceDelta, -1); delete u.raceDelta; }
+  if (!u.raceBlock) delete u.raceBlock;
+  u.race = res;
+  const info = enemyRaceInfo(u);
+  if (attrs === undefined) attrs = !!(info && info.attrs);
+  if (attrs) {
+    const blocks = typeof blockChanceRaw === "function" && blockChanceRaw(u) != null;
+    const d = raceDelta(res, u.level, blocks);
+    _raceAdd(u, d, 1);
+    u.raceDelta = d;
+  }
+  if (u.iv && ivEligible(u)) setEnemyIV(u, u.iv);
+  return u;
+}
+/** 生成时调用：race 写了（字符串 / { race, branch }）照写，没写的按 ENEMY_INFO 的配置：固定的照固定，随机的抽。
+ *  ENEMY_IV.off > 0 时随机种族当人类（不抽、不动数值） */
+function applyEnemyRace(u, race) {
+  if (!u || u.race) return u;
+  const info = enemyRaceInfo(u);
+  if (!info) return u;
+  if (race && raceParse(race)) return setEnemyRace(u, race);
+  if (info.fixed) return setEnemyRace(u, info.fixed, false);
+  if (ENEMY_IV.off > 0) { u.race = { race: "人类" }; return u; }
+  return setEnemyRace(u, raceRoll(info.table));
+}
+/** 画面用：「红皮人」「兽人·牛」；没有种族是空串 */
+function raceText(u) { return u && u.race ? raceLabel(u.race) : ""; }
+
+/* ===== 种族被动（docs/enemy-race.md 第 4 节） =====
+ * 照搬角色的种族特长 / 缺陷，按 u.race 通用生效（不看具体兵种）；角色也走同一份（racePerkKey 把 "兽人-蜥蜴" 这样的写法归一成 "兽人·蜥蜴"）。
+ * 数值放 RACE_PERK，各被动的开关和说明放 RACE_PERKS。
+ * RACE_PERK.off > 0 时敌人的种族被动全部不生效（种族、六维换算照旧）：只给平衡模拟工具用（tools/enemy-balance.js），默认 0 = 开，游戏里不碰 */
+const RACE_PERK = {
+  off: 0,                 // 工具用的总开关（照 ENEMY_IV.off 的写法）：> 0 = 关掉敌人的种族被动
+  fireCut: 0.25,          // 红皮人·热耐性：受火伤 −25%（和克制表加算）
+  energyUp: 0.25,         // 兽人·蜥蜴·鳞片：受能量伤害 +25%
+  loneWolfDiv: 2,         // 犬类人·狼·独狼：atk ± 等级 ÷ 2（向下取整）
+  loneWolfMates: 2,       // 区里有这么多名及以上队友就是减
+  swiftRecover: 1,        // 猫类人·豹·迅袭：每次移动回的架势
+  swiftBreak: 1,          // 猫类人·豹·迅袭：整场第一个行动的第一击 +击破
+  aweChance: 0.5,         // 猫类人·虎·威压：敌人的威吓检定成功率
+  fieldImmune: 0.5,       // 鼠类人·鼠·环境适应：每次受到场地伤害 / 场地击破，这个概率完全免疫（作者 10/21 定）
+  firstBonus: 1,          // 牛类人·马·千里马：第一回合 +附赠
+  rageHpPct: 0.5,         // 兽人·牛·易怒蛮牛：血量低于这个比例时受伤会失控
+  rageBreak: 1,           // 兽人·牛·易怒蛮牛：冲撞的击破
+  spitMult: 1,            // 兽人·蜥蜴·吐酸：倍率
+  breakCap: 2,            // 兽人·猫·灵巧：一回合最多失去的架势
+  distractTurns: 1,       // 兽人·猫·注意力涣散：连续打同一个目标超过这么多回合
+  distractCut: 0.25       // 兽人·猫·注意力涣散：伤害 −
+};
+const RACE_PERKS = {
+  "人类":      { reroll: true, text: "迎难直上：检定失败时重掷一次" },
+  "红皮人":    { fireCut: true, snuff: true, text: "热耐性：受火伤 −25%；附赠扑灭身上的灼烧" },
+  "犬类人·狼": { loneWolf: true, text: "独狼：同区没有队友时 atk + 等级÷2，有两名及以上队友时 atk − 等级÷2" },
+  "猫类人·豹": { swift: true, text: "迅袭：每次移动回 1 架势；整场第一个行动的第一击 +1 击破" },
+  "猫类人·虎": { awe: true, text: "威压：附赠，对近距一人威吓（50% 成功），成功施加不稳" },
+  "鼠类人·鼠": { fieldCut: true, text: "环境适应：场地伤害、冻土击破 50% 概率免疫" },
+  "牛类人·马": { firstBonus: true, text: "千里马：第一回合 +1 附赠" },
+  "兽人·狼":   { hunt: true, text: "追猎本能：附赠，对一个敌人施加紧追" },
+  "兽人·牛":   { rage: true, text: "易怒蛮牛（缺陷）：血量低于 50% 时受到任何伤害，会失去附赠、冲到另一个区、对随机一个目标造成 1 击破" },
+  "兽人·蜥蜴": { spit: true, energyUp: true, text: "吐酸：附赠，近距 1×atk 酸，每场一次；鳞片（缺陷）：受能量伤害 +25%" },
+  "兽人·猫":   { breakCap: true, distract: true, text: "灵巧：一回合最多失去 2 架势；注意力涣散（缺陷）：不止一个目标可选时，连续超过 1 回合打同一个目标，伤害 −25%" },
+  "兽人·熊":   { text: "重装操作、嗜睡（战斗里不生效，只记在资料里）" }
+};
+/** 种族的归一写法："兽人·蜥蜴"。敌人看 u.race；角色看 HERO_PROFILES（"兽人-蜥蜴"，武器人不算） */
+function racePerkKey(u) {
+  if (!u) return "";
+  if (u.race && u.race.race) return raceLabel(u.race);
+  if (u.isPlayer && !u.weaponOf && u.kit && typeof heroProfile === "function") {
+    const r = (heroProfile(u.kit) || {}).race;
+    return r ? String(r).replace("-", "·") : "";
+  }
+  return "";
+}
+/** 这个单位的种族被动配置（没有就是 null）。大支的被动写在大支名下（人类、红皮人），小分支写 "大支·小分支" */
+function racePerk(u) {
+  const k = racePerkKey(u);
+  return RACE_PERKS[k] || RACE_PERKS[k.split("·")[0]] || null;
+}
+/** 画面用：这个种族的被动说明，一行一条 */
+function racePerkLinesFor(label) {
+  const k = String(label || "").trim();
+  const p = RACE_PERKS[k] || RACE_PERKS[k.split("·")[0]];
+  return p && p.text ? [p.text] : [];
+}
+function racePerkLines(u) { return racePerkLinesFor(racePerkKey(u)); }
+
+/** 敌人的种族被动配置（只认 u.race；角色走各自的实现）。RACE_PERK.off（工具用）打开时一律没有 */
+function enemyRacePerk(u) { return u && u.race && !(RACE_PERK.off > 0) ? racePerk(u) : null; }
+
+/** 种族对「受到某属性伤害」的百分比修正：[{ value, reason }]（engine.js · resolveAttack 和 matchup.js 的克制表共用）。
+ *  角色的鳞片还是走 engine / matchup 里原来那一行，这里只管 u.race 的敌人，数值同一份 RACE_PERK */
+function raceDefendMods(u, el) {
+  const out = [];
+  const p = enemyRacePerk(u);
+  if (!p) return out;
+  if (p.fireCut && el === "fire") out.push({ value: -RACE_PERK.fireCut, reason: `热耐性（${racePerkKey(u)}）：火焰受伤 −${Math.round(RACE_PERK.fireCut * 100)}%。` });
+  if (p.energyUp && el === "energy") out.push({ value: RACE_PERK.energyUp, reason: `鳞片（${racePerkKey(u)}）：能量受伤 +${Math.round(RACE_PERK.energyUp * 100)}%。` });
+  return out;
+}
+
+/** 是不是同一边的友方单位：同阵营，或者是它召唤的 / 召唤它的；配置物、中立生物不算 */
+function raceMateOf(u, x) {
+  if (!u || !x || x === u || x.dead || x.hidden || x._removed || x.fused || x.kind || x.isProp || x.isStructure || x.kit === "ironwall") return false;
+  if (!!x.isPlayer !== !!u.isPlayer) return false;
+  if (typeof isNeutralCreature === "function" && isNeutralCreature(x)) return false;
+  if (x.summonedBy === u.id || u.summonedBy === x.id) return true;
+  return factionOf(x) === factionOf(u);
+}
+/** 同区的队友数（独狼） */
+function raceMateCount(u, units) {
+  return (units || state.units || []).filter(x => Number(x.zone) === Number(u.zone) && raceMateOf(u, x)).length;
+}
+/** 独狼：effectiveAtk（party.js）加上这个数。没有队友 +，两名及以上 −，一名不变 */
+function raceAtkAdjust(u, units) {
+  const p = enemyRacePerk(u);
+  if (!p || !p.loneWolf) return 0;
+  const n = raceMateCount(u, units), d = Math.floor((Number(u.level) || 1) / RACE_PERK.loneWolfDiv);
+  return n === 0 ? d : n >= RACE_PERK.loneWolfMates ? -d : 0;
+}
+
+/** 种族给检定带来的：{ reroll }（迎难直上）。角色的检定走 party.js · checkPerksFor，敌人走这里 */
+function raceCheckPerks(u) {
+  const p = u && !u.isPlayer ? enemyRacePerk(u) : null;
+  return { adv: false, dis: false, reroll: !!(p && p.reroll), softFail: false, text: p && p.reroll ? p.text : "" };
+}
+
+/** 环境适应（鼠类人·鼠）：这一次场地效果是否被完全免疫（每次单独掷 RACE_PERK.fieldImmune） */
+function raceFieldImmune(u) {
+  const p = enemyRacePerk(u);
+  return !!(p && p.fieldCut && Math.random() < RACE_PERK.fieldImmune);
+}
+/** 场地伤害经过种族（环境适应）：被免疫返回 0，否则原样返回 */
+function raceFieldDamage(u, dmg) {
+  if (!(dmg > 0)) return dmg;
+  return raceFieldImmune(u) ? 0 : dmg;
+}
+
+/** 迅袭「整场第一个行动」：做过任何行动（移动、攻击、种族附赠）就记下 */
+function raceMarkActed(u) { if (u && u.race) u.raceActed = true; }
+/** 迅袭：整场第一个行动里，第一击 +击破（dealTo 传给 resolveAttack 的 firstBreak） */
+function raceFirstBreak(u) {
+  const p = enemyRacePerk(u);
+  return p && p.swift && !u.raceActed ? RACE_PERK.swiftBreak : 0;
+}
+/** 迅袭：每次移动回架势。doMove 成功之后调用 */
+function raceAfterMove(u, notes) {
+  const p = enemyRacePerk(u);
+  if (!p || !p.swift) return;
+  raceMarkActed(u);
+  if (u.dead || u.noPosture || u.stunned) return;
+  const max = Number(u.defMax) || 0, cur = Number(u.def) || 0;
+  if (cur >= max) return;
+  u.def = Math.min(max, cur + RACE_PERK.swiftRecover);
+  if (notes) notes.push(`迅袭：${u.name} 移动回 ${RACE_PERK.swiftRecover} 架势 → ${u.def}。`);
+}
+
+/** 千里马：第一回合 +附赠（refreshEnemyEconomy 调用，返回要加的数量）。顺便数这个敌人经历了几个自己的回合 */
+function raceBonusExtra(u) {
+  if (!u || !u.race) return 0;
+  u.raceRounds = (u.raceRounds || 0) + 1;
+  const p = enemyRacePerk(u);
+  return p && p.firstBonus && u.raceRounds === 1 ? RACE_PERK.firstBonus : 0;
+}
+
+/** 灵巧：一回合最多失去的架势（没有就是 null）。engine.js · applyResultToUnit 读 */
+function raceBreakCap(u) {
+  const p = enemyRacePerk(u);
+  return p && p.breakCap ? RACE_PERK.breakCap : null;
+}
+
+/** 注意力涣散：这次攻击打 t 是不是「连续超过 N 回合打同一个目标」（不止一个目标可选才算）。只读，不记录 */
+function raceDistracted(a, t) {
+  const p = enemyRacePerk(a);
+  if (!p || !p.distract || !t || t === a) return false;
+  const rec = a.raceFocus;
+  if (!rec || rec.id !== t.id) return false;
+  const now = Number(state.turnNo) || 0;
+  const streak = rec.round === now ? rec.streak : (rec.round === now - 1 ? rec.streak + 1 : 1);
+  if (streak <= RACE_PERK.distractTurns) return false;
+  return hostilesOf(a).filter(x => !x.kind && !x.isProp && !x.dying).length > 1;
+}
+/** 攻击者一侧的种族修正：[{ value, reason }]（注意力涣散） */
+function raceAttackMods(a, t) {
+  return raceDistracted(a, t) ? [{ value: -RACE_PERK.distractCut, reason: `注意力涣散（${racePerkKey(a)}）：连续打同一个目标，伤害 −${Math.round(RACE_PERK.distractCut * 100)}%。` }] : [];
+}
+/** 记下这次攻击打了谁（dealTo 结算后调用；同一回合打几次只算一回合） */
+function raceNoteAttack(a, t) {
+  const p = enemyRacePerk(a);
+  if (!p || !p.distract || !t || t === a || t.kind) return;
+  const now = Number(state.turnNo) || 0, rec = a.raceFocus;
+  if (rec && rec.id === t.id) {
+    if (rec.round === now - 1) a.raceFocus = { id: t.id, round: now, streak: rec.streak + 1 };
+    else if (rec.round !== now) a.raceFocus = { id: t.id, round: now, streak: 1 };
+  } else a.raceFocus = { id: t.id, round: now, streak: 1 };
+}
+
+/** 易怒蛮牛：血量低于一半时受到任何伤害 → 失去附赠、冲到另一个区、对随机一个目标造成击破。applyCombat 末尾调用 */
+function raceAfterHurt(target, result, attacker, notes) {
+  const p = enemyRacePerk(target);
+  if (!p || !p.rage || target.dead || target._rageBusy || target.hidden) return;
+  if (!((Number(result && result.total) || 0) > 0 || (Number(result && result.shpDealt) || 0) > 0)) return;
+  const max = totalMaxHp(target);
+  if (!(max > 0) || totalHp(target) >= max * RACE_PERK.rageHpPct) return;
+  target._rageBusy = true;
+  try {
+    notes.push(`易怒蛮牛：${target.name} 血量低于 ${Math.round(RACE_PERK.rageHpPct * 100)}%，受伤后失控！`);
+    target.bonus = 0;
+    target.raceNoBonus = true;   // 下个敌人回合的附赠也没了（refreshEnemyEconomy 读）
+    const from = Number(target.zone);
+    const ns = zoneNeighbors(from).slice();
+    for (let i = ns.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [ns[i], ns[j]] = [ns[j], ns[i]]; }
+    for (const z of ns) {
+      doMove(target, z, { free: true, forced: true });
+      if (Number(target.zone) !== from) break;
+    }
+    if (Number(target.zone) === from) notes.push(`${target.name} 没有路可冲，原地发狂。`);
+    const pool = hostilesOf(target).filter(x => Number(x.zone) === Number(target.zone) && !x.kind && !x.isProp && !(typeof isDownProtected === "function" && isDownProtected(x)));
+    if (pool.length) {
+      const v = pool[Math.floor(Math.random() * pool.length)];
+      notes.push(`${target.name} 不受控地冲撞 ${v.name}。`);
+      dealBreak(v, RACE_PERK.rageBreak, "physical", notes, "易怒蛮牛冲撞", { by: target });
+    } else notes.push(`${target.name} 冲进 ${target.zone} 区，没有撞到人。`);
+  } finally { target._rageBusy = false; }
+}
+
+/** 种族带来的附赠技能（enemySkillList 追加）。只有敌人有：角色有自己的技能 */
+const RACE_SKILL_COST = { race_snuff: { ap: 0, bonus: 1 }, race_hunt: { ap: 0, bonus: 1 }, race_awe: { ap: 0, bonus: 1 }, race_spit: { ap: 0, bonus: 1 } };
+function raceSkills(u) {
+  const p = u && !u.isPlayer ? enemyRacePerk(u) : null;
+  if (!p) return [];
+  const out = [];
+  if (p.snuff) out.push({ id: "race_snuff", label: "热耐性：扑灭灼烧（附赠）" });
+  if (p.hunt) out.push({ id: "race_hunt", label: "追猎本能：紧追（附赠）" });
+  if (p.awe) out.push({ id: "race_awe", label: "威压：近距威吓（附赠，50% 施加不稳）" });
+  if (p.spit) out.push({ id: "race_spit", label: "吐酸：近距 1×atk 酸（附赠，每场一次）" });
+  return out;
+}
+/** 种族技能的执行（runEnemyActionInner 开头调用，不是种族技能返回 false） */
+function raceRunSkill(id, a, t, hitOne, lines, needT, atk) {
+  if (!RACE_SKILL_COST[id]) return false;
+  raceMarkActed(a);
+  a.resources = a.resources || {};
+  if (id === "race_snuff") {
+    const n = Math.floor(Number(a.statuses && a.statuses.burn) || 0);
+    if (a.statuses) a.statuses.burn = 0;
+    lines.push(n > 0 ? `热耐性：${a.name} 扑灭了身上的 ${n} 层灼烧。` : `${a.name} 身上没有灼烧。`);
+    return true;
+  }
+  if (!needT()) return true;
+  if (id === "race_hunt") {
+    t.statuses = t.statuses || {};
+    t.statuses.chase = true;
+    t.chasers = (t.chasers || []).filter(x => x !== a.id).concat(a.id);   // 目标移动时跟过去的是它（chaseFollow 读 chasers）
+    if (typeof popStatus === "function") popStatus(t, "chase");
+    lines.push(`追猎本能：${t.name} 被 ${a.name} 紧追，它移动时 ${a.name} 会跟过去。`);
+    return true;
+  }
+  if (Number(a.zone) !== Number(t.zone)) { lines.push(`${t.name} 不在同一区，打不到。`); return true; }
+  if (id === "race_awe") {
+    const ok = Math.random() < RACE_PERK.aweChance;
+    lines.push(`威压：${a.name} 威吓 ${t.name}（${Math.round(RACE_PERK.aweChance * 100)}%）→ ${ok ? "成功" : "失败"}`);
+    if (ok) {
+      const notes = [];
+      applyUnstable(t, notes);
+      if (typeof popStatus === "function") popStatus(t, "unstable");
+      lines.push(...notes, `${t.name} 不稳。`);
+    }
+    return true;
+  }
+  if (id === "race_spit") {
+    if (a.resources.spitUsed) { lines.push("吐酸：本场战斗已用。"); return true; }
+    a.resources.spitUsed = true;
+    hitOne(a, t, { element: "acid", mult: RACE_PERK.spitMult, baseBreak: 0, atk, atkRange: "melee" });
+    lines.push("吐酸：本场战斗已用。");
+    return true;
+  }
+  return false;
+}
+/** AI：这一步要不要先用一个种族附赠。返回 { id, target } 或 null。
+ *  精英 / 首领的移动也花附赠，所以只在不用移动（step == null）时才用；杂兵的附赠（千里马给的）不影响移动 */
+function raceBonusChoice(u, prey, step) {
+  if (!u || u.isPlayer || !u.race || (u.bonus || 0) < 1) return null;
+  const rank = typeof enemyRankOf === "function" ? enemyRankOf(u) : "minion";
+  if (rank !== "minion" && step != null) return null;
+  const p = enemyRacePerk(u);
+  if (!p) return null;
+  const mine = (id) => (enemySkillList(u) || []).some(s => s.id === id);
+  const near = (prey || []).filter(x => !x.kind && Number(x.zone) === Number(u.zone));
+  if (p.snuff && mine("race_snuff") && Number(u.statuses && u.statuses.burn) > 0) return { id: "race_snuff", target: null };
+  if (p.spit && mine("race_spit") && !(u.resources && u.resources.spitUsed) && near.length) return { id: "race_spit", target: near.slice().sort((a, b) => totalHp(a) - totalHp(b))[0] };
+  if (p.awe && mine("race_awe")) { const c = near.filter(x => !(x.statuses && x.statuses.unstable)); if (c.length) return { id: "race_awe", target: c[0] }; }
+  if (p.hunt && mine("race_hunt")) {
+    const c = (prey || []).filter(x => !x.kind && !(x.statuses && x.statuses.chase && (x.chasers || []).includes(u.id)));
+    if (c.length) return { id: "race_hunt", target: c[0] };
+  }
+  return null;
+}
+
+function spawnEnemyGroup(id, lv, partyN, zone, iv, race) {
   const z = zone != null ? Number(zone) : null;
   if (id === "ufo_boss" && typeof spawnUfoBoss === "function") {
     const pack = spawnUfoBoss(lv);
@@ -2261,7 +2832,7 @@ function spawnEnemyGroup(id, lv, partyN, zone, iv) {
   }
   const p = enemyPresets().find(x => x.id === id);
   if (!p || !p.build) return [];
-  const u = applyEnemyIV(p.build(lv, partyN), iv);
+  const u = applyEnemyIV(p.build(lv, partyN), iv, race);
   if (z) u.zone = Math.min(z, Number(state.zoneMode) || z);
   if (typeof refreshEnemyEconomy === "function") refreshEnemyEconomy(u);
   return [u];

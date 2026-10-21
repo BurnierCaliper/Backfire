@@ -119,6 +119,26 @@ const BESTIARY_TEXT = {
     "队友被打时替他协助格挡（40%），成功仍扣自己架势（最少留 1），并反击 1 击破",
     "协助：仅近距，普通攻击一次"] },
   captain_lizard: { move: "远距离", abilities: ["酸弹：atk + 1d6 酸，2 击破", "协助：远距 2×atk 酸"] },
+  // —— 外城区镇压部队（赤牙麾下，武器全是火；固定种族，种族被动另行实装）——
+  riot_baton: { move: "近距离，主动贴近", abilities: [
+    "火焰警棍：近距 atk + 1d4 火，2 击破，打中施加熔融",
+    "防暴盾（被动）：自己的护盾层还有血时，同区友军受到的远程攻击伤害 −25%（和其他百分比加算）",
+    "协助：冲到目标所在区，普通攻击一次（同样带熔融）"] },
+  riot_rifle: { move: "远距离，主动远离", abilities: [
+    "燃烧弹：远距 atk + 1d4 火，1 击破，打中后激活目标的灼烧（目标没有灼烧就不触发）",
+    "协助：远距 0.5×atk 火，同样激活灼烧"] },
+  riot_molotov: { move: "远距离（抛射），主动远离", abilities: [
+    "燃烧瓶：先标定一个区（画面上有预警），下个敌人回合落地——那一区的单位 0.5×atk 火、灼烧 1（那一区已经是火场则灼烧 2），然后那一区变成火场",
+    "抛射：越过危墙和关着的门；标定之后有一回合可以离开那个区",
+    "不能协助"] },
+  riot_flamer: { move: "近距离，主动贴近", abilities: [
+    "喷火：近距单体 3 段，每段 0.3×atk 火；目标有灼烧时每段各 1 击破，没有时 3 段共 1 击破；每段命中各有 15% 概率施加灼烧 1",
+    "燃料罐（被动）：被打进失衡时罐子破裂，同区所有单位（不分敌我）0.5×atk 火，那一区变成火场",
+    "协助：冲进目标所在区，喷火一次"] },
+  riot_captain: { move: "远近皆可", abilities: [
+    "火焰手枪：远近皆可，atk + 1d6 火，1 击破，打中施加灼烧 1",
+    "指挥（被动，只影响 AI）：他在场时，所有镇压队单位优先攻击还没有灼烧的敌人",
+    "协助：远距 1×atk 火，同样施加灼烧 1"] },
   ant_guard: { move: "远距离；不受酸液地面影响（不吃伤害，移动不受限）", abilities: [
     "酸液喷枪：远距 atk + 1d6 酸，1 击破，并施加腐蚀",
     "站在酸液地面上时汲取酸，改用大酸液弹：先标定一个区，下个敌人回合发射——区内随机一人 2×atk 酸 2 击破，同区其他人 等级 + 1d6 酸",
@@ -201,6 +221,29 @@ const BESTIARY_RANK_NOTE = {
   elite: "10 级及以上的精英架势打六折（上面的数字已经算进去），攒满 2 个晕眩标记才真正跳过回合。",
   boss: "首领架势打六折（上面的数字已经算进去），攒满 2 个晕眩标记才真正跳过回合。"
 };
+/** 分阶段的首领 / 精英（#205）：战斗里的悬停说明（unit-tip.js）只列当前阶段的能力，图鉴照旧列全部。
+ *  skill：只有这一阶段才有的招式。enemies.js · enemySkillList 按规则状态给出招式表，现在有哪个就是哪个阶段
+ *         （换阶段的条件只写在规则里一处，这里不再抄一遍血量 / 机械足的门槛）；
+ *  abilities：BESTIARY_TEXT 里属于这一阶段的那几行能力的开头。没被任何阶段认领的行是各阶段共有的，每个阶段都列。 */
+const BESTIARY_STAGES = {
+  // resources.phase：外层沙壳打穿 → 二阶段，装甲击破 → 三阶段，三阶段吸引碎片两次 → 回到二阶段
+  sand_aggregate: [
+    { name: "一阶段", skill: "en_agg1_melee", abilities: ["一阶段", "沙尘爆裂", "狂暴连打"] },
+    { name: "二阶段", skill: "en_agg2_melee", abilities: ["二阶段", "电能炮"] },
+    { name: "三阶段", skill: "en_agg3_debris", abilities: ["三阶段", "吸引碎片"] }
+  ],
+  // 本体 + 五条机械足，按还活着的机械足：4–5 条踩踏，2–3 条激光扫射，剩 1 条准备自爆。机械足的说明跟着本体
+  ufo_boss: [
+    { name: "机械足 4–5 条", skill: "ufo_stomp", abilities: ["五足齐全"] },
+    { name: "机械足 2–3 条", skill: "ufo_sweep", abilities: ["剩三足"] },
+    { name: "机械足 1 条", skill: "ufo_prime", abilities: ["剩一足"] }
+  ],
+  // 被杀死时吸收场上的沙灵 / 沙鱼，变成巨型活沙（resources.giant）
+  livesand: [
+    { name: "活沙", skill: "en_live", abilities: ["每回合一次", "被杀死时吸收"] },
+    { name: "巨型活沙", skill: "en_giant_sand_melee", abilities: ["巨型活沙"] }
+  ]
+};
 
 /* ---------- 记录（本机 localStorage） ---------- */
 function bestiaryStore() {
@@ -223,6 +266,16 @@ function bestiaryKitOf(u) {
   if (u.kit === "ufo_leg" || u.kit === "ufo_body") return "ufo_boss";
   return BESTIARY_SKIP.includes(u.kit) ? null : u.kit;
 }
+/** 分阶段的敌人现在在第几阶段（从 1 数；不分阶段、认不出来的是 0）。只读规则状态，不改任何东西。
+ *  飞碟触灵的机械足跟着本体算。联机由房主算好，online-view.js 只把这个编号发给玩家 */
+function bestiaryStageOf(u) {
+  const stages = BESTIARY_STAGES[bestiaryKitOf(u)];
+  if (!stages || typeof enemySkillList !== "function") return 0;
+  const self = u.kit === "ufo_leg" && typeof ufoBodyOf === "function" ? ufoBodyOf(u) : u;
+  let ids = [];
+  try { ids = (enemySkillList(self) || []).map(s => s.id); } catch (e) { return 0; }
+  return stages.findIndex(s => ids.includes(s.skill)) + 1;
+}
 /** 一场战斗结束：场上出现过的敌人都记为遭遇过（次数、见过的等级、打倒几只） */
 function bestiaryRecordBattle(outcome) {
   const units = (state.units || []).filter(u => !u.isPlayer && !u.isProp && (!u.hidden || u.dead));
@@ -240,6 +293,9 @@ function bestiaryRecordBattle(outcome) {
     e.minLv = e.minLv == null ? lv : Math.min(e.minLv, lv);
     e.maxLv = e.maxLv == null ? lv : Math.max(e.maxLv, lv);
     if (u.dead) e.kills += 1;   // 下潜逃走的（只有 _removed）不是击杀
+    // 种族（enemies.js）：随机种族的敌人记下见过哪些
+    const rl = typeof raceText === "function" ? raceText(u) : "";
+    if (rl) { e.races = Array.isArray(e.races) ? e.races : []; if (!e.races.includes(rl)) e.races.push(rl); }
     e.last = now;
     e.lastOutcome = outcome || null;
     d.kits[kit] = e;
@@ -291,7 +347,30 @@ function bestiaryStats(kit, level, partySize) {
   };
 }
 
-/** 图鉴的整张表：[{ kit, name, rank, faction, regions, seen, rec, text }]（按 杂兵 → 精英 → 首领 排） */
+/** 图鉴里的种族说明：固定的写种族，随机的写「随机：人类 / 红皮人 / 类人」（权重表里的大支，类人四支合并）；没有种族是空串 */
+function bestiaryRaceText(kit) {
+  const info = (typeof ENEMY_INFO !== "undefined" && ENEMY_INFO[kit]) || (typeof ENEMY_RACE_EXTRA !== "undefined" && ENEMY_RACE_EXTRA[kit]) || null;
+  if (!info) return "";
+  if (info.race) return info.race;
+  if (!Array.isArray(info.races) || !info.races.length) return "";
+  const names = [];
+  info.races.forEach(r => {
+    const big = String(r.race).split("·")[0];
+    const n = typeof ENEMY_RACE_GROUPS !== "undefined" && Object.keys(ENEMY_RACE_GROUPS).some(g => ENEMY_RACE_GROUPS[g].includes(big)) ? "类人" : big;
+    if (!names.includes(n)) names.push(n);
+  });
+  return "随机：" + names.join(" / ");
+}
+/** 图鉴里的种族被动：固定种族写那个种族的被动；随机种族写见过的种族的被动（"红皮人：热耐性……"）；没有被动是空数组 */
+function bestiaryRacePerks(kit, seen) {
+  if (typeof racePerkLinesFor !== "function") return [];
+  const info = (typeof ENEMY_INFO !== "undefined" && ENEMY_INFO[kit]) || (typeof ENEMY_RACE_EXTRA !== "undefined" && ENEMY_RACE_EXTRA[kit]) || null;
+  if (info && info.race) return racePerkLinesFor(info.race);
+  const out = [];
+  (Array.isArray(seen) ? seen : []).forEach(r => racePerkLinesFor(r).forEach(t => out.push(`${r}：${t}`)));
+  return out;
+}
+/** 图鉴的整张表：[{ kit, name, rank, faction, regions, seen, rec, text, race }]（按 杂兵 → 精英 → 首领 排） */
 function bestiaryEntries() {
   const d = bestiaryLoad();
   const order = { minion: 0, elite: 1, boss: 2 };
@@ -304,6 +383,8 @@ function bestiaryEntries() {
         kit: p.id, name: bestiaryName(p.id), rank, rankName: BESTIARY_RANK_NAME[rank] || rank,
         faction: info.faction || (BESTIARY_TEXT[p.id] || {}).faction || "", regions: info.regions || (BESTIARY_TEXT[p.id] || {}).regions || [],
         seen: !!d.kits[p.id], rec: d.kits[p.id] || null,
+        race: bestiaryRaceText(p.id), racesSeen: d.kits[p.id] && Array.isArray(d.kits[p.id].races) ? d.kits[p.id].races.slice() : [],
+        racePerks: bestiaryRacePerks(p.id, d.kits[p.id] && d.kits[p.id].races),
         text: BESTIARY_TEXT[p.id] || null, rankNote: BESTIARY_RANK_NOTE[rank] || "",
         // 可能掉的制作材料（items.js · enemyDropTable）：[{ id, name, chance 期望份数 }]，图鉴详情「可能掉落」一节显示（bestiary-ui.js · dropsSection）
         drops: typeof enemyDropTable === "function" ? enemyDropTable(p.id) : []

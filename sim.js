@@ -65,6 +65,10 @@ const BattleSim = (function () {
    *   level     敌人等级（enemies 里没写 lv 时用）
    *   seed      给了就装种子随机数，整场可复现
    *   before    布置完、放敌人之前调用（单局层用来盖回跨战斗的血量等）
+   *   region    这场战斗在哪个区域（只是画面；不给就用 encounter 的 region，单局的遭遇带着这一幕的区域）
+   *   scene     区域里的哪个场景（只是画面，world-data.js · BATTLE_SCENES 的 id；和主持人选的一样，这个区域没有的不认；不给就按默认）
+   *   sceneSeed 单局：按这个种子在区域的场景里随机抽一个（rogue.js · battleSpec 给；不动战斗用的随机数）
+   *   light     光影 day / dusk / night（只是画面；不给就跟着时钟）
    */
   function setup(opt) {
     opt = opt || {};
@@ -83,6 +87,9 @@ const BattleSim = (function () {
     const ivOff = typeof ENEMY_IV !== "undefined" && !opt.iv;
     if (ivOff) ENEMY_IV.off++;
     try { spawnAll(opt, level, partyN); } finally { if (ivOff) ENEMY_IV.off--; }
+    // 所在区域、场景、光影（只是画面，world-data.js · battleLookStart）
+    if (typeof battleLookStart === "function") battleLookStart({ region: opt.region != null ? opt.region : opt.encounter && opt.encounter.region,
+      scene: opt.scene, sceneSeed: opt.sceneSeed, light: opt.light });
     return state;
   }
   function spawnAll(opt, level, partyN) {
@@ -95,7 +102,7 @@ const BattleSim = (function () {
     } else {
       if (typeof Chain !== "undefined") Chain.clear();
       (opt.enemies || []).forEach(row => {
-        spawnEnemyGroup(row.id, Number(row.lv) || level, partyN, row.zone, row.iv).forEach(u => state.units.push(u));
+        spawnEnemyGroup(row.id, Number(row.lv) || level, partyN, row.zone, row.iv, row.race).forEach(u => state.units.push(u));
       });
     }
   }
@@ -273,7 +280,7 @@ const BattleSim = (function () {
     for (const id of EnemyAI.actingOrder()) {
       for (let n = 0; n < 5; n++) {
         const u = unitById(id);
-        if (!u || !alive(u) || u.stunned || (u.ap || 0) <= 0) break;
+        if (!u || !(alive(u) || (typeof vehicleRiderActs === "function" && vehicleRiderActs(u))) || u.stunned || (u.ap || 0) <= 0) break;
         const plan = EnemyAI.plan(u);
         if (!plan) break;
         const before = sig(u);

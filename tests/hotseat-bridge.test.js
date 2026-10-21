@@ -330,3 +330,20 @@ test("plain owned choices without unit options stay non-field (opening blade kee
   assert.equal(f.view().ask.field, false);
   assert.equal(f.view().ask.options.some(o => "target" in o), false);
 });
+
+test("热座（同一台设备）的协助询问不限时：deadline 为空，过再久也不会放弃", () => {
+  const f = bridge(["ruby", "kolt", "helu"]), [target, helperA, helperB] = f.units, { c } = f;
+  f.begin();
+  const options = [helperA, helperB].map(unit => ({ helper: unit.id, label: unit.name, extra: {} }));
+  const realNow = Date.now;
+  c.HotseatGame.requestAsk("block", "谁来格挡", options, () => [helperA, helperB], { seq: 8, targetId: target.id });
+  try {
+    c.HotseatGame.switchPlayer("p1");
+    const ask = f.view().ask;
+    assert.equal(ask.deadline, null);
+    assert.equal(ask.remainingMs, null);
+    Date.now = () => realNow() + 10 * 60 * 1000;
+    c.tickHotseat();
+    assert.equal(f.view().ask && f.view().ask.id, ask.id, "过了 10 分钟询问仍在等人回答");
+  } finally { Date.now = realNow; }
+});

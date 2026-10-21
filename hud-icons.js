@@ -222,18 +222,18 @@
     if (Number(u.sink) > 0) out.unshift({ key: "sink", stack: String(u.sink), title: `下陷 ${u.sink} 层（流沙）：每回合开始失去生命上限 ${5 * Number(u.sink)}%；2 层起自己走不出去，3 层不能行动、不能协助。不花行动点就慢慢浮出来` });
     if (u.submerged) out.unshift({ key: "submerged", stack: "", title: "下潜：选不中、范围攻击打不到；只有谐波攻击和塌陷打得到（打到就被迫浮上来 +1 击破）。自己攻击时解除" });
     if (u.dormant) out.unshift({ key: "dormant", stack: "", title: "休眠：不行动、不协助，被叫醒后才开始行动" });
-    // 首领和 10 级起的精英：一直挂着晕眩标记（0/2 也挂），开打前就看得出要失衡两次才会晕眩
+    // 首领、10 级起的精英、载具（和车合并的驾驶员，敌我都算）：一直挂着晕眩标记（0/2 也挂），开打前就看得出要失衡两次才会晕眩
     const max = stunMarkMax(u);
     if (max > 0) {
       const n = Math.min(max, Number(u.stunMarks) || 0);
-      out.unshift({ key: "stunMark", stack: `${n}/${max}`, title: `晕眩标记 ${n}/${max}：首领和 10 级以上的精英每失衡一次记 1 个标记，攒满 ${max} 个才会真正晕眩（跳过回合）；没攒满时架势立刻恢复` });
+      out.unshift({ key: "stunMark", stack: `${n}/${max}`, title: `晕眩标记 ${n}/${max}：首领、10 级以上的精英和载具（驾驶员用车的标记）每失衡一次记 1 个标记，攒满 ${max} 个才会真正晕眩（跳过回合）；没攒满时架势立刻恢复` });
     }
     return out;
   }
-  /** 这个单位用不用晕眩标记规则：联机投影过来的带 stunMax，本地单位直接问规则 */
+  /** 这个单位用不用晕眩标记规则：联机投影过来的带 stunMax，本地单位直接问规则（我方只有和载具合并的驾驶员用，vehicle.js） */
   function stunMarkMax(u) {
     if (u.stunMax != null) return Number(u.stunMax) || 0;
-    if (u.isPlayer || typeof root.isBossUnit !== "function") return 0;
+    if ((u.isPlayer && !u.vehMerged) || typeof root.isBossUnit !== "function") return 0;
     try { return root.isBossUnit(u) ? (typeof root.BOSS_STUN_MARKS === "number" ? root.BOSS_STUN_MARKS : 2) : 0; } catch (e) { return 0; }
   }
   /** 状态文字里的一个词有没有对应的图标（「灼烧×3」「高能 5」「自焚×2」都算） */
@@ -275,7 +275,8 @@
         try { if (has("noraMood")) mood = root.noraMood(u) === "cruel" ? "cruel" : "gentle"; } catch (e) {}
         return { kit: "nora", mood, pierce, lock: plus(2) };
       }
-      case "ruby": return { kit: "ruby", nano: Math.max(0, Math.min(100, Number(r.nano) || 0)), mecha: !!r.mecha,
+      // 储备能源（补充能源压缩出来的，#219）没有上限，不夹到 100
+      case "ruby": return { kit: "ruby", nano: Math.max(0, Math.min(100, Number(r.nano) || 0)), reserve: Math.max(0, Number(r.nanoReserve) || 0), mecha: !!r.mecha,
         // 收发代理（9 级）解锁后才显示无人机图标；放出来之前是暗的
         showDrone: (Number(u.level) || 1) >= 9, drone: !!r.drone, boost: !!r.overdrive };
       case "yuito": {
@@ -319,8 +320,9 @@
     nora: s => ind(I.gentle(s.mood === "gentle"), "温和", "big " + (s.mood === "gentle" ? "glow-mint" : "dim")) + ind(I.cruel(s.mood === "cruel"), "残忍", "big " + (s.mood === "cruel" ? "glow-pink" : "dim")) +
       (s.lock ? ind(svg(`<rect x="10" y="18" width="20" height="15" rx="2" fill="${C("brass")}"/><path d="M14 18v-5a6 6 0 0 1 12 0v5" stroke="${C("brass")}" stroke-width="3" fill="none"/>`), "不再随机") : "") +
       ind(I.needle(), s.pierce ? "刺入" + (s.pierce > 1 ? " ×" + s.pierce : "") : "没有刺入", s.pierce ? "" : "dim"),
-    ruby: s => `<div class="ind">${seg(Math.round(s.nano / 10), 10, s.nano >= 20 ? C("cyan") : "#d9644f", 8, 26)}<span>纳米 <b class="num">${s.nano}</b>/100</span></div>` +
-      ind(I.wing(s.mecha), s.mecha ? `机甲模式 · 每回合 −${s.boost ? 40 : 20}` : s.nano >= 20 ? "可进入机甲" : "能源不足", "big " + (s.mecha ? "glow-cyan" : "")) +
+    // 纳米不够时自动用储备能源：够不够看「纳米 + 储备」；有储备时在纳米下面写「储备 n」
+    ruby: s => `<div class="ind">${seg(Math.round(s.nano / 10), 10, s.nano + (s.reserve || 0) >= 20 ? C("cyan") : "#d9644f", 8, 26)}<span>纳米 <b class="num">${s.nano}</b>/100</span>${s.reserve > 0 ? `<span>储备 <b class="num">${s.reserve}</b></span>` : ""}</div>` +
+      ind(I.wing(s.mecha), s.mecha ? `机甲模式 · 每回合 −${s.boost ? 40 : 20}` : s.nano + (s.reserve || 0) >= 20 ? "可进入机甲" : "能源不足", "big " + (s.mecha ? "glow-cyan" : "")) +
       (s.showDrone ? ind(I.drone(s.drone, s.mecha), !s.drone ? "无人机未放出" : s.mecha ? `无人机 · 激光 ×${s.boost ? 3 : 2}` : "无人机 · 每回合 +10 纳米",
         s.drone ? (s.mecha ? "glow-red" : "glow-cyan") : "dim") : ""),
     yuito: s => `<div class="ind"><div class="pips">${s.bean ? Array.from({ length: Math.min(8, s.bean) }, () => I.bean(true)).join("") : I.bean(false)}</div><span>咖啡豆 ${s.bean}</span></div>` +

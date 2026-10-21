@@ -21,7 +21,7 @@ test("杂兵：每个都有个体值，血量、atk 都在 ±10% 内，按水平
   const seen = new Set();
   for (let i = 0; i < 60; i++) {
     const base = baseOf(c, "thug_hammer", 5);
-    const [u] = c.spawnEnemyGroup("thug_hammer", 5, 2, 2);
+    const [u] = c.spawnEnemyGroup("thug_hammer", 5, 2, 2, null, "人类");   // 种族固定为人类（对敌人没有数值变化），这里只看个体值
     assert.ok(u.iv, "有个体值");
     assert.ok(u.iv.hp >= -10 && u.iv.hp <= 10 && Number.isInteger(u.iv.hp));
     assert.ok(u.iv.atk >= -10 && u.iv.atk <= 10 && Number.isInteger(u.iv.atk));
@@ -49,7 +49,7 @@ test("精英也波动，首领不波动", () => {
 test("写死的水平照写；改水平按原始数值重算，不会越改越偏，已受的伤按比例保留", () => {
   const c = ctx();
   const base = baseOf(c, "thug_hammer", 5);
-  const [u] = c.spawnEnemyGroup("thug_hammer", 5, 2, 2, { hp: 10, atk: -10 });
+  const [u] = c.spawnEnemyGroup("thug_hammer", 5, 2, 2, { hp: 10, atk: -10 }, "人类");
   assert.equal(u.iv.hp, 10); assert.equal(u.iv.atk, -10);
   assert.equal(u.layers[0].max, Math.round(base.layers[0].max * 1.1));
   assert.equal(u.atk, Math.round(base.atk * 0.9 * 10) / 10);
@@ -61,10 +61,10 @@ test("写死的水平照写；改水平按原始数值重算，不会越改越�
   assert.ok(Math.abs(u.layers[0].current - u.layers[0].max / 2) <= 1);
   assert.equal(u.atk, base.atk);
   // 超出范围的水平夹到 ±10
-  const [v] = c.spawnEnemyGroup("thug_knife", 3, 2, 2, { hp: 50, atk: -99 });
+  const [v] = c.spawnEnemyGroup("thug_knife", 3, 2, 2, { hp: 50, atk: -99 }, "人类");
   assert.deepEqual(plain(v.iv), { hp: 10, atk: -10 });
   // 只写一项：另一项随机
-  const [w] = c.spawnEnemyGroup("thug_knife", 3, 2, 2, { hp: 3, atk: null });
+  const [w] = c.spawnEnemyGroup("thug_knife", 3, 2, 2, { hp: 3, atk: null }, "人类");
   assert.equal(w.iv.hp, 3);
 });
 
@@ -102,7 +102,7 @@ test("主持人：生成敌人可以写水平；战斗中可以改单位的个�
   const authority = Object.freeze({});
   c.GMCommands.configure({ requireHost: x => x === authority });
   const send = cmd => c.Commands.dispatch(plain(cmd), authority);
-  const out = send({ type: "gm.spawnEnemy", enemyId: "thug_knife", level: 3, zone: 2, iv: { hp: -10, atk: 10 } });
+  const out = send({ type: "gm.spawnEnemy", enemyId: "thug_knife", level: 3, zone: 2, race: "人类", iv: { hp: -10, atk: 10 } });
   const u = c.S.state.units.find(x => x.id === out.ids[0]);
   assert.deepEqual(plain(u.iv), { hp: -10, atk: 10 });
   const base = baseOf(c, "thug_knife", 3);
