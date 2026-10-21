@@ -64,8 +64,26 @@
     // 排污口：管壁上伸出来一截横着的管子（u 横向位置 × 战场半宽，离地 h，半径 r），污水从管口往下流进地上的污水里（fall 每秒往下走多少）
     outfall: { u: 0.55, h: 1.7, r: 0.55, fall: 1.2, color: 0x6a7048 }
   };
-  /** 环境动画的频率（秒）：flicker 管壁上会闪的灯隔多久闪一下、每次暗多久。减少动态效果时灯一直亮着、污水不流 */
-  const AMBIENT = { flicker: { every: [1.5, 5], dur: [0.06, 0.25] } };
+  /** 环境动画的频率（秒）：flicker 管壁上会闪的灯隔多久闪一下、每次暗多久。减少动态效果时灯一直亮着、污水不流。
+   *  thunder 雷鸣时（SHELTER.thunder.flicker）：外面隔 every 秒（随机）打一次雷，管子里的灯（壁灯、灯带、照亮的那一片）跟着闪一下：
+   *          一共 dur 秒，dips = [第几秒起, 剩几成亮]（一下暗、一下亮、再暗一下，然后恢复） */
+  const AMBIENT = {
+    flicker: { every: [1.5, 5], dur: [0.06, 0.25] },
+    thunder: { every: [4, 10], dur: 0.34, dips: [[0, 0.12], [0.07, 0.85], [0.13, 0.3], [0.22, 0.75]] }
+  };
+  /** 室内的场景里（下水道）天气怎么画（主人：「下水道里不显示天空类的天气」）：天上来的都不画，换成管子里说得通的样子；
+   *  规则上的天气照旧（顶栏照旧写着），只是画面不一样。挂钩见 hd2d-scene-art.js · weather。
+   *   fx       3D 那边按哪种天气画（"none" = 只剩飘浮的尘：没有乌云、闪电、雨丝、雪、沙粒，也不闪白、镜头不抖）
+   *   wfx      2D 层（正式画面的 weather-fx）按哪种叠（"none" = 不叠）
+   *   flicker  打雷时管子里的灯跟着闪一下（AMBIENT.thunder）
+   *  没写的天气（微光、相位：不是天上来的）照旧 */
+  const SHELTER = {
+    thunder: { fx: "none", wfx: "none", flicker: true },   // 乌云、闪电、闪白 → 只让灯闪一下
+    acid: { fx: "none", wfx: "none" },                      // 雨丝、地台上的涟漪
+    snow: { fx: "none", wfx: "none" },                      // 雪
+    sand: { fx: "none", wfx: "none" },                      // 沙暴的沙粒、沙雾（管子里刮不进风沙）
+    heat: { fx: "heat", wfx: "none" }                       // 酷暑：3D 的热浪扭曲、热尘留着（管子里闷热）；2D 那层从底下泛上来的暖光（像太阳的光晕）不要
+  };
   /** 战场周围的贫民窟（hd2d-scene-art.js · around 给的范围外面，margin 是再让开多少）：
    *   rows     后面几排：每排离「后面最近到哪」再往后 gap，横着每隔 step（± jitter 成）一间，往左右各伸出战场半宽 + reach
    *   side     左右两边各几列：每列离「左右最近到哪」再往外 gap，从后面一直排到战场前后的正中（不排到前面，不挡人）
@@ -101,7 +119,8 @@
    *   decor     地台上的装饰：band 左右边带上几个、ledge 台子上几个、size 半径范围、kinds 摆什么（barrel 油桶、tire 旧轮胎、valve 阀门），轮着挑
    *   backdrop  远景：slum 战场周围的贫民窟（SLUM）、pipes 远处的大管道 / cliffs 沙岩悬崖（FAR）、tunnel 下水道的圆管（TUNNEL）、
    *             band 天边画的远景用哪种（bandTexture 的 kind；null = 用以前的）
-   *   light     光照 / 调色（写法见 hd2d-scene-art.js · lighting） */
+   *   light     光照 / 调色（写法见 hd2d-scene-art.js · lighting）
+   *   weather   室内的场景里天气怎么画（SHELTER；不写 = 照旧） */
   const ART = {
     outer_street: {
       palette: "street",
@@ -119,6 +138,7 @@
       palette: "tunnel",
       decor: { band: 3, ledge: 2, size: [0.15, 0.2], kinds: ["valve", "barrel", "tire"] },
       backdrop: { tunnel: true, band: null },
+      weather: SHELTER,
       // 管子里：不分白天黑夜（按夜晚画、光照固定），天是黑的（反正被管壁挡住）；环境光、主光压暗，偏一点污水的黄绿，灯更亮；调色更闷、暗角更重。
       // 截图验收（主人：「远景、近景都太暗」）：环境光、主光比上一版亮一点，暗角轻一点（整体还是昏暗，结构靠灯带、铆钉、倒影看清）
       light: {
@@ -541,10 +561,11 @@
       joints.rings.forEach(rx => { band += Math.exp(-((x - rx) ** 2) / S2); });
       return c.copy(lc).multiplyScalar(Math.min(1, lit) * T.lamps.gain * 0.18).add(add.copy(rc).multiplyScalar(Math.min(1, band) * RG.level));
     };
-    const pool = new THREE.Mesh(wallSheet(kit, S, env.x0, env.x1, T.seg * 3, T.arc, T.rows, 0.06, glow), env.keep(new THREE.MeshBasicMaterial({
-      vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false, toneMapped: false
-    })));
-    env.group.add(tag(pool, "lampPool"));
+    const poolM = env.keep(new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false, toneMapped: false }));
+    env.group.add(tag(new THREE.Mesh(wallSheet(kit, S, env.x0, env.x1, T.seg * 3, T.arc, T.rows, 0.06, glow), poolM), "lampPool"));
+    // 打雷时灯跟着闪（tunnelScene）：灯带、照亮的那一片剩 v 成亮
+    const ringC = ringM.color.clone();
+    return (v) => { ringM.color.copy(ringC).multiplyScalar(v); poolM.color.setScalar(v); };
   }
   /** 管壁上的灯：一个暗色的灯罩 + 发光的灯泡 + 一团柔光；有几盏时不时闪一下（AMBIENT.flicker；减少动态效果时一直亮着） */
   function wallLamps(kit, env, lamps) {
@@ -556,6 +577,7 @@
       grd.addColorStop(0, "rgba(255,255,255,.9)"); grd.addColorStop(0.35, "rgba(255,255,255,.3)"); grd.addColorStop(1, "rgba(255,255,255,0)");
       g.fillStyle = grd; g.fillRect(0, 0, s, s);
     }, 5);
+    const all = [];
     lamps.forEach((l, i) => {
       const g = new THREE.Group();
       g.add(kit.put(new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.18, 0.2), house), l.x, l.y + 0.1, l.z));
@@ -564,12 +586,16 @@
       const sp = new THREE.Sprite(sm); sp.position.set(l.x, l.y, l.z + 0.1); sp.scale.setScalar(1.6);
       g.add(b, sp);
       env.group.add(tag(g, "wallLamp"));
-      if (i < T.blink) {
+      const blink = i < T.blink;
+      if (blink) {
         const beat = A.beat(A.rand(i * 59 + 7), cfg.every, cfg.dur);
         g.userData.ambient = { kind: "flicker", beat };
         env.anims.push((t, dt) => { const on = dt === 0 || beat.step(dt) < 0; b.visible = on; sm.opacity = on ? 0.55 : 0.08; });
       }
+      all.push({ b, sm, blink });
     });
+    // 打雷时灯跟着闪（tunnelScene，排在上面自己闪的那几盏后面）：剩 v 成亮，太暗的那一下灯泡也灭
+    return (v) => all.forEach(l => { l.sm.opacity = (l.blink ? l.sm.opacity : 0.55) * v; l.b.visible = (l.blink ? l.b.visible : true) && v >= 0.4; });
   }
   /** 沿管壁横着走的管子 / 电缆（TUNNEL.pipes），每隔 3 一个卡箍 */
   function wallPipes(kit, env, S) {
@@ -720,15 +746,27 @@
   }
   /** 下水道：巨大圆管的后半边（管壁、接缝和铆钉、灯带、拱顶、灯照亮的那一片）、管壁上的灯和管子、排污口、地上的污水和倒影。
    *  管子里看不到天：天幕和天边那条远景收起来（没有天光、太阳的光晕、星星、乌云） */
-  function tunnelScene(kit, env, seed) {
+  function tunnelScene(kit, env, art, seed) {
     const S = tunnelShape(env), lamps = tunnelLamps(env, S), joints = tunnelJoints(env);
     env.group.children.forEach(o => { if (o.userData.layer === "sky" || o.userData.layer === "band") o.visible = false; });
-    tunnelWall(kit, env, S, lamps, joints);
-    wallLamps(kit, env, lamps);
+    const dimWall = tunnelWall(kit, env, S, lamps, joints);
+    const dimLamps = wallLamps(kit, env, lamps);
     wallPipes(kit, env, S);
     outfall(kit, env, S, seed);
     sewage(kit, env, S, seed);
     shine(kit, env, S, joints.rings.concat(lamps.map(l => l.x)), seed);
+    // 雷鸣（SHELTER：管子里不劈闪电、不闪白）：外面打雷时管子里的灯跟着闪一下；减少动态效果时不闪
+    const w = art.weather && art.weather[env.weather];
+    if (w && w.flicker) {
+      const TH = AMBIENT.thunder, beat = A.beat(A.rand(seed + 53), TH.every, [TH.dur, TH.dur]);
+      env.group.userData.thunder = beat;
+      env.anims.push((t, dt) => {
+        const k = dt > 0 ? beat.step(dt) : -1;
+        let v = 1;
+        if (k >= 0) TH.dips.forEach(([at, lv]) => { if (k * TH.dur >= at) v = lv; });
+        dimWall(v); dimLamps(v);
+      });
+    }
   }
 
   /* ---------- 挂钩：远景 ---------- */
@@ -743,7 +781,7 @@
     if (art.backdrop.slum) slumScene(kit, env, art, P, b, seed);
     if (art.backdrop.pipes) bigPipes(kit, env, R);
     if (art.backdrop.cliffs) sandCliffs(kit, env, R);
-    if (art.backdrop.tunnel) tunnelScene(kit, env, seed);
+    if (art.backdrop.tunnel) tunnelScene(kit, env, art, seed);
     return {};
   }
 

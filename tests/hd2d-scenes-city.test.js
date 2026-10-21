@@ -317,6 +317,58 @@ test("下水道（#241）：在巨大圆管的里面——管壁从灯后面往�
   } finally { P.restore(); }
 });
 
+test("下水道里不显示天上来的天气（#241 截图验收）：雷鸣不画乌云、不劈闪电、不闪白，只让管子里的灯闪一下；雨、雪、沙暴不画，2D 层不叠；酷暑只留 3D 的热浪；别的场景、微光 / 相位照旧", async (t) => {
+  const A = packs(), WX = require("../prototypes/hd2d/hd2d-wfx.js");
+  const W = (w) => A.weather("sewer_tunnel", w);
+  assert.deepEqual(W("thunder"), { fx: "none", wfx: "none", flicker: true }, "雷鸣：3D、2D 都不画，灯闪一下");
+  ["acid", "snow", "sand"].forEach(w => assert.deepEqual(W(w), { fx: "none", wfx: "none", flicker: false }, w + "：天上来的，不画"));
+  assert.deepEqual(W("heat"), { fx: "heat", wfx: "none", flicker: false }, "酷暑：留 3D 的热浪，不要 2D 那层暖光");
+  ["glow", "phase", "none", undefined].forEach(w => assert.deepEqual(W(w), { fx: w || "none", wfx: w || "none", flicker: false }, String(w) + "：照旧"));
+  ["thunder", "acid", "snow", "sand", "heat"].forEach(w => {
+    assert.deepEqual(A.weather("outer_street", w), { fx: w, wfx: w, flicker: false }, "外城区的 " + w + " 照旧");
+    assert.equal(WX.plan({ weather: W(w).wfx, theme: "night", tier: "far" }).weather, "none", "下水道的 2D 层不叠 " + w);
+  });
+  // 接线：3D 天气、远景按它（hd2d-scene.js）；2D 层 sync 时先问它（hd2d-wfx.js · indoor，按布局的地面主题）
+  const scene = fs.readFileSync(path.join(DIR, "hd2d-scene.js"), "utf8"), wsrc = fs.readFileSync(path.join(DIR, "hd2d-wfx.js"), "utf8");
+  assert.match(scene, /const fx = ART\.weather\(layout\.ground, state\.meta\.weather \|\| "none"\)\.fx;/, "场景按地面主题换 3D 的天气");
+  assert.match(scene, /weatherPlan\(fx, state\.meta\.theme\)/, "远景的乌云按换过的天气");
+  assert.match(scene, /weather\.set\(fx, state\.meta\.theme\)/, "天气粒子、雷击按换过的天气");
+  assert.match(wsrc, /const p = plan\(indoor\(s, layout\)\)/, "2D 层按换过的天气");
+  const had = Object.prototype.hasOwnProperty.call(globalThis, "HD2DSceneArt"), keep = globalThis.HD2DSceneArt;
+  globalThis.HD2DSceneArt = A;
+  try {
+    assert.equal(WX.indoor({ weather: "thunder", theme: "night" }, { ground: "sewer_tunnel" }).weather, "none", "下水道：2D 层不叠雷鸣");
+    assert.equal(WX.indoor({ weather: "thunder", layout: { ground: "outer_street" } }).weather, "thunder", "外城区照旧");
+    assert.equal(WX.indoor({ weather: "glow", layout: { ground: "sewer_tunnel" } }).weather, "glow", "下水道的微光照旧");
+  } finally { if (had) globalThis.HD2DSceneArt = keep; else delete globalThis.HD2DSceneArt; }
+  // 雷鸣时管子里的灯跟着闪一下（真 three.js）：远景拿到的是规则上的天气；减少动态效果时不闪
+  const P = await protoEnv(t);
+  if (!P) return;
+  try {
+    const S = H.load().BattleSim, d = DONE.find(x => x.scene === "tunnel"), layout = layoutOf(BOARDS.line3(S), d, "night");
+    const build = (w) => P.B.buildBackdrop("sewer_tunnel", layout.bounds, "night", layout.camera, Object.assign({}, THEMES.night, { weather: w }));
+    const calm = build("none");
+    assert.equal(calm.group.userData.thunder, undefined, "不打雷时灯不跟着闪");
+    calm.dispose();
+    const bd = build("thunder"), beat = bd.group.userData.thunder;
+    assert.ok(beat, "打雷时管子里的灯跟着闪");
+    let ring = null, pool = null;
+    bd.group.traverse(o => { if (o.userData.art === "lightRing") ring = o.children[0].material; if (o.userData.art === "lampPool") pool = o.material; });
+    const full = ring.color.r;
+    for (let i = 0; i < 300; i++) bd.update(i * 0.05, 0);
+    assert.equal(beat.n, 0, "减少动态效果时不闪");
+    assert.equal(ring.color.r, full, "减少动态效果时灯一直亮着");
+    let darkest = 1, t0 = 0;
+    for (let i = 0; i < 600; i++) { bd.update(t0 += 0.05, 0.05); darkest = Math.min(darkest, pool.color.r); }
+    assert.ok(beat.n >= 2, `30 秒里外面打了几次雷（${beat.n}）`);
+    assert.ok(darkest < 0.5, `打雷时灯暗下去过（最暗 ${darkest}）`);
+    for (let i = 0; i < 40 && beat.active; i++) bd.update(t0 += 0.05, 0.05);
+    bd.update(t0 += 0.01, 0.01);
+    if (!beat.active) assert.ok(Math.abs(ring.color.r - full) < 1e-9 && pool.color.r === 1, "闪完灯恢复原样");
+    bd.dispose();
+  } finally { P.restore(); }
+});
+
 test("接线（#241）：页面在 #242 的登记处和采矿场的美术包后面加载城市类的美术包；没有坚毅生命（美术代码里不碰 shp / units / plate）", () => {
   const html = fs.readFileSync(path.join(DIR, "index.html"), "utf8");
   const at = (f) => html.indexOf(`<script src="${f}"></script>`);
