@@ -40,6 +40,15 @@ test("玩家详细：字段带名字、详细内容（保留换行的那一段�
   assert.match(L.playerHtml({ ...base, list: [] }), /这条资料现在看不到了/, "撤回或删除了");
 });
 
+test("玩家详细：主持人清空了详细内容（索引 rev 变大、没有 more），缓存里的旧正文不再画，也不挂着「正在取新的」", () => {
+  const row = npc("a", { name: "季玛" }, { rev: 2, more: true });
+  // 玩家点开过 rev 2（缓存着）；主持人把详细内容清空保存，索引里这条变成 rev 3、没有 more
+  const html = L.playerHtml({ types: TYPES, list: [npc("a", { name: "季玛" }, { rev: 3 })], openId: "a", entry: { ...row, body: "写错的剧透" } });
+  assert.doesNotMatch(html, /写错的剧透/, "清空往往是要撤掉写错的 / 剧透的内容");
+  assert.doesNotMatch(html, /正在取新的/, "没有详细内容就不会再去要，不能一直挂着");
+  assert.match(html, /（没有详细内容）/);
+});
+
 test("主持人列表：草稿和已发布都在（状态写清楚），草稿「发布」、已发布「撤回为草稿」，↑↓ 到头灰掉；认不得的类型只能删；忙的时候全灰", () => {
   const list = [npc("a", { name: "甲" }, { status: "published", body: "第一行\n第二行" }), npc("b", { name: "乙" }, { status: "draft" }), { id: "c", type: "place", fields: { name: "锈港" }, status: "draft" }];
   const html = L.gmHtml({ types: TYPES, list });
@@ -145,6 +154,10 @@ test("玩家：工具栏「NPC 资料」→ 列表 → 点开才向房主要详�
   await page.evaluate(row => { fixture.bodies.a = "改过的介绍"; fixture.setLore([row]); }, pubRow("a", "特蕾莎", 2));
   await page.waitForFunction(() => document.querySelector("#online-lore .ol-lore-body")?.innerText === "改过的介绍");
   assert.deepEqual(await calls(page, "loreEntry"), ["a", "a"], "rev 变大再要一次");
+  await page.evaluate(row => fixture.setLore([row]), pubRow("a", "特蕾莎", 3, false));   // 主持人把详细内容清空了
+  const cleared = await page.locator("#online-lore").innerText();
+  assert.match(cleared, /（没有详细内容）/); assert.doesNotMatch(cleared, /改过的介绍|正在取新的/, "缓存的旧正文不画");
+  assert.deepEqual(await calls(page, "loreEntry"), ["a", "a"], "没有详细内容就不再要");
   await page.evaluate(() => fixture.setLore([]));
   assert.match(await page.locator("#online-lore").innerText(), /这条资料现在看不到了/, "主持人撤回了");
   await page.keyboard.press("Escape");

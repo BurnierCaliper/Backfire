@@ -9,6 +9,9 @@
 (function (root) {
   "use strict";
   const ENTRY = "NPC 资料";   // 入口按钮和浮层标题（工具栏上的「角色资料」是自己角色的卡，所以这里不叫这个）
+  /** 界面上的几个数：主持人列表上露出详细内容的前几个字、新发布的提示最多列几个名字、详细内容框几行高；
+   *  LORE_TYPES 里没写上限时输入框 / 详细内容框限几个字（和 lore.js 认不得的字段、NPC 的详细内容一样长） */
+  const UI = { preview: 80, toastNames: 3, bodyRows: 10, fieldMax: 60, bodyMax: 2000 };
   const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]);
   const types = () => (typeof LORE_TYPES !== "undefined" && LORE_TYPES) || {};
   const untitled = () => (typeof LORE_LIMITS !== "undefined" && LORE_LIMITS.untitled) || "（未命名）";
@@ -36,7 +39,8 @@
       const row = list.find(e => e.id === m.openId);
       const back = `<div class="ol-attr-btns">${btn("← 返回列表", "back")}</div>`;
       if (!row) return `<div class="ol-card ol-quest-card ol-lore-card">${headHtml(ENTRY)}${back}<p class="ol-muted">这条资料现在看不到了（主持人撤回或删除了）。</p></div>`;
-      const e = m.entry && m.entry.id === row.id ? m.entry : null, spec = specOf(row, T);
+      // 索引里这条没有详细内容了（主持人清空了）：缓存的旧版本不画——清空往往是要撤掉写错的 / 剧透的内容，也不会再去要新的
+      const e = row.more && m.entry && m.entry.id === row.id ? m.entry : null, spec = specOf(row, T);
       const body = e && e.body ? `<p class="ol-lore-body">${esc(e.body)}</p>`
         : e || !row.more ? '<p class="ol-muted">（没有详细内容）</p>'
         : m.error ? `<p class="ol-notice" role="status">${esc(m.error)}</p><div class="ol-attr-btns">${btn("重试", "retry")}</div>`
@@ -57,18 +61,18 @@
       const text = String(e.body || "").replace(/\s+/g, " ").trim();
       const tools = [btn("编辑", "edit", "", off || !spec), pub ? btn("撤回为草稿", "unpublish", "", off) : btn("发布", "publish", "", off || !spec, true),
         btn("↑", "up", 'title="往前挪"', off || i === 0), btn("↓", "down", 'title="往后挪"', off || i === list.length - 1), btn("删除", "delete", "", off)].join("");
-      return `<article class="ol-q-card${pub ? " ol-q-active" : ""}" data-lore-id="${esc(e.id)}"><header><b>${esc(titleOf(e, T))}</b>${chips(e, T, false)}<span class="ol-q-st">${pub ? "已发布" : "草稿"}</span></header>${spec ? "" : '<p class="ol-muted">这个版本认不得这种资料，只能删除。</p>'}${text ? `<p class="ol-q-goal ol-muted">${esc(text.length > 80 ? text.slice(0, 80) + "…" : text)}</p>` : ""}<div class="ol-attr-btns">${tools}</div></article>`;
+      return `<article class="ol-q-card${pub ? " ol-q-active" : ""}" data-lore-id="${esc(e.id)}"><header><b>${esc(titleOf(e, T))}</b>${chips(e, T, false)}<span class="ol-q-st">${pub ? "已发布" : "草稿"}</span></header>${spec ? "" : '<p class="ol-muted">这个版本认不得这种资料，只能删除。</p>'}${text ? `<p class="ol-q-goal ol-muted">${esc(text.length > UI.preview ? text.slice(0, UI.preview) + "…" : text)}</p>` : ""}<div class="ol-attr-btns">${tools}</div></article>`;
     }).join("");
     return `<div class="ol-card ol-quest-card ol-lore-card">${headHtml(ENTRY + " · 主持人")}<p class="ol-muted">新建的是草稿，只有你看得到；「发布」后联机玩家在「${esc(ENTRY)}」里能看（只读）。已发布的照样能改，保存后玩家看到的跟着更新；「撤回为草稿」玩家就看不到了。玩家看到的顺序和这里一样。</p>${m.error ? `<p class="ol-notice" role="status">${esc(m.error)}</p>` : ""}<div class="ol-attr-btns">${make}</div>${cards || '<p class="ol-muted">还没有资料。</p>'}</div>`;
   }
   /** 主持人编辑表单（字段、长度上限照 LORE_TYPES） */
   function editorHtml(e, T) {
     const spec = specOf(e, T); if (!spec) return "";
-    const f = e.fields || {}, body = e.body || "", pub = e.status === "published";
-    const inputs = spec.fields.map(x => `<label>${esc(x.label)}<input data-lore-field="${esc(x.key)}" maxlength="${Number(x.max) || 60}" value="${esc(f[x.key] || "")}" autocomplete="off"></label>`).join("");
+    const f = e.fields || {}, body = e.body || "", pub = e.status === "published", bodyMax = Number(spec.body.max) || UI.bodyMax;
+    const inputs = spec.fields.map(x => `<label>${esc(x.label)}<input data-lore-field="${esc(x.key)}" maxlength="${Number(x.max) || UI.fieldMax}" value="${esc(f[x.key] || "")}" autocomplete="off"></label>`).join("");
     return `<div class="ol-card ol-quest-card ol-lore-card">${headHtml(`编辑 ${spec.name} 资料`)}<p class="ol-muted">${pub ? "这条已发布：保存后玩家看到的跟着更新。" : "这条是草稿：只有你看得到，「保存并发布」后玩家才看得到。"}</p>
-      <form class="crq-form" data-lore-form="${esc(e.id)}">${inputs}<label>${esc(spec.body.label)}<textarea data-lore-body rows="10" maxlength="${Number(spec.body.max) || 2000}">${esc(body)}</textarea></label>
-      <small class="ol-muted ol-lore-count" data-lore-count>${body.length} / ${Number(spec.body.max) || 2000}</small><p class="ol-notice" role="status" data-lore-error></p>
+      <form class="crq-form" data-lore-form="${esc(e.id)}">${inputs}<label>${esc(spec.body.label)}<textarea data-lore-body rows="${UI.bodyRows}" maxlength="${bodyMax}">${esc(body)}</textarea></label>
+      <small class="ol-muted ol-lore-count" data-lore-count>${body.length} / ${bodyMax}</small><p class="ol-notice" role="status" data-lore-error></p>
       <div class="ol-attr-btns">${btn("保存", "save", "", false, true)}${pub ? "" : btn("保存并发布", "savePublish")}${btn("取消", "cancel")}</div></form></div>`;
   }
 
@@ -104,13 +108,15 @@
         }
       }
     }
-    /** 玩家：主持人新发布的条目弹一句（第一次收到索引、换房间都不弹：那时已有的不算新的） */
+    /** 玩家：主持人新发布的条目弹一句（第一次收到索引、换房间都不弹：那时已有的不算新的）。
+     *  索引里没有详细内容了（主持人清空了）的条目，缓存的旧正文扔掉：以后主持人再写新的，取到之前也不先露出旧的 */
     function observe() {
       if (!Array.isArray(v().packet && v().packet.lore)) return;
       const list = index(), ids = new Set(list.map(e => e.id));
+      list.forEach(e => { if (!e.more) cache.delete(e.id); });
       if (seen && typeof o.toast === "function") {
         const fresh = list.filter(e => !seen.has(e.id));
-        if (fresh.length) o.toast(`👤 新的 ${ENTRY}：${fresh.slice(0, 3).map(e => "「" + titleOf(e, types()) + "」").join("、")}${fresh.length > 3 ? ` 等 ${fresh.length} 条` : ""}（点顶上的「${ENTRY}」查看）`);
+        if (fresh.length) o.toast(`👤 新的 ${ENTRY}：${fresh.slice(0, UI.toastNames).map(e => "「" + titleOf(e, types()) + "」").join("、")}${fresh.length > UI.toastNames ? ` 等 ${fresh.length} 条` : ""}（点顶上的「${ENTRY}」查看）`);
       }
       seen = ids;
     }
@@ -233,7 +239,8 @@
         }
         case "cancel":
           if (dirty() && typeof o.confirm === "function" && !(await o.confirm("放弃修改", "没保存的修改会丢掉，确定吗？", "放弃修改"))) return;
-          editId = editing = null; last = ""; paint(); return;
+          // 放弃了的那次保存失败的原因不带回列表上
+          editId = editing = null; error = ""; last = ""; paint(); return;
       }
     }
     const onInput = ev => {

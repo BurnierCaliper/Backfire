@@ -46,11 +46,12 @@ function loreText(v, max) {
   if (typeof v !== "string") return "";
   return loreCut(v.replace(/\r\n?/g, "\n").replace(/\t/g, " ").replace(/(?!\n)[\p{Cc}\p{Cf}]/gu, "").replace(/\s+$/, ""), max);
 }
-/** 新 id：时间 + 序号。不用 Math.random：战斗里的随机数按种子排好了，抽走一个后面的骰子就变了 */
+/** 新 id：创建时间，同一毫秒撞了才加序号（-1、-2…）。不按已经有几条编号：id 会发给玩家，看得出有几条草稿。
+ *  不用 Math.random：战斗里的随机数按种子排好了，抽走一个后面的骰子就变了 */
 function loreNewId(used) {
-  const t = Date.now();
-  let n = used.size, id;
-  do id = "lore-" + t + "-" + n++; while (used.has(id));
+  const base = "lore-" + Date.now();
+  let n = 0, id = base;
+  while (used.has(id)) id = base + "-" + ++n;
   return id;
 }
 /** 整理一条资料（存档读进来的、主持人存的）：认得的字段照表截长度，认不得的原样留着（截短）；id 缺了 / 重复了换一个新的 */

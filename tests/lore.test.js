@@ -35,7 +35,31 @@ test("新建是草稿：字段全空、rev 1；草稿不进玩家的索引，玩
   assert.ok(Object.values(e.fields).every(v => v === ""));
   assert.deepEqual(plain(c.lorePublicIndex()), []);
   assert.equal(c.lorePublicEntry(id), null);
-  assert.match(id, /^lore-\d+-\d+$/, "id 只用数字，不会撞上联机白名单的敏感词（online-view.js · id）");
+  assert.match(id, /^lore-\d+(-\d+)?$/, "id 只用数字（创建时间，同一毫秒撞了才加序号），不会撞上联机白名单的敏感词（online-view.js · id）");
+});
+
+/** 把规则环境的时钟拨到 t（之后每读一次走 1 毫秒） */
+const setClock = (c, t) => vm.runInContext(`{ let t = ${t}; Date.now = () => t++; }`, c);
+
+test("新 id 只看创建时间，不按已经有几条编号：先建几条草稿，之后发布的那条 id 不变（玩家看 id 推不出有几条草稿）", () => {
+  const publishedId = drafts => {
+    const { c, run } = rules();
+    setClock(c, 1792650204000);
+    for (let i = 0; i < drafts; i++) run({ action: "create" });
+    setClock(c, 1792650204757);
+    const { id } = run({ action: "create" });
+    run({ action: "save", entry: { id, fields: { name: "甲" } }, status: "published" });
+    assert.deepEqual(plain(c.lorePublicIndex()).map(e => e.id), [id], "玩家只看得到这一条");
+    return id;
+  };
+  const alone = publishedId(0);
+  assert.equal(publishedId(3), alone, "前面有 3 条草稿，发布的那条 id 一样");
+  assert.equal(publishedId(50), alone);
+  // 同一毫秒新建的才加序号（不重复）
+  const { c, run } = rules();
+  vm.runInContext("Date.now = () => 1792650204757", c);
+  const ids = [run({ action: "create" }).id, run({ action: "create" }).id, run({ action: "create" }).id];
+  assert.deepEqual(ids, ["lore-1792650204757", "lore-1792650204757-1", "lore-1792650204757-2"]);
 });
 
 test("保存：按 LORE_TYPES 截长度、去控制字符和零宽字符，详细内容保留换行；只认字符串，没传的字段照旧；内容变了 rev + 1，没变不加", () => {
@@ -195,6 +219,21 @@ test("登记给玩家看的字段（online-view.js · LORE_PUBLIC）都在 lore.
     for (const key of keys) assert.ok(TYPES[type].fields.some(f => f.key === key), type + "." + key);
   }
   assert.deepEqual([...OV.LORE_PUBLIC.npc], TYPES.npc.fields.map(f => f.key), "NPC 的五个字段都给玩家看");
+});
+
+test("白名单的条数、长度上限（online-view.js · LORE_CAP）不比 lore.js 的配置窄：配置允许的整份都到得了玩家那边；调大配置时两边要一起改", () => {
+  const { TYPES, LIMITS } = rules();
+  assert.ok(OV.LORE_CAP.entries >= LIMITS.entries, `条数：白名单 ${OV.LORE_CAP.entries}，配置 ${LIMITS.entries}`);
+  for (const [type, spec] of Object.entries(TYPES)) {
+    for (const f of spec.fields) assert.ok(OV.LORE_CAP.field >= f.max, `${type}.${f.key}：白名单 ${OV.LORE_CAP.field}，配置 ${f.max}`);
+    assert.ok(OV.LORE_CAP.body >= spec.body.max, `${type} 详细内容：白名单 ${OV.LORE_CAP.body}，配置 ${spec.body.max}`);
+  }
+  // 配置上限那么多条、每个字段都写满：玩家收到的一条不少、一个字不少
+  const full = Array.from({ length: LIMITS.entries }, (_, i) => ({ id: "lore-" + i, type: "npc", rev: 1, more: true,
+    fields: Object.fromEntries(TYPES.npc.fields.map(f => [f.key, "字".repeat(f.max)])) }));
+  assert.deepEqual(OV.projectLore(full), full);
+  const body = "文".repeat(TYPES.npc.body.max);
+  assert.equal(OV.projectLoreEntry({ ...full[0], body }).body, body);
 });
 
 /* ---------- 包大小（online-wire.js） ---------- */

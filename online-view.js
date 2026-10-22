@@ -831,9 +831,9 @@
   }
   /* 角色资料（lore.js，issue #264）：每种类型给玩家看哪些字段在这里登记（新加的字段、类型没登记就不发）。
    * 都是主持人写给玩家看的文字（和任务目标一样）：只去控制字符、截长度，不按敏感词整段丢掉——人物介绍里「后台」是常用词（「有后台」）；
-   * 坚毅生命这类规则数值根本不在条目里（条目只有主持人写的字）。长度上限比 lore.js 的配置宽，只是兜底 */
+   * 坚毅生命这类规则数值根本不在条目里（条目只有主持人写的字）。条数、长度上限都比 lore.js 的配置宽，只是兜底（tests/lore.test.js 查：调大配置时这里也要跟着调） */
   const LORE_PUBLIC = Object.freeze({ npc: Object.freeze(["name", "gender", "race", "faction", "title"]) });
-  const LORE_CAP = { entries: 200, field: 60, body: 4000 };
+  const LORE_CAP = Object.freeze({ entries: 400, field: 60, body: 4000 });
   function loreStr(v, max, lines) {
     if (typeof v !== "string") return "";
     // 控制字符（\p{Cc}）和零宽 / 双向控制这类格式字符（\p{Cf}）去掉；详细内容留着换行
@@ -908,7 +908,7 @@
     });
     return out;
   }
-  const api = { SCHEMA, pickKeys, projectHud, projectPacket, projectQuests, projectLore, projectLoreEntry, LORE_PUBLIC, projectPurse, projectShop, projectShopSell, projectClinic, projectSmith, projectWorkshop, projectCyberware, projectRest, projectCamp, projectParty, projectSheets, projectBagDetail, projectUnit, projectState, projectTape, projectFx, projectMessages, projectLogs, projectView, projectActionMenu, safeText: text, safeError };
+  const api = { SCHEMA, pickKeys, projectHud, projectPacket, projectQuests, projectLore, projectLoreEntry, LORE_PUBLIC, LORE_CAP, projectPurse, projectShop, projectShopSell, projectClinic, projectSmith, projectWorkshop, projectCyberware, projectRest, projectCamp, projectParty, projectSheets, projectBagDetail, projectUnit, projectState, projectTape, projectFx, projectMessages, projectLogs, projectView, projectActionMenu, safeText: text, safeError };
   root.OnlineView = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof globalThis !== "undefined" ? globalThis : window);
