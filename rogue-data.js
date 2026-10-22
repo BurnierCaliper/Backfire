@@ -45,6 +45,9 @@ const ROGUE_CONFIG = {
   // 幕间选择（作者定）：打完一幕的首领，选下一幕去哪。除了上面这张表的区域，第 2–4 幕还可以改去采矿场（第几幕 → 区域）。
   // 额外幕不选，照表走
   altRegions: { 2: "第一采矿场", 3: "第二采矿场", 4: "第三采矿场" },
+  // 下水道（作者 10/22，docs/ratfolk.md 第 6 节）：背包里有下水道地图（item），任何一次幕间选择都多一个「下水道」（region）选项，
+  // 额外幕的幕间也算；选了就用掉一张地图，一局只能进一次。下水道地图在单局商店的价格、进货见 ROGUE_SHOP / ROGUE_SHOP_RULES.mapChance
+  sewer: { region: "下水道", item: "map_sewer" },
   // 每日挑战（#52，rogue.js · dailySeed / dailyParty）：每天一个固定种子，大家打同一局，用来统计专长的选取率
   //   partySize 随机队伍几人（任何组合都行，方便测极端搭配）；featOffer 专长每次给几个选项；keepRuns 本机最多记几局
   daily: { partySize: 4, featOffer: 4, keepRuns: 200 },
@@ -57,7 +60,9 @@ const ROGUE_CONFIG = {
     // 采矿场还没有专属首领：从全部首领里抽
     "第一采矿场": [],
     "第二采矿场": [],
-    "第三采矿场": []
+    "第三采矿场": [],
+    // 下水道也还没有首领（docs/ratfolk.md 第 6 节：暂时从全部首领里抽）
+    "下水道": []
   },
 
   // 休息点不休息、直接离开：省下的时间换成一笔奎支（打零工 / 捡到的东西）
@@ -165,7 +170,9 @@ const ROGUE_TASK_WEATHER = {
     // 采矿场（占位）：露天矿坑晒、酸雨；熔岩矿场热；晶矿发光、相位
     "第一采矿场": ["heat", "acid", "sand"],
     "第二采矿场": ["heat", "acid"],
-    "第三采矿场": ["glow", "phase", "thunder"]
+    "第三采矿场": ["glow", "phase", "thunder"],
+    // 下水道：区域环境（天气、场地）待定（docs/ratfolk.md 第 7 节），先不带天气（和遭遇默认的一样，run.js · regionWeather）
+    "下水道": []
   }
 };
 
@@ -315,8 +322,9 @@ const ROGUE_MAIN_TASK = {
 
 /* 商店。价格照手册「常见物价」。give：water 是毫升；item 是背包物品 id（ITEM_CATALOG / 补给物品）。 */
 /* 商店：always 的（最便宜的水和食物）每家都有；其余商品每家随机进货 ROGUE_SHOP_RULES.randomCount 种；
- * 效果道具（items.js · EFFECT_ITEMS，自我效果除外）另外随机进 effectCount 种，不和水、食物、医疗包抢位置 */
-const ROGUE_SHOP_RULES = { randomCount: 8, effectCount: 4 };
+ * 效果道具（items.js · EFFECT_ITEMS，自我效果除外）另外随机进 effectCount 种，不和水、食物、医疗包抢位置；
+ * 地图（map: true 的，下水道地图）每家另外按 mapChance 的概率进一张（占位），也不抢位置；这一局进过下水道以后、长线养成不进 */
+const ROGUE_SHOP_RULES = { randomCount: 8, effectCount: 4, mapChance: 0.2 };
 /* 商店积分（作者定，docs/workshop-design.md 第 6 节）：在商店每花 per 奎支得 1 积分，零头累计到下次；
  * 积分只能兑换自我效果道具（items.js · EFFECT_ITEMS 里 kind 为 self 的，各自的 points）。这一局内有效。 */
 const ROGUE_SHOP_POINTS = { per: 3000 };
@@ -345,7 +353,8 @@ const ROGUE_SHOP = [
   { key: "steroid",      price: 1200, give: { item: "steroid" } },
   { key: "bomb_e",       price: 1000, give: { item: "bomb_e" } },
   { key: "bomb_a",       price: 1000, give: { item: "bomb_a" } },
-  { key: "shockbomb",    price: 1200, give: { item: "shockbomb" } }
+  { key: "shockbomb",    price: 1200, give: { item: "shockbomb" } },
+  { key: "map_sewer",    price: 3000, give: { item: "map_sewer" }, map: true }   // 下水道地图：幕间可以改走下水道（ROGUE_CONFIG.sewer）
 ].concat((typeof EFFECT_ITEMS !== "undefined" ? EFFECT_ITEMS : []).filter(it => it.price > 0)
   .map(it => ({ key: it.id, price: it.price, give: { item: it.id }, effect: true })));
 
