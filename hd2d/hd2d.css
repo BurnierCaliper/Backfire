@@ -347,3 +347,18 @@
 .hd2d-mist.in > .veil { opacity: var(--mist-o); }
 .hd2d-mist.out > .veil { opacity: 0; transition: opacity calc(var(--mist-out) * .6) ease-out; }
 @media (prefers-reduced-motion: reduce) { .hd2d-mist > i, .hd2d-mist > .veil { transition: none; } }
+
+/* ---------- 联机玩家的战斗画面（online-battle.js 的 .ol-battle，#289）----------
+ * 和正式画面一样：开着时盖住旧的区和单位卡（旧的照旧排、只是看不见、点不到），首领横幅、云雾转场照旧露在上面；
+ * 联机的战场自己会滚动（单位多时），3D 那一层铺在看得见的那一块上，开着时不滚。关着时没有 .hd2d-on，下面这些一条都套不上 */
+.ol-battle.hd2d-on > .g-field { visibility: hidden; }
+body.online-player .ol-battle.hd2d-on > .g-field.ol-field { overflow: hidden; }   /* 压过 online.css 战斗中的 overflow: auto */
+.ol-battle.hd2d-on > .g-field > .hd2d-field, .ol-battle.hd2d-on > .g-field > .g-topstack, .ol-battle.hd2d-on > .g-field > .hd2d-mist { visibility: visible; }
+.ol-battle.hd2d-on > .g-field > .g-topstack { z-index: 6; }
+/* 「新画面 关 / 开」开关（#g-hd2d-toggle，同一个按钮）挪到联机舞台顶上的工具栏里时：样子照旁边的按钮（online.css 的 .ol-button） */
+.ol-hd2d-slot { display: contents; }
+.ol-hd2d-slot > #g-hd2d-toggle {
+  min-height: 30px; padding: 2px 14px; cursor: pointer; color: inherit; font: inherit; font-weight: 700;
+  background: var(--sk-steel-hi, #3b342c); border: 2px solid var(--sk-ink, #0b0806); box-shadow: 2px 3px 0 #0008;
+}
+.ol-hd2d-slot > #g-hd2d-toggle[aria-pressed="true"] { background: var(--sk-hazard, #f2c230); color: var(--sk-ink, #0b0806); }
