@@ -95,6 +95,9 @@
         : typeof trpgCyberwarePacket === "function" && typeof TRPG !== "undefined" && TRPG.active && TRPG.clinicOpen ? trpgCyberwareFor(id, id === identity.id) : null,
       // 任务日志（跑团）：房主按收件人挑好（草稿、没指定给他的不给），online-view.js 再按白名单投影
       quests: !rogue() && typeof trpgQuestLog === "function" ? trpgQuestLog(id, id === identity.id, kitsOwnedBy(id)) : null,
+      // 角色资料（跑团，lore.js）：只有已发布条目的索引，不带详细内容（玩家点开一条时才要，见 receive 的 loreEntry）；
+      // 没变时 online-wire.js 只带 loreUnchanged，改了只发改了的条目
+      lore: !rogue() && typeof lorePublicIndex === "function" ? lorePublicIndex() : null,
       // 跑团私人钱包：自己操控的角色看得到余额，队友只给名字（转账用）；主持人看全部（online-view.js · projectPurse）
       purse: !rogue() && typeof trpgPurse === "function" && typeof TRPG !== "undefined" && TRPG.active ? purseFor(id, id === identity.id) : null,
       // 跑团商人：主持人开着的那家店（trpg-merchants.js · trpgMerchantView；online-view.js · projectShop 白名单）
@@ -319,6 +322,15 @@
       const result = OnlineRogue.handle(sender, cmd); publish(); return result && result.ok === false ? result : { ok: true };
     }
     Commands.validate(cmd);
+    // 角色资料（lore.js）：只有主持人能建、改、发布（玩家发来的在 receive 那里就挡掉了，这里按房主绑定的身份再查一次）；联机单局没有。
+    // 改完写进跑团存档（LoreCommands.onChange → rememberLore），再发包（玩家只拿到已发布条目的索引）
+    if (cmd.type === "lore") {
+      if (sender !== identity.id) error("只有主持人可以编辑角色资料");
+      if (rogue()) error("联机单局没有角色资料");
+      const value = HotseatGame.system(cmd, gmContext);
+      publish();
+      return value && typeof value.id === "string" ? { ok: true, id: value.id } : { ok: true };
+    }
     if (cmd.type === "gm.msg" || cmd.type === "gmReply") {
       const context = Object.freeze({}); messageContexts.set(context, sender);
       try { HotseatGame.system(cmd, context); publish(); return { ok: true }; }
@@ -390,6 +402,20 @@
     const battles = typeof LEDGER !== "undefined" && LEDGER.career && Array.isArray(LEDGER.career.battles) ? LEDGER.career.battles.slice(-10) : [];
     return { type: "sheetData", protocol: PROTOCOL, build: BUILD, sheets, armory, bag: bagDetail(), battles };
   }
+  /** 角色资料改了：写进跑团存档。队伍记忆（GAME.campaign）里的那份 LEDGER 也换成新的资料——战斗中途 GAME.campaign 是开战前那份，
+   *  战斗没打完就回探索时 trpgAbandonBattle 按它重读整个 LEDGER，不换的话这期间写的资料会被冲掉；写空位也是写这份（战斗中途不会把打到一半的血量当成进度） */
+  function rememberLore() {
+    if (rogue() || typeof TRPG === "undefined" || !TRPG.active || typeof LEDGER === "undefined") return;
+    const camp = root.GAME && GAME.campaign;
+    if (!camp || !camp.ledger || typeof camp.ledger !== "object") return;
+    camp.ledger.lore = copy(LEDGER.lore || []);
+    if (typeof GAME.onCampaignSaved === "function") GAME.onCampaignSaved(camp);
+  }
+  /** 一条资料的详细内容：只给已发布的（草稿、没有这条都是 null，不告诉玩家有没有这条草稿） */
+  function lorePacket(entryId) {
+    const entry = !rogue() && typeof lorePublicEntry === "function" && typeof entryId === "string" ? lorePublicEntry(entryId) : null;
+    return { type: "loreEntry", protocol: PROTOCOL, build: BUILD, entry };
+  }
   function messagePage(sender, request = {}) {
     const visible = sender === identity.id ? messages : messages.flatMap(m => OnlineView.projectMessages([m], { recipientId: sender, gmId: identity.id }));
     let end = visible.length;
@@ -403,7 +429,10 @@
   }
   Commands.register("gm.msg", recordMessage, { domain: "online" });
   Commands.register("gmReply", recordMessage, { domain: "online" });
-  function immediate(cmd) { return controls.has(cmd.type) || ["gm.msg", "gmReply", "orderStart"].includes(cmd.type); }
+  // 角色资料改完（在 lore 指令的执行里）写进跑团存档
+  if (typeof LoreCommands !== "undefined") LoreCommands.onChange = () => { if (isHost()) rememberLore(); };
+  // 角色资料不碰战场：不用排在演出、询问后面
+  function immediate(cmd) { return controls.has(cmd.type) || ["gm.msg", "gmReply", "orderStart", "lore"].includes(cmd.type); }
   async function receive(packet, sender) {
     if (!active || !isHost() || !status.roster.some(p => p.id === sender && p.role === "player")) return;
     try {
@@ -412,6 +441,7 @@
       if (!Number.isSafeInteger(packet.requestId) || packet.requestId < 1) error("无效指令编号");
       if (packet.type === "messageHistory") return sendProjected(sender, { ...messagePage(sender, packet), requestId: packet.requestId });
       if (packet.type === "sheetData") return sendProjected(sender, { ...sheetPacket(sender), requestId: packet.requestId });
+      if (packet.type === "loreEntry") return sendProjected(sender, { ...lorePacket(packet.id), requestId: packet.requestId });
       if (packet.type === "actionOptions") {
         if (isPaused()) error("房间暂停");
         const menu = actionMenu.menu(packet.request, sender);
@@ -440,7 +470,7 @@
   }
   function receiveDisplay(packet) {
     if (!active || packet.protocol !== PROTOCOL || packet.build !== BUILD || packet.displayOnly !== true) return;
-    if (packet.type === "ack" || packet.type === "actionOptions" || packet.type === "messageHistory" || packet.type === "sheetData") {
+    if (packet.type === "ack" || packet.type === "actionOptions" || packet.type === "messageHistory" || packet.type === "sheetData" || packet.type === "loreEntry") {
       const item = pending.get(packet.requestId); if (!item) return;
       clearTimeout(item.timer); pending.delete(packet.requestId); item.resolve(packet); return;
     }
@@ -724,6 +754,9 @@
     start() { if (!isHost()) error("只有主持人可以开始"); if (rogue() && !RunFlow.current()) error("先选好队伍出发"); if (!status.roster.some(p => p.role === "player" && p.online)) error("请等待至少一名玩家加入"); started = true; publish(); return { ok: true }; },
     actionMenu: request => rpc("actionOptions", { request }),
     sheetData: () => isHost() ? Promise.resolve(OnlineView.projectPacket(sheetPacket(identity.id), { recipientId: identity.id, gmId: identity.id })) : rpc("sheetData", {}),
+    /** 角色资料：主持人拿整份（草稿、详细内容都在，只在房主本机）；玩家是 null（玩家看 packet.lore 的索引，点开一条用 loreEntry 要） */
+    loreAll: () => isHost() && !rogue() && typeof loreList === "function" ? copy(loreList()) : null,
+    loreEntry: id => isHost() ? Promise.resolve(copy(lorePacket(id))) : rpc("loreEntry", { id: typeof id === "string" ? id : "" }),
     messageHistory: (request = {}) => isHost() ? Promise.resolve(messagePage(identity.id, request)) : rpc("messageHistory", { beforeId: request.beforeId || null }),
     subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     onPacket(fn) { packetListeners.add(fn); return () => packetListeners.delete(fn); },

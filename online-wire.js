@@ -161,11 +161,12 @@
     let encoded = {}, decoded = {}, hasEncoded = false, hasDecoded = false;
     let sentMatchup = null, hasSentMatchup = false, gotMatchup = null, hasGotMatchup = false;
     let sentRest = null, hasSentRest = false, gotRest = null, hasGotRest = false;
-    function reset() { encoded = {}; decoded = {}; hasEncoded = hasDecoded = false; sentMatchup = gotMatchup = sentRest = gotRest = null; hasSentMatchup = hasGotMatchup = hasSentRest = hasGotRest = false; }
+    let sentLore = null, hasSentLore = false, gotLore = null, hasGotLore = false;
+    function reset() { encoded = {}; decoded = {}; hasEncoded = hasDecoded = false; sentMatchup = gotMatchup = sentRest = gotRest = sentLore = gotLore = null; hasSentMatchup = hasGotMatchup = hasSentRest = hasGotRest = hasSentLore = hasGotLore = false; }
     function pack(input) {
       const packet = packetData(input);
       if (!["result", "resync"].includes(packet.type)) return packet;
-      if (own(packet, "wireFormat") || own(packet, "historyFull") || own(packet, "historyLengths") || own(packet, "matchupUnchanged") || own(packet, "restUnchanged")) fail("packet is already packed");
+      if (own(packet, "wireFormat") || own(packet, "historyFull") || own(packet, "historyLengths") || own(packet, "matchupUnchanged") || own(packet, "restUnchanged") || own(packet, "loreUnchanged") || own(packet, "loreDelta")) fail("packet is already packed");
       let full = !hasEncoded || packet.type === "resync";
       const lengths = {}, deltas = {}, next = { ...encoded };
       for (const key of histories) if (own(packet, key)) {
@@ -193,8 +194,23 @@
         if (hasSentRest && packet.type !== "resync" && packet.rest !== null && json === sentRest) { delete result.rest; result.restUnchanged = true; }
         sentRest = json; hasSentRest = true;
       }
+      // 角色资料索引（packet.lore，issue #264）：每包都带着同一份，和上一包一样只带 loreUnchanged；
+      // 改了（发布、编辑、撤回）且两份都是列表时只发改了的条目（loreDelta：和演出快照同一套按 id 的差异），比整份短才用。
+      // null（联机单局）、resync 一律整份发
+      let nextLore = sentLore, nextHasLore = hasSentLore;
+      if (own(packet, "lore")) {
+        const lore = packet.lore, base = hasSentLore && packet.type !== "resync" && Array.isArray(lore) && Array.isArray(sentLore) ? sentLore : null;
+        if (base && equal(base, lore)) { delete result.lore; result.loreUnchanged = true; }
+        else if (base) {
+          // 条目 id 不唯一之类做不了差异的（投影后不会出现），照整份发，不让一包资料卡住整个发包
+          let delta = null; try { delta = snapDelta(base, lore); } catch (_) { delta = null; }
+          if (delta && JSON.stringify(delta).length < JSON.stringify(lore).length) { delete result.lore; result.loreDelta = delta; }
+        }
+        nextLore = clone(lore); nextHasLore = true;
+      }
       // Commit only after every field was checked and encoded successfully.
       encoded = full ? Object.fromEntries(histories.filter(key => own(packet, key)).map(key => [key, next[key]])) : next;
+      sentLore = nextLore; hasSentLore = nextHasLore;
       hasEncoded = true; return result;
     }
     function unpack(input) {
@@ -230,8 +246,17 @@
         if (!hasGotRest || packet.type === "resync") fail("rest omission requires a baseline");
         result.rest = clone(gotRest); delete result.restUnchanged;
       } else if (own(packet, "rest")) { nextRest = clone(packet.rest); nextHasRest = true; }
+      // 角色资料索引：loreUnchanged 用上一次收到的那份还原，loreDelta 在上一份上按 id 改；玩家端看到的 packet.lore 和整份发时一模一样
+      let nextLore = gotLore, nextHasLore = hasGotLore;
+      if (own(packet, "loreUnchanged") || own(packet, "loreDelta")) {
+        if (!packed || own(packet, "lore") || own(packet, "loreUnchanged") && (packet.loreUnchanged !== true || own(packet, "loreDelta"))) fail("invalid lore metadata");
+        if (!hasGotLore || !Array.isArray(gotLore) || packet.type === "resync") fail("lore omission requires a baseline");
+        result.lore = own(packet, "loreDelta") ? applySnap(gotLore, packet.loreDelta) : clone(gotLore);
+        delete result.loreUnchanged; delete result.loreDelta;
+        nextLore = clone(result.lore);
+      } else if (own(packet, "lore")) { nextLore = clone(packet.lore); nextHasLore = true; }
       delete result.wireFormat; delete result.historyFull; delete result.historyLengths;
-      decoded = next; hasDecoded = true; gotMatchup = nextGot; hasGotMatchup = nextHasGot; gotRest = nextRest; hasGotRest = nextHasRest; return result;
+      decoded = next; hasDecoded = true; gotMatchup = nextGot; hasGotMatchup = nextHasGot; gotRest = nextRest; hasGotRest = nextHasRest; gotLore = nextLore; hasGotLore = nextHasLore; return result;
     }
     return { pack, unpack, reset };
   }

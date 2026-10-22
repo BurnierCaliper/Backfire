@@ -641,6 +641,8 @@
       out.bag = projectBagDetail(get(packet, "bag"));
       out.battles = projectBattles(get(packet, "battles"));
     }
+    // 角色资料的详细内容（玩家点开一条时才要，online-game.js · loreEntry）：只有已发布的，草稿在房主那边就是 null
+    if (get(packet, "type") === "loreEntry") out.entry = projectLoreEntry(get(packet, "entry"));
     if (own(packet, "offlineWait")) {
       const wait = get(packet, "offlineWait");
       out.offlineWait = obj(wait) ? identifiers(wait, copyFields(wait, {}, ["name"], ["deadline", "remainingMs"], []), ["actor", "owner"]) : null;
@@ -666,6 +668,8 @@
     if (own(packet, "rogue")) { const r = get(packet, "rogue"); out.rogue = obj(r) ? scrubHidden(clone(r)) : null; }
     // 任务日志：只留玩家该看的字段（主持人备注、敌人配置、隐藏站的内容在房主那边就去掉了，这里再按白名单过一遍）
     if (own(packet, "quests")) out.quests = projectQuests(get(packet, "quests"));
+    // 角色资料：已发布条目的索引（不带详细内容；草稿在房主那边就没放进来，这里再挡一次）
+    if (own(packet, "lore")) out.lore = projectLore(get(packet, "lore"));
     if (own(packet, "purse")) out.purse = projectPurse(get(packet, "purse"));
     if (own(packet, "shop")) out.shop = projectShop(get(packet, "shop"));
     if (own(packet, "shopSell")) out.shopSell = projectShopSell(get(packet, "shopSell"));
@@ -829,6 +833,43 @@
     });
     return scrubHidden(out);
   }
+  /* 角色资料（lore.js，issue #264）：每种类型给玩家看哪些字段在这里登记（新加的字段、类型没登记就不发）。
+   * 都是主持人写给玩家看的文字（和任务目标一样）：只去控制字符、截长度，不按敏感词整段丢掉——人物介绍里「后台」是常用词（「有后台」）；
+   * 坚毅生命这类规则数值根本不在条目里（条目只有主持人写的字）。条数、长度上限都比 lore.js 的配置宽，只是兜底（tests/lore.test.js 查：调大配置时这里也要跟着调） */
+  const LORE_PUBLIC = Object.freeze({ npc: Object.freeze(["name", "gender", "race", "faction", "title"]) });
+  const LORE_CAP = Object.freeze({ entries: 400, field: 60, body: 4000 });
+  function loreStr(v, max, lines) {
+    if (typeof v !== "string") return "";
+    // 控制字符（\p{Cc}）和零宽 / 双向控制这类格式字符（\p{Cf}）去掉；详细内容留着换行
+    const clean = lines ? v.replace(/\r\n?/g, "\n").replace(/(?!\n)[\p{Cc}\p{Cf}]/gu, "") : v.replace(/[\p{Cc}\p{Cf}]/gu, "");
+    const cut = clean.slice(0, max), last = cut.charCodeAt(cut.length - 1);
+    return last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut;
+  }
+  /** 索引：{ id, type, fields: { 登记过的字段 }, rev, more（有没有详细内容）}。带着 status 又不是已发布的（草稿）直接丢掉；id 重复的只留第一条 */
+  function projectLore(list) {
+    if (!Array.isArray(list)) return null;
+    const seen = new Set();
+    return list.slice(0, LORE_CAP.entries).flatMap(e => {
+      if (!obj(e)) return [];
+      const lid = id(get(e, "id")), type = get(e, "type");
+      if (!lid || seen.has(lid) || !Object.hasOwn(LORE_PUBLIC, type) || own(e, "status") && get(e, "status") !== "published") return [];
+      seen.add(lid);
+      const src = get(e, "fields"), fields = {};
+      for (const key of LORE_PUBLIC[type]) { const v = loreStr(get(src, key), LORE_CAP.field); if (v) fields[key] = v; }
+      const rev = number(get(e, "rev"));
+      const out = { id: lid, type, fields, rev: Number.isSafeInteger(rev) && rev > 0 ? rev : 1 };
+      if (get(e, "more") === true) out.more = true;
+      return [out];
+    });
+  }
+  /** 一条的详细内容：索引那几样 + body（保留换行） */
+  function projectLoreEntry(e) {
+    const row = obj(e) ? projectLore([e])[0] : null;
+    if (!row) return null;
+    delete row.more;
+    const body = loreStr(get(e, "body"), LORE_CAP.body, true); if (body) row.body = body;
+    return row;
+  }
   function projectQuests(list) {
     if (!Array.isArray(list)) return null;
     const str = (v, n) => typeof v === "string" ? v.slice(0, n) : "";
@@ -871,7 +912,7 @@
     });
     return out;
   }
-  const api = { SCHEMA, pickKeys, projectHud, projectPacket, projectQuests, projectPurse, projectShop, projectShopSell, projectClinic, projectSmith, projectWorkshop, projectCyberware, projectRest, projectCamp, projectParty, projectSheets, projectBagDetail, projectUnit, projectState, projectTape, projectFx, projectMessages, projectLogs, projectView, projectActionMenu, safeText: text, safeError };
+  const api = { SCHEMA, pickKeys, projectHud, projectPacket, projectQuests, projectLore, projectLoreEntry, LORE_PUBLIC, LORE_CAP, projectPurse, projectShop, projectShopSell, projectClinic, projectSmith, projectWorkshop, projectCyberware, projectRest, projectCamp, projectParty, projectSheets, projectBagDetail, projectUnit, projectState, projectTape, projectFx, projectMessages, projectLogs, projectView, projectActionMenu, safeText: text, safeError };
   root.OnlineView = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof globalThis !== "undefined" ? globalThis : window);
