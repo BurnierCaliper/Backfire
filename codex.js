@@ -1,7 +1,7 @@
 /* Antlerscale: Backfire · 配置物图鉴 / 效果图鉴（规则 / 数据）
  *
  * 和敌人图鉴（bestiary.js）放在同一个图鉴界面里（bestiary-ui.js 顶上的「敌人 / 配置物 / 效果」切换）。
- * 配置物和效果是规则说明，不需要遭遇过，一直都能查。
+ * 配置物和效果是规则说明，不需要遭遇过，一直都能查。角色、专长、义体图鉴也在这里（见文件后半）。
  * 文字按《游戏规则》第五章（伤害属性、血量层）、第七章（效果系统）、第八章（攻击效果、飞行、配置物）整理；
  * 和手册不同的地方以游戏里的实现为准（碎渣机炮每次使用也 −1 耐久；超充能电池摧毁时炸同区所有单位，不分敌我）。
  * 铁壁 / 防护罩 / 废铁墙是技能造出来的配置物，手册配置物一节里没有，按技能说明写。 */
@@ -274,4 +274,27 @@ function codexFeatEntries() {
       lines: [f.text || ""].filter(Boolean)
     };
   }).sort((a, b) => a.tier - b.tier);
+}
+
+/* ---------- 义体图鉴（#262） ---------- */
+/** 义体条目：读 cyberware.js 的正式目录（示例不列），文字由义体种类表生成（cyberware.js · cyberwareCodexInfo），和诊所、战斗里一致。
+ *  按种类分组（CYBERWARE_KINDS 的顺序，以后加了新种类自动多一个标签）；每条写名称、等级、效果、改造率、坚毅生命的消耗、诊所规则。
+ *  只写固定的规则文字：可以写坚毅生命的具体消耗，不显示任何角色当前的坚毅生命，也没有能推出它的数字 */
+function codexCyberwareEntries() {
+  if (typeof cyberwareCatalog !== "function" || typeof cyberwareCodexInfo !== "function") return [];
+  const kinds = typeof CYBERWARE_KINDS !== "undefined" ? Object.keys(CYBERWARE_KINDS) : [];
+  return cyberwareCatalog().filter(d => !d.example).map(d => {
+    const info = cyberwareCodexInfo(d);
+    return {
+      id: "cw:" + d.id, cwId: d.id, name: d.name, tier: d.tier, vol: d.vol, line: d.line, kind: d.kind, kindName: info.kindName,
+      element: d.element || null, group: d.kind, groupName: info.kindName, short: info.short, tags: info.tags,
+      effect: info.effect, use: info.use, rate: info.rate, rateSamples: info.rateSamples, grit: info.grit, clinic: info.clinic,
+      price: d.price, removePrice: d.removePrice, hpCut: d.hpCut,
+      lines: [].concat(info.effect, [info.use, info.rate], info.grit, info.clinic)
+    };
+  }).sort((a, b) => kinds.indexOf(a.kind) - kinds.indexOf(b.kind));
+}
+/** 义体图鉴的分组标签：全部 + 每个种类一个 */
+function codexCyberwareGroups() {
+  return typeof CYBERWARE_KINDS === "undefined" ? [] : Object.keys(CYBERWARE_KINDS).map(k => ({ id: k, name: CYBERWARE_KINDS[k].name || k }));
 }

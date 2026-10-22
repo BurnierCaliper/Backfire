@@ -602,6 +602,9 @@ function skillCost(id) {
   // 专长动作：按专长里写的消耗（默认 1 行动点）
   const featCost = typeof featSkillCost === "function" ? featSkillCost(id) : null;
   if (featCost) return featCost;
+  // 义体（cyberware.js）：按义体表里写的消耗（默认 1 行动点）
+  const cwCost = typeof cyberwareSkillCost === "function" ? cyberwareSkillCost(id) : null;
+  if (cwCost) return cwCost;
   // 不稳超导：拉斯缪尔已经处于不稳态时免费释放
   if (id === "ras_super") {
     const r = typeof state !== "undefined" && typeof findKit === "function" ? findKit("ras", state.units) : null;
@@ -1042,6 +1045,8 @@ function skillList(unit) {
   }
   // 专长带的战斗动作（feats.js）
   if (typeof featSkills === "function") featSkills(unit).forEach(add);
+  // 装着的义体（cyberware.js）：长在身上，空手也能用
+  if (typeof cyberwareSkills === "function") cyberwareSkills(unit).forEach(add);
   // 单人模式：支援（呼叫伙伴的协助攻击）
   if (typeof soloSupportSkill === "function") {
     const sup = soloSupportSkill(unit);
