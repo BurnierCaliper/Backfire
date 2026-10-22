@@ -46,7 +46,7 @@ function worldPlaceOf(regionOrId) {
  *   区域名用游戏里现成的：单局各幕 / 幕间改走的采矿场（rogue-data.js 的 regions / altRegions）、遭遇的 region。
  *   地图地点 id（跑团 LEDGER.place：mine_1、outer_city……）、地点名（天网塔）按上面的 WORLD_REGION_PLACE / WORLD_PLACES 对到区域；
  *   地图上别的地点（星际港口、极北禁区、太阳能板群……）不是区域，认不得。
- *   HD-2D 原型的地面主题表（prototypes/hd2d/hd2d-layout.js 的 REGIONS / REGION_ALIAS）和这里一一对上（tests/region-light.test.js 核对）。 */
+ *   HD-2D 战场的地面主题表（hd2d/hd2d-layout.js 的 REGIONS / REGION_ALIAS）和这里一一对上（tests/region-light.test.js 核对）。 */
 const BATTLE_REGIONS = ["外城区", "沙漠", "巨人城", "天网设施", "第一采矿场", "第二采矿场", "第三采矿场",
   "下水道"];   // 下水道：游戏里还没有这张图（ROADMAP 里的「下水道」），HD-2D 原型先放了地面主题；主持人可以在战场配置里选
 /** 区域名 / 地图地点 id / 地点名 → 区域名（BATTLE_REGIONS 里的）；认不得的返回 null */
@@ -62,7 +62,7 @@ function battleRegionName(x) {
  *   id 只要在同一个区域里不重复（三个采矿场都用 rim 矿外 / mid 矿内 / floor 矿底）；name 是战场配置下拉框里写的中文名。
  *   state.scene 只认当前区域的 id，联机白名单（online-view.js · projectState）也只放行这些。
  *   field：场上（棋盘上的区）有这种场地时固定用这个场景，画面和场地对得上（沙漠：有沙珊瑚台地 state.fields[z].coral → 沙珊瑚台地）。
- *   HD-2D 原型的地面主题表（prototypes/hd2d/hd2d-layout.js 的 SCENES）和这里一一对上（tests/region-scene.test.js 核对）。 */
+ *   HD-2D 战场的地面主题表（hd2d/hd2d-layout.js 的 SCENES）和这里一一对上（tests/region-scene.test.js 核对）。 */
 const BATTLE_SCENES = {
   "外城区": [{ id: "street", name: "街区" }],          // 外城区、巨人城、天网设施、下水道：暂时各只有一个场景，以后可以再加
   "沙漠": [{ id: "dune", name: "沙丘" }, { id: "coral", name: "沙珊瑚台地", field: "coral" }],

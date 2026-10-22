@@ -1,4 +1,4 @@
-// HD-2D 战场原型（prototypes/hd2d/）· 主人试玩反馈 · 二（#238）：界面。
+// HD-2D 战场（模块在 hd2d/，原型页在 prototypes/hd2d/）· 主人试玩反馈 · 二（#238）：界面。
 // 铭牌补上行动点 / 附赠动作、队伍栏名字右边的效果、按主职责的头像（主副属性色渐变）、技能按钮照旧画面（属性 / 攻击-技能两个角标）、
 // 唤出武器人单独做大按钮。数据只读联机投影过的（online-view.js 的白名单），坚毅生命（shp）的数值绝不出现。
 // 都是 Node 能跑的：界面数据是纯函数（hd2d-ui.js），房主那边用 tests/headless.js 的规则环境；画面截图由仓库主人跑。
@@ -9,14 +9,15 @@ const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
 const H = require("./headless");
-const L = require("../prototypes/hd2d/hd2d-layout.js");
+const L = require("../hd2d/hd2d-layout.js");
 const OV = require("../online-view.js");
 
 // 缺这个文件时只是用到它的那几条失败（每条测试里各自 require）
-const ui = () => require("../prototypes/hd2d/hd2d-ui.js");
+const ui = () => require("../hd2d/hd2d-ui.js");
 
-const DIR = path.join(__dirname, "..", "prototypes", "hd2d");
-const read = (f) => fs.readFileSync(path.join(DIR, f), "utf8");
+const DIR = path.join(__dirname, "..", "hd2d");   // HD-2D 战场的模块（#261 起在仓库根目录的 hd2d/）
+const PAGE = path.join(__dirname, "..", "prototypes", "hd2d", "index.html");   // 原型页（引用 hd2d/ 里的模块）
+const read = (f) => fs.readFileSync(f === "index.html" ? PAGE : path.join(DIR, f), "utf8");
 const PARTY = ["kolt", "helu", "ruby", "yuito"];
 const DESKTOP = { width: 1440, height: 900, top: 46, bottom: 160 };
 const SHP = 7771, SHP_MAX = 7772;
@@ -143,7 +144,7 @@ test("铭牌上画出行动点 / 附赠：紧凑铭牌贴在卡片右上角，�
   assert.ok(/\.pl-econ i\.ap \{[^}]*border-radius: 50%/.test(css) && /\.pl-econ i\.bn \{[^}]*border-bottom: 6px solid/.test(css), "圆点和三角");
   // 页面在场景之前加载 hd2d-ui.js
   const page = read("index.html");
-  assert.ok(page.indexOf('<script src="hd2d-ui.js"></script>') > 0 && page.indexOf('<script src="hd2d-ui.js"></script>') < page.indexOf('<script type="module">'), "页面加载 hd2d-ui.js");
+  assert.ok(page.indexOf('<script src="../../hd2d/hd2d-ui.js"></script>') > 0 && page.indexOf('<script src="../../hd2d/hd2d-ui.js"></script>') < page.indexOf('<script type="module">'), "页面加载 hd2d-ui.js（模块在 hd2d/，#261）");
 });
 
 /* ---------- 2. 队伍栏：名字右边身上的效果 ---------- */
@@ -201,7 +202,7 @@ test("主职责图标是主人定稿的那一套（10/22）：击破 = 右半完
   assert.ok(/class="hole"/.test(R["坦克"]), "坦克：城塔上挖出拱窗");
   assert.equal((R["控场"].match(/L\d+(?:\.\d+)? \d+(?:\.\d+)? L\d+(?:\.\d+)? \d+(?:\.\d+)? L\d+(?:\.\d+)? \d+(?:\.\d+)? Z/g) || []).length, 3, "控场：三块菱形地台");
   assert.ok(/<circle class="solid" cx="37" cy="16.5" r="5"\/>/.test(R["异常"]), "异常：分子环上一个节点亮着");
-  const css = fs.readFileSync(path.join(__dirname, "..", "prototypes/hd2d/hd2d.css"), "utf8");
+  const css = fs.readFileSync(path.join(DIR, "hd2d.css"), "utf8");
   for (const cls of ["frag", "ghost", "hole", "cut"]) assert.ok(new RegExp("\\.stk \\.(rim|ink) \\." + cls).test(css), "CSS 有 ." + cls);
 });
 

@@ -27,6 +27,8 @@ python3 -m http.server 8000
 
 ## 文件
 
+**#261 起，下面这些模块挪到了仓库根目录的 `hd2d/`**（正式战斗画面 `game.html` 的「新画面（HD-2D）」也用这一份）；这个目录只剩原型页 `index.html`、「演示出招」的房主那边 `hd2d-host.js` 和这份说明，原型页从 `../../hd2d/` 引用模块，不另存一份。
+
 | 文件 | 内容 |
 | --- | --- |
 | `index.html` | 入口：界面外壳、按 `tests/headless.js` 里 `RULE_FILES` 的顺序加载规则文件，后面接 `online-view.js`（联机的展示白名单）；三个演示战场、区域切换、镜头按钮 / 键盘；**先投影（`OnlineView.projectState`）再交给布局**；区域、光影读投影里的 `pv.region` / `pv.light`（#229）；原样加载正式画面的 `weather-fx.css` / `weather-fx.js`，2D 天气层读投影里的天气 / 风向 / 相位（#240） |

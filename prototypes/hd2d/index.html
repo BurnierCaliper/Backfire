@@ -8,7 +8,8 @@
 <link rel="stylesheet" href="../../hud-icons.css">
 <!-- 天气动效（#240）：正式战斗画面的 2D 天气叠加层，原样加载（只用到 .wfx-…；给正式画面面板换色的规则要 #g-app，原型里没有） -->
 <link rel="stylesheet" href="../../weather-fx.css">
-<link rel="stylesheet" href="hd2d.css">
+<!-- HD-2D 战场的模块（#261 起挪到仓库根目录的 hd2d/，正式战斗画面 game.html 也用这一份）：这个原型页只是引用，不另存一份 -->
+<link rel="stylesheet" href="../../hd2d/hd2d.css">
 <script type="importmap">{"imports":{"three":"../../vendor/three/three.module.min.js","three/addons/":"../../vendor/three/addons/"}}</script>
 </head>
 <body>
@@ -192,20 +193,21 @@ window.GAME_MODE = true;
   });
 })();
 </script>
-<script src="hd2d-layout.js"></script>
+<!-- HD-2D 战场的模块在仓库根目录的 hd2d/（#261：正式战斗画面也用这一份）；只有「演示出招」的房主那边（hd2d-host.js）是原型自己的 -->
+<script src="../../hd2d/hd2d-layout.js"></script>
 <!-- 区域场景的美术（#242）：登记处 + 美术包，把各场景自己的地面主题并进布局；画法经 hd2d-world.js / hd2d-backdrop.js / hd2d-scene.js 的挂钩交给美术包 -->
-<script src="hd2d-scene-art.js"></script>
-<script src="hd2d-scenes-mine.js"></script>
-<script src="hd2d-scenes-city.js"></script>
-<script src="hd2d-scenes-desert.js"></script>
-<script src="hd2d-ui.js"></script>
-<script src="hd2d-camera.js"></script>
-<script src="hd2d-fx.js"></script>
+<script src="../../hd2d/hd2d-scene-art.js"></script>
+<script src="../../hd2d/hd2d-scenes-mine.js"></script>
+<script src="../../hd2d/hd2d-scenes-city.js"></script>
+<script src="../../hd2d/hd2d-scenes-desert.js"></script>
+<script src="../../hd2d/hd2d-ui.js"></script>
+<script src="../../hd2d/hd2d-camera.js"></script>
+<script src="../../hd2d/hd2d-fx.js"></script>
 <script src="hd2d-host.js"></script>
-<script src="hd2d-play.js"></script>
-<script src="hd2d-wfx.js"></script>
+<script src="../../hd2d/hd2d-play.js"></script>
+<script src="../../hd2d/hd2d-wfx.js"></script>
 <script type="module">
-import { createHd2dScene } from "./hd2d-scene.js";
+import { createHd2dScene } from "../../hd2d/hd2d-scene.js";
 
 const L = window.HD2DLayout;
 const CAMS = window.HD2DCamera;

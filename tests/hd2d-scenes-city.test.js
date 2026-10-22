@@ -7,13 +7,14 @@ const assert = require("node:assert/strict");
 const fs = require("fs");
 const path = require("path");
 const H = require("./headless");
-const L = require("../prototypes/hd2d/hd2d-layout.js");
-const C = require("../prototypes/hd2d/hd2d-camera.js");
+const L = require("../hd2d/hd2d-layout.js");
+const C = require("../hd2d/hd2d-camera.js");
 
-const DIR = path.join(__dirname, "..", "prototypes", "hd2d");
+const DIR = path.join(__dirname, "..", "hd2d");   // HD-2D 战场的模块（#261 起在仓库根目录的 hd2d/）
+const PAGE = path.join(__dirname, "..", "prototypes", "hd2d", "index.html");   // 原型页（引用 hd2d/ 里的模块）
 // 缺这个文件时只是这几条失败（每条测试里各自 require）
-const art = () => require("../prototypes/hd2d/hd2d-scene-art.js");
-const city = () => require("../prototypes/hd2d/hd2d-scenes-city.js");
+const art = () => require("../hd2d/hd2d-scene-art.js");
+const city = () => require("../hd2d/hd2d-scenes-city.js");
 const packs = () => { city(); return art(); };
 
 /** 做好了的场景（区域、场景 id、地面主题），远景里一定有的东西（userData.art） */
@@ -72,7 +73,7 @@ async function protoEnv(t) {
     mod.register("data:text/javascript," + encodeURIComponent(`export async function resolve(s, c, n) {
       if (s === "three") return { url: ${JSON.stringify(threeUrl)}, format: "module", shortCircuit: true };
       const r = await n(s, c);
-      return /\\/(prototypes\\/hd2d|vendor\\/three)\\//.test(r.url) ? Object.assign({}, r, { format: "module" }) : r;
+      return /\\/(hd2d|vendor\\/three)\\//.test(r.url) ? Object.assign({}, r, { format: "module" }) : r;
     }`));
   }
   const A = packs();
@@ -399,7 +400,7 @@ test("下水道（#241）：在巨大圆管的里面——管壁从灯后面往�
 });
 
 test("下水道里不显示天上来的天气（#241 截图验收）：雷鸣不画乌云、不劈闪电、不闪白，只让管子里的灯闪一下；雨、雪、沙暴不画，2D 层不叠；酷暑只留 3D 的热浪；别的场景、微光 / 相位照旧", async (t) => {
-  const A = packs(), WX = require("../prototypes/hd2d/hd2d-wfx.js");
+  const A = packs(), WX = require("../hd2d/hd2d-wfx.js");
   const W = (w) => A.weather("sewer_tunnel", w);
   assert.deepEqual(W("thunder"), { fx: "none", wfx: "none", flicker: true }, "雷鸣：3D、2D 都不画，灯闪一下");
   ["acid", "snow", "sand"].forEach(w => assert.deepEqual(W(w), { fx: "none", wfx: "none", flicker: false }, w + "：天上来的，不画"));
@@ -451,9 +452,9 @@ test("下水道里不显示天上来的天气（#241 截图验收）：雷鸣不
 });
 
 test("接线（#241）：页面在 #242 的登记处和采矿场的美术包后面加载城市类的美术包；没有坚毅生命（美术代码里不碰 shp / units / plate）", () => {
-  const html = fs.readFileSync(path.join(DIR, "index.html"), "utf8");
-  const at = (f) => html.indexOf(`<script src="${f}"></script>`);
-  assert.ok(at("hd2d-scenes-city.js") > at("hd2d-scene-art.js") && at("hd2d-scene-art.js") > at("hd2d-layout.js"), "加载顺序：布局 → 登记处 → 美术包");
+  const html = fs.readFileSync(PAGE, "utf8");
+  const at = (f) => html.indexOf(`<script src="../../hd2d/${f}"></script>`);   // 模块在 hd2d/（#261）
+  assert.ok(at("hd2d-layout.js") > 0 && at("hd2d-scenes-city.js") > at("hd2d-scene-art.js") && at("hd2d-scene-art.js") > at("hd2d-layout.js"), "加载顺序：布局 → 登记处 → 美术包");
   const src = fs.readFileSync(path.join(DIR, "hd2d-scenes-city.js"), "utf8").replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
   assert.ok(!/\bshp\b|\.units\b|\.plate\b/.test(src), "美术包不碰单位数据");
 });

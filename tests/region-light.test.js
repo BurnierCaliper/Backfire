@@ -114,7 +114,7 @@ test("区域名列表在正式配置里（world-data.js · BATTLE_REGIONS）：�
   [undefined, null, "", "月球", "极北禁区", "north_zone", "starport", "太阳能板群", "solar_w", "<b>沙漠</b>", "__proto__", "constructor", "toString", 42, {}, ["沙漠"]]
     .forEach(x => assert.equal(c.battleRegionName(x), null, "认不得：" + String(x)));
   // 原型的表：区域名一一对上，别名（地图地点 id、天网塔）认出来的一样，地图上每个地点（id 和名字）两边认的都一样
-  const L = require("../prototypes/hd2d/hd2d-layout.js");
+  const L = require("../hd2d/hd2d-layout.js");   // HD-2D 战场的布局（#261 起在仓库根目录的 hd2d/）
   assert.deepEqual(Object.keys(L.REGIONS).sort(), [...R].sort(), "原型的 REGIONS 和正式的区域名列表一一对上");
   Object.entries(L.REGION_ALIAS).forEach(([alias, name]) => assert.equal(c.battleRegionName(alias), name, alias));
   c.S.WORLD_PLACES.forEach(p => [p.id, p.name].forEach(x => assert.equal(c.battleRegionName(x), L.regionName(x), x)));

@@ -95,7 +95,7 @@ test("场景表在正式配置里（world-data.js · BATTLE_SCENES，和 BATTLE_
 });
 
 test("HD-2D 原型的地面主题表按场景留出接口（hd2d-layout.js · SCENES）：区域、场景 id 和正式的场景表一一对上，先都用所属区域现在的样子；布局带上场景", () => {
-  const c = H.load(), T = vm.runInContext("BATTLE_SCENES", c), L = require("../prototypes/hd2d/hd2d-layout.js");
+  const c = H.load(), T = vm.runInContext("BATTLE_SCENES", c), L = require("../hd2d/hd2d-layout.js");   // #261 起在仓库根目录的 hd2d/
   assert.deepEqual(Object.keys(L.SCENES).sort(), Object.keys(T).sort(), "原型的 SCENES 和正式的场景表区域一一对上");
   Object.entries(T).forEach(([r, list]) => {
     assert.deepEqual(Object.keys(L.SCENES[r]).sort(), plain(list.map(s => s.id)).sort(), r + "：场景 id 一一对上");
@@ -594,7 +594,7 @@ test("HD-2D 原型：画面读投影里的 pv.scene，没有再用页面选的�
   assert.match(mod, /\.get\("scene"\)/, "网址参数 ?scene=");
   assert.match(mod, /battleScenes\(/, "下拉框列的是正式场景表里当前区域的场景");
   assert.doesNotMatch(mod, /\bst\.(?:scene|scenePick|sceneRoll)\b/, "不读房主原始 state 里的场景");
-  const css = read("prototypes/hd2d/hd2d.css");
+  const css = read("hd2d/hd2d.css");
   assert.ok(/@media \(max-width: 720px\)[\s\S]*#scene-select[^{]*\{[^}]*display: none/.test(css), "手机上收起场景下拉框（和区域下拉框一样）");
   // 假网页：页面环境里投影过的演示战场有场景；演示布置完再写一遍（和页面一样），沙珊瑚台地算得上
   const page = require("./hd2d-fake-page").load();

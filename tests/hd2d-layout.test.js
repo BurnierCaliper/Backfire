@@ -1,9 +1,9 @@
-// HD-2D 战场原型（prototypes/hd2d/）的布局：纯函数，只看战斗状态算位置。
+// HD-2D 战场（模块在 hd2d/，原型页在 prototypes/hd2d/）的布局：纯函数，只看战斗状态算位置。
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const H = require("./headless");
-const L = require("../prototypes/hd2d/hd2d-layout.js");
+const L = require("../hd2d/hd2d-layout.js");
 
 const PARTY = ["kolt", "helu", "ruby", "yuito"];
 const FOES = [{ id: "guard_sword", lv: 2 }, { id: "thug_knife", lv: 2 }, { id: "buoy", lv: 2 }, { id: "crow", lv: 2 }, { id: "thug_hammer", lv: 2 }];
@@ -194,12 +194,12 @@ test("竖屏：直排沿进深排开，我方区在最前面（z 最大）", () 
  * 去掉 import / export 之后当普通脚本编译一遍（只编译，不运行）。 */
 test("原型的浏览器脚本能通过语法检查，规则文件加载顺序和 headless 一致", () => {
   const fs = require("fs"), path = require("path"), vm = require("vm");
-  const dir = path.join(__dirname, "..", "prototypes", "hd2d");
+  const dir = path.join(__dirname, "..", "hd2d");   // 模块（#261 起在仓库根目录的 hd2d/）；原型页还在 prototypes/hd2d/
   const strip = (src) => src.replace(/^\s*import\s[^;]*?from\s+["'][^"']+["'];?\s*$/gm, "").replace(/^export\s+(default\s+)?/gm, "").replace(/^export\s*\{[^}]*\};?\s*$/gm, "");
   ["hd2d-scene.js", "hd2d-world.js", "hd2d-weather.js", "hd2d-backdrop.js"].forEach(f => {
     assert.doesNotThrow(() => new vm.Script(strip(fs.readFileSync(path.join(dir, f), "utf8")), { filename: f }), f);
   });
-  const html = fs.readFileSync(path.join(dir, "index.html"), "utf8");
+  const html = fs.readFileSync(path.join(__dirname, "..", "prototypes", "hd2d", "index.html"), "utf8");
   const mod = /<script type="module">([\s\S]*?)<\/script>/.exec(html);
   assert.ok(mod, "index.html 里有页面主脚本");
   assert.doesNotThrow(() => new vm.Script(strip(mod[1]), { filename: "index.html" }));
@@ -212,7 +212,8 @@ test("原型的浏览器脚本能通过语法检查，规则文件加载顺序�
   // 再接正式游戏的 2D 演出 attack-fx.js / hit-fx.js（#230：攻击演出和受击粒子，原样加载），
   // 然后是界面图标 icons.js / hud-icons.js（#238：技能按钮的属性角标、队伍栏的效果徽章，原样加载），
   // 最后是天气动效 weather-fx.js（#240：正式画面的 2D 天气叠加层，原样加载，压在 3D 画面上）
-  const tags = [...html.matchAll(/<script src="\.\.\/\.\.\/([^"]+)"><\/script>/g)].map(m => m[1]);
+  // （hd2d/ 里的是 HD-2D 战场自己的模块，#261 起原型页也从那里加载，不算在这一串里）
+  const tags = [...html.matchAll(/<script src="\.\.\/\.\.\/([^"]+)"><\/script>/g)].map(m => m[1]).filter(f => !/^hd2d\//.test(f));
   assert.equal(tags.join(), H.RULE_FILES.filter(f => fs.existsSync(path.join(__dirname, "..", f))).concat(["online-view.js", "attack-fx.js", "hit-fx.js", "icons.js", "hud-icons.js", "weather-fx.js"]).join());
 });
 
@@ -260,7 +261,7 @@ test("原型页面：垫片放在规则文件之前，页面自己的元素 id �
 
 test("危墙：矮而薄（尺寸在配置表 WALL 里），不会盖住铭牌", () => {
   const fs = require("fs"), path = require("path");
-  const src = fs.readFileSync(path.join(__dirname, "..", "prototypes", "hd2d", "hd2d-world.js"), "utf8");
+  const src = fs.readFileSync(path.join(__dirname, "..", "hd2d", "hd2d-world.js"), "utf8");
   const w = /const WALL = \{([^}]*)\}/.exec(src);
   assert.ok(w, "危墙尺寸在配置表 WALL 里");
   const v = k => Number(new RegExp(k + ":\\s*([\\d.]+)").exec(w[1])[1]);
@@ -270,8 +271,8 @@ test("危墙：矮而薄（尺寸在配置表 WALL 里），不会盖住铭牌",
 
 test("手机顶栏：有精简文字和切换小按钮；铭牌 HTML 不碰 shp", () => {
   const fs = require("fs"), path = require("path");
-  const dir = path.join(__dirname, "..", "prototypes", "hd2d");
-  const html = fs.readFileSync(path.join(dir, "index.html"), "utf8"), css = fs.readFileSync(path.join(dir, "hd2d.css"), "utf8");
+  const dir = path.join(__dirname, "..", "hd2d");
+  const html = fs.readFileSync(path.join(__dirname, "..", "prototypes", "hd2d", "index.html"), "utf8"), css = fs.readFileSync(path.join(dir, "hd2d.css"), "utf8");
   assert.ok(html.includes('id="tb-compact"') && html.includes('id="demo-btn"'));
   assert.ok(/@media \(max-width: 720px\)[\s\S]*#demo-select[^{]*\{[^}]*display: none/.test(css), "手机上下拉框收起来");
   const scene = fs.readFileSync(path.join(dir, "hd2d-scene.js"), "utf8");
@@ -330,7 +331,7 @@ test("默认镜头：布局算的镜头正对目标点，整个战场装在顶�
     })));
   }
   const fs = require("fs"), path = require("path");
-  const scene = fs.readFileSync(path.join(__dirname, "..", "prototypes", "hd2d", "hd2d-scene.js"), "utf8");
+  const scene = fs.readFileSync(path.join(__dirname, "..", "hd2d", "hd2d-scene.js"), "utf8");
   assert.ok(/layout\.camera/.test(scene) && /L\.CONFIG\.camera\.fov/.test(scene), "场景用布局算好的镜头（铭牌的屏幕位置才对得上）");
 });
 
@@ -427,7 +428,7 @@ test("远景剪影的高度上限：画面上沿那条视线（frameTop）上的
     });
   });
   const fs = require("fs"), path = require("path");
-  const src = fs.readFileSync(path.join(__dirname, "..", "prototypes", "hd2d", "hd2d-backdrop.js"), "utf8");
+  const src = fs.readFileSync(path.join(__dirname, "..", "hd2d", "hd2d-backdrop.js"), "utf8");
   const fill = Number(/fill:\s*([\d.]+)/.exec(src)[1]);
   assert.ok(fill > 0.5 && fill < 1, "中景剪影最高只到画面上沿视线的 fill 倍（整个轮廓都在画面里）");
   assert.ok(/L\.frameTop\(cam, z\)/.test(src), "远景用布局的 frameTop 算高度上限");
@@ -459,7 +460,7 @@ test("原型页面：照页面的顺序跑垫片 → 规则文件，app.js 的 i
 
 test("减少动态效果：场景跟着系统设置停住待机动画（铭牌浮动、闪烁、冒泡、光圈旋转、飘浮物、颗粒）；雷击不抖镜头、闪光减弱", () => {
   const fs = require("fs"), path = require("path");
-  const dir = path.join(__dirname, "..", "prototypes", "hd2d");
+  const dir = path.join(__dirname, "..", "hd2d");
   const scene = fs.readFileSync(path.join(dir, "hd2d-scene.js"), "utf8"), css = fs.readFileSync(path.join(dir, "hd2d.css"), "utf8");
   const weather = fs.readFileSync(path.join(dir, "hd2d-weather.js"), "utf8");
   assert.ok(/prefers-reduced-motion: reduce/.test(scene) && /addEventListener\("change"/.test(scene), "场景听系统的「减少动态效果」，中途切换也跟着变");
@@ -483,7 +484,7 @@ async function protoEnv(t) {
     mod.register("data:text/javascript," + encodeURIComponent(`export async function resolve(s, c, n) {
       if (s === "three") return { url: ${JSON.stringify(threeUrl)}, format: "module", shortCircuit: true };
       const r = await n(s, c);
-      return /\\/(prototypes\\/hd2d|vendor\\/three)\\//.test(r.url) ? Object.assign({}, r, { format: "module" }) : r;
+      return /\\/(hd2d|vendor\\/three)\\//.test(r.url) ? Object.assign({}, r, { format: "module" }) : r;
     }`));
   }
   const any = () => new Proxy(function () {}, { get: (o, k) => (k === Symbol.toPrimitive ? () => 0 : any()), set: () => true, apply: () => any() });
@@ -496,7 +497,7 @@ async function protoEnv(t) {
   globalThis.document = { createElement: () => ({ width: 0, height: 0, style: {}, getContext: () => any() }) };
   globalThis.window = { HD2DLayout: L };
   try {
-    const dir = path.join(__dirname, "..", "prototypes", "hd2d"), url = (f) => pathToFileURL(path.join(dir, f)).href;
+    const dir = path.join(__dirname, "..", "hd2d"), url = (f) => pathToFileURL(path.join(dir, f)).href;
     const THREE = await import(threeUrl);
     const W = await import(url("hd2d-world.js")), B = await import(url("hd2d-backdrop.js")), WX = await import(url("hd2d-weather.js"));
     return { THREE, W, B, WX, restore };
@@ -558,7 +559,7 @@ test("场景的积木在 Node 里用真的 three.js 建得出来：各种地台�
 
 test("铭牌：紧凑版只放名字 + 状态小圆点 + 血条 + 架势，ATK / 血量数字 / 状态文字悬停、选中时才展开；尺寸和布局用同一份配置", () => {
   const fs = require("fs"), path = require("path");
-  const dir = path.join(__dirname, "..", "prototypes", "hd2d");
+  const dir = path.join(__dirname, "..", "hd2d");
   const scene = fs.readFileSync(path.join(dir, "hd2d-scene.js"), "utf8"), css = fs.readFileSync(path.join(dir, "hd2d.css"), "utf8");
   const html = scene.slice(scene.indexOf("function plateHtml"), scene.indexOf("function makePlate"));
   const card = html.slice(html.indexOf('class="pl-card"')), more = html.slice(html.indexOf('class="pl-more"'), html.indexOf('class="pl-card"'));
@@ -677,7 +678,7 @@ test("雷击：间隔随机、落在配置的范围里，远处和战场边缘�
     }
     // 画面这边：闪白、推亮灯光的强度在 FLASH 配置里；抖动只在渲染这一下挪镜头，渲染完挪回去（OrbitControls 不受影响）
     const fs = require("fs"), path = require("path");
-    const src = fs.readFileSync(path.join(__dirname, "..", "prototypes", "hd2d", "hd2d-scene.js"), "utf8");
+    const src = fs.readFileSync(path.join(__dirname, "..", "hd2d", "hd2d-scene.js"), "utf8");
     assert.ok(/const FLASH = \{/.test(src) && /grade\.uniforms\.flash\.value = fl \* FLASH\.white/.test(src) && /uniform float flash;/.test(src), "全屏闪白在调色后期里，强度在 FLASH 配置里");
     assert.ok(/weather\.shake/.test(src) && /camera\.position\.add\(shakeV\)/.test(src) && /camera\.position\.sub\(shakeV\)/.test(src), "镜头抖动只挪渲染这一下");
   } finally { P.restore(); }
@@ -934,7 +935,7 @@ test("远景跟着区域：沙漠 → 沙丘、采矿场 → 岩壁（矿井架 
     assert.ok(G("巨人城").skyline > G("外城区").skyline && tallest(G("巨人城").skyline) > tallest(G("外城区").skyline) * 1.2, "巨人城的楼比外城区的高");
     // 场景：远景、地台外大片地面的颜色按布局给的地面主题（layout.ground），灯按布局摆
     const fs = require("fs"), path = require("path");
-    const scene = fs.readFileSync(path.join(__dirname, "..", "prototypes", "hd2d", "hd2d-scene.js"), "utf8");
+    const scene = fs.readFileSync(path.join(__dirname, "..", "hd2d", "hd2d-scene.js"), "utf8");
     assert.ok(/L\.GROUNDS\[[^\]]*\.ground\]/.test(scene) && /buildLamps\(layout\.lamps/.test(scene), "场景照布局给的地面主题挑远景 / 地面颜色，灯照布局摆");
   } finally { P.restore(); }
 });
@@ -949,7 +950,7 @@ test("原型页：顶栏可以切换区域（下拉框，或者网址加 ?region
     assert.ok(new RegExp(`id: "${id}",[^\\n]*region: "${region}"`).test(html), `演示 ${id} 默认在 ${region}`));
   // 交给布局的是联机投影过的状态（#204：project() = OnlineView.projectState(st)）
   assert.ok(/L\.build\(project\(\), \{[^}]*region:[^}]*theme:/.test(html), "布局拿到页面选的区域和光影主题（灯的数量看白天 / 夜晚）");
-  const css = fs.readFileSync(path.join(__dirname, "..", "prototypes", "hd2d", "hd2d.css"), "utf8");
+  const css = fs.readFileSync(path.join(__dirname, "..", "hd2d", "hd2d.css"), "utf8");
   assert.ok(/@media \(max-width: 720px\)[\s\S]*#region-select[^{]*\{[^}]*display: none/.test(css), "手机上收起区域下拉框（这一轮不专门调手机，别弄坏）");
 });
 
@@ -1012,7 +1013,7 @@ test("联机数据：原型页先用 OnlineView.projectState 投影再交给布�
 });
 
 /* 三段镜头的纯函数（hd2d-camera.js）：在 Node 里按布局算，和场景用的是同一套。每条测试里各自 require（缺这个文件时只是这几条失败，别的照跑） */
-const cams = () => require("../prototypes/hd2d/hd2d-camera.js");
+const cams = () => require("../hd2d/hd2d-camera.js");
 const usableAt = (s, v) => s.x >= -0.5 && s.x <= v.width + 0.5 && s.y >= v.top - 0.5 && s.y <= v.height - v.bottom + 0.5;
 const cornersOf = (z) => { const out = []; [z.cx - z.w / 2, z.cx + z.w / 2].forEach(x => [0, z.topY].forEach(y => [z.cz - z.d / 2, z.cz + z.d / 2].forEach(zz => out.push({ x, y, z: zz })))); return out; };
 /** 这个区整块（地台顶面四个角 + 地面四个角）都在顶栏和技能栏之间：用测试里自己写的投影量 */
@@ -1021,7 +1022,7 @@ const centerIn = (pose, z, v) => usableAt(screenOf(pose.cam, { x: z.cx, y: z.top
 /** 光影主题里远处糊的上限（hd2d-scene.js 的 THEMES[].dofFar），取最小的那个（最不糊的情况） */
 function minDofFar() {
   const fs = require("fs"), path = require("path");
-  const src = fs.readFileSync(path.join(__dirname, "..", "prototypes", "hd2d", "hd2d-scene.js"), "utf8");
+  const src = fs.readFileSync(path.join(__dirname, "..", "hd2d", "hd2d-scene.js"), "utf8");
   return Math.min(...[...src.matchAll(/dofFar: ([\d.]+)/g)].map(m => Number(m[1])));
 }
 
@@ -1066,7 +1067,7 @@ test("三段镜头：远景就是默认镜头（框住整个战场）；中景�
   // 场景改 BokehShader 的那两行（远处单独的上限、近景的横向糊）在 vendor 的 three.js 里真的有，改得上
   const fs = require("fs"), path = require("path");
   const shader = fs.readFileSync(path.join(__dirname, "..", "vendor", "three", "addons", "shaders", "BokehShader.js"), "utf8");
-  const scene = fs.readFileSync(path.join(__dirname, "..", "prototypes", "hd2d", "hd2d-scene.js"), "utf8");
+  const scene = fs.readFileSync(path.join(__dirname, "..", "hd2d", "hd2d-scene.js"), "utf8");
   ["float factor = ( focus + viewZ );", "vec2 dofblur = vec2 ( clamp( factor * aperture, -maxblur, maxblur ) );", "uniform float maxblur;"].forEach(s => {
     assert.ok(shader.includes(s), "BokehShader 里找不到：" + s);
     assert.ok(scene.includes(JSON.stringify(s).slice(1, -1)), "场景没改这一行：" + s);
@@ -1199,7 +1200,7 @@ test("滚轮在三段之间跳：一次滚动只跳一段（停顿超过 idle �
 
 test("镜头参数都在配置表（hd2d-camera.js 的 CAMERA）；场景照它切（按钮 / 1·2·3 / 滚轮 / 点地台或铭牌选区 / 近景左右键 + 屏幕箭头），镜头是每个人自己的、不写进战斗状态，算镜头不改布局", () => {
   const fs = require("fs"), path = require("path");
-  const dir = path.join(__dirname, "..", "prototypes", "hd2d");
+  const dir = path.join(__dirname, "..", "hd2d");
   const CAMS = cams(), C = CAMS.CAMERA;
   assert.deepEqual(plain(C.order), ["far", "mid", "near"]);
   ["mid", "near"].forEach(t => ["elevation", "fov", "margin", "clip", "maxLift"].forEach(k => assert.ok(Number.isFinite(C[t][k]), `${t}.${k} 在配置表里`)));
@@ -1224,7 +1225,7 @@ test("镜头参数都在配置表（hd2d-camera.js 的 CAMERA）；场景照它�
   assert.ok(/select\(id\)[\s\S]{0,200}setZone\(u\.zone\)/.test(scene), "点铭牌也选中它所在的区");
   assert.ok(!/DOF = \{|minElev|zoomIn/.test(scene), "景深 / 俯角范围不再写在场景里");
   // 页面：三段按钮、1 / 2 / 3、左右键、屏幕两边的箭头；网址记住镜头（截图用）；不写进战斗状态
-  const html = fs.readFileSync(path.join(dir, "index.html"), "utf8"), mod = /<script type="module">([\s\S]*?)<\/script>/.exec(html)[1];
+  const html = fs.readFileSync(path.join(__dirname, "..", "prototypes", "hd2d", "index.html"), "utf8"), mod = /<script type="module">([\s\S]*?)<\/script>/.exec(html)[1];
   ["cam-far", "cam-mid", "cam-near", "cam-zone", "zone-prev", "zone-next"].forEach(id => assert.ok(html.includes(`id="${id}"`), "页面上有 #" + id));
   assert.ok(/CAMERA\.keys/.test(mod) && /sc\.setTier\(/.test(mod) && /sc\.stepZone\(/.test(mod) && /addEventListener\("keydown"/.test(mod), "键盘 1 / 2 / 3、左右键");
   assert.ok(/q\.set\("cam"/.test(mod) && /params\.get\("cam"\)/.test(mod), "网址记住镜头（?cam=near&zone=3）");
