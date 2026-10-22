@@ -299,3 +299,33 @@
   .hd2d-cam-b { width: 26px; height: 24px; font-size: 13px; }
   .hd2d-zone-nav { padding: 8px 9px; font-size: 12px; }
 }
+/* 新旧画面之间的云雾转场（#261 追加，hd2d/hd2d-field.js · MIST / mistLayer）：一层铺满战场那一格，在新画面、首领横幅上面。
+ * 转场一开始就铺上（还透明，挡住点击、cursor 转圈）；.in 一团团白雾从四边涌进来、合拢（--mist-in 秒，一团比一团晚一点 --d），后半段整片柔边的蒙层跟上，
+ * 保证切画面的那一下看不见；.out 散开（--mist-out 秒）：各团往外飘、放大、淡掉。颜色 --mist-c（r, g, b）、最浓 --mist-o；每团的位置、大小、
+ * 从外面多远涌进来（--x / --y / --w / --h / --dx / --dy）都写在行内。柔边、半透明叠上去（径向渐变），不是一块纯白硬切。
+ * 新画面开着时旧战场整格 visibility: hidden，这一层要单独放出来；减少动态效果时根本不铺（直接切） */
+.hd2d-mist { position: absolute; inset: 0; z-index: 7; overflow: hidden; pointer-events: auto; cursor: progress; }
+.g-app.hd2d-on > .g-field > .hd2d-mist { visibility: visible; }
+.hd2d-mist > i {
+  position: absolute; left: var(--x); top: var(--y); width: var(--w); height: var(--h); pointer-events: none;
+  background:
+    radial-gradient(closest-side at 50% 52%, rgba(var(--mist-c), 1), rgba(var(--mist-c), .86) 42%, rgba(var(--mist-c), .42) 70%, rgba(var(--mist-c), 0)),
+    radial-gradient(closest-side at 30% 40%, rgba(var(--mist-c), .8), rgba(var(--mist-c), .3) 60%, rgba(var(--mist-c), 0)),
+    radial-gradient(closest-side at 70% 62%, rgba(var(--mist-c), .75), rgba(var(--mist-c), .28) 60%, rgba(var(--mist-c), 0));
+  opacity: 0; transform: translate(-50%, -50%) translate(var(--dx), var(--dy)) scale(.6);
+  transition: transform var(--mist-in) cubic-bezier(.22, .7, .3, 1) var(--d), opacity var(--mist-in) ease-out var(--d);
+  will-change: transform, opacity;
+}
+.hd2d-mist.in > i { opacity: var(--mist-o); transform: translate(-50%, -50%) translate(0, 0) scale(1); }   /* 三种状态的 transform 一样排（逐项插值） */
+.hd2d-mist.out > i {
+  opacity: 0; transform: translate(-50%, -50%) translate(calc(var(--dx) * .7), calc(var(--dy) * .7)) scale(1.3);
+  transition: transform var(--mist-out) ease-in-out, opacity var(--mist-out) ease-in;
+}
+.hd2d-mist > .veil {
+  position: absolute; inset: -12%; opacity: 0; pointer-events: none;
+  background: radial-gradient(ellipse at 50% 50%, rgba(var(--mist-c), 1) 50%, rgba(var(--mist-c), .88) 100%);
+  transition: opacity calc(var(--mist-in) * .5) ease-in calc(var(--mist-in) * .5);
+}
+.hd2d-mist.in > .veil { opacity: var(--mist-o); }
+.hd2d-mist.out > .veil { opacity: 0; transition: opacity calc(var(--mist-out) * .6) ease-out; }
+@media (prefers-reduced-motion: reduce) { .hd2d-mist > i, .hd2d-mist > .veil { transition: none; } }
