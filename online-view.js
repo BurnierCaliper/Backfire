@@ -272,7 +272,10 @@
       out.bag.items = arr(get(bag, "items")).slice(0, 200).flatMap(item => {
         const itemId = id(get(item, "id")), qty = number(get(item, "qty"));
         if (!itemId || qty === undefined || qty <= 0) return [];
-        // Catalog descriptions contain hidden-pool effects; only names are public.
+        // 舞台包里的背包只带道具名（说明玩家端本地查目录）。道具 / 效果说明可以写明坚毅生命的消耗（固定的规则文字）；
+        // 绝不能给玩家看的是玩家当前剩余的坚毅生命（shp / shpMax）：舞台包里靠 projectUnit 的白名单挡（根本不复制这些键），
+        // 能推出剩余值的数字（shpBase / shpBonus、实际扣了多少、前后对比、百分比）同样不给；
+        // 角色资料 / 单局这些整份转发的数据才靠 hiddenSheetKey / scrubHidden。
         const name = text(get(get(context.itemCatalog, itemId), "name"));
         return [{ id: itemId, name: name || itemId, qty }];
       });
