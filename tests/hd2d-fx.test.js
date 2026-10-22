@@ -356,7 +356,10 @@ test("出手时镜头稍微推一下：远景 / 中景推向攻击者和目标�
   assert.ok(/opts\.keep && state\.tween && !state\.tween\.push/.test(scene) && /if \(!opts\.keep\) state\.pushBack = null/.test(scene), "重排不打断推镜头；玩家换镜头就不拉回");
   assert.ok(/if \(!pushed\) arrive\(\)/.test(scene), "推着的时候不交还拖动");
   const html = fs.readFileSync(path.join(HP.PAGE, "index.html"), "utf8"), mod = /<script type="module">([\s\S]*?)<\/script>/.exec(html)[1];
-  assert.ok(/HD2DFx\.pushPose\(sc\.poseNow\(\), a, b, \{ enabled: pushOn, reduced: !sc\.motion,/.test(mod), "页面：开关和「减少动态效果」交给 pushPose");
+  // 推镜头的接线在 hd2d-play.js · HD2DPlay.camera（原型页和正式画面的新画面同一份，#283）：页面只给开关
+  assert.ok(/HD2DPlay\.camera\(sc, \{ enabled: \(\) => pushOn \}\)/.test(mod), "页面：开关交给 HD2DPlay.camera");
+  const playSrc = fs.readFileSync(path.join(DIR, "hd2d-play.js"), "utf8");
+  assert.ok(/F\.pushPose\(sc\.poseNow\(\), a, b, \{ enabled: o\.enabled \? !!o\.enabled\(\) : true, reduced: !sc\.motion,/.test(playSrc), "开关和「减少动态效果」交给 pushPose");
   assert.ok(html.includes('id="push-toggle"') && /params\.get\("push"\) !== "0"/.test(mod), "页面上能关（按钮、?push=0）");
 });
 
