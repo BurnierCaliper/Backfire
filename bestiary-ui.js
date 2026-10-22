@@ -386,9 +386,15 @@ const Bestiary = (() => {
       </div>`;
   }
   /* ---------- 规则说明（rulebook.js） ---------- */
-  /** 一条规则：「：」前面的短标签加粗（和效果图鉴一样） */
+  /** 一条规则：「：」前面的短标签加粗（和效果图鉴一样）；括号里的「：」不算（「瑞比（角色卡：力量 6…）」不会只加粗半个括号） */
   function ruleLine(a) {
-    const i = a.indexOf("：");
+    let depth = 0, i = -1;
+    for (let k = 0; k < a.length && i < 0; k++) {
+      const ch = a[k];
+      if (ch === "（" || ch === "(") depth++;
+      else if (ch === "）" || ch === ")") depth = Math.max(0, depth - 1);
+      else if (ch === "：" && !depth) i = k;
+    }
     return `<li>${i > 0 && i < 12 ? `<b>${esc(a.slice(0, i))}</b>${esc(a.slice(i))}` : esc(a)}</li>`;
   }
   /** 一章规则的详情（纯函数，测试直接调）：导语，然后每一节画出列表、表格和说明 */

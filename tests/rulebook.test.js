@@ -1,4 +1,4 @@
-// 规则说明（rulebook.js，issue #263）：图鉴第六本「规则」。章节里的数值都在打开时从规则表 / 规则函数现读，
+// 规则说明（rulebook.js，issue #263）：图鉴第七本「规则」。章节里的数值都在打开时从规则表 / 规则函数现读，
 // 写成文字的公式和规则函数逐项核对；坚毅生命只写规则、不写任何数值；标题 / 单局 / 跑团的「图鉴」旁边都有入口
 "use strict";
 const test = require("node:test");
@@ -100,7 +100,7 @@ test("检定：成功率表、难度名、奖励、种族和熟练项都从规�
   assert.ok(t.rows.some(r => r.includes("12.5%")), "小数照实写");
   const text = allText(e);
   const perks = run(c, "RACE_CHECK_PERKS");
-  Object.keys(perks).forEach(r => assert.ok(text.includes(`${r}：${perks[r].text}`), r));
+  Object.keys(perks).forEach(r => assert.ok(section(e, "种族").lines.some(l => l.startsWith(r)), r));
   const P = run(c, "PROFICIENCIES");
   Object.keys(P).forEach(g => assert.ok(text.includes(`${g}：${P[g].join("、")}`), g));
   assert.ok(text.includes(`熟练等级最高 ${run(c, "PROF_MAX")} 级`));
@@ -176,10 +176,10 @@ test("角色属性：生命 / 架势 / 改造率上限 / 空手格挡的文字�
 test("义体与改造率：档位表、攻击义体伤害、换算比例从 cyberware.js / growth.js 读；过度安装的专长看 FEATS", () => {
   const c = loadRules();
   const e = chapter(c, "cyber");
-  const T = run(c, "CYBERWARE_TIER"), tiers = run(c, "CYBERWARE_TIERS");
+  const T = run(c, "CYBERWARE_TIER"), tiers = run(c, "CYBERWARE_TIERS"), V = run(c, "CYBERWARE_VOL");
   const tb = section(e, "义体").table;
-  tiers.forEach((t, i) => assert.deepEqual(plain(tb.rows[i]), [`${t} 级`, `−${T[t].hpCut}`, pct(T[t].occupancy)]));
-  const at = section(e, "攻击义体").table;
+  tiers.forEach((t, i) => assert.deepEqual(plain(tb.rows[i]), [`${t} 级`, `.vol${V[t]}`, `−${T[t].hpCut}`, pct(T[t].occupancy)]));
+  const at = section(e, "发动义体（单体伤害型）").table;
   tiers.forEach((t, i) => assert.deepEqual(plain(at.rows[i]), [`${t} 级`, c.cyberwareDamageSpec(t, "melee").text, c.cyberwareDamageSpec(t, "ranged").text]));
   const text = allText(e);
   const R = run(c, "CYBER_RATIO");
@@ -192,7 +192,7 @@ test("义体与改造率：档位表、攻击义体伤害、换算比例从 cybe
   assert.match(text, /这个专长还没加入游戏/, "FEATS 里还没有过度安装的专长");
   run(c, "CYBERWARE_TIER[5].hpCut = 6; FEATS[CYBERWARE_OVERINSTALL_FEAT] = { name: '超限改造', tier: 1, text: '测试' }");
   const e2 = chapter(c, "cyber");
-  assert.equal(section(e2, "义体").table.rows[0][1], "−6");
+  assert.equal(section(e2, "义体").table.rows[0][2], "−6");
   assert.match(allText(e2), /专长「超限改造」/);
 });
 
@@ -341,6 +341,316 @@ test("武器耐久、改装件：耐久上限的文字公式照 weaponBaseDur；
   assert.ok(allText(chapter(c, "parts")).includes("武器等级 + 羁绊到 3 / 6 级各多 1 个改装槽"));
 });
 
+/* ---------- 按审查修（PR #275）：手写的规则说明照代码的实际结算 ---------- */
+/** 开一场战斗（规则说明本身不读单位；这里是拿实际结算来对照文字） */
+function battle(c, party, enemies, seed) {
+  c.BattleSim.setup({ party, enemies: enemies || [{ id: "thug_knife", lv: 1, zone: 2 }], seed: seed || "RULEBOOK" });
+  c.startCombat();
+  return c.S.state;
+}
+
+test("协助格挡：空手挡住架势照常扣（会被打进失衡）；拿武器格挡一发动就扣耐久，没挡住也扣；范围攻击、炮台、首领机制不能格挡", () => {
+  const c = loadRules();
+  const e = chapter(c, "block");
+  const after = section(e, "挡住以后").lines;
+  const bare = after.find(l => l.startsWith("空手挡住"));
+  assert.ok(bare, "有空手挡住那一条");
+  assert.match(bare, /一半伤害/);
+  assert.match(bare, /架势照常扣（可能被打进失衡）/);
+  assert.doesNotMatch(bare, /最少留/, "空手挡住不保架势");
+  assert.ok(after.every(l => !/耐久 −1/.test(l)), "扣耐久不写在「挡住以后」下面（没挡住也扣）");
+  assert.match(section(e, "成功率").lines.join("\n"), /拿着武器格挡，不管挡没挡住，这把武器耐久 −1/);
+  const who = section(e, "谁能挡").lines.join("\n");
+  assert.match(who, /范围攻击（打一整区的）也不能/);
+  assert.match(who, /防卫炮台/);
+  assert.match(who, /首领机制/);
+  // 实际结算 ①：空手挡住只把伤害减半，架势照扣到 0、失衡
+  const st = battle(c, ["kolt", "helu"], [{ id: "thug_knife", lv: 1, zone: 1 }]);
+  const kolt = c.findKit("kolt", st.units), helu = c.findKit("helu", st.units), foe = st.units.find(u => !u.isPlayer);
+  kolt.def = 2;
+  const r = c.resolveAttack({ attacker: foe, target: kolt, atk: 4, mult: 1, hits: 1, baseBreak: 3, element: "fire",
+    flags: { action: true, block: "bareOk" }, weather: "none", zoneMode: 2, attackerField: {}, targetField: {}, dist: 0, atkRange: "melee" });
+  assert.equal(r.defAfter, 0, "空手挡住：架势照扣");
+  assert.equal(r.broke, true, "被打进失衡");
+  // 实际结算 ②：拿武器格挡没挡住，这把武器照样 −1 耐久
+  helu.zone = kolt.zone; helu.bonus = 1;
+  const before = c.weaponDur("ecmo");
+  assert.equal(c.performAssistBlock(helu, kolt, foe, { ok: false }).ok, false);
+  assert.equal(c.weaponDur("ecmo"), before - 1, "没挡住也扣耐久");
+});
+
+test("唤出 / 变回武器人写基础消耗：选中带「人器一心」的人（或者他的武器人）时规则页照样不变，生成完也不改 state.attackerId", () => {
+  const c = loadRules();
+  const st = battle(c, ["kolt", "ruby"]);
+  const kolt = c.findKit("kolt", st.units);
+  st.attackerId = null;
+  const summon = c.rbCost(c.skillCost("kolt_summon")), back = c.rbCost(c.skillCost("torque_return"));
+  assert.equal(summon, "1 行动点 + 1 附赠动作");
+  const want = { economy: [`唤出武器人：${summon}；`, `武器人变回武器：${back}（`], durability: [`变成武器人一起打：${summon}；`, `武器人变回武器：${back}。`] };
+  const check = (why) => Object.keys(want).forEach(id => {
+    const t = allText(chapter(c, id));
+    want[id].forEach(w => assert.ok(t.includes(w), `${why} · ${id}：${w}`));
+  });
+  check("没选中人");
+  kolt.feats = ["onemind"];
+  st.attackerId = kolt.id;
+  assert.deepEqual(plain(c.skillCost("kolt_summon")), { bonus: 1 }, "对照：选中的人有人器一心时，技能的实际消耗确实变了");
+  check("选中带人器一心的柯尔特");
+  assert.equal(st.attackerId, kolt.id, "生成完还原选中的人");
+  const torque = c.spawnWeapon(kolt, "torque");
+  kolt.resources.featUsed = Object.assign({}, kolt.resources.featUsed, { onemind: 1 });
+  st.attackerId = torque.id;
+  assert.deepEqual(plain(c.skillCost("torque_return")), {}, "对照：人器一心用过以后，变回武器不花行动点");
+  check("选中扭矩");
+  assert.equal(st.attackerId, torque.id);
+});
+
+test("战斗中用维修工具包修过的武器：规则页写这一场按受损算（atk、格挡加成减半，不能再唤出），和 ledgerRepair 的实际结果一致", () => {
+  const c = loadRules();
+  const atk = section(chapter(c, "atk"), "会让 atk 变的情况").lines[0];
+  assert.match(atk, /战斗中用维修工具包修过/);
+  assert.match(atk, /不能再唤出武器人/);
+  assert.match(section(chapter(c, "durability"), "耐久").lines.join("\n"), /战斗中也能修，但修好的武器这一场仍按受损算/);
+  assert.match(section(chapter(c, "block"), "成功率").lines.join("\n"), /战斗中修过/);
+  const st = battle(c, ["kolt", "helu"]);
+  st.bag = { items: [] };
+  c.bagAdd("repair_kit", 1);
+  c.LEDGER.dur.torque = 2;
+  c.ledgerRepair("torque", []);
+  assert.ok(c.weaponDur("torque") > 2, "修好了");
+  assert.equal(c.weaponHalved("torque"), true, "这一场按受损算");
+  assert.equal(c.spawnWeapon(c.findKit("kolt", st.units), "torque"), null, "不能再唤出");
+});
+
+test("首领 / 精英的晕眩标记：没攒满时失衡马上结束、架势回满，排上队的协助攻击打到时它已经不在失衡（照 bossQuickRecover 写）", () => {
+  const c = loadRules();
+  const lines = section(chapter(c, "posture"), "失衡").lines.join("\n");
+  assert.doesNotMatch(lines, /这次失衡照常结算/);
+  assert.match(lines, /失衡马上结束、架势回满/);
+  assert.match(lines, /打到时它已经不在失衡/);
+  assert.match(lines, /算进下一个标记/);
+  assert.match(lines, /和载具合并的驾驶员/);
+  const st = battle(c, ["kolt", "ruby"], [{ id: "outlaw_king", lv: 1, zone: 2 }]);
+  const king = st.units.find(u => u.kit === "outlaw_king"), kolt = c.findKit("kolt", st.units);
+  st.assistQueue = [];
+  c.dealBreak(king, 99, "physical", [], "测试", { by: kolt });
+  assert.equal(king.stunMarks, 1);
+  assert.equal(king.stunned, false, "没攒满：失衡马上结束");
+  assert.equal(king.def, king.defMax, "架势回满");
+  assert.ok(st.assistQueue.some(j => j.targetId === king.id), "协助攻击照样排上队");
+});
+
+test("天气：相位波谷 / 波峰是 ∓50% 和其他百分比加在一起、微光不反转能量——文字和 resolveAttack 的结果一致", () => {
+  const c = loadRules();
+  const note = section(chapter(c, "damage"), "天气对属性伤害").note;
+  assert.match(note, /微光还会反转克制表（能量除外）/);
+  assert.match(note, /不另外相乘/);
+  const trough = Number((note.match(/波谷全场伤害 −(\d+)%/) || [])[1]);
+  const crest = Number((note.match(/波峰全场伤害 \+(\d+)%/) || [])[1]);
+  assert.ok(trough > 0 && crest > 0, note);
+  assert.match(section(chapter(c, "layers"), "克制表（常态天气）").note, /微光反转克制（能量除外）/);
+  // 实际结算：atk 100 打 9999 点的一层
+  const st = battle(c, ["ras"], [{ id: "thug_knife", lv: 1, zone: 1 }]);
+  const a = c.findKit("ras", st.units), t = st.units.find(u => !u.isPlayer);
+  a.zone = t.zone = 1; a.statuses = c.defaultStatuses ? c.defaultStatuses() : {};
+  const hit = (element, weather, phaseStep, layer) => {
+    t.layers = [{ type: layer, current: 9999, max: 9999 }]; t.def = t.defMax = 99; t.flying = false; t.instant = {};
+    return c.resolveAttack({ attacker: a, target: t, atk: 100, mult: 1, hits: 1, baseBreak: 0, element, flags: { action: true },
+      weather, phaseStep, zoneMode: 2, attackerField: {}, targetField: {}, dist: 0, atkRange: "any" }).total;
+  };
+  const CH = run(c, "CHART");
+  // 火打肉体（克制 +50%）：波谷 = 100 × (1 + 50% − 50%) = 100，不是 100 × 1.5 × 0.5
+  assert.equal(hit("fire", "phase", 0, "flesh"), Math.floor(100 * (1 + CH.fire.flesh - trough / 100)));
+  assert.equal(hit("fire", "phase", 2, "flesh"), Math.floor(100 * (1 + CH.fire.flesh + crest / 100)));
+  // 微光：能量打星灵照常克制；火打肉体反过来
+  assert.equal(hit("energy", "glow", null, "spirit"), Math.floor(100 * (1 + CH.energy.spirit + c.weatherDamagePct("glow", "energy"))));
+  assert.equal(hit("fire", "glow", null, "flesh"), Math.floor(100 * (1 - CH.fire.flesh + c.weatherDamagePct("glow", "fire"))));
+});
+
+test("血量层改造：能换的肉体 = 改造率上限 × 肉体上限（装了义体先扣义体的占用），和诊所算的上限一致", () => {
+  const c = loadRules();
+  const lines = section(chapter(c, "cyber"), "血量层改造").lines.join("\n");
+  assert.match(lines, /能换的肉体最多 = 改造率上限 × 肉体生命上限，向下取整/);
+  assert.match(lines, /装了义体时改成 \(改造率上限 − 义体的占用\) × 原生命上限/);
+  assert.doesNotMatch(lines, /最多 = 改造率 ×/, "「改造率」是现在的占用，不是上限");
+  let n = 0;
+  for (const con of [3, 5, 7]) for (const int of [3, 5, 6, 8, 10]) for (const lv of [1, 4, 9, 15]) for (const cw of [[], ["strike_v1"], ["shot_v2"], ["strike_v2", "shot_v1"]]) {
+    const u = { kit: "rb_test", attrs: { str: 5, con, dex: 5, wil: 5, int, sta: 5 }, level: lv, cyberware: cw.map(id => ({ id })) };
+    const base = c.cyberwareBaseHp(u), cap = c.cyberwareCap(u), fleshMax = base - c.cyberwareHpCut(u);
+    if (fleshMax <= 0) continue;
+    // 诊所（rogue.js · cyberInfo、trpg.js · trpgCyberInfo）的算法
+    const game = c.cyberConvertLimit(fleshMax, cw.length ? c.cyberwareLayerRateFor(u, fleshMax) : c.cyberRateOf(u.attrs, lv));
+    // 照规则页的文字算
+    const raw = cw.length ? Math.max(0, cap - c.cyberwareOccupancy(u)) * base : cap * fleshMax;
+    const byText = Math.floor(raw + 1e-9);
+    // 文字的结果恰好是整数时，诊所的浮点误差会少算 1 点（规则代码的问题，见 PR #275 的说明，这里不改）
+    const edge = Math.abs(raw - Math.round(raw)) < 1e-9;
+    assert.ok(game === byText || (edge && game === byText - 1), `体质 ${con} 智力 ${int} Lv${lv} ${cw}：诊所 ${game}，文字 ${byText}`);
+    n++;
+  }
+  assert.ok(n > 100);
+});
+
+test("义体已经做进游戏：规则页写目前的系列、以新换旧、战斗里怎么发动（消耗、次数、射程、击破照目录和 skillCost）", () => {
+  const c = loadRules();
+  const e = chapter(c, "cyber");
+  const text = allText(e);
+  const fire = section(e, "发动义体（单体伤害型）");
+  assert.doesNotMatch(section(e, "义体").lines.join("\n") + fire.lines.join("\n"), /还没|尚未|暂无/, "义体已经能装、能发动");
+  run(c, "CYBERWARE_LINES").forEach(l => assert.ok(section(e, "义体").lines[0].includes(`「${l.name}」`), l.name));
+  assert.match(text, /以新换旧（付旧的拆除费 \+ 新的价格）/);
+  assert.match(text, /图鉴「义体」/, "具体的坚毅生命消耗指到义体图鉴");
+  const cat = c.cyberwareCatalog();
+  assert.ok(cat.length > 0, "正式目录不是空的");
+  const use = fire.lines.join("\n");
+  cat.forEach(d => {
+    assert.ok(use.includes(`发动花 ${c.rbCost(c.skillCost("cw_" + d.id))}`), d.id + " 的消耗照 skillCost");
+    assert.ok(use.includes(`每次短休 ${d.usesPerShortRest} 次`), d.id);
+    assert.ok(use.includes(`${d.break} 击破`), d.id);
+  });
+  const K = run(c, "CYBERWARE_KINDS.attack");
+  assert.deepEqual(plain(K.range({ range: "melee" })), { min: 0, max: 0 });
+  assert.deepEqual(plain(K.range({ range: "ranged" })), { min: 1, max: 1 });
+  assert.match(use, /近战打同区的一名、远程打距离 1 的一名/);
+  // 目录里的消耗改了，文字跟着变
+  run(c, "Object.keys(CYBERWARE).forEach(k => { CYBERWARE[k].cost = { bonus: 1 }; })");
+  assert.ok(section(chapter(c, "cyber"), "发动义体（单体伤害型）").lines.join("\n").includes("发动花 1 附赠动作"));
+});
+
+test("经验来源：评价倍率照 SCORE_GRADES；跑团每场胜利的额外经验和 settleBattleRewards 一致；遭遇战照 ROGUE_CONFIG.ambush.xpPerLevel", () => {
+  const c = loadRules();
+  const lines = section(chapter(c, "level"), "经验").lines;
+  // 「B ×1.2、A ×1.5、S / SS / SSS ×2；C、D 不加」→ 每个评价的倍率
+  const gl = lines.find(l => l.startsWith("打赢时看战斗评价"));
+  assert.ok(gl, lines.join("\n"));
+  const seg = gl.slice(gl.indexOf("（") + 1, gl.indexOf("）"));
+  const [ups, none] = seg.split("；");
+  const said = {};
+  ups.split("、").forEach(p => { const [names, m] = p.split(" ×"); names.split(" / ").forEach(g => { said[g] = Number(m); }); });
+  (none || "").replace(/ 不加$/, "").split("、").filter(Boolean).forEach(g => { said[g] = 1; });
+  run(c, "SCORE_GRADES").forEach(g => assert.equal(said[g[0]], g[2], `评价 ${g[0]}`));
+  // 跑团：每人另加「队伍最高等级 × N ÷ 上场人数」
+  const tl = lines.find(l => l.startsWith("跑团和长线养成"));
+  const N = Number((tl.match(/队伍最高等级 × (\d+) ÷ 上场人数/) || [])[1]);
+  assert.ok(N > 0, tl);
+  const st = battle(c, ["ruby", "kolt", "tou"]);
+  c.setXpRequirementScale(1000);
+  c.S.TRPG.active = true;
+  const heroes = st.units.filter(u => u.isPlayer && !c.isWeaponUnit(u));
+  heroes[0].level = 6; heroes[1].level = 3; heroes[2].level = 1;
+  const r = c.settleBattleRewards("win");
+  heroes.forEach(u => assert.equal((r.trpgXp.find(x => x.name === u.name) || {}).xp, Math.floor(6 * N / heroes.length), u.name));
+  c.S.TRPG.active = false;
+  c.setXpRequirementScale(1);
+  // 遭遇战、单人模式
+  const A = run(c, "ROGUE_CONFIG.ambush.xpPerLevel"), S = run(c, "ROGUE_SOLO.battleXp");
+  assert.ok(lines.some(l => l.includes(`每人另加 ${A} × 敌人等级`) && l.includes(`单人模式每场胜利另加 ${S}`)));
+  run(c, "ROGUE_CONFIG.ambush.xpPerLevel = 77");
+  assert.ok(section(chapter(c, "level"), "经验").lines.some(l => l.includes("每人另加 77 × 敌人等级")));
+});
+
+test("检定：种族特长照 RACE_CHECK_PERKS 的字段写（猫只有侦察、躲藏优势），和 checkPerksFor 一致；跑团的熟练项由主持人记在角色卡上", () => {
+  const c = loadRules();
+  const e = chapter(c, "check");
+  const perks = run(c, "RACE_CHECK_PERKS");
+  const lines = section(e, "种族").lines;
+  const known = ["adv", "dis", "reroll", "softFail", "lowHpDis", "text"];
+  Object.keys(perks).forEach(r => {
+    Object.keys(perks[r]).forEach(k => assert.ok(known.includes(k), `${r} 的新字段 ${k}：规则页要跟着写`));
+    const l = lines.find(x => x.startsWith(r));
+    assert.ok(l, r);
+    const p = perks[r];
+    if ((p.adv || []).length) assert.ok(l.includes(`${p.adv.join("、")}检定优势`), l);
+    if ((p.dis || []).length) assert.ok(l.includes(`${p.dis.join("、")}检定劣势`), l);
+    assert.equal(/血量低于一半时所有检定劣势/.test(l), !!p.lowHpDis, l);
+    assert.equal(/检定失败后重掷一次/.test(l), !!p.reroll, l);
+    assert.equal(/检定失败时受的伤减半/.test(l), !!p.softFail, l);
+  });
+  const cat = lines.find(l => l.startsWith("猫类人-猫"));
+  assert.doesNotMatch(cat, /潜行/, "熟练项里没有潜行");
+  // 猫类人-猫（结人）：侦察、躲藏有优势，聆听没有
+  assert.equal(c.checkPerksFor("yuito", "侦察", false).adv, true);
+  assert.equal(c.checkPerksFor("yuito", "躲藏", false).adv, true);
+  assert.equal(c.checkPerksFor("yuito", "聆听", false).adv, false);
+  assert.match(section(e, "熟练项").lines.join("\n"), /跑团里熟练项由主持人记在角色卡上/);
+  assert.match(section(chapter(c, "level"), "每一级得到什么").note, /跑团里属性点、专长、职责技能照这张表，熟练项由主持人记在角色卡上/);
+});
+
+test("检定：战斗里的几种检定（空隙、冻土、改写炮台、上下车）照配置表写；制作也用这张成功率表", () => {
+  const c = loadRules();
+  const where = section(chapter(c, "check"), "在哪里检定").lines.join("\n");
+  const K = run(c, "ROGUE_CHECKS"), name = (i) => K.diffs[Object.keys(K.diffs)[i]].name;
+  const ck = (o) => `${name(o.diff)}「${o.prof}」`;
+  const V = run(c, "VOID_CROSS"), T = run(c, "TURRET_HACK"), VR = run(c, "VEHICLE_RULES");
+  assert.ok(where.includes(`越过空隙要过${ck(V)}检定`), where);
+  assert.ok(where.includes(`改写防卫炮台要过${ck(T)}检定`), where);
+  assert.ok(where.includes(`上车要过${ck(VR.boardCheck)}检定`), where);
+  assert.ok(where.includes(`把人拉下车要过${ck(VR.pullCheck)}检定`), where);
+  assert.match(where, /制作道具也按这张表算成功率/);
+  run(c, "TURRET_HACK.diff = 1");
+  assert.ok(section(chapter(c, "check"), "在哪里检定").lines.join("\n").includes(`改写防卫炮台要过${name(1)}「${T.prof}」检定`));
+});
+
+test("移动：危墙 / 关着的门挡移动（推、拉也过不去）；被推过空隙的地面单位坠落；不稳桥梁——文字和实际结算一致", () => {
+  const c = loadRules();
+  const e = chapter(c, "move");
+  const move = section(e, "移动").lines.join("\n");
+  assert.match(section(e, "挡在中间的东西").lines.join("\n"), /危墙、关着的机关门：摧毁 \/ 打开之前过不去（自己走、被推 \/ 拉都一样/);
+  assert.match(move, /不稳桥梁：地面单位每过一次（自己走、被推 \/ 拉都算），桥的耐久 −1d6/);
+  assert.match(move, /专长「跃迁」/);
+  const fall = Number((move.match(/被推 \/ 拉过空隙的地面单位会坠落：失去最大生命的 (\d+)%，留在原区/) || [])[1]);
+  assert.ok(fall > 0, move);
+  const st = battle(c, ["kolt"], [{ id: "thug_knife", lv: 1, zone: 1 }]);
+  const kolt = c.findKit("kolt", st.units);
+  kolt.zone = 1; kolt.flying = false;
+  st.gaps["1-2"] = { type: "wall", hp: 5 };
+  assert.equal(c.displaceTo(kolt, 2, [], "测试"), false, "危墙推不过去");
+  assert.equal(kolt.zone, 1);
+  st.gaps["1-2"] = { type: "void" };
+  const hp = c.totalHp(kolt), max = c.totalMaxHp(kolt);
+  assert.equal(c.displaceTo(kolt, 2, [], "测试"), false);
+  assert.equal(kolt.zone, 1, "留在原区");
+  assert.equal(hp - c.totalHp(kolt), Math.floor(max * fall / 100), "坠落失去最大生命的这个比例");
+});
+
+test("单人模式的支援消耗照 skillCost（不读没人用的 ROGUE_SOLO.supportCost）；短休花的时间和 ledgerShortRest 实际推进的一致", () => {
+  const c = loadRules();
+  const solo = () => section(chapter(c, "solo"), "和普通单局不同的地方").lines.join("\n");
+  assert.ok(solo().includes(`支援：花 ${c.rbCost(c.skillCost("solo_support"))}叫一名伙伴登场`), solo());
+  run(c, "ROGUE_SOLO.supportCost = 9");
+  assert.doesNotMatch(solo(), /花 9 行动点/, "游戏里扣的不是这个值");
+  assert.ok(allText(chapter(c, "rest")).includes(`花 ${run(c, "ROGUE_CONFIG.hours.shortRest")} 小时，恢复`));
+  battle(c, ["ruby"]);
+  const h0 = Number(c.LEDGER.hours) || 0;
+  c.ledgerShortRest(null, []);
+  assert.equal((Number(c.LEDGER.hours) || 0) - h0, run(c, "ROGUE_CONFIG.hours.shortRest"), "规则页读的短休时长就是实际推进的时间");
+});
+
+test("小处：主线期限、武器自己升到几级、装甲减伤就是克制表那一列、多段攻击的伤害骰、武器人不能协助攻击、起身后治疗无效、近程打飞行的例外、诊所价格、绯秋两把刀", () => {
+  const c = loadRules();
+  const T = (id) => allText(chapter(c, id));
+  assert.match(T("time"), /剩下的天数不够做主线时，本局直接结束，不用等到最后一天/);
+  assert.doesNotMatch(T("time"), /期限到了还没完成/);
+  assert.ok(T("parts").includes(`跑团里自己在工作站最多升到 ${run(c, "HANDBOOK_WEAPON_UPGRADE.selfMaxLevel")} 级`));
+  // 装甲的「25% 减伤」就是克制表装甲那一列（除了酸、冰都是 −25%），不另外再减
+  assert.match(T("layers"), /装甲写的「25% 减伤」就是克制表装甲那一列的 −25%，不另外再减一次/);
+  const CH = run(c, "CHART");
+  Object.keys(CH).forEach(el => assert.equal(CH[el].armor, el === "acid" ? 0.5 : el === "ice" ? 0 : -0.25, el));
+  assert.match(T("damage"), /伤害骰整次攻击只掷一次，每一段加同一个点数/);
+  assert.match(T("turn"), /晕眩标记/);
+  assert.match(T("assist"), /武器人自己不能发动协助攻击/);
+  assert.match(T("down"), /一般的治疗也无效/);
+  assert.match(T("economy"), /范围攻击、协助攻击、借机攻击，以及攻击者自己也在飞时不用付/);
+  assert.ok(T("cyber").includes(`每点 ${run(c, "ROGUE_CLINIC.cyberPerHp")} 奎支`));
+  assert.doesNotMatch(T("cyber"), /单局每点/);
+  ["atk", "block", "durability"].forEach(id => assert.match(T(id), /绯秋/, id));
+  // 绯秋分出丹生谷：手里换成鳴門，格挡加成按鳴門算
+  const st = battle(c, ["hiaki"]);
+  const hiaki = c.findKit("hiaki", st.units);
+  c.spawnWeapon(hiaki, "niu");
+  assert.equal(c.heldWeaponBlockBonus(hiaki), run(c, "WEAPON_BLOCK_BONUS").naruto);
+});
+
 /* ---------- 界面 ---------- */
 function loadUI(c) {
   // 和浏览器一样：bestiary-ui.js 和规则文件在同一个全局里
@@ -361,6 +671,17 @@ test("界面：图鉴多了「规则」这一本；章节详情画出每一节�
   assert.doesNotMatch(evil, /<img|<script|<i>/);
   assert.match(evil, /&lt;script&gt;/);
   assert.match(evil, /a&amp;b/);
+});
+
+test("界面：「：」前面的短标签加粗，括号里的「：」不算（「瑞比（角色卡：…）」不会只加粗半个括号）", () => {
+  const c = loadRules(), B = loadUI(c);
+  const html = B.rulebookHtml({ name: "t", groupName: "基础", blurb: "", sections: [{ title: "s", lines: [
+    "瑞比（角色卡：力量 6、体质 5）拿着「明特」：", "猫类人-猫（夜视）：侦察、躲藏检定优势", "回合开始：结算场地效果"] }] });
+  assert.doesNotMatch(html, /<b>瑞比（角色卡<\/b>/);
+  assert.match(html, /<b>猫类人-猫（夜视）<\/b>：侦察/);
+  assert.match(html, /<b>回合开始<\/b>：结算/);
+  // 真的章节里：例子那一行不加粗半个括号
+  assert.doesNotMatch(B.rulebookHtml(chapter(c, "atk")), /<b>[^<]*（角色卡<\/b>/);
 });
 
 test("入口：标题、单局顶栏、跑团顶栏的「图鉴」旁边都有「规则」，点了打开图鉴的「规则」这一本；规则文件按顺序加载", () => {
