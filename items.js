@@ -103,7 +103,7 @@ EFFECT_ITEMS.forEach(it => {
  * 结构材料（金属 → 赫心结晶）照旧只用于武器升级；道具制作另用这 7 种。队伍公用（supply：联机时不按需求分配，直接进公用背包）。
  *   cls：chem 化学 / elec 电子 / bio 生物；tier：1 常见、2 精制；price 参考价（黑市按 CRAFT_BLACK_MARKET 倍出售） */
 const CRAFT_MATERIALS = [
-  { id: "cm_scrap",  name: "废料",       price: 100, cls: "shell", tier: 0, hint: "道具的壳体。外城区机器人看守、狂徒等机械与人形敌人常掉，穴鸦也会叼来；拆解道具也能拿回" },
+  { id: "cm_scrap",  name: "废料",       price: 100, cls: "shell", tier: 0, hint: "道具的壳体。外城区机器人看守、狂徒等机械与人形敌人常掉，穴鸦也会叼来，下水道的狂鼠、清扫机身上也有；拆解道具也能拿回" },
   { id: "cm_chem",   name: "化工残液",   price: 200, cls: "chem",  tier: 1, hint: "化学 · 常见。采矿场的投料无人机、矿场看守机器人，自爆小车与各路警卫队队长常掉" },
   { id: "cm_gas",    name: "燃气浓缩物", price: 600, cls: "chem",  tier: 2, hint: "化学 · 精制。采矿场的燃气收集机、播撒者、蚁型特殊戒备兵种等精英多掉，亡命之王必掉" },
   { id: "cm_coil",   name: "废线圈",     price: 200, cls: "elec",  tier: 1, hint: "电子 · 常见。外城区机器人看守、安保巡逻车、巡检浮标常掉，高压巡逻艇、飞碟触灵掉得更多" },
@@ -155,6 +155,13 @@ const ENEMY_DROPS = {
   riot_molotov: { cm_chem: 0.25, cm_gas: 0.1 },                          // 燃烧瓶
   riot_flamer:  { cm_gas: 1.0, cm_chem: 0.65, cm_cell: 0.3 },            // 喷火器的燃料罐
   riot_captain: { cm_chem: 0.65, cm_gas: 0.4, cm_cell: 0.4, cm_scrap: 0.3 },
+  // —— 狂鼠（下水道）：随便掉一些废料，杂兵少、精英多（作者以后再调，docs/ratfolk.md 第 5 节） ——
+  rat_lurker: { cm_scrap: 0.25 },
+  rat_biter:  { cm_scrap: 0.25 },
+  rat_plague: { cm_scrap: 1.5 },
+  rat_tyrant: { cm_scrap: 1.5 },
+  // —— 下水道维护（下水道）：和狂鼠一样随便掉一些废料（作者以后再调，docs/sewer-maintenance.md 第 3 节）；清扫机三只一组 ——
+  sewer_sweeper: { cm_scrap: 0.25 },
   // —— 盗匪（外城区）：搜身拿到的破烂 ——
   thug_knife:  { cm_scrap: 0.2, cm_chem: 0.08 },
   thug_hammer: { cm_scrap: 0.2, cm_coil: 0.08 },

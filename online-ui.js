@@ -160,7 +160,7 @@
     // 悬停在单位 / 配置物上：图鉴描述 + 身上效果的文字说明（unit-tip.js）
     const TIP_STATUS = { burn: "灼烧", shock: "感电", corr: "腐蚀", frostbite: "冻伤", shockwave: "震荡", reso: "共振", unstable: "不稳", weak: "虚弱", inspire: "振奋", sturdy: "坚挺", hide: "躲藏", advantage: "优势", chase: "紧追" };
     const TIP_INSTANT = { melt: "熔融", sting: "刺骨", overload: "过载", shift: "错位", spread: "扩散", refract: "折射", iceNext: "冰冻+50%" };
-    const TIP_SELF = { burn: "自焚", frost: "霜结", splash: "溅射", conductor: "导体", anchor: "千钧", store: "蓄能", doppler: "多普勒" };
+    const TIP_SELF = { burn: "自焚", frost: "霜结", splash: "溅射", conductor: "导体", anchor: "千钧", store: "蓄能", doppler: "多普勒", frenzy: "狂暴" };
     const TIP_ATK = { combust: "爆燃", icebreak: "破冰", bolt: "雷击", etch: "蚀刻", backflow: "倒流", inertia: "惯性", diffract: "衍射" };
     function unitTip(node) {
       const T = global.UnitTip, data = displayState || view.state || {};

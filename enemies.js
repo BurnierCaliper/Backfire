@@ -94,7 +94,9 @@ function enemyMayAssist(u) {
  * 其余按技能射程（ENEMY_SKILL_RANGE，没登记的用单位卡上的 range），隔着危墙 / 关着的门打不到。 */
 const ENEMY_ASSIST_RUSH = ["en_thug_hammer_assist", "en_wolf_assist", "en_chi_exec", "en_overseer_assist", "en_gas_assist",
   "en_fish_lead_assist", "en_fish_drive_assist", "en_fish_ambush_assist",   // 沙鱼群起：冲到失衡的人那一区
-  "en_riot_baton_assist", "en_riot_spray_assist"];   // 镇压队：警棍盾、火焰喷射兵冲进目标所在区
+  "en_riot_baton_assist", "en_riot_spray_assist",   // 镇压队：警棍盾、火焰喷射兵冲进目标所在区
+  "en_rat_plague_assist", "en_rat_tyrant_assist",   // 下水道狂鼠：疫病暴徒、暴虐猎手冲到目标所在区
+  "en_sweeper_assist"];   // 下水道维护：清扫机冲到目标所在区自爆
 const ENEMY_ASSIST_ANYWHERE = ["en_patrol_assist", "ufo_assist", "en_alarm_assist"];
 function enemyAssistReach(u, t) {
   if (!u || !t) return false;
@@ -409,6 +411,30 @@ function enemySkillListBase(u) {
       { id: "en_riot_pistol", label: "火焰手枪（灼烧）" },
       { id: "en_riot_pistol_assist", label: "协助：远距 1×ATK 火（灼烧）" }
     ],
+    // 下水道狂鼠（docs/ratfolk.md）：撕咬者狂暴时普通攻击的写法换掉（下面按自我效果改名）
+    rat_lurker: [
+      { id: "en_rat_lurker_bite", label: "普通攻击（施加腐蚀）" },
+      { id: "en_rat_lurker_assist", label: "协助：同普通攻击，进入狂暴" }
+    ],
+    rat_biter: [
+      { id: "en_rat_biter_bite", label: "普通攻击（出血）" },
+      { id: "en_rat_biter_assist", label: "协助：同普通攻击，进入狂暴" }
+    ],
+    rat_plague: [
+      { id: "en_rat_plague_claw", label: "感染撕扯（近距，施加腐蚀）" },
+      { id: "en_rat_plague_spray", label: "感染喷洒（远距，施加腐蚀）" },
+      { id: "en_rat_plague_assist", label: "协助：冲近 1.5×ATK 酸（施加腐蚀）" }
+    ],
+    rat_tyrant: [
+      { id: "en_rat_tyrant_bite", label: "普通攻击（出血）" },
+      { id: "en_rat_tyrant_assist", label: "协助：冲近连打三次，所有狂鼠进入狂暴（出血）" }
+    ],
+    // 下水道维护（docs/sewer-maintenance.md）：清扫机还有敌人没有共振时上共振，所有敌人都有共振了才开火（AI 照这个挑，ai.js）
+    sewer_sweeper: [
+      { id: "en_sweeper_reso", label: "施加共振（远距，只上状态、不造成伤害）" },
+      { id: "en_sweeper_shot", label: "谐波射击（所有敌人都有共振时）" },
+      { id: "en_sweeper_assist", label: "协助：自爆（冲到目标所在区，同区所有敌对单位 1×ATK 火，然后自己死亡）" }
+    ],
     ant_hunter: [
       { id: "en_hunter_shot", label: "灼热子弹（穿刺）" },
       { id: "en_hunter_heat", label: "把天气变为酷暑" },
@@ -539,6 +565,11 @@ function enemySkillListBase(u) {
     list = list.filter(s => s.id !== "en_gl" && s.id !== "en_gl_fire");
     if (ready) list.unshift({ id: "en_gl_fire", label: "发射榴弹（" + u.resources.glZone + "区）" });
     else list.unshift({ id: "en_gl", label: "榴弹（选择区域）" });
+  }
+  if (u.kit === "rat_biter" && u.self === "frenzy") {
+    // 撕咬者狂暴：普通攻击变成两次 0.5×atk，每一击都出血（RAT_CFG.biter · ratBiterAttack）
+    const B = RAT_CFG.biter;
+    list = list.map(s => s.id === "en_rat_biter_bite" ? { id: s.id, label: `普通攻击（狂暴：${B.frenzyHits} 次 ${B.frenzyMult}×ATK，每一击都出血）` } : s);
   }
   if (u.kit === "riot_molotov") {
     const r = u.resources || {};
@@ -703,6 +734,13 @@ const ENEMY_SKILL_RANGE = {
   en_riot_spray_assist: "melee",
   en_riot_pistol: "any",
   en_riot_pistol_assist: "ranged",
+  // 下水道狂鼠：疫病暴徒远近皆可（撕扯近距、喷洒远距），其余都是近战；暴徒、猎手的协助冲到目标所在区（ENEMY_ASSIST_RUSH）
+  en_rat_lurker_bite: "melee", en_rat_lurker_assist: "melee",
+  en_rat_biter_bite: "melee", en_rat_biter_assist: "melee",
+  en_rat_plague_claw: "melee", en_rat_plague_spray: "ranged", en_rat_plague_assist: "melee",
+  en_rat_tyrant_bite: "melee", en_rat_tyrant_assist: "melee",
+  // 下水道清扫机：上共振、谐波射击都是一般远程（距离 1）；自爆是冲到目标所在区炸那一区（ENEMY_ASSIST_RUSH）
+  en_sweeper_reso: "ranged", en_sweeper_shot: "ranged", en_sweeper_assist: "melee",
   en_hunter_shot: "ranged",
   en_miner_shot: "ranged",
   en_spider_bite: "melee",
@@ -972,10 +1010,413 @@ function hunterHeatAtTurnStart(u, notes) {
   }
 }
 
+/* ===== 下水道狂鼠（docs/ratfolk.md 第 3 节）=====
+ * 通用机制都用 #274 做好的：出血（攻击规格上的 bleed，engine.js · BLEED）、狂暴（effects.js · enterFrenzy / FRENZY）、阵营被动狂潮（effects.js · frenzyTide）。
+ * 血量 / 架势 / atk / 伤害骰在 engine.js · RAT_STATS，这里是招式和机制的数：
+ *   biter   撕咬者：狂暴时普通攻击变成 frenzyHits 次 frenzyMult×atk 物理（共 1 击破），每一击都出血
+ *   plague  疫病暴徒：目标原本已经腐蚀时，感染撕扯给自己回 clawHeal 最大生命；协助 assistMult×atk 酸，
+ *           目标原本已经腐蚀时伤害 + assistDice、给自己回 assistHeal 最大生命；狂暴时受到的治疗 +frenzyHealUp
+ *   tyrant  暴虐猎手：协助冲近连打 assistHits 次 assistMult×atk 物理（每一击都出血）；斩杀那一击的协助格挡 +execBlock%
+ * 行动结束后的反应（潜藏者逃跑、疫病暴徒「所有敌人都腐蚀」进入狂暴、暴虐猎手斩杀）：app.js 在最外层的一次行动 / 移动 / 格挡落下 /
+ * 回合交界结算完之后调 ratfolkSweep；每一击结算完调 ratfolkAfterHit（记下潜藏者挨的近战、猎手击杀后狂暴 / 出血回血） */
+const RAT_CFG = {
+  biter:  { frenzyHits: 2, frenzyMult: 0.5 },
+  plague: { clawHeal: 0.1, assistMult: 1.5, assistDice: [2, 8], assistHeal: 0.25, frenzyHealUp: 0.5 },
+  tyrant: { assistHits: 3, assistMult: 0.5, execBlock: 5 }
+};
+const ratOnField = u => !!u && !u.dead && !u._removed && !u.hidden && !u.fused;
+const ratStunned = u => !!(u && (u.stunned || (typeof isEffectivelyStunned === "function" && isEffectivelyStunned(u))));
+function ratCorroded(u) { return !!(u && u.statuses && u.statuses.corr); }
+/** 狂鼠眼里的敌人：和它敌对、在场上的单位（倒地没起身的、配置物不算）。疫病暴徒「所有敌人都腐蚀」、腐蚀扩散都按它 */
+function ratFoesOf(a) {
+  return hostilesOf(a).filter(u => !u.kind && !u.isProp && !u.isStructure && !(typeof isDownProtected === "function" && isDownProtected(u)));
+}
+/** 撕咬者的普通攻击（协助也是这一下）：平时 1×atk + 1d6 物理、1 击破、出血；狂暴时两次 0.5×atk 物理（共 1 击破），每一击都出血 */
+function ratBiterAttack(a, dice) {
+  if (a && a.self === "frenzy") {
+    const B = RAT_CFG.biter;
+    return { element: "physical", mult: B.frenzyMult, hits: B.frenzyHits, baseBreak: 1, breakOnce: true, bleed: true };
+  }
+  return { element: "physical", mult: 1, diceN: (dice && dice[0]) || 1, diceS: (dice && dice[1]) || 6, baseBreak: 1, bleed: true };
+}
+/** 暴虐猎手的普通攻击（斩杀也是这一下）：1×atk + 1d8 物理、1 击破、出血 */
+function ratTyrantBite(dice) {
+  return { element: "physical", mult: 1, diceN: (dice && dice[0]) || 1, diceS: (dice && dice[1]) || 8, baseBreak: 1, bleed: true };
+}
+/** 受到的治疗倍率（engine.js · healUnit）：疫病暴徒狂暴时 +50%，别的 ×1 */
+function ratHealMult(u) {
+  return u && u.kit === "rat_plague" && u.self === "frenzy" ? 1 + RAT_CFG.plague.frenzyHealUp : 1;
+}
+/** 疫病暴徒打中原本已经腐蚀的目标：给自己回 pct 最大生命（app.js · runOnConnect 的 selfHeal） */
+function ratSelfHeal(a, pct, notes) {
+  if (!a || a.dead || !(pct > 0)) return;
+  const want = Math.floor(totalMaxHp(a) * pct);
+  const got = want > 0 && typeof healUnit === "function" ? healUnit(a, want) : 0;
+  const up = ratHealMult(a) > 1 ? `，狂暴：受到的治疗 +${Math.round(RAT_CFG.plague.frenzyHealUp * 100)}%` : "";
+  notes.push(`目标原本已经腐蚀：${a.name} 恢复 ${got} 生命（${Math.round(pct * 100)}% 最大生命${up}）。`);
+}
+/** 感染喷洒打中原本已经腐蚀的目标：腐蚀扩散到目标同区的所有敌人（app.js · runOnConnect 的 corrSpread） */
+function ratPlagueSpread(a, t, notes) {
+  if (!a || !t) return;
+  const z = Number(t.zone);
+  const got = ratFoesOf(a).filter(u => u.id !== t.id && Number(u.zone) === z && !ratCorroded(u));
+  if (!got.length) { notes.push(`感染喷洒：${z} 区没有别的敌人可以扩散腐蚀。`); return; }
+  got.forEach(u => {
+    u.statuses = u.statuses || {};
+    u.statuses.corr = true;
+    if (typeof popStatus === "function") popStatus(u, "corr");
+  });
+  notes.push(`感染喷洒：${t.name} 身上的腐蚀扩散到 ${z} 区的 ${got.map(u => u.name).join("、")}。`);
+}
+/** 暴虐猎手的协助：所有狂鼠进入狂暴（失衡 / 晕眩中的进不去，照狂潮的写法） */
+function ratFrenzyAll(a, lines, why) {
+  if (typeof enterFrenzy !== "function" || typeof isRatfolk !== "function") return;
+  const rats = (state.units || []).filter(u => isRatfolk(u) && ratOnField(u) && u.self !== "frenzy");
+  if (!rats.length) return;
+  const out = rats.filter(ratStunned);
+  lines.push(`${why}：所有狂鼠进入狂暴${out.length ? `（失衡中的 ${out.length} 只除外）` : ""}。`);
+  rats.filter(u => !ratStunned(u)).forEach(u => enterFrenzy(u, lines, why));
+}
+/** 暴虐猎手的协助优先权：其他狂鼠都没有狂暴时一定由它来协助（ai.js · aiPickAssister 先筛出打得到的，再看这个） */
+function ratTyrantHasPriority(u) {
+  if (!u || u.kit !== "rat_tyrant" || typeof isRatfolk !== "function") return false;
+  return !(state.units || []).some(x => x !== u && isRatfolk(x) && ratOnField(x) && x.self === "frenzy");
+}
+
+/** dealTo 每一击结算完（app.js；等协助格挡的那一击落下时才到这里）。ctx = { dist 攻击者到目标隔几个区, wasDown 这一击之前目标已经倒下 / 濒死,
+ *  wasStunned 这一击之前目标已经失衡 }
+ *   暴虐猎手：斩杀那一击落下了就撤掉格挡 +5%；狂暴时打出的出血等量回血；这一击打死敌人（打进濒死也算）就进入狂暴
+ *   潜藏者：被敌对单位的近战（同区的攻击动作）打中、没被打死、没被打进失衡 → 记下来，这次行动打完再逃（ratLurkerFlees） */
+function ratfolkAfterHit(a, t, res, flags, extra, ctx) {
+  if (!a || !t || !res || res.pending || res.ok === false) return;
+  flags = flags || {};
+  ctx = ctx || {};
+  if (flags.ratExec) ratExecSettle(a);
+  if (a.kit === "rat_tyrant" && !a.dead && t !== a) {
+    const bleed = Math.floor(Number(res.bleed) || 0);
+    if (bleed > 0 && a.self === "frenzy" && typeof healUnit === "function") {
+      const got = healUnit(a, bleed);
+      extra.push(`${a.name} 狂暴：打出的出血 ${bleed} 等量回血，恢复 ${got}。`);
+    }
+    if (!ctx.wasDown && (t.dead || t.dying) && typeof enterFrenzy === "function") enterFrenzy(a, extra, `击杀${t.name}`);
+  }
+  if (t.kit === "rat_lurker" && a !== t && !a.envSrc && !t.dead && !t.stunned && ctx.dist === 0 && flags.action !== false && !flags.environment &&
+      hostileTo(a, t) && (typeof attackConnected !== "function" || attackConnected(res, flags)) &&
+      !(typeof brokeInto === "function" && brokeInto(t, ctx.wasStunned))) {
+    (state.ratFlee = state.ratFlee || []).push({ id: t.id, by: a.id, zone: Number(a.zone) });
+  }
+}
+/** 斩杀那一击落下了：同一只猎手没有别的斩杀还在等格挡，就撤掉协助格挡 +5% 的记号（app.js · finalBlockChance 读 ratExecBlock） */
+function ratExecSettle(a) {
+  if (!a) return;
+  if ((state.blockQueue || []).some(j => j && j.attackerId === a.id && j.opt && j.opt.flags && j.opt.flags.ratExec)) return;
+  a.ratExecBlock = 0;
+}
+
+/* ---------- 潜藏者：挨了近战就逃（docs/ratfolk.md：每次被近战攻击打中，免费往远离攻击者的方向移动 1 区，不触发借机攻击；被打死、被打进失衡时不跑）----------
+ * 挨打时只记下来（ratfolkAfterHit），等这次行动整个打完再逃：一个技能里分几下打它，几下都照常打到；一次行动里挨了几下也只逃一次 */
+/** 往哪里逃：走得过去的相邻区里，离攻击者（挨打时它所在的区）最远的；一样远的挑敌人少的，再挑编号小的 */
+function ratFleeDest(u, fromZone) {
+  const z = Number(u.zone);
+  const ok = ratWalkable(u);
+  const ns = (typeof zoneNeighbors === "function" ? zoneNeighbors(z) : []).map(Number).filter(n => ok(z, n));
+  if (!ns.length) return null;
+  const foes = n => hostilesOf(u).filter(x => Number(x.zone) === n).length;
+  const far = n => zoneDist(n, Number(fromZone), state.zoneMode);
+  return ns.sort((x, y) => far(y) - far(x) || foes(x) - foes(y) || x - y)[0];
+}
+/** 免费移动走得过去的间隔：危墙 / 关着的门不行；地面单位越不过空隙（免费移动不花行动点，也就过不了空隙）、不进深渊 */
+function ratWalkable(u) {
+  return (x, y) => {
+    const g = typeof getGap === "function" ? getGap(x, y) : { type: "open" };
+    if (g.type === "wall" || (g.type === "door" && !g.open)) return false;
+    if (g.type === "void" && !u.flying) return false;
+    return !!u.flying || !(state.fields && state.fields[y] && state.fields[y].abyss);
+  };
+}
+function ratLurkerFlees() {
+  const q = state.ratFlee || [];
+  state.ratFlee = [];
+  let moved = false;
+  const done = new Set();
+  q.forEach(job => {
+    if (!job || done.has(job.id)) return;
+    done.add(job.id);
+    const u = unitById(job.id);
+    if (!u || u.kit !== "rat_lurker" || !ratOnField(u) || ratStunned(u)) return;
+    const by = unitById(job.by);
+    const why = `挨了${by ? ` ${by.name} 的` : ""}近战攻击`;
+    const stuck = u.noMove || u.self === "frost" || u.entangled || (typeof sinkStuck === "function" && sinkStuck(u)) || (typeof touDuelVictim === "function" && touDuelVictim(u));
+    const dest = stuck ? null : ratFleeDest(u, job.zone);
+    if (dest == null) { appendLog(`【${u.name}】逃跑\n  ${why}，但${stuck ? "动不了" : "无路可逃"}。`); return; }
+    const from = Number(u.zone);
+    doMove(u, dest, { free: true, noOpp: true, title: `【${u.name}】逃跑`, note: `（${why}：免费移动，不触发借机攻击）` });
+    if (Number(u.zone) !== from) moved = true;
+  });
+  return moved;
+}
+
+/* ---------- 疫病暴徒：所有敌人都腐蚀时进入狂暴 ---------- */
+function ratPlagueFrenzy() {
+  let any = false;
+  (state.units || []).forEach(u => {
+    if (u.kit !== "rat_plague" || !ratOnField(u) || u.self === "frenzy" || ratStunned(u) || typeof enterFrenzy !== "function") return;
+    const foes = ratFoesOf(u);
+    if (!foes.length || !foes.every(ratCorroded)) return;
+    const notes = [];
+    if (enterFrenzy(u, notes, "所有敌人都腐蚀了")) { appendLog(tidyActionBlock(`【${u.name}】狂暴`, notes).join("\n")); any = true; }
+  });
+  return any;
+}
+
+/* ---------- 暴虐猎手 · 斩杀 ----------
+ * 敌人因为任何原因血量降到「它的普通攻击掷最小值也一定能打死」时（打进濒死也算），猎手免费移动到那一区、免费普通攻击一次；
+ * 每轮不限次数，这一击可以协助格挡，成功率 +execBlock%。
+ * 「血量降到」：每次反应时把每个单位的血量记在 state.ratSeen，比上次记下的低了才看（开战时先记一遍，ratfolkBattleStart）；
+ * 靠坚毅生命站着的不算（不能让人从这里看出坚毅生命还剩多少） */
+function ratSeenSnapshot() {
+  const seen = {};
+  (state.units || []).forEach(u => { if (u && u.id != null) seen[u.id] = totalHp(u); });
+  return seen;
+}
+/** 猎手现在能不能出手斩杀：活着在场、没失衡、没休眠、没陷在流沙里没顶、没坐在车上 */
+function ratTyrantReady(a) {
+  return !!a && a.kit === "rat_tyrant" && ratOnField(a) && !ratStunned(a) && !a.dormant && !a.vehId &&
+    !(typeof sinkLocked === "function" && sinkLocked(a));
+}
+/** 猎手打不打得到 t：被牵制（嘲讽 / 决一死战 / 禁足怒吼）只能打牵制者；躲藏、下潜的选不中；屏障护着打不进去；近程打飞行要 1 附赠；
+ *  不在同区就要免费走过去（ratWalkable；禁足 / 霜结 / 被缠住 / 陷在流沙里走不动） */
+function ratExecReach(a, t) {
+  if (!hostileTo(a, t)) return false;
+  const forced = typeof enemyForcedTarget === "function" ? enemyForcedTarget(a) : null;
+  if (forced && forced !== t) return false;
+  if ((t.statuses && t.statuses.hide) || t.submerged || t.untargetable) return false;
+  if (typeof barrierFor === "function" && barrierFor(t, a)) return false;
+  if (t.flying && !a.flying && (Number(a.bonus) || 0) < 1) return false;
+  if (Number(a.zone) === Number(t.zone)) return true;
+  if (a.noMove || a.self === "frost" || a.entangled || (typeof sinkStuck === "function" && sinkStuck(a))) return false;
+  return !!zonePath(a.zone, t.zone, ratWalkable(a));
+}
+/** 斩杀的门槛：猎手走到 t 那一区、普通攻击骰子取 1，按伤害预演算能不能打死 t（最内层归零：敌人死亡，我方进濒死）。
+ *  在复制出来的单位上跑 engine.js · resolveAttack，不改场上任何东西；克制、天气、场地、出血、飞行减半这些引擎里算，
+ *  受击一方的减伤 / 免伤开关照 dealTo 加（ratExecFlags） */
+function ratExecKills(a, t) {
+  const clone = x => JSON.parse(JSON.stringify(x));
+  const flags = ratExecFlags(t);
+  if (flags.immune) return false;
+  const ac = clone(a), tc = clone(t);
+  ac.zone = t.zone;
+  const bite = ratTyrantBite(a.suggest && a.suggest.dice);
+  const f = (state.fields && state.fields[t.zone]) || {};
+  const res = resolveAttack({
+    attacker: ac, target: tc, atk: effectiveAtk(a, state.units), mult: bite.mult, flat: 0, diceValue: bite.diceN,   // 每颗骰子取 1
+    element: bite.element, baseBreak: bite.baseBreak, hits: 1, bleed: bite.bleed, flags,
+    weather: currentWeatherFor(t), phaseStep: Number(state.phaseStep), zoneMode: state.zoneMode,
+    attackerField: f, targetField: f, highA: false, highT: false, dist: 0, atkRange: "melee"
+  });
+  if (!res || res.ok === false) return false;
+  const ls = res.layersAfter || [];
+  const inner = ls.find(l => l && l.inner) || ls[ls.length - 1];
+  return !!inner && (Number(inner.current) || 0) <= 0;
+}
+/** 受击一方让这一击减伤 / 免伤 / 加伤的开关，照 app.js · dealTo（那边加了新的，这里也要加）：
+ *  赤牙的掩体、咬牙坚持、转移注意、屹立不倒 / 再次霜结、破釜沉舟的受伤翻倍、圣盾、首领蓄满能量、张开掩体、过度自信 */
+function ratExecFlags(t) {
+  const f = { action: true, block: "none" };
+  const r = t.resources || {};
+  if ((t.kit === "chixia" && r.cover) || r.gritTurn) f.dr50 = true;
+  if (r.divertGuard) f.dr25 = true;
+  if (r.standTurn || r.frostShell) f.immune = true;
+  if (typeof gambitRes === "function" && gambitRes(t).gambitWound) f.doubleTake = true;
+  if (typeof shieldBearer === "function" && shieldBearer(t)) f.holyShield = true;
+  let dr = 0;
+  if (!t.isPlayer && typeof mechChargeDr === "function") dr += Number(mechChargeDr(t)) || 0;
+  if (t.vehMerged && typeof vehicleCoverDr === "function") dr += Number(vehicleCoverDr(t)) || 0;
+  if (dr > 0) f.drPct = dr;
+  if (t.kit === "kolt" && !t.upOnShp && (typeof passiveOn !== "function" || passiveOn(t))) {
+    const mx = Number(t.prideMaxHp != null ? t.prideMaxHp : baseMaxHp(t)) || 0;
+    if (mx > 0 && totalCurHp(t) >= mx) f.prideReduce = typeof passivePlus === "function" && passivePlus(t, 2) ? 0.45 : true;
+  }
+  return f;
+}
+/** 斩杀：免费走到 t 那一区，免费普通攻击一次（可以协助格挡，格挡率 +execBlock%）。日志写成一块「【暴虐猎手】斩杀」 */
+function ratTyrantExecute(a, t) {
+  const T = RAT_CFG.tyrant;
+  const prevAssist = state._assistBy;
+  state._assistBy = null;   // 斩杀不是协助攻击（协助攻击结算完接着斩杀时也一样）：可以协助格挡
+  let out = null;
+  let lines;
+  try {
+    lines = withLogSink(() => {
+      const far = Number(a.zone) !== Number(t.zone);
+      appendLog(`${t.name} 的血量挡不住掷最小值的一击：${a.name} ${far ? "免费移动过去，" : ""}免费发动一次普通攻击（可以协助格挡，成功率 +${T.execBlock}%）。`);
+      const path = zonePath(a.zone, t.zone, ratWalkable(a)) || [Number(a.zone)];
+      for (let i = 1; i < path.length; i++) {
+        const before = Number(a.zone);
+        doMove(a, path[i], { free: true, title: "", note: "（斩杀：免费移动）" });
+        if (Number(a.zone) === before) break;   // 过不去（桥塌了……）就停在半路
+      }
+      if (Number(a.zone) !== Number(t.zone)) { appendLog(`${a.name} 没能走到 ${t.name} 身边，斩杀落空。`); return; }
+      a.ratExecBlock = T.execBlock;
+      const hl = [];
+      out = hitOne2(a, t, Object.assign(ratTyrantBite(a.suggest && a.suggest.dice), { atk: effectiveAtk(a, state.units), atkRange: "melee", flags: { action: true, ratExec: true } }), hl);
+      appendLog(hl.join("\n"));
+    });
+  } finally { state._assistBy = prevAssist; }
+  if (!out || !(out.pending || (out.res && out.res.pending))) a.ratExecBlock = 0;   // 已经落下（没人能格挡）：+5% 不留着
+  const block = tidyActionBlock(`【${a.name}】斩杀`, lines || []);
+  if (block.length) appendLog(block.join("\n"));
+  return out;
+}
+function ratTyrantExecutes() {
+  const tyrants = (state.units || []).filter(u => u && u.kit === "rat_tyrant" && ratOnField(u));
+  if (!tyrants.length) { state.ratSeen = null; return false; }
+  if (!state.ratSeen) { state.ratSeen = ratSeenSnapshot(); return false; }
+  const seen = state.ratSeen;
+  let acted = false;
+  (state.units || []).slice().forEach(t => {
+    if (!t || t.id == null) return;
+    const hp = totalHp(t), prev = seen[t.id];
+    seen[t.id] = hp;
+    if (prev == null || !(hp < prev)) return;   // 血量没降（新上场的先记下来）
+    if (!ratOnField(t) || t.kind || t.isProp || t.isStructure || t.kit === "ironwall" || hp <= 0 || t.upOnShp ||
+        (typeof isDownProtected === "function" && isDownProtected(t))) return;
+    const a = tyrants.filter(x => ratTyrantReady(x) && ratExecReach(x, t))
+      .sort((x, y) => zoneDist(x.zone, t.zone, state.zoneMode) - zoneDist(y.zone, t.zone, state.zoneMode))
+      .find(x => ratExecKills(x, t));
+    if (!a) return;
+    ratTyrantExecute(a, t);
+    seen[t.id] = totalHp(t);
+    acted = true;
+  });
+  return acted;
+}
+
+/* ---------- 进场 / 回合结束 / 行动结束 ---------- */
+/** 开战（app.js · startCombat）：清掉上一场留下的，记下开战时每个单位的血量（斩杀看「降到」） */
+function ratfolkBattleStart() {
+  if (typeof state === "undefined" || !state) return;
+  state.ratFlee = [];
+  state.ratSeen = (state.units || []).some(u => u && u.kit === "rat_tyrant" && ratOnField(u)) ? ratSeenSnapshot() : null;
+  (state.units || []).forEach(u => { if (u && u.kit === "rat_tyrant") u.ratExecBlock = 0; });
+}
+/** 回合结束（app.js · turnEnd，灼烧 / 腐蚀这些都结算完之后）：狂暴的潜藏者进入躲藏 */
+function ratfolkRoundEnd(notes) {
+  (state.units || []).forEach(u => {
+    if (!u || u.kit !== "rat_lurker" || u.self !== "frenzy" || !ratOnField(u)) return;
+    if (u.statuses && u.statuses.hide) return;
+    u.statuses = u.statuses || {};
+    u.statuses.hide = true;
+    if (typeof popStatus === "function") popStatus(u, "hide");
+    notes.push(`${u.name} 狂暴：回合结束，进入躲藏。`);
+  });
+}
+/** 最外层的一次行动 / 移动 / 格挡落下 / 回合交界结算完（app.js 调）：潜藏者逃跑 → 疫病暴徒全员腐蚀时狂暴 → 暴虐猎手斩杀，
+ *  一样引出下一样（斩杀打死人、逃跑走进别的区……）就再看一遍。反应自己里面的移动、攻击不再嵌套进来 */
+let RAT_SWEEPING = false;
+function ratfolkSweep() {
+  if (RAT_SWEEPING || typeof state === "undefined" || !state || !state.combatStarted || !Array.isArray(state.units)) return;
+  if (!state.units.some(u => typeof isRatfolk === "function" && isRatfolk(u) && ratOnField(u))) { state.ratFlee = []; state.ratSeen = null; return; }
+  RAT_SWEEPING = true;
+  try {
+    for (let guard = 0; guard < 8; guard++) {
+      const fled = ratLurkerFlees();
+      const mad = ratPlagueFrenzy();
+      const exec = ratTyrantExecutes();
+      if (!fled && !mad && !exec) break;
+    }
+  } finally { RAT_SWEEPING = false; }
+}
+
+/* ===== 下水道维护（docs/sewer-maintenance.md 第 1、2 节）=====
+ * 阵营「下水道维护」：和安保、警卫队、镇压队是一伙（run.js · ALLIED_FACTIONS，混编概率 FACTION_MIX_CHANCE 15%），
+ * 和其他所有阵营敌对（HOSTILE_EXCEPT_ALLIES）；只出没在下水道。
+ * 下水道清扫机：血量 / 架势 / atk / 伤害骰在 engine.js · SEWER_STATS，这里是招式的数：
+ *   shotMult / shotBreak   所有敌人都有共振时的远程谐波攻击（伤害骰是单位卡上的 1d4）
+ *   blastMult / blastBreak 协助「自爆」：冲到目标所在区，对那一区所有和它敌对的单位各 blastMult×atk 火、blastBreak 击破，然后自己死亡
+ * 还有敌人没有共振时花行动点给一个没有共振的敌人施加共振（只上状态、不造成伤害，sweeperApplyReso）；挑谁、什么时候开火在 ai.js */
+const SEWER_FACTION = "下水道维护";
+const SEWER_CFG = {
+  sweeper: { shotMult: 1, shotBreak: 1, blastMult: 1, blastBreak: 1 }
+};
+const sweeperResonated = u => !!(u && u.statuses && u.statuses.reso);
+/** 清扫机眼里的敌人：和它敌对、在场上、选得中的单位——倒地没起身的、配置物不算；躲藏 / 下潜 / 本来就选不中的
+ *  （飞碟本体、单局图纸「安全的迷彩」）看不见。「所有敌人都有共振」、上共振挑目标都按它 */
+function sweeperFoesOf(a) {
+  return hostilesOf(a).filter(u => !u.kind && !u.isProp && !u.isStructure && !u.untargetable && !u.submerged &&
+    !(u.statuses && u.statuses.hide) && !(typeof isDownProtected === "function" && isDownProtected(u)) &&
+    !(typeof bpUntargetable === "function" && bpUntargetable(u)));
+}
+/** 看得见的敌人都有共振了（一个都看不见也算）：清扫机改用谐波射击 */
+function sweeperAllResonated(a) {
+  return sweeperFoesOf(a).every(sweeperResonated);
+}
+/** t 能不能被 a 施加共振：看得见的敌人、还没有共振（不看距离；射程在 sweeperApplyReso / ai.js 里看） */
+function sweeperResoTargetOk(a, t) {
+  return !!t && !sweeperResonated(t) && sweeperFoesOf(a).includes(t);
+}
+/** 施加共振：只上状态、不造成伤害（不是攻击——不能协助格挡，也不触发受击 / 出手的效果）。射程照一般远程：距离 1，
+ *  隔着危墙 / 关着的门够不到（被牵制而牵制者就在同区、自己又没有近身攻击时可以抵近，照 enemyZoneInRange）。返回 true = 上上了 */
+function sweeperApplyReso(a, t, lines) {
+  if (sweeperResonated(t)) { lines.push(`${t.name} 已经有共振。`); return false; }
+  if (!hostileTo(a, t)) { lines.push(`${t.name} 不是敌对的单位，没法施加共振。`); return false; }
+  if (!sweeperResoTargetOk(a, t)) { lines.push(`${a.name} 选不中 ${t.name}（躲藏 / 下潜 / 倒地），没法施加共振。`); return false; }
+  if (!enemyZoneInRange(a, "en_sweeper_reso", t.zone)) {
+    const why = typeof lineBlocked === "function" && lineBlocked(a.zone, t.zone);
+    lines.push(why ? `${a.name} 够不到 ${t.name}：${why}` : `施加共振是远距离，够不到距离 ${zoneDist(a.zone, t.zone, state.zoneMode)} 的 ${t.name}。`);
+    return false;
+  }
+  t.statuses = t.statuses || {};
+  t.statuses.reso = true;
+  t.statuses.latestElement = "harmonic";   // 最新的状态属性（扩散按它结算），和道具上共振一样
+  if (typeof popStatus === "function") popStatus(t, "reso");
+  lines.push(`${a.name} 给 ${t.name} 施加共振。`);
+  return true;
+}
+/** 下水道清扫机的自爆（它的协助；下一步的触灵清扫员代挡后剩余血量 < 25% 时也直接调它）：
+ *  冲到 t 所在区（免费移动、不花行动点，一次一个区；过不去就停在半路；t 不给就在原地），对它所在那一区所有和它敌对的单位
+ *  （狂鼠也算；倒地没起身的不算）各 blastMult×atk 火、blastBreak 击破——范围攻击，不能协助格挡；然后自己死亡，
+ *  照常结算击杀（经验、奎支、评分：app.js · settleEnemyKill；材料战后照 items.js · ENEMY_DROPS 掉）。
+ *  hit：打一下的函数（技能里传 runSkill 的 hitOne 包装，不传用 hitOne2 写进 notes）。返回 true = 炸了 */
+function sweeperSelfDestruct(a, t, notes, hit) {
+  if (!a || a.kit !== "sewer_sweeper" || a.dead || a._removed || a._sweeperBoom) return false;
+  notes = notes || [];
+  const C = SEWER_CFG.sweeper;
+  for (let i = 0; t && Number(a.zone) !== Number(t.zone) && i < 8; i++) {
+    const before = Number(a.zone);
+    stepTowardZone(a, t.zone, { free: true });
+    if (Number(a.zone) === before || a.dead) break;   // 过不去（危墙、关着的门、禁足……）或者路上被打死
+  }
+  if (a.dead || a._removed) return false;
+  a._sweeperBoom = true;
+  const z = Number(a.zone);
+  if (t && Number(t.zone) !== z) notes.push(`${a.name} 没能冲到 ${t.name} 所在的 ${t.zone} 区，就地自爆。`);
+  const victims = hostilesOf(a).filter(u => Number(u.zone) === z && !(typeof isDownProtected === "function" && isDownProtected(u)));
+  notes.push(`${a.name} 自爆：${z} 区所有和它敌对的单位受到 ${C.blastMult}×ATK 火焰伤害、${C.blastBreak} 击破${victims.length ? "" : "（那一区没有敌对的单位）"}。`);
+  const atk = effectiveAtk(a, state.units);
+  const strike = hit || ((u, opt) => hitOne2(a, u, opt, notes));
+  victims.forEach(u => {
+    if (u.dead || u._removed || Number(u.zone) !== z) return;   // 前面的爆炸连带打死 / 推走的
+    strike(u, { atk, mult: C.blastMult, element: "fire", baseBreak: C.blastBreak, atkRange: "melee", flags: { action: true, aoe: true } });
+  });
+  // 自己死亡：和被打死一样结算（经验、奎支、击杀分只结算一次），然后清出场
+  (a.layers || []).forEach(l => { l.current = 0; });
+  if (typeof settleEnemyKill === "function") settleEnemyKill(a, notes);
+  a.dead = true;
+  notes.push(`${a.name} 在自爆中损毁。`);
+  if (typeof sweepDeadEnemies === "function") notes.push(...sweepDeadEnemies());
+  return true;
+}
+
 /* ===== 阵营敌对 =====
- * 异星生物和其他所有阵营的敌人互相视为敌人；盗匪和安保、警卫队互相视为敌人（会互相攻击、不互相协助）。
- * 其余敌人阵营之间照旧是一伙的。 */
-const HOSTILE_FACTION = "异星生物";
+ * HOSTILE_FACTIONS 里的阵营和其他所有阵营的敌人互相视为敌人：异星生物、下水道的狂鼠（docs/ratfolk.md，和 effects.js · RATFOLK_FACTION 同名）；
+ * HOSTILE_EXCEPT_ALLIES 里的阵营和自己那一伙（run.js · ALLIED_FACTIONS）以外的所有阵营互相视为敌人：下水道维护（SEWER_FACTION，
+ * docs/sewer-maintenance.md：和安保、警卫队、镇压队友好（还有「巨人」阵营，HOSTILE_EXCEPT_FRIENDS），和狂鼠、盗匪、沙灵、沙漠生物、异星生物等其他阵营敌对）；
+ * 盗匪和安保、警卫队互相视为敌人（会互相攻击、不互相协助）。其余敌人阵营之间照旧是一伙的。 */
+const HOSTILE_FACTIONS = ["异星生物", "狂鼠"];
+const HOSTILE_EXCEPT_ALLIES = [SEWER_FACTION];
+/** HOSTILE_EXCEPT_ALLIES 的阵营另外友好的阵营（不在同伙组里、但同属巨人方）：下水道维护和「巨人」阵营友好（作者 10/22：「一切巨人方友好」） */
+const HOSTILE_EXCEPT_FRIENDS = { [SEWER_FACTION]: ["巨人"] };
 const HOSTILE_PAIRS = [["盗匪", "安保"], ["盗匪", "警卫队"], ["盗匪", "镇压队"], ["沙漠生物", "沙灵"]];
 function factionOf(u) {
   if (!u) return null;
@@ -998,7 +1439,11 @@ function hostileTo(a, b) {
   if (a.isPlayer) return false;
   const fa = factionOf(a), fb = factionOf(b);
   if (!fa || !fb || fa === fb) return false;
-  if (fa === HOSTILE_FACTION || fb === HOSTILE_FACTION) return true;
+  if (HOSTILE_FACTIONS.includes(fa) || HOSTILE_FACTIONS.includes(fb)) return true;
+  if (HOSTILE_EXCEPT_ALLIES.includes(fa) || HOSTILE_EXCEPT_ALLIES.includes(fb)) {
+    const friends = (HOSTILE_EXCEPT_FRIENDS[fa] || []).includes(fb) || (HOSTILE_EXCEPT_FRIENDS[fb] || []).includes(fa);
+    return !friends && !(typeof alliesOf === "function" && alliesOf(fa).includes(fb));
+  }
   return HOSTILE_PAIRS.some(([x, y]) => (fa === x && fb === y) || (fa === y && fb === x));
 }
 /** 场上和 a 敌对、还活着的单位 */
@@ -1186,6 +1631,8 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
     }
     if (id !== "en_chi_shot") a.blockMalus = 0;
   }
+  // 暴虐猎手：斩杀那一击的协助格挡 +5% 只到它落下为止（ratExecSettle）；自己再出手时兜底清掉
+  if (a.kit === "rat_tyrant") a.ratExecBlock = 0;
 
   if (id === "en_approach") {
     if (!needT()) return true;
@@ -1526,6 +1973,81 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
     if (!needT()) return true;
     const assist = id === "en_riot_pistol_assist";
     aa(t, { element: "fire", mult: assist ? RIOT_CFG.captain.assistMult : 1, diceN: assist ? 0 : 1, diceS: assist ? 0 : RIOT_CFG.captain.dice, baseBreak: 1, onConnect: { burn: RIOT_CFG.captain.burn } });
+    return true;
+  }
+  // —— 下水道狂鼠（docs/ratfolk.md 第 3 节；RAT_CFG）——
+  if (id === "en_rat_lurker_bite" || id === "en_rat_lurker_assist") {
+    // 潜藏者：近距 1×atk + 1d6 物理、1 击破、腐蚀（打中才上）；协助同普通攻击，打完进入狂暴
+    if (!needT()) return true;
+    const assist = id === "en_rat_lurker_assist";
+    if (!assist) stepTowardZone(a, t.zone);
+    aa(t, { element: "physical", mult: 1, diceN: baseDice[0] || 1, diceS: baseDice[1] || 6, baseBreak: 1, onConnect: { status: "corr" } });
+    if (assist && typeof enterFrenzy === "function") enterFrenzy(a, lines, "协助");
+    return true;
+  }
+  if (id === "en_rat_biter_bite" || id === "en_rat_biter_assist") {
+    // 撕咬者：近距 1×atk + 1d6 物理、1 击破、出血；狂暴时两次 0.5×atk、每一击都出血；协助同普通攻击，打完进入狂暴
+    if (!needT()) return true;
+    const assist = id === "en_rat_biter_assist";
+    if (!assist) stepTowardZone(a, t.zone);
+    aa(t, ratBiterAttack(a, baseDice));
+    if (assist && typeof enterFrenzy === "function") enterFrenzy(a, lines, "协助");
+    return true;
+  }
+  if (id === "en_rat_plague_claw" || id === "en_rat_plague_spray") {
+    // 疫病暴徒：感染撕扯（近距物理）/ 感染喷洒（远距酸），1×atk + 1d8、1 击破、腐蚀；
+    // 目标原本已经腐蚀：撕扯给自己回 10% 最大生命，喷洒把腐蚀扩散到目标同区的所有敌人（都在打中时结算：app.js · runOnConnect）
+    if (!needT()) return true;
+    const claw = id === "en_rat_plague_claw";
+    if (claw) stepTowardZone(a, t.zone);
+    const was = ratCorroded(t);
+    const extra = !was ? {} : claw ? { selfHeal: RAT_CFG.plague.clawHeal } : { corrSpread: true };
+    aa(t, { element: claw ? "physical" : "acid", mult: 1, diceN: baseDice[0] || 1, diceS: baseDice[1] || 8, baseBreak: 1, onConnect: Object.assign({ status: "corr" }, extra) });
+    return true;
+  }
+  if (id === "en_rat_plague_assist") {
+    // 冲到目标所在区，1.5×atk 酸、腐蚀；目标原本已经腐蚀：伤害 +2d8，自己回 25% 最大生命
+    if (!needT()) return true;
+    stepTowardZone(a, t.zone, { free: true });
+    const P = RAT_CFG.plague, was = ratCorroded(t);
+    aa(t, { element: "acid", mult: P.assistMult, diceN: was ? P.assistDice[0] : 0, diceS: was ? P.assistDice[1] : 0, baseBreak: 1,
+      onConnect: Object.assign({ status: "corr" }, was ? { selfHeal: P.assistHeal } : {}) });
+    return true;
+  }
+  if (id === "en_rat_tyrant_bite") {
+    // 暴虐猎手：近距 1×atk + 1d8 物理、1 击破、出血
+    if (!needT()) return true;
+    stepTowardZone(a, t.zone);
+    aa(t, ratTyrantBite(baseDice));
+    return true;
+  }
+  if (id === "en_rat_tyrant_assist") {
+    // 冲到目标所在区，连打三次 0.5×atk 物理，每一击都出血（第 2、3 次照 BLEED 减半），然后让所有狂鼠进入狂暴
+    if (!needT()) return true;
+    stepTowardZone(a, t.zone, { free: true });
+    const T = RAT_CFG.tyrant;
+    aa(t, { element: "physical", mult: T.assistMult, hits: T.assistHits, baseBreak: 1, breakOnce: true, bleed: true });
+    ratFrenzyAll(a, lines, `${a.name}协助`);
+    return true;
+  }
+  // —— 下水道维护（docs/sewer-maintenance.md 第 2 节；SEWER_CFG）——
+  if (id === "en_sweeper_reso") {
+    // 下水道清扫机：给一个没有共振的敌人施加共振，只上状态、不造成伤害（射程照一般远程）
+    if (!needT()) return true;
+    sweeperApplyReso(a, t, lines);
+    return true;
+  }
+  if (id === "en_sweeper_shot") {
+    // 所有敌人都有共振时：远程 1×atk + 1d4 谐波，1 击破
+    if (!needT()) return true;
+    const C = SEWER_CFG.sweeper;
+    aa(t, { element: "harmonic", mult: C.shotMult, diceN: baseDice[0] || 1, diceS: baseDice[1] || 4, baseBreak: C.shotBreak });
+    return true;
+  }
+  if (id === "en_sweeper_assist") {
+    // 协助：自爆——冲到目标所在区，同区所有和它敌对的单位 1×atk 火、1 击破，然后自己死亡（sweeperSelfDestruct）
+    if (!needT()) return true;
+    sweeperSelfDestruct(a, t, lines, aa);
     return true;
   }
   if (id === "en_hunter_shot") {
@@ -2419,7 +2941,8 @@ function ivText(u) {
 /* ===== 敌人种族（docs/enemy-race.md） =====
  * 有机体的敌人有种族，记在 u.race = { race, branch }（branch 可空）。
  * 每个敌人的种族写在 run.js · ENEMY_INFO 上（格式见那里的注释）：固定写 race: "兽人·牛"，随机写 races: [{ race, w }] 权重表。
- * 随机种族且 ENEMY_INFO 上有 raceAttrs: true 的敌人，再按种族的六维修正换算数值（和个体值一样，生成时算一次）：
+ * ENEMY_INFO 上有 raceAttrs: true 的敌人（随机种族的盗匪、燃气收集机；固定种族里只有下水道的狂鼠，docs/ratfolk.md），
+ * 再按种族的六维修正换算数值（和个体值一样，生成时算一次）：
  *   体质只加在最内层的肉体；力量改 atk / personalAtk；耐力改架势；敏捷只改本来会格挡的敌人（u.raceBlock）。
  * u.raceDelta 记着加了多少，改种族时先减掉再加（按原始数值重算）。
  * ENEMY_IV.off > 0（BattleSim.setup 默认）时随机种族一律当人类（人类对敌人没有数值变化）；固定种族、主持人指定的种族不受影响 */
@@ -2479,7 +3002,7 @@ function enemyRaceInfo(u) {
   if (!u || u.isPlayer || !u.kit) return null;
   const info = (typeof ENEMY_INFO !== "undefined" && ENEMY_INFO[u.kit]) || ENEMY_RACE_EXTRA[u.kit];
   if (!info) return null;
-  if (info.race) return { fixed: info.race, attrs: false };
+  if (info.race) return { fixed: info.race, attrs: !!info.raceAttrs };   // 固定种族一般不套六维（下水道的狂鼠特意套）
   if (Array.isArray(info.races) && info.races.length) return { table: info.races, attrs: !!info.raceAttrs };
   return null;
 }
@@ -2542,7 +3065,7 @@ function applyEnemyRace(u, race) {
   const info = enemyRaceInfo(u);
   if (!info) return u;
   if (race && raceParse(race)) return setEnemyRace(u, race);
-  if (info.fixed) return setEnemyRace(u, info.fixed, false);
+  if (info.fixed) return setEnemyRace(u, info.fixed, info.attrs);
   if (ENEMY_IV.off > 0) { u.race = { race: "人类" }; return u; }
   return setEnemyRace(u, raceRoll(info.table));
 }

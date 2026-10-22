@@ -151,7 +151,7 @@
   const REGIONS = {
     "外城区": "outer", "沙漠": "desert", "巨人城": "giant", "天网设施": "skynet",
     "第一采矿场": "mine1", "第二采矿场": "mine2", "第三采矿场": "mine3",
-    "下水道": "sewer"     // 游戏里还没有这张图（ROADMAP 里的「下水道」），先放在这里，名字定了再对上
+    "下水道": "sewer"     // 隶属巨人城的专门区域（狂鼠的遭遇，run.js · SUB_REGIONS）；地图上的入口另做
   };
   /** 同一个地方的别名 → 区域名：world-data.js 的地图地点 id（跑团 LEDGER.place、联机跑团 view.map.place 发的是它）、天网塔 */
   const REGION_ALIAS = {

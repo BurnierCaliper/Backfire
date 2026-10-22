@@ -1,0 +1,664 @@
+/* Antlerscale: Backfire · HD-2D 战场 · 接进正式战斗画面（game.html，#261）
+ *
+ * 战斗顶栏的「新画面」开关（默认关，记在本机 localStorage）开着时，战场那一格（#g-field）里铺一层 3D 战场，盖住旧的区和单位卡：
+ *   · 画面数据走联机玩家的那条路：本机的战斗状态先过 online-view.js 的白名单（OnlineView.projectState），演出途中每一下的快照
+ *     （game.js · setView 拿到的 snapUnit / snapProp）照联机演出带（projectTape）的做法过 OnlineView.projectUnit，再交给布局（hd2d-layout.js）。
+ *     区域 / 场景 / 光影读投影里的 region / scene / light。坚毅生命投影里本来就没有，这里一个字都不碰
+ *   · 每次战斗画面刷新（game.js · setView：refreshAll、演出的每一下）跟着重排：血量、架势、状态、站位、天气、场地、间隔；谁在行动跟着 refreshHud
+ *   · 点铭牌 = 点单位卡、点地台 = 点区、点危墙 / 桥梁 = 点那根竖条、点空地 = 点战场的空白、悬停铭牌 = 悬停单位卡（悬停说明挂在铭牌上）：
+ *     都调 game.js 交出来的入口（GAME.fieldInput），规则判断只在 game.js 里那一份
+ *   · 选目标 / 选区的标记（game.js 的 fieldMarks）画成铭牌描边、其余变暗、地台 / 间隔亮框
+ *   · 2D 攻击演出（attack-fx / hit-fx / 伤害数字）先简单接上：位置问这里（rectOf / zoneRectOf：铭牌、地台、间隔按这一刻的镜头投影到屏幕上）
+ *   · 三段镜头（按钮、滚轮、中景 / 近景左右键换区）、双击特写、铭牌、天气（hd2d-scene.js / hd2d-wfx.js）照原型；技能栏、队伍栏、日志用正式画面现有的
+ *   · 新旧画面之间的云雾转场（#261 追加）：远景再往外拉（滚轮 / 双指）→ 镜头升到正上方 → 白色云雾涌进来盖满 → 切到旧画面（开关拨到关）→ 云雾散开；
+ *     旧战场上往前滚反过来（云雾 → 切到新画面 → 云雾散开、镜头从正上方降回远景）。顶栏开关走同一个入口（switchTo）；转场中滚轮、开关都不理；
+ *     减少动态效果时直接切。几段在 mistPlan、数值在 MIST
+ * 关着时什么都不建，也不加载布局 / 场景 / three.js（开了才按顺序加载），旧画面一模一样（只多了旧战场上往前滚 = 打开新画面，也走云雾转场）。
+ *
+ *   HD2DField.enabled(storage) / setEnabled(on, storage)   开关（读写 localStorage 都包 try/catch，默认关）
+ *   HD2DField.viewState(state, snaps, { OV, itemCatalog })  画面用的那一份（纯函数）
+ *   HD2DField.layoutOpts(v, view, portrait)                 交给 HD2DLayout.build 的选项（区域 / 场景 / 光影读投影）
+ *   HD2DField.marksOf(marks, layout, actorId)               game.js 的标记 → 场景要的（纯函数）
+ *   HD2DField.wire(input)                                   场景的点击 / 悬停 → GAME.fieldInput（纯函数）
+ *   HD2DField.gapRect(lens, gap, offset)                    危墙 / 桥梁在屏幕上的矩形（纯函数）
+ *   HD2DField.mistPlan(to, { reduced, live }) / wheelGate(s, deltaY, 秒) / mistPuffs()   云雾转场的几段、战场上的一次滚动、一团团云雾（纯函数）
+ * 页面（game.js 调）：on() / view(snaps) / actor(id) / marks(m) / rectOf(id) / zoneRectOf(区号)；switchTo("old" | "new") / transition()；boot() 在页面加载完自己跑。
+ * 纯函数的部分 Node 里能 require（tests/hd2d-field.test.js）。数值、文字都在 FIELD。 */
+(function (root, factory) {
+  if (typeof module === "object" && module.exports) module.exports = factory(root, require("./hd2d-layout.js"));
+  else root.HD2DField = factory(root, null);
+})(typeof self !== "undefined" ? self : this, function (root, L0) {
+  "use strict";
+
+  /* ---------- 配置 ----------
+   *   storageKey / defaultOn   本机记住开关的键（存 "on" / "off"）、默认（关：主人试过再改默认）
+   *   toggleId                 战斗顶栏的开关按钮；label 按钮上写的字（开 / 关 / 正在加载）；text 打不开时的提示（{0} = 浏览器给的原因）
+   *   scripts                  开了才按顺序加载的普通脚本（场景模块 import 时就要 HD2DLayout / HD2DCamera，铭牌要 HD2DUI）；scene 最后 import 的场景（ES 模块，
+   *                            three.js 走 game.html 的 importmap → vendor/three/）
+   *   live                     演出途中每一下的快照盖到投影上的字段（会变的：站位、血量、架势、行动点 / 附赠、倒下 / 濒死 / 失衡、飞 / 潜、藏起来）；
+   *                            名字、状态、实际 ATK 这些用这一刻的战斗状态投影出来的
+   *   pad                      取景时让开战场上沿的首领机制横幅 / 援军倒计时、下沿的镜头按钮，再多留几像素
+   *   drag                     右键拖动（平移镜头）挪过几像素就不算「右键取消」 */
+  const FIELD = {
+    storageKey: "backfire-hd2d-field",
+    defaultOn: false,
+    toggleId: "g-hd2d-toggle",
+    label: { on: "新画面 开", off: "新画面 关", loading: "新画面 …" },
+    text: {
+      file: "新画面要用本地服务打开 game.html（在仓库目录运行 python3 -m http.server 8000，再打开 http://localhost:8000/game.html），先用旧画面",
+      fail: "新画面打不开（这个浏览器用不了 WebGL 或 ES 模块：{0}），先用旧画面"
+    },
+    scripts: ["hd2d-layout.js", "hd2d-scene-art.js", "hd2d-scenes-mine.js", "hd2d-scenes-city.js", "hd2d-scenes-desert.js", "hd2d-ui.js", "hd2d-camera.js", "hd2d-fx.js", "hd2d-wfx.js"],
+    scene: "hd2d-scene.js",
+    live: ["zone", "layers", "def", "defMax", "ap", "apMax", "bonus", "bonusMax", "dead", "dying", "stunned", "upOnShp", "hidden", "flying", "submerged"],
+    pad: 6,
+    drag: 5
+  };
+  /* ---------- 新旧画面之间的云雾转场（#261 追加）----------
+   * 主人：「在远景情况下如果还继续缩小，就会变回之前的战斗画面，具体是镜头上升到正上方然后一阵白色云雾后切换成之前的战斗画面」。
+   * 新 → 旧：镜头升到正上方 → 云雾从四边涌进来盖满 → 切到旧画面（开关拨到关）→ 云雾散开；旧 → 新反过来：云雾涌进来 → 切到新画面（镜头在正上方）→ 云雾散开、镜头同时降回远景。
+   *   rise      镜头升到战场正上方往下看：elevation 俯角（度，接近 90；正 90 度镜头朝向算不出来）、dist 离看的那一点多远（× 远景的距离）、secs 升多久、ease 缓动（hd2d-camera.js 的 EASE）
+   *   descend   旧 → 新：镜头从正上方（rise 的俯角、距离）降回远景要多久、缓动；和云雾散开同时开始
+   *   cover     云雾从四边涌进来、合拢盖满要多久（秒）；overlap = 镜头离升到顶还有多少秒时云雾就开始涌（升和涌接得上，不是升完了停一下再来）
+   *   hold      盖满以后至少停多久（秒；这时切画面。旧 → 新还要等新画面建好，第一次打开要加载）；frames = 旧 → 新建好以后至少等浏览器画完几帧云雾才散
+   *             （第一次画要编译着色器，慢；不等的话云雾散开时可能露出还没画出来的空画布）
+   *   clear     云雾散开要多久（秒）
+   *   color / opacity   云雾的颜色（r, g, b）、最浓时的不透明度（柔边、半透明叠上去，不是一块纯白硬切）
+   *   puffs / size / spread / push / stagger   几团云；每团多大（× 战场的宽 / 高）；盖满时各团离中心多远（× 战场的半宽 / 半高）；
+   *             涌进来之前在外面多远（× 团自己的大小）；一团比一团晚出发多少秒（错开一点，像涌进来的）
+   *   wheel     旧画面的战场上往前滚（拉近）转到新画面：一次滚动（两下之间停顿不到 idle 秒算同一次）攒够 step 像素算一下，只算一次；
+   *             按行 / 按页给的 deltaY 换成像素 × line / × page（和镜头换段的 hd2d-camera.js · CAMERA.wheel 同一个算法）
+   * 系统开了「减少动态效果」时一段都不播：不升镜头、不涌云雾，直接切。转场只是这台机器上的画面，不改战斗状态、不发给联机的其他人 */
+  const MIST = {
+    rise: { elevation: 88, dist: 1.15, secs: 0.75, ease: "inOutCubic" },
+    descend: { secs: 0.9, ease: "inOutCubic" },
+    cover: 0.55, overlap: 0.25, hold: 0.15, frames: 2, clear: 0.7,
+    color: [255, 255, 255], opacity: 0.97,
+    puffs: 9, size: 1.1, spread: 0.38, push: 0.8, stagger: 0.03,
+    wheel: { step: 40, idle: 0.22, line: 40, page: 800 }
+  };
+
+  /** 布局（hd2d-layout.js）：Node 里直接 require；页面里开了新画面才加载，用的时候再取 */
+  const Lay = () => L0 || root.HD2DLayout;
+  const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+
+  /* ---------- 开关 ---------- */
+  /** 本机记着的开关（"on" / "off"）；没记过、记了认不得的、读不了（隐私模式、被禁用）都按默认（关） */
+  function enabled(storage) {
+    try {
+      const v = storage ? storage.getItem(FIELD.storageKey) : null;
+      return v === "on" ? true : v === "off" ? false : FIELD.defaultOn;
+    } catch (e) { return FIELD.defaultOn; }
+  }
+  /** 记住开关；存不了（隐私模式、存满了）不报错，返回 false */
+  function setEnabled(on, storage) {
+    try {
+      if (!storage) return false;
+      storage.setItem(FIELD.storageKey, on ? "on" : "off");
+      return true;
+    } catch (e) { return false; }
+  }
+
+  /* ---------- 画面用的数据（纯函数）---------- */
+  /**
+   * 画面用的那一份，和联机玩家拿到的同一条路：state 过 OnlineView.projectState；
+   * snaps = game.js · setView 这一帧的快照（单位、配置物；演出途中是那一下的样子），每个过 OnlineView.projectUnit（联机演出带 projectTape 也是这样投影快照的），
+   * 会变的字段（FIELD.live）盖到投影出来的单位上；配置物（id 是 prop:…，和单位卡一样）也当成铭牌画。快照里没有的单位（还没登场 / 已经拿掉）不画；
+   * 危墙 / 桥梁（快照里的 isGap）画成地台之间的间隔，不进单位。没给快照 = 投影本身。两个投影都不放行坚毅生命，这里也不碰
+   */
+  function viewState(state, snaps, deps) {
+    const OV = deps && deps.OV;
+    if (!state || !OV) return null;
+    const pv = OV.projectState(state, { itemCatalog: (deps && deps.itemCatalog) || {} });
+    if (!pv || !Array.isArray(snaps)) return pv;
+    const base = new Map((pv.units || []).map(u => [u.id, u]));
+    const units = [];
+    snaps.forEach(s => {
+      if (!s || s.isGap) return;
+      const p = OV.projectUnit(s);
+      if (!p) return;
+      const b = base.get(p.id);
+      if (!b) { units.push(p); return; }
+      const u = Object.assign({}, b);
+      FIELD.live.forEach(k => { if (own(p, k)) u[k] = p[k]; });
+      units.push(u);
+    });
+    return Object.assign({}, pv, { units });
+  }
+  /** 交给 HD2DLayout.build 的选项：画面大小、竖屏；区域 / 场景 / 光影读投影里的（没有 = 布局的兜底，光影按白天） */
+  function layoutOpts(v, view, portrait) {
+    return { portrait: !!portrait, view, region: (v && v.region) || null, scene: (v && v.scene) || null, theme: (v && v.light) || "day" };
+  }
+  /**
+   * game.js 的标记（fieldMarks：pick 正在选目标、targets 能点的目标 id、hover 鼠标停着的、zones 能移动去的区、hoverZone）→ 场景要的：
+   *   targets 场上有铭牌的目标、dim 变暗的（正在选目标时，不是目标、也不是行动的人——和旧画面单位卡的 is-dim 一样）、aim 鼠标停着的目标、
+   *   zones / hoverZone 地台亮框、gaps 能打的危墙 / 桥梁（目标 id 是 gap:…）
+   */
+  function marksOf(m, layout, actorId) {
+    m = m || {};
+    const on = new Set(((layout && layout.units) || []).map(u => u.id));
+    const want = new Set((m.targets || []).map(String));
+    const targets = new Set([...want].filter(id => on.has(id)));
+    return {
+      targets,
+      dim: new Set(m.pick ? [...on].filter(id => !want.has(id) && id !== actorId) : []),
+      aim: m.hover != null && targets.has(String(m.hover)) ? String(m.hover) : null,
+      zones: new Set((m.zones || []).map(Number).filter(Number.isFinite)),
+      hoverZone: m.hoverZone != null && Number.isFinite(Number(m.hoverZone)) ? Number(m.hoverZone) : null,
+      gaps: new Set([...want].filter(id => id.indexOf("gap:") === 0).map(id => id.slice(4)))
+    };
+  }
+  /** 场景的点击 / 悬停 → game.js 交出来的入口（GAME.fieldInput，旧画面的单位卡、危墙、区也走它们）：
+   *  input = { unit(id) 点单位卡, hover(id, on, 挂悬停说明的元素) 悬停单位卡, zone(区号 | null, 点在什么上) 点战场, zoneHover(区号, on) 悬停区 } */
+  function wire(input) {
+    return {
+      onUnitClick: (id) => input.unit(id),
+      onGapClick: (key) => input.unit("gap:" + key),
+      onZoneClick: (zone) => input.zone(zone, {}),
+      onEmptyClick: () => input.zone(null, {}),
+      onUnitHover: (id, on, el) => input.hover(id, on, el),
+      onZoneHover: (zone, on) => input.zoneHover(zone, on)
+    };
+  }
+  /** 一条间隔（危墙 / 桥梁……，布局的 gaps）在屏幕上的矩形：间隔那一块地（长沿 axis、宽 = 地台宽）的四个角按这一刻的镜头（hd2d-fx.js · lens）投影，取外框；
+   *  offset = 战场在页面里的位置（{ left, top }）。和 hd2d-fx.js 的 zoneRect 一样两种写法都给（attack-fx 要中心 + 宽高，HitFx.burst 要 left / top / width / height） */
+  function gapRect(lens, g, offset) {
+    const L = Lay();
+    if (!lens || !g || !L) return null;
+    const hx = (g.axis === "z" ? g.width : g.length) / 2, hz = (g.axis === "z" ? g.length : g.width) / 2;
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    [-1, 1].forEach(sx => [-1, 1].forEach(sz => {
+      const s = L.project(lens, { x: g.x + sx * hx, y: g.topY, z: g.z + sz * hz });
+      x0 = Math.min(x0, s.x); x1 = Math.max(x1, s.x); y0 = Math.min(y0, s.y); y1 = Math.max(y1, s.y);
+    }));
+    if (!Number.isFinite(x0) || !(x1 > x0) || !(y1 > y0)) return null;
+    const left = x0 + ((offset && offset.left) || 0), top = y0 + ((offset && offset.top) || 0), w = x1 - x0, h = y1 - y0;
+    return { x: left + w / 2, y: top + h / 2, w, h, left, top, width: w, height: h, right: left + w, bottom: top + h };
+  }
+
+  /* ---------- 新旧画面之间的转场（纯函数）---------- */
+  /**
+   * 转场要走的几段：to = "old" 新 → 旧 / "new" 旧 → 新；o = { reduced 减少动态效果, live 新画面现在建好了（新 → 旧时才有能升起来的镜头） }。
+   * 返回 [{ step, secs }]，一段走完接下一段：
+   *   rise   镜头往正上方升（升到最后 MIST.overlap 秒时云雾就开始涌，所以这一段只算到那时）
+   *   cover  云雾从四边涌进来盖满
+   *   swap   切画面（新 → 旧 = 开关拨到关，拆掉 3D；旧 → 新 = 拨到开，建好 3D、镜头摆在正上方）：盖满以后至少停 hold 秒，旧 → 新还要等新画面建好
+   *   clear  云雾散开（旧 → 新：镜头同时从正上方降回远景，按两个里长的那个算）
+   * 减少动态效果，或者新 → 旧时 3D 还没建好（还在加载 / 打不开，看到的就是旧画面）：只有 0 秒的 swap，直接切
+   */
+  function mistPlan(to, o) {
+    o = o || {};
+    const M = MIST;
+    if (o.reduced || (to === "old" && !o.live)) return [{ step: "swap", secs: 0 }];
+    const plan = to === "old" ? [{ step: "rise", secs: Math.max(0, M.rise.secs - M.overlap) }] : [];
+    return plan.concat([
+      { step: "cover", secs: M.cover },
+      { step: "swap", secs: M.hold },
+      { step: "clear", secs: to === "new" ? Math.max(M.clear, M.descend.secs) : M.clear }
+    ]);
+  }
+  /** 战场上的一下滚轮：s = 上一次返回的（第一次给 null），deltaY 像素（往前滚是负的），now 秒。
+   *  一次滚动（两下之间停顿不到 MIST.wheel.idle 秒）攒够 step 像素算一下、只算一次：往前 1（拉近）/ 往后 −1（拉远）。
+   *  state.ate = 这一次滚动已经换过一次画面（剩下的都不理：触控板的惯性不会接着把新画面的镜头往里推）；换了一次新的滚动就清掉。返回 { step, state } */
+  function wheelGate(s, deltaY, now) {
+    const W = MIST.wheel, fresh = !s || !(now - s.last <= W.idle);
+    const st = { acc: (fresh ? 0 : s.acc) + (Number(deltaY) || 0), last: now, done: !fresh && !!s.done, ate: !fresh && !!s.ate };
+    let step = 0;
+    if (!st.done && Math.abs(st.acc) >= W.step) { step = st.acc < 0 ? 1 : -1; st.done = true; }
+    return { step, state: st };
+  }
+  /** 滚轮事件的 deltaY 换成像素（有的浏览器按行、按页给） */
+  function wheelPixels(e) {
+    const W = MIST.wheel;
+    return (Number(e && e.deltaY) || 0) * (e && e.deltaMode === 1 ? W.line : e && e.deltaMode === 2 ? W.page : 1);
+  }
+  /** 云雾一团一团的样子（CSS 变量）：n 团均匀绕着战场一圈，盖满时的中心 x / y（%，离中心 spread × 半宽 / 半高）、大小 w / h（%，× 战场的宽 / 高），
+   *  涌进来之前往外挪 dx / dy（%，× 团自己的大小，沿着它那一圈的方向）、晚出发 d 秒。纯函数：只看 MIST */
+  function mistPuffs() {
+    const M = MIST, n = Math.max(1, Math.round(M.puffs)), out = [];
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + Math.PI / n, c = Math.cos(a), s = Math.sin(a);
+      const big = i % 2 ? 0.85 : 1;                  // 大小错开一点，不是一圈一样的圆
+      out.push({
+        x: +(50 + 50 * M.spread * c).toFixed(2), y: +(50 + 50 * M.spread * s).toFixed(2),
+        w: +(100 * M.size * big).toFixed(2), h: +(100 * M.size * big).toFixed(2),
+        dx: +(100 * M.push * c).toFixed(2), dy: +(100 * M.push * s).toFixed(2), d: +((i % 3) * M.stagger).toFixed(3)
+      });
+    }
+    return out;
+  }
+
+  /* ---------- 页面 ----------
+   * S：开关想开（want）、正在加载（loading）、建好的场景（sc）/ 天气的 2D 层（wfx）/ 攻击演出的适配器（ad）/ 3D 战场那一层（stage）/ 镜头按钮（cam），
+   *    最近一次排好的布局（layout）和画面用的那一份（view），game.js 给的快照（snaps）、标记（marks）、行动的人（actorId），
+   *    broken = 这一次打开页面新画面打不开过（旧战场上往前滚就不再去开它，要开点开关——开关会说为什么打不开）
+   * T：新旧画面之间的转场——busy 正在转（滚轮、开关都不理）、to 转去哪边（"old" / "new"）、step 走到哪一段、plan 剩下的几段（mistPlan）、mist 云雾那一层、
+   *    pre 旧 → 新时云雾一涌进来就开始加载的、gen 第几次（页面重新 boot 过，旧的计时器到了也不算）、gesture 战场上这一次滚动（wheelGate） */
+  const S = { want: false, loading: null, sc: null, wfx: null, ad: null, stage: null, cam: null, camInfo: null, layout: null, view: null, snaps: null, marks: null, actorId: null, insetKey: "", broken: false };
+  const T = { busy: false, to: null, step: null, plan: null, mist: null, pre: null, gen: 0, gesture: null };
+  const env = { doc: null, storage: null, load: null, hint: null, title: "", reduced: null, wait: null, now: null };
+  let keysBound = false;
+  /** 这个脚本所在的目录（hd2d/）：开了以后从这里加载布局、场景 */
+  let BASE = "hd2d/";
+  try { const cs = root.document && root.document.currentScript; if (cs && cs.src) BASE = cs.src.replace(/[^/]*$/, ""); } catch (e) {}
+
+  const stateNow = () => (typeof state !== "undefined" ? state : null);                    // 规则的战斗状态（app.js 的全局）
+  const catalog = () => (typeof ITEM_CATALOG !== "undefined" ? ITEM_CATALOG : {});         // 投影背包时查道具名（items.js）
+  function storageOf() { try { return root.localStorage || null; } catch (e) { return null; } }
+  function hint(msg) {
+    const G = root.GAME;
+    if (G && typeof G.flashHint === "function") G.flashHint(msg);
+    if (root.console && root.console.warn) root.console.warn("[HD-2D]", msg);
+  }
+  function isFile() { try { return !!(root.location && root.location.protocol === "file:"); } catch (e) { return false; } }
+  /** 系统的「减少动态效果」（和场景、weather-fx.js 看的是同一个设置） */
+  function reducedMotion() { try { return !!(root.matchMedia && root.matchMedia("(prefers-reduced-motion: reduce)").matches); } catch (e) { return false; } }
+
+  /** 页面加载完（game.js 的 boot 之后）接上开关、战场上的滚轮；本机记着开就直接打开（刚打开页面，不播转场）。
+   *  opts（测试用）：doc / storage / load / hint 换成假的，reduced()（减少动态效果）/ wait(秒, fn)（计时器）/ now()（秒）也能换 */
+  function boot(opts) {
+    opts = opts || {};
+    stopMist();
+    teardown(false);
+    S.want = false; S.loading = null; S.broken = false;
+    T.gesture = null;
+    env.doc = opts.doc || root.document || null;
+    env.storage = opts.storage !== undefined ? opts.storage : storageOf();
+    env.load = opts.load || loadModules;
+    env.hint = opts.hint || hint;
+    env.reduced = opts.reduced || reducedMotion;
+    env.wait = opts.wait || ((secs, fn) => root.setTimeout(fn, Math.max(0, secs) * 1000));
+    env.now = opts.now || (() => (root.performance && root.performance.now ? root.performance.now() : Date.now()) / 1000);
+    if (!env.doc) return;
+    const btn = env.doc.getElementById(FIELD.toggleId);
+    if (btn) {
+      env.title = btn.title || "";
+      if (!btn.hd2dBound) { btn.hd2dBound = true; btn.addEventListener("click", toggle); }
+    }
+    // 战场上的滚轮在捕获阶段先过这里（比新画面场景自己的滚轮先看到）：转场中不理、旧画面往前滚转到新画面
+    const field = env.doc.getElementById("g-field");
+    if (field && !field.hd2dWheel) { field.hd2dWheel = true; field.addEventListener("wheel", onFieldWheel, { capture: true, passive: false }); }
+    if (env.doc === root.document && !keysBound && typeof root.addEventListener === "function") { keysBound = true; root.addEventListener("keydown", onKey); }
+    paintToggle();
+    if (enabled(env.storage)) start();
+  }
+  /** 顶栏开关：和滚轮走同一个入口（switchTo）——开着就转回旧画面、关着就转到新画面；转场中点了不理 */
+  function toggle() { switchTo(S.want ? "old" : "new"); }
+  /** 打开：加载（只第一次）→ 建场景。加载途中又关掉就不建。pre = 已经在加载的（转场：云雾一涌进来就开始加载） */
+  function start(pre) {
+    S.want = true;
+    if (S.sc || S.loading) { paintToggle(); return S.loading; }
+    const p = pre || loadNow();
+    S.loading = p.then((create) => {
+      S.loading = null;
+      if (S.want && !S.sc) mount(create);
+      paintToggle();
+    }).catch((err) => { S.loading = null; fail(err); });
+    paintToggle();
+    return S.loading;
+  }
+  /** 开始加载（hd2d-field.js · loadModules，加载过的不再加载）；同步出错也给一个 reject 的 Promise */
+  function loadNow() { try { return Promise.resolve(env.load()); } catch (e) { return Promise.reject(e); } }
+  /** 打不开（本地文件打不开 ES 模块、没有 WebGL……）：退回旧画面，开关记成关，告诉玩家为什么 */
+  function fail(err) {
+    S.want = false;
+    S.broken = true;
+    setEnabled(false, env.storage);
+    teardown(true);
+    const msg = isFile() ? FIELD.text.file : FIELD.text.fail.replace("{0}", (err && err.message) || String(err));
+    paintToggle(msg);
+    env.hint(msg);
+  }
+  function paintToggle(why) {
+    const b = env.doc && env.doc.getElementById(FIELD.toggleId);
+    if (!b) return;
+    b.textContent = S.loading ? FIELD.label.loading : S.want ? FIELD.label.on : FIELD.label.off;
+    b.setAttribute("aria-pressed", S.want ? "true" : "false");
+    if (why) b.title = env.title + "\n（上次打不开：" + why + "）";
+  }
+
+  /* ---------- 新旧画面之间的云雾转场（#261 追加；几段、数值在 mistPlan / MIST）---------- */
+  /** 新旧画面换一下：顶栏开关、新画面远景再往外拉（场景的 onZoomOut）、旧战场上往前滚，都走这一个入口。
+   *  to = "old" / "new"；正在转场、已经是那边了：不理，返回 false。减少动态效果（或者 3D 还没建好，没有能升起来的镜头）时直接切；
+   *  不然按 mistPlan 一段一段走。只是这台机器上的画面：不碰战斗状态，开关照旧记在本机，不发给联机的其他人 */
+  function switchTo(to) {
+    if (T.busy || !env.doc || (to === "new") === S.want) return false;
+    const plan = mistPlan(to, { reduced: env.reduced(), live: !!S.sc });
+    if (plan.length === 1 && !(plan[0].secs > 0)) { swapNow(to); return true; }
+    T.busy = true; T.to = to; T.plan = plan.slice(); T.gen++;
+    T.mist = mistLayer();      // 先铺上（还透明）：转场中点不到下面半透明的东西
+    stepMist(T.gen);
+    return true;
+  }
+  /** 切画面（直接切，或者转场走到云雾最浓的那一下）：新 → 旧 = 开关记成关、拆掉 3D、旧画面露出来；旧 → 新 = 记成开、加载（只第一次）、建好 3D。
+   *  返回 Promise：旧 → 新建好或者打不开（退回旧画面、开关记成关、提示为什么）以后 resolve。pre = 已经在加载的 */
+  function swapNow(to, pre) {
+    if (to === "old") {
+      S.want = false;
+      setEnabled(false, env.storage);
+      teardown(true);
+      paintToggle();
+      return Promise.resolve();
+    }
+    setEnabled(true, env.storage);
+    return Promise.resolve(start(pre));
+  }
+  /** 走下一段（gen 对不上 = 页面重新 boot 过，旧计时器作废）：
+   *   rise   镜头往正上方升（场景的 overhead）    cover  云雾涌进来（旧 → 新同时开始加载）
+   *   swap   云雾盖满：切画面，至少停 hold 秒，旧 → 新还要等建好（建好了镜头先摆在正上方）
+   *   clear  云雾散开（旧 → 新：镜头同时从正上方降回远景，场景的 descend）      走完：云雾那一层拿掉 */
+  function stepMist(gen) {
+    if (gen !== T.gen || !T.busy) return;
+    const s = T.plan.shift(), M = MIST, go = () => stepMist(gen);
+    if (!s) { stopMist(); return; }
+    T.step = s.step;
+    if (s.step === "rise") {
+      camMove("overhead", { elevation: M.rise.elevation, dist: M.rise.dist, secs: M.rise.secs, ease: M.rise.ease });
+      env.wait(s.secs, go);
+    } else if (s.step === "cover") {
+      mistTo("in");
+      if (T.to === "new" && !S.loading) T.pre = preload();
+      env.wait(s.secs, go);
+    } else if (s.step === "swap") {
+      let left = 2;
+      const both = () => { if (--left === 0) go(); };
+      env.wait(s.secs, both);
+      const pre = T.pre;
+      T.pre = null;
+      swapNow(T.to, pre).then(() => {
+        if (gen !== T.gen || T.to !== "new" || !S.sc) { both(); return; }
+        camMove("overhead", { elevation: M.rise.elevation, dist: M.rise.dist, secs: 0 });   // 新画面从正上方开始
+        afterFrames(M.frames, both);   // 画出来了云雾才散
+      });
+    } else if (s.step === "clear") {
+      mistTo("out");
+      if (T.to === "new") camMove("descend", { secs: M.descend.secs, ease: M.descend.ease });
+      env.wait(s.secs, go);
+    } else go();
+  }
+  /** 等浏览器画完 n 帧再接着走（新画面第一次画要编译着色器）；没有 requestAnimationFrame（Node 里）就直接接着走 */
+  function afterFrames(n, fn) {
+    const raf = root.requestAnimationFrame;
+    if (!(n > 0) || typeof raf !== "function") { fn(); return; }
+    raf.call(root, () => afterFrames(n - 1, fn));
+  }
+  /** 叫场景挪转场的镜头（overhead 升到 / 摆到正上方、descend 降回远景）；没有场景、场景没有这一招（浏览器缓存里还是旧的场景模块）就算了，云雾照走 */
+  function camMove(name, o) { if (S.sc && typeof S.sc[name] === "function") S.sc[name](o); }
+  /** 转场走完（或者页面重新 boot）：云雾那一层拿掉，滚轮、开关又接了 */
+  function stopMist() {
+    T.gen++;
+    T.busy = false; T.to = T.step = T.plan = T.pre = null;
+    if (T.mist && T.mist.remove) T.mist.remove();
+    T.mist = null;
+  }
+  /** 旧 → 新：云雾一涌进来就开始加载（第一次打开要一会儿，盖满了再建）。先挂一个空的 catch：轮到「切」之前就出错不报「没人接的 reject」，切的时候 start 照样接着处理 */
+  function preload() { const p = loadNow(); p.catch(() => {}); return p; }
+  /** 云雾那一层：铺在战场那一格（#g-field）里、新画面和首领横幅上面（hd2d.css 的 .hd2d-mist）。转场一开始就铺上（还透明，挡住点击），
+   *  cover 时加 .in（一团团从四边涌进来、合拢盖满）、clear 时换成 .out（散开），走完拿掉。颜色、透明度、时长、每团的位置大小都按 MIST 写在行内；
+   *  只有几个空的 <i> / <b>，没有字、没有数（坚毅生命更不会有） */
+  function mistLayer() {
+    const d = env.doc, field = d.getElementById("g-field");
+    if (!field) return null;
+    const M = MIST, el = d.createElement("div");
+    el.className = "hd2d-mist";
+    el.setAttribute("aria-hidden", "true");
+    const vars = (node, kv) => kv.forEach(([k, v]) => node.style.setProperty(k, String(v)));
+    vars(el, [["--mist-c", M.color.join(", ")], ["--mist-o", M.opacity], ["--mist-in", M.cover + "s"], ["--mist-out", M.clear + "s"]]);
+    const veil = d.createElement("b");
+    veil.className = "veil";
+    el.appendChild(veil);
+    mistPuffs().forEach(p => {
+      const i = d.createElement("i");
+      vars(i, [["--x", p.x + "%"], ["--y", p.y + "%"], ["--w", p.w + "%"], ["--h", p.h + "%"], ["--dx", p.dx + "%"], ["--dy", p.dy + "%"], ["--d", p.d + "s"]]);
+      el.appendChild(i);
+    });
+    // 转场中的点击、双击、右键都吞掉（不落到 3D 铭牌 / 地台、旧战场上，也不冒到 #g-field 的点击）
+    ["click", "dblclick", "contextmenu", "pointerdown"].forEach(t => el.addEventListener(t, (e) => { e.preventDefault(); e.stopPropagation(); }));
+    field.appendChild(el);
+    return el;
+  }
+  function mistTo(phase) {
+    const el = T.mist;
+    if (!el) return;
+    if (phase === "in") { void el.offsetWidth; el.classList.add("in"); }   // 先按还没涌进来的样子排一次，才有过渡
+    else { el.classList.remove("in"); el.classList.add("out"); }
+  }
+  /** 战场上的滚轮（#g-field，捕获阶段，一次滚动 = wheelGate）：
+   *   正在转场、这一次滚动已经换过一次画面（触控板的惯性还在来）：不理（镜头不换段，页面也不滚）
+   *   旧画面：往前滚（拉近）攒够一下 → 转到新画面；往后滚、按着 Ctrl（触控板双指缩放 / 浏览器缩放）照旧是浏览器自己的
+   *   新画面：交给场景（三段镜头换段；远景再往外拉由场景叫 onZoomOut）
+   * 用 file:// 打开（新画面根本打不开）、这一次打开页面已经打不开过：旧画面的滚轮照旧，要开就点开关 */
+  function onFieldWheel(e) {
+    const r = wheelGate(T.gesture, wheelPixels(e), env.now());
+    T.gesture = r.state;
+    if (T.busy || T.gesture.ate) { e.preventDefault(); e.stopPropagation(); return; }
+    if (S.want || S.sc || r.step !== 1 || e.ctrlKey || isFile() || S.broken) return;
+    e.preventDefault(); e.stopPropagation();
+    if (switchTo("new")) T.gesture.ate = true;
+  }
+
+  /** 开了才加载：普通脚本按顺序（加载过的不再加载），最后 import 场景模块，交出 createHd2dScene */
+  const loaded = new Set();
+  function loadScript(src) {
+    return new Promise((ok, bad) => {
+      const s = env.doc.createElement("script");
+      s.src = src;
+      s.async = false;
+      s.onload = () => ok();
+      s.onerror = () => bad(new Error("载入失败：" + src));
+      env.doc.head.appendChild(s);
+    });
+  }
+  async function loadModules() {
+    for (const f of FIELD.scripts) {
+      if (loaded.has(f)) continue;
+      await loadScript(BASE + f);
+      loaded.add(f);
+    }
+    const mod = await import(BASE + FIELD.scene);
+    return mod.createHd2dScene;
+  }
+
+  /** 建 3D 战场：铺在 #g-field 里（盖住旧的区和单位卡，旧的照旧排、只是看不见），镜头按钮、天气的 2D 层、攻击演出的适配器一起建 */
+  function mount(create) {
+    const d = env.doc, G = root.GAME, L = Lay(), HD2DFx = root.HD2DFx, WX = root.HD2DWfx;
+    const field = d.getElementById("g-field"), app = d.getElementById("g-app");
+    if (!field || !app || !G || !L || !HD2DFx || !WX || typeof create !== "function") throw new Error("缺少战斗画面或模块");
+    const stage = d.createElement("div");
+    stage.className = "hd2d-field hd2d-theme";
+    // 3D 里的点击自己转给 GAME.fieldInput（铭牌、地台、空地），不再冒到旧战场 #g-field 的点击上（不然点一下算两下）
+    stage.addEventListener("click", (e) => e.stopPropagation());
+    // 右键拖动是平移镜头：拖过的那一下松手时浏览器还会发 contextmenu，别让它冒到 game.js 那里当成「右键取消选目标」；没拖动的右键照旧取消
+    let rdown = null;
+    stage.addEventListener("pointerdown", (e) => { rdown = e.button === 2 ? { x: e.clientX, y: e.clientY } : null; }, true);
+    stage.addEventListener("contextmenu", (e) => {
+      if (rdown && Math.hypot(e.clientX - rdown.x, e.clientY - rdown.y) > FIELD.drag) { e.preventDefault(); e.stopPropagation(); }
+      rdown = null;
+    });
+    field.appendChild(stage);
+    S.stage = stage;
+    buildCam(stage);
+    try {
+      S.sc = create(stage, Object.assign({
+        onCameraChange: syncCam,
+        onPortraitChange: () => { if (S.sc) paint(true); },
+        onViewChange: () => { if (S.sc) paint(true); },
+        // 远景到头了还往外拉（滚轮 / 双指捏小）：转回旧画面，和顶栏开关同一个入口；这一次滚动剩下的都不理（不会转回去又被惯性拉回来）
+        onZoomOut: () => { if (switchTo("old") && T.gesture) T.gesture.ate = true; }
+      }, G.fieldInput ? wire(G.fieldInput) : {}));
+      S.wfx = WX.create(stage, { lens: () => HD2DFx.lens(S.sc.lensNow()), view: () => S.sc.view(), flash: () => S.sc.flash });
+      S.ad = HD2DFx.adapter({ lens: () => S.sc.lensNow(), plate: (id) => S.sc.plateOf(id), zone: (id) => S.sc.zoneOf(id), size: (big) => L.plateSize(S.sc.view(), big), offset: () => stage.getBoundingClientRect() });
+    } catch (e) { teardown(false); throw e; }
+    app.classList.add("hd2d-on");
+    S.broken = false;
+    paint(true);
+    // 旧战场的天气叠加层拿掉（画在新画面上）、行动的人、标记都按现在的再走一遍；演出中先不打断，播完 game.js 自己会刷新
+    if (typeof G.refresh === "function" && !G.depth) G.refresh();
+  }
+  /** 拆掉 3D 战场，旧画面露出来；refresh = 让 game.js 再画一遍旧战场（天气叠加层放回去） */
+  function teardown(refresh) {
+    if (S.sc) { try { S.sc.dispose(); } catch (e) {} }
+    if (S.wfx) { try { S.wfx.dispose(); } catch (e) {} }
+    if (S.stage && S.stage.remove) S.stage.remove();
+    const hadStage = !!S.stage;
+    S.sc = S.wfx = S.ad = S.stage = S.cam = S.camInfo = S.layout = S.view = null;
+    S.insetKey = "";
+    const app = env.doc && env.doc.getElementById("g-app");
+    if (app) app.classList.remove("hd2d-on");
+    if (!hadStage) return;
+    if (root.UnitTip && root.UnitTip.hide) root.UnitTip.hide();
+    const G = root.GAME;
+    if (refresh && G && typeof G.refresh === "function" && !G.depth) G.refresh();
+  }
+
+  /** 排一次战场（game.js 刷新画面、窗口变了、横幅出来了）：投影 → 布局 → 场景；reset = 镜头回到这一段的默认位置 */
+  function paint(reset) {
+    const G = root.GAME, L = Lay(), st = stateNow();
+    if (!S.sc || !G || !L || !st) return;
+    // 战斗画面藏着（切到地图、标题……，战场宽 0）：先不排，回来时画面大小一变场景会叫 onViewChange 重排（快照记着最新的）
+    if (!S.stage || !S.stage.clientWidth) return;
+    // 和联机发包前一样先同步区域 / 场景 / 光影（光影跟着时钟、场景跟着场上的场地；只是画面的标签，不改结算：world-data.js）
+    try { if (typeof root.battleLookSync === "function") root.battleLookSync(); } catch (e) {}
+    const snaps = S.snaps || (typeof G.snapAll === "function" ? G.snapAll() : null);
+    const v = viewState(st, snaps, { OV: root.OnlineView, itemCatalog: catalog() });
+    if (!v) return;
+    S.view = v;
+    if (insets()) reset = true;
+    S.layout = L.build(v, layoutOpts(v, S.sc.view(), S.sc.portrait));
+    S.sc.setBattle(S.layout, { weather: v.weather || "none", theme: v.light || "day", actorId: S.actorId });
+    if (reset) S.sc.refit();
+    S.sc.setMarks(marksOf(S.marks, S.layout, S.actorId));
+    syncWeather();
+  }
+  /** 天气的 2D 层（正式画面的 weather-fx 压在 3D 上，hd2d-wfx.js）和 3D 沙粒的风：只读投影里的天气 / 风向 / 相位 / 光影；镜头是这个玩家自己的 */
+  function syncWeather() {
+    if (!S.sc || !S.wfx || !S.view) return;
+    const v = S.view, WX = root.HD2DWfx, portrait = !!(S.layout && S.layout.portrait), cam = S.camInfo || {};
+    S.sc.setWind(WX.windOf(v.sandDir, portrait));
+    S.wfx.sync({
+      weather: v.weather || "none", theme: v.light || "day", sandDir: v.sandDir, phaseStep: v.phaseStep, portrait,
+      tier: cam.tier || S.sc.tier, close: cam.close != null, zone: cam.zone != null ? cam.zone : S.sc.zone, reduced: !S.sc.motion, layout: S.layout
+    });
+  }
+  /** 取景让开战场上沿的一摞（首领机制横幅 / 援军倒计时，game.js 放在 #g-field 的 .g-topstack 里，照旧露在新画面上面）和下沿的镜头按钮；变了返回 true */
+  function insets() {
+    const field = S.stage && S.stage.parentNode;
+    const top = field && field.querySelector ? field.querySelector(":scope > .g-topstack") : null;
+    const t = top && top.offsetHeight > 0 ? top.offsetTop + top.offsetHeight + FIELD.pad : 0;
+    const b = S.cam && S.cam.bar ? S.cam.bar.offsetHeight + 2 * FIELD.pad : 0;
+    S.sc.setInsets({ top: t, bottom: b });
+    const key = t + "|" + b;
+    if (key === S.insetKey) return false;
+    S.insetKey = key;
+    return true;
+  }
+
+  /* ---------- 镜头按钮：远 / 中 / 近、看的那个区；中景 / 近景时两边的换区箭头（键盘左右键也行） ---------- */
+  function buildCam(stage) {
+    const d = env.doc, C = root.HD2DCamera;
+    const bar = d.createElement("div");
+    bar.className = "hd2d-cam";
+    bar.setAttribute("role", "group");
+    bar.setAttribute("aria-label", "镜头：远景 / 中景 / 近景");
+    const tiers = {};
+    C.CAMERA.order.forEach(t => {
+      const b = d.createElement("button");
+      b.type = "button";
+      b.className = "hd2d-cam-b";
+      b.textContent = C.CAMERA[t].label;
+      b.title = C.CAMERA[t].name + "（滚轮也能切：往前滚拉近、往后滚拉远，远景时再往后滚回到旧画面；近景里双击单位看特写）";
+      b.setAttribute("aria-pressed", "false");
+      b.addEventListener("click", () => { if (S.sc) S.sc.setTier(t); });
+      bar.appendChild(b);
+      tiers[t] = b;
+    });
+    const tag = d.createElement("span");
+    tag.className = "hd2d-cam-z";
+    bar.appendChild(tag);
+    const nav = (dir, cls) => {
+      const b = d.createElement("button");
+      b.type = "button";
+      b.className = "hd2d-zone-nav " + cls;
+      b.hidden = true;
+      b.addEventListener("click", () => { if (S.sc) S.sc.stepZone(dir); });
+      stage.appendChild(b);
+      return b;
+    };
+    stage.appendChild(bar);
+    S.cam = { bar, tiers, tag, prev: nav(-1, "prev"), next: nav(1, "next") };
+  }
+  /** 镜头变了（场景的 onCameraChange）：按钮、看的那个区、换区箭头跟着换；天气的 2D 层按这一段调强弱 */
+  function syncCam(info) {
+    S.camInfo = info;
+    const c = S.cam;
+    if (!c) return;
+    Object.keys(c.tiers).forEach(t => { const on = info.tier === t; c.tiers[t].classList.toggle("on", on); c.tiers[t].setAttribute("aria-pressed", String(on)); });
+    c.tag.textContent = (info.tag || "") + (info.close != null ? " · 特写 " + info.closeName : "");
+    const nav = info.tier !== "far";
+    [[c.prev, info.prev, "◀ " + info.prevTag], [c.next, info.next, info.nextTag + " ▶"]].forEach(([b, zone, text]) => {
+      b.hidden = !nav || zone == null;
+      b.textContent = text;
+    });
+    syncWeather();
+  }
+  /** 中景 / 近景里左右键换到相邻的区。数字键 1–9 在正式画面是放技能，镜头的远 / 中 / 近用按钮和滚轮。战斗画面藏起来时（宽 0）不管 */
+  function onKey(e) {
+    if (T.busy || !S.sc || !S.stage || !S.stage.clientWidth || e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
+    const t = e.target, tag = t && t.tagName;
+    if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA" || (t && t.isContentEditable)) return;
+    const K = root.HD2DCamera.CAMERA.keys;
+    if ((e.key === K.prev || e.key === K.next) && S.sc.tier !== "far") { e.preventDefault(); S.sc.stepZone(e.key === K.prev ? -1 : 1); }
+  }
+
+  /* ---------- game.js 调的 ---------- */
+  /** 新画面建好了没有（开关开着、模块加载成功）：game.js 的演出位置、天气叠加层看它 */
+  function on() { return !!S.sc; }
+  /** game.js · setView 每次都叫（refreshAll 的现在的状态、演出的每一下）：开着就跟着重排；快照记着，刚打开时用 */
+  function view(snaps) {
+    S.snaps = Array.isArray(snaps) ? snaps : null;
+    // 旧战场换棋盘时整个清空重建（game.js · syncFieldDom 的 innerHTML = ""）：新画面那一层、转场的云雾挂回去
+    const field = env.doc && env.doc.getElementById("g-field");
+    if (field && T.mist && T.mist.parentNode !== field) field.appendChild(T.mist);
+    if (!S.sc) return;
+    if (field && S.stage && S.stage.parentNode !== field) field.appendChild(S.stage);
+    paint(false);
+  }
+  /** 转场走到哪了（测试、game.js 看）：{ busy 正在转, to 转去哪边, step 哪一段 } */
+  function transition() { return { busy: T.busy, to: T.to, step: T.step }; }
+  /** 谁在行动（game.js · refreshHud：我方回合选中的那个人；敌人回合是 null）：铭牌描金边、脚下的光圈；换了人中景 / 近景跟到他所在的区。
+   *  refreshHud 叫得很勤（放技能、取消……），同一个人不再叫场景，不然玩家自己挪去看别的区的镜头会被拽回来 */
+  function actor(id) {
+    id = id != null ? id : null;
+    const changed = id !== S.actorId;
+    S.actorId = id;
+    if (!S.sc || !changed) return;
+    S.sc.setActor(id);
+    if (S.layout) S.sc.setMarks(marksOf(S.marks, S.layout, S.actorId));
+  }
+  /** 选目标 / 选区的标记（game.js · paintMarks） */
+  function marks(m) {
+    S.marks = m ? { pick: !!m.pick, targets: (m.targets || []).slice(), hover: m.hover != null ? m.hover : null, zones: (m.zones || []).slice(), hoverZone: m.hoverZone != null ? m.hoverZone : null } : null;
+    if (S.sc && S.layout) S.sc.setMarks(marksOf(S.marks, S.layout, S.actorId));
+  }
+  /** 2D 攻击演出要的「单位 / 危墙在屏幕上的矩形」（game.js · centerOf）：铭牌按这一刻的镜头投影（hd2d-fx.js 的适配器；被击倒拿掉的单位给最后一次的位置），
+   *  危墙 / 桥梁按间隔投影；没开 / 找不到返回 null */
+  function rectOf(id) {
+    if (!S.sc || !S.ad || id == null) return null;
+    const k = String(id);
+    if (k.indexOf("gap:") === 0) {
+      const g = S.layout && S.layout.gaps.find(x => x.key === k.slice(4));
+      return g ? gapRect(root.HD2DFx.lens(S.sc.lensNow()), g, S.stage.getBoundingClientRect()) : null;
+    }
+    return S.ad.rectOf(k);
+  }
+  /** 一个区的地台在屏幕上的外框（范围攻击画满整个区：game.js · zoneRectOf） */
+  function zoneRectOf(zone) { return S.sc && S.ad ? S.ad.zoneRectOf(Number(zone)) : null; }
+
+  const api = { FIELD, MIST, enabled, setEnabled, viewState, layoutOpts, marksOf, wire, gapRect, mistPlan, wheelGate, wheelPixels, mistPuffs, boot, on, view, actor, marks, rectOf, zoneRectOf, switchTo, transition };
+  // 页面里：等页面加载完（game.js 的 boot 先登记在 DOMContentLoaded 上，先跑）再接开关
+  if (!(typeof module === "object" && module.exports) && root.document) {
+    if (root.document.readyState === "loading") root.document.addEventListener("DOMContentLoaded", () => boot());
+    else boot();
+  }
+  return api;
+});
