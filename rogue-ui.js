@@ -775,7 +775,7 @@
         // 幕间选择：下一幕去哪
         const opts = query("interludeOptions");
         return `<h2>第 ${run.act} 幕 · 落幕</h2>
-          <p class="r-hint">${opts.length > 1 ? `选下一幕去哪。${opts.length > 2 ? "几" : "两"}条路都通往第 ${run.act + 1} 幕，敌人等级一样，遇到的敌人、天气和战场不同。${opts.some(o => o.sewer) ? "改走下水道会用掉一张下水道地图，一局只能进一次。" : ""}` : `前往第 ${run.act + 1} 幕。`}</p>
+          <p class="r-hint">${opts.length > 1 ? `选下一幕去哪。${opts.length > 2 ? "三" : "两"}条路都通往第 ${run.act + 1} 幕，敌人等级一样，遇到的敌人、天气和战场不同。${opts.some(o => o.sewer) ? "改走下水道会用掉一张下水道地图，一局只能进一次。" : ""}` : `前往第 ${run.act + 1} 幕。`}</p>
           <div class="r-choices r-interlude">${opts.map(o => `<button class="g-btn${o.alt ? "" : " r-main"}" data-next-region="${esc(o.region)}">第 ${run.act + 1} 幕：${esc(o.region)}${o.sewer ? "（用掉下水道地图）" : o.alt ? "（采矿场）" : ""}
             <small>${esc(o.desc)}${o.desc ? " · " : ""}会遇到：${esc(o.enemies.slice(0, 8).join("、"))}${o.enemies.length > 8 ? " 等" : ""}</small></button>`).join("")}</div>`;
       }

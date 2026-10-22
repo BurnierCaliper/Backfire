@@ -368,6 +368,15 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **下水道地图（新物品，3000）+ 单局 / 联机单局的幕间进入下水道**（作者 10/22 定的 docs/ratfolk.md 第 6 节，issue #286；trpg-data.js · `HANDBOOK_SHOP`、`HANDBOOK_GOODS`；rogue-data.js · `ROGUE_CONFIG.sewer`、`ROGUE_CONFIG.bosses`、`ROGUE_TASK_WEATHER`、`ROGUE_SHOP`、`ROGUE_SHOP_RULES.mapChance`；rogue.js · `SEWER` / `sewerEntered` / `canEnterSewer`、`interludeOptions`、`nextAct`、`useSewerMap` / `setMapUseHook`、`shopStock` / `mapStockable`；online-rogue.js · `options`（幕间投票）、`setMapUseHook`；rogue-ui.js · 幕间画面；world-data.js · `WORLD_PLACES`（地点「下水道」）；hd2d/hd2d-layout.js · `REGION_ALIAS`；测试：新增 tests/sewer-map.test.js）
+  - **以前**：下水道的区域和两个阵营已经有了（`rollEncounter({ region: "下水道" })` 抽得到），但单局里进不去；地图上也没有下水道。
+  - **现在**：
+    - **下水道地图**（`map_sewer`，和「污水处理厂地图」`map_sewage` 不是同一个，那个不变）：价格 3000。跑团商店「地图与票券」里有卖；和别的地图一样不能卖给商店。单局商店（任务里的商店、任务之间的休整）每家另外按 `ROGUE_SHOP_RULES.mapChance` 的概率进一张（**20%，占位**），另用一条随机流抽，不挤掉原来的常备 2 种 + 随机 8 种 + 效果道具（原来的进货一点没变）；这一局进过下水道以后、长线养成（没有幕间）都不再进货。
+    - **单局幕间**：背包里有下水道地图、这一局还没进过下水道时，**任何一次幕间选择**（`interludeOptions`，额外幕第 5 → 6 幕那次也算）都多一个「下水道」选项，排在原来的 1~2 个后面；说明照旧写区域简介（写在 `WORLD_PLACES` 的「下水道」）和会遇到的敌人（狂鼠、下水道维护的七种）。选了下水道（`nextAct`）就用掉一张地图，那一幕的区域是下水道：普通战、精英战、悬赏（目标和随从）都抽下水道的敌人，等级和原来那条路一样（只看第几幕、这一幕过了几天）；首领从全部首领里抽（`ROGUE_CONFIG.bosses["下水道"]` 是空池，照巨人城 / 采矿场的做法），首领战的区域、画面也是下水道。下一幕回到原本的表。
+    - **一局只能进一次**：幕间选过下水道（记在 `run.regionPick`）以后，再有地图也不出现这个选项，硬选会被拒绝；没有地图硬选也一样。只带了地图、走别的路不会用掉地图。
+    - **天气**：下水道的区域环境还待定（docs/ratfolk.md 第 7 节），下水道那一幕的任务**先不带天气**（`ROGUE_TASK_WEATHER["下水道"]` 是空表；遭遇默认的天气本来就是无，run.js · `regionWeather`）。战场上的随机配置物 / 地形只会出不限区域的那些。
+    - **地图上的路线**：角鳞星地图加了地点「下水道」（id `sewer`，图钉先放在巨人城中心底下），单局的路线照幕间选的走，选了下水道的那一幕连到这里；跑团主持人也可以把队伍移到下水道，战斗画面跟着是下水道的水道（`REGION_ALIAS` 加 `sewer`）。
+    - **联机单局**：队伍里**任何一个人**名下有下水道地图（或者有公用的，例如死去角色留下的），幕间投票就多一个「前往第 N 幕：下水道（用掉一张下水道地图）」；投中了只用掉一张：**先用公用的；没有公用的，用队伍里排在最前面（队伍顺序）、名下有地图的角色的那张**，记录里写明用了谁的。一局一次的限制和单机一样。
 - **下水道维护（二）：两个触灵精英「触灵维护员」「触灵清扫员」+ 下水道的「狂鼠 ↔ 下水道维护」三方混战**（作者 10/22 定稿的 docs/sewer-maintenance.md 第 2、3、4 节，issue #281；engine.js · `SEWER_STATS.elite`、`sewerEliteOf`、`enemyPresets`；run.js · `ENEMY_INFO`（两个精英；机甲触灵、飞碟触灵加 `race: "触灵"`）、`THREE_WAY.regions`；growth.js · `ENEMY_RANK`；enemies.js · `SEWER_CFG`（keeper / cleaner / cleanse / guard）、`SEWER_STATUS_NAME`、`sewerBadStatuses` / `sewerDotThreat` / `sewerCleansePick` / `sewerCleanse` / `sewerCleanseChoice`、`cleanerWaveZone` / `cleanerWave`、`cleanerOnField` / `sweeperGuardFor` / `sweeperGuardAfter`、`sewerAssistPool`、`enemySkillListBase`、`ENEMY_SKILL_RANGE`、`ENEMY_SKILL_COST`、`runEnemyActionInner`、`ENEMY_RACES`（新种族「触灵」）、`ENEMY_RACE_EXTRA`（飞碟触灵本体）、`spawnUfoBoss`；app.js · `dealTo`（代挡）；ai.js · `AI_SPEC`、`NO_TARGET`、`aiSpecial`、`aiPicks`、`aiPlanBase`（先清除状态、清扫员自己挑区）、`aiPickAssister`；items.js · `ENEMY_DROPS`、废料的说明；bestiary.js · `BESTIARY_TEXT`；测试：新增 tests/sewer-elites.test.js，tests/craft-materials.test.js 的敌人总数 55 → 57，tests/sewer-maintenance.test.js、tests/ratfolk-units.test.js 跟着改）
   - **以前**：下水道维护只有清扫机（抽到下水道维护，一场 4 枚代币就是 12 只清扫机）；下水道没有三方混战；「触灵」只是机甲触灵、飞碟触灵的阵营，不是种族。
   - **现在**：
