@@ -362,9 +362,13 @@ body.online-player .ol-battle.hd2d-on > .g-field.ol-field { overflow: hidden; } 
  *            按技能轮流换颜色（t-{颜色} → --tint：左边一道色条、底色带一点），正式画面的数字键写在右下角（.key）
  *   队伍栏一个人：.party 里的 .pm，里面是 hd2d-ui.js · partyInner——主职责头像（.face.av：行内的主 → 副属性渐变）、名字 / 等级 / 小字 / 身上的效果、分层血条
  * 选择器带上 .hd2d-shell.hd2d-theme 和外面那一层（.skills / .party），压过正式画面 game.css / skin.css / 天气换色给 .sk / .pc 的规则；
- * 关着新画面时 .g-hud 上没有这两个类，一条都套不上。贴纸风的小图标（.stk）、效果的小标记（.pm-fx）类名只有新画面用 */
+ * 关着新画面时 .g-hud 上没有这两个类，一条都套不上。贴纸风的小图标（.stk）、效果的小标记（.pm-fx）类名只有新画面用。
+ * 联机的 online.css 给旧画面排的技能按钮 / 队伍栏（一行排开、队伍条右边让给提示栏……）都限在 .g-hud:not(.hd2d-shell) 里，单机、联机用的是下面同一份 */
+/* 技能按钮一样宽、两行字（名字一行、消耗 / 用不了的原因一行），字太长截成「…」（完整的悬停看：技能说明、原因）；
+ * 右上角的攻击 / 技能角标探出按钮 8px（再加白边、转一点），按钮之间横竖留 14px / 12px（同原型页的 #skills），角标不压到旁边的按钮 */
+.hd2d-shell.hd2d-theme .skills { gap: 12px 14px; }
 .hd2d-shell.hd2d-theme .skills .sk {
-  position: relative; min-width: 112px; padding: 7px 16px 6px 31px; text-align: left; cursor: pointer; color: var(--canvas);
+  position: relative; display: block; flex: none; width: 132px; min-width: 0; padding: 7px 16px 6px 31px; text-align: left; cursor: pointer; color: var(--canvas);
   font-family: var(--ui-sans); background-color: color-mix(in srgb, var(--tint, var(--steel)) 16%, var(--steel)); background-image: var(--noise);
   border: 2px solid var(--ink); border-left: 6px solid var(--tint); box-shadow: 2px 3px 0 rgba(0, 0, 0, .5);
 }
@@ -375,8 +379,8 @@ body.online-player .ol-battle.hd2d-on > .g-field.ol-field { overflow: hidden; } 
 .hd2d-shell.hd2d-theme .skills .sk.armed { border-color: var(--hazard); border-left-color: var(--tint); box-shadow: 2px 3px 0 rgba(0, 0, 0, .5), inset 0 0 0 1px var(--hazard), 0 0 10px 1px rgba(242, 194, 48, .45); }
 .hd2d-shell.hd2d-theme .skills .sk[disabled] { opacity: .4; cursor: not-allowed; transform: none; }
 .sk.t-hazard { --tint: var(--hazard); } .sk.t-mint { --tint: var(--mint); } .sk.t-canvas { --tint: var(--canvas); } .sk.t-pink { --tint: var(--pink); }
-.hd2d-shell.hd2d-theme .skills .sk .nm { display: block; font-family: var(--ui-sans); font-weight: 900; font-size: 15px; line-height: 1.2; white-space: nowrap; text-shadow: 1px 1px 0 var(--ink); }
-.hd2d-shell.hd2d-theme .skills .sk .cost { display: block; font-size: 11px; line-height: 1.3; color: var(--muted); white-space: nowrap; }
+.hd2d-shell.hd2d-theme .skills .sk .nm { display: block; font-family: var(--ui-sans); font-weight: 900; font-size: 15px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 1px 1px 0 var(--ink); }
+.hd2d-shell.hd2d-theme .skills .sk .cost { display: block; font-size: 11px; line-height: 1.3; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hd2d-shell.hd2d-theme .skills .sk .cost .ap { color: var(--mint); }
 .hd2d-shell.hd2d-theme .skills .sk .cost .bn { color: #c9b27f; }
 .hd2d-shell.hd2d-theme .skills .sk .key { position: absolute; left: auto; top: auto; right: 5px; bottom: 3px; font: 900 10px/1 var(--ui-sans); color: var(--muted); }
@@ -419,8 +423,9 @@ body.online-player .ol-battle.hd2d-on > .g-field.ol-field { overflow: hidden; } 
   width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; flex: none;
   font: 900 16px var(--ui-sans); color: var(--ink); background: var(--mint); border: 2px solid var(--ink);
 }
-.hd2d-shell.hd2d-theme .party .pm .nm { display: flex; align-items: center; gap: 5px; min-height: 18px; font-weight: 900; font-size: 14px; line-height: 1.1; text-shadow: 2px 2px 0 var(--ink); }
-.hd2d-shell.hd2d-theme .party .pm .nm-t { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 名字不让后面的小字（「你」、操控者）、效果挤掉：名字照原样宽（比整行还长才截成「…」），一行放不下时后面的东西换到下一行 */
+.hd2d-shell.hd2d-theme .party .pm .nm { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 5px; min-height: 18px; font-weight: 900; font-size: 14px; line-height: 1.1; text-shadow: 2px 2px 0 var(--ink); }
+.hd2d-shell.hd2d-theme .party .pm .nm-t { flex: none; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hd2d-shell.hd2d-theme .party .pm .bar { height: 7px; margin-top: 4px; background: #2a2520; border: 1px solid var(--ink); display: flex; }
 .hd2d-shell.hd2d-theme .party .pm .bar i { display: block; height: 100%; }
 .hd2d-shell.hd2d-theme .party .pm .meta { display: block; min-width: 0; flex: 1; }
@@ -452,7 +457,9 @@ body.online-player .ol-battle.hd2d-on > .g-field.ol-field { overflow: hidden; } 
 .pm-fx-all .fx-row b { font: 900 12px/1.2 var(--ui-sans); color: var(--canvas); }
 .pm-fx-all .hi-badge .hi-svg { width: 18px; height: 18px; }
 @media (max-width: 720px) {
-  .hd2d-shell.hd2d-theme .skills .sk { min-width: 0; padding: 6px 13px 5px 28px; }
+  /* 手机：正式画面的技能排成网格（game.css），按钮跟着格子一样宽 */
+  .hd2d-shell.hd2d-theme .skills { gap: 10px 12px; }
+  .hd2d-shell.hd2d-theme .skills .sk { width: auto; padding: 6px 13px 5px 28px; }
   .hd2d-shell.hd2d-theme .skills .sk .nm { font-size: 14px; }
   .hd2d-shell.hd2d-theme .skills .sk .sk-el, .hd2d-shell.hd2d-theme .skills .sk .sk-el .eicon { width: 17px; height: 17px; }
 }
@@ -509,12 +516,9 @@ body.online-player .ol-battle.hd2d-on > .g-field.ol-field { overflow: hidden; } 
   /* 单机手机上 .g-hud 固定在屏幕底下、自己会滚：换上新外壳后不滚（队伍栏浮在它上面，滚的话会被裁掉；技能栏能收起） */
   .g-app > .g-hud.hd2d-shell.hd2d-theme { max-height: none; overflow: visible; }
 }
-/* 联机窄屏（online.css：.g-hud 限高、自己滚，按钮排成网格）：换上新外壳后同上不滚；技能按钮、队伍栏照新样子 */
+/* 联机窄屏（online.css：.g-hud 限高、自己滚）：换上新外壳后同上不滚；技能按钮、队伍栏和单机同一份（online.css 旧画面的网格、按钮宽度不套到新外壳上） */
 @media (max-width: 820px) {
   body.online-player.ol-in-battle .ol-battle > .g-hud.hd2d-shell { max-height: none; overflow: visible; }
-  body.online-player.ol-in-battle .ol-battle > .g-hud.hd2d-shell .skills .sk { padding: 6px 13px 5px 28px; }
-  body.online-player.ol-in-battle .ol-battle > .g-hud.hd2d-shell .skills .sk .key { left: auto; top: auto; right: 5px; bottom: 3px; }
-  body.online-player.ol-in-battle .ol-battle > .g-hud.hd2d-shell .party > .pc { width: auto; padding: 5px 8px 5px 6px; }
   /* 唤出武器人和结束行动两个大按钮并排（同原型页的手机） */
   body.online-player.ol-in-battle .ol-battle > .g-hud.hd2d-shell .hud-summon, body.online-player.ol-in-battle .ol-battle > .g-hud.hd2d-shell .hud-summon + .hud-side { flex: 1 1 0; min-width: 0; }
   body.online-player.ol-in-battle .ol-battle > .g-hud.hd2d-shell .hud-summon > .summonbtn { width: 100%; }
