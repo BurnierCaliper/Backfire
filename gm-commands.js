@@ -166,7 +166,8 @@
     const why = zoneReachable(a, dest, true); if (why) fail(why);
     let ap = 0, bonus = 0;
     if (f.acid && !a.flying) ap = 1;
-    else if (a.self !== "conductor") { if (enemyRankOf(a) === "minion") ap = 1; else bonus = 1; }
+    // 狂暴（effects.js）：这回合还有免费移动就不花附赠 / 行动点，和 app.js · doMoveInner 一样
+    else if (a.self !== "conductor" && !(typeof frenzyFreeMoveReady === "function" && frenzyFreeMoveReady(a))) { if (enemyRankOf(a) === "minion") ap = 1; else bonus = 1; }
     const gap = (state.gaps || {})[gapKey(a.zone, dest)];
     if (gap && gap.type === "void" && !a.flying) { ap = 1; bonus = 0; }   // 越过空隙这一步花 1 行动点（不花附赠），另掷运动检定
     if ((a.ap || 0) < ap + extraAp || (a.bonus || 0) < bonus) fail("移动所需行动预算不足");
@@ -333,6 +334,7 @@
       if (own(p, k) || own(p, maxKey)) u[k] = Math.min(own(p, k) ? p[k] : Math.max(0, Number(u[k]) || 0), Math.max(0, Number(u[maxKey]) || 0));
     });
     if (own(p, "self")) u.selfBurnStacks = p.self === "burn" ? Math.max(1, Number(u.selfBurnStacks) || 1) : 0;   // 同单机的「自我效果」
+    if (own(p, "self") && typeof syncFrenzyPosture === "function") syncFrenzyPosture(u, null);   // 改掉了狂暴：扣的架势上限还回去
     if (p.statuses) { u.statuses = Object.assign({}, u.statuses, p.statuses); if (own(p.statuses, "shockwave") && typeof syncShockwave === "function") syncShockwave(u, null); }
     if (own(p, "neutralize")) notes.push(...applyNeutralize(u));
     const stun = own(p, "stunned") ? p.stunned : p.stun;

@@ -589,6 +589,11 @@ function weatherDamagePct(weather, element) {
 
 /** 干涉场叠层上限（作者定）：±100%，到顶后不再叠加（以前无上限，曾叠到 −2425% 把伤害全变成 0） */
 const INTERFERE_CAP = 1;
+/** 出血（通用攻击效果，docs/ratfolk.md 2.3）：攻击规格上写 bleed: true（dealTo 的 opt，敌人、角色都能用）。
+ *  这一段打中肉体 / 星灵层（layers）、并对这一层造成了伤害时，对同一层再造成「这一层上限 × pct」的真实伤害：
+ *  不吃克制、减伤、护盾、狂暴减伤等任何修正；向下取整，最少 1 点；只打这一层，打空了也不溢出到下一层。
+ *  同一次攻击（一次 resolveAttack）里每多触发一次，比例再 × decay：10% → 5% → 2.5% …… */
+const BLEED = { pct: 0.10, decay: 0.5, layers: ["flesh", "spirit"] };
 function milestone(level, every = 5) {
   // 达到 5/10/15… 或 2/4/6… 的当级就加，不是下一级才加
   return Math.floor(Math.max(1, Number(level) || 1) / every);
@@ -660,7 +665,7 @@ function statusDotDice(kind, level, weather, extraArmor = false, envX = 1) {
  *   element, baseBreak, hits,
  *   flags, weather, phaseStep, zoneMode,
  *   attackerField, targetField, highGround,
- *   dist
+ *   dist, bleed（出血，见 BLEED）
  * }
  */
 function resolveAttack(ctx) {
@@ -770,6 +775,9 @@ function resolveAttack(ctx) {
   let pierColdRetrig = false;
   let knockdownHp = 0;
   let selfBreak = 0;
+  // 出血（BLEED）：这次攻击触发了几次（第 2 次起减半）、一共打了多少
+  let bleedCount = 0;
+  let bleedTotal = 0;
   // 干涉场：叠层只在单位站在干涉场里时生效（叠层记着是在哪一区叠的，换了区就不算）；不在干涉场里挨打就清掉
   const interfHere = !!fieldT.harmonic && (t.interfereZone == null || Number(t.interfereZone) === Number(t.zone));
   let interfDelta = interfHere ? Math.max(-INTERFERE_CAP, Math.min(INTERFERE_CAP, Number(t.interfere) || 0)) : 0;
@@ -964,6 +972,9 @@ function resolveAttack(ctx) {
     if (weather === "phase" && Number(ctx.phaseStep) === 0) { pct -= 0.5 * envX; wSum -= 0.5 * envX; hAdd(`相位波谷：伤害 −${50 * envX}%。`); }
     if (flags.dr50 && !noDr) { pct -= 0.5; hAdd("目标减伤 +50%：−50%。"); }
     if (flags.dr25 && !noDr) { pct -= 0.25; hAdd("自保模式：受伤 −25%。"); }
+    // 狂暴（effects.js · FRENZY.takenCut）：受到的所有伤害（攻击、状态、场地……）减少，和其他百分比加算
+    const frenzyCut = typeof frenzyTakenCut === "function" ? frenzyTakenCut(t) : 0;
+    if (frenzyCut && !noDr) { pct -= frenzyCut; hAdd(`目标狂暴：受到的伤害 −${Math.round(frenzyCut * 100)}%。`); }
     if (flags.drPct && !noDr) { pct -= Number(flags.drPct) || 0; hAdd(`${flags.drWhy || "减伤"}：−${Math.round((Number(flags.drPct) || 0) * 100)}%。`); }
     if (flags.prideReduce && !noDr) {
       const pr = typeof flags.prideReduce === "number" ? flags.prideReduce : 0.25;
@@ -1015,10 +1026,12 @@ function resolveAttack(ctx) {
     if (!ghost) totalReduced += Math.max(0, (Math.max(0, refBase + refAtk * multAdj) + (h === 0 ? firstBonus : 0)) * (flags.block === "bareOk" ? 0.5 : 1) - packet);
 
     let hitDealt = packet;
+    let hitBleed = 0;
     if (ghost) {
       hitDealt = 0;
       hAdd(`目标已倒下：这一段 ${packet} 全部算作溢出伤害。`);
     } else if (!onShp) {
+      const startBefore = startLayer ? Math.max(0, Number(startLayer.current) || 0) : 0;
       const distribute = distributePacket({
         layers: layersWork,
         startIdx,
@@ -1033,6 +1046,22 @@ function resolveAttack(ctx) {
       distribute.notes.forEach(hAdd);
       hitDealt = distribute.dealt;
       extraHarmonic += Number(distribute.extraHarmonic) || 0;
+      // 出血：这一段打中的是肉体 / 星灵层、而且真的扣了这一层的血 → 同一层再扣「上限 × 比例」的真实伤害（不溢出）
+      if (ctx.bleed && startLayer && BLEED.layers.includes(startLayer.type) && startBefore > (Number(startLayer.current) || 0)) {
+        const rate = BLEED.pct * Math.pow(BLEED.decay, bleedCount);
+        bleedCount++;
+        const cap = Number(startLayer.max) || 0;
+        const want = Math.max(1, Math.floor(cap * rate + 1e-9));
+        const left = Math.max(0, Number(startLayer.current) || 0);
+        hitBleed = Math.min(want, left);
+        startLayer.current = Math.max(0, Math.floor(left - hitBleed + 1e-9));
+        bleedTotal += hitBleed;
+        hitDealt += hitBleed;
+        const rateTxt = Math.round(rate * 1000) / 10 + "%";
+        const tail = left <= 0 ? "，这一层已经打空，不溢出" : hitBleed < want ? `，这一层只剩 ${left}，不溢出` : "";
+        hAdd(`出血${bleedCount > 1 ? `（第 ${bleedCount} 次，减半）` : ""}：${LAYER[startLayer.type]}上限 ${cap} × ${rateTxt} → ${want}（真实伤害，不吃任何修正）${tail}` +
+          (left > 0 ? `：${LAYER[startLayer.type]} ${left} → ${startLayer.current}` : ""));
+      }
     } else {
       hAdd("起身状态：本段伤害改由坚毅生命承受（不显示剩余值）。");
     }
@@ -1063,6 +1092,9 @@ function resolveAttack(ctx) {
         br += 1; anchorBreak = true;
         hAdd("千钧：击破 +1。");
       }
+      // 狂暴（effects.js · FRENZY.breakBonus）：和千钧一样，每一次攻击、多段攻击的每一段都加
+      const frenzyBr = isAttack && typeof frenzyBreakBonus === "function" ? frenzyBreakBonus(a) : 0;
+      if (frenzyBr) { br += frenzyBr; hAdd(`狂暴：击破 +${frenzyBr}。`); }
       if (weather === "glow") {
         if (br > 0) br = Math.max(1, br - envX);
         hAdd(`微光：击破 −${envX}（不会减到 0）。`);
@@ -1098,8 +1130,9 @@ function resolveAttack(ctx) {
     totalBreak += br;
 
     perHit.push({
-      dealt: hitDealt,
-      intended: packet,   // 这一段打出去的伤害（不按剩余血量封顶），画面按段弹字用
+      dealt: hitDealt,    // 这一段实际扣掉的血（含出血）
+      intended: packet,   // 这一段打出去的伤害（不按剩余血量封顶，不含出血），画面按段弹字用
+      bleed: hitBleed,    // 这一段的出血（真实伤害，已算在 dealt 里）
       base: segBase,      // 这一段吃目标修正之前的基础包（导体额外一下用）
       breakDealt: br,
       notes: hitLog,
@@ -1157,8 +1190,9 @@ function resolveAttack(ctx) {
     // 受击方的减伤减免掉的伤害（天气、血量层抗性、角色能力、减半……；协助格挡成功的不算）
     reduced: flags.block === "assistOk" ? 0 : Math.round(totalReduced),
     weatherUp, weatherDown,
-    total: totalDealt,
+    total: totalDealt,                      // 实际扣掉的血（含出血）
     intended: totalIntended,
+    bleed: bleedTotal,                      // 出血的真实伤害合计（已算在 total 里）
     extraHarmonic,
     breakDealt: totalBreak,
     helperBreak,

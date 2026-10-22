@@ -166,6 +166,7 @@ const EnemyAI = (function () {
   }
   /** 这一步移动付不付得起，按 app.js · doMoveInner 实际结算的消耗算：
    *  离开酸液地面 / 越过空隙（给出 dest 且隔着空隙）扣 1 行动点（荒原行者改扣附赠）；导体 / 探测模式不耗；
+   *  狂暴这回合还有免费移动也不耗（effects.js · frenzyFreeMoveReady）；
    *  其余杂兵用行动点，精英 / 首领用附赠行动。被禁足 / 霜结不能动 */
   function canPayMove(u, dest) {
     if (!u || u.noMove || u.self === "frost") return false;
@@ -180,6 +181,7 @@ const EnemyAI = (function () {
     const apMove = overVoid || (leaveAcid && !(typeof acidGroundWalker === "function" && acidGroundWalker(u)));
     if (apMove) return (u.ap || 0) >= (rank === "minion" ? 1 : 2);
     if (u.self === "conductor" || (u.kit === "ecmo" && u.resources && u.resources.probe)) return true;
+    if (typeof frenzyFreeMoveReady === "function" && frenzyFreeMoveReady(u)) return true;   // 狂暴：走这一步不花行动点，杂兵走完还能出手
     return rank === "minion" ? (u.ap || 0) >= 1 : (u.bonus || 0) >= 1;
   }
   /** 能正常走过去的相邻区（不隔危墙 / 关着的门；地面单位不走空隙、不进深渊） */
