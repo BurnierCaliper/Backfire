@@ -8,7 +8,8 @@
  *   HD2DFx.adapter({ lens, plate, zone, size })  → { rectOf(id), zoneRectOf(id), track(id) }   // 每次调用都按当时的镜头重新投影
  * 演出只用联机玩家收到的那一份（OnlineView.projectPacket 投影过的包：state / tape / fx），不读房主的原始 state：
  *   HD2DFx.cues(packet, { before, bigHit })   → 这一下怎么演：谁打谁、招式、每一段打中谁、要弹哪些数字、谁被击倒、有没有格挡
- *   HD2DFx.placeNumbers(numbers, rectOf, view) → 每个数字摆在哪、多大（近景大、远景小；几个数字同时出来两两不压住）
+ *   HD2DFx.numberOf(e, { level, bigHit })     → 演出带里的一下（投影过的）弹什么数字（cues 和正式画面 game.js 的新画面都用它，#283）
+ *   HD2DFx.placeNumbers(numbers, rectOf, view) → 每个数字摆在哪、多大（近景大、远景小；几个数字同时出来两两不压住，也不压住画面上还没消失的）
  * 坚毅生命（shp）的具体数值绝不显示：投影里本来就没有（projectTape 遇到打在坚毅生命上的、濒死的，干脆不给数），这里也只认投影里的 value。
  * 不碰 three.js 和 DOM：Node 里 require 来测（tests/hd2d-fx.test.js），浏览器里是全局的 HD2DFx（在 hd2d-layout.js 之后加载）。 */
 (function (root, factory) {
@@ -148,6 +149,30 @@
   /* ---------- 这一下怎么演（只读投影过的包）---------- */
   const alive = (u) => u && !u.dead && !u.hidden && !u._removed && !u.fused;
   /**
+   * 演出带里的一下（投影过的：OnlineView.projectTape 的一项）要弹的数字 { unitId, kind, text, el }；不弹 = null。
+   * o.level = 挨打的人的等级（画面上写着的 Lv），o.bigHit(等级, 伤害) = 规则的 bigHitInfo（大伤害：数字后面加 !!）。
+   * 只认投影里的 value：打在坚毅生命上、濒死的那几下投影不给数，这里就不弹（只演打中）。
+   * 原型的 cues 和正式画面（game.js 的新画面，#283）都按这一份挑数字：伤害、击破、治疗、高能自爆、状态字 / 攻击效果字（「无效」算格挡），
+   * 登场支援、红弹 / 蓝弹这种投影白名单里的字也当状态字
+   */
+  function numberOf(e, o) {
+    o = o || {};
+    if (!e || e.type !== "pop" || !e.unitId) return null;
+    const el = typeof e.element === "string" ? e.element : "physical";
+    const value = num(e.value), word = typeof e.text === "string" && e.text ? e.text : null;
+    const out = (kind, text) => ({ unitId: e.unitId, kind, text, el });
+    if (e.kind === "dmg") {
+      if (value === undefined || value <= 0) return null;      // 投影没给数（打在坚毅生命上、濒死）：只演打中，不弹数字
+      const big = !!(o.bigHit && (o.bigHit(o.level, value) || {}).big);
+      return out(big ? "big" : "dmg", big ? value + "!!" : String(value));
+    }
+    if (e.kind === "break") return value !== undefined && value > 0 ? out("brk", "击破" + value) : null;
+    if (e.kind === "heal") return value !== undefined && value > 0 ? out("heal", "+" + value) : null;
+    if (e.kind === "highboom") return out("big", "高能自爆");
+    if ((e.kind === "status" || e.kind === "fxword" || e.kind === "partner" || e.kind === "bullet") && word) return out(word === "无效" ? "block" : "word", word);
+    return null;
+  }
+  /**
    * packet = 联机玩家收到的那一份（OnlineView.projectPacket）：只读 packet.fx（招式）、packet.tape（弹字：伤害 / 击破 / 治疗 / 状态字）、packet.state.units（等级、谁还在）。
    * opts.before = 出招前画面上的那一份（上一个包的 state）：两边比一比，谁被击倒了。
    * opts.bigHit(等级, 伤害) = 规则的 bigHitInfo（app.js · spawnPopup 判「大伤害」用的同一个公式；只用投影里的等级和伤害数字）
@@ -162,25 +187,13 @@
     const out = { actor: fx ? fx.actor : null, target: fx ? fx.target : null, move: fx ? fx.move : null, script: fx && fx.script || null,
       parried: !!(fx && fx.parried), blocker: fx && fx.blocker || null, waves: [], numbers: [], ko: [] };
     let wave = -1;
-    const word = (e) => typeof e.text === "string" && e.text ? e.text : null;
     tape.forEach(e => {
       const el = typeof e.element === "string" ? e.element : "physical";
-      const value = num(e.value);
       if (e.kind === "dmg" && (e.main || wave < 0)) { wave++; out.waves.push({ unitId: e.unitId, el }); }
-      const at = Math.max(0, wave);
-      if (e.kind === "dmg") {
-        if (value === undefined || value <= 0) return;      // 投影没给数（打在坚毅生命上、濒死）：只演打中，不弹数字
-        const u = byId.get(e.unitId), big = !!(opts.bigHit && u && (opts.bigHit(u.level, value) || {}).big);
-        out.numbers.push({ unitId: e.unitId, kind: big ? "big" : "dmg", text: big ? value + "!!" : String(value), el, wave: at });
-      } else if (e.kind === "break") {
-        if (value !== undefined && value > 0) out.numbers.push({ unitId: e.unitId, kind: "brk", text: "击破" + value, el, wave: at });
-      } else if (e.kind === "heal") {
-        if (value !== undefined && value > 0) out.numbers.push({ unitId: e.unitId, kind: "heal", text: "+" + value, el, wave: at });
-      } else if (e.kind === "highboom") {
-        out.numbers.push({ unitId: e.unitId, kind: "big", text: "高能自爆", el, wave: at });
-      } else if ((e.kind === "status" || e.kind === "fxword") && word(e)) {
-        out.numbers.push({ unitId: e.unitId, kind: e.text === "无效" ? "block" : "word", text: e.text, el, wave: at });
-      }
+      const u = byId.get(e.unitId);
+      // 大伤害要看挨打的人的等级：包里没有这个人就不算大伤害
+      const n = numberOf(e, { level: u ? u.level : undefined, bigHit: u ? opts.bigHit : null });
+      if (n) out.numbers.push(Object.assign(n, { wave: Math.max(0, wave) }));
     });
     if (out.parried && out.target) out.numbers.push({ unitId: out.blocker || out.target, kind: "block", text: "格挡", el: "physical", wave: Math.max(0, wave) });
     // 击倒：出招前还站着、结算后不在了（死了 / 被移出）的，只算这一下碰到的单位
@@ -208,16 +221,20 @@
    * 先放在铭牌头顶正中，同一块铭牌上的第二个、第三个左右错开；和已经放好的压到了就往上叠，顶到顶栏了换旁边一列（右、左、再右……）从铭牌头顶重新叠。
    * 每一列往上都放不下（铭牌贴着顶栏、头顶挤满了：近景俯角抬高、数字放大以后会这样）再从铭牌头顶往下找空（盖在铭牌上一会儿），不进技能栏。
    * 每个数字占的范围连「往上飘」的那一截一起算，所以飘起来也不压住；实在放不下（画面挤满了）就不弹这一个，宁可少一个也不压住。
+   * 正式画面（#283）另给：view.x / view.y = 画面左上角在视口里的位置（战场那一格不在窗口左上角；不给 = 0, 0，原型的画面铺满整个窗口），
+   * view.taken = 画面上还没消失的数字占的范围（一个一个弹出来的：新的也不压住它们）。
    * 返回 [{ ...数字, x, y（中心）, w, h, size 字号, ink 描边, tilt 歪几度, box 占的范围 }]
    */
   function placeNumbers(numbers, rectOf, view) {
     const N = FX.num, out = [], used = new Map();
     view = view || {};
-    const W = view.width || Infinity, Hh = view.height || Infinity, top = (view.top || 0) + 2, floor = Hh - (view.bottom || 0) - 2;
+    const X0 = view.x || 0, Y0 = view.y || 0;
+    const W = X0 + (view.width || Infinity), Hh = Y0 + (view.height || Infinity), top = Y0 + (view.top || 0) + 2, floor = Hh - (view.bottom || 0) - 2;
     const hits = (a, b) => a.x0 < b.x1 + N.gap && b.x0 < a.x1 + N.gap && a.y0 < b.y1 + N.gap && b.y0 < a.y1 + N.gap;
+    const all = (view.taken || []).filter(Boolean).map(box => ({ box }));   // 已经占了的（画面上的 + 这一批放好的）
     (numbers || []).forEach((n, i) => {
       const r = rectOf(n.unitId);
-      if (!r || r.x < 0 || r.x > W || r.y < 0 || r.y > Hh) return;   // 铭牌不在画面里（近景看的是别的区）：不弹
+      if (!r || r.x < X0 || r.x > W || r.y < Y0 || r.y > Hh) return;   // 铭牌不在画面里（近景看的是别的区）：不弹
       const size = sizeOf(n.kind, r), ink = Math.max(1.5, size * N.ink), pad = n.kind === "big" || n.kind === "brk" ? size * N.pad : 0;
       const w = textWidth(n.text, size) + 2 * (ink + pad), h = size * N.lineH + 2 * (ink + pad * 0.5);
       const k = used.get(n.unitId) || 0;
@@ -226,13 +243,13 @@
       const cx = r.x + side * N.spread * r.w;
       const place = (x, bottom) => ({ x0: x - w / 2, x1: x + w / 2, y0: bottom - h - N.rise, y1: bottom });
       const start = Math.max(r.top - N.lift, top + h + N.rise);     // 铭牌贴着顶栏时，数字压在铭牌上也不顶进顶栏
-      const colX = (c) => clamp(cx + (c === 0 ? 0 : (c % 2 ? 1 : -1) * Math.ceil(c / 2)) * (w + N.gap), w / 2, W - w / 2);
+      const colX = (c) => clamp(cx + (c === 0 ? 0 : (c % 2 ? 1 : -1) * Math.ceil(c / 2)) * (w + N.gap), X0 + w / 2, W - w / 2);
       let b = null;
       for (let c = 0; c < 40 && !b; c++) {          // 往上叠
         const x = colX(c);
         let cand = place(x, start);
         for (let g = 0; g < 60 && cand.y0 >= top; g++) {
-          const p = out.find(q => hits(cand, q.box));
+          const p = all.find(q => hits(cand, q.box));
           if (!p) { b = cand; break; }
           cand = place(x, p.box.y0 - N.gap - 0.01);
         }
@@ -241,13 +258,15 @@
         const x = colX(c);
         let cand = place(x, start);
         for (let g = 0; g < 60 && cand.y1 <= floor; g++) {
-          const p = out.find(q => hits(cand, q.box));
+          const p = all.find(q => hits(cand, q.box));
           if (!p) { b = cand; break; }
           cand = place(x, p.box.y1 + N.gap + 0.01 + h + N.rise);
         }
       }
       if (!b) return;
-      out.push(Object.assign({}, n, { x: (b.x0 + b.x1) / 2, y: b.y1 - h / 2, w, h, size, ink, tilt: N.tilt[i % N.tilt.length], box: b }));
+      const one = Object.assign({}, n, { x: (b.x0 + b.x1) / 2, y: b.y1 - h / 2, w, h, size, ink, tilt: N.tilt[i % N.tilt.length], box: b });
+      out.push(one);
+      all.push(one);
     });
     return out;
   }
@@ -308,5 +327,5 @@
     return null;
   }
 
-  return { FX, lens, rectOf, zoneRect, adapter, cues, placeNumbers, textWidth, sizeOf, colorOf, paperOf, pushPose, posOf };
+  return { FX, lens, rectOf, zoneRect, adapter, cues, numberOf, placeNumbers, textWidth, sizeOf, colorOf, paperOf, pushPose, posOf };
 });
