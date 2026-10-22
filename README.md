@@ -368,6 +368,10 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **三方混战的概率 50% → 15%**（作者 10/22 定，issue #270；run.js · `THREE_WAY.chance` 0.5 → 0.15；README 里外城区、第三采矿场三方混战的两条旧记录，在「50%」后面注明后来改成 15%；测试：tests/three-way.test.js 改「三方混战的概率」那条、新加一条锁住 15%）
+  - **以前**：第三采矿场、外城区的随机遭遇，三区制时有 50% 变成三方混战。区制本来就是两区 / 三区各一半，所以没指定区制的随机遭遇（例如单局的普通战 / 精英战）里约 25% 是三方混战。
+  - **现在**：三区制时 **15%**，没指定区制的随机遭遇里约 7.5%。只改了这一个数：三方混战本身（玩家在中间 2 区、两边各 3 枚代币）、哪些遭遇不会变成三方混战（指定了阵营、混战、两区制、不分地区的）都照旧；随机混战 `CHANCE_MIXED`（5%，无视阵营）、镇压队的混编概率 `FACTION_MIX_CHANCE`（15%）没动。下水道的设计文档（docs/sewer-maintenance.md、docs/ratfolk.md）本来就写的 15%；ROADMAP、图鉴、区域说明里没写这个概率，都不用改。
+  - **测试**：tests/three-way.test.js「三方混战的概率」那条从「约一半（400 场里 140–260 场，没固定种子）」改成约 15%（固定种子抽 2000 场，差不超过 3 个百分点）；新加一条：`THREE_WAY.chance` 是 0.15、`CHANCE_MIXED` 还是 0.05、`FACTION_MIX_CHANCE` 还是镇压队 0.15，第三采矿场三区制的遭遇固定种子抽 2000 场约 15%。这两条在没改的代码上都失败（抽出 49.3%；0.5 ≠ 0.15）。改完实测（各 20000 场）：三区制外城区 15.2%、第三采矿场 15.2%；不指定区制 7.2%、7.5%。
 - **战斗画面加「新画面（HD-2D）」开关：开着时战场那一格换成 3D 战场（单机先接，旧画面留着，默认关）**（主人要求，issue #261，HD-2D 接进正式游戏的第一步；原型的模块挪到正式目录 hd2d/（hd2d-layout.js / hd2d-camera.js / hd2d-scene.js / hd2d-world.js / hd2d-backdrop.js / hd2d-scene-art.js / hd2d-scenes-*.js / hd2d-weather.js / hd2d-wfx.js / hd2d-ui.js / hd2d-fx.js / hd2d-play.js，内容不变），hd2d.css 拆成 hd2d/hd2d.css 和 prototypes/hd2d/hd2d-shell.css，prototypes/hd2d/index.html 改引用；新增 hd2d/hd2d-field.js；hd2d/hd2d-scene.js 加正式画面的回调 `onUnitClick` / `onUnitHover` / `onZoneClick` / `onZoneHover` / `onGapClick` / `onEmptyClick`、标记 `setMarks`（配置 `MARK`），画面藏起来时不画，`setBattle` 不再每次都重建天气粒子、重画天空贴图；game.js · 抽出 `clickField` / `hoverZone`、`G.fieldInput`、`onCardHover` 多一个参数（悬停说明挂在哪）、`fieldMarks` / `paintMarks`、`field3d` / `field3dRect` / `boxOf`、`centerOf` / `zoneRectOf` / `hit`、`applyEnv` 的天气叠加层、`setView` / `refreshHud` 通知新画面、`G.flashHint`；game.html 加开关按钮、hd2d/hd2d.css、importmap、hd2d/hd2d-field.js；weather-fx.js、world-data.js 的注释改路径；prototypes/hd2d/README.md；测试：新增 tests/hd2d-field.test.js、tests/hd2d-paths.js，改 tests/hd2d-*.test.js、tests/region-light.test.js、tests/region-scene.test.js 的路径，tests/hd2d-weather-fx.test.js 三条正式画面的检查）
   - **以前**：HD-2D 战场只有原型页（prototypes/hd2d/，模块也在那里）；正式游戏的战斗画面只有 2D 的区和单位卡。
   - **现在**：
@@ -1405,7 +1409,7 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 - **盗匪和安保、警卫队互相敌对；外城区也有三方混战**（enemies.js · `HOSTILE_PAIRS`、`hostileTo`；run.js · `THREE_WAY.regions`、`rollThreeWay`）：
   - 敌对规则同异星生物（见下面「三方混战」那一条）：会互相攻击、不问我方格挡、协助只找同伙。盗匪和其他阵营（沙灵、触灵、巨人……）照旧不敌对；异星生物和谁都敌对。
-  - 外城区的随机遭遇，三区制时 50% 变成三方混战：玩家在中间 2 区，安保 + 警卫队一边、盗匪一边，各 3 枚代币（成组的空投蜂群整组记 1 枚）。
+  - 外城区的随机遭遇，三区制时 50% 变成三方混战（后来改成 15%，见上面「三方混战的概率 50% → 15%」）：玩家在中间 2 区，安保 + 警卫队一边、盗匪一边，各 3 枚代币（成组的空投蜂群整组记 1 枚）。
   - 单局第一幕在外城区，普通战斗 / 精英战也会遇到；三方混战两边固定各 3 枚代币，不跟着精英战的代币数走。悬赏、护送、遭遇战（偷袭）、首领战不会变成三方混战。
   - 三方混战的设置改成按区域写（`THREE_WAY.regions`），以后别的区域照着加一行就行。测试：`tests/three-way.test.js`。
 
@@ -1417,7 +1421,7 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
     - 敌人打敌人：不问我方协助格挡，直接结算；被打死照常给我方经验、掉落和击杀分（全队的）。
     - 失衡后的协助攻击：敌人把敌对阵营的敌人打失衡，只有和打出失衡的那一方一伙的敌人协助（AI 选人），我方不协助；敌人把我方打失衡，也只有打人那一方的同伙协助。牛队长、巡逻车不替敌对阵营挡。
     - 矿场警戒自动机：敌对的异星生物走进它的区、或打了它的同伙，也会把它叫醒，并给那只异星生物施加高能；电涌也打身上有高能的异星生物。
-  - **三方混战的遭遇**：第三采矿场的随机遭遇，三区制时有 50% 变成三方混战（`THREE_WAY.chance`）：玩家在中间 2 区，安保和异星生物各占 1 区 / 3 区（随机），两边各 3 枚代币。指定了阵营、混战、两区制的不会变。测试：`tests/mine3-enemies.test.js`。
+  - **三方混战的遭遇**：第三采矿场的随机遭遇，三区制时有 50% 变成三方混战（`THREE_WAY.chance`；后来改成 15%，见上面「三方混战的概率 50% → 15%」）：玩家在中间 2 区，安保和异星生物各占 1 区 / 3 区（随机），两边各 3 枚代币。指定了阵营、混战、两区制的不会变。测试：`tests/mine3-enemies.test.js`。
 
 - **第三采矿场异星生物杂兵：陨体衍蛛、陨体弦蚣**（engine.js · `enemyPresets`；party.js · `effectiveAtk`；enemies.js · `alienOnDeath`、`spiderRoundEnd`、`spiderFollowUp`；ai.js（`fixed` 不会主动移动、只挑打得到的人里血量最低的）；app.js · `sweepDeadEnemies`、`settleEnemyKill`、`turnEnd`；game.js · 等复活的卡片留着）：
   - 新阵营「异星生物」，出没在第三采矿场；和安保不是一伙的（不混编，警戒自动机也不会因为它们挨打而醒）。
