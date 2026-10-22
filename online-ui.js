@@ -1175,6 +1175,8 @@
       if (checkReq) checkReq.sync();
       if (loreUi) loreUi.sync();
       if (view.active && !view.isHost) scheduleAutoMenu();
+      // 轮到自己的角色行动：响一次 DJ 搓碟（同一次只响一次；页面刚打开、重新同步时只记下）。演出还在播时等播完（行动开始的那一刻）
+      if (turnCue && !animating) turnCue.see(turnInfo(null, view.screen));
     }
     /** 「房间码 · 菜单」（#298）：点它打开暂停页面（pause-menu.js），「消息与成员」「大厅」「角色分配」「克制表」「主持人工具」都在里面
      *  （以前这里是「房间码 · 消息与成员」和「角色分配」两个按钮）。别人发来的新私信、大厅交流里还没看到的新消息，
@@ -1200,6 +1202,12 @@
       // 联机玩家的克制表：房主算好发来的 view.matchup（不含坚毅）；主持人用单机那一项（matchup-ui.js）
       global.PauseMenu.register({ id: "matchupOnline", config: "matchup", visible: () => !!(view.active && !view.isHost && view.screen === "battle" && matchupOf()),
         run: () => { if (global.MatchupUI) global.MatchupUI.open(() => matchupOf()); } }),
+      // 音效开关（#304）：联机玩家看不到房主顶栏的「音效 开 / 关」，放在菜单里（点了菜单不收起）；
+      // 和单机同一个本机开关（sfx.js · Sfx.enabled / setEnabled 的 localStorage 键），只影响这台电脑，不发给别人
+      global.PauseMenu.register({ id: "sfx", stay: true, visible: () => !!(view.active && !view.isHost && global.Sfx),
+        pressed: () => !!(global.Sfx && global.Sfx.enabled()),
+        label: () => { const c = global.PauseMenu.CONFIG.items.sfx; return global.Sfx && global.Sfx.enabled() ? c.on : c.off; },
+        run: () => { const S = global.Sfx; if (!S) return; S.setEnabled(!S.enabled()); if (S.enabled()) S.play("physical"); } }),
       // 玩家选着技能、正在选目标、战场上有要点选的询问：Esc 留给战场取消（online-battle.js），不开菜单
       global.PauseMenu.addBlocker(() => !!(view.active && !view.isHost && view.screen === "battle" && (request?.skill || fieldAsk())))
     ] : [];
@@ -1240,6 +1248,20 @@
       await call(() => api.submit(command));
     }
     const isMyTurn = () => view.screen === "battle" && hs().phase === "acting" && myUnits().includes(hs().currentUnitId);
+    /* 联机玩家的音效（online-sfx.js，#304）：播包时和单机响一样的音效、轮到自己时响一次 DJ 搓碟。声音只从收到的包推出来，不读房主的 state */
+    const turnCue = global.OnlineSfx ? global.OnlineSfx.turnWatch() : null;
+    /** 这一刻轮到谁（只看收到的包：view 里的行动阶段 / 谁在行动 / 角色归谁，state 里的回合数）；p = 刚收到、还没换上的包 */
+    const turnInfo = (p, screen) => {
+      p = p || view.packet || {};
+      const v = p.view || {};
+      return { active: !!view.active, isHost: !!view.isHost, screen: screen || p.screen || view.screen, phase: v.phase, current: v.currentUnitId, turnNo: (p.state || view.state || {}).turnNo,
+        room: view.roomCode || "", mine: (v.units || []).filter(u => u.owner === own()).map(u => u.id) };
+    };
+    /** 播一个包的音效：被新的包顶掉、离开房间、演出倍率 0（跳过）以后不再响 */
+    const sfxFor = (packet, before, generation) => global.OnlineSfx ? global.OnlineSfx.start(packet, {
+      before, bigHit: typeof global.bigHitInfo === "function" ? global.bigHitInfo : null,
+      live: () => !destroyed && generation === playbackGeneration && hd2dSpec.clock() > 0
+    }) : null;
     function battleUi() {
       const data = displayState || view.state || {}, cur = hs().currentUnitId, acting = view.screen === "battle" && hs().phase === "acting";
       const curUnit = (data.units || []).find(u => u.id === cur), mine = myUnits();
@@ -1346,10 +1368,12 @@
     async function play3d(packet, generation) {
       const before = displayState || null;
       animating = true; render();
+      const snd = sfxFor(packet, before, generation);   // 音效（online-sfx.js）：出手、每一段打中、格挡、演完的那一刻由 hd2d-play.js 叫
       try {
         await field3d.play(packet, {
           before, bigHit: typeof global.bigHitInfo === "function" ? global.bigHitInfo : null,
-          onImpact: () => { if (destroyed || generation !== playbackGeneration) return; displayState = packet.state || displayState; render(); }
+          onImpact: () => { if (destroyed || generation !== playbackGeneration) return; displayState = packet.state || displayState; render(); },
+          sound: snd ? (kind, i) => { if (typeof snd[kind] === "function") snd[kind](i); } : null
         });
       } catch (_) { /* 画坏了不影响结算 */ }
       finally { if (generation === playbackGeneration) { animating = false; displayState = packet.state || displayState; render(); } }
@@ -1555,8 +1579,11 @@
         seenMessages = new Set(); messagesInitialized = false; clearTimeout(toastTimer); toast.hidden = true;
         lobbySeen = null;   // 重新同步带来的大厅聊天记录不算新消息
         skip3d();           // 新画面正在播的立刻结束（#289；关着什么都不做）
+        if (turnCue) turnCue.prime();   // 重新同步（断线重连）以后第一次看到的回合只记下，不响搓碟
         displayState = packet.state || null; animating = false; return;
       }
+      // 页面在后台（别的标签页）：不等演出播完（后台的计时器很慢），收到包就看轮没轮到自己——这正是提示音最有用的时候
+      if (turnCue && typeof document !== "undefined" && document.hidden) turnCue.see(turnInfo(packet, packet.screen));
       const tape = packet.tape || [];
       if (!tape.length) return;
       // 新画面（HD-2D）开着：整包交给 hd2d/hd2d-field.js · play（纸片风数字、纸片感、推镜头，#289）；关着照旧走下面的旧画面
@@ -1564,6 +1591,7 @@
       animating = true; render();
       const held = [];   // 这一段演完之前留在场上的被打倒的敌人（卡片 + 红叉），演完一起淡出
       let zoomed = false;
+      const snd = sfxFor(packet, displayState, generation);   // 音效跟着画面一下一下响（online-sfx.js）
       try {
         // 攻击演出（attack-fx.js）：房主发来这一下谁打谁、哪种招式（有专属演出的再带脚本名和现场数据）——
         // 先播出手和弹道，再一段段跳数字，主攻击那几段补上打中的形状（刀光、冲击星……），敌人倒下喷一个红叉
@@ -1578,11 +1606,13 @@
           if (fx.assist || (scr && scr.zoom)) { zoomed = zoomOnline(rectOf(cardFor(fx.target))); if (zoomed) await AF.after(300); }
           // 拉斯缪尔的能量罐
           if (fx.tank) { const tr = rectOf(cardFor(fx.tank.id)); if (tr) AF.tank(tr, fx.tank.from, fx.tank.to, { ms: fx.tank.ms }); }
+          if (snd) snd.strike();   // 出手：开枪声 / 近战的破风声
           try { fxFrom = await strikeOnline(fx, scr, ctx, cardFor, rectOf); } catch (_) { fxFrom = null; }
           // 格挡成功：协助格挡的火花在两人连线的中点，自己格挡的在格挡的人身上
           if (fx.parried) {
             const b = rectOf(cardFor(fx.blocker || fx.target)), a = rectOf(cardFor(fx.actor));
             if (fx.blocker && a && b) AF.sparks({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }); else if (b) AF.clash(b);
+            if (snd) snd.parry();
           }
         }
         const deadBefore = new Set(((displayState || {}).units || []).filter(u => u && u.dead).map(u => u.id));
@@ -1596,6 +1626,7 @@
           if (fxFrom && event.kind === "break" && scr && scr.brk) { try { await scr.brk(ctx, event); } catch (_) { /* 同上 */ } }
           if (Array.isArray(event.snap)) displayState = { ...(displayState || packet.state || {}), units: copy(event.snap) };
           paintStage();
+          if (snd) snd.pop(event);   // 打中、治疗、状态字；这一下的快照里有人被击倒 / 濒死 / 换区也一起响
           const card = cardFor(event.unitId);
           if (AF && card && event.kind === "dmg") {
             const u = ((displayState || {}).units || []).find(x => x && x.id === event.unitId);
@@ -1631,6 +1662,7 @@
           await new Promise(resolve => setTimeout(resolve, main && scr && scr.instant ? 40 : 180));
           if (card) { card.classList.remove("ol-impact"); card.querySelector(".ol-popup")?.classList.remove("ol-visible"); card.querySelector(".ol-pop-temp")?.remove(); }
         }
+        if (snd) snd.end();   // 演完：失衡、还没响过的击倒 / 护盾 / 换区（被新的包顶掉了就不响）
       } finally {
         if (zoomed) zoomOutOnline();
         held.forEach(k => {
@@ -1807,6 +1839,7 @@
       document.removeEventListener("click", onRollOpen); document.removeEventListener("scroll", onListScroll, true); clearTimeout(titleTimer);
       while (hostMounts.length) hostMounts.pop().remove(); document.body.classList.remove("ol-has-side", "ol-host-online", "ol-in-battle", "ol-side-collapsed");
       pauseItems.forEach(off => off()); if (global.PauseMenu) global.PauseMenu.setOnline(null);
+      if (turnCue) turnCue.unmark();   // 标签页标题上的「▶ 轮到你」去掉
       for (const off of unsubs) if (typeof off === "function") off();
       for (const node of [...nodes, ...titleButtons]) node.remove();
       document.body.classList.remove("online-player"); if (mounted === instance) mounted = null;
