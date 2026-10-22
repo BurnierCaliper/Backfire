@@ -168,3 +168,25 @@ test("召唤物和铁壁不掉落", () => {
   t.settleBattleRewards("win");
   assert.equal(matTotal(t), 0);
 });
+
+test("第三采矿场：4 个杂兵一场期望约 2 份；按代币算（衍蛛两只一组）也在 1–3", () => {
+  const c = H.load();
+  const E = k => Object.values(c.enemyDropExpected([k])).reduce((a, b) => a + b, 0);
+  const kits = ["alarm_bot", "meteor_miner", "meteor_spider", "meteor_centipede"];
+  const avg4 = kits.reduce((a, k) => a + E(k), 0);   // 4 个杂兵随机抽 = 4 × 每种平均
+  assert.ok(avg4 >= 1.9 && avg4 <= 2.1, "第三采矿场 4 杂兵期望 " + avg4.toFixed(2));
+  const perToken = [E("alarm_bot"), E("meteor_miner"), 2 * E("meteor_spider"), E("meteor_centipede")];
+  perToken.forEach(v => assert.ok(v * 4 >= 1 && v * 4 <= 3, String(v)));
+});
+
+test("穴鸦是食腐鸟：不掉沙鱼鳞，掉废料一类；一群 4 只约 1 份；材料说明对得上", () => {
+  const c = H.load();
+  const t = c.enemyDropTable("crow");
+  assert.ok(!t.some(d => d.id === "cm_scale"));
+  assert.ok(t.some(d => d.id === "cm_scrap"));
+  const pack4 = 4 * t.reduce((a, d) => a + d.chance, 0);
+  assert.ok(pack4 >= 0.95 && pack4 <= 1.15, "4 只 " + pack4);
+  const mats = vm.runInContext("CRAFT_MATERIALS", c);
+  assert.doesNotMatch(mats.find(m => m.id === "cm_scale").hint, /穴鸦/);
+  assert.match(mats.find(m => m.id === "cm_scrap").hint, /穴鸦/);
+});
