@@ -509,6 +509,10 @@ test("hd2d-field.js：新画面建好时给单机的 .g-hud 换上新外壳、�
 /* ---------- 5. 样式：关着时一条都套不上；原型页和正式画面共用一份 ---------- */
 test("样式（hd2d/hd2d.css）：新外壳的规则都要 .hd2d-shell（或者只有新样子才有的类），关着新画面时一条都套不上；原型页的技能栏 / 队伍栏和正式画面用同一份，原型页自己不再留一份", () => {
   const css = read("hd2d/hd2d.css");
+  ["hd2d/hd2d.css", "prototypes/hd2d/hd2d-shell.css"].forEach(f => {
+    const s = read(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/"[^"]*"/g, "");
+    assert.equal((s.match(/\{/g) || []).length, (s.match(/\}/g) || []).length, f + "：大括号配得上");
+  });
   const a = css.indexOf("/* ---------- 新画面的技能栏、队伍栏（#297"), b = css.indexOf("/* 「新画面 关 / 开」开关（#g-hd2d-toggle");
   assert.ok(a > 0 && b > a, "#297 那一段");
   const part = css.slice(a, b).replace(/\/\*[\s\S]*?\*\//g, "");
