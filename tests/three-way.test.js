@@ -59,7 +59,7 @@ test("三方混战的概率写在 THREE_WAY.chance = 15%（作者 10/22 定，�
   const c = H.load();
   assert.equal(get(c, "THREE_WAY").chance, 0.15);
   assert.equal(get(c, "CHANCE_MIXED"), 0.05, "随机混战（无视阵营）照旧 5%");
-  assert.deepEqual(plain(get(c, "FACTION_MIX_CHANCE")), { "镇压队": 0.15 }, "镇压队的混编照旧 15%");
+  assert.equal(get(c, "FACTION_MIX_CHANCE")["镇压队"], 0.15, "镇压队的混编照旧 15%");
   // 固定种子抽样：第三采矿场三区制的遭遇
   c.Math.random = c.makeRng("3W-MINE3");
   const N = 2000;
@@ -94,7 +94,7 @@ test("我方和某阵营同阵营（战斗模板）：友军不打我方、我�
   c.BattleSim.setup({ party: ["kolt", "helu"], encounter: enc, level: 3, seed: "ALLY" });
   c.startCombat();
   const S = c.S.state;
-  assert.deepEqual([...S.playerAllies].sort(), ["安保", "警卫队", "镇压队"], "是一伙的警卫队、镇压队也算友军");
+  assert.deepEqual([...S.playerAllies].sort(), ["下水道维护", "安保", "警卫队", "镇压队"].sort(), "是一伙的警卫队、镇压队、下水道维护（#279）也算友军");
   const g = S.units.find(u => u.kit === "guard_sword"), t = S.units.find(u => u.kit === "thug_knife"), k = c.findKit("kolt", S.units);
   assert.equal(c.hostileTo(k, g), false); assert.equal(c.hostileTo(k, t), true); assert.equal(c.hostileTo(g, t), true);
   assert.match(c.statusLine(g), /友军/);

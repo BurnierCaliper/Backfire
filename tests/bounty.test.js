@@ -69,8 +69,12 @@ test("检定和其他节点交替，一站一站加进路线；3 次成功找到
   const iv = tg.iv || { hp: 0, atk: 0 };
   assert.equal(tg.layers[0].max, Math.round(Math.round(base.layers[0].max * (1 + iv.hp / 100)) * 1.5));
   assert.equal(c.effectiveAtk(tg, c.S.state.units), Math.round(Math.round(base.personalAtk * (1 + iv.atk / 100) * 10) / 10 * 1.5));
-  // 每一行敌人按代币算（成群的一行只算一次），目标再多算 1 枚：总数不超过精英战的 5 枚
-  const tokens = spec.encounter.enemies.reduce((s, e) => s + c.enemyTokens(e.preset), 0);
+  // 每一行敌人按代币算（成群的整组记一次：三区制的站位把一组拆成一只一行，按只数折回去，和 tests/three-way.test.js 一样），
+  // 目标再多算 1 枚：总数不超过精英战的 5 枚
+  const tokens = Math.round(spec.encounter.enemies.reduce((s, e) => {
+    const g = Number((c.enemyInfo(e.preset) || {}).group) || 1;
+    return s + c.enemyTokens(e.preset) * (e.count || 1) / g;
+  }, 0));
   assert.ok(tokens + 1 <= 5, `目标多占 1 枚代币：${tokens} + 1`);
   assert.equal(spec.encounter.enemies.filter(e => e.bounty).length, 1);
   const notes = R.finishBattle(run, "win");

@@ -280,6 +280,9 @@ const ENEMY_INFO = {
   rat_biter:  { faction: "狂鼠", regions: ["下水道"], tokens: 1, race: "鼠类人·鼠", raceAttrs: true },
   rat_plague: { faction: "狂鼠", regions: ["下水道"], tokens: 2, race: "鼠类人·鼠", raceAttrs: true },
   rat_tyrant: { faction: "狂鼠", regions: ["下水道"], tokens: 2, race: "鼠类人·鼠", raceAttrs: true },
+  // —— 下水道维护（下水道；清洁和保护，和安保、警卫队、镇压队是一伙，和其他所有阵营敌对，docs/sewer-maintenance.md）——
+  // 清扫机是机械，没有种族；一枚代币 3 只（照空投蜂群的 group: 3）
+  sewer_sweeper: { faction: "下水道维护", regions: ["下水道"], tokens: 1, group: 3 },
   // —— 盗匪 ——
   thug_knife:  { faction: "盗匪", regions: ["外城区"], tokens: 1, races: ENEMY_RACE_TABLES.bandit, raceAttrs: true },
   thug_hammer: { faction: "盗匪", regions: ["外城区"], tokens: 1, races: ENEMY_RACE_TABLES.bandit, raceAttrs: true },
@@ -316,20 +319,22 @@ const ENEMY_INFO = {
   watchcrow: { faction: "古代造物", regions: ["沙漠"], tokens: 2 }
 };
 
-/** 是一伙的阵营（安保、警卫队是一套体系的两个分支；镇压队是赤牙的部队，和它们是一伙）。
+/** 是一伙的阵营（安保、警卫队是一套体系的两个分支；镇压队是赤牙的部队，和它们是一伙；
+ *  下水道维护和巨人方友好，也是这一伙，docs/sewer-maintenance.md）。
  *  「一伙」只管不互相敌对、友军判断；遭遇里能不能同场混编另看 FACTION_MIX_CHANCE */
-const ALLIED_FACTIONS = [["安保", "警卫队", "镇压队"]];
+const ALLIED_FACTIONS = [["安保", "警卫队", "镇压队", "下水道维护"]];
 /** 同场混编概率：写在这里的阵营不是想混就混——抽遭遇时它和同伙阵营只有这么大的概率混编，
  *  其余时候各打各的（抽到镇压队就只出镇压队；抽到安保 / 警卫队时，镇压队也只有这个概率加进来）。
- *  没写的阵营照旧想混就混（安保 + 警卫队） */
-const FACTION_MIX_CHANCE = { "镇压队": 0.15 };
+ *  没写的阵营照旧想混就混（安保 + 警卫队）。
+ *  下水道维护照镇压队的做法给 15%（实际上下水道只抽下水道的敌人，平时碰不到安保） */
+const FACTION_MIX_CHANCE = { "镇压队": 0.15, "下水道维护": 0.15 };
 function alliesOf(faction) {
   const g = ALLIED_FACTIONS.find(a => a.indexOf(faction) >= 0);
   return g ? g.slice() : [faction];
 }
 /** 抽遭遇时这个阵营可以同场出现的阵营：alliesOf 去掉没掷中混编概率的阵营，每次调用各掷一次。
- *  抽到的是受限阵营（镇压队）：整个同伙（安保 + 警卫队）一起混进来或一起不来；
- *  抽到的是同伙：受限阵营各自掷一次决定加不加进来 */
+ *  抽到的是受限阵营（镇压队、下水道维护）：整个同伙一起混进来或一起不来；
+ *  抽到的是同伙（安保 / 警卫队）：受限阵营各自掷一次决定加不加进来 */
 function encounterFactions(faction) {
   const all = alliesOf(faction);
   const loose = all.filter(f => FACTION_MIX_CHANCE[f] != null);
