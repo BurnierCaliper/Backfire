@@ -1411,10 +1411,12 @@ function sweeperSelfDestruct(a, t, notes, hit) {
 /* ===== 阵营敌对 =====
  * HOSTILE_FACTIONS 里的阵营和其他所有阵营的敌人互相视为敌人：异星生物、下水道的狂鼠（docs/ratfolk.md，和 effects.js · RATFOLK_FACTION 同名）；
  * HOSTILE_EXCEPT_ALLIES 里的阵营和自己那一伙（run.js · ALLIED_FACTIONS）以外的所有阵营互相视为敌人：下水道维护（SEWER_FACTION，
- * docs/sewer-maintenance.md：和安保、警卫队、镇压队友好，和狂鼠、盗匪、沙灵、沙漠生物、异星生物等其他阵营敌对）；
+ * docs/sewer-maintenance.md：和安保、警卫队、镇压队友好（还有「巨人」阵营，HOSTILE_EXCEPT_FRIENDS），和狂鼠、盗匪、沙灵、沙漠生物、异星生物等其他阵营敌对）；
  * 盗匪和安保、警卫队互相视为敌人（会互相攻击、不互相协助）。其余敌人阵营之间照旧是一伙的。 */
 const HOSTILE_FACTIONS = ["异星生物", "狂鼠"];
 const HOSTILE_EXCEPT_ALLIES = [SEWER_FACTION];
+/** HOSTILE_EXCEPT_ALLIES 的阵营另外友好的阵营（不在同伙组里、但同属巨人方）：下水道维护和「巨人」阵营友好（作者 10/22：「一切巨人方友好」） */
+const HOSTILE_EXCEPT_FRIENDS = { [SEWER_FACTION]: ["巨人"] };
 const HOSTILE_PAIRS = [["盗匪", "安保"], ["盗匪", "警卫队"], ["盗匪", "镇压队"], ["沙漠生物", "沙灵"]];
 function factionOf(u) {
   if (!u) return null;
@@ -1438,7 +1440,10 @@ function hostileTo(a, b) {
   const fa = factionOf(a), fb = factionOf(b);
   if (!fa || !fb || fa === fb) return false;
   if (HOSTILE_FACTIONS.includes(fa) || HOSTILE_FACTIONS.includes(fb)) return true;
-  if (HOSTILE_EXCEPT_ALLIES.includes(fa) || HOSTILE_EXCEPT_ALLIES.includes(fb)) return !(typeof alliesOf === "function" && alliesOf(fa).includes(fb));
+  if (HOSTILE_EXCEPT_ALLIES.includes(fa) || HOSTILE_EXCEPT_ALLIES.includes(fb)) {
+    const friends = (HOSTILE_EXCEPT_FRIENDS[fa] || []).includes(fb) || (HOSTILE_EXCEPT_FRIENDS[fb] || []).includes(fa);
+    return !friends && !(typeof alliesOf === "function" && alliesOf(fa).includes(fb));
+  }
   return HOSTILE_PAIRS.some(([x, y]) => (fa === x && fb === y) || (fa === y && fb === x));
 }
 /** 场上和 a 敌对、还活着的单位 */
