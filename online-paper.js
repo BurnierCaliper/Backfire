@@ -9,7 +9,7 @@
  *   · 左上角队伍（hd2d-shell.js 的队伍栏挪过来）：收起成只剩头像一列；下面角色资料 / 武器 / 背包
  *   · 「工具 ▾」下拉（.olp-tools）：地图、战绩、钱包与商店、任务日志、NPC 资料、申请检定、新画面开关，点完收起；原来舞台顶上那一排按钮不画了
  *   · 右边战斗记录 / 小队聊天（#online-side）：平时收成右边缘一个竖标签，有新消息挂数字
- *   · 底下技能栏（hd2d-shell.js 的 .g-hud）：能收起成一行
+ *   · 底下技能栏（hd2d-shell.js 的 .g-hud）：能收起成一行；手机竖屏上紧凑、最多占屏幕高度的 PAPER.phone.dockMax，没手动点过时轮到你才展开（#311）
  * 各块的收起状态记在本机（localStorage，读写都包 try/catch）。只用联机玩家收到的包（online-view.js 白名单投影过的），不读房主的 state；
  * 坚毅生命（shp / shpMax）这里一个字都不碰。
  *
@@ -17,6 +17,7 @@
  *     PAPER                                 配置：类名、本机记住收起的键、文字、……
  *     active(o)                             这一刻是不是纸片画面：o = { active, isHost, screen, on3d }
  *     isOpen(name, storage, dflt) / setOpen(name, open, storage)   各块的收起 / 展开（读写都包 try/catch）
+ *     dockAuto(o) / phoneVars()             手机竖屏（#311）：技能栏这一刻该开着还是收着（没手动点过时轮到你展开）/ 技能栏最多多高
  *     themeOf({ light, night, weather }) / themeVars(theme)          白天 / 夜晚 / 天气 → 面板的配色（CSS 变量）
  *     shellHtml()                           骨架：顶栏、「工具 ▾」下拉、吊牌、提示各占一块（分开重画）
  *     topHtml(info)                         顶栏
@@ -58,6 +59,11 @@
       party: "我方队伍", you: "你", yourTurn: "轮到你了"
     },
     cam: { label: "镜头：远景 / 中景 / 近景" },
+    /* 手机竖屏（#311，让战场更大；电脑上不用）：
+     *   media     这么窄算手机竖屏（要和 online-paper.css 里手机那一段的 @media (max-width: 760px) 一样）
+     *   dockMax   技能栏展开时最多占屏幕高度的百分之几（online-ui.js 写成 --olp-dock-max，online-paper.css 手机上的技能栏用；放不下的是提示栏自己滚）
+     * 手机上技能栏没手动点过「技能 ▼ / ▲」时：轮到你（演出播完）展开、不是你就收起（dockAuto）；手动点过的照本机记着的（hd2d-shell.js · SHELL.keys.dock） */
+    phone: { media: "(max-width: 760px)", dockMax: 35 },
     /* 战斗记录 = 一长条热敏收据（审查：照 shot-day.jpg 右边那张）：顶上「BACKFIRE / 战斗记录 · 房间码」、一排等号，每个回合「*** 第 N 回合 ***」开头、
      * 每条之间虚线、伤害数字靠右、回合末尾「本回合合计」，底下是锯齿撕口（纸纹 receipt 那一种的 zig）。
      * 每条记录都是 online-view.js · projectLogs 投影过的那一句（谁 · 用了什么 → 目标：N 伤害，击破 M，弹字），这里只是拆开排版，不多给一个数：
@@ -180,6 +186,19 @@
       storage.setItem(k, open ? "open" : "closed");
       return true;
     } catch (e) { return false; }
+  }
+  /** 手机上技能栏这一刻该开着还是收着（#311）：o = { phone 手机竖屏（PAPER.phone.media）, manual 手动点过「技能 ▼ / ▲」（本机记着的、这次点过的）,
+   *  mine 轮到你了, busy 演出还在播 }。返回 true 展开 / false 收起 / null 不动：
+   *  电脑上、手动点过的不动（照本机记着的）；手机上不是你就收起；轮到你等演出播完再展开，自己出手的演出播着时也不收（不来回跳） */
+  function dockAuto(o) {
+    o = o || {};
+    if (!o.phone || o.manual) return null;
+    if (!o.mine) return false;
+    return o.busy ? null : true;
+  }
+  /** 手机竖屏的排版要的 CSS 变量（online-ui.js 写在 body 上）：技能栏展开时最多多高 */
+  function phoneVars() {
+    return { "--olp-dock-max": PAPER.phone.dockMax + "dvh" };
   }
 
   /* ---------- 白天 / 夜晚 / 天气的配色（第 2 步）---------- */
@@ -534,6 +553,6 @@
     return true;
   }
 
-  return { PAPER, active, isOpen, setOpen, themeOf, themeVars, mix, rng, roughPath, facetCount, nearest2, texture, grit, dress, shellHtml, topHtml, toolsHtml, tagsHtml,
+  return { PAPER, active, isOpen, setOpen, dockAuto, phoneVars, themeOf, themeVars, mix, rng, roughPath, facetCount, nearest2, texture, grit, dress, shellHtml, topHtml, toolsHtml, tagsHtml,
     receiptLine, receiptGroups, receiptHtml, noteColor, readMoves, pressMove, readCam, pressCam };
 });

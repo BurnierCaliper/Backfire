@@ -229,6 +229,57 @@ test("换上 / 拆掉新外壳（hd2d-shell.js · attach / detach）：技能栏
   assert.equal(hud2.classList.contains("dock-closed"), false, "存不了也能点开");
 });
 
+test("页面自己收起 / 展开一块（#311：联机纸片画面的手机上轮到你时展开技能栏）：setPanel 不记在本机、和现在一样就不动；manual = 手动点过（本机记着的，或者这次点过但存不了）；没换上新外壳不报错", () => {
+  const R = rules();
+  const storage = memStorage();
+  const page = uiPage(R, { storage });
+  const S = page.w.HD2DShell, hud = page.doc.querySelector("#g-app > .g-hud");
+  assert.equal(S.saved("dock", storage), null, "没记过");
+  assert.equal(S.manual(hud, "dock"), false, "没换上新外壳：不算");
+  assert.equal(S.setPanel(hud, "dock", true), false, "没换上新外壳：不动");
+  S.attach(hud, { phone: true });
+  const btn = hud.querySelector(".hd2d-dock-toggle"), panel = hud.querySelector(".hd2d-party");
+  assert.ok(hud.classList.contains("dock-closed"), "手机没记过：收着");
+  assert.equal(S.manual(hud, "dock"), false, "还没点过");
+  assert.equal(S.setPanel(hud, "dock", true), true);
+  assert.equal(hud.classList.contains("dock-closed"), false, "页面自己展开了");
+  assert.deepEqual([btn.textContent, btn.getAttribute("aria-expanded")], ["技能 ▼", "true"], "按钮上的字、读屏跟着");
+  assert.equal(S.saved("dock", storage), null, "页面自己展开的不记在本机");
+  assert.equal(S.manual(hud, "dock"), false, "也不算手动点过");
+  let set = 0; const was = btn.setAttribute; btn.setAttribute = function () { set++; return was.apply(this, arguments); };
+  S.setPanel(hud, "dock", true);
+  btn.setAttribute = was;
+  assert.equal(set, 0, "和现在一样：不动");
+  assert.equal(S.setPanel(hud, "party", true), true);
+  assert.equal(panel.classList.contains("collapsed"), false, "队伍栏也能");
+  S.setPanel(hud, "dock", false);
+  assert.ok(hud.classList.contains("dock-closed"), "收起");
+  // 手动点一下：照旧记在本机，算手动点过
+  btn.click();
+  assert.equal(S.saved("dock", storage), "open");
+  assert.equal(S.manual(hud, "dock"), true);
+  assert.equal(S.manual(hud, "party"), false, "队伍栏没点过");
+  S.detach(hud);
+  assert.equal(S.manual(hud, "dock"), false, "拆掉了：不算");
+  assert.equal(S.setPanel(hud, "dock", false), false, "拆掉了：不动");
+  // 以前点过（本机记着）：一换上就算手动
+  S.attach(hud, { phone: true });
+  assert.equal(S.manual(hud, "dock"), true, "本机记着的：算手动");
+  assert.equal(hud.classList.contains("dock-closed"), false, "照记着的展开");
+  // 存不了（隐私模式）：这次点过也算手动
+  const broken = { getItem() { return null; }, setItem() { throw new Error("QuotaExceededError"); } };
+  const P2 = uiPage(R, { storage: broken }), S2 = P2.w.HD2DShell, hud2 = P2.doc.querySelector("#g-app > .g-hud");
+  S2.attach(hud2, { phone: true });
+  assert.equal(S2.manual(hud2, "dock"), false);
+  hud2.querySelector(".hd2d-dock-toggle").click();
+  assert.equal(S2.saved("dock", broken), null, "没存上");
+  assert.equal(S2.manual(hud2, "dock"), true, "这次点过：算手动");
+  assert.equal(S.saved("dock", { getItem() { throw new Error("SecurityError"); } }), null, "读不了：不报错");
+  assert.equal(S.saved("dock", null), null);
+  const src = code(read("hd2d/hd2d-shell.js"));
+  assert.match(fnSrc(src, "saved"), /try \{[\s\S]*storage\.getItem\(k\)[\s\S]*\} catch/, "读在 try 里");
+});
+
 /* ---------- 2. 单机 game.js ---------- */
 test("单机 game.js：开着新画面（.g-hud 换上了新外壳）时技能按钮画成原型那一套——左上角属性、右上角攻击 / 技能、轮流换颜色，唤出武器人是单独的大按钮；队伍栏是主职责头像 + 身上的效果；关着时一点没变", () => {
   const R = rules(), kolt = R.unit("kolt");

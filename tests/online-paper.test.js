@@ -36,6 +36,28 @@ test("各块的收起状态记在本机：读写都包 try/catch；没记过按�
   assert.equal(P.setOpen("drawer", true, null), false);
 });
 
+test("手机竖屏（#311）：配置表 PAPER.phone——多窄算手机（和 online-paper.css 手机那一段一样宽）、技能栏展开时最多占屏幕高度的 35%（写成 --olp-dock-max）；dockAuto：没手动点过时不是你就收起、轮到你等演出播完展开；电脑上、手动点过的不动", () => {
+  const fs = require("node:fs"), path = require("node:path");
+  const read = f => fs.readFileSync(path.join(__dirname, "..", f), "utf8");
+  assert.equal(P.PAPER.phone.media, "(max-width: 760px)");
+  assert.equal(P.PAPER.phone.dockMax, 35, "最多占屏幕高度的 35%");
+  assert.deepEqual(P.phoneVars(), { "--olp-dock-max": "35dvh" });
+  const css = read("online-paper.css"), at = css.indexOf("@media " + P.PAPER.phone.media + " {");
+  assert.ok(at > 0, "手机那一段的 @media 和配置表一样宽");
+  assert.match(css.slice(at), /\.g-hud\.hd2d-shell \{[^}]*max-height: var\(--olp-dock-max\)/, "手机上的技能栏按这个变量限高（CSS 里不另写一个数）");
+  assert.match(read("online-ui.js"), /matchMedia\(global\.OnlinePaper\.PAPER\.phone\.media\)/, "online-ui.js 量手机用配置表里那一条");
+  const A = o => P.dockAuto(Object.assign({ phone: true, manual: false, mine: false, busy: false }, o));
+  assert.equal(A({}), false, "手机上不是你：收起（战场让出来）");
+  assert.equal(A({ busy: true }), false, "不是你：演出播着也收起");
+  assert.equal(A({ mine: true }), true, "轮到你：展开");
+  assert.equal(A({ mine: true, busy: true }), null, "轮到你但演出还在播：不动（别人的演出播完才展开；自己出手的演出播着时不收起来）");
+  assert.equal(A({ manual: true, mine: true }), null, "手动点过「技能 ▼ / ▲」：照本机记着的");
+  assert.equal(A({ manual: true }), null);
+  assert.equal(A({ phone: false, mine: true }), null, "电脑上不动");
+  assert.equal(A({ phone: false }), null);
+  assert.equal(P.dockAuto(), null);
+});
+
 test("顶栏：联机跑团 · 房间码（红章）· 第 N 回合 · 时间 · 天气（夜里写「夜 · 」）；右边镜头远 / 中 / 近、「工具 ▾」、「菜单」（交给暂停页面）", () => {
   const h = P.topHtml({ room: "SA3X7C", turnNo: 3, day: 2, time: "08:00", period: "上午", weather: "雷鸣", night: true,
     cams: [{ label: "远", on: true }, { label: "中" }, { label: "近" }] });

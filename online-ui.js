@@ -872,11 +872,13 @@
       paperTheme = th;
       if (key === paperThemeKey) return;
       const b = document.body, vars = th ? global.OnlinePaper.themeVars(th) : {};
-      if (paperThemeKey) { Object.keys(global.OnlinePaper.themeVars({ time: "day" })).forEach(k => b.style.removeProperty(k)); b.style.removeProperty("--olp-grit"); }
+      const phone = global.OnlinePaper.phoneVars();   // 手机竖屏的技能栏最多多高（#311）
+      if (paperThemeKey) { Object.keys(global.OnlinePaper.themeVars({ time: "day" })).concat(Object.keys(phone)).forEach(k => b.style.removeProperty(k)); b.style.removeProperty("--olp-grit"); }
       paperThemeKey = key;
       if (!th) { delete b.dataset.olpTime; delete b.dataset.olpWeather; b.style.removeProperty("--olp-dock-h"); return; }
       b.dataset.olpTime = th.time; b.dataset.olpWeather = th.weather;
       Object.keys(vars).forEach(k => b.style.setProperty(k, vars[k]));
+      Object.keys(phone).forEach(k => b.style.setProperty(k, phone[k]));
       const grit = global.OnlinePaper.grit(document);   // 印章、喷漆的斑驳（只一点点）
       if (grit) b.style.setProperty("--olp-grit", `url("${grit}")`);
     }
@@ -914,7 +916,8 @@
       want.forEach(n => paperWatch.observe(n, n.classList.contains("hd2d-cam") ? { subtree: true, attributes: true, attributeFilter: ["class"] }
         : { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["class", "disabled", "hidden"] }));
     }
-    /** 纸片画面：队伍栏下面接「角色资料 / 武器 / 背包」（原来舞台顶上那一排里的三个，同一个画法、同一个处理），技能栏那一行写「轮到你了」；不是纸片画面就拿掉 */
+    /** 纸片画面：队伍栏下面接「角色资料 / 武器 / 背包」（原来舞台顶上那一排里的三个，同一个画法、同一个处理），技能栏那一行写「轮到你了」；不是纸片画面就拿掉。
+     *  手机竖屏上技能栏没手动点过时，轮到你才展开（#311） */
     function paintPaperHud(el) {
       const panel = el.querySelector(".g-hud > .hd2d-party"), row = el.querySelector(".g-hud > .hd2d-dock-row");
       let tools = el.querySelector(".olp-party-tools"), turn = el.querySelector(".olp-turn");
@@ -928,6 +931,17 @@
       const mine = isMyTurn() && !animating;
       if (row && mine && !turn) { turn = document.createElement("span"); turn.className = "olp-turn olp-stamp"; turn.textContent = global.OnlinePaper.PAPER.text.yourTurn; row.appendChild(turn); }
       else if (turn && (!mine || !row)) turn.remove();
+      // 手机竖屏（#311）：技能栏没手动点过「技能 ▼ / ▲」时，轮到你（演出播完）展开、不是你就收起，让出战场（online-paper.js · dockAuto；不记在本机）；
+      // 手动点过的照本机记着的（hd2d-shell.js · manual）。电脑上不动
+      const SH = global.HD2DShell, hud = el.querySelector(".g-hud");
+      if (SH && SH.setPanel && hud && SH.on(hud)) {
+        const want = global.OnlinePaper.dockAuto({ phone: paperPhone(), manual: SH.manual(hud, "dock"), mine: isMyTurn(), busy: animating });
+        if (want != null) SH.setPanel(hud, "dock", want);
+      }
+    }
+    /** 这一刻算不算手机竖屏（online-paper.js · PAPER.phone.media，和 online-paper.css 手机那一段一样宽） */
+    function paperPhone() {
+      try { return !!(global.matchMedia && global.matchMedia(global.OnlinePaper.PAPER.phone.media).matches); } catch (e) { return false; }
     }
     /** 联机跑团的时钟行：和主持人顶栏同一句（party-cards.js · clockHtml，含「距上次长休」和力竭提示） */
     function clockLine() {
