@@ -701,7 +701,7 @@
       if (screen === "lobby" || !data) return '<div class="ol-wait"><h2>等待房间同步</h2><p>房主准备好后会更新这里。</p></div>';
       if (view.packet?.mode === "rogue" && view.packet.rogue && screen === "exploration") return rogueMarkup(view.packet.rogue);
       const units = (data.units || []).filter(u => !u.hidden), logs = view.packet?.publicLogs || [];
-      return `<header class="ol-stage-heading"><div><span class="ol-muted">${esc(view.roomCode)} · ${screen === "battle" ? `第 ${data.turnNo || 1} 回合` : screen === "ended" ? "遭遇结束" : "探索环节"}</span>${screen === "battle" && global.Chain && data.chainStatus ? `<div class="ol-chain">${global.Chain.barHtml(data.chainStatus)}</div>` : ""}<h1>${screen === "battle" ? "战场" : screen === "ended" ? "战斗结算" : "与队伍同行"}</h1>${clockLine()}<div class="ol-info-tools">${global.WorldMap ? button("地图", "map") : ""}${screen === "battle" && matchupOf() ? button("克制表", "matchup") : ""}${button("角色资料", "info", 'data-info="sheet"', pending)}${button("武器", "info", 'data-info="armory"', pending)}${button("背包", "info", 'data-info="bag" title="队伍的全部道具（材料、消耗品、改装件…）"')}${button("战绩", "info", 'data-info="record"', pending)}${suppliesButton()}${view.packet?.mode !== "rogue" ? button(`任务日志${questList().some(q => q.status === "active") ? ` · ${questList().filter(q => q.status === "active").length}` : ""}`, "quests") : ""}${loreButton()}</div></div>${weatherMarkup(data)}</header>${screen === "ended" ? resultMarkup() : ""}${checksMarkup(screen === "battle")}${screen === "battle" || screen === "ended" ? '<div class="ol-battle-slot"></div>' : `<p class="ol-muted ol-explore-hint">主持人正在管理探索与遭遇。右侧「小队」频道可以和大家聊天，「消息与成员」里可以私下回复主持人。</p>${partyMarkup(units)}`}`;
+      return `<header class="ol-stage-heading"><div><span class="ol-muted">${esc(view.roomCode)} · ${screen === "battle" ? `第 ${data.turnNo || 1} 回合` : screen === "ended" ? "遭遇结束" : "探索环节"}</span>${screen === "battle" && global.Chain && data.chainStatus ? `<div class="ol-chain">${global.Chain.barHtml(data.chainStatus)}</div>` : ""}<h1>${screen === "battle" ? "战场" : screen === "ended" ? "战斗结算" : "与队伍同行"}</h1>${clockLine()}<div class="ol-info-tools">${global.WorldMap ? button("地图", "map") : ""}${screen === "battle" && matchupOf() ? button("克制表", "matchup") : ""}${button("角色资料", "info", 'data-info="sheet"', pending)}${button("武器", "info", 'data-info="armory"', pending)}${button("背包", "info", 'data-info="bag" title="队伍的全部道具（材料、消耗品、改装件…）"')}${button("战绩", "info", 'data-info="record"', pending)}${suppliesButton()}${view.packet?.mode !== "rogue" ? button(`任务日志${questList().some(q => q.status === "active") ? ` · ${questList().filter(q => q.status === "active").length}` : ""}`, "quests") : ""}${loreButton()}${(screen === "battle" || screen === "ended") && global.HD2DField ? '<span class="ol-hd2d-slot"></span>' : ""}</div></div>${weatherMarkup(data)}</header>${screen === "ended" ? resultMarkup() : ""}${checksMarkup(screen === "battle")}${screen === "battle" || screen === "ended" ? '<div class="ol-battle-slot"></div>' : `<p class="ol-muted ol-explore-hint">主持人正在管理探索与遭遇。右侧「小队」频道可以和大家聊天，「消息与成员」里可以私下回复主持人。</p>${partyMarkup(units)}`}`;
     }
     /** 联机跑团的时钟行：和主持人顶栏同一句（party-cards.js · clockHtml，含「距上次长休」和力竭提示） */
     function clockLine() {
@@ -1130,6 +1130,7 @@
       renderSide();
       mountHostChat();
       if (!stage.hidden) paintStage();
+      else paintField3d(null);
       paintSupplies();
       if (checkReq) checkReq.sync();
       if (loreUi) loreUi.sync();
@@ -1160,11 +1161,13 @@
       stage.classList.toggle("is-night", night); document.body.classList.toggle("ol-night", night);
       html(stage, `${notice || view.notice || view.packet?.systemNotice ? `<p class="ol-notice" role="status">${esc(notice || view.notice || view.packet?.systemNotice)}</p>` : ""}${stageMarkup()}`, "stage");
       const slot = stage.querySelector(".ol-battle-slot");
-      if (!slot) return;
+      if (!slot) { paintField3d(null); return; }
       const b = battleView();
       if (!b) return;
       if (b.el.parentElement !== slot) slot.appendChild(b.el);
-      b.update(displayState || view.state || {}, battleUi());
+      const ui = battleUi();
+      b.update(displayState || view.state || {}, ui);
+      paintField3d(ui);   // 新画面（HD-2D，#289）：开着就跟着这一包重排；关着只把开关挪过来
       if (stage.scrollTop !== top) stage.scrollTop = top;
       // 战斗中舞台本身不滚动，是战场自己滚动：同样放回原处
       if (fieldEl && fieldEl.isConnected && fieldEl.scrollTop !== fieldTop) fieldEl.scrollTop = fieldTop;
@@ -1201,7 +1204,11 @@
     }
     function battleView() {
       if (battle || !global.OnlineBattle) return battle;
-      battle = global.OnlineBattle.create({
+      battle = global.OnlineBattle.create(battleCb);
+      return battle;
+    }
+    /** 战场上的点选：旧画面的单位卡 / 区（online-battle.js）、新画面的铭牌 / 地台（hd2d/hd2d-field.js，#289）都走这一份，规则和预演都问主机 */
+    const battleCb = {
         onSkill: id => { if (!isMyTurn() || disabled()) return; menu({ actor: hs().currentUnitId, skill: id }); },
         onOption: index => { if (disabled()) return; if (fieldAsk()) { answerField(index); return; } choose(index); },
         onUnit: id => {
@@ -1222,8 +1229,72 @@
         },
         onCancel: () => { if (fieldAsk()) return; if (request?.skill && !disabled()) menu({ actor: request.actor }); },
         onEnd: async () => { if (!isMyTurn() || disabled()) return; const actor = hs().currentUnitId; if (!(await endTurnOk(actor))) return; if (await call(() => api.submit({ type: "endTurn", actor }))) { request = currentMenu = null; } }
-      });
-      return battle;
+    };
+    /* ---------- 新画面（HD-2D，#289）----------
+     * 开关、云雾转场、镜头、场景都是 hd2d/hd2d-field.js 那一份：舞台上有战斗画面就 attach 过去（开关 #g-hd2d-toggle 挪到舞台顶上的工具栏，同一个按钮），
+     * 离开战斗 / 离开房间 detach（开关放回单机的顶栏）。画面只用收到的包（displayState / view.state：online-view.js 的白名单投影过的，packetView），不碰房主的 state；
+     * 点铭牌 / 地台走旧战场同样的回调（battleCb），悬停铭牌弹旧画面同样的单位说明（unitTip）；演出中点战场 = 跳过。
+     * 开关只记在这台电脑上（localStorage），镜头是自己的，都不发给别人（不经过 api） */
+    let field3d = null;
+    const hover3d = { unit: null, zone: null };
+    const hd2dSpec = {
+      field: () => (battle ? battle.el.querySelector(".g-field") : null),
+      app: () => (battle ? battle.el : null),
+      view: () => global.HD2DField.packetView(displayState || view.state || null, { OB: global.OnlineBattle, OV: global.OnlineView }),
+      input: {
+        unit: id => { if (animating) { skip3d(); return; } battleCb.onUnit(id); },
+        hover: (id, on, el) => {
+          hover3d.unit = on ? String(id) : null;
+          marks3d();
+          const T = global.UnitTip;
+          if (!T) return;
+          if (!on || (global.matchMedia && global.matchMedia("(hover: none)").matches)) { T.hide(); return; }
+          const key = String(id), h = el ? unitTip({ dataset: key.indexOf("prop:") === 0 ? { propId: key.slice(5) } : { unitId: key } }) : "";
+          if (h) T.show(el, h); else T.hide();
+        },
+        zone: z => { if (animating) { skip3d(); return; } if (z != null) battleCb.onZone(z); },
+        zoneHover: (z, on) => { hover3d.zone = on ? Number(z) : null; marks3d(); }
+      },
+      // 演出倍率：和旧画面的攻击演出（attack-fx.js）同一个钟（game.js 开页面时交给 AttackFx 的「演出 1× / 2×」）；这台机器上没有就按 1
+      clock: () => { try { const G = global.GAME; return G && typeof G.fxClock === "function" ? G.fxClock() : 1; } catch (_) { return 1; } },
+      refresh: () => setTimeout(() => { if (!destroyed) render(); }, 0),
+      hint: msg => { notice = msg; setTimeout(() => { if (!destroyed) render(); }, 0); },
+      slot: () => stage.querySelector(".ol-hd2d-slot")
+    };
+    const skip3d = () => { if (field3d) field3d.skip(); };
+    /** 选目标 / 选区的标记（和 online-battle.js 画单位卡、区的 is-targetable / is-dim / is-move-target 同一个判断：这一步菜单里能选的） */
+    function marksOf3d(ui) {
+      const m = ui.menu, ok = o => !o.disabled && o.value != null && o.value !== "";
+      const unit = !!(m && m.kind === "unit"), zone = !!(m && m.kind === "zone");
+      return { pick: unit, targets: unit ? (m.options || []).filter(ok).map(o => String(o.value)) : [], hover: hover3d.unit,
+        zones: zone ? (m.options || []).filter(ok).map(o => Number(o.value)) : [], hoverZone: hover3d.zone };
+    }
+    function marks3d() { if (field3d) field3d.marks(marksOf3d(battleUi())); }
+    /** 新画面跟着舞台：有战斗画面就挂上去，跟着这一包重排、谁在行动、选目标的标记；没有就拆下来 */
+    function paintField3d(ui) {
+      const F = global.HD2DField;
+      if (!F || typeof F.attach !== "function") return;
+      if (!ui || !battle) {
+        if (field3d) { F.detach(hd2dSpec); field3d = null; hover3d.unit = hover3d.zone = null; }
+        return;
+      }
+      field3d = F.attach(hd2dSpec);
+      if (!field3d) return;
+      field3d.actor(ui.acting ? ui.current || null : null);
+      field3d.marks(marksOf3d(ui));
+      field3d.view();
+    }
+    /** 新画面开着时播一个行动包（hd2d-play.js，和原型页同一份）：出招前的画面留着，第一下打中时换成包里的 state（铭牌的血条跟着掉），播完回到这一包 */
+    async function play3d(packet, generation) {
+      const before = displayState || null;
+      animating = true; render();
+      try {
+        await field3d.play(packet, {
+          before, bigHit: typeof global.bigHitInfo === "function" ? global.bigHitInfo : null,
+          onImpact: () => { if (destroyed || generation !== playbackGeneration) return; displayState = packet.state || displayState; render(); }
+        });
+      } catch (_) { /* 画坏了不影响结算 */ }
+      finally { if (generation === playbackGeneration) { animating = false; displayState = packet.state || displayState; render(); } }
     }
     /** 结束行动前：这个单位还有行动点或附赠没用就先问一句（防止误触） */
     async function endTurnOk(actor) {
@@ -1427,10 +1498,13 @@
         historyRows = []; historyHasMore = true; historyLoading = false; historyGeneration++;
         seenMessages = new Set(); messagesInitialized = false; clearTimeout(toastTimer); toast.hidden = true;
         lobbySeen = null;   // 重新同步带来的大厅聊天记录不算新消息
+        skip3d();           // 新画面正在播的立刻结束（#289；关着什么都不做）
         displayState = packet.state || null; animating = false; return;
       }
       const tape = packet.tape || [];
       if (!tape.length) return;
+      // 新画面（HD-2D）开着：整包交给 hd2d/hd2d-field.js · play（纸片风数字、纸片感、推镜头，#289）；关着照旧走下面的旧画面
+      if (field3d && field3d.on()) { await play3d(packet, generation); return; }
       animating = true; render();
       const held = [];   // 这一段演完之前留在场上的被打倒的敌人（卡片 + 红叉），演完一起淡出
       let zoomed = false;
@@ -1672,7 +1746,7 @@
     if (typeof api.onPacket === "function") unsubs.push(api.onPacket(playPacket));
     render();
     const instance = { render, open(which = "join") { entry = which; panelOpen = true; render(); }, destroy() {
-      destroyed = true; closeMyBag(); if (checkReq) { checkReq.destroy(); checkReq = null; } if (loreUi) { loreUi.destroy(); loreUi = null; } if (battle) { battle.destroy(); battle = null; } playbackGeneration++; actionGeneration++; historyGeneration++; clearTimeout(toastTimer);
+      destroyed = true; closeMyBag(); if (checkReq) { checkReq.destroy(); checkReq = null; } if (loreUi) { loreUi.destroy(); loreUi = null; } paintField3d(null); if (battle) { battle.destroy(); battle = null; } playbackGeneration++; actionGeneration++; historyGeneration++; clearTimeout(toastTimer);
       document.removeEventListener("compositionstart", onCompStart, true); document.removeEventListener("compositionend", onCompEnd, true);
       document.removeEventListener("click", onRollOpen); document.removeEventListener("scroll", onListScroll, true); clearTimeout(titleTimer);
       while (hostMounts.length) hostMounts.pop().remove(); document.body.classList.remove("ol-has-side", "ol-host-online", "ol-in-battle");

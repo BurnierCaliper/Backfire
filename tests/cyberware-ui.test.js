@@ -15,6 +15,8 @@ function setup(opt) {
   opt = opt || {};
   const c = H.load();
   vm.runInContext(read("cyberware-ui.js"), c, { filename: "cyberware-ui.js" });
+  // official: false = 先清掉正式目录（#262 起正式目录不再是空的），只看示例 / 空目录的画面
+  if (opt.official === false) vm.runInContext("Object.keys(CYBERWARE).forEach(k => { delete CYBERWARE[k]; })", c);
   if (opt.examples !== false) vm.runInContext("cyberwareLoadExamples()", c);
   const run = c.Rogue.newRun({ party: ["kolt", "helu"], seed: "CWUI" });
   run.stage = "camp";
@@ -57,7 +59,7 @@ test("目录：示例出现在可安装列表，有价格、说明、安装后�
 });
 
 test("空目录：显示「暂无可安装的义体」", () => {
-  const { U, model } = setup({ examples: false });
+  const { U, model } = setup({ official: false, examples: false });
   const html = U.html(model());
   assert.match(html, /暂无可安装的义体/);
   noShp(html);
@@ -105,7 +107,7 @@ test("过度安装：只有能过度安装时才能确认，并醒目显示「�
 });
 
 test("已安装：列表 + 拆除按钮写拆除费；拆除可逆", () => {
-  const { c, run, U, model } = setup();
+  const { c, run, U, model } = setup({ official: false });
   c.Rogue.installCyberware(run, "kolt", "example_t5_melee");
   const html = U.html(model());
   assert.match(html, /cw-row on[\s\S]*【示例】5级近战攻击义体[\s\S]*拆除<small>1000 奎支<\/small>/);

@@ -1,7 +1,8 @@
-/* Antlerscale: Backfire · 图鉴（界面）：角色 / 专长 / 敌人 / 配置物 / 效果
+/* Antlerscale: Backfire · 图鉴（界面）：角色 / 专长 / 义体 / 敌人 / 配置物 / 效果
  * Bestiary.open(opt) 打开全屏图鉴。opt.partySize：按几人队算血量（默认 4，界面上可以切）；
- * opt.mode：先打开哪一本（"enemy" 默认 / "hero" / "feat" / "prop" / "effect"）。
- * 配置物、效果图鉴是规则说明（数据在 codex.js），一直都能查，可以按分类筛、按关键词搜。
+ * opt.mode：先打开哪一本（"enemy" 默认 / "hero" / "feat" / "cyber" / "prop" / "effect"）。
+ * 配置物、效果、义体图鉴是规则说明（数据在 codex.js），一直都能查，可以按分类筛、按关键词搜。
+ * 义体图鉴只写固定的规则（可以写坚毅生命的具体消耗），不显示任何角色当前的坚毅生命。
  * 左边是卡片墙（按 杂兵 / 精英 / 首领 筛），右边是选中敌人的详情：
  *   遭遇过 → 行动方式、能力、按等级和人数现算的血量 / 架势 / atk、遭遇记录；
  *   没遭遇过 → 「？？？」，只看得到阵营和出没区域。数据在 bestiary.js。 */
@@ -11,9 +12,9 @@ const Bestiary = (() => {
   const RANGE = { melee: "近距离", ranged: "远距离", any: "远近皆可" };
   let root = null, filter = "all", sel = null, lv = null, party = 4, sub = "";
   let mode = "enemy", query = "";
-  const MODES = [["hero", "角色"], ["feat", "专长"], ["enemy", "敌人"], ["prop", "配置物"], ["effect", "效果"]];
+  const MODES = [["hero", "角色"], ["feat", "专长"], ["cyber", "义体"], ["enemy", "敌人"], ["prop", "配置物"], ["effect", "效果"]];
   let heroLv = 1;   // 角色图鉴：查看哪个等级的技能（默认 1 级，点别的等级才显示后面的技能，免得剧透）
-  const codexSel = { hero: null, feat: null, prop: null, effect: null }, codexFilter = { hero: "all", feat: "all", prop: "all", effect: "all" };
+  const codexSel = { hero: null, feat: null, cyber: null, prop: null, effect: null }, codexFilter = { hero: "all", feat: "all", cyber: "all", prop: "all", effect: "all" };
 
   function build() {
     root = document.createElement("div");
@@ -215,12 +216,15 @@ const Bestiary = (() => {
     if (mode === "hero") return typeof codexHeroEntries === "function" ? codexHeroEntries() : [];
     if (mode === "prop") return typeof codexPropEntries === "function" ? codexPropEntries() : [];
     if (mode === "feat") return typeof codexFeatEntries === "function" ? codexFeatEntries() : [];
+    if (mode === "cyber") return typeof codexCyberwareEntries === "function" ? codexCyberwareEntries() : [];
     return typeof codexEffectEntries === "function" ? codexEffectEntries() : [];
   }
   function codexTabs() {
     if (mode === "hero") return [["all", "全部"], ["easy", "入门 ★1–2"], ["mid", "进阶 ★3"], ["hard", "高手 ★4–5"]];
     if (mode === "prop") return PROP_TABS;
     if (mode === "feat") return [["all", "全部"], ["t1", "①7级"], ["t2", "②11级"], ["t3", "③13级"], ["t4", "④16级"]];
+    // 义体：按种类分（codex.js · codexCyberwareGroups，加了新种类自动多一个标签）
+    if (mode === "cyber") return [["all", "全部"]].concat((typeof codexCyberwareGroups === "function" ? codexCyberwareGroups() : []).map(g => [g.id, g.name]));
     return [["all", "全部"]].concat((typeof CODEX_EFFECT_GROUPS !== "undefined" ? CODEX_EFFECT_GROUPS : []).map(g => [g.id, g.name]));
   }
   function renderCodex() {
@@ -229,7 +233,7 @@ const Bestiary = (() => {
     const matched = all.filter(e => typeof codexMatch !== "function" || codexMatch(e, query));
     root.querySelector(".bx-prog-text").innerHTML = query.trim()
       ? `搜到 <b>${matched.length}</b> 条`
-      : `共 <b>${all.length}</b> ${mode === "hero" ? "名角色" : mode === "feat" ? "项专长" : mode === "prop" ? "种配置物" : "条效果"}`;
+      : `共 <b>${all.length}</b> ${mode === "hero" ? "名角色" : mode === "feat" ? "项专长" : mode === "cyber" ? "件义体" : mode === "prop" ? "种配置物" : "条效果"}`;
     root.querySelector(".bx-tabs").innerHTML = codexTabs().map(([k, n]) => {
       const c = k === "all" ? matched.length : matched.filter(e => e.group === k).length;
       return `<button class="bx-tab${f === k ? " on" : ""}" data-filter="${k}">${esc(n)}<small>${c}</small></button>`;
@@ -247,13 +251,13 @@ const Bestiary = (() => {
       return;
     }
     root.querySelector(".bx-grid").innerHTML = shown.map(e => {
-      const kicker = mode === "prop" ? (e.source ? "技能产物" : e.place) : mode === "feat" ? `专长 · ${e.kindName}` : e.groupName;
+      const kicker = mode === "prop" ? (e.source ? "技能产物" : e.place) : mode === "feat" ? `专长 · ${e.kindName}` : mode === "cyber" ? `${e.kindName} · ${e.tier} 级` : e.groupName;
       const el = e.element || null;
       return `<button class="bx-card cx seen${el ? " e-" + esc(el) : ""}${key(e) === codexSel[mode] ? " sel" : ""}" data-cx="${esc(key(e))}">
         <span class="bx-rank">${esc(kicker)}</span>
         ${el ? `<span class="bx-sigil e-${esc(el)}">${eleIcon(el)}</span>` : ""}
         <b class="bx-name">${esc(e.name)}</b>
-        <small>${esc(codexBlurb(e))}</small>
+        <small>${esc(mode === "cyber" && e.short ? e.short : codexBlurb(e))}</small>
       </button>`;
     }).join("") || `<p class="bx-empty">${query.trim() ? "没有符合搜索的条目。" : "这一类还没有条目。"}</p>`;
     renderCodexDetail(shown.find(e => key(e) === codexSel[mode]) || null);
@@ -356,10 +360,30 @@ const Bestiary = (() => {
         <p class="bx-note">${esc(e.level ? `${e.level} 级起可以选（选专长时可以选本级或更低级的）。` : "")}这是专长，不是同名的技能 / 配置物 / 效果。</p>
       </div>`;
   }
+  /** 义体详情：种类、等级、效果、改造率、坚毅生命的消耗（固定的规则文字）、诊所（价格、拆除、以新换旧）。
+   *  数据都来自 codex.js · codexCyberwareEntries，不读任何角色，所以也不会显示谁现在还剩多少坚毅生命 */
+  function renderCyberDetail(e) {
+    const box = root.querySelector(".bx-detail");
+    const chips = [`<span class="bx-chip">${esc(e.tier)} 级 · .vol${esc(e.vol)}</span>`, `<span class="bx-chip">${esc(e.kindName)}</span>`];
+    if (e.element) chips.push(`<span class="bx-chip e-${esc(e.element)}">${eleIcon(e.element)}${esc(typeof ELE !== "undefined" ? ELE[e.element] : e.element)}属性</span>`);
+    (e.tags || []).forEach(t => chips.push(`<span class="bx-chip dim">${esc(t)}</span>`));
+    const sec = (title, list) => (list || []).length ? `<section class="bx-sec"><div class="bx-sec-h"><span>${esc(title)}</span></div><ul class="bx-abil">${list.map(a => `<li>${esc(a)}</li>`).join("")}</ul></section>` : "";
+    box.innerHTML = `<div class="bx-d">
+        <div class="bx-kicker">义体 · ${esc(e.kindName)} · ${esc(e.tier)} 级</div>
+        <h4>${esc(e.name)}</h4>
+        <div class="bx-chips">${chips.join("")}</div>
+        ${sec("效果", (e.effect || []).concat(e.use ? [e.use] : []))}
+        ${sec("改造率", e.rate ? [e.rate] : [])}
+        ${sec("坚毅生命", e.grit)}
+        ${sec("诊所", e.clinic)}
+        <p class="bx-note">这是义体，不是同名的专长 / 技能。这里只写固定的规则，不显示任何角色现在的状态。</p>
+      </div>`;
+  }
   function renderCodexDetail(e) {
     const box = root.querySelector(".bx-detail");
     if (!e) { box.innerHTML = ""; return; }
     if (mode === "feat") { renderFeatDetail(e); return; }
+    if (mode === "cyber") { renderCyberDetail(e); return; }
     const chips = [];
     if (e.element) chips.push(`<span class="bx-chip e-${esc(e.element)}">${eleIcon(e.element)}${esc(typeof ELE !== "undefined" ? ELE[e.element] : e.element)}属性</span>`);
     if (mode === "prop") {

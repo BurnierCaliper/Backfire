@@ -52,6 +52,12 @@ const Rogue = (function () {
   const defaultRegion = (act) => C.regions[(act - 1) % C.regions.length];
   const region = (run) => (!run.growth && run.regionPick && run.regionPick[run.act]) || defaultRegion(run.growth ? growthAct(run) : run.act);
   const daysLeft = (run) => Math.max(0, C.daysPerAct - (run.actDay || 0));
+  /* 下水道（docs/ratfolk.md 第 6 节，rogue-data.js · ROGUE_CONFIG.sewer）：有下水道地图时幕间多一个「下水道」，选了用掉地图，一局只能进一次 */
+  const SEWER = () => C.sewer || { region: "下水道", item: "map_sewer" };
+  /** 这一局进过下水道没有：幕间选过就记在 run.regionPick 里 */
+  const sewerEntered = (run) => Object.values(run.regionPick || {}).indexOf(SEWER().region) >= 0;
+  /** 现在幕间能不能改走下水道：背包里有地图（联机：队里任何一个人名下有，或者公用的），这一局还没进过。长线养成没有幕间 */
+  const canEnterSewer = (run) => !run.growth && !!ITEM_CATALOG[SEWER().item] && bagCount(SEWER().item) > 0 && !sewerEntered(run);
   /* ---------- 长线养成（rogue-data.js · ROGUE_GROWTH） ---------- */
   const G = () => (typeof ROGUE_GROWTH !== "undefined" ? ROGUE_GROWTH : { startParty: 2, partyMax: 4, fusionPerTask: 1, drawCost: 1, recruitLevel: 1, maxLevel: 20, fusionItem: "heart_fusion" });
   let growthOn = false;   // 当前载入的是长线养成：经验照跑团模式（growth.js · grantXpToPlayers、app.js 战斗结算看这个）
@@ -1589,10 +1595,10 @@ const Rogue = (function () {
     if (!canClinic(run)) throw new Error("这里没有诊所");
     const { h, u } = cyberwareUnit(run, kit);
     const purse = { kuizhi: Number(state.kuizhi) || 0 };
-    const pv = cyberwareInstall(u, id, purse);
+    const pv = cyberwareInstall(u, id, purse);   // 同系列装着另一件时一起拆掉（以新换旧）
     state.kuizhi = purse.kuizhi;
     h.cyberware = (u.cyberware || []).map(x => ({ id: x.id }));
-    return logAll(run, [`${heroName(kit)} 安装了义体「${pv.name}」，花掉 ${pv.cost} 奎支。${pv.warning || ""}`]);
+    return logAll(run, [cyberwareInstallNote(heroName(kit), pv)]);
   }
   function removeCyberware(run, kit, id) {
     if (!canClinic(run)) throw new Error("这里没有诊所");
@@ -1630,20 +1636,29 @@ const Rogue = (function () {
     const node = currentNode(run);
     return !!(node && node.type === "shop") || (run.stage === "camp" && !!C.campShop);
   }
+  /** 地图这家店进不进：下水道地图在这一局进过下水道以后用不上了；长线养成没有幕间，也用不上 */
+  function mapStockable(run, row) {
+    if (run.growth) return false;
+    return !(row.give.item === SEWER().item && sewerEntered(run));
+  }
   /** 这家商店的货架：水和食物一定有，其余商品随机 randomCount 种（同一家店看几次都一样，换一家重新进货） */
   function shopPlace(run) { return run.stage === "camp" ? `c${run.act}.${run.taskNo}` : partPlace(run); }
   function shopStock(run) {
     const place = shopPlace(run);
     if (!run.shopStock || run.shopStock.place !== place) {
       const n = (typeof ROGUE_SHOP_RULES !== "undefined" && ROGUE_SHOP_RULES.randomCount) || 8;
-      const pool = ROGUE_SHOP.filter(r => !r.always && !r.effect).map(r => r.key);
+      const pool = ROGUE_SHOP.filter(r => !r.always && !r.effect && !r.map).map(r => r.key);
       const fxPool = ROGUE_SHOP.filter(r => r.effect).map(r => r.key);
       const fxN = (typeof ROGUE_SHOP_RULES !== "undefined" && ROGUE_SHOP_RULES.effectCount) || 0;
       const draw = (list, k) => { const left = list.slice(), out = []; while (out.length < k && left.length) out.push(left.splice(Math.floor(Math.random() * left.length), 1)[0]); return out; };
       const picked = withRng(`${run.seed}:shop:${place}`, () => draw(pool, n));
       // 效果道具另用一条随机流抽：加了它们以后，原来那 8 种商品的进货不变
       const fxPicked = withRng(`${run.seed}:shopfx:${place}`, () => draw(fxPool, fxN));
-      run.shopStock = { place, keys: ROGUE_SHOP.filter(r => r.always).map(r => r.key).concat(pool.filter(k => picked.includes(k)), fxPool.filter(k => fxPicked.includes(k))) };
+      // 地图（下水道地图）也另用一条随机流：每家按 mapChance 的概率进一张；用不上的（进过下水道、长线养成）不进
+      const mapN = (typeof ROGUE_SHOP_RULES !== "undefined" && ROGUE_SHOP_RULES.mapChance) || 0;
+      const mapPool = ROGUE_SHOP.filter(r => r.map && mapStockable(run, r)).map(r => r.key);
+      const mapPicked = withRng(`${run.seed}:shopmap:${place}`, () => mapPool.filter(() => Math.random() < mapN));
+      run.shopStock = { place, keys: ROGUE_SHOP.filter(r => r.always).map(r => r.key).concat(pool.filter(k => picked.includes(k)), fxPool.filter(k => fxPicked.includes(k)), mapPicked) };
     }
     const rows = ROGUE_SHOP.filter(r => run.shopStock.keys.includes(r.key));
     // 长线养成：武器升级要实物材料，商店常备（价格照物品表）
@@ -2778,32 +2793,44 @@ function advanceDays(run, n) {
   }
 
   /* ---------- 幕间、额外幕、结局 ---------- */
-  /** 幕间选择：下一幕可以去哪（原本的区域，第 2–4 幕再加一个采矿场）。
-   *  [{ region, alt, desc, enemies: [名字…] }]；额外幕只有原本的区域 */
+  /** 幕间选择：下一幕可以去哪（原本的区域，第 2–4 幕再加一个采矿场；有下水道地图、这一局还没进过下水道时再加一个下水道）。
+   *  [{ region, alt, sewer, desc, enemies: [名字…] }]；额外幕没有采矿场（下水道照样有） */
   function interludeOptions(run) {
     const next = run.act + 1;
     const out = [defaultRegion(next)];
     const alt = !run.extra && C.altRegions && C.altRegions[next];
     if (alt && out.indexOf(alt) < 0) out.push(alt);
+    const sewer = canEnterSewer(run) ? SEWER().region : null;
+    if (sewer && out.indexOf(sewer) < 0) out.push(sewer);
     const places = typeof WORLD_PLACES !== "undefined" ? WORLD_PLACES : [];
     const info = typeof ENEMY_INFO !== "undefined" ? ENEMY_INFO : {};
     const names = typeof enemyPresets === "function" ? Object.fromEntries(enemyPresets().map(p => [p.id, p.name])) : {};
     return out.map((reg, i) => ({
-      region: reg, alt: i > 0, desc: ((places.find(p => p.name === reg) || {}).desc) || "",
+      region: reg, alt: i > 0, sewer: reg === sewer, desc: ((places.find(p => p.name === reg) || {}).desc) || "",
       enemies: Object.keys(info).filter(id => (info[id].regions || []).indexOf(reg) >= 0).map(id => names[id] || id)
     }));
   }
-  /** 去下一幕。pick：幕间选的区域（不给就走原本的区域） */
+  /** 去下一幕。pick：幕间选的区域（不给就走原本的区域）。选了下水道：用掉一张下水道地图 */
   function nextAct(run, pick) {
     if (run.stage !== "interlude") throw new Error("现在不是幕间");
     const opts = interludeOptions(run);
     const choice = pick ? opts.find(o => o.region === pick) : opts[0];
-    if (!choice) throw new Error("下一幕不能去这里");
+    if (!choice) throw new Error(pick === SEWER().region ? "下一幕不能去下水道：要有下水道地图，而且一局只能进一次" : "下一幕不能去这里");
     run.act += 1;
     run.regionPick = Object.assign({}, run.regionPick || {}, { [run.act]: choice.region });
-    const notes = [`进入第 ${run.act} 幕：${region(run)}${choice.alt ? "（幕间选择：改走采矿场）" : ""}。`];
+    const notes = [`进入第 ${run.act} 幕：${region(run)}${choice.sewer ? "（幕间选择：用下水道地图改走下水道）" : choice.alt ? "（幕间选择：改走采矿场）" : ""}。`];
+    if (choice.sewer) useSewerMap(run, notes);
     startAct(run);
     return logAll(run, notes);
+  }
+  /* 进下水道用掉一张下水道地图：单机从背包里扣；联机单局（online-rogue.js）由 setMapUseHook 接管——决定用谁名下的那张 */
+  let mapUseHook = null;
+  function setMapUseHook(fn) { mapUseHook = typeof fn === "function" ? fn : null; }
+  function useSewerMap(run, notes) {
+    const id = SEWER().item;
+    if (mapUseHook && mapUseHook(run, id, notes) !== false) return;
+    bagAdd(id, -1);
+    notes.push(`用掉一张${ITEM_CATALOG[id].name}（一局只能进一次下水道）。`);
   }
   /** 四幕打完：通关（结束），或者继续挑战额外幕 */
   function afterVictory(run, goOn) {
@@ -3059,6 +3086,6 @@ function advanceDays(run, n) {
     drawInfo, drawHero, swapHero, partyLevel, growthXp: () => growthOn, routeEta, growthDaily: ensureGrowthDaily, growthDailyBump,
     camp, nextAct, afterVictory, endRun,
     enterRunMode, leaveRunMode, syncWorld, save, inRunMode: () => !!stash,
-    setLootHandler, grantLoot, rollItemDrops
+    setLootHandler, grantLoot, rollItemDrops, setMapUseHook
   };
 })();

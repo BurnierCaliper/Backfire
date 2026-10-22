@@ -808,24 +808,28 @@
     const str = (v, n) => typeof v === "string" ? v.slice(0, n) : "";
     const num = v => (typeof v === "number" && isFinite(v) ? v : 0);
     const BUR = ["none", "strain", "heavy"];
-    const item = d => ({ id: str(d.id, 60), name: str(d.name, 60), tier: num(d.tier), kind: str(d.kind, 20), range: str(d.range, 10), element: str(d.element, 20),
+    // vol / line / kindName / summary：义体种类表写好的展示文字（cyberware.js · cwPublic），界面不用认得是哪一种
+    const item = d => ({ id: str(d.id, 60), name: str(d.name, 60), tier: num(d.tier), vol: num(d.vol), line: d.line ? str(d.line, 30) : null,
+      kind: str(d.kind, 20), kindName: str(d.kindName, 20), summary: str(d.summary, 120), range: str(d.range, 10), element: str(d.element, 20),
       damageText: str(d.damageText, 40), break: num(d.break), hpCut: num(d.hpCut), conflict: d.conflict ? str(d.conflict, 30) : null, example: !!d.example });
+    // 以新换旧：会先拆掉同系列的哪件、它的拆除费
+    const swap = d => ({ replaces: d.replaces ? str(d.replaces, 60) : null, replaceName: str(d.replaceName, 60), replaceCost: num(d.replaceCost) });
     const v = obj(c.view) ? c.view : {};
     const out = { kit: str(c.kit, 40), name: str(c.name, 40), view: {
       rate: num(v.rate), cap: num(v.cap), cyberwareRate: num(v.cyberwareRate), layerRate: num(v.layerRate), remainingHp: num(v.remainingHp),
       overinstall: !!v.overinstall, canOverinstall: !!v.canOverinstall, burden: BUR.includes(v.burden) ? v.burden : "none", burdenText: str(v.burdenText, 80),
       installed: arr(v.installed).slice(0, 16).filter(obj).map(d => Object.assign(item(d), { usesLeft: num(d.usesLeft), removeCost: num(d.removeCost) })) },
       shop: arr(c.shop).slice(0, 64).filter(obj).map(d => Object.assign(item(d), { price: num(d.price), text: str(d.text, 300), installed: !!d.installed,
-        canInstall: !!d.canInstall, error: d.error ? str(d.error, 80) : null, warning: str(d.warning, 80), rateAfter: num(d.rateAfter) })) };
+        canInstall: !!d.canInstall, error: d.error ? str(d.error, 80) : null, warning: str(d.warning, 80), rateAfter: num(d.rateAfter) }, swap(d))) };
     out.purse = Math.max(0, Math.floor(num(c.purse)));
     const pv = obj(c.previews) ? c.previews : {};
     out.previews = {};
     Object.keys(pv).slice(0, 64).forEach(k => {
       const p = pv[k], key = str(k, 60);
       if (!obj(p) || !key) return;
-      out.previews[key] = { ok: !!p.ok, error: p.error ? str(p.error, 80) : null, cost: num(p.cost), id: str(p.id, 60), name: str(p.name, 60), tier: num(p.tier),
+      out.previews[key] = Object.assign({ ok: !!p.ok, error: p.error ? str(p.error, 80) : null, cost: num(p.cost), price: num(p.price), id: str(p.id, 60), name: str(p.name, 60), tier: num(p.tier),
         rateBefore: num(p.rateBefore), rateAfter: num(p.rateAfter), cap: num(p.cap), overinstall: !!p.overinstall, hpCut: num(p.hpCut),
-        conflictWith: p.conflictWith ? str(p.conflictWith, 60) : null, burden: BUR.includes(p.burden) ? p.burden : "none", warning: str(p.warning, 80) };
+        conflictWith: p.conflictWith ? str(p.conflictWith, 60) : null, burden: BUR.includes(p.burden) ? p.burden : "none", warning: str(p.warning, 80) }, swap(p));
     });
     return scrubHidden(out);
   }

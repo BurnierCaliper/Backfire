@@ -46,8 +46,10 @@
     ]
   };
   window.GAME = G;
-  // 攻击演出（attack-fx.js）的时间跟着「演出 2×」、协助攻击的慢放和「点击跳过」走
-  if (window.AttackFx) AttackFx.setClock(() => (G.skip || G.instant ? 0 : (G.fast ? 0.5 : 1) * (G.slow || 1)));
+  // 攻击演出（attack-fx.js）的时间跟着「演出 2×」、协助攻击的慢放和「点击跳过」走；
+  // 新画面（HD-2D）的纸片风数字、纸片感、推镜头用同一个钟（hd2d/hd2d-field.js 打开时交给 hd2d-play.js，#283）
+  G.fxClock = () => (G.skip || G.instant ? 0 : (G.fast ? 0.5 : 1) * (G.slow || 1));
+  if (window.AttackFx) AttackFx.setClock(G.fxClock);
   const hotseat = () => window.HotseatGame && HotseatGame.isActive();
   const systemCommand = (cmd, context) => hotseat() ? HotseatGame.system(cmd, context) : dispatch(cmd, context);
 
@@ -501,7 +503,11 @@
       const q1 = popDmg(lo.tape), q2 = popDmg(hi.tape);
       if (q1 > 0 || q2 > 0) { p.dmgLo = Math.min(q1, q2); p.dmgHi = Math.max(q1, q2); }
       p.healHi = Math.max(0, -Math.min(d1, d2));
-      const shpLoss = Math.max(bs.shp - s1.shp, bs.shp - s2.shp, 0);
+      // 行动者自己付的固定消耗（发动义体扣的坚毅：规则层在事件带上记成 selfCost）不算这次行动的效果，先加回来。
+      // 起身中的人坚毅扣到 1 就扣不动：按前后差写「伤到坚毅」会露出是不是只剩 1，打不出去的目标也会被当成有效果（cyberware.js · cwTapeSelfCost）
+      const paid = (tape) => (tape || []).filter(e => e.type === "selfCost" && e.unitId === id)
+        .reduce((sum, e) => sum + Math.max(0, Number(e.shp) || 0), 0);
+      const shpLoss = Math.max(bs.shp - s1.shp - paid(lo.tape), bs.shp - s2.shp - paid(hi.tape), 0);
       p.shpLoss = bs.upOnShp || bs.dying ? shpLoss : 0;
       p.defAfterHi = Math.max(s1.def, s2.def);   // 击破较少的一侧
       p.defAfterLo = Math.min(s1.def, s2.def);
@@ -861,6 +867,23 @@
     fx().appendChild(d);
     realTimeout(() => d.remove(), (opts.dur || 0.9) * 1000 + 60);
   }
+  /** 新画面（HD-2D）开着：这一下的数字换成原型的纸片风（hd2d/hd2d-field.js · numbers → hd2d-play.js；字号、颜色、摆位、时长照 hd2d-fx.js 的 FX），
+   *  旧的 .pop / 攻击效果大字不弹。e = 演出带里的一下（治疗是快照比出来的，也拼成这样的一下）：先过联机演出带的白名单（OnlineView.projectTape，
+   *  和联机玩家收到的一样：打在坚毅生命上、濒死的那几下不给数），再按 hd2d-fx.js · numberOf 挑数字——白名单没给数就什么都不弹；
+   *  word = 演出带里没有的字（格挡）：{ kind, text, el }。关着（或者新画面的模块还没加载好）返回 false：照旧弹旧的 */
+  function paperPop(id, e, word) {
+    if (!field3d() || typeof HD2DField.numbers !== "function" || !window.HD2DFx) return false;
+    let n = word ? Object.assign({ el: "physical" }, word, { unitId: id }) : null;
+    if (e) {
+      // 白名单只看这一下挨打的人那一刻的样子（快照里只留他，不把整场的快照都投影一遍）
+      const one = Object.assign({}, e, { snap: (Array.isArray(e.snap) ? e.snap : []).filter(s => s && s.id === e.unitId) });
+      const p = window.OnlineView ? OnlineView.projectTape([one], { state })[0] : null;
+      const s = G.view.get(e.unitId);
+      n = p ? HD2DFx.numberOf(p, { level: s ? s.level : 1, bigHit: typeof bigHitInfo === "function" ? bigHitInfo : null }) : null;
+    }
+    if (n && !G.sim) HD2DField.numbers([n]);
+    return true;
+  }
   /** 单位卡上某个状态 / 效果图标生效：放大一下 + 发光（hud-icons.js） */
   function procBadge(id, key) {
     if (!key || !window.HudIcons || G.sim || G.skip) return;
@@ -1109,6 +1132,7 @@
   /** 打中的形状：第 n 段（刀光左右交替）；有专属演出的照脚本 */
   function strikeImpact(st, e, n, from, big) {
     if (!window.AttackFx || G.sim || G.skip) return;
+    if (field3d()) HD2DField.paper(e.unitId);   // 新画面：打中那一下的纸片感（attack-fx 的画布按镜头俯角压扁、地台上一道淡影子）
     const scr = st.script && AttackFx.script(st.script);
     if (scr && scr.impact) { st.ctx = st.ctx || strikeCtx(st); try { scr.impact(st.ctx, e, n, !!big); } catch (err) { console.error("[attack-fx]", err); } return; }
     AttackFx.impact(rectOf(e.unitId), st.move, { n, from, big: !!big });
@@ -1309,6 +1333,7 @@
         // 敌人倒下：卡上喷一个红叉（和路线图上走过的节点打红勾是一套），叉跟着卡一起淡掉
         if (s && !s.isPlayer && !s.isProp && window.AttackFx && !G.sim && !G.skip) {
           const track = () => rectOf(b.id);
+          if (field3d()) HD2DField.unpaper();   // 新画面：红叉要停一阵，纸片感压扁过的画布先复原（不画歪）
           if (G.koHold) { const h = AttackFx.ko(rectOf(b.id), { hold: "manual", track }); if (h) G.koHandles.push({ h, slow: !!s.killBig }); }
           else AttackFx.ko(rectOf(b.id), { hold: s.killBig ? 3200 : 1650, track });
         }
@@ -1320,7 +1345,9 @@
       if (b.kind === "heal") {
         // 加的是护盾就响护盾声，恢复生命就响治疗声
         if (window.Sfx && !G.sim) { if (b.life !== false) Sfx.ui("heal"); if (b.shield) Sfx.ui("shield"); }
-        popup(b.id, "+" + b.value, "e-heal", { size: 22 }); longest = Math.max(longest, 300);
+        // 新画面：拼成演出带里的一下治疗，过同一个白名单（濒死 / 坚毅生命上的不给数）
+        if (!paperPop(b.id, { type: "pop", kind: "heal", unitId: b.id, value: b.value, element: "physical", snap: s ? [s] : [] })) popup(b.id, "+" + b.value, "e-heal", { size: 22 });
+        longest = Math.max(longest, 300);
       }
     });
     if (longest) await wait(longest);
@@ -1470,6 +1497,10 @@
     const tank = window.AttackFx && !G.sim && !G.skip ? rasTankOf(meta, cmd) : null;
     if (tank) AttackFx.tank(rectOf(tank.id), tank.from, tank.to, { ms: tank.ms });
     const impacted = new Set();
+    // 新画面（HD-2D）：出手时镜头稍微推一下（远景 / 中景），推到位再出手（弹道才对得上铭牌）；演完拉回（hd2d-field.js · push / release）。
+    // 减少动态效果、跳过时不推
+    const pushMs = strike && field3d() && !G.sim ? HD2DField.push(strike.actorId, strike.targetId) : 0;
+    if (pushMs) { await wait(pushMs); strikeFrom = rectOf(strike.actorId); }
     const motions = [];
     if (strike) motions.push(strikeIn(strike));
     else if (lungeAtk) motions.push(lunge(meta.actorId, meta.targetId));
@@ -1487,6 +1518,7 @@
         // 协助格挡：火花在两人连线的中点；自己格挡（空手格挡、敌人格挡）：火花在格挡的人身上
         if (blockerId && a && b) AttackFx.sparks({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }); else AttackFx.clash(b);
       }
+      if (window.HD2DFx) paperPop(blockerId || meta.targetId, null, HD2DFx.parryOf(blockerId || meta.targetId));   // 新画面：再弹一个纸片风的「格挡」（和原型一样；旧画面照旧只有火花）
       await wait(90);
     }
     const firstHit = pops.find(e => e.kind === "dmg" && Number(e.value) > 0);
@@ -1567,7 +1599,7 @@
           if (mainIdx >= 0 && (pre || big) && !parried && !(instant && mainIdx > 0)) await wait(big ? 110 : 70);
           if (e.adv && !advShook) { advShook = true; advShake(); }
           comboHit(e, v);
-          popup(e.unitId, big ? v + "!" : String(v), "e-" + e.element + (big ? " big" : "") + (boom ? " boom" : ""),
+          if (!paperPop(e.unitId, e)) popup(e.unitId, big ? v + "!" : String(v), "e-" + e.element + (big ? " big" : "") + (boom ? " boom" : ""),
             { icon: e.element, size: big ? Math.round(BIG_POP_SIZE * (0.8 + 0.35 * bh.ratio)) : boom ? 46 : 30,
               dur: boom ? 2.4 : big ? BIG_POP_DUR * (0.8 + 0.45 * bh.ratio) : 1.05 });
           if (boom) await wait(160);
@@ -1580,7 +1612,7 @@
           // 伙伴登场：亮相、停一下，再冲向目标
           const pc = cards.get(e.unitId);
           if (pc) { pc.wrap.classList.remove("enter"); void pc.wrap.offsetWidth; pc.wrap.classList.add("enter"); }
-          popup(e.unitId, e.text || "支援！", "txt e-" + e.element, { dur: 1.2 });
+          if (!paperPop(e.unitId, e)) popup(e.unitId, e.text || "支援！", "txt e-" + e.element, { dur: 1.2 });
           if (window.Sfx && !G.sim) Sfx.parry();
           await wait(420);
           if (e.targetId) {
@@ -1591,7 +1623,7 @@
           }
         } else if (e.kind === "bullet") {
           // 龙哥 / 小朋友消耗子弹：头顶跳出红弹 / 蓝弹
-          popup(e.unitId, e.text || (e.element === "fire" ? "红弹" : "蓝弹"), "bullet " + (e.element === "fire" ? "b-red" : "b-blue"), { lift: 64, dur: 1.5 });
+          if (!paperPop(e.unitId, e)) popup(e.unitId, e.text || (e.element === "fire" ? "红弹" : "蓝弹"), "bullet " + (e.element === "fire" ? "b-red" : "b-blue"), { lift: 64, dur: 1.5 });
           await wait(160);
         } else if (e.kind === "proc") {
           // 效果生效（灼烧结算、自焚掉血、高能自爆……）：单位卡上对应的图标放大一下并发光，不占演出时间
@@ -1601,7 +1633,7 @@
           const key = e.unitId + "|" + e.text;
           if (!shownWords.has(key)) {
             shownWords.add(key);
-            fxWord(e.unitId, e.text, e.element, shownWords.size);
+            if (!paperPop(e.unitId, e)) fxWord(e.unitId, e.text, e.element, shownWords.size);
             await wait(110);
           }
         } else if (e.kind === "highboom") {
@@ -1623,19 +1655,22 @@
           if (window.Sfx) Sfx.boom();
           hit(e.unitId, "energy", true);
           comboHit(e, Math.floor(Number(e.value) || 0));
-          stamp(e.unitId, "高能自爆", "boom");
-          popup(e.unitId, (Math.floor(Number(e.value) || 0)) + "!", "e-energy big boom", { icon: "energy", size: BIG_POP_SIZE + 12, dur: 2.8 });
+          // 新画面：纸片风的大字「高能自爆」（hd2d-fx.js · numberOf，和原型一样）代替盖章和大号数字
+          if (!paperPop(e.unitId, e)) {
+            stamp(e.unitId, "高能自爆", "boom");
+            popup(e.unitId, (Math.floor(Number(e.value) || 0)) + "!", "e-energy big boom", { icon: "energy", size: BIG_POP_SIZE + 12, dur: 2.8 });
+          }
           await playBeats(beatsBefore.filter(b => b.kind !== "stun"));
           await wait(chain ? 380 : 520);
         } else if (e.kind === "break") {
           // 只打击破的那一下（二次盾突……）：有专属演出的先演出手
           if (scr && scr.brk && strike && !G.skip) { strike.ctx = strike.ctx || strikeCtx(strike); await runScript(scr.brk, strike.ctx, e); }
-          popup(e.unitId, "击破 " + e.value, "brk", { below: true, dur: 1.05 });
+          if (!paperPop(e.unitId, e)) popup(e.unitId, "击破 " + e.value, "brk", { below: true, dur: 1.05 });
           deferStun(beatsBefore); await playBeats(beatsBefore.filter(b => b.kind !== "stun"));
           await wait(chain ? 40 : 55);
         } else {
           if (e.kind === "status" && e.text && window.Sfx && !G.sim) Sfx.ui(/振奋|坚固|坚挺|优势|躲藏|护盾|铁壁|免疫/.test(e.text) ? "shield" : /无效|打不动|触发/.test(e.text) ? "" : "debuff");
-          if (e.text) popup(e.unitId, e.text, "txt e-" + e.element);
+          if (e.text && !paperPop(e.unitId, e)) popup(e.unitId, e.text, "txt e-" + e.element);
           if (e.kind === "status" && e.text && window.HudIcons) procBadge(e.unitId, HudIcons.keyOf(e.text));
           deferStun(beatsBefore); await playBeats(beatsBefore.filter(b => b.kind !== "stun"));
           await wait(240);
@@ -1661,6 +1696,7 @@
       G.slow = 1;
       $("g-app").classList.remove("hitstop");
       if (zoomed) zoomOut();
+      if (pushMs && window.HD2DField) HD2DField.release();   // 新画面：推过的镜头拉回去（跳过了就直接回去）
       if (--G.koHold <= 0) { G.koHold = 0; releaseKOs(); }
       hideBanner(120);
     }
@@ -4638,6 +4674,9 @@
     elist.innerHTML = "";
     const foesNow = state.units.filter(u => !u.isPlayer && !u.hidden && u.kit !== "ufo_leg");
     if (!foesNow.length) elist.innerHTML = '<p class="sheet-empty">场上没有敌人。</p>';
+    // 首领机制的技能名（选填，下面四个面板共用）：填了，横幅、头顶图标、悬停说明、战斗记录都写这个名字（和内置首领的「公开处刑」「沙尘爆裂」一样）；
+    // 不填就叫机制原名 dflt。最多 BOSS_MECH_NAME_MAX 个字（boss-mechanics.js），规则层（battle-commands.js）再校验一次
+    const mechNameBox = (dflt) => `<label title="选填：填了，横幅、头顶图标、悬停说明和战斗记录里都写这个名字；不填就叫「${dflt}」">技能名<input data-x="name" type="text" maxlength="${BOSS_MECH_NAME_MAX}" placeholder="${dflt}"></label>`;
     foesNow.forEach(u => {
       const row = el("div", "sheet-slot");
       row.innerHTML = `<div><b>${esc(u.name)}</b><div class="sub">${u.kit || ""} · Lv${u.level} · ${u.zone} 区</div></div>`;
@@ -4657,7 +4696,8 @@
       elist.appendChild(row);
       const ed = el("div", "exec-edit");
       ed.hidden = true;
-      ed.innerHTML = `<label>落下<select data-x="phase"><option value="enemy">敌人回合开始</option><option value="player">我方回合开始</option></select></label>
+      ed.innerHTML = `${mechNameBox("死刑")}
+        <label>落下<select data-x="phase"><option value="enemy">敌人回合开始</option><option value="player">我方回合开始</option></select></label>
         <label>标记后<input data-x="turns" type="number" min="1" max="20" value="3"> 回合</label>
         <label title="每一段的倍率（× 这个敌人的 atk），用逗号隔开：3 = 一段 3 倍；2,1,1 = 三段">每段倍率<input data-x="hits" type="text" value="3"></label>
         <label>落下后<select data-x="then"><option value="repeat">重新标记</option><option value="once">只放一次</option></select></label>
@@ -4665,6 +4705,7 @@
       elist.appendChild(ed);
       const f = (k) => ed.querySelector(`[data-x="${k}"]`);
       if (cur) {
+        f("name").value = cur.name || "";
         f("phase").value = cur.phase || "enemy"; f("turns").value = cur.turns || 3;
         f("hits").value = (cur.hits || []).map(h => h.mult).join(","); f("then").value = cur.then || "repeat";
       }
@@ -4678,7 +4719,7 @@
         renderFieldSheet();
       };
       f("go").onclick = () => apply({
-        phase: f("phase").value, then: f("then").value,
+        name: f("name").value, phase: f("phase").value, then: f("then").value,
         turns: Math.max(1, Math.min(20, Math.floor(Number(f("turns").value) || 3))),
         hits: String(f("hits").value).split(/[,，\s]+/).filter(Boolean).map(x => ({ mult: Number(x) }))
       });
@@ -4690,7 +4731,8 @@
       row.insertBefore(sb, rm);
       const se = el("div", "exec-edit");
       se.hidden = true;
-      se.innerHTML = `<label>落下<select data-x="phase"><option value="enemy">敌人回合开始</option><option value="player">我方回合开始</option></select></label>
+      se.innerHTML = `${mechNameBox("分担")}
+        <label>落下<select data-x="phase"><option value="enemy">敌人回合开始</option><option value="player">我方回合开始</option></select></label>
         <label>标记后<input data-x="turns" type="number" min="1" max="20" value="3"> 回合</label>
         <label title="伤害池 = 这个倍率 × 这个敌人的 atk，同区的友方平均分担">伤害池<input data-x="mult" type="number" min="0.5" max="50" step="0.5" value="4"> × atk</label>
         <label>落下后<select data-x="then"><option value="repeat">重新标记</option><option value="once">只放一次</option></select></label>
@@ -4698,6 +4740,7 @@
       elist.appendChild(se);
       const g = (k) => se.querySelector(`[data-x="${k}"]`);
       if (curS) {
+        g("name").value = curS.name || "";
         g("phase").value = curS.phase || "enemy"; g("turns").value = curS.turns || 3;
         g("mult").value = (curS.pool && curS.pool.mult) || 4; g("then").value = curS.then || "repeat";
       }
@@ -4711,7 +4754,7 @@
         renderFieldSheet();
       };
       g("go").onclick = () => applyS({
-        phase: g("phase").value, then: g("then").value,
+        name: g("name").value, phase: g("phase").value, then: g("then").value,
         turns: Math.max(1, Math.min(20, Math.floor(Number(g("turns").value) || 3))),
         mult: Math.max(0.5, Math.min(50, Number(g("mult").value) || 4))
       });
@@ -4723,7 +4766,8 @@
       row.insertBefore(pb, rm);
       const pe = el("div", "exec-edit");
       pe.hidden = true;
-      pe.innerHTML = `<label>落下<select data-x="phase"><option value="enemy">敌人回合开始</option><option value="player">我方回合开始</option></select></label>
+      pe.innerHTML = `${mechNameBox("远离")}
+        <label>落下<select data-x="phase"><option value="enemy">敌人回合开始</option><option value="player">我方回合开始</option></select></label>
         <label>标记后<input data-x="turns" type="number" min="1" max="20" value="3"> 回合</label>
         <label title="每一次爆炸对同区每个友方的伤害 = 这个倍率 × 这个敌人的 atk">每次爆炸<input data-x="mult" type="number" min="0.5" max="20" step="0.5" value="1"> × atk</label>
         <label>落下后<select data-x="then"><option value="repeat">重新标记</option><option value="once">只放一次</option></select></label>
@@ -4731,6 +4775,7 @@
       elist.appendChild(pe);
       const q2 = (k) => pe.querySelector(`[data-x="${k}"]`);
       if (curP) {
+        q2("name").value = curP.name || "";
         q2("phase").value = curP.phase || "enemy"; q2("turns").value = curP.turns || 3;
         q2("mult").value = (curP.blast && curP.blast.mult) || 1; q2("then").value = curP.then || "repeat";
       }
@@ -4744,7 +4789,7 @@
         renderFieldSheet();
       };
       q2("go").onclick = () => applyP({
-        phase: q2("phase").value, then: q2("then").value,
+        name: q2("name").value, phase: q2("phase").value, then: q2("then").value,
         turns: Math.max(1, Math.min(20, Math.floor(Number(q2("turns").value) || 3))),
         mult: Math.max(0.5, Math.min(20, Number(q2("mult").value) || 1))
       });
@@ -4756,7 +4801,8 @@
       row.insertBefore(tbn, rm);
       const te = el("div", "exec-edit");
       te.hidden = true;
-      te.innerHTML = `<label>落下<select data-x="phase"><option value="enemy">敌人回合开始</option><option value="player">我方回合开始</option></select></label>
+      te.innerHTML = `${mechNameBox("踩塔")}
+        <label>落下<select data-x="phase"><option value="enemy">敌人回合开始</option><option value="player">我方回合开始</option></select></label>
         <label>标记后<input data-x="turns" type="number" min="1" max="20" value="3"> 回合</label>
         <label>塔数<input data-x="count" type="number" min="1" max="5" value="1"></label>
         <label>每座至少<input data-x="need" type="number" min="1" max="4" value="1"> 人</label>
@@ -4767,6 +4813,7 @@
       elist.appendChild(te);
       const q3 = (k) => te.querySelector(`[data-x="${k}"]`);
       if (curT) {
+        q3("name").value = curT.name || "";
         q3("phase").value = curT.phase || "enemy"; q3("turns").value = curT.turns || 3; q3("count").value = curT.count || 1; q3("need").value = curT.need || 1;
         q3("soak").value = (curT.soak && curT.soak.mult) != null ? curT.soak.mult : 0.5; q3("fail").value = (curT.fail && curT.fail.mult) || 4; q3("then").value = curT.then || "repeat";
       }
@@ -4781,7 +4828,7 @@
       };
       const int = (k, lo, hi, d) => Math.max(lo, Math.min(hi, Math.floor(Number(q3(k).value) || d)));
       q3("go").onclick = () => applyT({
-        phase: q3("phase").value, then: q3("then").value,
+        name: q3("name").value, phase: q3("phase").value, then: q3("then").value,
         turns: int("turns", 1, 20, 3), count: int("count", 1, 5, 1), need: int("need", 1, 4, 1),
         soak: Math.max(0, Math.min(20, Number(q3("soak").value) || 0)),
         fail: Math.max(0.5, Math.min(50, Number(q3("fail").value) || 4))
