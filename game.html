@@ -21,6 +21,7 @@
   <link rel="stylesheet" href="cyberware.css" />
   <link rel="stylesheet" href="shop-sell.css" />
   <link rel="stylesheet" href="weather-fx.css" />
+  <link rel="stylesheet" href="pause-menu.css" />
   <!-- 新画面（HD-2D 战场，#261）：战场顶栏的开关开着才用到。样式的类名都是 hd2d- / pl- 开头，关着时一条都套不上；
        场景和 three.js 打成了一个普通脚本 hd2d/hd2d-scene.bundle.js（tools/build-hd2d.js），开了以后 hd2d/hd2d-field.js 才加载，直接双击打开也能用 -->
   <link rel="stylesheet" href="hd2d/hd2d.css" />
@@ -940,6 +941,8 @@ window.GAME_MODE = true;
 <script src="weather-fx.js"></script>
 <script src="game.js"></script>
 <script src="screens.js"></script>
+<!-- 暂停页面（#298）：克制表、主持人工具、消息与成员、大厅等由各自的模块登记进来，所以放在它们前面 -->
+<script src="pause-menu.js"></script>
 <script src="training.js"></script>
 <script src="routemap.js"></script>
 <script src="workshop-data-adapter.js"></script>
