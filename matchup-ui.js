@@ -1,6 +1,6 @@
-/* 克制表（属性 × 血量层）浮层：战斗顶栏「克制表」随时能开，不打断回合（只读，不碰 GAME 的选技能 / 选目标状态）。
+/* 克制表（属性 × 血量层）浮层：暂停页面（Esc / 角上「菜单」，#298）里的「克制表」随时能开，不打断回合（只读，不碰 GAME 的选技能 / 选目标状态）。
  * 数据：matchup.js 的纯函数 matchupChart(weather, opt)（也挂在 Rogue.matchupChart）；联机玩家读房主发来的 view.matchup。
- * 没有数据接口时按钮不出现（available() = false），不自己算一份规则。
+ * 没有数据接口时菜单里没有这一项（available() = false），不自己算一份规则。
  *   表头：当前天气、相位阶段、恶劣环境 / 末日倍数（≠1 时）、冻土（跟随当前选中单位所在区域）
  *   行 = 属性（带属性图标），列 = 血量层；整行的天气增减伤写在 notes（数据没写的这里补上）
  *   格子按 adv 克制 / dis 被克制 / neu 普通 上色；天气改过的格子照常上色，只写「原（删除线）→ 现」，悬停 / 点开看原因
@@ -168,19 +168,15 @@
   function refresh() { if (isOpen() && getChart) box.innerHTML = html(getChart()); }
   function toggle(chart) { if (isOpen()) close(); else open(chart); }
 
-  /* 战斗顶栏 #g-matchup / 单局顶栏 #r-matchup（单局画面没有天气：按常态） */
-  function syncButtons() {
-    const ok = available();
-    ["g-matchup", "r-matchup"].forEach(id => { const b = typeof document !== "undefined" && document.getElementById(id); if (b) b.hidden = !ok; });
+  /* 入口在暂停页面里（pause-menu.js，#298；以前是战斗顶栏 #g-matchup / 单局顶栏 #r-matchup）：
+   * 战斗画面按战场现状算，单局画面没有天气按常态。联机玩家的那一项在 online-ui.js（读房主发来的 view.matchup） */
+  const screenNow = () => (typeof document !== "undefined" && document.body ? document.body.dataset.screen : "");
+  const onlinePlayer = () => typeof document !== "undefined" && !!document.body && document.body.classList.contains("online-player");
+  function openFromMenu() {
+    if (screenNow() === "run") open(() => chartWith("none", {}));
+    else open(() => localChart());
   }
-  if (typeof document !== "undefined") {
-    document.addEventListener("click", e => {
-      if (!e.target.closest) return;
-      if (e.target.closest("#g-matchup")) toggle(() => localChart());
-      else if (e.target.closest("#r-matchup")) toggle(() => chartWith("none", {}));
-    });
-    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", syncButtons); else syncButtons();
-  }
+  if (root.PauseMenu) root.PauseMenu.register({ id: "matchup", visible: () => available() && !onlinePlayer() && ["battle", "run"].includes(screenNow()), run: openFromMenu });
 
-  root.MatchupUI = { html, open, close, toggle, refresh, isOpen, available, localChart, chartWith, viewChart, allNotes, eff, pct, state: ui, syncButtons };
+  root.MatchupUI = { html, open, close, toggle, refresh, isOpen, available, localChart, chartWith, viewChart, allNotes, eff, pct, state: ui, openFromMenu };
 })(typeof window !== "undefined" ? window : globalThis);

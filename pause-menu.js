@@ -1,7 +1,7 @@
 /* 暂停页面（#298）：按 Esc 或点屏幕角上的「菜单」按钮打开，盖住全屏；再按 Esc、点「继续」或点空白处关掉。
  *   · Esc 先做它原来的事：取消选中的技能 / 选择、跳过演出、关掉最上层的面板（game.js · bindInput、online-ui.js 的弹框……）。
- *     按下时有开着的面板（PAUSE_MENU.layers），或者别的处理拿这一下取消了东西（preventDefault），就不打开；
- *     打字的时候（输入框、聊天框里）也不打开。
+ *     按下时有开着的面板（PAUSE_MENU.layers）、有东西要取消（PauseMenu.addBlocker：选着技能、正在选目标、在播演出……），
+ *     或者别的处理拿这一下取消了东西（preventDefault），就不打开；打字的时候（输入框、聊天框里）也不打开。
  *   · 菜单里的每一项由对应的模块自己登记（PauseMenu.register）：克制表（matchup-ui.js；联机玩家在 online-ui.js）、
  *     主持人工具（online-gm-ui.js）、消息与成员 / 大厅 / 角色分配（online-ui.js）、教程（#263 合进来后接上，见 PAUSE_MENU.tutorial）。
  *     点一项 = 关掉暂停页面 + 打开对应的面板，和以前点原来的按钮一样。
@@ -20,6 +20,7 @@
       openTitle: "菜单（Esc）：克制表等都在这里",
       empty: "这里暂时没有别的选项。",
       newCount: n => `（${n} 条新消息）`,
+      flag: "!",                    // 有事要处理（比如主持人工具：敌人待操作）
       attention: "（有事要处理）"
     },
     // 每一项的名字和说明；label / hint 也可以由登记的模块给函数（随状态变）
@@ -52,7 +53,9 @@
   let box = null, online = null, lastFocus = null;
 
   /* ---------- 菜单项 ---------- */
-  /** 登记一项：{ id, run(), visible?(), label?, hint?, badge?() }；label / hint 没给就用 PAUSE_MENU.items[id]。同一个 id 再登记会换掉旧的。返回撤销函数 */
+  /** 登记一项：{ id, run(), visible?(), label?, hint?, badge?(), config? }；label / hint / 先后没给就用 PAUSE_MENU.items / order 里
+   *  config（默认 = id）那一条（联机玩家的克制表用 config: "matchup"）。badge：数字 = 新消息条数，true = 有事要处理。
+   *  同一个 id 再登记会换掉旧的。返回撤销函数 */
   function register(item) {
     if (!item || !item.id || typeof item.run !== "function") throw new TypeError("PauseMenu.register 需要 id 和 run()");
     items.set(item.id, item);
@@ -67,18 +70,18 @@
     return [...items.values()]
       .filter(it => val(it.visible, true))
       .map(it => {
-        const cfg = PAUSE_MENU.items[it.id] || {};
-        return { id: it.id, label: String(val(it.label, cfg.label || it.id)), hint: String(val(it.hint, cfg.hint || "")), badge: val(it.badge, 0) || 0 };
+        const key = it.config || it.id, cfg = PAUSE_MENU.items[key] || {};
+        return { id: it.id, key, label: String(val(it.label, cfg.label || it.id)), hint: String(val(it.hint, cfg.hint || "")), badge: val(it.badge, 0) || 0 };
       })
-      .sort((a, b) => orderOf(a.id) - orderOf(b.id));
+      .sort((a, b) => orderOf(a.key) - orderOf(b.key));
   }
-  /** 角上按钮的提示：数字加起来；有不是数字的（比如「!」= 有事要处理）就显示它 */
+  /** 角上按钮的提示：新消息条数加起来；没有新消息、但有一项有事要处理（badge = true）就显示 PAUSE_MENU.text.flag */
   function badgeOf(rows) {
-    let n = 0, flag = "";
-    rows.forEach(r => { if (typeof r.badge === "number") n += r.badge > 0 ? r.badge : 0; else if (r.badge) flag = String(r.badge); });
+    let n = 0, flag = false;
+    rows.forEach(r => { if (typeof r.badge === "number") n += r.badge > 0 ? r.badge : 0; else if (r.badge) flag = true; });
     return n > 0 ? n : flag;
   }
-  const dotText = b => (typeof b === "number" ? (b > 9 ? "9+" : String(b)) : String(b));
+  const dotText = b => (typeof b === "number" ? (b > 9 ? "9+" : String(b)) : PAUSE_MENU.text.flag);
   const srText = b => (typeof b === "number" ? PAUSE_MENU.text.newCount(b) : PAUSE_MENU.text.attention);
   const dotHtml = b => (b ? `<span class="pm-dot" aria-hidden="true">${esc(dotText(b))}</span><span class="pm-sr">${esc(srText(b))}</span>` : "");
 
@@ -92,16 +95,24 @@
   /* ---------- 在哪能开 ---------- */
   /** 联机时由 online-ui.js 告诉这里：null = 不在房间里；{ host } = 主持人 / 玩家 */
   function setOnline(ctx) {
-    online = ctx ? { host: !!ctx.host } : null;
+    const next = ctx ? { host: !!ctx.host } : null;
+    if (JSON.stringify(next) === JSON.stringify(online)) return;
+    online = next;
     if (hasDoc()) { document.body.classList.toggle("pm-online", !!online); document.body.classList.toggle("pm-online-host", !!(online && online.host)); }
-    if (isOpen()) paint();
-    refresh();
+    // 离开房间时停在不能开菜单的画面（标题）：菜单收起来
+    if (isOpen() && !allowed()) close(); else refresh();
   }
   function allowed() {
     if (!hasDoc()) return false;
     return !!online || PAUSE_MENU.screens.includes(document.body.dataset.screen);
   }
   const typing = t => !!(t && t.closest && t.closest(PAUSE_MENU.typing));
+  // 「Esc 现在有东西要取消」：选着技能、正在选目标、在播演出……（game.js、online-ui.js 告诉这里）。
+  // 联机舞台、热座栏会拦掉冒泡的按键，光看 preventDefault 不够：按下时就问一遍
+  const blockers = new Set();
+  /** 登记一个判断（返回 true = 这一下 Esc 留给它取消）；返回撤销函数 */
+  function addBlocker(fn) { if (typeof fn === "function") blockers.add(fn); return () => blockers.delete(fn); }
+  const blocked = () => [...blockers].some(fn => val(fn, false));
   /** 有没有开着的面板 / 弹框（暂停页面自己不算） */
   function layerOpen() {
     if (!hasDoc()) return false;
@@ -125,16 +136,26 @@
     document.body.appendChild(box);
     return box;
   }
-  function paint() {
-    if (!ensureBox()) return;
-    const rows = list(), T = PAUSE_MENU.text;
-    const focusId = document.activeElement && box.contains(document.activeElement) ? document.activeElement.dataset.pauseItem || "" : "";
-    box.innerHTML = `<section class="pm-card" role="dialog" aria-modal="true" aria-labelledby="pm-title">
-      <header class="pm-head"><h2 id="pm-title">${esc(online ? T.titleOnline : T.title)}</h2>${online ? `<p class="pm-note">${esc(T.noteOnline)}</p>` : ""}</header>
+  let painted = "";
+  /** 整张卡片（纯函数，测试也用） */
+  function html(rows, isOnline) {
+    const T = PAUSE_MENU.text;
+    return `<section class="pm-card" role="dialog" aria-modal="true" aria-labelledby="pm-title">
+      <header class="pm-head"><h2 id="pm-title">${esc(isOnline ? T.titleOnline : T.title)}</h2>${isOnline ? `<p class="pm-note">${esc(T.noteOnline)}</p>` : ""}</header>
       <div class="pm-list">${rows.map(r => `<button type="button" class="pm-item" data-pause-item="${esc(r.id)}"><b>${esc(r.label)}</b>${r.hint ? `<small>${esc(r.hint)}</small>` : ""}${dotHtml(r.badge)}</button>`).join("") || `<p class="pm-empty">${esc(T.empty)}</p>`}</div>
       <footer class="pm-foot"><button type="button" class="pm-resume" data-pause-resume>${esc(T.resume)}<kbd>${esc(T.resumeKey)}</kbd></button></footer>
     </section>`;
-    if (focusId) { const again = box.querySelector(`[data-pause-item="${focusId}"]`); if (again) again.focus({ preventScroll: true }); }
+  }
+  /** 画菜单；内容没变就不动（联机每来一包都会 refresh，别把键盘焦点弄丢） */
+  function paint() {
+    if (!ensureBox()) return;
+    const markup = html(list(), !!online);
+    if (markup === painted) return;
+    const focusId = document.activeElement && box.contains(document.activeElement) ? document.activeElement.dataset.pauseItem || (document.activeElement.hasAttribute("data-pause-resume") ? "__resume" : "") : "";
+    painted = markup; box.innerHTML = markup;
+    const again = focusId === "__resume" ? box.querySelector("[data-pause-resume]") : focusId ? box.querySelector(`[data-pause-item="${focusId}"]`) : null;
+    if (again) again.focus({ preventScroll: true });
+    else if (focusId) { const first = box.querySelector("[data-pause-item], [data-pause-resume]"); if (first) first.focus({ preventScroll: true }); }
   }
   /** 角上的「菜单」按钮：单机顶栏里各插一个；提示（红点 / 数字）画在所有 [data-pause-open] 上（联机玩家的那个在 #online-dock） */
   function mountButtons() {
@@ -148,18 +169,18 @@
       bar.insertBefore(b, bar.firstChild);
     });
   }
+  let lastBadge = "";
   function paintButtons() {
     if (!hasDoc()) return;
-    const b = badgeOf(list()), html = dotHtml(b);
+    const dot = dotHtml(badgeOf(list())), fresh = !!dot && !lastBadge;
+    lastBadge = dot;
     document.querySelectorAll("[data-pause-open]").forEach(btn => {
       let slot = btn.querySelector(".pm-badge");
       if (!slot) { slot = document.createElement("span"); slot.className = "pm-badge"; btn.appendChild(slot); }
-      if (slot.innerHTML !== html) {
-        const fresh = !slot.innerHTML && !!html;
-        slot.innerHTML = html;
-        if (fresh) slot.classList.add("pm-pop");
-      }
-      if (!html) slot.classList.remove("pm-pop");
+      if (slot.dataset.html !== dot) { slot.dataset.html = dot; slot.innerHTML = dot; }
+      // 红点刚出现的那一下轻轻弹一下（和联机的 .ol-dot-pop 一样）；条数变多时换成新的红点，不再弹
+      const el = slot.querySelector(".pm-dot");
+      if (fresh && el) el.classList.add("pm-pop");
     });
   }
   /** 状态变了（联机来了新消息、换了身份、换了画面……）：重画角上按钮的提示，开着的菜单也重画 */
@@ -214,7 +235,7 @@
       return;
     }
     if (e.key !== "Escape" || e.isComposing || e.keyCode === 229 || e.repeat) return;
-    if (!allowed() || typing(e.target) || layerOpen()) return;
+    if (!allowed() || typing(e.target) || layerOpen() || blocked()) return;
     // 等这一下传完：别的处理拿它取消了东西（取消技能、跳过演出……都会 preventDefault）就不开
     setTimeout(() => { if (!e.defaultPrevented && !isOpen() && allowed() && !layerOpen()) open(); }, 0);
   }
@@ -241,5 +262,5 @@
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();
   }
 
-  root.PauseMenu = { CONFIG: PAUSE_MENU, register, unregister, list, badgeOf, open, close, toggle, isOpen, refresh, setOnline, allowed, layerOpen, choose, mountButtons };
+  root.PauseMenu = { CONFIG: PAUSE_MENU, register, unregister, addBlocker, list, badgeOf, html, open, close, toggle, isOpen, refresh, setOnline, allowed, layerOpen, blocked, choose, mountButtons };
 })(typeof window !== "undefined" ? window : globalThis);
