@@ -503,7 +503,11 @@
       const q1 = popDmg(lo.tape), q2 = popDmg(hi.tape);
       if (q1 > 0 || q2 > 0) { p.dmgLo = Math.min(q1, q2); p.dmgHi = Math.max(q1, q2); }
       p.healHi = Math.max(0, -Math.min(d1, d2));
-      const shpLoss = Math.max(bs.shp - s1.shp, bs.shp - s2.shp, 0);
+      // 行动者自己付的固定消耗（发动义体扣的坚毅：规则层在事件带上记成 selfCost）不算这次行动的效果，先加回来。
+      // 起身中的人坚毅扣到 1 就扣不动：按前后差写「伤到坚毅」会露出是不是只剩 1，打不出去的目标也会被当成有效果（cyberware.js · cwTapeSelfCost）
+      const paid = (tape) => (tape || []).filter(e => e.type === "selfCost" && e.unitId === id)
+        .reduce((sum, e) => sum + Math.max(0, Number(e.shp) || 0), 0);
+      const shpLoss = Math.max(bs.shp - s1.shp - paid(lo.tape), bs.shp - s2.shp - paid(hi.tape), 0);
       p.shpLoss = bs.upOnShp || bs.dying ? shpLoss : 0;
       p.defAfterHi = Math.max(s1.def, s2.def);   // 击破较少的一侧
       p.defAfterLo = Math.min(s1.def, s2.def);

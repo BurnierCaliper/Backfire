@@ -418,9 +418,9 @@ function trpgCyberwareAct(kit, id, remove) {
   const name = (cyberwareDef(id) || {}).name || id;
   const notes = trpgPayWith(kit, () => {
     const purse = { kuizhi: Number(state.kuizhi) || 0 };
-    if (remove) cost = cyberwareRemove(u, id, purse).cost; else { pv = cyberwareInstall(u, id, purse); cost = pv.cost; }
+    if (remove) cost = cyberwareRemove(u, id, purse).cost; else { pv = cyberwareInstall(u, id, purse); cost = pv.cost; }   // 同系列的旧义体一起拆掉（以新换旧）
     state.kuizhi = purse.kuizhi;
-    return [remove ? `${u.name} 拆掉了义体「${name}」，花掉 ${cost} 奎支。` : `${u.name} 安装了义体「${name}」，花掉 ${cost} 奎支。${pv.warning || ""}`];
+    return [remove ? `${u.name} 拆掉了义体「${name}」，花掉 ${cost} 奎支。` : cyberwareInstallNote(u.name, pv)];
   });
   return notes;
 }

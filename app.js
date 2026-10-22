@@ -9251,6 +9251,7 @@ function skillFlowSteps(id, actor, picks) {
   picks = picks || {};
   if (!actor) return [];
   if (typeof featOfSkill === "function" && featOfSkill(id)) return featSkillSteps(actor, id, picks);
+  if (typeof cyberwareOfSkill === "function" && cyberwareOfSkill(id)) return cyberwareSkillSteps(actor, id, picks);   // 义体（cyberware.js）
   if (id === "sand_pull") return [{ key: "target", type: "unit", optional: false, label: "把谁拉出流沙（距离 1 以内陷住的友方）", units: sandPullTargets(actor) }];
   if (PUSH_SKILLS.includes(id)) {
     // 这两个技能只打同区：目标就在自己这一区，推去的区 = 这一区相连的区
@@ -11310,6 +11311,7 @@ function summonableBlades(h) {
 function skillRequirementError(actor, id) {
   if (actor && /^veh_/.test(String(id)) && typeof vehicleSkillWhy === "function") return vehicleSkillWhy(actor, id);   // 载具招式（vehicle.js）
   if (actor && typeof featOfSkill === "function" && featOfSkill(id)) return featSkillWhy(actor, id);
+  if (actor && typeof cyberwareOfSkill === "function" && cyberwareOfSkill(id)) return cyberwareSkillWhy(actor, id);   // 义体（cyberware.js）：没装 / 短休前用过了
   const fn = SKILL_REQUIREMENT[id];
   if (!actor || typeof fn !== "function") return null;
   try { return fn(actor) || null; } catch (e) { return null; }
@@ -11385,6 +11387,12 @@ function skillTargetError(a, id, t) {
   if (typeof featOfSkill === "function" && featOfSkill(id)) {
     const fl = state.skillFlow;
     return featSkillTargetWhy(a, id, t, fl && fl.id === id ? fl.picks : {});
+  }
+  // 义体（cyberware.js）：先看义体种类自己的目标限制，再照下面通用的友军 / 近程打飞行检查
+  if (typeof cyberwareOfSkill === "function" && cyberwareOfSkill(id)) {
+    const fl = state.skillFlow;
+    const why = cyberwareSkillTargetWhy(a, id, t, fl && fl.id === id ? fl.picks : {});
+    if (why) return why;
   }
   if (id === "sand_pull") {
     const fl = state.skillFlow;
@@ -11884,6 +11892,10 @@ function runSkillInner(id, optRun) {
       // 专长动作（feats.js）：行动点上面已经扣过
       const fl = state.skillFlow;
       runFeatSkill(a, id, { t, picks: (fl && fl.picks) || {}, lines, hitOne });
+    } else if (typeof cyberwareOfSkill === "function" && cyberwareOfSkill(id)) {
+      // 义体（cyberware.js）：行动点上面已经扣过；次数、坚毅消耗由义体那边记（和专长分开）
+      const fl = state.skillFlow;
+      runCyberwareSkill(a, id, { t, picks: (fl && fl.picks) || {}, lines, hitOne });
     } else if (id === "sand_pull") {
       const fl = state.skillFlow;
       const tgt = fl && fl.picks && fl.picks.target ? unitById(fl.picks.target) : t;

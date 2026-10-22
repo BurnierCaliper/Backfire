@@ -1595,10 +1595,10 @@ const Rogue = (function () {
     if (!canClinic(run)) throw new Error("这里没有诊所");
     const { h, u } = cyberwareUnit(run, kit);
     const purse = { kuizhi: Number(state.kuizhi) || 0 };
-    const pv = cyberwareInstall(u, id, purse);
+    const pv = cyberwareInstall(u, id, purse);   // 同系列装着另一件时一起拆掉（以新换旧）
     state.kuizhi = purse.kuizhi;
     h.cyberware = (u.cyberware || []).map(x => ({ id: x.id }));
-    return logAll(run, [`${heroName(kit)} 安装了义体「${pv.name}」，花掉 ${pv.cost} 奎支。${pv.warning || ""}`]);
+    return logAll(run, [cyberwareInstallNote(heroName(kit), pv)]);
   }
   function removeCyberware(run, kit, id) {
     if (!canClinic(run)) throw new Error("这里没有诊所");

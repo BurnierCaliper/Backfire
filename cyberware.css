@@ -23,6 +23,8 @@
 .cw-txt small { font-size: 11px; color: var(--sk-muted, #a8977b); }
 .cw-desc { font-size: 12px; }
 .cw-conf { color: var(--sk-hazard, #f2c230) !important; }
+.cw-swap { color: var(--sk-mint, #39e6b4) !important; }   /* 以新换旧：会先拆掉同系列的那件 */
+.cw-rule { margin: 0 0 6px; font-size: 12px; color: var(--sk-muted, #a8977b); }
 .cw-after { font-family: var(--num); color: var(--sk-mint, #39e6b4); }
 .cw-after.over, .cw-heavy-tag { color: #f08a7a; }
 .cw-row .s-price { font-family: var(--num); color: var(--sk-hazard, #f2c230); }
