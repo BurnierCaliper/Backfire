@@ -112,7 +112,8 @@ test("关着时一切照旧：开关没开，boot 不加载 three.js / 场景、
   let loads = 0;
   const hints = [];
   const P = fakePage();
-  F.boot({ doc: P.doc, storage, load: () => { loads++; return Promise.reject(new Error("Failed to fetch dynamically imported module")); }, hint: (m) => hints.push(m) });
+  // reduced：减少动态效果，点开关直接切（云雾转场另在 tests/hd2d-mist.test.js）
+  F.boot({ doc: P.doc, storage, load: () => { loads++; return Promise.reject(new Error("Failed to fetch dynamically imported module")); }, hint: (m) => hints.push(m), reduced: () => true });
   await settle();
   const btn = P.els["g-hd2d-toggle"];
   assert.equal(loads, 0, "关着：不加载");
@@ -418,7 +419,7 @@ test("页面里走一遍（场景是假的）：记着开 → 3D 战场铺在 #g
   const P = fakeDocFull(), mem = new Map([[F.FIELD.storageKey, "on"]]);
   const storage = { getItem: (k) => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => { mem.set(k, String(v)); } };
   const log = { layouts: [], refits: 0 };
-  F.boot({ doc: P.doc, storage, load: () => Promise.resolve(fakeScene(log)), hint: (m) => calls.push(["hint", m]) });
+  F.boot({ doc: P.doc, storage, load: () => Promise.resolve(fakeScene(log)), hint: (m) => calls.push(["hint", m]), reduced: () => true });   // 关掉时直接切（云雾转场另在 tests/hd2d-mist.test.js）
   await settle(); await settle();
   const field = P.els["g-field"], app = P.els["g-app"];
   assert.equal(F.on(), true, "建好了");

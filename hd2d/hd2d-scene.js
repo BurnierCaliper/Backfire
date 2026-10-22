@@ -21,6 +21,9 @@
  *   onZoneClick(区号) / onZoneHover(区号, on)          点 / 悬停地台（点地台照样选中这个区，中景 / 近景跟过去）
  *   onGapClick(间隔的键) / onEmptyClick()             点间隔（危墙 / 桥梁……）、点空地
  *   sc.setMarks({ targets, dim, aim, zones, hoverZone, gaps })   // 选目标 / 选区的标记（hd2d-field.js · marksOf）：铭牌描边 / 变暗 / 瞄准，地台、间隔亮框
+ *   onZoomOut()                                       远景到头了还往外拉（滚轮往后 / 双指捏小）：正式画面拿它转回旧画面（#261 追加，云雾转场）；不给 = 照旧停在远景
+ *   sc.overhead({ elevation, dist, secs, ease }) / sc.descend({ secs, ease })   转场：镜头升到战场正上方往下看 / 从正上方降回远景（数值在 hd2d-field.js 的 MIST）；
+ *                                                     转场占着镜头（state.lock）：拖动、滚轮、双指、推镜头都不接，重排只换铭牌，降回远景了才交还
  * 镜头是这个玩家自己的视角：滚轮在三段之间跳、点地台 / 铭牌选区，都只动这边的画面，不写进战斗状态，也不同步给别人。
  * 系统开了「减少动态效果」（prefers-reduced-motion）时，待机动画、飘浮物、天气粒子、乌云、胶片颗粒都停住；雷照打，但闪光减弱、只闪一下，镜头不抖；
  * 换镜头不插值，直接切过去。
@@ -276,13 +279,14 @@ export function createHd2dScene(container, options) {
   composer.addPass(grade);
 
   // 镜头（每个玩家自己的）：tier 远 / 中 / 近、zone 选中的区（null = 跟着当前行动单位）、close 特写的单位（近景里双击，#237；null = 没在特写）、
-  // pose 这一段的镜头（hd2d-camera.js · pose / closePose）、cur 这一帧实际用的（过渡中是插值出来的）、tween 正在过渡
+  // pose 这一段的镜头（hd2d-camera.js · pose / closePose）、cur 这一帧实际用的（过渡中是插值出来的）、tween 正在过渡、
+  // lock 新旧画面的转场占着镜头（正式画面，#261：升到正上方 / 从正上方降回远景）
   const start = options.camera || {};
   const state = {
     portrait: false, layout: null, meta: { weather: "none", theme: "day" }, insets: { top: 0, bottom: 0 },
     world: null, backdrop: null, backdropSig: "", plates: new Map(), ctx: null, fit: 20, bounds: null, themeName: "day",
     actorId: null, selectedId: null, wantFit: true, motion: true,
-    tier: C.tierName(start.tier), zone: start.zone != null && start.zone !== "" ? Number(start.zone) : null, close: null, pose: null, cur: null, tween: null
+    tier: C.tierName(start.tier), zone: start.zone != null && start.zone !== "" ? Number(start.zone) : null, close: null, pose: null, cur: null, tween: null, lock: false
   };
   const weather = createWeather(scene, { bounds: { minX: -10, maxX: 10, minZ: -10, maxZ: 10 } });
   const clock = new THREE.Clock();
@@ -625,7 +629,8 @@ export function createHd2dScene(container, options) {
   function goTo(tier, zone, opts) {
     opts = opts || {};
     if (!state.layout) return;
-    if (opts.keep && state.tween && !state.tween.push) opts = {};   // 正在过渡：改成过渡到新算的这一段（攻击演出推镜头的过渡不打断）
+    if (state.lock) opts = { keep: true, lock: true };   // 新旧画面的转场占着镜头（#261）：只换段、区、铭牌，镜头照转场走
+    else if (opts.keep && state.tween && !state.tween.push) opts = {};   // 正在过渡：改成过渡到新算的这一段（攻击演出推镜头的过渡不打断）
     if (!opts.keep) state.pushBack = null;     // 玩家自己换了镜头：演出播完不再拉回推之前的位置
     // 特写（#237）：镜头推到那个单位面前（还算近景）；不然是这一段的镜头
     const to = (state.close != null && C.closePose(state.layout, state.close, { actorId: state.actorId })) || C.pose(state.layout, tier, zone, { actorId: state.actorId });
@@ -636,6 +641,7 @@ export function createHd2dScene(container, options) {
     placeFocus();
     if (opts.keep) {
       state.plates.forEach(p => setLift(p, p.liftTo));
+      if (opts.lock && state.tween && state.tween.lock === "down") state.tween.to = to;   // 正在从正上方降回来：降到新算的这一段
     } else {
       // 起点 = 镜头现在实际在哪（玩家可能拖动过、可能正在过渡），景深 / 雾 / 裁剪面接着上一次的
       const from = C.poseFrom(camera.position, controls.target, camera.fov, state.cur || to);
@@ -798,15 +804,42 @@ export function createHd2dScene(container, options) {
     markMeshes.clear();
   }
 
+  /** 滚轮 / 双指走了一段（step：1 拉近 / −1 拉远，一次手势一下）：在三段之间跳（状态机 camStep）；远景到头了还往外拉（hd2d-camera.js · pastFar）、
+   *  外面又接（正式画面，#261）就交给外面转回旧画面——原型不接，照旧停在远景。转场占着镜头时不理 */
+  function zoomStep(step) {
+    if (!step || state.lock) return;
+    if (options.onZoomOut && C.pastFar(camState(), step)) { options.onZoomOut(); return; }
+    move(C.camStep(camState(), { type: "wheel", step }));
+  }
   // 滚轮：在远景 / 中景 / 近景之间跳，一次滚动只跳一段（往前滚拉近）；特写时往后滚回到正常的近景（#237）。铭牌上滚也一样（冒泡到这里）
   let wheelState = null;
   const onWheel = (e) => {
     e.preventDefault();
     const r = C.wheelStep(wheelState, C.wheelPixels(e), now());
     wheelState = r.state;
-    if (r.step) move(C.camStep(camState(), { type: "wheel", step: r.step }));
+    zoomStep(r.step);
   };
   container.addEventListener("wheel", onWheel, { passive: false });
+  // 触屏双指（#261）：两根手指的距离比按下时张开 / 捏小够了（hd2d-camera.js · pinchStep）算一下，和滚轮一样走 zoomStep；
+  // 一次手势（两根手指按着没抬起来）只算一下。OrbitControls 的双指照旧平移（不缩放）
+  const pinch = { pts: new Map(), d0: 0, done: false };
+  const pinchGap = () => { const [a, b] = [...pinch.pts.values()]; return Math.hypot(a.x - b.x, a.y - b.y); };
+  renderer.domElement.addEventListener("pointerdown", (e) => {
+    if (e.pointerType !== "touch") return;
+    if (e.isPrimary) pinch.pts.clear();   // 新的一次触摸（第一根手指）：上一次没收到抬起的手指不算
+    pinch.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pinch.pts.size === 2) { pinch.d0 = pinchGap(); pinch.done = false; }
+  });
+  renderer.domElement.addEventListener("pointermove", (e) => {
+    if (!pinch.pts.has(e.pointerId)) return;
+    pinch.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pinch.pts.size !== 2 || pinch.done || !(pinch.d0 > 0)) return;
+    const step = C.pinchStep(pinchGap() / pinch.d0);
+    if (step) { pinch.done = true; zoomStep(step); }
+  });
+  const pinchUp = (e) => { pinch.pts.delete(e.pointerId); if (pinch.pts.size < 2) pinch.d0 = 0; };
+  renderer.domElement.addEventListener("pointerup", pinchUp);
+  renderer.domElement.addEventListener("pointercancel", pinchUp);
   function fitShadow() {
     const b = state.bounds, cx = (b.minX + b.maxX) / 2, cz = (b.minZ + b.maxZ) / 2;
     const r = Math.hypot(b.maxX - b.minX, b.maxZ - b.minZ) / 2 + 3;
@@ -964,8 +997,14 @@ export function createHd2dScene(container, options) {
       const p = C.at(state.tween, now() - state.tween.t0);
       applyPose(p);
       state.plates.forEach(pl => setLift(pl, pl.liftFrom + (pl.liftTo - pl.liftFrom) * p.k));
-      if (p.k >= 1) { const pushed = state.tween.push; state.tween = null; if (!pushed) arrive(); }   // 推镜头推到了：等演出播完 poseRelease 拉回来再交还拖动
-    } else {
+      if (p.k >= 1) {
+        // 推镜头推到了：等演出播完 poseRelease 拉回来再交还拖动；转场升到正上方（lock = up）：停在那里，等拆掉。从正上方降回远景了（down）：交还给玩家
+        const pushed = state.tween.push || state.tween.lock === "up";
+        if (state.tween.lock === "down") state.lock = false;
+        state.tween = null;
+        if (!pushed) arrive();
+      }
+    } else if (!state.lock) {              // 转场停在正上方时 OrbitControls 不碰镜头
       clampPan();
       controls.update();
     }
@@ -1063,7 +1102,7 @@ export function createHd2dScene(container, options) {
     /** 出手时镜头稍微推一下（p = hd2d-fx.js · pushPose 算的）：secs 秒过渡过去，过渡中、推着的时候不接拖动；段和选中的区不变。
      *  第一次推之前记下现在的位置，poseRelease 拉回这里（玩家原来选的这一段、拖动过的也回到拖动过的地方）。减少动态效果时外面不会叫它 */
     posePush(p, secs) {
-      if (!state.layout || !p) return;
+      if (!state.layout || !p || state.lock) return;   // 新旧画面的转场占着镜头：不推
       const from = C.poseFrom(camera.position, controls.target, camera.fov, state.cur || state.pose);
       if (!state.pushBack) state.pushBack = Object.assign({}, from, { k: 1 });
       state.plates.forEach(pl => { pl.liftFrom = pl.lift; });   // 过渡里铭牌的抬高照常插值：从现在的高度接着走，不跳回上一次换段的起点
@@ -1075,11 +1114,36 @@ export function createHd2dScene(container, options) {
     poseRelease(secs) {
       const back = state.pushBack;
       state.pushBack = null;
-      if (!back || !state.layout) return;
+      if (!back || !state.layout || state.lock) return;
       const from = C.poseFrom(camera.position, controls.target, camera.fov, state.cur || state.pose);
       state.plates.forEach(pl => { pl.liftFrom = pl.lift; });
       state.tween = { from, to: back, duration: Math.max(0, secs || 0), ease: "inOutCubic", t0: now() };
       if (!(state.tween.duration > 0)) { state.tween = null; applyPose(Object.assign({}, back, { k: 1 })); arrive(); }
+    },
+    /** 新旧画面之间的转场（正式画面，#261；数值在 hd2d-field.js 的 MIST.rise）：镜头从现在的位置升到战场正上方往下看（hd2d-camera.js · overheadPose：
+     *  看的还是远景看的那一点，俯角 o.elevation、离远 o.dist × 远景的距离），o.secs 秒（0 = 直接摆过去）。从这时起转场占着镜头：
+     *  升到了就停在那里，拖动、滚轮、双指、推镜头都不接，重排 / 换了行动的人只换铭牌——直到 descend 降回远景，或者整个场景拆掉（新 → 旧） */
+    overhead(o) {
+      if (!state.layout) return;
+      o = o || {};
+      const to = C.overheadPose(C.pose(state.layout, "far", state.zone, { actorId: state.actorId }), o);
+      const from = C.poseFrom(camera.position, controls.target, camera.fov, state.cur || to);
+      state.lock = true; state.pushBack = null;
+      controls.enabled = false; openLimits();
+      state.plates.forEach(pl => { pl.liftFrom = pl.liftTo = pl.lift; });   // 铭牌的抬高不跟着变
+      if (o.secs > 0) state.tween = { from, to, duration: o.secs, ease: o.ease || "inOutCubic", t0: now(), lock: "up" };
+      else { state.tween = null; applyPose(to); }
+    },
+    /** 旧 → 新：镜头从正上方（先 overhead 摆过去）降回这一段（远景）的镜头，o.secs 秒（0 = 直接切），到了把拖动交还给玩家。没在转场里就不管 */
+    descend(o) {
+      if (!state.layout || !state.lock || !state.pose) return;
+      o = o || {};
+      const to = state.pose, from = C.poseFrom(camera.position, controls.target, camera.fov, state.cur || to);
+      state.plates.forEach((pl, id) => { const q = to.plates[id]; pl.liftFrom = pl.lift; pl.liftTo = q ? q.lift : pl.lift; });
+      if (o.secs > 0) { state.tween = { from, to, duration: o.secs, ease: o.ease || "inOutCubic", t0: now(), lock: "down" }; return; }
+      state.tween = null; state.lock = false;
+      applyPose(Object.assign({}, to, { k: 1 }));
+      arrive();
     },
     dispose() {
       disposed = true; cancelAnimationFrame(raf); ro.disconnect(); container.removeEventListener("wheel", onWheel);
