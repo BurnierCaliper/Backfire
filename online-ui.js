@@ -839,10 +839,11 @@
     function paintPaper() {
       const OP = global.OnlinePaper;
       paperBox.hidden = !paperOn;
-      if (!paperOn || !OP) { if (paperBox.firstChild) { paperBox.innerHTML = ""; PAPER_KEYS.forEach(k => delete lastMarkup[k]); } watchPaper(false); return; }
+      if (!paperOn || !OP) { if (paperBox.firstChild) { paperBox.innerHTML = ""; PAPER_KEYS.forEach(k => delete lastMarkup[k]); } watchPaper(false); paintPaperTheme(null); return; }
       if (!paperBox.querySelector(".olp-top-host")) { paperBox.innerHTML = OP.shellHtml(); PAPER_KEYS.forEach(k => delete lastMarkup[k]); }
       const q = sel => paperBox.querySelector(sel);
       const data = displayState || view.state || {}, ck = view.packet?.clock, PC = global.PartyCards, moves = OP.readMoves(document);
+      paintPaperTheme(OP.themeOf({ light: data.light, night: paperNight(data), weather: data.weather }));
       const moving = [...moves.values()].some(list => list.some(m => m.hs === "moveCancel"));
       const top = lastMarkup.paperTop, tools = lastMarkup.paperTools, list = q(".olp-tools-list"), toggle = list.querySelector("#g-hd2d-toggle");
       html(q(".olp-top-host"), OP.topHtml({
@@ -862,6 +863,19 @@
       noteEl.hidden = !note; if (noteEl.textContent !== note) noteEl.textContent = note;
       watchPaper(true);
       if (lastMarkup.paperTop !== top && global.PauseMenu) global.PauseMenu.refresh();
+    }
+    /** 白天 / 夜晚 / 天气的配色（第 2 步）：body 上记一下是哪一套（data-olp-time / data-olp-weather），配色（online-paper.js · PAPER.palette / weathers）写成 CSS 变量；
+     *  th = null（不是纸片画面）：都拿掉 */
+    let paperThemeKey = "";
+    function paintPaperTheme(th) {
+      const key = th ? th.time + "|" + th.weather : "";
+      if (key === paperThemeKey) return;
+      const b = document.body, vars = th ? global.OnlinePaper.themeVars(th) : {};
+      if (paperThemeKey) Object.keys(global.OnlinePaper.themeVars({ time: "day" })).forEach(k => b.style.removeProperty(k));
+      paperThemeKey = key;
+      if (!th) { delete b.dataset.olpTime; delete b.dataset.olpWeather; return; }
+      b.dataset.olpTime = th.time; b.dataset.olpWeather = th.weather;
+      Object.keys(vars).forEach(k => b.style.setProperty(k, vars[k]));
     }
     /** 热座栏（延后 / 换位的按钮、提示）、新画面的镜头按钮自己会变（点了换位、滚轮换镜头……，不经过这里）：变了就重画一次（只看这几块，下一刻一起画） */
     let paperWatch = null, paperWatched = [], paperQueued = false;
@@ -2002,7 +2016,7 @@
       destroyed = true; closeMyBag(); if (checkReq) { checkReq.destroy(); checkReq = null; } if (loreUi) { loreUi.destroy(); loreUi = null; } paintField3d(null); if (battle) { battle.destroy(); battle = null; } playbackGeneration++; actionGeneration++; historyGeneration++; clearTimeout(toastTimer);
       document.removeEventListener("compositionstart", onCompStart, true); document.removeEventListener("compositionend", onCompEnd, true);
       document.removeEventListener("click", onRollOpen); document.removeEventListener("scroll", onListScroll, true); clearTimeout(titleTimer);
-      document.removeEventListener("click", onPaperOutside, true); document.removeEventListener("keydown", onPaperKey, true); if (paperWatch) paperWatch.disconnect();
+      document.removeEventListener("click", onPaperOutside, true); document.removeEventListener("keydown", onPaperKey, true); if (paperWatch) paperWatch.disconnect(); paintPaperTheme(null);
       while (hostMounts.length) hostMounts.pop().remove(); document.body.classList.remove("ol-has-side", "ol-host-online", "ol-in-battle", "ol-side-collapsed", "ol-paper");
       pauseItems.forEach(off => off()); if (global.PauseMenu) global.PauseMenu.setOnline(null);
       if (turnCue) turnCue.unmark();   // 标签页标题上的「▶ 轮到你」去掉

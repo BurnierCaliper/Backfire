@@ -81,6 +81,44 @@ test("行动顺序吊牌：当前的高亮；自己能动的格子平时只露 �
   assert.doesNotMatch(moving, /data-olp-swap/, "换位中不再露 ⇅");
 });
 
+test("白天 / 夜晚 / 天气的配色（第 2 步）：跟着这一包的光影（没有就看游戏时钟）和天气；配色都在配置表里，写成 CSS 变量", () => {
+  // 光影优先；傍晚和规则表一样算夜里；旧主机没发光影就看时钟
+  assert.deepEqual(P.themeOf({ light: "day", night: true, weather: "none" }), { time: "day", weather: "none" });
+  assert.deepEqual(P.themeOf({ light: "dusk" }), { time: "night", weather: "none" });
+  assert.deepEqual(P.themeOf({ light: "night" }).time, "night");
+  assert.deepEqual(P.themeOf({ night: true }).time, "night");
+  assert.deepEqual(P.themeOf({}).time, "day");
+  // 天气：沙暴、下雨（酸雨 / 雷鸣）、雪、雾（相位、微光）；别的不加
+  const w = k => P.themeOf({ light: "day", weather: k }).weather;
+  assert.deepEqual(["sand", "acid", "thunder", "snow", "phase", "glow", "heat", "none", "toString", undefined].map(w), ["sand", "rain", "rain", "snow", "fog", "fog", "none", "none", "none", "none"]);
+  // 白天：牛皮纸、米白卡片；夜晚：深色牛皮纸、黑卡纸、浅色字
+  const day = P.themeVars({ time: "day", weather: "none" }), night = P.themeVars({ time: "night", weather: "none" });
+  assert.equal(day["--olp-kraft"], P.PAPER.palette.day.kraft);
+  assert.equal(day["--olp-paper-ink"], P.PAPER.palette.day.paperInk);
+  assert.equal(night["--olp-paper"], P.PAPER.palette.night.paper);
+  const lum = hex => { const v = parseInt(hex.slice(1), 16); return ((v >> 16) * 299 + ((v >> 8) & 255) * 587 + (v & 255) * 114) / 1000; };
+  assert.ok(lum(day["--olp-paper"]) > 200 && lum(night["--olp-paper"]) < 60, "白天浅色纸、夜里黑卡纸");
+  assert.ok(lum(day["--olp-paper-ink"]) < 60 && lum(night["--olp-paper-ink"]) > 200, "夜里字是浅色");
+  assert.equal(day["--olp-edge-fx"], "inset 0 0 0 transparent", "没有天气：纸边不加东西");
+  // 沙暴：底色往沙黄混、纸边发黄；字的颜色不染
+  const sand = P.themeVars({ time: "day", weather: "sand" });
+  assert.equal(sand["--olp-kraft"], P.mix(P.PAPER.palette.day.kraft, P.PAPER.weathers.sand.tint, P.PAPER.weathers.sand.mix));
+  assert.notEqual(sand["--olp-kraft"], day["--olp-kraft"]);
+  assert.equal(sand["--olp-kraft-ink"], day["--olp-kraft-ink"]);
+  assert.equal(sand["--olp-edge-fx"], P.PAPER.weathers.sand.edge);
+  // 雪：纸边一层霜；雨：偏蓝灰；雾：字往灰里退（对比低一点）
+  assert.match(P.themeVars({ time: "day", weather: "snow" })["--olp-edge-fx"], /rgba\(255, 255, 255/);
+  const rain = P.themeVars({ time: "day", weather: "rain" })["--olp-paper"], [r, , b] = [1, 3, 5].map(i => parseInt(rain.slice(i, i + 2), 16));
+  assert.ok(b - r > parseInt(P.PAPER.palette.day.paper.slice(5, 7), 16) - parseInt(P.PAPER.palette.day.paper.slice(1, 3), 16), "雨天纸偏蓝");
+  const fog = P.themeVars({ time: "day", weather: "fog" });
+  assert.ok(lum(fog["--olp-paper-ink"]) > lum(day["--olp-paper-ink"]), "雾天字淡一点");
+  assert.equal(P.mix("#000000", "#ffffff", 0.5), "#808080");
+  assert.equal(P.mix("rgba(1,2,3,.5)", "#ffffff", 0.5), "rgba(1,2,3,.5)", "认不得的颜色原样");
+  // 每一套的变量名都一样（换一套时上一套的不会留下）
+  assert.deepEqual(Object.keys(night).sort(), Object.keys(day).sort());
+  assert.deepEqual(Object.keys(sand).sort(), Object.keys(day).sort());
+});
+
 test("单机 / 主持人 / 新画面关着一条都套不上：online-paper.css 每条规则都挂在 body.ol-paper 下面；game.html 加载了它们；online-ui.js 只在联机玩家 + 新画面开着时加这个类", () => {
   const fs = require("node:fs"), path = require("node:path");
   const read = f => fs.readFileSync(path.join(__dirname, "..", f), "utf8");

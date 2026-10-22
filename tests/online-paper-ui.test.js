@@ -351,6 +351,53 @@ test("各块收起 / 展开：队伍收成只剩头像一列、技能栏收成�
   assert.deepEqual(o.errors, []);
 });
 
+test("白天 / 夜晚 / 沙暴：浮着的面板（顶栏、技能栏、队伍、抽屉）跟着这一包的光影和天气换成配置表里的那一套配色；离开纸片画面就拿掉", { timeout: 60000 }, async t => {
+  const o = await paperPage(t); if (!o) return; const { page } = o;
+  await asPlayer(page);
+  await page.waitForSelector("#online-paper .olp-top", { state: "visible" });
+  const look = () => page.evaluate(() => {
+    const cs = s => getComputedStyle(document.querySelector(s));
+    return { time: document.body.dataset.olpTime, weather: document.body.dataset.olpWeather, top: cs("#online-paper .olp-top").backgroundColor, dock: cs(".ol-battle > .g-hud").backgroundColor,
+      party: cs(".hd2d-party").backgroundColor, side: cs("#online-side").backgroundColor, ink: cs("#online-side").color, edge: cs(".ol-battle > .g-hud").boxShadow };
+  });
+  /** 配置表里这一套的颜色（rgb(…) 写法，和 getComputedStyle 对得上） */
+  const want = (time, weather) => page.evaluate(([time, weather]) => {
+    const v = OnlinePaper.themeVars({ time, weather }), rgb = h => { const n = parseInt(h.slice(1), 16); return `rgb(${n >> 16}, ${(n >> 8) & 255}, ${n & 255})`; };
+    return { top: rgb(v["--olp-tape"]), dock: rgb(v["--olp-kraft"]), party: rgb(v["--olp-kraft"]), paper: rgb(v["--olp-paper"]), ink: rgb(v["--olp-paper-ink"]) };
+  }, [time, weather]);
+  // 白天（光影 day）
+  let now = await look(), w = await want("day", "none");
+  assert.deepEqual([now.time, now.weather], ["day", "none"]);
+  assert.deepEqual([now.top, now.dock, now.party], [w.top, w.dock, w.party], "白天：牛皮纸 / 胶带的颜色");
+  await page.click("#online-side [data-side-collapse]");
+  await page.waitForFunction(() => !document.getElementById("online-side").classList.contains("ol-side-collapsed"));
+  now = await look();
+  assert.deepEqual([now.side, now.ink], [w.paper, w.ink], "白天：抽屉拉出来是浅色纸、深色字");
+  await shot(page, "paper-step2-day");
+  // 夜晚（这一包的光影 night）：深色牛皮纸、黑卡纸、浅色字
+  await page.evaluate(() => { fixture.view.state.light = "night"; fixture.emit(); });
+  await page.waitForFunction(() => document.body.dataset.olpTime === "night");
+  now = await look(); w = await want("night", "none");
+  assert.deepEqual([now.top, now.dock, now.party, now.side, now.ink], [w.top, w.dock, w.party, w.paper, w.ink], "夜晚那一套");
+  assert.match(await page.locator("#online-paper .olp-top").innerText(), /夜 · 常态/, "顶栏写「夜 · 」");
+  await shot(page, "paper-step2-night");
+  // 沙暴（白天）：纸往沙黄混、纸边发黄
+  await page.evaluate(() => { fixture.view.state.light = "day"; fixture.view.state.weather = "sand"; fixture.emit(); });
+  await page.waitForFunction(() => document.body.dataset.olpWeather === "sand");
+  now = await look(); w = await want("day", "sand");
+  const plain = await want("day", "none");
+  assert.deepEqual([now.top, now.dock, now.party, now.side], [w.top, w.dock, w.party, w.paper], "沙暴那一套");
+  assert.notEqual(now.dock, plain.dock, "和平常的不一样");
+  assert.match(now.edge, /inset/, "纸边加了一圈：" + now.edge);
+  assert.match(await page.locator("#online-paper .olp-top").innerText(), /沙暴/);
+  await shot(page, "paper-step2-sand");
+  // 离开纸片画面（关掉新画面）：配色变量、标记都拿掉
+  await page.evaluate(() => HD2DField.switchTo("old"));
+  await page.waitForFunction(() => !document.body.classList.contains("ol-paper"));
+  assert.deepEqual(await page.evaluate(() => [document.body.dataset.olpTime || "", document.body.style.getPropertyValue("--olp-kraft")]), ["", ""]);
+  assert.deepEqual(o.errors, []);
+});
+
 test("新加的 DOM（顶栏、吊牌、下拉、队伍栏下面的按钮、技能栏那一行、抽屉标签）里没有坚毅生命的数字", { timeout: 60000 }, async t => {
   const o = await paperPage(t); if (!o) return; const { page } = o;
   await asPlayer(page);

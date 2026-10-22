@@ -17,6 +17,7 @@
  *     PAPER                                 配置：类名、本机记住收起的键、文字、……
  *     active(o)                             这一刻是不是纸片画面：o = { active, isHost, screen, on3d }
  *     isOpen(name, storage, dflt) / setOpen(name, open, storage)   各块的收起 / 展开（读写都包 try/catch）
+ *     themeOf({ light, night, weather }) / themeVars(theme)          白天 / 夜晚 / 天气 → 面板的配色（CSS 变量）
  *     shellHtml()                           骨架：顶栏、「工具 ▾」下拉、吊牌、提示各占一块（分开重画）
  *     topHtml(info)                         顶栏
  *     tagsHtml(slots, o)                    行动顺序吊牌
@@ -57,7 +58,34 @@
       party: "我方队伍", you: "你", yourTurn: "轮到你了"
     },
     cam: { label: "镜头：远景 / 中景 / 近景" },
-    tilt: [-3, 2, -1.5, 3, -2, 1.5]
+    tilt: [-3, 2, -1.5, 3, -2, 1.5],
+    /* 白天 / 夜晚 / 天气（第 2 步，规格见 docs/ui-paper/README.md）：所有浮着的面板跟着这一包的光影（pv.light；旧主机没发就按游戏时钟）和天气换色调。
+     *   theme.light    光影 → 纸的底色（傍晚和规则表一样算夜里：PartyCards.isNight）
+     *   theme.weather  天气 → 纸上加的一层：沙暴、下雨（酸雨 / 雷鸣）、雪、雾（相位的谐波雾带、微光）；别的天气不加
+     *   palette        白天：牛皮纸、米白卡片、白色收据；夜晚：深色牛皮纸、黑卡纸，字是浅色（样稿 shot-day.jpg / shot-night.jpg）。
+     *                  写成 CSS 变量 --olp-<名字>（kraftInk → --olp-kraft-ink），online-paper.css 只用变量
+     *   tintKeys       天气只给这几样底色加色调（字的颜色不跟着染）
+     *   weathers       每种天气：tint 往哪个颜色混、mix 混多少（0–1）、edge 纸边那一圈（内阴影：沙暴发黄、雪是一层霜、雨是深色水渍）、
+     *                  fade 字往灰里退多少（雾：对比低一点） */
+    theme: {
+      light: { day: "day", dusk: "night", night: "night" },
+      weather: { sand: "sand", acid: "rain", thunder: "rain", snow: "snow", phase: "fog", glow: "fog" }
+    },
+    palette: {
+      day: { kraft: "#c8a46e", kraftInk: "#2a1b0c", paper: "#f3ecdc", paperInk: "#1d160e", card: "#fbf7ee", muted: "#6e5c44",
+        tape: "#e8d6a6", tapeInk: "#2a1d0c", board: "#9a7448", boardInk: "#f6efe1", boardy: "#e9c443", receipt: "#f6f4ee", receiptInk: "#26231d",
+        on: "#55d6c2", onInk: "#08332c", stamp: "#c8281e", turn: "#0b6b5a", ring: "#e2b320", hl: "rgba(255, 226, 64, .55)" },
+      night: { kraft: "#3a2d20", kraftInk: "#efe4cf", paper: "#1d1c21", paperInk: "#eae4d6", card: "#26252b", muted: "#a59c8a",
+        tape: "#a09678", tapeInk: "#1c150c", board: "#6b5135", boardInk: "#f6efe1", boardy: "#c9a73a", receipt: "#1d1c21", receiptInk: "#eae4d6",
+        on: "#3fb8a6", onInk: "#04201b", stamp: "#e0473c", turn: "#3fd1b8", ring: "#e2b320", hl: "rgba(255, 226, 64, .35)" }
+    },
+    tintKeys: ["kraft", "paper", "card", "tape", "board", "boardy", "receipt"],
+    weathers: {
+      sand: { tint: "#d9a54a", mix: 0.2, edge: "inset 0 0 18px rgba(206, 150, 60, .7)" },
+      rain: { tint: "#5d7390", mix: 0.22, edge: "inset 0 0 16px rgba(28, 42, 66, .5)" },
+      snow: { tint: "#e6f1ff", mix: 0.28, edge: "inset 0 0 14px rgba(255, 255, 255, .95)" },
+      fog: { tint: "#9b9b9b", mix: 0.3, edge: "inset 0 0 22px rgba(170, 170, 170, .55)", fade: 0.22 }
+    }
   };
 
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -91,6 +119,37 @@
       storage.setItem(k, open ? "open" : "closed");
       return true;
     } catch (e) { return false; }
+  }
+
+  /* ---------- 白天 / 夜晚 / 天气的配色（第 2 步）---------- */
+  /** o = { light 这一包的光影（day / dusk / night，没有 = 看 night）, night 游戏时钟是不是夜里, weather 天气 }：{ time: "day" | "night", weather: "sand" | "rain" | "snow" | "fog" | "none" } */
+  function themeOf(o) {
+    o = o || {};
+    const T = PAPER.theme;
+    const time = own(T.light, o.light) ? T.light[o.light] : o.night ? "night" : "day";
+    return { time, weather: own(T.weather, o.weather) ? T.weather[o.weather] : "none" };
+  }
+  const own = (obj, k) => typeof k === "string" && Object.prototype.hasOwnProperty.call(obj, k);
+  const rgbOf = (hex) => { const m = /^#([0-9a-f]{6})$/i.exec(String(hex)); if (!m) return null; const v = parseInt(m[1], 16); return [v >> 16, (v >> 8) & 255, v & 255]; };
+  /** 两个颜色（#rrggbb）按 t 混（0 = a，1 = b）；认不得的颜色原样返回 a */
+  function mix(a, b, t) {
+    const x = rgbOf(a), y = rgbOf(b);
+    if (!x || !y) return a;
+    return "#" + x.map((c, i) => Math.round(c + (y[i] - c) * t).toString(16).padStart(2, "0")).join("");
+  }
+  const kebab = (k) => k.replace(/[A-Z]/g, c => "-" + c.toLowerCase());
+  /** 这一套配色写成的 CSS 变量：{ "--olp-kraft": "#…", …, "--olp-edge-fx": 纸边那一圈 }。天气给底色混一点色调、纸边加一圈；雾天字往灰里退（对比低一点） */
+  function themeVars(th) {
+    th = th || {};
+    const base = PAPER.palette[th.time] || PAPER.palette.day, W = PAPER.weathers[th.weather] || null, out = {};
+    Object.keys(base).forEach(k => {
+      let v = base[k];
+      if (W && PAPER.tintKeys.includes(k)) v = mix(v, W.tint, W.mix);
+      if (W && W.fade && /Ink$|^muted$/.test(k)) v = mix(v, W.tint, W.fade);
+      out["--olp-" + kebab(k)] = v;
+    });
+    out["--olp-edge-fx"] = W ? W.edge : "inset 0 0 0 transparent";
+    return out;
   }
 
   /* ---------- 骨架：顶栏、「工具 ▾」下拉、吊牌、提示各占一块，分开重画 ----------
@@ -196,5 +255,5 @@
     return true;
   }
 
-  return { PAPER, active, isOpen, setOpen, shellHtml, topHtml, toolsHtml, tagsHtml, readMoves, pressMove, readCam, pressCam };
+  return { PAPER, active, isOpen, setOpen, themeOf, themeVars, mix, shellHtml, topHtml, toolsHtml, tagsHtml, readMoves, pressMove, readCam, pressCam };
 });

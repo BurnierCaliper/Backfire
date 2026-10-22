@@ -1,7 +1,8 @@
 /* 联机玩家战斗画面的「纸片风」界面（#308，online-paper.js；设计定稿在 docs/ui-paper/，排版照 layout-open.jpg / layout-collapsed.jpg）
  * 只在 body.ol-paper 时生效：online-ui.js 只给开着新画面（3D 战场建好了）的联机玩家的战斗画面加这个类；
  * 新画面关着时的联机画面、单机 game.html、主持人那边，下面一条都套不上（每条规则都以 body.ol-paper 开头）。
- * 第 1 步：先用简单的纯色面板把位置、收起、功能做对；颜色都是下面的变量（白天 / 夜晚 / 天气换色、纸纹在后面几步）。
+ * 第 1 步：位置、收起、功能；第 2 步：白天 / 夜晚 / 天气换色——颜色都是 CSS 变量 --olp-*，值在 online-paper.js 的配置表（PAPER.palette / weathers），
+ *   online-ui.js 按这一包的光影和天气写到 body 上（body[data-olp-time] / [data-olp-weather] 记着是哪一套）。
  *   战场铺满整个画面；顶上一条（.olp-top）；顶栏下面中间挂行动顺序吊牌（.olp-tags）；左上角队伍（hd2d-shell.js 的 .hd2d-party）；
  *   右上「工具 ▾」下拉（.olp-tools）；右边战斗记录 / 小队聊天的抽屉（#online-side）；底下技能栏（hd2d-shell.js 的 .g-hud）。 */
 body.ol-paper {
@@ -10,14 +11,8 @@ body.ol-paper {
   --olp-under: 100px;        /* 顶栏 + 吊牌下面：队伍、抽屉、浮着的提示从这里往下 */
   --olp-edge: 14px;          /* 面板离屏幕边 */
   --olp-dock: min(960px, calc(100vw - 2 * var(--olp-edge)));
-  --olp-kraft: #c8a46e; --olp-kraft-ink: #2a1b0c;
-  --olp-paper: #f3ecdc; --olp-paper-ink: #1d160e;
-  --olp-card: #fbf7ee; --olp-muted: #6e5c44;
-  --olp-tape: #e8d6a6; --olp-tape-ink: #2a1d0c;
-  --olp-board: #9a7448; --olp-board-ink: #f6efe1; --olp-boardy: #e9c443;
-  --olp-on: #55d6c2; --olp-on-ink: #08332c;
-  --olp-stamp: #c8281e; --olp-hl: rgba(255, 226, 64, .55);
-  --olp-shadow: 2px 5px 6px rgba(0, 0, 0, .45);
+  /* 纸片的影子 + 天气给纸边加的那一圈（沙暴发黄、雪是一层霜、雨是深色水渍、雾发灰；--olp-edge-fx 也在配置表里） */
+  --olp-shadow: 2px 5px 6px rgba(0, 0, 0, .45), var(--olp-edge-fx, inset 0 0 0 transparent);
 }
 
 /* ---------- 战场铺满：舞台铺满整个画面，热座栏、「房间码 · 菜单」按钮让开（它们的内容在顶栏、吊牌上）---------- */
@@ -92,7 +87,7 @@ body.ol-paper .olp-tags {
   display: flex; justify-content: center; gap: 12px; margin: 0; padding: 10px 4px 4px; list-style: none; pointer-events: none;
 }
 body.ol-paper .olp-tag { position: relative; flex: 0 1 auto; min-width: 0; transform: rotate(var(--tilt, 0deg)); pointer-events: auto; }
-body.ol-paper .olp-tag::before { content: ""; position: absolute; left: 50%; top: -12px; width: 1.5px; height: 14px; background: rgba(40, 28, 14, .8); }
+body.ol-paper .olp-tag::before { content: ""; position: absolute; left: 50%; top: -12px; width: 1.5px; height: 14px; background: var(--olp-tape-ink); opacity: .8; }
 body.ol-paper .olp-tag-card {
   position: relative; display: flex; align-items: center; gap: 6px; height: 40px; min-width: 96px; max-width: 150px; padding: 0 8px 0 18px;
   color: var(--olp-kraft-ink); background: var(--olp-kraft); box-shadow: var(--olp-shadow);
@@ -132,7 +127,7 @@ body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party > .part
 body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party > .party > .pm .nm { text-shadow: none; }
 body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party > .party > .pm .lv { color: var(--olp-muted); }
 body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party > .party > .pm .pm-tag { color: var(--olp-stamp); background: transparent; border: 1.5px solid var(--olp-stamp); }
-body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party > .party > .pm.on { outline: 3px solid #e2b320; }
+body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party > .party > .pm.on { outline: 3px solid var(--olp-ring); }
 body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party > .party > .pm.off { opacity: .8; }
 body.online-player.ol-paper .olp-party-tools { display: flex; gap: 5px; padding: 0 10px 10px; }
 body.online-player.ol-paper .olp-party-tools .ol-button {
@@ -156,7 +151,7 @@ body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell::before { display: no
 body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell .hd2d-who { color: var(--olp-kraft-ink); text-shadow: none; }
 body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell .hd2d-who small { color: var(--olp-muted); }
 body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell .hd2d-dock-toggle { color: var(--olp-kraft-ink); background: var(--olp-card); border: 1.5px solid rgba(0, 0, 0, .4); }
-body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell .olp-turn { margin-left: auto; color: #0b6b5a; border-color: #0b6b5a; font-size: 15px; }
+body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell .olp-turn { margin-left: auto; color: var(--olp-turn); border-color: var(--olp-turn); font-size: 15px; }
 /* 提示栏（选目标、取消、为什么不能用……）：在技能那一排下面；收起时只在要点选（有按钮 / 标题）时露出来 */
 body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hint {
   position: static; width: auto; max-height: none; margin: 6px 0 0; text-align: left; color: var(--olp-muted); font-size: 13px;
