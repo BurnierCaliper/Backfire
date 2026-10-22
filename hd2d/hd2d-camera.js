@@ -13,6 +13,7 @@
  *   const to = HD2DCamera.pose(layout, "near", zoneId, { actorId });   // 这一段的镜头：{ tier, zone, zones, target, dist, elevation, fov, pos, dof, fogShift, clip, tilt, plates… }
  *   const tw = HD2DCamera.tween(from, to, { reduced });                // 过渡；reduced = 减少动态效果：不插值，直接切过去
  *   HD2DCamera.at(tw, 秒)                                               // 这一刻的镜头（k = 缓动后的进度 0–1，铭牌的抬高也按它插值）
+ *   HD2DCamera.pastFar(s, ±1) / overheadPose(far, { elevation, dist })  // 正式画面（#261）：远景再往外拉转回旧画面；转场时镜头升到 / 降自战场正上方
  */
 (function (root, factory) {
   if (typeof module === "object" && module.exports) module.exports = factory(require("./hd2d-layout.js"));
