@@ -826,6 +826,7 @@ export function createHd2dScene(container, options) {
   const pinchGap = () => { const [a, b] = [...pinch.pts.values()]; return Math.hypot(a.x - b.x, a.y - b.y); };
   renderer.domElement.addEventListener("pointerdown", (e) => {
     if (e.pointerType !== "touch") return;
+    if (e.isPrimary) pinch.pts.clear();   // 新的一次触摸（第一根手指）：上一次没收到抬起的手指不算
     pinch.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pinch.pts.size === 2) { pinch.d0 = pinchGap(); pinch.done = false; }
   });

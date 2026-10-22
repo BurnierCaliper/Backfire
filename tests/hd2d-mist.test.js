@@ -398,6 +398,7 @@ test("不在「远」档时缩小只换档：场景里滚轮 / 双指走 zoomSte
   assert.match(src, /wheelState = r\.state;\s*zoomStep\(r\.step\);/, "滚轮");
   assert.match(src, /const step = C\.pinchStep\(pinchGap\(\) \/ pinch\.d0\);\s*if \(step\) \{ pinch\.done = true; zoomStep\(step\); \}/, "双指：一次手势一下");
   assert.match(src, /if \(pinch\.pts\.size === 2\) \{ pinch\.d0 = pinchGap\(\); pinch\.done = false; \}/, "两根手指按下才开始量");
+  assert.match(src, /if \(e\.isPrimary\) pinch\.pts\.clear\(\);/, "新的一次触摸：上一次没收到抬起的手指不算");
   assert.equal((src.match(/options\.onZoomOut\(\)/g) || []).length, 1, "只有远景到头这一处交出去");
 });
 
@@ -534,4 +535,15 @@ test("场景：转场占着镜头（state.lock）——升到正上方用 hd2d-c
   assert.match(mistCss, /var\(--mist-o\)/);
   assert.match(mistCss, /var\(--mist-in\)/);
   assert.match(mistCss, /var\(--mist-out\)/);
+  // 一团团的 transform 在没涌进来 / 盖满 / 散开三种状态里排法一样（translate 居中 → translate 挪 → scale），逐项插值，不退成矩阵插值
+  const shape = (t) => {   // 只留函数名：translate(calc(var(--dx) * .7), …) → translate()
+    let out = "", depth = 0;
+    for (const ch of t) {
+      if (ch === "(") { if (depth++ === 0) out += "("; } else if (ch === ")") { if (--depth === 0) out += ")"; } else if (depth === 0) out += ch;
+    }
+    return out.trim();
+  };
+  const tf = [/\.hd2d-mist > i \{[^}]*transform: ([^;]+);/, /\.hd2d-mist\.in > i \{[^}]*transform: ([^;]+);/, /\.hd2d-mist\.out > i \{[^}]*transform: ([^;]+);/]
+    .map(re => shape(re.exec(mistCss)[1]));
+  tf.forEach(t => assert.equal(t, "translate() translate() scale()", "transform 的排法：" + t));
 });

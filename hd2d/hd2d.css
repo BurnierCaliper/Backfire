@@ -316,7 +316,7 @@
   transition: transform var(--mist-in) cubic-bezier(.22, .7, .3, 1) var(--d), opacity var(--mist-in) ease-out var(--d);
   will-change: transform, opacity;
 }
-.hd2d-mist.in > i { opacity: var(--mist-o); transform: translate(-50%, -50%) scale(1); }
+.hd2d-mist.in > i { opacity: var(--mist-o); transform: translate(-50%, -50%) translate(0, 0) scale(1); }   /* 三种状态的 transform 一样排（逐项插值） */
 .hd2d-mist.out > i {
   opacity: 0; transform: translate(-50%, -50%) translate(calc(var(--dx) * .7), calc(var(--dy) * .7)) scale(1.3);
   transition: transform var(--mist-out) ease-in-out, opacity var(--mist-out) ease-in;
