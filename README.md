@@ -368,6 +368,13 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **新画面接入（三）：联机玩家的战斗画面也能开新画面**（issue #289，只是画面，不改规则结算；前两步：#261 单机 game.html 能开新画面、云雾转场，#283 3D 战场上的攻击演出、纸片风数字、首领机制。房主 / 主持人那边的画面这次不动。hd2d/hd2d-field.js · 「画面挂在哪」：单机 `SOLO`（`soloView`）、`attach` / `detach`、把手的 `on` / `view` / `actor` / `marks` / `play` / `skip`、`packetView`、`play`、`placeToggle` / `homeToggle`、`remount`、`scrollsUp`，game.js 调的 `on` / `view` / `actor` / `marks` 只管单机；online-ui.js · `battleCb`（旧战场和新画面同一份点选回调）、`hd2dSpec`、`marksOf3d`、`paintField3d`、`play3d`、`paintStage` / `render` / `playPacket` / 离开时接上、舞台顶上工具栏的 `.ol-hd2d-slot`；hd2d/hd2d.css 的 `.ol-battle.hd2d-on`、`.ol-hd2d-slot`；online.css 联机玩家画面的隐藏规则放过 `#hd2d-pop`；测试：新增 tests/hd2d-online.test.js）
+  - **以前**：联机玩家（不是房主 / 主持人）的战斗画面是 online-ui.js 的 `paintStage` 按收到的包画的旧画面（单位卡、`AttackFx` / `HitFx` 演出、卡上的弹字）；顶栏的「新画面 关 / 开」开关和云雾转场只接到了单机（game.js）上，联机玩家的页面里那个开关被联机画面盖住，用不了新画面。
+  - **现在**：
+    - **开关和转场**：联机玩家进了战斗，同一个开关（`#g-hd2d-toggle`，同一个按钮）挪到联机舞台顶上的工具栏（「地图 / 角色资料 / 武器……」那一排），点它、旧战场上往前滚（联机的战场单位多时自己会滚动：还没滚到顶时照旧滚，滚到顶了再往前滚才算）、新画面远景再往外拉都走同一个入口 `HD2DField.switchTo`，一样的云雾转场，云雾铺在联机的战场上。开关照旧只记在这台电脑上（localStorage），镜头是自己的，**什么都不经过联机发给别人**，每个玩家自己选。离开战斗（探索、离开房间）新画面拆下来，开关放回单机的顶栏。本机记着开的，进战斗直接建好（不播转场）。
+    - **画面只用收到的包**：新画面的单位、铭牌、区域、天气、光线、场景、棋盘、场地、首领机制（铭牌上的图标和倒计时、地台上的踩塔；横幅和援军倒计时照旧是 online-battle.js 画在战场上方的那一摞，压在 3D 上面）都来自联机玩家收到的那一份（`OnlineView.projectState` 投影过的 `displayState` / `view.state`，`packetView` 原样用、不加字段）；配置物照单机的样子当成铭牌（online-battle.js 的 `snapProp` 再过 `OnlineView.projectUnit`）。不读房主的原始 state，也不读单机的快照；**坚毅生命投影里本来就没有，新画面的 DOM、铭牌、数字里都没有坚毅生命的数字**。白名单没有为新画面加任何字段。
+    - **演出**：收到行动包时，新画面开着就整包交给 hd2d-play.js 播（`HD2DPlay.play`，原型页按联机包播的同一份，不复制逻辑）：出手 / 弹道 / 打中照 attack-fx、纸片风数字、打中那一下的纸片感、出手时推镜头，位置问 3D 铭牌；第一下打中时画面换成包里的 state（铭牌的血条跟着掉），播完回到这一包。演出倍率用旧画面攻击演出同一个钟（「演出 1× / 2×」），演出中点战场 = 跳过，新包来了上一个立刻结束。**关着时还是原来 `paintStage` 的写法，旧画面一点不变**。纸片风数字那一层（`#hd2d-pop`）以前会被联机玩家画面的隐藏规则藏掉，现在放过它。
+    - **操作**：轮到这个玩家时，3D 上点铭牌 = 点单位卡（选目标、出手）、点地台 = 点区（选区、移动），走的是旧战场同一份回调（`battleCb`：选项问主机、主机回「确认执行」就出手），不另开一条路；能选的目标描边、其余变暗、能去的区亮框，和旧画面的 `is-targetable` / `is-dim` / `is-move-target` 同一个判断；悬停铭牌弹旧画面同样的单位说明（`unitTip`），右键取消照旧。
 - **后台加首领机制时可以填技能名（选填，不填用机制原名）**（issue #291；作者定：机制名直接写明太直白，敌人的技能就写技能名，和沙尘爆裂一样；「可填可不填」。battle-commands.js · `validate` 的 `mechName`、`named`、`mechLabel`、`panel` 的 `setExecution` / `setShare` / `setSpread` / `setTower`；boss-mechanics.js · `BOSS_MECH_NAME_MAX`；game.js · `renderFieldSheet` 的 `mechNameBox` 和四个面板；game.css · `.exec-edit input[data-x="name"]`；测试：新增 tests/boss-mech-name.test.js）
   - **以前**：内置首领的机制有自己的技能名（亡命之王的「公开处刑」「齐射」、沙灵聚合体的「沙尘爆裂」「电能炮」，`addBossMechanic` 传了 `name`）；主持人在战场配置里给敌人加死刑 / 分担 / 远离 / 踩塔时没地方填名字，画面上只能写机制原名。
   - **现在**：
