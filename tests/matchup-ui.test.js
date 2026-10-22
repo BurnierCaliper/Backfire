@@ -29,7 +29,9 @@ test("没有数据接口时不出按钮、不自己算", () => {
   assert.equal(c.MatchupUI.available(), false);
   assert.equal(c.MatchupUI.localChart(), null);
   assert.match(c.MatchupUI.html(null), /暂时没有数据/);
-  assert.match(read("game.html"), /id="g-matchup"[^>]*hidden/);
+  // 入口在暂停页面里（#298）：顶栏的 #g-matchup / #r-matchup 去掉了，菜单那一项也要 available() 才显示
+  assert.doesNotMatch(read("game.html"), /id="[gr]-matchup"/);
+  assert.match(read("matchup-ui.js"), /PauseMenu\.register\(\{ id: "matchup", visible: \(\) => available\(\) &&/);
   assert.ok(read("game.html").indexOf('src="matchup.js"') < read("game.html").indexOf('src="matchup-ui.js"'), "matchup.js 先加载");
 });
 
@@ -107,7 +109,9 @@ test("联机玩家：拿房主 matchup 的 opt，按自己选中单位的区改�
   const ol = read("online-ui.js");
   assert.match(ol, /view\.matchup \|\| view\.packet\?\.matchup/);
   assert.match(ol, /MatchupUI\.viewChart\(m, st, selectedActor \|\| \(mine \? cur : null\)\)/);
-  assert.match(ol, /screen === "battle" && matchupOf\(\) \? button\("克制表", "matchup"\)/);
+  // 入口在暂停页面里（#298）：舞台工具栏不再有「克制表」按钮
+  assert.match(ol, /register\(\{ id: "matchupOnline", config: "matchup", visible: \(\) => !!\(view\.active && !view\.isHost && view\.screen === "battle" && matchupOf\(\)\)/);
+  assert.doesNotMatch(ol, /button\("克制表", "matchup"\)/);
   assert.doesNotMatch(M.html(mine), /shp|坚毅/);
 });
 

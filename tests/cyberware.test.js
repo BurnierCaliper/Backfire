@@ -14,8 +14,9 @@ const hero = (lv, extra) => Object.assign({ kit: "t", name: "测试", attrs: { s
 c.__h = null;
 function withHero(h, src) { c.__h = h; return run(src); }
 
-test("正式目录是空的；示例要显式加载", () => {
-  assert.equal(run("Object.keys(CYBERWARE).length"), 0);
+test("正式目录是单体伤害型模板（打击 / 射击义体 .vol1–.vol4，#262），没有示例；示例要显式加载", () => {
+  assert.deepEqual(J(run("Object.keys(CYBERWARE)")), ["strike_v1", "strike_v2", "strike_v3", "strike_v4", "shot_v1", "shot_v2", "shot_v3", "shot_v4"]);
+  assert.equal(run("Object.keys(CYBERWARE).some(k => CYBERWARE[k].example)"), false);
   assert.deepEqual(J(run("cyberwareLoadExamples()")), ["example_t5_melee"]);
   const d = J(run("cyberwareDef('example_t5_melee')"));
   assert.equal(d.example, true); assert.equal(d.tier, 5); assert.equal(d.hpCut, 5); assert.equal(d.occupancy, 0.15);

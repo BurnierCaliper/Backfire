@@ -173,7 +173,7 @@
     }).filter(f => f.layerType && f.seq.length);
     if (focuses.length) out.focuses = focuses;
     // 状态图标（hud-icons.js）：自我效果、挂着的攻击效果、刺入 / 牵挂标记、角色仪表的数据
-    enumField(unit, out, "self", ["burn", "frost", "splash", "conductor", "anchor", "store", "doppler"]);
+    enumField(unit, out, "self", ["burn", "frost", "splash", "conductor", "anchor", "store", "doppler", "frenzy"]);   // frenzy：狂暴（下水道狂鼠）
     const sbs = number(get(unit, "selfBurnStacks")); if (sbs !== undefined) out.selfBurnStacks = sbs;
     const hung = arr(get(r, "nextAtkFx")).filter(x => ["combust", "icebreak", "bolt", "etch", "backflow", "inertia", "diffract"].includes(x)).slice(0, 7);
     if (hung.length && out.resources) out.resources.nextAtkFx = hung;
@@ -310,7 +310,7 @@
     for (const key of zoneKeys) { const zv = zoneViewOf(Number(key), state); if (zv) (out.zoneView = out.zoneView || {})[key] = zv; }
     return out;
   }
-  const popupWords = new Set(["无效", "失衡", "起身", "倒下", "刺入", "温和", "残忍", "登场支援！", "聚焦抹层", "灼烧", "感电", "腐蚀", "冻伤", "震荡", "共振", "高能", "虚弱", "振奋", "躲藏", "优势", "紧追", "熔融", "刺骨", "过载", "错位", "扩散", "折射", "红弹", "蓝弹", "导体", "霜结", "自焚", "溅射", "千钧", "蓄能", "多普勒", "爆燃", "破冰", "雷击", "蚀刻", "倒流", "惯性", "衍射", "穿刺", "猛击", "弱点特效", "超载", "中和", "被打倒", "克制"]);
+  const popupWords = new Set(["无效", "失衡", "起身", "倒下", "刺入", "温和", "残忍", "登场支援！", "聚焦抹层", "灼烧", "感电", "腐蚀", "冻伤", "震荡", "共振", "高能", "虚弱", "振奋", "躲藏", "优势", "紧追", "熔融", "刺骨", "过载", "错位", "扩散", "折射", "红弹", "蓝弹", "导体", "霜结", "自焚", "溅射", "千钧", "蓄能", "多普勒", "狂暴", "爆燃", "破冰", "雷击", "蚀刻", "倒流", "惯性", "衍射", "穿刺", "猛击", "弱点特效", "超载", "中和", "被打倒", "克制"]);
   function projectTape(tape, context = {}) {
     const units = arr(get(context.state, "units"));
     return arr(tape).slice(0, 256).flatMap(event => {
@@ -641,6 +641,8 @@
       out.bag = projectBagDetail(get(packet, "bag"));
       out.battles = projectBattles(get(packet, "battles"));
     }
+    // 角色资料的详细内容（玩家点开一条时才要，online-game.js · loreEntry）：只有已发布的，草稿在房主那边就是 null
+    if (get(packet, "type") === "loreEntry") out.entry = projectLoreEntry(get(packet, "entry"));
     if (own(packet, "offlineWait")) {
       const wait = get(packet, "offlineWait");
       out.offlineWait = obj(wait) ? identifiers(wait, copyFields(wait, {}, ["name"], ["deadline", "remainingMs"], []), ["actor", "owner"]) : null;
@@ -666,6 +668,8 @@
     if (own(packet, "rogue")) { const r = get(packet, "rogue"); out.rogue = obj(r) ? scrubHidden(clone(r)) : null; }
     // 任务日志：只留玩家该看的字段（主持人备注、敌人配置、隐藏站的内容在房主那边就去掉了，这里再按白名单过一遍）
     if (own(packet, "quests")) out.quests = projectQuests(get(packet, "quests"));
+    // 角色资料：已发布条目的索引（不带详细内容；草稿在房主那边就没放进来，这里再挡一次）
+    if (own(packet, "lore")) out.lore = projectLore(get(packet, "lore"));
     if (own(packet, "purse")) out.purse = projectPurse(get(packet, "purse"));
     if (own(packet, "shop")) out.shop = projectShop(get(packet, "shop"));
     if (own(packet, "shopSell")) out.shopSell = projectShopSell(get(packet, "shopSell"));
@@ -804,26 +808,67 @@
     const str = (v, n) => typeof v === "string" ? v.slice(0, n) : "";
     const num = v => (typeof v === "number" && isFinite(v) ? v : 0);
     const BUR = ["none", "strain", "heavy"];
-    const item = d => ({ id: str(d.id, 60), name: str(d.name, 60), tier: num(d.tier), kind: str(d.kind, 20), range: str(d.range, 10), element: str(d.element, 20),
+    // vol / line / kindName / summary：义体种类表写好的展示文字（cyberware.js · cwPublic），界面不用认得是哪一种
+    const item = d => ({ id: str(d.id, 60), name: str(d.name, 60), tier: num(d.tier), vol: num(d.vol), line: d.line ? str(d.line, 30) : null,
+      kind: str(d.kind, 20), kindName: str(d.kindName, 20), summary: str(d.summary, 120), range: str(d.range, 10), element: str(d.element, 20),
       damageText: str(d.damageText, 40), break: num(d.break), hpCut: num(d.hpCut), conflict: d.conflict ? str(d.conflict, 30) : null, example: !!d.example });
+    // 以新换旧：会先拆掉同系列的哪件、它的拆除费
+    const swap = d => ({ replaces: d.replaces ? str(d.replaces, 60) : null, replaceName: str(d.replaceName, 60), replaceCost: num(d.replaceCost) });
     const v = obj(c.view) ? c.view : {};
     const out = { kit: str(c.kit, 40), name: str(c.name, 40), view: {
       rate: num(v.rate), cap: num(v.cap), cyberwareRate: num(v.cyberwareRate), layerRate: num(v.layerRate), remainingHp: num(v.remainingHp),
       overinstall: !!v.overinstall, canOverinstall: !!v.canOverinstall, burden: BUR.includes(v.burden) ? v.burden : "none", burdenText: str(v.burdenText, 80),
       installed: arr(v.installed).slice(0, 16).filter(obj).map(d => Object.assign(item(d), { usesLeft: num(d.usesLeft), removeCost: num(d.removeCost) })) },
       shop: arr(c.shop).slice(0, 64).filter(obj).map(d => Object.assign(item(d), { price: num(d.price), text: str(d.text, 300), installed: !!d.installed,
-        canInstall: !!d.canInstall, error: d.error ? str(d.error, 80) : null, warning: str(d.warning, 80), rateAfter: num(d.rateAfter) })) };
+        canInstall: !!d.canInstall, error: d.error ? str(d.error, 80) : null, warning: str(d.warning, 80), rateAfter: num(d.rateAfter) }, swap(d))) };
     out.purse = Math.max(0, Math.floor(num(c.purse)));
     const pv = obj(c.previews) ? c.previews : {};
     out.previews = {};
     Object.keys(pv).slice(0, 64).forEach(k => {
       const p = pv[k], key = str(k, 60);
       if (!obj(p) || !key) return;
-      out.previews[key] = { ok: !!p.ok, error: p.error ? str(p.error, 80) : null, cost: num(p.cost), id: str(p.id, 60), name: str(p.name, 60), tier: num(p.tier),
+      out.previews[key] = Object.assign({ ok: !!p.ok, error: p.error ? str(p.error, 80) : null, cost: num(p.cost), price: num(p.price), id: str(p.id, 60), name: str(p.name, 60), tier: num(p.tier),
         rateBefore: num(p.rateBefore), rateAfter: num(p.rateAfter), cap: num(p.cap), overinstall: !!p.overinstall, hpCut: num(p.hpCut),
-        conflictWith: p.conflictWith ? str(p.conflictWith, 60) : null, burden: BUR.includes(p.burden) ? p.burden : "none", warning: str(p.warning, 80) };
+        conflictWith: p.conflictWith ? str(p.conflictWith, 60) : null, burden: BUR.includes(p.burden) ? p.burden : "none", warning: str(p.warning, 80) }, swap(p));
     });
     return scrubHidden(out);
+  }
+  /* 角色资料（lore.js，issue #264）：每种类型给玩家看哪些字段在这里登记（新加的字段、类型没登记就不发）。
+   * 都是主持人写给玩家看的文字（和任务目标一样）：只去控制字符、截长度，不按敏感词整段丢掉——人物介绍里「后台」是常用词（「有后台」）；
+   * 坚毅生命这类规则数值根本不在条目里（条目只有主持人写的字）。条数、长度上限都比 lore.js 的配置宽，只是兜底（tests/lore.test.js 查：调大配置时这里也要跟着调） */
+  const LORE_PUBLIC = Object.freeze({ npc: Object.freeze(["name", "gender", "race", "faction", "title"]) });
+  const LORE_CAP = Object.freeze({ entries: 400, field: 60, body: 4000 });
+  function loreStr(v, max, lines) {
+    if (typeof v !== "string") return "";
+    // 控制字符（\p{Cc}）和零宽 / 双向控制这类格式字符（\p{Cf}）去掉；详细内容留着换行
+    const clean = lines ? v.replace(/\r\n?/g, "\n").replace(/(?!\n)[\p{Cc}\p{Cf}]/gu, "") : v.replace(/[\p{Cc}\p{Cf}]/gu, "");
+    const cut = clean.slice(0, max), last = cut.charCodeAt(cut.length - 1);
+    return last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut;
+  }
+  /** 索引：{ id, type, fields: { 登记过的字段 }, rev, more（有没有详细内容）}。带着 status 又不是已发布的（草稿）直接丢掉；id 重复的只留第一条 */
+  function projectLore(list) {
+    if (!Array.isArray(list)) return null;
+    const seen = new Set();
+    return list.slice(0, LORE_CAP.entries).flatMap(e => {
+      if (!obj(e)) return [];
+      const lid = id(get(e, "id")), type = get(e, "type");
+      if (!lid || seen.has(lid) || !Object.hasOwn(LORE_PUBLIC, type) || own(e, "status") && get(e, "status") !== "published") return [];
+      seen.add(lid);
+      const src = get(e, "fields"), fields = {};
+      for (const key of LORE_PUBLIC[type]) { const v = loreStr(get(src, key), LORE_CAP.field); if (v) fields[key] = v; }
+      const rev = number(get(e, "rev"));
+      const out = { id: lid, type, fields, rev: Number.isSafeInteger(rev) && rev > 0 ? rev : 1 };
+      if (get(e, "more") === true) out.more = true;
+      return [out];
+    });
+  }
+  /** 一条的详细内容：索引那几样 + body（保留换行） */
+  function projectLoreEntry(e) {
+    const row = obj(e) ? projectLore([e])[0] : null;
+    if (!row) return null;
+    delete row.more;
+    const body = loreStr(get(e, "body"), LORE_CAP.body, true); if (body) row.body = body;
+    return row;
   }
   function projectQuests(list) {
     if (!Array.isArray(list)) return null;
@@ -867,7 +912,7 @@
     });
     return out;
   }
-  const api = { SCHEMA, pickKeys, projectHud, projectPacket, projectQuests, projectPurse, projectShop, projectShopSell, projectClinic, projectSmith, projectWorkshop, projectCyberware, projectRest, projectCamp, projectParty, projectSheets, projectBagDetail, projectUnit, projectState, projectTape, projectFx, projectMessages, projectLogs, projectView, projectActionMenu, safeText: text, safeError };
+  const api = { SCHEMA, pickKeys, projectHud, projectPacket, projectQuests, projectLore, projectLoreEntry, LORE_PUBLIC, LORE_CAP, projectPurse, projectShop, projectShopSell, projectClinic, projectSmith, projectWorkshop, projectCyberware, projectRest, projectCamp, projectParty, projectSheets, projectBagDetail, projectUnit, projectState, projectTape, projectFx, projectMessages, projectLogs, projectView, projectActionMenu, safeText: text, safeError };
   root.OnlineView = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof globalThis !== "undefined" ? globalThis : window);

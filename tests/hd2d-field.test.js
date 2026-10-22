@@ -106,13 +106,14 @@ function fakePage() {
 }
 const settle = () => new Promise(r => setImmediate(r));
 
-test("关着时一切照旧：开关没开，boot 不加载 three.js / 场景、不碰旧战场，按钮写「新画面 关」；点一下才加载，加载不了（本地文件打不开 ES 模块、没有 WebGL）就退回旧画面、开关记成关、给一句提示", async () => {
+test("关着时一切照旧：开关没开，boot 不加载 three.js / 场景、不碰旧战场，按钮写「新画面 关」；点一下才加载，加载不了（没有 WebGL）就退回旧画面、开关记成关、给一句提示", async () => {
   const F = field();
   const mem = new Map(), storage = { getItem: k => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => { mem.set(k, String(v)); } };
   let loads = 0;
   const hints = [];
   const P = fakePage();
-  F.boot({ doc: P.doc, storage, load: () => { loads++; return Promise.reject(new Error("Failed to fetch dynamically imported module")); }, hint: (m) => hints.push(m) });
+  // reduced：减少动态效果，点开关直接切（云雾转场另在 tests/hd2d-mist.test.js）
+  F.boot({ doc: P.doc, storage, load: () => { loads++; return Promise.reject(new Error("Failed to fetch dynamically imported module")); }, hint: (m) => hints.push(m), reduced: () => true });
   await settle();
   const btn = P.els["g-hd2d-toggle"];
   assert.equal(loads, 0, "关着：不加载");
@@ -130,7 +131,7 @@ test("关着时一切照旧：开关没开，boot 不加载 three.js / 场景、
   assert.equal(mem.get(F.FIELD.storageKey), "off", "开关记成关");
   assert.equal(btn.textContent, F.FIELD.label.off);
   assert.equal(btn.getAttribute("aria-pressed"), "false");
-  assert.ok(hints.length === 1 && /新画面/.test(hints[0]) && /本地服务|WebGL/.test(hints[0]), "提示为什么打不开：" + hints[0]);
+  assert.ok(hints.length === 1 && /新画面/.test(hints[0]) && /WebGL/.test(hints[0]), "提示为什么打不开：" + hints[0]);
   assert.equal(P.els["g-field"].children.length, 0);
   // 本机记着开：一打开就加载
   mem.set(F.FIELD.storageKey, "on");
@@ -157,19 +158,13 @@ test("关着时 game.html 的战场照旧：顶栏多一个「新画面」开关
   assert.ok(pos("game.js") > 0 && pos("hd2d/hd2d-field.js") > pos("game.js"), "hd2d-field.js 在 game.js 后面");
   assert.ok(!/<script[^>]*type="module"/.test(html), "不直接加载 ES 模块");
   assert.ok(!/<script src="(?:hd2d\/hd2d-(?!field\.js)[^"]*|vendor\/three\/[^"]*)"><\/script>/.test(html), "布局、场景、three.js 开了才加载");
-  // importmap：three.js 继续用 vendor/three/（开了以后 import 场景时要它）
-  const imap = /<script type="importmap">([^<]*)<\/script>/.exec(html);
-  assert.ok(imap, "有 importmap");
-  const map = JSON.parse(imap[1]).imports;
-  assert.equal(map.three, "./vendor/three/three.module.min.js");
-  assert.equal(map["three/addons/"], "./vendor/three/addons/");
-  assert.ok(fs.existsSync(path.join(HP.ROOT, "vendor/three/three.module.min.js")));
-  assert.ok(html.indexOf('<script type="importmap">') < html.indexOf("<body>"), "importmap 在 <head> 里（在任何模块之前）");
+  // 场景和 three.js 打成了普通脚本 hd2d/hd2d-scene.bundle.js（tools/build-hd2d.js），game.html 不再要 importmap（tests/hd2d-bundle.test.js）
+  assert.ok(!/<script type="importmap">/.test(html), "不要 importmap：直接双击打开（file://）也能开新画面");
   assert.ok(html.includes('<link rel="stylesheet" href="hd2d/hd2d.css" />'), "战场的样式（类名都是 hd2d- / pl- 开头，关着时一条都套不上）");
   // hd2d-field.js 开了才加载的东西都在 hd2d/ 里
   const F = field();
   F.FIELD.scripts.forEach(f => assert.ok(fs.existsSync(HP.mod(f)), f));
-  assert.ok(fs.existsSync(HP.mod("hd2d-scene.js")));
+  assert.ok(fs.existsSync(HP.mod(F.FIELD.scene)), "场景包在 hd2d/ 里");
   // game.js：接新画面的地方都先看开关（关着 = 原来的样子）
   const g = read("game.js");
   assert.match(g, /const field3d = \(\) => !!\(window\.HD2DField && HD2DField\.on\(\)\);/);
@@ -418,7 +413,7 @@ test("页面里走一遍（场景是假的）：记着开 → 3D 战场铺在 #g
   const P = fakeDocFull(), mem = new Map([[F.FIELD.storageKey, "on"]]);
   const storage = { getItem: (k) => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => { mem.set(k, String(v)); } };
   const log = { layouts: [], refits: 0 };
-  F.boot({ doc: P.doc, storage, load: () => Promise.resolve(fakeScene(log)), hint: (m) => calls.push(["hint", m]) });
+  F.boot({ doc: P.doc, storage, load: () => Promise.resolve(fakeScene(log)), hint: (m) => calls.push(["hint", m]), reduced: () => true });   // 关掉时直接切（云雾转场另在 tests/hd2d-mist.test.js）
   await settle(); await settle();
   const field = P.els["g-field"], app = P.els["g-app"];
   assert.equal(F.on(), true, "建好了");

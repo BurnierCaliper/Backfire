@@ -93,7 +93,7 @@
       else if (unitField === "iv") editor = `<div class="ogm-grid">${number("ogm-iv-hp", "血量水平 %（−10～10）", (u.iv || {}).hp || 0, -10, 10, 1)}${number("ogm-iv-atk", "ATK 水平 %（−10～10）", (u.iv || {}).atk || 0, -10, 10, 1)}</div><p class="ogm-muted">按生成时的原始数值重算：血量上限 ×(1 + 血量%)（已受的伤按比例保留），ATK ×(1 + ATK%)。</p>`;
       else if (unitField === "race") {
         const o = raceNames(); delete o[""];
-        editor = `${select("ogm-unit-value", "种族", options(o, typeof raceLabel === "function" ? raceLabel(u.race) : ""))}<p class="ogm-muted">按生成时的原始数值重算六维（先去掉旧种族加的，再加新种族的；只有随机种族的盗匪、燃气收集机才改数值），个体值跟着重算。</p>`;
+        editor = `${select("ogm-unit-value", "种族", options(o, typeof raceLabel === "function" ? raceLabel(u.race) : ""))}<p class="ogm-muted">按生成时的原始数值重算六维（先去掉旧种族加的，再加新种族的；只有随机种族的盗匪、燃气收集机和下水道的狂鼠才改数值），个体值跟着重算。</p>`;
       }
       else if (unitField === "enriched") editor = `${select("ogm-unit-value", "富集", options({ on: "富集", off: "普通（不富集）" }, u.enriched ? "on" : "off"))}<p class="ogm-muted">富集：装甲层 ×1.5、名字加「富集」、打倒奎支 ×5 并掉武器升级材料、第 3 回合起会下潜逃走。改成普通则反过来（已受的伤按比例保留）。定了以后开战不再随机。</p>`;
       else if (unitField === "self") editor = select("ogm-unit-value", "自身状态", options({ none: "无", burn: "焚身", frost: "霜结", splash: "溅射", conductor: "导体", anchor: "锚定", store: "储能", doppler: "多普勒" }, u.self));
@@ -127,8 +127,11 @@
       // except after an explicit selector change or accepted submit.
       if (open && focused && !busy && container.querySelector("#ogm-panel")) return;
       const tabs = { enemies: "敌人", units: "单位", props: "配置物", field: "地形", weather: "天气", attack: "安排攻击" };
-      container.innerHTML = `<button id="ogm-toggle" type="button" data-action="toggle" aria-expanded="${open}" aria-controls="ogm-panel">${view.manualPhase ? "敌人待操作 · " : ""}主持人工具</button>${open ? `<section id="ogm-panel" aria-label="主持人工具面板"><header><h2>主持人工具</h2>${button("关闭", "close", 'aria-label="关闭主持人工具"')}</header><div class="ogm-toolbar">${check("ogm-silent", "静默（不写玩家记录）", silent)}<span class="ogm-muted">仅主持人</span></div><nav aria-label="主持人工具类别">${Object.entries(tabs).map(([k, label]) => button(label, "tab", `data-tab="${k}" aria-pressed="${tab === k}"`)).join("")}</nav><p id="ogm-notice" role="status"${notice ? "" : " hidden"}>${esc(notice)}</p><div class="ogm-content">${({ enemies: enemiesMarkup, units: unitMarkup, props: propMarkup, field: fieldMarkup, weather: weatherMarkup, attack: attackMarkup })[tab]()}</div></section>` : ""}`;
+      // 入口在暂停页面里（#298，以前是右下角的「主持人工具」按钮 #ogm-toggle）：这里只画面板
+      container.innerHTML = open ? `<section id="ogm-panel" aria-label="主持人工具面板"><header><h2>主持人工具</h2>${button("关闭", "close", 'aria-label="关闭主持人工具"')}</header><div class="ogm-toolbar">${check("ogm-silent", "静默（不写玩家记录）", silent)}<span class="ogm-muted">仅主持人</span></div><nav aria-label="主持人工具类别">${Object.entries(tabs).map(([k, label]) => button(label, "tab", `data-tab="${k}" aria-pressed="${tab === k}"`)).join("")}</nav><p id="ogm-notice" role="status"${notice ? "" : " hidden"}>${esc(notice)}</p><div class="ogm-content">${({ enemies: enemiesMarkup, units: unitMarkup, props: propMarkup, field: fieldMarkup, weather: weatherMarkup, attack: attackMarkup })[tab]()}</div></section>` : "";
     }
+    /** 暂停页面里点「主持人工具」：打开面板（和以前点 #ogm-toggle 一样） */
+    function openPanel() { view = bridge.getView(); if (!container) render(); if (!container) return; open = true; refresh(); }
     // Esc closes the panel wherever focus is (capture phase, before the stage swallows the key).
     function onKey(event) { if (event.key === "Escape" && open && container) { event.preventDefault(); event.stopPropagation(); open = false; refresh(); } }
     function refresh() { if (container?.contains(document.activeElement)) document.activeElement.blur(); render(); }
@@ -161,7 +164,6 @@
     function onClick(event) {
       const b = event.target.closest("[data-action]"); if (!b || !container.contains(b)) return;
       const action = b.dataset.action;
-      if (action === "toggle") { open = !open; refresh(); return; }
       if (action === "close") { open = false; refresh(); return; }
       if (action === "tab") { tab = b.dataset.tab; notice = ""; refresh(); return; }
       if (busy) return;
@@ -219,10 +221,15 @@
       }
       if (cmd) void send(cmd);
     }
-    const off = typeof bridge.subscribe === "function" ? bridge.subscribe(render) : null;
+    // 暂停页面里的「主持人工具」（#298）：只有主持人看得到（联机单局没有主持人）；敌人等主持人手动操作时写在名字前面，「菜单」按钮挂「!」
+    const PM = root.PauseMenu;
+    const pmOff = PM ? PM.register({ id: "gmTools", visible: () => !!container, badge: () => !!(container && view && view.manualPhase),
+      label: () => `${view && view.manualPhase ? "敌人待操作 · " : ""}${PM.CONFIG.items.gmTools.label}`, run: openPanel }) : null;
+    function sync() { render(); if (PM) PM.refresh(); }
+    const off = typeof bridge.subscribe === "function" ? bridge.subscribe(sync) : null;
     if (typeof document !== "undefined") document.addEventListener("keydown", onKey, true);
-    render();
-    return { render: refresh, destroy() { if (typeof off === "function") off(); if (typeof document !== "undefined") document.removeEventListener("keydown", onKey, true); container?.remove(); container = null; } };
+    sync();
+    return { render: refresh, open: openPanel, destroy() { if (typeof off === "function") off(); if (pmOff) pmOff(); if (typeof document !== "undefined") document.removeEventListener("keydown", onKey, true); container?.remove(); container = null; } };
   }
   root.OnlineGMUI = { mount };
 })(typeof globalThis !== "undefined" ? globalThis : window);

@@ -431,7 +431,8 @@ test("阵营：镇压队和安保、警卫队是一伙，和盗匪互相敌对�
   assert.equal(c.hostileTo(riot, sec), false); assert.equal(c.hostileTo(riot, cap), false);
   assert.equal(c.hostileTo(riot, thug), true); assert.equal(c.hostileTo(thug, riot), true);
   assert.equal(c.hostileTo(thug, sec), true, "原来的盗匪 / 安保敌对照旧");
-  assert.deepEqual([...c.alliesOf("镇压队")].sort(), ["安保", "警卫队", "镇压队"].sort());
+  // 下水道维护（#279）后来也加进了这一伙
+  assert.deepEqual([...c.alliesOf("镇压队")].sort(), ["安保", "警卫队", "镇压队", "下水道维护"].sort());
 });
 
 test("遭遇：只在外城区出现；外城区随机遭遇能抽到镇压队", () => {
@@ -451,14 +452,15 @@ test("遭遇：只在外城区出现；外城区随机遭遇能抽到镇压队",
 
 test("遭遇：抽到镇压队时只有 15% 混编安保 / 警卫队（混编概率写在 FACTION_MIX_CHANCE）；安保 + 警卫队原来的混编不受影响", () => {
   const c = H.load();
-  assert.deepEqual(plain(get(c, "FACTION_MIX_CHANCE")), { "镇压队": 0.15 });
+  // 下水道维护（#279）照镇压队的做法也写了 15%，测试在 tests/sewer-maintenance.test.js
+  assert.equal(get(c, "FACTION_MIX_CHANCE")["镇压队"], 0.15);
   c.Math.random = c.makeRng("RIOT-MIX");
   const N = 4000;
   let mixed = 0;
   for (let i = 0; i < N; i++) {
     const allow = c.encounterFactions("镇压队");
     assert.ok(allow.includes("镇压队"));
-    if (allow.length > 1) { mixed++; assert.deepEqual([...allow].sort(), ["安保", "警卫队", "镇压队"].sort(), "混编是整个同伙一起来"); }
+    if (allow.length > 1) { mixed++; assert.deepEqual([...allow].sort(), [...c.alliesOf("镇压队")].sort(), "混编是整个同伙一起来"); }
   }
   assert.ok(Math.abs(mixed / N - 0.15) < 0.03, `混编比例 ≈ 15%，实际 ${(mixed / N * 100).toFixed(1)}%`);
   // 抽到的是安保：警卫队照旧一定可以混；镇压队只有 15%
@@ -469,7 +471,7 @@ test("遭遇：抽到镇压队时只有 15% 混编安保 / 警卫队（混编概
     if (allow.includes("镇压队")) withRiot++;
   }
   assert.ok(Math.abs(withRiot / N - 0.15) < 0.03, `实际 ${(withRiot / N * 100).toFixed(1)}%`);
-  assert.deepEqual([...c.encounterFactions("警卫队")].filter(f => f !== "镇压队").sort(), ["安保", "警卫队"]);
+  assert.deepEqual([...c.encounterFactions("警卫队")].filter(f => f !== "镇压队" && f !== "下水道维护").sort(), ["安保", "警卫队"]);
   // 没有混编概率的阵营：原样
   assert.deepEqual(plain(c.encounterFactions("盗匪")), ["盗匪"]);
 });

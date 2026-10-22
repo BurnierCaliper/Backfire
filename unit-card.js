@@ -258,7 +258,7 @@
   }
   /** 点名瞬间：box（头顶那一排 .u-mechs / 区名旁边的 .ztower-mark）刚按 list 画好。和上次比新出现的点名（mechFresh，
    *  记在 memo 上，默认就是 box）：图标弹一下（减少动态效果时不弹）、响一声（音效关着不响）；还没弹完的图标被重画换掉了，接着弹完。
-   *  sim（预演）时什么都不做。返回新出现的点名 */
+   *  sim（预演）时什么都不做；quiet 只弹不响（新画面 HD-2D 的铭牌 / 地台：同一个点名旧画面的单位卡已经响过，#283）。返回新出现的点名 */
   function alertNew(box, list, kind, opts, memo) {
     if (opts && opts.sim) return [];
     memo = memo || box;
@@ -272,7 +272,7 @@
       if (t0 == null || i._mechPop) return;
       try { i._mechPop = popIcon(i, t - t0) || true; } catch (e) { i._mechPop = true; }   // 弹不出来也不能耽误画卡
     });
-    if (fresh.length) ping();
+    if (fresh.length && !(opts && opts.quiet)) ping();
     return fresh;
   }
 

@@ -2,8 +2,11 @@
  *
  * 界面外壳（index.html 的队伍栏 / 技能栏、hd2d-scene.js 的铭牌）要画的东西，在这里整理成数据和 HTML 片段：
  *   econHtml(econ, big)            铭牌上的行动点 / 附赠动作（plateData 的 econ；画法照正式画面的单位卡 unit-card.js）
+ *   mechsHtml(mechs, UnitCard) / towersHtml(towers, UnitCard)   铭牌上方的首领机制图标、地台上的踩塔（#283；画法、文字全用 unit-card.js）
  *   effectsOf(u, icons) / effectsHtml(list, icons)   队伍栏名字右边身上的效果（状态图标用 hud-icons.js，没有图标的写短标签；多了写 +n，悬停看全部）
  *   heroLooks(cards, eleByCn) / avatarOf(look) / avatarHtml(av)   按主职责的头像：职责图标 + 主属性到副属性的渐变底
+ *   partyInner(u, look, o) / layerBarHtml(layers)   队伍栏一个人：头像 + 名字 / 等级 / 效果 + 分层血条（#297：原型页和正式画面的新画面共用）
+ *   skillBar / skillButton / skillInner / skillHtml / summonInner   技能按钮（属性 / 攻击-技能角标）、唤出武器人的大按钮（skillInner：正式画面的新画面也用）
  * 不碰 three.js，也不碰 DOM，Node 里可以直接 require 来测（tests/hd2d-ui.test.js）。
  * 单位数据只读联机投影过的（online-view.js · projectUnit 的白名单）；坚毅生命（shp）压根不读。
  * 数值和对应表都在下面的 UI 里。 */
@@ -51,6 +54,8 @@
       fallback: "#a8977b",
       glyph: `<circle cx="24" cy="15" r="7"/><path d="M10 42 C10 31 16 26 24 26 C32 26 38 31 38 42"/>`
     },
+    /* 队伍栏名字下面的分层血条（#297：以前写在原型页里，正式画面也用）：每层的颜色（没写的按肉体）、空掉的那一截的底色 */
+    layers: { flesh: "#d8574a", armor: "#9aa7b3", shield: "#4fb8ff", sand: "#d1a85a", spirit: "#c07cf0", empty: "#2a2520" },
     /* 技能栏（照正式战斗画面 game.html / game.js 的技能栏）：
      *   summon   唤出 / 收回武器人（game.js · isSummonSkill）和武器人倒下后的「取回武器」：单独做成大按钮，放在「结束回合」旁边，不进普通技能按钮；
      *            两个都有时先放取回武器（同 game.js）
@@ -133,6 +138,21 @@
     return `<span class="pl-econ${big ? " in" : ""}" title="${t}" role="img" aria-label="${t}">${body}</span>`;
   }
 
+  /* ---------- 首领机制（#283）：铭牌上方的图标、地台上的踩塔 ----------
+   * 图标、倒计时、悬停说明全用正式画面的 unit-card.js（UC = UnitCard：mechIconsHtml / towerMarkHtml，里面是 mechLeft / phaseText / markTip 那一套），
+   * 这里只包一层。数据是投影里的（hd2d-layout.js · mechsOf / towersOf）。没有 UnitCard（原型页不加载）或没有机制 = "" */
+  /** 铭牌上方那一排：被点名的标记、首领正在读条的机制（和旧画面单位卡的 .u-mechs 同一份 HTML） */
+  function mechsHtml(mechs, UC) {
+    if (!mechs || !UC || typeof UC.mechIconsHtml !== "function") return "";
+    const html = UC.mechIconsHtml({ marks: mechs.marks || [], casts: mechs.casts || [] });
+    return html ? `<div class="pl-mechs">${html}</div>` : "";
+  }
+  /** 地台前沿的踩塔：图标（数字 = 还有几回合）+ 几人 / 要几人（和旧画面区名旁边的 .ztower-mark 同一份 HTML） */
+  function towersHtml(towers, UC) {
+    if (!towers || !towers.length || !UC || typeof UC.towerMarkHtml !== "function") return "";
+    return UC.towerMarkHtml(towers);
+  }
+
   /* ---------- 队伍栏：名字右边身上的效果 ---------- */
   /**
    * 一个单位身上的效果（u 是联机投影过的单位：online-view.js · projectUnit）。icons = hud-icons.js（HudIcons），没有就只写短标签。
@@ -168,15 +188,45 @@
     if (e.icon && icons && typeof icons.badge === "function") return icons.badge(e.key, e.stack, e.title);
     return `<em class="fx-t${e.tone ? " " + e.tone : ""}" title="${esc(e.title)}">${esc(e.name)}</em>`;
   }
-  /** 名字右边的效果：最多 UI.effects.show 个，多的写 +n；悬停 / 键盘停上去展开全部（带名字和层数）。没有效果就什么都不画 */
-  function effectsHtml(list, icons, show) {
+  /** 名字右边的效果：最多 UI.effects.show 个，多的写 +n；悬停 / 键盘停上去展开全部（带名字和层数）。没有效果就什么都不画。
+   *  o.focus = false：不让键盘停上去（正式画面的队伍栏一个人是一个按钮，按钮里面不能再放能停上去的东西；悬停照样展开） */
+  function effectsHtml(list, icons, show, o) {
     if (!list || !list.length) return "";
     const n = show == null ? UI.effects.show : show;
     const head = list.slice(0, n).map(e => effectChip(e, icons)).join("");
     const more = list.length > n ? `<em class="fx-more">+${list.length - n}</em>` : "";
     const all = list.map(e => `<span class="fx-row">${effectChip(e, icons)}<b>${esc(effectName(e))}</b></span>`).join("");
     const label = esc("身上的效果：" + list.map(effectName).join("、"));
-    return `<span class="pm-fx hi-badges" tabindex="0" aria-label="${label}">${head}${more}<span class="pm-fx-all" role="tooltip">${all}</span></span>`;
+    const focus = o && o.focus === false ? "" : ` tabindex="0"`;
+    return `<span class="pm-fx hi-badges"${focus} aria-label="${label}">${head}${more}<span class="pm-fx-all" role="tooltip">${all}</span></span>`;
+  }
+
+  /* ---------- 队伍栏：一个人（原型页和正式画面共用，#297）---------- */
+  /** 分层血条：每层按上限占宽度、按现在的血量涂颜色（最外层在左）。layers = 投影里的 [{ type, current, max }]（演出快照写 cur 的也认） */
+  function layerBarHtml(layers) {
+    const L = (Array.isArray(layers) ? layers : []).filter(l => l && typeof l === "object").map(l => ({
+      type: l.type, cur: Math.max(0, Number(l.current != null ? l.current : l.cur) || 0), max: Math.max(0, Number(l.max) || 0)
+    }));
+    const total = L.reduce((a, l) => a + l.max, 0);
+    return L.slice().reverse().map(l => {
+      const w = total ? 100 * l.max / total : 0, fill = l.max ? 100 * Math.min(l.cur, l.max) / l.max : 0;
+      return `<i style="width:${+w.toFixed(2)}%;background:linear-gradient(90deg,${UI.layers[l.type] || UI.layers.flesh} ${+fill.toFixed(2)}%,${UI.layers.empty} 0)"></i>`;
+    }).join("");
+  }
+  /**
+   * 队伍栏一个人里面的东西：主职责头像 + 名字 / 等级 /（o.tag 小字：联机的「你」、热座的操控者）/ 身上的效果 + 分层血条。
+   * u = 投影过的单位（online-view.js · projectUnit：名字、等级、血量层、状态……；坚毅生命压根没有，这里也不读），
+   * look = heroLooks(...)[kit]（武器人用主人的，认不得给 null），o = { icons（hud-icons.js）, tag, focus（见 effectsHtml）}。
+   * 外面那一层（原型页的 div.pm、正式画面的队伍按钮）由页面自己做，点击照旧是页面的
+   */
+  function partyInner(u, look, o) {
+    o = o || {};
+    const name = u ? (u.name || u.id || "") : "";
+    const level = Math.max(1, Math.round(Number(u && u.level) || 1));
+    const tag = o.tag ? `<span class="pm-tag">${esc(o.tag)}</span>` : "";
+    const fx = effectsHtml(effectsOf(u, o.icons), o.icons, null, { focus: o.focus });
+    return `${avatarHtml(avatarOf(look || null))}<span class="meta"><span class="nm"><span class="nm-t">${esc(name)}</span><span class="lv">Lv${level}</span>${tag}${fx}</span>` +
+      `<span class="bar">${layerBarHtml(u && u.layers)}</span></span>`;
   }
 
   /* ---------- 按主职责的头像 ---------- */
@@ -279,28 +329,40 @@
     const summon = summonRow ? Object.assign(buttonOf(summonRow, unit, opts && opts.effects, 0), { back: /_return$/.test(summonRow.id) || summonRow.id === UI.skill.first }) : null;
     return { skills, summon };
   }
-  /** 属性角标：icons.js 的七种属性贴纸图标（Icons.element），颜色 = 属性色；无属性画一个灰圈 */
-  function elementBadge(b, icons) {
+  /** 属性角标：icons.js 的七种属性贴纸图标（Icons.element），颜色 = 属性色；无属性画一个灰圈。titles = false：不写悬停的小字（正式画面悬停弹完整的技能说明） */
+  function elementBadge(b, icons, titles) {
     const tip = b.element ? b.elementName + "属性" : "无属性";
     const color = b.element ? UI.elements[b.element] : UI.avatar.fallback;
     const svg = b.element && icons && typeof icons.element === "function" ? icons.element(b.element)
       : `<svg class="eicon" viewBox="0 0 48 48" aria-hidden="true"><g class="o"><circle cx="24" cy="24" r="12"/></g><g class="c"><circle cx="24" cy="24" r="12"/></g></svg>`;
-    return `<span class="sk-el${b.element ? "" : " none"}" style="color:${color}" title="${esc(tip)}">${svg}</span>`;
+    return `<span class="sk-el${b.element ? "" : " none"}" style="color:${color}"${titles === false ? "" : ` title="${esc(tip)}"`}>${svg}</span>`;
   }
   /** 攻击 / 技能角标：贴纸风的小图标（剑 / 齿轮） */
-  const kindBadge = (b) => `<span class="sk-kind" title="${esc(b.kindName)}">${stickerSvg(UI.skill.kinds[b.kind].glyph, "sk-k-ic")}</span>`;
+  const kindBadge = (b, titles) => `<span class="sk-kind"${titles === false ? "" : ` title="${esc(b.kindName)}"`}>${stickerSvg(UI.skill.kinds[b.kind].glyph, "sk-k-ic")}</span>`;
+  /** 技能按钮里面的东西（原型页的 skillHtml、正式画面的技能按钮共用，#297）：左上角属性、右上角攻击 / 技能、名字一行、消耗一行。
+   *  o = { key 快捷键（正式画面的数字键，写在右下角）, cost 消耗那一行换成这段文字（联机：房主算好的消耗、用不了的原因）, titles（见 elementBadge）} */
+  function skillInner(b, icons, o) {
+    o = o || {};
+    const cost = o.cost != null ? esc(o.cost) : (costParts(b.cost).map(p => `<span class="${p.k}">${esc(p.t)}</span>`).join(" ") || "不耗行动");
+    const key = o.key != null && o.key !== "" ? `<span class="key">${esc(o.key)}</span>` : "";
+    return `${elementBadge(b, icons, o.titles)}${kindBadge(b, o.titles)}${key}<span class="nm">${esc(b.name)}</span><span class="cost">${cost}</span>`;
+  }
   /** 普通技能按钮（照 game.js 的 .sk：名字一行、消耗一行）：左上角属性、右上角攻击 / 技能；按顺序轮流换颜色；悬停写名字、消耗、说明 */
   function skillHtml(b, icons) {
-    const cost = costParts(b.cost).map(p => `<span class="${p.k}">${esc(p.t)}</span>`).join(" ") || "不耗行动";
     const tip = `${b.name}（${costText(b.cost)} · ${b.elementName} · ${b.kindName}）\n${b.text}`;
     return `<button class="sk t-${b.tint} k-${b.kind}" data-skill="${esc(b.id)}" title="${esc(tip)}" aria-label="${esc(`${b.name}：${b.elementName}${b.kindName}，${costText(b.cost)}`)}">` +
-      `${elementBadge(b, icons)}${kindBadge(b)}<span class="nm">${esc(b.name)}</span><span class="cost">${cost}</span></button>`;
+      `${skillInner(b, icons)}</button>`;
   }
-  /** 唤出 / 收回武器人的大按钮里面那几样（照 game.js · #g-summon：图标、名字、消耗）；颜色（--el）由页面按这个人的主属性给 */
-  const summonInner = (b) => `${UI.skill.summonIcon(b.back)}<span class="sm-nm">${esc(b.name)}</span><small>${esc(costText(b.cost))}</small>`;
+  /** 唤出 / 收回武器人的大按钮里面那几样（照 game.js · #g-summon：图标、名字、消耗）；颜色（--el）由页面按这个人的主属性给。
+   *  o = { cost 消耗换成这段文字（联机：房主算好的）, key 快捷键（写在消耗后面：「· Q」）} */
+  const summonInner = (b, o) => {
+    o = o || {};
+    const cost = o.cost != null ? String(o.cost) : costText(b.cost);
+    return `${UI.skill.summonIcon(b.back)}<span class="sm-nm">${esc(b.name)}</span><small>${esc(cost + (o.key ? " · " + o.key : ""))}</small>`;
+  };
 
   return {
-    UI, esc, econText, econHtml, effectsOf, effectsHtml, heroLooks, avatarOf, avatarHtml, stickerSvg,
-    isSummon, skillKind, skillElement, costText, skillBar, skillHtml, summonInner
+    UI, esc, econText, econHtml, mechsHtml, towersHtml, effectsOf, effectsHtml, heroLooks, avatarOf, avatarHtml, stickerSvg, layerBarHtml, partyInner,
+    isSummon, skillKind, skillElement, costText, skillButton: buttonOf, skillBar, skillInner, skillHtml, summonInner
   };
 });

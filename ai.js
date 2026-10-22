@@ -28,12 +28,14 @@ const EnemyAI = (function () {
   }
   // 不按「打单个目标」瞄准的技能：标定区域的榴弹（落点任意），不看危墙
   const ZONE_PICK = { en_gl: true, en_gl_fire: true, en_ant_shell: true, en_ant_shell_fire: true, en_riot_bottle: true, en_riot_bottle_fire: true };
-  // 不需要目标 / 不是攻击的技能：找站位时不拿它们来算「能不能打到」
+  // 不需要目标 / 不是攻击的技能：找站位时不拿它们来算「能不能打到」（触灵精英的清除状态只对自己）
   const NO_TARGET = { en_agg3_debris: true, en_agg1_rush: true, en_agg1_rush_prep: true, en_king_hold: true, en_king_exec: true, en_bigsand_summon: true, en_bigsand_heal: true, ufo_prime: true,
     ufo_boom: true, ufo_stomp: true, ufo_sweep: true, ufo_summon: true, en_agg2_overheat: true, en_giant_sand_pulse: true, en_thug_mutiny: true, en_gas_ignite: true, en_hunter_heat: true, en_alarm_zap: true,
-    en_riot_bottle: true, en_riot_bottle_fire: true };
+    en_riot_bottle: true, en_riot_bottle_fire: true, en_sewer_cleanse: true };
   function canAimSkill(u, sid, t) {
     if (!inSkillReach(u, sid, t)) return false;
+    // 下水道清扫机的施加共振只对看得见、还没有共振的敌人用（不是攻击：已经有共振的人不用再上）
+    if (sid === "en_sweeper_reso" && !(typeof sweeperResoTargetOk === "function" && sweeperResoTargetOk(u, t))) return false;
     // 隔着危墙 / 关着的门打不到（dealTo 会挡下来）：以前照样瞄准，结果每回合白打
     if (!ZONE_PICK[sid] && typeof lineBlocked === "function" && lineBlocked(u.zone, t.zone)) return false;
     return true;
@@ -92,6 +94,7 @@ const EnemyAI = (function () {
    *   aim   打谁：
    *         local   同区优先（同区有人就打同区，手册没写明追谁的都用这个）
    *         lowest  血量最低者（手册写明的）
+   *         most    血量最多者（不分远近；暴虐猎手）
    *         nearest 最近的
    *         topAtk  ATK 最高者
    *   near / far  同区、隔区分别用哪个技能。
@@ -136,6 +139,16 @@ const EnemyAI = (function () {
     riot_molotov:   { dist: 1,    aim: "local",   special: "riot_bottle" },
     riot_flamer:    { dist: 0,    aim: "local",   near: "en_riot_spray" },
     riot_captain:   { dist: null, aim: "local",   near: "en_riot_pistol",    far: "en_riot_pistol" },
+    // 下水道狂鼠（docs/ratfolk.md）：潜藏者、撕咬者近战主动接近；疫病暴徒接近血量最低的人，场上有腐蚀的敌人就去喷（special）；暴虐猎手接近血量最多的人
+    rat_lurker:     { dist: 0,    aim: "local",   near: "en_rat_lurker_bite" },
+    rat_biter:      { dist: 0,    aim: "local",   near: "en_rat_biter_bite" },
+    rat_plague:     { dist: 0,    aim: "lowest",  near: "en_rat_plague_claw", far: "en_rat_plague_spray", special: "rat_plague" },
+    rat_tyrant:     { dist: 0,    aim: "most",    near: "en_rat_tyrant_bite" },
+    // 下水道维护（docs/sewer-maintenance.md）：清扫机远程、主动远离敌人；还有敌人没有共振就上共振，都有了才谐波射击（special）
+    sewer_sweeper:  { dist: 1,    aim: "local",   special: "sweeper" },
+    // 两个触灵精英：远程、主动远离；身上有负面状态先花附赠清除（aiPlanBase）；清扫员的普通攻击自己挑射程内敌人最多的区（special）
+    sewer_keeper:   { dist: 1,    aim: "local",   near: "en_keeper_shot",    far: "en_keeper_shot" },
+    sewer_cleaner:  { dist: 1,    aim: "local",   special: "cleaner" },
     ant_hunter:     { dist: 1,    aim: "local",   near: "en_hunter_shot",    far: "en_hunter_shot" },
     bigsand:        { dist: null, aim: "local",   near: "en_bigsand",        special: "bigsand" },
     livesand:       { dist: null, aim: "local",   special: "livesand" },
@@ -166,6 +179,7 @@ const EnemyAI = (function () {
   }
   /** 这一步移动付不付得起，按 app.js · doMoveInner 实际结算的消耗算：
    *  离开酸液地面 / 越过空隙（给出 dest 且隔着空隙）扣 1 行动点（荒原行者改扣附赠）；导体 / 探测模式不耗；
+   *  狂暴这回合还有免费移动也不耗（effects.js · frenzyFreeMoveReady）；
    *  其余杂兵用行动点，精英 / 首领用附赠行动。被禁足 / 霜结不能动 */
   function canPayMove(u, dest) {
     if (!u || u.noMove || u.self === "frost") return false;
@@ -180,6 +194,7 @@ const EnemyAI = (function () {
     const apMove = overVoid || (leaveAcid && !(typeof acidGroundWalker === "function" && acidGroundWalker(u)));
     if (apMove) return (u.ap || 0) >= (rank === "minion" ? 1 : 2);
     if (u.self === "conductor" || (u.kit === "ecmo" && u.resources && u.resources.probe)) return true;
+    if (typeof frenzyFreeMoveReady === "function" && frenzyFreeMoveReady(u)) return true;   // 狂暴：走这一步不花行动点，杂兵走完还能出手
     return rank === "minion" ? (u.ap || 0) >= 1 : (u.bonus || 0) >= 1;
   }
   /** 能正常走过去的相邻区（不隔危墙 / 关着的门；地面单位不走空隙、不进深渊） */
@@ -244,6 +259,32 @@ const EnemyAI = (function () {
   /** 已经有灼烧（免疫灼烧的自焚者也当作有，免得永远优先挑它） */
   function alreadyBurning(p) { return (Number(p.statuses && p.statuses.burn) || 0) > 0 || p.self === "burn"; }
 
+  /* ---- 下水道狂鼠（docs/ratfolk.md 第 3 节）---- */
+  const corroded = (p) => !!(p && p.statuses && p.statuses.corr);
+  /** 疫病暴徒活着、在战场上（失衡的也算在场）：潜藏者优先打还没腐蚀的敌人，尽量把所有人都打进腐蚀 */
+  function ratPlagueOnField() { return state.units.some(x => x.kit === "rat_plague" && unitAlive(x)); }
+  /** 疫病暴徒：场上有已经腐蚀的敌人时，用感染喷洒打其中一个，把腐蚀扩散到那一区——挑同区还没腐蚀的敌人最多的；
+   *  一样多的先挑现在就喷得到的（距离 1、不隔墙），再挑血少的。没有腐蚀的敌人返回 null（照常接近血量最低的人） */
+  function plagueSprayPick(u, prey) {
+    const sick = prey.filter(corroded);
+    if (!sick.length) return null;
+    const foes = typeof ratFoesOf === "function" ? ratFoesOf(u) : prey;
+    const fresh = (p) => foes.filter(x => x !== p && Number(x.zone) === Number(p.zone) && !corroded(x)).length;
+    const now = (p) => zdist(u.zone, p.zone) === 1 && !(typeof lineBlocked === "function" && lineBlocked(u.zone, p.zone)) ? 1 : 0;
+    return sick.slice().sort((a, b) => (fresh(b) - fresh(a)) || (now(b) - now(a)) || (hpOf(a) - hpOf(b)))[0];
+  }
+
+  /* ---- 下水道维护（docs/sewer-maintenance.md 第 2 节）---- */
+  /** 下水道清扫机：还有敌人没有共振时，挑一个没有共振的敌人上共振（enemies.js · sweeperResoTargetOk：看得见、还没有共振）——
+   *  先挑现在就够得着的（距离 1、不隔危墙），再挑离得近的，一样近的挑血量多的（手册没写明追谁时倾向于打血量最高的）。
+   *  看得见的敌人都有共振了返回 null（照常挑目标，谐波射击） */
+  function sweeperResoPick(u, prey) {
+    const fresh = prey.filter(p => typeof sweeperResoTargetOk === "function" && sweeperResoTargetOk(u, p));
+    if (!fresh.length) return null;
+    const now = (p) => zdist(u.zone, p.zone) === 1 && !(typeof lineBlocked === "function" && lineBlocked(u.zone, p.zone)) ? 1 : 0;
+    return fresh.slice().sort((a, b) => (now(b) - now(a)) || (zdist(u.zone, a.zone) - zdist(u.zone, b.zone)) || (hpOf(b) - hpOf(a)))[0];
+  }
+
   /** 选目标。强制目标（决一死战 / 嘲讽）优先，其次手册写明的追击规则，最后才是同区优先。 */
   function aiTarget(u, spec, prey) {
     const pick = aiTargetBase(u, spec, prey);
@@ -272,6 +313,21 @@ const EnemyAI = (function () {
       const fresh = prey.filter(p => !alreadyBurning(p));
       if (fresh.length) prey = fresh;
     }
+    // 下水道狂鼠：疫病暴徒在场时，潜藏者优先打还没腐蚀的敌人（配合暴徒的扩散和「所有敌人都腐蚀时狂暴」）
+    if (u.kit === "rat_lurker" && ratPlagueOnField()) {
+      const fresh = prey.filter(p => !corroded(p));
+      if (fresh.length) prey = fresh;
+    }
+    // 疫病暴徒：场上有已经腐蚀的敌人时，主动去喷有腐蚀的那个（站位交给 aiDistOverride：保持距离 1）
+    if (u.kit === "rat_plague") {
+      const sp = plagueSprayPick(u, prey);
+      if (sp) return { unit: sp };
+    }
+    // 下水道清扫机：还有敌人没有共振时，目标是要上共振的那个（站位交给 dist 1：太近后撤、太远接近）
+    if (u.kit === "sewer_sweeper" && typeof sweeperAllResonated === "function" && !sweeperAllResonated(u)) {
+      const rp = sweeperResoPick(u, prey);
+      if (rp) return { unit: rp };
+    }
     let aim = spec.aim || "local";
     // 手册：强盗头子在场时，所有狂徒集火血量最低者
     if (/^thug_/.test(u.kit || "") && foes().some(x => x.kit === "bandit_boss")) aim = "lowest";
@@ -284,6 +340,7 @@ const EnemyAI = (function () {
       return { unit: lowest(prey) };
     }
     if (aim === "nearest") return { unit: nearestFirst(u, prey)[0] };
+    if (aim === "most") return { unit: highest(prey) };
     if (aim === "topAtk") {
       const s = prey.slice().sort((a, b) =>
         (effectiveAtk(b, state.units) || 0) - (effectiveAtk(a, state.units) || 0));
@@ -336,6 +393,22 @@ const EnemyAI = (function () {
     if (spec.special === "gl") {
       if (has("en_gl_fire")) return "en_gl_fire";
       return has("en_gl") ? "en_gl" : null;
+    }
+    if (spec.special === "rat_plague") {
+      // 有腐蚀的敌人：目标就是要喷的那个（aiTargetBase），距离 1 就喷；够不着交给移动（aiDistOverride 把距离改成 1）。
+      // 没有腐蚀的敌人：照常接近血量最低的人，同区撕扯、隔区喷洒（near / far）
+      if (target && corroded(target) && zdist(u.zone, target.zone) === 1 && has("en_rat_plague_spray")) return "en_rat_plague_spray";
+      return null;
+    }
+    if (spec.special === "sweeper") {
+      // 目标还没有共振（aiTargetBase 挑的，或者被牵制的那个人）就上共振；目标已经有共振（看得见的敌人都有了，
+      // 或者被嘲讽 / 决一死战只能冲他去）就谐波射击。够不着交给移动（dist 1）
+      if (target && has("en_sweeper_reso") && typeof sweeperResoTargetOk === "function" && sweeperResoTargetOk(u, target)) return "en_sweeper_reso";
+      return has("en_sweeper_shot") ? "en_sweeper_shot" : null;
+    }
+    if (spec.special === "cleaner") {
+      // 触灵清扫员：远程射程内有看得见的敌人就打敌人最多的那一区（enemies.js · cleanerWaveZone，落点在 aiPicks）；一个都够不着交给移动（dist 1）
+      return has("en_cleaner_wave") && typeof cleanerWaveZone === "function" && cleanerWaveZone(u) != null ? "en_cleaner_wave" : null;
     }
     if (spec.special === "riot_bottle") {
       // 和榴弹一样：标定过、轮到落地就落地，否则标定一个区
@@ -429,8 +502,9 @@ const EnemyAI = (function () {
     return null;
   }
 
-  /** 三阶段的聚合体主动逃离，二阶段主动接近：覆盖表里的 dist */
-  function aiDistOverride(u, spec) {
+  /** 三阶段的聚合体主动逃离，二阶段主动接近；疫病暴徒有腐蚀的敌人可喷时保持距离 1（感染喷洒是远距离）：覆盖表里的 dist */
+  function aiDistOverride(u, spec, prey) {
+    if (u.kit === "rat_plague") return prey && plagueSprayPick(u, prey) ? Object.assign({}, spec, { dist: 1 }) : spec;
     if (u.kit !== "sand_aggregate") return spec;
     const ph = (u.resources && u.resources.phase) || 1;
     if (ph === 2) return Object.assign({}, spec, { dist: 0 });
@@ -440,6 +514,10 @@ const EnemyAI = (function () {
 
   /** 给需要额外选择的技能补上 picks（榴弹落点、激光区域、穿刺的两个目标） */
   function aiPicks(u, sid, target, prey) {
+    if (sid === "en_cleaner_wave") {
+      const z = typeof cleanerWaveZone === "function" ? cleanerWaveZone(u) : null;
+      return z != null ? { dest: z } : null;
+    }
     if (sid === "ufo_sweep") {
       const zones = [];
       for (let z = 1; z <= Number(state.zoneMode); z++) {
@@ -511,7 +589,17 @@ const EnemyAI = (function () {
       }
     }
 
-    const spec = aiDistOverride(u, AI_SPEC[u.kit] || { dist: 0, aim: "local" });
+    // 下水道维护的触灵精英：身上有负面状态时先花附赠清掉一种（enemies.js · sewerCleanseChoice / sewerCleanse）。
+    // 精英的移动也花附赠：清了这一回合就不再移动（作者没写明，先这样：清除状态优先）
+    if (typeof sewerCleanseChoice === "function" && sewerCleanseChoice(u)) {
+      return {
+        thunk: () => { state.attackerId = u.id; state.targetId = null; runSkill("en_sewer_cleanse"); },
+        meta: { actorId: u.id, targetId: null, skillName: enemyLabel(u, "en_sewer_cleanse"), skillId: "en_sewer_cleanse" },
+        ai: { kind: "cleanse", sid: "en_sewer_cleanse" }
+      };
+    }
+
+    const spec = aiDistOverride(u, AI_SPEC[u.kit] || { dist: 0, aim: "local" }, prey);
     const pick = aiTarget(u, spec, prey);
     let target = pick.unit;
     if (!target) return null;
@@ -595,7 +683,9 @@ const EnemyAI = (function () {
     // 付不起移动（精英 / 首领没有附赠行动、杂兵没有行动点）就不规划移动，改看付得起的行动（原地能打就打，打不到就不出手）
     if (step != null && !canPayMove(u, step)) step = null;
     let sid = aiSpecial(u, spec, target, prey, has, list);
-    if (sid && !["en_agg3_debris", "en_agg1_rush", "en_agg1_rush_prep", "en_king_hold", "en_king_exec", "en_bigsand_summon", "en_bigsand_heal", "ufo_prime", "ufo_boom", "ufo_stomp", "ufo_sweep", "en_agg2_overheat", "en_gl", "en_gl_fire", "en_ant_shell", "en_ant_shell_fire", "en_riot_bottle", "en_riot_bottle_fire", "en_gas_ignite", "en_alarm_zap", "en_giant_sand_pulse"].includes(sid)) {
+    // 不换目标 / 换招式的：自己找目标的、选区的；清扫机的施加共振（目标已经按「看得见、没有共振」挑好了，
+    // 换成别的招式会去打已经有共振的人、或者往人堆里走）
+    if (sid && !["en_agg3_debris", "en_agg1_rush", "en_agg1_rush_prep", "en_king_hold", "en_king_exec", "en_bigsand_summon", "en_bigsand_heal", "ufo_prime", "ufo_boom", "ufo_stomp", "ufo_sweep", "en_agg2_overheat", "en_gl", "en_gl_fire", "en_ant_shell", "en_ant_shell_fire", "en_riot_bottle", "en_riot_bottle_fire", "en_gas_ignite", "en_alarm_zap", "en_giant_sand_pulse", "en_sweeper_reso", "en_cleaner_wave"].includes(sid)) {
       const rt = retargetLegal(u, sid, target, prey, pick.forced);
       if (rt.target) target = rt.target;
       if (rt.sid) sid = rt.sid;
@@ -611,9 +701,11 @@ const EnemyAI = (function () {
       sid === "en_riot_bottle_fire" ||   // 燃烧瓶落地打标定好的区，不看现在的目标在哪
       sid === "en_gas_ignite" ||         // 点燃燃气打自己所在的区
       sid === "en_alarm_zap";            // 电涌打所有高能的敌人，不用瞄准
+    // 触灵清扫员的范围谐波自己挑区（射程内敌人最多的区，special 已经确认有区可打）：不用移动就直接打，要后撤 / 接近就先走
+    const zoneSelf = sid === "en_cleaner_wave" && step == null;
     if (sid && (inRange || !step || noTargetNeeded)) {
       // 打不到（射程外、自己又不移动）就不出手，免得每回合空放
-      if (noTargetNeeded || canAimSkill(u, sid, target)) return attack(sid, aiPicks(u, sid, target, prey));
+      if (noTargetNeeded || zoneSelf || canAimSkill(u, sid, target)) return attack(sid, aiPicks(u, sid, target, prey));
       if (step == null) {
         // 这里打不到：先找一个走一步就能打到的站位；找不到时强制目标照旧硬打，其余不出手
         // （决一死战不能移动：不找站位，以前每回合都规划移动、被拦下，整场不出手）
@@ -726,9 +818,13 @@ const EnemyAI = (function () {
    *  以前打不到的也会被选上：先回满架势，再打空。target 不给时取协助队列队首的目标 */
   function aiPickAssister(list, target) {
     const t = target || (state.assistQueue && state.assistQueue[0] ? unitById(state.assistQueue[0].targetId) : null);
-    const ok = (list || []).filter(u => !t || typeof enemyAssistReach !== "function" || enemyAssistReach(u, t));
-    if (!ok.length) return null;
-    return ok.slice().sort((a, b) => (effectiveAtk(b, state.units) || 0) - (effectiveAtk(a, state.units) || 0))[0].id;
+    const reach = (list || []).filter(u => !t || typeof enemyAssistReach !== "function" || enemyAssistReach(u, t));
+    if (!reach.length) return null;
+    // 触灵清扫员（下水道维护）：有别人能协助时它不主动协助，只剩它能协助才出手（enemies.js · sewerAssistPool）
+    const ok = typeof sewerAssistPool === "function" ? sewerAssistPool(reach) : reach;
+    // 暴虐猎手的协助优先权（下水道狂鼠，enemies.js · ratTyrantHasPriority）：其他狂鼠都没狂暴、它又打得到时，一定由它来协助
+    const first = typeof ratTyrantHasPriority === "function" ? ok.filter(u => ratTyrantHasPriority(u)) : [];
+    return (first.length ? first : ok).slice().sort((a, b) => (effectiveAtk(b, state.units) || 0) - (effectiveAtk(a, state.units) || 0))[0].id;
   }
 
   /** 敌人回合的出手顺序：杂兵 → 精英 → BOSS */

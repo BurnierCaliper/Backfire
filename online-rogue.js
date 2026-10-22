@@ -180,6 +180,18 @@
   });
   // 背包按类分个人 / 公用（rogue.js · bagByCategory）：联机时按 run.online.owned
   if (G_Rogue && Rogue.setBagOwnership) Rogue.setBagOwnership(r => (active() && r === run() ? data(r).owned : null));
+  // 幕间投中下水道，用掉一张下水道地图（rogue.js · nextAct）：好几个人都有时只用一张——
+  // 先用公用的（死去角色留下的……）；没有公用的，用队伍里排在最前面、名下有地图的角色的那张
+  if (G_Rogue && Rogue.setMapUseHook) Rogue.setMapUseHook((r, id, notes) => {
+    if (!active() || r !== run()) return false;
+    const d = data(r);
+    const kit = free(r, id) > 0 ? null : living(r).find(k => (Number((d.owned[k] || {})[id]) || 0) > 0) || null;
+    bagAdd(id, -1);
+    if (kit) addOwned(d, kit, id, -1);
+    clampOwned(r);
+    notes.push(`用掉${kit ? ` ${name(kit)} 名下的` : "一张公用的"}${itemName(id)}（一局只能进一次下水道）。`);
+    return true;
+  });
   // 战斗里用道具：自己的 + 公用的；用掉的先从自己名下扣
   if (typeof setItemAccess === "function") setItemAccess((unit, id) => {
     if (!active()) return bagCount(id);
@@ -285,8 +297,8 @@
       case "camp": add("camp", "休整（补给够就长休，不够硬撑）", { action: "camp" }); break;
       case "boss": add("fight", "迎战首领", { fight: true }); shortRest(); break;
       case "interlude":
-        // 幕间选择：下一幕去哪（原本的区域 / 采矿场），队伍投票
-        Rogue.interludeOptions(r).forEach(o => add("nextAct:" + o.region, `前往第 ${r.act + 1} 幕：${o.region}${o.alt ? "（改走采矿场）" : ""}`, { action: "nextAct", region: o.region }));
+        // 幕间选择：下一幕去哪（原本的区域 / 采矿场 / 下水道），队伍投票。队里任何一个人有下水道地图（或者有公用的）就多一个下水道
+        Rogue.interludeOptions(r).forEach(o => add("nextAct:" + o.region, `前往第 ${r.act + 1} 幕：${o.region}${o.sewer ? "（用掉一张下水道地图）" : o.alt ? "（改走采矿场）" : ""}`, { action: "nextAct", region: o.region }));
         break;
       case "victory": add("win:stop", "就此收手（通关）", { action: "afterVictory", goOn: false }); add("win:more", "继续挑战额外幕", { action: "afterVictory", goOn: true }); break;
     }

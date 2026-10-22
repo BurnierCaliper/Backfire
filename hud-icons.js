@@ -130,6 +130,8 @@
     heavy: c => `<path d="M15 14a5 5 0 0 1 10 0" fill="none" stroke="${c}" stroke-width="2.4"/><path d="M11 15h18l2 14H9z" fill="${c}"/><path d="M13 22h14" stroke="#15110d" stroke-width="1.6" opacity=".5"/>`,
     store: c => `<rect x="13" y="10" width="14" height="22" rx="2" fill="none" stroke="${c}" stroke-width="2.2"/><rect x="17" y="7" width="6" height="3" fill="${c}"/><rect x="16" y="22" width="8" height="7" fill="${c}"/><path d="M17 19l3-3 3 3" stroke="${c}" stroke-width="1.8" fill="none"/>`,
     doppler: c => `<circle cx="14" cy="20" r="2.6" fill="${c}"/><path d="M19 13q3 7 0 14M23 11q4 9 0 18M28 9q5 11 0 22" stroke="${c}" stroke-width="1.8" fill="none"/><path d="M10 15q-2 5 0 10" stroke="${c}" stroke-width="1.4" fill="none" opacity=".6"/>`,
+    // 狂暴（下水道狂鼠，effects.js · FRENZY）：怒筋（四角的弯钩）
+    frenzy: c => `<path d="M10 16q6 0 6-6M30 16q-6 0-6-6M10 24q6 0 6 6M30 24q-6 0-6 6" stroke="${c}" stroke-width="3.2" fill="none" stroke-linecap="round"/>`,
     // 攻击
     blast: c => `<path d="M17 7l2.5 7 6-4-2 7 7 1-6 4 4 6-7-2-1 7-3-6-5 4 1-7-7-1 6-4-4-6 7 2z" fill="${c}"/>`,
     iceBreak: c => `<g fill="none" stroke="${c}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-3-5 1-4-4-5M19 21l5-3 2-5 5-2M19 21l5 4 1 5 4 3M19 21l-4 3-1 6-3 3M19 21l-7-1-4 2"/><path d="M17 12l-3 0M25 15l2 2M25 28l-3 1M15 27l-3-2"/></g>`,
@@ -153,6 +155,8 @@
    ["shift", "错位", "physical"], ["diffuse", "扩散", "energy"], ["refract", "折射", "harmonic"]].forEach(([k, n, e]) => add(k, n, "circ", EC[e], G2[k]));
   [["selfBurn", "自焚", "fire"], ["frostShell", "霜结", "ice"], ["splash", "溅射", "acid"], ["conductor", "导体", "electric"],
    ["heavy", "千钧", "physical"], ["store", "蓄能", "energy"], ["doppler", "多普勒", "harmonic"]].forEach(([k, n, e]) => add(k, n, "dia", EC[e], G2[k]));
+  // 狂暴（下水道狂鼠）：不归属任何属性的自我效果，用怒红色
+  add("frenzy", "狂暴", "dia", "#ff5f4a", G2.frenzy);
   [["blast", "爆燃", "fire"], ["iceBreak", "破冰", "ice"], ["strike", "雷击", "electric"], ["etch", "蚀刻", "acid"],
    ["backflow", "倒流", "energy"], ["inertia", "惯性", "physical"], ["diffract", "衍射", "harmonic"],
    ["pierce", "穿刺", ""], ["smash", "猛击", ""], ["weakspot", "弱点特效", ""]].forEach(([k, n, e]) => add(k, n, "arr", e ? EC[e] : NEUTRAL, G2[k]));
@@ -201,7 +205,7 @@
   const STATUS_KEY = { burn: "burn", shock: "shock", corr: "corr", frostbite: "frost", shockwave: "quake", high: "high", reso: "reso",
     unstable: "unsteady", chase: "chase", weak: "weak", inspire: "inspire", sturdy: "firm", hide: "hide", advantage: "adv" };
   const INSTANT_KEY = { melt: "melt", sting: "pierceIce", overload: "overload", shift: "shift", spread: "diffuse", refract: "refract" };
-  const SELF_KEY = { burn: "selfBurn", frost: "frostShell", splash: "splash", conductor: "conductor", anchor: "heavy", store: "store", doppler: "doppler" };
+  const SELF_KEY = { burn: "selfBurn", frost: "frostShell", splash: "splash", conductor: "conductor", anchor: "heavy", store: "store", doppler: "doppler", frenzy: "frenzy" };
   const ATK_KEY = { combust: "blast", icebreak: "iceBreak", bolt: "strike", etch: "etch", backflow: "backflow", inertia: "inertia", diffract: "diffract" };
   function unitBadges(u, extra) {
     if (!u) return [];
@@ -216,6 +220,7 @@
     Object.keys(INSTANT_KEY).forEach(k => { if (ins[k]) out.push({ key: INSTANT_KEY[k], stack: "" }); });
     if (u.self && SELF_KEY[u.self]) out.push({ key: SELF_KEY[u.self], stack: u.self === "burn" && Number(u.selfBurnStacks) > 1 ? Number(u.selfBurnStacks)
       : u.self === "store" && !st.high && Number(u.highEnergy) > 0 ? Number(u.highEnergy) : "" });
+    if (u.self === "frenzy") { const t = frenzyTitle(u); if (t) out[out.length - 1].title = t; }
     const hung = (u.resources && Array.isArray(u.resources.nextAtkFx)) ? u.resources.nextAtkFx : [];
     hung.forEach(id => { if (ATK_KEY[id]) out.push({ key: ATK_KEY[id], stack: "" }); });
     (extra || []).forEach(k => { if (ICONS[k] && !out.some(b => b.key === k)) out.push({ key: k, stack: "" }); });
@@ -229,6 +234,10 @@
       out.unshift({ key: "stunMark", stack: `${n}/${max}`, title: `晕眩标记 ${n}/${max}：首领、10 级以上的精英和载具（驾驶员用车的标记）每失衡一次记 1 个标记，攒满 ${max} 个才会真正晕眩（跳过回合）；没攒满时架势立刻恢复` });
     }
     return out;
+  }
+  /** 狂暴徽章的提示：效果说明读规则（effects.js · frenzyEffectText，数值都在 FRENZY），没加载规则时不写（只显示名字） */
+  function frenzyTitle(u) {
+    try { return typeof root.frenzyEffectText === "function" ? "狂暴：" + root.frenzyEffectText(u) : ""; } catch (e) { return ""; }
   }
   /** 这个单位用不用晕眩标记规则：联机投影过来的带 stunMax，本地单位直接问规则（我方只有和载具合并的驾驶员用，vehicle.js） */
   function stunMarkMax(u) {

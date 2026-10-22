@@ -237,7 +237,8 @@ const ENEMY_RACE_TABLES = {
  *  种族（有机体的敌人才写，没写 = 无种族；规则见 docs/enemy-race.md，换算在 enemies.js · applyEnemyRace）：
  *    race: "兽人·牛"                      固定种族（大支·小分支），不受个体值开关影响，不套六维
  *    races: ENEMY_RACE_TABLES.bandit      随机种族：[{ race: "人类", w: 60 }, …] 权重表，生成时抽
- *    raceAttrs: true                      随机种族的敌人再按种族的六维修正改数值（体质只加最内层肉体）；不写 = 只挂种族、不改数值
+ *    raceAttrs: true                      再按种族的六维修正改数值（体质只加最内层肉体）；不写 = 只挂种族、不改数值。
+ *                                         随机种族的写这个；固定种族一般不写（数值设计时已经算进去了），下水道的狂鼠是特意套六维的固定种族（docs/ratfolk.md）
  *  新增兵种照这个格式加。 */
 const ENEMY_INFO = {
   // —— 天网安保（机械）——
@@ -274,6 +275,17 @@ const ENEMY_INFO = {
   riot_molotov:  { faction: "镇压队", regions: ["外城区"], tokens: 1, race: "兽人·蜥蜴" },
   riot_flamer:   { faction: "镇压队", regions: ["外城区"], tokens: 2, race: "兽人·熊" },
   riot_captain:  { faction: "镇压队", regions: ["外城区"], tokens: 2, race: "兽人·狼" },
+  // —— 狂鼠（下水道；鼠类人接触实验废料变异而成，和所有阵营敌对，不和任何阵营混编；固定「鼠类人·鼠」并且套六维，docs/ratfolk.md）——
+  rat_lurker: { faction: "狂鼠", regions: ["下水道"], tokens: 1, race: "鼠类人·鼠", raceAttrs: true },
+  rat_biter:  { faction: "狂鼠", regions: ["下水道"], tokens: 1, race: "鼠类人·鼠", raceAttrs: true },
+  rat_plague: { faction: "狂鼠", regions: ["下水道"], tokens: 2, race: "鼠类人·鼠", raceAttrs: true },
+  rat_tyrant: { faction: "狂鼠", regions: ["下水道"], tokens: 2, race: "鼠类人·鼠", raceAttrs: true },
+  // —— 下水道维护（下水道；清洁和保护，和安保、警卫队、镇压队是一伙，和其他所有阵营敌对，docs/sewer-maintenance.md）——
+  // 清扫机是机械，没有种族；一枚代币 3 只（照空投蜂群的 group: 3）
+  sewer_sweeper: { faction: "下水道维护", regions: ["下水道"], tokens: 1, group: 3 },
+  // 两个精英固定「触灵」种族（和机甲触灵、飞碟触灵同类；触灵没有六维修正、暂时没有种族被动），阵营照旧是下水道维护
+  sewer_keeper:  { faction: "下水道维护", regions: ["下水道"], tokens: 2, race: "触灵" },
+  sewer_cleaner: { faction: "下水道维护", regions: ["下水道"], tokens: 2, race: "触灵" },
   // —— 盗匪 ——
   thug_knife:  { faction: "盗匪", regions: ["外城区"], tokens: 1, races: ENEMY_RACE_TABLES.bandit, raceAttrs: true },
   thug_hammer: { faction: "盗匪", regions: ["外城区"], tokens: 1, races: ENEMY_RACE_TABLES.bandit, raceAttrs: true },
@@ -291,9 +303,10 @@ const ENEMY_INFO = {
   dustbody:   { faction: "沙灵", regions: ["沙漠"], tokens: 2 },
   sand_aggregate: { faction: "沙灵", regions: ["沙漠"], tokens: 4, boss: true },
   // —— 触灵（天网造物）——
-  mecha_mg: { faction: "触灵", regions: ["天网设施", "巨人城"], tokens: 2 },
-  mecha_gl: { faction: "触灵", regions: ["天网设施", "巨人城"], tokens: 2 },
-  ufo_boss: { faction: "触灵", regions: ["天网设施"], tokens: 4, boss: true },
+  // 种族也是「触灵」（docs/sewer-maintenance.md 第 1 节：下水道维护的触灵精英和它们分在一类；没有六维修正、暂时没有种族被动）
+  mecha_mg: { faction: "触灵", regions: ["天网设施", "巨人城"], tokens: 2, race: "触灵" },
+  mecha_gl: { faction: "触灵", regions: ["天网设施", "巨人城"], tokens: 2, race: "触灵" },
+  ufo_boss: { faction: "触灵", regions: ["天网设施"], tokens: 4, boss: true, race: "触灵" },
   // —— 巨人 ——
   giant: { faction: "巨人", regions: ["巨人城"], tokens: 2 },
   // —— 野生动物：只在外城区与沙漠 ——
@@ -310,20 +323,22 @@ const ENEMY_INFO = {
   watchcrow: { faction: "古代造物", regions: ["沙漠"], tokens: 2 }
 };
 
-/** 是一伙的阵营（安保、警卫队是一套体系的两个分支；镇压队是赤牙的部队，和它们是一伙）。
+/** 是一伙的阵营（安保、警卫队是一套体系的两个分支；镇压队是赤牙的部队，和它们是一伙；
+ *  下水道维护和巨人方友好，也是这一伙，docs/sewer-maintenance.md）。
  *  「一伙」只管不互相敌对、友军判断；遭遇里能不能同场混编另看 FACTION_MIX_CHANCE */
-const ALLIED_FACTIONS = [["安保", "警卫队", "镇压队"]];
+const ALLIED_FACTIONS = [["安保", "警卫队", "镇压队", "下水道维护"]];
 /** 同场混编概率：写在这里的阵营不是想混就混——抽遭遇时它和同伙阵营只有这么大的概率混编，
  *  其余时候各打各的（抽到镇压队就只出镇压队；抽到安保 / 警卫队时，镇压队也只有这个概率加进来）。
- *  没写的阵营照旧想混就混（安保 + 警卫队） */
-const FACTION_MIX_CHANCE = { "镇压队": 0.15 };
+ *  没写的阵营照旧想混就混（安保 + 警卫队）。
+ *  下水道维护照镇压队的做法给 15%（实际上下水道只抽下水道的敌人，平时碰不到安保） */
+const FACTION_MIX_CHANCE = { "镇压队": 0.15, "下水道维护": 0.15 };
 function alliesOf(faction) {
   const g = ALLIED_FACTIONS.find(a => a.indexOf(faction) >= 0);
   return g ? g.slice() : [faction];
 }
 /** 抽遭遇时这个阵营可以同场出现的阵营：alliesOf 去掉没掷中混编概率的阵营，每次调用各掷一次。
- *  抽到的是受限阵营（镇压队）：整个同伙（安保 + 警卫队）一起混进来或一起不来；
- *  抽到的是同伙：受限阵营各自掷一次决定加不加进来 */
+ *  抽到的是受限阵营（镇压队、下水道维护）：整个同伙一起混进来或一起不来；
+ *  抽到的是同伙（安保 / 警卫队）：受限阵营各自掷一次决定加不加进来 */
 function encounterFactions(faction) {
   const all = alliesOf(faction);
   const loose = all.filter(f => FACTION_MIX_CHANCE[f] != null);
@@ -343,13 +358,18 @@ function enemyTokens(preset) {
   const i = enemyInfo(preset);
   return i ? (i.tokens || 1) : 1;
 }
+/** 专门区域（作者 10/22，docs/ratfolk.md 第 1 节）：隶属某个大区（parent）、有自己的敌人池的区域。
+ *  只出没在专门区域里的敌人不进「敌人不分地区」的遭遇（单局休息时被偷袭的遭遇战，anyRegion），不和别的区域的敌人混用；
+ *  大区自己的遭遇本来就按 ENEMY_INFO.regions 分池，抽不到它们。单局怎么进下水道：带着下水道地图，幕间改走（rogue.js · interludeOptions） */
+const SUB_REGIONS = { "下水道": { parent: "巨人城" } };
 function regionPool(region, opt) {
   opt = opt || {};
   return Object.keys(ENEMY_INFO).filter(k => {
     const i = ENEMY_INFO[k];
     if (i.boss && !opt.boss) return false;
     if (i.neutral) return false;   // 中立生物不当敌人抽
-    return !region || i.regions.indexOf(region) >= 0;
+    if (!region) return !i.regions.every(r => SUB_REGIONS[r]);   // 不分地区：只出没在专门区域里的不算
+    return i.regions.indexOf(region) >= 0;
   });
 }
 function regionFactions(region) {
@@ -381,10 +401,12 @@ function pickByTokens(pool, tokens) {
  *   sides：两边各自的阵营（可混编的阵营写在一起）。chance：这个区域三区制的遭遇变成三方混战的概率 */
 const THREE_WAY = {
   tokens: 3,
-  chance: 0.5,
+  chance: 0.15,   // 作者 10/22 定 15%（原来 50%）
   regions: {
     "第三采矿场": { name: "三方混战", sides: [["安保"], ["异星生物"]] },
-    "外城区": { name: "三方混战", sides: [["安保", "警卫队"], ["盗匪"]] }
+    "外城区": { name: "三方混战", sides: [["安保", "警卫队"], ["盗匪"]] },
+    // 下水道：狂鼠 ↔ 下水道维护（docs/sewer-maintenance.md 第 4 节）；两边照代币正常抽，清扫机、维护员、清扫员可能混着出
+    "下水道": { name: "三方混战", sides: [["狂鼠"], ["下水道维护"]] }
   }
 };
 function rollThreeWay(region, opt) {
@@ -413,7 +435,7 @@ function rollEncounter(opt) {
   opt = opt || {};
   const region = opt.region || "外城区";
 
-  // 第三采矿场 / 外城区：三区制的遭遇有 THREE_WAY.chance 的概率变成三方混战（指定了阵营 / 混战 / 不分地区的不算）。
+  // 第三采矿场 / 外城区 / 下水道：三区制的遭遇有 THREE_WAY.chance 的概率变成三方混战（指定了阵营 / 混战 / 不分地区的不算）。
   // 先定下区制（和平常一样两区 / 三区各一半），三区才掷三方混战
   if (THREE_WAY.regions[region] && !opt.anyRegion && !opt.faction && opt.mixed == null) {
     const zm = Number(opt.zoneMode) || (Math.random() < 0.5 ? 2 : 3);

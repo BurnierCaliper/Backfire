@@ -589,6 +589,11 @@ function weatherDamagePct(weather, element) {
 
 /** 干涉场叠层上限（作者定）：±100%，到顶后不再叠加（以前无上限，曾叠到 −2425% 把伤害全变成 0） */
 const INTERFERE_CAP = 1;
+/** 出血（通用攻击效果，docs/ratfolk.md 2.3）：攻击规格上写 bleed: true（dealTo 的 opt，敌人、角色都能用）。
+ *  这一段打中肉体 / 星灵层（layers）、并对这一层造成了伤害时，对同一层再造成「这一层上限 × pct」的真实伤害：
+ *  不吃克制、减伤、护盾、狂暴减伤等任何修正；向下取整，最少 1 点；只打这一层，打空了也不溢出到下一层。
+ *  同一次攻击（一次 resolveAttack）里每多触发一次，比例再 × decay：10% → 5% → 2.5% …… */
+const BLEED = { pct: 0.10, decay: 0.5, layers: ["flesh", "spirit"] };
 function milestone(level, every = 5) {
   // 达到 5/10/15… 或 2/4/6… 的当级就加，不是下一级才加
   return Math.floor(Math.max(1, Number(level) || 1) / every);
@@ -660,7 +665,7 @@ function statusDotDice(kind, level, weather, extraArmor = false, envX = 1) {
  *   element, baseBreak, hits,
  *   flags, weather, phaseStep, zoneMode,
  *   attackerField, targetField, highGround,
- *   dist
+ *   dist, bleed（出血，见 BLEED）
  * }
  */
 function resolveAttack(ctx) {
@@ -770,6 +775,9 @@ function resolveAttack(ctx) {
   let pierColdRetrig = false;
   let knockdownHp = 0;
   let selfBreak = 0;
+  // 出血（BLEED）：这次攻击触发了几次（第 2 次起减半）、一共打了多少
+  let bleedCount = 0;
+  let bleedTotal = 0;
   // 干涉场：叠层只在单位站在干涉场里时生效（叠层记着是在哪一区叠的，换了区就不算）；不在干涉场里挨打就清掉
   const interfHere = !!fieldT.harmonic && (t.interfereZone == null || Number(t.interfereZone) === Number(t.zone));
   let interfDelta = interfHere ? Math.max(-INTERFERE_CAP, Math.min(INTERFERE_CAP, Number(t.interfere) || 0)) : 0;
@@ -964,6 +972,9 @@ function resolveAttack(ctx) {
     if (weather === "phase" && Number(ctx.phaseStep) === 0) { pct -= 0.5 * envX; wSum -= 0.5 * envX; hAdd(`相位波谷：伤害 −${50 * envX}%。`); }
     if (flags.dr50 && !noDr) { pct -= 0.5; hAdd("目标减伤 +50%：−50%。"); }
     if (flags.dr25 && !noDr) { pct -= 0.25; hAdd("自保模式：受伤 −25%。"); }
+    // 狂暴（effects.js · FRENZY.takenCut）：受到的所有伤害（攻击、状态、场地……）减少，和其他百分比加算
+    const frenzyCut = typeof frenzyTakenCut === "function" ? frenzyTakenCut(t) : 0;
+    if (frenzyCut && !noDr) { pct -= frenzyCut; hAdd(`目标狂暴：受到的伤害 −${Math.round(frenzyCut * 100)}%。`); }
     if (flags.drPct && !noDr) { pct -= Number(flags.drPct) || 0; hAdd(`${flags.drWhy || "减伤"}：−${Math.round((Number(flags.drPct) || 0) * 100)}%。`); }
     if (flags.prideReduce && !noDr) {
       const pr = typeof flags.prideReduce === "number" ? flags.prideReduce : 0.25;
@@ -1015,10 +1026,13 @@ function resolveAttack(ctx) {
     if (!ghost) totalReduced += Math.max(0, (Math.max(0, refBase + refAtk * multAdj) + (h === 0 ? firstBonus : 0)) * (flags.block === "bareOk" ? 0.5 : 1) - packet);
 
     let hitDealt = packet;
+    let hitBleed = 0;
     if (ghost) {
       hitDealt = 0;
       hAdd(`目标已倒下：这一段 ${packet} 全部算作溢出伤害。`);
     } else if (!onShp) {
+      // 出血要看这一段扣到了哪一层：打穿外层、溢进肉体 / 星灵的也算（作者 10/22 定），所以先记下每一层原来的血量
+      const layersBefore = layersWork.map(l => Math.max(0, Number(l.current) || 0));
       const distribute = distributePacket({
         layers: layersWork,
         startIdx,
@@ -1033,6 +1047,25 @@ function resolveAttack(ctx) {
       distribute.notes.forEach(hAdd);
       hitDealt = distribute.dealt;
       extraHarmonic += Number(distribute.extraHarmonic) || 0;
+      // 出血：这一段扣到了肉体 / 星灵层的血（直接打中，或者打穿外层溢进去都算）→ 对扣到的第一层肉体 / 星灵再扣「上限 × 比例」的真实伤害（不溢出）
+      const bleedIdx = ctx.bleed ? layersWork.findIndex((l, i) => BLEED.layers.includes(l.type) && layersBefore[i] > (Number(l.current) || 0)) : -1;
+      const bleedLayer = bleedIdx >= 0 ? layersWork[bleedIdx] : null;
+      if (bleedLayer) {
+        const startLayer = bleedLayer;   // 下面照原来的写法结算这一层
+        const rate = BLEED.pct * Math.pow(BLEED.decay, bleedCount);
+        bleedCount++;
+        const cap = Number(startLayer.max) || 0;
+        const want = Math.max(1, Math.floor(cap * rate + 1e-9));
+        const left = Math.max(0, Number(startLayer.current) || 0);
+        hitBleed = Math.min(want, left);
+        startLayer.current = Math.max(0, Math.floor(left - hitBleed + 1e-9));
+        bleedTotal += hitBleed;
+        hitDealt += hitBleed;
+        const rateTxt = Math.round(rate * 1000) / 10 + "%";
+        const tail = left <= 0 ? "，这一层已经打空，不溢出" : hitBleed < want ? `，这一层只剩 ${left}，不溢出` : "";
+        hAdd(`出血${bleedCount > 1 ? `（第 ${bleedCount} 次，减半）` : ""}：${LAYER[startLayer.type]}上限 ${cap} × ${rateTxt} → ${want}（真实伤害，不吃任何修正）${tail}` +
+          (left > 0 ? `：${LAYER[startLayer.type]} ${left} → ${startLayer.current}` : ""));
+      }
     } else {
       hAdd("起身状态：本段伤害改由坚毅生命承受（不显示剩余值）。");
     }
@@ -1063,6 +1096,9 @@ function resolveAttack(ctx) {
         br += 1; anchorBreak = true;
         hAdd("千钧：击破 +1。");
       }
+      // 狂暴（effects.js · FRENZY.breakBonus）：和千钧一样，每一次攻击、多段攻击的每一段都加
+      const frenzyBr = isAttack && typeof frenzyBreakBonus === "function" ? frenzyBreakBonus(a) : 0;
+      if (frenzyBr) { br += frenzyBr; hAdd(`狂暴：击破 +${frenzyBr}。`); }
       if (weather === "glow") {
         if (br > 0) br = Math.max(1, br - envX);
         hAdd(`微光：击破 −${envX}（不会减到 0）。`);
@@ -1098,8 +1134,9 @@ function resolveAttack(ctx) {
     totalBreak += br;
 
     perHit.push({
-      dealt: hitDealt,
-      intended: packet,   // 这一段打出去的伤害（不按剩余血量封顶），画面按段弹字用
+      dealt: hitDealt,    // 这一段实际扣掉的血（含出血）
+      intended: packet,   // 这一段打出去的伤害（不按剩余血量封顶，不含出血），画面按段弹字用
+      bleed: hitBleed,    // 这一段的出血（真实伤害，已算在 dealt 里）
       base: segBase,      // 这一段吃目标修正之前的基础包（导体额外一下用）
       breakDealt: br,
       notes: hitLog,
@@ -1157,8 +1194,9 @@ function resolveAttack(ctx) {
     // 受击方的减伤减免掉的伤害（天气、血量层抗性、角色能力、减半……；协助格挡成功的不算）
     reduced: flags.block === "assistOk" ? 0 : Math.round(totalReduced),
     weatherUp, weatherDown,
-    total: totalDealt,
+    total: totalDealt,                      // 实际扣掉的血（含出血）
     intended: totalIntended,
+    bleed: bleedTotal,                      // 出血的真实伤害合计（已算在 total 里）
     extraHarmonic,
     breakDealt: totalBreak,
     helperBreak,
@@ -1431,6 +1469,8 @@ function healUnit(unit, amount, opt) {
   if (typeof bpHealBonus === "function") raw += bpHealBonus(unit);   // 单局图纸：愿你无恙
   // 事故幸存+：拉斯缪尔不稳态下受到的治疗 ×3
   if (unit.kit === "ras" && unit.resources && unit.resources.unstable && typeof passivePlus === "function" && passivePlus(unit, 2)) raw *= 3;
+  // 疫病暴徒（下水道狂鼠）：狂暴时受到的治疗 +50%（enemies.js · ratHealMult）
+  if (typeof ratHealMult === "function") raw *= ratHealMult(unit);
   opt = opt || {};
   // 起身中（靠坚毅生命战斗）：普通治疗不回坚毅生命，只有自焚吸血回（这场战斗里临时有效，见 ledgerCapture）
   if (unit.upOnShp && !opt.selfBurn) return 0;
@@ -1650,6 +1690,38 @@ const RIOT_STATS = {
   captain: { shield: [15, 6],  flesh: [20, 5], def: 4, atk: 7 }    // 狼队长 atk 8 + … → 7 + …
 };
 
+/** 下水道狂鼠的数值（docs/ratfolk.md 第 3 节）：血量全部是纯肉体（模板原来的护盾 + 肉体合成一层，总量不变），flesh = [1 级血量, 每级增量]；
+ *  fleshPer5：每 5 级再加的血量（牛队长的护盾每 5 级 +4）；def = 1 级架势（杂兵每 10 级 +1，精英照队长每 5 级 +1，精英已经比模板 −1）；
+ *  atk = 1 级 atk（成长项照模板，写在 enemyPresets 里）；atkMult：ATK 是模板的几成（四舍五入）；dice：普通攻击的伤害骰（固定，不随等级升档）。
+ *  种族「鼠类人·鼠」的六维修正（体质 −1：最内层肉体 −(1 + 等级)，不随人数缩放；耐力 −1：架势不变）在生成时按 run.js · ENEMY_INFO 的
+ *  raceAttrs 换算（enemies.js · setEnemyRace），这里不算 */
+const RAT_STATS = {
+  lurker: { flesh: [17, 4], def: 3, atk: 5, atkMult: 0.75, dice: 6 },   // 潜藏者：狂徒（匕首），ATK × 0.75
+  biter:  { flesh: [17, 4], def: 3, atk: 5, dice: 6 },                  // 撕咬者：狂徒（匕首）
+  plague: { flesh: [42, 12], fleshPer5: 4, def: 4, atk: 6, dice: 8 },   // 疫病暴徒：警卫队队长（牛）护盾 16 + 肉体 26（每级 5 + 7）合成，架势 5 → 4
+  tyrant: { flesh: [35, 11], def: 3, atk: 8, dice: 8 }                  // 暴虐猎手：警卫队队长（狼）护盾 15 + 肉体 20（每级 6 + 5）合成，架势 4 → 3
+};
+
+/** 下水道维护的数值（docs/sewer-maintenance.md 第 2 节；表是 2 人队，3、4 人队的血量按 scaleHp 放大）。
+ *  sweeper 下水道清扫机：血量照空投蜂群——外层护盾 shield = [1 级血量, 每级增量]、内层装甲 armor（不随等级），两层原样保留；
+ *    架势 def + ⌊等级/2⌋，最多 defCap；ATK 照机器人看守（剑）：atk + ⌊等级/2⌋；
+ *    dice：所有敌人都有共振时那一发远程谐波攻击的伤害骰（固定 1d4，不随等级升档）。招式的倍率、击破在 enemies.js · SEWER_CFG
+ *  elite 触灵维护员 / 触灵清扫员（两个精英数值相同）：照警卫队队长（蜥蜴），肉体层换成星灵——外层护盾 shield = [1 级血量, 每级增量]、
+ *    每 2 级再加 shieldPer2；内层星灵 spirit = [1 级血量, 每级增量]；架势 def（不随等级，10 级起照精英规则 ×0.6）；
+ *    ATK atk + ⌊等级/2⌋ + ⌊等级/5⌋；dice：维护员普通攻击的伤害骰（固定 1d4，不随等级升档；清扫员的范围谐波没有伤害骰） */
+const SEWER_STATS = {
+  sweeper: { shield: [4, 2], armor: 1, def: 1, defCap: 3, atk: 4, dice: 4 },
+  elite: { shield: [12, 5], shieldPer2: 5, spirit: [14, 2], def: 4, atk: 7, dice: 4 }
+};
+/** 下水道维护的两个精英共用的数值（SEWER_STATS.elite）：护盾在外、星灵在内，远程 */
+function sewerEliteOf(name, lv, p, extra) {
+  const S = SEWER_STATS.elite;
+  return unitOf(name, lv, [
+    { type: "shield", hp: scaleHp(S.shield[0] + (lv - 1) * S.shield[1] + milestone(lv, 2) * S.shieldPer2, p) },
+    { type: "spirit", hp: scaleHp(S.spirit[0] + (lv - 1) * S.spirit[1], p) }
+  ], S.def, S.atk + milestone(lv, 2) + milestone(lv, 5), Object.assign({ range: "ranged" }, extra));
+}
+
 function enemyPresets() {
   return [
     { id: "guard_sword", name: "机器人看守（剑）", build(lv, p) {
@@ -1808,6 +1880,54 @@ function enemyPresets() {
         { type: "shield", hp: scaleHp(RIOT_STATS.captain.shield[0] + (lv - 1) * RIOT_STATS.captain.shield[1], p) },
         { type: "flesh", hp: scaleHp(RIOT_STATS.captain.flesh[0] + (lv - 1) * RIOT_STATS.captain.flesh[1], p) }
       ], RIOT_STATS.captain.def + milestone(lv, 5), RIOT_STATS.captain.atk + milestone(lv, 2) + milestone(lv, 5) * 2, { kit: "riot_captain", range: "any", dice: [1, 6], element: "fire" });
+    }},
+    // —— 下水道狂鼠（docs/ratfolk.md）：纯肉体；种族「鼠类人·鼠」的六维修正生成时再换算（ENEMY_INFO.raceAttrs）——
+    // 潜藏者：狂徒（匕首）的血量 / 架势，ATK × 0.75 四舍五入；开战时躲藏
+    { id: "rat_lurker", name: "潜藏者", build(lv, p) {
+      const S = RAT_STATS.lurker;
+      const u = unitOf(this.name, lv, [{ type: "flesh", hp: scaleHp(S.flesh[0] + (lv - 1) * S.flesh[1], p) }], S.def + milestone(lv, 10),
+        Math.round((S.atk + (lv - 1)) * S.atkMult), { kit: "rat_lurker", range: "melee", dice: [1, S.dice], element: "physical" });
+      u.statuses.hide = true;
+      return u;
+    }},
+    // 撕咬者：数值同狂徒（匕首）
+    { id: "rat_biter", name: "撕咬者", build(lv, p) {
+      const S = RAT_STATS.biter;
+      return unitOf(this.name, lv, [{ type: "flesh", hp: scaleHp(S.flesh[0] + (lv - 1) * S.flesh[1], p) }], S.def + milestone(lv, 10), S.atk + (lv - 1),
+        { kit: "rat_biter", range: "melee", dice: [1, S.dice], element: "physical" });
+    }},
+    // 疫病暴徒：照警卫队队长（牛）的写法（血量合成纯肉体、架势 −1），骰子固定 1d8
+    { id: "rat_plague", name: "疫病暴徒", build(lv, p) {
+      const S = RAT_STATS.plague;
+      return unitOf(this.name, lv, [{ type: "flesh", hp: scaleHp(S.flesh[0] + (lv - 1) * S.flesh[1] + milestone(lv, 5) * S.fleshPer5, p) }],
+        S.def + milestone(lv, 5), S.atk + milestone(lv, 5) * 2, { kit: "rat_plague", range: "any", dice: [1, S.dice], element: "physical" });
+    }},
+    // 暴虐猎手：照警卫队队长（狼）的写法（血量合成纯肉体、架势 −1），骰子 1d8
+    { id: "rat_tyrant", name: "暴虐猎手", build(lv, p) {
+      const S = RAT_STATS.tyrant;
+      return unitOf(this.name, lv, [{ type: "flesh", hp: scaleHp(S.flesh[0] + (lv - 1) * S.flesh[1], p) }],
+        S.def + milestone(lv, 5), S.atk + milestone(lv, 2) + milestone(lv, 5) * 2, { kit: "rat_tyrant", range: "melee", dice: [1, S.dice], element: "physical" });
+    }},
+    // —— 下水道维护（docs/sewer-maintenance.md）——
+    // 下水道清扫机：血量照空投蜂群（护盾 + 装甲，不会飞），ATK 照机器人看守（剑）；远程，机械、没有种族
+    { id: "sewer_sweeper", name: "下水道清扫机", build(lv, p) {
+      const S = SEWER_STATS.sweeper;
+      const u = unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(S.shield[0] + (lv - 1) * S.shield[1], p) },
+        { type: "armor", hp: scaleHp(S.armor, p) }
+      ], S.def + milestone(lv, 2), S.atk + milestone(lv, 2), { kit: "sewer_sweeper", range: "ranged", dice: [1, S.dice], element: "harmonic" });
+      // 架势照空投蜂群：无论几级、几人队都不超过 defCap
+      u.defMax = Math.min(S.defCap, u.defMax);
+      u.def = Math.min(u.def, u.defMax);
+      return u;
+    }},
+    // 触灵维护员 / 触灵清扫员（精英）：照警卫队队长（蜥蜴）的写法，肉体层换成星灵；远程，种族「触灵」（run.js · ENEMY_INFO）
+    // 维护员：普通攻击 1×atk + 1d4 电击；清扫员：普通攻击是对一区所有敌人 0.5×atk 谐波（没有伤害骰）
+    { id: "sewer_keeper", name: "触灵维护员", build(lv, p) {
+      return sewerEliteOf(this.name, lv, p, { kit: "sewer_keeper", dice: [1, SEWER_STATS.elite.dice], element: "electric" });
+    }},
+    { id: "sewer_cleaner", name: "触灵清扫员", build(lv, p) {
+      return sewerEliteOf(this.name, lv, p, { kit: "sewer_cleaner", dice: [0, 0], element: "harmonic" });
     }},
     // 第一采矿场精英（暂定数值，按狼队长的总血量 / 架势 / atk 拆成护盾、装甲、肉体三层）
     { id: "ant_guard", name: "蚁型特殊戒备兵种", build(lv, p) {

@@ -49,9 +49,10 @@
   <button class="toggle" id="demo-btn" aria-label="切换演示战场">换场</button>
 </header>
 
-<aside id="party" class="panel collapsed">
+<!-- 队伍栏、技能栏挂着 .hd2d-shell.hd2d-theme：按钮、队伍栏一个人的样子和正式画面的新画面共用（hd2d/hd2d.css，#297） -->
+<aside id="party" class="panel collapsed hd2d-shell hd2d-theme">
   <div class="head"><button class="toggle" id="party-toggle" aria-expanded="false">队伍</button><span class="tape">我方队伍</span></div>
-  <div class="list" id="party-list"></div>
+  <div class="list party" id="party-list"></div>
 </aside>
 
 <aside id="logdrawer" class="panel collapsed">
@@ -59,7 +60,7 @@
   <div class="body" id="log-body"></div>
 </aside>
 
-<footer id="dock" class="panel collapsed">
+<footer id="dock" class="panel collapsed hd2d-shell hd2d-theme">
   <div class="row">
     <button class="toggle" id="dock-toggle" aria-expanded="false">技能 ▲</button>
     <span class="who" id="dock-who"></span>
@@ -75,7 +76,7 @@
   </div>
   <!-- 技能栏（照正式战斗画面 game.html 的 .hud-row）：左边普通技能按钮，右边「唤出武器人」和「结束回合」两个大按钮放在一起、同一种喷漆样式 -->
   <div class="hud-row" id="dock-bar">
-    <div id="skills"></div>
+    <div class="skills" id="skills"></div>
     <div class="hud-side">
       <button class="bigbtn sumbtn" id="summon-btn" hidden></button>
       <button class="bigbtn endbtn" id="end-turn" title="原型：结束回合还没接规则">结束回合<small>原型占位</small></button>
@@ -164,6 +165,7 @@ window.GAME_MODE = true;
 <script src="../../battle-templates.js"></script>
 <script src="../../trpg-tasks.js"></script>
 <script src="../../trpg-merchants.js"></script>
+<script src="../../lore.js"></script>
 <script src="../../rogue.js"></script>
 <script src="../../battle-commands.js"></script>
 <script src="../../rogue-commands.js"></script>
@@ -202,6 +204,8 @@ window.GAME_MODE = true;
 <script src="../../hd2d/hd2d-scenes-city.js"></script>
 <script src="../../hd2d/hd2d-scenes-desert.js"></script>
 <script src="../../hd2d/hd2d-ui.js"></script>
+<!-- 技能栏 / 队伍栏的收起 / 展开（记在本机）、头像要的公开资料：和正式画面的新画面同一份（#297） -->
+<script src="../../hd2d/hd2d-shell.js"></script>
 <script src="../../hd2d/hd2d-camera.js"></script>
 <script src="../../hd2d/hd2d-fx.js"></script>
 <!-- 演示出招的房主那边（用规则结算一次普通攻击）：只有原型用，留在原型目录 -->
@@ -214,11 +218,12 @@ import { createHd2dScene } from "../../hd2d/hd2d-scene.js";
 const L = window.HD2DLayout;
 const CAMS = window.HD2DCamera;
 const UIX = window.HD2DUI;   // 界面数据（#238）：铭牌的行动点 / 附赠、队伍栏的效果和头像、技能按钮
+const SHELL = window.HD2DShell;   // 技能栏 / 队伍栏（#297）：收起 / 展开记在本机、头像要的公开资料——和正式画面的新画面同一份
 const WX = window.HD2DWfx;   // 天气的 2D 层（#240）：正式画面的 weather-fx 压在 3D 画面上
 const $ = (id) => document.getElementById(id);
 /* 头像要的公开资料：每个角色的主职责、主 / 副属性（角色卡 party.js · livePartyCards 上的 roles.primary 和 note，图鉴里也写着）。
- * 投影里没有这两项，按投影里的 kit 查这张表（见 README「#238」里缺的字段）；角色卡上别的字段一个都不拿 */
-const LOOKS = UIX.heroLooks(typeof livePartyCards === "function" ? livePartyCards() : [], typeof ELE_BY_CN !== "undefined" ? ELE_BY_CN : null);
+ * 投影里没有这两项，按投影里的 kit 查这张表（见 README「#238」里缺的字段）；角色卡上别的字段一个都不拿（hd2d-shell.js · looks，正式画面同一份） */
+const LOOKS = SHELL.looks();
 
 /* ---------- 演示战场（用真规则 BattleSim.setup 生成，再补上场地 / 间隔 / 状态） ---------- */
 const PARTY = ["kolt", "helu", "ruby", "yuito"];
@@ -346,17 +351,12 @@ function renderUI(layout) {
   // 手机上的精简顶栏：R1 · 晴 · 第一采矿场
   const wt = weatherText(pv.weather);
   $("tb-compact").textContent = "R" + (pv.turnNo || 1) + " · " + wt.replace(/天$/, "") + " · " + place;
-  // 队伍栏：只用铭牌数据和投影过的单位（没有坚毅生命）。头像 = 主职责图标 + 主副属性色渐变（角色卡上的公开资料，按投影里的 kit 查）；
-  // 名字右边是身上的效果（投影里的状态 / 即时 / 自我效果……，hud-icons.js 的图标，多了写 +n，悬停看全部）
-  const plates = {};
-  layout.units.forEach(u => { plates[u.id] = u.plate; });
-  $("party-list").innerHTML = players().map(u => {
-    const p = plates[u.id]; if (!p) return "";
-    const segs = p.layers.slice().reverse().map(l => `<i style="width:${p.hp.max ? 100 * l.max / p.hp.max : 0}%;background:linear-gradient(90deg,${LAYER[l.type] || "#d8574a"} ${l.max ? 100 * l.cur / l.max : 0}%,#2a2520 0)"></i>`).join("");
-    const fx = UIX.effectsHtml(UIX.effectsOf(u, window.HudIcons), window.HudIcons);
-    return `<div class="pm ${u.id === actorId ? "on" : ""}" data-id="${u.id}">${UIX.avatarHtml(UIX.avatarOf(LOOKS[u.kit] || null))}
-      <div class="meta"><div class="nm"><span class="nm-t">${esc(p.name)}</span><span class="lv">Lv${p.level}</span>${fx}</div><div class="bar">${segs}</div></div></div>`;
-  }).join("");
+  // 队伍栏：只用投影过的单位（没有坚毅生命），场上有铭牌的才排。一个人里面画什么和正式画面的新画面同一份（hd2d-ui.js · partyInner，#297）：
+  // 头像 = 主职责图标 + 主副属性色渐变（角色卡上的公开资料，按投影里的 kit 查）；名字右边是身上的效果
+  // （投影里的状态 / 即时 / 自我效果……，hud-icons.js 的图标，多了写 +n，悬停看全部）；下面是分层血条
+  const plated = new Set(layout.units.map(u => u.id));
+  $("party-list").innerHTML = players().filter(u => plated.has(u.id)).map(u =>
+    `<div class="pm ${u.id === actorId ? "on" : ""}" data-id="${esc(u.id)}">${UIX.partyInner(u, SHELL.lookOf(u, LOOKS), { icons: window.HudIcons })}</div>`).join("");
   document.querySelectorAll(".pm").forEach(el => el.addEventListener("click", () => setActor(el.dataset.id)));
   renderSkills();
   renderLog();
@@ -386,7 +386,6 @@ function pickWeather() {
   if (weatherPick.wind && (typeof sandDirOptions !== "function" || sandDirOptions().includes(weatherPick.wind))) st.sandDir = weatherPick.wind;
   if (weatherPick.phase != null) st.phaseStep = weatherPick.phase;
 }
-const LAYER = { flesh: "#d8574a", armor: "#9aa7b3", shield: "#4fb8ff", sand: "#d1a85a", spirit: "#c07cf0" };
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
 function setActor(id) {
@@ -395,8 +394,8 @@ function setActor(id) {
   document.querySelectorAll(".pm").forEach(el => el.classList.toggle("on", el.dataset.id === id));
   renderSkills();
 }
-/** 图鉴里带属性的效果（codex.js · CODEX_EFFECTS：感电 = 电、熔融 = 火、雪天 = 冰……）：技能按钮的属性角标，挂效果的技能看它挂的是什么 */
-const EFFECT_ELEMENTS = typeof CODEX_EFFECTS !== "undefined" ? CODEX_EFFECTS.filter(e => e && e.element).map(e => [e.name, e.element]) : [];
+/** 图鉴里带属性的效果（codex.js · CODEX_EFFECTS：感电 = 电、熔融 = 火、雪天 = 冰……）：技能按钮的属性角标，挂效果的技能看它挂的是什么（hd2d-shell.js，正式画面同一份） */
+const EFFECT_ELEMENTS = SHELL.effectElements();
 function renderSkills() {
   const v = pv && pv.units.find(x => x.id === actorId);   // 名字、等级、手里的刀 / 引擎（技能属性跟着变的那几个）：投影里的
   $("dock-who").innerHTML = v ? `${esc(v.name)}<small>Lv${v.level} · 行动中</small>` : "";
@@ -446,22 +445,10 @@ function fxAdapter() {
 /* 演出速度：HD2DFx.FX.speeds 里轮流切（1×、2×），倍率 = 1 / 速度，交给 AttackFx.setClock（HD2DPlay.setClock 一起设）；跳过 = 正在播的立刻结束 */
 let speed = HD2DFx.FX.speeds[0];
 HD2DPlay.setClock(() => 1 / speed);
-/** 出手时镜头稍微推一下（hd2d-fx.js · pushPose：远景 / 中景，攻击者和目标的铭牌推过去也在画面里），播完拉回原来的镜头。
- *  页面上的「推镜头」关了、系统开了「减少动态效果」（sc.motion 为 false）时不推 */
+/** 出手时镜头稍微推一下（hd2d-play.js · HD2DPlay.camera → hd2d-fx.js · pushPose：远景 / 中景，攻击者和目标的铭牌推过去也在画面里），播完拉回原来的镜头。
+ *  页面上的「推镜头」关了、系统开了「减少动态效果」（sc.motion 为 false）时不推；正式画面的新画面用同一份（#283） */
 let pushOn = true;
-function fxCamera() {
-  return {
-    push(actorId, targetId, secs) {
-      const v = sc.view(), a = sc.plateOf(actorId), b = sc.plateOf(targetId);
-      const plates = [a, b].filter(Boolean).map(q => Object.assign({ size: L.plateSize(v, !!q.big) }, q));
-      const p = HD2DFx.pushPose(sc.poseNow(), a, b, { enabled: pushOn, reduced: !sc.motion, view: v, plates });
-      if (!p) return false;
-      sc.posePush(p, secs);
-      return true;
-    },
-    release(secs) { sc.poseRelease(secs); }
-  };
-}
+function fxCamera() { return HD2DPlay.camera(sc, { enabled: () => pushOn }); }
 function syncFxControls() {
   $("fx-speed").textContent = "演出 " + speed + "×";
   $("push-toggle").textContent = "推镜头 " + (pushOn ? "开" : "关");
@@ -498,17 +485,13 @@ function toast(msg) {
   clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("show"), 1800);
 }
 
-/* 面板收起 / 展开 */
-function wirePanel(panelId, btnId, labelOn, labelOff, startOpen) {
-  const p = $(panelId), b = $(btnId);
-  const set = (open) => {
-    p.classList.toggle("collapsed", !open);
-    b.setAttribute("aria-expanded", String(open));
-    if (labelOn) b.textContent = open ? labelOn : labelOff;
-    if (panelId === "dock") reinset(true);
-  };
-  b.addEventListener("click", () => set(p.classList.contains("collapsed")));
-  set(startOpen);
+/* 面板收起 / 展开（hd2d-shell.js · wirePanel，和正式画面的新画面同一份）：技能栏、队伍栏记在本机（和正式画面同一个键，同一台电脑一个习惯），
+ * 没记过时手机上收起；日志抽屉不记、默认收起。技能栏收起 / 展开时取景跟着让开 */
+function wirePanels() {
+  const phone = SHELL.phoneNow();
+  SHELL.wirePanel($("dock"), $("dock-toggle"), { name: "dock", open: !phone, onChange: () => reinset(true) });
+  SHELL.wirePanel($("party"), $("party-toggle"), { name: "party", open: !phone });
+  SHELL.wirePanel($("logdrawer"), $("log-toggle"), { labels: { open: "日志 ▶", closed: "日志 ◀" }, open: false });
 }
 /** 取景时让开顶栏和底部技能栏；让开的大小变了，铭牌的站位也跟着重排 */
 function reinset(refit) {
@@ -589,10 +572,7 @@ function syncUrl() {
   try { history.replaceState(null, "", location.pathname + "?" + q.toString()); } catch (e) { /* 打不开 history（例如本地文件）就算了 */ }
 }
 function boot() {
-  const phone = window.matchMedia("(max-width: 720px)").matches;
-  wirePanel("dock", "dock-toggle", "技能 ▼", "技能 ▲", !phone);
-  wirePanel("party", "party-toggle", "队伍 ◀", "队伍 ▶", !phone);
-  wirePanel("logdrawer", "log-toggle", "日志 ▶", "日志 ◀", false);
+  wirePanels();
   $("demo-select").innerHTML = DEMOS.map(d => `<option value="${d.id}">${esc(d.region + " · " + d.name)}</option>`).join("");
   $("demo-select").addEventListener("change", e => loadDemo(e.target.value));
   $("demo-btn").addEventListener("click", () => loadDemo(DEMOS[(DEMOS.indexOf(demo) + 1) % DEMOS.length].id));   // 手机：小按钮轮流切

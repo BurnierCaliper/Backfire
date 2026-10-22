@@ -185,11 +185,14 @@ test("队伍栏的效果：投影里的状态 / 即时效果 / 濒死 / 失衡�
   const allowed = projectedUnitFields(), src = read("hd2d-ui.js");
   new Set([...fnSource(src, "effectsOf").matchAll(/\bu\.(\w+)/g)].map(m => m[1])).forEach(f => assert.ok(allowed.has(f), "effectsOf 读了白名单里没有的 u." + f));
   U.UI.effects.flags.forEach(f => assert.ok(allowed.has(f.key), f.key + " 在白名单里"));
-  // 页面：队伍栏用投影过的单位（players() 读 pv）排效果，加载 hud-icons.js / hud-icons.css；名字右边
+  // 页面：队伍栏用投影过的单位（players() 读 pv）排效果，加载 hud-icons.js / hud-icons.css；名字右边。
+  // 一个人里面画什么挪进了 hd2d-ui.js · partyInner（#297：正式画面的新画面同一份），原型页按投影里的单位调它
   const page = read("index.html"), mod = /<script type="module">([\s\S]*?)<\/script>/.exec(page)[1];
   assert.ok(/function players\(\) \{ return \(pv \? pv\.units : \[\]\)/.test(mod), "队伍栏的人从投影里来");
-  assert.ok(/UIX\.effectsHtml\(UIX\.effectsOf\(u, window\.HudIcons\)/.test(mod), "队伍栏排效果");
-  assert.ok(/class="nm-t">[^`]*<span class="lv">[^`]*\$\{fx\}<\/div>/.test(mod), "效果在名字（和等级）的右边");
+  assert.ok(/UIX\.partyInner\(u, SHELL\.lookOf\(u, LOOKS\), \{ icons: window\.HudIcons \}\)/.test(mod), "队伍栏排效果（hd2d-ui.js · partyInner）");
+  const inner = fnSource(read("hd2d-ui.js"), "partyInner");
+  assert.ok(/effectsHtml\(effectsOf\(u, o\.icons\)/.test(inner), "partyInner 排效果");
+  assert.ok(/class="nm-t">[^`]*<span class="lv">[^`]*\$\{tag\}\$\{fx\}<\/span>/.test(inner), "效果在名字（和等级）的右边");
   assert.ok(page.includes('<script src="../../hud-icons.js"></script>') && page.includes('<link rel="stylesheet" href="../../hud-icons.css">'), "加载 hud-icons");
   const css = read("hd2d.css");
   assert.ok(/\.pm-fx:hover \.pm-fx-all, \.pm-fx:focus \.pm-fx-all \{ display: grid;/.test(css), "悬停 / 键盘停上去展开全部");
@@ -243,9 +246,13 @@ test("头像：每个主职责一个图标（职责用 growth.js · ROLE_LIST）
   assert.equal(none.glyph, U.UI.avatar.glyph);
   assert.equal(none.background, `linear-gradient(to bottom right, ${U.UI.avatar.fallback}, ${U.UI.avatar.fallback})`);
   assert.equal(U.avatarOf({ role: "坦克", main: "fire", sub: null }).background, `linear-gradient(to bottom right, ${AF.COL.fire}, ${AF.COL.fire})`);
-  // 页面：头像按投影里的 kit 查（不再是写着名字第一个字的圆圈），资料来自角色卡；CSS 是贴纸风（白边 + 墨线）
+  // 页面：头像按投影里的 kit 查（不再是写着名字第一个字的圆圈），资料来自角色卡；CSS 是贴纸风（白边 + 墨线）。
+  // #297：查表、画头像挪进了 hd2d-shell.js · looks / lookOf 和 hd2d-ui.js · partyInner（正式画面的新画面同一份）
   const mod = /<script type="module">([\s\S]*?)<\/script>/.exec(read("index.html"))[1];
-  assert.ok(/UIX\.avatarHtml\(UIX\.avatarOf\(LOOKS\[u\.kit\]/.test(mod) && /UIX\.heroLooks\(typeof livePartyCards === "function" \? livePartyCards\(\) : \[\], typeof ELE_BY_CN/.test(mod), "头像按 kit 查角色卡上的职责和属性");
+  assert.ok(/const LOOKS = SHELL\.looks\(\);/.test(mod) && /SHELL\.lookOf\(u, LOOKS\)/.test(mod), "原型页的头像资料用共用的一份");
+  const shellSrc = read("hd2d-shell.js");
+  assert.ok(/UIX\(\)\.heroLooks\(list, map\)/.test(shellSrc) && /root\.livePartyCards\(\)/.test(shellSrc) && /typeof ELE_BY_CN !== "undefined" \? ELE_BY_CN/.test(shellSrc), "头像按 kit 查角色卡上的职责和属性");
+  assert.ok(/avatarHtml\(avatarOf\(look \|\| null\)\)/.test(fnSource(read("hd2d-ui.js"), "partyInner")), "队伍栏一个人前面是头像");
   assert.ok(!/class="face">\$\{esc\(p\.name\.slice\(0, 1\)\)\}/.test(mod), "不再是名字第一个字的圆圈");
   const css = read("hd2d.css");
   assert.ok(/\.stk \.rim \* \{[^}]*stroke: var\(--canvas\)/.test(css) && /\.stk \.ink \* \{[^}]*stroke: var\(--ink\)/.test(css), "白边 + 墨线");
@@ -352,7 +359,8 @@ test("唤出武器人（唤出 / 收回 / 取回武器）单独做成大按钮�
   const side = dock.slice(dock.indexOf('<div class="hud-side">'), dock.indexOf("</div>", dock.indexOf('<div class="hud-side">')));
   assert.ok(/id="summon-btn"/.test(side) && /id="end-turn"/.test(side), "唤出武器人和结束回合在同一块");
   assert.ok(/class="bigbtn sumbtn" id="summon-btn"/.test(side) && /class="bigbtn endbtn" id="end-turn"/.test(side), "同一种大按钮样式");
-  assert.ok(dock.indexOf('<div id="skills"></div>') > 0 && dock.indexOf('<div id="skills"></div>') < dock.indexOf('<div class="hud-side">'), "普通技能在左、两个大按钮在右（照 game.html 的 .hud-row）");
+  const skillsAt = dock.indexOf('<div class="skills" id="skills"></div>');   // #297：挂 .skills，按钮样式和正式画面的新画面共用（hd2d.css）
+  assert.ok(skillsAt > 0 && skillsAt < dock.indexOf('<div class="hud-side">'), "普通技能在左、两个大按钮在右（照 game.html 的 .hud-row）");
   const dbg = dock.slice(dock.indexOf('<div class="dbg"'), dock.indexOf("</div>", dock.indexOf('<div class="dbg"')));
   ["demo-strike", "fx-speed", "push-toggle", "fx-skip"].forEach(id => assert.ok(dbg.includes(`id="${id}"`), id + " 收在原型调试那一块"));
   assert.ok(!/class="btn alt" id="demo-strike"/.test(page), "演示出招不再是大喷漆按钮");

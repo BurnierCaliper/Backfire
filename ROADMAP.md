@@ -21,7 +21,7 @@
           routemap.js（任务路线图）· world-map.js / world-data.js（角鳞星地图）· bestiary.js / bestiary-ui.js（敌人图鉴）· rulebook.js（规则说明：图鉴的「规则」一本）· icons.js（属性 / 天气图标）· sheet-ui.js（角色资料）· armory-ui.js（武器工坊）· fonts/（打包的字体）
 联机      commands.js / *-commands.js（统一指令）· hotseat.js（热座）· online-*.js（在线跑团）· relay/（转发服务）
 单局      rogue.js（流程规则）· rogue-ui.js（界面）· rogue-data.js（所有数值）· run.js（种子、遭遇）· save.js（存档）
-跑团模式  trpg.js · trpg-ui.js · trpg-data.js · trpg-tasks.js（任务）
+跑团模式  trpg.js · trpg-ui.js · trpg-data.js · trpg-tasks.js（任务）· lore.js / lore-ui.js（角色资料：NPC 条目，目前只在联机跑团）
 战斗      sim.js（布置战场、无界面对打）· ai.js（敌人 AI）
 规则      engine.js（含区制棋盘）· party.js（角色 / 技能）· enemies.js · growth.js（升级、义体、改装件）· items.js · props.js（配置物）
           ledger.js（跨战斗档案、补给、休息）· app.js（结算核心）· effects.js（状态效果）· mods.js（武器图纸）· escort.js（护送对象）

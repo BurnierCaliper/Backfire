@@ -21,10 +21,10 @@
   <link rel="stylesheet" href="cyberware.css" />
   <link rel="stylesheet" href="shop-sell.css" />
   <link rel="stylesheet" href="weather-fx.css" />
+  <link rel="stylesheet" href="pause-menu.css" />
   <!-- 新画面（HD-2D 战场，#261）：战场顶栏的开关开着才用到。样式的类名都是 hd2d- / pl- 开头，关着时一条都套不上；
-       three.js 用 vendor/three/（开了以后 hd2d/hd2d-field.js 才 import 场景模块，这张 importmap 要在任何模块之前） -->
+       场景和 three.js 打成了一个普通脚本 hd2d/hd2d-scene.bundle.js（tools/build-hd2d.js），开了以后 hd2d/hd2d-field.js 才加载，直接双击打开也能用 -->
   <link rel="stylesheet" href="hd2d/hd2d.css" />
-  <script type="importmap">{"imports":{"three":"./vendor/three/three.module.min.js","three/addons/":"./vendor/three/addons/"}}</script>
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -91,7 +91,6 @@
     <span class="run-supplies" id="run-supplies"></span>
     <span class="spacer"></span>
     <button class="g-btn" id="run-map" title="角鳞星地图：看看现在在哪、各幕要去哪">地图</button>
-    <button class="g-btn" id="r-matchup" title="属性 × 血量层的克制表（常态天气）" hidden>克制表</button>
     <button class="g-btn" id="run-bestiary" title="图鉴：敌人、配置物和所有效果">图鉴</button>
     <button class="g-btn" id="run-rules" title="规则说明：回合、行动点、检定、伤害、武器 ATK、义体改造率……">规则</button>
     <button class="g-btn" id="run-title" title="进度已自动保存">存档并回到标题</button>
@@ -146,7 +145,6 @@
     <span class="g-phase" id="g-phasel">我方行动</span>
     <button class="g-btn mobile-only" id="g-log-open" title="战斗记录">记录</button>
     <button class="g-btn" id="g-backpack" title="背包（战斗中只读）">背包</button>
-    <button class="g-btn" id="g-matchup" title="属性 × 血量层的克制表（随时能看，不打断回合）" hidden>克制表</button>
     <span class="g-weather" id="g-weather">天气 常态</span>
     <span class="g-clock" id="g-clock"></span>
     <label style="font-size:13px;color:var(--muted);display:flex;gap:6px;align-items:center">天气
@@ -186,7 +184,7 @@
     <button class="g-btn" id="g-to-explore" title="跑团模式：回到探索环节">探索环节</button>
     <button class="g-btn" id="g-fast" aria-pressed="false" title="快捷键 F">演出 1×</button>
     <button class="g-btn" id="g-sfx" aria-pressed="true" title="攻击音效开关（战斗「后台」里可以试听）">音效 开</button>
-    <button class="g-btn" id="g-hd2d-toggle" aria-pressed="false" title="新画面（HD-2D）：战场换成 3D 沙盘（远 / 中 / 近三段镜头、近景双击单位看特写），技能栏、队伍栏、记录照旧；开关记在这台电脑上。要用本地服务打开 game.html（file:// 打不开）">新画面 关</button>
+    <button class="g-btn" id="g-hd2d-toggle" aria-pressed="false" title="新画面（HD-2D）：战场换成 3D 沙盘（远 / 中 / 近三段镜头、近景双击单位看特写），技能栏、队伍栏换成能收起的新样子（主职责头像、技能的属性和攻击 / 技能角标，操作和快捷键照旧），记录照旧；开关记在这台电脑上。旧战场上往前滚滚轮也能打开，新画面远景时再往后滚回到旧画面（一阵白色云雾）。">新画面 关</button>
     <a class="g-btn" href="index.html" style="display:flex;align-items:center;text-decoration:none">打开计算器</a>
   </header>
 
@@ -920,6 +918,7 @@ window.GAME_MODE = true;
 <script src="battle-templates.js"></script>
 <script src="trpg-tasks.js"></script>
 <script src="trpg-merchants.js"></script>
+<script src="lore.js"></script>
 <script src="rogue.js"></script>
 <script src="battle-commands.js"></script>
 <script src="rogue-commands.js"></script>
@@ -944,6 +943,8 @@ window.GAME_MODE = true;
 <script src="weather-fx.js"></script>
 <script src="game.js"></script>
 <script src="screens.js"></script>
+<!-- 暂停页面（#298）：克制表、主持人工具、消息与成员、大厅等由各自的模块登记进来，所以放在它们前面 -->
+<script src="pause-menu.js"></script>
 <script src="training.js"></script>
 <script src="routemap.js"></script>
 <script src="workshop-data-adapter.js"></script>
@@ -967,6 +968,7 @@ window.GAME_MODE = true;
 <script src="online-gm-ui.js"></script>
 <script src="online-battle.js"></script>
 <script src="check-request-ui.js"></script>
+<script src="lore-ui.js"></script>
 <script src="online-ui.js"></script>
 <script src="levelup-ui.js"></script>
 <script src="commands-debug.js"></script>
