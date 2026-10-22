@@ -87,20 +87,21 @@
       light: { day: "day", dusk: "night", night: "night" },
       weather: { sand: "sand", acid: "rain", thunder: "rain", snow: "snow", phase: "fog", glow: "fog" }
     },
-    /*              board 瓦楞纸板（深一点，喷漆字才看得清）、spray「结束行动」的喷漆、spray2「唤出」的喷漆（和角色主属性的颜色混一半）、sprayEdge 喷漆字的深色描边；
+    /*              board 瓦楞纸板（深一点，喷漆字才看得清）、spray「结束行动」的喷漆、spray2「唤出」没有主属性时的喷漆、
+     *              sprayLift「唤出」跟着主属性的颜色时往这个颜色提亮 35%（火、谐波这种深一点的颜色在纸板上也看得清）、sprayEdge 喷漆字的深色描边；
      *              boardyInk 黄纸（「菜单」、选中的索引标签）上的字：夜里也是深色；
      *              receiptMuted 收据上的小字、虚线 */
     palette: {
       day: { kraft: "#c8a46e", kraftInk: "#2a1b0c", paper: "#f3ecdc", paperInk: "#1d160e", card: "#fbf7ee", muted: "#6e5c44",
-        tape: "#e8d6a6", tapeInk: "#2a1d0c", board: "#6b4a29", boardInk: "#f6efe1", boardy: "#e9c443", boardyInk: "#2a1b0c", receipt: "#f6f4ee", receiptInk: "#26231d", receiptMuted: "#7b746a",
-        spray: "#ffd21a", spray2: "#3fe8d2", sprayEdge: "rgba(24, 12, 2, .9)",
+        tape: "#e8d6a6", tapeInk: "#2a1d0c", board: "#5a3d20", boardInk: "#f6efe1", boardy: "#e9c443", boardyInk: "#2a1b0c", receipt: "#f6f4ee", receiptInk: "#26231d", receiptMuted: "#7b746a",
+        spray: "#ffd21a", spray2: "#3fe8d2", sprayLift: "#ffffff", sprayEdge: "rgba(24, 12, 2, .9)",
         on: "#55d6c2", onInk: "#08332c", stamp: "#c8281e", turn: "#0b6b5a", ring: "#e2b320", hl: "rgba(255, 226, 64, .55)" },
       night: { kraft: "#3a2d20", kraftInk: "#efe4cf", paper: "#1d1c21", paperInk: "#eae4d6", card: "#26252b", muted: "#a59c8a",
         tape: "#a09678", tapeInk: "#1c150c", board: "#4a3521", boardInk: "#f6efe1", boardy: "#c9a73a", boardyInk: "#1c1208", receipt: "#1d1c21", receiptInk: "#eae4d6", receiptMuted: "#a39b8d",
-        spray: "#ffd21a", spray2: "#3fe8d2", sprayEdge: "rgba(0, 0, 0, .92)",
+        spray: "#ffd21a", spray2: "#3fe8d2", sprayLift: "#ffffff", sprayEdge: "rgba(0, 0, 0, .92)",
         on: "#3fb8a6", onInk: "#04201b", stamp: "#e0473c", turn: "#3fd1b8", ring: "#e2b320", hl: "rgba(255, 226, 64, .35)" }
     },
-    tintKeys: ["kraft", "paper", "card", "tape", "board", "boardy", "receipt"],
+    tintKeys: ["kraft", "paper", "card", "tape", "boardy", "receipt"],   // 纸板不染：雪天往白里混会变浅，喷漆字就看不清了
     weathers: {
       sand: { tint: "#d9a54a", mix: 0.2, edge: "inset 0 0 18px rgba(206, 150, 60, .7)" },
       rain: { tint: "#5d7390", mix: 0.22, edge: "inset 0 0 16px rgba(28, 42, 66, .5)" },

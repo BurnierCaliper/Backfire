@@ -256,7 +256,7 @@ body.ol-paper .g-hud.hd2d-shell :is(.summonbtn, .endturn)[data-olp-tex] {
 }
 body.ol-paper .g-hud.hd2d-shell .endturn[data-olp-tex] { font-family: var(--olp-label); font-size: 24px; font-weight: 400; }
 body.ol-paper .g-hud.hd2d-shell :is(.summonbtn, .endturn)[data-olp-tex]::before { display: none; }   /* skin.css 的喷漆色块：纸板上字就是喷漆，不再垫一块（不然黄字压黄底看不清） */
-body.ol-paper .g-hud.hd2d-shell .summonbtn[data-olp-tex] { color: color-mix(in srgb, var(--el, var(--olp-spray2)) 55%, var(--olp-spray2)); font-family: var(--olp-label); font-size: 19px; font-weight: 400; }
+body.ol-paper .g-hud.hd2d-shell .summonbtn[data-olp-tex] { color: color-mix(in srgb, var(--el, var(--olp-spray2)) 65%, var(--olp-spray-lift)); font-family: var(--olp-label); font-size: 19px; font-weight: 400; }   /* 颜色照旧跟着主属性，提亮一点 */
 body.ol-paper .g-hud.hd2d-shell :is(.summonbtn, .endturn)[data-olp-tex] small {
   display: block; opacity: 1; color: inherit; font: 400 12px/1.2 var(--olp-stencil); letter-spacing: 1px; -webkit-text-stroke: 0; text-shadow: 1px 1px 0 var(--olp-spray-edge);
 }

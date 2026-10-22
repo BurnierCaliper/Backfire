@@ -463,7 +463,8 @@ test("手机竖屏（390 × 844）：顶栏放得下；队伍只显示头像；�
 /* ---------- 审查（10/22）之后补的：收据、技能吊牌、收起的队伍、竖标签、纸板按钮、便利贴、手机上不挤 ---------- */
 /** 两个颜色（rgb(…) / #rrggbb）的对比度（WCAG） */
 const contrast = (a, b) => {
-  const rgb = c => (/^#/.test(c) ? [1, 3, 5].map(i => parseInt(c.slice(i, i + 2), 16)) : c.match(/[\d.]+/g).slice(0, 3).map(Number));
+  // #rrggbb、rgb(…)、color(srgb 0–1 …)（color-mix 算出来的颜色 getComputedStyle 写成这样）
+  const rgb = c => (/^#/.test(c) ? [1, 3, 5].map(i => parseInt(c.slice(i, i + 2), 16)) : /^color\(srgb/.test(c) ? c.match(/[\d.]+/g).slice(0, 3).map(v => Number(v) * 255) : c.match(/[\d.]+/g).slice(0, 3).map(Number));
   const lum = c => { const [r, g, b] = rgb(c).map(v => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
   const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p);
   return (x + 0.05) / (y + 0.05);
@@ -572,9 +573,23 @@ test("技能吊牌：打孔、打孔虚线、属性图标、名字从左往右�
   assert.equal(end.tex, "board");
   assert.ok(contrast(end.color, end.board) >= 4.5, "「结束行动」的喷漆字和纸板对比度够：" + JSON.stringify(end) + " → " + contrast(end.color, end.board).toFixed(2));
   assert.equal(end.small, "1", "下面那行小字不透明");
-  for (const time of ["day", "night"]) {
-    const v = await page.evaluate(time => OnlinePaper.themeVars({ time }), time);
-    assert.ok(contrast(v["--olp-spray"], v["--olp-board"]) >= 4.5 && contrast(v["--olp-spray2"], v["--olp-board"]) >= 4.5, time + "：两种喷漆在纸板上都够清楚");
+  for (const time of ["day", "night"]) for (const weather of ["none", "sand", "rain", "snow", "fog"]) {
+    const v = await page.evaluate(([time, weather]) => OnlinePaper.themeVars({ time, weather }), [time, weather]);
+    assert.ok(contrast(v["--olp-spray"], v["--olp-board"]) >= 4.5 && contrast(v["--olp-spray2"], v["--olp-board"]) >= 4.5, time + " / " + weather + "：两种喷漆在纸板上都够清楚");
+  }
+  // 「唤出」跟着角色主属性的颜色（提亮一点）：每一种属性的颜色在纸板上都够清楚（白天、夜里）
+  for (const light of ["day", "night"]) {
+    await page.evaluate(light => { fixture.view.state.light = light; fixture.emit(); }, light);
+    await page.waitForFunction(light => document.body.dataset.olpTime === light, light);
+    const lift = await page.evaluate(() => {
+      const hud = document.querySelector(".ol-battle > .g-hud"), out = [];
+      for (const [k, c] of Object.entries(HD2DUI.UI.elements)) {
+        const b = document.createElement("button"); b.className = "summonbtn"; b.dataset.olpTex = "board"; b.style.setProperty("--el", c); b.textContent = "唤出";
+        hud.appendChild(b); out.push([k, getComputedStyle(b).color]); b.remove();
+      }
+      return { out, board: getComputedStyle(document.body).getPropertyValue("--olp-board").trim() };
+    });
+    for (const [k, col] of lift.out) assert.ok(contrast(col, lift.board) >= 4.5, `${light}：「唤出」${k} 的颜色 ${col} 在纸板 ${lift.board} 上对比度 ${contrast(col, lift.board).toFixed(2)}`);
   }
   await shot(page, "paper-review-skills");
   assert.deepEqual(o.errors, []);
@@ -633,11 +648,17 @@ test("手机竖屏：抽屉收着时顶栏、吊牌、队伍头像、竖标签�
     assert.ok(Object.values(bx).every(b => b.l >= -1 && b.r <= 391 && b.b <= 845), why + "：都在屏幕里：" + JSON.stringify(bx));
   };
   check(await boxes(), "平时");
-  // 技能栏换行变高了（字多、技能多）：竖标签跟着往上挪，还是不压
-  await page.evaluate(() => { document.querySelector(".ol-battle > .g-hud .hint").style.minHeight = "160px"; });
-  await page.waitForFunction(() => { const h = document.querySelector(".ol-battle > .g-hud").getBoundingClientRect(), s = document.getElementById("online-side").getBoundingClientRect(); return s.bottom <= h.top; });
+  // 技能栏展开、换行变高了（字多、技能多）：竖标签跟着往上挪，还是不压
+  const before = await rect(page, ".ol-battle > .g-hud");
+  if (await page.evaluate(() => document.querySelector(".ol-battle > .g-hud").classList.contains("dock-closed"))) await page.click(".ol-battle .hd2d-dock-toggle");
+  await page.evaluate(() => { const h = document.querySelector(".ol-battle > .g-hud .hint"); h.style.display = "block"; h.style.minHeight = "160px"; });
+  await page.waitForFunction(h0 => document.querySelector(".ol-battle > .g-hud").getBoundingClientRect().height > h0 + 150, before.height);
+  await page.waitForFunction(() => { const h = document.querySelector(".ol-battle > .g-hud").getBoundingClientRect(), s = document.getElementById("online-side").getBoundingClientRect(); return s.bottom <= h.top; }, null, { timeout: 3000 });
   check(await boxes(), "技能栏变高以后");
-  await page.evaluate(() => { document.querySelector(".ol-battle > .g-hud .hint").style.minHeight = ""; });
+  await page.evaluate(() => { const h = document.querySelector(".ol-battle > .g-hud .hint"); h.style.display = ""; h.style.minHeight = ""; });
+  // 等竖标签跟着技能栏挪回去（量好的高度写回 --olp-dock-h）再点它
+  await page.waitForFunction(() => document.body.style.getPropertyValue("--olp-dock-h") === document.querySelector(".ol-battle > .g-hud").offsetHeight + "px");
+  await settle(page);
   // 拉开：盖满屏幕；收起按钮在屏幕里、点得到；点了回到竖标签
   await page.click("#online-side [data-side-collapse]");
   await page.waitForFunction(() => !document.getElementById("online-side").classList.contains("ol-side-collapsed"));
