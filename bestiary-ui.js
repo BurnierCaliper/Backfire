@@ -186,12 +186,15 @@ const Bestiary = (() => {
     const m = typeof CRAFT_MATERIALS !== "undefined" ? CRAFT_MATERIALS.find(x => x.id === id) : null;
     return m ? m.tier : null;
   }
-  const pct = (x) => `${Math.round(x * 100)}%`;
-  /** 一条掉落的文字：p < 1 → 「35% 掉 1 份」；p ≥ 1 → 「保底 2 份」（+「30% 再多 1 份」） */
+  /* 图鉴里不给玩家看具体掉率 / 份数（策划要求），只给模糊档位。
+   * 期望份数 ≥ 1 → 「必掉」（有小数部分 → 「必掉，有时更多」）；
+   * 否则按掉 1 份的概率分档：≥ 40% 常见，15%–40% 少见，< 15% 罕见。改档位只改这里。 */
+  const DROP_RARITY = [[0.4, "常见"], [0.15, "少见"], [0, "罕见"]];
+  /** 一条掉落的模糊说明（不含数字） */
   function dropChanceText(chance) {
-    const n = Math.floor(chance), f = Math.round((chance - n) * 1000) / 1000;
-    if (n < 1) return `${pct(f)} 掉 1 份`;
-    return `保底 ${n} 份${f > 0 ? `，${pct(f)} 再多 1 份` : ""}`;
+    const p = Number(chance) || 0;
+    if (p >= 1) return p - Math.floor(p) > 1e-9 ? "必掉，有时更多" : "必掉";
+    return DROP_RARITY.find(([min]) => p >= min)[1];
   }
   /** 详情里的「可能掉落」一节（没登记掉落的敌人写「不掉制作材料」） */
   function dropsSection(e) {
