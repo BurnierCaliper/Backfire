@@ -856,7 +856,7 @@ export function createHd2dScene(container, options) {
       const short = list.some(x => (Number(x.have) || 0) < Math.max(1, Number(x.need) || 1));
       t.ready = !!(UC && UC.mechLast && list.some(UC.mechLast));
       t.ring.material.color.set(short ? TOWER.short : TOWER.color).multiplyScalar(TOWER.glow);
-      t.el.classList.toggle("short", short); t.el.classList.toggle("ready", t.ready);
+      t.el.classList.toggle("short", short);
       const r = Math.min(z.w, z.d) * TOWER.radius;
       t.ring.scale.set(r, r, 1);
       t.ring.position.set(z.cx, z.topY + 0.03, z.cz);
