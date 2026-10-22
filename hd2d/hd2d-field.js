@@ -50,6 +50,28 @@
     pad: 6,
     drag: 5
   };
+  /* ---------- 新旧画面之间的云雾转场（#261 追加）----------
+   * 主人：「在远景情况下如果还继续缩小，就会变回之前的战斗画面，具体是镜头上升到正上方然后一阵白色云雾后切换成之前的战斗画面」。
+   * 新 → 旧：镜头升到正上方 → 云雾从四边涌进来盖满 → 切到旧画面（开关拨到关）→ 云雾散开；旧 → 新反过来：云雾涌进来 → 切到新画面（镜头在正上方）→ 云雾散开、镜头同时降回远景。
+   *   rise      镜头升到战场正上方往下看：elevation 俯角（度，接近 90；正 90 度镜头朝向算不出来）、dist 离看的那一点多远（× 远景的距离）、secs 升多久、ease 缓动（hd2d-camera.js 的 EASE）
+   *   descend   旧 → 新：镜头从正上方（rise 的俯角、距离）降回远景要多久、缓动；和云雾散开同时开始
+   *   cover     云雾从四边涌进来、合拢盖满要多久（秒）；overlap = 镜头离升到顶还有多少秒时云雾就开始涌（升和涌接得上，不是升完了停一下再来）
+   *   hold      盖满以后至少停多久（秒；这时切画面。旧 → 新还要等新画面建好，第一次打开要加载）
+   *   clear     云雾散开要多久（秒）
+   *   color / opacity   云雾的颜色（r, g, b）、最浓时的不透明度（柔边、半透明叠上去，不是一块纯白硬切）
+   *   puffs / size / spread / push / stagger   几团云；每团多大（× 战场的宽 / 高）；盖满时各团离中心多远（× 战场的半宽 / 半高）；
+   *             涌进来之前在外面多远（× 团自己的大小）；一团比一团晚出发多少秒（错开一点，像涌进来的）
+   *   wheel     旧画面的战场上往前滚（拉近）转到新画面：一次滚动（两下之间停顿不到 idle 秒算同一次）攒够 step 像素算一下，只算一次；
+   *             按行 / 按页给的 deltaY 换成像素 × line / × page（和镜头换段的 hd2d-camera.js · CAMERA.wheel 同一个算法）
+   * 系统开了「减少动态效果」时一段都不播：不升镜头、不涌云雾，直接切。转场只是这台机器上的画面，不改战斗状态、不发给联机的其他人 */
+  const MIST = {
+    rise: { elevation: 88, dist: 1.15, secs: 0.75, ease: "inOutCubic" },
+    descend: { secs: 0.9, ease: "inOutCubic" },
+    cover: 0.55, overlap: 0.25, hold: 0.15, clear: 0.7,
+    color: [255, 255, 255], opacity: 0.97,
+    puffs: 9, size: 1.1, spread: 0.38, push: 0.8, stagger: 0.03,
+    wheel: { step: 40, idle: 0.22, line: 40, page: 800 }
+  };
 
   /** 布局（hd2d-layout.js）：Node 里直接 require；页面里开了新画面才加载，用的时候再取 */
   const Lay = () => L0 || root.HD2DLayout;
@@ -147,6 +169,58 @@
     if (!Number.isFinite(x0) || !(x1 > x0) || !(y1 > y0)) return null;
     const left = x0 + ((offset && offset.left) || 0), top = y0 + ((offset && offset.top) || 0), w = x1 - x0, h = y1 - y0;
     return { x: left + w / 2, y: top + h / 2, w, h, left, top, width: w, height: h, right: left + w, bottom: top + h };
+  }
+
+  /* ---------- 新旧画面之间的转场（纯函数）---------- */
+  /**
+   * 转场要走的几段：to = "old" 新 → 旧 / "new" 旧 → 新；o = { reduced 减少动态效果, live 新画面现在建好了（新 → 旧时才有能升起来的镜头） }。
+   * 返回 [{ step, secs }]，一段走完接下一段：
+   *   rise   镜头往正上方升（升到最后 MIST.overlap 秒时云雾就开始涌，所以这一段只算到那时）
+   *   cover  云雾从四边涌进来盖满
+   *   swap   切画面（新 → 旧 = 开关拨到关，拆掉 3D；旧 → 新 = 拨到开，建好 3D、镜头摆在正上方）：盖满以后至少停 hold 秒，旧 → 新还要等新画面建好
+   *   clear  云雾散开（旧 → 新：镜头同时从正上方降回远景，按两个里长的那个算）
+   * 减少动态效果，或者新 → 旧时 3D 还没建好（还在加载 / 打不开，看到的就是旧画面）：只有 0 秒的 swap，直接切
+   */
+  function mistPlan(to, o) {
+    o = o || {};
+    const M = MIST;
+    if (o.reduced || (to === "old" && !o.live)) return [{ step: "swap", secs: 0 }];
+    const plan = to === "old" ? [{ step: "rise", secs: Math.max(0, M.rise.secs - M.overlap) }] : [];
+    return plan.concat([
+      { step: "cover", secs: M.cover },
+      { step: "swap", secs: M.hold },
+      { step: "clear", secs: to === "new" ? Math.max(M.clear, M.descend.secs) : M.clear }
+    ]);
+  }
+  /** 战场上的一下滚轮：s = 上一次返回的（第一次给 null），deltaY 像素（往前滚是负的），now 秒。
+   *  一次滚动（两下之间停顿不到 MIST.wheel.idle 秒）攒够 step 像素算一下、只算一次：往前 1（拉近）/ 往后 −1（拉远）。
+   *  state.ate = 这一次滚动已经换过一次画面（剩下的都不理：触控板的惯性不会接着把新画面的镜头往里推）；换了一次新的滚动就清掉。返回 { step, state } */
+  function wheelGate(s, deltaY, now) {
+    const W = MIST.wheel, fresh = !s || !(now - s.last <= W.idle);
+    const st = { acc: (fresh ? 0 : s.acc) + (Number(deltaY) || 0), last: now, done: !fresh && !!s.done, ate: !fresh && !!s.ate };
+    let step = 0;
+    if (!st.done && Math.abs(st.acc) >= W.step) { step = st.acc < 0 ? 1 : -1; st.done = true; }
+    return { step, state: st };
+  }
+  /** 滚轮事件的 deltaY 换成像素（有的浏览器按行、按页给） */
+  function wheelPixels(e) {
+    const W = MIST.wheel;
+    return (Number(e && e.deltaY) || 0) * (e && e.deltaMode === 1 ? W.line : e && e.deltaMode === 2 ? W.page : 1);
+  }
+  /** 云雾一团一团的样子（CSS 变量）：n 团均匀绕着战场一圈，盖满时的中心 x / y（%，离中心 spread × 半宽 / 半高）、大小 w / h（%，× 战场的宽 / 高），
+   *  涌进来之前往外挪 dx / dy（%，× 团自己的大小，沿着它那一圈的方向）、晚出发 d 秒。纯函数：只看 MIST */
+  function mistPuffs() {
+    const M = MIST, n = Math.max(1, Math.round(M.puffs)), out = [];
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + Math.PI / n, c = Math.cos(a), s = Math.sin(a);
+      const big = i % 2 ? 0.85 : 1;                  // 大小错开一点，不是一圈一样的圆
+      out.push({
+        x: +(50 + 50 * M.spread * c).toFixed(2), y: +(50 + 50 * M.spread * s).toFixed(2),
+        w: +(100 * M.size * big).toFixed(2), h: +(100 * M.size * big).toFixed(2),
+        dx: +(100 * M.push * c).toFixed(2), dy: +(100 * M.push * s).toFixed(2), d: +((i % 3) * M.stagger).toFixed(3)
+      });
+    }
+    return out;
   }
 
   /* ---------- 页面 ----------
@@ -441,7 +515,7 @@
   /** 一个区的地台在屏幕上的外框（范围攻击画满整个区：game.js · zoneRectOf） */
   function zoneRectOf(zone) { return S.sc && S.ad ? S.ad.zoneRectOf(Number(zone)) : null; }
 
-  const api = { FIELD, enabled, setEnabled, viewState, layoutOpts, marksOf, wire, gapRect, boot, on, view, actor, marks, rectOf, zoneRectOf };
+  const api = { FIELD, MIST, enabled, setEnabled, viewState, layoutOpts, marksOf, wire, gapRect, mistPlan, wheelGate, wheelPixels, mistPuffs, boot, on, view, actor, marks, rectOf, zoneRectOf };
   // 页面里：等页面加载完（game.js 的 boot 先登记在 DOMContentLoaded 上，先跑）再接开关
   if (!(typeof module === "object" && module.exports) && root.document) {
     if (root.document.readyState === "loading") root.document.addEventListener("DOMContentLoaded", () => boot());
