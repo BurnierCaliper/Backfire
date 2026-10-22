@@ -325,7 +325,8 @@ test("易怒蛮牛（兽人·牛）：血量低于 50% 时受到任何伤害，�
   assert.equal(foe.bonus, 0);
   c.refreshEnemyEconomy(foe, []);
   assert.equal(foe.bonus, 1, "只失去一回合");
-  // 冲到有人的区：随机一个目标 1 击破
+  // 冲到有人的区：随机一个目标 1 击破（每回合只发作一次：下面每段当作新的一回合，清掉 raceRageUsed）
+  foe.raceRageUsed = false;
   // 一个人在 1 区、一个人在 3 区：不管它往哪边冲，落脚的区里正好一个人，那个人受 1 击破（另一个不受）
   foe.zone = 2; kolt.zone = 1; helu.zone = 3;
   [kolt, helu].forEach(u => { u.def = u.defMax = 9; });
@@ -337,6 +338,7 @@ test("易怒蛮牛（兽人·牛）：血量低于 50% 时受到任何伤害，�
   // 冲到没人的区：没有撞到人
   foe.zone = 2; kolt.zone = 1; helu.zone = 1;
   [kolt, helu].forEach(u => { u.def = u.defMax = 9; });
+  foe.raceRageUsed = false;
   const empty = hit(c, kolt, foe, { flat: 1 });
   if (foe.zone === 3) { assert.equal(kolt.def + helu.def, 18); assert.match(empty.extra.join("\n"), /没有撞到人/); }
   else assert.equal(kolt.def + helu.def, 17, "冲进 1 区：两个人里随机一个受 1 击破");

@@ -1690,6 +1690,8 @@ function refreshEnemyEconomy(u, notes) {
 function beginRound(notes) {
   notes = notes || [];
   startLogTurn();
+  // 易怒蛮牛（enemies.js · raceAfterHurt）：每回合最多发作一次，新回合重新可以触发
+  state.units.forEach(u => { if (u && u.raceRageUsed) u.raceRageUsed = false; });
   // 援军（chain.js）：到了时候的这一波进场
   if (typeof Chain !== "undefined") Chain.roundStart([]).forEach(t => appendLog(t));
   // 背水一战+：夏濒死并且起身时，每回合自动获得 1 点燃油

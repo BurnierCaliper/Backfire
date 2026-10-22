@@ -3298,7 +3298,7 @@ const RACE_PERKS = {
   "鼠类人·鼠": { fieldCut: true, text: "环境适应：场地伤害、冻土击破 50% 概率免疫" },
   "牛类人·马": { firstBonus: true, text: "千里马：第一回合 +1 附赠" },
   "兽人·狼":   { hunt: true, text: "追猎本能：附赠，对一个敌人施加紧追" },
-  "兽人·牛":   { rage: true, text: "易怒蛮牛（缺陷）：血量低于 50% 时受到任何伤害，会失去附赠、冲到另一个区、对随机一个目标造成 1 击破" },
+  "兽人·牛":   { rage: true, text: "易怒蛮牛（缺陷）：血量低于 50% 时受到任何伤害，会失去附赠、冲到另一个区、对随机一个目标造成 1 击破；每回合最多一次，晕眩 / 失衡时不发作" },
   "兽人·蜥蜴": { spit: true, energyUp: true, text: "吐酸：附赠，近距 1×atk 酸，每场一次；鳞片（缺陷）：受能量伤害 +25%" },
   "兽人·猫":   { breakCap: true, distract: true, text: "灵巧：一回合最多失去 2 架势；注意力涣散（缺陷）：不止一个目标可选时，连续超过 1 回合打同一个目标，伤害 −25%" },
   "兽人·熊":   { text: "重装操作、嗜睡（战斗里不生效，只记在资料里）" }
@@ -3436,13 +3436,20 @@ function raceNoteAttack(a, t) {
   } else a.raceFocus = { id: t.id, round: now, streak: 1 };
 }
 
-/** 易怒蛮牛：血量低于一半时受到任何伤害 → 失去附赠、冲到另一个区、对随机一个目标造成击破。applyCombat 末尾调用 */
+/** 易怒蛮牛：血量低于一半时受到任何伤害 → 失去附赠、冲到另一个区、对随机一个目标造成击破。applyCombat 末尾调用。
+ *  每回合最多一次（raceRageUsed，beginRound 清掉）；晕眩 / 失衡时不发作 */
 function raceAfterHurt(target, result, attacker, notes) {
   const p = enemyRacePerk(target);
   if (!p || !p.rage || target.dead || target._rageBusy || target.hidden) return;
   if (!((Number(result && result.total) || 0) > 0 || (Number(result && result.shpDealt) || 0) > 0)) return;
   const max = totalMaxHp(target);
   if (!(max > 0) || totalHp(target) >= max * RACE_PERK.rageHpPct) return;
+  // 每回合（整轮）最多发作一次：beginRound 清 raceRageUsed。以前没有这道门，一击的主伤害触发一次、
+  // 随后的高压场地追加伤害（感电、灼烧等连带伤害同理）又触发一次，于是 1 区 → 2 区 → 1 区来回冲、撞两个人
+  if (target.raceRageUsed) return;
+  // 晕眩 / 失衡不冲撞：看这一击结算完之后的状态（这一击把它打进失衡、首领立刻恢复架势的 result.broke 也算）
+  if (target.stunned || (!target.noPosture && Number(target.def) <= 0) || (result && result.broke)) return;
+  target.raceRageUsed = true;
   target._rageBusy = true;
   try {
     notes.push(`易怒蛮牛：${target.name} 血量低于 ${Math.round(RACE_PERK.rageHpPct * 100)}%，受伤后失控！`);
