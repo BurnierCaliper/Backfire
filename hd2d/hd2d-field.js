@@ -41,8 +41,9 @@
   /* ---------- 配置 ----------
    *   storageKey / defaultOn   本机记住开关的键（存 "on" / "off"）、默认（关：主人试过再改默认）
    *   toggleId                 战斗顶栏的开关按钮；label 按钮上写的字（开 / 关 / 正在加载）；text 打不开时的提示（{0} = 浏览器给的原因）
-   *   scripts                  开了才按顺序加载的普通脚本（场景模块 import 时就要 HD2DLayout / HD2DCamera，铭牌要 HD2DUI）；scene 最后 import 的场景（ES 模块，
-   *                            three.js 走 game.html 的 importmap → vendor/three/）
+   *   scripts                  开了才按顺序加载的普通脚本（场景要 HD2DLayout / HD2DCamera，铭牌要 HD2DUI）；scene 最后加载的场景包（也是普通脚本：
+   *                            hd2d-scene.js 和 three.js 由 tools/build-hd2d.js 打成一个，加载后挂在 window[sceneGlobal] 上）。
+   *                            全用普通脚本，直接双击打开 game.html（file://）也能开新画面——浏览器不让 file:// 加载 ES 模块
    *   live                     演出途中每一下的快照盖到投影上的字段（会变的：站位、血量、架势、行动点 / 附赠、倒下 / 濒死 / 失衡、飞 / 潜、藏起来）；
    *                            名字、状态、实际 ATK 这些用这一刻的战斗状态投影出来的
    *   pad                      取景时让开战场上沿的首领机制横幅 / 援军倒计时、下沿的镜头按钮，再多留几像素
@@ -53,11 +54,11 @@
     toggleId: "g-hd2d-toggle",
     label: { on: "新画面 开", off: "新画面 关", loading: "新画面 …" },
     text: {
-      file: "新画面要用本地服务打开 game.html（在仓库目录运行 python3 -m http.server 8000，再打开 http://localhost:8000/game.html），先用旧画面",
-      fail: "新画面打不开（这个浏览器用不了 WebGL 或 ES 模块：{0}），先用旧画面"
+      fail: "新画面打不开（这个浏览器用不了 WebGL：{0}），先用旧画面"
     },
     scripts: ["hd2d-layout.js", "hd2d-scene-art.js", "hd2d-scenes-mine.js", "hd2d-scenes-city.js", "hd2d-scenes-desert.js", "hd2d-ui.js", "hd2d-camera.js", "hd2d-fx.js", "hd2d-play.js", "hd2d-wfx.js"],
-    scene: "hd2d-scene.js",
+    scene: "hd2d-scene.bundle.js",
+    sceneGlobal: "HD2DSceneBundle",
     live: ["zone", "layers", "def", "defMax", "ap", "apMax", "bonus", "bonusMax", "dead", "dying", "stunned", "upOnShp", "hidden", "flying", "submerged"],
     pad: 6,
     drag: 5
@@ -271,7 +272,6 @@
     if (G && typeof G.flashHint === "function") G.flashHint(msg);
     if (root.console && root.console.warn) root.console.warn("[HD-2D]", msg);
   }
-  function isFile() { try { return !!(root.location && root.location.protocol === "file:"); } catch (e) { return false; } }
   /** 系统的「减少动态效果」（和场景、weather-fx.js 看的是同一个设置） */
   function reducedMotion() { try { return !!(root.matchMedia && root.matchMedia("(prefers-reduced-motion: reduce)").matches); } catch (e) { return false; } }
 
@@ -345,13 +345,13 @@
   }
   /** 开始加载（hd2d-field.js · loadModules，加载过的不再加载）；同步出错也给一个 reject 的 Promise */
   function loadNow() { try { return Promise.resolve(env.load()); } catch (e) { return Promise.reject(e); } }
-  /** 打不开（本地文件打不开 ES 模块、没有 WebGL……）：退回旧画面，开关记成关，告诉玩家为什么 */
+  /** 打不开（没有 WebGL……）：退回旧画面，开关记成关，告诉玩家为什么 */
   function fail(err) {
     S.want = false;
     S.broken = true;
     setEnabled(false, env.storage);
     teardown(true);
-    const msg = isFile() ? FIELD.text.file : FIELD.text.fail.replace("{0}", (err && err.message) || String(err));
+    const msg = FIELD.text.fail.replace("{0}", (err && err.message) || String(err));
     paintToggle(msg);
     (host.hint || env.hint)(msg);
   }
@@ -473,14 +473,14 @@
    *   正在转场、这一次滚动已经换过一次画面（触控板的惯性还在来）：不理（镜头不换段，页面也不滚）
    *   旧画面：往前滚（拉近）攒够一下 → 转到新画面；往后滚、按着 Ctrl（触控板双指缩放 / 浏览器缩放）照旧是浏览器自己的
    *   新画面：交给场景（三段镜头换段；远景再往外拉由场景叫 onZoomOut）
-   * 用 file:// 打开（新画面根本打不开）、这一次打开页面已经打不开过：旧画面的滚轮照旧，要开就点开关 */
+   * 这一次打开页面新画面已经打不开过：旧画面的滚轮照旧，要开就点开关 */
   function onFieldWheel(e) {
     const r = wheelGate(T.gesture, wheelPixels(e), env.now());
     T.gesture = r.state;
     if (T.busy || T.gesture.ate) { e.preventDefault(); e.stopPropagation(); return; }
     // 联机玩家的旧战场自己会滚动：还没滚到顶就照旧滚，这一次滚动不打开新画面（#289）
     if (!S.want && !S.sc && scrollsUp(e)) { T.gesture.done = true; return; }
-    if (S.want || S.sc || r.step !== 1 || e.ctrlKey || isFile() || S.broken) return;
+    if (S.want || S.sc || r.step !== 1 || e.ctrlKey || S.broken) return;
     e.preventDefault(); e.stopPropagation();
     if (switchTo("new")) T.gesture.ate = true;
   }
@@ -496,7 +496,7 @@
     return false;
   }
 
-  /** 开了才加载：普通脚本按顺序（加载过的不再加载），最后 import 场景模块，交出 createHd2dScene */
+  /** 开了才加载：普通脚本按顺序（加载过的不再加载），最后是场景包（tools/build-hd2d.js 打的普通脚本），交出 createHd2dScene */
   const loaded = new Set();
   function loadScript(src) {
     return new Promise((ok, bad) => {
@@ -514,7 +514,9 @@
       await loadScript(BASE + f);
       loaded.add(f);
     }
-    const mod = await import(BASE + FIELD.scene);
+    if (!root[FIELD.sceneGlobal]) await loadScript(BASE + FIELD.scene);
+    const mod = root[FIELD.sceneGlobal];
+    if (!mod || typeof mod.createHd2dScene !== "function") throw new Error("场景包没有 createHd2dScene：" + FIELD.scene);
     return mod.createHd2dScene;
   }
 

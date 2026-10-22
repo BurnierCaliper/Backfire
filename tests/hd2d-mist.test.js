@@ -464,7 +464,7 @@ test("开关和滚轮走同一套逻辑（switchTo）：新 → 旧（开关 / �
 });
 
 /* ---------- 10. 打不开 ---------- */
-test("旧 → 新打不开（没有 WebGL / 本地文件打不开 ES 模块）：云雾盖满后留在旧画面、开关记成关、提示为什么，云雾照样散开；这一次打开页面就不再用滚轮去开（点开关还能试），用 file:// 打开时旧战场的滚轮照旧", async () => {
+test("旧 → 新打不开（没有 WebGL / 本地文件打不开 ES 模块）：云雾盖满后留在旧画面、开关记成关、提示为什么，云雾照样散开；这一次打开页面就不再用滚轮去开（点开关还能试）；用 file:// 打开也照样能用滚轮打开（场景打成了普通脚本 hd2d-scene.bundle.js）", async () => {
   let loads = 0;
   const p = await page({ on: false, load: () => { loads++; return Promise.reject(new Error("WebGL 不可用")); } });
   const { F, T, mem, log, btn } = p;
@@ -495,14 +495,14 @@ test("旧 → 新打不开（没有 WebGL / 本地文件打不开 ES 模块）�
   assert.equal(loads, 2);
   while (T.q.length) { T.tick(); await settle(); await settle(); }
   assert.equal(F.on(), false);
-  // file:// 打开：旧战场的滚轮照旧（新画面根本打不开），开关还在
+  // file:// 打开：场景打成了普通脚本（hd2d/hd2d-scene.bundle.js），双击打开也能开——旧战场上往前滚照样转到新画面
   const q = await page({ on: false });
   q.ctx.location = { protocol: "file:" };
   q.T.advance(1);
   const e2 = q.wheel(wheelEv(-200));
-  assert.equal(e2.prevented + e2.stopped, 0);
-  assert.equal(q.F.transition().busy, false);
-  assert.equal(q.log.loads, 0);
+  assert.ok(e2.prevented && e2.stopped, "滚轮交给转场");
+  assert.equal(q.F.transition().busy, true);
+  assert.equal(q.F.transition().to, "new");
 });
 
 /* ---------- 11. 旧 → 新：画出来了云雾才散 ---------- */

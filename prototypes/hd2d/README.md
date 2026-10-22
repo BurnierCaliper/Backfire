@@ -139,10 +139,10 @@ node --test tests/hd2d-weather-fx.test.js # 天气（#240 / #251）：正式画�
 
 路线（主人同意的）：① 单机先接，旧画面留开关（这一条）；② 攻击演出、首领机制图标 / 横幅这些叠加层接上；③ 联机玩家的画面也接上。
 
-**怎么打开**：game.html 也要用本地服务打开（在仓库目录 `python3 -m http.server 8000`，再开 `http://localhost:8000/game.html`；`file://` 浏览器不让加载 ES 模块），进战斗画面，点顶栏的「新画面 关」，变成「新画面 开」。开关记在这台电脑上（localStorage 的 `backfire-hd2d-field`，读写都包 try/catch），默认关；打不开（`file://`、没有 WebGL）就退回旧画面、开关记成关，提示栏说为什么。
+**怎么打开**：直接双击打开 game.html 就行（场景和 three.js 打成了普通脚本 `hd2d/hd2d-scene.bundle.js`，`file://` 也能加载；用本地服务打开也一样），进战斗画面，点顶栏的「新画面 关」，变成「新画面 开」。开关记在这台电脑上（localStorage 的 `backfire-hd2d-field`，读写都包 try/catch），默认关；打不开（没有 WebGL）就退回旧画面、开关记成关，提示栏说为什么。
 
-- **关着**：和以前一模一样。页面只多一个按钮、一份样式（`hd2d/hd2d.css`，类名都是 hd2d- / pl- 开头）和 importmap；布局、场景、three.js 都不加载
-- **开着**：`hd2d/hd2d-field.js` 按顺序加载布局等普通脚本，再 import 场景；在 `#g-field` 里铺一层 3D 战场，盖住旧的区和单位卡（旧的照旧排——规则、演出要它们的位置和 class——只是看不见、点不到）。战场正上方的首领机制横幅 / 援军倒计时照旧露在上面，取景让开它
+- **关着**：和以前一模一样。页面只多一个按钮、一份样式（`hd2d/hd2d.css`，类名都是 hd2d- / pl- 开头）；布局、场景、three.js 都不加载
+- **开着**：`hd2d/hd2d-field.js` 按顺序加载布局等普通脚本，最后加载场景包 `hd2d/hd2d-scene.bundle.js`（改了 `hd2d-scene.js` 或它 import 的模块、three.js，要运行 `npm run build:hd2d` 重新打包，`tests/hd2d-bundle.test.js` 会检查）；在 `#g-field` 里铺一层 3D 战场，盖住旧的区和单位卡（旧的照旧排——规则、演出要它们的位置和 class——只是看不见、点不到）。战场正上方的首领机制横幅 / 援军倒计时照旧露在上面，取景让开它
 - **数据**：和联机玩家同一条路——战斗状态过 `OnlineView.projectState`；演出途中每一下的快照（`game.js · setView` 拿到的）照联机演出带（`projectTape`）的做法过 `OnlineView.projectUnit`，会变的字段（站位、血量、架势、行动点 / 附赠、倒下 / 濒死 / 失衡、飞 / 潜、藏起来，`FIELD.live`）盖到投影上，再交给布局。区域 / 场景 / 光影读投影里的 `region` / `scene` / `light`（画之前和联机发包前一样 `battleLookSync`）。配置物也画成铭牌（id 和单位卡一样是 `prop:…`）。坚毅生命投影里本来就没有
 - **刷新**：每次 `setView`（refreshAll、演出的每一下）重排：血量、架势、状态、站位、天气、场地、间隔；谁在行动跟着 `refreshHud`（我方回合选中的人描金边、脚下光圈，中景 / 近景跟过去）
 - **点得动**：点铭牌 = 点单位卡、点地台 = 点区、点危墙 / 桥梁 = 点那根竖条、点空地 = 点战场空白（演出中点一下跳过），悬停铭牌 = 悬停单位卡（悬停说明挂在铭牌上）。都调 `game.js` 交出来的 `GAME.fieldInput`（`onCardClick` / `onCardHover` / `clickField` / `hoverZone`，旧画面也走它们），新画面自己不判断规则。选目标：能点的铭牌描黄边一明一暗、别的变暗、鼠标停着的更亮；选移动的区：能去的地台亮一圈薄荷绿的框、停着的更亮（停在区里的铭牌上也算）；能打的危墙 / 桥梁外面一圈黄框（`game.js` 的 `fieldMarks` → `hd2d-scene.js · setMarks`，颜色、粗细在 `MARK`）
