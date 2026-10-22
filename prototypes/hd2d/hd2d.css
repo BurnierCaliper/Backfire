@@ -344,6 +344,14 @@ body { position: fixed; inset: 0; user-select: none; }
 .stk .ink .thin { stroke-width: 2.8; }
 .stk .ink .bold { stroke-width: 5.6; }
 .stk .ink .solid { fill: var(--ink); stroke-width: 1.5; }
+/* 主职责图标定稿（主人 10/22 定）用到的：碎片的白边细一点（碎片之间露出缝）、虚线影子、实心块上挖的洞 / 白缝 */
+.stk .rim .frag { stroke-width: 3.4; }
+.stk .ink .frag { stroke-width: .8; }
+.stk .rim .ghost { stroke-width: 5; }
+.stk .ink .ghost { stroke-width: 1.8; stroke-dasharray: 2.2 2.6; }
+.stk .rim .hole, .stk .rim .cut { stroke: none; fill: none; }
+.stk .ink .hole { fill: var(--canvas); stroke: none; }
+.stk .ink .cut { stroke: var(--canvas); stroke-width: 2.4; }
 /* 「唤出武器人」「结束回合」：同一种喷漆大按钮放在一起（照 skin.css 的 .summonbtn / .endturn）；唤出的颜色跟着这个人的主属性（--el） */
 #dock .hud-side { display: flex; gap: 10px; flex: none; align-items: stretch; padding: 4px 4px 4px 0; }
 .bigbtn {

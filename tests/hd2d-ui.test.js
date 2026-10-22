@@ -194,6 +194,17 @@ test("队伍栏的效果：投影里的状态 / 即时效果 / 濒死 / 失衡�
 });
 
 /* ---------- 3. 按主职责的头像 ---------- */
+test("主职责图标是主人定稿的那一套（10/22）：击破 = 右半完整、左半碎开飞溅（碎片 + 虚影），坦克 = 带拱窗的城塔，控场 = 三块菱形地台之间跳一个单位；碎片 / 虚影 / 洞的样式在 CSS 里", () => {
+  const U = ui(), R = U.UI.roles;
+  assert.ok(/class="solid frag"/.test(R["击破"]) && /class="ghost"/.test(R["击破"]), "击破：碎片 + 原轮廓的虚影");
+  assert.ok(/A14 14 0 0 1/.test(R["击破"]), "击破：右半边还是完整的半圆");
+  assert.ok(/class="hole"/.test(R["坦克"]), "坦克：城塔上挖出拱窗");
+  assert.equal((R["控场"].match(/L\d+(?:\.\d+)? \d+(?:\.\d+)? L\d+(?:\.\d+)? \d+(?:\.\d+)? L\d+(?:\.\d+)? \d+(?:\.\d+)? Z/g) || []).length, 3, "控场：三块菱形地台");
+  assert.ok(/<circle class="solid" cx="37" cy="16.5" r="5"\/>/.test(R["异常"]), "异常：分子环上一个节点亮着");
+  const css = fs.readFileSync(path.join(__dirname, "..", "prototypes/hd2d/hd2d.css"), "utf8");
+  for (const cls of ["frag", "ghost", "hole", "cut"]) assert.ok(new RegExp("\\.stk \\.(rim|ink) \\." + cls).test(css), "CSS 有 ." + cls);
+});
+
 test("头像：每个主职责一个图标（职责用 growth.js · ROLE_LIST），底色是主属性 → 副属性的代表色从左上到右下渐变（属性色 = attack-fx.js 的 COL，主副属性照角色卡 note）", () => {
   const U = ui(), AF = require("../attack-fx.js");
   require("../icons.js");   // icons.js 没有 module.exports，挂在 globalThis.Icons 上
