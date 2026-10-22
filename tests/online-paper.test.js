@@ -119,6 +119,22 @@ test("白天 / 夜晚 / 天气的配色（第 2 步）：跟着这一包的光�
   assert.deepEqual(Object.keys(sand).sort(), Object.keys(day).sort());
 });
 
+test("纸片美术的纯函数：撕边的点都在纸里面、同一个种子画出来一样；没有 canvas（Node 里）不贴纹理也不报错", () => {
+  const a = P.roughPath(120, 40, { jag: 2, torn: { top: 6 } }, P.rng(42)), b = P.roughPath(120, 40, { jag: 2, torn: { top: 6 } }, P.rng(42));
+  assert.deepEqual(a, b, "同一个种子一样");
+  assert.ok(a.length > 30);
+  assert.ok(a.every(([x, y]) => x >= 0 && x <= 120 && y >= 0 && y <= 40), "都在纸里面");
+  assert.ok(a.filter(([, y]) => y < 10).some(([, y]) => y > 2), "撕开的那一边更毛（往里缩得更多）");
+  const r = P.rng(1); assert.ok([r(), r(), r()].every(v => v > 0 && v < 1));
+  assert.equal(P.texture(null, "card", 10, 10), "");
+  assert.equal(P.texture({ createElement: () => ({}) }, "card", 10, 10), "", "没有 canvas");
+  assert.equal(P.texture({ createElement: () => ({}) }, "nope", 10, 10), "");
+  assert.equal(P.dress(null), 0);
+  // 每种纸用的颜色都在配色表里；贴纹理的面板都有种类
+  Object.values(P.PAPER.art.kinds).forEach(k => assert.ok(P.PAPER.palette.day[k.color] && P.PAPER.palette.night[k.color], k.color));
+  P.PAPER.art.targets.forEach(([sel, kind]) => kind.split("|").forEach(k => assert.ok(P.PAPER.art.kinds[k], sel + " → " + k)));
+});
+
 test("单机 / 主持人 / 新画面关着一条都套不上：online-paper.css 每条规则都挂在 body.ol-paper 下面；game.html 加载了它们；online-ui.js 只在联机玩家 + 新画面开着时加这个类", () => {
   const fs = require("node:fs"), path = require("node:path");
   const read = f => fs.readFileSync(path.join(__dirname, "..", f), "utf8");

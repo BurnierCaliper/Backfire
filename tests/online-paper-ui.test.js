@@ -355,10 +355,12 @@ test("白天 / 夜晚 / 沙暴：浮着的面板（顶栏、技能栏、队伍�
   const o = await paperPage(t); if (!o) return; const { page } = o;
   await asPlayer(page);
   await page.waitForSelector("#online-paper .olp-top", { state: "visible" });
+  // 面板的底色（贴上纸纹以后底色藏在纹理里：量的时候先把纹理的标记拿掉一下，量完放回去）
   const look = () => page.evaluate(() => {
-    const cs = s => getComputedStyle(document.querySelector(s));
-    return { time: document.body.dataset.olpTime, weather: document.body.dataset.olpWeather, top: cs("#online-paper .olp-top").backgroundColor, dock: cs(".ol-battle > .g-hud").backgroundColor,
-      party: cs(".hd2d-party").backgroundColor, side: cs("#online-side").backgroundColor, ink: cs("#online-side").color, edge: cs(".ol-battle > .g-hud").boxShadow };
+    const plain = (s, f) => { const el = document.querySelector(s), t = el.dataset.olpTex; delete el.dataset.olpTex; const v = f(getComputedStyle(el)); if (t) el.dataset.olpTex = t; return v; };
+    const bg = s => plain(s, cs => cs.backgroundColor);
+    return { time: document.body.dataset.olpTime, weather: document.body.dataset.olpWeather, top: bg("#online-paper .olp-top"), dock: bg(".ol-battle > .g-hud"),
+      party: bg(".hd2d-party"), side: bg("#online-side"), ink: getComputedStyle(document.querySelector("#online-side")).color, edge: plain(".ol-battle > .g-hud", cs => cs.boxShadow) };
   });
   /** 配置表里这一套的颜色（rgb(…) 写法，和 getComputedStyle 对得上） */
   const want = (time, weather) => page.evaluate(([time, weather]) => {
@@ -398,6 +400,35 @@ test("白天 / 夜晚 / 沙暴：浮着的面板（顶栏、技能栏、队伍�
   assert.deepEqual(o.errors, []);
 });
 
+test("纸片美术：面板贴上程序生成的纸纹（data: 地址，不是图片文件），同一个尺寸只画一次；夜里换一套；减少动态效果时开合不做动画", { timeout: 60000 }, async t => {
+  const o = await paperPage(t); if (!o) return; const { page } = o;
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await asPlayer(page);
+  await page.waitForFunction(() => ["#online-paper .olp-top", ".ol-battle > .g-hud", ".hd2d-party", "#online-paper .olp-tag-card", ".ol-battle .endturn"].every(s => { const el = document.querySelector(s); return el && el.dataset.olpTex; }));
+  const tex = await page.evaluate(() => ["#online-paper .olp-top", ".ol-battle > .g-hud", ".hd2d-party", "#online-side"].map(s => { const el = document.querySelector(s); return [el.dataset.olpTex, el.style.getPropertyValue("--olp-tex").slice(0, 27)]; }));
+  assert.deepEqual(tex, [["tapebar", 'url("data:image/png;base64,'], ["dock", 'url("data:image/png;base64,'], ["kraft", 'url("data:image/png;base64,'], ["kraft", 'url("data:image/png;base64,']], "顶栏胶带、技能栏、队伍牛皮纸、抽屉的竖标签");
+  assert.equal(await page.evaluate(() => document.querySelector("#online-paper .olp-tag.on .olp-tag-card").dataset.olpTex), "tagon", "当前行动的吊牌换青色那一种");
+  // 纸纹那一层铺满整块面板（比面板四边多出撕边外的影子），不是一条细线
+  const sheet = await page.evaluate(() => { const el = document.querySelector(".ol-battle > .g-hud"), cs = getComputedStyle(el, "::before"); return { h: parseFloat(cs.height), panel: el.offsetHeight }; });
+  assert.ok(sheet.h >= sheet.panel, "技能栏后面那张纸铺满：" + JSON.stringify(sheet));
+  // 同一个尺寸、同一套配色只画一次（第二次从缓存拿，一模一样）
+  const same = await page.evaluate(() => { const th = { time: "day", weather: "none" }, a = OnlinePaper.texture(document, "card", 123, 45, th), t0 = performance.now(), b = OnlinePaper.texture(document, "card", 123, 45, th); return { same: a === b, fast: performance.now() - t0 < 2, png: a.startsWith("data:image/png") }; });
+  assert.deepEqual(same, { same: true, fast: true, png: true });
+  // 斑驳遮罩（印章、喷漆）
+  assert.match(await page.evaluate(() => document.body.style.getPropertyValue("--olp-grit")), /^url\("data:image\/png/);
+  // 夜里：换一套纹理
+  const dayTex = await page.evaluate(() => document.querySelector(".ol-battle > .g-hud").style.getPropertyValue("--olp-tex"));
+  await page.evaluate(() => { fixture.view.state.light = "night"; fixture.emit(); });
+  await page.waitForFunction(d => document.querySelector(".ol-battle > .g-hud").style.getPropertyValue("--olp-tex") !== d, dayTex);
+  // 减少动态效果：打开 / 收起不做动画
+  await page.click("#online-side [data-side-collapse]");
+  await page.click(".ol-battle .hd2d-dock-toggle");
+  const motion = await page.evaluate(() => ["#online-side", ".ol-battle > .g-hud", ".hd2d-party", "#online-paper .olp-tools"].map(s => { const cs = getComputedStyle(document.querySelector(s)); return cs.transitionDuration + "/" + cs.animationName; }));
+  assert.ok(motion.every(m => /^0s(, 0s)*\/none$/.test(m)), "没有动画：" + motion);
+  await shot(page, "paper-step3-night");
+  assert.deepEqual(o.errors, []);
+});
+
 test("新加的 DOM（顶栏、吊牌、下拉、队伍栏下面的按钮、技能栏那一行、抽屉标签）里没有坚毅生命的数字", { timeout: 60000 }, async t => {
   const o = await paperPage(t); if (!o) return; const { page } = o;
   await asPlayer(page);
@@ -405,7 +436,7 @@ test("新加的 DOM（顶栏、吊牌、下拉、队伍栏下面的按钮、技�
   await page.click('#online-paper [data-olp="tools"]');
   await page.click("#online-paper .olp-tag.mine [data-olp-swap]");
   const html = await page.evaluate(() => [document.getElementById("online-paper"), document.querySelector(".hd2d-party"), document.querySelector(".ol-battle > .g-hud"), document.getElementById("online-side"), document.querySelector("#online-stage .olp-float")]
-    .filter(Boolean).map(el => el.outerHTML).join("\n"));
+    .filter(Boolean).map(el => el.outerHTML).join("\n").replace(/data:image\/png;base64,[A-Za-z0-9+/=]+/g, "data:…"));   // 纸纹（base64 里碰巧有这几个字母不算）
   for (const n of [SHP, SHP_MAX]) assert.ok(!html.includes(String(n)), "出现了坚毅生命的数字 " + n);
   assert.doesNotMatch(html, /shp|坚毅/i);
   assert.deepEqual(o.errors, []);

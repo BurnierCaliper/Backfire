@@ -866,16 +866,34 @@
     }
     /** 白天 / 夜晚 / 天气的配色（第 2 步）：body 上记一下是哪一套（data-olp-time / data-olp-weather），配色（online-paper.js · PAPER.palette / weathers）写成 CSS 变量；
      *  th = null（不是纸片画面）：都拿掉 */
-    let paperThemeKey = "";
+    let paperThemeKey = "", paperTheme = null;
     function paintPaperTheme(th) {
       const key = th ? th.time + "|" + th.weather : "";
+      paperTheme = th;
       if (key === paperThemeKey) return;
       const b = document.body, vars = th ? global.OnlinePaper.themeVars(th) : {};
-      if (paperThemeKey) Object.keys(global.OnlinePaper.themeVars({ time: "day" })).forEach(k => b.style.removeProperty(k));
+      if (paperThemeKey) { Object.keys(global.OnlinePaper.themeVars({ time: "day" })).forEach(k => b.style.removeProperty(k)); b.style.removeProperty("--olp-grit"); }
       paperThemeKey = key;
       if (!th) { delete b.dataset.olpTime; delete b.dataset.olpWeather; return; }
       b.dataset.olpTime = th.time; b.dataset.olpWeather = th.weather;
       Object.keys(vars).forEach(k => b.style.setProperty(k, vars[k]));
+      const grit = global.OnlinePaper.grit(document);   // 印章、喷漆的斑驳（只一点点）
+      if (grit) b.style.setProperty("--olp-grit", `url("${grit}")`);
+    }
+    /** 纸片美术（第 3 步）：面板贴上照 mock.html 程序生成的纹理（online-paper.js · dress：揉皱的纸、撕边、不均匀的影子、天气；按尺寸缓存）。
+     *  每次画完叫一次；面板大小变了（收起 / 展开、窗口变了）由 ResizeObserver 叫，下一帧一起贴 */
+    let paperSizer = null, paperDressQueued = false;
+    function paperDress() {
+      if (!paperOn || !global.OnlinePaper) return;
+      global.OnlinePaper.dress(document, null, paperTheme);
+      if (typeof ResizeObserver !== "function") return;
+      if (!paperSizer) paperSizer = new ResizeObserver(() => {
+        if (paperDressQueued) return;
+        paperDressQueued = true;
+        const next = () => { paperDressQueued = false; if (!destroyed) paperDress(); };
+        if (typeof global.requestAnimationFrame === "function") global.requestAnimationFrame(next); else setTimeout(next, 16);
+      });
+      [paperBox.querySelector(".olp-top"), paperBox.querySelector(".olp-tools"), stage.querySelector(".ol-battle > .g-hud"), stage.querySelector(".ol-battle .hd2d-party"), side].forEach(n => { if (n) paperSizer.observe(n); });
     }
     /** 热座栏（延后 / 换位的按钮、提示）、新画面的镜头按钮自己会变（点了换位、滚轮换镜头……，不经过这里）：变了就重画一次（只看这几块，下一刻一起画） */
     let paperWatch = null, paperWatched = [], paperQueued = false;
@@ -1347,6 +1365,7 @@
       paintSupplies();
       if (checkReq) checkReq.sync();
       if (loreUi) loreUi.sync();
+      paperDress();   // 纸片画面（#308）：画完再贴纸纹（量得到大小）
       if (view.active && !view.isHost) scheduleAutoMenu();
       // 轮到自己的角色行动：响一次 DJ 搓碟（同一次只响一次；页面刚打开、重新同步时只记下）。演出还在播时等播完（行动开始的那一刻）
       if (turnCue && !animating) turnCue.see(turnInfo(null, view.screen));
@@ -2016,7 +2035,7 @@
       destroyed = true; closeMyBag(); if (checkReq) { checkReq.destroy(); checkReq = null; } if (loreUi) { loreUi.destroy(); loreUi = null; } paintField3d(null); if (battle) { battle.destroy(); battle = null; } playbackGeneration++; actionGeneration++; historyGeneration++; clearTimeout(toastTimer);
       document.removeEventListener("compositionstart", onCompStart, true); document.removeEventListener("compositionend", onCompEnd, true);
       document.removeEventListener("click", onRollOpen); document.removeEventListener("scroll", onListScroll, true); clearTimeout(titleTimer);
-      document.removeEventListener("click", onPaperOutside, true); document.removeEventListener("keydown", onPaperKey, true); if (paperWatch) paperWatch.disconnect(); paintPaperTheme(null);
+      document.removeEventListener("click", onPaperOutside, true); document.removeEventListener("keydown", onPaperKey, true); if (paperWatch) paperWatch.disconnect(); if (paperSizer) paperSizer.disconnect(); paintPaperTheme(null);
       while (hostMounts.length) hostMounts.pop().remove(); document.body.classList.remove("ol-has-side", "ol-host-online", "ol-in-battle", "ol-side-collapsed", "ol-paper");
       pauseItems.forEach(off => off()); if (global.PauseMenu) global.PauseMenu.setOnline(null);
       if (turnCue) turnCue.unmark();   // 标签页标题上的「▶ 轮到你」去掉

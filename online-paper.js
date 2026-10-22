@@ -85,6 +85,42 @@
       rain: { tint: "#5d7390", mix: 0.22, edge: "inset 0 0 16px rgba(28, 42, 66, .5)" },
       snow: { tint: "#e6f1ff", mix: 0.28, edge: "inset 0 0 14px rgba(255, 255, 255, .95)" },
       fog: { tint: "#9b9b9b", mix: 0.3, edge: "inset 0 0 22px rgba(170, 170, 170, .55)", fade: 0.22 }
+    },
+    /* 纸片美术（第 3 步）：纹理照 docs/ui-paper/mock.html 用程序生成（crumple 揉皱的折面 + 折痕 + 纤维、rough 撕边、grit 斑驳），按尺寸缓存，不放图片文件。
+     *   pad        纹理比面板四边多出来的像素（画撕边外面的影子）
+     *   shadow     不均匀的影子：两层（偏移、模糊、浓淡）
+     *   scale      折面按几分之一的大小算（再放大、糊一点，和样稿一样）；pixels 算的像素最多这么多（大面板自动再缩）
+     *   cache      最多记多少张（同一个尺寸、同一套配色只画一次）
+     *   kinds      每种纸：color 用配色表里的哪个颜色、facets / amp / crease / grain 褶皱、jag 边缘毛多少、torn 哪几条边是撕的（更毛）、
+     *              corrugated 瓦楞纸的竖纹、flat 按钮那种不画撕边和影子（直接当底图）
+     *   weather    天气在纸上加的：沙暴撒沙粒（每多少像素一粒）、下雨几块深色水渍、雪边上一层霜、雾蒙一层灰
+     *   grit       印章、喷漆的斑驳遮罩：多大、挖几个小洞（只一点点，字一定要清楚） */
+    art: {
+      pad: 8,
+      shadow: [{ x: 2, y: 5, blur: 7, a: 0.42 }, { x: -1, y: 1, blur: 2, a: 0.22 }],
+      scale: 0.5, pixels: 90000, cache: 48,
+      kinds: {
+        tapebar: { color: "tape", facets: 30, amp: 0.05, crease: 0.12, grain: 0.05, jag: 2, torn: { left: 6, right: 6 } },
+        kraft: { color: "kraft", facets: 18, amp: 0.09, crease: 0.22, grain: 0.05, jag: 2, torn: { bottom: 5 } },
+        dock: { color: "kraft", facets: 26, amp: 0.08, crease: 0.22, grain: 0.05, jag: 3, torn: { top: 6 } },
+        paper: { color: "paper", facets: 20, amp: 0.06, crease: 0.18, grain: 0.04, jag: 2 },
+        card: { color: "card", facets: 8, amp: 0.05, crease: 0.15, grain: 0.04, jag: 1.5 },
+        tag: { color: "kraft", facets: 6, amp: 0.06, crease: 0.2, grain: 0.05, jag: 1.5 },
+        tagon: { color: "on", facets: 6, amp: 0.06, crease: 0.2, grain: 0.05, jag: 1.5 },
+        board: { color: "board", facets: 10, amp: 0.1, crease: 0.22, grain: 0.05, corrugated: 7, flat: true },
+        boardy: { color: "boardy", facets: 6, amp: 0.06, crease: 0.18, grain: 0.05, flat: true }
+      },
+      weather: { sand: { grains: 90 }, rain: { stains: 5 }, snow: { frost: 6 }, fog: { veil: 0.12 } },
+      grit: { size: 160, holes: 200 },
+      // 哪些面板贴哪种纸（online-ui.js 交给 dress）："on" = 当前行动的吊牌换青色那一种
+      targets: [
+        ["#online-paper .olp-top", "tapebar"], ["#online-paper .olp-tools", "kraft"], ["#online-paper .olp-tag-card", "tag|tagon"],
+        ["#online-paper .olp-tools-b", "board"], ["#online-paper .olp-menu-b", "boardy"], ["#online-paper .olp-move", "card"],
+        [".ol-battle > .g-hud.hd2d-shell > .hd2d-party", "kraft"], [".ol-battle > .g-hud.hd2d-shell", "dock"],
+        [".ol-battle > .g-hud.hd2d-shell > .hd2d-party > .party > .pm", "card"], [".ol-battle .olp-party-tools .ol-button", "card"],
+        [".ol-battle > .g-hud.hd2d-shell .skills .sk", "tag"], [".ol-battle > .g-hud.hd2d-shell .summonbtn", "board"], [".ol-battle > .g-hud.hd2d-shell .endturn", "board"],
+        ["#online-side:not(.ol-side-collapsed)", "paper"], ["#online-side.ol-side-collapsed", "kraft"]
+      ]
     }
   };
 
@@ -150,6 +186,123 @@
     });
     out["--olp-edge-fx"] = W ? W.edge : "inset 0 0 0 transparent";
     return out;
+  }
+
+  /* ---------- 纸片美术（第 3 步）：照 mock.html 程序生成的纹理，按尺寸缓存 ---------- */
+  /** 同一个种子总是同一串随机数（Park–Miller，和 mock.html 一样）：同一个尺寸的纸每次画出来一样 */
+  function rng(seed) { let s = (Math.abs(Math.floor(seed)) % 2147483646) + 1; return () => (s = (s * 16807) % 2147483647) / 2147483647; }
+  const hash = (str) => { let h = 2166136261; for (const ch of String(str)) { h ^= ch.codePointAt(0); h = Math.imul(h, 16777619); } return h >>> 0; };
+  /** 撕边（mock.html · rough）：w × h 的纸四条边按步长往里随机缩一点，torn 的那几条边更毛、更碎；返回多边形的点 [[x, y]]（左上角是 0, 0） */
+  function roughPath(w, h, o, rnd) {
+    o = o || {};
+    const jag = o.jag == null ? 2 : o.jag, torn = o.torn || {}, p = [];
+    const j = (side) => (torn[side] ? torn[side] : jag), st = (side) => (torn[side] ? 4 : 9);
+    for (let x = 0; x <= w; x += st("top")) p.push([x, rnd() * j("top")]);
+    for (let y = 0; y <= h; y += st("right")) p.push([w - rnd() * j("right"), y]);
+    for (let x = w; x >= 0; x -= st("bottom")) p.push([x, h - rnd() * j("bottom")]);
+    for (let y = h; y >= 0; y -= st("left")) p.push([rnd() * j("left"), y]);
+    return p;
+  }
+  const texCache = new Map();
+  /** 这一张纸的纹理（data: 地址）：kind = PAPER.art.kinds 里的一种，w × h 面板的大小，theme = { time, weather }。
+   *  同一个尺寸、同一套配色只画一次（记 PAPER.art.cache 张）；没有 canvas（Node 里）返回空字符串。
+   *  画法（mock.html · crumple）：几块折面（Voronoi）明暗不同、折痕处一道亮一道暗、撒纤维噪点；瓦楞纸加竖纹；撕边外面画两层不均匀的影子；天气再加一层 */
+  function texture(doc, kind, w, h, theme) {
+    const A = PAPER.art, K = A.kinds[kind];
+    w = Math.round(w); h = Math.round(h);
+    if (!K || !doc || typeof doc.createElement !== "function" || !(w > 0) || !(h > 0)) return "";
+    theme = theme || { time: "day", weather: "none" };
+    const vars = themeVars(theme), base = vars["--olp-" + kebab(K.color)] || "#cccccc";
+    const key = [kind, w, h, theme.time, theme.weather, base].join("|");
+    if (texCache.has(key)) { const v = texCache.get(key); texCache.delete(key); texCache.set(key, v); return v; }
+    const pad = K.flat ? 0 : A.pad, W = w + 2 * pad, H = h + 2 * pad, rnd = rng(hash(key));
+    const out = doc.createElement("canvas");
+    if (!out || typeof out.getContext !== "function") return "";
+    out.width = W; out.height = H;
+    const g = out.getContext("2d");
+    if (!g) return "";
+    // 折面：按 scale 算（大面板再缩），放大时糊一点
+    let sc = A.scale;
+    if (w * h * sc * sc > A.pixels) sc = Math.sqrt(A.pixels / (w * h));
+    const sw = Math.max(8, Math.round(w * sc)), sh = Math.max(8, Math.round(h * sc));
+    const small = doc.createElement("canvas"); small.width = sw; small.height = sh;
+    const sx = small.getContext("2d"), img = sx.createImageData(sw, sh), d = img.data, c0 = rgbOf(base) || [204, 204, 204];
+    const pts = Array.from({ length: K.facets }, () => ({ x: rnd() * sw, y: rnd() * sh, l: rnd() * 2 - 1 }));
+    for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) {
+      let d1 = 1e9, d2 = 1e9, i1 = 0;
+      for (let i = 0; i < pts.length; i++) { const dx = x - pts[i].x, dy = y - pts[i].y, dd = dx * dx + dy * dy; if (dd < d1) { d2 = d1; d1 = dd; i1 = i; } else if (dd < d2) d2 = dd; }
+      const gap = Math.sqrt(d2) - Math.sqrt(d1);
+      let s = 1 + pts[i1].l * K.amp;
+      if (gap < 1.6) s += (i1 % 2 ? 1 : -1) * K.crease * (1 - gap / 1.6);
+      s += (rnd() - 0.5) * K.grain;
+      const k = (y * sw + x) * 4;
+      d[k] = c0[0] * s; d[k + 1] = c0[1] * s; d[k + 2] = c0[2] * s; d[k + 3] = 255;
+    }
+    sx.putImageData(img, 0, 0);
+    const poly = K.flat ? [[0, 0], [w, 0], [w, h], [0, h]] : roughPath(w, h, K, rnd);
+    const path = () => { g.beginPath(); poly.forEach(([x, y], i) => (i ? g.lineTo(x + pad, y + pad) : g.moveTo(x + pad, y + pad))); g.closePath(); };
+    // 不均匀的影子：沿着撕边，两层
+    if (!K.flat) A.shadow.forEach(s => { g.save(); g.shadowColor = `rgba(0, 0, 0, ${s.a})`; g.shadowBlur = s.blur; g.shadowOffsetX = s.x; g.shadowOffsetY = s.y; g.fillStyle = base; path(); g.fill(); g.restore(); });
+    g.save(); path(); g.clip();
+    g.filter = "blur(.6px)"; g.drawImage(small, pad, pad, w, h); g.filter = "none";
+    // 纤维：细短的线
+    for (let i = 0; i < (w * h) / 260; i++) {
+      g.strokeStyle = rnd() < 0.5 ? "rgba(0, 0, 0, .06)" : "rgba(255, 255, 255, .08)"; g.lineWidth = 0.7;
+      const a = rnd() * 6.28, L = 2 + rnd() * 5, px = pad + rnd() * w, py = pad + rnd() * h;
+      g.beginPath(); g.moveTo(px, py); g.lineTo(px + Math.cos(a) * L, py + Math.sin(a) * L); g.stroke();
+    }
+    if (K.corrugated) for (let x = 0; x < w; x += K.corrugated) { g.fillStyle = "rgba(0, 0, 0, .07)"; g.fillRect(pad + x, pad, 3, h); }
+    const Wx = A.weather[theme.weather] || {};
+    if (Wx.grains) for (let i = 0; i < (w * h) / Wx.grains; i++) { g.fillStyle = `rgba(${150 + rnd() * 60}, ${110 + rnd() * 40}, 60, ${0.2 + rnd() * 0.3})`; g.fillRect(pad + rnd() * w, pad + rnd() * h, 1.3, 1.3); }
+    if (Wx.stains) for (let i = 0; i < Wx.stains; i++) {
+      const x = pad + rnd() * w, y = pad + rnd() * h, r = 8 + rnd() * Math.min(40, Math.max(w, h) / 6), gr = g.createRadialGradient(x, y, r * 0.2, x, y, r);
+      gr.addColorStop(0, "rgba(30, 44, 66, .16)"); gr.addColorStop(0.85, "rgba(30, 44, 66, .1)"); gr.addColorStop(1, "rgba(30, 44, 66, 0)");
+      g.fillStyle = gr; g.beginPath(); g.arc(x, y, r, 0, 6.28); g.fill();
+    }
+    if (Wx.veil) { g.fillStyle = `rgba(150, 150, 150, ${Wx.veil})`; g.fillRect(pad, pad, w, h); }
+    g.restore();
+    if (Wx.frost) { g.save(); path(); g.clip(); g.shadowColor = "rgba(255, 255, 255, .95)"; g.shadowBlur = Wx.frost * 2; g.strokeStyle = "rgba(255, 255, 255, .8)"; g.lineWidth = Wx.frost; path(); g.stroke(); g.restore(); }
+    let url = "";
+    try { url = out.toDataURL(); } catch (e) { url = ""; }
+    texCache.set(key, url);
+    while (texCache.size > A.cache) texCache.delete(texCache.keys().next().value);
+    return url;
+  }
+  /** 印章、喷漆的斑驳遮罩（mock.html · grit）：一块黑底挖几个小洞；只一点点（PAPER.art.grit），字一定要清楚。每个页面只画一次 */
+  let gritUrl = null;
+  function grit(doc) {
+    if (gritUrl !== null) return gritUrl;
+    const G = PAPER.art.grit, c = doc && typeof doc.createElement === "function" ? doc.createElement("canvas") : null, g = c && c.getContext ? c.getContext("2d") : null;
+    if (!g) return "";
+    c.width = c.height = G.size;
+    const rnd = rng(7);
+    g.fillStyle = "#000"; g.fillRect(0, 0, G.size, G.size);
+    for (let i = 0; i < G.holes; i++) g.clearRect(rnd() * G.size, rnd() * G.size, 0.8 + rnd() * 1.4, 0.8 + rnd() * 1.4);
+    try { gritUrl = c.toDataURL(); } catch (e) { gritUrl = ""; }
+    return gritUrl;
+  }
+  /**
+   * 给纸片画面里的面板贴上纹理（online-ui.js 每次画完、窗口变了叫）：targets = [[选择器, 纸的种类]]，theme = 这一套配色。
+   * 每个面板记着上一次贴的（种类 + 尺寸 + 配色）：没变就不动；变了从缓存拿（没有才画）。纹理写成 --olp-tex（online-paper.css 用：
+   * 面板挂在 ::before 上、按钮直接当底图），面板上加 data-olp-tex = 种类。看不见的（宽 0）先不贴
+   */
+  function dress(doc, targets, theme) {
+    if (!doc || typeof doc.querySelectorAll !== "function") return 0;
+    let n = 0;
+    (targets || PAPER.art.targets).forEach(([sel, kind]) => doc.querySelectorAll(sel).forEach(el => {
+      const w = el.offsetWidth, h = el.offsetHeight;
+      if (!(w > 0) || !(h > 0)) return;
+      // 「tag|tagon」：当前行动的那一格（.olp-tag.on）用后一种
+      const k = kind.includes("|") ? kind.split("|")[el.closest && el.closest(".olp-tag.on") ? 1 : 0] : kind, key = [k, w, h, theme && theme.time, theme && theme.weather].join("|");
+      if (el.__olpTex === key) return;
+      const url = texture(doc, k, w, h, theme);
+      if (!url) return;
+      el.__olpTex = key; el.dataset.olpTex = k;
+      el.style.setProperty("--olp-tex", `url("${url}")`);
+      el.style.setProperty("--olp-pad", (PAPER.art.kinds[k].flat ? 0 : PAPER.art.pad) + "px");
+      n++;
+    }));
+    return n;
   }
 
   /* ---------- 骨架：顶栏、「工具 ▾」下拉、吊牌、提示各占一块，分开重画 ----------
@@ -255,5 +408,5 @@
     return true;
   }
 
-  return { PAPER, active, isOpen, setOpen, themeOf, themeVars, mix, shellHtml, topHtml, toolsHtml, tagsHtml, readMoves, pressMove, readCam, pressCam };
+  return { PAPER, active, isOpen, setOpen, themeOf, themeVars, mix, rng, roughPath, texture, grit, dress, shellHtml, topHtml, toolsHtml, tagsHtml, readMoves, pressMove, readCam, pressCam };
 });
