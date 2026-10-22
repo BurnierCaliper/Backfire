@@ -22,6 +22,10 @@
     // 战斗画面（online-battle.js）：和单人 / 跑团同一套画面；skillOptions 是当前角色的技能栏，autoKey 防止重复自动取技能
     let battle = null, skillOptions = [], skillsFor = "", autoKey = "";
     let displayState = null, animating = false, messagesInitialized = false, seenMessages = new Set(), toastTimer;
+    // 纸片画面（#308，online-paper.js）：联机玩家的战斗画面开着新画面时换的新排版。paperOn 这一刻是不是、toolsOpen「工具 ▾」开着没、
+    // swapOpen 点开了 ⇅ 的那一格吊牌、paperDrawer 右边的记录 / 聊天抽屉拉出来没有（记在本机，平时收着）
+    let paperOn = false, toolsOpen = false, swapOpen = null, paperDrawer = false;
+    const paperStore = (() => { try { return global.localStorage || null; } catch (e) { return null; } })();
     let questSeen = null, questBoxOpen = false;
     let restSeen;   // 已经弹过的长休结算（第一次收到不弹，免得进房间就弹旧的）   // 任务日志：上一包的摘要（算「任务更新」提示）、日志面板开着没
     let historyRows = [], historyRoom = "", historyHasMore = true, historyLoading = false, historyGeneration = 0;
@@ -54,6 +58,9 @@
     }
     const dock = make("div", "online-dock", "ol-dock");
     const stage = make("main", "online-stage", "ol-stage ol-skin", { "aria-label": "联机战场" });
+    // 纸片画面（#308）的顶栏、行动顺序吊牌、「工具 ▾」下拉：浮在铺满的战场和右边的抽屉上面；不是纸片画面时藏着、里面是空的
+    const paperBox = make("div", "online-paper", "olp-root", { "aria-label": "战斗画面顶栏" });
+    paperBox.hidden = true;
     const panel = make("section", "online-panel", "ol-overlay", { role: "dialog", "aria-label": "联机房间" });
     const toast = make("aside", "online-toast", "ol-toast", { role: "status", "aria-live": "polite" });
     toast.hidden = true;
@@ -95,23 +102,25 @@
     let sideOpen = false;
     const phoneSide = () => typeof matchMedia === "function" && matchMedia("(max-width: 760px)").matches;   // 战斗画面同样默认收起，战场和技能栏不被挤掉
     function paintSideFold() {
-      const fold = phoneSide() && !sideOpen && !side.hidden;
+      const fold = phoneSide() && !paperOn && !sideOpen && !side.hidden;   // 纸片画面（#308）的手机上不用底部那一条，用下面的抽屉
       side.classList.toggle("ol-side-folded", fold); document.body.classList.toggle("ol-side-folded", fold);
-      const t = side.querySelector("[data-side-fold]"); if (t) { t.hidden = !phoneSide(); t.textContent = sideOpen ? "收起 ▾" : "展开 ▴"; }
+      const t = side.querySelector("[data-side-fold]"); if (t) { t.hidden = !phoneSide() || paperOn; t.textContent = sideOpen ? "收起 ▾" : "展开 ▴"; }
       paintSideCollapse();
     }
     // 电脑上的右侧栏收起（#298）：读写 localStorage 都包 try/catch（隐私模式、存储满了就只在这一页记着）
     let sideCollapsed = (() => { try { return localStorage.getItem(SIDE_COLLAPSE.key) === "1"; } catch (e) { return false; } })();
-    const collapsedNow = () => sideCollapsed && !phoneSide() && !side.hidden;
-    /** 收起 / 展开按钮：收起时只剩它一个，小队来了新消息挂数字（和「小队」标签的红点同一个数） */
+    // 纸片画面（#308）：右边的战斗记录 / 小队聊天是一个抽屉，平时收成右边缘一个竖标签（手机上也是）；收着没有另记在本机（online-paper.js · PAPER.keys.drawer）
+    const collapsedNow = () => !side.hidden && (paperOn ? !paperDrawer : sideCollapsed && !phoneSide());
+    /** 收起 / 展开按钮：收起时只剩它一个，小队来了新消息挂数字（和「小队」标签的红点同一个数）；纸片画面收着时它就是那个竖标签「记录 · 聊天」 */
     function paintSideCollapse() {
       const on = collapsedNow(), b = side.querySelector("[data-side-collapse]");
       side.classList.toggle("ol-side-collapsed", on); document.body.classList.toggle("ol-side-collapsed", on);
       if (!b) return;
-      const n = on ? unread : 0, dot = b.querySelector(".ol-side-collapse-dot"), label = on ? SIDE_COLLAPSE.expandTitle : SIDE_COLLAPSE.collapseTitle;
-      b.hidden = phoneSide();
+      const P = paperOn ? global.OnlinePaper.PAPER.text : null;
+      const n = on ? unread : 0, dot = b.querySelector(".ol-side-collapse-dot"), label = P ? (on ? P.drawerOpen : P.drawerClose) : on ? SIDE_COLLAPSE.expandTitle : SIDE_COLLAPSE.collapseTitle;
+      b.hidden = phoneSide() && !P;
       b.setAttribute("aria-expanded", String(!on)); b.title = label;
-      b.querySelector(".ol-side-collapse-icon").textContent = on ? SIDE_COLLAPSE.expand : SIDE_COLLAPSE.collapse;
+      b.querySelector(".ol-side-collapse-icon").textContent = P && on ? P.drawer : on ? SIDE_COLLAPSE.expand : SIDE_COLLAPSE.collapse;
       dot.hidden = !n; dot.textContent = dotText(n);
       b.querySelector(".ol-side-collapse-sr").textContent = label + (n ? `（${n} 条新消息）` : "");
     }
@@ -122,11 +131,17 @@
       // 舞台变宽 / 变窄：按窗口大小排版的（战场、新画面）重新量一次
       if (typeof dispatchEvent === "function" && typeof Event === "function") dispatchEvent(new Event("resize"));
     }
+    /** 纸片画面的抽屉拉出来 / 收回去（#308）：记在本机（存不了就只在这一页记着）；抽屉浮在战场上，战场不用重新量 */
+    function setPaperDrawer(open) {
+      paperDrawer = !!open;
+      global.OnlinePaper.setOpen("drawer", paperDrawer, paperStore);
+      renderSide(true);
+    }
     if (typeof addEventListener === "function") addEventListener("resize", () => { if (!destroyed) { paintSideFold(); seeLobbyChat(); } });
     // 房间面板往下翻到「大厅交流」：看到了，红点消失
     panel.addEventListener("scroll", () => seeLobbyChat(), { passive: true });
     side.addEventListener("click", event => {
-      if (event.target.closest("[data-side-collapse]")) { setSideCollapsed(!sideCollapsed); return; }
+      if (event.target.closest("[data-side-collapse]")) { if (paperOn) setPaperDrawer(!paperDrawer); else setSideCollapsed(!sideCollapsed); return; }
       if (event.target.closest("[data-side-fold]")) { sideOpen = !sideOpen; paintSideFold(); return; }
       const tab = event.target.closest("[data-side]"); if (!tab) return;
       if (phoneSide() && !sideOpen) { sideOpen = true; paintSideFold(); }
@@ -181,12 +196,42 @@
     suppliesBox.addEventListener("click", event => { if (event.target === suppliesBox || event.target.closest('[data-online="suppliesClose"]')) { suppliesOpen = false; suppliesBox.hidden = true; } });
     suppliesBox.addEventListener("keydown", event => { if (event.key === "Escape") { suppliesOpen = false; suppliesBox.hidden = true; } });
     bagBox.addEventListener("keydown", event => { event.stopPropagation(); if (event.key === "Escape") bagBox.hidden = true; });
-    for (const node of [dock, stage, panel, suppliesBox]) {
+    for (const node of [dock, stage, panel, suppliesBox, paperBox]) {
       node.addEventListener("click", click);
       node.addEventListener("keydown", event => { event.stopPropagation(); if (event.key === "Escape" && panelOpen && view.screen !== "lobby") { panelOpen = false; render(); } });
       node.addEventListener("input", input); node.addEventListener("change", change);
       node.addEventListener("submit", event => { event.preventDefault(); if (event.target.id === "ol-message-form") sendMessage(); if (event.target.id === "ol-lobby-chat") sendLobbyChat(); });
     }
+    // 纸片画面（#308）的顶栏 / 吊牌：「工具 ▾」开关、镜头按钮（点新画面原来那几个）、⇅ 点开「延后 / 换位」（点热座栏原来那几个按钮）；
+    // 下拉里的一项（地图、战绩……：上面的 click 照旧处理；申请检定、新画面开关由它们自己的模块处理）点完就收起
+    paperBox.addEventListener("click", event => {
+      const t = event.target, OP = global.OnlinePaper;
+      if (!t || !t.closest || !OP) return;
+      if (t.closest('[data-olp="tools"]')) { toolsOpen = !toolsOpen; swapOpen = null; paintPaper(); return; }
+      const cam = t.closest("[data-olp-cam]");
+      if (cam) { OP.pressCam(stage, Number(cam.dataset.olpCam)); return; }
+      const sw = t.closest("[data-olp-swap]");
+      if (sw) { const i = Number(sw.dataset.olpSwap); swapOpen = swapOpen === i ? null : i; toolsOpen = false; paintPaper(); return; }
+      const mv = t.closest("[data-olp-move]");
+      if (mv) { if (mv.disabled) return; const [i, n] = mv.dataset.olpMove.split(" ").map(Number); swapOpen = null; OP.pressMove(document, i, n); paintPaper(); return; }
+    });
+    // 下拉里点了一项：在捕获阶段先认出来（处理它的时候可能马上重画，按钮就换掉了），等它处理完再收起
+    paperBox.addEventListener("click", event => {
+      if (toolsOpen && event.target && event.target.closest && event.target.closest(".olp-tools-list button")) setTimeout(() => { if (destroyed || !toolsOpen) return; toolsOpen = false; paintPaper(); }, 0);
+    }, true);
+    /** 点到别处 / 按 Esc：「工具 ▾」下拉、⇅ 点开的按钮收起来（新画面的 3D 战场自己拦了点击，所以在捕获阶段看） */
+    const closePaperMenus = () => { if (!toolsOpen && swapOpen == null) return false; toolsOpen = false; swapOpen = null; paintPaper(); return true; };
+    const onPaperOutside = event => {
+      const t = event.target, inside = sel => !!(t && t.closest && t.closest(sel));
+      if (!paperOn) return;
+      let changed = false;
+      if (toolsOpen && !inside("#olp-tools") && !inside('[data-olp="tools"]')) { toolsOpen = false; changed = true; }
+      if (swapOpen != null && !inside(".olp-tags")) { swapOpen = null; changed = true; }
+      if (changed) paintPaper();
+    };
+    const onPaperKey = event => { if (paperOn && event.key === "Escape" && closePaperMenus()) { event.preventDefault(); event.stopPropagation(); } };
+    document.addEventListener("click", onPaperOutside, true);
+    document.addEventListener("keydown", onPaperKey, true);
     // 悬停在单位 / 配置物上：图鉴描述 + 身上效果的文字说明（unit-tip.js）
     const TIP_STATUS = { burn: "灼烧", shock: "感电", corr: "腐蚀", frostbite: "冻伤", shockwave: "震荡", reso: "共振", unstable: "不稳", weak: "虚弱", inspire: "振奋", sturdy: "坚挺", hide: "躲藏", advantage: "优势", chase: "紧追" };
     const TIP_INSTANT = { melt: "熔融", sting: "刺骨", overload: "过载", shift: "错位", spread: "扩散", refract: "折射", iceNext: "冰冻+50%" };
@@ -736,7 +781,153 @@
       if (screen === "lobby" || !data) return '<div class="ol-wait"><h2>等待房间同步</h2><p>房主准备好后会更新这里。</p></div>';
       if (view.packet?.mode === "rogue" && view.packet.rogue && screen === "exploration") return rogueMarkup(view.packet.rogue);
       const units = (data.units || []).filter(u => !u.hidden), logs = view.packet?.publicLogs || [];
-      return `<header class="ol-stage-heading"><div><span class="ol-muted">${esc(view.roomCode)} · ${screen === "battle" ? `第 ${data.turnNo || 1} 回合` : screen === "ended" ? "遭遇结束" : "探索环节"}</span>${screen === "battle" && global.Chain && data.chainStatus ? `<div class="ol-chain">${global.Chain.barHtml(data.chainStatus)}</div>` : ""}<h1>${screen === "battle" ? "战场" : screen === "ended" ? "战斗结算" : "与队伍同行"}</h1>${clockLine()}<div class="ol-info-tools">${global.WorldMap ? button("地图", "map") : ""}${button("角色资料", "info", 'data-info="sheet"', pending)}${button("武器", "info", 'data-info="armory"', pending)}${button("背包", "info", 'data-info="bag" title="队伍的全部道具（材料、消耗品、改装件…）"')}${button("战绩", "info", 'data-info="record"', pending)}${suppliesButton()}${view.packet?.mode !== "rogue" ? button(`任务日志${questList().some(q => q.status === "active") ? ` · ${questList().filter(q => q.status === "active").length}` : ""}`, "quests") : ""}${loreButton()}${(screen === "battle" || screen === "ended") && global.HD2DField ? '<span class="ol-hd2d-slot"></span>' : ""}</div></div>${weatherMarkup(data)}</header>${screen === "ended" ? resultMarkup() : ""}${checksMarkup(screen === "battle")}${screen === "battle" || screen === "ended" ? '<div class="ol-battle-slot"></div>' : `<p class="ol-muted ol-explore-hint">主持人正在管理探索与遭遇。右侧「小队」频道可以和大家聊天，「菜单」里的「消息与成员」可以私下回复主持人。</p>${partyMarkup(units)}`}`;
+      return `<header class="ol-stage-heading"><div><span class="ol-muted">${esc(view.roomCode)} · ${screen === "battle" ? `第 ${data.turnNo || 1} 回合` : screen === "ended" ? "遭遇结束" : "探索环节"}</span>${screen === "battle" && global.Chain && data.chainStatus ? `<div class="ol-chain">${global.Chain.barHtml(data.chainStatus)}</div>` : ""}<h1>${screen === "battle" ? "战场" : screen === "ended" ? "战斗结算" : "与队伍同行"}</h1>${clockLine()}<div class="ol-info-tools">${global.WorldMap ? button("地图", "map") : ""}${button("角色资料", "info", 'data-info="sheet"', pending)}${button("武器", "info", 'data-info="armory"', pending)}${button("背包", "info", 'data-info="bag" title="队伍的全部道具（材料、消耗品、改装件…）"')}${button("战绩", "info", 'data-info="record"', pending)}${suppliesButton()}${view.packet?.mode !== "rogue" ? questsButton() : ""}${loreButton()}${(screen === "battle" || screen === "ended") && global.HD2DField ? '<span class="ol-hd2d-slot"></span>' : ""}</div></div>${weatherMarkup(data)}</header>${screen === "ended" ? resultMarkup() : ""}${checksMarkup(screen === "battle")}${screen === "battle" || screen === "ended" ? '<div class="ol-battle-slot"></div>' : `<p class="ol-muted ol-explore-hint">主持人正在管理探索与遭遇。右侧「小队」频道可以和大家聊天，「菜单」里的「消息与成员」可以私下回复主持人。</p>${partyMarkup(units)}`}`;
+    }
+    /** 「任务日志」按钮：进行中的任务带条数（舞台顶上那一排、纸片画面的「工具 ▾」同一个） */
+    const questsButton = () => button(`任务日志${questList().some(q => q.status === "active") ? ` · ${questList().filter(q => q.status === "active").length}` : ""}`, "quests");
+
+    /* ---------- 纸片画面（#308，online-paper.js；设计在 docs/ui-paper/）----------
+     * 联机玩家的战斗画面开着新画面（3D 建好了）时：战场铺满，顶栏 / 行动顺序吊牌 / 「工具 ▾」在 #online-paper 里，队伍栏挪到左上角、技能栏浮在底下（hd2d-shell.js 的外壳），
+     * 右边的记录 / 聊天收成抽屉。只换排版，出手流程、快捷键、点 3D 铭牌选目标照旧走上面那一份；只读收到的包，坚毅生命一个字都不碰 */
+    /** 这一刻是不是纸片画面：换了就给 body 加 / 去 .ol-paper，抽屉读本机记着的；战场的大小变了，新画面重新量一次 */
+    function setPaper(on) {
+      if (on === paperOn) return;
+      paperOn = on;
+      document.body.classList.toggle(global.OnlinePaper ? global.OnlinePaper.PAPER.bodyClass : "ol-paper", on);
+      toolsOpen = false; swapOpen = null;
+      if (on) paperDrawer = global.OnlinePaper.isOpen("drawer", paperStore);
+      setTimeout(() => { if (!destroyed && typeof dispatchEvent === "function" && typeof Event === "function") dispatchEvent(new Event("resize")); }, 0);
+    }
+    /** 「工具 ▾」下拉里的：原来舞台顶上那一排里除了角色资料 / 武器 / 背包（挪到队伍栏下面）的几个，同一个画法、同一个处理（不留两份）；
+     *  申请检定照旧由 check-request-ui.js 补进来，新画面开关（#g-hd2d-toggle）照旧由 hd2d-field.js 挪进 .ol-hd2d-slot */
+    function paperTools() {
+      return [global.WorldMap ? button("地图", "map") : "", button("战绩", "info", 'data-info="record"', pending), suppliesButton(),
+        view.packet?.mode !== "rogue" ? questsButton() : "", loreButton(), global.HD2DField ? '<span class="ol-hd2d-slot"></span>' : ""];
+    }
+    /** 纸片画面的舞台：只剩铺满的战场那一格；提示、战斗结算、连锁、检定浮在吊牌下面（.olp-float） */
+    function paperStageMarkup(note) {
+      const data = displayState || view.state || {}, screen = view.screen;
+      const chain = screen === "battle" && global.Chain && data.chainStatus ? `<div class="ol-chain">${global.Chain.barHtml(data.chainStatus)}</div>` : "";
+      return `<div class="olp-float">${note}${screen === "ended" ? resultMarkup() : ""}${chain}${checksMarkup(screen === "battle")}</div><div class="ol-battle-slot"></div>`;
+    }
+    const weatherName = w => (w === "sand" ? "沙暴" : labels[w] || labels.none);
+    /** 夜晚：这一包的光影（pv.light：傍晚也算夜）；旧主机没发光影就按游戏时钟 */
+    function paperNight(data) {
+      if (data && data.light) return data.light !== "day";
+      const ck = view.packet?.clock;
+      return !!(ck && global.PartyCards && global.PartyCards.isNight(ck.clock));
+    }
+    /** 行动顺序吊牌：收到的包里的行动顺序（hs().order）+ 每一格现在的按钮（热座栏里原来那几个，OnlinePaper.readMoves）；头像按投影过的单位（hd2d-ui.js） */
+    function paperSlots(data, moves) {
+      const phase = hs().phase;
+      if (!["picking", "acting", "enemy"].includes(phase)) return [];
+      const units = data.units || [], SH = global.HD2DShell, UI = global.HD2DUI;
+      return (hs().order || []).map((slot, i) => {
+        slot = slot || {};
+        const actor = slot.actor || "", u = units.find(x => x.id === actor), hu = (hs().units || []).find(x => x.id === actor) || {};
+        const owner = slot.owner || slot.operatorId || hu.owner;
+        const face = u && SH && UI ? UI.avatarHtml(UI.avatarOf(SH.lookOf(u))) : "";
+        return { index: i, actor, name: (u && u.name) || hu.name || actor, owner: actor ? playerName(owner) : "", face,
+          current: !!actor && (!!slot.current || (phase === "acting" && actor === hs().currentUnitId)), done: !!slot.done, locked: !!slot.locked,
+          vacated: !actor && phase !== "picking", mine: !!actor && owner === own(), moves: moves.get(i) || [] };
+      });
+    }
+    /** 顶栏、「工具 ▾」、吊牌、热座栏的提示（online-paper.js 画，各占一块分开重画）；不是纸片画面就清空藏起来。
+     *  顶栏重画了就把菜单按钮上的新消息红点补上（pause-menu.js 画在所有 [data-pause-open] 上）；
+     *  下拉的按钮列表重画了就把新画面开关、申请检定放回去（平时由 hd2d-field.js / check-request-ui.js 放，这里只是不让它们在两次之间丢掉） */
+    const PAPER_KEYS = ["paperTop", "paperTools", "paperTags"];
+    function paintPaper() {
+      const OP = global.OnlinePaper;
+      paperBox.hidden = !paperOn;
+      if (!paperOn || !OP) { if (paperBox.firstChild) { paperBox.innerHTML = ""; PAPER_KEYS.forEach(k => delete lastMarkup[k]); } watchPaper(false); paintPaperTheme(null); return; }
+      if (!paperBox.querySelector(".olp-top-host")) { paperBox.innerHTML = OP.shellHtml(); PAPER_KEYS.forEach(k => delete lastMarkup[k]); }
+      const q = sel => paperBox.querySelector(sel);
+      const data = displayState || view.state || {}, ck = view.packet?.clock, PC = global.PartyCards, moves = OP.readMoves(document);
+      paintPaperTheme(OP.themeOf({ light: data.light, night: paperNight(data), weather: data.weather }));
+      const moving = [...moves.values()].some(list => list.some(m => m.hs === "moveCancel"));
+      const top = lastMarkup.paperTop, tools = lastMarkup.paperTools, list = q(".olp-tools-list"), toggle = list.querySelector("#g-hd2d-toggle");
+      html(q(".olp-top-host"), OP.topHtml({
+        rogue: view.packet?.mode === "rogue", room: view.roomCode, reconnecting: paused(), turnNo: data.turnNo,
+        day: ck ? ck.day || 1 : 0, time: ck && PC ? PC.clockText(ck.clock == null ? 480 : ck.clock) : "", period: ck && PC ? PC.dayPeriod(ck.clock == null ? 480 : ck.clock) : "",
+        weather: weatherName(data.weather), night: paperNight(data), cams: OP.readCam(stage), toolsOpen
+      }), "paperTop");
+      q(".olp-tools").hidden = !toolsOpen;
+      html(list, OP.toolsHtml(paperTools()), "paperTools");
+      if (lastMarkup.paperTools !== tools) {
+        const slot = list.querySelector(".ol-hd2d-slot");
+        if (toggle && slot && toggle.parentNode !== slot) slot.appendChild(toggle);
+        if (checkReq) checkReq.sync();
+      }
+      html(q(".olp-tags-host"), OP.tagsHtml(paperSlots(data, moves), { open: swapOpen, moving }), "paperTags");
+      const hn = document.getElementById("hs-notice"), note = hn && !hn.hidden ? String(hn.textContent || "").trim() : "", noteEl = q(".olp-note");
+      noteEl.hidden = !note; if (noteEl.textContent !== note) noteEl.textContent = note;
+      watchPaper(true);
+      if (lastMarkup.paperTop !== top && global.PauseMenu) global.PauseMenu.refresh();
+    }
+    /** 白天 / 夜晚 / 天气的配色（第 2 步）：body 上记一下是哪一套（data-olp-time / data-olp-weather），配色（online-paper.js · PAPER.palette / weathers）写成 CSS 变量；
+     *  th = null（不是纸片画面）：都拿掉 */
+    let paperThemeKey = "", paperTheme = null;
+    function paintPaperTheme(th) {
+      const key = th ? th.time + "|" + th.weather : "";
+      paperTheme = th;
+      if (key === paperThemeKey) return;
+      const b = document.body, vars = th ? global.OnlinePaper.themeVars(th) : {};
+      if (paperThemeKey) { Object.keys(global.OnlinePaper.themeVars({ time: "day" })).forEach(k => b.style.removeProperty(k)); b.style.removeProperty("--olp-grit"); }
+      paperThemeKey = key;
+      if (!th) { delete b.dataset.olpTime; delete b.dataset.olpWeather; b.style.removeProperty("--olp-dock-h"); return; }
+      b.dataset.olpTime = th.time; b.dataset.olpWeather = th.weather;
+      Object.keys(vars).forEach(k => b.style.setProperty(k, vars[k]));
+      const grit = global.OnlinePaper.grit(document);   // 印章、喷漆的斑驳（只一点点）
+      if (grit) b.style.setProperty("--olp-grit", `url("${grit}")`);
+    }
+    /** 纸片美术（第 3 步）：面板贴上照 mock.html 程序生成的纹理（online-paper.js · dress：揉皱的纸、撕边、不均匀的影子、天气；按尺寸缓存）。
+     *  每次画完叫一次；面板大小变了（收起 / 展开、窗口变了）由 ResizeObserver 叫，下一帧一起贴 */
+    let paperSizer = null, paperDressQueued = false;
+    function paperDress() {
+      if (!paperOn || !global.OnlinePaper) return;
+      global.OnlinePaper.dress(document, null, paperTheme);
+      // 技能栏现在多高（--olp-dock-h）：手机上右边缘的竖标签挂在它上面，技能栏换行变高了也不压在一起
+      const hud = stage.querySelector(".ol-battle > .g-hud"), dockH = hud && hud.offsetHeight ? hud.offsetHeight + "px" : "";
+      if (document.body.style.getPropertyValue("--olp-dock-h") !== dockH) document.body.style.setProperty("--olp-dock-h", dockH);
+      if (typeof ResizeObserver !== "function") return;
+      if (!paperSizer) paperSizer = new ResizeObserver(() => {
+        if (paperDressQueued) return;
+        paperDressQueued = true;
+        const next = () => { paperDressQueued = false; if (!destroyed) paperDress(); };
+        if (typeof global.requestAnimationFrame === "function") global.requestAnimationFrame(next); else setTimeout(next, 16);
+      });
+      [paperBox.querySelector(".olp-top"), paperBox.querySelector(".olp-tools"), stage.querySelector(".ol-battle > .g-hud"), stage.querySelector(".ol-battle .hd2d-party"), side].forEach(n => { if (n) paperSizer.observe(n); });
+    }
+    /** 热座栏（延后 / 换位的按钮、提示）、新画面的镜头按钮自己会变（点了换位、滚轮换镜头……，不经过这里）：变了就重画一次（只看这几块，下一刻一起画） */
+    let paperWatch = null, paperWatched = [], paperQueued = false;
+    function watchPaper(on) {
+      const want = on ? [document.getElementById("hs-order"), document.getElementById("hs-notice"), stage.querySelector(".hd2d-cam")].filter(Boolean) : [];
+      if (want.length === paperWatched.length && want.every((n, i) => n === paperWatched[i])) return;
+      if (paperWatch) paperWatch.disconnect();
+      paperWatched = want;
+      if (!want.length || typeof MutationObserver !== "function") return;
+      if (!paperWatch) paperWatch = new MutationObserver(() => {
+        if (paperQueued) return;
+        paperQueued = true;
+        setTimeout(() => { paperQueued = false; if (!destroyed && paperOn) render(); }, 0);
+      });
+      want.forEach(n => paperWatch.observe(n, n.classList.contains("hd2d-cam") ? { subtree: true, attributes: true, attributeFilter: ["class"] }
+        : { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["class", "disabled", "hidden"] }));
+    }
+    /** 纸片画面：队伍栏下面接「角色资料 / 武器 / 背包」（原来舞台顶上那一排里的三个，同一个画法、同一个处理），技能栏那一行写「轮到你了」；不是纸片画面就拿掉 */
+    function paintPaperHud(el) {
+      const panel = el.querySelector(".g-hud > .hd2d-party"), row = el.querySelector(".g-hud > .hd2d-dock-row");
+      let tools = el.querySelector(".olp-party-tools"), turn = el.querySelector(".olp-turn");
+      if (!paperOn) { if (tools) tools.remove(); if (turn) turn.remove(); return; }
+      if (panel) {
+        const markup = `${button("角色资料", "info", 'data-info="sheet"', pending)}${button("武器", "info", 'data-info="armory"', pending)}${button("背包", "info", 'data-info="bag" title="队伍的全部道具（材料、消耗品、改装件…）"')}`;
+        if (!tools) { tools = document.createElement("div"); tools.className = "olp-party-tools"; }
+        if (tools.parentNode !== panel) panel.appendChild(tools);
+        if (tools.dataset.html !== markup) { tools.innerHTML = markup; tools.dataset.html = markup; }
+      }
+      const mine = isMyTurn() && !animating;
+      if (row && mine && !turn) { turn = document.createElement("span"); turn.className = "olp-turn olp-stamp"; turn.textContent = global.OnlinePaper.PAPER.text.yourTurn; row.appendChild(turn); }
+      else if (turn && (!mine || !row)) turn.remove();
     }
     /** 联机跑团的时钟行：和主持人顶栏同一句（party-cards.js · clockHtml，含「距上次长休」和力竭提示） */
     function clockLine() {
@@ -778,8 +969,9 @@
     /* ---------- 小队聊天 ---------- */
     const chatRows = () => (hs().chat || []).filter(m => m && typeof m.text === "string");
     const clock = at => { if (!at) return ""; const d = new Date(at); return isNaN(d) ? "" : `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
-    function chatListMarkup(rows) {
-      return rows.map(m => `<li class="${m.operatorId && m.operatorId === own() ? "ol-mine" : ""}${m.roll ? " ol-roll" : ""}${m.tier ? " ol-tier-" + m.tier : ""}${m.secret ? " ol-secret" : ""}${m.title ? " ol-title-row" : ""}"><div><b>${esc(m.name || m.operatorName || playerName(m.operatorId))}</b><small>${esc(clock(m.at))}</small></div><p${artAttr(m.text)}>${esc(m.text)}</p></li>`).join("") || '<li class="ol-muted">还没有人说话。消息所有人都能看到，并一直保留在记录里。</li>';
+    /** paper：纸片画面（#308）的便利贴——每条带上这个发送人固定的便利贴颜色（online-paper.js · noteColor） */
+    function chatListMarkup(rows, paper) {
+      return rows.map(m => { const mine = !!(m.operatorId && m.operatorId === own()); return `<li class="${mine ? "ol-mine" : ""}${m.roll ? " ol-roll" : ""}${m.tier ? " ol-tier-" + m.tier : ""}${m.secret ? " ol-secret" : ""}${m.title ? " ol-title-row" : ""}"${paper ? ` style="--olp-note:${global.OnlinePaper.noteColor(m.operatorId || m.name, mine)}"` : ""}><div><b>${esc(m.name || m.operatorName || playerName(m.operatorId))}</b><small>${esc(clock(m.at))}</small></div><p${artAttr(m.text)}>${esc(m.text)}</p></li>`; }).join("") || '<li class="ol-muted">还没有人说话。消息所有人都能看到，并一直保留在记录里。</li>';
     }
     /** 更新列表（只换列表内容，不碰输入框）；原来在底部就继续贴底 */
     function fillList(list, markup) {
@@ -803,18 +995,20 @@
       const tab = sideTab[battle ? "battle" : "other"];
       side.dataset.tab = tab;
       const logTab = side.querySelector('[data-side="log"]'), chatTab = side.querySelector('[data-side="chat"]');
-      logTab.textContent = battle ? "战斗" : "记录";
+      logTab.textContent = paperOn ? global.OnlinePaper.PAPER.text.logTab : battle ? "战斗" : "记录";
       logTab.classList.toggle("on", tab === "log"); chatTab.classList.toggle("on", tab === "chat");
       logTab.setAttribute("aria-selected", String(tab === "log")); chatTab.setAttribute("aria-selected", String(tab === "chat"));
       trackUnread(tab === "chat" && !collapsedNow());   // 右侧栏收着时「小队」频道看不见，新消息不算看到（#298）
       const badge = chatTab.querySelector(".ol-badge"); badge.hidden = !unread; badge.textContent = dotText(unread);
       paintSideCollapse();
       const logs = view.packet?.publicLogs || [];
-      const logMarkup = logs.map(l => `<li>${esc(l.text || "")}</li>`).join("") || '<li class="ol-muted">还没有公开记录。</li>';
+      // 纸片画面（#308）：战斗记录是一长条热敏收据（online-paper.js · receiptHtml：同样这几条记录，按回合分好、伤害靠右、本回合合计）
+      const logMarkup = paperOn ? global.OnlinePaper.receiptHtml(logs, { room: view.roomCode }) : logs.map(l => `<li>${esc(l.text || "")}</li>`).join("") || '<li class="ol-muted">还没有公开记录。</li>';
       if (force || sideKeys.log !== logMarkup) { sideKeys.log = logMarkup; fillList(side.querySelector(".ol-side-log"), logMarkup); }
-      const chatMarkup = chatListMarkup(chatRows());
+      const chatMarkup = chatListMarkup(chatRows(), paperOn);
       if (force || sideKeys.chat !== chatMarkup) { sideKeys.chat = chatMarkup; fillList(side.querySelector(".ol-side-chat"), chatMarkup); }
       side.querySelector(".ol-side-form button[type=submit]").disabled = chatSending || paused();
+      if (paperOn) paperDress();   // 换了频道（收据 ↔ 便利贴底下那张纸）、拉出来 / 收回去：换一张纸
     }
     /** 聊天框：Enter 发送，Shift+Enter 换行；输入法选字时按的 Enter 不算 */
     function chatEnter(event) {
@@ -1131,6 +1325,8 @@
         if (global.MatchupUI) { if (!matchupOf()) global.MatchupUI.close(); else global.MatchupUI.refresh(); }
       }
       document.body.classList.toggle("online-player", !!view.active && !view.isHost);
+      // 纸片画面（#308）：联机玩家的战斗画面开着新画面（3D 建好了）时换成新排版；新画面关着（还在加载、打不开）、主持人、单机都照旧
+      setPaper(!!global.OnlinePaper && global.OnlinePaper.active({ active: view.active, isHost: view.isHost, screen: view.screen, on3d: !!(field3d && field3d.on()) }));
       // 先定房间面板开不开（下面数新消息要用：面板开着，私信就算看到了）
       // 联机单局的房主：大厅里先要在单局画面选队伍，房间面板不挡着；队伍选好（有角色可分）时自动打开一次
       const rogueHost = view.active && view.isHost && view.mode === "rogue";
@@ -1169,11 +1365,13 @@
       seeLobbyChat();
       renderSide();
       mountHostChat();
+      paintPaper();   // 纸片画面的顶栏 / 吊牌先画好：新画面开关要挪进它的「工具 ▾」（paintStage → paintField3d）
       if (!stage.hidden) paintStage();
       else paintField3d(null);
       paintSupplies();
       if (checkReq) checkReq.sync();
       if (loreUi) loreUi.sync();
+      paperDress();   // 纸片画面（#308）：画完再贴纸纹（量得到大小）
       if (view.active && !view.isHost) scheduleAutoMenu();
       // 轮到自己的角色行动：响一次 DJ 搓碟（同一次只响一次；页面刚打开、重新同步时只记下）。演出还在播时等播完（行动开始的那一刻）
       if (turnCue && !animating) turnCue.see(turnInfo(null, view.screen));
@@ -1209,7 +1407,9 @@
         label: () => { const c = global.PauseMenu.CONFIG.items.sfx; return global.Sfx && global.Sfx.enabled() ? c.on : c.off; },
         run: () => { const S = global.Sfx; if (!S) return; S.setEnabled(!S.enabled()); if (S.enabled()) S.play("physical"); } }),
       // 玩家选着技能、正在选目标、战场上有要点选的询问：Esc 留给战场取消（online-battle.js），不开菜单
-      global.PauseMenu.addBlocker(() => !!(view.active && !view.isHost && view.screen === "battle" && (request?.skill || fieldAsk())))
+      global.PauseMenu.addBlocker(() => !!(view.active && !view.isHost && view.screen === "battle" && (request?.skill || fieldAsk()))),
+      // 纸片画面（#308）的「工具 ▾」下拉、⇅ 点开的按钮开着：Esc 先收它们
+      global.PauseMenu.addBlocker(() => !!(paperOn && (toolsOpen || swapOpen != null)))
     ] : [];
     function paintPanel() {
       if (panel.hidden) return;
@@ -1225,7 +1425,9 @@
       // 夜晚色调：和主持人 / 单机一样按游戏时钟（game.js 给 .g-app 加 is-night）；联机跑团和联机单局都发 packet.clock
       const ck = view.packet?.clock, night = !!(view.active && ck && global.PartyCards && global.PartyCards.isNight(ck.clock));
       stage.classList.toggle("is-night", night); document.body.classList.toggle("ol-night", night);
-      html(stage, `${notice || view.notice || view.packet?.systemNotice ? `<p class="ol-notice" role="status">${esc(notice || view.notice || view.packet?.systemNotice)}</p>` : ""}${stageMarkup()}`, "stage");
+      const note = notice || view.notice || view.packet?.systemNotice ? `<p class="ol-notice" role="status">${esc(notice || view.notice || view.packet?.systemNotice)}</p>` : "";
+      // 纸片画面（#308）：舞台只剩铺满的战场，提示 / 结算 / 检定浮在吊牌下面，原来那一排按钮不画
+      html(stage, paperOn ? paperStageMarkup(note) : `${note}${stageMarkup()}`, "stage");
       const slot = stage.querySelector(".ol-battle-slot");
       if (!slot) { paintField3d(null); return; }
       const b = battleView();
@@ -1233,6 +1435,7 @@
       if (b.el.parentElement !== slot) slot.appendChild(b.el);
       const ui = battleUi();
       b.update(displayState || view.state || {}, ui);
+      paintPaperHud(b.el);
       paintField3d(ui);   // 新画面（HD-2D，#289）：开着就跟着这一包重排；关着只把开关挪过来
       if (stage.scrollTop !== top) stage.scrollTop = top;
       // 战斗中舞台本身不滚动，是战场自己滚动：同样放回原处
@@ -1339,7 +1542,8 @@
       clock: () => { try { const G = global.GAME; return G && typeof G.fxClock === "function" ? G.fxClock() : 1; } catch (_) { return 1; } },
       refresh: () => setTimeout(() => { if (!destroyed) render(); }, 0),
       hint: msg => { notice = msg; setTimeout(() => { if (!destroyed) render(); }, 0); },
-      slot: () => stage.querySelector(".ol-hd2d-slot")
+      // 纸片画面（#308）：开关在顶栏「工具 ▾」下拉里
+      slot: () => stage.querySelector(".ol-hd2d-slot") || paperBox.querySelector(".ol-hd2d-slot")
     };
     const skip3d = () => { if (field3d) field3d.skip(); };
     /** 选目标 / 选区的标记（和 online-battle.js 画单位卡、区的 is-targetable / is-dim / is-move-target 同一个判断：这一步菜单里能选的） */
@@ -1520,7 +1724,7 @@
         case "lore": if (loreUi) loreUi.open(); break;
         case "map": openMap(); break;
         case "supplies": suppliesOpen = true; lastMarkup.supplies = ""; paintSupplies(); suppliesBox.querySelector('[data-online="suppliesClose"]')?.focus({ preventScroll: true }); break;
-        case "showLog": sideTab.battle = "log"; renderSide(true); side.querySelector(".ol-side-log")?.scrollIntoView({ block: "nearest" }); break;
+        case "showLog": sideTab.battle = "log"; if (paperOn && !paperDrawer) setPaperDrawer(true); renderSide(true); side.querySelector(".ol-side-log")?.scrollIntoView({ block: "nearest" }); break;
         case "checkRoll": if (!disabled()) await call(() => api.submit({ type: "checkRoll", checkId: b.dataset.check, unitId: b.dataset.unit })); break;
         case "attrRequest": if (!disabled()) await call(() => api.submit({ type: "attrRequest", unitId: b.dataset.unit, attr: b.dataset.attr })); break;
         case "shopBuy": if (!disabled()) { if (global.Sfx) Sfx.ui("coin"); await call(() => api.submit({ type: "shopBuy", merchant: view.packet?.shop?.id, key: b.dataset.key, qty: Math.max(1, Number(shopDraft.qty[b.dataset.key]) || 1), payer: shopDraft.payer })); } break;
@@ -1837,7 +2041,8 @@
       destroyed = true; closeMyBag(); if (checkReq) { checkReq.destroy(); checkReq = null; } if (loreUi) { loreUi.destroy(); loreUi = null; } paintField3d(null); if (battle) { battle.destroy(); battle = null; } playbackGeneration++; actionGeneration++; historyGeneration++; clearTimeout(toastTimer);
       document.removeEventListener("compositionstart", onCompStart, true); document.removeEventListener("compositionend", onCompEnd, true);
       document.removeEventListener("click", onRollOpen); document.removeEventListener("scroll", onListScroll, true); clearTimeout(titleTimer);
-      while (hostMounts.length) hostMounts.pop().remove(); document.body.classList.remove("ol-has-side", "ol-host-online", "ol-in-battle", "ol-side-collapsed");
+      document.removeEventListener("click", onPaperOutside, true); document.removeEventListener("keydown", onPaperKey, true); if (paperWatch) paperWatch.disconnect(); if (paperSizer) paperSizer.disconnect(); paintPaperTheme(null);
+      while (hostMounts.length) hostMounts.pop().remove(); document.body.classList.remove("ol-has-side", "ol-host-online", "ol-in-battle", "ol-side-collapsed", "ol-paper");
       pauseItems.forEach(off => off()); if (global.PauseMenu) global.PauseMenu.setOnline(null);
       if (turnCue) turnCue.unmark();   // 标签页标题上的「▶ 轮到你」去掉
       for (const off of unsubs) if (typeof off === "function") off();
