@@ -368,6 +368,10 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **出血：打穿外层、溢进肉体 / 星灵也算；下水道维护和「触灵」阵营友好**（作者 10/22 定；engine.js · `resolveAttack` 的出血判断，enemies.js · `HOSTILE_EXCEPT_FRIENDS`；docs/ratfolk.md 2.3、docs/sewer-maintenance.md 第 1 节；测试 tests/ratfolk-common.test.js「出血：扣到肉体 / 星灵层的血时触发」、tests/sewer-maintenance.test.js「阵营」）
+  - **出血以前**：只看这一段**最先打中**的那一层，打中装甲 / 护盾再溢进肉体不算，不出血。**现在**：这一段扣到了肉体或星灵的血（直接打中，或者打穿外层溢进去）就出血，打在扣到的第一层肉体 / 星灵上，比例、减半、不溢出这些照旧。
+  - **阵营以前**：下水道维护除了巨人方（安保、警卫队、镇压队、巨人）以外都敌对，包括「触灵」。**现在**：和「触灵」阵营也友好；野生、古代造物、盗匪、沙灵、沙漠生物、异星生物、狂鼠照旧敌对。
+
 - **下水道维护（一）：「下水道维护」阵营 + 杂兵「下水道清扫机」**（作者 10/22 定稿的 docs/sewer-maintenance.md 第 1、2、3 节，issue #279；两个触灵精英（维护员、清扫员）和「狂鼠 ↔ 下水道维护」的三方混战是下一个 issue（下水道维护（二）），这次不做；run.js · `ENEMY_INFO`、`ALLIED_FACTIONS`、`FACTION_MIX_CHANCE`（`encounterFactions` 的注释）；engine.js · `SEWER_STATS`、`enemyPresets`；growth.js · `ENEMY_RANK`；props.js · `MECHANICAL_KITS`；enemies.js · `SEWER_FACTION` / `SEWER_CFG`、`HOSTILE_EXCEPT_ALLIES` / `hostileTo`、`ENEMY_ASSIST_RUSH`、`enemySkillListBase`、`ENEMY_SKILL_RANGE`、`runEnemyActionInner`、`sweeperFoesOf` / `sweeperAllResonated` / `sweeperResoTargetOk` / `sweeperApplyReso`、`sweeperSelfDestruct`；ai.js · `AI_SPEC`、`sweeperResoPick`、`aiTargetBase`、`aiSpecial`、`canAimSkill`、`aiPlanBase`（施加共振不换目标 / 招式）；items.js · `ENEMY_DROPS`、废料的说明；bestiary.js · `BESTIARY_TEXT`；测试：新增 tests/sewer-maintenance.test.js，tests/craft-materials.test.js 的敌人总数 54 → 55，tests/ratfolk-units.test.js、tests/riot-force.test.js、tests/three-way.test.js、tests/bounty.test.js 跟着改）
   - **以前**：下水道只有狂鼠一个阵营（`rollEncounter({ region: "下水道" })` 只抽「下水道·狂鼠」）；同伙阵营 `ALLIED_FACTIONS` 是「安保、警卫队、镇压队」，混编概率只有镇压队写了 15%。
   - **现在**：
