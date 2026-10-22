@@ -22,7 +22,7 @@
  * 用法：Sfx.play("fire", { big: true })。重击（big）更响、多一层低频。
  * 同一属性 60 ms 内只响一次，范围攻击同时打中好几个人不会叠成噪音。
  * 浏览器要求先有一次点击 / 按键才能出声，这里在第一次点击或按键时启动。
- * 开关记在本机（localStorage「anterscale-sfx」），战斗顶栏「音效」按钮切换。 */
+ * 开关记在本机（localStorage「anterscale-sfx」），战斗顶栏「音效」按钮切换；联机玩家在暂停页面（Esc / 菜单）的「音效 开 / 关」切换，同一个开关。 */
 (function () {
   "use strict";
   const fxRand = () => (typeof fxRandom === "function" ? fxRandom() : Math.random());   // 画面效果的随机数：不动战斗用的种子随机数（run.js · fxRandom）
