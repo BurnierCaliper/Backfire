@@ -1,7 +1,11 @@
-/* Antlerscale: Backfire · HD-2D 战场原型 · 界面外壳
- * 美术参照 art/style-guide.html：水泥墙、铁皮面板、喷漆按钮、胶带标签。
- * 名字和按钮用黑体加粗（--ui-sans）；战场（canvas）占满整个屏幕，所有面板浮在上面，能收起。 */
-:root {
+/* Antlerscale: Backfire · HD-2D 战场（正式画面和原型共用）
+ * 3D 画布上叠的东西：天气的 2D 层、铭牌、伤害数字、纸片的淡影子；正式画面里新战场的位置。美术参照 art/style-guide.html。
+ * 这里只放战场自己的样子：正式画面（game.html，「新画面（HD-2D）」开关）的技能栏、队伍栏、日志用正式画面现有的；
+ * 原型页（prototypes/hd2d/index.html）的界面外壳（顶栏、技能栏、队伍栏、日志抽屉……）在 prototypes/hd2d/hd2d-shell.css。 */
+
+/* 配色、字体（art/style-guide.html 那一套）：挂在 .hd2d-theme 上——原型页的 <body>、正式画面的新战场容器（.hd2d-field）。
+ * 不写在 :root 上：正式画面的 game.css 有自己的 --ink / --muted（另一套颜色），不能被盖掉 */
+.hd2d-theme {
   --oil: #110e0b; --oil-2: #1a1511; --concrete: #2b2723; --steel: #2a2520; --steel-hi: #3b342c;
   --edge: #4d4337; --rust: #b4522a; --brass: #c99a46; --hazard: #f2c230; --blood: #d8322a;
   --pink: #ff4fa3; --mint: #39e6b4; --canvas: #ece0c6; --muted: #a8977b; --ink: #0b0806;
@@ -10,15 +14,9 @@
   --stencil: "Black Ops One", Impact, sans-serif;
   --ui-sans: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Heiti SC", system-ui, sans-serif;
   --noise: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 .6 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
-  --topbar-h: 40px;
-  --dock-h: 58px;
 }
-* { box-sizing: border-box; }
-html, body { margin: 0; height: 100%; overflow: hidden; background: #111; color: var(--canvas); font: 14px/1.4 var(--ui-sans); -webkit-tap-highlight-color: transparent; }
-body { position: fixed; inset: 0; user-select: none; }
 
-/* ---------- 战场：占满屏幕（暗角、颗粒、色温在 three.js 的调色后期里做，不盖住铭牌）---------- */
-#stage { position: fixed; inset: 0; z-index: 0; }
+/* ---------- 战场（暗角、颗粒、色温在 three.js 的调色后期里做，不盖住铭牌）---------- */
 .hd2d-canvas { display: block; width: 100%; height: 100%; touch-action: none; outline: none; }
 /* 天气的 2D 层（#240）：正式战斗画面的天气动效（weather-fx.css 的 .wfx-{天气}，WeatherFx.sync 生成）原样套在 3D 画面上。
  * 放在 #stage 里：3D 画布之上、铭牌（.hd2d-labels，z 1）之下（z-index 由 hd2d-wfx.js 的 WFX.z 写在行内）；界面面板（z 5–6）、攻击演出、伤害数字更在上面；不挡鼠标。
@@ -203,251 +201,8 @@ body { position: fixed; inset: 0; user-select: none; }
 /* 减少动态效果：铭牌不浮动、小箭头不动（场景那边其它动画也停） */
 .hd2d-labels.still .pl-bob, .hd2d-labels.still .pl-mark { animation: none; }
 @media (prefers-reduced-motion: reduce) { .pl-bob, .pl-mark { animation: none; } }
-
-/* ---------- 零件 ---------- */
-.panel {
-  position: fixed; z-index: 5;
-  background-color: var(--steel); background-image: var(--noise), linear-gradient(170deg, var(--steel-hi), var(--oil-2) 85%);
-  border: 3px solid var(--ink); box-shadow: 5px 6px 0 rgba(0, 0, 0, .5);
-}
-.tape {
-  /* 胶带标签 */
-  display: inline-block; padding: 1px 12px 2px; font-family: var(--ui-sans); font-weight: 900; font-size: 15px; line-height: 1.3; color: var(--ink);
-  background: rgba(220, 210, 186, .95); transform: rotate(-1.5deg);
-  clip-path: polygon(2% 8%, 0 0, 100% 4%, 98% 40%, 100% 100%, 3% 94%, 0 55%);
-  box-shadow: 0 2px 3px rgba(0, 0, 0, .4);
-}
-.tape.hz { background: var(--hazard); }
-.tape.pk { background: var(--pink); }
-.btn {
-  position: relative; cursor: pointer; border: 0; padding: 7px 16px 8px; color: var(--ink); isolation: isolate;
-  font-family: var(--ui-sans); font-weight: 900; font-size: 16px; line-height: 1.1; background: transparent; --bg: var(--hazard);
-}
-.btn::before {
-  /* 喷漆底（边缘打毛） */
-  content: ""; position: absolute; inset: 0; z-index: -1; background: var(--bg); filter: url(#spray);
-  clip-path: polygon(3% 6%, 30% 0, 70% 4%, 97% 0, 100% 40%, 96% 100%, 50% 95%, 4% 100%, 0 60%);
-  box-shadow: 0 0 0 3px var(--ink);
-}
-.btn:active { transform: translate(1px, 2px); }
-.btn.alt { --bg: var(--canvas); }
-.btn.mint { --bg: var(--mint); }
-.btn.pink { --bg: var(--pink); }
-.btn small { display: block; font: 10px/1 var(--marker); letter-spacing: .06em; margin-top: 3px; opacity: .75; }
-.toggle {
-  /* 收起 / 展开的小按钮 */
-  cursor: pointer; border: 2px solid var(--ink); background: var(--hazard); color: var(--ink); font: 900 13px/1 var(--ui-sans);
-  padding: 4px 9px; box-shadow: 2px 3px 0 rgba(0, 0, 0, .5);
-}
-.toggle:active { transform: translate(1px, 1px); }
-
-/* ---------- 顶栏 ---------- */
-#topbar {
-  position: fixed; z-index: 6; left: 0; right: 0; top: 0; height: var(--topbar-h);
-  display: flex; align-items: center; gap: 12px; padding: 0 12px;
-  background-color: rgba(26, 21, 17, .86); background-image: var(--noise);
-  border-bottom: 3px solid var(--ink); box-shadow: 0 3px 0 rgba(0, 0, 0, .35);
-}
-#topbar .brand { font: 12px/1 var(--stencil); color: var(--hazard); letter-spacing: .08em; white-space: nowrap; }
-#topbar .info { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
-#topbar .info b { font-weight: 900; }
-#topbar .map { font-weight: 900; color: var(--canvas); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#topbar .sep { color: var(--edge); }
-#topbar .compact, #demo-btn { display: none; }
-#demo-select, #region-select, #scene-select {
-  max-width: 46vw; font: 900 13px var(--ui-sans); color: var(--ink); background: var(--canvas);
-  border: 2px solid var(--ink); padding: 3px 6px; box-shadow: 2px 3px 0 rgba(0, 0, 0, .5);
-}
-#region-select { max-width: 22vw; background: #d8cdb4; }   /* 区域（地面 / 远景 / 灯）：截图比对用 */
-#scene-select { max-width: 16vw; background: #d8cdb4; }    /* 场景（区域里的哪个地方：矿外 / 矿内 / 矿底……，#239）：截图比对用 */
-
-/* ---------- 镜头：顶栏里的远 / 中 / 近三段按钮 + 选中的区；中景 / 近景时屏幕两边的换区箭头 ---------- */
-#topbar .cam { display: flex; align-items: center; gap: 4px; flex: none; }
-#topbar .cam-l { font: 900 12px/1 var(--ui-sans); color: var(--muted); margin-right: 2px; }
-.cam-b {
-  cursor: pointer; width: 30px; height: 26px; padding: 0; font: 900 14px/1 var(--ui-sans); color: var(--canvas);
-  background: var(--oil-2); border: 2px solid var(--ink); box-shadow: 2px 2px 0 rgba(0, 0, 0, .5);
-}
-.cam-b:hover { background: var(--steel-hi); }
-.cam-b.on { background: var(--hazard); color: var(--ink); }
-.cam-b:active { transform: translate(1px, 1px); }
-.cam-b:focus-visible { outline: 2px solid var(--canvas); outline-offset: 1px; }
-#topbar .cam-z { min-width: 4em; margin-left: 4px; font: 900 12px/1 var(--ui-sans); color: var(--canvas); white-space: nowrap; }
-.zone-nav {
-  position: fixed; z-index: 4; top: 50%; transform: translateY(-50%); cursor: pointer; padding: 10px 12px;
-  font: 900 14px/1 var(--ui-sans); color: var(--canvas); white-space: nowrap;
-  background: rgba(17, 14, 11, .78); border: 2px solid var(--ink); box-shadow: 3px 4px 0 rgba(0, 0, 0, .45);
-}
-.zone-nav.prev { left: 10px; border-left: 4px solid var(--hazard); }
-.zone-nav.next { right: 10px; border-right: 4px solid var(--hazard); }
-.zone-nav:hover { background: rgba(43, 39, 35, .92); }
-.zone-nav:active { transform: translateY(-50%) translate(1px, 1px); }
-.zone-nav[hidden] { display: none; }
-
-/* ---------- 底部技能栏 ---------- */
-#dock {
-  left: 50%; bottom: 0; transform: translateX(-50%); width: min(100vw, 980px);
-  padding: 10px 12px 12px; border-bottom: 0; transition: transform .25s ease;
-}
-#dock .row { display: flex; align-items: center; gap: 10px; }
-#dock .who { font-weight: 900; font-size: 16px; white-space: nowrap; text-shadow: 2px 2px 0 var(--ink); }
-#dock .who small { color: var(--muted); font-weight: 700; margin-left: 6px; }
-#dock .grow { flex: 1; }
-/* 原型的调试按钮（演示出招、演出速度、推镜头、跳过）：右上角一小块虚线框，不和技能按钮混在一起（#238） */
-#dock .dbg { display: flex; align-items: center; gap: 5px; padding: 3px 6px; border: 1px dashed var(--edge); border-radius: 3px; background: rgba(0, 0, 0, .18); }
-#dock .dbg-l { font: 900 11px/1 var(--ui-sans); color: var(--muted); letter-spacing: .08em; }
-/* 技能栏（#238，照正式战斗画面 game.html 的 .hud-row）：左边普通技能按钮，右边「唤出武器人」和「结束回合」两个大按钮 */
-#dock .hud-row { display: flex; align-items: stretch; gap: 12px; margin-top: 10px; }
-#skills { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 12px 14px; max-height: 136px; overflow-y: auto; padding: 8px 9px 6px 2px; }
-#dock.collapsed .hud-row { display: none; }
-#dock.collapsed { padding-bottom: 10px; }
-/* 普通技能按钮：照 game.js 的 .sk（铁板、墨线框，名字一行、消耗一行）；保留按技能轮流换颜色（--tint：左边一道色条 + 底色带一点）。
- * 左上角：属性（icons.js 的贴纸图标，无属性是灰圈）；右上角：攻击（剑）还是技能（齿轮），贴纸一样贴在角上 */
-.sk {
-  position: relative; min-width: 112px; padding: 7px 16px 6px 31px; text-align: left; cursor: pointer; color: var(--canvas);
-  font-family: var(--ui-sans); background-color: color-mix(in srgb, var(--tint) 16%, var(--steel)); background-image: var(--noise);
-  border: 2px solid var(--ink); border-left: 6px solid var(--tint); box-shadow: 2px 3px 0 rgba(0, 0, 0, .5);
-}
-.sk:hover { background-color: color-mix(in srgb, var(--tint) 28%, var(--steel-hi)); }
-.sk:active { transform: translate(1px, 2px); }
-.sk:focus-visible { outline: 2px solid var(--canvas); outline-offset: 2px; }
-.sk.t-hazard { --tint: var(--hazard); } .sk.t-mint { --tint: var(--mint); } .sk.t-canvas { --tint: var(--canvas); } .sk.t-pink { --tint: var(--pink); }
-.sk .nm { display: block; font-weight: 900; font-size: 15px; line-height: 1.2; white-space: nowrap; text-shadow: 1px 1px 0 var(--ink); }
-.sk .cost { display: block; font-size: 11px; line-height: 1.3; color: var(--muted); white-space: nowrap; }
-.sk .cost .ap { color: var(--mint); }
-.sk .cost .bn { color: #c9b27f; }
-.sk .sk-el { position: absolute; left: 7px; top: 7px; width: 19px; height: 19px; line-height: 0; }
-.sk .sk-el .eicon { width: 19px; height: 19px; margin: 0; }
-.sk .sk-el.none { opacity: .75; }
-.sk .sk-kind {
-  position: absolute; right: -8px; top: -8px; width: 21px; height: 21px; display: grid; place-items: center; border-radius: 50%;
-  background: var(--k); border: 2px solid var(--ink); box-shadow: 0 0 0 1.5px var(--canvas), 1px 2px 0 rgba(0, 0, 0, .5); transform: rotate(8deg);
-}
-.sk.k-attack { --k: var(--blood); }
-.sk.k-skill { --k: #3fe0ff; }
-.sk-k-ic { width: 15px; height: 15px; }
-/* 属性图标（icons.js · Icons.element）：底下一层粗白边、上面一层属性色（照 game.css 的 .eicon） */
-.eicon { width: .95em; height: .95em; overflow: visible; flex: none; }
-.eicon .o * { fill: none; stroke: var(--eo, #fff); stroke-width: 11; stroke-linejoin: round; stroke-linecap: round; }
-.eicon .o .thin { stroke-width: 8; }
-.eicon .o .solid { fill: var(--eo, #fff); }
-.eicon .c * { fill: none; stroke: currentColor; stroke-width: 5.2; stroke-linejoin: round; stroke-linecap: round; }
-.eicon .c .thin { stroke-width: 3.2; }
-.eicon .c .solid { fill: currentColor; stroke: none; }
-/* 贴纸风的小图标（头像的职责图标、技能的攻击 / 技能角标）：一层白边（.rim）+ 一层墨线（.ink），同 art/style-guide.html */
-.stk { display: block; overflow: visible; }
-.stk .rim * { fill: none; stroke: var(--canvas); stroke-width: 9; stroke-linejoin: round; stroke-linecap: round; }
-.stk .rim .thin { stroke-width: 7; }
-.stk .rim .bold { stroke-width: 10.5; }
-.stk .rim .solid { fill: var(--canvas); }
-.stk .ink * { fill: none; stroke: var(--ink); stroke-width: 4.2; stroke-linejoin: round; stroke-linecap: round; }
-.stk .ink .thin { stroke-width: 2.8; }
-.stk .ink .bold { stroke-width: 5.6; }
-.stk .ink .solid { fill: var(--ink); stroke-width: 1.5; }
-/* 主职责图标定稿（主人 10/22 定）用到的：碎片的白边细一点（碎片之间露出缝）、虚线影子、实心块上挖的洞 / 白缝 */
-.stk .rim .frag { stroke-width: 3.4; }
-.stk .ink .frag { stroke-width: .8; }
-.stk .rim .ghost { stroke-width: 5; }
-.stk .ink .ghost { stroke-width: 1.8; stroke-dasharray: 2.2 2.6; }
-.stk .rim .hole, .stk .rim .cut { stroke: none; fill: none; }
-.stk .ink .hole { fill: var(--canvas); stroke: none; }
-.stk .ink .cut { stroke: var(--canvas); stroke-width: 2.4; }
-/* 「唤出武器人」「结束回合」：同一种喷漆大按钮放在一起（照 skin.css 的 .summonbtn / .endturn）；唤出的颜色跟着这个人的主属性（--el） */
-#dock .hud-side { display: flex; gap: 10px; flex: none; align-items: stretch; padding: 4px 4px 4px 0; }
-.bigbtn {
-  position: relative; isolation: isolate; width: 118px; min-height: 54px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
-  padding: 6px 8px; background: transparent; border: 0; color: var(--ink); cursor: pointer; font: 900 15px/1.1 var(--ui-sans); text-align: center;
-}
-.bigbtn::before {
-  content: ""; position: absolute; inset: 0; z-index: -1; background: var(--el, var(--hazard)); filter: url(#spray);
-  clip-path: polygon(4% 3%, 35% 0, 68% 5%, 96% 1%, 100% 45%, 97% 98%, 55% 94%, 3% 100%, 0 55%);
-}
-.bigbtn[hidden] { display: none; }
-.bigbtn:hover { filter: brightness(1.1); }
-.bigbtn:active { transform: translate(1px, 2px); }
-.bigbtn:focus-visible { outline: 3px solid var(--canvas); outline-offset: 2px; }
-.bigbtn small { font-weight: 700; font-size: 11px; opacity: .75; }
-.bigbtn .sm-ic { width: 26px; height: 26px; display: block; }
-.sumbtn.back::before { clip-path: polygon(0 4%, 40% 0, 96% 3%, 100% 52%, 98% 100%, 45% 96%, 4% 99%, 1% 48%); }
-.endbtn { width: 132px; font-size: 19px; --el: var(--hazard); }
-.endbtn::before { clip-path: polygon(3% 6%, 30% 0, 70% 4%, 97% 0, 100% 40%, 96% 100%, 50% 95%, 4% 100%, 0 60%); }
-.hint { color: var(--muted); font-size: 12px; }
-
-/* ---------- 侧边：日志抽屉 / 队伍栏 ---------- */
-#logdrawer {
-  right: 0; top: calc(var(--topbar-h) + 10px); width: min(340px, 86vw); max-height: 56vh;
-  display: flex; flex-direction: column; transition: transform .25s ease; border-right: 0;
-}
-#logdrawer .head, #party .head { display: flex; align-items: center; gap: 8px; padding: 8px 10px; }
-#logdrawer .body { overflow-y: auto; padding: 0 12px 12px; font-size: 13px; line-height: 1.55; user-select: text; }
-#logdrawer .body p { margin: 0 0 6px; color: var(--canvas); }
-#logdrawer .body p.dim { color: var(--muted); }
-#logdrawer.collapsed { transform: translateX(calc(100% - 78px)); }
-#logdrawer.collapsed .body, #logdrawer.collapsed .head .tape { display: none; }
-#logdrawer.collapsed .head { padding: 8px; }
-#logdrawer.collapsed { max-height: none; width: min(340px, 86vw); background: transparent; border: 0; box-shadow: none; background-image: none; }
-
-#party { left: 0; top: calc(var(--topbar-h) + 10px); width: min(264px, 72vw); border-left: 0; }   /* 名字右边多了效果（#238），比以前宽一点 */
-#party .list { display: flex; flex-direction: column; gap: 6px; padding: 0 10px 10px; }
-#party.collapsed .list, #party.collapsed .head .tape { display: none; }
-#party.collapsed { background: transparent; border: 0; box-shadow: none; background-image: none; }
-.pm {
-  display: flex; align-items: center; gap: 8px; padding: 5px 8px 5px 6px; cursor: pointer;
-  background: rgba(0, 0, 0, .3); border-left: 5px solid var(--mint);
-}
-.pm.on { background: rgba(242, 194, 48, .16); outline: 2px solid var(--hazard); }
-.pm .face {
-  width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; flex: none;
-  font: 900 16px var(--ui-sans); color: var(--ink); background: var(--mint); border: 2px solid var(--ink);
-}
-.pm .nm { display: flex; align-items: center; gap: 5px; min-height: 18px; font-weight: 900; font-size: 14px; line-height: 1.1; text-shadow: 2px 2px 0 var(--ink); }
-.pm .nm-t { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.pm .bar { height: 7px; margin-top: 4px; background: #2a2520; border: 1px solid var(--ink); display: flex; }
-.pm .bar i { display: block; height: 100%; }
-.pm .meta { min-width: 0; flex: 1; }
-.pm .lv { flex: none; font: 11px var(--marker); color: var(--muted); }
-/* 头像（#238）：按主职责的贴纸图标（白边 + 墨线，同 art/style-guide.html），底色是主属性 → 副属性从左上到右下的渐变（行内的 background，hd2d-ui.js · avatarOf） */
-.pm .face.av {
-  width: 34px; height: 34px; border-radius: 8px; border: 2px solid var(--ink);
-  box-shadow: 0 0 0 2px var(--canvas), 2px 3px 0 2px rgba(0, 0, 0, .5); transform: rotate(-3deg);
-}
-.pm.on .face.av { box-shadow: 0 0 0 2px var(--hazard), 2px 3px 0 2px rgba(0, 0, 0, .5); }
-.av-ic { width: 26px; height: 26px; }   /* 白边 + 墨线的画法在下面的 .stk */
-/* 名字右边身上的效果（#238）：hud-icons.js 的徽章缩小一号；没有图标的写短标签；多了写 +n，悬停 / 键盘停上去展开全部 */
-.pm-fx { position: relative; display: inline-flex; flex-wrap: nowrap; align-items: center; gap: 3px; margin-left: auto; flex: none; outline: none; text-shadow: none; }
-.pm-fx:focus-visible { outline: 2px solid var(--canvas); outline-offset: 2px; }
-.pm-fx > .hi-badge .hi-svg { width: 17px; height: 17px; }
-.pm-fx .hi-badge .hi-stack { right: -4px; bottom: -4px; min-width: 11px; height: 11px; font-size: 8px; line-height: 9px; }
-.pm-fx .fx-t { font: 900 10px/1 var(--ui-sans); font-style: normal; padding: 2px 4px; color: var(--ink); background: var(--muted); border-radius: 2px; white-space: nowrap; }
-.pm-fx .fx-t.bad { background: var(--blood); color: var(--canvas); }
-.pm-fx .fx-t.warn { background: #ff9a3c; }
-.pm-fx .fx-more { font: 900 10px/1 var(--ui-sans); font-style: normal; padding: 2px 4px; color: var(--canvas); background: var(--edge); border-radius: 2px; }
-.pm-fx-all {
-  display: none; position: absolute; left: 0; top: calc(100% + 6px); z-index: 8; min-width: 120px; max-width: 220px; padding: 6px 8px;
-  background: rgba(17, 14, 11, .97); border: 2px solid var(--ink); border-radius: 3px; box-shadow: 3px 4px 0 rgba(0, 0, 0, .55);
-}
-.pm-fx:hover .pm-fx-all, .pm-fx:focus .pm-fx-all { display: grid; gap: 5px; }
-.pm-fx-all .fx-row { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
-.pm-fx-all .fx-row b { font: 900 12px/1.2 var(--ui-sans); color: var(--canvas); }
-.pm-fx-all .hi-badge .hi-svg { width: 18px; height: 18px; }
-
-#toast {
-  position: fixed; z-index: 20; left: 50%; top: calc(var(--topbar-h) + 14px); transform: translateX(-50%); max-width: 90vw;
-  padding: 8px 14px; background: var(--blood); color: var(--canvas); font-weight: 900; border: 3px solid var(--ink);
-  box-shadow: 4px 5px 0 rgba(0, 0, 0, .5); display: none; white-space: pre-wrap;
-}
-#toast.show { display: block; }
-#loading { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; background: #111; color: var(--muted); font-weight: 900; letter-spacing: .1em; }
-#loading.done { display: none; }
-
-/* ---------- 手机：面板默认收起，字号收一点 ---------- */
+/* 手机：铭牌的字小一号 */
 @media (max-width: 720px) {
-  :root { --topbar-h: 36px; }
-  #topbar { gap: 8px; padding: 0 8px; font-size: 12px; }
-  #topbar .brand, #topbar .sep.hide-sm, #topbar .info > .tape, #topbar .info > .map, #demo-select, #region-select, #scene-select { display: none; }
-  #topbar .info { flex: 1; min-width: 0; }
-  #topbar .compact { display: block; font-weight: 900; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  #demo-btn { display: block; flex: none; }
   .pl-card { font-size: 12px; line-height: 15px; padding: 2px 4px 3px; }   /* 宽高 --pw / --ph 用 CONFIG.plate 的手机尺寸 */
   .pl-name { height: 15px; }
   .pl-mid { height: 9px; }
@@ -455,23 +210,7 @@ body { position: fixed; inset: 0; user-select: none; }
   .pl-big { font-size: 14px; line-height: 16px; padding: 4px 6px 5px; }   /* 宽高 --bw / --bh 用 CONFIG.plate.big 的手机尺寸 */
   .pl-r1 { height: 16px; }
   .pl-r2 .pl-bar { height: 8px; }
-  #topbar .cam-l, #topbar .cam-z { display: none; }
-  .cam-b { width: 26px; height: 24px; font-size: 13px; }
-  .zone-nav { padding: 8px 9px; font-size: 12px; }
-  #dock { width: 100vw; padding: 8px 8px 10px; }
-  #dock .row { flex-wrap: wrap; row-gap: 6px; }
-  #dock .who { font-size: 14px; }
-  #dock .dbg-l { display: none; }
-  /* 手机：普通技能占满一行，两个大按钮在下面并排（同 game.css 窄屏的 .hud-side） */
-  #dock .hud-row { flex-wrap: wrap; gap: 8px; }
-  #skills { flex-basis: 100%; gap: 10px 12px; max-height: 120px; }
-  .sk { min-width: 0; padding: 6px 13px 5px 28px; }
-  .sk .nm { font-size: 14px; }
-  .sk .sk-el, .sk .sk-el .eicon { width: 17px; height: 17px; }
-  #dock .hud-side { width: 100%; padding: 0; }
-  .bigbtn { flex: 1; width: auto; min-height: 46px; }
 }
-@media (prefers-reduced-motion: reduce) { #dock, #logdrawer { transition: none; } }
 
 /* ---------- 伤害数字（#230）：纸片风——粗墨线描边 + 属性色，像一张贴纸拍上去（歪一点、往下错开一点的墨色投影）。
  * 位置、字号、颜色、时长都由 hd2d-fx.js 的 FX 算好写在行内变量里（--c 颜色、--ink 描边、--tilt 歪几度、--rise 往上飘、--life 总时长） */
@@ -509,6 +248,54 @@ body { position: fixed; inset: 0; user-select: none; }
   animation: hd2d-shadow var(--life) ease-out forwards;
 }
 @keyframes hd2d-shadow { 0% { opacity: 0; } 12% { opacity: var(--o); } 60% { opacity: var(--o); } 100% { opacity: 0; } }
-/* 页面上的演出开关：演出速度、跳过、推镜头 */
-#dock .fxc { padding: 4px 8px; font-size: 12px; }
-#dock .fxc[aria-pressed="false"] { opacity: .6; }
+
+/* ---------- 选目标 / 选区的标记（正式画面，#261；地台、间隔的亮框在 hd2d-scene.js 的 MARK）----------
+ * 和旧画面的单位卡一样：能点的目标描一圈危险黄、一明一暗（鼠标变准星），鼠标停着的那个更亮；别的铭牌变暗（旧画面 is-dim 的 0.45） */
+.hd2d-plate.target .pl-card, .hd2d-plate.target .pl-big { cursor: crosshair; border-color: var(--hazard); animation: pl-target 1.1s ease-in-out infinite; }
+.hd2d-plate.aim .pl-card, .hd2d-plate.aim .pl-big { animation: none; border-color: #fff4c2; box-shadow: inset 0 1px 0 var(--rim), 0 0 0 2px var(--ink), 0 0 0 4px var(--hazard), 0 0 18px 6px rgba(242, 194, 48, .75); }
+@keyframes pl-target {
+  0%, 100% { box-shadow: inset 0 1px 0 var(--rim), 0 0 0 1px var(--ink), 0 0 0 3px rgba(242, 194, 48, .55), 0 0 6px 1px rgba(242, 194, 48, .35); }
+  50% { box-shadow: inset 0 1px 0 var(--rim), 0 0 0 1px var(--ink), 0 0 0 3px rgba(242, 194, 48, .95), 0 0 14px 4px rgba(242, 194, 48, .6); }
+}
+.hd2d-plate.dimmed .pl-in { opacity: .45; filter: saturate(.6); }
+.hd2d-labels.still .hd2d-plate.target .pl-card, .hd2d-labels.still .hd2d-plate.target .pl-big { animation: none; }
+@media (prefers-reduced-motion: reduce) { .hd2d-plate.target .pl-card, .hd2d-plate.target .pl-big { animation: none; } }
+
+/* ---------- 正式战斗画面（game.html）里的新画面（#261）----------
+ * 战斗顶栏的「新画面」开关开着（#g-app 上的 .hd2d-on，hd2d/hd2d-field.js 加）：战场那一格（#g-field）里铺一层 3D 战场（.hd2d-field），
+ * 盖住旧的区和单位卡——旧的照旧排（规则、演出要它们的位置和 class），只是看不见、点不到；战场正上方那一摞（首领机制横幅 / 援军倒计时，.g-topstack）照旧露在上面。
+ * 关着时没有 .hd2d-on，也没有 .hd2d-field，下面这些一条都套不上 */
+.g-app.hd2d-on > .g-field { visibility: hidden; }
+.g-app.hd2d-on > .g-field > .hd2d-field, .g-app.hd2d-on > .g-field > .g-topstack { visibility: visible; }
+.hd2d-field { position: absolute; inset: 0; z-index: 5; overflow: hidden; background: #111; color: var(--canvas); font: 14px/1.4 var(--ui-sans); user-select: none; }
+/* 天气的 2D 层傍晚 / 夜晚借 weather-fx.css 的夜晚样子（hd2d-wfx.js 给这一层加 .g-app.is-night）：正式画面的 game.css / hotseat.css 给 .g-app 排了整页的网格、定了高度，
+ * 这一层不吃那些，还是铺满 3D 画面的一层 */
+.hd2d-field .hd2d-wfx.g-app { display: block; height: auto; padding: 0; overflow: hidden; grid-template: none; }
+/* 镜头按钮（远 / 中 / 近 + 看的那个区）：右下角，样子照原型顶栏的镜头按钮；中景 / 近景时两边的换区箭头（键盘左右键也行） */
+.hd2d-cam {
+  position: absolute; right: 10px; bottom: 10px; z-index: 3; display: flex; align-items: center; gap: 4px; padding: 4px 6px;
+  background: rgba(17, 14, 11, .82); border: 2px solid var(--ink); box-shadow: 2px 3px 0 rgba(0, 0, 0, .45);
+}
+.hd2d-cam-b {
+  cursor: pointer; width: 30px; height: 26px; padding: 0; font: 900 14px/1 var(--ui-sans); color: var(--canvas);
+  background: var(--oil-2); border: 2px solid var(--ink); box-shadow: 2px 2px 0 rgba(0, 0, 0, .5);
+}
+.hd2d-cam-b:hover { background: var(--steel-hi); }
+.hd2d-cam-b.on { background: var(--hazard); color: var(--ink); }
+.hd2d-cam-b:active { transform: translate(1px, 1px); }
+.hd2d-cam-b:focus-visible { outline: 2px solid var(--canvas); outline-offset: 1px; }
+.hd2d-cam-z { min-width: 4em; margin-left: 4px; font: 900 12px/1 var(--ui-sans); color: var(--canvas); white-space: nowrap; }
+.hd2d-zone-nav {
+  position: absolute; z-index: 3; top: 50%; transform: translateY(-50%); cursor: pointer; padding: 10px 12px;
+  font: 900 14px/1 var(--ui-sans); color: var(--canvas); white-space: nowrap;
+  background: rgba(17, 14, 11, .78); border: 2px solid var(--ink); box-shadow: 3px 4px 0 rgba(0, 0, 0, .45);
+}
+.hd2d-zone-nav.prev { left: 10px; border-left: 4px solid var(--hazard); }
+.hd2d-zone-nav.next { right: 10px; border-right: 4px solid var(--hazard); }
+.hd2d-zone-nav:hover { background: rgba(43, 39, 35, .92); }
+.hd2d-zone-nav[hidden] { display: none; }
+@media (max-width: 720px) {
+  .hd2d-cam-z { display: none; }
+  .hd2d-cam-b { width: 26px; height: 24px; font-size: 13px; }
+  .hd2d-zone-nav { padding: 8px 9px; font-size: 12px; }
+}
