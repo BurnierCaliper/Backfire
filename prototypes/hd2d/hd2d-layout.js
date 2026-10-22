@@ -5,12 +5,12 @@
  * 不碰 three.js，也不碰 DOM，所以 Node 里可以直接 require 来测（tests/hd2d-layout.test.js）。
  *
  *   const out = HD2DLayout.build(state, { portrait: false, view: { width, height, top, bottom } });
- *   out.zones   [{ id, cx, cz, w, d, h, topY, kind, effects, hole … }]
- *   out.gaps    [{ key, a, b, type, open, x, z, axis, length, width … }]
+ *   out.zones   [{ id, cx, cz, w, d, h, topY, kind, effects, hole, outline（不规则的外轮廓，局部坐标）… }]
+ *   out.gaps    [{ key, a, b, type, open, x, z, axis, length, width, y0 / y1（两头的地台多高）… }]
  *   out.units   [{ id, zone, x, y, z, flying, submerged, lift, rect, plate … }]
  *   out.bounds  { minX, maxX, minZ, maxZ, maxY }
  *   out.camera  { target, dist, pos, fov, elevation, aspect, width, height }   // 场景照这个摆默认镜头（= 远景；中景 / 近景在 hd2d-camera.js）
- *   out.region / out.ground / out.lamps   // 这场战斗在哪个区域（opts.region）、地面主题（GROUNDS 的键）、灯摆在哪（战场外缘，0–2 盏）
+ *   out.region / out.scene / out.ground / out.lamps   // 这场战斗在哪个区域（opts.region）、区域里的哪个场景（opts.scene）、地面主题（GROUNDS 的键）、灯摆在哪（战场外缘，0–2 盏）
  * state 用联机投影过的（online-view.js · projectState，和联机玩家拿到的一样）；房主的完整 state 也排得出来，结果一样。
  *
  * 坐标：x 向右，y 向上，z 朝镜头（镜头在 +z 一侧看过来）。我方站在 +z（前排），敌方站在 −z（后排）。
@@ -29,9 +29,27 @@
     zoneSize: 7.2,        // 每个区的地台边长（第二轮从 6.4 放大，给站位留空）
     zoneGap: 2.6,         // 区和区之间的缝（桥 / 墙 / 门 / 空隙摆在这条缝里）
     baseH: 0.8,           // 普通地台的厚度（顶面高度）；加厚了，侧面的砖 / 铁皮 / 岩层才看得出来
-    highH: 1.6,           // 高地 / 沙珊瑚台地的顶面高度
+    highRise: 1.5,        // 高地 / 沙珊瑚台地比普通地台高出多少（× baseH：顶面 0.8 × 2.5 = 2.0）。#237 主人试玩：以前只高 1 倍（顶面 1.6），看不出来
     pad: 0.8,             // 地台边缘留给装饰的一圈，单位不站进去
     holeRatio: 0.2,       // 深渊黑洞半径 = 地台边长 × 这个比例
+    /* 地台的外轮廓（#237：主人嫌每个区太方正）：不规则多边形——边上有缺口、凸起，四个角各削掉一块，贴着外沿有矮一截的台子（侧面高低错落），
+     * 脚下散着几块碎块。形状用种子固定（棋盘 + 区号 + 格子 + 区域），同一场战斗刷新不变。
+     * 只动外缘：往里最多缺 cut（< pad，站位区一点不碰；站位、铭牌和以前完全一样）；挨着别的区的那条边（桥 / 墙 / 门在那条缝里）
+     * 中间 mouth 那么宽保持平直、整条边都不往外凸，台子和碎块也不放那边，间隔接得上。
+     *   amount   整体的不规则程度（0 = 以前方方正正的；1 = 下面这些数照用；调这一个数就能整体加减）
+     *   seg      沿着边一段缺口 / 凸起大约多长（世界单位）；slope 两段之间斜着过渡多宽
+     *   cut / bump   往里最多缺多少、往外最多凸多少；notch 一段是缺口的概率，bumpP 不是缺口时往外凸的概率（其余不动）
+     *   chip     四个角各削掉多少（范围；最小值要大于 cut，角上两条边的缺口才不会交叉）
+     *   mouth    挨着别的区的那条边，中间保持平直的宽度（× 边长：桥的木板、护栏都落在平的地方）
+     *   stairs   高地的台阶那一段保持平直的半宽（× 边长）
+     *   ledges   矮一截的台子几块；ledgeW 沿边多长、ledgeOut 伸出去多少、ledgeH 高度（× 这块地台的厚度）
+     *   chunks   散落在脚下的碎块几块；chunk 大小、chunkOut 离地台边多远 */
+    outline: {
+      amount: 1, seg: 0.9, slope: 0.09, cut: 0.42, bump: 0.3, notch: 0.42, bumpP: 0.55, chip: [0.5, 0.9],
+      mouth: 0.62, stairs: 0.3,
+      ledges: 3, ledgeW: [0.9, 1.7], ledgeOut: [0.28, 0.55], ledgeH: [0.35, 0.72],
+      chunks: 5, chunk: [0.14, 0.34], chunkOut: [0.15, 0.75]
+    },
     unit: {
       d: 0.9,             // 站位格子的进深（世界单位）
       rowStep: 1.6,       // 前后两排的间距（地台放不下时压缩，最小 = d）
@@ -140,6 +158,19 @@
     "天网塔": "天网设施", outer_city: "外城区", desert: "沙漠", giant_city: "巨人城", skynet: "天网设施",
     mine_1: "第一采矿场", mine_2: "第二采矿场", mine_3: "第三采矿场"
   };
+  /** 区域下面的场景（#239：战斗状态的 state.scene / 投影的 pv.scene，id 见 world-data.js 的 BATTLE_SCENES）→ 地面主题（GROUNDS 的键）。
+   *  先留出接口：每个场景都先用所属区域现在的样子；各场景的美术做好以后，把这里换成它自己的 GROUNDS 键就行。
+   *  区域、场景 id 和正式的场景表一一对上，加场景两边一起加（tests/region-scene.test.js 核对） */
+  const SCENES = {
+    "外城区": { street: "outer" },
+    "沙漠": { dune: "desert", coral: "desert" },                     // 沙丘 / 沙珊瑚台地
+    "巨人城": { city: "giant" },
+    "天网设施": { facility: "skynet" },
+    "第一采矿场": { rim: "mine1", mid: "mine1", floor: "mine1" },     // 矿外 / 矿内 / 矿底
+    "第二采矿场": { rim: "mine2", mid: "mine2", floor: "mine2" },
+    "第三采矿场": { rim: "mine3", floor: "mine3" },                   // 没有矿内
+    "下水道": { tunnel: "sewer" }
+  };
 
   /** 状态徽章：statuses 里的键 → 铭牌上的字（敌我通用）。数值型的（灼烧层数）带上层数 */
   const STATUS_LABELS = {
@@ -190,10 +221,15 @@
     const s = x.trim();
     return own(REGIONS, s) ? s : own(REGION_ALIAS, s) ? REGION_ALIAS[s] : null;
   }
-  /** 区域 → 地面主题（GROUNDS 的键）；认不得的用兜底 GROUND_DEFAULT */
-  function groundOf(x) {
+  /** 这个区域有的场景 id 原样返回；别的（别的区域的、乱写的、没有区域）返回 null */
+  function sceneOf(x, scene) {
     const name = regionName(x);
-    return name ? REGIONS[name] : GROUND_DEFAULT;
+    return name && own(SCENES, name) && typeof scene === "string" && own(SCENES[name], scene) ? scene : null;
+  }
+  /** 区域（+ 场景）→ 地面主题（GROUNDS 的键）；场景认不得 / 不给 = 区域自己的；区域认不得的用兜底 GROUND_DEFAULT */
+  function groundOf(x, scene) {
+    const name = regionName(x), s = sceneOf(x, scene);
+    return name ? (s ? SCENES[name][s] : REGIONS[name]) : GROUND_DEFAULT;
   }
   /** 这场战斗放几盏灯、什么灯：看地面主题和光影主题（day / dusk / night），不超过 CONFIG.lamps.max */
   function lampPlan(ground, theme) {
@@ -214,7 +250,180 @@
     return spots.slice(0, plan.count).map((s, i) => ({ x: s.x, z: back - C.back, dir: s.dir, kind: plan.kind, color: plan.color, seed: i }));
   }
 
+  /* ---------- 地台的外轮廓（#237）---------- */
+  /** 字符串 → 32 位种子（FNV-1a） */
+  function hashOf(s) {
+    let h = 2166136261;
+    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+    return h >>> 0;
+  }
+  /** 小随机数（mulberry32，和 hd2d-world.js 的 rng 同一个算法）：同一个种子每次出一样的数 */
+  function randOf(seed) {
+    let a = (seed * 2654435761) >>> 0;
+    return function () {
+      a = (a + 0x6D2B79F5) >>> 0;
+      let t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  /** 四条边，绕一圈的顺序；每条边从哪个角出发（局部坐标，相对区中心）、沿哪个方向走、往外的法线 */
+  const SIDES = ["back", "right", "front", "left"];
+  function sideFrame(side, hw, hd) {
+    if (side === "back") return { o: { x: -hw, z: -hd }, d: { x: 1, z: 0 }, n: { x: 0, z: -1 }, len: 2 * hw };
+    if (side === "right") return { o: { x: hw, z: -hd }, d: { x: 0, z: 1 }, n: { x: 1, z: 0 }, len: 2 * hd };
+    if (side === "front") return { o: { x: hw, z: hd }, d: { x: -1, z: 0 }, n: { x: 0, z: 1 }, len: 2 * hw };
+    return { o: { x: -hw, z: hd }, d: { x: 0, z: -1 }, n: { x: -1, z: 0 }, len: 2 * hd };
+  }
+  const sideAt = (f, s, off) => ({ x: f.o.x + f.d.x * s + f.n.x * off, z: f.o.z + f.d.z * s + f.n.z * off });
+  /** 这个区哪几条边挨着别的区（棋盘是方格，挨着的区中心正好隔一个 pitch） */
+  function neighborSides(z, zones, pitch) {
+    const out = { back: false, right: false, front: false, left: false };
+    zones.forEach(q => {
+      if (q === z) return;
+      const dx = q.cx - z.cx, dz = q.cz - z.cz;
+      if (Math.abs(dz) < 1e-6 && Math.abs(Math.abs(dx) - pitch) < 1e-6) out[dx > 0 ? "right" : "left"] = true;
+      if (Math.abs(dx) < 1e-6 && Math.abs(Math.abs(dz) - pitch) < 1e-6) out[dz > 0 ? "front" : "back"] = true;
+    });
+    return out;
+  }
+  /**
+   * 一块地台的外轮廓（局部坐标 x / z，相对区中心）。sides = 哪几条边挨着别的区；seed = 种子。
+   * 返回 { pts 外轮廓（绕一圈的折点）, sides, stairs 高地的台阶在哪条边（没地方放 = null）, ledges [{ pts, h（× 地台厚度） }] 矮一截的台子,
+   *        chunks [{ x, z, size, rot }] 脚下的碎块, seed }。CONFIG.outline.amount = 0 时就是以前的正方形
+   */
+  function outlineOf(zone, sides, seed) {
+    const O = CONFIG.outline, k = Math.max(0, num(O.amount, 1)), r = randOf(seed);
+    const hw = zone.w / 2, hd = zone.d / 2;
+    const stairs = zone.highland ? ["front", "left", "right"].find(s => !sides[s]) || null : null;
+    const chips = SIDES.map(() => k * (O.chip[0] + r() * (O.chip[1] - O.chip[0])));
+    const pts = [], runsOf = {};
+    SIDES.forEach((side, i) => {
+      const f = sideFrame(side, hw, hd), mid = f.len / 2, end = f.len - chips[(i + 1) % 4];
+      const keep = [];   // 保持平直的几段（沿边的坐标）
+      if (sides[side]) keep.push([mid - O.mouth * f.len / 2, mid + O.mouth * f.len / 2]);
+      if (stairs === side) keep.push([mid - O.stairs * f.len, mid + O.stairs * f.len]);
+      const runs = [];
+      let s = chips[i];
+      while (s < end - 1e-6) {
+        const span = keep.find(([a, b]) => s >= a - 1e-6 && s < b - 1e-6);
+        if (span) { const s1 = Math.min(span[1], end); runs.push({ s0: s, s1, off: 0, flat: true }); s = s1; continue; }
+        const stop = Math.min(end, ...keep.filter(([a]) => a > s + 1e-6).map(([a]) => a));
+        let s1 = Math.min(s + O.seg * (0.6 + 0.8 * r()), stop);
+        if (stop - s1 < O.seg * 0.35) s1 = stop;                 // 不留太碎的一小段
+        const roll = r(), size = 0.35 + 0.65 * r();
+        let off = roll < O.notch ? -O.cut * size : r() < O.bumpP ? O.bump * size : 0;
+        if (sides[side] && off > 0) off = 0;                     // 挨着别的区：不往外凸（不伸进缝里）
+        runs.push({ s0: s, s1, off: off * k });
+        s = s1;
+      }
+      runs.forEach(run => {
+        const e = run.flat ? 0 : Math.min(O.slope * Math.min(1, k), (run.s1 - run.s0) / 4);
+        pts.push(sideAt(f, run.s0 + e, run.off), sideAt(f, run.s1 - e, run.off));
+      });
+      runsOf[side] = runs;
+    });
+    // 去掉挨得太近的重复点（同一段的两头、正方形时整条边上的点）
+    let clean = [];
+    pts.map(roundPt).forEach(p => { const q = clean[clean.length - 1]; if (!q || p.x !== q.x || p.z !== q.z) clean.push(p); });
+    if (clean.length > 1 && clean[0].x === clean[clean.length - 1].x && clean[0].z === clean[clean.length - 1].z) clean.pop();
+    // 再去掉落在一条直线中间的点（amount = 0 时就剩四个角，和以前的正方形一样）
+    for (let changed = true; changed && clean.length > 3;) {
+      changed = false;
+      clean = clean.filter((p, i, a) => {
+        const q = a[(i - 1 + a.length) % a.length], s = a[(i + 1) % a.length];
+        const straight = Math.abs((p.x - q.x) * (s.z - p.z) - (p.z - q.z) * (s.x - p.x)) < 1e-9 && (p.x - q.x) * (s.x - p.x) + (p.z - q.z) * (s.z - p.z) > 0;
+        if (straight && !changed) { changed = true; return false; }
+        return true;
+      });
+    }
+    // 这条边上 [a, b] 那一段的轮廓最往里 / 最往外到哪（台子、碎块贴着它摆）
+    const offRange = (side, a, b) => {
+      const rs = runsOf[side].filter(q => q.s1 > a && q.s0 < b);
+      return rs.length ? [Math.min(...rs.map(q => q.off)), Math.max(...rs.map(q => q.off))] : [0, 0];
+    };
+    const free = SIDES.filter(s => !sides[s] && s !== "back");   // 后面那条边镜头看不到，台子、碎块不往那边摆
+    const ledges = [], chunks = [];
+    if (k > 0 && free.length) {
+      for (let i = 0; i < O.ledges; i++) {
+        const side = free[Math.floor(r() * free.length)], f = sideFrame(side, hw, hd), j = SIDES.indexOf(side);
+        const w = O.ledgeW[0] + r() * (O.ledgeW[1] - O.ledgeW[0]);
+        const lo = chips[j] + 0.2, hi = f.len - chips[(j + 1) % 4] - 0.2 - w;
+        if (hi <= lo) continue;
+        let a = lo + r() * (hi - lo);
+        if (stairs === side) {   // 不挡台阶
+          const m = f.len / 2, sw = O.stairs * f.len + 0.3;
+          if (a + w > m - sw && a < m + sw) a = a < m ? Math.max(lo, m - sw - w) : Math.min(hi, m + sw);
+          if (a + w > m - sw && a < m + sw) continue;
+        }
+        const [inner, outer] = offRange(side, a, a + w), out = outer + k * (O.ledgeOut[0] + r() * (O.ledgeOut[1] - O.ledgeOut[0]));
+        const j0 = w * (0.1 + 0.2 * r()), j1 = w * (0.1 + 0.2 * r());
+        ledges.push({
+          side, h: round3(O.ledgeH[0] + r() * (O.ledgeH[1] - O.ledgeH[0])),
+          pts: [sideAt(f, a, inner - 0.05), sideAt(f, a + w, inner - 0.05), sideAt(f, a + w - j1, out), sideAt(f, a + j0, out)].map(roundPt)
+        });
+      }
+      for (let i = 0; i < O.chunks; i++) {
+        const side = free[Math.floor(r() * free.length)], f = sideFrame(side, hw, hd), j = SIDES.indexOf(side);
+        const s = chips[j] + r() * (f.len - chips[j] - chips[(j + 1) % 4]);
+        const size = O.chunk[0] + r() * (O.chunk[1] - O.chunk[0]);
+        if (stairs === side && Math.abs(s - f.len / 2) < O.stairs * f.len + 0.5) continue;   // 不落在台阶上
+        const out = Math.max(0, offRange(side, s - size, s + size)[1]) + size + O.chunkOut[0] + r() * (O.chunkOut[1] - O.chunkOut[0]);
+        const p = sideAt(f, s, out);
+        chunks.push({ x: round3(p.x), z: round3(p.z), size: round3(size), rot: round3(r() * Math.PI) });
+      }
+    }
+    return { pts: clean, sides: Object.assign({}, sides), stairs, ledges, chunks };
+  }
+  /** 轮廓的数都留三位小数就够（也不会凑出一长串数字：联机的测试按数字找有没有漏出坚毅生命） */
+  const round3 = (v) => Math.round(v * 1e3) / 1e3;
+  const roundPt = (p) => ({ x: round3(p.x), z: round3(p.z) });
+  /** 点（局部坐标）在不在轮廓里面（射线法） */
+  function insideOutline(pts, x, z) {
+    let inside = false;
+    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+      const a = pts[i], b = pts[j];
+      if ((a.z > z) !== (b.z > z) && x < (b.x - a.x) * (z - a.z) / (b.z - a.z) + a.x) inside = !inside;
+    }
+    return inside;
+  }
+  /** 点离轮廓的边有多远：在里面是正的，在外面是负的 */
+  function outlineDist(pts, x, z) {
+    let d = Infinity;
+    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+      const a = pts[j], b = pts[i], ex = b.x - a.x, ez = b.z - a.z, l2 = ex * ex + ez * ez || 1e-12;
+      const t = clamp(((x - a.x) * ex + (z - a.z) * ez) / l2, 0, 1);
+      d = Math.min(d, Math.hypot(x - a.x - ex * t, z - a.z - ez * t));
+    }
+    return insideOutline(pts, x, z) ? d : -d;
+  }
+  /** 轮廓往里（d > 0）/ 往外（d < 0）挪 d：每个折点沿两条边的法线的角平分线挪（尖角处夹一下，不会挪得太远）。
+   *  选中的区那圈细框、地台上沿的亮边（往里）、底座 / 高地的岩层底座（往外）都用它 */
+  function offsetOutline(pts, d) {
+    const n = pts.length;
+    let area = 0;
+    for (let i = 0; i < n; i++) { const a = pts[i], b = pts[(i + 1) % n]; area += a.x * b.z - b.x * a.z; }
+    const s = area > 0 ? 1 : -1;   // 往里的法线朝哪边转
+    const nrm = (a, b) => { const ex = b.x - a.x, ez = b.z - a.z, l = Math.hypot(ex, ez) || 1; return { x: -s * ez / l, z: s * ex / l }; };
+    return pts.map((p, i) => {
+      const n1 = nrm(pts[(i - 1 + n) % n], p), n2 = nrm(p, pts[(i + 1) % n]);
+      let mx = n1.x + n2.x, mz = n1.z + n2.z;
+      const ml = Math.hypot(mx, mz);
+      if (ml < 1e-6) { mx = n1.x; mz = n1.z; } else { mx /= ml; mz /= ml; }
+      const k = d / Math.max(0.35, mx * n1.x + mz * n1.z);
+      return { x: p.x + mx * k, z: p.z + mz * k };
+    });
+  }
+
   /* ---------- 铭牌数据 ---------- */
+  /** 行动点 / 附赠动作（#238）：投影里的 ap / apMax / bonus / bonusMax（online-view.js · projectUnit 的白名单本来就有）。
+   *  配置物、装置、间隔、中立生物的卡片上本来就不画（game.css · .unit.prop / .unit.mini 的 .u-econ），这里给 null */
+  function econOf(u) {
+    if (u.isProp || u.isDevice || u.isGap || u.neutral) return null;
+    const pair = (cur, max) => ({ cur: Math.max(0, num(cur, 0)), max: Math.max(0, num(max, 0)) });
+    return { ap: pair(u.ap, u.apMax), bonus: pair(u.bonus, u.bonusMax) };
+  }
   /** 铭牌上要写的内容。只读白名单里的字段——坚毅生命（shp）不在其中。
    *  原型页交进来的是联机投影过的状态（online-view.js · projectState），和联机玩家拿到的一样；
    *  ATK 用主机算好的实际 ATK（投影里的 display.atk，联机单位卡也是这个数：online-battle.js · snapUnit），没有就用 atk */
@@ -235,14 +444,16 @@
     if (u.stunned) flags.push({ key: "stunned", label: "失衡" });
     if (u.dying) flags.push({ key: "dying", label: "濒死" });
     const shownAtk = u.display && typeof u.display.atk === "number" && Number.isFinite(u.display.atk) ? u.display.atk : num(u.atk, 0);
+    const econ = econOf(u);
     const plate = {
       id: u.id, name: String(u.name || "?"), level: num(u.level, 1), atk: shownAtk,
       side: u.isPlayer ? "player" : "foe",
       hp: { cur, max }, layers,
       def: { cur: Math.min(def, shown), max: shown, big: Math.max(defMax, def) > CONFIG.maxDefPips },
-      statuses, flags
+      econ, statuses, flags
     };
     plate.text = [plate.name, "Lv" + plate.level, "ATK " + plate.atk, cur + "/" + max]
+      .concat(econ ? ["行动点 " + econ.ap.cur + "/" + econ.ap.max, "附赠 " + econ.bonus.cur + "/" + econ.bonus.max] : [])
       .concat(statuses.map(s => s.label), flags.map(f => f.label));
     return plate;
   }
@@ -437,6 +648,7 @@
    *   opts.portrait  竖屏（手机）：整块棋盘转 90°，直排沿进深（前后）排开，我方在最前面
    *   opts.view      { width, height, top, bottom }：画面大小和上下被界面盖住的像素（场景传真实的；不给按桌面 / 手机的默认值）
    *   opts.region    这场战斗在哪个区域（游戏里的区域名或地图地点 id）：没有场地效果的地台按它换地面（zone.ground），灯按它摆；认不得 / 不给 = 以前的样子
+   *   opts.scene     区域里的哪个场景（投影里的 pv.scene，SCENES 的 id）：地面主题按「区域 + 场景」挑（现在每个场景都还是所属区域的样子）；认不得 / 不给 = 区域的
    *   opts.theme     光影主题 day / dusk / night（灯的盏数看白天还是夜晚；不给按白天）
    */
   function build(state, opts) {
@@ -446,12 +658,12 @@
     const S = CONFIG.zoneSize, pitch = S + CONFIG.zoneGap;
     const xs = board.zones.map(z => z.x), ys = board.zones.map(z => z.y);
     const midX = (Math.min(...xs) + Math.max(...xs)) / 2, midY = (Math.min(...ys) + Math.max(...ys)) / 2;
-    const region = regionName(opts.region), ground = groundOf(opts.region);
+    const region = regionName(opts.region), scene = sceneOf(opts.region, opts.scene), ground = groundOf(opts.region, opts.scene);
 
     const zones = board.zones.map(bz => {
       const fk = fieldKinds((state.fields || {})[bz.id]);
       const high = fk.effects.includes("highland") || fk.effects.includes("coral");
-      const h = high ? CONFIG.highH : CONFIG.baseH;
+      const h = high ? CONFIG.baseH * (1 + CONFIG.highRise) : CONFIG.baseH;
       const cx = portrait ? (bz.y - midY) * pitch : (bz.x - midX) * pitch;
       const cz = portrait ? (midX - bz.x) * pitch : (bz.y - midY) * pitch;
       return {
@@ -464,6 +676,9 @@
     });
     const zoneById = {};
     zones.forEach(z => { zoneById[z.id] = z; });
+    // 外轮廓（#237）：种子 = 棋盘 + 区号 + 格子 + 区域，同一场战斗刷新不变。只看哪几条边挨着别的区，
+    // 不看那条缝里现在是桥还是墙（打坏了、门开了，地台的形状也不变）
+    zones.forEach(z => { z.outline = outlineOf(z, neighborSides(z, zones, pitch), hashOf([board.id, z.id, z.gx, z.gy, region || ""].join("|"))); });
 
     // 区之间的间隔：每条连接一个
     const gaps = board.links.map(([a, b]) => {
@@ -472,12 +687,15 @@
       if (!za || !zb) return null;
       const dx = zb.cx - za.cx, dz = zb.cz - za.cz;
       const axis = Math.abs(dx) >= Math.abs(dz) ? "x" : "z";
+      // 间隔的局部坐标（hd2d-world.js · buildGap）：长度沿局部 x，横的（axis x）从左往右，竖的（axis z）从前往后。y0 / y1 = 两头的地台顶面多高
+      const first = axis === "x" ? (za.cx <= zb.cx ? za : zb) : (za.cz >= zb.cz ? za : zb), second = first === za ? zb : za;
       return {
         key: gapKeyOf(a, b), a, b, type: g.type || "open", open: g.open !== false,
         hp: num(g.hp, 0), maxHp: num(g.maxHp, 0),
         x: (za.cx + zb.cx) / 2, z: (za.cz + zb.cz) / 2, axis,
         length: Math.max(0.1, (axis === "x" ? Math.abs(dx) : Math.abs(dz)) - S),
-        width: S, topY: Math.min(za.topY, zb.topY)
+        width: S, topY: Math.min(za.topY, zb.topY),
+        y0: first.topY, y1: second.topY      // 高地和普通区之间：桥斜着搭上去（#237）
       };
     }).filter(Boolean);
 
@@ -523,11 +741,13 @@
     });
     liftRows(units, camera, size);
     const lamps = lampSpots(zones, lampPlan(ground, opts.theme || "day"));
-    return { portrait, boardId: board.id, zones, gaps, units, bounds: b, camera, view, plateSize: size, region, ground, lamps };
+    return { portrait, boardId: board.id, zones, gaps, units, bounds: b, camera, view, plateSize: size, region, scene, ground, lamps };
   }
 
   return {
+    SCENES, sceneOf,   // 区域下面的场景（#239）
     CONFIG, KIND_ORDER, STATUS_LABELS, GROUNDS, GROUND_DEFAULT, REGIONS, REGION_ALIAS, build, boardOf, fieldKinds, plateData, arrangeUnits, gapKeyOf,
-    fitView, camAt, toNdc, project, plateScale, plateRect, plateSize, liftPlates, frameTop, regionName, groundOf, lampPlan
+    fitView, camAt, toNdc, project, plateScale, plateRect, plateSize, liftPlates, frameTop, regionName, groundOf, lampPlan,
+    outlineOf, neighborSides, insideOutline, outlineDist, offsetOutline, hashOf
   };
 });

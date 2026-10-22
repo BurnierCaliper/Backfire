@@ -1,9 +1,9 @@
 /* Antlerscale: Backfire · HD-2D 战场原型 · 远景
  *
- * 镜头俯角 30°、视角只有 22°，画面最上沿也是往下看的——真正的天空根本进不了画面。所以在战场后面立一圈「天幕」
- * （像舞台的天幕布，绕到两侧），按镜头真正看得到的那一截画天空渐变；天幕前面两层剪影：
- *   1. 天边一圈画出来的远景（canvas 画在一条弧形带子上）：远处的厂区（后面一道矿坑的台阶状坑壁）/ 桌山 / 城市
- *   2. 中景几何体：大小按「画面上沿那条视线在那里有多高」来定，整个轮廓都在画面里，不会只露半截
+ * 镜头俯角 30°、视角只有 22°，画面最上沿也是往下看的——真正的天空根本进不了画面。所以在战场后面立一块「天幕」
+ * （像舞台的天幕布，平的，往左右伸得够宽；#237 以前绕到两侧围成半个椭圆筒，地平线弯下去像小星球），按镜头真正看得到的那一截画天空渐变；天幕前面两层剪影：
+ *   1. 天边画出来的远景（canvas 画在一条平的带子上）：远处的厂区（后面一道矿坑的台阶状坑壁）/ 桌山 / 城市
+ *   2. 中景几何体：一层层平的布景板，排在战场后沿后面（不绕到两侧）；大小按「画面上沿那条视线在那里有多高」来定，整个轮廓都在画面里，不会只露半截
  *        采矿场 mine：两侧台阶状的岩壁（露天矿坑的坑壁）、矿井架（A 字架 + 天轮）、烟囱（冒烟、顶上红灯一闪一闪）、传送带通到料仓、筒仓、矿渣堆
  *        沙漠 desert：沙丘、风蚀岩柱、带岩层的桌山、半埋在沙里的船骨；天网设施 skynet：同样的沙漠，加一座孤零零的天网塔
  *        城市 city（以前叫 night，还认）：楼群（夜里亮着窗、傍晚亮一些、白天窗是暗的；skyline = 楼的高度倍数）、水塔、天线（红灯）
@@ -12,9 +12,10 @@
  *      区域认不得时场景照旧按光影主题挑。夜晚天幕上有星星
  * 剪影越远越接近天边的雾色（空气透视），景深再稍微糊一点（远处的糊上限在场景的 THEMES.dofFar）。
  * 雷鸣（storm）时天幕换成压暗的风暴色、画上慢慢翻滚的厚云（星星被盖住），中景上方再挂一层半透明的低云；
- * 打雷时云从里面亮起来，离雷近的那一片更亮。远处的雷劈在哪由这里给（farPoint：低云前面；天幕、低云都是弧，两边离得近，要按弧算）。
+ * 打雷时云从里面亮起来，离雷近的那一片更亮。远处的雷劈在哪由这里给（farPoint：低云前面、画面里；天幕、低云都是平的）。
+ * 沙暴（dust，#240）时整片远景蒙上一层沙色：天幕往沙尘的颜色靠、贴地融进雾里的那一截更高，中景剪影也更偏雾色，星星和亮云看不见，太阳的光晕淡一点。
  *
- *   const bd = buildBackdrop("mine", bounds, "dusk", layout.camera, { sky: [...4 色], fog: 0xRRGGBB, storm, skyline });
+ *   const bd = buildBackdrop("mine", bounds, "dusk", layout.camera, { sky: [...4 色], fog: 0xRRGGBB, storm, skyline, dust });
  *   scene.add(bd.group); 每帧 bd.update(t, dt, { flash, x })（flash / x = 雷击的闪光和位置）；bd.farPoint(r)；bd.dispose();
  * 剪影和天幕不吃场景雾（雾会把它们全抹成一个色），颜色自己按远近调。 */
 import * as THREE from "three";
@@ -24,16 +25,23 @@ import { rng } from "./hd2d-world.js";
 const L = window.HD2DLayout;
 
 /* ---------- 配置 ---------- */
+/* #237 主人试玩：「背景基本上是一个球面，曲度太大，显得星球很小；想要聚焦于单个场景的感觉」。
+ * 以前天幕、天边那圈画的远景、雷鸣的低云都是绕着战场的半个椭圆筒（左右各绕 0.6π），中景剪影也绕到两侧围成一圈，地台外面是一块大圆盘：
+ * 地平线在画面两边弯下去，像站在小星球上。现在全是平的——像舞台：一块平的地面，后面一层层平的布景板（剪影分几层排在战场后面，不绕到两侧），
+ * 最后面一块平的天幕；地平线是一条直线，远处靠雾和景深收住。 */
 const BACKDROP = {
   skyGap: 11,         // 天幕离战场后沿多远（世界单位）
-  sideGap: 12,        // 天幕离战场左右两边多远
-  skyArc: 0.6,        // 天幕从正后方往左右各绕多少（× π）
+  wide: 48,           // 天幕、天边的远景往战场左右两边各伸出去多宽（平的，镜头左右转到头也看不到边）
   skyH: 70,           // 天幕高度（镜头往上转也够）
   stops: [0, 0.3, 0.66, 1.08],   // 天空四个颜色在「默认镜头看得到的那截天幕」里的位置（0 = 地平线，1 = 画面上沿）
-  bandH: 0.52,        // 天边画出来的那圈远景，高度占看得到的天幕的比例
-  mid: { near: 2.6, far: 9.2, fill: 0.84, side: 9, sideMaxH: 6 },   // 中景剪影：离战场后沿 near–far；最高 = 画面上沿视线高度 × fill（两侧的再不超过 sideMaxH）；两侧最多离战场边 side
+  haze: 0.16,         // 天幕贴地的那一截融进雾里有多高（× 看得到的天幕高度）：地面和天幕接成一片，远处收住
+  bandH: 0.52,        // 天边画出来的那条远景，高度占看得到的天幕的比例
+  /* 中景剪影：一层层平的布景板，都在战场后沿后面 near–far 之间，分 layers 那几层（离后沿的比例）；最高 = 画面上沿视线高度 × fill；
+   * 横着铺得比战场宽 side（两边的叫「侧幕」，不超过 sideMaxH），不再绕到战场左右两侧 */
+  mid: { near: 2.6, far: 9.2, fill: 0.84, side: 9, sideMaxH: 6, layers: [0.1, 0.45, 0.85] },
+  ground: { size: 320 },   // 地台外面那一大片地：一块平的方地（以前是圆盘）
   count: { mine: 14, desert: 12, city: 22, wasteland: 12 },
-  cliff: { benches: 4, width: 9, fill: 0.85 },        // 采矿场两侧的岩壁：几级台阶、多宽、多高（× 两侧剪影的高度上限）
+  cliff: { benches: 4, width: 9, fill: 0.85, turn: 0.15 },   // 采矿场左右后方的岩壁：几级台阶、多宽、多高（× 侧幕的高度上限）、往战场这边偏多少弧度（#237 以前 0.75，围成一个碗）
   skynet: { u: -0.12, depth: 0.5, h: 0.86, glow: 0x4fd8ff },   // 天网塔：横向位置（−1…1）、远近（0–1）、多高（× 高度上限）、顶上灯带的颜色
   windows: { night: 0.38, dusk: 0.2, day: 0.15 },     // 楼群的窗：夜里 / 傍晚有几成亮着；白天有几成反着天光
   smoke: { puffs: 7, rise: 0.55, life: 5.5 },        // 烟囱的烟：每根几团、往上飘多快、一团飘多久
@@ -59,8 +67,8 @@ const BACKDROP = {
     cover: 0.7,               // 天幕上的云盖得多满（0–1；0.5 大约盖住六成天，0.7 大约八成）
     speed: [0.003, 0.006],    // 天幕上远 / 近两层云往右飘的速度（每秒走过多少圈弧：很慢）
     scale: [26, 47],          // 天幕上远 / 近两层云的疏密（沿弧一圈有几团）
-    low: { inset: 5.5, arc: 0.42, base: 0.25, opacity: 0.6, speed: 0.011, scale: 30 },   // 中景上方的低云：离天幕多远、左右绕多宽（× π）、下沿在画面上沿视线的几成高、多不透明、飘多快、多密
-    strike: { arc: 0.5, inset: 6 }   // 远处的雷劈在哪：左右最多偏多少（弧度）、离天幕多远（比低云近一点：劈在低云前面、中景的楼 / 山之间，整道看得见）
+    low: { inset: 5.5, span: 26, base: 0.25, opacity: 0.6, speed: 0.011, scale: 30 },   // 中景上方的低云（平的一条）：离天幕多远、往战场左右各伸出去多宽、下沿在画面上沿视线的几成高、多不透明、飘多快、多密
+    strike: { spread: 0.7, inset: 6 }   // 远处的雷劈在哪：往左右最多偏战场半宽的几成（在画面里）、离天幕多远（比低云近一点：劈在低云前面、中景的楼 / 山之间，整道看得见）
   }
 };
 const D2R = Math.PI / 180;
@@ -82,6 +90,14 @@ export function skyTexture(stops, stars) {
     }
   }
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+
+/** 沙暴（#240）：天幕的四个颜色往沙尘的颜色（dust.color，就是这时的雾色）靠 dust.sky（0–1）。
+ *  场景的屏幕背景（转到天幕外面时露出来的那块）也用它；没有沙尘原样返回 */
+export function dustSky(sky, dust) {
+  if (!dust || !(dust.sky > 0)) return sky;
+  const d = new THREE.Color(dust.color);
+  return sky.map(c => "#" + new THREE.Color(c).lerp(d, Math.min(1, dust.sky)).getHexString());
 }
 
 /** 废土地面：干裂的地、车辙、碎石 */
@@ -113,11 +129,12 @@ function groundTexture() {
   return t;
 }
 
-/** 废土地面：地台下面一大片暗地，像把地台摆在场景里（远处藏在天幕后面）。颜色由场景按光影主题 / 区域的地面主题设 */
+/** 废土地面：地台下面一大片暗地，像把地台摆在舞台上（远处藏在天幕后面、进雾里）。一块平的方地（#237：以前是圆盘，边是一圈弧）。
+ *  颜色由场景按光影主题 / 区域的地面主题设 */
 export function buildGround() {
-  const tex = groundTexture();
+  const tex = groundTexture(), S = BACKDROP.ground.size;
   const m = new THREE.Mesh(
-    new THREE.CircleGeometry(150, 56),
+    new THREE.PlaneGeometry(S, S, 1, 1),
     new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 1, map: tex, flatShading: true })
   );
   m.rotation.x = -Math.PI / 2; m.position.y = L.CONFIG.groundY; m.receiveShadow = true;
@@ -131,12 +148,14 @@ const NOISE_GLSL = `float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.
         return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y); }
       float fbm(vec2 p){ float v = 0.0, a = 0.5; for (int i = 0; i < 5; i++){ v += a * noise(p); p = p * 2.03 + vec2(17.1, 9.3); a *= 0.5; } return v; }`;
 
-/** 天幕的形状：绕着战场中心的半个椭圆筒（开口朝镜头），u 沿着弧，v 沿着高。y0 / y1 可以是数，也可以按进深 z 给（低云的上下沿跟着画面上沿视线走） */
-function arcGeometry(cx, cz, rx, rz, arc, y0, y1, seg) {
+/** 天幕的形状：立在战场后面（进深 z）的一块平的布景板，从 x0 横到 x1；u 沿着横向，v 沿着高。
+ *  y0 / y1 可以是数，也可以按进深 z 给（低云的上下沿跟着画面上沿视线走）。#237 以前是绕着战场的半个椭圆筒，地平线弯下去 */
+function flatGeometry(x0, x1, z, y0, y1, seg) {
   const pos = [], uv = [], idx = [];
+  const lo = typeof y0 === "function" ? y0(z) : y0, hi = typeof y1 === "function" ? y1(z) : y1;
   for (let i = 0; i <= seg; i++) {
-    const th = -arc + (2 * arc * i) / seg, x = cx + Math.sin(th) * rx, z = cz - Math.cos(th) * rz;
-    pos.push(x, typeof y0 === "function" ? y0(z) : y0, z, x, typeof y1 === "function" ? y1(z) : y1, z); uv.push(i / seg, 0, i / seg, 1);
+    const x = x0 + ((x1 - x0) * i) / seg;
+    pos.push(x, lo, z, x, hi, z); uv.push(i / seg, 0, i / seg, 1);
     if (i < seg) { const a = i * 2; idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); }
   }
   const g = new THREE.BufferGeometry();
@@ -157,7 +176,7 @@ function skyMaterial(colors, opts) {
       c2: { value: new THREE.Color(colors[2]) }, c3: { value: new THREE.Color(colors[3]) },
       stops: { value: new THREE.Vector4(...BACKDROP.stops) },
       camY: { value: opts.camY }, camZ: { value: opts.camZ }, slope: { value: opts.slope }, base: { value: -0.35 },
-      haze: { value: new THREE.Color(opts.fog) },
+      haze: { value: new THREE.Color(opts.fog) }, hazeH: { value: opts.haze > 0 ? opts.haze : BACKDROP.haze },
       sun: { value: new THREE.Vector3(opts.sun[0], opts.sun[1], opts.sun[2]) }, sunColor: { value: new THREE.Color(opts.sunColor) },
       stars: { value: opts.stars ? 1 : 0 }, clouds: { value: opts.clouds || 0 }, cloudColor: { value: new THREE.Color(opts.cloudColor || 0xffffff) },
       storm: { value: opts.storm ? 1 : 0 }, time: { value: 0 }, cover: { value: ST.cover },
@@ -168,7 +187,7 @@ function skyMaterial(colors, opts) {
     vertexShader: `varying vec3 vW; varying vec2 vUv;
       void main(){ vUv = uv; vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`,
     fragmentShader: `uniform vec3 c0; uniform vec3 c1; uniform vec3 c2; uniform vec3 c3; uniform vec4 stops;
-      uniform float camY; uniform float camZ; uniform float slope; uniform float base; uniform vec3 haze;
+      uniform float camY; uniform float camZ; uniform float slope; uniform float base; uniform vec3 haze; uniform float hazeH;
       uniform vec3 sun; uniform vec3 sunColor; uniform float stars; uniform float clouds; uniform vec3 cloudColor;
       uniform float storm; uniform float time; uniform float cover; uniform vec2 speed; uniform vec2 scale;
       uniform vec3 cloudDark; uniform vec3 cloudLit; uniform vec3 flashColor; uniform float flash; uniform float flashU;
@@ -207,8 +226,8 @@ function skyMaterial(colors, opts) {
           float fu = (vUv.x - flashU) * 7.0, glow = exp(-fu * fu);
           col += flashColor * flash * (0.12 + 0.88 * dens) * (0.25 + 0.75 * glow);
         }
-        // 贴地的一截融进雾里（和远处的地面接上）
-        col = mix(haze, col, smoothstep(-0.02, 0.1, s));
+        // 贴地的一截融进雾里（和远处的地面接上，远处收住）
+        col = mix(haze, col, smoothstep(-0.02, hazeH, s));
         gl_FragColor = vec4(col, 1.0);
       }`
   });
@@ -496,11 +515,17 @@ function smokeTexture() {
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
 }
 
+/** 区域场景的美术（#242，hd2d-scene-art.js 登记的美术包）：天边的远景、中景、矿坑由美术包画；three.js 和这里的小工具打包成 KIT 交过去。没加载就当没有 */
+const ART = window.HD2DSceneArt || { band: () => null, backdrop: () => null };
+const KIT = { THREE, BACKDROP, NOISE_GLSL, rng, flatGeometry, smokeTexture, bandTexture, put, box, cyl, headframe, chimney, conveyor, silos, heap, shed, cliff, dune, pillar, mesa, wreck };
+
 /**
  * 建一圈远景。kind = city / mine / desert / skynet / wasteland（night 是 city 的旧名字）；bounds 是战场范围；
  * camera 是布局算好的默认镜头（hd2d-layout.js 的 fitView），用来算「画面上沿那条视线」有多高；
- * colors = { sky: [地平线 → 天顶 4 个颜色], fog, storm, skyline }（storm = 雷鸣：天空换成 BACKDROP.storm 的风暴色、加乌云和低云；
- * skyline = 楼群的高度倍数，外城区矮、巨人城高）。返回 { group, update(t, dt, { flash, x }), farPoint(r), dispose }。
+ * colors = { sky: [地平线 → 天顶 4 个颜色], fog, storm, skyline, dust }（storm = 雷鸣：天空换成 BACKDROP.storm 的风暴色、加乌云和低云；
+ * skyline = 楼群的高度倍数，外城区矮、巨人城高；dust = 沙暴的沙尘 { color, sky, haze, veil, sun }：天幕往 color 靠 sky、贴地融进雾里的那一截高 haze、
+ * 中景剪影至少往雾色靠 veil、太阳的光晕剩 sun 成，见 hd2d-weather.js 的 WEATHER.sand；weather = 规则上的天气，原样交给区域场景的美术包，#241）。
+ * 返回 { group, update(t, dt, { flash, x }), farPoint(r), dispose }。
  */
 export function buildBackdrop(kind, bounds, themeName, camera, colors) {
   colors = colors || {};
@@ -520,50 +545,51 @@ export function buildBackdrop(kind, bounds, themeName, camera, colors) {
   const slope = Math.tan((cam.elevation - cam.fov / 2) * D2R);   // 天空的着色器里用同一条视线
   /** 默认镜头的画面上沿那条视线，在 z 处离地多高（这么高以内的东西整个都在画面里） */
   const topY = (z) => L.frameTop(cam, z);
-  const sky = storm ? (ST.sky[themeName] || ST.sky.day) : (colors.sky || ["#e8d8b8", "#d8c8a8", "#b8b0a0", "#8a8a90"]);
+  const dust = !storm && colors.dust ? colors.dust : null;   // 沙暴：远景蒙上一层沙色（雷鸣的风暴天空优先）
+  const sky = storm ? (ST.sky[themeName] || ST.sky.day) : dustSky(colors.sky || ["#e8d8b8", "#d8c8a8", "#b8b0a0", "#8a8a90"], dust);
   const fog = new THREE.Color(colors.fog != null ? colors.fog : 0x888888);
   const hazeOf = (k) => new THREE.Color(sky[0]).lerp(fog, 0.5).lerp(new THREE.Color(T.body), 1 - k);   // k 越大越靠近天边的雾色
 
-  /* 1. 天幕（雷鸣时：风暴色 + 乌云，星星和亮云不画，夕阳只透出一点） */
-  const rz = hz + BACKDROP.skyGap, rx = hx + BACKDROP.sideGap, arc = BACKDROP.skyArc * Math.PI;
+  /* 1. 天幕（雷鸣时：风暴色 + 乌云，星星和亮云不画，夕阳只透出一点；沙暴时：沙色、贴地的雾更高，星星和亮云也看不见）：
+   *    一块平的布景板，立在战场后沿再往后 skyGap（区域场景的美术包可以挪远：矿坑在天幕前面，#242），往左右各伸出去 wide */
+  const rz = hz + ((ART.skyGap && ART.skyGap(kind, bounds, cam)) || BACKDROP.skyGap), skyZ = cz - rz, x0 = cx - hx - BACKDROP.wide, x1 = cx + hx + BACKDROP.wide;
   const skyM = keep(skyMaterial(sky, {
-    camY: cam.pos.y, camZ: cam.pos.z, slope, fog,
+    camY: cam.pos.y, camZ: cam.pos.z, slope, fog, haze: dust ? dust.haze : 0,
     sun: dusk ? [0.3, 0.12, 0.09] : night ? [0.22, 0.9, 0.05] : [0.28, 0.75, 0.16],
-    sunColor: new THREE.Color(dusk ? 0xff9a50 : night ? 0x30405a : 0x6a5530).multiplyScalar(storm ? 0.35 : 1), stars: night && !storm,
-    clouds: storm ? 0 : dusk ? 0.55 : themeName === "day" ? 0.25 : 0, cloudColor: dusk ? 0xffb090 : 0xf4e2bc,
+    sunColor: new THREE.Color(dusk ? 0xff9a50 : night ? 0x30405a : 0x6a5530).multiplyScalar(storm ? 0.35 : dust && dust.sun != null ? dust.sun : 1), stars: night && !storm && !dust,
+    clouds: storm || dust ? 0 : dusk ? 0.55 : themeName === "day" ? 0.25 : 0, cloudColor: dusk ? 0xffb090 : 0xf4e2bc,
     storm, cloudDark: cloud[0], cloudLit: cloud[1]
   }));
-  const skyMesh = new THREE.Mesh(keep(arcGeometry(cx, cz, rx, rz, arc, -0.6, BACKDROP.skyH, 72)), skyM);
-  skyMesh.renderOrder = -1;
+  const skyMesh = new THREE.Mesh(keep(flatGeometry(x0, x1, skyZ, -0.6, BACKDROP.skyH, 72)), skyM);
+  skyMesh.renderOrder = -1; skyMesh.userData.layer = "sky";
   group.add(skyMesh);
-  /* 1b. 雷鸣：中景上方再挂一层半透明的低云（离天幕 low.inset，下沿按画面上沿视线定，上沿伸出画面），比天幕上的云飘得快一点 */
-  const LW = ST.low, low = storm ? { rx: rx - LW.inset, rz: rz - LW.inset, arc: LW.arc * Math.PI } : null;
+  /* 1b. 雷鸣：中景上方再挂一层半透明的低云（平的一条，离天幕 low.inset，下沿按画面上沿视线定，上沿伸出画面），比天幕上的云飘得快一点 */
+  const LW = ST.low, low = storm ? { z: skyZ + LW.inset, x0: cx - hx - LW.span, x1: cx + hx + LW.span } : null;
   if (low) {
     low.mat = keep(lowCloudMaterial({ speed: LW.speed, scale: LW.scale, opacity: LW.opacity, dark: cloud[0], lit: cloud[1], flashColor: ST.flash }));
-    const m = new THREE.Mesh(keep(arcGeometry(cx, cz, low.rx, low.rz, low.arc, (z) => topY(z) * LW.base, (z) => topY(z) + 1.5, 64)), low.mat);
+    const m = new THREE.Mesh(keep(flatGeometry(low.x0, low.x1, low.z, (z) => topY(z) * LW.base, (z) => topY(z) + 1.5, 64)), low.mat);
     m.renderOrder = -0.5;   // 比战场上的半透明东西、远处的闪电（在它前面）先画
     m.frustumCulled = false; m.userData.cloud = true;
     group.add(m);
   }
 
-  /* 2. 天边画出来的远景：一条弧形带子，贴在天幕前面一点 */
-  const backTop = topY(cz - rz);
+  /* 2. 天边画出来的远景：一条平的带子，贴在天幕前面一点 */
+  const backTop = topY(skyZ);
   const bandH = Math.max(1.2, backTop * BACKDROP.bandH);
   const nearC = hazeOf(0.55), farC = hazeOf(0.82), wallC = hazeOf(0.92);
-  const bandTex = keep(bandTexture(kind === "skynet" ? "desert" : kind, {
-    far: "#" + farC.getHexString(), near: "#" + nearC.getHexString(), wall: "#" + wallC.getHexString(), lit: night ? 1 : dusk ? 0.5 : 0
-  }, seed * 97 + 11));
-  const bandLen = ((rx + rz) / 2) * 2 * arc;
+  const bandColors = { far: "#" + farC.getHexString(), near: "#" + nearC.getHexString(), wall: "#" + wallC.getHexString(), lit: night ? 1 : dusk ? 0.5 : 0 };
+  const bandTex = keep(ART.band(KIT, kind, bandColors, seed * 97 + 11) || bandTexture(kind === "skynet" ? "desert" : kind, bandColors, seed * 97 + 11));
+  const bandLen = x1 - x0;
   bandTex.repeat.set(Math.max(1, Math.round(bandLen / (bandH * 8))), 1);
   const bandM = keep(new THREE.MeshBasicMaterial({ map: bandTex, transparent: true, alphaTest: 0.02, fog: false, side: THREE.DoubleSide, color: night ? new THREE.Color(1.5, 1.5, 1.5) : 0xffffff, toneMapped: !night }));
-  const band = new THREE.Mesh(keep(arcGeometry(cx, cz, rx - 0.7, rz - 0.7, arc * 0.98, -0.4, bandH, 72)), bandM);
-  band.renderOrder = -0.7;   // 半透明的东西里最先画（它最远）：低云、远处的闪电、烟都在它前面
+  const band = new THREE.Mesh(keep(flatGeometry(x0, x1, skyZ + 0.7, -0.4, bandH, 72)), bandM);
+  band.renderOrder = -0.7; band.userData.layer = "band";   // 半透明的东西里最先画（它最远）：低云、远处的闪电、烟都在它前面
   group.add(band);
 
   /* 3. 中景几何体 */
   const std = (color, opt) => keep(new THREE.MeshStandardMaterial(Object.assign({ color, roughness: 1, flatShading: true, fog: false }, opt || {})));
-  /** 一层的材质：远一点的偏向雾色，再带一点自发光（像被雾里的光照着） */
-  const mixOf = (c, k) => new THREE.Color(c).lerp(hazeOf(1), k * 0.55);
+  /** 一层的材质：远一点的偏向雾色，再带一点自发光（像被雾里的光照着）；沙暴时近的那层也至少蒙上 dust.veil */
+  const mixOf = (c, k) => new THREE.Color(c).lerp(hazeOf(1), Math.min(1, k * 0.55 + (dust ? dust.veil || 0 : 0)));
   const emOf = (k) => hazeOf(1).multiplyScalar(0.18 + k * 0.35);
   const layerMats = (k) => {
     const mix = (c) => mixOf(c, k), em = emOf(k);
@@ -610,14 +636,16 @@ export function buildBackdrop(kind, bounds, themeName, camera, colors) {
     }
   };
 
-  /** 中景的位置：后面（和两侧），离战场边至少 near；返回 { x, z, depth, k（远近 0–1）, hmax } */
+  /** 中景的位置：都在战场后沿后面，排成几层平的布景板（BACKDROP.mid.layers，#237：以前绕到战场左右两侧围成一圈）——想放的远近先落到最近的那一层；
+   *  side = true 的是「侧幕」：横着放到战场左右两边再往外（还是在后沿后面）。u ∈ [-1, 1] 横向位置。返回 { x, z, k（远近 0–1）, hmax } */
   const M3 = BACKDROP.mid;
+  const layerOf = (depth) => {
+    const a = (depth - M3.near) / (M3.far - M3.near);
+    return M3.layers.reduce((b, v) => (Math.abs(v - a) < Math.abs(b - a) ? v : b));
+  };
   const spot = (u, depth, side) => {
-    // u ∈ [-1, 1] 横向位置；side = true 时放在战场左右两侧
-    let x, z;
-    if (side) { x = cx + Math.sign(u || 1) * (hx + M3.near + Math.abs(depth - M3.near) * (M3.side / M3.far)); z = cz - hz * (0.2 + r() * 1.0) - (depth - M3.near) * 0.5; }
-    else { x = cx + u * (hx + M3.side * 0.6); z = cz - hz - depth; }
-    const k = Math.min(1, Math.max(0, (depth - M3.near) / (M3.far - M3.near)));
+    const k = layerOf(depth), z = cz - hz - (M3.near + k * (M3.far - M3.near));
+    const x = side ? cx + Math.sign(u || 1) * (hx + M3.side * (0.35 + 0.65 * Math.abs(u))) : cx + u * (hx + M3.side * 0.6);
     const hmax = Math.max(1, topY(z) * M3.fill);
     return { x, z, k, hmax: side ? Math.min(hmax, M3.sideMaxH) : hmax };
   };
@@ -625,7 +653,11 @@ export function buildBackdrop(kind, bounds, themeName, camera, colors) {
   const mats = (k) => layers[k < 0.34 ? 0 : k < 0.67 ? 1 : 2];
   const depthAt = (a) => M3.near + a * (M3.far - M3.near);
 
-  if (kind === "mine") {
+  // 区域场景（#242）：中景、矿坑、战场周围的装饰、环境动画由美术包摆（env 是这里算好的位置、材质和小工具）；没登记的照旧
+  const art = ART.backdrop(KIT, kind, { group, anims, keep, std, mats, spot, place, depthAt, topY, cx, cz, hx, hz, skyZ, x0, x1, bandH, r, theme: themeName, T, hazeOf, fog, sky, cam, storm, blinker, smoke, weather: colors.weather || "none" });
+  if (art) {
+    // 美术包已经摆好了
+  } else if (kind === "mine") {
     // 主角：左后方的矿井架；右后方一对冒烟的烟囱；中间一条传送带通到料仓；再撒些筒仓、矿渣堆、小厂房
     let s = spot(-0.55, depthAt(0.45));
     const hf = headframe(mats(s.k), s.hmax * 0.92); place(hf, s, 0.15); blinker(s.x, -0.3 + s.hmax * 0.92 * 1.1, s.z, 0.2);
@@ -644,16 +676,16 @@ export function buildBackdrop(kind, bounds, themeName, camera, colors) {
       else if (pick < 0.75) place(shed(mats(sp.k), 1.6 + r() * 2.2, Math.min(sp.hmax * 0.35, 0.9 + r() * 1.4)), sp);
       else place(silos(mats(sp.k), Math.min(sp.hmax * 0.5, 2.5 + r() * 2), 1 + Math.floor(r() * 2)), sp);
     }
-    // 两侧台阶状的岩壁（露天矿坑的坑壁），斜着朝向战场；最后才摆，上面那些厂房的位置不变
+    // 左右后方台阶状的岩壁（露天矿坑的坑壁），只往战场这边偏一点（以前斜着转 0.75 弧度围过来，像一个碗）；最后才摆，上面那些厂房的位置不变
     const CL = BACKDROP.cliff;
     [-1, 1].forEach(sd => {
       const s2 = spot(sd, depthAt(0.3), true);
-      place(cliff(mats(s2.k), CL.width, s2.hmax * CL.fill, CL.benches, r), s2, -sd * 0.75);
+      place(cliff(mats(s2.k), CL.width, s2.hmax * CL.fill, CL.benches, r), s2, -sd * CL.turn);
     });
   } else if (kind === "desert" || kind === "skynet") {
     // 两侧和后面的大沙丘；后方一座带岩层的桌山、几根风蚀岩柱；左边半埋的船骨
     [-1, 1].forEach(sd => {
-      const s = spot(sd, depthAt(0.15), true); place(dune(mats(s.k), Math.min(s.hmax * 0.9, 3.5 + r() * 1.5)), s, sd * 0.4);
+      const s = spot(sd, depthAt(0.15), true); place(dune(mats(s.k), Math.min(s.hmax * 0.9, 3.5 + r() * 1.5)), s, sd * 0.15);
     });
     let s = spot(0.35, depthAt(0.7)); place(mesa(mats(s.k), Math.min(10, hx * 0.7), s.hmax * 0.6), s, 0);
     [-0.6, -0.35, 0.75].forEach((u, i) => { const s2 = spot(u, depthAt(0.3 + i * 0.25)); place(pillar(mats(s2.k), s2.hmax * (0.75 - i * 0.1), 0.6 + r() * 0.4), s2); });
@@ -688,33 +720,34 @@ export function buildBackdrop(kind, bounds, themeName, camera, colors) {
   }
 
   // 采矿场 / 夜晚：天边一串远处的炉火 / 灯（泛光会抓到）
-  if (kind === "mine" || night) {
+  if (!art && (kind === "mine" || night)) {
     const glowM = keep(new THREE.MeshBasicMaterial({ color: new THREE.Color(night ? 0xffb35a : 0xff7a2a).multiplyScalar(2.4), toneMapped: false, fog: false }));
     const geo = keep(new THREE.SphereGeometry(0.2, 6, 5));
     for (let i = 0; i < 12; i++) {
-      const th = (r() * 2 - 1) * arc * 0.9;
+      const u = r();
       const m = new THREE.Mesh(geo, glowM);
-      m.position.set(cx + Math.sin(th) * (rx - 1.2), 0.1 + r() * bandH * 0.3, cz - Math.cos(th) * (rz - 1.2));
+      m.position.set(x0 + 2 + u * (x1 - x0 - 4), 0.1 + r() * bandH * 0.3, skyZ + 1.2);
       group.add(m);
     }
   }
 
   /** 世界 x 在一条弧上对应的 u（0–1，打雷时照亮云用） */
-  const uOf = (x, r, a) => (Math.asin(Math.max(-1, Math.min(1, (x - cx) / r))) + a) / (2 * a);
+  const uOf = (x, a, b) => Math.max(0, Math.min(1, (x - a) / (b - a)));
   return {
     group,
+    groundEdge: art && Number.isFinite(art.groundEdge) ? art.groundEdge : null,   // 地台外面那片地到哪为止（后面是矿坑，#242）；null = 一直铺到天幕
     /** light = { flash, x }：雷击的闪光（0–1）和位置；乌云跟着 t 慢慢飘（减少动态效果时 t 停住） */
     update(t, dt, light) {
       anims.forEach(fn => fn(t, dt));
       if (!storm) return;
       const f = (light && light.flash) || 0, x = (light && light.x) || 0, u = skyM.uniforms;
-      u.time.value = t; u.flash.value = f; u.flashU.value = uOf(x, rx, arc);
-      if (low) { const lu = low.mat.uniforms; lu.time.value = t; lu.flash.value = f; lu.flashU.value = uOf(x, low.rx, low.arc); }
+      u.time.value = t; u.flash.value = f; u.flashU.value = uOf(x, x0, x1);
+      if (low) { const lu = low.mat.uniforms; lu.time.value = t; lu.flash.value = f; lu.flashU.value = uOf(x, low.x0, low.x1); }
     },
     /** 远处的雷劈在哪：r ∈ [−1, 1] 从左到右；在低云前面一点（天幕、低云都是绕着战场的弧，两边离得近，所以也按弧算） */
     farPoint(r) {
-      const S = ST.strike, th = Math.max(-1, Math.min(1, r)) * S.arc;
-      return { x: cx + Math.sin(th) * (rx - S.inset), z: cz - Math.cos(th) * (rz - S.inset) };
+      const S = ST.strike;
+      return { x: cx + Math.max(-1, Math.min(1, r)) * hx * S.spread, z: skyZ + S.inset };
     },
     dispose() {
       group.traverse(o => { if (o.geometry) o.geometry.dispose(); });

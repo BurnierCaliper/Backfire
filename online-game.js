@@ -80,7 +80,8 @@
   }
   function readSaved() { try { const v = JSON.parse(localStorage.getItem(KEY)); return v?.version === 1 ? v : null; } catch (_) { return null; } }
   function rawPacket(id, type = "result", tape = [], result = null, fx = null) {
-    // 战斗所在的区域、光影（只是画面）：光影跟着时钟，推进时间以后发包前按当前时钟重算；主持人选过的照选的（world-data.js · battleLookSync）
+    // 战斗所在的区域、场景、光影（只是画面）：光影跟着时钟、场景跟着场上的场地（沙珊瑚台地），推进时间、换了场地以后发包前重算；
+    // 主持人选过的照选的（world-data.js · battleLookSync）
     if (typeof battleLookSync === "function") battleLookSync();
     const view = HotseatGame.getViewFor(id); view.players = roster(); view.network = true;
     return { protocol: PROTOCOL, build: BUILD, type, seq, state, tape, result: result || settledResult, view, screen: liveScreen(),
@@ -611,8 +612,8 @@
       if (cmd.type === "startCombat" || cmd.type === "battle.setup") settledResult = null;
       if (outer && !GAME.tape && ["trpg", "trpg.ui", "backstage", "calc", "battle.panel"].includes(cmd.type) &&
           !/^(normalize|saveCaptured|recordBattle)/.test(cmd.action || "")) {
-        // 战场配置里换所在区域 / 光影：写「调整了战场」（不是队伍物资；online-view.js · projectLogs 认这句）
-        const field = cmd.type === "battle.panel" && ["setRegion", "setLight"].includes(cmd.action);
+        // 战场配置里换所在区域 / 场景 / 光影：写「调整了战场」（不是队伍物资；online-view.js · projectLogs 认这句）
+        const field = cmd.type === "battle.panel" && ["setRegion", "setScene", "setLight"].includes(cmd.action);
         publicLogs.push({ kind: "gm", summary: field ? "主持人调整了战场" : "主持人调整了队伍物资", at: Date.now() }); publicLogs = publicLogs.slice(-100);
       }
       return value;

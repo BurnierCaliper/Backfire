@@ -209,9 +209,11 @@ test("原型的浏览器脚本能通过语法检查，规则文件加载顺序�
     "addons/postprocessing/OutputPass.js", "addons/postprocessing/ShaderPass.js", "addons/postprocessing/RenderPass.js", "addons/postprocessing/EffectComposer.js", "addons/renderers/CSS2DRenderer.js"]
     .forEach(f => assert.ok(fs.existsSync(path.join(base, f)), f));
   // 规则文件（和 headless 一个顺序），后面接联机的展示白名单 online-view.js（#204：画面只用它投影过的状态），
-  // 再接正式游戏的 2D 演出 attack-fx.js / hit-fx.js（#230：攻击演出和受击粒子，原样加载）
+  // 再接正式游戏的 2D 演出 attack-fx.js / hit-fx.js（#230：攻击演出和受击粒子，原样加载），
+  // 然后是界面图标 icons.js / hud-icons.js（#238：技能按钮的属性角标、队伍栏的效果徽章，原样加载），
+  // 最后是天气动效 weather-fx.js（#240：正式画面的 2D 天气叠加层，原样加载，压在 3D 画面上）
   const tags = [...html.matchAll(/<script src="\.\.\/\.\.\/([^"]+)"><\/script>/g)].map(m => m[1]);
-  assert.equal(tags.join(), H.RULE_FILES.filter(f => fs.existsSync(path.join(__dirname, "..", f))).concat(["online-view.js", "attack-fx.js", "hit-fx.js"]).join());
+  assert.equal(tags.join(), H.RULE_FILES.filter(f => fs.existsSync(path.join(__dirname, "..", f))).concat(["online-view.js", "attack-fx.js", "hit-fx.js", "icons.js", "hud-icons.js", "weather-fx.js"]).join());
 });
 
 /* ---------- 第一阶段打磨（issue #191）---------- */
@@ -709,12 +711,12 @@ test("乌云：雷鸣时远景的天幕压暗、盖上慢慢飘的厚云（星�
     assert.ok(su.flashU.value < u6, "云亮的地方跟着雷走");
     storm.update(10, 0.016, { flash: 0, x: 0 });
     assert.ok(su.flash.value === 0 && low.every(o => o.material.uniforms.flash.value === 0));
-    // 远处的雷：劈在低云前面（天幕、低云都是一圈弧，两边离得近；劈在后面会被挡住），比战场边缘的雷远，横着在画面里
-    const S = B.BACKDROP, cx = (b.minX + b.maxX) / 2, cz = (b.minZ + b.maxZ) / 2;
-    const rx = (b.maxX - b.minX) / 2 + S.sideGap, rz = (b.maxZ - b.minZ) / 2 + S.skyGap, lx = rx - S.storm.low.inset, lz = rz - S.storm.low.inset;
-    const arcZ = (x, ax, az) => { const k = (x - cx) / ax; return cz - az * Math.sqrt(Math.max(0, 1 - k * k)); };
+    // 远处的雷：劈在低云前面（劈在后面会被挡住），比战场边缘的雷远，横着在画面里。
+    // 天幕、低云都是平的（#237：以前是一圈弧，地平线弯下去像小星球）：天幕立在战场后沿再往后 skyGap，低云在它前面 low.inset
+    const S = B.BACKDROP, cz = (b.minZ + b.maxZ) / 2;
+    const rz = (b.maxZ - b.minZ) / 2 + S.skyGap, skyAt = cz - rz, lowAt = skyAt + S.storm.low.inset;
     [-1, -0.5, 0, 0.5, 1].forEach(r => {
-      const p = storm.farPoint(r), skyZ = arcZ(p.x, rx, rz), lowZ = arcZ(p.x, lx, lz);
+      const p = storm.farPoint(r), skyZ = skyAt, lowZ = lowAt;
       assert.ok(p.z > skyZ + 0.05 && p.z > lowZ + 0.05, `远处的雷 r=${r} 在天幕 / 低云后面（z=${p.z.toFixed(2)}，天幕 ${skyZ.toFixed(2)}，低云 ${lowZ.toFixed(2)}）`);
       assert.ok(p.z < b.minZ - WX.STORM.edgeDepth[1], `远处的雷 r=${r} 不比战场边缘的远（z=${p.z.toFixed(2)}）`);
       const s = L.project(cam, { x: p.x, y: 0, z: p.z });
@@ -981,8 +983,9 @@ test("联机数据：原型页先用 OnlineView.projectState 投影再交给布�
     for (const region of [undefined, "沙漠"]) for (const portrait of [false, true]) {
       const opts = { view: DESKTOP, region, theme: "dusk", portrait };
       const a = L.build(raw, opts), b = L.build(pv, opts), tag = `${id} ${region || "不给区域"}${portrait ? " 竖屏" : ""}`;
-      const json = JSON.stringify(b);
-      assert.ok(!/shp/i.test(json) && !json.includes(String(SHP)) && !json.includes(String(SHP_MAX)), tag + "：布局里有坚毅生命");
+      // 按「单独的一个数」找（布局里满是坐标小数，595.8610271177713 这种碰巧含 7771 的不算；#237 高地加高以后坐标变了碰上了）
+      const json = JSON.stringify(b), lone = (n) => new RegExp(`(?<![\\d.])${n}(?![\\d.])`).test(json);
+      assert.ok(!/shp/i.test(json) && !lone(SHP) && !lone(SHP_MAX), tag + "：布局里有坚毅生命");
       // 地台、间隔、灯、镜头、范围一模一样
       ["zones", "gaps", "lamps", "camera", "bounds", "region", "ground", "plateSize"].forEach(k => assert.deepEqual(plain(b[k]), plain(a[k]), tag + "：" + k + " 不一样"));
       // 单位：站位、抬高、屏幕矩形、铭牌一样；名字是投影规范化过的（全角括号 → 半角：OnlineView.safeText），ATK 是主机算好的实际 ATK（display.atk，联机单位卡也用它）
@@ -1024,7 +1027,7 @@ function minDofFar() {
 
 test("三段镜头：远景就是默认镜头（框住整个战场）；中景框住选中的区 + 相连的区、比远景近、俯角低；近景只框选中的那一个区、比中景近、俯角更低（各种棋盘、每个区，桌面 1440×900）", () => {
   const CAMS = cams(), C = CAMS.CAMERA;
-  assert.ok(C.mid.elevation < L.CONFIG.camera.elevation && C.near.elevation < C.mid.elevation && C.near.elevation <= 18, "俯角：远 > 中 > 近（近景接近平视）");
+  assert.ok(C.mid.elevation < L.CONFIG.camera.elevation && C.near.elevation < C.mid.elevation, "俯角：远 > 中 > 近（近景抬到 22–28°，见 tests/hd2d-camera-terrain.test.js，#237）");
   for (const c of CASES) {
     const out = L.build(setupCase(c, 4), { view: DESKTOP });
     for (const z of out.zones) {
