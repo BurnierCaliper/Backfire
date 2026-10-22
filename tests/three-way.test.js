@@ -3,6 +3,10 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const H = require("./headless");
+const vm = require("vm");
+const plain = x => JSON.parse(JSON.stringify(x));
+/** 顶层 const（THREE_WAY 等）不挂在 window 上，用 vm 取 */
+const get = (c, expr) => vm.runInContext(expr, c);
 
 test("敌对：盗匪和安保、警卫队互相敌对；盗匪和其他阵营照旧", () => {
   const c = H.load();
@@ -36,17 +40,31 @@ test("外城区的三方混战：玩家在 2 区，安保 / 警卫队一边、�
   }
 });
 
-test("三方混战的概率：三区制时一半；两区制、指定阵营、混战都不会变", () => {
+test("三方混战的概率：三区制时 15%；两区制、指定阵营、混战都不会变", () => {
   const c = H.load();
+  c.Math.random = c.makeRng("3W-CHANCE");
+  const N = 2000;
   let n = 0;
-  for (let i = 0; i < 400; i++) if (c.rollEncounter({ region: "外城区", zoneMode: 3 }).layout === "threeway") n++;
-  assert.ok(n > 140 && n < 260, "约一半：" + n);
+  for (let i = 0; i < N; i++) if (c.rollEncounter({ region: "外城区", zoneMode: 3 }).layout === "threeway") n++;
+  assert.ok(Math.abs(n / N - 0.15) < 0.03, `约 15%，实际 ${(n / N * 100).toFixed(1)}%`);
   for (let i = 0; i < 20; i++) {
     assert.notEqual(c.rollEncounter({ region: "外城区", zoneMode: 2 }).layout, "threeway");
     assert.notEqual(c.rollEncounter({ region: "外城区", zoneMode: 3, faction: "盗匪" }).layout, "threeway");
     assert.notEqual(c.rollEncounter({ region: "外城区", zoneMode: 3, mixed: true }).layout, "threeway");
     assert.notEqual(c.rollEncounter({ region: "沙漠", zoneMode: 3 }).layout, "threeway", "其他区域没有");
   }
+});
+
+test("三方混战的概率锁在 15%（THREE_WAY.chance，作者 10/22 定，以前 50%）：第三采矿场也一样；随机混战 5%、镇压队混编 15% 不跟着动", () => {
+  const c = H.load();
+  assert.equal(get(c, "THREE_WAY").chance, 0.15);
+  assert.equal(get(c, "CHANCE_MIXED"), 0.05, "随机混战（无视阵营）照旧 5%");
+  assert.deepEqual(plain(get(c, "FACTION_MIX_CHANCE")), { "镇压队": 0.15 }, "镇压队的混编照旧 15%");
+  c.Math.random = c.makeRng("3W-MINE3");
+  const N = 2000;
+  let n = 0;
+  for (let i = 0; i < N; i++) if (c.rollEncounter({ region: "第三采矿场", zoneMode: 3 }).layout === "threeway") n++;
+  assert.ok(Math.abs(n / N - 0.15) < 0.03, `第三采矿场三区制：约 15%，实际 ${(n / N * 100).toFixed(1)}%`);
 });
 
 test("外城区三方混战整场自动对打：狂徒会去打安保 / 警卫队，能打完、没有报错", () => {
