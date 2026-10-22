@@ -172,6 +172,8 @@
     if ((e.kind === "status" || e.kind === "fxword" || e.kind === "partner" || e.kind === "bullet") && word) return out(word === "无效" ? "block" : "word", word);
     return null;
   }
+  /** 格挡成功（包里的 fx.parried / 正式画面的格挡火花）：挡下来的人头上弹一个「格挡」 */
+  function parryOf(id) { return { unitId: id, kind: "block", text: "格挡", el: "physical" }; }
   /**
    * packet = 联机玩家收到的那一份（OnlineView.projectPacket）：只读 packet.fx（招式）、packet.tape（弹字：伤害 / 击破 / 治疗 / 状态字）、packet.state.units（等级、谁还在）。
    * opts.before = 出招前画面上的那一份（上一个包的 state）：两边比一比，谁被击倒了。
@@ -195,7 +197,7 @@
       const n = numberOf(e, { level: u ? u.level : undefined, bigHit: u ? opts.bigHit : null });
       if (n) out.numbers.push(Object.assign(n, { wave: Math.max(0, wave) }));
     });
-    if (out.parried && out.target) out.numbers.push({ unitId: out.blocker || out.target, kind: "block", text: "格挡", el: "physical", wave: Math.max(0, wave) });
+    if (out.parried && out.target) out.numbers.push(Object.assign(parryOf(out.blocker || out.target), { wave: Math.max(0, wave) }));
     // 击倒：出招前还站着、结算后不在了（死了 / 被移出）的，只算这一下碰到的单位
     const hit = new Set(tape.map(e => e.unitId).concat(out.target ? [out.target] : []));
     const before = opts.before && Array.isArray(opts.before.units) ? opts.before.units : null;
@@ -327,5 +329,5 @@
     return null;
   }
 
-  return { FX, lens, rectOf, zoneRect, adapter, cues, numberOf, placeNumbers, textWidth, sizeOf, colorOf, paperOf, pushPose, posOf };
+  return { FX, lens, rectOf, zoneRect, adapter, cues, numberOf, parryOf, placeNumbers, textWidth, sizeOf, colorOf, paperOf, pushPose, posOf };
 });

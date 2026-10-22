@@ -2,6 +2,7 @@
  *
  * 界面外壳（index.html 的队伍栏 / 技能栏、hd2d-scene.js 的铭牌）要画的东西，在这里整理成数据和 HTML 片段：
  *   econHtml(econ, big)            铭牌上的行动点 / 附赠动作（plateData 的 econ；画法照正式画面的单位卡 unit-card.js）
+ *   mechsHtml(mechs, UnitCard) / towersHtml(towers, UnitCard)   铭牌上方的首领机制图标、地台上的踩塔（#283；画法、文字全用 unit-card.js）
  *   effectsOf(u, icons) / effectsHtml(list, icons)   队伍栏名字右边身上的效果（状态图标用 hud-icons.js，没有图标的写短标签；多了写 +n，悬停看全部）
  *   heroLooks(cards, eleByCn) / avatarOf(look) / avatarHtml(av)   按主职责的头像：职责图标 + 主属性到副属性的渐变底
  * 不碰 three.js，也不碰 DOM，Node 里可以直接 require 来测（tests/hd2d-ui.test.js）。
@@ -131,6 +132,21 @@
     if (!body) return "";
     const t = esc(econText(econ));
     return `<span class="pl-econ${big ? " in" : ""}" title="${t}" role="img" aria-label="${t}">${body}</span>`;
+  }
+
+  /* ---------- 首领机制（#283）：铭牌上方的图标、地台上的踩塔 ----------
+   * 图标、倒计时、悬停说明全用正式画面的 unit-card.js（UC = UnitCard：mechIconsHtml / towerMarkHtml，里面是 mechLeft / phaseText / markTip 那一套），
+   * 这里只包一层。数据是投影里的（hd2d-layout.js · mechsOf / towersOf）。没有 UnitCard（原型页不加载）或没有机制 = "" */
+  /** 铭牌上方那一排：被点名的标记、首领正在读条的机制（和旧画面单位卡的 .u-mechs 同一份 HTML） */
+  function mechsHtml(mechs, UC) {
+    if (!mechs || !UC || typeof UC.mechIconsHtml !== "function") return "";
+    const html = UC.mechIconsHtml({ marks: mechs.marks || [], casts: mechs.casts || [] });
+    return html ? `<div class="pl-mechs">${html}</div>` : "";
+  }
+  /** 地台前沿的踩塔：图标（数字 = 还有几回合）+ 几人 / 要几人（和旧画面区名旁边的 .ztower-mark 同一份 HTML） */
+  function towersHtml(towers, UC) {
+    if (!towers || !towers.length || !UC || typeof UC.towerMarkHtml !== "function") return "";
+    return UC.towerMarkHtml(towers);
   }
 
   /* ---------- 队伍栏：名字右边身上的效果 ---------- */
@@ -300,7 +316,7 @@
   const summonInner = (b) => `${UI.skill.summonIcon(b.back)}<span class="sm-nm">${esc(b.name)}</span><small>${esc(costText(b.cost))}</small>`;
 
   return {
-    UI, esc, econText, econHtml, effectsOf, effectsHtml, heroLooks, avatarOf, avatarHtml, stickerSvg,
+    UI, esc, econText, econHtml, mechsHtml, towersHtml, effectsOf, effectsHtml, heroLooks, avatarOf, avatarHtml, stickerSvg,
     isSummon, skillKind, skillElement, costText, skillBar, skillHtml, summonInner
   };
 });

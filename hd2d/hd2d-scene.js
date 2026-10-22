@@ -61,6 +61,15 @@ const CAM = {
 /** 铭牌（DOM）：远的淡一点；状态小圆点 / 架势菱形最多画几个（多的写成数字）；近景放大的铭牌最多写几个状态、画几个架势菱形；
  *  近景里别的区的铭牌乘多少透明度（再糊一点，CSS 的 .dim）。大小和缩放公式在 L.CONFIG.plate */
 const PLATE = { fadeRange: 14, fadeMin: 0.72, maxDots: 4, maxPips: 6, bigChips: 3, bigPips: 6, dim: 0.5 };
+/** 首领机制（正式画面，#283）：铭牌上方一排图标（被点名的标记、首领正在读条的机制）。画法、倒计时、悬停说明全用 unit-card.js
+ *  （hd2d-ui.js · mechsHtml 包一层，数据是投影里的 display.marks / casts）；icon = 图标大小（像素，CSS 的 --mi）、gap = 离卡片上沿多高（--mg）。
+ *  新点名的那一下照旧画面「啪」地弹一下（unit-card.js · alertNew；提示音旧画面的单位卡已经响过，这里不再响） */
+const MECH = { icon: 30, gap: 8 };
+/** 踩塔（正式画面，#283）：被标记的区，地台顶面一圈环 + 地台前沿一块图标（unit-card.js · towerMarkHtml：数字 = 还有几回合，几人 / 要几人；hd2d-ui.js · towersHtml）。
+ *  环：半径 radius、宽 width（× 地台边长）；人数够是踩塔的机制色 color（unit-card.js 的 MECH_ICON.tower），不够是 short 红（和旧画面 game.css 的 .ztower-ring 一样）；
+ *  颜色 × glow 亮到泛光抓得到、opacity 透明度；最后一回合一明一暗（pulse 幅度、speed 快慢，旧画面 1.1 秒一次；减少动态效果时不闪）。
+ *  图标：贴在地台前沿往里 front（× 地台边长）、离地台顶面 lift；icon = 图标大小（像素） */
+const TOWER = { radius: 0.36, width: 0.035, color: 0x14a89a, short: 0xd8322a, glow: 1.6, opacity: 0.8, pulse: 0.3, speed: 5.7, front: 0.44, lift: 0.06, icon: 30 };
 /** 选中的区：地台顶面靠边一圈细框（inset = 离地台边多远、width 多宽），慢慢一明一暗（减少动态效果时不闪）；颜色 × glow 亮到泛光抓得到 */
 const FOCUS = { inset: 0.28, width: 0.09, color: 0xf2c230, glow: 1.5, opacity: 0.55, pulse: 0.15, speed: 2.2 };
 /** 选目标 / 选区的标记（正式画面，#261；铭牌的描边 / 变暗在 hd2d.css）：
@@ -387,7 +396,9 @@ export function createHd2dScene(container, options) {
     const defText = `架势 ${p.def.cur}/${p.def.max}${p.def.big ? "+" : ""}`;
     // 行动点 / 附赠（#238，画法照 unit-card.js）：紧凑铭牌贴在卡片右上角，放大的写在名字那一行；HTML 在 hd2d-ui.js · econHtml
     const UIX = window.HD2DUI, econ = (big) => (UIX ? UIX.econHtml(p.econ, big) : ""), econText = UIX && p.econ ? `<span>${esc(UIX.econText(p.econ))}</span>` : "";
-    return `<div class="pl-more" role="tooltip"><div class="pl-stats"><b>Lv${p.level}</b><span>ATK ${p.atk}</span><span>血量 ${p.hp.cur}/${p.hp.max}</span><span>${defText}</span>${econText}</div>${more ? `<div class="pl-chips">${more}</div>` : ""}</div>
+    // 首领机制（正式画面，#283）：铭牌上方一排 unit-card.js 的图标（原型页不加载 unit-card.js：不画）
+    const mechs = UIX && UIX.mechsHtml ? UIX.mechsHtml(p.mechs, window.UnitCard) : "";
+    return `${mechs}<div class="pl-more" role="tooltip"><div class="pl-stats"><b>Lv${p.level}</b><span>ATK ${p.atk}</span><span>血量 ${p.hp.cur}/${p.hp.max}</span><span>${defText}</span>${econText}</div>${more ? `<div class="pl-chips">${more}</div>` : ""}</div>
       <div class="pl-big" data-hit tabindex="0" role="button" aria-label="${esc(p.name)}"><span class="pl-mark" aria-hidden="true"></span>
       <div class="pl-r1"><span class="pl-nm">${esc(p.name)}</span>${econ(true)}<span class="pl-lv">Lv${p.level}</span></div>
       <div class="pl-r2"><div class="pl-bar">${segs}</div><span class="pl-hp">${p.hp.cur}/${p.hp.max}</span></div>
@@ -423,7 +434,7 @@ export function createHd2dScene(container, options) {
     group.add(label);
     scene.add(group, core, soft, ripple, ring, pick);
     const p = { id: u.id, el, inner: el.firstChild, bob: el.firstChild.firstChild, post: el.lastChild, label, core, soft, ripple, ring, pick, group, key: "", sc: 0, hover: false,
-      lift: 0, liftFrom: 0, liftTo: 0, liftSet: false, big: false, dim: false, close: false, hide: false, zoom: 1 };
+      lift: 0, liftFrom: 0, liftTo: 0, liftSet: false, big: false, dim: false, close: false, hide: false, zoom: 1, mechMemo: {} };
     // 悬停高亮、点击选中（原型：只是画面，不接规则；顺便选中这个单位所在的区，近景看的就是它）。只有卡片接鼠标（铭牌其余部分、细杆都不拦）；
     // 滚轮冒泡到外面的容器，照样在三段镜头之间跳。正式画面给了 onUnitClick / onUnitHover：点 = 点单位卡、悬停 = 悬停单位卡（悬停说明挂在这块铭牌上）
     const onCard = (e) => e.target && e.target.hasAttribute && e.target.hasAttribute("data-hit");
@@ -481,12 +492,20 @@ export function createHd2dScene(container, options) {
     labels.domElement.style.setProperty("--ph", size.h + "px");
     labels.domElement.style.setProperty("--bw", big.w + "px");   // 近景放大的铭牌（L.CONFIG.plate.big）
     labels.domElement.style.setProperty("--bh", big.h + "px");
+    labels.domElement.style.setProperty("--mi", MECH.icon + "px");   // 首领机制的图标（#283）
+    labels.domElement.style.setProperty("--mg", MECH.gap + "px");
+    const UC = window.UnitCard;
     state.layout.units.forEach(u => {
       live.add(u.id);
       let p = state.plates.get(u.id);
       if (!p) { p = makePlate(u); state.plates.set(u.id, p); }
       const key = JSON.stringify(u.plate);
-      if (key !== p.key) { p.key = key; p.bob.innerHTML = plateHtml(u.plate); }
+      if (key !== p.key) {
+        p.key = key; p.bob.innerHTML = plateHtml(u.plate);
+        // 新点名的图标「啪」地弹一下（unit-card.js · alertNew，记在这块铭牌上；第一次画只记下）；提示音旧画面的单位卡已经响过
+        if (UC && UC.alertNew) UC.alertNew(p.bob.querySelector(":scope > .pl-mechs"), u.plate.mechs ? u.plate.mechs.marks : [], "mark", { quiet: true }, p.mechMemo);
+      }
+      p.el.classList.toggle("has-mech", !!u.plate.mechs);
       p.u = u;
       p.group.position.set(u.x, u.y, u.z);
       if (!p.liftSet) setLift(p, u.lift);   // 后排抬高：铭牌下面一根细杆连到脚下（每一段镜头的抬高在 goTo 里换）
@@ -573,6 +592,7 @@ export function createHd2dScene(container, options) {
     if (wsig !== state.weatherSig) { state.weatherSig = wsig; weather.setBounds(layout.bounds, { camera: layout.camera, farPoint: state.backdrop.farPoint }); }
     weather.set(fx, state.meta.theme);
     syncPlates();
+    syncTowers();   // 首领机制·踩塔（正式画面，#283）
     placeMarks();
     // 特写的单位不在了（被打倒、藏起来）：退出特写，镜头平滑拉回正常的近景（#237）
     const wasClose = state.close, reset = newBoard || state.wantFit;
@@ -802,6 +822,51 @@ export function createHd2dScene(container, options) {
   function clearMarks() {
     markMeshes.forEach(m => { scene.remove(m); m.geometry.dispose(); m.material.dispose(); });
     markMeshes.clear();
+  }
+
+  /** 踩塔（正式画面，#283；数值在 TOWER）：被标记的区（布局的 zone.towers = 投影里的 zoneView[区].towers），地台顶面一圈环（人数不够变红，最后一回合一明一暗），
+   *  地台前沿立一块图标（unit-card.js · towerMarkHtml，和旧画面区名旁边的同一份；新标出来的照旧画面弹一下，不再响）。区号 → { label, el, ring, key, ready, memo } */
+  const towerMarks = new Map();
+  const towerGeo = new THREE.RingGeometry(1 - TOWER.width / TOWER.radius / 2, 1 + TOWER.width / TOWER.radius / 2, 72);
+  function syncTowers() {
+    const UC = window.UnitCard, UIX = window.HD2DUI, seen = new Set();
+    (state.layout ? state.layout.zones : []).forEach(z => {
+      const list = (z.towers || []).filter(t => t && t.type);
+      const html = UIX && UIX.towersHtml ? UIX.towersHtml(list, UC) : "";
+      if (!html) return;
+      seen.add(z.id);
+      let t = towerMarks.get(z.id);
+      if (!t) {
+        const el = document.createElement("div");
+        el.className = "hd2d-tower";
+        el.style.setProperty("--mi", TOWER.icon + "px");
+        const label = new CSS2DObject(el);
+        label.center.set(0.5, 0.5);
+        const ring = new THREE.Mesh(towerGeo, new THREE.MeshBasicMaterial({ transparent: true, opacity: TOWER.opacity, depthWrite: false, toneMapped: false, side: THREE.DoubleSide,
+          polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 }));
+        ring.rotation.x = -Math.PI / 2; ring.renderOrder = 2;
+        scene.add(label, ring);
+        t = { label, el, ring, key: "", ready: false, memo: {} };
+        towerMarks.set(z.id, t);
+      }
+      if (t.key !== html) {
+        t.key = html; t.el.innerHTML = html;
+        if (UC && UC.alertNew) UC.alertNew(t.el, list, "zone", { quiet: true }, t.memo);
+      }
+      const short = list.some(x => (Number(x.have) || 0) < Math.max(1, Number(x.need) || 1));
+      t.ready = !!(UC && UC.mechLast && list.some(UC.mechLast));
+      t.ring.material.color.set(short ? TOWER.short : TOWER.color).multiplyScalar(TOWER.glow);
+      t.el.classList.toggle("short", short); t.el.classList.toggle("ready", t.ready);
+      const r = Math.min(z.w, z.d) * TOWER.radius;
+      t.ring.scale.set(r, r, 1);
+      t.ring.position.set(z.cx, z.topY + 0.03, z.cz);
+      t.label.position.set(z.cx, z.topY + TOWER.lift, z.cz + z.d * TOWER.front);
+    });
+    towerMarks.forEach((t, id) => { if (!seen.has(id)) { dropTower(t); towerMarks.delete(id); } });
+  }
+  function dropTower(t) {
+    scene.remove(t.label, t.ring);   // 触发 removed 事件，把 DOM 摘掉
+    t.ring.material.dispose();
   }
 
   /** 滚轮 / 双指走了一段（step：1 拉近 / −1 拉远，一次手势一下）：在三段之间跳（状态机 camStep）；远景到头了还往外拉（hd2d-camera.js · pastFar）、
@@ -1041,6 +1106,8 @@ export function createHd2dScene(container, options) {
     if (focusRing && focusRing.visible) focusRing.material.opacity = FOCUS.opacity + (moving ? Math.sin(animT * FOCUS.speed) * FOCUS.pulse : 0);
     // 选目标 / 选区的框一明一暗（减少动态效果时不闪）
     markMeshes.forEach(m => { const c = m.userData.cfg; if (m.visible && c.pulse) m.material.opacity = c.opacity + (moving ? Math.sin(animT * c.speed) * c.pulse : 0); });
+    // 踩塔的环：最后一回合一明一暗（减少动态效果时不闪）
+    towerMarks.forEach(t => { t.ring.material.opacity = TOWER.opacity - (t.ready && moving ? (0.5 + 0.5 * Math.sin(animT * TOWER.speed)) * TOWER.pulse : 0); });
     // 打雷那一下镜头轻微抖动：天气给的像素换成焦点处的世界长度，沿镜头的左右 / 上下挪。
     // 只挪这一帧的渲染（铭牌跟着一起抖），渲染完挪回去，OrbitControls 看不到
     const sh = weather.shake, shaking = sh.x !== 0 || sh.y !== 0;
@@ -1149,6 +1216,7 @@ export function createHd2dScene(container, options) {
       disposed = true; cancelAnimationFrame(raf); ro.disconnect(); container.removeEventListener("wheel", onWheel);
       if (moveRaf) cancelAnimationFrame(moveRaf);
       state.plates.forEach(disposePlate); clearWorld(); clearMarks(); weather.dispose();
+      towerMarks.forEach(dropTower); towerMarks.clear(); towerGeo.dispose();
       if (state.backdrop) { scene.remove(state.backdrop.group); state.backdrop.dispose(); }
       if (focusRing) { scene.remove(focusRing); focusRing.geometry.dispose(); focusRing.material.dispose(); }
       Object.values(tex).forEach(t => t.dispose()); shadowGeo.dispose(); ringGeo.dispose();
