@@ -3,8 +3,8 @@
  *     按下时有开着的面板（PAUSE_MENU.layers）、有东西要取消（PauseMenu.addBlocker：选着技能、正在选目标、在播演出……），
  *     或者别的处理拿这一下取消了东西（preventDefault），就不打开；打字的时候（输入框、聊天框里）也不打开。
  *   · 菜单里的每一项由对应的模块自己登记（PauseMenu.register）：克制表（matchup-ui.js；联机玩家在 online-ui.js）、
- *     主持人工具（online-gm-ui.js）、消息与成员 / 大厅 / 角色分配（online-ui.js）、教程（#263 合进来后接上，见 PAUSE_MENU.tutorial）。
- *     点一项 = 关掉暂停页面 + 打开对应的面板，和以前点原来的按钮一样。
+ *     主持人工具（online-gm-ui.js）、消息与成员 / 大厅 / 角色分配 / 音效开关（online-ui.js）、教程（#263 合进来后接上，见 PAUSE_MENU.tutorial）。
+ *     点一项 = 关掉暂停页面 + 打开对应的面板，和以前点原来的按钮一样；开关这一类（stay，例：音效 开 / 关）点了菜单不收起，只换成新的状态。
  *   · 联机不会真的暂停：只盖住自己的画面，房间、计时照旧走（标题写「菜单」，下面一行小字说明）。
  * 只开关画面上的面板，不碰任何规则和联机数据。 */
 (function (root) {
@@ -30,10 +30,12 @@
       gmTools: { label: "主持人工具", hint: "敌人、单位、配置物、地形、天气、安排攻击（仅主持人）" },
       assign: { label: "角色分配", hint: "把角色分给房间里的玩家" },
       room: { label: "消息与成员", hint: "房间码、成员、私信、重新连接 / 离开" },
-      lobby: { label: "大厅", hint: "房间大厅：成员和大厅交流" }
+      lobby: { label: "大厅", hint: "房间大厅：成员和大厅交流" },
+      // 音效开关（#304，联机玩家；online-ui.js 登记）：和单机顶栏的「音效」按钮同一个本机开关（sfx.js 的 localStorage 键）
+      sfx: { label: "音效", on: "音效 开", off: "音效 关", hint: "打中、击倒、轮到你的提示音……只影响这台电脑" }
     },
     // 先后（小的在前）；没写的排在最后
-    order: { tutorial: 10, matchup: 20, gmTools: 30, assign: 40, room: 50, lobby: 60 },
+    order: { tutorial: 10, matchup: 20, gmTools: 30, assign: 40, room: 50, lobby: 60, sfx: 70 },
     // 教程（#263）：教程页挂出 window.Tutorial.open() 后这一项才出现。#263 的入口名不一样就改这一行
     tutorial: { global: "Tutorial", method: "open" },
     // Esc / 菜单按钮在这些画面里有效（<body data-screen>）；联机时（主持人、玩家）在哪个画面都有效
@@ -56,8 +58,9 @@
   let box = null, online = null, lastFocus = null, painted = "", lastBadge = "";
 
   /* ---------- 菜单项 ---------- */
-  /** 登记一项：{ id, run(), visible?(), label?, hint?, badge?(), config? }；label / hint / 先后没给就用 PAUSE_MENU.items / order 里
+  /** 登记一项：{ id, run(), visible?(), label?, hint?, badge?(), config?, stay?, pressed?() }；label / hint / 先后没给就用 PAUSE_MENU.items / order 里
    *  config（默认 = id）那一条（联机玩家的克制表用 config: "matchup"）。badge：数字 = 新消息条数，true = 有事要处理。
+   *  stay：开关这一类，点了菜单不收起（重画成新的状态）；pressed() = 现在开着没有（按钮上的 aria-pressed）。
    *  同一个 id 再登记会换掉旧的。返回撤销函数 */
   function register(item) {
     if (!item || !item.id || typeof item.run !== "function") throw new TypeError("PauseMenu.register 需要 id 和 run()");
@@ -68,13 +71,14 @@
   function unregister(id) { items.delete(id); refresh(); }
   const val = (v, fallback) => { try { const x = typeof v === "function" ? v() : v; return x == null ? fallback : x; } catch (e) { return fallback; } };
   const orderOf = id => (Object.prototype.hasOwnProperty.call(PAUSE_MENU.order, id) ? PAUSE_MENU.order[id] : 1000);
-  /** 现在该显示的项（按先后排好）：[{ id, label, hint, badge }] */
+  /** 现在该显示的项（按先后排好）：[{ id, label, hint, badge, pressed }]（pressed：开关这一类开着没有；不是开关 = null） */
   function list() {
     return [...items.values()]
       .filter(it => val(it.visible, true))
       .map(it => {
         const key = it.config || it.id, cfg = PAUSE_MENU.items[key] || {};
-        return { id: it.id, key, label: String(val(it.label, cfg.label || it.id)), hint: String(val(it.hint, cfg.hint || "")), badge: val(it.badge, 0) || 0 };
+        return { id: it.id, key, label: String(val(it.label, cfg.label || it.id)), hint: String(val(it.hint, cfg.hint || "")), badge: val(it.badge, 0) || 0,
+          pressed: it.pressed ? !!val(it.pressed, false) : null };
       })
       .sort((a, b) => orderOf(a.key) - orderOf(b.key));
   }
@@ -144,7 +148,7 @@
     const T = PAUSE_MENU.text;
     return `<section class="pm-card" role="dialog" aria-modal="true" aria-labelledby="pm-title">
       <header class="pm-head"><h2 id="pm-title">${esc(isOnline ? T.titleOnline : T.title)}</h2>${isOnline ? `<p class="pm-note">${esc(T.noteOnline)}</p>` : ""}</header>
-      <div class="pm-list">${rows.map(r => `<button type="button" class="pm-item" data-pause-item="${esc(r.id)}"><b>${esc(r.label)}</b>${r.hint ? `<small>${esc(r.hint)}</small>` : ""}${dotHtml(r.badge)}</button>`).join("") || `<p class="pm-empty">${esc(T.empty)}</p>`}</div>
+      <div class="pm-list">${rows.map(r => `<button type="button" class="pm-item" data-pause-item="${esc(r.id)}"${r.pressed == null ? "" : ` aria-pressed="${r.pressed ? "true" : "false"}"`}><b>${esc(r.label)}</b>${r.hint ? `<small>${esc(r.hint)}</small>` : ""}${dotHtml(r.badge)}</button>`).join("") || `<p class="pm-empty">${esc(T.empty)}</p>`}</div>
       <footer class="pm-foot"><button type="button" class="pm-resume" data-pause-resume>${esc(T.resume)}<kbd>${esc(T.resumeKey)}</kbd></button></footer>
     </section>`;
   }
@@ -220,6 +224,8 @@
   function choose(id) {
     const it = items.get(id);
     if (!it || !val(it.visible, true)) return false;
+    // 开关这一类（音效 开 / 关）：菜单不收起，切完重画（焦点留在这一项上）
+    if (it.stay) { it.run(); refresh(); return true; }
     const back = lastFocus;
     close(true);
     const before = visibleLayers();

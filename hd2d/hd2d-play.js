@@ -13,6 +13,7 @@
  *     onImpact  第一下打中的那一刻：画面换成包里的 state（铭牌的血条跟着掉）；跳过时也照样换
  *     camera    { push(actorId, targetId, secs) 出手时推一下镜头, release(secs) 播完拉回 }（HD2DPlay.camera 给；关掉 / 减少动态效果时不推）
  *     lens()    这一刻的镜头（纸片感按俯角压扁）
+ *     sound(kind, i)  该响音效的那一刻（联机玩家，online-sfx.js，#304）：出手 strike、第 i 段打中 wave、格挡 parry、演完 end；跳过、倍率 0 时不叫
  * 正式画面（game.html 的新画面，#283）自己的攻击演出（game.js · playTape）一下一下播，只借这里的三样（hd2d-field.js 转交）：
  *   HD2DPlay.numbers(list, rectOf, view)   弹一批数字（hd2d-fx.js · numberOf 挑好的）：摆位照 placeNumbers，也不压住画面上还没消失的
  *   HD2DPlay.paperHit(rect, lens, { hold })   打中那一下的纸片感（hold = 多少毫秒后画布自己复原，跟着演出倍率）
@@ -141,12 +142,15 @@
     const move = cue.move, cam = opts.camera, P = F.FX.push;
     let applied = false, pushed = false;
     const impactNow = () => { if (!applied) { applied = true; if (opts.onImpact) opts.onImpact(); } };
+    // 该响音效的那一刻（联机玩家，online-sfx.js，#304）：跟着画面走；跳过、倍率 0 时不响
+    const sound = (kind, i) => { if (typeof opts.sound === "function" && !me.skipped && clockScale() > 0) { try { opts.sound(kind, i); } catch (e) { /* 出不了声不影响演出 */ } } };
     try {
       if (move && cue.actor && cue.target && clockScale() > 0) {
         if (cam && cam.push) pushed = !!cam.push(cue.actor, cue.target, P.in * clockScale());
         // 推到位再出手：attack-fx 的出手 / 弹道在开始那一刻按矩形画（没有 track），镜头停住了，弹道才对得上铭牌
         if (pushed) { await wait(AttackFx.after(P.in * 1000)); if (me.skipped) return cue; }
         const from = ad.rectOf(cue.actor), to = ad.rectOf(cue.target);
+        sound("strike");
         await wait(AttackFx.windup(from, to, move));
         if (me.skipped) return cue;
         if (move.area) AttackFx.area(ad.zoneRectOf(packetZone(packet, cue.target)) || to, from, move);
@@ -160,16 +164,18 @@
         if (at && move) AttackFx.impact(at, move, { n: i, from });
         if (at && opts.lens) paper(F.paperOf(F.lens(opts.lens()), at));
         if (at && root.HitFx && clockScale() > 0) HitFx.burst(w.el || "physical", at, { big: !!(move && move.big) });
-        if (i === 0 && cue.parried && at) AttackFx.clash(at);
+        sound("wave", i);
+        if (i === 0 && cue.parried && at) { AttackFx.clash(at); sound("parry"); }
         showNumbers(F.placeNumbers(cue.numbers.filter(n => n.wave === i), ad.rectOf, view));
         if (i < waves.length - 1) await wait(AttackFx.after(F.FX.timing.hitGap));
       }
-      if (!waves.length) showNumbers(F.placeNumbers(cue.numbers, ad.rectOf, view));
+      if (!waves.length) { sound("wave", 0); showNumbers(F.placeNumbers(cue.numbers, ad.rectOf, view)); }
       if (cue.ko.length && !me.skipped) {
         await wait(AttackFx.after(F.FX.timing.koDelay));
         unpaper();                                      // 击倒的红叉要停一阵：画布先复原，红叉不会画到一半变形
         if (!me.skipped) cue.ko.forEach(id => { const r = ad.rectOf(id); if (r) AttackFx.ko(r, { track: ad.track(id) }); });
       }
+      sound("end");                                     // 演完（红叉出来的那一刻）：击倒、失衡、护盾、换区
       if (!me.skipped) await wait(AttackFx.after(F.FX.paper.shadow.dur));
       return cue;
     } finally {

@@ -17,11 +17,12 @@
  *   harmonic 谐波  共振：拍频的嗡鸣 + 共鸣的环响
  *
  * 首领机制点名：Sfx.marker()，很短的两声「叮」（数值在 MARKER_PING）。
+ * 轮到你（联机玩家）：Sfx.scratch()，DJ 搓碟「嚓—嚓嚓」+ 唱针落下（数值在 SCRATCH，sfx-tuner.html 能试听、调参数）。
  *
  * 用法：Sfx.play("fire", { big: true })。重击（big）更响、多一层低频。
  * 同一属性 60 ms 内只响一次，范围攻击同时打中好几个人不会叠成噪音。
  * 浏览器要求先有一次点击 / 按键才能出声，这里在第一次点击或按键时启动。
- * 开关记在本机（localStorage「anterscale-sfx」），战斗顶栏「音效」按钮切换。 */
+ * 开关记在本机（localStorage「anterscale-sfx」），战斗顶栏「音效」按钮切换；联机玩家在暂停页面（Esc / 菜单）的「音效 开 / 关」切换，同一个开关。 */
 (function () {
   "use strict";
   const fxRand = () => (typeof fxRandom === "function" ? fxRandom() : Math.random());   // 画面效果的随机数：不动战斗用的种子随机数（run.js · fxRandom）
@@ -157,6 +158,27 @@
     lowpass: 3200,     // 低通（Hz）：更高的泛音滤掉，不刺耳
     q: 0.7,            // 低通的 Q：不加共振峰
     throttle: 0.3      // 这么多秒以内只响一次：几个人同一刻被点名（远离点全员）也只响一声
+  };
+  /* ---------- 轮到你：DJ 搓碟（联机玩家轮到自己的角色行动的那一刻，online-ui.js · Sfx.scratch） ----------
+   * 唱片被手来回搓：噪声（加一层跟着扫的锯齿波）过带通，每一下的速度按半个正弦走——两头（手换方向）没声音，中间最快：
+   * 带通中心、噪声的播放速度、音量都跟着扫上去再落下来。往回拉的那几下慢一点、低一点。第一下长（「嚓—」），后面几下短（「嚓嚓」），
+   * 最后唱针落下：一下低频的「咚」+ 很短的「嗒」 */
+  const SCRATCH = {
+    len: 0.44,         // 总长（秒）：从第一下开始到最后一下搓完（不算唱针）
+    strokes: 3,        // 来回几下（「嚓—嚓嚓」= 3 下，一推一拉轮流）
+    lead: 0.42,        // 第一下占几成（「嚓—」拖长一点；只有一下时就是整段）
+    gap: 0.03,         // 两下之间停多久（秒）：手换方向的那一下，没声音
+    low: 420,          // 扫频的下沿（Hz）：搓得最慢时的带通中心
+    high: 2900,        // 扫频的上沿（Hz）：搓得最快时（和下沿差得越多，扫得越宽）
+    speed: 1.8,        // 搓得最快时噪声的播放速度（越快越尖、越「嘶」）
+    back: 0.78,        // 往回拉的那几下：速度、音高、音量乘多少（比往前推的慢一点、低一点）
+    q: 4.5,            // 带通的 Q：越大越像有音高的「哇」，越小越像沙沙的噪声
+    tone: 0.32,        // 跟着扫的锯齿波（唱片上录的人声那种有音高的感觉）的音量（相对噪声）；0 = 只有噪声
+    toneLow: 150,      // 锯齿波最低（Hz）
+    toneHigh: 720,     // 锯齿波最高（Hz）
+    gain: 0.62,        // 音量
+    needle: { at: 0.05, gain: 0.42, freq: 95, len: 0.1, click: 0.22 },   // 唱针落下：搓完后几秒、「咚」的音量 / 音高（Hz）/ 长短（秒）、「嗒」的音量；gain 0 = 不要
+    throttle: 0.8      // 这么多秒以内只响一次
   };
   let reverbIr = null;
   /** 程序生成的房间混响脉冲：1.8 秒衰减的立体声噪声 */
@@ -463,7 +485,52 @@
     });
   }
   VOICES.marker = markerVoice;
-  const RENDER_SECONDS = { parry: 1.4, stagger: 4.2, boom: 4.2, marker: 0.6 };
+
+  /* ---------- 轮到你：DJ 搓碟（数值在 SCRATCH） ---------- */
+  /** 每一下从几秒开始、多长、往哪边（1 往前推 / -1 往回拉）：第一下占 lead，剩下的几下平分，中间各停 gap */
+  function scratchPlan(S) {
+    const n = Math.max(1, Math.round(Number(S.strokes) || 1)), gap = Math.max(0, Number(S.gap) || 0);
+    const body = Math.max(0.02 * n, (Number(S.len) || 0) - gap * (n - 1));
+    const first = n > 1 ? body * Math.min(0.9, Math.max(0.1, Number(S.lead) || 0)) : body, rest = n > 1 ? (body - first) / (n - 1) : 0;
+    const out = [];
+    for (let i = 0, at = 0; i < n; i++) { const len = i ? rest : first; out.push({ at, len, dir: i % 2 ? -1 : 1 }); at += len + gap; }
+    return out;
+  }
+  /** 半个正弦（两头 0、中间 1）从 a 走到 b 再回到 a：一下搓过去的速度（点数取单数，正中间那一点正好到 b） */
+  function sweep(a, b, pts) {
+    const c = new Float32Array(pts || 33);
+    for (let i = 0; i < c.length; i++) c[i] = a + (b - a) * Math.sin(Math.PI * i / (c.length - 1));
+    return c;
+  }
+  function scratchVoice(t, v) {
+    const S = SCRATCH;
+    scratchPlan(S).forEach(st => {
+      const at = t + st.at, k = st.dir < 0 ? S.back : 1;
+      const g = ctx.createGain();
+      g.gain.value = 0;
+      g.gain.setValueCurveAtTime(sweep(0, S.gain * v * k), at, st.len);
+      g.connect(master);
+      const bp = filter("bandpass", S.low, S.q, g);
+      bp.frequency.setValueCurveAtTime(sweep(S.low, S.low + (S.high - S.low) * k), at, st.len);
+      const s = noise(at, st.len, bp);
+      s.playbackRate.setValueCurveAtTime(sweep(0.25, Math.max(0.3, S.speed * k)), at, st.len);
+      if (S.tone > 0) {
+        // 不用 osc()：它会在同一刻先 setValueAtTime，有的浏览器不让扫频曲线和它叠在同一刻
+        const tg = ctx.createGain(); tg.gain.value = S.tone; tg.connect(bp);
+        const o = ctx.createOscillator(); o.type = "sawtooth"; o.frequency.value = S.toneLow;
+        o.frequency.setValueCurveAtTime(sweep(S.toneLow, S.toneLow + (S.toneHigh - S.toneLow) * k), at, st.len);
+        o.connect(tg); o.start(at); o.stop(at + st.len + 0.02);
+      }
+    });
+    const N = S.needle, plan = scratchPlan(S), end = plan[plan.length - 1];
+    if (N && N.gain > 0) {
+      const at = t + end.at + end.len + Math.max(0, N.at);
+      osc("sine", at, N.len, N.freq, N.freq * 0.5, gainEnv(at, 0.002, N.gain * v, N.len));
+      if (N.click > 0) noise(at, 0.012, filter("highpass", 2400, 0.7, gainEnv(at, 0.001, N.click * v, 0.012)));
+    }
+  }
+  VOICES.scratch = scratchVoice;
+  const RENDER_SECONDS = { parry: 1.4, stagger: 4.2, boom: 4.2, marker: 0.6, scratch: 1.2 };
 
   function play(element, opt) {
     opt = opt || {};
@@ -522,6 +589,8 @@
   function boom() { return play("boom", { throttle: 0.25 }); }
   /** 首领机制点名的提示音（头顶的图标新出现那一下）：几个人同一刻被点名只响一声；音效关着不响 */
   function marker() { return play("marker", { throttle: MARKER_PING.throttle }); }
+  /** 轮到你的提示音（联机玩家轮到自己的角色行动，online-ui.js）：DJ 搓碟；音效关着不响；SCRATCH.throttle 秒以内只响一次 */
+  function scratch(opt) { return play("scratch", Object.assign({ throttle: SCRATCH.throttle }, opt || {})); }
 
-  window.Sfx = { render, parry, stagger, boom, marker, play, ui, playSample, hasSample, TUNE: SFX_TUNE, TONE, MARKER: MARKER_PING, UI_LABEL, enabled, setEnabled, ELEMENTS, NAMES: { physical: "物理", fire: "火", ice: "冰", electric: "电", acid: "酸", energy: "能量", harmonic: "谐波" } };
+  window.Sfx = { render, parry, stagger, boom, marker, scratch, scratchPlan: () => scratchPlan(SCRATCH), play, ui, playSample, hasSample, TUNE: SFX_TUNE, TONE, MARKER: MARKER_PING, SCRATCH, UI_LABEL, enabled, setEnabled, ELEMENTS, NAMES: { physical: "物理", fire: "火", ice: "冰", electric: "电", acid: "酸", energy: "能量", harmonic: "谐波" } };
 })();
