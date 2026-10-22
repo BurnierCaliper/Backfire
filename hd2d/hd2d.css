@@ -198,6 +198,20 @@
 .hd2d-plate.dim.hover .pl-in, .hd2d-plate.dim.sel .pl-in { filter: none; }
 /* 特写（#237，近景里双击一个单位）：它的铭牌在场景里再放大（transform 的 scale 乘 CAMERA.close.zoom）、叠在最上面（.close）；别的铭牌压到它的藏起来 */
 .hd2d-plate.hide .pl-in, .hd2d-plate.hide .pl-post { visibility: hidden; }
+/* 首领机制（正式画面，#283）：铭牌上方一排图标（被点名的标记、首领正在读条的机制）。图标是旧画面单位卡的那一套（game.css 的 .mech-ico：贴纸 + 角上的大号数字 = 还有几回合，
+ * 最后一回合脉动），HTML 由 unit-card.js 生成；大小 --mi、离卡片多高 --mg 由场景按 hd2d-scene.js 的 MECH 写在铭牌层上。
+ * 鼠标停在图标上（触屏点一下）弹旧画面那个说明（unit-card.js 的 .mech-tip）；展开的详细信息（.pl-more）让到图标上面 */
+.pl-mechs { position: absolute; left: 50%; bottom: calc(100% + var(--mg, 8px)); z-index: 2; display: flex; justify-content: center; gap: 9px; transform: translateX(-50%); pointer-events: none; }
+.pl-mechs .mech-ico { pointer-events: auto; }
+.hd2d-plate.has-mech .pl-more { bottom: calc(100% + var(--mi, 30px) + var(--mg, 8px) + 12px); }
+/* 踩塔（正式画面，#283）：地台前沿立一块（unit-card.js · towerMarkHtml：塔的图标 + 几人 / 要几人，人数不够标红），和旧画面区名旁边的同一份；
+ * 地台上那一圈环在场景里画（hd2d-scene.js 的 TOWER） */
+.hd2d-tower {
+  display: inline-flex; align-items: center; gap: 12px; padding: 5px 9px; white-space: nowrap; pointer-events: none;
+  background: rgba(17, 14, 11, .78); border: 2px solid var(--ink); border-left: 4px solid #14a89a; box-shadow: 2px 3px 0 rgba(0, 0, 0, .45);
+}
+.hd2d-tower.short { border-left-color: #d8322a; }
+.hd2d-tower .mech-ico { pointer-events: auto; }
 /* 减少动态效果：铭牌不浮动、小箭头不动（场景那边其它动画也停） */
 .hd2d-labels.still .pl-bob, .hd2d-labels.still .pl-mark { animation: none; }
 @media (prefers-reduced-motion: reduce) { .pl-bob, .pl-mark { animation: none; } }
@@ -268,6 +282,10 @@
 .g-app.hd2d-on > .g-field { visibility: hidden; }
 .g-app.hd2d-on > .g-field > .hd2d-field, .g-app.hd2d-on > .g-field > .g-topstack { visibility: visible; }
 .hd2d-field { position: absolute; inset: 0; z-index: 5; overflow: hidden; background: #111; color: var(--canvas); font: 14px/1.4 var(--ui-sans); user-select: none; }
+/* 首领机制横幅 + 援军倒计时（unit-card.js · paintBanner / topStack，旧画面同一份）：压在 3D 战场上面，不被挡住（#283；云雾转场 .hd2d-mist 在更上面） */
+.g-app.hd2d-on > .g-field > .g-topstack { z-index: 6; }
+/* 纸片感的淡影子（#283）：正式画面挂进 3D 战场这一层（hd2d-play.js · shadeIn），压在 3D 画面、天气层上面，铭牌下面 */
+.hd2d-field > #hd2d-shade { z-index: 0; }
 /* 天气的 2D 层傍晚 / 夜晚借 weather-fx.css 的夜晚样子（hd2d-wfx.js 给这一层加 .g-app.is-night）：正式画面的 game.css / hotseat.css 给 .g-app 排了整页的网格、定了高度，
  * 这一层不吃那些，还是铺满 3D 画面的一层 */
 .hd2d-field .hd2d-wfx.g-app { display: block; height: auto; padding: 0; overflow: hidden; grid-template: none; }

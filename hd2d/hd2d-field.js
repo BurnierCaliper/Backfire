@@ -8,7 +8,9 @@
  *   · 点铭牌 = 点单位卡、点地台 = 点区、点危墙 / 桥梁 = 点那根竖条、点空地 = 点战场的空白、悬停铭牌 = 悬停单位卡（悬停说明挂在铭牌上）：
  *     都调 game.js 交出来的入口（GAME.fieldInput），规则判断只在 game.js 里那一份
  *   · 选目标 / 选区的标记（game.js 的 fieldMarks）画成铭牌描边、其余变暗、地台 / 间隔亮框
- *   · 2D 攻击演出（attack-fx / hit-fx / 伤害数字）先简单接上：位置问这里（rectOf / zoneRectOf：铭牌、地台、间隔按这一刻的镜头投影到屏幕上）
+ *   · 2D 攻击演出（attack-fx / hit-fx）的位置问这里（rectOf / zoneRectOf：铭牌、地台、间隔按这一刻的镜头投影到屏幕上）；
+ *     伤害 / 击破 / 治疗 / 格挡 / 状态字换成原型的纸片风数字（numbers）、打中那一下的纸片感（paper）、出手时推一下镜头（push / release），
+ *     都交给 hd2d-play.js（和原型页同一份），演出倍率、跳过跟着 game.js 的 G.fxClock 走（#283）
  *   · 三段镜头（按钮、滚轮、中景 / 近景左右键换区）、双击特写、铭牌、天气（hd2d-scene.js / hd2d-wfx.js）照原型；技能栏、队伍栏、日志用正式画面现有的
  *   · 新旧画面之间的云雾转场（#261 追加）：远景再往外拉（滚轮 / 双指）→ 镜头升到正上方 → 白色云雾涌进来盖满 → 切到旧画面（开关拨到关）→ 云雾散开；
  *     旧战场上往前滚反过来（云雾 → 切到新画面 → 云雾散开、镜头从正上方降回远景）。顶栏开关走同一个入口（switchTo）；转场中滚轮、开关都不理；
@@ -23,6 +25,7 @@
  *   HD2DField.gapRect(lens, gap, offset)                    危墙 / 桥梁在屏幕上的矩形（纯函数）
  *   HD2DField.mistPlan(to, { reduced, live }) / wheelGate(s, deltaY, 秒) / mistPuffs()   云雾转场的几段、战场上的一次滚动、一团团云雾（纯函数）
  * 页面（game.js 调）：on() / view(snaps) / actor(id) / marks(m) / rectOf(id) / zoneRectOf(区号)；switchTo("old" | "new") / transition()；boot() 在页面加载完自己跑。
+ *   攻击演出（#283）：numbers(list) 弹纸片风数字 / paper(id) 打中那一下的纸片感 / unpaper() 画布复原 / push(出手的, 目标) 推镜头（返回要等的毫秒，不推 = 0）/ release() 拉回
  * 纯函数的部分 Node 里能 require（tests/hd2d-field.test.js）。数值、文字都在 FIELD。 */
 (function (root, factory) {
   if (typeof module === "object" && module.exports) module.exports = factory(root, require("./hd2d-layout.js"));
@@ -48,7 +51,7 @@
       file: "新画面要用本地服务打开 game.html（在仓库目录运行 python3 -m http.server 8000，再打开 http://localhost:8000/game.html），先用旧画面",
       fail: "新画面打不开（这个浏览器用不了 WebGL 或 ES 模块：{0}），先用旧画面"
     },
-    scripts: ["hd2d-layout.js", "hd2d-scene-art.js", "hd2d-scenes-mine.js", "hd2d-scenes-city.js", "hd2d-scenes-desert.js", "hd2d-ui.js", "hd2d-camera.js", "hd2d-fx.js", "hd2d-wfx.js"],
+    scripts: ["hd2d-layout.js", "hd2d-scene-art.js", "hd2d-scenes-mine.js", "hd2d-scenes-city.js", "hd2d-scenes-desert.js", "hd2d-ui.js", "hd2d-camera.js", "hd2d-fx.js", "hd2d-play.js", "hd2d-wfx.js"],
     scene: "hd2d-scene.js",
     live: ["zone", "layers", "def", "defMax", "ap", "apMax", "bonus", "bonusMax", "dead", "dying", "stunned", "upOnShp", "hidden", "flying", "submerged"],
     pad: 6,
@@ -230,11 +233,12 @@
 
   /* ---------- 页面 ----------
    * S：开关想开（want）、正在加载（loading）、建好的场景（sc）/ 天气的 2D 层（wfx）/ 攻击演出的适配器（ad）/ 3D 战场那一层（stage）/ 镜头按钮（cam），
+   *    出手时推镜头（push：hd2d-play.js · HD2DPlay.camera；pushed = 推着还没拉回），
    *    最近一次排好的布局（layout）和画面用的那一份（view），game.js 给的快照（snaps）、标记（marks）、行动的人（actorId），
    *    broken = 这一次打开页面新画面打不开过（旧战场上往前滚就不再去开它，要开点开关——开关会说为什么打不开）
    * T：新旧画面之间的转场——busy 正在转（滚轮、开关都不理）、to 转去哪边（"old" / "new"）、step 走到哪一段、plan 剩下的几段（mistPlan）、mist 云雾那一层、
    *    pre 旧 → 新时云雾一涌进来就开始加载的、gen 第几次（页面重新 boot 过，旧的计时器到了也不算）、gesture 战场上这一次滚动（wheelGate） */
-  const S = { want: false, loading: null, sc: null, wfx: null, ad: null, stage: null, cam: null, camInfo: null, layout: null, view: null, snaps: null, marks: null, actorId: null, insetKey: "", broken: false };
+  const S = { want: false, loading: null, sc: null, wfx: null, ad: null, push: null, pushed: false, stage: null, cam: null, camInfo: null, layout: null, view: null, snaps: null, marks: null, actorId: null, insetKey: "", broken: false };
   const T = { busy: false, to: null, step: null, plan: null, mist: null, pre: null, gen: 0, gesture: null };
   const env = { doc: null, storage: null, load: null, hint: null, title: "", reduced: null, wait: null, now: null };
   let keysBound = false;
@@ -488,6 +492,14 @@
       }, G.fieldInput ? wire(G.fieldInput) : {}));
       S.wfx = WX.create(stage, { lens: () => HD2DFx.lens(S.sc.lensNow()), view: () => S.sc.view(), flash: () => S.sc.flash });
       S.ad = HD2DFx.adapter({ lens: () => S.sc.lensNow(), plate: (id) => S.sc.plateOf(id), zone: (id) => S.sc.zoneOf(id), size: (big) => L.plateSize(S.sc.view(), big), offset: () => stage.getBoundingClientRect() });
+      // 纸片风数字、纸片感、推镜头（hd2d-play.js，#283）：演出倍率 / 跳过用 game.js 的同一个钟（G.fxClock：「演出 1× / 2×」、协助攻击的慢放、点击跳过）；
+      // 影子那一层挂进 3D 战场这一层（压在 3D 画面上、铭牌下面）
+      const PL = root.HD2DPlay;
+      if (PL) {
+        if (typeof G.fxClock === "function") PL.setClock(G.fxClock);
+        PL.shadeIn(stage);
+        S.push = PL.camera(S.sc);
+      }
     } catch (e) { teardown(false); throw e; }
     app.classList.add("hd2d-on");
     S.broken = false;
@@ -501,7 +513,10 @@
     if (S.wfx) { try { S.wfx.dispose(); } catch (e) {} }
     if (S.stage && S.stage.remove) S.stage.remove();
     const hadStage = !!S.stage;
-    S.sc = S.wfx = S.ad = S.stage = S.cam = S.camInfo = S.layout = S.view = null;
+    // 纸片风数字、影子拿掉，attack-fx 的画布复原（旧画面照旧画在没压扁的画布上）
+    if (hadStage && root.HD2DPlay) { root.HD2DPlay.clear(); root.HD2DPlay.shadeIn(null); }
+    S.sc = S.wfx = S.ad = S.push = S.stage = S.cam = S.camInfo = S.layout = S.view = null;
+    S.pushed = false;
     S.insetKey = "";
     const app = env.doc && env.doc.getElementById("g-app");
     if (app) app.classList.remove("hd2d-on");
@@ -654,7 +669,42 @@
   /** 一个区的地台在屏幕上的外框（范围攻击画满整个区：game.js · zoneRectOf） */
   function zoneRectOf(zone) { return S.sc && S.ad ? S.ad.zoneRectOf(Number(zone)) : null; }
 
-  const api = { FIELD, MIST, enabled, setEnabled, viewState, layoutOpts, marksOf, wire, gapRect, mistPlan, wheelGate, wheelPixels, mistPuffs, boot, on, view, actor, marks, rectOf, zoneRectOf, switchTo, transition };
+  /* ---------- 攻击演出：纸片风数字、纸片感、推镜头（#283，game.js · playTape 一下一下调；都交给 hd2d-play.js）---------- */
+  /** 数字摆位要的画面：战场那一格在视口里的位置（数字和铭牌的矩形一样是视口坐标）、大小，上下被首领横幅 / 镜头按钮盖住的像素（场景的 insets） */
+  function fxView() {
+    const r = S.stage.getBoundingClientRect(), v = S.sc.view();
+    return { x: r.left, y: r.top, width: v.width, height: v.height, top: v.top || 0, bottom: v.bottom || 0 };
+  }
+  /** 弹纸片风数字：list = [{ unitId, kind, text, el }]（game.js 按 hd2d-fx.js · numberOf 挑好的，投影里没给数的已经去掉）。
+   *  摆位、字号、颜色、时长照 hd2d-fx.js 的 FX（近景大远景小，两两不压住，也不压住画面上还没消失的）；跳过时不弹。没开返回 [] */
+  function numbers(list) {
+    if (!S.sc || !S.ad || !S.stage || !root.HD2DPlay) return [];
+    return root.HD2DPlay.numbers(list, rectOf, fxView());
+  }
+  /** 打中那一下的纸片感：attack-fx 的画布按镜头俯角压扁、脚下地台上一道淡影子；影子淡掉时画布自己复原（hd2d-fx.js 的 FX.paper，跟着演出倍率） */
+  function paper(id) {
+    if (!S.sc || !S.ad || !root.HD2DPlay || !root.HD2DFx) return false;
+    return root.HD2DPlay.paperHit(rectOf(id), S.sc.lensNow(), { hold: root.HD2DFx.FX.paper.shadow.dur });
+  }
+  /** 画布马上复原（击倒的红叉要停一阵，不画在压扁的画布上） */
+  function unpaper() { if (root.HD2DPlay) root.HD2DPlay.unpaper(); }
+  /** 出手时镜头稍微推一下（远景 / 中景；hd2d-play.js · HD2DPlay.camera → hd2d-fx.js · pushPose）：推过去要 FX.push.in 秒（跟着演出倍率）。
+   *  返回 game.js 要等多少毫秒再出手（推到位再出手，弹道才对得上铭牌；没推 = 0）。近景、减少动态效果、跳过、转场中都不推 */
+  function push(actorId, targetId) {
+    if (!S.sc || !S.push || !root.HD2DFx || !root.HD2DPlay) return 0;
+    const P = root.HD2DFx.FX.push;
+    if (!S.push.push(actorId, targetId, P.in * root.HD2DPlay.clock)) return 0;
+    S.pushed = true;
+    return P.in * 1000;
+  }
+  /** 演完拉回推之前的镜头（FX.push.out 秒，跟着演出倍率；跳过了就直接回去）；没推过不管 */
+  function release() {
+    if (!S.pushed) return;
+    S.pushed = false;
+    if (S.push && root.HD2DFx && root.HD2DPlay) S.push.release(root.HD2DFx.FX.push.out * root.HD2DPlay.clock);
+  }
+
+  const api = { FIELD, MIST, enabled, setEnabled, viewState, layoutOpts, marksOf, wire, gapRect, mistPlan, wheelGate, wheelPixels, mistPuffs, boot, on, view, actor, marks, rectOf, zoneRectOf, numbers, paper, unpaper, push, release, switchTo, transition };
   // 页面里：等页面加载完（game.js 的 boot 先登记在 DOMContentLoaded 上，先跑）再接开关
   if (!(typeof module === "object" && module.exports) && root.document) {
     if (root.document.readyState === "loading") root.document.addEventListener("DOMContentLoaded", () => boot());
