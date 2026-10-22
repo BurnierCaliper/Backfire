@@ -424,6 +424,18 @@
     const pair = (cur, max) => ({ cur: Math.max(0, num(cur, 0)), max: Math.max(0, num(max, 0)) });
     return { ap: pair(u.ap, u.apMax), bonus: pair(u.bonus, u.bonusMax) };
   }
+  /** 首领机制（#283）：被点名的标记（marks）、首领正在读条的机制（casts）——投影里主机算好的 display.marks / casts
+   *  （online-view.js · displayOf，和联机玩家的单位卡同一份：online-battle.js · snapUnit）。铭牌上方画成 unit-card.js 的图标；没有 = null */
+  function mechsOf(u) {
+    const d = u.display || {}, pick = (list) => (Array.isArray(list) ? list.filter(x => x && typeof x === "object" && x.type) : []);
+    const marks = pick(d.marks), casts = pick(d.casts);
+    return marks.length || casts.length ? { marks, casts } : null;
+  }
+  /** 区域上的踩塔（#283）：投影里的 zoneView[区].towers（online-view.js · zoneViewOf，旧画面 game.js · snapEnv 的 towers 同一份）；没有 = [] */
+  function towersOf(state, id) {
+    const zv = state && state.zoneView && state.zoneView[String(id)];
+    return zv && Array.isArray(zv.towers) ? zv.towers.filter(t => t && typeof t === "object" && t.type) : [];
+  }
   /** 铭牌上要写的内容。只读白名单里的字段——坚毅生命（shp）不在其中。
    *  原型页交进来的是联机投影过的状态（online-view.js · projectState），和联机玩家拿到的一样；
    *  ATK 用主机算好的实际 ATK（投影里的 display.atk，联机单位卡也是这个数：online-battle.js · snapUnit），没有就用 atk */
@@ -450,7 +462,8 @@
       side: u.isPlayer ? "player" : "foe",
       hp: { cur, max }, layers,
       def: { cur: Math.min(def, shown), max: shown, big: Math.max(defMax, def) > CONFIG.maxDefPips },
-      econ, statuses, flags
+      econ, statuses, flags,
+      mechs: mechsOf(u)
     };
     plate.text = [plate.name, "Lv" + plate.level, "ATK " + plate.atk, cur + "/" + max]
       .concat(econ ? ["行动点 " + econ.ap.cur + "/" + econ.ap.max, "附赠 " + econ.bonus.cur + "/" + econ.bonus.max] : [])
@@ -671,7 +684,8 @@
         kind: fk.kind, effects: fk.effects, highland: high,
         hole: fk.effects.includes("abyss") ? S * CONFIG.holeRatio : 0,
         // 地面主题：只给没有场地效果的地台（只是垫高的高地也算）；兜底时不给，照旧画以前的样子
-        ground: ground !== GROUND_DEFAULT && fk.effects.every(e => e === "highland") ? ground : null
+        ground: ground !== GROUND_DEFAULT && fk.effects.every(e => e === "highland") ? ground : null,
+        towers: towersOf(state, bz.id)   // 首领机制·踩塔（#283）：地台上一圈 + 前沿的图标
       };
     });
     const zoneById = {};
@@ -746,7 +760,7 @@
 
   return {
     SCENES, sceneOf,   // 区域下面的场景（#239）
-    CONFIG, KIND_ORDER, STATUS_LABELS, GROUNDS, GROUND_DEFAULT, REGIONS, REGION_ALIAS, build, boardOf, fieldKinds, plateData, arrangeUnits, gapKeyOf,
+    CONFIG, KIND_ORDER, STATUS_LABELS, GROUNDS, GROUND_DEFAULT, REGIONS, REGION_ALIAS, build, boardOf, fieldKinds, plateData, mechsOf, towersOf, arrangeUnits, gapKeyOf,
     fitView, camAt, toNdc, project, plateScale, plateRect, plateSize, liftPlates, frameTop, regionName, groundOf, lampPlan,
     outlineOf, neighborSides, insideOutline, outlineDist, offsetOutline, hashOf
   };
