@@ -383,19 +383,25 @@ test("下水道的三方混战：三区制 15%（THREE_WAY.chance 共用）；�
 });
 
 test("三方混战整场自动对打：清扫员、维护员、清扫机和狂鼠互相打，能打完、没有报错", () => {
-  let fights = 0;
+  let fights = 0, eliteHits = 0;
   for (let i = 0; i < 4; i++) {
     const c = H.load();
     const spec = { name: "下水道·三方混战", region: "下水道", zoneMode: 3, layout: "threeway", layoutLocked: true, playerZone: 2, enemies: [
       { preset: "sewer_cleaner", zone: 1 }, { preset: "sewer_keeper", zone: 1 }, { preset: "sewer_sweeper", zone: 1, count: 3 },
       { preset: "rat_biter", zone: 3 }, { preset: "rat_plague", zone: 3 }] };
     c.BattleSim.setup({ party: ["kolt", "helu", "tou"], encounter: spec, level: 4, seed: "SEWER-3W-FIGHT" + i });
+    ELITES.forEach(k => assert.ok(c.S.state.units.some(u => u.kit === k), k + " 摆上场"));
     const orig = c.dealTo;
-    c.dealTo = function (a, t, opt) { if (a && t && !a.isPlayer && !t.isPlayer && c.hostileTo(a, t)) fights++; return orig.apply(this, arguments); };
+    c.dealTo = function (a, t, opt) {
+      if (a && t && !a.isPlayer && !t.isPlayer && c.hostileTo(a, t)) fights++;
+      if (a && ELITES.includes(a.kit)) eliteHits++;
+      return orig.apply(this, arguments);
+    };
     const r = c.BattleSim.run({ maxRounds: 25 });
     assert.ok(r.winner && r.actions > 0);
   }
   assert.ok(fights > 0, "狂鼠和下水道维护打起来了");
+  assert.ok(eliteHits > 0, "两个精英出手了");
 });
 
 /* ================= 掉落、图鉴、联机 ================= */
