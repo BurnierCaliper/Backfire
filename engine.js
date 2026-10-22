@@ -1701,10 +1701,22 @@ const RAT_STATS = {
 /** 下水道维护的数值（docs/sewer-maintenance.md 第 2 节；表是 2 人队，3、4 人队的血量按 scaleHp 放大）。
  *  sweeper 下水道清扫机：血量照空投蜂群——外层护盾 shield = [1 级血量, 每级增量]、内层装甲 armor（不随等级），两层原样保留；
  *    架势 def + ⌊等级/2⌋，最多 defCap；ATK 照机器人看守（剑）：atk + ⌊等级/2⌋；
- *    dice：所有敌人都有共振时那一发远程谐波攻击的伤害骰（固定 1d4，不随等级升档）。招式的倍率、击破在 enemies.js · SEWER_CFG */
+ *    dice：所有敌人都有共振时那一发远程谐波攻击的伤害骰（固定 1d4，不随等级升档）。招式的倍率、击破在 enemies.js · SEWER_CFG
+ *  elite 触灵维护员 / 触灵清扫员（两个精英数值相同）：照警卫队队长（蜥蜴），肉体层换成星灵——外层护盾 shield = [1 级血量, 每级增量]、
+ *    每 2 级再加 shieldPer2；内层星灵 spirit = [1 级血量, 每级增量]；架势 def（不随等级，10 级起照精英规则 ×0.6）；
+ *    ATK atk + ⌊等级/2⌋ + ⌊等级/5⌋；dice：维护员普通攻击的伤害骰（固定 1d4，不随等级升档；清扫员的范围谐波没有伤害骰） */
 const SEWER_STATS = {
-  sweeper: { shield: [4, 2], armor: 1, def: 1, defCap: 3, atk: 4, dice: 4 }
+  sweeper: { shield: [4, 2], armor: 1, def: 1, defCap: 3, atk: 4, dice: 4 },
+  elite: { shield: [12, 5], shieldPer2: 5, spirit: [14, 2], def: 4, atk: 7, dice: 4 }
 };
+/** 下水道维护的两个精英共用的数值（SEWER_STATS.elite）：护盾在外、星灵在内，远程 */
+function sewerEliteOf(name, lv, p, extra) {
+  const S = SEWER_STATS.elite;
+  return unitOf(name, lv, [
+    { type: "shield", hp: scaleHp(S.shield[0] + (lv - 1) * S.shield[1] + milestone(lv, 2) * S.shieldPer2, p) },
+    { type: "spirit", hp: scaleHp(S.spirit[0] + (lv - 1) * S.spirit[1], p) }
+  ], S.def, S.atk + milestone(lv, 2) + milestone(lv, 5), Object.assign({ range: "ranged" }, extra));
+}
 
 function enemyPresets() {
   return [
@@ -1904,6 +1916,14 @@ function enemyPresets() {
       u.defMax = Math.min(S.defCap, u.defMax);
       u.def = Math.min(u.def, u.defMax);
       return u;
+    }},
+    // 触灵维护员 / 触灵清扫员（精英）：照警卫队队长（蜥蜴）的写法，肉体层换成星灵；远程，种族「触灵」（run.js · ENEMY_INFO）
+    // 维护员：普通攻击 1×atk + 1d4 电击；清扫员：普通攻击是对一区所有敌人 0.5×atk 谐波（没有伤害骰）
+    { id: "sewer_keeper", name: "触灵维护员", build(lv, p) {
+      return sewerEliteOf(this.name, lv, p, { kit: "sewer_keeper", dice: [1, SEWER_STATS.elite.dice], element: "electric" });
+    }},
+    { id: "sewer_cleaner", name: "触灵清扫员", build(lv, p) {
+      return sewerEliteOf(this.name, lv, p, { kit: "sewer_cleaner", dice: [0, 0], element: "harmonic" });
     }},
     // 第一采矿场精英（暂定数值，按狼队长的总血量 / 架势 / atk 拆成护盾、装甲、肉体三层）
     { id: "ant_guard", name: "蚁型特殊戒备兵种", build(lv, p) {
