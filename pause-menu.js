@@ -50,7 +50,10 @@
   const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const hasDoc = () => typeof document !== "undefined" && !!document.body;
   const items = new Map();
-  let box = null, online = null, lastFocus = null;
+  // 「Esc 现在有东西要取消」：选着技能、正在选目标、在播演出……（game.js、online-ui.js 告诉这里，见 addBlocker）
+  const blockers = new Set();
+  // painted：菜单上一次画的内容；lastBadge：角上按钮上一次的提示（从没有到有的那一下才弹）
+  let box = null, online = null, lastFocus = null, painted = "", lastBadge = "";
 
   /* ---------- 菜单项 ---------- */
   /** 登记一项：{ id, run(), visible?(), label?, hint?, badge?(), config? }；label / hint / 先后没给就用 PAUSE_MENU.items / order 里
@@ -90,7 +93,6 @@
     const t = PAUSE_MENU.tutorial, o = root[t.global];
     return o && typeof o[t.method] === "function" ? () => o[t.method]() : null;
   }
-  register({ id: "tutorial", visible: () => !!tutorialOpen(), run: () => { const f = tutorialOpen(); if (f) f(); } });
 
   /* ---------- 在哪能开 ---------- */
   /** 联机时由 online-ui.js 告诉这里：null = 不在房间里；{ host } = 主持人 / 玩家 */
@@ -107,21 +109,22 @@
     return !!online || PAUSE_MENU.screens.includes(document.body.dataset.screen);
   }
   const typing = t => !!(t && t.closest && t.closest(PAUSE_MENU.typing));
-  // 「Esc 现在有东西要取消」：选着技能、正在选目标、在播演出……（game.js、online-ui.js 告诉这里）。
-  // 联机舞台、热座栏会拦掉冒泡的按键，光看 preventDefault 不够：按下时就问一遍
-  const blockers = new Set();
+  // 联机舞台、热座栏会拦掉冒泡的按键，光看 preventDefault 不够：按下 Esc 时就问一遍有没有东西要取消
   /** 登记一个判断（返回 true = 这一下 Esc 留给它取消）；返回撤销函数 */
   function addBlocker(fn) { if (typeof fn === "function") blockers.add(fn); return () => blockers.delete(fn); }
   const blocked = () => [...blockers].some(fn => val(fn, false));
-  /** 有没有开着的面板 / 弹框（暂停页面自己不算） */
-  function layerOpen() {
-    if (!hasDoc()) return false;
-    return PAUSE_MENU.layers.some(sel => {
+  /** 开着的面板 / 弹框（看得见的；暂停页面自己不算） */
+  function visibleLayers() {
+    if (!hasDoc()) return [];
+    const out = [];
+    PAUSE_MENU.layers.forEach(sel => {
       let nodes;
-      try { nodes = document.querySelectorAll(sel); } catch (e) { return false; }
-      return [...nodes].some(el => !(box && (el === box || box.contains(el))) && el.getClientRects().length > 0);
+      try { nodes = document.querySelectorAll(sel); } catch (e) { return; }
+      nodes.forEach(el => { if (!(box && (el === box || box.contains(el))) && !out.includes(el) && el.getClientRects().length > 0) out.push(el); });
     });
+    return out;
   }
+  function layerOpen() { return visibleLayers().length > 0; }
 
   /* ---------- 画面 ---------- */
   function ensureBox() {
@@ -136,7 +139,6 @@
     document.body.appendChild(box);
     return box;
   }
-  let painted = "";
   /** 整张卡片（纯函数，测试也用） */
   function html(rows, isOnline) {
     const T = PAUSE_MENU.text;
@@ -169,7 +171,6 @@
       bar.insertBefore(b, bar.firstChild);
     });
   }
-  let lastBadge = "";
   function paintButtons() {
     if (!hasDoc()) return;
     const dot = dotHtml(badgeOf(list())), fresh = !!dot && !lastBadge;
@@ -206,6 +207,8 @@
   /** keepFocus：点了一项，焦点交给新打开的面板，不还给原来的元素 */
   function close(keepFocus) {
     if (!isOpen()) return false;
+    // 焦点在菜单的按钮上：先放掉（不然藏起来的按钮还拿着焦点，紧接着按空格会被当成「按这个按钮」，不结束回合）
+    if (document.activeElement && box.contains(document.activeElement)) document.activeElement.blur();
     box.hidden = true;
     document.body.classList.remove("pm-open");
     const back = lastFocus; lastFocus = null;
@@ -217,9 +220,16 @@
   function choose(id) {
     const it = items.get(id);
     if (!it || !val(it.visible, true)) return false;
+    const back = lastFocus;
     close(true);
-    if (hasDoc() && document.activeElement && box && box.contains(document.activeElement)) document.activeElement.blur();
+    const before = visibleLayers();
     it.run();
+    // 键盘焦点交给新打开的面板（第一个按钮）：接着用键盘操作，Esc 也由那个面板自己关（房间面板、克制表只认焦点在自己里面的 Esc）；
+    // 没开出新面板就还给打开菜单前的地方
+    if (!hasDoc()) return true;
+    const layer = visibleLayers().filter(el => !before.includes(el)).pop();
+    const to = (layer && layer.querySelector("button:not([disabled])")) || (back && back.isConnected && back !== document.body ? back : null);
+    if (to && typeof to.focus === "function") { try { to.focus({ preventScroll: true }); } catch (e) { /* 拿不到焦点就算了 */ } }
     return true;
   }
 
@@ -256,11 +266,12 @@
     mountButtons();
     paintButtons();
   }
+  register({ id: "tutorial", visible: () => !!tutorialOpen(), run: () => { const f = tutorialOpen(); if (f) f(); } });
   if (typeof document !== "undefined") {
     if (typeof addEventListener === "function") addEventListener("keydown", onKey, true);
     document.addEventListener("click", onClick);
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();
   }
 
-  root.PauseMenu = { CONFIG: PAUSE_MENU, register, unregister, addBlocker, list, badgeOf, html, open, close, toggle, isOpen, refresh, setOnline, allowed, layerOpen, blocked, choose, mountButtons };
+  root.PauseMenu = { CONFIG: PAUSE_MENU, register, unregister, addBlocker, list, badgeOf, html, open, close, toggle, isOpen, refresh, setOnline, allowed, layerOpen, visibleLayers, blocked, choose, mountButtons };
 })(typeof window !== "undefined" ? window : globalThis);
