@@ -326,7 +326,8 @@ body.ol-paper #online-side .ol-side-chat li.ol-muted { width: auto; color: var(-
 body.ol-paper #online-side .ol-side-chat li b { font-family: var(--olp-hand); font-weight: 400; font-size: 17px; color: color-mix(in srgb, var(--olp-note-ink) 80%, transparent); }
 body.ol-paper #online-side .ol-side-chat li small { color: color-mix(in srgb, var(--olp-note-ink) 62%, transparent); }
 body.ol-paper #online-side .ol-side-chat li p { font-family: var(--olp-sans); font-size: 15px; font-weight: 600; line-height: 1.45; color: var(--olp-note-ink); }
-/* ---------- 手机竖屏（第 4 步）：队伍只显示头像；记录 / 聊天从底下拉出来盖满屏幕；技能栏在最底下 ---------- */
+/* ---------- 手机竖屏（第 4 步；#311 让战场更大）：队伍收起只剩一列小头像；记录 / 聊天从底下拉出来盖满屏幕；技能栏在最底下，紧凑、最多占屏幕高度的 35%，平时收着 ----------
+ * 这一段的宽度要和 online-paper.js · PAPER.phone.media 一样（online-ui.js 按它决定手机上技能栏什么时候自己收起 / 展开） */
 @media (max-width: 760px) {
   body.ol-paper { --olp-top: 4px; --olp-bar: 40px; --olp-under: 96px; --olp-edge: 6px; }
   body.ol-paper .olp-top { left: 4px; right: 4px; gap: 6px; padding: 0 6px; }
@@ -359,7 +360,9 @@ body.ol-paper #online-side .ol-side-chat li p { font-family: var(--olp-sans); fo
    * 放不下的是提示栏自己滚。从上往下：「技能 ▼ · 谁 · 轮到你了」、纳米仪表一行小条、技能吊牌一行（放不下横着滑，不往下堆）、「唤出」「结束行动」同一行、提示。
    * 没手动点过「技能 ▼ / ▲」时默认收着、轮到你才展开（online-ui.js · paintPaperHud） */
   body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell, body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell.dock-closed { bottom: 0; width: 100%; padding: 8px 8px calc(6px + env(safe-area-inset-bottom)); }
-  body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell { display: flex; flex-direction: column; max-height: var(--olp-dock-max); }
+  body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell {   /* 技能栏是 <footer>：online.css 的「.ol-ui footer」那一条（换行、两头对齐、留空）压回去 */
+    display: flex; flex-flow: column nowrap; justify-content: flex-start; align-items: stretch; gap: 0; max-height: var(--olp-dock-max);
+  }
   body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > :is(.hd2d-dock-row, .hud-row) { flex: none; min-width: 0; }
   body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell:not(.dock-closed) > .hd2d-dock-row { margin-bottom: 4px; }
   body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hint { flex: 0 1 auto; min-height: 0; overflow-y: auto; margin-top: 4px; font-size: 12px; }

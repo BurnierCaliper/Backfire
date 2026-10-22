@@ -916,7 +916,8 @@
       want.forEach(n => paperWatch.observe(n, n.classList.contains("hd2d-cam") ? { subtree: true, attributes: true, attributeFilter: ["class"] }
         : { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["class", "disabled", "hidden"] }));
     }
-    /** 纸片画面：队伍栏下面接「角色资料 / 武器 / 背包」（原来舞台顶上那一排里的三个，同一个画法、同一个处理），技能栏那一行写「轮到你了」；不是纸片画面就拿掉 */
+    /** 纸片画面：队伍栏下面接「角色资料 / 武器 / 背包」（原来舞台顶上那一排里的三个，同一个画法、同一个处理），技能栏那一行写「轮到你了」；不是纸片画面就拿掉。
+     *  手机竖屏上技能栏没手动点过时，轮到你才展开（#311） */
     function paintPaperHud(el) {
       const panel = el.querySelector(".g-hud > .hd2d-party"), row = el.querySelector(".g-hud > .hd2d-dock-row");
       let tools = el.querySelector(".olp-party-tools"), turn = el.querySelector(".olp-turn");

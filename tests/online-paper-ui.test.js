@@ -57,7 +57,7 @@ async function paperPage(t, opt) {
   await page.goto(pathToFileURL(file("online-paper.css")).href);
   // 字体照 game.html 加载 fonts/fonts.css（标题、名字、模板字……量出来的宽度和真画面一样）
   await page.setContent('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="' + pathToFileURL(file("fonts/fonts.css")).href + '"><body><section id="scr-title"><div class="t-menu"></div></section><main class="g-app" id="g-app"><header class="g-top"><button id="g-hd2d-toggle" type="button">新画面 关</button></header>单机的战斗画面</main></body>');
-  for (const f of ["game.css", "skin.css", "hotseat.css", "online.css", "online-gm-ui.css", "workshop.css", "matchup.css", "pause-menu.css", "hd2d/hd2d.css", "online-paper.css"]) await page.addStyleTag({ path: file(f) });
+  for (const f of ["game.css", "skin.css", "hotseat.css", "online.css", "online-gm-ui.css", "hud-icons.css", "workshop.css", "matchup.css", "pause-menu.css", "hd2d/hd2d.css", "online-paper.css"]) await page.addStyleTag({ path: file(f) });
   await page.evaluate(([shp, shpMax, on]) => {
     if (on) localStorage.setItem("backfire-hd2d-field", "on");
     const players = [{ id: "gm", name: "主持人", gm: true, online: true }, { id: "p1", name: "甲", online: true }, { id: "p2", name: "乙", online: true }];
@@ -670,6 +670,195 @@ test("手机竖屏：抽屉收着时顶栏、吊牌、队伍头像、竖标签�
   await page.waitForFunction(() => document.getElementById("online-side").classList.contains("ol-side-collapsed"));
   check(await boxes(), "关掉以后");
   await shot(page, "paper-review-phone");
+  assert.deepEqual(o.errors, []);
+});
+
+/* ---------- 手机竖屏让战场更大（#311）：技能栏紧凑、默认收起 / 轮到你展开，队伍收起只剩一列小头像 ---------- */
+const PHONE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true };
+/** 技能多的一手（瑞比：九个普通技能 + 唤出武器人，身上有纳米仪表）：主机给的技能选项换成这一套，选了技能以后照旧问目标 */
+const RICH_SKILLS = [["ruby_aa", "普通攻击", "行动 1"], ["ruby_trigger", "扳机", "行动 1"], ["ruby_surge", "过载", "行动 1"], ["ruby_short", "短路", "行动 2"], ["ruby_algo", "算法", "附赠 1"],
+  ["ruby_relay", "收发代理", "附赠 1"], ["ruby_refuel", "补充能源", "附赠 1"], ["__move", "移动", "附赠 1"], ["__item", "道具", "附赠 1"], ["ruby_summon", "唤出武器人", "附赠 1"]];
+const richTurn = page => page.evaluate(rows => {
+  fixture.view.state.units.find(u => u.id === "a").hud = { kit: "ruby", nano: 60, reserve: 0, mecha: false, showDrone: true, drone: false, boost: false };
+  const ask = OnlineGame.actionMenu;
+  OnlineGame.actionMenu = async request => (request.skill ? ask(request)
+    : { type: "actionOptions", displayOnly: true, actor: request.actor, choices: { kind: "skill", options: rows.map(([value, label, cost]) => ({ value, label, cost })) } });
+}, RICH_SKILLS);
+/** 轮到谁（online-ui.js · isMyTurn、吊牌看的都是收到的包里的 view）：a = 自己的红玉，b = 队友的绯秋 */
+const turnTo = (page, actor) => page.evaluate(actor => { const v = fixture.view.packet.view; v.currentUnitId = actor; v.order.forEach(s => { s.current = s.actor === actor; }); fixture.emit(); }, actor);
+const dockClosed = page => page.evaluate(() => document.querySelector(".ol-battle > .g-hud").classList.contains("dock-closed"));
+const waitDock = (page, closed) => page.waitForFunction(c => { const h = document.querySelector(".ol-battle > .g-hud.hd2d-shell"); return !!h && h.classList.contains("dock-closed") === c; }, closed);
+
+test("手机竖屏（#311）：展开的技能栏紧凑——纳米仪表一行小条、技能吊牌矮一点排成一行（放不下横着滑）、「唤出」「结束行动」同一行；整个技能栏最多占屏幕高度的 35%（配置表 PAPER.phone.dockMax），字多了是提示栏自己滚；抽屉照旧", { timeout: 60000 }, async t => {
+  const o = await paperPage(t, { context: PHONE }); if (!o) return; const { page } = o;
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await richTurn(page);
+  await asPlayer(page);
+  await page.waitForFunction(() => document.querySelectorAll(".ol-battle .skills .sk").length === 9 && document.querySelector(".ol-battle .summonbtn") && document.querySelector(".ol-battle .hi-gauge .ind"));
+  if (await dockClosed(page)) await page.click(".ol-battle .hd2d-dock-toggle");   // 展开的样子：没自己展开就点开了再量
+  await page.waitForFunction(() => !!document.querySelector(".ol-battle .endturn[data-olp-tex]"));
+  await settle(page);
+  const max = 35, conf = await page.evaluate(() => OnlinePaper.PAPER.phone && OnlinePaper.PAPER.phone.dockMax);
+  const m = await page.evaluate(() => {
+    const hud = document.querySelector(".ol-battle > .g-hud"), q = s => hud.querySelector(s);
+    const r = el => { const b = el.getBoundingClientRect(); return { top: b.top, left: b.left, right: b.right, bottom: b.bottom, width: b.width, height: b.height }; };
+    const skills = q(".skills"), sks = [...skills.querySelectorAll(".sk")];
+    return {
+      vh: innerHeight, dock: r(hud).height, bottom: r(hud).bottom, gauge: r(q(".hi-gauge")).height,
+      inds: [...hud.querySelectorAll(".hi-gauge .ind")].map(i => Math.round(r(i).top + r(i).height / 2)),
+      rows: new Set(sks.map(s => s.offsetTop)).size, sk: Math.max(...sks.map(s => s.offsetHeight)),
+      scroll: { x: getComputedStyle(skills).overflowX, sw: skills.scrollWidth, cw: skills.clientWidth },
+      summon: r(q(".hud-summon")), side: r(q(".hud-side"))
+    };
+  });
+  assert.ok(m.dock <= m.vh * max / 100 + 1, `展开的技能栏最多占屏幕高度的 ${max}%：${m.dock} / ${m.vh}`);
+  assert.equal(conf, max, "这个数在配置表里（online-paper.js · PAPER.phone.dockMax）");
+  assert.ok(Math.abs(m.bottom - m.vh) < 1, "还是贴在最底下");
+  assert.ok(m.gauge <= 30, "纳米仪表缩成一行小条：" + m.gauge);
+  assert.ok(m.inds.length >= 3 && Math.max(...m.inds) - Math.min(...m.inds) <= 2, "仪表的几项排在同一行：" + m.inds);
+  assert.equal(m.rows, 1, "九个技能吊牌排成一行，不往下堆");
+  assert.ok(m.sk <= 40, "吊牌矮一点：" + m.sk);
+  assert.ok(m.scroll.x === "auto" && m.scroll.sw > m.scroll.cw, "一行放不下的横着滑：" + JSON.stringify(m.scroll));
+  assert.ok(Math.abs(m.summon.top - m.side.top) < 1 && m.summon.right <= m.side.left + 1, "「唤出」「结束行动」在同一行：" + JSON.stringify([m.summon, m.side]));
+  assert.ok(m.summon.height <= 44 && m.side.height <= 44, "两个按钮都不高：" + [m.summon.height, m.side.height]);
+  await shot(page, "paper-311-phone-dock");
+  // 滑到最后一个技能：照旧是同一个按钮，点了照旧问主机（选目标）
+  await page.click('.ol-battle [data-ob-skill="__item"]');
+  await page.waitForFunction(() => /选择目标/.test(document.querySelector(".ol-battle > .g-hud .hint").textContent));
+  // 提示栏字多：技能栏还是不超过 35%，提示栏自己滚（选目标的按钮都还在）
+  await page.evaluate(() => { const h = document.querySelector(".ol-battle > .g-hud .hint"); h.insertAdjacentHTML("afterbegin", "<span>" + "提示栏里字很多。".repeat(60) + "</span>"); });
+  await settle(page);
+  const tall = await page.evaluate(() => {
+    const h = document.querySelector(".ol-battle > .g-hud"), hint = h.querySelector(".hint"), box = el => el.getBoundingClientRect();
+    return { dock: box(h).height, vh: innerHeight, scroll: getComputedStyle(hint).overflowY, sh: hint.scrollHeight, ch: hint.clientHeight, cancel: !!hint.querySelector('[data-ob="cancel"]'),
+      order: [".hd2d-dock-row", ".hud-row", ".hint"].map(s => Math.round(box(h.querySelector(":scope > " + s)).top)), inside: box(hint).bottom <= box(h).bottom + 1 };
+  });
+  assert.ok(tall.dock <= tall.vh * max / 100 + 1 && tall.scroll === "auto" && tall.sh > tall.ch + 20 && tall.inside && tall.cancel, "字多了也不超过 35%，提示栏在技能栏里面自己滚：" + JSON.stringify(tall));
+  assert.ok(tall.order[0] < tall.order[1] && tall.order[1] < tall.order[2], "从上往下：技能 ▼ 那一行、仪表 / 技能 / 按钮、提示：" + tall.order);
+  await shot(page, "paper-311-phone-longhint");
+  // 记录 / 聊天的抽屉照旧：从底下拉出来盖满屏幕，点收起按钮回到竖标签
+  await page.click("#online-side [data-side-collapse]");
+  await page.waitForFunction(() => !document.getElementById("online-side").classList.contains("ol-side-collapsed"));
+  const sheet = await rect(page, "#online-side");
+  assert.deepEqual([sheet.left, sheet.top, Math.round(sheet.width), Math.round(sheet.height)], [0, 0, sheet.vw, sheet.vh], "拉出来盖满屏幕");
+  await page.click("#online-side [data-side-collapse]");
+  await page.waitForFunction(() => document.getElementById("online-side").classList.contains("ol-side-collapsed"));
+  assert.deepEqual(o.errors, []);
+});
+
+test("手机竖屏（#311）：技能栏没手动点过时默认收起、轮到你自动展开、你行动完又收起（都不记）；手动点过「技能 ▼ / ▲」的以手动的为准，记在本机（重新挂一次界面还是那样；存不了也照这次点的）", { timeout: 60000 }, async t => {
+  const o = await paperPage(t, { context: PHONE }); if (!o) return; const { page } = o;
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.evaluate(() => { const v = fixture.view.packet.view; v.currentUnitId = "b"; v.order.forEach(s => { s.current = s.actor === "b"; }); });
+  await asPlayer(page);
+  await page.waitForSelector(".ol-battle .hd2d-dock-toggle", { state: "visible" });
+  await settle(page);
+  // 不是你：收着（只剩「技能 ▲ · 谁」一行），战场让出来
+  assert.equal(await dockClosed(page), true, "默认收起");
+  const closed = await rect(page, ".ol-battle > .g-hud");
+  assert.ok(closed.height < 70, "收成一行：" + closed.height);
+  assert.match(await page.locator(".ol-battle .hd2d-dock-toggle").innerText(), /技能 ▲/);
+  // 轮到你：自动展开（「轮到你了」）；行动完（轮到队友）又收起；再轮到你又展开
+  await turnTo(page, "a");
+  await waitDock(page, false);
+  assert.match(await page.locator(".ol-battle .hd2d-dock-row").innerText(), /技能 ▼[\s\S]*轮到你了/);
+  await shot(page, "paper-311-phone-myturn");
+  await turnTo(page, "b");
+  await waitDock(page, true);
+  await shot(page, "paper-311-phone-waiting");
+  await turnTo(page, "a");
+  await waitDock(page, false);
+  assert.equal(await page.evaluate(() => localStorage.getItem("backfire-hd2d-dock")), null, "自己收起 / 展开的不记在本机");
+  // 手动收起：以手动的为准——轮次换了也不再自己展开；记在本机，重新挂一次界面还是收着
+  await page.click(".ol-battle .hd2d-dock-toggle");
+  await waitDock(page, true);
+  assert.equal(await page.evaluate(() => localStorage.getItem("backfire-hd2d-dock")), "closed");
+  await turnTo(page, "b"); await turnTo(page, "a"); await settle(page);
+  assert.equal(await dockClosed(page), true, "手动收起的：轮到你也不自己展开");
+  await page.evaluate(() => { HD2DField.switchTo("old"); HD2DField.switchTo("new"); OnlineUI.mount(OnlineGame); });
+  await page.waitForFunction(() => document.body.classList.contains("ol-paper") && !!document.querySelector(".ol-battle > .g-hud.hd2d-shell"));
+  await settle(page);
+  assert.equal(await dockClosed(page), true, "重新挂一次界面：还是手动收起的那样");
+  // 手动展开：不是你也开着
+  await page.click(".ol-battle .hd2d-dock-toggle");
+  await waitDock(page, false);
+  await turnTo(page, "b"); await settle(page);
+  assert.equal(await dockClosed(page), false, "手动展开的：轮到队友也不收");
+  assert.equal(await page.evaluate(() => localStorage.getItem("backfire-hd2d-dock")), "open");
+  // 本机存不了（隐私模式）：照样默认收起、轮到你展开；这次手动点过的照这次点的
+  await page.evaluate(() => { localStorage.clear(); HD2DField.switchTo("old"); HD2DField.switchTo("new"); Storage.prototype.setItem = () => { throw new Error("QuotaExceededError"); }; OnlineUI.mount(OnlineGame); });
+  await page.waitForFunction(() => document.body.classList.contains("ol-paper") && !!document.querySelector(".ol-battle > .g-hud.hd2d-shell"));
+  await waitDock(page, true);
+  await turnTo(page, "a");
+  await waitDock(page, false);
+  await page.click(".ol-battle .hd2d-dock-toggle");
+  await waitDock(page, true);
+  await turnTo(page, "b"); await turnTo(page, "a"); await settle(page);
+  assert.equal(await dockClosed(page), true, "存不了：这次手动收起的照样以手动的为准");
+  assert.deepEqual(o.errors, []);
+});
+
+test("手机竖屏（#311）：队伍收起时只剩一列小头像，没有「角色资料 / 武器 / 背包」；三个按钮在展开的队伍栏里（和名字、血条一起，排成一行）", { timeout: 60000 }, async t => {
+  const o = await paperPage(t, { context: PHONE }); if (!o) return; const { page } = o;
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await asPlayer(page);
+  await page.waitForSelector(".hd2d-party .hd2d-party-toggle", { state: "visible" });
+  await settle(page);
+  const look = () => page.evaluate(() => {
+    const panel = document.querySelector(".hd2d-party"), pr = panel.getBoundingClientRect(), vis = el => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden";
+    const faces = [...panel.querySelectorAll(".pm .face")].map(f => f.getBoundingClientRect());
+    const tools = [...panel.querySelectorAll("[data-online]")].filter(vis).map(b => ({ info: b.dataset.info, r: b.getBoundingClientRect() }));
+    return { collapsed: panel.classList.contains("collapsed"), panel: { l: pr.left, t: pr.top, r: pr.right, b: pr.bottom, w: pr.width }, vw: innerWidth,
+      faces: faces.map(f => ({ l: Math.round(f.left), w: f.width, b: f.bottom })), names: [...panel.querySelectorAll(".pm .meta")].filter(vis).length,
+      tools: tools.map(x => x.info), toolTops: [...new Set(tools.map(x => Math.round(x.r.top)))], toolsIn: tools.every(x => x.r.left >= pr.left - 1 && x.r.right <= pr.right + 1 && x.r.bottom <= pr.bottom + 1) };
+  });
+  // 收起（手机上没记过：收着）：一列小头像，下面什么都不连
+  let s = await look();
+  assert.equal(s.collapsed, true, "手机上默认收着");
+  assert.ok(s.faces.length === 2 && new Set(s.faces.map(f => f.l)).size === 1, "一列头像：" + JSON.stringify(s.faces));
+  assert.ok(s.faces.every(f => f.w <= 28), "头像小一点：" + JSON.stringify(s.faces));
+  assert.equal(s.names, 0, "名字、血条不显示");
+  assert.deepEqual(s.tools, [], "收起时没有角色资料 / 武器 / 背包");
+  assert.ok(s.panel.b <= Math.max(...s.faces.map(f => f.b)) + 12 && s.panel.w < 70, "只有头像那么长、那么宽（不挡左边的铭牌）：" + JSON.stringify(s));
+  await shot(page, "paper-311-phone-party");
+  // 展开：名字、血条出来了，三个按钮在展开的队伍栏最下面排成一行（不是一长列）
+  await page.click(".hd2d-party .hd2d-party-toggle");
+  await page.waitForFunction(() => !document.querySelector(".hd2d-party").classList.contains("collapsed"));
+  await settle(page);
+  s = await look();
+  assert.equal(s.names, 2, "展开才有名字、血条");
+  assert.deepEqual(s.tools, ["sheet", "armory", "bag"], "角色资料 / 武器 / 背包在展开的队伍栏里");
+  assert.ok(s.toolTops.length === 1 && s.toolsIn, "三个按钮排成一行、在队伍栏里面：" + JSON.stringify(s));
+  assert.ok(s.panel.w <= s.vw * 0.6, "展开了也不占半个屏幕以上：" + JSON.stringify(s.panel));
+  await shot(page, "paper-311-phone-party-open");
+  // 点「角色资料」：还是原来那一个按钮（同一个 data-online，打开同一个浮层）
+  await page.click('.hd2d-party [data-online="info"][data-info="sheet"]');
+  await page.waitForFunction(() => fixture.calls.some(c => c.kind === "sheetData"));
+  // 再收起：三个按钮又藏起来
+  await page.evaluate(() => { const c = document.querySelector('.ol-modal [data-close], .ol-modal .ol-close, [data-online-close]'); if (c) c.click(); });
+  await page.evaluate(() => document.querySelector(".hd2d-party .hd2d-party-toggle").click());
+  await page.waitForFunction(() => document.querySelector(".hd2d-party").classList.contains("collapsed"));
+  s = await look();
+  assert.deepEqual(s.tools, [], "收起又没有了");
+  assert.deepEqual(o.errors, []);
+});
+
+test("电脑上不变（#311）：技能栏照旧默认展开、不跟着轮次收起 / 展开，没有手机上的限高；队伍栏展开的样子照旧", { timeout: 60000 }, async t => {
+  const o = await paperPage(t); if (!o) return; const { page } = o;
+  await page.evaluate(() => { const v = fixture.view.packet.view; v.currentUnitId = "b"; v.order.forEach(s => { s.current = s.actor === "b"; }); });
+  await asPlayer(page);
+  await page.waitForSelector(".ol-battle .hd2d-dock-toggle", { state: "visible" });
+  await settle(page);
+  assert.equal(await dockClosed(page), false, "不是你也开着（同以前）");
+  await turnTo(page, "a"); await settle(page);
+  assert.equal(await dockClosed(page), false);
+  await turnTo(page, "b"); await settle(page);
+  assert.equal(await dockClosed(page), false, "轮次换了不自己收起");
+  const cs = await page.evaluate(() => { const c = getComputedStyle(document.querySelector(".ol-battle > .g-hud")); return { max: c.maxHeight, display: c.display }; });
+  assert.deepEqual(cs, { max: "none", display: "block" }, "电脑上没有手机的排法");
+  assert.equal(await page.isVisible(".hd2d-party .pm .meta"), true, "队伍栏有名字");
+  assert.deepEqual(await page.locator(".hd2d-party .olp-party-tools [data-online]").evaluateAll(els => els.map(e => e.dataset.info)), ["sheet", "armory", "bag"]);
+  assert.equal(await page.evaluate(() => localStorage.getItem("backfire-hd2d-dock")), null);
   assert.deepEqual(o.errors, []);
 });
 
