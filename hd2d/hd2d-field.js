@@ -478,9 +478,22 @@
     const r = wheelGate(T.gesture, wheelPixels(e), env.now());
     T.gesture = r.state;
     if (T.busy || T.gesture.ate) { e.preventDefault(); e.stopPropagation(); return; }
+    // 联机玩家的旧战场自己会滚动：还没滚到顶就照旧滚，这一次滚动不打开新画面（#289）
+    if (!S.want && !S.sc && scrollsUp(e)) { T.gesture.done = true; return; }
     if (S.want || S.sc || r.step !== 1 || e.ctrlKey || isFile() || S.broken) return;
     e.preventDefault(); e.stopPropagation();
     if (switchTo("new")) T.gesture.ate = true;
+  }
+
+  /** 滚轮落在的地方（联机的战场、区）还能往上滚：联机玩家的旧战场单位多时自己会滚动，往回滚不能被当成「打开新画面」。单机的战场不滚，不看 */
+  function scrollsUp(e) {
+    if (host === SOLO) return false;
+    const field = host.field();
+    for (let n = e && e.target; n && n.nodeType === 1; n = n.parentNode) {
+      if (n.scrollTop > 0) return true;
+      if (n === field) break;
+    }
+    return false;
   }
 
   /** 开了才加载：普通脚本按顺序（加载过的不再加载），最后 import 场景模块，交出 createHd2dScene */

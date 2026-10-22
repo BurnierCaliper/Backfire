@@ -129,8 +129,8 @@ async function olPage(opts) {
 
   const mem = new Map(opts.on ? [[F.FIELD.storageKey, "on"]] : []), writes = [];
   const storage = { getItem: (k) => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => { mem.set(k, String(v)); writes.push([k, String(v)]); } };
-  const q = [];
-  F.boot({ doc, storage, load: () => { log.loads++; return Promise.resolve(fakeScene(log)); }, hint: (m) => log.hints.push(m), reduced: () => !!opts.reduced, wait: (s, fn) => q.push(fn), now: () => 0 });
+  const q = [], clock = { t: 100 };
+  F.boot({ doc, storage, load: () => { log.loads++; return Promise.resolve(fakeScene(log)); }, hint: (m) => log.hints.push(m), reduced: () => !!opts.reduced, wait: (s, fn) => q.push(fn), now: () => clock.t });
   await settle();
 
   // 联机那边（online-ui.js 抠出来的几段）：这位玩家（p1）操控柯尔特，轮到他；主机的动作菜单照 online-player-ui.test.js 的样子回
@@ -185,7 +185,13 @@ async function olPage(opts) {
   const drain = async () => { for (let i = 0; i < 12 && (q.length || F.transition().busy); i++) { const fn = q.shift(); if (fn) fn(); await settle(); } };
   const scene = () => log.scenes[log.scenes.length - 1];
   const mist = () => olField.childNodes.find(c => c && c.className && String(c.className).split(" ").includes("hd2d-mist")) || null;
-  return { page, ctx, doc, F, OV, st, pv, kolt, foe, guard, app, top, btn, nextBtn, field, stage, slot, ol, olField, cards, mem, writes, calls, log, V, U, paint, drain, scene, mist, q, solo };
+  /** 联机战场上的一下滚轮（往前滚 = 拉近）；target = 落在哪个元素上 */
+  const wheel = (target, deltaY) => {
+    const ev = { deltaY: deltaY == null ? -120 : deltaY, deltaMode: 0, ctrlKey: false, target, prevented: 0, preventDefault() { this.prevented++; }, stopPropagation() {} };
+    (olField._on.wheel || []).forEach(f => f(ev));
+    return ev;
+  };
+  return { page, ctx, doc, F, OV, st, pv, kolt, foe, guard, app, top, btn, nextBtn, field, stage, slot, ol, olField, cards, mem, writes, calls, log, V, U, paint, drain, scene, mist, q, solo, wheel, clock };
 }
 /** 一棵 DOM 里的字（文字、属性、行内样式、innerHTML）都拼起来 */
 function domText(el) {
@@ -213,6 +219,22 @@ test("联机玩家开 / 关新画面：同一个开关（#g-hd2d-toggle 挪到�
   assert.equal(P.btn.textContent, "新画面 关");
   assert.equal(P.log.loads, 0, "关着：什么都不加载");
   assert.equal(P.ol.classList.contains("hd2d-on"), false, "关着：旧战场照旧");
+  // 旧战场上往前滚：联机的战场（或者区）还没滚到顶 → 照旧滚，这一次滚动不打开新画面；滚到顶了再往前滚 → 同一个入口打开
+  P.olField.scrollTop = 200;
+  const e1 = P.wheel(P.olField);
+  P.wheel(P.olField);
+  assert.equal(P.F.transition().busy, false, "还没滚到顶：不打开新画面");
+  assert.equal(e1.prevented, 0, "照旧是战场自己的滚动");
+  P.olField.scrollTop = 0; P.clock.t += 5;
+  const e2 = P.wheel(P.olField);
+  assert.deepEqual(JSON.parse(JSON.stringify(P.F.transition())), { busy: true, to: "new", step: "cover" }, "滚到顶了往前滚：云雾转场打开新画面");
+  assert.ok(e2.prevented > 0);
+  await P.drain();
+  assert.ok(P.scene() && P.ol.classList.contains("hd2d-on"), "打开了");
+  P.btn._on.click.forEach(f => f({}));
+  await P.drain();
+  assert.equal(P.ol.classList.contains("hd2d-on"), false, "开关关掉");
+  P.writes.length = 0;
   // 点开关：和单机同一个入口（switchTo）——云雾从四边涌进来（铺在联机的战场上），盖满时建好 3D，云雾散开
   P.btn._on.click.forEach(f => f({}));
   assert.deepEqual(JSON.parse(JSON.stringify(P.F.transition())), { busy: true, to: "new", step: "cover" }, "走云雾转场");
