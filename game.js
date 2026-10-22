@@ -331,8 +331,12 @@
     const night = !!(env.clock && env.clock.night);
     $("g-app").classList.toggle("is-night", night);
     const fieldEl = document.querySelector(".g-zone") && document.querySelector(".g-zone").parentElement;
-    // 天气动效（weather-fx.js / weather-fx.css，PR #53）：战场叠加层 + 界面的 data-sand-dir / data-phase-step
-    if (window.WeatherFx) WeatherFx.sync({ field: fieldEl, app: $("g-app"), weather: env.weather, sandDir: state.sandDir, phaseStep: state.phaseStep });
+    // 天气动效（weather-fx.js / weather-fx.css，PR #53）：战场叠加层 + 界面的 data-sand-dir / data-phase-step。
+    // 新画面（HD-2D）开着：叠加层画在新画面自己的那一层上（hd2d/hd2d-wfx.js），看不见的旧战场不放——
+    // weather-fx.js 的酸雨涟漪、雷鸣找的是页面里第一层 .wfx-…，两层都在就会落到看不见的这一层上
+    const wfxField = field3d() ? null : fieldEl;
+    if (!wfxField && fieldEl) { const old = fieldEl.querySelector(":scope > .wfx"); if (old) old.remove(); }
+    if (window.WeatherFx) WeatherFx.sync({ field: wfxField, app: $("g-app"), weather: env.weather, sandDir: state.sandDir, phaseStep: state.phaseStep });
     if (fieldEl) {
       let vg = fieldEl.querySelector(".night-vignette");
       if (night && !vg) { vg = el("div", "night-vignette"); fieldEl.appendChild(vg); }
@@ -738,6 +742,8 @@
     paintSandStir(snaps);
     paintMechBar(snaps);
     fitZones();
+    // 新画面（HD-2D，hd2d/hd2d-field.js）：这一帧的快照也交给它（演出的每一下、refreshAll 的现在的状态），它自己看开没开、投影后再排
+    if (window.HD2DField) HD2DField.view(snaps);
     return beats;
   }
 
@@ -806,7 +812,20 @@
     if (!String(id || "").startsWith("gap:")) return null;
     return document.querySelector(`#g-field .g-gap[data-key="${String(id).slice(4)}"]`);
   }
+  /** 新画面（HD-2D，hd2d/hd2d-field.js）开着没有：开着时战场那一格是 3D 战场，旧的区和单位卡照旧排、只是看不见 */
+  const field3d = () => !!(window.HD2DField && HD2DField.on());
+  /** 新画面开着：单位 / 危墙在 3D 战场上的屏幕矩形（铭牌、间隔按这一刻的镜头投影），和 centerOf 一样的写法；找不到返回 null */
+  function field3dRect(id) {
+    const b = HD2DField.rectOf(id);
+    return b ? { x: b.x, y: b.y, r: { left: b.left, top: b.top, width: b.w, height: b.h, right: b.left + b.w, bottom: b.top + b.h } } : null;
+  }
+  /** 受击粒子（HitFx.burst）要的矩形：新画面开着按 3D 的铭牌 / 间隔，关着就是单位卡 / 危墙竖条的 */
+  function boxOf(id) {
+    const p = centerOf(id);
+    return p ? p.r : null;
+  }
   function centerOf(id) {
+    if (field3d()) return field3dRect(id);
     const gn = gapNode(id);
     if (gn) {
       const r = gn.getBoundingClientRect();
@@ -894,7 +913,8 @@
       gn.classList.remove("hit");
       void gn.offsetWidth;
       gn.classList.add("hit");
-      if (!G.sim && !G.skip && window.HitFx) HitFx.burst(element || "physical", gn.getBoundingClientRect(), { big: !!big });
+      const gbox = boxOf(id) || (field3d() ? null : gn.getBoundingClientRect());   // 新画面开着：按 3D 的间隔（看不见的竖条不算）
+      if (gbox && !G.sim && !G.skip && window.HitFx) HitFx.burst(element || "physical", gbox, { big: !!big });
       return;
     }
     const c = cards.get(id);
@@ -914,7 +934,8 @@
     }
     c.wrap.classList.add("hit");
     // 属性受击特效（hit-fx.js）：火焰窜起、电弧、冰晶、酸液……
-    if (!G.sim && !G.skip && window.HitFx) HitFx.burst(element || "physical", c.wrap.getBoundingClientRect(), { big: !!big });
+    const box = boxOf(id) || (field3d() ? null : c.wrap.getBoundingClientRect());   // 新画面开着：按 3D 的铭牌（看不见的单位卡不算）
+    if (box && !G.sim && !G.skip && window.HitFx) HitFx.burst(element || "physical", box, { big: !!big });
   }
 
   /* ---------- 攻击演出（attack-fx.js）：出手 → 弹道 → 打中的形状 ----------
@@ -930,6 +951,7 @@
   }
   /** 一个区在画面上的位置（范围攻击的冲击波画满整个区） */
   function zoneRectOf(zone) {
+    if (field3d()) return HD2DField.zoneRectOf(zone);   // 新画面开着：3D 地台在屏幕上的外框
     const z = document.querySelector(`#g-field .g-zone[data-num="${Number(zone)}"]`);
     if (!z) return null;
     const r = z.getBoundingClientRect();
@@ -2487,6 +2509,13 @@
   function gapNodes() {
     return [...document.querySelectorAll("#g-field .g-gap[data-key]")];
   }
+  /** 选目标 / 选区的标记：旧画面是单位卡、危墙竖条、区上的 class；同一份记在这里交给新画面（HD-2D，hd2d/hd2d-field.js · marks），
+   *  画成铭牌描边 / 变暗、地台亮框。pick = 正在选目标，targets = 能点的目标，hover = 鼠标停着的目标，zones = 能移动去的区，hoverZone = 停着的区 */
+  const fieldMarks = { pick: false, targets: [], hover: null, zones: [], hoverZone: null };
+  function paintMarks(patch) {
+    Object.assign(fieldMarks, patch);
+    if (window.HD2DField) HD2DField.marks(fieldMarks);
+  }
   function markTargets(ids) {
     cards.forEach((c, id) => {
       const ok = ids.has(id);
@@ -2494,12 +2523,14 @@
       c.wrap.classList.toggle("is-dim", !ok && id !== G.actorId);
     });
     gapNodes().forEach(n => n.classList.toggle("is-targetable", ids.has("gap:" + n.dataset.key)));
+    paintMarks({ pick: true, targets: [...ids] });
   }
   function unmarkTargets() {
     if (window.AttackFx) AttackFx.clearAim();
     cards.forEach(c => c.wrap.classList.remove("is-targetable", "is-dim", "is-hover"));
     gapNodes().forEach(n => n.classList.remove("is-targetable", "is-hover"));
     document.querySelectorAll(".g-zone").forEach(z => z.classList.remove("is-move-target", "is-move-hover"));
+    paintMarks({ pick: false, targets: [], hover: null, zones: [], hoverZone: null });
   }
 
   function disarm() {
@@ -2580,6 +2611,7 @@
       });
       showPickBar(null, canGiveUp());
       document.querySelectorAll(".g-zone").forEach(z => z.classList.toggle("is-move-target", zones.includes(Number(z.dataset.num))));
+      paintMarks({ zones: zones.map(Number), hoverZone: null });
       refreshHud();
     });
   }
@@ -2621,19 +2653,23 @@
       rows: vc ? vc.roster : null, rowsTitle: vc ? vc.seatText : "",
       perks: vc ? [] : (s.racePerks || []) });                                       // 种族被动（画成车时不写驾驶员的）
   }
-  function onCardHover(id, on) {
+  /** 悬停单位卡 / 危墙（旧画面），或者新画面（HD-2D）里的铭牌：at = 悬停说明挂在哪（新画面给铭牌；不给 = 单位卡 / 危墙竖条） */
+  function onCardHover(id, on, at) {
     const fieldPick = !!(choiceResolve && choiceResolve.field);   // 结算队列里在战场上点选（那时动作还没结束，G.depth > 0）
     // 悬停说明：没在演出的时候都能看（选目标时也一样），离开就收起；触屏没有悬停。
     // 演出中（敌人回合、技能在播）不弹：卡片挪到鼠标底下时，说明框会把正在挨打的卡盖住
     if (window.UnitTip && !touchUI()) {
-      const anchor = cards.get(id) ? cards.get(id).wrap : String(id).indexOf("gap:") === 0 ? document.querySelector(`#g-field .g-gap[data-key="${String(id).slice(4)}"]`) : null;
+      const anchor = at || (cards.get(id) ? cards.get(id).wrap : String(id).indexOf("gap:") === 0 ? document.querySelector(`#g-field .g-gap[data-key="${String(id).slice(4)}"]`) : null);
       if (on && anchor && (G.depth === 0 || fieldPick)) { const h = unitTipHtml(id); if (h) UnitTip.show(anchor, h); else UnitTip.hide(); }
       else UnitTip.hide();
     }
+    // 选目标时鼠标停着的那个（旧画面的 is-hover；新画面的铭牌更亮）
+    const aim = on && !!(G.arm && G.arm.mode === "unit" && G.arm.map.has(id));
+    if (aim) paintMarks({ hover: id }); else if (fieldMarks.hover === id) paintMarks({ hover: null });
     const gapNode = String(id).indexOf("gap:") === 0 ? document.querySelector(`#g-field .g-gap[data-key="${String(id).slice(4)}"]`) : null;
     const c = cards.get(id) || (gapNode ? { wrap: gapNode } : null);
     if (!c) return;
-    c.wrap.classList.toggle("is-hover", on && !!(G.arm && G.arm.mode === "unit" && G.arm.map.has(id)));
+    c.wrap.classList.toggle("is-hover", aim);
     if ((G.depth > 0 && !fieldPick) || (choiceResolve && !fieldPick)) return;
     if (G.arm && G.arm.mode === "unit") {
       if (!on) { clearPreview(); if (window.AttackFx) AttackFx.clearAim(); return; }
@@ -2668,6 +2704,7 @@
       // 触屏：第一下预览移动的结果，再点一下才确认
       document.querySelectorAll(".g-zone").forEach(z => z.classList.remove("is-move-hover"));
       zone.classList.add("is-move-hover");
+      paintMarks({ hoverZone: zn });
       G.arm.tapZone = zn;
       showPreview(G.arm.previewFn(zn), `移动到 ${zn} 区`);
       flashHint(`${zn} 区：再点一下确认`);
@@ -2676,6 +2713,38 @@
     G.arm.resolve(zn);
     return true;
   }
+  /** 区号 → 旧战场里的那个区（新画面开着时它也照旧排着，只是看不见）；没有 / 不给返回 null */
+  function zoneSection(num) {
+    return num == null ? null : document.querySelector(`#g-field .g-zone[data-num="${Number(num)}"]`);
+  }
+  /* ---------- 战场的点击 / 悬停入口 ----------
+   * 旧画面（#g-field 的点击、区的悬停）和新画面（HD-2D：点地台 / 空地、悬停地台，hd2d/hd2d-field.js）都调下面这两个，
+   * 和 onCardClick / onCardHover（单位卡、危墙竖条 / 铭牌）一起交出去（G.fieldInput）：规则判断只有这一份 */
+  /** 点战场：zone = 点在哪个区（区里的空白 / 地台；区外 = null）；on = 点在什么上面（旧画面冒泡上来的点击：unit 单位卡、gap 危墙 / 桥梁）。
+   *  演出中点一下 = 跳过；选区域时选这个区；触屏点空白处取消正在选的技能、收起详情 */
+  function clickField(zone, on) {
+    on = on || {};
+    if (G.depth > 0) { G.skip = true; return; }
+    if (pickZoneByClick(zoneSection(zone))) return;
+    // 触屏：点战场空白处取消正在选的技能
+    if (G.arm && touchUI() && !on.unit && !on.gap) { disarm(); return; }
+    if (!G.arm && !on.unit && touchUI()) idleBox();
+  }
+  /** 鼠标停到一个区上 / 离开：选区域时预览移动的结果，那个区亮一点（旧画面的 is-move-hover，新画面的地台亮框） */
+  function hoverZone(num, on) {
+    const z = zoneSection(num);
+    if (!on) {
+      if (z) z.classList.remove("is-move-hover");
+      if (fieldMarks.hoverZone === Number(num)) paintMarks({ hoverZone: null });
+      if (G.arm && G.arm.mode === "zone") clearPreview();
+      return;
+    }
+    if (!(G.arm && G.arm.mode === "zone" && G.arm.zones.has(Number(num)))) return;
+    if (z) z.classList.add("is-move-hover");
+    paintMarks({ hoverZone: Number(num) });
+    showPreview(G.arm.previewFn(Number(num)), `移动到 ${num} 区`);
+  }
+  G.fieldInput = { unit: onCardClick, hover: onCardHover, zone: clickField, zoneHover: hoverZone };
   function onCardClick(id) {
     const fieldPick = !!(choiceResolve && choiceResolve.field);
     if (G.depth > 0 && !fieldPick) { G.skip = true; return; }
@@ -3585,6 +3654,7 @@
       party.appendChild(arm);
     }
     cards.forEach((c, id) => c.wrap.classList.toggle("is-actor", id === G.actorId && state.combatPhase === "player"));
+    if (window.HD2DField) HD2DField.actor(state.combatPhase === "player" ? G.actorId : null);   // 新画面：同一个人描金边、脚下光圈
 
     // 技能（技能栏重画一次 = 新局面：悬停预演的缓存作废；悬停中、触屏点了一下的预演收起）
     hudEpoch++;
@@ -4465,16 +4535,8 @@
       }
     }
     sections.forEach(sec => {
-      sec.addEventListener("mouseenter", () => {
-        if (!(G.arm && G.arm.mode === "zone" && G.arm.zones.has(Number(sec.dataset.num)))) return;
-        sec.classList.add("is-move-hover");
-        const pv = G.arm.previewFn(Number(sec.dataset.num));
-        showPreview(pv, `移动到 ${sec.dataset.num} 区`);
-      });
-      sec.addEventListener("mouseleave", () => {
-        sec.classList.remove("is-move-hover");
-        if (G.arm && G.arm.mode === "zone") clearPreview();
-      });
+      sec.addEventListener("mouseenter", () => hoverZone(Number(sec.dataset.num), true));
+      sec.addEventListener("mouseleave", () => hoverZone(Number(sec.dataset.num), false));
     });
     paintGaps();
     requestAnimationFrame(() => { try { fitZones(); } catch (e) {} });
@@ -4975,25 +5037,14 @@
       if (b && b.dataset.skill === G.skillTap.skillId) return;
       cancelSkillTap();
     }, true);
+    // 点战场 / 悬停区：和新画面（HD-2D）的地台同一个入口（clickField / hoverZone）
     $("g-field").addEventListener("click", (e) => {
-      if (G.depth > 0) { G.skip = true; return; }
       const zone = e.target.closest(".g-zone");
-      if (pickZoneByClick(zone)) return;
-      // 触屏：点战场空白处取消正在选的技能
-      if (G.arm && touchUI() && !e.target.closest(".unit-wrap, .g-gap")) { disarm(); return; }
-      if (!G.arm && !e.target.closest(".unit-wrap") && touchUI()) idleBox();
+      clickField(zone ? Number(zone.dataset.num) : null, { unit: !!e.target.closest(".unit-wrap"), gap: !!e.target.closest(".g-gap") });
     });
     document.querySelectorAll(".g-zone").forEach(z => {
-      z.addEventListener("mouseenter", () => {
-        if (!(G.arm && G.arm.mode === "zone" && G.arm.zones.has(Number(z.dataset.num)))) return;
-        z.classList.add("is-move-hover");
-        const pv = G.arm.previewFn(Number(z.dataset.num));
-        showPreview(pv, `移动到 ${z.dataset.num} 区`);
-      });
-      z.addEventListener("mouseleave", () => {
-        z.classList.remove("is-move-hover");
-        if (G.arm && G.arm.mode === "zone") clearPreview();
-      });
+      z.addEventListener("mouseenter", () => hoverZone(Number(z.dataset.num), true));
+      z.addEventListener("mouseleave", () => hoverZone(Number(z.dataset.num), false));
     });
     // 手机：战斗记录收在抽屉里；操作栏的高度写进 --hud-h，战场底部留出这么多空
     if ($("g-log-open")) $("g-log-open").onclick = () => $("g-app").classList.toggle("log-open");
@@ -5239,6 +5290,7 @@
   G.endTurn = endTurn;
   G.checkEnd = checkEnd;
   G.refresh = refreshAll;
+  G.flashHint = flashHint;   // 新画面（hd2d/hd2d-field.js）打不开时在提示栏说一声
   G.fitZones = fitZones;
   G.act = act;
   G.actSystem = (cmd, meta, context) => act(cmd, meta, context);

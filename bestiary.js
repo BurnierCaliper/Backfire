@@ -11,6 +11,11 @@
 
 const BESTIARY_KEY = "backfire.bestiary.v1";
 
+/** 下水道狂鼠每个兵种都写的两行（docs/ratfolk.md 第 2 节）：狂暴的效果、阵营被动狂潮。
+ *  数字和 effects.js · FRENZY 一致（game.html 里 bestiary.js 比 effects.js 先加载，这里不能直接读它；tests/ratfolk-units.test.js 核对） */
+const RATFOLK_FRENZY_TEXT = "狂暴（自我效果）：ATK + 等级、造成的击破 +1、受到的伤害 −25%、每回合可以免费移动一次、架势上限 −2；晕眩后解除（10 级起的精英要攒满晕眩标记），中和也能清掉；失衡 / 晕眩中不能进入";
+const RATFOLK_TIDE_TEXT = "狂潮（狂鼠的阵营被动）：敌人回合开始时，存活的狂鼠里狂暴的不少于一半，所有狂鼠都进入狂暴（失衡中的除外）";
+
 const BESTIARY_TEXT = {
   // —— 杂兵 ——
   guard_sword: { move: "近距离，主动贴近", abilities: [
@@ -139,6 +144,39 @@ const BESTIARY_TEXT = {
     "火焰手枪：远近皆可，atk + 1d6 火，1 击破，打中施加灼烧 1",
     "指挥（被动，只影响 AI）：他在场时，所有镇压队单位优先攻击还没有灼烧的敌人",
     "协助：远距 1×atk 火，同样施加灼烧 1"] },
+  // —— 下水道狂鼠（鼠类人接触实验废料变异而成，和所有阵营敌对；种族由图鉴的种族栏显示，docs/ratfolk.md）——
+  rat_lurker: { move: "近距离，主动接近；开战时处于躲藏", abilities: [
+    "躲藏：开战时处于躲藏（不会被选作攻击目标，发动攻击或受到伤害后解除）",
+    "普通攻击：近距 1×atk + 1d6 物理，1 击破，施加腐蚀",
+    "逃跑：每次被近战攻击打中，都免费往远离攻击者的方向移动 1 个区，不触发借机攻击；被打死、被打进失衡时不跑",
+    "疫病暴徒在场时：优先攻击还没有腐蚀的敌人",
+    "协助：同普通攻击（近距），并且进入狂暴",
+    "狂暴：协助后进入；狂暴时每回合结束进入躲藏",
+    RATFOLK_FRENZY_TEXT, RATFOLK_TIDE_TEXT] },
+  rat_biter: { move: "近距离，主动接近", abilities: [
+    "普通攻击：近距 1×atk + 1d6 物理，1 击破，带出血（打中肉体 / 星灵层时，再扣这一层上限 10% 的真实伤害）",
+    "协助：同普通攻击（近距），并且进入狂暴",
+    "狂暴：协助后进入；狂暴时普通攻击变成两次 0.5×atk 物理（共 1 击破），每一击都带出血（第二次出血减半）",
+    RATFOLK_FRENZY_TEXT, RATFOLK_TIDE_TEXT] },
+  rat_plague: { move: "远近皆可，主动接近血量最低的敌人；场上有腐蚀的敌人时，先用感染喷洒打有腐蚀的人（挑同区没腐蚀的敌人最多的）", abilities: [
+    "感染撕扯：近距 1×atk + 1d8 物理，1 击破，施加腐蚀；目标原本已经腐蚀时，自己恢复 10% 最大生命",
+    "感染喷洒：远距 1×atk + 1d8 酸，1 击破，施加腐蚀；目标原本已经腐蚀时，把腐蚀扩散到目标同区的所有敌人",
+    "协助：冲到目标所在区，1.5×atk 酸，施加腐蚀；目标原本已经腐蚀时伤害 +2d8，自己恢复 25% 最大生命",
+    "狂暴：所有敌人都处于腐蚀时进入；狂暴时受到的治疗 +50%",
+    RATFOLK_FRENZY_TEXT, RATFOLK_TIDE_TEXT] },
+  rat_tyrant: { move: "近距离，主动接近血量最多的敌人", abilities: [
+    "普通攻击：近距 1×atk + 1d8 物理，1 击破，带出血",
+    "斩杀：敌人的血量因为任何原因降到它的普通攻击掷最小值也一定能打死时（打进濒死也算），免费移动到那一区、免费普通攻击一次；每轮不限次数，这一击可以协助格挡，成功率 +5%",
+    "协助（优先权）：其他狂鼠都没有狂暴、它又能协助时，一定由它来协助：冲到目标所在区连打三次 0.5×atk 物理，每一击都带出血，并让所有狂鼠进入狂暴",
+    "狂暴：击杀敌人后进入；狂暴时打出的出血伤害等量为自己恢复生命",
+    RATFOLK_FRENZY_TEXT, RATFOLK_TIDE_TEXT] },
+  // —— 下水道维护（清洁和保护；和巨人方友好，和其他阵营敌对，docs/sewer-maintenance.md）——
+  sewer_sweeper: { move: "远距离，主动远离敌人；1 枚代币 3 只", abilities: [
+    "阵营「下水道维护」：和安保、警卫队、镇压队是一伙（不互相敌对、可以互相协助），和狂鼠、盗匪、沙灵、沙漠生物、异星生物等其他阵营都敌对",
+    "施加共振：还有敌人没有共振时，花行动点给一个没有共振的敌人施加共振（远距，只上状态、不造成伤害）",
+    "谐波射击：所有敌人都有共振时，远距 1×atk + 1d4 谐波，1 击破",
+    "机械，没有种族；自己不会清除状态",
+    "协助：自爆——冲到目标所在区，对那一区所有和它敌对的单位（狂鼠也算）1×atk 火，1 击破，然后自己死亡（照常算击杀：经验、掉落、评分）"] },
   ant_guard: { move: "远距离；不受酸液地面影响（不吃伤害，移动不受限）", abilities: [
     "酸液喷枪：远距 atk + 1d6 酸，1 击破，并施加腐蚀",
     "站在酸液地面上时汲取酸，改用大酸液弹：先标定一个区，下个敌人回合发射——区内随机一人 2×atk 酸 2 击破，同区其他人 等级 + 1d6 酸",
@@ -333,6 +371,9 @@ function bestiaryStats(kit, level, partySize) {
   try { u = p.build(Math.max(1, Number(level) || 1), Math.max(1, Number(partySize) || 2)); } catch (e) { return null; }
   if (Array.isArray(u)) u = u[0];
   if (!u) return null;
+  // 固定种族又套六维的（下水道的狂鼠）：和战斗里生成时一样按种族换算（enemies.js · setEnemyRace）；随机种族的照旧写原始数值
+  const info = typeof ENEMY_INFO !== "undefined" ? ENEMY_INFO[kit] : null;
+  if (info && info.race && info.raceAttrs && typeof setEnemyRace === "function") setEnemyRace(u, info.race, true);
   const sg = u.suggest || {};
   return {
     layers: (u.layers || []).map(l => ({ type: l.type, name: (typeof LAYER !== "undefined" && LAYER[l.type]) || l.type, hp: Number(l.max) || 0 })),

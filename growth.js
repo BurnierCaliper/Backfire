@@ -12,6 +12,8 @@ const ENEMY_RANK = {
   captain_ox: "elite", captain_lizard: "elite", bigsand: "elite", livesand: "elite",
   giant: "elite", patrolboat: "elite", spreader: "elite", ant_guard: "elite", gas_collector: "elite", ant_hunter: "elite", watchcrow: "elite", dustbody: "elite",
   riot_baton: "minion", riot_rifle: "minion", riot_molotov: "minion", riot_flamer: "elite", riot_captain: "elite",
+  rat_lurker: "minion", rat_biter: "minion", rat_plague: "elite", rat_tyrant: "elite",
+  sewer_sweeper: "minion",
   outlaw_king: "boss", chixia: "boss", sand_aggregate: "boss",
   ufo_body: "boss", ufo_leg: "minion"
 };

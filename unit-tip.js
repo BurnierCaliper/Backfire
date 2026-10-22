@@ -31,7 +31,9 @@
     "加倍计量": "异常手的加倍计量：身上所有状态这一回合效果翻倍。",
     "黄金时间": "辅助的黄金时间：括号里那种即时效果多保留一回合。",
     "击破预告": "击破手的击破预告：受到的击破翻倍；如果没能被打进失衡，施放者自己会失衡。",
-    "禁足": "坦克的禁足怒吼：这一回合不能移动，攻击也只能打括号里的坦克。"
+    "禁足": "坦克的禁足怒吼：这一回合不能移动，攻击也只能打括号里的坦克。",
+    // 下水道狂鼠的自我效果：数值跟着规则的配置走（effects.js · frenzyEffectText），用到时才读
+    "狂暴": () => { const fn = g("frenzyEffectText"); return typeof fn === "function" ? "自我效果：" + fn() : ""; }
   };
   function codexEffects() { return g("CODEX_EFFECTS") || []; }
   function lineOf(e) { return e ? (e.lines || []).join(" ").replace(/\s+/g, " ").trim() : ""; }
@@ -45,7 +47,7 @@
     if (/^聚焦/.test(base)) base = "聚焦";
     const e = codexEffects().find(x => x.name === base);
     if (e) return { name: raw, text: lineOf(e) };
-    if (EXTRA[base]) return { name: raw, text: EXTRA[base] };
+    if (EXTRA[base]) return { name: raw, text: typeof EXTRA[base] === "function" ? EXTRA[base]() : EXTRA[base] };
     if (base === "聚焦") return { name: raw, text: "Helumica 的聚焦：按方括号里那一步的属性攻击这一层，走完整个序列就抹掉整层血量并附加 2 击破。" };
     return { name: raw, text: "" };
   }

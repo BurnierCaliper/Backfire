@@ -7,14 +7,15 @@ const assert = require("node:assert/strict");
 const fs = require("fs");
 const path = require("path");
 const H = require("./headless");
-const L = require("../prototypes/hd2d/hd2d-layout.js");
+const HP = require("./hd2d-paths");
+const L = require("../hd2d/hd2d-layout.js");
 const OV = require("../online-view.js");
 
 // 缺这几个文件 / 函数时只是这几条失败（每条测试里各自 require）
-const cams = () => require("../prototypes/hd2d/hd2d-camera.js");
-const fxm = () => require("../prototypes/hd2d/hd2d-fx.js");
+const cams = () => require("../hd2d/hd2d-camera.js");
+const fxm = () => require("../hd2d/hd2d-fx.js");
 
-const DIR = path.join(__dirname, "..", "prototypes", "hd2d");
+const DIR = HP.MOD;   // 战场的模块（#261 起在正式目录 hd2d/）；原型页在 HP.PAGE
 const PARTY = ["kolt", "helu", "ruby", "yuito"];
 const DESKTOP = { width: 1440, height: 900, top: 46, bottom: 160 };   // 桌面 1440×900：顶栏 + 展开的技能栏
 const gapOf = (type, hp, open) => ({ type, hp: hp || 0, maxHp: hp || 0, open: open !== false, lastFrom: null });
@@ -195,14 +196,14 @@ test("近景双击单位特写（#237）：镜头平滑推到这个单位面前�
     assert.equal(C.closePose(layout, "nobody"), null, "没有这个单位：不特写");
   }
   // 场景、页面接上：双击铭牌 / 站位 → closeUp；换段、滚轮、换区都走状态机；特写时铭牌再放大、别的藏起来
-  const scene = fs.readFileSync(path.join(DIR, "hd2d-scene.js"), "utf8"), css = fs.readFileSync(path.join(DIR, "hd2d.css"), "utf8");
+  const scene = fs.readFileSync(path.join(DIR, "hd2d-scene.js"), "utf8"), css = HP.protoCss();
   assert.ok(/addEventListener\("dblclick"[^\n]*closeUp\(p\.id\)/.test(scene), "双击铭牌：特写");
   assert.ok(/renderer\.domElement\.addEventListener\("dblclick"[\s\S]{0,200}C\.unitAt\(/.test(scene), "双击地台上的站位：认出是谁，特写");
   assert.ok(/C\.closePose\(/.test(scene) && /C\.camStep\(camState\(\), \{ type: "tier"/.test(scene) && /C\.camStep\(camState\(\), \{ type: "wheel"/.test(scene) && /type: "zone"/.test(scene) && /type: "units"/.test(scene), "换段 / 滚轮 / 换区 / 重排都走状态机");
   assert.ok(/C\.tween\(from, to, \{ reduced: !!opts\.snap \|\| !state\.motion \}\)/.test(scene), "减少动态效果时直接切过去（和换段一样）");
   assert.ok(/wasClose != null && state\.close == null && !reset\) goTo\(state\.tier, state\.zone\)/.test(scene), "特写的人被打倒 / 藏起来：镜头拉回正常的近景（不停在原地）");
   assert.ok(/\* p\.zoom/.test(scene) && /classList\.toggle\("hide", p\.hide\)/.test(scene) && /\.hd2d-plate\.hide \.pl-in/.test(css), "特写的铭牌再放大，压到它的藏起来");
-  const html = fs.readFileSync(path.join(DIR, "index.html"), "utf8");
+  const html = fs.readFileSync(path.join(HP.PAGE, "index.html"), "utf8");
   assert.ok(/info\.close != null \? " · 特写 "/.test(html) && /sc\.setTier\(t\)/.test(html), "页面：镜头条写着特写谁；远 / 中按钮、1 / 2 键照旧 setTier（就退出特写）");
 });
 
@@ -451,7 +452,7 @@ async function protoEnv(t) {
     mod.register("data:text/javascript," + encodeURIComponent(`export async function resolve(s, c, n) {
       if (s === "three") return { url: ${JSON.stringify(threeUrl)}, format: "module", shortCircuit: true };
       const r = await n(s, c);
-      return /\\/(prototypes\\/hd2d|vendor\\/three)\\//.test(r.url) ? Object.assign({}, r, { format: "module" }) : r;
+      return /\\/(hd2d|vendor\\/three)\\//.test(r.url) ? Object.assign({}, r, { format: "module" }) : r;
     }`));
   }
   const any = () => new Proxy(function () {}, { get: (o, k) => (k === Symbol.toPrimitive ? () => 0 : any()), set: () => true, apply: () => any() });
