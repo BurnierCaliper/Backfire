@@ -135,6 +135,29 @@ test("纸片美术的纯函数：撕边的点都在纸里面、同一个种子�
   P.PAPER.art.targets.forEach(([sel, kind]) => kind.split("|").forEach(k => assert.ok(P.PAPER.art.kinds[k], sel + " → " + k)));
 });
 
+test("纸纹的折面数跟着面积走（审查：大面板的折面被放大成「碎地砖」）：越大的纸折面越多，小纸片至少是这种纸原来的块数，有上限；按格子找最近的点和挨个比一样", () => {
+  const A = P.PAPER.art;
+  // 越大越多：吊牌 < 队伍卡 < 抽屉（340 × 560）< 手机上拉满屏的抽屉（390 × 844），到上限为止
+  const n = [[112, 40], [236, 300], [340, 560], [390, 844]].map(([w, h]) => P.facetCount("paper", w, h));
+  assert.ok(n[0] < n[1] && n[1] < n[2] && n[2] < n[3], "折面数随面积增加：" + n);
+  assert.equal(P.facetCount("tag", 112, 40), A.kinds.tag.facets, "小纸片：照原来的块数");
+  assert.equal(P.facetCount("paper", 340, 560), Math.round(340 * 560 / A.facet.area), "每 area 平方像素一块");
+  assert.equal(P.facetCount("paper", 4000, 4000), A.facet.max, "有上限（防止太慢）");
+  assert.equal(P.facetCount("nope", 100, 100), 0);
+  // 一块折面平均多大：大纸和小纸差不多细（不再被放大成一大块一大块）
+  const per = (k, w, h) => (w * h) / P.facetCount(k, w, h);
+  assert.ok(per("paper", 340, 560) <= A.facet.area * 1.01 && per("dock", 960, 170) <= A.facet.area * 1.01, "大纸每块折面不超过 area");
+  // 按格子找：和挨个比的结果一模一样（同一个 Voronoi，只是快）
+  const rnd = P.rng(5), pts = Array.from({ length: 60 }, () => ({ x: rnd() * 90, y: rnd() * 140 })), near = P.nearest2(pts, 90, 140);
+  for (let y = 0; y < 140; y += 3) for (let x = 0; x < 90; x += 3) {
+    let d1 = 1e9, d2 = 1e9, i1 = 0;
+    pts.forEach((p, i) => { const dd = (x - p.x) ** 2 + (y - p.y) ** 2; if (dd < d1) { d2 = d1; d1 = dd; i1 = i; } else if (dd < d2) d2 = dd; });
+    const got = near(x, y);
+    assert.deepEqual([got.i1, got.d1, got.d2], [i1, d1, d2], `(${x}, ${y})`);
+  }
+  assert.deepEqual(P.nearest2([{ x: 1, y: 1 }], 10, 10)(5, 5).i1, 0, "只有一个点也行");
+});
+
 test("单机 / 主持人 / 新画面关着一条都套不上：online-paper.css 每条规则都挂在 body.ol-paper 下面；game.html 加载了它们；online-ui.js 只在联机玩家 + 新画面开着时加这个类", () => {
   const fs = require("node:fs"), path = require("node:path");
   const read = f => fs.readFileSync(path.join(__dirname, "..", f), "utf8");

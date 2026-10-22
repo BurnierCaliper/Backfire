@@ -71,12 +71,16 @@
       light: { day: "day", dusk: "night", night: "night" },
       weather: { sand: "sand", acid: "rain", thunder: "rain", snow: "snow", phase: "fog", glow: "fog" }
     },
+    /*              board 瓦楞纸板（深一点，喷漆字才看得清）、spray「结束行动」的喷漆、spray2「唤出」的喷漆（和角色主属性的颜色混一半）、sprayEdge 喷漆字的深色描边；
+     *              receiptMuted 收据上的小字、虚线 */
     palette: {
       day: { kraft: "#c8a46e", kraftInk: "#2a1b0c", paper: "#f3ecdc", paperInk: "#1d160e", card: "#fbf7ee", muted: "#6e5c44",
-        tape: "#e8d6a6", tapeInk: "#2a1d0c", board: "#9a7448", boardInk: "#f6efe1", boardy: "#e9c443", receipt: "#f6f4ee", receiptInk: "#26231d",
+        tape: "#e8d6a6", tapeInk: "#2a1d0c", board: "#6b4a29", boardInk: "#f6efe1", boardy: "#e9c443", receipt: "#f6f4ee", receiptInk: "#26231d", receiptMuted: "#7b746a",
+        spray: "#ffd21a", spray2: "#3fe8d2", sprayEdge: "rgba(24, 12, 2, .9)",
         on: "#55d6c2", onInk: "#08332c", stamp: "#c8281e", turn: "#0b6b5a", ring: "#e2b320", hl: "rgba(255, 226, 64, .55)" },
       night: { kraft: "#3a2d20", kraftInk: "#efe4cf", paper: "#1d1c21", paperInk: "#eae4d6", card: "#26252b", muted: "#a59c8a",
-        tape: "#a09678", tapeInk: "#1c150c", board: "#6b5135", boardInk: "#f6efe1", boardy: "#c9a73a", receipt: "#1d1c21", receiptInk: "#eae4d6",
+        tape: "#a09678", tapeInk: "#1c150c", board: "#4a3521", boardInk: "#f6efe1", boardy: "#c9a73a", receipt: "#1d1c21", receiptInk: "#eae4d6", receiptMuted: "#a39b8d",
+        spray: "#ffd21a", spray2: "#3fe8d2", sprayEdge: "rgba(0, 0, 0, .92)",
         on: "#3fb8a6", onInk: "#04201b", stamp: "#e0473c", turn: "#3fd1b8", ring: "#e2b320", hl: "rgba(255, 226, 64, .35)" }
     },
     tintKeys: ["kraft", "paper", "card", "tape", "board", "boardy", "receipt"],
@@ -90,8 +94,9 @@
      *   pad        纹理比面板四边多出来的像素（画撕边外面的影子）
      *   shadow     不均匀的影子：两层（偏移、模糊、浓淡）
      *   scale      折面按几分之一的大小算（再放大、糊一点，和样稿一样）；pixels 算的像素最多这么多（大面板自动再缩）
+     *   facet      折面数按面积算（审查：大面板的折面被放大成一块块「碎地砖」）：每 area 平方像素一块，至少是这种纸的 facets，最多 max 块（防止太慢）
      *   cache      最多记多少张（同一个尺寸、同一套配色只画一次）
-     *   kinds      每种纸：color 用配色表里的哪个颜色、facets / amp / crease / grain 褶皱、jag 边缘毛多少、torn 哪几条边是撕的（更毛）、
+     *   kinds      每种纸：color 用配色表里的哪个颜色、facets 小纸片至少几块折面 / amp / crease / grain 褶皱、jag 边缘毛多少、torn 哪几条边是撕的（更毛）、
      *              corrugated 瓦楞纸的竖纹、flat 按钮那种不画撕边和影子（直接当底图）
      *   weather    天气在纸上加的：沙暴撒沙粒（每多少像素一粒）、下雨几块深色水渍、雪边上一层霜、雾蒙一层灰
      *   grit       印章、喷漆的斑驳遮罩：多大、挖几个小洞（只一点点，字一定要清楚） */
@@ -99,6 +104,7 @@
       pad: 8,
       shadow: [{ x: 2, y: 5, blur: 7, a: 0.42 }, { x: -1, y: 1, blur: 2, a: 0.22 }],
       scale: 0.5, pixels: 90000, cache: 48,
+      facet: { area: 1600, max: 240 },
       kinds: {
         tapebar: { color: "tape", facets: 30, amp: 0.05, crease: 0.12, grain: 0.05, jag: 2, torn: { left: 6, right: 6 } },
         kraft: { color: "kraft", facets: 18, amp: 0.09, crease: 0.22, grain: 0.05, jag: 2, torn: { bottom: 5 } },
@@ -203,6 +209,36 @@
     for (let y = h; y >= 0; y -= st("left")) p.push([rnd() * j("left"), y]);
     return p;
   }
+  /** 这种纸 w × h 画几块折面：按面积算（每 PAPER.art.facet.area 平方像素一块），小纸片至少是这种纸的 facets，大纸最多 facet.max 块。
+   *  大纸也是细密的褶皱，不会被放大成一块块「碎地砖」 */
+  function facetCount(kind, w, h) {
+    const K = PAPER.art.kinds[kind], F = PAPER.art.facet;
+    if (!K) return 0;
+    const n = Math.round((Math.max(0, w) * Math.max(0, h)) / F.area);
+    return Math.max(K.facets, Math.min(F.max, n));
+  }
+  /** 折面（Voronoi）：每个像素离它最近、第二近的点。点按格子分好，从自己那一格一圈一圈往外找，找够了就停（和挨个比一样的结果，大纸也快） */
+  function nearest2(pts, sw, sh) {
+    const cs = Math.max(4, Math.sqrt((sw * sh) / Math.max(1, pts.length))), gx = Math.max(1, Math.ceil(sw / cs)), gy = Math.max(1, Math.ceil(sh / cs));
+    const cells = Array.from({ length: gx * gy }, () => []);
+    pts.forEach((p, i) => cells[Math.min(gy - 1, Math.floor(p.y / cs)) * gx + Math.min(gx - 1, Math.floor(p.x / cs))].push(i));
+    return (x, y) => {
+      const cx = Math.min(gx - 1, Math.floor(x / cs)), cy = Math.min(gy - 1, Math.floor(y / cs));
+      let d1 = 1e9, d2 = 1e9, i1 = 0;
+      const see = (i) => { const dx = x - pts[i].x, dy = y - pts[i].y, dd = dx * dx + dy * dy; if (dd < d1) { d2 = d1; d1 = dd; i1 = i; } else if (dd < d2) d2 = dd; };
+      for (let r = 0; ; r++) {
+        for (let j = cy - r; j <= cy + r; j++) {
+          if (j < 0 || j >= gy) continue;
+          const edge = j === cy - r || j === cy + r;
+          for (let i = cx - r; i <= cx + r; i += edge ? 1 : 2 * r) { if (i >= 0 && i < gx) cells[j * gx + i].forEach(see); if (!r) break; }
+        }
+        // 再往外一圈的点至少离 r × 格子大小：第二近的已经比它近，或者格子都看完了，就停
+        const near = r * cs;
+        if (d2 <= near * near || (r >= cx && r >= cy && r >= gx - 1 - cx && r >= gy - 1 - cy)) break;
+      }
+      return { d1, d2, i1 };
+    };
+  }
   const texCache = new Map();
   /** 这一张纸的纹理（data: 地址）：kind = PAPER.art.kinds 里的一种，w × h 面板的大小，theme = { time, weather }。
    *  同一个尺寸、同一套配色只画一次（记 PAPER.art.cache 张）；没有 canvas（Node 里）返回空字符串。
@@ -227,10 +263,9 @@
     const sw = Math.max(8, Math.round(w * sc)), sh = Math.max(8, Math.round(h * sc));
     const small = doc.createElement("canvas"); small.width = sw; small.height = sh;
     const sx = small.getContext("2d"), img = sx.createImageData(sw, sh), d = img.data, c0 = rgbOf(base) || [204, 204, 204];
-    const pts = Array.from({ length: K.facets }, () => ({ x: rnd() * sw, y: rnd() * sh, l: rnd() * 2 - 1 }));
+    const pts = Array.from({ length: facetCount(kind, w, h) }, () => ({ x: rnd() * sw, y: rnd() * sh, l: rnd() * 2 - 1 })), near = nearest2(pts, sw, sh);
     for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) {
-      let d1 = 1e9, d2 = 1e9, i1 = 0;
-      for (let i = 0; i < pts.length; i++) { const dx = x - pts[i].x, dy = y - pts[i].y, dd = dx * dx + dy * dy; if (dd < d1) { d2 = d1; d1 = dd; i1 = i; } else if (dd < d2) d2 = dd; }
+      const { d1, d2, i1 } = near(x, y);
       const gap = Math.sqrt(d2) - Math.sqrt(d1);
       let s = 1 + pts[i1].l * K.amp;
       if (gap < 1.6) s += (i1 % 2 ? 1 : -1) * K.crease * (1 - gap / 1.6);
@@ -408,5 +443,5 @@
     return true;
   }
 
-  return { PAPER, active, isOpen, setOpen, themeOf, themeVars, mix, rng, roughPath, texture, grit, dress, shellHtml, topHtml, toolsHtml, tagsHtml, readMoves, pressMove, readCam, pressCam };
+  return { PAPER, active, isOpen, setOpen, themeOf, themeVars, mix, rng, roughPath, facetCount, nearest2, texture, grit, dress, shellHtml, topHtml, toolsHtml, tagsHtml, readMoves, pressMove, readCam, pressCam };
 });
