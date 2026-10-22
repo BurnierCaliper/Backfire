@@ -133,13 +133,14 @@ function setWeather(kind, opts) {
 }
 
 /** 我方单位普通移动的消耗（技能栏显示用；越过空隙要看去哪，在移动时另算）：
- *  导体 / 探测模式不耗；站在酸液地面上离开要 1 行动点（荒原行者只要附赠）；其余 1 附赠行动 */
+ *  导体 / 探测模式不耗；站在酸液地面上离开要 1 行动点（荒原行者只要附赠）；狂暴这回合还有免费移动就不耗；其余 1 附赠行动 */
 function moveBaseCost(u) {
   if (!u) return { bonus: 1 };
   if (u.self === "conductor" || (u.kit === "ecmo" && u.resources && u.resources.probe)) return {};
   const f = (state.fields || {})[u.zone] || {};
   const wanderer = typeof featHas === "function" && featHas(u, "wanderer");
   if (f.acid && !u.flying && !wanderer && !(typeof acidGroundWalker === "function" && acidGroundWalker(u))) return { ap: 1 };
+  if (typeof frenzyFreeMoveReady === "function" && frenzyFreeMoveReady(u)) return {};   // 狂暴（effects.js）：每回合的免费移动
   return { bonus: 1 };
 }
 /** 这一区的场地现在能不能改成 kind（空 = 清除）：能返回 null，不能返回原因（深渊、损毁地面、固有场地、被锁定） */
@@ -993,7 +994,8 @@ function onUnitClick(id) {
 function selfName(k) {
   return ({
     none: "无", burn: "自焚", frost: "霜结", splash: "溅射",
-    conductor: "导体", anchor: "千钧", store: "蓄能", doppler: "多普勒"
+    conductor: "导体", anchor: "千钧", store: "蓄能", doppler: "多普勒",
+    frenzy: "狂暴"   // 下水道狂鼠（effects.js · FRENZY）
   })[k] || k;
 }
 
@@ -1757,6 +1759,7 @@ function beginRound(notes) {
     if (u.resources && u.resources.frostShell) { u.resources.frostShell = false; notes.push(`${u.name} 再次霜结的完全免疫结束。`); }
     if (typeof selfImmunities === "function") selfImmunities(u, notes);
     if (typeof syncShockwave === "function") syncShockwave(u, notes);
+    if (typeof syncFrenzyPosture === "function") syncFrenzyPosture(u, notes);   // 狂暴的架势上限（effects.js）也对一遍账
     // 即时效果都是单回合的：没被用掉的也在回合开始时失效
     if (u.instant) {
       const gone = [];
@@ -2076,6 +2079,8 @@ function startEnemyPhase() {
   });
   state.props = (state.props || []).filter(p => p.kind !== "scrapwall");
   settleBossStuns(notes);
+  // 狂鼠的阵营被动「狂潮」（effects.js · frenzyTide）：放在失衡的敌人恢复之前，这时还在失衡的不会被拉进狂暴（照样算存活数量）
+  if (typeof frenzyTide === "function") frenzyTide(notes);
   state.units.forEach(u => {
     if (u.isPlayer || u.hidden || u.dead) return;
     if (u.stunned && bossShrugStun(u, notes)) {
@@ -2165,6 +2170,7 @@ function turnEnd() {
     const weather = currentWeatherFor(u);
     if (typeof selfImmunities === "function") selfImmunities(u, notes);   // 自焚免疫灼烧：直接写进来的灼烧在这里清掉，不会先烫一跳
     if (typeof syncShockwave === "function") syncShockwave(u, notes);
+    if (typeof syncFrenzyPosture === "function") syncFrenzyPosture(u, notes);
     // 加倍计量：这个单位的状态此回合效果翻倍；恶劣环境 / 末日：天气对状态的修正翻倍
     const sm = statusMult(u);
     const ex = envMult(u);
@@ -4547,6 +4553,7 @@ function doMoveInner(unit, dest, moveOpt) {
   }
   // 荒原行者（feats.js）：酸液地面、空隙只要附赠动作，不用检定；冻土离开不检定、进入不受击破
   const wanderer = typeof featHas === "function" && featHas(unit, "wanderer");
+  let frenzyFree = false;
   if (!moveOpt.free) {
     const fromF = state.fields[from] || emptyField();
     if (wanderer && (overVoid || (fromF.acid && !unit.flying))) {
@@ -4556,6 +4563,10 @@ function doMoveInner(unit, dest, moveOpt) {
       if (!spendAp(unit, 1, "越过空隙")) return;
     } else if (fromF.acid && !unit.flying && !(typeof acidGroundWalker === "function" && acidGroundWalker(unit))) {
       if (!spendAp(unit, 1, "离开酸液地面")) return;
+    } else if (typeof frenzyFreeMoveReady === "function" && frenzyFreeMoveReady(unit)) {
+      // 狂暴（effects.js · FRENZY.freeMoves）：这回合的免费移动，不花附赠 / 行动点（越过空隙、离开酸液地面照上面的规则另算）
+      useFrenzyFreeMove(unit);
+      frenzyFree = true;
     } else if (unit.self === "conductor") {
       // 导体：移动不消耗附赠动作
     } else if (unit.kit === "ecmo" && unit.resources && unit.resources.probe) {
@@ -4625,7 +4636,7 @@ function doMoveInner(unit, dest, moveOpt) {
   if (typeof raceAfterMove === "function") raceAfterMove(unit, notes);   // 迅袭（enemies.js）：移动回 1 架势
   if (typeof featAlertOnEnter === "function") featAlertOnEnter(unit, notes);   // 警戒（feats.js）：敌人走进来挨一下
   chaseFollow(unit, notes);
-  notes.unshift(`${unit.name}：${from} 区 → ${unit.zone} 区${moveOpt.free ? "（技能内移动，不耗附赠）" : ""}`);
+  notes.unshift(`${unit.name}：${from} 区 → ${unit.zone} 区${moveOpt.free ? "（技能内移动，不耗附赠）" : frenzyFree ? "（狂暴：这回合的免费移动）" : ""}`);
   paintSkillLog(notes.join("\n"));
   renderAll();
 }
@@ -4984,6 +4995,7 @@ function applyNeutralize(u) {
     notes.push(`${u.name} 自我效果「${selfName(u.self)}」被中和清除（无额外结算）。`);
     u.self = "none";
     u.selfBurnStacks = 0;
+    if (typeof syncFrenzyPosture === "function") syncFrenzyPosture(u, notes);   // 狂暴扣的架势上限还回去
   }
   if (keys.indexOf("reso") >= 0) {
     st.reso = false;
@@ -7228,6 +7240,7 @@ function resetBattleFlags(u) {
   delete r.apGifts;
   delete r.whetDice; delete r.unstoppableNext; delete r.reviveGuard; delete r.alertGiven; delete r.attackSeq;
   r.chargeTurn = null; r.chargeUsed = null; r.blinkReady = null; r.blinkUsed = null;
+  delete r.frenzyMoveTurn; delete r.frenzyMoves;   // 狂暴的免费移动按回合数记（effects.js），每场从头算
   if (u.kit === "hiaki" && !r.blade) r.blade = "niu";
   if (u.kit === "tou") r.shield = 0;
   if (!isWeaponUnit(u)) u.weaponHeld = true;
@@ -8054,6 +8067,7 @@ function dealTo(attacker, target, opt) {
         onConnect: opt.onConnect || null,
         opt: JSON.parse(JSON.stringify({
         atk: opt.atk, mult: opt.mult, hitMults: opt.hitMults, flat: opt.flat, hits: opt.hits, baseHits: opt.baseHits, breakOnce: opt.breakOnce, element: opt.element,
+        bleed: opt.bleed,   // 出血（engine.js · BLEED）：等格挡结果的这一击落下时照样带着
         baseBreak: opt.baseBreak, diceN: opt.diceN, diceS: opt.diceS, diceB: opt.diceB, diceValue: opt.diceValue,
         usePrep: opt.usePrep, atkRange: opt.atkRange, wallZone: opt.wallZone, flags: Object.assign({}, opt.flags, { blockResolved: false })
       }))
@@ -8202,6 +8216,7 @@ function dealTo(attacker, target, opt) {
     hitMults: Array.isArray(opt.hitMults) ? opt.hitMults.slice() : null,
     breakOnce: !!opt.breakOnce,
     baseHits: opt.baseHits,
+    bleed: !!opt.bleed,   // 出血（engine.js · BLEED）：攻击规格上的开关
     // 这次攻击动作里刚被打死的敌人：留到动作结束，后面的攻击照常结算、全部算溢出
     ghostOk: !!(target && !target.isPlayer && target.dead && (state.actionKills || []).includes(target.id)),
     flags,
@@ -8232,6 +8247,9 @@ function dealTo(attacker, target, opt) {
   // 废物利用的来源：记下这一击之前敌人每层的血量，之后只认这一击真正打碎的层
   const layersBeforeHit = target && !target.isPlayer ? (target.layers || []).map(l => ({ type: l.type, cur: Number(l.current) || 0, max: Number(l.max) || 0, sealed: !!l.sealed })) : null;
   const extra = applyCombat(target, res, attacker);
+  // 出血（engine.js · BLEED）：日志单独写一行，排在这一击的其他后果（倒下、失衡……）前面
+  const bleedLine = bleedLogLine(res);
+  if (bleedLine) extra.unshift(bleedLine);
   // 这一击打死的敌人：本次行动后面的攻击还能打到它（全部算溢出）
   if (target && !target.isPlayer && target.dead && !wasDeadForGhost && state.actionKills && !state.actionKills.includes(target.id)) state.actionKills.push(target.id);
   if (target && !target.isPlayer && scoreBonus > 0 && brokeInto(target, wasStunnedForScore)) target._staggerBonus = scoreBonus;
@@ -8371,6 +8389,8 @@ function dealTo(attacker, target, opt) {
     if (segs.length > 1) segs.forEach(h => spawnPopup(target, { kind: "dmg", value: h.intended, element: ele, main: mainHit, adv: advHit, dis: disHit }));
     else if ((res.intended || res.total || 0) > 0) spawnPopup(target, { kind: "dmg", value: res.intended || res.total, element: ele, main: mainHit, adv: advHit, dis: disHit });
     if ((res.extraHarmonic || 0) > 0) spawnFloater(target, res.extraHarmonic, ele);
+    // 出血：每触发一次另跳一个数字（真实伤害，不算进上面那一段的数字）
+    (res.perHit || []).forEach(h => { if ((Number(h && h.bleed) || 0) > 0) spawnFloater(target, h.bleed, ele); });
     // 画面：这一击带的攻击效果打出大字（属性专属的用属性颜色，穿刺 / 猛击 / 弱点特效用灰色）
     if (flags.action !== false && !flags.environment && typeof attackConnected === "function" && attackConnected(res, flags)) {
       attackFxWords(flags).forEach(w => spawnPopup(target, { kind: "fxword", text: w.name, element: w.element }));
@@ -10771,6 +10791,14 @@ function tidyCalcLines(log, multi) {
   return out;
 }
 
+/** 出血（engine.js · BLEED）的那一行：「出血 n（真实伤害）」；同一次攻击触发了几次就写「出血 10 + 5 = 15（真实伤害）」。没有出血返回 "" */
+function bleedLogLine(res) {
+  const parts = ((res && res.perHit) || []).map(h => Math.floor(Number(h && h.bleed) || 0)).filter(n => n > 0);
+  if (!parts.length) return "";
+  const sum = parts.reduce((s, n) => s + n, 0);
+  return `出血 ${parts.length > 1 ? parts.join(" + ") + " = " + sum : sum}（真实伤害）`;
+}
+
 /** 一次命中写成几行：结果 → 掷骰 → 计算 → 后果 */
 function formatHitLines(actor, target, out, captured) {
   if (out && out.structure) return (out.lines || []).map(s => "  " + s);   // 打配置物 / 危墙（dealToStructure）
@@ -10789,7 +10817,8 @@ function formatHitLines(actor, target, out, captured) {
     return L;
   }
   const hits = (res.perHit || []).filter(Boolean);
-  const dmg = Math.floor(res.total || 0), br = Number(res.breakDealt) || 0;
+  // 出血单独写一行（bleedLogLine），这里只写这一击本身的伤害
+  const dmg = Math.floor((res.total || 0) - (res.bleed || 0)), br = Number(res.breakDealt) || 0;
   let head = `  → ${tName}：`;
   // 协助格挡成功：免伤，击破由格挡者承担
   const hb = Number(res.helperBreak) || 0;
