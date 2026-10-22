@@ -558,7 +558,7 @@
       b.type = "button";
       b.className = "hd2d-cam-b";
       b.textContent = C.CAMERA[t].label;
-      b.title = C.CAMERA[t].name + "（滚轮也能切：往前滚拉近、往后滚拉远；近景里双击单位看特写）";
+      b.title = C.CAMERA[t].name + "（滚轮也能切：往前滚拉近、往后滚拉远，远景时再往后滚回到旧画面；近景里双击单位看特写）";
       b.setAttribute("aria-pressed", "false");
       b.addEventListener("click", () => { if (S.sc) S.sc.setTier(t); });
       bar.appendChild(b);

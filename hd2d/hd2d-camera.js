@@ -380,13 +380,13 @@
     return lerpPose(tw.from, tw.to, k);
   }
   /** 战场正上方往下看的镜头（新旧画面之间的转场，#261：新 → 旧时镜头升到这里，旧 → 新时从这里降回远景）：
-   *  看的那一点、视野、景深 / 雾照远景的（far = pose(layout, "far")），俯角抬到 o.elevation（度；正 90 度时朝向算不出来，最多 89.5）、离远 o.dist 倍。
-   *  数值在 hd2d-field.js 的 MIST.rise */
+   *  看的那一点、视野、景深照远景的（far = pose(layout, "far")），俯角抬到 o.elevation（度；正 90 度时朝向算不出来，最多 89.5）、离远 o.dist 倍；
+   *  起雾的地方跟着往后挪多出来的那一截（不然离远了战场会蒙上雾）。数值在 hd2d-field.js 的 MIST.rise */
   function overheadPose(far, o) {
     o = o || {};
     const elevation = clamp(Number(o.elevation) || 0, 0, 89.5), dist = far.dist * (o.dist > 0 ? o.dist : 1);
     const target = { x: far.target.x, y: far.target.y, z: far.target.z };
-    return Object.assign({}, far, { target, dist, elevation, azimuth: 0, pos: posOf(target, dist, elevation, 0), k: 1 });
+    return Object.assign({}, far, { target, dist, elevation, azimuth: 0, pos: posOf(target, dist, elevation, 0), fogShift: (far.fogShift || 0) + dist - far.dist, k: 1 });
   }
 
   /* ---------- 滚轮 ---------- */

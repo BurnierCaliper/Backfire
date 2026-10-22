@@ -201,6 +201,7 @@ test("镜头：远景到头了还往外拉才算转回旧画面（pastFar），�
   assert.ok(Math.hypot(top.pos.x - top.target.x, top.pos.z - top.target.z) < top.dist * 0.05, "几乎没有水平偏移");
   assert.equal(top.azimuth, 0);
   assert.equal(top.fov, far.fov);
+  assert.ok(Math.abs(top.fogShift - (far.fogShift + top.dist - far.dist)) < 1e-9, "起雾的地方跟着往后挪多出来的那一截（离远了战场不蒙上雾）");
   assert.equal(C.overheadPose(far, { elevation: 95 }).elevation, 89.5, "正 90 度以上夹住（镜头朝向算不出来）");
   assert.equal(JSON.stringify(far), JSON.stringify(C.pose(out, "far", 1)), "不改传进来的");
   // 双指
