@@ -151,12 +151,12 @@
   const REGIONS = {
     "外城区": "outer", "沙漠": "desert", "巨人城": "giant", "天网设施": "skynet",
     "第一采矿场": "mine1", "第二采矿场": "mine2", "第三采矿场": "mine3",
-    "下水道": "sewer"     // 隶属巨人城的专门区域（狂鼠的遭遇，run.js · SUB_REGIONS）；地图上的入口另做
+    "下水道": "sewer"     // 隶属巨人城的专门区域（狂鼠的遭遇，run.js · SUB_REGIONS）；地图上是地点 sewer
   };
   /** 同一个地方的别名 → 区域名：world-data.js 的地图地点 id（跑团 LEDGER.place、联机跑团 view.map.place 发的是它）、天网塔 */
   const REGION_ALIAS = {
     "天网塔": "天网设施", outer_city: "外城区", desert: "沙漠", giant_city: "巨人城", skynet: "天网设施",
-    mine_1: "第一采矿场", mine_2: "第二采矿场", mine_3: "第三采矿场"
+    mine_1: "第一采矿场", mine_2: "第二采矿场", mine_3: "第三采矿场", sewer: "下水道"
   };
   /** 区域下面的场景（#239：战斗状态的 state.scene / 投影的 pv.scene，id 见 world-data.js 的 BATTLE_SCENES）→ 地面主题（GROUNDS 的键）。
    *  先留出接口：每个场景都先用所属区域现在的样子；各场景的美术做好以后，把这里换成它自己的 GROUNDS 键就行。

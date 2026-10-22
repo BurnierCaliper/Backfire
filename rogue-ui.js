@@ -775,8 +775,8 @@
         // 幕间选择：下一幕去哪
         const opts = query("interludeOptions");
         return `<h2>第 ${run.act} 幕 · 落幕</h2>
-          <p class="r-hint">${opts.length > 1 ? `选下一幕去哪。两条路都通往第 ${run.act + 1} 幕，敌人等级一样，遇到的敌人、天气和战场不同。` : `前往第 ${run.act + 1} 幕。`}</p>
-          <div class="r-choices r-interlude">${opts.map(o => `<button class="g-btn${o.alt ? "" : " r-main"}" data-next-region="${esc(o.region)}">第 ${run.act + 1} 幕：${esc(o.region)}${o.alt ? "（采矿场）" : ""}
+          <p class="r-hint">${opts.length > 1 ? `选下一幕去哪。${opts.length > 2 ? "几" : "两"}条路都通往第 ${run.act + 1} 幕，敌人等级一样，遇到的敌人、天气和战场不同。${opts.some(o => o.sewer) ? "改走下水道会用掉一张下水道地图，一局只能进一次。" : ""}` : `前往第 ${run.act + 1} 幕。`}</p>
+          <div class="r-choices r-interlude">${opts.map(o => `<button class="g-btn${o.alt ? "" : " r-main"}" data-next-region="${esc(o.region)}">第 ${run.act + 1} 幕：${esc(o.region)}${o.sewer ? "（用掉下水道地图）" : o.alt ? "（采矿场）" : ""}
             <small>${esc(o.desc)}${o.desc ? " · " : ""}会遇到：${esc(o.enemies.slice(0, 8).join("、"))}${o.enemies.length > 8 ? " 等" : ""}</small></button>`).join("")}</div>`;
       }
       case "victory":
@@ -1016,7 +1016,7 @@
       const C = ROGUE_CONFIG, total = Rogue.totalActs(run);
       const route = [];
       for (let a = 1; a <= total; a++) {
-        route.push({ place: (run.regionPick && run.regionPick[a]) || C.regions[(a - 1) % C.regions.length], label: `第 ${a} 幕`, state: a < run.act ? "done" : a === run.act ? "now" : "next" });   // 幕间选过采矿场的照选的
+        route.push({ place: (run.regionPick && run.regionPick[a]) || C.regions[(a - 1) % C.regions.length], label: `第 ${a} 幕`, state: a < run.act ? "done" : a === run.act ? "now" : "next" });   // 幕间选过采矿场 / 下水道的照选的（下水道是地图上的地点 sewer）
       }
       return { here: Rogue.region(run), sub: `${run.solo ? "单人模式" : run.daily ? "每日挑战 " + run.daily.date : "单局"} · 第 ${run.act} 幕 · ${Rogue.region(run)}`, party: run.party.map(h => Rogue.heroName(h.kit)), route };
     },

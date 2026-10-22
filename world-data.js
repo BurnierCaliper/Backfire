@@ -23,7 +23,9 @@ const WORLD_PLACES = [
   { id: "solar_w",      name: "太阳能板群", x: 40.6, y: 58.0, desc: "成片的太阳能板。" },
   { id: "solar_c",      name: "太阳能板群", x: 52.8, y: 64.0, desc: "成片的太阳能板。" },
   { id: "solar_e",      name: "太阳能板群", x: 90.4, y: 67.2, desc: "成片的太阳能板。" },
-  { id: "desert",       name: "沙漠",       x: 84.0, y: 84.0, desc: "包围一切的无边沙海。" }
+  { id: "desert",       name: "沙漠",       x: 84.0, y: 84.0, desc: "包围一切的无边沙海。" },
+  // 下水道：隶属巨人城的专门区域，在城底下（图钉先放在城中心，WORLD_GEO.center）。单局带着下水道地图，幕间可以改走这里（rogue.js · interludeOptions）
+  { id: "sewer",        name: "下水道",     x: 60.2, y: 42.0, desc: "巨人城地底的排污管网，潮湿阴暗。变异的狂鼠在这里出没，下水道维护的机器负责清扫和看守。" }
 ];
 const WORLD_REGION_PLACE = {
   "外城区": "outer_city",
@@ -48,7 +50,7 @@ function worldPlaceOf(regionOrId) {
  *   地图上别的地点（星际港口、极北禁区、太阳能板群……）不是区域，认不得。
  *   HD-2D 战场的地面主题表（hd2d/hd2d-layout.js 的 REGIONS / REGION_ALIAS）和这里一一对上（tests/region-light.test.js 核对）。 */
 const BATTLE_REGIONS = ["外城区", "沙漠", "巨人城", "天网设施", "第一采矿场", "第二采矿场", "第三采矿场",
-  "下水道"];   // 下水道：隶属巨人城的专门区域（run.js · SUB_REGIONS），狂鼠的遭遇带着这个区域名；地图上怎么进去另做，主持人也可以在战场配置里选
+  "下水道"];   // 下水道：隶属巨人城的专门区域（run.js · SUB_REGIONS），狂鼠的遭遇带着这个区域名；地图上是地点 sewer（单局带着下水道地图，幕间可以改走这里），主持人也可以在战场配置里选
 /** 区域名 / 地图地点 id / 地点名 → 区域名（BATTLE_REGIONS 里的）；认不得的返回 null */
 function battleRegionName(x) {
   if (typeof x !== "string") return null;
