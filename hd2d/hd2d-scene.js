@@ -563,15 +563,19 @@ export function createHd2dScene(container, options) {
     const plan = weatherPlan(fx, state.meta.theme);   // 雷鸣：远景要画乌云
     const look = L.GROUNDS[layout.ground] || {};   // 远景跟着区域（沙漠 → 沙丘，采矿场 → 岩壁，城市 → 楼群）
     syncBackdrop(layout, state.meta.backdrop || look.backdrop || backdropOf(state.meta.theme), plan, look.skyline);
-    // 天气：闪电从默认镜头的画面上沿外面劈下来；远处的雷劈在哪问远景
-    weather.setBounds(layout.bounds, { camera: layout.camera, farPoint: state.backdrop.farPoint });
+    // 天气：闪电从默认镜头的画面上沿外面劈下来；远处的雷劈在哪问远景。
+    // setBounds 会把天气粒子整个重建（位置重新撒）：战场范围、默认镜头、远景都没变就不叫——正式画面（#261）每刷新一次（演出的每一下）都会走到这里
+    const c = layout.camera, wsig = [Object.values(layout.bounds).map(v => v.toFixed(2)).join(","), c ? [c.dist, c.pos.x, c.pos.y, c.pos.z].map(v => v.toFixed(2)).join(",") : "", state.backdropSig].join("|");
+    if (wsig !== state.weatherSig) { state.weatherSig = wsig; weather.setBounds(layout.bounds, { camera: layout.camera, farPoint: state.backdrop.farPoint }); }
     weather.set(fx, state.meta.theme);
     syncPlates();
     placeMarks();
     // 特写的单位不在了（被打倒、藏起来）：退出特写，镜头平滑拉回正常的近景（#237）
     const wasClose = state.close, reset = newBoard || state.wantFit;
     state.close = C.camStep(camState(), { type: "units", ids: layout.units.map(u => u.id) }).close;
-    applyTheme();
+    // 光影主题（天空贴图、灯光、调色、雾、地面颜色）：主题 / 场景的光照 / 天气 / 地面都没变就不重做（天空是一张现画的贴图，每刷新一次都画太费）
+    const tsig = [state.meta.theme, state.lit ? "lit" : "", fx, layout.ground || ""].join("|");
+    if (tsig !== state.themeSig) { state.themeSig = tsig; applyTheme(); }
     fitShadow();
     fitCamera(reset);
     if (wasClose != null && state.close == null && !reset) goTo(state.tier, state.zone);

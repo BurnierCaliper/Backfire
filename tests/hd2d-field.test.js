@@ -486,7 +486,62 @@ test("页面里走一遍（场景是假的）：记着开 → 3D 战场铺在 #g
   assert.equal(P.els["g-hd2d-toggle"].textContent, "新画面 关");
 });
 
-/* ---------- 6. 原型页 ---------- */
+/* ---------- 6. 每次刷新都会排一次：重的东西不跟着重建 ---------- */
+let threeHooked = false;
+/** 在 Node 里用 vendor 的真 three.js import 天气模块（和 tests/hd2d-layout.test.js 的 protoEnv 一样的做法）；canvas 用什么都接受的假的 */
+async function weatherEnv(t) {
+  const mod = require("node:module"), { pathToFileURL } = require("url");
+  if (typeof mod.register !== "function") { t.skip("这个 Node 版本没有 module.register"); return null; }
+  const threeUrl = pathToFileURL(path.join(HP.ROOT, "vendor", "three", "three.module.min.js")).href;
+  if (!threeHooked) {
+    threeHooked = true;
+    mod.register("data:text/javascript," + encodeURIComponent(`export async function resolve(s, c, n) {
+      if (s === "three") return { url: ${JSON.stringify(threeUrl)}, format: "module", shortCircuit: true };
+      const r = await n(s, c);
+      return /\\/(hd2d|vendor\\/three)\\//.test(r.url) ? Object.assign({}, r, { format: "module" }) : r;
+    }`));
+  }
+  const any = () => new Proxy(function () {}, { get: (o, k) => (k === Symbol.toPrimitive ? () => 0 : any()), set: () => true, apply: () => any() });
+  const keep = { document: globalThis.document, window: globalThis.window };
+  globalThis.document = { createElement: () => ({ width: 0, height: 0, style: {}, getContext: () => any() }) };
+  globalThis.window = { HD2DLayout: L };
+  const restore = () => {
+    globalThis.document = keep.document; globalThis.window = keep.window;
+    if (keep.document === undefined) delete globalThis.document;
+    if (keep.window === undefined) delete globalThis.window;
+  };
+  try {
+    const THREE = await import(threeUrl), WX = await import(pathToFileURL(HP.mod("hd2d-weather.js")).href);
+    return { THREE, WX, restore };
+  } catch (e) { restore(); throw e; }
+}
+
+test("正式画面每刷新一次（演出的每一下）都会交一次布局给场景：天气粒子、天空贴图不跟着重建（setBounds 会把粒子整个重新撒，所以场景先比一比范围 / 镜头 / 远景）", async (t) => {
+  const P = await weatherEnv(t);
+  if (!P) return;
+  const { THREE, WX } = P;
+  try {
+    const scene = new THREE.Scene(), out = L.build({ zoneMode: 3, units: [], fields: {}, gaps: {} }, { view: DESKTOP });
+    const fx = WX.createWeather(scene, { bounds: out.bounds });
+    fx.set("sand", "day");
+    const before = new Set(scene.children);
+    fx.set("sand", "day");
+    assert.ok(scene.children.every(o => before.has(o)), "同一种天气再设一次：不重建（天气模块自己就比过）");
+    fx.setBounds(out.bounds, { camera: out.camera });
+    assert.ok(scene.children.some(o => !before.has(o)), "setBounds：粒子整个重建");
+  } finally { P.restore(); }
+  // 所以场景：范围 / 默认镜头 / 远景都没变就不叫 setBounds；光影主题、场景的光照、天气、地面都没变就不重画天空、不重设灯光调色
+  const set = code(read("hd2d/hd2d-scene.js"));
+  const body = set.slice(set.indexOf("function setBattle("), set.indexOf("const backdropOf"));
+  assert.match(body, /if \(wsig !== state\.weatherSig\) \{ state\.weatherSig = wsig; weather\.setBounds\(layout\.bounds, \{ camera: layout\.camera, farPoint: state\.backdrop\.farPoint \}\); \}/);
+  assert.match(body, /wsig = \[Object\.values\(layout\.bounds\)[^\n]*c\.dist, c\.pos\.x, c\.pos\.y, c\.pos\.z[^\n]*state\.backdropSig\]\.join\("\|"\);/, "签名里有范围、默认镜头、远景");
+  assert.match(body, /if \(tsig !== state\.themeSig\) \{ state\.themeSig = tsig; applyTheme\(\); \}/);
+  assert.match(body, /const tsig = \[state\.meta\.theme, state\.lit \? "lit" : "", fx, layout\.ground \|\| ""\]\.join\("\|"\);/);
+  assert.equal((body.match(/weather\.setBounds\(/g) || []).length, 1);
+  assert.equal((body.match(/applyTheme\(\)/g) || []).length, 1);
+});
+
+/* ---------- 7. 原型页 ---------- */
 test("原型页的模块路径改了以后照样能加载：页面引用的文件都在、模块只有 hd2d/ 那一份；场景模块里的相对 import 在 hd2d/ 里找得到；假网页照页面顺序加载 0 个报错", () => {
   const html = HP.readPage("index.html");
   const refs = [...html.matchAll(/(?:src|href)="([^"#][^"]*)"/g)].map(m => m[1]).filter(f => !/^(https?:|data:)/.test(f));

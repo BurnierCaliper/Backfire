@@ -305,6 +305,8 @@
   function paint(reset) {
     const G = root.GAME, L = Lay(), st = stateNow();
     if (!S.sc || !G || !L || !st) return;
+    // 战斗画面藏着（切到地图、标题……，战场宽 0）：先不排，回来时画面大小一变场景会叫 onViewChange 重排（快照记着最新的）
+    if (!S.stage || !S.stage.clientWidth) return;
     // 和联机发包前一样先同步区域 / 场景 / 光影（光影跟着时钟、场景跟着场上的场地；只是画面的标签，不改结算：world-data.js）
     try { if (typeof root.battleLookSync === "function") root.battleLookSync(); } catch (e) {}
     const snaps = S.snaps || (typeof G.snapAll === "function" ? G.snapAll() : null);
