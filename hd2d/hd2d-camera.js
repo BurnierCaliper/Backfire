@@ -13,6 +13,7 @@
  *   const to = HD2DCamera.pose(layout, "near", zoneId, { actorId });   // 这一段的镜头：{ tier, zone, zones, target, dist, elevation, fov, pos, dof, fogShift, clip, tilt, plates… }
  *   const tw = HD2DCamera.tween(from, to, { reduced });                // 过渡；reduced = 减少动态效果：不插值，直接切过去
  *   HD2DCamera.at(tw, 秒)                                               // 这一刻的镜头（k = 缓动后的进度 0–1，铭牌的抬高也按它插值）
+ *   HD2DCamera.pastFar(s, ±1) / overheadPose(far, { elevation, dist })  // 正式画面（#261）：远景再往外拉转回旧画面；转场时镜头升到 / 降自战场正上方
  */
 (function (root, factory) {
   if (typeof module === "object" && module.exports) module.exports = factory(require("./hd2d-layout.js"));
@@ -74,6 +75,9 @@
     /* 滚轮：一次滚动（两下之间停顿不到 idle 秒算同一次）只跳一段；攒够 step 像素才跳（触控板一下只给一点点）。
      * 往前滚拉近（远 → 中 → 近）；按行 / 按页给的 deltaY 换成像素：× line / × page */
     wheel: { step: 40, idle: 0.22, line: 40, page: 800 },
+    /* 触屏双指：两根手指的距离比按下时变了 ratio 那么多（张开到 1 + ratio 倍 / 捏到 1 / (1 + ratio)）算一下，和滚轮一样一次手势只跳一段：
+     * 张开拉近、捏小拉远（#261：正式画面里远景再捏小 = 转回旧画面） */
+    pinch: { ratio: 0.2 },
     /* 键盘：1 / 2 / 3 切远 / 中 / 近；中景 / 近景里左右键换相邻的区 */
     keys: { far: "1", mid: "2", near: "3", prev: "ArrowLeft", next: "ArrowRight" }
   };
@@ -330,6 +334,11 @@
     if (ev.type === "units") return s.close != null && !(ev.ids || []).includes(s.close) ? { tier: s.tier, zone: s.zone, close: null } : s;
     return s;
   }
+  /** 远景到头了还往外拉（滚轮往后 / 双指捏小，step < 0，一次手势一下；没在特写）：camStep 拉不动了，正式画面拿它转回旧画面（hd2d-field.js，#261）。
+   *  中景 / 近景往外拉照旧只换段，不算 */
+  function pastFar(s, step) {
+    return Number(step) < 0 && tierName(s && s.tier) === "far" && !(s && s.close != null);
+  }
 
   /* ---------- 过渡 ---------- */
   /** 镜头的位置：在 target 后上方 dist 远，俯角 elevation（度）、方位 azimuth（弧度，0 = 正对 −z 看，和 OrbitControls 的 theta 一样） */
@@ -370,6 +379,15 @@
     const k = (EASE[tw.ease] || EASE.linear)(clamp(t / tw.duration, 0, 1));
     return lerpPose(tw.from, tw.to, k);
   }
+  /** 战场正上方往下看的镜头（新旧画面之间的转场，#261：新 → 旧时镜头升到这里，旧 → 新时从这里降回远景）：
+   *  看的那一点、视野、景深照远景的（far = pose(layout, "far")），俯角抬到 o.elevation（度；正 90 度时朝向算不出来，最多 89.5）、离远 o.dist 倍；
+   *  起雾的地方跟着往后挪多出来的那一截（不然离远了战场会蒙上雾）。数值在 hd2d-field.js 的 MIST.rise */
+  function overheadPose(far, o) {
+    o = o || {};
+    const elevation = clamp(Number(o.elevation) || 0, 0, 89.5), dist = far.dist * (o.dist > 0 ? o.dist : 1);
+    const target = { x: far.target.x, y: far.target.y, z: far.target.z };
+    return Object.assign({}, far, { target, dist, elevation, azimuth: 0, pos: posOf(target, dist, elevation, 0), fogShift: (far.fogShift || 0) + dist - far.dist, k: 1 });
+  }
 
   /* ---------- 滚轮 ---------- */
   /** 滚轮在三段之间跳：一次滚动只跳一段。s = 上一次返回的 state（第一次给 null），deltaY 像素（往前滚是负的），now 秒。
@@ -386,9 +404,15 @@
     const W = CAMERA.wheel;
     return (Number(e.deltaY) || 0) * (e.deltaMode === 1 ? W.line : e.deltaMode === 2 ? W.page : 1);
   }
+  /** 触屏双指：ratio = 两根手指现在的距离 ÷ 按下时的距离。张开够了 1 拉近、捏小够了 −1 拉远、不够 0（一次手势只算一下由场景管） */
+  function pinchStep(ratio) {
+    const r = Number(ratio), P = CAMERA.pinch.ratio;
+    if (!(r > 0)) return 0;
+    return r >= 1 + P ? 1 : r <= 1 / (1 + P) ? -1 : 0;
+  }
 
   return {
     CAMERA, EASE, ZONE_TAGS, tierName, stepTier, zoneOrder, neighborZone, focusZone, linkedZones, zoneTag, windowOf, pose, blurAt,
-    closePose, unitAt, camStep, posOf, poseFrom, lerpPose, tween, at, wheelStep, wheelPixels
+    closePose, unitAt, camStep, pastFar, posOf, poseFrom, lerpPose, tween, at, overheadPose, wheelStep, wheelPixels, pinchStep
   };
 });

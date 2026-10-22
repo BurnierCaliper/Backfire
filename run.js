@@ -381,7 +381,7 @@ function pickByTokens(pool, tokens) {
  *   sides：两边各自的阵营（可混编的阵营写在一起）。chance：这个区域三区制的遭遇变成三方混战的概率 */
 const THREE_WAY = {
   tokens: 3,
-  chance: 0.5,
+  chance: 0.15,   // 作者 10/22 定 15%（原来 50%）
   regions: {
     "第三采矿场": { name: "三方混战", sides: [["安保"], ["异星生物"]] },
     "外城区": { name: "三方混战", sides: [["安保", "警卫队"], ["盗匪"]] }
