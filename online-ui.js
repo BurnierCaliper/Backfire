@@ -71,6 +71,7 @@
     const rollBox = make("section", "online-roll", "ol-overlay ol-bag ol-roll", { role: "dialog", "aria-label": "掷骰" });
     rollBox.hidden = true;
     let checkReq = null;   // 申请检定（check-request-ui.js）：玩家申请 / 主持人批准的浮层，下面 mount
+    let loreUi = null;     // NPC 资料（lore-ui.js）：主持人编辑 / 玩家只读的浮层，下面 mount
     const rollForm = { unit: "", prof: "", note: "", secret: false };
     // 大字：主持人发，所有人画面中间出现（像 Minecraft 的 /title）
     const titleShow = make("div", "online-title", "ol-title-show", { "aria-live": "assertive" });
@@ -700,7 +701,7 @@
       if (screen === "lobby" || !data) return '<div class="ol-wait"><h2>等待房间同步</h2><p>房主准备好后会更新这里。</p></div>';
       if (view.packet?.mode === "rogue" && view.packet.rogue && screen === "exploration") return rogueMarkup(view.packet.rogue);
       const units = (data.units || []).filter(u => !u.hidden), logs = view.packet?.publicLogs || [];
-      return `<header class="ol-stage-heading"><div><span class="ol-muted">${esc(view.roomCode)} · ${screen === "battle" ? `第 ${data.turnNo || 1} 回合` : screen === "ended" ? "遭遇结束" : "探索环节"}</span>${screen === "battle" && global.Chain && data.chainStatus ? `<div class="ol-chain">${global.Chain.barHtml(data.chainStatus)}</div>` : ""}<h1>${screen === "battle" ? "战场" : screen === "ended" ? "战斗结算" : "与队伍同行"}</h1>${clockLine()}<div class="ol-info-tools">${global.WorldMap ? button("地图", "map") : ""}${screen === "battle" && matchupOf() ? button("克制表", "matchup") : ""}${button("角色资料", "info", 'data-info="sheet"', pending)}${button("武器", "info", 'data-info="armory"', pending)}${button("背包", "info", 'data-info="bag" title="队伍的全部道具（材料、消耗品、改装件…）"')}${button("战绩", "info", 'data-info="record"', pending)}${suppliesButton()}${view.packet?.mode !== "rogue" ? button(`任务日志${questList().some(q => q.status === "active") ? ` · ${questList().filter(q => q.status === "active").length}` : ""}`, "quests") : ""}</div></div>${weatherMarkup(data)}</header>${screen === "ended" ? resultMarkup() : ""}${checksMarkup(screen === "battle")}${screen === "battle" || screen === "ended" ? '<div class="ol-battle-slot"></div>' : `<p class="ol-muted ol-explore-hint">主持人正在管理探索与遭遇。右侧「小队」频道可以和大家聊天，「消息与成员」里可以私下回复主持人。</p>${partyMarkup(units)}`}`;
+      return `<header class="ol-stage-heading"><div><span class="ol-muted">${esc(view.roomCode)} · ${screen === "battle" ? `第 ${data.turnNo || 1} 回合` : screen === "ended" ? "遭遇结束" : "探索环节"}</span>${screen === "battle" && global.Chain && data.chainStatus ? `<div class="ol-chain">${global.Chain.barHtml(data.chainStatus)}</div>` : ""}<h1>${screen === "battle" ? "战场" : screen === "ended" ? "战斗结算" : "与队伍同行"}</h1>${clockLine()}<div class="ol-info-tools">${global.WorldMap ? button("地图", "map") : ""}${screen === "battle" && matchupOf() ? button("克制表", "matchup") : ""}${button("角色资料", "info", 'data-info="sheet"', pending)}${button("武器", "info", 'data-info="armory"', pending)}${button("背包", "info", 'data-info="bag" title="队伍的全部道具（材料、消耗品、改装件…）"')}${button("战绩", "info", 'data-info="record"', pending)}${suppliesButton()}${view.packet?.mode !== "rogue" ? button(`任务日志${questList().some(q => q.status === "active") ? ` · ${questList().filter(q => q.status === "active").length}` : ""}`, "quests") : ""}${loreButton()}</div></div>${weatherMarkup(data)}</header>${screen === "ended" ? resultMarkup() : ""}${checksMarkup(screen === "battle")}${screen === "battle" || screen === "ended" ? '<div class="ol-battle-slot"></div>' : `<p class="ol-muted ol-explore-hint">主持人正在管理探索与遭遇。右侧「小队」频道可以和大家聊天，「消息与成员」里可以私下回复主持人。</p>${partyMarkup(units)}`}`;
     }
     /** 联机跑团的时钟行：和主持人顶栏同一句（party-cards.js · clockHtml，含「距上次长休」和力竭提示） */
     function clockLine() {
@@ -902,6 +903,12 @@
       bagBox.innerHTML = questMarkup(); bagBox.hidden = false; questBoxOpen = true;
       bagBox.querySelector('[data-bag="close"]')?.focus({ preventScroll: true });
     }
+    /* ---------- NPC 资料（角色资料，lore-ui.js；房主发来的只有已发布条目的索引 packet.lore）---------- */
+    // 不带条数：390px 下工具栏一格只有 84px，再长就被截（新发布的会弹提示）
+    function loreButton() {
+      if (!global.LoreUI || view.packet?.mode === "rogue") return "";
+      return button(global.LoreUI.ENTRY, "lore", 'title="主持人发布的人物资料（只读）"');
+    }
     /** 和上一包比：新任务、推进、完成、失败 → 提示一句（第一次收到不提示） */
     /** 主持人开店 / 关店：提示一句（第一次收到不提示） */
     let shopSeen;
@@ -1098,7 +1105,7 @@
       rogueHeroesSeen = heroCount > 0;
       // 有协助 / 格挡询问轮到我回应：先收起房间面板、钱包与商店弹窗、背包浮层（.ovl 8500 会盖住询问），别把询问挡住（倒计时到了会自动放弃）
       const myAsk = view.active && !view.isHost && hs().ask && hs().ask.eligible && !hs().ask.declined;
-      if (myAsk && view.screen !== "lobby") { panelOpen = false; suppliesOpen = false; closeMyBag(); }
+      if (myAsk && view.screen !== "lobby") { panelOpen = false; suppliesOpen = false; closeMyBag(); if (loreUi) loreUi.close(); }
       // 离开房间 / 被移出 / 变成房主：玩家打开的背包浮层（keep: true 不会自己收）收起来
       if (!(view.active && !view.isHost)) closeMyBag();
       panel.hidden = !(panelOpen || view.active && view.screen === "lobby" && !rogueHost);
@@ -1125,6 +1132,7 @@
       if (!stage.hidden) paintStage();
       paintSupplies();
       if (checkReq) checkReq.sync();
+      if (loreUi) loreUi.sync();
       if (view.active && !view.isHost) scheduleAutoMenu();
     }
     /** 「房间码 · 消息与成员」：别人发来的新私信、大厅交流里还没看到的新消息，记在按钮右上角的红点上（#207；
@@ -1357,6 +1365,7 @@
         case "info": if (b.dataset.info === "bag") { openBag(); break; } await openInfo(b.dataset.info, b.dataset.kit || null); break;
         case "focusHero": focusKit = b.dataset.kit || ""; render(); break;
         case "quests": openQuests(); break;
+        case "lore": if (loreUi) loreUi.open(); break;
         case "map": openMap(); break;
         case "supplies": suppliesOpen = true; lastMarkup.supplies = ""; paintSupplies(); suppliesBox.querySelector('[data-online="suppliesClose"]')?.focus({ preventScroll: true }); break;
         case "showLog": sideTab.battle = "log"; renderSide(true); side.querySelector(".ol-side-log")?.scrollIntoView({ block: "nearest" }); break;
@@ -1656,11 +1665,14 @@
     // 申请检定：规则在 hotseat.js · requestCheck / decideCheck；角色是自己操控的（可以好几名），主持人看全队
     if (global.CheckRequestUI) checkReq = global.CheckRequestUI.mount({ api, view: () => view, own, call, profLevel, playerName,
       units: () => view.isHost ? ((displayState || view.state || {}).units || []).filter(u => u.isPlayer && !u.weaponOf && u.kit) : rollUnits() });
+    // NPC 资料：规则在 lore.js（主持人的写入走 api.submit），玩家看 packet.lore、点开一条用 api.loreEntry 要详细内容
+    if (global.LoreUI) loreUi = global.LoreUI.mount({ api, view: () => view, confirm: askConfirm,
+      toast: text => { toast.textContent = text; toast.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { toast.hidden = true; }, 4500); } });
     if (typeof api.subscribe === "function") unsubs.push(api.subscribe(render));
     if (typeof api.onPacket === "function") unsubs.push(api.onPacket(playPacket));
     render();
     const instance = { render, open(which = "join") { entry = which; panelOpen = true; render(); }, destroy() {
-      destroyed = true; closeMyBag(); if (checkReq) { checkReq.destroy(); checkReq = null; } if (battle) { battle.destroy(); battle = null; } playbackGeneration++; actionGeneration++; historyGeneration++; clearTimeout(toastTimer);
+      destroyed = true; closeMyBag(); if (checkReq) { checkReq.destroy(); checkReq = null; } if (loreUi) { loreUi.destroy(); loreUi = null; } if (battle) { battle.destroy(); battle = null; } playbackGeneration++; actionGeneration++; historyGeneration++; clearTimeout(toastTimer);
       document.removeEventListener("compositionstart", onCompStart, true); document.removeEventListener("compositionend", onCompEnd, true);
       document.removeEventListener("click", onRollOpen); document.removeEventListener("scroll", onListScroll, true); clearTimeout(titleTimer);
       while (hostMounts.length) hostMounts.pop().remove(); document.body.classList.remove("ol-has-side", "ol-host-online", "ol-in-battle");
