@@ -267,3 +267,81 @@ test("战场配置（game.js · renderFieldSheet）：死刑 / 分担 / 远离 /
     assert.ok(fn.includes(`name: ${q}("name").value, phase: ${q}("phase").value`), dflt + "：发指令时带上 name");
   }
 });
+
+/* ---------- 浏览器：主持人真的在战场配置里填技能名（没装 Playwright 时跳过） ---------- */
+function playwright() {
+  try { return require("playwright"); } catch (_) {}
+  try { return require(path.join(execSync("npm root -g", { stdio: ["ignore", "pipe", "ignore"] }).toString().trim(), "playwright")); } catch (_) {}
+  return null;
+}
+let browser = null;
+test.before(async () => { const pw = playwright(); if (!pw) return; try { browser = await pw.chromium.launch(); } catch (e) { if (process.env.REQUIRE_UI === "1") throw e; } });
+test.after(async () => { if (browser) await browser.close(); });
+async function site(t) {
+  const website = http.createServer((req, res) => {
+    const file = path.resolve(H.ROOT, "." + decodeURIComponent(new URL(req.url, "http://localhost").pathname));
+    if (!file.startsWith(H.ROOT + path.sep)) { res.writeHead(403); res.end(); return; }
+    fs.readFile(file, (error, bytes) => {
+      if (error) { res.writeHead(404); res.end(); return; }
+      res.setHeader("Content-Type", ({ ".js": "application/javascript", ".css": "text/css", ".html": "text/html", ".json": "application/json", ".svg": "image/svg+xml" })[path.extname(file)] || "application/octet-stream");
+      res.end(bytes);
+    });
+  });
+  await new Promise((resolve, reject) => { website.once("error", reject); website.listen(0, "127.0.0.1", resolve); });
+  t.after(() => new Promise(resolve => website.close(resolve)));
+  return "http://127.0.0.1:" + website.address().port;
+}
+
+test("浏览器 · 战场配置：四个面板都有「技能名」；死刑填「公开处刑」、踩塔只填空格 → 横幅、头顶图标、战斗记录写技能名 / 机制原名；再打开面板名字还在；联机发不出去的名字弹提示、不改", { timeout: 60000 }, async t => {
+  if (!browser) { if (process.env.REQUIRE_UI === "1") throw new Error("UI 验收需要 Playwright"); t.skip("Playwright/browser unavailable"); return; }
+  const origin = await site(t);
+  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } }); t.after(() => context.close());
+  const page = await context.newPage(); const errors = []; page.on("pageerror", e => errors.push(e.message));
+  await page.goto(origin + "/game.html"); await page.waitForFunction(() => !!window.GAME && !!window.UnitCard);
+  await page.evaluate(() => {
+    GAME.skip = true; GAME.instant = true;
+    Screens.show("battle");
+    GAME.startCustomBattle("技能名测试", () => { BattleSim.setup({ party: ["ruby", "yuito", "ras"], enemies: [{ id: "thug_knife", lv: 5, zone: 2 }], seed: "MECH-NAME-UI" }); return {}; });
+    GAME.startOrEnd();
+  });
+  await page.waitForFunction(() => state.combatStarted);
+  await page.evaluate(() => document.querySelectorAll(".g-intro, .intro, .battle-intro").forEach(n => n.remove()));
+  await page.evaluate(() => document.getElementById("g-field-cfg").click());
+  await page.waitForSelector("#g-field-sheet.show");
+  // 敌人那一行下面的四个面板（死刑、分担、远离、踩塔）：第一项是技能名，空着，灰字写机制原名
+  assert.deepEqual(await page.$$eval("#g-enemy-list .exec-edit", eds => eds.map(e => { const i = e.querySelector('[data-x="name"]'); return [i.closest("label").textContent.trim(), i.placeholder, i.maxLength, i.value]; })),
+    [["技能名", "死刑", 12, ""], ["技能名", "分担", 12, ""], ["技能名", "远离", 12, ""], ["技能名", "踩塔", 12, ""]]);
+  /** 打开第 i 个面板（0 死刑 / 1 分担 / 2 远离 / 3 踩塔），技能名填 name，点「加上 / 改」 */
+  const apply = (i, name) => page.evaluate(([i, name]) => {
+    const box = document.querySelectorAll("#g-enemy-list .exec-edit")[i];
+    box.hidden = false;
+    box.querySelector('[data-x="name"]').value = name;
+    box.querySelector('[data-x="go"]').click();
+  }, [i, name]);
+  await apply(0, "公开处刑");
+  await apply(3, "   ");
+  await page.evaluate(() => GAME.refresh());
+  const st = await page.evaluate(() => {
+    const boss = state.units.find(u => !u.isPlayer);
+    return { id: boss.id, casts: bossCastsBy(boss).map(x => [x.type, x.name]), names: boss.mechanics.map(m => [m.type, m.name || null]), log: state.logPages.flatMap(p => p.lines).map(l => l.text).join("\n") };
+  });
+  assert.deepEqual(st.casts, [["execution", "公开处刑"], ["tower", "踩塔"]]);
+  assert.deepEqual(st.names, [["execution", "公开处刑"], ["tower", null]], "只填空格 = 不填");
+  assert.match(st.log, /加上「公开处刑」：/);
+  assert.match(st.log, /加上「踩塔」：/);
+  // 战场正上方的横幅、首领头上的读条图标
+  const banner = await page.$$eval("#g-field > .g-topstack .mech-bar .mb-row", rows => rows.map(r => r.innerText.replace(/\s+/g, " ").trim()));
+  assert.ok(banner.some(x => /^公开处刑 → \S+ · 3 回合$/.test(x)) && banner.some(x => /^踩塔 · \d 区 · 3 回合$/.test(x)), JSON.stringify(banner));
+  const aria = await page.$$eval(`#g-field .unit-wrap[data-id="${st.id}"] .u-mechs .mech-ico`, els => els.map(e => e.getAttribute("aria-label")));
+  assert.ok(aria.some(a => /^公开处刑 → \S+：还有 3 回合$/.test(a)) && aria.some(a => /^踩塔 · \d 区：还有 3 回合$/.test(a)), JSON.stringify(aria));
+  // 再打开死刑面板：按钮打勾，技能名还在，按钮变成「改」
+  assert.deepEqual(await page.evaluate(() => {
+    const box = document.querySelectorAll("#g-enemy-list .exec-edit")[0];
+    return [document.querySelector("#g-enemy-list .sheet-slot button").textContent, box.querySelector('[data-x="name"]').value, box.querySelector('[data-x="go"]').textContent];
+  }), ["死刑 ✓", "公开处刑", "改"]);
+  // 联机发不出去的名字：弹提示，机制不改
+  await apply(0, "坚毅之锤");
+  assert.match(await page.textContent("#g-hint"), /execution name can't be shown to players/);
+  assert.deepEqual(await page.evaluate(() => state.units.find(u => !u.isPlayer).mechanics.map(m => m.name || null)), ["公开处刑", null]);
+  assert.deepEqual(errors, []);
+});
