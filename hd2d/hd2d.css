@@ -248,3 +248,54 @@
   animation: hd2d-shadow var(--life) ease-out forwards;
 }
 @keyframes hd2d-shadow { 0% { opacity: 0; } 12% { opacity: var(--o); } 60% { opacity: var(--o); } 100% { opacity: 0; } }
+
+/* ---------- 选目标 / 选区的标记（正式画面，#261；地台、间隔的亮框在 hd2d-scene.js 的 MARK）----------
+ * 和旧画面的单位卡一样：能点的目标描一圈危险黄、一明一暗（鼠标变准星），鼠标停着的那个更亮；别的铭牌变暗（旧画面 is-dim 的 0.45） */
+.hd2d-plate.target .pl-card, .hd2d-plate.target .pl-big { cursor: crosshair; border-color: var(--hazard); animation: pl-target 1.1s ease-in-out infinite; }
+.hd2d-plate.aim .pl-card, .hd2d-plate.aim .pl-big { animation: none; border-color: #fff4c2; box-shadow: inset 0 1px 0 var(--rim), 0 0 0 2px var(--ink), 0 0 0 4px var(--hazard), 0 0 18px 6px rgba(242, 194, 48, .75); }
+@keyframes pl-target {
+  0%, 100% { box-shadow: inset 0 1px 0 var(--rim), 0 0 0 1px var(--ink), 0 0 0 3px rgba(242, 194, 48, .55), 0 0 6px 1px rgba(242, 194, 48, .35); }
+  50% { box-shadow: inset 0 1px 0 var(--rim), 0 0 0 1px var(--ink), 0 0 0 3px rgba(242, 194, 48, .95), 0 0 14px 4px rgba(242, 194, 48, .6); }
+}
+.hd2d-plate.dimmed .pl-in { opacity: .45; filter: saturate(.6); }
+.hd2d-labels.still .hd2d-plate.target .pl-card, .hd2d-labels.still .hd2d-plate.target .pl-big { animation: none; }
+@media (prefers-reduced-motion: reduce) { .hd2d-plate.target .pl-card, .hd2d-plate.target .pl-big { animation: none; } }
+
+/* ---------- 正式战斗画面（game.html）里的新画面（#261）----------
+ * 战斗顶栏的「新画面」开关开着（#g-app 上的 .hd2d-on，hd2d/hd2d-field.js 加）：战场那一格（#g-field）里铺一层 3D 战场（.hd2d-field），
+ * 盖住旧的区和单位卡——旧的照旧排（规则、演出要它们的位置和 class），只是看不见、点不到；战场正上方那一摞（首领机制横幅 / 援军倒计时，.g-topstack）照旧露在上面。
+ * 关着时没有 .hd2d-on，也没有 .hd2d-field，下面这些一条都套不上 */
+.g-app.hd2d-on > .g-field { visibility: hidden; }
+.g-app.hd2d-on > .g-field > .hd2d-field, .g-app.hd2d-on > .g-field > .g-topstack { visibility: visible; }
+.hd2d-field { position: absolute; inset: 0; z-index: 5; overflow: hidden; background: #111; color: var(--canvas); font: 14px/1.4 var(--ui-sans); user-select: none; }
+/* 天气的 2D 层傍晚 / 夜晚借 weather-fx.css 的夜晚样子（hd2d-wfx.js 给这一层加 .g-app.is-night）：正式画面的 game.css / hotseat.css 给 .g-app 排了整页的网格、定了高度，
+ * 这一层不吃那些，还是铺满 3D 画面的一层 */
+.hd2d-field .hd2d-wfx.g-app { display: block; height: auto; padding: 0; overflow: hidden; grid-template: none; }
+/* 镜头按钮（远 / 中 / 近 + 看的那个区）：右下角，样子照原型顶栏的镜头按钮；中景 / 近景时两边的换区箭头（键盘左右键也行） */
+.hd2d-cam {
+  position: absolute; right: 10px; bottom: 10px; z-index: 3; display: flex; align-items: center; gap: 4px; padding: 4px 6px;
+  background: rgba(17, 14, 11, .82); border: 2px solid var(--ink); box-shadow: 2px 3px 0 rgba(0, 0, 0, .45);
+}
+.hd2d-cam-b {
+  cursor: pointer; width: 30px; height: 26px; padding: 0; font: 900 14px/1 var(--ui-sans); color: var(--canvas);
+  background: var(--oil-2); border: 2px solid var(--ink); box-shadow: 2px 2px 0 rgba(0, 0, 0, .5);
+}
+.hd2d-cam-b:hover { background: var(--steel-hi); }
+.hd2d-cam-b.on { background: var(--hazard); color: var(--ink); }
+.hd2d-cam-b:active { transform: translate(1px, 1px); }
+.hd2d-cam-b:focus-visible { outline: 2px solid var(--canvas); outline-offset: 1px; }
+.hd2d-cam-z { min-width: 4em; margin-left: 4px; font: 900 12px/1 var(--ui-sans); color: var(--canvas); white-space: nowrap; }
+.hd2d-zone-nav {
+  position: absolute; z-index: 3; top: 50%; transform: translateY(-50%); cursor: pointer; padding: 10px 12px;
+  font: 900 14px/1 var(--ui-sans); color: var(--canvas); white-space: nowrap;
+  background: rgba(17, 14, 11, .78); border: 2px solid var(--ink); box-shadow: 3px 4px 0 rgba(0, 0, 0, .45);
+}
+.hd2d-zone-nav.prev { left: 10px; border-left: 4px solid var(--hazard); }
+.hd2d-zone-nav.next { right: 10px; border-right: 4px solid var(--hazard); }
+.hd2d-zone-nav:hover { background: rgba(43, 39, 35, .92); }
+.hd2d-zone-nav[hidden] { display: none; }
+@media (max-width: 720px) {
+  .hd2d-cam-z { display: none; }
+  .hd2d-cam-b { width: 26px; height: 24px; font-size: 13px; }
+  .hd2d-zone-nav { padding: 8px 9px; font-size: 12px; }
+}

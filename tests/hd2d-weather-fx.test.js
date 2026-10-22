@@ -415,8 +415,10 @@ test("原型页（#240）：原样加载 weather-fx.css / weather-fx.js（正式
   assert.ok(W.WFX.z < z(".hd2d-labels") && z(".hd2d-wfx") === W.WFX.z, "2D 层在铭牌下面");
   assert.ok(z(".panel") > z("#stage") && z("#topbar") > z("#stage"), "界面面板在 #stage（3D 画面 + 2D 天气层）上面");
   assert.ok(/\.hd2d-wfx \{[^}]*position: absolute; inset: 0;[^}]*pointer-events: none/.test(css), "2D 层铺满画面、不挡鼠标（拖动转镜头照样落在画布上）");
-  // 正式画面的两个文件：weather-fx.js 只加可选参数、默认值不变（git 里看得到；这里查它还是给 game.js 用的同一个 WeatherFx.sync）
-  assert.ok(/WeatherFx\.sync\(\{ field: fieldEl, app: \$\("g-app"\), weather: env\.weather, sandDir: state\.sandDir, phaseStep: state\.phaseStep \}\)/.test(read("game.js")), "正式画面照旧这样调");
+  // 正式画面的两个文件：weather-fx.js 只加可选参数、默认值不变（git 里看得到；这里查它还是给 game.js 用的同一个 WeatherFx.sync）。
+  // #261 起正式画面有「新画面」开关：关着时 wfxField 就是旧战场，照旧这样调（不给新参数）；开着时叠加层画在新画面的那一层上（hd2d-field.js）
+  assert.ok(/WeatherFx\.sync\(\{ field: wfxField, app: \$\("g-app"\), weather: env\.weather, sandDir: state\.sandDir, phaseStep: state\.phaseStep \}\)/.test(read("game.js")) &&
+    /const wfxField = field3d\(\) \? null : fieldEl;/.test(read("game.js")), "正式画面照旧这样调");
   // 假网页：照 index.html 的顺序加载不报错，HD2DWfx / WeatherFx 都在
   const page = require("./hd2d-fake-page").load();
   assert.deepEqual(page.errors, [], "假网页加载报错");
@@ -469,8 +471,9 @@ test("weather-fx.js 只加了两个可选参数（#240），不给就是正式�
   R.WF.sync({ field: rf, weather: "acid", spot: () => ({ x: 50, y: 50 }) });
   R.WF.sync({ field: rf, weather: "thunder" });
   assert.equal(R.timers.length, 0, "减少动态效果：不生成");
-  // 正式画面照旧这样调（不给新参数）
-  assert.ok(/WeatherFx\.sync\(\{ field: fieldEl, app: \$\("g-app"\), weather: env\.weather, sandDir: state\.sandDir, phaseStep: state\.phaseStep \}\)/.test(read("game.js")));
+  // 正式画面照旧这样调（不给新参数；#261 的新画面关着时 wfxField 就是旧战场）
+  assert.ok(/WeatherFx\.sync\(\{ field: wfxField, app: \$\("g-app"\), weather: env\.weather, sandDir: state\.sandDir, phaseStep: state\.phaseStep \}\)/.test(read("game.js")));
+  assert.ok(/const wfxField = field3d\(\) \? null : fieldEl;/.test(read("game.js")));
 });
 
 /* ---------- 8. 其他天气逐个接上 ---------- */
@@ -950,8 +953,9 @@ test("正式画面那两层大沙雾在原型里换成更深更浑的棕灰（#2
   // 原型的样式都挂在原型自己的类名底下（.hd2d-wfx / .hd2d-sand）；正式画面（game.html）不加载原型的样式 / 脚本；game.js 照旧不给新参数
   const sels = [...flatCss("hd2d.css").matchAll(/([^{}]+)\{/g)].map(m => m[1].trim()).filter(s => /wfx-sand|hd2d-sand/.test(s));
   assert.ok(sels.length && sels.every(s => s.split(",").every(x => /^\.hd2d-(wfx|sand)\b/.test(x.trim()))), "原型的沙暴样式都在 .hd2d-wfx / .hd2d-sand 底下：" + sels.join(" | "));
-  assert.ok(!/hd2d\.css|hd2d-wfx\.js/.test(read("game.html")), "正式画面不加载原型的样式 / 脚本");
-  assert.ok(/WeatherFx\.sync\(\{ field: fieldEl, app: \$\("g-app"\), weather: env\.weather, sandDir: state\.sandDir, phaseStep: state\.phaseStep \}\)/.test(read("game.js")), "正式画面照旧这样调");
+  // #261 起正式画面加载 hd2d/hd2d.css（新画面开关用；样式都挂在自己的类名底下，上面查过沙暴的），hd2d-wfx.js 开了新画面才由 hd2d-field.js 加载
+  assert.ok(!/<script src="[^"]*hd2d-wfx\.js"/.test(read("game.html")), "正式画面不直接加载 hd2d-wfx.js（新画面开了才加载）");
+  assert.ok(/WeatherFx\.sync\(\{ field: wfxField, app: \$\("g-app"\), weather: env\.weather, sandDir: state\.sandDir, phaseStep: state\.phaseStep \}\)/.test(read("game.js")), "正式画面照旧这样调（新画面关着时 wfxField 就是旧战场）");
 });
 
 test("3D 的雾和 2D 层配合（#251）：沙暴的 3D 雾比晴天浓、越远越浓（三个演示 × 远 / 中 / 近 × 每个区）；远景几乎被沙色吞掉——中景剪影离雾色只剩晴天的三成以下、天幕盖上八成沙色（以前只蒙 0.35 / 0.5，剪影清清楚楚）；2D 的沙雾比 3D 的雾色深、色调接得上（以前正式画面的沙雾和雾色一样亮，所以看不见）", async (t) => {
